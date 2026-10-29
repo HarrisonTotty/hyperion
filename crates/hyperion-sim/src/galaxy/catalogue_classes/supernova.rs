@@ -5,7 +5,7 @@
 //! (−(`W_eff` + L + H), +H], where `W_eff` is its shell's window as the test cuts it ([`claims`],
 //! [`SupernovaInterval`]). What the test reads of a death is its [`DeathMarks`]: T, what exploded,
 //! the explosion's energy (one uniform of `snr.energy`, keyed by the system's ID) and the fastest
-//! speed any member then has. Every side of the carve-out (the grid, the displaced bins, the
+//! speed any member has over the entry's lifetime. Every side of the carve-out (the grid, the displaced bins, the
 //! feature members and the catalogue classes) builds the marks of its own candidate with
 //! [`DeathMarks::of`] (or, for a Type Ia candidate, [`DeathMarks::of_type_ia`]) and calls the one
 //! [`claims`], after plan 08's [`death_in_interval`](crate::galaxy::displaced::death_in_interval),
@@ -529,7 +529,7 @@ pub fn lifetime_cap(speed: MetresPerSecond) -> Years {
 
 /// What the supernova test reads of one death (plan 09, P09.T17): whose it is, when the star
 /// explodes, as what, with what energy, and the fastest galactic-frame speed any member of the
-/// entry then has.
+/// entry has over its lifetime, the progenitor before T included.
 ///
 /// Built by [`DeathMarks::of`] from a system's stars, the one constructor that the cells, the
 /// displaced bins, the feature members and the catalogue's core collapses all use, or by
@@ -559,9 +559,12 @@ impl DeathMarks {
     /// - T is the primary's [`SystemStars::death_time`], and the kind its death's
     ///   ([`SupernovaKind::of_death`]): a white dwarf's birth, a collapse with no supernova, a
     ///   disruption and a death off the clock give `None`.
-    /// - The fastest member is the compact remnant, at `velocity` plus the natal kick
-    ///   ([`SystemStars::natal_kick`]), or at `velocity` where it has none. The system's companions
-    ///   are not members of the entry and are not read (plan 11's binaries).
+    /// - The fastest member's speed is the greater of the system's before T, |`velocity`|, and its
+    ///   compact remnant's after it, at `velocity` plus the natal kick
+    ///   ([`SystemStars::natal_kick`]), or at `velocity` where it has none: a kick against the
+    ///   system's motion leaves the remnant slower than its progenitor was, and the progenitor too
+    ///   must stay within [`LIFETIME_REACH`] of its site over the entry's lifetime (P09.T33.a). The
+    ///   system's companions are not members of the entry and are not read (plan 11's binaries).
     /// - The energy is the `snr.energy` draw (the type's documentation), through the
     ///   electron-capture law for an electron-capture death.
     ///
@@ -597,12 +600,20 @@ impl DeathMarks {
             velocity + GalacticVelocity::new(kick.velocity())
         });
         let system = stars.record().id();
+        // `total_cmp` orders two finite, non-negative speeds as `>` does, and picks one of them
+        // bit for bit.
+        let before = velocity.speed();
+        let fastest = if after.speed().value().total_cmp(&before.value()).is_ge() {
+            after.speed()
+        } else {
+            before
+        };
         Some(Self {
             system,
             death_time,
             kind,
             energy: drawn_energy(galaxy, system, EnergyLaw::of_death(&death)),
-            fastest_member_speed: after.speed(),
+            fastest_member_speed: fastest,
         })
     }
 
@@ -730,8 +741,8 @@ impl DeathMarks {
         self.energy
     }
 
-    /// `v_fast`: the fastest galactic-frame speed any member of the entry has after T, or a bound
-    /// on it.
+    /// `v_fast`: the fastest galactic-frame speed any member of the entry has over its lifetime,
+    /// before T and after it, or a bound on it.
     #[must_use]
     pub const fn fastest_member_speed(&self) -> MetresPerSecond {
         self.fastest_member_speed

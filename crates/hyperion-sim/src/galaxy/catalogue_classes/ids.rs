@@ -27,8 +27,12 @@ use std::error::Error;
 use std::fmt;
 
 use super::registry::ClassId;
-use crate::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
+use crate::coords::{GalacticPosition, LyCell, ROOT_HALF_WIDTH_LY};
 use crate::id::{BuildSystemIdError, CatalogueSystemId, SystemId};
+use crate::units::consts::METRES_PER_LIGHT_YEAR;
+
+/// `2⁻⁵²`.
+const TWO_POW_MINUS_52: f64 = 1.0 / 4_503_599_627_370_496.0;
 
 /// A catalogue-class cell: a class and a cell at the class's own size (plan 09, P09.T1).
 ///
@@ -238,6 +242,55 @@ impl CatalogueCellKey {
         member: u8,
     ) -> Result<CatalogueSystemId, BuildSystemIdError> {
         CatalogueSystemId::new(self.class.value(), self.fine_cell(), index, member)
+    }
+
+    /// The position in the cell three words give, one per axis, uniform over the cell (P09.T33.a):
+    /// as plan 01's [`GenCell::position_from_words`](crate::coords::GenCell::position_from_words)
+    /// lays out a generation cell, the top `log₂` (edge) bits of each word are the whole
+    /// light-year inside the cell and the next 52 bits the fraction of it.
+    ///
+    /// The edge is a power of two, so the draw is exactly uniform, and no `f64` ever spans the
+    /// cell. A class draws its candidates' sites with it.
+    ///
+    /// # Panics
+    ///
+    /// Never: the cell lies inside the root cube, whose light-years fit in `i32`, and a 52-bit
+    /// fraction of a light-year is below one.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::galaxy::catalogue_classes::{CatalogueCellKey, ClassId};
+    ///
+    /// let key = CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [0, 50, -1])?;
+    /// // The least word is the cell's least corner; the greatest lies just short of the far one.
+    /// let corner = key.position_from_words([0; 3]);
+    /// assert_eq!(corner.cell().to_array(), [0, 25_600, -512]);
+    /// let far = key.position_from_words([u64::MAX; 3]);
+    /// assert_eq!(far.cell().to_array(), [511, 26_111, -1]);
+    /// # Ok::<(), hyperion_sim::galaxy::catalogue_classes::BuildCatalogueCellKeyError>(())
+    /// ```
+    #[must_use]
+    pub fn position_from_words(&self, words: [u64; 3]) -> GalacticPosition {
+        let log2 = self.log2();
+        let origin = self.origin_ly();
+        let mut cell = [0_i32; 3];
+        let mut offset = [0.0; 3];
+        for axis in 0..3 {
+            let word = words[axis];
+            let ly = i32::try_from(word >> (64 - log2)).expect(
+                "a light-year inside a class cell, whose edge is at most 2^16 ly, fits in i32",
+            );
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a 52-bit fraction is exact in f64"
+            )]
+            let fraction = ((word << log2) >> 12) as f64;
+            cell[axis] = origin[axis] + ly;
+            offset[axis] = fraction * TWO_POW_MINUS_52 * METRES_PER_LIGHT_YEAR;
+        }
+        GalacticPosition::new(LyCell::new(cell), offset)
+            .expect("a light-year of the root cube and a fraction of it below one is a position")
     }
 
     /// The cell's word: the raw ID of its candidate 0, member 0, which keys its streams.

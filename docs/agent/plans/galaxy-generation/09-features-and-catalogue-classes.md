@@ -1257,6 +1257,8 @@ resolution, canonical IDs, no cell above 2²⁴ candidates.
 
 #### P09.T33 The core-collapse class
 
+**P09.T33.a built** (2026-10-29; no output moves): see "P09.T33.a as built" under Risks.
+
 - **P09.T33.a Field deaths.** `CoreCollapseProcess` on 512 ly cells: sites follow what dies in the
   field, which is the young field with its (1 − φ(a)) age factor. Envelope = site density bound ×
   (the field cap + L + 2H) × the largest death rate per system; a candidate draws its site, accepts
@@ -4379,3 +4381,196 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     from the pod): Weinberg 1972 §8.6, Murray and Dermott §6.8, Merritt 2013 §4.4.1 (which the plan
     marks "to re-check"), Binney and Tremaine §3.2.3, and GRAVITY 2020's printed 12.1′ (their
     elements give 12.156′).
+- **P09.T33.a as built (lane `p09-classes`, 2026-10-29, at `GENERATOR_VERSION` 23, no output
+  moves).** The first production class, registered: `ProductionClasses` has the
+  `CORE_COLLAPSE` arm and plan 03's `placement::resolve` hands every `111` ID to the class grid
+  (P09.T32's point (a)), so a core-collapse entry's ID resolves to its record. A placed class whose process is not
+  built yet still answers `KindNotGenerated` through plan 03 (`system_of`; the grid's own
+  `resolve` answers `NoSuchSystem`, as P09.T32 built it), since its IDs will name systems once
+  its task registers it with no bump; a free class value, the tidal-disruption victims, a
+  misaligned cell and every candidate the class does not keep answer `NoSuchSystem`
+  (determinism review). Nothing the grid places
+  moves (`RECENT_DEATH_CLAIM` stays `None`, P09.T35) and no existing golden pinned a `111` answer,
+  so there is no bump and no `GalaxyRules` hold (decision-bump-plan-after-22, §3). Files:
+  `catalogue_classes/core_collapse.rs` (the process, its candidate and entry) with
+  `core_collapse/tests.rs`; `catalogue_classes/system.rs` (`CatalogueSystem`, `CatalogueMotion`,
+  `system_of`, `system_of_record`); `grid.rs` (the trait's `system`, the arm, `candidate_count`
+  `pub(crate)` for the tests' census); `ids.rs` (`CatalogueCellKey::position_from_words`, T32's
+  deferred "no shared position draw"); `ages.rs` (`AgeDistribution::max_pdf_between`);
+  `placement/record.rs` (`SystemOrigin::CatalogueSystem(ClassId)`) and every match on the origin;
+  `supernova.rs` (v_fast, below); `rng/tags.rs` (five `System` tags under `class.core_collapse.`:
+  `site`, `mass`, `metallicity`, `death`, `velocity`); `hyperion-base`'s `rng/domain_tag.rs` (below); the
+  server's system cache; `tests/source_horizon.rs` (the class's row, P12.T0's rule).
+  - _Signatures_ (what P09.T43, T36.a, T37 and P11.T8 consume). In `catalogue_classes::core_collapse`:
+    `CoreCollapseProcess::new(&Galaxy)`, `components() -> &[YoungComponent]` (`id`, `share`,
+    `deaths_per_system`), `interval() -> &SupernovaInterval`; `CoreCollapseEntry` (`record`,
+    `component`, `composition`, `site`, `motion`, `marks`, `supernova`, `stars(&Galaxy)`);
+    `RECENT_DEATH_AGES: Years` (`YOUNG_AGE_LIMIT`, 100 Myr). Re-exported from `catalogue_classes`:
+    `CatalogueMotion` (`broken`, `straight`, `point`, `at`, `velocity_at`, `position_at`),
+    `CatalogueSystem` (`new`, `with_stars`, `record`, `motion`, `position_at`, `star_model`,
+    `stars`), `system_of(&Galaxy, CatalogueSystemId)`, which returns
+    `Result<CatalogueSystem, ResolveSystemError>`, and
+    `system_of_record(&Galaxy, &SystemRecord) -> CatalogueSystem`. Also
+    `ClassProcess::system(&self, &Galaxy, &CatalogueMember<Self::Entry>) -> CatalogueSystem`;
+    `CatalogueCellKey::position_from_words([u64; 3]) -> GalacticPosition`;
+    `AgeDistribution::max_pdf_between(Years, Years) -> f64`;
+    `TraceMotionError::CatalogueMotionNotTraced(SystemId)`;
+    `hyperion_base::rng::assert_tag_names<const N: usize>(&[&str; N])`, which took `&[&str]`.
+  - _The process_ (module documentation). Sites follow the young field's layer-E density: every
+    component with layer-E systems younger than `RECENT_DEATH_AGES` (100 Myr), at 23 the young thin
+    disc and the nuclear disc's two components; the old thin disc's youngest sub-disc starts at
+    100 Myr. A candidate draws its site in its cell, thinned on the envelope there with one mark
+    that also picks its component (plan 03's pick); its band-E mass; its [Fe/H] from its
+    component's law at the site, read at age zero (both young laws are flat in age); its primary's
+    draws at attempt 0 and their exact `lifetime`; T uniform over the field's thinning interval
+    (word 0 of `class.core_collapse.death`); its age at the epoch, lifetime − T; then it is thinned
+    on its component's age density at that age against the component's largest (word 1); then its
+    velocity, plan 08's `draw_on` of its component's law at the site (rule 6; zero without
+    kinematic tables, as `epoch_velocity`). The test is `death_in_interval` on its primary's marks,
+    `DeathMarks::of` its single-star `SystemStars` (companions are no members) at the site with that
+    velocity, and `claimed_window` in `Surroundings::Field`. The entry has one member, moving at the
+    velocity until T and at it plus the natal kick from T (`CatalogueMotion::broken`); its record's
+    epoch position is that line's at the epoch, its stars `generate_with` at its composition,
+    `MultiplicityContext::Free`.
+  - _Deviations from the task text, each a lean (2026-10-29)._ (1) **No redraw until a core
+    collapse.** "Builds its `SystemStars` … with `StarDraws::for_attempt` until the death kind is a
+    core collapse (bounded at 64 attempts)" would keep a candidate whose first draws die another
+    way and so over-produce entries wherever another death is likely. Under MM20 (their Table 1)
+    complete fallback is certain from an 8 M☉ carbon–oxygen core, some 27 M☉ initial at constant
+    mass (Hurley, Pols and Tout 2000, eqs. 66 and 75); near solar metallicity plan 06's tracks hold
+    the core at 6.0–8.1 M☉ over 23–56 M☉ (P06.T18's Wolf–Rayet plateau), where it is likely but
+    not certain. So redrawing would turn a chance of a shell of perhaps a sixth to a third into
+    near-certainty, and where fallback is certain all 64 attempts would fail; the mass's acceptance
+    would have to carry P(core collapse | m), which no table holds. The class thins instead: a death without a shell has no marks and is dropped, exactly as the grid
+    side's claim reads the same record (in the sample cells, 73 of 356 kept candidates had none).
+    The origin carries no attempt. (2) **A death rate per component.** The envelope's "largest
+    death rate per system" is each component's own: the nuclear disc's (a twentieth of its stars
+    over its last gigayear) is 1/201 of the young disc's, and against the young disc's the four
+    cells at the centre drew 30 million candidates (245 s) for 97 entries; with each component's
+    own, 150,549 (4.5 s). The envelope is Σ share × the component's `bound` over the cell × its
+    deaths per system over the interval, and the site's mark picks against those terms. (3) **The
+    rate is read at the drawn age**, lifetime − T, after T is drawn, not "at that mass" before it,
+    so the thinning is exact where the age density or a later (1 − φ(a)) varies with age. (4)
+    **The young field includes the nuclear disc's young tail**: the grid places it and P09.T35's
+    claim takes every layer-E record, so the catalogue must hold its deaths too (66 of 102 entries
+    of four central cells in the probe were its). The field holds no nuclear-cluster system: plan
+    02's two nuclear-disc components are the nuclear stellar disc's main and inner parts (Sormani
+    et al. 2022; ruling 143.1), and the nuclear cluster is a budget of its own (Design note 5), so
+    T36.b's centre entries add no double count and T36.b subtracts nothing (decision-galaxy-25-train
+    §3's consumes check). (5) **v_fast counts the progenitor** (below).
+  - _`ClassProcess::system` (rule 9, added)._ "Deciding what a catalogue system is" needs every
+    class's member as a record, a motion and its stars, and `resolve`'s `MemberVisitor` is generic
+    over any class, so the trait gains a required method,
+    `system(&Galaxy, &CatalogueMember<Entry>) -> CatalogueSystem` (P09.T32's toys implement it).
+    `CatalogueSystem` holds the record, a
+    `CatalogueMotion` (two lines meeting at a break; `straight` for one) and the composition and
+    multiplicity context of its stars, `None` for a class whose members the stellar stage does not
+    model (`star_model()`). `system_of(&Galaxy, CatalogueSystemId)` resolves one through
+    `ProductionClasses`; `CatalogueMotion::position_at` takes the time from its break as one exact
+    clock span, rounded once (determinism review). A catalogue system's existence and epoch
+    position read the galaxy's kinematic tables (a progenitor rests without them, as every grid
+    record does), which the server always builds.
+  - _What a catalogue system is, match by match._ `SystemOrigin::CatalogueSystem(ClassId)`
+    (8 bytes still): `from_parts` asserts an ID of its class; `layer()` the band of its primary's
+    initial mass (P09.T37's "counts in the layer its initial mass gives it"); `component()` `None`;
+    the primary read at attempt 0 (`record_attempt`, `MemberRecord::attempt`); the loss cone
+    `Clear` (it follows its class's line); `query::position_at` its class's motion;
+    `query::epoch_velocity` its line's velocity at the epoch (the server's scene and place read
+    it); `observe::stars_of`, `BriefModel::of_record`, the planetary context and the server's
+    system cache its class's stars (`KindNotGenerated` for a class without), the last two through
+    one exhaustive match on the ID's kind; lensing's mass its class's stars; `from_parts` also
+    asserts its primary is of 0.08–150 M☉, so that `layer()` cannot fail; `Drift::of_record` refuses it with a new `TraceMotionError::CatalogueMotionNotTraced`,
+    since its line breaks at the explosion (the server maps it to `unknown_system`, as the centre's
+    members); the sky census skips it (no class is a census source before P09.T37).
+  - _v_fast counts the progenitor._ `DeathMarks::of` took v_fast as the remnant's speed after T,
+    |v + kick|. A kick against the motion leaves the remnant slower than its progenitor, which
+    then outruns `LIFETIME_REACH` before T: over the field's thinning interval (3.43 Myr at the
+    fixture, its cap plus L + 2H) a progenitor above about 360 km/s does, as the nuclear disc's
+    can. v_fast is now max(|v|, |v + kick|), the
+    brainstorm's "fastest member's speed" over the entry's lifetime; nothing calls it in production
+    before P09.T35, so no output moves. T17's marks test asserts the new rule and a regression case
+    (v = −0.9 × kick). This supersedes "P09.T17 as built"'s design point (a), |v + kick|;
+    `of_type_ia`'s bound, |v| + the survivor's speed, is unchanged.
+  - _The registry's const assertion._ `hyperion-base`'s `assert_tag_names` re-hashed every earlier
+    name in its inner loop; with five more tags the sim's registry passed rustc's
+    `long_running_const_eval` limit (a compile error). It now hashes each name once into an array
+    (`const N`, the macro's literal) and compares names only on equal hashes; same messages, same
+    `compile_fail` doctests. A base change, so the gate's plan gains the surface module and vitest.
+  - _Figures (pod, 4 vCPU, opt-level 2)._ Fixture (seed `0x0933_0000_6363_6f6c`): layer-E share
+    0.00946; deaths per system over the 3.43 Myr interval 0.0345 (young disc) and 1.71 × 10⁻⁴
+    (nuclear disc); 54 entries in the 21 sample cells (73 deaths without a shell, 229 before their
+    window's interval); the farthest any of them travels 1,693 ly; the fullest cell expects at
+    most 38,302 candidates (the octants' bound), far inside 2²⁴. The census (`core_collapses_over_seeds`,
+    slow, 358 s on four threads): the fixture 1.56 core collapses a century, 36 in ±H, 15,558
+    entries, 11,383 shells, 4,175 beyond them, longest window 2.62 Myr, farthest 4,088 ly; three
+    drawn galaxies 1.66, 2.42 and 1.44 a century, 33, 44 and 28 in ±H, 4,444, 6,455 and 3,726
+    beyond the shells, farthest 4,093–4,095 ly. "About 40 at two a century" holds as 36 at 1.56
+    (31 expected); the Milky Way's measured rate is 1.63 ± 0.46 a century (Rozwadowska, Vissani and
+    Cappellaro 2021, New Astronomy 83, 101498).
+  - _Cost (finding)._ Some 10 ms a cell at the solar circle and 1.1 s a nuclear-disc cell at the
+    centre, nearly all of it three track builds per thinned candidate (the rate's `lifetime`, the
+    predicate's exact tier, `SystemStars`); a cold 50 ly query's 2,902 cells would take some 30 s,
+    against P09.T37's 5 ms. T37/T40's cache is needed. A prefilter that `claims` implies (T before
+    the interval's start at the window of the site's gas at `ExplosionEnergy::MAX`, with a margin
+    for the rounding of T) would skip the tracks for the 65–85% of candidates the window rejects,
+    changing nothing generated; and P08.T13's seam `decide(.., exact_death_age)` could take the
+    lifetime already computed.
+  - _Tests_ (`core_collapse/tests.rs`, 13, the census natively over four galaxies and on
+    wasm32-wasip1, which has no threads, over the fixture alone; the server's system cache, 1; the plan-09 tag test; `record.rs`, 3; `ages.rs`, 1;
+    `grid/tests.rs`'s production test rewritten; `clock_tests.rs`'s marks test; doctests on
+    `CoreCollapseProcess`, `CatalogueMotion`, `system_of`, `position_from_words`,
+    `max_pdf_between`): the young field's components and rates, every age density under its
+    component's bound; the envelope over 24,000 random points and the centre's corners; headroom by
+    the octants; the kept candidates against the field's own intensity by quadrature (young disc
+    138 against 139.1, nuclear disc 875 against 869.6; α = 10⁻³); every entry the shared test's
+    (predicate, marks with the one velocity, `claims`, the window, the caps, the kick at T);
+    no entry past the reach; resolution through the process, `system_of` and plan 03, a second
+    member and an index past the count naming nothing; the rest of the sim reading an entry through
+    its class (`stars_of`, the range brief on every route, the planetary context, the lensing mass,
+    plan 03's position and epoch velocity, the loss cone, the drift's refusal); deaths without a
+    shell and too early
+    thinned and unresolvable; order independence with stray resolves, the same seed twice, another
+    seed's counts differ; a galaxy without kinematics; the golden
+    `catalogue_classes/core_collapse.golden` (new, at 23: rates, interval, 21 cells' bounds, counts
+    and every entry); the slow census over four galaxies (above), with every window under its caps
+    and every system inside the reach at its interval's ends.
+  - _Goldens._ `rng/tags.golden` extended only (+5); `catalogue_classes/core_collapse.golden` new;
+    no other golden; `GENERATOR_VERSION` 23 → 23.
+- **Deferred findings (2026-10-13 rule)**, from P09.T33.a: (1) _Sites at the explosion, not at the
+  epoch._ The class's sites follow the young field's density, as the task says, so its systems'
+  epoch positions are those moved on by v (t − T), up to some 3,400 ly along the orbit over the
+  interval, while the grid's carved systems' epoch positions follow the density and their sites
+  are moved back. The two agree off the arms; on the young disc's sharp arms they differ by a
+  pattern shift, which P09.T38's budgets in twelve volumes will measure. The class also reads its
+  component's [Fe/H] law and plan 08's velocity law at the site, where the grid reads them at the
+  epoch position (`draw_metallicity`, `epoch_velocity`), so the two differ by the same shift. The
+  alternative, to draw the epoch position from the density and back the site out along x + v T as
+  `explosion_site` does, is listed for main (lean: the task's sites, 2026-10-29). (2) _No Kepler
+  regime._
+  A catalogue system follows straight lines everywhere; a nuclear-disc entry inside the black
+  hole's influence radius would follow its orbit on the grid side (T36.b, T38's centre volumes).
+  (3) _Companions are not carved._ `SystemStars::generate_with` redraws carved binaries for grid
+  records only (`binary::carve::grid_redraws`), so a catalogue system's companions may fall in a
+  plan 11 class (P11.T8). (4) _At version 26._ The class reads each component's age distribution
+  and `ShareMatrix::component_share`, so P09.T2.c's (1 − φ) and P08.T12.a's per-component
+  `stay_share` factor reach it unchanged; P09.T33.b adds the displaced classes' deaths beside it.
+  (5) _Plan 03's `position_at` and feature members._ It still panics for a feature member away
+  from the epoch in a galaxy with kinematic tables (P12.T0's finding), which the server's
+  extinction request can reach with a member's ID; a catalogue system is now routed through its
+  class. (6) _The census's brackets are galaxy-wide._ 20–160 core collapses in ±H, about 40 at two
+  a century and 3,000–21,000 entries beyond the shells are the brainstorm's figures for a whole
+  galaxy, which the field class holds alone at 23 only because φ = 0. From P09.T2.c (version 26)
+  the young field keeps 1 − φ(a), so the class holds a tenth to a fifth of core collapses (ruling
+  118.2) until P09.T36.a lists the rest, and `core_collapses_over_seeds` fails as written: P09.T2.c
+  restates it on the field's share, or the galaxy-wide counts move to T36.a's or T38's census.
+  (7) _A class that redraws._ `SystemOrigin::CatalogueSystem(ClassId)` carries no attempt, and
+  `record_attempt` reads every catalogue system's primary at attempt 0. P09.T43's catalogue side
+  redraws its star "with `StarDraws::for_attempt` until the window overlaps", exact there because
+  its sampler is conditional on the overlap, so T43 adds the attempt to the variant
+  (`CatalogueSystem { class, attempt: u16 }`, still eight bytes; every core collapse keeps 0, so
+  nothing moves). (8) _The fixture's rate._ 1.56 core collapses a century against the brainstorm's
+  "about two" (Li et al. 2011); the measured 1.63 ± 0.46 (Rozwadowska et al. 2021) sits between,
+  so the census checks the ±H count against the galaxy's own rate, and the figure is listed for
+  main. (9) _Fast-suite cost._ The sample cells take some 10 s to generate in each test process
+  that reads them (the centre's cell 1.1 s; opt-level 2, pod), and the golden reads them on
+  wasm32-wasip1 too; the module's fast tests take 13–30 s of test time natively.

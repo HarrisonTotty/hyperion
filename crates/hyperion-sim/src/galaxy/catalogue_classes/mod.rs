@@ -8,14 +8,18 @@
 //! ([`type_ia`]); and the class grid of phase 7 (P09.T32, [`grid`]): the [`ClassProcess`] trait
 //! every class implements, a class's cell ([`CatalogueClassCell`]), the resolve of a `111` ID
 //! ([`resolve`]) and the cells of a class about a sphere ([`cells_in_sphere`]). The registry's,
-//! the IDs' and the grid's items are re-exported here. No class's process is built yet, so the
-//! production lookup ([`ProductionClasses`]) has none; the processes and the carve-out follow in
-//! P09.T33–T35, P09.T43 and plan 11.
+//! the IDs' and the grid's items are re-exported here. Of the classes' processes, phase 7's first
+//! is built: the core collapses (P09.T33.a, [`core_collapse`]), the production lookup's
+//! ([`ProductionClasses`]) one arm, whose members are catalogue systems ([`system`]) that plan 03's
+//! resolve returns. The other processes and the carve-out follow in P09.T34–T35, P09.T43 and plan
+//! 11.
 
+pub mod core_collapse;
 pub mod grid;
 pub mod ids;
 pub mod registry;
 pub mod supernova;
+pub mod system;
 pub mod type_ia;
 
 pub use self::grid::{
@@ -25,3 +29,4 @@ pub use self::grid::{
 };
 pub use self::ids::{BuildCatalogueCellKeyError, CatalogueCellKey};
 pub use self::registry::{ALL_CLASSES, ClassId, FEATURE_LEVEL_LIST_ORDER};
+pub use self::system::{CatalogueMotion, CatalogueSystem, system_of, system_of_record};

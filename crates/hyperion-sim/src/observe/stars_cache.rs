@@ -3,6 +3,7 @@
 //! [`CellCache`](crate::galaxy::placement::CellCache).
 
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::features::members::{FeatureInteriorCache, NoInteriorCache, resolve_member};
 use crate::galaxy::placement::{SystemKind, SystemOrigin, SystemRecord};
 use crate::id::SystemIdKind;
@@ -96,6 +97,8 @@ impl StarsCache for NoStarsCache {
 ///   which the caller's list gives.
 /// - If `record` is a feature member that does not resolve in `galaxy`, which only a record of
 ///   another galaxy can be.
+/// - If `record` is a catalogue system that does not resolve in `galaxy`, or whose class models no
+///   stars by the stellar stage; a core collapse's does (plan 09, P09.T33.a).
 #[must_use]
 pub fn stars_of(
     galaxy: &Galaxy,
@@ -129,5 +132,14 @@ pub fn stars_of(
                 record.id()
             )
         }
+        // A catalogue system's stars are its class's (plan 09, P09.T33.a).
+        SystemOrigin::CatalogueSystem(_) => system_of_record(galaxy, record)
+            .stars(galaxy)
+            .unwrap_or_else(|| {
+                panic!(
+                    "a catalogue system whose class models no stars has none: {:?}",
+                    record.id()
+                )
+            }),
     }
 }

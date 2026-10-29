@@ -54,6 +54,12 @@ pub enum TraceMotionError {
     /// velocity is its member record's, which the caller's list and tube tables give, so its line
     /// is [`Drift::of_global_member`]'s, not one from the system record alone.
     GlobalListMember(SystemId),
+    /// The system is a catalogue system (plan 09, P09.T33.a). A supernova entry's moves on two
+    /// lines that meet at its explosion, where its remnant takes its natal kick, so no one line
+    /// traces it, and a retarded time across the explosion would misplace it by the kick's travel;
+    /// its class's motion ([`CatalogueMotion`](crate::galaxy::catalogue_classes::CatalogueMotion))
+    /// has no tracer yet.
+    CatalogueMotionNotTraced(SystemId),
 }
 
 impl fmt::Display for TraceMotionError {
@@ -67,6 +73,12 @@ impl fmt::Display for TraceMotionError {
             Self::GlobalListMember(id) => write!(
                 f,
                 "the global-list member {} is traced from its member record",
+                id.raw()
+            ),
+            Self::CatalogueMotionNotTraced(id) => write!(
+                f,
+                "the catalogue system {} moves on a line broken at its explosion, which is not \
+                 traced yet",
                 id.raw()
             ),
         }
@@ -233,7 +245,9 @@ impl Drift {
     /// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre, whose Kepler
     /// regime and orbit wait for plan 09's P09.T28 (P12.T2 as built, provisional), and
     /// [`TraceMotionError::GlobalListMember`] for a stream's or a dwarf core's member, whose line
-    /// is [`of_global_member`](Self::of_global_member)'s.
+    /// is [`of_global_member`](Self::of_global_member)'s, and
+    /// [`TraceMotionError::CatalogueMotionNotTraced`] for a catalogue system, whose line is broken
+    /// at its explosion (plan 09, P09.T33.a).
     ///
     /// # Panics
     ///
@@ -274,6 +288,9 @@ impl Drift {
             }
             SystemOrigin::GlobalListMember { .. } => {
                 return Err(TraceMotionError::GlobalListMember(record.id()));
+            }
+            SystemOrigin::CatalogueSystem(_) => {
+                return Err(TraceMotionError::CatalogueMotionNotTraced(record.id()));
             }
         };
         Ok(Self::new(*record.epoch_position(), velocity))

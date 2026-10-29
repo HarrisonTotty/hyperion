@@ -19,13 +19,11 @@
 //! - [`check_class_headroom`], which a class's task calls to show that no cell of the class can
 //!   draw more candidates than the 24-bit index numbers.
 //!
-//! **No class is registered** (P09.T32): the production lookup, [`ProductionClasses`], has no
-//! process, so every `111` ID that reaches the grid answers
-//! [`NoSuchSystem`](ResolveSystemError::NoSuchSystem) and no generated output moves. The task that
-//! builds each class's process adds its arm there. Plan 03's
-//! [`placement::resolve`](crate::galaxy::placement::resolve) still answers
-//! [`KindNotGenerated`](ResolveSystemError::KindNotGenerated) for a `111` ID: P09.T33.a, which
-//! registers the first class, wires its dispatch here and adds the record's origin.
+//! **The production lookup**, [`ProductionClasses`], has one arm per class whose process is built:
+//! P09.T33.a's core collapses so far. Every other `111` ID that reaches the grid answers
+//! [`NoSuchSystem`](ResolveSystemError::NoSuchSystem). Plan 03's
+//! [`placement::resolve`](crate::galaxy::placement::resolve) answers a `111` ID through it, with
+//! the record its class gives the member ([`ClassProcess::system`], [`system_of`]).
 //!
 //! # Streams
 //!
@@ -52,14 +50,20 @@ mod tests;
 use std::error::Error;
 use std::fmt;
 
+use super::core_collapse::CoreCollapseProcess;
 use super::ids::{CatalogueCellKey, entry_of};
 use super::registry::ClassId;
 use super::supernova::LIFETIME_REACH;
 #[cfg(doc)]
 use super::supernova::{DeathMarks, lifetime_cap};
+use super::system::CatalogueSystem;
+#[cfg(doc)]
+use super::system::system_of;
 use crate::coords::ROOT_HALF_WIDTH_LY;
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::ResolveSystemError;
+#[cfg(doc)]
+use crate::galaxy::placement::SystemOrigin;
 use crate::galaxy::query::QuerySphere;
 use crate::id::CatalogueSystemId;
 #[cfg(doc)]
@@ -116,6 +120,10 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 /// 8. **A placed class.** [`class`](Self::class) has a cell size. A process for
 ///    [`ClassId::TIDAL_DISRUPTION_VICTIM`], which is never placed, is refused: no
 ///    [`CatalogueCellKey`] exists for it, so it has no cell and resolves nothing.
+/// 9. **A system per member.** [`system`](Self::system) gives each member a record of origin
+///    [`SystemOrigin::CatalogueSystem`] of the class, with the member's own ID, and the member's
+///    motion: what plan 03's resolve and the rest of the sim read of it (P09.T33.a). Like the
+///    entry, it is a pure function of the galaxy and the member.
 ///
 /// # Examples
 ///
@@ -125,13 +133,16 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 ///
 /// ```
 /// use hyperion_sim::Seed;
-/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
 /// use hyperion_sim::galaxy::catalogue_classes::{
-///     CatalogueCellKey, CatalogueClassCell, ClassId, ClassProcess, resolve_entry,
+///     CatalogueCellKey, CatalogueClassCell, CatalogueMember, CatalogueMotion, CatalogueSystem,
+///     ClassId, ClassProcess, resolve_entry,
 /// };
+/// use hyperion_sim::galaxy::placement::{SystemOrigin, SystemRecord};
+/// use hyperion_sim::galaxy::{Galaxy, Population};
 /// use hyperion_sim::id::{CatalogueSystemId, SystemId};
 /// use hyperion_sim::rng::{ObjectKey, Stream, Threshold, tags};
-/// use hyperion_sim::units::PerCubicLightYear;
+/// use hyperion_sim::units::{PerCubicLightYear, SolarMasses, Years};
 ///
 /// struct Toy;
 ///
@@ -167,6 +178,20 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 ///
 ///     fn members(&self, _: &u64) -> u8 {
 ///         1
+///     }
+///
+///     // A toy entry is a ten-solar-mass star at rest at the origin, ten million years old.
+///     fn system(&self, _: &Galaxy, member: &CatalogueMember<u64>) -> CatalogueSystem {
+///         let here = GalacticPosition::ORIGIN;
+///         let record = SystemRecord::from_parts(
+///             SystemId::from(member.id()),
+///             here,
+///             SystemOrigin::CatalogueSystem(self.class()),
+///             Population::YoungThinDisc,
+///             SolarMasses::new(10.0),
+///             Years::new(1e7),
+///         );
+///         CatalogueSystem::new(record, CatalogueMotion::straight(here, GalacticVelocity::default()))
 ///     }
 /// }
 ///
@@ -219,6 +244,12 @@ pub trait ClassProcess {
     /// How many members `entry` has, 1–16: member 0 is the entry itself, and members 1 to this
     /// − 1 its further members, numbered without gaps (P09.T34.a's surviving donor is member 1).
     fn members(&self, entry: &Self::Entry) -> u8;
+
+    /// What `member` is to the rest of the sim (rule 9, P09.T33.a): its record, of origin
+    /// [`SystemOrigin::CatalogueSystem`] of the class and with the member's ID, its motion, and
+    /// how its stars are generated where the class models them. Plan 03's resolve returns the
+    /// record for the member's `111` ID ([`system_of`]).
+    fn system(&self, galaxy: &Galaxy, member: &CatalogueMember<Self::Entry>) -> CatalogueSystem;
 }
 
 /// One entry of a class cell: its candidate's ID, its number of members and what the class kept
@@ -349,6 +380,9 @@ impl<E> CatalogueClassCell<E> {
     /// use hyperion_sim::galaxy::catalogue_classes::{
     ///     CatalogueCellKey, CatalogueClassCell, ClassId, ClassProcess,
     /// };
+    /// # use hyperion_sim::galaxy::catalogue_classes::{
+    /// #     CatalogueMember, CatalogueMotion, CatalogueSystem,
+    /// # };
     /// use hyperion_sim::id::{CatalogueSystemId, SystemId};
     /// use hyperion_sim::rng::{ObjectKey, Stream, tags};
     /// use hyperion_sim::units::PerCubicLightYear;
@@ -373,6 +407,19 @@ impl<E> CatalogueClassCell<E> {
     /// #     }
     /// #     fn test(&self, _: &Galaxy, mark: u64) -> Option<u64> { Some(mark) }
     /// #     fn members(&self, _: &u64) -> u8 { 1 }
+    /// #     fn system(&self, _: &Galaxy, member: &CatalogueMember<u64>) -> CatalogueSystem {
+    /// #         let here = hyperion_sim::coords::GalacticPosition::ORIGIN;
+    /// #         let record = hyperion_sim::galaxy::placement::SystemRecord::from_parts(
+    /// #             SystemId::from(member.id()),
+    /// #             here,
+    /// #             hyperion_sim::galaxy::placement::SystemOrigin::CatalogueSystem(self.class()),
+    /// #             hyperion_sim::galaxy::Population::YoungThinDisc,
+    /// #             hyperion_sim::units::SolarMasses::new(10.0),
+    /// #             hyperion_sim::units::Years::new(1e7),
+    /// #         );
+    /// #         let still = hyperion_sim::coords::GalacticVelocity::default();
+    /// #         CatalogueSystem::new(record, CatalogueMotion::straight(here, still))
+    /// #     }
     /// # }
     /// let galaxy = Galaxy::new(Seed::new(9));
     /// // The 4,096 ly cell of a toy class (not physics, six candidates expected per cell) that
@@ -476,6 +523,9 @@ impl<E> CatalogueClassCell<E> {
 /// use hyperion_sim::galaxy::catalogue_classes::{
 ///     CatalogueCellKey, CatalogueClassCell, ClassId, ClassProcess, resolve_entry,
 /// };
+/// # use hyperion_sim::galaxy::catalogue_classes::{
+/// #     CatalogueMember, CatalogueMotion, CatalogueSystem,
+/// # };
 /// use hyperion_sim::galaxy::placement::ResolveSystemError;
 /// use hyperion_sim::id::{CatalogueSystemId, SystemId};
 /// use hyperion_sim::rng::{ObjectKey, Stream, tags};
@@ -501,6 +551,19 @@ impl<E> CatalogueClassCell<E> {
 /// #     }
 /// #     fn test(&self, _: &Galaxy, mark: u64) -> Option<u64> { (mark >> 63 == 0).then_some(mark) }
 /// #     fn members(&self, _: &u64) -> u8 { 2 }
+/// #     fn system(&self, _: &Galaxy, member: &CatalogueMember<u64>) -> CatalogueSystem {
+/// #         let here = hyperion_sim::coords::GalacticPosition::ORIGIN;
+/// #         let record = hyperion_sim::galaxy::placement::SystemRecord::from_parts(
+/// #             SystemId::from(member.id()),
+/// #             here,
+/// #             hyperion_sim::galaxy::placement::SystemOrigin::CatalogueSystem(self.class()),
+/// #             hyperion_sim::galaxy::Population::YoungThinDisc,
+/// #             hyperion_sim::units::SolarMasses::new(10.0),
+/// #             hyperion_sim::units::Years::new(1e7),
+/// #         );
+/// #         let still = hyperion_sim::coords::GalacticVelocity::default();
+/// #         CatalogueSystem::new(record, CatalogueMotion::straight(here, still))
+/// #     }
 /// # }
 /// let galaxy = Galaxy::new(Seed::new(9));
 /// let key = CatalogueCellKey::new(ClassId::TYPE_IA, [0, 50, 0])?;
@@ -589,6 +652,9 @@ pub trait MemberVisitor {
 ///     ALL_CLASSES, CatalogueCellKey, CatalogueClassCell, ClassId, ClassLookup, ClassProcess,
 ///     ClassVisitor, cells_in_sphere,
 /// };
+/// # use hyperion_sim::galaxy::catalogue_classes::{
+/// #     CatalogueMember, CatalogueMotion, CatalogueSystem,
+/// # };
 /// use hyperion_sim::galaxy::query::QuerySphere;
 /// use hyperion_sim::id::{CatalogueSystemId, SystemId};
 /// use hyperion_sim::rng::{ObjectKey, Stream, tags};
@@ -615,6 +681,19 @@ pub trait MemberVisitor {
 /// #     }
 /// #     fn test(&self, _: &Galaxy, mark: u64) -> Option<u64> { Some(mark) }
 /// #     fn members(&self, _: &u64) -> u8 { 1 }
+/// #     fn system(&self, _: &Galaxy, member: &CatalogueMember<u64>) -> CatalogueSystem {
+/// #         let here = hyperion_sim::coords::GalacticPosition::ORIGIN;
+/// #         let record = hyperion_sim::galaxy::placement::SystemRecord::from_parts(
+/// #             SystemId::from(member.id()),
+/// #             here,
+/// #             hyperion_sim::galaxy::placement::SystemOrigin::CatalogueSystem(self.class()),
+/// #             hyperion_sim::galaxy::Population::YoungThinDisc,
+/// #             hyperion_sim::units::SolarMasses::new(10.0),
+/// #             hyperion_sim::units::Years::new(1e7),
+/// #         );
+/// #         let still = hyperion_sim::coords::GalacticVelocity::default();
+/// #         CatalogueSystem::new(record, CatalogueMotion::straight(here, still))
+/// #     }
 /// # }
 /// /// A lookup with one class's process, a toy (not physics) on the merger class.
 /// struct OneToy;
@@ -676,14 +755,14 @@ pub trait ClassLookup {
     ) -> Option<V::Output>;
 }
 
-/// The production lookup of class processes (plan 09, P09.T32): at P09.T32 it has none.
+/// The production lookup of class processes (plan 09, P09.T32).
 ///
 /// Each class's process is registered here by the task that builds it, as one arm,
 /// `ClassId::CORE_COLLAPSE => Some(visitor.visit(&CoreCollapseProcess::new(galaxy)))`:
-/// [`CORE_COLLAPSE`](ClassId::CORE_COLLAPSE) by P09.T33.a, [`TYPE_IA`](ClassId::TYPE_IA) by
-/// P09.T34.a, [`LUMINOUS_BLUE_VARIABLE`](ClassId::LUMINOUS_BLUE_VARIABLE) by P09.T43, and plan
+/// [`CORE_COLLAPSE`](ClassId::CORE_COLLAPSE) by P09.T33.a (registered), [`TYPE_IA`](ClassId::TYPE_IA)
+/// by P09.T34.a, [`LUMINOUS_BLUE_VARIABLE`](ClassId::LUMINOUS_BLUE_VARIABLE) by P09.T43, and plan
 /// 11's five by P11.T8. [`TIDAL_DISRUPTION_VICTIM`](ClassId::TIDAL_DISRUPTION_VICTIM) is never
-/// placed and gets none. Until then every `111` ID that reaches the grid answers
+/// placed and gets none. Until its class's arm is added, every `111` ID of a class answers
 /// [`NoSuchSystem`](ResolveSystemError::NoSuchSystem).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProductionClasses;
@@ -691,11 +770,14 @@ pub struct ProductionClasses;
 impl ClassLookup for ProductionClasses {
     fn visit_class<V: ClassVisitor>(
         &self,
-        _galaxy: &Galaxy,
-        _class: ClassId,
-        _visitor: V,
+        galaxy: &Galaxy,
+        class: ClassId,
+        visitor: V,
     ) -> Option<V::Output> {
-        None
+        match class {
+            ClassId::CORE_COLLAPSE => Some(visitor.visit(&CoreCollapseProcess::new(galaxy))),
+            _ => None,
+        }
     }
 }
 
@@ -719,9 +801,9 @@ impl ClassLookup for ProductionClasses {
 ///
 /// # Examples
 ///
-/// Every catalogue ID that arrives from a save or the protocol will go through the production
-/// lookup once P09.T33.a points plan 03's resolve at it. No class's process is built yet, so each
-/// one names nothing:
+/// Every catalogue ID that arrives from a save or the protocol goes through the production lookup,
+/// to which plan 03's resolve hands it (P09.T33.a). A class whose process is not built yet names
+/// nothing:
 ///
 /// ```
 /// use hyperion_sim::Seed;
@@ -837,7 +919,7 @@ fn expected_candidates(key: &CatalogueCellKey, bound: PerCubicLightYear) -> f64 
 /// On a mean that is negative, not a number or above 2³¹ ([`Stream::poisson`]), and in debug
 /// builds on a draw past 2²⁴, which [`check_class_headroom`] rules out.
 #[must_use]
-fn candidate_count(seed: Seed, key: &CatalogueCellKey, bound: PerCubicLightYear) -> u32 {
+pub(crate) fn candidate_count(seed: Seed, key: &CatalogueCellKey, bound: PerCubicLightYear) -> u32 {
     let mean = expected_candidates(key, bound);
     let mut stream = Stream::open(seed, tags::CLASS_CELL, ObjectKey::cell(key.word()));
     let drawn = stream.poisson(mean);

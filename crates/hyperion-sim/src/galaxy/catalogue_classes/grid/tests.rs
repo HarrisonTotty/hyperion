@@ -22,12 +22,15 @@ use hyperion_testkit::stats::{ALPHA, assert_poisson_count};
 use super::*;
 use crate::GENERATOR_VERSION;
 use crate::coords::{GalacticPosition, GalacticVelocity, LyCell};
-use crate::galaxy::catalogue_classes::{ALL_CLASSES, BuildCatalogueCellKeyError};
-use crate::galaxy::placement;
+use crate::galaxy::Population;
+use crate::galaxy::catalogue_classes::{
+    ALL_CLASSES, BuildCatalogueCellKeyError, CatalogueMotion, system_of,
+};
+use crate::galaxy::placement::{self, SystemOrigin, SystemRecord};
 use crate::id::{SystemId, SystemIdKind};
 use crate::rng::Threshold;
 use crate::time::UniverseTime;
-use crate::units::LightYears;
+use crate::units::{LightYears, SolarMasses, Years};
 
 /// The seed of the galaxy the toys are placed in.
 const SEED: u64 = 0x0932_0000_6772_6964;
@@ -172,6 +175,23 @@ impl ClassProcess for Toy {
 
     fn members(&self, _: &ToyEntry) -> u8 {
         self.members
+    }
+
+    /// Every member is a ten-solar-mass star ten million years old on its entry's line.
+    fn system(&self, _: &Galaxy, member: &CatalogueMember<ToyEntry>) -> CatalogueSystem {
+        let entry = member.entry().value();
+        let record = SystemRecord::from_parts(
+            SystemId::from(member.id()),
+            entry.position,
+            SystemOrigin::CatalogueSystem(self.class),
+            Population::YoungThinDisc,
+            SolarMasses::new(10.0),
+            Years::new(1e7),
+        );
+        CatalogueSystem::new(
+            record,
+            CatalogueMotion::straight(entry.position, entry.velocity),
+        )
     }
 }
 
@@ -957,16 +977,26 @@ const FIFTY_LY_COUNTS: [[usize; 2]; 2] = [[2_902, 20], [2_890, 20]];
 
 // 6. The production lookup.
 
+/// P09.T33.a: the production lookup visits the core collapses alone; every other class's IDs name
+/// nothing in the grid, and plan 03's resolve answers each `111` ID through `system_of`, with the
+/// record its class gives the member, or as not generated for a placed class with no process yet.
 #[test]
-fn the_production_lookup_resolves_no_catalogue_id() {
+fn the_production_lookup_resolves_only_the_registered_classes() {
     struct Visited;
     impl ClassVisitor for Visited {
-        type Output = ();
-        fn visit<P: ClassProcess>(self, _: &P) {}
+        type Output = ClassId;
+        fn visit<P: ClassProcess>(self, process: &P) -> ClassId {
+            process.class()
+        }
     }
     let galaxy = galaxy();
     for class in ALL_CLASSES {
-        assert_eq!(ProductionClasses.visit_class(galaxy, class, Visited), None);
+        let registered = class == ClassId::CORE_COLLAPSE;
+        assert_eq!(
+            ProductionClasses.visit_class(galaxy, class, Visited),
+            registered.then_some(class),
+            "{class}"
+        );
     }
     let mut lcg = Lcg::new(0x0932_0006);
     for _ in 0..2_000 {
@@ -983,16 +1013,26 @@ fn the_production_lookup_resolves_no_catalogue_id() {
         let index = u32::try_from(lcg.next_below(64)).unwrap();
         let member = u8::try_from(lcg.next_below(16)).unwrap();
         let id = CatalogueSystemId::new(class, cell, index, member).unwrap();
+        let found = resolve(galaxy, &ProductionClasses, id, Found);
+        if class != ClassId::CORE_COLLAPSE.value() {
+            assert_eq!(found, Err(ResolveSystemError::NoSuchSystem), "{id:?}");
+        }
+        // Plan 03's resolve hands every `111` ID to the grid (P09.T33.a): a placed class whose
+        // process is not built yet is not generated, every other ID that names no system is none.
+        let record = placement::resolve(galaxy, SystemId::from(id));
         assert_eq!(
-            resolve(galaxy, &ProductionClasses, id, Found),
-            Err(ResolveSystemError::NoSuchSystem),
+            record,
+            system_of(galaxy, id).map(|system| *system.record()),
             "{id:?}"
         );
-        // Plan 03's resolve is unchanged: it does not generate catalogue systems yet (lean (a)).
-        assert_eq!(
-            placement::resolve(galaxy, SystemId::from(id)),
-            Err(ResolveSystemError::KindNotGenerated)
-        );
+        assert_eq!(record.is_ok(), found.is_ok(), "{id:?}");
+        let pending =
+            CatalogueCellKey::of(id).is_ok_and(|key| key.class() != ClassId::CORE_COLLAPSE);
+        if pending {
+            assert_eq!(record, Err(ResolveSystemError::KindNotGenerated), "{id:?}");
+        } else if record.is_err() {
+            assert_eq!(record, Err(ResolveSystemError::NoSuchSystem), "{id:?}");
+        }
     }
 }
 

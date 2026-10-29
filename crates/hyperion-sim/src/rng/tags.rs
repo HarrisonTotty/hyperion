@@ -976,6 +976,31 @@ domain_tags! {
     /// A stream member's velocity about its tube's mean (P10.T8.c): a Box–Muller pair and the
     /// first normal of a second, four words, along the tube's local tangent, normal and binormal.
     STREAM_MEMBER_VELOCITY: System = "stream.member.velocity";
+    // Plan 09, phase 7 (P09.T33.a): a core-collapse candidate's draws, `System` tags under
+    // `class.core_collapse.`, one per property group, opened with `ObjectKey::from(SystemId)` of
+    // the candidate's ID, its member 0 (Design note 23). Its primary's own draws are plan 06's
+    // `star.*` tags, keyed by its body 0 at attempt 0, and its explosion's energy `snr.energy`.
+    // Appended after P09.T32's `class.cell`, because the macro's order fixes `ALL`.
+
+    /// A core-collapse candidate's site: words 0–2 its position in its 512 ly cell, x, y and z,
+    /// and word 3 the mark that thins it on the young field's density and picks its density
+    /// component (P09.T33.a).
+    CLASS_CORE_COLLAPSE_SITE: System = "class.core_collapse.site";
+
+    /// A core-collapse candidate's primary's initial mass, in band E: one word (P09.T33.a).
+    CLASS_CORE_COLLAPSE_MASS: System = "class.core_collapse.mass";
+
+    /// A core-collapse candidate's \[Fe/H\]: one normal of its component's distribution at its site
+    /// (P09.T33.a).
+    CLASS_CORE_COLLAPSE_METALLICITY: System = "class.core_collapse.metallicity";
+
+    /// A core-collapse candidate's death: word 0 a uniform that places T in the field's thinning
+    /// interval, word 1 the mark that thins it on its component's death rate (P09.T33.a).
+    CLASS_CORE_COLLAPSE_DEATH: System = "class.core_collapse.death";
+
+    /// A core-collapse candidate's velocity at its site, galactic: plan 08's draw of its
+    /// component's law, four words per attempt of the escape cut (P09.T33.a).
+    CLASS_CORE_COLLAPSE_VELOCITY: System = "class.core_collapse.velocity";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1364,6 +1389,18 @@ mod tests {
         assert_eq!(CLASS_CELL.scope(), crate::rng::TagScope::Cell);
         assert!(CLASS_CELL.name().starts_with("class."));
         assert!(ALL.contains(&CLASS_CELL));
+        // P09.T33.a: the core collapses' candidates, one `System` tag per property group.
+        for tag in [
+            CLASS_CORE_COLLAPSE_SITE,
+            CLASS_CORE_COLLAPSE_MASS,
+            CLASS_CORE_COLLAPSE_METALLICITY,
+            CLASS_CORE_COLLAPSE_DEATH,
+            CLASS_CORE_COLLAPSE_VELOCITY,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.core_collapse."));
+            assert!(ALL.contains(&tag));
+        }
     }
 
     #[test]

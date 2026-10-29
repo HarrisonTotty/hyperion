@@ -44,7 +44,8 @@ use std::fmt;
 use super::params::SATELLITE_STABILITY_FRACTION;
 use super::placement::{OrbitZone, ZoneHierarchy, ZoneStar, stable_zones};
 use crate::Seed;
-use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
+use crate::galaxy::catalogue_classes::{CatalogueSystem, system_of};
+use crate::galaxy::features::members::{MemberRecord, NoInteriorCache, resolve_member};
 use crate::galaxy::imf::MASS_LIMIT_LO;
 use crate::galaxy::placement::{
     Existence, ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve,
@@ -593,6 +594,14 @@ pub struct SystemContext {
     encounter_environment: Option<EncounterEnvironment>,
 }
 
+/// A system as resolved for its stars: a feature member and a catalogue class's system bring their
+/// own (plan 09, P09.T10 and P09.T33.a), every other record the stellar stage's of its own marks.
+enum Resolved {
+    Member(MemberRecord),
+    Catalogue(CatalogueSystem),
+    Placed(SystemRecord),
+}
+
 impl SystemContext {
     /// The context of the system `id` of `galaxy`, resolved through plan 03.
     ///
@@ -600,7 +609,10 @@ impl SystemContext {
     /// resolves always has a context, whether it is born at the epoch or not. A catalogue
     /// feature's member takes its
     /// [`MemberRecord::stars`](crate::galaxy::features::members::MemberRecord::stars), at its
-    /// cluster's composition, and its feature's interior is built once.
+    /// cluster's composition, and its feature's interior is built once; a catalogue class's
+    /// system its class's stars ([`CatalogueSystem::stars`](crate::galaxy::catalogue_classes::CatalogueSystem::stars),
+    /// plan 09, P09.T33.a), resolved once, and a class that models none answers
+    /// [`KindNotGenerated`](ResolveSystemError::KindNotGenerated).
     ///
     /// # Errors
     ///
@@ -611,16 +623,23 @@ impl SystemContext {
     /// [`LayerNotGenerated`](ResolveSystemError::LayerNotGenerated) here.
     pub fn for_system(galaxy: &Galaxy, id: SystemId) -> Result<Self, ResolveSystemError> {
         // A feature member is resolved once, here, rather than through `resolve` and again for
-        // its stars: its interior is the costly part.
-        let member = match id.kind() {
+        // its stars: its interior is the costly part. So is a catalogue class's system, whose
+        // stars are its class's (plan 09, P09.T33.a).
+        let resolved = match id.kind() {
             SystemIdKind::FeatureMember(member) => {
-                Some(resolve_member(galaxy, &NoInteriorCache, member)?)
+                Resolved::Member(resolve_member(galaxy, &NoInteriorCache, member)?)
             }
-            _ => None,
+            SystemIdKind::Catalogue(system) => Resolved::Catalogue(system_of(galaxy, system)?),
+            SystemIdKind::Grid(_)
+            | SystemIdKind::Centre(_)
+            | SystemIdKind::Stream(_)
+            | SystemIdKind::DwarfCore(_)
+            | SystemIdKind::Pinned(_) => Resolved::Placed(resolve(galaxy, id)?),
         };
-        let record = match &member {
-            Some(member) => *member.record(),
-            None => resolve(galaxy, id)?,
+        let record = match &resolved {
+            Resolved::Member(member) => *member.record(),
+            Resolved::Catalogue(system) => *system.record(),
+            Resolved::Placed(record) => *record,
         };
         // The galactic centre's members resolve since plan 09's P09.T27, but their stars take
         // the centre's own composition and its black hole is no star: their system stage is not
@@ -631,9 +650,12 @@ impl SystemContext {
         if record.kind() != SystemKind::Stellar {
             return Err(ResolveSystemError::LayerNotGenerated(record.layer()));
         }
-        let stars = match member {
-            Some(member) => member.stars(galaxy),
-            None => SystemStars::generate(galaxy, &record),
+        let stars = match resolved {
+            Resolved::Member(member) => member.stars(galaxy),
+            Resolved::Catalogue(system) => system
+                .stars(galaxy)
+                .ok_or(ResolveSystemError::KindNotGenerated)?,
+            Resolved::Placed(record) => SystemStars::generate(galaxy, &record),
         };
         Ok(Self::from_stars(galaxy, &stars))
     }

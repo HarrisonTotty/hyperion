@@ -2115,12 +2115,13 @@ pub(crate) fn primary_draws(galaxy: &Galaxy, record: &SystemRecord) -> StarDraws
     }
 }
 
-/// The attempt a record's primary is read at: 0 for a grid record, and for a feature member the
-/// attempt its class's conditional draw chose (plan 09, P09.T10), which its origin carries.
+/// The attempt a record's primary is read at: 0 for a grid record and a catalogue system (plan 09,
+/// P09.T33.a), and for a feature member the attempt its class's conditional draw chose (plan 09,
+/// P09.T10), which its origin carries.
 #[must_use]
 fn record_attempt(record: &SystemRecord) -> u32 {
     match record.origin() {
-        SystemOrigin::Grid(_) => 0,
+        SystemOrigin::Grid(_) | SystemOrigin::CatalogueSystem(_) => 0,
         SystemOrigin::FeatureMember { attempt, .. }
         | SystemOrigin::CentreMember { attempt }
         | SystemOrigin::GlobalListMember { attempt } => u32::from(attempt),

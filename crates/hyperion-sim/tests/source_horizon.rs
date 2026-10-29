@@ -8,9 +8,10 @@
 //! start.
 //!
 //! The sources built so far are the grid's seven layers, the catalogue features' members (plan 09,
-//! P09.T21), the dwarf cores' and the streams' members (plan 10, P10.T7.b and P10.T8.b), and the
-//! supernova entry of plan 09's phase 4 as a value. The displaced remnants (plan 08, P08.T12), the
-//! galactic centre's members (P09.T24–T28) and the catalogue classes' grids (P09.T32–T35) are not
+//! P09.T21), the dwarf cores' and the streams' members (plan 10, P10.T7.b and P10.T8.b), the
+//! supernova entry of plan 09's phase 4 as a value, and the first catalogue class's entries, the
+//! core collapses (P09.T33.a). The displaced remnants (plan 08, P08.T12), the galactic centre's
+//! members (P09.T24–T28) and the other catalogue classes (P09.T34–T35, P09.T43, plan 11) are not
 //! placed yet; each is added here by the task that places it (P12.T0 as built).
 
 use hyperion_sim::Seed;
@@ -20,8 +21,12 @@ use hyperion_sim::events::{
     TimeWindow, tags,
 };
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use hyperion_sim::galaxy::catalogue_classes::supernova::{
     SupernovaEntry, SupernovaKind, SupernovaState,
+};
+use hyperion_sim::galaxy::catalogue_classes::{
+    CatalogueCellKey, CatalogueClassCell, ClassId, system_of,
 };
 use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
 use hyperion_sim::galaxy::features::members::FeatureInterior;
@@ -400,6 +405,49 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
                     assert!(t >= explosion && age.value().is_finite());
                     assert!(remnant.offset().is_some_and(|o| o.value().is_finite()));
                 }
+            }
+        }
+    }
+
+    // A core-collapse entry of the class grid (plan 09, P09.T33.a): its system on its line broken
+    // at the explosion, its record's existence, its stars and its supernova's state. Its line is
+    // not one, so the observer's drift refuses it, as it says.
+    let process = CoreCollapseProcess::new(&galaxy);
+    let entry = (8..28)
+        .map(|y| {
+            CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [0, y, 0])
+                .expect("a cell of the root cube")
+        })
+        .flat_map(|key| CatalogueClassCell::generate(&galaxy, &process, key).into_entries())
+        .next()
+        .expect("the inner disc has recent deaths");
+    let catalogue = system_of(&galaxy, entry.id()).expect("an entry resolves");
+    let record = catalogue.record();
+    let stars = catalogue
+        .stars(&galaxy)
+        .expect("a core collapse's stars are the stellar stage's");
+    assert!(matches!(
+        Drift::of_record(&galaxy, record),
+        Err(TraceMotionError::CatalogueMotionNotTraced(_))
+    ));
+    for t in TIMES {
+        let p = catalogue.position_at(t);
+        assert_in_padded_cube("a core-collapse entry", &p);
+        assert_eq!(position_at(&galaxy, record, t), p);
+        let exists = record.existence_at(t) == Existence::Exists;
+        assert!(record.age_at(t).value().is_finite());
+        let summary = stars.summary_at(t);
+        assert_eq!(summary.existence() == SystemExistence::Exists, exists);
+        assert_eq!(
+            stars.brief_at(t).is_some(),
+            exists,
+            "{:?} at {t}",
+            record.id()
+        );
+        match entry.value().supernova().state_at(t) {
+            SupernovaState::Progenitor { .. } => assert!(t < entry.value().site().death()),
+            SupernovaState::Supernova { age, .. } | SupernovaState::BareRemnant { age, .. } => {
+                assert!(t >= entry.value().site().death() && age.value().is_finite());
             }
         }
     }

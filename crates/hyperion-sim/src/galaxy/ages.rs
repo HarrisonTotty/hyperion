@@ -427,6 +427,37 @@ impl AgeDistribution {
             .unwrap_or(0.0)
     }
 
+    /// The greatest probability density at any age in `[lo, hi]`, per year; 0 if no piece meets
+    /// the range.
+    ///
+    /// Each piece's density never falls with age, a uniform piece's being flat and an exponential
+    /// history's rising, so the greatest over the range is a piece's own at the range's top or at
+    /// the piece's end, whichever comes first, in [`pdf`](Self::pdf)'s arithmetic. A process that
+    /// thins on `pdf` over a range of ages bounds it with this (plan 09, P09.T33.a).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::galaxy::ages::{AgeDistribution, FeatureShare};
+    /// use hyperion_sim::units::Years;
+    ///
+    /// let young = AgeDistribution::young_disc(Years::new(7e9), FeatureShare::None)?;
+    /// let (lo, hi) = (Years::new(0.0), Years::new(5e7));
+    /// // The young disc's history rises with age, so its density is greatest at 50 Myr.
+    /// assert_eq!(young.max_pdf_between(lo, hi), young.pdf(hi));
+    /// assert!(young.pdf(lo) < young.pdf(hi));
+    /// # Ok::<(), hyperion_sim::galaxy::ages::BuildAgeDistributionError>(())
+    /// ```
+    #[must_use]
+    pub fn max_pdf_between(&self, lo: Years, hi: Years) -> f64 {
+        let (lo, hi) = (lo.value(), hi.value());
+        self.pieces
+            .iter()
+            .filter(|p| p.lo <= hi && lo <= p.hi)
+            .map(|p| p.weight * p.pdf(p.hi.min(hi)))
+            .fold(0.0, f64::max)
+    }
+
     /// The probability that a system is younger than `age`.
     #[must_use]
     pub fn cdf(&self, age: Years) -> f64 {
@@ -567,6 +598,43 @@ mod tests {
             ));
         }
         all
+    }
+
+    /// P09.T33.a: the greatest density over a range is the greatest of the pieces' own, at the
+    /// range's top or the piece's end, and no age of the range has a greater one.
+    #[test]
+    fn max_pdf_between_bounds_every_age_of_its_range() {
+        for (name, ages) in examples() {
+            let (lo, hi) = (ages.min().value(), ages.max().value());
+            for (a, b) in [
+                (lo, hi),
+                (lo, f64::midpoint(lo, hi)),
+                (0.3 * hi, 0.7 * hi),
+                (-5e9, 2e10),
+            ] {
+                let bound = ages.max_pdf_between(Years::new(a), Years::new(b));
+                let mut greatest = 0.0_f64;
+                for k in 0..=50_000 {
+                    let age = a + (b - a) * f64::from(k) / 50_000.0;
+                    let pdf = ages.pdf(Years::new(age));
+                    assert!(
+                        pdf <= bound,
+                        "{name}: {pdf} above {bound} at {age} in [{a}, {b}]"
+                    );
+                    greatest = greatest.max(pdf);
+                }
+                // The bound is reached, within the grid's step, where the range meets a piece.
+                assert!(
+                    greatest >= bound * (1.0 - 1e-3) || greatest == 0.0,
+                    "{name}: {greatest} < {bound}"
+                );
+            }
+            assert_eq!(
+                ages.max_pdf_between(Years::new(2e10), Years::new(3e10)),
+                0.0,
+                "{name}"
+            );
+        }
     }
 
     #[test]

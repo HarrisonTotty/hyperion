@@ -163,7 +163,7 @@ impl GlobalMemberRecord {
             SystemOrigin::GlobalListMember { attempt }
             | SystemOrigin::FeatureMember { attempt, .. }
             | SystemOrigin::CentreMember { attempt } => u32::from(attempt),
-            SystemOrigin::Grid(_) => 0,
+            SystemOrigin::Grid(_) | SystemOrigin::CatalogueSystem(_) => 0,
         }
     }
 

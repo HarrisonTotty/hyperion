@@ -77,7 +77,9 @@ impl ObservedSystem {
 ///
 /// # Errors
 ///
-/// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre.
+/// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre, and
+/// [`TraceMotionError::CatalogueMotionNotTraced`] for a catalogue system, whose line breaks at its
+/// explosion (plan 09, P09.T33.a).
 ///
 /// # Panics
 ///
@@ -155,8 +157,8 @@ pub(crate) fn observe_on_line(
 ///
 /// # Errors
 ///
-/// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre, as
-/// [`observe_hit`].
+/// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre and
+/// [`TraceMotionError::CatalogueMotionNotTraced`] for a catalogue system, as [`observe_hit`].
 ///
 /// # Panics
 ///

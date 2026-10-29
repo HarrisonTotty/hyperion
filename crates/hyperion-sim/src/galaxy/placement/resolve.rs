@@ -16,6 +16,7 @@ use super::candidate::{catalogue_claims, evaluate_with_hook};
 use super::cell::{candidate_count_from_bound, layer_bound};
 use super::{CandidateOutcome, CellKey, ResolveSystemError, SystemRecord};
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::system_of;
 use crate::galaxy::features::centre::members::resolve_centre_member;
 use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
 use crate::galaxy::global_list::dwarf_core::{DwarfCoreModel, resolve_dwarf_core_member};
@@ -33,16 +34,19 @@ use crate::id::{DwarfCoreMemberId, StreamMemberId, SystemId, SystemIdKind};
 /// # Errors
 ///
 /// - [`ResolveSystemError::KindNotGenerated`] for an ID under the reserved layer value — a
-///   stream, a dwarf core, pinned content or a catalogue system — until plans 09 and 10 generate
-///   them. Streams and dwarf cores stay so here for good, since their members need the caller's
-///   tube tables: they resolve through [`resolve_with`]. A catalogue feature's member resolves
-///   through plan 09's [`resolve_member`] (P09.T21), and the galactic centre's through
-///   [`resolve_centre_member`] (P09.T27), which builds the centre's model.
+///   stream, a dwarf core or pinned content — until plan 10 generates them. Streams and dwarf
+///   cores stay so here for good, since their members need the caller's tube tables: they resolve
+///   through [`resolve_with`]. A catalogue feature's member resolves through plan 09's
+///   [`resolve_member`] (P09.T21), the galactic centre's through [`resolve_centre_member`]
+///   (P09.T27), which builds the centre's model, and a catalogue class's through the class grid
+///   ([`system_of`], P09.T33.a).
 /// - [`ResolveSystemError::NoSuchSystem`] if the index is at or above the cell's
 ///   [`candidate_count`](super::candidate_count), or its candidate was thinned, or a catalogue
 ///   class claimed it, or, from generator version 25, its orbit passes inside the black hole's
 ///   loss cone ([`CandidateOutcome::InLossCone`]; plan 09, P09.T28.b.b, held below it); for a
-///   feature member, if [`resolve_member`] finds none.
+///   feature member, if [`resolve_member`] finds none; for a catalogue system, if the class grid
+///   names none ([`system_of`]: a class with no process, an index past its cell's count, a
+///   candidate thinned or failing its class's test, a member its entry lacks).
 ///
 /// # Examples
 ///
@@ -80,10 +84,12 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
         }
         // The galactic centre's members and its black hole (plan 09, P09.T27).
         SystemIdKind::Centre(member) => resolve_centre_member(galaxy, member).map(|m| *m.record()),
-        SystemIdKind::Stream(_)
-        | SystemIdKind::DwarfCore(_)
-        | SystemIdKind::Pinned(_)
-        | SystemIdKind::Catalogue(_) => Err(ResolveSystemError::KindNotGenerated),
+        // A catalogue class's member, through the class grid's production lookup, with the record
+        // its class gives it (plan 09, P09.T33.a).
+        SystemIdKind::Catalogue(id) => system_of(galaxy, id).map(|system| *system.record()),
+        SystemIdKind::Stream(_) | SystemIdKind::DwarfCore(_) | SystemIdKind::Pinned(_) => {
+            Err(ResolveSystemError::KindNotGenerated)
+        }
     }
 }
 

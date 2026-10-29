@@ -100,6 +100,7 @@ use std::error::Error;
 use std::fmt;
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
+use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::features::centre::members::CentreMemberRecord;
 use crate::galaxy::features::centre::{BuildCentreError, CentreProfile, LossCone};
 use crate::galaxy::params::GalaxyParams;
@@ -1119,6 +1120,7 @@ pub enum LossConeVerdict {
 /// - a system in the straight regime, which follows no orbit about the black hole;
 /// - a centre member, whose placement has passed the same test already (P09.T25): a member that
 ///   resolves is outside the loss cone, so the verdict is not taken again on its rounded record;
+/// - a catalogue system (P09.T33.a), which follows its class's straight line and its kick;
 /// - a state with no orbit, at the black hole itself or with no angular momentum, which includes
 ///   every grid system of a galaxy built without its kinematic tables.
 #[must_use]
@@ -1136,7 +1138,11 @@ pub fn loss_cone_verdict(galaxy: &Galaxy, start: &EpochState) -> LossConeVerdict
 #[must_use]
 fn verdict_on(motion: &CentreMotion, start: &EpochState) -> LossConeVerdict {
     match start.record.origin() {
-        SystemOrigin::CentreMember { .. } => return LossConeVerdict::Clear,
+        // A catalogue system moves on its class's own line, not on an orbit about the black hole
+        // (plan 09, P09.T33.a).
+        SystemOrigin::CentreMember { .. } | SystemOrigin::CatalogueSystem(_) => {
+            return LossConeVerdict::Clear;
+        }
         SystemOrigin::Grid(_)
         | SystemOrigin::FeatureMember { .. }
         | SystemOrigin::GlobalListMember { .. } => {}
@@ -1452,6 +1458,9 @@ pub(crate) fn kepler_regime_position_at(
         | SystemOrigin::GlobalListMember { .. } => {
             drifted(record, epoch_velocity(galaxy, record), t)
         }
+        // Its class's broken line, not a drift at its epoch velocity, which is the remnant's once
+        // it has exploded (plan 09, P09.T33.a).
+        SystemOrigin::CatalogueSystem(_) => system_of_record(galaxy, record).position_at(t),
     }
 }
 

@@ -21,6 +21,7 @@
 
 use super::CellKey;
 use crate::coords::GalacticPosition;
+use crate::galaxy::catalogue_classes::ClassId;
 use crate::galaxy::features::ids::PackedFeature;
 use crate::galaxy::fields::{Component, ComponentId};
 use crate::galaxy::imf::MassBand;
@@ -79,9 +80,9 @@ pub struct SystemRecord {
 /// The members of the galactic centre, of streams and of dwarf cores belong to no density
 /// component, so a record carries where it came from instead of a component that some sources
 /// could not supply. [`Grid`](Self::Grid) is the only variant of the first milestone; plan 09 adds
-/// `FeatureMember(FeatureId)`, `CentreMember` and `CatalogueSystem(ClassId)` and plan 10
-/// `GlobalListMember`, none of which carries a component, and no grid record changes when they
-/// arrive.
+/// [`FeatureMember`](Self::FeatureMember), [`CentreMember`](Self::CentreMember) and
+/// [`CatalogueSystem`](Self::CatalogueSystem) and plan 10 `GlobalListMember`, none of which carries
+/// a component, and no grid record changes when they arrive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SystemOrigin {
@@ -109,6 +110,16 @@ pub enum SystemOrigin {
         /// The primary's redraw attempt ([`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt)).
         attempt: u16,
     },
+    /// A member of an entry of a catalogue class (plan 09, P09.T33.a), placed on the class's own
+    /// grid under the `111` prefix: its ID says which class, cell, candidate and member it is.
+    ///
+    /// Its stars and its motion are its class's, read through the class
+    /// ([`catalogue_classes::system_of`](crate::galaxy::catalogue_classes::system_of)): no
+    /// density component's laws apply to it, so [`component`](SystemRecord::component) is `None`.
+    /// It counts in the layer its primary's initial mass gives it, and its primary is read at
+    /// attempt 0: the core collapses thin their candidates on their first draws and redraw none
+    /// (a class that redraws, as P09.T43's will, adds the attempt to the variant).
+    CatalogueSystem(ClassId),
 }
 
 /// What a system is, as its layer says (plan 13, Design note 10): a star system, a free-floating
@@ -180,9 +191,10 @@ impl SystemRecord {
     /// # Panics
     ///
     /// If `origin` is [`SystemOrigin::Grid`] and `id` is not a grid ID, which would leave
-    /// [`layer`](Self::layer) with no answer, or if a member's origin does not match its ID's kind:
-    /// a feature member's its feature's member ID, a centre member's a centre member ID, a
-    /// global-list member's a stream's or a dwarf core's member ID.
+    /// [`layer`](Self::layer) with no answer; if any other origin's `id` is not of its kind: a
+    /// feature member's of its feature, a centre member's of the centre, a global-list member's a
+    /// stream's or a dwarf core's member ID, a catalogue system's of its class; and if a catalogue
+    /// system's primary is not of 0.08–150 M☉, the mass its layer is read from.
     #[must_use]
     pub fn from_parts(
         id: SystemId,
@@ -214,6 +226,17 @@ impl SystemRecord {
                 "a global-list member's record needs a stream's or a dwarf core's member ID, got \
                  {id:?}"
             ),
+            SystemOrigin::CatalogueSystem(class) => {
+                assert!(
+                    matches!(id.kind(), SystemIdKind::Catalogue(system)
+                        if system.class() == class.value()),
+                    "a catalogue system's record needs an ID of its class {class}, got {id:?}"
+                );
+                assert!(
+                    super::layer_for_initial_mass(primary_initial_mass).is_some(),
+                    "a catalogue system's primary is of 0.08-150 M_sun, got {primary_initial_mass:?}"
+                );
+            }
         }
         Self {
             id,
@@ -236,12 +259,13 @@ impl SystemRecord {
     /// mass function draws from the closed band, so a primary can sit on its band's upper edge.
     ///
     /// A feature member's is its slot's band, or for a member at feature level the band of its
-    /// primary's initial mass.
+    /// primary's initial mass. A catalogue system counts in the band of its primary's initial mass
+    /// (plan 09, P09.T37: "each merged system counts in the layer its initial mass gives it").
     ///
     /// # Panics
     ///
-    /// Never: a grid origin is built with a grid ID, which names a layer, and a member's primary
-    /// is of 0.08–150 M☉, which a band holds.
+    /// Never: a grid origin is built with a grid ID, which names a layer, and a member's or a
+    /// catalogue system's primary is of 0.08–150 M☉, which a band holds.
     #[must_use]
     pub fn layer(&self) -> Layer {
         match self.origin {
@@ -291,6 +315,10 @@ impl SystemRecord {
                     unreachable!("a global-list member's record is built with its member ID")
                 }
             },
+            SystemOrigin::CatalogueSystem(_) => {
+                super::layer_for_initial_mass(self.primary_initial_mass)
+                    .expect("a catalogue system's primary is of 0.08-150 M_sun")
+            }
         }
     }
 
@@ -325,7 +353,8 @@ impl SystemRecord {
             SystemOrigin::Grid(component) => Some(component),
             SystemOrigin::FeatureMember { .. }
             | SystemOrigin::CentreMember { .. }
-            | SystemOrigin::GlobalListMember { .. } => None,
+            | SystemOrigin::GlobalListMember { .. }
+            | SystemOrigin::CatalogueSystem(_) => None,
         }
     }
 
@@ -585,6 +614,80 @@ mod tests {
             Population::Bulge,
             SolarMasses::new(10.0),
             Years::new(1.0),
+        );
+    }
+
+    /// P09.T33.a: a catalogue system's record carries its class and its own `111` ID, counts in
+    /// the layer of its primary's initial mass, and has no density component.
+    #[test]
+    fn a_catalogue_system_counts_in_its_mass_s_layer_with_no_component() {
+        use crate::id::CatalogueSystemId;
+        let class = ClassId::CORE_COLLAPSE;
+        let id = SystemId::from(CatalogueSystemId::new(class.value(), [0, 50, 0], 7, 0).unwrap());
+        for (mass, layer) in [
+            (9.0, Layer::E),
+            (150.0, Layer::E),
+            (3.0, Layer::D),
+            (0.3, Layer::A),
+        ] {
+            let record = SystemRecord::from_parts(
+                id,
+                sunlike(),
+                SystemOrigin::CatalogueSystem(class),
+                Population::YoungThinDisc,
+                SolarMasses::new(mass),
+                Years::new(1e7),
+            );
+            assert_eq!(record.layer(), layer, "{mass} M☉");
+            assert_eq!(record.component(), None);
+            assert_eq!(record.kind(), SystemKind::Stellar);
+        }
+        // Still eight bytes: the class is one.
+        assert_eq!(size_of::<SystemOrigin>(), 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "a catalogue system's record needs an ID of its class")]
+    fn a_catalogue_system_s_record_refuses_another_class_s_id() {
+        use crate::id::CatalogueSystemId;
+        let id = CatalogueSystemId::new(ClassId::TYPE_IA.value(), [0, 50, 0], 7, 0).unwrap();
+        let _ = SystemRecord::from_parts(
+            SystemId::from(id),
+            sunlike(),
+            SystemOrigin::CatalogueSystem(ClassId::CORE_COLLAPSE),
+            Population::YoungThinDisc,
+            SolarMasses::new(10.0),
+            Years::new(1e7),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a catalogue system's primary is of 0.08-150 M_sun")]
+    fn a_catalogue_system_s_record_refuses_a_mass_no_layer_holds() {
+        use crate::id::CatalogueSystemId;
+        let class = ClassId::CORE_COLLAPSE;
+        let id = CatalogueSystemId::new(class.value(), [0, 50, 0], 7, 0).unwrap();
+        let _ = SystemRecord::from_parts(
+            SystemId::from(id),
+            sunlike(),
+            SystemOrigin::CatalogueSystem(class),
+            Population::YoungThinDisc,
+            SolarMasses::new(200.0),
+            Years::new(1e7),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a catalogue system's record needs an ID of its class")]
+    fn a_catalogue_system_s_record_refuses_a_grid_id() {
+        let key = CellKey::new(Layer::E, [0, 203, 0]).unwrap();
+        let _ = SystemRecord::from_parts(
+            key.candidate_id(0).unwrap(),
+            sunlike(),
+            SystemOrigin::CatalogueSystem(ClassId::CORE_COLLAPSE),
+            Population::YoungThinDisc,
+            SolarMasses::new(10.0),
+            Years::new(1e7),
         );
     }
 

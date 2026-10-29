@@ -30,7 +30,8 @@
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::features::members::{NoInteriorCache, resolve_member};
+use hyperion_sim::galaxy::catalogue_classes::{CatalogueSystem, system_of};
+use hyperion_sim::galaxy::features::members::{MemberRecord, NoInteriorCache, resolve_member};
 use hyperion_sim::galaxy::placement::{
     ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve,
 };
@@ -41,6 +42,14 @@ use hyperion_sim::stellar::system::SystemStars;
 
 use super::GalaxyKey;
 use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
+
+/// A system as resolved for its stars: a feature member and a catalogue class's system bring their
+/// own (plan 09, P09.T10 and P09.T33.a), every other record the stellar stage's of its own marks.
+enum Resolved {
+    Member(MemberRecord),
+    Catalogue(CatalogueSystem),
+    Placed(SystemRecord),
+}
 
 /// What names a system in the cache: the galaxy it belongs to, and the system itself.
 type SystemEntryKey = (GalaxyKey, SystemId);
@@ -85,7 +94,8 @@ impl SharedSystemCache {
     ///
     /// - The [`ResolveSystemError`] of plan 03's [`resolve`] if `id` names no system of `galaxy`.
     /// - [`ResolveSystemError::KindNotGenerated`] for a member of the galactic centre, whose system
-    ///   stage is not generated yet (plan 09, P09.T27).
+    ///   stage is not generated yet (plan 09, P09.T27), and for a catalogue system whose class
+    ///   models no stars; a core collapse's are its class's (P09.T33.a).
     /// - [`ResolveSystemError::LayerNotGenerated`] for a rogue planet, which has no stars: its state
     ///   is plan 14's (plan 13, P13.T5.d). A free-floating brown dwarf is generated as a single
     ///   object through the stellar stage (P13.T5.a).
@@ -110,17 +120,24 @@ impl SharedSystemCache {
         if let Some(stars) = self.systems.get(&entry_key) {
             return Ok(stars);
         }
-        // A feature member is resolved once, here, rather than through `resolve` and again for its
-        // stars: its feature's interior is the costly part.
-        let member = match id.kind() {
+        // A feature member is resolved once, here, rather than through `resolve` and again for
+        // its stars: its feature's interior is the costly part. So is a catalogue class's system, whose
+        // stars are its class's (plan 09, P09.T33.a).
+        let resolved = match id.kind() {
             SystemIdKind::FeatureMember(member) => {
-                Some(resolve_member(galaxy, &NoInteriorCache, member)?)
+                Resolved::Member(resolve_member(galaxy, &NoInteriorCache, member)?)
             }
-            _ => None,
+            SystemIdKind::Catalogue(system) => Resolved::Catalogue(system_of(galaxy, system)?),
+            SystemIdKind::Grid(_)
+            | SystemIdKind::Centre(_)
+            | SystemIdKind::Stream(_)
+            | SystemIdKind::DwarfCore(_)
+            | SystemIdKind::Pinned(_) => Resolved::Placed(resolve(galaxy, id)?),
         };
-        let record = match &member {
-            Some(member) => *member.record(),
-            None => resolve(galaxy, id)?,
+        let record = match &resolved {
+            Resolved::Member(member) => *member.record(),
+            Resolved::Catalogue(system) => *system.record(),
+            Resolved::Placed(record) => *record,
         };
         // The galactic centre's members resolve since plan 09's P09.T27, but their stars take the
         // centre's composition and its black hole is no star: not generated here yet.
@@ -130,9 +147,12 @@ impl SharedSystemCache {
         if record.kind() == SystemKind::RoguePlanet {
             return Err(ResolveSystemError::LayerNotGenerated(record.layer()));
         }
-        let stars = Arc::new(match member {
-            Some(member) => member.stars(galaxy),
-            None => SystemStars::generate(galaxy, &record),
+        let stars = Arc::new(match resolved {
+            Resolved::Member(member) => member.stars(galaxy),
+            Resolved::Catalogue(system) => system
+                .stars(galaxy)
+                .ok_or(ResolveSystemError::KindNotGenerated)?,
+            Resolved::Placed(record) => SystemStars::generate(galaxy, &record),
         });
         // A system larger than the whole budget is handed back and still answered from; nothing
         // else needs doing with it.
@@ -361,6 +381,40 @@ mod tests {
         assert_eq!(
             counters.bytes(),
             expected.heap_bytes() + size_of::<SystemStars>() + ENTRY_OVERHEAD_BYTES
+        );
+    }
+
+    /// A core-collapse entry's ID is served its class's stars and stored (plan 09, P09.T33.a); a
+    /// placed class with no process yet is refused as not generated.
+    #[test]
+    fn a_catalogue_system_is_served_its_class_s_stars() {
+        use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+        use hyperion_sim::galaxy::catalogue_classes::{
+            CatalogueCellKey, CatalogueClassCell, ClassId, system_of,
+        };
+        use hyperion_sim::id::CatalogueSystemId;
+        let cache = SharedSystemCache::new(64 << 20);
+        let process = CoreCollapseProcess::new(galaxy());
+        let entry = (8..28)
+            .flat_map(|y| {
+                let key = CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [0, y, 0])
+                    .expect("a cell of the root cube");
+                CatalogueClassCell::generate(galaxy(), &process, key).into_entries()
+            })
+            .next()
+            .expect("the inner disc has recent deaths");
+        let id = SystemId::from(entry.id());
+        let stars = cache.get_or_generate(key(), galaxy(), id).unwrap();
+        let expected = system_of(galaxy(), entry.id())
+            .unwrap()
+            .stars(galaxy())
+            .expect("a core collapse's stars are the stellar stage's");
+        assert_eq!(*stars, expected);
+        assert_eq!(cache.counters().entries(), 1);
+        let ia = CatalogueSystemId::new(ClassId::TYPE_IA.value(), [0, 16, 0], 0, 0).unwrap();
+        assert_eq!(
+            cache.get_or_generate(key(), galaxy(), SystemId::from(ia)),
+            Err(ResolveSystemError::KindNotGenerated)
         );
     }
 

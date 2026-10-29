@@ -182,7 +182,21 @@ fn the_marks_read_the_stars_and_their_own_stream() {
     ));
     let kick = stars.natal_kick().unwrap();
     let after = velocity + GalacticVelocity::new(kick.velocity());
-    assert_same_bits(marks.fastest_member_speed().value(), after.speed().value());
+    // The fastest member is the faster of the system before T and its remnant after (P09.T33.a).
+    let fastest = after.speed().value().max(velocity.speed().value());
+    assert_same_bits(marks.fastest_member_speed().value(), fastest);
+    // A system moving against its remnant's kick at nine tenths of it: the remnant is left at a
+    // tenth of the kick, and the progenitor's own speed bounds the entry's members.
+    let against = GalacticVelocity::new(kick.velocity().map(|c| -0.9 * c));
+    let braked = DeathMarks::of(&galaxy, &stars, &site, against).unwrap();
+    let remnant = (against + GalacticVelocity::new(kick.velocity()))
+        .speed()
+        .value();
+    assert!(remnant < 0.2 * kick.speed().value(), "{remnant}");
+    assert_same_bits(
+        braked.fastest_member_speed().value(),
+        against.speed().value(),
+    );
     // The energy: one uniform of `snr.energy`, word 0, keyed by the system's ID, through the law
     // of the death, bit for bit.
     let key = ObjectKey::from(stars.record().id());

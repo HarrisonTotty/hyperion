@@ -169,11 +169,13 @@ pub(crate) async fn extinction(
                     LineEnd::System(id) => match resolve(&galaxy, id) {
                         Ok(record) => match system_motion(&galaxy, &record, wanted.time()) {
                             Ok((position, _)) => position,
-                            // Nor has a system the server cannot place yet: a centre member,
-                            // refused at every time so that no answer depends on the time, or a
-                            // global-list member, which `resolve` never gives.
+                            // Nor has a system the server cannot place yet: a centre member, or
+                            // a catalogue system (P09.T33.a), refused at every time so that no
+                            // answer depends on the time, or a global-list member, which
+                            // `resolve` never gives.
                             Err(
                                 TraceMotionError::CentreOrbitNotBuilt(_)
+                                | TraceMotionError::CatalogueMotionNotTraced(_)
                                 | TraceMotionError::GlobalListMember(_),
                             ) => {
                                 return TargetExtinction::NoSuchSystem;

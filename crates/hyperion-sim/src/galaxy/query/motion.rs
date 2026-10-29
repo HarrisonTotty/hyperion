@@ -27,9 +27,12 @@ use super::result::SystemHit;
 use super::walk::QuerySphere;
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
+#[cfg(doc)]
+use crate::galaxy::catalogue_classes::CatalogueSystem;
+use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::kinematics::draw_velocity;
 use crate::galaxy::motion::{KeplerRegimeRules, SpeedBound, kepler_regime_position_at};
-use crate::galaxy::placement::{Existence, SystemRecord};
+use crate::galaxy::placement::{Existence, SystemOrigin, SystemRecord};
 use crate::id::Layer;
 use crate::time::UniverseTime;
 use crate::units::consts::SPEED_OF_LIGHT;
@@ -253,14 +256,26 @@ pub fn kepler_pad_for(
 /// [`Drift::of_record`](crate::observe::Drift::of_record). So this is where the padding's premise
 /// is checked: every grid record of a layer moves below that layer's [`pad_speed`] (P08.T17).
 ///
+/// A catalogue system's is its class's, its broken line's at the epoch (plan 09, P09.T33.a): away
+/// from the epoch and across its explosion its velocity is the line's at that time
+/// ([`CatalogueSystem::position_at`] follows it), which a constant drift does not.
+///
 /// # Panics
 ///
-/// - In a galaxy with kinematic tables, if `record` is not a grid record, as [`draw_velocity`].
+/// - In a galaxy with kinematic tables, if `record` is a feature member or a centre member, as
+///   [`draw_velocity`]; if it is a catalogue system that does not resolve in `galaxy`.
 /// - In debug builds, if the drawn speed is not below `pad_speed(record.layer())`. Plan 08's draw
 ///   prevents that: its escape cut holds every grid record below [`PAD_SPEED`], and P08.T12.d will
 ///   cap each exempt class below its layer's pad (Design note 7).
 #[must_use]
 pub fn epoch_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocity {
+    // A catalogue system moves as its class says: its line's velocity at the epoch, the
+    // remnant's once it has exploded (plan 09, P09.T33.a).
+    if let SystemOrigin::CatalogueSystem(_) = record.origin() {
+        return system_of_record(galaxy, record)
+            .motion()
+            .velocity_at(UniverseTime::EPOCH);
+    }
     if galaxy.kinematics().is_some() {
         let velocity = draw_velocity(galaxy, record);
         debug_assert!(
@@ -301,11 +316,17 @@ pub fn epoch_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocit
 ///   (about 1,300 km/s with the progenitor's motion). Only plan 08's fastest displaced classes,
 ///   which P08.T12.d will cap below their layer's pad, and the hypervelocity survivors, at up to
 ///   2,500 km/s, will move faster.
-/// - Away from the epoch, as [`epoch_velocity`].
+/// - Away from the epoch, as [`epoch_velocity`]; for a catalogue system, as its class's motion
+///   ([`CatalogueSystem::position_at`]) and if it does not resolve in `galaxy`.
 #[must_use]
 pub fn position_at(galaxy: &Galaxy, record: &SystemRecord, t: UniverseTime) -> GalacticPosition {
     if t == UniverseTime::EPOCH {
         return *record.epoch_position();
+    }
+    // A catalogue system moves as its class says, on a line broken at its explosion (plan 09,
+    // P09.T33.a).
+    if let SystemOrigin::CatalogueSystem(_) = record.origin() {
+        return system_of_record(galaxy, record).position_at(t);
     }
     match galaxy.rules().kepler_regime {
         KeplerRegimeRules::Straight => drifted(record, epoch_velocity(galaxy, record), t),

@@ -56,6 +56,7 @@
 //! whatever was asked before, so a server may cache it by system.
 
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::features::members::{FeatureInteriorCache, MemberRecord, resolve_member};
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::id::SystemIdKind;
@@ -328,7 +329,8 @@ impl BriefModel {
     /// The brief model of `record`'s system in `galaxy`, whatever placed it, as
     /// [`stars_of`](crate::observe::stars_of) builds its stars: a grid system's
     /// [`BriefModel::new`], a feature member's [`BriefModel::of_member`], its feature's interior
-    /// taken from `interiors`.
+    /// taken from `interiors`, and a catalogue system's at its class's composition and context
+    /// (plan 09, P09.T33.a).
     ///
     /// # Panics
     ///
@@ -337,7 +339,8 @@ impl BriefModel {
     /// - For a member of the global list, whose stars are its member record's, which the caller's
     ///   list gives.
     /// - If `record` is a feature member that does not resolve in `galaxy`, which only a record of
-    ///   another galaxy can be.
+    ///   another galaxy can be; and if it is a catalogue system that does not resolve, or whose
+    ///   class models no stars.
     /// - As [`BriefModel::new`], if a committed pair-light table cannot be read.
     #[must_use]
     pub fn of_record(
@@ -365,6 +368,21 @@ impl BriefModel {
                 panic!(
                     "a global-list member's stars are its member record's, through its list: {:?}",
                     record.id()
+                )
+            }
+            SystemOrigin::CatalogueSystem(_) => {
+                let system = system_of_record(galaxy, record);
+                let Some((composition, context)) = system.star_model() else {
+                    panic!(
+                        "a catalogue system whose class models no stars has none: {:?}",
+                        record.id()
+                    )
+                };
+                Self::build(
+                    galaxy,
+                    system.record(),
+                    (*composition, context),
+                    &FittedFates::generator(),
                 )
             }
         }

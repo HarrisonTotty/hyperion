@@ -42,7 +42,8 @@ use crate::convert::{
 /// `unknown_system` naming `system` for an ID whose bits are not a system ID, or that `resolve`
 /// refuses in this universe's galaxy, as `system_summary` answers it, and for a system whose motion
 /// the sim cannot trace yet, in either mode (a member of the galactic centre until plan 09's
-/// P09.T28, which `system_summary` refuses too); `bad_request` naming `mode` for an observer that is
+/// P09.T28, which `system_summary` refuses too, and a catalogue system, whose line breaks at its
+/// explosion, P09.T33.a); `bad_request` naming `mode` for an observer that is
 /// not a canonical position inside the root cube; those of [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot
 /// be built; `queue_full` if the interactive queue has no room for the job; `internal` if the pool
 /// is shutting down or the job panics; and `cancelled` if the client gave up before it ran.
@@ -108,7 +109,8 @@ pub(crate) async fn resolve_system(
 /// # Errors
 ///
 /// [`TraceMotionError`] for a system whose motion the sim cannot trace yet: a member of the
-/// galactic centre until plan 09's P09.T28 builds its orbit.
+/// galactic centre until plan 09's P09.T28 builds its orbit, and a catalogue system, whose line
+/// breaks at its explosion (plan 09, P09.T33.a).
 pub(super) fn observe_row(
     galaxy: &Galaxy,
     stars: &mut SystemStarsHandle<'_>,

@@ -10,6 +10,7 @@ use super::point_lens::{einstein_angle, point_lens_magnification};
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::events::TimeWindow;
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{
@@ -392,7 +393,8 @@ pub enum FindLensesError {
     /// The source does not resolve.
     SourceNotFound(ResolveSystemError),
     /// The source's motion cannot be traced yet: a member of the galactic centre, whose orbit
-    /// waits for plan 09's P09.T28.
+    /// waits for plan 09's P09.T28, or a catalogue system, whose line breaks at its explosion
+    /// (P09.T33.a).
     SourceMotionNotTraced(TraceMotionError),
     /// The walk would take more cells than the budget allows; nothing was generated.
     OverCellBudget {
@@ -438,7 +440,7 @@ impl Error for FindLensesError {
 ///
 /// # Panics
 ///
-/// If `record` is a feature member that does not resolve in `galaxy`.
+/// If `record` is a feature member or a catalogue system that does not resolve in `galaxy`.
 #[must_use]
 pub fn lens_mass_at(
     galaxy: &Galaxy,
@@ -473,6 +475,10 @@ pub fn lens_mass_at(
                 // tables give (plan 10): no lens from the system record alone.
                 SystemOrigin::CentreMember { .. } | SystemOrigin::GlobalListMember { .. } => {
                     return None;
+                }
+                // A catalogue system's stars are its class's (plan 09, P09.T33.a).
+                SystemOrigin::CatalogueSystem(_) => {
+                    system_of_record(galaxy, record).stars(galaxy)?
                 }
             };
             let mass = stars
@@ -565,7 +571,8 @@ struct Candidate {
 /// # Errors
 ///
 /// [`FindLensesError::SourceNotFound`] if the sightline's source does not resolve,
-/// [`FindLensesError::SourceMotionNotTraced`] if it is a member of the galactic centre, and
+/// [`FindLensesError::SourceMotionNotTraced`] if it is a member of the galactic centre or a
+/// catalogue system, and
 /// [`FindLensesError::OverCellBudget`] if the tube's cells exceed the budget, which is decided
 /// before any cell is generated.
 ///
