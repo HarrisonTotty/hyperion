@@ -2328,14 +2328,62 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
   - _Tests:_ its instantaneous shadow is within 15% of Smith 1967's at sun elevations up to 4° (the
     science check's tracer, 2° azimuths: 12%; Hayne et al.'s, 1°: 5%). Its permanent shadow is
     within the ray-traced surfaces' spread at σ_s 5.7° and 16.7°, and within 15% at 11.3° and
-    26.6°; its water cold traps are within 15% of §8.13's, and its CO₂ within a factor of two. A
-    body of another albedo and emissivity reads the same table.
+    26.6°; its water cold traps are within 15% of §8.13's. Its CO₂ is within a factor of two of
+    §8.13's at σ_s 5.7° and 26.6°, and at 11.3° and 16.7° within a factor of two of the 0.0215%
+    (± 0.0036 s.e.) and 0.0195% (± 0.0035) of an independent tracer (2026-10-29) over 8 surfaces, a
+    second tracer, not literature (`decision-r09-t7g-table` §6: §8.13's 0.010% there is one draw of
+    a quantity that varies 7- to 16-fold between surfaces). A body of another albedo and emissivity
+    reads the same table.
     T7.d's band, Ceres and CO₂ tests hold. _Acceptance (the pure half):_
     `cargo test -p hyperion-surface cold_trap`;
     `cargo test -p hyperion-fit --lib tasks::rough_plains_cold_traps`;
     `cargo test -p hyperion-fit --test rough_plains_cold_traps`; `just fit-check`;
     `just gen-surface` leaves the module's bindings and exports unchanged (the record says why
     not its bytes).
+- **R09.T7.l The rough plains' refit** (a T7.g follow-up; `decision-r09-t7g-table` §1–§4,
+  2026-10-29). Before any caller generates plains rougher than σ_s 5.7°, or supervolatile traps on
+  a body whose D ÷ w is below about 0.2 (at σ_s 5.7°, D below about 1.1°: Mercury-like bodies).
+  T7.g's table holds at plan 14's σ_s 5.7°. At σ_s ≥ 11° its CO₂ is its read between coarse cold
+  nodes, and its water and shadow fall short by the rays' reach and the read (T7.g's record, "The
+  five misses re-attributed"). It lands with T7.g's swap at 25 (decision §5), so that the record
+  path's goldens move once; its lane builds it before, on a lane branch. `hyperion-fit`'s
+  `rough_plains_cold_traps`, its manifest and the reader's read change:
+  - _Cold nodes where the tail lives:_ the cold shares at every limb node for D ÷ w ≤ 0.4 and at
+    every colatitude node for e₀ ÷ w ≤ 1, at every fourth and every second beyond: 21 colatitudes
+    and 15 limbs, 2,205 rows of `COLD` (about 0.3 MB). Even strides cannot do it (every limb node
+    at every second colatitude would make 3,927 rows, about 575 kB, over the 500 kB limit), so the
+    cold nodes are listed explicitly, and the read takes each cold node's shadow by its index among
+    the shadow's nodes, not by a stride. The reader's `read` and the fit's change together, held to
+    the bit.
+  - _The reach equal to the grid_ (512 px on 512², two longest waves): +2–7% of shadow at σ_s
+    11–27°.
+  - _16 surfaces_, not 8: the cold tail's spread is between surfaces (7- to 16-fold at σ_s
+    11–17°).
+  - _The heating at the disk's centre:_ the sunlit facets lit by the star's centre, D − α, the
+    shadow still by its upper limb, D, so that `irradiance_limit`'s flux-weighted normaliser
+    (T7.g's) reads fractions traced as it normalises them. The table has no α axis, so the trace
+    takes one α (R09.T7.l's record says which), and the normaliser corrects another body's to first
+    order.
+  - _The stand-in-table step_ for the changed items (T7.g's record, "Refitting the table"): the
+    fit crate builds against the surface crate, which reads the table, so a stand-in with the new
+    items and no header comes before the run.
+  - _Tests:_ T7.g's brackets, any still missed pinned as a finding. The spectrum check of decision
+    §3: the Moon's CO₂ bracket (`the_moons_co2_cold_traps_lie_within_schorghofers_bracket`, its
+    plains read through the reader in an uncommitted copy) under the refit's |k|^−(1+H) and under
+    a pilot of Hayne et al.'s cited code's |k|^−2(1+H), both recorded. If the bracket rejects
+    |k|^−(1+H) and accepts |k|^−2(1+H), the lane stops at a clean commit and reports it, with the
+    figures. _Acceptance:_ the read at the Moon's D within 10% of the task's own trace at that D on
+    its 16 surfaces, for water and CO₂ over 80–90° at w 0.1, 0.2, 0.3 and 0.5 (an independent
+    tracer on other surfaces differs by its sampling alone: CO₂'s standard error over 8 surfaces
+    is about 17%); `cargo test -p hyperion-surface cold_trap`;
+    `cargo test -p hyperion-fit --lib tasks::rough_plains_cold_traps`;
+    `cargo test -p hyperion-fit --test rough_plains_cold_traps`; `just fit-check`. _Cost:_ about
+    3 h on a pod, 4 vCPU (T7.g's 50-minute run times about 2 for the surfaces, 1.3 for the reach
+    and 1.5 for the cold nodes, though the added cold nodes lie where the shadow is large), one
+    run, in the slow class; a smoke run first.
+  - _The table's `since`:_ its body changes, and the fit tool takes `--since` only at the current
+    version and refuses a changed body at the committed `since`. The body takes effect at 25 with
+    the swap, which re-stamps it (R09.T7.l's record says how).
 - **R09.T7.h The kept craters' sharpening in the closed forms** (a T7 follow-up, after R10.T5;
   decision-r10-t5-closed-forms.md). `synth/craters.rs`: the small craters' closed forms count what
   a level's fillet leaves out of the ground's. For each octave the level keeps, that is its
