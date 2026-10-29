@@ -22,6 +22,11 @@ pub mod bowl_permanent_shadow;
     clippy::approx_constant,
     reason = "fitted values that may land near a constant are data"
 )]
+pub mod rough_plains_cold_traps;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
 pub mod space_weathering;
 
 use hyperion_base::version::TableInfo;

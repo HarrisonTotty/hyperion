@@ -120,7 +120,9 @@
 //!   - A peak-temperature form also understates the most volatile species' traps: Schorghofer et
 //!     al. find 3.5 times the CO₂ area by the time-averaged loss (2021, GRL 48, e2021GL095533).
 //! - **Rough plains.** On plains rougher than `σ_s` ≈ 6° the cold traps are overstated, water by up
-//!   to about three times at 27° and CO₂ by more, until R09.T7.g's ray-traced plains.
+//!   to about three times at 27° and CO₂ by more, until R09.T7.g's ray-traced plains. Their table
+//!   and its reader, [`rough_plains`], are built; nothing reads them here until the swap, which
+//!   rides a generator bump.
 //! - **The flux is at periapsis**, an upper bound when periapsis and solstice differ.
 //! - **The star circles the sky each day.** A body rotating synchronously with its star has no
 //!   such geometry; there the night side is a zonal matter.
@@ -137,6 +139,8 @@ use hyperion_base::math;
 use hyperion_base::units::consts::STEFAN_BOLTZMANN;
 use hyperion_base::units::{Kelvin, Radians, WattsPerSquareMetre};
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI, SQRT_2};
+
+pub mod rough_plains;
 
 /// The Moon's share of the cold-trapping area under lateral conduction's cut-off, 0.05 ± 0.02,
 /// labelled lunar: the reference value of [`TerrainParts::share_under_cutoff`]

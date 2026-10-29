@@ -893,6 +893,99 @@ mod cold_trap {
     fn a_band_of_negative_width_is_refused() {
         let _ = bowl_permanent_shadow(0.2, Radians::new(0.1), Radians::new(-0.1));
     }
+
+    /// The rough plains' reader's refusals (plan R09, T7.g), inside `cold_trap` so that T7's
+    /// `cold_trap` filter runs them.
+    mod rough_plains {
+        use hyperion_base::units::{Kelvin, Radians, WattsPerSquareMetre};
+        use hyperion_surface::cold_trap::rough_plains::{
+            cold_share, fraction, instantaneous_shadow, irradiance_limit, permanent_shadow,
+        };
+        use hyperion_surface::cold_trap::{Body, BodyParts};
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+        use wasm_bindgen_test::wasm_bindgen_test as test;
+
+        fn body() -> Body {
+            Body::new(BodyParts {
+                flux: WattsPerSquareMetre::new(1361.0),
+                greatest_declination: Radians::new(0.027),
+                star_radius: Radians::ZERO,
+                bond_albedo: 0.12,
+                emissivity: 0.95,
+                heat_flow: WattsPerSquareMetre::ZERO,
+            })
+            .unwrap()
+        }
+
+        #[test]
+        #[should_panic(expected = "a plain's RMS slope must be in [0, π/4]")]
+        fn a_slope_past_45_degrees_is_refused() {
+            let _ = permanent_shadow(Radians::new(0.8), Radians::new(0.1), Radians::new(0.03));
+        }
+
+        #[test]
+        #[should_panic(expected = "a colatitude must be in [0, π/2]")]
+        fn a_colatitude_past_the_equator_is_refused() {
+            let _ = permanent_shadow(Radians::new(0.1), Radians::new(1.6), Radians::new(0.03));
+        }
+
+        #[test]
+        #[should_panic(expected = "a star's declination and radius must sum to [0, π)")]
+        fn a_band_of_negative_width_is_refused() {
+            let _ = cold_share(
+                Radians::new(0.1),
+                Radians::new(0.1),
+                Radians::new(-0.1),
+                0.01,
+            );
+        }
+
+        #[test]
+        #[should_panic(expected = "an irradiance fraction must not be NaN")]
+        fn a_fraction_that_is_not_a_number_is_refused() {
+            let _ = cold_share(
+                Radians::new(0.1),
+                Radians::new(0.1),
+                Radians::new(0.03),
+                f64::NAN,
+            );
+        }
+
+        #[test]
+        #[should_panic(expected = "a sun's elevation must be in [0, π/2)")]
+        fn a_sun_at_the_zenith_is_refused() {
+            let _ =
+                instantaneous_shadow(Radians::new(0.1), Radians::new(std::f64::consts::FRAC_PI_2));
+        }
+
+        #[test]
+        #[should_panic(expected = "a threshold must be finite and positive")]
+        fn a_threshold_of_no_temperature_is_refused() {
+            let _ = irradiance_limit(Radians::new(0.1), Radians::new(0.03), &body(), Kelvin::ZERO);
+        }
+
+        #[test]
+        #[should_panic(expected = "a colatitude must be in [0, π/2]")]
+        fn an_irradiance_limit_past_the_equator_is_refused() {
+            let _ = irradiance_limit(
+                Radians::new(1.6),
+                Radians::new(0.03),
+                &body(),
+                Kelvin::new(110.0),
+            );
+        }
+
+        #[test]
+        #[should_panic(expected = "a latitude must be in [-π/2, π/2]")]
+        fn a_fraction_beyond_the_pole_is_refused() {
+            let _ = fraction(
+                Radians::new(1.6),
+                &body(),
+                Radians::new(0.1),
+                Kelvin::new(110.0),
+            );
+        }
+    }
 }
 
 /// The airless Moon's crater contract at saturation's N(>1 km).
