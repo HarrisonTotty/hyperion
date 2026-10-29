@@ -594,11 +594,6 @@ const PENDING: ReadonlyArray<PendingListing> = [
   { key: "VO", task: "R08.T4.f", what: "its bands (ExoMol's HyVO, which its service serves)" },
   { key: "H2S", task: "R08.T4.f", what: "its visible overtones (AYT2), from 296 K" },
   {
-    key: "SiO",
-    task: "R08.T4.f",
-    what: "its A-X hot bands (SiOUVenIR), which reach the range above about 1000 K",
-  },
-  {
     key: "CO",
     task: "R08.T4.f",
     part: "overtones",

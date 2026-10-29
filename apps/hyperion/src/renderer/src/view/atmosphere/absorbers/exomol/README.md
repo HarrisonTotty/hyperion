@@ -43,6 +43,8 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
     to HITRAN2024's 7–0 band (G. Li, I. E. Gordon, L. S. Rothman, Y. Tan, S.-M. Hu, S. Kassi, A.
     Campargue and E. S. Medvedev, Astrophys. J. Suppl. Ser. 216 (2015) 15, DOI
     10.1088/0067-0049/216/1/15).
+  - `SiO`: SiOUVenIR's ²⁸Si¹⁶O (S. N. Yurchenko et al., Mon. Not. R. Astron. Soc. 510 (2022) 903,
+    DOI 10.1093/mnras/stab3267).
 - `lineReferencesNH3.json` and `lineReferencesN2O.json` (plan R08, R08.T4.g), and
   `lineReferencesHot.json` (plan R08, R08.T4.f): named cells' curves of growth at three node
   pressures and three midpoints, computed from the same lists, beside the reduction's own, which
