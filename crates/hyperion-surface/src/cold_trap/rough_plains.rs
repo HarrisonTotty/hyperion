@@ -37,7 +37,8 @@
 //! slope node is read at the fraction scaled by its (`w_n` ÷ w)², the 0.05 slice included. A plain
 //! with no slope casts no shadow. The cold shares are tabulated at fewer nodes than the shadow,
 //! every node where D ÷ w and e₀ ÷ w are small and sparser beyond, and each cold node's shadow is
-//! found by its indices among the shadow's (`COLD_COLATITUDE_INDEX`, `COLD_LIMB_INDEX`).
+//! found by its indices among the shadow's ([`COLD_COLATITUDE_INDEX`](table::COLD_COLATITUDE_INDEX),
+//! [`COLD_LIMB_INDEX`](table::COLD_LIMB_INDEX)).
 //!
 //! **Nothing generated reads this yet.** [`fraction`](super::fraction) and
 //! [`permanent_shadow`](super::permanent_shadow) still take the plains as the labelled half-normal
@@ -274,8 +275,11 @@ pub fn instantaneous_shadow(slope: Radians, elevation: Radians) -> f64 {
 /// For a disk that clears the horizon and the table's α the two are one. Otherwise, to first order
 /// the facets' heating scales with the flux they intercept, so the shares are read at fractions of
 /// S sin `e_eff`: the shadow takes the upper limb, and the heating the disk
-/// (`decision-r09-t7g-table` §2). That is exact for the plain's mean heating; where the horizon
-/// cuts the disk it is an extrapolation (R09.T7.g's record). It is zero where the heat
+/// (`decision-r09-t7g-table` §2). That is exact for the plain's mean heating, and corrects a pixel
+/// that peaks away from noon at noon's ratio; where the horizon cuts the disk it is an
+/// extrapolation. Beyond first order a body whose α exceeds the table's (Mercury) keeps its
+/// heating overstated and its cold traps understated, and one whose α is smaller (a far body) the
+/// reverse (R09.T7.l's record). It is zero where the heat
 /// flow alone warms the shadow past the threshold, and infinite where `e_eff` = 0, a point star
 /// that never rises, but the shadow can be cold.
 ///

@@ -18,6 +18,7 @@ use hyperion_sim::math;
 use hyperion_sim::units::Radians;
 use hyperion_surface::cold_trap::rough_plains;
 use hyperion_surface::tables::rough_plains_cold_traps as table;
+use hyperion_testkit::float::assert_same_bits;
 
 /// The table the surface crate compiles, as committed.
 const COMMITTED: &str =
@@ -53,7 +54,12 @@ fn committed() -> RoughPlainsFit {
     }
     assert_eq!(axes.cold_colatitude_indices, table::COLD_COLATITUDE_INDEX);
     assert_eq!(axes.cold_limb_indices, table::COLD_LIMB_INDEX);
-    assert!(params.star_radius.total_cmp(&table::STAR_RADIUS).is_eq());
+    assert_same_bits(params.star_radius.value(), table::STAR_RADIUS);
+    of_table(axes, params)
+}
+
+/// The committed table's values as a fit on `axes` and `params`.
+fn of_table(axes: Axes, params: Params) -> RoughPlainsFit {
     RoughPlainsFit {
         axes,
         shadow: table::SHADOW.iter().map(|row| row.to_vec()).collect(),
@@ -63,8 +69,25 @@ fn committed() -> RoughPlainsFit {
     }
 }
 
+/// The committed table as a fit on its own axes, whatever the manifest holds: what the reader
+/// reads.
+fn as_read() -> RoughPlainsFit {
+    let axes = Axes {
+        slopes: table::SLOPE.to_vec(),
+        colatitudes: table::COLATITUDE_PER_SLOPE.to_vec(),
+        limbs: table::LIMB_PER_SLOPE.to_vec(),
+        cold_colatitudes: table::COLD_COLATITUDE_PER_SLOPE.to_vec(),
+        cold_limbs: table::COLD_LIMB_PER_SLOPE.to_vec(),
+        cold_colatitude_indices: table::COLD_COLATITUDE_INDEX.to_vec(),
+        cold_limb_indices: table::COLD_LIMB_INDEX.to_vec(),
+        irradiances: table::IRRADIANCE.to_vec(),
+        instants: table::TAN_ELEVATION_PER_SLOPE.to_vec(),
+    };
+    of_table(axes, Params::of(&manifest()).unwrap())
+}
+
 /// The committed body is the task's rendering of the committed values, byte for byte. The fit
-/// itself takes about an hour, so it is not rerun here: `hyperion-fit check` holds the file to its
+/// itself takes about three hours, so it is not rerun here: `hyperion-fit check` holds the file to its
 /// inputs hash and body hash, and the surface crate's tests hold its figures.
 #[test]
 fn the_committed_body_is_the_rendering_of_its_values() {
@@ -83,7 +106,8 @@ fn the_committed_body_is_the_rendering_of_its_values() {
 
 #[test]
 fn the_surface_crates_reader_is_the_fits_read_to_the_bit() {
-    let fit = committed();
+    // On the table's own axes, so that the two reads are held together whatever the manifest says.
+    let fit = as_read();
     let degrees = |x: f64| x.to_radians();
     let same =
         |a: f64, b: f64, what: &str| assert!(a.total_cmp(&b).is_eq(), "{what}: {a} against {b}");
@@ -162,18 +186,17 @@ fn the_smoke_run_is_the_same_on_any_thread_count_and_chunk_size() {
         run(&cli, &mut log).unwrap();
         let written = fs::read_to_string(&out).unwrap();
         let split = TableText::of_file(&written);
+        let acceptance = split.header().unwrap().acceptance.unwrap_or_default();
         assert!(
-            split
-                .header()
-                .unwrap()
-                .acceptance
-                .is_some_and(|a| a.contains("instantaneous shadow within")),
+            acceptance.contains("instantaneous shadow within"),
             "{written}"
         );
-        bodies.push(split.body);
+        // The direct trace at the Moon's D, R09.T7.l's acceptance, is in the header alone.
+        assert!(acceptance.contains("against a direct trace"), "{written}");
+        bodies.push((split.body, acceptance));
     }
     assert_eq!(bodies[0], bodies[1]);
     assert_eq!(bodies[0], bodies[2]);
     let task = find("rough_plains_cold_traps").unwrap();
-    assert_eq!(common::declared(&bodies[0]), task.items());
+    assert_eq!(common::declared(&bodies[0].0), task.items());
 }

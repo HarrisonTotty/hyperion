@@ -162,9 +162,9 @@ pub struct Params {
     pub step: f64,
     /// The rays' greatest length, pixels.
     pub reach: f64,
-    /// The angular radius α of the star whose disk's centre lights the facets, radians in
-    /// [0, π/2): the manifest's `star_radius_deg`.
-    pub star_radius: f64,
+    /// The angular radius α of the star whose disk's centre lights the facets, in [0, π/18]: the
+    /// manifest's `star_radius_deg` in [0, 10].
+    pub star_radius: Radians,
     /// The slope nodes, w = tan `σ_s`, ascending from [`SLOPE_MIN`] to [`SLOPE_MAX`].
     pub slopes: Vec<f64>,
     /// The greatest colatitude over w.
@@ -286,7 +286,7 @@ impl Params {
             sun_stride,
             step,
             reach,
-            star_radius: star_radius_deg * PI / 180.0,
+            star_radius: Radians::new(star_radius_deg * PI / 180.0),
             slopes: slopes(manifest)?,
             colatitude_range: positive(manifest, "colatitude_range")?,
             colatitude_nodes,
@@ -1021,7 +1021,7 @@ fn node_counts(
         counts.pieces += seens.iter().map(|s| s.pieces).sum::<u64>();
         counts.views += wide(seens.len()) * u64::from(params.azimuths / params.view_stride);
         // The facets are lit by the disk's centre, whose path lies within the upper limb's.
-        let centre = (limb - params.star_radius).max(0.0);
+        let centre = (limb - params.star_radius.value()).max(0.0);
         let path = Path {
             sin_lat,
             cos_lat,
@@ -1334,7 +1334,7 @@ struct SurfaceCounts {
     /// The horizons at least each of [`smith_points`]'s tan e ÷ w.
     smith: Vec<u64>,
     /// The direct trace at the real Moon's own D: a [`NodeCounts`] for each of [`CHECK_SLOPES`]
-    /// and [`direct_latitudes`], slope major, its one limb node the Moon's D and its irradiance
+    /// and [`direct_latitudes_deg`], slope major, its one limb node the Moon's D and its irradiance
     /// nodes 0 and the fractions of [`moon_limits`].
     direct: Vec<NodeCounts>,
     /// The pieces the sampled pixels' marches found.
@@ -1346,22 +1346,25 @@ struct SurfaceCounts {
 /// The latitudes, degrees, at which a run traces the real Moon's cold traps directly at its own D,
 /// to hold the table's read to: the midpoints of every 0.5° over 80–90°.
 #[must_use]
-pub fn direct_latitudes() -> Vec<f64> {
+pub fn direct_latitudes_deg() -> Vec<f64> {
     (0..20_u32).map(|i| 80.25 + 0.5 * f64::from(i)).collect()
 }
 
-/// The real Moon's irradiance fractions at `colatitude` radians: CO₂'s (57 K) and water's (110 K),
-/// ascending, as the reader takes them.
+/// The real Moon's irradiance fractions at `colatitude_rad`: CO₂'s (57 K) and water's (110 K),
+/// ascending, as the reader takes them. 110 K is where water sublimes at Schorghofer and
+/// Williams's 144 kg m⁻² Gyr⁻¹ (2020, PSJ 1, 54, Table 1), and 57 K CO₂'s in the 55.5–58.4 K
+/// that Clausius–Clapeyron gives at that rate (`science-r09-drainage.md` §8.6), as T7.g's
+/// figures take them.
 #[must_use]
-fn moon_limits(colatitude: f64) -> [f64; 2] {
+fn moon_limits(colatitude_rad: f64) -> [f64; 2] {
     let moon = real_moon();
     [Kelvin::new(57.0), Kelvin::new(110.0)]
-        .map(|t| irradiance_limit(Radians::new(colatitude), &moon, t))
+        .map(|t| irradiance_limit(Radians::new(colatitude_rad), &moon, t))
 }
 
 /// The real Moon's D = δ + α, radians.
 #[must_use]
-fn moon_limb() -> f64 {
+fn moon_limb_rad() -> f64 {
     MOON_DECLINATION + real_moon().parts().star_radius.value()
 }
 
@@ -1480,7 +1483,7 @@ fn surface_counts(
 }
 
 /// The direct trace of `surface` at the real Moon's own D, on `threads` threads: each of
-/// [`CHECK_SLOPES`] and [`direct_latitudes`] a node of its own, at the Moon's own D and at its own
+/// [`CHECK_SLOPES`] and [`direct_latitudes_deg`] a node of its own, at the Moon's own D and at its own
 /// irradiance fractions, so that nothing is read between nodes.
 fn direct_counts(
     surface: &Surface,
@@ -1489,7 +1492,7 @@ fn direct_counts(
     params: &Params,
     threads: NonZeroUsize,
 ) -> Result<Vec<NodeCounts>, BuildThreadPoolError> {
-    let latitudes = direct_latitudes();
+    let latitudes = direct_latitudes_deg();
     let pixels = surface.side * surface.side;
     let mut direct = Vec::with_capacity(CHECK_SLOPES.len() * latitudes.len());
     let check_normals: Vec<Vec<[f64; 3]>> = CHECK_SLOPES
@@ -1522,9 +1525,9 @@ fn direct_counts(
                     let at = Axes {
                         slopes: vec![w],
                         colatitudes: vec![colatitude / w],
-                        limbs: vec![moon_limb() / w],
+                        limbs: vec![moon_limb_rad() / w],
                         cold_colatitudes: vec![colatitude / w],
-                        cold_limbs: vec![moon_limb() / w],
+                        cold_limbs: vec![moon_limb_rad() / w],
                         cold_colatitude_indices: vec![0],
                         cold_limb_indices: vec![0],
                         irradiances: vec![0.0, co2, water],
@@ -1643,7 +1646,7 @@ pub struct RunCounts {
     /// The horizons at least each of [`smith_points`]' tan e ÷ w, over every surface.
     pub smith: Vec<u64>,
     /// The direct trace at the real Moon's D, over every surface: one for each of
-    /// [`CHECK_SLOPES`] and [`direct_latitudes`], slope major.
+    /// [`CHECK_SLOPES`] and [`direct_latitudes_deg`], slope major.
     pub direct: Vec<DirectCounts>,
     /// The pieces the sampled pixels' marches found, over every surface.
     pub pieces: u64,
@@ -1654,7 +1657,7 @@ pub struct RunCounts {
 }
 
 /// One slope and latitude's direct trace at the real Moon's D, over every surface.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct DirectCounts {
     /// The pixels in permanent shadow.
     pub shadow: u64,
@@ -1707,7 +1710,7 @@ fn band_mean(lo: f64, hi: f64, f: impl Fn(f64) -> f64) -> f64 {
 #[must_use]
 fn moon_cold(fit: &RoughPlainsFit, w: f64, colatitude: f64, threshold: Kelvin) -> f64 {
     let x = irradiance_limit(Radians::new(colatitude), &real_moon(), threshold);
-    fit.cold_share(w, colatitude, moon_limb(), x)
+    fit.cold_share(w, colatitude, moon_limb_rad(), x)
 }
 
 /// One check slope's figures.
@@ -1745,17 +1748,26 @@ pub struct Figures {
 }
 
 /// One check slope's read against its direct trace at the real Moon's D, over 80–90° at
-/// [`direct_latitudes`], area-weighted: each a pair (read, direct).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// [`direct_latitudes_deg`], area-weighted.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct DirectFigures {
     /// The slope w.
     pub slope: f64,
-    /// The permanent shadow.
-    pub shadow: (f64, f64),
-    /// Water's cold traps, 110 K.
-    pub water: (f64, f64),
-    /// CO₂'s cold traps, 57 K.
-    pub co2: (f64, f64),
+    /// The permanent shadow's share of the ground.
+    pub shadow: ReadAndTrace,
+    /// Water's cold traps' share of the ground, 110 K.
+    pub water: ReadAndTrace,
+    /// CO₂'s cold traps' share of the ground, 57 K.
+    pub co2: ReadAndTrace,
+}
+
+/// A share of the ground as the table's read gives it, and as the direct trace does.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+pub struct ReadAndTrace {
+    /// The table's read.
+    pub read: f64,
+    /// The direct trace.
+    pub direct: f64,
 }
 
 /// The figures of `fit` and `run`.
@@ -1809,20 +1821,20 @@ pub fn figures(fit: &RoughPlainsFit, run: &RunCounts) -> Figures {
     }
 }
 
-/// The read against the direct trace at the real Moon's D (the run's acceptance for R09.T7.l).
+/// The read against the direct trace at the real Moon's D (the run's acceptance for R09.T7.l), for
+/// each of [`CHECK_SLOPES`] that `run` traced directly: [`fit`]'s run traces them all.
 #[must_use]
 fn direct_figures(fit: &RoughPlainsFit, run: &RunCounts) -> Vec<DirectFigures> {
-    let latitudes = direct_latitudes();
-    let limb = moon_limb();
-    CHECK_SLOPES
-        .iter()
-        .enumerate()
-        .map(|(slope, &w)| {
+    let latitudes = direct_latitudes_deg();
+    let limb = moon_limb_rad();
+    run.direct
+        .chunks_exact(latitudes.len())
+        .zip(CHECK_SLOPES)
+        .map(|(traced, w)| {
             let mut sums = [0.0_f64; 7];
-            for (i, &lat) in latitudes.iter().enumerate() {
+            for (c, &lat) in traced.iter().zip(&latitudes) {
                 let colatitude = (90.0 - lat) * PI / 180.0;
                 let weight = math::cos(lat * PI / 180.0);
-                let c = &run.direct[slope * latitudes.len() + i];
                 let shadow = real(c.shadow) / run.pixels;
                 let share = |k: u64| {
                     if c.sampled == 0 {
@@ -1843,12 +1855,15 @@ fn direct_figures(fit: &RoughPlainsFit, run: &RunCounts) -> Vec<DirectFigures> {
                 }
                 sums[6] += weight;
             }
-            let mean = |k: usize| sums[k] / sums[6];
+            let pair = |k: usize| ReadAndTrace {
+                read: sums[k] / sums[6],
+                direct: sums[3 + k] / sums[6],
+            };
             DirectFigures {
                 slope: w,
-                shadow: (mean(0), mean(3)),
-                water: (mean(1), mean(4)),
-                co2: (mean(2), mean(5)),
+                shadow: pair(0),
+                water: pair(1),
+                co2: pair(2),
             }
         })
         .collect()
@@ -1941,7 +1956,7 @@ rounded to {digits} significant figures.",
         dr = p.limb_range,
         ncc = a.cold_colatitudes.len(),
         ncl = a.cold_limbs.len(),
-        alpha = p.star_radius * 180.0 / PI,
+        alpha = p.star_radius.value() * 180.0 / PI,
         nx = p.irradiance_nodes,
         xl = p.irradiance_min,
         xh = p.irradiance_max,
@@ -2028,7 +2043,7 @@ fn items(fit: &RoughPlainsFit) -> Vec<TableItem> {
                     .to_owned(),
                 "facets, at D − α: the manifest's `star_radius_deg`.".to_owned(),
             ],
-            value: fit.params.star_radius,
+            value: fit.params.star_radius.value(),
         },
         array(
             "IRRADIANCE",
@@ -2150,7 +2165,7 @@ fn acceptance(params: &Params, f: &Figures) -> String {
         s = params.surfaces,
         g = params.grid,
         reach = params.reach,
-        alpha = params.star_radius * 180.0 / PI,
+        alpha = params.star_radius.value() * 180.0 / PI,
         pv = f.pieces_per_view,
         a0 = f.spreads[0].0,
         a1 = f.spreads[0].1,
@@ -2186,12 +2201,12 @@ fn acceptance(params: &Params, f: &Figures) -> String {
             "; w {w}: shadow {s0:.4} against {s1:.4}, water {h0:.4} against {h1:.4}, CO₂ {c0:.6} \
              against {c1:.6}",
             w = d.slope,
-            s0 = d.shadow.0,
-            s1 = d.shadow.1,
-            h0 = d.water.0,
-            h1 = d.water.1,
-            c0 = d.co2.0,
-            c1 = d.co2.1,
+            s0 = d.shadow.read,
+            s1 = d.shadow.direct,
+            h0 = d.water.read,
+            h1 = d.water.direct,
+            c0 = d.co2.read,
+            c1 = d.co2.direct,
         );
     }
     out
@@ -2430,7 +2445,7 @@ mod tests {
         // shadowed pixels' peaks under the centre's path at D − α = 1.54°, over sin 1.54°.
         let (side, rim) = (128, 40.0);
         let params = Params {
-            star_radius: degrees(0.2711),
+            star_radius: Radians::new(degrees(0.2711)),
             samples: 1_000_000,
             ..bowl_params()
         };
@@ -2493,12 +2508,110 @@ mod tests {
                 })
                 .collect()
         };
-        assert_eq!(counts.cold, cold_under(limb - params.star_radius));
+        assert_eq!(counts.cold, cold_under(limb - params.star_radius.value()));
         assert_ne!(
             counts.cold,
             cold_under(limb),
             "the upper limb's would be the same"
         );
+    }
+
+    #[test]
+    fn the_cold_read_takes_each_cold_node_by_its_indices() {
+        // R09.T7.l: the smoke manifest's cold nodes are uneven ([0, 1, 2, 4] and [0, 1, 3, 6]),
+        // so a read that took a cold node's shadow by its position among the cold nodes, or a
+        // fit that filed its row by the shadow's node, would miss. At a cold node the read is
+        // that node's shadow, found by its indices, times its cold share.
+        let (table, _) = fit(Params::of(&smoke()).unwrap(), NonZeroUsize::new(4).unwrap()).unwrap();
+        let a = &table.axes;
+        let width = a.colatitudes.len();
+        let (cold_width, cold_limbs) = (a.cold_colatitudes.len(), a.cold_limbs.len());
+        let mut checked = 0_u32;
+        for (s, &w) in a.slopes.iter().enumerate() {
+            for (j, &c) in a.cold_colatitudes.iter().enumerate().take(cold_width - 1) {
+                for (k, &d) in a.cold_limbs.iter().enumerate().take(cold_limbs - 1) {
+                    let (colatitude, limb) = (c * w, d * w);
+                    if colatitude + limb >= FRAC_PI_2 {
+                        continue;
+                    }
+                    let fine = &table.shadow[s * width + usize::from(a.cold_colatitude_indices[j])];
+                    let shadow = fine[usize::from(a.cold_limb_indices[k])];
+                    let row = &table.cold[(s * cold_width + j) * cold_limbs + k];
+                    for (m, &x) in a.irradiances.iter().enumerate().skip(1) {
+                        let expected = shadow * row[m];
+                        let read = table.cold_share(w, colatitude, limb, x);
+                        assert!(
+                            (read - expected).abs() <= 1e-12,
+                            "w {w}, cold node ({j}, {k}), x {x}: {read} against {expected}"
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert_ne!(checked, 0);
+    }
+
+    #[test]
+    fn the_direct_trace_is_each_surface_s_own_node_at_the_moons_d() {
+        // R09.T7.l's acceptance figure: each check slope and latitude traced as a node of its
+        // own at the Moon's D and its own fractions, slope major, summed over the surfaces, with
+        // CO₂'s count before water's; and in the figures CO₂ ≤ water ≤ shadow, read and traced.
+        let params = Params::of(&smoke()).unwrap();
+        let threads = NonZeroUsize::new(4).unwrap();
+        let (table, run) = fit(params.clone(), threads).unwrap();
+        let latitudes = direct_latitudes_deg();
+        assert_eq!(run.direct.len(), CHECK_SLOPES.len() * latitudes.len());
+        let dirs = directions(params.azimuths);
+        for (slope, i) in [(0, 0), (2, 9), (3, 19)] {
+            let w = CHECK_SLOPES[slope];
+            let colatitude = (90.0 - latitudes[i]) * PI / 180.0;
+            let [co2, water] = moon_limits(colatitude);
+            let axes = Axes {
+                slopes: vec![w],
+                colatitudes: vec![colatitude / w],
+                limbs: vec![moon_limb_rad() / w],
+                cold_colatitudes: vec![colatitude / w],
+                cold_limbs: vec![moon_limb_rad() / w],
+                cold_colatitude_indices: vec![0],
+                cold_limb_indices: vec![0],
+                irradiances: vec![0.0, co2, water],
+                instants: Vec::new(),
+            };
+            let mut expected = DirectCounts::default();
+            for number in 0..params.surfaces {
+                let surface = Surface::gaussian(&params, number);
+                let horizons = Horizons::trace(&surface, &params, threads).unwrap();
+                let normals: Vec<[f64; 3]> = (0..surface.side * surface.side)
+                    .map(|at| normal(surface.gradient(at), w))
+                    .collect();
+                let view = SlopeView {
+                    surface: &surface,
+                    horizons: &horizons,
+                    dirs: &dirs,
+                    normals: &normals,
+                    w,
+                };
+                let c = node_counts(&view, &params, &axes, colatitude, Nodes::WithCold);
+                assert!(c.cold[1] <= c.cold[2], "CO₂'s fraction is below water's");
+                expected.shadow += c.shadow[0];
+                expected.sampled += c.sampled[0];
+                for (t, k) in expected.cold.iter_mut().zip(&c.cold) {
+                    *t += k;
+                }
+            }
+            assert_eq!(run.direct[slope * latitudes.len() + i], expected);
+        }
+        let direct = figures(&table, &run).direct;
+        assert_eq!(direct.len(), CHECK_SLOPES.len());
+        for d in &direct {
+            for (co2, water, shadow) in [
+                (d.co2.read, d.water.read, d.shadow.read),
+                (d.co2.direct, d.water.direct, d.shadow.direct),
+            ] {
+                assert!(co2 <= water && water <= shadow, "{d:?}");
+            }
+        }
     }
 
     #[test]
