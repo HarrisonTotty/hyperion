@@ -90,7 +90,7 @@
 //! every k-th of them in raster order. Counts are exact, so the shares are the same however they
 //! are summed. The trace is cut into chunks of `chunk` rows, and the slopes and colatitudes into
 //! chunks of `chunk` nodes, each a pure function of its index, mapped by
-//! [`map_reduce_chunks`](crate::parallel::map_reduce_chunks) and reduced in index order; every
+//! [`map_reduce_chunks`] and reduced in index order; every
 //! transcendental goes through [`hyperion_sim::math`]. So the table is the same for any thread
 //! count, any chunk size and on every platform. Shares are rounded to `digits` significant
 //! figures.

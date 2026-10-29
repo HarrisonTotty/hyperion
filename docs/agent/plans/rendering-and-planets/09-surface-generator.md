@@ -2247,7 +2247,8 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
     `cargo test -p hyperion-surface cold_trap`;
     `cargo test -p hyperion-fit --lib tasks::rough_plains_cold_traps`;
     `cargo test -p hyperion-fit --test rough_plains_cold_traps`; `just fit-check`;
-    `just gen-surface` leaves `hyperion_surface_bg.wasm` unchanged byte for byte.
+    `just gen-surface` leaves the module's bindings and exports unchanged (the record says why
+    not its bytes).
 - **R09.T7.h The kept craters' sharpening in the closed forms** (a T7 follow-up, after R10.T5;
   decision-r10-t5-closed-forms.md). `synth/craters.rs`: the small craters' closed forms count what
   a level's fillet leaves out of the ground's. For each octave the level keeps, that is its
