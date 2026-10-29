@@ -901,10 +901,14 @@ mod satellites {
 
     /// The cells are shared out among threads, each counting its own; the checks are per system
     /// and the counts are summed, so the result is the same on any number of threads. At most
-    /// four, the slots `.config/nextest.toml` gives the slow run.
+    /// four, the slots `.config/nextest.toml` gives the slow run, or the fewer a run grants.
     #[cfg(not(target_family = "wasm"))]
     fn check_shares(galaxy: &Galaxy, plan: &[(CellKey, usize)]) -> Counts {
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get().min(4));
+        let granted = hyperion_testkit::threads::granted(4);
+        // A machine whose parallelism cannot be read runs the grant: the counts are the same on any
+        // number of threads.
+        let threads =
+            std::thread::available_parallelism().map_or(granted, |n| n.get().min(granted));
         std::thread::scope(|scope| {
             let workers: Vec<_> = (0..threads)
                 .map(|k| scope.spawn(move || check_share(galaxy, plan, k, threads)))

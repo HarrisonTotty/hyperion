@@ -94,7 +94,8 @@ use hyperion_testkit::lcg::Lcg;
 /// The fixture's seed, the sim's sky tests' own.
 const SEED: u64 = 0x0926_0000;
 
-/// The most threads the test runs on: eight, a share of a machine other work uses too.
+/// The most threads the test runs on: eight, a share of a machine other work uses too, and the
+/// slots `.config/nextest.toml` reserves for it, of which a run of fewer test threads grants fewer.
 const THREADS: usize = 8;
 
 /// A finding's threshold, in standard errors (decided 2026-10-06).
@@ -190,8 +191,8 @@ fn solar_v_extinction(a_v: f64) -> f64 {
         .value()
 }
 
-/// `run` over `jobs` on up to [`THREADS`] threads, each taking the next job; the results in
-/// `jobs`' order, so no reduction of them depends on the threads.
+/// `run` over `jobs` on up to [`THREADS`] threads (or the fewer nextest grants), each taking the
+/// next job; the results in `jobs`' order, so no reduction of them depends on the threads.
 fn on_threads<J: Sync, R: Send>(jobs: &[J], run: impl Fn(&J) -> R + Sync) -> Vec<R> {
     let next = AtomicUsize::new(0);
     let worker = || {
@@ -204,7 +205,9 @@ fn on_threads<J: Sync, R: Send>(jobs: &[J], run: impl Fn(&J) -> R + Sync) -> Vec
             mine.push((k, run(job)));
         }
     };
-    let threads = THREADS.min(jobs.len()).max(1);
+    let threads = hyperion_testkit::threads::granted(THREADS)
+        .min(jobs.len())
+        .max(1);
     let mut all: Vec<(usize, R)> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..threads).map(|_| scope.spawn(worker)).collect();
         handles

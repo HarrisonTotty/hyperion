@@ -586,8 +586,10 @@ fn line(record: &Record, ceiling: &Ceiling, cut: &Cut) -> String {
     )
 }
 
-/// Measures each of the six points with `measure` on a thread of its own, over the fixture's
-/// galaxy and tables, then prints every point's lines in order and asserts that no point failed.
+/// Measures each of the six points with `measure`, on a thread of its own (the six slots
+/// `.config/nextest.toml` reserves, or the fewer a run grants, each taking the next point), over
+/// the fixture's galaxy and tables, then prints every point's lines in order and asserts that no
+/// point failed.
 fn record_points(measure: impl Fn(&Fixture, &str, [f64; 3]) -> (Vec<String>, Vec<String>) + Sync) {
     let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
         .expect("the Milky Way-like parameters are valid");
@@ -597,19 +599,11 @@ fn record_points(measure: impl Fn(&Fixture, &str, [f64; 3]) -> (Vec<String>, Vec
         offsets: CellOffsets::build(&galaxy),
         galaxy,
     };
-    let results: Vec<(Vec<String>, Vec<String>)> = std::thread::scope(|scope| {
-        let handles: Vec<_> = CAPS_POINTS
-            .iter()
-            .map(|&(name, point)| {
-                let (fixture, measure) = (&fixture, &measure);
-                scope.spawn(move || measure(fixture, name, point))
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().expect("a point's measure does not panic"))
-            .collect()
-    });
+    let results: Vec<(Vec<String>, Vec<String>)> =
+        hyperion_testkit::threads::in_shares(CAPS_POINTS.len(), 6, |k| {
+            let (name, point) = CAPS_POINTS[k];
+            measure(&fixture, name, point)
+        });
     let mut failures = Vec::new();
     for (lines, failed) in results {
         for l in lines {

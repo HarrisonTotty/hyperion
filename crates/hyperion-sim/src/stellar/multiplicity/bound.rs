@@ -554,9 +554,10 @@ mod tests {
         }
     }
 
-    /// [`check`] over `records`, in four shares on threads of their own, or one after another on
+    /// [`check`] over `records`, in four shares on threads of their own (the four slots
+    /// `.config/nextest.toml` reserves, or the fewer a run grants), or one after another on
     /// wasm32-wasip1, which has none; share k takes the records k, k + 4, …. The tallies are
-    /// counts, the same on any number of shares.
+    /// counts, the same on any number of shares and threads.
     fn check_all(galaxy: &Galaxy, records: &[SystemRecord]) -> Tally {
         const SHARES: usize = 4;
         let share = |k: usize| {
@@ -566,21 +567,7 @@ mod tests {
             }
             tally
         };
-        #[cfg(not(target_family = "wasm"))]
-        let parts: Vec<Tally> = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..SHARES)
-                .map(|k| {
-                    let share = &share;
-                    scope.spawn(move || share(k))
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().expect("a share's thread"))
-                .collect()
-        });
-        #[cfg(target_family = "wasm")]
-        let parts: Vec<Tally> = (0..SHARES).map(share).collect();
+        let parts: Vec<Tally> = hyperion_testkit::threads::in_shares(SHARES, SHARES, share);
         let mut total = Tally::default();
         for part in &parts {
             total.merge(part);

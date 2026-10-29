@@ -3733,8 +3733,9 @@ mod tests {
 
     /// The stars the camera's request near the Sun lists within [`WIDER_RADIUS_LY`], every cap
     /// forced to it, as a census complete to that radius lists them (those within it). Its cells
-    /// run on up to four threads (one on WebAssembly, which has none), each with its own context,
-    /// merged at [`MAX_N_MAX`], whose order is total, so the threads' timing changes no bit.
+    /// run on up to four threads (the slots `.config/nextest.toml` reserves, or the fewer a run
+    /// grants; one on WebAssembly, which has none), each with its own context, merged at
+    /// [`MAX_N_MAX`], whose order is total, so the threads' count and timing change no bit.
     fn camera_stars_within_200_ly() -> Vec<SkyStar> {
         let galaxy = milky_way_galaxy();
         let query = request(CAMERA_CUT, EYE_CUT)
@@ -3761,7 +3762,9 @@ mod tests {
             job()
         } else {
             std::thread::scope(|scope| {
-                let threads: Vec<_> = (0..4).map(|_| scope.spawn(job)).collect();
+                let threads: Vec<_> = (0..hyperion_testkit::threads::granted(4))
+                    .map(|_| scope.spawn(job))
+                    .collect();
                 threads
                     .into_iter()
                     .flat_map(|thread| thread.join().expect("a census thread completes"))

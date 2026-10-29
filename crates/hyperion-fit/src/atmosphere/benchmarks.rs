@@ -92,7 +92,9 @@ use super::{AtmosphereCase, Polarisation, ReferenceRadiances, trace_reference_wi
 use crate::data::load_dataset;
 use Level::{Bottom, Top};
 
-/// The threads each benchmark traces on.
+/// The threads each benchmark traces on: the slots `.config/nextest.toml` reserves for it, or the
+/// fewer a run grants (`hyperion_testkit::threads::granted`). The tracer's output is the same, bit
+/// for bit, on any number of threads.
 const THREADS: usize = 4;
 
 /// The largest standard error a value may carry, relative to its geometry's I (Design note 10).
@@ -274,7 +276,8 @@ fn trace_with(case: &AtmosphereCase, samples: u64, estimator: Estimator) -> Trac
             case,
             Polarisation::Stokes,
             NonZeroU64::new(n).expect("a benchmark traces samples"),
-            NonZeroUsize::new(THREADS).expect("a benchmark traces on threads"),
+            NonZeroUsize::new(hyperion_testkit::threads::granted(THREADS))
+                .expect("a benchmark traces on at least one thread"),
             estimator,
             Orders::Every,
         )

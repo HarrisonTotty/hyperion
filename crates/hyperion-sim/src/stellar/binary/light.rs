@@ -1948,8 +1948,8 @@ mod tests {
     }
 
     /// Checks each of `pairs` over a window in the old class (about its own age at +H) and in the
-    /// young (its age at +H log-uniform over 10⁵–10⁸ years), in eight shares (in turn on
-    /// wasm32-wasip1): the old and young tallies.
+    /// young (its age at +H log-uniform over 10⁵–10⁸ years), in eight shares on up to eight
+    /// threads, the fewer a run grants (in turn on wasm32-wasip1): the old and young tallies.
     ///
     /// A window ends up to 2H + L before the age at +H, as the census's light-time windows do,
     /// at the bound's extremes for a quarter of the pairs; its kind is [`window_ending`]'s, in
@@ -1990,21 +1990,7 @@ mod tests {
             }
             part
         };
-        #[cfg(not(target_family = "wasm"))]
-        let parts: Vec<[Checked; 2]> = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..SHARES)
-                .map(|k| {
-                    let share = &share;
-                    scope.spawn(move || share(k))
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().expect("a share's thread"))
-                .collect()
-        });
-        #[cfg(target_family = "wasm")]
-        let parts: Vec<[Checked; 2]> = (0..SHARES).map(share).collect();
+        let parts: Vec<[Checked; 2]> = hyperion_testkit::threads::in_shares(SHARES, SHARES, share);
         let mut total = [Checked::new(), Checked::new()];
         for [old, young] in parts {
             total[0].merge(old);

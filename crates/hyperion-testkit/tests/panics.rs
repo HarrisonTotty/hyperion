@@ -18,6 +18,7 @@ use hyperion_testkit::stats::{
     ALPHA, assert_p_value, assert_poisson_count, chi_square_gof, ks_one_sample, ks_two_sample,
     regularised_gamma_q,
 };
+use hyperion_testkit::threads::in_shares;
 
 fn text(version: u32, lines: &[&str]) -> String {
     let mut w = GoldenWriter::new();
@@ -173,4 +174,12 @@ fn count_outside_the_interval_fails_naming_both() {
 #[should_panic(expected = "must be positive and finite")]
 fn non_positive_shape_panics() {
     let _ = regularised_gamma_q(0.0, 1.0);
+}
+
+// threads
+
+#[test]
+#[should_panic(expected = "share 2 fails")]
+fn a_shares_panic_is_resumed_where_it_is_awaited() {
+    let _ = in_shares(4, 4, |k| assert_ne!(k, 2, "share 2 fails"));
 }

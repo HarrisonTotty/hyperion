@@ -2843,9 +2843,10 @@ mod tests {
     /// A cell's census: its stars and tallies.
     type Part = (Vec<SkyStar>, crate::sky::census::CensusTallies);
 
-    /// The census of each of `cells` for `query`, on up to four threads (one on WebAssembly, which
-    /// has none), each with a context of its own, keyed by cell: a cell's census is a function of
-    /// the cell and the query alone, so the threads' timing changes no bit.
+    /// The census of each of `cells` for `query`, on up to four threads (or the fewer a run grants;
+    /// one on WebAssembly, which has none), each with a context of its own, keyed by cell: a cell's
+    /// census is a function of the cell and the query alone, so the threads' count and timing change
+    /// no bit.
     fn census_by_cell(query: &SkyQuery, cells: &[CellKey]) -> BTreeMap<CellKey, Part> {
         by_cell(query, cells, &|ctx, key, query, out| {
             census_cell(milky_way_galaxy(), ctx, key, query, out)
@@ -2885,8 +2886,9 @@ mod tests {
         ) -> crate::sky::census::CensusTallies
         + Sync;
 
-    /// `each` of `cells` for `query`, on up to four threads (one on WebAssembly), each with a
-    /// context of its own, keyed by cell.
+    /// `each` of `cells` for `query`, on up to four threads (the slots `.config/nextest.toml`
+    /// reserves, or the fewer a run grants; one on WebAssembly), each with a context of its own,
+    /// keyed by cell.
     fn by_cell(query: &SkyQuery, cells: &[CellKey], each: &CellMeasure) -> BTreeMap<CellKey, Part> {
         let next = std::sync::atomic::AtomicUsize::new(0);
         let job = || {
@@ -2914,7 +2916,9 @@ mod tests {
             job()
         } else {
             std::thread::scope(|scope| {
-                let threads: Vec<_> = (0..4).map(|_| scope.spawn(job)).collect();
+                let threads: Vec<_> = (0..hyperion_testkit::threads::granted(4))
+                    .map(|_| scope.spawn(job))
+                    .collect();
                 threads
                     .into_iter()
                     .flat_map(|thread| thread.join().expect("a census thread completes"))

@@ -15,9 +15,10 @@
 //! the same galaxy with them, and [`observer_near_sun_at`] stands an observer near the Sun at any
 //! time of the clock window, for the census in motion (R06.T8.j).
 //!
-//! The cells run on up to [`THREADS`] threads, each with its own context, and their parts are
-//! merged by `merge_census`, whose order is total and whose tallies are sums, so neither the
-//! threads' count nor their timing changes a bit. Both read tables for no component
+//! The cells run on up to [`THREADS`] threads, or the fewer nextest grants the test
+//! (`hyperion_testkit::threads::granted`), each with its own context, and their parts are merged by
+//! `merge_census`, whose order is total and whose tallies are sums, so neither the threads' count
+//! nor their timing changes a bit. Both read tables for no component
 //! (`LuminosityTables::dark`): a census with forced caps reads no table, and the skips read only
 //! the envelope.
 
@@ -42,12 +43,16 @@ use hyperion_sim::units::{LightYears, Magnitudes};
 use hyperion_testkit::float;
 
 /// The most threads the oracle and its census run on: eight, a share of a machine other test
-/// processes use too; one on WebAssembly, which has no threads.
+/// processes use too, and the slots `.config/nextest.toml` reserves for the binaries that call
+/// them (`sky_census` and `sky_realised`), of which a run of fewer test threads grants fewer; one
+/// on WebAssembly, which has no threads.
 #[cfg(not(target_family = "wasm"))]
 pub const THREADS: usize = 8;
 
 /// The most threads the oracle and its census run on: eight, a share of a machine other test
-/// processes use too; one on WebAssembly, which has no threads.
+/// processes use too, and the slots `.config/nextest.toml` reserves for the binaries that call
+/// them (`sky_census` and `sky_realised`), of which a run of fewer test threads grants fewer; one
+/// on WebAssembly, which has no threads.
 #[cfg(target_family = "wasm")]
 pub const THREADS: usize = 1;
 
@@ -351,7 +356,9 @@ fn over_keys(
             done.push((i, (stars, tallies)));
         }
     };
-    let threads = THREADS.min(keys.len()).max(1);
+    let threads = hyperion_testkit::threads::granted(THREADS)
+        .min(keys.len())
+        .max(1);
     let mut done: Vec<(usize, Part)> = if threads == 1 {
         job()
     } else {

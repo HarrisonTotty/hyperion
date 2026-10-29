@@ -3995,28 +3995,15 @@ mod tests {
             ] {
                 let records = records_near(layer, at, per_place);
                 let records = &records[..per_place];
-                // Four shares, share k the records k, k + 4, …, on threads of their own, or one
-                // after another on wasm32-wasip1, which has none: the figures are the same.
+                // Four shares, share k the records k, k + 4, …, on threads of their own (the four
+                // slots `.config/nextest.toml` reserves, or the fewer a run grants), or one after
+                // another on wasm32-wasip1, which has none: the figures are the same.
                 let share = |k: usize| {
                     let mine: Vec<SystemRecord> =
                         records.iter().skip(k).step_by(4).copied().collect();
                     check_realised_of(&mine)
                 };
-                #[cfg(not(target_family = "wasm"))]
-                let parts: Vec<RealisedCheck> = std::thread::scope(|scope| {
-                    let handles: Vec<_> = (0..4)
-                        .map(|k| {
-                            let share = &share;
-                            scope.spawn(move || share(k))
-                        })
-                        .collect();
-                    handles
-                        .into_iter()
-                        .map(|h| h.join().expect("a share's thread"))
-                        .collect()
-                });
-                #[cfg(target_family = "wasm")]
-                let parts: Vec<RealisedCheck> = (0..4).map(share).collect();
+                let parts: Vec<RealisedCheck> = hyperion_testkit::threads::in_shares(4, 4, share);
                 let mut found = RealisedCheck {
                     least_margin: f64::INFINITY,
                     ..RealisedCheck::default()

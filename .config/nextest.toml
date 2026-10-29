@@ -4,6 +4,24 @@
 #
 # Each test runs in its own process, so a `OnceLock` shared between tests is built once per test,
 # not once per binary: slow tests that would share expensive data are written as one test instead.
+#
+# A test's `threads-required` is capped at the run's test threads. nextest's scheduler (future-queue
+# 0.4.0, under nextest 0.9.150) sets a weight above the pool's size to the pool's size, so a test
+# reserving 8 slots at `--test-threads 4` (or `NEXTEST_TEST_THREADS=4`) holds all 4 and runs alone,
+# and running 8 threads of its own it would put 8 on 4 slots (checked on 2026-10-29). So the tests
+# below that run threads of their own run no more than they hold: `hyperion_testkit::threads`'s
+# `granted(n)` gives a test reserving n slots the fewer of n and the run's test threads, which
+# nextest gives every test process as `NEXTEST_TEST_THREADS` (since 0.9.130), and `in_shares` runs
+# a test's fixed shares of work on that many. Their results are the same on any number of threads,
+# as each pool's documentation says. Each reservation below is the most threads its test runs, and
+# the test states the same number in its code: change the two together. Not capped, as each runs a
+# fixed number of threads, each with a part of its own: the server's tests that run threads beside
+# the server's own workers (the near-Sun sky, the caps' counts at the ceiling, the range query's
+# reference) and the nuclear disc's slow quadrants, which reserve 4 or fewer, and the density map's
+# budget, which takes every slot to measure every worker at once; each holds what it runs on any run
+# of at least that many test threads. An older nextest, which gives the tests no
+# `NEXTEST_TEST_THREADS`, warns.
+nextest-version = { recommended = "0.9.130" }
 
 # The protocol's `export_bindings_*` tests write the checked-in bindings (`TS_RS_EXPORT_DIR`,
 # `.cargo/config.toml`), and ts-rs 12 fsyncs each file it writes. In nextest's process per test each
