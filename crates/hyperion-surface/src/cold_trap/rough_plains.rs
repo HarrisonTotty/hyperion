@@ -264,7 +264,9 @@ pub fn instantaneous_shadow(slope: Radians, elevation: Radians) -> f64 {
 /// disk's upper limb, D = δ + α, and holds their heating over S sin(colatitude + D), while a plain
 /// under the disk intercepts S sin `e_eff`. To first order the facets' heating scales with the
 /// flux they intercept, so the shares are read at fractions of S sin `e_eff`: the shadow takes the
-/// upper limb, and the heating the disk (`decision-r09-t7g-table` §2). It is zero where the heat
+/// upper limb, and the heating the disk (`decision-r09-t7g-table` §2). That is exact for the
+/// plain's mean heating and leaves a pixel that peaks away from noon somewhat overheated; where
+/// the horizon cuts the disk it is an extrapolation (R09.T7.g's record). It is zero where the heat
 /// flow alone warms the shadow past the threshold, and infinite where `e_eff` = 0, a point star
 /// that never rises, but the shadow can be cold.
 ///
@@ -564,10 +566,10 @@ mod tests {
     fn the_heating_takes_the_disks_flux_weighted_elevation() {
         // decision-r09-t7g-table §2: the shadow takes the star's upper limb and the heating its
         // disk. At the pole of a body whose star is mostly below the horizon at its highest (δ
-        // 0.034° and α 0.87°, Mercury's at perihelion, science-r09-drainage.md §8.4), the disk's
+        // 0.034° and α 0.8665°, Mercury's at perihelion, science-r09-drainage.md §8.4), the disk's
         // flux-weighted elevation is about 0.20° against the upper limb's 0.90°, so the fraction
         // is about 4.5 times the upper limb's.
-        let (declination, star_radius) = (degrees(0.034), degrees(0.867));
+        let (declination, star_radius) = (degrees(0.034), degrees(0.8665));
         let body = Body::new(BodyParts {
             flux: WattsPerSquareMetre::new(1361.0 / (0.3075 * 0.3075)),
             greatest_declination: declination,

@@ -2364,10 +2364,11 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
   - _16 surfaces_, not 8: the cold tail's spread is between surfaces (7- to 16-fold at σ_s
     11–17°).
   - _The heating at the disk's centre:_ the sunlit facets lit by the star's centre, D − α, the
-    shadow still by its upper limb, D, so that `irradiance_limit`'s flux-weighted normaliser
-    (T7.g's) reads fractions traced as it normalises them. The table has no α axis, so the trace
-    takes one α (R09.T7.l's record says which), and the normaliser corrects another body's to first
-    order.
+    shadow still by its upper limb, D, and the fractions over S sin(e₀ + D − α), the traced
+    point's own elevation, so that `irradiance_limit`'s flux-weighted normaliser (T7.g's) reads
+    fractions traced as it normalises them and does not correct twice. The table has no α axis, so
+    the trace takes one α (R09.T7.l's record says which), and the normaliser corrects another
+    body's to first order.
   - _The stand-in-table step_ for the changed items (T7.g's record, "Refitting the table"): the
     fit crate builds against the surface crate, which reads the table, so a stand-in with the new
     items and no header comes before the run.
