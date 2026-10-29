@@ -585,7 +585,8 @@ fn check_no_repeated_instants(timeline: &BinaryTimeline, what: &impl Fn() -> Str
 /// continuous (no jump above 1% between samples 10⁻⁶ of the segment apart); no main-sequence star
 /// is older than its effective lifetime; the pair's total mass never rises; the timeline never
 /// reaches the cap on segments; no detached segment widens the orbit past its mass loss; no
-/// pinned primary collapses from its hydrogen main sequence ([`check_no_main_sequence_collapse`]).
+/// pinned primary collapses from its hydrogen main sequence ([`check_no_main_sequence_collapse`]);
+/// every swelled giant starts with an envelope around its own core ([`check_swells`], P11.T4.m).
 ///
 /// The continuity's events are each a segment's edge: a change of kind, a change of phase, a
 /// death, a strip, and the pinned primary's own main-sequence end, where a main sequence the pair
@@ -664,6 +665,7 @@ fn check_invariants(input: &BinaryInput, until: Years) {
     check_detached_widening(&timeline, &what);
     check_no_repeated_instants(&timeline, &what);
     check_no_bare_giant(&timeline, &what);
+    check_swells(&timeline, &what);
     check_collapses(input, &timeline, &what);
     check_no_main_sequence_collapse(input, &timeline, &what);
     // Ruling 108.1: no contact pair lives below Rasio's (1995) mass ratio.
@@ -796,6 +798,155 @@ fn check_no_bare_giant(timeline: &BinaryTimeline, what: &impl Fn() -> String) {
                 what()
             );
         }
+    }
+}
+
+/// A swell (P11.T4.m): member `slot`, the accretor of a stable transfer, is a helium star or a
+/// white dwarf at the end of one segment and a giant the binary carries at the start of the next,
+/// with the same mass.
+#[derive(Debug, Clone, Copy)]
+struct SwellSeen {
+    slot: usize,
+    /// The swell's age, years.
+    age: f64,
+    /// The accretor's phase before it.
+    from: Phase,
+    /// The accretor's mass at the start of the step that swelled it and at its end, M☉.
+    masses: [f64; 2],
+    /// That step's length, years.
+    step: f64,
+    /// The accretor's core at the step's start, M☉: a helium giant's carbon–oxygen core.
+    core_before: f64,
+    /// Its τ at the swell, for a helium main-sequence star the binary carries.
+    tau: Option<f64>,
+    /// The giant at the swell.
+    giant: crate::stellar::StarState,
+    /// The giant's share of central helium burning done there (BSE's y).
+    burnt: f64,
+}
+
+/// The swells of `timeline` ([`SwellSeen`]), read from its segments' members.
+fn swells_of(timeline: &BinaryTimeline) -> Vec<SwellSeen> {
+    use super::star::Member;
+
+    let giant = |phase: Phase| {
+        matches!(
+            phase,
+            Phase::FirstGiantBranch
+                | Phase::CoreHeliumBurning
+                | Phase::EarlyAgb
+                | Phase::ThermallyPulsingAgb
+        )
+    };
+    let fed = |phase: Phase| {
+        matches!(
+            phase,
+            Phase::HeliumMainSequence
+                | Phase::HeliumHertzsprungGap
+                | Phase::HeliumGiantBranch
+                | Phase::HeliumWhiteDwarf
+                | Phase::CarbonOxygenWhiteDwarf
+                | Phase::OxygenNeonWhiteDwarf
+        )
+    };
+    let ctx = timeline.context();
+    let mut out = Vec::new();
+    for pair in timeline.segments().windows(2) {
+        let (prev, next) = (&pair[0], &pair[1]);
+        let SegmentKind::StableTransfer { donor } = prev.kind() else {
+            continue;
+        };
+        let age = next.start().value();
+        if !prev.end().value().total_cmp(&age).is_eq() {
+            continue;
+        }
+        let slot = 1 - donor.index();
+        let (before, after) = (&prev.members()[slot], &next.members()[slot]);
+        let Member::Shaped { mass: carried, .. } = after else {
+            continue;
+        };
+        let (path, tau) = match before {
+            Member::MainSequence {
+                helium: true,
+                mass,
+                tau,
+            } => (mass, Some(tau.last())),
+            Member::Shaped { mass, .. } | Member::Remnant { mass, .. } => (mass, None),
+            Member::MainSequence { .. }
+            | Member::Track { .. }
+            | Member::Cooling { .. }
+            | Member::Frozen { .. }
+            | Member::Gone => continue,
+        };
+        let knots = path.knots();
+        let Some(&[[start, pre], [end, m]]) = knots.get(knots.len().saturating_sub(2)..) else {
+            continue;
+        };
+        // A swell keeps the accretor's mass, where a merger at the same instant does not.
+        if !carried.at(age).total_cmp(&m).is_eq() {
+            continue;
+        }
+        let from = before.state_at(ctx, slot, end).phase();
+        let Some(structure) = after.evaluate(ctx, slot, age, m, 0.0) else {
+            continue;
+        };
+        if !fed(from) || !giant(structure.state.phase()) {
+            continue;
+        }
+        let core_before = before
+            .evaluate(ctx, slot, start, pre, tau.unwrap_or(0.0))
+            .map_or(0.0, |s| s.state.core_mass().value());
+        out.push(SwellSeen {
+            slot,
+            age,
+            from,
+            masses: [pre, m],
+            step: end - start,
+            core_before,
+            tau,
+            giant: structure.state,
+            burnt: structure.burnt,
+        });
+    }
+    out
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06): every swelled giant starts its segment with an
+/// envelope, M − Mc > 0, and with the core the ruling asks for to 10⁻⁹: a helium star's or white
+/// dwarf's mass at the start of the step that swelled it, a helium giant's carbon–oxygen core then.
+fn check_swells(timeline: &BinaryTimeline, what: &impl Fn() -> String) {
+    for swell in swells_of(timeline) {
+        let (m, mc) = (swell.giant.mass().value(), swell.giant.core_mass().value());
+        assert!(
+            m > mc,
+            "a swelled giant with no envelope, {swell:?}: {}",
+            what()
+        );
+        let core = match swell.from {
+            Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch => swell.core_before,
+            Phase::HeliumMainSequence
+            | Phase::HeliumWhiteDwarf
+            | Phase::CarbonOxygenWhiteDwarf
+            | Phase::OxygenNeonWhiteDwarf => swell.masses[0],
+            Phase::Protostar
+            | Phase::PreMainSequence
+            | Phase::MainSequence
+            | Phase::HertzsprungGap
+            | Phase::FirstGiantBranch
+            | Phase::CoreHeliumBurning
+            | Phase::EarlyAgb
+            | Phase::ThermallyPulsingAgb
+            | Phase::PostAgb
+            | Phase::NeutronStar
+            | Phase::BlackHole
+            | Phase::NoRemnant
+            | Phase::Substellar => unreachable!("`swells_of` reads only fed phases: {swell:?}"),
+        };
+        assert!(
+            (mc - core).abs() <= 1e-9 * core,
+            "a swelled giant's core {mc} M☉ is not {core} M☉, {swell:?}: {}",
+            what()
+        );
     }
 }
 
@@ -4889,4 +5040,513 @@ fn the_second_pre_test_never_passes_over_an_interaction() {
         0,
         "interactions the pre-test asked again passed over"
     );
+}
+
+// --- P11.T4.m: a fed helium star or white dwarf swells around its own core ---------------------
+
+/// An engine at `age_years` of a pair at metallicity `z` holding `accretor` in slot 0 and a
+/// 2.5 M☉ main-sequence donor at τ = 0.5 in slot 1, in stable transfer from it on a circular
+/// 10 R☉ orbit: the state at the end of a step of transfer, for the swell's unit tests.
+fn fed_engine(accretor: super::star::Member, age_years: f64, z: f64) -> super::evolve::Engine {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+
+    let input = pair(2.0, 2.5, 1.0, 0.0, z);
+    let k = input.orbit();
+    let donor = Member::MainSequence {
+        helium: false,
+        mass: Path::starting(age_years, 2.5),
+        tau: Path::starting(age_years, 0.5),
+    };
+    let orbit = LiveOrbit::new(
+        age_years,
+        10.0,
+        0.0,
+        *k.orientation(),
+        k.mean_anomaly_at_epoch(),
+    );
+    let mut engine = Engine::new(
+        Arc::new(Context::of(&input)),
+        age_years,
+        1.0e10,
+        [accretor, donor],
+        orbit,
+        None,
+    );
+    engine.segment_start = age_years;
+    engine.kind = SegmentKind::StableTransfer {
+        donor: Component::Secondary,
+    };
+    engine
+}
+
+/// A helium main-sequence star of `m` M☉ at τ = `tau` that the binary carries from `age_years`.
+fn carried_helium_star(m: f64, tau: f64, age_years: f64) -> super::star::Member {
+    use super::star::{Member, Path};
+
+    Member::MainSequence {
+        helium: true,
+        mass: Path::starting(age_years, m),
+        tau: Path::starting(age_years, tau),
+    }
+}
+
+/// The core mass of `member`, slot 0 of `engine`, at `age_years` and `m` M☉.
+fn core_of(
+    engine: &super::evolve::Engine,
+    member: &super::star::Member,
+    age_years: f64,
+    m: f64,
+) -> f64 {
+    member
+        .evaluate(&engine.ctx, 0, age_years, m, 0.0)
+        .expect("a star")
+        .state
+        .core_mass()
+        .value()
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.1 item 4, §3.3 A): a 2 M☉ helium
+/// main-sequence accretor at τ = 0.5 fed hydrogen over a step of 10³ yr swells only where both
+/// gates pass. Fed at half the placed giant's core growth over the step, its shell would burn the
+/// hydrogen as it lands (the burn gate); fed a hundred times that but losing 41/42 of it to its
+/// own wind, its accretion does not beat 1.05 times its wind (BSE's gate, `evolv2.f` 1480), though
+/// it gains mass. Each stays a helium star with the step's mass, and no segment closes. Fed twice
+/// the growth with no wind, it swells into a core-helium-burning giant around its whole mass at
+/// the step's start, with the step's gain as its envelope.
+#[test]
+fn a_swell_the_shell_would_burn_is_refused() {
+    use super::rlof::Fed;
+    use super::star::{Kind, Member};
+    use crate::stellar::sse::NewStar;
+
+    let (before, tau, age, dt) = (2.0, 0.5, 5.0e7, 1.0e3);
+    let probe = fed_engine(carried_helium_star(before, tau, age), age, 0.02);
+    let burnt = probe
+        .structure(0, age, before, tau)
+        .expect("a helium star")
+        .burnt;
+    let giant = probe
+        .swelled_star(
+            0,
+            NewStar::CoreHeliumBurning { burnt },
+            before * (1.0 + 1e-3),
+            before,
+        )
+        .expect("a core-helium-burning star has a 2 M☉ core");
+    // Read well above the core, where the core is not held at the mass.
+    let heavy = 2.0 * before;
+    let growth = core_of(&probe, &giant, age + dt, heavy) - core_of(&probe, &giant, age, heavy);
+    assert!(
+        growth > 0.0,
+        "the giant's core grows over the step: {growth}"
+    );
+    for (gained, wind, swells) in [
+        (0.5 * growth, 0.0, false),
+        (100.0 * growth, 100.0 * growth * 41.0 / 42.0, false),
+        (2.0 * growth, 0.0, true),
+    ] {
+        let m = before + gained - wind;
+        let mut engine = fed_engine(carried_helium_star(m, tau, age), age, 0.02);
+        let s = engine.structure(0, age, m, tau).expect("a helium star");
+        let fed = Fed {
+            kind: Kind::HeliumMainSequence,
+            before,
+            core_before: 0.0,
+            gained,
+            dt,
+        };
+        let swelled = engine.swell(0, Kind::HeliumMainSequence, m, &s, fed);
+        let case =
+            format!("fed {gained:e} M☉ against a wind of {wind:e} and a growth of {growth:e}");
+        assert_eq!(swelled, swells, "{case}");
+        if swells {
+            assert_eq!(engine.segments.len(), 1, "{case}");
+            let star = engine.members[0].state_at(&engine.ctx, 0, age);
+            assert_eq!(star.phase(), Phase::CoreHeliumBurning, "{case}");
+            let core = star.core_mass().value();
+            assert!(
+                (core - before).abs() <= 1e-9 * before,
+                "{case}: core {core}"
+            );
+            let envelope = star.mass().value() - core;
+            assert!(
+                (envelope - (m - before)).abs() <= 1e-9 * m,
+                "{case}: envelope {envelope}"
+            );
+        } else {
+            assert!(
+                engine.segments.is_empty(),
+                "{case}: a refusal closes no segment"
+            );
+            assert!(
+                matches!(engine.members[0], Member::MainSequence { helium: true, .. }),
+                "{case}: {}",
+                engine.members[0].form()
+            );
+            assert!(
+                (engine.current(0).0 - m).abs() <= 1e-15 * m,
+                "{case}: it keeps the step's mass"
+            );
+        }
+    }
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.1 item 2): a helium Hertzsprung-gap star of
+/// 1.45 M☉ (a 1.5 M☉ helium star halfway through its gap, Z = 0.02) fed hydrogen with no wind
+/// swells into a thermally pulsing AGB star around its carbon–oxygen core at the step's start, to
+/// 10⁻⁹, with the step's mass (BSE `evolv2.f` 1482 and 1487, `massc(j2)`). The same step read as
+/// one over which the accretor's type changed swells nothing (BSE reads `kstar(j2)` at the step's
+/// start), and closes no segment.
+#[test]
+fn a_fed_helium_giant_swells_around_its_carbon_oxygen_core() {
+    use std::sync::Arc;
+
+    use super::rlof::Fed;
+    use super::star::{Kind, Member, Path};
+    use crate::stellar::sse::{NewStar, Track};
+
+    let (age, dt) = (5.0e7, 1.0e3);
+    let track = Arc::new(Track::helium_star_full(
+        SolarMasses::new(1.5),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+    ));
+    let at = track
+        .age_in_phase(Phase::HeliumHertzsprungGap, 0.5)
+        .expect("a helium Hertzsprung gap");
+    let offset = super::evolve::offset_for(age, at);
+    let before = track.mass_at(age - offset);
+    let giant = |m: f64| Member::Shaped {
+        track: Arc::clone(&track),
+        offset,
+        mass: Path::starting(age, m),
+    };
+    let probe = fed_engine(giant(before), age, 0.02);
+    let start = probe
+        .structure(0, age, before, 0.0)
+        .expect("a helium giant");
+    assert_eq!(start.state.phase(), Phase::HeliumHertzsprungGap);
+    let core_before = start.state.core_mass().value();
+    let placed = probe
+        .swelled_star(0, NewStar::PulsingAgb, 2.0 * before, core_before)
+        .expect("a thermally pulsing AGB star has the core");
+    let growth = core_of(&probe, &placed, age + dt, 2.0 * before)
+        - core_of(&probe, &placed, age, 2.0 * before);
+    let gained = 2.0 * growth.max(1e-9);
+    let m = before + gained;
+    for (step_kind, swells) in [(Kind::HeliumMainSequence, false), (Kind::HeliumGap, true)] {
+        let mut engine = fed_engine(giant(m), age, 0.02);
+        let s = engine.structure(0, age, m, 0.0).expect("a helium giant");
+        let fed = Fed {
+            kind: step_kind,
+            before,
+            core_before,
+            gained,
+            dt,
+        };
+        let case = format!("a step from a {step_kind:?}");
+        assert_eq!(
+            engine.swell(0, Kind::HeliumGap, m, &s, fed),
+            swells,
+            "{case}"
+        );
+        let star = engine.members[0].state_at(&engine.ctx, 0, age);
+        if swells {
+            assert_eq!(engine.segments.len(), 1, "{case}");
+            assert_eq!(star.phase(), Phase::ThermallyPulsingAgb, "{case}");
+            let core = star.core_mass().value();
+            assert!(
+                (core - core_before).abs() <= 1e-9 * core_before,
+                "{case}: core {core} against {core_before}"
+            );
+            assert!(
+                star.mass().value().total_cmp(&m).is_eq(),
+                "{case}: a mass of {:?} for {m}",
+                star.mass()
+            );
+        } else {
+            assert!(
+                engine.segments.is_empty(),
+                "{case}: a refusal closes no segment"
+            );
+            assert_eq!(star.phase(), Phase::HeliumHertzsprungGap, "{case}");
+        }
+    }
+}
+
+/// P11.T4.m, the determinism audit: pinned pairs 0255 (a helium star's swell), 0305 (a white
+/// dwarf's) and 0487 (a white dwarf's swell refused, its exact placement failing) are the same
+/// timelines in either order, and each run to just past each of its events, its swells among them,
+/// agrees with a run to 1.5 × 10¹⁰ years: the swell's track builds hold no state between runs.
+#[test]
+fn a_swell_is_the_same_in_any_order_and_at_any_age() {
+    let until = Years::new(1.2e10);
+    let inputs: Vec<BinaryInput> = [255, 305, 487]
+        .map(pinned_sample_pair)
+        .into_iter()
+        .collect();
+    let forward: Vec<_> = inputs.iter().map(|i| evolve(i, until)).collect();
+    let backward: Vec<_> = inputs.iter().rev().map(|i| evolve(i, until)).collect();
+    for (a, b) in forward.iter().zip(backward.iter().rev()) {
+        assert_eq!(a, b);
+    }
+    assert!(
+        forward[..2].iter().all(|t| !swells_of(t).is_empty()),
+        "0255 and 0305 swell"
+    );
+    let events: usize = inputs
+        .iter()
+        .map(|input| check_after_events(input, until)[0])
+        .sum();
+    assert!(events > 20, "{events} runs compared just past events");
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.3 B): only a hydrogen-rich donor swells a helium
+/// star, which then takes the whole transfer (BSE `evolv2.f` 1478–1479, the else branch of
+/// `kstar(j1).ge.7`; Hurley, Tout and Pols 2002, section 2.6.6). A white dwarf, a helium star or a
+/// neutron star feeding one gives it the thermally limited share, min(1, 10 `τ_Ṁ` ÷ `τ_KH`)
+/// (BSE 1477), and it does not swell.
+#[test]
+fn a_white_dwarf_donor_does_not_swell_a_helium_star() {
+    use super::rlof::kelvin_helmholtz;
+    use super::star::Kind;
+
+    let (m, tau, age) = (1.2, 0.3, 5.0e7);
+    let engine = fed_engine(carried_helium_star(m, tau, age), age, 0.02);
+    let sa = engine.structure(0, age, m, tau).expect("a helium star");
+    let ka = Kind::HeliumMainSequence;
+    for rate in [1e-9, 1e-6, 1e-3] {
+        let thermal = (10.0 * (m / rate) / kelvin_helmholtz(&sa, ka)).min(1.0);
+        for kd in [
+            Kind::HeliumWhiteDwarf,
+            Kind::CarbonOxygenWhiteDwarf,
+            Kind::OxygenNeonWhiteDwarf,
+            Kind::HeliumMainSequence,
+            Kind::HeliumGiant,
+            Kind::NeutronStar,
+        ] {
+            let accretion = engine.accretion(kd, ka, rate, m, &sa);
+            assert!(!accretion.swells, "{kd:?} at {rate:e} M☉/yr");
+            assert!(
+                (accretion.share - thermal).abs() <= 1e-15,
+                "{kd:?} at {rate:e} M☉/yr: {} against {thermal}",
+                accretion.share
+            );
+        }
+        for kd in [Kind::MainSequence, Kind::GiantBranch, Kind::PulsingAgb] {
+            let accretion = engine.accretion(kd, ka, rate, m, &sa);
+            assert!(accretion.swells, "{kd:?} at {rate:e} M☉/yr");
+            assert!(
+                accretion.share.total_cmp(&1.0).is_eq(),
+                "{kd:?} at {rate:e} M☉/yr: a share of {}",
+                accretion.share
+            );
+        }
+    }
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.3 C; finding F15): a helium main-sequence
+/// accretor keeps its fraction burnt as it accretes, τ + dt ÷ `t_HeMS`(m₁), as BSE's code
+/// (`evolv2.f` 1889–1900) and COMPAS's `HURLEY` option do; a hydrogen main-sequence accretor
+/// outside 0.35–1.25 M☉ is still mixed, τ m₀ ÷ m₁ + dt ÷ `t_MS`(m₁), and one inside keeps its τ.
+#[test]
+fn a_helium_accretor_keeps_its_fraction_burnt() {
+    use super::star::{Member, Path};
+    use crate::stellar::sse::main_sequence_lifetime;
+
+    let (age, dt, tau) = (5.0e7, 1.0e3, 0.6);
+    let mut engine = fed_engine(carried_helium_star(1.0, tau, age), age, 0.02);
+    let ctx = std::sync::Arc::clone(&engine.ctx);
+    let lifetime = |helium: bool, m: f64| main_sequence_lifetime(ctx.coeffs(), helium, m);
+    let (m0, m1) = (1.0, 1.01);
+    let helium = engine.rejuvenated_tau(0, tau, m0, m1, dt);
+    let kept = tau + dt / lifetime(true, m1);
+    assert!((helium - kept).abs() <= 1e-15, "{helium} against {kept}");
+    for (m0, m1, mixed) in [(3.0, 3.03, true), (1.0, 1.01, false), (0.3, 0.303, true)] {
+        engine.members[0] = Member::MainSequence {
+            helium: false,
+            mass: Path::starting(age, m0),
+            tau: Path::starting(age, tau),
+        };
+        let got = engine.rejuvenated_tau(0, tau, m0, m1, dt);
+        let start = if mixed { tau * m0 / m1 } else { tau };
+        let expected = start + dt / lifetime(false, m1);
+        assert!(
+            (got - expected).abs() <= 1e-15,
+            "a hydrogen accretor from {m0} to {m1} M☉: {got} against {expected}"
+        );
+    }
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.3 A4): a swelled giant's built track has the
+/// core asked for at its placement, to 10⁻⁹ of it, or the placement is refused. Core-helium-burning
+/// stars at y = 0.1, 0.5 and 0.9 with cores of 0.8–8 M☉ and thermally pulsing AGB stars with
+/// carbon–oxygen cores of 0.55–1.3 M☉, at Z = 0.02 and 0.004. `placed_star`, which every other
+/// caller keeps (finding F16), misses by up to −8.4% over them (core-helium-burning at y = 0.1,
+/// 8 M☉, Z = 0.02, the one case refused: its exact ask lies at about 1.108 times the core, past
+/// the bracket's 1.1); the miss is printed, not asserted, being F16's.
+#[test]
+fn the_swells_placement_is_exact() {
+    use crate::stellar::sse::NewStar;
+
+    let age = 5.0e7;
+    let mut placed = 0;
+    let mut refused = Vec::new();
+    let mut worst_miss: f64 = 0.0;
+    for z in [0.02, 0.004] {
+        let engine = fed_engine(carried_helium_star(1.0, 0.5, age), age, z);
+        let mut cases: Vec<(NewStar, f64)> = Vec::new();
+        for y in [0.1, 0.5, 0.9] {
+            for core in [0.8, 1.5, 2.5, 4.0, 8.0] {
+                cases.push((NewStar::CoreHeliumBurning { burnt: y }, core));
+            }
+        }
+        for core in [0.55, 0.7, 1.0, 1.3] {
+            cases.push((NewStar::PulsingAgb, core));
+        }
+        for (target, core) in cases {
+            let m = core * (1.0 + 1e-4);
+            if let Some(old) = engine.placed_star(0, target, m, core) {
+                worst_miss = worst_miss.min(core_of(&engine, &old, age, m) / core - 1.0);
+            }
+            match engine.swelled_star(0, target, m, core) {
+                Some(member) => {
+                    let built = core_of(&engine, &member, age, m);
+                    assert!(
+                        (built - core).abs() <= 1e-9 * core,
+                        "{target:?} of {core} M☉ at Z = {z}: built {built}"
+                    );
+                    assert!(
+                        member.mass_at(age).total_cmp(&m).is_eq(),
+                        "{target:?} of {core} M☉ at Z = {z}: a mass of {} for {m}",
+                        member.mass_at(age)
+                    );
+                    placed += 1;
+                }
+                None => refused.push(format!("{target:?} of {core} M☉ at Z = {z}")),
+            }
+        }
+    }
+    eprintln!(
+        "{placed} placed exactly, {} refused {refused:?}; placed_star's worst miss {worst_miss:.4}",
+        refused.len()
+    );
+    assert!(
+        refused.len() * 10 <= placed,
+        "{} of {} refused: {refused:?}",
+        refused.len(),
+        placed + refused.len()
+    );
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.4): pinned pair 0255 (20.79 + 20.51 M☉ at
+/// 969 d, Z = 0.02). Its primary, stripped to a 5.53 M☉ helium star, is fed hydrogen by its
+/// main-sequence companion faster than its wind takes mass and than a hydrogen shell on its core
+/// would burn it: at 8.6114 Myr it swells into a core-helium-burning star whose core is its helium
+/// mass at the step's start, 5.530251 M☉, to 10⁻⁹, whose envelope is the step's net gain,
+/// 3.19 × 10⁻⁴ M☉, to 10⁻⁹ of its mass, whose fraction burnt is the helium star's τ, and which
+/// stays compact (under 1 R☉, HPT's small-envelope perturbation). Before P11.T4.m it swelled at
+/// 8.6095 Myr into a 1,076 R☉ giant around its whole mass, with nothing accreted.
+#[test]
+fn a_fed_helium_star_swells_around_its_own_core() {
+    let input = pinned_sample_pair(255);
+    let timeline = evolve(&input, Years::new(1.2e10));
+    let swells = swells_of(&timeline);
+    let swell = swells
+        .iter()
+        .find(|s| s.slot == 0 && s.from == Phase::HeliumMainSequence)
+        .unwrap_or_else(|| panic!("the primary swells: {}", describe(&timeline)));
+    let [before, after] = swell.masses;
+    let (m, core) = (swell.giant.mass().value(), swell.giant.core_mass().value());
+    let tau = swell
+        .tau
+        .expect("a helium main-sequence star the binary carries");
+    eprintln!(
+        "pair 0255 swells at {} yr, fed {:e} M☉/yr over {} yr: core {core} M☉, envelope {:e} M☉, \
+         y {} against τ {tau}, R {} R☉",
+        swell.age,
+        (after - before) / swell.step,
+        swell.step,
+        m - core,
+        swell.burnt,
+        swell.giant.radius().value()
+    );
+    assert!((swell.age / 8.6114e6 - 1.0).abs() < 1e-4, "{swell:?}");
+    assert_eq!(swell.giant.phase(), Phase::CoreHeliumBurning, "{swell:?}");
+    assert!((before - 5.530_251).abs() < 1e-6, "{swell:?}");
+    assert!((core - before).abs() <= 1e-9 * before, "{swell:?}");
+    assert!(
+        ((m - core) - (after - before)).abs() <= 1e-9 * m,
+        "the envelope is the step's net gain: {swell:?}"
+    );
+    assert!((after - before - 3.19e-4).abs() < 0.01e-4, "{swell:?}");
+    assert!((swell.burnt - tau).abs() <= 1e-9, "{swell:?}");
+    assert!(swell.giant.radius().value() < 1.0, "{swell:?}");
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.1 item 3): a white dwarf fed hydrogen at
+/// 2.71 × 10⁻⁷ M☉ yr⁻¹ or more swells into a giant around itself. In pinned pair 0118 (2.64 +
+/// 2.42 M☉ at 605 d, Z = 0.004) the primary's 0.715 M☉ carbon–oxygen dwarf becomes a thermally
+/// pulsing AGB star whose core is the dwarf's mass at the step's start, to 10⁻⁹, and whose
+/// envelope is the step's net gain. In pinned pair 0305 (3.30 + 2.22 M☉ at 76.9 d), whose dwarf
+/// was swelled bare before P11.T4.m, kept everything and grew to a 1.77 M☉ carbon–oxygen dwarf
+/// that collapsed at 526.2 Myr, the dwarf swells around its own 1.2745 M☉, and no carbon–oxygen
+/// dwarf above the Chandrasekhar mass is shown.
+#[test]
+fn a_fed_white_dwarf_swells_around_itself() {
+    use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
+
+    let until = Years::new(1.2e10);
+    for (i, dwarf) in [(118, 0.715_027), (305, 1.274_548)] {
+        let input = pinned_sample_pair(i);
+        let timeline = evolve(&input, until);
+        let swells = swells_of(&timeline);
+        let swell = swells
+            .iter()
+            .find(|s| s.from == Phase::CarbonOxygenWhiteDwarf)
+            .unwrap_or_else(|| panic!("pair {i:04}'s dwarf swells: {}", describe(&timeline)));
+        let [before, after] = swell.masses;
+        let (m, core) = (swell.giant.mass().value(), swell.giant.core_mass().value());
+        assert!((before - dwarf).abs() < 1e-6, "pair {i:04}: {swell:?}");
+        assert!(
+            (after - before) / swell.step >= 2.71e-7,
+            "pair {i:04}: {swell:?}"
+        );
+        assert_eq!(
+            swell.giant.phase(),
+            Phase::ThermallyPulsingAgb,
+            "pair {i:04}: {swell:?}"
+        );
+        assert!(
+            (core - before).abs() <= 1e-9 * before,
+            "pair {i:04}: {swell:?}"
+        );
+        assert!(
+            ((m - core) - (after - before)).abs() <= 1e-9 * m,
+            "pair {i:04}: the envelope is the step's net gain: {swell:?}"
+        );
+        let mut ages: Vec<f64> = Vec::new();
+        for segment in timeline.segments() {
+            ages.extend([segment.start().value(), segment.end().value()]);
+            for member in segment.members() {
+                if let super::star::Member::Remnant { mass, .. } = member {
+                    ages.extend(mass.knots().iter().map(|knot| knot[0]));
+                }
+            }
+        }
+        for age in ages.into_iter().filter(|&age| age < until.value()) {
+            for star in timeline.state_at(Years::new(age)).stars() {
+                assert!(
+                    star.phase() != Phase::CarbonOxygenWhiteDwarf
+                        || star.mass() <= CHANDRASEKHAR_MASS,
+                    "pair {i:04}: a {:?} carbon–oxygen dwarf at {age} yr",
+                    star.mass()
+                );
+            }
+        }
+    }
 }

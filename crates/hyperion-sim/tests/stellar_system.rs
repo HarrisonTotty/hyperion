@@ -662,10 +662,13 @@ fn a_companion_stripped_by_its_wind_on_the_early_agb_has_a_fate() {
 /// touched its companion and recursed through the common envelope and the merger. Now a star with
 /// no envelope is a helium star from that step (HPT section 6; BSE `hrdiag`): the primary stays
 /// compact (under 3 R☉) to its pinned collapse at 15.896 Myr, no living hydrogen giant has
-/// M ≤ Mc, and the pair meets no common envelope, contact or merger after 15.69 Myr. Between
-/// 15.69 Myr and the collapse `swell` (BSE's rule for a helium star fed hydrogen) still makes the
-/// accretor a core-helium-burning giant with a thin envelope again and again, each stripped back
-/// at once: `swell`'s core is the open finding of P11.T4.g, outside it.
+/// M ≤ Mc, and the pair meets no common envelope, contact or merger after 15.69 Myr. Until
+/// P11.T4.m, `swell` made the accretor a core-helium-burning giant with a thin envelope again and
+/// again between 15.69 Myr and the collapse, each stripped back at once (P11.T4.g's finding C2).
+/// Now its wind outweighs what it is fed, BSE's gate (`evolv2.f` 1480) refuses every swell (all
+/// 133 requests, counted when this was written), and from 15.457 Myr to the collapse the primary
+/// is a naked helium star at every sample (ruling p11-c2-swell of 2026-10-06). The companion's
+/// neutron star, at 20.31 Myr, moved by 2.1 × 10⁻⁷ M☉ with it.
 #[test]
 fn a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star() {
     let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
@@ -691,16 +694,6 @@ fn a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star() {
         .value();
     assert!((collapse / 15.896e6 - 1.0).abs() < 1e-4, "{collapse}");
     let helium_from = 15.457e6;
-    let giant = |phase: Phase| {
-        matches!(
-            phase,
-            Phase::HertzsprungGap
-                | Phase::FirstGiantBranch
-                | Phase::CoreHeliumBurning
-                | Phase::EarlyAgb
-                | Phase::ThermallyPulsingAgb
-        )
-    };
     let mut checked = 0;
     for segment in timeline.segments() {
         let (from, to) = (segment.start().value(), segment.end().value());
@@ -714,8 +707,8 @@ fn a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star() {
                 segment.kind()
             );
         }
-        for k in 0..=4_u32 {
-            let t = from + (to - from) * f64::from(k) / 4.0;
+        for k in 0..=64_u32 {
+            let t = from + (to - from) * f64::from(k) / 64.0;
             if !(helium_from..collapse).contains(&t) {
                 continue;
             }
@@ -726,32 +719,20 @@ fn a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star() {
                 primary.phase(),
                 primary.radius().value()
             );
-            if giant(primary.phase()) {
-                assert_eq!(primary.phase(), Phase::CoreHeliumBurning, "at {t} yr");
-                // At the segment's start, a step; inside a step the core may outgrow the mass
-                // until the next one strips it.
-                if k == 0 {
-                    assert!(
-                        primary.mass().value() > primary.core_mass().value(),
-                        "at {t} yr"
-                    );
-                }
-            } else {
-                assert!(
-                    matches!(
-                        primary.phase(),
-                        Phase::HeliumMainSequence
-                            | Phase::HeliumHertzsprungGap
-                            | Phase::HeliumGiantBranch
-                    ),
-                    "{:?} at {t} yr",
-                    primary.phase()
-                );
-            }
+            assert!(
+                matches!(
+                    primary.phase(),
+                    Phase::HeliumMainSequence
+                        | Phase::HeliumHertzsprungGap
+                        | Phase::HeliumGiantBranch
+                ),
+                "{:?} at {t} yr",
+                primary.phase()
+            );
             checked += 1;
         }
     }
-    assert!(checked > 20, "{checked}");
+    assert!(checked > 200, "{checked}");
     let state = stars
         .state_at(UniverseTime::EPOCH)
         .expect("the system exists");

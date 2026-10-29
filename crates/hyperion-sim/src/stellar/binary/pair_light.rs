@@ -1919,9 +1919,11 @@ fn held_floor_of(fe_cell: usize) -> HeldFloorTable {
 /// as it nears its main sequence's end, each step aimed at that end landing short of it once
 /// the accretion has lowered its fractional age (plan 11's Risks: finding F15 for a helium
 /// accretor, and the same for a hydrogen one above 1.25 M☉), and in P11.T4.g's swell and strip
-/// cycle of a fed helium star (finding C2). Such a pair is rare (about 10⁻⁴ of close pairs of
-/// 5–8 M☉, P11.T17.c's follow-up probe) and the tables' 72 samples a cell seldom hold one, so the
-/// tables can read DARK where it lives. The floor bounds it from the engine's own models:
+/// cycle of a fed helium star (finding C2); P11.T4.m removed the rules behind F15 and C2, and
+/// the hydrogen accretor's is P11.T4.o's (finding F18). Such a pair is rare (about 10⁻⁴ of close
+/// pairs of 5–8 M☉ before P11.T4.m, P11.T17.c's follow-up probe) and the tables' 72 samples a
+/// cell seldom hold one, so the tables can read DARK where it lives. The floor bounds it from the
+/// engine's own models:
 ///
 /// - its value is the brightest V of a hydrogen or helium main-sequence star of mass at most
 ///   `total_msun` (the binary never adds mass), at any fractional age and any metallicity of the

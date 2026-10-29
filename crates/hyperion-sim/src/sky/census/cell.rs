@@ -4272,11 +4272,13 @@ mod tests {
 
     /// The record of R06.T8.g's slow test whose star shone where its bound was dark (P11.T17.c's
     /// follow-up): `0x61fec2d802000037`, a bulge record of layer D, 8.7 Gyr old at [Fe/H] +0.56,
-    /// whose pair of 6.29 and 5.59 M☉ reaches the engine's cap on segments at 78 Myr (finding
+    /// whose pair of 6.29 and 5.59 M☉ reached the engine's cap on segments at 78 Myr (finding
     /// F15: a helium main-sequence accretor fed by a helium star at its main sequence's end). Its
-    /// stretched last segment holds both stripped stars on the helium main sequence, at
-    /// M<sub>V</sub> 2.52 and 1.30, and plan 11's tables alone read `Remnants`. Both stars, at
-    /// both of the slow test's times, are now no brighter than their bounds.
+    /// stretched last segment held both stripped stars on the helium main sequence, at
+    /// M<sub>V</sub> 2.52 and 1.30, where plan 11's tables alone read `Remnants`; the held floor
+    /// bounded them. Since P11.T4.m (ruling p11-c2-swell of 2026-10-06) the accretor keeps its
+    /// fraction burnt, the pair is not capped, and both stars have died by 8.7 Gyr: at both of the
+    /// slow test's times no star shines, and none is brighter than its bound.
     #[test]
     fn the_capped_bulge_record_is_bounded_star_by_star() {
         let galaxy = milky_way_galaxy();
@@ -4290,8 +4292,8 @@ mod tests {
             .expect("the record in its cell");
         let check = check_realised_of(&[record]);
         assert_eq!(
-            (check.systems, check.own + check.widened),
-            (1, 4),
+            (check.systems, check.own + check.widened, check.unbounded),
+            (1, 0, 0),
             "{check:?}"
         );
     }

@@ -171,6 +171,19 @@ const RAPID_CONTACT_SHARE: f64 = 0.1;
 /// §3.2 and Fig. 2).
 pub(super) const TEMPORARY_CONTACT_OVERFILL: f64 = 0.10;
 
+/// The relative miss, built core against the core asked for, within which a swelled giant is
+/// placed exactly ([`Engine::swelled_star`]; ruling p11-c2-swell of 2026-10-06, §3.3 A4).
+const SWELL_CORE_TOLERANCE: f64 = 1e-9;
+
+/// The top of the bracket of the core asked of a swelled giant's placement, in units of the core
+/// wanted: a placed track's core falls short of the one asked for by up to 8.4% (finding F16;
+/// ruling p11-c2-swell, §3.3 A4).
+const SWELL_BRACKET: f64 = 1.1;
+
+/// The most track builds a swelled giant's placement makes before it is refused (ruling
+/// p11-c2-swell, §3.3 A4).
+const SWELL_BUILDS: u32 = 12;
+
 /// Whether a merger may still pass through a common envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Envelope {
@@ -1120,8 +1133,86 @@ impl Engine {
         m: f64,
         core: f64,
     ) -> Option<Member> {
+        self.placed_by(i, target, m.max(core), core)
+    }
+
+    /// The giant a fed helium star or white dwarf swells into ([`Engine::swell`]): a star of mass
+    /// `m` M☉ placed as `target` in member `i`'s slot, whose built track's core at the placement,
+    /// read at `m`, is `core` M☉ (below `m`) to [`SWELL_CORE_TOLERANCE`] of it; or `None` where no
+    /// ask places one so within [`SWELL_BUILDS`] track builds (ruling p11-c2-swell of 2026-10-06,
+    /// §3.3 A4; P11.T4.m).
+    ///
+    /// [`Engine::placed_star`] builds the new star's track from the zero-age main sequence with its
+    /// winds, so the track enters the placed phase at a wind-reduced effective initial mass (HPT
+    /// section 7.1) and its core there falls short of the one asked for (finding F16): for a
+    /// core-helium-burning star of 8 M☉ at Z = 0.02 by about 7% halfway through core helium
+    /// burning, and by 8.4% a tenth of the way through. As an envelope, that miss was a fictitious
+    /// giant's (finding C2). BSE's `gntage` starts the star at the placement (`gntage.f` 159–160),
+    /// so that its core is the one asked for to its bisection's 10⁻⁵ M☉ in M₀ (lines 24 and 147).
+    /// Here the core asked of the placement, c′, is solved for instead: bracketed in
+    /// [core, [`SWELL_BRACKET`] core] among the asks that place a star, from the fixed-point step
+    /// c′ = core + (core − built) and then by the secant rule, or by bisection where that leaves
+    /// the bracket. An ask that places no star, or overshoots, closes the bracket from above. The
+    /// trials are a fixed sequence of the inputs. Every other caller keeps `placed_star`'s miss,
+    /// whose own fix is F16's task.
+    #[must_use]
+    pub(super) fn swelled_star(
+        &self,
+        i: usize,
+        target: NewStar,
+        m: f64,
+        core: f64,
+    ) -> Option<Member> {
+        let tolerance = SWELL_CORE_TOLERANCE * core;
+        // The ask's star and its built core's miss, or `None` where the ask places none.
+        let trial = |ask: f64| {
+            let member = self.placed_by(i, target, m, ask)?;
+            let built = member.evaluate(&self.ctx, i, self.age, m, 0.0)?;
+            let miss = built.state.core_mass().value() - core;
+            Some((member, miss))
+        };
+        let (member, miss) = trial(core)?;
+        if miss.abs() <= tolerance {
+            return Some(member);
+        }
+        if miss > 0.0 {
+            return None;
+        }
+        let (mut lo, mut top) = (core, SWELL_BRACKET * core);
+        let mut last = (core, miss);
+        // The next ask, where the last step gives one inside the bracket; a bisection otherwise.
+        let mut next = Some(core - miss);
+        for _ in 1..SWELL_BUILDS {
+            let ask = next
+                .filter(|&ask| ask > lo && ask < top)
+                .unwrap_or(lo + 0.5 * (top - lo));
+            let Some((member, miss)) = trial(ask) else {
+                top = ask;
+                next = None;
+                continue;
+            };
+            if miss.abs() <= tolerance {
+                return Some(member);
+            }
+            if miss < 0.0 {
+                lo = ask;
+            } else {
+                top = ask;
+            }
+            // The secant through the last two trials, where they differ.
+            let slope = (miss - last.1) / (ask - last.0);
+            next = (slope.is_finite() && slope.abs() > 0.0).then(|| ask - miss / slope);
+            last = (ask, miss);
+        }
+        None
+    }
+
+    /// A star of mass `m` M☉ that the binary carries from now in member `i`'s slot, placed as
+    /// `target` with the core `ask` M☉ asked of [`sse::new_star_mass`] ([`Engine::placed_star`]).
+    #[must_use]
+    fn placed_by(&self, i: usize, target: NewStar, m: f64, ask: f64) -> Option<Member> {
         let (m0, phase, fraction) =
-            sse::new_star_mass(target, SolarMasses::new(core), self.ctx.coeffs())?;
+            sse::new_star_mass(target, SolarMasses::new(ask), self.ctx.coeffs())?;
         let track = match target {
             NewStar::HeliumGiant => {
                 Track::helium_star_full(m0, self.ctx.composition(), self.ctx.draws(i))
@@ -1140,7 +1231,7 @@ impl Engine {
         Some(Member::Shaped {
             track: Arc::new(track),
             offset: super::evolve::offset_for(self.age, at),
-            mass: Path::starting(self.age, m.max(core)),
+            mass: Path::starting(self.age, m),
         })
     }
 }

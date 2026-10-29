@@ -26,14 +26,33 @@
 //! - **Accretion** (section 2.6.6): a main-sequence, Hertzsprung-gap or core-helium-burning star
 //!   takes min(1, 10 `τ_Ṁ` ÷ `τ_KH`) of it (equations 64 and 65) and is rejuvenated; a giant takes all;
 //!   a white dwarf fed hydrogen keeps ε of it below 1.03 × 10⁻⁷ M☉ yr⁻¹ (novae, equation 66), all
-//!   of it up to 2.71 × 10⁻⁷, and above that swells into a giant; a helium star fed hydrogen
-//!   swells into a core-helium-burning or AGB star; degenerate accretors take what the Eddington
-//!   limit allows (equations 67 and 68, X the accreted matter's hydrogen fraction), which is on by
-//!   default (ruling 132.1, where BSE's table 3 has it off). What is not accreted leaves with
-//!   the donor's specific orbital angular momentum, a (M₁ + M₂) = constant for it (section 2.6),
-//!   or with the accretor's for novae and super-Eddington loss, as the published code has it.
-//!   The donor's transferred spin returns to the orbit and the accretor's spin grows by the
-//!   specific angular momentum of the inner disc (equations 54 and 55), up to break-up.
+//!   of it up to 2.71 × 10⁻⁷, and above that swells into a giant; a helium star fed by a
+//!   hydrogen-rich donor takes all of it and swells into a core-helium-burning or AGB star, and one
+//!   fed by any other donor takes the thermally limited share (BSE `evolv2.f` 1476–1479);
+//!   degenerate accretors take what the Eddington limit allows (equations 67 and 68, X the accreted
+//!   matter's hydrogen fraction), which is on by default (ruling 132.1, where BSE's table 3 has it
+//!   off). What is not accreted leaves with the donor's specific orbital angular momentum,
+//!   a (M₁ + M₂) = constant for it (section 2.6), or with the accretor's for novae and
+//!   super-Eddington loss, as the published code has it. The donor's transferred spin returns to
+//!   the orbit and the accretor's spin grows by the specific angular momentum of the inner disc
+//!   (equations 54 and 55), up to break-up.
+//! - **The swell** (sections 2.6.4, "effectively a reverse of the process which formed the
+//!   degenerate remnant star in the first place", and 2.6.6; BSE `evolv2.f` 1480–1490 and
+//!   1513–1547, `gntage.f` 99–160; ruling p11-c2-swell of 2026-10-06, P11.T4.m). A fed helium star
+//!   or white dwarf becomes a giant around its own core only where the hydrogen accumulates: where
+//!   the step's accretion beats 1.05 times the accretor's own net wind over it (BSE's gate for a
+//!   helium star, 1480), and the step's net gain beats the new giant's core growth over the step,
+//!   the rate at which its hydrogen shell turns the envelope into core (the ruling's burn gate, in
+//!   place of BSE's 10⁻⁴ of the mass an orbit, 1481, whose threshold rate scales as 1 ÷ P; after
+//!   Nomoto, Saio, Kato and Hachisu 2007, ApJ 663, 1269, section 3: above their `Ṁ_RG` "the
+//!   accreted matter is accumulated faster than consumed into He by H-shell burning" and piles up
+//!   into a red giant's envelope). BSE swells a white dwarf fed at 2.71 × 10⁻⁷ M☉ yr⁻¹ or more
+//!   with no gate (1518–1547); the ruling applies both to it too. The giant's core is the
+//!   accretor's mass at the step's start, a helium giant's carbon–oxygen core there, placed exactly
+//!   (`Engine::swelled_star`); its mass is the mass after the step, so its envelope is the step's
+//!   net gain. Otherwise the accretor keeps its type and the step's mass, burning the hydrogen to
+//!   helium as it lands or losing it to its wind, as BSE below its gate and COMPAS always do for a
+//!   helium star; a swell refused closes no segment.
 //! - **White dwarfs fed** (section 2.6.6): a helium dwarf that reaches 0.7 M☉ on helium, a
 //!   carbon–oxygen dwarf that has taken 0.15 M☉ of helium, and a dwarf at the Chandrasekhar mass
 //!   are plan 11's pooled Type Ia candidates (`pooled_ia`); the engine continues as if they did
@@ -81,6 +100,11 @@ pub(crate) const CODE_Q: f64 = 3.0;
 pub(crate) const NOVA_RATE: f64 = 1.03e-7;
 /// From this rate a white dwarf fed hydrogen swells into a giant (BSE section 2.6.6), M☉ yr⁻¹.
 const GIANT_RATE: f64 = 2.71e-7;
+/// A fed helium star or white dwarf swells only where the step's accretion exceeds this many times
+/// its own net wind over the step (BSE `evolv2.f` 1480, `dmchk = dm2 - 1.05d0*dms(j2)`, for a
+/// helium star; the paper, section 2.6.6, states no gate; ruling p11-c2-swell of 2026-10-06, gate
+/// (a), which applies it to a white dwarf too).
+const SWELL_WIND_FACTOR: f64 = 1.05;
 /// A helium white dwarf fed helium ignites at this mass (BSE section 2.6.6), M☉.
 const HELIUM_DWARF_IGNITION: f64 = 0.7;
 /// A carbon–oxygen white dwarf detonates its accreted helium layer at this mass (BSE section
@@ -113,14 +137,30 @@ pub(super) enum Stability {
 
 /// How much of the transfer the accretor takes, and what it does.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Accretion {
+pub(super) struct Accretion {
     /// The share accreted.
-    share: f64,
+    pub(super) share: f64,
     /// Whether what is lost leaves with the accretor's specific angular momentum (novae,
     /// super-Eddington loss) rather than the donor's.
-    from_accretor: bool,
-    /// Whether the accretor swells into a giant.
-    swells: bool,
+    pub(super) from_accretor: bool,
+    /// Whether the accretor may swell into a giant ([`Engine::swell`]).
+    pub(super) swells: bool,
+}
+
+/// What one step of stable transfer gave its accretor, which the swell's gates read
+/// ([`Engine::swell`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Fed {
+    /// The accretor's type at the step's start.
+    pub(super) kind: Kind,
+    /// The accretor's mass at the step's start, M☉.
+    pub(super) before: f64,
+    /// Its core's mass at the step's start, M☉: a helium giant's carbon–oxygen core.
+    pub(super) core_before: f64,
+    /// The mass it accreted over the step, M☉: its share of the mass transferred.
+    pub(super) gained: f64,
+    /// The step's length, years.
+    pub(super) dt: f64,
 }
 
 /// What the trials of one step of stable transfer share ([`Engine::trial_base`]).
@@ -455,7 +495,14 @@ impl Engine {
             if self.age >= self.until {
                 return;
             }
-            if self.accretor_events(d, rate, accretion.share * rate * dt, accretion) {
+            let fed = Fed {
+                kind: Kind::of(sa.state.phase(), s.masses[a_idx]),
+                before: s.masses[a_idx],
+                core_before: sa.state.core_mass().value(),
+                gained: accretion.share * rate * dt,
+                dt,
+            };
+            if self.accretor_events(d, rate, fed, accretion) {
                 return;
             }
             if self.donor_events(d) {
@@ -797,8 +844,21 @@ impl Engine {
 
     /// The accretion of a transfer at `rate` from a donor of type `kd` onto an accretor of type
     /// `ka`, mass `ma` and structure `sa` (BSE section 2.6.6).
+    ///
+    /// A helium star takes the whole transfer, and may swell ([`Engine::swell`]), only from a
+    /// hydrogen-rich donor (BSE `evolv2.f` 1478–1479, the else branch of `kstar(j1).ge.7`; Hurley,
+    /// Tout and Pols 2002, section 2.6.6; ruling p11-c2-swell of 2026-10-06, item B): from a helium
+    /// star, a white dwarf or anything else it takes the thermally limited share (1477), as from a
+    /// helium donor.
     #[must_use]
-    fn accretion(&self, kd: Kind, ka: Kind, rate: f64, ma: f64, sa: &Structure) -> Accretion {
+    pub(super) fn accretion(
+        &self,
+        kd: Kind,
+        ka: Kind,
+        rate: f64,
+        ma: f64,
+        sa: &Structure,
+    ) -> Accretion {
         let params = self.ctx.params();
         let thermal_share = || {
             let tau_mdot = if rate > 0.0 { ma / rate } else { f64::INFINITY };
@@ -822,17 +882,17 @@ impl Engine {
                 swells: false,
             },
             Kind::HeliumMainSequence | Kind::HeliumGap | Kind::HeliumGiant => {
-                if kd.is_helium_star() {
-                    Accretion {
-                        share: thermal_share(),
-                        from_accretor: false,
-                        swells: false,
-                    }
-                } else {
+                if kd.surface() == Surface::Hydrogen {
                     Accretion {
                         share: 1.0,
                         from_accretor: false,
                         swells: true,
+                    }
+                } else {
+                    Accretion {
+                        share: thermal_share(),
+                        from_accretor: false,
+                        swells: false,
                     }
                 }
             }
@@ -918,11 +978,21 @@ impl Engine {
     /// τ of member `i`, an accretor, from `m0` to `m1` over `dt`: rejuvenated as BSE's code does
     /// (section 2.6.6, after Tout et al. 1997): kept for a star with a radiative core (0.35–1.25
     /// M☉) and lowered by m₀ ÷ m₁ for one whose convective core mixes in the new fuel.
+    ///
+    /// A helium main-sequence star keeps its fraction burnt, as BSE's code does (`evolv2.f`
+    /// 1889–1900, which applies the factor only where `kstar(j2).ne.7`), and as COMPAS's `HURLEY`
+    /// option does (`HeMS::CalculateMassTransferRejuvenationFactor` returns 1; its default,
+    /// `STARTRACK`, takes `m_prev` ÷ m): ruling p11-c2-swell of 2026-10-06, item C; P11.T4.m. The
+    /// paper (section 2.6.6) rejuvenates it as a star with a convective core, Mc ∝ M; its code
+    /// excludes type 7. Hydrogen fed below the swell's gates lands outside the helium-burning core
+    /// either way. Counted as mixed, a helium accretor fed near its end landed each step short of
+    /// it and shrank its segments to the cap (finding F15: pair 6695 of layer D, capped at
+    /// 183.1 Myr).
     #[must_use]
-    fn rejuvenated_tau(&self, i: usize, tau: f64, m0: f64, m1: f64, dt: f64) -> f64 {
+    pub(super) fn rejuvenated_tau(&self, i: usize, tau: f64, m0: f64, m1: f64, dt: f64) -> f64 {
         match &self.members[i] {
             Member::MainSequence { helium, .. } => {
-                let mixed = *helium || !(0.35..=1.25).contains(&m1);
+                let mixed = !*helium && !(0.35..=1.25).contains(&m1);
                 let tau = if mixed && m1 > m0 { tau * m0 / m1 } else { tau };
                 (tau + dt / sse::main_sequence_lifetime(self.ctx.coeffs(), *helium, m1)).min(1.0)
             }
@@ -949,9 +1019,11 @@ impl Engine {
         }
     }
 
-    /// Acts on what the accretor did in the last step (see the module documentation): whether
-    /// it ended the phase.
-    fn accretor_events(&mut self, d: usize, rate: f64, gained: f64, accretion: Accretion) -> bool {
+    /// Acts on what the accretor did in the last step, at `rate` from donor `d`, with what it was
+    /// `fed` and its `accretion` (see the module documentation): whether it ended the phase. A
+    /// swell ([`Engine::swell`]) reads the accretor's type, mass and core at the step's start,
+    /// what it gained and the step's length (ruling p11-c2-swell of 2026-10-06, §3.3 A.1).
+    fn accretor_events(&mut self, d: usize, rate: f64, fed: Fed, accretion: Accretion) -> bool {
         let a_idx = 1 - d;
         let (ma, ta) = self.current(a_idx);
         let (md, td) = self.current(d);
@@ -968,11 +1040,11 @@ impl Engine {
             let m1 = me.current(1).0;
             [SolarMasses::new(m0), SolarMasses::new(m1)]
         };
-        if accretion.swells && rate > 0.0 && self.swell(a_idx, ka, ma, &sa) {
+        if accretion.swells && rate > 0.0 && self.swell(a_idx, ka, ma, &sa, fed) {
             return false;
         }
         if kd.surface() == Surface::Helium && ka.is_white_dwarf() {
-            self.accreted_helium[a_idx] += gained;
+            self.accreted_helium[a_idx] += fed.gained;
         }
         match ka {
             Kind::HeliumWhiteDwarf
@@ -1095,18 +1167,52 @@ impl Engine {
         }
     }
 
-    /// Member `i` of type `kind`, mass `m` and structure `s`, a white dwarf or helium star fed
-    /// hydrogen, swells into a giant around its core (BSE sections 2.6.6 and 2.7.4): a helium
-    /// dwarf into a giant-branch star, a carbon–oxygen or oxygen–neon dwarf or a helium giant into
-    /// a thermally pulsing AGB star, a helium main-sequence star into a core-helium-burning one.
-    fn swell(&mut self, i: usize, kind: Kind, m: f64, s: &Structure) -> bool {
+    /// Member `i` of type `kind`, mass `m` M☉ and structure `s` after a step of transfer, a white
+    /// dwarf or helium star `fed` hydrogen, swells into a giant around its own core where the
+    /// hydrogen accumulates (BSE sections 2.6.4, 2.6.6 and 2.7.4, `evolv2.f` 1480–1490 and
+    /// 1513–1547, `gntage.f` 99–160; ruling p11-c2-swell of 2026-10-06, P11.T4.m): whether it did.
+    ///
+    /// A helium dwarf becomes a giant-branch star, a carbon–oxygen or oxygen–neon dwarf or a
+    /// helium giant a thermally pulsing AGB star, and a helium main-sequence star a
+    /// core-helium-burning one with its own fraction burnt, y = τ (BSE 1484). The core is the
+    /// accretor's mass at the step's start (BSE's `mass(j2)` and a dwarf's `massc(j2)`), or a
+    /// helium giant's carbon–oxygen core then (`massc(j2)`); the mass is `m`, never raised to the
+    /// core, so a helium star's or a dwarf's envelope is the step's net gain (BSE's `mt2`, 1489 and
+    /// 1546).
+    ///
+    /// The steps, in the ruling's order:
+    ///
+    /// 1. gate (a), BSE's for a helium star (1480), the ruling's for a white dwarf too: the step's
+    ///    accretion exceeds [`SWELL_WIND_FACTOR`] times the accretor's own net wind over the step,
+    ///    the accretion less its net gain, and `m` exceeds the core;
+    /// 2. the exact placement ([`Engine::swelled_star`]), where the giant's core is the core asked
+    ///    for;
+    /// 3. gate (b), the burn gate, in place of BSE's per-orbit 10⁻⁴ of the mass for a helium star
+    ///    (1481; BSE has none for a white dwarf): the placed giant's core, read at `m`, grows over
+    ///    the step's length by less than the step's net gain, so the hydrogen arrives faster than
+    ///    its shell turns it into core (Nomoto et al. 2007, section 3; on the thermally pulsing
+    ///    AGB the core's growth is the shell's less third dredge-up, HPT equation 73), and stays
+    ///    inside the mass to the step's end, so that the next step does not strip the giant again
+    ///    (`hrdiag.f` 357–367, P11.T4.g's strip);
+    /// 4. the segment is closed and the member set.
+    ///
+    /// A refusal at any step leaves the member as it is, with the step's mass (for a helium star,
+    /// BSE below its gate and COMPAS always), and closes no segment. A step over which the
+    /// accretor's own type changes, one that lands on its phase's end or its death, which the
+    /// phase then acts on, swells nothing: BSE reads the type at the step's start (`kstar(j2)`,
+    /// 1482), and the swell would place the giant around a core of another kind, or give a dying
+    /// star a new track.
+    pub(super) fn swell(&mut self, i: usize, kind: Kind, m: f64, s: &Structure, fed: Fed) -> bool {
+        if kind != fed.kind {
+            return false;
+        }
         let (target, core) = match kind {
-            Kind::HeliumWhiteDwarf => (NewStar::GiantBranch, m),
-            Kind::HeliumMainSequence => (NewStar::CoreHeliumBurning { burnt: s.burnt }, m),
-            Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf => (NewStar::PulsingAgb, m),
-            Kind::HeliumGap | Kind::HeliumGiant => {
-                (NewStar::PulsingAgb, s.state.core_mass().value())
+            Kind::HeliumWhiteDwarf => (NewStar::GiantBranch, fed.before),
+            Kind::HeliumMainSequence => (NewStar::CoreHeliumBurning { burnt: s.burnt }, fed.before),
+            Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf => {
+                (NewStar::PulsingAgb, fed.before)
             }
+            Kind::HeliumGap | Kind::HeliumGiant => (NewStar::PulsingAgb, fed.core_before),
             Kind::LowMassMainSequence
             | Kind::MainSequence
             | Kind::HertzsprungGap
@@ -1118,11 +1224,31 @@ impl Engine {
             | Kind::BlackHole
             | Kind::Massless => return false,
         };
-        // Where no star of the kind has such a core, the accretor keeps the mass as it is (BSE's
-        // gntage falls back likewise).
-        let Some(member) = self.placed_star(i, target, m, core) else {
+        let net_gain = m - fed.before;
+        let wind = fed.gained - net_gain;
+        if !(fed.gained - SWELL_WIND_FACTOR * wind > 0.0 && m > core) {
+            return false;
+        }
+        // Where no star of the kind has such a core, or no ask places one exactly, the accretor
+        // keeps the mass as it is (ruling p11-c2-swell, item 7; BSE's gntage instead places a
+        // giant of another type, `gntage.f` 34–49, 132–137 and 281–294).
+        let Some(member) = self.swelled_star(i, target, m, core) else {
             return false;
         };
+        let core_at = |age: f64| {
+            member
+                .evaluate(&self.ctx, i, age, m, 0.0)
+                .map(|s| s.state.core_mass().value())
+        };
+        let (Some(now), Some(later)) = (core_at(self.age), core_at(self.age + fed.dt)) else {
+            return false;
+        };
+        // Read at `m`, a core that would outgrow the mass is held at it, so the growth alone would
+        // pass a core that reaches the mass within the step by the placement's rounding: the
+        // giant must also keep an envelope to the step's end, which is the gate's purpose.
+        if !(later - now < net_gain && later < m) {
+            return false;
+        }
         self.close_segment();
         self.set_member(i, member);
         true

@@ -1383,6 +1383,9 @@ P11.T4, as built"._
       (decision-observed-class-findings §A.5);
     - determinism-auditor, science-checker and rust-reviewer reviews.
 
+  _As built (lane p11-t4mn, 2026-10-29; at version 23 on its lane branch, held for 25's train): see
+  Risks, "P11.T4.m as built"._
+
 - **P11.T4.n A pinned main sequence ends at its own** (decision-observed-class-findings §B,
   2026-10-21; a physically absurd collapse; output moves; an anchor of version 25 (S1), after
   P11.T4.l and T4.m on their lane branch and landed only with the train, by
@@ -4532,6 +4535,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
   - Routed to the binary-population calibration investigation with F9–F12.
 - **P11.T4.g's finding C2 (`swell`'s core) has a measured consequence** (ruling p11-t4k-faults;
   ruled by ruling p11-c2-swell, 2026-10-06, and fixed by P11.T4.m in the deferred bump batch).
+  _Closed by P11.T4.m (lane p11-t4mn, 2026-10-29), with F15, on its lane branch for version 25's
+  train: the caps hold at versions 21 to 24. See "P11.T4.m as built"._
   - A helium main-sequence accretor fed hydrogen by a main-sequence donor:
     - is swelled at any positive rate, even while its wind outweighs what it is fed, into a
       core-helium-burning giant whose envelope is the placement's miss (−0.2 to −0.6% of its
@@ -6578,6 +6583,160 @@ galaxy_sweeps`.
     - **Citations not re-read in the pod** (no web access): HTP02 §2.2 for Jeans's mode (the
       plan's), HPT equations 107–110 and BSE equation 35. The science check derived every formula
       (all ok) and leaves the section and equation numbers to a check against the sources.
+- **P11.T4.m as built** (lane p11-t4mn, 2026-10-29; ruling p11-c2-swell, findings C2 and F15). A
+  fed helium star or white dwarf swells into a giant around its own core only where the hydrogen
+  accumulates, on an exact placement, and a helium main-sequence accretor keeps its fraction
+  burnt. **Built as version 25's behaviour at version 23, on its lane branch, with no hold and no
+  bump**, as P11.T4.l is (the lane's brief; decision-bump-plan-after-22 §2.2;
+  decision-galaxy-25-train §1.7): its goldens are re-blessed by name at header 23, not at the
+  task's header 24, and the train's bump re-blesses them at 25. `golden_diff.py` reports "changed
+  values, not bumped". P11.T4.n, split off to a lane of its own, is not in it.
+  - _The rule, as built._
+    - `rlof.rs`: `transfer_phase` builds a `Fed` (the accretor's type, mass and core at the step's
+      start, what it accreted, `accretion.share × rate × dt`, and the step's dt) and passes it
+      through `accretor_events` to `swell`. `swell`: the type at the step's end against the
+      type at its start; the target and the core (a helium main-sequence star's or a dwarf's mass
+      at the step's start, a helium giant's carbon–oxygen core then); gate (a),
+      `SWELL_WIND_FACTOR` = 1.05 (the accretion beats 1.05 × its net wind, the accretion less its
+      net gain, and m is above the core); the placement, `Engine::swelled_star`; gate (b); then
+      the segment closed and the member set. The mass is m, never raised to the core; y is the
+      helium star's τ at the step's end. A refusal leaves the member as it is and closes no
+      segment.
+    - `accretion`: a helium star takes the whole transfer, and may swell, only from a donor of
+      `Surface::Hydrogen`; any other, a white dwarf among them, gives the thermally limited share.
+      `rejuvenated_tau`: `mixed` is `!helium && !(0.35..=1.25).contains(&m1)`.
+    - `common_envelope.rs`: `placed_star`'s body is `placed_by(i, target, m, ask)`, the carried
+      mass apart from the core asked of `sse::new_star_mass`; `placed_star` calls it with
+      `(m.max(core), core)`, so every other caller is bit for bit as before (F16).
+      `swelled_star(i, target, m, core)` solves for the ask: the core itself first (kept within
+      `SWELL_CORE_TOLERANCE`, 10⁻⁹; refused if it places no star or overshoots); then the
+      fixed-point step core − miss, then the secant through the last two trials, or bisection
+      where it leaves the bracket [core, `SWELL_BRACKET` core = 1.1 core]; an ask that places no
+      star or overshoots closes the bracket from above; at most `SWELL_BUILDS` (12) track builds,
+      a fixed sequence of the inputs, with no cache.
+    - `accretion`, `swell`, `rejuvenated_tau`, `Accretion` (and its fields) and `Fed` are
+      `pub(super)` for `binary/tests.rs`.
+  - _Deviations from the task's text, and the lane's choices (lean, 2026-10-29)._
+    - **Gate (b) also asks that the giant keep its envelope to the step's end.** Read at m, a core
+      that would outgrow the mass is held at it, so the growth test alone (later − now below
+      m − pre) passes such a core wherever the placement's built core lies a hair above the
+      asked one. Both are asked: the growth below the net gain, and the core at age + dt below m.
+      That is the gate's own purpose: the next step does not strip the giant (P11.T4.g's strip).
+    - **A step over which the accretor's type changes swells nothing** (the review). BSE reads the
+      type at the step's start (`kstar(j2)`, `evolv2.f` 1482); a helium giant whose step lands on
+      its death reads as a dwarf at the step's end, and would otherwise be placed around its whole
+      mass just before the death acts. Counted with scratch counters: it never fires in the
+      pinned thousand or in 22,000 prior pairs, and moves nothing.
+    - **Gate (a) applies to white dwarfs too**, as the task's rule is written; BSE has neither gate
+      for a dwarf (`evolv2.f` 1513–1547, the science check). A dwarf has no wind, so it refuses
+      none (0 of layer D's 190 requests).
+    - **The bracket's top is not built first**: an ask outside (lo, top) bisects instead. **The 1.1
+      bracket refuses one corner of `the_swells_placement_is_exact`'s grid**, core helium burning
+      at y = 0.1 with an 8 M☉ core at Z = 0.02, where `placed_star` misses by −8.4% and the placed
+      core rises at about 0.78 of the ask, so that the exact ask lies at about 1.108 × the core.
+      37 of the 38 cases are placed exactly. No swell in the samples meets it (no placement of a
+      helium star is refused in them). The ruling's bracket is kept; widening it to about 1.15
+      would move nothing now.
+    - **`a_swell_the_shell_would_burn_is_refused`'s wind case** feeds 100 × the core growth and loses
+      41/42 of it to the wind: the star gains mass and would pass the burn gate, so the case tests
+      BSE's 1.05 alone. Pairs 1723 and 8002 cover a star whose wind beats its accretion.
+    - **`a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star`** reads 65 even samples
+      a segment, its edges included, not every knot; a swell closes a segment, so it would fall on
+      a sampled edge. No gate passes there: BSE's gate (a) refuses all 133 requests (counted).
+    - **`a_fed_white_dwarf_swells_around_itself`** reads pinned pairs 0118 (a 0.715027 M☉ CO dwarf
+      becomes a TP-AGB star, Z = 0.004) and 0305 (it swells around its 1.274548 M☉ dwarf), and
+      for both looks for a CO dwarf above the Chandrasekhar mass at every segment edge and every
+      knot of a remnant's mass.
+    - **More tests** (the reviews): `a_fed_helium_giant_swells_around_its_carbon_oxygen_core` (unit:
+      a 1.45 M☉ helium Hertzsprung-gap star becomes a TP-AGB star around its CO core at the step's
+      start to 10⁻⁹, and the same step read as a change of type is refused);
+      `a_swell_is_the_same_in_any_order_and_at_any_age` (pinned pairs 0255, 0305 and 0487 in both
+      orders, and run to just past each event); `check_swells` in `check_invariants`, which besides
+      the plan's M − Mc > 0 checks each swelled giant's core against the ruling's to 10⁻⁹; and
+      `the_follow_ups_fed_helium_star_is_not_capped` (below).
+    - **Two other tests restated, no golden:** `light.rs`'s `a_capped_timelines_held_stars_are_bounded`
+      (P11.T17.c's follow-up) keeps the held floor's check on its F18 sample (cell 4817 of D's
+      table, P11.T4.o's) alone, and the F15 sample (cell 4273, sample 10253) gets its own test,
+      asserting it is no longer capped. R06's
+      `sky::census::cell::tests::the_capped_bulge_record_is_bounded_star_by_star`: record
+      `0x61fec2d802000037`'s pair (R06's record of it in `06-the-sky.md`) is no longer capped,
+      and both its stars are dead by 8.7 Gyr, so no star is checked at T8.g's times
+      ((systems, own + widened, unbounded) = (1, 0, 0), against (1, 4) before); the held floor
+      keeps its coverage in `light.rs` and its own tests. The held floor's docs (`light.rs`,
+      `pair_light::held_floor`) say T4.m removed the rules behind F15 and C2, and label their
+      rates as before T4.m.
+    - **Citations corrected by the science check:** the "reverse of the process" sentence is HTP02
+      §2.6.4, not §2.6.6; BSE's `gntage` never refuses a placement (it re-types the star,
+      `gntage.f` 34–49, 132–137, 281–294), so the refusal is the ruling's (item 7); and the burn
+      gate now cites Nomoto, Saio, Kato and Hachisu (2007, ApJ 663, 1269, §3). **The ruling's
+      "COMPAS's `HURLEY` default" is wrong**: COMPAS's default rejuvenation is `STARTRACK`
+      (`m_prev` ÷ m), and HTP02 §2.6.6 rejuvenates a helium main-sequence accretor as a
+      convective-core star; only BSE's code (`evolv2.f` 1889–1900) and COMPAS's `HURLEY` option
+      keep its fraction burnt. Item C stands as ruled; the docs say so (lean: keep it, since the
+      paper's rule is F15's stall).
+  - _Re-measured on T4.l's engine_ (the ruling measured on T4.k's prototype; every figure below
+    matches it unless said):
+    - 1723: 16 segments, a 1.188 M☉ neutron star at 36.342 Myr, bound; 8002: 18 segments, 1.208 M☉
+      at 37.709 Myr, bound (both capped at 64 segments before).
+    - 6695: 18 segments, not capped; its fed helium star collapses to a neutron star at
+      183.85 Myr (capped at 183.1 Myr before).
+    - 0255 swells at 8.611390 Myr around 5.530250928 M☉ (net gain 1.96 × 10⁻⁶ M☉ yr⁻¹ over a
+      163 yr step), envelope 3.1896 × 10⁻⁴ M☉, y = τ to 10⁻¹⁵, R 0.667 R☉; its black holes are of
+      2.880 and 4.179 M☉ (2.941 before), and **the pair stays bound through both** (the ruling's
+      prototype had it disrupted).
+    - 0267: a real swell at 14.1815 Myr (0.546 R☉), one more transfer segment (11 → 12), the same
+      merger. 0305: no 1.77 M☉ CO dwarf nor collapse at 526.2 Myr; a TP-AGB star around its
+      1.2745 M☉ dwarf, then a merger to a 1.284 M☉ ONe dwarf (21 → 15 segments). 0487: the exact
+      placement refused, an accretion-induced collapse at 454.18 Myr (15 → 18 segments). 0080:
+      21 → 19 segments, its neutron star at 366.708 Myr (366.572 before).
+  - _Swells_ (scratch counters in a probe, never committed; requests repeat at every step):
+    - layer E (12,000 prior pairs): 396 helium-star requests, all refused by gate (a); 2
+      white-dwarf requests, both made;
+    - layer D (10,000): 187 helium-star requests, 162 refused by gate (a) and 25 by gate (b), none
+      made; 190 white-dwarf requests, **6 placements refused**, 184 made;
+    - the pinned thousand: 49 helium-star requests (41 by (a), 6 by (b), 2 made) and 25
+      white-dwarf ones (5 placements refused, 20 made).
+  - _Goldens_ (blessed by name at header 23, `uname -m` x86_64; `golden_diff.py --base ef9b605`,
+    T4.l's commit: two files, "changed values, not bumped"):
+    - `stellar/binary_timelines`: **27 of 1,000 digests**, as the task listed: 21 by white dwarfs
+      (20 swells: 0059, 0080, 0118, 0248, 0264, 0284, 0305, 0319, 0332, 0417, 0524, 0528, 0562,
+      0590, 0698, 0769, 0787, 0934, 0977, 0983; and 0487, whose placement is refused), 2 by helium
+      stars' swells (0255, 0267) and 4 by the helium accretor's clock, in their bits (0050, 0138,
+      0841, 0960). Segment counts change in the task's five: 0080, 0255 (15 → 14), 0267, 0305 and 0487.
+    - `stellar/held_bare_core_helium_star` (**the ruling expected none**): star 1, the 12.66 M☉
+      companion that fed the helium star, leaves a neutron star at 20.31 Myr of 1.3716645444
+      M☉, not 1.3716643345 (+1.5 × 10⁻⁷), and its luminosity with it: with no swell and strip
+      between 15.69 Myr and the primary's collapse, the transfer it gave differs.
+    - No other golden moves: the 2,902 tests the gate selects, run without stopping at a failure
+      (3,938 s, pod, 4 vCPU), failed only on these two goldens, the two restated tests above and
+      the fitted tables' freshness.
+  - _Statistics_ (the probe on `binary_classes`' prior sampler, every pair run to 13.8 Gyr as
+    `run_pairs` runs it; T4.l's engine before, this task's after):
+    - capped timelines: layer E 2 → **0**, layer D 1 → **0**;
+    - layer E: records 14,084 → 14,087, hydrogen-poor 5,300 → 5,305 (0.3763 → 0.3766; the ruling's
+      8,393 → 8,396 and 0.5376 → 0.5380 were before T4.l), blue-straggler time −39% (34,912 →
+      21,230 pair-Myr on 400 log ages, all of it 1723's and 8002's stretched segments);
+    - layer D: records 914 → 891; accretion-induced collapses 41 → 23; bound neutron stars after
+      the primary's collapse 160 → 142 (the ruling 158 → 140); low-mass X-ray binaries, persistent
+      NS 104 → 86, persistent BH 17 → 6, transient NS 98 → 85, transient BH 21 → 8, symbiotic BH
+      20 → 8 (the ruling's figures exactly); millisecond pulsars 39 → 28 (the ruling 43 → 29);
+      CVs 684 → 682, symbiotics 150 → 149, double white dwarfs 2,170 → 2,168, Type Ia progenitors
+      137 → 136; pairs ever holding a bound NS or BH beside a living star 159 → 141; hot-subdwarf
+      time **−30%** (45,204 → 31,519 pair-Myr, 6695's stretched segment).
+    - `just fit-check` (the gate's step): **`binary_pair_light_c`, `binary_pair_light_d` and R06's
+      `sky_binary_light_d` are stale** by their fingerprint probes (0 stale at T4.l). The task
+      leaves them to the train's wiring, and P11.T4.n's lane stales the same tables, so they are
+      not refitted here (lean, 2026-10-29); the gate's freshness step fails by design until then.
+  - _Findings_ (recorded; not this task's):
+    - **F16's miss is larger early in core helium burning**: −8.4% at y = 0.1, 8 M☉, Z = 0.02,
+      beyond "up to 8%"; the swell's 1.1 bracket refuses that corner (above).
+    - **Gate (b) on the thermally pulsing AGB** compares the net gain with the core's growth, which
+      third dredge-up cuts (HPT eq. 73, λ up to 0.9), not with the shell's burning rate: so for a
+      dwarf or helium giant swelled to the TP-AGB it passes gains down to (1 − λ) of that rate.
+      As ruled (gate (b) is the core's growth); for the binary-population calibration (the
+      science check).
+    - **The rejuvenation of a helium accretor** (item C; above): the paper and COMPAS's default
+      rejuvenate it, BSE's code does not. Kept as ruled.
 - **P11.T4.n as built** (lane p11-t4n, 2026-10-29; decision-observed-class-findings §B, which
   supersedes ruling p11-t4k-faults' "recorded, not routed", its §2.1 C and §7). A pinned primary's
   own track's main-sequence end is an engine stop, where a hydrogen main sequence the pair has

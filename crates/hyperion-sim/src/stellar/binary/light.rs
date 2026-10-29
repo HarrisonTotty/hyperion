@@ -137,8 +137,10 @@
 //! engine reaches the cap where an accretor so carried is fed at its main sequence's end, each
 //! step landing short of that end once the accretion has lowered its fractional age (plan 11's
 //! Risks: finding F15 for a helium accretor, and the same for a hydrogen one), and in P11.T4.g's
-//! swell and strip cycle (finding C2). About 3 × 10⁻⁵ of the census's pairs do, too few for the
-//! tables' 72 samples a cell to hold, and a held gainer reaches M<sub>V</sub> −7.6. So where the
+//! swell and strip cycle (finding C2); P11.T4.m removed the rules behind F15 and C2, and the
+//! hydrogen accretor's is P11.T4.o's (finding F18). About 3 × 10⁻⁵ of the census's pairs did
+//! before P11.T4.m (P11.T17.c's follow-up probe, not re-run since), too few for the tables' 72
+//! samples a cell to hold, and a held gainer reaches M<sub>V</sub> −7.6. So where the
 //! closed form does not call the pair `Detached` at the window's end, each bin from
 //! [`pair_light::held_floor`]'s first one reads its living and changed values as no fainter than
 //! the floor: the brightest hydrogen or helium main-sequence star of at most the pair's total
@@ -2115,66 +2117,74 @@ mod tests {
     /// P11.T17.c's follow-up probe of D's close, metal-rich pairs of 5–8 M☉.
     const CAPPED_SEED: u64 = 0x7a59_e7ed_d0b1_0517;
 
+    /// The other capped sample of P11.T17.c's follow-up in D's table, a helium main-sequence star
+    /// of 1.59 M☉ at M<sub>V</sub> 1.98 fed by a helium giant (5.06 + 4.06 M☉), whose tables alone
+    /// read `Remnants` from about 4 Gyr, held there by the cap (finding F15), is not capped since
+    /// P11.T4.m: a helium accretor keeps its fraction burnt (ruling p11-c2-swell of 2026-10-06).
+    #[test]
+    fn the_follow_ups_fed_helium_star_is_not_capped() {
+        let grid = pair_light::PairGrid::of(Layer::D).expect("D's grid");
+        let input = pair_light::sample_input(&grid, 4_273, 10_253, CAPPED_SEED);
+        let timeline = evolve(&input, Years::new(pair_light::LAST_AGE_YEARS));
+        assert!(!timeline.hit_segment_cap(), "cell 4273, sample 10253");
+    }
+
     /// A capped timeline's held stars are bounded (the module's held floor; P11.T17.c's follow-up
-    /// to R06.T8.g's bulge record `0x61fec2d802000037`). Two of D's table samples reach the
+    /// to R06.T8.g's bulge record `0x61fec2d802000037`). One of D's table samples reaches the
     /// engine's cap on segments as an accretor carried on its main sequence is fed at its end,
-    /// and their stretched last segments hold it there to 1.5 × 10¹⁰ years:
-    /// - a hydrogen main-sequence gainer of 8.88 M☉ at τ = 1, at M<sub>V</sub> −3.48, beside its
-    ///   donor's white dwarf (5.72 + 4.36 M☉); the tables alone read `Bright(−1.38)` at 1 Gyr and
-    ///   `Remnants` from 3 Gyr;
-    /// - a helium main-sequence star of 1.59 M☉ at M<sub>V</sub> 1.98, fed by a helium giant
-    ///   (finding F15; 5.06 + 4.06 M☉); the tables alone read `Remnants` from about 4 Gyr.
+    /// and its stretched last segment holds it there to 1.5 × 10¹⁰ years: a hydrogen
+    /// main-sequence gainer of 8.88 M☉ at τ = 1, at M<sub>V</sub> −3.48, beside its donor's white
+    /// dwarf (5.72 + 4.36 M☉); the tables alone read `Bright(−1.38)` at 1 Gyr and `Remnants` from
+    /// 3 Gyr (finding F18, P11.T4.o's).
     ///
     /// At every window from the cap to the age run to, the verdict holds against the engine, as
     /// the slow test holds it, and it is never `Remnants` or `Unchanged`.
     #[test]
     fn a_capped_timelines_held_stars_are_bounded() {
         let grid = pair_light::PairGrid::of(Layer::D).expect("D's grid");
-        for (cell, index) in [(4_817, 10_021), (4_273, 10_253)] {
-            let input = pair_light::sample_input(&grid, cell, index, CAPPED_SEED);
-            let horizon = pair_light::LAST_AGE_YEARS;
-            let timeline = evolve(&input, Years::new(horizon));
-            assert!(timeline.hit_segment_cap(), "cell {cell}, sample {index}");
-            let cap = timeline
-                .segments()
-                .last()
-                .expect("a segment")
-                .start()
-                .value();
-            let [m1, m2] = input.masses();
-            let p = input.orbit().periapsis();
-            let comp = input.composition();
-            let mut bright = 0;
-            for k in 0..=8 {
-                let lo = crate::math::log10(cap);
-                let hi = crate::math::log10(horizon);
-                let t = crate::math::exp10(lo + (hi - lo) * f64::from(k) / 8.0).min(horizon);
-                for window in [[t, t], [t * 0.9, t]] {
-                    let verdict = pair_light_bound(
-                        m1,
-                        m2,
-                        p,
-                        comp,
-                        Years::new(window[0])..=Years::new(window[1]),
-                    );
-                    let truth = held(&input, horizon, window);
-                    let what = || {
-                        format!("cell {cell}, sample {index}, {window:?}: {verdict:?}, {truth:?}")
-                    };
-                    assert!(truth.living && truth.departing, "{}", what());
-                    match verdict {
-                        Some(PairLight::Bright(m)) => {
-                            assert!(truth.departing_mag >= m.value(), "{}", what());
-                            bright += 1;
-                        }
-                        None => {}
-                        Some(PairLight::Remnants | PairLight::Unchanged | PairLight::Detached) => {
-                            panic!("{}", what())
-                        }
+        let (cell, index) = (4_817, 10_021);
+        let input = pair_light::sample_input(&grid, cell, index, CAPPED_SEED);
+        let horizon = pair_light::LAST_AGE_YEARS;
+        let timeline = evolve(&input, Years::new(horizon));
+        assert!(timeline.hit_segment_cap(), "cell {cell}, sample {index}");
+        let cap = timeline
+            .segments()
+            .last()
+            .expect("a segment")
+            .start()
+            .value();
+        let [m1, m2] = input.masses();
+        let p = input.orbit().periapsis();
+        let comp = input.composition();
+        let mut bright = 0;
+        for k in 0..=8 {
+            let lo = crate::math::log10(cap);
+            let hi = crate::math::log10(horizon);
+            let t = crate::math::exp10(lo + (hi - lo) * f64::from(k) / 8.0).min(horizon);
+            for window in [[t, t], [t * 0.9, t]] {
+                let verdict = pair_light_bound(
+                    m1,
+                    m2,
+                    p,
+                    comp,
+                    Years::new(window[0])..=Years::new(window[1]),
+                );
+                let truth = held(&input, horizon, window);
+                let what =
+                    || format!("cell {cell}, sample {index}, {window:?}: {verdict:?}, {truth:?}");
+                assert!(truth.living && truth.departing, "{}", what());
+                match verdict {
+                    Some(PairLight::Bright(m)) => {
+                        assert!(truth.departing_mag >= m.value(), "{}", what());
+                        bright += 1;
+                    }
+                    None => {}
+                    Some(PairLight::Remnants | PairLight::Unchanged | PairLight::Detached) => {
+                        panic!("{}", what())
                     }
                 }
             }
-            assert!(bright > 0, "cell {cell}, sample {index}: no window Bright");
         }
+        assert!(bright > 0, "cell {cell}, sample {index}: no window Bright");
     }
 }

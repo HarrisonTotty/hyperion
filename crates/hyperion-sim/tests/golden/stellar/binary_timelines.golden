@@ -49,7 +49,7 @@
 0047 0.824+0.781 M☉ P 161.64 d, 1 segments = 0x6edd8f61691b1287
 0048 2.462+2.394 M☉ P 0.36 d, 9 segments = 0x5ef0c68ef707e853
 0049 1.728+1.093 M☉ P 5.12 d, 11 segments = 0x6571884f37a8d5fb
-0050 4.450+4.385 M☉ P 3.97 d, 15 segments = 0x26125b42640597c5
+0050 4.450+4.385 M☉ P 3.97 d, 15 segments = 0xf1c0890d6e9b3bc0
 0051 6.056+3.763 M☉ P 290.34 d, 10 segments = 0x57e23b4b504ffc81
 0052 0.838+0.811 M☉ P 4560.63 d, 1 segments = 0xcdbe122680f28c63
 0053 7.061+4.849 M☉ P 17.25 d, 18 segments = 0x52cf5b1620fae6e2
@@ -58,7 +58,7 @@
 0056 1.737+0.108 M☉ P 0.40 d, 9 segments = 0x098e3ae2b4444f54
 0057 19.155+12.555 M☉ P 296.82 d, 13 segments = 0xe0f7ed9c70f9d12d
 0058 30.656+13.969 M☉ P 1.18 d, 10 segments = 0x47534be6b96c8e3b
-0059 3.569+1.549 M☉ P 138.72 d, 17 segments = 0x3058cfb093811e75
+0059 3.569+1.549 M☉ P 138.72 d, 17 segments = 0x15ee6f52039e9861
 0060 0.868+0.072 M☉ P 4309.88 d, 1 segments = 0x83e557b0888041cd
 0061 33.286+26.290 M☉ P 60.60 d, 15 segments = 0xc8a4acc1c1e0dbc7
 0062 23.812+6.263 M☉ P 0.31 d, 7 segments = 0x9ca8e0bd2f220282
@@ -79,7 +79,7 @@
 0077 2.234+1.158 M☉ P 0.56 d, 18 segments = 0xd50ececed1ca1e1d
 0078 21.647+15.855 M☉ P 1.14 d, 7 segments = 0x124d232783e61e67
 0079 4.737+1.931 M☉ P 0.44 d, 11 segments = 0xd17d4a1709a2092c
-0080 5.191+3.322 M☉ P 583.38 d, 21 segments = 0x1546ab0bed8b726d
+0080 5.191+3.322 M☉ P 583.38 d, 19 segments = 0x5b7c5613eb1ae6e8
 0081 6.346+3.910 M☉ P 2.58 d, 16 segments = 0x580010d6c300a1c1
 0082 38.700+16.861 M☉ P 5469.88 d, 10 segments = 0xae18a235d51e6b60
 0083 30.329+16.857 M☉ P 7403.99 d, 3 segments = 0x304f4eb98eb79d54
@@ -117,7 +117,7 @@
 0115 7.279+3.757 M☉ P 1.21 d, 11 segments = 0x162c25c186d7d1b3
 0116 2.135+1.654 M☉ P 1.00 d, 14 segments = 0x7c3412f86306899a
 0117 26.766+6.651 M☉ P 0.47 d, 8 segments = 0x5a23361e2103a7bc
-0118 2.642+2.416 M☉ P 605.00 d, 15 segments = 0x0a5875694591eea8
+0118 2.642+2.416 M☉ P 605.00 d, 15 segments = 0x14edd1bcb6b108db
 0119 35.130+22.245 M☉ P 98.63 d, 17 segments = 0xc01d7bdbb6826e54
 0120 8.965+8.931 M☉ P 1.38 d, 9 segments = 0x0416d664c1460f2d
 0121 0.832+0.200 M☉ P 70.58 d, 1 segments = 0x0298c88a647f8b96
@@ -137,7 +137,7 @@
 0135 1.312+0.335 M☉ P 86.79 d, 11 segments = 0x56f80210f6325354
 0136 38.813+37.345 M☉ P 0.34 d, 7 segments = 0x0255724ff6b2316e
 0137 11.364+5.954 M☉ P 0.54 d, 10 segments = 0x8061e0994b690aee
-0138 3.952+3.153 M☉ P 4.58 d, 17 segments = 0x3731d6d6b80a8394
+0138 3.952+3.153 M☉ P 4.58 d, 17 segments = 0xf9c5a90dab388e2e
 0139 7.309+1.905 M☉ P 27.26 d, 16 segments = 0x2bb200924230af54
 0140 3.402+2.940 M☉ P 976.23 d, 10 segments = 0x54fd0fd492a4b5f7
 0141 11.917+2.050 M☉ P 2.52 d, 8 segments = 0x58d21cc63cd8a2fa
@@ -247,14 +247,14 @@
 0245 1.829+1.664 M☉ P 0.45 d, 12 segments = 0x9494b18e708bc93e
 0246 7.350+3.274 M☉ P 3.84 d, 16 segments = 0x1de73f4afd272499
 0247 4.509+0.873 M☉ P 8273.86 d, 9 segments = 0x49662e3d14fd834a
-0248 2.913+2.491 M☉ P 102.24 d, 19 segments = 0x6fb8ca2194f9d8a4
+0248 2.913+2.491 M☉ P 102.24 d, 19 segments = 0x925075f18df14837
 0249 2.601+1.058 M☉ P 1.80 d, 17 segments = 0x3d80cfe3f2eed640
 0250 8.947+4.431 M☉ P 1.46 d, 11 segments = 0xe79eb121b4cecdc2
 0251 10.786+3.636 M☉ P 2.44 d, 12 segments = 0xbce9af438bb99589
 0252 9.884+2.266 M☉ P 2973.52 d, 11 segments = 0x202e6d9c31a1a3ea
 0253 10.685+7.070 M☉ P 0.90 d, 10 segments = 0x9d69a5acead7037c
 0254 3.082+1.321 M☉ P 3175.26 d, 17 segments = 0xdc0eec0703f87aa3
-0255 20.788+20.505 M☉ P 969.35 d, 15 segments = 0xe54f62cba10eb19e
+0255 20.788+20.505 M☉ P 969.35 d, 14 segments = 0x02c8cbf1699890c7
 0256 5.279+0.776 M☉ P 1.63 d, 10 segments = 0x133f35517290e151
 0257 21.482+18.988 M☉ P 229.88 d, 13 segments = 0xaea294c598a69ca6
 0258 9.459+6.556 M☉ P 4687.83 d, 13 segments = 0x7f58dd3d1c4a5126
@@ -263,10 +263,10 @@
 0261 4.283+3.963 M☉ P 147.13 d, 10 segments = 0xe8d6062a57fd9325
 0262 3.432+0.297 M☉ P 3576.93 d, 9 segments = 0x1285e03780c4e42f
 0263 0.969+0.391 M☉ P 5253.75 d, 1 segments = 0x25002d55601bd930
-0264 4.959+3.185 M☉ P 6649.28 d, 15 segments = 0x1a2e1c9b74c2f1cf
+0264 4.959+3.185 M☉ P 6649.28 d, 15 segments = 0xb3b89c3e25f9713d
 0265 2.774+1.813 M☉ P 54.45 d, 10 segments = 0xedf7201c43196111
 0266 8.635+4.438 M☉ P 494.90 d, 16 segments = 0x407b6714dba89de8
-0267 15.063+13.990 M☉ P 422.28 d, 11 segments = 0xc0ee87fedc9a5dd9
+0267 15.063+13.990 M☉ P 422.28 d, 12 segments = 0xc182ad6030f33fe3
 0268 9.896+8.382 M☉ P 2650.63 d, 11 segments = 0xa045951ffe6e0701
 0269 12.157+2.306 M☉ P 1021.06 d, 15 segments = 0x620352cb0c6becf3
 0270 1.528+0.629 M☉ P 1.68 d, 11 segments = 0xe251fee52b4c85a5
@@ -283,7 +283,7 @@
 0281 1.920+0.806 M☉ P 11.12 d, 10 segments = 0x0d0cc4bf67aac7b3
 0282 1.819+0.596 M☉ P 10.41 d, 10 segments = 0xe9118246a665dd0a
 0283 2.639+1.170 M☉ P 0.74 d, 12 segments = 0x3aad78aa0092b13e
-0284 2.569+2.403 M☉ P 356.41 d, 17 segments = 0x1a0d1b564acc8246
+0284 2.569+2.403 M☉ P 356.41 d, 17 segments = 0xa23073c13e6f4aff
 0285 2.551+2.492 M☉ P 36.97 d, 10 segments = 0x35eda47c86cebeac
 0286 1.197+1.080 M☉ P 93.20 d, 10 segments = 0xd18e4e106a7f33c1
 0287 4.278+3.989 M☉ P 27.55 d, 21 segments = 0xf53001219235d984
@@ -304,7 +304,7 @@
 0302 2.315+0.230 M☉ P 20.64 d, 10 segments = 0xc1f3e6b67f043d77
 0303 34.679+7.388 M☉ P 19.82 d, 9 segments = 0x921a9f5e2fd2e5b9
 0304 2.821+0.478 M☉ P 382.67 d, 12 segments = 0xcf38f5fea2e7eac4
-0305 3.300+2.218 M☉ P 76.88 d, 21 segments = 0x5311999774269d50
+0305 3.300+2.218 M☉ P 76.88 d, 15 segments = 0xe1ead7130a50b9da
 0306 0.966+0.237 M☉ P 425.46 d, 1 segments = 0xa1f1db8d6d9a9b2c
 0307 5.151+4.424 M☉ P 2.80 d, 14 segments = 0x7b9ac2ea5b78e878
 0308 32.081+3.065 M☉ P 2.85 d, 7 segments = 0x327ef13540da7ab1
@@ -318,7 +318,7 @@
 0316 5.356+3.566 M☉ P 4990.94 d, 16 segments = 0xbf20c8ecdb7de866
 0317 23.714+21.937 M☉ P 0.67 d, 7 segments = 0x1d289a41e5854e0a
 0318 11.315+10.624 M☉ P 14.75 d, 18 segments = 0x135db14133bb980d
-0319 3.937+3.242 M☉ P 2150.87 d, 15 segments = 0x486ecdf624268f72
+0319 3.937+3.242 M☉ P 2150.87 d, 15 segments = 0x82a013ee634d9bc7
 0320 0.866+0.643 M☉ P 326.72 d, 6 segments = 0xf24fbde6e66651b1
 0321 0.852+0.488 M☉ P 259.25 d, 1 segments = 0x81cb3d1efeb614a0
 0322 7.351+5.653 M☉ P 163.74 d, 9 segments = 0xb781310d728d2289
@@ -331,7 +331,7 @@
 0329 12.235+3.991 M☉ P 1.21 d, 7 segments = 0x3b766330796cc4ea
 0330 12.400+11.447 M☉ P 4082.74 d, 11 segments = 0xcca0960d78df8e40
 0331 9.123+9.037 M☉ P 0.67 d, 9 segments = 0x7a4710f777e0f8f2
-0332 1.985+1.768 M☉ P 60.93 d, 15 segments = 0xecee37a9e627a358
+0332 1.985+1.768 M☉ P 60.93 d, 15 segments = 0x1ba0b34140513f52
 0333 17.745+3.551 M☉ P 99.26 d, 8 segments = 0xfaf3b8f16682307d
 0334 29.177+24.332 M☉ P 0.77 d, 7 segments = 0x571284f07077ee38
 0335 1.657+1.523 M☉ P 40.35 d, 10 segments = 0x5d2f7d49c7768c31
@@ -416,7 +416,7 @@
 0414 2.623+2.295 M☉ P 7194.11 d, 16 segments = 0x240decd247f09385
 0415 9.290+8.914 M☉ P 0.44 d, 7 segments = 0xc2fe905cddaddeb3
 0416 1.010+0.138 M☉ P 3.03 d, 11 segments = 0x0ba20eeaac05586c
-0417 3.717+2.833 M☉ P 390.90 d, 15 segments = 0xd595c71afc49798f
+0417 3.717+2.833 M☉ P 390.90 d, 15 segments = 0x4c136ab9462d32f9
 0418 5.164+0.812 M☉ P 176.88 d, 10 segments = 0xc69b94c8725254e9
 0419 4.177+2.272 M☉ P 2.89 d, 16 segments = 0x6ef78ba68b3f3175
 0420 2.971+0.254 M☉ P 0.53 d, 9 segments = 0x7888ad92c60aa0aa
@@ -486,7 +486,7 @@
 0484 1.257+0.133 M☉ P 6545.22 d, 10 segments = 0xb46704e801ba0b00
 0485 1.376+0.570 M☉ P 1188.40 d, 10 segments = 0x4a125fd8f8699565
 0486 1.003+0.186 M☉ P 0.56 d, 11 segments = 0xe81e0733e7b399bb
-0487 6.879+2.614 M☉ P 2935.03 d, 15 segments = 0xaaf26d956f5a7e68
+0487 6.879+2.614 M☉ P 2935.03 d, 18 segments = 0x612ce4518bc3b627
 0488 5.496+3.594 M☉ P 8.23 d, 19 segments = 0x9b3a839a369aadf9
 0489 1.868+1.570 M☉ P 0.61 d, 12 segments = 0x8769a3de64200d25
 0490 36.197+5.983 M☉ P 3721.37 d, 13 segments = 0xd7484b3a8c4f5804
@@ -523,11 +523,11 @@
 0521 5.589+0.594 M☉ P 0.41 d, 9 segments = 0x2e130a7fd877623f
 0522 1.908+1.211 M☉ P 124.58 d, 10 segments = 0xe4466526829a95d5
 0523 1.037+0.411 M☉ P 7246.75 d, 1 segments = 0x552453266dec7fe4
-0524 2.553+2.052 M☉ P 179.49 d, 17 segments = 0xe3f5847c7c6bef77
+0524 2.553+2.052 M☉ P 179.49 d, 17 segments = 0x779901cb941eb5c7
 0525 4.472+1.871 M☉ P 0.38 d, 9 segments = 0xf4ff1a6029856fc8
 0526 5.522+0.550 M☉ P 0.31 d, 9 segments = 0xace51b1631380d22
 0527 3.413+0.783 M☉ P 344.45 d, 10 segments = 0x3ce855ccbc3746e9
-0528 6.571+2.654 M☉ P 319.50 d, 17 segments = 0x34fec31ca8017002
+0528 6.571+2.654 M☉ P 319.50 d, 17 segments = 0x52cfe20f0f79b0be
 0529 1.223+0.757 M☉ P 0.38 d, 11 segments = 0x2093615250be20c7
 0530 16.560+6.801 M☉ P 4.62 d, 15 segments = 0x004a571a9a83083c
 0531 0.960+0.457 M☉ P 10.34 d, 1 segments = 0xc68dcffcaab6b853
@@ -561,7 +561,7 @@
 0559 2.620+1.898 M☉ P 1.53 d, 16 segments = 0x00b7d2d8bb5b4d9a
 0560 4.013+2.243 M☉ P 2.00 d, 17 segments = 0x0601515288ac8003
 0561 1.623+1.162 M☉ P 4.61 d, 10 segments = 0x6ef5d63b0b2d8060
-0562 5.358+2.566 M☉ P 3804.36 d, 15 segments = 0x196c2f4fa2217c03
+0562 5.358+2.566 M☉ P 3804.36 d, 15 segments = 0x7fd4b7171454be61
 0563 0.922+0.756 M☉ P 1.52 d, 15 segments = 0xd82b7dd912828a8d
 0564 8.419+2.037 M☉ P 7.40 d, 10 segments = 0x3c6fd0edbcd63a5c
 0565 3.550+2.379 M☉ P 8.08 d, 16 segments = 0xf88692e6f884a36c
@@ -589,7 +589,7 @@
 0587 2.152+1.908 M☉ P 3.00 d, 16 segments = 0x3afcd5ffc11c4177
 0588 3.215+2.949 M☉ P 2.41 d, 16 segments = 0x460cbdd024ea187c
 0589 1.359+0.218 M☉ P 7179.30 d, 10 segments = 0x228cd5dca2d30f10
-0590 2.763+2.068 M☉ P 379.15 d, 17 segments = 0x7cacddfebca81750
+0590 2.763+2.068 M☉ P 379.15 d, 17 segments = 0x98ab5a6b8b0378a7
 0591 5.782+4.679 M☉ P 0.60 d, 8 segments = 0x375826fd1366f1d3
 0592 0.931+0.060 M☉ P 30.41 d, 9 segments = 0xaf80ec7f6a655ff2
 0593 1.151+0.768 M☉ P 236.35 d, 6 segments = 0x6ac416615845c691
@@ -697,7 +697,7 @@
 0695 35.043+3.226 M☉ P 0.84 d, 8 segments = 0xacb5e16cf22fd759
 0696 5.700+4.010 M☉ P 3.13 d, 19 segments = 0xc40b4536624735c8
 0697 5.330+5.255 M☉ P 3029.39 d, 14 segments = 0x39e37daa13b32ad1
-0698 5.734+4.262 M☉ P 2418.21 d, 16 segments = 0x9f58dcd3e1319273
+0698 5.734+4.262 M☉ P 2418.21 d, 16 segments = 0xf92f09aaf1db44d5
 0699 2.441+2.297 M☉ P 100.27 d, 14 segments = 0x108ccc49c55dfb4f
 0700 3.738+3.662 M☉ P 0.35 d, 9 segments = 0x9ddea807d5389ea0
 0701 28.203+11.455 M☉ P 614.04 d, 15 segments = 0x0fe960dff72ac871
@@ -768,7 +768,7 @@
 0766 5.965+4.890 M☉ P 259.35 d, 19 segments = 0x445801afccc88590
 0767 16.221+6.675 M☉ P 0.31 d, 7 segments = 0xf612f3b18472bf21
 0768 4.355+0.976 M☉ P 22.16 d, 10 segments = 0x06c40c9a67716bef
-0769 5.286+2.723 M☉ P 247.44 d, 17 segments = 0x1d43299251927381
+0769 5.286+2.723 M☉ P 247.44 d, 17 segments = 0xea412e86706c51d0
 0770 2.564+0.698 M☉ P 521.15 d, 12 segments = 0xb7ab7bdc07171174
 0771 16.926+4.725 M☉ P 1618.71 d, 15 segments = 0x0876f77c1be73021
 0772 3.362+2.677 M☉ P 873.64 d, 10 segments = 0xf8b61d91c5a4d4e7
@@ -786,7 +786,7 @@
 0784 1.281+1.165 M☉ P 8.48 d, 10 segments = 0xd486adaaec03c27b
 0785 7.635+4.509 M☉ P 12.19 d, 14 segments = 0x1640370b85631e16
 0786 2.739+1.871 M☉ P 8.11 d, 10 segments = 0x1967b9c950fcb557
-0787 2.689+0.794 M☉ P 11.23 d, 12 segments = 0xedb1969ca5df3211
+0787 2.689+0.794 M☉ P 11.23 d, 12 segments = 0x349c4524b44a9e07
 0788 1.336+0.858 M☉ P 2.32 d, 15 segments = 0x292616269b391a79
 0789 4.328+0.802 M☉ P 513.50 d, 10 segments = 0x4077cf28caf7b3f5
 0790 0.812+0.397 M☉ P 1.57 d, 2 segments = 0xcd2913f5021157fd
@@ -840,7 +840,7 @@
 0838 3.561+0.359 M☉ P 6.07 d, 10 segments = 0x2a11d19c8d2f7257
 0839 1.003+0.239 M☉ P 28.81 d, 10 segments = 0x87c02b44ff3a612f
 0840 14.853+9.211 M☉ P 19.89 d, 12 segments = 0xdb1307a691dd0d7d
-0841 3.720+3.171 M☉ P 4.26 d, 17 segments = 0xa47444286cae9d17
+0841 3.720+3.171 M☉ P 4.26 d, 17 segments = 0xb141fce740a599ea
 0842 19.798+13.327 M☉ P 16.49 d, 17 segments = 0x73c63386a1f9f1c0
 0843 2.009+0.259 M☉ P 13.37 d, 10 segments = 0xd8e4454b93fe7634
 0844 9.896+7.463 M☉ P 6112.27 d, 11 segments = 0xe5455160c26be9ba
@@ -933,7 +933,7 @@
 0931 6.901+4.869 M☉ P 35.59 d, 20 segments = 0x63be92646c1533f7
 0932 26.298+17.847 M☉ P 0.47 d, 8 segments = 0x85f01d143b73e77a
 0933 12.255+11.464 M☉ P 145.62 d, 7 segments = 0x2d79f32d29f15d6d
-0934 5.610+1.869 M☉ P 192.06 d, 17 segments = 0xd2662de8d03fc977
+0934 5.610+1.869 M☉ P 192.06 d, 17 segments = 0xaf59e2484c0337e8
 0935 2.901+0.386 M☉ P 4648.92 d, 9 segments = 0xfef586df0697f008
 0936 20.980+11.560 M☉ P 4238.91 d, 10 segments = 0x1d6a0a7030bf1ce6
 0937 1.721+1.412 M☉ P 4303.19 d, 18 segments = 0xc55c77086fdf39c5
@@ -959,7 +959,7 @@
 0957 29.926+27.914 M☉ P 9.04 d, 11 segments = 0x1b6813c9d3db2cfd
 0958 17.317+11.168 M☉ P 56.26 d, 14 segments = 0x50dabc36b2dd4414
 0959 1.081+0.470 M☉ P 94.00 d, 11 segments = 0xc9c5963df4dd8a87
-0960 3.217+1.781 M☉ P 12.06 d, 17 segments = 0x22cb4ba0bc9926bf
+0960 3.217+1.781 M☉ P 12.06 d, 17 segments = 0x23e919b95974b9ab
 0961 0.864+0.281 M☉ P 2.18 d, 2 segments = 0x356f5f4d99977a3e
 0962 17.417+13.412 M☉ P 5.53 d, 14 segments = 0xe366c9697c07a98d
 0963 10.506+7.595 M☉ P 732.48 d, 13 segments = 0x159152a311f218e9
@@ -976,13 +976,13 @@
 0974 10.188+2.230 M☉ P 1108.61 d, 13 segments = 0x097bebf1dbd41c2c
 0975 2.350+0.146 M☉ P 5986.43 d, 9 segments = 0x7329e306b0095a40
 0976 3.082+1.649 M☉ P 5427.77 d, 17 segments = 0x9fdc8e6a966919bf
-0977 4.906+4.140 M☉ P 1319.90 d, 16 segments = 0xce20c2ac0d2b8cde
+0977 4.906+4.140 M☉ P 1319.90 d, 16 segments = 0xcd21c0b15aa3a66d
 0978 1.293+0.125 M☉ P 8482.50 d, 10 segments = 0xaefdd45e36313e24
 0979 9.259+3.643 M☉ P 242.92 d, 9 segments = 0xbd791d52263591ae
 0980 27.076+20.816 M☉ P 25.04 d, 17 segments = 0xf3fa1d71a392104f
 0981 32.507+31.614 M☉ P 58.19 d, 14 segments = 0x5a87bde2b0c13ac2
 0982 3.960+0.273 M☉ P 2.14 d, 10 segments = 0x29f40d450153d37a
-0983 2.484+2.281 M☉ P 38.10 d, 17 segments = 0xa03facbc9125472f
+0983 2.484+2.281 M☉ P 38.10 d, 17 segments = 0x55bf76b5ab651ca5
 0984 2.097+0.807 M☉ P 23.74 d, 10 segments = 0xd1495e09e7443849
 0985 9.324+5.418 M☉ P 2572.06 d, 14 segments = 0x51ffc0a1d4d01a44
 0986 4.473+0.242 M☉ P 220.47 d, 9 segments = 0x007018e74f19a86c

@@ -630,3 +630,115 @@ fn passed_over_collapses_are_pinned() {
     }
     golden!("stellar/passed_over_collapses", w.as_str());
 }
+
+/// The ages at which to read a timeline's stars: every segment's start and middle, and 64 even
+/// ages between, short of `until`.
+fn sample_ages(timeline: &BinaryTimeline, until: Years) -> Vec<Years> {
+    let mut ages: Vec<f64> = timeline
+        .segments()
+        .iter()
+        .flat_map(|s| {
+            let end = s.end().value().min(until.value());
+            [s.start().value(), f64::midpoint(s.start().value(), end)]
+        })
+        .collect();
+    ages.extend((0..64).map(|k| until.value() * f64::from(k) / 64.0));
+    ages.into_iter()
+        .filter(|&age| age < until.value())
+        .map(Years::new)
+        .collect()
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §1.2 and §3.4): layer-E prior pairs 1723 (8.84 +
+/// 4.90 M☉ at 696 d) and 8002 (8.61 + 2.69 M☉ at 1,605 d), whose stripped primaries are fed
+/// about 10⁻¹² M☉ yr⁻¹ of hydrogen by their main-sequence companions against winds of 10⁻⁹ M☉
+/// yr⁻¹. Before P11.T4.m every step swelled the helium star into a giant whose envelope was the
+/// placement's miss, which a common envelope or T4.g's strip took off again, until the timeline's
+/// 64 segments capped it short of the pin. Now BSE's gate (`evolv2.f` 1480) refuses the swell: the
+/// helium star stays a helium star from its strip to its pin, where plan 06's neutron star is born
+/// bound, and the timeline is not capped.
+#[test]
+fn a_helium_star_fed_less_than_its_wind_stays_a_helium_star() {
+    let (lo, hi, _) = LAYERS[4];
+    for (index, born, remnant, segments) in
+        [(1_723, 36.342e6, 1.188, 16), (8_002, 37.709e6, 1.208, 18)]
+    {
+        let input = prior_pair(4, index, (lo, hi));
+        let timeline = evolve(&input, AGE_OF_UNIVERSE);
+        assert!(!timeline.hit_segment_cap(), "pair {index}");
+        let record = timeline
+            .supernovae()
+            .iter()
+            .find(|r| r.component() == Component::Primary)
+            .unwrap_or_else(|| panic!("pair {index}: the primary's pin is recorded"));
+        let pin = record.age().value();
+        eprintln!(
+            "pair {index}: {} segments, the primary's {:?} of {} M☉ at {pin} yr, bound {}",
+            timeline.segments().len(),
+            record.remnant().kind(),
+            record.remnant().mass().value(),
+            record.bound()
+        );
+        assert!((pin / born - 1.0).abs() < 1e-4, "pair {index}: {pin} yr");
+        assert_eq!(
+            record.remnant().kind(),
+            RemnantKind::NeutronStar,
+            "pair {index}"
+        );
+        assert!(
+            (record.remnant().mass().value() - remnant).abs() < 1e-3,
+            "pair {index}: {:?}",
+            record.remnant().mass()
+        );
+        assert!(record.bound(), "pair {index}");
+        assert!(
+            timeline.segments().len().abs_diff(segments) <= 2,
+            "pair {index}: {} segments",
+            timeline.segments().len()
+        );
+        let helium = |phase: Phase| {
+            matches!(
+                phase,
+                Phase::HeliumMainSequence | Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
+            )
+        };
+        let mut ages = sample_ages(&timeline, Years::new(pin));
+        ages.sort_by(|a, b| a.value().total_cmp(&b.value()));
+        let stripped = ages
+            .iter()
+            .position(|&age| helium(timeline.state_at(age).stars()[0].phase()))
+            .unwrap_or_else(|| panic!("pair {index}: a helium star"));
+        for &age in &ages[stripped..] {
+            let primary = timeline.state_at(age).stars()[0];
+            assert!(
+                helium(primary.phase()),
+                "pair {index}: a {:?} primary at {age:?}, stripped by {:?}",
+                primary.phase(),
+                ages[stripped]
+            );
+        }
+    }
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §1.4; finding F15): layer-D prior pair 6695
+/// (4.29 + 2.91 M☉ at 4.19 d, Z = 0.0024). Both stars are stripped, and the 1.21 M☉ helium star
+/// feeds helium onto the 0.73 M☉ one near the end of its helium main sequence. Counted as
+/// convectively mixed, the accretor's τ fell by m₀ ÷ m₁ at each step, so each step landed short of
+/// the end and closed a segment, until the timeline's 64 segments capped it at 183.1 Myr. Its
+/// fraction burnt is now kept (BSE `evolv2.f` 1889–1900), and the timeline is not capped.
+#[test]
+fn a_helium_accretor_fed_to_its_end_is_not_capped() {
+    let (lo, hi, _) = LAYERS[3];
+    let input = prior_pair(3, 6_695, (lo, hi));
+    let timeline = evolve(&input, AGE_OF_UNIVERSE);
+    eprintln!(
+        "pair 6695: {} segments, records {:?}",
+        timeline.segments().len(),
+        timeline
+            .supernovae()
+            .iter()
+            .map(|r| (r.component(), r.age().value(), r.remnant().kind()))
+            .collect::<Vec<_>>()
+    );
+    assert!(!timeline.hit_segment_cap());
+}
