@@ -57,6 +57,7 @@ import {
 } from "./forwardLobe";
 import { forwardPeakEntry } from "./forwardPeak";
 import type { MsSourceTable } from "./thick/bake";
+import type { PolarisationTable } from "./thick/polarisation";
 import {
   packThickTable,
   type PackedThickTable,
@@ -2227,10 +2228,15 @@ export class AtmosphereTables {
   /** The last build's per-planet row (R08.T8.e, `decision-r08-t8-leans.md` §13, point 2). */
   #row: PerPlanetRow = EMPTY_ROW;
   /**
-   * The thick multiple-scattering table the kernels read in place of Ψ_ms (R08.T14.c,
-   * {@link AtmosphereTables.setThickTables}), packed and uploaded, or `null`.
+   * The thick multiple-scattering table the kernels read in place of, or beside, Ψ_ms (R08.T14.c
+   * and R08.T14.f; {@link AtmosphereTables.setThickTables},
+   * {@link AtmosphereTables.setPolarisationCorrection}), packed and uploaded, or `null`.
    */
   #thick: { readonly packed: PackedThickTable; texture: TextureHandle } | null = null;
+  /** The body's thick bake, which the table holds, or `null` (R08.T14.c). */
+  #thickBands: ReadonlyArray<MsSourceTable> | null = null;
+  /** The body's polarisation correction, which the table holds, or `null` (R08.T14.f). */
+  #correction: ReadonlyArray<PolarisationTable> | null = null;
 
   /**
    * Makes the tables and builds them for `medium`.
@@ -2277,12 +2283,17 @@ export class AtmosphereTables {
       this.#slotDepthsKernel = null;
       this.#armSlotDepthsKernel = null;
       this.#key = null;
-      // The thick table belongs to the medium, which the restore builds again: uploaded anew after it.
+      // The thick table belongs to the medium, which the restore builds again: uploaded anew after
+      // it, with the bake and the correction it was packed of.
       const thick = this.#thick?.packed ?? null;
+      const bands = this.#thickBands;
+      const correction = this.#correction;
       this.#thick = null;
       this.setMedium(this.#medium, this.#bottomRadiusM, this.#curves, this.#body);
       if (thick !== null) {
         this.#thick = { packed: thick, texture: this.#uploadThick(thick) };
+        this.#thickBands = bands;
+        this.#correction = correction;
       }
     });
   }
@@ -2419,7 +2430,8 @@ export class AtmosphereTables {
 
   /**
    * The thick table's bytes as allocated, B (R08.T14.c; `thick/read.ts`'s `thickTableBytes`):
-   * 270,592 a band and light slot, the table's 270,336 and its info row; 0 without one.
+   * 270,592 a band and light slot, the table's 270,336 and its info row, of either kind (the bake
+   * with the correction summed into it, or the correction alone, R08.T14.f); 0 without one.
    */
   get thickBytes(): number {
     return this.#thick === null ? 0 : thickTableBytes(this.#thick.packed);
@@ -2427,9 +2439,9 @@ export class AtmosphereTables {
 
   /**
    * The thick multiple-scattering table, `rgba32uint`, one layer a band and light slot
-   * (`thick/read.ts`; plan R08, R08.T14.c), which the kernels read in place of Ψ_ms
-   * (`hillaire.ts`'s `withThickRead`), or `null`, and the body draws by Ψ_ms; a new handle after a
-   * restore.
+   * (`thick/read.ts`; plan R08, R08.T14.c and R08.T14.f), which the kernels read in place of Ψ_ms,
+   * or beside it where it holds the polarisation correction alone (`hillaire.ts`'s `withThickRead`),
+   * or `null`, and the body draws by Ψ_ms alone; a new handle after a restore.
    */
   get thickTable(): TextureHandle | null {
     return this.#thick?.texture ?? null;
@@ -2442,23 +2454,62 @@ export class AtmosphereTables {
 
   /**
    * Gives the tables the body's thick bake to read in place of Ψ_ms (plan R08, R08.T14.c), packed
-   * against the medium as the kernels read it (`thick/read.ts`'s `packThickTable`), or takes it
-   * away (`null`). A rebuild for another medium takes it away too, since it belongs to the medium.
+   * against the medium as the kernels read it (`thick/read.ts`'s `packThickTable`) with the
+   * polarisation correction they hold summed into it (R08.T14.f), or takes it away (`null`), leaving
+   * the correction alone. A rebuild for another medium takes it away too, since it belongs to the
+   * medium.
    *
    * @param bands - The bake's tables, one a latitude band of the tables' plan, in its order, each
    *   at its band's s.
+   * @throws RangeError for bands that are not the plan's, as `packThickTable` refuses them or the
+   *   correction held, and the tables keep what they held; `EngineUnavailable` while the engine has
+   *   no device (a loss); or Error once they are disposed.
+   */
+  setThickTables(bands: ReadonlyArray<MsSourceTable> | null): void {
+    this.#checkPlanBands("thick bake", bands);
+    this.#pack(bands, this.#correction);
+  }
+
+  /**
+   * Gives the tables the body's polarisation correction (plan R08, R08.T14.f; Design note 10), to
+   * read beside Ψ_ms, or summed into the thick bake where they hold one (`thick/read.ts`'s two
+   * kinds), or takes it away (`null`). A rebuild for another medium takes it away too.
+   *
+   * @param bands - The correction's tables (`thick/polarisation.ts`'s `PolarisationTable`), one a
+   *   latitude band of the tables' plan, in its order, each at its band's s, with as many light
+   *   slots as the bake's.
    * @throws RangeError for bands that are not the plan's, as `packThickTable` refuses them, and the
    *   tables keep what they held; `EngineUnavailable` while the engine has no device (a loss); or
    *   Error once they are disposed.
    */
-  setThickTables(bands: ReadonlyArray<MsSourceTable> | null): void {
+  setPolarisationCorrection(bands: ReadonlyArray<PolarisationTable> | null): void {
+    this.#checkPlanBands("polarisation correction", bands);
+    this.#pack(this.#thickBands, bands);
+  }
+
+  /**
+   * Whether the table holds the correction (R08.T14.f): summed into the bake, or alone; `false`
+   * without one.
+   */
+  get holdsPolarisationCorrection(): boolean {
+    return this.#correction !== null;
+  }
+
+  /**
+   * Refuses bands that are not the tables' plan's, in count or s.
+   *
+   * @throws Error once the tables are disposed; RangeError for bands not the plan's.
+   */
+  #checkPlanBands(
+    what: string,
+    bands: ReadonlyArray<{ readonly band: { readonly gravityRatio: number } }> | null,
+  ): void {
     if (this.#disposed) {
       throw new Error(
         "the atmosphere's tables were disposed: a caller holds them past their release",
       );
     }
     if (bands === null) {
-      this.#releaseThick();
       return;
     }
     const plan = this.#plan.bands;
@@ -2471,13 +2522,35 @@ export class AtmosphereTables {
       )
     ) {
       throw new RangeError(
-        `a thick bake of ${bands.length} bands at s ${bands.map((band) => band.band.gravityRatio).join(", ")} is not the tables' ${plan.length} at ${plan.map((band) => band.gravityRatio).join(", ")}`,
+        `a ${what} of ${bands.length} bands at s ${bands.map((band) => band.band.gravityRatio).join(", ")} is not the tables' ${plan.length} at ${plan.map((band) => band.gravityRatio).join(", ")}`,
       );
     }
-    const packed = packThickTable(bands, kernelMedium(this.#medium));
+  }
+
+  /**
+   * Packs and uploads the table of `bands` and `correction` (`thick/read.ts`'s kinds), or releases
+   * it for neither, keeping what the tables held should the packing refuse them.
+   */
+  #pack(
+    bands: ReadonlyArray<MsSourceTable> | null,
+    correction: ReadonlyArray<PolarisationTable> | null,
+  ): void {
+    if (bands === null && correction === null) {
+      this.#releaseThick();
+      this.#thickBands = null;
+      this.#correction = null;
+      return;
+    }
+    const packed = packThickTable(
+      bands,
+      kernelMedium(this.#medium),
+      correction === null ? null : { bands: correction, medium: this.#medium },
+    );
     const texture = this.#uploadThick(packed);
     this.#releaseThick();
     this.#thick = { packed, texture };
+    this.#thickBands = bands;
+    this.#correction = correction;
   }
 
   /** Makes and fills a texture for a packed thick table. */
@@ -2644,8 +2717,10 @@ export class AtmosphereTables {
     this.#row = row;
     this.#key = null;
     this.#irradianceBuilt = false;
-    // A thick table belongs to the medium it was baked for (R08.T14.c).
+    // A thick table and a correction belong to the medium they were baked for (R08.T14.c, R08.T14.f).
     this.#releaseThick();
+    this.#thickBands = null;
+    this.#correction = null;
     const engine = this.#engine;
     const r = this.#resources;
     engine.writeBuffer(r.terms, 0, terms);

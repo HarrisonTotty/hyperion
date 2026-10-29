@@ -103,9 +103,12 @@ import { type ForwardLobe, forwardLobeAt, forwardLobeOfTable, lobeIsDrawn } from
 import {
   type PackedThickTable,
   thickAnalyticShare,
+  thickAnalyticWeight,
   thickBandsInto,
   thickJInto,
+  thickMultipleInto,
   thickSourceScratch,
+  type ThickTableKind,
 } from "./thick/read";
 import {
   drawnSurfaceKind,
@@ -1869,7 +1872,8 @@ export interface PlanetTwin extends TwinTransmittance {
   readonly multiScatteringBySlot?: ReadonlyArray<TwinTable>;
   /**
    * The thick multiple-scattering table the kernels read in place of Ψ_ms from the table's first
-   * sun cosine cell up (`thick/read.ts`; plan R08, R08.T14.c), as `AtmosphereTables.thickPacked`
+   * sun cosine cell up, or beside it where it holds the polarisation correction alone
+   * (`thick/read.ts`'s kinds; plan R08, R08.T14.c and R08.T14.f), as `AtmosphereTables.thickPacked`
    * holds it; absent for a body drawn by Ψ_ms alone.
    */
   readonly thick?: PackedThickTable;
@@ -1950,11 +1954,16 @@ export interface TwinSources {
    */
   readonly sunOpticalDepth?: (heightM: number, muSun: number, out: TwinRgb) => void;
   /**
+   * The thick table's kind (`thick/read.ts`; R08.T14.f): present with
+   * {@link TwinSources.thickSource}, and then the march mixes the table's J with
+   * {@link TwinSources.multiScattering} by it, as `thickRead.wgsl`'s `thickMultipleAt` does.
+   */
+  readonly thickKind?: ThickTableKind;
+  /**
    * The thick table's J per unit illuminance and of scattering at a height, into `out`, slot
-   * `slot`'s (`thick/read.ts`, R08.T14.c): `muTravel` the view's travel cosine, −(v·n), and
-   * `horizontal` v·s − (v·n)(s·n). Present where the planet holds the thick table, and then the
-   * march reads it as `thickRead.wgsl`'s `thickMultipleAt` does, with
-   * {@link TwinSources.multiScattering} at the analytic term's share.
+   * `slot`'s (`thick/read.ts`, R08.T14.c and R08.T14.f), not held at 0: `muTravel` the view's travel
+   * cosine, −(v·n), and `horizontal` v·s − (v·n)(s·n). Present where the planet holds the thick
+   * table.
    */
   readonly thickSource?: (
     heightM: number,
@@ -1972,7 +1981,7 @@ function thickSourceOf(table: PackedThickTable): NonNullable<TwinSources["thickS
   const oneBand = Float64Array.of(0);
   return (heightM, muSun, muTravel, horizontal, out, slot) => {
     thickBandsInto(table, oneBand, heightM, 1, muSun, muTravel, slot, scratch);
-    thickJInto(scratch, horizontal, out);
+    thickJInto(scratch, muSun, muTravel, horizontal, out);
   };
 }
 
@@ -2035,7 +2044,9 @@ export function tableSources(planet: PlanetTwin, read: SunRead = "curves"): Twin
     absorberPathDepth: (columns, pressureColumns, out, slot) => {
       absorberDepthInto(absorbersAt(slot), columns, pressureColumns, out);
     },
-    ...(planet.thick === undefined ? {} : { thickSource: thickSourceOf(planet.thick) }),
+    ...(planet.thick === undefined
+      ? {}
+      : { thickKind: planet.thick.kind, thickSource: thickSourceOf(planet.thick) }),
     sunOpticalDepth: (heightM, muSun, out) => {
       const rM = bottom + Math.min(Math.max(heightM, 0), atmosphereM);
       const [u, v] = transmittanceRMuToUv(shell, rM, muSun);
@@ -2452,8 +2463,8 @@ class Marcher {
   readonly #depth: TwinRgb = [0, 0, 0];
   /** Whether the march adds the forward lobes' higher orders: a tabulated term, and its depth read. */
   readonly #lobes: boolean;
-  /** Whether the tables hold the thick table, read beside Ψ_ms (R08.T14.c). */
-  readonly #thick: boolean;
+  /** The thick table's kind where the tables hold one, read with Ψ_ms (R08.T14.c, R08.T14.f). */
+  readonly #thick: ThickTableKind | null;
   readonly #thickRead: TwinRgb = [0, 0, 0];
 
   constructor(
@@ -2491,7 +2502,11 @@ class Marcher {
       terms.some((term) => term.lobe !== null) &&
       (reads.kind === "oblate" || reads.sources.sunOpticalDepth !== undefined);
     this.#thick =
-      reads.kind === "oblate" ? reads.reader.hasThick : reads.sources.thickSource !== undefined;
+      reads.kind === "oblate"
+        ? reads.reader.thickKind
+        : reads.sources.thickSource === undefined
+          ? null
+          : (reads.sources.thickKind ?? "thick");
     // A path a light slot under an absorber, slot 0's always (the views' mean transmittance), and
     // one path for every source of a medium with none, as `hillaire.ts`'s `frameSourcesOf` sends
     // them (`source.wgsl`'s `ViewMarch`).
@@ -2593,23 +2608,25 @@ class Marcher {
       const slot = source.slot;
       const lit = groundShadows(sources.bottomRadiusM, heightM, muSun) ? 0 : 1;
       sources.sunTransmittance(heightM, muSun, this.#toSun, slot);
-      // The thick table's read (`thickRead.wgsl`'s thickMultipleAt, R08.T14.c): Ψ_ms at the
-      // analytic term's share, the table's J at the rest, and the lobes' orders at Ψ_ms's share.
-      const analytic = this.#thick ? thickAnalyticShare(muSun) : 1;
+      // The thick table's read (`thickRead.wgsl`'s thickMultipleAt, R08.T14.c and R08.T14.f): on
+      // the bake's table Ψ_ms at the analytic term's share, the table's J at the rest, and the
+      // lobes' orders at Ψ_ms's share; beside the correction alone, Ψ_ms and the lobes whole.
+      const kind = this.#thick;
+      const weight = kind === null ? 1 : thickAnalyticWeight(kind, muSun);
       this.#multiple.fill(0);
-      if (analytic > 0) {
+      if (weight > 0) {
         sources.multiScattering(heightM, muSun, this.#multiple, slot);
       }
-      if (analytic < 1) {
+      if (kind !== null && thickAnalyticShare(muSun) < 1) {
         const muView = (d.x * gx + d.y * gy + d.z * gz) / gLength;
         const horizontal = d.x * s.x + d.y * s.y + d.z * s.z - muView * muSun;
         sources.thickSource?.(heightM, muSun, -muView, horizontal, this.#thickRead, slot);
-        this.#mixThick(analytic);
+        thickMultipleInto(kind, muSun, this.#thickRead, this.#multiple);
       }
       phasedInto(this.#terms, this.#densities, source.phases, this.#phased);
       if (this.#lobes) {
         sources.sunOpticalDepth?.(heightM, muSun, this.#depth);
-        this.#addLobeOrders(source.entry, local, source.phases, analytic);
+        this.#addLobeOrders(source.entry, local, source.phases, weight);
       }
       this.#addShare(source, lit);
     }
@@ -2662,38 +2679,28 @@ class Marcher {
       )
         ? 1
         : 0;
-      const analytic = this.#thick ? thickAnalyticShare(muSun) : 1;
+      const kind = this.#thick;
+      const weight = kind === null ? 1 : thickAnalyticWeight(kind, muSun);
       this.#multiple.fill(0);
-      if (analytic > 0) {
+      if (weight > 0) {
         reader.multiScatteringInto(scaledHeightM, s, muSun, slot, this.#multiple);
       }
-      if (analytic < 1) {
+      if (kind !== null && thickAnalyticShare(muSun) < 1) {
         const d = geodeticHeights
           ? inBodyAxes(reads.frame, this.#ray.direction, false)
           : this.#ray.direction;
         const muView = (d.x * normal.x + d.y * normal.y + d.z * normal.z) / normalLength;
         const horizontal = d.x * v.x + d.y * v.y + d.z * v.z - muView * muSun;
         reader.thickInto(scaledHeightM, s, muSun, -muView, horizontal, slot, this.#thickRead);
-        this.#mixThick(analytic);
+        thickMultipleInto(kind, muSun, this.#thickRead, this.#multiple);
       }
       phasedInto(this.#terms, this.#densities, source.phases, this.#phased);
       if (this.#lobes) {
-        this.#addLobeOrders(source.entry, local, source.phases, analytic);
+        this.#addLobeOrders(source.entry, local, source.phases, weight);
       }
       this.#addShare(source, lit);
     }
     this.#advance(dtM);
-  }
-
-  /**
-   * The multiple scattering at the step as `thickRead.wgsl`'s `thickMultipleAt` forms it: Ψ_ms at
-   * the analytic term's share `analytic`, which the read left in it at full weight, plus the thick
-   * table's J at the rest.
-   */
-  #mixThick(analytic: number): void {
-    for (const c of CHANNELS) {
-      this.#multiple[c] = analytic * this.#multiple[c] + (1 - analytic) * this.#thickRead[c];
-    }
   }
 
   /** A source's single and multiple scattering at the step, weighted into its path's share. */
@@ -5236,15 +5243,19 @@ class OblateReader {
     }
   }
 
-  /** Whether the body's tables hold the thick table (R08.T14.c, {@link OblatePlanetTwin.thick}). */
-  get hasThick(): boolean {
-    return this.#planet.thick !== undefined;
+  /**
+   * The body's thick table's kind, or `null` where its tables hold none (R08.T14.c, R08.T14.f;
+   * {@link OblatePlanetTwin.thick}).
+   */
+  get thickKind(): ThickTableKind | null {
+    return this.#planet.thick?.kind ?? null;
   }
 
   /**
    * The thick table's J at `scaledHeightM`, s, sun cosine `muSun` and travel cosine `muTravel` into
-   * `out`, light slot `slot`'s layers (`thickRead.wgsl`'s `thickBandsAt`, then max(J⁰ + G·h_⊥, 0)):
-   * linear in ln s between the bands about s, the nearer band beyond them; 0 without the table.
+   * `out`, light slot `slot`'s layers (`thickRead.wgsl`'s `thickBandsAt`, then `thick/read.ts`'s
+   * `thickJInto`, not held at 0): linear in ln s between the bands about s, the nearer band beyond
+   * them; 0 without the table.
    *
    * @param horizontal - h_⊥ = v·s − (v·n)(s·n), the view's and the source's horizontal parts' dot product.
    */
@@ -5272,7 +5283,7 @@ class OblateReader {
       slot,
       this.#thickScratch,
     );
-    thickJInto(this.#thickScratch, horizontal, out);
+    thickJInto(this.#thickScratch, muSun, muTravel, horizontal, out);
   }
 
   /** A march's own path's absorber depth under light slot `slot`'s curves (`TwinSources`'). */

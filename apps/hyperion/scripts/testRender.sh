@@ -16,7 +16,7 @@
 # R07.T8.e–f's cell pass, 9 R08.T8.a's march band and R08.T11.e's giant, 10 R08.T7 and R08.T8.e's
 # slot layers on its binary, 11 R08.T9.b's two and R08.T8.c's far limb's footprint, 12 R08.T11.b's
 # face count, which took part 8 to its watchdog, and R08.T11.e's Earth, 13 R08.T14.c's thick read,
-# its kernels' catalogue, its Earth and its specialised march, which would have taken parts 9, 11
+# its kernels' catalogue, its Earth, R08.T14.f's correction alone on Earth and its specialised march, which would have taken parts 9, 11
 # and 12 to some 160 to 166 s at their slowest gates, 2026-10-27), part 4 also R05.T12.e's marches
 # and part 6 R05.T12.c's frames, each first, part 7 R10's terrain groups, and part 1 every other
 # group.

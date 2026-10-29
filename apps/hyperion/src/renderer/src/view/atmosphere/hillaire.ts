@@ -118,6 +118,7 @@ import {
 } from "./tables";
 import {
   THICK_ALTITUDES,
+  THICK_CORRECTION_MODES,
   THICK_MODES,
   THICK_SUN_COSINES,
   THICK_TRAVEL_COSINES,
@@ -188,11 +189,19 @@ export interface TableSizes {
    * frame time (Design note 11).
    */
   readonly thick: ThickTableSize;
+  /**
+   * The polarisation correction's grid, a band and light slot (plan R08, Design notes 10 and 11;
+   * R08.T14.f): the thick table's, which it shares, read on both settings, and held in it on a
+   * `thickScattering` world (`thick/read.ts`'s `thick` kind) and alone on a thin one (its
+   * `correction` kind).
+   */
+  readonly polarisation: ThickTableSize;
 }
 
 /**
  * The thick table's grid (plan R08, Design note 9; R08.T14.c; `thick/read.ts`): its altitudes, sun
- * cosines, travel cosines and azimuthal modes, the bake's `THICK_BAKE_GRID` and `THICK_BAKE_MODES`.
+ * cosines, travel cosines and azimuthal modes, the bake's `THICK_BAKE_GRID`, and the modes it
+ * stores, the polarisation correction's three (R08.T14.f).
  */
 export interface ThickTableSize {
   readonly altitudes: number;
@@ -202,14 +211,27 @@ export interface ThickTableSize {
 }
 
 /**
- * The thick table's grid as built (R08.T14.c): 33 altitudes, 32 μ₀ and 16 μ_v, m = 0 and 1,
- * 270,336 B a band and light slot as `rgba16float` (`thick/read.ts`'s `THICK_TABLE_BYTES_A_SLOT`).
+ * The thick table's grid as built (R08.T14.c and R08.T14.f): 33 altitudes, 32 μ₀ and 16 μ_v, the
+ * bake's m = 0 and 1 and the correction's m = 2 summed into one texel a cell, 270,336 B a band and
+ * light slot (`thick/read.ts`'s `THICK_TABLE_BYTES_A_SLOT`).
  */
 export const THICK_TABLE_SIZE: ThickTableSize = {
   altitudes: THICK_ALTITUDES,
   sunCosines: THICK_SUN_COSINES,
   travelCosines: THICK_TRAVEL_COSINES,
   modes: THICK_MODES,
+};
+
+/**
+ * The polarisation correction's grid as built (R08.T14.f; Design note 11's correction row): the
+ * thick table's, m = 0, 1 and 2, 270,336 B a band and light slot in the same texels, against the
+ * note's 393 KB for three modes in `rgba16float`.
+ */
+export const POLARISATION_TABLE_SIZE: ThickTableSize = {
+  altitudes: THICK_ALTITUDES,
+  sunCosines: THICK_SUN_COSINES,
+  travelCosines: THICK_TRAVEL_COSINES,
+  modes: THICK_CORRECTION_MODES,
 };
 
 /**
@@ -342,6 +364,7 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
       drawnBandM: DRAWN_SURFACE_BAND_M,
     },
     thick: THICK_TABLE_SIZE,
+    polarisation: POLARISATION_TABLE_SIZE,
   },
   low: {
     transmittance: TRANSMITTANCE_SIZE,
@@ -358,6 +381,7 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
     marchSourceCap: 2,
     marchDepthSteps: null,
     thick: THICK_TABLE_SIZE,
+    polarisation: POLARISATION_TABLE_SIZE,
   },
 };
 
@@ -1005,7 +1029,7 @@ const THICK_READ: ReadonlyArray<{
 }> = [
   {
     general: "phased += lobeOrdersOf(local, angle, light.depth);",
-    thick: "phased += thickAnalyticShare(muSun) * lobeOrdersOf(local, angle, light.depth);",
+    thick: "phased += thickAnalyticWeight(muSun) * lobeOrdersOf(local, angle, light.depth);",
     least: 1,
     most: 2,
   },

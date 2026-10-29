@@ -10,9 +10,9 @@
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
  * groups are in thirteen parts, each a run of its own under the harness's watchdog (perf-smoke,
  * 2026-10-13), parts 2 to 6 and 8 to 13 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
- * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c), part 4 with R05.T12.e's
- * marches before them and part 6 with R05.T12.c's frames, part 7 R10's terrain groups, part 13
- * R08.T14.c's thick read, and part 1 every other; with no part given the page runs them all, in
+ * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f), part 4 with
+ * R05.T12.e's marches before them and part 6 with R05.T12.c's frames, part 7 R10's terrain groups,
+ * part 13 R08.T14.c's thick read and R08.T14.f's correction, and part 1 every other; with no part given the page runs them all, in
  * its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
@@ -31,7 +31,7 @@
  * the top, in part 4 after R05.T12.e's marches, and its low pick, which has no twin, in part 1;
  * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11;
  * R08.T14.c's thick read in part 13, its kernels' catalogue first, then its kernels against their
- * twins on Earth and its specialised march, and its kernels against their twins on a Saturn-class
+ * twins on Earth, R08.T14.f's correction alone against its twins on Earth and its specialised march, and its kernels against their twins on a Saturn-class
  * figure in part 3 after R08.T6.g's heights; and part 7 R10.T10.b's lit terrain, R10.T10.c's
  * survey edge, R10.T16.c's frame, R10.T11's wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an
  * engine of its own, whose device it destroys). Three groups of part 1 run only when asked:
@@ -72,6 +72,7 @@ import {
   checkMarchArea,
   checkMarchBand,
   checkMarchSpecialised,
+  checkCorrectionFrameTwinsEarth,
   checkThickFrameTwinsEarth,
   checkThickFrameTwinsSaturn,
   checkThickMarchSpecialised,
@@ -469,6 +470,11 @@ async function run(
   // watchdog: both in part 9 took it to 165 s under load.
   await group(13, "R08.T14.c the thick read's kernels against their twins on Earth", () =>
     checkThickFrameTwinsEarth(engine, checks, twins),
+  );
+  // In part 13 after the thick table's Earth, whose kernels it draws by, compiled by the part's
+  // catalogue: in part 9, the lightest other part, it would compile them again.
+  await group(13, "R08.T14.f the correction's kernels against their twins on Earth", () =>
+    checkCorrectionFrameTwinsEarth(engine, checks, twins),
   );
   await group(9, "R08.T11.e the unread column tables at one texel on a giant", () =>
     checkUnreadGiant(engine, checks),

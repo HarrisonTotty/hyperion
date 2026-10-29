@@ -172,7 +172,7 @@ import {
   saturnClassMedium,
   venusClassMedium,
 } from "../test/atmosphereFixtures";
-import { patternedThickBake } from "../test/thickTables";
+import { patternedCorrection, patternedThickBake } from "../test/thickTables";
 import {
   type DrawItem,
   type PassTimes,
@@ -2079,9 +2079,14 @@ async function checkFrameTwins(
   }
 }
 
-/** A body whose frames the thick read's kernels draw, held to their twins (R08.T14.c). */
+/**
+ * A body whose frames the thick read's kernels draw, held to their twins (R08.T14.c, R08.T14.f):
+ * over a thick table, the bake's pattern with the correction's summed into it, or over the
+ * correction's alone (`thick/read.ts`'s kinds).
+ */
 interface ThickTwinBody {
   readonly name: string;
+  readonly table: "thick" | "correction";
   readonly medium: AtmosphereMedium;
   readonly curves: AbsorberCurveSlots;
   readonly figure: SpheroidFigure;
@@ -2103,7 +2108,8 @@ const THICK_TWIN_FRAMES: ReadonlyArray<TwinFrame> = [
 ];
 
 /**
- * R08.T14.c: the sky-view, aerial-perspective and march kernels reading the thick table, each
+ * R08.T14.c and R08.T14.f: the sky-view, aerial-perspective and march kernels reading the thick
+ * table, the bake's with the polarisation correction summed into it (its m = 2 among them), each
  * held to its CPU twin over the GPU's own per-planet tables and the same packed table, to 10⁻³
  * above 10⁻⁶ of the largest (R08.T6.b's bound): R05's Earth on WGS 84 with its normal gravity (one
  * band) over {@link THICK_TWIN_FRAMES}, on high.
@@ -2116,11 +2122,40 @@ export async function checkThickFrameTwinsEarth(
   await checkThickTwinBodies(engine, checks, twins, [
     {
       name: "R05's Earth",
+      table: "thick",
       medium: R05_EARTH_REFERENCE,
       curves: NO_ABSORBER_CURVES,
       figure: WGS84,
       gravity: EARTH_GRAVITY,
       frames: THICK_TWIN_FRAMES,
+    },
+  ]);
+}
+
+/**
+ * R08.T14.f: the kernels' correction equals the twin's. {@link checkThickFrameTwinsEarth} over the
+ * polarisation correction alone, a thin world's table (`thick/read.ts`'s `correction` kind, Ψ_ms
+ * whole and the correction added at the table's share), from 2 km at the sun 20° up over a surface
+ * and 1° up, where the correction fades in across the first sun cosine cell: in part 13 after the
+ * thick table's Earth, whose kernels the part's catalogue has compiled.
+ */
+export async function checkCorrectionFrameTwinsEarth(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  await checkThickTwinBodies(engine, checks, twins, [
+    {
+      name: "R05's Earth",
+      table: "correction",
+      medium: R05_EARTH_REFERENCE,
+      curves: NO_ABSORBER_CURVES,
+      figure: WGS84,
+      gravity: EARTH_GRAVITY,
+      frames: THICK_TWIN_FRAMES.filter(
+        (frame) =>
+          frame.heightM === 2_000 && frame.suns.every((sun) => sun.directionBodyFixed.x > 0.01),
+      ),
     },
   ]);
 }
@@ -2138,6 +2173,7 @@ export async function checkThickFrameTwinsSaturn(
   await checkThickTwinBodies(engine, checks, twins, [
     {
       name: "the Saturn-class figure",
+      table: "thick",
       medium: saturnClassMedium(),
       curves: NO_ABSORBER_CURVES,
       figure: SATURN_SPHEROID,
@@ -2169,7 +2205,11 @@ async function checkThickTwinBodies(
         body.gravity,
       );
       try {
-        withThickTable(atmosphere.tables, body.curves.length);
+        if (body.table === "thick") {
+          withThickTable(atmosphere.tables, body.curves.length);
+        } else {
+          withCorrectionTable(atmosphere.tables, body.curves.length);
+        }
         const read = kernelMedium(body.medium);
         // The harness's GPU work runs in order: each body's tables are read back before the next's.
         // oxlint-disable-next-line no-await-in-loop
@@ -2189,13 +2229,17 @@ async function checkThickTwinBodies(
           void ordered.later(async (later) => {
             const result = await agreements();
             const label = `${body.name}, high, ${frame.name}`;
+            const over =
+              body.table === "thick"
+                ? "R08.T14.c {label}: {what}, over the thick table,"
+                : "R08.T14.f {label}: {what}, beside the correction alone,";
             for (const [what, held] of [
               ["the sky view", result.skyView],
               ["the aerial perspective", result.aerial],
               ["the ray march", result.rayMarch],
             ] as const) {
               later.check(
-                `R08.T14.c ${label}: ${what}, over the thick table, agrees with the CPU twin to 10⁻³`,
+                `${over.replace("{label}", label).replace("{what}", what)} agrees with the CPU twin to 10⁻³`,
                 held.worst <= 1 && held.above > 0,
                 `worst ${held.at}; ${held.above} channels above 10⁻⁶ of the largest, ${held.over} over the bound`,
               );
@@ -2851,15 +2895,26 @@ export async function checkMarchSpecialised(
 }
 
 /**
- * A smoke check's thick table for `tables` (R08.T14.c): `test/thickTables.ts`'s pattern, one layer
- * a light slot of `slots` (at least one), on the tables' own bands, against the medium as the
- * kernels read it. The read's cost and arithmetic do not depend on the values, so a pattern that
- * varies in every axis holds the kernels to their twin, and to each other, as a bake's would.
+ * A smoke check's correction alone for `tables` (R08.T14.f): `test/thickTables.ts`'s correction
+ * pattern, a thin world's table, one layer a band and light slot.
+ */
+function withCorrectionTable(tables: AtmosphereTables, slots: number): void {
+  tables.setPolarisationCorrection(
+    patternedCorrection(tables.plan.bands, tables.medium, Math.max(1, slots)),
+  );
+}
+
+/**
+ * A smoke check's thick table for `tables` (R08.T14.c and R08.T14.f): `test/thickTables.ts`'s
+ * pattern with its correction's summed into it, so that every texel holds an m = 2, one layer a
+ * light slot of `slots` (at least one), on the tables' own bands, against the medium as the kernels
+ * read it. The read's cost and arithmetic do not depend on the values, so a pattern that varies in
+ * every axis holds the kernels to their twin, and to each other, as a bake's would.
  */
 function withThickTable(tables: AtmosphereTables, slots: number): void {
-  tables.setThickTables(
-    patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), Math.max(1, slots)),
-  );
+  const count = Math.max(1, slots);
+  tables.setThickTables(patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), count));
+  tables.setPolarisationCorrection(patternedCorrection(tables.plan.bands, tables.medium, count));
 }
 
 /**

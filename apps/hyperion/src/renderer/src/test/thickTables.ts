@@ -1,16 +1,19 @@
 /**
- * Synthetic thick bakes for the read path's tests and the smoke page's checks (plan R08,
- * R08.T14.c): `bake.ts`'s `MsSourceTable` shapes on the bake's grid, with values set so that the
- * packed table's J⁰ and G (`thick/read.ts`) follow a pattern in every axis, without running a solve.
- * The values are a test's, not a world's.
+ * Synthetic thick bakes and polarisation corrections for the read path's tests and the smoke page's
+ * checks (plan R08, R08.T14.c and R08.T14.f): `bake.ts`'s `MsSourceTable` and `polarisation.ts`'s
+ * `PolarisationTable` shapes on the bake's grid, with values set so that the packed table's J⁰, G
+ * and G₂ (`thick/read.ts`) follow a pattern in every axis, without running a solve. The values are a
+ * test's, not a world's.
  */
 
 import { type AtmosphereMedium, densityAt } from "../view/atmosphere/medium";
 import type { TablesBand } from "../view/atmosphere/tables";
 import type { MsSourceSlot, MsSourceTable } from "../view/atmosphere/thick/bake";
+import type { PolarisationSlot, PolarisationTable } from "../view/atmosphere/thick/polarisation";
 import {
   THICK_ALTITUDES,
-  THICK_MODES,
+  THICK_CORRECTION_MODES,
+  THICK_SOURCE_MODES,
   THICK_SUN_COSINES,
   THICK_TRAVEL_COSINES,
 } from "../view/atmosphere/thick/read";
@@ -41,6 +44,29 @@ export function thickPatternAt(
   return { level: [base(0), base(1), base(2)], slope: [slope(0), slope(1), slope(2)] };
 }
 
+/** The pattern's grid: altitudes evenly from the ground to the medium's top, and the bake's cosines. */
+function patternGrid(medium: AtmosphereMedium): {
+  readonly altitudesM: Float64Array;
+  readonly sunCosines: Float64Array;
+  readonly travelCosines: Float64Array;
+} {
+  const top = medium.topHeightM;
+  return {
+    altitudesM: Float64Array.from(
+      { length: THICK_ALTITUDES },
+      (_, a) => (top * a) / (THICK_ALTITUDES - 1),
+    ),
+    sunCosines: Float64Array.from(
+      { length: THICK_SUN_COSINES },
+      (_, s) => (s + 0.5) / THICK_SUN_COSINES,
+    ),
+    travelCosines: Float64Array.from(
+      { length: THICK_TRAVEL_COSINES },
+      (_, v) => (v + 0.5) / (THICK_TRAVEL_COSINES / 2) - 1,
+    ),
+  };
+}
+
 /**
  * A bake whose packed J⁰ and G are {@link thickPatternAt}'s, one table a band of `bands` (a
  * tables plan's, in its order), with `slots` light slots, on the bake's grid: altitudes evenly from
@@ -53,19 +79,7 @@ export function patternedThickBake(
   kernelMedium: AtmosphereMedium,
   slots: number,
 ): MsSourceTable[] {
-  const top = kernelMedium.topHeightM;
-  const altitudesM = Float64Array.from(
-    { length: THICK_ALTITUDES },
-    (_, a) => (top * a) / (THICK_ALTITUDES - 1),
-  );
-  const sunCosines = Float64Array.from(
-    { length: THICK_SUN_COSINES },
-    (_, s) => (s + 0.5) / THICK_SUN_COSINES,
-  );
-  const travelCosines = Float64Array.from(
-    { length: THICK_TRAVEL_COSINES },
-    (_, v) => (v + 0.5) / (THICK_TRAVEL_COSINES / 2) - 1,
-  );
+  const { altitudesM, sunCosines, travelCosines } = patternGrid(kernelMedium);
   const scattering = Array.from(altitudesM, (h) =>
     [0, 1, 2].map((c) =>
       kernelMedium.terms.reduce(
@@ -77,7 +91,7 @@ export function patternedThickBake(
   return bands.map((band, b): MsSourceTable => {
     const slotTables = Array.from({ length: slots }, (_, k): MsSourceSlot => {
       const values = new Float32Array(
-        THICK_ALTITUDES * THICK_SUN_COSINES * THICK_TRAVEL_COSINES * THICK_MODES * 3,
+        THICK_ALTITUDES * THICK_SUN_COSINES * THICK_TRAVEL_COSINES * THICK_SOURCE_MODES * 3,
       );
       for (let a = 0; a < THICK_ALTITUDES; a += 1) {
         for (let s = 0; s < THICK_SUN_COSINES; s += 1) {
@@ -86,7 +100,8 @@ export function patternedThickBake(
             const mu0 = sunCosines[s] ?? Number.NaN;
             const muV = travelCosines[v] ?? Number.NaN;
             const sines = Math.sqrt((1 - mu0 * mu0) * (1 - muV * muV));
-            const at = ((a * THICK_SUN_COSINES + s) * THICK_TRAVEL_COSINES + v) * THICK_MODES * 3;
+            const at =
+              ((a * THICK_SUN_COSINES + s) * THICK_TRAVEL_COSINES + v) * THICK_SOURCE_MODES * 3;
             for (let c = 0; c < 3; c += 1) {
               const sigma = scattering[a]?.[c] ?? Number.NaN;
               values[at + c] = (point.level[c] ?? Number.NaN) * sigma;
@@ -114,8 +129,100 @@ export function patternedThickBake(
       altitudesM,
       sunCosines,
       travelCosines,
-      modes: THICK_MODES,
+      modes: THICK_SOURCE_MODES,
       verticalOpticalDepth: new Float64Array(15),
+      slots: slotTables,
+    };
+  });
+}
+
+/** ΔJ_0, ΔJ_1 ÷ (sin θ_v sin θ₀) and ΔJ_2 ÷ (sin θ_v sin θ₀)² at a point, per channel, sr⁻¹. */
+export interface ThickCorrectionPoint {
+  readonly level: readonly [number, number, number];
+  readonly slope: readonly [number, number, number];
+  readonly curve: readonly [number, number, number];
+}
+
+/**
+ * The correction's pattern at altitude `a`, sun cosine `s`, travel cosine `v`, band `b` and light slot
+ * `k` (R08.T14.f): smooth in each and of either sign, ΔJ_0 at most a tenth of
+ * {@link thickPatternAt}'s J⁰, ΔJ_1's quotient 8% of it and ΔJ_2's 5%.
+ */
+export function thickCorrectionPatternAt(
+  a: number,
+  s: number,
+  v: number,
+  b: number,
+  k: number,
+): ThickCorrectionPoint {
+  const { level: base } = thickPatternAt(a, s, v, b, k);
+  const at = (c: number): number => base[c] ?? Number.NaN;
+  const level = (c: number): number =>
+    0.1 * at(c) * Math.sin(0.23 * a - 0.31 * s + 0.17 * v + 0.5 * c + 0.7 * b + 0.3 * k);
+  const slope = (c: number): number =>
+    0.08 * at(c) * Math.cos(0.19 * a + 0.27 * v - 0.4 * c + b - 0.2 * k);
+  const curve = (c: number): number =>
+    0.05 * at(c) * Math.sin(0.33 * s + 0.41 * v + 0.6 * c - 0.5 * b - k);
+  return {
+    level: [level(0), level(1), level(2)],
+    slope: [slope(0), slope(1), slope(2)],
+    curve: [curve(0), curve(1), curve(2)],
+  };
+}
+
+/**
+ * A polarisation correction whose ΔJ is {@link thickCorrectionPatternAt}'s (R08.T14.f), one table a
+ * band of `bands`, with `slots` light slots, on {@link patternedThickBake}'s grid for `medium`. ΔJ is
+ * per unit of the whole σ_s, so that over a medium with no forward delta the packed correction is
+ * the pattern itself.
+ */
+export function patternedCorrection(
+  bands: ReadonlyArray<TablesBand>,
+  medium: AtmosphereMedium,
+  slots: number,
+): PolarisationTable[] {
+  const { altitudesM, sunCosines, travelCosines } = patternGrid(medium);
+  return bands.map((band, b): PolarisationTable => {
+    const slotTables = Array.from({ length: slots }, (_, k): PolarisationSlot => {
+      const values = new Float32Array(
+        THICK_ALTITUDES * THICK_SUN_COSINES * THICK_TRAVEL_COSINES * THICK_CORRECTION_MODES * 3,
+      );
+      for (let a = 0; a < THICK_ALTITUDES; a += 1) {
+        for (let s = 0; s < THICK_SUN_COSINES; s += 1) {
+          for (let v = 0; v < THICK_TRAVEL_COSINES; v += 1) {
+            const point = thickCorrectionPatternAt(a, s, v, b, k);
+            const mu0 = sunCosines[s] ?? Number.NaN;
+            const muV = travelCosines[v] ?? Number.NaN;
+            const sines = Math.sqrt((1 - mu0 * mu0) * (1 - muV * muV));
+            const at =
+              ((a * THICK_SUN_COSINES + s) * THICK_TRAVEL_COSINES + v) * THICK_CORRECTION_MODES * 3;
+            for (let c = 0; c < 3; c += 1) {
+              values[at + c] = point.level[c] ?? Number.NaN;
+              values[at + 3 + c] = (point.slope[c] ?? Number.NaN) * sines;
+              values[at + 6 + c] = (point.curve[c] ?? Number.NaN) * sines * sines;
+            }
+          }
+        }
+      }
+      return {
+        values,
+        solves: 0,
+        complexPairs: 0,
+        imaginaryShares: [Number.POSITIVE_INFINITY, 0],
+        nonsymmetricLayers: 0,
+      };
+    });
+    return {
+      band: {
+        gravityRatio: band.gravityRatio,
+        latitudeRad: band.latitudeRad,
+        bottomRadiusM: band.bottomRadiusM,
+        coefficientFactor: band.coefficientFactor,
+      },
+      altitudesM,
+      sunCosines,
+      travelCosines,
+      modes: THICK_CORRECTION_MODES,
       slots: slotTables,
     };
   });

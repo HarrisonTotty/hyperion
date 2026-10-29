@@ -26,7 +26,11 @@ const PSI: TwinRgb = [0.01, 0.02, 0.03];
 const J: TwinRgb = [0.05, 0.04, 0.07];
 
 /** The sources' reads, the table's recording each read's arguments when it has one. */
-function sources(thick: boolean, reads: number[][] = []): TwinSources {
+function sources(
+  thick: boolean | "correction",
+  reads: number[][] = [],
+  j: TwinRgb = J,
+): TwinSources {
   return {
     bottomRadiusM: BOTTOM_M,
     sunTransmittance: (_h, _mu, out) => {
@@ -40,16 +44,17 @@ function sources(thick: boolean, reads: number[][] = []): TwinSources {
     absorberPathDepth: (_c, _p, out) => {
       out.fill(0);
     },
-    ...(thick
-      ? {
+    ...(thick === false
+      ? {}
+      : {
+          thickKind: thick === "correction" ? "correction" : "thick",
           thickSource: (h, muSun, muTravel, horizontal, out) => {
             reads.push([h, muSun, muTravel, horizontal]);
-            out[0] = J[0];
-            out[1] = J[1];
-            out[2] = J[2];
+            out[0] = j[0];
+            out[1] = j[1];
+            out[2] = j[2];
           },
-        }
-      : {}),
+        }),
   };
 }
 
@@ -131,6 +136,48 @@ describe("the twin's march over the thick table (R08.T14.c)", () => {
       expect(muSun).toBeCloseTo(mu0, 12);
       expect(muTravel).toBeCloseTo(-muView, 12);
       expect(horizontal).toBeCloseTo(d.x * s.x + d.y * s.y + d.z * s.z - muView * mu0, 12);
+    }
+  });
+});
+
+/** The correction's ΔJ of the stand-ins, per channel: of either sign, the blue one past Ψ_ms. */
+const DELTA: TwinRgb = [0.002, -0.004, -0.05];
+
+/** The stand-in with Ψ_ms read as Ψ_ms + ΔJ, held at 0: a correction at its full weight. */
+const CORRECTED_PSI: TwinSources = {
+  ...sources(false),
+  multiScattering: (_h, _mu, out) => {
+    out[0] = Math.max(PSI[0] + DELTA[0], 0);
+    out[1] = Math.max(PSI[1] + DELTA[1], 0);
+    out[2] = Math.max(PSI[2] + DELTA[2], 0);
+  },
+};
+
+describe("the twin's march beside a correction alone (R08.T14.f)", () => {
+  it("reads Ψ_ms alone for a source at or below the horizontal, and never the table", () => {
+    const reads: number[][] = [];
+    const ray = rayWith(-0.05);
+    expect(march(sources("correction", reads, DELTA), ray)).toEqual(march(sources(false), ray));
+    expect(reads).toEqual([]);
+  });
+
+  it("adds the correction to Ψ_ms whole from the first sun cosine cell up, the sum held at 0", () => {
+    const ray = rayWith(0.5);
+    const corrected = march(sources("correction", [], DELTA), ray);
+    const expected = march(CORRECTED_PSI, ray);
+    for (const c of [0, 1, 2] as const) {
+      expect(corrected[c]).toBeCloseTo(expected[c], 12);
+    }
+  });
+
+  it("fades the correction in across the first cell, Ψ_ms whole", () => {
+    const ray = rayWith(Math.asin(1 / 64));
+    const faded = march(sources("correction", [], DELTA), ray);
+    const thin = march(sources(false), ray);
+    const full = march(CORRECTED_PSI, ray);
+    for (const c of [0, 1] as const) {
+      expect(faded[c]).toBeGreaterThan(Math.min(thin[c], full[c]));
+      expect(faded[c]).toBeLessThan(Math.max(thin[c], full[c]));
     }
   });
 });

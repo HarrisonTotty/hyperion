@@ -119,6 +119,7 @@ import {
   type TwinView,
 } from "../tablesCpu";
 import type { MsSourceTable, ThickBakeBody } from "../thick/bake";
+import type { PolarisationTable } from "../thick/polarisation";
 import { packThickTable } from "../thick/read";
 import type { CaseFigure } from "./cases";
 import {
@@ -189,6 +190,15 @@ export interface TwinOptions {
    */
   readonly thick: ReadonlyArray<MsSourceTable> | null;
   /**
+   * The polarisation correction the reads add (plan R08, R08.T14.f; `thick/polarisation.ts`'s
+   * `bakePolarisationCorrection`), one table a band of the twin's slicing, in its order: summed into
+   * {@link TwinOptions.thick}'s bake where it is given, and read beside Ψ_ms where not, as a body's
+   * tables hold it once its correction lands (`thick/read.ts`'s kinds); none by default. Taken with
+   * `drawn` multiple scattering only; the sky's irradiance reads Ψ_ms alone either way, as the
+   * kernels' does.
+   */
+  readonly polarisation: ReadonlyArray<PolarisationTable> | null;
+  /**
    * The multiple-scattering table's size, its μ_s across and its height down: the kernels'
    * `MULTI_SCATTERING_SIZE` by default; R08.T14.c's resolution control takes four times its μ_s
    * (`decision-r08-t13c2-classes.md` §1).
@@ -207,6 +217,7 @@ export const DEFAULT_TWIN_OPTIONS: TwinOptions = {
   marchSteps: "pieces",
   multipleScattering: "drawn",
   thick: null,
+  polarisation: null,
   multiScatteringSize: MULTI_SCATTERING_SIZE,
 };
 
@@ -608,19 +619,34 @@ export function referenceTwin(
       oblate = asBuilt;
       break;
     case "zeroed":
-      if (settings.thick !== null) {
-        throw new RangeError("a twin with its multiple scattering zeroed takes no thick bake");
+      if (settings.thick !== null || settings.polarisation !== null) {
+        throw new RangeError(
+          "a twin with its multiple scattering zeroed takes no thick bake and no correction",
+        );
       }
       oblate = withoutMultipleScattering(asBuilt);
       break;
   }
-  if (settings.thick !== null) {
-    if (settings.thick.length !== oblate.bands.length) {
-      throw new RangeError(
-        `a thick bake of ${settings.thick.length} bands for a twin of ${oblate.bands.length}`,
-      );
+  const { thick, polarisation } = settings;
+  if (thick !== null || polarisation !== null) {
+    for (const [what, bands] of [
+      ["thick bake", thick],
+      ["polarisation correction", polarisation],
+    ] as const) {
+      if (bands !== null && bands.length !== oblate.bands.length) {
+        throw new RangeError(
+          `a ${what} of ${bands.length} bands for a twin of ${oblate.bands.length}`,
+        );
+      }
     }
-    oblate = { ...oblate, thick: packThickTable(settings.thick, drawn) };
+    oblate = {
+      ...oblate,
+      thick: packThickTable(
+        thick,
+        drawn,
+        polarisation === null ? null : { bands: polarisation, medium },
+      ),
+    };
   }
   const marched = oblate.medium;
   const [band] = oblate.bands;

@@ -8,7 +8,7 @@ import {
 } from "../../test/atmosphereFixtures";
 import { wgslFunctions, wgslReached } from "../../test/atmosphereWgsl";
 import { boundNames, countingRenderEngine } from "../../test/countingRenderEngine";
-import { patternedThickBake } from "../../test/thickTables";
+import { patternedCorrection, patternedThickBake } from "../../test/thickTables";
 import { lookAlong } from "../camera/quaternion";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
 import type { KernelPair } from "../engine/kernels";
@@ -131,7 +131,7 @@ const THICK_SOURCE_AT =
   "return thickSourceAt(body, start, light, muSun, slot, local, phased, ray, dir, up);";
 const LOBES = "phased += lobeOrdersOf(local, angle, light.depth);";
 const THICK_LOBES =
-  "phased += thickAnalyticShare(muSun) * lobeOrdersOf(local, angle, light.depth);";
+  "phased += thickAnalyticWeight(muSun) * lobeOrdersOf(local, angle, light.depth);";
 const SLOT_SOURCE_AT = "let one = sourceAt(body, start, light, muSun, slot, local, phased);";
 const THICK_SLOT_SOURCE_AT =
   "let one = thickSourceAt(body, start, light, muSun, slot, local, phased, ray, dir, up);";
@@ -316,10 +316,82 @@ describe("AtmosphereTables' thick table (R08.T14.c)", () => {
   });
 });
 
+describe("AtmosphereTables' polarisation correction (R08.T14.f)", () => {
+  it("holds a correction alone as a correction table, and summed into a bake as a thick one, of the bake's bytes", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, tableRadiusM(WGS84));
+    const before = tables.rowBytes;
+    const bands = tables.plan.bands;
+    expect(tables.holdsPolarisationCorrection).toBe(false);
+    tables.setPolarisationCorrection(patternedCorrection(bands, tables.medium, 2));
+    expect(tables.thickPacked?.kind).toBe("correction");
+    expect(tables.holdsPolarisationCorrection).toBe(true);
+    expect(tables.rowBytes).toBe(before + 2 * 270_592);
+    tables.setThickTables(patternedThickBake(bands, kernelMedium(tables.medium), 2));
+    expect(tables.thickPacked?.kind).toBe("thick");
+    expect(tables.thickBytes).toBe(2 * 270_592);
+    // The bake taken away leaves the correction alone; the correction taken away, nothing.
+    tables.setThickTables(null);
+    expect(tables.thickPacked?.kind).toBe("correction");
+    tables.setPolarisationCorrection(null);
+    expect([tables.thickTable, tables.thickBytes, tables.holdsPolarisationCorrection]).toEqual([
+      null,
+      0,
+      false,
+    ]);
+    tables.dispose();
+    expect(() => tables.setPolarisationCorrection(null)).toThrow(/disposed/u);
+  });
+
+  it("refuses a correction of other bands or light slots, keeping what it held", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, tableRadiusM(WGS84));
+    const bands = tables.plan.bands;
+    tables.setThickTables(patternedThickBake(bands, kernelMedium(tables.medium), 2));
+    const held = tables.thickTable;
+    expect(() =>
+      tables.setPolarisationCorrection(
+        patternedCorrection(
+          bands.map((band) => ({ ...band, gravityRatio: band.gravityRatio * 1.01 })),
+          tables.medium,
+          2,
+        ),
+      ),
+    ).toThrow(/is not the tables'/u);
+    expect(() =>
+      tables.setPolarisationCorrection(patternedCorrection(bands, tables.medium, 1)),
+    ).toThrow(/light slots/u);
+    expect(tables.thickTable).toBe(held);
+    expect(tables.holdsPolarisationCorrection).toBe(false);
+    tables.dispose();
+  });
+
+  it("forgets both on a rebuild for another medium, and keeps both across a restore", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, tableRadiusM(WGS84));
+    const bands = tables.plan.bands;
+    tables.setThickTables(patternedThickBake(bands, kernelMedium(tables.medium), 1));
+    tables.setPolarisationCorrection(patternedCorrection(bands, tables.medium, 1));
+    engine.loseDevice();
+    engine.restore();
+    expect(tables.thickPacked?.kind).toBe("thick");
+    // The bake is still held after the restore: taking the correction away leaves it.
+    tables.setPolarisationCorrection(null);
+    expect(tables.thickPacked?.kind).toBe("thick");
+    tables.setPolarisationCorrection(patternedCorrection(bands, tables.medium, 1));
+    tables.setMedium(
+      { ...R05_EARTH_REFERENCE, groundAlbedo: [0.2, 0.2, 0.2] },
+      tableRadiusM(WGS84),
+    );
+    expect([tables.thickTable, tables.holdsPolarisationCorrection]).toEqual([null, false]);
+    tables.dispose();
+  });
+});
+
 describe("HillaireAtmosphere over a thick table (R08.T14.c)", () => {
   /** The march's and the sky's dispatches, by kernel name. */
   async function drawn(
-    withThick: boolean,
+    withThick: boolean | "correction",
     cover: "area" | "whole frame" | "tiles",
     camera: AtmosphereCamera = DISTANT,
   ): Promise<{ kernels: string[]; bound: string[][] }> {
@@ -332,7 +404,9 @@ describe("HillaireAtmosphere over a thick table (R08.T14.c)", () => {
       [],
       earthBody(),
     );
-    if (withThick) {
+    if (withThick === "correction") {
+      tables.setPolarisationCorrection(patternedCorrection(tables.plan.bands, tables.medium, 1));
+    } else if (withThick) {
       tables.setThickTables(patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), 1));
     }
     const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
@@ -372,6 +446,21 @@ describe("HillaireAtmosphere over a thick table (R08.T14.c)", () => {
     });
     expect(declared).toHaveLength(3);
     expect(declared.map(([given]) => given)).toEqual(declared.map(([, wanted]) => wanted));
+  });
+
+  it("draws a thin body with a correction alone by the thick kernels too, binding the table (R08.T14.f)", async () => {
+    const { kernels, bound } = await drawn("correction", "area", NEAR);
+    expect(kernels.filter((name) => name.startsWith("atmosphere ray march"))).toEqual([
+      RAY_MARCH_THICK_SPECIAL_KERNEL.name,
+    ]);
+    expect(kernels).toEqual(
+      expect.arrayContaining([SKY_VIEW_THICK_KERNEL.name, AERIAL_PERSPECTIVE_THICK_KERNEL.name]),
+    );
+    expect(
+      bound.every(
+        (names, k) => !(kernels[k] ?? "").includes("thick") || names.includes("thickTable"),
+      ),
+    ).toBe(true);
   });
 
   it("takes no tile cull for a thick body, and the general thick march on the reference path", async () => {
