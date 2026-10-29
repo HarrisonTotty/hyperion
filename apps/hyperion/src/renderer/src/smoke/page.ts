@@ -657,7 +657,8 @@ const fixtureName = parameters.get("fixture") ?? "none";
 const gpuTiming = parameters.get("gpuTiming") === "1";
 /**
  * Whether the frame's timings also draw the measured Earth through the thick read, its bake forced
- * on (`--smoke-thick-read=1`; R08.T14.c's frame record): the smoke's override alone.
+ * on with its correction summed into it, and with its polarisation correction alone
+ * (`--smoke-thick-read=1`; R08.T14.c's and R08.T14.f's frame records): the smoke's override alone.
  */
 const thickRead = parameters.get("thickRead") === "1";
 /** Whether the run renders R05.T12.c's comparison frames for the main process to save. */

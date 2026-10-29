@@ -49,14 +49,20 @@
  *   (A)'s but at `SATURN_GIANT_DISTANCE_M`, beyond the farthest of its cameras.
  *
  * R08.T14.c adds two under `--smoke-thick-read=1` alone (the smoke's override; the route stays
- * gated, `thick/routing.ts`), timed and reported as (A) and (I) are:
+ * gated, `thick/routing.ts`), timed and reported as (A) and (I) are, and R08.T14.f two more under
+ * the same flag:
  *
  * - (K) the measured Earth through the thick read: (A)'s combinations on both settings, its tables
- *   (its own, beside (A)'s) holding its bake under the reference Sun on both light slots
- *   (`thick/keptBake.ts`, made on the page before the renderer), so that the sky view, the aerial
+ *   (its own, beside (A)'s) holding its bake under the reference Sun on both light slots with its
+ *   polarisation correction summed into it (`thick/keptBake.ts`, made on the page before the
+ *   renderer; R08.T14.f's lever, one read a sample and source), so that the sky view, the aerial
  *   perspective and the march read the thick table (`hillaire.ts`'s `withThickRead`), and its J_ms
  *   bytes beside its rows;
- * - (L) the same tables under R10's smoke class map, (I)'s judged rows.
+ * - (L) the same tables under R10's smoke class map, (I)'s judged rows;
+ * - (M) the measured Earth drawn as every world with air now is (R08.T14.f): its tables holding its
+ *   correction alone, read beside Ψ_ms by the same kernels, (A)'s combinations, its bytes beside
+ *   its rows;
+ * - (N) (M)'s tables under the class map, (I)'s judged rows.
  *
  * The timed parts take QW2's and QW3's form (`decision-r08-t8-leans.md` §10;
  * `frameTimingLedger.ts`' `QW_FORM` and `runTimed`): each combination's 10 warm-up frames, then 30
@@ -95,7 +101,9 @@ import {
 import { forwardLobeOf } from "../view/atmosphere/forwardLobe";
 import type { AtmosphereMedium } from "../view/atmosphere/medium";
 import { keptBakeLightsOf } from "../view/atmosphere/opticsMessages";
-import { bakeKeptCase } from "../view/atmosphere/thick/keptBake";
+import type { MsSourceTable } from "../view/atmosphere/thick/bake";
+import { bakeKeptCase, bakeKeptCorrection } from "../view/atmosphere/thick/keptBake";
+import type { PolarisationTable } from "../view/atmosphere/thick/polarisation";
 import { THICK_TABLE_BYTES_A_SLOT } from "../view/atmosphere/thick/read";
 import {
   absorberCount,
@@ -250,6 +258,8 @@ const EARTH_IDS = {
   palette: "0200080020000000.0316",
   thick: "0200080020000000.0317",
   thickClassMap: "0200080020000000.0318",
+  corrected: "0200080020000000.0319",
+  correctedClassMap: "0200080020000000.031a",
 } as const;
 
 /** (H)'s three small bodies' ids, in `SMALL_TRIO`'s order. */
@@ -2196,8 +2206,9 @@ function summaryCheckNames(): string[] {
 /** What a run of {@link timeAtmosphereFrame} takes beyond its checks. */
 export interface FrameTimingOptions {
   /**
-   * Whether (K) and (L) run: the measured Earth through the thick read, its bake forced on (plan
-   * R08, R08.T14.c; the page's `thickRead`, `--smoke-thick-read=1`).
+   * Whether (K) to (N) run: the measured Earth through the thick read, its bake forced on, and with
+   * its polarisation correction alone (plan R08, R08.T14.c and R08.T14.f; the page's `thickRead`,
+   * `--smoke-thick-read=1`).
    */
   readonly thickRead: boolean;
 }
@@ -2209,6 +2220,71 @@ const THICK_EARTH_NAME = "the measured Earth through the thick read";
 const THICK_CLASS_MAP_NAME =
   "the measured Earth under R10's smoke class map, through the thick read";
 
+/** (M)'s medium's name in its checks. */
+const CORRECTED_EARTH_NAME = "the measured Earth with its polarisation correction alone";
+
+/** (N)'s medium's name in its checks. */
+const CORRECTED_CLASS_MAP_NAME =
+  "the measured Earth under R10's smoke class map, with its polarisation correction alone";
+
+/** The measured Earth's bake and correction for (K) to (N), made on the page, and their times. */
+interface MeasuredBakes {
+  readonly bands: ReadonlyArray<MsSourceTable>;
+  readonly correction: ReadonlyArray<PolarisationTable>;
+  readonly bakeMs: number;
+  readonly correctionMs: number;
+}
+
+/**
+ * The measured Earth's thick bake and polarisation correction on both light slots under the
+ * reference Sun (`R06_SOLAR_BAKE_SPECTRUM`, the spectrum its curves were formed under), made on the
+ * page (`thick/keptBake.ts`).
+ */
+function measuredBakes(measured: FrameMedium): MeasuredBakes {
+  const kept = { medium: measured.medium, sources: EARTH_REFERENCE_SOURCES };
+  const lights = keptBakeLightsOf(
+    measured.medium,
+    Array.from({ length: measured.tables.curves.length }, () => R06_SOLAR_BAKE_SPECTRUM),
+  );
+  const earth = earthBody();
+  const body = { ...earth, bottomRadiusM: tableRadiusM(earth.figure) };
+  const start = performance.now();
+  const bands = bakeKeptCase(kept, lights, body);
+  const baked = performance.now();
+  const correction = bakeKeptCorrection(kept, lights, body);
+  return {
+    bands,
+    correction,
+    bakeMs: baked - start,
+    correctionMs: performance.now() - baked,
+  };
+}
+
+/**
+ * (M)'s medium: the measured Earth as (A) draws it, its own tables holding its polarisation
+ * correction alone (R08.T14.f; `thick/read.ts`'s `correction` kind), held by `releases`, with what
+ * its rows say of the table.
+ */
+function correctedMeasuredMedium(
+  engine: RenderEngine,
+  releases: Releases,
+  measured: FrameMedium,
+  bakes: MeasuredBakes,
+): { readonly medium: FrameMedium; readonly about: string } {
+  const tables = releases.hold(
+    earthTables(engine, measured.medium, measured.tables.curves),
+    (made) => {
+      made.dispose();
+    },
+  );
+  tables.setPolarisationCorrection(bakes.correction);
+  const layers = tables.thickPacked?.layers ?? 0;
+  return {
+    medium: { ...measured, name: CORRECTED_EARTH_NAME, id: EARTH_IDS.corrected, tables },
+    about: `its tables (its own, beside (A)'s) hold its polarisation correction alone (R08.T14.f, as every world with air is drawn): ${tables.thickPacked?.bands ?? 0} band and ${tables.thickPacked?.slots ?? 0} light slots, both under the reference Sun, baked on the page in ${(bakes.correctionMs / 1_000).toFixed(1)} s; ${layers} × ${THICK_TABLE_BYTES_A_SLOT.toLocaleString("en-GB")} B (${tables.thickBytes.toLocaleString("en-GB")} B allocated with the info rows), the row's ${tables.rowBytes.toLocaleString("en-GB")} B in all; the sky view, the aerial perspective and the march read Psi_ms whole and the correction beside it (withThickRead)`,
+  };
+}
+
 /**
  * (K)'s medium: the measured Earth as (A) draws it, its own tables holding its thick bake on both
  * light slots under the reference Sun (`R06_SOLAR_BAKE_SPECTRUM`, the spectrum its curves were
@@ -2219,6 +2295,7 @@ function thickMeasuredMedium(
   engine: RenderEngine,
   releases: Releases,
   measured: FrameMedium,
+  bakes: MeasuredBakes,
 ): { readonly medium: FrameMedium; readonly about: string } {
   const tables = releases.hold(
     earthTables(engine, measured.medium, measured.tables.curves),
@@ -2226,32 +2303,23 @@ function thickMeasuredMedium(
       made.dispose();
     },
   );
-  const slots = measured.tables.curves.length;
-  const start = performance.now();
-  const body = earthBody();
-  const bands = bakeKeptCase(
-    { medium: measured.medium, sources: EARTH_REFERENCE_SOURCES },
-    keptBakeLightsOf(
-      measured.medium,
-      Array.from({ length: slots }, () => R06_SOLAR_BAKE_SPECTRUM),
-    ),
-    { ...body, bottomRadiusM: tableRadiusM(body.figure) },
-  );
-  const bakeMs = performance.now() - start;
-  tables.setThickTables(bands);
+  const { bakeMs } = bakes;
+  tables.setThickTables(bakes.bands);
+  tables.setPolarisationCorrection(bakes.correction);
   const packed = tables.thickPacked;
   const layers = packed?.layers ?? 0;
   return {
     medium: { ...measured, name: THICK_EARTH_NAME, id: EARTH_IDS.thick, tables },
-    about: `its tables (its own, beside (A)'s) hold its thick bake (R08.T14.c's smoke-only override; the route stays gated): ${packed?.bands ?? 0} band and ${packed?.slots ?? 0} light slots, both under the reference Sun, baked on the page in ${(bakeMs / 1_000).toFixed(1)} s; its J_ms ${layers} × ${THICK_TABLE_BYTES_A_SLOT.toLocaleString("en-GB")} B as rgba16float would hold it (${(layers * THICK_TABLE_BYTES_A_SLOT).toLocaleString("en-GB")} B), ${tables.thickBytes.toLocaleString("en-GB")} B allocated with the info rows, the row's ${tables.rowBytes.toLocaleString("en-GB")} B in all; the sky view, the aerial perspective and the march read it (withThickRead), the analytic term below the horizon`,
+    about: `its tables (its own, beside (A)'s) hold its thick bake with its polarisation correction summed into it (R08.T14.c's smoke-only override, R08.T14.f's lever; the route stays gated): ${packed?.bands ?? 0} band and ${packed?.slots ?? 0} light slots, both under the reference Sun, baked on the page in ${(bakeMs / 1_000).toFixed(1)} s and corrected in ${(bakes.correctionMs / 1_000).toFixed(1)} s; its J_ms ${layers} × ${THICK_TABLE_BYTES_A_SLOT.toLocaleString("en-GB")} B as rgba16float would hold it (${(layers * THICK_TABLE_BYTES_A_SLOT).toLocaleString("en-GB")} B), ${tables.thickBytes.toLocaleString("en-GB")} B allocated with the info rows, the row's ${tables.rowBytes.toLocaleString("en-GB")} B in all; the sky view, the aerial perspective and the march read it (withThickRead), the analytic term below the horizon`,
   };
 }
 
 /**
  * R08.T11's photorealistic frame's timings (the module's remarks): (D) first, so that its cold
  * builds are as cold as the page leaves them, then (A), (B) on (A)'s sources, (C), (G), R08.T11.c's
- * (H), (I) and (J), R08.T14.c's (K) and (L) where `options.thickRead` asks (their bake made before
- * the renderer, with (I)'s and (J)'s media), then (E) and (F);
+ * (H), (I) and (J), R08.T14.c's (K) and (L) and R08.T14.f's (M) and (N) where `options.thickRead`
+ * asks (their bake and correction made before the renderer, with (I)'s and (J)'s media), then (E)
+ * and (F);
  * a check a table, one per combination with its per-frame sums, and one that no timed frame was
  * dropped. Without `timestamp-query` each check fails with the reason.
  */
@@ -2290,12 +2358,15 @@ export async function timeAtmosphereFrame(
     const specs = classMapSpecs();
     const mapped = specs.map((spec) => classMapMedium(engine, releases, measured, spec));
     const saturn = await saturnMedium(engine, releases);
-    // (K)'s and (L)'s media before the renderer, as (I)'s and (J)'s, its bake made here.
-    const thick = options.thickRead
-      ? await timedPart("(K)'s bake", () =>
-          Promise.resolve(thickMeasuredMedium(engine, releases, measured)),
+    // (K)'s to (N)'s media before the renderer, as (I)'s and (J)'s, their bakes made here.
+    const bakes = options.thickRead
+      ? await timedPart("(K)'s bake and (M)'s correction", () =>
+          Promise.resolve(measuredBakes(measured)),
         )
       : null;
+    const thick = bakes === null ? null : thickMeasuredMedium(engine, releases, measured, bakes);
+    const corrected =
+      bakes === null ? null : correctedMeasuredMedium(engine, releases, measured, bakes);
     const judged = specs.find((spec) => spec.name === CLASS_MAP_NAME);
     if (judged === undefined) {
       throw new Error("(I)'s judged class map is among its specs");
@@ -2307,6 +2378,14 @@ export async function timeAtmosphereFrame(
             ...judged,
             name: THICK_CLASS_MAP_NAME,
             id: EARTH_IDS.thickClassMap,
+          });
+    const correctedMapped =
+      corrected === null
+        ? null
+        : classMapMedium(engine, releases, corrected.medium, {
+            ...judged,
+            name: CORRECTED_CLASS_MAP_NAME,
+            id: EARTH_IDS.correctedClassMap,
           });
     const firstPlace = FAR_LIMB_TIMING_PLACES[0];
     const firstSet = sourceSetsOf("high")[0];
@@ -2361,6 +2440,22 @@ export async function timeAtmosphereFrame(
       );
       thickMissing = missingOf(thickFrames) + missingOf(thickMappedFrames);
     }
+    if (corrected !== null && correctedMapped !== null) {
+      const correctedFrames = await timedPart("(M)", () =>
+        timeFrames(on, ledger, [corrected.medium]),
+      );
+      reportFrames(checks, correctedFrames, () => corrected.about);
+      const correctedMappedFrames = await timedPart("(N)", () =>
+        timeClassMap(on, ledger, [correctedMapped]),
+      );
+      reportFrames(
+        checks,
+        correctedMappedFrames,
+        () =>
+          `${MEASURED_EARTH_NAME}'s body under ${judged.about}, under its own id, over (M)'s tables: ${corrected.about}`,
+      );
+      thickMissing += missingOf(correctedFrames) + missingOf(correctedMappedFrames);
+    }
     const frameMissing = missingOf(frames);
     const mappedMissing = missingOf(mappedFrames);
     const saturnMissing = missingOf(saturnFrames);
@@ -2376,7 +2471,7 @@ export async function timeAtmosphereFrame(
     checks.check(
       CHECK_NAMES.dropped,
       missing === 0,
-      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) and (L) ${thickMissing}`}`,
+      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) to (N) ${thickMissing}`}`,
     );
     const bytes = await timedPart("(E)", () => perViewBytes(engine, checks, measured));
     await timedPart("(F)", () =>
