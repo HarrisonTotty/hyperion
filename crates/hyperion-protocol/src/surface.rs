@@ -224,7 +224,8 @@ pub enum ClimateModelDto {
     /// A seasonal moist energy-balance model, for a world with a seasonal water cycle or one like
     /// it.
     EnergyBalance,
-    /// The same model in tidally locked coordinates about the substellar axis, with no seasons.
+    /// The same model in tidally locked coordinates about the substellar axis, with seasons
+    /// wherever its orbit is eccentric or it has obliquity.
     LockedEnergyBalance,
     /// Radiative equilibrium with thermal inertia, for an airless or thin-aired world.
     RadiativeEquilibrium,

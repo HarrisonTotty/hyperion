@@ -49,8 +49,8 @@ coded_enum! {
         /// energy in latitude and longitude, for a world with a seasonal water cycle or one like
         /// it.
         EnergyBalance = 0,
-        /// The same model in tidally locked coordinates about the substellar axis, with no seasons
-        /// (R09.T13.b).
+        /// The same model in tidally locked coordinates about the substellar axis, with seasons
+        /// wherever its orbit is eccentric or it has obliquity (R09.T13.b).
         LockedEnergyBalance = 1,
         /// Radiative equilibrium with thermal inertia, for an airless or thin-aired world
         /// (R09.T13.c).
