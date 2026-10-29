@@ -17,13 +17,15 @@
 //! track integrates with its rate at each of the segment's knots (P06.T10.c) and interpolates
 //! between them by a monotone cubic. The age at t is read in its two parts, the age at the epoch
 //! and the years since it, as the track's mass is for a planet's orbit (P14.T45.d), so that the
-//! clock follows the clock time without forming an age at t (design note 23). Within ±H that is
-//! the plan's form, the integral at the epoch plus the clock time since the epoch times the epoch's
-//! pulse frequency, to under 10⁻³ cycles for most stars (a unit test measures 1–4 M☉), growing with
-//! ḟ to some 10⁻² cycles for the short periods of the most massive (6–7 M☉, `τ_ip` of 100–300
-//! years); across the source horizon it stays the track's pulse count, from which the first-order
-//! form would drift by ½ ḟ Δt², tens of cycles for the shortest phases, which the source horizon
-//! spans whole.
+//! clock follows the clock time without forming an age at t (design note 23); it is the task's
+//! form as amended (plan 06, P06.T28.f, 2026-10-29). Within ±H the first-order form the task first
+//! gave, the integral at the epoch plus the clock time since the epoch times the epoch's pulse
+//! frequency, is this count's tangent and agrees with it to under 10⁻³ cycles for most stars (a
+//! unit test measures 1–4 M☉), growing with ḟ to up to 2 × 10⁻² cycles for the short periods of
+//! the most massive (6–7 M☉, `τ_ip` of 100–300 years, at median draws: plan 06's record of
+//! P06.T28.f), and more for the census's shortest periods; across the source horizon the
+//! first-order form would drift by ½ ḟ Δt², tens of cycles for the shortest phases, which the
+//! source horizon spans whole.
 //!
 //! Before the segment and after it φ continues linearly at the segment's mean rate, so that it is
 //! strictly increasing on the whole clock, as a [`PhaseClock`] must be; pulses fall only inside
@@ -1072,8 +1074,8 @@ mod tests {
     /// The clock's rate is 1 ÷ `τ_ip`, Wagenhuber and Groenewegen's interpulse period at the
     /// state's core mass and envelope, to the knots' interpolation (10%: 8.2% at [Fe/H] = −1, where
     /// the first pulses' turn-on bends the rate between the sparsest knots), at nine instants of
-    /// each phase; and within ±H the clock is the plan's first-order form, its count at the epoch
-    /// plus the time since times its rate at the epoch, to 10⁻³ cycles.
+    /// each phase; and within ±H the clock is the first-order form the task first gave, its count
+    /// at the epoch plus the time since times its rate at the epoch, to 10⁻³ cycles.
     #[test]
     fn the_rate_is_the_interpulse_periods_and_the_clock_is_first_order_within_the_window() {
         for s in cases() {

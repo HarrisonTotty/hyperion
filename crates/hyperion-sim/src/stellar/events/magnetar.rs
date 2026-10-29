@@ -74,9 +74,10 @@
 //! that follows is not modelled.
 //!
 //! Every figure the ruling cited from memory was read at source on 2026-10-29 (arXiv copies, and
-//! Olausen and Kaspi's online catalogue as the Internet Archive kept it), and each constant's documentation names
-//! the section or table it was read in. One moved: the bursts' duration width, 0.35 dex, not the
-//! ruling's 0.3 ([`BURST_DURATION_SIGMA_DEX`]).
+//! Olausen and Kaspi's online catalogue as the Internet Archive kept it), except Cheng et al.'s
+//! index, read as Göğüş et al. 1999 quote it, and Mazets et al.'s text, whose date the papers that
+//! cite it confirm; each constant's documentation says what it was read in. One moved: the bursts'
+//! duration width, 0.35 dex, not the ruling's 0.3 ([`BURST_DURATION_SIGMA_DEX`]).
 //!
 //! An event may change what a console reads, never what the star's track is (design note 14):
 //! nothing here changes the star or its neutron star.
@@ -153,10 +154,10 @@ pub const EPISODES_PER_E_FOLD: f64 = 2_000.0;
 /// 1998"; Hurley et al. 2005 and Palmer et al. 2005, 27 December 2004; Olausen and Kaspi 2014,
 /// "1979 March 5, from … the Large Magellanic Cloud" (Mazets et al.'s own text was not reached).
 /// No other Galactic giant flare: "only three have been seen … in the Milky Way and in the Large
-/// Magellanic Cloud" (Mereghetti et al. 2024, arXiv:2312.14645), "only 3 such events have been
-/// observed" (Trigg et al. 2025, A&A 710, A139). The 45 years are a choice: Mereghetti et al. say
-/// "∼50 years" and Trigg et al. "the last 57 years", or 0.035–0.044 a year, inside two events'
-/// Poisson error.
+/// Magellanic Cloud" (Mereghetti et al. 2024, Nature 629, 58), "only 3 such events have been
+/// observed" (Trigg et al. 2026, A&A 710, A139; the arXiv copy of October 2025, as read). The 45
+/// years are a choice: Mereghetti et al. say "∼50 years" and Trigg et al. "the last 57 years", or
+/// 0.035–0.044 a year, inside two events' Poisson error.
 pub const GALACTIC_GIANT_FLARES_PER_YEAR: f64 = 0.044;
 
 /// The giant flares of a magnetar per e-fold of its field: 67.29, derived from T21's census.
@@ -175,13 +176,14 @@ pub const GIANT_FLARES_PER_E_FOLD: f64 = 67.29;
 ///
 /// The ruling's checks: over 400 bursts in a day from SGR J1550−5418 in January 2009 (Kaneko et
 /// al. 2010, ApJ 710, 1335; van der Horst et al. 2012, ApJ 749, 122), hundreds from SGR 1935+2154
-/// in April 2020 (Younes et al. 2020, ApJL 904, L21) and about 440 bursts of 8 magnetars in 5 years
-/// of Fermi GBM (Collazzi et al. 2015, ApJS 218, 11). Read at source 2026-10-29 (arXiv copies):
-/// Kaneko et al. §1, "a total of ∼450 bursts during this 24 hour period" from 2009 January 22 (van
-/// der Horst et al. merge their 555 untriggered events of that day into 286 bursts over January
-/// 22–29); Younes et al.'s abstract, "over 217 bursts" in the first 1,120 s of 2020-04-28; and
-/// Collazzi et al.'s abstract, 440 bursts from July 2008 to June 2013 (their Table 1: 427 from 8
-/// magnetars, 19 of unknown origin).
+/// in April 2020 (Younes et al. 2020, ApJL 904, L21) and about 440 bursts in 5 years of Fermi GBM,
+/// nearly all of 8 magnetars (Collazzi et al. 2015, ApJS 218, 11). Read at source 2026-10-29 (arXiv
+/// copies): Kaneko et al. §1, "a total of ∼450 bursts during this 24 hour period" from 2009 January
+/// 22 (van der Horst et al.'s untriggered search found 555 events on January 22, and they analyse
+/// 286 bursts of January 22–29); Younes et al.'s abstract, "over 217 bursts" in the first 1,120 s
+/// of 2020-04-28; and Collazzi et al.'s abstract, 440 magnetar bursts from July 2008 to June 2013,
+/// most of known magnetars and a few of unknown origin (their Table 1 lists 427 from 8 magnetars
+/// and 19 of unknown origin).
 pub const BURST_COUNT: (f64, f64) = (3.0, 1_000.0);
 
 /// The range of an episode's burst e-folding time `τ_b`, days, log-uniform: 0.3–10 (the ruling's
@@ -1828,6 +1830,30 @@ mod tests {
         for g in &gs {
             assert_eq!(g.end().checked_since(g.onset()), Some(GIANT_FLARE_SPIKE));
         }
+    }
+
+    /// The duration law's ends, at u = 0 and just below 1, are its ±4σ cut, 0.1 s × 10^(∓1.4) =
+    /// 3.98 ms and 2.512 s, which no sample reaches; the top is under [`MAX_BURST_DURATION`], and
+    /// that is under the bursts' look-back.
+    #[test]
+    fn the_duration_law_ends_inside_its_bound() {
+        let edge = math::exp10(BURST_DURATION_SIGMA_DEX * BURST_DURATION_TRUNCATION);
+        let bottom = burst_duration_seconds_at(0.0);
+        let top = burst_duration_seconds_at(1.0 - f64::EPSILON / 2.0);
+        assert!(
+            relative(bottom, BURST_DURATION_MEDIAN_SECONDS / edge) < 1e-6,
+            "{bottom}"
+        );
+        assert!(
+            relative(top, BURST_DURATION_MEDIAN_SECONDS * edge) < 1e-6,
+            "{top}"
+        );
+        assert!(relative(top, 2.511_886) < 1e-6, "{top}");
+        assert!(Span::from_seconds_f64(top).unwrap() <= MAX_BURST_DURATION);
+        assert!(
+            MAX_BURST_DURATION
+                < Span::from_seconds(BURST_BIN_SECONDS * i64::from(BURST_LOOK_BACK_BINS))
+        );
     }
 
     /// Every listed event of each kind is regenerated from its ID, and IDs of other series or kinds

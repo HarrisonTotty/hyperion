@@ -681,7 +681,7 @@ fn beyond_humphreys_davidson(s: &Surface) -> bool {
 
 /// HPT's luminous-blue-variable rate beyond the Humphreys–Davidson limit as HPT publish it (p. 562)
 /// and SSE's code writes it, 0.1 (x − 1)³ (L ÷ 6 × 10⁵ − 1) with x = 10⁻⁵ R L^½, and zero within
-/// it; it vanishes on the limit itself. The arXiv preprint omits the − 1.
+/// it, so that it vanishes on the limit itself (the arXiv preprint omits the − 1).
 #[must_use]
 fn hurley_lbv(s: &Surface) -> f64 {
     if !beyond_humphreys_davidson(s) {

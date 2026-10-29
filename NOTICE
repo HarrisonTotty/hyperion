@@ -901,12 +901,13 @@ ruled 2026-10-09 and 2026-10-10).
   Astron. J. 132 (2006) 1221; Tremblay, Bergeron and Gianninas, Astrophys. J. 730 (2011) 128;
   Bergeron et al., Astrophys. J. 737 (2011) 28; Blouin et al., Astrophys. J. 863 (2018) 184;
   Kowalski and Saumon, Astrophys. J. 651 (2006) L137; and Bergeron, Wesemael and Beauchamp,
-  Publ. Astron. Soc. Pac. 107 (1995) 1047. The grid's BC_V column alone, at its own nodes, in
+  Publ. Astron. Soc. Pac. 107 (1995) 1047. The grid's BC_V column, at its own nodes, with its
+  M_bol and V columns for the tests only, in
   crates/hyperion-sim/src/stellar/photometry/montreal_da.rs (galaxy plan 6, P06.T43.a).
 
 - Cool stars' bolometric corrections: G. Worthey and H.-c. Lee, Astrophys. J. Suppl. Ser. 193
   (2011) 1, from the authors' color-temperature table (http://astro.wsu.edu/models/, mash2.out
-  of 2010-09-15), [Fe/H] = 0, log g 0.0-5.5, V - K from 1.1, T_eff and BC_V alone, in
+  of 2010-09-15), [Fe/H] = 0, log g 0.0-5.5, V - K from 1.1, T_eff and BC_V at each row, in
   crates/hyperion-sim/src/stellar/photometry/wl11.rs (galaxy plan 6, P06.T43.a). Not taken from
   CDS's copy of the same table, which CDS offers under CC BY-NC.
 

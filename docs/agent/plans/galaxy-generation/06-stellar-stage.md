@@ -1666,8 +1666,8 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
     - Marks: the episode's burst count N_b, log-uniform on [3, 1,000] (ours; median 55, mean
       172), against over 400 bursts in a day from SGR J1550−5418 in January 2009 (Kaneko et al.
       2010 and van der Horst et al. 2012 [S]), hundreds from SGR 1935+2154 in April 2020 (Younes
-      et al. 2020 [S]) and about 440 bursts from 8 magnetars in 5 years of Fermi GBM (Collazzi et
-      al. 2015 [S]); its e-folding τ_b, log-uniform on 0.3–10 days (ours).
+      et al. 2020 [S]) and about 440 bursts in 5 years of Fermi GBM, nearly all from 8 magnetars
+      (Collazzi et al. 2015 [S]); its e-folding τ_b, log-uniform on 0.3–10 days (ours).
     - Recorded, not tested: an episode's energy, about R³B² ÷ (3 N_EP), roughly 10⁴⁴ erg at
       5 × 10¹⁴ G, above X-ray outbursts' 10⁴⁰–10⁴³ erg: a radiative efficiency of 10⁻⁴–10⁻¹,
       plausible.
@@ -1677,8 +1677,8 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
     regenerated from their own series, which is pure: no event list is ever an input. The bound is
     the sum, over the looked-back episodes, of N_b ÷ τ_b at the bin's start. Marks: energy
     dN/dE ∝ E^(−5/3) on 10³⁷–10⁴¹ erg (Göğüş et al. 1999, ApJ 526, L93; 2000, ApJ 532, L121;
-    Cheng et al. 1996, Nature 382, 518 [S]); duration log-normal about 0.1 s, σ 0.3 dex (Göğüş et
-    al. 2001, ApJ 558, 228 [S]).
+    Cheng et al. 1996, Nature 382, 518 [S]); duration log-normal about 0.1 s, σ 0.35 dex (Göğüş et
+    al. 2001, ApJ 558, 228, §3.1 [S]; the ruling's 0.3, moved at source 2026-10-29).
   - **Giant flares** (`star.ev.magnetar_giant`, Poisson bins, Δ = 1 Julian year):
     r_gf = N_GF × B(t) ÷ (10¹⁹ G yr).
     - N_GF is derived by the task from the model's own Milky Way census of active magnetars
@@ -5648,7 +5648,8 @@ R06.
     read on its `dev` branch) adds `CalculateMassLossRateLBVHurley`'s term,
     0.1 (x − 1)³ (L ÷ 6 × 10⁵ − 1), to the other winds, with no `MODERN_LBV` floor: the floor is
     the ruling's.
-  - _Finding: a fifth place where HPT's text and SSE's code differ, for the owner to confirm._
+  - _Finding (settled 2026-10-29, below: no difference): a fifth place where HPT's text and SSE's
+    code differ, for the owner to confirm._
     HPT's text (astro-ph/0001295v1, §7.1) prints the term as 0.1 (10⁻⁵ R L^½)³ (L ÷ 6 × 10⁵ − 1.0),
     with no − 1 in the cube, which steps to 0.1 (L ÷ 6 × 10⁵ − 1) at the limit (0.07 M☉/yr at
     10⁶ L☉) and is 21–28% higher at 4,000 K from log L 5.78 to 5.90. SSE's code (`mlwind.f`, read in
@@ -5662,7 +5663,9 @@ R06.
     2026-10-29 (research):_ the published text (MNRAS 315, 562) prints the − 1.0 in the cube; only
     the arXiv preprint omits it. There is no fifth difference, and the module's list is four again
     (lane `p06-land`: `wind.rs`'s docs say so, and credit the form to the published text and SSE's
-    code alike).
+    code alike). Research read ruling 10's four in the published text as well (p. 561: "on the GB
+    and beyond", log P₀ = min(3.3, …), "for L > 4000 L☉" with no ramp, and the LBV term with no
+    type restriction): they stand.
   - _Tests_ (`stellar::sse::wind`):
     `within_the_humphreys_davidson_limit_the_limited_rate_is_the_modern_rate` (a grid of 2,160
     states in nine phases at four metallicities, each that is not an evolved star beyond the limit
@@ -5970,7 +5973,8 @@ R06.
     whole) holds a thermally pulsing AGB segment with a positive count, both ends on the clock.
     A star short of the phase at +H, one that never reaches it (20 and 30 M☉ tested) and an
     object below 0.1 M☉ have no model.
-  - _The clock (a deviation from the task's form and from design note 23's letter)._ φ(t) is
+  - _The clock (a deviation from the task's form and from design note 23's letter; the task's
+    form since its amendment of 2026-10-29)._ φ(t) is
     T10.c's knot interpolant of the count (the monotone cubic on the knots' counts and rates),
     read at the age's two parts as P14.T45.d's `mass_at_split` is, (age at the epoch − the knot's
     age) + years since the epoch, the interval chosen at the summed age; not n(a₀) + f(a₀)(t −
@@ -6195,7 +6199,8 @@ R06.
       2010, §1); "over 217 bursts" from SGR 1935+2154 (Younes et al. 2020); Collazzi et al.'s 440
       bursts; the burst index (γ = 1.66 and 1.67–1.76, Göğüş et al. 1999 and 2000) and range; the
       median duration (93.9 and 161.8 ms); the three giant flares' dates and that no other has been
-      seen (Mereghetti et al. 2024; Trigg et al. 2025, to October 2025); the giant flares' index,
+      seen (Mereghetti et al. 2024, Nature 629, 58; Trigg et al. 2026, A&A 710, A139, read as its
+      arXiv copy of October 2025); the giant flares' index,
       α = 1.7 ± 0.4 (90%), differential (Burns et al. 2021); the range against Burns et al.'s
       search over 1.0 × 10⁴⁴–5.75 × 10⁴⁷ erg; their 3.8 (+4.0 −3.1) × 10⁵ Gpc⁻³ yr⁻¹; and SGR
       1806−20's 0.2 s spike. The 45 years of coverage are a choice (Mereghetti et al. say ∼50,
@@ -6203,8 +6208,9 @@ R06.
       0.02–0.09 window, so 0.044 stays.
     - _N_GF against the observed rates (research's item 9; 67.29 kept)._ Burns et al.'s rate, at
       their 0.050 (0.009–0.10) a year per M☉ yr⁻¹ of star formation and the Milky Way's 1.65 M☉
-      yr⁻¹, is 0.082 (0.015–0.17) a year above 3.7 × 10⁴⁴ erg; the model's E^(−1.7) puts 37.4% of
-      its flares there, 0.0165 a year at the 0.044 target, at the low edge of their interval.
+      yr⁻¹, is 0.082 (0.015–0.17) a year above 4 × 10⁴⁴ erg (their abstract's threshold;
+      E_iso,min 3.7 × 10⁴⁴ erg, §4.1); the model's E^(−1.7) puts 37.4% of its flares above
+      4 × 10⁴⁴ erg, 0.0165 a year at the 0.044 target, at the low edge of their interval.
       Trigg et al. find 0.14 (+0.20 −0.08) a year for the Milky Way and the LMC, which they note
       overpredicts the three flares seen. The 22 confirmed Galactic magnetars of the online
       catalogue sum to 7.39 × 10¹⁵ G (7.39 × 10⁻⁴ e-folds a year), so they alone would need N_GF ≈
@@ -6214,7 +6220,9 @@ R06.
       reaches word 2's durations alone. The golden `stellar/magnetars`, re-blessed by name, changes
       its 100 burst durations and nothing else (596 lines, header 23; `golden_diff` against the
       integration tip: new goldens only). The module's 15 tests pass, the K–S test of the durations
-      against the new law and every duration under the new 3 s bound among them. No rate reads a
+      against the new law and every duration under the new 3 s bound among them, and a 16th, added
+      by the review, pins the law's ends (3.98 ms and 2.512 s at u = 0 and just below 1) under the
+      bound and the bound under the 15-minute look-back, which no sample reaches. No rate reads a
       duration, so the counts are unchanged: the slow test gives episodes 721 against 717.5,
       giant flares 1,415 against 1,442.4 and bursts 1,756 against 1,701.3, and
       `giant_flares_galaxy_wide_at_milky_way_values` 98.9 active magnetars (20–300) and **0.0518**
@@ -6259,7 +6267,8 @@ R06.
     (`MagnetarModel::of` reads `neutron_star()` and `death()` per free call).
 - **Deferred findings (2026-10-13 rule) (P06.T28.c).** Recorded and deferred: each leaves the
   algorithm and every contract as they are. The leads are unread unless said.
-  - _The model's magnetars are weak, so its outbursts are few._ T21's active magnetars average
+  - _The model's magnetars are weak, so each bursts less often (first titled "so its outbursts
+    are few")._ T21's active magnetars average
     about 7.8 × 10¹³ G, where the catalogue's lie mostly at 10¹⁴–10¹⁵ G (the review recalls the
     known magnetars' fields alone decaying at about 8.1 × 10⁻⁴ e-folds a year, more than the census's
     whole Galaxy; research re-summed the 22 confirmed Galactic magnetars of the online catalogue to
@@ -6268,8 +6277,9 @@ R06.
     episodes a year against Coti Zelati et al.'s 23 in 1998–2016 from the known magnetars alone,
     1.2–1.3 a year (recorded first as 1.6–1.8 a year from the span 2003–2016, which their Table 2
     does not bear out). So the Galaxy's count is met, by more and weaker magnetars than the
-    catalogue's. Lean: revisit T21's field law, or set N_EP against the Galaxy's count as N_GF is
-    set; either a later task with a bump.
+    catalogue's: set against the known magnetars' 1.2–1.3 a year, N_EP would move under 10%, to
+    1,850–1,950, so the shortfall per magnetar is T21's field law's. Lean: revisit T21's field law,
+    a later task with a bump.
   - _Giant flares are independent of episodes._ Observed ones came in active phases (lead:
     Mereghetti et al. 2005 on SGR 1806−20 before 2004-12-27). Lean: thin them by the episodes'
     rate, a later task with a bump.
