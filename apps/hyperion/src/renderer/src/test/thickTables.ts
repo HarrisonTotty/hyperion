@@ -6,7 +6,7 @@
  * test's, not a world's.
  */
 
-import { type AtmosphereMedium, densityAt } from "../view/atmosphere/medium";
+import type { AtmosphereMedium } from "../view/atmosphere/medium";
 import type { TablesBand } from "../view/atmosphere/tables";
 import type { MsSourceSlot, MsSourceTable } from "../view/atmosphere/thick/bake";
 import type { PolarisationSlot, PolarisationTable } from "../view/atmosphere/thick/polarisation";
@@ -68,26 +68,18 @@ function patternGrid(medium: AtmosphereMedium): {
 }
 
 /**
- * A bake whose packed J⁰ and G are {@link thickPatternAt}'s, one table a band of `bands` (a
- * tables plan's, in its order), with `slots` light slots, on the bake's grid: altitudes evenly from
- * the ground to the medium's top, μ₀ = (s + ½) ÷ 32 and μ_v = (v + ½) ÷ 8 − 1. E is formed from
- * the pattern by the kernels' scattering at each altitude, so that the medium given is the one the
- * kernels read (`tables.ts`'s `kernelMedium`, or the drawn medium where no term has a forward delta).
+ * A bake whose packed J⁰ and G are {@link thickPatternAt}'s and whose m = 2 is 0, one table a band
+ * of `bands` (a tables plan's, in its order), with `slots` light slots, on the bake's grid:
+ * altitudes evenly from the ground to `medium`'s top, μ₀ = (s + ½) ÷ 32 and μ_v = (v + ½) ÷ 8 − 1.
+ * Its J is in sr⁻¹ per unit of the kernels' scattering, as the bake's (`bake.ts`'s `MsSourceSlot`),
+ * so that the packed table is the pattern over any medium.
  */
 export function patternedThickBake(
   bands: ReadonlyArray<TablesBand>,
-  kernelMedium: AtmosphereMedium,
+  medium: AtmosphereMedium,
   slots: number,
 ): MsSourceTable[] {
-  const { altitudesM, sunCosines, travelCosines } = patternGrid(kernelMedium);
-  const scattering = Array.from(altitudesM, (h) =>
-    [0, 1, 2].map((c) =>
-      kernelMedium.terms.reduce(
-        (sum, term) => sum + (term.scattering[c] ?? 0) * densityAt(term.density, h),
-        0,
-      ),
-    ),
-  );
+  const { altitudesM, sunCosines, travelCosines } = patternGrid(medium);
   return bands.map((band, b): MsSourceTable => {
     const slotTables = Array.from({ length: slots }, (_, k): MsSourceSlot => {
       const values = new Float32Array(
@@ -103,9 +95,8 @@ export function patternedThickBake(
             const at =
               ((a * THICK_SUN_COSINES + s) * THICK_TRAVEL_COSINES + v) * THICK_SOURCE_MODES * 3;
             for (let c = 0; c < 3; c += 1) {
-              const sigma = scattering[a]?.[c] ?? Number.NaN;
-              values[at + c] = (point.level[c] ?? Number.NaN) * sigma;
-              values[at + 3 + c] = (point.slope[c] ?? Number.NaN) * sigma * sines;
+              values[at + c] = point.level[c] ?? Number.NaN;
+              values[at + 3 + c] = (point.slope[c] ?? Number.NaN) * sines;
             }
           }
         }

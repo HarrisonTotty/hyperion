@@ -196,7 +196,7 @@ describe("the optics worker's thick bake", () => {
   });
 
   it(
-    "answers a kept TEST EARTH's bake from its request's own absorbers and spectra, finite, E⁰ at least 0",
+    "answers a kept TEST EARTH's bake from its request's own absorbers and spectra, finite, J⁰ at least 0",
     // The job takes no grid of its own: the full grid, 1.3 s at load 2.4 (2026-10-27).
     { timeout: 60_000 },
     async () => {
@@ -211,7 +211,7 @@ describe("the optics worker's thick bake", () => {
       expect(values?.every(Number.isFinite)).toBe(true);
       let least = Number.POSITIVE_INFINITY;
       for (const [i, value] of (values ?? []).entries()) {
-        // m = 0 of `[altitude][μ₀][μ_v][m][RGB]`, m = 0 and 1.
+        // m = 0 of `[altitude][μ₀][μ_v][m][RGB]`, m = 0, 1 and 2.
         if (Math.floor(i / 3) % THICK_BAKE_MODES === 0) {
           least = Math.min(least, value);
         }

@@ -11,7 +11,7 @@
  * worker runs them for one band and one light: the correction's preparation (the optics at the
  * channels and 570 nm, the layers and the channels' bins' exponential sums); one band's correction,
  * its 8-stream vector and scalar solves, m = 0 … 2, at the channels; the thick bake's band on the
- * same column (16 streams, m = 0 and 1, in the 15 bins), whose preparation `bake.bench.ts` times;
+ * same column (16 streams, m = 0, 1 and 2, in the 15 bins), whose preparation `bake.bench.ts` times;
  * and one 16-stream vector solve of the column's green channel, m = 0 … 2, the tests' reference.
  */
 import { describe, expect, test } from "vitest";

@@ -6,48 +6,51 @@
  * σ_s·Ψ_ms·p_u (`shaders/thickRead.wgsl`) and the CPU twin makes alike (`tablesCpu.ts`).
  *
  * @remarks
- * **What is stored.** The bake gives E = E⁰ + E¹ cos Δφ, the emission of orders two and up per unit
- * of true length, per steradian, per unit of the star's irradiance normal to its beam at the top
- * (m⁻¹ sr⁻¹); the correction gives ΔJ = Σ_m ΔJ_m cos mΔφ, m = 0 … 2, per unit of the column's whole
- * σ_s (every forward delta in), so that σ_s ΔJ is E's vector less its scalar (R08.T14.e's record,
+ * **What is stored.** The bake gives J = Σ_m Jᵐ cos mΔφ, m = 0 … 2, the source of orders two and
+ * up per steradian, per unit of the kernels' scattering σ_s,k and of the star's irradiance normal to
+ * its beam at the top (sr⁻¹; `bake.ts`'s remarks, "What the table holds is J", R08.T14.d.1); the
+ * correction gives ΔJ = Σ_m ΔJ_m cos mΔφ, m = 0 … 2, per unit of the column's whole σ_s (every
+ * forward delta in), so that σ_s ΔJ is the emission's vector less its scalar (R08.T14.e's record,
  * _ΔJ's unit and frame_). A table is of one of two kinds ({@link ThickTableKind}):
  *
- * - **`thick`**, a body whose bake landed: E + σ_s ΔJ, the two summed on T14.b's grid, which they
- *   share to the bit, so that the kernels make one read where a thin world makes Ψ_ms's and the
- *   correction's (`decision-r08-t13c2-classes.md` §6's lever, R08.T14.f). m = 2 is σ_s ΔJ_2 alone,
- *   since the bake holds m = 0 and 1 (`THICK_BAKE_MODES`); a body with no correction, or none yet,
- *   holds 0 there.
- * - **`correction`**, a thin world: σ_s ΔJ alone, added to Hillaire's term, which stays whole.
+ * - **`thick`**, a body whose bake landed: J + ΔJ σ_s ÷ σ_s,k, the two summed on T14.b's grid, which
+ *   they share to the bit, so that the kernels make one read where a thin world makes Ψ_ms's and the
+ *   correction's (`decision-r08-t13c2-classes.md` §6's lever, R08.T14.f). m = 2 is the bake's J²
+ *   and the correction's ΔJ_2 together; a body with no correction, or none yet, holds the bake's
+ *   alone.
+ * - **`correction`**, a thin world: ΔJ σ_s ÷ σ_s,k alone, added to Hillaire's term, which stays
+ *   whole.
  *
  * The table stores, per channel, at each of the bake's altitudes h, sun cosines μ₀ and travel
- * cosines μ_v, with Eᵐ the m-th coefficient of what the kind sums:
+ * cosines μ_v, with Jᵐ the m-th coefficient of what the kind sums, per unit of σ_s,k:
  *
- * - J⁰ = E⁰ ÷ σ_s,k(h),
- * - G = E¹ ÷ (σ_s,k(h) sin θ_v sin θ₀), and
- * - G₂ = E² ÷ (σ_s,k(h) sin² θ_v sin² θ₀), sin θ = √(1 − μ²) at the cell's centre,
+ * - J⁰,
+ * - G = J¹ ÷ (sin θ_v sin θ₀), and
+ * - G₂ = J² ÷ (sin² θ_v sin² θ₀), sin θ = √(1 − μ²) at the cell's centre,
  *
  * σ_s,k(h) the kernels' own scattering at h, every term's forward delta out
  * (`tables.ts`'s `kernelMedium`), the factor each kernel multiplies its multiple scattering by, and
  * σ_s(h) of the correction the drawn medium's, the deltas in: σ_s,k ÷ (1 − f̄_c), as the correction's
  * record has a kernel take it. So J is per steradian and per unit of scattering, as Hillaire's Ψ_ms
  * is (sr⁻¹), and the read is J = J⁰ + G·h_⊥ + G₂·(2h_⊥² − (1 − μ_v²)(1 − μ₀²)), h_⊥ = v·s − (v·n)(s·n)
- * for the view's direction v, the source's s and the zenith n: Σ_m Eᵐ cos mΔφ ÷ σ_s,k exactly at the
- * cells' centres, since sin θ_v sin θ₀ cos Δφ is v's and s's horizontal parts' dot product and
+ * for the view's direction v, the source's s and the zenith n: Σ_m Jᵐ cos mΔφ exactly at the cells'
+ * centres, since sin θ_v sin θ₀ cos Δφ is v's and s's horizontal parts' dot product and
  * sin² θ_v sin² θ₀ cos 2Δφ = 2h_⊥² − sin² θ_v sin² θ₀.
- * - Dividing by σ_s,k puts the values in the half float's range. E is about 10⁻⁷–10⁻⁶ m⁻¹ sr⁻¹ near
- *   an Earth-like ground and far less aloft, under `rgba16float`'s least normal (6.1 × 10⁻⁵), while
- *   J is of Ψ_ms's order, 10⁻³–10⁻¹ sr⁻¹ (plan R08's "Deferred findings", T14.b's _Half floats_).
- *   It is also what varies slowly with height: E follows the density's exponential between the
- *   table's rows, 1.3–24 km apart, and J does not.
- * - G and G₂ in place of E¹ and E² keep the read continuous where the view or the sun is vertical.
- *   Eᵐ is an m-th Fourier coefficient, driven by the beam's Λ_lᵐ(μ₀) (the ground, Lambertian, acts
+ * - Per unit of scattering, the values lie in the half float's range. The emission E = σ_s,k J is
+ *   up to about 10⁻⁵ m⁻¹ sr⁻¹ near an Earth-like ground (7.5 × 10⁻⁶ on `earth`, plan R08's record
+ *   of T14.c) and far less aloft, under `rgba16float`'s least normal (6.1 × 10⁻⁵), while J is of
+ *   Ψ_ms's order, 10⁻³–10⁻¹ sr⁻¹ (plan R08's "Deferred findings", T14.b's _Half floats_). It is
+ *   also what varies slowly with height: E follows the density's exponential between the table's
+ *   rows, 1.3–24 km apart, and J does not.
+ * - G and G₂ in place of J¹ and J² keep the read continuous where the view or the sun is vertical.
+ *   Jᵐ is an m-th Fourier coefficient, driven by the beam's Λ_lᵐ(μ₀) (the ground, Lambertian, acts
  *   at m = 0 alone) and smooth at the poles, so it falls as sinᵐ θ_v sinᵐ θ₀, and their quotient is
  *   smooth: Pₗᵐ(μ) ∝ (1 − μ²)^(m/2) (S. Chandrasekhar, _Radiative Transfer_, Oxford 1950, §48), and
  *   the I row of a mode with an unpolarised beam carries the generalised spherical function
  *   P^l_m0 alike (W. A. de Rooij and C. C. A. H. van der Stap, A&A 131 (1984) 237), so the
- *   correction's modes fall so too. Read as Eᵐ cos mΔφ with Eᵐ held at the last cell (μ_v = ±15/16) beyond it, the table
- *   would spin about the zenith, where Δφ has no value.
- * - On a `thick` table, where J dips below 0 (by up to 49% of E⁰ on the Titan-class fixture's far
+ *   correction's modes fall so too. Read as Jᵐ cos mΔφ with Jᵐ held at the last cell
+ *   (μ_v = ±15/16) beyond it, the table would spin about the zenith, where Δφ has no value.
+ * - On a `thick` table, where J dips below 0 (by up to 49% of J⁰ on the Titan-class fixture's far
  *   side of a forward-peaked point, T14.b's _m ≤ 1 dips below 0_), the read is held at 0 (T14.b's
  *   lean). A `correction` is a difference of either sign, and the sum it makes with Ψ_ms is held
  *   at 0 instead.
@@ -60,12 +63,17 @@
  * 9-bit two's-complement mantissas (red in bits 0–8, green 9–17, blue 18–26) and their shared
  * exponent e in bits 27–31, each channel m·2^(e − 24) ({@link THICK_CURVE_EXPONENT_BIAS}): 2⁻²⁴ to
  * 32,640, each to 1 in 255 of the texel's largest, or to 2⁻²⁵ where that is the larger (its least
- * exponent). G₂ is a correction's m = 2, a few per cent of the
- * source at most (Design note 10's figures), so the shared exponent's rounding is some 10⁻⁴ of J,
- * and the texel stays one load. A band and light is 270,336 B, the bake's figure for `rgba16float`
- * (33 × 32 × 16 texels × 16 B), and the info row 256 B more, so that the lever costs no byte over
- * R08.T14.c's table. Layer 0's info row holds the altitudes as `f32` bits, words 0–32, the light
- * slots a band, word 33, and the kind, word 34: 0 for `thick`, 1 for `correction`.
+ * exponent). G₂ carries the bake's m = 2 with the correction's: |J²| reaches 0.44 of J⁰ on `earth`
+ * and 1.37 on `mars` (`reference/vectorGate.json`'s `bakeCurveShareOfJ0`). The shared exponent's
+ * rounding moves each channel's J by at most 1 in 255.5 of the texel's largest |G₂| sin² θ_v sin² θ₀,
+ * so a weaker channel takes the strongest channel's |J²| ÷ 255.5 against its own J⁰: at most 0.15% of
+ * a channel's J⁰ on `earth` and 0.51% on `mars`, with the correction summed in or not
+ * (`bakeCurveRoundingOfJ0` and `routedCurveRoundingOfJ0`, against `f32`), a tenth of Design note
+ * 10's 5% or less, and the texel stays one load. A band and light is 270,336 B, the bake's figure
+ * for `rgba16float` (33 × 32 × 16 texels × 16 B), and the info row 256 B more, so that the lever
+ * costs no byte over R08.T14.c's table. Layer 0's info row holds the altitudes as `f32` bits,
+ * words 0–32, the light slots a band, word 33, and the kind, word 34: 0 for `thick`, 1 for
+ * `correction`.
  *
  * **The read** is linear in each of h, μ₀ and μ_v between the cells' centres about it, held at the
  * table's edges: μ₀ = (s + ½) ÷ 32 and μ_v = (v + ½) ÷ 8 − 1 lie at texel centres, and h between
@@ -78,9 +86,9 @@
  * are blended over the table's first μ₀ cell, (0, 1/32]: the table's share is clamp(32 μ₀, 0, 1)
  * (`decision-r08-t13c2-classes.md` §6). On a `thick` table the analytic term takes the rest,
  * 1 − clamp(32 μ₀, 0, 1), and the forward lobes' higher orders (R08.T7, `forwardLobe.ts`) the same
- * share (main, 2026-10-27): the bake's E holds the aureole scattered once more by the smooth part,
+ * share (main, 2026-10-27): the bake's J holds the aureole scattered once more by the smooth part,
  * which the orders' tail also adds, so on the table's side they would count it twice. The orders'
- * in-lobe part, the aureole scattered again within the lobe (T14.b's IMS), is not in E, so the
+ * in-lobe part, the aureole scattered again within the lobe (T14.b's IMS), is not in J, so the
  * table's side leaves it out: R08.T14.d judges it at Mars's aureole (plan R08's Risks,
  * "Preconditions of R08.T14.d's routing"). On a `correction` table the analytic term and the lobes
  * stay whole at every μ₀, and the correction fades in across the same cell, where its beam is
@@ -99,15 +107,18 @@ export const THICK_ALTITUDES = 33;
 export const THICK_SUN_COSINES = 32;
 /** The table's travel cosines: 16, at (v + ½) ÷ 8 − 1, the downward half first. */
 export const THICK_TRAVEL_COSINES = 16;
-/** The bake's azimuthal modes the table takes: m = 0 and 1 (`bake.ts`'s `THICK_BAKE_MODES`). */
-export const THICK_SOURCE_MODES = 2;
+/** The bake's azimuthal modes the table takes: m = 0, 1 and 2 (`bake.ts`'s `THICK_BAKE_MODES`). */
+export const THICK_SOURCE_MODES = 3;
 /**
  * The polarisation correction's azimuthal modes: m = 0, 1 and 2 (`polarisation.ts`'s
  * `POLARISATION_MODES`, held equal by `read.test.ts`; not imported, so that the render thread loads
  * no solver).
  */
 export const THICK_CORRECTION_MODES = 3;
-/** The table's azimuthal modes: m = 0, 1 and 2, the correction's (R08.T14.f). */
+/**
+ * The table's azimuthal modes: m = 0, 1 and 2, the bake's and the correction's (R08.T14.f and
+ * T14.d.1).
+ */
 export const THICK_MODES = THICK_CORRECTION_MODES;
 /** The info row: after the altitudes' and sun cosines' rows. */
 export const THICK_INFO_ROW = THICK_ALTITUDES * THICK_SUN_COSINES;
@@ -145,9 +156,10 @@ export const THICK_TABLE_BYTES_A_SLOT =
 export const THICK_LAYER_BYTES = THICK_ROWS * THICK_TRAVEL_COSINES * TEXEL_BYTES;
 
 /**
- * What a table holds (the module's remarks): `thick`, a bake's E with the correction summed into it,
- * read in place of Ψ_ms from the first sun cosine cell up; or `correction`, the correction alone,
- * read beside Ψ_ms on a thin world.
+ * What a table holds (the module's remarks), sr⁻¹ per unit of the kernels' scattering and of the
+ * star's irradiance: `thick`, a bake's J with the correction summed into it, read in place of Ψ_ms
+ * from the first sun cosine cell up; or `correction`, the correction alone, read beside Ψ_ms on a
+ * thin world.
  */
 export type ThickTableKind = "thick" | "correction";
 
@@ -337,17 +349,17 @@ function checkBands(
 
 /**
  * A body's bake, its polarisation correction, or both summed, packed for the kernels (the module's
- * remarks): J⁰, G and G₂ per band and light slot, divided by the kernels' scattering at each
+ * remarks): J⁰, G and G₂ per band and light slot, per unit of the kernels' scattering at each
  * altitude.
  *
- * @param bands - The bake's tables, one a latitude band in the body's order
- *   (`bake.ts`'s `thickBakeBands`), each with the same altitudes and light slots; `null` for a
- *   `correction` table, a thin world's.
+ * @param bands - The bake's tables, J in sr⁻¹ per unit of the kernels' scattering, taken as they
+ *   are, one a latitude band in the body's order (`bake.ts`'s `thickBakeBands`), each with the same
+ *   altitudes and light slots; `null` for a `correction` table, a thin world's.
  * @param kernelMedium - The medium as the kernels read it (`tables.ts`'s `kernelMedium`, or the
  *   drawn medium with its terms' forward deltas taken out), whose scattering the kernels multiply
- *   the read by.
- * @param correction - The polarisation correction, summed into the bake's E where both are given,
- *   or alone; `null` for none, a `thick` table whose m = 2 is 0.
+ *   the read by, and the correction is taken per unit of.
+ * @param correction - The polarisation correction, summed into the bake's J where both are given,
+ *   or alone; `null` for none, a `thick` table of the bake alone.
  * @throws RangeError for no bake and no correction, no band, a table off the bake's grid
  *   ({@link THICK_ALTITUDES} altitudes ascending from 0, {@link THICK_SUN_COSINES} μ₀ and
  *   {@link THICK_TRAVEL_COSINES} μ_v at their cells' centres, {@link THICK_SOURCE_MODES} modes a
@@ -437,25 +449,29 @@ export function packThickTable(
                 `${what} at band ${b}, slot ${k}, altitude ${a}, μ₀ ${s}, μ_v ${v}${c === null ? "" : `, channel ${c}`}`;
             for (let c = 0; c < 3; c += 1) {
               const scatteringPerM = sigma[c] ?? Number.NaN;
-              const perScattering = scatteringPerM > 0 ? 1 / scatteringPerM : 0;
-              const wholePerM = sigmaWhole[c] ?? Number.NaN;
+              // The correction's ΔJ is per unit of the whole σ_s, the table per unit of σ_s,k.
+              const wholeShare =
+                scatteringPerM > 0 ? (sigmaWhole[c] ?? Number.NaN) / scatteringPerM : 0;
+              const from = cell * sourceStride + c;
               const at = cell * correctionStride + c;
-              const e0 =
-                (source === undefined ? 0 : (source[cell * sourceStride + c] ?? Number.NaN)) +
-                (delta === undefined ? 0 : wholePerM * (delta[at] ?? Number.NaN));
-              const e1 =
-                (source === undefined ? 0 : (source[cell * sourceStride + 3 + c] ?? Number.NaN)) +
-                (delta === undefined ? 0 : wholePerM * (delta[at + 3] ?? Number.NaN));
-              const e2 = delta === undefined ? 0 : wholePerM * (delta[at + 6] ?? Number.NaN);
-              halves[c] = halfOf(e0 * perScattering, where("J⁰", c));
-              halves[3 + c] = halfOf((e1 * perScattering) / sines, where("G", c));
-              curve[c] = (e2 * perScattering) / (sines * sines);
+              const j0 =
+                (source === undefined ? 0 : (source[from] ?? Number.NaN)) +
+                (delta === undefined ? 0 : wholeShare * (delta[at] ?? Number.NaN));
+              const j1 =
+                (source === undefined ? 0 : (source[from + 3] ?? Number.NaN)) +
+                (delta === undefined ? 0 : wholeShare * (delta[at + 3] ?? Number.NaN));
+              const j2 =
+                (source === undefined ? 0 : (source[from + 6] ?? Number.NaN)) +
+                (delta === undefined ? 0 : wholeShare * (delta[at + 6] ?? Number.NaN));
+              halves[c] = halfOf(j0, where("J⁰", c));
+              halves[3 + c] = halfOf(j1 / sines, where("G", c));
+              curve[c] = j2 / (sines * sines);
             }
             const texel = base + cell * TEXEL_WORDS;
             texels[texel] = ((halves[0] ?? 0) | ((halves[1] ?? 0) << 16)) >>> 0;
             texels[texel + 1] = ((halves[2] ?? 0) | ((halves[3] ?? 0) << 16)) >>> 0;
             texels[texel + 2] = ((halves[4] ?? 0) | ((halves[5] ?? 0) << 16)) >>> 0;
-            texels[texel + 3] = delta === undefined ? 0 : packThickCurve(curve, where("G₂", null));
+            texels[texel + 3] = packThickCurve(curve, where("G₂", null));
           }
         }
       }

@@ -20,6 +20,7 @@ import {
   THICK_INFO_ROW,
   THICK_KIND_WORD,
   THICK_LAYER_BYTES,
+  THICK_ROWS,
   THICK_SOURCE_MODES,
   THICK_SUN_COSINES,
   THICK_TABLE_BYTES_A_SLOT,
@@ -75,6 +76,9 @@ const TWO_BANDS: ReadonlyArray<TablesBand> = [0.98, 1.03].map((s, b) => ({
   coefficientFactor: 1 / s,
 }));
 
+/** The words of one packed layer: its table's rows and its info row, four words a texel. */
+const LAYER_WORDS = THICK_ROWS * THICK_TRAVEL_COSINES * 4;
+
 /** The half float's rounding, relative: 2⁻¹¹. */
 const HALF_ULP = 2 ** -11;
 
@@ -124,7 +128,7 @@ describe("the thick table's packing and read (R08.T14.c)", () => {
   const bands = patternedThickBake(TWO_BANDS, MEDIUM, 2);
   const packed = packThickTable(bands, MEDIUM);
 
-  it("reads each cell's J⁰ and G back to the half float's rounding, divided by the scattering", () => {
+  it("reads each cell's J⁰ and G back to the half float's rounding, per unit of the kernels' scattering as baked", () => {
     const out = thickSourceScratch();
     let worst = 0;
     for (const [b, layerBand] of [0, 1].entries()) {
@@ -152,7 +156,7 @@ describe("the thick table's packing and read (R08.T14.c)", () => {
         }
       }
     }
-    // f32 rounding of E and σ, then the half's: within one half ulp and a little.
+    // f32 rounding of J, then the half's: within one half ulp and a little.
     expect(worst).toBeLessThan(1.2 * HALF_ULP);
   });
 
@@ -214,15 +218,14 @@ describe("the thick table's packing and read (R08.T14.c)", () => {
     expect(out9).toEqual(out2);
   });
 
-  it("is a thick table with no m = 2 and its kind in the info row's word 34", () => {
+  it("is a thick table with no m = 2 in any layer where its bake holds none, and its kind in the info row's word 34", () => {
     expect(packed.kind).toBe("thick");
     const info = THICK_INFO_ROW * THICK_TRAVEL_COSINES * 4;
     expect(packed.texels[info + THICK_KIND_WORD]).toBe(0);
-    for (let texel = 0; texel < THICK_INFO_ROW * THICK_TRAVEL_COSINES; texel += 1) {
-      if (packed.texels[texel * 4 + 3] !== 0) {
-        throw new Error(`texel ${texel} holds an m = 2 the bake has not`);
-      }
-    }
+    const curves = packed.texels.filter(
+      (word, i) => i % LAYER_WORDS < info && i % 4 === 3 && word !== 0,
+    ).length;
+    expect([packed.layers, curves]).toEqual([4, 0]);
   });
 
   it("forms J as J⁰ plus G times the horizontal product plus G₂ times its harmonic, not held at 0", () => {
@@ -455,6 +458,101 @@ describe("the polarisation correction's packing and read (R08.T14.f)", () => {
   });
 });
 
+/** The bake's J² of the m = 2 tests, sr⁻¹: 0.7 of the pattern's J⁰ at most, of either sign. */
+const curveAt = (a: number, s: number, v: number, b: number, k: number, c: number): number =>
+  0.7 *
+  (thickPatternAt(a, s, v, b, k).level[c] ?? Number.NaN) *
+  Math.cos(0.29 * a + 0.37 * s - 0.23 * v + 0.9 * c + b + 0.4 * k);
+
+/** sin² θ_v sin² θ₀ at cell (s, v), as the packing forms it. */
+const sinesSquared = (s: number, v: number): number => (1 - sunAt(s) ** 2) * (1 - travelAt(v) ** 2);
+
+/** The patterned bake on {@link TWO_BANDS} with {@link curveAt}'s J² set in place of its zeros. */
+function curvedThickBake(): ReadonlyArray<MsSourceTable> {
+  const bands = patternedThickBake(TWO_BANDS, MEDIUM, 2);
+  for (const [b, band] of bands.entries()) {
+    for (const [k, slot] of band.slots.entries()) {
+      for (let a = 0; a < THICK_ALTITUDES; a += 1) {
+        for (let s = 0; s < THICK_SUN_COSINES; s += 1) {
+          for (let v = 0; v < THICK_TRAVEL_COSINES; v += 1) {
+            const cell = (a * THICK_SUN_COSINES + s) * THICK_TRAVEL_COSINES + v;
+            for (let c = 0; c < 3; c += 1) {
+              slot.values[cell * THICK_SOURCE_MODES * 3 + 6 + c] = curveAt(a, s, v, b, k, c);
+            }
+          }
+        }
+      }
+    }
+  }
+  return bands;
+}
+
+describe("the bake's m = 2 in G₂ (R08.T14.d.1)", () => {
+  const bands = curvedThickBake();
+  const correction = patternedCorrection(TWO_BANDS, MEDIUM, 2);
+
+  it("reads G₂ back against its f32 value to 1 in 255 of its texel's largest, alone and with the correction summed in", () => {
+    const alone = packThickTable(bands, MEDIUM);
+    const summed = packThickTable(bands, MEDIUM, { bands: correction, medium: MEDIUM });
+    let checked = 0;
+    for (const b of [0, 1]) {
+      for (const k of [0, 1]) {
+        for (const a of [0, 3, 16, 32]) {
+          for (const s of [0, 9, 31]) {
+            for (const v of [0, 7, 8, 15]) {
+              const cell = (a * THICK_SUN_COSINES + s) * THICK_TRAVEL_COSINES + v;
+              const bake = bands[b]?.slots[k]?.values;
+              const delta = correction[b]?.slots[k]?.values;
+              // The f32 control: each table's m = 2 over the cell's sines, unrounded past f32.
+              const control = (withCorrection: boolean): number[] =>
+                [0, 1, 2].map(
+                  (c) =>
+                    ((bake?.[cell * THICK_SOURCE_MODES * 3 + 6 + c] ?? Number.NaN) +
+                      (withCorrection
+                        ? (delta?.[cell * THICK_CORRECTION_MODES * 3 + 6 + c] ?? Number.NaN)
+                        : 0)) /
+                    sinesSquared(s, v),
+                );
+              for (const [table, expected] of [
+                [alone, control(false)],
+                [summed, control(true)],
+              ] as const) {
+                const out = thickSourceScratch();
+                const row = thickRowAt(table, table.altitudesM[a] ?? Number.NaN);
+                addThickLayer(table, b * 2 + k, row, sunAt(s), travelAt(v), 1, out);
+                const largest = Math.max(...expected.map(Math.abs));
+                for (let c = 0; c < 3; c += 1) {
+                  expect(
+                    Math.abs((out.curve[c] ?? 0) - (expected[c] ?? Number.NaN)),
+                  ).toBeLessThanOrEqual((1 / 255) * largest * (1 + 1e-6));
+                  checked += 1;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(checked).toBe(2 * 2 * 4 * 3 * 4 * 2 * 3);
+  });
+
+  it("packs the bake's J² into G₂ alone, every layer's J⁰ and G as without it", () => {
+    const plain = packThickTable(patternedThickBake(TWO_BANDS, MEDIUM, 2), MEDIUM);
+    const curved = packThickTable(bands, MEDIUM);
+    const info = THICK_INFO_ROW * THICK_TRAVEL_COSINES * 4;
+    const table = (i: number): boolean => i % LAYER_WORDS < info;
+    const differs = curved.texels.some(
+      (word, i) => table(i) && i % 4 !== 3 && word !== plain.texels[i],
+    );
+    const layersWithCurves = new Set(
+      Array.from(curved.texels.keys())
+        .filter((i) => table(i) && i % 4 === 3 && curved.texels[i] !== 0)
+        .map((i) => Math.floor(i / LAYER_WORDS)),
+    );
+    expect([differs, layersWithCurves.size]).toEqual([false, curved.layers]);
+  });
+});
+
 describe("the thick table's refusals (R08.T14.c)", () => {
   const good = patternedThickBake([ONE_BAND], MEDIUM, 1);
   const first = good[0];
@@ -472,7 +570,7 @@ describe("the thick table's refusals (R08.T14.c)", () => {
     expect(() =>
       packThickTable(withFirst({ sunCosines: first.sunCosines.map((mu) => mu * 0.99) }), MEDIUM),
     ).toThrow(/grid/u);
-    expect(() => packThickTable(withFirst({ modes: 3 }), MEDIUM)).toThrow(/grid/u);
+    expect(() => packThickTable(withFirst({ modes: 2 }), MEDIUM)).toThrow(/grid/u);
   });
 
   it("refuses bands of other altitudes or light slots", () => {
@@ -502,8 +600,9 @@ describe("the thick table's refusals (R08.T14.c)", () => {
       return withFirst({ slots: [{ ...slot, values }] });
     };
     expect(() => packThickTable(broken(10, Number.NaN), MEDIUM)).toThrow(RangeError);
-    // E at the top over its tiny scattering: a J of 10⁹.
-    const topAt = (THICK_ALTITUDES - 1) * THICK_SUN_COSINES * THICK_TRAVEL_COSINES * 2 * 3;
-    expect(() => packThickTable(broken(topAt, 1), MEDIUM)).toThrow(/no half float/u);
+    // A J past the half's largest, 65,504 sr⁻¹, at the top.
+    const topAt =
+      (THICK_ALTITUDES - 1) * THICK_SUN_COSINES * THICK_TRAVEL_COSINES * THICK_SOURCE_MODES * 3;
+    expect(() => packThickTable(broken(topAt, 1e5), MEDIUM)).toThrow(/no half float/u);
   });
 });

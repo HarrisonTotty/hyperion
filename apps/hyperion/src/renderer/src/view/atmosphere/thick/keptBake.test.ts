@@ -1,7 +1,8 @@
 /**
  * A kept scene's thick bake made directly (plan R08, R08.T14.c): `TEST EARTH` (its aerosol from its
  * channel optics, its ozone under the reference Sun's curves) and `TEST MARS` (its dust on its own
- * TAMUdust optics) each bake one band, finite, with E⁰ at least 0.
+ * TAMUdust optics) each bake one band, finite, with J⁰ at least 0; and TEST EARTH's m = 2 packs into
+ * G₂ to its word's bound against its `f32` values (R08.T14.d.1).
  */
 import { describe, expect, it } from "vitest";
 
@@ -15,10 +16,12 @@ import {
   referenceCaseBakeLights,
   type ReferenceCase,
 } from "../reference/cases";
+import { kernelMedium } from "../tables";
 import { type MsSourceTable, THICK_BAKE_MODES, thickBakeBands } from "./bake";
 import { bakeKeptCase, keptColumnOf, sphereBakeBody } from "./keptBake";
+import { packThickTable, thickCurveChannel } from "./read";
 
-/** A table's E⁰ entries (the m = 0 mode of `bake.ts`'s layout), every channel, of its one slot. */
+/** A table's J⁰ entries (the m = 0 mode of `bake.ts`'s layout), every channel, of its one slot. */
 function zerothMode(table: MsSourceTable): ReadonlyArray<number> {
   const values = table.slots[0]?.values;
   if (values === undefined || table.slots.length !== 1) {
@@ -76,13 +79,13 @@ describe("a kept case's direct bake", () => {
     ]);
   });
 
-  it("bakes TEST EARTH's one band finite, E⁰ at least 0", { timeout: KEPT_BAKE_TIMEOUT_MS }, () => {
+  it("bakes TEST EARTH's one band finite, J⁰ at least 0", { timeout: KEPT_BAKE_TIMEOUT_MS }, () => {
     const table = bakedOf(EARTH_CASE, EARTH_COLUMN.referenceGravityMS2, EARTH_REFERENCE_RADIUS_M);
     expect(table.slots[0]?.values.every(Number.isFinite)).toBe(true);
     expect(leastOf(zerothMode(table))).toBeGreaterThanOrEqual(0);
   });
 
-  it("bakes TEST MARS's one band finite, E⁰ at least 0", { timeout: KEPT_BAKE_TIMEOUT_MS }, () => {
+  it("bakes TEST MARS's one band finite, J⁰ at least 0", { timeout: KEPT_BAKE_TIMEOUT_MS }, () => {
     const table = bakedOf(MARS_CASE, MARS_FIT_COLUMN.referenceGravityMS2, MARS_REFERENCE_RADIUS_M);
     expect(table.slots[0]?.values.every(Number.isFinite)).toBe(true);
     expect(leastOf(zerothMode(table))).toBeGreaterThanOrEqual(0);
@@ -91,4 +94,42 @@ describe("a kept case's direct bake", () => {
   it("refuses a kept medium with no sources", () => {
     expect(() => keptColumnOf({ medium: EARTH_CASE.medium })).toThrow(/no sources/u);
   });
+
+  it(
+    "packs TEST EARTH's m = 2 into G₂ to 1 in 255 of each texel's largest, against its f32 values",
+    { timeout: KEPT_BAKE_TIMEOUT_MS },
+    () => {
+      const table = bakedOf(EARTH_CASE, EARTH_COLUMN.referenceGravityMS2, EARTH_REFERENCE_RADIUS_M);
+      const packed = packThickTable([table], kernelMedium(EARTH_CASE.medium));
+      const values = table.slots[0]?.values ?? new Float32Array(0);
+      const views = table.travelCosines.length;
+      let worst = 0;
+      let curveMost = 0;
+      let levelMost = 0;
+      for (let a = 0; a < table.altitudesM.length; a += 1) {
+        for (const [s, mu0] of table.sunCosines.entries()) {
+          for (const [v, muV] of table.travelCosines.entries()) {
+            const cell = (a * table.sunCosines.length + s) * views + v;
+            const at = cell * THICK_BAKE_MODES * 3;
+            // The f32 control: the bake's J² over the cell's sines, unrounded past f32.
+            const sines = (1 - mu0 * mu0) * (1 - muV * muV);
+            const control = [0, 1, 2].map((c) => (values[at + 6 + c] ?? Number.NaN) / sines);
+            const largest = Math.max(...control.map(Math.abs));
+            const word = packed.texels[cell * 4 + 3] ?? 0;
+            for (let c = 0; c < 3; c += 1) {
+              levelMost = Math.max(levelMost, values[at + c] ?? Number.NaN);
+              curveMost = Math.max(curveMost, Math.abs(values[at + 6 + c] ?? Number.NaN));
+              if (largest > 0) {
+                // The word's bound: 1 in 255 of the texel's largest, or 2⁻²⁵ where that is larger.
+                const bound = Math.max(largest / 255, 2 ** -25);
+                const read = thickCurveChannel(word, c);
+                worst = Math.max(worst, Math.abs(read - (control[c] ?? Number.NaN)) / bound);
+              }
+            }
+          }
+        }
+      }
+      expect([curveMost > 0.1 * levelMost, worst <= 1 + 1e-6]).toEqual([true, true]);
+    },
+  );
 });

@@ -10,7 +10,7 @@
  * worker runs them for one band and one light: its absorbers' bin curves under the Sun; the
  * column's optics in the 15 bins alone (an aerosol's Mie or MMF, the larger share of the
  * preparation); the whole preparation (the optics, the layers and the exponential sums); and one
- * band's bake, every bin and term, m = 0 and 1. A phase's name carries its solves and terms.
+ * band's bake, every bin and term, m = 0, 1 and 2. A phase's name carries its solves and terms.
  */
 import { describe, expect, test } from "vitest";
 

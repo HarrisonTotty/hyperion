@@ -14,9 +14,9 @@
  *   share replace the case twin's in the committed `caseGate.json`'s values, and R08.T13.c1's
  *   record (`caseGate.ts`'s `caseGateRecord`) is formed on them against the same references,
  *   scalar against scalar: nothing is re-traced. Each image's tally is written beside c1's.
- * - **The half floats** (T14.b's deferred finding): each bake's E⁰ and E¹ in m⁻¹ sr⁻¹, the packed
- *   J⁰ and G in sr⁻¹, and the half's largest relative rounding over the entries at least 10⁻³ of
- *   their table's largest J⁰.
+ * - **The half floats** (T14.b's deferred finding): each bake's J⁰, |J¹| and |J²| in sr⁻¹ (per unit
+ *   of the kernels' scattering from R08.T14.d.1, which also gives it m = 2), the packed J⁰ and G in
+ *   sr⁻¹, and the packed J⁰ halves under the half's least normal.
  * - **What the label covered** (`decision-r08-t6b-floor.md` §9.4.3): on R08.T6.c's Venus-class
  *   medium (`venusClassMedium`), the analytic multiple-scattering table's texel of the largest
  *   1 ÷ mean(escape), its Ψ_ms there, and the bake's J⁰ there averaged over the travel cosines, the
@@ -112,8 +112,8 @@ const LIMIT_MS = { whole: 3_600_000 } as const;
 /** The record's file, from this test. */
 const RECORD_FILE = "./thickRuns.json";
 
-/** The record's format. */
-const THICK_RUNS_FORMAT = 1;
+/** The record's format: 2 from R08.T14.d.1, whose bake holds J at m ≤ 2 in place of E at m ≤ 1. */
+const THICK_RUNS_FORMAT = 2;
 
 /** The twin's values of c1's record, which a case's thick values replace. */
 const C1_VALUES = twinValuesOfRecord(committedGate);
@@ -137,20 +137,21 @@ function halfFloatsOf(
   bands: ReadonlyArray<MsSourceTable>,
   packed: PackedThickTable,
 ): Record<string, unknown> {
-  let e0Least = Number.POSITIVE_INFINITY;
-  let e0Most = 0;
-  let e1Most = 0;
+  let bakeJ0Least = Number.POSITIVE_INFINITY;
+  let bakeJ0Most = 0;
+  let bakeJ1Most = 0;
+  let bakeJ2Most = 0;
   for (const band of bands) {
     for (const slot of band.slots) {
-      for (let i = 0; i < slot.values.length; i += 6) {
+      for (let i = 0; i < slot.values.length; i += 3 * band.modes) {
         for (let c = 0; c < 3; c += 1) {
-          const e0 = slot.values[i + c] ?? Number.NaN;
-          const e1 = Math.abs(slot.values[i + 3 + c] ?? Number.NaN);
-          if (e0 > 0) {
-            e0Least = Math.min(e0Least, e0);
+          const j0 = slot.values[i + c] ?? Number.NaN;
+          if (j0 > 0) {
+            bakeJ0Least = Math.min(bakeJ0Least, j0);
           }
-          e0Most = Math.max(e0Most, e0);
-          e1Most = Math.max(e1Most, e1);
+          bakeJ0Most = Math.max(bakeJ0Most, j0);
+          bakeJ1Most = Math.max(bakeJ1Most, Math.abs(slot.values[i + 3 + c] ?? Number.NaN));
+          bakeJ2Most = Math.max(bakeJ2Most, Math.abs(slot.values[i + 6 + c] ?? Number.NaN));
         }
       }
     }
@@ -183,8 +184,9 @@ function halfFloatsOf(
     }
   }
   return {
-    e0PerMSr: [figure(e0Least), figure(e0Most)],
-    e1MostPerMSr: figure(e1Most),
+    bakeJ0PerSr: [figure(bakeJ0Least), figure(bakeJ0Most)],
+    bakeJ1MostPerSr: figure(bakeJ1Most),
+    bakeJ2MostPerSr: figure(bakeJ2Most),
     j0PerSr: [figure(j0Least), figure(j0Most)],
     slopeMostPerSr: figure(slopeMost),
     j0BelowLeastNormal: halves.filter((j) => j > 0 && j < 2 ** -14).length,
@@ -433,7 +435,7 @@ describe.skipIf(!RUN)("R08.T14.c's recorded runs (by hand)", () => {
       });
       const record = {
         description:
-          "R08.T14.c's recorded runs: R08.T13.c1's scalar case gate with each case's twin reading its thick bake in place of Psi_ms from the table's first sun cosine cell up, beside c1's (caseGate.json), against the same committed references; the bakes' half floats; R08.T6.c's Venus-class analytic table at its largest 1 / mean(escape); the control at four times Psi_ms's mu_s and the sky view's rows. Recorded, never gated. Written by thickRuns.test.ts; do not edit by hand.",
+          "R08.T14.c's recorded runs: R08.T13.c1's scalar case gate with each case's twin reading its thick bake (J at m <= 2 from R08.T14.d.1) in place of Psi_ms from the table's first sun cosine cell up, beside c1's (caseGate.json), against the same committed references; the bakes' half floats; R08.T6.c's Venus-class analytic table at its largest 1 / mean(escape); the control at four times Psi_ms's mu_s and the sky view's rows. Recorded, never gated. Written by thickRuns.test.ts; do not edit by hand.",
         format: THICK_RUNS_FORMAT,
         cases: Object.fromEntries(
           CASES.map(({ referenceCase: { name } }) => [

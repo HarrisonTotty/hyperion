@@ -13,7 +13,9 @@ import {
 } from "../../../test/atmosphereFixtures";
 import { absorberBinCurves, type AbsorberBinCurves } from "../absorbers";
 import { mediumTableRadiusM } from "../assemble";
-import { BAKE_WAVELENGTHS_NM, CHANNEL_WAVELENGTHS_NM } from "../medium";
+import { MARS_FIT_COLUMN } from "../channels";
+import { BAKE_BIN_COUNT, BAKE_WAVELENGTHS_NM, CHANNEL_WAVELENGTHS_NM } from "../medium";
+import { MARS_CASE, MARS_REFERENCE_RADIUS_M } from "../reference/cases";
 import { normalizedAssociatedLegendre } from "./discreteOrdinates";
 import { tablesPlanOf } from "../tables";
 import {
@@ -43,6 +45,7 @@ import {
   venusClassFixture,
 } from "../../../test/bakeFixtures";
 import { doubleGaussQuadrature } from "./discreteOrdinates";
+import { keptColumnOf, sphereBakeBody } from "./keptBake";
 import { type SpectralColumn, spectralOptics, type SpectralTerm } from "./spectralColumn";
 
 /** A value computed on its first use, so that a describe block's setup runs inside its tests. */
@@ -319,10 +322,11 @@ describe("the stored source against the solver's own fields", () => {
               ? -(viewCosines[views / 2 - 1 - v] ?? 0)
               : (viewCosines[v - views / 2] ?? 0);
           const cell = ((a * suns + s) * views + v) * THICK_BAKE_MODES;
-          for (const deltaPhi of [0, Math.PI / 2, Math.PI]) {
-            const stored =
-              (solve.source[cell] ?? Number.NaN) +
-              (solve.source[cell + 1] ?? Number.NaN) * Math.cos(deltaPhi);
+          for (const deltaPhi of [0, Math.PI / 3, Math.PI / 2, Math.PI]) {
+            let stored = 0;
+            for (let m = 0; m < THICK_BAKE_MODES; m += 1) {
+              stored += (solve.source[cell + m] ?? Number.NaN) * Math.cos(m * deltaPhi);
+            }
             let direct = 0;
             for (const [j, node] of nodes.entries()) {
               for (const sign of [1, -1]) {
@@ -350,7 +354,7 @@ describe("the stored source against the solver's own fields", () => {
     expect(worst).toBeLessThan(1e-12);
   });
 
-  it("holds no m = 1 at an overhead sun, where Λ_l¹(1) = 0", () => {
+  it("holds no m = 1 or 2 at an overhead sun, where Λ_lᵐ(1) = 0 for m ≥ 1", () => {
     const fixture = titanClassFixture();
     const prepared = prepareBake(
       fixture.column,
@@ -362,15 +366,18 @@ describe("the stored source against the solver's own fields", () => {
     const overhead = suns - 1;
     const perSun = 2 * prepared.grid.upwardCosines.length * THICK_BAKE_MODES * 3;
     let largest = 0;
-    let modeOne = 0;
+    const higher = [0, 0];
     for (let i = 0; i < values.length; i += 1) {
       const s = Math.floor(i / perSun) % suns;
       const m = Math.floor(i / 3) % THICK_BAKE_MODES;
       const value = Math.abs(values[i] ?? Number.NaN);
       largest = Math.max(largest, m === 0 ? value : 0);
-      modeOne = Math.max(modeOne, s === overhead && m === 1 ? value : 0);
+      if (s === overhead && m > 0) {
+        higher[m - 1] = Math.max(higher[m - 1] ?? 0, value);
+      }
     }
-    expect([prepared.grid.sunCosines[overhead], modeOne <= 1e-12 * largest]).toEqual([1, true]);
+    expect([THICK_BAKE_MODES, prepared.grid.sunCosines[overhead]]).toEqual([3, 1]);
+    expect(higher.map((value) => value <= 1e-12 * largest)).toEqual([true, true]);
   });
 });
 
@@ -422,6 +429,52 @@ describe("the bake's exponential sums in its bins", () => {
       });
       const got = (together.lights[0]?.bins ?? []).map((bin) => bin.terms.length);
       expect([got, Math.max(...got) <= THICK_BAKE_MAX_TERMS_PER_BIN]).toEqual([expected, true]);
+    },
+  );
+});
+
+describe("the bake's channels (R08.T14.d.1)", () => {
+  it(
+    "stores each channel's J: each bin's E over its own kernel scattering σ_s (1 − f_c) at the altitude, converted to the channel, to f32's rounding",
+    { timeout: BAKE_TIMEOUT_MS },
+    () => {
+      // TEST MARS's dust carries a forward delta, so that (1 − f_c) is not 1.
+      const prepared = prepareBake(
+        keptColumnOf(MARS_CASE),
+        [UNABSORBED],
+        smallGrid(Float64Array.of(0.2, 0.7)),
+      );
+      const body = sphereBakeBody(MARS_REFERENCE_RADIUS_M, MARS_FIT_COLUMN.referenceGravityMS2);
+      const band = thickBakeBands(body)[0];
+      const factors = prepared.lights[0]?.conversion.factors;
+      if (band === undefined || factors === undefined) {
+        throw new Error("Mars bakes one band under one light");
+      }
+      const { values } = slotOf(bakeMultipleScattering(prepared, body, 0));
+      const perAltitude = values.length / 3 / prepared.altitudesM.length;
+      const expected = new Float64Array(values.length);
+      for (let b = 0; b < BAKE_BIN_COUNT; b += 1) {
+        for (const term of prepared.lights[0]?.bins[b]?.terms ?? []) {
+          for (const [i, emission] of bakeBinSolve(prepared, band, b, term).source.entries()) {
+            const point = prepared.pointOptics[b]?.[Math.floor(i / perAltitude)];
+            const kernel = (point?.scatteringPerM ?? Number.NaN) * (1 - (point?.forwardDelta ?? 0));
+            const j = kernel > 0 ? (term.weight * emission) / kernel : 0;
+            for (let c = 0; c < 3; c += 1) {
+              expected[i * 3 + c] =
+                (expected[i * 3 + c] ?? 0) + (factors[c]?.[b] ?? Number.NaN) * j;
+            }
+          }
+        }
+      }
+      let largest = 0;
+      let worst = 0;
+      for (const [i, value] of values.entries()) {
+        const want = expected[i] ?? Number.NaN;
+        largest = Math.max(largest, Math.abs(want));
+        worst = Math.max(worst, Math.abs(value - want));
+      }
+      const forward = prepared.pointOptics.some((bin) => bin.some((p) => p.forwardDelta > 0));
+      expect([forward, largest > 0, worst <= 1e-6 * largest]).toEqual([true, true, true]);
     },
   );
 });

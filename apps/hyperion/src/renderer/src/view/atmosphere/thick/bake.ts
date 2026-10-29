@@ -1,6 +1,6 @@
 /**
  * The thick-atmosphere bake (plan R08, R08.T14.b; Design notes 5, 9 and 17): the view-dependent
- * multiple-scattering source table J_ms(h, μ₀, μ_v, m), m = 0 and 1, of one latitude band of a
+ * multiple-scattering source table J_ms(h, μ₀, μ_v, m), m = 0, 1 and 2, of one latitude band of a
  * world, solved by discrete ordinates (`discreteOrdinates.ts`) in `f64`, spectrally in the 15 bake
  * bins and stored in the render channels, in the optics worker.
  *
@@ -35,10 +35,11 @@
  * **What is stored, and Nakajima and Tanaka's corrections** (T. Nakajima and M. Tanaka, JQSRT 40
  * (1988) 51–69, cited for TMS and IMS, not re-read). The kernels march with the full extinction less
  * the forward delta, σ_k = σ_ext − f_c σ_s, add the exact single scattering of their own beam T_k,
- * σ_s(p − f_c δ)(Θ₀) T_k, and read this table in place of σ_s Ψ_ms p_u. So the table holds the
- * emission of orders two and up in the kernels' own frame, σ_s ∫ (p − f_c δ) I_d dΩ′, with I_d the
- * diffuse field, here delta-M's I′_d, and the truncated peak p − (1 − f)p′ (of weight f) taken as
- * narrow beside I′_d:
+ * σ_s(p − f_c δ)(Θ₀) T_k, and read this table, times their own σ_s,k = σ_s (1 − f_c), in place of
+ * σ_s Ψ_ms p_u. So the bake forms the emission of orders two and up in the kernels' own frame,
+ * σ_s ∫ (p − f_c δ) I_d dΩ′, with I_d the diffuse field, here delta-M's I′_d, and the truncated peak
+ * p − (1 − f)p′ (of weight f) taken as narrow beside I′_d, and the table holds it per unit of σ_s,k
+ * ("What the table holds is J", below):
  *
  * E = σ_s [(f − f_c) I′_d(Ω) + (1 − f) ∫ p′ I′_d dΩ′ + (1 − f) p′(Θ₀) (T′ − T_k)]
  *
@@ -52,17 +53,33 @@
  * - The last is the light delta-M counts as direct beam, T′ − T_k ≥ 0 (the aureole, scattered
  *   inside the lobe), scattered once more by the smooth part.
  * - IMS is left out: the aureole scattered again inside the lobe, σ_s (f − f_c)(T′ − T_k) toward
- *   the sun's own direction, stays within the lobe of the sun, finer than m ≤ 1 and 16 view cosines
+ *   the sun's own direction, stays within the lobe of the sun, finer than m ≤ 2 and 16 view cosines
  *   can hold. Its share of each point's multiply scattered light, (f − f_c)(T′ − T_k) ÷
  *   [(1 − f_c)(4π Ī′_d + T′ − T_k)], is recorded ({@link MsSourceSlot.doubleForwardShare}).
  *
  * E is per unit of true length at h\* (the reference medium's σ_s there, which a band's frame takes
  * as σ_s ÷ s_b per unit of h\*), per steradian, per unit of the star's irradiance on a plane normal
- * to its beam at the top of the atmosphere: m⁻¹ sr⁻¹. Its azimuth is E = E⁰ + E¹ cos Δφ, Δφ the
- * azimuth of the light's direction of travel less the beam's: for an observer, the azimuth they look
- * toward less the sun's (`discreteOrdinates.ts`'s convention). It is formed per bin, so that the
- * spectral product of σ_s and J stays inside the bake, then converted on storage
- * (`binConversion.ts`), so that the kernels multiply it by the star's colour.
+ * to its beam at the top of the atmosphere: m⁻¹ sr⁻¹. Its azimuth is E = Σ_m Eᵐ cos mΔφ,
+ * m = 0 … {@link THICK_BAKE_MODES} − 1, Δφ the azimuth of the light's direction of travel less the
+ * beam's: for an observer, the azimuth they look toward less the sun's (`discreteOrdinates.ts`'s
+ * convention).
+ *
+ * **What the table holds is J** (R08.T14.d.1): in each bin, E over the bin's own kernel scattering
+ * at the altitude, J_b = E_b ÷ (σ_s,b (1 − f_c,b)), sr⁻¹ per unit of the kernels' scattering and of
+ * the star's irradiance, then converted on storage (`binConversion.ts`), so that the kernels
+ * multiply it by their own σ_s,k and the star's colour. A channel's J is thus the bins' J weighted
+ * by the channel, and its σ_s the kernels' own at the channel's wavelength, as their single
+ * scattering, Hillaire's Ψ_ms, the polarisation correction and the references take it (the gases
+ * alone are weighted by channel, through their curves of growth, with the same weights). Converting
+ * E and dividing by the channel's σ_s,k instead takes σ_s's own spectral weighting into the channel:
+ * on a Rayleigh column under the reference Sun's bake spectrum, Σ_b W_cb λ_b⁻⁴ ÷ C_c is 0.917, 0.979
+ * and 0.973 of λ_c⁻⁴ at the channels' 433.6, 544 and 645 nm (blue, green, red), which left a
+ * Saturn-class sky's blue 7–10% dim against its reference (the research advice after R08.T14.f).
+ * The weighted J is J at the channel's wavelength only as far as J is flat across the channel's
+ * weights, whose first moments lie at 639, 544 and 440 nm, the red channel's negative from about
+ * 440 to 550 nm: where J follows part of τ's λ⁻⁴ (a thin column, or a low sun's reddened field), a
+ * channel reads J off its wavelength (`saturn-oblate`'s s0 blue 0.97 of its reference; Earth's red
+ * at μ₀ 1/64 some 0.74 of a solve at 645 nm, plan R08's record of T14.d.1).
  *
  * **Spectral** (Design note 5): each absorber in each bin is an exponential sum fitted to its bin
  * curve (`expSum.ts`), each layer reading k at its own Curtis–Godson pressure; several absorbers in
@@ -130,8 +147,11 @@ export const BAKE_CEILING_S = 5;
  */
 export const THICK_BAKE_STREAMS = DISCRETE_ORDINATE_STREAMS;
 
-/** The azimuthal modes the table holds: m = 0 and 1 (Design note 9; whether 1 is needed is R08.T14.d's gate). */
-export const THICK_BAKE_MODES = 2;
+/**
+ * The azimuthal modes the table holds: m = 0, 1 and 2 (Design note 9; R08.T14.d's precondition 1,
+ * the m = 2 that a forward-peaked aerosol's second-order source carries; no m = 3, main 2026-10-29).
+ */
+export const THICK_BAKE_MODES = 3;
 
 /**
  * The most solves one bin may take, the product of its absorbers' terms: past it the weakest
@@ -239,10 +259,10 @@ export interface MsBinRecord {
 /** One light slot's table. */
 export interface MsSourceSlot {
   /**
-   * E per channel, m⁻¹ sr⁻¹ per unit of the star's irradiance normal to its beam at the top (the
-   * module's remarks), A × S × V × M × 3 row-major, entry `(((a S + s) V + v) M + m) 3 + c`: a
-   * the altitude, s the sun's cosine, v the travel cosine and m the mode of {@link MsSourceTable},
-   * c red, green, blue.
+   * J per channel, sr⁻¹ per unit of the kernels' scattering σ_s,k and of the star's irradiance
+   * normal to its beam at the top (the module's remarks, "What the table holds is J"),
+   * A × S × V × M × 3 row-major, entry `(((a S + s) V + v) M + m) 3 + c`: a the altitude, s the
+   * sun's cosine, v the travel cosine and m the mode of {@link MsSourceTable}, c red, green, blue.
    */
   readonly values: Float32Array;
   /** Each bin's solves and fit. */
@@ -265,14 +285,16 @@ export interface MsSourceSlot {
 }
 
 /**
- * J_ms(h, μ₀, μ_v, m) of one latitude band (Provides' `MsSourceTable`), as the kernels read it in
- * place of σ_s·Ψ_ms·p_u (the module's remarks), one table a light slot.
+ * J_ms(h, μ₀, μ_v, m) of one latitude band (Provides' `MsSourceTable`), sr⁻¹ per unit of the
+ * kernels' scattering σ_s,k and of the star's irradiance, which the kernels read times their own
+ * σ_s,k in place of σ_s·Ψ_ms·p_u (the module's remarks), one table a light slot.
  *
  * @remarks
- * `f64` in the solve, stored as `Float32Array`; packing for the GPU is R08.T14.c's. A band of the
- * default grid is 33 × 32 × 16 × 2 × 3 values a slot, 405,504 B as `f32` and 270,336 B as
- * `rgba16float` (Design note 9's 0.26 MB, at 32 altitudes). Each light slot holds its own table,
- * since μ₀ and the curves of growth are a sun's.
+ * `f64` in the solve, stored as `Float32Array`; packing for the GPU is R08.T14.c's and T14.f's
+ * (`read.ts`). A band of the default grid is 33 × 32 × 16 × 3 × 3 values a slot, 608,256 B as
+ * `f32`, and packs into 270,336 B of texels and a 256 B info row (Design note 9's 0.26 MB, at 32
+ * altitudes, for two modes as `rgba16float`; `read.ts` holds the third in the texel's spare word).
+ * Each light slot holds its own table, since μ₀ and the curves of growth are a sun's.
  */
 export interface MsSourceTable {
   readonly band: ThickBakeBand;
@@ -1291,7 +1313,8 @@ function solveOf(
 /**
  * The thick bake of one latitude band (Provides' `bakeMultipleScattering`; the module's remarks):
  * for every light of the preparation, every bin and every term of its gases, one solve, its E
- * summed by the terms' weights, then converted to the channels.
+ * (m⁻¹ sr⁻¹) summed by the terms' weights; then each bin's J, E over the bin's kernel scattering at
+ * the altitude (sr⁻¹ per unit of that scattering), converted to the channels.
  *
  * @param band - The band's index in {@link thickBakeBands}' order.
  * @param options - A ground other than Lambertian and a reader of each solve (R08.T15's deck);
@@ -1369,6 +1392,15 @@ export function bakeMultipleScattering(
       }
     }
   }
+  // J = E ÷ (σ_s (1 − f_c)) in each bin, its own kernel scattering at the altitude; none where it
+  // has no scattering, whose E the solve leaves 0.
+  const perAltitude = suns * views * THICK_BAKE_MODES;
+  const perScattering = prepared.pointOptics.map((bin) =>
+    Float64Array.from(bin, (point) => {
+      const kernel = point.scatteringPerM * (1 - point.forwardDelta);
+      return kernel > 0 ? 1 / kernel : 0;
+    }),
+  );
   const slots = prepared.lights.map((light, slot): MsSourceSlot => {
     const out = lights[slot];
     if (out === undefined) {
@@ -1377,11 +1409,12 @@ export function bakeMultipleScattering(
     const values = new Float32Array(points * 3);
     const [red, green, blue] = light.conversion.factors;
     for (let i = 0; i < points; i += 1) {
+      const a = Math.floor(i / perAltitude);
       let r = 0;
       let g = 0;
       let bl = 0;
       for (let b = 0; b < BAKE_BIN_COUNT; b += 1) {
-        const x = out.bins[b]?.[i] ?? Number.NaN;
+        const x = (out.bins[b]?.[i] ?? Number.NaN) * (perScattering[b]?.[a] ?? Number.NaN);
         r += (red[b] ?? Number.NaN) * x;
         g += (green[b] ?? Number.NaN) * x;
         bl += (blue[b] ?? Number.NaN) * x;

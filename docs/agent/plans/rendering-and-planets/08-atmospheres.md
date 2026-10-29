@@ -526,9 +526,10 @@ export function prepareBake(
   grid?: ThickBakeGrid, // Design note 9's by default
   options?: ExpSumOptions, // thick/expSum.ts: the fits' tolerance and cap
 ): PreparedBake;
-/** J_ms(h, μ₀, μ_v, m), m = 0..1: the emission of orders two and higher, m⁻¹ sr⁻¹ per unit of the
- * star's irradiance, spectral in, channels out, one table a light, for one latitude band of
- * `gravity.slicing` (Design note 17). f64, in the optics worker (`thick-bake`). */
+/** J_ms(h, μ₀, μ_v, m), m = 0..2: the source of orders two and higher, sr⁻¹ per unit of the star's
+ * irradiance and of the kernels' scattering σ_s,k (as built at R08.T14.d.1: each bin's emission over
+ * its own σ_s (1 − f_c), then to channels), spectral in, channels out, one table a light, for one
+ * latitude band of `gravity.slicing` (Design note 17). f64, in the optics worker (`thick-bake`). */
 export function bakeMultipleScattering(
   prepared: PreparedBake,
   body: ThickBakeBody, // the figure, the gravity and R_ref
@@ -5783,7 +5784,9 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       kernel scattering σ_s (1 − f_c) at the altitude, in place of the bins' E over the channel's
       σ_s,k (question 2, with the science-checker's ruling on the conversion). The vector gate is
       run at m = 0 alone, m ≤ 1 and m ≤ 2, which is the first bullet's "which is needed", and the
-      bake's time a band is recorded against `BAKE_CEILING_S`.
+      bake's time a band is recorded against `BAKE_CEILING_S`. _Built 2026-10-29_ (Risks,
+      "Deviations in T14.d.1, as built", its vector gates by mode count, its bake times, and the
+      UHD 620 host's time pending the owner's run).
     - **T14.d.2, twilight: the bake below the horizon.** The bake and the correction extend below
       μ₀ = 0, over the lit air above the planet's shadow, where the pseudo-spherical beam is
       defined (question 1). This departs from T14.e's "ΔJ_pol = 0 where the beam is undefined"
@@ -21316,6 +21319,214 @@ KX 4417 /2`)."
     uncounted by the 32 MB budget, as T14.c's bakes are.
   - _`packThickTable`'s inputs_ (`bands | null`, `correction | null`) could be a union of the two
     kinds; both `null` is refused at run time.
+- **Deviations in T14.d.1, as built** (2026-10-29; `thick/bake.ts`, `thick/read.ts`,
+  `test/thickTables.ts`, `reference/vectorGate.test.ts` and `vectorGate.json`,
+  `reference/thickRuns.test.ts` and `thickRuns.json`, each with its tests; the split above and main's
+  rulings of 2026-10-29).
+  - _m = 2._ `bake.ts`'s `THICK_BAKE_MODES` and `read.ts`'s `THICK_SOURCE_MODES` are 3, and
+    `packThickTable` puts the bake's J² into G₂ beside the correction's ΔJ_2, packing G₂ wherever a
+    bake or a correction is held (a bake alone with no m = 2 still packs 0). No texel, read,
+    binding, WGSL or kernel changed: the kernels and both twins already decode G₂ (T14.f). An
+    `MsSourceTable` slot holds 33 × 32 × 16 × 3 × 3 values, 608,256 B as `f32` (405,504 B at
+    m ≤ 1), and still packs into 270,592 B a band and light. The solve's Fourier modes are
+    independent (`discreteOrdinates.ts` solves each on its own), so the bake's m = 0 and 1 are
+    those of a bake at m ≤ 1.
+  - _J in place of E_ (the lane's call, question 2). `MsSourceSlot.values` holds J, sr⁻¹ per unit
+    of the kernels' scattering σ_s,k and of the star's irradiance normal to its beam at the top: in
+    each bin, E_b ÷ (σ_s,b (1 − f_c,b)), the bin's own kernel scattering at the table's altitude
+    (`PreparedBake.pointOptics`), then converted by the light's `binConversion` factors, which are
+    unchanged. `packThickTable` takes J as it is, and the correction's ΔJ times σ_s ÷ σ_s,k, the
+    factor T14.f's packing formed as σ_s ΔJ ÷ σ_s,k. Holding E = σ_s,k J instead would need the
+    bake to hold the kernels' channel scattering (`tables.ts`'s `kernelMedium`), only for the
+    packing to divide it out again. A channel of the bake is thus the bins' J weighted by the
+    channel, in place of the bins' E so weighted over the channel's σ_s,k: on a Rayleigh column
+    under the reference Sun's bake spectrum, λ⁻⁴ weighted by the bake's channels is 0.917, 0.979
+    and 0.973 of λ_c⁻⁴ at the channels' 433.6, 544 and 645 nm (blue, green, red), the measured
+    cause of `saturn-oblate`'s daylit blue misses (the research advice after T14.f, 2026-10-29, in
+    main's orchestration records, whose experiments are the source of every "research advice"
+    figure below).
+  - _The science check_ (2026-10-29) ruled the conversion correct, with the module's docs fixed:
+    - A kernel channel takes its scattering at λ_c and its gases through curves of growth weighted
+      by the channel (`absorbers.ts`), with the weights `binConversion.ts` uses. Its single
+      scattering, Hillaire's Ψ_ms, the correction and the references all stand per unit of σ_s at
+      λ_c, so J_c must be J at the channel, its gases weighted by it.
+    - σ_s cancels out of each bin's J exactly, so however steeply it varies across a channel it no
+      longer enters. The gases' variation is averaged with their curves' own weights, and the sum
+      over a bin's terms commutes with the division, σ_s being the same for every term.
+    - Dividing by σ_s (1 − f_c), not σ_s, is what the kernels' σ_s,k multiplies back: E is formed
+      with p − f_c δ, which integrates to 1 − f_c. pointOptics' f_c is weighted by σ_s, so
+      σ_s (1 − f̄_c) is `kernelMedium`'s scattering in the bin. The correction's ΔJ σ_s ÷ σ_s,k is
+      ΔJ ÷ (1 − f̄_c), as before.
+    - 0.9172, 0.9793 and 0.9732 reproduce under the reference Sun's spectrum (0.933, 0.970 and
+      1.025 under an equal-energy one).
+    - What is left is J's own slope across a channel's weights, whose first moments lie at 639,
+      544 and 440 nm, the red channel's weights negative from about 440 to 550 nm. The J route is
+      the closer of the two at any slope (blue on a τ^α model: 1.000 against 0.917 at α = 0, 0.917
+      against 0.839 at α = 1). At low sun it was unmeasured (below, _the conversion at low sun_).
+    - G₂'s precision is adequate: a weaker channel's rounding is at most the strongest channel's
+      |J²| ÷ 255.5 against its own J⁰, and 5% would need a channel ratio of about 29 on Earth or 9
+      on Mars.
+  - _Shared lines_ (for R08.T15's deck, which composes `bake.ts`'s pieces): `THICK_BAKE_MODES` and
+    its doc; `bakeMultipleScattering`'s conversion loop (the `perScattering` factors and their
+    use) and its doc; the docs of the module, `MsSourceSlot.values` and `MsSourceTable`. No
+    exported signature changed. `prepareBake`, `bakeLayering`, `bakeLightBins`, `deltaMLayer`,
+    `thickBakeBands` and `bakeBinSolve` are untouched, and `BinSolve.source` is still E in its bin.
+    The deck's own J_ms converts to channels too and needs the same J conversion.
+  - _The refusal at the top._ With J formed per bin, the packing no longer divides the bake by the
+    kernel medium's σ_s,k, so T14.c's "E at the top over its tiny scattering: a J of 10⁹" cannot
+    arise; `read.test.ts` holds the half's refusal with a J of 10⁵ sr⁻¹.
+  - _The cut modes in the record._ `routedByModes` keeps each cut's verdicts, not its values, so
+    `pnpm test` and `HYPERION_SLOW_TESTS=1` take the section as committed, as they take `tables`;
+    only the by-hand run (`HYPERION_VECTOR_GATE=1`) forms it again.
+  - _Design note 9's table_ ("m = 0 and 1 azimuthal modes") holds m = 0, 1 and 2 from T14.d.1, for
+    its next revision. Precondition 1 ("the bake holds m ≥ 2 … the read takes a second texel a
+    cell") is met at m ≤ 2 with no second texel: G₂ carries the third mode in the texel's spare
+    word (T14.f), and m = 3 is not built (main, 2026-10-29).
+  - _The patterned bake_ (`test/thickTables.ts`'s `patternedThickBake`) holds J as the bake does,
+    its medium setting only the altitudes' top, and its m = 2 is 0: the smoke's twins and the
+    cache's tests read the same pattern, now packed from `f32` J in place of `f32` E over σ_s,k.
+  - _The records' formats_ are 2: `vectorGate.json` gains each case's `routedByModes` and the bake's
+    figures in `tables`; `thickRuns.json`'s half floats give the bake's J⁰, |J¹| and |J²| in sr⁻¹
+    (`bakeJ0PerSr`, `bakeJ1MostPerSr`, `bakeJ2MostPerSr`) in place of E⁰ and E¹ in m⁻¹ sr⁻¹.
+  - _Tests._ `bake.test.ts`: TEST MARS's stored J against each bin's own solve over its kernel
+    scattering, converted, to `f32`'s rounding (its dust has a forward delta); no m = 1 or 2 at an
+    overhead sun; the Rayleigh column's direct quadrature at three modes. `read.test.ts`: G₂ of a
+    bake's J² against its `f32` value to 1 in 255 of the texel's largest, alone and with the
+    correction summed in, and J⁰ and G unchanged by it. `keptBake.test.ts`: TEST EARTH's own m = 2
+    against its `f32` values to the same bound.
+- **R08.T14.d.1's vector gates** (`reference/vectorGate.json`, 2026-10-29; nothing re-traced). The
+  route against the vector I, as T14.f's gates, with the bake's J converted per bin and its table
+  cut to m = 0 alone and to m ≤ 1 (`routedByModes`: a test's option, the higher modes set to 0, the
+  correction whole at m ≤ 2), beside the route at m ≤ 2. Misses; worst |ΔL| ÷ (T + 4σ):
+
+  | Case               | T14.f (m ≤ 1, E converted) | m = 0     | m ≤ 1     | m ≤ 2 (the route) |
+  | ------------------ | -------------------------- | --------- | --------- | ----------------- |
+  | `earth`            | 56, 2.92                   | 74, 3.30  | 52, 3.24  | 26, 2.10          |
+  | `earth-ozone-slab` | 52, 2.97                   | 75, 3.29  | 50, 3.29  | 24, 2.05          |
+  | `mars`             | 197, 27.9                  | 243, 48.8 | 198, 27.8 | 167, 31.4         |
+  | `saturn-oblate`    | 124, 40.0                  | 88, 40.0  | 88, 40.0  | 87, 40.0          |
+
+  By image, where any count misses (misses and worst ratio at m = 0, m ≤ 1 and m ≤ 2; every other
+  image misses none at any):
+
+  | Case and image              | m = 0     | m ≤ 1     | m ≤ 2     |
+  | --------------------------- | --------- | --------- | --------- |
+  | `earth` ground-s30          | 1, 1.11   | 0, 0.59   | 0, 0.29   |
+  | `earth` ground-s60          | 20, 2.36  | 9, 1.81   | 0, 0.55   |
+  | `earth` ground-s80          | 22, 3.30  | 12, 3.24  | 0, 0.95   |
+  | `earth` ground-s90          | 26, 2.20  | 26, 2.17  | 26, 2.10  |
+  | `earth` aerial              | 5, 1.64   | 5, 1.64   | 0, 0.65   |
+  | `earth-ozone-slab` s30      | 2, 1.02   | 0, 0.52   | 0, 0.34   |
+  | `earth-ozone-slab` s60      | 20, 2.42  | 8, 1.83   | 0, 0.52   |
+  | `earth-ozone-slab` s80      | 23, 3.29  | 12, 3.29  | 0, 0.95   |
+  | `earth-ozone-slab` s90      | 24, 2.15  | 24, 2.12  | 24, 2.05  |
+  | `earth-ozone-slab` aerial   | 6, 1.55   | 6, 1.55   | 0, 0.59   |
+  | `mars` ground-s0            | 3, 1.58   | 3, 1.55   | 3, 1.55   |
+  | `mars` ground-s30           | 56, 13.81 | 28, 7.08  | 20, 7.90  |
+  | `mars` ground-s60           | 66, 21.56 | 61, 12.91 | 55, 11.82 |
+  | `mars` ground-s80           | 59, 48.81 | 49, 27.83 | 47, 31.41 |
+  | `mars` ground-s85 aureole   | 12, 7.80  | 12, 6.42  | 12, 5.47  |
+  | `mars` ground-s90           | 19, 5.89  | 17, 5.89  | 17, 5.89  |
+  | `mars` ground-s95           | 6, 4.16   | 6, 4.16   | 6, 4.16   |
+  | `mars` disc-p85             | 1, 1.20   | 1, 1.20   | 1, 1.20   |
+  | `mars` limb                 | 15, 5.73  | 15, 5.93  | 6, 1.77   |
+  | `mars` aerial               | 6, 2.88   | 6, 2.87   | 0, 0.67   |
+  | `saturn-oblate` equator-s90 | 13, 7.09  | 13, 7.09  | 13, 7.08  |
+  | `saturn-oblate` equator-s95 | 24, 31.87 | 24, 31.87 | 24, 31.87 |
+  | `saturn-oblate` lat60-s90   | 11, 6.32  | 11, 6.32  | 10, 6.31  |
+  | `saturn-oblate` lat60-s95   | 19, 36.50 | 19, 36.50 | 19, 36.50 |
+  | `saturn-oblate` pole-s90    | 10, 5.55  | 10, 5.55  | 10, 5.54  |
+  | `saturn-oblate` pole-s95    | 11, 40.03 | 11, 40.03 | 11, 40.03 |
+  - **No case passes.** At m ≤ 2 every remaining miss on `earth`, `earth-ozone-slab` and
+    `saturn-oblate` is twilight (s90 and s95): T14.d.2's. Mars's are precondition 2's (T14.d.3).
+    Mars's daylit misses are precondition 2's (T14.d.3); its 23 at s90 and s95 are twilight's too
+    (T14.d.2). The m ≤ 2 figures are the research advice's to the image.
+  - **Which modes are needed** (the task's first bullet): m ≤ 2 for an Earth-class air. m = 0 alone
+    and m ≤ 1 both miss Earth's s60, s80 and aerial images, which clear only at m ≤ 2 (its aerosol's
+    forward-peaked second-order source, precondition 1). `saturn-oblate`'s Rayleigh air needs only
+    m = 0 (88, 88, 87: its largest |J¹| and |J²| are 9.1 and 10.2 × 10⁻⁴ sr⁻¹ beside J⁰'s 0.11).
+    Mars gains from each mode (243, 198, 167) and passes at none.
+  - **The conversion's share** (the research advice's runs, m ≤ 2 with E converted against J):
+    `saturn-oblate` 128 → 87, its 36 daylit blue misses at −7 to −10% cleared at every latitude;
+    on `earth` and `earth-ozone-slab` no verdict moved, `earth`'s daylit worst ratios at s0 and s30
+    falling to about a third (0.74 → 0.27, 0.81 → 0.29) and s80's rising (0.69 → 0.95).
+  - **The scalar run through the bake** (`thickRuns.json`, re-blessed, scalar against scalar):
+    `earth` 47 → 17, `earth-ozone-slab` 44 → 16 (all s90), `mars` 197 → 167, `saturn-oblate`
+    122 → 74 (all s90 and s95). At R08.T6.c's Venus-class texel of the largest 1 ÷ mean(escape)
+    (blue, 12.9 km, μ_s 0.032), the bake's J⁰ averaged over μ_v moves from 6.6 to 7.2 × 10⁻⁴ sr⁻¹
+    (T14.c's record); Ψ_ms there is 3.2 × 10⁻¹⁷ as before.
+  - **G₂ against `f32`.** Each texel's G₂ reads back within 1 in 255 of the texel's largest
+    (`read.test.ts`, `keptBake.test.ts`). Over each bake's entries whose J⁰ is at least 10⁻³ of its
+    largest, the largest |J²| ÷ J⁰, and the largest J error the word's rounding makes as a share of
+    the channel's J⁰, in the bake's own table and in the routed one with the correction summed in
+    (`tables`' `bakeCurveShareOfJ0`, `bakeCurveRoundingOfJ0` and `routedCurveRoundingOfJ0`):
+    `earth` 0.44, 0.15% and 0.15%; `earth-ozone-slab` 0.44, 0.15% and 0.15%; `mars` 1.37, 0.50%
+    and 0.51%; `saturn-oblate` 0.037, 0.019% and 0.078%, where the correction's m = 2, some five
+    times the bake's, sets the word's exponent. The research advice's control, G₂ in an `f32` side array
+    at m ≤ 2 (E converted), gave the packed word's counts on all four cases (26, 24, 168, 128), so
+    no second texel.
+  - **The conversion at low sun** (the science check's should-fix; a scratch probe on band 0: the
+    packed table's J⁰ over a 16-stream scalar solve at each channel's own wavelength,
+    `polarisation.ts`'s `polarisationSources` at m = 0, over the entries above 10⁻³ of the solve's
+    largest; the median, with the least and most, at μ₀ 1/64 and 63/64, on the base tree's E route
+    and this tree's J route):
+
+    | Case and channel       | E route, μ₀ 1/64 | J route, μ₀ 1/64 | E route, μ₀ 63/64 | J route, μ₀ 63/64 |
+    | ---------------------- | ---------------- | ---------------- | ----------------- | ----------------- |
+    | `earth` red, 645 nm    | 0.58 (0.47–0.77) | 0.74 (0.65–0.79) | 0.93 (0.83–0.98)  | 0.96 (0.89–0.98)  |
+    | `earth` green, 544 nm  | 1.00 (0.97–1.02) | 1.01 (1.00–1.02) | 0.94 (0.93–1.00)  | 1.00 (0.99–1.00)  |
+    | `earth` blue, 433.6 nm | 0.93 (0.90–1.02) | 1.04 (1.01–1.07) | 0.88 (0.87–0.95)  | 0.97 (0.95–0.99)  |
+    | `saturn-oblate` red    | 0.98 (0.95–1.01) | 1.00 (0.99–1.02) | 0.97 (0.94–0.97)  | 1.00 (1.00–1.00)  |
+    | `saturn-oblate` green  | 0.99 (0.97–1.00) | 1.00 (1.00–1.00) | 0.95 (0.94–0.97)  | 1.00 (1.00–1.00)  |
+    | `saturn-oblate` blue   | 0.93 (0.90–0.95) | 1.01 (0.99–1.03) | 0.89 (0.88–0.90)  | 0.98 (0.96–0.99)  |
+    - The J route is the closer in every channel at every μ₀ cell of both cases (cells 1/64, 3/64,
+      7/64, 11/64, 15/64, 33/64 and 63/64 were read). On gas-free `saturn-oblate` it is within −4%
+      to +5% at every cell.
+    - `earth`'s red stays low at a low sun, 0.74 of the 645 nm solve at μ₀ 1/64, and also below
+      solves at 560, 600 and 620 nm (medians 0.84–0.93 overhead). That is J's rise toward the blue
+      taken by the red channel's negative weights, and part may be the comparison's: the solve at a
+      wavelength reads ozone through the bin that holds it, where the channel and the references
+      weight it by the channel. It bears on the table's first μ₀ cells, which T14.d.2's twilight
+      reads (deferred, below).
+
+- **R08.T14.d.1's bake times** (pod, 4 vCPU, one thread, on a quiet pod: the 1-minute load 0.07 at
+  the start of this tree's runs and 0.55 at the start of the base tree's, which give m ≤ 1).
+  `bakeKeptCase` (its preparation and each band's `bakeMultipleScattering`) and `bakeKeptCorrection`
+  of the kept cases on the twin's bands, two runs after a warm-up, by a scratch probe; an earlier
+  pair of runs at loads of 1.2–1.8 agreed within 6%. Against `BAKE_CEILING_S`, 5 s, which is the
+  UHD 620 host's:
+
+  | Case                         | A band, m ≤ 1 | A band, m ≤ 2 | Bake, m ≤ 1 | Bake, m ≤ 2 | Correction  | Bake and correction, m ≤ 2 |
+  | ---------------------------- | ------------- | ------------- | ----------- | ----------- | ----------- | -------------------------- |
+  | `earth` (one band)           | 2.11 s        | 3.11–3.22 s   | 2.31–2.33 s | 3.29–3.43 s | 1.57–1.72 s | 4.9–5.1 s                  |
+  | `saturn-oblate` (four bands) | 1.13–1.30 s   | 1.67–1.80 s   | 4.65–4.93 s | 6.83–6.99 s | 3.41–3.47 s | 10.3–10.4 s                |
+  - m ≤ 2 costs about 1.45–1.5 times m ≤ 1 a band (the means' ratio 1.50 on `earth`, 1.44 on
+    `saturn-oblate`); the preparation, 0.2 s on `earth`, is shared, and the correction is
+    unchanged. The bake and its correction summed are at the ceiling for `earth` and twice it for
+    `saturn-oblate` on the pod. No fallback is taken on a pod's figure: the UHD 620 host's time,
+    summed over the bands with the correction's, is pending: the owner's run.
+
+- **R08.T14.d.1's frame** (no run). T14.d.1 changes no read, texel, binding or kernel, so QW33's
+  (K)–(N) on T14.f's tree stand for this tree (pending: the owner's RTX run).
+- **Deferred findings (2026-10-13 rule)** (R08.T14.d.1). Recorded and deferred:
+  - _Mars's worst ratio_ rises with the modes, 27.8 at m ≤ 1 to 31.4 at m ≤ 2
+    (`ground-s80-v85-a180/b`), while its misses fall: its forward-peaked dust, precondition 2's.
+  - _Earth's daylit worst at m ≤ 1_ is 3.24 with J converted against T14.f's 2.92 (E converted),
+    both at `ground-s80-v85-a90/r`: the missing m = 2 dominates there, and at m ≤ 2 the image's
+    worst is 0.95.
+  - _The deck's J_ms_ (R08.T15) converts its bins to channels as the bake did, and wants the same
+    J conversion before its gates.
+  - _A channel's J off its wavelength_ (the science check): `earth`'s red at a low sun reads some
+    0.74 of a solve at 645 nm (above). The science check's option, if T14.d.2's or T14.d.4's gates
+    show it: the channel-weighted J times the ratio of J at λ_c to the channel-weighted J of the
+    gas-free continuum, which keeps the gases' channel weighting.
+  - _The f32 bakes past an eviction_ (T14.c's deferred finding) are now 608,256 B a band and light,
+    as the corrections are.
+  - _Two docs left saying m ≤ 1 and E._ `hillaire.ts`'s `THICK_TABLE_SIZE` ("the bake's m = 0 and 1
+    and the correction's m = 2") and `shaders/thickRead.wgsl`'s header ("J0, G and G2 are E0, E1 …
+    divided by the kernels' scattering") and its lobes' note ("the table's E"). T14.d.1 changes no
+    WGSL or `hillaire.ts` line, beside R08.T11.g's lane there; the next task that edits either file
+    corrects them.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client
