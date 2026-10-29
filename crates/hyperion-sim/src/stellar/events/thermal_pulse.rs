@@ -19,9 +19,11 @@
 //! and the years since it, as the track's mass is for a planet's orbit (P14.T45.d), so that the
 //! clock follows the clock time without forming an age at t (design note 23). Within ±H that is
 //! the plan's form, the integral at the epoch plus the clock time since the epoch times the epoch's
-//! pulse frequency, to under 10⁻³ cycles (a unit test measures it); across the source horizon it
-//! stays the track's pulse count, from which the first-order form would drift by ½ ḟ Δt², tens of
-//! cycles for the shortest phases, which the source horizon spans whole.
+//! pulse frequency, to under 10⁻³ cycles for most stars (a unit test measures 1–4 M☉), growing with
+//! ḟ to some 10⁻² cycles for the short periods of the most massive (6–7 M☉, `τ_ip` of 100–300
+//! years); across the source horizon it stays the track's pulse count, from which the first-order
+//! form would drift by ½ ḟ Δt², tens of cycles for the shortest phases, which the source horizon
+//! spans whole.
 //!
 //! Before the segment and after it φ continues linearly at the segment's mean rate, so that it is
 //! strictly increasing on the whole clock, as a [`PhaseClock`] must be; pulses fall only inside

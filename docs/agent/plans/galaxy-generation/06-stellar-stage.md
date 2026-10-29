@@ -1733,7 +1733,16 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   parts and a noise anchored so that pulse 0 falls at the phase's start:** the record is under
   Risks ("Deviations in T28.f, as built" and "Deferred findings (2026-10-13 rule) (P06.T28.f)");
   T24.b reads `thermal_pulse::pulse_number_at` for its n, and T28.g composes
-  `ThermalPulseModel::luminosity_factor_at` into `summary_at`.
+  `ThermalPulseModel::luminosity_factor_at` into `summary_at`. _Amended 2026-10-29 (main's ruling
+  on the lane's question)._ The base phase is the track's integrated pulse count, the integral of
+  1 ÷ τ_ip(M_c, M_env) (Wagenhuber and Groenewegen 1998, A&A 340, 183, equation 11) that P06.T10.c
+  stores at the segment's knots, read at the age's two parts: the age at the epoch, and the clock
+  time since it, as P14.T45.d reads the mass. It replaces n(a₀) + f(a₀)(t − epoch), which is that
+  count's tangent at the epoch. Both keep design note 23's intent, since the fast part comes from
+  the clock time. The tangent departs from the count by ½ ḟ (t − epoch)²: under 10⁻³ cycles over
+  ±H for most stars, but up to some 2 × 10⁻² cycles for the short periods of 6–7 M☉ stars, and
+  many cycles across the source horizon, where it would put pulses outside the phase. Reading the
+  count itself gives P06.T24.b's C/O, the census and the listings the same pulses.
 - **P06.T28.g Assembly.** `stellar::events::{events_in, active_at}` over all kinds; `StarEvent`;
   transient factors composed in `summary_at` (design note 14).
 - **Files:** `stellar/events/`: `mod.rs`, `flares.rs`, `glitches.rs`, `magnetar.rs`,
@@ -5951,7 +5960,11 @@ R06.
     read at the age's two parts as P14.T45.d's `mass_at_split` is, (age at the epoch − the knot's
     age) + years since the epoch, the interval chosen at the summed age; not n(a₀) + f(a₀)(t −
     epoch). Over ±H the two agree to under 10⁻³ cycles, f the interpolant's slope at the epoch
-    (tested at ±H on four stars). Over the source horizon, which spans the shortest phases whole,
+    (tested at ±H on four stars, 1–4 M☉). Research measured more (2026-10-29, median draws, at a
+    third, two thirds and 95% of the phase): under 10⁻³ cycles to 6 M☉ at solar metallicity, 5 M☉
+    at [Fe/H] −0.5 and 4 M☉ at −1.0, and up to 2.2 × 10⁻² cycles at 7 M☉ and [Fe/H] −0.5 (τ_ip
+    130 years), so the module's documentation says so; the test's bound stays, right for its four
+    stars. Over the source horizon, which spans the shortest phases whole,
     the first-order form would drift by ½ ḟ Δt², tens of cycles, and put pulses outside the
     phase; the count stays the closed form in the event number that T24.b reads.
     `Track::pulse_phase_at(base_years, offset_years)` replaces `pulse_phase_at(age)` and is `None`
