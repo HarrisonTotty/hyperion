@@ -26,15 +26,19 @@ import {
   coarseCellCount,
   coarseLevel,
   DEFAULT_BODY_DISTANCE_AU,
+  DEFAULT_HILL_FRACTION,
   DEFAULT_NEAR_LY,
   DEFAULT_SEED,
   DEFAULT_UNIVERSE,
+  defaultBodyDistanceM,
   describePlacement,
+  GRAVITATIONAL_CONSTANT_M3_PER_KG_S2,
   MAX_MEAN_CELL_M,
   nearestFirst,
   type PlaceShipOptions,
   parsePlaceShipArgs,
   main,
+  pericentreHillRadiusM,
   placeShip,
 } from "./placeShip";
 
@@ -90,6 +94,53 @@ function planetAt(seconds: number): BodySummaryDto {
 }
 
 /**
+ * The Earth's and the Sun's masses, kg, and the Earth's orbit's semi-major axis, m, and
+ * eccentricity: NASA's Earth and Sun fact sheets (5.9722 × 10²⁴ kg, 1.988 50 × 10³⁰ kg,
+ * 149.598 × 10⁶ km, 0.0167), whose Hill radius at pericentre is 1.472 × 10⁹ m.
+ */
+const EARTH = { massKg: 5.9722e24, sunKg: 1.9885e30, aM: 1.49598e11, e: 0.0167 } as const;
+
+/** `body` with the Earth's mass and orbit, and a mean radius of `radiusM`. */
+function withEarthsOrbit(body: BodySummaryDto, radiusM: number): BodySummaryDto {
+  return {
+    ...body,
+    mass_kg: { state: "ok", value: EARTH.massKg },
+    orbit: {
+      state: "ok",
+      value: {
+        parent: { type: "star", body_index: 0 },
+        orbit: {
+          period_s: 31_558_150,
+          semi_major_axis_m: EARTH.aM,
+          eccentricity: EARTH.e,
+          inclination_rad: 0,
+          ascending_node_rad: 0,
+          argument_of_periapsis_rad: 0,
+          mean_anomaly_at_epoch_rad: 0,
+          mu_m3_s2: GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 * (EARTH.sunKg + EARTH.massKg),
+        },
+        valid_until: null,
+      },
+    },
+    bulk: {
+      state: "ok",
+      value: {
+        radius_m: radiusM,
+        density_kg_m3: 5_513,
+        surface_gravity_m_s2: 9.8,
+        class: "rocky",
+        mass_fractions: { iron: 0.32, rock: 0.68, water: 0, envelope: 0 },
+        equilibrium_temperature_k: 255,
+        effective_temperature_k: null,
+      },
+    },
+  };
+}
+
+/** The Earth's Hill radius at pericentre, a (1 − e) (m ÷ 3M)^⅓, m. */
+const EARTH_HILL_M = EARTH.aM * (1 - EARTH.e) * Math.cbrt(EARTH.massKg / (3 * EARTH.sunKg));
+
+/**
  * The planet's equatorial and polar radii, m: the Moon's, NASA's Moon fact sheet's 1,738.1 and
  * 1,736.0 km, whose volumetric radius, 1,737.4 km, puts its coarse field at level 6.
  */
@@ -132,6 +183,8 @@ function planetDetail(body: Extract<RequestBody, { kind: "body_detail" }>): Resp
 class FakeServer {
   readonly universes: UniverseInfo[] = [UNIVERSE];
   readonly requests: RequestBody[] = [];
+  /** The planet `NEAR` lists at a time, s: {@link planetAt}, with no mass or orbit, by default. */
+  planetOf: (seconds: number) => BodySummaryDto = planetAt;
 
   answer(body: RequestBody): ResponseBody | RequestError {
     this.requests.push(body);
@@ -217,7 +270,7 @@ class FakeServer {
   #bodies(seconds: number, detail: DetailLevelDto): BodySummaryDto[] {
     const bodies = [
       aBody(`${NEAR}.0001`, "ring", [0, 0, 0]),
-      planetAt(seconds),
+      this.planetOf(seconds),
       aBody(`${NEAR}.0101`, "moon", null),
     ];
     if (detail === "contact") {
@@ -262,6 +315,15 @@ class FakeServer {
   }
 }
 
+/** The ship's offset from the body it was placed at, m. */
+function offsetOf(server: FakeServer): readonly [number, number, number] {
+  const { position } = server.sceneShip().ship;
+  if (position.frame !== "body") {
+    throw new Error(`the ship was placed in the ${position.frame} frame, not a body's`);
+  }
+  return position.offset_m;
+}
+
 function options(args: readonly string[]): PlaceShipOptions {
   return parsePlaceShipArgs(args);
 }
@@ -294,6 +356,7 @@ describe("place-ship's command line", () => {
       timeS: 0,
       rate: 1,
       survey: null,
+      json: false,
     });
   });
 
@@ -409,6 +472,49 @@ describe("placing the ship", () => {
     expect(ship.velocity_m_s).toEqual([0, 0, 0]);
   });
 
+  it("stands half the planet's Hill radius at pericentre behind it, inside the entry ratio (R10.T12)", async () => {
+    const server = new FakeServer();
+    server.planetOf = (seconds) => withEarthsOrbit(planetAt(seconds), 6_371_000);
+    const placement = await placeShip(askThrough(server.client()), options(["-u", "Survey"]));
+    expect(Math.hypot(...offsetOf(server))).toBeCloseTo(DEFAULT_HILL_FRACTION * EARTH_HILL_M, 3);
+    // Inside the frame's entry ratio of 0.9, where 0.01 au stood at 1.017 of it.
+    expect(placement.hillRadiusM).toBeCloseTo(EARTH_HILL_M, 3);
+    expect((DEFAULT_BODY_DISTANCE_AU * AU_M) / EARTH_HILL_M).toBeGreaterThan(1);
+    expect(describePlacement(placement)).toContain("0.500 of its Hill radius at pericentre");
+    // The body is listed at `bulk`, which states its radius.
+    expect(server.requests).toContainEqual(expect.objectContaining({ detail: "bulk" }));
+  });
+
+  it("takes the distance asked over the Hill radius's default", async () => {
+    const server = new FakeServer();
+    server.planetOf = (seconds) => withEarthsOrbit(planetAt(seconds), 6_371_000);
+    const placement = await placeShip(
+      askThrough(server.client()),
+      options(["-u", "Survey", "--distance", "0.002"]),
+    );
+    expect(placement.distanceM).toBe(0.002 * AU_M);
+    expect(Math.hypot(...offsetOf(server))).toBeCloseTo(0.002 * AU_M, 3);
+  });
+
+  it("refuses a default inside the body, where half its Hill radius is within its radius", async () => {
+    const server = new FakeServer();
+    // An Earth's mass and orbit on a body of 800,000 km: half its Hill radius, 736,000 km, is inside.
+    server.planetOf = (seconds) => withEarthsOrbit(planetAt(seconds), 8e8);
+    await expect(placeShip(askThrough(server.client()), options(["-u", "Survey"]))).rejects.toThrow(
+      "is within its radius of 800000000 m: give --distance",
+    );
+  });
+
+  it("takes the system of the body it is asked to look at, with no search", async () => {
+    const server = new FakeServer();
+    const placement = await placeShip(
+      askThrough(server.client()),
+      options(["-u", "Survey", "--look-at", `${NEAR}.0100`]),
+    );
+    expect([placement.system, placement.body]).toEqual([NEAR, `${NEAR}.0100`]);
+    expect(server.requests.some((sent) => sent.kind === "systems_in_range")).toBe(false);
+  });
+
   it("refuses a body that is not there to look at", async () => {
     const server = new FakeServer();
     await expect(
@@ -495,6 +601,32 @@ describe("placing the ship", () => {
       ),
     ).rejects.toThrow(`body ${NEAR}.0100 has no figure to give its coarse field's level`);
     expect(server.surveyPasses()).toEqual([]);
+  });
+});
+
+describe("the default distance from a body", () => {
+  it("is half the Hill radius at pericentre, a (1 − e) (m ÷ 3M)^⅓", () => {
+    const earth = withEarthsOrbit(planetAt(0), 6_371_000);
+    expect(pericentreHillRadiusM(earth)).toBeCloseTo(EARTH_HILL_M, 3);
+    expect(pericentreHillRadiusM(earth)).toBeCloseTo(1.472e9, -7);
+    expect(defaultBodyDistanceM(earth)).toBeCloseTo(0.5 * EARTH_HILL_M, 3);
+  });
+
+  it("is 0.01 au where the server states no Hill radius", () => {
+    expect(pericentreHillRadiusM(planetAt(0))).toBeNull();
+    expect(defaultBodyDistanceM(planetAt(0))).toBe(DEFAULT_BODY_DISTANCE_AU * AU_M);
+  });
+
+  it("takes the client's constant of gravitation (a tripwire)", async () => {
+    // The node project's compiler does not reach the renderer's modules (a project of their own),
+    // so the client's module is loaded at run time and its constant narrowed.
+    const url = new URL("../renderer/src/lib/system/constants.ts", import.meta.url).href;
+    const client: unknown = await import(/* @vite-ignore */ url);
+    const g: unknown =
+      typeof client === "object" && client !== null
+        ? Reflect.get(client, "GRAVITATIONAL_CONSTANT_M3_PER_KG_S2")
+        : undefined;
+    expect(g).toBe(GRAVITATIONAL_CONSTANT_M3_PER_KG_S2);
   });
 });
 
@@ -717,6 +849,21 @@ describe("the tool's run", () => {
     expect(socket.sent[0]).toEqual({ type: "hello", client_version: "place-ship" });
     expect(AnsweringSocket.server.sceneShip().universe).toBe(UNIVERSE.id);
     expect(socket.closed).toBe(true);
+  });
+
+  it("prints the placement as one line of JSON with --json", async () => {
+    const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const run = main(["-u", "Survey", "--json"]);
+    AnsweringSocket.latest().serverWelcomes();
+    await expect(run).resolves.toBe(0);
+    const printed = write.mock.calls.map(([chunk]) => String(chunk)).join("");
+    expect(printed.endsWith("\n")).toBe(true);
+    const placement: unknown = JSON.parse(printed);
+    expect(placement).toMatchObject({
+      universe: { id: UNIVERSE.id },
+      system: NEAR,
+      body: `${NEAR}.0100`,
+    });
   });
 
   it("exits 1 and closes the socket when the server never welcomes it", async () => {
