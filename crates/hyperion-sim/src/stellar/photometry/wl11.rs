@@ -16,6 +16,12 @@
 //! T<sub>eff</sub> and BC<sub>V</sub> as printed. The log g −0.5 rows are left out: below log g
 //! 0.0 the photometry reads Levesque et al.'s supergiants' column over this table's log g 0.0.
 //!
+//! **Terms.** These rows are a reduced table, cut to the quantities and range read (rendering plan
+//! R08's decision-r08-cmf-licence §9.2; main's ruling of 2026-10-29, plan 06's record of
+//! P06.T43.a), with their citation here and in `NOTICE`. They come from the authors' own file. CDS
+//! holds the same data as a catalogue of an AAS journal, which it offers under CC BY-NC, and that
+//! copy must never replace the authors' file here.
+//!
 //! **What the table is.** Johnson–Cousins photometry of stars of known [Fe/H] fitted as
 //! colour–colour relations in gravity and abundance, with literature temperature and
 //! bolometric-correction scales attached (their sections 2 and 2.5): VandenBerg and Clem's (2003)

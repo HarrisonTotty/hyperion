@@ -894,6 +894,22 @@ ruled 2026-10-09 and 2026-10-10).
   crates/hyperion-sim/src/tables/substance_albedo.rs are computed from them. Courtesy of the U.S.
   Geological Survey, which has not reviewed or endorsed the derived values.
 
+- White-dwarf synthetic photometry: the V-band bolometric corrections of the pure-hydrogen grid
+  of P. Bergeron et al., "Synthetic Colors and Evolutionary Sequences of Hydrogen- and
+  Helium-Atmosphere White Dwarfs", http://www.astro.umontreal.ca/~bergeron/CoolingModels
+  (release of 2021-01-13), with Bédard et al., Astrophys. J. 901 (2020) 93; Holberg and Bergeron,
+  Astron. J. 132 (2006) 1221; Tremblay, Bergeron and Gianninas, Astrophys. J. 730 (2011) 128;
+  Bergeron et al., Astrophys. J. 737 (2011) 28; Blouin et al., Astrophys. J. 863 (2018) 184;
+  Kowalski and Saumon, Astrophys. J. 651 (2006) L137; and Bergeron, Wesemael and Beauchamp,
+  Publ. Astron. Soc. Pac. 107 (1995) 1047. The grid's BC_V column alone, at its own nodes, in
+  crates/hyperion-sim/src/stellar/photometry/montreal_da.rs (galaxy plan 6, P06.T43.a).
+
+- Cool stars' bolometric corrections: G. Worthey and H.-c. Lee, Astrophys. J. Suppl. Ser. 193
+  (2011) 1, from the authors' color-temperature table (http://astro.wsu.edu/models/, mash2.out
+  of 2010-09-15), [Fe/H] = 0, log g 0.0-5.5, V - K from 1.1, T_eff and BC_V alone, in
+  crates/hyperion-sim/src/stellar/photometry/wl11.rs (galaxy plan 6, P06.T43.a). Not taken from
+  CDS's copy of the same table, which CDS offers under CC BY-NC.
+
 ================================================================================
 Test data (not shipped)
 

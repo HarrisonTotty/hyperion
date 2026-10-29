@@ -5711,12 +5711,21 @@ R06.
       arXiv:astro-ph/0504337v1 through the Internet Archive.
     - The science check compared every embedded value with its source file: 915 Montreal, 636
       Worthey and Lee and 12 Levesque values, no mismatch.
-  - _The data's terms (lean, 2026-10-28; for the owner)._ The Montreal site states no licence and
-    asks for citation; Worthey and Lee state no terms beyond offering the table and program (their
-    §4). Both are embedded with their citations, the Montreal grid's BC<sub>V</sub> column (305
-    values, with 610 M<sub>bol</sub> and V values for the tests) and Worthey and Lee's 636 rows, as
-    `pm13` embeds Mamajek's table. Plan 15's design note 12, and the `montreal_cooling` dataset's
-    provenance (only that file committed), are read as the fitting crate's rule for raw files.
+  - _The data's terms (ruled by main, 2026-10-29, on research's advice; it replaces the lean of
+    2026-10-28)._ The Montreal site states no licence; its one term is "If you are using any of
+    these color tables, please acknowledge this Web site … and include the relevant references".
+    Worthey and Lee state no terms beyond offering the table and program (their §4). Both stay
+    embedded with their citations and a `NOTICE` "Data" entry each.
+    - The Montreal grid's BC<sub>V</sub> column (305 values at the source's own nodes, with 610
+      M<sub>bol</sub> and V values for the tests) counts as reduced: the one quantity used, cut
+      from a 45-column table. That holds provided the module states the site's acknowledgement and
+      `NOTICE` carries it, which both do (lane `p06-land`).
+    - Worthey and Lee's 636 rows ([Fe/H] = 0, log g 0.0–5.5, V − K from 1.1: 1 of 7 abundances,
+      12 of 13 gravities and 53 of 75 colours, T<sub>eff</sub> and BC<sub>V</sub> alone) are
+      reduced under decision-r08-cmf-licence §9.2. Their source is the authors' own `mash2.out` of
+      2010-09-15. The CDS copy of the same data is an AAS-origin catalogue, which CDS offers under
+      CC BY-NC (decision-r08-cmf-licence §9.3; decision-camera-eta excludes non-commercial data),
+      so it must never replace the authors' file; `wl11.rs` says so.
   - _Zero points (lean, 2026-10-28)._ Each source moves onto the module's (M<sub>bol</sub>☉
     4.74, BC<sub>V</sub>☉ −0.085) in the way its numbers are made. The Montreal tables are
     synthetic photometry of models of known luminosity on M<sub>bol</sub>☉ = 4.75 (recomputed from

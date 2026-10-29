@@ -12,12 +12,16 @@
 //! `ff3cfe6882c10c5a9e64c3ca19cec9ed92d622bcc88b3dd87e1382017ddad1df`). Its values are consistent
 //! with those this module quoted before from the same release's 0.6 M☉ sequence: BC<sub>V</sub>
 //! −0.40 at 4,000 K and −4.15 at 45,000 K at log g 8.0; that sequence's −8.16 at 150,000 K lies at
-//! log g 6.54, below this grid. The site states no licence and asks users to cite the papers. The
-//! `WD_models` code's README lists, for the synthetic colours, Holberg and Bergeron (2006, AJ 132,
-//! 1221), Kowalski and Saumon (2006, ApJ 651, L137), Tremblay, Bergeron and Gianninas (2011, ApJ
-//! 730, 128), Bergeron et al. (2011, ApJ 737, 28) and Blouin et al. (2018, ApJ 863, 184); the
-//! release's sequences are Bédard et al.'s (2020). Only the BC<sub>V</sub> column is kept, with the
-//! M<sub>bol</sub> and V columns for the tests, as printed.
+//! log g 6.54, below this grid. The site states no licence and asks users to acknowledge it
+//! (<http://www.astro.umontreal.ca/~bergeron/CoolingModels>) and cite the papers listed there,
+//! which this documentation and `NOTICE` do. The `WD_models` code's README lists, for the synthetic
+//! colours, Holberg and Bergeron (2006, AJ 132, 1221), Kowalski and Saumon (2006, ApJ 651, L137),
+//! Tremblay, Bergeron and Gianninas (2011, ApJ 730, 128), Bergeron et al. (2011, ApJ 737, 28) and
+//! Blouin et al. (2018, ApJ 863, 184); the site lists those and Bergeron, Wesemael and Beauchamp
+//! (1995, PASP 107, 1047); the release's sequences are Bédard et al.'s (2020). Only the
+//! BC<sub>V</sub> column is kept, with the M<sub>bol</sub> and V columns for the tests, as printed:
+//! the one quantity used, cut from the table's 45 columns, so a reduced table (main's ruling of
+//! 2026-10-29, plan 06's record of P06.T43.a).
 //!
 //! **The grid.** Five gravities, log g = 7.0 to 9.0 by 0.5 (0.15–1.2 M☉ for cool models; at log g
 //! 7.0 the grid's mass rises to 0.69 M☉ at 150,000 K), and the same 61 effective temperatures at
