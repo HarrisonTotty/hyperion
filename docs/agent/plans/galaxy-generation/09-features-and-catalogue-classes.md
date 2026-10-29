@@ -1259,6 +1259,9 @@ resolution, canonical IDs, no cell above 2²⁴ candidates.
 
 **P09.T33.a built** (2026-10-29; no output moves): see "P09.T33.a as built" under Risks.
 
+**P09.T33.b not built** (2026-10-29): it waits on P08.T12's displaced fields; see "P09.T33.b not
+built" under Risks.
+
 - **P09.T33.a Field deaths.** `CoreCollapseProcess` on 512 ly cells: sites follow what dies in the
   field, which is the young field with its (1 − φ(a)) age factor. Envelope = site density bound ×
   (the field cap + L + 2H) × the largest death rate per system; a candidate draws its site, accepts
@@ -4576,3 +4579,55 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   main. (9) _Fast-suite cost._ The sample cells take some 10 s to generate in each test process
   that reads them (the centre's cell 1.1 s; opt-level 2, pod), and the golden reads them on
   wasm32-wasip1 too; the module's fast tests take 13–30 s of test time natively.
+- **P09.T33.b not built (lane `p09-classes`, 2026-10-29, at `GENERATOR_VERSION` 23): it waits on
+  P08.T12.** Its second site density is "plan 08's runaway and walkaway classes of band E", and
+  those classes have no density until P08.T12.a builds the displaced fields: each class's weight
+  × its `FormTable` form, with the form's in-cube, unbound and own-form shares (the nuclear disc's
+  own-form share stays in the field) and a bound over a cell. Plan 09's Consumes already puts
+  T33–T36 on P08.T12. Three things stand in the way, and building around them would be a stand-in
+  for P08.T12.a:
+  - _No carrier._ `ClassTable::build` takes 0.53 s for the fixture (pod, opt-level 2), and the
+    class's process is built from the galaxy alone at each visit of the production lookup
+    (P09.T32's registration), so it cannot build the table; nothing carries it per galaxy before
+    P08.T12.
+  - _No densities or bounds._ `DiscBornForm` and `CoredPowerLaw` have densities but no bound over
+    a cell yet; `FlareFactor` and the arms' `sup` are the pieces P08.T12.a's `layer_bound` will
+    assemble.
+  - _No physical forms._ `FormTable::committed()` is provisional, "fitted to the orbit run's smoke
+    histograms and … not physical", until P15.T6's production table.
+  - _The closed form, measured_ (a probe, not committed): at the fixture, W = 0.340 from the class
+    table; over band E's 33 nodes at the thin disc's reference lifetimes, solar composition and
+    the median draws (whose deaths make a shell up to 18.2 M☉ and 65.9% of band E's deaths by
+    rate), runaways are 15.4% and walkaways 34.0% of the young field's core collapses: 49.4% of
+    them die after being ejected. These are lifetime shares. A runaway's encounter, at 0–3 Myr,
+    comes before every band-E death after 3 Myr; a walkaway's release, at its heavier
+    companion's death, always comes first. At 23 the grid places every young star in the field,
+    so T33.a's field-only class agrees with the grid.
+  - _Design for when P08.T12 lands (lean, 2026-10-29)._ (1) T33.a's field term keeps a death only
+    if its ejection marks say it was not ejected before it died. The marks go on a new tag,
+    `class.core_collapse.ejection`: the kind by `runaway_share` and `walkaway_share`, the channel,
+    and the ejection age as the class table's `ejection_ages` gives it. They are judged at the
+    reference lifetime, so the closed form is exact for the share. (2) A second set of terms in
+    the same class, one per band-E runaway and walkaway class of the thin disc and the nuclear
+    disc (speed bin by the bin of the time from ejection to death). Each term is its class's
+    form × an envelope of its recent deaths, and the site's mark picks a term as T33.a's picks a
+    component, so both densities share the class's cells and index space. (3) A term's candidate:
+    - draws its mass by thinning on its class's conditional weight against its largest;
+    - draws its ejection age inside the age bin and its speed inside the speed bin;
+    - takes as its velocity the source component's law at the site plus the ejection velocity
+      (the one velocity);
+    - then goes through T33.a's death-rate thinning and the shared test.
+
+    (4) Tests: the class's ejected share against the closed form above (α = 10⁻³); and
+    complementarity for sampled runaway candidates, where a grid runaway record and a catalogue
+    candidate with the same marks and velocity give the same `death_in_interval` and `claims`.
+    The production lookup needs the galaxy to carry P08.T12's displaced fields, or a
+    `GalaxyRules` hold at 26.
+
+  - _For P09.T43._ Its "sites follow … the band-E runaways" waits on the same carrier.
+- **Deferred findings (2026-10-13 rule)**, from P09.T33.a's review: _Every read of a catalogue
+  record resolves its entry again._ `query::position_at`, `epoch_velocity`, `stars_of`,
+  `BriefModel::of_record` and lensing's mass each call `system_of_record`. That rebuilds the
+  process and reruns the candidate and its test, some milliseconds each time. Before P09.T37 puts
+  catalogue systems into the range query, callers that hold the `CatalogueSystem` should pass it,
+  or the process should be cached per galaxy (Rust review).
