@@ -460,7 +460,9 @@ P10.T10.b's registration member (below)._
     are 0.3–1% of the halo; the distribution of the applied share over 2,000 seeds is recorded in
     a golden summary, a new golden under `tests/golden/galaxy/global_list/` written by a slow
     test, since 2,000 seeds' in-plane tables take minutes, as T3.c's sweep does; evaluating it
-    costs under a millisecond. It lands now, at the version in force, with no hold and no train.
+    costs about 10 ms for a drawn galaxy and 1.3 ms for the fixture (pod, 4 vCPU; restated from
+    "under a millisecond", research-p10's item 8, Risks, "P10.T3.d.a's cost"). It lands now, at
+    the version in force, with no hold and no train.
     Acceptance: `just ci`; `cargo test -p hyperion-sim --lib -- galaxy::global_list`; the
     summary's slow test by name under `just test-slow`; `golden_diff.py` lists the new golden
     alone.
@@ -1696,3 +1698,40 @@ grows with the registry")]`.
     `the_strays_lie_inside_the_other_arm_s_tube`. Commands:
     `cargo test -p hyperion-sim --lib -- galaxy::global_list` and
     `cargo test -p hyperion-sim --features testing --test global_list_tube -- --ignored`.
+- **P10.T3.d.a's cost, cut bit for bit (lane `p10-fixes`, 2026-10-29, on `13b8b05` at
+  `GENERATOR_VERSION` 23).** Research `research-p10`'s item 8, as main ruled it (2026-10-29). No
+  output moved. Every golden is unchanged and passes, and a release probe, run by this lane over
+  the change, gave the same bits before and after for the shares of the first 100 sweep galaxies
+  and for the whole `Debris` (every field, by its `Debug` form) of the Milky Way fixture and sweep
+  galaxies 3 and 11: 789 streams and 7 cores.
+  - _What changed._ `PotentialTables::potential_in_plane` sums Φ alone, in `totals`' order, through
+    a new private `InPlaneTable::potential_at` (`at`'s three branches for Φ only): it had also
+    evaluated `v_c²` and its slope for the in-plane table and all three spherical components.
+    `SphericalOrbit::state_after_pericentre`'s bisection integrates the time alone (a new private
+    `panel_time`, `panel_integrals(…).0`'s arithmetic) and leaves once the midpoint equals an end
+    of the interval, after which every later step keeps it; `share_inside` calls a time-only
+    `radial_time` (crate-visible). An orphan's attempt tests its turning points before it builds
+    the orbit (`SphericalOrbit::between` is pure). Two fast tests hold each copy to what it copies,
+    bit for bit (review fix): `potential::tables`'s
+    `the_potential_in_the_plane_is_the_totals_bit_for_bit` in all three branches, and `spec`'s
+    `the_time_alone_is_the_integrals_time_bit_for_bit`, against the old 60 full bisections.
+  - _Costs (release, pod, 4 vCPU)._ `discrete_share`: the fixture 7.50 → 1.33 ms; 40 sweep
+    galaxies a mean of 54.7 → 9.3 ms (median 56.0 → 9.4, at most 115 → 20); 7.2 → 1.2 ms a recent
+    progenitor, of which the fixture has one and a drawn galaxy eight on average. One
+    `potential_in_plane` 1.2 → 0.31 µs (`research-p10`'s figure). `Debris::generate`: the fixture
+    (264 streams) 1.56 → 0.16 s, sweep galaxy 3 (155) 0.89 → 0.11 s, sweep galaxy 11 (370) 2.22 →
+    0.24 s; `Galaxy::with_full_potential` 7.5 s each, unchanged. `Debris` no longer threatens T4's
+    "about one second" for the list.
+  - _The target._ T3.d.a's "evaluating it costs under a millisecond" is restated as about 10 ms for
+    a drawn galaxy and 1.3 ms for the fixture. Under a millisecond would need a Newton inversion
+    of the time from pericentre or fewer panels, either of which moves `dwarfs.golden`: left to the
+    bump that corrects `ORBIT_APOCENTRE`. The bench group `global_list` gains
+    `discrete_share (sweep galaxy 0)`, the summary's first seed, which has eight recent
+    progenitors (9.7 ms in the probe).
+  - _Tests run (pod, x86_64)._ Fast: `cargo test -p hyperion-sim --lib -- galaxy::global_list galaxy::potential
+galaxy::kinematics galaxy::params galaxy::features::interior::table rng::tags` (115 passed,
+    `dwarfs.golden` among them), `--test global_list_orbit` (`orbit.golden`) and `--test
+galaxy_potential`. Slow, by name, in the slow-test profile:
+    `the_applied_share_over_2000_galaxies_is_summarised` (`discrete_share.golden` unchanged, 683 s
+    against the 902 s recorded before), `debris_carries_the_scaled_dwarfs_and_drops_what_the_scale_empties`
+    (44 s), `tests/global_list_debris.rs` (65 s) and `tests/global_list_orbit.rs`' eleven.

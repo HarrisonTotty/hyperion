@@ -68,10 +68,13 @@ pub const INSIDE_LY: f64 = 65_000.0;
 /// documentation).
 ///
 /// The dwarfs' tubes beyond the list's 4,096 streams, which [`Debris`](super::Debris) would drop,
-/// are counted: no galaxy comes near that. It costs the dwarfs' quadratures, nearly all of them
-/// their epoch states' inversions of the time from pericentre: 7.5 ms for the Milky Way fixture in
-/// the bench profile (pod, 4 vCPU; `global_list/discrete_share` in `benches/galaxy.rs`), against
-/// P10.T3.d.a's "under a millisecond".
+/// are counted: no galaxy comes near that. It costs the dwarfs' quadratures, most of them their
+/// epoch states' inversions of the time from pericentre, about 1.2 ms a recent progenitor: 1.3 ms
+/// for the Milky Way fixture, which has one, and over 40 sweep galaxies a mean of 9.3 ms, at most
+/// 20 ms (release, pod, 4 vCPU, measured by a probe; the bench `global_list` in
+/// `benches/galaxy.rs` times the fixture and a sweep galaxy). The plan's first target, under a
+/// millisecond, would need fewer panels or a Newton inversion, either of which moves the dwarfs'
+/// figures (plan 10's records, "P10.T3.d.a's cost").
 ///
 /// # Examples
 ///
@@ -212,7 +215,7 @@ fn share_inside(orbit: &SphericalOrbit, phi: &impl Fn(f64) -> f64, radius: f64) 
     }
     // `r = r̄ + ½ (r_a − r_p) sin θ` at `radius`.
     let sin = ((radius - f64::midpoint(apo, peri)) / (0.5 * (apo - peri))).clamp(-1.0, 1.0);
-    let (time, _) = orbit.radial_integrals(phi, math::asin(sin));
+    let time = orbit.radial_time(phi, math::asin(sin));
     (2.0 * time / orbit.radial_period().value()).clamp(0.0, 1.0)
 }
 

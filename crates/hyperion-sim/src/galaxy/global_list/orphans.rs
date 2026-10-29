@@ -153,7 +153,11 @@ pub(crate) fn orphans(galaxy: &Galaxy, living: u32, room: usize) -> Vec<StreamSp
                 let velocity = draw_on_from(galaxy, debris, &at, &mut stream, first + 3).velocity();
                 let (peri, apo) = turning_points(galaxy, &at, Some(velocity));
                 let accepted = peri.value() > corotation && apo.value() < APOCENTRE_LIMIT_LY;
-                let orbit = SphericalOrbit::between(tables, peri, apo).filter(|_| accepted)?;
+                // Only an accepted attempt pays for the orbit's quadrature.
+                if !accepted {
+                    return None;
+                }
+                let orbit = SphericalOrbit::between(tables, peri, apo)?;
                 Some((
                     GalacticPosition::ORIGIN.displacement_to(&at),
                     velocity,

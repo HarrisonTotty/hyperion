@@ -14,8 +14,9 @@
 //! - `FeatureCatalogue::cell` of an inner-disc feature cell, 10 ms, and the walk of every
 //!   globular, 0.3 s (plan 09, P09.T3.c). Until phase 3 supplies their density the globular walk
 //!   visits 32,768 empty cells.
-//! - `global_list::discrete_share` of the Milky Way fixture, from its in-plane tables: under a
-//!   millisecond (plan 10, P10.T3.d.a).
+//! - `global_list::discrete_share` from in-plane tables, of the Milky Way fixture, which has one
+//!   recent progenitor, and of the first sweep galaxy, which has eight, as a drawn galaxy has on
+//!   average: about 1.3 ms and 10 ms (plan 10, P10.T3.d.a, restated from "under a millisecond").
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -208,15 +209,23 @@ fn features(c: &mut Criterion) {
     group.finish();
 }
 
-/// The halo's discrete share of the Milky Way fixture, from its parameters, seed and in-plane
-/// tables (plan 10, P10.T3.d.a): under a millisecond.
+/// The halo's discrete share, from a galaxy's parameters, seed and in-plane tables (plan 10,
+/// P10.T3.d.a): of the Milky Way fixture, about 1.3 ms, and of the first sweep galaxy of
+/// T3.d.a's summary, whose eight recent progenitors cost most of its 10 ms in their epoch states
+/// (pod, 4 vCPU).
 fn global_list(c: &mut Criterion) {
     use hyperion_sim::galaxy::global_list::discrete_share;
     let params = GalaxyParams::milky_way_like();
     let tables = PotentialTables::in_plane(&MassModel::new(&params));
+    let sweep = Seed::new(0x0a10_3d00_0000_0000);
+    let drawn = GalaxyParams::from_seed(sweep, MassFunctionKind::default());
+    let drawn_tables = PotentialTables::in_plane(&MassModel::new(&drawn));
     let mut group = c.benchmark_group("global_list");
     group.bench_function("discrete_share", |b| {
         b.iter(|| discrete_share(black_box(Seed::new(7)), black_box(&params), &tables));
+    });
+    group.bench_function("discrete_share (sweep galaxy 0)", |b| {
+        b.iter(|| discrete_share(black_box(sweep), black_box(&drawn), &drawn_tables));
     });
     group.finish();
 }

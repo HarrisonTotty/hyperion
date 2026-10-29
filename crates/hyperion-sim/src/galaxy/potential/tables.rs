@@ -127,6 +127,22 @@ impl InPlaneTable {
         table
     }
 
+    /// [`at`](Self::at)`(r).potential` alone, by the same arithmetic: the Gaussians' `Φ(R, 0)`,
+    /// (km/s)², zero at infinity, at radius `r > 0` (ly).
+    #[must_use]
+    fn potential_at(&self, r: f64) -> f64 {
+        if r < FIRST {
+            let omega_sq = self.v_circ_sq[0] / (FIRST * FIRST);
+            return self.potential[0] + 0.5 * omega_sq * (r * r - FIRST * FIRST);
+        }
+        if r > LAST {
+            let scale = LAST / r;
+            return self.potential[POINTS - 1] * scale;
+        }
+        let (i, t) = cell(r);
+        interpolate(&self.potential, &self.v_circ_sq, i, t)
+    }
+
     /// The Gaussians' part at radius `r`: interpolated inside the grid, solid-body below it and
     /// Keplerian above it.
     fn at(&self, r: f64) -> Extended {
@@ -386,7 +402,13 @@ impl PotentialTables {
     /// The potential in the plane at radius `r > 0`, (km/s)², zero at infinity.
     #[must_use]
     pub fn potential_in_plane(&self, r: LightYears) -> f64 {
-        self.totals(r.value()).potential
+        // Φ alone, summed in `totals`' order, so the bits are `totals(r).potential`'s: the
+        // orbits' quadratures call this some thousands of times a progenitor, and v_c² and its
+        // slope cost three times as much again (1.2 µs a call against 0.31 µs, pod, 4 vCPU).
+        let x = r.value();
+        self.spherical()
+            .iter()
+            .fold(self.in_plane.potential_at(x), |sum, c| sum + c.potential(r))
     }
 
     /// The potential at `(R, z)`, (km/s)², zero at infinity; `None` without the (R, z) grid
@@ -635,6 +657,36 @@ impl PotentialTables {
 mod tests {
     use super::*;
     use crate::galaxy::params::GalaxyParams;
+
+    /// `potential_in_plane` sums Φ alone, so that it must be `totals(r).potential` bit for bit:
+    /// below the grid, on and between its points, and beyond it out to the escape boundary and
+    /// the orphans' 10⁶ ly, for the fixture and two drawn galaxies (plan 10, P10.T3.d.a's cost,
+    /// which moved no output).
+    #[test]
+    fn the_potential_in_the_plane_is_the_totals_bit_for_bit() {
+        use crate::galaxy::imf::MassFunctionKind;
+        let drawn =
+            |seed| GalaxyParams::from_seed(crate::Seed::new(seed), MassFunctionKind::default());
+        for params in [
+            GalaxyParams::milky_way_like(),
+            drawn(0x0a10_3d01),
+            drawn(0x0a10_3d02),
+        ] {
+            let tables = PotentialTables::in_plane(&MassModel::new(&params));
+            let mut radii = vec![1e-3, 0.03, 3e5, 1e6, tables.escape_boundary().value()];
+            for i in 0..POINTS {
+                radii.extend([grid_point(i), grid_point(i) * 1.37]);
+            }
+            for r in radii {
+                let fast = tables.potential_in_plane(LightYears::new(r));
+                let total = tables.totals(r).potential;
+                assert!(
+                    fast.total_cmp(&total).is_eq(),
+                    "r {r}: {fast} against {total}"
+                );
+            }
+        }
+    }
 
     /// Ruling 91: the escape speed from the Milky Way fixture at the Sun's radius, measured to
     /// twice `r₂₀₀` as Deason et al. (2019) measure it, lies in the Milky Way's 500–580 km/s
