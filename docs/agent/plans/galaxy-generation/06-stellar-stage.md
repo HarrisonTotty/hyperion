@@ -649,6 +649,7 @@ doc comment. Every public item gets rustdoc with units and valid ranges, per `ru
 #### P06.T1 Module skeleton, state types, units and the normal quantile
 
 - **P06.T1.a Module skeleton, state types and units.**
+  Records: [06-stellar-stage/records/P06.T1.a.md](06-stellar-stage/records/P06.T1.a.md).
   - **Build:** the `stellar` module tree (`state`, `composition`, `sse`, `substellar`, `premain`,
     `remnant`, `classify`, `photometry`, `variability`, `rotation`, `nebula`, `events`, `system`,
     `fates`, `draws`, `testing`) with `//!` docs. `Phase`, `StarState`, `Composition`, `ObjectKind`
@@ -678,6 +679,7 @@ doc comment. Every public item gets rustdoc with units and valid ranges, per `ru
   arguments that cross both branch points: 0.5, 0.02425 ± 2⁻⁵⁵, 0.97575, 0.001, 0.999, 10⁻¹⁰, 1 −
   2⁻⁵³; no existing line changes. It needs nothing else of this plan, and T19.a's kick law and plans
   08 and 10 call it.
+  Records: [06-stellar-stage/records/P06.T1.b.md](06-stellar-stage/records/P06.T1.b.md).
   - **Files:** `crates/hyperion-sim/src/math.rs`, `tests/foundation_golden.rs`, the golden.
   - **Tests:** the golden; `hyperion_testkit::stats::normal_cdf(normal_quantile(p))` returns p to
     10⁻¹² at 1,000 points; antisymmetry about ½ to 10⁻¹²; strictly increasing across both branch
@@ -685,6 +687,8 @@ doc comment. Every public item gets rustdoc with units and valid ranges, per `ru
   - **Accept:** `cargo test -p hyperion-sim math` and the foundation golden pass.
 
 #### P06.T2 Per-star draws and reserved streams
+
+Records: [06-stellar-stage/records/P06.T2.md](06-stellar-stage/records/P06.T2.md).
 
 - **Build:** `StarDraws::for_star(seed, BodyId)`: one struct of fixed draws, each read from its own
   domain tag (the list under "Generator version"), none depending on time or on another draw.
@@ -710,6 +714,8 @@ doc comment. Every public item gets rustdoc with units and valid ranges, per `ru
   name contains `star_draws`).
 
 #### P06.T3 Metallicity draw per system
+
+Records: [06-stellar-stage/records/P06.T3.md](06-stellar-stage/records/P06.T3.md).
 
 - **Needs:** plan 03's `SystemRecord` and plan 02's `Galaxy` (P02.T9), and P02.T7.e's
   metallicity as revised for the 2026-09-21 rulings; the only task of phases A–F that does.
@@ -741,6 +747,8 @@ nothing of plans 02 or 03.
 
 #### P06.T4 Metallicity coefficients and the zero-age main sequence
 
+Records: [06-stellar-stage/records/P06.T4.md](06-stellar-stage/records/P06.T4.md).
+
 - **P06.T4.a Coefficient tables.** Transcribe the appendix coefficients of HPT (each `a_n`, `b_n` as
   its polynomial in ζ = log₁₀(Z ÷ 0.02)) and the ZAMS coefficients of Tout et al. (1996; MNRAS 281,
   page 257) into `const` arrays. Files: `stellar/sse/coeffs_data.rs`. Tests: array lengths; a
@@ -767,6 +775,8 @@ nothing of plans 02 or 03.
 
 #### P06.T5 Main sequence
 
+Records: [06-stellar-stage/records/P06.T5.md](06-stellar-stage/records/P06.T5.md).
+
 - **P06.T5.a Timescales.** `t_bgb`, `t_hook`, `t_ms` (HPT section 5.1). Tests: `t_ms`(1 M☉, 0.02) is
   within 3% of 11.0 Gyr, and 0.75 M☉ exceeds 13.8 Gyr at every Z (the brainstorm's reason for the
   B/C boundary); monotone decreasing in mass.
@@ -781,6 +791,8 @@ nothing of plans 02 or 03.
   `cargo test -p hyperion-sim stellar::sse::ms`.
 
 #### P06.T6 Hertzsprung gap and first giant branch
+
+Records: [06-stellar-stage/records/P06.T6.md](06-stellar-stage/records/P06.T6.md).
 
 - **P06.T6.a Giant-branch core mass–luminosity relation** and its inverse, the parameters p, q, B,
   D, the crossover `m_x`, `t_inf1`, `t_inf2` and `t_x` (HPT section 5.2). Core mass as a function of
@@ -807,6 +819,8 @@ nothing of plans 02 or 03.
 
 #### P06.T7 Core helium burning
 
+Records: [06-stellar-stage/records/P06.T7.md](06-stellar-stage/records/P06.T7.md).
+
 - **Build:** zero-age horizontal branch luminosity and radius as functions of core and envelope
   mass, the minimum luminosity and radius for intermediate masses, the blue-loop fraction and its
   timing (`τ_x`, `τ_y`), the helium-burning lifetime `t_he`, core growth, and L and R through the
@@ -821,6 +835,8 @@ nothing of plans 02 or 03.
 - **Accept:** tests pass.
 
 #### P06.T8 Asymptotic giant branch
+
+Records: [06-stellar-stage/records/P06.T8.md](06-stellar-stage/records/P06.T8.md).
 
 - **P06.T8.a Early AGB:** core mass at the base of the AGB `m_c_bagb`, the helium and carbon–oxygen
   core growth, L from the core mass–luminosity relation, R_AGB. Second dredge-up at the end of the
@@ -837,6 +853,8 @@ nothing of plans 02 or 03.
 
 #### P06.T9 Naked helium stars
 
+Records: [06-stellar-stage/records/P06.T9.md](06-stellar-stage/records/P06.T9.md).
+
 - **Build:** helium main sequence (ZAMS L and R, lifetime, evolution), helium Hertzsprung gap and
   giant branch with their own core mass–luminosity relation and radius, and the rule for which
   evolved helium stars become helium giants (HPT section 6.1). Entry points: from a track whose
@@ -849,6 +867,8 @@ nothing of plans 02 or 03.
 - **Accept:** tests pass.
 
 #### P06.T10 Mass loss and the track integrator
+
+Records: [06-stellar-stage/records/P06.T10.md](06-stellar-stage/records/P06.T10.md).
 
 - **P06.T10.a Hurley's wind recipe** (HPT section 7.1): Kudritzki–Reimers with η, Vassiliadis–Wood
   on the AGB with its superwind cap, Nieuwenhuijzen–de Jager scaled by Z^½, the Wolf-Rayet-like term
@@ -914,6 +934,8 @@ nothing of plans 02 or 03.
 
 #### P06.T11 Remnant structure from the backbone
 
+Records: [06-stellar-stage/records/P06.T11.md](06-stellar-stage/records/P06.T11.md).
+
 - **Build:** the white dwarf kinds by core mass at envelope loss (He, CO, ONe), white dwarf radius
   (HPT section 6.2.1), neutron star radius (10 km in HPT; use 11.5 km with a citation to a current
   measurement, and keep 10 under `RemnantRecipe::Hurley2000`), black hole radius 2GM ÷ c², and the
@@ -929,6 +951,8 @@ nothing of plans 02 or 03.
 - **Accept:** tests pass.
 
 #### P06.T12 Validation against the published SSE output
+
+Records: [06-stellar-stage/records/P06.T12.md](06-stellar-stage/records/P06.T12.md).
 
 - **P06.T12.a Reference vectors.** A developer runs the public SSE code once, offline, for m ∈ {0.1,
   0.3, 0.5, 0.8, 1, 1.5, 2, 3, 5, 8, 10, 15, 20, 40, 60, 100} M☉ and Z ∈ {0.0001, 0.001, 0.004,
@@ -952,6 +976,8 @@ nothing of plans 02 or 03.
 
 #### P06.T13 Below 0.1 M☉: cooling fits (shared with plan 13)
 
+Records: [06-stellar-stage/records/P06.T13.md](06-stellar-stage/records/P06.T13.md).
+
 - **Build:** `substellar::cooling(mass, age, comp)`: the analytic fits of Burrows et al. (2001,
   their equations for L, T_eff and R as power laws in age, mass and opacity), valid 0.01–0.08 M☉,
   with deuterium burning ignored below 13 Jupiter masses (plan 13 may refine). For 0.075–0.1 M☉ a
@@ -968,6 +994,8 @@ nothing of plans 02 or 03.
 - **Accept:** tests pass; plan 13 can call the function with no change.
 
 #### P06.T14 Extension to 100–150 M☉
+
+Records: [06-stellar-stage/records/P06.T14.md](06-stellar-stage/records/P06.T14.md).
 
 - **Build:** above 100 M☉ the formulae are evaluated as they stand, times correction factors for
   ZAMS luminosity, ZAMS radius and main-sequence lifetime, each a quadratic in log₁₀(m ÷ 100) that
@@ -1030,6 +1058,7 @@ nothing of plans 02 or 03.
   `StarDraws::disc_lifetime()` that draws nothing itself, is built in `stellar/premain.rs` ahead of
   the rest of T15, because plan 14 is its first caller (the `planet` lane, round 7; see its as-built
   record in Risks); its tests (the median, the clamps, monotonicity in the rank) went with it.
+  Records: [06-stellar-stage/records/P06.T15.c.md](06-stellar-stage/records/P06.T15.c.md).
 - **Files:** `stellar/premain.rs`, `stellar/sse/track.rs`.
 - **Tests:** continuity at t_p and at `t_zams` (values to 10⁻⁶, slopes to 5%); a 1 M☉ star at 2 Myr
   has 1–3 L☉ and 3,900–4,500 K; in a sample of the young disc (ages −H to 100 Myr) most stars below
@@ -1230,6 +1259,8 @@ MAX_RADIUS, IONISING_TEMPERATURE, MIN_EXPANSION_SPEED, MAX_EXPANSION_SPEED}`; th
 
 #### P06.T18 Remnant type and mass (Mandel and Müller 2020)
 
+Records: [06-stellar-stage/records/P06.T18.md](06-stellar-stage/records/P06.T18.md).
+
 - **P06.T18.a Core collapse outcomes** from the carbon–oxygen core mass at death, with the paper's
   break points M₁ = 2, M₂ = 3, M₃ = 7, M₄ = 8 M☉ (re-check every figure against MNRAS 499, 3214,
   section 2 and table 1). Always a neutron star below M₁. P(black hole) rises linearly from 0 at M₁
@@ -1249,6 +1280,7 @@ MAX_RADIUS, IONISING_TEMPERATURE, MIN_EXPANSION_SPEED, MAX_EXPANSION_SPEED}`; th
 - **P06.T18.c Pair instability** (design note 10).
 - **P06.T18.d `CompactRemnant`** type joining the three, and `RemnantRecipe::MandelMuller2020` as
   the generator default in `Track::death`.
+  Records: [06-stellar-stage/records/P06.T18.d.md](06-stellar-stage/records/P06.T18.d.md).
 - **Files:** `stellar/remnant/collapse.rs`.
 - **Tests:** over a Kroupa sample of 8–150 M☉ at Z = 0.02: black holes are 38 ± 5% of compact
   remnants (the research figure behind "about four fifths" of layer-E remnants staying); black holes
@@ -1258,6 +1290,8 @@ MAX_RADIUS, IONISING_TEMPERATURE, MIN_EXPANSION_SPEED, MAX_EXPANSION_SPEED}`; th
 - **Accept:** `cargo test -p hyperion-sim stellar::remnant::collapse` passes.
 
 #### P06.T19 The kick law
+
+Records: [06-stellar-stage/records/P06.T19.md](06-stellar-stage/records/P06.T19.md).
 
 - **P06.T19.a Interface and ordinary mode.** The normal quantile this subtask once began with is
   P06.T1.b, which needs nothing of this plan and lands early. The law: `KickLaw`, `KickLawParams`,
@@ -1333,6 +1367,7 @@ MAX_RADIUS, IONISING_TEMPERATURE, MIN_EXPANSION_SPEED, MAX_EXPANSION_SPEED}`; th
   on their initial models); the law itself is unchanged.
   Check against the 0.6 M☉ CO thick-hydrogen sequence of Bédard et al. (2020), at models held out
   of the fit: T_eff within 10% from 0.01 to 10 Gyr; and continuity in mass across the fitted range.
+  Records: [06-stellar-stage/records/P06.T20.a.md](06-stellar-stage/records/P06.T20.a.md).
 - **P06.T20.b Spectral type** by fixed draws against thresholds that move with temperature, the
   pattern the brainstorm's determinism section prescribes. `u_atm` (`star.wd.atmosphere`) against
   the helium-atmosphere fraction f_He(T_eff): low near the DB gap (30,000–45,000 K), about 10% at
@@ -1350,6 +1385,8 @@ MAX_RADIUS, IONISING_TEMPERATURE, MIN_EXPANSION_SPEED, MAX_EXPANSION_SPEED}`; th
 - **Accept:** tests pass.
 
 #### P06.T21 Neutron stars
+
+Records: [06-stellar-stage/records/P06.T21.md](06-stellar-stage/records/P06.T21.md).
 
 - **P06.T21.a Birth draws.** Spin period normal about 250 ms with σ 100 ms, redrawn until above 10
   ms (`star.ns.spin`); log₁₀ of the equatorial dipole field in gauss normal about 12.95 with σ 0.6
@@ -1377,6 +1414,7 @@ MAX_RADIUS, IONISING_TEMPERATURE, MIN_EXPANSION_SPEED, MAX_EXPANSION_SPEED}`; th
   function still returns, with the error documented.
 - **P06.T21.e Pulsar wind nebula flag:** present while the spin-down luminosity is above 10³⁶ erg/s
   (10⁴–10⁵ years, as the brainstorm's shell section expects). Plan 09 draws it.
+  Records: [06-stellar-stage/records/P06.T21.e.md](06-stellar-stage/records/P06.T21.e.md).
 - **Files:** `stellar/remnant/neutron_star.rs`.
 - **Tests:** P is continuous and non-decreasing in age; with constant field the closed form equals
   √(P₀² + 2kB²t); a 10¹²·⁵ G pulsar born at 300 ms dies after 10⁷–10⁸ years; the share of neutron
@@ -1390,6 +1428,8 @@ MAX_RADIUS, IONISING_TEMPERATURE, MIN_EXPANSION_SPEED, MAX_EXPANSION_SPEED}`; th
 
 #### P06.T22 Black holes
 
+Records: [06-stellar-stage/records/P06.T22.md](06-stellar-stage/records/P06.T22.md).
+
 - **Build:** `BlackHole { mass, spin }`. Mass from T18. Dimensionless spin from one draw
   (`star.bh.spin`): small for single-star collapse, a half-normal with σ = 0.1 held below 0.998
   (efficient core–envelope coupling; Fuller and Ma 2019 as the suggested source, recorded by the
@@ -1402,6 +1442,8 @@ MAX_RADIUS, IONISING_TEMPERATURE, MIN_EXPANSION_SPEED, MAX_EXPANSION_SPEED}`; th
 ### Phase E: classification and derived properties
 
 #### P06.T23 MK classification
+
+Records: [06-stellar-stage/records/P06.T23.md](06-stellar-stage/records/P06.T23.md).
 
 - **P06.T23.a Dwarf scale and photometry.** The dwarf table of Pecaut and Mamajek (2013, ApJS 208,
   9, table 5 and its maintained extension to L, T and Y): spectral subtype, T_eff, BC_V, B−V, as a
@@ -1431,6 +1473,8 @@ MAX_RADIUS, IONISING_TEMPERATURE, MIN_EXPANSION_SPEED, MAX_EXPANSION_SPEED}`; th
 - **Accept:** tests pass.
 
 #### P06.T39 Winds near the Eddington limit (ruling 124.1)
+
+Records: [06-stellar-stage/records/P06.T39.md](06-stellar-stage/records/P06.T39.md).
 
 Runs before P06.T24.a, whose WNh class it feeds.
 
@@ -1488,6 +1532,7 @@ massive and stripped stars, T24.b the rest, and T24.c corrects T24.a's hot subdw
     by its disc draw, and a 4 M☉ one at 0.3 Myr is `HerbigAeBe`; count checks in T31.
 - **P06.T24.c The stripped helium stars** (a technical correction to T24.a,
   `decision-stripped-star-class.md` of 2026-10-21; the brainstorm sets no edge for subdwarfs).
+  Records: [06-stellar-stage/records/P06.T24.c.md](06-stellar-stage/records/P06.T24.c.md).
   - Hot subdwarfs end at 1.7 M☉ (`HOT_SUBDWARF_MAX_MASS`), an edge in mass: Götberg et al. (2018,
     A&A 615, A78) find spectra "undistinguishable from subdwarfs" only up to 1.7 M☉, and Drout et
     al. (2023, Science 382, 1287) put the subdwarfs at ≲ 1.5 M☉ and the "intermediate-mass helium
@@ -1516,6 +1561,8 @@ massive and stripped stars, T24.b the rest, and T24.c corrects T24.a's hot subdw
 
 #### P06.T25 Rotation and magnetism
 
+Records: [06-stellar-stage/records/P06.T25.md](06-stellar-stage/records/P06.T25.md).
+
 - **Build:** one draw each, as the brainstorm's row says, plus the spin axis (`star.spin_axis`).
   - `u_rot` (`star.rotation`) is a rank. Above 1.3 M☉ it maps onto the equatorial velocity
     distribution for the mass (bimodal for late B and A stars; Zorec and Royer 2012; record), as a
@@ -1542,6 +1589,8 @@ massive and stripped stars, T24.b the rest, and T24.c corrects T24.a's hot subdw
 - **Accept:** tests pass.
 
 #### P06.T26 Variability
+
+Records: [06-stellar-stage/records/P06.T26.md](06-stellar-stage/records/P06.T26.md).
 
 - **P06.T26.a The instability strip.** Blue and red edges as lines in (log T_eff, log L) (record the
   source). A star inside pulsates, named by phase and mass: δ Scuti (main sequence and Hertzsprung
@@ -1580,6 +1629,8 @@ massive and stripped stars, T24.b the rest, and T24.c corrects T24.a's hot subdw
 ### Phase F: events in time
 
 #### P06.T27 Generic event machinery (`hyperion_sim::events`)
+
+Records: [06-stellar-stage/records/P06.T27.md](06-stellar-stage/records/P06.T27.md).
 
 - **P06.T27.a Tags, windows and IDs.** Declare this plan's event domain tags (scope `Event`) in
   `rng/tags.rs` and register each in plan 01's `event_tags!` (`id/event_tags.rs`) as
@@ -1634,6 +1685,7 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   M☉, and pre-main-sequence stars). Cumulative rate above energy E a power law of index about −1,
   normalised by T25's activity level, with an energy floor per star that keeps the bound at or under
   64 a day. Marks: energy (power law), duration and peak factor from the energy.
+  Records: [06-stellar-stage/records/P06.T28.a.md](06-stellar-stage/records/P06.T28.a.md).
 - **P06.T28.b Glitches.** Crab-like: Poisson bins (Δ = 30 days), rate proportional to |ν̇| for
   pulsars younger than 10⁷ years, sizes from a power law, a recovery that decays within the
   look-back. Vela-like (characteristic age 10⁴–10⁵ years and one fixed mark): monotone phase with P
@@ -1643,6 +1695,7 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   output on the two glitch tags and the new domain tag `star.ns.glitch_class`, moving nothing
   existing).** The record is under Risks ("Deviations in T28.b, as built" and "Deferred findings
   (2026-10-13 rule) (P06.T28.b)").
+  Records: [06-stellar-stage/records/P06.T28.b.md](06-stellar-stage/records/P06.T28.b.md).
 - **P06.T28.c Magnetar bursts and giant flares** (rates ruled 2026-10-27, decision-galaxy-25-train
   §5.1; new output on the registered tags 0x0103–0x0105, moving nothing existing, so no bump).
   Every rate is zero unless `PulsarState::is_magnetar` holds, and zero once the field sits at its
@@ -1654,6 +1707,7 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   The figures marked [S] were cited from memory in the ruling: the task's science check reads each
   at source before commit, and a source that differs moves the figure to the source's value
   within the same form, recorded, with no new ruling unless it is a blocker.
+  Records: [06-stellar-stage/records/P06.T28.c.md](06-stellar-stage/records/P06.T28.c.md).
   - **Episodes** (`star.ev.magnetar_episode`, Poisson bins, Δ = 30 days):
     r_ep = N_EP × B(t) ÷ (10¹⁹ G yr), with N_EP = 2,000 episodes per e-fold of the field (ours).
     That is 0.2 a year at 10¹⁵ G, 0.02 at 10¹⁴ G and 0.009 at 4.4 × 10¹³ G.
@@ -1714,6 +1768,7 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   marks and the parent's 240–830 a year:** the record is under Risks ("Deviations in T28.d, as
   built" and "Deferred findings (2026-10-13 rule) (P06.T28.d)"); T28.g composes
   `Outburst::luminosity_factor_at` into `summary_at`.
+  Records: [06-stellar-stage/records/P06.T28.d.md](06-stellar-stage/records/P06.T28.d.md).
 - **P06.T28.e LBV giant eruptions.** Poisson bins (Δ = 100 years, look-back 1 bin) while inside
   T24.a's LBV window. The rate is a generator default, provisionally one per 30,000 years per star
   in the window, which with some 500 such stars gives a Milky Way galaxy about 30 in ±H (the
@@ -1724,6 +1779,7 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   T31's 181 LBVs (30.2 in ±H):** the record is under Risks ("Deviations in T28.e, as built" and
   "Deferred findings (2026-10-13 rule) (P06.T28.e)"); T28.g composes
   `Eruption::luminosity_factor_at` into `summary_at`.
+  Records: [06-stellar-stage/records/P06.T28.e.md](06-stellar-stage/records/P06.T28.e.md).
 - **P06.T28.f Thermal pulses.** Monotone phase on a clock whose base phase is the integral of 1 ÷
   τ_ip(M_c) along the thermally pulsing AGB segment, which T10.c stores at the segment's knots,
   interpolated in age, plus the clock time since the epoch times the epoch's pulse frequency (design
@@ -1743,6 +1799,7 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   ±H for most stars, but up to some 2 × 10⁻² cycles for the short periods of 6–7 M☉ stars, and
   many cycles across the source horizon, where it would put pulses outside the phase. Reading the
   count itself gives P06.T24.b's C/O, the census and the listings the same pulses.
+  Records: [06-stellar-stage/records/P06.T28.f.md](06-stellar-stage/records/P06.T28.f.md).
 - **P06.T28.g Assembly.** `stellar::events::{events_in, active_at}` over all kinds; `StarEvent`;
   transient factors composed in `summary_at` (design note 14).
 - **Files:** `stellar/events/`: `mod.rs`, `flares.rs`, `glitches.rs`, `magnetar.rs`,
@@ -1808,6 +1865,8 @@ phase D and before T26.d and T28, which take a `StarModel`; T29.b needs plan 03 
 
 #### P06.T30 Real lifetimes and remnant masses in the mean mass per system
 
+Records: [06-stellar-stage/records/P06.T30.md](06-stellar-stage/records/P06.T30.md).
+
 This task needs T10, T18 and plan 02's `Galaxy` (P02.T9), which holds the table; it needs nothing
 of plan 03. Its brackets also assume that plan 02 has switched the default mass function to
 Chabrier's (ruling 2 of 2026-09-21): as built, `MassFunctionKind`'s default and
@@ -1837,6 +1896,7 @@ Chabrier's (ruling 2 of 2026-09-21): as built, `MassFunctionKind`'s default and
   only `mean_companions` and may keep `ProvisionalFates`. Bump `GENERATOR_VERSION` in `version.rs`,
   with the unit test there that pins its value; regenerate every golden file in the same commit
   with `just bless`.
+  Records: [06-stellar-stage/records/P06.T30.b.md](06-stellar-stage/records/P06.T30.b.md).
 - **Tests:** at Milky Way parameters the mean present-day mass per system under the default,
   Chabrier's system function, is 0.55–0.59 M☉ (0.48 ± 0.02 under Kroupa's), varies by under 5%
   between the old populations, and the young disc's is 30–50% higher; the share of dead primaries is
@@ -1890,6 +1950,8 @@ Chabrier's (ruling 2 of 2026-09-21): as built, `MassFunctionKind`'s default and
   `ZCoeffs::new` alone is 1.4–1.7 µs, so the difference is under 0.3%.
 
 #### P06.T38 Fitted fates and range briefs (ruling 89)
+
+Records: [06-stellar-stage/records/P06.T38.md](06-stellar-stage/records/P06.T38.md).
 
 A range brief is routed per row. Every exact-routed row is bit-identical to `SystemStars::brief_at`;
 a dead primary read through the fate table agrees with `system_summary` in kind and class exactly,
@@ -2238,6 +2300,8 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
 
 #### P06.T33 Protocol
 
+Records: [06-stellar-stage/records/P06.T33.md](06-stellar-stage/records/P06.T33.md).
+
 - **Build:** in `hyperion-protocol`: `ObjectKindDto` (snake-case strings), `StellarBriefDto`
   (`kind`, `class: String`, `log_luminosity_lsun: f32`, `teff_k: f32`), the optional `stellar` field
   on the range row and `include_stellar` on the request (both `#[serde(default)]`, and `stellar`
@@ -2275,6 +2339,8 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
 - **Accept:** `just gen-protocol-check` and `just ci` green.
 
 #### P06.T34 Server
+
+Records: [06-stellar-stage/records/P06.T34.md](06-stellar-stage/records/P06.T34.md).
 
 - **Blocked in part (ruling 77.3), unblocked by T38 (ruling 89):** the `system_summary` handler is
   built. The range handler's `stellar` briefs wait on T38.e: a brief needs each star's state at the
@@ -2333,6 +2399,7 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
   says what is hidden (`412 OF 1630 SHOWN: LIVING`, digits grouped from five as the guide and
   plan 05's `lib/format.ts` have it), per the guide's honest-data rule. Legend
   entries for the five shapes. The list gains a class column.
+  Records: [06-stellar-stage/records/P06.T35.b.md](06-stellar-stage/records/P06.T35.b.md).
 - **Files:** `docs/frontend/ux-guidelines.md`; under `apps/hyperion/src/renderer/src/`:
   `spatial/{marks.ts, symbols.ts}`, `lib/galaxy/{starSymbols.ts, wire.ts, model.ts}`, in
   `displays/galaxy/`: `chartModel.ts`, `ChartControls.tsx`, `SystemList.tsx`, `SymbolLegend.tsx` and
@@ -2342,6 +2409,8 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
 - **Accept:** `pnpm typecheck`, `pnpm lint`, `pnpm test` green.
 
 #### P06.T36 Client: system readout
+
+Records: [06-stellar-stage/records/P06.T36.md](06-stellar-stage/records/P06.T36.md).
 
 - **Build:** selecting a system requests `system_summary` at the chart's time through plan 05's
   `useServerRequest<"system_summary">`, whose `RequestChannel` makes the latest selection win; the
@@ -2433,6 +2502,7 @@ log L 5.78–5.80, does the enforcing.
   them. The term is added after the Eddington boost (P06.T39), not inside `modern_below_kink`, and
   the doc says that the rate departs from Belczynski et al.'s "full amount of LBV mass loss". It
   lands as a function that nothing on the record calls.
+  Records: [06-stellar-stage/records/P06.T42.a.md](06-stellar-stage/records/P06.T42.a.md).
   - **Files:** `stellar/sse/wind.rs`.
   - **Tests:** below the limit the function gives today's Modern rate to the bit; past it the rate
     is at least `MODERN_LBV` and at least the side rate; the term's figures above, at 4,000 K.
@@ -2465,6 +2535,7 @@ Both are wrong skies.
   for supergiants), as functions that nothing on the record calls. With them, the check of the
   module's "Straižys and Kuriliene (1981, Ap&SS 80, 353, Table III)" citation for the M giants'
   corrections.
+  Records: [06-stellar-stage/records/P06.T43.a.md](06-stellar-stage/records/P06.T43.a.md).
   - **Files:** `stellar/photometry.rs` and its tests.
   - **Tests:** a white dwarf's V at the grid's nodes, to the grid's printed precision; the cool
     giants' BC_V against the chosen source's table at three gravities; the M6 III case of the
@@ -2570,10 +2641,8 @@ Reserved so that later plans move no star:
 
 ## Risks and open points
 
-- **Updated for the 2026-09-21 density rulings.** The default mass function is now Chabrier's system
-  function, so T30.b's bracket is the default's 0.55–0.59 M☉, with Kroupa's 0.48 kept as a second
-  case. The thin discs' age–metallicity relation is now flat to 8 Gyr, so the thin discs' entry in
-  T30.a's `reference_fe_h` follows whatever mean P02.T7.e sets at the reference radius.
+Task records as built: [06-stellar-stage/records/](06-stellar-stage/records/), one file per task, each linked from its entry under Tasks.
+
 - **Re-validated at 70c6052**, against plan 01, plan 02's T1–T8, plan 04's T1–T13 and plan 05's
   T1, T3 and T5–T7 as built. Since the plan was written the brainstorm changed only by the
   2026-09-21 rulings, which touch T30.b (applied above) and the thin disc's metallicity that T3
@@ -2650,8 +2719,6 @@ Reserved so that later plans move no star:
 - **"Continuous in time" against real jumps.** The helium flash and the end of the AGB are bridged
   over short physical times (note 3). Supernovae and collapses stay discontinuous, as deaths with a
   clock time, which is how the brainstorm treats them.
-- **Very massive stars.** The choice of comparison grid for 100–150 M☉ is left to T14 because no
-  source is cited; with about a thousand such stars alive the exposure is small.
 - **Cost of briefs on large queries.** A bulge query returns tens of thousands of rows, nearly all
   old and many dead. `include_stellar` is optional for that reason, and the server cache absorbs
   repeats. If it is still too slow the chart can request briefs for the coarse layers only.
@@ -2667,1073 +2734,6 @@ Reserved so that later plans move no star:
   honoured by plans 09, 11 and 14, none of which names numbers yet. Plan 09 asks that draws accept
   an attempt number (`StarDraws::for_attempt`) and plans 11 and 14 ask for the monotone helpers on
   `Track`; both are provided.
-- **Deviations in T1.a, as built.** `ObjectKind` lives in `stellar::state`, re-exported as
-  `stellar::ObjectKind`, because T1.a makes `system.rs` a `//!`-only file; no consumer names a path
-  to it. `StarState` is built by `StarState::new(StarStateParts)`, a struct of the eight required
-  inputs with public fields (none is optional, so no builder); it derives the envelope mass (M −
-  M_c, at least +0) and T_eff, and debug-asserts the documented ranges (age ≥ 0, a remnant all
-  core, `NoRemnant` massless and dark). T_eff is 0 K at zero luminosity; `surface_gravity()` is
-  `Option<Dex>`, log₁₀ g in cm s⁻², `None` at zero mass or radius. T☉ is
-  `units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K`. Added beyond the sketch:
-  `Composition::{fe_h, helium_excess, SOLAR}`, the constants `Z_SOLAR`, `Z_FIT_MIN` and
-  `Z_FIT_MAX` of `stellar::composition`, `Phase::ALL`, `ObjectKind::ALL`. `stellar::testing` is
-  `#[cfg(test)] pub(crate)` until the crate has its `testing` feature (T27.d, another lane);
-  whichever of T27.d and T1.a merges second, and at the latest T31, whose integration test calls
-  it, moves it under `cfg(any(test, feature = "testing"))` and makes it `pub`.
-- **Deviations in T2, as built.** The decision draws are `rng::Mark`s, not `UnitUniform`s
-  (brainstorm, "Floating point": decisions compare integers; the `KickDraws` sketch already has a
-  "mode mark"): `star.magnetism`, `star.stripped`, `star.remnant.type`, `star.remnant.fallback`,
-  `star.kick.mode` and the three `star.wd.*`. The median mark is 2⁵², below a threshold of
-  probability p exactly when p > ½. T25 takes the fossil field's strength rank from the magnetism
-  mark as (mark + ½) ÷ k below its threshold k; T30.b builds its type and fallback nodes as marks.
-  `star.kick.score` and `star.ns.spin` are held as the first `REDRAW_TRIES` = 8 normals of the
-  attempt's block (16 of its 64 words), in draw order; T19.a and T21.a take the first their
-  condition accepts and must document a fallback for all eight failing (about once in 10¹⁵ and 4 ×
-  10¹² stars). `star.ns.geometry` holds the spin axis (words 0–1), then the magnetic inclination
-  as a rank (word 2). `from_parts` takes `StarDrawsParts`, a struct with public fields and a
-  `MEDIAN` constant for struct-update syntax; the median's directions are galactic north (a
-  convention). Added: `ATTEMPT_WORDS`, `REDRAW_TRIES` (a const assertion keeps their product in
-  the block; changing either is a version change), `UnitUniform::{new, value, HALF}`,
-  `StandardNormal::{new, value, ZERO}`, a getter per field and `parts()`. The golden test is
-  `star_draws_are_pinned` in `tests/stellar_draws.rs`. T2 also extends
-  `tests/golden/rng/tags.golden` by the 22 tags (`domain_tags_are_pinned`, which the acceptance
-  command does not select); merging another lane's tags means regenerating that file with that
-  test.
-- **Deviations in T4, as built.** The tables are `pub(crate)` constants `coeffs_data::{A, B,
-ZAMS_L, ZAMS_R}` of type `[[f64; 5]; N]` indexed by coefficient number, with the paper's digits;
-  row 0, the closed-form rows (a17, a33, b2, b3, b17, b26, b45, b47, b50) and the unused b8 and
-  b35 are zero. Their types fix the lengths, so there is no length test; an FNV-1a checksum of the
-  bits pins each table and a test pins which rows are empty. They were read from the papers by
-  script and then checked number by number against the SSE package's data statements (`zdata.h`,
-  `zcnsts.f`), which agree to the last digit: a use of the SSE source beyond settling misprints,
-  for the owner to confirm. The paper's text layer loses b45's parentheses: b45 = 1 − (2.47162ρ −
-  5.401682ρ² + 3.247361ρ³), as printed and in SSE. Equation 21a is a58 M^a60 ÷ (a59 + M^a61) as
-  the journal prints it (the arXiv preprint misprints a59 M^a61); `ZCoeffs::alpha_r_power_law`
-  holds the one copy, which T5's αR shares. Equation numbers in doc comments are the journal's,
-  which splits some of the preprint's (9a/9b, 19a/19b, 21a/21b, 22a/22b). The a68/a66 special case
-  makes a64 jump in Z near 0.016, as in the paper and SSE; it keeps αR continuous in mass.
-  `M_hook` and `M_HeF` are quadratics in ζ with minima inside the fitted range (Z ≈ 0.0025 and
-  0.00073, as SSE's values confirm), so "each critical mass is monotone in Z" cannot hold: the test
-  asserts that `M_FGB` rises, all three are continuous at 200 points, and `M_hook` and `M_HeF` turn
-  once each. `M_FGB` keeps the paper's rounded constants (13.048, 0.0012), within 0.18% of SSE's
-  16.5 Z^0.06 ÷ (1 + (10⁻⁴ ÷ Z)^1.27). Tout et al.'s fits are their equations 1 and 2, with the
-  coefficients from their equations 3 and 4 (Tables 1 and 2). `ZCoeffs::new` clamps Z to the
-  fitted range and panics on NaN. Added: `ZCoeffs::{z, zeta, m_hook, m_hef, m_fgb}`; tests against
-  SSE output (critical masses at the five T12 metallicities, ZAMS L and R at four points), with the
-  SSE run's provenance in `stellar/sse/mod.rs`; a continuity sweep of every aₙ and bₙ in Z. Bench:
-  `ZCoeffs::new` 1.81 µs against the 5 µs target.
-- **Deviations in T5, as built.** `stellar::sse::ms` is `pub(crate)` (T10 is its first caller;
-  until then it carries `cfg_attr(not(test), expect(dead_code))`, which T10 removes, as it does on
-  `ZCoeffs::{a, b, alpha_r_power_law}`). `t_bgb`, `t_hook`, `t_ms` (in `Megayears` from the ZAMS),
-  `l_tms`, `l_bgb` (`SolarLuminosities`) and `r_tms` (`SolarRadii`) take `SolarMasses`; L and R
-  along the main sequence come from `MainSequence::new(m, &c).at(t)`, which returns the new
-  `sse::PhasePoint { luminosity, radius, core_mass }` that every later phase returns too. Equation
-  6's x is the SSE code's form, max(0.95, max(0.95 − (10/3)(Z − 0.01), min(0.99, 0.98 − (100/7)(Z −
-  0.001)))): the printed max(0.95, min(0.95 − 0.03(ζ + 0.30103), 0.99)) is a different fit, not a
-  misprint; the two agree for Z ≤ 0.0003, at 0.001 and for Z ≥ 0.01, and at Z = 0.004 (0.962
-  against 0.970) the printed form moves `t_ms` by 0.8% and late main-sequence L by 0.02–0.06 dex
-  against SSE, beyond T12.b's 0.02 dex; for the owner to confirm, since the phase consults SSE
-  only for misprints. Misprint settled against SSE: equation 22b's denominator is a74 − 1.0
-  (printed a74 − 1.06 in the journal too). Equation 23's low-mass branch takes |M − a78| as SSE
-  does (no numerical effect), and its last branch ends at a75 + 0.1 as the journal prints. R_TMS is held at 1.5 R_ZAMS below 0.5 M☉ as printed
-  (SSE holds it up to a17, where a test shows it never binds). Equation 24's degenerate floor uses
-  X = 0.76 − 3Z (Pols et al. 1998) at every mass; it binds only near 0.1 M☉, where it exceeds Tout
-  et al.'s R_ZAMS (0.135 against 0.130 R☉ at Z = 0.02), so the τ = 0 and 1 tests compare with the
-  floored radii and T15.b's blend must meet `MainSequence::at(0)`, not `zams::radius`. Continuity is
-  asserted with a test-only bisection jump detector (`stellar/sse/continuity.rs`) instead of a
-  Lipschitz bound, which the hooks' (M − `M_hook`)^0.4 and ^0.5 rises and R_TMS's steep ramp at Z =
-  10⁻⁴ would break, applied both to L and R and to each coefficient of equations 16–23 at its own
-  scale. The 0.75 M☉ test sweeps 200 metallicities. Added: L and R against SSE's `hrdiag` at nine
-  (Z, M, t) points to 10⁻⁹ (all 5 × 31 × 400 main-sequence rows of the run agree to 10⁻¹⁴).
-- **Deviations in T6, as built.** `stellar::sse::{hg, gb}` are private modules of `pub(crate)`
-  items with `ms`'s dead-code expectation, which T10 removes. The gap is `HertzsprungGap::new(m,
-&c).at(t)` (`t_start` = t_MS, `t_end` = t_BGB); the branch below `M_FGB` is
-  `FirstGiantBranch::new(m, &c).at(t)` (`t_hei`); both return `PhasePoint` and debug-assert their
-  time range. Equation 37 is `GiantBranch` (`m_x`, `l_x`, `luminosity`, `core_mass`, `times` →
-  `GiantTimes`, `core_mass_at`, `time_of_luminosity`); R_GB is `gb::radius`, L_HeI `gb::l_hei`. The
-  gap's end and equation 44 need parts of HPT 5.3–5.4, so `gb.rs` also holds, for T7 and T8 to
-  reuse: `mc_hei`, `mc_bgb` (eq. 44), `r_hei` (eq. 50), `r_mhe_intermediate` (eq. 55 from `M_HeF`
-  up; T7 adds the branch below), `blue_fraction_massive` (eq. 58 above `M_FGB`; T7 adds the rest),
-  `agb_radius` (eq. 74) and `mc_bagb` (eq. 66), the `m_c_bagb` of T8, T18.b and T28.f, which T8.b
-  re-exports from `sse` under that name since `gb` is private. Two choices follow SSE, for the owner
-  to confirm: p, q and log D change form over 2.0–2.5 M☉, not `M_HeF`–2.5 as printed (same at Z =
-  0.02; at Z = 0.001 the printed form leaves a 2 M☉ giant up to 0.06 dex fainter at a given age,
-  beyond T12.b's 0.02 dex); and above `M_FGB` a star with no blue phase (τ_bl zero below 10⁻¹⁰, as
-  SSE's `tblf`) ignites helium at R_AGB(L_HeI), not R_mHe, so that core helium burning, which then
-  starts on R_AGB (eq. 64), begins where the gap ends (every star above `M_FGB` at Z ≳ 0.022, where
-  1 − b47 < 0, and elsewhere where R_mHe ≥ R_AGB). Equation 44's c₁ is the printed 9.20925 × 10⁻⁵
-  (SSE: 0.09796164⁴), so the SSE tests (4 gap and 6 branch points) hold L and R to 10⁻⁹ and Mc to
-  10⁻⁷. T6.c re-checked: equation 49 puts the 1 M☉, Z = 0.02 tip at 2,752 L☉ (SSE agrees; Fig. 11
-  about 2,800) with a 0.477 M☉ core, and the bolometric tip **rises** with metallicity (1,933 L☉ at
-  Z = 10⁻⁴ to 2,814 at 0.03; Cassisi and Salaris 1997 agree), so the tests assert 2,752 ± 1 L☉ and a
-  rise over 200 metallicities; the plan's "near 2,500" and "falls" are for the owner to amend. Left
-  to T10.d, whose Build text should gain it: HPT section 6.3's small-envelope perturbation of L and
-  R (equations 97–100), which SSE applies from the gap to the AGB whenever μ < 1, including massive
-  stars in the gap with no mass loss (μ ≈ 0.86 at 20 M☉), and which needs T9's helium ZAMS and the
-  white dwarf's L and R; the SSE test points avoid it. Also for T10: the phase structs take one
-  mass, while SSE evaluates R_GB and R_AGB at the current mass, and equation 30 keeps the larger of
-  a mass-losing gap star's previous core and the formula's. Not done, from review: SSE reference
-  rows for the gap above `M_FGB` (only self-consistency is tested there), and computing equation
-  44's C and f_bl(`M_FGB`) once per Z rather than per star (T10's bench decides).
-- **Deviations in T1.b, as built.** `math::normal_quantile` departs from Acklam's reference form in
-  three places, each to keep its error at a few ulps: above ½ it is −Q(1 − p), with 1 − p exact,
-  so the upper tail is as accurate as the lower and the mirror is exact bit for bit (the upper
-  branch point moves to where 1 − p crosses 0.02425, so 0.97575 as an `f64` takes the tail
-  branch); for 0.25 ≤ p ≤ ½ the Halley step evaluates Φ(x) − p as ½ erf(x ÷ √2) − (p − ½), since
-  the erfc form loses x's relative precision as x → 0 at ½; and in the tail the Newton step is
-  scaled by p, (Φ − p) ÷ p × √(2π) exp(x²/2 + ln p), which cannot overflow for subnormal p. The
-  10⁻¹³ bound holds for normal p (3.3 × 10⁻¹⁶ at worst against 200-bit values). Below 2⁻¹⁰²² the
-  step cannot resolve Φ(x₀) − p and Acklam's unrefined value remains: 1.8 × 10⁻⁹ at 2⁻¹⁰⁷⁴.
-  Release builds return −∞ for p ≤ 0, +∞ for p ≥ 1 and a NaN unchanged, rather than the
-  hardware's default NaN, whose sign differs by architecture; callers inverting a draw take it
-  from `Stream::uniform_open` (`Stream::uniform` can return 0). The golden's arguments are a
-  superset of the task's: 0.97575 ± 2⁻⁵⁵ rounds to 0.97575, so the upper branch point is crossed
-  at 0.97575 ± 2⁻⁵³, and 0.02425, 0.25 (the erf switch), `f64::MIN_POSITIVE` and 5 × 10⁻³²⁴ are
-  added. Strict increase is tested on steps of 2⁻⁵⁰ in p across 0.02425, 0.25, ½ and 0.97575:
-  neighbouring doubles move the quantile by less than an ulp there, so it is monotone only to
-  within its rounding. The round trip through `normal_cdf` is relative, with the complement checked
-  above ½; since `normal_cdf` is the Φ the step drives to p, accuracy is also checked against a
-  test-only transcription of Wichura's AS 241 (PPND16) to 10⁻¹³ relative.
-- **Deviations in T27, as built.** The sketch's `(key: &EventKey, tag: EventTag)` pairs are one
-  `events::EventSeries { subject, tag, key }`, built by `EventSeries::new(seed, tag, subject)`
-  (which calls `EventKey::derive`), because an `EventId` needs the subject and a key does not
-  carry it; every `events_in`, `active_at`, `event`, `phase_at` and `cycle_at` takes
-  `&EventSeries`, and plans 09, 11 and 14 build one where their text says `EventKey::derive`. A
-  tag's series goes to one construction only: bin k's count stream is cycle k's skip stream.
-  `RateModel::bound` takes the bin's `TimeWindow` (so a model needs no Δ), and both methods return
-  the new unit `events::EventsPerSecond` (`per_day`, `per_julian_year`), kept in `events` rather
-  than `units.rs` while another lane edits that file. Phases are a split `Phase { cycles: i64,
-fraction: f64 }`: `PhaseClock::base_phase` and `phase_at` return one and `time_at` takes one,
-  because an `f64` of cycles resolves only 6 × 10⁻⁵ at P = 16 s over the source horizon;
-  `LinearClock` takes a `Span` period of at least 16 s and inverts in integer arithmetic to within
-  max(1 ns, 2⁻⁵² P). `PoissonBins::new(bin_seconds, look_back_bins)` rejects Δ outside 16 s to
-  2⁴⁴ s; bins and cycles beyond the 40-bit numbers hold no events; a bin's mean above 64 fails a
-  debug assertion; thinning is one integer `Threshold::from_ratio` decision per candidate, whose
-  time is its word's top 53 bits scaled to the bin in integer nanoseconds. `MonotonePhase::new(a,
-ℓ, J)` takes ℓ in whole cycles and 1–48 octaves with ℓ × 2^(J − 1) ≤ 2⁶², and the skip comes
-  through `with_skip(SkipMark)`; added `octaves_to_span`, `LinearClock::cycles_in`,
-  `noise_bound_cycles`, `amplitude_cycles` and `event_by_id`. Octave j's lattice value at index i is
-  the first word of `event_stream(i, j + 1)`, so a phase kind draws all of a cycle's marks from
-  `event_stream(n, 0)`. Roots are an integer-nanosecond bisection, not `galaxy::quad::bisect`
-  (whose `f64` seconds resolve a millisecond at the horizon); Φ in `f64` is not monotone within a
-  few ulps of n (over microseconds at periods of years), so the bracket, the margin, the form of
-  `noise_bound_cycles` and the midpoint rule are output, and a ten-year case in the golden pins
-  them. A per-call `Lattice` cache keeps amplitudes and the last lattice values; a test checks it
-  bit for bit against cold bisection. `Phase::new` asserts a finite fraction in release builds too.
-  "Exact arithmetic" is read as integer lattice indices and fractions from integer remainders, with
-  3s² − 2s³ in plain `f64`. Tests: `events::testing` holds `partition`,
-  `assert_partition_independent` and `ConstantRate` and does not depend on `hyperion-testkit`; the
-  tests permute calls with `assert_order_independent` over the pieces, and the thread checks are
-  separate tests compiled out on wasm32-wasip1, which has no threads (x86-64 and AArch64 run them).
-  The diffusion test measures the variance, over 400 subjects, of the drift from cycle 0, tₙ − t₀ −
-  nP, at lags 4–4,096 below a top octave of 8,192 (tₙ − nP alone is stationary across subjects);
-  its fixed ratios (each fourfold lag at least doubles, 1,024 × the lag at least 64 ×) sit about
-  five standard deviations from both the expected 4 and the control's 1. The million-cycle test is
-  `#[ignore = "slow: …"]` (about 55 s under `slow-test`). Goldens `events/bins` (with a thinned
-  rate) and `events/phase` are written from unit tests, under `tests/golden/events/`, not
-  `stellar/`. Acceptance also needs `cargo test -p hyperion-sim -- events event_tags
-domain_tags_are_pinned`, since `events` alone misses the registry tests and the tags golden.
-  Bench (x86-64, criterion): ten day-long bins with thinning, 52 µs; one horizon-spanning root
-  (P = 3 yr, 16 octaves), 30 µs.
-- **Deviations in T7, as built.** `stellar::sse::cheb` is a private module of `pub(crate)` items
-  with `ms`'s dead-code expectation, which T10 removes: `CoreHeliumBurning::new(m, &c)` with
-  `t_start` (`t_HeI`), `t_end` (`t_HeI` + `t_He`) and `at(t)` → `PhasePoint`, and the landmarks
-  `t_hei`, `t_he`, `l_bagb`, `l_min_he`, `l_zahb`, `r_zahb`, `r_mhe_low` (eq. 55 below `M_HeF`) and
-  `blue_fraction` (eq. 58 in every regime, T6's `gb::blue_fraction_massive` above `M_FGB`). The
-  helium ZAMS pieces are `helium::{zams_luminosity, zams_radius, main_sequence_lifetime}` (eqs.
-  77–79). `gb.rs` gains `RadiusLaw` (R_GB and R_AGB with their mass dependence evaluated once, to
-  which `radius` and `agb_radius` now delegate, bit for bit), so that the phases keep `at(t)`
-  without a `ZCoeffs`. Below `M_HeF`, `m` is the mass after the flash, where HPT section 7.1 reset
-  M₀ to Mₜ; the envelope sets the horizontal branch through eq. 52's µ. Two places follow SSE, for
-  the owner to confirm: eq. 58's exponent is 0.4805428, not the printed 0.414, which moves `τ_bl` by
-  up to 0.035 and R by up to 0.12 dex (L 0.06 dex) at Z = 0.001, 4–5 M☉; and below `M_HeF`, `R_x` =
-  `R_ZAHB` is evaluated with the growing core, and ξ and `R_min` with it, where the paper fixes
-  `R_x` at the start (the fixed form moves R by up to 0.030 dex at 0.7 M☉, Z = 10⁻⁴, and L by 0.009
-  dex). A misprint settled against SSE: b17's exponent is 0.6371760; both printings give 2.862149,
-  b′16's second coefficient, which moved `L_min,He` by up to a third at Z = 0.03. That is a one-line
-  fix in T4's `coeffs.rs`; b17 has no other caller, so nothing generated moves. Eq. 53's 1.6479 is
-  kept as printed (SSE 1.647903, under 10⁻⁵ in `L_ZAHB`); `L_ZAHB`(`M_HeF`) = `L_min,He`(`M_HeF`)
-  whatever the core, so SSE's choice of core in eq. 55's constant is immaterial. The SSE rows hold L
-  and R to 10⁻⁵, not 10⁻⁹, because T4's printed `M_FGB` constants and the printed 1.6479 move them
-  by up to 4 × 10⁻⁶ there (3 × 10⁻³ dex at Z = 10⁻⁴; with SSE's two constants patched in, every
-  unperturbed row of the run agreed to 5 × 10⁻¹⁴); massive stars are compared with a run that
-  disables SSE's μ < 1 perturbation, which SSE applies to all of them in this phase. Plan figures
-  that are wrong for HPT's formulae, SSE agreeing with the formulae: the 5 M☉ loop at Z = 0.02 spans
-  4,010–4,665 K and never reaches 5,500–6,500 K (at Z = 0.004 it spans 4,475–7,260 K, and the test
-  asserts both); at Z = 0.0005 a horizontal branch with 0.1–0.2 M☉ of envelope sits at 15,400–9,000
-  K, and 6,000–7,500 K takes 0.25–0.30 M☉ (6,910 K for the 0.8 M☉ star that lost nothing; 6,975 K
-  since ruling 92, as Z = 0.0005 lies between calibration metallicities). `t_He`(1
-  M☉) is 131.5 Myr at Z = 0.02. Continuity is tested from T6 at ignition above `M_HeF` (to 10⁻⁹ and
-  by age sweeps), in τ, and in mass across `M_HeF` and 12 M☉ and, for Z ≤ 0.002, `M_FGB`; for Z >
-  0.002 HPT's declared jump at `M_FGB` is excluded and checked to exist (only 0.007 in `τ_bl` at Z =
-  0.004).
-- **Deviations in T8, as built.** `stellar::sse::agb`: `EarlyAgb::new(m, &c)` (`t_start` = `t_BAGB`,
-  `t_end`, `end` → `EarlyAgbEnd::{ThermalPulses, Supernova}`, `co_core_mass(t)`, `at(t)` with the
-  helium core as `core_mass`, and `thermal_pulses()` → `Option<ThermallyPulsingAgb>`, so that no
-  mismatched or impossible pulsing phase can be built), `ThermallyPulsingAgb` (`t_start` = `t_DU`,
-  `t_end`, `end` → `CoreEnd::{Supernova, WhiteDwarf}`, `time_of_core_mass`, `at`,
-  `interpulse_period`), `mc_du` (eq. 69), `mc_sn` (eq. 75), and the constants
-  `HELIUM_RATE_MSUN_PER_LSUN_MYR`, `COMBINED_RATE_MSUN_PER_LSUN_MYR` and `CHANDRASEKHAR_MSUN`. The
-  ends are at constant mass; the envelope's loss under a wind is T10's root. `sse` re-exports
-  `m_c_bagb` (T6's `gb::mc_bagb`) and `interpulse_period` for T18.b and T28.f. `gb.rs` gains
-  `GiantBranch::{with_rate, times_from}`, the second for eq. 72, which the 1 M☉ thermally pulsing
-  AGB needs because its core starts above `M_x`. `A_He` is SSE's 8.0 × 10⁻⁵, not eq. 68's 7.66 ×
-  10⁻⁵, which makes the early AGB 4.4% longer and its luminosity up to 0.11 dex off SSE (2.5 M☉, Z =
-  0.02), for the owner to confirm; `A_H,He` is the printed ≈ 1.27 × 10⁻⁵, as SSE has it. `Mc,SN` is
-  eq. 75 as printed, not SSE's max(…, 1.05 `Mc,CO`(`t_BAGB`)): where the relation's carbon–oxygen
-  core at the base of the AGB already exceeds `Mc,SN` (40–80 M☉) the early AGB ends at once, at most
-  0.24% of the lifetime before SSE's; at 60 M☉ and Z = 10⁻⁴ and 10⁻³ SSE's carbon–oxygen core at the
-  base of the AGB exceeds its helium core and it runs a thermally pulsing AGB with third dredge-up
-  for 0.41 and 0.31 Myr more (8.2% and 6.4% of its lifetime), an artefact not followed, for the
-  owner to confirm, since it exceeds T12.b's 1% at those two grid points. HPT give no interpulse
-  period; it is Wagenhuber and Groenewegen (1998, A&A 340, 183) eq. 11 with all three terms, so
-  `interpulse_period(mc, mc_first, envelope, &c)` → `Years` takes the core at the first pulse and
-  the envelope as well as the core, with their α_MLT = 1.5. Plan figure re-checked: `m_c_bagb`
-  reaches 1.6 M☉ at 6.31 M☉ and 2.25 M☉ at 8.20 M☉ at Z = 0.02. SSE, at constant mass on 200 ages
-  over each star's AGB: L and R to 10⁻¹¹ on 8,690 early and 3,824 thermally pulsing rows where μ ≥ 1
-  (all 13,577 and 8,527 with the perturbation off), `t_DU`, `L_DU` and the time to `Mc,SN` to 10⁻¹².
-  The helium core's fall at `t_DU` in the second dredge-up is HPT's declared discontinuity; L and R
-  are continuous there and at `t_BAGB`.
-- **Deviations in T9, as built.** `stellar::sse::helium::HeliumStar`: `new(m)` at zero age (plan
-  11's stripped stars, and envelope loss in the gap or on the giant branch), and
-  `from_core_helium_burning(&cheb, t)` and `from_early_agb(&early, t)`, which return the star and
-  its age (eq. 76; the helium giant's age from eq. 84's relation at the early AGB's carbon–oxygen
-  core, no earlier than `t_HeMS`); `t_ms`, `t_end`, `end` (T8's `CoreEnd`), `phase_at(t)` → `Phase`
-  (the helium Hertzsprung gap while R₁ < R₂, the giant branch after) and `at(t)`. `gb.rs` gains
-  `GiantBranch::helium_giant` (eq. 84's relation). `A_He` is T8's. Below 0.214 M☉, where 1.45 M −
-  0.31 is not positive, `Mc,max` is M, as in SSE; SSE's rule that a helium main-sequence star below
-  the core at helium ignition of an `M_HeF` star (about 0.33 M☉) is at once a helium white dwarf is
-  not in HPT and is left to T10.d. Plan figure: a 4 M☉ helium star's main sequence lasts 1.514 Myr
-  ("about 1 Myr"). "Continuous in L to 1% when the envelope reaches zero" holds, to 10⁻⁹, for a star
-  whose envelope is gone on the zero-age horizontal branch, and for the helium star against the core
-  luminosity that section 6.3's perturbation takes a thinning envelope to. Without that perturbation
-  the core-helium-burning luminosity exceeds the helium star of its core by 0.13–1.75 dex (0.49 dex
-  at 1 M☉, Z = 0.02, halfway through), which is the gap T10.d must close. SSE: helium main sequence,
-  gap and giant branch L and R to 10⁻¹³ on 7,493, 455 and 11 rows where μ ≥ 1 (the perturbation of
-  helium giants near their end is T10.d's); the entries from core helium burning to 10⁻⁷ (eq. 44's
-  rounded c₁ in the core) and from the early AGB to 10⁻¹² with the perturbation off. The SSE runs
-  that T7–T9's tests read are the build of `stellar/sse/mod.rs`, run again on 2026-09-23 on finer
-  grids and a second time with the perturbation's branch disabled; each test says which it reads.
-- **Deviations in T10.a and T10.b, as built.** `sse::wind` is private; `WindRecipe` is `pub`
-  (`Default` is `Modern`) and re-exported as `sse::WindRecipe`. `wind::rate(recipe, &StarState,
-&Composition, ReimersEta) -> SolarMassesPerYear` is `pub(crate)`; η is the new `pub(crate)`
-  newtype `ReimersEta` (`new`, `value`, `HURLEY` = 0.5), which T10.c builds from
-  `StarDraws::eta` by design note 7. Added for T10.d's HPT §6.3 perturbation:
-  `wind::small_envelope_mu(m, mc, l)`, equation 97. Both recipes read Z ÷ Z☉ as
-  `Composition::z_fit` ÷ 0.02. Post-AGB, pre-main-sequence, substellar and remnant phases have no
-  wind. `Hurley2000` is SSE's `mlwind` for a single star with `hewind` = 1, the paper's, and it
-  agrees with `mlwind` to 8 × 10⁻¹⁵ over 131,040 states (types 1–9, four Z, every term), zeros
-  included. It follows SSE in four places where the printed text moves the rate further than
-  T12.b's tolerances (ruling 10), for the owner to confirm. First, Nieuwenhuijzen and de Jager
-  ramps on over 4,000–4,500 L☉; the printed switch is up to 0.7 dex high at 4,100 L☉. Second,
-  Reimers applies from the Hertzsprung gap; "the GB and beyond" would zero every gap star below
-  4,000 L☉. Third, P₀ ≤ 2,000 d rather than log P₀ ≤ 3.3, 0.059 dex where it binds. Fourth, the
-  LBV term applies to types 2–6 and not on the main sequence. Both the paper and SSE **add** the
-  LBV term to the largest of the other four, so the plan's "the maximum of the applicable terms"
-  holds for those four only. SSE's distributed `evolve.in` sets `hewind` = 0.5, so T12.a runs
-  with `hewind` = 1.0 or T12.b's helium-star rates differ by 2. `Modern` follows Belczynski et
-  al. (2010, §2.2). From 12,500 K a hydrogen-rich star loses mass at Vink's rate **alone**, in
-  place of every HPT term, small-envelope term included: design note 6's "Hurley's own choices
-  elsewhere", and Belczynski's "for H-rich low mass stars, for which the above prescriptions do
-  not apply". Vink's equations 24 and 25 were checked digit by digit against the paper,
-  Belczynski's equations 6–7 and MESA's `winds.f90`. They are applied beyond their calibrated
-  grid (log L 5.0–6.0, 20–60 M☉, Z ÷ Z☉ 1/30–3), as Belczynski applies them from about 3 M☉.
-  Across 22,500–27,500 K, Ṁ is (1 − w) cool + w hot with w linear in T, both fits taken at the
-  star's state; Vink's own jump position (about 25.9 kK at solar Z, eqs 14–15) and the second
-  jump near 15 kK are not modelled. From 11,500 to 12,500 K HPT's rate is handed over to Vink's
-  the same way, in a band we chose after MESA's "Dutch" 10,000–11,000 K. T is held at 50,000 K
-  above the fits, and v∞ ÷ v_esc at 2.6 and 1.3, with no Z^0.13 correction, so Ṁ ∝ Z^0.85 as
-  design note 6 says. Evolved hydrogen-rich stars beyond the Humphreys–Davidson limit lose
-  1.5 × 10⁻⁴ M☉ yr⁻¹ in place of every other term. That step, about 6 times the rate just inside
-  the limit for a 60 M☉ star of 10⁶ L☉, is the recipe's one discontinuity, kept as design note 6
-  specifies; the continuity test covers the five temperature boundaries (11,500, 12,500, 22,500,
-  27,500 and 50,000 K) inside the limit. Helium stars lose max(Reimers, 10⁻¹³ L^1.5 (Z ÷
-  Z☉)^0.86). A giant cooler than 11,500 K that is stripped to a helium star therefore sees its
-  rate fall about 95 times at Z = 10⁻⁴ and 7 at 0.002, as in the codes followed. The plan's O star
-  (40 M☉, 40 kK, 10⁵·⁷ L☉) loses 3.43 × 10⁻⁶ M☉ yr⁻¹.
-- **Deviations in T11, as built.** `RemnantRecipe` (`pub`, `Default` `MandelMuller2020`) lives
-  in `stellar::remnant` and is re-exported as `sse::RemnantRecipe`. `RemnantKind` and
-  `CompactRemnant` (`pub`, getters `kind` and `mass`, `pub(crate) new` debug-asserting the mass)
-  exist now, in Provides' shape, because HPT's remnant mass returns one; T18.d reuses them.
-  `remnant::structure` is `pub(crate)` and holds `CHANDRASEKHAR_MASS` (1.44),
-  `OXYGEN_NEON_MC_BAGB` (1.6) and `HURLEY_MAX_NEUTRON_STAR_MASS` (1.8). The white dwarf's kind
-  is `white_dwarf_kind(DegenerateCore)`: `Helium` for a degenerate helium core, and
-  `CarbonOxygen { mc_bagb }` below 1.6 M☉ or oxygen–neon from it. So carbon–oxygen against
-  oxygen–neon is decided by the core mass at the base of the AGB (HPT §5.4, SSE), not at the
-  envelope loss; for a helium star the caller passes its initial mass, HPT §6.1. The radii are
-  `white_dwarf_radius(recipe, m)` (equation 91, floored at the recipe's neutron-star radius),
-  `neutron_star_radius(recipe)` and `black_hole_radius(recipe, m)`: 4.24 × 10⁻⁶ M under
-  `Hurley2000`, otherwise 2GM ÷ c² from the nominal constants, 0.12% larger. HPT's "10 km" is
-  kept as their 1.4 × 10⁻⁵ R☉, 9.74 km in the nominal R☉. `hurley_supernova_remnant(mc_sn)` is
-  equation 92, a neutron star up to 1.8 M☉. **The neutron-star radius is 12.2 km, not 11.5.**
-  Koehn et al. (2025, Phys. Rev. X 15, 021014) combine nuclear theory and experiment with the
-  NICER radii of PSR J0030+0451 (Riley et al. 2019, Miller et al. 2019) and PSR J0740+6620
-  (Salmi et al. 2024, Dittmann et al. 2024), GW170817 and GW190425, and give R₁.₄ = 12.20 (+0.50
-  −0.48) km at 95%, which excludes 11.5. The other combined analyses of the NICER data centre at
-  12.0–12.45 km (Miller et al. 2021, Raaijmakers et al. 2021, and Rutherford et al. 2024 with PSR
-  J0437−4715), and those of 2025–2026 that add PSR J0614−3329 at 11.8–11.9 km. Only
-  gravitational waves with nuclear theory alone reach 11.0 km (Capano et al. 2020). T21.b's
-  spin-down constant, written with 11.5 km, should read `neutron_star_radius`: k ∝ R⁶ is 1.43
-  times larger. Equation 91's relation vanishes at M_Ch as the plan asks. The radius itself is
-  floored at the neutron star's, as HPT print it, which binds within 3 × 10⁻⁶ M☉ of M_Ch. SSE's
-  two guards below 0.002 M☉ are left out. SSE's distributed `evolve.in` has `nsflag` = 1
-  (Belczynski et al. 2002 masses) and `mxns` = 3, so T12.a must run with `nsflag` = 0 and `mxns`
-  = 1.8 to compare against `RemnantRecipe::Hurley2000`. Against SSE's `hrdiag` (run of
-  2026-09-23), white-dwarf radii at ten masses, neutron-star and black-hole radii, and the
-  supernova remnants of 8–80 M☉ stars at three Z all agree to 10⁻⁹.
-- **Validation of T1.a, T1.b, T2, T4–T6 and T27 (val06, round 6).**
-  - _Coefficients._ Every row of HPT's Appendix (journal pages 566–569, ADS scan) and of Tout et
-    al.'s Tables 1 and 2 (page 258) was read against the page images, and separately against
-    SSE's `zdata.h` through `zcnsts.f`'s mapping: all 143 table rows agree (SSE stores the rows of
-    b21 and b22 in the other order). The closed forms do not all agree. b17's exponent is printed
-    2.862149 in the journal and the preprint, which is b′16's β one row above; SSE has 0.6371760,
-    a number the paper never prints. The printed form moves `L_min,He` (equation 51) by +0.08 dex
-    at Z = 0.004 and −0.17 dex at 0.03, so b17 now takes SSE's exponent as a misprint settled,
-    with a test against SSE's `lHef` (the same fix, to the same value, as `starA`'s); nothing reads
-    b17 before T7. For T7: equation 58's (M ÷ `M_FGB`)^0.414 is 0.4805428 in SSE's `tblf` (the
-    printed exponent raises `τ_bl` by up to 0.035), and equation 53's 1.6479 is 1.647903 there.
-  - _Agreement with SSE, reproduced_ over all of `probe_hrd.csv` with a harness since removed:
-    main sequence (52,029 rows) L 1.0 × 10⁻¹⁴ and R 1.3 × 10⁻¹⁴ relative; gap (770 rows) L
-    2.0 × 10⁻¹⁴, Mc 4.3 × 10⁻⁸ (equation 44's c₁), and R 1.3 × 10⁻³ dex at Z = 10⁻⁴, 5 M☉, above
-    `M_FGB`, where equation 50's µ reads the rounded `M_FGB` (7 × 10⁻¹⁴ with SSE's); branch (1,795
-    rows) L 4.2 × 10⁻¹³, R 2.6 × 10⁻¹³, Mc 4.3 × 10⁻⁸. The recorded 10⁻¹³ for the gap holds only
-    below `M_FGB`. Eighteen rows (15 gap, 3 branch) carry SSE's µ < 1 perturbation, T10.d's, and
-    differ by up to 0.018 dex in R. Added to the tests: the nine unperturbed gap rows above `M_FGB`
-    (all at Z = 10⁻⁴), four main-sequence rows in η's Z ≤ 0.0009 branch, and 24 points of SSE's
-    landmark functions (`L_HeI`, `R_GB`, `R_AGB`, `R_mHe`, `τ_bl`, `Mc,BAGB`, `Mc,BGB`, `Mc,HeI`,
-    `R_HeI`), which the gap's end had been checked against only through the same functions.
-  - _The five choices for the owner_, as the worst deviation from SSE over the grid's unperturbed
-    rows; all five meet the 0.02 dex rule, and the recommendation is to confirm them as built.
-    - Equation 6's printed x: `t_MS` −0.83% (Z = 0.004), main-sequence R +0.030 dex and L
-      +0.016 dex within 13.8 Gyr (L +0.055 dex and gap L −0.18 dex beyond it), 207 rows past
-      0.02 dex. SSE's form stands.
-    - p, q and log D from `M_HeF`: branch L −0.038 dex (Z = 0.001, 2 M☉), R −0.023 dex, Mc
-      −0.95%, `t_HeI` +0.055%. SSE's 2.0 M☉ stands.
-    - Ignition at `R_AGB` without a blue phase: the printed `R_HeI` differs by −0.70 to +2.31 dex
-      at 15 of the 155 points (M ≥ 40 at Z = 0.02, M ≥ 15 at 0.03, 60–100 at 0.004, 100 at 0.001);
-      every gap row it touches is perturbed, where it is off by 1.14 dex. SSE's form stands.
-    - Equation 44's printed c₁: Mc 4.3 × 10⁻⁸, L and R unchanged. The printed form stands.
-    - `M_FGB`'s rounded constants: gap R 1.3 × 10⁻³ dex, `L_min,He` 8 × 10⁻⁵ dex, `τ_bl`
-      1.4 × 10⁻³, and, measured by `starA` together with equation 53's printed 1.6479, core helium
-      burning 1.1 × 10⁻³ dex in L and 3.1 × 10⁻³ in R (ruling 29). The printed form stands.
-  - _T6.c's figures._ The plan's "near 2,500 L☉" and "falls" should read: a 1 M☉ star at
-    Z = 0.02 reaches the tip at 2,700–3,000 L☉ (log L = 3.45 ± 0.05; BaSTI, Pietrinferni et al.
-    2004, ApJ 612, 168, Table 3: 2,985 L☉ with a 0.478 M☉ core; HPT's equation 49 gives 2,752 L☉
-    and 0.477 M☉), and the bolometric tip brightens with metallicity (Salaris and Cassisi 1997,
-    MNRAS 289, 406, Table 1: 1,977 L☉ at Z = 10⁻⁴ to 2,742 at 0.006, against HPT's 1,933 to 2,814
-    at 0.03); only the I-band tip fades. Cassisi and Salaris 1997 (MNRAS 285, 593) gives no tip
-    luminosity: the paper meant is Salaris and Cassisi 1997.
-  - _The normal quantile_ against roots found to 45 digits at 49,187 points (each branch point ±6
-    ulps, the tails, 2⁻¹⁰⁷⁴–2⁻¹⁰²², random): 3.4 × 10⁻¹⁶ relative (2.45 ulps) for normal p, and
-    3.9 × 10⁻⁹ for subnormal p, at 6.5 × 10⁻³¹⁹ (the doc said 3.5 × 10⁻⁹; corrected). The mirror
-    is exact bit for bit at all 37,058 points where 1 − (1 − p) = p, except p = ½, +0 against −0,
-    which no odd function avoids (the doc is corrected).
-  - _T2._ Tags, scopes and word budgets match "Generator version" and the plan's text (at most 16
-    of 64 words; eight tries all fail at 8.9 × 10⁻¹⁶ and 2.5 × 10⁻¹³). The median mark's boundary
-    is exact: ceil(p × 2⁵³) > 2⁵² exactly when p > ½, and ½ + 2⁻⁵³ already accepts. The test
-    checked 0.500001 and one field, so a median mark one too high passed it; it now checks every
-    field of the median and the next double above ½.
-  - _T27._ New tests: the partition rule over every one-second piece of ±1,000 s at 16 s bins and
-    periods, with cuts a nanosecond either side of an event, across `ClockWindow::START` and `END`
-    and `SourceHorizon::START`, and across the last 40-bit bin and cycle numbers; and
-    `LinearClock`'s fraction against the exact ratio, to 2⁻⁵⁰ across the source horizon. All pass.
-    A rate above its bound fails only in debug builds, as the plan asks. In release it is clipped
-    to the bound, a mean above 64 passes, a count above 255 is clamped (events are lost without a
-    word), and a NaN rate gives no events; a NaN, negative or overflowing bound panics in release
-    too.
-  - _Tests that could not fail_ (97 deliberate breaks, 38 survived). The jump detector's 0.05 dex
-    gate hid every jump below about 0.03 dex, and its bisection lost a jump that ran against the
-    slope. It now flags any interval that departs from the cubic through its neighbours, cuts each
-    into 32 pieces so that curvature cannot outweigh a jump, bisects every piece past the tolerance
-    towards its outlying quarter, and tells a cusp from a jump by whether the change halves over 2²⁰
-    of width. It finds 10⁻⁴ dex anywhere in a sweep, which the continuity tests alone now show for
-    every jump the breaks planted; the main-sequence sweep takes about 10 s in debug under load. The
-    diffusion test was one-sided, so octave amplitudes of 2ʲ passed; it now bounds each fourfold
-    lag's growth by 8. Coefficient digits below the SSE tests' 10⁻⁹, b46's finishing step and b17
-    were pinned by the checksum alone. The new golden `stellar/sse` pins every aₙ, bₙ and critical
-    mass and points of all three phases at the five metallicities, bit for bit; it passes on
-    wasm32-wasip1. Left as equivalent: γ's a75 + 0.1 bound (its clamp makes the forms identical),
-    `events_in`'s −1 ns on the window's end, the phase's one-cycle margins, the quantile's erf/erfc
-    switch anywhere in 0.1–0.4, and √(2π) one ulp off.
-  - _Determinism._ No platform transcendental bypasses `math`, nothing `usize`-dependent reaches
-    output, and the `Lattice` cache lives for one call. Latent: a release build lets a NaN into a
-    `StarState`, whose range checks are debug assertions.
-- **P06.T35.b's outline, as built alone (round 7, `ui`).** Only the `ringed-circle` value of `SymbolShape` and its outline are built, for plan 14's `SYSTEM` display; `starSymbols.ts`, the `STARS` filter and the legend wait for the stellar wire types. `SymbolOutline` gains a third kind, `{ kind: "ringed-circle", discRadius }`, with `discRadius` `RINGED_DISC_SHARE` = 1/3 of the ring's radius; the painter fills the disc alone, then adds the ring to the path and strokes both once, so open and filled differ only by the fill (tested in the draw list and on a recorded canvas). **Deviation, for the orchestrator to rule:** the task asks that it read open against filled at the smallest `SIZE_CLASS_REM`, which no ringed circle can: at size class 0 (8 px at 100%) the ring's and the disc's 1.5 px outlines take 6 px, leaving 2 px for the gap round the disc and the open disc's hole, which cannot both be a pixel wide. The third splits it evenly, 2 px each at size class 2 and 1.2 px at 80%, and the test asserts both at least the outline's width at class 2 — the smallest class a giant is expected to take, since D17 ties size to the initial-mass layer and giants should come from layer C (0.75–2.5 M☉) and above in a galaxy of the Milky Way's age; `starSymbols.ts` should confirm that when it lands, or plan 06 should give giants a size class floor. _Since R07.T16.f, below a device-pixel ratio of 4/3, the ring moves out three times as far as the disc, so its hole and gap stand as built at every ratio, and a ringed circle grows up to 2δ more than other marks (decision-thin-line-contrast)._
-- **Deviations in T15.c, as built (`planet`, round 7; rulings 33 and 38).** Only the disc-lifetime
-  law is built, because plan 14's disc is its first caller: `stellar::premain::disc_lifetime` of a
-  mass and a rank, in `Megayears`, with `disc_lifetime_mean(mass)` and the constants
-  `DISC_LIFETIME_MEAN_SOLAR`, `DISC_LIFETIME_LOW_MASS_EXPONENT`, `DISC_LIFETIME_HIGH_MASS_EXPONENT`,
-  `DISC_LIFETIME_MIN` and `DISC_LIFETIME_MAX`; its values are pinned by the golden
-  `stellar/disc_lifetime`. It draws nothing: the rank is the star's `StarDraws::disc_lifetime()`.
-  The lifetime is −τ ln(1 − u), held to 0.3–15 Myr, with τ = 2.5 Myr at 1 M☉; the median rank gives
-  1.733 Myr there, Mamajek's half-life of 1.7. The source, re-checked: Mamajek (2009, AIP Conf.
-  Proc. 1158, 3, Fig. 1 and eq. 1), an e-folding time of 2.5 Myr for the disc fraction of 22
-  clusters; Ribas et al.'s (2015, Table A.2) all-star fit of 2.7 ± 0.7 Myr for inner-disc excesses
-  agrees. The mass scaling was first built as the plan's m^−½, which gave 1.6–2.2 Myr at 1.3–2.5 M☉
-  against Mamajek's 1.2 and 11 Myr for brown dwarfs against about 3. Ruled (ruling 38, point 6): it
-  follows measurements. Below 1 M☉, τ ∝ m^−0.1: Luhman et al. (2005, ApJ 631, L69) find brown
-  dwarfs' disc fractions of 42% and 50% in IC 348 and Chamaeleon I against 33% and 45% for their
-  M0–M6 stars, lifetimes 1.28 and 1.15 times as long across a factor of six in mass; the law gives
-  3.4 Myr at 0.05 M☉. Above 1 M☉, τ ∝ m^−1.06, halving by 2 M☉ (1.20 Myr there): Ribas et al. (2015,
-  Table 3) measure lifetimes 2.09 and 2.2 times longer below 2 M☉ than above at 1–3 and 3–11 Myr,
-  and Mamajek 1.2 Myr above 1.3 M☉. The mean reaches the 0.3 Myr floor near 7 M☉. P06.T15.c's text
-  now says so. T24's T Tauri class must read this function. T15.a and T15.b are not built, and
-  `Track` is untouched.
-- **Deviations in T3, as built.** `stellar::system::draw_metallicity(&Galaxy, &SystemRecord) ->
-Composition` as specified: \[Fe/H\] = `mean + sigma × z` through `Stream::normal` (two words of
-  `system.metallicity`, scope `System`, keyed by `ObjectKey::from(SystemId)`), `Composition::from_fe_h`
-  with no helium excess, the field read at `max(age, 0)`; a record without a component fails a
-  `debug_assert!` and reads its population's first component. The tag sits under a new "Plan 06,
-  the system's own draws" heading after the `star.*` tags, so `tags.golden` gains one line in the
-  middle, not at the end. Tests (`tests/stellar_metallicity.rs`, units in `system.rs`): the
-  gradient over 2.7 × 10⁵ thin-disc records of a strip of layer-E cells along +y (12,800–44,800
-  ly), slow by plan 01's convention although it runs in about a second, is the fixture's −0.05
-  dex/kpc within 3.29 standard errors of the fitted slope (measured −0.04979 ± 0.00020), and the
-  scatter the field's 0.20 within 3.29 of its own standard error (0.2001). The field states no
-  tolerance, so the bracket is its scatter's sampling error at α = 10⁻³. Records older than
-  `THIN_DISC_FLAT_AGE` are left out, so the test holds whichever disc carries the decline beyond
-  8 Gyr. The halo test builds records from parts in the fixture's in-situ and dominant-merger
-  components, 10⁴ each, and finds means −0.5988 and −1.1991, a separation of 0.6004 against 0.6
-  (± 0.0042), and a two-sample K–S p below 10⁻³⁰⁰. The K–S test at one place (old thin disc,
-  9,000/21,000/−120 ly, 3.2 Gyr) has p = 0.72. The golden `stellar/system_metallicity` pins 25
-  records: the first three of seven cells across the layers, three young-disc and three halo
-  records found by placement, and one young-disc record 500 years unborn built from parts, since
-  the unborn sliver (H = 1,000 years) is too rare to find. **For the orchestrator:** ruling 7 is
-  not in the field as built. `galaxy/fields/metallicity.rs` still gives the thin discs the
-  decline of 0.1 dex per Gyr beyond 8 Gyr, and the thick disc a fixed −0.55. T3 reads whatever the
-  field says, so moving the decline is plan 02's change, with a bump.
-- **Deviations in T13, as built.** `stellar::substellar::cooling(mass: SolarMasses, age: Years,
-comp: &Composition) -> Result<StarState, EvaluateCoolingError>`. It covers
-  `substellar::{MIN_MASS, MAX_MASS}` = 0.01–0.1 M☉ inclusive. `MassOutsideFits(mass)` is returned
-  outside that range or for NaN, and `AgeOutsideLife(age)` for a negative or non-finite age. Below
-  `MIN_AGE` (1 Myr) it gives the 1 Myr state with the true age. Plan 13's sketch has a bare
-  `StarState`, so its calls take `?` or an `expect`. Added: `hydrogen_burning_limit(&Composition) ->
-SolarMasses`, which plan 13 and T29 need to tell `ObjectKind::Dwarf` from `Substellar`. The
-  returned phase is `Phase::Substellar` at every age and on both sides of the limit, since the
-  phase's own doc already covers "the latest M dwarfs" and no such object leaves it. Mass is
-  constant, the core is zero, the mass-loss rate is zero and the phase fraction is zero. The
-  seam for `starA`'s `evolve` is `m0 < 0.1 → cooling(m0, age, comp)`, which cannot fail for grid
-  primaries (0.08 M☉ and up). Five departures from the plan's sketch follow, **for the
-  orchestrator to rule**.
-  - _A contraction regime._ Burrows et al.'s power laws are late-time fits ("characterize older
-    SMOs", §II), and alone they miss BHAC15 at 0.1 Gyr: 3,238 against 2,525 K at 0.05 M☉, and
-    −2.42 against −2.68 dex at 0.09 M☉. Before degeneracy the object contracts on its Hayashi
-    track by the n = 3/2 polytrope's Kelvin–Helmholtz law, R³ = t_KH m² (T☉/T_H)⁴ ÷ 7t, whose
-    one parameter T_H = 3,020 K (m ÷ 0.1)^0.09 is fitted to BHAC15. It joins the Burrows branch
-    by p-norms of order 4, the smaller L and the larger R. The Burrows radius is their
-    equation 5, at equation 3's gravity and equation 2's temperature.
-  - _Radius and temperature are joined, not luminosity and radius._ With L and R joined, a star
-    settling on the floor rose by up to 200 K in temperature at Z = 10⁻⁴. With R and T each a
-    p-norm of order 20 and L = R²T⁴, T, R and L never rise with age, and T never falls with
-    mass, by construction. Plan 13's P13.T5.a asks for exactly that.
-  - _The floor._ R_hb = R₀.₁ (m ÷ 0.1)^1.2 x^0.05 and T_hb = T₀.₁ x^0.18, with x = (m − m_e) ÷
-    (0.1 − m_e), fitted to BHAC15's 10 Gyr isochrone. It is pinned at 0.1 M☉ to Tout's ZAMS
-    luminosity and to the radius the backbone starts from, HPT's equation 24 floor (0.1346 R☉ at
-    Z = 0.02; `zams::radius` alone gives 0.1305). That floor is computed again in
-    `backbone_at_tenth`, in `sse::ms`'s arithmetic, because `MainSequence` is private to `sse`.
-    At merge, add a test of `cooling(0.1)` against `evolve(0.1)` at 1 and 10 Gyr.
-  - _Metallicity._ Burrows's κ̂ is read as Z ÷ Z☉ (on `z_fit`) above a metal-free floor
-    4^(−1/0.35) = 0.0190, the quarter of solar luminosity their text gives at zero metallicity.
-    The hydrogen-burning limit follows their equation 7, m_e ∝ κ̂^(−1/9), with its own floor
-    (0.068 ÷ 0.083)⁹. It is calibrated at 0.068 M☉ solar, where the floor's weight must vanish
-    for BHAC15's 0.07 M☉ model to keep burning, and at 0.083 M☉ metal-poor. Baraffe et al.'s
-    (1997, A&A 327, 1054) Tables II–V start at 0.083 M☉ at every \[M/H\] from −2.0 to −1.0, and
-    call that the limit. At −2.0 their model is at the edge (1,779 K, log L −4.27), but at −1.0 it
-    still has 2,359 K, so the limit there lies lower. The fit gives 0.065 M☉ at Z = 0.03, 0.079 at
-    \[M/H\] = −1 (their 0.083 M☉ model's luminosity within 0.12 dex, relative to 0.1 M☉), 0.0826
-    at −2.0 and 0.083 at Z = 10⁻⁴.
-  - _The 10 Gyr point at 0.05 M☉._ BHAC15's grid stops at 1,300 K, so it comes from ATMO 2020
-    (Phillips et al. 2020, A&A 637, A38), the same group's cold extension: 782 K and −5.670. The
-    fit gives 759 K and −5.698.
-- **Measured for T13**, against BHAC15's isochrones (`BHAC15_iso.2mass`). ΔT and Δlog L at
-  0.05 M☉ are +10 K and 0.000 at 0.1 Gyr, and +98 K and +0.125 at 1 Gyr (from the track). The
-  0.125 is Burrows's equation 1 itself, which ATMO 2020 matches to 0.02 dex. At 0.075 M☉ they are
-  +8, −120 and +69 K, and −0.002, −0.093 and +0.034. At 0.08 M☉, +4, −74 and −25 K, and −0.004,
-  −0.060 and −0.020. At 0.09 M☉, +6, −57 and −58 K, and +0.003, −0.008 and −0.012. The worst are
-  120 K and 0.125 dex, against the plan's 150 K and 0.15. Over BHAC15's grid from 30 Myr to
-  10 Gyr and 0.03–0.1 M☉ the fit is within 190 K and 0.16 dex. At 0.1 M☉ it meets the backbone
-  within 0.53% in L and 0.02% in R from 1 Gyr on, at all five metallicities (the plan's 2%; the
-  test holds 1% and 0.03%). A
-  0.05 M☉ object is 2,535 K at 0.1 Gyr (M), 1,481 K at 1 Gyr (L) and 931 K at 5 Gyr (T), on
-  Pecaut and Mamajek's scale (2022.04.16: M/L at 2,310 K, L/T at 1,310 K). Continuity in age is
-  a log–log Lipschitz bound (|Δln L| ≤ 2|Δln t|, |Δln R| ≤ |Δln t| ÷ 3). The golden
-  `stellar/substellar_cooling` pins 252 states.
-  - _Plan figures that were wrong._ The limit's range is wider than 0.072–0.078 M☉ at its
-    metal-poor end. At solar metallicity Burrows et al. give 0.07–0.075 M☉ and BHAC15 0.07, but
-    the limit is 0.083 M☉ at \[M/H\] = −2.0 (Baraffe et al. 1997) and 0.092 M☉ at zero
-    metallicity (Burrows et al., after Saumon et al. 1994). A 0.05 M☉ object is not "2,800 K at
-    0.1 Gyr": BHAC15 give 2,525 K and ATMO 2020 2,548 K, and 2,800 K is its temperature at
-    10–25 Myr. Deuterium burns above 13 Jupiter masses, not below (Burrows et al. §II), and the
-    fit ignores it at every mass.
-  - _Known limits._ Near 13 Jupiter masses the fit is up to 0.6 dex faint at 30–100 Myr against
-    ATMO 2020, where deuterium burns (P13.T5.a may add it). At 0.1 M☉ it is 0.42 dex brighter
-    than the backbone at 0.1 Gyr, as BHAC15's star is, until P06.T15.b's pre-main sequence, whose
-    Hayashi segment should use this contraction law. Young objects near 0.075 M☉ are 2,900–
-    3,000 K below 10 Myr (BHAC15 2,967 K, ATMO 2020 3,050 K), which P13.T5.a's "none earlier than
-    M6" (2,810 K) must allow. The metal-poor floors follow Baraffe et al. (1997) in luminosity to
-    0.2 dex, but are 230–440 K cooler. The reason is the backbone's: HPT's equation 24 gives
-    0.143 R☉ at 0.1 M☉ and Z = 10⁻⁴, against their 0.108. That is a finding against the
-    backbone's floor at low Z, for T12.
-- **Deviations in T18.a–c, as built (round 7, `remnant`).** Built as functions of plain arguments in
-  `stellar::remnant::collapse` (`pub mod`), for T18.d to wire into `Track::death`; nothing generated
-  calls them yet, so no golden moved, and the new golden `stellar/collapse` pins them by bits at 11.
-  - _API._ `RemnantDraws::{of(&StarDraws), from_parts(type, fallback, mass)}` holds the three
-    reserved draws. `core_collapse(co_core, helium_core, RemnantDraws) -> CoreCollapse` returns
-    `NeutronStar { mass }`, `BlackHole { mass }` (partial fallback), `DirectCollapse { mass }`
-    (complete fallback, the helium core), `PulsationalPairInstability` (40.5 M☉) or
-    `PairInstabilitySupernova`, and `CoreCollapse::remnant()` gives the `CompactRemnant`.
-    `pair_instability(helium_core) -> PairInstability::{None, Pulsational, Disruptive, Collapse}`,
-    which `core_collapse` applies first. For electron capture there is
-    `ElectronCaptureWindows::new(&ZCoeffs)`, with `iron_core_mass()` (m_cc), `window(width)`,
-    `single()` and `companion_stripped()`, each an `InitialMassWindow` with `lower`, `upper` and
-    `contains`, and `electron_capture_remnant()`. The Table 1 figures, the 1.26 M☉ mass, the 2.25 M☉
-    core at the base of the AGB, the window widths and Belczynski's four figures are `pub const`s.
-  - _T18.d's call._ In the EAGB and helium-star ends:
-    `core_collapse(p.co_core_mass(), p.helium_core_mass(), RemnantDraws::of(draws))`.
-    `DirectCollapse` and `PulsationalPairInstability` map to `DeathKind::DirectCollapse`, and
-    `PairInstabilitySupernova` to `DeathKind::PairInstability`. At the thermally pulsing AGB's end:
-    `windows.single()` (or `companion_stripped()`) `.contains(m)`, with the windows built once per
-    track beside `lightest_helium_star`.
-  - _Figures re-checked_ against the arXiv source of MM20 (2006.08360). M₁–M₄ are 2, 3, 7 and 8. The
-    probabilities are (M_CO − M₁) ÷ (M₃ − M₁) and (M_CO − M₁) ÷ (M₄ − M₁). The mass laws are
-    1.2 ± 0.02, 1.4 + 0.5 (…) ± 0.05, 1.4 + 0.4 (…) ± 0.05 and 0.8 M_CO ± 0.5, and the hold is
-    1.13–2.0 M☉. All are as the plan has them, but the recipe is MM20's **section 3**, not 2.
-    Electron capture's 1.26 M☉ is also section 3. Belczynski et al. (2016, A&A 594, A97,
-    arXiv:1607.03116, section 3 and eq. 1, model M10) give 45–65 M☉ → 45 (1 − 0.1) = 40.5 M☉ and
-    65–135 M☉ → nothing, and section 2 gives collapse from 135 M☉.
-  - _Redraws._ MM20 redraw out-of-range masses. The one normal is mapped through the quantile of
-    the truncated normal instead: the same distribution, one draw, monotone in the draw (tested
-    against a rejection sample). A black hole of partial fallback is also held below its helium
-    core, the mass of complete fallback. MM20 print no such bound, but COMPAS, where they
-    implemented the recipe, applies it (`GiantBranch::CalculateFallbackBHMassMullerMandel`, `dev`
-    branch). MM20's models span M_CO ≈ 1.4–9 M☉ (their Fig. 1); complete fallback above that is
-    their rule carried on.
-  - _The envelope and the total mass do not enter._ MM20 take any hydrogen envelope to be unbound,
-    so T18.d need pass neither.
-  - _m_cc(Z)_ is bisected on `m_c_bagb` over 0.1–100 M☉ to adjacent doubles. It is the lowest
-    double reaching 2.25 M☉, the early AGB's own test, and matches eq. 66 inverted by hand to
-    10⁻¹⁴. It is 8.203 M☉ at Z = 0.02, 8.32 at 0.03, 6.83 at 10⁻⁴, and lowest, 6.72, near
-    3 × 10⁻⁴. Both windows lie in the oxygen–neon band (a core of at least 1.88 M☉ at the base of
-    the AGB) at every Z.
-  - **For the orchestrator to rule: the window's mass.** m_cc is found at constant mass. On
-    `starA`'s tracks main-sequence winds lower the mass `m_c_bagb` reads (HPT section 7.1), so iron
-    cores begin at m0 = 8.305 M☉ at Z = 0.02 (6.836 at [Fe/H] = −2.3). An initial-mass window
-    [8.103, 8.203) then leaves a 0.1 M☉ gap of stars that neither capture electrons nor make iron
-    cores. The track runs them through HPT's own electron capture, 2.2% of an 8–150 M☉ sample.
-    Recommended: T18.d tests the window against the mass the track's `m_c_bagb` reads, so that the
-    window meets the iron cores.
-  - **For the orchestrator to rule: the stripped window and design note 11.** Note 11 draws the
-    companion-stripped mark only for stars of 8 M☉ or more, but the stripped window [m_cc − 1,
-    m_cc) lies below 8.2 M☉ at every Z, so it would be nearly empty. Recommended: T19.c draws the
-    mark from m_cc − 1.0 M☉, where the widest window begins.
-  - _Also for the orchestrator._ MM20 use 1.38 M☉ in place of M_Ch in eq. 75, which the track does
-    not; that moves only M_CO below M₁, where the neutron star is 1.2 M☉ either way. The 40.5 M☉
-    black hole carries Belczynski's 10% neutrino loss while MM20 neglect it, so the black hole of
-    a 44.9 M☉ helium core is 44.9 M☉ and that of 45.0 is 40.5, a step design note 10 accepts.
-    T19's `ec_window_single` and `ec_window_stripped` must read `SINGLE_STAR_WINDOW` and
-    `COMPANION_STRIPPED_WINDOW`, so that there is one copy.
-  - _Population tests left to T18.d._ The 38 ± 5% black holes, 70–80% complete fallback and 2–6%
-    electron captures need real cores. The one stand-in in the tree, HPT's constant-mass cores
-    (eqs 66 and 75), passes them (36.9%, 75.0%, 2.6%), but for its own reasons. It puts solar
-    stars above about 80 M☉ into pair instability and overstates complete fallback. A forecast on
-    `starA`'s tracks (a scratch run, not committed; 3 × 20,000 Kroupa stars at Z = 0.02, η and
-    the remnant draws drawn, tracks capped at 100 M☉) gives 36.4–37.2%, **70.3–70.9%** and
-    2.4–2.6%. So T18.d's complete-fallback test sits one sampling σ above its floor: stars of
-    23–56 M☉ end on a Wolf–Rayet plateau of M_CO 6.0–8.1 M☉, short of M₄.
-  - _Tests._ The type is monotone in the draw and in M_CO. The shares follow both linear
-    probabilities (χ², α = 10⁻³). Neutron stars lie in 1.13–2.0 M☉ at |z| up to 40, and follow
-    the three branches' mean and σ. Black holes of 2–5 M☉ exist, and partial fallback lies between
-    2.0 M☉ and the helium core. The pair-instability ranges are closed below. m_cc and the windows
-    are checked at 41 metallicities.
-  - _Outside `collapse.rs`._ The `pub mod collapse;` line is appended to `remnant/mod.rs`. Three
-    `expect` attributes that the new public code leaves unfulfilled are removed: on
-    `CompactRemnant::new`, on `ZCoeffs::b` and on the `m_c_bagb` re-export. `starA`'s tree already
-    removes the first two.
-- **Deviations in T10.c–e, as built (round 7, `starA`).**
-  - _API._ `stellar::sse::{Track, TrackOptions, Bridges, MIN_INITIAL_MASS, MAX_INITIAL_MASS,
-evolve, lifetime, turn_off_mass}`, with `evolve` and `lifetime` re-exported as `stellar::{evolve,
-lifetime}`. `Track::{to_age, full, to_age_with, full_with, state_at, lifetime, death, remnant,
-max_radius_until, max_luminosity_until, built_until, initial_mass, composition, options}`. The
-    `_with` forms take `TrackOptions` (wind recipe, remnant recipe and `Bridges::{Physical,
-Instant}`); `TrackOptions::hurley2000()` is T12.b's (both HPT recipes, no bridges).
-    `pub(crate)`: `Track::pulse_phase_at` (T8.b's cumulative pulses, for T24.b and T28.f, with
-    their dead-code expectation) and `track::lifetime_of`. `window_where` is T24's and not built.
-    `stellar::remnant` gains `Death`, `DeathKind` (with `ThermonuclearDisruption`, carbon ignition
-    in a degenerate core that leaves nothing), `ProgenitorAtDeath`, `Stripping` and
-    `SupernovaType`, and the `pub(crate)` modules `white_dwarf` (HPT eq. 90) and `neutron_star`
-    (eq. 93), which both recipes use until T20 and T21 (ruling 33). `stellar::sse::envelope` holds
-    HPT §6.3's perturbation (eqs 97–105), which ruling 29 makes a requirement.
-  - _The knot coordinate_ (ruling 40). The main sequence and the helium main sequence keep design
-    note 1's τ grid (16 knots). From the Hertzsprung gap on, knots sit at fixed values of u = 1 − (1
-    − x)(1 − y): x is the phase's progress, in time for the gap, core helium burning and the
-    thermally pulsing AGB and in core mass on the giant branches, and y is the share of the entry
-    envelope lost. The 16 knots (32 on the pulsing AGB) are clustered as 1 − (1 − k ÷ (n − 1))³,
-    and each interval is integrated in u from the state reached, so the coordinate is still fixed
-    before any query. Fixed fractions of the phase's time stall on massive stars'
-    luminous-blue-variable bursts, which strip an envelope in a sliver of the phase, and at the
-    giant-branch tip. Offsets in log L and log R decay over the first 2% of a phase where HPT's
-    formulae step: the core's appearance at a massive star's gap, the second dredge-up, and an
-    early-AGB star whose remnant is still passing to the helium giants.
-  - _The initial mass in the gap is frozen_ at the main sequence's end (ruling 40). HPT ask that
-    it follow the current mass; the effect on any age is under 10⁻⁴.
-  - _SSE's forms, by ruling 40._ `R_mHe` at the initial mass above `M_FGB` (`gb::IgnitionRadius`;
-    the current-mass form keeps 25 M☉ of a 60 M☉ star at Z = 10⁻⁴). The supernova core is held to
-    at least 1.05 × `Mc,CO`(`t_BAGB`), while printed eq. 75 still decides supernova against
-    pulses (ruling 29 amended). A helium star's carbon–oxygen white dwarf has the star's whole
-    mass, because HPT say only that the star "becomes a CO WD". Below 0.689 M☉ that leaves the
-    unburnt helium on the dwarf, and the luminosity steps at the hand-over by log₁₀(M ÷ (1.45 M −
-    0.31)), as in SSE: 0.26–0.34 dex for the lightest helium star that burns helium. The step is
-    at the death, which the continuity tests exclude, but P06.T16's bridge will not remove it.
-    The early AGB's remnant passes from the end of the helium main sequence to the helium giants'
-    relation over the first third of the early AGB's own span, where SSE uses a third of its
-    nuclear time; this is provisional, for T12.b to decide. HPT's eq. 90 cools white dwarfs with A
-    = 4, 15 and 17 (ruling 33). A black hole's luminosity is exactly zero, and
-    `StarState::luminosity` says that no consumer may take its logarithm unguarded. Inside the
-    track, the only logarithms of L are of living phases.
-  - _Seams._ `phases::collapse_remnant` is P06.T18.d's: HPT's remnant stands in under both recipes
-    until then. `evolve` is where P06.T13's `substellar::cooling` takes over below 0.1 M☉; until
-    the orchestrator wires it (ruling 33), masses below 0.1 M☉ are evaluated at 0.1. The AGB hands
-    straight to the white dwarf until T16, and that step is declared to the continuity test, as are
-    the unbridged flash of `Bridges::Instant` and a helium star too light to burn helium. SSE turns
-    such a star into a helium white dwarf at once (`zpars(10)`, 0.31–0.35 M☉), and HPT do not print
-    the rule.
-  - _Supernova types._ IIP above 2 M☉ of hydrogen envelope, after Heger et al. (2003, §4.1 and
-    Fig. 2), who assume that split. IIL from 0.1 M☉, the plan's default. IIb below that, Ib above
-    0.14 M☉ of helium outside the carbon–oxygen core, and Ic below. The 0.14 is the top of the
-    0.06–0.14 M☉ that Hachinger et al. (2012, §4.3) find can hide in low-mass SNe Ic, extrapolated
-    to heavier cores. **For the orchestrator to rule:** the 0.1 M☉ IIb bound matches SN 2011dh's
-    envelope of about 0.1 M☉ (Bersten et al. 2012), but it calls the prototype, SN 1993J, Type IIL:
-    its envelope was 0.20 ± 0.05 M☉ (Woosley et al. 1994).
-  - _Dead code._ T10 made the phase modules' blanket expectations unnecessary, and they are gone.
-    What only tests call is now `#[cfg(test)]`: the constant-mass `at` of the gap, the giant
-    branch, core helium burning and the pulsing AGB, `l_zahb`, `r_zahb`, `t_hook`,
-    `GiantBranch::{m_x, l_x}`, `HeliumStar::{from_core_helium_burning, end, phase_at}` and
-    `ReimersEta::HURLEY`. Accessors that nothing calls are removed, and so is `r_mhe_low`, whose
-    wrapper had no caller. `agb::interpulse_period` keeps an expectation naming T28.f.
-    `DegenerateCore::Helium` is now what the track builds helium white dwarfs from.
-  - _Tests._ They are as the task lists. Added: finiteness over 120 random tracks under both
-    recipes (ruling 30), a helium star's whole-mass white dwarf, and the envelope's loss continuous
-    to 1% in L and R. The lifetime-in-mass sweep runs 2 metallicities × 60 intervals in the fast
-    suite (2.5 s) and 5 × 400 as a slow test. Slow tests, at the slow-test profile, one thread
-    each, load 5–7: 200 random tracks × 2 recipes × 2,000 ages continuous, 8.4 s; 10⁵ life and
-    death inputs, 228 s; 10⁴ fast lifetimes equal to the full track's bit for bit, 28 s; the 5 × 400
-    sweep, 54 s. All pass.
-  - _Against SSE_, run with `evolve.in`'s options changed as ruling 26 asks and steps a hundred
-    times finer (`pts` × 0.01), over the 16 masses × 5 Z. Phase-start ages agree to 9.5 × 10⁻⁵,
-    except a 0.1 M☉ helium white dwarf's 8.1 × 10⁻⁴ at 7 × 10¹² years. Masses at phase starts agree
-    to 0.85%, the worst at 1 M☉ on the pulsing AGB, where SSE's own steps jitter by ±0.3%. Cores at
-    phase starts agree to 9.5 × 10⁻⁴ and remnant masses to 5.3 × 10⁻⁴ M☉. Three routes differ, each
-    by a sliver of a phase: 47 years of core helium burning (60 M☉, Z = 10⁻³), a pulsing AGB of no
-    length (0.8 M☉, Z = 0.004), and SSE's 160 years as a helium giant before the supernova (20 M☉,
-    Z = 0.03). Within phases, L and R at equal phase fractions differ by up to 1.7 dex, but only
-    where the state moves steeply with time. That is the gap of massive stars, whose LBV wind strips
-    the envelope in a burst, and the pulsing AGB's end. T12.a's samples must avoid those places.
-  - _Speed_ is a finding, not a failure (ruling 40). Measured on 2026-09-23 with the bench profile
-    (`benches/stellar.rs`) at load 2.3 rising to 5.2 and 2.9–3.0 GHz. `math::exp` took 6.9 ns
-    before the groups, the idle figure, and 18.1 ns after, once the load rose.
-
-    | Call                                   | Time             | `math::exp` calls | Target                          |
-    | -------------------------------------- | ---------------- | ----------------- | ------------------------------- |
-    | `lifetime`, 4 M☉ (layer D)             | 2.0 ms           | 295,000           | 5 µs                            |
-    | `lifetime`, 20 M☉ (layer E)            | 0.95 ms          | 137,000           | 5 µs                            |
-    | `Track::to_age`, 0.4 M☉ at 5 Gyr       | 10.7 µs          | 1,550             | 10 µs (a dwarf's `generate`)    |
-    | `Track::to_age`, 2 M☉ giant at 1.2 Gyr | 0.49 ms          | 71,000            | 60 µs (a giant's `generate`)    |
-    | `Track::full`, 1, 5 and 20 M☉          | 1.5, 1.8, 1.3 ms | 187,000–261,000   | 150 µs (a remnant's `generate`) |
-    | `state_at`, main sequence and AGB      | 0.20, 1.8 µs     | 28, 260           | —                               |
-
-    A second run at load 7–9 agreed to 10–40%. A dwarf meets its target, and every evolved track
-    misses by 8–12 times. `lifetime` misses by 200–400 times, because it integrates the same grid
-    as the full track and drops only the samples and the remnant, as it must to stay equal to it
-    bit for bit. Each derivative of the envelope integration evaluates the phase's closed forms,
-    the wind, and five core-mass or progress probes, and a track takes about a thousand of them.
-    Nothing on the slice's path calls `lifetime` in bulk. Plan 08's placement will, and its target
-    stays open until then.
-- **Deviations in T12, as built (round 7, `starA`).**
-  - _T12.a._ `crates/hyperion-sim/tests/data/sse/z{0.0001,0.001,0.004,0.02,0.03}.csv`, about 32 KB
-    each, with a provenance `README.md`. The run is SSE's `evolv1` with ruling 26's options, and
-    with steps a hundred times finer than distributed (`pts` × 0.01, ruling 40); the header and the
-    README give both step settings. A "phase change" is the first logged step of each SSE stellar
-    type, and the row of a remnant's type is the death. The plan's "20 samples along each track"
-    are steps at fixed fractions of a phase's time, not at ages, chosen from SSE alone. Candidates
-    sit at 0.05, …, 0.95 of each phase that lasts at least 10⁻³ of the lifetime. A candidate is
-    kept where log L and log R move by at most 0.05 dex across ±1% of the phase, and where SSE's
-    run at ten-times-coarser steps agrees to 0.005 dex, so that SSE is converged there. The
-    candidates are then taken round-robin over the phases. Of 6,327 candidates, 5,988 pass, and
-    every star has 20. Without the convergence filter, one early-AGB sample (20 M☉, Z = 0.03, at
-    0.40 of the phase, where item 4's blend ends) was 0.0205 dex off in R. There SSE's own R moves
-    by 0.075 dex between its two step settings, and its core moves towards ours.
-  - _T12.b._ `tests/sse_reference.rs`, on the public API only. Phases are matched by SSE's type,
-    with the helium Hertzsprung gap and giant branch merged. A phase lasting under 10⁻⁴ of the
-    lifetime may be missing from the other code; three are: 47 years of core helium burning (60 M☉,
-    Z = 10⁻³), a pulsing AGB of no length (0.8 M☉, Z = 0.004), and SSE's 160 years as a helium giant
-    (20 M☉, Z = 0.03). All 80 stars pass at the plan's tolerances. The worst deviations are:
-
-    | Quantity          | Worst           | Where                                  | Tolerance |
-    | ----------------- | --------------- | -------------------------------------- | --------- |
-    | Phase-start age   | 9.5 × 10⁻⁵      | core helium burning, 1 M☉, Z = 0.03    | 1%        |
-    | Lifetime          | 8.1 × 10⁻⁴      | 0.1 M☉, Z = 0.004                      | 1%        |
-    | Phase-start mass  | 0.76%           | early AGB, 20 M☉, Z = 0.02             | 1%        |
-    | Phase-start core  | 9.5 × 10⁻⁴      | Hertzsprung gap, 100 M☉, Z = 0.02      | 1%        |
-    | log L at a sample | 2.8 × 10⁻³ dex  | core helium burning, 0.8 M☉, Z = 0.004 | 0.02 dex  |
-    | log R at a sample | 1.07 × 10⁻² dex | core helium burning, 0.8 M☉, Z = 0.004 | 0.02 dex  |
-    | Remnant mass      | 5.3 × 10⁻⁴ M☉   | black hole, 40 M☉, Z = 10⁻⁴            | 0.02 M☉   |
-
-    Every remnant is of SSE's kind. **Ruling 29's two SSE artefacts do not arise with the wind:**
-    both 60 M☉ stars (Z = 10⁻⁴ and 10⁻³) lose their envelope in the gap and never reach the AGB,
-    in either code. A test keeps that true, and no point is exempted. Ruling 40's item 4, the early
-    AGB's remnant blend over a third of the phase, passes the tolerance and stands.
-
-  - _T12.c._ The initial–final mass relation of HPT's Fig. 18 was read from the journal's 799-dpi
-    bitmap to about ±0.003 M☉: 17 points at Z = 0.02 and 16 at 0.004, from 1.25 to 7.5 M☉. Under
-    `TrackOptions::hurley2000` the tracks agree to 0.0025 M☉ (the plan asks 0.05). Under the
-    generator's recipes, at [Fe/H] = 0 and 0.85–7.2 M☉ in 0.05 M☉ steps, the white dwarfs follow
-    Cummings et al.'s (2018, ApJ 866, 21) adopted MIST fit, eqs. 4–6, to 0.08 M☉ (design note 9).
-    The worst is +0.069 M☉ at 7.2 M☉, and −0.05 M☉ near 1 M☉, within their 0.06 M☉ scatter.
-    HPT tabulate no main-sequence lifetimes. Their Fig. 5 plots Pols et al.'s detailed-model
-    `t_BGB` at Z = 10⁻⁴ and 0.03, which eq. 4 fits to 4.8%. `ms::t_bgb` agrees with 24 of those
-    models, 0.5–4 M☉, to within 4.3%, and the test (`sse::evolve`'s unit test, since `t_bgb` is
-    crate-private) allows 0.03 dex. Above 4 M☉ the two metallicities' markers overlap. The model
-    near 0.63 M☉ is left out, because its mass would need three digits at log t ∝ −3.7 log M.
-  - `cargo test -p hyperion-sim --test sse_reference` takes 0.45 s, so it is not marked slow.
-- **Deviations in T23 and T20.b, as built (round 7, `class`).** Built without the T24/T25 extras (ruling 33). The integrator (T10.c–e) was another lane's, so every test builds its `StarState`s directly.
-  - _Files and API._ Besides `classify/{mod,pm13,luminosity}.rs` and `photometry.rs`, there are four new files:
-    - `classify/sk81.rs` holds the class boundaries' source table.
-    - `classify/scales.rs` holds the giant and supergiant temperature scales.
-    - `remnant/wd_spectral.rs` holds T20.b. It is not `white_dwarf.rs`, which `starA` owns.
-    - `tests/stellar_classify.rs` writes a new golden, `stellar/classify`.
-
-    `remnant/mod.rs` gains one `pub mod wd_spectral;` line, and the sim's `clippy.toml` gains one word, `McElroy`, in its list of valid identifiers.
-    - `classify` takes `(&StarState, &Composition, &StarDraws, &ClassExtras)`. `ClassExtras` is an empty `#[non_exhaustive]` struct: `ClassExtras::NONE` is its only value, and `classify` destructures it, so a field added by T21, T24 or T25 fails to compile until it is read. `PeculiarClass` is an uninhabited enum, so `Classification::peculiar_class()` is always `None`, and the `Display` match on it is empty.
-    - Added: `SpectralLetter`; `SpectralCode`, the continuous code, ten per class with O0 at 0, written to the nearest half subtype, half up; `NeutronStarClass`; and `subtype_from_teff(Kelvin) -> Option<SpectralCode>`.
-    - `LuminosityClass` names its variants (`Hypergiant` for Ia⁺ through `Dwarf` for V) and adds `Subdwarf` and `ExtremeSubdwarf`, written as prefixes. The Ia⁺ class is written `Ia+`.
-    - `SpectralType` is `Sequence(SpectralCode)`, `WhiteDwarf(WhiteDwarfType)`, `NeutronStar(NeutronStarClass)`, `BlackHole` or `NoRemnant`.
-    - Photometry: `bolometric_correction_v(Kelvin)`, `colour_b_v(Kelvin)` and `absolute_magnitude_v(&StarState)` each return `Option<Magnitudes>`. Also added: `absolute_bolometric_magnitude` and `SOLAR_ABSOLUTE_BOLOMETRIC_MAGNITUDE`.
-
-  - _T23.a._
-    - The table is Mamajek's maintained version 2022.04.16, whole: 118 rows from O3V to Y4V, SHA-256 in the header. The alternative was Table 5 (O9V–M9V) with the extension stitched on. The version differs from Table 5 by up to 700 K (O9V), and its BC_V is on the IAU 2015 scale (−0.085 for the Sun).
-    - Interpolation is linear in log T_eff, and the tables are checksummed. The Sun reads G1.98, written G2V, with M_V = 4.825.
-    - BC_V is tabulated down to L5V and B − V down to M9V; cooler objects get `None`.
-    - Above O3V, BC_V follows the Rayleigh–Jeans slope of 7.5 mag per dex, and B − V is held. From 45 to 150 kK this falls within 0.1 mag of the Montreal DA models' fall in BC_V.
-    - White dwarfs, neutron stars and black holes get no M_V. The dwarf table's BC_V is 0.6–3.3 mag off the Montreal DA models from 4,000 to 3,000 K.
-  - _T23.b._ The plan asks for log g boundaries throughout. They are used only between V, IV and the rest.
-    - III, II, Ib, Iab and Ia are separated by luminosity at the star's temperature. The source is Straižys and Kuriliene (1981), whose Tables III, IV and VII were transcribed and cross-checked by their own formula for log g to 0.045 dex.
-    - The reason: their class III gravities are those of 2.1–3.5 M☉ tracks. On log g alone, Arcturus-like giants (4,300 K, log g 1.7) would read II, which fails the plan's own test.
-    - Ia⁺ uses the Humphreys–Davidson limit in HPT's form, as the winds do.
-    - The tie rule extends to the AGB: a core-helium-burning or AGB star is at least III.
-    - Subtype scales:
-      - V is exact on the dwarf scale.
-      - III: Martins et al. (2005) for O; the dwarf scale times Zorec et al.'s (2009) III/V ratio for B–A1; the dwarf scale for A2–F5; a log T_eff bridge from F5 to G5; van Belle et al.'s (2021) fit for G5–M5.5; and Richichi et al. (1999) for M6–M9.
-      - The supergiant scale (Ib, Iab, Ia and Ia⁺ share it): Martins for O; Markova and Puls (2008) for B0–B7; Firnstein and Przybilla (2012) for B8–A3; Humphreys and McElroy (1984) for F–G; Levesque et al. (2005) for K1–M5; then parallel to the giants.
-      - IV and II take the subtype halfway between their neighbours' at the star's temperature.
-      - Giants and supergiants are typed no later than M9.5.
-    - de Burgos et al.'s (2024) B supergiants were set aside: they run 1–1.3 kK hotter at B1–B2 and would put those supergiants above the giants.
-  - _T23.c._
-    - sd and esd are classes, with the plan's [Fe/H] thresholds of −1.0 and −1.7. These have no source: Lépine et al. (2007) define the classes by TiO/CaH, not [Fe/H]. They apply to main-sequence dwarfs of class V only.
-    - L, T and Y are written without a class. Every neutron star is `NS`.
-    - `NoRemnant` is written `NONE`.
-  - _T20.b._
-    - The helium-atmosphere fraction follows the measurements and is not monotone. It is held at 24% above 75 kK, the share Bédard et al. (2020) find "born with hydrogen-deficient atmospheres"; their 87% above 90 kK is only hydrogen-rich stars crossing those temperatures faster. It falls to 8% at 30 kK (their Fig. 19), then rises to 32% at 5.5–7 kK (Kilic et al. 2025, Table 4). Reversals are pooled.
-    - As a result, above 29,854 K a helium-rich star can float up to DA. The plan's test ("never back to DA") is asserted from there down.
-    - The DB/DC boundary is set at 11,000 K instead of 12,000, where Kilic's DBs give way.
-    - The DQ fraction peaks at 38% (8–9 kK) and falls, where the plan had it rising.
-    - Metal lines use the 40 pc census's optical rates, constant with age: 8.0% of DAs and 15.8% of the rest (O'Brien et al. 2024). The plan asked for 0.25–0.5 by cooling age, which is Koester et al.'s (2014) intrinsic rate, measured in the UV. It would triple the DAZ fraction against every census, and O'Brien et al. find no trend with cooling age.
-    - The census test uses uniform ages over 0–9 Gyr on the Montreal 0.6 M☉ DA sequence and is cut at 5,000 K, where the censuses are complete. It gives DA 70.2%, DC + DQ + DZ 28.5% and DB 1.2%. The DB bracket was 2–10%, below every measured sample (1.1–2.0%), and is corrected to 1–3%.
-  - _Known limits, for T24, T25 and plan 07._
-    - Helium stars and hot central stars are typed by temperature alone (a 90 kK helium star reads O3V) until T24.a.
-    - Luminous low-mass AGB stars read II by their luminosity: the Mira-like case reads M8II, where catalogues give M7 III.
-    - BC_V is the dwarfs' at every gravity, so a late M giant's M_V is up to 1.7 mag too bright (Straižys and Kuriliene 1981, Table III, at M6 III).
-- **Deviations in T33, as built (round 7, `wire`).** Built in one change with P11.T13's slice and
-  P14.T35.a, in a new private module `stellar.rs` beside `orbit.rs` and `planetary.rs`, their types
-  re-exported at the crate root as every module's are; `envelope.rs` and `galaxy.rs` gain the kind,
-  the error codes and the two optional range fields.
-  - _The field set._ `SystemSummaryDto`: `universe`, `system`, `time`, `existence`
-    (`SystemExistenceDto`: `not_yet_born`, `exists`), `age_myr`, `fe_h_dex`, `stars` and plan 11's
-    `hierarchy`. `StarSummaryDto`: `body_index`, `kind`, `phase` (`PhaseDto`, one value per
-    `Phase`), `class`, `initial_mass_msun`, `mass_msun`, `core_mass_msun`, `luminosity_lsun`,
-    `radius_rsun`, `teff_k`, `absolute_v_mag`, `colour_b_v_mag`, `mass_loss_rate_msun_per_yr`,
-    `remnant` and `death_time`; then, absent until their tasks land, `rotation_period_d` and
-    `activity_log_lx_lbol` (T25), `variability` (T26), `planetary_nebula` (T16) and
-    `active_events` (T28). `age_myr` and `initial_mass_msun` are not in the task's list: T29.b
-    computes both, and the `SYSTEM` display shows them at times other than the chart row's.
-    `body_index` and `hierarchy` are required, since they land with the kind and no older form
-    exists.
-  - _Three states per value._ Absent: this generator version does not compute it (ruling 34's
-    single value, the em dash). `null`: computed, and the object has none, plan 04's convention for
-    an `Option`. Otherwise the value. A value that is absent now and can be `null` once computed (a
-    star that does not vary, one with no nebula) is the new `hyperion_protocol::Modelled<T>`
-    (`NotModelled`, `Null`, `Value`), with hand-written serde impls and
-    `#[ts(as = "Option<Option<T>>", optional)]`, so TypeScript reads `name?: T | null`; Clippy's
-    `option_option` ruled out a bare `Option<Option<T>>`. One that always has a value once
-    computed is a skipped `Option`. **For the orchestrator to rule.**
-  - _`RemnantDto`_ is tagged by `type`: `white_dwarf { cooling_age_myr, natal_kick? }`,
-    `neutron_star { pulsar?, natal_kick? }`, `black_hole { dimensionless_spin?, natal_kick? }`,
-    `no_remnant`. The white dwarf's type is not repeated: it is the star's `class`, where T23 and
-    T20.b write Sion's type (`DA4.2`), and its composition is the `phase`. `PulsarDto` is
-    `spin_period_s`, `period_derivative_s_per_s`, `magnetic_field_g`, `alive` and `magnetar`;
-    `NatalKickDto` is `speed_km_s` and `KickModeDto` (`ordinary`, `low`, `fallback_none`,
-    `white_dwarf`).
-  - _Shapes for later tasks, fixed now from their text._ `VariabilityDto` is `kind`, `period_d` and
-    `amplitude_mag` (peak to peak, V), with `VariableKindDto` holding the 21 kinds T26.a–c name;
-    `PlanetaryNebulaDto` is T16.b's `radius_ly`, `expansion_speed_km_s`, `age_yr`,
-    `ionised_mass_msun` and `excitation_class`; `StarEventDto` is `kind` (`StarEventKindDto`,
-    T28's seven), `onset` and `duration_s`, and T28 adds each kind's magnitude, and the event ID if
-    plan 12 needs it, as fields. Activity is log₁₀ L_X ÷ L_bol, the quantity T25's Rossby law
-    gives, since `ActivityLevel` has no shape yet.
-  - _Light-less objects._ `StellarBriefDto`'s `log_luminosity_lsun` and `teff_k` are
-    `Option<f32>`, `null` for a black hole and for `NoRemnant`: log₁₀ 0 is −∞, which `serde_json`
-    writes as `null` and cannot read back as an `f32`. `StarSummaryDto.teff_k` is `null` for them
-    too, rather than the sim's 0 K.
-  - _Radii of neutron stars and black holes_ stay `radius_rsun` on the wire, one field in one unit
-    for every object; ruling 36's km is the client's scale step. **For the orchestrator to rule**,
-    against a `radius_km` on those remnants.
-  - _`include_stellar`_ is a `bool` with `serde(default, skip_serializing_if = "std::ops::Not::not")`
-    and `ts(as = "Option<bool>", optional)`, since ts-rs's `optional` takes only an `Option`. A
-    request of plan 04's form parses as `false` and serialises unchanged, and a row without a brief
-    has no `stellar` key. Until T34 the server ignores the flag and every row's `stellar` is `None`,
-    which a test in `convert.rs` pins so that T34 changes it knowingly.
-  - _Server._ `Handlers` answers `system_summary` with `unsupported` under its own ID
-    (`not_served_yet`), `kind` names it, and `is_large` puts it with the small responses;
-    `tests/websocket.rs` checks the answer and that the connection carries on.
-  - _Error codes._ `unknown_system` and plan 14's `unknown_body` both land here, after
-    `unknown_universe`, with their `settledState` cases and a hook test, and both join
-    `RequestStatus.tsx`'s `REFUSALS` (a set, not an exhaustive switch, so nothing failed to
-    compile), which would otherwise have read them as faults. Both files are the `ui` lane's.
-  - The server's `galaxy_parameters` and `systems_in_range` goldens are unchanged
-    (`golden_diff.py`: "No golden files changed").
-- **Deviations in T18.d, T20.a and T29, as built (round 7, `model`).** No existing golden moved.
-  Three goldens are new at 11: `stellar/summaries`, `stellar/endings` (T18.d's and T20.a's endings
-  on real tracks, bit for bit) and `stellar/white_dwarf_cooling`. **Ruled (ruling 57):** the
-  version stays 11, as `SYSTEM-VIEWER-PATH.md` §3 has it ("land T20.a before T29.b's goldens and it
-  costs no bump"). But the default recipe's `Track` output does move: white-dwarf luminosities, the
-  §6.3 perturbation's target, iron-core remnants, and the IIb bound. Through the perturbation's
-  target, the wind also moves the lifetimes and white-dwarf masses of stars with thin envelopes. No
-  golden at HEAD pinned any of it, and nothing seeded read it; ruling 33 had expected a bump.
-  - _T18.d's wiring._ The builder carries the star's `RemnantDraws`. Every iron-core death (the
-    early AGB's supernova and an oxygen–neon helium star's) goes through `phases::iron_core_fate`:
-    HPT's equation 92 under `Hurley2000`, so T12.b is untouched, and `collapse::core_collapse` under
-    `MandelMuller2020`. A neutron star or partial fallback keeps `CoreCollapse { supernova }`;
-    complete fallback and pulsational pair instability are `DirectCollapse`; a pair-instability
-    supernova is `PairInstability` with `NoRemnant`. The fate records the supernova type, so that
-    `Track::fate_with(RemnantDraws)` redraws the remnant on the built track (T29's remnant stage,
-    which plan 08 repeats). The single-star window is tested at the end of the thermal pulses on the
-    early AGB's initial mass, the mass `m_c_bagb` reads (ruling 45): inside it the star collapses
-    by electron capture into the 1.26 M☉ neutron star however its pulses end. At Z = 0.02 that is
-    [8.103, 8.203) M☉ in that mass, about [8.20, 8.30) M☉ initially, and it meets the iron cores
-    with no gap. The windows are found only when a star reaches the pulses' end. The stripped
-    window waits for T19.c's mark: the track never sets `Stripping::Companion`.
-  - **Below the window. Ruled (ruling 57).** On the tracks as built, the pulses of stars 0.13 M☉
-    (Z = 0.02) to 0.34 M☉ (Z = 10⁻⁴) below the window grew oxygen–neon cores to `Mc,SN` = 1.44 M☉
-    with up to 5.9 M☉ of envelope still on. That left 1.44 M☉ dwarfs at the neutron-star radius
-    floor, 2.0–2.2% of an 8–150 M☉ sample. Under the default an oxygen–neon white dwarf is now
-    capped at `collapse::OXYGEN_NEON_CAPTURE_MASS`, 1.37 M☉. That is the electron-capture mass of
-    Miyaji et al. (1980) and Nomoto (1984), about 1.375 M☉. Outside the window the AGB ends when the
-    core reaches the cap, on the thermal pulses or, where `Mc,DU` is already above it, on the early
-    AGB, and the envelope goes then. This follows Doherty et al. (2015, MNRAS 446, 2599): a
-    super-AGB star below the window loses its envelope first. `Hurley2000` keeps HPT's electron
-    capture there. Over 5–9 M☉ at five metallicities the heaviest white dwarf is exactly 1.37 M☉,
-    at 0.002 96 R☉ (2,062 km), against the floor's 1.75 × 10⁻⁵ R☉; 125 of the scan's dwarfs sit at
-    the cap. A test holds that no dwarf passes the cap or comes within 20 times the floor. The
-    three shares and T12.b are unchanged. In `stellar/endings` the rows of 7 and 8.1 M☉ at Z = 0.02
-    moved, and no other golden did. At 7 M☉ the shorter span of the pulses moves the knots: the
-    death comes 530 years earlier and the dwarf is 6 × 10⁻⁵ M☉ lighter. At 8.1 M☉ the 1.44 M☉
-    dwarf becomes 1.37 M☉.
-  - _Shares on real tracks_ (Kroupa 8–150 M☉ at Z = 0.02, own η and remnant draws, tracks held to
-    100 M☉ until T14, 20,000 stars). Seed `0x0618d00000000001`, which the slow tests use, gives 35.98%
-    black holes, 71.59% complete fallback and 2.68% electron capture. Seeds 2 and 3 give
-    36.37–36.67%, 70.39–70.87% and 2.52–2.70%. All are in band: complete fallback sits 0.4–1.6
-    points above its floor, as the forecast said. Neutron stars span 1.132–1.997 M☉, and 1,661
-    black holes are of 2–5 M☉. The tests are slow, 20 s each at the slow-test profile.
-  - _The IIb bound is 0.5 M☉_ (ruling 46.1). It is the upper end of the envelopes inferred for SNe
-    IIb, from Sravan, Marchant and Kalogera (2019, ApJ 885, 130, §2.3): ≲ 0.5 M☉ for every one with
-    a detected progenitor (1993J, 2011dh, 2011fu, 2016gkg), and below it for larger samples.
-    SN 1993J (0.20 ± 0.05 M☉), 2011dh (about 0.1) and Cas A (a 1993J twin by its light echo, Krause
-    et al. 2008) are IIb. The lower bound stays zero. The sample gives 90.9% IIP, 1.0% IIL, 3.4%
-    IIb, 4.7% Ib and no Ic, as single stars should.
-  - _T20.a._ `white_dwarf::{hurley_shara_luminosity, luminosity, formation_luminosity,
-cooling_origin}`, with the paper's 300, 1.18 and 6.48, the 9,000 Myr break, and HPT's A of 4, 15
-    and 17 (HS03's 20:80 C:O and 80:20 O:Ne give 15.2 and 16.8). The late factor is SSE's
-    (9,000.1 A)^5.3, because the printed (9,000 A)^5.3 leaves a 6 × 10⁻⁵ step at 9 Gyr. §6.3's
-    perturbation reads the recipe's law at t = 0, as SSE does with `wdflag` > 0. Under the default,
-    the law's clock starts where it gives the star's last luminosity, above −0.1 Myr, so L is
-    continuous at every hand-over. **Ruling 46.2:** the light helium stars' 0.26–0.34 dex step is
-    therefore gone now, at T10.d's direct hand-over, and not only once T16 lands. The oxygen–neon
-    dwarfs' 0.06 dex step goes with it, and only the radius still steps. `Hurley2000` keeps both
-    steps; a test shows each. When T16 lands, the match moves to the bridge's end.
-  - **The 10% check fails.** Against Bédard et al.'s (2020) 0.6 M☉ thick-H sequence (the Montreal
-    `seq_060_thick.txt`), Hurley and Shara's T_eff is within 10% only at 0.01–0.02 Gyr and 2–3 Gyr.
-    It is 13–20% cool from 0.05 to 1 Gyr and 11–17% cool from 5 to 10 Gyr, worst −20.0% at 0.2 Gyr.
-    Equation 90 is 9–45% cool. The test pins these deviations and that the law beats equation 90 at
-    all 13 ages; it does not claim the plan's bracket. **Ruled (ruling 57):** HS03 stands
-    provisionally, with these deviations pinned; a fit to the Montreal sequences replaces it in
-    version 12's batch.
-  - _T29.a._ `stellar::system::{StarModel, BuildStarModelError, MAX_STAR_MASS}`. It has
-    `StarModel::new(m0, Composition, StarDraws, age_at_epoch) -> Result` for 0.01–150 M☉. It also
-    has `state_at(t) -> Option<StarState>`, `None` while the age is not positive, as
-    `existence_at` has it. The remaining methods are `lifetime()`, `death()` and `remnant()`, each
-    an `Option` that is `None` below 0.1 M☉; `max_radius_until(t)` and `max_luminosity_until(t)`,
-    zero before formation; `natal_kick()`, `None` until T19; and `age_at(t)`, `initial_mass()`,
-    `composition()`, `draws()` and `age_at_epoch()`. The track is built to `age_at(+H)`. A star
-    living past +H finds its death on demand by `sse::fate_of`, which is `Track::full`'s bit for
-    bit and costs a whole build, 1–2 ms for an evolved star. Stars above 100 M☉ are evolved at 100
-    until T14. `remnant::{NatalKick, KickMode}` are the Provides shape, with no law.
-  - _T29.b._ `SystemStars::{generate, record, stars, primary, summary_at, brief_at, death_time,
-natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
-    `SystemExistence`, `ClockDeath` and `object_kind`. `StarSummary` holds the state, `ObjectKind`,
-    classification (T23 with `ClassExtras::NONE`), M_V, B − V, the remnant once dead, and the death
-    if it falls in [−H, +H]. Variability, rotation, magnetism, nebula and events wait for their
-    tasks. `brief_at` is `None` before birth, and its log L is `None` where L = 0. `lbv_window` is
-    `None` until T24.a. `death_time` is `BeyondClockRange` for T past `i64` seconds (the lightest
-    dwarfs, whose lifetimes pass 2.9 × 10¹¹ years) and for objects below 0.1 M☉. `ObjectKind` for helium stars uses T24.a's floor of
-    10⁴·⁹ (Z ÷ 0.02)^−0.4 L☉: Wolf–Rayet above it, hot subdwarf below (and, since T24.c, a
-    stripped helium star below it above 1.7 M☉).
-  - _Tests._ 10⁵ random systems across the layers near the solar circle at random clock times hold
-    the brainstorm's property (a slow test; 400 in the fast suite).
-  - _Outside the owned files._ `remnant/mod.rs` gains `mod kick` beside the `class` lane's
-    `pub mod wd_spectral` (applied from `class-P06T23T20b.patch`, with its `McElroy` in `clippy.toml`
-    and its Risks bullet above). `sse/mod.rs` re-exports `fate_of`.
-- **P06.T35.b's registry, as built alone (round 7c, `ui`).** `lib/galaxy/starSymbols.ts` exports
-  `starSymbol(kind: ObjectKindDto): SymbolShape | null`, an exhaustive `switch` over the wire's 13
-  kinds (14 since P06.T24.c): circle for a protostar, pre-main-sequence star, dwarf, subgiant, hot
-  subdwarf, stripped helium star (T24.c) and `substellar` (a brown dwarf), ringed circle for a giant, supergiant and Wolf-Rayet star, diamond
-  for a white dwarf, triangle for a neutron star, square for a black hole, and `null` for
-  `no_remnant`, which is listed and not drawn (the owner's draft of the symbol set). `ObjectKind` is
-  the wire's `ObjectKindDto`; no client alias was added. `starSizeClass(shape, layer)` gives the mass
-  layer's class and raises a ringed circle to `RINGED_CIRCLE_MIN_SIZE_CLASS` (2), ruling 35.4's
-  floor, which a test pins for every layer. Its first caller is plan 14's orbit map; the chart's
-  `STARS` filter, legend entries and class column, `wire.ts`'s brief and `include_stellar` still wait
-  for P06.T34, which fills the brief. P06.T36's readout was built for the `SYSTEM` display's host,
-  not the chart's `SystemReadout` (plan 14's round-7c bullet), and its words (`objectKindLabel`,
-  `phaseLabel`, `remnantLabel`) are in `lib/system/words.ts` for the chart to reuse. Luminosity and
-  radius have their formatters, `formatLuminosityLsun` and `formatRadiusRsun` (three significant
-  figures, E notation below 0.001), with `KM_PER_RSUN` (695,700, IAU 2015 B3) and `formatRadiusKm` for
-  ruling 36's compact remnants, and their drawn units, `SolarUnit` (`L☉`, "solar luminosities";
-  `R☉`, "solar radii").
-- **Deviations in T34, as built (round 7, `srvstars`), without the range briefs.** The code is
-  `hyperion-server`'s `requests/system.rs` (`summary`), `convert/stellar.rs` (`SummaryRequest`,
-  `system_summary`, `unknown_system`, `orbit_dto`) and `compute/systems.rs` (`SharedSystemCache`).
-  `config.rs` gains `--system-cache` (`HYPERION_SYSTEM_CACHE_MB`, default 128 MiB), there is a new
-  `ServerStats::systems()`, and the README's table of options gains the row.
-  - _The cache._ It is a `SharedByteLru<(GalaxyKey, SystemId), SystemStars>`, with
-    `impl HeapBytes for SystemStars` through the sim's new `SystemStars::heap_bytes` (every track's
-    segments, knots and samples by capacity, and the hierarchy's lists). Measured charges: 10.6 KB
-    for a pair of living dwarfs, 16.2 KB for the pinned triple, 21 KB for a quadruple of dwarfs, and
-    30–80 KB where a star is a white dwarf with its whole track. So 128 MiB holds some 1,600–12,000
-    systems. Entries are epoch state, so a request at another time is a hit. A hit skips `resolve`,
-    since only IDs that resolved are stored. There is no `SingleFlight`: two concurrent misses both
-    generate, and the second insert replaces an equal value (`SharedByteLru`'s rule).
-  - _The order of checks_ is the universe, then `time` (plan 04's `query_time`: `bad_request`
-    naming `time`), then the ID, then the galaxy, then one interactive pool job. The job looks up
-    the cache, and on a miss resolves and generates, then summarises at the time and converts. The
-    small frame is serialised on the runtime. **For the orchestrator to rule:** a well-formed
-    16-digit `SystemIdHex` whose bits fail `SystemId::from_raw` is neither `resolve`'s refusal nor a
-    parse failure. It is answered `unknown_system` naming `system`, as the code's doc ("a
-    well-formed system ID that names no system") reads.
-  - _Wire rules (ruling 54)._ Rotation, activity, variability, a nebula, active events, a pulsar's
-    detail and a black hole's spin are absent. A natal kick is sent when the sim has one (none
-    before T19). `teff_k` is `null` where L = 0. A white dwarf's cooling age is its age less its
-    age at death. The hierarchy's nodes come from `SystemSummary::hierarchy`, empty before birth.
-    A star node's mass is its initial mass. An orbit's fields are `KeplerElements`' accessors, bit
-    for bit.
-  - _Not this round: `include_stellar`'s briefs._ A brief builds a track, 1–2 ms (ruling 46), so a
-    brief per row of a 20,000-system answer is seconds. The flag is accepted and every row still
-    has no `stellar`. `convert.rs` documents this, and its test is renamed
-    `a_request_for_briefs_gets_rows_without_them_until_the_integrator_is_fast`. The test "a range
-    request with `include_stellar` returns a brief on every row" waits with the briefs.
-  - _Tests._ `tests/system_summary.rs` holds five tests:
-    - four pinned systems (one to four stars) equal the sim's field by field, companions included,
-      at three times;
-    - P11.T13's triple returns three stars and two orbits, with the elements, μ = G ΣM and the
-      masses;
-    - `bad_request` naming `time`, and `unknown_system` naming `system`, for `u64::MAX` and for the
-      index after a cell's last candidate; a malformed ID is `bad_request`;
-    - a summary cancelled while its cold galaxy builds ends with exactly one terminal message:
-      `cancelled`, or the answer on a machine that finishes the build first;
-    - the same request twice gives the same frame, a miss then a hit, and a second universe of the
-      seed shares the entry.
-
-    There are unit tests for the conversion and the cache. `websocket.rs`'s "unsupported until its
-    handler lands" test, and `Handlers`' `not_served_yet`, are removed. The server's
-    `galaxy_parameters` and `systems_in_range` goldens are unchanged.
-- **T20.a refitted to the Montreal sequences, as built (round 8, `wdcool`; ruling 57.2).** Under
-  the modern recipe a white dwarf now cools by `stellar::remnant::cooling`, which reads
-  `tables/wd_cooling.rs`, the output of `hyperion-fit run wd_cooling` (task version 0).
-  - _Data and licence._ The input is the 23 thick-hydrogen (DA) sequences of Bédard, Bergeron,
-    Brassard and Fontaine (2020, ApJ 901, 93), 0.2–1.3 M☉ in steps of 0.05, from
-    <https://www.astro.umontreal.ca/~bergeron/CoolingModels/>, retrieved 2026-09-24. The page states
-    no licence. It asks users of its tables to acknowledge the site and cite the papers, and the
-    table's header does both. The raw files are therefore **not committed**. The fit reads them from
-    `crates/hyperion-fit/data/cache/montreal_cooling/` (moved by P15.T2, ruling 101.5) or `--data`,
-    and the header records their FNV-1a digest,
-    `0x632cda247f9d4def`. `hyperion-fit`'s reproduction test and residual test run only where the
-    files are present, and say so on stderr otherwise. The sim's own tests quote the held-out models
-    they check, as T20.a's first check quoted thirteen.
-  - _The fit._ For each sequence, the table holds log₁₀(t + 0.1 Myr) at 96 luminosities evenly
-    spaced over log₁₀ L = −7.5 to 2.5. That is the age as a function of the luminosity, which stays
-    gentle through a crystallised dwarf's Debye plunge, where L(t) does not. The values are least
-    squares for linear interpolation in log L, with a 10⁻⁶ curvature penalty. Every model whose
-    number is a multiple of 5 is held out. Past a sequence's brighter end the column goes on
-    straight. Past its fainter end, about 1,500 K, it follows Mestel's L ∝ t^−1.4. Carried on at
-    the last models' slope, a 1.3 M☉ dwarf would have been 46 dex fainter at 10 Gyr. A dwarf in the
-    Debye regime really fades faster than Mestel's law, so the extension bounds L from above. Between
-    sequences, the clock is linear in mass at fixed log L, and L(t) is that column inverted. Every
-    column falls strictly, so the inverse exists and L falls with age at every mass. **Residuals**
-    in log L at the models' ages: the 4,221 fitted models are within 0.009 dex (rms 0.0010); the
-    1,046 held-out models are within 0.028 dex (rms 0.0020), the worst being 1.05 M☉'s last model,
-    at 11.4 Gyr, in the Mestel extension.
-  - _The 0.6 M☉ check_ runs at all 35 held-out models of `seq_060_thick.txt` from 8.8 Myr to
-    10.2 Gyr, with T11's radius. T_eff is within 10% everywhere and within 5.5% at the worst,
-    +5.4% at 8.8 Myr. All of that is the radius: the young model is 1.11 times T11's cold radius,
-    and L is within 0.01 dex. The error is under 2.2% past 0.5 Gyr. Hurley and Shara's law was
-    −20% at worst. Luminosities at held-out models of 0.2, 0.45, 0.9 and 1.3 M☉ are within 0.02 dex.
-  - _Continuity in mass._ At 1 Myr–3 Gyr no step of 0.001 M☉ moves L by 0.015 dex. At 10 Gyr the
-    steps reach 0.12 dex, smoothly, between 1.10 and 1.15 M☉, where one sequence is still plunging
-    and the next has ended, below 2,000 K. Over 10⁻⁷ M☉ no step exceeds 10⁻⁴ dex, and L meets each
-    sequence at its mass. Interpolation itself was checked by holding whole sequences out, 0.1 M☉
-    apart, which is twice the table's spacing. Above 3,000 K it is within 0.05 dex from 0.45 to
-    0.95 M☉. It is off by 0.07–0.19 dex below 0.45 M☉ at 10–50 Myr, where the sequences start at
-    different luminosities, by 0.08–0.11 dex at 1.0–1.1 M☉, and by 0.3–1.8 dex at 1.15–1.25 M☉ in
-    the Debye plunge.
-  - _Where Montreal has no sequence._ **For the orchestrator to rule.**
-    - Helium and oxygen–neon cores read the carbon–oxygen table at their law time × A ÷ A_CO,
-      Mestel's heat-capacity scaling (Mestel 1952; the A of HPT §6.2.1 and HS03 §2). A is 4 for
-      helium, 16.67 for HS03's 80:20 O:Ne by mass, and 13.71 for Montreal's 50:50 C:O (the harmonic
-      mean, since the ions count). A helium dwarf therefore takes 3.4 times as long as a
-      carbon–oxygen one to reach a given L, and an oxygen–neon one 0.82 times as long. Both factors
-      come from the scaling alone. Detailed models agree in direction only: Althaus et al. (2013,
-      A&A 557, A19) for helium, mostly by residual hydrogen burning, and Camisassa et al. (2022,
-      MNRAS 511, 5198) for carbon–oxygen against oxygen–neon. Their sequences would do better, if
-      their terms allow.
-    - Masses outside 0.2–1.3 M☉ read the nearest sequence, which covers oxygen–neon dwarfs up to
-      the 1.37 M☉ cap.
-    - The law no longer reads Z. HS03's Z^0.4 was a fit, and the sequences take no progenitor
-      metallicity. They omit its small real effects: residual hydrogen burning at low Z (Renedo et
-      al. 2010) and ²²Ne sedimentation (Camisassa et al. 2016). So metal-poor dwarfs moved most: at Z = 0.001, +0.73 dex at 1 Gyr for a 1 M☉
-      star's dwarf.
-  - _The perturbation's target stays Hurley and Shara's law at t = 0._ **For the orchestrator to
-    rule.** This is `formation_luminosity`, 23 L☉ for 0.6 M☉. The Montreal sequences start where
-    their models were started (0.2 L☉ at 0.2 M☉, 56 L☉ at 0.6 M☉), not at formation, so they
-    cannot stand in. Every track is therefore unchanged up to its death. `cooling_origin` inverts
-    the new law at the star's last luminosity: a 0.6 M☉ dwarf starts 0.18 Myr into the law, and a
-    brighter hand-over starts before zero, above −0.1 Myr. **Ruling 46.2 holds.**
-    `a_white_dwarf_takes_over_at_its_stars_luminosity_and_then_fades` (1, 2, 3 M☉ CO, 7 M☉ ONe)
-    and the light helium star's test still show under 10⁻⁶ dex at the hand-over. The origin test
-    covers all three cores at 0.3–1.37 M☉ and from 10⁻⁴ to 5 × 10⁴ L☉, to 10⁻⁹.
-  - _Outside the owned files._ `track/tests.rs` is `speed`'s. The fading test's per-stride floor
-    goes from 0.8 to 0.7, with a comment. The 7 M☉ oxygen–neon dwarf's Debye plunge drops 25% in
-    one stride at 5 Gyr, from 10⁻⁵ to 10⁻⁷ L☉ in 0.6 Gyr, as the 1.3 M☉ sequence does. Three doc
-    comments in `track.rs`, `track/model.rs` and `track/tests.rs` now name the Montreal law. No
-    code in `track/` changed: `luminosity`, `formation_luminosity` and `cooling_origin` keep their
-    signatures, and `cooling_origin`'s `z` is `_z`, unread.
-  - _Goldens (at 11; the orchestrator bumps to 12)._ Three moved, and only white dwarfs' values
-    in them.
-    - `stellar/white_dwarf_cooling`: 72 origins now invert the new law, and 63 `Montreal at`
-      lines are new. The Hurley and Shara and HPT lines are unchanged.
-    - `stellar/endings`: 32 values, the luminosity at +1 Myr and +1 Gyr of every white dwarf. At
-      1 Gyr each is brighter by 0.17–0.90 dex. At 1 Myr the dwarfs of 1.0–1.37 M☉ are 0.15–0.67 dex
-      fainter, and the lighter ones 0.29–0.70 dex brighter. Masses and deaths are unchanged.
-    - `stellar/summaries`: the three white dwarfs' L, T_eff and B − V at their three times, and
-      their Sion types (DA5.3 to DA4.5, DA8.2 to DA7.9, and DC11.0 to DA9.9, since the atmosphere
-      draw's threshold moves with T_eff). Their masses, radii and ages are unchanged.
 - **The integrator's speed, as optimised (round 8, `speed`; ruling 46).** No output bit moved: no
   golden changed, and a scratch fingerprint of 480 tracks under all four option sets (segments,
   knots, samples, fates, 60 states and maxima each, `to_age` prefixes, `lifetime`, `evolve`, doubled
@@ -3818,119 +2818,6 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
     a nearly unbound orbit amplifies the remnant mass's change, and its mean anomaly by 4.8 × 10⁻³
     rad after some 2,300 orbits. Every golden outside the stellar stage and its planetary readers is
     unchanged.
-- **P06.T36, as built on the `GALAXY` readout (round 9, `ui9`).** `SystemsPanel` asks
-  `system_summary` for the selected system at the chart's answered time. It reuses the `SYSTEM`
-  display's `displays/system/useSystemSummary.ts`, whose channel lets the latest selection win and
-  drops a superseded reply, rather than a second hook in `displays/galaxy/`. The fixtures are
-  `test/systemFixtures.ts`'s, not a new `aSystemSummary` in `galaxyFixtures.ts`.
-  - _Rows._ `SystemReadout` gains `MASS` (the primary's mass now) beside `INIT MASS`, and `[Fe/H]`
-    in `dex` after `POPULATION`; both are the em dash until the answer, so no row moves. A `STAR A`
-    heading follows with `PrimaryReadings`: `KIND`, `PHASE`, `CLASS`, `DIES IN 312 yr` (or
-    `DIED 312 yr AGO`, counted from the answer's time), `LUM`, `RADIUS`, `T EFF`, `M(V)` in `mag`,
-    `REMNANT` and its rows, `ROTATION`, `VARIABILITY`, `NEBULA RADIUS` and `EVENTS`. These are the words,
-    units, `NO LIGHT` and em dashes of the `SYSTEM` host readout, with km radii for neutron stars
-    and black holes (ruling 36). Then plan 11's star list. An unborn system reads
-    `STARS NOT YET FORMED`. The system's galactic `RADIUS`, `ANGLE` and `HEIGHT` stand under a
-    `GALACTIC` heading, set as `STAR A` is, after `[Fe/H]` and before `STAR A`, as the guide groups
-    them (`ui10`, round 9).
-  - _Tests._ `SystemReadout.summary.test.tsx`, through `App`, covers every remnant kind. That
-    includes `no_remnant`, whose light and size rows are left out and whose mass is the em dash.
-  - _Model._ `HostBody` gains `absoluteVMag`, `planetaryNebula: Modelled` and
-    `activeEvents: Pending`, read by `wire.ts`. `words.ts` gains `starEventLabel`.
-  - _States._ Pending, refused, timed out and link down are `RequestStatus` between the readout and
-    `OPEN SYSTEM`, outside the live region, with `RETRY` (rulings 13 and 14). An unreadable answer
-    reads `SYSTEM DATA INVALID: …`. An answer kept for a time the chart has left, or after a newer
-    request failed, is stale: muted, with the `S`.
-  - _Layout._ The readings scroll in their own tabbable region with their position, and each
-    reading and each star-list table counts one (ruling 70.6). A container query sets one reading
-    to a line in a column under 30 rem, so nothing scrolls sideways. The list and the readout share
-    the panel equally, but the list's scrolling region never falls below four rows (8 rem), and the
-    panel's gaps are 0.25 rem. At 1280 × 720 that is four list rows and five readings, where the
-    equal share alone left two rows (`ui10`, round 9). Before `ui9`, the readout overlapped the list
-    there, which was an existing fault.
-  - **For the owner:** `STAR A`, `M(V)` (the guide's absolute visual magnitude), `mag`, `DIES IN`,
-    `DIED … AGO`, `NEBULA RADIUS` and `EVENTS` join the draft nomenclature. `RADIUS` now names the galactic
-    coordinate and, under `STAR A`, the star's radius in one readout.
-- **Deviations in T19.a–d, as built (round 9, `kick`).** T19.e is left as the plan has it: plan
-  15's P15.T5.a replaces `tables/kick_rank.rs`, with the bump. No existing golden moved; the new
-  golden `stellar/kicks` pins three systems of layer E (an ordinary-mode neutron star
-  `0x8200b2e000000000`, a low-mode one `…000c` and a kicked black hole `…0005`), which a slow
-  search reproduces. Output moves at 11 all the same: every remnant's kick, the stripped window's
-  deaths, the `Stripping` of `StarModel::death`, the wire's `natal_kick` and the planets of
-  sudden-death hosts. The version-12 bump carries them.
-  - _API._ `CollapseChannel` gains `CompleteFallback` and `EnvelopeLoss`: neither the progenitor
-    nor the remnant tells the law of a complete fallback or of a white dwarf's birth.
-    `CollapseChannel::of(DeathKind)`. `KickRankTable::{generator, new, rank, quantiles}`.
-    `StandardKickLaw::{new, params, table, ordinary_speed_km_s, with_stripped_mark, natal_kick}`,
-    the last two being `StarModel`'s remnant stage. `KickLawParams::{is_stripped,
-low_mode_probability, ordinary_speed_km_s, score_factor}`. `NatalKick::velocity`.
-    `reference::{ReferencePopulation::{new, star, fate, score, scores}, quantiles_of,
-score_quantiles, sampled_kick, SampledKick, KickObservables}`. `KickObservables` has public
-    fields and holds the sorted ln v of test 1.
-  - _Draws._ A white dwarf's Maxwellian reads the three `star.kick.low` normals, since a white
-    dwarf never takes the low mode. A Maxwellian's direction is its own normals'. If all eight ξ
-    tries fail, ξ = 1. `stellar.reference` is appended at the end of `rng/tags.rs`, not under the
-    "Plan 06" heading, because the macro's order fixes `ALL`. Its sample's word layout is in the
-    tag's documentation.
-  - _The stripped mark._ The track reads it for one thing only: a marked star's
-    electron-capture window is the companion-stripped one, 1 M☉ wide
-    (`Builder::stripped_by_companion`; a test finds captures from 7.3 M☉ at Z = 0.02 against
-    8.2 unmarked, and iron cores from 8.35). The remnant stage marks every collapse's progenitor
-    `Stripping::Companion`; the track's own `Death` does not. Every collapse lies above
-    m_cc − 1 M☉, so ruling 45.2's floor holds. **For plan 08:** a later attempt's `star.stripped`
-    can turn a wide-window star's white dwarf into an electron capture at a different age, so for
-    those stars the kick loop must rebuild the track or keep attempt 0's mark. **For plan 11:**
-    `STRIPPED_MARK_MIN_MASS` is 8 M☉ while ruling 45.2 draws the mark from m_cc − 1 (6.7–7.3
-    M☉), so a marked star of m_cc − 1 to 8 M☉ is stripped here with no interacting companion there.
-    **For P15.T5.b:** the track reads the defaults, not a caller's `KickLawParams`, so a changed
-    `stripped_share` or `ec_window_*` passed to `kick_observables` moves the kick stage's mark
-    but not the track's window; vary them through the constants. Superseded (2026-10-23,
-    decision-p15-revalidation Q1): P15.T5.d makes the windows and the reference population's
-    membership run-time inputs that default to the constants. **Design note 11** ("it does not
-    change the track") no longer holds for the wide window, and is the orchestrator's to amend.
-    _Settled since: ruling 93.1 amended design note 11, which now says that the mark changes the
-    track in the wide window._
-  - _The table_ is written by a new `hyperion-fit run kick_rank` from `score_quantiles` with 10⁶
-    scores of seed `0x0619b00000000000`. The fit took 13 min 56 s single-threaded (0.45 ms a
-    track; load 7.5). The task's test compares the committed file with the rendering of its
-    quantiles; the fit is not rerun. The slow K–S of 10⁵ fresh ranks stands in: D = 0.0033,
-    p = 0.23. Plan 15's P15.T5.a takes the task over.
-  - _Tests._ Test 1 asserts the reference population's own ordinary neutron stars, the single and
-    wind-stripped ones: ln v 5.605 ± 0.674, n = 9,036, K–S p = 0.66. The whole ordinary mode is
-    5.658 ± 0.685 (n = 10,135), since the companion-stripped stars above the ramp are the fast
-    tail. Test 5's toy explodes the carbon–oxygen core, an ultra-stripped star (Tauris, Langer and
-    Podsiadlowski 2015). It treats every neutron star of the sample as companion-stripped. "Unkicked"
-    in test 6 is `FallbackNone`. On seed `0x0619d00000000001` (20,000 stars):
-    - 6.67% of isolated pulsars are under 50 km/s on the sky;
-    - the low mode is 19.1%;
-    - retention is 19.1 / 19.5 / 24.1% under 20 / 50 / 100 km/s;
-    - 78.1% of 9,830 surviving double neutron stars have e < 0.3, and 7.4% with the helium core
-      as the exploding mass;
-    - 71.0% of black holes are unkicked, and of those under 12 M☉ 67.1% unkicked and 14.6% above
-      100 km/s.
-  - **For the orchestrator (physics, researched):**
-    - The black-hole factor 0.75 is ours. Mandel and Müller's table 1 has v_BH ÷ v_NS = 0.5, on the
-      score.
-    - Nagarajan and El-Badry (2025, §4.1) find 6 of 12 black holes unkicked and at least 4 above
-      100 km/s; without Cyg X-1 that is 45% and 36%, outside test 6's bands.
-    - "An eighth unbound" is 13.1% of kicks above 570 km/s, but 16.6% once added to a 230 km/s
-      rotation (18.0% at 550).
-    - Disberg and Mandel fit 0–1,000 km/s, and the clamp puts 2.7% above that.
-    - Igoshev et al.'s 20% is a mode of σ = 45 km/s, not 5.
-    - Retention under 20 km/s is 19%, against the brainstorm's 8–12%.
-    - Test 5 passes only with the ultra-stripped star.
-    - Against the older fits: the 3D mean is 294 km/s (Hobbs et al. 2005: 400 ± 40), the 1D rms
-      233 km/s (265), and the share under 100 km/s 24% (Verbunt et al. 2017, 16%; Igoshev 2020,
-      13%), with the low mode in it.
-- **P06.T34, amended (round 9, `ui10`).** The phase sent is read from the phase and the kind
-  together, so `PhaseDto` is no longer one value per `Phase`. Ruling 33 puts every object of initial
-  mass below 0.1 M☉ on the cooling fits, whose phase is `Phase::Substellar` on both sides of the
-  hydrogen-burning limit (`substellar::hydrogen_burning_limit`, 0.065–0.083 M☉, rising as
-  metallicity falls), while `object_kind` already calls the objects above the limit dwarfs. So a
-  0.1 M☉ M6V star read `PHASE SUBSTELLAR` beside `KIND DWARF`. `convert/stellar.rs`'s `phase` now
-  sends `Phase::Substellar` with any kind but `ObjectKind::Substellar` as `PhaseDto::MainSequence`,
-  since the star burns hydrogen; only brown dwarfs are sent as `PhaseDto::Substellar`. Tested at
-  0.09, 0.0999, 0.05 and 0.1 M☉. No sim output or golden moves.
 - **Rulings 96 and 93.1–3, as built (round 9, `kick` follow-up).**
   - _96.2._ `KickLawParams::max_speed_km_s` = 1,000: the ordinary map is the log-normal truncated
     there, exp(μ + σ Φ⁻¹(r Φ(b))), b = (ln 1,000 − μ) ÷ σ, so the clamp spans 32–990 km/s and
@@ -4035,186 +2922,6 @@ score_quantiles, sampled_kick, SampledKick, KickObservables}`. `KickObservables`
     line in `mod.rs`; none of the `briefs` lane's fast path (`evolve.rs`, `track.rs`,
     `track/build.rs`). `ZCoeffs::{giant_radius_scale, agb_radius_scale}` are now test-only, and
     `cheb::ZeroAgeHorizontalBranch::{at_mass, radius}` changed signature.
-- **Range briefs through the fate table (round 9, `briefs`; ruling 89, T38).**
-  - A table-routed dead primary's L and T_eff differ from `system_summary`'s by up to the table's
-    tolerance. Its kind and class agree, which the guard ensures and the slow test checks. The
-    DTO's doc says so.
-  - The per-cell bounds are validated, not proved, so the guard's safety factor is 2–4 times the
-    largest validation error, and the fallback share is reported with T38.e.
-  - The table's mass axis stops at 100 M☉ with the formulae. P06.T14 extends both, and regenerates
-    the table in the same bump.
-  - An interacting binary (P11.T4's `can_interact`) and a non-zero `helium_excess` are routed
-    exact, and the budget is re-measured when P11.T4 lands.
-  - T38.a's survey finds the white-dwarf mass structured in Z by 5–10% within 0.125–0.25 dex, so
-    the design study's 10 Z nodes miss 10⁻³ for white dwarfs. The grid awaits a ruling.
-- **P06.T34's range briefs, as built (round 9, `briefs`; rulings 89 and 90).**
-  - `convert.rs::system_record` takes the row's `Option<StellarBriefDto>`, and its hard-disable is
-    gone. `systems_in_range` takes the briefs in row order. `convert/stellar.rs::brief_dto` gives
-    log L and `teff_k` as `null` where L = 0 (ruling 54), and the wire's `f32`s round the sim's
-    values.
-  - `StellarBriefDto` gains `star_count: u8`, plan 11's P11.T13 field. It is required, not
-    optional, since no brief had been sent before; its wire pins are updated and the TypeScript
-    regenerated.
-  - `requests/galaxy.rs` builds the briefs from a new `compute::SharedBriefCache` of `BriefModel`s
-    keyed by `(GalaxyKey, SystemId)`:
-    - up to `limits::BRIEF_CHUNK_ROWS` = 1,024 rows, in the query's own job;
-    - beyond, in 1,024-row chunks, one interactive job each, in row order, then one conversion job.
-  - _Deviation:_ ADVICE's example threshold was 4,096. A dead row costs a full track until T38.d,
-    so a 4,096-row chunk of them would hold one worker for about 4 s.
-  - `config.rs` gains `--brief-cache` / `HYPERION_BRIEF_CACHE_MB`, default 64 MiB: about 25,000
-    main-sequence models or 2,500 dead ones. The README's table gains the row, and there is a new
-    `ServerStats::briefs()`.
-  - Tests:
-    - in `convert.rs`, the renamed "a range request with `include_stellar` returns a brief on every
-      row", each brief the full system's and each row otherwise plan 04's;
-    - in `requests/galaxy.rs`, the briefs are equal whole and in four chunks, with a warm cache, no
-      cache and a tight one;
-    - in `compute/systems.rs`, a model is built once, and every budget answers the same;
-    - in `tests/systems_in_range.rs`, briefs on every row at 30 and at 65 ly (1,000+ rows, so
-      chunked), each equal to the sim's; the same request cold and warm is identical JSON, with
-      every warm row a cache hit; and a new golden, `systems_in_range_briefs.golden`.
-  - `systems_in_range.golden` is unchanged.
-  - A 20,000-row answer queues 20 chunk jobs and a conversion job; each waits for room in the
-    interactive queue (`CpuPool::submit`), so a query that has run is never refused `queue_full`
-    for its briefs. Dead-row chunks hold a worker for about a second each until T38.d, which
-    `system_summary` jobs queue behind.
-- **P06.T35.b's remainder and P06.T37, as built (round 9, `briefs`).**
-  - Every chart request sends `include_stellar: true`. `model.ts`'s `StarBrief` gives
-    `ChartSystem.star`, which is `null` for a row with no brief (a system not yet formed).
-  - `chartModel.ts` takes marks from `starSymbol` and `starSizeClass`. A system with no remnant,
-    or not yet formed, is listed and not drawn.
-  - `ChartControls.tsx` gains the `STARS` radio group (`ALL`, `LIVING`, `REMNANTS`), stepped by
-    **K**. It is never disabled when the link is down, since it asks nothing of the server. The
-    chart, the list, the counts, the selection and the HR diagram all take the filtered systems,
-    and `shownCountText` reads `412 OF 1630 SHOWN: LIVING`, with the colon of the draft's D2.3
-    rather than the task's em dash, which also means a missing value. `REMNANTS` is a white dwarf,
-    neutron star or black hole (D2.3); a star with no remnant and a system not yet formed show under
-    `ALL` alone.
-  - `SystemList` gains a `CLASS` column, and each row's accessible name gives the kind in words.
-  - `StarShapeLegend.tsx` holds the five shapes. `SymbolLegend` and the orbit map's `OrbitLegend`
-    share the new `spatial/LegendSymbol.tsx` and `LegendReticle.tsx`. The chart legend names each
-    shape's kinds as the draft's D4.4 table does, and says `RINGED CIRCLE SIZE AT LEAST 0.75 M☉`.
-  - _Deviation:_ `star_count` is not shown, since the list has no room. It is left for P11.T14.
-  - `HrDiagram.tsx` and `lib/galaxy/hrProjection.ts` are built as specified, with pure projection,
-    draw list and picking.
-    - The class letters' band edges are Pecaut and Mamajek's dwarf scale, which the server
-      classifies with.
-    - Neutron stars and black holes are counted as `NO PHOTOSPHERE`. A star with no remnant, a
-      system not yet formed and a bad value each have a count of their own.
-    - Every mark is filled, since a graph has no reference plane.
-    - Every tick at a power of ten is in E notation, and each axis ends `, LOG SCALE` (D2.4).
-  - _Deviation:_ the diagram is a fourth page, `HR DIAGRAM`, not a panel on the chart page, which
-    has no room at 1280 px. So the `STARS` selector and **K** live on the chart page, and the
-    diagram's caption says what they hide.
-  - _Deviation:_ the off-scale mark is a drawn arrowhead, since the canvas carries no text, where
-    the guide's mark is `↑`/`↓`.
-  - Pending the owner, with P06.T35.a:
-    - the HR diagram as a permitted scatter plot with a reversed axis;
-    - `L☉`;
-    - the five-shape set and "listed, not drawn";
-    - the arrowhead off-scale mark;
-    - the words in neither the guide nor the drafts: `HR DIAGRAM`, `HERTZSPRUNG-RUSSELL DIAGRAM`,
-      `CLASS`, `PLOTTED`, `OFF SCALE`, `NO PHOTOSPHERE`, `NO REMNANT`, `NO DATA`,
-      `PEGGED OFF SCALE`, `LUMINOSITY`, `EFFECTIVE TEMPERATURE`,
-      `NO REMNANT, NOT YET FORMED: LIST ONLY`, `RINGED CIRCLE SIZE AT LEAST … M☉`,
-      `NO CHART: centre one to plot its systems`, and the server's class strings `NS`, `BH` and
-      `NONE` shown as sent;
-    - the key **K** for `STARS`.
-  - _Deviations of Files:_ `useRangeQuery.ts` is unchanged, since `wire.ts`'s `toRangeRequest`
-    sets `include_stellar`. The filter and the HR page reach `CensusReadout.tsx`, `SystemsPanel.tsx`,
-    `useLocalChart.ts`, `LocalChartPanel.tsx` and `GalaxyPages.tsx`. A selection the filter hides
-    is hidden, not cleared. `OrbitLegend.tsx` takes the shared legend parts with no change in
-    behaviour.
-  - The by-eye checks of "Verification" are not yet made.
-  - _Settled (round 9b, `ui13`, ruling 115):_ the "Pending the owner, with P06.T35.a" list above is
-    resolved, and P06.T35.a closes with the guide's `docs(ux)` edits. The reversed-axis scatter,
-    `L☉`, the five shapes, "listed and not drawn" and the arrowhead are confirmed, and the guide's
-    graph bullet and "Data states" Off scale row now say so. Words changed: the title is
-    `HR DIAGRAM` (the canvas's accessible name keeps "Hertzsprung-Russell diagram"),
-    `PEGGED OFF SCALE` became `OFF SCALE`, `NO PHOTOSPHERE` became separate `NEUTRON STAR` and
-    `BLACK HOLE` counts under a `NOT PLOTTED` heading, and `NO DATA` became `DATA INVALID`. The
-    temperature ticks read plainly (`100,000` to `1000`) and a `CLASS` label names the letter row,
-    so the left margin grew from 3.5 to 4 rem. The arrowhead's arms are 0.375 rem long at 45°
-    (the built "0.25 rem" was each arm's run, 0.35 rem long). `HR`, `CLASS`, `NS`, `BH`, the caption
-    words, `LIST ONLY`, `RINGED CIRCLE SIZE AT LEAST` and `NO CHART` are on the nomenclature list;
-    **K** stands. The by-eye checks are still to be made.
-- **Deviations in T21, as built (round 9, `rem06`).** `stellar::remnant::neutron_star` holds
-  `NeutronStar` (`new`, `from_draws`, `state_at`, `field_at`, `pulse_clock`), `PulsarState`,
-  `PulsarBeam::sweeps` and `PulseClock::phase_at`; `StarModel` gains `neutron_star`, `pulsar_at`,
-  `remnant_age_at` and `pulsar_phase_at`, and the summary's `RemnantDetail::NeutronStar`. The plan's
-  figures are built as stated and marked provisional.
-  - k = 8π²R⁶ ÷ (3c³I) with R from `neutron_star_radius` (12.2 km, ruling 27): 3.2 × 10⁻³⁹ s G⁻².
-  - The glitch window is set on the unglitched characteristic age, which has closed forms on both
-    branches of the field. The field-decay luminosity is −R³BḂ ÷ 3 (Colpi et al. 2000). If all
-    eight birth-period tries fail, the period is 300 ms.
-  - The pulse clock is referred to the epoch, or to the birth of a star born after it. The phase
-    is the cubic series by definition: inside the window its rate stays within 10⁻⁴ of 1 ÷ P, but
-    its integral departs from the closed form's by ν⃛Δt⁴ ÷ 24, millions of cycles at 1,000 years for
-    a young pulsar, so it is a consistent clock rather than the spin-down's own phase.
-  - The wind-nebula test takes the median duration over stars born with one (most never have one).
-    The magnetar count reads "two core collapses a century" as 2 a century × the 0.62 neutron-star
-    share of T31 (266); with every collapse a neutron star it is 430.
-  - _Finding, for a ruling:_ Popov et al.'s (2010) birth field is the polar one and k is the
-    equatorial convention (B = 3.2 × 10¹⁹ √(PṖ) at 10 km), so braking is about thirteen times
-    Popov's model at 12.2 km (four from the field's definition, 3.3 from R⁶). Design note 13's re-check (a steady birth rate over 100 Myr) gives living pulsars a median
-    P of 2.0 s against the catalogue's 0.6 s, with Ṗ right (10⁻¹⁴·⁶). The decay law's 10⁴ yr is
-    Beniamini et al. 2019's τ with Colpi et al. 2000's α = 1 form (whose own τ is 10³ yr), and the
-    glitch window of 10³–10⁵ yr is not Fuentes et al. 2017's (1% for all but Crab-like pulsars).
-- **Deviations in T22, as built.** `stellar::remnant::BlackHole` (`new`, `from_draws`, `spin`,
-  `schwarzschild_radius`, `isco_radius` after Bardeen, Press and Teukolsky 1972), read through
-  `StarModel::black_hole` and the summary's `RemnantDetail::BlackHole`. A draw beyond
-  9.98σ takes the largest spin below 0.998. The half-normal's σ of 0.1 has a median of 0.067, about
-  seven times Fuller and Ma's 10⁻²; recorded as provisional. The wire carries the spin only.
-- **Deviations in T25, as built.** `stellar::rotation::{rotation, fossil_field, magnetism, activity,
-Rotation, Magnetism, Activity, ActivityLevel, SpinAxis}`; `StarModel::rotation_at`; Be, Ap, Bp
-  and Am are `PeculiarClass`es that `classify` decides from the draws (MK suffixes `e`, `p`, `m`),
-  so the range brief's fast path reads the rotation and magnetism draws (`rotation_for_attempt`).
-  Class strings move where a star is one (`B7V` to `B7Ve` in the server's range-brief golden,
-  re-blessed at 11 with the round's other moves, for the bump to 12).
-  - The braking law is Mamajek and Hillenbrand's own, P = 0.407 (B−V − 0.495)^0.325 t^0.566: with
-    the plan's t^½ their coefficient gives the Sun 15 d and fails the 22–30 d test. It is the clock
-    of P² = P₀² + P_g², the Skumanich solution, with the torque saturated below Ro = 0.13 (Wright's
-    τ) at every mass, where the spin-down is exponential: that is the "saturation for fully
-    convective stars". The colour is the zero-age main sequence's, so the clock never runs back.
-    Birth periods: log-normal, median 4 d, 0.35 dex, half as long below 0.25 M☉ (after Herbst et
-    al. 2007).
-  - The saturated level is Wright et al.'s −3.13, not the rounded 10⁻³. The activity bands below
-    saturation are a decade of L(X) ÷ L(bol) each (the Sun is `Low`).
-  - Above 1.3 M☉ the rank maps onto v ÷ v(crit), v(crit) = √(2GM ÷ 3R): a fast normal whose centre
-    is fitted to Zorec and Royer 2012 and Huang et al. 2010, and a slow mode for 2–3.2 M☉ and every
-    fossil-field star. Protostars have no rotation (their mass crosses the Kraft break).
-  - Added: evolved stars keep their angular momentum from the end of the main sequence (P ∝ R²,
-    `Track::main_sequence_end`), and cool dwarfs a dynamo field (Reiners et al. 2022, continuous at
-    Ro = 0.13).
-  - _Findings, for a ruling:_ the fossil-field share is a flat 8%, where Sikora et al. (2019) find
-    0.3% below 1.8 M☉ rising to 11% at 3.4–3.8 M☉; strengths are log-normal about 2.6 kG, 0.4 dex,
-    300 G–30 kG. The Be threshold of 0.7 is Rivinius et al.'s ~0.75 of the orbital speed rounded.
-- **Deviations in T26, as built.** T26.a–c only: `stellar::variability::{variability,
-VariabilityInputs, Variability, VariableKind}` and the summary's variability. T26.d
-  (`light_factor_at`) waits on T27.c's monotone phase in a `StarModel`. Each kind's region comes
-  from its own source: Cepheids a linear fit to Anderson et al. 2016's table A.1, RR Lyrae Marconi
-  et al. 2015's edges, δ Scuti Murphy et al. 2019's (held to log g ≥ 3.5); β Cep, SPB and γ Dor
-  from Pamyatnykh 1999 and Kaye et al. 1999; the white-dwarf strips from Althaus et al. 2010. Q is
-  0.033 (δ Sct, β Cep), 0.036 (RR Lyr), 0.039 (Cepheids, about 30% short at 30 d, where
-  Anderson et al.'s Q is 0.052) and 0.6 d for g-modes (the lane's).
-  - A star is one kind, the first region in `variability`'s order that holds it: white dwarfs and
-    GW Vir, S Doradus, α² CVn (before the pulsators, as a fossil field suppresses them), the strip,
-    β Cep, SPB, γ Dor, α Cyg, long-period variables, BY Dra. So there are no δ Sct–γ Dor hybrids.
-  - The strip's kinds use one low-mass limit, 2 M☉ initial, at every Z; stars of 2–3 M☉ in core
-    helium burning have no strip kind. Type II Cepheids use the Cepheids' strip.
-  - T26.b: a thermally pulsing AGB star is a Mira from a fundamental period of 100 d, otherwise
-    SRa; a first-giant-branch star from 630 L☉ is SRb; a red supergiant is SRc once burning helium
-    and Lc before; all below 4,500 K, with fixed amplitudes per kind (4.0, 1.5, 0.8, 1.0 and 1.0
-    mag), not the plan's luminosity and amplitude threshold, for which no source was found.
-  - T26.c: the S Doradus cycle is 10 yr × R ÷ 100 R☉, held to 3–40 yr, at 1.5 mag; white-dwarf
-    amplitudes reach 0.3 mag; BY Dra stars are saturated (0.2 mag) or highly active (0.05) K and M
-    dwarfs; α² CVn stars vary by 0.05 mag (all the lane's, provisional). The LBV criterion is a
-    copy of T24.a's, which its `PhasePredicate::Lbv` is to replace.
-  - _Findings, for a ruling:_ the LPV relation the plan credits to Ostlie and Cox (1986) is
-    Vassiliadis and Wood's (1993) equation 4 (built, cited to them); Bono et al. (2000) put the amplitude's
-    peak near the blue edge, not mid-strip (built mid-strip); at solar Z the backbone's 5 M☉ blue
-    loop reaches only 4,660 K, short of the strip (6,170 K), so the 5 M☉ test is at [Fe/H] = −0.5
-    and loops reach the strip from 6 M☉ at solar Z.
 - **Ruling 110, as built (round 9, `rem07`).** Points 1, 3, 5 and 7 move output, in one batch.
   - _T21 (points 1–4)._ `neutron_star::TIMING_RADIUS` (10 km) sets k = 9.77 × 10⁻⁴⁰ s G⁻², which
     withdraws ruling 27's consequence for k (the radius bullet above); the decay luminosity keeps
@@ -4241,125 +2948,6 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
     strip, keep 4x(1 − x): Bono et al.'s models are classical Cepheids'. The 5 M☉ test stays at
     [Fe/H] = −0.5; the backbone's short solar loop is recorded against P06.T14–T16 (Anderson et
     al. 2016, Table A.1: 5 M☉ at Z = 0.014 enters the strip at P 2.95–4.81 d).
-- **P06.T14–T17, as built (round 9, `track06`): findings for the orchestrator and research.**
-  - _Very massive stars._ Yusof et al.'s (2013) grid is 8–16% smaller in radius and 19–22% shorter
-    in τ_H than HPT's formulae already at 120 M☉, so the quadratics pinned to 1 at 100 M☉ do their
-    correcting between 100 and 120 M☉ (slopes −2.2 and −2.9 per dex there). The tracks' own main
-    sequences last 1–16% longer than τ_H, their winds lowering the mass the effective-age clock
-    reads. The electron-scattering Eddington factor at the initial X passes 1 on the late main
-    sequence at Z ≤ 0.001 above about 130 M☉ (1.14 at 150 M☉ and Z = 10⁻⁴) and after the main
-    sequence at every metallicity and mass from 80 M☉ (HPT's core helium burning and early AGB:
-    1.0–2.1 at 80 M☉, up to 11 at 150 M☉ and Z = 0.001). The plan's "stays below 1 over the whole range"
-    holds only on the main sequence from Z = 0.006. _Ruled (124.1):_ the check reads X = 0 (below
-    0.75 on every main sequence, at most 0.65); the post-main-sequence excursions at X = 0 are
-    pinned for P06.T39 (`post_main_sequence_eddington_excursions_are_pinned`, maxima within 20%,
-    times above 1 within a factor of two): 6.73 and 88 kyr at 150 M☉ and Z = 10⁻⁴; 8.04 and
-    50 kyr at 150 M☉ and Z = 0.001; 1.03 and 11 kyr at 120 M☉ and Z = 0.006; 1.19 and 46 kyr at
-    80 M☉ and Z = 10⁻⁴; 0.89 and 0.60, never above 1, at 150 M☉ and Z = 0.014 and 80 M☉ and
-    Z = 0.03.
-  - _The blend below 0.5 M☉ (124.7)._ At Z below 0.02 the zero-age main sequence is up to 300 K
-    hotter than the solar birthline, so the test's 200 K window there spans the birthline's and
-    the zero-age main sequence's temperatures; at Z = 0.02 it holds to the birthline's.
-  - _The knee's fade (124.2, 127.1)._ Ruled: the fade follows MB16 to 10 L☉; the window is
-    0.3–30 kyr.
-  - _The arrival._ Scaled Kelvin–Helmholtz times run 70–80% of MIST's arrivals at 2–5 M☉; MIST
-    counts from a larger starting radius than t_p's birthline. The arrival falls below t_p near
-    6 M☉, not the plan's 8. _Ruled (124.6):_ the plan now says 6–7 M☉.
-  - _The post-AGB knee._ At the zero-temperature white dwarf's radius it is 0.3–0.4 dex hotter than
-    Miller Bertolami's (2016) highest temperatures, and the fade after it runs on the Montreal
-    law's extrapolation above 10^2.5 L☉. A hot-core radius for the bridge's end and the first
-    10⁴–10⁵ years of cooling would fix both; the cooling law would need its own young models.
-    _Ruled (124.2) and built:_ the knee follows MB16. _Ruled (127.1) and built:_ the fade after it
-    is MB16's to 10 L☉ and the Montreal law's after, matched there; P06.T20.a is untouched.
-  - _Lighter white dwarfs._ Leaving HPT's perturbation off the bridged AGB makes the last winds act
-    at the giant's radius: white dwarfs lose 0.002–0.014 M☉ (1 M☉ at Z = 0.02: 0.5197 to 0.5121
-    M☉). Cummings et al.'s (2018) check in `sse_reference` still passes.
-  - _Lazy cores._ With Miller Bertolami's crossing times as power laws in the core mass, cores
-    below 0.446–0.487 M☉ (slowest and fastest shells) show no nebula, not "below about 0.53": his
-    own 0.528 M☉ sequence at Z = 0.02 reaches 25,000 K 13.6 kyr after the AGB and would show one,
-    while his 0.532 M☉ sequence at Z = 0.01 takes 67 kyr. Frew and Parker (2010) give 0.55 M☉ as
-    the observed lower limit. A steeper law at the low end, or a metallicity term, is the choice.
-    _Ruled (124.3) and built:_ an offset power law; the cut-off is 0.527–0.534 M☉.
-  - _The Galaxy's nebulae._ 6,200 from a constant 1.65 M☉ a year, against some 20,000 estimated
-    (Zijlstra and Pottasch 1991; Jacoby et al. 2010 ~25,000; Moe and De Marco 2006 46,000 ±
-    13,000): the mean visible time is right (21,000 years), so the death rate is the question,
-    which T31's sampler over the real star-formation history should answer. _Ruled (124.4):_ T31
-    compares by birth rate. After 124.3–124.5 the constant-rate floor measures 4,050. _Ruled
-    (127.2):_ the floor is 3,500 (0.296 deaths a year × 0.70 × 19.6 kyr), and the test holds the
-    nebula share of AGB deaths at 0.65–0.75. **T31's warning:** if its nebula share of births falls
-    under 0.6, the light low-end cores of rulings 92 and 99 are examined first, and the window is
-    not widened.
-  - _Output moves broadly_ (bump 14): every star's clock by its arrival (38 Myr at 1 M☉, 230 at
-    0.2), stars of 100–150 M☉, every AGB white dwarf's death (10²–10⁵ years later) and mass, the
-    fate tables (re-emitted; the exact-path shares fall to 14.5%, 6.1% and 3.2% from 34.6%, 9.6%
-    and 6.5%) and the kick law's provisional rank table (its fingerprint's 10 M☉ core moved, since
-    heavy stars now start their main sequence at t_p with τ₀ > 0; re-run).
-  - _The fate table's white dwarfs._ The bridge hands a white dwarf over at thousands of L☉, above
-    the Montreal law's brightest node, so its cooling origin is negative (about −0.0996 Myr);
-    `FittedFate::remnant` held origins at zero, which made table-routed young dwarfs 0.1 Myr older
-    in the law's clock and put 0.004–0.008 dex of L outside the guard's box
-    (`briefs_are_the_full_systems_over_thirty_thousand_systems`). It now holds them just after the
-    law's −0.1 Myr pole (`fates::MIN_ORIGIN_MYR`); the worst row over 26,000 then sits at 0.98 of
-    its box. Plan 11's engine rebuilt main-sequence tracks to a reach that assumed the main
-    sequence starts at zero; it now adds `sse::main_sequence_start`.
-  - _P14.T32's pins._ The search re-pins the subgiant (`0x42006cba00000000`: the old pin's gap
-    crossing moved past the epoch) and now finds a T Tauri star (`0x41feec7600000003`, 1.61 M☉,
-    1.73 Myr, 2.8 L☉ and 4,652 K), pinned as the fifteenth; the tripwire is gone. Both
-    descriptions are left for the bump. The T Tauri system already holds a 232 M⊕ planet at
-    0.17 au at 1.7 Myr, a question for plan 14.
-  - _The nebula's size against the brainstorm._ The brainstorm's nebulae are "under a light-year
-    or two across"; the plan's R_max = 0.8 pc let one reach 2.61 ly in radius, 5.2 across. _Ruled
-    (124.5):_ a median diameter against a maximum radius; R_max is 0.9 pc and the brainstorm's
-    sentence says both (2026-09-27).
-  - _Left for later._ The planetary nebula is not on the wire (`srv/convert/stellar.rs` keeps
-    `NotModelled`); ruling 110.8's short solar blue loop is not touched by T14–T16.
-- **Deviations in T30, as built (round 9b, `fates`, with P11.T1.d; version left at 14 for the
-  orchestrator's batch of 15).**
-  - _T30.a._ `galaxy::fates::reference_fe_h(Population) -> Dex` reads plan 02's constants, so the
-    thick disc is −0.5 (`fields::metallicity::THICK_DISC`, ruling 106.3), not the plan's −0.55;
-    the halo's −1.2 is `fates::HALO_REFERENCE_FE_H`, which a test holds equal to the derived
-    dominant merger's. Four distinct values, as planned. `fates_for(Population)` returns
-    `&'static MultiplicityFates` (P11.T1.d's, which wraps T30.b's table): the ProvisionalFates
-    stage of T30.a was built and superseded in the same lane.
-  - _T30.b._ `stellar::fates::TrackFates::at(Dex)`: 96 masses (`TRACK_FATES_MASSES`,
-    `track_fates_grid`), 23, 5, 15, 15 and 37 intervals in bands A–E, log-spaced within each.
-    Each node is the fate table's at η's median where it answers (`FittedFates::fate_fitted`) and
-    one `FateNode::of` (a full track) where it does not (below 0.741 M☉ and in unusable cells);
-    below 0.1 M☉ the node is the 0.1 M☉ star. An iron core's remnant is the mean over 8 × 8
-    midpoint marks of the type and fallback draws (`REMNANT_QUADRATURE_NODES`), the mass normal at
-    its median. Interpolation is linear in ln m of log₁₀ t and of the remnant mass; the lifetime is
-    held non-increasing node by node. `breaks()` lists every interior node and the provisional
-    companions' bin edges. Living stars count at their initial mass: the trait has no living-mass
-    function and the main sequence's winds are negligible there.
-  - _Held once per process, not per `Galaxy`._ The table depends on the generator version alone
-    and is needed while `GalaxyParams` derives the mean masses, before any handle exists (plan 02's
-    note), so `fates_for` builds the four in a `OnceLock` on first use (about 0.15 s, most of it
-    the tracks below the fate table's range). `build`'s `mean_formed_mass` and
-    `mean_stars_per_system` read `fates_for(OldThinDisc)`, not `ProvisionalFates`, since after
-    P11.T1.d the companions are plan 11's.
-  - _Measured at Milky Way parameters_ (`derive::tests`): 0.5581 M☉ per system under the default
-    (Chabrier's at the scratch scale 0.68) and 0.4864 under Kroupa's; 8.96 × 10¹⁰ and
-    1.028 × 10¹¹ systems for 5 × 10¹⁰ M☉; old populations 0.545–0.566 (3.8% apart); young disc
-    1.36 times the old thin disc's; dead primaries 8.18% (old thin disc), 12.16% (thick disc) and
-    14.39% (the halo's dominant component); 1.421 and 1.393 stars per system.
-  - _Also as built._ The halo's dead share (14.39%) is measured over its dominant merger's ages
-    at the halo's reference [Fe/H], not over the halo's mixture. The nodes carry
-    `binarity::NEVER_STRIPPED` in place of `StarDraws::median()`'s mark, so that a node never
-    asks for the stripped share it feeds (plan 11's T1.d). A `GalaxyParams` build now takes
-    about 40 ms (1.3 ms before), most of it the companions' integral (P11.T1.d).
-  - _Consequence (the thin discs' tests, for the orchestrator):_ `tests/common` re-derives the
-    young disc's window from 10⁴ seeds (0.769 M☉ under the default, 0.671 under Kroupa's; old
-    populations 0.545–0.568 and 0.474–0.495), and `gas::params`' least drawn corner share becomes
-    −0.0631 with its failing thin-disc scatter 0.235 dex (plan 07's documented figures, re-pinned).
-- **Rulings 137 and 138, as applied to T30's tests (round 9b, `fates`).** At plan 15's fitted
-  Chabrier scale, 0.920 (ruling 138), the fixture's mean present-day mass per system with every
-  remnant is 0.5985 M☉ galaxy-wide and 0.6115 locally, of which neutron stars and black holes are
-  0.053; in stars and white dwarfs over primaries below 8 M☉ the local mean is 0.5517, inside the
-  census's 0.54–0.60. `derive::tests` asserts 0.59–0.61 for the default (Kroupa's 0.4864 in
-  0.48 ± 0.02 stands) and the old thin disc's census-like mean in 0.54–0.60; 8.35 × 10¹⁰ systems
-  for 5 × 10¹⁰ M☉. The dead-primary shares are the research figures behind Kroupa's 0.48, so the
-  test now reads Kroupa's function (8/11/13% windows) and prints the default's (10.7% in the old
-  thin disc).
 - **The spectral scale of young objects (ruling 135.2, from `sub13b`'s P13.T5.a).** The classifier
   types every living object on the dwarf scale (Pecaut and Mamajek 2013, Mamajek's table
   v2022.04.16; M6V 2,810 K, M5.5 written from 2,994 K down, M6 from 2,869 K). Young objects near the
@@ -4367,158 +2955,6 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
   from 5 to 80 Myr, which BHAC15 supports. A catalogue on Luhman et al.'s (2003) young scale, M6 at
   2,990 K and warmer than the dwarf scale by about a subtype, would call them M6.5–M7; Herczeg and
   Hillenbrand's (2014) newer young scale, M6 at 2,860 K, gives M5.5 too. The dwarf scale is kept.
-- **P06.T21.e's threshold (ruling 136.4, built by `feat09c`, 2026-09-28).** `WIND_NEBULA_THRESHOLD`
-  is 10³⁵ erg/s (10²⁸ W), not 10³⁶: Gaensler and Slane's 4 × 10³⁶ erg/s is the line for prominent
-  nebulae, and Kargaltsev and Pavlov's Chandra nebulae reach 10³⁵·⁴ erg/s at 10⁴–10⁵ yr. Plan 09's
-  `snr::PulsarWindNebula` reads the same flag. The median nebula lasts 1.45 × 10⁴ yr; T21.e's test
-  passes unchanged.
-- **P06.T39, T24.a, T26.d and T31, as built (round 9, `events06a`; provisional at version 15, for
-  the orchestrator's v16 batch).**
-  - _T39, the wind._ `sse::wind::eddington_factor(L, M)` is Γ_e at X = 0 (κ_e = 0.02 m² kg⁻¹, 1 at
-    L ÷ M = 65,304 L☉ per M☉). Under `WindRecipe::Modern`, above Γ_e = 0.7 the rate is the larger
-    of the recipe's own and the recipe's rate at the star's "kink twin" (its L, R, T and core, with
-    the mass M Γ_e ÷ 0.7 at which Γ_e is 0.7) times (Γ_e ÷ 0.7)^3.99. So at a fixed L log Ṁ rises as
-    3.99 log Γ_e from the recipe's own rate at the kink, continuously; the L dependence at a fixed
-    Γ_e is the recipe's at the kink (Vink et al. 2001's L^0.88), not Vink et al. 2011's L^0.78,
-    which a recipe-anchored kink cannot also have. `WindRecipe::Hurley2000` is untouched (SSE's
-    validation). _Deviation:_ the early and thermally pulsing AGB keep their own rates: the end of
-    the superwind reaches Γ_e ≈ 0.8 at intermediate masses (7 M☉, L ≈ 6 × 10⁴ L☉ at 1.2 M☉),
-    where the line-driven kink does not describe the dust-driven wind, and applying it there moved
-    every AGB death age by a little (the fate table's mid panel and, through T30's mean masses,
-    the whole galaxy).
-  - _T39, a finding (pinned, not tuned; for a ruling):_ the plan's bound, no living state over
-    10³ years at Γ_e(X = 0) > 1, holds from Z = 0.014, and at 100–110 M☉ at Z = 0.006, but not at
-    lower Z. The steepening removes the large excursions (the largest Γ_e after the main sequence
-    falls from 6.7–8.0 to 1.15–1.75 at Z ≤ 0.001), but a star then sits just above the limit while
-    it loses its envelope at the steepened rate, which at Γ_e ≈ 1–1.3 is only 4–12 times the
-    recipe's: Belczynski et al.'s 1.5 × 10⁻⁴ M☉ a year for a red supergiant beyond the
-    Humphreys–Davidson limit, with 15–60 M☉ of envelope, and, at the stripping instant, Vink's
-    rate at Z^0.85. Measured (years above 1, largest Γ_e): 15–38 kyr and 1.15–1.75 at Z = 10⁻⁴
-    (80–150 M☉), 11–29 kyr and 1.15–1.49 at Z = 0.001, 1.5–10 kyr and 1.01–1.12 at 120–150 M☉ and
-    Z = 0.006. The plan's "strips … in decades … in a few thousand years" needs rates of order
-    10⁻² M☉ a year at Γ_e just above 1, which the recipe-anchored law does not give; a
-    continuum-driven rate above Γ_e = 1 (up to the photon-tiring limit), or the kink read at the
-    surface hydrogen rather than X = 0, would. `the_eddington_wind_bounds_the_excursions_or_pins_them`
-    pins the rows over 10³ years (largest Γ_e within 10%, time within a factor of two).
-  - _T39, what moved:_ stars that reach Γ_e > 0.7 off the AGB, which is from about 40–60 M☉ at low
-    Z and about 100 M☉ at solar Z (not only "above about 80 M☉"): their post-main-sequence tracks,
-    remnants and fates. The fate table's high panel was re-emitted (`stellar_fates_high`, since
-    15: 99 of 1,633 cells left to the exact track, from 103), and so, through T30's `TrackFates`
-    nodes, the mean mass per system, the galaxy's scales and every system: the provisional
-    displaced-form table's fingerprint (`GalaxyScales::v_c`) moved, so its smoke histograms were
-    rerun in the new potential (PROVENANCE's SHA-256 updated) and the table refitted. The fit
-    tool refuses a changed table at an unchanged `since` (15), so it was written by removing the
-    old file first, the tool's own path for a new table: **the v16 bump must re-emit it** with
-    `--since 16`. The kick rank table's quantiles came out bit for bit the same (only its
-    fingerprint moved). The stripping table (P11.T1.d, since 14 → 15) was re-emitted too: its
-    fingerprint held, but `binarity::tests::the_table_follows_the_quadrature_and_the_tracks` found
-    its core-helium-burning radius 6.3% off the moved tracks (window 5%); after the rerun the
-    share is within 0.0688 of the exact at the cells' centres. `hyperion-fit check` is fresh.
-  - _T24.a._ `classify::peculiar` (`is_luminous_blue_variable`, `LBV_MIN_LUMINOSITY`,
-    `WolfRayetType`, `WolfRayetSequence`, `HeliumSurface`, `carbon_shows_after`,
-    `WOLF_RAYET_MIN_TEFF`); `SpectralType::WolfRayet`; `PeculiarClass`'s `WolfRayet`,
-    `HotSubdwarf` and `LuminousBlueVariable`; `ClassExtras::helium_star`; `sse::PhasePredicate`,
-    `sse::AgeInterval` and `Track::window_where`; `StarModel::lbv_window` and `SystemStars::lbv_window`. Written forms:
-    `WN6`, `WN7h`, `WC5`, `WO2`; `sdB0`, `sdO5` (the `sd` prefix on the letter the 40,000 K split
-    gives, the subtype from the dwarf scale held to that letter); `B2Ia+ LBV`. `object_kind` now
-    follows the classification: a WR type is `WolfRayet` (the WNh stars included), a hot subdwarf
-    `HotSubdwarf`, and any other naked helium star goes by its luminosity class. The S Doradus
-    cycles read `is_luminous_blue_variable`, which replaces variability's copy of the criterion,
-    unchanged.
-    - WNh: hot (≥ 30,000 K, the lane's choice below the WN9 stars' T* of 32–38 kK), above the
-      floor, hydrogen-rich (MS to TPAGB) and either an envelope under 10% of the mass or Γ_e at the
-      surface hydrogen, taken as X = 0.76 − 3Z, of 0.5 or more (Gräfener et al. 2011, section 2;
-      Vink et al.'s 0.7 the upper bracket; the lane's choice, provisional), which makes the most
-      massive main-sequence stars WNh, as R136's are.
-    - WN → WC: the mass lost as a helium star exceeds f × its entry mass, f = 1 ÷ (1 + (M ÷ 6.30
-      M☉)^0.855), fitted to Langer's (1989a, table 1) helium zero-age convective cores at 2–60 M☉
-      (within 0.021, rms 0.012; held at 60 M☉ above), the criterion of Langer (1989b, section 3.1);
-      it agrees within 0.03 with Woosley (2019) and Yoon (2017). The entry mass is the track's
-      (`Track::helium_star_entry_mass`) and reaches `classify` through `ClassExtras`; without it a
-      helium star is WN.
-    - Subtypes from T* tables: WN2–9 from Hamann et al. (2019, table 1) medians, WC4–9 from Sander
-      et al. (2019, table 5), WO1–4 after Tramper et al. (2015) (the lane's reading).
-    - Hot subdwarfs from 20,000 K (Heber 2016, section 2.2), sdO from 40,000 K (a convention: the
-      classes are spectroscopic).
-    - _Findings, pinned provisionally (for a ruling):_ (1) the floor 10⁴·⁹ L☉ × (Z ÷ 0.02)^−0.4 is
-      the plan's; Shenar et al. (2020, A&A 634, A79, section 3) give the observed single-WR floor
-      as log L = 4.9, 5.25 and 5.6 at Z = 0.014, 0.006 and 0.002, i.e. 10⁴·⁹ (Z ÷ 0.014)^−0.82, twice
-      the plan's floor at the SMC's Z. (2) WO from 10⁵ K is the plan's; on the stellar temperature
-      T* that hydrostatic models give, WO stars are 150–210 kK and WC4 already 117 kK (Tramper et
-      al. 2015, table 4; Sander et al. 2019), so 10⁵ K is the τ = 2/3 scale (Aadland et al. 2022).
-      (3) The backbone's helium stars are hydrostatically hot (100–150 kK), so almost every
-      WN star is WN2–3; observed WN5–9 stars have T* of 36–63 kK (Crowther 2007, section 3.3).
-      (4) The LBV criterion's 8,000 K is the plan's; Humphreys and Davidson (1994, section 2.4)
-      put eruptions at 7,000–8,000 K, and HPT's limit only admits stars cooler than
-      5,772 K (L ÷ 10⁵ L☉)^½, 14–32 kK, cooler than many quiescent LBVs (the exponent printed
-      as ¼ until 2026-10-29: R = L^½ (5,772 K ÷ T)² in solar units, so 10⁻⁵ R L^½ > 1 is
-      T < 5,772 K (L ÷ 10⁵ L☉)^½, as the figures beside it have always been).
-    - `Track::window_where` returns the hull of the ages at which the predicate holds (257
-      samples a living segment, 60 bisections at each change), within the part of the track
-      that is built; the 60 M☉ star's window has no gap in the test.
-  - _T26.d._ `variability::light_factor_at(star, cycles, t)`: `StarModel` holds no seed or ID, so
-    the star's `star.var.cycle` series comes in beside it (a deviation from the plan's
-    `light_factor_at(star, t)`); `StarModel::variability_at(t)` is new. The clock's frequency is the
-    epoch's plus its first derivative from the period ±10 years about the epoch, held so that the
-    frequency stays above half the epoch's over the source horizon and constant in its drift
-    beyond it; a star whose kind at t is not its kind at the epoch takes the period at t with no
-    drift. The light curve is −(A ÷ 2) cos(π g), maximum light at the cycle's start, rising over
-    0.3 of the cycle for Cepheids, 0.15 for RR Lyrae, 0.4 for Miras and 0.5 otherwise; per-cycle
-    amplitude marks (uniform, standard deviation 20% for Miras, 30–50% for semiregulars and
-    irregulars) blend smoothly into the next cycle's; period jitter is the monotone phase's
-    amplitude, 0.03 cycles for Miras, 0.05–0.08 for the rest of the irregular kinds, 0 for the
-    regular pulsators; forty octaves on a one-cycle lattice for every irregular kind (the shortest
-    clock period over the source horizon), so the octave count never depends on the period. The
-    shares are the lane's, provisional.
-  - _T31._ `stellar::testing`'s `Sampling`, `SampledStar`, `SampleInputs`, `sample_population`,
-    `sample_population_star`, `sample_inputs`, `sample_star`, `sample_range`,
-    `reference_position` and `components_of`, under `cfg(test)` or the `testing` feature. The
-    draws of mass, age and [Fe/H] are a SplitMix64 sequence of the sample's
-    seed, key and index, opening no domain tag; each star's own draws are on a synthetic layer-A
-    body. _Deviation:_ the slow tests live in `stellar/testing.rs`'s own test module, not
-    `tests/stellar_statistics.rs`: an integration test cannot reach a module behind the `testing`
-    feature unless the build enables it, and no build does, so `required-features` would skip it
-    under `just test-slow`. Galaxy-wide counts sample each density component at its population's
-    reference position (the solar circle for the discs and halo, 3,000 ly along the bar for the
-    bulge and bar, 300 ly for the nuclear disc) in the bands that hold the counted objects; the
-    young disc's metallicity is the solar circle's. The galaxy-wide counts and the core-collapse
-    rates do not draw an age for their stars: each star's full track gives the ages at which it is
-    the counted object (sampled at 4,000 steps of its life, 400 of its nebula's span, 400
-    log-spaced remnant ages for a pulsar), and the component's age distribution weighs them, so
-    short phases are not left to chance (4,000 primaries a component and band). T28.e's
-    giant-eruption rate is not retuned here (T28 is not built).
-  - _T31, measured at Milky Way parameters_ (fixed seed; the slow tests print every figure):
-    - Thin disc at 26,000 ly, 10⁶ primaries: M 76.1%, K **15.5%**, G **4.71%**, F 2.98%, A 0.548%,
-      B 0.095%, O 1.2 × 10⁻⁶ of the main sequence; white dwarfs 8.61% and giants 0.436% of objects.
-    - Old populations: the heaviest living primary of 10⁵ in band C is **1.096** (thick disc),
-      **1.166** (bulge) and **1.064 M☉** (halo); 0.43%, 6.1% and 0.05% of those primaries live
-      above 1 M☉, at [Fe/H] up to +0.38, +1.75 (held at Z = 0.03 by the formulae) and +0.52 and
-      ages from 10.0, 8.0 and 11.0 Gyr. Giants and horizontal-branch stars 0.36%, 0.39% and 0.33%
-      of objects. Halo RR Lyrae **5.3 × 10⁻⁴** per M☉ of living primaries.
-    - Layer E: none of 2 × 10⁴ old-thin-disc primaries living; neutron stars 64.8% of the neutron
-      stars and black holes; 94% of the young disc's living layer-E stars under 30 Myr.
-    - Galaxy-wide: protostars 9.7 × 10⁵; stars above 100 M☉ 1,107; Wolf-Rayet stars 1,244; LBVs
-      181; classical Cepheids 44,500; planetary nebulae 6,200; AGB white-dwarf births **0.64 a
-      year**, with a nebula for **0.55** of them; living radio pulsars 6.3 × 10⁵, 11.3% of them
-      beamed along +x; core collapses 2.13 a century, and 1.77, 1.22, 1.09 and 2.73 at seeds 1–4.
-  - _T31, findings (the bold figures), pinned provisionally within 15% (for a ruling; the
-    windows are not widened):_
-    - The thin disc's K dwarfs (15.5% against 10–14%) and G dwarfs (4.7% against 5–8%): the
-      mass function's primaries of 0.5–1.0 M☉ against the census's.
-    - "Nothing living above the turn-off (0.8–1.0 M☉)": the populations' own ages and
-      metallicities keep stars of up to 1.1–1.17 M☉ alive (the bulge from 8 Gyr, and its [Fe/H]
-      field's tail above Z = 0.03). The window, or the populations' age and metallicity ranges,
-      is the question.
-    - Halo RR Lyrae at 5.3 × 10⁻⁴ per M☉ of living primaries, five times the observed 1 × 10⁻⁴
-      (Sesar et al. 2013 over Deason et al. 2019 and Mackereth and Bovy 2020; the window of a
-      factor of three is 3.3 × 10⁻⁵–3 × 10⁻⁴): the RR Lyrae strip's reach or the halo's
-      horizontal-branch morphology. Companions are not in the mass, which would lower it by a
-      quarter or so.
-    - AGB white-dwarf births at 0.64 a year against 1.2–3.0, and a nebula share of 0.55 against
-      0.6–0.95. By ruling 127.2 the light low-end cores of rulings 92 and 99 are to be examined
-      first. The planetary nebulae (6,200) sit inside the plan's window but under its expected
-      20,000–40,000, as the birth rate does.
-    - The core-collapse window "1–8 across seeds" is met with little margin at seed 3 (1.09).
 - **Ruling 147.2, as built (lane `kick147`, 2026-09-30; moves output, provisional bless at 15 for
   the version 16 batch).** `ReferencePopulation::score`'s members are the iron-core neutron stars
   that take the ordinary mode: the companion-stripped mark is applied (`binarity::is_stripped`,
@@ -4536,863 +2972,6 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
     deferred, its window unchanged; P06.T19.e re-pins it at its re-measured value.
   - Neutron stars above the escape speed 0.1159, against 12–20% (expected about 0.15): held at the
     measured value, and ruled as the line above.
-- **`absolute_v_mag`, added by rendering plan R02 (R02.T5, by agreement,
-  `8dfe57b`, now `3f5b34d4`; recorded in RM1 validation, 2026-10-02).** P06.T33's
-  `StellarBriefDto` gains `absolute_v_mag: Option<f32>`, M_V in mag (Johnson V
-  at 10 pc), with `#[serde(default, skip_serializing_if = "Option::is_none")]`
-  and `#[ts(optional)]`, so a brief without it keeps its wire form and `PROTOCOL_VERSION` is
-  unchanged. The server fills it (`convert/stellar.rs`, `brief_absolute_v`) from the brief's log L
-  and T_eff as M_V = 4.74 − 2.5 log L − BC_V (Pecaut and Mamajek's sequence in Mamajek's
-  2022.04.16 table, IAU 2015 zero point), as P06.T23.a specifies, for living kinds only: `None` for
-  white dwarfs, neutron stars, black holes and no remnant, without a luminosity, or below the
-  corrections' last row (1,710 K). Its golden change is the three rows of the server's
-  `systems_in_range_briefs.golden` that gained the field.
-- **Deviations in T28.a, as built (lane `14-p06-t28a-flares`, 2026-10-14; at version 22, no
-  bump).** Flares are `stellar::events::flares`; nothing reads them yet (T28.g and plan 12's
-  P12.T5.e will).
-  - _API._ `FlareModel::of(&StarModel) -> Option<FlareModel<'_>>`, a `RateModel` that borrows the
-    star (its rate at t reads the star's phase then), with `star`, `activity` (T25's at the
-    epoch), `quiescent_luminosity`, `index` (β), `floor_joules`, `listed_rate` (ν above the floor),
-    `rate_above(energy_joules)`, `flares_at(t)` and `energy_joules_at(u)`. `Flare` (`Copy`): `id`,
-    `onset`, `end`, `duration` (a `Span`), `energy_joules`, `half_width_seconds`, `peak_factor`,
-    `is_active_at(t)` and `luminosity_factor_at(t)`. `flares_in(star, series, window, out)`,
-    `flares_active_at(star, series, t, out)` and `flare(star, series, id)`, whose series is
-    `EventSeries::new(seed, tags::STAR_FLARE, body.into())`, beside the star as for T26.d's
-    `light_factor_at` (they debug-assert the tag). Also public: `saturated_rate(mass)` (an
-    `EventsPerSecond`) and the constants `BIN_SECONDS`, `LOOK_BACK_BINS`, `MAX_DURATION`, `FLARE_INDEX`,
-    `REFERENCE_ENERGY_JOULES`, `FIXED_FLOOR_JOULES`, `MAX_ENERGY_JOULES`, `TESS_BAND_SHARE`,
-    `SOLAR_TYPE_SATURATED_PER_YEAR`, `SOLAR_TYPE_ANCHOR_JOULES` and `DURATION_INDEX`. Energies are
-    joules (erg in the sources). `system.rs` is unchanged: `StarModel::activity_at` is not added,
-    since the module reads the activity at the epoch only.
-  - _Who flares._ Where T25 gives an `Activity`: pre-main-sequence and main-sequence stars below
-    1.3 M☉. The phase rule copies T25's private `is_cool_dwarf` (phase before the end of the main
-    sequence, mass below the Kraft break); a test checks it against `rotation::activity` over 10
-    masses, 8 ages and the horizon's ends.
-  - _The law._ ν(>E) = ν₀ [(E ÷ E₀)^−β − (E_max ÷ E₀)^−β] for bolometric E from the floor to E_max,
-    with ν₀ = ν_sat(M) × 10^(log L_X ÷ L_bol + 3.13), T25's continuous activity (Wright et al.
-    2011: 1 below Ro = 0.13, Ro^−2.70 above), not `ActivityLevel`'s bands. No one survey gives
-    the index and the normalisation against activity for M and Sun-like dwarfs alike, so the law
-    takes the index and the M dwarfs' end from one survey, the Sun-like end from another and the
-    scaling with activity from a third, and blends the two ends in mass. That departs from design
-    note 22's "the task picks and records one":
-    - _The distribution:_ Medina et al. 2020 (ApJ 905, 107), α = 1.98 ± 0.02 (section 5.2.4, a
-      maximum-likelihood fit with completeness, 38 stars of 0.1–0.3 M☉), so β = 0.98; and their
-      saturated rate, ln R31.5 = −1.30 ± 0.08 a day above 10^31.5 erg in the TESS band for every
-      star below Ro = 0.1 (section 6.1; their "log" is natural, section 5.2.3), held below 0.3 M☉,
-      where they find no dependence on mass. E₀ = 1.51 × 10³² erg, their bolometric equivalent.
-    - _The activity relation:_ Audard et al. 2000 (ApJ 541, 396, sections 5.2.1–5.2.2): the rate of
-      flares above 10³² erg is log N = −26.7 + (0.95 ± 0.10) log L_X, "compatible with
-      proportionality", and normalised to the saturation turn-on it is constant at saturation; so
-      the rate at a fixed energy is taken proportional to L_X ÷ L_bol at a fixed mass. Yang and
-      Liu 2019 (ApJS 241, 29, Fig. 5), fitting flare activity with the turnoff fixed at Wright's
-      Ro = 0.13, find unsaturated slopes of 2.24 ± 1.69 (M) and 2.39 ± 1.74 (K); Maehara et al.
-      2015 (Earth,
-      Planets and Space 67, 59, section "Occurrence frequency distribution") find the solar-type
-      rate above 10³³ erg roughly ∝ P^−3 over 2.5–20 d. Both agree with 2.70 within their errors.
-    - _The Sun-like end:_ ν_sat(1 M☉) above 10³³ erg = 7.50 a year, the geometric mean of Maehara
-      et al.'s Fig. 2 bins (2.21, 0.149 and 0.0279 a star a year at 2.5–5, 5–10 and 10–20 d, read
-      from the figure; 5,300–6,300 K, log g 4.0–4.8) each over the law's decline at the bin's
-      geometric-mean period with Wright's τ(1 M☉) = 14.45 d (12.2, 5.34, 6.49). Their P < 2.5 d
-      bin (0.68) lies below the 2.5–5 d one and is not used. Held from 1.0 to 1.3 M☉. It is an
-      extrapolation to saturation, 3.4 times their highest bin, which no bin observes.
-    - _The blend:_ log ν_sat at E₀ linear in log M between 0.3 M☉ (0.2725 a day) and 1.0 M☉
-      (0.1309 a day): this model's own interpolation between its two sourced anchors,
-      provisional.
-    - Normalised at the fixed E₀, never at the floor, so a higher floor drops only small flares.
-  - _The band._ Bolometric. Medina et al.'s TESS energies over their stated 20.9% (a
-    9,000 K blackbody in 600–1,000 nm; a blackbody integral gives 0.2097); Maehara et al.'s are
-    bolometric already (Shibayama et al. 2013, ApJS 209, 5, section 2.3, a 10,000 K blackbody).
-    At 9,000 K Shibayama et al.'s method gives 66% of its 10,000 K energies, so the two anchors'
-    energy scales may differ by up to that; not corrected.
-  - _Floor and E_max._ The fixed floor is 10³⁰ erg in the TESS band, 4.78 × 10³⁰ erg
-    bolometric: where Medina et al.'s nearest star, Proxima Centauri, is 30% complete (their Fig.
-    5, read; its 50% point is 10^30.16), the threshold above which they fit α (section 5.2.4), so
-    the lowest energy their fit reaches. The 64-a-day floor never binds: a saturated 0.2 M☉ dwarf
-    reaches 64 a day only at 5.75 × 10²⁹ erg, and lists 8.03 a day above the fixed floor. E_max =
-    10³⁶ erg: the top of Maehara et al.'s fitted range (4 × 10³³–10³⁶ erg) and of Yang and Liu's
-    for F and G stars (10^34.5–10³⁶, Fig. 3). Shibayama et al.'s most energetic superflares are
-    1.1–1.3 × 10³⁶ erg, on G dwarfs rotating in 0.8–3.9 d (Fig. 3, table 3), and those on
-    Sun-like stars (P > 10 d) reach 5.2 × 10³⁵ erg (Fig. 4). E_max also keeps every flare under
-    the day's look-back.
-  - _Time._ Bins of 86,400 s looking back one. The activity, ν₀, the floor and the
-    quiescent luminosity are the epoch's; the rate is ν(>floor) wherever `state_at(t)` gives a
-    flaring phase (read at +H beyond the clock window) and 0 elsewhere; `bound` is the constant.
-    _Built: the phase check per candidate, not the interval._ Measured during the build with a
-    timing harness since taken out (the sim's tests read no clocks; opt-level 2, the shared
-    laptop, load about 3): a year of the saturated dwarf, 2,968 flares, 2.56 ms, against 0.64 ms
-    for the same bins at a constant rate, so the check and the marks cost about 0.65 µs a flare.
-    The interval needs two bisections on `state_at` over the star's age (about 180 calls, some
-    110 µs) in every `FlareModel::of`, which every call builds; that is dearer for any listing of
-    fewer than about 170 flares (three weeks of a saturated dwarf, any instant's query, and
-    nearly every sampled star's 30 days). `Track::window_where` would find it cheaply but has
-    only the LBV predicate, and `sse` is outside this lane.
-  - _Marks._ Word 0 of the event's stream: the energy, E = floor × [1 − u (1 − (E_max ÷
-    floor)^−β)]^(−1 ÷ β) from one `uniform()` in [0, 1). Nothing else is drawn; the duration
-    and peak follow from E, and scatter added later takes words 1, 2, … in order.
-  - _Duration and light curve._ Davenport et al. 2014 (ApJ 797, 122): the rise of their
-    equation 1, 1 + 1.941x − 0.175x² − 2.246x³ − 1.125x⁴ on −1 ≤ x ≤ 0, and the decay of
-    equation 4, 0.6890 e^(−1.600x) + 0.3030 e^(−0.2783x), x in t½ from the peak, followed to
-    x = 20, the template's span. The printed pieces miss 0 at the onset by 0.005 and 1 at the
-    peak by 0.008, and the decay never reaches 0, so each is rescaled to its ends, (F − F(−1)) ÷
-    (1 − F(−1)) and (F − F(20)) ÷ (F(0) − F(20)): continuous, area 1.810 t½. t½ is Maehara et
-    al.'s e-folding decay time (equation 7, τ ∝ E^(0.39 ± 0.03)) over 1.00995, where the
-    template falls to 1/e; their normalisation is not printed and is read from Fig. 6's
-    regression line, 11.1 min at 10³⁴ erg (1.9 min at 10³², 160 at 10³⁷). A flare lasts 21 t½,
-    23.2 h at E_max, under the 24 h cap (asserted in debug builds; at the cap t½ would be held and
-    the peak raised to keep the energy). Peak factor 1 + E ÷ (L_bol t½ × 1.810), L_bol the
-    epoch's, so ∫ ΔL dt = E (checked by quadrature to 10⁻⁵). Maehara et al.'s relation is fitted
-    to G dwarfs from about 2 × 10³² to 10³⁶ erg and is carried, unsourced, to K and M dwarfs and
-    down to the floor; see the deferred findings for GJ 1243.
-  - _Sanity check, Sun-like (Maehara et al. 2015)._ The median Sun (P 28.97 d, Ro 2.00, log L_X ÷
-    L_bol −6.34) flares above 10³³ erg once in 215 years, 10³⁴ once in 2,080 and 10³⁵ once in
-    21,900, and 0.87 times a year above its floor. Maehara et al. put stars of the Sun's period
-    (P ≈ 25 d) at once in 500–600 years above 10³³ erg; the law gives once in 144 years at 25 d,
-    3.5–4 times as often (their P^−3 against the law's P^−2.70 is a factor 1.2 of it; their
-    figure scales their Sun-like subsample, 5,800–6,300 K, whose rate at P ≥ 10 d, 10³³ erg once
-    in 70 years, is half the solar-type 10–20 d bin's). Their Fig. 2 bins against the law at the
-    bins' geometric-mean periods: 2.21, 0.149, 0.0279 and under 0.0125 a year (P ≥ 20 d) against
-    1.36, 0.209, 0.0322 and 0.0050.
-  - _Sanity check, saturated M dwarf (Medina et al. 2020)._ A 0.2 M☉ dwarf at 300 Myr (Ro 0.036,
-    0.00566 L☉) flares 0.2725 a day above 1.51 × 10³² erg, e^−1.30 by construction. Their slow
-    rotators (Ro > 0.5) show ln R31.5 < −3.86; the law gives −4.94 at Ro = 0.5 and −6.81 at 1.
-    Against GJ 1243, the M4 dwarf of Davenport 2016 (ApJ 829, 23, Fig. 6, 14 Kepler quarters: log
-    ν = 31.08 − 0.98 log E_Kp a day) with the 42% Kepler share above: 0.82 a day above 1.51 ×
-    10³² erg, 3.0 times the law; GJ 1243 is among the most active of its class (Hawley et al.
-    2014, table 2: 5.1 × 10⁻³ of its light in flares).
-  - _Tests._ `cargo test -p hyperion-sim stellar::events`: 16 tests and one ignored, the
-    template's ends, area and e-fold; the solar-type fit and the blend's ends; the floor's rise to
-    64 a day (`floor_and_rate` at ten times the rate that binds, which no star reaches with these
-    constants); who flares (1.5 M☉, a pre-main-sequence 2 M☉ star, a giant, a white dwarf, a
-    brown dwarf, a protostar and an unformed star have no model); the phase rule against T25; the
-    bound over 6 masses × 4 ages × 3 rotation ranks × 3 metallicities; the two sanity checks (their
-    brackets, a factor of five about once in 550 years and of 2.5 about each Fig. 2 bin, are the
-    lane's); floor, E_max (no rate from it up), duration and a K–S test of a year's energies
-    against the truncated law; the factor's ends, continuity and integral; `flare(id)` over six
-    bins around a protostar's end a century before the epoch (rejected candidates, numbers beyond
-    the count, foreign IDs, a star that does not flare); partitions in any order and on threads
-    (compiled out on wasm32-wasip1); `flares_active_at` against the listing; and the +900-year
-    no-history test, whose cold call is the first on a fresh model. The golden `stellar/flares`
-    (363 lines, header 22) pins the template's profile at four points and its area; the saturated
-    M dwarf, the median-draw Sun (over three days and over a year, which holds one flare) and a
-    0.8 M☉ pre-main-sequence star at 10 Myr (Ro 0.21), each flare's ID, onset, energy, duration,
-    t½, peak factor and factor at 0.5, 1, 3 and 15 t½ after the onset; and the 0.5 M☉ star whose
-    protostar phase ends mid-bin, over that bin and its neighbours, so that its rejected
-    candidates show as gaps in the numbers. The slow test
-    `the_mean_count_over_10_000_stars_matches_the_rate_integral` (`#[ignore]`, 2.3–2.9 s under
-    `slow-test`): 10⁴ stars of T31's sampler at Milky Way parameters, the seven populations in
-    turn, over 30 days from the epoch; expected 246,141.2, counted 246,325, Poisson interval
-    244,510–247,775 at α = 10⁻³. A star with a model flares at the epoch, the window's start, so
-    none can enter a flaring phase in it, and the test asserts none leaves one. Of the 10⁴, 2,051
-    (20.5%) have no activity at the epoch, and none of them is in a flaring phase at either end of
-    the source horizon; of the 7,949 with one, 4 are not flaring at an end, so enter or leave a
-    flaring phase inside the horizon. `flares_in` over all 10⁴ stars' 30 days took 234 ms
-    (measured as above).
-- **Deferred findings (2026-10-13 rule) (P06.T28.a).** Recorded and deferred: each leaves the
-  algorithm and every contract as they are. The leads are unread unless said.
-  - _Stars that do not flare here._ Protostars (lead: X-ray flares of Orion's young stars in the
-    COUP survey, Getman et al. 2008, ApJ 688, 418); pre-main-sequence stars from 1.3 M☉, many
-    still convective early on (the same lead, and T25's pre-main-sequence rotation above the
-    Kraft break); giants (Yang and Liu 2019, section 4.5, read: 76 flaring Kepler stars below
-    log g = 3.5, energies 10^35.5–10³⁷ erg in their Fig. 3; the largest TESS flare of Günther et
-    al. 2020, AJ 159, 60, read, 10^36.9 erg, is on a G giant of 9.3 R☉); remnants (no source
-    read; magnetars are T28.c); and objects below 0.1 M☉, `StarModel`'s
-    cooling branch (lead: K2 superflares on L dwarfs, Paudel et al. 2018, ApJ 858, 55). Each
-    needs an activity that T25 does not give, or a rate of its own.
-  - _The epoch's side._ A star with no activity at the epoch never flares: one that leaves its
-    protostar phase between the epoch and +H, or ended its main sequence between −(H + L) and the
-    epoch, has no flares on the side where it was a flaring star. A star with an activity flares
-    only while its phase allows, so it starts or stops at such a change, at the epoch's rate. The
-    exposure is small: of the slow test's 10⁴ sampled stars, none without an activity at the
-    epoch is in a flaring phase at either end of the horizon, and 4 with one are not. Lean: read
-    the activity at the first flaring instant where the epoch's is `None`, through
-    `StarModel::activity_at`.
-  - _No scatter between stars._ Stars of one mass and activity share one rate, where observed
-    rates at a given Rossby number scatter by over a decade (Medina et al.'s Fig. 7, Yang and
-    Liu's Fig. 5). A per-star rank needs a domain tag of its own (`star.flare_activity`, say),
-    which this task may not add; a later task, with a version bump.
-  - _Saturation's end for M dwarfs._ Medina et al.'s mid-to-late M dwarfs stay saturated to
-    Ro ≈ 0.5 (section 6.1); the law, on Wright's 0.13, gives a tenth of saturation at Ro = 0.3.
-    Lean: a flare law of its own for M dwarfs below Ro ≈ 0.5, from Medina et al.'s Fig. 7, which
-    would leave T25 as it is.
-  - _One index for every mass._ Maehara et al. fit α = 1.5 ± 0.1 to solar-type superflares
-    (4 × 10³³–10³⁶ erg), flatter than β + 1 = 1.98: the law gives Sun-like stars fewer large
-    superflares relative to 10³³ erg (10³⁵ once in 21,900 years for the median Sun). Lean: blend
-    β in mass as ν_sat is blended.
-  - _E_max and the look-back._ Davenport 2016's G dwarf KIC 11551430 flares above 10³⁶ erg. A
-    flare above about 1.09 × 10³⁶ erg would outlast the day's look-back. Lean: keep 10³⁶ erg, or
-    look back two bins for a higher cap.
-  - _Durations of M-dwarf flares._ Maehara et al.'s duration law is fitted to G dwarfs. Hawley et
-    al. (2014, section 4.1) give GJ 1243's flares of E_Kp ≈ 10³¹ erg an amplitude of about 0.005
-    and those of 10^30.5 erg about 0.002, which with its log L_Kp = 30.67 (table 2) and the
-    template's area imply t½ ≈ 240 s and 190 s; the law gives 62 s and 40 s at their bolometric
-    equivalents (a 9,000 K blackbody's 42% in a 420–900 nm Kepler box, the lane's estimate). So
-    the law's M-dwarf flares may be three to five times too short and too peaked at a given
-    energy, though Kepler's one-minute cadence lowers the observed amplitudes, which biases the
-    implied t½ up. Lean: a duration relation for M dwarfs, fitted to Hawley et al.'s Fig. 10 or
-    to Davenport et al.'s 2014 t½ distribution.
-  - _Sources set aside._ Davenport 2016's flare-activity relation ([log L_fl ÷ L_Kp]_sat = −2.99
-    below Ro = 0.036, slope −0.97; Kepler band, stars with at least 100 flare candidates) would
-    give the Sun (Ro ≈ 1.8) L_fl ÷ L_Kp ≈ 10^−4.64; spread at α = 2 over three to five decades of
-    Kepler energies, that is superflares above 10³⁴ erg of order 20–40 a year. Yang and Liu 2019's
-    absolute flare activity (about 10⁻⁷ at saturation in their Fig. 5, 10^−6.75 at most by their
-    equation 1) is 3.7 decades below Davenport's −2.99 and 4.4 below Hawley et al.'s 5.1 × 10⁻³
-    for GJ 1243, both Kepler measurements, so only their slopes are used (their turnoff is
-    Wright's 0.13, fixed). Davenport et al. 2019 (ApJ 871, 241)
-    model the distribution in mass and age, not activity, and over-predict the Sun by their own
-    account (section 5).
-  - _Figures read from plots._ Maehara et al.'s Fig. 2 bins and Fig. 6 normalisation, and Medina
-    et al.'s Fig. 5 floor, are pixel readings, good to a few per cent; a source with tabulated
-    values would replace them.
-  - _The quiescent luminosity is the epoch's._ The peak factor of a pre-main-sequence star
-    divides by its luminosity at the epoch, which drifts by a few per cent over the 2.6 × 10⁵
-    years of the source horizon. Lean: T28.g divides by L(t) when it composes the factor.
-- **Deviations in T28.d, as built (lane `22-p06-t28d-fuor`, 2026-10-15; at version 22, no
-  bump).** FU Orionis outbursts are `stellar::events::fu_orionis`, built to main's ruling of
-  2026-10-15, which supersedes the task text's rates, marks and 240–830 window; nothing reads them
-  yet (T28.g and plan 12 will). `system.rs`, `premain.rs`, `flares.rs` and `events/` are unchanged.
-  - _API._ `FuOrionisRates::new(initial_mass, disc_rank) -> Option<_>`, the rate as a closed form of
-    age with no track or clock (`disc_lifetime`, `has_disc_phase`, `last_age`, `rate_at_age(age)`,
-    `component_rate_at_age(component, age)`), which the galaxy-wide test builds per sampled star
-    without its track. `FuOrionisModel::of(&StarModel) -> Option<FuOrionisModel<'_>>`, `None` below
-    0.1 M☉ and `Some` for every other star (its rate is zero outside its young ages), a `RateModel`
-    that borrows the star, with `star`, `rates`, `disc_lifetime`, the clock times `formation`,
-    `class_0_end`, `protostar_end`, `disc_end` and `last_instant`, `rate_at_age`,
-    `component_rate_at_age` and `component_rate_at(component, t)`. `OutburstClass` with `FuOri` and
-    `V1647Ori` (the ruling's names) and, added, `OutburstComponent` with `ProtostellarFuOri`,
-    `V1647Ori` and `DiscFuOri` (`ALL`, `class`, `peak_factor_range`, `rise_range_years`), the rate's
-    three terms, which word 0 picks and which set the factor's range. `Outburst` (`Copy`): `id`,
-    `component`, `class`, `onset`, `peak`, `end`, `rise`, `decay`, `duration` (`Span`s),
-    `drawn_peak_factor`, `peak_factor` (capped), `fading_magnitudes_per_year` (`Some` ḟ for the FU
-    Ori class), `is_active_at(t)` and `luminosity_factor_at(t)`.
-    `outbursts_in(star, series, window, out)`, `outbursts_active_at(star, series, t, out)` and
-    `outburst(star, series, id)`, the series
-    `EventSeries::new(seed, tags::STAR_FU_ORIONIS, body.into())` beside the star as for flares (tag
-    debug-asserted); `outburst` is `None` for another series' ID, a rejected candidate, a number
-    beyond the count or an object below 0.1 M☉. Public constants with their sources: `BIN_SECONDS`
-    (500 Julian years, 15,778,800,000 s), `LOOK_BACK_BINS` (1), `MAX_DURATION` (one bin),
-    `FU_ORI_PROTOSTELLAR_PER_YEAR`, `CLASS_0_PER_YEAR`, `CLASS_I_PER_YEAR`,
-    `V1647_ORI_CLASS_0_PER_YEAR`, `V1647_ORI_CLASS_I_PER_YEAR`, `FU_ORI_DISC_PER_YEAR`,
-    `CLASS_0_END` (t_c), `STEP_WIDTH` (w), `DISC_PHASE_MASS_LIMIT` (2 M☉) and the seven mark ranges
-    (`FU_ORI_PROTOSTELLAR_PEAK_FACTOR`, `FU_ORI_DISC_PEAK_FACTOR`, `FU_ORI_RISE_YEARS`,
-    `FU_ORI_FADING_MAGNITUDES_PER_YEAR`, `V1647_ORI_PEAK_FACTOR`, `V1647_ORI_RISE_YEARS`,
-    `V1647_ORI_DECAY_YEARS`), as `(lo, hi)` pairs like plan 14's ranges.
-  - _Departures from the task text (the ruling), each with its source._
-    - _Two classes of one kind_ on the one tag 0x0106 and one series, Fischer et al. 2023 (PPVII,
-      arXiv:2203.11257v2, Table 1, "FU Ori event" and "V1647 Ori event"; the V1647 Ori row gives no
-      figures, "intermediate between those of EX Lup bursts and FU Ori outbursts").
-    - _The rates._ Class 0 (0 < age < t_c) 1/5,000 FU Ori + 1/480 V1647 Ori, total 1/438 years;
-      Class I (t_c ≤ age < t_p) 1/5,000 + 1/2,671, total 1/1,741 years: Zakri et al. 2022 (ApJL
-      924, L23, arXiv:2201.04647v1, Table 3, the medians under the logarithmic prior, 95% intervals
-      161–1,884 and 527–12,011; three ≥ 2 mag mid-infrared bursts among 92 Class 0 and two among 227
-      Class I/flat-spectrum protostars, section 4.1, over a 13-year baseline). The V1647 Ori rates
-      are those totals less the FU Ori rate (built as the difference, 1/480.05 and 1/2,671.1),
-      since Zakri et al.'s bursts include V2775 Ori, "one of the lowest amplitude FU Ori outbursts
-      known" (their section 3). The protostellar FU Ori 1/5,000 is the brainstorm's, inside
-      Contreras Peña et al.'s (2019, MNRAS 486, 4590, arXiv:1904.04068v1) Class I estimates of 3.0,
-      6.0 (section 6.1.1) and 13 kyr (section 7.4). The disc's 1/112,000 is their Class II
-      recurrence, 112 (+68, −38) kyr with the 1/τ prior (section 6, equations 8–9; 131 kyr without,
-      equation 7; 100–130 kyr with contamination, section 7.4), for an outburst that "rises by more
-      than four magnitudes" (section 6).
-    - _The t_c step_ at T15's Class 0 end, t_p (1 − 1/√2) = 146,447 years (`protostar_class`).
-    - _The 2 M☉ disc limit_: the disc phase only for stars under 2 M☉, T24.b's T Tauri class; the
-      protostar phase at every mass of 0.1–150 M☉, with the cap.
-    - _The marks_, log-uniform and independent, each from one `uniform()`: the FU Ori class, F
-      5–50 (protostellar) or 5–300 (disc), rise 0.25–25 years, ḟ 0.012–0.13 mag a year and a decay
-      of min(2.5 log₁₀ F ÷ ḟ, 500 years − rise) from the drawn F; the V1647 Ori class, F 3–15, rise
-      0.25–10 years, decay 5–20 years. Sources in each constant's documentation (Fischer et al.
-      2023, Table 1 and section 4.1.2; Audard et al. 2014, PPVI, arXiv:1401.3368v1, sections 2.2,
-      2.3.1 and 2.7 and Table 1; Zakri et al. 2022, sections 3.1–3.2; Szabó et al. 2021, ApJ 917,
-      80, and 2022, ApJ 936, 64; Hartmann and Kenyon 1996, ARA&A 34, 207, abstract only).
-    - _The Eddington cap_ (below), which the task text has not.
-    - _The windows_ in place of 240–830 a year (below).
-  - _The steps._ r(a) = C_p [r_FU + r_V0 C_c + r_VI S_c] + r_d S_p C_d [m < 2 M☉], S the smoothstep
-    3s² − 2s³ of width w = 0.05 Myr **centred** on t_c, t_p and t_d (so each star's expected count
-    is the sharp model's, checked by quadrature to 10⁻⁹), and C = 1 − S computed from the step's
-    far side, so that it stays accurate where it is small; zero at and before the onset of
-    collapse and from `last_age`, max(t_p, t_d) + w/2 (t_p + w/2 from 2 M☉). A disc that ends
-    before t_p gives no disc term, and the protostellar rates hold through t_p whatever the disc
-    (one that ends inside the t_p step gives a partial one). r is non-increasing in age after the
-    onset. The onset of collapse itself is a sharp step, from zero to 1/438 a year at age 0, since
-    the ruling smooths only t_c, t_p and t_d; the bound takes the rate at the bin's first instant
-    after it, so it stays tight there too.
-  - _Time._ Bins of 15,778,800,000 s looking back one; a bin's mean is at most 1.14. The onset of
-    collapse, the three step centres and the last instant are turned into clock times once, the
-    epoch plus (age − age at the epoch) × 31,557,600 s floored to the nanosecond (as `mass_breaks`),
-    and the rate at t is formed from the whole nanoseconds between t and each, so no gigayear age is
-    read at t. `bound` is the rate at the bin's first instant after the onset, padded by 2⁻⁴⁰ of
-    itself against rounding (the sweep checks it at 43 instants of every bin, ends included, for
-    every step, 0.1–150 M☉, discs of 0.3 Myr, the median and 15 Myr, and discs ending inside the t_p
-    step or before it at 1.5 and 3 M☉); zero for a bin that ends by the onset or starts from the
-    last instant. `outbursts_in` lists only the part of the window between the onset and the last
-    instant, which drops nothing and spares an old star's empty bins, and `outbursts_active_at`
-    returns at once outside it.
-  - _Word layout._ Word 0, the component, one integer `Mark` through `pick_weighted` over the three
-    terms at the onset against their own sum, so the last threshold is 2⁵³ and a pick never fails;
-    word 1, F; word 2, the rise; word 3, ḟ (FU Ori) or the decay (V1647 Ori). Later scatter takes
-    words 4, 5, … in order.
-  - _Light curve._ F_eff^x with x = (t − onset) ÷ rise through the rise and (end − t) ÷ decay
-    through the decay, linear in magnitude both ways (Audard et al. 2014, section 2.3.1: FU Ori
-    and BBW 76 fade at constant rates in magnitudes); the rise's shape, linear in magnitude too, is
-    the lane's choice. Exactly 1 at the onset and the end and F_eff at the peak, continuous, with
-    no rescaling.
-  - _The Eddington cap._ F_eff = max(1, min(F, 1 ÷ Γ)), Γ = `wind::eddington_factor(L, M)` × (1 +
-    X), X = 0.76 − 3Z (`classify::peculiar`'s construction), from `state_at(min(onset, +H))`; the
-    quiescent luminosity of a protostar includes T15.a's accretion luminosity. A star with no state
-    by then (one that forms after +H, which no galaxy star does) is not capped. L_Edd ÷ L, the
-    largest factor the cap allows, at the median draws and solar composition (the test prints it at
-    0.02, 0.1, 0.3 and 0.49 Myr): up to 3 M☉ it is 218–34,000 and never binds; at 10 M☉ 53–187,
-    above every protostellar factor, so it never binds either; at 30 M☉ 48, 24, 13 and 9.3, so it
-    trims the largest FU Ori factors from the start, most of them by t_p, and some V1647 Ori ones
-    near t_p (30 of 62 outbursts at 0.49 Myr); at 100 M☉ 11, 17, 6.0 and 2.8, so it holds most FU
-    Ori outbursts throughout and every outburst near t_p (62 of 62 at 0.49 Myr).
-  - _Duty cycles_ from the mean marks (log-uniform means; the FU Ori decay 2.5 E[log₁₀ F] E[1/ḟ],
-    E[1/ḟ] = 31.75 years a magnitude): FU Ori outbursts last 100.5 years on average from a
-    protostar (rise 5.37, decay 95.2) and 131 from a disc (decay 126; the 500-year cut binds about
-    once in 1,800), V1647 Ori outbursts 13.5 years (2.64 and 10.8). The share of time in outburst:
-    Class 0, 2.0% FU Ori and 2.8% V1647 Ori (4.8%); Class I, 2.0% and 0.50% (2.5%); disc, 0.12%.
-  - _Against the plan's 10–100, 1–10 and 20–200 years._ Bolometric ratios in Audard et al.'s
-    Table 1: V2775 Ori 4.9–14 (11 in their section 2.7), HBC 722 10–17 (4.7–20 in section 2.7),
-    OO Ser 5.8–8.0, V1647 Ori 6.1–12.6, V1118 Ori 5.0–17.9, PV Cep 2.4, V2492 Cyg 3.1, EX Lup and
-    Parsamian 21 2.9: only HBC 722 lies wholly inside 10–100, and none reaches 30; the classical
-    FUors list no quiescent luminosity. Zakri et al.'s three are 3.7, 5.4 and 9.7. So the plan's
-    floor of 10 sat above most measured factors, which the ruling's 5 (FU Ori) and 3 (V1647 Ori)
-    meet. Rises: the plan's 1–10 years missed HBC 722's months and V1515 Cyg's two to three
-    decades; the ruling's 0.25–25 years covers all but V1515 Cyg's ~30 years (Szabó et al. 2022,
-    section 3.1). Decays: the plan's 20–200 years had no V1647 Ori-type event (OO Ser and others
-    fade in about 5 years, Fischer et al. 2023, section 4.1.2) and fell short of FU Ori's centuries
-    at 14 mmag a year; the ruling's FU Ori decays run 13–354 years from a protostar and 13–500 from
-    a disc, and the V1647 Ori class's 5–20.
-  - _Tests._ `cargo test -p hyperion-sim stellar::events`: 18 tests and one ignored in `fu_orionis`
-    (beside T28.a's 16 and one): the phases' totals, the components and zero outside them, from 1.99
-    to 150 M☉, and the clock model against the closed form; each step's integral against the sharp
-    step's; the age rules against T15 (`state_at` is `Protostar` exactly below t_p, and
-    `protostar_class` `Class0` exactly below t_c, at 7 masses × 8 ages × 5 clock times; the clock
-    times are their ages to 10⁻³ years); the bound sweep (541,800 instants); the binomial shares of
-    word 0 in Class 0 and Class I, and the disc's single component; `outburst` by ID around an onset
-    of collapse mid-bin, over 60 series (rejected candidates, numbers beyond the count, foreign IDs,
-    a brown dwarf); K–S tests of every mark of the three components and the FU Ori decay rule, with
-    the cut at the corner; the factor's ends, peak, continuity, F^½ at half the rise and the decay,
-    and its shape; the cap over 9 masses × 4 ages; objects of 0.01–0.099 M☉ and a 3 M☉ star past its
-    step; partitions in any order and on threads (compiled out on wasm32-wasip1), and at the active
-    part's edges (the onset of collapse and the last instant, a nanosecond either side); the cut to
-    the active part against the uncut bins, for four stars whose edges lie in the source horizon;
-    the step width's three forms; `outbursts_active_at` against the listing; and the +900-year
-    no-history test. The golden `stellar/fu_orionis` (972 lines, header 22): a Class 0 protostar of
-    0.5 M☉ at 0.1 Myr over 5,000 years; a 1 M☉ star at t_c over 10,000 years of its step; a 0.3 M☉
-    star at 2 Myr with its 3 Myr disc, over the source horizon in four series; a 0.8 M☉ star at 1.05
-    Myr whose disc ends at 1 Myr, over the horizon in six; a 30 M☉ protostar at 0.49 Myr over 20,000
-    years, where the cap binds. Each with its step centres, the bound of the bins holding them and
-    the clock's rate a quarter step either side (what thinning reads), its rate and components at
-    six ages, and each outburst's ID, onset, class, component, drawn and capped factor, rise, decay,
-    ḟ and factor at four instants (70 outbursts). The slow test
-    `the_mean_count_over_10_000_stars_matches_the_rate_integral` (`#[ignore]`, 1.1 s under
-    `slow-test`): 10⁴ stars of the young thin disc's masses, compositions and draws, at ages from a
-    test-local LCG over 0–16 Myr, over the source horizon's 528 whole bins; expected 84,835.4,
-    counted 85,340, interval 83,879–85,795, and the FU Ori class expected 17,809.4, counted 18,159,
-    interval 17,372–18,250 at α = 10⁻³ (694 of the stars are below 0.1 M☉; 161 form, 152 end their
-    protostar phase and 140 their disc inside the window). The FU Ori count's z of 2.6 is that
-    seed's: a check harness since taken out gave z of −0.49 to 0.42 for the FU Ori class and −0.21
-    to 0.58 for all outbursts at four other seeds. Measured with it (opt-level 3 with debug
-    assertions, the shared laptop at a load of 3–4.6): `outbursts_in` over the source horizon for a
-    Class I protostar (1 M☉ at 0.4 Myr, 169 outbursts) 288 µs, about 1.7 µs an outburst with its
-    cap's `state_at`; for an old star 0.45 µs, the cut to the active part sparing its 528 empty
-    bins; for the test's 10⁴ stars 164–204 ms in all.
-  - _Galaxy-wide (P06.T31's sampler; the ruling's windows)._ A slow test in
-    `stellar::testing::tests`, `fu_orionis_onsets_galaxy_wide_at_milky_way_values` (`#[ignore]`,
-    4.2 s under `slow-test`), after `galaxy_counts`: each component's system count × its band share
-    × the mean over 10⁴ primaries a band (`sample_inputs`) of Σ rate × `weight` over the star's age
-    pieces (one a plateau, 500 years in the steps), building no track and drawing no age. It takes
-    every band of the three components whose ages reach below 16 Myr (the young thin disc's and the
-    nuclear disc's two, all from −H) and asserts that the rest weigh nothing below 16 Myr. At Milky
-    Way values: FU Ori protostellar 201.4, V1647 Ori 881.0 and FU Ori disc 38.5 onsets a year, so
-    FU Ori onsets **239.9** (window 140–1,000) and both classes **1,120.9** (650–4,500); protostars
-    1.007 × 10⁶, with **1.0748 × 10⁻³** protostellar onsets a year each (1.075 × 10⁻³ within 5%)
-    and an FU Ori share of **18.61%** (18.6% within 5%). All inside their windows; nothing pinned.
-    The protostars are 4% above T31's 9.7 × 10⁵, since this test samples the nuclear disc's light
-    bands too, which T31's `galaxy_counts` leaves out.
-- **Deferred findings (2026-10-13 rule) (P06.T28.d).** Recorded and deferred: each leaves the
-  algorithm and every contract as they are. The leads are unread unless said.
-  - _Objects below 0.1 M☉._ They follow P06.T13's cooling fits, have no protostar phase or track,
-    and so no `FuOrionisModel`; proto-brown dwarfs are modelled to burst (lead: Parkosidis,
-    Stamatellos and Riaz 2025, A&A 696, A104). A protostar phase below 0.1 M☉ is plan 06's to add.
-  - _T15.c's floor below t_p (for T15)._ The disc lifetime's 0.3 Myr floor lies below t_p = 0.5
-    Myr, so a share 1 − e^(−0.5 Myr ÷ τ) of discs end while the star is still a protostar: about
-    one in six at 0.3–1 M☉ (16% at 0.3 M☉, 18% at 1 M☉) and most from about 3.2 M☉ (58% at 4 M☉).
-    Such a disc gives no disc-phase term here, while T24.b's T Tauri class and plan 14's disc read
-    it from the protostar phase. Lean: a floor at t_p for the circumstellar disc, if T15 agrees.
-  - _The V1647 Ori rates' uncertainty._ Zakri et al.'s intervals span a factor of 12 and 23 (Class
-    0 161–1,884 and Class I/FS 527–12,011 years), from five bursts; their Orion Nebula Cluster
-    Class 0 subsample gives 199 years (60–1,393), and they "cannot rule out that protostars of all
-    classes have the same burst interval" (section 4.1; 879 years in Table 3). They are
-    mid-infrared changes of 2 magnitudes or more, which Fischer et al. (2023, section 4.1.3) call
-    bursts, and their section 5.2 warns that methods "potentially lead to much higher measured
-    rates of outbursts for protostars". The FU Ori rates rest on optical rises of more than four
-    magnitudes (Contreras Peña et al. 2019), so the two classes' rates use different definitions.
-  - _Massive protostars' interval is unmeasured._ The protostellar rates are Orion's low-mass
-    protostars', carried to 150 M☉. Observed bursts: S255IR NIRS3, about 20 M☉, from 2.9 × 10⁴ to
-    1.6 × 10⁵ L☉ (Caratti o Garatti et al. 2017, Nature Physics 13, 276, main text and Methods);
-    NGC 6334I-MM1, 70 ± 20 from the millimetre continuum (Hunter et al. 2017, ApJL 837, L29,
-    abstract), revised to 16.3 ± 4.4 from the SED and lasting more than 6 years (Hunter et al.
-    2021, ApJL 912, L17, abstract); G358.93−0.03-MM1, 4.7 (+2.1, −1.5) over about 2.5 years
-    (Stecklum et al. 2021, A&A 646, A161, section 5.2). Models give factors of 2.5 to more than 40
-    and about 1.7% of the first 60 kyr in eruptive phases for 100 M☉ cores (Meyer et al. 2019,
-    MNRAS 482, 5459, abstract), against this model's 4.8% of Class 0 and 2.5% of Class I in
-    outburst at every mass, two to three times as much. A rate for massive protostars needs a
-    source.
-  - _Herbig Ae/Be disc-phase outbursts_ (from 2 M☉) are not modelled. Z CMa's FUor is its less
-    massive star, and its Herbig Be star's brightening kept a constant bolometric luminosity
-    (Szeifert et al. 2010, A&A 509, L7, abstract; lead: Elbakyan, Nayakshin and Vorobyov 2021, A&A
-    651, L3).
-  - _EXors and Class II V1647 Ori-type events_ are out of scope: EX Lup's 2008 burst (a factor of
-    2.9, under a year) and V1647 Ori's own events (1966, 2003, 2008; 0.4–1.7, 2.5 and more than 4.3
-    years, Audard et al. 2014, Table 1). A kind of its own, with its own tag, would add them.
-  - _Overlapping outbursts._ Poisson bins are memoryless, so an outburst can start while another
-    runs: with the mean durations above (21 years over both classes in Class 0, 44 in Class I),
-    about 5% of Class 0 outbursts start while another runs and about 9% overlap another one way or
-    the other (2 r E[D] = 9.6%); in Class I, 2.5% and 5%. No refractory rule is added. Lean for
-    T28.g: add the excesses, L = L_q [1 + Σ (Fᵢ(t) − 1)], held at the Eddington luminosity.
-  - _The light curve's simplifications._ Linear in magnitude through the rise and the decay, with
-    no plateau, no colour and no change in radius or temperature; the sources' fading rates are
-    optical (FU Ori's 14 mmag a year in V), used as bolometric, while V1515 Cyg's disc fell from 138
-    to about 45 L☉ (Szabó et al. 2022, abstract), 1.2 bolometric magnitudes, and BBW 76 has stayed
-    near its brightness since at least 1900 (Audard et al. 2014, section 2.3.1).
-  - _No joint distribution of the marks was read._ F, the rise and ḟ (or the decay) are drawn
-    independently; whether brighter outbursts rise more slowly or fade more slowly is not sourced.
-  - _The class is not on the wire._ `StarEventKindDto::FuOrionisOutburst` carries no class or
-    component; T28.g, which builds `StarEvent`, decides whether the wire shows it.
-  - _Classical FUors' progenitor luminosities were not read._ FU Ori, V1057 Cyg, V1515 Cyg, Z CMa
-    and BBW 76 list no quiescent luminosity in Audard et al.'s Table 1 (outburst 200–800 L☉), so
-    the disc factors' top of 300 follows optical amplitudes (about 5 magnitudes, Audard et al.
-    2014, section 2.3.1; V1057 Cyg's 6 in V, Szabó et al. 2021, section 1); no source read gives a
-    bolometric ratio above about 20 (HBC 722).
-  - _Ranges against their sources._ Kept as ruled: V1515 Cyg rose for about 30 years (Szabó et al.
-    2022, section 3.1), beyond the FU Ori rise's 25; V1647 Ori's 2003 event lasted 2.5 years in all
-    (Audard et al. 2014, Table 1), under the V1647 Ori decay's 5-year floor, which OO Ser's fade of
-    about 5 years sits at (Audard et al.'s Table 1 lists OO Ser's duration as more than 16 years);
-    and FU Ori's 14 mmag a year sits at ḟ's floor of 12. The V1647 Ori rise of 0.25–10 years has
-    no source read: Fischer et al.'s Table 1 gives the class no figures, and Zakri et al. give the
-    bursts' durations, not their rises. Audard et al.'s section 2.7 and Table 1
-    disagree for HBC 722 (0.6–0.85 to 4–12 against 0.7–0.85 to 8.7–12 L☉) and V2775 Ori (4.5 to
-    51 against 2–4.5 to 22–28 L☉); the documentation quotes both.
-  - _A star that forms after +H_ has no state at or before +H for the cap, and is left uncapped;
-    no galaxy star is one (every age distribution starts at −H).
-- **Deviations in T28.b, as built (lane `23-p06-t28b-glitches`, 2026-10-15; at version 22, no
-  bump).** Glitches are `stellar::events::glitches`; nothing reads them yet (T28.g and plan 12's
-  local-event alerts will). Every ruling named below is main's ruling of 2026-10-15.
-  - _API._ `GlitchModel::of(&StarModel) -> Option<GlitchModel<'_>>`, a `RateModel` that borrows the
-    star, with `star`, `reference`, `pulsar` (the `PulsarState` there), `frequency_hz`,
-    `spin_down_hz_per_s`, `characteristic_age`, `small_glitch_rate`, `size_index`,
-    `fractional_size_bounds`, `vela_like_period_years`, `glitches_at(t)` and `meets_vela_like_cuts`.
-    `Glitch` (`Copy`): `id`, `onset`, `end`, `fractional_size`, `size_hz`, `recovery_fraction`,
-    `recovery_time_seconds`, `is_active_at(t)` and `frequency_offset_hz_at(t)`.
-    `glitches_in(star, series, window, out)`, `glitches_active_at(star, series, t, out)` and
-    `glitch(star, series, id)` on `EventSeries::new(seed, tags::STAR_GLITCH, body.into())`.
-    `GlitchCycle::of(&StarModel, Seed, BodyId) -> Option<GlitchCycle<'_>>` (`model`, `series`,
-    `clock`, `noise`, `period`, `frequency_offset_hz_at(t)`) opens both the mark and the star's
-    `star.ev.glitch_cycle` series from the seed and the body, so they cannot come from two
-    universes; the lean, `(star, seed, &series)` with a debug assertion, would let a release build
-    mix two. `LargeGlitch` (`Copy`): `id`, `cycle`, `onset`, `size_hz`, `fractional_size`;
-    `large_glitches_in(star, seed, body, window, out)` and `large_glitch(star, seed, body, cycle)`.
-    `is_vela_like_marked(seed, body)`; `frequency_offset_hz_at(star, seed, body, t)`, both kinds
-    summed (the Crab-like glitches in their listing order, then the sawtooth), for T28.g;
-    `small_glitch_rate(|ν̇|)`, `crab_fractional_size_at(u)` and `large_size_hz_at(u)`; and a
-    constant for every figure: `BIN_SECONDS`, `LOOK_BACK_BINS`, `RECOVERY_SPAN`,
-    `MAX_CHARACTERISTIC_AGE`, `SMALL_GLITCH_RATE_PER_YEAR`, `SMALL_GLITCH_RATE_INDEX`,
-    `RATE_REFERENCE_HZ_PER_S`, `RATE_CAP_HZ_PER_S`, `CRAB_SIZE_INDEX`, `MIN_FRACTIONAL_SIZE`,
-    `MAX_FRACTIONAL_SIZE`, `RECOVERY_FRACTION`, `RECOVERY_TIME_DAYS`, `VELA_LIKE_MIN_AGE`,
-    `VELA_LIKE_MAX_AGE`, `VELA_PERIOD_YEARS`, `VELA_FREQUENCY_HZ`, `VELA_SPIN_DOWN_HZ_PER_S`,
-    `PERIOD_SPIN_DOWN_PRODUCT_HZ`, `LARGE_GLITCHES_PER_SPIN_DOWN`, `VELA_LIKE_SHARE`,
-    `LARGE_LOG_SIZE_MEAN`, `LARGE_LOG_SIZE_SIGMA`, `LARGE_SIZE_TRUNCATION`, `LARGE_MEAN_SIZE_HZ`,
-    `NOISE_AMPLITUDE_CYCLES` and `NOISE_LATTICE_CYCLES`. Frequencies are `f64` in Hz with the unit
-    in the name and Δν ÷ ν is dimensionless; no unit newtype. `system.rs` gains one read-only
-    accessor, `StarModel::remnant_age_at_epoch` (the signed age `pulsar_phase_at` hands the pulse
-    clock, in its arithmetic; a test checks the pulse phase built from it against `pulsar_phase_at`
-    bit for bit, before and after a birth after the epoch); no existing function, `neutron_star.rs`,
-    `draws.rs`, `sim/events/`, `flares.rs`, the summary or the wire changes.
-  - _Who glitches (deviations 2 and 7)._ A star whose neutron star exists by +H, not a magnetar and
-    of τ_c below 10⁷ years, both at the reference. The plan's ages are read as τ_c
-    (`PulsarState::characteristic_age`, from the glitched Ṗ), in which the relations are stated
-    (Espinoza et al. 2011, Table 5: glitches in the τ_c bins up to 1.8 × 10⁴ kyr and none from 6.1 ×
-    10⁴ kyr). The plan's "pulsars" are Fuentes et al.'s rotation-powered ones (their §1; Table 1
-    counts 898 of them and no magnetar; Fig. 2's fits leave magnetar glitches out), so magnetars
-    glitch in neither kind; T21's 1% reversal below the |ν̇| limit still covers them (ruling 110.3).
-    Radio visibility is not asked. A star whose track runs past +H can report a death after it; its
-    neutron star is not the window's, and `GlitchModel::of` refuses a reference after +H.
-  - _Time (deviation 7)._ The reference is `NeutronStar::pulse_clock`'s: the epoch for a neutron
-    star that exists then, and its birth for one born after the epoch, so the glitch clock and
-    T21.d's pulse clock agree. Its `PulsarState` gives ν = 1 ÷ P, |ν̇| = Ṗ ÷ P², τ_c and the
-    magnetar flag, read once; a star then glitches wherever `pulsar_at(t)` is `Some` (tested as
-    `remnant_age_at(t)`, the same condition without building the state), at the reference's rate and
-    with its ν, and never crosses a cut inside the horizon.
-  - _The Crab-like rate (deviation 1)._ Poisson bins of 2,592,000 s (30 days). R(|ν̇|) = R₁₂ × (|ν̇|
-    ÷ 10⁻¹² Hz s⁻¹)^b, the Poisson maximum-likelihood fit to N_t − N_ℓ of Fuentes et al.'s Table 1
-    (§4.1) against Σ T_i over all sixteen bins at their central log |ν̇|, refitted by a unit test to
-    10⁻³: R₁₂ = 0.05639 a year (σ of ln R₁₂ 0.058), b = 0.3718 ± 0.0155, deviance 63.7 on 14 degrees
-    of freedom (overdispersed: observed against expected from log |ν̇| = −16.75 to −9.25, 0/0.11,
-    0/0.64, 0/2.80, 3/8.65, 11/14.3, 25/16.2, 35/26.3, 28/33.0, 23/38.9, 34/33.9, 66/34.4, 41/38.3,
-    6/10.9, 4/11.1, 2/6.19, 25/27.3); built as 0.0564 and 0.372. Not the plan's "proportional to
-    |ν̇|", which is Fuentes et al.'s large-glitch law (§4.2, Fig. 6: Ṅ_ℓ ÷ |ν̇| = (4.2 ± 0.5) × 10²
-    Hz⁻¹) that the Vela-like kind carries; Espinoza et al.'s ⟨Ṅ_g⟩ ∝ |ν̇|^0.47(4) (§5.2, Table 4,
-    Fig. 10) counts large glitches too, and Basu et al.'s 76 |ν̇|^0.187 (§4.3) is fitted to pulsars
-    glitching more than 0.05 times a year (Fig. 10's caption). The same law runs on above
-    `GLITCH_NU_DOT_LIMIT` (Fuentes et al. reject the large-glitch trend there, §4.2 and Table 2, and
-    their bins 14–16 are in the fit), held at |ν̇| = 10⁻⁹ Hz s⁻¹, the top of Table 1's last bin:
-    0.737 a year (0.736 at the unrounded fit), 0.0605 a bin, which a debug assertion keeps under 64.
-    `bound` is the constant.
-  - _Sizes, within the plan._ The plan's "a power law" is the Crab's of Melatos et al. (eq. 1–2,
-    Table 3: a = 1.2, 1σ 1.1–1.4; also the median of Table 3's seven aperiodic glitchers and §6's "a
-    ≈ 1.2 for the youngest pulsars") on the Crab's own domain, read from its 26 rows of Table 1 (23
-    with a size, three "n/a"): 1.1 × 10⁻⁹ (MJD 43023 and 52587.84) to 2.1 × 10⁻⁷ (MJD 53067.059).
-    One law in x for every star, so Δν = x ν scales with ν and stays below 10 μHz while ν is below
-    47.6 Hz. ⟨x⟩ = 2.782 × 10⁻⁸, median 7.86 × 10⁻⁹. Inverse transform from word 0 of the event's
-    stream; a K–S test checks a millennium of a young pulsar's sizes.
-  - _Recovery and look-back, within the plan._ A glitch's offset Δt after its onset is Δν × [Q
-    (e^(−Δt ÷ τ_d) − e^(−T ÷ τ_d)) ÷ (1 − e^(−T ÷ τ_d)) + (1 − Q)(1 − Δt ÷ T)] for 0 ≤ Δt < T and
-    exactly 0 from T on (a debug assertion), T = 1,218 bins = 3,157,056,000 s (100.04 years). Q =
-    0.835 and τ_d = 3.1 days are the medians of the six single-exponential recoveries Wong, Backer
-    and Lyne (2001) fitted to the Crab's glitches of Δν ÷ ν = 2.1–31.9 × 10⁻⁹ (Q 0.68–0.9, τ_d
-    2.0–10.3 days), as Yu et al. (2013, MNRAS 429, 688, Table A4) list them; Lyne et al. (2015,
-    MNRAS 446, 857, §3) describe the Crab's steps as "followed by a nearly complete recovery within
-    about 20 days" (the model keeps the lasting 16.5% then) and tabulate no Q. Yu et al. tabulate no
-    Q against τ_c (their Fig. 16c is a scatter), so one pair. The linear take-back of the lasting
-    part is the model's own rule, stated in the doc: it makes each glitch's net spin-up zero, so the
-    kind adds nothing to the mean spin-down, whose glitch activity is T21.b's (the factor 1 − 0.01
-    below the |ν̇| limit, none above it, where nothing is counted twice). The offset's own mean in ν
-    is not zero: R ⟨x⟩ ν [Q τ_d + (1 − Q) T ÷ 2] = R ⟨x⟩ ν × 8.26 years, 1.18 × 10⁻⁷ ν (3.5 μHz) at
-    the Crab's |ν̇|, 1.69 × 10⁻⁷ ν at the cap and 0.40 μHz for a Vela-like star at Vela's; the plan
-    asks a zero mean of the sawtooth alone, and subtracting the constant would leave an offset where
-    no glitch is active. `glitches_active_at` lists 1,219 bins and keeps the glitches whose offset
-    is not yet 0: 68–98 µs a call (measured with a timing harness since taken out, opt-level 2, the
-    shared laptop at load 3–4), far under 1 ms.
-  - _The Vela-like kind (deviations 3, 4 and 5)._ A star of the Crab-like kind with τ_c in [10⁴,
-    10⁵) years and |ν̇| below `GLITCH_NU_DOT_LIMIT` at the reference (the |ν̇| and magnetar
-    conditions are deviation 4), and the plan's "one fixed mark" below `VELA_LIKE_SHARE`: word 0 of
-    the new domain tag `star.ns.glitch_class` (scope `Body`, keyed by the star's body, opened by
-    `Stream::open` and decided by `Threshold::from_probability`; words 1–7 reserved), not a
-    `StarDraws` member, read whatever the kick attempt, appended at the registry's end after plan
-    09's `centre.ev.tidal_disruption` (deviation 5). `VELA_LIKE_SHARE` = 420 Hz⁻¹ × C = 0.6478 (±
-    0.077), recomputed by a unit test to 10⁻³: the share at which the Vela-like stars' large
-    glitches add up to Fuentes et al.'s population rate (§4.2, Fig. 6). One large glitch a cycle,
-    none skipped, on a `LinearClock` from the reference of period P = C ÷ |ν̇| (at least 1.546
-    years), C = P_Vela × |ν̇_Vela| = 1.54247 × 10⁻³ Hz. P_Vela = 3.12 years, within the plan's
-    "about three years": the mean of the twelve intervals between Vela's 13 glitches of Δν ≥ 10 μHz
-    in Melatos et al.'s Table 1, MJD 40280 to 53959.93 (2.497, 4.082, 2.765, 3.272, 0.832, 2.916,
-    3.457, 2.567, 5.235, 3.258, 4.478 and 2.094 years: mean 3.1211, sd 1.150, coefficient of
-    variation 0.368, lag-1 correlation −0.24), refitted by a unit test to 10⁻³. Vela's ν =
-    11.1946499395 Hz and |ν̇| = 1.5666 × 10⁻¹¹ Hz s⁻¹ are the ATNF pulsar catalogue's, version 2.9.0
-    (Manchester et al. 2005). Checks: (1) Melatos et al.'s Δt_c = 2.8 ± 0.1 years (Table 6) is the
-    δ-component of a fit to all of Vela's waiting times, small glitches included; (2) at PSR
-    J0537−6910's |ν̇| (1.9922720 × 10⁻¹⁰, ATNF 2.9.0) the law gives 0.2453 years against Table 6's
-    0.3 ± 0.1; (3) Fuentes et al.'s interval at Vela's |ν̇|, 1 ÷ (420 Hz⁻¹ |ν̇|) = 4.816 years, is P
-    ÷ `VELA_LIKE_SHARE`.
-  - _The noise, a choice left to the build._ `MonotonePhase::new(0.087, 1, J)`, J =
-    `octaves_to_span(1, cycles in the source horizon)` (18 at Vela's period), slope bound 0.8961,
-    noise bound 107 cycles at J = 18. The slope bound caps the intervals' scatter: over 300 years of
-    182 Vela-like series of one star the coefficient of variation is 0.0925 (lag-1 correlation
-    +0.20), against Vela's 0.37 (−0.24). At the same bound a coarser lattice reaches at most 0.11,
-    at lag-1 correlations of 0.54 (ℓ = 2, a = 0.174) to 0.98 (ℓ = 16): a slowly wandering clock, not
-    scattered intervals, so ℓ = 1 is kept (a deferred finding). The phase's fraction at the
-    reference is uniform over 2,600 Vela-like series (K–S at α = 10⁻³), so the stars do not glitch
-    together at the epoch.
-  - _Sizes of the Vela-like kind (deviation 3)._ log₁₀(Δν ÷ μHz) ~ N(1.38, 0.13²) truncated at ±4σ
-    (7.24–79.4 μHz), Fuentes et al.'s Table A.1 (the three-Gaussian model's third component, weight
-    0.17; the 2- and 4-Gaussian models give 1.37–1.38 and 0.13, and Fig. 2's axis is log Δν in μHz),
-    from one uniform at word 0 of the cycle's own stream through `math::normal_quantile`, whatever ν
-    or |ν̇|; its closed-form mean, `LARGE_MEAN_SIZE_HZ`, is 25.086 μHz (pinned to 10⁻¹⁴). The plan's
-    "near Δν ÷ ν = 10⁻⁶" is replaced: the narrow component is narrow in Δν (Fuentes et al. §3 find
-    "two broader peaks" in Δν ÷ ν), and its median reaches 10⁻⁶ in Δν ÷ ν only at ν = 24 Hz (2.14 ×
-    10⁻⁶ at Vela's ν). Checks: Vela's 13 large glitches give log₁₀ Δν = 1.379 ± 0.118; Melatos et
-    al.'s (Δν ÷ ν)_c = 2.5 × 10⁻⁶ (Table 4) is 28.0 μHz at Vela's ν; Espinoza et al.'s peak near 25
-    μHz (§5.3.1, Fig. 13); Basu et al.'s narrow component at 18 μHz (§4.1, Fig. 4).
-  - _The sawtooth (deviation 6)._ In cycle n of Φ at t, at fraction f, Δνₙ (1 − f) − ⟨Δν⟩ ÷ 2, with
-    Δνₙ from cycle n's event stream at word 0 (opened directly, as `CycleEvent::marks` would give
-    it, without the bisection), and 0 where the star is not a neutron star (a star born part-way
-    through a cycle starts at that cycle's sawtooth). Its mean is zero over cycles, not within each:
-    cycle n's is (Δνₙ − ⟨Δν⟩) ÷ 2, which does not accumulate. Its slope is −Δνₙ ÷ Pₙ, on average
-    −⟨Δν⟩ ÷ P = −0.0163 |ν̇|, against T21.b's 0.01 |ν̇| reversal at Vela: a Vela-like star returns
-    more than T21's 1%, and the share brings the population to 1.05%. Tested at the listed time ± 1
-    s over 919 glitches in 3,000 years: the jump is Δνₙ to 10⁻⁶ and the value before it −⟨Δν⟩ ÷ 2;
-    the sizes pass K–S against the truncated law; the mean size is 25.078 μHz and the time average
-    of the offset −0.054 μHz (both within their errors of 25.086 and 0).
-  - _Both kinds on one star._ A Vela-like star also has the Crab-like kind (Melatos et al. §5.2: the
-    quasiperiodic component coexists with the Poisson one).
-  - _Left to T28.g._ Both kinds become `StarEventKind::Glitch`. A Crab-like glitch lasts
-    `RECOVERY_SPAN`; a Vela-like glitch has no end of its own, its sawtooth running to cycle n + 1's
-    onset (`large_glitch(…, n + 1)`, no history needed), so `active_at` and the wire's `duration_s`
-    need a rule for it. `frequency_offset_hz_at` builds the glitch model twice (about 1.6 µs each),
-    which T28.g can fold if it calls it per summary.
-  - _Word layouts._ A Crab-like glitch: word 0 of `event_stream(k, j)`, x by inverse transform. A
-    Vela-like glitch: word 0 of `event_stream(n, 0)`, Δν by inverse transform.
-    `star.ns.glitch_class`: word 0 the mark, words 1–7 reserved. Nothing else is drawn; later
-    scatter takes words 1, 2, … in order.
-  - _Sanity checks._ The Crab-like rate at the Crab's |ν̇| (3.77535 × 10⁻¹⁰, ATNF 2.9.0) is 0.513 a
-    year, against Fuentes et al.'s bin 16 (25 small glitches in 46 years, 0.543), Espinoza et al.'s
-    Table 4 (0.6(1)) and Melatos et al.'s Table 5 (λ = 0.91, 0.57–1.3); bins 14 and 15 expect 11.1
-    and 6.2 small glitches against 4 and 2 observed. The Crab's mean activity, rate × ν × ⟨x⟩, is
-    1.35 × 10⁻¹⁴ Hz s⁻¹ against Fuentes et al.'s 1.1(5) × 10⁻¹⁴ (§5.1). The period at Vela's |ν̇| is
-    3.12 years and at J0537−6910's 0.245, against Melatos et al.'s Table 6 (2.8 ± 0.1, 0.3 ± 0.1)
-    and Fuentes et al.'s 4.82 years. A Vela-like star at Vela's parameters glitches 0.157 (small) +
-    0.3205 (large) = 0.477 times a year, against Vela's 17 in 37.84 years (0.449; Melatos et al.
-    Tables 1 and 2), 4 of them small (0.106 a year); its activity, ⟨Δν⟩ ÷ P, is 1.63% of |ν̇|,
-    against Basu et al.'s 1.8 ± 0.3% for pulsars that glitch (§4.4) and Vela's own 1.78% over
-    Melatos et al.'s span. Per half decade of |ν̇|, over the slow test's stars (both kinds, the
-    Vela-like at the share; the 3,000 young stars, which populate −13.5 to −10.5): the population's
-    activity ÷ |ν̇| is 0.28%, 0.48%, 0.88%, 0.95%, 0.33% and 0.08% from log |ν̇| = −13.5 to −10.5
-    (from −12.5 to −11.5 the steady sample gives 0.70% and 0.76%), against Fuentes et al.'s 1.0 ±
-    0.1% (§4.2) and T21's 1%: within a factor of 1.1 at −12.5 to −11.5, short by 2–12 at both ends,
-    where τ_c leaves 10⁴–10⁵ years (a deferred finding). The total rate a star a year against
-    Espinoza et al.'s ⟨Ṅ_g⟩ (Table 4), steady sample, from log |ν̇| = −15.5 to −11.5: 0.0006,
-    0.0033, 0.0076, 0.0123, 0.0191, 0.0291, 0.0489 and 0.078 against 0.001, 0.003, 0.012, 0.016,
-    0.027, 0.04, 0.08 and 0.29 (factors 0.6, 1.1, 0.63, 0.77, 0.71, 0.73, 0.61, 0.27); the young
-    sample from −11.5 to −9.5, 0.128, 0.179, 0.250 and 0.336 against 0.24, 0.3, 0.2 and 1.6 (the
-    last Espinoza et al.'s J0537−6910 and Crab). The slope of log rate against log |ν̇| is 0.39 over
-    the young sample's half decades and 0.92 over the steady sample's, whose low bins hold many
-    stars of τ_c ≥ 10⁷ years that never glitch, against Espinoza et al.'s 0.47(4) (Fig. 10). The
-    Crab-like kind's mean size and activity at the Table 4 rows up to 10⁻¹³·⁵ Hz s⁻¹ (log ⟨|ν̇|⟩ =
-    −0.22, 0.25, 0.77 and 1.24 in 10⁻¹⁵): mean Δν 0.0092, 0.023, 0.038 and 0.048 μHz against ΣΔν ÷
-    N_g = 0.00045, 0.00043, 0.047 and 0.46 μHz (factors 20, 54, 0.81, 0.10; 1.03 against the 0.046
-    μHz that the printed ν̇_glitch implies at 1.24), and activity 0.00018, 0.0024, 0.0091 and 0.0186
-    × 10⁻¹⁵ Hz s⁻¹ against ν̇_glitch = 0.00001, 0.00005, 0.017 and 0.024 as printed (factors 18, 48,
-    0.54, 0.78; 0.075 against the 0.2465 of ΣΔν ÷ Σ T_i at 1.24). Espinoza et al.'s lowest two rows
-    hold 2 and 7 glitches.
-  - _Tests._ `cargo test -p hyperion-sim stellar::events`: 35 tests and 2 ignored (19 and one
-    ignored of them this task's; and `stellar::system`'s test of `remnant_age_at_epoch`), and the
-    two doctests (`GlitchModel`, and `glitches_in`: a Vela-like pulsar's glitches of both kinds over
-    thirty years, one regenerated from its ID): the refits (R₁₂ and b, P_Vela, the share, C and the
-    checks); the two size laws' domains, means and medians; who glitches (a living star, a white
-    dwarf, a black hole, a magnetar, a pulsar of τ_c ≥ 10⁷ years and a neutron star born after +H
-    have no model; a Crab-like pulsar, one of τ_c 10⁶ years, one above the |ν̇| limit at τ_c 10⁴
-    years, a magnetar and an unmarked body have no cycle); the bound over 7 birth periods × 9 fields
-    × 41 ages of the law and 60 star models' probes (both sides of the limit, the cap, newborns);
-    the recovery's ends, continuity, monotony and lasting part; `glitch(id)` over 600 bins about a
-    newborn's birth (rejected candidates, numbers beyond the count, foreign IDs, a magnetar);
-    `large_glitch` and a newborn Vela-like star's first cycle; partitions in any order for both
-    kinds, and on threads (compiled out on wasm32-wasip1); `glitches_active_at` against the listing;
-    the +900-year no-history test for both stars and the summed offset; the sawtooth; the mark (the
-    share over 2 × 10⁴ bodies by χ², the same mark for two references, the seed's own stream). The
-    golden `stellar/glitches` (337 lines, header 22) pins the marks of 64 bodies, a young Crab-like
-    pulsar above the |ν̇| limit, the marked Vela-like pulsar, a pulsar of τ_c 1.015 × 10⁶ years over
-    300 years, a high-field pulsar (9.9 × 10¹³ G, not a magnetar at the epoch), a magnetar, which
-    has no model, and a Vela-like pulsar born 500 years after the epoch, over its birth: their
-    references, rates, periods, size laws and noise, each glitch's ID, onset, size and offsets, and
-    the summed offset at seven instants. `tags.golden` gains its one line at the end. The slow test,
-    `the_mean_counts_over_10_000_massive_stars_match_the_rate_integrals` (`#[ignore]`, 28 s under
-    `slow-test`, capped at 6 GB): T31's `sample_inputs` of band E (8–150 M☉) of the young thin disc
-    at the solar circle, with their draws and composition, each evolved once to its lifetime and, if
-    it leaves a neutron star, rebuilt at the lifetime plus a uniform age, a steady birth rate;
-    window 30 years from the epoch. 10⁴ stars of neutron-star ages to 10⁷ years: 6,310 neutron
-    stars, 2,012 glitching, 3 magnetars; Crab-like glitches expected 559.9, counted 583, Poisson
-    interval 484–639 at α = 10⁻³; only 25 meet the Vela-like cuts (15 marked, 6 cycles against 6.0).
-    So 3,000 more, of ages to 10⁵ years: 1,943 neutron stars, 1,867 glitching, 61 magnetars;
-    Crab-like expected 2,282.9, counted 2,343, interval 2,127–2,442; 974 meet the cuts and 624 are
-    marked (0.641, χ² against 0.648 passes); their cycles number 299 against Σ W ÷ P = 292.6, within
-    the summed bound of twice the noise's bound per star (25,467, loose by construction), and the
-    mean deviation per star, 0.010 ± 0.41 (standard error 0.016), carries the test. All are born
-    before the epoch, so the share born after it was not measured. Listing times (a harness since
-    taken out, slow-test profile): the 2,012 glitching stars' 30 years took 78 ms, the 15 Vela-like
-    stars' cycles 1.9 ms; `glitches_in` and `large_glitches_in` over 30 years for the Vela-like
-    pulsar of the golden, 258 µs.
-- **Deferred findings (2026-10-13 rule) (P06.T28.b).** Recorded and deferred: each leaves the
-  algorithm and every contract as they are. The leads are unread unless said.
-  - _Millisecond pulsars._ The binary lane's recycled pulsars are plan 11's and glitch in neither
-    kind here; Basu et al. (§4.1, read) cite two millisecond-pulsar glitches, Δν ÷ ν = 8(1) × 10⁻¹²
-    and 2.5(1) × 10⁻¹².
-  - _Magnetar glitches._ Excluded from both kinds (deviation 2). They have large Δν ÷ ν but low to
-    intermediate Δν (Espinoza et al. §5.3.1, read): the Crab-like law would give a 0.1–0.5 Hz
-    magnetar 10⁻⁴–0.1 μHz against the 0.03–6.1 μHz of Espinoza et al.'s Table 1 magnetar rows. Lead:
-    Dib and Kaspi 2014 (ApJ 784, 37; cited by Fuentes et al. §2: 11 glitches in 5 magnetars over
-    about 16 years each), for T28.c's active episodes or a later task.
-  - _The reference's side._ The rate, ν and the cuts are read at the reference, so a neutron star
-    born long before the epoch glitches at its epoch rate throughout the horizon, and a pulsar that
-    crosses τ_c = 10⁴ or 10⁵ years or the |ν̇| limit inside it keeps its class. A newborn's rate is
-    its birth rate for the whole window.
-  - _A per-star reversal._ T21 gives every star 1% (ruling 110.3, kept); a reversal of about 1.6%
-    for Vela-like stars and under 0.4% for the rest would match both Fuentes et al.'s 0.010 for the
-    population and Basu et al.'s 1.8% for pulsars that glitch. It moves T21's output: a later task,
-    with a bump.
-  - _Large glitches outside τ_c 10⁴–10⁵ years._ Fuentes et al. (§5, read) see no reason to reject
-    that every neutron star eventually glitches large; their bins 8–9 hold 4 of the 66 large
-    glitches with −13.5 < log |ν̇| < −10.5. PSR J0537−6910 (τ_c 4.9 kyr, above the |ν̇| limit) has
-    no Vela-like cycle here, though Fuentes et al. find it on the trend (§5.1) and Melatos et al.
-    fit it a quasiperiodic component (Table 6). In the slow test the population's activity is 0.28%
-    of |ν̇| at log |ν̇| = −13.5 to −13 and 0.08% at −11 to −10.5, against Fuentes et al.'s 1.0%
-    throughout −13.5 to −10.5; it reaches 0.88–0.95% only at −12.5 to −11.5.
-  - _Per-pulsar size laws._ One Crab law for every star, where Melatos et al.'s indices run from
-    −0.13 to 2.4 (§6) with each pulsar's own bounds; and one Vela-like size law, where words 1–7 of
-    `star.ns.glitch_class` could carry a per-star index or characteristic size. One law in x makes
-    slow pulsars' small glitches small in Δν: at log |ν̇| = −13.76 the slow test's mean Crab-like Δν
-    is 0.048 μHz, against Fuentes et al.'s bin 7 (35 small glitches of 9.78 μHz in all, 0.28 μHz
-    each) and Espinoza et al.'s 0.46 μHz (ΣΔν ÷ N_g, Table 4).
-  - _The size floor against detection._ For ν below about 9 Hz the Crab law's floor, 1.1 × 10⁻⁹ ν,
-    lies below Fuentes et al.'s detection limit of about 10⁻² μHz (§3), so a survey like theirs
-    would miss up to about half the small glitches of slow pulsars, while the rate is fitted to the
-    glitches they found.
-  - _The Crab-like offset's mean in ν._ Each Crab-like glitch is taken back whole, so its net ν̇ is
-    zero, but its offset in ν is never negative and averages R ⟨x⟩ ν × 8.26 years (1.2 × 10⁻⁷ ν at
-    the Crab), where the sawtooth's mean is zero. Lean: keep it, since ν̇ is unaffected and a
-    subtracted constant would leave an offset where no glitch is active; T28.g decides whether the
-    summary shows ν with it.
-  - _Overdispersion._ One power law fits Table 1's small-glitch counts at a deviance of 63.7 on 14
-    degrees of freedom (bin 11: 66 against 34.4; bin 9: 23 against 38.9).
-  - _Interval scatter._ The slope bound of 0.9 caps the Vela-like intervals' coefficient of
-    variation at 0.093 (0.11 with a coarser, strongly correlated lattice) against Vela's 0.37.
-    Reaching it needs a phase construction other than T27's monotone noise, or a slope bound above
-    0.9, which lets events change order.
-  - _Vela's short recoveries._ The Vela-like steps do not recover: Yu et al.'s Table A4 lists Q of
-    10⁻³–10⁻¹ and τ_d of 0.5–350 days for Vela's glitches, which the sawtooth does not model.
-  - _Per-glitch recovery._ One (Q, τ_d) for every Crab-like glitch, where Yu et al. find Q bimodal
-    (§5.2.1, Fig. 15: a broad peak near 0.01 and another near 1, with no recovery detected in many
-    glitches) and τ_d growing with τ_c (Fig. 16d); a later task could draw them from words 1–2 of
-    each glitch's marks.
-  - _The τ_c cut._ Espinoza et al.'s Table 5 has 3 glitches in the bin of mean τ_c 1.8 × 10⁴ kyr (18
-    Myr), above the cut, and their abstract puts the edge at 20 Myr.
-  - _The sources' misprints._ Basu et al.'s Fig. 14 caption prints 0.0018(3) for the text's 0.018
-    (§4.4). Espinoza et al.'s Table 4 rows at log⟨|ν̇|⟩ = 1.24 and 1.73 print ΣΔν = 13 and 17 μHz
-    with ν̇_glitch = 0.024(1) and 0.051(2) × 10⁻¹⁵ Hz s⁻¹, which disagree tenfold. The misprint is
-    in ν̇_glitch, not ΣΔν: ΣΔν ÷ Σ T_i gives 0.247 and 0.522, as it gives the printed ν̇_glitch on
-    every other row; the arXiv source (1102.1743) keeps the unrounded column in comments, 0.244 ±
-    0.009 and 0.514 ± 0.02, whose errors moved with the values; and Fuentes et al.'s bin 7 at the
-    same |ν̇| (§4.2, read: small glitches of 9.78 μHz in 2,083 years) is 0.149. The arXiv PDF and,
-    by the review's reading, the journal's HTML print the same; the journal's PDF was not readable.
-    The sanity checks above compare the model with both readings.
-
-- **Deviations in T24.c, as built (lane `stripped-class`, 2026-10-21; at version 22, no bump;
-  `PROTOCOL_VERSION` 2 → 3).** The ruling is `decision-stripped-star-class.md` (2026-10-21): a
-  technical correction to T24.a, made under the owner's standing delegation, since the brainstorm
-  sets no edge for subdwarfs.
-  - _The cause._ Look-72's E-141 (LOOK72's `820E6EE00000008D`), a 10.96 M☉ primary stripped to
-    2.37 M☉ (log L ≈ 3.7) and seen at 2.25 M☉, read `sdO3 HOT SUBDWARF` (plan 12's Risks, "The
-    observed brief reads the summary's primary", finding 4). `hot_subdwarf` had no upper edge, so every naked helium star from
-    20,000 K below the Wolf-Rayet floor was a hot subdwarf: some 1.7–8 M☉ at solar Z and up to
-    about 10 M☉ at low Z, most of plan 11's stripped stars.
-  - _API._ `classify::HOT_SUBDWARF_MAX_MASS` (1.7 M☉, re-exported);
-    `PeculiarClass::StrippedHeliumStar` (name `He-sd`, no suffix) and `PeculiarClass::prefix`
-    (`He-` for it, nothing for the rest), which `Classification`'s `Display` writes before the
-    luminosity class's prefix; the crate's `peculiar::stripped_helium_star`, which shares `hot_subdwarf`'s letter rule
-    through a private `helium_subdwarf`; `ObjectKind::StrippedHeliumStar` after `HotSubdwarf`
-    (`ALL` now holds 14); `ObjectKindDto::StrippedHeliumStar`, `"stripped_helium_star"`. The test
-    parser reads `He-` before a subdwarf's class.
-  - _The protocol._ `PROTOCOL_VERSION` is 3. `ObjectKindDto` is a closed enum (plan 04's reserved
-    list names only `MassLayer`, `Population`, `LayerStatus`, `Unit` and `ErrorCode` as growing),
-    and a closed enum that gains a variant bumps (`decision-gg-port-d0.md` §1). A version 2 and a
-    version 3 build read each other LINK INCOMPATIBLE. The server's `websocket.rs` welcome test now
-    reads the constant.
-  - _The server and the client._ The server's conversion and `brief_absolute_v` (living), and the
-    kind maps of `tests/{observed,systems_in_range}.rs`. `objectKindLabel` gives
-    `STRIPPED HELIUM STAR`; `starSymbol` a circle, with the hot subdwarf (compact, with no wind); the chart's
-    `STARS` filter counts it living; the H-R diagram plots it; the legend's circle names it, a
-    kind kept whole in 446a06e4's spans (`LocalChartPanel.compact.test.tsx` lists it); the UX
-    guide's symbol row and kind words list it.
-  - _Unchanged._ The pair class's `HOT_SUBDWARF_MASSES` window (0.32–0.8 M☉), whose doc now cites
-    Heber (2016, §3.4.1 and figure 26) for its 0.8 M☉ merger tracks and points to the edge (plan
-    11's Risks, R3). The Wolf-Rayet floor, the stripped stars' upper end. Colour, magnitude and
-    variability, which read T_eff, the state, and Ap and Bp only. The 40,000 K letter split, whose
-    doc now cites Götberg et al. (2018, §4.3) in place of "a convention".
-  - _No golden moved._ The class and the kind are derived at read time: no record field, fitted
-    table or knowledge-log line holds them, and no golden pins a helium star below the floor
-    (`classify.golden`'s `helium_star`, 10 M☉ at 10⁵ L☉, is above it and stays `WN4`). A bless of
-    every golden that reads a class or a kind (`stellar_classify`, `stellar_system`,
-    `stellar_briefs`, `multiplicity_golden`, `observe_in_system_golden`, the server's
-    `systems_in_range` and `scene_fixture`) left every file as it was, and
-    `golden_diff.py --base origin/rendering-and-planets` reports "No golden files changed".
-  - _Tests._ `classify::peculiar`: `the_hot_subdwarfs_end_at_1_7_solar_masses` (1.6 and 1.8 M☉
-    helium stars at mid-life on their own tracks; 1.7 M☉ itself is a hot subdwarf),
-    `a_stripped_helium_star_is_written_he_sd` (2.3 M☉ at 65,000 K is `He-sdO3`, at 30,000 K
-    `He-sdB`, at 15,000 K neither), `above_the_floor_a_helium_star_is_still_a_wolf_rayet_star`
-    (10 M☉ at 10⁵ L☉ is `WN4`), and a 2.3 M☉ helium star's track in the round-trip test. The 0.5 M☉
-    `sdB` test is unchanged. `tests/observe_brief.rs`: look-72's primary is a 2.25 M☉ stripped
-    helium star, `He-sdO3`, in the observed summary and in the now summary at the same instant
-    (`summary_at` at the emitted time; at the epoch it is a neutron star in both), and the 2.37 M☉
-    helium star the common envelope leaves is one too. The protocol's `object_kind_strings` and
-    `protocol_version_is_three`. On the client, the kind's words (`StarList`), symbol, filter,
-    H-R placement and legend.
-  - _Corrected test._ `stellar::system`'s `the_kind_follows_the_phase_and_the_luminosity_class`
-    pinned a 10 M☉ helium star at 6 × 10⁴ L☉, and at 1.5 × 10⁵ L☉ at [Fe/H] = −1, as hot
-    subdwarfs; both are stripped helium stars now, and a 0.5 M☉ helium star of 20 L☉ at about
-    25,000 K is its hot subdwarf.
-  - _Review fixes (in P11.T11.b's commit)._ The science check: `He-sdB` is cited to Heber (2016,
-    §2), which names it, and `He-sdO` to Götberg et al.'s §4 scheme (the `He-` prefix, after
-    Stroeer et al. 2007) and §4.2 (the `sd`); "most of" the observed stripped stars lose
-    ≲ 10⁻⁹ M☉ yr⁻¹ (Götberg et al. 2023, §7, has exceptions at 10⁻⁸–10⁻⁷: stars 1 and 5, and star
-    26's upper limit); the O3 quote is the LMC's WN3/O3 stars'. The UX review: the guide's helium-phase row names a naked helium star's phases, of
-    any of its three kinds; `.symbol-legend__kind` stays whole everywhere, so that the H-R
-    legend breaks the circle's entry after a comma, not inside `STRIPPED HELIUM STAR`.
-  - _HYPERION's convention._ The literature also writes `He-sdO` and `He-sdB` for helium-rich hot
-    subdwarfs below the edge (Götberg et al. 2018, §4.3, from 0.75 M☉; the merger channel's
-    He-sdO stars of `HOT_SUBDWARF_MASSES`), which read `sdO` and `sdB` here: the prefix marks the
-    stripped helium stars' class above the edge, as the ruling chose. Recorded, not a blocker.
-  - _Recorded (R4)._ The 1.7 M☉ edge comes from a Z = 0.014 grid and is held at every Z
-    (provisional). Götberg et al. find absorption-line spectra up to 2.3 M☉ at Z = 0.006 and 0.002
-    (§4.3), so at low Z the edge is likely higher; not a blocker (2026-10-20 rule).
-  - _The layout fix (its own commit; `decision-stripped-star-class.md`, "Compact OBSERVED and
-    STRIPPED HELIUM STAR", 2026-10-21)._ Measured hidden on look-72's harness (LOOK72, E-141 at
-    20,000 ly), the circle's seventh kind gave the compact `LOCAL CHART`'s legend a seventh line
-    in `OBSERVED` at 1280 × 720: the stage fell from 240 to 222 px and the column ended 10 px past
-    its foot, over the furniture's text (13 overlaps), a blocker. The narrow `SYSTEMS` list also
-    cut `He-sdO3` to read `He-sdC`, another.
-    - _The fix, as ruled._ The camera's angles and keys leave the column for the presets' row's
-      end, a 1rem line each, the keys 1rem down; the furniture's lines are 1rem. The list's wide
-      class column is 12.5ch, for the longest class, `B1.5Ia+ LBV` (11 characters); its container
-      query turns at 42rem, the longest designation's room; the narrow rows' gaps are 0.25rem and
-      the class is set in 0.5rem, so it holds seven characters; a longer class is cut with an
-      ellipsis (B612 Mono has U+2026). Guards: the first tests of
-      `LocalChartPanel.compact.test.tsx`, rewritten (the column, the presets' row, the 1rem lines,
-      the DOM order by a render test), `SystemList.layout.test.ts`, and an at-rule lookup,
-      `stylesheetRuleIn`, in `test/stylesheet.ts`.
-    - _Deviation: ruling 134.9's floor lowered._ The compact stage keeps at least 14rem at 80 × 45
-      rem (it was 15rem), a design floor in both modes. `LocalChartPanel.tsx`'s doc said the angles
-      and keys stand in the column and that the stage keeps 15rem; that file was #73's until it
-      landed (187f4e60), so both sentences were corrected at this lane's landing merge, doc only
-      (ruling A).
-    - _Measured, final tree._ At 1280 × 720, 100%: `NOW` stage 262 px, column 52 px clear;
-      `OBSERVED` 228 px (14.25rem), 18 px clear; 0 overlaps in every common state; one refused
-      entry 4 px past the foot, inside the furniture's top margin, 0 overlaps. The angles (x
-      655–831, y 178–194) and the keys (507–831, 194–210) stand clear of the presets (33–386) and
-      of each other. `He-sdO3` (63.8 px of B612 Mono at 9.11 px a character) stands whole in the
-      narrow list's class cell, 68 px after its set-in, and every designation whole (347 px); a
-      nine-character class is cut there with an ellipsis. At 1920 × 1080, 100%: stages 509 and
-      469 px as before the fix, 0 overlaps, the wide list's class 114 px, which held a
-      nine-character class (measured) and holds `B1.5Ia+ LBV`'s 100 px (arithmetic). In the
-      narrow rows the range stands 0.125rem off the mass's unit, which the 0.25rem gaps had
-      joined to it (`11.0 M☉IN`; the UX review). At 150% (80 × 45 rem: a 1920 × 1081 window at a page zoom of 1.5,
-      device pixel ratio 1.5, since the harness's device scale factor left the offscreen page at
-      1): `NOW` 266 px, 57 px clear; `OBSERVED` 232 px, 23 px clear; 0 overlaps; one refusal 2 px
-      clear; `He-sdO3` whole (82 px).
-    - _Landing (2026-10-22, at `GENERATOR_VERSION` 23)._ The lane merged the tip with 23,
-      P12.T11.b, P12.T11.c and P12.T11.d on it, and no golden moved (`golden_diff.py`; the class-
-      and kind-reading goldens pass at 23 by name). Re-measured hidden on look-74's harness, with
-      look-75's axis and hint cases and this lane's list checks (LOOK72, 80 × 45 rem). At 1280 ×
-      720, 100%: `NOW` 262 px, 52.5 px clear; `OBSERVED` 228 px, 18.5 px clear; one refusal or two
-      change neither, since P12.T11.c's refusals add no line. At 150%: 266 and 232 px, 56.5 and
-      22.5 px clear. 0 overlaps of the column on the furniture, the census or the legend in every
-      state. The census's hint at 50 ly (`DENSE REGION`), which look-75 counted at 30 overlaps on
-      the tip before this fix, has 0 at 1280 × 720 with or without refusals: in `OBSERVED` the
-      stage is 206 px and the mode row ends 3.5 px past its foot, 0.5 px above the furniture
-      (211.3 px and 1.8 px clear at 150%), and in `NOW` 240 px. At 1920 × 1080, 100%, the stacked
-      page has no overlap (stages 509 px in `NOW`, 491 in `OBSERVED`), and the wide list's class
-      cell is 113.7 px. `He-sdO3` stands whole in every list (76, 82 and 114 px), and no
-      designation is cut.
-    - _Recorded at landing, not blockers._ (1) The galactic-axis case (the chart centred at
-      [0, 0, 3000] ly, `ANGLE —`): the axis note takes a line of its own, so the stage is 246 px in
-      `NOW` and 212 px in `OBSERVED` at 100% (250 and 216 at 150%), under the 14rem floor in
-      `OBSERVED` by 12 px (8 at 150%), with the column 2.5 px clear (6.5 at 150%) and 0 overlaps;
-      it was 222 px before this lane's fix, under the 15rem floor of then. Like the hint, it is a
-      line of some states only, measured and recorded (the layout ruling's §B); main records it as
-      pre-existing, for P12.T11.e's look. _Mended by P12.T11.g (plan 12)._ (2) The census's hint
-      leaves `OBSERVED` 206 px, under the floor, as the layout ruling's §D foresaw; 0 overlaps,
-      which closes look-74's and look-75's case. _Mended by P12.T11.g (plan 12)._ (3) The
-      furniture's 1rem lines are shorter than B612's 0.875rem content boxes, so
-      the boxes of adjacent lines meet by 1–2 px (`RADIUS`'s `ly` and the scale bar's `10 ly`;
-      `UT`'s `yr` and `OBSERVED FROM`): up to 3 pairs at 100% and 1 at 150%, none at 1920 × 1080;
-      the glyphs stand apart in 3× crops.
-    - _Recorded, not blockers._ In the narrow list (1280 × 720) classes of eight to eleven
-      characters are cut with an ellipsis, rare (an LBV, a half-subtype stripped helium star, and
-      perhaps a Be, Bp, Ap or Am star whose gravity gives it III, `B2.5IIIe`, not counted), and
-      the selected system's `CLASS` reading shows them whole; a later list layout is P05's or
-      P06's. The list's head stands about 17 px right of its rows, for the scroll bar (before this
-      lane). The mode toggle now rescales the compact chart by 11% (6% before); the scale bar
-      states it. The furniture's 1rem and the legend's 1.125rem lines differ, each comment says
-      why.
 
 ### Asked by rendering plan R06
 
@@ -5618,686 +3197,3 @@ R06.
   simplification, not a wrong class. If a ruling schedules it, it takes P06.T40, rides the first
   galaxy train after its gate, and reruns P06.T19.d, P09.T9.b's retention test and the
   `cluster_retention` fit.
-
-- **Deviations in P06.T42.a, as built (lane `p06-asks`, 2026-10-28; at version 23, no bump; pure,
-  nothing on the record calls it).** Ask A2's rate, for P06.T42.b's swap.
-  - _API._ A private `wind::modern_limited(regime, surface, eta)`, beside `modern`, under
-    `#[cfg_attr(not(test), expect(dead_code))]` until T42.b; the swap is `rate`'s
-    `WindRecipe::Modern` arm calling it in place of `modern`. `modern`'s choice of where P06.T39's
-    steepening acts moved into `with_eddington_kink(regime, surface, recipe)`, which both call;
-    the record's rate is the same arithmetic in the same order (`golden_diff`: no golden changed).
-  - _As the plan has it._ For an evolved hydrogen-rich star (HG to TP-AGB, SSE's types 2–6)
-    beyond the limit (HPT's form, L > 6 × 10⁵ L☉ and 10⁻⁵ R L^½ > 1): max(`MODERN_LBV`,
-    `hot_or_cool(s, hurley_evolved(s, η, agb))`), steepened as `modern` steepens (not on the
-    AGB), then `hurley_lbv(s)` added at the star's own state, so the Γₑ = 0.7 twin carries no
-    term. Everything else, the main sequence beyond the limit included, is `modern_below_kink`,
-    so the rate is `modern`'s to the bit there by construction. The plan's "past the limit" is
-    read as the evolved star's: today's `Modern` gives the main sequence and naked helium stars no
-    `MODERN_LBV`, and SSE applies the term to types 2–6 alone (ruling 10's fourth place). The
-    module documentation's new section cites the ruling, the observed ceiling and Belczynski et
-    al.'s "full amount of LBV mass loss", from which the rate departs.
-  - _Figures re-checked_ (arXiv copies read through the Internet Archive; the pod reaches no
-    journal): Davies, Crowther and Beasor (2018) give log L = 5.4 (SMC) and 5.5 (LMC), and quote
-    Humphreys and Davidson's 5.7–5.9 revised to 5.66 by Humphreys (1983) and Elias et al. (1985).
-    At 4,000 K and 40 M☉ (Γₑ 0.23–0.30), HPT's term is 0.657 M☉/yr at log L 5.78, 9.227 at 5.80
-    and 121.5 at 5.90, zero up to L = 6 × 10⁵ L☉ (log L 5.778); the cool side's rate is
-    1.01 × 10⁻⁴ at 5.78, 1.09 × 10⁻⁴ at 5.80 and 1.59 × 10⁻⁴ at 5.90, so the floor binds at the
-    first two and the side rate at the third. The constant is about equal to the cool side's rate
-    at log L 5.8–5.9 and about five times below it at 6.3 (8.1 × 10⁻⁴ for 80 M☉), which the module
-    now states. COMPAS's `HURLEY_ADD` (`BaseStar::CalculateMassLossRateBelczynski2010`,
-    read on its `dev` branch) adds `CalculateMassLossRateLBVHurley`'s term,
-    0.1 (x − 1)³ (L ÷ 6 × 10⁵ − 1), to the other winds, with no `MODERN_LBV` floor: the floor is
-    the ruling's.
-  - _Finding (settled 2026-10-29, below: no difference): a fifth place where HPT's text and SSE's
-    code differ, for the owner to confirm._
-    HPT's text (astro-ph/0001295v1, §7.1) prints the term as 0.1 (10⁻⁵ R L^½)³ (L ÷ 6 × 10⁵ − 1.0),
-    with no − 1 in the cube, which steps to 0.1 (L ÷ 6 × 10⁵ − 1) at the limit (0.07 M☉/yr at
-    10⁶ L☉) and is 21–28% higher at 4,000 K from log L 5.78 to 5.90. SSE's code (`mlwind.f`, read in
-    AMUSE's copy, `src/amuse_sse/src/mlwind.f` at commit `da3c98d5`:
-    `dml = 0.1d0*(x-1.d0)**3*(lum/6.0d+05-1.d0)` for types 2–6), COMPAS and Belczynski et al.
-    (2010, equation 5) cube x − 1, which vanishes on it, as `hurley_lbv` always has, and as the
-    plan's own T42.a text writes it. The module's list under `Hurley2000` now names it the fifth
-    ("Five places"), for the owner's confirmation as ruling 10 gave the first four, and
-    `HURLEY_LBV`'s and `hurley_lbv`'s docs credit the form to SSE's code. No output moves. The
-    printed MNRAS text was not seen: if it prints the − 1, there is no difference. _Settled
-    2026-10-29 (research):_ the published text (MNRAS 315, 562) prints the − 1.0 in the cube; only
-    the arXiv preprint omits it. There is no fifth difference, and the module's list is four again
-    (lane `p06-land`: `wind.rs`'s docs say so, and credit the form to the published text and SSE's
-    code alike). Research read ruling 10's four in the published text as well (p. 561: "on the GB
-    and beyond", log P₀ = min(3.3, …), "for L > 4000 L☉" with no ramp, and the LBV term with no
-    type restriction): they stand.
-  - _Tests_ (`stellar::sse::wind`):
-    `within_the_humphreys_davidson_limit_the_limited_rate_is_the_modern_rate` (a grid of 2,160
-    states in nine phases at four metallicities, each that is not an evolved star beyond the limit
-    bit for bit, the main sequence and helium stars beyond it included),
-    `beyond_the_limit_the_limited_rate_is_at_least_belczynskis_and_the_side_rate`
-    (also at least today's rate; below the kink and on the AGB exactly the floor plus the term,
-    and above it, off the AGB, exactly the floor steepened plus the term at the star alone, so that
-    the term cannot move inside the steepening unseen),
-    `at_4000_k_hurleys_term_is_a_wall_at_log_l_5_8` and
-    `past_the_limit_the_limited_rate_is_pinned_by_its_bits` (six states past the limit, so that an
-    edit before T42.b shows apart from the swap's move). The first two compare with `modern`
-    itself, not `rate`, so they keep their reference after the swap.
-  - _For P06.T42.b._ The swap overturns
-    `beyond_the_humphreys_davidson_limit_the_modern_rate_is_belczynskis` (exactly 1.5 × 10⁻⁴
-    beyond the limit) and the words "the whole of its wind" in the module's `Modern` section,
-    `MODERN_LBV`'s and `WindRecipe::Modern`'s docs, and the "one step left" sentence becomes the
-    floor's step alone. T42.a's tests need `modern` kept as their reference (under `cfg(test)`
-    once `rate` stops calling it).
-
-- **Deviations in P06.T43.a, as built (lane `p06-asks`, 2026-10-28; at version 23, no bump; pure,
-  nothing on the record calls them).** Ask A4's photometry, for P06.T43.b's swap.
-  - _API._ Three public functions in `stellar::photometry`, each returning `Option<Magnitudes>`:
-    `white_dwarf_absolute_magnitude_v(&StarState)`,
-    `white_dwarf_bolometric_correction_v(Kelvin, Dex)` and
-    `giant_bolometric_correction_v(Kelvin, Dex)`, log g as `StarState::surface_gravity` gives it.
-    The tables sit in three private modules beside `photometry.rs`, one per source as
-    `classify::pm13` and `sk81` are: `photometry/montreal_da.rs`, `wl11.rs` and `levesque05.rs`
-    (the plan's Files named `photometry.rs` alone). `crates/hyperion-sim/clippy.toml` adds
-    "VandenBerg" to `doc-valid-idents`, an author's name.
-  - _Sources (the pod reaches GitHub and the Internet Archive, not the Montreal site, CDS, ADS,
-    the journals or arXiv)._
-    - Montreal: `Table_DA`, the pure-hydrogen grid's synthetic photometry (release "Wed Jan 13
-      09:13:58 2021", beside the sequences of Bédard et al. 2020), read from the copy the
-      `WD_models` code keeps as downloaded (commit `619128a7`, SHA-256 `ff3cfe68…`). It is
-      consistent with the module's earlier figures from the same release's 0.6 M☉ sequence
-      (−0.40 at 4,000 K and −4.15 at 45,000 K at log g 8.0; that sequence's −8.16 at 150,000 K lies
-      at log g 6.54, below the grid). _(lean, 2026-10-28)_ The copy stands in for the site; a
-      re-fetch from the site should be diffed against it.
-    - Worthey and Lee (2011): the authors' `mash2.out` (2010-09-15) in `colorinterp.tar.gz`
-      through the Internet Archive (both SHA-256s in the module); [Fe/H] = 0, log g 0.0–5.5,
-      V − K 1.1–10.2, 12 × 53 rows. Its log g −0.5 rows are left out, since below log g 0.0 the
-      supergiants' column takes over. Chosen over Fluks et al. (1994), the plan's other option for
-      M giants, because its table was fetched whole and covers every gravity; Fluks et al.'s could
-      not be reached.
-    - Levesque et al. (2005): Table 6 (MARCS, log g 0.0, 3,200–4,300 K) from
-      arXiv:astro-ph/0504337v1 through the Internet Archive.
-    - The science check compared every embedded value with its source file: 915 Montreal, 636
-      Worthey and Lee and 12 Levesque values, no mismatch.
-  - _The data's terms (ruled by main, 2026-10-29, on research's advice; it replaces the lean of
-    2026-10-28)._ The Montreal site states no licence; its one term is "If you are using any of
-    these color tables, please acknowledge this Web site … and include the relevant references".
-    Worthey and Lee state no terms beyond offering the table and program (their §4). Both stay
-    embedded with their citations and a `NOTICE` "Data" entry each.
-    - The Montreal grid's BC<sub>V</sub> column (305 values at the source's own nodes, with 610
-      M<sub>bol</sub> and V values for the tests) counts as reduced: the one quantity used, cut
-      from a 45-column table. That holds provided the module states the site's acknowledgement and
-      `NOTICE` carries it, which both do (lane `p06-land`).
-    - Worthey and Lee's 636 rows ([Fe/H] = 0, log g 0.0–5.5, V − K from 1.1: 1 of 7 abundances,
-      12 of 13 gravities and 53 of 75 colours, T<sub>eff</sub> and BC<sub>V</sub> alone) are
-      reduced under decision-r08-cmf-licence §9.2. Their source is the authors' own `mash2.out` of
-      2010-09-15. The CDS copy of the same data is an AAS-origin catalogue, which CDS offers under
-      CC BY-NC (decision-r08-cmf-licence §9.3; decision-camera-eta excludes non-commercial data),
-      so it must never replace the authors' file; `wl11.rs` says so.
-  - _Zero points (lean, 2026-10-28)._ Each source moves onto the module's (M<sub>bol</sub>☉
-    4.74, BC<sub>V</sub>☉ −0.085) in the way its numbers are made. The Montreal tables are
-    synthetic photometry of models of known luminosity on M<sub>bol</sub>☉ = 4.75 (recomputed from
-    the table's log g, mass and T<sub>eff</sub>: median 4.7493 over its 305 nodes), so they move
-    by the difference in M<sub>bol</sub>☉, −0.01, which keeps each model's V. Worthey and Lee's
-    and Levesque et al.'s corrections are scales set by the Sun's correction (−0.09, VandenBerg and
-    Clem 2003, their §2.5; −0.07, Bessell, Castelli and Plez 1998, their §3.2), so they move to
-    the module's −0.085, +0.005 and −0.015, which keeps a star's correction against the Sun's and
-    so against the dwarf table at the hand-over. Moved by M<sub>bol</sub>☉ instead, they would take
-    −0.01 and 0: 0.015 mag from those used.
-  - _White dwarfs (leans, 2026-10-28)._
-    - Every white dwarf reads the hydrogen grid: the atmosphere is `wd_spectral`'s mark, which a
-      state does not carry. The helium grid (`Table_DB`, the same release, measured and not
-      embedded) differs by up to 0.29 mag from 4,000 to 45,000 K, 0.45 mag above and 1.1 mag below
-      4,000 K, across log g 7–9.
-    - The grid is read at the star's own log g, not its mass, since a dwarf's radius here is HPT's
-      equation 91, not Montreal's. Log g is held at 7.0 and 9.0 beyond the grid; the correction
-      changes 0.03–0.04 mag per dex at the edges above 6,000 K and up to 0.17–0.23 below 4,000 K,
-      and HPT's oxygen–neon dwarfs reach log g 9.7 at 1.38 M☉, so the coolest of them read up to
-      about 0.1 mag off. Linear extrapolation in log g was set aside: below 2,000 K the correction
-      is not monotonic in log g. Bilinear in log₁₀ T<sub>eff</sub> and log g, exact at the nodes.
-    - Above 150,000 K the correction falls at the module's Rayleigh–Jeans 7.5 mag per dex from
-      the grid's hottest (the grid's own fall there is 7.8 at log g 8.0); none below 1,500 K.
-  - _Giants (leans, 2026-10-28)._
-    - Worthey and Lee at the star's log g; at log g 0.0 and below, plus the offset of Levesque et
-      al.'s column from Worthey and Lee's log g 0.0 correction, which is so Levesque et al.'s
-      column; between log g 0.0 and 1.0 that offset scaled linearly from 1 to 0. Gravity cannot
-      tell a supergiant from a late M giant of the AGB (SK81's M2 Iab and M6 III both sit at log g
-      0.1–0.5), and the column changes "< 0.05 mag over 0.5 dex in log g" from 3,500 to 4,300 K.
-    - The column is read from 3,400 K (the row below their coolest supergiant, M5 I at 3,450 K)
-      to 4,300 K; beyond, its offset at the nearer end is held (+0.006 mag at 3,400 K, +0.044 at
-      4,300 K). Its 3,200 and 3,300 K rows, models cooler than any supergiant measured, lie 0.57 and
-      0.23 mag below Worthey and Lee's and are left out. Within 3,400–4,300 K the two sources agree
-      to 0.064 mag.
-    - From 6,000 K the dwarf table's correction; linear in temperature between 5,000 and 6,000 K,
-      where the two differ by 0.01–0.06 mag at log g 0–3, the giants' the less negative.
-    - Worthey and Lee's interpolation follows their program's (`mash3.f`, `teffinterp`): linear in
-      log g at fixed V − K, held at 0.0 and 5.5 beyond the rows kept (the program extrapolates),
-      then along the rows in θ = 5,040 K ÷ T<sub>eff</sub>, linearly where the program fits a
-      five-point polynomial, and extrapolated linearly in θ below the coolest row (2,650–2,690 K
-      at log g 0–1), as the program extrapolates: −13.1 mag at 2,000 K, log g 0. Below the dwarf
-      table's last correction, 1,710 K, there is none.
-    - Solar abundance alone: a state carries none. Worthey and Lee's correction for M3–M6 giants
-      is the same to 0.001 mag from [Fe/H] −1.0 to +0.5; it spreads 0.03 mag at K5 III (log g 1.5)
-      and 0.02 at M0–M1 III.
-    - At a dwarf's gravity it gives Worthey and Lee's dwarfs, which lie above the mean dwarf
-      sequence by 0.1–0.2 mag from 3,400 to 4,000 K, 0.3–0.45 mag from 2,800 to 3,200 K and up to
-      1.0 mag near 2,600 K; it is for evolved stars, and T43.b chooses who reads it.
-  - _The citation check: not settled (lean, 2026-10-28; for the owner)._ The scan of Straižys and
-    Kuriliene (1981, `1981Ap&SS..80..353S`) could not be fetched.
-    - `classify::sk81` transcribes Table III's log T<sub>eff</sub> columns for classes V, III and
-      I–II (and leaves its ZAMS columns out). It cannot show whether Table III also prints
-      bolometric corrections.
-    - Its rows put M3 V and M5 III at the same log T<sub>eff</sub> (3.531), and M4 V and M6 III
-      at the same 3.512. Those are the pairs at which the note's "1.1 mag at M5 III and 1.7 mag at
-      M6 III, at the same temperature" stand, as a BC column read row against row would give.
-    - At SK81's class III temperatures and the gravities of its Table VII (M3 III 3,648 K and
-      1.12; M5 III 3,396 K and 0.76; M6 III 3,251 K and 0.52), Worthey and Lee's giants'
-      corrections lie 0.27, 0.95 and 1.59 mag below their dwarfs' (log g 4.5). That is the note's
-      0.1–0.5, 1.1 and 1.7 mag to within 0.15 mag.
-    - So the citation is plausible and unproven. The module's note keeps it, and adds the
-      giants' correction's figures and Worthey and Lee's. A later lane with the scan (pages
-      353–358) should settle it.
-  - _The M6 III case, before and after_
-    (`late_m_giants_read_fainter_by_the_giants_correction_than_by_the_dwarf_table`):
-    - At 3,251 K and log g 0.52, BC<sub>V</sub> is −2.353 by the dwarf table (before) and −3.692
-      by `giant_bolometric_correction_v` (after), so M<sub>V</sub> is 1.339 mag fainter.
-    - M3 III: −1.445 → −1.608 (0.16 mag). M5 III: −2.002 → −2.767 (0.77).
-    - The rest of Worthey and Lee's 1.59 mag at M6 III is the gap between the two dwarf scales:
-      the mean dwarf sequence's M dwarfs lie 0.25 mag below theirs at 3,250 K.
-    - The plan's and R06's "1.7 mag" quotes are left as written, for the owner to amend or keep as
-      history.
-  - _Also fixed in the module's documentation._ The hot tail's comparison had its two falls the
-    wrong way round. The Montreal 0.6 M☉ sequence falls 4.01 mag from 45,000 to 150,000 K, and
-    the 7.5 mag per dex continuation 3.93; it now says so.
-  - _Tests_ (`stellar::photometry`):
-    - `a_white_dwarfs_v_at_the_grids_nodes_is_the_grids_to_its_printed_precision`: all 305 nodes,
-      within 0.001 mag, the last printed digit, which is the worst at 73 nodes; the correction
-      bit for bit.
-    - `a_white_dwarfs_magnitude_reads_its_temperature_and_gravity` and
-      `the_white_dwarf_correction_is_held_or_continued_beyond_the_grid`.
-    - `the_giants_correction_is_worthey_and_lees_at_three_gravities`: log g 1, 2 and 3, every row
-      to 5,000 K bit for bit, nine rows quoted as printed.
-    - `supergiants_take_levesques_column` and
-      `the_giants_correction_is_continuous_and_meets_the_dwarf_table`, which also checks the
-      1,710 K floor.
-    - `late_m_giants_read_fainter_by_the_giants_correction_than_by_the_dwarf_table`.
-    - In the table modules:
-      - `montreal_da`'s `the_grid_is_pinned_by_its_checksum` and `the_columns_agree_at_every_node`
-        (V = M<sub>bol</sub> − BC<sub>V</sub> to 0.001 mag);
-      - `wl11`'s `the_table_is_pinned_by_its_checksum`,
-        `temperature_and_correction_fall_down_every_gravity` (strictly) and
-        `the_rows_are_reproduced_exactly`;
-      - `levesque05`'s `the_column_is_read_linearly_between_its_rows`, with no checksum: its twelve
-        rows are the test's.
-    - The doctests of the three functions.
-  - _For P06.T43.b_ (the determinism audit's point): once the swap puts these on the record, the
-    form of the bilinear interpolation, the θ search and both blends becomes output. Add a
-    `GoldenWriter` golden that samples the two corrections over a fixed off-node grid of
-    (T<sub>eff</sub>, log g). It should cross the hand-over bands, the column's range ends and
-    the white dwarfs' hot tail.
-- **Deviations in T28.e, as built (lane `p06-events`, 2026-10-28; at version 23, no bump: new
-  output on the registered tag 0x0107 and a new golden, moving nothing existing).** Giant
-  eruptions are `stellar::events::lbv`; nothing reads them yet (T28.g, P09.T43 through
-  `StarEventKind::GiantEruption`, and P12.T5.c will). `system.rs`, `sse`, `classify` and the other
-  kinds are unchanged.
-  - _API._ `LbvModel::of(&StarModel) -> Option<LbvModel<'_>>`, `None` where `StarModel::lbv_window`
-    is, a `RateModel` that borrows the star, with `star`, `start`, `end`, `rate_inside`,
-    `erupts_at(t)` and the listings `eruptions_in`, `eruptions_active_at` and `eruption`, which
-    reuse the window found once. `Eruption` (`Copy`): `id`, `onset`, `peak`, `end`, `rise`,
-    `duration` (`Span`s), `ejected_mass`, `peak_luminosity`, `quiescent_luminosity`,
-    `peak_factor`, `is_active_at(t)`, `luminosity_factor_at(t)` and `luminosity_at(t)` (the
-    quiescent luminosity times the factor, for plan 12). The free functions
-    `eruptions_in(star, series, window, out)`, `eruptions_active_at(star, series, t, out)` and
-    `eruption(star, series, id)` take the series
-    `EventSeries::new(seed, tags::STAR_LBV_ERUPTION, body.into())` beside the star, as for flares
-    (tag debug-asserted), and find the window on each call. Constants: `BIN_SECONDS` (3,155,760,000 s), `LOOK_BACK_BINS` (1), `MAX_DURATION`
-    (20 years), `ERUPTIONS_PER_YEAR`, `EJECTED_MASS_SOLAR_MASSES`,
-    `LOG_PEAK_LUMINOSITY_SOLAR_LUMINOSITIES` and `DURATION_YEARS` (`(lo, hi)` pairs), and
-    `RISE_SHARE`.
-  - _Who erupts._ A star inside T24.a's window, the hull from the first to the last age at which
-    `is_luminous_blue_variable` holds, in any living phase, not thinned inside it. At the median
-    draws: 50–100 M☉ at solar Z, 0.3–1.9 kyr of the Hertzsprung gap (60 M☉, 1,633 years); 150 M☉,
-    7.36 × 10⁵ years from the main sequence; at [Fe/H] = −1, 45–100 M☉, about 2 × 10⁵ years across
-    a red-supergiant stretch near 4,000 K (60 M☉, 2.13 × 10⁵); none below about 40 M☉, the lightest
-    with a window being 40 M☉ at [Fe/H] = −1, dead at 5.9 Myr.
-  - _The rate (retuned here, not by T31, which ran before T28 existed)._ One per 12,000 years,
-    ours (design note 22), constant in the window and zero outside it; a bin's bound is the
-    constant where the bin meets the window. T31's 181 LBVs × 2H ÷ 12,000 years = 30.2 in ±H; the
-    plan's 1/30,000 assumed some 500 LBVs and would give 12.1, under 15. The task text's
-    "regenerating this task's golden" when T31 retunes is moot: a later change to the rate or the
-    marks moves `stellar/lbv_eruptions` and is a bump.
-  - _Time._ Bins of 3,155,760,000 s looking back one; a bin's mean is 1/120. The window's ends are
-    `lbv_window`'s clock times and the rate compares t with them, reading no age. Listings are cut
-    to the window, which drops nothing, and `eruptions_active_at` returns at once before it and
-    from its end plus 20 years.
-  - _Marks (the laws ours; the plan gives ranges only)._ Word 0 the ejected mass, log-uniform on
-    0.1–10 M☉ (mean 2.15); word 1 log₁₀ L_peak (L☉), uniform on 6.5–7.5; word 2 the duration,
-    log-uniform on 1–20 Julian years, floored to the nanosecond; independent, one `uniform()`
-    each. Later scatter takes words 3, 4, … in order.
-  - _Light curve (ours)._ F^x with F = max(1, L_peak ÷ L_q): x rises linearly over the first
-    quarter of the duration (`RISE_SHARE`; η Carinae's 1837–1843 rise was 0.27 of its Great
-    Eruption) and falls linearly to the end, linear in magnitude as T28.d's, exactly 1 at the
-    onset and the end and continuous. L_q is `state_at(min(onset, +H))`'s, read once per
-    eruption. No Eddington cap: giant eruptions exceed it (η Carinae's by five to eight times for
-    about a decade). F's floor never binds in the tests (the 150 M☉ star's L_q is 2.55–2.57 × 10⁶
-    L☉ against the peak's floor of 3.16 × 10⁶).
-  - _Sources, recalled and not read at source (the pod reaches no literature host)._ Smith and
-    Hartigan 2006 (ApJ 638, 1045: P Cygni's ~0.1 M☉), Smith et al. 2003 (AJ 125, 1458: η
-    Carinae's ≥ 12 M☉), Davidson and Humphreys 1997 (ARA&A 35, 1: η Carinae's M_bol ≈ −14, 10^49.7
-    erg, 1838–1858), Humphreys and Davidson 1994 (PASP 106, 1025: P Cygni's six years) and Owocki,
-    Gayley and Shaviv 2004 (ApJ 616, 525: super-Eddington). The review's science check found the
-    arithmetic and conversions right (M_bol −14 is 3.13 × 10⁷ L☉) and the citations plausible.
-  - _Tests._ `cargo test -p hyperion-sim stellar::events::lbv`: 12 tests and one ignored, and the
-    doctests on `LbvModel` and `eruptions_in`: the rate and bound at the window's edges ± 1 ns for
-    three stars, with the clock window against the track's; no model for 1, 20 and 40 M☉, a brown
-    dwarf, or a 60 M☉ star at 1 Myr (its track not yet built to its window), and a long-dead star
-    lists nothing; the bound at 43 instants of every bin within 32 of each end of the window,
-    40–150 M☉ at two compositions; `eruption(id)` over 2,000 series (rejected candidates, numbers
-    beyond the count, foreign IDs, a star with no window); K–S tests of the three marks, the rise's
-    quarter, and L_q against `state_at` bit for bit; the factor's ends, peak, F^½, continuity and
-    shape, and `luminosity_at`; partitions at the window's edges and over four cut sets, in any
-    order and on threads (compiled out on wasm32-wasip1), and the free function against the
-    model's; `eruptions_active_at` against the listing; and the +900-year no-history test, at the
-    first instant from +900 years (in 10-year steps) at which an eruption runs. The golden
-    `stellar/lbv_eruptions` (325 lines, header 23, 28 eruptions): the 60 M☉ solar star over 40
-    series, and the 150 M☉ solar and 60 M☉ [Fe/H] = −1 stars over the first 1,000 bins of their
-    windows, one series each. The slow test
-    `the_mean_count_over_10_000_stars_matches_the_rate_integral` (`#[ignore]`): the first 100 LBVs
-    of T31's band-E young-thin-disc sample (1,418 drawn), each built ten years past its window,
-    100 series each, 10⁴ series rather than 10⁴ distinct stars (each LBV costs a massive track,
-    and at a constant rate the count reads only the window's length); windows of 782–680,837
-    years; expected 141,080.4, counted 141,686, interval 139,846–142,318 at α = 10⁻³.
-  - _Galaxy-wide._ `lbv_eruptions_galaxy_wide_at_milky_way_values` in `stellar::testing::tests`
-    (`#[ignore]`): `galaxy_counts`'s band-E LBV weight (4,000 primaries a component, the same
-    samples) × the rate × 2H, every component whose ages reach below 10 Myr, the rest asserted to
-    weigh nothing there. LBVs 181.29 (window 100–2,000) and giant eruptions **30.21** in ±H
-    (15–60); nothing pinned. Both slow tests took 6.5 s together under `slow-test` (pod, 4 vCPU).
-  - _Left to T28.g._ `StarEventKind::GiantEruption`, composing `luminosity_factor_at` into
-    `summary_at` (about 0.1% of eruptions overlap another, 2 r E[D] with E[D] = 6.34 years) and
-    the wire's magnitude fields. Each free call repeats `Track::window_where` (some 1,500
-    `state_at`s for a star with a window, not measured here), so T28.g should build the model once
-    per summary.
-- **Deferred findings (2026-10-13 rule) (P06.T28.e).** Recorded and deferred: each leaves the
-  algorithm and every contract as they are. The leads are unread unless said.
-  - _Design note 14 against the plan's figures._ At the retuned rate the marks' mean ejecta of 2.15
-    M☉ come to 1.79 × 10⁻⁴ M☉ a year, 1.19 times the whole modern LBV wind beyond the limit (1.5 ×
-    10⁻⁴, Belczynski et al. 2010, ApJ 714, 1217, eq. 8, which the recipe applies to evolved stars
-    only); on the main-sequence part of a window the track blows Vink's rate, not that. Over whole
-    windows the expected ejecta are 132 M☉ for the 150 M☉ solar star and 38 M☉ for 60 M☉ at
-    [Fe/H] = −1. At the plan's 1/30,000 it would have been under half the wind. Lean: accept it as
-    a mark only (nothing reads the mass into the track), and let P06.T42.b's train, which moves
-    the windows, recheck it; or weight the mass law to small ejecta.
-  - _The hull spans states that are not LBVs._ At [Fe/H] = −1 the 45–100 M☉ hulls cross a
-    red-supergiant stretch near 4,000 K, where eruptions run at the full rate; T24.a's "no gap"
-    held for its 60 M☉ solar test star. Lean: thin each candidate by the predicate (one `state_at`
-    each, as T28.a checks its phase), with T31's census and the retune weighted the same way, or
-    leave it to P06.T42.b, whose A2 winds strip cool supergiants past the limit.
-  - _Main-sequence windows._ The predicate admits any living phase, so the most massive stars
-    erupt from the main sequence (150 M☉: 7.36 × 10⁵ years), where `classify` may name them WNh;
-    such windows dominate the census (the slow test's longest is 6.8 × 10⁵ years). P09.T43 reads
-    the same window.
-  - _Short solar-Z windows and faint LBVs._ For 50–100 M☉ at solar Z, 0.3–1.9 kyr gives a 2.5–15%
-    chance of any eruption in a star's life, against observed LBV phases of 10⁴–10⁵ years, and no
-    star below about 40 M☉ (6 × 10⁵ L☉) has a window, while observed LBVs reach log L ≈ 5.4 (lead:
-    Humphreys and Davidson 1994).
-  - _The peak is absolute._ F is 1.24–12.4 for the 150 M☉ star and about 2.5–26 for 60 M☉ at
-    [Fe/H] = −1; for a star above 10^6.5 L☉ a low draw gives no brightening, where a giant
-    eruption is defined by one. The light curve has no plateau, though η Carinae stayed near its
-    peak from 1843 to about 1856 and P Cygni at third magnitude for 1600–1606, and P Cygni's span
-    back to quiet, about 26 years, exceeds the 20-year top. Only L changes: no radius,
-    temperature or colour; S Doradus cycles are T26.d's.
-  - _For P06.T42.b._ Its "What moves" does not name the LBV windows, which it moves; with them move
-    T31's 181, P09.T43's hosts and this kind's 30.2 eruptions. Its train reruns
-    `lbv_eruptions_galaxy_wide_at_milky_way_values` and retunes `ERUPTIONS_PER_YEAR` (a bump) if
-    the figure leaves 15–60.
-  - _Sources not read at source._ Every literature figure above and in the constants'
-    documentation was recalled on a machine with no literature access; a science check with
-    network access should read them and drop the "recalled" notes.
-- **Deviations in T28.f, as built (lane `p06-events`, 2026-10-28; at version 23, no bump: new
-  output on the registered tag 0x0108 and a new golden, moving nothing existing).** Thermal
-  pulses are `stellar::events::thermal_pulse`; nothing reads them yet (T24.b's C/O and T28.g
-  will). `classify`, the summary and the other kinds are unchanged.
-  - _API._ `ThermalPulseClock::of(&StarModel) -> Option<ThermalPulseClock<'_>>`, a `PhaseClock`
-    that borrows the star's track, on the track's own count (no anchor), with `anchored(c)`,
-    `start` and `end` (clock times), `start_age`, `end_age`, `pulses_at_end`,
-    `mean_frequency_hz`, `anchor_cycles` and `holds(t)`.
-    `ThermalPulseModel::of(&StarModel, &EventSeries)`, built for one series because its anchor is
-    the series' noise's, with `star`,
-    `series`, `clock`, `noise`, `is_pulsing_at`, `cycle_at`, `pulse_number_at`,
-    `interpulse_period_at`, `luminosity_factor_at`, and the listings `pulses_in`, `pulse` and
-    `pulse_active_at`. `ThermalPulse` (`Copy`): `id`, `number`, `onset`, `transient_end` and
-    `is_active_at(t)`. The free functions `thermal_pulses_in`, `thermal_pulse`, `pulse_number_at`
-    and `luminosity_factor_at` take the series
-    `EventSeries::new(seed, tags::STAR_THERMAL_PULSE, body.into())` beside the star (tag
-    debug-asserted), as for flares. `pulse_strength(n)` and
-    `cycle_luminosity_factor(n, f)` are the profile. Constants: `NOISE_AMPLITUDE_CYCLES` (0.03),
-    `NOISE_LATTICE_CYCLES` (1), `RAPID_PEAK_SHARE`, `RAPID_PEAK_DEX`, `DIP_SHARE`, `DIP_DEX`,
-    `DIP_MINIMUM`, `TRANSIENT_SHARE` (0.31), `PULSE_STRENGTH_PULSES` (3), `START_STEP_CYCLES`
-    (10⁻⁹) and `ANCHOR_MARGIN_CYCLES` (10⁻¹²).
-  - _Who pulses._ A star whose track (built to `age_at(+H)` or to its death; segments are built
-    whole) holds a thermally pulsing AGB segment with a positive count, both ends on the clock.
-    A star short of the phase at +H, one that never reaches it (20 and 30 M☉ tested) and an
-    object below 0.1 M☉ have no model.
-  - _The clock (a deviation from the task's form and from design note 23's letter; the task's
-    form since its amendment of 2026-10-29)._ φ(t) is
-    T10.c's knot interpolant of the count (the monotone cubic on the knots' counts and rates),
-    read at the age's two parts as P14.T45.d's `mass_at_split` is, (age at the epoch − the knot's
-    age) + years since the epoch, the interval chosen at the summed age; not n(a₀) + f(a₀)(t −
-    epoch). Over ±H the two agree to under 10⁻³ cycles, f the interpolant's slope at the epoch
-    (tested at ±H on four stars, 1–4 M☉). Research measured more (2026-10-29, median draws, at a
-    third, two thirds and 95% of the phase): under 10⁻³ cycles to 6 M☉ at solar metallicity, 5 M☉
-    at [Fe/H] −0.5 and 4 M☉ at −1.0, and up to 2.2 × 10⁻² cycles at 7 M☉ and [Fe/H] −0.5 (τ_ip
-    130 years), so the module's documentation says so; the test's bound stays, right for its four
-    stars. Over the source horizon, which spans the shortest phases whole,
-    the first-order form would drift by ½ ḟ Δt², tens of cycles, and put pulses outside the
-    phase; the count stays the closed form in the event number that T24.b reads.
-    `Track::pulse_phase_at(base_years, offset_years)` replaces `pulse_phase_at(age)` and is `None`
-    outside the segment's ends inclusive; `Segment::pulse_phase` is `pulse_phase_at_split`;
-    `Track::pulsing_agb` gives the phase's `AgeInterval`; `StarModel::track` lends the track
-    (`shared_track` clones the `Arc`). The expectations naming T28.f on `agb::interpulse_period`,
-    its `sse` re-export and `Track::pulse_phase_at` are gone.
-  - _Outside the phase._ φ continues linearly at the segment's mean rate (count ÷ length), so
-    that it increases over the whole clock; before the start it is lowered by 10⁻⁹ cycles, since a
-    split phase cannot hold a value within 10⁻¹⁶ below a whole number (without it the first pulse
-    fell a fraction of a millisecond before the phase), a step where `PhaseClock` asks for
-    continuity. Inside, the count is held to [0, n]; where the summed age rounds outside the
-    segment (half a unit in its last place, seconds at gigayears) it reads the nearer end's.
-    `time_at` bisects to the nanosecond inside and inverts the lines outside; its form brackets
-    each crossing and so is output (stated in its documentation). Pulses are listed only in
-    [start, end).
-  - _The noise and its anchor._ The brainstorm names thermal pulses among the monotone phase's
-    kinds, whose noise "lets the phase wander", so the phase carries one: a = 0.03 cycles (ours,
-    T26.d's Miras'; no source read gives a scatter about WG98's τ_ip), ℓ = 1, as many octaves as
-    span the source horizon's cycles at the phase's mean rate (slope bound 0.31). Its anchor c,
-    where c + N(c) reaches cycle 0 by bisection on `f64`, plus `ANCHOR_MARGIN_CYCLES` (10⁻¹², above
-    the phase's rounding just after the start, which the review's audit found could put pulse 0
-    tens of microseconds late for some 5–7% of stars), is added to the count, so that pulse 0 falls
-    on the phase's first nanosecond for every series (tested over 200 series of four stars and 10
-    series at 40 ages of the 2 M☉ star) and Φ wanders from the track's count by at most the noise's
-    bound (0.13 cycles at 2 M☉, about 9 for the shortest periods). So T24.b's n reads the series (P06.T24.b's handoff). A pulse's
-    own stream is unread; later scatter takes its words 0, 1, … in order.
-  - _Numbering._ Pulse 0 falls at the phase's start (t_DU, where HPT and WG98 put the first
-    pulse); `pulse_number_at` is ⌊Φ⌋, the pulses since the first, so n + 1 pulses have fallen;
-    `None` off the phase.
-  - _τ_ip._ `interpulse_period_at(t)` is `sse::interpulse_period` (WG98 eq. 11, T8's) at the
-    track's state at `age_at(t)`, its core and envelope, with the first pulse at the core where the
-    phase starts (Mc,DU): the reciprocal of the rate the track integrates. A probe found the knots'
-    rates 1 ÷ τ_ip exactly (not kept as a test); between knots the interpolant's slope departs from
-    it by 0.8–8.2%, the 8.2% at [Fe/H] = −1 where the first pulses' turn-on bends the rate
-    between the sparsest knots (tested to 10% at nine instants of each phase). T8.b's `m_c_bagb`
-    is not read: the track's integral carries it.
-  - _The transient (ours, provisional)._ 10^(s(n) Δ(f)) of the cycle's fraction f: a rapid peak of
-    +0.1 dex over the first 1% of the cycle, a slow dip to −0.3 dex over the next 30% with its
-    minimum a quarter of the way in, then the track's light; each piece a smoothstep, continuous,
-    1 at every pulse. s(n) = 1 − e^(−(n + 1) ÷ 3) makes the first pulses weak (0.28 at the
-    first, 0.96 by the tenth), as models' are, the review's science check's correction. A
-    full-strength cycle averages 0.920 of the track's light. Only L moves. The shape after
-    Boothroyd and Sackmann's 1988 series (ApJ 328, 632–671) and WG98's fits, the growth after Iben
-    and Renzini 1983 (ARA&A 21, 271) and Herwig 2005 (ARA&A 43, 435), all recalled and not read
-    at source (no literature host reachable); the six figures are the module's own.
-  - _Measured (median draws, the golden's stars, a third of the way through)._ 1 M☉ solar: the
-    phase lasts 12,915 years with 0.141 pulses (τ_ip 90,900–92,060 years), so pulse 0 alone, its
-    transient held to the phase's end. 2 M☉ solar: 1.622 Myr, 20.44 pulses (τ_ip 93,317 years
-    then, 58,414 a day before the end). 4 M☉ solar: 0.554 Myr, 84.28 pulses (6,298 years, 7,854 at
-    the end). 2 M☉ at [Fe/H] = −1: 1.351 Myr, 22.10 pulses (76,483 years, 38,763 at the end).
-  - _Tests._ `cargo test -p hyperion-sim stellar::events::thermal_pulse` (and the doctests on
-    `cycle_luminosity_factor`, `ThermalPulseModel` and `thermal_pulses_in`): the clock is the
-    track's count bit for bit inside the phase, non-decreasing, linear outside it and continuous
-    at its end, and its anchor adds exactly; its rate against 1 ÷ τ_ip and the first-order form;
-    the inverse exact to the nanosecond, anchored or not; the anchor over 200 series; pulses 0 …
-    at the crossings, each regenerated from its ID, foreign IDs rejected, within the noise's bound
-    of the track's count; the series wander apart (pulse 40 of the 4 M☉ star over 40 series);
-    who pulses; the profile's ends, peak, minimum, strength, continuity, monotone pieces and mean;
-    `pulse_active_at` against the listing; partitions in any order and on threads (compiled out
-    on wasm32-wasip1), and the free function against the model's; the +900-year no-history test.
-    `stellar::sse::track`'s `the_thermal_pulses_count_up_through_the_pulsing_agb` gains the
-    two-part reading and `pulsing_agb`. The golden `stellar/thermal_pulses` (header 23): the four
-    stars' phase ages and clock times, pulses, mean rate, anchor and octaves; the clock, Φ, τ_ip
-    and the factor at −H, the epoch, +H, the phase's middle and a day before its end; and their
-    first 30 pulses. The parent's count over 10⁴ stars, for a phase: the slow test
-    `the_pulse_count_over_10_000_stars_matches_the_clocks_integral` (`#[ignore]`) takes bands C
-    and D of the old thin disc from T31's sampler, each star at a test-local LCG age inside its
-    phase; each star's listing over the source horizon equals its crossings, ⌊Φ(b⁻)⌋ − ⌊Φ(a⁻)⌋,
-    exactly, and the total lies within the summed bound (twice the noise's bound and one a star)
-    of the clock's integral. A deterministic count, not a Poisson interval, and no `bound` to sweep
-    (no `RateModel`), as for T28.b's Vela-like kind. 10⁴ stars of 10,983 drawn list 863,651 pulses over the source horizon against the clock's
-    860,686.5 (a mean wander of 0.30 a star, within the summed bound of 23,219.6; one star holds
-    5,327); 136 s under `slow-test` (pod, 4 vCPU).
-  - _Left to T28.g and T24.b._ `StarEventKind::ThermalPulse`, its `duration_s` the transient's
-    length, and composing `luminosity_factor_at` into `summary_at` with the model built once per
-    summary (`interpulse_period_at` builds a `ZCoeffs` and two states; the anchor costs some 60
-    noise evaluations a model). T24.b reads `pulse_number_at` with the star's series as n, n + 1
-    pulses having fallen.
-- **Deferred findings (2026-10-13 rule) (P06.T28.f).** Recorded and deferred: each leaves the
-  algorithm and every contract as they are. The leads are unread unless said.
-  - _Short low-mass phases (the track's)._ A 1 M☉ solar star's thermally pulsing AGB on T10's
-    track lasts 12,915 years against a τ_ip of 91,000, with 0.064 M☉ of envelope at its start
-    (Vassiliadis and Wood's superwind takes it at once, about 6 × 10⁻⁶ M☉ a year, by the review's
-    estimate), so it has one pulse and spends the phase in that pulse's transient (0.82 of the
-    track's light at the dip's minimum, at the first pulse's strength). Detailed models give such
-    stars a few to ten pulses (leads: Karakas 2014, MNRAS 445, 347; Marigo et al. 2013, MNRAS 434,
-    488); 4 M☉'s 84 pulses are some 1.5–3 times theirs, in part because WG98's turn-on term,
-    keyed to the dredged core's growth, never switches off under λ = 0.9 (τ_ip 28% short a third
-    of the way through). For the track's owner (T8, T10).
-  - _The dip's depth by core mass._ A factor of two fits low-mass cores; hot-bottom-burning cores
-    (Mc ≳ 0.8 M☉) dip less. Lean: scale `DIP_DEX` down with Mc, provisionally.
-  - _The cycle's mean against design note 14._ A full-strength cycle averages 0.920 of the
-    track's light, 0.036 dex below it, while the wind, the maxima and the class read the
-    track's. The build reads the track's L as the quiescent luminosity between pulses, which core
-    mass–luminosity relations fit (Paczyński 1970; Boothroyd and Sackmann 1988); were it meant
-    as the cycle's mean, the quiescent factor would be 1 ÷ 0.920. Lean: keep it.
-  - _Light only, and the phase's end._ No radius, temperature or colour changes (lean for T28.g:
-    scale R by the factor's square root, so T_eff holds). A star whose phase ends mid-transient
-    steps by the factor there (0.071 dex for the 1 M☉ star, 0.850 a day before its end). T16's bridge or T28.g may taper it.
-  - _Sources not read at source._ The profile's descriptions and the first pulses' growth were
-    recalled on a machine with no literature access; a science check with network access should
-    read them, set the six figures from them, and drop the "recalled" notes.
-- **Deviations in T28.c, as built (lane `p06-events`, 2026-10-28; at version 23, no bump: new
-  output on the registered tags 0x0103–0x0105 and a new golden, moving nothing existing).**
-  Magnetar episodes, short bursts and giant flares are `stellar::events::magnetar`, built to
-  decision-galaxy-25-train §5.1 (2026-10-27); nothing reads them yet (T28.g and P12.T5.e will).
-  `system.rs`, `remnant`, `events/` and the other kinds are unchanged.
-  - _API._ `MagnetarSeries::new(seed, body)` opens `star.ev.magnetar_episode`,
-    `star.ev.magnetar_burst` and `star.ev.magnetar_giant` together (`episodes`, `bursts`,
-    `giant_flares`), as T28.b's `GlitchCycle::of` opens its two, since the bursts are thinned by
-    the episodes and the three must not come from two universes. `MagnetarModel::of(&StarModel)`
-    is `None` unless the star leaves a neutron star by +H born above 4.4 × 10¹³ G, with `star`,
-    `neutron_star`, `birth`, `quiet_from`, `neutron_star_age_at` (`Years`), `pulsar_at`,
-    `is_magnetar_at`, `episode_rate_at`, `giant_flare_rate_at` and the listings `episodes_in`,
-    `episodes_active_at`, `episode`, `bursts_in`, `bursts_active_at`, `burst`, `giant_flares_in`,
-    `giant_flares_active_at` and `giant_flare` on `&MagnetarSeries`; free functions of the same
-    names build the model per call. `Episode` (`Copy`): `id`, `onset`, `end`, `expected_bursts`,
-    `e_folding_seconds`, `is_active_at`, `burst_rate_at`. `Burst` (`Copy`): `id`, `episode` (its
-    episode's ID), `onset`, `end`, `duration`, `energy_joules`, `mean_luminosity_watts`,
-    `is_active_at`. `GiantFlare` (`Copy`): `id`, `onset`, `end`, `energy_joules`,
-    `mean_luminosity_watts`, `is_active_at`. `field_e_folds_per_year(Gauss)`. Constants:
-    `EPISODE_BIN_SECONDS` (2,592,000), `EPISODE_LOOK_BACK_BINS` (4), `BURST_BIN_SECONDS` (900),
-    `BURST_LOOK_BACK_BINS` (1), `GIANT_FLARE_BIN_SECONDS` (31,557,600),
-    `GIANT_FLARE_LOOK_BACK_BINS` (1), `FIELD_DECAY_PRODUCT_GAUSS_YEARS` (10¹⁹, from T21's
-    `DECAY_TIME_AT_1E15_G`), `EPISODES_PER_E_FOLD`, `GALACTIC_GIANT_FLARES_PER_YEAR`,
-    `GIANT_FLARES_PER_E_FOLD`, `BURST_COUNT` and `BURST_E_FOLDING_DAYS` (`(lo, hi)` pairs),
-    `EPISODE_SPAN_E_FOLDINGS` (10), `MAX_EPISODE_SPAN` (100 days), `BURST_ENERGY_JOULES`,
-    `BURST_ENERGY_INDEX`, `BURST_DURATION_MEDIAN_SECONDS`, `BURST_DURATION_SIGMA_DEX`,
-    `BURST_DURATION_TRUNCATION`, `MAX_BURST_DURATION` (3 s), `GIANT_FLARE_ENERGY_JOULES`,
-    `GIANT_FLARE_ENERGY_INDEX` and `GIANT_FLARE_SPIKE` (0.2 s). Energies in J, the erg ranges in
-    the docs.
-  - _Who bursts._ A star whose neutron star is a magnetar at t (`PulsarState::is_magnetar`, T21.c);
-    none is one at birth, and once it stops it never is again (tested). Its rates read the neutron
-    star's age at t, `age_at(t)` less the death age, in `remnant_age_at`'s arithmetic. Listings are
-    cut to the birth less a day through the field's reaching 4.4 × 10¹³ G plus a day (the margin
-    covers the ages' rounding, which can leave the field a hair above the critical field at the
-    quiet instant); every bound is zero outside, so the cut drops nothing.
-  - _Bounds._ Episodes and giant flares: the rate at the bin's first instant after the birth,
-    padded by 2⁻⁴⁰ as T28.d pads its bound, zero for a bin that ends before the birth or starts with
-    the field at or below the critical field. Bursts: the sum over the episodes overlapping the bin
-    of each one's (N_b ÷ τ_b) e^(−Δt ÷ τ_b) at the bin's start or its onset, whichever is later,
-    the ruling's "N_b ÷ τ_b at the bin's start" read with the decay since the onset, padded the
-    same way.
-  - _Burst bins (deviation)._ 900 s, not the ruling's hour: at N_b ÷ τ_b up to 1,000 ÷ 0.3 days an
-    hour expects up to 138.9 bursts, above `PoissonBins::MAX_MEAN_PER_BIN` = 64, for 1.47% of
-    episodes; a quarter hour expects at most 34.7 from one episode. Two of the strongest episodes
-    starting within about τ_b of each other (each in about the top 0.07% of N_b ÷ τ_b, some 10⁻¹⁰
-    of episodes) still exceed 64, which a debug build asserts (tested on built episodes). The
-    look-back over episodes is the ruling's: onsets within 100 days of a bin (4 episode bins),
-    regenerated from their own series for each listing. `bursts_in` lists each run of bins that
-    the episodes' spans touch, with the slice of the onset-sorted episodes that can overlap it (an
-    episode that does not adds an exact zero to every bound, rate and pick), its bins clamped to
-    the 40-bit bin numbers as `PoissonBins::events_in` clamps them (±15.7 Myr at 900 s, tested at
-    the lower end).
-  - _N_GF (derived, as ruled)._ 67.29 giant flares per e-fold, from T21's census sample
-    (`magnetars_are_the_high_tail_of_the_birth_field`: 20,000 neutron stars of seed 11, 701
-    log-spaced edges to 10 Myr, two core collapses a century, 62% leaving a neutron star): 83.7
-    active magnetars and 6.539 × 10⁻⁴ e-folds a year in all, 0.044 ÷ 6.539 × 10⁻⁴ = 67.29,
-    re-derived by a unit test to 10⁻³. The ruling expected about 30 from 1.5 × 10⁻⁵ e-folds a year
-    per magnetar; the census's decay at 7.8 × 10⁻⁶ (a mean field near 7.8 × 10¹³ G), so a 10¹⁵ G
-    magnetar flares once in 149 years, not 330. Within the ruling's form; no new ruling.
-  - _Episodes._ Word 0 N_b and word 1 τ_b, log-uniform by one `uniform()` each. An episode lasts
-    10 τ_b, floored to the nanosecond, its bursts cut there (dropping e⁻¹⁰ of N_b), so "within 10
-    τ_b of its onset" holds by construction; at most 100 days, which four 30-day bins of look-back
-    cover. Recorded, not tested: R³B² ÷ (3 N_EP), 4 × 10⁴³ erg at 5 × 10¹⁴ G and R = 10 km (the
-    ruling's "roughly 10⁴⁴"), a radiative efficiency of 10⁻⁴–10⁻¹ against X-ray outbursts'
-    10⁴⁰–10⁴³ erg.
-  - _Bursts._ Word 0 the episode, picked in proportion to the episodes' rates at the onset
-    (`Mark::pick_weighted`), so `Burst::episode` needs no history and is the same however the
-    episodes reaching a bin are gathered; word 1 the energy, inverse transform of E^(−5/3) on
-    10³⁷–10⁴¹ erg; word 2 the duration, log-normal about 0.1 s with σ 0.35 dex truncated at ±4σ
-    (3.98 ms–2.512 s), as T28.b truncates its large glitches (the truncation ours). Built at the
-    ruling's 0.3 dex (6.3 ms–1.585 s, `MAX_BURST_DURATION` 2 s), moved by the read at source
-    below.
-  - _Giant flares._ Word 0 the energy, E^(−1.7) on 10⁴⁴–10⁴⁷ erg. A flare's light is its initial
-    spike alone, 0.2 s (SGR 1806−20's ~0.2 s, Hurley et al. 2005, Nature 434, 1098; SGR 1900+14's
-    about 1 s, Hurley et al. 1999, Nature 397, 41, Table 1); the pulsating tails, 380 s and ~300 s,
-    are not modelled. Bursts and flares carry `mean_luminosity_watts`, energy over
-    duration, not a factor of the star's luminosity. Under E^(−1.7) 37.4% of flares exceed
-    4 × 10⁴⁴ erg, 0.0165 a year for the Galaxy, to set against Burns et al.'s (2021, ApJL 907, L28)
-    3.8 × 10⁵ Gpc⁻³ yr⁻¹.
-  - _Sources: the ruling's [S] figures were not read at source._ The pod reaches no literature
-    host, so the science check of the review worked from memory: every formula and derived figure
-    checked out (its own census of 2 × 10⁶ neutron stars gave N_GF = 66.1), the papers' journals
-    were added as it recalls them, and it flagged Coti Zelati et al.'s first year (2002 or 2003),
-    σ = 0.3 dex and ">400 bursts in a day" (it recalls van der Horst et al.'s 286 GBM bursts in
-    January 2009) as the least sure. Each constant's documentation says "not read at source in
-    this build". The ruling asks this read before commit; it is left to main (lean: a networked
-    science check before landing, moving any figure its source contradicts within the same form,
-    recorded). Superseded by the next item.
-  - _The [S] figures read at source (research, 2026-10-29; fixed before landing, lane
-    `p06-land`)._ Read as arXiv copies through the Internet Archive, and the McGill catalogue as it
-    kept it on 2026-10-22. Of the module's 22 figures, 18 are confirmed or consistent, one rounded
-    and one unverifiable; two were wrong.
-    - _Moved:_ the bursts' duration width, 0.3 → 0.35 dex (Göğüş et al. 2001, ApJ 558, 228, §3.1:
-      "σ = 0.35 ± 0.01; where σ is the width of the distribution in decades" for SGR 1900+14, 0.34
-      ± 0.02 for SGR 1806−20), within the same form; `MAX_BURST_DURATION` 2 s → 3 s, above the new
-      ±4σ top of 2.512 s. The later Fermi samples of SGR J1550−5418 are wider (0.41 ± 0.02, van der
-      Horst et al. 2012; 0.40 ± 0.02, Collazzi et al. 2015).
-    - _Docs only:_ Coti Zelati et al.'s sample runs 1998–2016 (it opens with SGR 1627−41's outburst
-      of 1998 June 15), not 2003–2016; "about 0.05 per magnetar-year" is derived, 23 over 19 years
-      among the 26 sources of Olausen and Kaspi's catalogue (the online catalogue now lists 30).
-      SGR 1900+14's giant-flare spike lasted about 1 s (Hurley et al. 1999, Table 1), and the tails
-      380 s and ~300 s, where the module had "under a second" and "some 400 s".
-    - _Unverifiable:_ Cheng et al. 1996's index (only the abstract is reachable; Göğüş et al. 1999
-      quote their γ = 1.6). The module cites Göğüş et al. for the index and Cheng et al. for the
-      earthquake likeness. Mazets et al. 1979's text was not reached either; three papers that cite
-      it confirm the date.
-    - _Confirmed_ (each constant's documentation names the section or table): the 23 outbursts of
-      17 magnetars and their 6 × 10⁴⁰–2.4 × 10⁴³ erg; the dipole fields mostly 10¹⁴–10¹⁵ G (16 of
-      Olausen and Kaspi's 21 confirmed); "∼450 bursts" in a day of January 2009 (Kaneko et al.
-      2010, §1); "over 217 bursts" from SGR 1935+2154 (Younes et al. 2020); Collazzi et al.'s 440
-      bursts; the burst index (γ = 1.66 and 1.67–1.76, Göğüş et al. 1999 and 2000) and range; the
-      median duration (93.9 and 161.8 ms); the three giant flares' dates and that no other has been
-      seen (Mereghetti et al. 2024, Nature 629, 58; Trigg et al. 2026, A&A 710, A139, read as its
-      arXiv copy of October 2025); the giant flares' index,
-      α = 1.7 ± 0.4 (90%), differential (Burns et al. 2021); the range against Burns et al.'s
-      search over 1.0 × 10⁴⁴–5.75 × 10⁴⁷ erg; their 3.8 (+4.0 −3.1) × 10⁵ Gpc⁻³ yr⁻¹; and SGR
-      1806−20's 0.2 s spike. The 45 years of coverage are a choice (Mereghetti et al. say ∼50,
-      Trigg et al. 57: 0.035–0.044 a year), inside the Poisson error of two events and the
-      0.02–0.09 window, so 0.044 stays.
-    - _N_GF against the observed rates (research's item 9; 67.29 kept)._ Burns et al.'s rate, at
-      their 0.050 (0.009–0.10) a year per M☉ yr⁻¹ of star formation and the Milky Way's 1.65 M☉
-      yr⁻¹, is 0.082 (0.015–0.17) a year above 4 × 10⁴⁴ erg (their abstract's threshold;
-      E_iso,min 3.7 × 10⁴⁴ erg, §4.1); the model's E^(−1.7) puts 37.4% of its flares above
-      4 × 10⁴⁴ erg, 0.0165 a year at the 0.044 target, at the low edge of their interval.
-      Trigg et al. find 0.14 (+0.20 −0.08) a year for the Milky Way and the LMC, which they note
-      overpredicts the three flares seen. The 22 confirmed Galactic magnetars of the online
-      catalogue sum to 7.39 × 10¹⁵ G (7.39 × 10⁻⁴ e-folds a year), so they alone would need N_GF ≈
-      60, an upper bound for the real Galaxy; the model needs 67 because T21's census sums to
-      6.54 × 10¹⁵ G, the deferred finding below. The Galaxy's rate, the observable, is right.
-    - _Re-run after the move (lane `p06-land`, 2026-10-29; pod, 4 vCPU, x86_64)._ The width
-      reaches word 2's durations alone. The golden `stellar/magnetars`, re-blessed by name, changes
-      its 100 burst durations and nothing else (596 lines, header 23; `golden_diff` against the
-      integration tip: new goldens only). The module's 15 tests pass, the K–S test of the durations
-      against the new law and every duration under the new 3 s bound among them, and a 16th, added
-      by the review, pins the law's ends (3.98 ms and 2.512 s at u = 0 and just below 1) under the
-      bound and the bound under the 15-minute look-back, which no sample reaches. No rate reads a
-      duration, so the counts are unchanged: the slow test gives episodes 721 against 717.5,
-      giant flares 1,415 against 1,442.4 and bursts 1,756 against 1,701.3, and
-      `giant_flares_galaxy_wide_at_milky_way_values` 98.9 active magnetars (20–300) and **0.0518**
-      giant flares a year (0.02–0.09). The two slow tests took 13.7 s under `slow-test`.
-  - _Tests._ `cargo test -p hyperion-sim -- stellar::events::magnetar`: 15 tests and one ignored,
-    and the doctests on `MagnetarModel` and `bursts_in`: the scaling and the ruling's 0.2, 0.02,
-    0.0088 and 0.05 a year; N_GF re-derived; no model for a sub-critical neutron star, a living
-    star, a white dwarf, a black hole and a brown dwarf; rates zero off the magnetar and
-    non-increasing on it at 4,001 instants for three stars, and the bounds about the birth, the
-    onset, the quiet and the epoch; a sweep of the bounds over birth fields of 10^13.7–10^16 G ×
-    periods of 0.02–0.6 s × 163 instants log-spaced in the neutron star's age, and of the burst
-    bound at the marks' corners alone and in overlapping pairs; every burst inside its episode
-    and the burst bound over an episode's span (3,520 bursts against 3,432.5 expected over four
-    series of 20 years of a 10¹⁵ G magnetar, z = +1.49); K–S tests of N_b, τ_b, both energies and
-    the durations, and the ranges; regeneration by ID, foreign IDs rejected; partitions in any
-    order (bursts about a busy episode and where two episodes overlap, with a cut between their
-    onsets; episodes and flares over ±3,000 years and at the birth and the quiet ± 1 ns; the burst
-    bins' lower end) and on threads (compiled out on wasm32-wasip1); `active_at` against the
-    listings; the +900-year no-history test. The golden `stellar/magnetars` (596 lines, header 23):
-    three magnetars (10¹⁵ G at 0.2 s born 2,000 years before the epoch, 10^14.5 G at 0.3 s 10,000
-    years before, 10^15.2 G at 0.25 s 300 years after) on series of their own, each with its birth,
-    quiet, rates at five instants, the three kinds' bin bounds at the birth, its first episode and
-    the quiet, its episodes over 100 years, the bursts of its first episode's first two days and
-    its giant flares over 3,000 years; and the bursts where two episodes of the first star overlap,
-    word 0 choosing between them. The slow test
-    `the_mean_counts_over_10_000_magnetars_match_the_rate_integrals` (`#[ignore]`): 10⁴ series of
-    1,000 synthetic neutron stars rather than 10⁴ stars of T31's sampler, few of whose stars are
-    magnetars; each a 15 M☉ solar progenitor with log B₀ uniform on 13.7–15.4, P₀ of the birth law
-    and an age to 3 × 10⁵ years from a test-local LCG; episodes over five years, giant flares over
-    300 years and bursts over 30 days given the episodes listed: episodes 721 against 717.5
-    expected (Poisson interval 631–807 at α = 10⁻³), giant flares 1,415 against 1,442.4 (1,319–1,569)
-    and bursts 1,756 against 1,701.3 (1,567–1,839); 562 of the 1,000 are magnetars at the epoch.
-  - _Galaxy-wide._ `giant_flares_galaxy_wide_at_milky_way_values` in `stellar::testing::tests`
-    (`#[ignore]`): 4,000 primaries of bands D and E of each component with ages below 10⁸ years
-    (the rest asserted to weigh nothing there), each magnetar step of T21's sweep weighted by the
-    component's ages, times the rate: active magnetars 98.9 (T21's
-    window 20–300) and giant flares **0.0518** a year (0.02–0.09); nothing pinned. The five slow
-    tests of the lane took 174 s together under `slow-test` (pod, 4 vCPU), 136 s of it T28.f's.
-  - _Left to T28.g._ `StarEventKind::MagnetarBurst` and `MagnetarGiantFlare` (an episode is no
-    `StarEventKind`; plan 12's `TransientKind` has `MagnetarBurst` only), a rule for putting an
-    absolute burst or spike luminosity into `summary_at`, and building the model once per summary
-    (`MagnetarModel::of` reads `neutron_star()` and `death()` per free call).
-- **Deferred findings (2026-10-13 rule) (P06.T28.c).** Recorded and deferred: each leaves the
-  algorithm and every contract as they are. The leads are unread unless said.
-  - _The model's magnetars are weak, so each bursts less often (first titled "so its outbursts
-    are few")._ T21's active magnetars average
-    about 7.8 × 10¹³ G, where the catalogue's lie mostly at 10¹⁴–10¹⁵ G (the review recalls the
-    known magnetars' fields alone decaying at about 8.1 × 10⁻⁴ e-folds a year, more than the census's
-    whole Galaxy; research re-summed the 22 confirmed Galactic magnetars of the online catalogue to
-    7.39 × 10⁻⁴, 2026-10-29). The population gives 0.016 episodes per magnetar-year against the
-    ruling's check of 0.05, which the law meets star by star at 2.5 × 10¹⁴ G, and the Galaxy 1.31
-    episodes a year against Coti Zelati et al.'s 23 in 1998–2016 from the known magnetars alone,
-    1.2–1.3 a year (recorded first as 1.6–1.8 a year from the span 2003–2016, which their Table 2
-    does not bear out). So the Galaxy's count is met, by more and weaker magnetars than the
-    catalogue's: set against the known magnetars' 1.2–1.3 a year, N_EP would move under 10%, to
-    1,850–1,950, so the shortfall per magnetar is T21's field law's. Lean: revisit T21's field law,
-    a later task with a bump.
-  - _Giant flares are independent of episodes._ Observed ones came in active phases (lead:
-    Mereghetti et al. 2005 on SGR 1806−20 before 2004-12-27). Lean: thin them by the episodes'
-    rate, a later task with a bump.
-  - _No marks scale with the field._ N_b, τ_b and both energy laws are the same at every B, though
-    the rate's own argument has an outburst's energy scale with B². Lead (read at source,
-    2026-10-29): Burns et al. 2021 cap a giant flare's energy at 2.3 × 10⁴⁶ (B ÷ 2 × 10¹⁵ G)² erg,
-    below 10⁴⁴ erg under 1.3 × 10¹⁴ G, so most of the model's giant flares come from fields that on
-    that scaling could not make them.
-  - _Intermediate flares._ The two energy laws leave 10⁴¹–10⁴⁴ erg empty (SGR 1900+14's of
-    2001-04-18 is an intermediate flare); the ruling's scope.
-  - _Outbursts outside the predicate._ SGR 0418+5729's dipole is near 6 × 10¹² G (lead: Rea et al.
-    2010, Science 330, 944) and PSR J1846−0258's 2006 outburst came from a rotation-powered pulsar
-    (lead: Gavriil et al. 2008, Science 319, 1802); neither has an analogue here.
-  - _Magnetar glitches._ T28.b deferred them "for T28.c's active episodes or a later task" (lead:
-    Dib and Kaspi 2014); none is added, so they stay deferred.
-  - _The dipole energy's convention._ T21's L_B, −R³ B Ḃ ÷ 3, takes the external energy as
-    B²R³ ÷ 6; with the timing convention's equatorial field the review finds B_eq² R³ ÷ 3, a factor
-    of two that also reaches `is_magnetar` and so the census (marked provisional in T21).
-  - _For P06.T42.b._ Its fates move the neutron-star share past the limit; its train reruns
-    `giant_flares_galaxy_wide_at_milky_way_values` and re-derives N_GF (a bump) if the figure
-    leaves 0.02–0.09.
