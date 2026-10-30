@@ -89,7 +89,7 @@ use crate::planetary::hooks::figures::relief::Hypsometry;
 use crate::planetary::hooks::surface::{FULL_OCEAN_FRACTION, OceanWeight};
 use crate::planetary::surface::MAX_CONDENSATES;
 use crate::substance::diagram::PhaseDiagram;
-use crate::substance::{CondensedPhase, Phase, Substance, SubstanceId, by_key};
+use crate::substance::{CompressionSlot, CondensedPhase, Phase, Substance, SubstanceId, by_key};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{
     Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared,
@@ -827,15 +827,16 @@ struct Caps {
 /// after the solve and never moves the cap (decision-p14-t51a-part2 §2.2). Zero where the
 /// condensable would boil or freeze at the mean, where all of it is airborne there, where it lies
 /// above its critical point (supercritical or solid whatever `critical`, its cap there), and where
-/// the gravity or the liquid's density is not known.
+/// the gravity or the liquid's density is not known. The density is `compression`'s, the direct
+/// call's to the bit ([`CompressionSlot`]).
 #[must_use]
 fn own_ocean_weight(
     (species, diagram): (&Species, &PhaseDiagram),
     climate: &ClimateSpan,
     ground: &Ground,
-    others: Pascals,
-    minor: Pascals,
+    (others, minor): (Pascals, Pascals),
     critical: CriticalCap,
+    compression: &mut CompressionSlot,
 ) -> f64 {
     let share = if species.substance == Gas::Water.substance() {
         ground.water_at_surface
@@ -854,10 +855,8 @@ fn own_ocean_weight(
     if phase != Some(CondensatePhase::Liquid) {
         return 0.0;
     }
-    let Some(density) = species
-        .substance
-        .substance()
-        .liquid_density_at_pressure(climate.mean, pressure)
+    let Some(density) =
+        compression.liquid_density_at_pressure(species.substance, climate.mean, pressure)
     else {
         return 0.0;
     };
@@ -891,7 +890,8 @@ fn share(weight: Pascals, molar_mass: f64, others_moles: f64) -> f64 {
 ///
 /// A caller that solves the same inventory at many temperatures (T13.c's greenhouse steps) keeps
 /// one, so that no step allocates ([`AirborneWeights::solve`]). Each solve starts afresh from its
-/// inputs alone: nothing of an earlier solve is read.
+/// inputs alone: nothing of an earlier solve is read but the slot of its own seas' compressed
+/// densities, which gives the bits a direct call would ([`CompressionSlot`]).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct AirborneWeights {
     weights: Vec<Pascals>,
@@ -899,6 +899,8 @@ pub(crate) struct AirborneWeights {
     /// What caps a condensable above its critical point in the last solve, the rules' in force
     /// when it started ([`CriticalCap::in_force`]).
     critical: CriticalCap,
+    /// The last compression its seas' layers read, a local of whoever keeps these weights.
+    compression: CompressionSlot,
 }
 
 /// What caps a condensable's own partial pressure at or above its critical temperature in the
@@ -1015,6 +1017,7 @@ impl AirborneWeights {
             weights,
             caps,
             critical: cap,
+            ..
         } = self;
         *cap = critical;
         weights.clear();
@@ -1127,6 +1130,7 @@ impl AirborneWeights {
             weights,
             caps,
             critical,
+            compression,
         } = self;
         let mut moved = false;
         for (k, species) in inventory.species.iter().enumerate() {
@@ -1147,7 +1151,14 @@ impl AirborneWeights {
             // Its own sea, where it has one at the mean, holds it there (§4); a minor
             // condensable is held there already.
             let c = if d > 0.0 {
-                own_ocean_weight((species, diagram), climate, ground, total, minor, *critical)
+                own_ocean_weight(
+                    (species, diagram),
+                    climate,
+                    ground,
+                    (total, minor),
+                    *critical,
+                    compression,
+                )
             } else {
                 0.0
             };
@@ -2011,6 +2022,7 @@ pub fn partition(climate: &ClimateSpan, ground: &Ground, inventory: &ColumnInven
         weights,
         caps: held,
         critical,
+        ..
     } = solved;
     let (mut pressure, mut moles) = (0.0, 0.0);
     for (species, w) in inventory.species.iter().zip(&weights) {

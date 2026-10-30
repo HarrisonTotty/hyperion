@@ -90,12 +90,12 @@ pub use element::Element;
 pub use formation::{BalanceReactionError, Reaction, formation_range, log10_formation_constant};
 pub use helmholtz::HelmholtzResidual;
 pub use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
-pub(crate) use liquid::liquid_properties_at_pressure;
 pub use liquid::{
     BuildLiquidCompositionError, Composition, LIQUID_BIN_EDGES_NM, LiquidColumns,
     LiquidComposition, LiquidMember, ResolveLiquidError, liquid_properties,
     pure_liquid_scattering_per_m,
 };
+pub(crate) use liquid::{CompressionSlot, liquid_properties_at_pressure};
 pub use mix::{GasColumns, mean_molar_mass_g_per_mol};
 pub use optics::{CondensedOptics, ReferenceForm, ResolvePaletteEntryError, resolve_palette_entry};
 pub use phase::{MOLAR_GAS_CONSTANT, Phase, ice_ih_density};

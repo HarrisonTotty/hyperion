@@ -109,7 +109,7 @@ use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
 
 use super::condensed::{CondensedPhase, GrainDensity};
 use super::diagram::{AVOGADRO_PER_MOL, DensityEquation, DensityForm, PhaseDiagram};
-use super::helmholtz::{COMPRESSION_CEILING, HelmholtzIdeal, HelmholtzResidual};
+use super::helmholtz::{COMPRESSION_CEILING, HelmholtzIdeal, HelmholtzResidual, Isotherm};
 use super::rows::liquids::LIQUIDS;
 use super::{Source, Substance, SubstanceId};
 use crate::math;
@@ -1732,21 +1732,155 @@ fn compressed(
         return saturated;
     };
     let vapour = diagram.saturation_pressure(temperature);
-    // By comparison, so that a pressure that is not a number compresses nothing, nor any pressure
-    // where the vapour's is infinite, at the critical temperature.
-    let compresses = pressure > vapour;
-    if !compresses {
+    if !compresses(pressure, vapour) {
         return saturated;
     }
+    let isotherm = equation.isotherm(temperature);
+    let at_vapour = isotherm.density_at_pressure(saturated, vapour);
+    compressed_from(&isotherm, saturated, at_vapour, pressure)
+}
+
+/// Whether a liquid under `pressure` whose vapour's is `vapour` is compressed: by comparison, so
+/// that a pressure that is not a number compresses nothing, nor any pressure where the vapour's is
+/// infinite, at the critical temperature.
+#[must_use]
+fn compresses(pressure: Pascals, vapour: Pascals) -> bool {
+    pressure > vapour
+}
+
+/// `saturated` compressed to `pressure` along `isotherm` from `at_vapour`, the equation's own
+/// saturated liquid there ([`compressed`]'s last step): the equation's compression, at most to
+/// [`COMPRESSION_CEILING`], carried onto `saturated`.
+#[must_use]
+fn compressed_from(
+    isotherm: &Isotherm<'_>,
+    saturated: KilogramsPerCubicMetre,
+    at_vapour: KilogramsPerCubicMetre,
+    pressure: Pascals,
+) -> KilogramsPerCubicMetre {
     let held = if pressure < COMPRESSION_CEILING {
         pressure
     } else {
         COMPRESSION_CEILING
     };
-    let isotherm = equation.isotherm(temperature);
-    let at_vapour = isotherm.density_at_pressure(saturated, vapour);
     let at_pressure = isotherm.compressed_density(at_vapour, held);
     KilogramsPerCubicMetre::new(saturated.value() * (at_pressure.value() / at_vapour.value()))
+}
+
+/// A local slot for a liquid's compressed density, [`Substance::liquid_density_at_pressure`]'s
+/// to the bit: the last row and temperature asked for, with what the compression reads of them
+/// alone (the saturated density, the vapour pressure, the equation's [`Isotherm`] and its own
+/// saturated liquid there, the last taken when first needed), and the last pressure with the
+/// density it gave.
+///
+/// A condensable's sea weighs its own layer over its compressed density at every sweep of every
+/// greenhouse step ([`AirborneWeights`](crate::planetary::chem::partition::AirborneWeights)), and
+/// within one greenhouse the steps ask again at the same temperature, its mean held, and often
+/// at the same pressure. Over the first 20 sample systems at version 24, `generate` made 15,602
+/// compressions in 1,314 greenhouses: 84% read the row and temperature of the one before, and 30%
+/// its pressure too (P14.T54.b.l's count). With the slot, `generate` over them fell from 557 to
+/// 459 ms and `snapshot_at` from 1,942 to 1,843 ms (pod, 8 vCPU).
+///
+/// The slot is a local of its owner, never a static or a thread's, so that no derivation reads
+/// another's, as a derivation's cold-trap field slot is (P14.T54.b.f;
+/// decision-p14-t54b-f-coldtraps §4). Every value it holds is a pure function of its keys, which
+/// it matches bit for bit, so a reuse gives the bits a direct call would.
+#[derive(Default)]
+pub(crate) struct CompressionSlot {
+    last: Option<Compressing>,
+}
+
+impl fmt::Debug for CompressionSlot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CompressionSlot").finish_non_exhaustive()
+    }
+}
+
+impl Clone for CompressionSlot {
+    /// An empty slot: a clone builds its own, and gives the same bits.
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for CompressionSlot {
+    /// Always: a slot never changes what its owner gives, so its owner's equality ignores it.
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// One liquid row's compression at one temperature ([`CompressionSlot`]).
+struct Compressing {
+    id: SubstanceId,
+    temperature: Kelvin,
+    /// [`Substance::grain_density`] of its liquid there.
+    saturated: Option<KilogramsPerCubicMetre>,
+    /// Its equation along the isotherm and its diagram's vapour pressure, where it has one
+    /// ([`equation_of_state`]).
+    equation: Option<(Isotherm<'static>, Pascals)>,
+    /// The equation's own saturated liquid there, once a compression has needed it.
+    at_vapour: Option<KilogramsPerCubicMetre>,
+    /// The last pressure a compression took, and its density.
+    last: Option<(Pascals, KilogramsPerCubicMetre)>,
+}
+
+impl CompressionSlot {
+    /// [`Substance::liquid_density_at_pressure`] of the row `id` at `temperature` under
+    /// `pressure`, to the bit.
+    pub(crate) fn liquid_density_at_pressure(
+        &mut self,
+        id: SubstanceId,
+        temperature: Kelvin,
+        pressure: Pascals,
+    ) -> Option<KilogramsPerCubicMetre> {
+        let held = self.last.as_ref().is_some_and(|last| {
+            last.id == id
+                && last
+                    .temperature
+                    .value()
+                    .total_cmp(&temperature.value())
+                    .is_eq()
+        });
+        if !held {
+            let row = id.substance();
+            self.last = Some(Compressing {
+                id,
+                temperature,
+                saturated: row.grain_density(CondensedPhase::Liquid, temperature),
+                equation: equation_of_state(row).map(|(equation, diagram)| {
+                    (
+                        equation.isotherm(temperature),
+                        diagram.saturation_pressure(temperature),
+                    )
+                }),
+                at_vapour: None,
+                last: None,
+            });
+        }
+        let compressing = self
+            .last
+            .as_mut()
+            .expect("the slot holds this row and temperature");
+        let saturated = compressing.saturated?;
+        let Some((isotherm, vapour)) = &compressing.equation else {
+            return Some(saturated);
+        };
+        if !compresses(pressure, *vapour) {
+            return Some(saturated);
+        }
+        if let Some((at, density)) = compressing.last
+            && at.value().total_cmp(&pressure.value()).is_eq()
+        {
+            return Some(density);
+        }
+        let at_vapour = *compressing
+            .at_vapour
+            .get_or_insert_with(|| isotherm.density_at_pressure(saturated, *vapour));
+        let density = compressed_from(isotherm, saturated, at_vapour, pressure);
+        compressing.last = Some((pressure, density));
+        Some(density)
+    }
 }
 
 /// The row's liquid density at `temperature` with its basis, or `None` where it has none: a

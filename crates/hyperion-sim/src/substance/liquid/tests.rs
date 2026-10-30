@@ -3169,3 +3169,48 @@ fn the_newton_solves_end_where_their_steps_do() {
         }
     }
 }
+
+/// One [`CompressionSlot`] asked in turn for every liquid row, compressible or not, at
+/// temperatures inside and past its liquid range, under pressures repeated, below its vapour's,
+/// past the ceiling and not a number, each twice over and interleaved, gives
+/// [`Substance::liquid_density_at_pressure`]'s bits every time.
+#[test]
+fn the_compression_slot_gives_the_direct_density() {
+    let rows: Vec<SubstanceId> = super::super::rows::liquids::LIQUIDS
+        .iter()
+        .map(|(key, _)| row(key.as_str()))
+        .collect();
+    let mut slot = CompressionSlot::default();
+    let mut asked = 0;
+    for id in rows {
+        let substance = id.substance();
+        let (low, high) = substance.phase_diagram().map_or_else(
+            || reference_range(id),
+            |diagram| {
+                (
+                    diagram.triple_temperature().value(),
+                    diagram.critical_temperature().value(),
+                )
+            },
+        );
+        for fraction in [0.0, 0.5, 0.5, 0.99, 1.0, 1.3] {
+            let t = Kelvin::new(low + (high - low) * fraction);
+            for p in [1e5, 1e5, 3e6, 3e6, 1.0, 2e9, f64::NAN, 3e6, 1e5] {
+                let pressure = Pascals::new(p);
+                let direct = substance.liquid_density_at_pressure(t, pressure);
+                let held = slot.liquid_density_at_pressure(id, t, pressure);
+                let same = match (direct, held) {
+                    (Some(a), Some(b)) => a.value().total_cmp(&b.value()).is_eq(),
+                    (a, b) => a.is_none() && b.is_none(),
+                };
+                assert!(
+                    same,
+                    "{} at {t:?} under {p} Pa: {held:?} against {direct:?}",
+                    substance.key()
+                );
+                asked += 1;
+            }
+        }
+    }
+    assert!(asked > 500, "{asked}");
+}

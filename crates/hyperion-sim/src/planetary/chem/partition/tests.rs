@@ -2247,9 +2247,9 @@ fn under_compression_a_carbon_dioxide_sea_and_its_ocean_weight_read_one_density(
             (species, diagram),
             &climate,
             &ground,
-            others,
-            minor,
+            (others, minor),
             CriticalCap::Uncapped,
+            &mut CompressionSlot::default(),
         )
     };
     let moved = weight();
