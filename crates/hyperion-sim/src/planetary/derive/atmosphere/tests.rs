@@ -6361,11 +6361,17 @@ fn a_pass_publishes_the_state_its_previous_pass_carried() {
 
 // P14.T53.b part 3: the steam envelope and the partition's cap (decision-p14-t53b-part3).
 
-/// `run` under P14.T53.b part 3 alone, every landed 25 hold in force but P14.T53.e's, which holds
-/// its own movers apart, and at 24 alone, as the two results: part 3's movers against 24.
+/// `run` under P14.T53.b part 3 alone, every landed 25 hold in force but P14.T53.e's and
+/// P14.T51.l's, which hold their own movers apart, and at 24 alone, as the two results: part 3's
+/// movers against 24.
 fn with_part_three<R>(run: impl Fn() -> R) -> (R, R) {
+    use crate::planetary::derive::passes::{PassRoot, with_pass_root};
     use crate::planetary::testing::with_every_25_hold;
-    let part_three = || with_present_state(PresentStateRules::Held, &run);
+    let part_three = || {
+        with_present_state(PresentStateRules::Held, || {
+            with_pass_root(PassRoot::Halvings, &run)
+        })
+    };
     (with_every_25_hold(part_three), run())
 }
 

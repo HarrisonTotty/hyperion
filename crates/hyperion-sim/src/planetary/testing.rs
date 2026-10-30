@@ -444,6 +444,8 @@ pub fn wire_body_events_in_this_process() {
 /// - the molten decks', `MOLTEN_DECKS_VERSION` (P14.T49.p), at `MoltenDecksRules::Molten` through
 ///   `with_molten_decks`: the molten refractories' and salts' stand-in index files and the molten
 ///   salts' densities.
+/// - the passes' superlinear root, `SECANT_ROOT_VERSION` (P14.T51.l), at `PassRoot::Secant`
+///   through `with_pass_root`: a bracketed body's secant steps, a detected 2-cycle its own bracket.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 24's) is not
@@ -454,6 +456,7 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::atmosphere::{
         PresentStateRules, SteamEnvelopeRules, with_present_state, with_steam_envelope,
     };
+    use crate::planetary::derive::passes::{PassRoot, with_pass_root};
     use crate::planetary::hooks::cold_traps::with_rough_plains;
     use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
     use crate::planetary::system::events::{StormEventsRules, with_storm_events};
@@ -462,6 +465,7 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = || with_storm_events(StormEventsRules::Wired, run);
     let run = move || with_rough_plains(PlainsModel::RayTraced, run);
     let run = move || with_molten_decks(MoltenDecksRules::Molten, run);
+    let run = move || with_pass_root(PassRoot::Secant, run);
     with_steam_envelope(SteamEnvelopeRules::Steam, || {
         with_present_state(PresentStateRules::Present, || {
             with_exposed_ice(ExposedIceRules::Exposed, run)
@@ -776,6 +780,20 @@ mod tests {
             MoltenDecksRules::Held
         );
         assert_eq!(MoltenDecksRules::in_force(), MoltenDecksRules::Held);
+    }
+
+    /// The passes' superlinear root's switch (P14.T51.l): in force inside 25's helper, the halvings
+    /// outside it and where a test sets it back.
+    #[test]
+    fn the_pass_root_s_hold_is_in_force_inside_25_s_helper_alone() {
+        use crate::planetary::derive::passes::{PassRoot, with_pass_root};
+        assert_eq!(PassRoot::in_force(), PassRoot::Halvings);
+        assert_eq!(with_every_25_hold(PassRoot::in_force), PassRoot::Secant);
+        assert_eq!(
+            with_every_25_hold(|| with_pass_root(PassRoot::Halvings, PassRoot::in_force)),
+            PassRoot::Halvings
+        );
+        assert_eq!(PassRoot::in_force(), PassRoot::Halvings);
     }
 
     #[test]

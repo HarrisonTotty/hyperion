@@ -7551,6 +7551,8 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
   - _Files:_ `planetary/derive/passes.rs` and its tests.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::passes`;
     `cargo test -p hyperion-sim planetary::derive`.
+  - _Built_ 2026-10-30, held at 25 (`SECANT_ROOT_VERSION`): Risks, "Deviations in P14.T51.l, as
+    built".
 - **P14.T51.m The surface's coupled condensables** (a later planetary bump, after 24; lane
   `p14-modifiers`, after P14.T51.g.b; decision-p14-t51a-part2 §2.3, decision-bump-plan-after-22
   R2, decision-p14-t51g Q7).
@@ -32908,3 +32910,19 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     readout's sections are the body list's, and stand as T43.a–b built them.
   - _Not here:_ eruptions are not told lava or ice (T31.a's R7).
   - _Not done:_ a visual check at 1920×1080 and 1280×720, which needs a display.
+- **Deviations in P14.T51.l, as built (2026-10-30).** Held at 25: `SECANT_ROOT_VERSION`,
+  `PassRoot` (`Halvings`, `Secant`), the tests' `with_pass_root` (in `with_every_25_hold`; part 3's
+  comparisons set it back to `Halvings`) and the tripwire
+  `the_secant_root_is_held_only_until_the_25_bump`; nothing moves at 24.
+  - `passes::secant_steps`: the Illinois false position, at most `SECANT_STEPS` 40 (the sample's
+    smooth roots take 6–15, its jumps 26–33). Added to the plan's rule: two false positions in a row
+    that do not halve the ends' least |g| hand the round to halvings, a jump's. The stop is the
+    absolute `SECANT_STOP_WIDTH`, 2⁻³², or an end at g = 0; a bound of [0, 1⁻] is taken first, so
+    the cap is `MOST_SECANT_PASSES` 112.
+  - The plan's sample equality is not met (lean, 2026-10-30): 3 bodies end at another crossing and
+    19 move only their partials, each pinned by name in the system tests' ignored
+    `under_the_secant_root_the_passes_and_movers_are_stated`.
+  - _Accept, as built:_ also that test by name (`--run-ignored only`, the slow-test profile).
+  - For 25's bump: delete the hold, the switch and the tripwire; keep `Halvings` as a
+    `#[cfg(test)]` oracle; read `MOST_SECANT_PASSES` where `MOST_PASSES` bounds a body's passes;
+    re-run the measurement.

@@ -6664,6 +6664,333 @@ fn the_passes_endings_over_the_whole_sample_are_recorded() {
     );
 }
 
+/// The 18 Temperates P14.T53.a's weathering thermostat raised in its census, each as its system
+/// (the sample's by ID, a golden system's by name) and body index: the 16 its plain passes settled,
+/// then the two they left to the bracket, P14.T51.l's lever (plan 14's P14.T53.a record;
+/// decision-24-cost D4).
+const THERMOSTAT_RAISED: [&str; 18] = [
+    "02000b2ca0000001.0200",
+    "02000b2ca0000000.0300",
+    "02001b2ca0000000.0100",
+    "02000b2c20000000.0100",
+    "02000b2cdfff0000.0200",
+    "01ffeb2c9fff0000.0200",
+    "02000b2ce0010000.0200",
+    "02001b2c9ffe0000.0300",
+    "220016587ff80001.0700",
+    "02000b2cdffe0000.0200",
+    "02000b2cdffe0000.0300",
+    "01ffeb2c60020000.0300",
+    "41ffecb1ffc00009.0a00",
+    "01fffb2be0000001.0200",
+    "m_dwarf_resonant_chain.0100",
+    "close_binary.0600",
+    "02001b2ce0010000.0100",
+    "01ffeb2c60020000.0400",
+];
+
+/// The 19 bodies whose partials alone move under P14.T51.l's secant steps, beyond 10⁻⁹ of max(each,
+/// 10⁻⁶ Pa), with `T_eq` within 2.6 × 10⁻¹⁰ and every discrete member the same: at jumps across the
+/// diagonal or steep crossings, where both roots stop within 2⁻³² of the crossing, in the walk's
+/// order.
+const SECANT_PARTIALS_ONLY: [&str; 19] = [
+    "02000b2ca0000001.1100",
+    "02000b2cdfff0000.0d00",
+    "01ffeb2c5ffe0000.0400",
+    "01fffb2bdfff0001.0600",
+    "01ffdb2c1fff0001.0900",
+    "01ffdb2c1fff0000.0700",
+    "01ffeb2cdffd0000.0a02",
+    "01ffeb2d20000000.e101",
+    "01ffdb2c60020000.0100",
+    "02002b2d1ffe0000.e101",
+    "41ffecb1ffc00007.0d01",
+    "41ffecb1ffc00007.e101",
+    "01fffb2d5ffe0000.0a01",
+    "01ffeb2d1ffc0000.0600",
+    "01ffeb2d1ffc0000.0900",
+    "01ffcb2ba0010000.0700",
+    "close_binary.0800",
+    "close_binary.0900",
+    "close_binary.e501",
+];
+
+/// P14.T51.l, a measurement for its record, run by name: every present planet, member and moon of
+/// the 400 sample systems and the golden systems at the epoch, each system generated and derived
+/// afresh under T51.h's halvings and under the secant steps (`with_pass_root`), compared body by
+/// body as the plan's test asks: the state, the deck, the carbon carrier, the lid, the capped set
+/// (each gas held below its inventory's weight), the dominant gas and its condensing peer, whether
+/// it jumps, and the surface temperature's branch equal; `T_eq` within 10⁻⁹ of itself; every
+/// partial within 10⁻⁹ of max(itself, 10⁻⁶ Pa). It states every mover, the passes by kind and
+/// ending before and after, and the thermostat's raised bodies' passes by name.
+#[test]
+#[ignore = "a measurement for P14.T51.l's record, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk under each root, each mover listed and the passes tallied by kind"
+)]
+fn under_the_secant_root_the_passes_and_movers_are_stated() {
+    use std::collections::BTreeMap;
+
+    use std::time::Instant;
+
+    use crate::planetary::derive::passes::{
+        Convergence, PassRoot, SECANT_STEPS, with_pass_root, with_secant_rounds,
+    };
+
+    /// A kind's bodies, then for each root its bracketed, its jumping, and its passes over the
+    /// bracketed and over all.
+    type Tally = (u32, [(u32, u32, u32, u32); 2]);
+
+    /// What the comparison reads of one body's derivation.
+    #[derive(Debug, Clone)]
+    struct Line {
+        label: String,
+        kind: &'static str,
+        discrete: String,
+        t_eq: f64,
+        t_s: f64,
+        partials: [f64; 9],
+        convergence: Convergence,
+        passes: u32,
+    }
+    let line = |label: String, kind: &'static str, derived: &DerivedBody| {
+        let air = derived.atmosphere();
+        let weights = air.inventory_weights();
+        let capped: Vec<Gas> = Gas::ALL
+            .into_iter()
+            .filter(|&gas| air.partial_pressures().of(gas) < weights.of(gas))
+            .collect();
+        let moles = |gas: Gas| air.partial_pressures().of(gas).value() / gas.molar_mass_g_per_mol();
+        let dominant = Gas::ALL
+            .into_iter()
+            .max_by(|x, y| moles(*x).total_cmp(&moles(*y)));
+        let condensing = capped
+            .iter()
+            .copied()
+            .max_by(|x, y| moles(*x).total_cmp(&moles(*y)));
+        Line {
+            label,
+            kind,
+            discrete: format!(
+                "{:?} {:?} {:?} {:?} capped {capped:?} dominant {dominant:?} condensing \
+                 {condensing:?} jump {}",
+                air.state(),
+                air.runaway_deck(),
+                air.carbon_carrier(),
+                derived
+                    .crust_lid()
+                    .map(|lid| (lid.crust(), lid.lithology())),
+                derived.convergence().is_jump(),
+            ),
+            t_eq: derived.equilibrium_temperature().value(),
+            t_s: air.surface_temperature().value(),
+            partials: Gas::ALL.map(|gas| air.partial_pressures().of(gas).value()),
+            convergence: derived.convergence(),
+            passes: derived.atmosphere_passes(),
+        }
+    };
+    let t = UniverseTime::EPOCH;
+    let sets: Vec<(String, Seed, SystemContext)> = sample()
+        .iter()
+        .map(|ctx| (format!("{:016x}", ctx.id().raw()), SEED, ctx.clone()))
+        .chain(golden_systems().iter().map(|(name, ctx, _)| {
+            (
+                (*name).to_owned(),
+                Seed::new(GOLDEN_SYSTEMS_SEED),
+                ctx.clone(),
+            )
+        }))
+        .collect();
+    let walk = |root: PassRoot| {
+        with_pass_root(root, || {
+            let mut lines = Vec::new();
+            for (name, seed, ctx) in &sets {
+                if ctx.age_at_epoch().value() <= 0.0 {
+                    continue;
+                }
+                let system = generate(*seed, ctx);
+                let epoch = Epoch::new(&system, ctx, t).with_shades();
+                let cosines = HourCosines::new();
+                for body in system.bodies() {
+                    let kind = match body.part {
+                        Part::Planet(_) => "planets",
+                        Part::Member(_) => "members",
+                        Part::Moon(_) | Part::Ring(_) => continue,
+                    };
+                    let host = fate_host(ctx, system.zone_of(body));
+                    let fate = system.fate_of(body, &host);
+                    let at = fate.at(t);
+                    let now = system.primary_now(&epoch, &cosines, body, &fate, &at);
+                    let Some(derived) = now.derived else {
+                        continue;
+                    };
+                    let label = format!("{name}.{:04x}", body.index.get());
+                    lines.push(line(label, kind, &derived));
+                    for child in system.children(body.index) {
+                        if let Some(moon) = system.record_moon(&epoch, child, (&now, &fate)) {
+                            let label = format!("{name}.{:04x}", child.index.get());
+                            lines.push(line(label, "moons", moon.body()));
+                        }
+                    }
+                }
+            }
+            lines
+        })
+    };
+    let start = Instant::now();
+    let halvings = walk(PassRoot::Halvings);
+    let halvings_walk = start.elapsed();
+    let start = Instant::now();
+    let (secant, rounds) = with_secant_rounds(|| walk(PassRoot::Secant));
+    let secant_walk = start.elapsed();
+    assert_eq!(halvings.len(), secant.len());
+    let mut steps = BTreeMap::<u32, u32>::new();
+    for &round in &rounds {
+        *steps.entry(round).or_default() += 1;
+    }
+    eprintln!(
+        "the walks (pod, slow-test profile): the halvings {halvings_walk:?}, the secant steps \
+         {secant_walk:?}; the secant rounds' steps, {} rounds: {steps:?}",
+        rounds.len()
+    );
+    let mut kinds: BTreeMap<&str, Tally> = BTreeMap::new();
+    let (mut movers, mut other_roots, mut partials_only) = (Vec::new(), Vec::new(), Vec::new());
+    let mut jumps = Vec::new();
+    let mut worst_t_eq: f64 = 0.0;
+    for (h, s) in halvings.iter().zip(&secant) {
+        assert_eq!(h.label, s.label);
+        let entry = kinds.entry(h.kind).or_default();
+        entry.0 += 1;
+        for (k, at) in [h, s].into_iter().enumerate() {
+            let bracketed = matches!(at.convergence, Convergence::Bracketed { .. });
+            entry.1[k].0 += u32::from(bracketed);
+            entry.1[k].1 += u32::from(at.convergence.is_jump());
+            if bracketed {
+                entry.1[k].2 += at.passes;
+            }
+            entry.1[k].3 += at.passes;
+        }
+        let t_eq = if s.t_eq.total_cmp(&h.t_eq).is_eq() {
+            0.0
+        } else {
+            (s.t_eq / h.t_eq - 1.0).abs()
+        };
+        worst_t_eq = worst_t_eq.max(t_eq);
+        // Each partial's move as a share of max(itself, 10⁻⁶ Pa): the largest, and whether any is
+        // above 10⁻⁹, by comparison so that a partial that is not a number moves.
+        let shares: Vec<f64> = h
+            .partials
+            .iter()
+            .zip(&s.partials)
+            .map(|(a, b)| (a - b).abs() / a.abs().max(1e-6))
+            .collect();
+        let partial = shares.iter().copied().fold(0.0, f64::max);
+        let partial_moved = !shares.iter().all(|share| *share <= 1e-9);
+        if h.convergence.is_jump() || s.convergence.is_jump() {
+            let residual = |convergence: Convergence| match convergence {
+                Convergence::Converged => 0.0,
+                Convergence::Bracketed { residual, .. } => residual,
+            };
+            jumps.push(format!(
+                "{}: {:.6e} → {:.6e}",
+                h.label,
+                residual(h.convergence),
+                residual(s.convergence)
+            ));
+        }
+        let t_s_held = s.t_s.total_cmp(&h.t_s).is_eq() || (s.t_s / h.t_s - 1.0).abs() <= 1e-6;
+        let branch = !t_s_held;
+        // By comparison, so that a move that is not a number is a mover.
+        let t_eq_held = t_eq <= 1e-9;
+        let other_root = h.discrete != s.discrete || !t_eq_held || branch;
+        if other_root {
+            other_roots.push(h.label.clone());
+        } else if partial_moved {
+            partials_only.push(h.label.clone());
+        }
+        if other_root || partial_moved {
+            movers.push(format!(
+                "{} ({}): T_eq {:.9} → {:.9} K ({t_eq:.2e}), T_s {:.6} → {:.6} K, partials \
+                 {partial:.2e}\n      \
+                 halvings {} {:?} ({} passes)\n      secant   {} {:?} ({} passes)",
+                h.label,
+                h.kind,
+                h.t_eq,
+                s.t_eq,
+                h.t_s,
+                s.t_s,
+                h.discrete,
+                h.convergence,
+                h.passes,
+                s.discrete,
+                s.convergence,
+                s.passes,
+            ));
+        }
+    }
+    eprintln!(
+        "{} bodies; the largest move of T_eq {worst_t_eq:.3e}",
+        halvings.len()
+    );
+    for (kind, (bodies, [h, s])) in &kinds {
+        eprintln!(
+            "{kind}: {bodies} bodies; halvings {} bracketed, {} jumping, {} passes over the \
+             bracketed, {} in all; secant {} bracketed, {} jumping, {} over the bracketed, {} in all",
+            h.0, h.1, h.2, h.3, s.0, s.1, s.2, s.3
+        );
+    }
+    eprintln!("THE THERMOSTAT'S RAISED BODIES:");
+    let (mut raised_halvings, mut raised_secant, mut found) = (0, 0, 0);
+    for name in THERMOSTAT_RAISED {
+        let at = |lines: &[Line]| lines.iter().find(|l| l.label == name).cloned();
+        if let (Some(h), Some(s)) = (at(&halvings), at(&secant)) {
+            eprintln!(
+                "  {name}: {} → {} passes, {:?} → {:?}",
+                h.passes, s.passes, h.convergence, s.convergence
+            );
+            raised_halvings += h.passes;
+            raised_secant += s.passes;
+            found += 1;
+        } else {
+            eprintln!("  {name}: not in the walk");
+        }
+    }
+    eprintln!("  {found} found: {raised_halvings} passes → {raised_secant}");
+    eprintln!("THE JUMPS' RESIDUALS, halvings → secant ({}):", jumps.len());
+    for jump in &jumps {
+        eprintln!("  {jump}");
+    }
+    eprintln!("MOVERS ({}):", movers.len());
+    for mover in &movers {
+        eprintln!("  {mover}");
+    }
+    assert_eq!(found, THERMOSTAT_RAISED.len());
+    let slowest = rounds.iter().copied().max().unwrap_or(0);
+    assert!(slowest < SECANT_STEPS, "a round took {slowest} steps");
+    assert!(halvings.len() > 2_000, "{}", halvings.len());
+    // Pinned as measured (P14.T51.l's record). Three bodies end at another crossing of the
+    // diagonal: 41ffecb200000004.0200, whose 2-cycle's bracket holds another fixed point than the
+    // plain passes' (T_eq 0.37 K warmer); 02003b2d1ffe0001.0200, whose bracket holds several jumps
+    // (T_s 239.8 → 193.3 K); and 01ffdb2c1fff0001.0b00, whose jump lies against nitrogen's cover's
+    // edge, the halvings stopping on its ice's side and the secant steps on the other. The rest
+    // move only their partials, at jumps or steep crossings where both roots stop within 2⁻³² of
+    // the crossing.
+    assert_eq!(
+        other_roots,
+        [
+            "01ffdb2c1fff0001.0b00",
+            "41ffecb200000004.0200",
+            "02003b2d1ffe0001.0200"
+        ],
+        "the bodies whose secant root is another crossing"
+    );
+    assert_eq!(
+        partials_only, SECANT_PARTIALS_ONLY,
+        "the bodies that move their partials alone"
+    );
+}
+
 /// A measurement for the bless note, run by name (decision-pre-23-review items 7, 16 and 17;
 /// P14.T54.a's C3): over every present planet, member and moon of the first 60 whole systems at
 /// the epoch, each record derived with its lid and without it (`without_crust`, the derivation
@@ -12693,16 +13020,20 @@ impl SteamBody {
 
 /// [`part_three_census`] with the later 25 holds set back, for a caller inside
 /// `with_every_25_hold`: part 3's landing alone. P14.T53.e's movers are its own census's
-/// (`present_state_tests`), P14.T53.c's exposed share's are `exposed_ice_tests`', and R09.T7.g's
-/// ray-traced plains' its own (`cold_trap_tests`).
+/// (`present_state_tests`), P14.T53.c's exposed share's are `exposed_ice_tests`', R09.T7.g's
+/// ray-traced plains' its own (`cold_trap_tests`), and P14.T51.l's secant root's its own
+/// (`under_the_secant_root_the_passes_and_movers_are_stated`).
 fn part_three_s_own_25_census(sets: &[(&str, Seed, &SystemContext)]) -> Vec<SteamBody> {
     use crate::planetary::derive::atmosphere::{PresentStateRules, with_present_state};
+    use crate::planetary::derive::passes::{PassRoot, with_pass_root};
     use crate::planetary::hooks::cold_traps::with_rough_plains;
     use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
     use hyperion_surface::cold_trap::PlainsModel;
     with_present_state(PresentStateRules::Held, || {
         with_exposed_ice(ExposedIceRules::Held, || {
-            with_rough_plains(PlainsModel::Bowls, || part_three_census(sets))
+            with_rough_plains(PlainsModel::Bowls, || {
+                with_pass_root(PassRoot::Halvings, || part_three_census(sets))
+            })
         })
     })
 }
