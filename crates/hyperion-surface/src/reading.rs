@@ -409,8 +409,9 @@ pub(crate) trait SurveyedGround {
     ///
     /// # Errors
     ///
-    /// Where the view does not hold the cell, or the receiver of its trunk one king move away
-    /// (R09.T6.f), though its survey said it did and its margin holds every neighbour.
+    /// Where the view does not hold the cell, the receiver of its trunk or, where water drains
+    /// through it, an edge neighbour, one king move away (R09.T6.f, R09.T6.g), though its survey
+    /// said it did and its margin holds every neighbour.
     fn omitted_rms(&self, cell: PatchKey, level: BandLevel) -> Result<Metres, Self::Error>;
 
     /// The structure function, square metres, at a lag of `lag`, of what `level` leaves out of the
@@ -418,8 +419,9 @@ pub(crate) trait SurveyedGround {
     ///
     /// # Errors
     ///
-    /// Where the view does not hold the cell, or the receiver of its trunk one king move away
-    /// (R09.T6.f), though its survey said it did and its margin holds every neighbour.
+    /// Where the view does not hold the cell, the receiver of its trunk or, where water drains
+    /// through it, an edge neighbour, one king move away (R09.T6.f, R09.T6.g), though its survey
+    /// said it did and its margin holds every neighbour.
     fn omitted_structure(
         &self,
         cell: PatchKey,

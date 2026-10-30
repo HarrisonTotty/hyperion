@@ -170,9 +170,9 @@ pub mod incision;
 pub use incision::{
     CHANNEL_HEAD_AREA, CUT_WIDTH, ChannelBody, DEBRIS_FLOW_SLOPE, EpochValley, MEAN_SAMPLES,
     MEAN_TRIBUTARY_LENGTH, MEAN_TRUNK_LENGTH, TRIBUTARY_SHARE, TRIBUTARY_VARIANCE_SHARE,
-    VALLEY_WALL_GRADIENT, VALLEY_WALL_SHARE, WALL_RUN_PER_DEPTH, WHOLE_VARIANCE_SHARE,
-    channel_head_area, channel_structure_function, channel_variance, deepest_level, epoch_valley,
-    valley_depth,
+    VALLEY_RELIEF_SHARE, VALLEY_WALL_GRADIENT, VALLEY_WALL_SHARE, WALL_RUN_PER_DEPTH,
+    WHOLE_VARIANCE_SHARE, channel_head_area, channel_structure_function, channel_variance,
+    deepest_level, drawn_channel_variance, epoch_valley, valley_depth,
 };
 pub(crate) use incision::{ChannelCache, trunk_valley_m, unresolved_channel_variance};
 

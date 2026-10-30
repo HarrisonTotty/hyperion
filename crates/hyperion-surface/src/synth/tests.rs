@@ -199,20 +199,45 @@ fn the_height_is_its_contributions_summed_in_order() {
                         let relief = synth.relief().at(field, dir, through, &mut fresh);
                         expected = plus(expected, relief.unwrap());
                     }
+                    // The others summed without the channels, h₀, for the floor.
+                    let mut without = expected;
+                    let mut cut = 0.0;
                     if let Some(through) = set.channels_through() {
                         let incision = synth
                             .channels()
-                            .incision_at(field, dir, through, &mut fresh);
-                        expected = plus(expected, incision.unwrap());
+                            .incision_at(field, dir, through, &mut fresh)
+                            .unwrap();
+                        cut = incision.height_m;
+                        expected = plus(expected, incision);
                     }
                     if let Some(through) = set.craters_through() {
                         let mut craters = CraterCache::new();
-                        expected = plus(
-                            expected,
-                            synth.craters().at(dir, level, through, &mut craters),
-                        );
+                        let small = synth.craters().at(dir, level, through, &mut craters);
+                        expected = plus(expected, small);
+                        without = plus(without, small);
                     }
-                    expected = plus(expected, synth.rims().at(field, dir, level).unwrap());
+                    let rims = synth.rims().at(field, dir, level).unwrap();
+                    expected = plus(expected, rims);
+                    without = plus(without, rims);
+                    // The floor (R09.T6.f, R09.T6.g), where the channels cut a dry cell below it.
+                    let (coarse, record) = synth.cell_at(dir).unwrap();
+                    if cut < 0.0 && !record.is_under_water() && !record.epoch_incision.is_epoch() {
+                        let floor = synth
+                            .channels()
+                            .floor_at(field, coarse, dir, &mut fresh)
+                            .unwrap()
+                            .unwrap_or(HeightSample {
+                                height_m: field.header().sea_level().value(),
+                                gradient: [0.0; 3],
+                            });
+                        if expected.height_m < floor.height_m {
+                            expected = if without.height_m >= floor.height_m {
+                                floor
+                            } else {
+                                without
+                            };
+                        }
+                    }
                     let got = synth.height_at(&mut cache, dir, level).unwrap();
                     assert_eq!(
                         sample_bits(got),

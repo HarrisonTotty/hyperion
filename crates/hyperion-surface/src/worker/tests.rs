@@ -345,11 +345,11 @@ pub(super) fn earth_cell() -> PatchKey {
     .unwrap()
 }
 
-/// The fixture's patch: (900, 669) of face +x at the Earth-like world's finest level, 19, in
+/// The fixture's patch: (896, 675) of face +x at the Earth-like world's finest level, 19, in
 /// [`earth_cell`], whose ground is soil, sand and a channel's sediment of the continental crust's
 /// granite.
 pub(super) fn earth_patch() -> PatchKey {
-    PatchKey::new(Face::PosX, 19, 900, 669).unwrap()
+    PatchKey::new(Face::PosX, 19, 896, 675).unwrap()
 }
 
 /// The Earth-like fixture: [`earth_cell`] surveyed at 50 m with its margin, in the fixture's blocks.
@@ -995,6 +995,48 @@ fn worker_level_sigma_is_the_largest_omitted_rms_on_an_earth_like_field() {
         largest_omitted_rms(field, &cells).map(bits)
     );
     assert!(sigma[0] > 0.0, "{sigma:?}");
+}
+
+/// The Earth-like fixture's survey cut into small blocks, block 0 first and the rest forwards or
+/// backwards: a surveyed cell whose edge neighbours, which the channels' closed forms read
+/// (R09.T6.g), come in a later block waits for them, and once every block is taken none waits and
+/// σ is the largest omitted RMS over the survey, bit for bit, in either order.
+#[test]
+fn worker_level_sigma_waits_for_a_survey_s_margin_in_either_order() {
+    let field: &CoarseField = world(SyntheticWorld::EarthLike);
+    let cells: BTreeSet<PatchKey> = [earth_cell()].into_iter().collect();
+    let blocks = split(&encode_within(
+        field,
+        &cover(&cells, |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        1024,
+    ));
+    assert!(blocks.len() > 3, "{}", blocks.len());
+    let body = field.header().body();
+    let (mut sigmas, mut waited) = (Vec::new(), 0);
+    for backwards in [false, true] {
+        let mut order: Vec<usize> = (1..blocks.len()).collect();
+        if backwards {
+            order.reverse();
+        }
+        let mut fields = WorkerFields::new();
+        take(&mut fields, body, 0, &blocks[0], SigmaSurvey::Surveyed);
+        for &n in &order {
+            take(&mut fields, body, n, &blocks[n], SigmaSurvey::Surveyed);
+            waited = waited.max(fields.sigma_pending(body).unwrap());
+        }
+        assert_eq!(fields.sigma_pending(body), Some(0), "backwards {backwards}");
+        let sigma = fields.level_sigma_m(body).unwrap();
+        assert_eq!(
+            sigma.map(bits),
+            largest_omitted_rms(fields.field(body).unwrap(), &cells).map(bits),
+            "backwards {backwards}"
+        );
+        sigmas.push(sigma.map(bits));
+    }
+    assert_eq!(sigmas[0], sigmas[1]);
+    assert!(waited > 0, "no cell waited for its margin");
 }
 
 /// `run`'s answer, and the cells' σ reads it made on this thread ([`SIGMA_READS`]).

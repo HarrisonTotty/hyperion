@@ -121,10 +121,16 @@ fn a_cell_under_water_carries_no_incision_at_any_level() {
     }
 }
 
-/// Part (b): every dry trunk's valley is the cell's held to its height above its base level, its
-/// receiver's water or the sea, and the groove and the synthesis's closed form read the one depth
-/// G; where the hold does not bind, the closed form is the coarse pass's budget's to the bit.
+/// Part (b): every dry trunk's valley is the cell's held to a share of its height above its base
+/// level, its receiver's water, a playa's pit's ground or the sea (R09.T6.f, R09.T6.g), some of the
+/// trunks running into pits, and the groove and
+/// the synthesis's closed form read the one depth G: its trunk level is its own trunk's half, faded
+/// into water, and its donors' halves, each at its own groove's depth.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one sweep of the trunks, each checked against its hold, groove and closed form"
+)]
 fn no_trunk_s_valley_is_cut_below_its_base_level() {
     let field = earth();
     let header = field.header();
@@ -140,7 +146,8 @@ fn no_trunk_s_valley_is_cut_below_its_base_level() {
         }),
         1_500,
     );
-    let (mut checked, mut held, mut into_water, mut unheld_equal) = (0, 0, 0, 0);
+    let (mut checked, mut held, mut into_water, mut with_donors, mut into_pits) = (0, 0, 0, 0, 0);
+    let cap = groove_cap_m(r, first);
     for c in trunks {
         let record = field.cell(c).unwrap();
         let Some(trunk) = network.segment(c).unwrap() else {
@@ -150,58 +157,87 @@ fn no_trunk_s_valley_is_cut_below_its_base_level() {
             panic!("a trunk drains to a cell");
         };
         let receiver = field.cell(receiver).unwrap();
-        let room = record.water_surface().value() - base_level_m(receiver, sea);
+        // The base level read afresh: the receiver's water, a dry, terminal receiver's ground
+        // above the sea (R09.T6.g), or the sea.
+        let into_pit = !receiver.is_under_water()
+            && receiver.flow.edge().is_none()
+            && receiver.water_surface() > sea;
+        let base = if receiver.is_under_water() || into_pit {
+            receiver.water_surface().value()
+        } else {
+            sea.value()
+        };
+        assert_eq!(bits(base_level_m(receiver, sea)), bits(base), "{c:?}");
+        let room = record.water_surface().value() - base;
         let from_the_cell = tributary_steepness_of(record)
             .map_or(0.0, |k| valley_depth(k, body.radius, first).value());
         let valley = trunk.below_top(0.5).value();
         assert_eq!(
             bits(valley),
-            bits(num::min(from_the_cell, num::max(room, 0.0))),
+            bits(num::min(
+                from_the_cell,
+                VALLEY_RELIEF_SHARE * num::max(room, 0.0)
+            )),
             "{c:?}"
         );
         assert!(
-            valley <= num::max(room, 0.0),
+            valley <= VALLEY_RELIEF_SHARE * num::max(room, 0.0),
             "{c:?}: {valley} m in {room} m"
         );
-        let g = trunk_depth_m(
-            valley,
-            trunk.bankfull_depth().value(),
-            groove_cap_m(r, first),
-        );
-        let (_, terms) = synthesised_terms(field, c).unwrap();
+        let g = trunk_depth_m(valley, trunk.bankfull_depth().value(), cap);
         match Groove::of(&trunk, r) {
-            Some(groove) => {
-                assert_eq!(groove.depth, Depth::Constant(g), "{c:?}");
-                let wall = VALLEY_WALL_SHARE * mean_cell_width(r, first);
-                let expected = level_term(
-                    first,
-                    MEAN_TRUNK_LENGTH / mean_cell_width(r, first),
-                    g,
-                    0.5 * trunk.bankfull_width().value(),
-                    wall,
-                );
-                assert_eq!(terms.first(), Some(&expected), "{c:?}");
-            }
+            Some(groove) => assert_eq!(groove.depth, Depth::Constant(g), "{c:?}"),
             None => assert!(g <= 0.0, "{c:?}"),
         }
-        if valley < from_the_cell {
-            held += 1;
+        // The trunk level's halves: its own, then each donor's in the edges' order, each the
+        // depth its own groove cuts.
+        let fade = if receiver.is_under_water() {
+            INTO_WATER_FADE
         } else {
-            let wide = Metres::new(1e7);
-            assert_eq!(
-                unresolved_channel_variance(field, c, wide),
-                Some(channel_variance(record, body, wide)),
-                "{c:?}"
+            UNFADED
+        };
+        let mut halves: Vec<TrunkHalf> = (g > 0.0)
+            .then_some(TrunkHalf {
+                depth_m: g,
+                floor_m: 0.5 * trunk.bankfull_width().value(),
+                fade,
+            })
+            .into_iter()
+            .collect();
+        for edge in Edge::ALL {
+            let (n, back) = c.edge_neighbour_and_back(edge);
+            let donor = field.cell(n).unwrap();
+            if donor.is_under_water() || donor.flow.edge() != Some(back) {
+                continue;
+            }
+            let Some(segment) = network.segment(n).unwrap() else {
+                continue;
+            };
+            let depth = trunk_depth_m(
+                segment.below_top(0.5).value(),
+                segment.bankfull_depth().value(),
+                cap,
             );
-            unheld_equal += 1;
+            halves.push(TrunkHalf {
+                depth_m: depth,
+                floor_m: 0.5 * segment.bankfull_width().value(),
+                fade: UNFADED,
+            });
+            with_donors += 1;
         }
+        let (_, terms) = synthesised_terms(field, c).unwrap();
+        let wall = VALLEY_WALL_SHARE * mean_cell_width(r, first);
+        let expected = trunk_term(first, &halves, mean_cell_width(r, first), wall);
+        assert_eq!(terms.first(), Some(&expected), "{c:?}");
+        held += usize::from(valley < from_the_cell);
         into_water += usize::from(receiver.is_under_water());
+        into_pits += usize::from(into_pit);
         checked += 1;
     }
     assert!(checked > 1_000, "{checked}");
     assert!(
-        held > 50 && into_water > 20 && unheld_equal > 100,
-        "{held}, {into_water}, {unheld_equal}"
+        held > 50 && into_water > 20 && with_donors > 100 && into_pits > 0,
+        "{held}, {into_water}, {with_donors}, {into_pits}"
     );
 }
 

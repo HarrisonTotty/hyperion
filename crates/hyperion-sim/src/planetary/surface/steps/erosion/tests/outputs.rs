@@ -465,6 +465,58 @@ fn the_small_earth_s_mean_and_lakes_hold_after_the_whole_pass() {
         "the small Earth's realised σ_h misses plan 14's by {miss:.3e}, relative"
     );
     assert_the_month_terms_are_shared_to_the_bit(&through);
+    // The small Earth's re-match books 1.22% above what its final field draws (as built): a figure,
+    // printed; the plan's 1% is the reference Earth's.
+    assert_the_budget_books_what_is_drawn("small Earth", &through, None);
+}
+
+/// R09.T6.g (b) on a world wet now: the budget's book of the field after the late craters is the
+/// synthesis's own channel share over that field quantised, the solid-angle mean of
+/// `Synthesiser::unresolved_variance`'s channels at the budget's whole wavelength, to 10⁻¹²; and
+/// the re-match's `C_c`, booked from the provisional records, is within `rematch_within` of it,
+/// relative, where given, and printed.
+fn assert_the_budget_books_what_is_drawn(
+    what: &str,
+    through: &Through,
+    rematch_within: Option<f64>,
+) {
+    use hyperion_base::rng::DetailSeed;
+    use hyperion_surface::field::cell_at_index;
+    use hyperion_surface::synth::Synthesiser;
+    let pass = through.pass();
+    let body = budget::Body::of(&pass, &through.finished.spectrum);
+    let booked = budget::book(&pass, &through.finished, &body).channels_m2;
+    let field =
+        crate::planetary::surface::quantise::quantise(pass.inputs(), through.finished.clone())
+            .expect("the finished state quantises");
+    let synth = Synthesiser::new(&field, DetailSeed::new(0x7436_6721));
+    let level = pass.level().get();
+    let (mut sum, mut total) = (0.0, 0.0);
+    for (n, &w) in (0_u32..).zip(pass.grid().solid_angles_sr()) {
+        let key = cell_at_index(level, n).expect("a cell of the pass's level");
+        let drawn = synth
+            .unresolved_variance(key, body.whole)
+            .expect("the field holds every cell");
+        sum += w * drawn.channels().value();
+        total += w;
+    }
+    let drawn = sum / total;
+    let rematch = through.record.matched.booked.channels_m2;
+    eprintln!(
+        "{what}: C_c drawn {drawn:.3} m², booked from the finished state {booked:.3} m², by the \
+         re-match {rematch:.3} m² ({:+.3}%)",
+        100.0 * (rematch / drawn - 1.0)
+    );
+    assert!(
+        (booked / drawn - 1.0).abs() <= 1e-12,
+        "{what}: the budget books {booked} m² where the synthesis draws {drawn} m²"
+    );
+    if let Some(within) = rematch_within {
+        assert!(
+            (rematch / drawn - 1.0).abs() <= within,
+            "{what}: the re-match booked {rematch} m² where the synthesis draws {drawn} m²"
+        );
+    }
 }
 
 /// R09.T16.a's shared month terms against their oracles, in the states
@@ -901,6 +953,7 @@ fn the_reference_earth_s_final_field_holds_r09_t14d() {
         miss.abs() <= WET_NOW_SIGMA_H_TOLERANCE,
         "the reference Earth's realised σ_h misses plan 14's by {miss:.3e}, relative"
     );
+    assert_the_budget_books_what_is_drawn("reference Earth", &through, Some(0.01));
     let (mut most, mut at) = (0.0_f64, 0_usize);
     let mut thrice = 0_usize;
     for (c, cell) in through.finished.cells.iter().enumerate() {

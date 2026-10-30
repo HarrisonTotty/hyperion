@@ -192,13 +192,14 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// gradient alike, and the sum asserted finite. `cache` is the caller's, and no result depends
     /// on what it holds.
     ///
-    /// The channels take no point of a dry coarse cell below the sea level, except on a world dry
-    /// now (R09.T6.f; decision-r09-channel-term §4(b)): with h₀ the height without their incision
-    /// c, the height is max(h₀ + c, min(h₀, sea)), the sea level and flat where they would cut
-    /// through it, and h₀ where the ground lies below the sea without them. The floor is
-    /// continuous and moves no height towards anything but h₀, so the level bound holds; it binds
-    /// only where the sum lies below the sea and c is negative, and every other height is the sum
-    /// to the bit.
+    /// The channels take no point of a dry coarse cell below its floor, except on a world dry now
+    /// (R09.T6.f, R09.T6.g; decision-r09-channel-term §4(b) and §9.4): with h₀ the height without
+    /// their incision c and f the floor, the height is max(h₀ + c, min(h₀, f)), the floor where
+    /// they would cut through it, and h₀ where the ground lies below it without them. The floor
+    /// is the sea level, flat, and towards a playa's pit above the sea the pit's ground
+    /// ([`Channels`]' floor, bilinear between the cell's corners). It is continuous and moves no
+    /// height towards anything but h₀, so the level bound holds; it binds only where the sum lies
+    /// below it and c is negative, and every other height is the sum to the bit.
     ///
     /// # Errors
     ///
@@ -222,32 +223,37 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
                 *g += d;
             }
         }
-        // The channels take no dry point below the sea level (R09.T6.f; decision-r09-channel-term
-        // §4(b)'s per-point floor): h = max(h₀ + c, min(h₀, sea)) with h₀ the height without them.
-        // It binds only where the sum lies below the sea and the channels cut, so that every other
-        // point keeps its sum's bits.
-        let sea = self.field.header().sea_level().value();
-        if sample.height_m < sea && parts.channels.height_m < 0.0 {
-            let (_, record) = self.cell_at(dir)?;
+        // The channels take no dry point below the floor (R09.T6.f; decision-r09-channel-term
+        // §4(b)'s per-point floor, and §9.4's at a playa's pit, R09.T6.g): h = max(h₀ + c,
+        // min(h₀, f)) with h₀ the height without them and f the floor, the sea level or towards a
+        // pit its ground. It binds only where the sum lies below the floor and the channels cut, so
+        // that every other point keeps its sum's bits.
+        if parts.channels.height_m < 0.0 {
+            let (coarse, record) = self.cell_at(dir)?;
             if !record.is_under_water() && !record.epoch_incision.is_epoch() {
-                // h₀, the other contributions summed in their order.
-                let mut without = parts.base;
-                for part in [parts.relief, parts.craters, parts.rims] {
-                    without.height_m += part.height_m;
-                    for (g, d) in without.gradient.iter_mut().zip(part.gradient) {
-                        *g += d;
+                let floor = self.channels.floor_at(self.field, coarse, dir, cache)?;
+                let floor_m =
+                    floor.map_or_else(|| self.field.header().sea_level().value(), |f| f.height_m);
+                if sample.height_m < floor_m {
+                    // h₀, the other contributions summed in their order.
+                    let mut without = parts.base;
+                    for part in [parts.relief, parts.craters, parts.rims] {
+                        without.height_m += part.height_m;
+                        for (g, d) in without.gradient.iter_mut().zip(part.gradient) {
+                            *g += d;
+                        }
                     }
+                    sample = if without.height_m >= floor_m {
+                        // On the floor: flat at the sea, or the pit's floor.
+                        floor.unwrap_or(HeightSample {
+                            height_m: floor_m,
+                            gradient: [0.0; 3],
+                        })
+                    } else {
+                        // Below the floor without the channels: they cut nothing there.
+                        without
+                    };
                 }
-                sample = if without.height_m >= sea {
-                    // On the floor, flat.
-                    HeightSample {
-                        height_m: sea,
-                        gradient: [0.0; 3],
-                    }
-                } else {
-                    // Below the sea without the channels: they cut nothing there.
-                    without
-                };
             }
         }
         Ok(HeightSample {
@@ -381,9 +387,10 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 
     /// What band level `level` leaves out of the finest level's ground in `cell`, per
     /// contribution: the level-keyed closed forms (added by R10.T5;
-    /// `decision-r10-t5-closed-forms.md`), or `None` where the view does not hold the cell or the
-    /// receiver of its trunk, one king move away inside the margin, whose base level the channels'
-    /// form reads (R09.T6.f).
+    /// `decision-r10-t5-closed-forms.md`), or `None` where the view does not hold the cell, the
+    /// receiver of its trunk, or, where water drains through it, an edge neighbour: one king move
+    /// away inside the margin, whose base level and trunks the channels' form reads (R09.T6.f,
+    /// R09.T6.g).
     ///
     /// Each contribution's wavelength-keyed form ([`unresolved_variance`]) is taken from the cut
     /// at which it counts what the level leaves out, since a level evaluates each contribution by
@@ -413,7 +420,8 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// finest level's ground in `cell`, square metres: the contributions' structure functions as
     /// [`omitted_variance`](Self::omitted_variance) takes them, at its cuts and the small craters'
     /// octaves kept and left out, summed in its order (added by R10.T5; R09.T7.h); `None` where
-    /// the view does not hold the cell or the receiver of its trunk (R09.T6.f). Each tends to twice
+    /// the view does not hold what the channels' form reads (R09.T6.f, R09.T6.g; as
+    /// [`omitted_variance`](Self::omitted_variance)). Each tends to twice
     /// its share of that variance at lags long against its wavelengths.
     ///
     /// # Panics
@@ -439,8 +447,8 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// The RMS of what band level `level` leaves out of the finest level's ground in `cell`: the
     /// square root of [`omitted_variance`](Self::omitted_variance)'s total, which R10's readings
     /// quote as the uncertainty of a height read at that level (its Design note 6; added by
-    /// R10.T5); `None` where the view does not hold the cell or the receiver of its trunk
-    /// (R09.T6.f).
+    /// R10.T5); `None` where the view does not hold what the channels' form reads (R09.T6.f,
+    /// R09.T6.g; as [`omitted_variance`](Self::omitted_variance)).
     ///
     /// # Panics
     ///
@@ -472,8 +480,9 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 /// What the band level of `set` leaves out of the finest level's ground in `cell` of `field`,
 /// per contribution, with the small craters' part given: [`Synthesiser::omitted_variance`]'s
 /// closed forms and sum, which it calls with `small_craters` its octaves'
-/// [`CraterOctaves::omitted_variance`] at `set`; `None` where `field` does not hold the cell or
-/// the receiver of its trunk (R09.T6.f).
+/// [`CraterOctaves::omitted_variance`] at `set`; `None` where `field` does not hold the cell, the
+/// receiver of its trunk or, where water drains through it, an edge neighbour (R09.T6.f,
+/// R09.T6.g).
 ///
 /// The small craters' part is the body's, the same in every cell and a sum over the octaves and
 /// their sampled profiles, so a caller that asks of many cells at a level builds it once (R10.T4.b,
@@ -658,7 +667,8 @@ impl UnresolvedVariance {
     }
 
     /// The channels' share, square metres: the variance of their incision's levels in the band
-    /// asked for, from the cell's steepness, runoffs and drainage ([`channels::channel_variance`]).
+    /// asked for, from the cell's record and its neighbours' as the synthesis cuts them
+    /// ([`channels::drawn_channel_variance`]).
     #[must_use]
     pub const fn channels(&self) -> SquareMetres {
         self.channels
@@ -689,8 +699,8 @@ impl UnresolvedVariance {
 }
 
 /// The variance of `cell`'s ground in wavelengths shorter than `finer_than`, per contribution, or
-/// `None` where `field` does not hold the cell or the receiver of its trunk (Design note 18;
-/// R09.T6.f).
+/// `None` where `field` does not hold the cell, the receiver of its trunk or, where water drains
+/// through it, an edge neighbour (Design note 18; R09.T6.f, R09.T6.g).
 ///
 /// Each contribution reads `finer_than` in its own placement ([`UnresolvedVariance`]), so a band
 /// level leaves out more than this at its `λ_n`: what it leaves out is
@@ -791,7 +801,8 @@ fn structure_with(
 /// The RMS of `cell`'s ground in wavelengths shorter than `resolution`: the square root of
 /// [`unresolved_variance`]'s total, one standard deviation of every contribution in wavelengths
 /// shorter than the resolution, each in its own placement ([`UnresolvedVariance`]); `None` where
-/// `field` does not hold the cell or the receiver of its trunk (R09.T6.f).
+/// `field` does not hold the cell, the receiver of its trunk or, where water drains through it, an
+/// edge neighbour (R09.T6.f, R09.T6.g).
 ///
 /// It falls as the resolution refines and is zero at the 2 m band limit and below, where the
 /// synthesis has nothing finer. A height read at a band level leaves out more than this at the

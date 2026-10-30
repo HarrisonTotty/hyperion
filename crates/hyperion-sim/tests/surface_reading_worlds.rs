@@ -112,21 +112,19 @@ const GAP_Z: RangeInclusive<f64> = 1.0 - Z_TOLERANCE..=1.25;
 /// The sample-world cases, each a world's name and a survey's index in [`SURVEYS_M`], whose
 /// z-scores' variance is held to [`STYLE_GAP_Z`] rather than the plan's 15%: the reference Earth at
 /// both surveys and the locked Earth at 100 m. At generator version 24 (P14.T54.b.l, T53.a's water
-/// term moving the Earths' coarse fields) the reference Earth measures 1.1739 and 1.3718, each with
-/// its RMS ratio within 1% of 1 (0.9924 and 1.0065) and held at the plan's 10%. Since R09.T6.f
-/// (2026-10-27, generator version 23) they measured 1.1751, 1.3568 and 1.1635; before it, 1.1772,
-/// 1.1584 and 1.1658.
+/// term moving the Earths' coarse fields) the reference Earth measured 1.1739 and 1.3718, each with
+/// its RMS ratio within 1% of 1 (0.9924 and 1.0065) and held at the plan's 10%. Since R09.T6.g
+/// (2026-10-30, at generator version 23) they measured 1.1757, 1.1732 and 1.1650; with R09.T6.f,
+/// 1.1751, 1.3568 and 1.1635; before it, 1.1772, 1.1584 and 1.1658.
 ///
 /// The ground a level leaves out is wider than the cell's σ at some points of the Earths, which
 /// raises the z-scores' variance where σ is small and barely moves the pooled RMS. The gap was
 /// named for decision-r10-t2-weights §2's cause, R09's level-keyed forms reading each cell's own
 /// relief style while the synthesis interpolates the styles, a small effect that stands
-/// (decision-r09-channel-term §6). Since R09.T6.f the reference Earth's 1000 m case has a second
-/// cause: the synthesis holds a coastal cell's trunk to its base level, which shrinks the cell's own
-/// closed-form channel term, while its neighbours' trunks reaching into it, which the closed forms
-/// omit, and the floor's flats at the sea stay realised (plan R09's "Deferred findings (2026-10-13
-/// rule) (R09.T6.f)"). The 24 bump re-records these figures, which R10.T15.b was to take at 24
-/// (plan R10's "Deferred findings (2026-10-13 rule) (R10.T5's `sample_worlds()` follow-up)").
+/// (decision-r09-channel-term §6). R09.T6.f's second cause at the reference Earth's 1000 m, the
+/// neighbours' trunks the closed forms omitted, went with R09.T6.g, whose forms count them; the
+/// floor's flats, which they do not count, stay. R10.T15.b re-records these figures at 24 (plan
+/// R10's "Deferred findings (2026-10-13 rule) (R10.T5's `sample_worlds()` follow-up)").
 const STYLE_GAP: [(&str, usize); 3] = [(EARTH, 0), (EARTH, 1), (LOCKED_EARTH, 0)];
 
 /// The style gap's bounds on the z-scores' variance, \[0.85, 1.38\]: the plan's tolerance from

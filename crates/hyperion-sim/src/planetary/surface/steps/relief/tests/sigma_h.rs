@@ -17,7 +17,7 @@ use hyperion_surface::field::{
     cell_index,
 };
 use hyperion_surface::spheroid::Spheroid;
-use hyperion_surface::synth::channels::{ChannelBody, channel_variance};
+use hyperion_surface::synth::channels::{ChannelBody, drawn_channel_variance};
 use hyperion_surface::synth::craters::CraterOctaves;
 use hyperion_surface::synth::craters::rims::{CoarseRims, kept_relief};
 use hyperion_surface::synth::relief::{
@@ -507,11 +507,10 @@ fn assert_header_free_forms(world: Reference) {
     for n in (0..f.grid().len()).step_by(every) {
         let key = cell_at_index(pass.level().get(), n).unwrap();
         let field_side = synthesiser.unresolved_variance(key, lambda).unwrap();
-        let record = &f.field.synthesis()[slot(n)];
-        assert_same_bits(
-            channel_variance(record, body, lambda).value(),
-            field_side.channels().value(),
-        );
+        let booked =
+            drawn_channel_variance(|k| f.field.cell(k), key, header.sea_level(), body, lambda)
+                .unwrap();
+        assert_same_bits(booked.value(), field_side.channels().value());
         let reaching: Vec<&CoarseCrater> = f.field.craters_reaching(key).collect();
         if let [crater] = reaching[..] {
             let shape = crater_shape(header.craters(), crater.diameter);

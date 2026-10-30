@@ -284,9 +284,10 @@ thread_local! {
 /// [`Synthesiser::omitted_rms`] at n over the cells the field holds as surveyed, metres, 0 before
 /// any ([`WorkerFields::level_sigma_m`]).
 ///
-/// It grows with the cells each block surveys anew, each read once, and never shrinks, since a
-/// cell surveyed stays surveyed and its record never changes (R10.T6.a): the largest over a set,
-/// so the same whatever the order of the blocks. Each level's small-crater share is the body's,
+/// It grows with the cells each block surveys anew, each read once the field holds what its forms
+/// read (a cell whose margin is still to come waits for a later block, R09.T6.g), and never
+/// shrinks, since a cell surveyed stays surveyed and its record never changes (R10.T6.a): the
+/// largest over a set, so the same whatever the order of the blocks. Each level's small-crater share is the body's,
 /// the same in every cell ([`omitted_variance_in`]), so it is built once at the field's start,
 /// leaving each cell its relief, channels and coarse rims; a cell's σ is then
 /// [`Synthesiser::omitted_rms`]'s to the bit. A level whose bound is zero, from the band limit's
@@ -301,6 +302,10 @@ struct LevelSigma {
     small_craters: [Option<SquareMetres>; LEVEL_TABLE_ROWS],
     /// Each level's largest σ so far, metres.
     largest_m: [f64; LEVEL_TABLE_ROWS],
+    /// The cells surveyed whose σ the field cannot answer yet, by [`cell_index`] in the order they
+    /// came: a survey's margin still to come in a later block, since the channels' closed forms
+    /// read a cell's edge neighbours (R09.T6.g). Each is read once its margin is held.
+    pending: Vec<u32>,
 }
 
 impl LevelSigma {
@@ -316,30 +321,49 @@ impl LevelSigma {
         Self {
             small_craters,
             largest_m: [0.0; LEVEL_TABLE_ROWS],
+            pending: Vec::new(),
         }
     }
 
     /// Widens each level's σ by the cells of `runs`, which `field` holds as surveyed: a block's
-    /// [`SurveyChange::runs`] once the field has taken it.
+    /// [`SurveyChange::runs`] once the field has taken it. A cell whose σ the field cannot answer
+    /// yet, its margin still to come, waits for a later block, and every waiting cell is tried
+    /// again first; so once a payload's blocks are all taken, every surveyed cell is read, and the
+    /// largest σ is the same whatever the order of the blocks.
     fn survey(&mut self, field: &PartialField, bounds: &LevelBounds, runs: &[(u32, u32)]) {
         let level = field.header().level().get();
-        for &(start, end) in runs {
-            for index in start..end {
-                let cell =
-                    cell_at_index(level, index).expect("a run's cells are the field's level's");
-                let levels = (0..=MAX_LEVEL).zip(&self.small_craters);
-                for ((n, &share), largest) in levels.zip(&mut self.largest_m) {
-                    let Some(share) = share else {
-                        continue;
-                    };
-                    #[cfg(test)]
-                    SIGMA_READS.with(|reads| reads.set(reads.get() + 1));
-                    let variance = omitted_variance_in(field, bounds.set(band(n)), share, cell)
-                        .expect("a cell the field took as surveyed is held");
-                    *largest = num::max(*largest, variance.total().value().sqrt());
-                }
+        let waiting = std::mem::take(&mut self.pending);
+        let fresh = runs.iter().flat_map(|&(start, end)| start..end);
+        for index in waiting.into_iter().chain(fresh) {
+            let cell = cell_at_index(level, index).expect("a run's cells are the field's level's");
+            if !self.read(field, bounds, cell) {
+                self.pending.push(index);
             }
         }
+    }
+
+    /// Widens each level's σ by `cell`'s, held as surveyed, and returns whether the field could
+    /// answer it at every level; where it could not, no level changes.
+    fn read(&mut self, field: &PartialField, bounds: &LevelBounds, cell: PatchKey) -> bool {
+        let mut sigma = [None; LEVEL_TABLE_ROWS];
+        for ((n, &share), at) in (0..=MAX_LEVEL).zip(&self.small_craters).zip(&mut sigma) {
+            let Some(share) = share else {
+                continue;
+            };
+            #[cfg(test)]
+            SIGMA_READS.with(|reads| reads.set(reads.get() + 1));
+            let Some(variance) = omitted_variance_in(field, bounds.set(band(n)), share, cell)
+            else {
+                return false;
+            };
+            *at = Some(variance.total().value().sqrt());
+        }
+        for (largest, at) in self.largest_m.iter_mut().zip(sigma) {
+            if let Some(sigma) = at {
+                *largest = num::max(*largest, sigma);
+            }
+        }
+        true
     }
 }
 
@@ -1544,7 +1568,8 @@ impl WorkerFields {
     /// is taken over the surveyed ground alone, which is all a patch draws from the field (an
     /// unsurveyed vertex takes the reference surface, R10.T6.a), as a bake's own σ is
     /// ([`TerrainLayers::sigma`](crate::bake::TerrainLayers::sigma)). It grows as blocks survey
-    /// cells, each cell read once as its block is taken (the closed forms of each level below the
+    /// cells, each cell read once the field holds its margin, as its block or a later one is taken
+    /// (the closed forms of each level below the
     /// band limit's, the small craters' share built once a level at the field's start: about 50 to
     /// 70 µs a cell, some 2 s for a full 1 MiB block of a level-8 field), and is the same whatever
     /// the order of the blocks. A field started with [`SigmaSurvey::Skipped`] reads none and
@@ -1557,6 +1582,16 @@ impl WorkerFields {
                 .as_ref()
                 .map_or([0.0; LEVEL_TABLE_ROWS], |sigma| sigma.largest_m)
         })
+    }
+
+    /// The surveyed cells of `body`'s field whose σ waits for their margin ([`LevelSigma`]'s
+    /// pending cells), `None` if no field of it surveys σ: the tests' view of the deferral.
+    #[cfg(test)]
+    pub(crate) fn sigma_pending(&self, body: BodyRef) -> Option<usize> {
+        self.bodies
+            .get(&body)
+            .and_then(|held| held.sigma.as_ref())
+            .map(|sigma| sigma.pending.len())
     }
 
     /// Bakes `key` over `body`'s field with the body's detail seed `seed` ([`bake_terrain`], no

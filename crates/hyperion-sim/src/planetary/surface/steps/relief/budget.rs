@@ -21,9 +21,11 @@
 //!   analytic coarse profile for the reconstructed one (labelled: the cells sample the profile at
 //!   their centres, and the spline smooths it). The cells' crater-wide `unresolved_rims` would
 //!   overcount the area mean, by the cover's area over the disc's.
-//! - `C_c`, the channels' whole share: the area mean of [`channel_variance`] of each cell's
-//!   quantised record at twice `D_b`, at least twice the coarse cell's mean width, where every
-//!   level counts whole. It is zero before the erosion step, every cell's flow
+//! - `C_c`, the channels' whole share: the area mean of [`drawn_channel_variance`] of each cell's
+//!   quantised record, with its edge neighbours' and the sea level, at twice `D_b`, at least twice
+//!   the coarse cell's mean width, where every level counts whole: what the synthesis draws, its
+//!   trunks held to their base levels and its donors' trunks counted (R09.T6.g). It is zero
+//!   before the erosion step, every cell's flow
 //!   [`Terminal`](hyperion_surface::field::FlowDirection::Terminal), and is computed anyway so that
 //!   R09.T14.d's second match reuses it.
 //!
@@ -67,10 +69,12 @@
 //! reconstructed field (the spline is a convex blend of the cells) as the surface crate's readers
 //! rely on, not the quadrature's narrower range, which it reports beside it.
 
-use hyperion_surface::field::{CoarseCrater, SynthesisCell, boundary_diameter};
+use hyperion_surface::field::{
+    CoarseCrater, SynthesisCell, boundary_diameter, cell_at_index, cell_index,
+};
 use hyperion_surface::num;
 use hyperion_surface::synth::BandSpectrum;
-use hyperion_surface::synth::channels::{ChannelBody, channel_variance};
+use hyperion_surface::synth::channels::{ChannelBody, drawn_channel_variance};
 use hyperion_surface::synth::craters::CraterOctaves;
 use hyperion_surface::synth::craters::rims::{CoarseRims, kept_relief};
 use hyperion_surface::synth::relief::{ReliefStyle, StructuralVariance, nyquist_degree};
@@ -211,8 +215,9 @@ pub(crate) struct StructuralShare {
 }
 
 /// What the budget books of the cells' quantised records: their styles' realised structural share
-/// and the channels' cell means, whole and finer than `λ_c` ([`book`]). The scale and the sea
-/// change no code these read, so the figures after them take the match's.
+/// and the channels' cell means, whole and finer than `λ_c` ([`book`]). Where every cell's flow is
+/// terminal, before the erosion step, the scale and the sea change nothing these read, so the
+/// figures after them take the match's.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Booked {
     /// The styles' realised structural share.
@@ -242,7 +247,9 @@ pub(crate) fn records<'a>(
 
 /// Books the cells of `working` on the body `body` of `pass` ([`Booked`]): each cell's style
 /// from `ReliefStyle::of` of its record, their realised structural share by the quadrature, and
-/// the channels' share of each record, averaged over the cells' solid angles in cell-index order.
+/// the channels' share of each record as the synthesis draws it, with its edge neighbours' records
+/// and `working`'s sea level ([`drawn_channel_variance`]), averaged over the cells' solid angles
+/// in cell-index order.
 ///
 /// # Panics
 ///
@@ -251,15 +258,25 @@ pub(crate) fn records<'a>(
 pub(crate) fn book(pass: &Pass<'_>, working: &Working, body: &Body) -> Booked {
     let omega = pass.grid().solid_angles_sr();
     let count = working.cells.len();
+    let cells: Vec<SynthesisCell> = records(pass.inputs(), working).collect();
+    let record =
+        |key| cells.get(usize::try_from(cell_index(key)).expect("a cell index fits a usize"));
+    let level = pass.level().get();
+    let drawn = |key, finer_than| {
+        drawn_channel_variance(record, key, working.sea_level, body.channels, finer_than)
+            .expect("the pass holds every cell")
+            .value()
+    };
     let (mut amplitude, mut belt) = (Vec::with_capacity(count), Vec::with_capacity(count));
     let (mut total, mut whole, mut finer) = (0.0, 0.0, 0.0);
-    for (record, &w) in records(pass.inputs(), working).zip(omega) {
-        let style = ReliefStyle::of(&record);
+    for ((n, record), &w) in (0_u32..).zip(&cells).zip(omega) {
+        let style = ReliefStyle::of(record);
         amplitude.push(style.amplitude());
         belt.push(style.belt());
         total += w;
-        whole += w * channel_variance(&record, body.channels, body.whole).value();
-        finer += w * channel_variance(&record, body.channels, body.nyquist_wavelength).value();
+        let key = cell_at_index(level, n).expect("a cell of the pass's level");
+        whole += w * drawn(key, body.whole);
+        finer += w * drawn(key, body.nyquist_wavelength);
     }
     Booked {
         structural: structural_share(pass, body, &amplitude, &belt),
@@ -684,7 +701,8 @@ pub(crate) struct Figures {
 /// documentation, "The realised figures").
 ///
 /// `booked` is the cells' shares ([`book`]) for the records as they stand: the match's after the
-/// scale and the sea, which change no code the book reads, and a fresh book otherwise.
+/// scale and the sea before the erosion step, where every flow is terminal and they change nothing
+/// the book reads, and a fresh book otherwise.
 ///
 /// # Panics
 ///

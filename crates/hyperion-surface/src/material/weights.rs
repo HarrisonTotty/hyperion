@@ -341,8 +341,9 @@ impl Omitted {
     ///
     /// # Errors
     ///
-    /// [`QueryHeightError::NotSurveyed`] naming `cell` where the view does not hold it, or the
-    /// receiver of its trunk one king move away (R09.T6.f), the closed forms' `None`.
+    /// [`QueryHeightError::NotSurveyed`] naming `cell` where the view does not hold it, the
+    /// receiver of its trunk or, where water drains through it, an edge neighbour, one king move
+    /// away (R09.T6.f, R09.T6.g), the closed forms' `None`.
     fn of<F: FieldView>(
         synth: &Synthesiser<'_, F>,
         cache: &mut SynthCache,

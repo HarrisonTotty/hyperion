@@ -65,14 +65,16 @@
 //! patch of at least three classes, which neither Moon-like file holds: every cell they survey is
 //! highland, of regolith and bedrock of one entry alone. This one surveys the Earth-like world's
 //! cell (0, 0) of face +x at level 8, at 50 m with its margin (one payload of 4,850 bytes in two
-//! blocks), and pins its finest-level (19) patch (900, 669) of face +x, about 19 m across, centred
+//! blocks), and pins its finest-level (19) patch (896, 675) of face +x, about 19 m across, centred
 //! near 35.23° S, 44.87° W: soil (class 2), sand (3) and a channel's sediment (4), each of the
 //! continental crust's granite, entry 1, where the arid bound's height contour crosses a channel
-//! (2,336, 273 and 1,616 of its 4,225 vertices dominant).
+//! (3,840, 231 and 154 of its 4,225 vertices dominant).
 //!
 //! The spot was found by a deterministic search, recorded here so that it can be run again (it was,
-//! 2026-10-20, to the same patch, (900, 668), and 2026-10-27, after R09.T6.f held the channels'
-//! valleys to their base level, to (900, 669), the row above, through the same blocks). A class is
+//! 2026-10-20, to the same patch, (900, 668); 2026-10-27, after R09.T6.f held the channels'
+//! valleys to their base level, to (900, 669), the row above, through the same blocks; and
+//! 2026-10-30, after R09.T6.g's shallower trunks, to (896, 675), through the same fourth block). A
+//! class is
 //! the form
 //! [`material_at`](crate::material::material_at) answers over the world's whole field (over the
 //! fixture's survey the search finds the same blocks and the same patch), and "columns in turn,
@@ -85,14 +87,14 @@
 //!   [`st_to_uv`](crate::cube::st_to_uv)'s warp, each 16 × 16 finest-level patches: square (a, b)
 //!   read at its centre, s = (128 i + a + ½) ÷ 2¹⁵ and t = (128 j + b + ½) ÷ 2¹⁵.
 //! - Every 2 × 2 block of squares, at every (a, b) from 0 to 126, so that the blocks overlap,
-//!   columns in turn, the rows within each, that holds at least three classes: here (5, 22),
+//!   columns in turn, the rows within each, that holds at least three classes: here (40, 86),
 //!   (53, 41), (54, 41), then (55, 41).
 //! - For each such block in turn, the 17 × 17 finest-level patches centred on the one whose corner
 //!   of least s and t is the block's centre, (16 (128 i + a + 1), 16 (128 j + b + 1)) on the face,
 //!   from 8 below it to 8 above it each way, columns in turn, the rows within each. Each patch is
 //!   sampled at every eighth vertex, x and y of 0, 8, …, 64, 81 points (`vertex_point`).
 //! - The first patch whose samples hold three classes: the first three blocks have none, and the
-//!   fourth's patches about (896, 672) give (900, 669).
+//!   fourth's patches about (896, 672) give (896, 675).
 //!
 //! After the header:
 //!

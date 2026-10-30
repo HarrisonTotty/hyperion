@@ -478,7 +478,8 @@ fn segments_carry_their_discharge_width_depth_and_depth_below_the_top() {
         assert_eq!(bits(trunk.mean_discharge_m3_s()), bits(mean));
         assert_eq!(trunk.bankfull_width(), bankfull_width(forming, g));
         assert_eq!(trunk.bankfull_depth(), bankfull_depth(forming, g));
-        // Its valley is the cell's, held to its base level (R09.T6.f).
+        // Its valley is the cell's, held to a share of its height above its base level (R09.T6.f,
+        // R09.T6.g).
         let unheld = valley_depth(
             tributary_steepness_of(record).unwrap(),
             header.radius(),
@@ -489,7 +490,10 @@ fn segments_carry_their_discharge_width_depth_and_depth_below_the_top() {
         };
         let receiver = field.cell(receiver).unwrap();
         let room = record.water_surface().value() - base_level_m(receiver, header.sea_level());
-        let valley = Metres::new(num::min(unheld.value(), num::max(room, 0.0)));
+        let valley = Metres::new(num::min(
+            unheld.value(),
+            VALLEY_RELIEF_SHARE * num::max(room, 0.0),
+        ));
         assert!(valley <= unheld);
         assert_eq!(trunk.below_top(0.0), valley);
         assert_eq!(trunk.below_top(1.0), valley);
@@ -1061,7 +1065,7 @@ fn measure_the_network_and_the_incision() {
         for &c in &cells {
             let cell = field.cell(c).unwrap();
             let rms = |from: u8, to: u8| {
-                level_terms_to(cell, body, to, TrunkValley::FromTheCell)
+                level_terms_to(cell, body, to, &TrunkValley::FromTheCell)
                     .iter()
                     .filter(|t| t.level > from)
                     .map(|t| t.variance)
@@ -1448,4 +1452,5 @@ fn the_drawn_valleys_void_is_the_closure_s() {
     );
 }
 
+mod depth;
 mod water;

@@ -25,7 +25,19 @@
 //! to land and the dry points they cut below the sea, at each band level, and the variance of z
 //! at band levels 3 and 4 (probe C's split), the omitted ground over the closed forms' RMS, for wet
 //! and dry cells, which the fix brings to about one in wet cells; and the coarse pass's channel
-//! share against the synthesis's (`print_the_budget`).
+//! share against the synthesis's (`check_the_budget`).
+//!
+//! R09.T6.g adds, on each world (decision-r09-channel-term §9.2 and §9.4):
+//!
+//! - **(a) the trunks' depth**: the drawn steady-state trunk valleys' groove depth has its median
+//!   within a factor of two of 250 m and its p90 at most 2 km, and its median over the cell's height
+//!   above its base level is under 1 (`check_the_trunks_depth`);
+//! - **(b) the budget**: the coarse pass's `C_c`, the area mean of `drawn_channel_variance` over the
+//!   field's records, is the synthesis's drawn channel variance to 1% over every sixteenth cell, and
+//!   the realised `σ_h` is plan 14's to 0.1% (`check_the_budget`);
+//! - **(d) the playas**: no point on the axis of a trunk into a dry, terminal cell above the sea, nor
+//!   of the pit's cell, is cut by the channels from at or above the pit's ground to below it, at
+//!   band levels 5, 7 and 19 (`check_the_playas`).
 //!
 //! The worlds are R09.T16's `sample_worlds()` (`tests/common/surface_worlds.rs`), each a
 //! `Tier::Slow` world with a test of its own, ignored: run with
@@ -44,12 +56,16 @@ use std::collections::BTreeSet;
 use common::surface_worlds::sample_world;
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::Metres;
+use hyperion_sim::math;
 use hyperion_surface::cube::{Face, FaceUv, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
 use hyperion_surface::field::{
     ClimateCell, CoarseCrater, CoarseField, FieldHeader, FieldView, FlowDirection, LogRunoff,
-    SynthesisCell, cell_at_index, cell_index,
+    LogSteepness, SynthesisCell, cell_at_index, cell_index,
 };
-use hyperion_surface::synth::channels::{ChannelBody, Outlet, channel_variance};
+use hyperion_surface::synth::channels::{
+    ChannelBody, Outlet, VALLEY_WALL_GRADIENT, VALLEY_WALL_SHARE, channel_variance,
+    drawn_channel_variance, valley_depth,
+};
 use hyperion_surface::synth::{BandLevel, SynthCache, Synthesiser};
 use hyperion_testkit::float::bits;
 use hyperion_testkit::lcg::Lcg;
@@ -383,24 +399,28 @@ fn check_the_channels_keep_out_of_the_water(name: &str) {
         }
     }
     print_the_split(name, &synth);
-    print_the_budget(name, field, &synth);
+    check_the_budget(name, field, &synth);
+    check_the_trunks_depth(name, field, &synth);
+    check_the_playas(name, field, &synth, &bare);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// The coarse pass's channel share against the synthesis's, printed: the mean over every
-/// sixteenth cell, unweighted, of `channel_variance` (the `σ_h` budget's `C_c`, kept to the bit by
-/// R09.T6.f) and of the synthesis's own closed form, every level counted whole.
-fn print_the_budget(name: &str, field: &CoarseField, synth: &Synthesiser<'_, CoarseField>) {
-    let body = ChannelBody::of(field.header());
+/// (b): the coarse pass's channel share against the synthesis's: the mean over every sixteenth
+/// cell, unweighted, of `drawn_channel_variance` over the field's records (the `σ_h` budget's
+/// `C_c` since R09.T6.g) and of the synthesis's own closed form, every level counted whole, to 1%,
+/// with R09.T6.b's cell-alone `channel_variance`, which the budget booked until then, printed; and
+/// the field's realised `σ_h` plan 14's to 0.1%.
+fn check_the_budget(name: &str, field: &CoarseField, synth: &Synthesiser<'_, CoarseField>) {
+    let header = field.header();
+    let body = ChannelBody::of(header);
     let whole = Metres::new(1e7);
-    let (mut budget, mut drawn, mut wet_budget, mut cells) = (0.0, 0.0, 0.0, 0_u32);
+    let (mut booked, mut drawn, mut cell_alone, mut cells) = (0.0, 0.0, 0.0, 0_u32);
     for cell in all_cells(field).step_by(16) {
         let record = field.cell(cell).expect("held");
-        let booked = channel_variance(record, body, whole).value();
-        budget += booked;
-        if record.is_under_water() {
-            wet_budget += booked;
-        }
+        booked += drawn_channel_variance(|k| field.cell(k), cell, header.sea_level(), body, whole)
+            .expect("held")
+            .value();
+        cell_alone += channel_variance(record, body, whole).value();
         drawn += synth
             .unresolved_variance(cell, whole)
             .expect("held")
@@ -410,13 +430,240 @@ fn print_the_budget(name: &str, field: &CoarseField, synth: &Synthesiser<'_, Coa
     }
     let n = f64::from(cells);
     println!(
-        "  {name}: the budget's channel share {:.1} m² (of it wet cells' {:.3} m²) against the \
-         synthesis's {:.1} m², {:.2}% more, over {cells} cells",
-        budget / n,
-        wet_budget / n,
+        "  {name}: the budget's channel share {:.1} m² against the synthesis's {:.1} m², {:.3}% \
+         apart, over {cells} cells (R09.T6.b's cell-alone form {:.1} m²)",
+        booked / n,
         drawn / n,
-        100.0 * (budget / drawn - 1.0)
+        100.0 * (booked / drawn - 1.0),
+        cell_alone / n
     );
+    assert!(
+        (booked / drawn - 1.0).abs() <= 0.01,
+        "{name}: the budget books {booked} m² against {drawn} m² drawn"
+    );
+    let target = sample_world(name).inputs().sigma_h().value();
+    let realised = header.realised_sigma_h().value();
+    println!(
+        "  {name}: realised σ_h {realised:.3} m against plan 14's {target:.3} m, {:.3e} relative",
+        realised / target - 1.0
+    );
+    assert!(
+        (realised / target - 1.0).abs() <= 1e-3,
+        "{name}: the realised σ_h {realised} m misses plan 14's {target} m"
+    );
+}
+
+/// The `q` quantile of `sorted`, the nearest rank's.
+fn quantile(sorted: &[f64], q: f64) -> f64 {
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a rank of a list of cells, exact in f64 and back"
+    )]
+    let rank = ((sorted.len() - 1) as f64 * q).round() as usize;
+    sorted[rank]
+}
+
+/// (a): the census of the drawn steady-state trunk valleys against decision-r09-channel-term
+/// §9.2's target, printed and asserted: over every dry cell with a trunk, the groove's depth at its
+/// axis, min(max(valley, bankfull depth), `G_max`), has its median within a factor of two of
+/// 250 m and its p90 at most 2 km, and its median over the cell's height above its base level is
+/// under 1. The unheld stream-power relief ([`valley_depth`]) is printed beside it.
+fn check_the_trunks_depth(name: &str, field: &CoarseField, synth: &Synthesiser<'_, CoarseField>) {
+    let header = field.header();
+    let first = header.level().get();
+    let body = ChannelBody::of(header);
+    let sea = header.sea_level().value();
+    let width = header.radius().value() * (4.0 * core::f64::consts::PI / 6.0).sqrt()
+        / f64::from(1_u32 << first);
+    // The groove cap's wall is the level's, its steepest 1.5 G ÷ W at the design gradient.
+    let cap = VALLEY_WALL_GRADIENT * VALLEY_WALL_SHARE * width / 1.5;
+    let mut network = synth.channels().network(field);
+    let (mut depths, mut unheld, mut ratios) = (Vec::new(), Vec::new(), Vec::new());
+    for cell in all_cells(field) {
+        let record = field.cell(cell).expect("held");
+        if record.is_under_water() {
+            continue;
+        }
+        let Some(trunk) = network.segment(cell).expect("held") else {
+            continue;
+        };
+        let Outlet::Cell { receiver, .. } = trunk.outlet() else {
+            panic!("a trunk drains to a cell");
+        };
+        let into = field.cell(receiver).expect("held");
+        let base = if into.is_under_water() {
+            into.water_surface().value()
+        } else if into.flow.edge().is_none() {
+            into.water_surface().value().max(sea)
+        } else {
+            sea
+        };
+        let valley = trunk.below_top(0.5).value();
+        let g = valley.max(trunk.bankfull_depth().value()).min(cap);
+        let k = record.steepness.index_m0_9()
+            * math::powf(
+                record.catchment_runoff.metres_per_year() / record.runoff.metres_per_year(),
+                LogSteepness::THETA,
+            );
+        if k.is_finite() && k > 0.0 {
+            unheld.push(valley_depth(k, body.radius, first).value());
+        }
+        let room = record.water_surface().value() - base;
+        if room > 0.0 {
+            ratios.push(g / room);
+        }
+        depths.push(g);
+    }
+    for list in [&mut depths, &mut unheld, &mut ratios] {
+        list.sort_by(f64::total_cmp);
+    }
+    let (median, p90) = (quantile(&depths, 0.5), quantile(&depths, 0.9));
+    let ratio = quantile(&ratios, 0.5);
+    #[expect(clippy::cast_precision_loss, reason = "counts of cells, exact in f64")]
+    let above_one = ratios.iter().filter(|&&r| r > 1.0).count() as f64 / ratios.len() as f64;
+    println!(
+        "  {name}: {} dry trunks' groove depth median {median:.1} m, p90 {p90:.1} m, largest {:.1} \
+         m; over the height above the base level, median {ratio:.3}, {:.4} of them above 1 (the \
+         bankfull channel's) ({} above it); the unheld relief median {:.1} m, p90 {:.1} m",
+        depths.len(),
+        depths.last().copied().unwrap_or(0.0),
+        above_one,
+        ratios.len(),
+        quantile(&unheld, 0.5),
+        quantile(&unheld, 0.9)
+    );
+    assert!(
+        (125.0..=500.0).contains(&median) && p90 <= 2_000.0 && ratio < 1.0,
+        "{name}: the trunks' depth misses §9.2's target"
+    );
+}
+
+/// (d): no point on the axis of a trunk into a dry, terminal cell above the sea, a playa's pit, at
+/// 17 points along both its chords, nor of the pit's own 4 × 4 grid, is cut by the channels from
+/// at or above the pit's ground to below it, at band levels 5, 7 and 19; h₀ is `bare`'s.
+fn check_the_playas(
+    name: &str,
+    field: &CoarseField,
+    synth: &Synthesiser<'_, CoarseField>,
+    bare: &Synthesiser<'_, WithoutChannels<'_>>,
+) {
+    let header = field.header();
+    let sea = header.sea_level().value();
+    let figure = header.figure();
+    let mut network = synth.channels().network(field);
+    let (mut pits, mut trunks, mut checked, mut cut) = (0, 0, 0, Vec::new());
+    let mut basin = BTreeSet::new();
+    for pit in all_cells(field) {
+        let record = field.cell(pit).expect("held");
+        let ground = record.water_surface().value();
+        if record.is_under_water() || record.flow.edge().is_some() || ground <= sea {
+            continue;
+        }
+        pits += 1;
+        basin.insert(pit);
+        let mut dirs = points_of(pit);
+        for edge in hyperion_surface::cube::Edge::ALL {
+            let (donor, back) = pit.edge_neighbour_and_back(edge);
+            let d = field.cell(donor).expect("held");
+            if d.is_under_water() || d.flow.edge() != Some(back) {
+                continue;
+            }
+            basin.insert(donor);
+            let Some(trunk) = network.segment(donor).expect("held") else {
+                continue;
+            };
+            trunks += 1;
+            for k in 0..=16 {
+                let p = trunk.point_m(f64::from(k) / 16.0);
+                dirs.push(unit_dir([
+                    p[0] / figure.equatorial_radius_m,
+                    p[1] / figure.equatorial_radius_m,
+                    p[2] / figure.polar_radius_m,
+                ]));
+            }
+        }
+        for band in BANDS {
+            let level = BandLevel::new(band).expect("a band level");
+            let (mut cache, mut bare_cache) = (SynthCache::new(), SynthCache::new());
+            for &dir in &dirs {
+                let h = synth
+                    .height_at(&mut cache, dir, level)
+                    .expect("held")
+                    .height_m;
+                let h0 = bare
+                    .height_at(&mut bare_cache, dir, level)
+                    .expect("held")
+                    .height_m;
+                if h0 >= ground {
+                    checked += 1;
+                    if h < ground - 1e-6 {
+                        cut.push(format!("{pit:?} band {band}: {h} m below {ground} m"));
+                    }
+                }
+            }
+        }
+    }
+    let (lifted, points, outside) = floor_outside(field, synth, bare, &basin);
+    println!(
+        "  {name}: {pits} playas' pits above the sea, {trunks} trunks into them, {checked} points \
+         checked, {} cut below the pit's ground; outside the basins the floor lifts {lifted} of \
+         {points} points of {outside} neighbour cells at band level 19",
+        cut.len()
+    );
+    assert!(cut.is_empty(), "{name}: {}", cut.join("\n"));
+}
+
+/// The floor outside the playas' basins, `basin` their pits and donors: over the 4 × 4 grids of
+/// their dry edge and corner neighbours that neither are a pit nor drain into one, where the
+/// floor's corners rise to a pit's ground, the points the floor lifts above the sum with the
+/// channels and above the sea at band level 19, the points and the cells; h₀ is `bare`'s.
+fn floor_outside(
+    field: &CoarseField,
+    synth: &Synthesiser<'_, CoarseField>,
+    bare: &Synthesiser<'_, WithoutChannels<'_>>,
+    basin: &BTreeSet<PatchKey>,
+) -> (u32, u32, usize) {
+    let sea = field.header().sea_level().value();
+    let finest = BandLevel::new(19).expect("a band level");
+    let through = synth.level_set(finest).channels_through();
+    let (mut cache, mut bare_cache) = (SynthCache::new(), SynthCache::new());
+    let mut outside = BTreeSet::new();
+    for &c in basin {
+        let around = hyperion_surface::cube::Edge::ALL
+            .into_iter()
+            .map(|e| c.edge_neighbour(e))
+            .chain(c.corner_neighbours().into_iter().flatten());
+        for n in around {
+            if !basin.contains(&n) && !field.cell(n).expect("held").is_under_water() {
+                outside.insert(n);
+            }
+        }
+    }
+    let (mut points, mut lifted) = (0_u32, 0_u32);
+    for &n in &outside {
+        for dir in points_of(n) {
+            let h = synth
+                .height_at(&mut cache, dir, finest)
+                .expect("held")
+                .height_m;
+            let h0 = bare
+                .height_at(&mut bare_cache, dir, finest)
+                .expect("held")
+                .height_m;
+            let c = through.map_or(0.0, |t| {
+                synth
+                    .channels()
+                    .incision_at(field, dir, t, &mut cache)
+                    .expect("held")
+                    .height_m
+            });
+            points += 1;
+            lifted += u32::from(h > h0 + c + 1e-6 && h > sea);
+        }
+    }
+    (lifted, points, outside.len())
 }
 
 /// Probe C's split, printed: at band levels 3 and 4, the variance of z, the ground the level

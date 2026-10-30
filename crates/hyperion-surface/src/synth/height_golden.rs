@@ -56,6 +56,13 @@
 //! - `bakes`: one [`Synthesiser::bake_patch`] a world, at L + 3 in a channelled cell, or a rim's,
 //!   or a random one: the digests of its samples and parent heights, and a few of each.
 //!
+//! And one of the Earth-like world alone:
+//!
+//! - `playas`: [`Synthesiser::height_at`] at band levels 5, 7 and 19 at nine points along the
+//!   trunk of each of the first [`PLAYAS`] dry, terminal cells above the sea, in cell-index order,
+//!   whose first dry donor's trunk the playa's floor holds at some point (R09.T6.g): a floored
+//!   height is the floor's bilinear blend, which no other site reaches.
+//!
 //! # Format
 //!
 //! After the header, a line without `=` opens a section (a world, a site and its direction, a part
@@ -114,6 +121,12 @@ const RIM_RADII: [f64; 3] = [0.97, 1.0, 1.04];
 /// The share of a coarse crater's reach, as a chord from its centre, at which a site sits "just
 /// inside" it.
 const INSIDE_REACH: f64 = 0.98;
+
+/// The playas the `playas` golden pins.
+const PLAYAS: usize = 4;
+
+/// The band levels the `playas` golden pins.
+const PLAYA_BANDS: [u8; 3] = [5, 7, 19];
 
 /// The file stem of `kind`'s goldens.
 const fn stem(kind: SyntheticWorld) -> &'static str {
@@ -323,7 +336,8 @@ fn channelled_cells(field: &CoarseField, count: usize) -> Vec<PatchKey> {
 }
 
 /// The first of `field`'s coarse cells, in cell-index order, whose steady-state trunk's valley the
-/// synthesis holds to its base level (R09.T6.f), where its closed forms leave the coarse pass's.
+/// synthesis holds to its base level (R09.T6.f, R09.T6.g), where its closed forms fall below
+/// R09.T6.b's cell-alone `channel_variance`.
 fn held_trunk_cells(field: &CoarseField) -> Vec<PatchKey> {
     let body = ChannelBody::of(field.header());
     let whole = Metres::new(1e7);
@@ -340,7 +354,8 @@ fn held_trunk_cells(field: &CoarseField) -> Vec<PatchKey> {
 }
 
 /// The first of `field`'s coarse cells, in cell-index order, under water and with a flow edge: a
-/// trunk the synthesis draws nothing of (R09.T6.f) and the coarse pass books a bankfull channel.
+/// trunk the synthesis draws nothing of (R09.T6.f), where R09.T6.b's cell-alone form counts a
+/// bankfull channel.
 fn wet_trunk_cells(field: &CoarseField) -> Vec<PatchKey> {
     coarse_cells(field)
         .find(|&c| {
@@ -1307,6 +1322,79 @@ fn common() -> String {
     w.finish()
 }
 
+/// The `playas` golden's playas on `field` (see the module documentation): each pit, the donor
+/// whose trunk runs into it, the pit's ground, metres, and the nine points along the trunk at
+/// t = k ÷ 8, of which at least one is held at the floor at band level 19.
+fn playa_trunks(
+    field: &CoarseField,
+    synth: &Synthesiser<'_, CoarseField>,
+) -> Vec<(PatchKey, PatchKey, f64, Vec<[f64; 3]>)> {
+    let sea = field.header().sea_level().value();
+    let mut network = synth.channels().network(field);
+    let mut cache = SynthCache::new();
+    let mut out = Vec::new();
+    for pit in coarse_cells(field) {
+        let record = field.cell(pit).expect("the field holds its cells");
+        let ground = record.water_surface().value();
+        if record.is_under_water() || record.flow.edge().is_some() || ground <= sea {
+            continue;
+        }
+        let donor = crate::cube::Edge::ALL.into_iter().find_map(|edge| {
+            let (n, back) = pit.edge_neighbour_and_back(edge);
+            let d = field.cell(n).expect("the field holds its cells");
+            (!d.is_under_water() && d.flow.edge() == Some(back)).then_some(n)
+        });
+        let Some(donor) = donor else {
+            continue;
+        };
+        let Some(trunk) = network.segment(donor).expect("the field holds its cells") else {
+            continue;
+        };
+        let dirs: Vec<[f64; 3]> = (0..=8)
+            .map(|k| dir_of(field, trunk.point_m(f64::from(k) / 8.0)))
+            .collect();
+        let floored = dirs.iter().any(|&dir| {
+            let (coarse, _) = synth.cell_at(dir).expect("the field holds its cells");
+            let h = synth.height_at(&mut cache, dir, band(19)).expect("held");
+            let floor = synth
+                .channels()
+                .floor_at(field, coarse, dir, &mut cache)
+                .expect("held");
+            floor.is_some_and(|f| sample_bits(f) == sample_bits(h))
+        });
+        if floored {
+            out.push((pit, donor, ground, dirs));
+            if out.len() == PLAYAS {
+                break;
+            }
+        }
+    }
+    assert_eq!(out.len(), PLAYAS, "the Earth-like world has its playas");
+    out
+}
+
+/// The text of the `playas` golden.
+fn playas() -> String {
+    let field = world(SyntheticWorld::EarthLike);
+    let synth = Synthesiser::new(field, SEED);
+    let mut cache = SynthCache::new();
+    let mut w = writer();
+    for (pit, donor, ground, dirs) in playa_trunks(field, &synth) {
+        w.line(&format!("playa {} donor {}", key(pit), key(donor)));
+        w.f64("ground", ground);
+        for (k, dir) in dirs.iter().enumerate() {
+            w.line(&format!("point {k} = dir {}", hex3(*dir)));
+            for n in PLAYA_BANDS {
+                let s = synth
+                    .height_at(&mut cache, *dir, band(n))
+                    .expect("the field holds its cells");
+                sample(&mut w, &format!("L{n}"), s);
+            }
+        }
+    }
+    w.finish()
+}
+
 /// The text of the levels golden.
 fn levels() -> String {
     let mut w = writer();
@@ -1336,8 +1424,8 @@ fn levels() -> String {
 /// The cells each world's closed forms are pinned at, with what each is: a cube corner's cell
 /// and a face edge's, and a cell under a coarse rim, one with channels and one on a belt where the
 /// world has them; and where it has them, a dry cell whose trunk's valley the synthesis holds to
-/// its base level and a wet cell with a trunk, whose synthesised closed forms leave the coarse
-/// pass's `channel_variance` (R09.T6.f).
+/// its base level and a wet cell with a trunk, whose synthesised closed forms leave R09.T6.b's
+/// cell-alone `channel_variance` (R09.T6.f).
 fn closed_form_cells(kind: SyntheticWorld) -> Vec<(&'static str, PatchKey)> {
     let field = world(kind);
     let level = field.header().level().get();
@@ -1567,11 +1655,46 @@ fn every_world_s_baked_patch_matches_its_golden() {
     golden!("height/bakes", &bakes());
 }
 
+#[test]
+fn the_playas_heights_match_their_golden() {
+    golden!("height/playas", &playas());
+}
+
+/// The playas' floored heights are the same forwards, backwards and interleaved through one cache
+/// that every query fills, and from an empty cache (the sim-determinism skill's "Order
+/// independence"): the floor's corners are cached per coarse cell (R09.T6.g).
+#[test]
+fn the_playas_heights_are_independent_of_the_cache_and_the_order() {
+    let field = world(SyntheticWorld::EarthLike);
+    let synth = Synthesiser::new(field, SEED);
+    let keys: Vec<([f64; 3], u8)> = playa_trunks(field, &synth)
+        .into_iter()
+        .flat_map(|(_, _, _, dirs)| dirs)
+        .flat_map(|dir| PLAYA_BANDS.map(|n| (dir, n)))
+        .collect();
+    let shared = core::cell::RefCell::new(SynthCache::new());
+    let through = |&(dir, n): &([f64; 3], u8)| {
+        sample_bits(
+            synth
+                .height_at(&mut shared.borrow_mut(), dir, band(n))
+                .expect("held"),
+        )
+    };
+    hyperion_testkit::order::assert_order_independent(&keys, through);
+    for k in &keys {
+        let fresh = synth
+            .height_at(&mut SynthCache::new(), k.0, band(k.1))
+            .expect("held");
+        assert_eq!(through(k), sample_bits(fresh), "{k:?}");
+    }
+}
+
 /// Tests that read files, which the browser target cannot.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod native_only {
-    /// The height goldens: two of each of the six worlds and four of all of them.
-    const HEIGHT_GOLDENS: usize = 16;
+    /// The height goldens: two of each of the six worlds, four of all of them and the Earth-like
+    /// world's playas.
+    const HEIGHT_GOLDENS: usize = 17;
 
     /// Every golden file under `tests/golden/height/` carries `GENERATOR_VERSION`, not R05's
     /// `TEST_PLANET_VERSION`, which heads the files directly under `tests/golden/`.
