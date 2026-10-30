@@ -153,11 +153,15 @@ RECORDS_INDEX = (
     "Task records as built: [{stem}/{dir}/]({stem}/{dir}/), one file per task, each linked from its"
     " entry under Tasks."
 )
-# The keep mark: a line of its own inside a Risks bullet (`  <!-- plan-split: keep -->`, at the
-# indent of the bullet's text, outside a code fence) that keeps the bullet in Risks whatever it
-# names. plan_split.py's `--keep` writes it, so the bullet stays on every later split; an HTML
-# comment, Prettier leaves it as it is.
+# The split's marks: a line of its own inside a Risks bullet, at the indent of the bullet's text and
+# outside a code fence, that overrides the rule for it. The keep mark keeps the bullet in Risks
+# whatever it names; the file mark, `<!-- plan-split: file under P06.T28.f -->`, files it under the
+# task it names. plan_split.py writes them for `--keep` and `--assign`, so a bullet lies where they
+# put it on every later split, and a record file's file mark tells `--verify` how its bullet got
+# there. HTML comments, Prettier leaves them as they are.
 KEEP_MARK = "<!-- plan-split: keep -->"
+FILE_MARK = "<!-- plan-split: file under {task} -->"
+FILE_MARK_RE = re.compile(r"<!-- plan-split: file under ([PR]\d{2}\.T\d+(?:\.[a-z]+){0,2}) -->")
 RECORD_HEADER = (
     "# {key}: records as built\n"
     "\n"
@@ -332,7 +336,8 @@ def assign_records(lines: list[str], items: list[RiskItem], prefix: str, task_id
 
     - Only a top-level bullet before any sub-heading of the section moves, and not a re-validation
       (a title opening "Re-validated"): implement-task and revalidate-plan look for those in Risks.
-      Nor does a bullet with a keep mark (has_keep_mark()).
+      Nor does a bullet with a keep mark (split_mark()), and one with a file mark is filed under
+      its task, record_file_key()'s file, whatever it names and wherever it stands in Risks.
     - It belongs to the tasks of this plan that its title names (the bold or italic span it opens
       with, code spans aside). If the title names none: those that the rest of its first sentence
       names ("**Deferred findings (2026-10-13 rule)**, from P14.T49.e:"), else those whose
@@ -347,11 +352,18 @@ def assign_records(lines: list[str], items: list[RiskItem], prefix: str, task_id
       a record of no one task (a phase's validation, a ruling across tasks).
     """
     for item in items:
+        mark = split_mark(lines, item) if item.kind == "bullet" else None
+        if mark == KEEP_MARK:
+            item.why = "a keep mark"
+            continue
+        if mark is not None:  # a file mark, under a sub-heading too
+            task = FILE_MARK_RE.fullmatch(mark).group(1)
+            item.names = [task]
+            item.key = record_file_key(task, task_ids)
+            item.why = "a file mark" if item.key else f"its file mark names no task under Tasks: {task}"
+            continue
         if item.kind != "bullet" or item.under_heading:
             item.why = "a sub-heading's item" if item.under_heading else f"a {item.kind}, not a bullet"
-            continue
-        if has_keep_mark(lines, item):
-            item.why = "a keep mark"
             continue
         title, tail = item_head(lines, item)
         if REVALIDATED_RE.match(title):
@@ -381,17 +393,19 @@ def assign_records(lines: list[str], items: list[RiskItem], prefix: str, task_id
             item.why = f"its {where} names several tasks: " + ", ".join(keys)
 
 
-def has_keep_mark(lines: list[str], item: RiskItem) -> bool:
-    """Whether a Risks bullet holds the keep mark: a line of its own at the indent of the bullet's
-    text, outside a code fence (a mark quoted in a fence, or nested deeper, keeps nothing)."""
+def split_mark(lines: list[str], item: RiskItem) -> str | None:
+    """The split's mark a Risks bullet holds (KEEP_MARK, or a FILE_MARK naming its task): a line
+    of its own at the indent of the bullet's text, outside a code fence (a mark quoted in a fence,
+    or nested deeper, marks nothing); the last if several; None for none."""
     depth = len(re.match(r"(?:[-*+]|\d+[.)])\s+|", lines[item.start]).group(0))
-    fenced = False
+    fenced, found = False, None
     for line in lines[item.start + 1 : item.body_end]:
         if line.lstrip().startswith(("```", "~~~")):
             fenced = not fenced
-        elif not fenced and depth and indent(line) == depth and line.strip() == KEEP_MARK:
-            return True
-    return False
+        elif not fenced and depth and indent(line) == depth:
+            if line.strip() == KEEP_MARK or FILE_MARK_RE.fullmatch(line.strip()):
+                found = line.strip()
+    return found
 
 
 def plan_prefix(plan: Path) -> str | None:

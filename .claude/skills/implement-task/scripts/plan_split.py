@@ -11,23 +11,31 @@ Usage (from the repository root, as `python3 -I`):
                                         back and verify them.
     plan_split.py PLAN --verify REV     Check a committed split: split PLAN as it was at git
                                         revision REV (with its record files then) and compare the
-                                        result with the working tree, byte for byte.
+                                        result with the working tree, byte for byte, with the
+                                        overrides the working tree's marks record (below) beside
+                                        any given.
     --assign 'TEXT=ID'                  File the Risks bullet whose first line starts with TEXT
-                                        (after its `- `) under task ID (repeatable). A bullet with
-                                        a keep mark refuses it: delete the mark's line first.
+                                        (after its `- `) under task ID (repeatable), now and on
+                                        every later split: it gains a file mark naming the task as
+                                        its last line, which moves with it into its record file.
     --keep 'TEXT'                       Keep that bullet in Risks, now and on every later split:
                                         a bullet the rule would move gains a keep mark as its last
-                                        line, written by --write and --dry-run (repeatable).
+                                        line (repeatable). A bullet marked otherwise refuses
+                                        either override: delete the mark's line first.
     --json                              Print the report as JSON; --verbose lists each bullet moved.
 
 What moves: each top-level bullet of "Risks and open points" that belongs to one task of the plan
 by plan_task.assign_records()'s rule, filed under plan_task.record_file_key(); a bullet stays in
 Risks when it names no task of the plan (an open point, a ruling across tasks), when it is a
-re-validation, when it is under a sub-heading of the section, and when it has a keep mark: a line
-of its own inside it, `<!-- plan-split: keep -->` (plan_task.KEEP_MARK) at its text's indent,
-which `--keep` adds and Prettier leaves as it is, so the bullet stays wherever it is moved or
-edited, and on a split run without the flag (as implement-task's records step runs it). The check
-takes a mark the split adds out again, as it does a link line. Every bullet that stays is
+re-validation, when it is under a sub-heading of the section, and when it has a keep mark. The
+marks are lines of their own inside a bullet, at its text's indent, which Prettier leaves as they
+are: `<!-- plan-split: keep -->` (plan_task.KEEP_MARK), which `--keep` adds, keeps it in Risks, and
+`<!-- plan-split: file under P06.T28.f -->` (plan_task.FILE_MARK), which `--assign` adds, files it
+under that task, under a sub-heading too. So a bullet lies where its override put it on every
+later split, run without the flag (as implement-task's records step runs it), wherever it is
+moved or edited; and `--verify` reads a committed split's marks as the overrides it was made
+with. The check takes a mark the split adds out again, from the plan or a record file, as it
+does a link line. Every bullet that stays is
 reported, with its first line and why, and so is a line that keeps Prettier from formatting the
 rest of the plan (a warning, not a failure). Nothing outside Risks moves. The plan gains RECORDS_INDEX after the Risks
 heading, and each task with records gains RECORD_LINE in its entry under Tasks: a paragraph of its
@@ -135,6 +143,7 @@ class Container:
     header: str = ""  # a new record file's header
     items: list[int] = field(default_factory=list)  # indices into the Risks items
     trails: dict[int, str] = field(default_factory=dict)  # position -> the blank lines it had after it, where changed
+    marks: dict[int, str] = field(default_factory=dict)  # position -> the mark line the split gave it
 
 
 @dataclass
@@ -151,7 +160,7 @@ class Result:
     order: list[str | None]  # each Risks item's container, in the plan's order
     links: dict[str, str]  # key -> "added" or "present"
     head_len: int  # the Risks heading and the lines before its first item
-    marked: list[int]  # the Risks items `--keep` gave a keep mark, by index
+    marked: dict[int, str]  # Risks item index -> the mark `--keep` or `--assign` gave it
 
     @property
     def moved(self) -> list[pt.RiskItem]:
@@ -166,12 +175,19 @@ def first_line(line: str) -> str:
     return re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", plain(line)).strip()
 
 
-def apply_overrides(p, result_items, firsts, assign, keep, ids) -> tuple[list[str], list[int]]:
-    """Apply `--assign` and `--keep` to the Risks items: the problems, and the items `--keep` is to
-    mark (their indices), those the rule would move. A marked bullet refuses `--assign`, and one
-    that ends inside a code fence refuses `--keep`, whose mark would be code."""
+def fence_open(p: list[str], item: pt.RiskItem) -> bool:
+    """Whether a bullet ends inside a code fence, where a mark would be code."""
+    return sum(p[i].lstrip().startswith(("```", "~~~")) for i in range(item.start, item.body_end)) % 2 == 1
+
+
+def apply_overrides(p, result_items, firsts, assign, keep, ids) -> tuple[list[str], dict[int, str]]:
+    """Apply `--assign` and `--keep` to the Risks items: the problems, and the mark each item that
+    an override moves from where the rule puts it is to gain (by its index): a file mark naming the
+    task for `--assign`, the keep mark for `--keep`. A bullet the rule puts there already, or marked
+    so, needs none; one marked otherwise refuses the override, as does one that ends inside a code
+    fence."""
     problems: list[str] = []
-    marks: list[int] = []
+    marks: dict[int, str] = {}
 
     def find(text: str) -> int | None:
         hits = [k for k, (it, f) in enumerate(zip(result_items, firsts)) if it.kind == "bullet" and f.startswith(text)]
@@ -188,20 +204,30 @@ def apply_overrides(p, result_items, firsts, assign, keep, ids) -> tuple[list[st
             continue
         if (k := find(text)) is None:
             continue
-        if pt.has_keep_mark(p, result_items[k]):
-            problems.append(f"--assign {text!r}: the bullet has a keep mark; delete its `{pt.KEEP_MARK}` line first")
-            continue
-        result_items[k].key, result_items[k].why = key, f"--assign {task}"
+        item, mark = result_items[k], pt.split_mark(p, result_items[k])
+        filed = pt.FILE_MARK_RE.fullmatch(mark or "")
+        if mark is not None and not (filed and pt.record_file_key(filed.group(1), ids) == key):
+            problems.append(f"--assign {text!r}: the bullet has the mark `{mark}`; delete its line first")
+        elif mark is None and item.key == key:
+            pass  # the rule files it there already
+        elif mark is None and fence_open(p, item):
+            problems.append(f"--assign {text!r}: the bullet ends inside a code fence; close it first")
+        elif mark is None:
+            item.key, item.why = key, f"--assign {task}, marked"
+            marks[k] = pt.FILE_MARK.format(task=task)
     for text in keep:
         if (k := find(text)) is None or result_items[k].key is None:
             continue  # the rule keeps it already (a keep mark among the reasons)
-        item = result_items[k]
-        if sum(p[i].lstrip().startswith(("```", "~~~")) for i in range(item.start, item.body_end)) % 2:
+        item, mark = result_items[k], pt.split_mark(p, result_items[k])
+        if mark is not None or k in marks:
+            problems.append(f"--keep {text!r}: the bullet has the mark `{mark or marks[k]}` (or an --assign); "
+                            "delete its line first")
+        elif fence_open(p, item):
             problems.append(f"--keep {text!r}: the bullet ends inside a code fence; close it first")
-            continue
-        item.key, item.why = None, "--keep, marked"
-        marks.append(k)
-    return problems, sorted(marks)
+        else:
+            item.key, item.why = None, "--keep, marked"
+            marks[k] = pt.KEEP_MARK
+    return problems, marks
 
 
 def link_insertion(p: list[str], marker: pt.Marker, marker_lines: set[int], line: str) -> tuple[int, list[str]]:
@@ -244,7 +270,6 @@ def split_text(plan: Path, original: str, existing: dict[str, str], assign=(), k
     problems, marks = apply_overrides(p, items, firsts, assign, keep, ids)
     if problems:
         raise UsageError("; ".join(problems))
-    to_mark = set(marks)
     index = pt.RECORDS_INDEX.format(stem=plan.stem, dir=pt.RECORDS_DIR)
     already = any(it.kind == "para" and p[it.start] == index for it in items)
 
@@ -273,13 +298,11 @@ def split_text(plan: Path, original: str, existing: dict[str, str], assign=(), k
             if text in existing[it.key]:
                 raise SplitError(f"{firsts[k][:60]!r} is already in {pt.record_rel(plan, it.key)}")
 
-    marked_at: list[tuple[int, str]] = []  # each new keep mark: where the run of the plan's own items puts it
-
     def run(c: Container, end_trail: list[str]) -> list[str]:
         """The container's items, each followed by the blank lines it had after it, except that a
         list ends with a blank line before a heading or a paragraph, and the last item takes
-        end_trail. Each trail changed so is kept in c.trails, to be put back. An item `--keep`
-        marks gains the keep mark as its last line, at its bullet's indent; marked_at gets where."""
+        end_trail. Each trail changed so is kept in c.trails, to be put back. An item an override
+        marks gains its mark as its last line, at its text's indent, kept in c.marks."""
         out: list[str] = []
         for n, k in enumerate(c.items):
             it = items[k]
@@ -293,10 +316,9 @@ def split_text(plan: Path, original: str, existing: dict[str, str], assign=(), k
             if new != trail:
                 c.trails[n] = "".join(trail)
             out += lines[it.start : it.body_end]
-            if k in to_mark:
-                mark = " " * re.match(r"(?:[-*+]|\d+[.)])\s+", p[it.start]).end() + pt.KEEP_MARK + eol
-                marked_at.append((len(out), mark))
-                out.append(mark)
+            if k in marks:
+                c.marks[n] = " " * re.match(r"(?:[-*+]|\d+[.)])\s+", p[it.start]).end() + marks[k] + eol
+                out.append(c.marks[n])
             out += new
         return out
 
@@ -346,8 +368,6 @@ def split_text(plan: Path, original: str, existing: dict[str, str], assign=(), k
     out += lines[cursor : span[0]]
     if inserted_risks:
         inserted.append((len(out) + len(risks), [x + eol for x in inserted_risks]))
-    own_items = len(out) + len(risks) + len(inserted_risks)  # where the run of the plan's own items starts
-    inserted += [(own_items + at, [mark]) for at, mark in marked_at]
     out += region
     out += lines[span[1] :]
 
@@ -407,6 +427,10 @@ def recombine(result: Result, text: str, records: dict[str, str]) -> str:
             raise SplitError(f"{key or 'the plan'} holds {len(run)} items where the split put {len(c.items)}")
         for n, trail in c.trails.items():
             run[n] = (run[n][0], split_lines(trail))
+        for n, mark in c.marks.items():
+            if not run[n][0] or run[n][0][-1] != mark:
+                raise SplitError(f"{key or 'the plan'}'s item {n + 1} does not end with the mark the split gave it")
+            run[n] = (run[n][0][:-1], run[n][1])
     taken = {key: 0 for key in runs}
     region = lines[span[0] : body_start]
     for key in result.order:
@@ -539,7 +563,7 @@ def report(result: Result, problems: list[str]) -> dict:
         "record_files_appended": appended,
         "bullets_moved": len(moved),
         "bullets_kept": len(kept),
-        "keep_marks_added": [result.first_lines[k] for k in result.marked],
+        "marks_added": [f"{result.first_lines[k][:60]}: {mark}" for k, mark in sorted(result.marked.items())],
         "links": result.links,
         "kept": kept,
         "moved": moved,
@@ -553,7 +577,7 @@ def print_report(rep: dict, verbose: bool) -> None:
     print(f"{rep['plan']}: {rep['lines_before']} lines -> {rep['lines_after']}; "
           f"{len(rep['record_files_new'])} record files new, {len(rep['record_files_appended'])} appended "
           f"({rep['record_lines']} lines); {rep['bullets_moved']} bullets moved, {rep['bullets_kept']} kept"
-          + (f" ({len(rep['keep_marks_added'])} keep marks added)" if rep["keep_marks_added"] else "")
+          + (f" ({len(rep['marks_added'])} marks added)" if rep["marks_added"] else "")
           + f"; check {rep['check']}")
     for k in rep["kept"]:
         print(f"  kept {k['line']} ({k['lines']} lines, {k['why']}): {k['first'][:100]}")
@@ -591,6 +615,33 @@ def records_dirty(root: Path, plan: Path) -> bool:
     return out.returncode == 0 and bool(out.stdout.strip())
 
 
+def recorded_overrides(rev_text: str, text: str, records: dict[str, str]) -> tuple[list[tuple[str, str]], list[str]]:
+    """The overrides a committed split records in its marks, for `--verify` to split REV's plan as
+    it was split: `--assign` for each record file's bullet (`records`, the working tree's) with a
+    file mark, `--keep` for each bullet of the plan's Risks (`text`) with a keep mark, each by its
+    first line, where REV's Risks has a bullet of that first line (one filed before REV has not)."""
+    def bullets(q: list[str], start: int, stop: int) -> list[pt.RiskItem]:
+        return [it for it in pt.top_items(q, start, stop) if it.kind == "bullet"]
+
+    rp = [plain(x) for x in split_lines(rev_text)]
+    span = pt.named_section(rp, "risks")
+    at_rev = {first_line(rp[it.start]) for it in bullets(rp, span[0] + 1, span[1])} if span else set()
+    assign: list[tuple[str, str]] = []
+    keep: list[str] = []
+    p = [plain(x) for x in split_lines(text)]
+    span = pt.named_section(p, "risks")
+    for it in bullets(p, span[0] + 1, span[1]) if span else []:
+        if pt.split_mark(p, it) == pt.KEEP_MARK and first_line(p[it.start]) in at_rev:
+            keep.append(first_line(p[it.start]))
+    for body in records.values():
+        q = [plain(x) for x in split_lines(body)]
+        for it in bullets(q, 0, len(q)):
+            filed = pt.FILE_MARK_RE.fullmatch(pt.split_mark(q, it) or "")
+            if filed and first_line(q[it.start]) in at_rev:
+                assign.append((first_line(q[it.start]), filed.group(1)))
+    return assign, keep
+
+
 def parse_assign(values: list[str]) -> list[tuple[str, str]]:
     pairs = []
     for value in values:
@@ -619,13 +670,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no plan at {plan}", file=sys.stderr)
         return EXIT_USAGE
     try:
-        assign = parse_assign(args.assign)
+        assign, keep = parse_assign(args.assign), list(args.keep)
         if args.verify:
             root = pt.repo_root()
             original, existing = at_revision(root, plan, args.verify)
+            # The overrides the committed split made, from its marks, beside any given.
+            marked_assign, marked_keep = recorded_overrides(original, read_text(plan), existing_records(plan))
+            assign += [a for a in marked_assign if a not in assign]
+            keep += [k for k in marked_keep if k not in keep]
         else:
             original, existing = read_text(plan), existing_records(plan)
-        result = split_text(plan, original, existing, assign, args.keep)
+        result = split_text(plan, original, existing, assign, keep)
     except SplitError as e:
         print(f"plan_split: {e}", file=sys.stderr)
         return EXIT_USAGE if isinstance(e, UsageError) else EXIT_FAIL

@@ -179,7 +179,11 @@ a record by the task its title, or else its first sentence, names. Where it goes
   to be filed. The run moves every bullet of Risks that names one task, so read its `kept` and
   `moved` lines: a bullet that names a task but must stay (an open point it raised) is kept with
   `--keep '<its first words>'`, which gives the bullet a keep mark, a last line
-  `<!-- plan-split: keep -->` indented as the bullet's text, so that every later run keeps it too.
+  `<!-- plan-split: keep -->` indented as the bullet's text, so that every later run keeps it too;
+  and a bullet the rule leaves in Risks or files elsewhere is filed with
+  `--assign '<its first words>=<ID>'`, which gives it a file mark,
+  `<!-- plan-split: file under <ID> -->`, that moves with it. `--verify <rev>` reads both marks
+  back, so it needs no flags.
 - **An inline plan**: at the end of the plan's **Risks and open points**.
 - In either layout, an open point, or a finding or ruling that binds several tasks or the whole
   plan, goes in Risks.

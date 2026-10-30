@@ -223,19 +223,20 @@ class KeepMark(unittest.TestCase):
         self.assertEqual(ps.recombine(first, first.text, first.records), PLAN)
         self.assertEqual(ps.outside_risks_unchanged(first), [])
         self.assertNotIn("P07.T1", first.records)
-        self.assertEqual(ps.report(first, [])["keep_marks_added"], ["**Deviations in T1, as built.** T1's record."])
+        self.assertEqual(ps.report(first, [])["marks_added"],
+                         ["**Deviations in T1, as built.** T1's record.: " + pt.KEEP_MARK])
         # A split without the flag, as a lane runs it to file a record, keeps it and adds nothing.
         later = first.text.replace("### Asked by plan R01",
                                    "- **Deviations in T4.b, as built.** New.\n\n### Asked by plan R01")
         second = split_fixture(later, dict(first.records))
         kept = by_first(second)["**Deviations in T1, as built.*"]
-        self.assertEqual((kept.key, kept.why, second.marked), (None, "a keep mark", []))
+        self.assertEqual((kept.key, kept.why, second.marked), (None, "a keep mark", {}))
         self.assertEqual(sorted(second.records), ["P07.T4.b"])
         self.assertEqual(ps.recombine(second, second.text, second.records), later)
         self.assertEqual(second.text.count(pt.KEEP_MARK), 1)
         # Kept again, it gains no second mark, and nothing changes.
         third = split_fixture(second.text, {**first.records, **second.records}, keep=["**Deviations in T1, as built.**"])
-        self.assertEqual((third.text, third.records, third.marked), (second.text, {}, []))
+        self.assertEqual((third.text, third.records, third.marked), (second.text, {}, {}))
 
     def test_the_mark_ends_a_loose_bullet_before_its_blank_line(self) -> None:
         result = split_fixture(keep=["**Deviations in T2.a and T3"])
@@ -253,7 +254,7 @@ class KeepMark(unittest.TestCase):
         marked = split_fixture(keep=["**Deviations in T1, as built.**"]).text
         with self.assertRaises(ps.UsageError) as caught:
             split_fixture(marked, assign=[("**Deviations in T1, as built.**", "P07.T1")])
-        self.assertIn("keep mark", str(caught.exception))
+        self.assertIn(f"has the mark `{pt.KEEP_MARK}`", str(caught.exception))
         lines = marked.splitlines()
         items = pt.risk_items(lines, pt.named_section(lines, "risks"))
         pt.assign_records(lines, items, "P07", {m.task_id for m in pt.task_markers(lines, pt.markers(lines))})
@@ -267,7 +268,7 @@ class KeepMark(unittest.TestCase):
 
     def test_keep_marks_only_a_bullet_the_rule_would_move_and_none_in_an_open_fence(self) -> None:
         result = split_fixture(keep=["**An open point.**", "**Deviations in T1, under a sub-heading.**"])
-        self.assertEqual((result.marked, result.text.count(pt.KEEP_MARK)), ([], 0))
+        self.assertEqual((result.marked, result.text.count(pt.KEEP_MARK)), ({}, 0))
         fenced = PLAN.replace("T1's record.", "T1's record.\n  ```text\n  never closed")
         with self.assertRaises(ps.UsageError) as caught:
             split_fixture(fenced, keep=["**Deviations in T1, as built.**"])
@@ -286,9 +287,66 @@ class KeepMark(unittest.TestCase):
 
         formatted = prettier(PLAN)
         result = split_fixture(formatted, keep=["**Deviations in T1, as built.**", "**Deviations in T2.a and T3",
-                                                "**Deferred findings", "**P07.T4.c as built."])
-        self.assertEqual(len(result.marked), 4)
+                                                "**Deferred findings", "**P07.T4.c as built."],
+                               assign=[("**An open point.**", "P07.T4.b"),
+                                       ("**Deviations in T1, under a sub-heading.**", "P07.T1")])
+        self.assertEqual(len(result.marked), 6)
         self.assertEqual(prettier(result.text), result.text)
+        for body in result.records.values():
+            self.assertEqual(prettier(body), body)
+        self.assertEqual(sum(pt.FILE_MARK_RE.search(b) is not None for b in result.records.values()), 2)
+
+
+FILED = "  " + pt.FILE_MARK.format(task="P07.T1") + "\n"
+
+
+class FileMark(unittest.TestCase):
+    """`--assign` marks its bullet with the task, in the record file it moves to, so that a later
+    `--check` or `--write` and `--verify` against the revision before the split reproduce it."""
+
+    def test_assign_marks_the_bullet_in_its_record_file(self) -> None:
+        result = split_fixture(assign=[("**Deviations in T1, under a sub-heading.**", "P07.T1")])
+        self.assertTrue(result.records["P07.T1"].endswith(
+            "T1's record.\n- **Deviations in T1, under a sub-heading.** It stays.\n" + FILED))
+        self.assertNotIn("under a sub-heading.**", result.text)
+        self.assertEqual(ps.recombine(result, result.text, result.records), PLAN)
+        self.assertEqual(ps.check_layout(PLAN_PATH, result.text, result.records), [])
+        crlf = PLAN.replace("\n", "\r\n")
+        again = split_fixture(crlf, assign=[("**Deviations in T1, under a sub-heading.**", "P07.T1")])
+        self.assertIn(FILED.replace("\n", "\r\n"), again.records["P07.T1"])
+        self.assertEqual(ps.recombine(again, again.text, again.records), crlf)
+
+    def test_a_file_mark_in_risks_files_its_bullet_under_a_sub_heading_too(self) -> None:
+        marked = PLAN.replace("- **Deviations in T1, under a sub-heading.** It stays.\n",
+                              "- **Deviations in T1, under a sub-heading.** It stays.\n" + FILED)
+        item = by_first(split_fixture(marked))["**Deviations in T1, under a su"]
+        self.assertEqual((item.key, item.why), ("P07.T1", "a file mark"))
+        # The same --assign again is no override; another task's, or a keep, is refused.
+        self.assertEqual(split_fixture(marked, assign=[("**Deviations in T1, under", "P07.T1")]).marked, {})
+        for overrides in ({"assign": [("**Deviations in T1, under", "P07.T4.b")]},
+                          {"keep": ["**Deviations in T1, under"]}):
+            with self.assertRaises(ps.UsageError):
+                split_fixture(marked, **overrides)
+        nowhere = marked.replace(pt.FILE_MARK.format(task="P07.T1"), pt.FILE_MARK.format(task="P07.T9"))
+        item = by_first(split_fixture(nowhere))["**Deviations in T1, under a su"]
+        self.assertEqual(item.key, None)
+        self.assertIn("names no task under Tasks: P07.T9", item.why)
+
+    def test_the_marks_a_split_holds_are_the_overrides_verify_reads(self) -> None:
+        first = split_fixture(keep=["**Deviations in T4.a–b"],
+                              assign=[("**Deviations in T1, under a sub-heading.**", "P07.T1"),
+                                      ("**An open point.**", "P07.T2.b")])
+        assign, keep = ps.recorded_overrides(PLAN, first.text, first.records)
+        self.assertEqual(sorted(assign), [("**An open point.** It names no task.", "P07.T2.b"),
+                                          ("**Deviations in T1, under a sub-heading.** It stays.", "P07.T1")])
+        self.assertEqual(keep, ["**Deviations in T4.a–b, as built.** Both subtasks."])
+        again = split_fixture(assign=assign, keep=keep)
+        self.assertEqual((again.text, again.records), (first.text, first.records))
+        # An --assign to where the rule files it already adds no mark.
+        self.assertEqual(split_fixture(assign=[("**Deviations in T1, as built.**", "P07.T1")]).marked, {})
+        # Against the split itself, every bullet already filed or marked: no override.
+        self.assertEqual(ps.recorded_overrides(first.text, first.text, first.records),
+                         ([], ["**Deviations in T4.a–b, as built.** Both subtasks."]))
 
 
 class AgainSplit(unittest.TestCase):
@@ -396,13 +454,36 @@ class Command(unittest.TestCase):
         with mock.patch.object(pt, "repo_root", return_value=self.root):
             code, out = run_main([str(self.plan), "--write", "--keep", "**Deviations in T1, as built.**"])
             self.assertEqual(code, ps.EXIT_OK, out)
-            self.assertIn("0 bullets moved, 2 kept (1 keep marks added); check pass", out)
+            self.assertIn("0 bullets moved, 2 kept (1 marks added); check pass", out)
             self.assertEqual(self.plan.read_bytes().decode("utf-8"), plan + KEEP)
             code, out = run_main([str(self.plan), "--check"])
             self.assertEqual(code, ps.EXIT_OK, out)
             self.assertIn("0 bullets moved, 2 kept; check pass", out)
             self.assertIn("kept 31 (2 lines, a keep mark)", out)
         self.assertFalse(pt.records_dir(self.plan).exists())
+
+    @unittest.skipUnless(shutil.which("git"), "no git")
+    def test_verify_and_check_reproduce_a_split_made_with_overrides(self) -> None:
+        # Plan 06's case: bullets under its "Asked by rendering plan R06" assigned to their tasks.
+        plan = PLAN.replace("### Asked by plan R01", "### Asked by rendering plan R06")
+        self.plan.write_bytes(plan.encode("utf-8"))
+        git = ["git", "-C", str(self.root), "-c", "user.name=plan-split-test", "-c", "user.email=test@example.invalid",
+               "-c", "commit.gpgsign=false"]
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        subprocess.run(git + ["add", "-A"], check=True)
+        subprocess.run(git + ["commit", "-q", "-m", "inline", "--no-gpg-sign"], check=True)
+        with mock.patch.object(pt, "repo_root", return_value=self.root):
+            code, out = run_main([str(self.plan), "--write", "--assign", "**Deviations in T1, under a sub-heading.**=P07.T1",
+                                  "--assign", "**An open point.**=P07.T4.b", "--keep", "**Deviations in T4.a–b"])
+            self.assertEqual(code, ps.EXIT_OK, out)
+            subprocess.run(git + ["add", "-A"], check=True)
+            subprocess.run(git + ["commit", "-q", "-m", "split", "--no-gpg-sign"], check=True)
+            code, out = run_main([str(self.plan), "--verify", "HEAD~1"])  # no flags: the marks hold them
+            self.assertEqual(code, ps.EXIT_OK, out)
+            code, out = run_main([str(self.plan), "--check"])
+            self.assertEqual(code, ps.EXIT_OK, out)
+            self.assertIn("0 bullets moved", out)
+        self.assertIn(pt.FILE_MARK.format(task="P07.T1"), (pt.records_dir(self.plan) / "P07.T1.md").read_text())
 
     def test_the_readers_follow_the_split(self) -> None:
         def run(fn, *args) -> str:
