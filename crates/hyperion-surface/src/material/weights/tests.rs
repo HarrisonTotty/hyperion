@@ -641,10 +641,10 @@ fn agreements(
     let synth = Synthesiser::new(field, SEED);
     let finest = finest_band(field.header()).get();
     let mut rng = Lcg::new(0x7765_6967_6874_7300 ^ u64::from(finest));
-    let fixed = (FIXED_BAND, fixed_texels, fixed_side);
+    let fixed_band = (FIXED_BAND, fixed_texels, fixed_side);
     let levels = (1..=6_u8)
         .map(|k| (finest - k, per_level, 8))
-        .chain([fixed]);
+        .chain([fixed_band]);
     for (level, count, side) in levels {
         let (mut sum, mut mixed_sum, mut mixed) = (0.0, 0.0, 0_u32);
         let mut worst: f64 = 0.0;
@@ -696,8 +696,8 @@ fn agreements(
 
 /// Holds `world_`'s agreement to [`AGREEMENT`] at every level, and prints each as it is measured;
 /// a failure names the level's worst texels and their cells.
-fn assert_agreement(world_: SyntheticWorld, per_level: usize, fixed: (usize, u32)) {
-    agreements(world_, per_level, fixed, |a| {
+fn assert_agreement(world_: SyntheticWorld, per_level: usize, fixed_band: (usize, u32)) {
+    agreements(world_, per_level, fixed_band, |a| {
         println!(
             "{world_:?} level {}: mean {:.4}, worst {:.4} over {} texels; mean {:.4} over the {} \
              mixed",
@@ -717,26 +717,26 @@ fn assert_agreement(world_: SyntheticWorld, per_level: usize, fixed: (usize, u32
 /// The texels at [`FIXED_BAND`] in `ci`'s agreement on each world, and their points a side: 64,
 /// and 32 on the browser target, where those points were most of the Mars-like world's time and
 /// both of its texels are still mixed (`crate::test_sizes`).
-const FIXED_BAND_TEXELS: (usize, u32) = (2, per_target(64, 32));
+const FIXED_BAND_SAMPLING: (usize, u32) = (2, per_target(64, 32));
 
 #[test]
 fn material_weights_agree_with_the_classes_counted_on_the_earth_like_world() {
-    assert_agreement(SyntheticWorld::EarthLike, 24, FIXED_BAND_TEXELS);
+    assert_agreement(SyntheticWorld::EarthLike, 24, FIXED_BAND_SAMPLING);
 }
 
 #[test]
 fn material_weights_agree_with_the_classes_counted_on_the_mars_like_world() {
-    assert_agreement(SyntheticWorld::MarsLike, 24, FIXED_BAND_TEXELS);
+    assert_agreement(SyntheticWorld::MarsLike, 24, FIXED_BAND_SAMPLING);
 }
 
 #[test]
 fn material_weights_agree_with_the_classes_counted_on_the_moon_like_world() {
-    assert_agreement(SyntheticWorld::MoonLike, 24, FIXED_BAND_TEXELS);
+    assert_agreement(SyntheticWorld::MoonLike, 24, FIXED_BAND_SAMPLING);
 }
 
 #[test]
 fn material_weights_agree_with_the_classes_counted_on_the_ceres_like_world() {
-    assert_agreement(SyntheticWorld::CeresLike, 24, FIXED_BAND_TEXELS);
+    assert_agreement(SyntheticWorld::CeresLike, 24, FIXED_BAND_SAMPLING);
 }
 
 /// The plan's measure: a thousand texels a level, sixty-four points a texel at n − 1 to n − 6 and
