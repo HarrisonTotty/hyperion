@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { detailOf, recordInput } from "../../../test/atmosphereRecords";
 import { toyLoader } from "../../../test/opticsFakes";
+import { leastZerothModes } from "../../../test/thickTables";
 import { earthDetail } from "../../../test/planetaryFixture";
 import { absorberCurvesBySun } from "../absorbers";
 import type { AssembledMedium } from "../assemble";
@@ -17,7 +18,7 @@ import { OpticsJobs } from "../opticsJobs";
 import type { KeptBakeLights, OpticsRequest } from "../opticsMessages";
 import { molecularMixture } from "../rayleigh";
 import { EARTH_CASE, EARTH_REFERENCE_RADIUS_M, referenceCaseBakeLights } from "../reference/cases";
-import { bakeMultipleScattering, prepareBake, THICK_BAKE_MODES, type ThickBakeBody } from "./bake";
+import { bakeMultipleScattering, prepareBake, type ThickBakeBody } from "./bake";
 import { keptColumnOf, sphereBakeBody } from "./keptBake";
 import type { SpectralColumn } from "./spectralColumn";
 
@@ -196,7 +197,7 @@ describe("the optics worker's thick bake", () => {
   });
 
   it(
-    "answers a kept TEST EARTH's bake from its request's own absorbers and spectra, finite, J⁰ at least 0",
+    "answers a kept TEST EARTH's bake from its request's own absorbers and spectra, finite, J⁰ at least 0 above the horizontal and at least −10⁻⁶ of its largest below it",
     // The job takes no grid of its own: the full grid, 1.3 s at load 2.4 (2026-10-27).
     { timeout: 60_000 },
     async () => {
@@ -206,17 +207,18 @@ describe("the optics worker's thick bake", () => {
       if (reply.kind !== "thick-baked") {
         throw new Error(`the kept bake was answered ${reply.kind}`);
       }
-      const values = reply.tables[0]?.slots[0]?.values;
-      expect([reply.tables.length, reply.tables[0]?.slots.length]).toEqual([1, 1]);
+      const table = reply.tables[0];
+      const values = table?.slots[0]?.values;
+      expect([reply.tables.length, table?.slots.length]).toEqual([1, 1]);
       expect(values?.every(Number.isFinite)).toBe(true);
-      let least = Number.POSITIVE_INFINITY;
-      for (const [i, value] of (values ?? []).entries()) {
-        // m = 0 of `[altitude][μ₀][μ_v][m][RGB]`, m = 0, 1 and 2.
-        if (Math.floor(i / 3) % THICK_BAKE_MODES === 0) {
-          least = Math.min(least, value);
-        }
-      }
-      expect(least).toBeGreaterThanOrEqual(0);
+      // J⁰ at least 0 above the horizontal, and below it at least −10⁻⁶ of the largest
+      // (`leastZerothModes`, R08.T14.d.2).
+      const { above, belowShare } = leastZerothModes(
+        values ?? [],
+        table?.sunCosines ?? new Float64Array(0),
+      );
+      expect(above).toBeGreaterThanOrEqual(0);
+      expect(belowShare).toBeGreaterThanOrEqual(-1e-6);
     },
   );
 

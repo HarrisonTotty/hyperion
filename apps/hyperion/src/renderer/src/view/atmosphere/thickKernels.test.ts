@@ -250,8 +250,8 @@ describe("AtmosphereTables' thick table (R08.T14.c)", () => {
     const before = tables.rowBytes;
     expect(tables.thickTable).toBeNull();
     tables.setThickTables(patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), 2));
-    expect(tables.thickBytes).toBe(2 * 270_592);
-    expect(tables.rowBytes).toBe(before + 2 * 270_592);
+    expect(tables.thickBytes).toBe(2 * 388_864);
+    expect(tables.rowBytes).toBe(before + 2 * 388_864);
     expect(tables.thickTable).not.toBeNull();
     expect(tables.thickPacked?.slots).toBe(2);
     const written = engine.textureWritten.findLast((w) => w.texture === "atmosphere thick table");
@@ -311,7 +311,7 @@ describe("AtmosphereTables' thick table (R08.T14.c)", () => {
     engine.restore();
     expect(tables.thickTable).not.toBeNull();
     expect(tables.thickTable).not.toBe(held);
-    expect(tables.thickBytes).toBe(270_592);
+    expect(tables.thickBytes).toBe(388_864);
     tables.dispose();
   });
 });
@@ -326,10 +326,10 @@ describe("AtmosphereTables' polarisation correction (R08.T14.f)", () => {
     tables.setPolarisationCorrection(patternedCorrection(bands, tables.medium, 2));
     expect(tables.thickPacked?.kind).toBe("correction");
     expect(tables.holdsPolarisationCorrection).toBe(true);
-    expect(tables.rowBytes).toBe(before + 2 * 270_592);
+    expect(tables.rowBytes).toBe(before + 2 * 388_864);
     tables.setThickTables(patternedThickBake(bands, kernelMedium(tables.medium), 2));
     expect(tables.thickPacked?.kind).toBe("thick");
-    expect(tables.thickBytes).toBe(2 * 270_592);
+    expect(tables.thickBytes).toBe(2 * 388_864);
     // The bake taken away leaves the correction alone; the correction taken away, nothing.
     tables.setThickTables(null);
     expect(tables.thickPacked?.kind).toBe("correction");

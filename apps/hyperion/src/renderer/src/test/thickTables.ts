@@ -16,6 +16,7 @@ import {
   THICK_SOURCE_MODES,
   THICK_SUN_COSINES,
   THICK_TRAVEL_COSINES,
+  thickSunCosineAt,
 } from "../view/atmosphere/thick/read";
 
 /** J⁰ and G at a point of the pattern, per channel, sr⁻¹ per unit of scattering. */
@@ -44,7 +45,10 @@ export function thickPatternAt(
   return { level: [base(0), base(1), base(2)], slope: [slope(0), slope(1), slope(2)] };
 }
 
-/** The pattern's grid: altitudes evenly from the ground to the medium's top, and the bake's cosines. */
+/**
+ * The pattern's grid: altitudes evenly from the ground to the medium's top, and the bake's cosines,
+ * its sun cosines below the horizontal among them (R08.T14.d.2).
+ */
 function patternGrid(medium: AtmosphereMedium): {
   readonly altitudesM: Float64Array;
   readonly sunCosines: Float64Array;
@@ -56,10 +60,7 @@ function patternGrid(medium: AtmosphereMedium): {
       { length: THICK_ALTITUDES },
       (_, a) => (top * a) / (THICK_ALTITUDES - 1),
     ),
-    sunCosines: Float64Array.from(
-      { length: THICK_SUN_COSINES },
-      (_, s) => (s + 0.5) / THICK_SUN_COSINES,
-    ),
+    sunCosines: Float64Array.from({ length: THICK_SUN_COSINES }, (_, s) => thickSunCosineAt(s)),
     travelCosines: Float64Array.from(
       { length: THICK_TRAVEL_COSINES },
       (_, v) => (v + 0.5) / (THICK_TRAVEL_COSINES / 2) - 1,
@@ -70,7 +71,9 @@ function patternGrid(medium: AtmosphereMedium): {
 /**
  * A bake whose packed J⁰ and G are {@link thickPatternAt}'s and whose m = 2 is 0, one table a band
  * of `bands` (a tables plan's, in its order), with `slots` light slots, on the bake's grid:
- * altitudes evenly from the ground to `medium`'s top, μ₀ = (s + ½) ÷ 32 and μ_v = (v + ½) ÷ 8 − 1.
+ * altitudes evenly from the ground to `medium`'s top, the table's 46 μ₀ (`thick/read.ts`'s
+ * `thickSunCosineAt`, the rows below the horizontal with the same pattern as those above) and
+ * μ_v = (v + ½) ÷ 8 − 1.
  * Its J is in sr⁻¹ per unit of the kernels' scattering, as the bake's (`bake.ts`'s `MsSourceSlot`),
  * so that the packed table is the pattern over any medium.
  */
@@ -217,4 +220,41 @@ export function patternedCorrection(
       slots: slotTables,
     };
   });
+}
+
+/** {@link leastZerothModes}'s least J⁰: above the horizontal, sr⁻¹, and below it, of the largest. */
+export interface ZerothModesLeast {
+  readonly above: number;
+  readonly belowShare: number;
+}
+
+/**
+ * A bake's least J⁰ (its m = 0, every channel; `bake.ts`'s `[altitude][μ₀][μ_v][m][RGB]`) over the
+ * rows above the horizontal, and over those below it as a share of its largest J⁰ (R08.T14.d.2).
+ * Each bin's J⁰ is at least 0, but a channel's is the bins' converted by signed matching functions
+ * (`binConversion.ts`), so a near-dark twilight row's steep spectrum can take it a hair below 0:
+ * −1.8 × 10⁻⁹ sr⁻¹ in TEST EARTH's blue at μ₀ −0.164, 3 × 10⁻⁸ of its largest, which the read holds
+ * at 0.
+ */
+export function leastZerothModes(
+  values: ArrayLike<number>,
+  sunCosines: Float64Array,
+): ZerothModesLeast {
+  const perSun = THICK_TRAVEL_COSINES * THICK_SOURCE_MODES * 3;
+  let above = Number.POSITIVE_INFINITY;
+  let below = Number.POSITIVE_INFINITY;
+  let largest = 0;
+  for (let i = 0; i < values.length; i += 1) {
+    if (Math.floor(i / 3) % THICK_SOURCE_MODES !== 0) {
+      continue;
+    }
+    const value = values[i] ?? Number.NaN;
+    largest = Math.max(largest, value);
+    if ((sunCosines[Math.floor(i / perSun) % sunCosines.length] ?? Number.NaN) > 0) {
+      above = Math.min(above, value);
+    } else {
+      below = Math.min(below, value);
+    }
+  }
+  return { above, belowShare: below / largest };
 }

@@ -2978,21 +2978,20 @@ export interface PolarisationSlot {
  * sense does not matter here. Stored per channel, from a solve at the channel's own wavelength, and
  * multiplied by the star's colour as every table is.
  *
- * **The beam.** μ₀ ∈ (0, 1] on `bake.ts`'s `THICK_BAKE_GRID`, where the pseudo-spherical beam is
- * defined at every height: no entry is set to 0 for want of a beam. A grid may also hold μ₀ in
- * [−1, 0) (R08.T14.d.2), where the same beam as the scalar bake's crosses the column under each lit
- * interface twice and is 0 in the planet's shadow (`sphericalBeam.ts`), so that ΔJ_pol is formed
- * there too, in place of T14.e's 0 where the beam is undefined; the table's rows below the
- * horizontal wait on main's ruling on the prototype's gates (plan R08's record of T14.d.2).
+ * **The beam.** `bake.ts`'s `THICK_BAKE_GRID`, the scalar bake's rows: above the horizontal the
+ * pseudo-spherical beam is defined at every height, and below it (R08.T14.d.2, its 14 rows to
+ * −7/32) the same beam as the scalar bake's crosses the column under each lit interface twice and is
+ * 0 in the planet's shadow (`sphericalBeam.ts`), so that ΔJ_pol is formed there too, in place of
+ * T14.e's 0 where the beam is undefined, and is 0 only in a column wholly in the shadow.
  *
- * **Size.** 33 × 32 × 16 × 3 × 3 values a band and slot, 608,256 B as `f32` (R08.T14.f's packing,
- * as `rgba16float` RGB, is 304,128 B before any padding to four channels).
+ * **Size.** 33 × 46 × 16 × 3 × 3 values a band and slot, 874,368 B as `f32`, packed by `read.ts`
+ * into the thick table's 388,608 B and its info row.
  */
 export interface PolarisationTable {
   readonly band: ThickBakeBand;
   /** h\* above the ground, m, ascending: the thick bake's altitudes. */
   readonly altitudesM: Float64Array;
-  /** μ₀, ascending: the grid's, in (0, 1] on `bake.ts`'s `THICK_BAKE_GRID`. */
+  /** μ₀, ascending: the grid's, 46 on `bake.ts`'s `THICK_BAKE_GRID`, 14 below the horizontal. */
   readonly sunCosines: Float64Array;
   /** The travel cosines, positive upward, ascending: the downward half, then the upward. */
   readonly travelCosines: Float64Array;

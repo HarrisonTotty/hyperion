@@ -58,7 +58,10 @@ export function keptColumnOf(kept: KeptMedium): SpectralColumn {
 export interface KeptBakeOptions {
   /** The bands to bake, indices of `bake.ts`'s `thickBakeBands(body)`; every band by default. */
   readonly bands?: ReadonlyArray<number>;
-  /** The bake's grid; `bake.ts`'s `THICK_BAKE_GRID` by default. */
+  /**
+   * The bake's grid; `bake.ts`'s `THICK_BAKE_GRID` by default, with its 14 rows below the horizontal
+   * (R08.T14.d.2), for the bake and the correction alike.
+   */
   readonly grid?: ThickBakeGrid;
 }
 

@@ -19,19 +19,17 @@
  * absorber's amount divided by s_b, so that its vertical optical depth is the reference's over s_b.
  *
  * **The beam** is pseudo-spherical (`sphericalBeam.ts`, Dahlback and Stamnes 1991) on the band's
- * sphere, at each of {@link THICK_BAKE_GRID}'s μ₀ in (0, 1]: a ray with μ₀ > 0 climbs from its
- * point and never meets the ground, so the beam is defined at every height. A grid may also hold
- * μ₀ in [−1, 0), a sun below the point's horizontal (R08.T14.d.2): the beam then crosses the column
- * under each lit interface twice, through its tangent point, and is 0 in the planet's shadow, where
- * the solve's diffuse field from the lit air above remains, and a column whose top lies in the
- * shadow (μ₀ below −√(1 − (R ÷ (R + h_top))²)) holds no light at all. {@link THICK_BAKE_GRID} holds
- * none of those rows yet: a source at or below the horizontal is read by the analytic term
- * (R08.T14.c), and the table's rows below it wait on main's ruling on the prototype's gates (plan
- * R08's record of T14.d.2). Past about 90° the pseudo-spherical solve is not demonstrated
- * (libRadtran's guide, §2.2.1; zenith-sky models agree within 6.6% only up to 94°, F. Hendrick et
- * al., ACP 6 (2006) 93), and R. P. Loughman et al., JGR 109 (2004) D06303, find plane-parallel
- * diffuse fields up to 8% high at 60 km tangent height in Earth's limb, which Design note 9 takes as
- * its warning for Titan.
+ * sphere, at each of {@link THICK_BAKE_GRID}'s μ₀: a ray with μ₀ > 0 climbs from its point and
+ * never meets the ground, so the beam is defined at every height. Below 0, a sun below the point's
+ * horizontal (R08.T14.d.2), the beam crosses the column under each lit interface twice, through its
+ * tangent point, and is 0 in the planet's shadow, where the solve's diffuse field from the lit air
+ * above remains, and a column whose top lies in the shadow (μ₀ below −√(1 − (R ÷ (R + h_top))²))
+ * holds no light at all. {@link THICK_BAKE_GRID} holds 14 rows there, to the cell edge −7/32, below
+ * which the kernels read the analytic term (`read.ts`). Past about 90° the pseudo-spherical solve
+ * is not demonstrated (libRadtran's guide, §2.2.1; zenith-sky models agree within 6.6% only up to
+ * 94°, F. Hendrick et al., ACP 6 (2006) 93), and R. P. Loughman et al., JGR 109 (2004) D06303,
+ * find plane-parallel diffuse fields up to 8% high at 60 km tangent height in Earth's limb, which
+ * Design note 9 takes as its warning for Titan.
  *
  * **Delta-M** (W. J. Wiscombe, J. Atmos. Sci. 34 (1977) 1408–1422) on each layer's mixed moments,
  * 16 streams in all ({@link THICK_BAKE_STREAMS}, `aerosol.ts`'s `deltaMTruncation(…, 8)`): f = χ₁₆,
@@ -183,17 +181,30 @@ export interface ThickBakeGrid {
 }
 
 /**
- * Design note 9's grid: 64 layers, 33 altitudes (every second interface from the ground), 32 μ₀
- * and 16 μ_v, each at the centre of its cell of an even division, μ₀ = (s + ½) ÷ 32 and
- * μ_v = ±(v + ½) ÷ 8, so that a texture's linear filter with clamped edges reads the table at its
- * cells' centres (the read is R08.T14.c's). Its μ₀ lie above the horizontal: the rows below it
- * (R08.T14.d.2) wait on main's ruling on the prototype's gates (plan R08's record of T14.d.2).
+ * Design note 9's grid: 64 layers, 33 altitudes (every second interface from the ground), 46 μ₀
+ * and 16 μ_v, each at the centre of its cell: μ_v = ±(v + ½) ÷ 8, and μ₀ = −(13.5 − s) ÷ 64 for
+ * s = 0 … 13, 14 rows of 1/64 below the horizontal to the cell edge −7/32 (R08.T14.d.2), then
+ * (s − 13.5) ÷ 32 for s = 14 … 45, the 32 daylit rows of R08.T14.b. `read.ts` reads the table
+ * linearly between the cells' centres above μ₀ = 1/64 and J⁰ geometrically below it, and the
+ * analytic term below the rows (its remarks). The deck takes the daylit rows alone
+ * ({@link THICK_BAKE_DAY_GRID}).
  */
 export const THICK_BAKE_GRID: ThickBakeGrid = {
   layers: 64,
   altitudeStride: 2,
-  sunCosines: Float64Array.from({ length: 32 }, (_, s) => (s + 0.5) / 32),
+  sunCosines: Float64Array.from({ length: 46 }, (_, s) =>
+    s < 14 ? -(13.5 - s) / 64 : (s - 13.5) / 32,
+  ),
   upwardCosines: Float64Array.from({ length: 8 }, (_, v) => (v + 0.5) / 8),
+};
+
+/**
+ * {@link THICK_BAKE_GRID} with its 32 rows above the horizontal alone, μ₀ = (s + ½) ÷ 32: the
+ * deck's grid (`deck.ts`). Whether the deck takes the rows below the horizontal is R08.T15.a.2's.
+ */
+export const THICK_BAKE_DAY_GRID: ThickBakeGrid = {
+  ...THICK_BAKE_GRID,
+  sunCosines: THICK_BAKE_GRID.sunCosines.filter((mu) => mu > 0),
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -300,16 +311,17 @@ export interface MsSourceSlot {
  *
  * @remarks
  * `f64` in the solve, stored as `Float32Array`; packing for the GPU is R08.T14.c's and T14.f's
- * (`read.ts`). A band of the default grid is 33 × 32 × 16 × 3 × 3 values a slot, 608,256 B as
- * `f32`, and packs into 270,336 B of texels and a 256 B info row (Design note 9's 0.26 MB, at 32
- * altitudes, for two modes as `rgba16float`; `read.ts` holds the third in the texel's spare word).
- * Each light slot holds its own table, since μ₀ and the curves of growth are a sun's.
+ * (`read.ts`). A band of the default grid is 33 × 46 × 16 × 3 × 3 values a slot, 874,368 B as
+ * `f32`, and packs into 388,608 B of texels and a 256 B info row (Design note 9's 0.26 MB was 32
+ * altitudes and 32 μ₀, two modes as `rgba16float`; R08.T14.d.2 added the 14 rows below the
+ * horizontal, and `read.ts` holds the third mode in the texel's spare word). Each light slot holds
+ * its own table, since μ₀ and the curves of growth are a sun's.
  */
 export interface MsSourceTable {
   readonly band: ThickBakeBand;
   /** The table's altitudes, h\* above the ground, m, ascending: interfaces of the solve's layers. */
   readonly altitudesM: Float64Array;
-  /** μ₀, ascending: the grid's, in (0, 1] on {@link THICK_BAKE_GRID}. */
+  /** μ₀, ascending: the grid's, 14 below the horizontal and 32 above on {@link THICK_BAKE_GRID}. */
   readonly sunCosines: Float64Array;
   /**
    * The cosines of the light's direction of travel, positive upward, ascending: the downward

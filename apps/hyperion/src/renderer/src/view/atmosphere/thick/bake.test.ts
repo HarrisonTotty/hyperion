@@ -83,11 +83,12 @@ const titan = once(async (): Promise<Baked> => Promise.resolve(bakedOf(titanClas
 
 /**
  * The thick fixtures: measured 3.9 × 10⁻² and 1.2 × 10⁻² for Venus's CO₂, 1.7 × 10⁻³ for Titan's
- * methane; IMS 1.2% and 5.0% (2026-10-26).
+ * methane; IMS 1.2% and 5.0% (2026-10-26), and Titan's 10.45% once the grid took its rows below the
+ * horizontal (R08.T14.d.2).
  */
 const FIXTURES: ReadonlyArray<readonly [string, FixtureCase]> = [
   ["Venus-class column", { baked: venus, fitBounds: [0.04, 0.013], imsBound: 0.02 }],
-  ["Titan-class column", { baked: titan, fitBounds: [2e-3, 2e-3], imsBound: 0.06 }],
+  ["Titan-class column", { baked: titan, fitBounds: [2e-3, 2e-3], imsBound: 0.11 }],
 ];
 
 /** A table's one slot, or a test failure. */
@@ -576,6 +577,21 @@ function uranusBody(): ThickBakeBody {
 }
 
 describe("the bake below the horizontal (R08.T14.d.2)", () => {
+  it("holds Design note 9's grid: 14 rows of 1/64 below the horizontal to the cell edge −7/32, then the 32 daylit rows of 1/32", () => {
+    const suns = THICK_BAKE_GRID.sunCosines;
+    expect(suns.length).toBe(46);
+    for (const [s, mu] of suns.entries()) {
+      expect(mu).toBe(s < 14 ? -(13.5 - s) / 64 : (s - 13.5) / 32);
+    }
+    expect([(suns[0] ?? Number.NaN) - 0.5 / 64, suns[13], suns[14], suns.at(-1)]).toEqual([
+      -7 / 32,
+      -1 / 128,
+      1 / 64,
+      63 / 64,
+    ]);
+    expect(suns.every((mu) => mu !== 0)).toBe(true);
+  });
+
   /** Titan-class Rayleigh air's bake at a μ₀ past its top's shadow, then {@link TWILIGHT_SUNS}. */
   const twilight = once(() => {
     const column = rayleighColumn();

@@ -57,7 +57,7 @@
  *
  * **The texture** is `rgba32uint`, a 2D array of one layer a band and light slot, layer
  * b × slots + k (`multiScattering`'s order): 16 texels across, one a travel cosine, and
- * 33 × 32 + 1 rows, row a × 32 + s for altitude a and sun cosine s, then the info row. A texel holds
+ * 33 × 46 + 1 rows, row a × 46 + s for altitude a and sun cosine s, then the info row. A texel holds
  * six halves in its first three words, two to a word: J⁰'s red and green, J⁰'s blue and G's red,
  * G's green and blue (`pack2x16float`'s order, the first in the low half); and G₂ in its fourth, three
  * 9-bit two's-complement mantissas (red in bits 0–8, green 9–17, blue 18–26) and their shared
@@ -69,30 +69,47 @@
  * so a weaker channel takes the strongest channel's |J²| ÷ 255.5 against its own J⁰: at most 0.15% of
  * a channel's J⁰ on `earth` and 0.51% on `mars`, with the correction summed in or not
  * (`bakeCurveRoundingOfJ0` and `routedCurveRoundingOfJ0`, against `f32`), a tenth of Design note
- * 10's 5% or less, and the texel stays one load. A band and light is 270,336 B, the bake's figure
- * for `rgba16float` (33 × 32 × 16 texels × 16 B), and the info row 256 B more, so that the lever
- * costs no byte over R08.T14.c's table. Layer 0's info row holds the altitudes as `f32` bits,
- * words 0–32, the light slots a band, word 33, and the kind, word 34: 0 for `thick`, 1 for
- * `correction`.
+ * 10's 5% or less, and the texel stays one load. A band and light is 388,608 B
+ * (33 × 46 × 16 texels × 16 B), the bake's figure for `rgba16float` at the same rows, so that the
+ * lever costs no byte, and the info row 256 B more: 388,864 B a layer, 270,592 B at R08.T14.c's 32
+ * rows. Layer 0's info row holds the altitudes as `f32` bits, words 0–32, the light slots a band,
+ * word 33, and the kind, word 34: 0 for `thick`, 1 for `correction`.
+ *
+ * **The sun cosines** are the bake's 46 rows (`bake.ts`'s `THICK_BAKE_GRID`, R08.T14.d.2): 14 of
+ * 1/64 below the horizontal, μ₀ = −(13.5 − s) ÷ 64 for s = 0 … 13, to the cell edge −7/32, and the
+ * 32 daylit rows of 1/32, (s − 13.5) ÷ 32 for s = 14 … 45. Their cells' centres map to texel rows
+ * piecewise ({@link thickSunPlace}): x = 14 + 32 μ₀ − ½ from μ₀ = 1/64 up, x = 13 + 64 (μ₀ + 1/128)
+ * held at 0 below −1/128, and the cell across the horizontal, [−1/128, 1/64], 3/128 wide, between.
  *
  * **The read** is linear in each of h, μ₀ and μ_v between the cells' centres about it, held at the
- * table's edges: μ₀ = (s + ½) ÷ 32 and μ_v = (v + ½) ÷ 8 − 1 lie at texel centres, and h between
- * the rows about it, found by bisection over the altitudes. Its band's s is read as the multiple
- * scattering's bands are (`oblate.wgsl`'s `bandTableAt`): linear in ln s between the bands about it,
- * the nearer band beyond them.
+ * table's edges: the sun cosines and μ_v = (v + ½) ÷ 8 − 1 lie at texel centres, and h between the
+ * rows about it, found by bisection over the altitudes. Below μ₀ = 1/64 (s₀ < 14: the cells below
+ * the horizontal and the one across it) J⁰ is geometric in μ₀ instead, J⁰_s₀^(1 − f) J⁰_s₀+1^f at
+ * each altitude and travel cosine about the point, with G and G₂ linear as their ratios to J⁰, and
+ * then linear in h and μ_v ({@link addThickLayer}). That holds in each channel where both rows hold
+ * J⁰ > 0; where either does not (a row in the planet's shadow, or a correction's ΔJ⁰ of either
+ * sign), the step is linear. Near the shadow's edge J falls 2–50 times a row of 1/32 on Earth
+ * (plan R08's record of T14.d.2, the science check's item 8), which a linear filter reads high
+ * mid-cell by (1 + r) ÷ (2√r); the geometric step is exact for J⁰ = e^(a + c μ₀), and reads the
+ * bake's limit at 1/128 rows within −0.2% to −5.4% at the twilight views measured (the record of
+ * T14.d.2's rows). Its band's s is read as the multiple scattering's bands are (`oblate.wgsl`'s
+ * `bandTableAt`): linear in ln s between the bands about it, the nearer band beyond them.
  *
- * **Below the horizon.** μ₀ ≤ 0 lies outside the table (T14.b's record, the beam's domain; the
- * correction's too, R08.T14.e), so a source there is read by the analytic term alone, and the two
- * are blended over the table's first μ₀ cell, (0, 1/32]: the table's share is clamp(32 μ₀, 0, 1)
- * (`decision-r08-t13c2-classes.md` §6). On a `thick` table the analytic term takes the rest,
- * 1 − clamp(32 μ₀, 0, 1), and the forward lobes' higher orders (R08.T7, `forwardLobe.ts`) the same
- * share (main, 2026-10-27): the bake's J holds the aureole scattered once more by the smooth part,
- * which the orders' tail also adds, so on the table's side they would count it twice. The orders'
- * in-lobe part, the aureole scattered again within the lobe (T14.b's IMS), is not in J, so the
- * table's side leaves it out: R08.T14.d judges it at Mars's aureole (plan R08's Risks,
+ * **Below the table.** μ₀ under the rows' edge, −7/32, lies outside the table, so a source there is
+ * read by the analytic term alone, and the two are blended over the cell of 1/32 above the edge,
+ * [−7/32, −6/32]: the table's share is clamp(32 μ₀ + 7, 0, 1) (`decision-r08-t13c2-classes.md`
+ * §6, amended by R08.T14.d.2). The edge lies below the shadow limit, past which the bake holds no
+ * light, of each body T14.d.4 may route (`earth`'s −0.1751, `saturn-oblate`'s −0.1427 to −0.1813)
+ * and above Mars's (−0.3196, T14.d.3's). On a `thick` table the analytic term takes the rest,
+ * 1 − clamp(32 μ₀ + 7, 0, 1), and the forward lobes' higher orders (R08.T7, `forwardLobe.ts`) the
+ * same share (main, 2026-10-27): the bake's J holds the aureole scattered once more by the smooth
+ * part, which the orders' tail also adds, so on the table's side they would count it twice. The
+ * orders' in-lobe part, the aureole scattered again within the lobe (T14.b's IMS), is not in J, so
+ * the table's side leaves it out: R08.T14.d judges it at Mars's aureole (plan R08's Risks,
  * "Preconditions of R08.T14.d's routing"). On a `correction` table the analytic term and the lobes
- * stay whole at every μ₀, and the correction fades in across the same cell, where its beam is
- * defined, so that a sunset's sky is continuous ({@link thickAnalyticWeight}).
+ * stay whole at every μ₀, and the correction fades in across the same cell, its rows below the
+ * horizontal formed over the lit air as the bake's are, so that a sunset's sky is continuous
+ * ({@link thickAnalyticWeight}).
  */
 
 import type { Rgb } from "../../photometry/toneCurve";
@@ -104,8 +121,17 @@ import { log, pow } from "../../../lib/pinnedMath";
 
 /** The table's altitudes: the bake's 33 (`bake.ts`'s `THICK_BAKE_GRID`, 64 layers at stride 2). */
 export const THICK_ALTITUDES = 33;
-/** The table's sun cosines: 32, at (s + ½) ÷ 32. */
-export const THICK_SUN_COSINES = 32;
+/**
+ * The table's sun cosines below the horizontal: 14, at −(13.5 − s) ÷ 64 for s = 0 … 13, to the cell
+ * edge −7/32 (R08.T14.d.2).
+ */
+export const THICK_SUN_COSINES_BELOW = 14;
+/** The rows a unit of μ₀ below the horizontal: 64. */
+export const THICK_SUN_ROWS_A_UNIT_BELOW = 64;
+/** The rows a unit of μ₀ above the horizontal: 32, (s − 13.5) ÷ 32 for s = 14 … 45 (R08.T14.b's). */
+export const THICK_SUN_ROWS_A_UNIT_ABOVE = 32;
+/** The table's sun cosines: 46, the 14 below the horizontal and the 32 above it. */
+export const THICK_SUN_COSINES = THICK_SUN_COSINES_BELOW + THICK_SUN_ROWS_A_UNIT_ABOVE;
 /** The table's travel cosines: 16, at (v + ½) ÷ 8 − 1, the downward half first. */
 export const THICK_TRAVEL_COSINES = 16;
 /** The bake's azimuthal modes the table takes: m = 0, 1 and 2 (`bake.ts`'s `THICK_BAKE_MODES`). */
@@ -147,20 +173,20 @@ const CURVE_MANTISSA_MOST = 255;
 const CURVE_EXPONENT_MOST = 31;
 
 /**
- * A band and light slot's table as `rgba16float` would hold it, B: 270,336 (the bake's record; plan
- * R08, Design note 11's J_ms row).
+ * A band and light slot's table as `rgba16float` would hold it, B: 388,608 (270,336 at R08.T14.c's 32
+ * rows, the bake's record; plan R08, Design note 11's J_ms row).
  */
 export const THICK_TABLE_BYTES_A_SLOT =
   THICK_ALTITUDES * THICK_SUN_COSINES * THICK_TRAVEL_COSINES * TEXEL_BYTES;
 
-/** A layer's bytes as allocated, B: the table's and the info row's, 270,592. */
+/** A layer's bytes as allocated, B: the table's and the info row's, 388,864. */
 export const THICK_LAYER_BYTES = THICK_ROWS * THICK_TRAVEL_COSINES * TEXEL_BYTES;
 
 /**
  * What a table holds (the module's remarks), sr⁻¹ per unit of the kernels' scattering and of the
  * star's irradiance: `thick`, a bake's J with the correction summed into it, read in place of Ψ_ms
- * from the first sun cosine cell up; or `correction`, the correction alone, read beside Ψ_ms on a
- * thin world.
+ * from the table's lowest sun cosine cell up; or `correction`, the correction alone, read beside
+ * Ψ_ms on a thin world.
  */
 export type ThickTableKind = "thick" | "correction";
 
@@ -228,12 +254,46 @@ function scatteringAt(
   return [red, green, blue];
 }
 
-/** A cosine grid's check: `n` values, each at (i + ½) ÷ `per` + `offset`, to 10⁻¹². */
+/** A cosine grid's check: `n` values, each `cosineAt(i)`, to 10⁻¹². */
+function onCosines(values: Float64Array, n: number, cosineAt: (i: number) => number): boolean {
+  return values.length === n && values.every((value, i) => Math.abs(value - cosineAt(i)) <= 1e-12);
+}
+
+/** A cosine grid's check of an even division: `n` values, each at (i + ½) ÷ `per` + `offset`. */
 function onGrid(values: Float64Array, n: number, per: number, offset: number): boolean {
-  return (
-    values.length === n &&
-    values.every((value, i) => Math.abs(value - ((i + 0.5) / per + offset)) <= 1e-12)
-  );
+  return onCosines(values, n, (i) => (i + 0.5) / per + offset);
+}
+
+/**
+ * Sun cosine row `s`'s μ₀ (the module's remarks; `bake.ts`'s `THICK_BAKE_GRID`, held equal by
+ * `read.test.ts`): −(13.5 − s) ÷ 64 below the horizontal, s < 14, and (s − 13.5) ÷ 32 above it.
+ */
+export function thickSunCosineAt(s: number): number {
+  return s < THICK_SUN_COSINES_BELOW
+    ? -(THICK_SUN_COSINES_BELOW - 0.5 - s) / THICK_SUN_ROWS_A_UNIT_BELOW
+    : (s - THICK_SUN_COSINES_BELOW + 0.5) / THICK_SUN_ROWS_A_UNIT_ABOVE;
+}
+
+/**
+ * Where sun cosine `muSun` lies among the table's rows, as a row and its share to the next, x, held
+ * in [0, 45] (`thickRead.wgsl`'s `thickSunPlace`; the module's remarks): x = 14 + 32 μ₀ − ½ from
+ * the first row above the horizontal, μ₀ = 1/64, up; 13 + (μ₀ + 1/128) ÷ (3/128) across the
+ * cell from the last row below it, −1/128; and 13 + 64 (μ₀ + 1/128) below that.
+ */
+export function thickSunPlace(muSun: number): number {
+  const firstAbove = 0.5 / THICK_SUN_ROWS_A_UNIT_ABOVE;
+  const lastBelow = -0.5 / THICK_SUN_ROWS_A_UNIT_BELOW;
+  const below = THICK_SUN_COSINES_BELOW - 1;
+  if (muSun >= firstAbove) {
+    return Math.min(
+      THICK_SUN_COSINES_BELOW + muSun * THICK_SUN_ROWS_A_UNIT_ABOVE - 0.5,
+      THICK_SUN_COSINES - 1,
+    );
+  }
+  if (muSun >= lastBelow) {
+    return below + (muSun - lastBelow) / (firstAbove - lastBelow);
+  }
+  return Math.max(below + (muSun - lastBelow) * THICK_SUN_ROWS_A_UNIT_BELOW, 0);
 }
 
 /** Each cosine's sine, √(1 − μ²). */
@@ -332,7 +392,7 @@ function checkBands(
   for (const [b, band] of bands.entries()) {
     if (
       band.modes !== modes ||
-      !onGrid(band.sunCosines, THICK_SUN_COSINES, THICK_SUN_COSINES, 0) ||
+      !onCosines(band.sunCosines, THICK_SUN_COSINES, thickSunCosineAt) ||
       !onGrid(band.travelCosines, THICK_TRAVEL_COSINES, THICK_TRAVEL_COSINES / 2, -1)
     ) {
       throw new RangeError(`${what} band ${b}'s table is off the thick bake's grid`);
@@ -362,8 +422,9 @@ function checkBands(
  * @param correction - The polarisation correction, summed into the bake's J where both are given,
  *   or alone; `null` for none, a `thick` table of the bake alone.
  * @throws RangeError for no bake and no correction, no band, a table off the bake's grid
- *   ({@link THICK_ALTITUDES} altitudes ascending from 0, {@link THICK_SUN_COSINES} μ₀ and
- *   {@link THICK_TRAVEL_COSINES} μ_v at their cells' centres, {@link THICK_SOURCE_MODES} modes a
+ *   ({@link THICK_ALTITUDES} altitudes ascending from 0, {@link THICK_SUN_COSINES} μ₀ at
+ *   {@link thickSunCosineAt}'s rows and {@link THICK_TRAVEL_COSINES} μ_v at their cells' centres,
+ *   {@link THICK_SOURCE_MODES} modes a
  *   bake and {@link THICK_CORRECTION_MODES} a correction), bands with different altitudes or light
  *   slots, a correction of other bands, s, altitudes or light slots than the bake's, a correction
  *   whose medium has another count of terms than the kernel medium (the terms' order is the
@@ -523,9 +584,20 @@ export function thickRowAt(table: PackedThickTable, heightM: number): ThickRow {
   return { lower, t: Math.min(Math.max((heightM - below) / (above - below), 0), 1) };
 }
 
-/** The analytic term's share of a source's multiple scattering at sun cosine `muSun` on a `thick` table (the module's remarks). */
+/**
+ * The analytic term's blend below the table (the module's remarks): across the cell of 1/32 above
+ * the rows' edge, μ₀ ∈ [−7/32, −6/32], over which 32 μ₀ + 7 runs from 0 to 1.
+ */
+const BLEND_CELLS_A_UNIT = 32;
+const BLEND_EDGE_CELLS = 7;
+
+/**
+ * The analytic term's share of a source's multiple scattering at sun cosine `muSun` on a `thick`
+ * table (the module's remarks): 1 − clamp(32 μ₀ + 7, 0, 1), all of it below the rows' edge, −7/32,
+ * none from −6/32 up.
+ */
 export function thickAnalyticShare(muSun: number): number {
-  return 1 - Math.min(Math.max(muSun * THICK_SUN_COSINES, 0), 1);
+  return 1 - Math.min(Math.max(muSun * BLEND_CELLS_A_UNIT + BLEND_EDGE_CELLS, 0), 1);
 }
 
 /**
@@ -595,9 +667,43 @@ function clear(out: ThickSource): void {
 }
 
 /**
+ * The step in μ₀ between two rows' J⁰, G and G₂ below μ₀ = 1/64, at share `f` to `upper`, added
+ * into `out` at weight `w` (`thickRead.wgsl`'s `thickGeometricMix`; the module's remarks): in each
+ * channel where both rows hold J⁰ > 0, J⁰ = J⁰_lower^(1 − f) J⁰_upper^f with G and G₂ linear as
+ * their ratios to J⁰; linear in all three where either does not.
+ */
+function addGeometric(
+  lower: ThickSource,
+  upper: ThickSource,
+  f: number,
+  w: number,
+  out: ThickSource,
+): void {
+  for (let c = 0; c < 3; c += 1) {
+    const l0 = lower.level[c] ?? 0;
+    const l1 = upper.level[c] ?? 0;
+    const g0 = lower.slope[c] ?? 0;
+    const g1 = upper.slope[c] ?? 0;
+    const q0 = lower.curve[c] ?? 0;
+    const q1 = upper.curve[c] ?? 0;
+    if (l0 > 0 && l1 > 0) {
+      const level = l0 ** (1 - f) * l1 ** f;
+      out.level[c] = (out.level[c] ?? 0) + w * level;
+      out.slope[c] = (out.slope[c] ?? 0) + w * level * ((1 - f) * (g0 / l0) + f * (g1 / l1));
+      out.curve[c] = (out.curve[c] ?? 0) + w * level * ((1 - f) * (q0 / l0) + f * (q1 / l1));
+    } else {
+      out.level[c] = (out.level[c] ?? 0) + w * ((1 - f) * l0 + f * l1);
+      out.slope[c] = (out.slope[c] ?? 0) + w * ((1 - f) * g0 + f * g1);
+      out.curve[c] = (out.curve[c] ?? 0) + w * ((1 - f) * q0 + f * q1);
+    }
+  }
+}
+
+/**
  * One layer's J⁰, G and G₂ at `row`, sun cosine `muSun` and travel cosine `muTravel`, added into
  * `out` at weight `weight` (`thickRead.wgsl`'s `thickLayerAt`): linear in each between the cells'
- * centres about it, held at the edges.
+ * centres about it, held at the edges, but below μ₀ = 1/64 geometric in μ₀ at each altitude and
+ * travel cosine about it ({@link addGeometric}), then linear in the two (the module's remarks).
  */
 export function addThickLayer(
   table: PackedThickTable,
@@ -608,7 +714,7 @@ export function addThickLayer(
   weight: number,
   out: ThickSource,
 ): void {
-  const x = Math.min(Math.max(muSun * THICK_SUN_COSINES - 0.5, 0), THICK_SUN_COSINES - 1);
+  const x = thickSunPlace(muSun);
   const s0 = Math.min(Math.floor(x), THICK_SUN_COSINES - 2);
   const fs = x - s0;
   const y = Math.min(
@@ -619,6 +725,26 @@ export function addThickLayer(
   const fv = y - v0;
   const a0 = row.lower;
   const ta = row.t;
+  if (s0 < THICK_SUN_COSINES_BELOW) {
+    const lower = thickSourceScratch();
+    const upper = thickSourceScratch();
+    for (const [da, wa] of [
+      [0, 1 - ta],
+      [1, ta],
+    ] as const) {
+      for (const [dv, wv] of [
+        [0, 1 - fv],
+        [1, fv],
+      ] as const) {
+        clear(lower);
+        clear(upper);
+        addTexel(table, layer, a0 + da, s0, v0 + dv, 1, lower);
+        addTexel(table, layer, a0 + da, s0 + 1, v0 + dv, 1, upper);
+        addGeometric(lower, upper, fs, weight * wa * wv, out);
+      }
+    }
+    return;
+  }
   for (const [da, wa] of [
     [0, 1 - ta],
     [1, ta],

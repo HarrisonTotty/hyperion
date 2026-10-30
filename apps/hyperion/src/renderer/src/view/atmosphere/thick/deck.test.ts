@@ -22,6 +22,7 @@ import { BAKE_WAVELENGTHS_NM } from "../medium";
 import {
   bakeBinSolve,
   prepareBake,
+  THICK_BAKE_DAY_GRID,
   THICK_BAKE_GRID,
   THICK_BAKE_MODES,
   THICK_BAKE_STREAMS,
@@ -675,10 +676,22 @@ describe("the deck's refusals", () => {
 
   it("refuses a grid with a sun below the horizontal, R08.T15.a.2's to take (R08.T14.d.2)", () => {
     const { column, deckAltitudeM } = fixture();
+    const split = { altitudeM: deckAltitudeM, floor: "ground" } as const;
     const grid = { ...GRID, sunCosines: Float64Array.of(-0.05, ...GRID.sunCosines) };
-    expect(() =>
-      prepareDeck(column, [SUN], { altitudeM: deckAltitudeM, floor: "ground" }, { grid }),
-    ).toThrow(/below the horizontal/u);
+    expect(() => prepareDeck(column, [SUN], split, { grid })).toThrow(/below the horizontal/u);
+    expect(() => prepareDeck(column, [SUN], split, { grid: THICK_BAKE_GRID })).toThrow(
+      /below the horizontal/u,
+    );
+  });
+
+  it("takes the bake's grid's daylit rows by default, its 32 of 1/32 (R08.T14.d.2)", () => {
+    expect(THICK_BAKE_DAY_GRID).toEqual({
+      ...THICK_BAKE_GRID,
+      sunCosines: Float64Array.from({ length: 32 }, (_, s) => (s + 0.5) / 32),
+    });
+    const { column, deckAltitudeM } = fixture();
+    const deck = prepareDeck(column, [SUN], { altitudeM: deckAltitudeM, floor: "ground" });
+    expect(deck.upper.grid).toBe(THICK_BAKE_DAY_GRID);
   });
 
   it("refuses deck layers that are not whole strides", () => {

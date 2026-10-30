@@ -1,11 +1,13 @@
 /**
  * A kept scene's thick bake made directly (plan R08, R08.T14.c): `TEST EARTH` (its aerosol from its
  * channel optics, its ozone under the reference Sun's curves) and `TEST MARS` (its dust on its own
- * TAMUdust optics) each bake one band, finite, with J⁰ at least 0; and TEST EARTH's m = 2 packs into
+ * TAMUdust optics) each bake one band, finite, with J⁰ at least 0 (below the horizontal, at least
+ * −10⁻⁶ of the largest, R08.T14.d.2); and TEST EARTH's m = 2 packs into
  * G₂ to its word's bound against its `f32` values (R08.T14.d.1).
  */
 import { describe, expect, it } from "vitest";
 
+import { leastZerothModes } from "../../../test/thickTables";
 import { MARS_FIT_COLUMN } from "../channels";
 import { EARTH_COLUMN, EARTH_OZONE, R06_SOLAR_BAKE_SPECTRUM, REFERENCE_SUN } from "../earth";
 import {
@@ -21,18 +23,18 @@ import { type MsSourceTable, THICK_BAKE_MODES, thickBakeBands } from "./bake";
 import { bakeKeptCase, keptColumnOf, sphereBakeBody } from "./keptBake";
 import { packThickTable, thickCurveChannel } from "./read";
 
-/** A table's J⁰ entries (the m = 0 mode of `bake.ts`'s layout), every channel, of its one slot. */
-function zerothMode(table: MsSourceTable): ReadonlyArray<number> {
-  const values = table.slots[0]?.values;
-  if (values === undefined || table.slots.length !== 1) {
+/**
+ * Whether a table's J⁰ is at least 0 above the horizontal, and at least −10⁻⁶ of its largest below
+ * it (`test/thickTables.ts`'s `leastZerothModes`).
+ */
+function expectZerothModesAtLeastZero(table: MsSourceTable): void {
+  const slot = table.slots[0];
+  if (slot === undefined || table.slots.length !== 1) {
     throw new Error("the kept bake has one light slot");
   }
-  return Array.from(values).filter((_, i) => Math.floor(i / 3) % THICK_BAKE_MODES === 0);
-}
-
-/** The least of many values. */
-function leastOf(values: ReadonlyArray<number>): number {
-  return values.reduce((least, value) => Math.min(least, value), Number.POSITIVE_INFINITY);
+  const { above, belowShare } = leastZerothModes(slot.values, table.sunCosines);
+  expect(above).toBeGreaterThanOrEqual(0);
+  expect(belowShare).toBeGreaterThanOrEqual(-1e-6);
 }
 
 /** A kept case's one table: its one band under its one light. */
@@ -79,17 +81,29 @@ describe("a kept case's direct bake", () => {
     ]);
   });
 
-  it("bakes TEST EARTH's one band finite, J⁰ at least 0", { timeout: KEPT_BAKE_TIMEOUT_MS }, () => {
-    const table = bakedOf(EARTH_CASE, EARTH_COLUMN.referenceGravityMS2, EARTH_REFERENCE_RADIUS_M);
-    expect(table.slots[0]?.values.every(Number.isFinite)).toBe(true);
-    expect(leastOf(zerothMode(table))).toBeGreaterThanOrEqual(0);
-  });
+  it(
+    "bakes TEST EARTH's one band finite, J⁰ at least 0 above the horizontal and at least −10⁻⁶ of its largest below it",
+    { timeout: KEPT_BAKE_TIMEOUT_MS },
+    () => {
+      const table = bakedOf(EARTH_CASE, EARTH_COLUMN.referenceGravityMS2, EARTH_REFERENCE_RADIUS_M);
+      expect(table.slots[0]?.values.every(Number.isFinite)).toBe(true);
+      expectZerothModesAtLeastZero(table);
+    },
+  );
 
-  it("bakes TEST MARS's one band finite, J⁰ at least 0", { timeout: KEPT_BAKE_TIMEOUT_MS }, () => {
-    const table = bakedOf(MARS_CASE, MARS_FIT_COLUMN.referenceGravityMS2, MARS_REFERENCE_RADIUS_M);
-    expect(table.slots[0]?.values.every(Number.isFinite)).toBe(true);
-    expect(leastOf(zerothMode(table))).toBeGreaterThanOrEqual(0);
-  });
+  it(
+    "bakes TEST MARS's one band finite, J⁰ at least 0 above the horizontal and at least −10⁻⁶ of its largest below it",
+    { timeout: KEPT_BAKE_TIMEOUT_MS },
+    () => {
+      const table = bakedOf(
+        MARS_CASE,
+        MARS_FIT_COLUMN.referenceGravityMS2,
+        MARS_REFERENCE_RADIUS_M,
+      );
+      expect(table.slots[0]?.values.every(Number.isFinite)).toBe(true);
+      expectZerothModesAtLeastZero(table);
+    },
+  );
 
   it("refuses a kept medium with no sources", () => {
     expect(() => keptColumnOf({ medium: EARTH_CASE.medium })).toThrow(/no sources/u);

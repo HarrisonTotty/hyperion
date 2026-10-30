@@ -90,7 +90,7 @@ import {
   type MsSourceTable,
   type PreparedBake,
   prepareBake,
-  THICK_BAKE_GRID,
+  THICK_BAKE_DAY_GRID,
   THICK_BAKE_MODES,
   THICK_BAKE_REFERENCE_BIN,
   THICK_BAKE_STREAMS,
@@ -156,7 +156,10 @@ export interface DeckSplit {
 
 /** A deck's preparation options. */
 export interface DeckOptions {
-  /** The upper medium's grid; `bake.ts`'s `THICK_BAKE_GRID` by default. */
+  /**
+   * The upper medium's grid; `bake.ts`'s `THICK_BAKE_DAY_GRID` by default, the bake's rows above
+   * the horizontal (whether the deck takes those below it is R08.T15.a.2's).
+   */
   readonly grid?: ThickBakeGrid;
   /** The exponential sums' options; `expSum.ts`'s by default. */
   readonly expSum?: ExpSumOptions;
@@ -253,7 +256,7 @@ export function prepareDeck(
   split: DeckSplit,
   options: DeckOptions = {},
 ): PreparedDeck {
-  const grid = options.grid ?? THICK_BAKE_GRID;
+  const grid = options.grid ?? THICK_BAKE_DAY_GRID;
   checkBakeInputs(column, lights, grid);
   // The bake takes a sun below the horizontal (R08.T14.d.2); over a deck that is R08.T15.a.2's.
   // `bakeDeck` reads each sun's reflectance by its place among `groundCosinesOf`'s incident

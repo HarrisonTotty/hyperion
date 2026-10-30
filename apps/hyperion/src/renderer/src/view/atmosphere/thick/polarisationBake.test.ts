@@ -3,7 +3,9 @@
  * grid, the depolarisers (test 3), the 8-stream correction against a 16-stream vector solve on four
  * columns (test 4), the modes past m = 2 (test 5), the channels against the 15 bins (test 6), the
  * predicate and the refusals. Every check is deterministic; each column's solves are made once and
- * shared by the tests that read them.
+ * shared by the tests that read them. Tests 4 to 6 hold T14.e's figures, which are a sun's above
+ * the horizontal, on the grid's daylit rows (`bake.ts`'s `THICK_BAKE_DAY_GRID`); below it the
+ * correction is held formed and finite (R08.T14.d.2).
  */
 import { describe, expect, it } from "vitest";
 
@@ -18,7 +20,13 @@ import {
   type PhaseMatrixTable,
   phaseTable,
 } from "../medium";
-import { bakeMultipleScattering, prepareBake, THICK_BAKE_GRID, thickBakeBands } from "./bake";
+import {
+  bakeMultipleScattering,
+  prepareBake,
+  THICK_BAKE_DAY_GRID,
+  THICK_BAKE_GRID,
+  thickBakeBands,
+} from "./bake";
 import {
   lightOf,
   titanClassFixture,
@@ -84,7 +92,9 @@ interface Solved {
 }
 
 function solvedOf(fixture: ThickFixture): Solved {
-  const prepared = preparePolarisation(fixture.column, [lightOf(fixture)]);
+  const prepared = preparePolarisation(fixture.column, [lightOf(fixture)], {
+    grid: THICK_BAKE_DAY_GRID,
+  });
   const channels = [0, 1, 2];
   return {
     fixture,
@@ -246,7 +256,7 @@ function sourceComparison(solved: Solved, c: number): Worst {
   if (coarseSource === undefined || fineSource === undefined || point === undefined) {
     throw new Error(`no channel ${c}`);
   }
-  const grid = THICK_BAKE_GRID;
+  const grid = THICK_BAKE_DAY_GRID;
   const suns = grid.sunCosines.length;
   const v2 = 2 * grid.upwardCosines.length;
   const worst: Worst = { ofTolerance: 0, ofValue: 0 };
@@ -305,7 +315,7 @@ function boundaryComparison(solved: Solved, c: number): Worst {
   if (coarseSource === undefined || fineSource === undefined) {
     throw new Error(`no channel ${c}`);
   }
-  const grid = THICK_BAKE_GRID;
+  const grid = THICK_BAKE_DAY_GRID;
   const views = grid.upwardCosines.length;
   const worst: Worst = { ofTolerance: 0, ofValue: 0 };
   const boundaries = [
@@ -357,7 +367,7 @@ function modesPastTwo(solved: Solved, c: number): number {
   if (source === undefined || point === undefined) {
     throw new Error(`no channel ${c}`);
   }
-  const grid = THICK_BAKE_GRID;
+  const grid = THICK_BAKE_DAY_GRID;
   const suns = grid.sunCosines.length;
   const v2 = 2 * grid.upwardCosines.length;
   let worst = 0;
@@ -401,7 +411,7 @@ function modesPastTwoAtBoundaries(solved: Solved, c: number): number {
   if (source === undefined) {
     throw new Error(`no channel ${c}`);
   }
-  const grid = THICK_BAKE_GRID;
+  const grid = THICK_BAKE_DAY_GRID;
   const views = grid.upwardCosines.length;
   const modes = ALL_MODES + 1;
   let worst = 0;
@@ -457,7 +467,7 @@ const earthTables = once(async () => {
 
 describe("the correction's table", () => {
   it(
-    "lays a band out as 33 altitudes, 32 μ₀, 16 travel cosines, m = 0 … 2 and RGB, 608,256 B a light",
+    "lays a band out as 33 altitudes, 46 μ₀, 16 travel cosines, m = 0 … 2 and RGB, 874,368 B a light",
     { timeout: COLUMN_TIMEOUT_MS },
     async () => {
       const { correction } = await earthTables();
@@ -469,7 +479,7 @@ describe("the correction's table", () => {
         correction.modes,
         slot?.values.length,
         slot?.values.byteLength,
-      ]).toEqual([33, 32, 16, 3, 33 * 32 * 16 * 3 * 3, 608_256]);
+      ]).toEqual([33, 46, 16, 3, 33 * 46 * 16 * 3 * 3, 874_368]);
     },
   );
 
@@ -640,15 +650,18 @@ describe("the channels against the 15 bins converted (test 6)", () => {
       async () => {
         const fixture = await make();
         const light = lightOf(fixture);
-        const channels = preparePolarisation(fixture.column, [light]);
+        const channels = preparePolarisation(fixture.column, [light], {
+          grid: THICK_BAKE_DAY_GRID,
+        });
         const bins = preparePolarisation(fixture.column, [light], {
+          grid: THICK_BAKE_DAY_GRID,
           wavelengthsNm: BAKE_WAVELENGTHS_NM,
         });
         const perBin = BAKE_WAVELENGTHS_NM.map((_, b) =>
           first(polarisationSources(bins, fixture.body, 0, b)),
         );
         const conversion = binConversion(fixture.sun);
-        const grid = THICK_BAKE_GRID;
+        const grid = THICK_BAKE_DAY_GRID;
         const suns = grid.sunCosines.length;
         const v2 = 2 * grid.upwardCosines.length;
         for (let c = 0; c < 3; c += 1) {

@@ -212,9 +212,10 @@ export interface ThickTableSize {
 }
 
 /**
- * The thick table's grid as built (R08.T14.c and R08.T14.f): 33 altitudes, 32 μ₀ and 16 μ_v, the
- * bake's m = 0 and 1 and the correction's m = 2 summed into one texel a cell, 270,336 B a band and
- * light slot (`thick/read.ts`'s `THICK_TABLE_BYTES_A_SLOT`).
+ * The thick table's grid as built (R08.T14.c, R08.T14.f, R08.T14.d.1 and R08.T14.d.2): 33
+ * altitudes, 46 μ₀ (14 below the horizontal and 32 above it) and 16 μ_v, J per unit of the kernels'
+ * scattering σ_s,k at m = 0, 1 and 2, the bake's and the correction's summed into one texel a cell,
+ * 388,608 B a band and light slot (`thick/read.ts`'s `THICK_TABLE_BYTES_A_SLOT`).
  */
 export const THICK_TABLE_SIZE: ThickTableSize = {
   altitudes: THICK_ALTITUDES,
@@ -225,8 +226,8 @@ export const THICK_TABLE_SIZE: ThickTableSize = {
 
 /**
  * The polarisation correction's grid as built (R08.T14.f; Design note 11's correction row): the
- * thick table's, m = 0, 1 and 2, 270,336 B a band and light slot in the same texels, against the
- * note's 393 KB for three modes in `rgba16float`.
+ * thick table's, m = 0, 1 and 2, 388,608 B a band and light slot in the same texels (270,336 B at
+ * R08.T14.f's 32 μ₀, against the note's 393 KB for three modes in `rgba16float`).
  */
 export const POLARISATION_TABLE_SIZE: ThickTableSize = {
   altitudes: THICK_ALTITUDES,
@@ -1099,11 +1100,11 @@ const THICK_READ: ReadonlyArray<{
 /**
  * `pair`, a per-frame kernel (the sky view, the aerial perspective or a ray march), reading the
  * thick multiple-scattering table (plan R08, R08.T14.c; Design note 9; `thick/read.ts`): its
- * sources' multiple scattering is `thickRead.wgsl`'s, the bake's J_ms from the table's first sun
- * cosine cell up and Hillaire's Ψ_ms below the horizon, blended across that cell, and the forward
- * lobes' higher orders take Ψ_ms's share ({@link THICK_READ}). Every other line is the kernel's own,
- * so that the thin kernel stays as it was to the byte and the thick one differs from it only there;
- * the table binds at `thickTable` beside the kernel's own bindings.
+ * sources' multiple scattering is `thickRead.wgsl`'s, the bake's J_ms from the table's lowest sun
+ * cosine cell up and Hillaire's Ψ_ms below the rows' edge, −7/32, blended across that cell, and the
+ * forward lobes' higher orders take Ψ_ms's share ({@link THICK_READ}). Every other line is the
+ * kernel's own, so that the thin kernel stays as it was to the byte and the thick one differs from it
+ * only there; the table binds at `thickTable` beside the kernel's own bindings.
  *
  * @throws Error naming the kernel when its sources hold a rewritten line more or fewer times than
  *   {@link THICK_READ} allows, or still call `sourceAt` after them.

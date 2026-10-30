@@ -47,9 +47,11 @@ import {
   addThickLayer,
   packThickTable,
   type PackedThickTable,
+  THICK_SUN_COSINES,
   THICK_TRAVEL_COSINES,
   thickRowAt,
   thickSourceScratch,
+  thickSunCosineAt,
 } from "../thick/read";
 import { channelSource, type SpectralSource } from "../thick/spectralColumn";
 import committedGate from "./caseGate.json" with { type: "json" };
@@ -166,11 +168,11 @@ function halfFloatsOf(
   for (let layer = 0; layer < packed.layers; layer += 1) {
     for (let a = 0; a < packed.altitudesM.length; a += 1) {
       const row = thickRowAt(packed, packed.altitudesM[a] ?? Number.NaN);
-      for (let s = 0; s < 32; s += 1) {
+      for (let s = 0; s < THICK_SUN_COSINES; s += 1) {
         for (let v = 0; v < THICK_TRAVEL_COSINES; v += 1) {
           scratch.level.fill(0);
           scratch.slope.fill(0);
-          addThickLayer(packed, layer, row, (s + 0.5) / 32, (v + 0.5) / 8 - 1, 1, scratch);
+          addThickLayer(packed, layer, row, thickSunCosineAt(s), (v + 0.5) / 8 - 1, 1, scratch);
           for (let c = 0; c < 3; c += 1) {
             const j0 = scratch.level[c] ?? Number.NaN;
             if (j0 > 0) {

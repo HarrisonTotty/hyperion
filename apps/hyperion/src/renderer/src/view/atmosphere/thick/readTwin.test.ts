@@ -96,21 +96,26 @@ function march(source: TwinSources, ray: TwinRay): TwinRgb {
   return [luminance[0], luminance[1], luminance[2]];
 }
 
+/** The sun's elevation, rad, at the middle of the analytic term's blend: μ₀ −13/64. */
+const BLEND_MIDDLE_RAD = Math.asin(-13 / 64);
+
 describe("the twin's march over the thick table (R08.T14.c)", () => {
-  it("reads Ψ_ms alone for a source at or below the horizontal, as the thin march does", () => {
-    const ray = rayWith(-0.05);
+  it("reads Ψ_ms alone for a source below the table's lower edge, −7/32, as the thin march does", () => {
+    const ray = rayWith(-0.3);
     expect(march(sources(true), ray)).toEqual(march(sources(false), ray));
   });
 
-  it("reads the table's J alone from the first sun cosine cell up", () => {
-    const ray = rayWith(0.5);
-    expect(march(sources(true), ray)).toEqual(march(TABLE_AS_PSI, ray));
+  it("reads the table's J alone from −6/32 up, below the horizontal and above it (R08.T14.d.2)", () => {
+    for (const elevationRad of [-0.1, 0, 0.5]) {
+      const ray = rayWith(elevationRad);
+      expect(march(sources(true), ray)).toEqual(march(TABLE_AS_PSI, ray));
+    }
   });
 
-  it("blends the two across the first cell, linearly in the multiple scattering", () => {
+  it("blends the two across [−7/32, −6/32], linearly in the multiple scattering", () => {
     // At 2 km and 2.5–17.5 km along a horizontal ray the local sun cosine is near the zenith one;
     // the blend is linear in Ψ and J at each step, so the march lies between the two.
-    const ray = rayWith(Math.asin(1 / 64));
+    const ray = rayWith(BLEND_MIDDLE_RAD);
     const both = march(sources(true), ray);
     const thin = march(sources(false), ray);
     const table = march(TABLE_AS_PSI, ray);
@@ -156,24 +161,26 @@ const CORRECTED_PSI: TwinSources = {
 };
 
 describe("the twin's march beside a correction alone (R08.T14.f)", () => {
-  it("reads Ψ_ms alone for a source at or below the horizontal, and never the table", () => {
+  it("reads Ψ_ms alone for a source below the table's lower edge, and never the table", () => {
     const reads: number[][] = [];
-    const ray = rayWith(-0.05);
+    const ray = rayWith(-0.3);
     expect(march(sources("correction", reads, DELTA), ray)).toEqual(march(sources(false), ray));
     expect(reads).toEqual([]);
   });
 
-  it("adds the correction to Ψ_ms whole from the first sun cosine cell up, the sum held at 0", () => {
-    const ray = rayWith(0.5);
-    const corrected = march(sources("correction", [], DELTA), ray);
-    const expected = march(CORRECTED_PSI, ray);
-    for (const c of [0, 1, 2] as const) {
-      expect(corrected[c]).toBeCloseTo(expected[c], 12);
+  it("adds the correction to Ψ_ms whole from −6/32 up, the sum held at 0", () => {
+    for (const elevationRad of [-0.1, 0.5]) {
+      const ray = rayWith(elevationRad);
+      const corrected = march(sources("correction", [], DELTA), ray);
+      const expected = march(CORRECTED_PSI, ray);
+      for (const c of [0, 1, 2] as const) {
+        expect(corrected[c]).toBeCloseTo(expected[c], 12);
+      }
     }
   });
 
-  it("fades the correction in across the first cell, Ψ_ms whole", () => {
-    const ray = rayWith(Math.asin(1 / 64));
+  it("fades the correction in across [−7/32, −6/32], Ψ_ms whole", () => {
+    const ray = rayWith(BLEND_MIDDLE_RAD);
     const faded = march(sources("correction", [], DELTA), ray);
     const thin = march(sources(false), ray);
     const full = march(CORRECTED_PSI, ray);

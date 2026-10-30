@@ -6,13 +6,17 @@
 // here and leaves every other line as it is.
 //
 // The table, `rgba32uint`, one layer a band and light slot (band b's slot k at b x slots + k): 16
-// texels across, one a travel cosine mu_v = (v + 1/2) / 8 - 1, and rows a x 32 + s, altitude a of 33
-// and sun cosine mu0 = (s + 1/2) / 32, then the info row. A texel holds six halves in its first three
+// texels across, one a travel cosine mu_v = (v + 1/2) / 8 - 1, and rows a x 46 + s, altitude a of 33
+// and sun cosine s of 46, then the info row. The sun cosines are 14 rows below the horizontal,
+// mu0 = -(13.5 - s) / 64 for s = 0 to 13, to the cell edge -7/32, and 32 above it,
+// mu0 = (s - 13.5) / 32 for s = 14 to 45 (R08.T14.d.2). A texel holds six halves in its first three
 // words: J0's red and green, J0's blue and G's red, G's green and blue, each word's first half its
 // low one; and G2 in its fourth, three 9-bit two's-complement mantissas (red in bits 0 to 8) and
-// their shared exponent e in bits 27 to 31, each m 2^(e - 24). J0, G and G2 are E0, E1 /
-// (sin theta_v sin theta0) and E2 / (sin theta_v sin theta0)^2 divided by the kernels' scattering at
-// the altitude, so that the read, J0 + G h + G2 (2 h^2 - (1 - mu_v^2)(1 - mu0^2)) with
+// their shared exponent e in bits 27 to 31, each m 2^(e - 24). J0, G and G2 are J^0,
+// J^1 / (sin theta_v sin theta0) and J^2 / (sin theta_v sin theta0)^2, J^m the source's m-th
+// azimuthal coefficient, m = 0 to 2, per steradian and per unit of the kernels' scattering
+// sigma_s,k at the altitude (the bake's J with the correction's summed in, or the correction's
+// alone), so that the read, J0 + G h + G2 (2 h^2 - (1 - mu_v^2)(1 - mu0^2)) with
 // h = v.s - (v.n)(s.n), is per steradian and per unit of scattering, as Psi_ms is. Layer 0's info row
 // holds the altitudes, h* above the ground in m, as f32 bits in words 0 to 32, the light slots a band
 // in word 33, and the table's kind in word 34: 0 the bake's (`thick`), 1 the correction alone
@@ -20,9 +24,12 @@
 @group(0) @binding(24) var thickTable : texture_2d_array<u32>;
 
 const THICK_ALTITUDES : u32 = 33u;
-const THICK_SUN_COSINES : u32 = 32u;
+const THICK_SUN_COSINES : u32 = 46u;
+const THICK_SUN_COSINES_BELOW : u32 = 14u;
+const THICK_SUN_ROWS_A_UNIT_BELOW : f32 = 64.0;
+const THICK_SUN_ROWS_A_UNIT_ABOVE : f32 = 32.0;
 const THICK_TRAVEL_COSINES : u32 = 16u;
-const THICK_INFO_ROW : u32 = 1056u;
+const THICK_INFO_ROW : u32 = 1518u;
 const THICK_KIND_WORD : u32 = 34u;
 const THICK_CURVE_BITS : u32 = 9u;
 const THICK_CURVE_EXPONENT_BIAS : i32 = 24;
@@ -49,10 +56,10 @@ fn thickCorrectionOnly() -> bool {
 }
 
 // The analytic term's share of a source's multiple scattering at its zenith cosine `muSun` on the
-// bake's table: all of it at and below the horizontal, where the table has no beam, none from the
-// table's first mu0 cell's upper edge, 1/32, and linear across that cell; the table takes the rest.
+// bake's table: all of it below the rows' edge, -7/32, none from -6/32 up, and linear across that
+// cell, 1 - clamp(32 mu0 + 7, 0, 1); the table takes the rest.
 fn thickAnalyticShare(muSun : f32) -> f32 {
-  return 1.0 - clamp(muSun * f32(THICK_SUN_COSINES), 0.0, 1.0);
+  return 1.0 - clamp(muSun * 32.0 + 7.0, 0.0, 1.0);
 }
 
 // The analytic term's weight, and the forward lobes' higher orders': its share on the bake's table,
@@ -121,13 +128,61 @@ fn thickMix(a : ThickSource, b : ThickSource, t : f32) -> ThickSource {
   );
 }
 
+// The step in mu0 between two rows below mu0 = 1/64, at share `t` to `b`: in each channel where both
+// rows hold J0 > 0, J0 = J0_a^(1 - t) J0_b^t, by log2 and exp2, with G and G2 linear as their ratios
+// to J0; linear in all three where either does not (`thick/read.ts`'s addGeometric).
+fn thickGeometricMix(a : ThickSource, b : ThickSource, t : f32) -> ThickSource {
+  let linear = thickMix(a, b, t);
+  let both = (a.level > vec3f(0.0)) & (b.level > vec3f(0.0));
+  let la = select(vec3f(1.0), a.level, both);
+  let lb = select(vec3f(1.0), b.level, both);
+  let level = exp2((1.0 - t) * log2(la) + t * log2(lb));
+  return ThickSource(
+    select(linear.level, level, both),
+    select(linear.slope, level * ((1.0 - t) * a.slope / la + t * b.slope / lb), both),
+    select(linear.curve, level * ((1.0 - t) * a.curve / la + t * b.curve / lb), both),
+  );
+}
+
+// Where the sun cosine `muSun` lies among the table's rows, as a row and its share to the next, held
+// in [0, 45] (`thick/read.ts`'s thickSunPlace): 14 + 32 mu0 - 1/2 from the first row above the
+// horizontal, 1/64, up; 13 + (mu0 + 1/128) / (3/128) across the cell from the last row below it,
+// -1/128; and 13 + 64 (mu0 + 1/128) below that.
+fn thickSunPlace(muSun : f32) -> f32 {
+  let firstAbove = 0.5 / THICK_SUN_ROWS_A_UNIT_ABOVE;
+  let lastBelow = -0.5 / THICK_SUN_ROWS_A_UNIT_BELOW;
+  let below = f32(THICK_SUN_COSINES_BELOW - 1u);
+  if (muSun >= firstAbove) {
+    return min(
+      f32(THICK_SUN_COSINES_BELOW) + muSun * THICK_SUN_ROWS_A_UNIT_ABOVE - 0.5,
+      f32(THICK_SUN_COSINES - 1u),
+    );
+  }
+  if (muSun >= lastBelow) {
+    return below + (muSun - lastBelow) / (firstAbove - lastBelow);
+  }
+  return max(below + (muSun - lastBelow) * THICK_SUN_ROWS_A_UNIT_BELOW, 0.0);
+}
+
+// The step in mu0 between two rows at share `t` to `b`: geometric below mu0 = 1/64 (`below`,
+// thickGeometricMix), linear from it up.
+fn thickSunMix(a : ThickSource, b : ThickSource, t : f32, below : bool) -> ThickSource {
+  if (below) {
+    return thickGeometricMix(a, b, t);
+  }
+  return thickMix(a, b, t);
+}
+
 // One layer's J0, G and G2 at `row`, sun cosine `muSun` and travel cosine `muTravel` (positive upward:
 // for a view along v, -(v.n)): linear in each between the cells' centres about it, held at the
-// table's edges (`thick/read.ts`'s addThickLayer).
+// table's edges, but below mu0 = 1/64 geometric in mu0 at each altitude and travel cosine about it
+// (thickSunMix), then linear in the two (`thick/read.ts`'s addThickLayer). Its eight texels are
+// loaded once whichever the step.
 fn thickLayerAt(layer : u32, row : ThickRow, muSun : f32, muTravel : f32) -> ThickSource {
-  let x = clamp(muSun * f32(THICK_SUN_COSINES) - 0.5, 0.0, f32(THICK_SUN_COSINES - 1u));
+  let x = thickSunPlace(muSun);
   let s0 = min(u32(x), THICK_SUN_COSINES - 2u);
   let fs = x - f32(s0);
+  let below = s0 < THICK_SUN_COSINES_BELOW;
   let y = clamp(
     (muTravel + 1.0) * f32(THICK_TRAVEL_COSINES / 2u) - 0.5, 0.0, f32(THICK_TRAVEL_COSINES - 1u)
   );
@@ -136,21 +191,26 @@ fn thickLayerAt(layer : u32, row : ThickRow, muSun : f32, muTravel : f32) -> Thi
   let a0 = row.lower;
   let a1 = a0 + 1u;
   let lower = thickMix(
-    thickMix(thickTexel(layer, a0, s0, v0), thickTexel(layer, a0, s0, v0 + 1u), fv),
-    thickMix(thickTexel(layer, a0, s0 + 1u, v0), thickTexel(layer, a0, s0 + 1u, v0 + 1u), fv),
-    fs,
+    thickSunMix(thickTexel(layer, a0, s0, v0), thickTexel(layer, a0, s0 + 1u, v0), fs, below),
+    thickSunMix(
+      thickTexel(layer, a0, s0, v0 + 1u), thickTexel(layer, a0, s0 + 1u, v0 + 1u), fs, below
+    ),
+    fv,
   );
   let upper = thickMix(
-    thickMix(thickTexel(layer, a1, s0, v0), thickTexel(layer, a1, s0, v0 + 1u), fv),
-    thickMix(thickTexel(layer, a1, s0 + 1u, v0), thickTexel(layer, a1, s0 + 1u, v0 + 1u), fv),
-    fs,
+    thickSunMix(thickTexel(layer, a1, s0, v0), thickTexel(layer, a1, s0 + 1u, v0), fs, below),
+    thickSunMix(
+      thickTexel(layer, a1, s0, v0 + 1u), thickTexel(layer, a1, s0 + 1u, v0 + 1u), fs, below
+    ),
+    fv,
   );
   return thickMix(lower, upper, row.t);
 }
 
 // J0, G and G2 of light slot `slot` at the bands about s, as the multiple scattering's bands are read
 // (`oblate.wgsl`'s bandTableAt): linear in ln s between the two bands about s, the nearer band
-// beyond them, one band's alone.
+// beyond them, one band's alone. Two reads of a layer at most, so that the kernels inline
+// thickLayerAt twice.
 fn thickBandsAt(
   body : OblateBody,
   row : ThickRow,
@@ -162,27 +222,27 @@ fn thickBandsAt(
   let layers = thickSlotCount();
   let k = min(slot, layers - 1u);
   let last = oblateBandCount(body) - 1u;
-  if (last == 0u) {
-    return thickLayerAt(k, row, muSun, muTravel);
-  }
-  let ls = log(s);
-  if (!(ls > oblateBand(oblateBody, 0u).y)) {
-    return thickLayerAt(k, row, muSun, muTravel);
-  }
-  if (!(ls < oblateBand(oblateBody, last).y)) {
-    return thickLayerAt(last * layers + k, row, muSun, muTravel);
-  }
   var lower = 0u;
-  while (lower + 1u < last && oblateBand(oblateBody, lower + 1u).y <= ls) {
-    lower++;
+  var w = 0.0;
+  if (last > 0u) {
+    let ls = log(s);
+    if (!(ls > oblateBand(oblateBody, 0u).y)) {
+      lower = 0u;
+    } else if (!(ls < oblateBand(oblateBody, last).y)) {
+      lower = last;
+    } else {
+      while (lower + 1u < last && oblateBand(oblateBody, lower + 1u).y <= ls) {
+        lower++;
+      }
+      let l0 = oblateBand(oblateBody, lower).y;
+      w = (ls - l0) / (oblateBand(oblateBody, lower + 1u).y - l0);
+    }
   }
-  let l0 = oblateBand(oblateBody, lower).y;
-  let w = (ls - l0) / (oblateBand(oblateBody, lower + 1u).y - l0);
-  return thickMix(
-    thickLayerAt(lower * layers + k, row, muSun, muTravel),
-    thickLayerAt((lower + 1u) * layers + k, row, muSun, muTravel),
-    w,
-  );
+  let near = thickLayerAt(lower * layers + k, row, muSun, muTravel);
+  if (w == 0.0) {
+    return near;
+  }
+  return thickMix(near, thickLayerAt((lower + 1u) * layers + k, row, muSun, muTravel), w);
 }
 
 // One source's multiple scattering per unit of its illuminance and of scattering, sr^-1, for the

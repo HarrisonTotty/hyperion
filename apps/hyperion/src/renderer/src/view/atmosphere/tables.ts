@@ -2431,7 +2431,7 @@ export class AtmosphereTables {
 
   /**
    * The thick table's bytes as allocated, B (R08.T14.c; `thick/read.ts`'s `thickTableBytes`):
-   * 270,592 a band and light slot, the table's 270,336 and its info row, of either kind (the bake
+   * 388,864 a band and light slot, the table's 388,608 and its info row, of either kind (the bake
    * with the correction summed into it, or the correction alone, R08.T14.f); 0 without one.
    */
   get thickBytes(): number {

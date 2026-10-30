@@ -2097,15 +2097,22 @@ interface ThickTwinBody {
 
 /**
  * R08.T14.c's frames: R08.T6.b's two (from 2 km at a sun 20° up with a surface 60 km ahead, and
- * from 400 km with the sun 5° up, the limb), and from 2 km with the sun 1° up, inside the table's
- * first sun cosine cell, where the read blends the analytic term and the table, and 2° down, where
- * the analytic term reads alone and the lit upper air is outside the table.
+ * from 400 km with the sun 5° up, the limb), and from 2 km with the sun 1° up (μ₀ 0.017), at the
+ * table's first rows above the horizontal; and R08.T14.d.2's below the horizontal, from 2 km: the
+ * sun 2° and 5° down (μ₀ −0.035 and −0.087), in the rows below it, read geometrically in μ₀, 11.5°
+ * down (μ₀ −0.199), in the cell [−7/32, −6/32] where the read blends the analytic term and the
+ * table, and 14° down (μ₀ −0.242), below the table, where the analytic term reads alone at the
+ * camera. The far air of each frame below the horizontal stands at other μ₀, the cell across the
+ * horizontal, [−1/128, 1/64], among them.
  */
 const THICK_TWIN_FRAMES: ReadonlyArray<TwinFrame> = [
   { name: "2 km, a surface 60 km ahead", heightM: 2_000, suns: [sunAt(20)], surfaceM: 60_000 },
   { name: "400 km, the limb", heightM: 400_000, suns: [sunAt(5)], surfaceM: null },
   { name: "2 km, the sun 1° up", heightM: 2_000, suns: [sunAt(1)], surfaceM: null },
   { name: "2 km, the sun 2° down", heightM: 2_000, suns: [sunAt(-2)], surfaceM: null },
+  { name: "2 km, the sun 5° down", heightM: 2_000, suns: [sunAt(-5)], surfaceM: null },
+  { name: "2 km, the sun 11.5° down", heightM: 2_000, suns: [sunAt(-11.5)], surfaceM: null },
+  { name: "2 km, the sun 14° down", heightM: 2_000, suns: [sunAt(-14)], surfaceM: null },
 ];
 
 /**
@@ -2136,9 +2143,11 @@ export async function checkThickFrameTwinsEarth(
 /**
  * R08.T14.f: the kernels' correction equals the twin's. {@link checkThickFrameTwinsEarth} over the
  * polarisation correction alone, a thin world's table (`thick/read.ts`'s `correction` kind, Ψ_ms
- * whole and the correction added at the table's share), from 2 km at the sun 20° up over a surface
- * and 1° up, where the correction fades in across the first sun cosine cell: in part 13 after the
- * thick table's Earth, whose kernels the part's catalogue has compiled.
+ * whole and the correction added at the table's share), from 2 km at the sun 20° up over a surface,
+ * 1° up, and 2° down (R08.T14.d.2), in the rows below the horizontal, where the correction's ΔJ⁰ of
+ * either sign takes the geometric step in μ₀ where both rows hold it above 0 and the linear one
+ * elsewhere: in part 13 after the thick table's Earth, whose kernels the part's catalogue has
+ * compiled.
  */
 export async function checkCorrectionFrameTwinsEarth(
   engine: RenderEngine,
@@ -2153,9 +2162,11 @@ export async function checkCorrectionFrameTwinsEarth(
       curves: NO_ABSORBER_CURVES,
       figure: WGS84,
       gravity: EARTH_GRAVITY,
+      // Down to the sun 2° below the horizontal (μ₀ −0.035): its rows below take the correction's
+      // ΔJ⁰ of either sign through both steps in μ₀, and the deeper frames read no other code.
       frames: THICK_TWIN_FRAMES.filter(
         (frame) =>
-          frame.heightM === 2_000 && frame.suns.every((sun) => sun.directionBodyFixed.x > 0.01),
+          frame.heightM === 2_000 && frame.suns.every((sun) => sun.directionBodyFixed.x > -0.05),
       ),
     },
   ]);
@@ -2163,8 +2174,9 @@ export async function checkCorrectionFrameTwinsEarth(
 
 /**
  * {@link checkThickFrameTwinsEarth} on the Saturn-class figure (five slices, four bands, the read
- * linear in ln s between them), from 2 km at the sun 20° up over a surface and 1° up, on high: a
- * group of its own, in another part, for the smoke's watchdog.
+ * linear in ln s between them), from 2 km at the sun 20° up over a surface, 1° up, and 2°, 5°, 11.5°
+ * and 14° down (R08.T14.d.2), on high: a group of its own, in another part, for the smoke's
+ * watchdog.
  */
 export async function checkThickFrameTwinsSaturn(
   engine: RenderEngine,
@@ -2179,10 +2191,7 @@ export async function checkThickFrameTwinsSaturn(
       curves: NO_ABSORBER_CURVES,
       figure: SATURN_SPHEROID,
       gravity: saturnBody().gravity,
-      frames: THICK_TWIN_FRAMES.filter(
-        (frame) =>
-          frame.heightM === 2_000 && frame.suns.every((sun) => sun.directionBodyFixed.x > 0.01),
-      ),
+      frames: THICK_TWIN_FRAMES.filter((frame) => frame.heightM === 2_000),
     },
   ]);
 }
@@ -2971,7 +2980,8 @@ function withThickTable(tables: AtmosphereTables, slots: number): void {
 /**
  * R08.T14.c's frames for the thick read's specialised march: {@link checkMarchSpecialised}'s on
  * high, from 400 km and from 10⁷ m over a surface, whose discs hold the night side, the terminator
- * and the day, so that the read's seam across the table's first sun cosine cell is drawn.
+ * and the day, so that the table's rows below the horizontal and the read's seam at their edge,
+ * −7/32, are drawn.
  */
 const THICK_AREA_FRAMES: ReadonlyArray<AreaFrame> = AREA_FRAMES.filter(
   (frame) => frame.setting === "high" && frame.distanceM !== 1e8,
