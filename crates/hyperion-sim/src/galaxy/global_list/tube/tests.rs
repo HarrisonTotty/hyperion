@@ -658,6 +658,31 @@ fn a_mean_system_mass_of_zero_is_a_broken_invariant() {
     let _ = along_cells(SolarMasses::new(1e4), SolarMasses::new(0.0));
 }
 
+/// P10.T8.c: the frame and the dispersions at a knot's along coordinate are the knot's, and
+/// between knots the dispersions are linear and the frame's vectors unit vectors.
+#[test]
+fn the_frame_and_the_dispersions_at_an_along_coordinate_are_the_knots() {
+    let tube = table(&circle(300, 0));
+    let total = tube.mass().value();
+    for k in tube.arm(Arm::Leading).knots().iter().skip(1).step_by(37) {
+        let u = k.cumulative_mass().value() / total;
+        let frame = tube.frame_at(u);
+        for (got, want) in frame.iter().zip(k.frame()) {
+            for i in 0..3 {
+                assert!((got[i] - want[i]).abs() < 1e-12);
+            }
+        }
+        for (got, want) in tube.dispersions_at(u).iter().zip(k.dispersions()) {
+            assert!((got.value() / want.value() - 1.0).abs() < 1e-12);
+        }
+    }
+    for u in [0.13, 0.5, 0.77] {
+        for v in tube.frame_at(u) {
+            assert!((length(v) - 1.0).abs() < 1e-12);
+        }
+    }
+}
+
 /// A knot dropped its stored binormal (P10.T6.c): it is the tangent × the normal, recomputed to
 /// the bits the frames were built with, so that a knot is 168 bytes on every target.
 #[test]

@@ -53,7 +53,16 @@
 //!   [`locate`](TubeTable::locate) of the three, so [`TubeTable::cells_touching`] finds it. A
 //!   member outside the root cube is dropped and its index kept. Nothing is thinned: every member
 //!   counted is a member, its star drawn by [`StreamBandShares::draw_star`].
-//! - **Its velocity** is the tube's mean velocity where it lies ([`TubeTable::mean_velocity`]).
+//!
+//! # A stream member's motion (P10.T8.c)
+//!
+//! Its velocity is the tube's mean velocity at its along coordinate ([`TubeTable::mean_velocity`])
+//! plus a normal draw of the tube's three dispersions there ([`TubeTable::dispersions_at`]) along
+//! its local frame's tangent, normal and binormal ([`TubeTable::frame_at`]): a Box–Muller pair and
+//! the first normal of a second on `stream.member.velocity`, four words. Every band takes the
+//! tracers' dispersions, which carry no mass. It drifts on the straight line of its own velocity
+//! ([`Drift::of_global_member`](crate::observe::Drift::of_global_member)), since plan 03's
+//! `query::motion` serves grid records only.
 
 use crate::coords::GalacticVelocity;
 use crate::galaxy::Galaxy;
@@ -76,7 +85,7 @@ use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::sse::turn_off_mass;
 use crate::stellar::system::SystemStars;
-use crate::units::{Dex, HeliumExcess, SolarMasses, Years};
+use crate::units::{Dex, HeliumExcess, MetresPerSecond, SolarMasses, Years};
 
 use super::StreamOrigin;
 use super::dwarf_core::{
@@ -716,8 +725,36 @@ pub fn stream_member(
         record,
         class,
         composition,
-        tube.mean_velocity(u),
+        member_velocity(galaxy, tube, system, u),
     ))
+}
+
+/// The velocity of the member `system` at along coordinate `u` of `tube` (module documentation,
+/// "A stream member's motion").
+#[must_use]
+fn member_velocity(
+    galaxy: &Galaxy,
+    tube: &TubeTable,
+    system: SystemId,
+    u: f64,
+) -> GalacticVelocity {
+    let mut stream = Stream::open(
+        galaxy.seed(),
+        tags::STREAM_MEMBER_VELOCITY,
+        ObjectKey::from(system),
+    );
+    let (first, second) = stream.standard_normal_pair();
+    let third = stream.standard_normal();
+    let frame = tube.frame_at(u);
+    let sigma = tube.dispersions_at(u).map(MetresPerSecond::value);
+    let mean = tube.mean_velocity(u).metres_per_second();
+    let draws = [first, second, third];
+    GalacticVelocity::new(core::array::from_fn(|i| {
+        mean[i]
+            + sigma[0] * draws[0] * frame[0][i]
+            + sigma[1] * draws[1] * frame[1][i]
+            + sigma[2] * draws[2] * frame[2][i]
+    }))
 }
 
 /// Every member of `band` in `cell` of `tube`, in index order, into `out` (cleared first): the

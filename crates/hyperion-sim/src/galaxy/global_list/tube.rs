@@ -700,6 +700,39 @@ impl TubeTable {
         GalacticVelocity::new(core::array::from_fn(|i| p[i] + f * (q[i] - p[i])))
     }
 
+    /// The local frame at along coordinate `u`, `[tangent, normal, binormal]`: each vector linear
+    /// between knots and made a unit vector again, as [`locate`](Self::locate) reads it.
+    ///
+    /// `u` is clamped to `[0, 1]`.
+    ///
+    /// # Panics
+    ///
+    /// If `u` is not finite.
+    #[must_use]
+    pub fn frame_at(&self, u: f64) -> [[f64; 3]; 3] {
+        assert!(u.is_finite(), "a tube's along coordinate is finite: {u}");
+        let (from, to, f) = self.segment(u);
+        interpolated_frame(&from.frame(), &to.frame(), f)
+    }
+
+    /// The tracers' velocity dispersions at along coordinate `u`, rms along the local frame's
+    /// tangent, normal and binormal ([`frame_at`](Self::frame_at)), linear between knots.
+    ///
+    /// `u` is clamped to `[0, 1]`.
+    ///
+    /// # Panics
+    ///
+    /// If `u` is not finite.
+    #[must_use]
+    pub fn dispersions_at(&self, u: f64) -> [MetresPerSecond; 3] {
+        assert!(u.is_finite(), "a tube's along coordinate is finite: {u}");
+        let (from, to, f) = self.segment(u);
+        core::array::from_fn(|axis| {
+            let (p, q) = (from.dispersions[axis].value(), to.dispersions[axis].value());
+            MetresPerSecond::new(p + f * (q - p))
+        })
+    }
+
     /// ψ at along coordinate `u`, the inverse of `Λ(ψ) ÷ Λ_total`, linear between knots.
     ///
     /// `u` is clamped to `[0, 1]`.

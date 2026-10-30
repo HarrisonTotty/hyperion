@@ -673,6 +673,9 @@ P10.T7.a, as built" and "P10.T7.b as built" in Risks._
 
 ### P10.T8 Stream members
 
+_T8.a–c built (lane `p10-t6c`, 2026-10-30, at `GENERATOR_VERSION` 24); see "P10.T8.a as built",
+"P10.T8.b as built" and "P10.T8.c as built" in Risks._
+
 - **P10.T8.a Band shares.** `StreamBandShares`: what the cluster lost = the evolved canonical mass
   function minus the cluster's present one (plan 09's depleted slope; for an orphan the slope of a
   cluster at the end of its life), white dwarfs kept, neutron stars and black holes zero, and the
@@ -2034,3 +2037,17 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
     Slow, by name: `the_fullest_cell_of_sagittarius_like_s_tube_stays_far_under_the_index` and
     `resolve_with_reaches_a_drawn_stream_s_members` (`tests/global_list_tube.rs`); plan 12's sweep
     gains the streams' row.
+- **P10.T8.c as built (lane `p10-t6c`, 2026-10-30, at `GENERATOR_VERSION` 24).** No served
+  output moved; T8.b's unwired `stream_members.golden` re-blessed by name, its velocities alone
+  moving. Tag `stream.member.velocity` (`System`) appended.
+  - _Items._ `TubeTable::frame_at(u)` and `TubeTable::dispersions_at(u)`, read as `locate` reads
+    the knots.
+  - _The draw._ The tube's mean velocity at `u` plus three normals, a Box–Muller pair and one
+    more, times the dispersions there along the local tangent, normal and binormal. Every band
+    takes the tracers' dispersions (lean, 2026-10-30: the spray's tracers carry no mass, so no
+    equipartition is drawn). The member drifts on its own straight line
+    (`Drift::of_global_member`).
+  - _For T9._ No speed bound is given yet for the query's pad: a member's internal speed is at most
+    8.58 √2 times its tube's largest dispersion, plan 09's `INTERNAL_SPEED_SIGMAS`.
+  - _Tests._ Fast: `members::tests::stream_members_move_with_their_tube_s_dispersions_in_every_band`
+    and `tube::tests::the_frame_and_the_dispersions_at_an_along_coordinate_are_the_knots`.

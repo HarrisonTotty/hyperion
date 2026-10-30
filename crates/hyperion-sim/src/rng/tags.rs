@@ -972,6 +972,10 @@ domain_tags! {
     /// A stream member's place in its tube cell (P10.T8.b): three uniforms, its along coordinate
     /// in its along cell, then its two across coordinates' ranks in their truncated normals.
     STREAM_MEMBER_POSITION: System = "stream.member.position";
+
+    /// A stream member's velocity about its tube's mean (P10.T8.c): a Box–Muller pair and the
+    /// first normal of a second, four words, along the tube's local tangent, normal and binormal.
+    STREAM_MEMBER_VELOCITY: System = "stream.member.velocity";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface

@@ -581,3 +581,42 @@ fn stream_members_golden() {
     }
     golden!("galaxy/global_list/stream_members", w.as_str());
 }
+
+/// P10.T8.c: a stream member's velocity is its tube's mean plus the tube's three dispersions
+/// along its local frame, the same for every band: about the mean, each band's offsets along the
+/// tangent, the normal and the binormal, in units of the dispersions there, have a mean of 0 and
+/// an rms of 1.
+#[test]
+fn stream_members_move_with_their_tube_s_dispersions_in_every_band() {
+    let (tube, _, members, _, _) = synthetic_members();
+    let mut tested = 0;
+    for band in MassBand::ALL {
+        let of_band: Vec<&(MassBand, TubeCell, GlobalMemberRecord, [f64; 3])> =
+            members.iter().filter(|(b, ..)| *b == band).collect();
+        if of_band.len() < 300 {
+            continue;
+        }
+        let n = f64::from(u32::try_from(of_band.len()).unwrap());
+        for axis in 0..3 {
+            let z: Vec<f64> = of_band
+                .iter()
+                .map(|(_, _, m, [u, _, _])| {
+                    let mean = tube.mean_velocity(*u).metres_per_second();
+                    let v = m.velocity().metres_per_second();
+                    let e = tube.frame_at(*u)[axis];
+                    let offset: f64 = (0..3).map(|i| (v[i] - mean[i]) * e[i]).sum();
+                    offset / tube.dispersions_at(*u)[axis].value()
+                })
+                .collect();
+            let mean = z.iter().sum::<f64>() / n;
+            let rms = (z.iter().map(|x| x * x).sum::<f64>() / n).sqrt();
+            assert!(mean.abs() < 4.0 / n.sqrt(), "{band:?} axis {axis}: {mean}");
+            assert!(
+                (rms - 1.0).abs() < 5.0 / (2.0 * n).sqrt(),
+                "{band:?} axis {axis}: {rms}"
+            );
+        }
+        tested += 1;
+    }
+    assert!(tested >= 3, "{tested} bands tested");
+}
