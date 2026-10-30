@@ -44,7 +44,8 @@
 //! - [`observe`]: readings at the retarded time, the apparent position and the light's age, the
 //!   stated error from neglected curvature, and bearings.
 //! - [`lensing`]: microlensing along one monitored line of sight.
-//! - [`alerts`]: transients seen from a distance; so far only the bands a detection is made in.
+//! - [`alerts`]: transients seen from a distance: the bands, sensors and queries, the registry of
+//!   transient kinds, and reach and flux (plan 12, P12.T5.a).
 //!
 //! Planetary systems (plan 14):
 //!

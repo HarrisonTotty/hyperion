@@ -2211,8 +2211,8 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     5.8 × 10²¹ ÷ `R_V`, 1.871 × 10²¹ cm⁻² mag⁻¹. `Sightline::a_v` and `in_band` return `Magnitudes`,
     and `hydrogen_column` returns `PerCm2`. `sightline` takes the modifiers as a slice, so the
     caller first gathers them from a `GasModifierSource`. `Quality::Budget` takes a `NonZeroU32`.
-    Plan 07's `SIGHTLINE_QUALITY` (`Budget(256)`) asks that a third reader take a constant of its
-    own.
+    Plan 07's `SIGHTLINE_QUALITY` (`Budget(256)`) is shared by the readers that want its budget; a
+    reader that wants another takes a constant of its own.
   - _Plan 09._ `features::gas_overlay::FeatureGas::new(galaxy, cache, time)` is the
     `GasModifierSource`. Its features sit at their epoch positions, at one evaluation time that the
     caller picks.
@@ -2240,3 +2240,130 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     `grid::cells_in_sphere`, not a `CatalogueClassSource`. `expected_hosts_in_sphere` and
     `catalogue_classes::lbv` do not exist yet. No class has a process (P09.T33.a is in lane
     `p09-classes`).
+- **P12.T5.a as built (lane `p12-alerts`, 2026-10-30, at `GENERATOR_VERSION` 23).** No generated
+  output moves, no golden changes and no draw or tag is added: the registry, reach and flux only
+  read. Files `alerts/{mod,registry,reach}.rs`; T5.b–T5.e are not started. Names and shapes that
+  differ from the sketches:
+  - _Types._ Beside Provides' types: `BandLimits` with `BuildBandLimitsError`,
+    `BuildSensorHorizonError`, `AlertQueryBuilder`, `BuildAlertQueryError`, `DEFAULT_HOST_LIMIT` and
+    `AlertBand::ALL` (plan 07's ten bands, then `XRay`). `SensorHorizon::new(bands)` takes one
+    `BandLimits` (`detect`, `resolve`: positive and finite, `resolve` no fainter) per band it has,
+    at least one and none twice; `limits(band)` is `None` for a band it lacks. It is `PartialEq` and
+    `PartialOrd` only, since the sim bans float bits, so T8's `ScanKey` keys the sensor its own way.
+    `ClassSet` is one bit per class value under `ClassId::LIMIT`.
+    `AlertQuery::builder(observer_position, window, sensor)`: `classes` defaults to `ClassSet::ALL`
+    and `host_limit` to `DEFAULT_HOST_LIMIT`; `build` refuses an observer outside the root cube and
+    a window reaching outside ±H. `Detection`, `ClassCensus` and `AlertResult` have getters and no
+    public constructor, as `ObservedSystem` has none: T5.b–T5.e build them. `resolvable` is
+    `is_resolvable()`.
+  - _`DEFAULT_HOST_LIMIT` (lean, 2026-10-30)._ 2²⁴, above the galaxy's accreting white dwarfs (6–12
+    × 10⁶; Pala et al. 2020), so that by default `BACKGROUND_THRESHOLD_HOSTS` alone parts the
+    interactive classes from the background ones and no galaxy-wide scan is `OverLimit`. T8 sets the
+    service's limit.
+  - _`AlertContext`, T5.a's part._ `new(noise, gas)` holds plan 07's `NoiseCache` and a
+    `&dyn GasModifierSource`: plan 09's `FeatureGas` at the one evaluation time the caller gives it,
+    not each event's emitted time. `sightline(galaxy, from, to)` gathers the modifiers along the
+    segment afresh and marches plan 07's line in `Realised` noise at plan 07's `SIGHTLINE_QUALITY`
+    (`Budget(256)`), shared because the alerts want the same budget for the same reason. The class
+    lookup, the `FeatureCatalogue` with its cell cache and the `GlobalList` join it with T5.b–T5.d.
+  - _The registry._ `TransientKind::{ALL, row}` and
+    `TransientRow::{kind, classes, route, peak_bound, duration, light_curve, pending}`; a row is
+    built or pending, never both.
+    - The plan's "class" is a `ClassSet`: novae and dwarf novae belong to both accreting white dwarf
+      classes.
+    - `Route` (`OneShot`, `Recurrent`, `Centre`, `Local`) is new: the subtask that walks the kind.
+    - The bound "per band" is two slots, one shared by every photometric band and one for X-rays.
+      Each is a `PeakBound`: `Watts`, `EddingtonShare` of the galaxy's black hole (`in_galaxy`), or
+      `PerHost`.
+    - D is `LongestDuration::{AtMost(Span), Unending}`.
+    - The light curve is `LightCurveSource`, a tag naming the source's function, not a callable: the
+      sources' events share no type, so a walk calls the named function on the event it holds. Every
+      curve is the event's own light: the centre's flares above its quiescence, and a star flare's
+      or an FU Orionis outburst's (factor − 1) × the star's quiescent luminosity, so that a
+      detection clears when the event fades (Design note 11).
+  - _The rows._
+    - Core collapse: `CORE_COLLAPSE_PEAK`, 10³⁸ W, the IIP, IIL and IIb breakout at T. Type Ia:
+      `TYPE_IA_PEAK`, 1.0730 × 10³⁶ W (the template's 1.07291 × 10³⁶ W at 15.13 days, rounded up).
+      Both are bolometric, photometric only and unending. The templates state no peak, so both are
+      restated and a test holds them to the templates.
+    - Tidal disruptions: `EddingtonShare(XRAY_SHARE)` in X-rays and `EddingtonShare(1.0)`
+      photometric, from `bolometric_watts_at`; unending.
+    - Centre flares: X-rays only, `MAX_PEAK_LUMINOSITY_WATTS` and `AtMost(MAX_DURATION)`, 8,175 s;
+      `BIN_SECONDS` × `LOOK_BACK_BINS` is read only by the test that holds D under it.
+    - Star flares and FU Orionis outbursts: `PerHost`, `AtMost` their modules' `MAX_DURATION` (a
+      day; 500 years). Glitches: no light and `AtMost(Span::ZERO)`, the spin step's instant, not
+      plan 06's `RECOVERY_SPAN`, which is a timing residual.
+    - The black hole's quiescence has no row (main's note of 2026-10-29: no row from T30.b's law).
+  - _Slice._ Nine rows keep their kind, classes and route and name the task whose source fills them:
+    P11.T9 for `LuminousRedNova`, `Kilonova`, `Nova`, `DwarfNova`, `XrayTransient`, `XrayBurst` and
+    `BeXOutburst`; P06.T28.e for `GiantEruption`, whose class process is P09.T43; P06.T28.c for
+    `MagnetarBurst`. Until then their classes reach nothing (lean, 2026-10-30), which is true while
+    no event of theirs can be generated.
+  - _The tails, provisional on P09.T30.c._ The bound is the Eddington cap and the curve the tail's
+    own, so the row reads T30.b's law now and T30.c's arm once its hold is in force, provided that
+    arm keeps `min(…, L_Edd)` and `XRAY_SHARE`. The test
+    `the_galaxys_own_tails_stay_under_the_rows_bounds_under_each_rule_set` holds the fixture's own
+    tails under the bounds under the rules in force and under `every_25_hold`, so T30.c's arm meets
+    it when it lands.
+  - _Reach._ `class_reach` keeps the plan's signature and is the largest `kind_reach` of the class's
+    kinds that are not local; `kind_reach` is the largest, over the sensor's bands, of
+    `reach(bound, limits)`, √(L ÷ 4πF) at the band's detection limit capped at `ROOT_CUBE_DIAGONAL`
+    (227,023.363 ly). `reach` takes a `BandLimits`, whose detection limit is proven positive.
+    - (lean, 2026-10-30) `class_reach` takes no galaxy, so an `EddingtonShare` or `PerHost` bound
+      reaches the diagonal: the tidal-disruption class reaches it with any sensor (the centre is one
+      host), and local kinds are not walked by reach.
+    - (lean, 2026-10-30) Local kinds add nothing to their classes' reach: T5.c's "excluded from
+      distant scans by reach", for dwarf novae and X-ray bursts, is built as the route, whatever
+      their bound.
+  - _Flux._ `flux(luminosity, distance, sightline, band) -> Option<WattsPerSquareMetre>` is
+    `inverse_square_flux` × `transmission`, and `None` at no distance; the plan's single flux is
+    split so that a walk marches one line (`AlertContext::sightline`) and reads every band from it.
+    `transmission` is 10^(−0.4 `in_band`), 1 in radio, or e^(−τ_X). `reach`, `kind_reach`,
+    `inverse_square_flux` and `transmission` are public as well.
+  - _X-rays._ `XRAY_CROSS_SECTION_CM2` is 4.301 × 10⁻²³ cm², Morrison and McCammon's (1983) Table 2
+    fit at 2 keV. τ_X is 1 at `A_V` = 12.43 mag (`N_H` = 2.325 × 10²² cm⁻²) with plan 07's
+    `HYDROGEN_COLUMN_PER_MAG`; Predehl and Schmitt's (1995) 1.79 × 10²¹ would put it at 12.99 mag,
+    Güver and Özel's (2009) 2.21 × 10²¹ at 10.52.
+  - _Tests_ (pod, 4 vCPU, debug: the 20 unit tests in 1.4 s, the 7 doctests in 1.1 s).
+    `reach_grows_as_the_limit_falls_and_caps_at_the_diagonal`: `class_reach` for both supernova
+    classes in V and `kind_reach` for the centre's flares in X-rays, 61 limits from 1 to 10⁻³⁰ W
+    m⁻², the closed form to 10⁻¹⁴ under the cap and the diagonal to the bit at it.
+    `a_pinned_novas_flux_at_three_distances`: 1.257 × 10³¹ W, the Eddington luminosity of a
+    solar-mass white dwarf (Della Valle and Izzo 2020, A&A Rev. 28, 3), at 100, 1,000 and 10,000 ly,
+    bare fluxes 1.1176 × 10⁻⁶, ⁻⁸ and ⁻¹⁰ W m⁻².
+    `the_xray_depth_is_unity_at_its_stated_visual_extinction`.
+    `hot_coronal_gas_leaves_the_xray_depth_unchanged`: a 500 ly superbubble filled at 0.005 cm⁻³
+    adds 4.730 × 10¹⁸ cm⁻² of hydrogen and leaves `a_v` and τ_X the same to the bit. Acceptance:
+    `cargo test -p hyperion-sim alerts`.
+  - _Science check._ The arithmetic, the two supernova bounds against the templates, the tails'
+    bounds and the doc examples were checked. The citations (Morrison and McCammon 1983's
+    coefficients and abundances, Predehl and Schmitt 1995, Güver and Özel 2009, Wilms, Allen and
+    McCray 2000, Della Valle and Izzo 2020) match the checker's knowledge but were not read at
+    source, since the lane's pod could open no source: pending a re-check with the network.
+  - _Findings, recorded and not changed._
+    - **The 2 keV cross-section under-counts the 2–10 keV band.** The centre's flares and tails are
+      unabsorbed 2–10 keV luminosities, and photoelectric σ falls about as E^−2.5 above 2 keV
+      (Morrison and McCammon's 4.038–7.111 keV row gives 3.5 × 10⁻²⁴ cm² at 5 keV). Taking τ at 2
+      keV for the whole band under-counts the flux about 2.3 times at `A_V` = 12.4 and 7–8 times at
+      `A_V` = 30, towards the centre (science check, not re-checked at source). Design note 14 fixes
+      2 keV and this plan's Risks name one energy; it errs towards saying less. A band-averaged
+      transmission as a function of the column, or an effective energy, would replace the constant:
+      for main's ruling.
+    - **Bolometric curves in a band.** The supernova templates, the tails' bolometric light, star
+      flares and FU Orionis outbursts are bolometric, so a band's flux from them errs bright by the
+      bolometric correction: a core collapse's 10⁵–10⁶ K breakout puts a small share of its light in
+      V, so T5.b must not read the template as a V-band luminosity without a correction, or every
+      breakout is detected across the cube. A split by band is plan 09's (and plan 06's) to make.
+      The breakout's X-rays are not split out either, so an X-ray-only sensor reaches no supernova.
+    - **X-ray bursts and magnetar bursts are routed `Local`**, as T5.c and T5.e have them, though
+      the brainstorm names only flares, dwarf novae and glitches as local. Both are seen across the
+      Galaxy (an X-ray burst near a neutron star's Eddington luminosity, a magnetar's giant flare
+      far above it), so no distant sensor sees them while they are local: for main's ruling before
+      P11.T9 and P06.T28.c fill the rows.
+    - Star flares have no X-ray bound: P06.T28.a models white light only.
+  - _For T5.b–T5.e, T9 and T13._ T5.b adds `Detection`'s crate-private constructor and T5.d
+    `AlertResult`'s and `ClassCensus`'s. A glitch has no light or band, so T5.e decides what its
+    `Detection` carries. The centre's flares have `class() == None`. The shared re-observation test,
+    T9's integration test and the by-eye check need novae, so they wait on P11.T9 and T5.c. Under
+    T30.b's law the fixture's 26 unending tails stay above a sensitive sensor's limit, so T5.d would
+    report the centre's disruptions in progress at every time: it should land after P09.T30.c.
