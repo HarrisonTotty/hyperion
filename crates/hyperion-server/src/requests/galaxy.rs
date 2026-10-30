@@ -142,8 +142,9 @@ pub(crate) async fn extinction_map(
 /// members are served, through the features' gas at the request's time (P09.T40.a). A target whose
 /// ID names no
 /// system, one of a kind or layer this generator does not place yet, or one `system_motion` cannot
-/// place yet (a member of the galactic centre, at every time, the epoch included) is answered
-/// `no_such_system`, and the rest are still answered. The answer is small, so its frame is
+/// place yet (a member of the galactic centre, or a catalogue system, whose line breaks at its
+/// explosion, each at every time, the epoch included) is answered `no_such_system`, and the rest
+/// are still answered. The answer is small, so its frame is
 /// serialised on the runtime.
 ///
 /// # Errors

@@ -1,12 +1,15 @@
 //! A client's system ID placed by its origin, over a real socket (plan 07, P07.T10.c): `extinction`
 //! and `scene_ship`, and a scene framed on a feature member as its clock runs, place a grid system
 //! as the range query does and a catalogue feature's member on its own line, and refuse the
-//! galactic centre's members, at the epoch and away from it, the server answering on.
+//! galactic centre's members, at the epoch and away from it, the server answering on. `extinction`
+//! refuses a catalogue class's system too (plan 09, P09.T33.a).
 
 mod common;
 
 use common::TestServer;
-use common::origins::{GRID_SYSTEM, a_feature_member, at_years, galaxy, the_centre_s_members};
+use common::origins::{
+    GRID_SYSTEM, a_catalogue_system, a_feature_member, at_years, galaxy, the_centre_s_members,
+};
 use common::scene::{next_scene, set_ship, subscribe, universe_on};
 use hyperion_protocol::{
     BodyIdHex, DetailLevelDto, ErrorCode, ExtinctionRequest, ExtinctionTarget, FramePositionDto,
@@ -45,6 +48,7 @@ struct Origins {
     grid: SystemRecord,
     member: SystemRecord,
     centre: [SystemId; 3],
+    catalogue: SystemId,
 }
 
 impl Origins {
@@ -54,6 +58,7 @@ impl Origins {
             grid: resolved(SystemId::from_raw(GRID_SYSTEM).expect("a system ID")),
             member: *a_feature_member(galaxy).record(),
             centre: the_centre_s_members(galaxy),
+            catalogue: a_catalogue_system(galaxy),
         }
     }
 }
@@ -76,8 +81,8 @@ async fn a_client_s_system_is_placed_by_its_origin_in_every_request() {
 
 /// Run by [`a_client_s_system_is_placed_by_its_origin_in_every_request`] on its shared server: a
 /// grid target ends at `position_at`, a feature member at its line's position, and each centre
-/// member is `no_such_system`, beside the others, at the epoch and a century after it; and the
-/// next request is answered.
+/// member and a catalogue system are `no_such_system`, beside the others, at the epoch and a
+/// century after it; and the next request is answered.
 async fn extinction_ends_each_line_where_the_target_s_origin_places_it(
     server: &TestServer,
     origins: &Origins,
@@ -107,6 +112,9 @@ async fn extinction_ends_each_line_where_the_target_s_origin_places_it(
                 .centre
                 .map(|id| ExtinctionTarget::System { id: hex(id) }),
         );
+        targets.push(ExtinctionTarget::System {
+            id: hex(origins.catalogue),
+        });
         let answer = client
             .request(RequestBody::Extinction(ExtinctionRequest {
                 universe: universe.clone(),
@@ -131,8 +139,8 @@ async fn extinction_ends_each_line_where_the_target_s_origin_places_it(
             &[],
             &mut NoiseCache::with_capacity(64),
         );
-        let [grid, member, on_line, centre @ ..] = result.targets.as_slice() else {
-            panic!("six answers at {time:?}: {:?}", result.targets);
+        let [grid, member, on_line, centre @ .., catalogue] = result.targets.as_slice() else {
+            panic!("seven answers at {time:?}: {:?}", result.targets);
         };
         assert_eq!(
             *grid,
@@ -151,6 +159,11 @@ async fn extinction_ends_each_line_where_the_target_s_origin_places_it(
             centre,
             [const { TargetExtinction::NoSuchSystem }; 3],
             "the centre's members at {time:?}"
+        );
+        assert_eq!(
+            *catalogue,
+            TargetExtinction::NoSuchSystem,
+            "the catalogue system at {time:?}"
         );
     }
     let next = client

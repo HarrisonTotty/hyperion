@@ -1,6 +1,6 @@
 //! A system of each origin in a server galaxy, shared by the integration tests that place a system
 //! from a client's ID (plan 07, P07.T10.c; plan 12, P12.T6): a grid system, a catalogue feature's
-//! member, and the galactic centre's members.
+//! member, the galactic centre's members, and a catalogue class's system (plan 09, P09.T33.a).
 
 use std::sync::OnceLock;
 
@@ -58,6 +58,29 @@ pub fn a_feature_member(galaxy: &Galaxy) -> MemberRecord {
             members.first().map(|(member, _)| *member)
         })
         .expect("the feature has a member in band C")
+}
+
+/// A core-collapse entry of the class grid in the inner disc (plan 09, P09.T33.a): a catalogue
+/// system, whose line breaks at its explosion.
+pub fn a_catalogue_system(galaxy: &Galaxy) -> SystemId {
+    use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+    use hyperion_sim::galaxy::catalogue_classes::{
+        CatalogueCellKey, CatalogueClassCell, ClassId, system_of,
+    };
+
+    let process = CoreCollapseProcess::new(galaxy);
+    let entry = (8..28)
+        .map(|y| {
+            CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [0, y, 0])
+                .expect("a cell of the root cube")
+        })
+        .flat_map(|key| CatalogueClassCell::generate(galaxy, &process, key).into_entries())
+        .next()
+        .expect("the inner disc has recent deaths");
+    system_of(galaxy, entry.id())
+        .expect("an entry resolves")
+        .record()
+        .id()
 }
 
 /// The galactic centre's three kinds of member: the first member of its fullest band and cell,

@@ -40,7 +40,9 @@ use hyperion_sim::time::UniverseTime;
 ///
 /// # Errors
 ///
-/// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre, at every time.
+/// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre, and
+/// [`TraceMotionError::CatalogueMotionNotTraced`] for a catalogue system (plan 09, P09.T33.a), each
+/// at every time.
 ///
 /// # Panics
 ///
@@ -143,6 +145,28 @@ pub(crate) mod origins {
         record_of(member.record().id())
     }
 
+    /// A core-collapse entry of the class grid in the inner disc (plan 09, P09.T33.a).
+    pub(crate) fn a_catalogue_system() -> SystemRecord {
+        use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+        use hyperion_sim::galaxy::catalogue_classes::{
+            CatalogueCellKey, CatalogueClassCell, ClassId, system_of,
+        };
+
+        let galaxy = galaxy();
+        let process = CoreCollapseProcess::new(galaxy);
+        let entry = (8..28)
+            .map(|y| {
+                CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [0, y, 0])
+                    .expect("a cell of the root cube")
+            })
+            .flat_map(|key| CatalogueClassCell::generate(galaxy, &process, key).into_entries())
+            .next()
+            .expect("the inner disc has recent deaths");
+        *system_of(galaxy, entry.id())
+            .expect("an entry resolves")
+            .record()
+    }
+
     /// The first member of the centre's fullest band and cell, the black hole, and the black hole's
     /// first victim.
     pub(crate) fn the_centre_s_members() -> [SystemRecord; 3] {
@@ -170,7 +194,9 @@ pub(crate) mod origins {
 mod tests {
     use hyperion_sim::coords::LyCell;
 
-    use super::origins::{a_feature_member, a_grid_system, galaxy, the_centre_s_members};
+    use super::origins::{
+        a_catalogue_system, a_feature_member, a_grid_system, galaxy, the_centre_s_members,
+    };
     use super::*;
 
     /// The epoch, a century after it and 999 years before it.
@@ -245,6 +271,20 @@ mod tests {
                     record.id()
                 );
             }
+        }
+    }
+
+    #[test]
+    fn a_catalogue_system_is_refused_at_every_time() {
+        let galaxy = galaxy();
+        let record = a_catalogue_system();
+        assert!(matches!(record.origin(), SystemOrigin::CatalogueSystem(_)));
+        for t in times() {
+            assert_eq!(
+                system_motion(galaxy, &record, t),
+                Err(TraceMotionError::CatalogueMotionNotTraced(record.id())),
+                "{t}"
+            );
         }
     }
 }
