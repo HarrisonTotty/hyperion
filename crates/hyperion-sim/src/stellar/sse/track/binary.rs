@@ -53,6 +53,10 @@ pub(crate) const ENVELOPE_GYRATION: f64 = 0.1;
 /// k′₃ of BSE equation 35 (HPT equation 109): a core's I ÷ (M R²), an n = 3/2 polytrope.
 pub(crate) const CORE_GYRATION: f64 = 0.21;
 
+// The engine's bounds on the spin read k′₂ < k′₃, a moment of inertia of at most k′₃ M R²: the
+// wind's factor of `Engine::zero_age_spin`, and the coarse test of `decay_reaches`.
+const _: () = assert!(ENVELOPE_GYRATION < CORE_GYRATION);
+
 /// Whether `x` is positive: false for zero, a negative number and NaN.
 #[must_use]
 fn positive(x: f64) -> bool {
