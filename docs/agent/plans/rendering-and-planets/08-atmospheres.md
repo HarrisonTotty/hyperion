@@ -644,6 +644,12 @@ column's `ms-sweep-w1000-a800.case.json`, written by `reference/sweepCases.test.
 `bless.ts`) and their outputs `ms-sweep-w<ω×1000>.json` (R08.T13.b's), a cell or a point a line,
 each under 450 kB and in `.prettierignore`.
 
+### Pinned maths (`lib/pinnedMath.ts`, R08.T20)
+
+`exp`, `log`, `log2`, `log1p`, `expm1`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `cbrt`, each
+`(x: number) => number`, and `atan2(y, x)` and `pow(x, y)`: bit for bit `hyperion_base::math`'s on
+every platform. `lib/pinnedMathPaths.test.ts` lists the modules that must use them.
+
 ## Consumes
 
 Names are those the owning plans give; the owning plan is authoritative.
@@ -2114,6 +2120,9 @@ The order:
   T4.a's colour pipeline and T9.b's surface lighting; T18.b needs T14.f, T16.b and the solver's
   thermal source. T19 needs P14.T49.a's fixture and
   T5.b, and grows with the registry. Both precede T17. T17 closes.
+  P14.T24.d is on the wire. T18 needs T6, T9, T14 and T16.b. T19 needs P14.T49.a's fixture and
+  T5.b, and grows with the registry. Both precede T17. A task that adds a committed table after T20
+  computes it through `lib/pinnedMath.ts`. T17 closes.
 
 Some tasks wait on the owner or on another plan, and say so where they do:
 
@@ -6017,6 +6026,20 @@ JSON import, and fails if:
   2005's ideal-gas tables run 1 ÷ Z² high.
 
 Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/parity`.
+
+### R08.T20 The client's optics on pinned math
+
+(Assigned by main, 2026-10-29: hold the committed tables bit-exact, with no tolerance, and pin the
+math.) The client's committed-table tests failed on macOS arm64 and passed on Linux x86-64: V8's
+`**` calls the platform's `pow`, and its fdlibm port is built with fused multiply-adds on arm64.
+`lib/pinnedMath.ts` ports `libm` 0.2.16's transcendentals line for line; every module that feeds a
+committed table computes through it; the tables are re-blessed on Linux by test name. Tests:
+`hyperion-base`'s `tests/client_math_golden.rs` writes `libm`'s values to
+`golden/math/client_pairs.golden`, which `lib/pinnedMath.test.ts` holds bit for bit;
+`lib/pinnedMathPaths.test.ts` scans the modules' text.
+
+Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/lib/pinnedMath`,
+`cargo test -p hyperion-base --test client_math_golden` and the gate; the owner's macOS run.
 
 ### R08.T17 Verification pass
 
@@ -23510,3 +23533,14 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     cut-off splits. Plan conformance's corrections are made above.
   - _Gate._ `just smart-ci 37cc73fa8` ran over this tree. The laptop's failing goldens pass in the
     pod.
+- **R08.T20, for the next task** (2026-10-30).
+  - `lib/pinnedMath.ts` gives `exp`, `log`, `log2`, `log1p`, `expm1`, `sin`, `cos`, `tan`, `asin`,
+    `acos`, `atan`, `atan2(y, x)`, `cbrt` and `pow(x, y)`, bit for bit `libm` 0.2.16's. A module
+    that feeds a committed table, and every test that writes one through `bless.ts`, uses them, not
+    `Math`'s or a `**` but `** 2` and `** 0.5`, and joins `lib/pinnedMathPaths.test.ts`'s list
+    (the scan fails on an unlisted bless writer).
+  - `hyperion_testkit::golden::f64_word_digest`: a new 32-bit digest a JavaScript test recomputes.
+  - Left undone: the tracer's four references and eight sweep outputs were traced from the cases
+    before their re-bless and not re-traced (each sweep output's `caseSha256` names the old case
+    text); `negligible.ts` and `src/tools/` still use V8's maths; the owner's macOS run.
+  - 1990ecd fails the table tests until cecae9b re-blesses them: land the two together.
