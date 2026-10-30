@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GpuProcessGoneReport, GraphicsLaunchMode } from "../../preload/api";
 import { GPU_PROCESS_GONE_CHANNEL } from "../../preload/graphicsLaunch";
+import { CRASH_LOOP_WINDOW_MS } from "./crashLoop";
 import {
   type ChildProcessGoneDetails,
   GpuProcessMonitor,
@@ -168,6 +169,27 @@ describe("the GPU-process monitor", () => {
       [
         "views check: FAIL the GPU's feature status dropped Vulkan or WebGPU (the GPU process crashed 1 times)",
       ],
+    ]);
+  });
+
+  it("names the crashes where three spread past the window precede the drop that ends a views check", () => {
+    const lines: string[] = [];
+    const { app, tick } = monitor("vulkan", [], (line) => lines.push(line));
+    app.infoUpdate();
+    // Three crashes, the first and third more than the window apart: no loop of crashes.
+    for (let crash = 0; crash < 3; crash += 1) {
+      tick(CRASH_LOOP_WINDOW_MS / 2 + 1_000);
+      app.gone("GPU");
+      app.infoUpdate();
+    }
+    const exitsBeforeTheDrop = [...app.exits];
+    app.featureStatus = { vulkan: "disabled_off", webgpu: "enabled" };
+    app.infoUpdate();
+    // The status's drop made the loop, and the line names the crashes (the lean of 2026-10-29).
+    expect([exitsBeforeTheDrop, app.exits, lines]).toEqual([
+      [],
+      [1],
+      ["views check: FAIL the GPU process crashed 3 times"],
     ]);
   });
 

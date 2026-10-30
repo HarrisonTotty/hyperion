@@ -22916,8 +22916,9 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     `views check: FAIL the GPU's feature status dropped Vulkan or WebGPU (the GPU process crashed <n> times)`
     (lean, 2026-10-29: the policy's decision does not carry its cause, and its API is left as it
     is; three crashes spread over more than its window with the status dropped read as the
-    crashes'). Safe and default modes, which never relaunch, are unchanged. Every views-check run
-    kind takes it; a spike launch still relaunches.
+    crashes'; a monitor test pins that case's line, 2026-10-30). Safe and default modes, which
+    never relaunch, are unchanged. Every views-check run kind takes it; a spike launch still
+    relaunches.
 - **Deviations in T18.a, as built** (2026-10-29; lane `r08-glow`; the split is the task entry's).
   Client only: no generated output, no `GENERATOR_VERSION` (23), `PROTOCOL_VERSION` (3) or
   `ATMOSPHERE_OPTICS_VERSION` change, and no golden moves.
