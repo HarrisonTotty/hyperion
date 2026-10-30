@@ -1266,12 +1266,36 @@ as built"._
   only a disrupted victim adds a tail (updated 2026-10-15). `luminosity_at(t)` = quiescence +
   flares + the t^(−5⁄3) tails of the disruptions in the horizon, by looking back over their bins
   with this task's own look-back (T30.a's disruptions look back 0 bins). Tests: a victim resolves
-  from its ID and is at pericentre at the event time; 0.3–3 × 10³⁹ erg/s a thousand years after a
-  disruption (Ponti et al. 2010); the Kepler members' loss cone stays empty; at Milky Way values
-  every main-sequence victim is disrupted.
+  from its ID and is at pericentre at the event time; a Sun-like tail follows its closed forms; at
+  Milky Way values the centre is at or below Ponti et al.'s 10³⁶ erg/s at the epoch in most seeds;
+  the Kepler members' loss cone stays empty; at Milky Way values every main-sequence victim is
+  disrupted (updated 2026-10-30 by P09.T30.c, from "0.3–3 × 10³⁹ erg/s a thousand years after a
+  disruption (Ponti et al. 2010)": the light echoes measure short outbursts, not a tail).
 
   _Done (lane `p09-victims`, 2026-10-29, at `GENERATOR_VERSION` 23, no output moved): see Risks,
   "P09.T30.b as built", and the findings after it._
+
+- **P09.T30.c The centre's quiescence** (added 2026-10-30: the research lane `research-p09-t30b`'s
+  advice on P09.T30.b's findings 1 and 2, §1 and §2, as main ruled it on 2026-10-29). A disrupted
+  victim's tail radiates `ε Ṁ c²`, at most L_Edd, with an efficiency that falls with its fallback
+  rate `ṁ = Ṁ ÷ Ṁ_Edd`, `Ṁ_Edd = 10 L_Edd ÷ c²`: Xie and Yuan's (2012, MNRAS 427, 1580, Table 1,
+  equation 11) hot-flow fit at δ = 0.5, α = 0.1 and s = 0.4, `ε = ε₀ (ṁ ÷ 10⁻²)^a` with
+  `(ε₀, a)` = (1.58, 0.65), (0.055, 0.076) and (0.17, 1.12), each range between where it meets
+  its neighbours (2.8802 × 10⁻⁵ and 3.3929 × 10⁻³), and η = 0.1 from where the top range reaches
+  it (6.2265 × 10⁻³), so that ε is continuous and non-decreasing. The tails do not end, and
+  `peak_luminosity_watts` takes the same efficiency at the peak rate. The law moves
+  `galaxy/features/centre_luminosity`, so it is built behind a hold of its own in `GalaxyRules`
+  (decision-galaxy-25-train §1): `CENTRE_QUIESCENCE_VERSION` = 25 with its tripwire, and a field
+  whose `of_version(25)` arm is the new law, which `every_25_hold()` includes. Tests: at 23 no
+  golden moves; under every 25 hold only `centre_luminosity` moves, its moved figures recorded; a
+  Sun-like tail follows its closed forms, without Ponti's bracket; over T30.b's 200 seeds at Milky
+  Way values the centre is at most 10³⁶ erg/s at the epoch (Ponti et al. 2010) in at least half
+  the seeds under 25's rules, and under 23's law in 1 of 200, pinned. Recorded as gaps, not
+  built: the echoes' short outbursts; partial disruptions' steeper t^(−9⁄4) tails; a 2–10 keV
+  share that should fall at very low rates (Sgr A*'s own C_X is about 190–380, not 15.8).
+
+  _Done (lane `p09-t30c`, 2026-10-30, behind its hold at `GENERATOR_VERSION` 23, no output moved):
+  see Risks, "P09.T30.c as built", and its gaps._
 
 #### P09.T31 Centre tests
 
@@ -1595,12 +1619,14 @@ _Done (issue #74, 2026-10-22, at `GENERATOR_VERSION` 22): see Risks, "P09.T44 as
 
 ## Generator version
 
-This plan changes generated output four times, each a bump with regenerated goldens: P09.T2.c (the
+This plan changes generated output five times, each a bump with regenerated goldens: P09.T2.c (the
 field gives up φ), P09.T28.b (the Kepler regime and the grid's loss cone), P09.T28.d (the secular
-rates, away from the epoch only), P09.T35 (the supernova and luminous-blue-variable carve-outs,
-layer D's ancient share and the hypervelocity class's weight). T28.b and T28.d ride version 25 (S1),
-and T35 and T2.c (with rendering plan R06's R06.T16.a) ride 26 (S2); each boards a later train if
-not ready (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). It reserves, so that later
+rates, away from the epoch only), P09.T30.c (the disruption tails' falling efficiency, ruled
+2026-10-29), P09.T35 (the supernova and luminous-blue-variable carve-outs, layer D's ancient share
+and the hypervelocity class's weight). T28.b, T28.d and T30.c ride version 25 (S1), each behind a
+`GalaxyRules` hold until the bump, and T35 and T2.c (with rendering plan R06's R06.T16.a) ride 26
+(S2); each boards a later train if not ready (decision-bump-plan-after-22, 2026-10-14; updated
+2026-10-15). It reserves, so that later
 plans move nothing: the `ClassId` values 2, 3, 5, 6 and 8 for plan 11 and the rule that
 feature-level lists append classes in the list order of design note 16; event tags 0x0203–0x02FF of
 this plan's block; the `10` sub-kinds `01` and `10` for plan 10 (`11` stays rejected);
@@ -3961,7 +3987,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
      the fixture), 9.7% inside (5 of the fixture's 26), pinned as they stand. Ponti et al. 2010
      state no band (their figure is Terrier et al. 2010's 1–100 keV) and no disruption; Ponti et
      al.'s 2013 review (§4.4) has flares "of the order of 10³⁹ erg s⁻¹ or higher, between ∼100
-     and ∼1000 years ago". Lean: the bracket stays on the Sun-like star.
+     and ∼1000 years ago". Lean: the bracket stays on the Sun-like star. _Ruled 2026-10-29 and
+     built in P09.T30.c: the bracket applies to neither; see "P09.T30.c as built"._
   2. _The tails at late times._ η = 0.1 is SM16's figure for super-Eddington accretion. A tail is
      below a tenth of Eddington after about five years and at 1.3 × 10⁻⁵ of it by 1,000, where
      low-luminosity nuclei radiate "much less than the canonical value of 0.1" (Ho 2009). With
@@ -3969,7 +3996,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
      fixture at 3.47 × 10³⁸ now, 10⁵ times Sgr A*'s 3.6 × 10³³; Ponti et al. 2010 put Sgr A*
      below 8 × 10³⁵ erg/s until 60–90 years ago. Lean: the plan's law stands now; a ruling may let
      η fall with Ṁ below about 10⁻² Ṁ_Edd (an advection-dominated law, not checked) or end the
-     tails, a version bump.
+     tails, a version bump. _Ruled 2026-10-29 and built in P09.T30.c, behind its 25 hold: Xie
+     and Yuan's falling efficiency, the tails not ended._
   3. _Weights and β (leans)._ A victim's class is drawn by its count over the whole cluster, not
      by the loss-cone flux, which favours stars near the influence radius; β is 1, not SM16's
      pinhole tail. Neither moves a figure the plan names.
@@ -4246,6 +4274,155 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `request_kinds_are_pinned` and the envelope's walk over every kind; the server's
     `kinds_without_a_handler_are_answered_unsupported`, now over nine kinds, and over the WebSocket
     `a_feature_kind_is_answered_unsupported_until_it_is_served`.
+- **P09.T30.c as built (lane `p09-t30c`, 2026-10-30, at `GENERATOR_VERSION` 23; the research lane
+  `research-p09-t30b`'s advice, §1 and §2, as main ruled it on 2026-10-29; decision-galaxy-25-train
+  §1).** Built behind its hold, `CENTRE_QUIESCENCE_VERSION` = 25, so no output moves at 23:
+  `golden_diff.py --base` the lane's base finds no golden changed. Files:
+  `galaxy/features/centre/events/luminosity.rs`, `events/luminosity/centre_quiescence_hold.rs`
+  (new, the hold's tests), `events/victims.rs` and `galaxy/rules.rs`; the brainstorm's centre
+  paragraph (its own commit, as ruled) and this plan's T30.b test sentence and Generator version.
+  Finding 2 of P09.T30.b is closed by it, and finding 1 as its record says.
+  - _The hold (E1–E6)._ `luminosity::{CENTRE_QUIESCENCE_VERSION, CentreQuiescenceRules}`
+    (`ConstantEfficiency`, held; `HotFlow`), crate-private, and `GalaxyRules::centre_quiescence`,
+    which `every_25_hold()` turns on with nothing to edit. It is read through the `Galaxy` (E1)
+    where its victims are drawn, `CentreVictims::new` and `one`, so `CentreLuminosityModel::new`
+    and `of` and `CentreMemberSource::new` take it; each `DisruptionTail` carries its galaxy's arm.
+    It reaches no memo of the galaxy (the centre's model holds no victim), so `Galaxy::with_rules`
+    needs no reset for it, and it feeds no static (E2), table (E3) or wire type (E5). _One call
+    site, not the advice's two (lean):_ the private `DisruptionTail::accreted_watts(rate)`, a
+    `match` whose held arm is the old expression verbatim, `RADIATIVE_EFFICIENCY * rate * c * c`
+    in the same order, which `bolometric_watts_at` and `peak_luminosity_watts` share, so the bump
+    deletes one `match`. `Galaxy`'s `Debug` text gains `centre_quiescence: ConstantEfficiency`,
+    and a tail's `Debug` and equality its arm; no persisted digest reads either.
+  - _Doors (lean)._ The crate-private `DisruptionTail::new_with_rules` and
+    `CentreVictims::from_parts_with_rules` take the arm; the public `DisruptionTail::new` and
+    `CentreVictims::from_parts`, which take no galaxy, take the generator version's
+    (`GalaxyRules::of_version(GENERATOR_VERSION)`), the held arm until the bump and the one law
+    after. `radiative_efficiency(eddington_ratio)`, `HOT_FLOW_EFFICIENCY` and
+    `HOT_FLOW_RATE_SCALE` are crate-private until the bump, and `EDDINGTON_RATE_PER_WATT`
+    (`10 ÷ c²`, Xie and Yuan's `Ṁ_Edd = 10 L_Edd ÷ c²`) private.
+  - _The law._ `ε(ṁ) = min(η, max(min(ε₁, ε₂), ε₃))`, `εᵢ = ε₀ (ṁ ÷ 10⁻²)^a`: the advice's
+    piecewise form exactly (each range between where it meets its neighbours, 2.8802 × 10⁻⁵ and
+    3.3929 × 10⁻³, η from 6.2265 × 10⁻³), continuous and non-decreasing by construction, so a
+    tail's light falls monotonically from t_fb. Three `powf` a call, where the piecewise form
+    would take one; nothing reads it on a hot path.
+  - _Census C1, what moves under every 25 hold_ (the fixture `0x0926_0000`, against the held
+    arm). The victims do not move: records, stars, outcomes, orbits, and the tails' timing and
+    peaks, since every peak at the Milky Way's black hole is above the switch (15 Eddington rates
+    for a Sun-like star). Of the `centre_luminosity` golden's 52 values 33 move, every one
+    finite and fainter, and no other: a Sun-like tail at 100, 1,000 and 10⁵ yr, 2.0968 × 10⁴⁰ →
+    9.3276 × 10³⁹, 4.5175 × 10³⁸ → 9.5944 × 10³⁷ and 2.0968 × 10³⁵ → 3.0340 × 10³² erg/s (its
+    1-yr and 10-yr values do not: it is η's for its first 24.9 yr); and the tails and totals at
+    all fifteen instants, by 0.028–0.39, the fixture's at −1,000, 0 and +1,000 yr 4.0174 ×
+    10³⁹ → 1.5726 × 10³⁹, 3.4676 × 10³⁸ → 6.0033 × 10³⁷ and 1.3674 × 10³⁸ → 1.2468 × 10³⁷
+    erg/s (totals). The flares, the Eddington luminosity and the fallback time do not move. The
+    new arm's values have the digest `0xacdcf23d013fd38e` (x86-64). A Sun-like tail falls to the
+    quiescence 4.0677 × 10⁴ yr on, where η takes 1.1459 × 10⁶.
+  - _Ponti et al.'s limit_ (2010: at most 10³⁶ erg/s, the mean over the last 60–90 years), at the
+    epoch over P09.T30.b's 200 seeds at Milky Way values, quiescence, flares and tails: under every
+    25 hold 149 seeds are within it (the least 4.544 × 10³³, median 9.574 × 10³⁴, 90th percentile
+    1.719 × 10³⁷ erg/s; 35 at or below 10³⁴ and 134 at or below 3.5 × 10³⁵, the limit in 2–10 keV
+    if it is Terrier et al.'s 1–100 keV); under the held law 1 is (the least 9.211 × 10³⁵, median
+    9.170 × 10³⁶, 90th percentile 1.686 × 10³⁸). The greatest, 3.421 × 10⁴³ under either, is a
+    seed disrupting a star in the year before the epoch. The counts are the research probe's,
+    with the flares in.
+  - _The drawn tails a thousand years on_, re-pinned as they stand: over the 200 seeds' 5,524,
+    a median of 8.199 × 10³⁷ erg/s and 538 in the old 0.3–3 × 10³⁹ under η, 5.742 × 10³⁶ and 35
+    under the hot flow; the fixture's 26, a median of 7.472 × 10³⁷ under η.
+  - _Checks of the law._ At EHT 2022 Paper V's rates for Sgr A*, 5.2 and 9.5 × 10⁻⁹ M☉/yr, it
+    gives 1.7629 and 4.7651 × 10³⁵ erg/s bolometric, 3.86 and 1.93 times below EHT's 6.8 and
+    9.2 × 10³⁵. Xie and Yuan's Eddington rate at the fixture's black hole is 6.0146 × 10²¹ kg/s
+    (0.095456 M☉/yr). A peak below the switch is lowered: a 1 M☉, 10 R☉ star at 10⁸ M☉ peaks at
+    4.2 × 10⁻³ Eddington rates, at 0.6494 of η's light; `peak_luminosity_watts` is a tail's light
+    at t_fb under either arm.
+  - _Deviations (leans, 2026-10-30)._ (1) The Ponti test is in the fast tier, not the slow one
+    the lane's brief named: its 200-seed sweep takes about 2 s in the test profile (pod, 8 vCPU),
+    as T30.b's own sweep does, so it runs in every gate and in the wasip1 suite. (2) It reads
+    `luminosity_at`'s total, the flares in, where the probe left them out; the counts are the
+    same. (3) It tests an instant, the epoch, against a mean over 60–90 years, as ruled. (4) _D1._
+    No extension pre-pin: `centre_luminosity`, blessed at 23, already pins the region the hold
+    moves (a Sun-like tail at five times, the fixture's tails and totals at fifteen instants), and
+    the hold leaves it byte-identical. (5) The hold's constant is `CENTRE_QUIESCENCE_VERSION`, as
+    the lane's brief named it, not the advice's `TAIL_EFFICIENCY_VERSION`. (6) The EHT check's
+    bracket, 1.9–4.0, holds the measured 1.93 and 3.86, which the advice rounds to "2–4 times";
+    EHT's §6 gives 6.8–9.8 × 10³⁵ erg/s where its abstract gives 6.8–9.2, and unpaired the ratio
+    spans 1.4–5.2 (science check). Against EHT's own efficiency, (1.3–3.0) × 10⁻³, the law's
+    6.0–8.9 × 10⁻⁴ is 1.5–5 times lower.
+  - _The fast suite._ The hold's six tests and the module's three new ones add 10.7 s of test time
+    (pod, 8 vCPU; the renamed closed-form test went from 1.8 s to 1.1 s), most of it the fixture
+    galaxy that each of nextest's processes builds; the slowest, the drawn tails' and Ponti's
+    sweeps, take 2.4 s each. The centre's, the members' and the rules' tests, under
+    `cargo nextest run -p hyperion-sim --lib` over `features::centre`, `features::members` and
+    `galaxy::rules`: 122 passed, 45.6 s.
+  - _Tests (as run)._ In `luminosity::tests`: `a_sun_like_tail_follows_its_closed_forms` (from
+    T30.b's `a_thousand_years_after_a_disruption_its_tail_gives_ponti_s_luminosity`, without the
+    bracket, under both arms: dark before t_fb, Eddington's share at it, half the star back, the
+    rate's t^(−5⁄3), the light's t^(−5⁄3) under η and `Ṁ^1.65` on the lowest range under the hot
+    flow, the research's six figures a tail),
+    `the_drawn_tails_a_thousand_years_on_are_pinned_as_they_stand`,
+    `the_hot_flow_s_efficiency_is_xie_and_yuan_s_fit_made_continuous` (the switches, the published
+    bounds within 1% and 3%, the 2.9% dip the printed bounds would leave, each range between its
+    switches, η above, continuity, non-decreasing over 10⁻¹²–10² Eddington rates on 140,001
+    points, EHT's check) and `a_tail_s_light_falls_from_its_peak_under_either_efficiency`;
+    `centre_luminosity_is_pinned` writes `centre_luminosity_entries`, the same bytes. In
+    `luminosity/centre_quiescence_hold.rs`: the tripwire,
+    `the_centre_s_quiescence_is_held_only_until_the_25_bump` (E6, with the doors that take no
+    galaxy on the version's arm); `the_hot_flow_moves_only_the_centre_s_luminosity_pinned` (D2
+    and C1 above; `CentreVictims::one`, `resolve`'s door, equal to the list's victim at every
+    index under the new arm); `the_hot_flow_s_law_beyond_the_golden_is_pinned` (a second digest,
+    `0x7fe1828ba0fad5a7`, of `radiative_efficiency` inside each range and above the switch and of
+    the 10 R☉ tail's peak and its light ten fallback times on, where the golden does not reach;
+    both pinned tests run in the wasip1 suite by their names);
+    `the_hot_flow_gives_the_same_seed_the_same_light_twice_and_in_any_order` (D4: a galaxy built
+    under every 25 hold equals the fixture given them, its victims and light to the bit, and
+    `assert_order_independent` over 119 instants); and
+    `at_milky_way_values_the_centre_is_within_ponti_s_limit_at_the_epoch_in_most_seeds`. In
+    `galaxy/rules.rs`, `each_hold_turns_on_at_its_version` covers the field.
+  - _D5._ The new arm adds three `powf` a tail on its path. Run by name on the pod before the
+    gate, the module's 14 tests and the rules' 2 pass on wasip1 under wasmtime 49.0.1 (the two
+    pinned tests in 2.2 s and 0.4 s), with both digests blessed natively on x86-64; the gate's
+    wasip1 suite runs them again.
+  - _Reviews._ The Rust, determinism, plan-conformance and science reviews' fixes are in: plain
+    code, not links, for the crate-private names in public docs (rustdoc's private links); the
+    units in the rates' names; `one` and the law beyond the golden pinned under the new arm; and
+    the science check's corrections, some of them to the advice (the outbursts' energy, the
+    debris's apocentres, where a peak falls below the switch, Ho's quote, the switch's place
+    against Maccarone's range and Xie and Yuan's two-phase flow). It could not reach Nowak et al.
+    2012's 3.6 × 10³³ erg/s (P09.T30.b's quiescence, unchanged here) at source. _For main (lean:
+    keep the ruled text):_ the brainstorm's "radiatively inefficient once the fallback falls below
+    a few thousandths of Eddington's rate" is the label of the regime, but at δ = 0.5 the law is
+    only 2–3 times below η at 10⁻³–3 × 10⁻⁵ Eddington rates ("the efficiency of ADAFs is not as
+    low as people sometimes imagine", Xie and Yuan 2012, §4.1), and 10 times below near 4 × 10⁻⁶.
+  - _For P12.T5.a._ The tails' bound is still `DisruptionTail::peak_luminosity_watts`, exact
+    under either arm; their duration still the horizon (`TAIL_LOOK_BACK_BINS`), though from 25 a
+    Sun-like tail is below the quiescence some 4 × 10⁴ yr on; their light curve
+    `DisruptionTail::luminosity_watts_at`. Plan 12's text is not changed here.
+  - _Gaps (recorded, not built; the advice's, as main ruled)._ (1) _The echoes' outbursts_: about
+    10³⁹ erg/s for a few to ten years, 10⁴⁷ erg or so each (the Bridge's fluence is about
+    10⁴⁸ n₃⁻¹ erg, Churazov et al. 2017, MNRAS 465, 45), a 5–10% duty cycle over the past
+    millennium (Ponti et al. 2015, MNRAS 453, 172, §8.4.3, after Ponti et al. 2013; Clavel et al.
+    2013; Terrier et al. 2018, A&A 612, A102), of unsettled cause: neither T30.a's
+    flares (at most 3.6 × 10³⁵ erg/s and 8,175 s) nor T30.b's tails; a candidate for a later centre
+    task. (2) _Partial disruptions' steeper tails_: t^(−9⁄4) when a core survives (Coughlin and
+    Nixon 2019, ApJL 883, L17), n ≃ −2.2 for about half of all disruptions (Guillochon and
+    Ramirez-Ruiz 2013, ApJ 767, 25); at β = 1 a γ = 4⁄3 Sun-like star is only partly disrupted
+    (Stone and Metzger 2016, §3), and 24% of the drawn victims are above 0.5 M☉. It needs a drawn
+    β, new draw words and a bump. (3) _An X-ray share that falls at very low rates_: Ho's
+    C_X = 15.8 is extrapolated below about 10⁻⁶ L_Edd and errs bright there; Sgr A*'s own is about
+    190–380 (EHT 2022's L_bol over Baganoff et al. 2003's and Nowak et al. 2012's L_X), and with
+    300 below 10⁻⁷ L_Edd the research probe's median at the epoch falls about elevenfold. A share
+    that falls with ṁ needs a sourced law and a ruling. Two assumptions are also unchecked at
+    source: that accretion follows the fallback in the thin-disc phase (≲25 yr), where the viscous
+    time at 2 r_t is of order 10 yr; and that debris returning after 10³–10⁵ yr, from apocentres of
+    0.16–3.4 pc (semi-major axes of 0.08–1.7 pc, where the advice took them for apocentres), does
+    so ballistically through Sgr A*'s gas.
+  - _For the 25 wiring (C2)._ Delete in its own checkpoint, blessed at 24:
+    `CENTRE_QUIESCENCE_VERSION`, `CentreQuiescenceRules` with `ConstantEfficiency`,
+    `GalaxyRules::centre_quiescence`, the `match` in `accreted_watts`, the tail's `rules` field,
+    the doors `new_with_rules` and `from_parts_with_rules` (folded into `new` and `from_parts`)
+    and the tripwire. `centre_luminosity` moves, its 33 values as above and no other golden; the
+    hold's tests become the version's (the digest, the 149 and the 33 stay; the held arm's pins,
+    the 1 of 200 among them, go).
 - **Deferred findings (2026-10-13 rule)**, from P12.T5.a.2 (main's ruling of 2026-10-30; plan 12's
   Risks, "P12.T5.a.2's citations, checked at source"). Recorded and deferred, not built; nothing in
   this plan changes with them.

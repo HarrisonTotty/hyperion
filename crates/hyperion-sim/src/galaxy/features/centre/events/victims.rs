@@ -42,7 +42,8 @@
 //! recorded as its [`DisruptionOutcome`], never dropped: every disruption keeps its ID, its time
 //! and its victim. At the Milky Way's 4.3 × 10⁶ M☉ every star the centre holds is disrupted (an M
 //! dwarf of 0.1 M☉ and 0.12 R☉ has a Hills mass near 1.5 × 10⁷ M☉). Only a disrupted victim has a
-//! tail ([`luminosity`](super::luminosity)).
+//! tail ([`luminosity`](super::luminosity)), which radiates under its galaxy's rules
+//! (`GalaxyRules::centre_quiescence`, P09.T30.c's hold).
 //!
 //! # The orbit
 //!
@@ -75,6 +76,7 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::GENERATOR_VERSION;
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::events::{EventId, TimeWindow};
 use crate::galaxy::features::centre::classes::{CentreClass, CentreClassKind, age_components};
@@ -83,6 +85,7 @@ use crate::galaxy::features::centre::{BuildCentreError, CentreModel};
 use crate::galaxy::imf::MassFunction;
 use crate::galaxy::motion::{KeplerOrbit, MotionState, StateAt, full_scan_radius};
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
+use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{CentreMemberId, MemberSlot, SystemId};
 use crate::math;
@@ -101,7 +104,7 @@ use super::disruptions::{
     BuildTidalDisruptionModelError, TidalDisruption, TidalDisruptionModel, disruption_rate,
     tidal_disruptions,
 };
-use super::luminosity::DisruptionTail;
+use super::luminosity::{CentreQuiescenceRules, DisruptionTail};
 
 /// The words of a disruption's event stream its victim's orbit takes, words 0–2: the
 /// pericentre's direction (two uniforms) and the angle of the velocity about it (one).
@@ -459,18 +462,20 @@ impl CentreVictims {
         galaxy: &Galaxy,
         centre: &CentreModel,
     ) -> Result<Self, BuildTidalDisruptionModelError> {
-        Self::from_parts(
+        Self::from_parts_with_rules(
             galaxy.seed(),
             galaxy.params().black_hole().mass(),
             centre,
             galaxy.mass_function(),
+            galaxy.rules().centre_quiescence,
         )
     }
 
     /// The victims of a black hole of `black_hole_mass` in the universe of `seed`, drawn from the
     /// living classes of `centre` with initial masses on `mass_function`: what [`new`](Self::new)
     /// builds from a galaxy's seed, black hole, centre and mass function, so that a test can sweep
-    /// seeds and masses about one centre.
+    /// seeds and masses about one centre. Their tails radiate as the generator version's
+    /// galaxies' do.
     ///
     /// # Errors
     ///
@@ -481,12 +486,42 @@ impl CentreVictims {
         centre: &CentreModel,
         mass_function: &dyn MassFunction,
     ) -> Result<Self, BuildTidalDisruptionModelError> {
+        Self::from_parts_with_rules(
+            seed,
+            black_hole_mass,
+            centre,
+            mass_function,
+            GalaxyRules::of_version(GENERATOR_VERSION).centre_quiescence,
+        )
+    }
+
+    /// [`from_parts`](Self::from_parts), with tails that radiate under `rules`, a galaxy's
+    /// (P09.T30.c's hold).
+    ///
+    /// # Errors
+    ///
+    /// As [`TidalDisruptionModel::new`].
+    pub(crate) fn from_parts_with_rules(
+        seed: Seed,
+        black_hole_mass: SolarMasses,
+        centre: &CentreModel,
+        mass_function: &dyn MassFunction,
+        rules: CentreQuiescenceRules,
+    ) -> Result<Self, BuildTidalDisruptionModelError> {
         let model = TidalDisruptionModel::new(seed, black_hole_mass)?;
         let (classes, weights) = living_classes(centre);
         let victims = (1..=u16::MAX)
             .zip(horizon_disruptions(&model))
             .map(|(index, disruption)| {
-                victim_of(&model, &classes, &weights, mass_function, disruption, index)
+                victim_of(
+                    &model,
+                    &classes,
+                    &weights,
+                    mass_function,
+                    disruption,
+                    index,
+                    rules,
+                )
             })
             .collect();
         Ok(Self { model, victims })
@@ -519,6 +554,7 @@ impl CentreVictims {
             galaxy.mass_function(),
             disruption,
             index,
+            galaxy.rules().centre_quiescence,
         )))
     }
 
@@ -663,7 +699,7 @@ fn living_classes(centre: &CentreModel) -> (Vec<CentreClass>, Vec<f64>) {
 }
 
 /// The victim of `disruption` in `model`, at list index `index`, its star drawn from `classes` by
-/// `weights` (module documentation).
+/// `weights` (module documentation), its tail radiating under `rules`.
 #[must_use]
 fn victim_of(
     model: &TidalDisruptionModel,
@@ -672,6 +708,7 @@ fn victim_of(
     mass_function: &dyn MassFunction,
     disruption: TidalDisruption,
     index: u16,
+    rules: CentreQuiescenceRules,
 ) -> TidalDisruptionVictim {
     let black_hole_mass = model.black_hole_mass();
     let word = disruption.id().word();
@@ -717,11 +754,12 @@ fn victim_of(
         .map(|c| c / METRES_PER_SECOND_PER_KILOMETRE_PER_SECOND);
     let member = CentreMemberRecord::from_parts(record, star.class, composition, velocity_km_s);
     let tail = match outcome {
-        DisruptionOutcome::Disrupted => Some(DisruptionTail::new(
+        DisruptionOutcome::Disrupted => Some(DisruptionTail::new_with_rules(
             disruption.time(),
             black_hole_mass,
             star_mass,
             star_radius,
+            rules,
         )),
         DisruptionOutcome::SwallowedWhole => None,
     };

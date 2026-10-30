@@ -19,6 +19,11 @@
 //!   walks' pad for the orbits.
 //! - [`kepler_secular`](GalaxyRules::kepler_secular), at [`KEPLER_SECULAR_VERSION`] (plan 09,
 //!   P09.T28.d.b): the exact orbit in the centre's potential for a Kepler-regime orbit bound in it.
+//! - [`centre_quiescence`](GalaxyRules::centre_quiescence), at [`CENTRE_QUIESCENCE_VERSION`] (plan
+//!   09, P09.T30.c): the radiative efficiency of the black hole's disruption tails, falling with
+//!   their fallback rate. It is read where a galaxy's victims are drawn (`CentreVictims::new` and
+//!   `one`), into each tail, and reaches none of the galaxy's memos, so `Galaxy::with_rules` need
+//!   not reset them for it.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -27,6 +32,9 @@
 //! inside [`StellarRules`].
 
 use crate::GeneratorVersion;
+use crate::galaxy::features::centre::events::luminosity::{
+    CENTRE_QUIESCENCE_VERSION, CentreQuiescenceRules,
+};
 use crate::galaxy::motion::{
     KEPLER_REGIME_VERSION, KEPLER_SECULAR_VERSION, KeplerRegimeRules, KeplerSecularRules,
 };
@@ -42,6 +50,8 @@ pub(crate) struct GalaxyRules {
     /// The law a Kepler-regime orbit follows: the two-body law, or its exact orbit in the centre's
     /// potential (P09.T28.d.b).
     pub(crate) kepler_secular: KeplerSecularRules,
+    /// The efficiency the black hole's disruption tails radiate at (P09.T30.c).
+    pub(crate) centre_quiescence: CentreQuiescenceRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -61,6 +71,11 @@ impl GalaxyRules {
                 KeplerSecularRules::Spherical
             } else {
                 KeplerSecularRules::TwoBody
+            },
+            centre_quiescence: if version.get() >= CENTRE_QUIESCENCE_VERSION.get() {
+                CentreQuiescenceRules::HotFlow
+            } else {
+                CentreQuiescenceRules::ConstantEfficiency
             },
             stellar: StellarRules::of_version(version),
         }
@@ -165,6 +180,15 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_25_hold().kepler_secular,
             KeplerSecularRules::Spherical
+        );
+        let quiescence = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).centre_quiescence;
+        assert_eq!(quiescence(23), CentreQuiescenceRules::ConstantEfficiency);
+        assert_eq!(quiescence(24), CentreQuiescenceRules::ConstantEfficiency);
+        assert_eq!(quiescence(25), CentreQuiescenceRules::HotFlow);
+        assert_eq!(quiescence(26), CentreQuiescenceRules::HotFlow);
+        assert_eq!(
+            GalaxyRules::every_25_hold().centre_quiescence,
+            CentreQuiescenceRules::HotFlow
         );
         assert_eq!(
             GalaxyRules::every_25_hold().stellar,
