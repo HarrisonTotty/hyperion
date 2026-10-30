@@ -23665,6 +23665,9 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
   - Left undone: `ATMOSPHERE TEST`'s thick bodies (a worker must build their media), so the flight
     past them, R08.T10.b's open condition, is NOT RUN; the line absorbers' lines in the cases (the
     added-file hook); §2.5.
+  - On the tip after R08.T20, five cases are re-blessed and their references kept, not re-traced:
+    the higher limb's by ≤ 1.1 × 10⁻¹⁴ relative; the three Venus cases in 3, 3 and 6 near-forward
+    b₁ and b₂ values, by ≤ 10⁻¹⁶ (≤ 2.5 × 10⁻¹⁵ of the element's largest; 4.1 × 10⁻⁹ of itself).
 - **R08.T5.e, as built** (2026-10-30):
   - `ACID_UV_K365 = 1.49e-3`, `ACID_UV_DECAY_NM = 47.6` (past Spacek et al.'s 26.9 nm bound, a
     deviation); `acidUvAbsorberK(λ, absorber?)`; the materials tool's `--acid-uv-from` and `--only`.
