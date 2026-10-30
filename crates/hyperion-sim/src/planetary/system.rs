@@ -2719,8 +2719,14 @@ impl PlanetarySystem {
             // The primary's orbit at the time sets the seasons: a planet's or a member's own, and
             // its moons'.
             seasonal: fate.at(t).orbit().copied(),
-            // The impactors' sources about the primary's host (P14.T48.f), as generated.
-            sources: self.impactor_sources(primary.host),
+            // The impactors' sources about the primary's host (P14.T48.f), as generated, with the
+            // primary's own source taken once for its passes.
+            sources: self.impactor_sources(primary.host).map(|sources| {
+                match self.host_orbiter(primary) {
+                    Some(orbiter) => sources.with_primary(&orbiter),
+                    None => sources,
+                }
+            }),
             continental_asymptote: relief::continental_asymptote(self.seed, id),
             cold_traps: ColdTrapCase {
                 exposed_fraction: cold_traps::exposed_fraction(self.seed, id),

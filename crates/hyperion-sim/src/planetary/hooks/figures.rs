@@ -545,13 +545,94 @@ impl From<&Belt> for SourceBelt {
 ///
 /// P14.T24.b builds one per host, which [`ImpactorSources::new`] validates once, and lends it to
 /// each of the host's bodies.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone)]
 pub struct ImpactorSources {
     host: GravitationalParameter,
     belts: Vec<SourceBelt>,
     innermost_giant: Option<Metres>,
     icy_mass: EarthMasses,
     comet_edge: Option<Metres>,
+    /// One orbiter's source and abundance, precomputed ([`ImpactorSources::with_primary`]).
+    primary: Option<PrimarySource>,
+}
+
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "the precomputed primary's source is a function of the fields shown, and a derive's \
+              text is kept"
+)]
+impl fmt::Debug for ImpactorSources {
+    /// Its sources, as a derive prints them: the precomputed primary's source is not shown.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ImpactorSources")
+            .field("host", &self.host)
+            .field("belts", &self.belts)
+            .field("innermost_giant", &self.innermost_giant)
+            .field("icy_mass", &self.icy_mass)
+            .field("comet_edge", &self.comet_edge)
+            .finish()
+    }
+}
+
+impl PartialEq for ImpactorSources {
+    /// Its sources, field by field as a derive compares them: the precomputed primary's source is
+    /// theirs, so it is not compared.
+    fn eq(&self, other: &Self) -> bool {
+        self.host == other.host
+            && self.belts == other.belts
+            && self.innermost_giant == other.innermost_giant
+            && self.icy_mass == other.icy_mass
+            && self.comet_edge == other.comet_edge
+    }
+}
+
+/// The impactor source of one orbiter under its sources, with the orbiter it is of
+/// ([`ImpactorSources::with_primary`]).
+#[derive(Debug, Clone, Copy)]
+struct PrimarySource {
+    orbiter: HostOrbiter,
+    source: ImpactorSource,
+    abundance: f64,
+}
+
+impl ImpactorSources {
+    /// These sources with the impactor source and abundance of `orbiter`, their body's own orbit or
+    /// a moon's parent's, computed once ([`ImpactorSource::with_abundance`]): what each of its
+    /// passes' crater contracts reads, a pure function of `orbiter` and the sources, so that a
+    /// pass whose orbiter is it to the bit reads the same bits without its encounter integrals.
+    ///
+    /// A body's passes recomputed it at every pass, the Öpik mean of a belt member's or an
+    /// annulus's excitation (16 eccentricities by 16 inclinations at each axis node): 3.5% of
+    /// `snapshot_at` and 1.7% of `generate` over the first 20 sample systems at version 24
+    /// (P14.T54.b.l's cost lane, pod, 16 vCPU).
+    #[must_use]
+    pub(crate) fn with_primary(mut self, orbiter: &HostOrbiter) -> Self {
+        self.primary = None;
+        let (source, abundance) = ImpactorSource::with_abundance(orbiter, &self);
+        self.primary = Some(PrimarySource {
+            orbiter: *orbiter,
+            source,
+            abundance,
+        });
+        self
+    }
+}
+
+impl HostOrbiter {
+    /// Whether `other` is this orbiter to the bit: its orbit's elements, its mass and its
+    /// membership.
+    #[must_use]
+    fn same_bits(&self, other: &Self) -> bool {
+        let same = |a: f64, b: f64| a.total_cmp(&b).is_eq();
+        let (Self { orbit, mass, belt }, theirs) = (self, &other.orbit);
+        same(
+            orbit.semi_major_axis.value(),
+            theirs.semi_major_axis.value(),
+        ) && same(orbit.eccentricity, theirs.eccentricity)
+            && same(orbit.inclination.value(), theirs.inclination.value())
+            && same(mass.value(), other.mass.value())
+            && *belt == other.belt
+    }
 }
 
 impl ImpactorSources {
@@ -642,6 +723,7 @@ impl ImpactorSources {
             innermost_giant,
             icy_mass,
             comet_edge,
+            primary: None,
         })
     }
 
@@ -997,6 +1079,11 @@ impl ImpactorSource {
     /// ([`floored_abundance`]): the rate and the velocity read one population.
     #[must_use]
     fn with_abundance(orbiter: &HostOrbiter, sources: &ImpactorSources) -> (Self, f64) {
+        if let Some(primary) = sources.primary
+            && primary.orbiter.same_bits(orbiter)
+        {
+            return (primary.source, primary.abundance);
+        }
         let a = orbiter.orbit.semi_major_axis;
         // Rule 1: a member shares its part's excitation; any body orbiting in an annulus, that
         // annulus's.
