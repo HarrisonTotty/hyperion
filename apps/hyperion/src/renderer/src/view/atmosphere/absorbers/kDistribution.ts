@@ -1038,12 +1038,15 @@ export function cellSigmasAt(kd: SpeciesKDistribution, broadeningPa: number): Fl
     throw new RangeError(`a broadening pressure is finite and above 0 Pa, not ${broadeningPa}`);
   }
   const node = kd.pressuresPa.indexOf(broadeningPa);
+  if (node >= 0) {
+    return kd.cells.map((cell) => {
+      const g = cell.weights.length;
+      return cell.sigmas.slice(node * g, (node + 1) * g);
+    });
+  }
   const inLogPressure: Axis = { along: kd.pressuresPa.map((p) => log(p)), x: log(broadeningPa) };
   return kd.cells.map((cell) => {
     const g = cell.weights.length;
-    if (node >= 0) {
-      return cell.sigmas.slice(node * g, (node + 1) * g);
-    }
     return Float64Array.from({ length: g }, (_, k) =>
       cubicOnLog(kd.pressuresPa, broadeningPa, inLogPressure, (p) => cell.sigmas[p * g + k] ?? 0),
     );

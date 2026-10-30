@@ -17,9 +17,8 @@
  * JavaScript's `+ - * /` and `Math.sqrt` are IEEE 754's correctly rounded operations on every
  * platform, and V8's compilers never fuse a multiply and an add, so these ports, which use nothing
  * else (with `Math.abs`, `Math.floor`, `Math.trunc` and the reinterpretation of a double's bits,
- * all exact), give
- * the same bits everywhere: the bits of `libm` itself, as `hyperion_base::math` returns them on
- * every target of the sim. `src/math/<name>.rs` below is that crate's file. `crates/hyperion-base`'s
+ * all exact), give the same bits everywhere: the bits of `libm` itself, as `hyperion_base::math`
+ * returns them on every target of the sim. `src/math/<name>.rs` below is that crate's file. `crates/hyperion-base`'s
  * `tests/client_math_golden.rs` writes `libm`'s values at random inputs, each function's special
  * cases and inputs near a rounding midpoint, and `pinnedMath.test.ts` holds these functions to
  * them bit for bit, with `libm`'s digests of a sweep of 2¹⁷ random inputs a domain.
@@ -32,18 +31,21 @@
  * out, as are the paths no `f64` input reaches (`rem_pio2_large`'s other precisions, `cbrt`'s
  * directed roundings).
  *
- * The functions the optics, the bakes and the case gate call most (`exp`, `expm1`, `log`, `pow`,
- * `sin`, `cos`, `atan`, `atan2` and `cbrt`) take their common arguments by a fast path first, and
- * hand the rest to the whole port, `<name>Port`. A fast path is the port's own path for those
- * arguments, its operations in its order, with its constants local to the function, since V8 reads
- * a module's constant from its context as a boxed number at every use; where `libm` writes a
- * double's words only to scale it by a power of two or to clear its low word, it forms the same
- * double arithmetically ({@link twoTo}, {@link zeroLowWord}). Nothing on a fast path allocates, and
- * a port's result reaches it through {@link asNumber}. Per call on the
- * case gate's and the optics' arguments, the ports alone against the fast paths (pod, 16 vCPU,
- * 2026-10-30): `exp` 14.2 against 11.3 ns, `expm1` 19.3 against 8.1, `log` 29.7 against 13.5,
+ * The functions the optics, the bakes and the case gate call most take their common arguments by a
+ * fast path first: `exp`, `expm1`, `log`, `pow`, `atan`, `atan2` and `cbrt` hand the rest to the
+ * whole port, `<name>Port`, and `sin` and `cos` take `rem_pio2`'s first round and its medium case
+ * themselves before they call it. A fast path is the port's own path for those arguments, its
+ * operations in its order, with its constants local to the function, since V8 reads a module's
+ * constant from its context as a boxed number at every use; where `libm` writes a double's words
+ * only to scale it by a power of two or to clear its low word, it forms the same double
+ * arithmetically ({@link twoTo}, {@link zeroLowWord}). Nothing on a fast path allocates, and a
+ * port's result reaches it through {@link asNumber}. Per call on the case gate's and the optics'
+ * arguments, the ports alone against the fast paths (pod, 16 vCPU, 2026-10-30): `exp` 14.2 against 11.3 ns, `expm1` 19.3 against 8.1, `log` 29.7 against 13.5,
  * `sin` 26.2 against 18.4, `atan2` 34.7 against 25.5, `cbrt` 66.1 against 37.5, and `pow` of a
  * fractional power 186 against 124.
+ *
+ * The module imports nothing, and must not: the client's tests load it as Node's own module
+ * (`vitest.config.mts`'s `server.deps.external`), outside Vite's module runner.
  *
  * The FreeBSD msun sources these ports descend from carry Sun Microsystems' notice, which is
  * preserved here as `libm` carries it:
@@ -195,8 +197,8 @@ function asNumber(x: number): number {
 }
 
 /**
- * 2ⁿ for an integer n in [−1074, 1023], exact: the double `scalbn` multiplies by where n is
- * normal, from a table where `libm` writes its words.
+ * 2ⁿ, exact, for an integer n in [−1074, 1023], and NaN outside: where n is normal, the double
+ * `scalbn` multiplies by, read from a table where `libm` writes its words.
  */
 function twoTo(n: number): number {
   return POWERS_OF_TWO[1074 + n] ?? Number.NaN;
@@ -881,8 +883,7 @@ function remTail(): number {
 }
 
 /**
- * `rem_pio2`'s `medium` case: n = rint(x ÷ (π/2)) for |x| ≲ 2²⁰ π/2, and x − n π/2 in `remHead` and
- * `remTail`, in up to three rounds of π/2's 33-bit pieces.
+ * `rem_pio2`'s `medium` case: n = rint(x ÷ (π/2)) for |x| ≲ 2²⁰ π/2, and x − n π/2 in {@link REM}, in up to three rounds of π/2's 33-bit pieces.
  */
 function remPio2Medium(x: number, ix: number): number {
   const toInt = 6755399441055744; /* 1.5 / EPS, 1.5 * 2**52 */
@@ -925,7 +926,7 @@ function remPio2Medium(x: number, ix: number): number {
 }
 
 /**
- * n, with x − n π/2 in `remHead` and `remTail`, for |x| ≳ π/4 (the caller handles the rest):
+ * n, with x − n π/2 in {@link REM}, for |x| ≳ π/4 (the caller handles the rest):
  * `libm`'s `rem_pio2`.
  */
 function remPio2(x: number): number {
@@ -1070,7 +1071,7 @@ function at(values: ArrayLike<number>, index: number): number {
 }
 
 /**
- * n mod 8, with x − n π/2 in `remHead` and `remTail`, for x = Σ `x[i]` 2^(`e0` − 24 i), at
+ * n mod 8, with x − n π/2 in {@link REM}, for x = Σ `x[i]` 2^(`e0` − 24 i), at
  * `libm`'s `rem_pio2_large` precision 1 (53 bits), the one `rem_pio2` asks for.
  */
 function remPio2Large(x: ReadonlyArray<number>, e0: number): number {
@@ -1266,6 +1267,9 @@ function remPio2Large(x: ReadonlyArray<number>, e0: number): number {
  * Ported line for line from `libm` 0.2.16's `src/math/sin.rs` (FreeBSD's `s_sin.c`): `x` is reduced
  * by π/2 to [−π/4, π/4] (`rem_pio2`, Payne and Hanek's method past 2²⁰ π/2), and the quadrant's
  * kernel, `k_sin` or `k_cos`, evaluates it; within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16).
+ *
+ * `rem_pio2`'s first round (|x| ≲ 3π/4, but near π/2) is taken here, and its medium case
+ * (9π/4 < |x| < 2²⁰ π/2) called directly, as `rem_pio2` itself would.
  */
 export function sin(x: number): number {
   /* High word of x. */
@@ -1288,15 +1292,17 @@ export function sin(x: number): number {
 
   /* argument reduction needed */
   if (ix <= 0x4002d97c && (ix & 0xfffff) !== 0x921fb) {
-    /* |x| ~<= 3pi/4 but ~pi/2: rem_pio2's one round, good to 85 bits, n = +-1 */
+    /* |x| ~<= 3pi/4, not ~pi/2: rem_pio2's one round, good to 85 bits, n = +-1 */
+    const pio2_1 = 1.57079632673412561417; /* 0x3FF921FB, 0x54400000: first 33 bits of pi/2 */
+    const pio2_1t = 6.07710050650619224932e-11; /* 0x3DD0B461, 0x1A626331: pi/2 - pio2_1 */
     if (x > 0) {
-      const z = x - 1.57079632673412561417; /* x - pio2_1 */
-      const y0 = z - 6.07710050650619224932e-11; /* z - pio2_1t */
-      return kCos(y0, z - y0 - 6.07710050650619224932e-11);
+      const z = x - pio2_1;
+      const y0 = z - pio2_1t;
+      return kCos(y0, z - y0 - pio2_1t);
     }
-    const z = x + 1.57079632673412561417;
-    const y0 = z + 6.07710050650619224932e-11;
-    return -kCos(y0, z - y0 + 6.07710050650619224932e-11);
+    const z = x + pio2_1;
+    const y0 = z + pio2_1t;
+    return -kCos(y0, z - y0 + pio2_1t);
   }
   /* rem_pio2 takes 9pi/4 < |x| < 2**20 pi/2 to its medium case */
   const n = ix > 0x401c463b && ix < 0x413921fb ? remPio2Medium(x, ix) : remPio2(x);
@@ -1318,6 +1324,8 @@ export function sin(x: number): number {
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/cos.rs` (FreeBSD's `s_cos.c`), with
  * {@link sin}'s reduction and kernels; within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16).
+ *
+ * As {@link sin}, it takes `rem_pio2`'s first round here and calls its medium case directly.
  */
 export function cos(x: number): number {
   const ix = highWord(x) & 0x7fffffff;
@@ -1341,15 +1349,17 @@ export function cos(x: number): number {
 
   /* argument reduction needed */
   if (ix <= 0x4002d97c && (ix & 0xfffff) !== 0x921fb) {
-    /* |x| ~<= 3pi/4 but ~pi/2: rem_pio2's one round, good to 85 bits, n = +-1 */
+    /* |x| ~<= 3pi/4, not ~pi/2: rem_pio2's one round, good to 85 bits, n = +-1 */
+    const pio2_1 = 1.57079632673412561417; /* 0x3FF921FB, 0x54400000: first 33 bits of pi/2 */
+    const pio2_1t = 6.07710050650619224932e-11; /* 0x3DD0B461, 0x1A626331: pi/2 - pio2_1 */
     if (x > 0) {
-      const z = x - 1.57079632673412561417; /* x - pio2_1 */
-      const y0 = z - 6.07710050650619224932e-11; /* z - pio2_1t */
-      return -kSin(y0, z - y0 - 6.07710050650619224932e-11, 1);
+      const z = x - pio2_1;
+      const y0 = z - pio2_1t;
+      return -kSin(y0, z - y0 - pio2_1t, 1);
     }
-    const z = x + 1.57079632673412561417;
-    const y0 = z + 6.07710050650619224932e-11;
-    return kSin(y0, z - y0 + 6.07710050650619224932e-11, 1);
+    const z = x + pio2_1;
+    const y0 = z + pio2_1t;
+    return kSin(y0, z - y0 + pio2_1t, 1);
   }
   /* rem_pio2 takes 9pi/4 < |x| < 2**20 pi/2 to its medium case */
   const n = ix > 0x401c463b && ix < 0x413921fb ? remPio2Medium(x, ix) : remPio2(x);
@@ -2243,7 +2253,8 @@ export function pow(x: number, y: number): number {
   let r = s2 * s2 * (l1 + s2 * (l2 + s2 * (l3 + s2 * (l4 + s2 * (l5 + s2 * l6)))));
   r += sL * (sH + ss);
   s2 = sH * sH;
-  /* 3 + s2 + r lies in [2, 4) here, where clearing its low word keeps 19 bits after the point */
+  /* 3 + s2 + r lies in [3, 3.02) here, where clearing its low word keeps 19 bits after the point;
+  the guard keeps the general form for any other value */
   const th = 3.0 + s2 + r;
   tH = th >= 2 && th < 4 ? Math.trunc(th * 524288) * 1.9073486328125e-6 : zeroLowWord(th);
   tL = r - (tH - 3.0 - s2);

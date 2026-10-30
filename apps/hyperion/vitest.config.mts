@@ -118,8 +118,8 @@ export default defineConfig({
     // natively, the same code (pod, 8 vCPU, 2026-10-30), and a bench's export tracker added
     // 550 ms more. A native load needs the module to import nothing, as it does.
     server: { deps: { external: [/\/lib\/pinnedMath\.ts$/u] } },
-    // That load finds no `"type"` in the package's manifest and reparses the file as a module, which
-    // Node would warn of once a worker.
+    // That load finds no `"type"` in the package's manifest and reparses the file as a module, and
+    // Node warns of it once a worker unless told not to.
     execArgv: ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON"],
     projects: [
       {
