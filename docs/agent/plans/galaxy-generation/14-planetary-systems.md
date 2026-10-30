@@ -3408,6 +3408,8 @@ before and after), and three ordinary fillers.
   with the reason it is not (Woitke's types until T55.a, for example). This turns "Milky Way-like"
   from a claim into a measurement of the generated galaxy.
   - _Accept:_ `just test-slow` filtered to `composition_census`.
+  - _Built_ (2026-10-30): `planetary/system/census_tests.rs`; Risks, "P14.T33.c's census, as
+    built".
 
 ### Phase H: queries and protocol
 
@@ -32582,3 +32584,35 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `under_every_25_hold_the_rest_of_the_400_show_their_lag_s_exposed_share_of_water_ice`.
   - For 25's bump: the tripwire's list; the wire's `surface_ices` docs; the goldens holding a
     dark-lid ice bulk with ice (`planetary/systems`, `planetary/surface_conditions_published`).
+- **P14.T33.c's census, as built** (lane `p14-t33c`, 2026-10-30). The full tables are the tests'
+  own print (`planetary::system::census_tests`, `--success-output immediate`): the ordinary
+  census, 6,800 systems and 103,830 bodies, in the fast tier on 8 threads (so `just test` runs it),
+  and the slow one, 68,000 systems and 1,046,470 bodies, under `just test-slow`.
+  - _Never reached_ at either size, each listed in `UNREACHED` with its reason (the ordinary census
+    holds the list exact):
+    - `FeH`: no CEA record (`formation::NOT_MODELLED`), so every envelope lists it not modelled;
+    - `NaCl` and `FeS`: no law aloft (`aloft::NOT_MODELLED`), and no rule makes a surface salt or
+      sulphide;
+    - `SiO2` and `TiO2`: displaced aloft by MgSiO₃ and CaTiO₃ in every envelope;
+    - `brine_mgso4` and `MgSO4`: an ocean's liquid is `H2O`, `brine_nacl` or `nh3_h2o`, and
+      sulphate oceans are P14.T55.k's;
+    - `brine_naclo4` and `brine_mgclo4`: no rule makes a perchlorate brine, and the perchlorates
+      have no rows (P14.T49.h);
+    - `anorthosite` and `lava_glass`: R09's and R08's rows, no lithology of P14.T51.c's;
+    - `iron_nickel`: no rule makes a metal surface;
+    - `ca_al_residue`: a lava world's lag, P14.T55.b's;
+    - `SiC` and `carbonaceous`: carbon-rich surfaces, P14.T55.d's;
+    - `Na2CO3` and `CaCO3`: no rule deposits a salt, the crust storing its carbonate as a mass;
+      `Na2CO3` is R09's reference Ceres's.
+  - _Wrong, found and not fixed here_ (bodies of the 10⁶, then of the 10⁵):
+    - 2,203 (219) `Snowball`s above 273.15 K, the six of the 400 among them, 195 of the 219 under
+      H₂-led airs and 23 at 647.096 K, water's critical temperature (P14.T53.e's): e.g.
+      `01ffdb2c1fff0000.0900`, 519.6 K under 477 bar of H₂-led air.
+    - 52 (6) surfaces above 10 kbar: e.g. `02002b2ddffe0000.0600`, a `Snowball` under 29.5 kbar.
+    - The audit's M3 fails on 3 (0): e.g. the moon `41ffac9dffc00000.0301`, `Airless` at 221.4 K
+      beyond the maximum-greenhouse limit with no ceiling.
+    - The audit's M6 fails on 34 (0): e.g. the member `41ffecb5ff000004.e106`, an airless `Ice`
+      surface at a T0 of 371.3 K.
+  - _The must-fix count_ (main's ruling of 2026-10-27, P14.T54.b's record, i's bullet): no gas
+    envelope changes section inside the clock window, 0 of 63,669 (6,515) at the window's two ends,
+    none with a recorded change inside it.
