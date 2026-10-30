@@ -1227,21 +1227,34 @@ fn capped_gases(air: &crate::planetary::derive::Atmosphere) -> Vec<Gas> {
 
 /// The members of the discrete key that differ between `a` and `b` (decision-p14-t54a-passes
 /// §1.5): the figures present, the basins' shape, the water share's outgassing branch, the regime,
-/// the craters' crust class, a moon's tide branch, the inertia lid and `lid_of`'s unresurfaced
-/// test.
+/// the craters' crust class, a moon's tide branch, the inertia lid, `lid_of`'s unresurfaced test
+/// and the state P14.T53.e's rules 5–7 carry (from 25). The key is destructured, so that a member
+/// added to it is a compile error here.
 fn key_members(
     a: &crate::planetary::derive::pass_record::PassContextKey,
     b: &crate::planetary::derive::pass_record::PassContextKey,
 ) -> Vec<&'static str> {
+    let crate::planetary::derive::pass_record::PassContextKey {
+        figures,
+        basins,
+        volcanic,
+        regime,
+        crust,
+        tide,
+        lid,
+        unresurfaced,
+        present,
+    } = *a;
     [
-        ("figures", a.figures != b.figures),
-        ("basins", a.basins != b.basins),
-        ("water share", a.volcanic != b.volcanic),
-        ("regime", a.regime != b.regime),
-        ("crust class", a.crust != b.crust),
-        ("tide branch", a.tide != b.tide),
-        ("lid", a.lid != b.lid),
-        ("resurfacing", a.unresurfaced != b.unresurfaced),
+        ("figures", figures != b.figures),
+        ("basins", basins != b.basins),
+        ("water share", volcanic != b.volcanic),
+        ("regime", regime != b.regime),
+        ("crust class", crust != b.crust),
+        ("tide branch", tide != b.tide),
+        ("lid", lid != b.lid),
+        ("resurfacing", unresurfaced != b.unresurfaced),
+        ("carried state", present != b.present),
     ]
     .into_iter()
     .filter_map(|(member, differs)| differs.then_some(member))
@@ -7908,6 +7921,36 @@ fn the_states_and_the_dark_thick_airs_are_recorded() {
     for (name, ctx, system) in golden_systems() {
         census_walk(name, ctx, system, &mut |case| census.visit(case));
     }
+    report_states(&census);
+}
+
+/// [`the_states_and_the_dark_thick_airs_are_recorded`] under P14.T53.e's rules alone, over the same
+/// systems generated afresh under them: a measurement for 25's bless, run by name, which P14.T53.e's
+/// tests ask of it ("its bless re-runs the states census and item 26's re-check", its three second
+/// starts among them). Not under every 25 hold: the cover rule's check holds a supercritical entry
+/// massless, version 24's, where P14.T53.b part 3's reservoir carries its mass from 25, which 25's
+/// bump restates.
+#[test]
+#[ignore = "a measurement for the 25 bless, run by name"]
+fn under_the_present_state_the_states_and_the_dark_thick_airs_are_recorded() {
+    use crate::planetary::derive::atmosphere::{PresentStateRules, with_present_state};
+    with_present_state(PresentStateRules::Present, || {
+        let mut census = Census::default();
+        for ctx in sample().iter().take(60) {
+            let system = generate(SEED, ctx);
+            census_walk("sample", ctx, &system, &mut |case| census.visit(case));
+        }
+        for (name, ctx) in golden_contexts() {
+            let system = generate(Seed::new(GOLDEN_SYSTEMS_SEED), &ctx);
+            census_walk(name, &ctx, &system, &mut |case| census.visit(case));
+        }
+        report_states(&census);
+    });
+}
+
+/// The states census's lists ([`the_states_and_the_dark_thick_airs_are_recorded`]), printed, with
+/// its one assertion: no liquid entry that would boil.
+fn report_states(census: &Census) {
     let list = |items: &[String]| items.join("\n  ");
     let cover = &census.cover;
     eprintln!("bodies with a surface: {:?}", census.bodies);
@@ -12908,7 +12951,14 @@ fn under_every_25_hold_part_three_s_movers_are_stated() {
         )
         .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
         .collect();
-    let on = with_every_25_hold(|| part_three_census(&sets));
+    // Part 3's landing alone: P14.T53.e's movers are its own census's
+    // (`present_state_tests`).
+    let on = with_every_25_hold(|| {
+        crate::planetary::derive::atmosphere::with_present_state(
+            crate::planetary::derive::atmosphere::PresentStateRules::Held,
+            || part_three_census(&sets),
+        )
+    });
     let off = part_three_census(&sets);
     assert_eq!(on.len(), off.len());
     let (mut failures, movers, passes) = part_three_movers(&on, &off);

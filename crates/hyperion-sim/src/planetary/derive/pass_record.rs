@@ -35,7 +35,7 @@ use core::fmt;
 
 use crate::planetary::chem::partition::{Basins, CrustWater, Ground};
 use crate::planetary::derive::atmosphere::{
-    Atmosphere, Gas, NoMaturity, SurfaceMaterial, SurfaceState, WeatheringCase,
+    Atmosphere, Gas, NoMaturity, PresentClimate, SurfaceMaterial, SurfaceState, WeatheringCase,
 };
 use crate::planetary::derive::passes::{Context, floats_agree};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide, SurfaceLag};
@@ -303,6 +303,7 @@ impl Resurfacing {
 /// | tide | a moon's branch and ocean flag, and its tidal heat | key; float |
 /// | inertia lid | the pass's own lid ([`InertiaLid`]), whose row the next pass's ground reads | key |
 /// | `lid_of`'s unresurfaced test | the surface age against the time since the magma ocean, which the next pass's lid takes ([`Resurfacing`]) | key |
+/// | carried state | the state the pass carries by P14.T53.e's rules 5–7 ([`Atmosphere::carried_state`]), which the next pass's state-keyed branches read; `None` under their hold and where the rules agree with its climate's class | key |
 ///
 /// Every member a pass reads is ranked: the lid a pass takes reads the surface age (a float), the
 /// tide's branch, the unresurfaced test and the basis, which no pass moves; its ground reads the
@@ -317,6 +318,7 @@ pub(crate) struct PassContext {
     tide: Option<PassTide>,
     lid: Option<InertiaLid>,
     unresurfaced: Option<Resurfacing>,
+    present: Option<PresentClimate>,
 }
 
 /// How many float members a context holds beside its basins': the water share, the heat flow, the
@@ -382,6 +384,9 @@ pub(crate) struct PassContextKey {
     /// `lid_of`'s unresurfaced test on its surface age, where the body has a crust's basis and
     /// the context a surface age.
     pub(crate) unresurfaced: Option<Resurfacing>,
+    /// The state the pass carries by P14.T53.e's rules 5–7, `None` under their hold and where
+    /// they agree with its climate's class.
+    pub(crate) present: Option<PresentClimate>,
 }
 
 impl PassContext {
@@ -396,6 +401,7 @@ impl PassContext {
         tide: None,
         lid: None,
         unresurfaced: None,
+        present: None,
     };
 
     /// The context of the first stage `figures` and the tide `tide`, a moon's or none (K(P)), with
@@ -419,6 +425,7 @@ impl PassContext {
             },
             lid: None,
             unresurfaced: None,
+            present: None,
         };
         let (floats, n) = context.floats();
         assert!(
@@ -448,6 +455,21 @@ impl PassContext {
             unresurfaced,
             ..self
         }
+    }
+
+    /// The context with the state `present` its pass carries by P14.T53.e's rules 5–7
+    /// ([`Atmosphere::carried_state`]), which the next pass's state-keyed branches read.
+    #[must_use]
+    pub(crate) const fn with_present(self, present: Option<PresentClimate>) -> Self {
+        Self { present, ..self }
+    }
+
+    /// The state the previous pass carried by P14.T53.e's rules 5–7, which the pass reading this
+    /// context publishes in place of its climate's class: `None` at C₀, under the rules' hold,
+    /// where rules 1–4 decided that pass's state and where the rules agreed with its class.
+    #[must_use]
+    pub(crate) const fn present(&self) -> Option<PresentClimate> {
+        self.present
     }
 
     /// A moon's tide at the pass it is of.
@@ -630,6 +652,7 @@ impl Context for PassContext {
             tide: self.tide.map(|tide| (tide.branch, tide.ocean)),
             lid: self.lid,
             unresurfaced: self.unresurfaced,
+            present: self.present,
         }
     }
 
@@ -655,6 +678,29 @@ impl Context for PassContext {
                 .find(|order| order.is_ne())
                 .unwrap_or_else(|| n.cmp(&m))
         })
+    }
+}
+
+/// The passes' stand-in's context from generator version 25 (P14.T53.e).
+///
+/// It is the state the previous pass carried by rules 5–7 ([`Atmosphere::carried_state`]): `None`
+/// at the first pass, where rules 1–4 decided that pass's state and where the rules agreed with
+/// its climate's class. Its key is itself, and two contexts agree only where they are the same
+/// state. Under the rules' hold the stand-in takes no context
+/// ([`passes::solve`](super::passes::solve)).
+impl Context for Option<PresentClimate> {
+    type Key = Self;
+
+    fn key(&self) -> Self::Key {
+        *self
+    }
+
+    fn agrees(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn rank(&self, other: &Self) -> Ordering {
+        self.cmp(other)
     }
 }
 

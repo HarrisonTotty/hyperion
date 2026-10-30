@@ -53,8 +53,9 @@
 //! §2 (d)). A pass that reads no field publishes P14.T51.a's, with why (`cold_traps::NoColdTraps`).
 
 use super::{
-    Atmosphere, AtmosphereInputs, ClimateOf, Gas, PartialPressures, PublishedState, RunawayDeck,
-    SurfaceMaterial, SurfaceState,
+    Atmosphere, AtmosphereInputs, ClimateOf, Gas, PartialPressures, PresentClimate, PresentFigures,
+    PublishedState, RunawayDeck, SurfaceMaterial, SurfaceState, climate_class, published_ice_cover,
+    state_to_carry,
 };
 use crate::planetary::chem::partition::{
     Basins, ClimateSpan, CondensatePhase, Condensates, Cover, CrustWater, Ground, Partition,
@@ -138,6 +139,13 @@ pub(crate) struct PassSurface<'a> {
     /// constructors, and [`PublishedState::Hothouse`] for the passes of a body solved again as a
     /// hothouse between the limits ([`with_published`](Self::with_published)).
     pub(crate) published: PublishedState,
+    /// The state the previous pass carried by P14.T53.e's rules 5–7, which this pass publishes and
+    /// its state-keyed branches read in place of its climate's class (`escaping`'s
+    /// `present_state`): `None` from the stand-in's constructor, the context's under the body's
+    /// own climate ([`PassContext::present`]), and `None` there too at the first pass, under the
+    /// rules' hold and after a pass whose state rules 1–4 decided or whose figures agreed with its
+    /// class.
+    pub(crate) present: Option<PresentClimate>,
 }
 
 /// The climate a pass reads ([`PassSurface::climate`]).
@@ -370,6 +378,7 @@ impl<'a> PassSurface<'a> {
             regolith: &Regolith::of_material,
             deck: RunawayDeck::Kept,
             published: PublishedState::Climate,
+            present: None,
         }
     }
 
@@ -386,6 +395,7 @@ impl<'a> PassSurface<'a> {
             regolith: &Regolith::of_material,
             deck: RunawayDeck::Kept,
             published: PublishedState::Climate,
+            present: spun.context.present(),
         }
     }
 
@@ -399,6 +409,13 @@ impl<'a> PassSurface<'a> {
     #[must_use]
     pub(crate) const fn with_published(self, published: PublishedState) -> Self {
         Self { published, ..self }
+    }
+
+    /// The same surface with the state `present` the previous pass carried by P14.T53.e's rules
+    /// 5–7: the stand-in's, whose passes carry it beside the albedo ([`PassSurface::present`]).
+    #[must_use]
+    pub(crate) const fn with_present(self, present: Option<PresentClimate>) -> Self {
+        Self { present, ..self }
     }
 }
 
@@ -494,10 +511,12 @@ fn pass_water_cover(
 }
 
 /// What a pass's partition gives its area mix (P14.T51.a): its partition solved once more at the
-/// pass's final climate, its condensates published over the pass's cover, and under the body's
-/// own climate the record's conditions it was solved over, `None` where it read none (a climate
-/// given, or a column with nothing that condenses).
-type PassPartition = (Partition, Condensates, Option<SurfaceConditions>);
+/// pass's final climate, its condensates published over the pass's cover, under the body's own
+/// climate the record's conditions it was solved over, `None` where it read none (a climate given,
+/// or a column with nothing that condenses), and its water cover's ice
+/// ([`WaterCover::ice_fraction`]), which P14.T53.e's rule 5 adds where the condensates list no
+/// water ice, as the record's figures add T24.b's.
+type PassPartition = (Partition, Condensates, Option<SurfaceConditions>, f64);
 
 /// The partition of the atmosphere `air` of the body `inputs` describe under a climate given
 /// `climate_of` ([`PassClimate::Given`]), on the surface `surface`, its body of gravity `gravity`:
@@ -526,7 +545,7 @@ fn given_partition(
         state: air.state,
         water,
     });
-    (solved, published, None)
+    (solved, published, None, water.ice_fraction)
 }
 
 /// The partition's ground of the atmosphere `air` under the body's own climate `spun`: the
@@ -613,6 +632,11 @@ impl SpunPartition {
     /// builds by the same constructor ([`PassColdTraps::body`]); P14.T51.a's otherwise.
     #[must_use]
     fn publish(self, traps: Option<&PassColdTraps>, air: &Atmosphere) -> PassPartition {
+        let water_ice = match &self.cover {
+            SpunCover::Isothermal { water, .. } | SpunCover::Profiled { water, .. } => {
+                water.ice_fraction
+            }
+        };
         let published = match &self.cover {
             SpunCover::Isothermal { climate, water } => {
                 debug_assert!(traps.is_none(), "a pass with no profile reads no field");
@@ -641,7 +665,7 @@ impl SpunPartition {
                 }
             }
         };
-        (self.solved, published, self.conditions)
+        (self.solved, published, self.conditions, water_ice)
     }
 }
 
@@ -883,6 +907,7 @@ pub(super) fn area_mixed(
         liquid_water,
         maturity,
         cold_traps,
+        present,
     } = match air.state {
         SurfaceState::GasEnvelope => SurfaceMix {
             albedo: area_mix::giant_bond(shade, inputs.heated, inputs.class),
@@ -891,6 +916,7 @@ pub(super) fn area_mixed(
             liquid_water: false,
             maturity: Err(NoMaturity::NoRegolith),
             cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
+            present: None,
         },
         SurfaceState::MagmaOcean => {
             let lid = match surface.climate {
@@ -904,6 +930,7 @@ pub(super) fn area_mixed(
                 liquid_water: false,
                 maturity: Err(NoMaturity::NoRegolith),
                 cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
+                present: None,
             }
         }
         // A steam envelope's photometry is a runaway's, its label read by no pass (P14.T53.b
@@ -934,14 +961,16 @@ pub(super) fn area_mixed(
         cloud_fraction,
         runaway_deck,
         liquid_water,
+        present,
         ..*air
     };
     (air, lid, maturity, cold_traps)
 }
 
 /// What a pass's area mix gives ([`area_mixed`]): its Bond albedo before its floor, its cloud
-/// fraction, the lid it took, whether its condensates list liquid water, its maturity's outcome
-/// and its cold traps'.
+/// fraction, the lid it took, whether its condensates list liquid water, its maturity's outcome,
+/// its cold traps' and the state it carries to the next pass by P14.T53.e's rules 5–7
+/// ([`state_to_carry`]).
 struct SurfaceMix {
     albedo: f64,
     cloud_fraction: f64,
@@ -949,6 +978,7 @@ struct SurfaceMix {
     liquid_water: bool,
     maturity: PassMaturity,
     cold_traps: PassTraps,
+    present: Option<PresentClimate>,
 }
 
 /// The mean surface temperature of an airless body of equilibrium temperature `equilibrium` over
@@ -1234,9 +1264,10 @@ fn surface_and_cloud(
             liquid_water: false,
             maturity: Err(NoMaturity::NoRegolith),
             cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
+            present: None,
         };
     };
-    let ((solved, published, _), lid, (deposits, maturity), regolith, cold_traps) =
+    let ((solved, published, _, water_ice), lid, (deposits, maturity), regolith, cold_traps) =
         match surface.climate {
             PassClimate::Given(climate_of) => (
                 given_partition(air, inputs, surface, (climate_of, gravity)),
@@ -1291,6 +1322,21 @@ fn surface_and_cloud(
     let liquid_water = published
         .entry(Gas::Water.substance(), CondensatePhase::Liquid)
         .is_some();
+    // P14.T53.e: the state the next pass reads, by rules 5–7 on what this pass publishes; none in
+    // a hothouse's re-solve, whose state is fixed (P14.T53.b part 1 (c)).
+    let present = match surface.published {
+        PublishedState::Climate => state_to_carry(
+            air,
+            (climate_class(inputs, surface.published), deck),
+            || PresentFigures {
+                ice_cover: published_ice_cover(&published, water_ice),
+                liquid_water,
+                surface_temperature: air.surface_temperature,
+                surface_pressure: air.surface_pressure,
+            },
+        ),
+        PublishedState::Hothouse => None,
+    };
     SurfaceMix {
         albedo,
         cloud_fraction: cloud,
@@ -1298,6 +1344,7 @@ fn surface_and_cloud(
         liquid_water,
         maturity,
         cold_traps,
+        present,
     }
 }
 

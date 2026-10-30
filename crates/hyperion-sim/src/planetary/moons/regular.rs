@@ -3446,6 +3446,51 @@ mod tests {
         }
     }
 
+    /// P14.T53.e's anchors among the moons (decision-p14-t54a-states §3.4): under every 25 hold, at
+    /// the rank that keeps each one's measured radius, Titan is a `Snowball` by rule 5, its ice
+    /// crust's water ice over its whole surface at 94 K; Europa, Ganymede and Callisto are
+    /// `Airless` and Triton `Tenuous` (P14.T53.c), each by rule 4, as at 24.
+    #[test]
+    fn under_every_25_hold_the_table_s_moons_keep_their_states() {
+        use crate::planetary::derive::atmosphere::SurfaceState;
+        use crate::planetary::testing::with_every_25_hold;
+        let jupiter = table_giant("Jupiter", 5, None);
+        let saturn = table_giant("Saturn", 6, None);
+        let neptune = table_giant("Neptune", 8, None);
+        for (name, moon, giant, state) in [
+            ("Europa", EUROPA, &jupiter, SurfaceState::Airless),
+            ("Ganymede", GANYMEDE, &jupiter, SurfaceState::Airless),
+            ("Callisto", CALLISTO, &jupiter, SurfaceState::Airless),
+            ("Titan", TITAN, &saturn, SurfaceState::Snowball),
+            ("Triton", TRITON, &neptune, SurfaceState::Tenuous),
+        ] {
+            let ((kg, keep), orbit) = table_moon(moon, giant);
+            let (volatiles, bulk) = if name == "Triton" {
+                let volatiles = MoonVolatiles {
+                    draws: VolatileDraws::MEDIAN,
+                    site: VolatileSite::ParentZone,
+                };
+                (volatiles, captured_bulk(kg, moon.1).0)
+            } else {
+                (MoonVolatiles::SHARED, MoonBulk::Derived)
+            };
+            let derive = || own_moon((kg, keep), &orbit, giant, &volatiles, bulk);
+            let (at_24, at_25) = (derive(), with_every_25_hold(derive));
+            assert_eq!(at_24.atmosphere().state(), state, "{name} at 24");
+            assert_eq!(
+                at_25.atmosphere().published_state(),
+                state,
+                "{name}: {:?}",
+                at_25.atmosphere()
+            );
+            assert_eq!(
+                at_25.atmosphere().carried_state(),
+                None,
+                "{name} does not flip"
+            );
+        }
+    }
+
     /// The condensate partition of the moon `derived`'s air over the passes' stand-in surface: an
     /// isothermal climate at its surface temperature, on basins not known, its condensed water all
     /// at the surface.

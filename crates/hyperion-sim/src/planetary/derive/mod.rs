@@ -122,10 +122,10 @@ use crate::planetary::chem::inventory::{
 };
 use crate::planetary::derive::atmosphere::{
     AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, EnvelopeHistory, Gas, Insolation, PassLight,
-    PassMaturity, PassSurface, PassWeathering, PublishedState, RunawayDeck, SpunClimate,
-    SpunColdTraps, SurfaceMaterial, VolatileDraws, VolatileInventory, atmosphere_and_lid,
-    energy_limited_loss, formation_temperature, helium_left, nitrogen_boosted, pass_regolith,
-    solved_as_a_hothouse, solved_without_the_deck,
+    PassMaturity, PassSurface, PassWeathering, PresentClimate, PublishedState, RunawayDeck,
+    SpunClimate, SpunColdTraps, SurfaceMaterial, VolatileDraws, VolatileInventory,
+    atmosphere_and_lid, energy_limited_loss, formation_temperature, helium_left, nitrogen_boosted,
+    pass_regolith, present_state_in_force, solved_as_a_hothouse, solved_without_the_deck,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -2193,6 +2193,13 @@ impl PassBody<'_> {
     #[must_use]
     fn stand_in_passes(&self, driver: PassDriver, surface: &PassSurface<'_>) -> Passes {
         match driver {
+            PassDriver::Solve if present_state_in_force() => {
+                self.stand_in_present_passes(BondAlbedo::BEFORE_ATMOSPHERES, surface)
+            }
+            #[cfg(test)]
+            PassDriver::From(start) if present_state_in_force() => {
+                self.stand_in_present_passes(start, surface)
+            }
             PassDriver::Solve => {
                 let solved = passes::solve(
                     BondAlbedo::BEFORE_ATMOSPHERES,
@@ -2273,6 +2280,37 @@ impl PassBody<'_> {
             }
             #[cfg(test)]
             PassDriver::Traced => unreachable!("the re-check traces a record's passes"),
+        }
+    }
+
+    /// The passes over the stand-in surface `surface` from the albedo `start` under P14.T53.e's
+    /// rules 5–7 (from generator version 25): each pass reads the state the previous pass's figures
+    /// gave ([`PassSurface::with_present`]), the first none, so that the stand-in's state-keyed
+    /// branches lag as a record's do ([`passes::solve_in_context`], its context that state alone).
+    #[must_use]
+    fn stand_in_present_passes(&self, start: BondAlbedo, surface: &PassSurface<'_>) -> Passes {
+        let solved = passes::solve_in_context(
+            start,
+            None,
+            |albedo, present: &Option<PresentClimate>| {
+                self.pass(&surface.with_present(*present), albedo)
+            },
+            |&(_, _, air, ..): &PassOut| air.albedo(),
+            |&(_, _, air, ..): &PassOut| air.carried_state(),
+            settled,
+        );
+        let (irradiated, heated, air, crust_lid, weathered, cold_traps) = solved.pass;
+        Passes {
+            albedo: solved.albedo,
+            irradiated,
+            heated,
+            air,
+            count: solved.count,
+            convergence: solved.convergence,
+            spun: None,
+            crust_lid,
+            weathered,
+            cold_traps,
         }
     }
 
@@ -2361,7 +2399,9 @@ impl PassBody<'_> {
                 .as_ref()
                 .zip(context.surface_age())
                 .map(|(basis, age)| Resurfacing::of(basis.unresurfaced(age)));
-            context.with_lid(lid.as_ref().map(InertiaLid::of), unresurfaced)
+            context
+                .with_lid(lid.as_ref().map(InertiaLid::of), unresurfaced)
+                .with_present(air.carried_state())
         };
         let solve = || {
             let solved = passes::solve_in_context(

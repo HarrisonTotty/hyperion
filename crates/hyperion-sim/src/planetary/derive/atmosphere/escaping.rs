@@ -58,7 +58,10 @@
 //!    In the re-solve of a body whose passes judged its first solve a hothouse between the limits
 //!    ((c): a dry `Temperate` at or above water's saturation temperature at its surface pressure,
 //!    [`PublishedState::Hothouse`]), a `Temperate` publishes `RunawayGreenhouse` instead, every
-//!    step above reading the same division.
+//!    step above reading the same division. From generator version 25 (P14.T53.e, behind its
+//!    hold) a pass whose previous pass's figures gave a state by rules 5–7
+//!    ([`PassSurface::present`]) publishes that state in place of the present class, every step
+//!    above still reading the division.
 
 use core::f64::consts::PI;
 
@@ -83,10 +86,10 @@ use crate::units::{
 use super::{
     AIRLESS_PRESSURE, Airborne, Atmosphere, AtmosphereInputs, CarbonCarrier, Crust,
     EnvelopeHistory, GREENHOUSE_STEPS, Gas, GreenhouseCeiling, IceHeld, Insolation,
-    PartialPressures, PassSurface, PublishedState, Retention, RunawayDeck, SILICATE_SOLIDUS,
-    StepClimate, SupercriticalReservoir, SurfaceState, TEMPERATE_AIRBORNE_CARBON,
-    earth_xuv_fluence, exobase_temperature, mole_fraction_of, partitioned_greenhouse, retained,
-    steam_envelope_in_force, surface_mix,
+    PartialPressures, PassSurface, PresentClimate, PublishedState, Retention, RunawayDeck,
+    SILICATE_SOLIDUS, StepClimate, SupercriticalReservoir, SurfaceState, TEMPERATE_AIRBORNE_CARBON,
+    earth_xuv_fluence, exobase_temperature, mole_fraction_of, partitioned_greenhouse,
+    present_state_in_force, retained, steam_envelope_in_force, surface_mix,
 };
 
 /// The melting point of ice Ih at one standard atmosphere, K: 273.15, IAPWS R10-06's 273.152 519
@@ -1109,6 +1112,10 @@ struct Body<'a> {
     /// The state its passes publish, the pass's surface's ([`PassSurface::published`]): the
     /// climate's, or P14.T53.b part 1 (c)'s hothouse in its re-solve (`finish`).
     published: PublishedState,
+    /// The state the previous pass's figures gave by P14.T53.e's rules 5–7, the pass's surface's
+    /// ([`PassSurface::present`]): `None` at the first pass, under their hold, and where rules 1–4
+    /// decided that pass's state.
+    present: Option<PresentClimate>,
 }
 
 /// What the body's retention and ice leave it ([`Body::kept`], step 2), before the shoreline.
@@ -1150,6 +1157,7 @@ impl<'a> Body<'a> {
             formed: envelope_at_formation(inputs, envelope.as_ref()),
             ceiling: GreenhouseCeiling::of(inputs),
             published: surface.published,
+            present: surface.present,
         }
     }
 
@@ -1192,6 +1200,7 @@ impl<'a> Body<'a> {
             supercritical: None,
             kept_water: None,
             steam_envelope: false,
+            present: None,
         }
     }
 
@@ -1398,9 +1407,9 @@ impl<'a> Body<'a> {
     #[must_use]
     fn divide(&self, kept: &mut Kept, ledger: &mut Ledger) -> (SurfaceState, OxygenOutcome) {
         let inputs = self.inputs;
-        match (inputs.crust, inputs.insolation) {
-            (Crust::Molten, _) => (SurfaceState::MagmaOcean, OxygenOutcome::NONE),
-            (Crust::Solid, Insolation::InsideRunaway) => {
+        let state = division_state(inputs);
+        match state {
+            SurfaceState::RunawayGreenhouse => {
                 let melt = MeltWindow {
                     until: inputs.molten_for,
                     capacity: melt_oxygen_capacity(inputs.mass),
@@ -1428,14 +1437,40 @@ impl<'a> Body<'a> {
                 if self.retention.retains(Gas::Oxygen) {
                     kept.air.oxygen = oxygen.kept().value();
                 }
-                (SurfaceState::RunawayGreenhouse, oxygen)
+                (state, oxygen)
             }
-            (Crust::Solid, Insolation::Habitable) => (SurfaceState::Temperate, OxygenOutcome::NONE),
-            (Crust::Solid, Insolation::BeyondMaximumGreenhouse) => {
-                (SurfaceState::Snowball, OxygenOutcome::NONE)
-            }
+            SurfaceState::GasEnvelope
+            | SurfaceState::MagmaOcean
+            | SurfaceState::Airless
+            | SurfaceState::Temperate
+            | SurfaceState::Snowball
+            | SurfaceState::Tenuous
+            | SurfaceState::SteamEnvelope => (state, OxygenOutcome::NONE),
         }
     }
+}
+
+/// The state of the climate's division of the body `inputs` describe (step 5, [`Body::divide`]):
+/// a molten crust's `MagmaOcean`, and a solid one's by its insolation class, the runaway limit at
+/// its hosts' largest past luminosity ([`AtmosphereInputs::insolation`]).
+#[must_use]
+const fn division_state(inputs: &AtmosphereInputs) -> SurfaceState {
+    match (inputs.crust, inputs.insolation) {
+        (Crust::Molten, _) => SurfaceState::MagmaOcean,
+        (Crust::Solid, Insolation::InsideRunaway) => SurfaceState::RunawayGreenhouse,
+        (Crust::Solid, Insolation::Habitable) => SurfaceState::Temperate,
+        (Crust::Solid, Insolation::BeyondMaximumGreenhouse) => SurfaceState::Snowball,
+    }
+}
+
+/// The class a body the atmosphere's inputs `inputs` describe publishes before P14.T53.e's rules
+/// 5–7, its passes publishing `published`: its division's state as P14.T53.b part 1 (a) and (c)
+/// publish it (`present_state` with no state carried), the same at every pass, since it reads the
+/// inputs alone. A pass carries a state to the next only where rules 5–7 differ from it
+/// ([`state_to_carry`](super::state_to_carry)).
+#[must_use]
+pub(super) fn climate_class(inputs: &AtmosphereInputs, published: PublishedState) -> SurfaceState {
+    present_state(division_state(inputs), inputs, (published, None))
 }
 
 /// The batch's greenhouse of one body: the partition's partial pressures over the step climate of
@@ -1806,8 +1841,9 @@ pub(super) fn state_and_greenhouse(
 }
 
 /// The state a body the atmosphere's inputs `inputs` describe publishes in place of the state
-/// `state` of its climate's division, its passes publishing `published` (P14.T53.b part 1 (a) and
-/// (c); decision-absurd-states-24 R4.1, decision-t53b-arm-c):
+/// `state` of its climate's division, its passes publishing `published`, the previous pass's
+/// figures giving `carried` by P14.T53.e's rules 5–7 (P14.T53.b part 1 (a) and (c);
+/// decision-absurd-states-24 R4.1, decision-t53b-arm-c; P14.T53.e):
 ///
 /// - (a): a [`SurfaceState::RunawayGreenhouse`], a world inside the runaway limit at its hosts'
 ///   largest past luminosity, publishes its present class
@@ -1815,10 +1851,15 @@ pub(super) fn state_and_greenhouse(
 ///   `Temperate` between the limits now, `Snowball` beyond the maximum-greenhouse limit now, its
 ///   water lost and its carbon airborne all the same (the division's). The present class comes
 ///   from the hosts' luminosities alone, not from the passes' figures.
+/// - P14.T53.e, from generator version 25 (behind its hold): where the previous pass's figures
+///   gave a state by rules 5–7 (`carried`), that state replaces the present class, its division
+///   and its water's state unchanged; the first pass, and every pass under the hold, carries none
+///   and publishes the present class.
 /// - (c): in the re-solve of a body whose first solve its passes judged a hothouse between the
 ///   limits ([`PublishedState::Hothouse`], [`solved_as_a_hothouse`]), a `Temperate` publishes
-///   [`SurfaceState::RunawayGreenhouse`], its division and its water's state unchanged. The state
-///   is fixed within that solve: no feedback.
+///   [`SurfaceState::RunawayGreenhouse`], its division and its water's state unchanged, and from
+///   25 a `Snowball` class too, which a first solve published `Temperate` by rules 5–7 can hold.
+///   The state is fixed within that solve: no feedback, and no state carried.
 ///
 /// Every other state is its own, `Airless` and `MagmaOcean` by their own tests.
 ///
@@ -1827,7 +1868,7 @@ pub(super) fn state_and_greenhouse(
 fn present_state(
     state: SurfaceState,
     inputs: &AtmosphereInputs,
-    published: PublishedState,
+    (published, carried): (PublishedState, Option<PresentClimate>),
 ) -> SurfaceState {
     let present = match state {
         SurfaceState::RunawayGreenhouse => match inputs.present_insolation {
@@ -1843,10 +1884,35 @@ fn present_state(
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => state,
     };
-    if present == SurfaceState::Temperate && published == PublishedState::Hothouse {
-        SurfaceState::RunawayGreenhouse
-    } else {
-        present
+    match published {
+        PublishedState::Hothouse => match present {
+            SurfaceState::Temperate => SurfaceState::RunawayGreenhouse,
+            SurfaceState::Snowball if present_state_in_force() => SurfaceState::RunawayGreenhouse,
+            SurfaceState::GasEnvelope
+            | SurfaceState::MagmaOcean
+            | SurfaceState::Airless
+            | SurfaceState::RunawayGreenhouse
+            | SurfaceState::Snowball
+            | SurfaceState::Tenuous
+            | SurfaceState::SteamEnvelope => present,
+        },
+        PublishedState::Climate => match (present, carried) {
+            (
+                SurfaceState::RunawayGreenhouse | SurfaceState::Temperate | SurfaceState::Snowball,
+                Some(carried),
+            ) => carried.state(),
+            (
+                SurfaceState::GasEnvelope
+                | SurfaceState::MagmaOcean
+                | SurfaceState::Airless
+                | SurfaceState::RunawayGreenhouse
+                | SurfaceState::Temperate
+                | SurfaceState::Snowball
+                | SurfaceState::Tenuous
+                | SurfaceState::SteamEnvelope,
+                _,
+            ) => present,
+        },
     }
 }
 
@@ -2011,7 +2077,7 @@ fn finish(
     // (`published_state`; decision-p14-t53b-part3 §5).
     let water_state = if molten { state } else { water };
     let kept_water = (water_state != state).then(|| Kilograms::new(air.water));
-    let state = present_state(state, inputs, body.published);
+    let state = present_state(state, inputs, (body.published, body.present));
     Atmosphere {
         state,
         water_state,
@@ -2035,5 +2101,6 @@ fn finish(
         supercritical: solved.supercritical,
         kept_water,
         steam_envelope: steam_hides_the_surface(solved.supercritical, gravity),
+        present: None,
     }
 }

@@ -68,7 +68,7 @@ use crate::units::{Kelvin, Kilograms, Metres, Pascals};
 
 /// One system of a census: its set ("sample", the golden system's name, or "look72"), its
 /// universe's seed and its context.
-type AuditSet = (&'static str, Seed, SystemContext);
+pub(super) type AuditSet = (&'static str, Seed, SystemContext);
 
 /// Design-k §0's set C ([module](self)): the first 60 sample systems, the 15 golden systems and
 /// LOOK72's 30 ([`look72_audit_contexts`]).
@@ -106,17 +106,17 @@ fn sets_of(samples: usize) -> Vec<AuditSet> {
 /// One present planet, member or moon with a bulk section and a derivation at the epoch, as
 /// [`audit_walk`] gives it: its record as `snapshot_at` builds it (the epoch with its shades and
 /// its small bodies' rules), its derivation and what the items read beside them.
-struct AuditCase<'a> {
+pub(super) struct AuditCase<'a> {
     /// Its set ([`AuditSet`]).
-    set: &'a str,
+    pub(super) set: &'a str,
     /// The body.
     body: &'a Body,
     /// "planets", "members" or "moons".
-    kind: &'static str,
+    pub(super) kind: &'static str,
     /// Its record at the epoch.
-    record: &'a BodyRecord,
+    pub(super) record: &'a BodyRecord,
     /// Its derivation over its record.
-    derived: &'a DerivedBody,
+    pub(super) derived: &'a DerivedBody,
     /// Its primary's state at the epoch (a moon's planet's).
     now: &'a ParentNow,
     /// Σ Fᵢ ÷ `S_eff` at the runaway limit now ([`runaway_now`]), at the runaway limit at the hosts'
@@ -124,7 +124,7 @@ struct AuditCase<'a> {
     /// its planet's.
     ratios: [f64; 3],
     /// Its derivation again, its passes driven by a driver (M1's first solve).
-    again: &'a dyn Fn(PassDriver) -> DerivedBody,
+    pub(super) again: &'a dyn Fn(PassDriver) -> DerivedBody,
 }
 
 impl AuditCase<'_> {
@@ -134,7 +134,7 @@ impl AuditCase<'_> {
     }
 
     /// Its record's surface, `None` where it is not `Ok`.
-    fn surface(&self) -> Option<&Surface> {
+    pub(super) fn surface(&self) -> Option<&Surface> {
         self.record.surface().ok()
     }
 
@@ -239,7 +239,7 @@ fn audit_walk_system(
 }
 
 /// Every system of `sets` generated afresh at its seed, walked ([`audit_walk_system`]), in order.
-fn audit_walk(sets: &[AuditSet], visit: &mut dyn FnMut(&AuditCase<'_>)) {
+pub(super) fn audit_walk(sets: &[AuditSet], visit: &mut dyn FnMut(&AuditCase<'_>)) {
     for (set, seed, ctx) in sets {
         let system = generate(*seed, ctx);
         audit_walk_system(set, ctx, &system, visit);

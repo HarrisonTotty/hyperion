@@ -414,7 +414,10 @@ impl Error for SampleContextsError {
 ///   `SteamEnvelopeRules::Steam` through `with_steam_envelope`: the partition's cap at each
 ///   condensable's critical isochore and its supercritical reservoir, the envelope's section from
 ///   that reservoir, the steam a runaway keeps beyond its escape's capacity and the
-///   `SteamEnvelope` state.
+///   `SteamEnvelope` state;
+/// - the present climate's state, `PRESENT_STATE_VERSION` (P14.T53.e), at
+///   `PresentStateRules::Present` through `with_present_state`: rules 5–7 of the published state
+///   on each pass's figures, which the next pass's state-keyed branches read.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 24's) is not
@@ -422,8 +425,12 @@ impl Error for SampleContextsError {
 /// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::derive::atmosphere::{SteamEnvelopeRules, with_steam_envelope};
-    with_steam_envelope(SteamEnvelopeRules::Steam, run)
+    use crate::planetary::derive::atmosphere::{
+        PresentStateRules, SteamEnvelopeRules, with_present_state, with_steam_envelope,
+    };
+    with_steam_envelope(SteamEnvelopeRules::Steam, || {
+        with_present_state(PresentStateRules::Present, run)
+    })
 }
 
 #[cfg(test)]
@@ -613,6 +620,25 @@ mod tests {
             SteamEnvelopeRules::Held
         );
         assert_eq!(SteamEnvelopeRules::in_force(), SteamEnvelopeRules::Held);
+    }
+
+    /// 25's second switch, the present climate's state (P14.T53.e): in force inside 25's helper,
+    /// held outside it and where a test sets it back.
+    #[test]
+    fn the_present_state_s_hold_is_in_force_inside_25_s_helper_alone() {
+        use crate::planetary::derive::atmosphere::{PresentStateRules, with_present_state};
+        assert_eq!(PresentStateRules::in_force(), PresentStateRules::Held);
+        assert_eq!(
+            with_every_25_hold(PresentStateRules::in_force),
+            PresentStateRules::Present
+        );
+        assert_eq!(
+            with_every_25_hold(|| {
+                with_present_state(PresentStateRules::Held, PresentStateRules::in_force)
+            }),
+            PresentStateRules::Held
+        );
+        assert_eq!(PresentStateRules::in_force(), PresentStateRules::Held);
     }
 
     #[test]

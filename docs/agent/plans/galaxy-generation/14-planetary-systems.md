@@ -8047,6 +8047,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - its bless re-runs the states census and item 26's re-check.
   - _Files:_ `planetary/derive/atmosphere.rs`, `planetary/derive/mod.rs` (the passes).
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`.
+  - _Built_ 2026-10-30, held at 25 (`PRESENT_STATE_VERSION`): Risks, "Deviations in P14.T53.e, as
+    built".
 - **P14.T53.f The supercritical envelope's section** (after P14.T53.b part 3, placed with 25's train; lane
   p14-escape, else a free slot; decision-p14-t53b-part3 §7).
   - A model of a supercritical envelope over a solid body, a steam envelope's and any other
@@ -32465,3 +32467,29 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - The science check read these from abstracts or second-hand: Zurek and Martin 1993, Strausberg
     et al. 2005, Kass et al. 2020 and Li and Ingersoll 2015 from their abstracts, and Sánchez-Lavega
     1994's durations through Sayanagi et al. 2013.
+- **Deviations in P14.T53.e, as built (2026-10-30).** Held at 25: `PRESENT_STATE_VERSION`,
+  `PresentStateRules`, the tests' `with_present_state` (in `with_every_25_hold`) and the tripwire
+  `the_present_state_is_held_only_until_the_25_bump`; nothing moves at 24.
+  - Rules 5–7 are `derive/atmosphere/present.rs`'s `present_climate_state` (a three-state
+    `PresentClimate`, `SNOWBALL_ICE_COVER` 0.5, `published_ice_cover`, the record's ice sum by
+    `hooks::figures::published_ice_cover_of`). Files beyond the entry's: `escaping.rs`
+    (`present_state`, `climate_class`), `surface_mix.rs`, `pass_record.rs`, `hooks/figures.rs`.
+  - A pass carries a state (`Atmosphere::carried_state`) only where rules 5–7 differ from the
+    division's class; the next reads it through `PassContext::present` (a key member) or, over the
+    stand-in, `passes::solve_in_context` on `Option<PresentClimate>`. Non-flipping bodies keep 24's
+    passes to the bit.
+  - A dry runaway under Venus's deck is not judged again (rule 6 without the deck, as (c)); judged,
+    a CO₂ collapse under it 2-cycled two bodies into hot `Snowball`s. A decked runaway that lists
+    liquid water is judged. (c)'s re-solve stands, and from 25 also takes a `Snowball` class.
+  - No history rule for bistable magma oceans: none of 169 runaways over the 400 and the goldens
+    settles molten from 0.10 (lean, 2026-10-30: a cooling world keeps the molten branch, Hamano et
+    al. 2013, if one appears).
+  - The census (`present_state_tests`, by name) exempts dry decked runaways and lists jumps and
+    (c)'s re-solves; at the build, 0 exceptions. The states census's 25 twin runs under T53.e
+    alone: its cover check holds a supercritical entry massless, which part 3 changes at 25.
+  - _Accept, as built:_ also `cargo test -p hyperion-sim --lib under_every_25_hold`, and by name
+    the two `…the_present_climate_sets_the_state_over_the_400` and
+    `under_the_present_state_the_states_and_the_dark_thick_airs_are_recorded`.
+  - For 25's bump: the tripwire's list, the `SurfaceStateDto` and guide rows, and the goldens it
+    moves (`planetary/systems/close_binary`, `m_dwarf_resonant_chain`, `solar_like`,
+    `planetary/surface_conditions_published`).

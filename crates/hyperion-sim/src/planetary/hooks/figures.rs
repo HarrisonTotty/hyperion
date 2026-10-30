@@ -2558,11 +2558,14 @@ impl GlobalFigures {
                 // surface: its water stays inside the `H2O` solid (W3 (b)'s end;
                 // decision-absurd-states-24 R1).
                 let liquids = condensates.surface_liquids();
-                let mut ices = condensates.surface_ices();
-                if condensates.entry(water, CondensatePhase::Solid).is_none() {
-                    ices.push((water, ice()));
-                }
-                (within_the_surface(liquids), within_the_surface(ices))
+                let water_ice = condensates
+                    .entry(water, CondensatePhase::Solid)
+                    .is_none()
+                    .then(ice);
+                (
+                    within_the_surface(liquids),
+                    published_ices(condensates.surface_ices(), water_ice),
+                )
             }
         };
         Self {
@@ -3348,6 +3351,30 @@ fn within_the_surface(mut shares: Vec<(SubstanceId, f64)>) -> Vec<(SubstanceId, 
         }
     }
     shares
+}
+
+/// The record's ices at the surface ([`GlobalFigures::surface_ices`]): the condensates' solids
+/// `ices`, water's ice `water_ice` added last where given (T24.b's, where they list none of
+/// water's), held within the surface.
+#[must_use]
+fn published_ices(
+    mut ices: Vec<(SubstanceId, f64)>,
+    water_ice: Option<f64>,
+) -> Vec<(SubstanceId, f64)> {
+    if let Some(ice) = water_ice {
+        ices.push((Gas::Water.substance(), ice));
+    }
+    within_the_surface(ices)
+}
+
+/// The share of the surface the ices `ices` cover together, water's ice `water_ice` added last
+/// where given: [`GlobalFigures::ice_fraction`] over the list
+/// [`with_surface_under`](GlobalFigures::with_surface_under) builds of them, by the same function,
+/// which P14.T53.e's rule 5 reads of a pass's published condensates
+/// ([`published_ice_cover`](crate::planetary::derive::atmosphere::published_ice_cover)).
+#[must_use]
+pub(crate) fn published_ice_cover_of(ices: Vec<(SubstanceId, f64)>, water_ice: Option<f64>) -> f64 {
+    covered(&published_ices(ices, water_ice))
 }
 
 /// The share of the surface the area shares `shares` cover together, their sum in their order,

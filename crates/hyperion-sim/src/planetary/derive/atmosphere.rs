@@ -64,9 +64,11 @@
 //! told apart (ruling 112.7).
 
 mod escaping;
+mod present;
 mod supercritical;
 mod surface_mix;
 
+use escaping::climate_class;
 pub(crate) use escaping::helium_left;
 #[cfg(test)]
 pub(crate) use escaping::protosolar_helium_mass_fraction;
@@ -76,6 +78,13 @@ pub use escaping::{
 #[cfg(test)]
 pub(crate) use escaping::{
     Thermostat, ThermostatCounts, WaterPhase, water_phase, with_resolve_check, with_thermostat,
+};
+pub(crate) use present::{
+    PresentClimate, PresentFigures, present_state_in_force, published_ice_cover, state_to_carry,
+};
+#[cfg(test)]
+pub(crate) use present::{
+    PresentStateRules, SNOWBALL_ICE_COVER, present_climate_state, with_present_state,
 };
 #[cfg(test)]
 pub(crate) use supercritical::{SteamEnvelopeRules, with_steam_envelope};
@@ -2161,7 +2170,11 @@ pub const GREENHOUSE_STEPS: u32 = 32;
 /// luminosity: a world inside the runaway limit at its hosts' peak alone keeps its water lost
 /// under `Temperate` or `Snowball` (its atmosphere's `water_state` gates its surface water), and a
 /// dry world between the limits whose surface would, without Venus's deck, be too hot for liquid
-/// water at its surface pressure is `RunawayGreenhouse`.
+/// water at its surface pressure is `RunawayGreenhouse`. From generator version 25 (P14.T53.e,
+/// behind its hold) the three are the present climate's, by rules 5–7 on the published figures:
+/// `Snowball` under ice on at least half the surface, `RunawayGreenhouse` with no surface liquid
+/// water at or above water's saturation temperature at the surface pressure, `Temperate` the rest;
+/// the insolation class keeps driving the inventory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SurfaceState {
     /// A hydrogen and helium envelope of at least 0.1% of the mass: no solid surface (a gas giant,
@@ -2202,7 +2215,9 @@ pub enum SurfaceState {
     /// its carbon airborne (P14.T53.b part 1). A world here can be ice-covered, on the cold side of
     /// the ice-albedo bistability (decision-pre-23-review item 26). From 24 a dry world here whose
     /// surface would, without Venus's deck, be too hot for liquid water at its surface pressure is
-    /// not: such a world is `RunawayGreenhouse` (P14.T53.b part 1 (c)).
+    /// not: such a world is `RunawayGreenhouse` (P14.T53.b part 1 (c)). From 25 (P14.T53.e) it is
+    /// rule 7's: neither iced over half its surface nor too hot for a sea, a hot sea below the
+    /// boiling curve or a cold or warm desert such as Mars, wherever its insolation class lies.
     Temperate,
     /// Beyond the maximum-greenhouse limit now, where a carbon-dioxide and water greenhouse cannot
     /// hold the surface above freezing (Kopparapu et al. 2013), as on Titan.
@@ -2212,6 +2227,8 @@ pub enum SurfaceState {
     /// P14.T53.a's
     /// carbon-dioxide form, a dry carbon-dioxide world here can be published above melting with no
     /// ice (P14.T13.c's finding "No maximum-greenhouse ceiling"; decision-p14-t51a-partition §1).
+    /// From 25 (P14.T53.e) it is rule 5's: ice of every substance over at least half its surface,
+    /// wherever its insolation class lies.
     Snowball,
     /// A thin or transient air below [`AIRLESS_PRESSURE`] whose column reaches the tenuous floor
     /// ([`TENUOUS_FLOOR_COLUMN`](crate::planetary::chem::tenuous::TENUOUS_FLOOR_COLUMN)), its gases
@@ -2549,6 +2566,10 @@ pub struct Atmosphere {
     /// Whether its published solve is labelled a steam envelope (P14.T53.b part 3;
     /// [`published_state`](Self::published_state)), a label no figure reads.
     steam_envelope: bool,
+    /// The state its pass carries to the next by P14.T53.e's rules 5–7
+    /// ([`carried_state`](Self::carried_state)): `None` under their hold, before the area mix,
+    /// where rules 1–4 decide its state and where the rules agree with its climate's class.
+    present: Option<PresentClimate>,
 }
 
 impl Atmosphere {
@@ -2587,7 +2608,9 @@ impl Atmosphere {
     /// (c)); the water the body holds follows its [`water_state`](Self::water_state), the
     /// division's. It is never [`SurfaceState::SteamEnvelope`], which labels a solve for its
     /// sections alone ([`published_state`](Self::published_state)), so that no branch of the
-    /// state reads that label (P14.T53.b part 3).
+    /// state reads that label (P14.T53.b part 3). From 25 (P14.T53.e, behind its hold) a pass whose
+    /// previous pass's figures gave another state by rules 5–7 publishes that state here (the
+    /// state that pass carried), and at a settled pass it is the one its own figures give.
     #[must_use]
     pub const fn state(&self) -> SurfaceState {
         self.state
@@ -2610,6 +2633,22 @@ impl Atmosphere {
         } else {
             self.state
         }
+    }
+
+    /// The state its pass carries to the next by P14.T53.e's rules 5–7, from generator version 25.
+    ///
+    /// It is the state its published figures give, where it differs from the class its climate's
+    /// division publishes (P14.T53.b part 1 (a) and (c)), which the next pass's state-keyed
+    /// branches read in its place. A dry runaway under Venus's deck carries its own state, judged on
+    /// its climate without the deck, which its passes do not solve.
+    ///
+    /// `None` under the hold, where rules 1–4 decide its state (a gas envelope, a magma ocean, an
+    /// airless or tenuous surface), in a hothouse's re-solve (P14.T53.b part 1 (c)), whose state is
+    /// fixed, and where the rules agree with its class: so at a settled pass, its own
+    /// [`state`](Self::state) is the one its figures give.
+    #[must_use]
+    pub(crate) const fn carried_state(&self) -> Option<PresentClimate> {
+        self.present
     }
 
     /// The state its water follows (P14.T53.b part 1 (a)): the state of the climate's division,
