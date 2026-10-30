@@ -34,13 +34,16 @@ export interface SoftwareModeLaunch {
   readonly packaged: boolean;
   /** Whether the launch is a views check (`--views-check`). */
   readonly viewsCheck: boolean;
+  /** Whether the views check names its own results directory (`--out`). */
+  readonly out: boolean;
 }
 
 /**
  * Why a launch may not take the software switch, as one usage line, or `null` where it may.
  *
  * @returns The refusal in a packaged build, then without `--views-check`, on every platform, so
- * that no player's launch takes the switch; `null` without the switch.
+ * that no player's launch takes the switch, then with `--out`, so that a software run's records go
+ * under `target/` alone (main's ruling, 2026-10-29); `null` without the switch.
  */
 export function softwareModeRefusal(launch: SoftwareModeLaunch): string | null {
   if (!launch.software) {
@@ -51,6 +54,9 @@ export function softwareModeRefusal(launch: SoftwareModeLaunch): string | null {
   }
   if (!launch.viewsCheck) {
     return `error: --${SOFTWARE_MODE_SWITCH} is an option of --views-check, which was not given`;
+  }
+  if (launch.out) {
+    return `error: --out is refused with --${SOFTWARE_MODE_SWITCH}, whose records go under target/ alone`;
   }
   return null;
 }

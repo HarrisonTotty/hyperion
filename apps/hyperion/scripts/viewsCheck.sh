@@ -63,16 +63,18 @@
 # implying --hidden. It is the check-only software mode, a test-tool exception to R01 Design note 8
 # (the owner's ruling, 2026-10-29): the client draws both styles on the fallback adapter, its
 # GRAPHICS panel reads SOFTWARE and the record's launch mode `software`. Electron runs in
-# test-render's environment (DISPLAY, WAYLAND_DISPLAY and XDG_SESSION_TYPE unset, the session's
-# D-Bus out of reach) with test-render's adapter and headless switches,
-# --hyperion-graphics-software, --ozone-override-screen-size=1920,1080 (headless Ozone's screen
-# would hold the window at its 1024 x 640 minimum) and --disable-gpu-watchdog (Chromium's GPU
-# watchdog ended SwiftShader's frames of up to 30 s with exit_code=512), and never
-# --ozone-platform=x11. Every wait of the run, the client's watchdog and each launch's limit here
-# are five times as long. Its results go under the smoke's target/views-check/ directories, a full
-# run's included (never docs/measurements/), its frame times are SwiftShader's, and a GPU-process
-# exit or a primary not drawn in the style its phase asks for fails the several-views check too. The
-# client refuses the switch without --views-check and in a packaged build.
+# test-render's environment (DISPLAY and WAYLAND_DISPLAY unset, the session's D-Bus out of reach),
+# with XDG_SESSION_TYPE unset too, and with test-render's adapter and headless switches,
+# --hyperion-graphics-software, --ozone-override-screen-size=1920,1080 and --disable-gpu-watchdog,
+# never --ozone-platform=x11. The research lane's prototype found both needed (AMD EPYC 7571,
+# 4 vCPU, 2026-10-29): headless Ozone's screen held the window at the client's 1024 x 640 minimum
+# whatever the setting, and Chromium's GPU watchdog ended SwiftShader's frames of 18.7 and 29.8 s
+# with exit_code=512, where with it off the longest frame measured took 22.7 s. Every wait of the
+# run, the client's watchdog and each launch's limit here are five times as long. Its results go
+# under the smoke's target/views-check/ directories, a full run's included (never
+# docs/measurements/), its frame times are SwiftShader's, and a GPU-process exit or a primary not
+# drawn in the style its phase asks for fails the several-views check too. The client refuses the
+# switch without --views-check, with --out and in a packaged build.
 #
 # Each launch gets a fresh `--user-data-dir`, removed afterwards; Electron runs in a process group
 # of its own under `timeout`, killed when the launch ends or the script ends for any reason. The
@@ -158,7 +160,8 @@ headless_switches=(--ozone-platform=headless --use-angle=swiftshader --enable-fe
 env_run=()
 switches=()
 if [[ $software -eq 1 ]]; then
-    # testRender.sh's environment: no display, and the session's D-Bus out of reach.
+    # testRender.sh's environment, no display and the session's D-Bus out of reach, and no
+    # XDG_SESSION_TYPE either.
     env_run+=(-u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE
         DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent)
     switches=("${adapter_switches[@]}" "${headless_switches[@]}" --hyperion-graphics-software

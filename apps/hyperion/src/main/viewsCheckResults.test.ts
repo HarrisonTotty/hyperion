@@ -415,12 +415,17 @@ function memoryFiles(
 
 describe("a software run's judgement (R01.T16)", () => {
   it("passes a run with every primary as asked and no GPU-process exit", () => {
-    expect(softwareViewsCheckFailures(buildViewsCheckResults(input()))).toBeNull();
+    expect(softwareViewsCheckFailures(buildViewsCheckResults(input()), 0)).toBeNull();
   });
 
   it("fails a run whose GPU process exited", () => {
     const results = buildViewsCheckResults(input({ gpuProcessExits: 2 }));
-    expect(softwareViewsCheckFailures(results)).toBe("2 exits of the GPU process");
+    expect(softwareViewsCheckFailures(results, 2)).toBe("2 exits of the GPU process");
+  });
+
+  it("fails a run whose GPU process exited after its results were written", () => {
+    const results = buildViewsCheckResults(input());
+    expect(softwareViewsCheckFailures(results, 1)).toBe("1 exits of the GPU process");
   });
 
   it("fails a phase whose photorealistic primary went back to the wireframe", () => {
@@ -432,7 +437,7 @@ describe("a software run's judgement (R01.T16)", () => {
           : phaseRecord(name),
       ),
     };
-    expect(softwareViewsCheckFailures(buildViewsCheckResults(input({ record })))).toBe(
+    expect(softwareViewsCheckFailures(buildViewsCheckResults(input({ record })), 0)).toBe(
       "photoreal-two-wireframe's primary was drawn wireframe, not photorealistic",
     );
   });
@@ -442,7 +447,7 @@ describe("a software run's judgement (R01.T16)", () => {
       ...RECORD,
       phases: [phaseRecord("wireframe-alone", [])],
     };
-    expect(softwareViewsCheckFailures(buildViewsCheckResults(input({ record })))).toBe(
+    expect(softwareViewsCheckFailures(buildViewsCheckResults(input({ record })), 0)).toBe(
       "wireframe-alone's primary was drawn in no style, not wireframe",
     );
   });

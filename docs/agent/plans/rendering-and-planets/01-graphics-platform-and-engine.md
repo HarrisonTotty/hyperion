@@ -98,9 +98,9 @@ TypeScript paths are under `apps/hyperion/src/`. Signatures are sketches.
 ```ts
 /**
  * How this launch runs the GPU: Chromium's own path off Linux (no switches, never relaunched), the
- * forced Vulkan path on Linux, or the declared safe mode.
+ * forced Vulkan path on Linux, the declared safe mode, or the check-only software mode (T16).
  */
-export type GraphicsLaunchMode = "default" | "vulkan" | "safe";
+export type GraphicsLaunchMode = "default" | "vulkan" | "safe" | "software";
 /** One Chromium switch; `value` absent for a bare flag. */
 export interface ChromiumSwitch {
   readonly name: string;
@@ -118,8 +118,18 @@ export function applyGraphicsSwitches(
   commandLine: Electron.CommandLine,
   switches: ReadonlyArray<ChromiumSwitch>,
 ): void;
-/** The launch's mode: `default` off Linux, else `safe` with the switch and `vulkan` without. */
-export function launchModeOf(platform: NodeJS.Platform, safeSwitch: boolean): GraphicsLaunchMode;
+/**
+ * The launch's mode: `default` off Linux, else `safe` with its switch, `software` with its own
+ * (T16), and `vulkan` with neither; the safe switch wins.
+ */
+export interface LaunchModeSwitches {
+  readonly safe: boolean;
+  readonly software: boolean;
+}
+export function launchModeOf(
+  platform: NodeJS.Platform,
+  switches: LaunchModeSwitches,
+): GraphicsLaunchMode;
 
 // x11Relaunch.ts
 /**
@@ -133,7 +143,22 @@ export function x11RelaunchArgs(
 ): readonly string[] | undefined;
 
 export const SAFE_MODE_SWITCH = "hyperion-graphics-safe";
+export const SOFTWARE_MODE_SWITCH = "hyperion-graphics-software"; // T16
 export const GPU_TIMING_SWITCH = "hyperion-gpu-timing";
+
+// softwareMode.ts (T16)
+/** The views checks' waits, watchdog and limit in the software mode: five times, fixed. */
+export const SOFTWARE_WAIT_FACTOR = 5;
+/**
+ * The software switch's refusal, one usage line, in a packaged build, without `--views-check` or
+ * with `--out`; `null` where the launch may take it.
+ */
+export function softwareModeRefusal(launch: {
+  readonly software: boolean;
+  readonly packaged: boolean;
+  readonly viewsCheck: boolean;
+  readonly out: boolean;
+}): string | null;
 
 // featureStatus.ts
 /**
@@ -159,7 +184,7 @@ export type GpuProcessEvent =
       readonly webgpu: string;
     };
 export type CrashLoopDecision = "none" | "relaunch-safe";
-/** Always `none` in `default` and `safe` modes (Design note 6). */
+/** Always `none` in `default`, `safe` and `software` modes (Design note 6, T16). */
 export function crashLoopDecision(
   history: ReadonlyArray<GpuProcessEvent>,
   mode: GraphicsLaunchMode,
@@ -219,8 +244,7 @@ export type AdapterOutcome =
       readonly adapter: GPUAdapter;
       readonly summary: AdapterSummary;
       readonly capabilities: GpuCapabilities;
-      readonly styles: StyleAvailability;
-    };
+    }; // T16: no `styles`, which the status derives with the launch's mode
 export function summariseAdapter(adapter: GPUAdapter): {
   readonly summary: AdapterSummary;
   readonly capabilities: GpuCapabilities;
@@ -232,7 +256,12 @@ export function featuresNotEnabled(
   requested: ReadonlyArray<GPUFeatureName>,
   enabled: ReadonlySet<string>,
 ): ReadonlyArray<GPUFeatureName>;
-export function styleAvailability(summary: AdapterSummary): StyleAvailability;
+/** T16: whether a launch takes a fallback adapter as a hardware one: `software` alone. */
+export function takesFallbackAdapter(launchMode: GraphicsLaunchMode): boolean;
+export function styleAvailability(
+  summary: AdapterSummary,
+  launchMode: GraphicsLaunchMode, // T16
+): StyleAvailability;
 export function requestAdapterOutcome(gpu: GPU | undefined): Promise<AdapterOutcome>;
 /** Optional features requested whenever present; never required. */
 export const WANTED_FEATURES: ReadonlyArray<GPUFeatureName>;
@@ -1041,7 +1070,11 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     failed), 2 (no adapter, a setup error) or 3 (watchdog). It loads a second renderer input,
     `smoke.html`, which imports the real `view/engine/` modules and never the bridge client, so no
     test switch can reach the client's main process; a test asserts that `graphicsSwitches` never
-    returns the unsafe flag or the adapter override. Frames are read back from an offscreen
+    returns the unsafe flag or the adapter override. _Excepted by T16 (the owner's ruling,
+    2026-10-29): `viewsCheck.sh --software` puts the harness's adapter and headless switches on the
+    client's own command line for a views check. The client still never sets them, and its main
+    process refuses the software switch without `--views-check`, with `--out` and in a packaged
+    build (`softwareModeRefusal`)._ Frames are read back from an offscreen
     `rgba16float` target, where a non-finite texel can exist, and from each view's canvas texture
     (configured with `COPY_SRC`, taken immediately before encoding, since it expires once the task
     yields). The network assertion is `session.defaultSession.webRequest.onBeforeRequest` over
@@ -1917,9 +1950,9 @@ New, 2026-10-30, from the research lane's advice on running `VIEW`'s checks in a
   Every other mode refuses as before (`GRAPHICS SOFTWARE ADAPTER`).
 - **The launch** (`src/main/index.ts`). With the switch, `prepareGraphics` asks for no X11
   relaunch, applies no switch and no timing toggle. `softwareModeRefusal` refuses it, exit 2 and one
-  usage line, without `--views-check` and in a packaged build. `viewsCheckDirs` writes a software
-  run under the smoke's directory, a full run's included; `viewsCheckWatchdogMs` is five times as
-  long.
+  usage line, without `--views-check`, with `--out` and in a packaged build. `viewsCheckDirs`
+  writes a software run under the smoke's directory, a full run's included;
+  `viewsCheckWatchdogMs` is five times as long.
 - **The waits.** `check/softwareTiming.ts`: in `software` mode the views check's `waitMs`, the
   atmosphere run's `waitMs` and `settleMaxMs`, the terrain run's `waitMs` and `restoreMs` and the
   hand-over check's `waitMs` and `overrunMs` are five times as long; the measured windows, settles,
@@ -1963,7 +1996,9 @@ New, 2026-10-30, from the research lane's advice on running `VIEW`'s checks in a
 - **By hand, recorded:** on the development machine (RTX 3080), the adapter (T1.b), the crash-loop
   relaunch (T2.b), the three canvases' GPU time with no copies (T11), the soak (T12) and child
   windows (T13); on the UHD 620, by the owner, the adapter, the three canvases with the rounding
-  probe, and the soak.
+  probe, and the soak; in a pod with no GPU, the views checks in the software mode (T16:
+  `just views-check --atmosphere --software --smoke`, `--software --smoke` and
+  `--terrain --software --smoke`), their times, exits and faults.
 - **By eye:** the `GRAPHICS` panel in each condition, and the header banner in safe mode (T5.b).
 
 ## Generator version
@@ -3264,3 +3299,20 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
       smoke part runs long enough to show it.
     - The logs and the harness are in the lane's scratch, which its handoff
       (`handoff-r01-t15.md`) names.
+- **R01.T16, as built** (2026-10-30), for the tasks that consume it:
+  - `launchModeOf(platform, { safe, software })` replaces `(platform, safeSwitch)`; safe wins.
+  - `AdapterOutcome` has no `styles`; the status derives them with
+    `styleAvailability(summary, launchMode)`, and `takesFallbackAdapter(launchMode)` holds in
+    `software` alone. R05's and R07's notes that call `styleAvailability(summary)` hold outside
+    the software mode.
+  - `viewsCheckDirs` and `viewsCheckWatchdogMs` are in `main/viewsCheck.ts` and take the launch
+    mode; `softwareModeRefusal` (a packaged build, no `--views-check`, or `--out`: exit 2) and
+    `SOFTWARE_WAIT_FACTOR` are in `main/graphics/softwareMode.ts`. The factor of five is held in
+    the main process, in `check/softwareTiming.ts` and in `viewsCheck.sh`, each pinned by a test.
+  - `ViewsCheckRunner` takes `launchMode`; `softwareViewsCheckFailures(results, gpuProcessExits)`
+    judges a software several-views run.
+  - Left undone: the terrain run does not pass in software mode (its script advances at most
+    0.25 s a frame, so high outlasts the ×5 watchdog and low fails the 500 ms stall bound and the
+    mid-stream loss); the hand-over check was not run in software mode; the brainstorm's
+    fallback and testing sentences are not amended (main's text pending); the justfile's
+    `views-check` comment is not edited, since a justfile edit plans the full `just ci`.

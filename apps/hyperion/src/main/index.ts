@@ -594,6 +594,7 @@ async function main(): Promise<void> {
     software: app.commandLine.hasSwitch(SOFTWARE_MODE_SWITCH),
     packaged: app.isPackaged,
     viewsCheck: args.viewsCheck !== undefined,
+    out: (args.viewsCheck?.out ?? null) !== null,
   });
   if (softwareRefusal !== null) {
     process.stderr.write(`${softwareRefusal}\n`);

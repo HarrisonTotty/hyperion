@@ -434,6 +434,14 @@ describe("the views check's session in the software mode (R01.T16)", () => {
     ]);
   });
 
+  it("ends with 1 when the GPU process exited after the results were written", async () => {
+    const { session: run, deps } = moded("software");
+    await run.writeResults({ ...RECORD, phases: [primaryPhase("photorealistic")] });
+    run.gpuProcessGone();
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(1);
+  });
+
   it("ends with 1 when a primary went back to the wireframe", async () => {
     const { session: run, deps } = moded("software");
     await run.writeResults({ ...RECORD, phases: [primaryPhase("wireframe")] });

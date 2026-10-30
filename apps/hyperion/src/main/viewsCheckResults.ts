@@ -762,14 +762,19 @@ export function buildViewsCheckResults(input: ViewsCheckInput): ViewsCheckResult
  * line, or `null` where it passes: an exit of the GPU process over the run, or a phase whose
  * primary was not drawn in the style the phase asks for when it ended, its capture's moment.
  *
+ * @param gpuProcessExits - The GPU process's exits by the run's end, which may pass the count its
+ * results were written with: the larger is judged.
  * @remarks
  * A hardware run is recorded, not judged (R07.T20), and stays so. On SwiftShader a lost GPU
  * process takes the photorealistic primary back to the wireframe, which a run recorded alone
  * passed (the research lane's F1, 2026-10-29), so a software run is judged on both.
  */
-export function softwareViewsCheckFailures(results: ViewsCheckResults): string | null {
+export function softwareViewsCheckFailures(
+  results: ViewsCheckResults,
+  gpuProcessExits: number,
+): string | null {
   const reasons: string[] = [];
-  const exits = results.findings.faults.gpuProcessExits;
+  const exits = Math.max(results.findings.faults.gpuProcessExits, gpuProcessExits);
   if (exits > 0) {
     reasons.push(`${String(exits)} exits of the GPU process`);
   }

@@ -30,7 +30,7 @@ import { sizesReportOf } from "./fixtures/sizesReport";
 import { smallReport } from "./fixtures/spikeReport";
 
 const PLATFORMS: ReadonlyArray<NodeJS.Platform> = ["linux", "win32", "darwin"];
-const MODES: ReadonlyArray<GraphicsLaunchMode> = ["default", "vulkan", "safe"];
+const MODES: ReadonlyArray<GraphicsLaunchMode> = ["default", "vulkan", "safe", "software"];
 const SAFETY: ReadonlyArray<DawnSafety> = ["on", "off"];
 
 const VULKAN_SET: ReadonlyArray<ChromiumSwitch> = [

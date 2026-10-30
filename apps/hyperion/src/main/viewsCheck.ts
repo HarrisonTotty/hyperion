@@ -135,8 +135,8 @@ export const VIEWS_CHECK_TRACE_BUFFER_KB = 512 * 1024;
  * @remarks
  * A run in the check-only software mode (plan R01, R01.T16) writes under the smoke's directory, a
  * full run's included: its frame times are SwiftShader's and its file names carry a test machine's
- * name, so it never writes under `docs/measurements/` (main's ruling, 2026-10-29). `--out` still
- * names a directory of its own, as for any run.
+ * name, so it never writes under `docs/measurements/` (main's ruling, 2026-10-29); the main
+ * process refuses `--out` with it (`softwareModeRefusal`).
  */
 export function viewsCheckDirs(
   launch: ViewsCheckLaunch,
@@ -725,10 +725,13 @@ export class ViewsCheckSession {
     if (code === 0) {
       switch (this.#deps.launch.run) {
         case "several-views": {
-          // The renderer ends with 0 only once its results are written.
+          // The renderer ends with 0 only once its results are written; an exit of the GPU process
+          // since then counts too.
           const results = this.#viewsResults;
           const failures =
-            results?.run.launchMode === "software" ? softwareViewsCheckFailures(results) : null;
+            results?.run.launchMode === "software"
+              ? softwareViewsCheckFailures(results, this.#gpuProcessExits)
+              : null;
           failure =
             failures === null ? null : `the software run's views were not as asked: ${failures}`;
           break;
