@@ -4188,12 +4188,15 @@ pass.
       ground's variance of z at band levels 3 and 4, after R09's follow-up on the closed forms (the
       neighbours' trunks) if it has landed (R09.T6.f's, R10.T2's and R10.T5's records). The bump's
       bless re-runs those binaries by name first.
-    - _Its looks also take:_ the reference Mars, a world dry now, for its trunks' two straight
-      chords a cell (signoff-r09-t6c-brainstorm); T11's wireframe legibility on a small body;
-      T8.b's face edge near a cube corner at close range, and whether eight azimuths miss peaks;
-      T10.d's class map under a patterned survey; T16.f's night side in the photorealistic style
-      (a draped graticule is scoped only if surveyed ground is unreadable there); and T16.b's mask
-      at survey cell code 0 on a level-7 or level-8 field.
+    - _Its looks also take:_ a served world dry now, if one serves, for its trunks' two straight
+      chords a cell (signoff-r09-t6c-brainstorm; the reference Mars's own look is taken at 23,
+      R09.T6.c's record); T11's wireframe legibility on a small body; T8.b's face edge near a cube
+      corner at close range, and whether eight azimuths miss peaks; T10.d's class map under a
+      patterned survey; T16.f's night side in the photorealistic style (a draped graticule is
+      scoped only if surveyed ground is unreadable there); and, as a figure from the descent's
+      metrics, the bake rounds and ranges over which T16.b's mask is withheld at survey cell code 0
+      on a level-7 or level-8 field, captured only if it is withheld inside the hand-over range
+      (R10.T16.b's trigger).
     - _The crater gap._ It retires `CRATER_GAP` (the synthetic Ceres-like world at 1 km, var z held
       in [0.85, 1.25]) by a check weighted by crater count, or a larger cratered sample, or records
       why the gap stays (R09.T7.h's and R10.T5's records).
