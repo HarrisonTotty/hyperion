@@ -202,3 +202,4 @@ class.cell (Cell) = 0xd675c50fb0714e5f
 dwarf.core.metallicity (Galaxy) = 0xbd1b119c20498aa9
 stream.spray.release (Galaxy) = 0x530a54c1c2a5c79d
 stream.spray.offsets (Galaxy) = 0x79ce3e8131fb9430
+stream.tube.gaps (Galaxy) = 0x0e05c44f9a7f726e

@@ -1,6 +1,7 @@
-//! The tube table's unit tests (P10.T6.a): the reduction of a synthetic stream on a circle, whose
-//! centre line, frame, widths and dispersions are known. The test streams' sprays, which take the
-//! full potential and seconds of integration, are `tests/global_list_tube.rs`'s.
+//! The tube table's unit tests (P10.T6.a and T6.b): the reduction of a synthetic stream on a
+//! circle, whose centre line, frame, widths and dispersions are known, and its gap noise. The test
+//! streams' sprays, which take the full potential and seconds of integration, are
+//! `tests/global_list_tube.rs`'s.
 
 use super::*;
 use crate::Seed;
@@ -24,13 +25,23 @@ const DISPERSION: [f64; 3] = [3_000.0, 1_000.0, 500.0];
 const MASS: f64 = 2e4;
 /// 10⁻⁹ ly in metres.
 const NANO_LY: f64 = 1e-9 * METRES_PER_LIGHT_YEAR;
+/// The seed of the tables' gap noise.
+const SEED: Seed = Seed::new(0x0a10_6b00);
+/// The mean system mass the tables' along cells are cut for, M☉: a round figure near the Milky
+/// Way fixture's halo's 0.61 (`Galaxy::mean_system_mass`), which puts 512 cells in [`MASS`].
+const MEAN_MASS: f64 = 0.55;
 
 /// A specification for the tables to name: only its number is read.
 fn spec() -> StreamSpec {
+    numbered(7)
+}
+
+/// [`spec`] with stream number `number`.
+fn numbered(number: u16) -> StreamSpec {
     let orbit = SphericalOrbit::from_turning_points(|r| -1e12 / r, 40_000.0, 60_000.0)
         .expect("Kepler turning points bound an orbit");
     StreamSpec {
-        number: StreamNumber::new(7).expect("below the limit"),
+        number: StreamNumber::new(number).expect("below the limit"),
         origin: StreamOrigin::Orphan,
         position: GalacticDisplacement::new([RADIUS * METRES_PER_LIGHT_YEAR, 0.0, 0.0]),
         velocity: GalacticVelocity::new([0.0, SPEED, 0.0]),
@@ -93,7 +104,20 @@ fn circle(per_arm: u32, astray: u32) -> Vec<Tracer> {
 }
 
 fn table(tracers: &[Tracer]) -> TubeTable {
-    TubeTable::from_tracers(&spec(), tracers).expect("enough tracers in each arm")
+    built(SEED, MEAN_MASS, &spec(), tracers)
+}
+
+/// The table of `tracers` with the gap noise of `seed` and along cells for `mean_mass`.
+fn built(seed: Seed, mean_mass: f64, spec: &StreamSpec, tracers: &[Tracer]) -> TubeTable {
+    TubeTable::from_tracers(seed, SolarMasses::new(mean_mass), spec, tracers)
+        .expect("enough tracers in each arm")
+}
+
+/// Every along cell's gap noise, in cell order.
+fn noises(tube: &TubeTable) -> Vec<f64> {
+    (0..tube.along_cells())
+        .map(|cell| tube.noise(cell))
+        .collect()
 }
 
 fn ly(position: &GalacticPosition) -> [f64; 3] {
@@ -391,7 +415,7 @@ fn an_arm_of_fewer_tracers_than_a_kernel_is_an_error() {
         keep
     });
     assert_eq!(
-        TubeTable::from_tracers(&spec(), &tracers),
+        TubeTable::from_tracers(SEED, SolarMasses::new(MEAN_MASS), &spec(), &tracers),
         Err(BuildTubeTableError::TooFewTracers {
             arm: Arm::Trailing,
             tracers: 47
@@ -500,4 +524,136 @@ fn the_line_density_follows_unequal_weights() {
             "knot {j}: Λ {lambda} against {behind} behind its ψ"
         );
     }
+}
+
+/// The gap noise keeps the tube's expected total (P10.T6.b): its factors over the along cells,
+/// summed in cell order, are the cell count to 10⁻¹², at the fewest cells, the most and between.
+/// Each is positive and finite, and they vary as a log-normal of [`GAP_NOISE_AMPLITUDE`] does: the
+/// rms of their logarithms over 512 cells, 64 node spacings, is 0.302 here.
+#[test]
+fn the_gap_noise_keeps_the_expected_total() {
+    let tracers = circle(600, 3);
+    for (mean_mass, cells) in [(1e3, 16), (MEAN_MASS, 512), (1e-3, 16_384)] {
+        let tube = built(SEED, mean_mass, &spec(), &tracers);
+        assert_eq!(tube.along_cells(), cells);
+        let noise = noises(&tube);
+        assert!(noise.iter().all(|f| *f > 0.0 && f.is_finite()));
+        let sum = noise.iter().fold(0.0, |sum, f| sum + f);
+        let n = f64::from(cells);
+        assert!((sum / n - 1.0).abs() < 1e-12, "{cells} cells: {sum}");
+        if cells == 512 {
+            let logs: Vec<f64> = noise.iter().map(|f| math::ln(*f)).collect();
+            let mean = logs.iter().sum::<f64>() / n;
+            let rms = (logs.iter().map(|l| (l - mean) * (l - mean)).sum::<f64>() / n).sqrt();
+            assert!(
+                (0.5 * GAP_NOISE_AMPLITUDE..1.5 * GAP_NOISE_AMPLITUDE).contains(&rms),
+                "{rms}"
+            );
+        }
+    }
+}
+
+/// The gap noise is a pure function of the seed and the stream (P10.T6.b): the same seed and
+/// stream number give the same bits from the tracers in any order and whatever cells, of whichever
+/// table, were read before; another seed or another number gives other noise; and each cell's
+/// factor is the module documentation's, bit for bit, from node `k`'s normal at word `2k` of
+/// [`tags::STREAM_TUBE_GAPS`] keyed by the stream's number.
+#[test]
+fn the_gap_noise_is_a_pure_function_of_the_seed_and_the_stream() {
+    let tracers = circle(300, 2);
+    let tube = table(&tracers);
+    let noise = noises(&tube);
+    let reversed: Vec<Tracer> = tracers.iter().rev().copied().collect();
+    assert_eq!(noises(&table(&reversed)), noise);
+    let others = [
+        built(Seed::new(0x0a10_6b01), MEAN_MASS, &spec(), &tracers),
+        built(SEED, MEAN_MASS, &numbered(8), &tracers),
+    ];
+    let tubes = [&tube, &others[0], &others[1]];
+    let keys: Vec<(usize, u32)> = (0..3)
+        .flat_map(|t| {
+            (0..tube.along_cells())
+                .step_by(7)
+                .map(move |cell| (t, cell))
+        })
+        .collect();
+    hyperion_testkit::order::assert_order_independent(&keys, |&(t, cell)| tubes[t].noise(cell));
+    for other in &others {
+        assert_eq!(other.along_cells(), tube.along_cells());
+        let moved = noises(other)
+            .iter()
+            .zip(&noise)
+            .filter(|(a, b)| (*a / *b - 1.0).abs() > 1e-3)
+            .count();
+        assert!(moved > 400, "{moved} of 512 cells moved");
+    }
+    // By hand: the lattice from the trailing tip's ψ to the leading tip's, eight mean cells a node.
+    let cells = tube.along_cells();
+    let knots: Vec<&TubeKnot> = tube.knots().collect();
+    let (low, high) = (knots[0].psi().value(), knots[511].psi().value());
+    let spacing = 8.0 * (high - low) / f64::from(cells);
+    let mut nodes = Stream::open(SEED, tags::STREAM_TUBE_GAPS, ObjectKey::galaxy_item(7));
+    let normals: Vec<f64> = (0..=cells / 8)
+        .map(|k| {
+            nodes.seek(2 * u64::from(k));
+            nodes.standard_normal()
+        })
+        .collect();
+    let factors: Vec<f64> = (0..cells)
+        .map(|cell| {
+            let psi = tube.psi((f64::from(cell) + 0.5) / f64::from(cells)).value();
+            let t = ((psi - low) / spacing).clamp(0.0, f64::from(cells / 8));
+            let below = t.min(f64::from(cells / 8 - 1)).floor();
+            let s = fade(t - below);
+            let (w0, w1) = (1.0 - s, s);
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "below is a whole number in [0, cells ÷ 8 − 1]"
+            )]
+            let k = below as usize;
+            let g = (w0 * normals[k] + w1 * normals[k + 1]) / (w0 * w0 + w1 * w1).sqrt();
+            math::exp(GAP_NOISE_AMPLITUDE * g - 0.5 * GAP_NOISE_AMPLITUDE * GAP_NOISE_AMPLITUDE)
+        })
+        .collect();
+    let mean = factors.iter().fold(0.0, |sum, f| sum + f) / f64::from(cells);
+    for (by_hand, f) in factors.iter().zip(&noise) {
+        hyperion_testkit::float::assert_same_bits(by_hand / mean, *f);
+    }
+}
+
+/// A tube's along cells are the power of two nearest its mass over 64 mean systems, nearest in the
+/// logarithm (Design note 7), held to 16 (this task's lean) and 16,384 (the note's) (P10.T6.b).
+#[test]
+fn the_along_cells_follow_the_rule_and_its_clamp() {
+    let cells = |ideal: f64| along_cells(SolarMasses::new(64.0 * ideal), SolarMasses::new(1.0));
+    for (ideal, expected) in [
+        (0.0, 16),
+        (1.0, 16),
+        (22.0, 16),
+        (23.0, 32),
+        (200.0, 256),
+        (362.0, 256),
+        (363.0, 512),
+        (11_585.0, 8_192),
+        (11_586.0, 16_384),
+        (1e9, 16_384),
+    ] {
+        assert_eq!(cells(ideal), expected, "{ideal}");
+    }
+    // At each geometric middle the count rounds up.
+    for log2 in 4..14 {
+        let middle = f64::from(1_u32 << log2) * core::f64::consts::SQRT_2;
+        assert_eq!(cells(middle), 2 << log2);
+        assert_eq!(cells(middle * (1.0 - 1e-12)), 1 << log2);
+    }
+    // The synthetic stream: 2 × 10⁴ M☉ over 0.55 × 64 is 568, so 512.
+    assert_eq!(table(&circle(600, 0)).along_cells(), 512);
+}
+
+/// A mean system mass that is not positive cannot cut a tube.
+#[test]
+#[should_panic(expected = "a galaxy's mean system mass is positive and finite: 0")]
+fn a_mean_system_mass_of_zero_is_a_broken_invariant() {
+    let _ = along_cells(SolarMasses::new(1e4), SolarMasses::new(0.0));
 }

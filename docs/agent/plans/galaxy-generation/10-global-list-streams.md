@@ -70,7 +70,9 @@ All Rust paths are under `hyperion_sim::galaxy` unless they start with another m
   `TubeTable::build(&Galaxy, &StreamSpec) -> TubeTable` (as built,
   `-> Result<TubeTable, BuildTubeTableError>`, with
   `TubeTable::from_tracers(&StreamSpec, &[Tracer])` for a pool's tracers: Risks, "P10.T6.a as
-  built"), `TubeTable::byte_size()`,
+  built"; as built in P10.T6.b, `from_tracers(Seed, SolarMasses, &StreamSpec, &[Tracer])`, the
+  seed and the halo's mean system mass first, with `TubeTable::along_cells()` and
+  `TubeTable::noise(cell)`: Risks, "P10.T6.b as built"), `TubeTable::byte_size()`,
   `TubeTable::locate(u, a, b) -> GalacticPosition`, `TubeTable::mean_velocity(u)`,
   `TubeTable::cells_touching(sphere) -> impl Iterator<Item = TubeCell>`.
 - `global_list::tube::TubeLookup`, the trait a caller's cache implements:
@@ -566,6 +568,9 @@ which T4 checks (Risks, "T3.a–c as built").
   `global_list::testing::{pal5_like, gd1_like, sagittarius_like}` (Provides).
 
 ### P10.T6 The tube table
+
+_T6.a–b built (lanes `p10-t6a` and `p10-t6b`, 2026-10-29 and 2026-10-30, at `GENERATOR_VERSION`
+23); see "P10.T6.a as built" and "P10.T6.b as built" in Risks._
 
 - **P10.T6.a Reduction.** Per arm about 256 knots per design note 6: centre line (as integer
   light-years plus offset), a local frame carried along the track by parallel transport so that it
@@ -1887,3 +1892,31 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
   shrinks a core's radius only by a factor of about 2 even after 99% of its stars are lost
   (Peñarrubia, Navarro and McConnachie 2008, ApJ 673, 226; abstract only). Not a blocker; T7.b
   measures it again on these fixes' scaled cores.
+- **P10.T6.b as built (lane `p10-t6b`, 2026-10-30, at `GENERATOR_VERSION` 23).** No output
+  moved: nothing reads a tube before P10.T8. One tag, `stream.tube.gaps` (`Galaxy`), keyed by
+  `ObjectKey::galaxy_item` of the stream number; `rng/tags.golden` is extended only.
+  - _Items._ `TubeTable::from_tracers(seed, mean_system_mass, spec, tracers)` (`Seed`,
+    `SolarMasses`); `build` passes `galaxy.seed()` and `galaxy.mean_system_mass(Population::Halo)`.
+    `TubeTable::along_cells` and `TubeTable::noise`; in `tube`, the constants
+    `CROSS_SECTION_MEMBERS`, `MIN_ALONG_CELLS`, `MAX_ALONG_CELLS`, `CELLS_PER_GAP_NODE` and
+    `GAP_NOISE_AMPLITUDE`. The table stores the seed, the cell count and the noise's mean (16
+    bytes more for T6.c's `byte_size`), no per-cell values and not the mean system mass.
+  - _For T8.b._ Read `along_cells()`, never recompute it. Cell `i` holds the along coordinates
+    from `i ÷ cells` to `(i + 1) ÷ cells`. Before band shares its mean count is
+    `Λ_total ÷ (m̄ × cells) × noise(i)`, with `m̄` the mean system mass `from_tracers` was given
+    (the halo's, in `build`). `noise` reopens the stream and reads two node normals at each call.
+  - _For T6.c._ The tube golden must pin `along_cells()` and some cells' `noise(cell)` bits, not
+    only the stored fields: no golden pins the noise yet, so `wasm32-wasip1` does not compare it.
+  - _Leans (2026-10-30)._ "The power of two nearest" is nearest in the logarithm, a geometric
+    middle rounding up; the floor of 16 cells; the nodes run from the trailing tip's ψ to the
+    leading tip's, `cells ÷ 8` intervals, so Design note 8's "eight cells" is eight mean cells in
+    ψ, and where the tracers lie sparse a node spacing covers fewer cells (about 2.5 over
+    `gd1_like`'s outer 10 % of mass); the amplitude, σ = 0.3 of the logarithm.
+  - _Tests._ Fast, `tube::tests`: `the_gap_noise_keeps_the_expected_total`,
+    `the_gap_noise_is_a_pure_function_of_the_seed_and_the_stream`,
+    `the_along_cells_follow_the_rule_and_its_clamp`,
+    `a_mean_system_mass_of_zero_is_a_broken_invariant`. Slow, by name, in
+    `tests/global_list_tube.rs`: `gd1_like_s_gap_noise_peaks_at_a_few_thousand_light_years`, the
+    peak read at the scale `1 ÷ k` (Bovy, Erkal and Sanders 2017's axis) in `k P(k)` (this task's
+    choice, so that a peak exists), and
+    `build_cuts_the_tube_with_the_galaxy_s_seed_and_its_halo_s_mean_mass`.

@@ -939,6 +939,15 @@ domain_tags! {
     /// for tracer `t`, one uniform each, the ranks of its `k_r`, `k_vφ`, `k_z` and `k_vz` in their
     /// cut Gaussians (Fardal, Huang and Weinberg 2015).
     STREAM_SPRAY_OFFSETS: Galaxy = "stream.spray.offsets";
+
+    // Plan 10, P10.T6.b: a tube's gap noise, under the "Plan 10" heading's rule (scope `Galaxy`),
+    // keyed by `ObjectKey::galaxy_item` of the stream's number (Design note 14). Appended here,
+    // after P10.T5's spray, because the macro's order fixes `ALL`.
+
+    /// A stream's gap noise (P10.T6.b, `global_list::tube::TubeTable::noise`, Design note 8):
+    /// words `2k` and `2k + 1`, a Box–Muller pair whose first normal is the noise's node `k` along
+    /// ψ, from the trailing arm's tip.
+    STREAM_TUBE_GAPS: Galaxy = "stream.tube.gaps";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1340,6 +1349,7 @@ mod tests {
             DWARF_CORE_METALLICITY,
             STREAM_SPRAY_RELEASE,
             STREAM_SPRAY_OFFSETS,
+            STREAM_TUBE_GAPS,
         ];
         for tag in tags {
             assert_eq!(tag.scope(), crate::rng::TagScope::Galaxy, "{}", tag.name());

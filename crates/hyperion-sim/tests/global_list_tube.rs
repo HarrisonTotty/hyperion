@@ -1,6 +1,6 @@
-//! The tube table's slow tests (plan 10, P10.T6.a): the three test streams of
-//! `global_list::testing`, reduced from the generator's 2,000 tracers, and the strays of
-//! `sagittarius_like` under several seeds.
+//! The tube table's slow tests (plan 10, P10.T6.a and T6.b): the three test streams of
+//! `global_list::testing`, reduced from the generator's 2,000 tracers, the strays of
+//! `sagittarius_like` under several seeds, and the power of `gd1_like`'s gap noise.
 //!
 //! The (R, z) grid costs seconds to build, so the test streams read one set of tables, the Milky
 //! Way fixture's, and its spray table, as `tests/global_list_spray.rs` does, and each stream is
@@ -12,29 +12,38 @@
 
 use std::sync::OnceLock;
 
-use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
-use hyperion_sim::galaxy::global_list::spray::{Arm, Spray, SprayForce, SprayParams, Tracer};
+use hyperion_sim::galaxy::global_list::spray::{self, Arm, Spray, SprayForce, SprayParams, Tracer};
 use hyperion_sim::galaxy::global_list::testing::{gd1_like, pal5_like, sagittarius_like};
-use hyperion_sim::galaxy::global_list::tube::TubeKnot;
+use hyperion_sim::galaxy::global_list::tube::{GAP_NOISE_AMPLITUDE, KNOTS_PER_ARM, TubeKnot};
 use hyperion_sim::galaxy::global_list::{StreamSpec, TubeTable};
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::potential::{MassModel, PotentialTables};
+use hyperion_sim::galaxy::{Galaxy, Population};
+use hyperion_sim::units::SolarMasses;
 use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+use hyperion_sim::{Seed, math};
 
 const SEED: Seed = Seed::new(0x0a10_5b00_0000_0000);
 
 struct Fixture {
     tables: PotentialTables,
     force: SprayForce,
+    /// The halo's mean system mass, which cuts a tube's along cells.
+    mean_mass: SolarMasses,
 }
 
 fn fixture() -> &'static Fixture {
     static FIXTURE: OnceLock<Fixture> = OnceLock::new();
     FIXTURE.get_or_init(|| {
-        let tables = PotentialTables::full(&MassModel::new(&GalaxyParams::milky_way_like()));
+        let params = GalaxyParams::milky_way_like();
+        let tables = PotentialTables::full(&MassModel::new(&params));
         let force = SprayForce::new(&tables).expect("the full tables");
-        Fixture { tables, force }
+        Fixture {
+            tables,
+            force,
+            mean_mass: params.mean_system_mass(Population::Halo),
+        }
     })
 }
 
@@ -52,7 +61,8 @@ fn tube(seed: Seed, spec: &StreamSpec) -> (Vec<Tracer>, TubeTable) {
     let spray = Spray::new(seed, &f.force, &f.tables, spec, &SprayParams::default())
         .expect("a finite stripping time");
     let tracers = spray.tracers();
-    let table = TubeTable::from_tracers(spec, &tracers).expect("enough tracers in each arm");
+    let table = TubeTable::from_tracers(seed, f.mean_mass, spec, &tracers)
+        .expect("enough tracers in each arm");
     (tracers, table)
 }
 
@@ -537,4 +547,184 @@ fn the_strays_lie_inside_the_other_arm_s_tube() {
         strays += astray.len();
     }
     assert!(strays > 0, "no stray to check");
+}
+
+/// The arc length along `table`'s centre line, ly, from the trailing arm's tip to the point at
+/// along coordinate `u`, through the knots.
+fn arc_at(table: &TubeTable, u: f64) -> f64 {
+    let knots: Vec<&TubeKnot> = table.knots().collect();
+    let mut s = vec![0.0];
+    for w in knots.windows(2) {
+        let last = s[s.len() - 1];
+        s.push(last + norm(sub(ly(&w[1].centre()), ly(&w[0].centre()))));
+    }
+    // The knots' Λ rises within each arm; between the roots it does not, so no u falls there.
+    let target = u.clamp(0.0, 1.0) * table.mass().value();
+    let trailing = table.arm(Arm::Trailing).mass().value();
+    let per_arm = usize::try_from(KNOTS_PER_ARM).expect("256 knots fit a usize");
+    let (start, end) = if target < trailing {
+        (0, per_arm)
+    } else {
+        (per_arm, 2 * per_arm)
+    };
+    let arm = &knots[start..end];
+    let after = arm.partition_point(|k| k.cumulative_mass().value() <= target);
+    match after {
+        0 => s[start],
+        n if n == arm.len() => s[end - 1],
+        n => {
+            let (low, high) = (
+                arm[n - 1].cumulative_mass().value(),
+                arm[n].cumulative_mass().value(),
+            );
+            let f = (target - low) / (high - low);
+            s[start + n - 1] + f * (s[start + n] - s[start + n - 1])
+        }
+    }
+}
+
+/// P10.T6.b on `gd1_like`: the power of its gap noise's density contrast along the tube peaks at
+/// scales of a few thousand light-years, and the contrast's rms is the amplitude's.
+///
+/// The contrast is each along cell's noise less 1, constant over the cell's arc of the centre
+/// line ([`arc_at`]). Its Fourier modes over the tube's length are exact integrals over the cells,
+/// and their power is averaged over 512 seeds of noise on the tests' tracers. The power is read
+/// at the scale `1 ÷ k`, the axis Bovy, Erkal and Sanders (2017, MNRAS 466, 628) plot stream
+/// density power spectra against, and taken here per logarithmic interval of `k`, `k P(k)`, so
+/// that a peak is defined (lattice noise's `P(k)` is flat at large scales). The peak must lie at
+/// 1–10 thousand light-years, stand at least twice the longest mode's, and stand five times every
+/// mode's at scales under 1,000 ly. The contrast's rms, weighted by arc length, must be within
+/// 10 % of `√(exp(σ²) − 1)`.
+///
+/// Measured at v23, x86-64, over 512 seeds: 128 along cells over 135,899 ly, so the nodes lie
+/// about 8,500 ly apart; the ideal count, 7,000 M☉ over 64 of the halo's 0.606 M☉, is 180.5, just
+/// under the step to 256 at 181.0. `k P(k)` peaks at mode 5, a wavelength of 27,180 ly and a
+/// scale of 4,326 ly, with mode 6 (3,605 ly) at 0.92 of it. Mode 2, the largest outside the
+/// scales' bracket, lies at 0.68 of the peak and the longest mode at 0.36, each at least 4
+/// standard errors from its bracket (a mode's power over 512 seeds is good to 4.4 %); the largest
+/// under 1,000 ly lies at 0.085. The rms is 0.299 against 0.307 at σ = 0.3.
+#[test]
+#[ignore = "slow: sprays three test streams of 2,000 tracers, 20,000 steps for the longest"]
+fn gd1_like_s_gap_noise_peaks_at_a_few_thousand_light_years() {
+    const SEEDS: u32 = 512;
+    let Sprayed {
+        spec,
+        tracers,
+        table,
+        ..
+    } = &sprayed()[1];
+    let cells = table.along_cells();
+    let edges: Vec<f64> = (0..=cells)
+        .map(|c| arc_at(table, f64::from(c) / f64::from(cells)))
+        .collect();
+    let length = edges[edges.len() - 1] - edges[0];
+    let tau = 2.0 * std::f64::consts::PI;
+    // Every mode whose scale is at least 500 ly, well short of the median cell's 681 ly.
+    let modes: Vec<u32> = (1..=u32::MAX)
+        .take_while(|&m| length / (tau * f64::from(m)) >= 500.0)
+        .collect();
+    let mut power = vec![0.0; modes.len()];
+    let mut variance = 0.0;
+    for seed in 1..=SEEDS {
+        let noisy = TubeTable::from_tracers(
+            Seed::new(u64::from(seed)),
+            fixture().mean_mass,
+            spec,
+            tracers,
+        )
+        .expect("enough tracers in each arm");
+        let contrast: Vec<f64> = (0..cells).map(|c| noisy.noise(c) - 1.0).collect();
+        variance += contrast
+            .iter()
+            .zip(edges.windows(2))
+            .map(|(d, w)| d * d * (w[1] - w[0]) / length)
+            .sum::<f64>()
+            / f64::from(SEEDS);
+        for (p, &mode) in power.iter_mut().zip(&modes) {
+            let k = tau * f64::from(mode) / length;
+            // ∫ e^(−iks) ds over a cell is [sin ks + i cos ks] ÷ k between its ends.
+            let (mut re, mut im) = (0.0, 0.0);
+            for (d, w) in contrast.iter().zip(edges.windows(2)) {
+                let (sin_b, cos_b) = math::sin_cos(k * (w[1] - edges[0]));
+                let (sin_a, cos_a) = math::sin_cos(k * (w[0] - edges[0]));
+                re += d * (sin_b - sin_a) / k;
+                im += d * (cos_b - cos_a) / k;
+            }
+            // The mode's share of the contrast's variance, both signs of k, times k's mode number:
+            // `k P(k)` up to a constant.
+            *p +=
+                f64::from(mode) * 2.0 * (re * re + im * im) / (length * length) / f64::from(SEEDS);
+        }
+    }
+    let scale = |m: u32| length / (tau * f64::from(m));
+    let (peak, &highest) = power
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .expect("modes to compare");
+    let at = modes[peak];
+    let near: Vec<u32> = modes
+        .iter()
+        .zip(&power)
+        .filter(|(_, p)| **p >= 0.9 * highest)
+        .map(|(m, _)| *m)
+        .collect();
+    let short = modes
+        .iter()
+        .zip(&power)
+        .filter(|(m, _)| scale(**m) < 1_000.0)
+        .map(|(_, p)| *p)
+        .fold(0.0, f64::max);
+    let rms = variance.sqrt();
+    let expected = (math::exp(GAP_NOISE_AMPLITUDE * GAP_NOISE_AMPLITUDE) - 1.0).sqrt();
+    for (m, p) in modes.iter().zip(&power).take(16) {
+        eprintln!(
+            "gd1: mode {m}, a wavelength of {:.0} ly and a scale of {:.0} ly: k P(k) {:.3} of the \
+             peak",
+            length / f64::from(*m),
+            scale(*m),
+            p / highest
+        );
+    }
+    eprintln!(
+        "gd1: {cells} along cells over {length:.0} ly; k P(k) peaks at mode {at}, a wavelength of \
+         {:.0} ly and a scale of {:.0} ly, modes {near:?} within 10 % of it; {:.1} times the \
+         longest mode's and {:.1} times the largest under 1,000 ly; the contrast's rms {rms:.3} \
+         against {expected:.3} at σ = {GAP_NOISE_AMPLITUDE}",
+        length / f64::from(at),
+        scale(at),
+        highest / power[0],
+        highest / short
+    );
+    assert!(
+        (1_000.0..=10_000.0).contains(&scale(at)),
+        "the power peaks at a scale of {} ly",
+        scale(at)
+    );
+    assert!(highest >= 2.0 * power[0], "{power:?}");
+    assert!(highest >= 5.0 * short, "{power:?}");
+    assert!(
+        (rms / expected - 1.0).abs() < 0.1,
+        "{rms} against {expected}"
+    );
+}
+
+/// `TubeTable::build` sprays the stream in the galaxy and cuts its tube with the galaxy's seed and
+/// its halo's mean system mass (P10.T6.b): bit for bit the table `from_tracers` makes of the same
+/// spray with those two, and not the one another seed makes.
+#[test]
+#[ignore = "slow: builds a galaxy's full potential and sprays sagittarius_like twice"]
+fn build_cuts_the_tube_with_the_galaxy_s_seed_and_its_halo_s_mean_mass() {
+    let galaxy = Galaxy::from_params(SEED, GalaxyParams::milky_way_like())
+        .expect("the fixture's parameters are valid")
+        .with_full_potential();
+    let spec = sagittarius_like(galaxy.potential());
+    let built = TubeTable::build(&galaxy, &spec).expect("the full potential");
+    let tracers = spray::spray(&galaxy, &spec).expect("the full potential");
+    let halo = galaxy.mean_system_mass(Population::Halo);
+    let reduced = |seed| {
+        TubeTable::from_tracers(seed, halo, &spec, &tracers).expect("enough tracers in each arm")
+    };
+    assert_eq!(built, reduced(galaxy.seed()));
+    assert_ne!(built, reduced(Seed::new(1)));
 }

@@ -78,14 +78,42 @@
 //! by mass along the tube (Design note 7). Between
 //! the two arms' roots Λ does not rise, so no `u` falls there: for an orphan, the gap where its
 //! cluster was.
+//!
+//! # Gaps
+//!
+//! The along coordinate is cut into [`along_cells`](TubeTable::along_cells) cells of equal mass,
+//! the power of two nearest the tube's mass over [`CROSS_SECTION_MEMBERS`] mean systems (Design
+//! note 7), and each cell's mean count carries one factor of gap noise, [`TubeTable::noise`]
+//! (Design note 8):
+//!
+//! ```text
+//! F(cell) = exp(σ g(ψ) − σ² ÷ 2) ÷ m
+//! ```
+//!
+//! with `σ` [`GAP_NOISE_AMPLITUDE`] and `ψ` the cell's middle's, [`TubeTable::psi`] at the middle's
+//! share of the mass. `g` is one-dimensional lattice noise in ψ. Its nodes lie
+//! [`CELLS_PER_GAP_NODE`] mean cells apart in ψ, `8 (ψ_max − ψ_min) ÷ cells` from the trailing
+//! arm's tip to the leading arm's, so that no wavelength is shorter than eight mean cells. "Eight
+//! cells" has to be read in ψ's mean, since the cells are equal in mass, not in ψ: where the
+//! tracers lie sparse, at the tips, a cell is wider than the mean and a node spacing covers
+//! fewer. Node `k` holds one standard normal, words `2k` and `2k + 1` of the
+//! tube's [`tags::STREAM_TUBE_GAPS`] stream, so that any node is read without the ones before it.
+//! Between two nodes `g` is the gas noise's in one dimension
+//! ([`gas::noise`](crate::galaxy::gas::noise)): their normals weighted by `1 − s` and `s` of the
+//! quintic fade and divided by the root of the weights' squares' sum, so that `g` is exactly
+//! N(0, 1) at every ψ and `exp(σ g − σ² ÷ 2)` has expectation 1. `m` is that factor's exact mean
+//! over the tube's cells, summed in cell order when the table is built, so the cells' factors sum
+//! to the cell count and the tube's expected total is unchanged. The table keeps only `m`, and
+//! a cell's factor is recomputed from the seed.
 
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
-use crate::galaxy::Galaxy;
+use crate::galaxy::{Galaxy, Population};
 use crate::math;
+use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{LightYears, MetresPerSecond, Radians, SolarMasses};
 
@@ -113,6 +141,39 @@ pub const KERNEL_WIDTH: f64 = 12.0;
 /// member's ±4 (plan 10, Design note 7), and near enough that a point that far from any knot stays
 /// in the light-year cells' range.
 pub const ACROSS_LIMIT: f64 = 1_000.0;
+
+/// The members one cross-section of cells expects over all bands, which sets a tube's along
+/// cells: 64 (plan 10, Design note 7).
+pub const CROSS_SECTION_MEMBERS: f64 = 64.0;
+
+/// The fewest along cells a tube is cut into, a parameter of the generator version: 16, two of
+/// the gap noise's node spacings (a lean of P10.T6.b, 2026-10-30; Design note 7 sets no floor).
+pub const MIN_ALONG_CELLS: u32 = 16;
+
+/// The most along cells a tube is cut into: 16,384 (plan 10, Design note 7), which the 14 bits of
+/// a stream member's ID's along cell hold (plan 01's `StreamMemberId`).
+pub const MAX_ALONG_CELLS: u32 = 16_384;
+
+/// The gap noise's node spacing in mean along cells, a parameter of the generator version: 8, so
+/// that no wavelength is shorter than eight mean cells in ψ (plan 10, Design note 8).
+pub const CELLS_PER_GAP_NODE: u32 = 8;
+
+// The node lattice spans every tube with at least two intervals and ends on the leading tip, which
+// `TubeTable::undivided_noise`'s `intervals − 1` needs.
+const _: () = assert!(
+    MIN_ALONG_CELLS >= 2 * CELLS_PER_GAP_NODE && MIN_ALONG_CELLS.is_multiple_of(CELLS_PER_GAP_NODE),
+    "every tube's cells hold two node spacings or more, a whole number of them"
+);
+
+/// The gap noise's amplitude, the standard deviation of its factor's natural logarithm, a
+/// parameter of the generator version: 0.3, so that the density contrast along a tube, the
+/// factor less 1, has an rms of `√(exp(0.09) − 1)`, 0.31, and a factor of 0.5 lies 2.2 standard
+/// deviations of the logarithm down (a lean of P10.T6.b, 2026-10-30, not a fit).
+///
+/// The noise stands for the gaps observed along streams such as GD-1 (Price-Whelan and Bonaca
+/// 2018, ApJL 863, L20; de Boer, Erkal and Gieles 2020, MNRAS 494, 5315); the depth and the rms
+/// are this lean's, not figures read from those papers.
+pub const GAP_NOISE_AMPLITUDE: f64 = 0.3;
 
 /// A tube table could not be built.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -259,10 +320,10 @@ impl TubeArm {
 ///
 /// ```no_run
 /// use hyperion_sim::Seed;
-/// use hyperion_sim::galaxy::Galaxy;
 /// use hyperion_sim::galaxy::global_list::spray::{Spray, SprayForce, SprayParams};
 /// use hyperion_sim::galaxy::global_list::{Debris, TubeTable};
 /// use hyperion_sim::galaxy::params::GalaxyParams;
+/// use hyperion_sim::galaxy::{Galaxy, Population};
 ///
 /// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?
 ///     .with_full_potential();
@@ -274,11 +335,17 @@ impl TubeArm {
 /// let half = spray.tracer_count() / 2;
 /// let mut tracers: Vec<_> = (0..half).map(|i| spray.tracer(i)).collect();
 /// tracers.extend((half..spray.tracer_count()).map(|i| spray.tracer(i)));
-/// let tube = TubeTable::from_tracers(stream, &tracers)?;
+/// let mean_mass = galaxy.mean_system_mass(Population::Halo);
+/// let tube = TubeTable::from_tracers(seed, mean_mass, stream, &tracers)?;
 /// // The along coordinate is a share of the tube's mass: a uniform draw of it is a draw by mass.
 /// let middle = tube.locate(0.5, 0.0, 0.0);
 /// let edge = tube.locate(0.5, 1.0, 0.0);
 /// assert!(middle.distance_to(&edge).value() > 0.0);
+/// // Each along cell expects its share of the tube's mass times its gap noise, which sums to the
+/// // cell count, so the tube's expected total is its mass.
+/// let cells = tube.along_cells();
+/// let noise: f64 = (0..cells).map(|cell| tube.noise(cell)).sum();
+/// assert!((noise / f64::from(cells) - 1.0).abs() < 1e-12);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -287,12 +354,19 @@ pub struct TubeTable {
     /// The trailing arm, then the leading arm: the order of the along coordinate.
     arms: [TubeArm; 2],
     mass: SolarMasses,
+    /// The galaxy's seed, which the gap noise's nodes are drawn under.
+    seed: Seed,
+    along_cells: u32,
+    /// The gap noise's mean over the along cells before it is divided out, `m` (module
+    /// documentation, "Gaps").
+    noise_mean: f64,
 }
 
 impl TubeTable {
     /// The tube table of `spec`'s stream in `galaxy`, its tracers sprayed one after another at the
     /// generator's [`SprayParams`](spray::SprayParams) ([`spray::spray`]); a caller with a pool
-    /// sprays them in parallel and calls [`from_tracers`](Self::from_tracers).
+    /// sprays them in parallel and calls [`from_tracers`](Self::from_tracers) with the galaxy's
+    /// seed and its halo's mean system mass, as this does.
     ///
     /// # Errors
     ///
@@ -300,15 +374,22 @@ impl TubeTable {
     /// [`from_tracers`](Self::from_tracers) otherwise.
     pub fn build(galaxy: &Galaxy, spec: &StreamSpec) -> Result<Self, BuildTubeTableError> {
         let tracers = spray::spray(galaxy, spec)?;
-        Self::from_tracers(spec, &tracers)
+        Self::from_tracers(
+            galaxy.seed(),
+            galaxy.mean_system_mass(Population::Halo),
+            spec,
+            &tracers,
+        )
     }
 
-    /// The tube table reduced from `tracers`, the spray of `spec`'s stream in index order.
+    /// The tube table reduced from `tracers`, the spray of `spec`'s stream in index order, with
+    /// the gap noise of `seed` and along cells for members of `mean_system_mass`, the halo's
+    /// (module documentation, "Gaps").
     ///
     /// The tracers are [`Spray::tracer`](spray::Spray::tracer)'s, as a pool gathers them by index
     /// (main's ruling of 2026-10-29, after ruling 146.3), and the reduction is the module
     /// documentation's. Tracers of equal ψ keep their order, so the table is a pure function of
-    /// the list.
+    /// the seed, the mass, the stream's number and the list.
     ///
     /// # Errors
     ///
@@ -319,8 +400,11 @@ impl TubeTable {
     /// # Panics
     ///
     /// If a tracer's weight is not positive and finite, which a spray's, each half its stratum's
-    /// share of its tube's positive mass, always is.
+    /// share of its tube's positive mass, always is; or if `mean_system_mass` is not, which a
+    /// galaxy's never is.
     pub fn from_tracers(
+        seed: Seed,
+        mean_system_mass: SolarMasses,
         spec: &StreamSpec,
         tracers: &[Tracer],
     ) -> Result<Self, BuildTubeTableError> {
@@ -359,11 +443,25 @@ impl TubeTable {
             reduced[side].finish(&frames[side], bases[side], counts[side])
         });
         let mass = SolarMasses::new(reduced[0].mass + reduced[1].mass);
-        Ok(Self {
+        let mut table = Self {
             stream: spec.number(),
             arms,
             mass,
-        })
+            seed,
+            along_cells: along_cells(mass, mean_system_mass),
+            noise_mean: 1.0,
+        };
+        let mut nodes = table.gap_nodes();
+        let sum = (0..table.along_cells).fold(0.0, |sum, cell| {
+            sum + table.undivided_noise(&mut nodes, cell)
+        });
+        table.noise_mean = sum / f64::from(table.along_cells);
+        assert!(
+            table.noise_mean > 0.0 && table.noise_mean.is_finite(),
+            "a mean of exponentials of finite normals is positive and finite: {}",
+            table.noise_mean
+        );
+        Ok(table)
     }
 
     /// The stream whose tube this is.
@@ -376,6 +474,74 @@ impl TubeTable {
     #[must_use]
     pub const fn mass(&self) -> SolarMasses {
         self.mass
+    }
+
+    /// The number of along cells the tube is cut into, cells of equal mass: the power of two
+    /// nearest `Λ_total ÷ (m̄ × 64)`, nearest in its logarithm, with `m̄` the mean system mass it
+    /// was built with and 64 [`CROSS_SECTION_MEMBERS`] (plan 10, Design note 7), held to
+    /// [`MIN_ALONG_CELLS`] (this task's lean) and [`MAX_ALONG_CELLS`] (the note's). Cell `i` holds
+    /// the along coordinates `[i, i + 1) ÷ cells`; the table does not keep `m̄`.
+    #[must_use]
+    pub const fn along_cells(&self) -> u32 {
+        self.along_cells
+    }
+
+    /// The gap noise of along cell `cell`, the factor on its mean count (module documentation,
+    /// "Gaps"): positive, constant within the cell, and summing over the cells to
+    /// [`along_cells`](Self::along_cells), up to rounding.
+    ///
+    /// # Panics
+    ///
+    /// If `cell` is not below [`along_cells`](Self::along_cells).
+    #[must_use]
+    pub fn noise(&self, cell: u32) -> f64 {
+        assert!(
+            cell < self.along_cells,
+            "the tube has {} along cells, not {cell}",
+            self.along_cells
+        );
+        self.undivided_noise(&mut self.gap_nodes(), cell) / self.noise_mean
+    }
+
+    /// The stream the gap noise's nodes are drawn on: [`tags::STREAM_TUBE_GAPS`] keyed by the
+    /// stream's number (plan 10, Design note 14).
+    #[must_use]
+    fn gap_nodes(&self) -> Stream {
+        Stream::open(
+            self.seed,
+            tags::STREAM_TUBE_GAPS,
+            ObjectKey::galaxy_item(u64::from(self.stream.get())),
+        )
+    }
+
+    /// `exp(σ g − σ² ÷ 2)` at along cell `cell`'s middle, before it is divided by its mean over
+    /// the cells, with node normals read from `nodes` (module documentation, "Gaps").
+    #[must_use]
+    fn undivided_noise(&self, nodes: &mut Stream, cell: u32) -> f64 {
+        let cells = f64::from(self.along_cells);
+        let psi = self.psi((f64::from(cell) + 0.5) / cells).value();
+        let low = self.arms[0].knots[0].psi.value();
+        let high = self.arms[1].knots[self.arms[1].knots.len() - 1].psi.value();
+        // The trailing arm's tip lies at a negative ψ and the leading arm's at zero or more, so
+        // the span is positive.
+        let spacing = f64::from(CELLS_PER_GAP_NODE) * (high - low) / cells;
+        let intervals = self.along_cells / CELLS_PER_GAP_NODE;
+        let t = ((psi - low) / spacing).clamp(0.0, f64::from(intervals));
+        debug_assert!(t.is_finite(), "ψ is finite and the span positive: {t}");
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "t is clamped to [0, intervals − 1] first, intervals at most 2,048"
+        )]
+        let below = t.min(f64::from(intervals - 1)).floor() as u32;
+        let s = fade(t - f64::from(below));
+        let mut normal = |node: u32| {
+            nodes.seek(2 * u64::from(node));
+            nodes.standard_normal()
+        };
+        let (first, second) = (normal(below), normal(below + 1));
+        let g = ((1.0 - s) * first + s * second) / ((1.0 - s) * (1.0 - s) + s * s).sqrt();
+        math::exp(GAP_NOISE_AMPLITUDE * g - 0.5 * GAP_NOISE_AMPLITUDE * GAP_NOISE_AMPLITUDE)
     }
 
     /// The arm of ψ's sign (module documentation, "The arms").
@@ -813,6 +979,37 @@ fn interpolated_frame(from: &[[f64; 3]; 3], to: &[[f64; 3]; 3], f: f64) -> [[f64
 fn unit(v: [f64; 3]) -> Option<[f64; 3]> {
     let length = dot(v, v).sqrt();
     (length > 0.0 && length.is_finite()).then(|| v.map(|c| c / length))
+}
+
+/// The along cells of a tube of `mass` whose members' mean mass is `mean_system_mass`
+/// ([`TubeTable::along_cells`]): doubled from [`MIN_ALONG_CELLS`] while the mass in a
+/// cross-section of [`CROSS_SECTION_MEMBERS`] lies at or above the geometric middle between this
+/// count and the next, up to [`MAX_ALONG_CELLS`].
+///
+/// # Panics
+///
+/// If `mean_system_mass` is not positive and finite.
+#[must_use]
+fn along_cells(mass: SolarMasses, mean_system_mass: SolarMasses) -> u32 {
+    let mean = mean_system_mass.value();
+    assert!(
+        mean > 0.0 && mean.is_finite(),
+        "a galaxy's mean system mass is positive and finite: {mean}"
+    );
+    let ideal = mass.value() / (mean * CROSS_SECTION_MEMBERS);
+    let mut cells = MIN_ALONG_CELLS;
+    while cells < MAX_ALONG_CELLS && ideal >= f64::from(cells) * core::f64::consts::SQRT_2 {
+        cells *= 2;
+    }
+    cells
+}
+
+/// The quintic fade `s(t) = t³ (6t² − 15t + 10)`, which rises from 0 to 1 over `[0, 1]` with its
+/// first and second derivatives 0 at both ends, as the gas noise's
+/// ([`gas::noise`](crate::galaxy::gas::noise)).
+#[must_use]
+fn fade(t: f64) -> f64 {
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
 }
 
 /// A `u32` as an index.
