@@ -192,7 +192,7 @@ use crate::planetary::hooks::figures::interior::{
     ROCK_THERMAL_DIFFUSIVITY_M2_PER_S, RadiogenicIsotope, radiogenic_heat_production_w_per_kg,
 };
 use crate::planetary::hooks::figures::{Birthplace, Crust};
-use crate::planetary::hooks::surface::SurfaceConditions;
+use crate::planetary::hooks::surface::{SurfaceConditions, ZonalInsolation};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::substance::{Element, PhaseDiagram, SubstanceId};
 use crate::units::{Dex, EarthMasses, Kelvin, Kilograms, Megayears, Metres, Years};
@@ -1307,7 +1307,7 @@ impl CrustComposition {
             provinces: provinces.substance(),
             redox: lid.redox,
             mantle_delta_iw: lid.delta_iw,
-            melt_area_fraction: melt_area(lid.state, record.surface, lid.lithology),
+            melt_area_fraction: melt_area(lid.state, record, lid.lithology),
             thermal_history: lid.thermal_history,
             peak_central_temperature: lid.peak,
         })
@@ -1590,6 +1590,10 @@ pub(crate) struct CrustRecord<'a> {
     pub(crate) continental_fraction: f64,
     /// Its surface conditions, for the melt area.
     pub(crate) surface: &'a SurfaceConditions,
+    /// The body's insolation table, of its conditions' obliquity, where its caller holds one: the
+    /// melt area's cold profile reads it, the same bits as the conditions' own (lever (h),
+    /// [`SurfaceConditions::cold_area_over`]).
+    pub(crate) table: Option<&'a ZonalInsolation>,
 }
 
 impl<'a> CrustRecord<'a> {
@@ -1600,6 +1604,7 @@ impl<'a> CrustRecord<'a> {
             volcanism: inputs.volcanism,
             continental_fraction: inputs.continental_fraction,
             surface: inputs.surface,
+            table: None,
         }
     }
 }
@@ -2094,18 +2099,26 @@ fn lid_of(
     }
 }
 
-/// The share of the surface `surface` above the solidus of `lid` ([module](self)'s "The melt
+/// The share of the record's surface above the solidus of `lid` ([module](self)'s "The melt
 /// area"), in [0, 1], in the state `state`: 1 in the `MagmaOcean` state, and otherwise 0 for an
-/// ice lid, whose liquid is a condensate.
+/// ice lid, whose liquid is a condensate. Its cold area reads the record's insolation table where
+/// it holds one, the same bits: the record built 162 of the 568 tables of the first 20 sample
+/// systems' snapshots for its melt area alone (bless-note-23 §4; decision-24-cost D5's lever).
 #[must_use]
-fn melt_area(state: SurfaceState, surface: &SurfaceConditions, lid: CrustLithology) -> f64 {
+fn melt_area(state: SurfaceState, record: &CrustRecord<'_>, lid: CrustLithology) -> f64 {
     if state == SurfaceState::MagmaOcean {
         return 1.0;
     }
     if lid.is_ice() {
         return 0.0;
     }
-    let melt = 1.0 - surface.cold_area(lid.transition());
+    let surface = record.surface;
+    let solidus = lid.transition();
+    let cold = record.table.map_or_else(
+        || surface.cold_area(solidus),
+        |table| surface.cold_area_over(solidus, table),
+    );
+    let melt = 1.0 - cold;
     // By comparison, so that a NaN, which no valid surface makes, becomes no melt.
     if melt > 1.0 {
         1.0

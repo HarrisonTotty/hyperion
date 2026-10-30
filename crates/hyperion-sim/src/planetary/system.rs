@@ -5880,7 +5880,7 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         ice_fraction: figures.ice_fraction(),
         ice_threshold: figures.ice_threshold(),
     });
-    let crust = record_crust(sky.crust_lid, &figures, &conditions);
+    let crust = record_crust(sky.crust_lid, &figures, (&conditions, table));
     let surface = Surface::new(air.state(), material, conditions, figures, published)
         .expect(
             "conditions exist only off the gas-envelope and steam-envelope states, and \
@@ -5978,12 +5978,13 @@ fn record_air_sections(
 /// The record's crust of a body whose published pass took the lid `lid`, of figures `figures`
 /// and conditions `conditions` (P14.T51.c, on the record from P14.T54.a; item 17's constraint 1):
 /// that lid with what only the record reads, the figures' volcanism and continental fraction and
-/// the conditions' melt area (`CrustComposition::of`); `None` where the pass took no lid.
+/// the conditions' melt area, read off the body's insolation table `table` (`CrustComposition::of`);
+/// `None` where the pass took no lid.
 #[must_use]
 fn record_crust(
     lid: Option<&CrustLid>,
     figures: &GlobalFigures,
-    conditions: &SurfaceConditions,
+    (conditions, table): (&SurfaceConditions, &ZonalInsolation),
 ) -> Option<CrustComposition> {
     let crust = CrustComposition::of(
         lid?,
@@ -5991,6 +5992,7 @@ fn record_crust(
             volcanism: figures.volcanism(),
             continental_fraction: figures.continental_fraction(),
             surface: conditions,
+            table: Some(table),
         },
     );
     // The figures' volcanism and continental fraction lie in range: a refusal is a bug, which the
