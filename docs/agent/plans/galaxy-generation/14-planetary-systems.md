@@ -3108,6 +3108,55 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     - _Commit:_
       `fix(planetary): P14.T24.i The floored mean on the escape's batch path, and the state read at it`.
 
+- **P14.T24.j A locked world's substellar cloud deck** (behind `LOCKED_CLIMATE_VERSION` = 26 with a
+  tripwire; lane `p14-locked-climate`; main's rulings of 2026-10-30 on research-p14-locked-climate's
+  advice: anchored on CAM3, no ocean heat transport).
+  - _Why:_ T24.a gives a world locked 1:1 a rotator's mean (the table's Earth 290.4 K, 59.8 K
+    day–night), and R09 shows the reference locked Earth's substellar sea at 333.2 K, where five
+    GCMs at 1,360 W m⁻² about a 3,400 K host give a mean of 246–272 K and a substellar peak of
+    276–295 K (Yang et al. 2019, ApJ 875, 46).
+  - _The rule_ (`hooks/surface/deck.rs`), in T24.a's `Column` before `climate_of`, identically in
+    `SurfaceConditions::derive` and `step_climate`. Every table is Yang, Cowan and Abbot 2013's
+    (ApJL 771, L45) Table 1, the rotation's transition its §5, M-star track only:
+    - w = r · `f_S` · `f_p` · `f_open`: r = clamp(log₂(P ÷ (5 d · R ÷ R⊕)), 0, 1) (their §5);
+      `f_S` = clamp((S − 800) ÷ 200, 0, 1); `f_p` = clamp(1 − ln(`p_s` ÷ 10 bar) ÷ ln 3, 0, 1);
+    - `f_open` is 0 where the surface holds no liquid water (at a pass the previous pass's,
+      through `PassContext`, and on the record the one its published pass read), and otherwise a
+      2 K ramp of the warmest climate above water's melting point at `p_s`, w solved for itself by
+      a fixed bisection on the changed column;
+    - `A_w` = A + w max(0, `A_deck`(S) − A), `A_deck` Group 3's, linear in S and held at its ends;
+      `T_eq,w` = `T_eq` ((1 − `A_w`) ÷ (1 − A))^¼;
+    - `G_w` = G (1 − w (1 − s(S))), G = `T_s` − `T_eq` the column's, s = G(Group 3) ÷ G(Group 5),
+      held beyond 1,600 W m⁻²; the column takes `T_s,w` = `T_eq,w` + `G_w` and `T_eq,w`;
+    - Cowan–Agol at Koll's ε, the zonal profile, the range and the regime follow unchanged. T13.c's
+      own `T_s`, the air's, is unchanged; `mean_surface_temperature`'s doc says the two differ.
+  - _The hold:_ `LockedClimateRules::{Held, Deck}` with `in_force()`, the tests' `with_locked_climate`,
+    the tripwire `the_locked_climate_is_held_only_until_the_26_bump`, and
+    `planetary::testing::with_every_26_hold`, which wraps `with_every_25_hold`. Nothing moves under
+    `Held`.
+  - _The fixture:_ `reference::locked_earth_like` reads the rules in force: under `Deck` its mean is
+    288 K plus plan 14's locked-minus-own difference and its contrasts plan 14's under the lock;
+    under `Held` as before. `the_locked_earth_s_contrasts_are_plan_14_s` holds both forms to 1 K.
+  - _Tests:_ `A_deck` and s at the table's rows to the bit, held beyond; r, `f_S`, `f_p` and
+    `f_open` at their ends; no deck on a rotator, a dry world or a frozen one, the column to the
+    bit; the table's Earth locked (21.10 d, no obliquity) under `Deck` at 245.4, 47.2 and 25.2 K
+    (each ± 1 K) with `f_open` = 1, and under `Held` at 290.38 and 59.85 K; R09 on the fixture
+    under `with_every_26_hold`: the substellar sea at most 285 K and open, the antistellar point
+    at least 205 K, the wettest cell-month printed; the census over the 400 (ignored, by name):
+    none outside the domain moves, every moved body's warmest at or above water's melting point,
+    no non-finite mean, no jump.
+  - _Files:_ `hooks/surface.rs`, `hooks/surface/deck.rs` and its tests, `derive/atmosphere.rs`,
+    `derive/atmosphere/surface_mix.rs`, `derive/pass_record.rs`, `derive/mod.rs`, `system.rs`,
+    `system/locked_climate_tests.rs`, `testing.rs`, `surface/reference.rs`,
+    `surface/coarse_golden.rs`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface`;
+    `planetary::surface::reference`;
+    `planetary::system::tests::the_published_climate_regimes_hold_over_the_sample`; the new tests
+    by name, the slow ones with `-- --ignored`.
+  - _Out of scope:_ ocean heat transport (Yang 2013's CCSM3 runs, +18 K), the K-star track, R09's
+    arithmetic-versus-emission mean, R09.T13.n's partition.
+  - _Commit:_ `feat(planetary): P14.T24.j A locked world's substellar cloud deck, held at 26`.
+
 #### P14.T25 Habitability assessment
 
 `hooks/habitability.rs`. `HabitabilityAssessment { class, limits }`: class one of `Hostile`,
@@ -32730,3 +32779,42 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   and liquid Fe's intercept at Assael et al. 2006 stay unread, each lead closed (the lane's
   findings). `GAPS_AT_24` names both gaps with their reasons, and the rows' sources say so. No
   `DENSITY_GAPS_VERSION`, since nothing moves. Phase II's stand-in waits on main's ruling.
+- **Deviations in P14.T24.j, as built (2026-10-30).** Held at 26: `LOCKED_CLIMATE_VERSION`,
+  `LockedClimateRules`, the tests' `with_locked_climate` (in the new
+  `planetary::testing::with_every_26_hold`) and the tripwire
+  `the_locked_climate_is_held_only_until_the_26_bump`; nothing moves at 24 or 25.
+  - `hooks/surface/deck.rs` (crate-private): Table 1's rows (`DECK_ALBEDO`, `LOCKED_GREENHOUSE_K`,
+    `ROTATOR_GREENHOUSE_K`), the weights (`rotation_weight`, `flux_weight`, `pressure_weight`,
+    `open_water_weight`), `decked_column` and `under_deck`, which `SurfaceConditions::derive` and
+    `step_climate` both call; the melting point is `substance::phase::ice_ih_melting_temperature`.
+  - The open-water gate is an input: `SurfaceInputs::holds_liquid_water` (a new public field) and
+    `ClimateBody::{stellar_flux, holds_liquid_water}`. `PassContext` gains a key member
+    `open_water` (`OpenWater::{Dry, Open}`), which `record_passes` sets `Open` only where the pass
+    lists liquid water (`Atmosphere::lists_liquid_water`, now public) and `deck::reads_open_water`
+    (locked, r `f_S` `f_p` > 0 at the column's pressure), so that no dry body's key changes. The record reads the flag its published pass read (`SpunPasses::context`),
+    so that its conditions are that pass's to the bit (rule (f)); at a settled solve it is that
+    pass's own (lean, 2026-10-30).
+  - Leans (2026-10-30), for main: the tapers `f_S` (800 → 1,000 W m⁻²) and `f_p` (10 → 30 bar in
+    ln p), whole below 1 bar and none with no air; r's log₂ form between its sourced ends; s
+    interpolated linearly in S between its rows; A taken as 1 − 4σ`T_eq`⁴ ÷ S; the column's air
+    (`c_p`, τ, vapour gain) and its ground's inertia stay as without the deck, so
+    `heat_capacity_over_r` stays at the air's mean (its doc says so); a step's `ClimateSpan` keeps
+    the step's own mean, so on a decked world `ClimateSpan::about` widens its warmest end to the
+    air's mean (the table's Earth's 290.38 K, above its decked range), which the passes'
+    condensation reads; the bisection (48 halvings) publishes its lower end.
+  - The census: s243 and s363 settle as `Snowball`s at the open water's edge (no liquid listed,
+    warmest 273.2 K), s187 under its partial weight; s59 and s102 move through their intermediate
+    passes only. The `planetary/surface_conditions` golden's 1:1-locked Earth turns in 0.997 d, so
+    r = 0 and it does not move at 26.
+  - Files beyond the entry's: the new fields' literals in `hooks/{crust, figures}.rs`,
+    `hooks/figures/{tests, cover/tests}.rs`, `hooks/surface/{regime, tests}.rs`, `moons/regular.rs`
+    and `derive/atmosphere/tests.rs`, and `system/tests.rs`'s `key_members`.
+  - _Accept, as built:_ also `cargo test -p hyperion-sim --lib planetary::hooks::surface::deck` and
+    `planetary::system::locked_climate_tests`; by name with `-- --ignored`,
+    `under_every_26_hold_r09_shows_the_locked_earth_s_sea_under_its_deck` and
+    `under_every_26_hold_only_the_locked_worlds_under_their_deck_move_over_the_400`.
+  - For 26's bump: the tripwire's list; re-bless `planetary/surface/locked_earth_like` and what
+    reads its field (the sim's `tests/surface_coarse_golden.rs` payload digest, the R10
+    `surface_*_worlds` tests' locked Earth, the client's `level-bounds.json` fixture), and re-run
+    `tests/channel_water_worlds.rs`'s locked Earth. No system golden moves: the census moves 5
+    sample bodies (s59, s102, s187, s243, s363) and none of the 15 golden systems'.
