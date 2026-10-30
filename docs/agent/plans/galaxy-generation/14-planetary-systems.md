@@ -8776,6 +8776,7 @@ feeding back into p_s, T_s, the albedo or the bulk.
       - The bless runs once through the `sim-determinism` skill under the heavy lock. The bless note
         follows §6 and D5, with the stage table measured at the blessing message.
       - P14.T33.c follows.
+- **P14.T54.c The 24 → 25 bump** (S1; decision-bump-plan-after-22 §2.2, decision-galaxy-25-train).
 
 #### P14.T55 Later composition (unscheduled)
 
