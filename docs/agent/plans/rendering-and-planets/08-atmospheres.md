@@ -5965,6 +5965,22 @@ Acceptance: `pnpm test`.
 
   By hand, a Jupiter fixture crossing 10⁹ m is recorded here.
 
+  - _The split_ (research's lean, ruled by main, 2026-10-30). T16.b is built in two parts.
+    - **T16.b.1:**
+      - the table for media with a ground: the Earth fixture, and the Saturn-class figure over its
+        1-bar Lambertian boundary;
+      - the read path in `view/shaders/bodyDisc.wgsl` beyond `GAS_GIANT_FULL_PASS_BOUNDARY_M` for
+        a body with an atmosphere, the albedo-only shading kept for airless bodies;
+      - the catalogue entries (`bodies:disc`, `bodies:discLimb`, the smooth mesh, `disc cells`);
+      - `DISC_TEXTURES` at a free group 2 binding;
+      - the twin in `view/bodies/discShading.ts`;
+      - `REGIME_HYSTERESIS` applied in `planLitBodies`;
+      - the geometric albedo beside `BodyPhotometry`.
+    - **T16.b.2 (after T16.a):** the Jupiter fixture at 10⁹ m, and a Jupiter fixture crossing
+      10⁹ m by hand.
+
+  _T16.b.1 built 2026-10-30_ (Risks, "Deviations in T16.b.1, as built").
+
 Acceptance: `pnpm test` and `just test-render`.
 
 ### R08.T18 Thermal emission
@@ -23676,3 +23692,44 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     (seed 10) and `.reference.json` (6,144 samples), `venus-uv-fit.json` (every trial).
   - `venus_uv_absorber`'s tests hold p(365) and p(B) ÷ p(V); p(g′) ÷ p(r′) is held at 4σ and refused
     for its σ.
+- **Deviations in T16.b.1, as built** (2026-10-30; lane `r08-disc-table`; the split is the task
+  entry's). Client only: no generated output, version or golden moves.
+  - _Files._ New: `view/atmosphere/discTable.ts` (the grid, the read's twin), `thick/discBake.ts`
+    (the bake, in the optics worker), `shaders/discAir.wgsl`, `smoke/discAir.ts`,
+    `test/discAirCases.ts`. Changed: `discReflectance.ts` (`DiscAir`, `withDiscAir`,
+    `packDiscAir`), `tables.ts` (`setDiscReflectance`), `AtmosphereCache.ts`, the optics pool's
+    `disc-bake` job, `thick/routing.ts`, R07's `discShading.ts`, `draw.ts` and `regime.ts`,
+    `photoreal/renderer.ts`, `engine/catalogue.ts`.
+  - _The read_ is `discAir.wgsl`, appended to the plain sources by `withDiscAir` (`shade`'s last
+    line hands its light to `disc_air`), not written into `bodyDisc.wgsl`: the plain kernels stay
+    byte-identical, their digests pinned.
+  - _Forms._ `bodies:discAir`, `bodies:discLimbAir`, `bodies:smoothMeshAir` and the kernel
+    `BODY DISC CELLS, with air` (`DISC_AIR_ENTRIES`), prepared on first need (`prepareAir`), the
+    plain forms and the full passes drawing until then. R01.T15's bounded cache: `VIEW_KERNELS` 28
+    → 29; the materials are outside it. The table binds at group 2 binding 15 (`DISC_AIR_TEXTURES`).
+  - _The table_, `rgba16float` [208, 32, bands × slots]: 16 μ_v at (v ÷ 15)², 32 μ₀ (8 rows from
+    the floor where the sun lights the air's top to the horizontal, 24 above), 13 Δφ; rgb the air's
+    π L ÷ E, alpha the march's transmittance meaned over channels, as the composite's. 53,248 B a
+    band and slot.
+  - _The disc_ is its ground's plain shading × alpha plus Σ E × exposure ÷ π × rgb, each star's air
+    under its eclipse and ring, planetshine at slot 0, bands in ln s. A record carries emission or
+    air, not both: T18.b's.
+  - _"Spectrally"_ (lean, 2026-10-30): J is the thick solve's, the routed bake's or one the worker
+    solves, the correction in it; the single scattering and transmittance are marched in the
+    channels, as the march does. Ψ_ms with the correction alone is not built.
+  - _Near the limb_ the bake marches each band's sphere, not a plane-parallel column. The disc lacks
+    the air beyond the datum's limb: 0.6–2.1% of the light at 10⁹ m. Resolution: 8 + 24 sun rows
+    and 48 view steps, the read within 1.5% rms and 7% at worst of the march by day.
+  - _At 10⁹ m_ against the routed full passes: Earth −0.61 to −1.38%, Saturn-class −0.79 to −0.91%;
+    against today's (Ψ_ms): Earth +0.90 to −2.36%, Saturn-class +1.36 to +6.67%, its 90° green and
+    blue past 5% (a finding; the test pinned at 8%).
+  - _Geometric albedo_ (a test's, beside `BodyPhotometry`'s): Earth 0.082, 0.114 and 0.195 over a
+    ground of 0.067; Saturn-class 0.226, 0.298 and 0.423 over 0.200.
+  - _Routing_ (lean, 2026-10-30): every world with air is asked its table once its thick bake and
+    correction settle (`discTableRouted`); a body in `BodyFramePlan.tabled` skips its full passes.
+    The hysteresis is `regime.ts`'s `drawnByTable`, `planLitBodies` taking `previousTabled`.
+  - _Bake time_ (pod, 16 vCPU, one thread): Earth 2.38 s for J and 0.98 s for the table;
+    Saturn-class 4.41 s and 3.41 s (4 bands), past `BAKE_CEILING_S` (a finding).
+  - _Smoke._ Part 9's group holds the kernel arm's floor at 10⁻³ of the largest, not 10⁻⁶: R07's
+    limb weights are `f32`'s (`smoke/discAir.ts`). Frame timing (P) is pending: the owner's RTX run.
+  - _Left:_ T16.b.2; the air beyond the datum's limb; a body drawn as a point has no air.

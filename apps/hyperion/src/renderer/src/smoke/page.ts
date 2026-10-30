@@ -49,6 +49,7 @@
 import {
   ATMOSPHERE_ONE_BAND_ENTRIES,
   ATMOSPHERE_THICK_ENTRIES,
+  DISC_AIR_ENTRIES,
   THERMAL_ENTRIES,
   WGSL_CATALOGUE,
 } from "../view/engine/catalogue";
@@ -96,6 +97,7 @@ import {
 } from "./atmosphere";
 import { checkAtmosphereFrame } from "./atmosphereFrame";
 import { checkCellPassEveryRecord } from "./cellPass";
+import { checkDiscAir } from "./discAir";
 import { checkThermalDiscs } from "./thermal";
 import { captureDatum, checkDatumFrame } from "./datumFrame";
 import { timeAtmosphereFrame } from "./frameTiming";
@@ -168,8 +170,9 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * GPU work (2 R08.T6.b's but its medium of four absorbers, 3 R08.T6.g's, 4 R08.T8.b's far limb, with the
  * composite from above the top, 5 R08.T6.f's Saturn-class figure and R08.T6.i's layer edges, 6
  * R08.T6.b's medium of four absorbers, 8 R08.T6.f's Earth, R08.T11.d's march area and R08.T11.g's
- * march for one band, edged, 9 R08.T11.g's kernels' catalogue, R08.T8.a's march band and R08.T18.a's
- * thermal emission with its emissive forms' catalogue, 10 R08.T7's several suns, R08.T8.e's slot
+ * march for one band, edged, 9 R08.T11.g's kernels' catalogue, R08.T8.a's march band, R08.T18.a's
+ * thermal emission with its emissive forms' catalogue and R08.T16.b's disc air with its air forms'
+ * catalogue, 10 R08.T7's several suns, R08.T8.e's slot
  * layers on its binary and R10.T16.g's datum over the image, 11
  * R08.T9.b's Earth and Saturn-class figure and R08.T8.c's far limb's footprint, 12 R08.T11.b's
  * face count, R08.T11.e's Earth and R08.T11.d's specialised march over the shared read), 7 R10's
@@ -380,12 +383,13 @@ async function run(
   // took 33 s more under load, the part past its watchdog. R08.T11.g's one-band march's two are
   // compiled in part 9, first: with them part 1 went from 170 s to past its watchdog on one variant
   // on a slower machine (4 vCPU, 2026-10-29). R08.T18.a's emissive forms are compiled in part 9 too,
-  // the lightest, beside their twin's group.
+  // the lightest, beside their twin's group, and R08.T16.b's air forms after them.
   const thin = WGSL_CATALOGUE.filter(
     (entry) =>
       !ATMOSPHERE_THICK_ENTRIES.includes(entry) &&
       !ATMOSPHERE_ONE_BAND_ENTRIES.includes(entry) &&
-      !THERMAL_ENTRIES.includes(entry),
+      !THERMAL_ENTRIES.includes(entry) &&
+      !DISC_AIR_ENTRIES.includes(entry),
   );
   const entries = fixture === "broken-wgsl" ? [...thin, BROKEN_ENTRY] : thin;
   await group(1, "T9.b catalogue", () => checkCatalogue(engine, status, entries, checks));
@@ -518,6 +522,13 @@ async function run(
   );
   await group(9, "R08.T18.a the ground's thermal emission against its twin", () =>
     checkThermalDiscs(engine, checks),
+  );
+  // R08.T16.b's air forms of the lit bodies' kernels, compiled and held to their twin.
+  await group(9, "T9.b catalogue: the air forms", () =>
+    checkCatalogue(engine, status, DISC_AIR_ENTRIES, checks),
+  );
+  await group(9, "R08.T16.b the disc's air beyond 10⁹ m against its twin", () =>
+    checkDiscAir(engine, checks),
   );
   await group(7, "R10.T10.b the lit terrain", () => checkLitTerrain(engine, checks));
   await group(7, "R10.T10.c the survey edge", () => checkSurveyEdge(engine, checks));

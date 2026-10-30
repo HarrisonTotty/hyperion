@@ -72,6 +72,14 @@
  *   emissive forms (`discReflectance.ts`), made and prepared before the timed frames
  *   (`PhotorealRenderer.prepareEmissive`): what the emission costs beside (G)'s plain frames.
  *
+ * R08.T16.b adds one, timed and reported as (G) is, for the owner's RTX run:
+ *
+ * - (P) the frame past 10⁹ m: the measured Earth from 1.2, 2.4 and 4.8 × 10⁹ m, past the boundary's
+ *   hysteresis, at `x1`, `x2` and `x4` on high, drawn by its disc table (its tables holding the
+ *   table baked on the page from its bake, `thick/discBake.ts`, the air forms prepared before the
+ *   timed frames, `PhotorealRenderer.prepareAir`) and by its full passes (the same tables without
+ *   it), each combination both ways: what the table saves beside the full passes there.
+ *
  * The timed parts take QW2's and QW3's form (`decision-r08-t8-leans.md` §10;
  * `frameTimingLedger.ts`' `QW_FORM` and `runTimed`): each combination's 10 warm-up frames, then 30
  * timed, back to back; two sweeps over every combination, the second in the reverse order. There
@@ -115,12 +123,16 @@ import type { MsSourceTable } from "../view/atmosphere/thick/bake";
 import { bakeKeptCase, bakeKeptCorrection } from "../view/atmosphere/thick/keptBake";
 import type { PolarisationTable } from "../view/atmosphere/thick/polarisation";
 import { THICK_TABLE_BYTES_A_SLOT } from "../view/atmosphere/thick/read";
+import { thickBakeBands } from "../view/atmosphere/thick/bake";
+import { discReflectanceFor } from "../view/atmosphere/thick/discBake";
+import type { DiscReflectanceTable } from "../view/atmosphere/discTable";
 import {
   absorberCount,
   type AbsorberCurveSlots,
   ATMOSPHERE_TABLES_PASS,
   type AtmosphereBody,
   AtmosphereTables,
+  kernelMedium,
   NO_ABSORBER_CURVES,
   packAbsorberCurves,
   packDensityTables,
@@ -246,6 +258,10 @@ const CHECK_NAMES = {
     `${TASK} the frame without its air, its ground emitting's timings, high, ${medium}`,
   emittingSums: (medium: string, place: string, set: string): string =>
     `${TASK} the frame without its air, its ground emitting's per-frame sums, high, ${medium}, ${place}, ${set}`,
+  pastBoundary: (medium: string): string =>
+    `${TASK} the frame past 10⁹ m's timings, high, ${medium}`,
+  pastBoundarySums: (medium: string, place: string, set: string, mode: string): string =>
+    `${TASK} the frame past 10⁹ m's per-frame sums, high, ${medium}, ${place}, ${set}, ${mode}`,
   tables: `${TASK} the per-planet tables' builds`,
   bytes: `${TASK} the per-view bytes of a body's air`,
   firstAir: `${TASK} the first air frame on the main thread, high`,
@@ -1558,6 +1574,149 @@ async function timeBare(
   return kept.reduce((sum, { missing }) => sum + missing, 0);
 }
 
+/** (P)'s cameras: 1.2, 2.4 and 4.8 × 10⁹ m from the centre, past the boundary's 1.1 × 10⁹ m. */
+const PAST_BOUNDARY_PLACES: ReadonlyArray<TimedPlace> = [1.2e9, 2.4e9, 4.8e9].map((distanceM) => ({
+  label: `${distanceM.toExponential(1).replace("e+", "e")} m`,
+  distanceM,
+}));
+
+/** How one of (P)'s combinations draws the body: by its disc table, or by its full passes. */
+type PastBoundaryMode = "by its table" | "by its full passes";
+
+/** One of (P)'s combinations. */
+interface PastBoundaryCombination {
+  readonly place: string;
+  readonly set: SourceSet;
+  readonly mode: PastBoundaryMode;
+  readonly frame: PhotorealFrame;
+  /** Whether the plan drew the body by its table at the combination's last frame. */
+  tabled: boolean;
+}
+
+/**
+ * The measured Earth's disc table as the optics worker bakes it (R08.T16.b): J by the thick bake's
+ * solver under the reference Sun on each light slot, then the table, on the page.
+ */
+function measuredDiscTable(measured: FrameMedium): DiscReflectanceTable {
+  const earth = earthBody();
+  const body = { ...earth, bottomRadiusM: tableRadiusM(earth.figure) };
+  const bands = bakeKeptCase(
+    { medium: measured.medium, sources: EARTH_REFERENCE_SOURCES },
+    keptBakeLightsOf(
+      measured.medium,
+      Array.from({ length: measured.tables.curves.length }, () => R06_SOLAR_BAKE_SPECTRUM),
+    ),
+    body,
+  );
+  return discReflectanceFor(
+    {
+      medium: measured.medium,
+      kernelMedium: kernelMedium(measured.medium),
+      curves: measured.tables.curves,
+    },
+    thickBakeBands(body),
+    () => bands,
+  );
+}
+
+/**
+ * (P), the frame past 10⁹ m (R08.T16.b): the measured Earth from {@link PAST_BOUNDARY_PLACES} at
+ * `x1`, `x2` and the setting's whole count on high, (A)'s scene and sources, drawn by its disc table
+ * and by its full passes, the table given to its tables and taken away again by each combination.
+ *
+ * @returns Its timed frames with a resolve missing.
+ */
+async function timePastBoundary(
+  on: FrameView,
+  checks: Checks,
+  ledger: ResolveLedger,
+  measured: FrameMedium,
+): Promise<number> {
+  const viewport = settingOutput("high");
+  on.view.resize(viewport);
+  const bakeStart = performance.now();
+  const table = measuredDiscTable(measured);
+  const bakeMs = performance.now() - bakeStart;
+  // The air forms made before the timed frames, as a body's first frame past 10⁹ m would wait.
+  await on.renderer.prepareAir();
+  const failures: string[] = [];
+  const sets = sourceSetsOf("high").filter((set) => set.name !== "x2p");
+  const modes: ReadonlyArray<PastBoundaryMode> = ["by its table", "by its full passes"];
+  const combinations: Array<Timed<PastBoundaryCombination>> = PAST_BOUNDARY_PLACES.flatMap(
+    (place) =>
+      sets.flatMap((set) =>
+        modes.map((mode) => {
+          const { item } = frameCombination("high", measured, place, set, failures);
+          return {
+            item: { place: place.label, set, mode, frame: item.frame, tabled: false },
+            records: [],
+          };
+        }),
+      ),
+  );
+  try {
+    await runTimed(
+      ledger,
+      combinations,
+      (combination) => {
+        measured.tables.setDiscReflectance(combination.mode === "by its table" ? table : null);
+      },
+      (combination) => {
+        const { plan, ms } = renderFrame(on, combination.frame);
+        combination.tabled = plan?.tabled.has(measured.id) ?? false;
+        return ms;
+      },
+    );
+  } finally {
+    measured.tables.setDiscReflectance(null);
+  }
+  const kept = combinations.map((combination) => keptOf(combination));
+  const all = kept.flatMap(({ frames }) => frames);
+  const labels = labelsSeen("high", all);
+  const heading = ["camera", "set", "drawn", "sum", ...labels, "CPU in render", "frames"].join(
+    " | ",
+  );
+  const rows = kept.map(({ combination, frames, missing }) =>
+    [
+      combination.item.place,
+      combination.item.set.name,
+      combination.item.mode,
+      cell(frames, sumNs),
+      ...labels.map((label) => cell(frames, (f) => labelledNs(f, new Set([label])))),
+      cell(frames, (f) => nsOfMs(f.cpuMs)),
+      framesCell(frames.length, missing),
+    ].join(" | "),
+  );
+  const drawnAsAsked = combinations.every(
+    ({ item }) => item.tabled === (item.mode === "by its table"),
+  );
+  checks.check(
+    CHECK_NAMES.pastBoundary(measured.name),
+    kept.every(({ frames }) => frames.length === TIMED_IN_ALL && framesFinite(frames)) &&
+      failures.length === 0 &&
+      drawnAsAsked,
+    [
+      `high at ${viewport.widthPx} × ${viewport.heightPx}, ${measured.name} from ${PAST_BOUNDARY_PLACES.map((place) => place.label).join(", ")}, (A)'s scene and sources, drawn by its disc table (${table.bands} band, ${table.slots} light slots, baked on the page in ${(bakeMs / 1_000).toFixed(1)} s) and by its full passes; every frame drawn as asked: ${String(drawnAsAsked)}`,
+      timerText(timerSummary(all)),
+      `the frame's GPU pass sum and its passes by label, and the main thread's time in render (performance.now(), 0.1 ms steps here), µs, median / p95: ${[heading, ...rows].join(" || ")}`,
+    ].join("; "),
+  );
+  for (const combination of combinations) {
+    const { frames } = keptOf(combination);
+    checks.check(
+      CHECK_NAMES.pastBoundarySums(
+        measured.name,
+        combination.item.place,
+        combination.item.set.name,
+        combination.item.mode,
+      ),
+      frames.length === TIMED_IN_ALL && framesFinite(frames),
+      `${frames.length} of ${TIMED_IN_ALL} frames kept; the GPU pass sum, µs, in timed order: ${perFrameSums(combination)}`,
+    );
+  }
+  return kept.reduce((sum, { missing }) => sum + missing, 0);
+}
+
 // --- (D) the per-planet tables ---------------------------------------------------------------------
 
 /** One medium (D) builds tables for: on its ground, with its curves and its body. */
@@ -2453,6 +2612,9 @@ export async function timeAtmosphereFrame(
     const emittingMissing = await timedPart("(O)", () =>
       timeBare(on, checks, ledger, measured, lava),
     );
+    const pastMissing = await timedPart("(P)", () =>
+      timePastBoundary(on, checks, ledger, measured),
+    );
     const trioMissing = await timedPart("(H)", () => timeSmallTrio(on, checks, ledger, measured));
     const mappedFrames = await timedPart("(I)", () => timeClassMap(on, ledger, mapped));
     const specAbout = new Map(specs.map((spec) => [spec.name, spec.about]));
@@ -2510,6 +2672,7 @@ export async function timeAtmosphereFrame(
       smallMissing +
       bareMissing +
       emittingMissing +
+      pastMissing +
       trioMissing +
       mappedMissing +
       saturnMissing +
@@ -2517,7 +2680,7 @@ export async function timeAtmosphereFrame(
     checks.check(
       CHECK_NAMES.dropped,
       missing === 0,
-      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (O) ${emittingMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) to (N) ${thickMissing}`}`,
+      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (O) ${emittingMissing}, (P) ${pastMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) to (N) ${thickMissing}`}`,
     );
     const bytes = await timedPart("(E)", () => perViewBytes(engine, checks, measured));
     await timedPart("(F)", () =>
