@@ -231,7 +231,7 @@ impl NestedGrid {
 
     /// Whether `cell` coordinate `c` of a level lies in its inner half, which the level below owns.
     #[must_use]
-    fn is_inner(self, c: u8) -> bool {
+    pub(crate) fn is_inner(self, c: u8) -> bool {
         let n = self.cells_per_axis;
         n / 4 <= c && c < 3 * n / 4
     }

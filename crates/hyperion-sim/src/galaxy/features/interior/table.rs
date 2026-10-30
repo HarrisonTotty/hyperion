@@ -27,7 +27,7 @@ use crate::rng::Mark;
 use crate::units::LightYears;
 
 use super::super::cluster::ClusterModel;
-use super::super::nested::{NestedCell, NestedGrid};
+use super::super::nested::{NestedCell, NestedGrid, NestedLevel};
 use super::MemberClass;
 use super::counts::{CANONICAL_SLOPE, ClassCount, ClassCounts, class_counts};
 use super::profile::{CUSP_SOFTENING, ClassProfile, ProfileShape};
@@ -139,15 +139,48 @@ impl TailClass {
     /// note 10): 0 if the sphere misses both ends' spans along the axis.
     #[must_use]
     pub fn bound(&self, centre: &PointLy, radius: f64) -> f64 {
-        let s = centre.x * self.axis[0] + centre.y * self.axis[1] + centre.z * self.axis[2];
+        self.bound_across(centre, radius, &mut Across::default())
+    }
+
+    /// [`bound`](Self::bound), bit for bit, reading the sphere's place along the axis and the
+    /// Gaussian across it from `across`, filled by the first tail that reads them: every band's
+    /// tail shares its axis and width, and so both (P09.T40.a). `across` serves one sphere.
+    fn bound_across(&self, centre: &PointLy, radius: f64, across: &mut Across) -> f64 {
+        let same = |a: f64, b: f64| a.total_cmp(&b).is_eq();
+        let known = across.line.is_some_and(|(axis, width)| {
+            same(width, self.width) && axis.iter().zip(self.axis).all(|(&a, b)| same(a, b))
+        });
+        if !known {
+            *across = Across {
+                line: Some((self.axis, self.width)),
+                along: centre.x * self.axis[0] + centre.y * self.axis[1] + centre.z * self.axis[2],
+                gauss: None,
+            };
+        }
+        let s = across.along;
         let (lo, hi) = (s.abs() - radius, s.abs() + radius);
         if hi < self.inner || lo > self.reach {
             return 0.0;
         }
-        let d2 = (centre.x * centre.x + centre.y * centre.y + centre.z * centre.z - s * s).max(0.0);
-        let d = (d2.sqrt() - radius).max(0.0);
-        self.axis_density() * math::exp(-0.5 * d * d / (self.width * self.width)) * (1.0 + 1e-12)
+        let gauss = *across.gauss.get_or_insert_with(|| {
+            let d2 =
+                (centre.x * centre.x + centre.y * centre.y + centre.z * centre.z - s * s).max(0.0);
+            let d = (d2.sqrt() - radius).max(0.0);
+            math::exp(-0.5 * d * d / (self.width * self.width))
+        });
+        self.axis_density() * gauss * (1.0 + 1e-12)
     }
+}
+
+/// What [`TailClass::bound`] reads of one sphere for a tail's line, shared by the tails of one
+/// axis and width: the sphere's centre along the axis and, once a tail's span meets it, the
+/// Gaussian across at the sphere's nearest approach (P09.T40.a).
+#[derive(Debug, Clone, Copy, Default)]
+struct Across {
+    /// The axis and width it was found for, or `None` before any.
+    line: Option<([f64; 3], f64)>,
+    along: f64,
+    gauss: Option<f64>,
 }
 
 /// One profiled class of a band: the class, its count and its profile.
@@ -566,18 +599,31 @@ impl MemberClassTable {
     /// is.
     #[must_use]
     pub fn peak_candidates(&self, grid: &NestedGrid) -> f64 {
+        let mut marks = PeakCells::new(*grid);
+        grid.all_levels().fold(0.0_f64, |peak, level| {
+            peak.max(self.level_peak(*grid, level, Admit::Owned, &mut marks, f64::INFINITY))
+        })
+    }
+
+    /// The most candidates any band expects in the cells of `level` of `grid` that
+    /// [`peak_candidates`](Self::peak_candidates) reads and `admit` admits, each cell once, or the
+    /// most so far as soon as that passes `stop`. `marks` is scratch.
+    fn level_peak(
+        &self,
+        grid: NestedGrid,
+        level: NestedLevel,
+        admit: Admit,
+        marks: &mut PeakCells,
+        stop: f64,
+    ) -> f64 {
+        marks.clear();
         let n = grid.cells_per_axis();
         let beside = [n / 2 - 1, n / 2];
-        let mut cells = std::collections::BTreeSet::new();
-        for level in 0..grid.levels() {
-            for along in 0..n {
-                for a in beside {
-                    for b in beside {
-                        cells.extend(
-                            [[along, a, b], [a, along, b], [a, b, along]]
-                                .into_iter()
-                                .filter_map(|c| grid.cell(level, c)),
-                        );
+        for along in 0..n {
+            for a in beside {
+                for b in beside {
+                    for c in [[along, a, b], [a, along, b], [a, b, along]] {
+                        marks.mark(c);
                     }
                 }
             }
@@ -585,40 +631,68 @@ impl MemberClassTable {
         if let Some(tail) = self.tails.iter().flatten().next() {
             // Every cell within one cell of a point of the line, in steps of a quarter cell.
             let axis = tail.axis;
-            for level in grid.all_levels() {
-                let edge = level.edge().value();
-                let half = level.half_width().value();
-                let steps = 8 * u32::from(n);
-                for i in 0..=steps {
-                    let along = -half + 2.0 * half * f64::from(i) / f64::from(steps);
-                    let point = axis.map(|a| along * a);
-                    let index = point.map(|c| (c / edge).floor() + f64::from(n / 2));
-                    for offset in [-1.0, 0.0, 1.0]
-                        .iter()
-                        .flat_map(|&dx| [-1.0, 0.0, 1.0].map(move |dy| (dx, dy)))
-                        .flat_map(|(dx, dy)| [-1.0, 0.0, 1.0].map(move |dz| [dx, dy, dz]))
-                    {
-                        let c = [0, 1, 2].map(|k| index[k] + offset[k]);
-                        if c.iter().all(|&v| (0.0..f64::from(n)).contains(&v)) {
-                            #[expect(
-                                clippy::cast_possible_truncation,
-                                clippy::cast_sign_loss,
-                                reason = "whole numbers checked to lie in 0..n, n at most 64"
-                            )]
-                            let c = c.map(|v| v as u8);
-                            cells.extend(grid.cell(level.level(), c));
-                        }
+            let edge = level.edge().value();
+            let half = level.half_width().value();
+            let steps = 8 * u32::from(n);
+            for i in 0..=steps {
+                let along = -half + 2.0 * half * f64::from(i) / f64::from(steps);
+                let point = axis.map(|a| along * a);
+                let index = point.map(|c| (c / edge).floor() + f64::from(n / 2));
+                for offset in [-1.0, 0.0, 1.0]
+                    .iter()
+                    .flat_map(|&dx| [-1.0, 0.0, 1.0].map(move |dy| (dx, dy)))
+                    .flat_map(|(dx, dy)| [-1.0, 0.0, 1.0].map(move |dz| [dx, dy, dz]))
+                {
+                    let c = [0, 1, 2].map(|k| index[k] + offset[k]);
+                    if c.iter().all(|&v| (0.0..f64::from(n)).contains(&v)) {
+                        #[expect(
+                            clippy::cast_possible_truncation,
+                            clippy::cast_sign_loss,
+                            reason = "whole numbers checked to lie in 0..n, n at most 64"
+                        )]
+                        let c = c.map(|v| v as u8);
+                        marks.mark(c);
                     }
                 }
             }
         }
         let mut peak = 0.0_f64;
-        for cell in cells {
-            for band in MassBand::ALL {
-                peak = peak.max(self.cell_candidates(band, grid, cell));
+        for c in marks.cells() {
+            let Some(cell) = grid.cell(level.level(), c) else {
+                continue;
+            };
+            if admit == Admit::InnerHalf && !c.iter().all(|&v| grid.is_inner(v)) {
+                continue;
+            }
+            peak = peak.max(self.cell_peak(&grid.local_cell(cell)));
+            if peak > stop {
+                break;
             }
         }
         peak
+    }
+
+    /// The most candidates any band expects in `cell`: the greatest over the bands of
+    /// [`cell_candidates`](Self::cell_candidates), bit for bit, with the cell's nearest radius and
+    /// bounding sphere and its tails' Gaussian found once for every band (P09.T40.a).
+    fn cell_peak(&self, cell: &LocalCell) -> f64 {
+        let nearest = cell.nearest_radius();
+        let (centre, radius) = cell.bounding_sphere();
+        let mut across = Across::default();
+        MassBand::ALL.iter().fold(0.0_f64, |peak, &band| {
+            let expected = match self.cusp_slope(band) {
+                Some(_) if nearest <= 0.0 => self.proposal(band, cell).expected(cell),
+                // `cell_bound` over the cell, as `proposal` takes it.
+                Some(_) | None => {
+                    let tail = self
+                        .tail(band)
+                        .map_or(0.0, |t| t.bound_across(&centre, radius, &mut across));
+                    let bound = (self.bound(band, nearest) + tail) * (1.0 + 1e-12);
+                    CellProposal::Uniform { bound }.expected(cell)
+                }
+            };
+            peak.max(expected)
+        })
     }
 
     /// The width of the cluster's nested grid of [`FEATURE_GRID_CELLS`] cells and
@@ -652,12 +726,86 @@ impl MemberClassTable {
             k += 1;
         }
         let extent = self.extent().value();
-        while !reaches(k, extent)
-            && self.peak_candidates(&feature_grid(k + 1)) <= CELL_CANDIDATE_TARGET
-        {
+        let mut marks = PeakCells::new(feature_grid(k));
+        let mut whole = true;
+        while !reaches(k, extent) && self.doubled_holds(feature_grid(k + 1), whole, &mut marks) {
             k += 1;
+            whole = false;
         }
         feature_grid(k).width()
+    }
+
+    /// Whether [`peak_candidates`](Self::peak_candidates) of `grid` is at most
+    /// [`CELL_CANDIDATE_TARGET`], stopping at the first cell over it (P09.T40.a).
+    ///
+    /// Unless `whole`, the grid half as wide is known to hold, and only the cells it lacks are
+    /// read: the grid's level `j` is that grid's level `j + 1`, cell for cell, with the same cells
+    /// read and owned, but for level 0's inner half, which that grid's level 1 leaves to its level
+    /// 0, and the outermost level, which it has not got. A cell's expected candidates are a
+    /// function of its box alone, so the answer is the whole grid's, bit for bit.
+    ///
+    ///
+    /// A level whose [`level_ceiling`](Self::level_ceiling) is under the target holds without its
+    /// cells being read, level 0 once its eight cells with a corner at the centre, which the
+    /// ceiling leaves out, are read and hold.
+    fn doubled_holds(&self, grid: NestedGrid, whole: bool, marks: &mut PeakCells) -> bool {
+        let target = CELL_CANDIDATE_TARGET;
+        let outermost = grid.levels() - 1;
+        grid.all_levels().all(|level| {
+            let admit = match level.level() {
+                _ if whole => Admit::Owned,
+                0 if outermost > 0 => Admit::InnerHalf,
+                j if j == outermost => Admit::Owned,
+                _ => return true,
+            };
+            let centre_holds = || {
+                let n = grid.cells_per_axis();
+                let beside = [n / 2 - 1, n / 2];
+                beside.iter().all(|&x| {
+                    beside.iter().all(|&y| {
+                        beside.iter().all(|&z| {
+                            grid.cell(0, [x, y, z])
+                                .is_none_or(|c| self.cell_peak(&grid.local_cell(c)) <= target)
+                        })
+                    })
+                })
+            };
+            if self.level_ceiling(grid, level) <= target && (level.level() > 0 || centre_holds()) {
+                return true;
+            }
+            self.level_peak(grid, level, admit, marks, target) <= target
+        })
+    }
+
+    /// A ceiling on what [`cell_peak`](Self::cell_peak) gives for any owned cell of `level` of
+    /// `grid` but, on level 0, the eight with a corner at the centre, where a cusp's envelope
+    /// peaks (P09.T40.a).
+    ///
+    /// A higher level owns no cell nearer the centre than a quarter of its cells per axis, and
+    /// those cells of level 0 none nearer than one edge, each exactly so in floating point. Every
+    /// profile is a power of `1 + (r ÷ a)²` or of `r² + ε²` with a negative exponent times a taper
+    /// falling with `r`, so it never rises with the radius, as computed, by more than `libm`'s last
+    /// bits, which [`CEILING_MARGIN`] covers; a tail's Gaussian across is at most 1. So each band's
+    /// cell bound is at most its profiles' bound at that radius plus its tail's axis density, and
+    /// the cell's candidates that times its volume, every step a monotone rounding.
+    fn level_ceiling(&self, grid: NestedGrid, level: NestedLevel) -> f64 {
+        let edge = level.edge().value();
+        let nearest = if level.level() == 0 {
+            edge
+        } else {
+            f64::from(grid.cells_per_axis() / 4) * edge
+        };
+        MassBand::ALL.iter().fold(0.0_f64, |ceiling, &band| {
+            let tail = self
+                .tail(band)
+                .map_or(0.0, |t| t.axis_density() * (1.0 + 1e-12));
+            let bound = (self.bound(band, nearest) * (1.0 + CEILING_MARGIN) + tail) * (1.0 + 1e-12);
+            let expected = CellProposal::Uniform { bound }.expected(&LocalCell {
+                min: [0.0; 3],
+                edge,
+            });
+            ceiling.max(expected * (1.0 + CEILING_MARGIN))
+        })
     }
 
     /// The cluster's nested grid: [`grid_width`](Self::grid_width), 16 cells and eight levels.
@@ -787,6 +935,60 @@ impl CellProposal {
 /// powers it is built from.
 const CUSP_MARGIN: f64 = 1e-9;
 
+/// The relative margin of [`MemberClassTable::level_ceiling`] over a profile's last-bit rises
+/// and the rounding of its own products: 10⁻⁹, against `libm`'s few units in 10¹⁶.
+const CEILING_MARGIN: f64 = 1e-9;
+
+/// Which owned cells of a level [`MemberClassTable::level_peak`] reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Admit {
+    /// Every one.
+    Owned,
+    /// Those of the level's inner half, every coordinate inner.
+    InnerHalf,
+}
+
+/// One level's cells, as a bitmap over its `n³` cells, x-major: each cell where a table's bound
+/// can peak once, however many times the axes and the tail's line visit it (P09.T40.a).
+#[derive(Debug, Clone)]
+struct PeakCells {
+    n: usize,
+    words: Vec<u64>,
+}
+
+impl PeakCells {
+    /// An empty bitmap for a level of `grid`.
+    fn new(grid: NestedGrid) -> Self {
+        let n = usize::from(grid.cells_per_axis());
+        Self {
+            n,
+            words: vec![0; (n * n * n).div_ceil(64)],
+        }
+    }
+
+    fn clear(&mut self) {
+        self.words.fill(0);
+    }
+
+    /// Marks cell `c`, each coordinate below `n`.
+    fn mark(&mut self, c: [u8; 3]) {
+        let i = (usize::from(c[0]) * self.n + usize::from(c[1])) * self.n + usize::from(c[2]);
+        self.words[i / 64] |= 1 << (i % 64);
+    }
+
+    /// The marked cells, x-major.
+    fn cells(&self) -> impl Iterator<Item = [u8; 3]> + '_ {
+        let n = self.n;
+        self.words.iter().enumerate().flat_map(move |(w, &word)| {
+            (0..64).filter(move |b| word & (1 << b) != 0).map(move |b| {
+                let i = w * 64 + b;
+                [i / (n * n), (i / n) % n, i % n]
+                    .map(|v| u8::try_from(v).expect("a cell coordinate is below 64"))
+            })
+        })
+    }
+}
+
 /// `∫₀^r h(s) s² ds` for `h(s) = max(ε, s)^−γ`, γ < 3 (a cusp's slope is 1.6–2).
 #[must_use]
 fn envelope_mass(r: f64, slope: f64) -> f64 {
@@ -915,6 +1117,178 @@ mod tests {
         let reach = LightYears::new(4.0 * model.tidal_radius().value());
         let table = MemberClassTable::new(&galaxy, &model, reach, [1.0, 0.0, 0.0]);
         (model, table)
+    }
+
+    /// The peak as the search had it before P09.T40.a: every cell into one ordered set, then every
+    /// band of every cell through `cell_candidates`.
+    fn peak_as_built(table: &MemberClassTable, grid: NestedGrid) -> f64 {
+        let n = grid.cells_per_axis();
+        let beside = [n / 2 - 1, n / 2];
+        let mut cells = std::collections::BTreeSet::new();
+        for level in 0..grid.levels() {
+            for along in 0..n {
+                for a in beside {
+                    for b in beside {
+                        cells.extend(
+                            [[along, a, b], [a, along, b], [a, b, along]]
+                                .into_iter()
+                                .filter_map(|c| grid.cell(level, c)),
+                        );
+                    }
+                }
+            }
+        }
+        if let Some(tail) = table.tails.iter().flatten().next() {
+            let axis = tail.axis;
+            for level in grid.all_levels() {
+                let edge = level.edge().value();
+                let half = level.half_width().value();
+                let steps = 8 * u32::from(n);
+                for i in 0..=steps {
+                    let along = -half + 2.0 * half * f64::from(i) / f64::from(steps);
+                    let point = axis.map(|a| along * a);
+                    let index = point.map(|c| (c / edge).floor() + f64::from(n / 2));
+                    for dx in [-1.0, 0.0, 1.0] {
+                        for dy in [-1.0, 0.0, 1.0] {
+                            for dz in [-1.0, 0.0, 1.0] {
+                                let c = [index[0] + dx, index[1] + dy, index[2] + dz];
+                                if c.iter().all(|&v| (0.0..f64::from(n)).contains(&v)) {
+                                    #[expect(
+                                        clippy::cast_possible_truncation,
+                                        clippy::cast_sign_loss,
+                                        reason = "whole numbers checked to lie in 0..n"
+                                    )]
+                                    let c = c.map(|v| v as u8);
+                                    cells.extend(grid.cell(level.level(), c));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut peak = 0.0_f64;
+        for cell in cells {
+            for band in MassBand::ALL {
+                peak = peak.max(table.cell_candidates(band, &grid, cell));
+            }
+        }
+        peak
+    }
+
+    /// The width as the search had it before P09.T40.a: every doubled grid's whole peak.
+    fn width_as_built(table: &MemberClassTable, floor_log2: i32) -> f64 {
+        let reaches = |k: i32, r: f64| feature_grid(k).reach().value() >= r;
+        let mut k = floor_log2;
+        while !reaches(k, table.tidal) {
+            k += 1;
+        }
+        while !reaches(k, table.extent().value())
+            && peak_as_built(table, feature_grid(k + 1)) <= CELL_CANDIDATE_TARGET
+        {
+            k += 1;
+        }
+        feature_grid(k).width().value()
+    }
+
+    /// The peak read level by level from a bitmap, its tails' Gaussian shared, and the width
+    /// searched from the cells each doubling adds, are the whole search's, bit for bit: for the
+    /// named globulars with short and long tails along two axes, and a dwarf core of classes alone
+    /// (P09.T40.a).
+    #[test]
+    fn the_width_search_is_the_whole_grids_search_bit_for_bit() {
+        use crate::galaxy::features::testing::{M15, OMEGA_CEN, PAL_5, TUC_47};
+        use hyperion_testkit::float::assert_same_bits;
+        let galaxy =
+            Galaxy::from_params(Seed::new(0x0921_0100), GalaxyParams::milky_way_like()).unwrap();
+        let mut tables = Vec::new();
+        for name in [M4, TUC_47, PAL_5, OMEGA_CEN, M15] {
+            let model = ClusterModel::new(&galaxy, &catalogue_parameters(named_cluster(name)));
+            for (radii, axis) in [(4.0, [1.0, 0.0, 0.0]), (40.0, [0.3, -0.8, 0.5])] {
+                let reach = LightYears::new(radii * model.tidal_radius().value());
+                tables.push(MemberClassTable::new(&galaxy, &model, reach, axis));
+            }
+        }
+        let classes: Vec<ClassCount> = tables[0]
+            .bands
+            .iter()
+            .flatten()
+            .map(|row| ClassCount {
+                class: row.class,
+                expected: row.expected,
+                shape: row.profile.shape(),
+            })
+            .collect();
+        tables.push(MemberClassTable::from_classes(
+            &classes,
+            LightYears::new(tables[0].tidal),
+            0.67,
+        ));
+        let mut doublings = 0;
+        for table in &tables {
+            let width = table.grid_width().value();
+            assert_same_bits(width, width_as_built(table, GRID_WIDTH_MIN_LOG2));
+            assert_same_bits(table.grid_width_from(2).value(), width_as_built(table, 2));
+            let mut k = GRID_WIDTH_MIN_LOG2;
+            while feature_grid(k).reach().value() < table.tidal {
+                k += 1;
+            }
+            // Every grid the search may read, and the one past it.
+            while feature_grid(k).width().value() <= 2.0 * width {
+                let grid = feature_grid(k);
+                assert_same_bits(table.peak_candidates(&grid), peak_as_built(table, grid));
+                doublings += 1;
+                k += 1;
+            }
+        }
+        assert!(doublings > 30, "{doublings} grids compared");
+    }
+
+    /// The search's width is the whole search's for every cluster within 3,000 ly of the
+    /// Sun-like point and the first hundred globulars of the walk, so that the levels its ceiling
+    /// passes unread are never ones the whole search would refuse (P09.T40.a).
+    #[test]
+    #[ignore = "slow: some hundreds of cluster models and whole width searches"]
+    fn every_cluster_near_the_sun_and_a_hundred_globulars_keep_the_whole_search_s_width() {
+        use crate::coords::GalacticPosition;
+        use crate::galaxy::features::FeatureProcess;
+        use crate::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache, bulk_velocity};
+        use hyperion_testkit::float::assert_same_bits;
+        let galaxy = Galaxy::new(Seed::new(0x4d2)).with_full_potential();
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap();
+        let near = FeatureCatalogue::near(&galaxy, &sun, LightYears::new(3_000.0), &NoFeatureCache);
+        let globulars = FeatureCatalogue::walk_process(&galaxy, FeatureProcess::Globular).take(100);
+        let (mut clusters, mut by_target) = (0, 0);
+        for feature in near.chain(globulars) {
+            let (Some(model), Some(bulk)) = (
+                ClusterModel::from_record(&galaxy, &feature),
+                bulk_velocity(&galaxy, &feature),
+            ) else {
+                continue;
+            };
+            let table =
+                MemberClassTable::new(&galaxy, &model, feature.reach(), bulk.metres_per_second());
+            let width = table.grid_width().value();
+            assert_same_bits(width, width_as_built(&table, GRID_WIDTH_MIN_LOG2));
+            clusters += 1;
+            if feature_grid_reach(width) < table.extent().value() {
+                by_target += 1;
+            }
+        }
+        println!("{clusters} clusters, {by_target} stopped by the target");
+        assert!(clusters > 100 && by_target > 0, "{clusters} {by_target}");
+    }
+
+    /// The reach of the catalogue's grid `width` ly wide.
+    fn feature_grid_reach(width: f64) -> f64 {
+        NestedGrid::new(
+            LightYears::new(width),
+            FEATURE_GRID_CELLS,
+            FEATURE_GRID_LEVELS,
+        )
+        .unwrap()
+        .reach()
+        .value()
     }
 
     /// The floor argument leaves a cluster's grid as it was (P10.T7.a), and a floor above the
