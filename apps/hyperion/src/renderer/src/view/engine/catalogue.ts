@@ -57,6 +57,7 @@ import {
 } from "../bodies/draw";
 import {
   IRRADIANCE_KERNEL,
+  IRRADIANCE_THICK_KERNEL,
   MULTI_SCATTERING_KERNEL,
   SLOT_DEPTHS_KERNEL,
   TRANSMITTANCE_KERNEL,
@@ -182,8 +183,9 @@ export const ATMOSPHERE_ONE_BAND_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 /**
  * R08.T14.c's per-frame atmosphere over the thick multiple-scattering table (`hillaire.ts`'s
  * `withThickRead`): the sky view, the aerial perspective and both marches' footprints, each with
- * its form specialised for one band and no layer edge. The smoke page compiles them in a part of
- * their own (`smoke/page.ts`), for the watchdog of the part that compiles the rest.
+ * its form specialised for one band and no layer edge; and R08.T14.d.4's sky-irradiance build over
+ * it (`tables.ts`'s `IRRADIANCE_THICK_KERNEL`). The smoke page compiles them in a part of their own
+ * (`smoke/page.ts`), for the watchdog of the part that compiles the rest.
  */
 export const ATMOSPHERE_THICK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   SKY_VIEW_THICK_KERNEL,
@@ -192,6 +194,7 @@ export const ATMOSPHERE_THICK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   RAY_MARCH_SLOTS_THICK_KERNEL,
   RAY_MARCH_THICK_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
+  IRRADIANCE_THICK_KERNEL,
 ].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
 
 /**

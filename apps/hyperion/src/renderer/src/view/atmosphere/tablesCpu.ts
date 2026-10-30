@@ -107,12 +107,15 @@ import {
   type PackedDeckTable,
 } from "./thick/deckRead";
 import {
+  addThickLayer,
   type PackedThickTable,
   thickAnalyticShare,
   thickAnalyticWeight,
   thickBandsInto,
+  thickIrradianceLayer,
   thickJInto,
   thickMultipleInto,
+  thickRowAt,
   thickSourceScratch,
   type ThickTableKind,
 } from "./thick/read";
@@ -2009,6 +2012,30 @@ export interface TwinThickSource {
   ) => void;
 }
 
+/**
+ * One layer of a thick table read as {@link TwinThickSource.read}, whatever the slot asked
+ * (`thickRead.wgsl`'s `thickIrradianceMultiple`): a sky-irradiance build's, whose band and light
+ * slot fix the layer (R08.T14.d.4).
+ */
+function thickLayerSourceOf(table: PackedThickTable, layer: number): TwinThickSource["read"] {
+  const scratch = thickSourceScratch();
+  return (heightM, muSun, muTravel, horizontal, out) => {
+    scratch.level.fill(0);
+    scratch.slope.fill(0);
+    scratch.curve.fill(0);
+    addThickLayer(
+      table,
+      layer,
+      thickRowAt(table, Math.max(heightM, 0)),
+      muSun,
+      muTravel,
+      1,
+      scratch,
+    );
+    thickJInto(scratch, muSun, muTravel, horizontal, out);
+  };
+}
+
 /** One band's thick table read as {@link TwinThickSource.read}: band 0's, at s = 1. */
 function thickSourceOf(table: PackedThickTable): TwinThickSource["read"] {
   const scratch = thickSourceScratch();
@@ -2979,7 +3006,10 @@ function irradianceTexelInto(inputs: IrradianceInputs, x: number, y: number, out
  * E = ∫ L μ_v dω over the hemisphere above the horizon (`irradianceQuadrature.ts`), as
  * `irradiance.wgsl` stores it in rgb, alpha 0. It reads `transmittance` and the multiple-scattering
  * layers as the per-frame marches read a sphere's tables (`tableSources`), with light slot
- * `curveSlot`'s curves and multiple-scattering layer.
+ * `curveSlot`'s curves and multiple-scattering layer; where `thick` is given, as `tables.ts`'s
+ * `IRRADIANCE_THICK_KERNEL` reads it (R08.T14.d.4), the thick table's layer in place of Ψ_ms from
+ * its lowest sun cosine cell up, as the march reads it, so that the ground is lit by the multiple
+ * scattering the sky is drawn with.
  *
  * @param bottomRadiusM - The tables' ground radius, m: R_ref, or a latitude band's sphere.
  * @param multiScatteringBySlot - The multiple-scattering table's layers, one a light slot.
@@ -2987,7 +3017,9 @@ function irradianceTexelInto(inputs: IrradianceInputs, x: number, y: number, out
  *   are left 0.
  * @param coefficientFactor - The factor every coefficient takes: 1 ÷ s_b in a latitude band's own
  *   frame ({@link twinBandOf}), 1 otherwise.
- * @throws RangeError as {@link multiScatteringTwin}.
+ * @param thick - The thick table the build reads, with its layer for the band and light slot
+ *   (band b's slot k at b × slots + k); absent, Ψ_ms alone.
+ * @throws RangeError as {@link multiScatteringTwin}, or for a layer the thick table does not hold.
  */
 export function irradianceTwin(
   medium: AtmosphereMedium,
@@ -2998,24 +3030,40 @@ export function irradianceTwin(
   texels?: ReadonlyArray<readonly [number, number]>,
   curveSlot = SHARED_TABLE_CURVE_SLOT,
   coefficientFactor = 1,
+  thick?: { readonly table: PackedThickTable; readonly layer: number },
 ): TwinTable {
   const first = multiScatteringBySlot[0];
   if (first === undefined) {
     throw new RangeError("the sky's irradiance reads at least one multiple-scattering layer");
   }
+  if (
+    thick !== undefined &&
+    !(Number.isInteger(thick.layer) && thick.layer >= 0 && thick.layer < thick.table.layers)
+  ) {
+    throw new RangeError(
+      `the sky's irradiance reads layer ${thick.layer} of a thick table of ${thick.table.layers}`,
+    );
+  }
   const terms = scaledTerms(termsOf(medium), coefficientFactor);
+  const sources = tableSources({
+    medium,
+    bottomRadiusM,
+    ...transmittance,
+    multiScattering: first,
+    multiScatteringBySlot,
+  });
   const inputs: IrradianceInputs = {
     terms,
     edgesM: marchEdgesOf(terms, medium.topHeightM),
     pressureBarOf: pressureBarLookup(medium),
     shell: { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM },
-    sources: tableSources({
-      medium,
-      bottomRadiusM,
-      ...transmittance,
-      multiScattering: first,
-      multiScatteringBySlot,
-    }),
+    sources:
+      thick === undefined
+        ? sources
+        : {
+            ...sources,
+            thick: { kind: thick.table.kind, read: thickLayerSourceOf(thick.table, thick.layer) },
+          },
     curveSlot,
     options,
   };
@@ -5619,7 +5667,9 @@ export function bandMultiScattering(
  * An oblate body's sky-irradiance tables (plan R08, R08.T9.b; Design note 17, _Latitude bands_):
  * band by band, a layer a light slot, each {@link irradianceTwin} in the band's own frame over its
  * own transmittance tables and multiple-scattering layer, as `AtmosphereTables` builds them. Earth's
- * one band at s = 1 reads the one slice's tables.
+ * one band at s = 1 reads the one slice's tables. Where the planet holds a thick table, each band's
+ * layers read it (R08.T14.d.4): band b's light slot k reads layer b × slots + k, the table's last slot
+ * where it holds fewer, as the kernels' build is given it.
  *
  * @param texels - The texels to compute, each [x, y]; every texel by default.
  * @throws RangeError as {@link irradianceTwin}.
@@ -5629,7 +5679,8 @@ export function oblateIrradianceTwin(
   options: IrradianceOptions = IRRADIANCE_KERNEL_OPTIONS,
   texels?: ReadonlyArray<readonly [number, number]>,
 ): ReadonlyArray<ReadonlyArray<TwinTable>> {
-  return planet.bands.map((band) =>
+  const { thick } = planet;
+  return planet.bands.map((band, b) =>
     band.multiScatteringBySlot.map((_, slot) =>
       irradianceTwin(
         planet.medium,
@@ -5640,6 +5691,9 @@ export function oblateIrradianceTwin(
         texels,
         slot,
         1 / band.gravityRatio,
+        thick === undefined
+          ? undefined
+          : { table: thick, layer: thickIrradianceLayer(b, slot, thick.slots) },
       ),
     ),
   );

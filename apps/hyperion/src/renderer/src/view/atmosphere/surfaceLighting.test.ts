@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { cross, dot, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import { earthBody, saturnBody, saturnClassMedium } from "../../test/atmosphereFixtures";
 import { forbiddenIn } from "../../test/atmosphereWgsl";
+import { patternedCorrection, patternedThickBake } from "../../test/thickTables";
 import { phaseFactorFromTable, phaseFactorTableOf } from "../appearance/law";
 import { lawFor } from "../appearance/phase";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
@@ -32,7 +33,14 @@ import {
   surfaceLightingTextures,
   type SurfaceLightingReader,
 } from "./surfaceLighting";
-import { IRRADIANCE_KERNEL, IRRADIANCE_SAMPLES, IRRADIANCE_SIZE } from "./tables";
+import {
+  IRRADIANCE_KERNEL,
+  IRRADIANCE_SAMPLES,
+  IRRADIANCE_SIZE,
+  kernelMedium,
+  tablesPlanOf,
+} from "./tables";
+import { packThickTable, type PackedThickTable, thickIrradianceLayer } from "./thick/read";
 import {
   IRRADIANCE_KERNEL_OPTIONS,
   irradianceTwin,
@@ -175,6 +183,38 @@ function sphereIrradiance(
   );
 }
 
+/**
+ * The sky's irradiance twin of a sphere's medium at the texels listed over `thick`'s layer `layer`,
+ * or Psi_ms alone (R08.T14.d.4), small tables beneath.
+ */
+function sphereIrradianceOver(
+  medium: AtmosphereMedium,
+  radiusM: number,
+  texels: ReadonlyArray<readonly [number, number]>,
+  thick: PackedThickTable | undefined,
+  layer = 0,
+): TwinTable {
+  const transmittance = transmittanceTablesTwin(
+    medium,
+    radiusM,
+    [],
+    SIZES.transmittance,
+    SIZES.transmittanceSamples,
+  );
+  const multiple = multiScatteringTwin(medium, radiusM, transmittance, SIZES.multiScattering);
+  return irradianceTwin(
+    medium,
+    radiusM,
+    transmittance,
+    [multiple],
+    IRRADIANCE_KERNEL_OPTIONS,
+    texels,
+    0,
+    1,
+    thick === undefined ? undefined : { table: thick, layer },
+  );
+}
+
 /** A texel's rgb. */
 function texelOf(table: TwinTable, x: number, y: number): readonly [number, number, number] {
   const at = (y * table.widthTexels + x) * 4;
@@ -274,6 +314,57 @@ describe("the sky's irradiance (R08.T9.b)", () => {
     };
     const sky = sphereIrradiance(absorbing, 6_371_000, rowsOf([0, 5, 10, 15]));
     expect(sky.texels.every((v) => v === 0)).toBe(true);
+  });
+});
+
+describe("the sky's irradiance over the thick table (R08.T14.d.4)", () => {
+  const radiusM = 6_371_000;
+  const medium = thinRayleigh(0.1);
+  const bands = tablesPlanOf(null, radiusM).bands;
+  /** Texels at the ground: the sun at the zenith, and below the table's lowest row, −7/32. */
+  const texels = [
+    [63, 0],
+    [10, 0],
+  ] as const;
+  const bake = packThickTable(
+    patternedThickBake(bands, kernelMedium(medium), 1),
+    kernelMedium(medium),
+    null,
+  );
+  const silent = patternedCorrection(bands, medium, 1);
+  for (const band of silent) {
+    for (const slot of band.slots) {
+      slot.values.fill(0);
+    }
+  }
+  const quiet = packThickTable(null, kernelMedium(medium), { bands: silent, medium });
+  const analytic = sphereIrradianceOver(medium, radiusM, texels, undefined);
+
+  it("reads the bake's J in place of Psi_ms from the table's lowest sun cosine cell up, and Psi_ms below it", () => {
+    const over = sphereIrradianceOver(medium, radiusM, texels, bake);
+    // Texel 10's sun cosine, 2 × 10.5 ÷ 64 − 1, lies below −7/32, where the analytic term is whole.
+    expect([
+      texelOf(over, 63, 0).every((value, c) => value !== texelOf(analytic, 63, 0)[c]),
+      texelOf(over, 10, 0),
+    ]).toEqual([true, texelOf(analytic, 10, 0)]);
+  });
+
+  it("reads a correction of 0 alone as Psi_ms alone", () => {
+    expect(sphereIrradianceOver(medium, radiusM, texels, quiet).texels).toEqual(analytic.texels);
+  });
+
+  it("refuses a layer the table does not hold", () => {
+    expect(() => sphereIrradianceOver(medium, radiusM, texels, bake, 1)).toThrow(
+      /reads layer 1 of a thick table of 1/u,
+    );
+  });
+
+  it("takes band b's light slot k at b × slots + k, the table's last slot where it holds fewer", () => {
+    expect([
+      thickIrradianceLayer(0, 0, 1),
+      thickIrradianceLayer(2, 1, 2),
+      thickIrradianceLayer(3, 1, 1),
+    ]).toEqual([0, 5, 3]);
   });
 });
 

@@ -109,6 +109,7 @@ import sourceWgsl from "./shaders/source.wgsl?raw";
 import thermalSourceWgsl from "./shaders/thermalSource.wgsl?raw";
 import deckReadWgsl from "./shaders/deckRead.wgsl?raw";
 import thickReadWgsl from "./shaders/thickRead.wgsl?raw";
+import thickReadBandsWgsl from "./shaders/thickReadBands.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
 import {
   absorberCount,
@@ -1016,9 +1017,15 @@ const THICK_READ: ReadonlyArray<{
 ];
 
 /**
+ * The thick table's read a per-frame kernel takes ({@link withThickRead}): `thickRead.wgsl`, the
+ * table and a layer's read, then `thickReadBands.wgsl`, the read over the body's bands.
+ */
+export const THICK_READ_WGSL = `${thickReadWgsl}\n${thickReadBandsWgsl}`;
+
+/**
  * `pair`, a per-frame kernel (the sky view, the aerial perspective or a ray march), reading the
  * thick multiple-scattering table (plan R08, R08.T14.c; Design note 9; `thick/read.ts`): its
- * sources' multiple scattering is `thickRead.wgsl`'s, the bake's J_ms from the table's lowest sun
+ * sources' multiple scattering is {@link THICK_READ_WGSL}'s, the bake's J_ms from the table's lowest sun
  * cosine cell up and Hillaire's Ψ_ms below the rows' edge, −7/32, blended across that cell, and the
  * forward lobes' higher orders take Ψ_ms's share ({@link THICK_READ}). Every other line is the
  * kernel's own, so that the thin kernel stays as it was to the byte and the thick one differs from it
@@ -1041,7 +1048,7 @@ export function withThickRead(pair: KernelPair): KernelPair {
     if (/[^\w]sourceAt\(/u.test(code.replaceAll("fn sourceAt(", ""))) {
       throw new Error(`kernel ${pair.name} still calls sourceAt after the thick read's rewrites`);
     }
-    return `${code}\n${thickReadWgsl}`;
+    return `${code}\n${THICK_READ_WGSL}`;
   };
   return {
     ...pair,

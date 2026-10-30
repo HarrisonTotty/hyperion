@@ -47,11 +47,11 @@ import {
   type SunState,
   TABLE_SIZES,
   tableRadiusM,
+  THICK_READ_WGSL,
   withDeckRead,
   withThickRead,
 } from "./hillaire";
 import deckReadWgsl from "./shaders/deckRead.wgsl?raw";
-import thickReadWgsl from "./shaders/thickRead.wgsl?raw";
 import { AtmosphereTables, kernelMedium } from "./tables";
 import { upperMediumOf } from "./thick/deckRead";
 
@@ -112,16 +112,17 @@ const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
 ];
 
 /**
- * The thick kernels' sources as they stood before R08.T15.a.2 (1e949d8e), by digest: the deck read
- * is made beside them, and leaves each to the byte, so that a body with no deck draws as before.
+ * The thick kernels' sources by digest, as R08.T14.d.4's thick read made them (they stood before
+ * R08.T15.a.2 at 1e949d8e, and that read moved them): the deck read is made beside them, and leaves
+ * each to the byte, so that a body with no deck draws as before.
  */
 const THICK_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
-  [SKY_VIEW_THICK_KERNEL, "2f0225028c051361"],
-  [AERIAL_PERSPECTIVE_THICK_KERNEL, "1ebf84e4c2889818"],
-  [RAY_MARCH_THICK_KERNEL, "36ae5050caf9561e"],
-  [RAY_MARCH_SLOTS_THICK_KERNEL, "5e1a2b29be3e2d70"],
-  [RAY_MARCH_THICK_SPECIAL_KERNEL, "7ac9ad838b192e4e"],
-  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "6704cba1da82e660"],
+  [SKY_VIEW_THICK_KERNEL, "8d9564b785fc26f6"],
+  [AERIAL_PERSPECTIVE_THICK_KERNEL, "12be428ef12a5a5"],
+  [RAY_MARCH_THICK_KERNEL, "68e7d61da49a840f"],
+  [RAY_MARCH_SLOTS_THICK_KERNEL, "ad23b833c968de3d"],
+  [RAY_MARCH_THICK_SPECIAL_KERNEL, "2e46a5ebcb4a7ebf"],
+  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "16f56a67b8dd79ad"],
 ];
 
 /** Each thick kernel beside the thin one it is made from. */
@@ -172,7 +173,7 @@ describe("the thick read's kernels (R08.T14.c)", () => {
     "makes %s's thick form from its own sources, differing only at the multiple scattering and the lobes, with the read appended",
     (_name, thin, thick) => {
       expect(thick.name).toBe(`${thin.name}, thick`);
-      const appended = `\n${thickReadWgsl}`;
+      const appended = `\n${THICK_READ_WGSL}`;
       expect(thick.reference.endsWith(appended)).toBe(true);
       const head = thick.reference.slice(0, -appended.length);
       const bySlot = thin === RAY_MARCH_SLOTS_KERNEL;
@@ -337,7 +338,7 @@ describe("the deck read's kernels (R08.T15.a.2)", () => {
     const empty = {
       ...RAY_MARCH_THICK_KERNEL,
       name: "no ground",
-      reference: `${thickReadWgsl}\nfn main() {}`,
+      reference: `${THICK_READ_WGSL}\nfn main() {}`,
     };
     expect(() => withDeckRead(empty)).toThrow(/^kernel no ground holds 0 places for/u);
   });

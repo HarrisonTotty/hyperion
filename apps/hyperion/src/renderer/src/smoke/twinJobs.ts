@@ -14,6 +14,7 @@
 import type { VolumeSize } from "../view/atmosphere/hillaire";
 import type { AtmosphereMedium } from "../view/atmosphere/medium";
 import type { AbsorberCurveSlots, TableSize } from "../view/atmosphere/tables";
+import type { PackedThickTable } from "../view/atmosphere/thick/read";
 import {
   aerialPerspectiveTwin,
   IRRADIANCE_KERNEL_OPTIONS,
@@ -153,6 +154,8 @@ export type TwinJob =
       readonly curveSlot: number;
       readonly coefficientFactor: number;
       readonly texels: ReadonlyArray<readonly [number, number]>;
+      /** The thick table the build reads and its layer (R08.T14.d.4); absent, Ψ_ms alone. */
+      readonly thick?: { readonly table: PackedThickTable; readonly layer: number };
     };
 
 /** A job's answer, tagged with the job's kind. */
@@ -301,6 +304,7 @@ export function runTwinJob(job: TwinJob): TwinAnswer {
           job.texels,
           job.curveSlot,
           job.coefficientFactor,
+          job.thick,
         ),
       };
       break;

@@ -18,7 +18,12 @@
  * - **Uncorrected**, recorded beside: c1's own record, the uncorrected twin against the scalar I
  *   (`caseGate.json`), and the same twin against the vector I.
  * - **R08.T13's surface irradiance** (check 6) against `earth`'s vector flux aggregate, to 2% by the
- *   tolerance test, uncorrected: the sky's irradiance reads Ψ_ms alone, as the kernels' does.
+ *   tolerance test, uncorrected: the sky's irradiance reads Ψ_ms alone, as the kernels' does on a
+ *   body whose tables hold no thick table.
+ * - **The ground's irradiance through the route** (R08.T14.d.4, R08.T14.d's precondition 3): each
+ *   case's downwelling flux under each of its aggregates' suns, the sky's irradiance built over the
+ *   thick table as the kernels' is since R08.T14.d.4 (`tables.ts`'s `IRRADIANCE_THICK_KERNEL`),
+ *   against the vector flux aggregate to 2% by the tolerance test, the diagnostic's beside.
  * - **The bake's modes** (R08.T14.d.1, the task's "both m = 0 alone and m = 0..1 are run"): the route
  *   is also gated with the bake's table cut to m = 0 alone and to m ≤ 1, its higher modes set to 0
  *   (a test's option, not a product setting; the solve's modes are independent, so the cut table is
@@ -61,7 +66,12 @@ import { describe, expect, it } from "vitest";
 import type { Rgb } from "../../photometry/toneCurve";
 import { cos } from "../../../lib/pinnedMath";
 import { expectCommittedTable } from "../../../test/bless";
-import { aggregatePasses, aggregateRefusal } from "../gate";
+import {
+  AGGREGATE_RELATIVE_TOLERANCE,
+  AGGREGATE_SIGMA_CAP,
+  aggregatePasses,
+  aggregateRefusal,
+} from "../gate";
 import { densityAt } from "../medium";
 import { kernelMedium } from "../tables";
 import {
@@ -177,9 +187,10 @@ const RECORD_FILE = "./vectorGate.json";
 
 /**
  * The record's format: 2 from R08.T14.d.1, which adds the cut modes and the bake's figures; 3 from
- * R08.T15.a.2, which adds `giant-deck`'s gate through its deck (`deck`).
+ * R08.T15.a.2, which adds `giant-deck`'s gate through its deck (`deck`); 4 from R08.T14.d.4, which
+ * adds the ground's irradiance through the route.
  */
-const VECTOR_GATE_FORMAT = 3;
+const VECTOR_GATE_FORMAT = 4;
 
 /** Who writes the record, as each of its records' heads says. */
 const WRITER = "vectorGate.test.ts, through caseGate.ts (plan R08, R08.T14.f)";
@@ -187,11 +198,32 @@ const WRITER = "vectorGate.test.ts, through caseGate.ts (plan R08, R08.T14.f)";
 /** The twin's values of c1's record, which a path's values replace. */
 const C1_VALUES = twinValuesOfRecord(committedGate);
 
-/** The values a path replaces: each case setting's radiance and drawn-surface share. */
-const PATH_SPECS: ReadonlyArray<TwinValueSpec> = twinValueSpecs(CASES).filter(
-  (spec) =>
-    spec.setting === "case" && (spec.quantity === "radiance" || spec.quantity === "surfaceShare"),
+/**
+ * The ground's downwelling flux under each aggregate a case's reference holds (R08.T14.d.4,
+ * precondition 3): one value a case and aggregate, the reading's name less its `/downwelling`.
+ */
+const GROUND_SPECS: ReadonlyArray<TwinValueSpec> = CASES.flatMap(({ referenceCase, reference }) =>
+  fluxReadingsOf(reference, "vector")
+    .filter((reading) => reading.name.endsWith("/downwelling"))
+    .map((reading): TwinValueSpec => ({
+      quantity: "downwelling",
+      setting: "case",
+      caseName: referenceCase.name,
+      name: reading.name.replace(/\/downwelling$/u, ""),
+    })),
 );
+
+/**
+ * The values a path replaces: each case setting's radiance and drawn-surface share, and the ground's
+ * downwelling flux under each of its aggregates (R08.T14.d.4).
+ */
+const PATH_SPECS: ReadonlyArray<TwinValueSpec> = [
+  ...twinValueSpecs(CASES).filter(
+    (spec) =>
+      spec.setting === "case" && (spec.quantity === "radiance" || spec.quantity === "surfaceShare"),
+  ),
+  ...GROUND_SPECS,
+];
 
 /** The two paths whose values the record holds. */
 type PathName = "routed" | "diagnostic";
@@ -521,6 +553,58 @@ function vectorRecordOf(path: TwinValues): unknown {
     throw new Error("a path's twin gives values not finite or negative");
   }
   return caseGateRecord(CASES, values, { writer: WRITER, radiance: "vector" });
+}
+
+/** The channels as the record names them. */
+const CHANNEL_NAMES = ["r", "g", "b"] as const;
+
+/**
+ * The ground's irradiance on each path (R08.T14.d.4, precondition 3): for each case and aggregate,
+ * each channel's twin flux, the reference's, its σ, the twin's over it less 1, and the tolerance
+ * test's verdict, `refused` where the reading's σ refuses it.
+ *
+ * @throws Error for a path that holds no value of a case and aggregate.
+ */
+function groundIrradianceOf(path: TwinValues): ReadonlyArray<Record<string, unknown>> {
+  return GROUND_SPECS.map((spec) => {
+    const gateCase = CASES.find(({ referenceCase }) => referenceCase.name === spec.caseName);
+    const reading =
+      gateCase === undefined
+        ? undefined
+        : fluxReadingsOf(gateCase.reference, "vector").find(
+            (each) => each.name === `${spec.name}/downwelling`,
+          );
+    const twin = path.get(twinValueKey(spec));
+    if (reading === undefined || twin === undefined) {
+      throw new Error(`the path holds no ground irradiance of ${twinValueKey(spec)}`);
+    }
+    const rows = ([0, 1, 2] as const).map((c) => {
+      let verdict = "refused";
+      if (aggregateRefusal(reading, c) === undefined) {
+        verdict = aggregatePasses(twin[c], reading, c) ? "pass" : "miss";
+      }
+      return [
+        CHANNEL_NAMES[c],
+        twin[c],
+        recorded(reading.flux[c]),
+        recorded(reading.standardError[c]),
+        recorded(twin[c] / reading.flux[c] - 1),
+        verdict,
+      ];
+    });
+    return { case: spec.caseName, aggregate: `${spec.name}/downwelling`, rows };
+  });
+}
+
+/** The ground's irradiance section of the record: the route's and the diagnostic's. */
+function groundIrradianceSection(
+  paths: Readonly<Record<PathName, TwinValues>>,
+): Record<string, unknown> {
+  return {
+    tolerance: { relative: AGGREGATE_RELATIVE_TOLERANCE, sigmaCap: AGGREGATE_SIGMA_CAP },
+    routed: groundIrradianceOf(paths.routed),
+    diagnostic: groundIrradianceOf(paths.diagnostic),
+  };
 }
 
 /** The routed path's sections of the record, from its case gate's record `routed`. */
@@ -954,7 +1038,7 @@ function vectorGateRecord(
   const uncorrected = caseGateRecord(CASES, C1_VALUES, { writer: WRITER, radiance: "vector" });
   return {
     description:
-      "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
+      "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; the ground's irradiance under every aggregate's sun on both paths, its sky's irradiance built over the thick table as the kernels' is (groundIrradiance, R08.T14.d.4); each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
     format: VECTOR_GATE_FORMAT,
     cases: Object.fromEntries(
       CASES.map(({ referenceCase }) => {
@@ -978,6 +1062,7 @@ function vectorGateRecord(
       }),
     ),
     irradiance: sectionOf(uncorrected, "irradiance"),
+    groundIrradiance: groundIrradianceSection(paths),
     routedMarsAureole: sectionOf(routed, "marsAureole"),
     routedSaturnOblateness: sectionOf(routed, "saturnOblateness"),
     twinValues: { routed: rowsOf(paths.routed), diagnostic: rowsOf(paths.diagnostic) },
@@ -1205,9 +1290,18 @@ describe.skipIf(BAKES)("R08.T14.f's vector gates' record", () => {
     () => {
       // Through JSON, as the record is committed.
       const formed: unknown = JSON.parse(
-        JSON.stringify(routedSections(vectorRecordOf(committedValues("routed")))),
+        JSON.stringify({
+          ...routedSections(vectorRecordOf(committedValues("routed"))),
+          groundIrradiance: groundIrradianceSection({
+            routed: committedValues("routed"),
+            diagnostic: committedValues("diagnostic"),
+          }),
+        }),
       );
-      expect(formed).toEqual(committedRoutedSections());
+      expect(formed).toEqual({
+        ...committedRoutedSections(),
+        groundIrradiance: sectionOf(committed, "groundIrradiance"),
+      });
     },
   );
 

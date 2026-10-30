@@ -16,6 +16,7 @@ import {
   WGS84_SPHEROID,
 } from "../../test/atmosphereFixtures";
 import { forbiddenIn } from "../../test/atmosphereWgsl";
+import { patternedCorrection, patternedThickBake } from "../../test/thickTables";
 import {
   boundNames,
   countingRenderEngine,
@@ -73,6 +74,7 @@ import {
   densityTableLevelsM,
   IRRADIANCE_KERNEL,
   IRRADIANCE_SIZE,
+  IRRADIANCE_THICK_KERNEL,
   KERNEL_ARM_FORMAT,
   kernelMedium,
   type LayeredPlanes,
@@ -445,6 +447,48 @@ describe("AtmosphereTables", () => {
     expect(engine.textureSpecs.find((spec) => spec.name === irradiance.name)?.format).toBe(
       "rgba32float",
     );
+  });
+
+  it("builds the sky's irradiance over the thick table once the tables hold one, and over Psi_ms again without (R08.T14.d.4)", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    tables.irradiance();
+    tables.setThickTables(patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), 1));
+    tables.irradiance();
+    const thick = engine.dispatched.at(-1);
+    tables.setThickTables(null);
+    tables.irradiance();
+    expect([
+      engine.dispatched.map((d) => d.kernel).filter((name) => name.includes("irradiance")),
+      thick?.bindings.sampled["thickTable"] !== undefined,
+      thick === undefined ? [] : boundNames(thick.bindings),
+    ]).toEqual([
+      ["atmosphere irradiance", "atmosphere irradiance, thick", "atmosphere irradiance"],
+      true,
+      [...kernelBindings(IRRADIANCE_THICK_KERNEL.reference).keys()].toSorted(),
+    ]);
+  });
+
+  it("builds each band and light slot's irradiance over its own layer of the thick table (R08.T14.d.4)", async () => {
+    const engine = await countingRenderEngine();
+    const body = saturnBody();
+    const medium = saturnClassMedium();
+    const tables = new AtmosphereTables(
+      engine,
+      medium,
+      tableRadiusM(SATURN_SPHEROID),
+      NO_ABSORBER_CURVES,
+      body,
+    );
+    tables.setThickTables(patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), 2));
+    tables.setPolarisationCorrection(patternedCorrection(tables.plan.bands, tables.medium, 2));
+    engine.dispatched.length = 0;
+    tables.irradiance();
+    const builds = engine.dispatched.filter((d) => d.kernel === IRRADIANCE_THICK_KERNEL.name);
+    // A medium with no absorber builds one irradiance layer a band, over the table's first slot.
+    expect(
+      builds.map((d) => [d.bindings.uniforms["medium"]?.[14], d.bindings.uniforms["medium"]?.[15]]),
+    ).toEqual(tables.plan.bands.map((_, b) => [b, 2 * b]));
   });
 
   it("builds the sky's irradiance once a build, at its first read after it (R08.T9.b)", async () => {
@@ -1241,6 +1285,10 @@ describe("the per-planet kernels' arithmetic (R08.T6.g)", () => {
     ["the transmittance kernel", TRANSMITTANCE_KERNEL.reference],
     ["the multiple-scattering kernel", MULTI_SCATTERING_KERNEL.reference],
     ["the sky-irradiance kernel (R08.T9.b)", IRRADIANCE_KERNEL.reference],
+    [
+      "the sky-irradiance kernel over the thick table (R08.T14.d.4)",
+      IRRADIANCE_THICK_KERNEL.reference,
+    ],
   ])("%s calls no builtin trigonometry, R05 radius form or sebh remap", (_name, source) => {
     expect(forbiddenIn(source)).toEqual([]);
   });
@@ -1251,6 +1299,28 @@ describe("the per-planet kernels' arithmetic (R08.T6.g)", () => {
         kernel.reference.indexOf("const MAX_TERMS"),
       );
     }
+  });
+});
+
+describe("the sky-irradiance kernel over the thick table (R08.T14.d.4)", () => {
+  it("is the thin kernel but at its multiple scattering and its lobes' orders, with the reads appended", () => {
+    const thin = IRRADIANCE_KERNEL.reference.split("\n");
+    const thick = IRRADIANCE_THICK_KERNEL.reference.split("\n");
+    const changed = thick.filter((line) => !thin.includes(line));
+    expect([
+      IRRADIANCE_THICK_KERNEL.name,
+      IRRADIANCE_THICK_KERNEL.reference.includes("fn thickLayerAt("),
+      IRRADIANCE_THICK_KERNEL.reference.includes("fn thickIrradianceMultiple("),
+      IRRADIANCE_THICK_KERNEL.reference.includes("fn thickBandsAt("),
+      changed.some((line) => line.includes("thickAnalyticWeight(muSun) * lobeOrdersOf(")),
+      changed.some((line) => line.includes("let multiple = thickIrradianceMultiple(")),
+    ]).toEqual(["atmosphere irradiance, thick", true, true, false, true, true]);
+  });
+
+  it("binds the thick table beside the thin kernel's own bindings", () => {
+    const thin = [...kernelBindings(IRRADIANCE_KERNEL.reference).keys()];
+    const thick = [...kernelBindings(IRRADIANCE_THICK_KERNEL.reference).keys()];
+    expect(thick.toSorted()).toEqual([...thin, "thickTable"].toSorted());
   });
 });
 

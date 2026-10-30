@@ -14,6 +14,7 @@
 import type { VolumeSize } from "../view/atmosphere/hillaire";
 import type { AtmosphereMedium } from "../view/atmosphere/medium";
 import type { AbsorberCurveSlots, TableSize } from "../view/atmosphere/tables";
+import type { PackedThickTable } from "../view/atmosphere/thick/read";
 import type {
   OblatePlanetTwin,
   PlanetTwin,
@@ -247,7 +248,7 @@ export class TwinPool {
   /**
    * `irradianceTwin` at the texels listed, over the transmittance tables and multiple-scattering
    * layers given (R08.T9.b): light slot `curveSlot`'s layer in the frame of `coefficientFactor`,
-   * 1 ÷ s_b for a latitude band's.
+   * 1 ÷ s_b for a latitude band's, and reading `thick`'s layer where given (R08.T14.d.4).
    */
   irradiance(
     medium: AtmosphereMedium,
@@ -257,6 +258,7 @@ export class TwinPool {
     curveSlot: number,
     coefficientFactor: number,
     texels: ReadonlyArray<readonly [number, number]>,
+    thick: { readonly table: PackedThickTable; readonly layer: number } | null = null,
   ): Promise<TwinTable> {
     return this.#run(
       {
@@ -268,6 +270,7 @@ export class TwinPool {
         curveSlot,
         coefficientFactor,
         texels,
+        ...(thick === null ? {} : { thick }),
       },
       (answer) => (answer.kind === "irradiance" ? answer.twin : null),
     );

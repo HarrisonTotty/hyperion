@@ -87,6 +87,7 @@ import {
   packThickTable,
   type PackedThickTable,
   THICK_TABLE_FORMAT,
+  thickIrradianceLayer,
   thickTableBytes,
 } from "./thick/read";
 import type { SpheroidFigure } from "./hillaire";
@@ -121,10 +122,12 @@ import {
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import irradianceWgsl from "./shaders/irradiance.wgsl?raw";
+import irradianceThickWgsl from "./shaders/irradianceThick.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
 import scatteringWgsl from "./shaders/scattering.wgsl?raw";
 import slotDepthsWgsl from "./shaders/slotDepths.wgsl?raw";
+import thickReadWgsl from "./shaders/thickRead.wgsl?raw";
 import transmittanceWgsl from "./shaders/transmittance.wgsl?raw";
 import { log, sin } from "../../lib/pinnedMath";
 
@@ -852,6 +855,49 @@ export const IRRADIANCE_KERNEL: KernelPair = {
   readback: "presentation-only",
 };
 
+/**
+ * The lines {@link IRRADIANCE_THICK_KERNEL} rewrites in `irradiance.wgsl`, each with what it
+ * becomes: the forward lobes' higher orders at the analytic term's weight, and the multiple
+ * scattering `irradianceThick.wgsl`'s, as `hillaire.ts`'s withThickRead rewrites the march's.
+ */
+const IRRADIANCE_THICK_READ: ReadonlyArray<readonly [string, string]> = [
+  [
+    "phased += lobeOrdersOf(local, ray.angle, tableAtUnitLayer(transmittance, layer, unit).rgb);",
+    "phased += thickAnalyticWeight(muSun) * lobeOrdersOf(local, ray.angle, tableAtUnitLayer(transmittance, layer, unit).rgb);",
+  ],
+  [
+    `let multiple = tableAtUnitLayer(
+    multiScattering, buildMultiScatteringLayer(),
+    multiScatteringUnitAt(topM, max(sampleHeightM, 0.0), muSun)
+  ).rgb;`,
+    `let multiple = thickIrradianceMultiple(
+    tableAtUnitLayer(
+      multiScattering, buildMultiScatteringLayer(),
+      multiScatteringUnitAt(topM, max(sampleHeightM, 0.0), muSun)
+    ).rgb,
+    max(sampleHeightM, 0.0), muSun, ray.dir, p / rP, ray.sun
+  );`,
+  ],
+];
+
+/**
+ * The sky-irradiance kernel reading the thick table (plan R08, R08.T14.d.4; R08.T14.d's precondition
+ * 3): {@link IRRADIANCE_KERNEL} with its multiple scattering and its lobes' orders rewritten
+ * ({@link IRRADIANCE_THICK_READ}), then `thickRead.wgsl` and `irradianceThick.wgsl`, the table bound
+ * at `thickTable`, so that a body whose tables hold a thick table is lit on the ground by the light
+ * the sky is drawn with. Every other line is the thin kernel's own.
+ */
+export const IRRADIANCE_THICK_KERNEL: KernelPair = {
+  ...IRRADIANCE_KERNEL,
+  name: `${IRRADIANCE_KERNEL.name}, thick`,
+  reference: `${IRRADIANCE_THICK_READ.reduce((code, [general, thick]) => {
+    if (code.split(general).length !== 2) {
+      throw new Error(`the irradiance kernel holds ${general} other than once`);
+    }
+    return code.replace(general, thick);
+  }, IRRADIANCE_KERNEL.reference)}\n${thickReadWgsl}\n${irradianceThickWgsl}`,
+};
+
 /** The format the smoke's kernel arm writes its kernels' outputs in (R08.T6.g). */
 export const KERNEL_ARM_FORMAT = "rgba32float";
 
@@ -1199,6 +1245,11 @@ export interface MediumBuild {
   readonly transmittanceLayer: number;
   /** The layer of the multiple-scattering table the kernel writes: band × light slots + slot. */
   readonly multiScatteringLayer: number;
+  /**
+   * The thick table's layer the sky-irradiance build reads ({@link IRRADIANCE_THICK_KERNEL};
+   * `tablesCpu.ts`'s `thickIrradianceLayer`); 0 where it reads none.
+   */
+  readonly thickLayer?: number;
 }
 
 /** The bytes of the kernels' `terms` buffer: {@link MAX_TERMS} terms of 64 B, 512 B. */
@@ -1347,7 +1398,12 @@ export function packMediumUniform(
     8,
   );
   packed.set(
-    [build.coefficientFactor, build.transmittanceLayer, build.multiScatteringLayer, 0],
+    [
+      build.coefficientFactor,
+      build.transmittanceLayer,
+      build.multiScatteringLayer,
+      build.thickLayer ?? 0,
+    ],
     12,
   );
   return packed;
@@ -2237,6 +2293,8 @@ export class AtmosphereTables {
   #irradianceBuilt = false;
   /** The sky-irradiance kernel, made at the irradiance's first build on a device. */
   #irradianceKernel: ComputeHandle | null = null;
+  /** The sky-irradiance kernel reading the thick table, made at its first build (R08.T14.d.4). */
+  #irradianceThickKernel: ComputeHandle | null = null;
   /** The slot-depth kernel, made at the first build on a device that takes the layers (R08.T8.e). */
   #slotDepthsKernel: ComputeHandle | null = null;
   /** The kernel arm's slot-depth kernel, made at the first arm that takes the layers. */
@@ -2319,6 +2377,7 @@ export class AtmosphereTables {
       this.#resources = createResources(engine, columnTableSizes(this.#medium, this.#columnTables));
       this.#armKernels = null;
       this.#irradianceKernel = null;
+      this.#irradianceThickKernel = null;
       this.#slotDepthsKernel = null;
       this.#armSlotDepthsKernel = null;
       this.#key = null;
@@ -2766,6 +2825,15 @@ export class AtmosphereTables {
     }
   }
 
+  #releaseThick(): void {
+    if (this.#thick !== null) {
+      this.#engine.releaseTexture(this.#thick.texture);
+      this.#thick = null;
+    }
+    // The sky's irradiance reads the table it held (R08.T14.d.4): built again at its next read.
+    this.#irradianceBuilt = false;
+  }
+
   /** Makes and fills a texture for a packed thick table. */
   #uploadThick(packed: PackedThickTable): TextureHandle {
     const texture = this.#engine.createTexture({
@@ -2784,13 +2852,6 @@ export class AtmosphereTables {
       packed.texels,
     );
     return texture;
-  }
-
-  #releaseThick(): void {
-    if (this.#thick !== null) {
-      this.#engine.releaseTexture(this.#thick.texture);
-      this.#thick = null;
-    }
   }
 
   /**
@@ -3337,7 +3398,12 @@ export class AtmosphereTables {
     const medium = this.#medium;
     const plan = this.#plan;
     const slots = multiScatteringLayersOf(medium, this.#curves);
-    const kernel = (this.#irradianceKernel ??= engine.createCompute(IRRADIANCE_KERNEL));
+    // Where the tables hold a thick table, the build reads it as the sky does (R08.T14.d.4).
+    const thick = this.#thick;
+    const kernel =
+      thick === null
+        ? (this.#irradianceKernel ??= engine.createCompute(IRRADIANCE_KERNEL))
+        : (this.#irradianceThickKernel ??= engine.createCompute(IRRADIANCE_THICK_KERNEL));
     let own: TransmittanceTextures | null = null;
     try {
       for (const [b, band] of plan.bands.entries()) {
@@ -3363,6 +3429,8 @@ export class AtmosphereTables {
                   coefficientFactor: band.coefficientFactor,
                   transmittanceLayer: 0,
                   multiScatteringLayer: b * slots + slot,
+                  thickLayer:
+                    thick === null ? 0 : thickIrradianceLayer(b, slot, thick.packed.slots),
                 }),
                 layerEdges: this.#layerEdges,
               },
@@ -3377,6 +3445,7 @@ export class AtmosphereTables {
                 multiScattering: r.multiScattering.texture,
                 phaseTables: r.phaseTables.texture,
                 lobeTables: r.lobeTables.texture,
+                ...(thick === null ? {} : { thickTable: thick.texture }),
               },
               storage: { irradianceOut: { texture: r.irradiance.texture, level: 0 } },
             },

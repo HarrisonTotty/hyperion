@@ -226,6 +226,15 @@ export interface ThickCorrection {
   readonly medium: AtmosphereMedium;
 }
 
+/**
+ * The thick table's layer a sky-irradiance build of band `band` and light slot `slot` reads
+ * (`tables.ts`'s `IRRADIANCE_THICK_KERNEL` and its twin, R08.T14.d.4): band b's slot k at b × slots + k, the table's last slot where it holds fewer than
+ * the multiple scattering's (a medium with no absorber builds one layer a band for every light).
+ */
+export function thickIrradianceLayer(band: number, slot: number, slots: number): number {
+  return band * slots + Math.min(slot, slots - 1);
+}
+
 /** The bytes a packed table allocates, B: {@link THICK_LAYER_BYTES} a layer. */
 export function thickTableBytes(table: Pick<PackedThickTable, "layers">): number {
   return table.layers * THICK_LAYER_BYTES;

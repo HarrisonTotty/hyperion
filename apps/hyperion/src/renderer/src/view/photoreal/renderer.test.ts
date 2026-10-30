@@ -90,6 +90,7 @@ import {
   type AtmosphereBody,
   AtmosphereTables,
   IRRADIANCE_KERNEL,
+  IRRADIANCE_THICK_KERNEL,
   kernelMedium,
   MULTI_SCATTERING_KERNEL,
   SLOT_DEPTHS_KERNEL,
@@ -902,11 +903,11 @@ async function overlayDatums(
  * one; since R08.T18.b the sky view, the aerial perspective and both marches' footprints of each
  * read in their thermal forms (`withThermalSource`), for a self-luminous body; since R08.T15.a.2
  * both marches' footprints, general and specialised, reading a cloud deck at their ground
- * (`withDeckRead`), for a body whose tables hold one; its per-planet tables' four; and the sky
- * bake's four. Each is a module constant, its WGSL fixed text with no value of a medium, a body or a
+ * (`withDeckRead`), for a body whose tables hold one; its per-planet tables' four, and since
+ * R08.T14.d.4 the sky's irradiance over the thick table; and the sky bake's four. Each is a module constant, its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 42,
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 43,
  * however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
@@ -949,6 +950,7 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   MULTI_SCATTERING_KERNEL,
   SLOT_DEPTHS_KERNEL,
   IRRADIANCE_KERNEL,
+  IRRADIANCE_THICK_KERNEL,
   ...BAKE_KERNELS,
 ];
 
@@ -1126,8 +1128,9 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // and by its first over a deck (the third); none after adds a kernel. The thin first pass makes
     // 14: the view's, made up front with both reads' one-band marches among them (R08.T11.g, which
     // the slab Earth takes by slot and the deck over the shared read), and the tables' four. The
-    // thick pass makes 6 more, the deck's pass its four marches, 24 in all, bounded however many
-    // bodies follow. All but eighteen are made: the sky bake's four are the sky's, the march's fill
+    // thick pass makes 7 more, the thick read's six and the sky's irradiance over the thick table
+    // (R08.T14.d.4), the deck's pass its four marches, 25 in all, bounded however many bodies
+    // follow. All but eighteen are made: the sky bake's four are the sky's, the march's fill
     // a reader's, which no frame asks, the tile cull's two centre ray's kernels its own cover's,
     // which a view never takes (R08.T11.d), the disc cells' emissive form a body's above the
     // thermal cut, which none of these is (R08.T18.a), their air form a body's drawn by its disc
@@ -1135,7 +1138,7 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // kernels' eight thermal forms a glowing or self-luminous body's, which none of these is
     // (R08.T18.b).
     expect([held[kinds.length - 1], held[2 * kinds.length - 1]]).toEqual([
-      VIEW_KERNELS.length - BAKE_KERNELS.length - 14 - 6 - 4,
+      VIEW_KERNELS.length - BAKE_KERNELS.length - 14 - 7 - 4,
       VIEW_KERNELS.length - BAKE_KERNELS.length - 14 - 4,
     ]);
     expect(new Set(held.slice(3 * kinds.length - 1))).toEqual(new Set([held.at(-1)]));

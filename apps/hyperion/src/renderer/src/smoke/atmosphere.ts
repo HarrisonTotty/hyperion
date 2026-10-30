@@ -127,7 +127,11 @@ import {
   type TransmittanceTextures,
   TRANSMITTANCE_SIZE,
 } from "../view/atmosphere/tables";
-import type { PackedThickTable, ThickTableKind } from "../view/atmosphere/thick/read";
+import {
+  type PackedThickTable,
+  thickIrradianceLayer,
+  type ThickTableKind,
+} from "../view/atmosphere/thick/read";
 import {
   type FarLimbShells,
   farLimbFootprintTwin,
@@ -6839,7 +6843,8 @@ const IRRADIANCE_JOB_ROWS = 4;
 /**
  * One layer of the sky's irradiance twinned over the GPU's own tables (R08.T9.b): the band's
  * transmittance tables and its multiple-scattering layers as the GPU stored them, light slot `slot`
- * in the band's frame, its rows in jobs on the twin workers, merged.
+ * in the band's frame, reading the thick table's layer `thick` gives (R08.T14.d.4), its rows in jobs
+ * on the twin workers, merged.
  */
 async function irradianceOverGpu(
   twins: TwinPool,
@@ -6848,6 +6853,7 @@ async function irradianceOverGpu(
   transmittance: TwinTransmittance,
   multiScatteringBySlot: ReadonlyArray<TwinTable>,
   slot: number,
+  thick: { readonly table: PackedThickTable; readonly layer: number } | null,
 ): Promise<TwinTable> {
   const { widthTexels: w, heightTexels: h } = IRRADIANCE_SIZE;
   const jobs: Promise<TwinTable>[] = [];
@@ -6867,6 +6873,7 @@ async function irradianceOverGpu(
         slot,
         band.coefficientFactor,
         texels,
+        thick,
       ),
     );
   }
@@ -6974,12 +6981,17 @@ function lookupTables(
  * lookups, run in the catalogue's lit-body probe with the body's stored tables bound, against
  * their twin over the GPU's slices and irradiance (`surfaceLightingTwin`, the body's table's
  * scale heights). Each to 10⁻³ above 10⁻⁶ of the largest value of its kind.
+ *
+ * @param thick - Whether the tables hold a thick table ({@link withThickTable}), whose layer the
+ *   irradiance's build then reads, `tables.ts`'s `IRRADIANCE_THICK_KERNEL`, as its twin does
+ *   (R08.T14.d.4).
  */
 async function checkSurfaceLighting(
   engine: RenderEngine,
   checks: Checks,
   twins: TwinPool,
   surface: SurfaceBody,
+  thick = false,
 ): Promise<void> {
   const read = kernelMedium(surface.medium);
   const tables = new AtmosphereTables(
@@ -6990,6 +7002,11 @@ async function checkSurfaceLighting(
     surface.body,
   );
   try {
+    if (thick) {
+      withThickTable(tables, surface.curves.length);
+    }
+    const packed = tables.thickPacked;
+    const label = packed === null ? "" : ", over the thick table";
     await inOrder(checks, async (ordered) => {
       const plan = tables.plan;
       const perBand = tables.layersPerBand;
@@ -7019,7 +7036,13 @@ async function checkSurfaceLighting(
         for (let slot = 0; slot < perBand; slot += 1) {
           // Marked handled: a failure before the checks read it, or while an earlier one is read,
           // leaves no unhandled rejection, and the checks that read it still see it.
-          twinsOverGpu.push(handled(irradianceOverGpu(twins, read, band, own, bandLayers, slot)));
+          const layer =
+            packed === null
+              ? null
+              : { table: packed, layer: thickIrradianceLayer(b, slot, packed.slots) };
+          twinsOverGpu.push(
+            handled(irradianceOverGpu(twins, read, band, own, bandLayers, slot, layer)),
+          );
         }
       }
       // The lookups through the probe, with the body's stored tables bound.
@@ -7031,10 +7054,10 @@ async function checkSurfaceLighting(
           // oxlint-disable-next-line no-await-in-loop
           const twin = await pending;
           const band = Math.floor(index / perBand);
-          const name = `${surface.name}: the sky's irradiance, band ${band} of ${plan.bands.length}'s layer of light slot ${index % perBand}, over the GPU's tables`;
+          const name = `${surface.name}: the sky's irradiance, band ${band} of ${plan.bands.length}'s layer of light slot ${index % perBand}, over the GPU's tables${label}`;
           recordHeights(
             later,
-            "R08.T9.b",
+            packed === null ? "R08.T9.b" : "R08.T14.d.4",
             name,
             twinAgreement(layerOf(irradiance, layers, index), twin, false, { arm: "kernel" }),
             "kernel",
@@ -7058,7 +7081,7 @@ async function checkSurfaceLighting(
           recordHeights(
             later,
             "R08.T9.b",
-            `${surface.name}: surfaceLighting.wgsl's ${lookup} lookup at ${twin.widthTexels} points, over the GPU's tables`,
+            `${surface.name}: surfaceLighting.wgsl's ${lookup} lookup at ${twin.widthTexels} points, over the GPU's tables${label}`,
             twinAgreement(probed, twin, false, { arm: "kernel" }),
             "kernel",
           );
@@ -7077,6 +7100,18 @@ export async function checkSurfaceLightingEarth(
   twins: TwinPool,
 ): Promise<void> {
   await checkSurfaceLighting(engine, checks, twins, surfaceEarth());
+}
+
+/**
+ * R08.T14.d.4 on Earth ({@link surfaceEarth}; `checkSurfaceLighting`): the sky's irradiance built
+ * over a thick table, and the ground's lookups over it, against their twins.
+ */
+export async function checkSurfaceLightingThickEarth(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  await checkSurfaceLighting(engine, checks, twins, surfaceEarth(), true);
 }
 
 /** R08.T9.b on the Saturn-class figure ({@link surfaceSaturn}; `checkSurfaceLighting`). */

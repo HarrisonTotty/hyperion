@@ -23,12 +23,12 @@
       "routed": {
         "all": {
           "comparisons": 360,
-          "passes": 290,
-          "misses": 2,
+          "passes": 288,
+          "misses": 4,
           "refusals": 68,
           "worstRatio": 1.160348,
           "worstAt": "ground-s90-v85-a180/r",
-          "missed": ["ground-s90-v85-a180/rg"]
+          "missed": ["ground-s90-v85-a180/rg", "disc-p0/r", "disc-p30/r"]
         },
         "images": [
           ["ground-s0", 12, 12, 0, 0, 0.2722814, "ground-s0-v85-a0", "b"],
@@ -37,25 +37,25 @@
           ["ground-s80", 63, 63, 0, 0, 0.9450542, "ground-s80-v85-a180", "r"],
           ["ground-s90", 63, 56, 2, 5, 1.160348, "ground-s90-v85-a180", "r"],
           ["ground-s95", 63, 0, 0, 63, null, null, null],
-          ["disc-p0", 3, 3, 0, 0, 0.9851468, "disc-p0", "r"],
-          ["disc-p30", 3, 3, 0, 0, 0.9776806, "disc-p30", "r"],
-          ["disc-p60", 3, 3, 0, 0, 0.818751, "disc-p60", "r"],
-          ["disc-p75", 3, 3, 0, 0, 0.7071167, "disc-p75", "r"],
-          ["disc-p85", 3, 3, 0, 0, 0.4567332, "disc-p85", "r"],
-          ["limb", 15, 15, 0, 0, 0.2844789, "limb-10H", "r"],
-          ["aerial", 9, 9, 0, 0, 0.6452388, "aerial-32km", "b"]
+          ["disc-p0", 3, 2, 1, 0, 1.019314, "disc-p0", "r"],
+          ["disc-p30", 3, 2, 1, 0, 1.001149, "disc-p30", "r"],
+          ["disc-p60", 3, 3, 0, 0, 0.783566, "disc-p60", "r"],
+          ["disc-p75", 3, 3, 0, 0, 0.5822114, "disc-p75", "r"],
+          ["disc-p85", 3, 3, 0, 0, 0.6478243, "disc-p85", "b"],
+          ["limb", 15, 15, 0, 0, 0.2845885, "limb-10H", "r"],
+          ["aerial", 9, 9, 0, 0, 0.6089333, "aerial-32km", "r"]
         ]
       },
       "routedByModes": {
         "m = 0": {
           "all": {
             "comparisons": 360,
-            "passes": 238,
-            "misses": 54,
+            "passes": 234,
+            "misses": 58,
             "refusals": 68,
             "worstRatio": 3.295727,
             "worstAt": "ground-s80-v85-a135/r",
-            "missed": ["ground-s30-v85-a0/b", "ground-s60-v60-a135/rg", "ground-s60-v60-a180/rg", "ground-s60-v75-a90/rg", "ground-s60-v75-a135/rg", "ground-s60-v75-a180/rg", "ground-s60-v85-a0/gb", "ground-s60-v85-a90/rgb", "ground-s60-v85-a135/rgb", "ground-s60-v85-a180/rg", "ground-s80-v60-a90/rg", "ground-s80-v60-a135/rg", "ground-s80-v60-a180/r", "ground-s80-v75-a90/rgb", "ground-s80-v75-a135/rgb", "ground-s80-v75-a180/rg", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v75-a0/r", "ground-s90-v75-a90/r", "ground-s90-v85-a0/rg", "ground-s90-v85-a90/r", "ground-s90-v85-a135/r", "aerial-10km/rgb", "aerial-32km/rg"]
+            "missed": ["ground-s30-v85-a0/b", "ground-s60-v60-a135/rg", "ground-s60-v60-a180/rg", "ground-s60-v75-a90/rg", "ground-s60-v75-a135/rg", "ground-s60-v75-a180/rg", "ground-s60-v85-a0/gb", "ground-s60-v85-a90/rgb", "ground-s60-v85-a135/rgb", "ground-s60-v85-a180/rg", "ground-s80-v60-a90/rg", "ground-s80-v60-a135/rg", "ground-s80-v60-a180/r", "ground-s80-v75-a90/rgb", "ground-s80-v75-a135/rgb", "ground-s80-v75-a180/rg", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v75-a0/r", "ground-s90-v75-a90/r", "ground-s90-v85-a0/rg", "ground-s90-v85-a90/r", "ground-s90-v85-a135/r", "disc-p0/r", "disc-p30/r", "aerial-1km/b", "aerial-10km/rgb", "aerial-32km/rgb"]
           },
           "images": [
             ["ground-s0", 12, 12, 0, 0, 0.2708251, "ground-s0-v85-a0", "b"],
@@ -64,24 +64,24 @@
             ["ground-s80", 63, 41, 22, 0, 3.295727, "ground-s80-v85-a135", "r"],
             ["ground-s90", 63, 52, 6, 5, 1.585684, "ground-s90-v85-a135", "r"],
             ["ground-s95", 63, 0, 0, 63, null, null, null],
-            ["disc-p0", 3, 3, 0, 0, 0.9851468, "disc-p0", "r"],
-            ["disc-p30", 3, 3, 0, 0, 0.9776806, "disc-p30", "r"],
-            ["disc-p60", 3, 3, 0, 0, 0.818751, "disc-p60", "r"],
-            ["disc-p75", 3, 3, 0, 0, 0.7071167, "disc-p75", "r"],
-            ["disc-p85", 3, 3, 0, 0, 0.4567527, "disc-p85", "r"],
-            ["limb", 15, 15, 0, 0, 0.6585442, "limb-10H", "r"],
-            ["aerial", 9, 4, 5, 0, 1.642926, "aerial-10km", "g"]
+            ["disc-p0", 3, 2, 1, 0, 1.019301, "disc-p0", "r"],
+            ["disc-p30", 3, 2, 1, 0, 1.001137, "disc-p30", "r"],
+            ["disc-p60", 3, 3, 0, 0, 0.7835407, "disc-p60", "r"],
+            ["disc-p75", 3, 3, 0, 0, 0.5821453, "disc-p75", "r"],
+            ["disc-p85", 3, 3, 0, 0, 0.647603, "disc-p85", "b"],
+            ["limb", 15, 15, 0, 0, 0.6586464, "limb-10H", "r"],
+            ["aerial", 9, 2, 7, 0, 1.680732, "aerial-10km", "g"]
           ]
         },
         "m <= 1": {
           "all": {
             "comparisons": 360,
-            "passes": 263,
-            "misses": 29,
+            "passes": 259,
+            "misses": 33,
             "refusals": 68,
             "worstRatio": 3.235573,
             "worstAt": "ground-s80-v85-a90/r",
-            "missed": ["ground-s60-v75-a90/rg", "ground-s60-v75-a180/b", "ground-s60-v85-a90/rgb", "ground-s60-v85-a180/rgb", "ground-s80-v60-a90/rg", "ground-s80-v75-a90/rgb", "ground-s80-v75-a180/r", "ground-s80-v85-a90/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v75-a90/r", "ground-s90-v85-a0/g", "ground-s90-v85-a90/r", "aerial-10km/rgb", "aerial-32km/rg"]
+            "missed": ["ground-s60-v75-a90/rg", "ground-s60-v75-a180/b", "ground-s60-v85-a90/rgb", "ground-s60-v85-a180/rgb", "ground-s80-v60-a90/rg", "ground-s80-v75-a90/rgb", "ground-s80-v75-a180/r", "ground-s80-v85-a90/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v75-a90/r", "ground-s90-v85-a0/g", "ground-s90-v85-a90/r", "disc-p0/r", "disc-p30/r", "aerial-1km/b", "aerial-10km/rgb", "aerial-32km/rgb"]
           },
           "images": [
             ["ground-s0", 12, 12, 0, 0, 0.2722878, "ground-s0-v85-a0", "b"],
@@ -90,13 +90,13 @@
             ["ground-s80", 63, 51, 12, 0, 3.235573, "ground-s80-v85-a90", "r"],
             ["ground-s90", 63, 55, 3, 5, 1.560084, "ground-s90-v85-a90", "r"],
             ["ground-s95", 63, 0, 0, 63, null, null, null],
-            ["disc-p0", 3, 3, 0, 0, 0.9851468, "disc-p0", "r"],
-            ["disc-p30", 3, 3, 0, 0, 0.9776806, "disc-p30", "r"],
-            ["disc-p60", 3, 3, 0, 0, 0.818751, "disc-p60", "r"],
-            ["disc-p75", 3, 3, 0, 0, 0.7071167, "disc-p75", "r"],
-            ["disc-p85", 3, 3, 0, 0, 0.4567332, "disc-p85", "r"],
-            ["limb", 15, 15, 0, 0, 0.6665664, "limb-10H", "r"],
-            ["aerial", 9, 4, 5, 0, 1.641707, "aerial-10km", "g"]
+            ["disc-p0", 3, 2, 1, 0, 1.019314, "disc-p0", "r"],
+            ["disc-p30", 3, 2, 1, 0, 1.001152, "disc-p30", "r"],
+            ["disc-p60", 3, 3, 0, 0, 0.7835281, "disc-p60", "r"],
+            ["disc-p75", 3, 3, 0, 0, 0.5821122, "disc-p75", "r"],
+            ["disc-p85", 3, 3, 0, 0, 0.6478113, "disc-p85", "b"],
+            ["limb", 15, 15, 0, 0, 0.6666687, "limb-10H", "r"],
+            ["aerial", 9, 2, 7, 0, 1.679512, "aerial-10km", "g"]
           ]
         }
       },
@@ -117,13 +117,13 @@
           ["ground-s80", 63, 19, 44, 0, 3.578842, "ground-s80-v85-a45", "b"],
           ["ground-s90", 63, 41, 17, 5, 2.23645, "ground-s90-v85-a0", "g"],
           ["ground-s95", 63, 0, 0, 63, null, null, null],
-          ["disc-p0", 3, 2, 1, 0, 1.292881, "disc-p0", "b"],
-          ["disc-p30", 3, 2, 1, 0, 1.172471, "disc-p30", "b"],
-          ["disc-p60", 3, 2, 1, 0, 1.03245, "disc-p60", "b"],
-          ["disc-p75", 3, 3, 0, 0, 0.6493578, "disc-p75", "r"],
-          ["disc-p85", 3, 3, 0, 0, 0.6804063, "disc-p85", "b"],
+          ["disc-p0", 3, 2, 1, 0, 1.294016, "disc-p0", "b"],
+          ["disc-p30", 3, 2, 1, 0, 1.173255, "disc-p30", "b"],
+          ["disc-p60", 3, 2, 1, 0, 1.031941, "disc-p60", "b"],
+          ["disc-p75", 3, 3, 0, 0, 0.6496777, "disc-p75", "r"],
+          ["disc-p85", 3, 3, 0, 0, 0.677907, "disc-p85", "b"],
           ["limb", 15, 15, 0, 0, 0.3378775, "limb-1H", "r"],
-          ["aerial", 9, 2, 7, 0, 2.44243, "aerial-32km", "b"]
+          ["aerial", 9, 2, 7, 0, 2.442701, "aerial-32km", "b"]
         ]
       },
       "uncorrectedVector": {
@@ -185,13 +185,13 @@
         ["ground-s80", 0.9751961, "ground-s80-v85-a135/r", 1.065098, "ground-s80-v85-a180/r"],
         ["ground-s90", 0.9572673, "ground-s90-v85-a0/g", 1.11658, "ground-s90-v85-a135/b"],
         ["ground-s95", 0.6607934, "ground-s95-v85-a90/g", 1.108565, "ground-s95-v85-a180/r"],
-        ["disc-p0", 0.9386417, "disc-p0/r", 1.044089, "disc-p0/b"],
-        ["disc-p30", 0.9387957, "disc-p30/r", 1.036908, "disc-p30/b"],
-        ["disc-p60", 0.9474342, "disc-p60/r", 1.032609, "disc-p60/b"],
-        ["disc-p75", 0.9521884, "disc-p75/r", 1.016253, "disc-p75/b"],
-        ["disc-p85", 0.9683347, "disc-p85/r", 1.030359, "disc-p85/b"],
-        ["limb", 0.9938567, "limb-1H/r", 1.019952, "limb-10H/r"],
-        ["aerial", 0.9537704, "aerial-32km/b", 0.9811788, "aerial-10km/g"]
+        ["disc-p0", 0.9365137, "disc-p0/r", 1.043062, "disc-p0/b"],
+        ["disc-p30", 0.9373265, "disc-p30/r", 1.037418, "disc-p30/b"],
+        ["disc-p60", 0.9496932, "disc-p60/r", 1.039675, "disc-p60/b"],
+        ["disc-p75", 0.9606338, "disc-p75/r", 1.029667, "disc-p75/b"],
+        ["disc-p85", 0.9850123, "disc-p85/r", 1.046161, "disc-p85/b"],
+        ["limb", 0.9939023, "limb-1H/r", 1.01996, "limb-10H/r"],
+        ["aerial", 0.9575992, "aerial-32km/b", 0.9885128, "aerial-1km/b"]
       ],
       "diagnosticRatios": [
         ["ground-s0", 0.9321181, "ground-s0-v85-a0/b", 1.064426, "ground-s0-v60-a0/r"],
@@ -200,13 +200,13 @@
         ["ground-s80", 0.7475861, "ground-s80-v85-a45/b", 1.011146, "ground-s80-v0-a0/r"],
         ["ground-s90", 0.7726465, "ground-s90-v85-a0/b", 1.042243, "ground-s90-v0-a0/b"],
         ["ground-s95", 1.072339, "ground-s95-v85-a0/r", 4.778906, "ground-s95-v85-a180/r"],
-        ["disc-p0", 0.9407856, "disc-p0/r", 1.090632, "disc-p0/b"],
-        ["disc-p30", 0.9411446, "disc-p30/r", 1.082326, "disc-p30/b"],
-        ["disc-p60", 0.9522333, "disc-p60/r", 1.072594, "disc-p60/b"],
-        ["disc-p75", 0.9560937, "disc-p75/r", 1.041617, "disc-p75/b"],
-        ["disc-p85", 0.9731381, "disc-p85/r", 1.048483, "disc-p85/b"],
+        ["disc-p0", 0.9407991, "disc-p0/r", 1.090712, "disc-p0/b"],
+        ["disc-p30", 0.9411541, "disc-p30/r", 1.082381, "disc-p30/b"],
+        ["disc-p60", 0.9522285, "disc-p60/r", 1.072558, "disc-p60/b"],
+        ["disc-p75", 0.9560721, "disc-p75/r", 1.041509, "disc-p75/b"],
+        ["disc-p85", 0.9730871, "disc-p85/r", 1.048305, "disc-p85/b"],
         ["limb", 0.9754657, "limb-1H/r", 1.014953, "limb-10H/r"],
-        ["aerial", 0.8250067, "aerial-32km/b", 0.9545145, "aerial-1km/r"]
+        ["aerial", 0.8249873, "aerial-32km/b", 0.9545094, "aerial-1km/r"]
       ]
     },
     "earth-ozone-slab": {
@@ -233,7 +233,7 @@
           "passes": 292,
           "misses": 0,
           "refusals": 68,
-          "worstRatio": 0.9659295,
+          "worstRatio": 0.9995821,
           "worstAt": "disc-p0/r",
           "missed": []
         },
@@ -244,13 +244,13 @@
           ["ground-s80", 63, 63, 0, 0, 0.9508424, "ground-s80-v85-a180", "r"],
           ["ground-s90", 63, 58, 0, 5, 0.8182227, "ground-s90-v75-a180", "b"],
           ["ground-s95", 63, 0, 0, 63, null, null, null],
-          ["disc-p0", 3, 3, 0, 0, 0.9659295, "disc-p0", "r"],
-          ["disc-p30", 3, 3, 0, 0, 0.9650399, "disc-p30", "r"],
-          ["disc-p60", 3, 3, 0, 0, 0.9239161, "disc-p60", "r"],
-          ["disc-p75", 3, 3, 0, 0, 0.8692215, "disc-p75", "r"],
-          ["disc-p85", 3, 3, 0, 0, 0.5454289, "disc-p85", "b"],
-          ["limb", 15, 15, 0, 0, 0.2938242, "limb-10H", "g"],
-          ["aerial", 9, 9, 0, 0, 0.5893553, "aerial-32km", "r"]
+          ["disc-p0", 3, 3, 0, 0, 0.9995821, "disc-p0", "r"],
+          ["disc-p30", 3, 3, 0, 0, 0.9878869, "disc-p30", "r"],
+          ["disc-p60", 3, 3, 0, 0, 0.8882034, "disc-p60", "r"],
+          ["disc-p75", 3, 3, 0, 0, 0.7439559, "disc-p75", "r"],
+          ["disc-p85", 3, 3, 0, 0, 0.7654043, "disc-p85", "b"],
+          ["limb", 15, 15, 0, 0, 0.2939801, "limb-10H", "g"],
+          ["aerial", 9, 9, 0, 0, 0.5761616, "aerial-32km", "r"]
         ]
       },
       "routedByModes": {
@@ -271,13 +271,13 @@
             ["ground-s80", 63, 40, 23, 0, 3.286916, "ground-s80-v85-a90", "r"],
             ["ground-s90", 63, 53, 5, 5, 1.352642, "ground-s90-v85-a0", "r"],
             ["ground-s95", 63, 0, 0, 63, null, null, null],
-            ["disc-p0", 3, 3, 0, 0, 0.9659295, "disc-p0", "r"],
-            ["disc-p30", 3, 3, 0, 0, 0.9650399, "disc-p30", "r"],
-            ["disc-p60", 3, 3, 0, 0, 0.9239161, "disc-p60", "r"],
-            ["disc-p75", 3, 3, 0, 0, 0.8692215, "disc-p75", "r"],
-            ["disc-p85", 3, 3, 0, 0, 0.5454289, "disc-p85", "b"],
-            ["limb", 15, 15, 0, 0, 0.7317302, "limb-0.3H", "r"],
-            ["aerial", 9, 3, 6, 0, 1.552436, "aerial-32km", "g"]
+            ["disc-p0", 3, 3, 0, 0, 0.9995658, "disc-p0", "r"],
+            ["disc-p30", 3, 3, 0, 0, 0.9878756, "disc-p30", "r"],
+            ["disc-p60", 3, 3, 0, 0, 0.8881786, "disc-p60", "r"],
+            ["disc-p75", 3, 3, 0, 0, 0.7439014, "disc-p75", "r"],
+            ["disc-p85", 3, 3, 0, 0, 0.7651669, "disc-p85", "b"],
+            ["limb", 15, 15, 0, 0, 0.7324795, "limb-0.3H", "r"],
+            ["aerial", 9, 3, 6, 0, 1.579347, "aerial-32km", "g"]
           ]
         },
         "m <= 1": {
@@ -297,13 +297,13 @@
             ["ground-s80", 63, 51, 12, 0, 3.285581, "ground-s80-v85-a90", "r"],
             ["ground-s90", 63, 56, 2, 5, 1.122529, "ground-s90-v85-a0", "g"],
             ["ground-s95", 63, 0, 0, 63, null, null, null],
-            ["disc-p0", 3, 3, 0, 0, 0.9659295, "disc-p0", "r"],
-            ["disc-p30", 3, 3, 0, 0, 0.9650399, "disc-p30", "r"],
-            ["disc-p60", 3, 3, 0, 0, 0.9239161, "disc-p60", "r"],
-            ["disc-p75", 3, 3, 0, 0, 0.8692215, "disc-p75", "r"],
-            ["disc-p85", 3, 3, 0, 0, 0.5454289, "disc-p85", "b"],
-            ["limb", 15, 15, 0, 0, 0.7617359, "limb-0.3H", "r"],
-            ["aerial", 9, 3, 6, 0, 1.549639, "aerial-32km", "g"]
+            ["disc-p0", 3, 3, 0, 0, 0.9995821, "disc-p0", "r"],
+            ["disc-p30", 3, 3, 0, 0, 0.9878907, "disc-p30", "r"],
+            ["disc-p60", 3, 3, 0, 0, 0.8881723, "disc-p60", "r"],
+            ["disc-p75", 3, 3, 0, 0, 0.7438686, "disc-p75", "r"],
+            ["disc-p85", 3, 3, 0, 0, 0.7653779, "disc-p85", "b"],
+            ["limb", 15, 15, 0, 0, 0.7624853, "limb-0.3H", "r"],
+            ["aerial", 9, 3, 6, 0, 1.576554, "aerial-32km", "g"]
           ]
         }
       },
@@ -324,13 +324,13 @@
           ["ground-s80", 63, 18, 45, 0, 3.550782, "ground-s80-v85-a45", "b"],
           ["ground-s90", 63, 42, 16, 5, 2.19129, "ground-s90-v85-a0", "g"],
           ["ground-s95", 63, 0, 0, 63, null, null, null],
-          ["disc-p0", 3, 3, 0, 0, 0.9764495, "disc-p0", "b"],
-          ["disc-p30", 3, 2, 1, 0, 1.058531, "disc-p30", "b"],
-          ["disc-p60", 3, 3, 0, 0, 0.9605765, "disc-p60", "b"],
-          ["disc-p75", 3, 3, 0, 0, 0.8334095, "disc-p75", "r"],
-          ["disc-p85", 3, 3, 0, 0, 0.7967672, "disc-p85", "b"],
-          ["limb", 15, 15, 0, 0, 0.3176983, "limb-0.3H", "g"],
-          ["aerial", 9, 2, 7, 0, 2.33314, "aerial-32km", "b"]
+          ["disc-p0", 3, 3, 0, 0, 0.9775072, "disc-p0", "b"],
+          ["disc-p30", 3, 2, 1, 0, 1.059273, "disc-p30", "b"],
+          ["disc-p60", 3, 3, 0, 0, 0.9600917, "disc-p60", "b"],
+          ["disc-p75", 3, 3, 0, 0, 0.8337042, "disc-p75", "r"],
+          ["disc-p85", 3, 3, 0, 0, 0.794314, "disc-p85", "b"],
+          ["limb", 15, 15, 0, 0, 0.3177009, "limb-0.3H", "g"],
+          ["aerial", 9, 2, 7, 0, 2.333403, "aerial-32km", "b"]
         ]
       },
       "uncorrectedVector": {
@@ -413,7 +413,7 @@
         ["disc-p75", 0.9435012, "disc-p75/r", 1.053352, "disc-p75/b"],
         ["disc-p85", 0.9740646, "disc-p85/r", 1.056335, "disc-p85/b"],
         ["limb", 0.9779729, "limb-1H/r", 1.010626, "limb-10H/r"],
-        ["aerial", 0.8328828, "aerial-32km/b", 0.9503615, "aerial-1km/r"]
+        ["aerial", 0.832864, "aerial-32km/b", 0.9503567, "aerial-1km/r"]
       ]
     },
     "mars": {
@@ -437,12 +437,12 @@
       "routed": {
         "all": {
           "comparisons": 384,
-          "passes": 119,
-          "misses": 169,
+          "passes": 120,
+          "misses": 168,
           "refusals": 96,
           "worstRatio": 31.40811,
           "worstAt": "ground-s80-v85-a180/b",
-          "missed": ["ground-s0-v30-a0/rgb", "ground-s30-v0-a0/rgb", "ground-s30-v30-a45/rgb", "ground-s30-v30-a90/rgb", "ground-s30-v30-a135/rgb", "ground-s30-v30-a180/rgb", "ground-s30-v60-a180/rgb", "ground-s30-v75-a180/rb", "ground-s60-v0-a0/r", "ground-s60-v30-a180/r", "ground-s60-v60-a45/rgb", "ground-s60-v60-a90/rgb", "ground-s60-v60-a135/rgb", "ground-s60-v60-a180/rgb", "ground-s60-v75-a0/rgb", "ground-s60-v75-a45/rgb", "ground-s60-v75-a90/rgb", "ground-s60-v75-a135/rgb", "ground-s60-v75-a180/rgb", "ground-s60-v85-a0/rgb", "ground-s60-v85-a45/rgb", "ground-s60-v85-a90/rgb", "ground-s60-v85-a135/gb", "ground-s60-v85-a180/rgb", "ground-s80-v0-a0/r", "ground-s80-v30-a180/r", "ground-s80-v60-a0/rgb", "ground-s80-v60-a45/rgb", "ground-s80-v60-a90/rgb", "ground-s80-v60-a135/rgb", "ground-s80-v60-a180/rgb", "ground-s80-v75-a0/rgb", "ground-s80-v75-a45/rgb", "ground-s80-v75-a90/rgb", "ground-s80-v75-a135/rgb", "ground-s80-v75-a180/rgb", "ground-s80-v85-a0/rgb", "ground-s80-v85-a45/rgb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v30-a0/rgb", "ground-s90-v30-a45/g", "ground-s90-v30-a90/g", "ground-s90-v60-a0/rgb", "ground-s90-v60-a45/b", "ground-s90-v60-a90/rg", "ground-s90-v75-a45/rgb", "ground-s90-v75-a90/rg", "ground-s90-v85-a45/rgb", "ground-s95-v60-a0/rgb", "ground-s95-v75-a0/rgb", "disc-p85/r", "limb-3H/rgb", "limb-10H/rgb", "aureole-s85-d3/rgb", "aureole-s85-d5/rgb", "aureole-s85-d8/rgb", "aureole-s85-d12/rgb", "aureole-s60-d3/rgb", "aureole-s60-d5/rgb", "aureole-s60-d8/rgb", "aureole-s60-d12/rgb"]
+          "missed": ["ground-s0-v30-a0/rgb", "ground-s30-v0-a0/rgb", "ground-s30-v30-a45/rgb", "ground-s30-v30-a90/rgb", "ground-s30-v30-a135/rgb", "ground-s30-v30-a180/rgb", "ground-s30-v60-a180/rgb", "ground-s30-v75-a180/rb", "ground-s60-v0-a0/r", "ground-s60-v30-a180/r", "ground-s60-v60-a45/rgb", "ground-s60-v60-a90/rgb", "ground-s60-v60-a135/rgb", "ground-s60-v60-a180/rgb", "ground-s60-v75-a0/rgb", "ground-s60-v75-a45/rgb", "ground-s60-v75-a90/rgb", "ground-s60-v75-a135/rgb", "ground-s60-v75-a180/rgb", "ground-s60-v85-a0/rgb", "ground-s60-v85-a45/rgb", "ground-s60-v85-a90/rgb", "ground-s60-v85-a135/gb", "ground-s60-v85-a180/rgb", "ground-s80-v0-a0/r", "ground-s80-v30-a180/r", "ground-s80-v60-a0/rgb", "ground-s80-v60-a45/rgb", "ground-s80-v60-a90/rgb", "ground-s80-v60-a135/rgb", "ground-s80-v60-a180/rgb", "ground-s80-v75-a0/rgb", "ground-s80-v75-a45/rgb", "ground-s80-v75-a90/rgb", "ground-s80-v75-a135/rgb", "ground-s80-v75-a180/rgb", "ground-s80-v85-a0/rgb", "ground-s80-v85-a45/rgb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v30-a0/rgb", "ground-s90-v30-a45/g", "ground-s90-v30-a90/g", "ground-s90-v60-a0/rgb", "ground-s90-v60-a45/b", "ground-s90-v60-a90/rg", "ground-s90-v75-a45/rgb", "ground-s90-v75-a90/rg", "ground-s90-v85-a45/rgb", "ground-s95-v60-a0/rgb", "ground-s95-v75-a0/rgb", "limb-3H/rgb", "limb-10H/rgb", "aureole-s85-d3/rgb", "aureole-s85-d5/rgb", "aureole-s85-d8/rgb", "aureole-s85-d12/rgb", "aureole-s60-d3/rgb", "aureole-s60-d5/rgb", "aureole-s60-d8/rgb", "aureole-s60-d12/rgb"]
         },
         "images": [
           ["ground-s0", 12, 9, 3, 0, 1.55354, "ground-s0-v30-a0", "b"],
@@ -451,13 +451,13 @@
           ["ground-s80", 63, 16, 47, 0, 31.40811, "ground-s80-v85-a180", "b"],
           ["ground-s90", 63, 7, 19, 37, 8.77687, "ground-s90-v85-a45", "b"],
           ["ground-s95", 63, 0, 6, 57, 6.966007, "ground-s95-v75-a0", "b"],
-          ["disc-p0", 3, 3, 0, 0, 0.2330353, "disc-p0", "r"],
-          ["disc-p30", 3, 2, 0, 1, 0.2422668, "disc-p30", "g"],
-          ["disc-p60", 3, 3, 0, 0, 0.4226002, "disc-p60", "b"],
-          ["disc-p75", 3, 3, 0, 0, 0.6690881, "disc-p75", "r"],
-          ["disc-p85", 3, 2, 1, 0, 1.198644, "disc-p85", "r"],
+          ["disc-p0", 3, 3, 0, 0, 0.1473765, "disc-p0", "b"],
+          ["disc-p30", 3, 2, 0, 1, 0.05225494, "disc-p30", "g"],
+          ["disc-p60", 3, 3, 0, 0, 0.3587502, "disc-p60", "r"],
+          ["disc-p75", 3, 3, 0, 0, 0.6746599, "disc-p75", "r"],
+          ["disc-p85", 3, 3, 0, 0, 0.6335327, "disc-p85", "r"],
           ["limb", 15, 9, 6, 0, 1.773128, "limb-3H", "r"],
-          ["aerial", 9, 8, 0, 1, 0.6730193, "aerial-32km", "g"],
+          ["aerial", 9, 8, 0, 1, 0.7418375, "aerial-32km", "g"],
           ["ground-s85", 12, 0, 12, 0, 5.468645, "aureole-s85-d5", "b"]
         ]
       },
@@ -465,12 +465,12 @@
         "m = 0": {
           "all": {
             "comparisons": 384,
-            "passes": 42,
-            "misses": 246,
+            "passes": 43,
+            "misses": 245,
             "refusals": 96,
             "worstRatio": 48.80723,
             "worstAt": "ground-s80-v85-a180/b",
-            "missed": ["ground-s0-v30-a0/rgb", "ground-s30-v0-a0/rgb", "ground-s30-v30-a90/rgb", "ground-s30-v30-a135/rgb", "ground-s30-v30-a180/rgb", "ground-s30-v60-a0/rgb", "ground-s30-v60-a45/rgb", "ground-s30-v60-a90/rgb", "ground-s30-v60-a135/rgb", "ground-s30-v60-a180/rgb", "ground-s30-v75-a0/rgb", "ground-s30-v75-a45/rgb", "ground-s30-v75-a90/rgb", "ground-s30-v75-a135/rgb", "ground-s30-v75-a180/rgb", "ground-s30-v85-a0/rgb", "ground-s30-v85-a45/gb", "ground-s30-v85-a90/rgb", "ground-s30-v85-a135/rgb", "ground-s30-v85-a180/rgb", "ground-s60-v0-a0/r", "ground-s60-v30-a0/rgb", "ground-s60-v30-a45/rgb", "ground-s60-v30-a90/rgb", "ground-s60-v30-a135/rgb", "ground-s60-v30-a180/rgb", "ground-s60-v60-a45/gb", "ground-s60-v60-a90/rgb", "ground-s60-v60-a135/rgb", "ground-s60-v60-a180/rgb", "ground-s60-v75-a0/rgb", "ground-s60-v75-a90/rgb", "ground-s60-v75-a135/rgb", "ground-s60-v75-a180/rgb", "ground-s60-v85-a0/rgb", "ground-s60-v85-a45/rgb", "ground-s60-v85-a90/rgb", "ground-s60-v85-a135/rgb", "ground-s60-v85-a180/rgb", "ground-s80-v0-a0/r", "ground-s80-v30-a0/rgb", "ground-s80-v30-a45/rgb", "ground-s80-v30-a90/rgb", "ground-s80-v30-a135/rgb", "ground-s80-v30-a180/rgb", "ground-s80-v60-a0/rgb", "ground-s80-v60-a45/rgb", "ground-s80-v60-a90/rgb", "ground-s80-v60-a135/rgb", "ground-s80-v60-a180/rgb", "ground-s80-v75-a0/rgb", "ground-s80-v75-a45/gb", "ground-s80-v75-a90/rgb", "ground-s80-v75-a135/rgb", "ground-s80-v75-a180/rgb", "ground-s80-v85-a0/rgb", "ground-s80-v85-a45/gb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v30-a0/rgb", "ground-s90-v30-a45/rgb", "ground-s90-v60-a0/rgb", "ground-s90-v60-a45/rgb", "ground-s90-v60-a90/rg", "ground-s90-v75-a45/rgb", "ground-s90-v75-a90/rg", "ground-s90-v85-a45/rgb", "ground-s95-v60-a0/rgb", "ground-s95-v75-a0/rgb", "disc-p85/r", "limb-0.1H/rgb", "limb-0.3H/rgb", "limb-1H/rgb", "limb-3H/rgb", "limb-10H/rgb", "aerial-10km/rgb", "aerial-32km/rgb", "aureole-s85-d3/rgb", "aureole-s85-d5/rgb", "aureole-s85-d8/rgb", "aureole-s85-d12/rgb", "aureole-s60-d3/rgb", "aureole-s60-d5/rgb", "aureole-s60-d8/rgb", "aureole-s60-d12/rgb"]
+            "missed": ["ground-s0-v30-a0/rgb", "ground-s30-v0-a0/rgb", "ground-s30-v30-a90/rgb", "ground-s30-v30-a135/rgb", "ground-s30-v30-a180/rgb", "ground-s30-v60-a0/rgb", "ground-s30-v60-a45/rgb", "ground-s30-v60-a90/rgb", "ground-s30-v60-a135/rgb", "ground-s30-v60-a180/rgb", "ground-s30-v75-a0/rgb", "ground-s30-v75-a45/rgb", "ground-s30-v75-a90/rgb", "ground-s30-v75-a135/rgb", "ground-s30-v75-a180/rgb", "ground-s30-v85-a0/rgb", "ground-s30-v85-a45/gb", "ground-s30-v85-a90/rgb", "ground-s30-v85-a135/rgb", "ground-s30-v85-a180/rgb", "ground-s60-v0-a0/r", "ground-s60-v30-a0/rgb", "ground-s60-v30-a45/rgb", "ground-s60-v30-a90/rgb", "ground-s60-v30-a135/rgb", "ground-s60-v30-a180/rgb", "ground-s60-v60-a45/gb", "ground-s60-v60-a90/rgb", "ground-s60-v60-a135/rgb", "ground-s60-v60-a180/rgb", "ground-s60-v75-a0/rgb", "ground-s60-v75-a90/rgb", "ground-s60-v75-a135/rgb", "ground-s60-v75-a180/rgb", "ground-s60-v85-a0/rgb", "ground-s60-v85-a45/rgb", "ground-s60-v85-a90/rgb", "ground-s60-v85-a135/rgb", "ground-s60-v85-a180/rgb", "ground-s80-v0-a0/r", "ground-s80-v30-a0/rgb", "ground-s80-v30-a45/rgb", "ground-s80-v30-a90/rgb", "ground-s80-v30-a135/rgb", "ground-s80-v30-a180/rgb", "ground-s80-v60-a0/rgb", "ground-s80-v60-a45/rgb", "ground-s80-v60-a90/rgb", "ground-s80-v60-a135/rgb", "ground-s80-v60-a180/rgb", "ground-s80-v75-a0/rgb", "ground-s80-v75-a45/gb", "ground-s80-v75-a90/rgb", "ground-s80-v75-a135/rgb", "ground-s80-v75-a180/rgb", "ground-s80-v85-a0/rgb", "ground-s80-v85-a45/gb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v30-a0/rgb", "ground-s90-v30-a45/rgb", "ground-s90-v60-a0/rgb", "ground-s90-v60-a45/rgb", "ground-s90-v60-a90/rg", "ground-s90-v75-a45/rgb", "ground-s90-v75-a90/rg", "ground-s90-v85-a45/rgb", "ground-s95-v60-a0/rgb", "ground-s95-v75-a0/rgb", "limb-0.1H/rgb", "limb-0.3H/rgb", "limb-1H/rgb", "limb-3H/rgb", "limb-10H/rgb", "aerial-10km/rgb", "aerial-32km/rgb", "aureole-s85-d3/rgb", "aureole-s85-d5/rgb", "aureole-s85-d8/rgb", "aureole-s85-d12/rgb", "aureole-s60-d3/rgb", "aureole-s60-d5/rgb", "aureole-s60-d8/rgb", "aureole-s60-d12/rgb"]
           },
           "images": [
             ["ground-s0", 12, 9, 3, 0, 1.577401, "ground-s0-v30-a0", "b"],
@@ -479,25 +479,25 @@
             ["ground-s80", 63, 4, 59, 0, 48.80723, "ground-s80-v85-a180", "b"],
             ["ground-s90", 63, 4, 22, 37, 9.718878, "ground-s90-v75-a90", "g"],
             ["ground-s95", 63, 0, 6, 57, 9.497599, "ground-s95-v75-a0", "b"],
-            ["disc-p0", 3, 3, 0, 0, 0.2330353, "disc-p0", "r"],
-            ["disc-p30", 3, 2, 0, 1, 0.2422721, "disc-p30", "g"],
-            ["disc-p60", 3, 3, 0, 0, 0.4226147, "disc-p60", "b"],
-            ["disc-p75", 3, 3, 0, 0, 0.6690974, "disc-p75", "r"],
-            ["disc-p85", 3, 2, 1, 0, 1.198473, "disc-p85", "r"],
+            ["disc-p0", 3, 3, 0, 0, 0.1456777, "disc-p0", "b"],
+            ["disc-p30", 3, 2, 0, 1, 0.04880119, "disc-p30", "g"],
+            ["disc-p60", 3, 3, 0, 0, 0.3617457, "disc-p60", "r"],
+            ["disc-p75", 3, 3, 0, 0, 0.6573131, "disc-p75", "r"],
+            ["disc-p85", 3, 3, 0, 0, 0.585329, "disc-p85", "r"],
             ["limb", 15, 0, 15, 0, 5.733597, "limb-3H", "b"],
-            ["aerial", 9, 2, 6, 1, 2.878689, "aerial-32km", "r"],
+            ["aerial", 9, 2, 6, 1, 2.869946, "aerial-32km", "r"],
             ["ground-s85", 12, 0, 12, 0, 7.797107, "aureole-s85-d8", "b"]
           ]
         },
         "m <= 1": {
           "all": {
             "comparisons": 384,
-            "passes": 89,
-            "misses": 199,
+            "passes": 90,
+            "misses": 198,
             "refusals": 96,
             "worstRatio": 27.82876,
             "worstAt": "ground-s80-v85-a90/b",
-            "missed": ["ground-s0-v30-a0/rgb", "ground-s30-v0-a0/rgb", "ground-s30-v30-a45/rgb", "ground-s30-v30-a90/rgb", "ground-s30-v30-a135/rgb", "ground-s30-v30-a180/rgb", "ground-s30-v60-a45/r", "ground-s30-v60-a90/rgb", "ground-s30-v60-a180/rgb", "ground-s30-v75-a90/rgb", "ground-s30-v85-a90/rgb", "ground-s60-v0-a0/r", "ground-s60-v30-a0/b", "ground-s60-v30-a90/rgb", "ground-s60-v30-a180/rg", "ground-s60-v60-a45/rgb", "ground-s60-v60-a90/rgb", "ground-s60-v60-a135/rgb", "ground-s60-v60-a180/rgb", "ground-s60-v75-a0/rgb", "ground-s60-v75-a45/rgb", "ground-s60-v75-a90/rgb", "ground-s60-v75-a135/rgb", "ground-s60-v75-a180/rgb", "ground-s60-v85-a0/rgb", "ground-s60-v85-a45/rgb", "ground-s60-v85-a90/rgb", "ground-s60-v85-a135/rgb", "ground-s60-v85-a180/rgb", "ground-s80-v0-a0/r", "ground-s80-v30-a90/rgb", "ground-s80-v60-a0/rgb", "ground-s80-v60-a45/rgb", "ground-s80-v60-a90/rgb", "ground-s80-v60-a135/rgb", "ground-s80-v60-a180/rgb", "ground-s80-v75-a0/rgb", "ground-s80-v75-a45/rgb", "ground-s80-v75-a90/rgb", "ground-s80-v75-a135/rgb", "ground-s80-v75-a180/rgb", "ground-s80-v85-a0/rgb", "ground-s80-v85-a45/rgb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v30-a0/rgb", "ground-s90-v30-a45/g", "ground-s90-v60-a0/rgb", "ground-s90-v60-a45/b", "ground-s90-v60-a90/rg", "ground-s90-v75-a45/rgb", "ground-s90-v75-a90/rg", "ground-s90-v85-a45/rgb", "ground-s95-v60-a0/rgb", "ground-s95-v75-a0/rgb", "disc-p85/r", "limb-0.1H/rgb", "limb-0.3H/rgb", "limb-1H/rgb", "limb-3H/rgb", "limb-10H/rgb", "aerial-10km/rgb", "aerial-32km/rgb", "aureole-s85-d3/rgb", "aureole-s85-d5/rgb", "aureole-s85-d8/rgb", "aureole-s85-d12/rgb", "aureole-s60-d3/rgb", "aureole-s60-d5/rgb", "aureole-s60-d8/rgb", "aureole-s60-d12/rgb"]
+            "missed": ["ground-s0-v30-a0/rgb", "ground-s30-v0-a0/rgb", "ground-s30-v30-a45/rgb", "ground-s30-v30-a90/rgb", "ground-s30-v30-a135/rgb", "ground-s30-v30-a180/rgb", "ground-s30-v60-a45/r", "ground-s30-v60-a90/rgb", "ground-s30-v60-a180/rgb", "ground-s30-v75-a90/rgb", "ground-s30-v85-a90/rgb", "ground-s60-v0-a0/r", "ground-s60-v30-a0/b", "ground-s60-v30-a90/rgb", "ground-s60-v30-a180/rg", "ground-s60-v60-a45/rgb", "ground-s60-v60-a90/rgb", "ground-s60-v60-a135/rgb", "ground-s60-v60-a180/rgb", "ground-s60-v75-a0/rgb", "ground-s60-v75-a45/rgb", "ground-s60-v75-a90/rgb", "ground-s60-v75-a135/rgb", "ground-s60-v75-a180/rgb", "ground-s60-v85-a0/rgb", "ground-s60-v85-a45/rgb", "ground-s60-v85-a90/rgb", "ground-s60-v85-a135/rgb", "ground-s60-v85-a180/rgb", "ground-s80-v0-a0/r", "ground-s80-v30-a90/rgb", "ground-s80-v60-a0/rgb", "ground-s80-v60-a45/rgb", "ground-s80-v60-a90/rgb", "ground-s80-v60-a135/rgb", "ground-s80-v60-a180/rgb", "ground-s80-v75-a0/rgb", "ground-s80-v75-a45/rgb", "ground-s80-v75-a90/rgb", "ground-s80-v75-a135/rgb", "ground-s80-v75-a180/rgb", "ground-s80-v85-a0/rgb", "ground-s80-v85-a45/rgb", "ground-s80-v85-a90/rgb", "ground-s80-v85-a135/rgb", "ground-s80-v85-a180/rgb", "ground-s90-v30-a0/rgb", "ground-s90-v30-a45/g", "ground-s90-v60-a0/rgb", "ground-s90-v60-a45/b", "ground-s90-v60-a90/rg", "ground-s90-v75-a45/rgb", "ground-s90-v75-a90/rg", "ground-s90-v85-a45/rgb", "ground-s95-v60-a0/rgb", "ground-s95-v75-a0/rgb", "limb-0.1H/rgb", "limb-0.3H/rgb", "limb-1H/rgb", "limb-3H/rgb", "limb-10H/rgb", "aerial-10km/rgb", "aerial-32km/rgb", "aureole-s85-d3/rgb", "aureole-s85-d5/rgb", "aureole-s85-d8/rgb", "aureole-s85-d12/rgb", "aureole-s60-d3/rgb", "aureole-s60-d5/rgb", "aureole-s60-d8/rgb", "aureole-s60-d12/rgb"]
           },
           "images": [
             ["ground-s0", 12, 9, 3, 0, 1.553388, "ground-s0-v30-a0", "b"],
@@ -506,13 +506,13 @@
             ["ground-s80", 63, 14, 49, 0, 27.82876, "ground-s80-v85-a90", "b"],
             ["ground-s90", 63, 8, 18, 37, 9.719664, "ground-s90-v75-a90", "g"],
             ["ground-s95", 63, 0, 6, 57, 7.965022, "ground-s95-v75-a0", "b"],
-            ["disc-p0", 3, 3, 0, 0, 0.2330353, "disc-p0", "r"],
-            ["disc-p30", 3, 2, 0, 1, 0.2422668, "disc-p30", "g"],
-            ["disc-p60", 3, 3, 0, 0, 0.4226002, "disc-p60", "b"],
-            ["disc-p75", 3, 3, 0, 0, 0.6690881, "disc-p75", "r"],
-            ["disc-p85", 3, 2, 1, 0, 1.198644, "disc-p85", "r"],
+            ["disc-p0", 3, 3, 0, 0, 0.1473898, "disc-p0", "b"],
+            ["disc-p30", 3, 2, 0, 1, 0.04853965, "disc-p30", "g"],
+            ["disc-p60", 3, 3, 0, 0, 0.362337, "disc-p60", "r"],
+            ["disc-p75", 3, 3, 0, 0, 0.6891418, "disc-p75", "r"],
+            ["disc-p85", 3, 3, 0, 0, 0.6433207, "disc-p85", "r"],
             ["limb", 15, 0, 15, 0, 5.925944, "limb-3H", "b"],
-            ["aerial", 9, 2, 6, 1, 2.865021, "aerial-32km", "r"],
+            ["aerial", 9, 2, 6, 1, 2.856705, "aerial-32km", "r"],
             ["ground-s85", 12, 0, 12, 0, 6.424165, "aureole-s85-d8", "b"]
           ]
         }
@@ -534,11 +534,11 @@
           ["ground-s80", 63, 18, 45, 0, 5.506771, "ground-s80-v30-a180", "r"],
           ["ground-s90", 63, 5, 21, 37, 5.893025, "ground-s90-v0-a0", "r"],
           ["ground-s95", 63, 0, 6, 57, 4.163327, "ground-s95-v75-a0", "r"],
-          ["disc-p0", 3, 0, 3, 0, 1.479301, "disc-p0", "b"],
-          ["disc-p30", 3, 0, 2, 1, 1.458208, "disc-p30", "b"],
-          ["disc-p60", 3, 1, 2, 0, 1.093063, "disc-p60", "g"],
-          ["disc-p75", 3, 3, 0, 0, 0.3828876, "disc-p75", "b"],
-          ["disc-p85", 3, 0, 3, 0, 3.475485, "disc-p85", "r"],
+          ["disc-p0", 3, 0, 3, 0, 1.479279, "disc-p0", "b"],
+          ["disc-p30", 3, 0, 2, 1, 1.45819, "disc-p30", "b"],
+          ["disc-p60", 3, 1, 2, 0, 1.093066, "disc-p60", "g"],
+          ["disc-p75", 3, 3, 0, 0, 0.3829225, "disc-p75", "b"],
+          ["disc-p85", 3, 0, 3, 0, 3.475474, "disc-p85", "r"],
           ["limb", 15, 4, 11, 0, 3.537483, "limb-0.1H", "r"],
           ["aerial", 9, 3, 5, 1, 2.301408, "aerial-32km", "r"],
           ["ground-s85", 12, 6, 6, 0, 2.327617, "aureole-s85-d12", "r"]
@@ -605,13 +605,13 @@
         ["ground-s80", 0.1164293, "ground-s80-v85-a90/b", 3.261656, "ground-s80-v85-a180/b"],
         ["ground-s90", 0.2716722, "ground-s90-v85-a90/b", 2.257634, "ground-s90-v85-a180/b"],
         ["ground-s95", 0.3146356, "ground-s95-v85-a0/b", 1.409593, "ground-s95-v75-a180/b"],
-        ["disc-p0", 1.009482, "disc-p0/b", 1.014887, "disc-p0/r"],
-        ["disc-p30", 1.010706, "disc-p30/r", 1.015852, "disc-p30/g"],
-        ["disc-p60", 1.015635, "disc-p60/g", 1.029635, "disc-p60/b"],
-        ["disc-p75", 1.026414, "disc-p75/b", 1.044011, "disc-p75/r"],
-        ["disc-p85", 1.041161, "disc-p85/g", 1.082782, "disc-p85/r"],
-        ["limb", 0.9959598, "limb-0.1H/b", 1.519027, "limb-10H/r"],
-        ["aerial", 0.9549932, "aerial-32km/g", 1.007783, "aerial-10km/b"],
+        ["disc-p0", 0.9897848, "disc-p0/b", 1.001742, "disc-p0/r"],
+        ["disc-p30", 0.9980075, "disc-p30/b", 1.003419, "disc-p30/g"],
+        ["disc-p60", 1.009305, "disc-p60/g", 1.023155, "disc-p60/r"],
+        ["disc-p75", 1.016651, "disc-p75/b", 1.044378, "disc-p75/r"],
+        ["disc-p85", 1.001444, "disc-p85/g", 1.043754, "disc-p85/r"],
+        ["limb", 0.9958992, "limb-0.1H/b", 1.519027, "limb-10H/r"],
+        ["aerial", 0.9503911, "aerial-32km/g", 0.9976798, "aerial-10km/r"],
         ["ground-s85", 0.6195658, "aureole-s85-d5/b", 0.77008, "aureole-s85-d12/r"]
       ],
       "diagnosticRatios": [
@@ -621,11 +621,11 @@
         ["ground-s80", 0.6693866, "ground-s80-v85-a45/b", 1.390861, "ground-s80-v30-a180/r"],
         ["ground-s90", 0.5994523, "ground-s90-v85-a45/b", 1.612281, "ground-s90-v30-a180/r"],
         ["ground-s95", 0.298757, "ground-s95-v85-a45/b", 1.384904, "ground-s95-v30-a180/r"],
-        ["disc-p0", 0.8974646, "disc-p0/b", 0.9079883, "disc-p0/r"],
-        ["disc-p30", 0.8996588, "disc-p30/b", 0.9084284, "disc-p30/g"],
-        ["disc-p60", 0.9275516, "disc-p60/g", 0.9325353, "disc-p60/b"],
-        ["disc-p75", 0.9722458, "disc-p75/b", 0.9966159, "disc-p75/g"],
-        ["disc-p85", 1.163282, "disc-p85/b", 1.240028, "disc-p85/r"],
+        ["disc-p0", 0.8974661, "disc-p0/b", 0.9079883, "disc-p0/r"],
+        ["disc-p30", 0.89966, "disc-p30/b", 0.9084287, "disc-p30/g"],
+        ["disc-p60", 0.9275514, "disc-p60/g", 0.9325348, "disc-p60/b"],
+        ["disc-p75", 0.9722433, "disc-p75/b", 0.9966156, "disc-p75/g"],
+        ["disc-p85", 1.163276, "disc-p85/b", 1.240028, "disc-p85/r"],
         ["limb", 0.766988, "limb-0.1H/r", 1.261295, "limb-10H/b"],
         ["aerial", 0.8502488, "aerial-32km/r", 0.9846953, "aerial-1km/b"],
         ["ground-s85", 0.9966019, "aureole-s85-d3/b", 1.164164, "aureole-s85-d12/r"]
@@ -678,9 +678,9 @@
           ["pole-s80", 27, 27, 0, 0, 0.5953558, "pole-s80-v0-a0", "b"],
           ["pole-s90", 27, 27, 0, 0, 0.3412629, "pole-s90-v85-a0", "b"],
           ["pole-s95", 27, 0, 11, 16, 6.776323, "pole-s95-v75-a90", "r"],
-          ["limb-lat0", 9, 9, 0, 0, 0.2075469, "limb-lat0-0.3H", "b"],
-          ["limb-lat45", 9, 9, 0, 0, 0.1538963, "limb-lat45-1H", "r"],
-          ["limb-lat90", 9, 9, 0, 0, 0.1445498, "limb-lat90-1H", "b"]
+          ["limb-lat0", 9, 9, 0, 0, 0.2066108, "limb-lat0-0.3H", "b"],
+          ["limb-lat45", 9, 9, 0, 0, 0.1535578, "limb-lat45-1H", "r"],
+          ["limb-lat90", 9, 9, 0, 0, 0.1440828, "limb-lat90-1H", "b"]
         ]
       },
       "routedByModes": {
@@ -713,9 +713,9 @@
             ["pole-s80", 27, 27, 0, 0, 0.6782717, "pole-s80-v75-a90", "b"],
             ["pole-s90", 27, 27, 0, 0, 0.4434929, "pole-s90-v85-a0", "b"],
             ["pole-s95", 27, 0, 11, 16, 6.719513, "pole-s95-v75-a90", "r"],
-            ["limb-lat0", 9, 9, 0, 0, 0.1137119, "limb-lat0-3H", "b"],
-            ["limb-lat45", 9, 9, 0, 0, 0.1246321, "limb-lat45-1H", "b"],
-            ["limb-lat90", 9, 9, 0, 0, 0.1696874, "limb-lat90-1H", "r"]
+            ["limb-lat0", 9, 9, 0, 0, 0.1137307, "limb-lat0-3H", "b"],
+            ["limb-lat45", 9, 9, 0, 0, 0.1251608, "limb-lat45-1H", "b"],
+            ["limb-lat90", 9, 9, 0, 0, 0.1700974, "limb-lat90-1H", "r"]
           ]
         },
         "m <= 1": {
@@ -747,9 +747,9 @@
             ["pole-s80", 27, 27, 0, 0, 0.6782677, "pole-s80-v75-a90", "b"],
             ["pole-s90", 27, 27, 0, 0, 0.4433753, "pole-s90-v85-a0", "b"],
             ["pole-s95", 27, 0, 11, 16, 6.719514, "pole-s95-v75-a90", "r"],
-            ["limb-lat0", 9, 9, 0, 0, 0.1137119, "limb-lat0-3H", "b"],
-            ["limb-lat45", 9, 9, 0, 0, 0.1246321, "limb-lat45-1H", "b"],
-            ["limb-lat90", 9, 9, 0, 0, 0.1696874, "limb-lat90-1H", "r"]
+            ["limb-lat0", 9, 9, 0, 0, 0.1137307, "limb-lat0-3H", "b"],
+            ["limb-lat45", 9, 9, 0, 0, 0.1251608, "limb-lat45-1H", "b"],
+            ["limb-lat90", 9, 9, 0, 0, 0.1700974, "limb-lat90-1H", "r"]
           ]
         }
       },
@@ -782,9 +782,9 @@
           ["pole-s80", 27, 6, 21, 0, 5.024934, "pole-s80-v85-a90", "b"],
           ["pole-s90", 27, 23, 4, 0, 4.667461, "pole-s90-v85-a90", "b"],
           ["pole-s95", 27, 0, 11, 16, 39.69698, "pole-s95-v0-a0", "r"],
-          ["limb-lat0", 9, 9, 0, 0, 0.7819792, "limb-lat0-0.3H", "r"],
-          ["limb-lat45", 9, 9, 0, 0, 0.6774186, "limb-lat45-1H", "r"],
-          ["limb-lat90", 9, 9, 0, 0, 0.5407812, "limb-lat90-0.3H", "r"]
+          ["limb-lat0", 9, 9, 0, 0, 0.7819835, "limb-lat0-0.3H", "r"],
+          ["limb-lat45", 9, 9, 0, 0, 0.6774277, "limb-lat45-1H", "r"],
+          ["limb-lat90", 9, 9, 0, 0, 0.5407914, "limb-lat90-0.3H", "r"]
         ]
       },
       "uncorrectedVector": {
@@ -874,9 +874,9 @@
         ["pole-s80", 1.001515, "pole-s80-v30-a90/g", 1.042718, "pole-s80-v0-a0/b"],
         ["pole-s90", 0.9754719, "pole-s90-v85-a0/b", 1.017856, "pole-s90-v0-a0/g"],
         ["pole-s95", 0.3682812, "pole-s95-v85-a90/g", 0.9268061, "pole-s95-v85-a0/r"],
-        ["limb-lat0", 0.9852001, "limb-lat0-0.3H/b", 1.002682, "limb-lat0-3H/r"],
-        ["limb-lat45", 0.989396, "limb-lat45-1H/g", 1.002284, "limb-lat45-1H/b"],
-        ["limb-lat90", 0.9897563, "limb-lat90-1H/b", 1.006043, "limb-lat90-1H/r"]
+        ["limb-lat0", 0.9852668, "limb-lat0-0.3H/b", 1.002682, "limb-lat0-3H/r"],
+        ["limb-lat45", 0.9894147, "limb-lat45-1H/g", 1.002322, "limb-lat45-1H/b"],
+        ["limb-lat90", 0.9897894, "limb-lat90-1H/b", 1.006071, "limb-lat90-1H/r"]
       ],
       "diagnosticRatios": [
         ["equator-s0", 0.7572568, "equator-s0-v85-a90/b", 0.9767635, "equator-s0-v30-a0/r"],
@@ -897,9 +897,9 @@
         ["pole-s80", 0.6340616, "pole-s80-v85-a90/b", 0.9618798, "pole-s80-v0-a0/r"],
         ["pole-s90", 0.6667188, "pole-s90-v85-a90/b", 1.062172, "pole-s90-v0-a0/b"],
         ["pole-s95", 1.295761, "pole-s95-v85-a0/r", 7.584187, "pole-s95-v0-a0/b"],
-        ["limb-lat0", 0.9483838, "limb-lat0-0.3H/r", 1.007525, "limb-lat0-3H/b"],
-        ["limb-lat45", 0.9541101, "limb-lat45-1H/r", 1.016772, "limb-lat45-0.3H/b"],
-        ["limb-lat90", 0.963693, "limb-lat90-0.3H/r", 1.012689, "limb-lat90-3H/b"]
+        ["limb-lat0", 0.9483835, "limb-lat0-0.3H/r", 1.007525, "limb-lat0-3H/b"],
+        ["limb-lat45", 0.9541094, "limb-lat45-1H/r", 1.016769, "limb-lat45-0.3H/b"],
+        ["limb-lat90", 0.9636923, "limb-lat90-0.3H/r", 1.012689, "limb-lat90-3H/b"]
       ]
     }
   },
@@ -920,6 +920,232 @@
       "verdict": ["pass", "pass", "miss"],
       "ratio": [0.6381636, 0.8749608, 1.517617]
     }
+  },
+  "groundIrradiance": {
+    "tolerance": {
+      "relative": 0.02,
+      "sigmaCap": 0.0025
+    },
+    "routed": [
+      {
+        "case": "earth",
+        "aggregate": "flux-s0/downwelling",
+        "rows": [
+          ["r", 134391.6, 134429.6, 31.36762, -0.0002825803, "pass"],
+          ["g", 120355.9, 120436.6, 39.12932, -0.0006701721, "pass"],
+          ["b", 109072.1, 109442.8, 59.30561, -0.003387277, "pass"]
+        ]
+      },
+      {
+        "case": "earth",
+        "aggregate": "flux-s30/downwelling",
+        "rows": [
+          ["r", 114812, 114832.6, 36.47949, -0.000179595, "pass"],
+          ["g", 102600.5, 102607, 43.82943, -0.00006292042, "pass"],
+          ["b", 92257.21, 92493.39, 62.27668, -0.002553522, "pass"]
+        ]
+      },
+      {
+        "case": "earth",
+        "aggregate": "flux-s60/downwelling",
+        "rows": [
+          ["r", 61309.58, 61341.79, 42.45136, -0.0005251089, "pass"],
+          ["g", 54182.93, 54170.28, 47.2547, 0.0002334642, "pass"],
+          ["b", 47081.34, 47333.3, 57.45114, -0.005323028, "pass"]
+        ]
+      },
+      {
+        "case": "earth",
+        "aggregate": "flux-s80/downwelling",
+        "rows": [
+          ["r", 15492.26, 15470.14, 32.52721, 0.00142966, "pass"],
+          ["g", 13515.69, 13511.82, 32.15267, 0.0002860667, "pass"],
+          ["b", 11741.03, 11598.16, 31.65232, 0.01231864, "refused"]
+        ]
+      },
+      {
+        "case": "earth-ozone-slab",
+        "aggregate": "flux-s0/downwelling",
+        "rows": [
+          ["r", 134268.3, 134409.4, 31.42296, -0.001049929, "pass"],
+          ["g", 120225.2, 120439.7, 38.79209, -0.001780979, "pass"],
+          ["b", 108921.4, 109461.6, 58.45651, -0.004935185, "pass"]
+        ]
+      },
+      {
+        "case": "earth-ozone-slab",
+        "aggregate": "flux-s30/downwelling",
+        "rows": [
+          ["r", 114697, 114821.1, 36.28183, -0.00108097, "pass"],
+          ["g", 102481, 102694.8, 44.31499, -0.00208205, "pass"],
+          ["b", 92124.19, 92551.17, 62.59975, -0.00461349, "pass"]
+        ]
+      },
+      {
+        "case": "earth-ozone-slab",
+        "aggregate": "flux-s60/downwelling",
+        "rows": [
+          ["r", 61230.9, 61297.54, 41.54069, -0.001087139, "pass"],
+          ["g", 54106.97, 54205.67, 46.56109, -0.001820874, "pass"],
+          ["b", 47015.56, 47238.86, 55.4473, -0.004727096, "pass"]
+        ]
+      },
+      {
+        "case": "earth-ozone-slab",
+        "aggregate": "flux-s80/downwelling",
+        "rows": [
+          ["r", 15473.62, 15565.12, 33.06881, -0.005878793, "pass"],
+          ["g", 13497.73, 13518.17, 31.46757, -0.001511846, "pass"],
+          ["b", 11750.99, 11657.44, 31.08999, 0.008024492, "refused"]
+        ]
+      },
+      {
+        "case": "mars",
+        "aggregate": "flux-s0/downwelling",
+        "rows": [
+          ["r", 138961, 138762.1, 286.581, 0.001433633, "pass"],
+          ["g", 122180.4, 123961.4, 1158.793, -0.01436753, "refused"],
+          ["b", 110621.5, 111777.3, 346.0272, -0.01034027, "refused"]
+        ]
+      },
+      {
+        "case": "mars",
+        "aggregate": "flux-s30/downwelling",
+        "rows": [
+          ["r", 118622.8, 118312.1, 293.3193, 0.002626442, "pass"],
+          ["g", 104216.9, 104546.3, 308.8689, -0.003150838, "refused"],
+          ["b", 94228.49, 93848.37, 351.9695, 0.004050376, "refused"]
+        ]
+      },
+      {
+        "case": "mars",
+        "aggregate": "flux-s60/downwelling",
+        "rows": [
+          ["r", 62240.45, 61764.95, 292.333, 0.007698581, "refused"],
+          ["g", 53884.97, 54340.04, 314.7621, -0.008374504, "refused"],
+          ["b", 47439.85, 47725.72, 346.128, -0.005989955, "refused"]
+        ]
+      },
+      {
+        "case": "mars",
+        "aggregate": "flux-s80/downwelling",
+        "rows": [
+          ["r", 16368.32, 15759.87, 153.8026, 0.03860781, "refused"],
+          ["g", 13439.33, 13297.23, 152.3625, 0.0106864, "refused"],
+          ["b", 10663.45, 10316.63, 150.9299, 0.03361761, "refused"]
+        ]
+      }
+    ],
+    "diagnostic": [
+      {
+        "case": "earth",
+        "aggregate": "flux-s0/downwelling",
+        "rows": [
+          ["r", 134821.7, 134429.6, 31.36762, 0.002916864, "pass"],
+          ["g", 120735.7, 120436.6, 39.12932, 0.002483354, "pass"],
+          ["b", 109390.2, 109442.8, 59.30561, -0.0004807366, "pass"]
+        ]
+      },
+      {
+        "case": "earth",
+        "aggregate": "flux-s30/downwelling",
+        "rows": [
+          ["r", 115068.4, 114832.6, 36.47949, 0.00205322, "pass"],
+          ["g", 102738.7, 102607, 43.82943, 0.001283967, "pass"],
+          ["b", 92142.82, 92493.39, 62.27668, -0.003790259, "pass"]
+        ]
+      },
+      {
+        "case": "earth",
+        "aggregate": "flux-s60/downwelling",
+        "rows": [
+          ["r", 61082.91, 61341.79, 42.45136, -0.004220306, "pass"],
+          ["g", 53682.73, 54170.28, 47.2547, -0.009000381, "pass"],
+          ["b", 45961.68, 47333.3, 57.45114, -0.02897784, "miss"]
+        ]
+      },
+      {
+        "case": "earth",
+        "aggregate": "flux-s80/downwelling",
+        "rows": [
+          ["r", 15028.96, 15470.14, 32.52721, -0.02851835, "miss"],
+          ["g", 12819.85, 13511.82, 32.15267, -0.05121253, "miss"],
+          ["b", 10583.65, 11598.16, 31.65232, -0.08747136, "refused"]
+        ]
+      },
+      {
+        "case": "earth-ozone-slab",
+        "aggregate": "flux-s0/downwelling",
+        "rows": [
+          ["r", 134688.4, 134409.4, 31.42296, 0.002075596, "pass"],
+          ["g", 120600.8, 120439.7, 38.79209, 0.001337594, "pass"],
+          ["b", 109257.9, 109461.6, 58.45651, -0.001861047, "pass"]
+        ]
+      },
+      {
+        "case": "earth-ozone-slab",
+        "aggregate": "flux-s30/downwelling",
+        "rows": [
+          ["r", 114944.9, 114821.1, 36.28183, 0.00107804, "pass"],
+          ["g", 102616.5, 102694.8, 44.31499, -0.000762607, "pass"],
+          ["b", 92031.67, 92551.17, 62.59975, -0.005613153, "pass"]
+        ]
+      },
+      {
+        "case": "earth-ozone-slab",
+        "aggregate": "flux-s60/downwelling",
+        "rows": [
+          ["r", 60997.98, 61297.54, 41.54069, -0.004886965, "pass"],
+          ["g", 53607.2, 54205.67, 46.56109, -0.01104076, "pass"],
+          ["b", 45923.87, 47238.86, 55.4473, -0.02783709, "miss"]
+        ]
+      },
+      {
+        "case": "earth-ozone-slab",
+        "aggregate": "flux-s80/downwelling",
+        "rows": [
+          ["r", 15005.77, 15565.12, 33.06881, -0.03593638, "miss"],
+          ["g", 12802.97, 13518.17, 31.46757, -0.05290639, "miss"],
+          ["b", 10616.4, 11657.44, 31.08999, -0.08930301, "refused"]
+        ]
+      },
+      {
+        "case": "mars",
+        "aggregate": "flux-s0/downwelling",
+        "rows": [
+          ["r", 142236.5, 138762.1, 286.581, 0.02503879, "pass"],
+          ["g", 125677.3, 123961.4, 1158.793, 0.01384205, "refused"],
+          ["b", 114140.7, 111777.3, 346.0272, 0.02114376, "refused"]
+        ]
+      },
+      {
+        "case": "mars",
+        "aggregate": "flux-s30/downwelling",
+        "rows": [
+          ["r", 120464.9, 118312.1, 293.3193, 0.01819628, "pass"],
+          ["g", 106411, 104546.3, 308.8689, 0.01783603, "refused"],
+          ["b", 96567.27, 93848.37, 351.9695, 0.02897121, "refused"]
+        ]
+      },
+      {
+        "case": "mars",
+        "aggregate": "flux-s60/downwelling",
+        "rows": [
+          ["r", 62363.2, 61764.95, 292.333, 0.009685955, "refused"],
+          ["g", 54532.51, 54340.04, 314.7621, 0.003541939, "refused"],
+          ["b", 48392.54, 47725.72, 346.128, 0.01397182, "refused"]
+        ]
+      },
+      {
+        "case": "mars",
+        "aggregate": "flux-s80/downwelling",
+        "rows": [
+          ["r", 16893.24, 15759.87, 153.8026, 0.0719152, "refused"],
+          ["g", 14030.41, 13297.23, 152.3625, 0.05513776, "refused"],
+          ["b", 11155.49, 10316.63, 150.9299, 0.08131149, "refused"]
+        ]
+      }
+    ]
   },
   "routedMarsAureole": {
     "verdict": "miss",
@@ -1205,32 +1431,32 @@
       ["case/surfaceShare/earth/ground-s95-v85-a135", 0, 0, 0],
       ["case/radiance/earth/ground-s95-v85-a180", 0.9277009, 1.451376, 2.75977],
       ["case/surfaceShare/earth/ground-s95-v85-a180", 0, 0, 0],
-      ["case/radiance/earth/disc-p0", 4645.888, 5131.059, 7400.501],
-      ["case/surfaceShare/earth/disc-p0", 0.7152112, 0.5799013, 0.3642325],
-      ["case/radiance/earth/disc-p30", 4012.346, 4445.801, 6435.124],
-      ["case/surfaceShare/earth/disc-p30", 0.7068115, 0.5695311, 0.3528509],
-      ["case/radiance/earth/disc-p60", 2338.226, 2675.167, 4012.304],
-      ["case/surfaceShare/earth/disc-p60", 0.6438559, 0.4945924, 0.282363],
-      ["case/radiance/earth/disc-p75", 1276.618, 1563.018, 2477.361],
-      ["case/surfaceShare/earth/disc-p75", 0.5085926, 0.3567031, 0.1837992],
-      ["case/radiance/earth/disc-p85", 499.7344, 677.1768, 1110.848],
-      ["case/surfaceShare/earth/disc-p85", 0.2671101, 0.1762049, 0.1030325],
-      ["case/radiance/earth/limb-0.1H", 3785.231, 5660.633, 9858.486],
-      ["case/surfaceShare/earth/limb-0.1H", 0.01367961, 0.00803872, 0.003951363],
-      ["case/radiance/earth/limb-0.3H", 3754.169, 5622.314, 9809.171],
-      ["case/surfaceShare/earth/limb-0.3H", 0.01336142, 0.007840388, 0.003847043],
-      ["case/radiance/earth/limb-1H", 3636.931, 5479.817, 9625.818],
-      ["case/surfaceShare/earth/limb-1H", 0.01233428, 0.007194008, 0.003505994],
-      ["case/radiance/earth/limb-3H", 3300.837, 5029.41, 9027.23],
-      ["case/surfaceShare/earth/limb-3H", 0.009476005, 0.005465451, 0.00260684],
-      ["case/radiance/earth/limb-10H", 1990.406, 3204.872, 6288.777],
-      ["case/surfaceShare/earth/limb-10H", 0.00191621, 0.001045892, 0.0004563592],
-      ["case/radiance/earth/aerial-1km", 930.3132, 945.0796, 1077.009],
-      ["case/surfaceShare/earth/aerial-1km", 0.6816214, 0.5896944, 0.4430771],
-      ["case/radiance/earth/aerial-10km", 2373.041, 2602.038, 3128.57],
-      ["case/surfaceShare/earth/aerial-10km", 0.3551008, 0.2846206, 0.2026924],
-      ["case/radiance/earth/aerial-32km", 3388.804, 3529.845, 3828.281],
-      ["case/surfaceShare/earth/aerial-32km", 0.2486626, 0.2098091, 0.1656455],
+      ["case/radiance/earth/disc-p0", 4635.355, 5121.88, 7393.223],
+      ["case/surfaceShare/earth/disc-p0", 0.714564, 0.5791485, 0.3636067],
+      ["case/radiance/earth/disc-p30", 4006.067, 4442.504, 6438.286],
+      ["case/surfaceShare/earth/disc-p30", 0.7063519, 0.5692116, 0.3531687],
+      ["case/radiance/earth/disc-p60", 2343.801, 2687.46, 4039.76],
+      ["case/surfaceShare/earth/disc-p60", 0.6447031, 0.4969042, 0.2872403],
+      ["case/radiance/earth/disc-p75", 1287.941, 1581.313, 2510.061],
+      ["case/surfaceShare/earth/disc-p75", 0.5129128, 0.3641455, 0.1944324],
+      ["case/radiance/earth/disc-p85", 508.3413, 688.5718, 1127.884],
+      ["case/surfaceShare/earth/disc-p85", 0.2795191, 0.1898377, 0.1165807],
+      ["case/radiance/earth/limb-0.1H", 3785.425, 5661.059, 9859.436],
+      ["case/surfaceShare/earth/limb-0.1H", 0.01373009, 0.008113336, 0.004047286],
+      ["case/radiance/earth/limb-0.3H", 3754.356, 5622.726, 9810.09],
+      ["case/surfaceShare/earth/limb-0.3H", 0.01341073, 0.00791317, 0.003940436],
+      ["case/radiance/earth/limb-1H", 3637.098, 5480.186, 9626.641],
+      ["case/surfaceShare/earth/limb-1H", 0.01237982, 0.007260809, 0.003591112],
+      ["case/radiance/earth/limb-3H", 3300.954, 5029.667, 9027.803],
+      ["case/surfaceShare/earth/limb-3H", 0.009511046, 0.005516238, 0.002670135],
+      ["case/radiance/earth/limb-10H", 1990.421, 3204.903, 6288.846],
+      ["case/surfaceShare/earth/limb-10H", 0.001923314, 0.001055619, 0.0004674318],
+      ["case/radiance/earth/aerial-1km", 932.6614, 950.2576, 1088.574],
+      ["case/surfaceShare/earth/aerial-1km", 0.682423, 0.5919302, 0.4489937],
+      ["case/radiance/earth/aerial-10km", 2376.162, 2608.919, 3143.938],
+      ["case/surfaceShare/earth/aerial-10km", 0.3559477, 0.2865074, 0.2065898],
+      ["case/radiance/earth/aerial-32km", 3391.925, 3536.726, 3843.649],
+      ["case/surfaceShare/earth/aerial-32km", 0.2493538, 0.2113465, 0.1689814],
       ["case/radiance/earth-ozone-slab/ground-s0-v30-a0", 4382.542, 5460.931, 8245.989],
       ["case/surfaceShare/earth-ozone-slab/ground-s0-v30-a0", 0, 0, 0],
       ["case/radiance/earth-ozone-slab/ground-s0-v60-a0", 2637.453, 3758.65, 6649.64],
@@ -1445,32 +1671,32 @@
       ["case/surfaceShare/earth-ozone-slab/ground-s95-v85-a135", 0, 0, 0],
       ["case/radiance/earth-ozone-slab/ground-s95-v85-a180", 1.438649, 1.627866, 2.722724],
       ["case/surfaceShare/earth-ozone-slab/ground-s95-v85-a180", 0, 0, 0],
-      ["case/radiance/earth-ozone-slab/disc-p0", 4641.814, 5125.939, 7396.745],
-      ["case/surfaceShare/earth-ozone-slab/disc-p0", 0.7165334, 0.5809703, 0.3646927],
-      ["case/radiance/earth-ozone-slab/disc-p30", 4008.258, 4440.835, 6431.671],
-      ["case/surfaceShare/earth-ozone-slab/disc-p30", 0.7081579, 0.5706069, 0.3533074],
-      ["case/radiance/earth-ozone-slab/disc-p60", 2334.156, 2670.678, 4010.903],
-      ["case/surfaceShare/earth-ozone-slab/disc-p60", 0.6453432, 0.4956947, 0.2827805],
-      ["case/radiance/earth-ozone-slab/disc-p75", 1272.192, 1558.339, 2478.462],
-      ["case/surfaceShare/earth-ozone-slab/disc-p75", 0.5105047, 0.3579416, 0.1842511],
-      ["case/radiance/earth-ozone-slab/disc-p85", 495.5124, 671.8499, 1113.738],
-      ["case/surfaceShare/earth-ozone-slab/disc-p85", 0.2701125, 0.1777717, 0.1036686],
-      ["case/radiance/earth-ozone-slab/limb-0.1H", 3783.282, 5597.841, 9854.991],
-      ["case/surfaceShare/earth-ozone-slab/limb-0.1H", 0.014034, 0.008335053, 0.004055389],
-      ["case/radiance/earth-ozone-slab/limb-0.3H", 3750.134, 5557.112, 9805.45],
-      ["case/surfaceShare/earth-ozone-slab/limb-0.3H", 0.01371984, 0.008136277, 0.003949741],
-      ["case/radiance/earth-ozone-slab/limb-1H", 3627.985, 5406.495, 9619.902],
-      ["case/surfaceShare/earth-ozone-slab/limb-1H", 0.01268922, 0.007482827, 0.003602278],
-      ["case/radiance/earth-ozone-slab/limb-3H", 3302.371, 4969.334, 9021.608],
-      ["case/surfaceShare/earth-ozone-slab/limb-3H", 0.00973914, 0.00568767, 0.002683667],
-      ["case/radiance/earth-ozone-slab/limb-10H", 1984.208, 3148.708, 6283.801],
-      ["case/surfaceShare/earth-ozone-slab/limb-10H", 0.002001717, 0.001108568, 0.0004758836],
-      ["case/radiance/earth-ozone-slab/aerial-1km", 930.2011, 945.0636, 1076.65],
-      ["case/surfaceShare/earth-ozone-slab/aerial-1km", 0.6808041, 0.5889158, 0.4428897],
-      ["case/radiance/earth-ozone-slab/aerial-10km", 2377.452, 2605.74, 3128.133],
-      ["case/surfaceShare/earth-ozone-slab/aerial-10km", 0.3539958, 0.2838534, 0.2025796],
-      ["case/radiance/earth-ozone-slab/aerial-32km", 3401.202, 3538.313, 3827.843],
-      ["case/surfaceShare/earth-ozone-slab/aerial-32km", 0.2474443, 0.2090398, 0.1655491],
+      ["case/radiance/earth-ozone-slab/disc-p0", 4631.5, 5116.833, 7388.976],
+      ["case/surfaceShare/earth-ozone-slab/disc-p0", 0.7159022, 0.5802246, 0.3640248],
+      ["case/radiance/earth-ozone-slab/disc-p30", 4002.176, 4437.591, 6434.284],
+      ["case/surfaceShare/earth-ozone-slab/disc-p30", 0.7077144, 0.570293, 0.35357],
+      ["case/radiance/earth-ozone-slab/disc-p60", 2339.897, 2682.987, 4037.729],
+      ["case/surfaceShare/earth-ozone-slab/disc-p60", 0.6462134, 0.4980083, 0.2875455],
+      ["case/radiance/earth-ozone-slab/disc-p75", 1283.672, 1576.653, 2510.593],
+      ["case/surfaceShare/earth-ozone-slab/disc-p75", 0.514882, 0.3653995, 0.194691],
+      ["case/radiance/earth-ozone-slab/disc-p85", 504.2139, 683.2393, 1130.417],
+      ["case/surfaceShare/earth-ozone-slab/disc-p85", 0.2827086, 0.191478, 0.1168932],
+      ["case/radiance/earth-ozone-slab/limb-0.1H", 3783.487, 5598.278, 9855.942],
+      ["case/surfaceShare/earth-ozone-slab/limb-0.1H", 0.01408727, 0.008412452, 0.004151462],
+      ["case/radiance/earth-ozone-slab/limb-0.3H", 3750.332, 5557.536, 9806.372],
+      ["case/surfaceShare/earth-ozone-slab/limb-0.3H", 0.01377192, 0.008211838, 0.004043313],
+      ["case/radiance/earth-ozone-slab/limb-1H", 3628.162, 5406.874, 9620.727],
+      ["case/surfaceShare/earth-ozone-slab/limb-1H", 0.01273742, 0.007552339, 0.003687623],
+      ["case/radiance/earth-ozone-slab/limb-3H", 3302.494, 4969.599, 9022.184],
+      ["case/surfaceShare/earth-ozone-slab/limb-3H", 0.009776188, 0.005740548, 0.002747256],
+      ["case/radiance/earth-ozone-slab/limb-10H", 1984.223, 3148.741, 6283.872],
+      ["case/surfaceShare/earth-ozone-slab/limb-10H", 0.002009352, 0.001118885, 0.000487152],
+      ["case/radiance/earth-ozone-slab/aerial-1km", 932.6147, 950.2385, 1087.927],
+      ["case/surfaceShare/earth-ozone-slab/aerial-1km", 0.6816302, 0.5911545, 0.4486649],
+      ["case/radiance/earth-ozone-slab/aerial-10km", 2380.659, 2612.617, 3143.12],
+      ["case/surfaceShare/earth-ozone-slab/aerial-10km", 0.3548662, 0.2857385, 0.206382],
+      ["case/radiance/earth-ozone-slab/aerial-32km", 3404.41, 3545.19, 3842.831],
+      ["case/surfaceShare/earth-ozone-slab/aerial-32km", 0.2481533, 0.2105741, 0.1688036],
       ["case/radiance/mars/ground-s0-v30-a0", 12734.89, 9955.008, 7340.316],
       ["case/surfaceShare/mars/ground-s0-v30-a0", 0, 0, 0],
       ["case/radiance/mars/ground-s0-v60-a0", 7554.872, 5675.669, 3847.732],
@@ -1685,32 +1911,32 @@
       ["case/surfaceShare/mars/ground-s95-v85-a135", 0, 0, 0],
       ["case/radiance/mars/ground-s95-v85-a180", 65.09076, 48.76268, 32.30759],
       ["case/surfaceShare/mars/ground-s95-v85-a180", 0, 0, 0],
-      ["case/radiance/mars/disc-p0", 12226.4, 10368.06, 8718.938],
-      ["case/surfaceShare/mars/disc-p0", 0.5624308, 0.5860249, 0.6328969],
-      ["case/radiance/mars/disc-p30", 10251.1, 8666.674, 7328.197],
-      ["case/surfaceShare/mars/disc-p30", 0.5681285, 0.5935954, 0.6370724],
-      ["case/radiance/mars/disc-p60", 6091.652, 5023.373, 4053.821],
-      ["case/surfaceShare/mars/disc-p60", 0.4949378, 0.5248287, 0.5771272],
-      ["case/radiance/mars/disc-p75", 3418.341, 2718.98, 2028.737],
-      ["case/surfaceShare/mars/disc-p75", 0.3817567, 0.4092107, 0.4610531],
-      ["case/radiance/mars/disc-p85", 1468.819, 1135.75, 780.5016],
-      ["case/surfaceShare/mars/disc-p85", 0.2970403, 0.3067277, 0.3238882],
-      ["case/radiance/mars/limb-0.1H", 9973.04, 7555.306, 5031.284],
-      ["case/surfaceShare/mars/limb-0.1H", 0.002014287, 0.002324791, 0.003097332],
-      ["case/radiance/mars/limb-0.3H", 9889.419, 7491.543, 4985.015],
-      ["case/surfaceShare/mars/limb-0.3H", 0.001520463, 0.001754958, 0.002339979],
-      ["case/radiance/mars/limb-1H", 9366.249, 7093.527, 4709.196],
-      ["case/surfaceShare/mars/limb-1H", 0.0004166337, 0.0004810211, 0.0006429165],
+      ["case/radiance/mars/disc-p0", 12068.05, 10199, 8548.81],
+      ["case/surfaceShare/mars/disc-p0", 0.5566892, 0.579163, 0.6255912],
+      ["case/radiance/mars/disc-p30", 10162.05, 8560.603, 7215.137],
+      ["case/surfaceShare/mars/disc-p30", 0.5643438, 0.5885598, 0.6313853],
+      ["case/radiance/mars/disc-p60", 6085.718, 4992.066, 4007.761],
+      ["case/surfaceShare/mars/disc-p60", 0.4944453, 0.5218488, 0.5722672],
+      ["case/radiance/mars/disc-p75", 3419.541, 2703.987, 2009.44],
+      ["case/surfaceShare/mars/disc-p75", 0.3819735, 0.4059349, 0.4558776],
+      ["case/radiance/mars/disc-p85", 1415.876, 1092.425, 754.55],
+      ["case/surfaceShare/mars/disc-p85", 0.2707551, 0.2792328, 0.3006344],
+      ["case/radiance/mars/limb-0.1H", 9973.002, 7555.099, 5030.978],
+      ["case/surfaceShare/mars/limb-0.1H", 0.002010564, 0.002297463, 0.003036733],
+      ["case/radiance/mars/limb-0.3H", 9889.391, 7491.388, 4984.786],
+      ["case/surfaceShare/mars/limb-0.3H", 0.001517633, 0.0017343, 0.002294148],
+      ["case/radiance/mars/limb-1H", 9366.242, 7093.487, 4709.137],
+      ["case/surfaceShare/mars/limb-1H", 0.0004158391, 0.000475335, 0.0006302881],
       ["case/radiance/mars/limb-3H", 5735.358, 4338.733, 2868.898],
       ["case/surfaceShare/mars/limb-3H", 0, 0, 0],
       ["case/radiance/mars/limb-10H", 16.39349, 12.36553, 8.165259],
       ["case/surfaceShare/mars/limb-10H", 0, 0, 0],
-      ["case/radiance/mars/aerial-1km", 1961.265, 1679.273, 1443.67],
-      ["case/surfaceShare/mars/aerial-1km", 0.8474166, 0.8654447, 0.893338],
-      ["case/radiance/mars/aerial-10km", 3930.874, 3224.67, 2581.771],
-      ["case/surfaceShare/mars/aerial-10km", 0.5440468, 0.5799189, 0.6427735],
-      ["case/radiance/mars/aerial-32km", 5752.73, 4608.033, 3522.42],
-      ["case/surfaceShare/mars/aerial-32km", 0.3717503, 0.4058233, 0.4711232],
+      ["case/radiance/mars/aerial-1km", 1957.994, 1662.015, 1418.279],
+      ["case/surfaceShare/mars/aerial-1km", 0.8471616, 0.8640475, 0.8914285],
+      ["case/radiance/mars/aerial-10km", 3926.664, 3202.463, 2549.1],
+      ["case/surfaceShare/mars/aerial-10km", 0.5435579, 0.577006, 0.638195],
+      ["case/radiance/mars/aerial-32km", 5748.52, 4585.827, 3489.749],
+      ["case/surfaceShare/mars/aerial-32km", 0.3712903, 0.402946, 0.4661719],
       ["case/radiance/mars/aureole-s85-d3", 100307.8, 107496.6, 119552.4],
       ["case/surfaceShare/mars/aureole-s85-d3", 0, 0, 0],
       ["case/radiance/mars/aureole-s85-d5", 73442.68, 70148.16, 66132.82],
@@ -2025,24 +2251,36 @@
       ["case/surfaceShare/saturn-oblate/pole-s95-v85-a0", 0, 0, 0],
       ["case/radiance/saturn-oblate/pole-s95-v85-a90", 0.8696577, 0.4683911, 0.2477609],
       ["case/surfaceShare/saturn-oblate/pole-s95-v85-a90", 0, 0, 0],
-      ["case/radiance/saturn-oblate/limb-lat0-0.3H", 3493.303, 3069.334, 2671.44],
-      ["case/surfaceShare/saturn-oblate/limb-lat0-0.3H", 0.000561483, 0.0005212042, 0.0004101343],
-      ["case/radiance/saturn-oblate/limb-lat0-1H", 3507.506, 3194.695, 2889.727],
-      ["case/surfaceShare/saturn-oblate/limb-lat0-1H", 0.0003278668, 0.0002935973, 0.0002223023],
-      ["case/radiance/saturn-oblate/limb-lat0-3H", 2874.728, 2903.967, 3026.282],
-      ["case/surfaceShare/saturn-oblate/limb-lat0-3H", 0.0000158913, 0.00001283181, 0.00000843315],
-      ["case/radiance/saturn-oblate/limb-lat45-0.3H", 3227.536, 2909.81, 2608.576],
-      ["case/surfaceShare/saturn-oblate/limb-lat45-0.3H", 0.000720951, 0.0006650989, 0.0005321567],
-      ["case/radiance/saturn-oblate/limb-lat45-1H", 3192.649, 2958.472, 2767.698],
-      ["case/surfaceShare/saturn-oblate/limb-lat45-1H", 0.0004695689, 0.0004214649, 0.0003231456],
-      ["case/radiance/saturn-oblate/limb-lat45-3H", 2622.798, 2630.967, 2752.939],
-      ["case/surfaceShare/saturn-oblate/limb-lat45-3H", 0.00006434037, 0.00005334904, 0.00003656982],
-      ["case/radiance/saturn-oblate/limb-lat90-0.3H", 2903.054, 2662.733, 2453.855],
-      ["case/surfaceShare/saturn-oblate/limb-lat90-0.3H", 0.0009269211, 0.0008564062, 0.0006956425],
-      ["case/radiance/saturn-oblate/limb-lat90-1H", 2844.024, 2655.401, 2541.995],
-      ["case/surfaceShare/saturn-oblate/limb-lat90-1H", 0.0006501368, 0.0005901081, 0.0004614584],
-      ["case/radiance/saturn-oblate/limb-lat90-3H", 2354.985, 2334.273, 2432.451],
-      ["case/surfaceShare/saturn-oblate/limb-lat90-3H", 0.0001550562, 0.0001325827, 0.00009525602]
+      ["case/radiance/saturn-oblate/limb-lat0-0.3H", 3493.414, 3069.432, 2671.621],
+      ["case/surfaceShare/saturn-oblate/limb-lat0-0.3H", 0.0005930685, 0.0005531337, 0.0004778361],
+      ["case/radiance/saturn-oblate/limb-lat0-1H", 3507.57, 3194.752, 2889.833],
+      ["case/surfaceShare/saturn-oblate/limb-lat0-1H", 0.0003463154, 0.0003115877, 0.0002590063],
+      ["case/radiance/saturn-oblate/limb-lat0-3H", 2874.73, 2903.969, 3026.286],
+      ["case/surfaceShare/saturn-oblate/limb-lat0-3H", 0.00001678585, 0.00001361833, 0.000009825882],
+      ["case/radiance/saturn-oblate/limb-lat45-0.3H", 3227.65, 2909.898, 2608.737],
+      ["case/surfaceShare/saturn-oblate/limb-lat45-0.3H", 0.0007564025, 0.0006953521, 0.0005939165],
+      ["case/radiance/saturn-oblate/limb-lat45-1H", 3192.723, 2958.528, 2767.802],
+      ["case/surfaceShare/saturn-oblate/limb-lat45-1H", 0.0004926832, 0.0004406673, 0.0003606901],
+      ["case/radiance/saturn-oblate/limb-lat45-3H", 2622.806, 2630.973, 2752.951],
+      ["case/surfaceShare/saturn-oblate/limb-lat45-3H", 0.0000675155, 0.00005578969, 0.00004083009],
+      ["case/radiance/saturn-oblate/limb-lat90-0.3H", 2903.168, 2662.804, 2453.978],
+      ["case/surfaceShare/saturn-oblate/limb-lat90-0.3H", 0.0009664298, 0.0008831511, 0.0007457751],
+      ["case/radiance/saturn-oblate/limb-lat90-1H", 2844.103, 2655.45, 2542.08],
+      ["case/surfaceShare/saturn-oblate/limb-lat90-1H", 0.0006778519, 0.0006085333, 0.0004947027],
+      ["case/radiance/saturn-oblate/limb-lat90-3H", 2355.001, 2334.283, 2432.468],
+      ["case/surfaceShare/saturn-oblate/limb-lat90-3H", 0.0001616668, 0.0001367188, 0.0001021093],
+      ["case/downwelling/earth/flux-s0", 134391.6, 120355.9, 109072.1],
+      ["case/downwelling/earth/flux-s30", 114812, 102600.5, 92257.21],
+      ["case/downwelling/earth/flux-s60", 61309.58, 54182.93, 47081.34],
+      ["case/downwelling/earth/flux-s80", 15492.26, 13515.69, 11741.03],
+      ["case/downwelling/earth-ozone-slab/flux-s0", 134268.3, 120225.2, 108921.4],
+      ["case/downwelling/earth-ozone-slab/flux-s30", 114697, 102481, 92124.19],
+      ["case/downwelling/earth-ozone-slab/flux-s60", 61230.9, 54106.97, 47015.56],
+      ["case/downwelling/earth-ozone-slab/flux-s80", 15473.62, 13497.73, 11750.99],
+      ["case/downwelling/mars/flux-s0", 138961, 122180.4, 110621.5],
+      ["case/downwelling/mars/flux-s30", 118622.8, 104216.9, 94228.49],
+      ["case/downwelling/mars/flux-s60", 62240.45, 53884.97, 47439.85],
+      ["case/downwelling/mars/flux-s80", 16368.32, 13439.33, 10663.45]
     ],
     "diagnostic": [
       ["case/radiance/earth/ground-s0-v30-a0", 4508.225, 5588.913, 8413.185],
@@ -2259,32 +2497,32 @@
       ["case/surfaceShare/earth/ground-s95-v85-a135", 0, 0, 0],
       ["case/radiance/earth/ground-s95-v85-a180", 3.999218, 5.565397, 7.648114],
       ["case/surfaceShare/earth/ground-s95-v85-a180", 0, 0, 0],
-      ["case/radiance/earth/disc-p0", 4656.499, 5210.532, 7730.396],
-      ["case/surfaceShare/earth/disc-p0", 0.7135815, 0.5710563, 0.3486889],
-      ["case/radiance/earth/disc-p30", 4022.385, 4514.87, 6716.992],
-      ["case/surfaceShare/earth/disc-p30", 0.7050476, 0.5608183, 0.3380441],
-      ["case/radiance/earth/disc-p60", 2350.07, 2718.246, 4167.669],
-      ["case/surfaceShare/earth/disc-p60", 0.6406111, 0.486754, 0.2718369],
-      ["case/radiance/earth/disc-p75", 1281.854, 1580.06, 2539.191],
-      ["case/surfaceShare/earth/disc-p75", 0.5065154, 0.3528558, 0.1793236],
-      ["case/radiance/earth/disc-p85", 502.2133, 685.2964, 1130.387],
-      ["case/surfaceShare/earth/disc-p85", 0.2657917, 0.1741172, 0.1012516],
-      ["case/radiance/earth/limb-0.1H", 3712.041, 5538.869, 9700.594],
-      ["case/surfaceShare/earth/limb-0.1H", 0.01394933, 0.008215439, 0.004015677],
-      ["case/radiance/earth/limb-0.3H", 3682.389, 5502.425, 9652.182],
-      ["case/surfaceShare/earth/limb-0.3H", 0.01362187, 0.008011217, 0.003909613],
-      ["case/radiance/earth/limb-1H", 3569.631, 5366.279, 9472.282],
-      ["case/surfaceShare/earth/limb-1H", 0.01256682, 0.007346217, 0.003562822],
-      ["case/radiance/earth/limb-3H", 3246.511, 4935.623, 8885.089],
-      ["case/surfaceShare/earth/limb-3H", 0.009634574, 0.005569306, 0.002648544],
-      ["case/radiance/earth/limb-10H", 1980.65, 3173.134, 6191.219],
-      ["case/surfaceShare/earth/limb-10H", 0.00192565, 0.001056353, 0.0004635502],
-      ["case/radiance/earth/aerial-1km", 911.6232, 910.4288, 983.6574],
-      ["case/surfaceShare/earth/aerial-1km", 0.6955959, 0.6121381, 0.4851264],
-      ["case/radiance/earth/aerial-10km", 2273.039, 2428.98, 2730.051],
-      ["case/surfaceShare/earth/aerial-10km", 0.3707235, 0.3048991, 0.2322804],
-      ["case/radiance/earth/aerial-32km", 3217.098, 3262.655, 3311.444],
-      ["case/surfaceShare/earth/aerial-32km", 0.2619345, 0.2269911, 0.1914987],
+      ["case/radiance/earth/disc-p0", 4656.566, 5210.716, 7730.96],
+      ["case/surfaceShare/earth/disc-p0", 0.7135856, 0.5710714, 0.3487363],
+      ["case/radiance/earth/disc-p30", 4022.426, 4514.979, 6717.334],
+      ["case/surfaceShare/earth/disc-p30", 0.7050506, 0.560829, 0.3380778],
+      ["case/radiance/earth/disc-p60", 2350.058, 2718.211, 4167.53],
+      ["case/surfaceShare/earth/disc-p60", 0.6406093, 0.4867474, 0.2718125],
+      ["case/radiance/earth/disc-p75", 1281.825, 1579.983, 2538.928],
+      ["case/surfaceShare/earth/disc-p75", 0.5065043, 0.352824, 0.1792384],
+      ["case/radiance/earth/disc-p85", 502.187, 685.2345, 1130.195],
+      ["case/surfaceShare/earth/disc-p85", 0.2657533, 0.1740425, 0.1010985],
+      ["case/radiance/earth/limb-0.1H", 3712.04, 5538.868, 9700.589],
+      ["case/surfaceShare/earth/limb-0.1H", 0.01394922, 0.00821522, 0.004015179],
+      ["case/radiance/earth/limb-0.3H", 3682.388, 5502.424, 9652.177],
+      ["case/surfaceShare/earth/limb-0.3H", 0.01362176, 0.008011004, 0.003909128],
+      ["case/radiance/earth/limb-1H", 3569.631, 5366.278, 9472.278],
+      ["case/surfaceShare/earth/limb-1H", 0.01256672, 0.007346022, 0.00356238],
+      ["case/radiance/earth/limb-3H", 3246.51, 4935.622, 8885.086],
+      ["case/surfaceShare/earth/limb-3H", 0.009634499, 0.005569158, 0.002648215],
+      ["case/radiance/earth/limb-10H", 1980.65, 3173.134, 6191.218],
+      ["case/surfaceShare/earth/limb-10H", 0.001925635, 0.001056325, 0.0004634929],
+      ["case/radiance/earth/aerial-1km", 911.6183, 910.414, 983.5986],
+      ["case/surfaceShare/earth/aerial-1km", 0.6955943, 0.6121318, 0.4850956],
+      ["case/radiance/earth/aerial-10km", 2273.032, 2428.96, 2729.973],
+      ["case/surfaceShare/earth/aerial-10km", 0.3707217, 0.3048934, 0.2322584],
+      ["case/radiance/earth/aerial-32km", 3217.091, 3262.635, 3311.366],
+      ["case/surfaceShare/earth/aerial-32km", 0.261933, 0.2269865, 0.1914796],
       ["case/radiance/earth-ozone-slab/ground-s0-v30-a0", 4497.521, 5578.182, 8398.459],
       ["case/surfaceShare/earth-ozone-slab/ground-s0-v30-a0", 0, 0, 0],
       ["case/radiance/earth-ozone-slab/ground-s0-v60-a0", 2798.217, 3896.325, 6742.423],
@@ -2499,32 +2737,32 @@
       ["case/surfaceShare/earth-ozone-slab/ground-s95-v85-a135", 0, 0, 0],
       ["case/radiance/earth-ozone-slab/ground-s95-v85-a180", 4.669523, 5.865245, 7.610407],
       ["case/surfaceShare/earth-ozone-slab/ground-s95-v85-a180", 0, 0, 0],
-      ["case/radiance/earth-ozone-slab/disc-p0", 4651.609, 5203.57, 7718.716],
-      ["case/surfaceShare/earth-ozone-slab/disc-p0", 0.7150245, 0.5723029, 0.3494803],
-      ["case/radiance/earth-ozone-slab/disc-p30", 4017.271, 4507.839, 6705.893],
-      ["case/surfaceShare/earth-ozone-slab/disc-p30", 0.7065692, 0.5621256, 0.3388597],
-      ["case/radiance/earth-ozone-slab/disc-p60", 2344.256, 2711.098, 4159.964],
-      ["case/surfaceShare/earth-ozone-slab/disc-p60", 0.6425628, 0.4883044, 0.2726478],
-      ["case/radiance/earth-ozone-slab/disc-p75", 1275.474, 1572.889, 2536.518],
-      ["case/surfaceShare/earth-ozone-slab/disc-p75", 0.5091911, 0.3546303, 0.180034],
-      ["case/radiance/earth-ozone-slab/disc-p85", 496.6807, 678.4577, 1132.795],
-      ["case/surfaceShare/earth-ozone-slab/disc-p85", 0.2694771, 0.1760403, 0.1019246],
-      ["case/radiance/earth-ozone-slab/limb-0.1H", 3695.34, 5466.496, 9697.065],
-      ["case/surfaceShare/earth-ozone-slab/limb-0.1H", 0.01436799, 0.008535321, 0.004121435],
-      ["case/radiance/earth-ozone-slab/limb-0.3H", 3663.718, 5427.729, 9648.527],
-      ["case/surfaceShare/earth-ozone-slab/limb-0.3H", 0.01404345, 0.008330225, 0.004013979],
-      ["case/radiance/earth-ozone-slab/limb-1H", 3546.465, 5283.828, 9466.735],
-      ["case/surfaceShare/earth-ozone-slab/limb-1H", 0.0129809, 0.007656546, 0.003660561],
-      ["case/radiance/earth-ozone-slab/limb-3H", 3234.991, 4867.314, 8879.82],
-      ["case/surfaceShare/earth-ozone-slab/limb-3H", 0.009941991, 0.005806886, 0.002726519],
+      ["case/radiance/earth-ozone-slab/disc-p0", 4651.672, 5203.74, 7719.257],
+      ["case/surfaceShare/earth-ozone-slab/disc-p0", 0.7150284, 0.5723169, 0.3495258],
+      ["case/radiance/earth-ozone-slab/disc-p30", 4017.309, 4507.94, 6706.221],
+      ["case/surfaceShare/earth-ozone-slab/disc-p30", 0.706572, 0.5621354, 0.338892],
+      ["case/radiance/earth-ozone-slab/disc-p60", 2344.245, 2711.065, 4159.831],
+      ["case/surfaceShare/earth-ozone-slab/disc-p60", 0.6425611, 0.4882983, 0.2726245],
+      ["case/radiance/earth-ozone-slab/disc-p75", 1275.447, 1572.818, 2536.264],
+      ["case/surfaceShare/earth-ozone-slab/disc-p75", 0.5091807, 0.3546009, 0.1799521],
+      ["case/radiance/earth-ozone-slab/disc-p85", 496.6561, 678.4009, 1132.609],
+      ["case/surfaceShare/earth-ozone-slab/disc-p85", 0.2694411, 0.1759714, 0.1017768],
+      ["case/radiance/earth-ozone-slab/limb-0.1H", 3695.34, 5466.495, 9697.061],
+      ["case/surfaceShare/earth-ozone-slab/limb-0.1H", 0.01436788, 0.00853511, 0.004120946],
+      ["case/radiance/earth-ozone-slab/limb-0.3H", 3663.718, 5427.728, 9648.523],
+      ["case/surfaceShare/earth-ozone-slab/limb-0.3H", 0.01404335, 0.008330019, 0.004013503],
+      ["case/radiance/earth-ozone-slab/limb-1H", 3546.465, 5283.827, 9466.731],
+      ["case/surfaceShare/earth-ozone-slab/limb-1H", 0.01298081, 0.007656357, 0.003660127],
+      ["case/radiance/earth-ozone-slab/limb-3H", 3234.99, 4867.313, 8879.817],
+      ["case/surfaceShare/earth-ozone-slab/limb-3H", 0.009941918, 0.005806742, 0.002726196],
       ["case/radiance/earth-ozone-slab/limb-10H", 1967.242, 3112.856, 6186.894],
-      ["case/surfaceShare/earth-ozone-slab/limb-10H", 0.00201898, 0.001121336, 0.0004833376],
-      ["case/radiance/earth-ozone-slab/aerial-1km", 910.3637, 909.3145, 983.3892],
-      ["case/surfaceShare/earth-ozone-slab/aerial-1km", 0.6956393, 0.6120686, 0.4848915],
-      ["case/radiance/earth-ozone-slab/aerial-10km", 2271.287, 2427.325, 2729.979],
-      ["case/surfaceShare/earth-ozone-slab/aerial-10km", 0.3705424, 0.3047173, 0.2321248],
-      ["case/radiance/earth-ozone-slab/aerial-32km", 3218.848, 3262.791, 3311.453],
-      ["case/surfaceShare/earth-ozone-slab/aerial-32km", 0.2614625, 0.2266918, 0.1913649],
+      ["case/surfaceShare/earth-ozone-slab/limb-10H", 0.002018965, 0.001121308, 0.0004832805],
+      ["case/radiance/earth-ozone-slab/aerial-1km", 910.3591, 909.3008, 983.3331],
+      ["case/surfaceShare/earth-ozone-slab/aerial-1km", 0.6956377, 0.6120628, 0.4848621],
+      ["case/radiance/earth-ozone-slab/aerial-10km", 2271.281, 2427.307, 2729.904],
+      ["case/surfaceShare/earth-ozone-slab/aerial-10km", 0.3705407, 0.3047121, 0.2321039],
+      ["case/radiance/earth-ozone-slab/aerial-32km", 3218.842, 3262.773, 3311.378],
+      ["case/surfaceShare/earth-ozone-slab/aerial-32km", 0.2614611, 0.2266875, 0.1913467],
       ["case/radiance/mars/ground-s0-v30-a0", 13135.13, 10295.25, 7550.844],
       ["case/surfaceShare/mars/ground-s0-v30-a0", 0, 0, 0],
       ["case/radiance/mars/ground-s0-v60-a0", 8351.96, 6593.096, 4776.714],
@@ -2739,32 +2977,32 @@
       ["case/surfaceShare/mars/ground-s95-v85-a135", 0, 0, 0],
       ["case/radiance/mars/ground-s95-v85-a180", 69.38072, 50.20452, 29.00804],
       ["case/surfaceShare/mars/ground-s95-v85-a180", 0, 0, 0],
-      ["case/radiance/mars/disc-p0", 10938.59, 9288.571, 7751.437],
-      ["case/surfaceShare/mars/disc-p0", 0.6286467, 0.6541307, 0.7118923],
-      ["case/radiance/mars/disc-p30", 9151.379, 7750.196, 6504.121],
-      ["case/surfaceShare/mars/disc-p30", 0.6364007, 0.6637894, 0.7177899],
-      ["case/radiance/mars/disc-p60", 5531.502, 4587.71, 3671.525],
-      ["case/surfaceShare/mars/disc-p60", 0.545058, 0.574668, 0.6372203],
-      ["case/radiance/mars/disc-p75", 3251.273, 2608.118, 1921.672],
-      ["case/surfaceShare/mars/disc-p75", 0.4013735, 0.4266048, 0.4867404],
-      ["case/radiance/mars/disc-p85", 1682.127, 1297.723, 859.446],
-      ["case/surfaceShare/mars/disc-p85", 0.2593731, 0.2684441, 0.2941374],
+      ["case/radiance/mars/disc-p0", 10938.59, 9288.575, 7751.45],
+      ["case/surfaceShare/mars/disc-p0", 0.6286467, 0.6541308, 0.7118928],
+      ["case/radiance/mars/disc-p30", 9151.38, 7750.199, 6504.13],
+      ["case/surfaceShare/mars/disc-p30", 0.6364007, 0.6637895, 0.7177903],
+      ["case/radiance/mars/disc-p60", 5531.502, 4587.709, 3671.523],
+      ["case/surfaceShare/mars/disc-p60", 0.545058, 0.574668, 0.6372201],
+      ["case/radiance/mars/disc-p75", 3251.272, 2608.117, 1921.667],
+      ["case/surfaceShare/mars/disc-p75", 0.4013734, 0.4266045, 0.4867389],
+      ["case/radiance/mars/disc-p85", 1682.126, 1297.722, 859.4418],
+      ["case/surfaceShare/mars/disc-p85", 0.2593728, 0.2684434, 0.2941339],
       ["case/radiance/mars/limb-0.1H", 7384.702, 5786.637, 3973.008],
-      ["case/surfaceShare/mars/limb-0.1H", 0.002720294, 0.003035357, 0.003922356],
+      ["case/surfaceShare/mars/limb-0.1H", 0.002720294, 0.003035356, 0.003922354],
       ["case/radiance/mars/limb-0.3H", 7362.085, 5768.331, 3959.236],
-      ["case/surfaceShare/mars/limb-0.3H", 0.002042424, 0.002279228, 0.002946232],
+      ["case/surfaceShare/mars/limb-0.3H", 0.002042423, 0.002279227, 0.00294623],
       ["case/radiance/mars/limb-1H", 7135.063, 5587.766, 3831.846],
-      ["case/surfaceShare/mars/limb-1H", 0.000546918, 0.0006106441, 0.0007901203],
+      ["case/surfaceShare/mars/limb-1H", 0.000546918, 0.0006106439, 0.0007901198],
       ["case/radiance/mars/limb-3H", 4704.174, 3681.365, 2526.69],
       ["case/surfaceShare/mars/limb-3H", 0, 0, 0],
       ["case/radiance/mars/limb-10H", 12.03918, 9.597639, 6.825001],
       ["case/surfaceShare/mars/limb-10H", 0, 0, 0],
       ["case/radiance/mars/aerial-1km", 1907.203, 1645.804, 1424.474],
-      ["case/surfaceShare/mars/aerial-1km", 0.8714377, 0.8830439, 0.905376],
-      ["case/radiance/mars/aerial-10km", 3603.215, 3021.985, 2467.189],
-      ["case/surfaceShare/mars/aerial-10km", 0.5935198, 0.6188141, 0.6726252],
-      ["case/radiance/mars/aerial-32km", 5080.153, 4191.902, 3291.501],
-      ["case/surfaceShare/mars/aerial-32km", 0.4209675, 0.4461094, 0.5041754],
+      ["case/surfaceShare/mars/aerial-1km", 0.8714377, 0.8830439, 0.9053759],
+      ["case/radiance/mars/aerial-10km", 3603.214, 3021.985, 2467.188],
+      ["case/surfaceShare/mars/aerial-10km", 0.5935198, 0.6188141, 0.6726251],
+      ["case/radiance/mars/aerial-32km", 5080.153, 4191.902, 3291.5],
+      ["case/surfaceShare/mars/aerial-32km", 0.4209674, 0.4461093, 0.5041752],
       ["case/radiance/mars/aureole-s85-d3", 137187.9, 152640.4, 181423.9],
       ["case/surfaceShare/mars/aureole-s85-d3", 0, 0, 0],
       ["case/radiance/mars/aureole-s85-d5", 104260, 105590.2, 109819.6],
@@ -3079,24 +3317,36 @@
       ["case/surfaceShare/saturn-oblate/pole-s95-v85-a0", 0, 0, 0],
       ["case/radiance/saturn-oblate/pole-s95-v85-a90", 9.194358, 7.893862, 3.740228],
       ["case/surfaceShare/saturn-oblate/pole-s95-v85-a90", 0, 0, 0],
-      ["case/radiance/saturn-oblate/limb-lat0-0.3H", 3347.366, 2994.569, 2718.911],
-      ["case/surfaceShare/saturn-oblate/limb-lat0-0.3H", 0.0005859623, 0.0005342171, 0.0004029734],
-      ["case/radiance/saturn-oblate/limb-lat0-1H", 3367.918, 3118.547, 2928.449],
-      ["case/surfaceShare/saturn-oblate/limb-lat0-1H", 0.0003414557, 0.0003007662, 0.0002193628],
+      ["case/radiance/saturn-oblate/limb-lat0-0.3H", 3347.365, 2994.566, 2718.905],
+      ["case/surfaceShare/saturn-oblate/limb-lat0-0.3H", 0.0005854119, 0.0005331662, 0.000400612],
+      ["case/radiance/saturn-oblate/limb-lat0-1H", 3367.917, 3118.545, 2928.446],
+      ["case/surfaceShare/saturn-oblate/limb-lat0-1H", 0.0003411349, 0.0003001744, 0.0002180771],
       ["case/radiance/saturn-oblate/limb-lat0-3H", 2776.41, 2840.23, 3042.949],
-      ["case/surfaceShare/saturn-oblate/limb-lat0-3H", 0.00001645404, 0.00001311977, 0.000008386959],
-      ["case/radiance/saturn-oblate/limb-lat45-0.3H", 3107.866, 2849.35, 2652.532],
-      ["case/surfaceShare/saturn-oblate/limb-lat45-0.3H", 0.0007487114, 0.0006792116, 0.0005233382],
-      ["case/radiance/saturn-oblate/limb-lat45-1H", 3078.23, 2897.534, 2804.043],
-      ["case/surfaceShare/saturn-oblate/limb-lat45-1H", 0.0004870231, 0.0004303286, 0.0003189571],
+      ["case/surfaceShare/saturn-oblate/limb-lat0-3H", 0.00001643858, 0.00001309395, 0.000008337791],
+      ["case/radiance/saturn-oblate/limb-lat45-0.3H", 3107.865, 2849.347, 2652.525],
+      ["case/surfaceShare/saturn-oblate/limb-lat45-0.3H", 0.0007480818, 0.0006780784, 0.000520724],
+      ["case/radiance/saturn-oblate/limb-lat45-1H", 3078.228, 2897.532, 2804.038],
+      ["case/surfaceShare/saturn-oblate/limb-lat45-1H", 0.0004866137, 0.0004296108, 0.0003173638],
       ["case/radiance/saturn-oblate/limb-lat45-3H", 2538.386, 2578.377, 2770.105],
-      ["case/surfaceShare/saturn-oblate/limb-lat45-3H", 0.00006647995, 0.00005443718, 0.0000363432],
-      ["case/radiance/saturn-oblate/limb-lat90-0.3H", 2808.479, 2618.482, 2498.514],
-      ["case/surfaceShare/saturn-oblate/limb-lat90-0.3H", 0.0009581348, 0.0008708789, 0.0006832082],
-      ["case/radiance/saturn-oblate/limb-lat90-1H", 2753.545, 2610.77, 2580.173],
-      ["case/surfaceShare/saturn-oblate/limb-lat90-1H", 0.0006714997, 0.0006001957, 0.0004546304],
-      ["case/radiance/saturn-oblate/limb-lat90-3H", 2285.56, 2294.239, 2453.461],
-      ["case/surfaceShare/saturn-oblate/limb-lat90-3H", 0.0001597661, 0.0001348962, 0.00009444034]
+      ["case/surfaceShare/saturn-oblate/limb-lat45-3H", 0.0000664241, 0.00005434643, 0.00003616165],
+      ["case/radiance/saturn-oblate/limb-lat90-0.3H", 2808.477, 2618.479, 2498.507],
+      ["case/surfaceShare/saturn-oblate/limb-lat90-0.3H", 0.0009574094, 0.0008696362, 0.0006803059],
+      ["case/radiance/saturn-oblate/limb-lat90-1H", 2753.544, 2610.768, 2580.168],
+      ["case/surfaceShare/saturn-oblate/limb-lat90-1H", 0.0006709913, 0.0005993392, 0.000452699],
+      ["case/radiance/saturn-oblate/limb-lat90-3H", 2285.56, 2294.239, 2453.46],
+      ["case/surfaceShare/saturn-oblate/limb-lat90-3H", 0.0001596451, 0.0001347037, 0.00009403916],
+      ["case/downwelling/earth/flux-s0", 134821.7, 120735.7, 109390.2],
+      ["case/downwelling/earth/flux-s30", 115068.4, 102738.7, 92142.82],
+      ["case/downwelling/earth/flux-s60", 61082.91, 53682.73, 45961.68],
+      ["case/downwelling/earth/flux-s80", 15028.96, 12819.85, 10583.65],
+      ["case/downwelling/earth-ozone-slab/flux-s0", 134688.4, 120600.8, 109257.9],
+      ["case/downwelling/earth-ozone-slab/flux-s30", 114944.9, 102616.5, 92031.67],
+      ["case/downwelling/earth-ozone-slab/flux-s60", 60997.98, 53607.2, 45923.87],
+      ["case/downwelling/earth-ozone-slab/flux-s80", 15005.77, 12802.97, 10616.4],
+      ["case/downwelling/mars/flux-s0", 142236.5, 125677.3, 114140.7],
+      ["case/downwelling/mars/flux-s30", 120464.9, 106411, 96567.27],
+      ["case/downwelling/mars/flux-s60", 62363.2, 54532.51, 48392.54],
+      ["case/downwelling/mars/flux-s80", 16893.24, 14030.41, 11155.49]
     ]
   },
   "deck": {

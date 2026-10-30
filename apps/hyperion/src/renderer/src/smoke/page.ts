@@ -96,6 +96,7 @@ import {
   checkSeveralSuns,
   checkSurfaceLightingEarth,
   checkSurfaceLightingSaturn,
+  checkSurfaceLightingThickEarth,
   checkUnreadEarth,
   checkUnreadGiant,
   timeFarLimb,
@@ -531,6 +532,10 @@ async function run(
   // catalogue: in part 9, the lightest other part, it would compile them again.
   await group(13, "R08.T14.f the correction's kernels against their twins on Earth", () =>
     checkCorrectionFrameTwinsEarth(engine, checks, twins),
+  );
+  // In part 13, whose catalogue compiles the thick irradiance kernel.
+  await group(13, "R08.T14.d.4 the sky's irradiance over the thick table on Earth", () =>
+    checkSurfaceLightingThickEarth(engine, checks, twins),
   );
   await group(9, "R08.T11.e the unread column tables at one texel on a giant", () =>
     checkUnreadGiant(engine, checks),
