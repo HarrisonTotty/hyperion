@@ -1380,7 +1380,8 @@ pub(in crate::substance) const CARBON_MONOXIDE: PhaseDiagram = PhaseDiagram {
         Source {
             covers: "ρ_s",
             citation: "α: 1,042.55 kg m⁻³, Vegard 1930's cubic cell a = 5.63 Å, Z = 4 (Z. Phys. \
-                       61, 185; COD 1010305), its temperature not read; β's not read",
+                       61, 185; COD 1010305), its temperature not read; β's not read, its lead \
+                       Krupskii et al. 1975 closed (searched again by P14.T49.o, 2026-10-30)",
             basis: Basis::Reduced,
         },
         Source {
@@ -1596,7 +1597,8 @@ pub(in crate::substance) const HYDROGEN_SULPHIDE: PhaseDiagram = PhaseDiagram {
                        H₂S not stated; their own film's 1,224 at 80 K agrees; phase I 1,162.01 kg \
                        m⁻³ from Vegard and Sinding-Oserød 1942's fcc cell, a = 5.797 Å, Z = 4 \
                        (COD 1539470), at M = 34.08088 g mol⁻¹, its temperature not read; phase \
-                       II's not read. The transitions, 103.52 K and 126.22 K, are Giauque and \
+                       II's not read, its lead Cockcroft and Fitch 1990, a D₂S study, closed \
+                       (searched again by P14.T49.o, 2026-10-30). The transitions, 103.52 K and 126.22 K, are Giauque and \
                        Blue 1936's (J. Am. Chem. Soc. 58, 831)",
             basis: Basis::Reduced,
         },

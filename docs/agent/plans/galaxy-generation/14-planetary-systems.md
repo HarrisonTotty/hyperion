@@ -32716,3 +32716,7 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - For 25's bump: the tripwire's list; at the bless, `substance/registry.golden`,
     `planetary/condense.golden`, `planetary/envelope_atmosphere.golden`, and the protocol's
     `substances.json` and `planetary.json` (the fixture hot Jupiter's Fe modes) move.
+- **P14.T49.o, searched again (2026-10-30): nothing closed.** β-CO's and H₂S phase II's densities
+  and liquid Fe's intercept at Assael et al. 2006 stay unread, each lead closed (the lane's
+  findings). `GAPS_AT_24` names both gaps with their reasons, and the rows' sources say so. No
+  `DENSITY_GAPS_VERSION`, since nothing moves. Phase II's stand-in waits on main's ruling.

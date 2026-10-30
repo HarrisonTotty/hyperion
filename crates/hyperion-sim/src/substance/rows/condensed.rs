@@ -318,7 +318,8 @@ pub(in crate::substance) const IRON: CondensedColumns = CondensedColumns {
              1,811 K) kg m⁻³, within ±0.8 per cent (its abstract's total uncertainty; 0.77 per \
              cent at 95 per cent confidence): its values at the row's melting point, 1,811.15 K \
              (the correlation's is 1,811 K), 7,034.8211, and at 2,500 K, 6,396.946, linear \
-             between and held beyond. The paper was not reached: its slope is as Boungou Dzaba \
+             between and held beyond. The paper was not reached (closed at its publisher and its \
+             authors' repository, searched again by P14.T49.o, 2026-10-30): its slope is as Boungou Dzaba \
              et al. 2026 (J. Appl. Phys. 140, 115102) quote it and its 1,811 K as Assael et al. \
              2017 (High Temp. High Press. 46, 391, Table 8) do, its intercept was seen only as \
              citing papers' text matches, and its range of validity was not read. Boungou Dzaba \
