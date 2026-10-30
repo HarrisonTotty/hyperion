@@ -223,3 +223,115 @@ export function aGalaxyFeatures({
     ],
   };
 }
+
+/** The golden's cluster detail of `GPF F207`, at +100 yr, with its first two classes of the 32. */
+export function aClusterDetail(): ResponseFor<"feature_detail"> {
+  return {
+    kind: "feature_detail",
+    universe: UNIVERSE_ID,
+    time: universeTimeFromYears(100),
+    feature: OPEN_CLUSTER,
+    structure: {
+      type: "cluster",
+      core_radius_ly: 0.916_490_737_743_348_5,
+      half_mass_radius_ly: 2.110_349_946_105_902_8,
+      tidal_radius_ly: 26.909_037_649_658_29,
+      central_escape_speed_km_s: 2.055_194_871_289_066,
+      relaxation_time_myr: 3.893_000_282_736_426_5,
+      core_collapsed: false,
+      black_holes: 0,
+      classes: [
+        {
+          class: {
+            type: "cluster",
+            kind: "living",
+            band: "a",
+            generation: "first",
+            multiplicity: "single",
+          },
+          initial_mass_min_msun: 0.08,
+          initial_mass_max_msun: 0.5,
+          mean_mass_msun: 0.287_672_421_139_877_73,
+          expected: 41.129_073_526_749_906,
+        },
+        {
+          class: {
+            type: "cluster",
+            kind: "living",
+            band: "a",
+            generation: "first",
+            multiplicity: "binary",
+          },
+          initial_mass_min_msun: 0.08,
+          initial_mass_max_msun: 0.5,
+          mean_mass_msun: 0.431_508_631_709_816_57,
+          expected: 17.626_745_797_178_533,
+        },
+      ],
+    },
+  };
+}
+
+/** The golden's cloud detail of `FNF F260`, at the epoch. */
+export function aCloudDetail(): ResponseFor<"feature_detail"> {
+  return {
+    kind: "feature_detail",
+    universe: UNIVERSE_ID,
+    time: universeTimeFromYears(0),
+    feature: MOLECULAR_CLOUD,
+    structure: {
+      type: "cloud",
+      core_radius_ly: 15.779_983_166_698_207,
+      central_density_per_cm3: 1_073.989_208_075_869,
+    },
+  };
+}
+
+/** The golden's centre detail at the epoch, with none of its classes. */
+export function aCentreDetail(): ResponseFor<"feature_detail"> {
+  return {
+    kind: "feature_detail",
+    universe: UNIVERSE_ID,
+    time: universeTimeFromYears(0),
+    feature: GALACTIC_CENTRE,
+    structure: {
+      type: "centre",
+      influence_radius_ly: 10_000.000_000_000_01,
+      loss_cone_radius_ly: 0.000_085_231_461_947_658_41,
+      classes: [],
+    },
+  };
+}
+
+/** The golden's black hole at the epoch, with its two newest disruptions of the many. */
+export function aBlackHoleState(): ResponseFor<"black_hole_state"> {
+  return {
+    kind: "black_hole_state",
+    universe: UNIVERSE_ID,
+    time: universeTimeFromYears(0),
+    id: "f000000700000000",
+    mass_msun: 84_173_629.874_983_71,
+    luminosity: {
+      quiescent_w: 3.6e26,
+      flares_w: 0,
+      tails_w: 1.653_609_449_323_589_4e28,
+      total_w: 1.689_609_449_323_589_3e28,
+    },
+    disruptions: [
+      {
+        victim: "f000000700000009",
+        time: { seconds: -1_372_618_232_176, nanos: 856_405_493 },
+        star_mass_msun: 0.134_905_705_546_258_03,
+        outcome: "swallowed_whole",
+        peak_luminosity_w: null,
+      },
+      {
+        victim: "f000000700000008",
+        time: { seconds: -1_396_191_207_374, nanos: 572_342_006 },
+        star_mass_msun: 0.188_384_620_749_928_4,
+        outcome: "swallowed_whole",
+        peak_luminosity_w: null,
+      },
+    ],
+  };
+}

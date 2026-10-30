@@ -1,15 +1,25 @@
-import { universeTimeFromYears } from "@hyperion/protocol";
+import {
+  type FeatureKindCensus,
+  type RequestKind,
+  universeTimeFromYears,
+} from "@hyperion/protocol";
 import { type ReactNode, useId, useState } from "react";
 
 import { RequestStatus } from "../../components/RequestStatus";
 import { StatusLine } from "../../components/StatusLine";
 import { StatusText } from "../../components/StatusText";
+import { featureKindAbbreviation } from "../../lib/galaxy/featureWords";
 import { NOW_MODE, sameQueryMode } from "../../lib/galaxy/model";
 import { useUniverse } from "../../lib/universe";
+import type { RequestState } from "../../lib/useServerRequest";
 import { type SummaryTarget, useSystemSummary } from "../system/useSystemSummary";
 import { type SystemTarget, systemTargetFor } from "../system/systemTarget";
+import { FeatureList } from "./FeatureList";
+import { FeatureReadout } from "./FeatureReadout";
 import { SystemList } from "./SystemList";
 import { SystemReadout } from "./SystemReadout";
+import { useBlackHoleState } from "./useBlackHoleState";
+import { useFeatureDetail } from "./useFeatureDetail";
 import type { LocalChartState } from "./useLocalChart";
 
 /**
@@ -17,6 +27,49 @@ import type { LocalChartState } from "./useLocalChart";
  * and a refusal with its reason, as `RequestStatus` writes one (decision-gg-port-d0 §2.1).
  */
 const NO_SUCH_SYSTEM = "EXTINCTION REJECTED: no such system";
+
+/** Which of the chart's two lists the panel shows (plan 09, P09.T41.c). */
+type ChartList = "systems" | "features";
+
+/** Each list's choice, in the order offered. */
+const LISTS: ReadonlyArray<{ readonly list: ChartList; readonly label: string }> = [
+  { list: "systems", label: "SYSTEMS" },
+  { list: "features", label: "FEATURES" },
+];
+
+/**
+ * What the features' census says beyond the list (plan 09, P09.T41.c), or `null` with nothing to
+ * say: the kinds left out by the server's cell budget, as the systems' census says of a layer, and
+ * those it does not generate, plan 10's streams and dwarf cores, in the data state for what this
+ * generator version does not compute, so that neither reads as none; or, where every kind is in and
+ * none is in range, that none is.
+ */
+export function featureCensusWords(
+  census: ReadonlyArray<FeatureKindCensus>,
+  returned: number,
+): string | null {
+  const of = (status: FeatureKindCensus["status"]): string[] =>
+    census
+      .filter((line) => line.status === status)
+      .map((line) => featureKindAbbreviation(line.kind));
+  const overBudget = of("over_cell_budget");
+  const notGenerated = of("not_generated");
+  const parts = [
+    overBudget.length === 0
+      ? null
+      : `LARGE VOLUME: ${overBudget.join(", ")} over the server cell budget; reduce radius`,
+    notGenerated.length === 0 ? null : `${notGenerated.join(", ")} NOT YET MODELLED`,
+  ].filter((part) => part !== null);
+  if (parts.length === 0) {
+    return returned === 0 ? "NO FEATURES IN RANGE" : null;
+  }
+  return parts.join(" · ");
+}
+
+/** Whether a request ended in a failure, which leaves an answer kept from before a snapshot. */
+function failedState(state: RequestState<RequestKind>): boolean {
+  return state.kind === "rejected" || state.kind === "timed_out";
+}
 
 interface SystemsPanelProps {
   readonly chart: LocalChartState;
@@ -64,6 +117,18 @@ interface SystemsPanelProps {
  * system reads `EXTINCTION REJECTED: no such system`, a refusal with no `RETRY`, and an answer the
  * client cannot read `EXTINCTION DATA INVALID` with `RETRY`. The link's state is shown once, by the
  * summary's status where that shows it (decision-gg-port-d0 §2.1).
+ *
+ * The chart's features are its second list (plan 09, P09.T41.c), shown in the systems' place, one
+ * list at a time, so that the column keeps its rows: `SYSTEMS` and `FEATURES` beside the panel's
+ * title choose between them, one stop in the tab order, the arrows moving from one to the other,
+ * and a selection made on the chart shows the list it is in. The features' list
+ * ({@link FeatureList}) has the systems' keyboard selection, and under it what the features'
+ * census leaves out; until an answer for the chart on show arrives it says `FEATURES PENDING`. The
+ * selection is a system or a feature, and a feature's readout ({@link FeatureReadout}) stands in
+ * the system's: its structure is asked for at the chart's time (`feature_detail`), and for the
+ * galactic centre its black hole (`black_hole_state`), each request's state said after it, its
+ * subject `STRUCTURE` or `BLACK HOLE` before it. A feature is no system to open, so `OPEN SYSTEM`
+ * says `NO SYSTEM SELECTED` meanwhile.
  */
 export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
   const titleId = useId();
@@ -71,6 +136,45 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
   const { open } = useUniverse();
   const { result, fault, stale } = chart;
   const selected = chart.selected;
+  const selectedFeature = chart.selectedFeature;
+  const [listChoice, setListChoice] = useState<ChartList>("systems");
+  // A selection made on the chart shows the list it is in, so that it is shown in both places.
+  const selectionKey =
+    selectedFeature === null ? chart.selectedId : `feature:${selectedFeature.id}`;
+  const [seenSelection, setSeenSelection] = useState<string | null>(null);
+  let list = listChoice;
+  if (selectionKey !== seenSelection) {
+    setSeenSelection(selectionKey);
+    const wanted: ChartList | null =
+      selectedFeature === null ? (selected === null ? null : "systems") : "features";
+    if (wanted !== null && wanted !== listChoice) {
+      list = wanted;
+      setListChoice(wanted);
+    }
+  }
+  const chartTimeYr = result?.timeYr ?? chart.timeYr;
+  const [featureGeneration, setFeatureGeneration] = useState(0);
+  const detail = useFeatureDetail({
+    universe: open?.id ?? null,
+    feature: selectedFeature?.id ?? null,
+    timeYr: chartTimeYr,
+    generation: featureGeneration,
+  });
+  const centreSelected = selectedFeature?.kind === "galactic_centre";
+  const blackHole = useBlackHoleState(
+    centreSelected ? (open?.id ?? null) : null,
+    chartTimeYr,
+    featureGeneration,
+  );
+  const retryFeature = (): void => {
+    setFeatureGeneration((count) => count + 1);
+  };
+  // An answer for a time the chart has left, or kept through a newer request that failed.
+  const detailStale =
+    detail.shown !== null && (detail.shown.timeYr !== chartTimeYr || failedState(detail.state));
+  const blackHoleStale =
+    blackHole.shown !== null &&
+    (blackHole.shown.timeYr !== chartTimeYr || failedState(blackHole.state));
   const bands = chart.bands;
   // A free-floating object has no system to open until plan 14 gives it bodies (P14.T27). An object
   // of a layer this build does not know is offered, and the server answers for what it has.
@@ -147,20 +251,57 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
       }
       aria-labelledby={titleId}
     >
-      <h2 className="panel__title" id={titleId}>
-        Systems
-      </h2>
+      <div className="systems-panel__head">
+        <h2 className="panel__title" id={titleId}>
+          Systems
+        </h2>
+        {/*
+         * The chart's two lists, one shown at a time, so that the column at 1280 x 720 keeps the
+         * list's four rows and the readout (plan 09, P09.T41.c). A display control, never held
+         * back, its choice's button pressed and ruled under, as the mode's is.
+         */}
+        <fieldset className="form-choice systems-panel__lists">
+          <legend className="visually-hidden">LIST</legend>
+          {LISTS.map(({ list: each, label }) => (
+            <button
+              key={each}
+              type="button"
+              className="control mode-control__button"
+              aria-pressed={each === list}
+              // One stop in the tab order, the list shown's, the arrows moving between the two, so
+              // that the list is still one `Tab` from the `CURSOR` fields beyond it.
+              tabIndex={each === list ? 0 : -1}
+              onClick={() => {
+                setListChoice(each);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+                  return;
+                }
+                event.preventDefault();
+                const other: ChartList = each === "systems" ? "features" : "systems";
+                setListChoice(other);
+                const group = event.currentTarget.parentElement;
+                group?.querySelector<HTMLButtonElement>(`[data-list="${other}"]`)?.focus();
+              }}
+              data-list={each}
+            >
+              {label}
+            </button>
+          ))}
+        </fieldset>
+      </div>
       {result === null ? (
         <p className="panel__empty">
           <StatusText
             text={
               fault === null
-                ? "NO CHART: centre one to list its systems"
+                ? `NO CHART: centre one to list its ${list}`
                 : "CHART DATA INVALID: retry on the LOCAL CHART page"
             }
           />
         </p>
-      ) : (
+      ) : list === "systems" ? (
         <SystemList
           systems={chart.systems}
           selectedId={chart.selectedId}
@@ -169,29 +310,57 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
           distanceDecimals={chart.distanceDecimals}
           stale={stale}
         />
+      ) : (
+        <FeatureListPart chart={chart} />
       )}
-      <SystemReadout
-        system={chart.selected}
-        frame={chart.frame}
-        driveRangeLy={chart.driveRangeLy}
-        timeYr={result?.timeYr ?? chart.timeYr}
-        distanceDecimals={chart.distanceDecimals}
-        stars={stars}
-        stale={stale}
-        starsStale={starsStale}
-        starsAt={summary.shownEmitted}
-        extinction={answer.kind === "line" ? answer.line : null}
-      />
-      {summary.shown?.kind === "fault" ? (
-        <StatusLine
-          text={`SYSTEM DATA INVALID: ${summary.shown.fault}`}
-          standing="fault"
-          action={{ label: "RETRY", onAction: retry }}
+      {selectedFeature === null ? (
+        <SystemReadout
+          system={chart.selected}
+          frame={chart.frame}
+          driveRangeLy={chart.driveRangeLy}
+          timeYr={chartTimeYr}
+          distanceDecimals={chart.distanceDecimals}
+          stars={stars}
+          stale={stale}
+          starsStale={starsStale}
+          starsAt={summary.shownEmitted}
+          extinction={answer.kind === "line" ? answer.line : null}
+          features={chart.features?.features}
         />
       ) : (
-        <RequestStatus state={summary.state} onRetry={retry} />
+        <FeatureReadout
+          feature={selectedFeature}
+          timeYr={chartTimeYr}
+          distanceDecimals={chart.distanceDecimals}
+          stale={stale}
+          detail={detail.shown}
+          detailStale={detailStale}
+          blackHole={centreSelected ? blackHole.shown : null}
+          blackHoleStale={blackHoleStale}
+        />
       )}
-      {extinctionStatus}
+      {selectedFeature === null ? (
+        <>
+          {summary.shown?.kind === "fault" ? (
+            <StatusLine
+              text={`SYSTEM DATA INVALID: ${summary.shown.fault}`}
+              standing="fault"
+              action={{ label: "RETRY", onAction: retry }}
+            />
+          ) : (
+            <RequestStatus state={summary.state} onRetry={retry} />
+          )}
+          {extinctionStatus}
+        </>
+      ) : (
+        <>
+          <RequestStatus state={detail.state} subject="STRUCTURE" onRetry={retryFeature} />
+          {/* The link's state is said once, by the structure's status. */}
+          {centreSelected && blackHole.state.kind !== "link_down" ? (
+            <RequestStatus state={blackHole.state} subject="BLACK HOLE" onRetry={retryFeature} />
+          ) : null}
+        </>
+      )}
       <div className="systems-panel__actions">
         <button
           type="button"
@@ -218,5 +387,50 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
         ) : null}
       </div>
     </section>
+  );
+}
+
+interface FeatureListPartProps {
+  readonly chart: LocalChartState;
+}
+
+/**
+ * The chart's features, as the panel lists them (plan 09, P09.T41.c): the list and what the census
+ * says beyond it, or where the features' request stands, `FEATURES PENDING` until an answer for the
+ * chart on show arrives, so that unfetched features never look absent, a failure with `RETRY`, and
+ * an answer the client cannot use as `FEATURE DATA INVALID` with `RETRY`.
+ */
+function FeatureListPart({ chart }: FeatureListPartProps) {
+  const { features, featureFault, featureState, stale } = chart;
+  if (featureFault !== null) {
+    return (
+      <StatusLine
+        text={`FEATURE DATA INVALID: ${featureFault}`}
+        standing="fault"
+        action={{ label: "RETRY", onAction: chart.retryFeatures }}
+      />
+    );
+  }
+  if (features === null) {
+    // An answer for another chart than the one on show is one still to come.
+    const state = featureState.kind === "ok" ? { kind: "pending" as const } : featureState;
+    return <RequestStatus state={state} subject="FEATURES" onRetry={chart.retryFeatures} />;
+  }
+  const censusWords = featureCensusWords(features.census, features.features.length);
+  return (
+    <>
+      <FeatureList
+        features={features.features}
+        selectedId={chart.selectedFeature?.id ?? null}
+        onSelect={chart.selectFeature}
+        distanceDecimals={chart.distanceDecimals}
+        stale={stale}
+      />
+      {censusWords === null ? null : (
+        <p className="feature-list__census">
+          <StatusText text={censusWords} />
+        </p>
+      )}
+    </>
   );
 }

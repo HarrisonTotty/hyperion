@@ -367,9 +367,11 @@ async function answerQuery({ socket }: Session): Promise<void> {
 
 /** 8. The list of systems is reached with `Tab`, and the next system selected. */
 async function selectSystem({ user }: Session): Promise<void> {
-  // The list is the next stop after the `CURSOR` fields, so one `Tab` from the last of them
-  // reaches it; the step asserts the focus landed there.
+  // The list is the next stop after the `CURSOR` fields but the panel's choice of list (plan 09,
+  // P09.T41.c), one stop itself, so two `Tab`s from the last of them reach it; the step asserts
+  // the focus landed there.
   await user.click(within(cursorPanel()).getByRole("textbox", { name: "Z" }));
+  await user.tab();
   await user.tab();
   await user.keyboard("{ArrowDown}");
 }
@@ -601,6 +603,7 @@ describe("the GALAXY display, end to end", { timeout: 300_000 }, () => {
   it("announces a selection once, from the selected system's readout alone", async () => {
     const { user } = await playTo("charted");
     await user.click(within(cursorPanel()).getByRole("textbox", { name: "Z" }));
+    await user.tab();
     await user.tab();
 
     const announced = await announcements(() => user.keyboard("{ArrowDown}"));

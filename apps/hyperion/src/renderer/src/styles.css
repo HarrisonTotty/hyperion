@@ -2752,6 +2752,59 @@ body {
   margin-left: auto;
 }
 
+/*
+ * The chart's features' list (plan 09, P09.T41.c), the system list's twin with its own columns:
+ * designation, kind's abbreviation (`CENTRE`, six characters), distance, extent in light-years to
+ * three figures (`1.23E-4`, seven), and mass to three figures with its unit and the row's one stale
+ * slot (`3.80E7 M☉ S`). In a narrow list the designation takes a line of its own, as a system's
+ * does.
+ */
+.feature-list .system-list__head,
+.feature-list .system-list__row {
+  grid-template-columns: minmax(0, 1fr) 7ch 7ch 7.5ch 11.5ch;
+}
+
+@container (max-width: 42rem) {
+  .feature-list .system-list__head,
+  .feature-list .system-list__row {
+    grid-template-columns: minmax(0, 1fr) 7ch 7.5ch 11.5ch;
+  }
+}
+
+.feature-list__mass {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.25ch;
+}
+
+/* What the features' census says beyond the list: a kind left out, or none in range. */
+.feature-list__census {
+  flex: none;
+  margin: 0;
+  color: var(--text-muted);
+}
+
+/* The panel's title, and beside it the choice of which of the chart's lists it shows. */
+.systems-panel__head {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0 1rem;
+}
+
+.systems-panel__head > .panel__title {
+  margin-bottom: 0;
+}
+
+/* A group of two display controls, unframed, its legend for assistive technology alone. */
+.systems-panel__lists {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+}
+
 .system-list__class {
   overflow: hidden;
   font-family: var(--font-mono);

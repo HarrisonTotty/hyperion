@@ -15,16 +15,23 @@
  * Missing, so that the switches over them stay exhaustive.
  */
 import type {
+  CatalogueClassWire,
+  CentreTracerWire,
+  ClassKindWire,
+  DisruptionOutcomeWire,
   EmissionClassWire,
   FeatureIdHex,
   FeatureKindCensus,
   FeatureKindWire,
+  GenerationWire,
   LayerCensus,
   LayerStatus,
   MapFeatureKindWire,
   MassLayer,
+  MultiplicityWire,
   ObjectKindDto,
   Population,
+  ShellPhaseWire,
   SystemIdHex,
 } from "@hyperion/protocol";
 
@@ -215,7 +222,106 @@ export interface ChartSystem {
    * server built before P12.T6 ignores the mode.
    */
   readonly observed: Observation | null;
+  /** What placed it (plan 09, P09.T39). */
+  readonly origin: SystemOrigin;
+  /** Its class in its feature's tables, for a member of a feature or of the centre; else `null`. */
+  readonly memberClass: MemberClass | null;
+  /** What it is as a supernova catalogue entry at the chart's time; `null` for any other system. */
+  readonly supernova: SupernovaState | null;
 }
+
+/**
+ * A catalogue class (plan 09's `ClassId` registry) as the wire names it, or `unknown` for one this
+ * build does not know: the enum grows (plan 04's reserved list), so a newer server may send a class
+ * registered later, which reads Missing.
+ */
+export type CatalogueClass = CatalogueClassWire | "unknown";
+
+/**
+ * What placed a system (plan 09, P09.T39): a layer's grid, a feature, the galactic centre or a
+ * catalogue class; `not_sent` for a row from a server that does not say, as one before P09.T40
+ * does not and P09.T40's does not before its members' gate opens (P09.T2.c, version 26); and
+ * `unknown` for an origin this build does not know, which the enum's growing allows (plan 04's
+ * reserved list) and which reads Missing.
+ */
+export type SystemOrigin =
+  | { readonly kind: "not_sent" }
+  | { readonly kind: "grid" }
+  | { readonly kind: "feature_member"; readonly feature: FeatureIdHex }
+  | { readonly kind: "centre_member" }
+  | { readonly kind: "catalogue_system"; readonly catalogueClass: CatalogueClass }
+  | { readonly kind: "unknown" };
+
+/**
+ * A member's class in its feature's tables (plan 09, P09.T39): what its systems are and where in a
+ * cluster's or the centre's tables they were drawn from, or the catalogue class of an entry of a
+ * feature-level list; `unknown` for a class this build does not know, which reads Missing.
+ */
+export type MemberClass =
+  | {
+      readonly kind: "cluster";
+      readonly classKind: ClassKindWire;
+      /** The layer whose band its primaries' initial masses fall in. */
+      readonly band: MassLayer;
+      readonly generation: GenerationWire;
+      readonly multiplicity: MultiplicityWire;
+    }
+  | {
+      readonly kind: "centre";
+      readonly classKind: ClassKindWire;
+      readonly band: MassLayer;
+      /** The index of the star-formation episode its members were born in, from 0, the oldest. */
+      readonly episode: number;
+      readonly tracer: CentreTracerWire;
+    }
+  | { readonly kind: "listed"; readonly catalogueClass: CatalogueClass }
+  | { readonly kind: "unknown" };
+
+/** A supernova remnant's shell at one age (plan 09's `ShellState`). */
+export interface ShellState {
+  /** The radius of its outer shock from the explosion site. */
+  readonly radiusLy: number;
+  readonly shockSpeedKmS: number;
+  readonly phase: ShellPhaseWire;
+  /** Bright in X-rays and radio: free expansion and Sedov–Taylor. */
+  readonly xRayAndRadio: boolean;
+  /** Optical filaments, its shock faster than 70 km/s. */
+  readonly optical: boolean;
+  /** A shell of neutral hydrogen seen at 21 cm: the two snowplough phases. */
+  readonly neutralHydrogen: boolean;
+}
+
+/** What a supernova left, at one time after it (plan 09's `RemnantState`). */
+export interface RemnantState {
+  /** The compact remnant's distance from the explosion site; `null` where it left none. */
+  readonly offsetLy: number | null;
+  /** Whether the compact remnant drives a bow shock. */
+  readonly bowShock: boolean;
+  /** The spin-down luminosity powering its pulsar's wind nebula, in watts; `null` for none. */
+  readonly nebulaPowerW: number | null;
+  /** A Type Ia's surviving companion's distance from the site; `null` for none. */
+  readonly survivorOffsetLy: number | null;
+}
+
+/**
+ * What a supernova catalogue entry is at the chart's time (plan 09's `SupernovaState`): the living
+ * progenitor, the supernova with its shell, or once the shell has merged with the gas, the bare
+ * remnant.
+ */
+export type SupernovaState =
+  | {
+      readonly kind: "progenitor";
+      readonly untilExplosionYr: number;
+      /** A Type Ia's double white dwarf's orbital period, in seconds; `null` for any other. */
+      readonly pairPeriodS: number | null;
+    }
+  | {
+      readonly kind: "supernova";
+      readonly ageYr: number;
+      readonly shell: ShellState;
+      readonly remnant: RemnantState;
+    }
+  | { readonly kind: "bare_remnant"; readonly ageYr: number; readonly remnant: RemnantState };
 
 /** Myr in one Julian year, the light age's unit on the wire. */
 const MYR_PER_YR = 1e-6;
@@ -372,3 +478,67 @@ export type MapFeatureLayer =
       readonly shells: ReadonlyArray<MapShell>;
     }
   | { readonly kind: MapFeatureKindWire; readonly status: "not_generated" };
+
+/** One member class of a feature with its expected count (plan 09's `ClassCount`). */
+export interface ClassCount {
+  readonly memberClass: MemberClass;
+  readonly initialMassMinMsun: number;
+  readonly initialMassMaxMsun: number;
+  /** The mean present mass of its systems. */
+  readonly meanMassMsun: number;
+  /** Its expected count: an expectation, not a count of rows. */
+  readonly expected: number;
+}
+
+/** A feature's structure at a time (plan 09, P09.T40.b's `feature_detail`), by what it is. */
+export type FeatureStructure =
+  | {
+      readonly kind: "cluster";
+      readonly coreRadiusLy: number;
+      readonly halfMassRadiusLy: number;
+      readonly tidalRadiusLy: number;
+      readonly centralEscapeSpeedKmS: number;
+      readonly relaxationTimeMyr: number;
+      readonly coreCollapsed: boolean;
+      /** The expected number of stellar black holes it still holds. */
+      readonly blackHoles: number;
+      readonly classes: ReadonlyArray<ClassCount>;
+    }
+  | {
+      readonly kind: "centre";
+      readonly influenceRadiusLy: number;
+      readonly lossConeRadiusLy: number;
+      readonly classes: ReadonlyArray<ClassCount>;
+    }
+  | { readonly kind: "cloud"; readonly coreRadiusLy: number; readonly centralDensityPerCm3: number }
+  | { readonly kind: "association"; readonly radiusLy: number; readonly expansionSpeedKmS: number };
+
+/** One feature's detail at a time: what the readout adds to its summary. */
+export interface FeatureDetailModel {
+  readonly id: FeatureIdHex;
+  /** The time it describes, in years from the epoch. */
+  readonly timeYr: number;
+  readonly structure: FeatureStructure;
+}
+
+/** One tidal disruption by the central black hole (plan 09's `TidalDisruptionVictim`). */
+export interface TidalDisruption {
+  readonly victim: SystemIdHex;
+  /** Its pericentre passage, in years from the epoch. */
+  readonly timeYr: number;
+  readonly starMassMsun: number;
+  readonly outcome: DisruptionOutcomeWire;
+  /** Its debris tail's peak 2–10 keV luminosity, in watts; `null` for a star swallowed whole. */
+  readonly peakLuminosityW: number | null;
+}
+
+/** The central black hole at a time (plan 09, P09.T40.b's `black_hole_state`). */
+export interface BlackHoleModel {
+  /** The time it describes, in years from the epoch. */
+  readonly timeYr: number;
+  readonly massMsun: number;
+  /** Its unabsorbed 2–10 keV luminosity, in watts; `null` from a server that does not say. */
+  readonly luminosityW: number | null;
+  /** Its disruptions at or before the time, newest first. */
+  readonly disruptions: ReadonlyArray<TidalDisruption>;
+}

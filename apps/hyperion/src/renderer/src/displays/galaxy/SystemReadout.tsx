@@ -19,7 +19,12 @@ import {
   formatUniverseTimeYr,
   TIME_SYSTEM_LABEL,
 } from "../../lib/format";
-import { type ChartSystem, isFormedPlanet, observedAgeMyr } from "../../lib/galaxy/model";
+import {
+  type ChartFeature,
+  type ChartSystem,
+  isFormedPlanet,
+  observedAgeMyr,
+} from "../../lib/galaxy/model";
 import {
   type BoundUnit,
   EMITTED_WIDTH_CH,
@@ -40,6 +45,7 @@ import {
   toLocal,
 } from "../../geometry/frame";
 import { TIME_WIDTH_CH } from "./chartReadings";
+import { OriginReadings } from "./OriginReadings";
 import { PrimaryReadings } from "./PrimaryReadings";
 import type { LineExtinction } from "./useExtinction";
 import { SystemReading as Reading } from "./SystemReading";
@@ -104,7 +110,15 @@ export interface SystemReadoutProps {
    * a failed request (plan 07, P07.T11.c); where the request stands is said beside the readout.
    */
   readonly extinction: LineExtinction | null;
+  /**
+   * The features of the chart on show, from which a member's `ORIGIN` names its feature (plan 09,
+   * P09.T41.c); none when absent.
+   */
+  readonly features?: ReadonlyArray<ChartFeature> | undefined;
 }
+
+/** The features of a readout given none, one list for every render. */
+const NO_FEATURES: ReadonlyArray<ChartFeature> = [];
 
 /** The state of a readout of a system as its light shows it (plan 12, P12.T11). */
 export const AS_OBSERVED = "AS OBSERVED";
@@ -293,6 +307,11 @@ function ageReading(system: ChartSystem | null): AgeShown {
  * when the summary is a snapshot of its own (`starsStale`): kept for a time the chart has left, or
  * after a newer request failed.
  *
+ * After `POPULATION`, what placed the system (plan 09, P09.T41.c; {@link OriginReadings}): its
+ * `ORIGIN`, `NOT YET MODELLED` from a server that does not say, a member's `MEMBER CLASS`, and a
+ * supernova catalogue entry's state; an origin, a catalogue class or a member class this build does
+ * not know reads Missing, and every other reading as before.
+ *
  * A row the chart was answered in observed mode reads `AS OBSERVED` (plan 12, P12.T11), on a line
  * above the scrolling readings, so that it stays on show however far they are scrolled, and in the
  * live region, so that a selection is announced with it; a row without its observation reads as
@@ -324,6 +343,7 @@ export function SystemReadout({
   starsStale,
   starsAt = null,
   extinction,
+  features = NO_FEATURES,
 }: SystemReadoutProps) {
   // The summary is a snapshot when the chart's answer is, as well as when it lags the chart.
   const summaryStale = stale || starsStale;
@@ -533,6 +553,12 @@ export function SystemReadout({
               wide
               stale={stale}
             />
+            {/* What placed it, a member's class and a supernova's state (plan 09, P09.T41.c). */}
+            {system === null ? (
+              <Reading label="ORIGIN" value={null} wide stale={stale} />
+            ) : (
+              <OriginReadings system={system} features={features} stale={stale} />
+            )}
             <Reading
               label="[Fe/H]"
               symbol

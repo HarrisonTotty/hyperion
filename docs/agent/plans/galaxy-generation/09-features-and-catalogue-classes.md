@@ -4534,6 +4534,20 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - `mapLayout`'s face-on words gain `FEATURES_ROW_REM` = 2.25 rem, estimated, not measured: plan 07's
     hidden runs should re-measure it (the stacked overlay's room at 1920 × 1080 now has 20 px).
   - Not drawn: a globular beyond the edge-on picture's ±32,768 ly; nothing is pegged.
+- **P09.T41.c, records (lane `p09-t41`, 2026-10-30, at 23 and 3; client only).**
+  - `ChartSystem` gains `origin: SystemOrigin` (`not_sent`, `unknown` and the four wire arms),
+    `memberClass: MemberClass | null` and `supernova: SupernovaState | null`, built by
+    `toSystemOrigin`, `toMemberClass` and `toSupernovaState` (`lib/galaxy/featureWire.ts`) inside
+    `toChartSystem`; unknown values are found by `Object.hasOwn` against the known tags and classes.
+  - The panel shows one of two lists, `SYSTEMS` or `FEATURES` (`FeatureList`), one tab stop; a feature
+    selected shows `FeatureReadout`, with `useFeatureDetail` (`STRUCTURE`) and, for the centre,
+    `useBlackHoleState` (`BLACK HOLE`: mass, total 2–10 keV luminosity, disruptions). P09.T42's
+    `BLACK HOLE` readout builds on that heading.
+  - `OriginReadings` adds `ORIGIN`, `MEMBER CLASS` and the supernova rows to the system readout,
+    `SystemReadout` taking the chart's `features`; T44's remnant rows are these.
+  - Leans (2026-10-30): a grid system's `ORIGIN` is its population alone until P08.T15.a sends a
+    placement; an absent origin reads `NOT YET MODELLED`; zero expected members read `NONE`; the slow
+    hosts' accreting white dwarfs read `SLOW ACCRETING WD`.
 - **P09.T33.a as built (lane `p09-classes`, 2026-10-29, at `GENERATOR_VERSION` 23, no output
   moves).** The first production class, registered: `ProductionClasses` has the
   `CORE_COLLAPSE` arm and plan 03's `placement::resolve` hands every `111` ID to the class grid

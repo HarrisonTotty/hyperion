@@ -27,6 +27,7 @@ import {
 } from "@hyperion/protocol";
 
 import type { Vec3 } from "../../geometry/vec3";
+import { toMemberClass, toSupernovaState, toSystemOrigin } from "./featureWire";
 import {
   type CentreLy,
   type ChartKind,
@@ -150,6 +151,12 @@ function toChartSystem(centre: GalacticPosition, record: SystemRecord): ChartSys
     // Only a row answered in observed mode carries it: one from a server that ignored the mode is
     // the present's, whatever was asked (the port ruling, §6.2).
     observed: record.observed === undefined ? null : toObservation(centre, record.observed),
+    // A row from a server that does not say leaves the three out (plan 09, P09.T39), and an origin
+    // or a class this build does not know reads as unknown, so that the readout's switches stay
+    // exhaustive.
+    origin: toSystemOrigin(record.origin),
+    memberClass: record.member_class === undefined ? null : toMemberClass(record.member_class),
+    supernova: record.supernova === undefined ? null : toSupernovaState(record.supernova),
   };
 }
 

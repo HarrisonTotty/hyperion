@@ -3,7 +3,18 @@
  * list: each kind's abbreviation, which stands beside its mark, and its name in words, which the
  * list and the readout give.
  */
-import type { FeatureKindWire, MapFeatureKindWire } from "@hyperion/protocol";
+import type {
+  CatalogueClassWire,
+  CentreTracerWire,
+  ClassKindWire,
+  EmissionClassWire,
+  FeatureKindWire,
+  MapFeatureKindWire,
+  ShellPhaseWire,
+} from "@hyperion/protocol";
+
+import type { CatalogueClass, MemberClass } from "./model";
+import { layerLetter } from "./wire";
 
 /**
  * A feature kind's abbreviation, as its mark's label and the list's `KIND` column write it: `GC`,
@@ -84,6 +95,206 @@ export function mapFeatureKindWords(kind: MapFeatureKindWire, count: number): st
       break;
     case "bright_shell":
       words = `${String(count)} bright supernova remnant ${count === 1 ? "shell" : "shells"}`;
+      break;
+  }
+  return words;
+}
+
+/** A feature kind in words, as the list's name for a row and the readout's `KIND` give it. */
+export function featureKindWords(kind: FeatureKindWire): string {
+  let words: string;
+  switch (kind) {
+    case "globular":
+      words = "GLOBULAR CLUSTER";
+      break;
+    case "open_cluster":
+      words = "OPEN CLUSTER";
+      break;
+    case "association":
+      words = "OB ASSOCIATION";
+      break;
+    case "star_forming_region":
+      words = "STAR-FORMING REGION";
+      break;
+    case "molecular_cloud":
+      words = "MOLECULAR CLOUD";
+      break;
+    case "galactic_centre":
+      words = "GALACTIC CENTRE";
+      break;
+    case "stream":
+      words = "STREAM";
+      break;
+    case "dwarf_core":
+      words = "DWARF CORE";
+      break;
+  }
+  return words;
+}
+
+/**
+ * A feature's emission class as the guide names it: `H II`, `REFLECTION`, `DARK CLOUD`, `SNR` and
+ * `PWN`.
+ */
+export function emissionWords(emission: EmissionClassWire): string {
+  let words: string;
+  switch (emission) {
+    case "hii_region":
+      words = "H II";
+      break;
+    case "reflection_nebula":
+      words = "REFLECTION";
+      break;
+    case "dark_cloud":
+      words = "DARK CLOUD";
+      break;
+    case "remnant_shell":
+      words = "SNR";
+      break;
+    case "pulsar_wind_nebula":
+      words = "PWN";
+      break;
+  }
+  return words;
+}
+
+/** A catalogue class this build knows, in words. */
+function knownCatalogueClassWords(value: CatalogueClassWire): string {
+  let words: string;
+  switch (value) {
+    case "core_collapse":
+      words = "CORE-COLLAPSE SUPERNOVA";
+      break;
+    case "type_ia":
+      words = "TYPE IA SUPERNOVA";
+      break;
+    case "stellar_merger":
+      words = "STELLAR MERGER";
+      break;
+    case "neutron_star_merger":
+      words = "NEUTRON STAR MERGER";
+      break;
+    case "luminous_blue_variable":
+      words = "LUMINOUS BLUE VARIABLE";
+      break;
+    case "xray_binary":
+      words = "X-RAY BINARY";
+      break;
+    case "accreting_white_dwarf":
+      words = "ACCRETING WD";
+      break;
+    case "tidal_disruption_victim":
+      words = "TIDAL DISRUPTION VICTIM";
+      break;
+    case "accreting_white_dwarf_slow":
+      words = "SLOW ACCRETING WD";
+      break;
+  }
+  return words;
+}
+
+/**
+ * A catalogue class in words (plan 09's registry): `X-RAY BINARY`, `CORE-COLLAPSE SUPERNOVA`; `null`
+ * for one this build does not know, which reads Missing.
+ */
+export function catalogueClassWords(value: CatalogueClass): string | null {
+  return value === "unknown" ? null : knownCatalogueClassWords(value);
+}
+
+/** What a member class's systems are, in words. */
+function classKindWords(kind: ClassKindWire): string {
+  let words: string;
+  switch (kind) {
+    case "living":
+      words = "LIVING";
+      break;
+    case "white_dwarf":
+      words = "WHITE DWARF";
+      break;
+    case "neutron_star":
+      words = "NEUTRON STAR";
+      break;
+    case "black_hole":
+      words = "BLACK HOLE";
+      break;
+    case "tail":
+      words = "TIDAL TAIL";
+      break;
+  }
+  return words;
+}
+
+/** The distribution function a centre class's orbits are drawn from, in words. */
+function tracerWords(tracer: CentreTracerWire): string {
+  let words: string;
+  switch (tracer) {
+    case "stars":
+      words = "STARS";
+      break;
+    case "black_holes":
+      words = "BLACK HOLES";
+      break;
+    case "young_disc":
+      words = "YOUNG DISC";
+      break;
+    case "young_isotropic":
+      words = "YOUNG ISOTROPIC";
+      break;
+  }
+  return words;
+}
+
+/**
+ * A member's class in words, its parts joined by a middle dot as a reading's are: what its systems
+ * are, the layer of its primaries' band, and a cluster's generation and multiplicity
+ * (`LIVING · A · FIRST · BINARY`) or the centre's episode and tracer (`LIVING · A · EPISODE 0 ·
+ * STARS`), or a listed entry's catalogue class; `null` for a class or a catalogue class this build
+ * does not know, which reads Missing.
+ */
+export function memberClassWords(memberClass: MemberClass): string | null {
+  let words: string | null;
+  switch (memberClass.kind) {
+    case "cluster":
+      words = [
+        classKindWords(memberClass.classKind),
+        layerLetter(memberClass.band),
+        memberClass.generation.toUpperCase(),
+        memberClass.multiplicity.toUpperCase(),
+      ].join(" · ");
+      break;
+    case "centre":
+      words = [
+        classKindWords(memberClass.classKind),
+        layerLetter(memberClass.band),
+        `EPISODE ${String(memberClass.episode)}`,
+        tracerWords(memberClass.tracer),
+      ].join(" · ");
+      break;
+    case "listed":
+      words = catalogueClassWords(memberClass.catalogueClass);
+      break;
+    case "unknown":
+      words = null;
+      break;
+  }
+  return words;
+}
+
+/** A remnant shell's phase in words. */
+export function shellPhaseWords(phase: ShellPhaseWire): string {
+  let words: string;
+  switch (phase) {
+    case "free_expansion":
+      words = "FREE EXPANSION";
+      break;
+    case "sedov_taylor":
+      words = "SEDOV-TAYLOR";
+      break;
+    case "pressure_driven_snowplough":
+      words = "PRESSURE-DRIVEN SNOWPLOUGH";
+      break;
+    case "momentum_conserving_snowplough":
+      words = "MOMENTUM-CONSERVING SNOWPLOUGH";
       break;
   }
   return words;
