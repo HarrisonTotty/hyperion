@@ -196,8 +196,9 @@ impl Track {
     /// convective envelope that tides, magnetic braking and common envelopes read.
     ///
     /// The closed forms are those of the segment that holds `age` at the track's own coordinate
-    /// there; only the radius and the wind read the mass, as HPT section 7.1 has every phase after
-    /// the main sequence do. A remnant keeps its own mass.
+    /// there; only the radius and the wind read the mass, as HPT section 7.1 has a star that loses
+    /// mass after the main sequence do (BSE's `evolv2.f` raises a heavier Hertzsprung-gap star's M0
+    /// to its mass below `M_FGB`). A remnant keeps its own mass.
     ///
     /// # Panics
     ///

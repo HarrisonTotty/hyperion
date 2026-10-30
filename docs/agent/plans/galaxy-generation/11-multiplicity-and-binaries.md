@@ -1411,12 +1411,12 @@ P11.T4, as built"._
       supergiant or a stripped helium star) is no blocker: a shift of about 10% of the life, from
       a real class of progenitor, recorded.
   - **The switch.**
-    - The pinned primary's own track's main-sequence end age (from `PinnedTrack`'s track) becomes
-      an engine stop. If, at that age, member 0 (or the merger product that holds the pin) is
-      still a carried hydrogen main-sequence star (`Member::MainSequence { helium: false }`), the
-      engine closes the segment there, a listed event. It then carries the star on the pin's own
-      track: `Member::Shaped` at offset 0, at the binary's mass, the form a case-B donor already
-      takes.
+    - The pinned primary's own track's main-sequence end age (from `PinnedTrack`'s track) becomes an
+      engine stop. If, at that age, member 0 holds a hydrogen main sequence that outlasts the pin's
+      own, carried (`Member::MainSequence { helium: false }`) or on a track of its own (a merger's
+      product), the engine closes the segment there, a listed event. It then carries the star on the
+      pin's own track: `Member::Shaped` at offset 0, at the binary's mass, the form a case-B donor
+      already takes.
     - What follows is existing machinery: the radius at the star's mass (HPT §7.1), the
       small-envelope perturbation, a naked helium star once M ≤ Mc, and case AB. The pin falls at
       the own track's death through the existing carried tie. The core becomes Mc,TMS(10.5 M☉)
@@ -6833,12 +6833,13 @@ galaxy_sweeps`.
       ruling's intent: any hydrogen main sequence of member 0 that outlasts the pin's own. The
       product goes on along the pin's own track at its own mass.
     - **A contact pair coalesces at the switch**, as the engine's contact does when a star leaves
-      its main sequence (Nelson and Eggleton 2001's slow case, `Engine::contact`; L2 overflow,
-      Marchant et al. 2016, A&A 588, A50): `mix` of the Hertzsprung-gap star and its main-sequence
-      companion is a common envelope, which in every sampled pair ends in a coalesced
-      Hertzsprung-gap product of the pair's mass on its own full track (`new_star`). In 0223 and
-      0277 that product's own track dies before the pin (16.56 and 44.24 Myr), and it is held there
-      (`Engine::hold`), an early-AGB supergiant, until the pin collapses it.
+      its main sequence (Nelson and Eggleton 2001's slow case, `Engine::contact`; L2 overflow, HTP
+      2002 §2.6.6, which coalesces every contact; Menon et al. 2021, MNRAS 507, 5013, §2.2.3, whose
+      massive contact pairs merge as a star leaves its main sequence): `mix` of the Hertzsprung-gap
+      star and its main-sequence companion is a common envelope, which in every sampled pair ends in
+      a coalesced Hertzsprung-gap product of the pair's mass on its own full track (`new_star`). In
+      0223 and 0277 that product's own track dies before the pin (16.56 and 44.24 Myr), and it is
+      held there (`Engine::hold`), an early-AGB supergiant, until the pin collapses it.
     - **The stop is registered only while member 0 holds such a main sequence**, so that it moves
       no step of any other pair.
     - **T4.k's pin inside a contact** is now a backstop that no pinned contact reaches: a contact
@@ -6913,20 +6914,21 @@ galaxy_sweeps`.
       to +1.009 dex (median +0.54), and to +1.31 in the close pairs. Real donors are overluminous,
       so the direction is right; easing the step over a thermal time is deferred. **New:** a merger
       product heavier than the pin's track steps by −0.46 to +0.35 dex (median +0.02), since the
-      Hertzsprung gap's L reads the track's initial mass (HPT section 7.1), so a heavy product
+      gap's L reads the track's initial mass, as BSE does for a mass-losing star but not for a
+      heavier one below M_FGB (HPT section 7.1; `evolv2.f`), so a heavy product
       dims at the switch.
     - **The core is the own track's at its end**, case-B-like, about twice a real case-A core:
       822C72E00000008C 2.196 M☉, Mc,TMS of the track at its own mass there, 10.15 M☉ after its
-      main-sequence wind (the ruling's 2.3 M☉ is that of 10.49 M☉, the science check); the pinned
-      thousand's case-A donors 1.40–13.2 M☉ (median 2.94).
+      main-sequence wind (the ruling's 2.3 M☉ is HPT's Mc,TMS at 10.49 M☉ with no main-sequence
+      wind; on the track, as in SSE, the star reaches its TAMS at 10.15 M☉); the pinned thousand's
+      case-A donors 1.40–13.2 M☉ (median 2.94).
     - **Real donors of this mass most likely end as white dwarfs or in an electron-capture
       supernova, later than the pin** (Wellstein, Langer and Braun 2001, system 31): design note
-      16's departure. **Finding (the science check):** 822C72E00000008C's helium star is 2.24 M☉,
-      just under the 2.25 M☉ that BSE sends to core collapse (HPT section 6 after equation 75,
-      Mc,BAGB, a helium star's mass in its place), in the band where BSE makes an electron-capture
-      collapse, of a neutron star of about 1.3 M☉. So the ruling's "≈ 2.3 M☉, above 2.25 M☉" does
-      not hold as built; the pin still gives plan 06's 1.1927 M☉ neutron star. For the owner, if a
-      ruling is wanted.
+      16's departure. 822C72E00000008C's helium star is 2.24 M☉, in BSE's oxygen–neon band (HPT
+      §6.1), where BSE also makes a neutron star (1.30 M☉; about 1.26 M☉ and a low kick in
+      COSMIC's electron-capture branch). The pin's 1.1927 M☉ neutron star at 12 km s⁻¹ agrees in
+      class and kick; the collapse comes during the helium main sequence (§B.1). No ruling is
+      needed (the review of T4.n's leans, 2026-10-30).
     - **A case-A-stripped remnant** belongs to finding F13's stripped-mark remnant law (P15.T5.c;
       plan 06's deferred findings), not here.
   - _Goldens_ (blessed by name at header 23, `uname -m` x86_64; `golden_diff.py` against the base:
@@ -6981,8 +6983,8 @@ galaxy_sweeps`.
     - **The blast radius is larger than the rulings' census:** 53 main-sequence collapses in the
       pinned thousand (the ruling's 2) and 737 in the 12,000 layer-E prior pairs (the ruling's
       0), most of them main-sequence merger products.
-    - **822C72E00000008C's helium star is below BSE's core-collapse line** (above, the third
-      departure).
+    - **822C72E00000008C's helium star is in BSE's oxygen–neon band**, where BSE also makes a
+      neutron star (above, the third departure).
     - **A merger product heavier than the pin's track dims at the switch** (above, the first
       departure).
 - **P11.T4.e's label for a pinned pair instability** (the train's fix, 2026-10-30). A pinned

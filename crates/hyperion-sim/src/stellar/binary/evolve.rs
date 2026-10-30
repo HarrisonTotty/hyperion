@@ -1048,8 +1048,9 @@ impl Engine {
     /// goes on along the pin's own track from that end, on its closed forms at the mass the binary
     /// gives it ([`Member::Shaped`] at offset 0, as [`offset_for`] places it): the form a case-B
     /// donor already takes. A contact pair coalesces then, as a contact does when a star leaves its
-    /// main sequence ([`Engine::contact`]; its expansion overflows the outer Lagrangian point,
-    /// Marchant et al. 2016, A&A 588, A50).
+    /// main sequence ([`Engine::contact`]; Hurley, Tout and Pols 2002 section 2.6.6, which
+    /// coalesces every contact; Menon et al. 2021, MNRAS 507, 5013, section 2.2.3, whose massive
+    /// contact pairs merge as a star leaves its main sequence).
     ///
     /// What follows is the engine's own: the radius at the star's mass (HPT section 7.1), the
     /// small-envelope perturbation (HPT section 6.3), a naked helium star once M ≤ Mc, and case AB
