@@ -6628,6 +6628,8 @@ impl<'c> Epoch<'c> {
 mod air;
 #[cfg(test)]
 mod audit_tests;
+#[cfg(all(test, not(target_family = "wasm")))]
+mod census_tests;
 #[cfg(test)]
 pub(crate) mod cold_trap_tests;
 pub(crate) mod envelope;

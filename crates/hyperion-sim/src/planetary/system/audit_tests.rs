@@ -110,7 +110,7 @@ pub(super) struct AuditCase<'a> {
     /// Its set ([`AuditSet`]).
     pub(super) set: &'a str,
     /// The body.
-    body: &'a Body,
+    pub(super) body: &'a Body,
     /// "planets", "members" or "moons".
     pub(super) kind: &'static str,
     /// Its record at the epoch.
@@ -118,7 +118,7 @@ pub(super) struct AuditCase<'a> {
     /// Its derivation over its record.
     pub(super) derived: &'a DerivedBody,
     /// Its primary's state at the epoch (a moon's planet's).
-    now: &'a ParentNow,
+    pub(super) now: &'a ParentNow,
     /// Σ Fᵢ ÷ `S_eff` at the runaway limit now ([`runaway_now`]), at the runaway limit at the hosts'
     /// peak ([`runaway_at_peak`]) and at the maximum-greenhouse limit now ([`limit_now`]): a moon's
     /// its planet's.
@@ -158,7 +158,7 @@ impl AuditCase<'_> {
 /// Every present planet, member and moon of `system` (of the set `set` and context `ctx`) with a
 /// bulk section and a derivation at the epoch, whatever its surface's tag, in body order, each
 /// given to `visit` ([`AuditCase`]).
-fn audit_walk_system(
+pub(super) fn audit_walk_system(
     set: &str,
     ctx: &SystemContext,
     system: &PlanetarySystem,
@@ -248,7 +248,7 @@ pub(super) fn audit_walk(sets: &[AuditSet], visit: &mut dyn FnMut(&AuditCase<'_>
 
 /// A MUST-FIX item the audit asserts ([module](self)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Item {
+pub(super) enum Item {
     M1,
     M3,
     M4,
@@ -332,15 +332,15 @@ const DEEPEST_ICE_V_FLOOR: &str = "41ffecb600000001.0200";
 
 /// What the audit holds of one body ([`AuditCase`]): each item's failures on it and each line an
 /// item states of it by name, so that a census of thousands keeps no record.
-struct AuditBody {
+pub(super) struct AuditBody {
     /// "{set} {id} {kind}".
     label: String,
     /// Whether its record's surface is `Ok`.
     surface: bool,
     /// Each item's failure on it, by its line.
-    faults: Vec<(Item, String)>,
+    pub(super) faults: Vec<(Item, String)>,
     /// Each list an item states by name, the list's title and its line.
-    stated: Vec<(Item, &'static str, String)>,
+    pub(super) stated: Vec<(Item, &'static str, String)>,
     /// For a runaway between the limits now (M1 (c)), its deck and its side of water's
     /// saturation temperature; `None` for every other body.
     hothouse: Option<(RunawayDeck, Saturation)>,
@@ -348,7 +348,7 @@ struct AuditBody {
 
 impl AuditBody {
     /// The audit of the body `case`.
-    fn of(case: &AuditCase<'_>) -> Self {
+    pub(super) fn of(case: &AuditCase<'_>) -> Self {
         let mut body = Self {
             label: case.label(),
             surface: case.surface().is_some(),
