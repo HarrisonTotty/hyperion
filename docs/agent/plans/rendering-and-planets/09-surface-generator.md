@@ -3529,6 +3529,45 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   - _Built 2026-10-30_ on a lane branch, for 25's train or 26's; its goldens re-blessed in the bump
     commit.
 
+- **R09.T13.n The partition's thermodynamics from the climate the world shows** (after R09.T13.m;
+  research-r09-t13m-landing's Part 2, whose four rulings main adopted on 2026-10-30, ruling 3 as
+  main's new rule amends it: held by default; R09.T13.e's E-P2). The partition took its h and
+  L q from the energy-balance model's own records, which run 7–14 K above the shown field on a
+  locked world's day side (343.0 against 333.1 K at the reference locked Earth's substellar
+  point): its partition's convergence came to 1.48 times the planet's evaporation (4.1 against
+  2.78 mm/day as global means), its evaporative ring rained nothing and its core 272.6 mm/day.
+  Records: [09-surface-generator/records/R09.T13.n.md](09-surface-generator/records/R09.T13.n.md).
+  - _The rule._ Each month, each band's h and L q, and on a rotating world's geographic grid each
+    grid point's for the columns, are the solid-angle means over the climate cells in it at their
+    sea-level month temperatures (the field the evaporation reads) and 0.8 humidity
+    (`hydrology::ShownAir`); a band with none takes the nearest band's, a point its band's. They set
+    `h_T` = 1.06 h_max, the gross moist stability, the latent flux, E − P and the Hadley part
+    (`partition::budget_in_air`); F and the energy-flux equators stay the own record's. One rule
+    for every world, the zonal and the column budgets alike. A modelling choice, not Siler et al.'s,
+    labelled so in the doc comments.
+  - _The hold._ `partition::SHOWN_THERMODYNAMICS_VERSION` = 26: below it
+    `PartitionThermodynamics::in_force` is the own record's and every water cycle is R09.T13.m's to
+    the bit, so it lands after 25's bump; the tests' switch `with_partition_thermodynamics`, and a
+    tripwire.
+  - _Tests_ (the brief's, under the switch): the mean (one temperature to the bit, two cells to
+    10⁻¹², a dry world zero); the reference locked Earth's k within [0.85, 1.15], its wettest
+    climate cell-month at most 265 mm/day (a pin while plan 14's 333 K substellar sea stands) and
+    its convergence (decision-r09-t13m §3.7); at a 255 K input mean (a shown substellar sea near
+    300 K) its wettest at most 120, its substellar band's sea at most 80 (the plan's ceiling;
+    Merlis and Schneider 2010's "≥ 40 mm/day" is a floor) and its ring, 35–50° of tidally locked
+    latitude (40–55° from the substellar point), raining on its sea more than 1 mm/day in every
+    band; the split of `budget_in_air`, and the shown air at the columns' own temperatures giving
+    their own budgets to the bit; under the switch the step twice, the pass twice and in any order,
+    and R09.T13.l's relief Earth; the rotating Earth's R09.T13.m tests measured with the hold
+    lifted.
+  - _Contract:_ nothing moves before 26. At 26 `planetary/surface/locked_earth_like` and
+    `earth_like` move, re-blessed by name in that bump commit. Plan 14's locked mean, behind the
+    333 K substellar sea, is out of scope (ruling 4).
+  - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate` and
+    `planetary::surface::coarse_golden`; the new slow tests and R09.T13.m's by name, those with the
+    hold lifted too; `just smart-ci <base> --hook-checks`.
+  - _Built 2026-10-30_ on a lane branch, behind its hold.
+
 The climate step's acceptance: `cargo test -p hyperion-sim planetary::surface::steps::climate`.
 
 ### R09.T14 Erosion
