@@ -19,8 +19,10 @@
 //! the sim through a handle for one galaxy, which is what the sim's caller-supplied traits take
 //! ([`FeatureCellCache`] and [`FeatureInteriorCache`]): they take `&self`, so the handles reach
 //! the shared caches through the [`SharedByteLru`]'s own lock. Two threads may build one entry at
-//! the same time; the second insert replaces an equal value, which is cheaper than coordinating
-//! (the same ruling as [`SharedByteLru`]'s).
+//! the same time; the second insert replaces an equal value, or for a cell is dropped, which is
+//! cheaper than coordinating (the same ruling as [`SharedByteLru`]'s). A cell a lookup reads only
+//! through some of its processes ([`FeatureCellCache::contents_through`]) is held so until a
+//! lookup needs more of it.
 //!
 //! The galaxy map's globulars are every globular of a galaxy with its expected members, found once
 //! in a bulk job and kept per galaxy by the [`GalaxyFeaturesService`], as the density maps are;
@@ -117,13 +119,19 @@ impl SharedFeatureCellCache {
         self.cells.counters()
     }
 
-    /// The contents of `cell` in `galaxy`, the galaxy `key` names: the cache's, or generated and
-    /// stored.
+    /// Contents of `cell` in `galaxy`, the galaxy `key` names, that hold its processes up to
+    /// `last`: the cache's if they hold them, or generated through `last` and stored
+    /// ([`FeatureCatalogue::cell_through`]; the whole cell for [`FeatureProcess::Cloud`]).
+    ///
+    /// A cell made through fewer processes than a query needs is made again through more and
+    /// replaces the one held, which is part of it; one is never stored over a cell holding more
+    /// that another job stored meanwhile (P09.T40.a).
     fn contents(
         &self,
         key: GalaxyKey,
         galaxy: &Galaxy,
         cell: FeatureCell,
+        last: FeatureProcess,
     ) -> Arc<FeatureCellContents> {
         assert_eq!(
             galaxy.seed().get(),
@@ -131,12 +139,17 @@ impl SharedFeatureCellCache {
             "a feature cell cache handle lends the cells of one galaxy, and this is another's"
         );
         let entry_key = (key, cell);
-        if let Some(contents) = self.cells.get(&entry_key) {
-            return contents;
+        let held = self.cells.get(&entry_key);
+        if let Some(contents) = &held
+            && contents.holds(last)
+        {
+            return Arc::clone(contents);
         }
-        let contents = Arc::new(FeatureCatalogue::cell(galaxy, cell));
+        let contents = Arc::new(FeatureCatalogue::cell_through(galaxy, cell, last));
         // A cell larger than the whole budget is handed back and still lent.
-        let _ = self.cells.insert(entry_key, Arc::clone(&contents));
+        let _ = self
+            .cells
+            .insert_if_unchanged(entry_key, held.as_ref(), Arc::clone(&contents));
         contents
     }
 }
@@ -165,7 +178,23 @@ impl FeatureCellCache for FeatureCellHandle<'_> {
     /// If `galaxy`'s seed is not the seed of this handle's key, since its cells would then be lent
     /// under another galaxy's key (the module documentation says what keeps the rest apart).
     fn contents(&self, galaxy: &Galaxy, cell: FeatureCell) -> Arc<FeatureCellContents> {
-        self.cache.contents(self.galaxy, galaxy, cell)
+        self.cache
+            .contents(self.galaxy, galaxy, cell, FeatureProcess::Cloud)
+    }
+
+    /// Lends contents of `cell` that hold its processes up to `last`: the cell the cache holds if
+    /// it holds them, or the cell made through `last` otherwise, then held in its place.
+    ///
+    /// # Panics
+    ///
+    /// As [`contents`](Self::contents).
+    fn contents_through(
+        &self,
+        galaxy: &Galaxy,
+        cell: FeatureCell,
+        last: FeatureProcess,
+    ) -> Arc<FeatureCellContents> {
+        self.cache.contents(self.galaxy, galaxy, cell, last)
     }
 }
 
@@ -571,6 +600,7 @@ mod tests {
     use std::sync::OnceLock;
 
     use hyperion_sim::coords::GalacticPosition;
+    use hyperion_sim::galaxy::ages::SubDisc;
     use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
     use hyperion_sim::galaxy::features::members::NoInteriorCache;
     use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
@@ -638,6 +668,40 @@ mod tests {
         let none = SharedFeatureCellCache::new(0);
         let _ = FeatureCellCache::contents(&none.handle(key()), galaxy(), cell);
         assert_eq!(none.counters().entries(), 0);
+    }
+
+    /// A cell asked for through a process is the catalogue's through it and is held; asked for
+    /// through no more processes, the held cell is lent; asked for whole, it is made again whole
+    /// and replaces the part, which is then never lent again (P09.T40.a).
+    #[test]
+    fn a_cell_held_in_part_is_lent_for_less_and_made_again_for_more() {
+        let cache = SharedFeatureCellCache::new(64 << 20);
+        let handle = cache.handle(key());
+        let cell = a_cluster().id().cell();
+        let part = handle.contents_through(galaxy(), cell, FeatureProcess::Nursery);
+        assert_eq!(
+            *part,
+            FeatureCatalogue::cell_through(galaxy(), cell, FeatureProcess::Nursery)
+        );
+        assert!(!part.holds(FeatureProcess::Cloud));
+        let fewer = handle.contents_through(
+            galaxy(),
+            cell,
+            FeatureProcess::OldOpenCluster(SubDisc::First),
+        );
+        assert!(Arc::ptr_eq(&fewer, &part), "the held part is lent for less");
+        let whole = FeatureCellCache::contents(&handle, galaxy(), cell);
+        assert_eq!(*whole, FeatureCatalogue::cell(galaxy(), cell));
+        assert_eq!(
+            cache.counters().entries(),
+            1,
+            "the whole cell replaced the part"
+        );
+        let again = handle.contents_through(galaxy(), cell, FeatureProcess::Nursery);
+        assert!(
+            Arc::ptr_eq(&again, &whole),
+            "the whole cell is lent for a part"
+        );
     }
 
     /// An interior is [`FeatureInterior::of`]'s, is charged its heap bytes, and is lent again from

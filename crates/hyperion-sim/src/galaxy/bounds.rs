@@ -470,13 +470,29 @@ impl Fields {
     /// It reads the nearest corner and the cell's ranges of radius and phase once for every
     /// component, and the arm factor's bound once for the sub-discs, which share one arm.
     pub fn component_bounds(&self, cell: &CellBox, out: &mut [f64; MAX_COMPONENTS]) {
+        self.component_bounds_of(cell, &[true; MAX_COMPONENTS], out);
+    }
+
+    /// [`component_bounds`](Self::component_bounds) for the components `wanted` marks, by index,
+    /// the same bits; every other entry is set to 0. What plan 09's catalogue reads for its disc
+    /// processes' columns, so that the components it does not follow cost nothing (P09.T40.a).
+    pub(crate) fn component_bounds_of(
+        &self,
+        cell: &CellBox,
+        wanted: &[bool; MAX_COMPONENTS],
+        out: &mut [f64; MAX_COMPONENTS],
+    ) {
         let corner = Site::new(&cell.nearest_corner());
         let radii = cell.r_cyl_range();
         // Every arm follows the galaxy's geometry, which `Fields::new` asserts.
         let phase = self.arms().phase_range(cell);
         let mut last: Option<(&Arm, f64)> = None;
         let (used, rest) = out.split_at_mut(self.components().len());
-        for (slot, component) in used.iter_mut().zip(self.components()) {
+        for ((slot, component), &want) in used.iter_mut().zip(self.components()).zip(wanted) {
+            if !want {
+                *slot = 0.0;
+                continue;
+            }
             let envelope = component.shape().envelope_sup(&corner, radii.hi) * (1.0 + BOUND_MARGIN);
             *slot = match component.arm() {
                 Some(arm) => {
