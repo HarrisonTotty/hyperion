@@ -9,6 +9,7 @@
 import type { AbsorberLayer } from "../view/atmosphere/absorbers";
 import { type AtmosphereColumn, hydrostaticColumn } from "../view/atmosphere/column";
 import { localRadiusM } from "../view/atmosphere/opticalDepth";
+import { acos, cos, exp, log, pow } from "../lib/pinnedMath";
 
 /**
  * The column: the US Standard Atmosphere 1976's sea level (101 325 Pa, 288.15 K) and its 6.5 K
@@ -79,7 +80,7 @@ export const PATH_HEIGHTS_M: ReadonlyArray<number> = [0, 3_000];
  * 35 air masses (Kasten and Young 1989, Appl. Opt. 28, 4735, give 38.09 with refraction).
  */
 export const PATH_ZENITH_DEG: ReadonlyArray<number> = [1, 1.5, 2, 3, 5, 10, 20]
-  .map((m) => (Math.acos(1 / m) * 180) / Math.PI)
+  .map((m) => (acos(1 / m) * 180) / Math.PI)
   .concat([90]);
 
 /** The layers' count, equal in ln p from the start's pressure to {@link TOP_PRESSURE_PA}. */
@@ -133,7 +134,7 @@ function stateAt(
   const p1 = column.pressuresPa[i + 1] ?? p0;
   const t0 = column.temperaturesK[i] ?? Number.NaN;
   const t1 = column.temperaturesK[i + 1] ?? t0;
-  return { p: Math.exp(Math.log(p0) + (Math.log(p1) - Math.log(p0)) * f), t: t0 + (t1 - t0) * f };
+  return { p: exp(log(p0) + (log(p1) - log(p0)) * f), t: t0 + (t1 - t0) * f };
 }
 
 /** The height at a pressure on the column, m: linear in ln p between its levels. */
@@ -143,9 +144,9 @@ function heightAt(column: AtmosphereColumn, pressurePa: number): number {
   while (i < p.length - 2 && (p[i + 1] ?? 0) > pressurePa) {
     i += 1;
   }
-  const a = Math.log(p[i] ?? Number.NaN);
-  const b = Math.log(p[i + 1] ?? Number.NaN);
-  const f = Math.min(Math.max((Math.log(pressurePa) - a) / (b - a), 0), 1);
+  const a = log(p[i] ?? Number.NaN);
+  const b = log(p[i + 1] ?? Number.NaN);
+  const f = Math.min(Math.max((log(pressurePa) - a) / (b - a), 0), 1);
   return (
     (column.altitudesM[i] ?? 0) +
     ((column.altitudesM[i + 1] ?? 0) - (column.altitudesM[i] ?? 0)) * f
@@ -179,7 +180,7 @@ export function earthLinePaths(column: AtmosphereColumn, startHeightM: number): 
   const o2Fraction = (o2?.columnPerM2 ?? 0) / (n0 * columnIntegralM(column));
   const startP = stateAt(column, startHeightM).p;
   const bounds = Array.from({ length: PATH_LAYERS + 1 }, (_, k) =>
-    heightAt(column, startP * (TOP_PRESSURE_PA / startP) ** (k / PATH_LAYERS)),
+    heightAt(column, startP * pow(TOP_PRESSURE_PA / startP, k / PATH_LAYERS)),
   );
   const densityAt = (h: number): number =>
     stateAt(column, h).p / (1.380_649e-23 * stateAt(column, h).t);
@@ -207,7 +208,7 @@ export function earthLinePaths(column: AtmosphereColumn, startHeightM: number): 
     const h2oSelfPairPerM5: number[] = [];
     const h2oAirPairPerM5: number[] = [];
     for (const zenith of PATH_ZENITH_DEG) {
-      const mu = Math.cos((zenith * Math.PI) / 180);
+      const mu = cos((zenith * Math.PI) / 180);
       const r0 = radius + startHeightM;
       // Along the spherical ray, not the plane-parallel secant, which grows without bound at the horizon.
       const toRadius = (r: number): number =>

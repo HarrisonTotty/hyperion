@@ -59,6 +59,10 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/thick/read.ts",
     "../view/atmosphere/thick/spectralColumn.ts",
     "../view/atmosphere/thick/sphericalBeam.ts",
+    // Two more whose platform maths moved no bit under the nudge, pinned at no cost: the channel
+    // fit, which `channels.json` records, and the Earth line paths' fixture.
+    "../view/atmosphere/channels.ts",
+    "../test/earthLinePaths.ts",
     // The tone curve and exposure `gate.ts` reads for its colours.
     "../view/photometry/toneCurve.ts",
     "../view/photometry/exposure.ts",
@@ -69,7 +73,7 @@ const MODULES = import.meta.glob<string>(
 );
 
 /** How many modules the list names: the glob drops a path that no longer exists. */
-const LISTED = 43;
+const LISTED = 45;
 
 /** The transcendental functions of `Math` whose results depend on the platform. */
 const PLATFORM_MATH =

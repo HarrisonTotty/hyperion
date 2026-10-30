@@ -59,6 +59,7 @@ import {
   uvOfRgb,
   weightedRgb,
 } from "./spectralColour";
+import { cos, exp, expm1, log1p, pow, sin } from "../../lib/pinnedMath";
 
 /** One term of an atmosphere at any wavelength: R08's medium term, spectrally. */
 export interface SpectralAirTerm {
@@ -136,14 +137,14 @@ function raySteps(
   lengthM: number,
   steps: number,
 ): { readonly sM: Float64Array; readonly dsM: Float64Array } {
-  const a = Math.log1p(lengthM / FIRST_STEP_M);
-  const scale = lengthM / Math.expm1(a);
+  const a = log1p(lengthM / FIRST_STEP_M);
+  const scale = lengthM / expm1(a);
   const sM = new Float64Array(steps);
   const dsM = new Float64Array(steps);
   for (let i = 0; i < steps; i += 1) {
     const u = (i + 0.5) / steps;
-    sM[i] = scale * Math.expm1(a * u);
-    dsM[i] = (scale * a * Math.exp(a * u)) / steps;
+    sM[i] = scale * expm1(a * u);
+    dsM[i] = (scale * a * exp(a * u)) / steps;
   }
   return { sM, dsM };
 }
@@ -187,8 +188,8 @@ function geometryOf(air: SpectralAir, view: CaseView): CaseGeometry {
   };
   const groundM = air.groundRadiusM;
   const sun: readonly [number, number, number] = [
-    Math.sin(view.sunZenithDeg * DEG),
-    Math.cos(view.sunZenithDeg * DEG),
+    sin(view.sunZenithDeg * DEG),
+    cos(view.sunZenithDeg * DEG),
     0,
   ];
   if (view.kind === "sun") {
@@ -197,9 +198,9 @@ function geometryOf(air: SpectralAir, view: CaseView): CaseGeometry {
   const elevation = view.elevationDeg * DEG;
   const azimuth = view.azimuthFromSunDeg * DEG;
   const look: readonly [number, number, number] = [
-    Math.cos(elevation) * Math.cos(azimuth),
-    Math.sin(elevation),
-    Math.cos(elevation) * Math.sin(azimuth),
+    cos(elevation) * cos(azimuth),
+    sin(elevation),
+    cos(elevation) * sin(azimuth),
   ];
   const terms = air.terms.length;
   const { sM, dsM } = raySteps(distanceToTopM(shell, groundM, look[1]), VIEW_STEPS);
@@ -257,7 +258,7 @@ function responseOf(
     for (let t = 0; t < terms; t += 1) {
       depth += (optics.extinction[t] ?? 0) * (geometry.columnsM[t] ?? 0);
     }
-    return Math.exp(-depth);
+    return exp(-depth);
   }
   let radiance = 0;
   const phase = air.terms.map((term) => term.phasePerSr(geometry.cosTheta, wavelengthNm));
@@ -269,7 +270,7 @@ function responseOf(
       source +=
         (optics.scattering[t] ?? 0) * (phase[t] ?? 0) * (geometry.weightsM[t + terms * i] ?? 0);
     }
-    radiance += source * Math.exp(-depth);
+    radiance += source * exp(-depth);
   }
   return radiance;
 }
@@ -342,7 +343,7 @@ export const EARTH_AEROSOL_TERM: SpectralAirTerm = {
 /** R05's aerosol extinction at the ground, m⁻¹: τ(λ) ÷ H, as `earth.ts` evaluates it per channel. */
 function earthAerosolExtinctionPerM(wavelengthNm: number): number {
   return (
-    (AEROSOL_OPTICAL_DEPTH_550 * (wavelengthNm / 550) ** -AEROSOL_ANGSTROM_EXPONENT) /
+    (AEROSOL_OPTICAL_DEPTH_550 * pow(wavelengthNm / 550, -AEROSOL_ANGSTROM_EXPONENT)) /
     AEROSOL_SCALE_HEIGHT_M
   );
 }
