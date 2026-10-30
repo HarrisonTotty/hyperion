@@ -5091,6 +5091,10 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     and T43's. (5) Census C1 counts the grid records of P09.T28.b.a's pre-pin, which no class claims
     at 23 (`RECENT_DEATH_CLAIM` is `None`), so no catalogue system is among them; under every 25
     hold the catalogue systems move as they do at 23.
+  - _Met P07.T10.c's server at 24 (2026-10-30)._ `extinction`'s `match` on `system_motion` lacked
+    `CatalogueMotionNotTraced` (E0004). A catalogue system is now refused at every time, as a
+    centre member is: `no_such_system` to `extinction`, `unknown_system` to `resolve_system` and
+    `scene_ship`. The task that gives its class's broken line a tracer lifts the refusal there.
 - **P09.T33.a's leans, kept (main's research, 2026-10-29).** Its four leans stand and nothing
   blocks landing. Two follow-ups, each its own commit, no golden moved:
   - _[Fe/H] at age zero, pinned (determinism audit)._
