@@ -12687,6 +12687,22 @@ impl SteamBody {
     }
 }
 
+/// [`part_three_census`] with the later 25 holds set back, for a caller inside
+/// `with_every_25_hold`: part 3's landing alone. P14.T53.e's movers are its own census's
+/// (`present_state_tests`), P14.T53.c's exposed share's are `exposed_ice_tests`', and R09.T7.g's
+/// ray-traced plains' its own (`cold_trap_tests`).
+fn part_three_s_own_25_census(sets: &[(&str, Seed, &SystemContext)]) -> Vec<SteamBody> {
+    use crate::planetary::derive::atmosphere::{PresentStateRules, with_present_state};
+    use crate::planetary::hooks::cold_traps::with_rough_plains;
+    use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
+    use hyperion_surface::cold_trap::PlainsModel;
+    with_present_state(PresentStateRules::Held, || {
+        with_exposed_ice(ExposedIceRules::Held, || {
+            with_rough_plains(PlainsModel::Bowls, || part_three_census(sets))
+        })
+    })
+}
+
 /// Every body of [`envelope_walk`] over the systems `sets`, each generated afresh at its seed
 /// under the rules in force on the calling thread, in order, for P14.T53.b part 3's census.
 fn part_three_census(sets: &[(&str, Seed, &SystemContext)]) -> Vec<SteamBody> {
@@ -12951,19 +12967,7 @@ fn under_every_25_hold_part_three_s_movers_are_stated() {
         )
         .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
         .collect();
-    // Part 3's landing alone: P14.T53.e's movers are its own census's
-    // (`present_state_tests`), and P14.T53.c's exposed share's are `exposed_ice_tests`'.
-    let on = with_every_25_hold(|| {
-        crate::planetary::derive::atmosphere::with_present_state(
-            crate::planetary::derive::atmosphere::PresentStateRules::Held,
-            || {
-                crate::planetary::hooks::figures::lag::with_exposed_ice(
-                    crate::planetary::hooks::figures::lag::ExposedIceRules::Held,
-                    || part_three_census(&sets),
-                )
-            },
-        )
-    });
+    let on = with_every_25_hold(|| part_three_s_own_25_census(&sets));
     let off = part_three_census(&sets);
     assert_eq!(on.len(), off.len());
     let (mut failures, movers, passes) = part_three_movers(&on, &off);

@@ -37,6 +37,8 @@
 use std::error::Error;
 use std::fmt;
 
+use hyperion_surface::cold_trap::PlainsModel;
+
 use crate::coords::SystemPosition;
 use crate::events::EventsPerSecond;
 use crate::id::{BodyId, SystemId};
@@ -667,13 +669,16 @@ pub(crate) struct SurfaceBasis {
 /// record's other members (P14.T54.b.f; decision-p14-t54b-f-coldtraps §5), each that field's
 /// input, to the bit: the star's angular radius α of its sky and the bare regolith's Bond albedo
 /// it read, the published pass's own (never recomputed from the record's maturity, K(P*)'s surface
-/// age). Its heat flow and craters R09 reads from the record's figures (a recorded residual).
+/// age), and its sky's plains model (R09.T7.g). Its heat flow and craters R09 reads from the
+/// record's figures (a recorded residual).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ColdTrapBasis {
     /// The star's angular radius at the seasonal orbit's periapsis, rad in [0, π/2].
     pub(crate) star_radius: Radians,
     /// The bare regolith's Bond albedo about the body's hosts' bands, airless, 0 to 1.
     pub(crate) regolith_albedo: f64,
+    /// The model its rough plains took.
+    pub(crate) plains_model: PlainsModel,
 }
 
 impl Surface {

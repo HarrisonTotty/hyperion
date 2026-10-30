@@ -40,11 +40,12 @@
 //! found by its indices among the shadow's ([`COLD_COLATITUDE_INDEX`](table::COLD_COLATITUDE_INDEX),
 //! [`COLD_LIMB_INDEX`](table::COLD_LIMB_INDEX)).
 //!
-//! **Nothing generated reads this yet.** [`fraction`](super::fraction) and
-//! [`permanent_shadow`](super::permanent_shadow) still take the plains as the labelled half-normal
-//! bowls, with `PLAINS_DEPTH_SCALE` and `PLAINS_SURROUNDINGS`. The swap moves galaxy plan 14's
-//! published cold-trap areas, which its record path's goldens pin from 24, so it rides a generator
-//! bump (R09.T7.g's record).
+//! **Its use.** A [`Terrain`](super::Terrain) whose plains are
+//! [`PlainsModel::RayTraced`](super::PlainsModel::RayTraced) reads its plains here, in
+//! [`fraction`](super::fraction) and [`permanent_shadow`](super::permanent_shadow), to the bit. The
+//! galaxy's generator takes them from version 25 and the labelled bowls before it (R09.T7.g's swap,
+//! behind the sim's `ROUGH_PLAINS_VERSION`), since they move galaxy plan 14's published cold-trap
+//! areas, which its record path's goldens pin.
 
 use super::{Body, Sky, cell};
 use crate::num;

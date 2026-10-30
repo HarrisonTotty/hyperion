@@ -42,6 +42,7 @@ use core::num::FpCategory;
 use std::error::Error;
 use std::fmt;
 
+use hyperion_surface::cold_trap::PlainsModel;
 use hyperion_surface::craters::CraterParams;
 use hyperion_surface::field::{
     BodyRef, BuildPaletteError, ClimateModelKind, Crust, MaterialPalette, PaletteRole,
@@ -397,8 +398,8 @@ impl From<&CondensateEntry> for Condensate {
 }
 
 /// What a body's cold traps read of its star and its ground beyond the other inputs (P14.T51.f;
-/// R09.T13.f): the star's angular radius at periapsis and the bare ground's Bond albedo. The
-/// greatest declination, the flux at periapsis and the heat flow come from
+/// R09.T13.f): the star's angular radius at periapsis, the bare ground's Bond albedo and the model
+/// of its rough plains. The greatest declination, the flux at periapsis and the heat flow come from
 /// [`CoarseInputs::spin`], [`CoarseInputs::host_flux`] with the seasonal orbit's eccentricity, and
 /// [`CoarseInputs::heat_flow`], by plan 14's own arithmetic (`ColdTrapGround`).
 ///
@@ -416,6 +417,12 @@ pub struct ColdTrapInputs {
     /// in [0, 1), dimensionless. It is plan 14's (P14.T51.f's; the lid regolith's about the
     /// host's bands from P14.T51.i), not the climate model's `SurfaceState::albedo`.
     pub bond_albedo: f64,
+    /// The model the cold traps' rough plains take (R09.T7.g): the record's published pass's,
+    /// which its system's rules gave it ([`PlainsModel::Bowls`] to generator version 24, the
+    /// ray-traced table from 25), so that the field's cold traps and the record's read one model.
+    /// It is carried, never read from the version here, so that a coarse pass is a function of
+    /// its inputs alone.
+    pub plains_model: PlainsModel,
 }
 
 /// The ground's space weathering, the field header's paired `maturity` and `weathering_rate`
@@ -1065,6 +1072,7 @@ impl CoarseInputs {
                 .cold_trap_inputs(ColdTrapInputs {
                     star_angular_radius: traps.star_radius,
                     bond_albedo: traps.regolith_albedo,
+                    plains_model: traps.plains_model,
                 })
                 .cold_traps(trapped_of(surface));
         }
@@ -3787,6 +3795,7 @@ pub(crate) mod tests {
         ColdTrapInputs {
             star_angular_radius: Radians::from(Degrees::new(0.2711)),
             bond_albedo: 0.12,
+            plains_model: PlainsModel::Bowls,
         }
     }
 
@@ -3889,6 +3898,7 @@ pub(crate) mod tests {
         let inputs = |star_angular_radius: f64, bond_albedo: f64| ColdTrapInputs {
             star_angular_radius: Radians::new(star_angular_radius),
             bond_albedo,
+            plains_model: PlainsModel::Bowls,
         };
         for alpha in [-0.1, core::f64::consts::FRAC_PI_2, f64::NAN, 1e-200] {
             let error = refused(trapped_moon().cold_trap_inputs(inputs(alpha, 0.12)));
@@ -3988,6 +3998,23 @@ pub(crate) mod tests {
     /// figures list its ice at its entry's area and scaled as that ice where they scaled the ices
     /// into the surface; a record whose pass read none gives none. Records `for_body` refuses are
     /// listed, none for its cold traps.
+    /// R09's cold-trap inputs `group` carry the plains model of the record's basis, `basis`, and of
+    /// the field its published pass read, `carried`: version 24's bowls (R09.T7.g's hold).
+    fn assert_plains_carried(
+        group: &ColdTrapInputs,
+        basis: PlainsModel,
+        carried: &crate::planetary::hooks::cold_traps::PassColdTraps,
+        id: &str,
+    ) {
+        let models = (
+            group.plains_model,
+            basis,
+            carried.inputs().sky().plains_model,
+        );
+        let bowls = PlainsModel::Bowls;
+        assert_eq!(models, (bowls, bowls, bowls), "{id}");
+    }
+
     #[test]
     fn under_the_batch_the_record_gives_its_cold_traps_to_the_bit() {
         use std::collections::BTreeMap;
@@ -4042,6 +4069,7 @@ pub(crate) mod tests {
             );
             assert_same_bits(group.bond_albedo, basis.regolith_albedo);
             assert_same_bits(group.bond_albedo, carried.inputs().regolith_albedo());
+            assert_plains_carried(group, basis.plains_model, carried, &body.id());
             let ices = surface.figures().surface_ices();
             let mut expected: Vec<(String, u64)> = Vec::new();
             for e in surface.condensates().entries() {

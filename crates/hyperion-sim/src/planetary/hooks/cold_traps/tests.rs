@@ -91,16 +91,29 @@ fn real_moon() -> Sunlit {
     Sunlit::new(lunar_sky(), 0.12, WattsPerSquareMetre::new(0.018))
 }
 
-/// Hayne et al.'s best-fit lunar terrain with craters of `depths`: 20% craters, plains at an RMS
-/// slope of 0.1 and the lunar share under the conduction cut-off.
-fn lunar_terrain(depths: DepthRatios) -> Terrain {
+/// Hayne et al.'s best-fit lunar terrain with craters of `depths`: 20% craters, plains of the
+/// model `plains_model` at an RMS slope of 0.1 and the lunar share under the conduction cut-off.
+fn lunar_terrain(depths: DepthRatios, plains_model: PlainsModel) -> Terrain {
     Terrain::new(TerrainParts {
         crater_fraction: SATURATED_CRATER_FRACTION,
         crater_depths: depths,
         plains_slope: Radians::new(math::atan(PLAINS_RMS_SLOPE)),
+        plains_model,
         share_under_cutoff: LUNAR_SHARE_UNDER_CUTOFF,
     })
     .unwrap()
+}
+
+/// The terrains the plan's lunar tests take, each crater distribution under each plains model:
+/// version 24's bowls and 25's ray-traced plains (R09.T7.g; `ROUGH_PLAINS_VERSION`). 25's bump
+/// drops the bowls.
+fn lunar_terrains() -> [(PlainsModel, DepthRatios); 4] {
+    [
+        (PlainsModel::Bowls, DepthRatios::HAYNE_B),
+        (PlainsModel::Bowls, DepthRatios::HAYNE_A),
+        (PlainsModel::RayTraced, DepthRatios::HAYNE_B),
+        (PlainsModel::RayTraced, DepthRatios::HAYNE_A),
+    ]
 }
 
 /// The cold-trap threshold of the gas `gas` at 144 kg m⁻² Gyr⁻¹.
@@ -279,6 +292,7 @@ fn the_sky_is_taken_at_periapsis() {
             (a, e),
             Some(SolarRadii::new(1.0)),
             0.035,
+            PlainsModel::Bowls,
         )
     };
     let venus = sky(177.36, 0.0).greatest_declination.value().to_degrees();
@@ -297,6 +311,7 @@ fn the_sky_is_taken_at_periapsis() {
         (a, 0.0),
         None,
         0.035,
+        PlainsModel::Bowls,
     );
     assert_same_bits(point.star_radius.value(), 0.0);
 }
@@ -324,6 +339,7 @@ fn the_zonal_annual_maximum_matches_the_research_s() {
                 periapsis_flux: WattsPerSquareMetre::new(1361.0 / (0.3075 * 0.3075)),
                 star_radius: Radians::from(Degrees::new(radius)),
                 exposed_fraction: 0.45,
+                plains_model: PlainsModel::Bowls,
             },
             0.07,
             WattsPerSquareMetre::new(0.02),
@@ -365,16 +381,20 @@ fn area_points() -> Vec<(f64, f64)> {
         .collect()
 }
 
-/// The latitude rule's 24 nodes within 5 × 10⁻⁴ of a midpoint rule at 0.02° (−3.99 × 10⁻⁴ measured
-/// with B, +1.07 × 10⁻⁴ with A), for the Moon's water traps under craters of distribution B and A;
-/// nothing lies below 60°.
+/// The latitude rule's 24 nodes within 5 × 10⁻⁴ of a midpoint rule at 0.02° for the Moon's water
+/// traps under craters of distribution B and A on the bowls (−4.06 × 10⁻⁴ and +7.26 × 10⁻⁵
+/// measured), and with B on the ray-traced plains (−1.22 × 10⁻⁴); nothing lies below 60°. With A on
+/// the ray-traced plains it is +5.30 × 10⁻⁴, pinned as built under 5.4 × 10⁻⁴: a finding
+/// (R09.T7.g), the table's piecewise-linear read in the colatitude against the rule's four nodes a
+/// band.
 #[test]
 fn the_latitude_rule_is_within_its_error_of_a_fine_midpoint_rule() {
     let ground = real_moon();
     let shadows = ground.shadows().unwrap();
     let water = threshold(Gas::Water);
-    for depths in [DepthRatios::HAYNE_B, DepthRatios::HAYNE_A] {
-        let terrain = lunar_terrain(depths);
+    let bounds = [5e-4, 5e-4, 5e-4, 5.4e-4];
+    for ((model, depths), bound) in lunar_terrains().into_iter().zip(bounds) {
+        let terrain = lunar_terrain(depths, model);
         let rule = ground.trap_fraction(&shadows, &terrain, water);
         let fine = midpoint(
             |latitude| cold_trap::fraction(latitude, &shadows, &terrain, water),
@@ -382,8 +402,10 @@ fn the_latitude_rule_is_within_its_error_of_a_fine_midpoint_rule() {
             0.02,
         );
         let error = rule / fine - 1.0;
-        eprintln!("{depths:?}: the rule {rule:e}, the midpoint {fine:e}, error {error:e}");
-        assert!(error.abs() < 5e-4, "{depths:?}: {error:e}");
+        eprintln!(
+            "{model:?}, {depths:?}: the rule {rule:e}, the midpoint {fine:e}, error {error:e}"
+        );
+        assert!(error.abs() < bound, "{model:?}, {depths:?}: {error:e}");
         assert_same_bits(band(&ground, &terrain, water, (0.0, 60.0)), 0.0);
     }
     // The rule integrates cos φ, the hemisphere's area, to 1.
@@ -401,19 +423,20 @@ fn the_moon_s_cold_traps_lie_within_the_plan_s_bands() {
     let shadows = ground.shadows().unwrap();
     let water = threshold(Gas::Water);
     let polar_area = 1.0 - math::sin(Radians::from(Degrees::new(80.0)).value());
-    for depths in [DepthRatios::HAYNE_B, DepthRatios::HAYNE_A] {
-        let terrain = lunar_terrain(depths);
+    for (model, depths) in lunar_terrains() {
+        let terrain = lunar_terrain(depths, model);
         let whole = ground.trap_fraction(&shadows, &terrain, water);
         let polar = band(&ground, &terrain, water, (80.0, 90.0)) / polar_area;
         let low = band(&ground, &terrain, water, (0.0, 70.0));
         eprintln!(
-            "{depths:?}: whole {:.4}%, 80–90° {:.3}%, below 70° {low:e}",
+            "{model:?}, {depths:?}: whole {:.4}%, 80–90° {:.3}%, below 70° {low:e}",
             100.0 * whole,
             100.0 * polar
         );
-        assert!((0.000_24..=0.002).contains(&whole), "{depths:?}: {whole}");
-        assert!((0.016..=0.13).contains(&polar), "{depths:?}: {polar}");
-        assert!(low <= 0.01 * whole, "{depths:?}: {low} of {whole}");
+        let label = format!("{model:?}, {depths:?}");
+        assert!((0.000_24..=0.002).contains(&whole), "{label}: {whole}");
+        assert!((0.016..=0.13).contains(&polar), "{label}: {polar}");
+        assert!(low <= 0.01 * whole, "{label}: {low} of {whole}");
     }
 }
 
@@ -426,13 +449,18 @@ fn the_moon_s_exposed_water_is_within_two_of_li_et_al() {
     let shadows = ground.shadows().unwrap();
     let water = threshold(Gas::Water);
     let f_x = lunar_sky().exposed_fraction;
-    for depths in [DepthRatios::HAYNE_B, DepthRatios::HAYNE_A] {
-        let terrain = lunar_terrain(depths);
+    for (model, depths) in lunar_terrains() {
+        let terrain = lunar_terrain(depths, model);
         let exposed = f_x * ground.trap_fraction(&shadows, &terrain, water) * MOON_KM2;
         for reference in [18_300.0, 40_000.0] {
             let ratio = exposed / (f_x * reference);
-            eprintln!("{depths:?}: {exposed:.0} km² exposed, ×{ratio:.2} of {reference} km²'s");
-            assert!((0.5..=2.0).contains(&ratio), "{depths:?}: ×{ratio}");
+            eprintln!(
+                "{model:?}, {depths:?}: {exposed:.0} km² exposed, ×{ratio:.2} of {reference} km²'s"
+            );
+            assert!(
+                (0.5..=2.0).contains(&ratio),
+                "{model:?}, {depths:?}: ×{ratio}"
+            );
         }
     }
 }
@@ -450,16 +478,19 @@ fn half_the_moon_s_co2_traps_at_10_kg_lie_in_schorghofer_s_bracket() {
     let strict = threshold_at(Gas::CarbonDioxide, 10.0);
     let rule = threshold(Gas::CarbonDioxide);
     assert!(strict < rule, "{strict:?} against {rule:?}");
-    for depths in [DepthRatios::HAYNE_B, DepthRatios::HAYNE_A] {
-        let terrain = lunar_terrain(depths);
+    for (model, depths) in lunar_terrains() {
+        let terrain = lunar_terrain(depths, model);
         let half = |t: Kelvin| 0.5 * MOON_KM2 * ground.trap_fraction(&shadows, &terrain, t);
         let (at_10, at_144) = (half(strict), half(rule));
         eprintln!(
-            "{depths:?}: CO₂ at {:.2} K {at_10:.0} km²; at {:.2} K {at_144:.0} km²",
+            "{model:?}, {depths:?}: CO₂ at {:.2} K {at_10:.0} km²; at {:.2} K {at_144:.0} km²",
             strict.value(),
             rule.value()
         );
-        assert!((30.0..=408.0).contains(&at_10), "{depths:?}: {at_10}");
+        assert!(
+            (30.0..=408.0).contains(&at_10),
+            "{model:?}, {depths:?}: {at_10}"
+        );
     }
 }
 
@@ -477,6 +508,7 @@ fn ceres_s_permanent_shadow_lies_between_b_and_a_by_the_rule() {
                 periapsis_flux: WattsPerSquareMetre::new(1361.0 / (2.5577 * 2.5577)),
                 star_radius: Radians::from(Degrees::new(0.1042)),
                 exposed_fraction: 0.016,
+                plains_model: PlainsModel::Bowls,
             },
             0.12,
             WattsPerSquareMetre::new(0.0),
@@ -484,25 +516,55 @@ fn ceres_s_permanent_shadow_lies_between_b_and_a_by_the_rule() {
         .shadows()
         .unwrap()
     };
-    let shadow_km2 = |tilt: f64, depths: DepthRatios| {
-        let (body, terrain) = (ceres(tilt), lunar_terrain(depths));
+    let shadow_km2 = |tilt: f64, depths: DepthRatios, model: PlainsModel| {
+        let (body, terrain) = (ceres(tilt), lunar_terrain(depths, model));
         ceres_km2 * over_latitude(|latitude| permanent_shadow(latitude, &body, &terrain))
     };
-    let (b, a) = (
-        shadow_km2(4.0, DepthRatios::HAYNE_B),
-        shadow_km2(4.0, DepthRatios::HAYNE_A),
-    );
-    eprintln!("Ceres at 4°: B {b:.0} km², A {a:.0} km²");
-    assert!(b <= 2_282.0 && 2_282.0 <= a, "B {b} km², A {a} km²");
-    for depths in [DepthRatios::HAYNE_B, DepthRatios::HAYNE_A] {
-        let tilted = shadow_km2(20.0, depths);
-        eprintln!("Ceres at 20°: {depths:?} {tilted:.1} km²");
-        assert!(tilted < 68.0, "{depths:?} at 20°: {tilted} km²");
+    for model in [PlainsModel::Bowls, PlainsModel::RayTraced] {
+        let (b, a) = (
+            shadow_km2(4.0, DepthRatios::HAYNE_B, model),
+            shadow_km2(4.0, DepthRatios::HAYNE_A, model),
+        );
+        eprintln!("Ceres at 4°, {model:?}: B {b:.0} km², A {a:.0} km²");
+        assert!(
+            b <= 2_282.0 && 2_282.0 <= a,
+            "{model:?}: B {b} km², A {a} km²"
+        );
+    }
+    for (model, depths) in lunar_terrains() {
+        let tilted = shadow_km2(20.0, depths, model);
+        eprintln!("Ceres at 20°: {model:?}, {depths:?} {tilted:.1} km²");
+        assert!(tilted < 68.0, "{model:?}, {depths:?} at 20°: {tilted} km²");
     }
 }
 
+/// The ray-traced plains (R09.T7.g) are held until the 24 → 25 bump: the model in force is the
+/// bowls', version 24's, and a system generated outside the tests' switch reads it.
+#[test]
+fn the_rough_plains_are_held_only_until_the_25_bump() {
+    assert!(
+        crate::GENERATOR_VERSION < ROUGH_PLAINS_VERSION,
+        "the 24 → 25 bump puts R09.T7.g's ray-traced plains on the record (decision-r09-t7g-table \
+         §5): every cold trap of the record, the passes' fields and R09's then read \
+         `PlainsModel::RayTraced`. Delete `ROUGH_PLAINS_VERSION`, `rough_plains_in_force`, \
+         `with_rough_plains`, its switch in `with_every_25_hold`, `RecordRules` with \
+         `PlanetarySystem::record`, the plains model of `ColdTrapSky`, `ColdTrapBasis`, \
+         `ColdTrapInputs` and `ColdTrapGroundParts`, and this test; in `hyperion_surface`, \
+         `PlainsModel` with its `Bowls` arm, `PLAINS_DEPTH_SCALE`, `PLAINS_SURROUNDINGS`, \
+         `Population::of_plains` with `HalfNormal`, and `coldest_limit`'s `surroundings`; the \
+         tests' bowls arms go with them, and the table's `since` is re-stamped 25 \
+         (R09.T7.l's record)"
+    );
+    assert_eq!(rough_plains_in_force(), PlainsModel::Bowls);
+    assert_eq!(
+        with_rough_plains(PlainsModel::RayTraced, rough_plains_in_force),
+        PlainsModel::RayTraced
+    );
+    assert_eq!(rough_plains_in_force(), PlainsModel::Bowls);
+}
+
 /// An airless body whose star reaches 30° from its equator has no cold traps of water or carbon
-/// dioxide, with either crater distribution.
+/// dioxide, with either crater distribution under either plains model.
 #[test]
 fn an_airless_body_at_30_degrees_obliquity_has_none() {
     let tilted = Sunlit::new(
@@ -514,8 +576,8 @@ fn an_airless_body_at_30_degrees_obliquity_has_none() {
         WattsPerSquareMetre::new(0.018),
     );
     let shadows = tilted.shadows().unwrap();
-    for depths in [DepthRatios::HAYNE_B, DepthRatios::HAYNE_A] {
-        let terrain = lunar_terrain(depths);
+    for (model, depths) in lunar_terrains() {
+        let terrain = lunar_terrain(depths, model);
         for gas in DELIVERED {
             let trapped = tilted.trap_fraction(&shadows, &terrain, threshold(gas));
             assert_same_bits(trapped, 0.0);
@@ -540,7 +602,11 @@ fn a_body_colder_than_its_threshold_everywhere_lays_a_whole_cover() {
     let maxima = far.maxima(&area_points());
     assert_same_bits(area_below(&maxima, water), 1.0);
     let shadows = far.shadows().unwrap();
-    let trapped = far.trap_fraction(&shadows, &lunar_terrain(DepthRatios::HAYNE_B), water);
+    let trapped = far.trap_fraction(
+        &shadows,
+        &lunar_terrain(DepthRatios::HAYNE_B, PlainsModel::Bowls),
+        water,
+    );
     assert_same_bits(trapped, 0.0);
     let warm_below = |t: Kelvin| area_below(&maxima, t);
     let g = MetresPerSecondSquared::new(1.0);
@@ -738,7 +804,7 @@ fn the_record_path_publishes_the_moon_s_cold_traps_under_the_batch() {
     assert_eq!(format!("{batch:?}"), format!("{:?}", under(&built)));
     let ground = Sunlit::new(sky, air.albedo().value(), figures.heat_flow());
     let shadows = ground.shadows().unwrap();
-    let terrain = terrain_of(figures.craters());
+    let terrain = terrain_of(figures.craters(), PlainsModel::Bowls);
     for gas in DELIVERED {
         let substance = gas.substance();
         assert_eq!(
@@ -783,6 +849,7 @@ fn time_the_cold_traps() {
             (Metres::new(a_au * METRES_PER_AU), e),
             Some(SolarRadii::new(1.0)),
             0.035,
+            PlainsModel::Bowls,
         )
     };
     for (name, body) in historic_table() {
@@ -862,6 +929,7 @@ fn lunar_parts(craters: &CraterParams) -> ColdTrapGroundParts<'_> {
         bond_albedo: 0.12,
         heat_flow: WattsPerSquareMetre::new(0.018),
         craters,
+        plains_model: PlainsModel::Bowls,
     }
 }
 
@@ -928,12 +996,18 @@ fn the_trap_fraction_is_the_latitude_integral_of_fractions_at() {
         let obliquity = Radians::from(Degrees::new(degrees));
         let flux = WattsPerSquareMetre::new(1361.0 / (a_au * a_au * (1.0 - e * e).sqrt()));
         let star = Some(SolarRadii::new(1.0));
-        let sky =
-            ColdTrapSky::at_periapsis(obliquity, flux, (Metres::new(a_au * au), e), star, 0.1);
+        let sky = ColdTrapSky::at_periapsis(
+            obliquity,
+            flux,
+            (Metres::new(a_au * au), e),
+            star,
+            0.1,
+            PlainsModel::Bowls,
+        );
         let (albedo, heat_flow) = (0.12, WattsPerSquareMetre::new(0.018));
         let sunlit = Sunlit::new(sky, albedo, heat_flow);
         let shadows = sunlit.shadows().unwrap();
-        let terrain = terrain_of(figures.craters());
+        let terrain = terrain_of(figures.craters(), PlainsModel::Bowls);
         let ground = ColdTrapGround::new(&ColdTrapGroundParts {
             obliquity,
             orbit_mean_flux: flux,
@@ -942,6 +1016,7 @@ fn the_trap_fraction_is_the_latitude_integral_of_fractions_at() {
             bond_albedo: albedo,
             heat_flow,
             craters: figures.craters(),
+            plains_model: PlainsModel::Bowls,
         })
         .unwrap();
         for gas in DELIVERED {
@@ -1094,6 +1169,7 @@ fn the_ground_s_annual_maximum_gives_t51f_s_figures() {
             bond_albedo: 0.07,
             heat_flow: WattsPerSquareMetre::new(0.02),
             craters,
+            plains_model: PlainsModel::Bowls,
         })
         .unwrap();
         let pole = mercury.annual_maximum(Radians::new(FRAC_PI_2)).value();
@@ -1206,7 +1282,7 @@ fn a_ground_refuses_a_heat_flow_that_is_not_a_number() {
 fn the_field_s_f_ct_is_the_latitude_integral_of_fractions_at() {
     let (_, figures) = table_moon();
     let sunlit = Sunlit::new(lunar_sky(), 0.12, WattsPerSquareMetre::new(0.018));
-    let terrain = terrain_of(figures.craters());
+    let terrain = terrain_of(figures.craters(), PlainsModel::Bowls);
     let shadows = sunlit.shadows().unwrap();
     let species: Vec<SubstanceId> = [
         Gas::Helium,
@@ -1266,6 +1342,7 @@ fn fractions_at_through_the_shared_form_is_one_fraction_per_threshold_with_the_g
             bond_albedo: 0.11,
             heat_flow: WattsPerSquareMetre::new(0.02),
             craters,
+            plains_model: PlainsModel::Bowls,
         },
         ColdTrapGroundParts {
             obliquity: Radians::from(Degrees::new(4.0)),
@@ -1277,6 +1354,7 @@ fn fractions_at_through_the_shared_form_is_one_fraction_per_threshold_with_the_g
             bond_albedo: 0.09,
             heat_flow: WattsPerSquareMetre::new(0.001),
             craters,
+            plains_model: PlainsModel::Bowls,
         },
     ]
     .map(|parts| ColdTrapGround::new(&parts).unwrap());
@@ -1528,6 +1606,19 @@ fn a_field_s_key_is_every_input_to_the_bit() {
             FieldInputs {
                 sky: ColdTrapSky {
                     exposed_fraction: up(sky.exposed_fraction),
+                    ..sky
+                },
+                ..base
+            },
+        ),
+        (
+            "the plains model".into(),
+            FieldInputs {
+                sky: ColdTrapSky {
+                    plains_model: match sky.plains_model {
+                        PlainsModel::Bowls => PlainsModel::RayTraced,
+                        PlainsModel::RayTraced => PlainsModel::Bowls,
+                    },
                     ..sky
                 },
                 ..base

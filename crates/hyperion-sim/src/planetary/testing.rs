@@ -424,7 +424,10 @@ impl Error for SampleContextsError {
 /// - the exposed ice through a lag, `EXPOSED_ICE_VERSION` (P14.T53.c), at
 ///   `ExposedIceRules::Exposed` through `with_exposed_ice`: an ice bulk's water ice under a dark
 ///   lid at its lag's exposed share, held to the cover's ice area, and the belt test reading a
-///   cover within rounding of 1 as whole.
+///   cover within rounding of 1 as whole;
+/// - the rough plains', `ROUGH_PLAINS_VERSION` (R09.T7.g), at `PlainsModel::RayTraced` through
+///   `with_rough_plains`: the plains' cold traps from the ray-traced table, which a system reads
+///   once as it is generated and carries to its passes, its record and R09's cold traps.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 24's) is not
@@ -435,9 +438,12 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::atmosphere::{
         PresentStateRules, SteamEnvelopeRules, with_present_state, with_steam_envelope,
     };
+    use crate::planetary::hooks::cold_traps::with_rough_plains;
     use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
     use crate::planetary::system::events::{StormEventsRules, with_storm_events};
+    use hyperion_surface::cold_trap::PlainsModel;
     let run = || with_storm_events(StormEventsRules::Wired, run);
+    let run = move || with_rough_plains(PlainsModel::RayTraced, run);
     with_steam_envelope(SteamEnvelopeRules::Steam, || {
         with_present_state(PresentStateRules::Present, || {
             with_exposed_ice(ExposedIceRules::Exposed, run)
@@ -689,6 +695,30 @@ mod tests {
             ExposedIceRules::Held
         );
         assert_eq!(ExposedIceRules::in_force(), ExposedIceRules::Held);
+    }
+
+    /// 25's rough plains' switch (R09.T7.g): in force inside 25's helper, held outside it and
+    /// where a test sets it back; a system reads it once, as it is generated.
+    #[test]
+    fn the_rough_plains_hold_is_in_force_inside_25_s_helper_alone() {
+        use crate::planetary::hooks::cold_traps::{rough_plains_in_force, with_rough_plains};
+        use crate::planetary::system::RecordRules;
+        use hyperion_surface::cold_trap::PlainsModel;
+        assert_eq!(rough_plains_in_force(), PlainsModel::Bowls);
+        assert_eq!(
+            with_every_25_hold(rough_plains_in_force),
+            PlainsModel::RayTraced
+        );
+        assert_eq!(
+            with_every_25_hold(|| with_rough_plains(PlainsModel::Bowls, rough_plains_in_force)),
+            PlainsModel::Bowls
+        );
+        assert_eq!(rough_plains_in_force(), PlainsModel::Bowls);
+        assert_eq!(
+            with_every_25_hold(RecordRules::in_force).plains_model,
+            PlainsModel::RayTraced
+        );
+        assert_eq!(RecordRules::in_force().plains_model, PlainsModel::Bowls);
     }
 
     #[test]

@@ -2303,8 +2303,9 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
   Landing later, T7.g moves P14.T51.f's published areas and R09.T16's goldens, so it rides a
   generator bump.
   _Built in two halves:_ the table and its reader, `cold_trap::rough_plains`, landed pure at 23
-  (lane `r09-t7g`, 2026-10-28), read by nothing generated; the swap below, the use, is still to
-  build, behind a hold after 24 (the record says what moves). _The normaliser, as built_
+  (lane `r09-t7g`, 2026-10-28), read by nothing generated; the swap below, the use, is built
+  behind `ROUGH_PLAINS_VERSION` 25 (2026-10-30, at 24, no golden moved; the record, "The swap, as
+  built", says what moves at 25's bump). _The normaliser, as built_
   (2026-10-29, at 23, no bump): `irradiance_limit` takes the heating's sin e as the disk's
   flux-weighted elevation's, the bowls' to the bit, and the shadow keeps the upper limb
   (`decision-r09-t7g-table` §2). It moved the reader's as-built pins, not its golden (the record,
@@ -2343,7 +2344,8 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
     `cargo test -p hyperion-fit --lib tasks::rough_plains_cold_traps`;
     `cargo test -p hyperion-fit --test rough_plains_cold_traps`; `just fit-check`;
     `just gen-surface` leaves the module's bindings and exports unchanged (the record says why
-    not its bytes).
+    not its bytes). _Acceptance (the swap):_ `cargo test -p hyperion-surface cold_trap`;
+    `cargo test -p hyperion-sim --lib cold_trap` and `-- the_rough_plains`; no golden moves at 24.
 - **R09.T7.l The rough plains' refit** (a T7.g follow-up; `decision-r09-t7g-table` §1–§4,
   2026-10-29). Before any caller generates plains rougher than σ_s 5.7°, or supervolatile traps on
   a body whose D ÷ w is below about 0.2 (at σ_s 5.7°, D below about 1.1°: Mercury-like bodies).

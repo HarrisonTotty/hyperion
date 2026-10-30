@@ -373,9 +373,9 @@ fn threshold_of(substance: SubstanceKey) -> Kelvin {
 
 /// The body's cold-trap ground from `inputs` (decision-r09-t13f-cold-traps §3.2, "R09's side"):
 /// plan 14's `ColdTrapGround` of its spin's obliquity, its host flux, its seasonal orbit's
-/// eccentricity (0 without one), its cold-trap inputs' star angular radius and Bond albedo, its
-/// heat flow and its crater contract. `None` without cold-trap inputs, or where the closed form
-/// refuses the sky (no light, a star that fills it, an albedo of 1).
+/// eccentricity (0 without one), its cold-trap inputs' star angular radius, Bond albedo and plains
+/// model, its heat flow and its crater contract. `None` without cold-trap inputs, or where the
+/// closed form refuses the sky (no light, a star that fills it, an albedo of 1).
 #[must_use]
 fn ground_of(inputs: &CoarseInputs) -> Option<ColdTrapGround> {
     let group = inputs.cold_trap_inputs()?;
@@ -389,6 +389,7 @@ fn ground_of(inputs: &CoarseInputs) -> Option<ColdTrapGround> {
         bond_albedo: group.bond_albedo,
         heat_flow: inputs.heat_flow(),
         craters: inputs.craters(),
+        plains_model: group.plains_model,
     })
 }
 

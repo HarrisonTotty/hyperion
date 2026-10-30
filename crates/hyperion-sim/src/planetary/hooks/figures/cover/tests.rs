@@ -1069,6 +1069,7 @@ fn the_table_s_airless_bodies_keep_their_delivered_traps_through_the_passes() {
     use crate::planetary::hooks::cold_traps::{Sunlit, lunar_sky, terrain_of, trap_threshold};
     use crate::units::consts::METRES_PER_AU;
     use crate::units::{Metres, SolarRadii, WattsPerSquareMetre};
+    use hyperion_surface::cold_trap::PlainsModel;
 
     // Mercury and Ceres in their own skies (NASA's fact sheets, *from memory*: Mercury 0.387 au,
     // e 0.2056, 0.034°; Ceres 2.767 au, e 0.0785, 4°), as `time_the_cold_traps` takes them.
@@ -1079,6 +1080,7 @@ fn the_table_s_airless_bodies_keep_their_delivered_traps_through_the_passes() {
             (Metres::new(a_au * METRES_PER_AU), e),
             Some(SolarRadii::new(1.0)),
             0.035,
+            PlainsModel::Bowls,
         )
     };
     for (name, sky) in [
@@ -1096,7 +1098,7 @@ fn the_table_s_airless_bodies_keep_their_delivered_traps_through_the_passes() {
         let first = context.figures().expect("its context holds figures");
         let sunlit = Sunlit::new(sky, inputs.regolith_albedo(), context.heat_flow());
         let shadows = sunlit.shadows().expect("a lit body's shadows");
-        let terrain = terrain_of(first.craters());
+        let terrain = terrain_of(first.craters(), PlainsModel::Bowls);
         let column = derived.atmosphere().column_inventory().condenses();
         for gas in [Gas::Water, Gas::CarbonDioxide] {
             let substance = gas.substance();
