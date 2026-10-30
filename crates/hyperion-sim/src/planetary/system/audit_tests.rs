@@ -61,6 +61,7 @@ use crate::planetary::hooks::structure::VerticalStructure;
 use crate::planetary::hooks::surface::night_floor;
 use crate::planetary::moons::regular::WATER_DENSITY;
 use crate::planetary::record::{BulkProperties, Modelled};
+use crate::planetary::system::member_lag::member_lag_in_force;
 use crate::planetary::system::moon_ice::HOT_ICE_LIMIT;
 use crate::substance::Element;
 use crate::substance::phase::{high_pressure_melting, ice_ih_melting_temperature};
@@ -546,9 +547,9 @@ impl AuditBody {
     ///
     /// A lagged record's surface is rock, `Mercury`'s template where airless, under a lid that is
     /// not `H2O`; no airless record has an `Ice` surface above the melting point at T0
-    /// ([`HOT_ICE_LIMIT`]), a planet's above all; an icy belt member is lagged exactly above it and
-    /// a planet never (the code's own rule). Count (ix), every other `Ice` surface above it, is
-    /// stated.
+    /// ([`HOT_ICE_LIMIT`]), a planet's above all; an icy belt member is lagged exactly above it,
+    /// and from 25 any other member whose solved bulk is ice (`member_lag`), and a planet never
+    /// (the code's own rule). Count (ix), every other `Ice` surface above it, is stated.
     fn lag(&mut self, case: &AuditCase<'_>) {
         let Some(surface) = case.surface() else {
             return;
@@ -557,11 +558,16 @@ impl AuditBody {
         let t0 = case.t0();
         let hot = t0 > HOT_ICE_LIMIT;
         let lagged = lag == SurfaceLag::Lagged;
+        // An icy belt's member is asked the lag; from 25 any other member whose solved bulk is ice
+        // (`member_lag`).
+        let asked = icy_member_ice(case.body).is_some()
+            || (member_lag_in_force()
+                && SurfaceMaterial::of(&case.derived.fractions()) == SurfaceMaterial::Ice);
         match &case.body.part {
             Part::Planet(_) if lagged => {
                 self.fault(Item::M6, "a lagged planet");
             }
-            Part::Member(_) if lagged != (icy_member_ice(case.body).is_some() && hot) => {
+            Part::Member(_) if lagged != (asked && hot) => {
                 self.fault(
                     Item::M6,
                     &format!("a member {lag:?} at T0 {:.1} K", t0.value()),

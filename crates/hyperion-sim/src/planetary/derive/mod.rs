@@ -185,6 +185,7 @@ pub struct PlacedBody {
     volatile_zone: Option<FormationZone>,
     molten_until: Option<Years>,
     bulk: Option<GivenBulk>,
+    solved_lag: SolvedLag,
 }
 
 impl PlacedBody {
@@ -221,6 +222,7 @@ impl PlacedBody {
             volatile_zone: None,
             molten_until: None,
             bulk: None,
+            solved_lag: SolvedLag::Bare,
         })
     }
 
@@ -260,6 +262,14 @@ impl PlacedBody {
             bulk: Some(bulk),
             ..self
         }
+    }
+
+    /// The same body with its surface lag decided as `solved_lag` says where it has no given bulk
+    /// ([`SolvedLag`]): a given bulk's own lag decides where it has one. A body built without it
+    /// is bare under its solve's bulk.
+    #[must_use]
+    pub(crate) const fn with_solved_lag(self, solved_lag: SolvedLag) -> Self {
+        Self { solved_lag, ..self }
     }
 
     /// The same body with a young magma ocean until its system is `until` old (design note 12;
@@ -546,6 +556,22 @@ pub(crate) enum GivenLag {
     /// thins. The limit is the retention arm's, `system::moon_ice::HOT_ICE_LIMIT` (a module
     /// private to the system), and the flux is [`DerivedBody::flux`], to the bit.
     AboveMelting,
+}
+
+/// Whether a body with no [`GivenBulk`] takes [`GivenLag::AboveMelting`]'s verdict over the ice
+/// bulk its composition solve gives it: P14.T56.g's rule for a rocky belt's member whose solved
+/// bulk is ice, held at generator version 25
+/// ([`MEMBER_LAG_VERSION`](crate::planetary::system::member_lag::MEMBER_LAG_VERSION)).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum SolvedLag {
+    /// No lag: a planet's, and to version 24 every body's with no given bulk.
+    #[default]
+    Bare,
+    /// Lagged where its solved bulk's material is ice ([`SurfaceMaterial::Ice`]) and the
+    /// zero-albedo equilibrium temperature at its flux exceeds [`UNDER_ICE_MELTING_POINT`], as
+    /// [`GivenLag::AboveMelting`] reads it, to the bit; bare otherwise, so that a rock bulk and an
+    /// ice bulk below the melting point keep their surfaces.
+    AboveMeltingOverIce,
 }
 
 /// The surface material of a body of bulk fractions `fractions` whose surface lag is `lag`
@@ -2968,7 +2994,8 @@ impl PlacedBody {
     ///   side and the [`formation_temperature`] of that distance and snow line, to the bit, which
     ///   is [`FormationZone::temperature`] for a zone; its ΔIW reads the same distance and snow
     ///   line.
-    /// - Its surface lag is its given bulk's at `flux` ([`surface_lag`](Self::surface_lag)).
+    /// - Its surface lag is its given bulk's at `flux`, or with none its [`SolvedLag`]'s over those
+    ///   fractions ([`surface_lag`](Self::surface_lag)).
     #[must_use]
     fn air_of(
         &self,
@@ -3015,7 +3042,7 @@ impl PlacedBody {
             mass: Kilograms::from(mass),
             radius,
             fractions,
-            lag: self.surface_lag(flux),
+            lag: self.surface_lag(flux, &fractions),
             side,
             elements,
             ammonia,
@@ -3023,25 +3050,32 @@ impl PlacedBody {
         }
     }
 
-    /// The body's surface lag under its hosts' flux `flux` (P14.T56.g; [`GivenLag`]): its given
-    /// bulk's as stated, or for an icy belt member's lagged where the zero-albedo equilibrium
-    /// temperature at `flux` exceeds [`UNDER_ICE_MELTING_POINT`]; bare with no given bulk, a
-    /// planet's.
+    /// The body's surface lag under its hosts' flux `flux` over its bulk's fractions `fractions`
+    /// (P14.T56.g; [`GivenLag`], [`SolvedLag`]): its given bulk's as stated, or for an icy belt
+    /// member's lagged where the zero-albedo equilibrium temperature at `flux` exceeds
+    /// [`UNDER_ICE_MELTING_POINT`]; with no given bulk, the same where its [`SolvedLag`] asks it
+    /// and `fractions` make an ice bulk, and bare otherwise, a planet's.
     #[must_use]
-    fn surface_lag(&self, flux: EarthFluxes) -> SurfaceLag {
-        match self.bulk.map(|bulk| bulk.lag) {
-            None => SurfaceLag::Bare,
-            Some(GivenLag::Stated(lag)) => lag,
-            Some(GivenLag::AboveMelting) => {
-                // A temperature that is not a number is not above the melting point.
-                if equilibrium_temperature(flux, BondAlbedo::from_fraction(0.0))
-                    > UNDER_ICE_MELTING_POINT
-                {
-                    SurfaceLag::Lagged
-                } else {
-                    SurfaceLag::Bare
-                }
+    fn surface_lag(&self, flux: EarthFluxes, fractions: &MassFractions) -> SurfaceLag {
+        let above_melting = || {
+            // A temperature that is not a number is not above the melting point.
+            if equilibrium_temperature(flux, BondAlbedo::from_fraction(0.0))
+                > UNDER_ICE_MELTING_POINT
+            {
+                SurfaceLag::Lagged
+            } else {
+                SurfaceLag::Bare
             }
+        };
+        match (self.bulk.map(|bulk| bulk.lag), self.solved_lag) {
+            (Some(GivenLag::Stated(lag)), _) => lag,
+            (Some(GivenLag::AboveMelting), _) => above_melting(),
+            (None, SolvedLag::AboveMeltingOverIce)
+                if SurfaceMaterial::of(fractions) == SurfaceMaterial::Ice =>
+            {
+                above_melting()
+            }
+            (None, SolvedLag::Bare | SolvedLag::AboveMeltingOverIce) => SurfaceLag::Bare,
         }
     }
 }
@@ -3554,6 +3588,29 @@ mod tests {
     use crate::planetary::derive::composition::RadiusAdjustment;
     use crate::units::consts::{EARTH_MASS_KG, EARTH_RADIUS_M, METRES_PER_AU, SOLAR_MASS_KG};
     use crate::units::{AstronomicalUnits, Pascals};
+
+    /// A body with no given bulk is bare unless its [`SolvedLag`] asks the lag, and then lagged
+    /// exactly where its solved bulk is ice and its zero-albedo temperature exceeds the melting
+    /// point (`system::member_lag`, at 25): 278 K at 1 S⊕, 234 K at 0.5 S⊕.
+    #[test]
+    fn a_solved_ice_bulk_is_lagged_above_melting_only_where_asked() {
+        let body = placed(EARTH_MASS_KG * 1e-3, 1.0, 0.0, 0.5);
+        let (ice, rock) = (
+            MassFractions::solid(0.2, 0.47, 0.33),
+            MassFractions::solid(0.3, 0.7, 0.0),
+        );
+        let (hot, cold) = (EarthFluxes::new(1.0), EarthFluxes::new(0.5));
+        let asked = body.with_solved_lag(SolvedLag::AboveMeltingOverIce);
+        assert_eq!(asked.surface_lag(hot, &ice), SurfaceLag::Lagged);
+        assert_eq!(asked.surface_lag(cold, &ice), SurfaceLag::Bare);
+        assert_eq!(asked.surface_lag(hot, &rock), SurfaceLag::Bare);
+        assert_eq!(body.with_solved_lag(SolvedLag::Bare), body);
+        for flux in [hot, cold] {
+            for fractions in [&ice, &rock] {
+                assert_eq!(body.surface_lag(flux, fractions), SurfaceLag::Bare);
+            }
+        }
+    }
 
     #[test]
     #[expect(

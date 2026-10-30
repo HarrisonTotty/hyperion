@@ -841,12 +841,14 @@ fn icy_member_given_bulk(body: &Body, mass: EarthMasses) -> Option<GivenBulk> {
 
 /// `placed`, the placement of `body`: with its record's bulk ([`icy_member_given_bulk`]) for an
 /// icy belt's member, so that its air and albedo read the material its bulk section states
-/// (P14.T51.b), and as it is otherwise.
+/// (P14.T51.b); from generator version 25 for any other belt member with P14.T56.g's lag asked
+/// over its solved bulk ([`member_lag::member_solved_lag`]); and as it is otherwise.
 #[must_use]
 fn with_record_bulk(body: &Body, placed: &PlacedBody) -> PlacedBody {
-    match icy_member_given_bulk(body, placed.mass()) {
-        Some(bulk) => placed.with_bulk(bulk),
-        None => *placed,
+    match (icy_member_given_bulk(body, placed.mass()), &body.part) {
+        (Some(bulk), _) => placed.with_bulk(bulk),
+        (None, Part::Member(_)) => placed.with_solved_lag(member_lag::member_solved_lag()),
+        (None, Part::Planet(_) | Part::Moon(_) | Part::Ring(_)) => *placed,
     }
 }
 
@@ -1373,8 +1375,9 @@ fn parent_at_epoch(
     let hosts = BodyHosts::new(host_mass, *ctx.composition(), &orbited, &companions)
         .ok()?
         .with_shades(epoch.shades.as_ref());
-    // An icy member's bulk moves only its air, albedo and temperatures, none of which its moons'
-    // parent reads (its mass, its bulk's radius and class, its moon limit and its orbit).
+    // An icy member's bulk, and from 25 a rocky member's lag, move only its air, albedo and
+    // temperatures, none of which its moons' parent reads (its mass, its bulk's radius and class,
+    // its moon limit and its orbit).
     let placed = with_record_bulk(body, &placed);
     let age = ctx.age_at_epoch();
     let id = body.index.body_id(ctx.id());
@@ -3883,8 +3886,8 @@ impl PlanetarySystem {
     }
 
     /// The planet or member `body` on its orbit `orbit` at the time, of mass `mass` then, as
-    /// [`derive_body`] reads it, with its record's bulk for an icy member
-    /// ([`with_record_bulk`]).
+    /// [`derive_body`] reads it, with its record's bulk for an icy member and from 25 the lag
+    /// asked of any other member ([`with_record_bulk`]).
     #[must_use]
     fn placed_now(body: &Body, orbit: &KeplerElements, mass: EarthMasses) -> PlacedBody {
         let placed = match &body.part {
@@ -6677,6 +6680,7 @@ pub(crate) mod events;
 mod exposed_ice_tests;
 #[cfg(test)]
 mod locked_climate_tests;
+pub(crate) mod member_lag;
 mod modifiers;
 pub(crate) mod moon_ice;
 #[cfg(test)]

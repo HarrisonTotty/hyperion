@@ -443,9 +443,13 @@ pub fn wire_body_events_in_this_process() {
 ///   once as it is generated and carries to its passes, its record and R09's cold traps;
 /// - the molten decks', `MOLTEN_DECKS_VERSION` (P14.T49.p), at `MoltenDecksRules::Molten` through
 ///   `with_molten_decks`: the molten refractories' and salts' stand-in index files and the molten
-///   salts' densities.
+///   salts' densities;
 /// - the passes' superlinear root, `SECANT_ROOT_VERSION` (P14.T51.l), at `PassRoot::Secant`
-///   through `with_pass_root`: a bracketed body's secant steps, a detected 2-cycle its own bracket.
+///   through `with_pass_root`: a bracketed body's secant steps, a detected 2-cycle its own bracket;
+/// - the member lag, `MEMBER_LAG_VERSION` (P14.T56.g's rule for a rocky belt's member), at
+///   `MemberLagRules::Members` through `with_member_lag`: a belt member with no given bulk
+///   lagged where its solved bulk is ice and its zero-albedo temperature lies above the melting
+///   point.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 24's) is not
@@ -460,9 +464,14 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hooks::cold_traps::with_rough_plains;
     use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
     use crate::planetary::system::events::{StormEventsRules, with_storm_events};
+    use crate::planetary::system::member_lag::{MemberLagRules, with_member_lag};
     use crate::substance::aerosol::{MoltenDecksRules, with_molten_decks};
     use hyperion_surface::cold_trap::PlainsModel;
-    let run = || with_storm_events(StormEventsRules::Wired, run);
+    let run = || {
+        with_member_lag(MemberLagRules::Members, || {
+            with_storm_events(StormEventsRules::Wired, run)
+        })
+    };
     let run = move || with_rough_plains(PlainsModel::RayTraced, run);
     let run = move || with_molten_decks(MoltenDecksRules::Molten, run);
     let run = move || with_pass_root(PassRoot::Secant, run);
@@ -794,6 +803,23 @@ mod tests {
             PassRoot::Halvings
         );
         assert_eq!(PassRoot::in_force(), PassRoot::Halvings);
+    }
+
+    /// The member lag's switch (P14.T56.g's rule for a rocky belt's member): in force inside 25's
+    /// helper, held outside it and where a test sets it back.
+    #[test]
+    fn the_member_lag_s_hold_is_in_force_inside_25_s_helper_alone() {
+        use crate::planetary::system::member_lag::{MemberLagRules, with_member_lag};
+        assert_eq!(MemberLagRules::in_force(), MemberLagRules::Held);
+        assert_eq!(
+            with_every_25_hold(MemberLagRules::in_force),
+            MemberLagRules::Members
+        );
+        assert_eq!(
+            with_every_25_hold(|| with_member_lag(MemberLagRules::Held, MemberLagRules::in_force)),
+            MemberLagRules::Held
+        );
+        assert_eq!(MemberLagRules::in_force(), MemberLagRules::Held);
     }
 
     #[test]
