@@ -173,8 +173,9 @@ impl Population {
 /// parameters' black hole ([`GalaxyParams::black_hole`]), solved once from the parameters when first
 /// read, which the mass model does while the galaxy is built, the centre's motion
 /// ([`centre_motion`](Self::centre_motion)), built from the parameters and the mass model when
-/// first read (plan 09, P09.T28.b.a), and the centre's model ([`centre`](Self::centre)), built
-/// from that motion's profile when first read (plan 09, P09.T29); the sim caches nothing else. [`Galaxy::new`] takes about 130 ms, against plan 02's target of
+/// first read (plan 09, P09.T28.b.a), and the centre's model ([`centre`](Self::centre)) and
+/// potential (`centre_potential`, P09.T28.d.b), built from that motion when first read (plan 09,
+/// P09.T29); the sim caches nothing else. [`Galaxy::new`] takes about 130 ms, against plan 02's target of
 /// 100 ms, two thirds of it the discs' vertical Jeans solve in [`Fields::new`] (plan 02, Risks,
 /// R19); the gas field adds its two radial quadratures, some tens of microseconds, and nothing on
 /// the heap (plan 07), and the shell window's caps their scan, about 1% (plan 09,
@@ -218,6 +219,7 @@ pub struct Galaxy {
     window_caps: WindowCaps,
     centre_motion: CentreMotionCell,
     centre: CentreModelCell,
+    centre_potential: CentrePotentialCell,
     rules: GalaxyRules,
 }
 
@@ -302,14 +304,15 @@ impl Galaxy {
     /// It is what [`from_params_with_rules`](Self::from_params_with_rules) builds from the same
     /// seed and parameters, with the builders after it, since nothing a galaxy builds when it is
     /// built reads its rules: each held call site reads them when asked, and a test holds the two
-    /// equal. It keeps the centre's motion if it has been read, since the motion reads only the
-    /// parameters and the mass model. It keeps the centre's model only if the stellar rules
-    /// ([`GalaxyRules::stellar`]) stay as they were. The model's classes are built from the stellar
-    /// law (the kick law's parameters and the turn-off), so under other stellar rules the memo is
-    /// emptied. The reset is pre-emptive: no stellar field reaches the model yet, and it builds
-    /// again to the same bits. The first stellar hold that reaches it must also pass the galaxy's
-    /// stellar rules into `CentreModel::from_parts`, since the reset alone does not route them. A
-    /// galaxy-side hold whose arm reaches either memo must reset it here too.
+    /// equal. It keeps the centre's motion and potential if they have been read, since the motion
+    /// reads only the parameters and the mass model, and the potential only the motion. It keeps
+    /// the centre's model only if the stellar rules ([`GalaxyRules::stellar`]) stay as they were.
+    /// The model's classes are built from the stellar law (the kick law's parameters and the
+    /// turn-off), so under other stellar rules the memo is emptied. The reset is pre-emptive: no
+    /// stellar field reaches the model yet, and it builds again to the same bits. The first stellar
+    /// hold that reaches it must also pass the galaxy's stellar rules into
+    /// `CentreModel::from_parts`, since the reset alone does not route them. A galaxy-side hold
+    /// whose arm reaches any of these memos must reset it here too.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn with_rules(self, rules: GalaxyRules) -> Self {
@@ -368,6 +371,7 @@ impl Galaxy {
             window_caps,
             centre_motion: CentreMotionCell::default(),
             centre: CentreModelCell::default(),
+            centre_potential: CentrePotentialCell::default(),
             rules,
         })
     }
@@ -518,6 +522,27 @@ impl Galaxy {
             .map_err(|e| *e)
     }
 
+    /// The centre's potential as the exact orbits in it read it (plan 09, P09.T28.d.b): the black
+    /// hole's, the cluster's and the rest of the galaxy's monopole, tabulated
+    /// ([`CentrePotential`](motion::spherical::CentrePotential)).
+    ///
+    /// Only the Kepler regime's exact orbit reads it, from version 25 (`KEPLER_SECULAR_VERSION`'s
+    /// hold), so a galaxy below that never builds it. It is held with the galaxy and built when
+    /// first read, as [`centre_motion`](Self::centre_motion) is, from that motion alone, in well
+    /// under a millisecond once the motion is built: the same bits whichever caller reads it first
+    /// and whenever, and the galaxy's equality and `Debug` text do not depend on whether it has
+    /// been read. The builders that carry the motion carry it, built or not.
+    ///
+    /// # Panics
+    ///
+    /// As [`centre_motion`](Self::centre_motion), which it reads.
+    #[must_use]
+    pub(crate) fn centre_potential(&self) -> &motion::spherical::CentrePotential {
+        self.centre_potential
+            .0
+            .get_or_init(|| motion::spherical::CentrePotential::new(self.centre_motion()))
+    }
+
     /// The galaxy-side holds' arms this galaxy takes, which each held call site reads its field of
     /// (decision-galaxy-25-train §1).
     ///
@@ -634,7 +659,8 @@ impl Galaxy {
     /// quadrature nodes); the (R, |z|) grid adds 128 KiB and the kinematic tables that read it
     /// about 0.7 MiB (plan 08). The gas field is held inline and adds nothing. The centre's
     /// motion, once read, adds its tables, about 20 KiB (plan 09, P09.T28.b.a), and the centre's
-    /// model, once built, its distribution functions' tables, about 0.5 MiB (P09.T29), so the
+    /// model, once built, its distribution functions' tables, about 0.5 MiB (P09.T29), and the
+    /// centre's potential, once read, its table and basis, about 15 kB (P09.T28.d.b), so the
     /// figure depends on what has been read.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
@@ -657,6 +683,11 @@ impl Galaxy {
                 // is not lost, `centre` returns it at every read.
                 .and_then(|built| built.as_deref().ok())
                 .map_or(0, |model| size_of::<CentreModel>() + model.heap_bytes())
+            + self
+                .centre_potential
+                .0
+                .get()
+                .map_or(0, motion::spherical::CentrePotential::heap_bytes)
             + self
                 .kinematics
                 .as_ref()
@@ -734,6 +765,25 @@ impl PartialEq for CentreModelCell {
 impl fmt::Debug for CentreModelCell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("CentreModelCell")
+    }
+}
+
+/// [`Galaxy::centre_potential`]'s value, built when first read, as [`CentreMotionCell`] is.
+#[derive(Clone, Default)]
+struct CentrePotentialCell(OnceLock<motion::spherical::CentrePotential>);
+
+/// Equal always, as [`CentreMotionCell`]: the potential is a pure function of the centre's
+/// motion, itself one of what the galaxy's equality compares.
+impl PartialEq for CentrePotentialCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been built, as [`CentreMotionCell`]'s.
+impl fmt::Debug for CentrePotentialCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CentrePotentialCell")
     }
 }
 

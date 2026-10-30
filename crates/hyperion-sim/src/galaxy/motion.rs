@@ -37,6 +37,14 @@
 //! galaxy built today, each takes its held arm, the straight lines verbatim, so no generated
 //! output moves; P09.T29's centre source reads these under either.
 //!
+//! **From version 25 the orbit is the exact one in the centre's potential** (P09.T28.d.b, behind
+//! `KEPLER_SECULAR_VERSION`, a hold of its own for attribution). Under its rules a Kepler-regime
+//! state whose orbit is bound in the centre's Ψ follows that orbit exactly, with the Schwarzschild
+//! advance on top ([`spherical`]), and one that is not keeps the [`KeplerOrbit`]: through
+//! [`Trajectory::new`], which [`position_velocity_at`] and the centre's source read. The Kepler
+//! orbit still sets the bounds read off it (the loss cone's verdict, P09.T28.c's radius, P09.T29's
+//! shells and pads), which hold the exact orbit too.
+//!
 //! # The range query near the black hole (P09.T29)
 //!
 //! A [`Trajectory`] is a system's law prepared once, the [`KeplerOrbit`] built and the loss cone
@@ -99,6 +107,7 @@
 use std::error::Error;
 use std::fmt;
 
+use self::spherical::{CentrePotential, SphericalOrbit};
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::features::centre::members::CentreMemberRecord;
@@ -1158,7 +1167,8 @@ fn verdict_on(motion: &CentreMotion, start: &EpochState) -> LossConeVerdict {
 }
 
 /// Where a system starting from `start` is at `t` in `galaxy`, and how it moves there, under its
-/// regime's law (plan 09, Design note 12; P09.T28.b.a).
+/// regime's law (plan 09, Design note 12; P09.T28.b.a), as the galaxy's rules take it
+/// ([`Trajectory::new`]).
 ///
 /// - **[`Regime::Straight`]:** plan 08's straight line from the epoch position at the epoch
 ///   velocity, the same bits as plan 03's [`position_at`](crate::galaxy::query::position_at)
@@ -1170,6 +1180,9 @@ fn verdict_on(motion: &CentreMotion, start: &EpochState) -> LossConeVerdict {
 ///   black hole itself or a state with no angular momentum, keeps its epoch position, which is how
 ///   a grid system of a galaxy built without its kinematic tables stays put, as plan 03's systems
 ///   do there.
+///
+///   From version 25 (`KEPLER_SECULAR_VERSION`, P09.T28.d.b) an orbit bound in the centre's
+///   potential takes its exact orbit there instead ([`spherical::SphericalOrbit`]).
 ///
 /// At the epoch either law gives the epoch state to the bit. The two laws meet at the influence
 /// radius: a thousand years on they differ there by G `M_bh` t² ÷ r², the pull of the black hole
@@ -1227,7 +1240,7 @@ fn verdict_on(motion: &CentreMotion, start: &EpochState) -> LossConeVerdict {
 /// ```
 #[must_use]
 pub fn position_velocity_at(galaxy: &Galaxy, start: &EpochState, t: UniverseTime) -> StateAt {
-    Trajectory::of(galaxy.centre_motion(), *start).state_at(t)
+    Trajectory::new(galaxy, *start).state_at(t)
 }
 
 /// A system's law of motion from its epoch state, prepared once so that it can be asked about at
@@ -1235,8 +1248,10 @@ pub fn position_velocity_at(galaxy: &Galaxy, start: &EpochState, t: UniverseTime
 /// bits (P09.T29, for the centre's cache of orbits).
 ///
 /// Preparing reads the regime, builds the [`KeplerOrbit`] of a Kepler-regime state
-/// ([`CentreMotion::kepler_orbit`]) and takes the loss cone's verdict; [`state_at`](Self::state_at)
-/// then only propagates. It holds the epoch state and the orbit, some 190 bytes.
+/// ([`CentreMotion::kepler_orbit`]) and takes the loss cone's verdict, and under the exact orbit's
+/// law prepares that orbit ([`spherical::SphericalOrbit`]); [`state_at`](Self::state_at) then only
+/// propagates. It holds the epoch state and the orbit, some 190 bytes, and the exact orbit, boxed,
+/// some 640 bytes more ([`heap_bytes`](Self::heap_bytes)).
 ///
 /// # Examples
 ///
@@ -1271,14 +1286,14 @@ pub fn position_velocity_at(galaxy: &Galaxy, start: &EpochState, t: UniverseTime
 /// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Trajectory {
     start: EpochState,
     law: Law,
 }
 
 /// How a [`Trajectory`] moves.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Law {
     /// The straight regime: plan 08's straight line.
     Straight,
@@ -1287,20 +1302,32 @@ enum Law {
     Still,
     /// The Kepler regime: the orbit from the epoch state.
     Kepler(KeplerOrbit),
+    /// The Kepler regime under the exact orbit's law (P09.T28.d.b), bound in the centre's
+    /// potential: the exact orbit there, with the Kepler orbit from the epoch state for the bounds
+    /// read off it.
+    Spherical(KeplerOrbit, Box<SphericalOrbit>),
     /// The Kepler regime, on an orbit that passes inside the loss cone: no such system.
     NoSuchSystem,
 }
 
 impl Trajectory {
-    /// The trajectory of `start` in `galaxy`, under its regime's law (as
-    /// [`position_velocity_at`]).
+    /// The trajectory of `start` in `galaxy`, under its regime's law as the galaxy's rules take it
+    /// (as [`position_velocity_at`]): [`of`](Self::of) below version 25, and
+    /// [`in_potential`](Self::in_potential) from it (`KEPLER_SECULAR_VERSION`, P09.T28.d.b).
     #[must_use]
     pub fn new(galaxy: &Galaxy, start: EpochState) -> Self {
-        Self::of(galaxy.centre_motion(), start)
+        let motion = galaxy.centre_motion();
+        match galaxy.rules().kepler_secular {
+            KeplerSecularRules::TwoBody => Self::of(motion, start),
+            KeplerSecularRules::Spherical => {
+                Self::in_potential(motion, galaxy.centre_potential(), start)
+            }
+        }
     }
 
     /// The trajectory of `start` about a galaxy's centre whose motion is `motion`
-    /// ([`Galaxy::centre_motion`]), for a caller that holds it.
+    /// ([`Galaxy::centre_motion`]), for a caller that holds it: the two-body law in the Kepler
+    /// regime, the held arm of `KEPLER_SECULAR_VERSION`.
     #[must_use]
     pub fn of(motion: &CentreMotion, start: EpochState) -> Self {
         let law = match motion.regime_at(start.record.epoch_position()) {
@@ -1316,6 +1343,97 @@ impl Trajectory {
         Self { start, law }
     }
 
+    /// The trajectory of `start` about a galaxy's centre whose motion is `motion` and whose
+    /// potential is `potential` ([`spherical::CentrePotential::new`] of the same motion), under
+    /// the exact orbit's law (P09.T28.d.b): as [`of`](Self::of), but that a Kepler-regime orbit
+    /// bound in the potential follows its exact orbit there
+    /// ([`spherical::SphericalOrbit::new`]); one that is not keeps its Kepler orbit.
+    ///
+    /// # Examples
+    ///
+    /// A member 1 ly from the Milky Way's black hole, a millennium on, by the two laws:
+    ///
+    /// ```
+    /// use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
+    /// use hyperion_sim::galaxy::Population;
+    /// use hyperion_sim::galaxy::motion::spherical::CentrePotential;
+    /// use hyperion_sim::galaxy::motion::{CentreMotion, EpochState, StateAt, Trajectory};
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    /// use hyperion_sim::galaxy::placement::{SystemOrigin, SystemRecord};
+    /// use hyperion_sim::galaxy::potential::MassModel;
+    /// use hyperion_sim::id::{CentreMemberId, Layer, MemberSlot, SystemId};
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+    /// use hyperion_sim::units::{SolarMasses, Years};
+    ///
+    /// let params = GalaxyParams::milky_way_like();
+    /// let motion = CentreMotion::new(&params, &MassModel::new(&params))?;
+    /// let potential = CentrePotential::new(&motion);
+    /// let slot = MemberSlot::InCell { band: Layer::A, level: 4, cell: [0, 0, 0], index: 0 };
+    /// let record = SystemRecord::from_parts(
+    ///     SystemId::from(CentreMemberId::new(slot)?),
+    ///     GalacticPosition::from_light_years([1.0, 0.0, 0.0]).expect("in range"),
+    ///     SystemOrigin::CentreMember { attempt: 0 },
+    ///     Population::NuclearDisc,
+    ///     SolarMasses::new(1.0),
+    ///     Years::new(1e9),
+    /// );
+    /// let start = EpochState::new(record, GalacticVelocity::new([3e4, 1.5e5, 0.0]))?;
+    /// let t = UniverseTime::from_julian_years(1_000).expect("in the clock window");
+    /// let at = |trajectory: Trajectory| match trajectory.state_at(t) {
+    ///     StateAt::Exists(state) => *state.position(),
+    ///     StateAt::NoSuchSystem => panic!("far from the loss cone"),
+    /// };
+    /// let two_body = at(Trajectory::of(&motion, start));
+    /// let exact = at(Trajectory::in_potential(&motion, &potential, start));
+    /// // The stars spread over the orbit pull it some 10⁻⁴ ly off the two-body law's, where the
+    /// // mass inside 1 ly is held fixed.
+    /// let apart = two_body.distance_to(&exact).value() / METRES_PER_LIGHT_YEAR;
+    /// assert!((1e-5..1e-2).contains(&apart), "{apart} ly");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn in_potential(
+        motion: &CentreMotion,
+        potential: &CentrePotential,
+        start: EpochState,
+    ) -> Self {
+        debug_assert!(
+            (potential.black_hole().value()
+                / GravitationalParameter::from_solar_masses(motion.profile().black_hole()).value()
+                - 1.0)
+                .abs()
+                < 1e-12,
+            "the potential is the same centre's as the motion"
+        );
+        let law = match Self::of(motion, start).law {
+            Law::Kepler(orbit) => SphericalOrbit::new(potential, &orbit)
+                .map_or(Law::Kepler(orbit), |exact| {
+                    Law::Spherical(orbit, Box::new(exact))
+                }),
+            law @ (Law::Straight | Law::Still | Law::NoSuchSystem | Law::Spherical(..)) => law,
+        };
+        Self { start, law }
+    }
+
+    /// Its exact orbit in the centre's potential, under that law (P09.T28.d.b); `None` otherwise.
+    #[must_use]
+    pub fn exact_orbit(&self) -> Option<&SphericalOrbit> {
+        match &self.law {
+            Law::Spherical(_, exact) => Some(exact),
+            Law::Straight | Law::Still | Law::Kepler(_) | Law::NoSuchSystem => None,
+        }
+    }
+
+    /// The bytes it owns on the heap: its exact orbit's, if it has one, for P09.T29's cache.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        match &self.law {
+            Law::Spherical(..) => size_of::<SphericalOrbit>(),
+            Law::Straight | Law::Still | Law::Kepler(_) | Law::NoSuchSystem => 0,
+        }
+    }
+
     /// The epoch state it starts from.
     #[must_use]
     pub const fn start(&self) -> &EpochState {
@@ -1327,16 +1445,18 @@ impl Trajectory {
     pub const fn regime(&self) -> Regime {
         match self.law {
             Law::Straight => Regime::Straight,
-            Law::Still | Law::Kepler(_) | Law::NoSuchSystem => Regime::Kepler,
+            Law::Still | Law::Kepler(_) | Law::Spherical(..) | Law::NoSuchSystem => Regime::Kepler,
         }
     }
 
     /// The Kepler orbit it follows: `None` in the straight regime, for a state with no orbit, and
-    /// for one the loss cone carves out.
+    /// for one the loss cone carves out. Under the exact orbit's law it is the Kepler orbit from
+    /// the epoch state, whose radial range and speeds bound the exact orbit's
+    /// ([`spherical`]'s "What follows for the bounds").
     #[must_use]
     pub const fn orbit(&self) -> Option<&KeplerOrbit> {
         match &self.law {
-            Law::Kepler(orbit) => Some(orbit),
+            Law::Kepler(orbit) | Law::Spherical(orbit, _) => Some(orbit),
             Law::Straight | Law::Still | Law::NoSuchSystem => None,
         }
     }
@@ -1380,6 +1500,18 @@ impl Trajectory {
                     position,
                     velocity: later.velocity(),
                 })
+            }
+            Law::Spherical(_, exact) => {
+                if t == UniverseTime::EPOCH {
+                    return StateAt::Exists(epoch);
+                }
+                let (displacement, velocity) =
+                    exact.position_velocity(Seconds::new(t.since_epoch().as_seconds_f64()));
+                let position = GalacticPosition::ORIGIN.translated(displacement).expect(
+                    "an orbit bound in the centre's potential stays inside its apocentre, under \
+                     10⁶ ly, and in the addressable range",
+                );
+                StateAt::Exists(MotionState { position, velocity })
             }
         }
     }
@@ -1468,6 +1600,35 @@ pub(crate) fn kepler_regime_position_at(
         // it has exploded (plan 09, P09.T33.a).
         SystemOrigin::CatalogueSystem(_) => system_of_record(galaxy, record).position_at(t),
     }
+}
+
+/// The generator version from which a Kepler-regime orbit bound in the centre's potential follows
+/// its exact orbit there (plan 09, P09.T28.d.b; [`spherical`]): 25, a hold of its own beside
+/// [`KEPLER_REGIME_VERSION`]'s for attribution (decision-galaxy-25-train §1.7), on the same train.
+///
+/// It is the hold of one call site, a `match` on [`KeplerSecularRules`] read from the galaxy's
+/// rules: [`Trajectory::new`], which [`position_velocity_at`] (and so plan 03's
+/// [`position_at`](crate::galaxy::query::position_at) under the Kepler regime's rules) and the
+/// centre's source ([`CentreCellOrbits`](crate::galaxy::features::centre::CentreCellOrbits)) read.
+/// Its term reaches generated output only through [`KEPLER_REGIME_VERSION`]'s swap.
+///
+/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
+/// [`KeplerSecularRules::TwoBody`], the code of version 23 verbatim, and never builds the centre's
+/// potential; the tests reach the new arm through `GalaxyRules::every_25_hold()`. The bump to 25
+/// deletes this hold, [`KeplerSecularRules`] with its `TwoBody` arm, the galaxy's `kepler_secular`
+/// field and its tripwire (`the_kepler_secular_term_is_held_only_until_the_25_bump`).
+pub(crate) const KEPLER_SECULAR_VERSION: GeneratorVersion = GeneratorVersion::new(25);
+
+/// Which law a Kepler-regime orbit follows (the hold of [`KEPLER_SECULAR_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum KeplerSecularRules {
+    /// Version 24's and before: the two-body law about the mass inside the epoch radius
+    /// ([`KeplerOrbit::propagate`]).
+    TwoBody,
+    /// Version 25's: an orbit bound in the centre's potential follows its exact orbit there, with
+    /// the Schwarzschild advance ([`spherical::SphericalOrbit`]); one that is not keeps the
+    /// two-body law.
+    Spherical,
 }
 
 /// Whether the loss cone carves grid `record` out under the Kepler regime's rules (P09.T28.b.b):
@@ -1688,10 +1849,13 @@ impl SpeedBound {
 }
 
 pub mod secular;
+pub mod spherical;
 pub mod tidal;
 
 #[cfg(test)]
 mod kepler_regime_hold;
+#[cfg(test)]
+mod kepler_secular_hold;
 
 #[cfg(test)]
 mod tests {

@@ -7,9 +7,10 @@
 //! added as secular rates" (brainstorm, "Orbits and time"). [`KeplerOrbit::propagate`] keeps the
 //! two-body law; [`SecularOrbit::propagate`] is the secular step, the two-body orbit propagated at
 //! the corrected mean motion and turned in its plane by the rates × dt, from the orbit with its
-//! [`SecularRates`] ([`KeplerOrbit::secular`]). Nothing reads them at this
-//! version: the term in [`position_velocity_at`](super::position_velocity_at) is P09.T28.d.b's,
-//! behind `KEPLER_SECULAR_VERSION` = 25.
+//! [`SecularRates`] ([`KeplerOrbit::secular`]). Nothing reads the stars' rate or the step: the
+//! term in [`position_velocity_at`](super::position_velocity_at) is P09.T28.d.b's exact orbit in
+//! the centre's potential ([`spherical`](super::spherical); restated 2026-10-30 on research
+//! advice), which reads the Schwarzschild advance alone, behind `KEPLER_SECULAR_VERSION` = 25.
 //!
 //! # The relativistic advance
 //!
@@ -20,8 +21,8 @@
 //! relativistic term is about `M★(<a) ÷ M_bh` of the black hole's, and at most some 10⁻⁴ of the
 //! orbit's apsidal rate, `G M_bh ÷ (c² a)` of the stars' Newtonian precession where it matters.
 //! S2's orbit (a = 0.0163 ly, e = 0.8846; GRAVITY Collaboration 2020, A&A 636, L5) advances 12.3′
-//! an orbit about the Milky Way fixture's 4.297 × 10⁶ M☉, where GRAVITY measured 12.1′ about their
-//! 4.261 × 10⁶ M☉. The change it makes to the radial period, of order `G M ÷ (c² a)`, depends on
+//! an orbit about the Milky Way fixture's 4.297 × 10⁶ M☉, where GRAVITY's elements and their
+//! 4.261 × 10⁶ M☉ give 12.1′, the prediction their measured precession matched. The change it makes to the radial period, of order `G M ÷ (c² a)`, depends on
 //! the coordinates and is not modelled.
 //!
 //! # The stars' precession
@@ -71,7 +72,8 @@
 //! ±1,000 yr (P09.T28.d.a as built, in plan 09's Risks), it keeps a circular orbit exact, and on
 //! eccentric ones cuts the two-body law's error some thirtyfold at 0.1 ly, where the span holds
 //! one to eight radial periods; at 1 and 5 ly, where it holds a fraction of one, the two-body law
-//! is the closer, and neither meets a tenth of the orbit's tidal radius on an eccentric orbit.
+//! is the closer, and neither meets a tenth of the orbit's tidal radius on an eccentric orbit:
+//! the exact orbit does (`spherical`'s test, which replaced this module's pinned misses).
 //!
 //! # The eccentricity table
 //!
@@ -900,177 +902,6 @@ mod tests {
             let energy = |o: &KeplerOrbit| o.specific_energy_j_per_kg();
             assert!((energy(&once) / energy(&later) - 1.0).abs() < 1e-12);
             assert!((h(&once) / h(&bound) - 1.0).abs() < 1e-12);
-        }
-    }
-
-    /// The acceleration `−G M(<r) r̂ ÷ r²` of the black hole and the stars inside r, m s⁻².
-    fn acceleration(motion: &CentreMotion, x: [f64; 3]) -> [f64; 3] {
-        let r = length(x);
-        let gm = mu_at(motion, r / METRES_PER_LIGHT_YEAR);
-        x.map(|c| -gm * c / (r * r * r))
-    }
-
-    /// The position `span` s after the state `(start, speed)` (m, m s⁻¹) in the smooth potential
-    /// of the black hole and the stars (`motion`'s mass inside each radius), by the classical
-    /// fourth-order Runge–Kutta method with steps of `eta` local dynamical times
-    /// `√(r³ ÷ G M(<r))`.
-    fn integrate(
-        motion: &CentreMotion,
-        start: [f64; 3],
-        speed: [f64; 3],
-        span: f64,
-        eta: f64,
-    ) -> [f64; 3] {
-        let (mut position, mut velocity, mut done) = (start, speed, 0.0);
-        let add = |a: [f64; 3], b: [f64; 3], step: f64| [0, 1, 2].map(|i| a[i] + step * b[i]);
-        while (span - done).abs() > 0.0 {
-            let radius = length(position);
-            let dynamical =
-                (radius * radius * radius / mu_at(motion, radius / METRES_PER_LIGHT_YEAR)).sqrt();
-            let step = (eta * dynamical).min((span - done).abs()) * span.signum();
-            let k1 = (velocity, acceleration(motion, position));
-            let k2 = (
-                add(velocity, k1.1, step / 2.0),
-                acceleration(motion, add(position, k1.0, step / 2.0)),
-            );
-            let k3 = (
-                add(velocity, k2.1, step / 2.0),
-                acceleration(motion, add(position, k2.0, step / 2.0)),
-            );
-            let k4 = (
-                add(velocity, k3.1, step),
-                acceleration(motion, add(position, k3.0, step)),
-            );
-            position = [0, 1, 2].map(|i| {
-                position[i] + step / 6.0 * (k1.0[i] + 2.0 * k2.0[i] + 2.0 * k3.0[i] + k4.0[i])
-            });
-            velocity = [0, 1, 2].map(|i| {
-                velocity[i] + step / 6.0 * (k1.1[i] + 2.0 * k2.1[i] + 2.0 * k3.1[i] + k4.1[i])
-            });
-            done = if (span - done).abs() <= step.abs() {
-                span
-            } else {
-                done + step
-            };
-        }
-        position
-    }
-
-    /// The secular step's variants, for the plan's test: the stars' rates as built (the mean
-    /// orbit's mean motion and the stars' shift of it), without the mean orbit's correction, the
-    /// precession alone (the plan's "two rates × dt"), and none (the two-body law), each Newtonian.
-    fn variants(orbit: &KeplerOrbit, table: &SecularTable) -> [SecularOrbit; 4] {
-        let rates = orbit.secular_rates(table).expect("bound");
-        let (mu, a) = (orbit.mu, 1.0 / orbit.alpha);
-        let e = orbit.eccentricity();
-        let n = orbit.mean_motion_si();
-        let scale = table.stars_at(a);
-        let [alpha, beta, _] = table.averages_at(a, e).map(|v| v * scale);
-        let shift = n * (2.0 * (table.black_hole - mu) + 2.0 * alpha + (1.0 - e * e) * beta) / mu;
-        let with = |mass_precession: PerYear, mean_motion: PerYear| SecularOrbit {
-            orbit: *orbit,
-            rates: SecularRates {
-                schwarzschild: PerYear::new(0.0),
-                mass_precession,
-                mean_motion,
-            },
-        };
-        let (precession, none) = (rates.mass_precession, PerYear::new(0.0));
-        [
-            with(precession, rates.mean_motion),
-            with(precession, PerYear::new(shift * YEAR)),
-            with(precession, none),
-            with(none, none),
-        ]
-    }
-
-    /// The plan's test of the pair: against a direct integration in the smooth potential of the
-    /// black hole and the stars (Newtonian, so the step takes the stars' rates alone), the
-    /// position after ±1,000 yr from 0.1, 1 and 5 ly, on a circular orbit and four eccentric ones,
-    /// each against a tenth of the orbit's tidal radius at pericentre for a solar mass
-    /// (P09.T28.c).
-    ///
-    /// The bound is met only by the circular orbits, by the step as by the two-body law; the
-    /// eccentric ones miss it (plan 09's Risks, "P09.T28.d.a as built"), and the misses are
-    /// pinned as they stand. At 0.1 ly, where the span holds one to eight radial periods, the step
-    /// beats the two-body law on every orbit; at 1 and 5 ly, where it holds a fraction of one, the
-    /// two-body law beats the step on every eccentric orbit, since the rates are orbit averages and
-    /// the arc is short.
-    #[test]
-    fn the_secular_step_beats_the_two_body_law_only_where_the_span_holds_whole_periods() {
-        let motion = milky_way();
-        let table = SecularTable::new(&motion);
-        let cases = [(1.0, 0.0), (0.7, 0.0), (1.25, 0.0), (0.9, 0.9), (1.1, -1.0)];
-        let names = ["as built", "no mean orbit", "precession alone", "two-body"];
-        // The worst of each radius, in tenths of the tidal radius, as measured (2026-10-29, on
-        // x86-64), pinned to 10%: the step as built, and the two-body law.
-        let pinned = [
-            (0.1, 65.37, 1804.6),
-            (1.0, 3180.8, 379.56),
-            (5.0, 1953.3, 1.092),
-        ];
-        for (r, pinned_built, pinned_two_body) in pinned {
-            let mut worst = [0.0_f64; 4];
-            for (factor, tilt) in cases {
-                let orbit = orbit_at(&motion, r, factor, tilt);
-                let bound = 0.1
-                    * motion
-                        .tidal_radius_at_pericentre(&orbit, SolarMasses::new(1.0))
-                        .value();
-                let steps = variants(&orbit, &table);
-                for years in [-1_000.0, 1_000.0] {
-                    let t = years * YEAR;
-                    let truth = integrate(&motion, orbit.position, orbit.velocity, t, 2e-3);
-                    let finer = integrate(&motion, orbit.position, orbit.velocity, t, 1e-3);
-                    let off = |x: [f64; 3]| length([0, 1, 2].map(|i| x[i] - truth[i]));
-                    assert!(off(finer) < 1e-3 * bound, "the integration converges");
-                    let errors =
-                        steps.map(|step| off(step.propagate(Seconds::new(t)).position) / bound);
-                    println!(
-                        "r {r} ly, ×{factor} at {tilt} rad (e {:.3}, P {:.0} yr), {years} yr, \
-                         bound {:.3e} ly: {}",
-                        orbit.eccentricity(),
-                        orbit.period().expect("bound").value() / YEAR,
-                        bound / METRES_PER_LIGHT_YEAR,
-                        names
-                            .iter()
-                            .zip(errors)
-                            .map(|(name, x)| format!("{name} {x:.3}"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
-                    for (w, x) in worst.iter_mut().zip(errors) {
-                        *w = w.max(x);
-                    }
-                    let [built, .., two_body] = errors;
-                    if (factor - 1.0_f64).abs() < f64::EPSILON {
-                        // A circular orbit is exact about μ, and the step keeps it so.
-                        assert!(
-                            built < 0.01 && two_body < 0.01,
-                            "circular at {r} ly: {errors:?}"
-                        );
-                    } else if r < 0.5 {
-                        assert!(built < two_body, "{r} ly, ×{factor}: {errors:?}");
-                    } else {
-                        assert!(two_body < built, "{r} ly, ×{factor}: {errors:?}");
-                    }
-                }
-            }
-            println!(
-                "r {r} ly, worst over the orbits, in tenths of the tidal radius: {}",
-                names
-                    .iter()
-                    .zip(worst)
-                    .map(|(name, x)| format!("{name} {x:.3}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            let [built, .., two_body] = worst;
-            assert!((built / pinned_built - 1.0).abs() < 0.1, "{r} ly: {built}");
-            assert!(
-                (two_body / pinned_two_body - 1.0).abs() < 0.1,
-                "{r} ly: {two_body}"
-            );
         }
     }
 }

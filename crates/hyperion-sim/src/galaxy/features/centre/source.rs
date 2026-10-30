@@ -11,7 +11,8 @@
 //!   holds it, one in layer E. A tidal disruption's victim (P09.T30.b) still on its way in at the
 //!   epoch counts one in its layer if its epoch position is inside the radius.
 //! - **Hits.** Members move on their orbits (P09.T28.b.a's [`Trajectory`]: the Kepler orbit
-//!   inside the influence radius, a straight line outside it), so the cells are chosen by how far
+//!   inside the influence radius, from version 25 the exact orbit in the centre's potential,
+//!   P09.T28.d.b, and a straight line outside it), so the cells are chosen by how far
 //!   their members can go, and every member of a chosen cell is propagated to the sphere's time
 //!   and tested there against the unpadded radius. Members not yet born at that time (the young
 //!   disc's, with ages from −H) are dropped.
@@ -117,7 +118,8 @@ const SPEED_MARGIN: f64 = 1e-6;
 const SHELL_MARGIN: f64 = 1e-6;
 
 /// One cell's members of one band with their trajectories (module documentation): what a
-/// [`CentreOrbitCache`] keeps, about 200 bytes a member.
+/// [`CentreOrbitCache`] keeps, about 200 bytes a member, and from version 25 some 640 more for
+/// each member's exact orbit.
 ///
 /// Each member also carries the shell it never leaves: its orbit's pericentre and apocentre
 /// ([`KeplerOrbit::pericentre`](crate::galaxy::motion::KeplerOrbit::pericentre),
@@ -142,11 +144,10 @@ impl CentreCellOrbits {
         band: MassBand,
         cell: NestedCell,
     ) -> Self {
-        let motion = galaxy.centre_motion();
         let trajectories: Vec<Trajectory> = centre
             .members_in_cell(galaxy, band, cell)
             .iter()
-            .map(|member| Trajectory::of(motion, EpochState::of_centre_member(member)))
+            .map(|member| Trajectory::new(galaxy, EpochState::of_centre_member(member)))
             .collect();
         let shells = trajectories.iter().map(shell_of).collect();
         Self {
@@ -165,7 +166,13 @@ impl CentreCellOrbits {
     /// The bytes it owns on the heap, for a byte-bounded cache (P09.T40.a).
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
-        size_of_val(&*self.trajectories) + size_of_val(&*self.shells)
+        size_of_val(&*self.trajectories)
+            + size_of_val(&*self.shells)
+            + self
+                .trajectories
+                .iter()
+                .map(Trajectory::heap_bytes)
+                .sum::<usize>()
     }
 
     /// Appends the hits its members make in `sphere`, `from_black_hole` ly from the black hole.
@@ -184,9 +191,14 @@ impl CentreCellOrbits {
     }
 }
 
-/// The least and greatest distance from the black hole that `trajectory` ever has, ly.
+/// The least and greatest distance from the black hole that `trajectory` ever has, ly: its exact
+/// orbit's turning points under that law (P09.T28.d.b), which its Kepler orbit's bound only to the
+/// dark halo's share inward, else its Kepler orbit's.
 #[must_use]
 fn shell_of(trajectory: &Trajectory) -> [f64; 2] {
+    if let Some(exact) = trajectory.exact_orbit() {
+        return [exact.pericentre().value(), exact.apocentre().value()];
+    }
     match (trajectory.regime(), trajectory.orbit()) {
         (Regime::Kepler, Some(orbit)) => [
             orbit.pericentre().value(),
@@ -240,7 +252,8 @@ impl CentreOrbitCache for NoCentreOrbitCache {
 /// A cache that keeps every cell it builds for one galaxy, the one it is made for.
 ///
 /// It is what a caller asking several queries of one centre passes, as the brainstorm's century
-/// query "with cached orbits" does. It grows without bound, about 200 bytes a member, so a
+/// query "with cached orbits" does. It grows without bound, about 200 bytes a member (840 from
+/// version 25), so a
 /// long-lived caller uses plan 09's server cache (P09.T40.a) instead.
 ///
 /// # Panics
@@ -842,6 +855,11 @@ mod tests {
         assert_eq!(
             orbits.heap_bytes(),
             members.len() * (size_of::<Trajectory>() + size_of::<[f64; 2]>())
+                + orbits
+                    .trajectories()
+                    .iter()
+                    .map(Trajectory::heap_bytes)
+                    .sum::<usize>()
         );
     }
 

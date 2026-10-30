@@ -17,6 +17,8 @@
 //! - [`kepler_regime`](GalaxyRules::kepler_regime), at [`KEPLER_REGIME_VERSION`] (plan 09,
 //!   P09.T28.b.b): the Kepler regime in the drift hook, the grid's loss-cone carve-out and the
 //!   walks' pad for the orbits.
+//! - [`kepler_secular`](GalaxyRules::kepler_secular), at [`KEPLER_SECULAR_VERSION`] (plan 09,
+//!   P09.T28.d.b): the exact orbit in the centre's potential for a Kepler-regime orbit bound in it.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -25,7 +27,9 @@
 //! inside [`StellarRules`].
 
 use crate::GeneratorVersion;
-use crate::galaxy::motion::{KEPLER_REGIME_VERSION, KeplerRegimeRules};
+use crate::galaxy::motion::{
+    KEPLER_REGIME_VERSION, KEPLER_SECULAR_VERSION, KeplerRegimeRules, KeplerSecularRules,
+};
 use crate::stellar::rules::StellarRules;
 
 /// The galaxy-side holds of the next galaxy train, carried by the `Galaxy` value
@@ -35,6 +39,9 @@ pub(crate) struct GalaxyRules {
     /// The law a Kepler-regime grid system moves by, whether the loss cone carves the grid's
     /// plunging orbits out, and the pad the walks choose cells by (P09.T28.b.b).
     pub(crate) kepler_regime: KeplerRegimeRules,
+    /// The law a Kepler-regime orbit follows: the two-body law, or its exact orbit in the centre's
+    /// potential (P09.T28.d.b).
+    pub(crate) kepler_secular: KeplerSecularRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -49,6 +56,11 @@ impl GalaxyRules {
                 KeplerRegimeRules::Kepler
             } else {
                 KeplerRegimeRules::Straight
+            },
+            kepler_secular: if version.get() >= KEPLER_SECULAR_VERSION.get() {
+                KeplerSecularRules::Spherical
+            } else {
+                KeplerSecularRules::TwoBody
             },
             stellar: StellarRules::of_version(version),
         }
@@ -144,6 +156,15 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_25_hold().kepler_regime,
             KeplerRegimeRules::Kepler
+        );
+        let secular = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).kepler_secular;
+        assert_eq!(secular(23), KeplerSecularRules::TwoBody);
+        assert_eq!(secular(24), KeplerSecularRules::TwoBody);
+        assert_eq!(secular(25), KeplerSecularRules::Spherical);
+        assert_eq!(secular(26), KeplerSecularRules::Spherical);
+        assert_eq!(
+            GalaxyRules::every_25_hold().kepler_secular,
+            KeplerSecularRules::Spherical
         );
         assert_eq!(
             GalaxyRules::every_25_hold().stellar,

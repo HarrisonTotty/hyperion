@@ -59,22 +59,22 @@ fn kepler() -> &'static Galaxy {
     GALAXY.get_or_init(|| held().clone().with_rules(GalaxyRules::every_25_hold()))
 }
 
-fn years(y: i64) -> UniverseTime {
+pub(super) fn years(y: i64) -> UniverseTime {
     UniverseTime::from_julian_years(y).expect("in the clock window")
 }
 
-fn ly(x: f64, y: f64, z: f64) -> GalacticPosition {
+pub(super) fn ly(x: f64, y: f64, z: f64) -> GalacticPosition {
     GalacticPosition::from_light_years([x, y, z]).expect("in range")
 }
 
 /// The distance between two positions, ly.
-fn apart(a: &GalacticPosition, b: &GalacticPosition) -> f64 {
+pub(super) fn apart(a: &GalacticPosition, b: &GalacticPosition) -> f64 {
     a.distance_to(b).value() / METRES_PER_LIGHT_YEAR
 }
 
 /// Every grid record of `layer` whose epoch position lies within `radius` ly of the black hole,
 /// in walk order, as `galaxy` places them.
-fn records_within(galaxy: &Galaxy, layer: Layer, radius: f64) -> Vec<SystemRecord> {
+pub(super) fn records_within(galaxy: &Galaxy, layer: Layer, radius: f64) -> Vec<SystemRecord> {
     records_within_from(&mut NoCache::new(), galaxy, layer, radius)
 }
 
@@ -162,8 +162,9 @@ fn the_kepler_regime_is_held_only_until_the_25_bump() {
 
 /// The digest (`f64_digest`) of the Kepler arm's positions in the D2 test: each Kepler-regime
 /// record's cell and offsets at −1,000, −100, +100 and +1,000 yr, in walk order. Blessed natively
-/// on x86-64; the wasip1 suite compares it.
-const MOVED_POSITIONS_DIGEST: u64 = 0xdc2a_4657_d88c_161e;
+/// on x86-64; the wasip1 suite compares it. Re-pinned by name when P09.T28.d.b's exact orbit
+/// joined every 25 hold (it was `0xdc2a_4657_d88c_161e` on the two-body law).
+const MOVED_POSITIONS_DIGEST: u64 = 0xce83_b24f_e65c_7554;
 
 /// D2 under every 25 hold: the Kepler arm moves the fixture's grid records inside the influence
 /// radius onto their orbits, bit for bit [`position_velocity_at`]'s, and leaves every record
@@ -174,8 +175,8 @@ const MOVED_POSITIONS_DIGEST: u64 = 0xdc2a_4657_d88c_161e;
 /// new one. Layer B within 1.5 influence radii, whose eight central cells are the stellar layers'
 /// cheapest to place, at ±100 and ±1,000 yr. Named `pinned` for the WebAssembly suite's filter
 /// (D5): the arm propagates on the record's path, so the counts and a digest of the positions it
-/// gives are pinned, as blessed natively; P09.T28.d's secular term may re-pin them by name
-/// (decision-galaxy-25-train §1.3).
+/// gives are pinned, as blessed natively. Under every 25 hold the orbits are P09.T28.d.b's exact
+/// ones, which re-pinned the digest by name (decision-galaxy-25-train §1.3).
 #[test]
 fn the_kepler_arm_moves_records_inside_the_radius_and_no_others_pinned() {
     let (held, kepler) = (held(), kepler());
@@ -228,7 +229,7 @@ fn the_kepler_arm_moves_records_inside_the_radius_and_no_others_pinned() {
                 "{:?}: the held arm is the straight line",
                 record.id()
             );
-            match (regime, position_velocity_at(held, &start, t)) {
+            match (regime, position_velocity_at(kepler, &start, t)) {
                 (Regime::Straight, _) => {
                     assert_eq!(b, a, "{:?} outside the regime moved", record.id());
                 }
@@ -535,7 +536,7 @@ impl Ask {
 }
 
 /// The census C1's galaxies: P09.T28.b.a's pre-pin's three, with their kinematic tables.
-fn census_galaxies() -> [(&'static str, Galaxy); 3] {
+pub(super) fn census_galaxies() -> [(&'static str, Galaxy); 3] {
     let drawn = |seed: u64| {
         Galaxy::from_params(
             Seed::new(seed),
@@ -557,7 +558,7 @@ fn census_galaxies() -> [(&'static str, Galaxy); 3] {
 
 /// The pre-pin's radius for `layer`: 1.5 influence radii, and for the substellar layers at most
 /// 4 ly (P09.T28.b.a as built).
-fn census_radius(galaxy: &Galaxy, layer: Layer) -> f64 {
+pub(super) fn census_radius(galaxy: &Galaxy, layer: Layer) -> f64 {
     let edge = 1.5 * galaxy.centre_motion().influence_radius().value();
     match layer {
         Layer::A | Layer::B | Layer::C | Layer::D | Layer::E => edge,

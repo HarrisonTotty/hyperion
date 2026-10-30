@@ -1222,6 +1222,8 @@ hundred innermost members.
       (decision-galaxy-25-train §1.3). The plan's "Bump `GENERATOR_VERSION`" becomes the 25
       wiring's. Its D2 and C1 run with `kepler_regime` on, under `every_25_hold()`; its term
       reaches generated output only through T28.b.b's swap.
+    - _Built behind its hold (lane `p09-t28db`, 2026-10-30, at `GENERATOR_VERSION` 23, no output
+      moved): see Risks, "P09.T28.d.b as built"._
 
 #### P09.T29 The range query at the centre
 
@@ -4445,6 +4447,32 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     from the pod): Weinberg 1972 §8.6, Murray and Dermott §6.8, Merritt 2013 §4.4.1 (which the plan
     marks "to re-check"), Binney and Tremaine §3.2.3, and GRAVITY 2020's printed 12.1′ (their
     elements give 12.156′).
+- **P09.T28.d.b as built (lane `p09-t28db`, 2026-10-30, on 90e53c0 at `GENERATOR_VERSION` 23).**
+  No output moves at 23: nothing below 25 builds the centre's potential, and no golden changes.
+  - _Names._ `motion::spherical::{CentrePotential, SphericalOrbit}`;
+    `Trajectory::in_potential(&CentreMotion, &CentrePotential, EpochState)`,
+    `Trajectory::exact_orbit()` and `Trajectory::heap_bytes()`; `Trajectory` is no longer `Copy`
+    (its exact orbit is boxed, some 640 bytes). `Galaxy::centre_potential()` (crate-internal,
+    lazy, outside equality and `Debug`).
+  - _The hold._ `GalaxyRules::kepler_secular` (`KeplerSecularRules::{TwoBody, Spherical}`),
+    `KEPLER_SECULAR_VERSION` = 25; one call site, `Trajectory::new`, which `position_velocity_at`
+    and now `CentreCellOrbits::new` read. The bump deletes the field, its `match` and the tripwire
+    `the_kepler_secular_term_is_held_only_until_the_25_bump`.
+  - _Deviations (lean, 2026-10-30)._
+    - The anomaly is logarithmic, `ln r = ū − Δ cos η`, not Hénon's: Hénon's missed the bound by
+      16 and 10⁵ tenths on wide orbits (unbound about μ, as most of the grid's are).
+    - The Schwarzschild advance is `6π (G M_bh ÷ (c L))²` a radial period, on the exact orbit's L,
+      turned in proportion to the Newtonian azimuth, not `schwarzschild_rate × t` (none for an
+      orbit unbound about μ, too large by up to μ ÷ G M_bh for a bound one, and uniform in time).
+    - The velocity is the Newtonian one turned with the position, as T28.d.a's step, without `ω̇ r`.
+    - The near-circular threshold is Δ < 10⁻⁵, measured; the harmonic core's closed forms are
+      tested in its two limits, with the first-order advance between them.
+  - _Re-pinned by name (decision §1.3)._ T28.b.b's D2 digest, `0xce83_b24f_e65c_7554`. T28.d.a's
+    pinned-miss test is replaced by `the_exact_orbit_meets_the_plan_s_bound_against_a_direct_integration`.
+  - _For P09.T29 and P14.T29._ Under the exact law the source's shells are the exact orbit's
+    turning points; the pads, the loss-cone verdict and T28.c's radius stay on the Kepler orbit,
+    which bounds the exact one but for the dark halo's share inward (re-checked by the source
+    against a scan and by C1).
 - **P09.T40.a, the features' part, as built (lane `p09-t40`, 2026-10-30, on 1e55cff at
   `GENERATOR_VERSION` 23 and `PROTOCOL_VERSION` 3; no output moves).** Main's rulings of
   2026-10-30 narrow it to the features' part (`decision-r06-t16a-scope.md`): `CentreMemberSource`,
