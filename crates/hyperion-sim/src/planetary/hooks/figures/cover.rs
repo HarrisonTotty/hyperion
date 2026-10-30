@@ -112,14 +112,14 @@ const TRUNCATION: f64 = 3.0;
 /// population ([`OCEAN_LEVEL_HALVINGS`]) at every greenhouse step, and its three constants were
 /// three of `truncated_depth`'s five transcendentals: 12.7% of `generate` and `snapshot_at` over
 /// the first 20 sample systems at version 24 (pod, 8 vCPU, P14.T54.b.l's profile).
-const BELOW_TRUNCATION: f64 = 0.001_349_898_031_630_095_7;
+const LOWER_TRUNCATION_CDF: f64 = 0.001_349_898_031_630_095_7;
 
-/// Φ(3), [`normal_cdf`]`(`[`TRUNCATION`]`)` to the bit, a test holds ([`BELOW_TRUNCATION`]).
-const ABOVE_TRUNCATION_CDF: f64 = 0.998_650_101_968_369_9;
+/// Φ(3), [`normal_cdf`]`(`[`TRUNCATION`]`)` to the bit, a test holds ([`LOWER_TRUNCATION_CDF`]).
+const UPPER_TRUNCATION_CDF: f64 = 0.998_650_101_968_369_9;
 
 /// φ(−3), [`normal_density`]`(−`[`TRUNCATION`]`)` to the bit, a test holds
-/// ([`BELOW_TRUNCATION`]).
-const DENSITY_AT_TRUNCATION: f64 = 0.004_431_848_411_938_007_5;
+/// ([`LOWER_TRUNCATION_CDF`]).
+const LOWER_TRUNCATION_DENSITY: f64 = 0.004_431_848_411_938_007_5;
 
 /// The melting point of water ice, the triple temperature of water's phase diagram: 273.16 K
 /// (IAPWS-95's), where the diagram's solid and liquid meet at their vapour pressure, which
@@ -405,8 +405,8 @@ fn truncated_cdf(z: f64) -> f64 {
     if z >= TRUNCATION {
         return 1.0;
     }
-    let low = BELOW_TRUNCATION;
-    (normal_cdf(z) - low) / (ABOVE_TRUNCATION_CDF - low)
+    let low = LOWER_TRUNCATION_CDF;
+    (normal_cdf(z) - low) / (UPPER_TRUNCATION_CDF - low)
 }
 
 /// The truncated standard normal's mean depth below a level z, `G_t`(z) = ∫ from −3 to z of
@@ -420,8 +420,8 @@ fn truncated_depth(z: f64) -> f64 {
     if z >= TRUNCATION {
         return z;
     }
-    let (low, high) = (BELOW_TRUNCATION, ABOVE_TRUNCATION_CDF);
-    let edge = DENSITY_AT_TRUNCATION;
+    let (low, high) = (LOWER_TRUNCATION_CDF, UPPER_TRUNCATION_CDF);
+    let edge = LOWER_TRUNCATION_DENSITY;
     (z * normal_cdf(z) + normal_density(z) + TRUNCATION * low - edge - low * (z + TRUNCATION))
         / (high - low)
 }

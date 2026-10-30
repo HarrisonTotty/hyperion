@@ -1653,7 +1653,7 @@ impl Substance {
     /// saturated liquid as [`LiquidSpecificHeat`] takes it
     /// ([`HelmholtzResidual::density_at_pressure`]); at p′,
     /// [`COMPRESSION_STEPS`](super::helmholtz::COMPRESSION_STEPS) more from there
-    /// ([`Isotherm::compressed_density`](super::helmholtz::Isotherm::compressed_density)). The equation's compression is carried onto the
+    /// ([`Isotherm::compressed_density`]). The equation's compression is carried onto the
     /// registry's saturated density, so the law is the registry's own at saturation to the bit, and
     /// it never expands a liquid: a pressure at or below `p_sat`(T) gives `ρ_reg`(T) itself, as
     /// does a pressure that is not a number, and any pressure at the critical temperature, where
@@ -1828,6 +1828,7 @@ struct Compressing {
 impl CompressionSlot {
     /// [`Substance::liquid_density_at_pressure`] of the row `id` at `temperature` under
     /// `pressure`, to the bit.
+    #[must_use]
     pub(crate) fn liquid_density_at_pressure(
         &mut self,
         id: SubstanceId,
@@ -1843,8 +1844,11 @@ impl CompressionSlot {
                     .is_eq()
         });
         if !held {
+            self.last = None;
+        }
+        let compressing = self.last.get_or_insert_with(|| {
             let row = id.substance();
-            self.last = Some(Compressing {
+            Compressing {
                 id,
                 temperature,
                 saturated: row.grain_density(CondensedPhase::Liquid, temperature),
@@ -1856,12 +1860,8 @@ impl CompressionSlot {
                 }),
                 at_vapour: None,
                 last: None,
-            });
-        }
-        let compressing = self
-            .last
-            .as_mut()
-            .expect("the slot holds this row and temperature");
+            }
+        });
         let saturated = compressing.saturated?;
         let Some((isotherm, vapour)) = &compressing.equation else {
             return Some(saturated);

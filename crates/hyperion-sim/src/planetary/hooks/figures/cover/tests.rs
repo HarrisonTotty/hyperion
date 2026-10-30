@@ -1136,9 +1136,9 @@ fn the_table_s_airless_bodies_keep_their_delivered_traps_through_the_passes() {
 
 #[test]
 fn the_truncation_s_constants_are_the_normal_s_own_to_the_bit() {
-    assert_same_bits(BELOW_TRUNCATION, normal_cdf(-TRUNCATION));
-    assert_same_bits(ABOVE_TRUNCATION_CDF, normal_cdf(TRUNCATION));
-    assert_same_bits(DENSITY_AT_TRUNCATION, normal_density(-TRUNCATION));
+    assert_same_bits(LOWER_TRUNCATION_CDF, normal_cdf(-TRUNCATION));
+    assert_same_bits(UPPER_TRUNCATION_CDF, normal_cdf(TRUNCATION));
+    assert_same_bits(LOWER_TRUNCATION_DENSITY, normal_density(-TRUNCATION));
 }
 
 /// One [`FillSlot`] asked in turn for two hypsometries' fills, by layers repeated, interleaved,
@@ -1167,6 +1167,78 @@ fn the_fill_slot_gives_the_fill_s_bits() {
             let (want_level, want_share) = hypsometry.fill(depth);
             assert_same_bits(level.value(), want_level.value());
             assert_same_bits(share, want_share);
+        }
+    }
+}
+
+/// The fill's and [`Hypsometry::layer_filling`]'s halvings, which stop where a halving would leave
+/// the bracket as it was, end where all [`OCEAN_LEVEL_HALVINGS`] of them do, to the bit: over a
+/// mobile and a stagnant lid, at layers from a millimetre to past the span's top and at shares
+/// from none to all.
+#[test]
+fn the_fill_s_halvings_end_where_all_of_them_do() {
+    let plain_fill = |h: &Hypsometry, depth: Metres| {
+        let (bottom, top) = h.span();
+        if !(depth.value() > 0.0 && bottom.value().is_finite()) {
+            return (bottom, 0.0);
+        }
+        let full = h.volume_below(top);
+        if depth >= full {
+            return (top + (depth - full), 1.0);
+        }
+        let (mut low, mut high) = (bottom.value(), top.value());
+        for _ in 0..OCEAN_LEVEL_HALVINGS {
+            let middle = low + (high - low) * 0.5;
+            if h.volume_below(Metres::new(middle)) < depth {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        let level = Metres::new(low + (high - low) * 0.5);
+        (level, h.area_below(level))
+    };
+    let plain_layer = |h: &Hypsometry, area: f64| {
+        let (bottom, top) = h.span();
+        if !(area > 0.0 && bottom.value().is_finite()) {
+            return Metres::ZERO;
+        }
+        let (mut low, mut high) = (bottom.value(), top.value());
+        for _ in 0..OCEAN_LEVEL_HALVINGS {
+            let middle = low + (high - low) * 0.5;
+            if h.area_below(Metres::new(middle)) < area {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        h.volume_below(Metres::new(high))
+    };
+    let lid = *Relief::of(&ReliefInputs {
+        regime: TectonicRegime::StagnantLid,
+        continental_fraction: 0.0,
+        crust: Crust::Silicate,
+        surface_gravity: MetresPerSecondSquared::new(3.71),
+        radius: Metres::new(3.39e6),
+        crater_density: PerSquareKilometre::new(0.1),
+        volcanism: 1.0,
+        lithosphere: Metres::new(100e3),
+    })
+    .hypsometry();
+    for hypsometry in [earth_hypsometry(), lid] {
+        for k in 0..=120 {
+            let depth = Metres::new(1e-3 * math::powf(10.0, f64::from(k) / 12.0));
+            let (level, share) = hypsometry.fill(depth);
+            let (want_level, want_share) = plain_fill(&hypsometry, depth);
+            assert_same_bits(level.value(), want_level.value());
+            assert_same_bits(share, want_share);
+        }
+        for k in 0..=100 {
+            let area = f64::from(k) / 100.0;
+            assert_same_bits(
+                hypsometry.layer_filling(area).value(),
+                plain_layer(&hypsometry, area).value(),
+            );
         }
     }
 }

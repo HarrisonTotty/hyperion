@@ -26,8 +26,9 @@
 //! The terms are summed in their published order, each power through the crate's deterministic
 //! `math` (sim-determinism): an integer power of δ by [`math::powi`], a real power by
 //! [`math::powf`], each exponential by [`math::exp`]; a density solved at a pressure takes a fixed
-//! number of Newton steps along an [`Isotherm`], which takes τ's powers once for all of them, and
-//! nothing is cached between calls.
+//! number of Newton steps along one isotherm, which takes τ's powers once for all of them. Nothing
+//! here is cached between calls; a partition keeps its last compression in a local slot of its
+//! own (`liquid::CompressionSlot`).
 
 use crate::math;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
@@ -996,9 +997,10 @@ mod tests {
 
     use super::*;
 
-    /// [`iterate`] is the plain loop of `steps` steps to the bit: over sequences of a tail of up
-    /// to five densities into a cycle of one to seven, and one whose step ends, at every count of
-    /// steps to 40, past its history.
+    /// [`iterate`] is the plain loop of `steps` steps to the bit, at every count of steps to 40,
+    /// past its history: over sequences of a tail of up to five densities into a cycle of one to
+    /// seven, of tails that reach the cycle only past the history, one that never repeats, and one
+    /// whose step ends.
     #[test]
     fn iterating_ends_where_the_plain_loop_does() {
         let plain = |start: f64, steps: usize, step: &dyn Fn(f64) -> Option<f64>| {
@@ -1011,7 +1013,7 @@ mod tests {
             }
             density
         };
-        for tail in 0..=5_u32 {
+        for tail in (0..=5_u32).chain(28..=36) {
             for period in 1..=7_u32 {
                 // The densities 1, 2, …: the tail's, then the cycle's, whose last returns to its
                 // first.
@@ -1030,8 +1032,10 @@ mod tests {
             }
         }
         let ending = |x: f64| (x < 4.0).then_some(x + 1.0);
+        let rising = |x: f64| Some(x + 1.0);
         for steps in 0..=40 {
             assert_same_bits(iterate(1.0, steps, ending), plain(1.0, steps, &ending));
+            assert_same_bits(iterate(1.0, steps, rising), plain(1.0, steps, &rising));
         }
     }
 
