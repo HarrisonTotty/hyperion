@@ -227,7 +227,7 @@ use modifiers::{
 use moon_ice::{HotHistory, MoonIce, kept_water, shell_lag};
 use small_bodies::SmallBodyTypes;
 
-pub use events::SystemEvents;
+pub use events::{ListedEvents, SystemEvents, events_on_the_record};
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then
 /// seven reserved.

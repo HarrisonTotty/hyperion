@@ -207,7 +207,8 @@ fn open_topic(
 /// this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
 /// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
 /// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
-/// 15): `body_events` until plan 14's P14.T31, and plan 09's `features_in_range`,
+/// 15): `body_events` until generator version 25 puts plan 14's P14.T31 events on the record (its
+/// hold), and plan 09's `features_in_range`,
 /// `galaxy_features`, `feature_detail` and `black_hole_state` until its P09.T40.b. Each handler
 /// that names a universe starts from [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
@@ -247,7 +248,15 @@ impl Handler for Handlers {
             RequestBody::BodyDetail(request) => {
                 Box::pin(system::detail(state, request, token).map(answered))
             }
-            RequestBody::BodyEvents(_) => Box::pin(ready(Err(not_served_yet("body_events")))),
+            // Served from generator version 25, which puts P14.T31's events on the record; below
+            // it, answered as a server built before them would (P14.T31.c's hold).
+            RequestBody::BodyEvents(request) => {
+                if hyperion_sim::planetary::system::events_on_the_record() {
+                    Box::pin(system::events(state, request, token).map(answered))
+                } else {
+                    Box::pin(ready(Err(not_served_yet("body_events"))))
+                }
+            }
             // The connection answers `subscribe` through `Handler::subscribe` and `unsubscribe`
             // itself (rendering plan R03, R03.T5.b), so neither reaches here; the arms keep the
             // match exhaustive for a caller that bypasses the connection.

@@ -1,14 +1,17 @@
 //! The planetary requests and their answers: `system_bodies`, `body_detail` and `body_events`
 //! (plan 14, P14.T35.c), added by plan 04's "Extending the convention".
 //!
-//! Until their handlers land (P14.T36, and P14.T31 for `body_events`) the server answers each of
-//! them `unsupported`, as an older server would.
+//! The server serves all three (P14.T36.b), `body_events` from generator version 25, which puts
+//! P14.T31's events on the record; before it, `body_events` is answered `unsupported`, as an older
+//! server answers it.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::planetary::{BodySummaryDto, DetailLevelDto, SectionDto, SystemPlaneDto, ZoneDto};
-use crate::primitives::{BodyIdHex, SystemIdHex, UniverseIdHex, UniverseTime};
+use crate::planetary::{
+    BodySummaryDto, DetailLevelDto, OrbitHostDto, SectionDto, SystemPlaneDto, ZoneDto,
+};
+use crate::primitives::{BodyIdHex, EventIdHex, SystemIdHex, UniverseIdHex, UniverseTime};
 use crate::stellar::SystemSummaryDto;
 
 /// Asks for every body of one system as it is at one time, at a detail level (`system_bodies`),
@@ -82,9 +85,11 @@ pub struct BodyDetailRequest {
 /// Asks for the events on one system's bodies between two times (`body_events`), answered with a
 /// [`BodyEventsDto`].
 ///
-/// A window longer than 1,000 years is refused with `bad_request` (plan 14, P14.T36.b). The
-/// window's ends, `from` inclusive and `to` exclusive, and the field a refusal names, `to`, are
-/// provisional until P14.T31 and T36 serve the kind.
+/// Both ends must lie inside the clock window, `bad_request` naming the end that does not, and a
+/// window that ends before it starts or is longer than 1,000 Julian years is refused with
+/// `bad_request` naming `to` (plan 14, P14.T36.b). The window holds `from` and not `to`. Before
+/// generator version 25, which puts P14.T31's events on the record, the server answers
+/// `unsupported`, as a server built before the events does.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct BodyEventsRequest {
@@ -98,9 +103,12 @@ pub struct BodyEventsRequest {
     pub to: UniverseTime,
 }
 
-/// The events on one system's bodies in a window of time (plan 14, P14.T31).
+/// The events on one system's bodies in a window of time (plan 14, P14.T31, P14.T36.b).
 ///
-/// `universe`, `system`, `from` and `to` echo the request.
+/// `universe`, `system`, `from` and `to` echo the request. An answer lists at most 25,000 events:
+/// where the window holds more, it lists every event of the widest span about the window's middle
+/// that holds no more, which `listed_from` and `listed_to` state, so that a client asking about the
+/// time at a window's middle has the events nearest it, and asks a narrower window for the rest.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct BodyEventsDto {
@@ -112,19 +120,154 @@ pub struct BodyEventsDto {
     pub from: UniverseTime,
     /// The end of the window, exclusive.
     pub to: UniverseTime,
-    /// Every event in the window, by time.
+    /// The start of the span every event of which is listed, inclusive: `from`, or later where the
+    /// window holds more events than an answer lists.
+    pub listed_from: UniverseTime,
+    /// The end of that span, exclusive: `to`, or earlier where the window holds more events than an
+    /// answer lists.
+    pub listed_to: UniverseTime,
+    /// Every event in the listed span, by time and then by event ID.
     pub events: Vec<BodyEventDto>,
 }
 
-/// One event on a body: an impact, an eruption, a giant storm, a global dust storm, or a comet's
-/// apparition (plan 14, design note 15).
+/// One event on a body: an impact, an eruption, a great storm, a global dust storm, or a comet's
+/// passage through perihelion (plan 14, design note 15, P14.T31; the simulation's
+/// `planetary::events::BodyEvent`), tagged by its `type`.
 ///
-/// Its variants are P14.T31's, which the slice does not build, so the type has no value yet and
-/// `body_events` is answered `unsupported` until then. TypeScript sees it as `never`. It derives
-/// only what an event carrying elements and a sampled track can keep.
+/// Every event has its `id`, plan 01's event ID, from which the server regenerates it alone, and
+/// its time: an impact's instant, or the onset of an eruption or a storm, or a comet's perihelion
+/// passage. A comet carries its orbit and a track of positions the server samples, since a client
+/// does not propagate an open orbit. The type is closed: it carries all five kinds from the first
+/// build that sends a value of it (P14.T36.b), which sets its shape, as `BodySurfaceDto`'s first
+/// value set its own (`PROTOCOL_VERSION`'s documentation).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum BodyEventDto {
+    /// An impact on a body above the energy its rate is counted from (P14.T31.a, `body.impact`).
+    Impact {
+        /// The event.
+        id: EventIdHex,
+        /// The body struck.
+        body: BodyIdHex,
+        /// The instant of the impact.
+        time: UniverseTime,
+        /// The projectile's diameter, m, positive.
+        projectile_diameter_m: f64,
+        /// The energy it brings, J, positive.
+        energy_j: f64,
+        /// The impact velocity, m/s, positive: the body's mean.
+        impact_velocity_m_per_s: f64,
+        /// The site's planetocentric latitude in the body's own frame, rad, in [−π ÷ 2, π ÷ 2].
+        latitude_rad: f64,
+        /// The site's east longitude in the body's own frame, rad, in [0, 2π).
+        longitude_rad: f64,
+    },
+    /// An eruption on a body (P14.T31.a, `body.eruption`).
+    Eruption {
+        /// The event.
+        id: EventIdHex,
+        /// The body erupting.
+        body: BodyIdHex,
+        /// When it starts.
+        onset: UniverseTime,
+        /// How long it lasts, s, positive and at most 10 Julian years.
+        duration_s: f64,
+    },
+    /// A great storm on a giant, after Saturn's great white spots (P14.T31.b, `body.storm`).
+    Storm {
+        /// The event.
+        id: EventIdHex,
+        /// The giant.
+        body: BodyIdHex,
+        /// When it breaks out.
+        onset: UniverseTime,
+        /// How long it lasts, s, positive.
+        duration_s: f64,
+        /// Its latitude band, in the northern hemisphere of the giant's own frame.
+        band: StormBandDto,
+    },
+    /// A global dust storm on a dry, thin-aired body, after Mars's (P14.T31.b, `body.duststorm`).
+    DustStorm {
+        /// The event.
+        id: EventIdHex,
+        /// The body.
+        body: BodyIdHex,
+        /// When it breaks out, in the perihelion season.
+        onset: UniverseTime,
+        /// How long it lasts, s, positive.
+        duration_s: f64,
+        /// The true anomaly of the orbit its seasons follow at the onset, rad, in [−π, π]: the
+        /// body's own, or a moon's planet's.
+        onset_true_anomaly_rad: f64,
+    },
+    /// A long-period comet's passage through perihelion, sent in from the system's cometary halo
+    /// (P14.T31.a, `system.comet`).
+    Comet(Box<CometEventDto>),
+}
+
+/// The latitude band of a great storm, in the northern hemisphere of the giant's own frame (P14.T31.b),
+/// as Saturn's six great white spots fell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum StormBandDto {
+    /// Near the equator.
+    Equatorial,
+    /// At mid-latitudes.
+    MidLatitude,
+    /// At high latitudes.
+    Polar,
+}
+
+/// A long-period comet's passage through perihelion (P14.T31.a): its orbit about the halo's host,
+/// its nucleus, when it is listed, and a track of its positions the server samples over that.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub enum BodyEventDto {}
+pub struct CometEventDto {
+    /// The event, of the system's subject.
+    pub id: EventIdHex,
+    /// The cometary halo that sent it in.
+    pub halo: BodyIdHex,
+    /// What it goes round: the halo's host, a star, a pair or the system's barycentre.
+    pub host: OrbitHostDto,
+    /// When it passes perihelion: the event's time.
+    pub perihelion_time: UniverseTime,
+    /// Its perihelion distance from the host, m, positive.
+    pub perihelion_m: f64,
+    /// Its eccentricity, in (0.99, 1]: nearly parabolic.
+    pub eccentricity: f64,
+    /// Its orbit's inclination to the system frame's x-y plane, rad, in [0, π].
+    pub inclination_rad: f64,
+    /// Its longitude of the ascending node, rad, in [0, 2π).
+    pub ascending_node_rad: f64,
+    /// Its argument of perihelion, rad, in [0, 2π).
+    pub argument_of_periapsis_rad: f64,
+    /// The host's gravitational parameter μ, m³ s⁻², positive.
+    pub mu_m3_s2: f64,
+    /// Its nucleus's diameter, m, positive.
+    pub nucleus_diameter_m: f64,
+    /// When it is first listed: when it comes inside 30 au × √(L ÷ L☉) of the host.
+    pub listed_from: UniverseTime,
+    /// When it is no longer listed: when it leaves that radius, or reaches the host's surface if
+    /// it plunges.
+    pub listed_to: UniverseTime,
+    /// Whether its perihelion lies inside the host, which it strikes before perihelion.
+    pub plunges: bool,
+    /// Its positions over its listing, in time order, from `listed_from` to `listed_to`, closer
+    /// together about perihelion.
+    pub track: Vec<CometTrackPointDto>,
+}
+
+/// One sampled position of a comet: where it is relative to its host at a time.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CometTrackPointDto {
+    /// The instant.
+    pub time: UniverseTime,
+    /// Its position relative to the host, m, along the system frame's axes.
+    pub position_m: [f64; 3],
+}
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -140,7 +283,7 @@ pub(crate) mod tests {
     use crate::planetary::{BodyKindDto, BodyRecordDto, BodyStateDto};
     use crate::stellar::SystemExistenceDto;
     use crate::stellar::tests::{sunlike, sunlike_json};
-    use crate::testing::assert_wire_form;
+    use crate::testing::{assert_wire_form, assert_wire_strings};
 
     /// The hosts of a system of one Sun-like star, 4.57 Gyr old.
     pub(crate) fn single_star_hosts() -> SystemSummaryDto {
@@ -337,6 +480,14 @@ pub(crate) mod tests {
                     seconds: 3_155_760_000,
                     nanos: 0,
                 },
+                listed_from: UniverseTime {
+                    seconds: 1_262_304_000,
+                    nanos: 0,
+                },
+                listed_to: UniverseTime {
+                    seconds: 1_893_456_000,
+                    nanos: 0,
+                },
                 events: Vec::new(),
             },
             json!({
@@ -344,18 +495,245 @@ pub(crate) mod tests {
                 "system": "0200080020000000",
                 "from": { "seconds": 0, "nanos": 0 },
                 "to": { "seconds": 3_155_760_000_i64, "nanos": 0 },
+                "listed_from": { "seconds": 1_262_304_000_i64, "nanos": 0 },
+                "listed_to": { "seconds": 1_893_456_000_i64, "nanos": 0 },
                 "events": [],
             }),
         );
     }
 
-    #[test]
-    fn no_body_event_parses_before_its_task_lands() {
-        let error = serde_json::from_value::<BodyEventDto>(json!({ "impact": {} })).unwrap_err();
-        assert!(
-            error.to_string().contains("there are no variants"),
-            "unexpected error: {error}"
+    /// An event ID of the test system: `subject` its body index, or `None` for the system's own.
+    fn event_id(subject: Option<u16>, word: u64) -> EventIdHex {
+        let subject = subject.map_or_else(
+            || format!("{SYSTEM:016x}"),
+            |index| BodyIdHex::from_parts(SYSTEM, index).to_string(),
         );
+        EventIdHex::try_from(format!("{subject}:{word:016x}")).unwrap()
+    }
+
+    /// One event of each kind, illustrative values of the sizes the generator gives: the events
+    /// of `packages/protocol/fixtures/planetary.json`'s `body_events_populated`, in time order.
+    pub(crate) fn one_of_each_event() -> Vec<BodyEventDto> {
+        let giant = BodyIdHex::from_parts(SYSTEM, 0x0500);
+        vec![
+            BodyEventDto::Comet(Box::new(CometEventDto {
+                id: event_id(None, 0x0404_ffff_ffff_ce00),
+                halo: BodyIdHex::from_parts(SYSTEM, 0xef00),
+                host: OrbitHostDto::Star { body_index: 0 },
+                perihelion_time: UniverseTime {
+                    seconds: -1_577_489_772,
+                    nanos: 190_519_035,
+                },
+                perihelion_m: 2.047_5e10,
+                eccentricity: 0.999_975,
+                inclination_rad: 1.25,
+                ascending_node_rad: 3.5,
+                argument_of_periapsis_rad: 0.75,
+                mu_m3_s2: 1.327_124_400_18e20,
+                nucleus_diameter_m: 3_184.5,
+                listed_from: UniverseTime {
+                    seconds: -1_888_438_790,
+                    nanos: 238_587_678,
+                },
+                listed_to: UniverseTime {
+                    seconds: -1_266_540_754,
+                    nanos: 142_450_392,
+                },
+                plunges: false,
+                track: vec![
+                    CometTrackPointDto {
+                        time: UniverseTime {
+                            seconds: -1_888_438_790,
+                            nanos: 238_587_678,
+                        },
+                        position_m: [-3.5e12, 2.25e12, -1.5e12],
+                    },
+                    CometTrackPointDto {
+                        time: UniverseTime {
+                            seconds: -1_577_489_772,
+                            nanos: 190_519_035,
+                        },
+                        position_m: [1.25e10, -1.5e10, 5.0e9],
+                    },
+                    CometTrackPointDto {
+                        time: UniverseTime {
+                            seconds: -1_266_540_754,
+                            nanos: 142_450_392,
+                        },
+                        position_m: [2.75e12, -1.75e12, 1.25e12],
+                    },
+                ],
+            })),
+            BodyEventDto::Eruption {
+                id: event_id(Some(0x0300), 0x0401_ffff_fff6_0500),
+                body: BodyIdHex::from_parts(SYSTEM, 0x0300),
+                onset: UniverseTime {
+                    seconds: -1_545_016_715,
+                    nanos: 305_613_213,
+                },
+                duration_s: 852_234.5,
+            },
+            BodyEventDto::Impact {
+                id: event_id(Some(0x0500), 0x0400_ffff_ffff_fe00),
+                body: giant.clone(),
+                time: UniverseTime {
+                    seconds: -61_215_250,
+                    nanos: 0,
+                },
+                projectile_diameter_m: 107.5,
+                energy_j: 4.75e17,
+                impact_velocity_m_per_s: 54_006.0,
+                latitude_rad: -0.5,
+                longitude_rad: 2.25,
+            },
+            BodyEventDto::DustStorm {
+                id: event_id(Some(0x0400), 0x0403_0000_0000_0000),
+                body: BodyIdHex::from_parts(SYSTEM, 0x0400),
+                onset: UniverseTime {
+                    seconds: 25_116_480,
+                    nanos: 500_000_000,
+                },
+                duration_s: 12_096_000.0,
+                onset_true_anomaly_rad: -0.375,
+            },
+            BodyEventDto::Storm {
+                id: event_id(Some(0x0500), 0x0402_ffff_ffff_f300),
+                body: giant,
+                onset: UniverseTime {
+                    seconds: 198_238_971,
+                    nanos: 282_075_757,
+                },
+                duration_s: 805_426.5,
+                band: StormBandDto::MidLatitude,
+            },
+        ]
+    }
+
+    /// [`one_of_each_event`]'s wire form.
+    pub(crate) fn one_of_each_event_json() -> Value {
+        json!([
+            {
+                "type": "comet",
+                "id": "0200080020000000:0404ffffffffce00",
+                "halo": "0200080020000000.ef00",
+                "host": { "type": "star", "body_index": 0 },
+                "perihelion_time": { "seconds": -1_577_489_772_i64, "nanos": 190_519_035 },
+                "perihelion_m": 2.047_5e10,
+                "eccentricity": 0.999_975,
+                "inclination_rad": 1.25,
+                "ascending_node_rad": 3.5,
+                "argument_of_periapsis_rad": 0.75,
+                "mu_m3_s2": 1.327_124_400_18e20,
+                "nucleus_diameter_m": 3_184.5,
+                "listed_from": { "seconds": -1_888_438_790_i64, "nanos": 238_587_678 },
+                "listed_to": { "seconds": -1_266_540_754_i64, "nanos": 142_450_392 },
+                "plunges": false,
+                "track": [
+                    {
+                        "time": { "seconds": -1_888_438_790_i64, "nanos": 238_587_678 },
+                        "position_m": [-3.5e12, 2.25e12, -1.5e12],
+                    },
+                    {
+                        "time": { "seconds": -1_577_489_772_i64, "nanos": 190_519_035 },
+                        "position_m": [1.25e10, -1.5e10, 5.0e9],
+                    },
+                    {
+                        "time": { "seconds": -1_266_540_754_i64, "nanos": 142_450_392 },
+                        "position_m": [2.75e12, -1.75e12, 1.25e12],
+                    },
+                ],
+            },
+            {
+                "type": "eruption",
+                "id": "0200080020000000.0300:0401fffffff60500",
+                "body": "0200080020000000.0300",
+                "onset": { "seconds": -1_545_016_715_i64, "nanos": 305_613_213 },
+                "duration_s": 852_234.5,
+            },
+            {
+                "type": "impact",
+                "id": "0200080020000000.0500:0400fffffffffe00",
+                "body": "0200080020000000.0500",
+                "time": { "seconds": -61_215_250, "nanos": 0 },
+                "projectile_diameter_m": 107.5,
+                "energy_j": 4.75e17,
+                "impact_velocity_m_per_s": 54_006.0,
+                "latitude_rad": -0.5,
+                "longitude_rad": 2.25,
+            },
+            {
+                "type": "dust_storm",
+                "id": "0200080020000000.0400:0403000000000000",
+                "body": "0200080020000000.0400",
+                "onset": { "seconds": 25_116_480, "nanos": 500_000_000 },
+                "duration_s": 12_096_000.0,
+                "onset_true_anomaly_rad": -0.375,
+            },
+            {
+                "type": "storm",
+                "id": "0200080020000000.0500:0402fffffffff300",
+                "body": "0200080020000000.0500",
+                "onset": { "seconds": 198_238_971, "nanos": 282_075_757 },
+                "duration_s": 805_426.5,
+                "band": "mid_latitude",
+            },
+        ])
+    }
+
+    #[test]
+    fn body_event_wire_forms() {
+        let Value::Array(wires) = one_of_each_event_json() else {
+            panic!("the events' wire form is a list");
+        };
+        for (event, wire) in one_of_each_event().iter().zip(wires) {
+            assert_wire_form(event, wire);
+        }
+    }
+
+    #[test]
+    fn storm_band_wire_strings() {
+        assert_wire_strings(&[
+            (StormBandDto::Equatorial, "equatorial"),
+            (StormBandDto::MidLatitude, "mid_latitude"),
+            (StormBandDto::Polar, "polar"),
+        ]);
+    }
+
+    #[test]
+    fn a_body_event_of_no_kind_or_a_malformed_id_is_refused() {
+        for wire in [
+            json!({ "type": "flare", "id": "0200080020000000:0404ffffffffce00" }),
+            json!({
+                "type": "eruption",
+                "id": "0200080020000000.0300",
+                "body": "0200080020000000.0300",
+                "onset": { "seconds": 0, "nanos": 0 },
+                "duration_s": 1.0,
+            }),
+        ] {
+            let error = serde_json::from_value::<BodyEventDto>(wire.clone()).unwrap_err();
+            assert!(
+                error.to_string().contains("unknown variant `flare`")
+                    || error
+                        .to_string()
+                        .contains("expected a system or body ID, a colon and 16"),
+                "{wire}: {error}"
+            );
+        }
+    }
+
+    /// The shared fixture's populated answer holds the events pinned here, which the client's
+    /// tests read (P14.T43.c).
+    #[test]
+    fn the_shared_events_fixture_holds_one_of_each_event() {
+        let ServerMessage::Response {
+            body: ResponseBody::BodyEvents(answer),
+            ..
+        } = server_message("body_events_populated")
+        else {
+            panic!("body_events_populated is not a body_events response");
+        };
+        assert_eq!(answer.events, one_of_each_event());
     }
 
     /// The messages of `packages/protocol/fixtures/planetary.json`, which `@hyperion/protocol`'s
@@ -393,7 +771,7 @@ pub(crate) mod tests {
             .unwrap();
             assert_eq!(&again, wire, "{name}");
         }
-        assert_eq!(messages.len(), 14);
+        assert_eq!(messages.len(), 15);
     }
 
     #[test]

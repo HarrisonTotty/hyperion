@@ -1,6 +1,6 @@
 //! The system's handlers: `system_summary` (plan 06, P06.T34, with plan 11's P11.T13 slice and
-//! plan 12's observed mode, P12.T6.b), and `system_bodies` and `body_detail` (plan 14, P14.T36;
-//! `body_events` waits for P14.T31).
+//! plan 12's observed mode, P12.T6.b), and `system_bodies`, `body_detail` and `body_events` (plan
+//! 14, P14.T36).
 //!
 //! Each starts from [`openable_universe`](super::universe::openable_universe), as every handler
 //! that names a universe does, checks the time and decodes the ID, and takes the universe's galaxy
@@ -8,12 +8,15 @@
 //! pool from the [`SharedSystemCache`](crate::compute::SharedSystemCache). The planetary kinds take
 //! the system from the [`SharedBodyCache`](crate::compute::SharedBodyCache), generated there on a
 //! miss from the stars the system cache holds, and are answered by a second pool job that evaluates
-//! it at the request's time.
+//! it at the request's time; `body_events`, served from generator version 25, takes the system's
+//! event models from the same cache, built there on a miss from the cached system, between the
+//! two.
 
 use std::sync::Arc;
 
 use hyperion_protocol::{
-    BodyDetailRequest, RequestError, ResponseBody, SystemBodiesRequest, SystemSummaryRequest,
+    BodyDetailRequest, BodyEventsRequest, RequestError, ResponseBody, SystemBodiesRequest,
+    SystemSummaryRequest,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
@@ -28,8 +31,9 @@ use crate::compute::{
     CancelToken, GalaxyKey, GenerateBodiesError, GeneratedSystem, JobError, Priority,
 };
 use crate::convert::{
-    BodiesRequest, DetailRequest, SummaryRequest, body_detail, body_refusal, hosts_request,
-    system_bodies, system_summary, system_summary_observed, unknown_system, untraced,
+    BodiesRequest, DetailRequest, EventsRequest, SummaryRequest, body_detail, body_events,
+    body_refusal, hosts_request, system_bodies, system_summary, system_summary_observed,
+    unknown_system, untraced,
 };
 
 /// Every star of one system at the request's time, and the orbits that hold them; in observed mode
@@ -195,6 +199,52 @@ pub(crate) async fn detail(
         .await
         .unwrap_or_else(|closed| Err(JobError::from(closed)))??;
     Ok(ResponseBody::BodyDetail(Box::new(answered)))
+}
+
+/// The events on one system's bodies in the request's window, each while its body is present, by
+/// time and then by event ID (plan 14, P14.T36.b, from P14.T31.c's `events_between`).
+///
+/// The system is the body cache's, as for [`bodies`], and its event models the same cache's, built
+/// on a miss as one interactive pool job shared by every request for them; a second interactive
+/// job lists the window's events and converts them, and the answer, which can be large, is
+/// serialised on the pool (design note 22). Before generator version 25, P14.T31.c's hold, the
+/// dispatch answers `unsupported` and never reaches here.
+///
+/// # Errors
+///
+/// In the order they are checked: those of [`openable_universe`]; `bad_request` naming `from` or
+/// `to` for an end outside the clock window, and naming `to` for a window that ends before it
+/// starts or is longer than 1,000 Julian years; `unknown_system` naming `system`, for an ID whose
+/// bits are not a system ID and, on the job, for one that `resolve` refuses; the galaxy's; and
+/// `queue_full`, `internal` or `cancelled` from any of the three jobs.
+pub(crate) async fn events(
+    state: Arc<AppState>,
+    request: BodyEventsRequest,
+    token: CancelToken,
+) -> Result<ResponseBody, RequestError> {
+    let universe = openable_universe(&state, &request.universe)?;
+    let wanted = EventsRequest::try_from(&request)?;
+    let key = universe.key();
+    let galaxy = state.galaxies.get(key).await?;
+    let refusal = |error| match error {
+        GenerateBodiesError::NoSuchSystem(error) => unknown_system(&request.system, error),
+        GenerateBodiesError::Compute(error) => error.into(),
+    };
+    let system = bodies_of(&state, key, &galaxy, wanted.system())
+        .await
+        .map_err(refusal)?;
+    let models = state
+        .bodies
+        .events_of(key, wanted.system(), Arc::clone(&system))
+        .await?;
+    let answer = move |_: &CancelToken| body_events(request, wanted, &system.1, &models);
+    let receiver = state
+        .pool
+        .try_submit(Priority::Interactive, token, answer)?;
+    let answered = receiver
+        .await
+        .unwrap_or_else(|closed| Err(JobError::from(closed)))?;
+    Ok(ResponseBody::BodyEvents(answered))
 }
 
 /// The planetary system `id` of `galaxy`: the body cache's, or generated there.

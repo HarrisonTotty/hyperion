@@ -64,12 +64,18 @@ pub(crate) enum StormEventsRules {
 impl StormEventsRules {
     /// The rules this generator version gives: the events from [`STORM_EVENTS_VERSION`], none
     /// below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_storm_events`]).
+    /// ([`with_storm_events`]); behind the `testing` feature, the events wherever another crate's
+    /// test binary has wired them for its whole process
+    /// ([`wire_body_events_in_this_process`](crate::planetary::testing::wire_body_events_in_this_process)).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(rules) = RULES.with(core::cell::Cell::get) {
             return rules;
+        }
+        #[cfg(feature = "testing")]
+        if WIRED_IN_THIS_PROCESS.load(core::sync::atomic::Ordering::Relaxed) {
+            return Self::Wired;
         }
         if GENERATOR_VERSION >= STORM_EVENTS_VERSION {
             Self::Wired
@@ -77,6 +83,37 @@ impl StormEventsRules {
             Self::Held
         }
     }
+}
+
+/// Whether another crate's test binary has put the events on the record for every thread of its
+/// process ahead of their hold
+/// ([`wire_body_events_in_this_process`](crate::planetary::testing::wire_body_events_in_this_process)):
+/// its code answers on threads of its own, such as the server's pool, which no thread's switch
+/// reaches. Never set in this crate's tests, nor outside the `testing` feature. 25's bump deletes it
+/// with the hold.
+#[cfg(feature = "testing")]
+pub(crate) static WIRED_IN_THIS_PROCESS: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+/// Whether this generator version puts P14.T31.c's events on the record: from 25, its hold
+/// (`STORM_EVENTS_VERSION`), and in a test where its switch, or the process-wide one another
+/// crate's test binary sets, puts them there ahead of it.
+///
+/// A server answers `body_events` only where it is `true`, and otherwise as a server built before
+/// the events would, so that no client reads a held version's empty list as a quiet system. 25's
+/// bump deletes it with the hold.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::planetary::system::events_on_the_record;
+///
+/// // Version 24, under the hold.
+/// assert!(!events_on_the_record());
+/// ```
+#[must_use]
+pub fn events_on_the_record() -> bool {
+    StormEventsRules::in_force() == StormEventsRules::Wired
 }
 
 #[cfg(test)]
@@ -100,6 +137,13 @@ pub(crate) fn with_storm_events<R>(rules: StormEventsRules, run: impl FnOnce() -
     }
     let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
     run()
+}
+
+/// Puts the events on the record for every thread of this process, ahead of their hold
+/// ([`WIRED_IN_THIS_PROCESS`]); one-way.
+#[cfg(feature = "testing")]
+pub(crate) fn wire_in_this_process() {
+    WIRED_IN_THIS_PROCESS.store(true, core::sync::atomic::Ordering::Relaxed);
 }
 
 /// A system's event models, every kind's for each of its bodies, read once from its records at
@@ -208,6 +252,61 @@ impl HaloComets {
     fn holds_at(&self, t: UniverseTime) -> bool {
         self.until.is_none_or(|until| t < until)
     }
+}
+
+/// The events [`SystemEvents::listed_about_middle`] lists, and the span they are every event of.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListedEvents {
+    span: TimeWindow,
+    events: Vec<BodyEvent>,
+}
+
+impl ListedEvents {
+    /// The span every event of which is listed: the window asked about, or a part of it about its
+    /// middle.
+    #[must_use]
+    pub const fn span(&self) -> TimeWindow {
+        self.span
+    }
+
+    /// The span's events, sorted by time and then by [`EventId`].
+    #[must_use]
+    pub fn events(&self) -> &[BodyEvent] {
+        &self.events
+    }
+}
+
+/// The grains of half a window a listing's span about its middle is measured in
+/// ([`SystemEvents::listed_about_middle`]): 2¹⁵, each rounded down to whole nanoseconds and at
+/// least one, so about 0.56 days of a century and 5.6 days of a 1,000-year window.
+const LISTING_GRAINS: i64 = 1 << 15;
+
+/// [`LISTING_GRAINS`] as a `u32`, for the tests' arithmetic in floats.
+#[cfg(test)]
+const LISTING_GRAINS_U32: u32 = 1 << 15;
+
+/// Nanoseconds in a second.
+const NANOS_PER_SECOND: i128 = 1_000_000_000;
+
+/// `span` in whole nanoseconds.
+#[must_use]
+fn nanos_of(span: Span) -> i128 {
+    i128::from(span.seconds()) * NANOS_PER_SECOND + i128::from(span.subsec_nanos())
+}
+
+/// The instant `nanos` nanoseconds from the epoch.
+///
+/// # Panics
+///
+/// Never for an instant from a window's start to its end, which the clock holds.
+#[must_use]
+fn time_of_nanos(nanos: i128) -> UniverseTime {
+    let seconds = i64::try_from(nanos.div_euclid(NANOS_PER_SECOND))
+        .expect("an instant of a window is one of the clock's");
+    let nanos = u32::try_from(nanos.rem_euclid(NANOS_PER_SECOND))
+        .expect("a remainder of a second is below 10⁹");
+    UniverseTime::new(seconds, nanos)
+        .expect("whole seconds and a remainder below a second are an instant")
 }
 
 /// When a planet or a belt member is present: from its formation, if it forms, until its ending,
@@ -375,6 +474,15 @@ impl SystemEvents {
         self.system
     }
 
+    /// The bytes the models own on the heap, beyond `size_of::<SystemEvents>()`: one entry a
+    /// planet, member and moon present at the epoch, by capacity, each holding nothing of its own on
+    /// the heap. It is what a server charges cached models against its byte budget (plan 14,
+    /// P14.T36.b); nothing generated reads it.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.bodies.capacity() * size_of::<BodyModels>()
+    }
+
     /// Whether no body of the system has an event of any kind: a system with no body present at
     /// the epoch, or one under the hold (generator versions before 25).
     #[must_use]
@@ -417,6 +525,101 @@ impl SystemEvents {
         // An ID names one event, so the order is total and the sort's stability moot.
         out.sort_unstable_by_key(|event| (event.time(), event.id()));
         out
+    }
+
+    /// The events of `window`, at most `most` of them, and the span they are every event of
+    /// ([`ListedEvents`]): the whole window where it holds no more; otherwise the widest span about
+    /// the window's middle, reaching as far either side as the window allows, of a half-width a
+    /// whole number of grains, 2¹⁵ of them to the window's half, that holds no more. Where even
+    /// one grain either side holds more, the span is the empty one at the middle.
+    ///
+    /// It is for a caller that must bound what it lists, as a server bounds an answer (plan 14,
+    /// P14.T36.b). The span is found by doubling its half-width from one grain until it holds more
+    /// than `most`, then halving the gap, so at most about 32 listings ([`between`](Self::between))
+    /// are made, each of a span the last one holding no more than `most` at most doubles; a span's
+    /// count of events never falls as it widens.
+    ///
+    /// # Panics
+    ///
+    /// Never: the span is worked in nanoseconds from the epoch, in which no window overflows, and
+    /// held to the window's ends, which the clock holds.
+    ///
+    /// # Examples
+    ///
+    /// No more than `most` events are listed, and every event of the span is:
+    ///
+    /// ```
+    /// use hyperion_sim::events::TimeWindow;
+    /// use hyperion_sim::planetary::{SystemContext, generate};
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::{Dex, SolarMasses, Years};
+    /// use hyperion_sim::{Seed, id::SystemId};
+    ///
+    /// let ctx = SystemContext::builder()
+    ///     .system(SystemId::from_raw(0x0200_0800_2000_0000)?)
+    ///     .star(SolarMasses::new(1.0))
+    ///     .fe_h(Dex::ZERO)
+    ///     .age_at_epoch(Years::new(4.6e9))
+    ///     .build()?;
+    /// let models = generate(Seed::new(7), &ctx).event_models(&ctx);
+    /// let century = TimeWindow::new(
+    ///     UniverseTime::from_julian_years(-50).ok_or("in range")?,
+    ///     UniverseTime::from_julian_years(50).ok_or("in range")?,
+    /// )?;
+    /// let listed = models.listed_about_middle(century, 10);
+    /// assert!(listed.events().len() <= 10);
+    /// assert_eq!(listed.events(), models.between(listed.span()));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn listed_about_middle(&self, window: TimeWindow, most: usize) -> ListedEvents {
+        // In nanoseconds from the epoch, where even the clock's whole window is far from
+        // overflowing an `i128`.
+        let start = nanos_of(window.start().since_epoch());
+        let end = nanos_of(window.end().since_epoch());
+        let half = (end - start) / 2;
+        let middle = start + half;
+        let grain = (half / i128::from(LISTING_GRAINS)).max(1);
+        // Enough grains either side to reach both of the window's ends.
+        let whole = (half + grain) / grain;
+        let span = |grains: i128| {
+            let reach = grains * grain;
+            TimeWindow::new(
+                time_of_nanos((middle - reach).max(start)),
+                time_of_nanos((middle + reach).min(end)),
+            )
+            .expect("a span about the middle has its ends in order")
+        };
+        let (mut good, mut events) = (0, Vec::new());
+        let mut grains = 1;
+        let bad = loop {
+            let found = self.between(span(grains));
+            if found.len() > most {
+                break grains;
+            }
+            (good, events) = (grains, found);
+            if grains >= whole {
+                return ListedEvents {
+                    span: span(grains),
+                    events,
+                };
+            }
+            grains = (grains * 2).min(whole);
+        };
+        let mut bad = bad;
+        while bad - good > 1 {
+            let mid = good + (bad - good) / 2;
+            let found = self.between(span(mid));
+            if found.len() > most {
+                bad = mid;
+            } else {
+                (good, events) = (mid, found);
+            }
+        }
+        ListedEvents {
+            span: span(good),
+            events,
+        }
     }
 
     /// The event `id` names, regenerated on its own: the one [`between`](Self::between) lists

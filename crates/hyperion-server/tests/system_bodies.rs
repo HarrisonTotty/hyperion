@@ -13,8 +13,8 @@ use std::sync::OnceLock;
 use common::surface::{Secret, check_no_seed_key};
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
-    BodyDetailDto, BodyDetailRequest, BodyFigureDto, BodyHooksDto, BodyIdHex, BodyKindDto,
-    BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
+    BodyDetailDto, BodyDetailRequest, BodyEventsRequest, BodyFigureDto, BodyHooksDto, BodyIdHex,
+    BodyKindDto, BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
     DetailLevelDto, DetailSeedHex, ErrorCode, OrbitHostDto, QueryModeDto, RequestBody,
     RequestError, ResponseBody, SectionDto, ServerMessage, SystemBodiesDto, SystemBodiesRequest,
     SystemIdHex, SystemSummaryRequest, UniverseIdHex, UniverseTime,
@@ -147,7 +147,36 @@ async fn system_bodies_and_body_records_are_the_sims_and_cached() {
     each_bodys_record_is_the_sims_and_the_lists(&server).await;
     a_body_the_system_does_not_hold_is_unknown_body(&server).await;
     mass_and_orbit_gives_no_bulk_section(&server).await;
+    no_system_has_events_before_the_25_bump(&server).await;
     server.stop().await;
+}
+
+/// P14.T36.b at generator version 24: `body_events` is answered `unsupported`, as a server built
+/// before the events answers it, never with an empty list, since P14.T31.c's events are held until
+/// 25. `body_events.rs` asks for them with the hold lifted. 25's bump deletes this property with the
+/// hold.
+async fn no_system_has_events_before_the_25_bump(server: &TestServer) {
+    assert!(
+        !hyperion_sim::planetary::system::events_on_the_record(),
+        "25's bump puts P14.T31.c's events on the record: delete this property"
+    );
+    let (mut client, universe) = joined(server, "Kepler Reach events").await;
+    for raw in PINNED {
+        let error = refused(
+            &mut client,
+            RequestBody::BodyEvents(BodyEventsRequest {
+                universe: universe.clone(),
+                system: SystemIdHex::from_u64(raw),
+                from: at_years(-50),
+                to: at_years(50),
+            }),
+        )
+        .await;
+        assert_eq!(error.code, ErrorCode::Unsupported, "{raw:#018x}: {error:?}");
+    }
+    // Nothing was built for the held kind.
+    assert_eq!(server.stats().bodies().modelled(), 0);
+    client.close().await;
 }
 
 async fn bodies(client: &mut TestClient, body: RequestBody) -> SystemBodiesDto {

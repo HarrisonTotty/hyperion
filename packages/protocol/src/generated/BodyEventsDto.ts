@@ -5,9 +5,12 @@ import type { UniverseIdHex } from "./UniverseIdHex";
 import type { UniverseTime } from "./UniverseTime";
 
 /**
- * The events on one system's bodies in a window of time (plan 14, P14.T31).
+ * The events on one system's bodies in a window of time (plan 14, P14.T31, P14.T36.b).
  *
- * `universe`, `system`, `from` and `to` echo the request.
+ * `universe`, `system`, `from` and `to` echo the request. An answer lists at most 25,000 events:
+ * where the window holds more, it lists every event of the widest span about the window's middle
+ * that holds no more, which `listed_from` and `listed_to` state, so that a client asking about the
+ * time at a window's middle has the events nearest it, and asks a narrower window for the rest.
  */
 export type BodyEventsDto = { 
 /**
@@ -27,6 +30,16 @@ from: UniverseTime,
  */
 to: UniverseTime, 
 /**
- * Every event in the window, by time.
+ * The start of the span every event of which is listed, inclusive: `from`, or later where the
+ * window holds more events than an answer lists.
+ */
+listed_from: UniverseTime, 
+/**
+ * The end of that span, exclusive: `to`, or earlier where the window holds more events than an
+ * answer lists.
+ */
+listed_to: UniverseTime, 
+/**
+ * Every event in the listed span, by time and then by event ID.
  */
 events: Array<BodyEventDto>, };

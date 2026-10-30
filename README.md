@@ -163,7 +163,7 @@ An option given on the command line wins over its variable.
 | `--cell-cache`          | `HYPERION_CELL_CACHE_MB`       | `256`                                                  | Cache of generated cells, in MiB             |
 | `--map-cache`           | `HYPERION_MAP_CACHE_MB`        | `64`                                                   | Cache of galaxy density maps, in MiB         |
 | `--system-cache`        | `HYPERION_SYSTEM_CACHE_MB`     | `128`                                                  | Cache of generated systems' stars, in MiB    |
-| `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | `128`                                                  | Cache of generated planetary systems, in MiB |
+| `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | `128`                                                  | Cache of planetary systems and events in MiB |
 | `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | `64`                                                   | Cache of range briefs' star models, in MiB   |
 | `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | `0`, off                                               | Cache of the sky census's cells, in MiB      |
 | `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | `160`                                                  | Cache of each galaxy's sky tables, in MiB    |

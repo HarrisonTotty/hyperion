@@ -22,6 +22,10 @@ import type { BodyDetailRequest } from "./generated/BodyDetailRequest";
 import type { BodyEventDto } from "./generated/BodyEventDto";
 import type { BodyEventsDto } from "./generated/BodyEventsDto";
 import type { BodyEventsRequest } from "./generated/BodyEventsRequest";
+import type { CometEventDto } from "./generated/CometEventDto";
+import type { CometTrackPointDto } from "./generated/CometTrackPointDto";
+import type { EventIdHex } from "./generated/EventIdHex";
+import type { StormBandDto } from "./generated/StormBandDto";
 import type { BodyHooksDto } from "./generated/BodyHooksDto";
 import type { BodyIdHex } from "./generated/BodyIdHex";
 import type { BodyKindDto } from "./generated/BodyKindDto";
@@ -318,6 +322,10 @@ export type {
   BodyEventDto,
   BodyEventsDto,
   BodyEventsRequest,
+  CometEventDto,
+  CometTrackPointDto,
+  EventIdHex,
+  StormBandDto,
   BodyHooksDto,
   BodyIdHex,
   BodyKindDto,

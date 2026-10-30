@@ -7,9 +7,11 @@ import type { UniverseTime } from "./UniverseTime";
  * Asks for the events on one system's bodies between two times (`body_events`), answered with a
  * [`BodyEventsDto`].
  *
- * A window longer than 1,000 years is refused with `bad_request` (plan 14, P14.T36.b). The
- * window's ends, `from` inclusive and `to` exclusive, and the field a refusal names, `to`, are
- * provisional until P14.T31 and T36 serve the kind.
+ * Both ends must lie inside the clock window, `bad_request` naming the end that does not, and a
+ * window that ends before it starts or is longer than 1,000 Julian years is refused with
+ * `bad_request` naming `to` (plan 14, P14.T36.b). The window holds `from` and not `to`. Before
+ * generator version 25, which puts P14.T31's events on the record, the server answers
+ * `unsupported`, as a server built before the events does.
  */
 export type BodyEventsRequest = { 
 /**

@@ -291,6 +291,98 @@ impl fmt::Display for BodyIdHex {
     }
 }
 
+/// An event ID's text form was not plan 01's: a subject, a colon and the event's word as 16
+/// lowercase hexadecimal digits, where the subject is a system ID or a body ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ParseEventIdHexError {
+    /// The text has no colon.
+    MissingSeparator,
+    /// The part before the colon is neither a system ID nor a body ID.
+    Subject,
+    /// The part after the colon is not 16 lowercase hexadecimal digits.
+    Word,
+}
+
+impl fmt::Display for ParseEventIdHexError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingSeparator | Self::Subject | Self::Word => f.write_str(
+                "expected a system or body ID, a colon and 16 lowercase hexadecimal digits",
+            ),
+        }
+    }
+}
+
+impl Error for ParseEventIdHexError {}
+
+/// Checks an event ID's text form: a system ID or a body ID, a colon, then the 16 digits of its
+/// word.
+fn check_event_id(text: &str) -> Result<(), ParseEventIdHexError> {
+    let (subject, word) = text
+        .split_once(':')
+        .ok_or(ParseEventIdHexError::MissingSeparator)?;
+    let subject_ok = if subject.contains('.') {
+        decode_body_id(subject).is_ok()
+    } else {
+        subject.len() == HEX64_DIGITS && hex_value(subject.as_bytes()).is_some()
+    };
+    if !subject_ok {
+        return Err(ParseEventIdHexError::Subject);
+    }
+    if word.len() != HEX64_DIGITS || hex_value(word.as_bytes()).is_none() {
+        return Err(ParseEventIdHexError::Word);
+    }
+    Ok(())
+}
+
+/// An event's ID, as plan 01's `EventId` writes it: its subject, a colon and its word as 16
+/// lowercase hexadecimal digits (plan 14, P14.T31's events).
+///
+/// The subject is the system's ID for an event of the system as a whole, such as a comet's
+/// passage, or a body's ID for an event of one body: `0200080020000000.0500:0402fffffffff300` is a
+/// great storm on body `0x0500`. The word holds the event's kind, its bin or cycle and its number
+/// within it. The text is checked whenever a value is built, so a held value is always well formed;
+/// a client never builds one, but quotes what the server sent.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_protocol::{EventIdHex, ParseEventIdHexError};
+///
+/// let storm = EventIdHex::try_from("0200080020000000.0500:0402fffffffff300".to_owned())?;
+/// assert_eq!(storm.as_str(), "0200080020000000.0500:0402fffffffff300");
+/// assert!(EventIdHex::try_from("0200080020000000:0404ffffffffce00".to_owned()).is_ok());
+/// assert!(EventIdHex::try_from("0200080020000000.0500".to_owned()).is_err());
+/// # Ok::<(), ParseEventIdHexError>(())
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(try_from = "String")]
+#[ts(export, type = "string")]
+pub struct EventIdHex(String);
+
+impl EventIdHex {
+    /// The text form, exactly as it crosses the wire.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for EventIdHex {
+    type Error = ParseEventIdHexError;
+
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        check_event_id(&text)?;
+        Ok(Self(text))
+    }
+}
+
+impl fmt::Display for EventIdHex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// An instant on the universe clock: coordinate time in the galaxy's rest frame.
 ///
 /// Zero is the epoch, the instant the galaxy's fields describe. `seconds` may be negative, and
@@ -547,6 +639,62 @@ mod tests {
             error.to_string().contains("invalid type"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn event_id_hex_wire_form() {
+        for text in [
+            "0200080020000000.0500:0402fffffffff300",
+            "0200080020000000:0404ffffffffce00",
+        ] {
+            let id = EventIdHex::try_from(text.to_owned()).unwrap();
+            assert_eq!(serde_json::to_value(&id).unwrap(), json!(text));
+            assert_eq!(
+                serde_json::from_value::<EventIdHex>(json!(text)).unwrap(),
+                id
+            );
+            assert_eq!(id.to_string(), text);
+        }
+    }
+
+    #[test]
+    fn event_id_hex_rejects_every_malformed_form() {
+        for (text, error) in [
+            (
+                "0200080020000000.0500",
+                ParseEventIdHexError::MissingSeparator,
+            ),
+            ("", ParseEventIdHexError::MissingSeparator),
+            (":0402fffffffff300", ParseEventIdHexError::Subject),
+            (
+                "0200080020000000.050:0402fffffffff300",
+                ParseEventIdHexError::Subject,
+            ),
+            (
+                "020008002000000:0404ffffffffce00",
+                ParseEventIdHexError::Subject,
+            ),
+            (
+                "0200080020000000.0500:0402FFFFFFFFF300",
+                ParseEventIdHexError::Word,
+            ),
+            (
+                "0200080020000000.0500:0402fffffffff30",
+                ParseEventIdHexError::Word,
+            ),
+            (
+                "0200080020000000:0404ffffffffce00:",
+                ParseEventIdHexError::Word,
+            ),
+        ] {
+            assert_eq!(EventIdHex::try_from(text.to_owned()), Err(error), "{text}");
+        }
+        assert_eq!(
+            ParseEventIdHexError::Word.to_string(),
+            "expected a system or body ID, a colon and 16 lowercase hexadecimal digits"
+        );
+        let error = serde_json::from_value::<EventIdHex>(json!(7)).unwrap_err();
+        assert!(error.to_string().contains("invalid type"), "{error}");
     }
 
     #[test]

@@ -230,7 +230,8 @@ pub struct ServerArgs {
     #[arg(long, value_name = "MIB", env = ENV_SYSTEM_CACHE_MB, default_value_t = DEFAULT_SYSTEM_CACHE)]
     system_cache: CacheBudget,
 
-    /// Budget of the cache of generated planetary systems, in MiB; 0 caches nothing
+    /// Budget of the cache of generated planetary systems, and as much again of their event
+    /// models, in MiB; 0 caches nothing
     #[arg(long, value_name = "MIB", env = ENV_BODY_CACHE_MB, default_value_t = DEFAULT_BODY_CACHE)]
     body_cache: CacheBudget,
 

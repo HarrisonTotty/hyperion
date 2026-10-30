@@ -701,12 +701,40 @@ describe("body_detail's Titan, with its lakes (P14.T54.a)", () => {
 });
 
 describe("body_events", () => {
-  it("decodes an answer, which holds no event before its generator lands", () => {
+  it("decodes an answer with no event, a quiet century", () => {
     const events = response("body_events_response", "body_events");
 
     expect([events.universe, events.system]).toEqual([UNIVERSE, SYSTEM]);
     expect(events.to.seconds - events.from.seconds).toBe(3_155_760_000);
     expect(events.events).toEqual([]);
+  });
+
+  it("decodes one event of each kind, each tagged by its type, in time order", () => {
+    const { events } = response("body_events_populated", "body_events");
+
+    expect(events.map((event) => event.type)).toEqual([
+      "comet",
+      "eruption",
+      "impact",
+      "dust_storm",
+      "storm",
+    ]);
+    const [comet, eruption, impact, dustStorm, storm] = events;
+    if (comet?.type !== "comet" || storm?.type !== "storm" || impact?.type !== "impact") {
+      throw new Error("the fixture's kinds are in time order");
+    }
+    // A comet is the system's event and carries its orbit and the server's track.
+    expect(comet.id).toBe(`${SYSTEM}:0404ffffffffce00`);
+    expect(comet.halo).toBe(formatBodyId({ system: SYSTEM, bodyIndex: 0xef00 }));
+    expect(comet.host).toEqual({ type: "star", body_index: 0 });
+    expect(comet.track.map((point) => point.time)).toEqual([
+      comet.listed_from,
+      comet.perihelion_time,
+      comet.listed_to,
+    ]);
+    expect(storm.band).toBe("mid_latitude");
+    expect(impact.body).toBe(formatBodyId({ system: SYSTEM, bodyIndex: 0x0500 }));
+    expect([eruption?.type, dustStorm?.type]).toEqual(["eruption", "dust_storm"]);
   });
 });
 

@@ -3801,6 +3801,8 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
     returns `bad_request` naming the field; a `detail` of `mass_and_orbit` returns no bulk section;
     the same request twice is served from the cache (the counter again).
   - _Accept:_ `cargo test -p hyperion-server system_bodies`.
+  - _Built_ 2026-10-30 (`body_events`, held at 25 with P14.T31.c's events): Risks, "Deviations in
+    P14.T36.b, as built".
 - _Slice:_ `system_bodies` and `body_detail` only; `body_events` and its window test come with
   T31. The hosts' `SystemSummaryDto` is P06.T33–T34's, whose `system_summary` handler and
   `SystemStars` cache the slice builds first.
@@ -32818,3 +32820,52 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `surface_*_worlds` tests' locked Earth, the client's `level-bounds.json` fixture), and re-run
     `tests/channel_water_worlds.rs`'s locked Earth. No system golden moves: the census moves 5
     sample bodies (s59, s102, s187, s243, s363) and none of the 15 golden systems'.
+- **Deviations in P14.T36.b, as built (`body_events`, 2026-10-30).**
+  - _Hold._ The arm serves `body_events` only where `planetary::system::events_on_the_record()`
+    holds, from generator version 25 (P14.T31.c's hold). Below it, the arm answers
+    `not_served_yet` (`unsupported`), never an empty list (main's ruling, 2026-10-30).
+  - _Checks, in order:_
+    - the universe;
+    - `from`, then `to`, each inside the clock window (`bad_request` naming it);
+    - a `to` before `from`, or a window longer than 1,000 Julian years (`bad_request` naming
+      `to`);
+    - `system` (`unknown_system`);
+    - the galaxy;
+    - the body cache's job, the models' job, then an interactive listing job, whose large answer
+      is serialised on the pool.
+  - _Cache (lean, 2026-10-30)._ `SharedBodyCache::events_of` keeps one `SystemEvents` per system,
+    under the systems' key, in an LRU of its own and its own `SingleFlight`. Its budget is as much
+    again as the systems' (`--body-cache`'s help and the README say so). It fails with
+    `ComputeError`. The counters are `BodyCacheCounters::{events, modelled}`, and the sim's charge
+    is `SystemEvents::heap_bytes`.
+  - _Cap (lean, 2026-10-30)._ An answer lists at most `MAX_LISTED_EVENTS` (25,000) events. Over
+    it, the answer lists every event of the widest span about the window's middle that holds no
+    more. That span is stated in the new `BodyEventsDto.listed_from` and `listed_to`. The reason: a
+    Sun-like pinned system's whole century runs to tens of megabytes of JSON (the outbox has the
+    figures).
+    - The sim's new `SystemEvents::listed_about_middle` finds the span, returning `ListedEvents`.
+    - Its half-width is a whole number of grains, 2^15 to the window's half, found by doubling,
+      then bisection, in nanoseconds from the epoch, so that no window overflows.
+  - _Wire._ There is no `PROTOCOL_VERSION` change: `BodyEventDto` had no value, so its first sets
+    its shape. It is tagged by `type`:
+    - `impact`, `eruption`, `storm` and `dust_storm`;
+    - `comet`, a boxed `CometEventDto` with its orbit, host and listing, and a track of up to 33
+      points (`CometTrackPointDto`).
+
+    New types beside it: `StormBandDto`, and `EventIdHex`, plan 01's text form. The shared fixture
+    gains `body_events_populated`.
+
+  - _Tests._
+    - (a): `compute::bodies`'s `two_concurrent_requests_for_one_system_s_events_model_it_once`
+      and `event_models_past_the_byte_bound_are_evicted_and_the_bound_is_never_exceeded`. They run
+      at 24, where the models are empty, so they pin the flight and the bound.
+    - The sim's `under_every_25_hold_*` tests pin the listing and the models' charge.
+    - (b): `tests/body_events.rs` over a socket, under the 25 arm. It holds the pinned systems and
+      the golden solar-like system, with its comets, to the sim's bit for bit, with the cut span,
+      the refusals and the counters. Its switch is `planetary::testing::wire_body_events_in_this_process`,
+      process-wide under the sim's `testing` feature, since the pool's threads never see a thread's
+      switch. Its helpers are shared with `system_bodies.rs` in `tests/common/bodies.rs`.
+    - `system_bodies.rs` checks `unsupported` at 24.
+  - _Accept, as built:_ `cargo test -p hyperion-server --test body_events --test system_bodies`,
+    `cargo test -p hyperion-server --lib compute::bodies` and
+    `cargo test -p hyperion-sim --lib planetary::system::events`.

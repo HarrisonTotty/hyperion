@@ -818,6 +818,8 @@ mod tests {
                 system: system(),
                 from: UniverseTime::default(),
                 to: UniverseTime::default(),
+                listed_from: UniverseTime::default(),
+                listed_to: UniverseTime::default(),
                 events: Vec::new(),
             })),
             Some(ResponseBody::BodyEvents(_)) => {

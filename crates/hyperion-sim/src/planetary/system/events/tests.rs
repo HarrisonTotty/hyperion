@@ -75,9 +75,16 @@ fn the_body_events_are_held_only_until_the_25_bump() {
         "the 24 → 25 bump puts P14.T31.c's events on the record (decision-galaxy-25-train §5.2): \
          delete `STORM_EVENTS_VERSION`, `StormEventsRules` with its `Held` arm and the arm that \
          reads it in `PlanetarySystem::event_models`, the tests' `with_storm_events`, its switch in \
-         `with_every_25_hold` and this test"
+         `with_every_25_hold`, the process-wide `wire_body_events_in_this_process` with \
+         `WIRED_IN_THIS_PROCESS` and its callers in the server's tests, `events_on_the_record` \
+         with the server's held arm of `body_events`, and this test"
     );
     assert_eq!(StormEventsRules::in_force(), StormEventsRules::Held);
+    assert!(!events_on_the_record());
+    assert!(with_storm_events(
+        StormEventsRules::Wired,
+        events_on_the_record
+    ));
     let ctx = sun(0);
     let system = generate(SEED, &ctx);
     let models = system.event_models(&ctx);
@@ -456,6 +463,73 @@ fn a_moon_s_presence_is_its_record_s() {
     }
     eprintln!("{moons} moons, {losses} lost by the window's end, {checked} checked");
     assert!(moons > 50 && losses > 0, "{moons} moons, {losses} losses");
+}
+
+/// P14.T36.b's bound: a window is listed whole where it holds no more than asked, and otherwise
+/// the widest span about its middle that holds no more, every event of it, as far either side,
+/// one grain wider holding more; the busiest golden system's century, at four bounds.
+#[test]
+fn under_every_25_hold_a_listing_holds_no_more_than_asked_about_the_window_s_middle() {
+    let systems = golden_at_25();
+    let (.., models) = named(&systems, "close_binary");
+    let all = models.between(century());
+    assert!(all.len() > 100_000, "{}", all.len());
+    let whole = models.listed_about_middle(century(), all.len());
+    assert_eq!((whole.span(), whole.events()), (century(), all.as_slice()));
+    let grain = Span::new(0, 0)
+        .unwrap()
+        .checked_add(
+            Span::from_seconds_f64(50.0 * 31_557_600.0 / f64::from(LISTING_GRAINS_U32)).unwrap(),
+        )
+        .unwrap();
+    for most in [0, 1, 1_000, 25_000] {
+        let listed = models.listed_about_middle(century(), most);
+        let span = listed.span();
+        assert!(listed.events().len() <= most, "{most}");
+        assert_eq!(listed.events(), models.between(span), "{most}");
+        assert!(century().start() <= span.start() && span.end() <= century().end());
+        let (before, after) = (
+            UniverseTime::EPOCH.checked_since(span.start()).unwrap(),
+            span.end().checked_since(UniverseTime::EPOCH).unwrap(),
+        );
+        assert_eq!(before, after, "{most}: as far either side of the middle");
+        // A grain wider, to the rounding of the grain here, holds more.
+        let wider = TimeWindow::new(
+            span.start().checked_sub(grain).unwrap(),
+            span.end().checked_add(grain).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            models.between(wider).len() > most,
+            "{most}: {span:?} is the widest"
+        );
+    }
+}
+
+/// A listing of the clock's whole window overflows nothing: with no events, it is the window.
+#[test]
+fn a_listing_of_the_clock_s_whole_window_is_the_window() {
+    let clock = TimeWindow::new(
+        UniverseTime::new(i64::MIN, 0).unwrap(),
+        UniverseTime::new(i64::MAX, 999_999_999).unwrap(),
+    )
+    .unwrap();
+    let none = SystemEvents::none(SystemId::from_raw(0x0200_0800_2000_0000).unwrap());
+    let listed = none.listed_about_middle(clock, 0);
+    assert_eq!((listed.span(), listed.events()), (clock, &[][..]));
+}
+
+/// The models' charge is one entry a body with models, each holding nothing of its own on the heap.
+#[test]
+fn under_every_25_hold_the_models_charge_one_entry_a_body() {
+    let systems = golden_at_25();
+    let (.., models) = named(&systems, "solar_like");
+    assert_eq!(
+        models.heap_bytes(),
+        models.bodies.capacity() * size_of::<BodyModels>()
+    );
+    assert!(models.heap_bytes() >= 22 * size_of::<BodyModels>());
+    assert_eq!(SystemEvents::none(models.system()).heap_bytes(), 0);
 }
 
 /// [`Lifetime::state_at`] is [`BodyFate::at`]'s state for every planet and member of the golden

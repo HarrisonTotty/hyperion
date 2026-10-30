@@ -585,13 +585,13 @@ fn system_plane(planets: &PlanetarySystem) -> Option<SystemPlaneDto> {
 
 /// A body's ID on the wire.
 #[must_use]
-fn body_id(system: SystemId, index: BodyIndex) -> BodyIdHex {
+pub(super) fn body_id(system: SystemId, index: BodyIndex) -> BodyIdHex {
     BodyIdHex::from_parts(system.raw(), index.get())
 }
 
 /// What a body or a zone orbits, as the wire says it.
 #[must_use]
-fn orbit_host(system: SystemId, host: OrbitHost) -> OrbitHostDto {
+pub(super) fn orbit_host(system: SystemId, host: OrbitHost) -> OrbitHostDto {
     match host {
         OrbitHost::Star(n) => OrbitHostDto::Star {
             body_index: u16::from(n),

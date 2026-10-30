@@ -402,6 +402,19 @@ impl Error for SampleContextsError {
     }
 }
 
+/// Puts P14.T31.c's events on the record for every thread of this process, ahead of their hold at
+/// generator version 25 (`STORM_EVENTS_VERSION`), for another crate's test binary: the server's
+/// handlers answer on its pool's threads, which a switch on the test's thread would not reach. Only
+/// the events' hold is lifted; every other 25 hold stays held, so the events read version 24's
+/// records. It is one-way and process-wide, so a binary that calls it calls it at the start of
+/// every test, and holds no test that asks for the events at 24. The `testing` feature can reach a
+/// workspace build of the server too, since `hyperion-fit` enables it as a normal dependency, so
+/// only a test binary calls this. 25's bump deletes it with the hold.
+#[cfg(feature = "testing")]
+pub fn wire_body_events_in_this_process() {
+    super::system::events::wire_in_this_process();
+}
+
 /// `run`'s result with every landed hold at generator version 25 in force on this thread, for a
 /// test that asserts a 25 figure: a hold that missed 24's membership, which P14.T54.b.i closed
 /// (decision-p14-t53b-part3 §8), rides 25 behind its own version and switch, so that every 24 test

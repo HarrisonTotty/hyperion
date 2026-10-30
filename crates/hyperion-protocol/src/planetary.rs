@@ -34,8 +34,8 @@ pub use record::{
     WetEpochDto,
 };
 pub use requests::{
-    BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest, SystemBodiesDto,
-    SystemBodiesRequest,
+    BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest, CometEventDto,
+    CometTrackPointDto, StormBandDto, SystemBodiesDto, SystemBodiesRequest,
 };
 pub use zones::{ArchitectureClassDto, HabitableZoneDto, SystemPlaneDto, ZoneDto};
 

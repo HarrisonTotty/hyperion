@@ -11,6 +11,7 @@
 //! surface's (rendering plan R09) in [`surface`]. Where a system a client names is, by its origin,
 //! is in [`motion`] (P07.T10.c).
 
+mod events;
 mod extinction;
 mod motion;
 mod observe;
@@ -55,6 +56,7 @@ use hyperion_sim::units::{
 };
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
+pub(crate) use self::events::{EventsRequest, body_events};
 pub(crate) use self::extinction::{
     ExtinctionMapQuery, ExtinctionQuery, LineEnd, extinction_map, extinction_result,
     target_extinction,
