@@ -24,7 +24,9 @@
 //! The profile is normalised to integrate to 1 by a fixed 64-node Gauss–Legendre quadrature (two
 //! panels of 32) in `t = ln(1 + r ÷ s)`, `s` the shape's scale, in which every shape is smooth. Its
 //! radial cumulative distribution is tabulated at [`CDF_KNOTS`] knots even in `t` for the inverse
-//! transform, which reads it linearly in `t` between knots.
+//! transform, which reads it linearly in `t` between knots, when it is first read.
+
+use std::sync::OnceLock;
 
 use crate::galaxy::PointLy;
 use crate::galaxy::quad::{gl_panels, gl16};
@@ -133,8 +135,28 @@ pub struct ClassProfile {
     norm: f64,
     /// `ln(1 + r_t ÷ s)`.
     t_max: f64,
-    /// The cumulative mass fraction at `CDF_KNOTS + 1` knots even in `t`, from 0 to 1.
-    cdf: Box<[f64]>,
+    /// The cumulative mass fraction at `CDF_KNOTS + 1` knots even in `t`, from 0 to 1, tabulated
+    /// when first read ([`Tabulated`]).
+    cdf: Tabulated,
+}
+
+/// A profile's cumulative distribution, tabulated when the inverse transform first reads it
+/// (P09.T40.a).
+///
+/// Only [`ClassProfile::cumulative`] and [`ClassProfile::radius_quantile`] read it: a cluster's
+/// members in its nested cells are placed by the density alone, so a class table's profiles,
+/// which a range query builds by the hundred, never tabulate theirs. The table is
+/// 256 sixteen-node panels, nearly all of a profile's cost and more than half of a feature
+/// interior's (measured 2026-10-30). It is a pure function of the profile's shape and tidal
+/// radius, so it is the same whenever it is made, and two profiles equal in those are equal here
+/// whether either has made it.
+#[derive(Debug, Clone, Default)]
+struct Tabulated(OnceLock<Box<[f64]>>);
+
+impl PartialEq for Tabulated {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
 }
 
 impl ClassProfile {
@@ -157,41 +179,44 @@ impl ClassProfile {
             "a flattening of {flattening}"
         );
         let t_max = math::ln_1p(tidal / s);
-        let shell = |t: f64| {
-            let r = s * math::exp_m1(t);
-            let taper = 1.0 - (r / tidal) * (r / tidal);
-            4.0 * core::f64::consts::PI * r * r * shape.at(r) * taper * taper * (r + s)
-        };
-        let total = gl_panels(shell, &[0.0, 0.5 * t_max, t_max]);
-        let mut cdf = Vec::with_capacity(CDF_KNOTS + 1);
-        cdf.push(0.0);
-        let mut running = 0.0;
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "the knot count is small and exact"
-        )]
-        let dt = t_max / CDF_KNOTS as f64;
-        for k in 0..CDF_KNOTS {
-            #[expect(
-                clippy::cast_precision_loss,
-                reason = "a knot index is small and exact"
-            )]
-            let a = dt * k as f64;
-            running += gl16(shell, a, a + dt);
-            cdf.push(running);
-        }
-        let last = running;
-        for c in &mut cdf {
-            *c /= last;
-        }
+        let total = gl_panels(shell(shape, tidal), &[0.0, 0.5 * t_max, t_max]);
         Self {
             shape,
             tidal,
             flattening,
             norm: 1.0 / total,
             t_max,
-            cdf: cdf.into_boxed_slice(),
+            cdf: Tabulated::default(),
         }
+    }
+
+    /// The cumulative distribution's knots, tabulated on the first call ([`Tabulated`]).
+    fn cdf(&self) -> &[f64] {
+        self.cdf.0.get_or_init(|| {
+            let shell = shell(self.shape, self.tidal);
+            let mut cdf = Vec::with_capacity(CDF_KNOTS + 1);
+            cdf.push(0.0);
+            let mut running = 0.0;
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "the knot count is small and exact"
+            )]
+            let dt = self.t_max / CDF_KNOTS as f64;
+            for k in 0..CDF_KNOTS {
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a knot index is small and exact"
+                )]
+                let a = dt * k as f64;
+                running += gl16(shell, a, a + dt);
+                cdf.push(running);
+            }
+            let last = running;
+            for c in &mut cdf {
+                *c /= last;
+            }
+            cdf.into_boxed_slice()
+        })
     }
 
     /// The shape.
@@ -252,7 +277,8 @@ impl ClassProfile {
             reason = "a knot index is small and exact"
         )]
         let frac = place - knot as f64;
-        self.cdf[knot] + frac * (self.cdf[knot + 1] - self.cdf[knot])
+        let cdf = self.cdf();
+        cdf[knot] + frac * (cdf[knot + 1] - cdf[knot])
     }
 
     /// The radius (ly; ellipsoidal if flattened) below which a share `u` of the class lies: the
@@ -260,8 +286,9 @@ impl ClassProfile {
     #[must_use]
     pub fn radius_quantile(&self, u: f64) -> f64 {
         let u = u.clamp(0.0, 1.0);
-        let k = self.cdf.partition_point(|&c| c <= u).clamp(1, CDF_KNOTS) - 1;
-        let (lo, hi) = (self.cdf[k], self.cdf[k + 1]);
+        let cdf = self.cdf();
+        let k = cdf.partition_point(|&c| c <= u).clamp(1, CDF_KNOTS) - 1;
+        let (lo, hi) = (cdf[k], cdf[k + 1]);
         let f = if hi > lo { (u - lo) / (hi - lo) } else { 0.0 };
         #[expect(
             clippy::cast_precision_loss,
@@ -271,15 +298,28 @@ impl ClassProfile {
         (self.shape.scale() * math::exp_m1(t)).min(self.tidal)
     }
 
-    /// The bytes it owns on the heap.
+    /// The bytes it owns on the heap once its cumulative distribution is tabulated, whether or not
+    /// it is yet, so that a cache charges a profile the same whatever has read it.
     #[must_use]
-    pub fn heap_bytes(&self) -> usize {
-        size_of_val(&*self.cdf)
+    pub const fn heap_bytes(&self) -> usize {
+        (CDF_KNOTS + 1) * size_of::<f64>()
+    }
+}
+
+/// The integrand of a profile's normalisation and cumulative distribution in `t = ln(1 + r ÷ s)`:
+/// the mass in a shell, `4π r² ρ dr ÷ dt`, unnormalised.
+fn shell(shape: ProfileShape, tidal: f64) -> impl Fn(f64) -> f64 + Copy {
+    let s = shape.scale();
+    move |t: f64| {
+        let r = s * math::exp_m1(t);
+        let taper = 1.0 - (r / tidal) * (r / tidal);
+        4.0 * core::f64::consts::PI * r * r * shape.at(r) * taper * taper * (r + s)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
     use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 
     use super::*;
@@ -370,6 +410,37 @@ mod tests {
             };
             let ks = ks_one_sample(&mut radii, exact);
             assert_p_value(&format!("{shape:?}"), ks.p_value, ALPHA);
+        }
+    }
+
+    /// The cumulative distribution is tabulated when first read (P09.T40.a): whichever reading
+    /// makes it, and whether a clone was taken before or after, every value is the same bit for
+    /// bit, the profiles compare equal, and the charge does not move.
+    #[test]
+    fn the_table_made_on_first_reading_is_the_same_whatever_reads_it() {
+        for shape in shapes() {
+            let read_forward = ClassProfile::new(shape, 60.0, 1.0);
+            let read_inverse = ClassProfile::new(shape, 60.0, 1.0);
+            let unread = read_inverse.clone();
+            let charge = unread.heap_bytes();
+            assert_eq!(charge, (CDF_KNOTS + 1) * size_of::<f64>());
+            let radii = [0.01, 0.5, 3.0, 17.0, 59.9];
+            let shares = [0.0, 0.1, 0.5, 0.9, 1.0];
+            let forward: Vec<f64> = radii.iter().map(|&r| read_forward.cumulative(r)).collect();
+            let inverse: Vec<f64> = shares
+                .iter()
+                .map(|&u| read_inverse.radius_quantile(u))
+                .collect();
+            for (k, &r) in radii.iter().enumerate() {
+                assert_same_bits(read_inverse.cumulative(r), forward[k]);
+                assert_same_bits(unread.clone().cumulative(r), forward[k]);
+            }
+            for (k, &u) in shares.iter().enumerate() {
+                assert_same_bits(read_forward.radius_quantile(u), inverse[k]);
+                assert_same_bits(unread.radius_quantile(u), inverse[k]);
+            }
+            assert_eq!(read_forward, unread.clone());
+            assert_eq!(read_forward.heap_bytes(), charge);
         }
     }
 
