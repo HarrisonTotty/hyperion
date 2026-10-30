@@ -104,7 +104,7 @@ use crate::id::{DwarfCoreMemberId, StreamMemberId};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{LightYears, Seconds, SolarMasses};
 
-use spray::SprayForce;
+use spray::{Leg, SprayForce};
 
 /// How many of its local widths a tube reaches across, on each of its two axes: the brainstorm's
 /// "the tube is cut at four widths" (plan 10, Design note 7), a parameter of the generator version
@@ -515,9 +515,11 @@ impl GlobalList {
     /// The global list of `galaxy` (module documentation): the centre's entry, then one per
     /// stream and one per dwarf core of its [`Debris`], in number order.
     ///
-    /// It generates the debris (about 0.16 s at the Milky Way's parameters), reads the galaxy's
-    /// centre ([`Galaxy::centre`], built on its first read) and integrates one orbit per stream
-    /// and core in the spray's table of the potential, which it builds once.
+    /// It generates the debris (about 0.11 s at the Milky Way's parameters on a pod of 16 vCPU,
+    /// [`Debris::generate`]), reads the galaxy's
+    /// centre ([`Galaxy::centre`], built on its first read) and integrates every stream's and
+    /// core's orbits together, side by side, in the spray's table of the potential, which it
+    /// builds once.
     ///
     /// # Panics
     ///
@@ -542,20 +544,26 @@ impl GlobalList {
         let tables = galaxy.potential();
         let force = SprayForce::new(tables)
             .expect("the kinematic tables Debris::generate needs come with the (R, z) grid");
-        let mut entries = Vec::with_capacity(1 + debris.streams().len() + debris.cores().len());
+        // Every shell's orbits at once, which `spray::radii_over_ly` steps side by side.
+        let shells: Vec<ShellLegs> = (debris.streams().iter().map(stream_legs))
+            .chain(debris.cores().iter().map(core_legs))
+            .collect();
+        let reached = reaches_ly(&force, &shells);
+        let (streams, cores) = reached.split_at(debris.streams().len());
+        let mut entries = Vec::with_capacity(1 + shells.len());
         entries.push(centre.as_global_entry());
-        entries.extend(debris.streams().iter().map(|s| {
+        entries.extend(debris.streams().iter().zip(streams).map(|(s, &reach)| {
             GlobalEntry::new(
                 GlobalEntryKind::Stream(s.number()),
                 s.mass(),
-                stream_shell(tables, &force, s),
+                widened_stream_shell(tables, s, reach),
             )
         }));
-        entries.extend(debris.cores().iter().map(|c| {
+        entries.extend(debris.cores().iter().zip(cores).map(|(c, &reach)| {
             GlobalEntry::new(
                 GlobalEntryKind::DwarfCore(c.number()),
                 c.mass(),
-                core_shell(galaxy, &force, c),
+                widened_core_shell(galaxy, c, reach),
             )
         }));
         Self { entries, debris }
@@ -609,28 +617,105 @@ impl GlobalList {
     }
 }
 
-/// The bounding shell of `spec`'s stream in a galaxy of `tables` and their spray table `force`
-/// (module documentation, "Bounding shells").
+/// The orbits a bounding shell is widened from, each from its entry's epoch state (module
+/// documentation, "Bounding shells"): one backwards, and one forwards for a stream whose
+/// stripping time is shorter than a radial period and for every dwarf core.
+#[derive(Debug, Clone, Copy)]
+struct ShellLegs {
+    back: Leg,
+    ahead: Option<Leg>,
+}
+
+/// The orbits of `spec`'s stream's bounding shell: its stripping time backwards, and forwards too
+/// if that is shorter than a radial period.
 #[must_use]
-fn stream_shell(tables: &PotentialTables, force: &SprayForce, spec: &StreamSpec) -> BoundingShell {
+fn stream_legs(spec: &StreamSpec) -> ShellLegs {
     let orbit = spec.orbit();
     let leg = |span: Seconds| {
         let fixed = orbit.fixed_step(span).expect(
             "a specification's stripping time is finite, and its step rule's count fits a u32",
         );
-        spray::radii_over_ly(force, spec.position(), spec.velocity(), fixed)
+        Leg::new(spec.position(), spec.velocity(), fixed)
     };
     let stripping = Seconds::from(spec.stripping_time());
-    let [mut least, mut greatest] = leg(-stripping);
-    if spec.stripping_time().value() < orbit.radial_period().value() {
-        let [ahead_least, ahead_greatest] = leg(stripping);
-        if ahead_least < least {
-            least = ahead_least;
-        }
-        if ahead_greatest > greatest {
-            greatest = ahead_greatest;
-        }
+    ShellLegs {
+        back: leg(-stripping),
+        ahead: (spec.stripping_time().value() < orbit.radial_period().value())
+            .then(|| leg(stripping)),
     }
+}
+
+/// The orbits of dwarf core `spec`'s bounding shell: a radial period either way.
+#[must_use]
+fn core_legs(spec: &DwarfCoreSpec) -> ShellLegs {
+    let orbit = spec.orbit();
+    let period = Seconds::from(orbit.radial_period());
+    let leg = |span: Seconds| {
+        let fixed = orbit
+            .fixed_step(span)
+            .expect("a core's radial period is finite, and its step rule's count fits a u32");
+        Leg::new(spec.position(), spec.velocity(), fixed)
+    };
+    ShellLegs {
+        back: leg(-period),
+        ahead: Some(leg(period)),
+    }
+}
+
+/// The least and greatest distances from the galactic centre, ly, over each of `shells`' orbits
+/// in `force`'s field, in order.
+#[must_use]
+fn reaches_ly(force: &SprayForce, shells: &[ShellLegs]) -> Vec<[f64; 2]> {
+    let mut legs = Vec::with_capacity(2 * shells.len());
+    legs.extend(
+        shells
+            .iter()
+            .flat_map(|s| core::iter::once(s.back).chain(s.ahead)),
+    );
+    let mut radii = spray::radii_over_ly(force, &legs).into_iter();
+    let mut next = || radii.next().expect("one radius pair per leg");
+    shells
+        .iter()
+        .map(|s| {
+            let [back_least, back_greatest] = next();
+            let Some([ahead_least, ahead_greatest]) = s.ahead.map(|_| next()) else {
+                return [back_least, back_greatest];
+            };
+            [
+                if ahead_least < back_least {
+                    ahead_least
+                } else {
+                    back_least
+                },
+                if ahead_greatest > back_greatest {
+                    ahead_greatest
+                } else {
+                    back_greatest
+                },
+            ]
+        })
+        .collect()
+}
+
+/// The bounding shell of `spec`'s stream in a galaxy of `tables` and their spray table `force`
+/// (module documentation, "Bounding shells"), for tests of streams on no list.
+#[cfg(test)]
+#[must_use]
+fn stream_shell(tables: &PotentialTables, force: &SprayForce, spec: &StreamSpec) -> BoundingShell {
+    widened_stream_shell(tables, spec, reaches_ly(force, &[stream_legs(spec)])[0])
+}
+
+/// The bounding shell of `spec`'s stream in a galaxy of `tables`, from the least and greatest
+/// distances of its orbits from the centre, `reach_ly`, widened (module documentation, "Bounding
+/// shells").
+#[must_use]
+fn widened_stream_shell(
+    tables: &PotentialTables,
+    spec: &StreamSpec,
+    reach_ly: [f64; 2],
+) -> BoundingShell {
+    let [least, greatest] = reach_ly;
+    let orbit = spec.orbit();
     let pericentre = orbit.pericentre().value();
     let first = SolarMasses::new(spec.progenitor_mass().value() + spec.mass().value());
     let at_first =
@@ -653,29 +738,12 @@ fn stream_shell(tables: &PotentialTables, force: &SprayForce, spec: &StreamSpec)
     )
 }
 
-/// The bounding shell of dwarf core `spec` of `galaxy`, whose spray table is `force` (module
-/// documentation, "Bounding shells").
+/// The bounding shell of dwarf core `spec` of `galaxy`, from the least and greatest distances of
+/// its orbits from the centre, `reach_ly`, widened by its extent (module documentation, "Bounding
+/// shells").
 #[must_use]
-fn core_shell(galaxy: &Galaxy, force: &SprayForce, spec: &DwarfCoreSpec) -> BoundingShell {
-    let orbit = spec.orbit();
-    let period = Seconds::from(orbit.radial_period());
-    let leg = |span: Seconds| {
-        let fixed = orbit
-            .fixed_step(span)
-            .expect("a core's radial period is finite, and its step rule's count fits a u32");
-        spray::radii_over_ly(force, spec.position(), spec.velocity(), fixed)
-    };
-    let ([back_least, back_greatest], [ahead_least, ahead_greatest]) = (leg(-period), leg(period));
-    let least = if ahead_least < back_least {
-        ahead_least
-    } else {
-        back_least
-    };
-    let greatest = if ahead_greatest > back_greatest {
-        ahead_greatest
-    } else {
-        back_greatest
-    };
+fn widened_core_shell(galaxy: &Galaxy, spec: &DwarfCoreSpec, reach_ly: [f64; 2]) -> BoundingShell {
+    let [least, greatest] = reach_ly;
     let extent = dwarf_core::extent_of(galaxy, spec).value();
     assert!(
         least.is_finite() && greatest.is_finite() && extent.is_finite(),
@@ -885,6 +953,7 @@ mod tests {
         #[test]
         fn the_milky_way_s_list_is_pinned_ordered_and_pure() {
             golden_list();
+            the_lanes_give_every_shell_orbit_s_bits_alone();
             the_entries_are_the_centre_then_the_streams_then_the_cores();
             the_list_does_not_depend_on_whether_the_centre_was_built();
             the_shells_hold_their_progenitors_and_spheres_touch_them_by_their_radii();
@@ -1023,6 +1092,71 @@ mod tests {
             );
         }
 
+        /// Stepped side by side in lanes, every orbit of the fixture's shells reaches the same
+        /// radii, bit for bit, as when the spray's own loop steps it alone, and every shell the
+        /// least and greatest of its legs'. Every third stream is given a forward leg too, which
+        /// none of the fixture's has, so that shells with one and without alternate.
+        fn the_lanes_give_every_shell_orbit_s_bits_alone() {
+            let Fixture { galaxy, list } = fixture();
+            let force = SprayForce::new(galaxy.potential()).expect("the fixture's full tables");
+            let debris = list.debris();
+            let ahead = |s: &StreamSpec| {
+                let span = Seconds::from(s.stripping_time());
+                let fixed = s.orbit().fixed_step(span).expect("a finite span");
+                Leg::new(s.position(), s.velocity(), fixed)
+            };
+            let shells: Vec<ShellLegs> = (debris.streams().iter().enumerate())
+                .map(|(n, s)| {
+                    let legs = stream_legs(s);
+                    ShellLegs {
+                        ahead: legs.ahead.or_else(|| (n % 3 == 0).then(|| ahead(s))),
+                        ..legs
+                    }
+                })
+                .chain(debris.cores().iter().map(core_legs))
+                .collect();
+            let legs: Vec<Leg> = shells
+                .iter()
+                .flat_map(|s| core::iter::once(s.back).chain(s.ahead))
+                .collect();
+            assert_eq!(
+                legs.len(),
+                352,
+                "the 262 streams' backward legs, 88 forward ones and the core's two"
+            );
+            let alone: Vec<[f64; 2]> = legs
+                .iter()
+                .map(|leg| spray::radii_over_ly_alone(&force, leg))
+                .collect();
+            let lanes = spray::radii_over_ly(&force, &legs);
+            for (n, (radii, alone)) in lanes.iter().zip(&alone).enumerate() {
+                assert_eq!(
+                    f64_digest(radii),
+                    f64_digest(alone),
+                    "leg {n}: {radii:?} against {alone:?}"
+                );
+            }
+            // The base's merge of a stream's two legs.
+            let mut alone = alone.into_iter();
+            for (n, (shell, reach)) in shells.iter().zip(reaches_ly(&force, &shells)).enumerate() {
+                let [mut least, mut greatest] = alone.next().expect("a backward leg");
+                if shell.ahead.is_some() {
+                    let [ahead_least, ahead_greatest] = alone.next().expect("a forward leg");
+                    if ahead_least < least {
+                        least = ahead_least;
+                    }
+                    if ahead_greatest > greatest {
+                        greatest = ahead_greatest;
+                    }
+                }
+                assert_eq!(
+                    f64_digest(&reach),
+                    f64_digest(&[least, greatest]),
+                    "shell {n}"
+                );
+            }
+        }
+
         /// The fixture's list was built before the galaxy's centre was read; built again with the
         /// centre held, it is the same.
         fn the_list_does_not_depend_on_whether_the_centre_was_built() {
@@ -1110,8 +1244,8 @@ mod tests {
                     .orbit()
                     .fixed_step(-Seconds::from(spec.stripping_time()))
                     .expect("a finite span");
-                let [least, greatest] =
-                    spray::radii_over_ly(&force, spec.position(), spec.velocity(), back);
+                let leg = Leg::new(spec.position(), spec.velocity(), back);
+                let [least, greatest] = spray::radii_over_ly(&force, &[leg])[0];
                 let radii = (0..=back.count()).map(|step| {
                     let (at, _) = spray.progenitor(step).expect("a boundary of the track");
                     at.length().value() / METRES_PER_LIGHT_YEAR

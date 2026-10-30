@@ -274,7 +274,7 @@ mod milky_way {
     use std::sync::OnceLock;
 
     use hyperion_testkit::golden;
-    use hyperion_testkit::golden::GoldenWriter;
+    use hyperion_testkit::golden::{GoldenWriter, f64_digest};
     use hyperion_testkit::order::assert_order_independent;
 
     use super::*;
@@ -336,6 +336,7 @@ mod milky_way {
     fn the_spray_is_pinned_its_table_conservative_and_its_tracers_pure() {
         golden_sprays();
         the_table_is_its_potential_s_gradient_and_near_the_leapfrog_s();
+        the_force_inside_the_table_is_the_full_lookup_s_gradient_bit_for_bit();
         tracers_are_pure_functions_of_their_index_and_weigh_the_tube();
         the_drawn_offsets_keep_their_dispersions_within_the_cut();
     }
@@ -448,6 +449,38 @@ mod milky_way {
         }
         assert!(worst_potential < 2e-5, "{worst_potential:e}");
         assert!(worst_force < 1e-3, "{worst_force:e}");
+    }
+
+    /// The force reads the interpolant's slopes alone inside the table; it is the gradient of the
+    /// full lookup, potential included, bit for bit: above and below the plane, within the slabs
+    /// about the plane and the axis, at the centre, on the box's face and just beyond it, and
+    /// beyond it in `|z|`.
+    fn the_force_inside_the_table_is_the_full_lookup_s_gradient_bit_for_bit() {
+        let force = &fixture().force;
+        let face = crate::galaxy::potential::grid_point(NODES - 1);
+        for [x, y, z] in [
+            [26_000.0, 0.0, 30.0],
+            [26_000.0, 0.0, -30.0],
+            [-60_000.0, 40_000.0, 90_000.0],
+            [8_000.0, 3_000.0, 0.01],
+            [0.01, 0.02, -500.0],
+            [0.0, 0.0, 0.0],
+            [face, 0.0, 1_000.0],
+            [face * 1.001, 0.0, 1_000.0],
+            [2e5, -1e5, 1.4e6],
+        ] {
+            let at = GalacticDisplacement::new([m(x), m(y), m(z)]);
+            let (shortcut, full) = (
+                force.acceleration_m_s2(&at),
+                force.acceleration_in_full_m_s2(&at),
+            );
+            assert_eq!(
+                f64_digest(&shortcut),
+                f64_digest(&full),
+                "at {:?} ly: {shortcut:?} against {full:?}",
+                [x, y, z]
+            );
+        }
     }
 
     /// The offsets a spray draws (main's ruling of 2026-10-29): over 20,000 tracers' words, the

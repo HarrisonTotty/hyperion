@@ -57,7 +57,8 @@ impl Debris {
     ///
     /// It walks every globular of the feature catalogue and draws every orphan's orbit: 0.16 s
     /// at the Milky Way's parameters, 0.11–0.24 s for sweep galaxies of 155–370 streams (release,
-    /// pod, 4 vCPU).
+    /// pod, 4 vCPU); 0.11 s on the Milky Way fixture since an orphan's attempt whose pericentre
+    /// misses skips its apocentre (pod, 16 vCPU).
     ///
     /// # Panics
     ///

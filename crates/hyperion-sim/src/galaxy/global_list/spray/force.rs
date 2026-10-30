@@ -29,9 +29,11 @@
 //!   which conserve energy (`PotentialTables::force`'s documentation); only the widest orphan
 //!   orbits reach it, and then briefly.
 //!
-//! The lookup costs two logarithms, a square root and the 16 terms of each of the three sums: no
-//! closed form and no `powf` is left in the spray's inner loop. Like the leapfrog's, it uses
-//! `+ − × ÷`, `sqrt` and [`math`] only (P10.T2.c's source check reads this file).
+//! A force's lookup costs two logarithms, a square root and the 16 terms of each of the two
+//! slopes' sums (the potential's own sum is read only beyond the box and by
+//! [`SprayForce::potential_j_kg`]): no closed form and no `powf` is left in the spray's inner
+//! loop. Like the leapfrog's, it uses `+ − × ÷`, `sqrt` and [`math`] only (P10.T2.c's source
+//! check reads this file).
 
 use crate::coords::GalacticDisplacement;
 use crate::galaxy::global_list::orbit::{
@@ -54,6 +56,9 @@ const CROSS_STEP: f64 = 1.0 / 4_096.0;
 /// The position in the table's cells beyond which a coordinate is clamped, just inside the last:
 /// `NODES − 1` less 10⁻⁹.
 const LAST_CELL: f64 = 68.999_999_999;
+
+// `cell` takes a cell's index as a `u8`.
+const _: () = assert!(NODES <= 256, "a cell's index fits a u8");
 
 /// Ruling 146.3's table of the galaxy's total potential (module documentation).
 ///
@@ -132,56 +137,94 @@ impl SprayForce {
     /// axes: the exact gradient of [`potential_j_kg`](Self::potential_j_kg).
     #[must_use]
     pub fn acceleration_m_s2(&self, position: &GalacticDisplacement) -> [f64; 3] {
-        self.acceleration_ly(position.metres().map(|c| c / METRES_PER_LIGHT_YEAR))
-            .map(|a| a * FORCE_IN_SI)
+        let at = self.locate(position.metres());
+        self.acceleration_at(&at, at.logs())
     }
 
     /// The potential at `position` (about the galactic centre), J/kg, zero at infinity.
     #[must_use]
     pub fn potential_j_kg(&self, position: &GalacticDisplacement) -> f64 {
-        let p = position.metres().map(|c| c / METRES_PER_LIGHT_YEAR);
-        self.potential_and_gradient(p).0 * SQUARED_KM_S_IN_SI
+        let at = self.locate(position.metres());
+        self.potential_and_gradient(&at, at.logs()).0 * SQUARED_KM_S_IN_SI
     }
 
-    /// The acceleration at `p` (ly), (km/s)² per light-year along the galactic axes.
+    /// A lookup's first part: where `position_m` (m) reads the table ([`Located`]).
+    // The lookup's parts and `Patch`'s are forced inline into the shell orbits' lanes
+    // (`spray::radii_over_ly`), where LLVM's own choice left them out of line: a lane's step cost
+    // 61 ns out of line, 64 ns with `#[inline]` hints and 49 ns inlined, on the Milky Way
+    // fixture's 5.1 × 10⁶ steps (P10.T4's list bench, pod, 16 vCPU).
     #[must_use]
-    pub(super) fn acceleration_ly(&self, p: [f64; 3]) -> [f64; 3] {
-        let (_, horizontal, vertical) = self.potential_and_gradient(p);
-        [-horizontal * p[0], -horizontal * p[1], -vertical]
-    }
-
-    /// The potential at `p` (ly), (km/s)², and its gradient as `(∂Φ ÷ ∂R) ÷ R`, (km/s)² per ly²,
-    /// and `∂Φ ÷ ∂z`, (km/s)² per ly (module documentation).
-    #[must_use]
-    fn potential_and_gradient(&self, p: [f64; 3]) -> (f64, f64, f64) {
+    #[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+    #[inline(always)]
+    pub(super) fn locate(&self, position_m: [f64; 3]) -> Located {
+        let p = position_m.map(|c| c / METRES_PER_LIGHT_YEAR);
         let r = (p[0] * p[0] + p[1] * p[1]).sqrt();
         let height = p[2].abs();
         let last = self.last;
-        let (horizontal, by_height, phi) = if r <= last && height <= last {
-            let [phi, by_ln_r, by_ln_z] = self.at(r.max(GRID_FIRST_LY), height.max(GRID_FIRST_LY));
-            (
-                if r > GRID_FIRST_LY {
-                    by_ln_r / (r * r)
-                } else {
-                    0.0
-                },
-                if height > GRID_FIRST_LY {
-                    by_ln_z / height
-                } else {
-                    0.0
-                },
-                phi,
-            )
+        let inside = r <= last && height <= last;
+        let point = if inside {
+            [r.max(GRID_FIRST_LY), height.max(GRID_FIRST_LY)]
+        } else {
+            [
+                r.clamp(GRID_FIRST_LY, last),
+                height.clamp(GRID_FIRST_LY, last),
+            ]
+        };
+        Located {
+            p_ly: p,
+            r_ly: r,
+            height_ly: height,
+            inside,
+            point_ly: point,
+        }
+    }
+
+    /// A lookup's last part: the acceleration at `at`, m/s² along the galactic axes, from `logs`,
+    /// [`Located::logs`].
+    ///
+    /// Inside the table it reads the interpolant's slopes alone ([`Patch::slopes`]), which are
+    /// [`potential_and_gradient`](Self::potential_and_gradient)'s bit for bit, and skips the
+    /// potential's sum, which a force never reads.
+    #[must_use]
+    #[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+    #[inline(always)]
+    pub(super) fn acceleration_at(&self, at: &Located, logs: [f64; 2]) -> [f64; 3] {
+        let p = at.p_ly;
+        let (horizontal, vertical) = if at.inside {
+            let [by_ln_r, by_ln_z] = Patch::new(&self.nodes, logs).slopes();
+            let (horizontal, by_height) = within(at.r_ly, at.height_ly, by_ln_r, by_ln_z);
+            (horizontal, if p[2] < 0.0 { -by_height } else { by_height })
+        } else {
+            let (_, horizontal, vertical) = self.potential_and_gradient(at, logs);
+            (horizontal, vertical)
+        };
+        [-horizontal * p[0], -horizontal * p[1], -vertical].map(|a| a * FORCE_IN_SI)
+    }
+
+    /// The potential at `at`, (km/s)², and its gradient as `(∂Φ ÷ ∂R) ÷ R`, (km/s)² per ly², and
+    /// `∂Φ ÷ ∂z`, (km/s)² per ly, from `logs`, [`Located::logs`] (module documentation).
+    #[must_use]
+    fn potential_and_gradient(&self, at: &Located, logs: [f64; 2]) -> (f64, f64, f64) {
+        let Located {
+            p_ly: p,
+            r_ly: r,
+            height_ly: height,
+            inside,
+            point_ly: [rc, zc],
+        } = *at;
+        let last = self.last;
+        let patch = Patch::new(&self.nodes, logs);
+        let [by_ln_r, by_ln_z] = patch.slopes();
+        let phi = patch.sum(patch.radial, patch.vertical);
+        let (horizontal, by_height, phi) = if inside {
+            let (horizontal, by_height) = within(r, height, by_ln_r, by_ln_z);
+            (horizontal, by_height, phi)
         } else {
             // Beyond the box: Φ = A ÷ h, A = g h_c from the clamped point, A changing along
             // whichever coordinate is inside the table's range.
-            let (rc, zc) = (
-                r.clamp(GRID_FIRST_LY, last),
-                height.clamp(GRID_FIRST_LY, last),
-            );
+            let (g, g_by_ln_r, g_by_ln_z) = (phi, by_ln_r, by_ln_z);
             let h = (r * r + height * height).sqrt();
             let hc = (rc * rc + zc * zc).sqrt();
-            let [g, g_by_ln_r, g_by_ln_z] = self.at(rc, zc);
             let amplitude = g * hc;
             let a_by_r = if r > GRID_FIRST_LY && r < last {
                 hc * g_by_ln_r / rc + g * rc / hc
@@ -204,49 +247,160 @@ impl SprayForce {
         let vertical = if p[2] < 0.0 { -by_height } else { by_height };
         (phi, horizontal, vertical)
     }
+}
 
-    /// The bicubic interpolant at `(r, height)` inside the table, ly: `Φ` and its derivatives in
-    /// `ln R` and `ln |z|`, (km/s)².
+#[cfg(test)]
+impl SprayForce {
+    /// The acceleration at `position`, m/s², from
+    /// [`potential_and_gradient`](Self::potential_and_gradient) in full: what
+    /// [`acceleration_m_s2`](Self::acceleration_m_s2) reads inside the table without the
+    /// potential's sum, which tests hold it to bit for bit.
     #[must_use]
-    fn at(&self, r: f64, height: f64) -> [f64; 3] {
-        let (row, across) = cell(r);
-        let (column, up) = cell(height);
-        let (radial, radial_rate) = (hermite(across), hermite_slope(across));
-        let (vertical, vertical_rate) = (hermite(up), hermite_slope(up));
-        // Basis weights of the value and of the slope, along each axis: `[value, slope]` pairs.
-        let weights = |basis: [f64; 4], k: usize| [basis[k], basis[k + 2]];
-        let (mut phi, mut by_ln_r, mut by_ln_z) = (0.0, 0.0, 0.0);
-        for di in 0..2 {
-            for dj in 0..2 {
-                let node = self.nodes[(row + di) * NODES + column + dj];
-                let term = |[r_value, r_slope]: [f64; 2], [z_value, z_slope]: [f64; 2]| {
-                    let [value, by_r, by_z, by_both] = node;
-                    r_value * z_value * value
-                        + GRID_LN_STEP * (r_slope * z_value * by_r + r_value * z_slope * by_z)
-                        + GRID_LN_STEP * GRID_LN_STEP * r_slope * z_slope * by_both
-                };
-                phi += term(weights(radial, di), weights(vertical, dj));
-                by_ln_r += term(weights(radial_rate, di), weights(vertical, dj));
-                by_ln_z += term(weights(radial, di), weights(vertical_rate, dj));
-            }
-        }
-        // The basis's rates are per cell; one cell is the step in the logarithm.
-        [phi, by_ln_r / GRID_LN_STEP, by_ln_z / GRID_LN_STEP]
+    pub(super) fn acceleration_in_full_m_s2(&self, position: &GalacticDisplacement) -> [f64; 3] {
+        let at = self.locate(position.metres());
+        let (_, horizontal, vertical) = self.potential_and_gradient(&at, at.logs());
+        let p = at.p_ly;
+        [-horizontal * p[0], -horizontal * p[1], -vertical].map(|a| a * FORCE_IN_SI)
     }
 }
 
-/// The cell of the table holding `ln x` for `x` inside it, and the position in it, 0–1.
+/// Where a point reads the table, the first part of a lookup ([`SprayForce::locate`]): the
+/// point in light-years, its distances from the axis and from the plane, whether it lies inside
+/// the table's box, and the point of the table it reads, `(R, |z|)` clamped to the table.
+///
+/// A lookup is split in three so that a caller stepping several bodies at once can take every
+/// body's [`logs`](Self::logs) together: they are the longest link in a step's chain of
+/// latencies, and a body's next step waits on its last, while different bodies' steps do not
+/// wait on each other.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct Located {
+    /// The point.
+    p_ly: [f64; 3],
+    /// Its distance from the axis.
+    r_ly: f64,
+    /// Its distance from the plane.
+    height_ly: f64,
+    /// Whether it lies inside the table's box.
+    inside: bool,
+    /// The point of the table it reads, `(R, |z|)`.
+    point_ly: [f64; 2],
+}
+
+impl Located {
+    /// The lookup's middle part: `(ln R, ln |z|)` of the point of the table it reads.
+    #[must_use]
+    #[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+    #[inline(always)]
+    pub(super) fn logs(&self) -> [f64; 2] {
+        self.point_ly.map(math::ln)
+    }
+}
+
+/// The gradient inside the table at `(r, height)`, ly, from the interpolant's derivatives there
+/// in `ln R` and `ln |z|`: `(∂Φ ÷ ∂R) ÷ R`, (km/s)² per ly², and `∂Φ ÷ ∂|z|`, (km/s)² per ly,
+/// each zero within the first node of the axis or of the plane (module documentation).
 #[must_use]
-fn cell(x: f64) -> (usize, f64) {
-    let position = ((math::ln(x) - GRID_LN_FIRST) / GRID_LN_STEP).clamp(0.0, LAST_CELL);
-    let index = position.floor();
+#[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+#[inline(always)]
+fn within(r: f64, height: f64, by_ln_r: f64, by_ln_z: f64) -> (f64, f64) {
+    (
+        if r > GRID_FIRST_LY {
+            by_ln_r / (r * r)
+        } else {
+            0.0
+        },
+        if height > GRID_FIRST_LY {
+            by_ln_z / height
+        } else {
+            0.0
+        },
+    )
+}
+
+/// The four nodes of the table's cell about a point inside it, and the cubic Hermite bases at the
+/// point along each axis with their rates.
+struct Patch {
+    /// The nodes at `(i, j)`, `(i, j + 1)`, `(i + 1, j)` and `(i + 1, j + 1)`, the cell's lower
+    /// corner at row `i`, column `j`.
+    nodes: [[f64; 4]; 4],
+    radial: [f64; 4],
+    radial_rate: [f64; 4],
+    vertical: [f64; 4],
+    vertical_rate: [f64; 4],
+}
+
+impl Patch {
+    /// The patch of the table `nodes` about the point inside it whose `(ln R, ln |z|)` are `logs`.
+    #[must_use]
+    #[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+    #[inline(always)]
+    fn new(nodes: &[[f64; 4]], [ln_r, ln_z]: [f64; 2]) -> Self {
+        let (row, across) = cell(ln_r);
+        let (column, up) = cell(ln_z);
+        let corner = row * NODES + column;
+        let (lower, upper) = (
+            &nodes[corner..corner + 2],
+            &nodes[corner + NODES..corner + NODES + 2],
+        );
+        Self {
+            nodes: [lower[0], lower[1], upper[0], upper[1]],
+            radial: hermite(across),
+            radial_rate: hermite_slope(across),
+            vertical: hermite(up),
+            vertical_rate: hermite_slope(up),
+        }
+    }
+
+    /// The interpolant's derivatives in `ln R` and `ln |z|`, (km/s)².
+    #[must_use]
+    #[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+    #[inline(always)]
+    fn slopes(&self) -> [f64; 2] {
+        // The basis's rates are per cell; one cell is the step in the logarithm.
+        [
+            self.sum(self.radial_rate, self.vertical) / GRID_LN_STEP,
+            self.sum(self.radial, self.vertical_rate) / GRID_LN_STEP,
+        ]
+    }
+
+    /// The sum over the four nodes of the bicubic terms with the bases `radial` and `vertical`
+    /// along the two axes, in node order.
+    #[must_use]
+    #[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+    #[inline(always)]
+    fn sum(&self, radial: [f64; 4], vertical: [f64; 4]) -> f64 {
+        // Basis weights of the value and of the slope, along each axis: `[value, slope]` pairs.
+        let weights = |basis: [f64; 4], k: usize| [basis[k], basis[k + 2]];
+        let mut total = 0.0;
+        for (n, [value, by_r, by_z, by_both]) in self.nodes.into_iter().enumerate() {
+            let ([r_value, r_slope], [z_value, z_slope]) =
+                (weights(radial, n / 2), weights(vertical, n % 2));
+            total += r_value * z_value * value
+                + GRID_LN_STEP * (r_slope * z_value * by_r + r_value * z_slope * by_z)
+                + GRID_LN_STEP * GRID_LN_STEP * r_slope * z_slope * by_both;
+        }
+        total
+    }
+}
+
+/// The cell of the table holding a point inside it whose coordinate's logarithm is `ln_x`, and
+/// the position in it, 0–1.
+#[must_use]
+#[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+#[inline(always)]
+fn cell(ln_x: f64) -> (usize, f64) {
+    let position = ((ln_x - GRID_LN_FIRST) / GRID_LN_STEP).clamp(0.0, LAST_CELL);
+    // Clamped below 69, the position's truncation is its floor, and a NaN, which no finite point
+    // gives, lands in cell 0 as the floor's cast left it. `f64::floor` is a library call on
+    // x86-64's baseline, which lacks SSE4.1's `roundsd`: with it, a shell orbit's step cost 52 ns
+    // against 49 (P10.T4's list bench, pod, 16 vCPU).
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
-        reason = "a whole number clamped to 0–68"
+        reason = "truncates a position clamped to 0–68.999999999, as the floor would"
     )]
-    let i = index as usize;
-    (i, position - index)
+    let index = position as u8;
+    (usize::from(index), position - f64::from(index))
 }
 
 #[cfg(test)]
@@ -263,13 +417,13 @@ mod tests {
         let spacing = grid_point(10) / grid_point(9);
         assert!((ratio / spacing - 1.0).abs() < 1e-12);
         assert!((LAST_CELL.ceil() - 69.0).abs() < f64::EPSILON);
-        let (at, t) = cell(0.0625);
+        let (at, t) = cell(math::ln(0.0625));
         assert_eq!(at, 0);
         assert!(t.abs() < 1e-12);
-        let (at, t) = cell(grid_point(NODES - 1) * 2.0);
+        let (at, t) = cell(math::ln(grid_point(NODES - 1) * 2.0));
         assert_eq!(at, NODES - 2);
         assert!((t - 1.0).abs() < 1e-8);
-        let (at, t) = cell(0.01);
+        let (at, t) = cell(math::ln(0.01));
         assert_eq!(at, 0);
         assert!(t.abs() < f64::EPSILON);
     }

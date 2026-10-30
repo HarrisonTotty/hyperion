@@ -56,6 +56,7 @@ use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::params::{HaloComponentKind, ProgenitorKind};
+use crate::galaxy::potential::PotentialTables;
 use crate::galaxy::quad::gl_panels;
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::math;
@@ -600,27 +601,85 @@ pub fn orbit(
     position: &GalacticPosition,
     velocity: Option<GalacticVelocity>,
 ) -> (LightYears, LightYears) {
-    let tables = galaxy.potential();
-    let p = PointLy::from(position);
-    let r = (p.x * p.x + p.y * p.y + p.z * p.z).sqrt().max(1.0);
-    let phi = |x: f64| tables.potential_in_plane(LightYears::new(x.max(1.0)));
     let Some(v) = velocity else {
-        return (LightYears::new(r), LightYears::new(r));
+        let r = LightYears::new(distance_ly(position));
+        return (r, r);
     };
-    let [vx, vy, vz] = v.metres_per_second().map(|c| c * 1e-3);
-    let energy = 0.5 * (vx * vx + vy * vy + vz * vz) + phi(r);
-    // L = |r × v| in ly km/s.
-    let (lx, ly, lz) = (
-        p.y * vz - p.z * vy,
-        p.z * vx - p.x * vz,
-        p.x * vy - p.y * vx,
-    );
-    let l2 = lx * lx + ly * ly + lz * lz;
-    let g = |x: f64| 2.0 * (energy - phi(x)) - l2 / (x * x);
-    (
-        LightYears::new(turning_point(&g, 1.0, r)),
-        LightYears::new(turning_point(&g, 1e7, r)),
-    )
+    let motion = RadialMotion::new(galaxy, position, v);
+    (motion.pericentre(), motion.apocentre())
+}
+
+/// The distance of `position` from the galactic centre, ly, at least 1.
+#[must_use]
+fn distance_ly(position: &GalacticPosition) -> f64 {
+    let p = PointLy::from(position);
+    (p.x * p.x + p.y * p.y + p.z * p.z).sqrt().max(1.0)
+}
+
+/// The radial motion of a body through a position at a velocity in a galaxy's mid-plane potential
+/// taken as spherical, whose turning points [`orbit`] gives: each is found when asked for, so a
+/// caller that tests one first may skip the other's search.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RadialMotion<'a> {
+    tables: &'a PotentialTables,
+    /// The body's distance from the centre, at least 1 ly.
+    r_ly: f64,
+    /// Its energy.
+    energy_km2_s2: f64,
+    /// Its squared angular momentum.
+    l2_ly2_km2_s2: f64,
+}
+
+impl<'a> RadialMotion<'a> {
+    /// The motion of a body at `position` moving at `velocity` (galactic, m/s) in `galaxy`.
+    #[must_use]
+    pub(crate) fn new(
+        galaxy: &'a Galaxy,
+        position: &GalacticPosition,
+        velocity: GalacticVelocity,
+    ) -> Self {
+        let tables = galaxy.potential();
+        let p = PointLy::from(position);
+        let r = distance_ly(position);
+        let [vx, vy, vz] = velocity.metres_per_second().map(|c| c * 1e-3);
+        // L = |r × v| in ly km/s.
+        let (lx, ly, lz) = (
+            p.y * vz - p.z * vy,
+            p.z * vx - p.x * vz,
+            p.x * vy - p.y * vx,
+        );
+        Self {
+            tables,
+            r_ly: r,
+            energy_km2_s2: 0.5 * (vx * vx + vy * vy + vz * vz) + potential_km2_s2(tables, r),
+            l2_ly2_km2_s2: lx * lx + ly * ly + lz * lz,
+        }
+    }
+
+    /// The pericentre, ly.
+    #[must_use]
+    pub(crate) fn pericentre(&self) -> LightYears {
+        LightYears::new(turning_point(&|x| self.g(x), 1.0, self.r_ly))
+    }
+
+    /// The apocentre, ly.
+    #[must_use]
+    pub(crate) fn apocentre(&self) -> LightYears {
+        LightYears::new(turning_point(&|x| self.g(x), 1e7, self.r_ly))
+    }
+
+    /// `2 (E − Φ(x)) − L² ÷ x²`, the squared radial speed at radius `x`, ly, in (km/s)²: zero at
+    /// the turning points.
+    #[must_use]
+    fn g(&self, x: f64) -> f64 {
+        2.0 * (self.energy_km2_s2 - potential_km2_s2(self.tables, x)) - self.l2_ly2_km2_s2 / (x * x)
+    }
+}
+
+/// The mid-plane potential of `tables` at radius `x_ly` (at least 1 ly).
+#[must_use]
+fn potential_km2_s2(tables: &PotentialTables, x_ly: f64) -> f64 {
+    tables.potential_in_plane(LightYears::new(x_ly.max(1.0)))
 }
 
 /// The history of a globular of present `mass`, `half_mass_radius` and `age` at `position` moving

@@ -41,7 +41,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::PointLy;
 use crate::galaxy::features::interior::counts::CANONICAL_SLOPE;
 use crate::galaxy::features::kinds::globular::{
-    ACCRETED_AGES, GLOBULAR_CORE, METALLICITY_LAWS, orbit as turning_points,
+    ACCRETED_AGES, GLOBULAR_CORE, METALLICITY_LAWS, RadialMotion,
 };
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::kinematics::{ESCAPE_CUT_ATTEMPTS, VELOCITY_WORDS_PER_ATTEMPT, draw_on_from};
@@ -175,12 +175,16 @@ pub(crate) fn orphans(galaxy: &Galaxy, living: u32, room: usize) -> Vec<StreamSp
                 ])
                 .expect("a radius under 10⁶ ly fits the i32 light-year cells");
                 let velocity = draw_on_from(galaxy, debris, &at, &mut stream, first + 3).velocity();
-                let (peri, apo) = turning_points(galaxy, &at, Some(velocity));
-                let accepted = peri.value() > corotation && apo.value() < APOCENTRE_LIMIT_LY;
-                // Only an accepted attempt pays for the orbit's quadrature.
-                if !accepted {
-                    return None;
-                }
+                let motion = RadialMotion::new(galaxy, &at, velocity);
+                let peri = motion.pericentre();
+                // Only an attempt whose pericentre clears corotation pays for its apocentre's
+                // search, and only an accepted one for the orbit's quadrature. Most attempts fall
+                // inside corotation: searching both turning points of every attempt cost the
+                // Milky Way fixture's debris 158 ms against 110 (P10.T4's list bench, pod, 16
+                // vCPU).
+                let apo = (peri.value() > corotation)
+                    .then(|| motion.apocentre())
+                    .filter(|apo| apo.value() < APOCENTRE_LIMIT_LY)?;
                 let orbit = SphericalOrbit::between(tables, peri, apo)?;
                 Some((
                     GalacticPosition::ORIGIN.displacement_to(&at),

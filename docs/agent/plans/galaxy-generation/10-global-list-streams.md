@@ -2093,3 +2093,10 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
   - _Counts (lean, 2026-10-30)._ "About 240" is held as the mean over eight Milky Way seeds within
     200–300; "150–1,500" is held on 24 galaxies, though some drawn galaxies expect fewer than 150
     (a finding).
+- **P10.T4's list build, faster (a performance lane, 2026-10-30).** No output moved.
+  `spray::radii_over_ly(force, &[Leg]) -> Vec<[f64; 2]>` steps every shell orbit of a list
+  together, in lanes, so `GlobalList::build` gathers its shells' legs first; `stream_shell` is
+  test-only (T9's tests still call it). `SprayForce`'s lookup is split into `locate`,
+  `Located::logs` and `acceleration_at` (`acceleration_ly` is gone), and `globular::RadialMotion`
+  gives an orbit's turning points one at a time, which the orphans' draws use. If the spray's
+  steps change, `radii_over_ly_alone` (test-only) holds the lanes to them bit for bit.

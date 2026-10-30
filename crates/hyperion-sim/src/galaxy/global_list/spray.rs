@@ -975,10 +975,46 @@ pub fn spray(galaxy: &Galaxy, spec: &StreamSpec) -> Result<Vec<Tracer>, BuildLea
     Ok(spray.tracers())
 }
 
-/// The least and greatest distances from the galactic centre, ly, over the step boundaries of the
-/// body that starts at `position` and `velocity` and takes `fixed`'s steps in `force`'s field:
-/// the radii the global list's bounding shells are widened from (P10.T4,
-/// [`GlobalList`](super::GlobalList)).
+/// A body's start and steps, for [`radii_over_ly`]: one of the orbits the global list's bounding
+/// shells are widened from (P10.T4, [`GlobalList`](super::GlobalList)).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Leg {
+    /// Where the body starts, about the galactic centre.
+    position: GalacticDisplacement,
+    /// Its velocity there.
+    velocity: GalacticVelocity,
+    /// Its steps.
+    fixed: FixedStep,
+}
+
+impl Leg {
+    /// The body that starts at `position` moving at `velocity` and takes `fixed`'s steps.
+    #[must_use]
+    pub(super) const fn new(
+        position: GalacticDisplacement,
+        velocity: GalacticVelocity,
+        fixed: FixedStep,
+    ) -> Self {
+        Self {
+            position,
+            velocity,
+            fixed,
+        }
+    }
+}
+
+/// The legs [`radii_over_ly`] steps side by side.
+///
+/// A step waits on its own lookup, a chain of divisions, a square root and two logarithms, so a
+/// leg stepped alone leaves the core idle for most of it: 98 ns a step for some 690 instructions,
+/// on the Milky Way fixture's 5.1 × 10⁶ shell steps. In lanes the chains of different legs
+/// overlap: 58 ns a step with 2 lanes, 49.6 with 4, 49.5 with 8 and 49.8 with 16 (P10.T4's list
+/// bench, pod, 16 vCPU). Eight leaves room for a core with a deeper pipeline.
+const LANES: usize = 8;
+
+/// The least and greatest distances from the galactic centre, ly, over the step boundaries of each
+/// leg, in order: the body that starts at its position and velocity and takes its steps in
+/// `force`'s field.
 ///
 /// Over a specification's stripping time backwards these are the steps [`Spray::new`] takes on
 /// its backward pass, in the same field from the same state, so the body is the spray's
@@ -986,20 +1022,119 @@ pub fn spray(galaxy: &Galaxy, spec: &StreamSpec) -> Result<Vec<Tracer>, BuildLea
 /// [`OrbitSummary`](super::orbit::OrbitSummary)'s are: at the step rule's 64 steps a pericentre
 /// crossing a turning point lies within about `r̈ h² ÷ 8 ≈ r_p ÷ 32,768` of the nearer boundary's
 /// distance (`r̈` near `v_p² ÷ r_p`), under 10⁻⁴ of itself, which the shells' widening dwarfs.
+///
+/// The legs are stepped [`LANES`] at a time, longest first, in lockstep. Each lane takes the
+/// spray's own kick–drift–kick steps, with the force's lookup split in three passes over the
+/// lanes ([`SprayForce::locate`], [`Located::logs`](force::Located::logs) and
+/// [`SprayForce::acceleration_at`]) so that the lanes' logarithms are taken together. A leg's
+/// radii are the same bits however the legs are grouped.
 #[must_use]
-pub(super) fn radii_over_ly(
-    force: &SprayForce,
-    position: GalacticDisplacement,
-    velocity: GalacticVelocity,
-    fixed: FixedStep,
-) -> [f64; 2] {
+pub(super) fn radii_over_ly(force: &SprayForce, legs: &[Leg]) -> Vec<[f64; 2]> {
+    let mut radii = vec![[0.0; 2]; legs.len()];
+    let mut order: Vec<usize> = (0..legs.len()).collect();
+    // Longest first, so that the lanes run full until only short legs are left.
+    order.sort_by_key(|&n| core::cmp::Reverse(legs[n].fixed.count()));
+    let mut queue = order.into_iter().map(|n| Lane::new(force, n, &legs[n]));
+    let mut lanes: Vec<Lane> = queue.by_ref().take(LANES).collect();
+    let mut located = [force::Located::default(); LANES];
+    let mut logarithms = [[0.0; 2]; LANES];
+    loop {
+        let mut n = 0;
+        while let Some(lane) = lanes.get(n) {
+            if lane.left > 0 {
+                n += 1;
+                continue;
+            }
+            radii[lane.leg] = lane.radii();
+            if let Some(next) = queue.next() {
+                lanes[n] = next;
+            } else {
+                lanes.swap_remove(n);
+            }
+        }
+        if lanes.is_empty() {
+            return radii;
+        }
+        for (lane, at) in lanes.iter_mut().zip(&mut located) {
+            kick_drift(&mut lane.body, lane.acceleration_m_s2, lane.step_s);
+            *at = force.locate(lane.body.0);
+        }
+        for (at, logs) in located.iter().zip(&mut logarithms).take(lanes.len()) {
+            *logs = at.logs();
+        }
+        for ((lane, at), logs) in lanes.iter_mut().zip(&located).zip(&logarithms) {
+            lane.acceleration_m_s2 = force.acceleration_at(at, *logs);
+            kick(&mut lane.body, lane.acceleration_m_s2, lane.step_s);
+            lane.reach();
+            lane.left -= 1;
+        }
+    }
+}
+
+/// A leg in one of [`radii_over_ly`]'s lanes.
+struct Lane {
+    /// Its place among the legs.
+    leg: usize,
+    body: Body,
+    /// The acceleration at the body's position.
+    acceleration_m_s2: [f64; 3],
+    /// The step.
+    step_s: f64,
+    /// The steps left.
+    left: u32,
+    /// The least and greatest squared distances from the centre so far.
+    least_m2: f64,
+    greatest_m2: f64,
+}
+
+impl Lane {
+    /// Leg `leg`, `start`, at its first boundary.
+    #[must_use]
+    fn new(force: &SprayForce, leg: usize, start: &Leg) -> Self {
+        let body = (start.position.metres(), start.velocity.metres_per_second());
+        let r2 = dot(body.0, body.0);
+        Self {
+            leg,
+            body,
+            acceleration_m_s2: force.acceleration_m_s2(&GalacticDisplacement::new(body.0)),
+            step_s: start.fixed.step().value(),
+            left: start.fixed.count(),
+            least_m2: r2,
+            greatest_m2: r2,
+        }
+    }
+
+    /// Takes the body's distance at its boundary into the least and greatest.
+    fn reach(&mut self) {
+        let r2 = dot(self.body.0, self.body.0);
+        // Squared distances are never NaN or a negative zero, so the comparisons are exact.
+        if r2 < self.least_m2 {
+            self.least_m2 = r2;
+        }
+        if r2 > self.greatest_m2 {
+            self.greatest_m2 = r2;
+        }
+    }
+
+    /// The least and greatest distances from the centre, ly.
+    #[must_use]
+    fn radii(&self) -> [f64; 2] {
+        [self.least_m2, self.greatest_m2].map(|r2| r2.sqrt() / METRES_PER_LIGHT_YEAR)
+    }
+}
+
+/// [`radii_over_ly`] of one leg by the spray's own loop, [`kick_drift_kick`] in `force`'s field,
+/// which the lanes must give bit for bit.
+#[cfg(test)]
+#[must_use]
+pub(super) fn radii_over_ly_alone(force: &SprayForce, leg: &Leg) -> [f64; 2] {
     let field = |x: [f64; 3]| force.acceleration_m_s2(&GalacticDisplacement::new(x));
-    let mut body = (position.metres(), velocity.metres_per_second());
+    let mut body = (leg.position.metres(), leg.velocity.metres_per_second());
     let mut acceleration = field(body.0);
-    let h = fixed.step().value();
+    let h = leg.fixed.step().value();
     let start = dot(body.0, body.0);
     let (mut least, mut greatest) = (start, start);
-    for _ in 0..fixed.count() {
+    for _ in 0..leg.fixed.count() {
         kick_drift_kick(&mut body, &mut acceleration, h, field);
         let r2 = dot(body.0, body.0);
         // Squared distances are never NaN or a negative zero, so the comparisons are exact.
@@ -1025,16 +1160,28 @@ fn kick_drift_kick(
     h: f64,
     field: impl Fn([f64; 3]) -> [f64; 3],
 ) {
+    kick_drift(body, *acceleration, h);
+    *acceleration = field(body.0);
+    kick(body, *acceleration, h);
+}
+
+/// A step's first half: the half kick of `h` seconds of `body` by `acceleration` (m/s²), then
+/// the drift.
+fn kick_drift(body: &mut Body, acceleration: [f64; 3], h: f64) {
     let half = 0.5 * h;
     let (x, v) = body;
-    for (v, a) in v.iter_mut().zip(*acceleration) {
+    for (v, a) in v.iter_mut().zip(acceleration) {
         *v += a * half;
     }
     for (x, v) in x.iter_mut().zip(*v) {
         *x += v * h;
     }
-    *acceleration = field(*x);
-    for (v, a) in v.iter_mut().zip(*acceleration) {
+}
+
+/// A step's last half kick, of `h` seconds, of `body` by `acceleration` (m/s²) at its new position.
+fn kick(body: &mut Body, acceleration: [f64; 3], h: f64) {
+    let half = 0.5 * h;
+    for (v, a) in body.1.iter_mut().zip(acceleration) {
         *v += a * half;
     }
 }
