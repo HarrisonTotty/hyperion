@@ -37,12 +37,19 @@
  * - the control bites, equator-on: the sphere's datum, as R10.T16.g drew it, changes pixels beyond
  *   the figure at the pole. Pole-on the spheroid's outline lies some 0.3 px inside the sphere's, so
  *   no control is asked there.
+ *
+ * {@link captureDatum} saves `TEST SATURN`'s datum as `VIEW` draws it, for a person's look (plan
+ * R02, R02.T19.b): the spheroid centred in a 1280 × 720 view at a 60° field from
+ * {@link CAPTURE_RANGE_M}, seen equator-on and pole-on, lit from behind the camera and to its
+ * right, in the photorealistic style over its own medium with its datum inside the figure, and in
+ * the wireframe with its limb centred.
  */
 
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import { add, dot, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
 import { type BodyFigure, PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
+import { atmosphereToBodyFixed, bodyAtmosphereCamera } from "../view/atmosphere/bodyCamera";
 import { R05_EARTH_REFERENCE } from "../view/atmosphere/earth";
 import { AtmosphereTables } from "../view/atmosphere/tables";
 import type { ProjectionCamera, Viewport } from "../view/camera/projection";
@@ -51,8 +58,10 @@ import type { RenderEngine, RenderView } from "../view/engine/types";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
 import { overlaySubmission } from "../view/photoreal/overlay";
 import { PhotorealRenderer } from "../view/photoreal/renderer";
-import type { ViewBody, ViewScene } from "../view/scene/model";
-import { ATMOSPHERE_FIXTURES } from "../view/scenes/atmosphereScene";
+import { exposureScale } from "../view/photometry/exposure";
+import type { Rgb } from "../view/photometry/toneCurve";
+import { sceneOrigins, type ViewBody, type ViewScene } from "../view/scene/model";
+import { ATMOSPHERE_FIXTURES, builtOfCase } from "../view/scenes/atmosphereScene";
 import { AU_M } from "../view/scenes/kept";
 import { type ColourTokens, readTokens } from "../spatial/paint";
 import {
@@ -70,6 +79,8 @@ import {
   FIXTURE_SYSTEM,
   NO_TURN,
 } from "../test/viewFixtures";
+import { base64Of, type CapturedImage } from "./atmosphere";
+import { lambertPhotometry } from "./frameTimingScene";
 import { addCanvas } from "./frames";
 import type { Checks } from "./harness";
 
@@ -124,15 +135,15 @@ function datumScene(overrides: Partial<ViewBody> = {}): ViewScene {
   });
 }
 
-/** The camera a datum is built from: `centreM` from the planet fixture's centre. */
-function drawCameraFor(centreM: Vec3): DrawCamera {
+/** The camera a datum is built from: `centreM` from the planet fixture's centre, at a field. */
+function drawCameraFor(centreM: Vec3, fovXRad: number = CAMERA.fovXRad): DrawCamera {
   return {
     pose: {
       frame: { kind: "system", system: FIXTURE_SYSTEM },
       positionM: sub(FIXTURE_PLANET_CENTRE_M, centreM),
       orientation: NO_TURN,
     },
-    fovXRad: CAMERA.fovXRad,
+    fovXRad,
   };
 }
 
@@ -148,8 +159,9 @@ function datumList(
   tokens: ColourTokens,
   scene: ViewScene = datumScene(),
   camera: DrawCamera = DRAW_CAMERA,
+  viewport: Viewport = VIEWPORT,
 ): WireframeDrawList {
-  const list = buildWireframeDrawList(scene, camera, VIEWPORT, tokens, {
+  const list = buildWireframeDrawList(scene, camera, viewport, tokens, {
     lowSetting: false,
     ev100: 0,
     selection: null,
@@ -556,4 +568,190 @@ export async function checkDatumFrame(engine: RenderEngine, checks: Checks): Pro
     }
     element.remove();
   }
+}
+
+/** The captures' view (plan R02, R02.T19.b), device px. */
+const CAPTURE_VIEWPORT: Viewport = { widthPx: 1280, heightPx: 720 };
+
+/** The captures' camera: a 60° horizontal field along the view's axes. */
+const CAPTURE_CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+
+/**
+ * The captures' range, m from `TEST SATURN`'s centre: 340 Mm, where its figure fills about half the
+ * view's height. Seen equator-on its polar diameter spans 360 of the view's 720 px, f c ÷ √(d² − a²)
+ * each side of the centre at a focal length f of 640 ÷ tan 30° px, and seen pole-on its disc 398 px,
+ * f a ÷ √(d² − c²) each side.
+ */
+const CAPTURE_RANGE_M = 340e6;
+
+/**
+ * The captures' fixed exposure, EV100: 15, the photographer's "sunny 16" for a sunlit scene (ISO
+ * 100 at f/16 and 1/125 s), where `TEST SATURN`'s disc in sunlight at 1 au stands about a stop over
+ * middle grey.
+ */
+const CAPTURE_EV100 = 15;
+
+/**
+ * The way to the Sun from `TEST SATURN` in the captures: from behind the camera and to its right, at
+ * 64° of phase, so that its lit limb and its terminator both show.
+ */
+const CAPTURE_TO_SUN = normalise(vec3(1, 0.3, 0.5));
+
+/**
+ * `TEST SATURN` centred in the captures' view from {@link CAPTURE_RANGE_M}, its pole up the view
+ * (equator-on) or towards the camera (pole-on, looking down the pole).
+ */
+const CAPTURE_VIEWS: ReadonlyArray<SaturnView> = [
+  {
+    name: "equator-on",
+    centreM: vec3(0, 0, -CAPTURE_RANGE_M),
+    figure: { ...SATURN, pole: vec3(0, 1, 0) },
+    across: true,
+  },
+  {
+    name: "pole-on",
+    centreM: vec3(0, 0, -CAPTURE_RANGE_M),
+    figure: { ...SATURN, pole: vec3(0, 0, 1) },
+    across: false,
+  },
+];
+
+/** A canvas read-back as a capture named `name`. */
+function capturedOf(name: string, bytes: Float32Array | Uint8Array): CapturedImage {
+  return {
+    name,
+    width: CAPTURE_VIEWPORT.widthPx,
+    height: CAPTURE_VIEWPORT.heightPx,
+    rgba: base64Of(bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes)),
+  };
+}
+
+/** How one capture sees `TEST SATURN`: its view, its scene and the camera both styles draw from. */
+interface CaptureFraming {
+  readonly view: SaturnView;
+  readonly scene: ViewScene;
+  readonly camera: DrawCamera;
+}
+
+/**
+ * Draws `TEST SATURN` seen as `view` has it, in its `scene` from `camera`, through the
+ * photorealistic style, with its medium's `tables` drawn about its pole as `VIEW` draws a body's air
+ * (`bodyAtmosphereCamera`), and its datum inside the figure over the image; reads the canvas back in
+ * the task that drew it.
+ */
+function drawPhotorealCapture(
+  renderer: PhotorealRenderer,
+  wireframe: WireframeRenderer,
+  canvas: RenderView,
+  tables: AtmosphereTables,
+  albedo: Rgb,
+  tokens: ColourTokens,
+  { view, scene, camera }: CaptureFraming,
+): Promise<Float32Array | Uint8Array> {
+  const [body] = scene.bodies;
+  if (body === undefined) {
+    throw new Error("TEST SATURN's scene has no body");
+  }
+  const projection = { fovXRad: CAPTURE_CAMERA.fovXRad, viewport: CAPTURE_VIEWPORT };
+  const air = bodyAtmosphereCamera(scene, body, camera.pose, sceneOrigins(scene), projection);
+  if (air === null) {
+    throw new Error("TEST SATURN has an atmosphere camera");
+  }
+  const datum = datumList(true, tokens, scene, camera, CAPTURE_VIEWPORT);
+  // A Lambert sphere of its medium's ground albedo, p = A ÷ 1.5, as `ATMOSPHERE TEST` draws it.
+  const [r, g, b] = albedo;
+  renderer.render(canvas, {
+    camera: CAPTURE_CAMERA,
+    viewport: CAPTURE_VIEWPORT,
+    presentedPx: CAPTURE_VIEWPORT,
+    role: "eye",
+    setting: "high",
+    exposureScale: exposureScale(CAPTURE_EV100),
+    sky: [],
+    starSprites: [],
+    hostDraws: new Map(),
+    glareSources: [],
+    lights: [{ disc: sunLikeHostDisc(), centreM: add(view.centreM, scale(CAPTURE_TO_SUN, AU_M)) }],
+    bodies: [
+      {
+        id: BODY,
+        centreM: view.centreM,
+        figure: view.figure,
+        photometry: lambertPhotometry([r / 1.5, g / 1.5, b / 1.5]),
+        lighting: undefined,
+      },
+    ],
+    depthWriters: [],
+    previousRegimes: new Map(),
+    overlay: (surveyed) =>
+      overlaySubmission(wireframe, datum, tokens, camera, CAPTURE_VIEWPORT, surveyed),
+    meter: null,
+    atmospheres: [{ id: BODY, tables, camera: air, toBodyFixed: atmosphereToBodyFixed(body) }],
+  });
+  return canvas.readBack();
+}
+
+/**
+ * R02.T19.b's captures, for a person's look: `TEST SATURN`'s datum as `VIEW` draws it, in both
+ * styles and seen equator-on and pole-on, named `datum-saturn-<style>-<framing>` (see the module's
+ * remarks).
+ *
+ * @remarks
+ * The photorealistic frames are drawn over `ATMOSPHERE TEST`'s `saturn-oblate` medium on Saturn's
+ * spheroid, its tables built as the scene's cache builds them (`builtOfCase`), and the wireframe's
+ * on a cleared canvas, the datum alone in each.
+ */
+export async function captureDatum(engine: RenderEngine): Promise<CapturedImage[]> {
+  const tokens: ColourTokens = readTokens(document.documentElement);
+  const loaded = await import("../view/atmosphere/reference/cases");
+  const built = builtOfCase(loaded.SATURN_OBLATE_CASE, "saturn-oblate");
+  const element = addCanvas();
+  // What the captures made, released in reverse after them, whatever they threw.
+  const made: Array<{ dispose(): void }> = [];
+  const hold = <T extends { dispose(): void }>(each: T): T => {
+    made.push(each);
+    return each;
+  };
+  const images: CapturedImage[] = [];
+  try {
+    const renderer = hold(new PhotorealRenderer(engine, "datum captures smoke"));
+    const wireframe = hold(new WireframeRenderer(engine));
+    const tables = hold(
+      new AtmosphereTables(engine, built.medium, built.bottomRadiusM, built.curves, built.body),
+    );
+    const canvas = hold(engine.createView(element, "datum captures smoke"));
+    canvas.resize(CAPTURE_VIEWPORT);
+    await renderer.prepare(CAPTURE_VIEWPORT, "high", "eye", CAPTURE_CAMERA);
+    for (const view of CAPTURE_VIEWS) {
+      // One scene and camera for both styles, so that the two show the same framing.
+      const seen: CaptureFraming = {
+        view,
+        scene: saturnScene(view, true),
+        camera: drawCameraFor(view.centreM, CAPTURE_CAMERA.fovXRad),
+      };
+      // Each frame is read back in the task that drew it, before the next.
+      // oxlint-disable-next-line no-await-in-loop
+      const image = await drawPhotorealCapture(
+        renderer,
+        wireframe,
+        canvas,
+        tables,
+        built.medium.groundAlbedo,
+        tokens,
+        seen,
+      );
+      images.push(capturedOf(`datum-saturn-photorealistic-${view.name}`, image));
+      const list = datumList(false, tokens, seen.scene, seen.camera, CAPTURE_VIEWPORT);
+      wireframe.render(canvas, list, seen.camera, CAPTURE_VIEWPORT);
+      // The wireframe's frame too, read back in the task that drew it, before the next view's.
+      // oxlint-disable-next-line no-await-in-loop
+      images.push(capturedOf(`datum-saturn-wireframe-${view.name}`, await canvas.readBack()));
+    }
+  } finally {
+    for (const each of made.toReversed()) {
+      each.dispose();
+    }
+    element.remove();
+  }
+  return images;
 }

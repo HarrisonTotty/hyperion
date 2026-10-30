@@ -39,7 +39,8 @@
  * R08.T8.c's far limb's timings and, after them, R08.T11's photorealistic frame's timings
  * (`frameTiming.ts`), after the low pick, when the run lifted timestamp quantization (`gpuTiming`,
  * the hardware runs of R01.T11), and R08.T8.c's far limb captures, after R07.T10.c's eclipse
- * captures, with the other captures; a plain `just test-render` runs none of them.
+ * captures, with the other captures, and R02.T19.b's datum captures after them; a plain
+ * `just test-render` runs none of them.
  *
  * With `transfer` in its query (`--smoke-transfer`; plan R10, R10.T15.b) the page runs R03.T15's
  * transfer check instead of every group (`transfer.ts`): no adapter, only the server's socket.
@@ -96,7 +97,7 @@ import {
 import { checkAtmosphereFrame } from "./atmosphereFrame";
 import { checkCellPassEveryRecord } from "./cellPass";
 import { checkThermalDiscs } from "./thermal";
-import { checkDatumFrame } from "./datumFrame";
+import { captureDatum, checkDatumFrame } from "./datumFrame";
 import { timeAtmosphereFrame } from "./frameTiming";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
@@ -633,6 +634,18 @@ async function run(
   if (captures) {
     await group(1, "R08.T8.c the far limb captures", async () => {
       images = [...images, ...(await captureFarLimb(engine, checks))];
+    });
+  }
+
+  if (captures) {
+    await group(1, "R02.T19 the datum captures", async () => {
+      const frames = await captureDatum(engine);
+      images = [...images, ...frames];
+      checks.check(
+        "R02.T19 the datum captures",
+        frames.length > 0,
+        `${String(frames.length)} frames`,
+      );
     });
   }
 
