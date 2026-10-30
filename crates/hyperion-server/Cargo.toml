@@ -45,6 +45,10 @@ name = "density_map"
 harness = false
 
 [[bench]]
+name = "feature_range_query"
+harness = false
+
+[[bench]]
 name = "range_query"
 harness = false
 
