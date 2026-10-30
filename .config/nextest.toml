@@ -168,15 +168,6 @@ priority = 50
 filter = "package(hyperion-sim) & test(/^stellar::multiplicity::bound::tests::the_(bound_holds|hierarchy_bound_holds)/)"
 threads-required = 4
 
-# P14.T33.c's ordinary composition census generates its 6,800 systems on eight threads of its own
-# (`ORDINARY_THREADS` in `planetary/system/census_tests.rs`), so it takes eight slots rather than a
-# nominal one, and starts as early as the sky's group: like them, it is among the fast tier's
-# longest. It is compiled out on WebAssembly.
-[[profile.default.overrides]]
-filter = "package(hyperion-sim) & test(=planetary::system::census_tests::composition_census_reaches_every_row_or_lists_why)"
-threads-required = 8
-priority = 50
-
 # The range query's merged properties build their reference galaxy on a thread of their own, beside
 # the server's build of it, so the test takes two slots.
 [[profile.default.overrides]]
@@ -279,11 +270,13 @@ threads-required = "num-test-threads"
 filter = "package(hyperion-sim) & binary(galaxy_sweeps) & test(=the_rotation_curve_over_four_thousand_seeds)"
 priority = 100
 
-# P14.T33.c's slow composition census, 10⁶ bodies of 68,000 systems, generates them on eight
-# threads of its own (`SLOW_THREADS` in `planetary/system/census_tests.rs`), so it takes eight
-# slots, and starts with the rotation curve: its slot time is the tier's longest.
+# P14.T33.c's four composition censuses (10⁵ bodies of 6,800 systems and 10⁶ of 68,000, each at
+# version 24 and under every 25 hold) generate their systems on eight threads of their own
+# (`ORDINARY_THREADS` and `SLOW_THREADS` in `planetary/system/census_tests.rs`), so each takes
+# eight slots, and they start with the rotation curve: the 10⁶ censuses' slot time is the tier's
+# longest. They are compiled out on WebAssembly.
 [[profile.slow.overrides]]
-filter = "package(hyperion-sim) & test(=planetary::system::census_tests::composition_census_over_a_million_bodies_reaches_every_row_or_lists_why)"
+filter = "package(hyperion-sim) & test(/^planetary::system::census_tests::composition_census_/)"
 threads-required = 8
 priority = 100
 
