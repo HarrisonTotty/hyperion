@@ -6,13 +6,15 @@
 //!   cells), the Moon at 6 (24,576), Mars at 7 (98,304) and the Earth at 8 (393,216). Each world
 //!   runs the steps its regime names, so a level's figure is its world's, not the level's alone:
 //!   the Earth alone runs the moving plates, the sea, the energy balance and its water cycle, and
-//!   the steady state of a world wet now, and Mars its wet epoch's erosion. Ten samples a level,
-//!   one pass each (`SamplingMode::Flat`). Once a level's samples are taken, the bench prints the
+//!   the steady state of a world wet now, and Mars its wet epoch's erosion.
+//!   `coarse/pass_small_earth` is the small Earth at level 5 (`reference::small_earth`), the pass's
+//!   tests' stand-in for the Earth, whose energy balance costs it more than the level-8 Earth's.
+//!   Ten samples a world, one pass each (`SamplingMode::Flat`). Once a world's samples are taken, the bench prints the
 //!   field's heap bytes ([`CoarseField::heap_bytes`]) and, where the platform reports it (Linux's
-//!   `/proc/self/status`), the process's peak resident set (`VmHWM`). The levels run from 5 to 8,
-//!   each pass's working state freed before the next, so each level's peak is its own pass's
-//!   (plan 09's "Concurrent passes" lean: a pool of passes holds that a pass). With
-//!   `HYPERION_COARSE_STEPS` set, each level's pass runs once more step by step, its field
+//!   `/proc/self/status`), the process's peak resident set (`VmHWM`). The worlds run in order of
+//!   their fields' size, each pass's working state freed before the next, so each world's peak is
+//!   its own pass's (plan 09's "Concurrent passes" lean: a pool of passes holds that a pass). With
+//!   `HYPERION_COARSE_STEPS` set, each world's pass runs once more step by step, its field
 //!   asserted to be the pass's, printing each step's wall time: a run whose filter leaves out every
 //!   sample (`-- coarse/steps`) prints the breakdown alone.
 //! - `coarse/erosion_l8` (R09.T14.d): the erosion step ([`steps::erosion::run`]) on the reference
@@ -88,9 +90,11 @@ use hyperion_sim::planetary::surface::steps::{self, Pass, Working};
 use hyperion_sim::planetary::surface::{CellGraph, CoarseInputs, coarse_pass, quantise, reference};
 use hyperion_surface::field::{CoarseField, coarse_level};
 
-/// One of the pass's levels in the bench: the reference world of that level, and the time its ten
+/// One of the pass's worlds in the bench: a reference world, its level, and the time its ten
 /// samples may take.
 struct PassBench {
+    /// The bench's name, after `coarse/`.
+    name: &'static str,
     /// The coarse level, 5 to 8.
     level: u8,
     /// The reference world whose radius gives that level.
@@ -99,50 +103,62 @@ struct PassBench {
     seconds: u64,
 }
 
-/// The reference world of each of the pass's levels, 5 to 8.
-const LEVELS: [PassBench; 4] = [
+/// The reference world of each of the pass's levels, 5 to 8, and the small Earth, the pass's tests'
+/// stand-in for the reference Earth at level 5, in order of their fields' size.
+const WORLDS: [PassBench; 5] = [
     PassBench {
+        name: "pass_l5",
         level: 5,
         world: reference::ceres_like,
         seconds: 10,
     },
     PassBench {
+        name: "pass_l6",
         level: 6,
         world: reference::moon_like,
         seconds: 20,
     },
     PassBench {
+        name: "pass_small_earth",
+        level: 5,
+        world: reference::small_earth,
+        seconds: 1_000,
+    },
+    PassBench {
+        name: "pass_l7",
         level: 7,
         world: reference::mars_like,
         seconds: 120,
     },
     PassBench {
+        name: "pass_l8",
         level: 8,
         world: reference::earth_like,
         seconds: 1_000,
     },
 ];
 
-/// The whole pass on the reference world of each level.
+/// The whole pass on each of [`WORLDS`].
 fn pass(c: &mut Criterion) {
     let mut group = c.benchmark_group("coarse");
     group.sample_size(10);
     group.sampling_mode(SamplingMode::Flat);
     for PassBench {
+        name,
         level,
         world,
         seconds,
-    } in LEVELS
+    } in WORLDS
     {
         let inputs = world();
         assert_eq!(
             coarse_level(inputs.radius()).get(),
             level,
-            "the reference world of level {level}"
+            "coarse/{name}'s world is of level {level}"
         );
         group.measurement_time(Duration::from_secs(seconds));
         let mut field: Option<CoarseField> = None;
-        group.bench_function(format!("pass_l{level}"), |b| {
+        group.bench_function(name, |b| {
             b.iter(|| {
                 // The previous sample's field is dropped before the pass, so that the peak
                 // resident set is one pass's; the last is kept, so that its heap is measured.
@@ -152,13 +168,13 @@ fn pass(c: &mut Criterion) {
         });
         if let Some(field) = &field {
             eprintln!(
-                "coarse/pass_l{level}: field heap {} B; peak resident set {}",
+                "coarse/{name}: field heap {} B; peak resident set {}",
                 field.heap_bytes(),
                 peak_resident_set().unwrap_or_else(|| "not reported".to_owned())
             );
         }
         if std::env::var_os(STEPS_VARIABLE).is_some() {
-            print_steps(level, &inputs, field.as_ref());
+            print_steps(name, &inputs, field.as_ref());
         }
     }
     group.finish();
@@ -168,12 +184,12 @@ fn pass(c: &mut Criterion) {
 const STEPS_VARIABLE: &str = "HYPERION_COARSE_STEPS";
 
 /// The pass on `inputs` once more, step by step in [`coarse_pass`]'s order, printing each step's
-/// wall time, its field asserted to be `field` (the samples' last) or, with none (a filter that
-/// left the level's samples out), a pass's: the pass's cost by step, which plan 09's performance
-/// list reads.
-fn print_steps(level: u8, inputs: &CoarseInputs, field: Option<&CoarseField>) {
+/// wall time under the bench's `name`, its field asserted to be `field` (the samples' last) or,
+/// with none (a filter that left the world's samples out), a pass's: the pass's cost by step,
+/// which plan 09's performance list reads.
+fn print_steps(name: &str, inputs: &CoarseInputs, field: Option<&CoarseField>) {
     let mut laps: Vec<(&str, Duration)> = Vec::new();
-    let mut lap = |name: &'static str, start: Instant| laps.push((name, start.elapsed()));
+    let mut lap = |step: &'static str, start: Instant| laps.push((step, start.elapsed()));
     let start = Instant::now();
     let grid = CellGraph::for_field(coarse_level(inputs.radius()));
     let climate_grid = CellGraph::for_climate(coarse_level(inputs.radius()));
@@ -208,24 +224,18 @@ fn print_steps(level: u8, inputs: &CoarseInputs, field: Option<&CoarseField>) {
     let staged = quantise(inputs, working).expect("the reference world's field quantises");
     lap("quantise", start);
     match field {
-        Some(field) => assert!(
-            staged == *field,
-            "level {level}: the staged pass is the pass"
-        ),
+        Some(field) => assert!(staged == *field, "{name}: the staged pass is the pass"),
         None => assert!(
             staged == coarse_pass(reference::SEED, inputs),
-            "level {level}: the staged pass is the pass"
+            "{name}: the staged pass is the pass"
         ),
     }
     let total: f64 = laps.iter().map(|(_, d)| d.as_secs_f64()).sum();
     let steps: Vec<String> = laps
         .iter()
-        .map(|(name, d)| format!("{name} {:.3} s", d.as_secs_f64()))
+        .map(|(step, d)| format!("{step} {:.3} s", d.as_secs_f64()))
         .collect();
-    eprintln!(
-        "coarse/pass_l{level} by step ({total:.3} s): {}",
-        steps.join(", ")
-    );
+    eprintln!("coarse/{name} by step ({total:.3} s): {}", steps.join(", "));
 }
 
 /// The process's peak resident set, as Linux's `/proc/self/status` reports it (`VmHWM`); none on

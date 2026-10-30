@@ -283,7 +283,7 @@ fn structural_share(
     let b = Values::new(grid, belt);
     let (mut weight, mut structural, mut square) = (0.0, 0.0, 0.0);
     quadrature::each_node(grid, &quadrature::gauss_legendre(NODES), |n, dir, w| {
-        let (a, b) = (a.at(n, dir), b.at(n, dir));
+        let [a, b] = quadrature::pair_at(&a, &b, n, dir);
         weight += w;
         structural += w * body.structure.point_variance(a, b).value();
         square += w * (a * a);
@@ -356,7 +356,7 @@ fn reconstructed_pair(pass: &Pass<'_>, first: &[f64], second: &[f64]) -> (f64, f
         quadrature::cell_mean(grid, second),
     ]);
     quadrature::each_node(grid, &quadrature::gauss_legendre(NODES), |n, dir, w| {
-        moments.add(w, [x.at(n, dir), y.at(n, dir)]);
+        moments.add(w, quadrature::pair_at(&x, &y, n, dir));
     });
     (
         moments.covariance(0, 0),

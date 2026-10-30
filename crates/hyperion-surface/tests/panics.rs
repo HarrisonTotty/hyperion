@@ -29,7 +29,7 @@ use hyperion_surface::spheroid::Spheroid;
 use hyperion_surface::synth::channels::{
     Channels, hack_area, head_length, main_stream_length, tributary_rise,
 };
-use hyperion_surface::synth::interp::{CellValues, interpolate};
+use hyperion_surface::synth::interp::{CellValues, interpolate, interpolate_pair};
 use hyperion_surface::synth::relief::{
     PLAIN_STRUCTURE, RIDGED_STRUCTURE, Relief, StructuralVariance, finest_octave, nyquist_degree,
     octave_bound, octave_rms, octave_spacing,
@@ -354,6 +354,38 @@ impl CellValues for WholeFaces {
 #[should_panic(expected = "the interpolant reads levels 1 to 24, not level 0")]
 fn the_interpolant_refuses_level_0() {
     let _ = interpolate(&WholeFaces, [0.0, 0.0, 1.0]);
+}
+
+/// Cells of level 5, every one held at zero.
+struct LevelFive;
+
+impl CellValues for LevelFive {
+    fn level(&self) -> u8 {
+        5
+    }
+
+    fn value(&self, _: PatchKey) -> Option<f64> {
+        Some(0.0)
+    }
+}
+
+/// Cells of level 6, every one held at zero.
+struct LevelSix;
+
+impl CellValues for LevelSix {
+    fn level(&self) -> u8 {
+        6
+    }
+
+    fn value(&self, _: PatchKey) -> Option<f64> {
+        Some(0.0)
+    }
+}
+
+#[test]
+#[should_panic(expected = "a pair interpolated at once is of one level")]
+fn a_pair_of_two_levels_is_refused() {
+    let _ = interpolate_pair(&LevelFive, &LevelSix, [0.0, 0.0, 1.0]);
 }
 
 #[test]

@@ -146,6 +146,49 @@ pub fn interpolate<V: CellValues + ?Sized>(
     Ok(one)
 }
 
+/// The interpolated values of `first` and `second`, two value sets of one level, at the direction
+/// `dir`, and their gradients.
+///
+/// Each is bit for bit what [`interpolate`] gives of it alone: the two share the query's cell, the
+/// faces' weights and spline bases, the stencil's walk and each cell's read, as the fused pass's
+/// values do (`interpolate_each`), and each takes its own arithmetic in [`interpolate`]'s order.
+/// The coarse pass's quadrature reads two fields at a node (R09.T16).
+///
+/// # Errors
+///
+/// [`ReadCellError`] naming the first cell, in [`interpolate`]'s reading order, that either value
+/// set does not hold.
+///
+/// # Panics
+///
+/// If the two are of different levels, if the level is 0 or above [`MAX_LEVEL`], or if `dir` is
+/// zero or has a component that is not finite.
+pub fn interpolate_pair<V: CellValues + ?Sized, W: CellValues + ?Sized>(
+    first: &V,
+    second: &W,
+    dir: [f64; 3],
+) -> Result<[Interpolated; 2], ReadCellError> {
+    assert_eq!(
+        first.level(),
+        second.level(),
+        "a pair interpolated at once is of one level"
+    );
+    interpolate_each(&Pair(first, second), dir, &mut Fresh)
+}
+
+/// Two [`CellValues`] of one level as a fused pass's pair of values.
+struct Pair<'a, V: ?Sized, W: ?Sized>(&'a V, &'a W);
+
+impl<V: CellValues + ?Sized, W: CellValues + ?Sized> CellRecords<2> for Pair<'_, V, W> {
+    fn level(&self) -> u8 {
+        self.0.level()
+    }
+
+    fn values(&self, cell: PatchKey) -> Option<[f64; 2]> {
+        Some([self.0.value(cell)?, self.1.value(cell)?])
+    }
+}
+
 /// What the fused pass reads: `N` values for each cell of one level, all from one read of the
 /// cell (R09.T8's follow-up): the base elevation with the relief's three style values, or the three
 /// alone.
@@ -1366,6 +1409,70 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A pair interpolated at once is each value's own interpolant to the bit, its gradient too,
+    /// a constant second value among them (R09.T16).
+    #[test]
+    fn a_pair_interpolates_as_each_value_alone() {
+        fn smooth_value(dir: [f64; 3]) -> f64 {
+            1_000.0 * dir[0] - 250.0 * dir[1] * dir[2]
+        }
+        for level in [1, 5, 7, 12] {
+            let rough = Values::new(level, rough_value);
+            let smooth = Values::new(level, smooth_value);
+            let constant = Values::new(level, |_| -2_345.678);
+            let mut points = random_points(0x7061_6972 + u64::from(level), 300);
+            points.extend(band_points(level));
+            for &dir in &points {
+                for second in [&smooth, &constant] {
+                    let [a, b] = interpolate_pair(&rough, second, dir).unwrap();
+                    assert_eq!(
+                        interpolated_bits(a),
+                        interpolated_bits(interpolate(&rough, dir).unwrap())
+                    );
+                    assert_eq!(
+                        interpolated_bits(b),
+                        interpolated_bits(interpolate(second, dir).unwrap())
+                    );
+                }
+            }
+        }
+    }
+
+    /// Values of one level's cells that hold every cell but one, each the rough value at its
+    /// centre.
+    struct AllBut {
+        level: u8,
+        missing: PatchKey,
+    }
+
+    impl CellValues for AllBut {
+        fn level(&self) -> u8 {
+            self.level
+        }
+
+        fn value(&self, cell: PatchKey) -> Option<f64> {
+            (cell != self.missing).then(|| rough_value(cell.vertex_dir(32, 32)))
+        }
+    }
+
+    /// A pair that reads a cell one of its sets does not hold is refused with that cell, the error
+    /// [`interpolate`] gives of the set alone, whichever of the two lacks it (R09.T16).
+    #[test]
+    fn a_pair_is_refused_at_the_cell_either_set_lacks() {
+        let level = 5;
+        let whole = Values::new(level, rough_value);
+        let dir = unit_dir([0.3, -0.2, 0.9]);
+        let home = PatchKey::containing(level, dir).unwrap();
+        let partial = AllBut {
+            level,
+            missing: home,
+        };
+        let alone = interpolate(&partial, dir).unwrap_err();
+        assert_eq!(alone, ReadCellError { cell: home });
+        assert_eq!(interpolate_pair(&whole, &partial, dir).unwrap_err(), alone);
+        assert_eq!(interpolate_pair(&partial, &whole, dir).unwrap_err(), alone);
     }
 
     #[test]

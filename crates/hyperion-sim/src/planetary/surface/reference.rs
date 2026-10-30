@@ -1482,19 +1482,19 @@ pub(crate) fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
     builder
 }
 
-/// The reference Earth's inputs on a 600 km sphere, at level 5: the fast tests' stand-in for the
+/// The reference Earth's inputs on a 600 km sphere, at level 5: the tests' stand-in for the
 /// reference Earth (decision-r09-t13-test-cost §2, (e)), the one copy the pass's, the climate's and
-/// the erosion's tests share. The pass runs every step that only the Earth reaches among the
-/// reference worlds (the moving plates and their belts, R09.T12.e's sea and reflood, the
-/// energy-balance model with its hypsometry, R09.T13.d's liquids, R09.T13.e's hydrology and
-/// R09.T14's steady state and lakes) on 6,144 cells.
+/// the erosion's tests and the `surface` bench share; the pass's order test runs it in the slow
+/// tier, and its identical-bytes test in the fast one (R09.T16). The pass runs every step that only
+/// the Earth reaches among the reference worlds (the moving plates and their belts, R09.T12.e's
+/// sea and reflood, the energy-balance model with its hypsometry, R09.T13.d's liquids, R09.T13.e's
+/// hydrology and R09.T14's steady state and lakes) on 6,144 cells.
 ///
 /// # Panics
 ///
 /// Never: the reference Earth's inputs hold on the smaller sphere.
-#[cfg(test)]
 #[must_use]
-pub(crate) fn small_earth() -> CoarseInputs {
+pub fn small_earth() -> CoarseInputs {
     builder_of(&earth_like())
         .figure(Spheroid::sphere(600.0e3))
         .build()

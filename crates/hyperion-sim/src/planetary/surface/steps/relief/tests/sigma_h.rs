@@ -30,7 +30,7 @@ use crate::planetary::surface::inputs::AreaShare;
 use crate::planetary::surface::steps::craters::{self, Phase, smoothed_in_by};
 use crate::planetary::surface::steps::relief::budget::{Match, Rule};
 use crate::planetary::surface::steps::relief::quadrature::{
-    Moments, NODES, Values, each_node, gauss_legendre,
+    Moments, NODES, Values, each_node, gauss_legendre, pair_at,
 };
 use crate::planetary::surface::steps::relief::sea::Sea;
 use crate::units::MetresPerSecondSquared;
@@ -1640,6 +1640,50 @@ fn the_uniform_cells_are_read_as_the_interpolant_gives_them() {
     let lift = crater_lift(f, &f.working.craters, Phase::AfterErosion);
     for values in [lift, a] {
         assert!(uniform_reads(f.grid(), &values, 13) > 0);
+    }
+}
+
+/// The quadrature's pair reads are each field's own to the bit ([`pair_at`]): at every node of
+/// the reference Moon and Ceres for the budget's pairs, the elevation with the crater lift, read
+/// through the interpolant together at some nodes, and the amplitude with the belt weight, uniform
+/// on these worlds (R09.T16).
+#[test]
+fn the_pair_reads_are_each_field_s_own_to_the_bit() {
+    for world in [Reference::Moon, Reference::Ceres] {
+        let staged = finished(world);
+        let records: Vec<SynthesisCell> =
+            budget::records(staged.inputs(), &staged.working).collect();
+        let amplitude: Vec<f64> = records
+            .iter()
+            .map(|r| ReliefStyle::of(r).amplitude())
+            .collect();
+        let belt: Vec<f64> = records.iter().map(|r| ReliefStyle::of(r).belt()).collect();
+        let lift = crater_lift(staged, &staged.working.craters, Phase::AfterErosion);
+        let elevation = elevations(&staged.working);
+        let grid = staged.grid();
+        // The elevation and the lift share the interpolant's walk at most nodes; the styles are
+        // uniform on these worlds.
+        for (first, second, shared) in [
+            (&elevation, &lift, true),
+            (&amplitude, &belt, false),
+            (&lift, &elevation, true),
+        ] {
+            let (one, other) = (Values::new(grid, first), Values::new(grid, second));
+            let mut both = 0_u32;
+            each_node(grid, &gauss_legendre(NODES), |n, dir, _| {
+                let [read, other_read] = pair_at(&one, &other, n, dir);
+                assert_same_bits(read, one.at(n, dir));
+                assert_same_bits(other_read, other.at(n, dir));
+                both += u32::from(
+                    read.total_cmp(&first[slot(n)]).is_ne()
+                        && other_read.total_cmp(&second[slot(n)]).is_ne(),
+                );
+            });
+            assert!(
+                both > 0 || !shared,
+                "{world:?}: no node read both fields through the interpolant"
+            );
+        }
     }
 }
 

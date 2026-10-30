@@ -16,7 +16,7 @@
 
 use hyperion_surface::cube::{FaceUv, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
 use hyperion_surface::field::cell_index;
-use hyperion_surface::synth::interp::{CellValues, interpolate};
+use hyperion_surface::synth::interp::{CellValues, interpolate, interpolate_pair};
 
 use crate::planetary::surface::grid::CellGraph;
 use crate::planetary::surface::steps::plates::slot;
@@ -171,6 +171,34 @@ impl<'a> Values<'a> {
         interpolate(self, dir)
             .expect("the working state holds every cell")
             .value
+    }
+}
+
+/// The values of `first` and `second`, two fields of one grid, at the unit direction `dir` within
+/// cell `cell`.
+///
+/// Each is [`Values::at`]'s to the bit, the interpolant read once for both where neither is
+/// uniform about the cell ([`interpolate_pair`]). On the reference Mars both are read through the
+/// interpolant at 70% of the nodes of the budget's pair, the elevation and the craters' lift, and
+/// its pass fell from 10.6 s to 8.8 s (R09.T16, pod, 8 vCPU, 2026-10-30).
+///
+/// # Panics
+///
+/// If the two fields are of different levels; never for a node of the quadrature of their grid,
+/// whose every cell is held.
+#[must_use]
+pub(crate) fn pair_at(
+    first: &Values<'_>,
+    second: &Values<'_>,
+    cell: u32,
+    dir: [f64; 3],
+) -> [f64; 2] {
+    if first.uniform[slot(cell)] || second.uniform[slot(cell)] {
+        [first.at(cell, dir), second.at(cell, dir)]
+    } else {
+        interpolate_pair(first, second, dir)
+            .expect("the working state holds every cell")
+            .map(|read| read.value)
     }
 }
 

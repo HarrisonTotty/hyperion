@@ -322,13 +322,36 @@ mod tests {
 
     /// The pass is a pure function of its seed and inputs: computed forwards, backwards and
     /// interleaved, each (seed, world) gives the same field (sim-determinism, "Order
-    /// independence"), which the server's cache of fields relies on (Design note 19). The small
-    /// Earth stands in for the reference Earth, so that every step's code is order-tested in the
-    /// fast tier, the Earth-only steps' under both seeds; the reference Earth's level-8 passes are
-    /// the slow [`the_reference_earth_s_pass_is_order_independent`]'s (decision-r09-t13-test-cost
-    /// §2.2).
+    /// independence"), which the server's cache of fields relies on (Design note 19). Ceres, the
+    /// Moon and Mars run every step of the pass, Mars's erosion and late craters among them; the
+    /// steps' branches that only the Earth reaches are order-tested with the small Earth in the
+    /// slow [`the_small_earth_s_pass_is_order_independent`], and at level 8 in the slow
+    /// [`the_reference_earth_s_pass_is_order_independent`] (decision-r09-t13-test-cost §2.2).
+    ///
+    /// The small Earth left the fast tier by main's ruling on R09.T16's cost (2026-10-30), which
+    /// moves the rest of an order test over 120 s to a slow twin and drops no world or seed. Under
+    /// the reference seed its energy-balance model's two geographic runs each take the cap's 40
+    /// orbits, so that its pass took 190–220 s natively in release, and 60–70 s under the other
+    /// seed; with it the test took 1,604 s in a lane's gate (pod, 8 vCPU, 2026-10-30). Without it
+    /// the test took 101.5 s in the test profile, at 8 test threads.
     #[test]
     fn the_pass_is_order_independent() {
+        assert_order_independent_over(&[
+            reference::ceres_like(),
+            reference::moon_like(),
+            reference::mars_like(),
+        ]);
+    }
+
+    /// The pass is order-independent on the small Earth too, interleaved with the small worlds:
+    /// [`the_pass_is_order_independent`]'s property, with the steps only the Earth reaches (the
+    /// moving plates and their belts, the sea and its reflood, the energy-balance model, the
+    /// liquids, the hydrology and a world wet now's erosion) under both seeds
+    /// (decision-r09-t13-test-cost §2.2, the order test as it stood before R09.T16).
+    #[test]
+    #[ignore = "slow: the small Earth's coarse passes in four orders under two seeds, with the \
+                small worlds', about 1,000 s natively"]
+    fn the_small_earth_s_pass_is_order_independent() {
         assert_order_independent_over(&[
             reference::ceres_like(),
             reference::moon_like(),

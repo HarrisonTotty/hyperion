@@ -563,6 +563,42 @@ pub(super) fn solve_tridiagonal(
     }
 }
 
+/// [`solve_tridiagonal`] of one system for the right-hand sides `first_rhs` and `second_rhs`, into
+/// `first` and `second`.
+///
+/// Each solution is [`solve_tridiagonal`]'s to the bit, the pivots and `scratch` computed once for
+/// both. The cyclic solve's two Thomas solves share their matrix: on the small Earth's 72 × 72
+/// grid its longitude solves fell from 0.27 s to 0.16 s an orbit (R09.T16, pod, 8 vCPU,
+/// 2026-10-30).
+///
+/// # Panics
+///
+/// If the system is empty, or a slice is shorter than `diagonal`.
+fn solve_tridiagonal_pair(
+    lower: &[f64],
+    diagonal: &[f64],
+    upper: &[f64],
+    [first_rhs, second_rhs]: [&[f64]; 2],
+    [first, second]: [&mut [f64]; 2],
+    scratch: &mut [f64],
+) {
+    let n = diagonal.len();
+    assert!(n > 0, "a tridiagonal system has at least one unknown");
+    scratch[0] = upper[0] / diagonal[0];
+    first[0] = first_rhs[0] / diagonal[0];
+    second[0] = second_rhs[0] / diagonal[0];
+    for i in 1..n {
+        let pivot = diagonal[i] - lower[i] * scratch[i - 1];
+        scratch[i] = if i + 1 < n { upper[i] / pivot } else { 0.0 };
+        first[i] = (first_rhs[i] - lower[i] * first[i - 1]) / pivot;
+        second[i] = (second_rhs[i] - lower[i] * second[i - 1]) / pivot;
+    }
+    for i in (0..n - 1).rev() {
+        first[i] -= scratch[i] * first[i + 1];
+        second[i] -= scratch[i] * second[i + 1];
+    }
+}
+
 /// The working arrays of [`solve_cyclic_tridiagonal`], for a system of the length it records.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct CyclicWork {
@@ -623,23 +659,15 @@ pub(super) fn solve_cyclic_tridiagonal(
     work.diagonal.copy_from_slice(diagonal);
     work.diagonal[0] = diagonal[0] - gamma;
     work.diagonal[last] = diagonal[last] - alpha * beta / gamma;
-    solve_tridiagonal(
-        lower,
-        &work.diagonal,
-        upper,
-        rhs,
-        solution,
-        &mut work.scratch,
-    );
     work.correction_rhs.fill(0.0);
     work.correction_rhs[0] = gamma;
     work.correction_rhs[last] = alpha;
-    solve_tridiagonal(
+    solve_tridiagonal_pair(
         lower,
         &work.diagonal,
         upper,
-        &work.correction_rhs,
-        &mut work.correction,
+        [rhs, &work.correction_rhs],
+        [solution, &mut work.correction],
         &mut work.scratch,
     );
     let factor = (solution[0] + beta * solution[last] / gamma)
@@ -819,6 +847,40 @@ mod tests {
         solve_tridiagonal(&lower, &diagonal, &upper, &rhs, &mut solution, &mut scratch);
         for (x, e) in solution.iter().zip(&expected) {
             assert!((x - e).abs() < 1e-14, "{x} against {e}");
+        }
+    }
+
+    /// The paired solve gives each right-hand side [`solve_tridiagonal`]'s solution to the bit,
+    /// on the cyclic solve's model form and on a general system (R09.T16).
+    #[test]
+    fn the_paired_solve_is_two_solves_to_the_bit() {
+        for n in [1, 2, 9, LOCKED_COLUMNS] {
+            let at = |i: usize, scale: f64| math::sin(scale * index(i) + 0.3);
+            let lower: Vec<f64> = (0..n).map(|i| -1.0 + 0.4 * at(i, 1.3)).collect();
+            let upper: Vec<f64> = (0..n).map(|i| 0.7 * at(i, 2.1)).collect();
+            let diagonal: Vec<f64> = (0..n).map(|i| 4.0 + at(i, 0.5)).collect();
+            let first_rhs: Vec<f64> = (0..n).map(|i| 10.0 * at(i, 0.9)).collect();
+            // The cyclic solve's correction: zero but at its ends.
+            let mut second_rhs = vec![0.0; n];
+            second_rhs[0] = -diagonal[0];
+            second_rhs[n - 1] = upper[n - 1];
+            let mut scratch = vec![0.0; n];
+            let (mut first, mut second) = (vec![0.0; n], vec![0.0; n]);
+            solve_tridiagonal_pair(
+                &lower,
+                &diagonal,
+                &upper,
+                [&first_rhs, &second_rhs],
+                [&mut first, &mut second],
+                &mut scratch,
+            );
+            for (rhs, paired) in [(&first_rhs, &first), (&second_rhs, &second)] {
+                let mut alone = vec![0.0; n];
+                solve_tridiagonal(&lower, &diagonal, &upper, rhs, &mut alone, &mut scratch);
+                for (&x, &y) in paired.iter().zip(&alone) {
+                    assert_same_bits(x, y);
+                }
+            }
         }
     }
 

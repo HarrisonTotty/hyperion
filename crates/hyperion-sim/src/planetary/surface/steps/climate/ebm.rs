@@ -1865,6 +1865,7 @@ impl Relief {
     /// The quantiles' grounds of a point of heights `heights` under the sea-level temperature
     /// `t_k`, K ([`ground_k`](Self::ground_k)), and their places in `table`: the first alone at a
     /// level point, the rest left nothing.
+    #[cfg(test)]
     #[must_use]
     fn quantiles_at(
         &self,
@@ -1872,15 +1873,33 @@ impl Relief {
         heights: &PointHeights,
         table: Option<&Tabulated>,
     ) -> [Quantile; QUANTILES] {
-        let count = match heights.shape {
-            Shape::Varied => QUANTILES,
-            Shape::SeaLevel | Shape::Level => 1,
-        };
         let mut quantiles = [Quantile {
             ground_k: 0.0,
             rate: 0.0,
             located: None,
         }; QUANTILES];
+        self.quantiles_into(t_k, heights, table, &mut quantiles);
+        quantiles
+    }
+
+    /// The quantiles' grounds of a point of heights `heights` under the sea-level temperature
+    /// `t_k`, K ([`ground_k`](Self::ground_k)), and their places in `table`, written over
+    /// `quantiles`.
+    ///
+    /// A level point's is the first alone, which is all that its albedo and emission read; the rest
+    /// are left as they were. A step wrote a whole array a raised point, 320 bytes, into its 1.66
+    /// MB of quantiles on the 72 × 72 grid ([`EnergyBalance::advance`]).
+    fn quantiles_into(
+        &self,
+        t_k: f64,
+        heights: &PointHeights,
+        table: Option<&Tabulated>,
+        quantiles: &mut [Quantile; QUANTILES],
+    ) {
+        let count = match heights.shape {
+            Shape::Varied => QUANTILES,
+            Shape::SeaLevel | Shape::Level => 1,
+        };
         for (quantile, &z) in quantiles.iter_mut().zip(&heights.quantiles_m).take(count) {
             let (ground_k, rate) = self.ground_k(t_k, z);
             *quantile = Quantile {
@@ -1889,7 +1908,6 @@ impl Relief {
                 located: table.and_then(|table| table.locate(ground_k)),
             };
         }
-        quantiles
     }
 
     /// The temperature of the water's surface of a point of heights `heights` under the sea-level
@@ -2081,10 +2099,10 @@ struct Work {
     cyclic: CyclicWork,
     /// Each point's quantiles' grounds at the step's start, K, their slopes in T and their places
     /// in the run's table, computed once a step for the albedo and the emission alike (the first
-    /// quantile's alone at a level point).
+    /// quantile's alone at a level point, the rest left as an earlier step wrote them and unread).
     quantiles: Vec<[Quantile; QUANTILES]>,
     /// Each point's column water term at the step's start under the water term, read with its h
-    /// ([`EnergyBalance::column_reads`]) for its emission; none under one τ.
+    /// ([`EnergyBalance::located_column_reads`]) for its emission; none under one τ.
     column_water: Vec<Option<ColumnWater>>,
 }
 
@@ -2398,7 +2416,7 @@ impl Tabulated {
     #[must_use]
     fn locate(&self, t: f64) -> Option<(usize, f64)> {
         let x = t / TABLE_SPACING_K;
-        let node = x.floor();
+        let node = truncating_floor(x);
         let offset = node - self.first_node;
         // By comparison, so that a NaN is outside.
         if !(offset >= 0.0 && offset < super::grid::index(self.smooth.len())) {
@@ -2444,7 +2462,7 @@ fn wet_of(multiplier: f64, water: [f64; 2]) -> [f64; 2] {
 
 /// `τ_w` of `water` and its slope at `t_k`, K, from `table` where it holds `t_k`, and directly
 /// otherwise: the tests' oracle for the step's own reads ([`ColumnWater::read`],
-/// [`EnergyBalance::column_reads`]).
+/// [`EnergyBalance::located_column_reads`]).
 #[cfg(test)]
 #[must_use]
 fn water_terms(water: &WaterVapour, t_k: f64, table: Option<&Tabulated>) -> [f64; 2] {
@@ -2467,6 +2485,39 @@ fn wet_terms(
     table
         .and_then(|table| table.wet_at(multiplier, ground_k))
         .unwrap_or_else(|| wet_of(multiplier, water.depth_and_slope(ground_k)))
+}
+
+/// A temperature's place in a run's table: the table, the interval holding the temperature and the
+/// fraction across it ([`Tabulated::locate`]), or `None` where there is no table or it does not
+/// hold the temperature.
+type Located<'a> = Option<(&'a Tabulated, (usize, f64))>;
+
+/// `t_k`'s place in `table`, K ([`Located`]).
+#[must_use]
+fn located(table: Option<&Tabulated>, t_k: f64) -> Located<'_> {
+    table.and_then(|table| Some((table, table.locate(t_k)?)))
+}
+
+/// ⌊x⌋, to the bit: by truncation where 0 < x < 2⁵², and by [`f64::floor`] elsewhere, a NaN
+/// included.
+///
+/// There truncating is flooring and the integer is exact in `f64`. Without SSE4.1's `roundsd`,
+/// x86-64's `floor` is a software routine, which took 3.5% of a small-Earth pass in
+/// [`Tabulated::locate`], up to nine times a point a step (R09.T16, pod, 8 vCPU, 2026-10-30).
+#[must_use]
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "x is positive and below 2^52, so the cast truncates it to its floor, which converts \
+              back exactly"
+)]
+fn truncating_floor(x: f64) -> f64 {
+    if x > 0.0 && x < 4_503_599_627_370_496.0 {
+        (x as u64) as f64
+    } else {
+        x.floor()
+    }
 }
 
 /// `x`, a non-negative integer-valued `f64` below 2³², as a `usize`.
@@ -2565,8 +2616,9 @@ impl EnergyBalance {
     /// h at `t_k`, K, its slope, the albedo and its slope, from `table` where it holds `t_k` and
     /// directly otherwise ([`energy`](Self::energy), [`energy_slope`](Self::energy_slope),
     /// [`albedo_and_slope`](Self::albedo_and_slope)): what a step read at a point at the sea level
-    /// before R09.T16.a, the tests' oracle for its reads now ([`column_reads`](Self::column_reads)
-    /// and [`ground_albedo`](Self::ground_albedo)).
+    /// before R09.T16.a, the tests' oracle for its reads now
+    /// ([`located_column_reads`](Self::located_column_reads) and
+    /// [`ground_albedo`](Self::ground_albedo)).
     #[cfg(test)]
     #[must_use]
     fn functions(&self, t_k: f64, table: Option<&Tabulated>) -> [f64; 4] {
@@ -2631,20 +2683,24 @@ impl EnergyBalance {
     }
 
     /// h and its slope at a point's sea-level temperature `t_k`, K, and under `radiation`'s water
-    /// term the column's `τ_w` and its slope there, which its emission reads, each from `table`
-    /// where it holds `t_k` and directly otherwise, `t_k` located once: [`energies`](Self::energies)'
-    /// and the tests' oracle `water_terms`' values, to the bit. Where neither is in the table, as
-    /// at every point of τ's fit, they are read together ([`direct_reads`](Self::direct_reads)),
-    /// sharing their saturation pressures (R09.T16.a, B3).
+    /// term the column's `τ_w` and its slope there, which its emission reads, `at` being `t_k`'s
+    /// place in the run's table ([`Located`]).
+    ///
+    /// Each is read from the table where it holds `t_k` and directly otherwise:
+    /// [`energies`](Self::energies)' and the tests' oracle `water_terms`' values, to the bit. Where
+    /// neither is in the table, as at every point of τ's fit, they are read together
+    /// ([`direct_reads`](Self::direct_reads)), sharing their saturation pressures (R09.T16.a, B3).
+    /// A step's point at the sea level locates its temperature once for these and its albedo
+    /// ([`located_ground_albedo`](Self::located_ground_albedo)).
     #[must_use]
-    fn column_reads(
+    fn located_column_reads(
         &self,
         radiation: &Radiation,
         t_k: f64,
-        table: Option<&Tabulated>,
+        at: Located<'_>,
     ) -> ([f64; 2], Option<ColumnWater>) {
         let water = radiation.water();
-        if let Some((table, (i, f))) = table.and_then(|table| Some((table, table.locate(t_k)?))) {
+        if let Some((table, (i, f))) = at {
             // τ_w from the table where it holds the water term ([`Tabulated::water_at`]).
             let water = water.map(|water| match &table.water {
                 Some(nodes) => {
@@ -2659,13 +2715,23 @@ impl EnergyBalance {
         (energies, water.map(ColumnWater::Direct))
     }
 
-    /// The albedo at the ground's temperature `ground_k`, K, and its slope, from `table` where it
-    /// holds `ground_k` and directly otherwise (the nodes lie on one lattice, so the value does
-    /// not depend on the table's span); at a point at the sea level, whose ground is at T, what a
-    /// step read there with h before R09.T16.a (the tests' oracle `functions`).
+    /// [`located_ground_albedo`](Self::located_ground_albedo) at `ground_k`, K, located in `table`.
+    #[cfg(test)]
     #[must_use]
     fn ground_albedo(&self, ground_k: f64, table: Option<&Tabulated>) -> AlbedoAt {
-        match table.and_then(|table| Some((table, table.locate(ground_k)?))) {
+        self.located_ground_albedo(ground_k, located(table, ground_k))
+    }
+
+    /// The albedo at the ground's temperature `ground_k`, K, and its slope, `at` being `ground_k`'s
+    /// place in the run's table ([`Located`]).
+    ///
+    /// Each is read from the table where it holds `ground_k` and directly otherwise (the nodes lie
+    /// on one lattice, so the value does not depend on the table's span); at a point at the sea
+    /// level, whose ground is at T, what a step read there with h before R09.T16.a (the tests'
+    /// oracle `functions`).
+    #[must_use]
+    fn located_ground_albedo(&self, ground_k: f64, at: Located<'_>) -> AlbedoAt {
+        match at {
             Some((table, (i, f))) => {
                 let (albedo, slope_per_k) = hermite(&table.albedo, i, f);
                 AlbedoAt {
@@ -2839,12 +2905,18 @@ impl EnergyBalance {
         for (p, &v) in t_k.iter().enumerate() {
             // h and the column's water term at T, read together so that directly they share
             // their saturation pressures (R09.T16.a, B3); the emission reads the water term below.
-            let ([energy, slope], column_water) = self.column_reads(radiation, v, table);
+            // T located once in the table, for h and the column's water term and, at the sea
+            // level, the albedo: a sea-level point, 69% of the small Earth's 72 × 72 grid, located
+            // it twice. With the quantiles written in place and the longitude solve's shared
+            // pivots, an orbit of that grid fell from 2.49 s to 2.21 s (R09.T16, pod, 8 vCPU,
+            // 2026-10-30).
+            let at_v = located(table, v);
+            let ([energy, slope], column_water) = self.located_column_reads(radiation, v, at_v);
             let albedo = match raised(p) {
                 // At the sea level, T13.a's arithmetic to the bit.
-                None => self.ground_albedo(v, table),
+                None => self.located_ground_albedo(v, at_v),
                 Some((relief, (heights, _))) => {
-                    work.quantiles[p] = relief.quantiles_at(v, heights, table);
+                    relief.quantiles_into(v, heights, table, &mut work.quantiles[p]);
                     self.located_albedo(heights.shape, &work.quantiles[p], table)
                 }
             };
@@ -2881,6 +2953,7 @@ impl EnergyBalance {
                     table,
                     work.column_water[p],
                 );
+                work.water[p] = sea_k;
                 // The pseudo-capacity reads the slope at a fixed τ, so that the relaxation stays
                 // conditioned as R09.T13.a built it where the water term weakens the restoring
                 // (decision-r09-t13i §2.2); under one τ the two are the same.
@@ -2908,7 +2981,7 @@ impl EnergyBalance {
         // edges carry them; elsewhere the systems are as built.
         let coupled = match ocean {
             Some((ocean, returning)) if ocean.any() => {
-                self.couple_ocean(grid, ocean, returning, t_k, ground, work);
+                self.couple_ocean(grid, ocean, returning, work);
                 true
             }
             Some(_) | None => false,
@@ -2937,9 +3010,9 @@ impl EnergyBalance {
         largest
     }
 
-    /// The sea's terms of a step at the points' starting temperatures `t_k`, K, over the ground
-    /// `ground`, on the latitude systems in `work` (whose h, slopes, right sides and diagonals the
-    /// step has filled), under `ocean` with the return temperatures `returning` (decision-r09-t13i
+    /// The sea's terms of a step at the points' starting temperatures, on the latitude systems in
+    /// `work`, whose h, slopes, water-surface temperatures (T, or T − Γ `z̄_w` over relief:
+    /// [`Relief::water_k`]), right sides and diagonals the caller has filled, under `ocean` with the return temperatures `returning` (decision-r09-t13i
     /// §2.3): each point's off-diagonals the band's, then at a point whose edges carry a term the
     /// Ekman cells' conductance Λ A γ on its h and the gyres' K on its water-surface temperature,
     /// implicit in the step's change y = h′ δT (δT = y ÷ h′ at each point), with their fluxes at
@@ -2950,18 +3023,10 @@ impl EnergyBalance {
         grid: &ModelGrid,
         ocean: &OceanGrid,
         returning: &Returning,
-        t_k: &[f64],
-        ground: GridGround<ReliefAt<'_>>,
         work: &mut Work,
     ) {
         let lambda = self.transport_kg_m2_s;
         let columns = grid.columns();
-        for (p, &t) in t_k.iter().enumerate() {
-            work.water[p] = match ground.raised(p) {
-                None => t,
-                Some((relief, (heights, _))) => relief.water_k(t, heights),
-            };
-        }
         grid.band_means_into(&work.energy, &mut work.band_energy);
         ocean.band_sea_k(grid, &work.water, &mut work.band_sea);
         ocean.ekman_gains(
@@ -3942,8 +4007,12 @@ impl EnergyBalance {
             let [energy, slope] = self.energies(t, None);
             work.energy[p] = energy;
             work.slope[p] = slope;
+            work.water[p] = match at.raised(p) {
+                None => t,
+                Some((relief, (heights, _))) => relief.water_k(t, heights),
+            };
         }
-        self.couple_ocean(grid, ocean, &Returning::Own, t_k, at, &mut work);
+        self.couple_ocean(grid, ocean, &Returning::Own, &mut work);
         let mut recorder = Recorder::new(grid.points(), 1);
         recorder.add(grid, &work, 0);
         recorder.finish(&[1], 1)
@@ -5620,8 +5689,9 @@ pub(super) fn solve_locked(
 /// `None` (T13.a's arithmetic to the bit) and otherwise over its relief, heights and
 /// transmissions, its quantiles' grounds and table places `quantiles` the step's own; and the
 /// temperature its sea's capacity reads, its water surface's, K. Under the water term the column's
-/// `τ_w` at `t_k` is `column`, where the step read it with h ([`EnergyBalance::column_reads`]),
-/// and is read here otherwise ([`ColumnWater::read`]): the same values.
+/// `τ_w` at `t_k` is `column`, where the step read it with h
+/// ([`EnergyBalance::located_column_reads`]), and is read here otherwise ([`ColumnWater::read`]):
+/// the same values.
 #[must_use]
 fn emission_and_sea(
     radiation: &Radiation,
@@ -5788,6 +5858,37 @@ mod tests {
     use crate::planetary::surface::grid::CellGraph;
     use crate::planetary::surface::reference;
     use crate::planetary::surface::steps::{Pass, Working};
+
+    /// The table's floor is `f64::floor` to the bit, about zero, at the truncation's bound of
+    /// 2⁵², at the table's temperatures over the spacing, and for a NaN (R09.T16).
+    #[test]
+    fn the_table_s_floor_is_floor_to_the_bit() {
+        let mut g = Lcg::new(0x5eed_f100);
+        let edges = [
+            0.0,
+            -0.0,
+            f64::MIN_POSITIVE,
+            5e-324,
+            0.5,
+            1.0 - f64::EPSILON / 2.0,
+            1.0,
+            -0.5,
+            -1.0,
+            -1.5,
+            4_503_599_627_370_495.5,
+            4_503_599_627_370_496.0,
+            4_503_599_627_370_497.0,
+            9.0e15,
+            1.0e300,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        let drawn = (0..10_000).map(|_| (1.0 + 600.0 * g.next_f64()) / TABLE_SPACING_K);
+        for x in edges.into_iter().chain(drawn) {
+            assert_same_bits(truncating_floor(x), x.floor());
+        }
+        assert!(truncating_floor(f64::NAN).is_nan());
+    }
 
     fn earth() -> (EnergyBalance, Sunlight, ModelGrid) {
         let inputs = reference::earth_like();
@@ -7720,16 +7821,19 @@ mod tests {
         raised: Option<(&Relief, (&PointHeights, &[f64; QUANTILES]))>,
         table: Option<&Tabulated>,
     ) -> ([f64; 8], Option<ColumnWater>, [Quantile; QUANTILES]) {
-        let ([energy, slope], column) = model.column_reads(radiation, t, table);
+        let at = located(table, t);
+        let ([energy, slope], column) = model.located_column_reads(radiation, t, at);
+        // The step's buffer as no step wrote it: a level point's reads take its first quantile
+        // alone, so a read of the rest would carry a NaN into the values compared (R09.T16).
         let mut quantiles = [Quantile {
-            ground_k: 0.0,
-            rate: 0.0,
+            ground_k: f64::NAN,
+            rate: f64::NAN,
             located: None,
         }; QUANTILES];
         let albedo = match raised {
-            None => model.ground_albedo(t, table),
+            None => model.located_ground_albedo(t, at),
             Some((relief, (heights, _))) => {
-                quantiles = relief.quantiles_at(t, heights, table);
+                relief.quantiles_into(t, heights, table, &mut quantiles);
                 model.located_albedo(heights.shape, &quantiles, table)
             }
         };
