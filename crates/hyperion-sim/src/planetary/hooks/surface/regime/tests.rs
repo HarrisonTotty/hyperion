@@ -8,6 +8,7 @@ use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::solar::{
     PLANETS, SOLAR_AGE, derive_historic, placed_about_the_sun, solar_disc,
 };
+use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
 use crate::planetary::hooks::figures::{VolatileHistory, table_figures};
 use crate::planetary::hooks::surface::tests::{conditions_of, inputs_of, spin_of, table};
 use crate::planetary::hooks::surface::{
@@ -284,6 +285,28 @@ fn a_ninety_degree_world_started_cold_has_an_equatorial_belt_and_one_started_war
         regime_of(&body, &upright, true).forcing(),
         Forcing::Seasonal
     );
+    // A cover the surface scaled, summing back to an ulp under 1, is part of the surface under
+    // 24's rule, a belt, and whole from 25's (P14.T53.c, `lag::covers_part`), no belt; half the
+    // surface is a belt under both.
+    let covered = |ice_fraction: f64| {
+        ClimateRegime::of(
+            &conditions,
+            &ClimateInputs {
+                mass: body.mass(),
+                reservoirs: &reservoirs,
+                from_colder: true,
+                ice_fraction,
+                ice_threshold: threshold,
+            },
+        )
+        .forcing()
+    };
+    let ulp_under = 1.0 - f64::EPSILON / 2.0;
+    assert_eq!(covered(ulp_under), Forcing::IceBelt);
+    with_exposed_ice(ExposedIceRules::Exposed, || {
+        assert_eq!(covered(ulp_under), Forcing::Seasonal);
+        assert_eq!(covered(0.5), Forcing::IceBelt);
+    });
 }
 
 /// The measured Mars, by hand, as P14.T24.a's test of it takes it: 6.1 mbar of CO₂ at 210 K,

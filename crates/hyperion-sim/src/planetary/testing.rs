@@ -420,7 +420,11 @@ impl Error for SampleContextsError {
 ///   on each pass's figures, which the next pass's state-keyed branches read;
 /// - the events on the record, `STORM_EVENTS_VERSION` (P14.T31.c), at `StormEventsRules::Wired`
 ///   through `with_storm_events`: a system's events from its records at the epoch, the storms
-///   floored at 10 years and gated on a water deck.
+///   floored at 10 years and gated on a water deck;
+/// - the exposed ice through a lag, `EXPOSED_ICE_VERSION` (P14.T53.c), at
+///   `ExposedIceRules::Exposed` through `with_exposed_ice`: an ice bulk's water ice under a dark
+///   lid at its lag's exposed share, held to the cover's ice area, and the belt test reading a
+///   cover within rounding of 1 as whole.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 24's) is not
@@ -431,10 +435,13 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::atmosphere::{
         PresentStateRules, SteamEnvelopeRules, with_present_state, with_steam_envelope,
     };
+    use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
     use crate::planetary::system::events::{StormEventsRules, with_storm_events};
     let run = || with_storm_events(StormEventsRules::Wired, run);
     with_steam_envelope(SteamEnvelopeRules::Steam, || {
-        with_present_state(PresentStateRules::Present, run)
+        with_present_state(PresentStateRules::Present, || {
+            with_exposed_ice(ExposedIceRules::Exposed, run)
+        })
     })
 }
 
@@ -663,6 +670,25 @@ mod tests {
             StormEventsRules::Held
         );
         assert_eq!(StormEventsRules::in_force(), StormEventsRules::Held);
+    }
+
+    /// 25's fourth switch, the exposed ice through a lag (P14.T53.c): in force inside 25's helper,
+    /// held outside it and where a test sets it back.
+    #[test]
+    fn the_exposed_ice_s_hold_is_in_force_inside_25_s_helper_alone() {
+        use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
+        assert_eq!(ExposedIceRules::in_force(), ExposedIceRules::Held);
+        assert_eq!(
+            with_every_25_hold(ExposedIceRules::in_force),
+            ExposedIceRules::Exposed
+        );
+        assert_eq!(
+            with_every_25_hold(|| {
+                with_exposed_ice(ExposedIceRules::Held, ExposedIceRules::in_force)
+            }),
+            ExposedIceRules::Held
+        );
+        assert_eq!(ExposedIceRules::in_force(), ExposedIceRules::Held);
     }
 
     #[test]

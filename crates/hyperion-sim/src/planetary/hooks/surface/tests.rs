@@ -3371,7 +3371,13 @@ fn the_batch_publishes_the_table_s_condensates() {
         let (partition, published) = under();
         let (history, off_table) = (VolatileHistory::NONE, WaterIce::OffTable);
         let second = |figures: GlobalFigures| {
-            figures.with_surface_under(&conditions, history, Some(&published), &table, off_table)
+            figures.with_surface_under(
+                &conditions,
+                history,
+                Some(&published),
+                &table,
+                (off_table, None),
+            )
         };
         if let Some(ice) = published.entry(water, CondensatePhase::Solid) {
             let t24b = cover::ice_fraction(&cover::IceInputs {
@@ -3571,7 +3577,7 @@ fn the_record_s_second_stage_reads_its_partition_s_ice_to_the_bit() {
                         VolatileHistory::NONE,
                         Some(&published),
                         &table,
-                        water_ice,
+                        (water_ice, None),
                     )
                 };
                 assert_eq!(

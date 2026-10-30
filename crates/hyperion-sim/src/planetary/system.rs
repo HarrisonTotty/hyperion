@@ -154,10 +154,10 @@ use crate::planetary::hooks::crust::{
     ParentSurface, formation_time,
 };
 use crate::planetary::hooks::figures::{
-    BeltMembership, Continents, CraterInputs, FieldBody, FiguresInputs, HostOrbit, HostOrbiter,
-    ImpactorOrbit, ImpactorSources, MoonBirth, PartitionGround, PassFigures, SourceBelt,
-    VolatileHistory, VolatileHistoryInputs, WaterIce, WetEpoch, WindowAt, WindowEntryInputs,
-    pass_figures, past_outgassing, relief, window_entry,
+    BeltMembership, Continents, CraterInputs, DarkLag, FieldBody, FiguresInputs, HostOrbit,
+    HostOrbiter, ImpactorOrbit, ImpactorSources, MoonBirth, PartitionGround, PassFigures,
+    SourceBelt, VolatileHistory, VolatileHistoryInputs, WaterIce, WetEpoch, WindowAt,
+    WindowEntryInputs, pass_figures, past_outgassing, relief, window_entry,
 };
 use crate::planetary::hooks::ocean::{OceanInputs, OceanSolutes, subsurface_ocean};
 use crate::planetary::hooks::surface::{
@@ -5825,8 +5825,11 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
     // light over the body's past and its outgassing then (P14.T48.b), and the ocean and the ice
     // read the conditions (science-p14-t24b-laws §4.6, steps 8–12).
     let history = figures_of.volatile_history(&figure_inputs, conditions.liquid_water());
-    // T24.b's ice is the partition's cover's, read off the profile it built (lever (a)).
-    let figures = figures.with_surface_under(&conditions, history, Some(&published), table, ice);
+    // T24.b's ice is the partition's cover's, read off the profile it built (lever (a)); under a
+    // dark lid over an ice bulk, its lag's exposed share, held to it, from 25 (P14.T53.c).
+    let lag = DarkLag::of(material, sky.crust_lid.map(CrustLid::lithology));
+    let figures =
+        figures.with_surface_under(&conditions, history, Some(&published), table, (ice, lag));
     // P14.T51.g.b's ocean, the record's own, in place of the tidal branch's its regime read.
     let ocean = record_subsurface_ocean(case, &figures, &conditions, &published);
     let figures = figures.with_subsurface_ocean(ocean);
@@ -6629,6 +6632,8 @@ mod audit_tests;
 pub(crate) mod cold_trap_tests;
 pub(crate) mod envelope;
 pub(crate) mod events;
+#[cfg(test)]
+mod exposed_ice_tests;
 mod modifiers;
 pub(crate) mod moon_ice;
 #[cfg(test)]

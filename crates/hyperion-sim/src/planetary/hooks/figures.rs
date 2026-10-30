@@ -167,6 +167,7 @@ use crate::units::{
 
 pub mod cover;
 pub mod interior;
+pub(crate) mod lag;
 pub mod relief;
 pub mod surface_age;
 pub mod wet_epoch;
@@ -175,6 +176,7 @@ pub use interior::{
     Interior, MagneticField, RadiogenicIsotope, TectonicRegime, conductive_lag,
     convecting_heat_flow, magnetic_field, outgassing, radiogenic_heat_flow, tectonic_regime,
 };
+pub(crate) use lag::DarkLag;
 pub use relief::{Continents, Hypsometry, Relief};
 pub use wet_epoch::{
     VolatileHistory, VolatileHistoryInputs, WetEpoch, WindowAt, WindowEntry, WindowEntryInputs,
@@ -2460,7 +2462,7 @@ impl GlobalFigures {
             history,
             None,
             &conditions.zonal_insolation(),
-            WaterIce::OffTable,
+            (WaterIce::OffTable, None),
         )
     }
 
@@ -2481,7 +2483,8 @@ impl GlobalFigures {
     ///   bulk is not ice (decision-p14-t51a-partition §2; W3 (a)). An ice bulk's crust under an
     ///   `H2O` lid (or none known) is its condensates' own `H2O` solid at that area
     ///   ([`WaterCover::crust_water`]); under any other lid its ice is this appended item
-    ///   (decision-p14-t54a-ganymede §C3.1).
+    ///   (decision-p14-t54a-ganymede §C3.1), from generator version 25 its lag's exposed share,
+    ///   held to that area ([`lag::shown`], P14.T53.c), the ice under the lag being the ice table.
     /// - Each list is divided by its total, its appended item included, where that total exceeds
     ///   the whole surface (W2): ices of several substances compete for the same cold zones.
     ///
@@ -2491,7 +2494,8 @@ impl GlobalFigures {
     /// T24.b's ice is `water_ice`: the record's water cover's, read off the profile its partition
     /// built ([`WaterIce::Covered`], lever (a)), or the conditions' cold area off the body's
     /// insolation table `table` ([`SurfaceConditions::cold_area_over`]), its record's, built once
-    /// a body (lever (h)).
+    /// a body (lever (h)). `lag` is the dark lag over an ice bulk's ice ([`DarkLag::of`] of the
+    /// record's material and lid), `None` for none.
     ///
     /// The subsurface ocean is left as the inputs gave it, the tidal branch's, which the regime
     /// read; [`with_subsurface_ocean`](Self::with_subsurface_ocean) publishes the record's.
@@ -2502,7 +2506,7 @@ impl GlobalFigures {
         history: VolatileHistory,
         condensates: Option<&Condensates>,
         table: &ZonalInsolation,
-        water_ice: WaterIce,
+        (water_ice, lag): (WaterIce, Option<DarkLag>),
     ) -> Self {
         let water = Gas::Water.substance();
         // Step 8: the published ocean.
@@ -2561,7 +2565,7 @@ impl GlobalFigures {
                 let water_ice = condensates
                     .entry(water, CondensatePhase::Solid)
                     .is_none()
-                    .then(ice);
+                    .then(|| lag::shown(lag, ice()));
                 (
                     within_the_surface(liquids),
                     published_ices(condensates.surface_ices(), water_ice),

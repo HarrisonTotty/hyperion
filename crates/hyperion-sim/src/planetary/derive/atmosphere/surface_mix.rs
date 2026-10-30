@@ -70,7 +70,7 @@ use crate::planetary::hooks::cold_traps::{
 };
 use crate::planetary::hooks::crust::{CrustBasis, CrustLid, LidAt};
 use crate::planetary::hooks::figures::{
-    Crust, FieldBody, PartitionGround, PartitionOver, WetEpoch, cover, partition_over,
+    Crust, DarkLag, FieldBody, PartitionGround, PartitionOver, WetEpoch, cover, lag, partition_over,
 };
 use crate::planetary::hooks::modifiers::{
     DeriveModifiersError, HeliocentricOrbit, ModifierHost, ModifierParts, Primary,
@@ -1329,7 +1329,15 @@ fn surface_and_cloud(
             air,
             (climate_class(inputs, surface.published), deck),
             || PresentFigures {
-                ice_cover: published_ice_cover(&published, water_ice),
+                // The record's own ice cover: under a dark lid over an ice bulk, the appended water
+                // ice is its lag's exposed share from 25 (P14.T53.c).
+                ice_cover: published_ice_cover(
+                    &published,
+                    lag::shown(
+                        DarkLag::of(inputs.material, lid.as_ref().map(CrustLid::lithology)),
+                        water_ice,
+                    ),
+                ),
                 liquid_water,
                 surface_temperature: air.surface_temperature,
                 surface_pressure: air.surface_pressure,

@@ -75,6 +75,7 @@ use hyperion_surface::field::ClimateModelKind;
 
 use crate::math;
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas};
+use crate::planetary::hooks::figures::lag;
 use crate::planetary::hooks::surface::{AirTransport, SurfaceConditions, annual_insolation};
 use crate::substance::{self, Phase, SubstanceId, phase_at, saturation_pressure};
 use crate::units::{Days, EarthMasses, Kelvin, Pascals, Seconds, WattsPerSquareMetre};
@@ -523,11 +524,11 @@ fn forcing(conditions: &SurfaceConditions, inputs: &ClimateInputs<'_>) -> Forcin
         return Forcing::SlowRotator;
     }
     let (equator, pole) = annual_insolation(conditions.spin.obliquity);
-    let ice = inputs.ice_fraction;
+    // Part of the surface, not all of it: from 25 a cover the surface scaled, which sums back to 1
+    // only to rounding, is whole (P14.T53.c; `lag::covers_part`).
     let belt = equator < pole
         && inputs.from_colder
-        && ice > 0.0
-        && ice < 1.0
+        && lag::covers_part(inputs.ice_fraction)
         && conditions.zonal_temperature(1.0) >= inputs.ice_threshold;
     if belt {
         Forcing::IceBelt

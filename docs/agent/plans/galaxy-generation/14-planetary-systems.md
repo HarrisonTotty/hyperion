@@ -7997,6 +7997,9 @@ feeding back into p_s, T_s, the albedo or the bulk.
     `planetary/chem/partition.rs` (the controlling temperature).
   - _Accept:_ `cargo test -p hyperion-sim planetary::chem::tenuous`;
     `cargo test -p hyperion-sim planetary::derive::atmosphere`.
+  - _The exposed share through a lag_ (decision-p14-t54a-ganymede §C3.4; decision-bump-plan-after-22
+    V3.9's W3 (a)): built at 24, held at 25 (Risks, "P14.T53.c's exposed share through a lag, as
+    built").
 - **P14.T53.d The biosphere hook** (23 → 24).
   - `hooks/biosphere.rs`: `Biosphere { fluxes: Vec<(SubstanceId, f64)> }`, the net surface fluxes
     of O₂, CH₄ and N₂O in units of Earth's present biotic flux of each, and the palette's `Cover`
@@ -32545,3 +32548,37 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `events_between` reads a whole epoch snapshot. A young system lists up to about 2 × 10⁵ events
     a century (the golden `subgiant`: 176,697).
   - _Not here:_ lava and cryovolcanism are not told apart (T31.a's R7, for T43).
+- **P14.T53.c's exposed share through a lag, as built (2026-10-30).** Held at 25:
+  `EXPOSED_ICE_VERSION`, `ExposedIceRules`, the tests' `with_exposed_ice` (the third switch of
+  `with_every_25_hold`) and the tripwire `the_exposed_ice_is_held_only_until_the_25_bump`; nothing
+  moves at 24.
+  - `hooks/figures/lag.rs`: `DarkLag::of(material, lid)` (an ice bulk under a known non-`H2O`
+    lid: `cometary` → `Cometary`, `chondrite_ci`/`_cm` → `Carbonaceous`, every other → `Rock`), and
+    `lag::shown`, W3 (a)'s appended H₂O ice as the lag's share of the surface
+    (`COMETARY_EXPOSED_SHARE` 10⁻³, `CARBONACEOUS_EXPOSED_SHARE` 0.1, `ROCK_EXPOSED_SHARE` 10⁻⁵)
+    held to the cover's ice area; no draw. `GlobalFigures::with_surface_under` takes
+    `(WaterIce, Option<DarkLag>)`; the record passes `DarkLag::of` of the published pass's lid
+    (`sky.crust_lid`, as `CrustWater::of_record` reads it), and the passes' rule 5
+    (`surface_mix.rs`) reads the same item.
+  - The belt test (`regime.rs`'s forcing) reads `lag::covers_part`: from 25 a cover within
+    `WHOLE_COVER_ROUNDING` (10⁻¹²) of 1 is whole. A tolerance, not a scaled list published as 1, so
+    `ice_fraction` and the wire's "held at 1, to the bit" tests do not move.
+  - Leans (2026-10-30), for main: "the H₂O solid entry" (§C3.4) is read as W3 (a)'s `surface_ices`
+    item, the condensates still listing no `H2O` solid under a dark lid, since dividing the frozen
+    water (the condensate, the crust, the shell) is not built: the share is an area with no mass,
+    and the area mix does not weigh it in the albedo. The share is of the whole surface, not scaled
+    by the cover's area. CI and CM lids are the Callisto class (Callisto itself keeps its `H2O`
+    lid). T51.d's organic cover is not read: by its rule it lies on carbon-bearing and nitrogen
+    ices' ground, not water's, and the modifiers read the figures.
+  - The census (`system/exposed_ice_tests.rs`): 200 dark-lid ice bulks over the 400 and the
+    goldens (139 cometary, 26 carbonaceous, 35 rock), each water ice within its share, its cover
+    at most the other ices' (the condensates' own frosts, on 38; the largest cover 0.935) and the
+    share, below 1; no state, regime or other record moves, but 2 ice bulks under a supercritical
+    envelope, 02001b2ce0020000.0400 and 02003b2c20000000.0100, whose template leaves `Snowball`
+    by their passes' rule 5 (pinned).
+  - _Accept, as built:_ `cargo test -p hyperion-sim --lib planetary::hooks::figures::lag`,
+    `planetary::system::exposed_ice_tests`, `the_exposed_ice_s_hold_is_in_force` and
+    `a_ninety_degree_world_started_cold`; by name, with `-- --ignored`,
+    `under_every_25_hold_the_rest_of_the_400_show_their_lag_s_exposed_share_of_water_ice`.
+  - For 25's bump: the tripwire's list; the wire's `surface_ices` docs; the goldens holding a
+    dark-lid ice bulk with ice (`planetary/systems`, `planetary/surface_conditions_published`).

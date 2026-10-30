@@ -12952,11 +12952,16 @@ fn under_every_25_hold_part_three_s_movers_are_stated() {
         .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
         .collect();
     // Part 3's landing alone: P14.T53.e's movers are its own census's
-    // (`present_state_tests`).
+    // (`present_state_tests`), and P14.T53.c's exposed share's are `exposed_ice_tests`'.
     let on = with_every_25_hold(|| {
         crate::planetary::derive::atmosphere::with_present_state(
             crate::planetary::derive::atmosphere::PresentStateRules::Held,
-            || part_three_census(&sets),
+            || {
+                crate::planetary::hooks::figures::lag::with_exposed_ice(
+                    crate::planetary::hooks::figures::lag::ExposedIceRules::Held,
+                    || part_three_census(&sets),
+                )
+            },
         )
     });
     let off = part_three_census(&sets);
