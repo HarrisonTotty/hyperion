@@ -337,12 +337,12 @@ acceptance = "adopted A = 40, γ = 0.7 and cap 40 (decision-p15-t8-blocks); fitt
 name = "rough_plains_cold_traps"
 path = "rough_plains_cold_traps.rs"
 task = "rough_plains_cold_traps"
-revision = 0
-inputs_sha256 = "544f813bd8d74e92aafb3b8e3d316d2a14d3f0d5365bddef15e76c6cbdc0ab39"
-body_sha256 = "1cd53bd22b6039b8a578669d2af6dad16d3ff5111eb2cb4a0f108dd44f57ea32"
+revision = 1
+inputs_sha256 = "03aeb5f7aa37c0d9aa1fe1847a8cf09e00aa636b442cfc257bc35ecd5085550b"
+body_sha256 = "641be67af7d5b9318141966103bf5dca9cc803f940302e709103cb9c8cc302f2"
 since_generator_version = 23
 provisional = false
-acceptance = "8 surfaces of 512² pixels, 27.5 pieces a sampled view azimuth; instantaneous shadow within 0.133 of Smith 1967's at 0.5–4° for w 0.1, 0.3 and 0.5 (worst at w 0.1, 4°); under a point star 1.54° from the equator, permanent shadow over 80–90° from 0.0230 to 0.0318 across the surfaces at w 0.1 and 0.2107 to 0.2360 at w 0.3; w 0.1: shadow 0.0267 over 80–90° and 0.00047 over 70–80°, under the real Sun water (110 K) 0.0201 and CO₂ (57 K) 0.000968 over 80–90°; w 0.2: shadow 0.1306 over 80–90° and 0.02165 over 70–80°, under the real Sun water (110 K) 0.0537 and CO₂ (57 K) 0.000515 over 80–90°; w 0.3: shadow 0.2231 over 80–90° and 0.07263 over 70–80°, under the real Sun water (110 K) 0.0402 and CO₂ (57 K) 0.000377 over 80–90°; w 0.5: shadow 0.3399 over 80–90° and 0.18121 over 70–80°, under the real Sun water (110 K) 0.0209 and CO₂ (57 K) 0.000326 over 80–90°; the largest shadow at the last colatitude node 3.81e-6 and at the last limb node 0.00e0"
+acceptance = "16 surfaces of 512² pixels, rays to 512 pixels, the facets lit 0.2711° below the star's upper limb, 28.2 pieces a sampled view azimuth; instantaneous shadow within 0.133 of Smith 1967's at 0.5–4° for w 0.1, 0.3 and 0.5 (worst at w 0.1, 4°); under a point star 1.54° from the equator, permanent shadow over 80–90° from 0.0234 to 0.0341 across the surfaces at w 0.1 and 0.2232 to 0.2586 at w 0.3; w 0.1: shadow 0.0279 over 80–90° and 0.00056 over 70–80°, under the real Sun water (110 K) 0.0211 and CO₂ (57 K) 0.001211 over 80–90°; w 0.2: shadow 0.1377 over 80–90° and 0.02305 over 70–80°, under the real Sun water (110 K) 0.0629 and CO₂ (57 K) 0.000448 over 80–90°; w 0.3: shadow 0.2378 over 80–90° and 0.07647 over 70–80°, under the real Sun water (110 K) 0.0541 and CO₂ (57 K) 0.000409 over 80–90°; w 0.5: shadow 0.3715 over 80–90° and 0.19028 over 70–80°, under the real Sun water (110 K) 0.0348 and CO₂ (57 K) 0.000585 over 80–90°; the largest shadow at the last colatitude node 2.38e-6 and at the last limb node 0.00e0; at the real Moon's D, the read against a direct trace on the same surfaces over 80–90° every 0.5°; w 0.1: shadow 0.0218 against 0.0216, water 0.0211 against 0.0213, CO₂ 0.001214 against 0.001304; w 0.2: shadow 0.1233 against 0.1226, water 0.0630 against 0.0657, CO₂ 0.000449 against 0.000405; w 0.3: shadow 0.2213 against 0.2205, water 0.0542 against 0.0572, CO₂ 0.000409 against 0.000379; w 0.5: shadow 0.3566 against 0.3551, water 0.0348 against 0.0381, CO₂ 0.000585 against 0.000497"
 
 [[table]]
 name = "saturation_curves"

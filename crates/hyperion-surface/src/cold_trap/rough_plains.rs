@@ -459,14 +459,12 @@ mod tests {
             (3e-4..=1.1e-3).contains(&fine_sub),
             "w 0.1, 70–80°: {fine_sub}"
         );
-        // Pinned as built, a finding (R09.T7.g's record): at σ_s 16.7° the table keeps 22.31%
-        // of 80–90° and 7.26% of 70–80°, 2% under §8.13's two surfaces (22.8–24.4% and
-        // 7.4–8.2%); its own eight surfaces span 21.1–23.6% over 80–90°.
-        for (lo, as_built) in [(80.0, 0.2231), (70.0, 0.072_63)] {
+        // Within §8.13's two surfaces at σ_s 16.7° (R09.T7.l's refit: 23.78% and 7.65%).
+        for (lo, spread) in [(80.0, 0.228..=0.244), (70.0, 0.074..=0.082)] {
             let rough = band(lo, 0.3);
             assert!(
-                (rough / as_built - 1.0).abs() <= 0.01,
-                "w 0.3, {lo}°: {rough} against {as_built} as built"
+                spread.contains(&rough),
+                "w 0.3, {lo}°: {rough} against {spread:?}"
             );
         }
         for (lo, w, traced) in [
@@ -510,15 +508,15 @@ mod tests {
                 "w {w}: CO₂ {traps} against {traced}"
             );
         }
-        // Pinned as built, findings (R09.T7.g's record): water at σ_s 26.6° falls 17% under
-        // §8.13's 2.69%, outside the plan's 15%, and CO₂ at 11.3° and 16.7° is 2.7 and 2.1 times
-        // the 0.0215% and 0.0195% of an independent tracer (2026-10-29; 8 surfaces, not
-        // literature), outside the plan's factor of two: the table's read between its coarse cold
-        // nodes, which R09.T7.l refits.
+        // Pinned as built on R09.T7.l's refit, findings: water at σ_s 26.6° is 29% over §8.13's
+        // 2.69%, outside the plan's 15%, and CO₂ at 11.3° and 16.7° is 2.1 times the 0.0215%
+        // and 0.0195% of an independent tracer (2026-10-29; 8 surfaces, not literature), just
+        // outside the plan's factor of two (those heat at the upper limb; heated at the disk's
+        // centre, as the refit is, they are 0.0367% and 0.0297%).
         for (w, threshold, as_built) in [
-            (0.5, WATER, 0.0222),
-            (0.2, co2, 5.72e-4),
-            (0.3, co2, 4.07e-4),
+            (0.5, WATER, 0.0348),
+            (0.2, co2, 4.48e-4),
+            (0.3, co2, 4.09e-4),
         ] {
             let traps = band(w, threshold);
             assert!(
