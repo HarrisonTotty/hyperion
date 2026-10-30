@@ -1,4 +1,4 @@
-# generator_version = 23
+# generator_version = 24
 cut_widening = 0x3ff0c2d05089dbe4  # 1.047561945537148
 table.sun.potential = 0xc242215a28a65154  # -155737936204.63538
 table.sun.acceleration.x = 0xbdeacddc7127a73b  # -1.9502582238165705e-10
