@@ -1302,8 +1302,10 @@ Names are those the owning plans give; the owning plan is authoritative.
      only if the sweep shows the collapse within one grid step, and R08.T13 tests for it.
    - **The replacement.** Above the boundary the replacement is a view-dependent source-function
      table, J_ms(h, μ₀, μ_v, m) with m = 0 and 1 azimuthal modes. It is about 32 altitudes × 32
-     μ₀ × 16 μ_v × 2 × RGB, some 0.26 MB. The sky-view, aerial-perspective and march kernels read
-     it in place of σ_s·Ψ_ms·p_u. Whether m = 1 is needed is decided by the gate, not assumed.
+     μ₀ × 16 μ_v × 2 × RGB, some 0.26 MB. _Amended_ (R08.T14.d.1 and T14.d.2): m ≤ 2 and 46 μ₀, 14
+     of them below the horizontal, 388,864 B a band and light as built. The sky-view,
+     aerial-perspective and march kernels read it in place of σ_s·Ψ_ms·p_u. Whether m = 1 is
+     needed is decided by the gate, not assumed.
    - **The bake** is DISORT-style discrete ordinates in `f64` in a worker. It uses 16 streams,
      about 64 layers, Dahlback and Stamnes's pseudo-spherical beam, delta-M and the Nakajima–Tanaka
      corrections, and solves all μ₀ on one factorisation. It is spectral (Design note 5).
@@ -1546,7 +1548,8 @@ Names are those the owning plans give; the owning plan is authoritative.
     planet on both.
     - **Memory** (researched 2026-09-29, the arithmetic at 8 B a texel in `rgba16float`). The
       per-planet tables come to about 0.40 MB: transmittance 256 × 64 (131 KB), multiple scattering
-      32² (8 KB) and the thick J_ms table (262 KB), plus the absorber-column table and the
+      32² (8 KB) and the thick J_ms table (262 KB; 389 KB a band and light as built, with
+      R08.T14.d.2's rows below the horizontal), plus the absorber-column table and the
       irradiance table (64 × 16, 8 KB). The per-view tables come to about 0.43 MB on high,
       sky-view 192 × 108 (166 KB) and aerial perspective 32³ (262 KB), whatever the number of
       suns, since they are summed (Design note 7). One table per sun would have been 1.71 MB a
@@ -1572,7 +1575,8 @@ Names are those the owning plans give; the owning plan is authoritative.
       - An ice giant (2 slices, 2 bands) comes to about 0.29 MB thin and 0.82 MB with two J_ms
         bands.
       - At Saturn's flattening a thick world comes to 1.77 MB with four J_ms bands (1.05 MB),
-        before a second absorber table (131 KB a slice). The generator's worst case is flatter.
+        before a second absorber table (131 KB a slice). _Amended_ (R08.T14.d.2): 2.81 MB as
+        built, the four bands' J_ms with the correction summed in 1.56 MB. The generator's worst case is flatter.
         Plan 14 caps f at 0.2, and its spin law puts there 9–31% of unlocked giants (P14.T46.c;
         science-r08-oblate). At the cap, Design note 17's ω_fig gives 9–10 slices and 6–7 bands.
         - Thin, that is 1.3–1.4 MB.
@@ -5700,9 +5704,9 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
     term, the seam blended over the first μ₀ cell. Earth's sunsets are on this path; T14.f's and
     T14.d's gates judge it at `ground-s90`. _Amended_ (main, 2026-10-29, R08.T14.d.2): the bake and
     the correction extend below the horizon over the lit air above the planet's shadow, and the
-    table's rows and read follow, the analytic term reading below the table's new lower edge. As
-    built so far the beam and both solves take μ₀ below the horizontal and the table's grid does
-    not (Risks, "Deviations in T14.d.2, as built"), so this rule still reads as written.
+    table's rows and read follow, the analytic term reading below the table's new lower edge.
+    _Built_ (T14.d.2's step 3): the analytic term reads alone below −7/32, blended over
+    [−7/32, −6/32] (Risks, "Deviations in T14.d.2's step 3, as built").
   - **The recorded runs** (recorded, not gated), from the committed references, nothing re-traced:
     - c1's scalar case gate on `earth`, `earth-ozone-slab`, `mars` and `saturn-oblate` through the
       twin with the baked table in place of Ψ_ms;
@@ -5736,9 +5740,8 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
     - Where the beam is undefined, ΔJ_pol = 0, recorded. _Amended_ (main, 2026-10-29,
       R08.T14.d.2): the beam is defined below the horizon over the lit air above the planet's
       shadow (Dahlback and Stamnes's own twilight case), and the correction is formed there on the
-      scalar bake's rows; it is 0 only in a column wholly in the shadow. Built in the solve; the
-      table's rows below the horizon wait on main's ruling (Risks, "Deviations in T14.d.2, as
-      built").
+      scalar bake's rows; it is 0 only in a column wholly in the shadow. Built in the solve and
+      the table's rows (Risks, "Deviations in T14.d.2's step 3, as built").
     - It runs in the optics worker for every world with a term whose b₁ ≠ 0, thin or thick.
   - Tests:
     - at 16 streams the vector mode reproduces Natraj et al. 2009's τ 0.5, μ₀ 0.2 I, Q and U to
@@ -5843,7 +5846,9 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       T14.d.2, as built", and its prototype's gates): the science check, the beam and both solves
       below the horizontal built; the prototype's gates missed the brief's aim (Saturn's s95 at
       every site, and Earth's ground-s90 by one view on each case), which stops the table, read,
-      kernels and twins for main's ruling.
+      kernels and twins for main's ruling. _Step 3 built, 2026-10-30_ (main's ruling on the
+      research advice; Risks, "Deviations in T14.d.2's step 3, as built"): the table's rows and
+      read, the kernels and the twins; nothing routes.
     - **T14.d.3, Mars's aureole** (precondition 2): one of its options (a) or (b), then m = 3
       measured again on Mars alone. _Partial, 2026-10-30_ (Risks, "R08.T14.d.3, as measured"):
       (a) built, measured and not landed, since it leaves the aureole rows missing; (b), probed as
@@ -23089,9 +23094,10 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
   `thick/discreteOrdinates.ts`, `thick/polarisation.ts` and `thick/bake.ts`, each with its tests,
   and `thick/polarisationBake.test.ts`; main's ruling of 2026-10-29 that the bake and the correction
   extend below the horizon). **Partial.** The beam and both solves below the horizontal are built;
-  the table's rows, its read, the kernels and the twins are not. The prototype's gates (below) missed
-  the brief's aim, which stops the task there for main's ruling. No table, read, record, kernel,
-  binding, label or golden moved.
+  the table's rows, its read, the kernels and the twins are not (built since, "Deviations in
+  T14.d.2's step 3, as built", which supersedes this entry's grid and departures). The
+  prototype's gates (below) missed the brief's aim, which stops the task there for main's ruling. No
+  table, read, record, kernel, binding, label or golden moved.
   - _The science check_ (2026-10-30, before any code). Dahlback and Stamnes 1991 is closed access and
     was not read. The check read cdisort 2.1.3's `c_chapman` and its comments, which cite D&S's
     eqs. B1–B2 (GPL, read for its behaviour only, never ported), libRadtran's user guide, and
@@ -23282,6 +23288,50 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     one under a load of 3.24, gave 13–17% and 11–14%. The UHD 620 host's time is pending: the
     owner's run.
 
+- **Deviations in T14.d.2's step 3, as built** (2026-10-30; main's ruling on research-r08-t14d2's
+  advice; the measurements in the lane's outbox).
+  - _The grid._ `THICK_BAKE_GRID` holds 46 μ₀: 14 of 1/64 below the horizontal,
+    −(13.5 − s) ÷ 64, to the cell edge −7/32, then the 32 daylit rows, (s − 13.5) ÷ 32.
+    `THICK_BAKE_DAY_GRID`, the daylit 32, is `deck.ts`'s default, and `prepareDeck` keeps its
+    guard: whether the deck takes the rows below is R08.T15.a.2's (shared lines: `THICK_BAKE_GRID`,
+    `checkBakeInputs`, `prepareDeck`'s guard).
+  - _The table._ `read.ts`: `THICK_SUN_COSINES` 46, `THICK_SUN_COSINES_BELOW` 14,
+    `THICK_SUN_ROWS_A_UNIT_BELOW` 64 and `_ABOVE` 32, `thickSunCosineAt` (the band check's grid),
+    `thickSunPlace` (the piecewise map); `THICK_INFO_ROW` 1,518; 388,864 B a band and light
+    (`THICK_TABLE_SIZE`, `TABLE_SIZES` unchanged in shape). `thickRead.wgsl` holds the same
+    constants (`read.test.ts` pins them), its header's J fixed.
+  - _The read._ Below μ₀ = 1/64, J⁰ is geometric in μ₀ at each altitude and travel-cosine corner
+    pair, G and G₂ linear as their ratios to J⁰, and linear in a channel where either row holds
+    J⁰ ≤ 0; the twin (`addThickLayer`) and the kernels (`thickLayerAt`) share that order (the
+    `qlast` order was not taken). The analytic share is 1 − clamp(32 μ₀ + 7, 0, 1), on both kinds.
+  - _Records re-blessed by name._ `vectorGate.json` reproduces research's h64 run to the digit:
+    the route misses `earth` 2 (1.16), `earth-ozone-slab` 0, `saturn-oblate` 43 (s95 alone, 6.99)
+    and `mars` 169 (its s90 17 → 19, T14.d.3's); no daylit, aerial or disc verdict moved.
+    `thickRuns.json` too.
+  - _Tests moved._ T14.e's tests 4–6 run on `THICK_BAKE_DAY_GRID` (their figures are a sun's above
+    the horizontal); the Titan-class IMS share's bound is 0.11 (10.45% with the rows below); J⁰ ≥ 0
+    is held above the horizontal and ≥ −10⁻⁶ of the largest below it (the signed channel
+    conversion). The thick twins' frames (`smoke/atmosphere.ts`) add the sun 5°, 11.5° and 14°
+    down on Earth and the Saturn-class figure, and the correction alone takes 2° down.
+  - _For T14.d.4._ s95 is the pseudo-spherical model's limit (main's ruling): route by the passing
+    images' range, with a deep-twilight `ATMOSPHERE: APPROXIMATE` label for the UX sign-off. The
+    band sphere's √(MN) binds at s90 too (its fix, μ₀ scaled by the sun's azimuth, is unmeasured).
+    Earth's anti-twilight arch reads 8% bright in the converged bake (T14.d.3's m = 3 run on
+    `earth`'s s90 tells the column from m = 3). `earth-ozone-slab`'s prototype miss was dim, at a90,
+    not "red, bright and anti-sun". A Saturn-class world under one star holds 2.81 MB with four
+    bands (precondition 3's row).
+  - _The kernels' shape._ `thickLayerAt` loads its eight texels once and branches only for the μ₀
+    step (`thickSunMix`), and `thickBandsAt` reads a layer at most twice: the first form, a second
+    set of loads for the geometric step and five reads a band, crashed SwiftShader after some
+    5 minutes compiling the thick ray march. Keep that shape (14 s to compile, as before).
+  - _For R08.T15.a.2._ `packThickTable` takes the 46 rows alone and refuses the day grid's 32, so
+    the deck's tables need the rows below, or a padded pack, before `setThickTables`.
+  - _For T14.d.4._ Precondition 3's halving of the correction's μ₀ axis predates the 46 uneven
+    rows (halved below the horizontal they are rows of 1/32 again, the prototype's read). T14.e's
+    figures are unmeasured below the horizontal (tests 4–6 hold the daylit rows). `thickRuns.json`'s
+    half-float tally now counts all 46 rows.
+  - _Pending: the owner's RTX run_ (frame rows (K)–(N), part 1 with `--smoke-gpu-timing=1` and
+    `--smoke-thick-read=1` on this tree) and the UHD 620 host's bake time at 46 rows.
 - **Deferred findings (2026-10-13 rule)** (R08.T14.d.2). Recorded and deferred: each leaves the
   algorithm and every contract as they are.
   - _The oblate band's sphere at the shadow's edge._ The bake's band takes one sphere of s_b √(MN),
@@ -23292,7 +23342,8 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     axis holds the azimuth.
   - _The IMS share's filter_ (the science check). `doubleForwardShare` keeps the points whose light
     is at least 10⁻³ of their bin's brightest, so a twilight row, far dimmer, mostly drops out of
-    it. Lean: filter per μ₀ row when the table takes rows below the horizontal.
+    it. Lean: filter per μ₀ row when the table takes rows below the horizontal. Deferred again at
+    step 3, the filter as it was (the Titan-class share 10.45% with the rows).
   - _The analytic term below the table's lower edge._ With rows below the horizontal, Ψ_ms reads
     past −7/32, where the pseudo-spherical bake holds 0 once the column's top is in the shadow
     (`earth`'s −0.1751). The blend then brings a little light back past the lowest row. Unmeasured:
