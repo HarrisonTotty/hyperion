@@ -8191,6 +8191,36 @@ feeding back into p_s, T_s, the albedo or the bulk.
     (P14.T53.b parts 2 and 3).
   - _Files:_ `planetary/record.rs`, `planetary/system.rs`, the protocol's `BodyEnvelopeDto`, the
     client's envelope rows.
+- **P14.T53.g A molten body's surface on its published air** (behind `MELT_OXYGEN_VERSION` = 26
+  with a tripwire; decision-p14-t53a-thick-co2 §11.2's ruled follow-up, after 24, behind its own
+  hold; it missed 25's list, so it rides 26).
+  - _Why:_ `escaping::finish` gives a molten body's O₂ to its melt and publishes its air without
+    it, but keeps the T_s and τ its greenhouse solved with the O₂ in the column. Count (xvii)
+    (`guard_twin::MeltOxygen`) finds 222 such samples among the guard's, 180 of them off by more
+    than 1%: 42002cb2000188e8.0100 publishes 2,565 K over an air that gives 1,832 K.
+  - _The rule_ (`finish`): for a molten body whose melt takes its O₂, T_s is evaluated once more
+    on the published partials, `GreenhouseCeiling::surface_temperature` over their τ, then
+    `saturate`; it publishes max(that, `SILICATE_SOLIDUS`), with that column's τ. It is one
+    evaluation, with no new greenhouse steps: a molten air has nothing to condense. Nothing else
+    moves.
+  - _The hold:_ `MeltOxygenRules::{Held, Published}` with `in_force()`, the tests'
+    `with_melt_oxygen` (in `planetary::testing::with_every_26_hold`) and the tripwire
+    `the_melt_oxygen_is_held_only_until_the_26_bump`. Under `Held` no golden changes.
+  - _Tests:_
+    - under `with_every_26_hold`, 188e8's T_s within 1% of 1,832 K, and 42002cb200049423.0100 at
+      the solidus, 1,394 K, `MagmaOcean`; under `Held` both as today, bit for bit;
+    - count (xvii) under `with_every_26_hold` (slow, by name): no molten body differs from its
+      published air's surface by more than 1%, but those held at the solidus; the counts printed
+      both ways; every counted body `MagmaOcean` under both arms (a state change goes to main);
+    - the same seed twice under the new arm gives identical output;
+    - `guard_twin`'s two guard tests pass under both arms.
+  - _Files:_ `planetary/derive/atmosphere/escaping.rs`, `planetary/derive/atmosphere.rs`,
+    `planetary/derive/atmosphere/guard_twin.rs`, `planetary/derive/atmosphere/tests.rs`,
+    `planetary/testing.rs`.
+  - _Accept:_ `cargo test -p hyperion-sim --lib planetary::derive::atmosphere`; the new tests by
+    name, the slow ones with `-- --ignored`.
+  - _For 26's bump:_ re-bless `planetary/systems` and every golden whose record holds a counted
+    body (the records list them).
 
 #### P14.T54 The composition batches on the record
 
