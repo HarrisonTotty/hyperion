@@ -5,13 +5,14 @@ The files in this directory are adapted material of the ExoMol database (J. Tenn
 Attribution-ShareAlike 4.0 International licence (CC BY-SA 4.0,
 <https://creativecommons.org/licenses/by-sa/4.0/>): "All data in ExoMol is released under the
 Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence"
-(<https://www.exomol.com/data/licence/>, read 2026-10-10, 2026-10-11 and 2026-10-13).
+(<https://www.exomol.com/data/licence/>, read 2026-10-10, 2026-10-11, 2026-10-13 and
+2026-10-29).
 
 - `bounds.json` (plan R08, R08.T4.c; `decision-r08-t4b-t12c.md`, follow-ups 3 and 4): for each
   pending absorber, its 1 nm cell-mean cross-sections over 380–760 nm at the line list's
-  temperature nodes, reduced from the line lists each entry names (C2018, AYT2, SiOUVenIR, Li2015,
-  TYM, Harris, Toto, HyVO, MoLLIST's FeH and POKAZATEL), with each list's paper, its dataset
-  DOI where ExoMol gives one, the files' SHA-256 and the date fetched. The values were computed
+  temperature nodes, reduced from the line lists each entry names (TYM and C2018, the species
+  still pending), with each list's paper, its dataset DOI where ExoMol gives one, the files'
+  SHA-256 and the date fetched. The values were computed
   from the line lists, by direct sums or through ExoMol's cross-section service, a modification
   of them; CO's are scaled to HITRAN2024's 7–0 band, as each entry's `method` states.
 - `kDistributions/NH3.json` and its parts `NH3-<n>.bin` (plan R08, R08.T4.g): NH₃'s
@@ -29,7 +30,8 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
   R08.T4.f): their k-distributions per 1 nm cell, reduced by super-lines on the grid and in the
   16-bit format each sidecar states, from these lists, their files fetched from the database's
   archive of each dataset on Zenodo (each record's DOI in its sidecar), whose records state CC BY
-  4.0 (read 2026-10-29), the database's own licence quoted above:
+  4.0 (read 2026-10-29), the database's own licence quoted above, but H₂O's and VO's, as their
+  entries say:
   - `FeH`: MoLLIST's FeH as ExoMol carries it (M. Dulick et al., Astrophys. J. 594 (2003) 651; S.
     Wende, A. Reiners, A. Seifahrt and P. F. Bernath, Astron. Astrophys. 523 (2010) A58; P. F.
     Bernath, J. Quant. Spectrosc. Radiat. Transf. 240 (2020) 106687).
@@ -51,6 +53,11 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
   - `HCN`: Harris's H¹²C¹⁴N (G. J. Harris et al., Mon. Not. R. Astron. Soc. 367 (2006) 400, DOI
     10.1111/j.1365-2966.2005.09960.x; R. J. Barber et al., Mon. Not. R. Astron. Soc. 437 (2014)
     1828, DOI 10.1093/mnras/stt2011).
+  - `H2O`: POKAZATEL's ¹H₂¹⁶O, its transitions of 13,100–26,400 cm⁻¹ and its MARVELised states,
+    fetched from <https://www.exomol.com/db/H2O/1H2-16O/POKAZATEL/> on 2026-10-29 (O. L.
+    Polyansky, A. A. Kyuberis, N. F. Zobov, J. Tennyson, S. N. Yurchenko and L. Lodi, Mon. Not. R.
+    Astron. Soc. 480 (2018) 2597, DOI 10.1093/mnras/sty1877), each profile less its value at the
+    cut-off, the continuum's convention.
   - `VO`: HyVO's ⁵¹V¹⁶O (C. A. Bowesman, Q. Qu, L. K. McKemmish, S. N. Yurchenko and J. Tennyson,
     Mon. Not. R. Astron. Soc. 529 (2024) 1321, DOI 10.1093/mnras/stae542), its strong lines as P. E.
     Cubillos's REPACK holds them (Repacked ExoMol Opacity Line Lists, Zenodo record 14266247,

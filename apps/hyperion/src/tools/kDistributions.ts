@@ -1601,6 +1601,20 @@ export function carbonMonoxideRayleighCm2(wavelengthNm: number): number {
 }
 
 /**
+ * H₂O's Rayleigh cross-section, cm², at a vacuum wavelength, nm, as the client's `rayleigh.ts`
+ * takes it (held equal by `kDistributions.test.ts`; R08.T4.f): Ciddor 1996's water-vapour
+ * refractivity (Appl. Opt. 35, 1566, eq. 3), (n − 1) × 10⁸ = 1.022 (295.235 + 2.6422 σ² −
+ * 0.032 38 σ⁴ + 0.004 028 σ⁶), σ in µm⁻¹, at 20 °C and 1,333 Pa with Z = 0.999 237, and the King
+ * factor 1.001 (Murphy 1977, J. Chem. Phys. 67, 5877: ρₚ = (3.0 ± 1.4) × 10⁻⁴).
+ */
+export function waterRayleighCm2(wavelengthNm: number): number {
+  const s2 = perUmSquared(wavelengthNm);
+  const nMinusOne = 1.022 * (295.235 + s2 * (2.642_2 + s2 * (-0.032_38 + s2 * 0.004_028))) * 1e-8;
+  const density = 1_333 / (0.999_237 * BOLTZMANN_J_PER_K * 293.15);
+  return dispersionRayleighCm2(nMinusOne, density, 1.001, wavelengthNm);
+}
+
+/**
  * N₂'s Rayleigh cross-section, cm², at a vacuum wavelength, nm, as the client's `rayleigh.ts`
  * takes it (held equal by `kDistributions.test.ts`; R08.T4.f): Peck and Khanna 1966's dispersion
  * (J. Opt. Soc. Am. 56, 1059) from 468 nm, (n − 1) × 10⁸ = 6,497.378 + 3,073,864.9 ÷ (144 − σ²), σ

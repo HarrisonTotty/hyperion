@@ -32,7 +32,7 @@ import {
 import { NO_VISIBLE_ABSORPTION, PENDING_ABSORBERS } from "./transparency";
 
 /** The species R08.T4.f draws from ExoMol's lists (decision-r08-t4ef-storage §5.4's order). */
-const DRAWN = ["FeH", "TiO", "H2S", "CO", "HCN", "SiO", "N2", "VO"] as const;
+const DRAWN = ["FeH", "TiO", "H2S", "CO", "HCN", "SiO", "N2", "H2O", "VO"] as const;
 
 /** A drawn species. */
 type Drawn = (typeof DRAWN)[number];
@@ -50,6 +50,7 @@ const RANGES: Readonly<Record<Drawn, readonly [number, number]>> = {
   HCN: [300, 4_000],
   SiO: [1_000, 4_000],
   N2: [1_800, 4_000],
+  H2O: [300, 4_000],
   VO: [1_000, 4_000],
 };
 
@@ -75,14 +76,13 @@ const ESTIMATED: ReadonlyArray<Drawn> = ["CO", "HCN", "N2"];
  * The drawn species whose hot tables continue R08.T4.d's HITRAN2024 tables, handing over at their
  * first node, 300 K.
  */
-const HANDED_OVER: ReadonlyArray<Drawn> = ["CO", "HCN"];
+const HANDED_OVER: ReadonlyArray<Drawn> = ["CO", "HCN", "H2O"];
 
 /**
- * The species R08.T4.f leaves pending, each keeping its entry: hot H₂O, whose list (POKAZATEL) the
- * reducing machine could not fetch; hot CO₂ (UCL-4000, its χ far wings beyond the super-lines); hot
- * NH₃ and N₂O (decision-r08-t4ef-storage §5.4).
+ * The species R08.T4.f leaves pending, each keeping its entry: hot CO₂ (UCL-4000, its χ far wings
+ * beyond the super-lines); hot NH₃ and N₂O (decision-r08-t4ef-storage §5.4).
  */
-const PENDING = ["H2O", "CO2", "NH3", "N2O"] as const;
+const PENDING = ["CO2", "NH3", "N2O"] as const;
 
 /**
  * T4.f's budget, bytes (decision-r08-t4ef-storage §1.3): the 150,000,000-byte cap less the
@@ -499,5 +499,29 @@ describe("the hand-overs' agreement at 300 K (the recorded figures)", () => {
   it("holds HCN's within 0.77 at 0.1 MPa in every shared cell", () => {
     const { worst, compared } = handOverDifference("HCN", 1e5, 0);
     expect([worst < 0.77, compared > 0]).toEqual([true, true]);
+  });
+
+  // H₂O's 82 cells above a hundredth of its peak agree in mean to a median 1.012 (0.68–1.17),
+  // POKAZATEL's default width against HITRAN2024's own; its weaker cells, below 500 nm at most
+  // 3.3 × 10⁻³ of the peak, hold POKAZATEL's lines at 0.48–0.80 of HITRAN2024's summed (H₂O's
+  // notes).
+  it("holds H₂O's two tables within 0.10 of each other at 1 kPa in its stronger cells", () => {
+    const { worst, compared } = handOverDifference("H2O", 1e3, 0.01);
+    expect([worst < 0.1, compared > 0]).toEqual([true, true]);
+  });
+
+  it("holds H₂O's within 0.11 at 0.1 MPa in its stronger cells", () => {
+    const { worst, compared } = handOverDifference("H2O", 1e5, 0.01);
+    expect([worst < 0.11, compared > 0]).toEqual([true, true]);
+  });
+
+  it("holds H₂O's within 0.55 at 1 kPa in every shared cell", () => {
+    const { worst, compared } = handOverDifference("H2O", 1e3, 0);
+    expect([worst < 0.55, compared > 0]).toEqual([true, true]);
+  });
+
+  it("holds H₂O's within 0.60 at 0.1 MPa in every shared cell", () => {
+    const { worst, compared } = handOverDifference("H2O", 1e5, 0);
+    expect([worst < 0.6, compared > 0]).toEqual([true, true]);
   });
 });

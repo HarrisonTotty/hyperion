@@ -191,9 +191,10 @@ const CUTOFF_25: ShapePolicy = {
 
 /**
  * H₂O's shape: its continuum's convention, Voigt within 25 cm⁻¹ less each line's pedestal at every
- * pressure, `estimated` past γ_L = 2.5 cm⁻¹ (`decision-r08-t4d-kdist.md` §5.2, §6.4).
+ * pressure, `estimated` past γ_L = 2.5 cm⁻¹ (`decision-r08-t4d-kdist.md` §5.2, §6.4), R08.T4.d's
+ * table's and R08.T4.f's hot one's.
  */
-const CKD_CONVENTION: ShapePolicy = {
+export const CKD_CONVENTION: ShapePolicy = {
   variants: [{ broadener: "air" }],
   cutoffPerCm: LINE_CUTOFF_PER_CM,
   pedestal: true,

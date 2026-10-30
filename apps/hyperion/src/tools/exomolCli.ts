@@ -108,10 +108,12 @@ import {
   type SaturationCurve,
   type ShapePolicy,
   STORED_PRESSURES_PA,
+  waterRayleighCm2,
 } from "./kDistributions";
 import {
   type CellReductionSource,
   type CheckedFile,
+  CKD_CONVENTION,
   FINEST_STEP_K,
   LINE_SOURCES,
   type LineSource,
@@ -137,7 +139,10 @@ import {
   type TransformedWindow,
 } from "./superLines";
 
-/** ExoMol's licence, as the database states it (read 2026-10-10, 2026-10-11 and 2026-10-13). */
+/**
+ * ExoMol's licence, as the database states it (read 2026-10-10, 2026-10-11, 2026-10-13 and
+ * 2026-10-29).
+ */
 export const EXOMOL_TERMS =
   "CC BY-SA 4.0: 'All data in ExoMol is released under the Creative Commons " +
   "Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence' (https://www.exomol.com/data/licence/); " +
@@ -912,6 +917,202 @@ export const WCCRMT: ExoMolSource = archivedList({
   assumedWidth: WCCRMT_WIDTH,
 });
 
+// --- R08.T4.f's part 2: hot H₂O, fetched from ExoMol's own site ---
+
+/** The POKAZATEL list's directory. */
+const POKAZATEL_URL = "https://www.exomol.com/db/H2O/1H2-16O/POKAZATEL/";
+
+/**
+ * POKAZATEL's transition files over {@link HOT_BIN_RANGE_PER_CM}, 100 cm⁻¹ each, as fetched
+ * 2026-10-29: each one's size its HTTP Content-Length and its SHA-256 the fetch's (ExoMol
+ * publishes no checksums), each passing `bzip2 -t`.
+ */
+const POKAZATEL_TRANSITIONS = [
+  [13_100, 143_135_111, "9b104cfc178cebf1c6b32157568473abba4ac1b858589471bf325d67096b7222"],
+  [13_200, 141_329_944, "15cd4f37355eab39c5b077edb276654f4a40a8948e85aa595d51b0047c0f4019"],
+  [13_300, 139_492_529, "7c8349ea5820aa9da0c79ea04b8b2dc141ba8dfea05db924736f31edd640482e"],
+  [13_400, 137_810_225, "e7d048e7a3809a0edfc3e96659c28f97d3efb9aeb9765d22e571f71128ee8940"],
+  [13_500, 136_044_408, "67470d9056b31b7ec9f83271a14f2c17198de0b648bc771e6321e83371aa4d46"],
+  [13_600, 134_266_120, "1f3b9eb9f045c40992ee702c18797363494b9f4057ae267ad6b1b65ab009481e"],
+  [13_700, 132_596_640, "0f92ef8b05391aa00913c15c53f30f33461cd47dab5131e4e8ed3bb1113cba23"],
+  [13_800, 130_835_345, "9aefec555af3e298daa571ba83eedd27fbf1e7dbe3b75e00108b673ba5eff708"],
+  [13_900, 129_066_290, "16274a6f6b03bab0f637759ee6485aaa4dde665d3e361768e129900d0d32aeeb"],
+  [14_000, 127_429_874, "4254d3bcb0c643ca1a98f4042ba9dba15c9dc7657887cb82efae61fea6c1b09f"],
+  [14_100, 125_779_855, "5199d1e4c3e49b050f68dcd37a9d79a9e0967114230548210fb6844492290618"],
+  [14_200, 124_111_249, "6177919f3b888807950c53bc3514da697249c6494511e5d1f609935d6f1fb9f9"],
+  [14_300, 122_485_697, "1987bfec54b6e48255c526d6b9998afe765f19ca90ddea3d9018af46061dcaed"],
+  [14_400, 120_871_118, "45cf439093acea7eb8fedf9e72ba61bb51b17456fdc7bc78987c41a660f581af"],
+  [14_500, 119_317_695, "0679e1618310670e55cb44a1200184666bbbdc826e1ceba8d06aeae6021b8161"],
+  [14_600, 117_707_935, "e3ce68b8af934f7ae9bba993183b631ee04c0112217ae2beee75c3575b256b00"],
+  [14_700, 116_130_253, "8d668530992a05b6982f6f3bc886d916237d254c7f810a8a4ea9f3b257ebbcfc"],
+  [14_800, 114_546_109, "bf7a48a12a4dc95c1e777c183590349323c8100cc5925a81f1a26531d6b7d7fa"],
+  [14_900, 113_037_292, "49a0dda32a657b38fe19c71aa40ba61b11ca5701d6e0e39c9acc5d74a25074bb"],
+  [15_000, 111_583_590, "6d0169a24ebaf6940c4f58392a21703928887b3e5b0dc58c2e402e0e1d96b5e8"],
+  [15_100, 110_054_894, "efca4c3ed0c013013fc083a4c21035d6144b5a27c6fa94bef4baae0feaea2bf5"],
+  [15_200, 108_516_002, "bb02644463d8e14937380d0112b034a34f681f73b0589989768e2a1729c2e682"],
+  [15_300, 107_037_686, "3715711aa97c083981d6c849e88f7ac34cdc31bd80fd43bbc2cfd3a3bbf934cc"],
+  [15_400, 105_536_960, "d74d2b84f8cd360fe4c356012eef94d2ca9e9812d30d46b06f7b811cfb50c0da"],
+  [15_500, 104_065_167, "b8a5afb4e66e043e3e8499016579fd7286d60abd439a3622638c1d28a84abaf1"],
+  [15_600, 102_607_266, "0f9c5ea8b09e6ad3bcdc634ad5d5f6c75174484221c4483b92dce4a15c8bb55a"],
+  [15_700, 101_246_142, "c3c2acf9bb70fd0763b6b558643994aad4ea4f14a94a1bc3f8dfa6ceed5443f8"],
+  [15_800, 99_847_128, "d569ebb377211c6aa1002ba0685cb1826a5566f1f33d0ef0d6a81e5bc9f0178a"],
+  [15_900, 98_463_244, "5c4c9333e46909a995969f9d565b1683a3793a825b3de46418f4bcbb29a9df66"],
+  [16_000, 97_033_524, "e64aec1c577cef87270bc6b87aa163a280b48aaea0aa69f0fba24a2fdd31cc59"],
+  [16_100, 95_661_486, "d6aedd481c14712452fd0f2fb17d2775199098eee88d6b4bb29390cb185b33cc"],
+  [16_200, 94_366_072, "b70abf8533adef94ed5c4ce48cc95e1afa11c85a9b651f85e27bfba742e7a027"],
+  [16_300, 93_090_491, "3a4fc6056c394e8b9a4fad18b847ca2c60b14a18d8f7aa09463f7586cb4dba7e"],
+  [16_400, 91_687_298, "4bf18ec52a3ce95d3735dec362d3b733332e8129f8cd92eac51ab6a549cfc91c"],
+  [16_500, 90_418_578, "e074e7c5fec1035fb0b49307dc422d2b92aec5695e80a7cda02b482efb838add"],
+  [16_600, 89_145_245, "1b3be279f2a5ccedd9a9415f7c35887148b3ffa3b0e2c62e8963eccba91d5bbe"],
+  [16_700, 87_820_083, "d2a76b06ada3b9e43b8be8f9656e0777aa858ce1500cd38c9e657b27d6f91ddf"],
+  [16_800, 86_600_576, "24cc844a8efdb79bad03c12e3a494988af46b9762700911c73dc14e291a9b212"],
+  [16_900, 85_251_800, "ec58c27709df3587f45ae79bb8ca21643d05dec7c651d97ba34d97e4f6f7c0d6"],
+  [17_000, 84_010_262, "d885dfaab227a03780777890819d9b273aebf217d6286987d9b4c8cd4dfff156"],
+  [17_100, 82_817_876, "a5f9089e5ed9443791df68dd0cf10bc1de5fef6e9356e66ad66a64be7105a0cd"],
+  [17_200, 81_656_190, "ea16b49378e615c8b87eefd73be49e706dfc6a6210ec888b83c72b56decc1232"],
+  [17_300, 80_461_924, "911d136906af64a7f9661a0a4ce8ed0e5c72a1f11f0679123e8363d3ac2ce071"],
+  [17_400, 79_288_454, "be456c34486b9bb2ebd7dda02e38caefc7d844287fbb075e96a3c5aaca41a1d1"],
+  [17_500, 78_122_151, "7f6bf298edd3220f0e007607b32797b233b63a2a58f3c9dd108d95328a745408"],
+  [17_600, 76_979_391, "fbbfbeebcb3864340b246c61b87fb5aa00aa97db3cd0eef89f56f9aa554921bd"],
+  [17_700, 75_912_980, "011b3fb96c530ab6590e5a281036806736364e6bdd9d81ef6b1d6918f35bf3ea"],
+  [17_800, 74_739_599, "57d77b57d905521db4e2e5e0a6db81791a095aebf7fe7cfd406988bb5c12e16f"],
+  [17_900, 73_575_653, "4a3b9f385c8e66506386ed8e5f22cf911de8b97451355a315277b5c35ed31d1f"],
+  [18_000, 72_536_361, "9eba4ce4a04a098bba18423cb31be656a1f989e33d563d5cae6d92e1e179af07"],
+  [18_100, 71_430_077, "d2fb4b3d69bdbcd7f8a5bebec3927f54f8af92f42824dbf85e25e1819b867ef0"],
+  [18_200, 70_344_074, "88307ee37ba6747226cf9ced2133d190db6bbf83390eb5dfa1cb74ba82f6b4e7"],
+  [18_300, 69_175_220, "0f5de1395a7bf0da40cc569539ec5ac58bdceb5037e4106ae699ab87cdc8c8fb"],
+  [18_400, 68_146_537, "da73ad800a5b7c6ce160a2a9f15cbfdb2599fe27a7bc82be563f1fa09a507b21"],
+  [18_500, 67_111_803, "38ea234cde46702ad06f2eceb995036046b7bd68b8ab83ae824c9f675921f5cd"],
+  [18_600, 66_060_239, "783f5aaf6891655ae66ad4ea2f45f9d339783d4e287ab0cde9d2d850bcdf0157"],
+  [18_700, 65_125_975, "bd1acc300140d41a5ad8c8cda703693cb5444a7a9048178d73ad85553be7c30c"],
+  [18_800, 64_006_138, "75c80bd0b852e29c73d608c25d06df4b7b127aa3d7a54b02066c7fbb5ccc0448"],
+  [18_900, 63_043_045, "84a4ec9b357f80615d4166c85019071ba313eac2b1629fa736b88cbe48f62781"],
+  [19_000, 62_081_473, "a8dd9ee2cb9e9af84e3313ebcc09c76f6c26cab84a73e2b56803c721443296e0"],
+  [19_100, 61_104_177, "5545ed5c70a4ad14b19191579f858095a924e9246843ceebf8ebf464c0f4ff4d"],
+  [19_200, 60_159_558, "95a089ebf8298639ac4957782ed9e8fac77ad908dc656c4b54aecbb686449274"],
+  [19_300, 59_183_347, "0484ac6cbe080b1ff570db38396f0d45f0ad11d3870d92f42dd87cf3d6c5a451"],
+  [19_400, 58_228_567, "04b1fdac970ffcbd33abfbbb794f4d847353ff86202413def94cead98ce73706"],
+  [19_500, 57_297_797, "494e7eea648f596beaddd30d6fa951220cd5b376e13590373fc407e0b3d41747"],
+  [19_600, 56_366_714, "05682772c81513acfdbc7dd4013196c0326c987ccd79ae5b257edfafdd8ac065"],
+  [19_700, 55_474_838, "6a04ca2103cb9e01cc40f1b007549c740a34fca35f955ac5baeae81756385eb8"],
+  [19_800, 54_521_105, "2dd4e042f867b7389fa5b5719c94fa1d4f8e5c20cea5f4ceb9980adfdd7d3a91"],
+  [19_900, 53_678_184, "77f5519e0647ce081f9fe41555b626984c08e9173cd07c124e3bf1b162981fad"],
+  [20_000, 52_775_332, "2478d45d0f38828edb3e63df648df5fc6c6cf06901d8493152e3a8bb1bddb0b3"],
+  [20_100, 51_921_045, "83fb3423742540ebd2ac70394675b4bcb4e3a74c7437aec691d62df0298d83b1"],
+  [20_200, 51_057_662, "950f2eebee6ea8cd3fb1c633f93aadeb88e4ce417c4dea493e9ad457785b2d43"],
+  [20_300, 50_220_180, "bcf1f65ccb98b2c89c47e15ec52f4a1a4c484043ae4eed176f6b5fda42ba3ae0"],
+  [20_400, 49_397_513, "874ded84a4755bc0c0f0084a95fc0fd05978bb8f4b31d93ab4a729230bd8cb5b"],
+  [20_500, 48_567_309, "aa9d4f4a7c0657cc86eb1e81095f2df00e5cad1f5f3bfac343b42f31e92d8223"],
+  [20_600, 47_799_462, "835ecb2131b2b0303a03ca6393e3bcd480b6690143e300b504d142f6db759345"],
+  [20_700, 46_955_844, "8f85cce35de1aed54f36fba0b4dc7857b97602a9a6e386e3ba23dcf67c448d86"],
+  [20_800, 46_175_844, "9b01da31f5eb92886ee8716f92fc9931835e94fca803efde633b450d396df616"],
+  [20_900, 45_397_644, "26474799e4fbc4ee4998cac8f837d9b58ab098e974ef6b7d224bf29d82145554"],
+  [21_000, 44_611_741, "e0a373854ec4e5fbcc4d101dc40e5c01031439675611375daf92b1e21d1ec6e7"],
+  [21_100, 43_882_621, "69a6b73b68887cb705b6a31b802821f151f8ba6d4f4cd46c955abb64eddfec0f"],
+  [21_200, 43_109_429, "940ab5cdc5150c82b189eb76c042f0ffcc87b4f71b0cf703ceb771fe0a9346cb"],
+  [21_300, 42_329_330, "b62bc9890d26153bd6c1821c0842d7c4e62a6f97a10f91898d351342d2b66154"],
+  [21_400, 41_601_472, "ae384e786f1be7842eae177d02bcbfbeb9e53d68df7d99a303c84bf847481b7f"],
+  [21_500, 40_904_681, "22bc5cbc09236ec6ee99f943e61ea245e5f6848c71bd108fc7ef6202c1c4be45"],
+  [21_600, 40_159_660, "dbe71ba3f2e10a4dc322eb00f744d0c6bcf4a0eda8a17862c97761e72b2bfdd7"],
+  [21_700, 39_502_271, "53c9b66dae4a44c163ecb5c1f303e2b75faadb23e346bfa97b34bad75b703673"],
+  [21_800, 38_757_538, "4574693fa302de0cb9c5f288154973da48adfae3410bd14ea3e9d843272a66c7"],
+  [21_900, 38_067_324, "dea6a30f561cbb1b497b14dc308df3d9434a4b8b89ccd1273b286a39c07994c3"],
+  [22_000, 37_398_357, "895a2ad22606eb762788672adc96b9c221eab3246930f81b95140f6b7bb5e5e5"],
+  [22_100, 36_708_598, "638732b4b776d87dfd16821d1bfc20563d11160503622872243e83cfdd91d075"],
+  [22_200, 36_062_233, "a7bc12d51995cbc9057152f9b0105bdb4244b7750fea923ba7fdaae16dbec3df"],
+  [22_300, 35_392_047, "c017c896ff4a338094c260ec8cbd3e217db9ed34a77e096bfcb1ee9cc34f3845"],
+  [22_400, 34_765_838, "d20d51f17f114e08e46aa1208c562065ff42aa06da3a387f76ef9a831e6b40e7"],
+  [22_500, 34_113_421, "cd41674f05262c1fbf19451f09bb72875e912d691b35f2d69cbde232d8888c60"],
+  [22_600, 33_479_775, "e321655e0e4ae42ebdc29829dd363f7b68308ccdf97de7c7ae3d10f130158cb0"],
+  [22_700, 32_865_609, "887cba541e2992b865146d09bb11a3c341fa6c083d078cc5d6dc0c230d910698"],
+  [22_800, 32_258_716, "9389a645d3a9d21cd72d5306d17dd3b591bb783b7dab3b4ed969998c735252b5"],
+  [22_900, 31_621_364, "e1b3c334942b009e601776b073faf0296b6722756ba66b4ba69569b17de5388e"],
+  [23_000, 31_018_474, "db8b358f8359199cf8c876210b40b7841a4647cddc00ca4f1a84bff9d9bf8e92"],
+  [23_100, 30_471_898, "be9394ddcdf1fe462a5958d78657f8b1bb4c8f46b72af0e3da04cd62793a1c24"],
+  [23_200, 29_907_120, "c79c3af41e3b39c62bfbed7fc7da3155a8bebe4b15c9de57ab4324599d30aa33"],
+  [23_300, 29_269_441, "441b8d8de2baaeb938e1e0de678cd37ae489b85a181c21c24929909cdcac52df"],
+  [23_400, 28_746_671, "b010585ab72bfa26833b6d64761c6f9def6537fba7e7b57141b35d49fbe368dc"],
+  [23_500, 28_190_755, "f7804954e6ad8ec78f1efb74dc101e77a8747651d21dd4badfe6dcf9d1d7bdfa"],
+  [23_600, 27_617_102, "b3c1ec7dc22b67544567b1dc879a8c64444f10bc14b93d6532e93a280b08a47a"],
+  [23_700, 27_074_814, "edd7a03ceafa4cbba497195ae1101d6ae7cdf2c277fab0b123a2cadaf5e70510"],
+  [23_800, 26_568_536, "978d1e59cad3eb586c5d725e6ac079c8fde4140a27ae7a2ff7baa72500d832af"],
+  [23_900, 26_048_357, "4c8d60997d4330a931bcc6a1ca26c75008308dad341bd125f6b5e2d882bb1068"],
+  [24_000, 25_504_819, "5c737d96ee5c9f5cd22e41e1d5a3729f7e6f63b837ae64dffe5a6e4d37168020"],
+  [24_100, 25_030_793, "7433baab06658e5e0e849075438d58505e5eafb91540a689a847f89cb8da837f"],
+  [24_200, 24_550_027, "bb5bd0c15a11deb9d8e359b8162a22562dda1d51acdd40aa627768a02f6ac349"],
+  [24_300, 24_043_086, "afcef8edeca772af443fa3cefcfaad8a27792c6aa1e6c1456ccbc3b9f562be10"],
+  [24_400, 23_579_703, "07feb8df4b5ed053047d3a625e8ae47cfd8b91cf750c3bd1a5f67b65c92c05bb"],
+  [24_500, 23_093_791, "3d41cdf2ae92a02ee7e671e5f4b13feff63bbe7a54fcb2f7ebb240c0840defa2"],
+  [24_600, 22_654_720, "034b1b1d356ee37d9d82a2262ee917eeb5a174aad63eaccb03d4f41877765b1f"],
+  [24_700, 22_178_552, "40d83b236f905219aa1c364d76b5aa15440f7aff10961082362263336a1ca070"],
+  [24_800, 21_718_327, "f143e76036a3bf5c2c85fdfa316341e3484852225cdd7ef14db91d36b7a8ab32"],
+  [24_900, 21_286_651, "775ebc0832231d8be72f5e5b0f020fcf0a2a845ad03824c5c32dbc6ee79ad232"],
+  [25_000, 20_828_892, "f22f5bf04adc8aa9009cd0d4cf2216bdcc3c846ea96bc753376f76ce56b465da"],
+  [25_100, 20_391_306, "93b15926d6415dd6e2126bc5cbf72e2f13d6e82728b21aa67eeae1b95a1f0a5c"],
+  [25_200, 19_961_827, "5a5ec4fa2eaa40aba1bf1e622694551fdf46a734fe7a5c9250d7bd7e98c1e2ef"],
+  [25_300, 19_496_346, "aa294a833d9b0a287cf434de4fa1173cae2d43543db1cd0415b0450f64612813"],
+  [25_400, 19_107_932, "1801098b29efaeb70d438ad07df5f865c819b259444c30a11573efa4d3ec4716"],
+  [25_500, 18_697_772, "07dff0564775cb5af16ae19469f42f47b1b4f1f410039c4af8a7f344ce8727bd"],
+  [25_600, 18_270_040, "6b617c38c7fc544702b9badb50de0cc6728c848247a96ecf6e8becc7c82778bc"],
+  [25_700, 17_901_972, "ca70703a99d1d70373471d871dc261a42be0a2ac0fd443b43d7979af4b4ea073"],
+  [25_800, 17_513_213, "48a284590f41f844d7869ec8f265b5ed0d6f195b9247a9848e7e429fb7f58ac2"],
+  [25_900, 17_110_789, "1e429dce7a8bd14a8286986328023a9b2ee2f1997bbe84c1d6d7966d576c665d"],
+  [26_000, 16_742_139, "c062ccc7f46c34c7c632e95bbce3ed1165b27d25a1efb349a4cf7505db1cf8de"],
+  [26_100, 16_391_239, "03d6bb0338a249bbb6dd93dc67c728a162dcaa849f99c4d80e9540478b90b9a9"],
+  [26_200, 16_001_239, "e7a128df908657e7d20702bd6443b98ccf6f0c6de64539ccafc142f66eeb4b6b"],
+  [26_300, 15_647_617, "78c45451388f93cf51ba655d88831ce122a3670435672061f13548443b6edd6b"],
+] as const;
+
+/**
+ * POKAZATEL (¹H₂¹⁶O), ExoMol's recommended H₂O list, valid to 6,000 K by its definition; its
+ * states the MARVELised file served on 2026-10-29 (12,667,256 bytes, last modified 2026-04-09:
+ * 14,664 of its 810,269 states MARVEL's), its transitions three columns, so that ν is E′ − E″.
+ */
+export const POKAZATEL: ExoMolFilesSource = {
+  kind: "exomol",
+  species: "H2O",
+  citation:
+    "ExoMol line list POKAZATEL for 1H2-16O, version 20230621 (O. L. Polyansky, A. A. Kyuberis, " +
+    "N. F. Zobov, J. Tennyson, S. N. Yurchenko and L. Lodi, ExoMol molecular line lists XXX: a " +
+    "complete high-accuracy line list for water, Mon. Not. R. Astron. Soc. 480 (2018) 2597-2608, " +
+    "DOI 10.1093/mnras/sty1877), its 133 transition files of 13100-26400 cm-1 and its MARVELised " +
+    `states; ${EXOMOL_2024}`,
+  url: POKAZATEL_URL,
+  fetched: "2026-10-29, from ExoMol's site",
+  terms: EXOMOL_TERMS,
+  def: {
+    name: "1H2-16O__POKAZATEL.def",
+    bytes: 13_776,
+    sha256: "50d2248b1fba7ac095b7306864c7a2556d24f989c58494c87ce16f83e7c50c87",
+    format: "text",
+  },
+  states: {
+    name: "1H2-16O__POKAZATEL.states.bz2",
+    bytes: 12_667_256,
+    sha256: "72e9067baa46884ec7811be329d5e7710adc17f37ad60f8235df3b5ccfdac092",
+    layout: { energy: 2, degeneracy: 3, j: 4 },
+  },
+  transitions: POKAZATEL_TRANSITIONS.map(([from, bytes, sha256]) => ({
+    name: `1H2-16O__POKAZATEL__${from}-${from + 100}.trans.bz2`,
+    bytes,
+    sha256,
+    fromPerCm: from,
+    toPerCm: from + 100,
+  })),
+  partition: {
+    from: "pf",
+    file: {
+      name: "1H2-16O__POKAZATEL.pf",
+      bytes: 260_000,
+      sha256: "39441c486f09e50fcc450e85e321dff968a2db4e8a606af50ae346cb293dae39",
+    },
+  },
+  broadeners: [],
+  // HITRAN's natural abundance of H₂¹⁶O (hitran.org/docs/iso-meta/, molecule 1, local 1).
+  abundance: 0.997_317,
+  binRangePerCm: HOT_BIN_RANGE_PER_CM,
+};
+
 /** HyVO's directory on ExoMol's site, whose `.def` and `.pf` VO's table takes. */
 const HYVO_URL = "https://www.exomol.com/db/VO/51V-16O/HyVO/";
 
@@ -1016,8 +1217,8 @@ const HOT_TOP_K = 4_000;
 
 /**
  * An R08.T4.f table: one list's super-lines (with its other isotopologues'), on E1′'s ladder from
- * its floor, its measured range its nodes', CUTOFF_25's shape, the cells of 380–760 nm its lines
- * reach.
+ * its floor, its measured range its nodes', CUTOFF_25's shape unless given, the cells of 380–760 nm
+ * its lines reach.
  */
 function hotTable(spec: {
   readonly exomol: ExoMolSource;
@@ -1026,6 +1227,8 @@ function hotTable(spec: {
   /** Where its measured range ends below its top node, K (VO's 3,500 K, REPACK's top), or none. */
   readonly measuredToK?: number;
   readonly rayleighCm2: RayleighCrossSection;
+  /** The line shape, where not CUTOFF_25: H₂O's continuum's convention ({@link CKD_CONVENTION}). */
+  readonly policy?: ShapePolicy;
   readonly what: string;
   readonly notes: string;
   /**
@@ -1044,7 +1247,7 @@ function hotTable(spec: {
     basis: spec.basis,
     measuredRangeK: [first, spec.measuredToK ?? last],
     temperaturesK: spec.temperaturesK,
-    policy: CUTOFF_25,
+    policy: spec.policy ?? CUTOFF_25,
     saturation: undefined,
     rayleighCm2: spec.rayleighCm2,
     reduction: `${spec.what} ${HOT_SUPER_LINE_REDUCTION}`,
@@ -1205,6 +1408,44 @@ export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
       "positive (C3Piu-B3Pig) bands are not in it: the band model of both systems stays pending " +
       "as N2's secondPositive part (bounds.json), its cells over 380-459 nm reaching 10^3-10^7 " +
       "times the table's.",
+  }),
+  H2O: hotTable({
+    exomol: POKAZATEL,
+    temperaturesK: ladderTemperatures(300, HOT_TOP_K, "E1prime"),
+    rayleighCm2: waterRayleighCm2,
+    policy: CKD_CONVENTION,
+    basis: "measured",
+    what:
+      "Hot H2O (POKAZATEL, R08.T4.f), from its hand-over; every profile less its value at the " +
+      "25 cm-1 cut-off, the continuum's convention (Clough, Kneizys and Davies 1989), as " +
+      "R08.T4.d's H2O table's lines (decision-r08-t4d-kdist.md section 6.4), nodes whose " +
+      "half-width passes 2.5 cm-1 estimated.",
+    notes:
+      "Hands over from R08.T4.d's HITRAN2024 table at 300 K, its first node at or above HITRAN's " +
+      "296 K: at and below 300 K the client reads R08.T4.d's table, above it this one " +
+      "(kDistribution.ts's tableAt). There, at 10 Pa, the 82 cells above a hundredth of that " +
+      "table's peak agree in mean to a median 1.012 (0.68-1.17; over 680-760 nm 1.027 summed), " +
+      "and over the columns at which R08.T4.d's table transmits 0.2-0.8 a cell's transmittance " +
+      "steps by up to 0.096 at 1 kPa and 0.104 at 0.1 MPa in them (hotLines.test.ts). Below 500 " +
+      "nm, where both tables' cells are at most 3.3e-3 of the peak, POKAZATEL's lines sum to " +
+      "0.48 (380-420 nm), 0.80 (420-460 nm) and 0.68 (460-500 nm) times HITRAN2024's, 0.05-4.1 " +
+      "cell by cell, and a transmittance steps by up to 0.55 at 1 kPa and 0.60 at 0.1 MPa: the " +
+      "lists disagree on water's weak blue lines, and which is nearer the measurements is not " +
+      "settled here. Both tables subtract each line's value at the 25 cm-1 cut-off, the " +
+      "continuum's convention, so that CKD's continuum, drawn at every temperature, is not " +
+      "counted twice (decision-r08-t4d-kdist.md section 6.4). POKAZATEL holds 1H2-16O alone, so " +
+      "HITRAN2024's H2-18O, H2-17O and HDO (0.27% of its abundances) are left out above 300 K. " +
+      "Every line takes the list's default width, 0.07 cm-1 per bar with n = 0.5 (its .def), " +
+      "estimated, and the table holds no self width (R08.T4.d's gives self 4.87 times air): H2O " +
+      "being dipolar (kDistribution.ts's DIPOLAR_BROADENERS), any share of it leaves this " +
+      "table's lines estimated, a steam atmosphere's taking air's width. Against the pending " +
+      "bound it replaces (ExoMol's cross-section service over the same list, per molecule of " +
+      "1H2-16O, rounded up), the direct sums' cell means are 0.995-0.996 times it at the median " +
+      "at 1000, 3000 and 4000 K (the abundance, 0.9973, and the round-up), 0.69-1.43 cell by " +
+      "cell at 1000 K and 0.93-1.05 at 4000 K. Q(T) is the list's .pf (174.5813 at 296 K). Above " +
+      "4000 K the 4000 K node is held, estimated, POKAZATEL being valid to 6000 K by its .def. " +
+      "Fetched from ExoMol's site, the database's archive holding POKAZATEL's opacities but not " +
+      "its transitions; its states the MARVELised file served on 2026-10-29.",
   }),
   VO: hotTable({
     exomol: HYVO_REPACK,

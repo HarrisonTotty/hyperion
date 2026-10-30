@@ -28,7 +28,8 @@ import type { BakeSpectrum } from "./spectralColour";
  * 2 since R08.T10.d (`decision-r08-approximate-plate.md` §8, item 1, 2026-10-27): H's lines take
  * H's own width from its table, so a medium that draws them changes. 3 since R08.T4.f: CO and HCN
  * above 300 K take the hot tables, and FeH, TiO, H₂S, SiO and N₂ are drawn where they were
- * pending. 4 since R08.T4.f's part 2: VO is drawn where it was pending.
+ * pending. 4 since R08.T4.f's part 2: VO and hot H₂O are drawn where they were pending, one raise
+ * for both though they landed apart, since every cache keyed on it lasts one session.
  */
 export const ATMOSPHERE_OPTICS_VERSION = 4;
 

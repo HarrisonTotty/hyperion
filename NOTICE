@@ -563,7 +563,11 @@ ruled 2026-10-09 and 2026-10-10).
   Mon. Not. R. Astron. Soc. 460 (2016) 4063-4074, DOI: 10.1093/mnras/stw1133); and Harris's H12C14N
   (G. J. Harris et al., Mon. Not. R. Astron. Soc. 367 (2006) 400-406, DOI:
   10.1111/j.1365-2966.2005.09960.x; R. J. Barber et al., Mon. Not. R. Astron. Soc. 437 (2014)
-  1828-1835, DOI: 10.1093/mnras/stt2011); and HyVO's 51V16O (C. A. Bowesman, Q. Qu, L. K.
+  1828-1835, DOI: 10.1093/mnras/stt2011); POKAZATEL's 1H2-16O, its transitions of 13100-26400
+  cm-1 and its MARVELised states, fetched from ExoMol's site
+  (https://www.exomol.com/db/H2O/1H2-16O/POKAZATEL/, 2026-10-29; O. L. Polyansky, A. A. Kyuberis, N.
+  F. Zobov, J. Tennyson, S. N. Yurchenko and L. Lodi, Mon. Not. R. Astron. Soc. 480 (2018)
+  2597-2608, DOI: 10.1093/mnras/sty1877); and HyVO's 51V16O (C. A. Bowesman, Q. Qu, L. K.
   McKemmish, S. N. Yurchenko and J. Tennyson, Mon. Not. R. Astron. Soc. 529 (2024) 1321-1332, DOI:
   10.1093/mnras/stae542), its strong lines as P. E. Cubillos's REPACK holds them (Repacked ExoMol
   Opacity Line Lists, Zenodo, DOI: 10.5281/zenodo.14266247, the record licensed CC BY 4.0,

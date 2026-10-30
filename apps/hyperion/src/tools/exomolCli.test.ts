@@ -330,6 +330,7 @@ describe("R08.T4.f's hot tables (decision-r08-t4ef-storage §1.4; decision-r08-t
     ["H2S", 296, 1_500],
     ["CO", 300, 4_000],
     ["HCN", 300, 4_000],
+    ["H2O", 300, 4_000],
     ["VO", 1_000, 4_000],
   ] as const)("run %s from its floor or hand-over, %i K, to %i K (E2)", (species, first, last) => {
     const nodes = hot(species).temperaturesK;
@@ -375,6 +376,27 @@ describe("R08.T4.f's hot tables (decision-r08-t4ef-storage §1.4; decision-r08-t
       ["CO"],
       2.05,
     ]);
+  });
+
+  it("subtract the pedestal from H₂O's lines alone, R08.T4.d's H₂O table's convention", () => {
+    expect(
+      Object.entries(HOT_TABLES)
+        .filter(([, table]) => table.policy.pedestal)
+        .map(([species]) => species),
+    ).toEqual(["H2O"]);
+  });
+
+  it("name POKAZATEL's 133 transition files of 100 cm⁻¹, end to end over the binned range", () => {
+    const source = hot("H2O").exomol;
+    const files = source.kind === "exomol" ? source.transitions : [];
+    const gaps = files.filter((f, i) => i > 0 && f.fromPerCm !== files[i - 1]?.toPerCm);
+    expect([
+      files.length,
+      files[0]?.fromPerCm,
+      files.at(-1)?.toPerCm,
+      gaps.length,
+      source.url,
+    ]).toEqual([133, 13_100, 26_400, 0, "https://www.exomol.com/db/H2O/1H2-16O/POKAZATEL/"]);
   });
 
   it("refine to a quarter of E1's step, R08.T4.g's tables to 12.5 K", () => {

@@ -38,6 +38,9 @@ const PLAIN: ShapePolicy = {
   estimatedAboveHalfWidthPerCm: 0.25,
 };
 
+/** CKD's convention, H₂O's (R08.T4.f): Voigt within 25 cm⁻¹ less each line's pedestal. */
+const CKD: ShapePolicy = { ...PLAIN, pedestal: true, estimatedAboveHalfWidthPerCm: 2.5 };
+
 /** A deterministic sequence in [0, 1): a linear congruential generator, for the toy lines. */
 function sequence(seed: number): () => number {
   let state = seed >>> 0;
@@ -178,6 +181,19 @@ describe("the kernel", () => {
       0.5 * voigtProfile(5, 0.5, 0.1),
       0,
       expect.closeTo(0.7 * voigtProfile(5, 0.5, 0.1), 15),
+    ]);
+  });
+
+  it("subtracts the profile's value at the cut-off within it, where the pedestal is asked", () => {
+    const pedestal = voigtProfile(5, 0.5, 0.1);
+    const kernel = circularKernel(64, 1, 5, 0.5, 0.1, true);
+    // Past the cut-off the share is 0 (a −0 times the profile's fall below its pedestal).
+    expect([kernel[0], kernel[3], kernel[61], kernel[5], kernel[6] === 0]).toEqual([
+      voigtProfile(0, 0.5, 0.1) - pedestal,
+      voigtProfile(3, 0.5, 0.1) - pedestal,
+      voigtProfile(3, 0.5, 0.1) - pedestal,
+      0,
+      true,
     ]);
   });
 });
@@ -344,6 +360,32 @@ describe("a cell's super-line spectrum", () => {
     },
   );
 
+  it.each([
+    [296, 1e5],
+    [296, 3e6],
+    [150, 8.6596e6],
+  ])(
+    "draws a curve of growth less each line's pedestal within 3 × 10⁻⁵ of line by line at %d K and %d Pa",
+    (t, p) => {
+      const superLine = superLineSpectra(species, CKD)(cellNm, t, p, [1]);
+      const exact = lineByLine(lines, CKD)(cellNm, t, p, [1]);
+      const plain = superLineSpectra(species, PLAIN)(cellNm, t, p, [1]);
+      if (superLine === undefined || exact === undefined || plain === undefined) {
+        throw new Error("the toy cell has lines");
+      }
+      let worst = 0;
+      let apart = 0;
+      for (let k = 0; k <= 60; k += 1) {
+        const u = 1e22 * 10 ** (k / 6);
+        const drawn = intervalTransmittance(superLine.node, 0, 1, u);
+        worst = Math.max(worst, Math.abs(drawn - intervalTransmittance(exact.node, 0, 1, u)));
+        apart = Math.max(apart, Math.abs(drawn - intervalTransmittance(plain.node, 0, 1, u)));
+      }
+      // The pedestal moves the curve by more than the agreement asked, so the test sees it.
+      expect([worst < 3e-5, apart > 3e-4]).toEqual([true, true]);
+    },
+  );
+
   it("keeps the cell's mean cross-section to the line-by-line one's within 10⁻⁴", () => {
     const superLine = superLineSpectra(species, PLAIN)(cellNm, 296, 1e5, [1]);
     const exact = lineByLine(lines, PLAIN)(cellNm, 296, 1e5, [1]);
@@ -410,6 +452,12 @@ describe("a cell's super-line spectrum", () => {
   it("estimates a merged node's shape where its super-lines' widths are a stated estimate", () => {
     const merged = mergedSpectra(toyLines(cellNm, 40, 5), species, species, PLAIN, 714);
     expect(merged(cellNm, 296, 1e5, [1])?.estimatedShape).toBe(true);
+  });
+
+  it("refuses a pedestal in a merged table", () => {
+    expect(() => mergedSpectra(toyLines(cellNm, 40, 5), species, species, CKD, 714)).toThrow(
+      "no pedestal",
+    );
   });
 
   it("refuses a policy of two variants, which super-lines do not take", () => {

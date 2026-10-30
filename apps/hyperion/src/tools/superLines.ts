@@ -35,6 +35,10 @@
  *   floor there (R08.T4.g's second ruling). A 150th of the cut-off,
  *   0.17 cm⁻¹, left them 4.2–8.7 × 10⁻⁴ apart there (2 × 10⁻³ at 3 × 10³⁰ cm⁻²), though smooth in
  *   p; at 300 K, where helium's cap gates such columns, 1 × 10⁻⁴.
+ * - **The pedestal.** Where a policy subtracts it (R08.T4.f's H₂O, whose lines keep the continuum's
+ *   convention at every pressure, `decision-r08-t4d-kdist.md` §6.4), the kernel is the profile less
+ *   its value at the cut-off, as T4.d's line-by-line spectrum takes it: every bin of a node shares
+ *   one width, so one kernel subtracts every line's pedestal.
  * - **The binning's smoothing.** Linear binning spreads each line over a triangle of one step,
  *   which broadens a Doppler core by about 10⁻³ of its width at a twelfth of it. The bins'
  *   transform is divided by the binning's own response ({@link assignmentResponse}), as
@@ -294,6 +298,11 @@ export function powerOfTwoAtLeast(length: number): number {
  * rounded to a whole step would move it by up to a step, which at 10 MPa (a step near 0.8 cm⁻¹, a
  * line's wing at 25 cm⁻¹ a tenth of its peak) moves a cell's least cross-sections unevenly from one
  * pressure node to the next.
+ *
+ * @param pedestal - Whether the profile's value at the cut-off, its pedestal, is subtracted within
+ *   it, CKD's convention, as `molecularLines.ts`' line-by-line spectrum subtracts it (R08.T4.f's
+ *   H₂O; `decision-r08-t4d-kdist.md` §6.4). The profile less its pedestal is 0 at the cut-off, so
+ *   the share across it changes it by under the profile's slope there times a step.
  */
 export function circularKernel(
   n: number,
@@ -301,13 +310,15 @@ export function circularKernel(
   cutoffPerCm: number,
   dopplerPerCm: number,
   lorentzPerCm: number,
+  pedestal = false,
 ): Float64Array {
   const kernel = new Float64Array(n);
   const reach = Math.min(Math.ceil(cutoffPerCm / stepPerCm + 0.5), (n >> 1) - 1);
-  kernel[0] = voigtProfile(0, dopplerPerCm, lorentzPerCm);
+  const base = pedestal ? voigtProfile(cutoffPerCm, dopplerPerCm, lorentzPerCm) : 0;
+  kernel[0] = voigtProfile(0, dopplerPerCm, lorentzPerCm) - base;
   for (let j = 1; j <= reach; j += 1) {
     const share = Math.min(Math.max(cutoffPerCm / stepPerCm - j + 0.5, 0), 1);
-    const v = share * voigtProfile(j * stepPerCm, dopplerPerCm, lorentzPerCm);
+    const v = share * (voigtProfile(j * stepPerCm, dopplerPerCm, lorentzPerCm) - base);
     kernel[j] = v;
     kernel[n - j] = v;
   }
@@ -420,6 +431,7 @@ export interface TransformedWindow {
  * @param points - The cell's point count ({@link superLinePointCount}, or more).
  * @param cache - Keeps one window's transform between calls at the same cell, temperature and
  *   coarsening; a map the caller owns, cleared between cells.
+ * @param pedestal - Whether each profile's pedestal is subtracted ({@link circularKernel}).
  * @throws RangeError where the bins' own step is not under a tenth of the node's narrowest Voigt
  *   half-width and {@link SUPER_LINE_STEPS_PER_CUTOFF} times under the cut-off.
  */
@@ -431,6 +443,7 @@ export function superLineCell(
   cutoffPerCm: number,
   points: number,
   cache: Map<string, TransformedWindow>,
+  pedestal = false,
 ): SuperLineCell | undefined {
   const [low, high] = cellWavenumbersPerCm(cellNm);
   const lorentz = superLineLorentzPerCm(species, temperatureK, pressurePa);
@@ -467,8 +480,8 @@ export function superLineCell(
   }
   const { n, stepPerCm, re: binsRe, im: binsIm } = window;
   // Both kernels in one transform: real and even, so each one's transform is real.
-  const kernelRe = circularKernel(n, stepPerCm, cutoffPerCm, dopplerLow, lorentz);
-  const kernelIm = circularKernel(n, stepPerCm, cutoffPerCm, dopplerHigh, lorentz);
+  const kernelRe = circularKernel(n, stepPerCm, cutoffPerCm, dopplerLow, lorentz, pedestal);
+  const kernelIm = circularKernel(n, stepPerCm, cutoffPerCm, dopplerHigh, lorentz, pedestal);
   fft(kernelRe, kernelIm);
   // B K_low + i B K_high: its inverse is y_low + i y_high, both real.
   const outRe = new Float64Array(n);
@@ -647,6 +660,7 @@ export function mergedCell(
     shape.cutoffPerCm,
     points,
     cache,
+    shape.pedestal,
   );
   if (indices.length === 0 && fromSuperLines === undefined) {
     return undefined;
@@ -695,6 +709,9 @@ export function mergedSpectra(
   policy: ShapePolicy,
   splitNm: number,
 ): NodeSpectra {
+  if (policy.pedestal) {
+    throw new Error("a merged table takes no pedestal");
+  }
   const below = superLineSpectra(all, policy);
   const shape: LineShape = { cutoffPerCm: policy.cutoffPerCm, pedestal: false };
   const cache = new Map<string, TransformedWindow>();
@@ -723,17 +740,18 @@ export function mergedSpectra(
 
 /**
  * A super-line species as a {@link NodeSpectra}, under a one-variant policy without a far-wing
- * factor: each node's spectrum from its temperature's bins ({@link superLineCell}), its node
- * `estimated` where the policy's half-width is passed or the width is a stated estimate.
+ * factor: each node's spectrum from its temperature's bins ({@link superLineCell}), each profile
+ * less its pedestal where the policy subtracts it (R08.T4.f's H₂O), its node `estimated` where the
+ * policy's half-width is passed or the width is a stated estimate.
  *
  * @throws Error for a policy of more than one variant or a far-wing factor, which super-lines do
  *   not take.
  */
 export function superLineSpectra(species: SuperLineSpecies, policy: ShapePolicy): NodeSpectra {
-  if (policy.variants.length !== 1 || policy.variants[0]?.chi !== undefined || policy.pedestal) {
-    throw new Error("super-lines take one variant, without a far-wing factor or a pedestal");
+  if (policy.variants.length !== 1 || policy.variants[0]?.chi !== undefined) {
+    throw new Error("super-lines take one variant, without a far-wing factor");
   }
-  const shape: LineShape = { cutoffPerCm: policy.cutoffPerCm, pedestal: false };
+  const shape: LineShape = { cutoffPerCm: policy.cutoffPerCm, pedestal: policy.pedestal };
   const cache = new Map<string, TransformedWindow>();
   let cacheCell = Number.NaN;
   return (cellNm, temperatureK, pressurePa): CellNode | undefined => {
@@ -757,6 +775,7 @@ export function superLineSpectra(species: SuperLineSpecies, policy: ShapePolicy)
       shape.cutoffPerCm,
       points,
       cache,
+      shape.pedestal,
     );
     return cell === undefined
       ? undefined

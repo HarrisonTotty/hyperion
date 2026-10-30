@@ -283,7 +283,7 @@ describe("the key the cache holds a medium under", () => {
     );
   });
 
-  it("keys on the optics' version 4, raised by R08.T4.f's hot tables and then its VO", () => {
+  it("keys on the optics' version 4, raised by R08.T4.f's hot tables and then its VO and hot H₂O", () => {
     expect(ATMOSPHERE_OPTICS_VERSION).toBe(4);
   });
 

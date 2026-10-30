@@ -23353,7 +23353,8 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     strongest and median samples.
 
   - _`ATMOSPHERE_OPTICS_VERSION`_ is raised from 3 to 4, by its own rule: VO is drawn where it was
-    pending.
+    pending. Hot H₂O's merge keeps 4 (main, 2026-10-30): the version keys in-memory caches alone,
+    so no cache of the VO-only build can meet H₂O's.
   - _Hot H₂O, as this lane left it._ POKAZATEL's 133 transition files over the range (8.46 GB) were
     shared with the lane and checked by SHA-256; its source record, `HOT_TABLES` entry and H₂O's
     Rayleigh mirror were written (20af738), and its first binning pass reached 74 of the 133 files
@@ -23366,6 +23367,8 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
   - _Questions, with leans_ (2026-10-30), listed for main:
     - One raise of `ATMOSPHERE_OPTICS_VERSION` for part 2: VO's commit takes it to 4, and H₂O's
       laptop commit may raise it too. Lean: a single raise to 4 covering both when they are merged.
+      Ruled 2026-10-30 (main, on research advice): 4 for both, every cache keyed on it lasting one
+      session.
     - REPACK's record states CC BY 4.0: lean, the table stays CC BY-SA 4.0, HyVO's.
     - `ExoMolSource` as a union on `kind`, the REPACK reader beside ExoMol's own files: lean, as
       built; a list streamed file by file (the advice's HyVO option 1) would be a third kind. The
@@ -23383,3 +23386,99 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     line shape is `estimated`, as every hot table's is.
   - _`exomol/README.md`'s bounds bullet_ still lists every list R08.T4.c summed (HyVO, Toto,
     MoLLIST's FeH and the others) though their entries left `bounds.json` with their tables.
+- **Deviations in R08.T4.f's part 2, hot H₂O, as built** (2026-10-29, on the owner's laptop, which
+  reaches ExoMol's site; main's move of hot H₂O to a laptop-side reduction, 2026-10-30;
+  decision-r08-t4ef-storage, decision-r08-t4d-kdist.md §6.4 and decision-r08-licences). Built on
+  VO's commits, the other half of part 2.
+  - _Files._ `src/tools/superLines.ts` (`circularKernel`'s and `superLineCell`'s `pedestal`;
+    `superLineSpectra` takes a policy's pedestal, and `mergedSpectra` refuses one),
+    `kDistributionsCli.ts` (`CKD_CONVENTION` exported), `kDistributions.ts` (`waterRayleighCm2`),
+    `exomolCli.ts` (`POKAZATEL` and `POKAZATEL_TRANSITIONS`, `hotTable`'s `policy`, and H₂O's
+    `HOT_TABLES` entry, before VO's by decision-r08-t4ef-storage §5.4's order), with their tests;
+    the client's `absorbers/exomol/kDistributions/H2O.json` and its 25 parts, new;
+    `exomol/lineReferencesHot.json`; `exomol/bounds.json` and `transparency.ts`, H₂O's pending
+    entry gone; `atmosphereInput.ts`'s remark; `exomol/README.md` and `NOTICE`; tests
+    `hotLines.test.ts` and `assemble.test.ts`. The README's bounds bullet now names the lists still
+    pending, TYM and C2018 (VO's record's deferred finding). No Rust, wire, WGSL or generator
+    change, and no GENERATOR_VERSION bump.
+  - _The source._ POKAZATEL v20230621 (Polyansky et al. 2018): its 133 transition files over
+    13,100–26,400 cm⁻¹ (8,449,142,450 bytes), its states (the MARVELised file served on
+    2026-10-29, 14,664 of its 810,269 states MARVEL's), `.pf` and `.def`, from
+    <https://www.exomol.com/db/H2O/1H2-16O/POKAZATEL/>, its record naming ExoMol's URLs as C2018's
+    and TYM's do. ExoMol publishes no checksums, so each SHA-256 is the fetch's (the survey's
+    `files.tsv`). The transitions have three columns, so ν is E′ − E″ from the states. The
+    abundance is HITRAN's for H₂¹⁶O, 0.997 317.
+  - _The pedestal_ (the survey's "no change to the pipeline" missed it). R08.T4.d's H₂O lines take
+    CKD's convention at every pressure, and under decision-r08-t4d-kdist.md §6.4 every body with
+    H₂O draws the continuum, at every temperature (`absorbers.ts`: the self part's power law, the
+    foreign part held at 296 K), so the hot table subtracts each line's value at the 25 cm⁻¹
+    cut-off too. Super-lines took no pedestal; they now take one where the policy asks, one kernel
+    serving every bin, since every line of a node shares one width. A toy cell's curve less its
+    pedestal lies within 3 × 10⁻⁵ of line by line, and more than 3 × 10⁻⁴ from the plain curve
+    (`superLines.test.ts`). The table takes `CKD_CONVENTION` (`estimated` past γ_L = 2.5 cm⁻¹;
+    every node is `estimated` anyway, by its default width).
+  - _The Rayleigh column._ `waterRayleighCm2` is the client's: Ciddor 1996's eq. 3 at 20 °C and
+    1,333 Pa with Z = 0.999 237, and the King factor 1.001, held equal to `rayleigh.ts` by
+    `kDistributions.test.ts`.
+  - _The projection:_ 381 cells, G 26/18/30 (717/620/716 nm), 12.11 MB on E1′–E3 (as specified
+    42.37 MB), 0.24 CPU-s a cell-node; no refinement.
+  - _The table, as built_ (the columns as part 1's table above):
+
+    | Species | Cells | Nodes, K      | P (kept, kPa) | G = 1 |        Node |       Chain |      16-bit |        1 Pa | Beyond cap | Parts |      Bytes | Basis      |
+    | ------- | ----: | ------------- | ------------- | ----: | ----------: | ----------: | ----------: | ----------: | ---------: | ----: | ---------: | ---------- |
+    | H₂O     |   381 | 300–4,000, 32 | 21 (177.8)    |     0 | 8.27 × 10⁻⁴ | 1.56 × 10⁻³ | 2.98 × 10⁻⁵ | 6.79 × 10⁻⁴ |       0.01 |    25 | 11,525,706 | `measured` |
+
+    Its first pass, on E3's 20 pressures, failed the chain tier at the dropped 177.8 kPa alternate
+    (39 states in 12 cells over 581–756 nm, 300–550 K, to 2.49 × 10⁻³), so it was reduced again
+    whole on the 21 the merge asked for, as H₂S, HCN and VO were. Its parts are 446,496–478,904
+    bytes. T4.f's tables now hold 42,251,989 bytes of its 71,366,237 (part 1's 26,233,897, VO's
+    4,492,386 and H₂O's); the cap's directories hold 120,885,752 of 150,000,000. References: 717
+    and 620 nm, the projection's strongest and median samples.
+
+  - _The hand-over_ at 300 K, as CO's and HCN's. Over the columns at which R08.T4.d's table
+    transmits 0.2–0.8, a shared cell's transmittance steps by at most (`hotLines.test.ts`, each
+    figure a test):
+
+    | Key | Cells compared                                   | 1 kPa | 0.1 MPa |
+    | --- | ------------------------------------------------ | ----: | ------: |
+    | H₂O | the 82 above a hundredth of the peak cell's mean | 0.096 |   0.104 |
+    | H₂O | all 381                                          | 0.548 |   0.598 |
+    - The 82 stronger cells agree in mean at 10 Pa to a median 1.012 (0.68–1.17); over 680–760 nm,
+      where the bands are, 1.027 summed (median 0.994), and over 500–680 nm 0.95–1.04 summed. Their
+      steps compound each cell's own ratio with POKAZATEL's default width (0.07 cm⁻¹ bar⁻¹, n =
+      0.5) over HITRAN2024's measured air widths and exponents.
+    - Below 500 nm, where both tables' cells are at most 3.3 × 10⁻³ of the peak, POKAZATEL's lines
+      sum to 0.48 (380–420 nm), 0.80 (420–460 nm) and 0.68 (460–500 nm) times HITRAN2024's, 0.05–4.1
+      cell by cell: the lists disagree on water's weak blue lines, and which is nearer the
+      measurements was not settled (a question below). HITRAN2024's line file was not on the
+      laptop, so the comparison is with R08.T4.d's committed table, as part 1's were.
+
+  - _Against the pending bound it replaces_ (ExoMol's cross-section service over POKAZATEL, per
+    molecule of ¹H₂¹⁶O, rounded up to three figures): the pass's direct sums are 0.995–0.996
+    times it at the median at 1,000, 3,000 and 4,000 K (the abundance, 0.9973, and the round-up;
+    2,000 K is not a node), 0.69–1.43 cell by cell at 1,000 K and 0.93–1.05 at 4,000 K.
+  - _What the table leaves out._ POKAZATEL is ¹H₂¹⁶O alone, so HITRAN2024's H₂¹⁸O, H₂¹⁷O and HDO
+    (0.27% of its abundances) are left out above 300 K. Every line takes the `.def`'s default
+    width, and the table holds no self width, where R08.T4.d's gives self 4.87 times air: H₂O being
+    in `DIPOLAR_BROADENERS`, any share of it leaves the hot table's lines `estimated`, and a steam
+    atmosphere above 300 K takes air's width (a question below). Above 4,000 K the 4,000 K node is
+    held, `estimated`, POKAZATEL being valid to 6,000 K.
+  - _`ATMOSPHERE_OPTICS_VERSION`_ stays 4: VO's raise covers both species, its remark naming both
+    (VO's record's question, ruled 2026-10-30): the version keys in-memory caches alone, so no
+    cache of the VO-only build can meet H₂O's.
+  - _Costs_ (the owner's laptop, 10 cores, 16 GiB, at most two heavy processes at once). The
+    checksums and one binning pass of 973,006,042 lines (973,001,355 binned) at the 63 nodes and
+    midpoints, with two `bzip2` jobs, 610 s and 3.07 GB peak resident; the bin cache 2.1 GB; the
+    projection 22 s; the reductions 1.96 CPU-hours over both passes, two workers at once, 29
+    minutes of wall time a pass, at most 524 MB resident a worker; the references 12 s. None of it
+    is in the clone.
+  - _Questions, with leans_ (2026-10-29), listed for main:
+    - Hot H₂O's lines less their pedestal, the super-lines widened to take one: lean, as built,
+      decision-r08-t4d-kdist.md §6.4 binding every H₂O line beside the drawn continuum.
+    - H₂O `measured`, though its cells below 500 nm sum to 0.48–0.80 of HITRAN2024's: lean,
+      `measured`, as part 1 judged H₂S with its blue caveat, the notes saying so. A science check
+      of both lists' blue lines against the near-ultraviolet water-vapour measurements would
+      settle which is nearer, for a later task.
+    - No self width: lean, as part 1's tables (the list's default alone), the client labelling any
+      H₂O share through `DIPOLAR_BROADENERS`; carrying R08.T4.d's self ratio, 4.87, as a stated
+      estimate would be a later task's, if steam worlds' hot H₂O is to be less approximate.
