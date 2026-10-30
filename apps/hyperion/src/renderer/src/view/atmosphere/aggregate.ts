@@ -52,6 +52,7 @@
  * gate (science-r08-mmf.md §4).
  */
 
+import { cos, exp, expm1, log, log1p, pow, sin } from "../../lib/pinnedMath";
 import { substanceName } from "../../lib/substances";
 import { gaussLegendre } from "../lighting/quadrature";
 import { type MaterialForm, indexAt, resolveMaterial } from "./materials/materials";
@@ -177,7 +178,7 @@ interface Aggregate {
 
 /** An aggregate's fractal prefactor k_f: its own, or (5 ÷ 3)^(D_f ÷ 2) where it gives none. */
 function prefactorOf(mode: Omit<AggregateMode, "material" | "form">): number {
-  return mode.fractalPrefactor ?? (5 / 3) ** (mode.fractalDimension / 2);
+  return mode.fractalPrefactor ?? pow(5 / 3, mode.fractalDimension / 2);
 }
 
 /** Why the MMF refuses an aggregate's shape, as `checkAggregate`'s throw says it, or `null`. */
@@ -263,7 +264,7 @@ const LANCZOS = [
  */
 export function gammaFunction(x: number): number {
   if (x < 0.5) {
-    return Math.PI / (Math.sin(Math.PI * x) * gammaFunction(1 - x));
+    return Math.PI / (sin(Math.PI * x) * gammaFunction(1 - x));
   }
   const z = x - 1;
   let sum = LANCZOS[0] ?? 0;
@@ -271,7 +272,7 @@ export function gammaFunction(x: number): number {
     sum += (LANCZOS[i] ?? 0) / (z + i);
   }
   const t = z + 7.5;
-  return Math.sqrt(2 * Math.PI) * t ** (z + 0.5) * Math.exp(-t) * sum;
+  return Math.sqrt(2 * Math.PI) * pow(t, z + 0.5) * exp(-t) * sum;
 }
 
 /** Below this z the transformed series sums M(a, b, −z); above it, the asymptotic series. */
@@ -295,7 +296,7 @@ export function kummerNegative(a: number, b: number, z: number): number {
         break;
       }
     }
-    return Math.exp(-z) * sum;
+    return exp(-z) * sum;
   }
   let term = 1;
   let sum = 1;
@@ -310,26 +311,26 @@ export function kummerNegative(a: number, b: number, z: number): number {
       break;
     }
   }
-  return ((gammaFunction(b) / gammaFunction(b - a)) * sum) / z ** a;
+  return ((gammaFunction(b) / gammaFunction(b - a)) * sum) / pow(z, a);
 }
 
 /** The spherical Bessel functions jₙ(u) and yₙ(u), n = 0 … order, into the arrays given. */
 function sphericalBessel(order: number, u: number, j: Float64Array, y: Float64Array): void {
-  const sin = Math.sin(u);
-  const cos = Math.cos(u);
-  y[0] = -cos / u;
+  const sinU = sin(u);
+  const cosU = cos(u);
+  y[0] = -cosU / u;
   if (order >= 1) {
-    y[1] = -cos / (u * u) - sin / u;
+    y[1] = -cosU / (u * u) - sinU / u;
   }
   for (let n = 1; n < order; n += 1) {
     y[n + 1] = ((2 * n + 1) / u) * (y[n] ?? 0) - (y[n - 1] ?? 0);
   }
-  const j0 = sin / u;
+  const j0 = sinU / u;
   if (u > order) {
     // Upward recurrence is stable for jₙ while n < u.
     j[0] = j0;
     if (order >= 1) {
-      j[1] = sin / (u * u) - cos / u;
+      j[1] = sinU / (u * u) - cosU / u;
     }
     for (let n = 1; n < order; n += 1) {
       j[n + 1] = ((2 * n + 1) / u) * (j[n] ?? 0) - (j[n - 1] ?? 0);
@@ -357,7 +358,7 @@ function sphericalBessel(order: number, u: number, j: Float64Array, y: Float64Ar
       }
     }
   }
-  const j1 = u < 0.1 ? u / 3 - (u * u * u) / 30 + u ** 5 / 840 : sin / (u * u) - cos / u;
+  const j1 = u < 0.1 ? u / 3 - (u * u * u) / 30 + pow(u, 5) / 840 : sinU / (u * u) - cosU / u;
   const f0 = j[0] ?? 0;
   const f1 = j[1] ?? above;
   const scale = Math.abs(j0) >= Math.abs(j1) || order < 1 ? j0 / f0 : j1 / f1;
@@ -388,24 +389,24 @@ const SP_CUTOFF_EXPONENT = 25;
  */
 function structureIntegrals(df: number, xg: number, pMax: number): Float64Array {
   const c = df / 4;
-  const fcNorm = (2 * c ** (df / 2)) / gammaFunction(df / 2);
+  const fcNorm = (2 * pow(c, df / 2)) / gammaFunction(df / 2);
   const uLow = SP_TAIL_FRACTION * xg;
   const uHigh = 2 * xg * Math.sqrt(SP_CUTOFF_EXPONENT / df);
   const sums = new Float64Array(2 * (pMax + 1));
   const j = new Float64Array(pMax + 1);
   const y = new Float64Array(pMax + 1);
-  let lnU = Math.log(uLow);
-  const lnHigh = Math.log(uHigh);
+  let lnU = log(uLow);
+  const lnHigh = log(uHigh);
   while (lnU < lnHigh) {
-    const u0 = Math.exp(lnU);
-    const next = Math.min(lnHigh, lnU + Math.min(SP_PANEL_LN_U, Math.log1p(SP_PANEL_U / u0)));
+    const u0 = exp(lnU);
+    const next = Math.min(lnHigh, lnU + Math.min(SP_PANEL_LN_U, log1p(SP_PANEL_U / u0)));
     const half = 0.5 * (next - lnU);
     for (let i = 0; i < SP_PANEL_ORDER; i += 1) {
       const lu = lnU + half * (1 + (SP_RULE.x[i] ?? 0));
-      const u = Math.exp(lu);
+      const u = exp(lu);
       const t = u / xg;
       // du = u d(ln u), so the integrand gains one power of u.
-      const weight = half * (SP_RULE.w[i] ?? 0) * u ** df * fcNorm * Math.exp(-c * t * t);
+      const weight = half * (SP_RULE.w[i] ?? 0) * pow(u, df) * fcNorm * exp(-c * t * t);
       sphericalBessel(pMax, u, j, y);
       for (let p = 0; p <= pMax; p += 1) {
         const jp = j[p] ?? 0;
@@ -421,11 +422,11 @@ function structureIntegrals(df: number, xg: number, pMax: number): Float64Array 
     doubleFactorial *= 2 * p + 1;
     sums[2 * p] =
       (sums[2 * p] ?? 0) +
-      (fcNorm * uLow ** (2 * p + df)) / ((2 * p + df) * doubleFactorial * doubleFactorial);
+      (fcNorm * pow(uLow, 2 * p + df)) / ((2 * p + df) * doubleFactorial * doubleFactorial);
     sums[2 * p + 1] =
-      (sums[2 * p + 1] ?? 0) - (fcNorm * uLow ** (df - 1)) / ((2 * p + 1) * (df - 1));
+      (sums[2 * p + 1] ?? 0) - (fcNorm * pow(uLow, df - 1)) / ((2 * p + 1) * (df - 1));
   }
-  const scale = 1 / (2 * xg ** df);
+  const scale = 1 / (2 * pow(xg, df));
   return sums.map((v) => v * scale);
 }
 
@@ -437,18 +438,18 @@ function structureIntegrals(df: number, xg: number, pMax: number): Float64Array 
 function meanOverlapEfficiency(aggregate: Aggregate): number {
   const { df, kf, count } = aggregate;
   const a = 0.5 * (df - 2);
-  const xMin = df * (kf / count) ** (2 / df);
+  const xMin = df * pow(kf / count, 2 / df);
   const factor = xMin / (16 * gammaFunction(0.5 * df));
   const rule = gaussLegendre(16);
   let integral = 0;
-  let ln = Math.log(xMin);
-  const top = Math.log(Math.max(60, 2 * xMin));
+  let ln = log(xMin);
+  const top = log(Math.max(60, 2 * xMin));
   while (ln < top) {
     const next = Math.min(top, ln + 0.25);
     const half = 0.5 * (next - ln);
     for (let i = 0; i < rule.x.length; i += 1) {
-      const x = Math.exp(ln + half * (1 + (rule.x[i] ?? 0)));
-      integral += half * (rule.w[i] ?? 0) * x ** a * Math.exp(-x);
+      const x = exp(ln + half * (1 + (rule.x[i] ?? 0)));
+      integral += half * (rule.w[i] ?? 0) * pow(x, a) * exp(-x);
     }
     ln = next;
   }
@@ -750,10 +751,10 @@ function angularSums(
     for (let i = 0; i < order; i += 1) {
       const t = (2 * p + 1 + (ANGLE_RULE.x[i] ?? 0)) * half;
       theta[p * order + i] = t;
-      weight[p * order + i] = half * (ANGLE_RULE.w[i] ?? 0) * Math.sin(t);
+      weight[p * order + i] = half * (ANGLE_RULE.w[i] ?? 0) * sin(t);
     }
   }
-  const mu = theta.map(Math.cos);
+  const mu = theta.map((t) => cos(t));
   const { a1 } = aggregateMatrix(field, aggregate, wavenumberPerUm, rgUm, mu);
   let s11 = 0;
   let s11Cos = 0;
@@ -792,7 +793,7 @@ export function mmfAggregate(
       `monomer size parameter ${x0} exceeds the MMF's ${MMF_MONOMER_SIZE_PARAMETER_MAX} here`,
     );
   }
-  const rg = a0 * (count / kf) ** (1 / df);
+  const rg = a0 * pow(count / kf, 1 / df);
   const rc = Math.sqrt(5 / 3) * rg;
   const xg = k * rg;
   const monomer = mieCoefficients(x0, index);
@@ -818,7 +819,7 @@ export function mmfAggregate(
   const geometric =
     (count * Math.PI * a0 * a0) / (1 + (count - 1) * meanOverlapEfficiency(aggregate));
   const tau = cAbsRgd / geometric;
-  const cAbs = Math.max(geometric * -Math.expm1(-tau), cExt - cScaMeanField);
+  const cAbs = Math.max(geometric * -expm1(-tau), cExt - cScaMeanField);
   const cSca = cExt - cAbs;
 
   const sums4pi = (4 * Math.PI) / (k * k * cScaMeanField);
@@ -836,7 +837,7 @@ export function mmfAggregate(
     b2: raw.b2.map((v) => v * sums4pi),
   };
 
-  const filling = count * (a0 / rc) ** 3;
+  const filling = count * pow(a0 / rc, 3);
   const phaseShift = 2 * k * rc * maxwellGarnettContrast(index, filling);
   const indexContrast = Math.hypot(index.n - 1, index.k);
   const monomerPhaseShift = 2 * x0 * indexContrast;
@@ -967,7 +968,7 @@ export function aggregateOptics(
     geometricCrossSectionM2: geometricM2,
     extinctionCrossSectionM2: extM2,
     scatteringCrossSectionM2: scaM2,
-    volumeM3: mode.monomerCount * (4 / 3) * Math.PI * mode.monomerRadiusUm ** 3 * 1e-18,
+    volumeM3: mode.monomerCount * (4 / 3) * Math.PI * pow(mode.monomerRadiusUm, 3) * 1e-18,
     matrix: hasTable ? keptMatrix(result.matrix) : undefined,
     shape: "aggregate",
     provenance: material.provenance,

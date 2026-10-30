@@ -69,6 +69,9 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/reference/cases.ts",
     "../view/atmosphere/reference/thickCases.ts",
     "../test/venusAlbedo.ts",
+    // The aggregates' optics, which the Titan-class case's haze reads: its platform maths moved
+    // the case's bits between x86_64 Linux and arm64 macOS (R08.T12.b.2).
+    "../view/atmosphere/aggregate.ts",
     // The tone curve and exposure `gate.ts` reads for its colours.
     "../view/photometry/toneCurve.ts",
     "../view/photometry/exposure.ts",
@@ -98,7 +101,7 @@ const MODULES = import.meta.glob<string>(
 );
 
 /** How many modules the list names: the glob drops a path that no longer exists. */
-const LISTED = 65;
+const LISTED = 66;
 
 /** Every renderer test, as its text: the scan finds among them the tests that bless a table. */
 const TESTS = import.meta.glob<string>("../**/*.test.ts", {
