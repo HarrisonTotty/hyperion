@@ -498,7 +498,7 @@ impl GlobalEntry {
 /// assert_eq!(list.entries()[0].kind(), GlobalEntryKind::Centre);
 /// // A query in the Sun's neighbourhood tests every shell and builds tables only for the streams
 /// // whose shells it meets.
-/// let centre = GalacticPosition::from_light_years([26_000.0, 0.0, 20.0])?;
+/// let centre = GalacticPosition::from_light_years([26_000.0, 0.0, 20.0]).ok_or("out of range")?;
 /// let (radius, time) = (LightYears::new(50.0), UniverseTime::EPOCH);
 /// let sphere = QuerySphere::new(centre, radius, time, LightYears::ZERO)?;
 /// let touched = list.entries_touching(&sphere).count();
