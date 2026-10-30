@@ -2880,15 +2880,24 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   are melt, from this task's per-cell temperature, not from the global state; the body's
   `melt_area_fraction` is the lid's crust's, the crust P14.T51.c's `lid` names (`CrustInputs::lid`,
   R09.T10.d; science-composition-crusts.md §5, which replaces "the secondary's, or the primary's
-  where there is none"). Tests: an airless world's day–night contrast exceeds 300 K; the
-  isothermal model's own field, before T13.d imposes plan 14's contrasts, varies by under 1 K; a
-  locked lava world's melt is the dayside region above the solidus, and its nightside is solid.
+  where there is none"). Tests: the reference Moon locked 1:1 to its star at 1 au has a substellar
+  band more than 300 K warmer than its antistellar band in the annual mean, the antistellar band at
+  the night floor, and a 3:2 Mercury of the reference Moon's surface (0.387 au, e 0.2056) has an
+  equator whose warmest and coldest samples are more than 300 K apart, while the reference Moon's
+  own equator spans under 300 K as the model runs it, its warmest within 382–402 K and its coldest
+  within 90–100 K (Diviner's "∼387–397 K" and "∼95 K", Williams et al. 2017, whose range straddles
+  300 K); the isothermal model's own field, before T13.d imposes plan 14's contrasts, varies by
+  under 1 K; a locked lava world's melt is the dayside region above the solidus, and its nightside
+  is solid.
   Records: [09-surface-generator/records/R09.T13.c.md](09-surface-generator/records/R09.T13.c.md).
-  _Built 2026-10-19_ (`57df11f6`, T13.a–d together; lane `r09-climate`). As built, the 300 K test
-  runs on an airless world locked to its star and on a 3:2 rotator's equator: the reference Moon's
-  equator, a lunar-like rotator, spans 293.1 K, within Diviner's 292–302 K (the record's deferred
-  findings, whose lean for the test's text, main's to rule, is "an airless world locked to its
-  star, or a slow rotator, has a day–night contrast above 300 K").
+  _Built 2026-10-19_ (`57df11f6`, T13.a–d together; lane `r09-climate`). _The 300 K test's text
+  (main's ruling, 2026-10-29): it names its worlds. "An airless world's day–night contrast exceeds
+  300 K" is no law: a world locked to a Sun-like star clears 300 K between its substellar and
+  antistellar bands only above about 667 W m⁻² (inside about 1.43 au) at the regolith's albedo and
+  emissivity, and plan 14's μ-weighted day–night contrast only above about 1,050 W m⁻²; a
+  rotator's range is set by its flux and its thermal parameter, and the reference Moon, itself a
+  slow rotator (`Forcing::SlowRotator`), spans under 300 K. The band difference is not plan 14's
+  `day_night_contrast_k`, and the text does not call it one._
 - **R09.T13.d Normalisation and ice.** Plan 14's mean and signed contrasts imposed on the field as
   plan 14 defines them (decision-r09-t13d-normalisation): the equator–pole contrast on the annual
   field's T(0°) less its poles' mean, a locked world's day–night contrast on its μ-weighted day and
