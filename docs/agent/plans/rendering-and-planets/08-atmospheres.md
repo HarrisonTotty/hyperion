@@ -5689,7 +5689,11 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
     rule. Without it the kept bodies cannot bake, and T14.f's gate cannot run.
   - **A source below the horizon** (μ₀ ≤ 0, outside the table, T14.b's record) reads the analytic
     term, the seam blended over the first μ₀ cell. Earth's sunsets are on this path; T14.f's and
-    T14.d's gates judge it at `ground-s90`.
+    T14.d's gates judge it at `ground-s90`. _Amended_ (main, 2026-10-29, R08.T14.d.2): the bake and
+    the correction extend below the horizon over the lit air above the planet's shadow, and the
+    table's rows and read follow, the analytic term reading below the table's new lower edge. As
+    built so far the beam and both solves take μ₀ below the horizontal and the table's grid does
+    not (Risks, "Deviations in T14.d.2, as built"), so this rule still reads as written.
   - **The recorded runs** (recorded, not gated), from the committed references, nothing re-traced:
     - c1's scalar case gate on `earth`, `earth-ozone-slab`, `mars` and `saturn-oblate` through the
       twin with the baked table in place of Ψ_ms;
@@ -5720,7 +5724,12 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
     R08.T14.b's grid.
     - The solve: 8 streams, Fourier modes m = 0..2, R08.T14.b's pseudo-spherical beam, all μ₀
       on one factorisation, at the render channels, once per latitude band.
-    - Where the beam is undefined, ΔJ_pol = 0, recorded.
+    - Where the beam is undefined, ΔJ_pol = 0, recorded. _Amended_ (main, 2026-10-29,
+      R08.T14.d.2): the beam is defined below the horizon over the lit air above the planet's
+      shadow (Dahlback and Stamnes's own twilight case), and the correction is formed there on the
+      scalar bake's rows; it is 0 only in a column wholly in the shadow. Built in the solve; the
+      table's rows below the horizon wait on main's ruling (Risks, "Deviations in T14.d.2, as
+      built").
     - It runs in the optics worker for every world with a term whose b₁ ≠ 0, thin or thick.
   - Tests:
     - at 16 streams the vector mode reproduces Natraj et al. 2009's τ 0.5, μ₀ 0.2 I, Q and U to
@@ -5821,7 +5830,11 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       μ₀ = 0, over the lit air above the planet's shadow, where the pseudo-spherical beam is
       defined (question 1). This departs from T14.e's "ΔJ_pol = 0 where the beam is undefined"
       and from the table's μ₀ ≤ 0 limit, which is T14.b's choice; the table's rows and read
-      follow. It comes after T14.d.1 and R08.T11.g.
+      follow. It comes after T14.d.1 and R08.T11.g. _Partial, 2026-10-30_ (Risks, "Deviations in
+      T14.d.2, as built", and its prototype's gates): the science check, the beam and both solves
+      below the horizontal built; the prototype's gates missed the brief's aim (Saturn's s95 at
+      every site, and Earth's ground-s90 by one view on each case), which stops the table, read,
+      kernels and twins for main's ruling.
     - **T14.d.3, Mars's aureole** (precondition 2): one of its options (a) or (b), then m = 3
       measured again on Mars alone.
     - **T14.d.4, the gates and the route.** The Venus- and Titan-class cases above,
@@ -23044,3 +23057,220 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     when it was applied over them; its fourth commit's message still calls the part (M). (O)
     runs after (G) and before (H), and its timings' check is among the summary checks that fail
     together without `timestamp-query` (`smoke/frameTiming.test.ts`).
+- **Deviations in T14.d.2, as built** (2026-10-30; `thick/sphericalBeam.ts`,
+  `thick/discreteOrdinates.ts`, `thick/polarisation.ts` and `thick/bake.ts`, each with its tests,
+  and `thick/polarisationBake.test.ts`; main's ruling of 2026-10-29 that the bake and the correction
+  extend below the horizon). **Partial.** The beam and both solves below the horizontal are built;
+  the table's rows, its read, the kernels and the twins are not. The prototype's gates (below) missed
+  the brief's aim, which stops the task there for main's ruling. No table, read, record, kernel,
+  binding, label or golden moved.
+  - _The science check_ (2026-10-30, before any code). Dahlback and Stamnes 1991 is closed access and
+    was not read. The check read cdisort 2.1.3's `c_chapman` and its comments, which cite D&S's
+    eqs. B1–B2 (GPL, read for its behaviour only, never ported), libRadtran's user guide, and
+    F. Hendrick et al., ACP 6 (2006) 93. Its reading:
+    1. _The slant depth._ The beam is defined at an interface whose ray to the sun clears the
+       ground, r_t = r_k √(1 − μ₀²) > R. The ray crosses the shells between r_t and r_k twice and
+       those above once, so the top's T is below 1. Each crossing takes the stable form
+       (r_a² − r_b²) ÷ (D_a + D_b), D² = (h − h_k)(2R + h + h_k) + r_k² μ₀².
+    2. _The beam's direction._ The pseudo-spherical solve scatters with the signed μ₀ in every layer
+       (cdisort's Legendre functions at −μ₀), λ > 0 from the spherical path. `discreteOrdinates.ts`'s
+       source, Legendre functions, parity, particular solution, user-angle source, φ and ψ and
+       resonance test need no change.
+    3. _The solver._ μ₀ < 0 is admitted only with a beam path. The ground's beam is 0 below the
+       horizontal: the must-fix, since the layer the shadow's edge cuts carries a beam to its base,
+       and T_L e^(−λτ) would light the ground. A ground other than Lambertian holds the beams above
+       the horizontal alone (the deck divides by μ′). The direct flux μ₀T is upward, below 0.
+    4. _J in the shadow._ A shadowed layer has no beam source, but the solve's diffuse field from
+       the lit air above remains, and is physical within the plane-parallel approximation. The
+       kernels already add J without the shadow, and shadow only their single scattering, by the
+       same ground-sphere test (`tablesCpu.ts`'s `groundShadows`). J ≡ 0 once the column's top lies
+       in the shadow.
+    5. _T14.e's vector solve_ takes the same `sphericalBeamPath` beam. d^l_m0 is valid on [−1, 1]
+       and needs no rotation for an unpolarised beam. Its validation and ground term change as the
+       scalar solver's do.
+    6. _The bake._ T′ and T_k are 0 in the shadow, and max(T′ − T_k, 0) holds. The IMS share's
+       filter compares each point with its bin's brightest, so the twilight rows mostly drop out of
+       `doubleForwardShare` (kept as it is; deferred, below).
+    7. _The rows._ ⌈32 |μ_lim| − ½⌉ + 1, so that the last row holds 0, with
+       μ_lim = −√(1 − (R ÷ (R + h_top))²):
+       - `earth`: −0.1751, 7 rows;
+       - `mars`: −0.3196, 11 rows;
+       - `saturn-oblate`'s four bands: −0.1427 to −0.1813, 6–7 rows;
+       - a Titan-class haze: about −0.50, 17 rows (estimated).
+
+       On accuracy alone a per-body count is the sounder; a fixed count is as good only as far down
+       as it reaches. The brief's −√(2H ÷ R) is this limit to first order (1.2% large on Earth).
+       Design note 7's twilight limit is the camera's (20.2° on Earth's ground); the table's is
+       acos(R ÷ R_top) below the point's horizontal (10.09° on Earth).
+
+    8. _Validity._ The pseudo-spherical approach is shown for mean intensities to a solar zenith
+       angle of 90°, and its validity off the zenith is "rarely" shown (libRadtran's guide, §2.2.1;
+       sdisort "may not be used for limb geometry", §3.2.1). Zenith-sky slant columns of several models agree
+       within 4.4% below 90° and 6.6% to 94° (Hendrick et al. 2006). The risk named: near the
+       shadow's edge J falls 2–50 times a row of 1/32 on Earth (about 500 on Saturn's band 3), which
+       a linear filter reads high mid-cell by (1 + r) ÷ (2√r).
+  - _The beam_ (`sphericalBeam.ts`) takes μ₀ in [−1, 1]. Above the horizontal the arithmetic is the
+    same: the by-hand records formed again over the landed tree match the committed files to the
+    byte (below). Below the horizontal:
+    - τ_s runs through the tangent point (1 above);
+    - a shadowed interface has T 0 and τ_s +∞;
+    - a shadowed layer has T 0 at its top and λ 1, uncounted in `flooredLayers`;
+    - a lit layer of τ 0 takes its chord through the layer over its thickness (the ray from its
+      base, past its dip, from where it climbs back through the base); its λ moves no T;
+    - every layer's depth is checked, though a column wholly in the shadow reads none;
+    - the layer the shadow's edge cuts, lit at its top and dark at its base, takes the λ whose
+      e^(−λt) deposits over the whole layer the same ∫T dt as the true beam over its lit part, at
+      the lit part's own average secant. That is the science check's recommendation; cdisort takes
+      Kylling and Stamnes 1992's (X₀ + X₁τ) e^(−ατ) instead. The λ is the root of
+      (1 − e^(−x)) ÷ x = the share, x = λτ, by 64 halvings of the bracket's logarithm. The rule is
+      continuous in μ₀ as the edge crosses an interface, where a dark layer would step.
+
+    Its test found a fault in the first form: the shadow height lies inside a layer, which that
+    form counted twice whole. The layer that holds the point is now split at it, once above and
+    twice below; for an interface the arithmetic is as before.
+
+  - _The solves._ `discreteOrdinates.ts`'s beams (`preparedBeam`) and `polarisation.ts`'s
+    `prepareBeams` take μ₀ in [−1, 1] with a path and in (0, 1] without one. The ground's
+    transmission is 0 for μ₀ ≤ 0. `groundCosinesOf` drops the beams at or below the horizontal, and
+    `groundModeTerms` gives each of them a zero row, so that the ground's reflection of the diffuse
+    field stays. The ground's 0 holds for a column that stands on the ground, as every column the
+    bake and the correction make does; the deck's column does not (below).
+  - _The bake._ `checkBakeInputs` takes sun cosines in [−1, 1] other than 0 (its view cosines in
+    (0, 1], as before). `THICK_BAKE_GRID` keeps its 32 rows above the horizontal, the grid of the
+    bake, the correction and the deck (R08.T15.a.1) alike. The module's docs, `MsSourceTable`'s and
+    `PolarisationTable`'s say so.
+  - _Tests._
+    - `sphericalBeam.test.ts`: τ_s against the ray's own intersections with every sphere, to 10⁻⁹
+      at 11 cosines from −0.17 to 1; the top below 1; the shadow as the twin's ground shadow; no
+      beam in it; the top dark just past −0.1751 (100 km over 6,371 km) and lit just inside it;
+      T = e^(−τ_s) at every lit interface with no floor, to 10⁻¹²; T carried at every lit layer to
+      10⁻¹²; the floor of a clear layer under a thick one below the horizontal, caught up below it;
+      a clear layer's chord, lit and at the shadow's edge; the edge layer's deposit to 10⁻⁶; τ_s
+      continuous across μ₀ = 0 (±10⁻⁹) to 10⁻⁵; μ₀ = 0 itself; a bad depth refused in full
+      shadow.
+    - `discreteOrdinates.test.ts`: energy at ω = 1 to 10⁻⁶ against the deposit
+      Σ T_p (1 − e^(−λ_p τ_p)) ÷ λ_p, on Rayleigh and Henyey–Greenstein g 0.85 air over black and
+      white grounds; the ground unlit, though the edge layer carries a beam to its base; a Lambertian
+      ρ⁰ = A ground solved as the albedo; the refusals.
+    - `polarisation.test.ts`: energy at ω = 1 to 10⁻⁶ on Rayleigh air; the depolarisers give the
+      scalar I to 10⁻¹²; the refusal.
+    - `bake.test.ts`: the stored source's integral identity to 10⁻¹² below the horizontal too; on
+      Titan-class Rayleigh air, a finite J, its m = 0 at least 0, J joined across μ₀ = 0 (±10⁻⁶)
+      to 10⁻³, and 0 past the top's shadow; the refusals of a sun cosine of 0 or past [−1, 1] and
+      of a view cosine past (0, 1].
+    - `polarisationBake.test.ts`: the correction finite and formed below the horizontal, 0 past
+      the top's shadow, and 0 to 10⁻¹² with every term a depolariser.
+    - `deck.test.ts`: the deck's refusal of a sun below the horizontal (below).
+  - _The departures_ (main's ruling). T14.e's "ΔJ_pol = 0 where the beam is undefined" and
+    `decision-r08-t13c2-classes.md` §6's below-horizon rule (T14.c's entry) carry the amendment in
+    their entries: built in the solves, not yet in the rows.
+  - _The deck_ (the brief's overlap with `r08-deck`). On `THICK_BAKE_GRID` nothing of the deck
+    moves. `prepareDeck` refuses a grid with a sun at or below the horizontal (`thick/deck.ts`, one
+    guard and its test), which `checkBakeInputs` refused before this task: `bakeDeck` reads sun s's
+    ρ at column n + s of `groundCosinesOf`'s incident cosines, which now hold the suns above the
+    horizontal alone, and the upper medium stands on the deck's top, which a twilight sun may
+    light while the solves hold their ground unlit. Shared lines for R08.T15: `checkBakeInputs`,
+    which `prepareDeck` calls; `groundCosinesOf`; `groundModeTerms`; the solves' ground
+    transmission; `sphericalBeamPath`. Whether the deck's tables take the rows below the horizontal
+    is R08.T15.a.2's (lean: it decides with its read, and lifts the guard).
+- **R08.T14.d.2's prototype** (2026-10-30, pod, 4 vCPU; CPU only, none of it landed; its patch is in
+  main's orchestration records). `THICK_BAKE_GRID` and `read.ts`'s μ₀ map are extended by 7 rows of
+  1/32 below the horizontal, to the cell edge −7/32, the analytic blend moved to the lowest cell,
+  [−7/32, −6/32]. The vector gate is run by hand (`HYPERION_VECTOR_GATE=1 HYPERION_BLESS=1`, 8 m 12 s
+  to 8 m 35 s a run). The twilight images' misses on the route, with the worst |ΔL| ÷ (T + 4σ):
+
+  | Case and image                | BASE      | 1/32, linear | 1/64, linear | 1/32, J⁰ geometric |
+  | ----------------------------- | --------- | ------------ | ------------ | ------------------ |
+  | `earth` ground-s90            | 26, 2.10  | 8, 1.94      | 2, 1.41      | 1, 1.04            |
+  | `earth-ozone-slab` ground-s90 | 24, 2.05  | 6, 1.54      | 2, 1.14      | 1, 1.02            |
+  | `saturn-oblate` equator-s90   | 13, 7.08  | 15, 2.07     | 9, 1.59      | 0, 0.75            |
+  | `saturn-oblate` lat60-s90     | 10, 6.31  | 1, 1.11      | 0, 0.68      | 0, 0.95            |
+  | `saturn-oblate` pole-s90      | 10, 5.54  | 7, 1.67      | 0, 0.82      | 0, 0.56            |
+  | `saturn-oblate` equator-s95   | 24, 31.87 | 18, 5.17     | 8, 1.65      | 18, 2.85           |
+  | `saturn-oblate` lat60-s95     | 19, 36.50 | 17, 3.74     | 19, 6.70     | 19, 7.38           |
+  | `saturn-oblate` pole-s95      | 11, 40.03 | 9, 4.17      | 11, 6.56     | 11, 6.99           |
+  | `mars` ground-s90 (T14.d.3's) | 17, 5.89  | 18, 9.62     | 17, 9.10     | 21, 8.73           |
+  | `mars` ground-s95 (T14.d.3's) | 6, 4.16   | 6, 6.74      | 6, 6.89      | 6, 7.04            |
+  - _The variants._
+    - The 1/64 run takes 78 rows (14 below the horizontal), its edge still at −7/32: a control on
+      the filter, not a proposal (twice the bytes).
+    - The geometric read takes J⁰ as J⁰_s0^(1 − f) J⁰_s1^f between the two rows where both are
+      above 0 below the horizontal, with G and G₂ linear as their ratio to J⁰. It was run twice,
+      before and after the edge layer's fault was fixed, with the same verdicts at every image; the
+      linear runs predate the fix.
+    - No other image of any case moved. Every daylit and aerial verdict is T14.d.1's.
+    - _The rows' reach._ The 7 rows reach −7/32 on every body: past `earth`'s −0.1751 and
+      `saturn-oblate`'s −0.1427 to −0.1813, short of `mars`'s −0.3196 (11 rows). Mars's suns below
+      −7/32 read the analytic term in every variant (T14.d.3's).
+    - `earth`'s and `earth-ozone-slab`'s ground-s95 refuse all 63 of their geometries before and
+      after (σ_ref over T ÷ 8), so they are not in the table.
+  - _Not owed while no row is built._ `vectorGate.json` and `thickRuns.json` are not re-blessed:
+    each formed again by hand over the landed tree (`HYPERION_VECTOR_GATE=1` and
+    `HYPERION_THICK_RUNS=1` with `HYPERION_BLESS=1`, 8 m 16 s and 4 m 16 s) matches its committed
+    file to the byte. The prototype ran no scalar `thickRuns` pass. The frame: no read, texel,
+    binding or kernel changed, so QW33's (K)–(N) on T14.f's tree stand (pending: the owner's RTX
+    run).
+  - **The aim missed.** The brief's aim is that `earth`'s and `earth-ozone-slab`'s ground-s90 and
+    `saturn-oblate`'s s90 and s95 pass. With the geometric read:
+    - Saturn's s90 passes at all three sites;
+    - Earth's ground-s90 keeps one miss on each case (`ground-s90-v85-a180/r` at 1.04, and
+      `earth-ozone-slab`'s `ground-s90-v85-a90/r` at 1.02);
+    - Saturn's s95 misses at every site under every variant.
+
+    The task stops there, as the brief directs.
+
+  - _What the misses are._
+    - _The filter._ J falls steeply between rows near the shadow's edge. Twice the rows take
+      Earth's anti-sun excess (v85-a180, blue) only from +20% to +16%, where the geometric read at
+      1/32 takes it to +10%: part of it is the filter's, part is not.
+    - _The model, at s95._ Through the geometric read every s95 view reads dim: Saturn 0.34–0.98 of
+      the vector I, and Earth's ungated s95 0.61–1.03. That is the pseudo-spherical column's own
+      limit: it carries no light from the lit air sunward of the column, past the 90° to which
+      libRadtran's guide shows the approach (above). Through the linear read Saturn's equator read bright (to 1.53) and lat60 and the
+      pole dim: the band's sphere of s_b √(MN) stands for the normal section toward the sun (N on
+      the equator, M at lat60), which moves the shadow's height (deferred, below).
+    - _The channels at a low sun._ Through the linear read blue reads 2–7% above red and green
+      across Earth's s90 views: T14.d.1's conversion at a low sun (blue 1.04 of a solve at
+      433.6 nm at μ₀ 1/64).
+  - _The bytes, if built at 7 rows._ 33 × 39 × 16 texels × 16 B is 329,472 B a band and light, and
+    329,728 B with the info row: 21.9% over 270,592 B (Design note 11's 262 KB row, which T14.d.4
+    counts). A routed Saturn-class world of four bands would hold about 1.25 + 1.32 = 2.57 MB with
+    one star, against T14.f's 2.33 MB. Built, it would also amend Design note 9's "32 μ₀" and
+    Design note 11's 262 KB. Not built.
+  - _The bake's time at 7 rows_ (T14.d.1's scratch probe: `bakeKeptCase` and `bakeKeptCorrection`
+    of the kept cases on the twin's bands, one thread, two runs after a warm-up, the 39-row grid
+    first; the 1-minute load 0.45 and 0.44 at the two runs' starts). Against `BAKE_CEILING_S`, 5 s,
+    the UHD 620 host's:
+
+    | Case                         | A band, 32 rows | A band, 39 rows | Bake, 32 rows | Bake, 39 rows | Correction, 32 rows | Correction, 39 rows |
+    | ---------------------------- | --------------- | --------------- | ------------- | ------------- | ------------------- | ------------------- |
+    | `earth` (one band)           | 3.13–3.26 s     | 3.56–3.59 s     | 3.35–3.47 s   | 3.75–3.81 s   | 1.63–1.67 s         | 1.78–1.89 s         |
+    | `saturn-oblate` (four bands) | 1.66–1.81 s     | 1.91–2.12 s     | 6.68–6.97 s   | 7.79–8.15 s   | 3.47–3.52 s         | 3.96–4.02 s         |
+
+    The 32-row figures repeat T14.d.1's. By the runs' means, seven more rows cost 11% of
+    `earth`'s bake and of its correction, and 17% of `saturn-oblate`'s bake (1.70 s a band to
+    1.99 s) and 14% of its correction, all on each mode's one factorisation. `earth`'s sum moves
+    from 5.0–5.1 s to 5.5–5.7 s, over the ceiling on the pod. An earlier pair of runs, the 39-row
+    one under a load of 3.24, gave 13–17% and 11–14%. The UHD 620 host's time is pending: the
+    owner's run.
+
+- **Deferred findings (2026-10-13 rule)** (R08.T14.d.2). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The oblate band's sphere at the shadow's edge._ The bake's band takes one sphere of s_b √(MN),
+    while the true shadow's height follows the spheroid's normal section toward the sun
+    (1 ÷ R(α) = cos²α ÷ M + sin²α ÷ N). On `saturn-oblate` at s95 that is about 11% of the radius
+    on the equator (N against √(MN)) and 3% at lat60 (M), which moves J by its scale heights there.
+    It lies under the model's own s95 limit above. Lean: record it with the s95 ruling; no table
+    axis holds the azimuth.
+  - _The IMS share's filter_ (the science check). `doubleForwardShare` keeps the points whose light
+    is at least 10⁻³ of their bin's brightest, so a twilight row, far dimmer, mostly drops out of
+    it. Lean: filter per μ₀ row when the table takes rows below the horizontal.
+  - _The analytic term below the table's lower edge._ With rows below the horizontal, Ψ_ms reads
+    past −7/32, where the pseudo-spherical bake holds 0 once the column's top is in the shadow
+    (`earth`'s −0.1751). The blend then brings a little light back past the lowest row. Unmeasured:
+    no gated view's observer stands there (s95 is μ₀ −0.087). Lean: leave it, as the brief has the
+    analytic term read below the edge.
+  - _The edge figure's wording._ The brief's "about −√(2H ÷ R), Design note 7's twilight limit" is
+    the table's own limit, −√(1 − (R ÷ (R + h_top))²), to first order, not Design note 7's (the
+    camera's). The plan's entry ("over the lit air above the planet's shadow") already reads
+    correctly; this is for main's next brief.
