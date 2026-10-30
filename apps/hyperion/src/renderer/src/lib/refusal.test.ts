@@ -9,6 +9,7 @@ describe("isRefusal", () => {
     "name_taken",
     "unknown_universe",
     "unknown_system",
+    "unknown_feature",
     "unknown_body",
     "generator_version_mismatch",
   ])("reads %s as a refusal of what the request asked", (code) => {

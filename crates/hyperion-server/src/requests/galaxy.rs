@@ -485,7 +485,7 @@ impl RowExtras {
 }
 
 /// Runs `job` as an interactive pool job and waits for its value.
-async fn run<T: Send + 'static>(
+pub(super) async fn run<T: Send + 'static>(
     state: &AppState,
     token: &CancelToken,
     job: impl FnOnce(&CancelToken) -> T + Send + 'static,

@@ -44,6 +44,7 @@ const ERROR_CODES: Readonly<Record<ErrorCode, true>> = {
   hello_required: true,
   unknown_universe: true,
   unknown_system: true,
+  unknown_feature: true,
   unknown_body: true,
   generator_version_mismatch: true,
   unsupported_save_format: true,

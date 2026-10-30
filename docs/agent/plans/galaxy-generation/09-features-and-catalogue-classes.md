@@ -4487,6 +4487,89 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `tests/feature_members.rs`: served, a query inside a globular returns its members with their
     origin, class and velocity, the sim's own rows at 0 and 1,000 yr, the same warm, and with
     briefs and observed; near the Sun every row says `grid`; held, no member and no key.
+- **P09.T40.b as built (lane `p09-t40`, 2026-10-30, on 65b6d31 at `GENERATOR_VERSION` 23 and
+  `PROTOCOL_VERSION` 3; no existing output moves).** Main's rulings of 2026-10-30: the four kinds
+  are served and answer what the tree holds at 23, where the features exist; `CentreMemberSource`
+  and `CatalogueClassSource` wait on P09.T37. The handlers read the catalogue and the centre's
+  models, not the range query's sources, so they are served whatever P09.T40.a's members gate holds.
+  `just gen-protocol` adds `AssociationStructure.ts` and changes `ErrorCode.ts` and
+  `FeatureStructure.ts`; `golden_diff.py` reports one new golden, `tests/golden/features.golden`,
+  and nothing pinned before moves (the four kinds were answered `unsupported`).
+  - _Handlers._ `requests/features.rs` (`in_range`, `map`, `detail`, `black_hole`), the checks and
+    answers in `convert/feature_answers.rs`. Each starts from `openable_universe`, checks `time`
+    against the clock window, then its own fields in order (`centre` and `radius_ly` as a range
+    query's, then `kinds`; or `feature`), and builds its answer in one interactive pool job. A
+    `kinds` list is non-empty with no repeat. `kinds_without_a_handler_are_answered_unsupported` is
+    over five kinds again, and `a_feature_kind_is_answered_unsupported_until_it_is_served` is gone.
+  - _Refusals (lean, 2026-10-30)._ `ErrorCode::UnknownFeature` (`unknown_feature`, naming `feature`)
+    joins without a bump, `ErrorCode` being on plan 04's growing list: a well-formed feature word
+    that `FeatureCatalogue::resolve` does not give back, or whose feature is none at the time. A
+    word that is no feature's (a member's with its slot set, a grid system's, the black hole's, no
+    `SystemId`) is `bad_request` naming `feature`; `f000000000000000` is the centre. The client
+    reads `unknown_feature` as a refusal (`refusal.ts`), and its exhaustive tables take it
+    (`subscriptions.ts`, `useServerRequest.ts`, `AtmosphereCache.ts`).
+  - _A summary at `t`._ Kind `kind_at(t)` (a feature without one is left out); position the epoch
+    position moved by `bulk_velocity` (a cloud stays); extent a cluster's tidal radius (a globular,
+    an old open cluster, a nursery that is a bound cluster then), any other nursery's half size at
+    its age, a cloud's half-mass radius; mass a globular's today, an old open cluster's at `t`, a
+    nursery's stars at its age, a cloud's gas; age at `t`, null for a cloud; `EmissionClass::of` at
+    `t`; a nursery's `Superbubble` at its age. A range places each looked-up feature cheaply first
+    and counts the classes only of one of a wanted kind that meets the sphere.
+  - _Expected members (lean)._ `compute::expected_members_of`: the sum of
+    `class_counts(galaxy, model, reach)` at the epoch, classes then tails (`counted_members`), about
+    1 ms a cluster in a test build against 19 ms for its interior; 0 with no cluster model. A
+    detail's classes are the same counts and sum to the summary's figure. Deferred findings
+    (2026-10-13 rule): the interior cuts its tails at its nested grid's reach (`with_tails_to`), so
+    where the grid stops short the summary expects more members than `FeatureMemberSource` places;
+    and the centre's `CentreClasses::systems()` counts its whole profile, about 3% beyond the 128 ly
+    reach its mass and extent stop at. Both unmeasured over the catalogue; P09.T41.c shows the
+    figure as the member count.
+  - _The centre (lean)._ ID `f000000000000000`; designation `CENTRE`, its feature-level members'
+    `CENTRE M<i>` without the slot; at the origin, the same at every time; extent 128 ly
+    (`NuclearClusterParams::NORMALISATION_RADIUS`); mass the nuclear cluster's inside it; expected
+    members `CentreClasses::systems()`; age, emission and bubble null (six episodes have no single
+    age). Its detail is `centre`: the influence and loss-cone radii and every class with its episode
+    and tracer.
+  - _`features_in_range` (lean)._ The catalogue is read through the shared feature cells about the
+    sphere padded by `pad_for(t, UNBOUND_PAD_SPEED)`; a feature is in range when its sphere of
+    `extent_ly` at `t` meets the query's; nearest first, then by word. `MAX_FEATURE_CELLS` = 512
+    (`limits.rs`, the server's own limit beside plan 04's design note 24) bounds the lookup's cell
+    box (`feature_cells_near`, corners counted, so it errs toward refusing): past it every catalogue
+    kind is `over_cell_budget` and unread, about a 10,000 ly sphere at the Sun-like point, some 0.7
+    s of cells cold at 1.4 ms a cell in a test build. The centre is answered whatever the budget;
+    streams and dwarf cores are `not_generated`.
+  - _`galaxy_features` (lean)._ `compute::GalaxyFeaturesService`, a `SharedByteLru` over `GalaxyKey`
+    with a `SingleFlight` as `DensityMapService` is, keeps `MapGlobulars` per galaxy (two saves of
+    one seed share it, plan 04's design note 23): every globular of `walk_process(Globular)` with
+    its expected members (142 in the tests' galaxy, walked in 17 ms and counted in 56 ms in a test
+    build), found in a bulk job on the first request; each request describes them at its time.
+    Budget `GALAXY_FEATURES_CACHE_BYTES` = 1 MiB, a constant; `ServerStats::galaxy_features`. The
+    centre's list is its one summary; bright shells are `not_generated` until P09.T37.
+  - _`feature_detail` (lean)._ A feature with a cluster model is `cluster` (its class counts and
+    tails); a nursery is one while it has a model and is embedded or a bound cluster. A cloud is its
+    Plummer profile. A nursery with no model is `cloud` while it holds gas, the Plummer ball the
+    features' gas places (half its gas within half its size), and otherwise the new
+    `association { radius_ly, expansion_speed_km_s }`: `FeatureStructure` is closed, but no build
+    had sent a value of it, so it took the variant without a bump ("P09.T39 as built").
+  - _`black_hole_state` (lean)._ `id` `f000000700000000`, the mass the parameter's, the luminosity
+    `luminosity_at` by part, the disruptions every victim at or before `t`, newest first (the sim's
+    list reversed). Refused outside the clock window, naming `time`, though the centre's events
+    reach back to the source horizon. `CentreLuminosityModel::of` is built per request (0.8 ms once
+    the centre is built, 251 ms the first time, in a test build); if it fails, which no galaxy the
+    sim allows reaches, the answer is `internal`.
+  - _Not tested._ A detail of a feature that is none at the time (`unknown_feature` by `kind_at`);
+    the service's shared flight and its cancellation; the cost of a sphere at the cell budget and of
+    a map request's description (some 140 summaries); a job's cancel token, which no handler here
+    checks between features.
+  - _Tests._ `tests/features.rs`: each message over the WebSocket (a range at 0 and 1,000 yr with
+    the nearest cluster as the sim has it; an empty halo sphere, the budget at 40,000 ly, every
+    field refused by name; a cluster's, the centre's and a cloud's detail, `unknown_feature` and
+    `bad_request`; the map, kept, its first answer whole again; the black hole at −1,000, −1, 0, 1
+    and 1,000 yr), and `the_feature_answers_are_the_golden_frames`, which pins the frames of the
+    four. `convert::feature_answers`: the IDs, the kinds, the cell box, a range the same through the
+    cell cache at every budget and in either order, the map's kept globulars each its own summary,
+    and an unbound nursery as its gas or an association. The protocol's wire forms; the client's
+    `isRefusal`, `useServerRequest` and `RequestStatus` tables.
 - **P09.T33.a as built (lane `p09-classes`, 2026-10-29, at `GENERATOR_VERSION` 23, no output
   moves).** The first production class, registered: `ProductionClasses` has the
   `CORE_COLLAPSE` arm and plan 03's `placement::resolve` hands every `111` ID to the class grid

@@ -16,9 +16,10 @@
 //! [`Handler`] is the seam where each kind's handler plugs in (plan 04, P04.T14). The server's is
 //! [`Handlers`]; unit tests inject doubles through [`AppState`]. The handlers of the universe
 //! lifecycle are in [`universe`], the galaxy's in [`galaxy`], the system's in [`system`], the
-//! scene's in [`scene`], the sky's in [`sky`], the surface's in [`surface`], and plan 12's
-//! `resolve_system` in [`observe`].
+//! scene's in [`scene`], the sky's in [`sky`], the surface's in [`surface`], plan 12's
+//! `resolve_system` in [`observe`], and plan 09's features' in [`features`].
 
+mod features;
 mod galaxy;
 mod observe;
 mod scene;
@@ -286,17 +287,18 @@ impl Handler for Handlers {
             RequestBody::ResolveSystem(request) => {
                 Box::pin(observe::resolve_system(state, request, token).map(answered))
             }
-            // Plan 09's kinds are the protocol's (P09.T39), answered as an older server would
-            // until P09.T40.b serves them.
-            RequestBody::FeaturesInRange(_) => {
-                Box::pin(ready(Err(not_served_yet("features_in_range"))))
+            // Plan 09's kinds (P09.T39), served since P09.T40.b.
+            RequestBody::FeaturesInRange(request) => {
+                Box::pin(features::in_range(state, request, token).map(answered))
             }
-            RequestBody::GalaxyFeatures(_) => {
-                Box::pin(ready(Err(not_served_yet("galaxy_features"))))
+            RequestBody::GalaxyFeatures(request) => {
+                Box::pin(features::map(state, request, token).map(answered))
             }
-            RequestBody::FeatureDetail(_) => Box::pin(ready(Err(not_served_yet("feature_detail")))),
-            RequestBody::BlackHoleState(_) => {
-                Box::pin(ready(Err(not_served_yet("black_hole_state"))))
+            RequestBody::FeatureDetail(request) => {
+                Box::pin(features::detail(state, request, token).map(answered))
+            }
+            RequestBody::BlackHoleState(request) => {
+                Box::pin(features::black_hole(state, request, token).map(answered))
             }
         }
     }
@@ -1486,7 +1488,7 @@ mod tests {
         // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
         // kinds the connection routes, `scene_cameras` until R03.T8 serves it, R06's `sky`
         // while its switch is off (R06.T11.c), as this test turns it: it is on by default since
-        // rendering plan R13's R13.T2, and plan 09's four kinds until P09.T40.b serves them.
+        // rendering plan R13's R13.T2. Plan 09's four kinds are served since P09.T40.b.
         let harness = Harness::start_configured(Handlers, ConnectionLimits::default(), |config| {
             config.sky_service(SkyService::Unsupported)
         })
@@ -1501,14 +1503,10 @@ mod tests {
                         | RequestBody::Unsubscribe(_)
                         | RequestBody::SceneCameras(_)
                         | RequestBody::Sky(_)
-                        | RequestBody::FeaturesInRange(_)
-                        | RequestBody::GalaxyFeatures(_)
-                        | RequestBody::FeatureDetail(_)
-                        | RequestBody::BlackHoleState(_)
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 9);
+        assert_eq!(events.len(), 5);
         for body in events {
             let name = kind(&body);
             let answer = Handlers

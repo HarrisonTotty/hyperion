@@ -311,7 +311,14 @@ pub enum FeatureStructure {
     /// The galactic centre's nuclear cluster about its black hole (plan 09's `CentreModel`).
     Centre(CentreStructure),
     /// A molecular cloud: gas and dust, with no members.
+    ///
+    /// A star-forming region still embedded in its gas and not bound, which has no cluster model,
+    /// is described by its gas, as a cloud.
     Cloud(CloudStructure),
+    /// An association: a nursery's stars, unbound and expanding once its gas has gone.
+    ///
+    /// It has no cluster model and no members of its own.
+    Association(AssociationStructure),
 }
 
 /// A cluster's structure today.
@@ -359,6 +366,16 @@ pub struct CloudStructure {
     pub core_radius_ly: f64,
     /// The density of hydrogen at its centre, per cubic centimetre.
     pub central_density_per_cm3: f64,
+}
+
+/// An association's structure at a time.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AssociationStructure {
+    /// Its radius at the time, in light-years, above zero: half the size it has expanded to.
+    pub radius_ly: f64,
+    /// The speed its stars move away from its centre at, in km/s, above zero.
+    pub expansion_speed_km_s: f64,
 }
 
 /// One member class of a feature with its expected count.
@@ -1164,7 +1181,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn feature_detail_structure_wire_forms_for_the_centre_and_a_cloud() {
+    fn feature_detail_structure_wire_forms_for_the_centre_a_cloud_and_an_association() {
         assert_wire_form(
             &FeatureStructure::Centre(CentreStructure {
                 influence_radius_ly: 10.0,
@@ -1207,6 +1224,13 @@ pub(crate) mod tests {
                 central_density_per_cm3: 125.0,
             }),
             json!({ "type": "cloud", "core_radius_ly": 25.0, "central_density_per_cm3": 125.0 }),
+        );
+        assert_wire_form(
+            &FeatureStructure::Association(AssociationStructure {
+                radius_ly: 62.5,
+                expansion_speed_km_s: 4.5,
+            }),
+            json!({ "type": "association", "radius_ly": 62.5, "expansion_speed_km_s": 4.5 }),
         );
     }
 

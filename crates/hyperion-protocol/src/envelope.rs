@@ -242,6 +242,11 @@ pub enum ErrorCode {
     /// cannot be placed yet (a member of the galactic centre, as `resolve_system` answers it);
     /// `field` names the request's field.
     UnknownSystem,
+    /// A well-formed feature ID that names no feature of the universe at the request's time;
+    /// `field` names the request's field (galaxy plan 09, P09.T40.b).
+    ///
+    /// Like the other codes plan 04's reserved list names as growing, it was added without a bump.
+    UnknownFeature,
     /// A well-formed body ID that names no body of its system, or none the detail level asked for
     /// resolves; `field` names the request's field.
     UnknownBody,
@@ -1147,6 +1152,7 @@ mod tests {
             (ErrorCode::HelloRequired, "hello_required"),
             (ErrorCode::UnknownUniverse, "unknown_universe"),
             (ErrorCode::UnknownSystem, "unknown_system"),
+            (ErrorCode::UnknownFeature, "unknown_feature"),
             (ErrorCode::UnknownBody, "unknown_body"),
             (
                 ErrorCode::GeneratorVersionMismatch,

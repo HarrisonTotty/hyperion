@@ -110,6 +110,7 @@ function settledState<K extends RequestKind>(
     case "hello_required":
     case "unknown_universe":
     case "unknown_system":
+    case "unknown_feature":
     case "unknown_body":
     case "generator_version_mismatch":
     case "unsupported_save_format":

@@ -1,11 +1,12 @@
-//! The caches of plan 09's large features, bounded in bytes (P09.T40.a): each feature cell's
-//! contents, and each feature's interior.
+//! The caches of plan 09's large features, bounded in bytes: each feature cell's contents and each
+//! feature's interior (P09.T40.a), and the galaxy map's globulars (P09.T40.b).
 //!
 //! A query near a feature looks up every feature cell within the feature reach of its sphere
 //! ([`FeatureCatalogue::near`]), and a feature with members builds its interior, its cluster model,
 //! class table and nested grid ([`FeatureInterior::of`]): 14–17 ms each by plan 09's Risks
 //! ("Ruling 139 as built", 139.5), and about 88 ms each in a test build (115 in 10.1 s, measured
-//! 2026-10-30 for a 50 ly query at the Sun-like point). Two queries near one another ask for the same ones, so the server keeps both:
+//! 2026-10-30 for a 50 ly query at the Sun-like point). Two queries near one another ask for the
+//! same ones, so the server keeps both:
 //! [`SharedFeatureCellCache`] is a [`SharedByteLru`] over `(GalaxyKey, FeatureCell)` and
 //! [`SharedClusterModelCache`] one over `(GalaxyKey, FeatureId)`, so that two saves of one seed
 //! share their entries and nothing generated under one generator version is lent for another
@@ -20,6 +21,10 @@
 //! the same time; the second insert replaces an equal value, which is cheaper than coordinating
 //! (the same ruling as [`SharedByteLru`]'s).
 //!
+//! The galaxy map's globulars are every globular of a galaxy with its expected members, found once
+//! in a bulk job and kept per galaxy by the [`GalaxyFeaturesService`], as the density maps are;
+//! each request describes them at its own time.
+//!
 //! Like the cell cache's handle, a handle cannot check that it is lent the galaxy its key names
 //! beyond its seed. A bare galaxy and its [`with_full_potential`](Galaxy::with_full_potential)
 //! share a seed and differ in their members; what keeps them apart is that only
@@ -30,15 +35,21 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::features::FeatureId;
 use hyperion_sim::galaxy::features::catalogue::{
     FeatureCatalogue, FeatureCellCache, FeatureCellContents, FeatureRecord,
 };
+use hyperion_sim::galaxy::features::cluster::ClusterModel;
+use hyperion_sim::galaxy::features::interior::counts::{ClassCounts, class_counts};
 use hyperion_sim::galaxy::features::members::FeatureInterior;
 use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
+use hyperion_sim::galaxy::features::{FeatureId, FeatureProcess};
 use hyperion_sim::id::FeatureCell;
+use hyperion_sim::units::LightYears;
 
-use super::GalaxyKey;
+use super::sky::bulk;
+use super::{
+    CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyCache, GalaxyKey, SingleFlight,
+};
 use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
 
 impl HeapBytes for FeatureCellContents {
@@ -273,6 +284,188 @@ impl FeatureInteriorCache for KeptInteriors<'_> {
     }
 }
 
+/// The members a cluster's class counts expect: their sum, its tails' included.
+///
+/// Summed in a fixed order, the classes in their order and then the tails in band order, which
+/// the answers' bits follow.
+#[must_use]
+pub(crate) fn counted_members(counts: &ClassCounts) -> f64 {
+    let classes: f64 = counts.classes.iter().map(|class| class.expected).sum();
+    let tails: f64 = counts
+        .tails
+        .iter()
+        .flatten()
+        .map(|tail| tail.expected)
+        .sum();
+    classes + tails
+}
+
+/// The members a cluster of model `model` and reach `reach` expects ([`counted_members`] of plan
+/// 09's `class_counts`).
+///
+/// About a millisecond a cluster in a test build (measured 2026-10-30), against 19 ms for its whole
+/// interior.
+#[must_use]
+pub(crate) fn expected_members_of(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) -> f64 {
+    counted_members(&class_counts(galaxy, model, reach))
+}
+
+/// A catalogue feature's expected members at the epoch, from its cluster model.
+///
+/// None for a feature with no cluster model: a cloud, an association, an unbound embedded region.
+#[must_use]
+pub(crate) fn expected_members(galaxy: &Galaxy, feature: &FeatureRecord) -> f64 {
+    ClusterModel::from_record(galaxy, feature).map_or(0.0, |model| {
+        expected_members_of(galaxy, &model, feature.reach())
+    })
+}
+
+/// One globular of the galaxy map's list: its record and its expected members, as epoch state.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MapGlobular {
+    record: FeatureRecord,
+    expected_members: f64,
+}
+
+impl MapGlobular {
+    /// The globular's record.
+    #[must_use]
+    pub fn record(&self) -> &FeatureRecord {
+        &self.record
+    }
+
+    /// The members its class counts expect.
+    #[must_use]
+    pub fn expected_members(&self) -> f64 {
+        self.expected_members
+    }
+}
+
+/// The galaxy map's globulars, as the map's list keeps them between requests (P09.T40.b).
+///
+/// Every globular of the catalogue, in its walk order, with its expected members, as epoch state;
+/// each request describes them at its own time.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MapGlobulars(Vec<MapGlobular>);
+
+impl MapGlobulars {
+    /// Every globular of `galaxy`, by the catalogue's walk over its cells, with its expected
+    /// members.
+    ///
+    /// The walk is [`FeatureCatalogue::walk_process`]'s: 142 globulars in the server's tests'
+    /// galaxy, walked in 17 ms and counted in 56 ms in a test build (measured 2026-10-30).
+    #[must_use]
+    pub fn of(galaxy: &Galaxy) -> Self {
+        let mut globulars: Vec<_> =
+            FeatureCatalogue::walk_process(galaxy, FeatureProcess::Globular)
+                .map(|record| MapGlobular {
+                    expected_members: expected_members(galaxy, &record),
+                    record,
+                })
+                .collect();
+        globulars.shrink_to_fit();
+        Self(globulars)
+    }
+
+    /// The globulars, in the catalogue's walk order.
+    #[must_use]
+    pub fn globulars(&self) -> &[MapGlobular] {
+        &self.0
+    }
+}
+
+impl HeapBytes for MapGlobulars {
+    /// The entries' buffer: a record owns nothing on the heap itself.
+    fn heap_bytes(&self) -> usize {
+        self.0.capacity() * size_of::<MapGlobular>()
+    }
+}
+
+/// The galaxy map's feature lists of every galaxy the server holds, computed in the background and
+/// kept per galaxy, as the density maps are (P09.T40.b).
+///
+/// [`GalaxyFeaturesService::get`] hands back a galaxy's globulars, finding them in a bulk job on
+/// the CPU pool if no one has yet, the galaxy taken from the [`GalaxyCache`]. Callers that ask for
+/// one galaxy at once share one job through a [`SingleFlight`], and if every one of them gives up,
+/// the job still queued is skipped.
+pub struct GalaxyFeaturesService {
+    pool: Arc<CpuPool>,
+    galaxies: Arc<GalaxyCache>,
+    held: Arc<SharedByteLru<GalaxyKey, MapGlobulars>>,
+    flights: SingleFlight<GalaxyKey, MapGlobulars, ComputeError>,
+}
+
+impl GalaxyFeaturesService {
+    /// A service that finds its lists on `pool` from the galaxies of `galaxies`, keeping at most
+    /// `budget_bytes` of them.
+    ///
+    /// A budget of zero keeps none.
+    #[must_use]
+    pub fn new(pool: Arc<CpuPool>, galaxies: Arc<GalaxyCache>, budget_bytes: usize) -> Self {
+        Self {
+            pool,
+            galaxies,
+            held: Arc::new(SharedByteLru::new(budget_bytes)),
+            flights: SingleFlight::new(),
+        }
+    }
+
+    /// The globulars of the galaxy `key` names, found if they are not held already.
+    ///
+    /// # Errors
+    ///
+    /// [`ComputeError`] as [`GalaxyCache::get`] gives it for the galaxy, and for the job:
+    /// [`ComputeError::Submit`] if the pool is shutting down, and [`ComputeError::Job`] if it was
+    /// cancelled, panicked, or was still queued when the pool stopped.
+    pub async fn get(&self, key: GalaxyKey) -> Result<Arc<MapGlobulars>, ComputeError> {
+        if let Some(globulars) = self.held.get(&key) {
+            return Ok(globulars);
+        }
+        let (pool, galaxies, held) = (
+            Arc::clone(&self.pool),
+            Arc::clone(&self.galaxies),
+            Arc::clone(&self.held),
+        );
+        self.flights
+            .run(key, move || async move {
+                // As the density maps' service: a caller can arrive just after another flight has
+                // finished, and the list it found is worth more than a second walk.
+                if let Some(globulars) = held.get(&key) {
+                    return Ok(globulars);
+                }
+                let galaxy = galaxies.get(key).await?;
+                let token = CancelToken::new();
+                // Cancels the queued job once every waiter on this flight has gone.
+                let _cancel_on_drop = CancelOnDrop::new(token.clone());
+                let globulars = Arc::new(
+                    bulk(&pool, &token, move |_: &CancelToken| {
+                        MapGlobulars::of(&galaxy)
+                    })
+                    .await?,
+                );
+                // A list larger than the whole budget is handed back and not stored.
+                drop(held.insert(key, Arc::clone(&globulars)));
+                Ok(globulars)
+            })
+            .await
+    }
+
+    /// The lists held, the bytes they are charged, and the hits, misses, evictions and refusals
+    /// so far.
+    #[must_use]
+    pub fn counters(&self) -> LruCounters {
+        self.held.counters()
+    }
+}
+
+impl std::fmt::Debug for GalaxyFeaturesService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GalaxyFeaturesService")
+            .field("counters", &self.counters())
+            .finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::OnceLock;
@@ -284,7 +477,6 @@ mod tests {
     use hyperion_sim::galaxy::placement::NoCache;
     use hyperion_sim::galaxy::query::{RangeQuery, RangeResult, range_query};
     use hyperion_sim::id::SystemIdKind;
-    use hyperion_sim::units::LightYears;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
 
     use super::*;

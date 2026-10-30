@@ -212,6 +212,7 @@ import type { SystemsInRange } from "./generated/SystemsInRange";
 import type { SystemsInRangeRequest } from "./generated/SystemsInRangeRequest";
 import type { TargetExtinction } from "./generated/TargetExtinction";
 // Plan 09's features, the black hole and a range row's origin (P09.T39).
+import type { AssociationStructure } from "./generated/AssociationStructure";
 import type { BlackHoleLuminosityWire } from "./generated/BlackHoleLuminosityWire";
 import type { BlackHoleState } from "./generated/BlackHoleState";
 import type { BlackHoleStateRequest } from "./generated/BlackHoleStateRequest";
@@ -263,6 +264,7 @@ import type { VariableKindDto } from "./generated/VariableKindDto";
 import type { ZoneDto } from "./generated/ZoneDto";
 
 export type {
+  AssociationStructure,
   BlackHoleLuminosityWire,
   BlackHoleState,
   BlackHoleStateRequest,

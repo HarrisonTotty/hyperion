@@ -52,8 +52,10 @@ pub use extinction_map::{
     EXTINCTION_FLOOR_LOG10_MAG, ExtinctionMapKey, ExtinctionMapService, Mag, RawExtinctionMap,
 };
 pub use features::{
-    ClusterModelHandle, FeatureCellHandle, SharedClusterModelCache, SharedFeatureCellCache,
+    ClusterModelHandle, FeatureCellHandle, GalaxyFeaturesService, KeptInteriors, MapGlobular,
+    MapGlobulars, SharedClusterModelCache, SharedFeatureCellCache,
 };
+pub(crate) use features::{counted_members, expected_members_of};
 pub use float_mode::{FlushProbe, probe_flush_to_zero};
 pub use galaxies::{GalaxyCache, GalaxyCounters};
 pub use key::GalaxyKey;

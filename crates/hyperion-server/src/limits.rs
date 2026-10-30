@@ -162,6 +162,22 @@ pub const MAX_QUERY_RADIUS_LY: f64 = 131_072.0;
 /// 2,000 ly in the outer halo expects a few thousand layer-A systems while visiting 10⁸ cells.
 pub const MAX_QUERY_CELLS: NonZeroU32 = NonZeroU32::new(262_144).expect("262,144 is not zero");
 
+/// Most feature cells one `features_in_range` request may read (plan 09, P09.T40.b).
+///
+/// 512 cells are some 0.7 s of cells cold in a test build at 1.4 ms each (measured 2026-10-30), a
+/// sphere of up to about 10,000 ly. Past it, the catalogue's kinds are left out as over the cell
+/// budget.
+///
+/// The catalogue's lookup reads every 4,096 ly cell within the sphere's radius plus the features'
+/// greatest reach, 4,096 ly, so even a small sphere reads 27 to 64 cells; the root cube holds
+/// 32,768.
+pub const MAX_FEATURE_CELLS: u64 = 512;
+
+/// The byte budget of the galaxy map's feature lists, kept per galaxy (plan 09, P09.T40.b): some
+/// 140 globulars of 168 bytes each, 24 kB a galaxy, so this holds every galaxy the server keeps
+/// ([`GALAXY_CACHE_ENTRIES`]) with room.
+pub const GALAXY_FEATURES_CACHE_BYTES: usize = 1 << 20;
+
 /// Most targets one `extinction` request may name (plan 07, P07.T10.c).
 ///
 /// A position target is some 130 bytes of JSON, so 64 of them, with the origin and the envelope,
@@ -212,6 +228,8 @@ mod tests {
         assert_eq!(MAX_QUERY_RADIUS_LY.to_bits(), 131_072.0_f64.to_bits());
         assert_eq!(MAX_QUERY_CELLS.get(), 1 << 18);
         assert_eq!(MAX_EXTINCTION_TARGETS, 64);
+        assert_eq!(MAX_FEATURE_CELLS, 512);
+        assert_eq!(GALAXY_FEATURES_CACHE_BYTES, 1 << 20, "1 MiB");
         assert_eq!(GALAXY_CACHE_ENTRIES.get(), 4);
         assert_eq!(INTERACTIVE_QUEUE_CAPACITY.get(), 64);
         assert_eq!(BULK_QUEUE_CAPACITY.get(), 256);

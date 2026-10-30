@@ -34,6 +34,7 @@ pub struct ServerStats {
     sightlines: LruCounters,
     feature_cells: LruCounters,
     cluster_models: LruCounters,
+    galaxy_features: LruCounters,
 }
 
 impl ServerStats {
@@ -58,6 +59,7 @@ impl ServerStats {
             sightlines: state.sightlines.counters(),
             feature_cells: state.feature_cells.counters(),
             cluster_models: state.cluster_models.counters(),
+            galaxy_features: state.galaxy_features.counters(),
         }
     }
 
@@ -178,6 +180,13 @@ impl ServerStats {
     #[must_use]
     pub fn cluster_models(&self) -> LruCounters {
         self.cluster_models
+    }
+
+    /// The galaxy map's feature lists' contents and use, including their byte budget: a galaxy's
+    /// globulars are found once and kept (plan 09, P09.T40.b).
+    #[must_use]
+    pub fn galaxy_features(&self) -> LruCounters {
+        self.galaxy_features
     }
 }
 

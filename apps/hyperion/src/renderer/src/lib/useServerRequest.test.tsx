@@ -175,6 +175,7 @@ describe("useServerRequest", () => {
 
   it.each([
     ["unknown_system", "system", "no system 0200080020000000 in this universe"],
+    ["unknown_feature", "feature", "feature e842000280000000 names no feature of this universe"],
     ["unknown_body", "body", "no body 0200080020000000.0300 in its system"],
   ] as const)(
     "reports %s as a rejection with the server's reason",

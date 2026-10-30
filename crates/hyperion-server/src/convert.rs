@@ -9,10 +9,12 @@
 //! `extinction_map` and `extinction` in [`extinction`], plan 12's query mode, observed rows and
 //! `resolve_system` in [`observe`], the scene's requests (rendering plan R03) in [`scene`], and the
 //! surface's (rendering plan R09) in [`surface`]. Where a system a client names is, by its origin,
-//! is in [`motion`] (P07.T10.c).
+//! is in [`motion`] (P07.T10.c). Plan 09's features' wire forms are in [`features`], and its four
+//! feature requests and their answers in [`feature_answers`] (P09.T40).
 
 mod events;
 mod extinction;
+mod feature_answers;
 mod features;
 mod motion;
 mod observe;
@@ -63,6 +65,10 @@ pub(crate) use self::events::{EventsRequest, body_events};
 pub(crate) use self::extinction::{
     ExtinctionMapQuery, ExtinctionQuery, LineEnd, extinction_map, extinction_result,
     target_extinction,
+};
+pub(crate) use self::feature_answers::{
+    FeatureRangeQuery, black_hole_state, black_hole_time, centre_not_built, detail_of,
+    feature_detail_target, features_in_range, galaxy_features, galaxy_features_time,
 };
 #[cfg(test)]
 pub(crate) use self::motion::origins;

@@ -42,6 +42,12 @@ describe("RequestStatus", () => {
       false,
     ],
     [
+      "refused for an unknown feature",
+      { kind: "rejected", code: "unknown_feature", reason: "no feature e842000280000000" },
+      "REJECTED: no feature e842000280000000",
+      false,
+    ],
+    [
       "refused for an unknown body",
       { kind: "rejected", code: "unknown_body", reason: "no body 0200080020000000.0300" },
       "REJECTED: no body 0200080020000000.0300",

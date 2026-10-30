@@ -60,14 +60,15 @@ pub use envelope::{
     SubscriptionTopic, UnsubscribeRequest,
 };
 pub use features::{
-    BlackHoleLuminosityWire, BlackHoleState, BlackHoleStateRequest, BrightShell,
-    CatalogueClassWire, CentreStructure, CentreTracerWire, ClassCountWire, ClassKindWire,
-    CloudStructure, ClusterStructure, DisruptionOutcomeWire, EmissionClassWire, FeatureDetail,
-    FeatureDetailRequest, FeatureKindCensus, FeatureKindStatus, FeatureKindWire, FeatureStructure,
-    FeatureSummary, FeaturesInRange, FeaturesInRangeRequest, GalaxyFeatures, GalaxyFeaturesRequest,
-    GenerationWire, MapFeatureKindWire, MapFeatureList, MapFeatures, MapShells, MemberClassWire,
-    MultiplicityWire, PulsarWindNebulaWire, RemnantSummary, ShellEmissionWire, ShellPhaseWire,
-    ShellSummary, SupernovaStateWire, SystemOriginWire, TidalDisruptionWire,
+    AssociationStructure, BlackHoleLuminosityWire, BlackHoleState, BlackHoleStateRequest,
+    BrightShell, CatalogueClassWire, CentreStructure, CentreTracerWire, ClassCountWire,
+    ClassKindWire, CloudStructure, ClusterStructure, DisruptionOutcomeWire, EmissionClassWire,
+    FeatureDetail, FeatureDetailRequest, FeatureKindCensus, FeatureKindStatus, FeatureKindWire,
+    FeatureStructure, FeatureSummary, FeaturesInRange, FeaturesInRangeRequest, GalaxyFeatures,
+    GalaxyFeaturesRequest, GenerationWire, MapFeatureKindWire, MapFeatureList, MapFeatures,
+    MapShells, MemberClassWire, MultiplicityWire, PulsarWindNebulaWire, RemnantSummary,
+    ShellEmissionWire, ShellPhaseWire, ShellSummary, SupernovaStateWire, SystemOriginWire,
+    TidalDisruptionWire,
 };
 pub use galaxy::{
     Census, DensityMap, DensityMapRequest, ExtinctionMap, ExtinctionMapRequest, ExtinctionRequest,

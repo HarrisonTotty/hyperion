@@ -39,13 +39,13 @@ use std::{fmt, io};
 use axum::{Router, routing::get};
 
 use crate::compute::{
-    CpuPool, DensityMapService, ExtinctionMapService, GalaxyCache, SharedBodyCache,
-    SharedBriefCache, SharedCellCache, SharedClusterModelCache, SharedFeatureCellCache,
-    SharedSightlineCache, SharedSkyCellCache, SharedSystemCache, ShutDownPoolError, SkyCaps,
-    SkyTablesService, StartPoolError,
+    CpuPool, DensityMapService, ExtinctionMapService, GalaxyCache, GalaxyFeaturesService,
+    SharedBodyCache, SharedBriefCache, SharedCellCache, SharedClusterModelCache,
+    SharedFeatureCellCache, SharedSightlineCache, SharedSkyCellCache, SharedSystemCache,
+    ShutDownPoolError, SkyCaps, SkyTablesService, StartPoolError,
 };
 use crate::connections::Connections;
-use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
+use crate::limits::{BULK_QUEUE_CAPACITY, GALAXY_FEATURES_CACHE_BYTES, INTERACTIVE_QUEUE_CAPACITY};
 use crate::requests::{Handler, Handlers};
 use crate::scene::SceneService;
 use crate::stats::{OutboundStats, RequestStats};
@@ -122,6 +122,9 @@ pub(crate) struct AppState {
     /// Shared with [`AppState::systems`] and [`AppState::briefs`], which resolve a feature's
     /// members through it.
     pub(crate) cluster_models: Arc<SharedClusterModelCache>,
+    /// The galaxy map's globulars of every galaxy asked for, found once each in a bulk job and kept
+    /// (P09.T40.b).
+    pub(crate) galaxy_features: GalaxyFeaturesService,
     /// Whether the range query serves plan 09's feature members, each row its origin, and the sky
     /// the features' gas: P09.T40.a's serve gate, held until
     /// [`FEATURE_MEMBERS_FROM`](config::FEATURE_MEMBERS_FROM).
@@ -211,12 +214,9 @@ impl Server {
         );
         let sightlines = SharedSightlineCache::new(config.sightline_cache_bytes());
         let cells = SharedCellCache::new(config.cell_cache_bytes());
-        let (feature_cells, cluster_models) = feature_caches(&config);
-        // A feature member's stars and brief take its feature's interior from the shared cache.
-        let systems = SharedSystemCache::new(config.system_cache_bytes())
-            .with_interiors(Arc::clone(&cluster_models));
-        let briefs = SharedBriefCache::new(config.brief_cache_bytes())
-            .with_interiors(Arc::clone(&cluster_models));
+        let (feature_cells, cluster_models, map_lists) =
+            feature_caches(&config, Arc::clone(&pool), Arc::clone(&galaxies));
+        let (systems, briefs) = system_caches(&config, &cluster_models);
         let bodies = SharedBodyCache::new(Arc::clone(&pool), config.body_cache_bytes());
         let sky_cells = Arc::new(SharedSkyCellCache::new(config.sky_cache_bytes()));
         let sky_tables = sky_tables_service(&config, Arc::clone(&pool), &feature_cells);
@@ -260,6 +260,7 @@ impl Server {
                 bodies,
                 feature_cells,
                 cluster_models,
+                galaxy_features: map_lists,
                 feature_members: config.feature_members(),
                 handler,
                 connections: Connections::new(),
@@ -385,16 +386,43 @@ pub fn tap_socket(tcp: &tokio::net::TcpStream) {
     let _ = tcp;
 }
 
-/// The caches of plan 09's feature cells and interiors, in the budgets `config` gives (P09.T40.a).
+/// The caches of plan 09's feature cells and interiors, in the budgets `config` gives (P09.T40.a),
+/// and the galaxy map's feature lists, found on `pool` from the galaxies of `galaxies`
+/// (P09.T40.b).
 #[must_use]
 fn feature_caches(
     config: &ServerConfig,
-) -> (Arc<SharedFeatureCellCache>, Arc<SharedClusterModelCache>) {
+    pool: Arc<CpuPool>,
+    galaxies: Arc<GalaxyCache>,
+) -> (
+    Arc<SharedFeatureCellCache>,
+    Arc<SharedClusterModelCache>,
+    GalaxyFeaturesService,
+) {
     (
         Arc::new(SharedFeatureCellCache::new(config.feature_cache_bytes())),
         Arc::new(SharedClusterModelCache::new(
             config.cluster_model_cache_bytes(),
         )),
+        GalaxyFeaturesService::new(pool, galaxies, GALAXY_FEATURES_CACHE_BYTES),
+    )
+}
+
+/// The caches of the systems' stars and of the range briefs' models, in the budgets `config`
+/// gives.
+///
+/// Each resolves a feature member through the feature interiors `cluster_models`, so that a
+/// feature's members share one build of its interior.
+#[must_use]
+fn system_caches(
+    config: &ServerConfig,
+    cluster_models: &Arc<SharedClusterModelCache>,
+) -> (SharedSystemCache, SharedBriefCache) {
+    (
+        SharedSystemCache::new(config.system_cache_bytes())
+            .with_interiors(Arc::clone(cluster_models)),
+        SharedBriefCache::new(config.brief_cache_bytes())
+            .with_interiors(Arc::clone(cluster_models)),
     )
 }
 
@@ -578,6 +606,7 @@ mod tests {
             (fresh.sightlines(), defaults.sightline_cache_bytes()),
             (fresh.feature_cells(), defaults.feature_cache_bytes()),
             (fresh.cluster_models(), defaults.cluster_model_cache_bytes()),
+            (fresh.galaxy_features(), GALAXY_FEATURES_CACHE_BYTES),
         ] {
             assert_eq!(
                 (
@@ -707,7 +736,7 @@ mod tests {
                 .sky_caps(SkyCaps::forced(LightYears::new(10.0)).unwrap())
                 .feature_members(members)
                 .build();
-            let (cells, _) = feature_caches(&config);
+            let cells = Arc::new(SharedFeatureCellCache::new(config.feature_cache_bytes()));
             let service = sky_tables_service(&config, Arc::clone(&pool), &cells);
             let tables = service.get(key, &galaxy).await.unwrap();
             let mut found = Vec::new();
