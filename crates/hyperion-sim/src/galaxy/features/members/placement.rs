@@ -69,8 +69,10 @@ impl FeatureInterior {
     ///
     /// # Panics
     ///
-    /// In debug builds, if its [`member_speed_bound`](Self::member_speed_bound) is not below
-    /// [`UNBOUND_PAD_SPEED`], the speed the range query's feature lookup is padded by.
+    /// If its [`member_speed_bound`](Self::member_speed_bound) is not below
+    /// [`UNBOUND_PAD_SPEED`], the speed the range query's feature lookup is padded by, and the
+    /// speed it keeps a feature's grid clear of a sphere at: a check made once an interior, which
+    /// release builds keep too (P09.T40.a).
     #[must_use]
     pub fn of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
         let bulk = bulk_velocity(galaxy, feature)?;
@@ -80,7 +82,7 @@ impl FeatureInterior {
         let grid = table.grid();
         let table = table.with_tails_to(grid.reach());
         let speed_bound = member_speed_bound(&model, &table, bulk);
-        debug_assert!(
+        assert!(
             speed_bound.value() < UNBOUND_PAD_SPEED.value(),
             "the members of {:?} may move at {} km/s, not below the {} km/s the range query's \
              feature lookup is padded by",
@@ -99,7 +101,7 @@ impl FeatureInterior {
     }
 
     /// A bound on the reach of the nested grid [`of`](Self::of) builds for `feature`, ly, from its
-    /// cluster's tidal radius and its tails' length alone ([`MemberClassTable::grid_reach_bound`]),
+    /// cluster's tidal radius and its tails' length alone (`MemberClassTable::grid_reach_bound`),
     /// or `None` where `of` builds no interior: what a query tests before it builds one
     /// (P09.T40.a).
     ///
@@ -122,9 +124,9 @@ impl FeatureInterior {
             parameters.age,
             feature.reach(),
         );
-        let tidal = tidal.value();
         // A tail's reach as `MemberClassTable::from_counts` cuts it at the feature's.
-        let tails = (tidal + tail.length.value()).min(feature.reach().value());
+        let tails =
+            LightYears::new((tidal.value() + tail.length.value()).min(feature.reach().value()));
         Some(MemberClassTable::grid_reach_bound(tidal, tails))
     }
 
@@ -347,7 +349,7 @@ impl FeatureInterior {
         );
     }
 
-    /// The accepted members of `band` in `cell` within `within` ly of the local point `near`, in
+    /// The accepted members of `band` in `cell` within `within` of the local point `near`, in
     /// index order, with their local positions, into `out` (cleared first):
     /// [`members_in_cell`](Self::members_in_cell)'s that lie so near, the rest left undrawn
     /// (P09.T40.a).
@@ -356,15 +358,16 @@ impl FeatureInterior {
     /// class, mass, age and velocity, is nearly all its cost: in a 1 ly query about a globular's
     /// centre the cells it touches hold four times the members its sphere does (measured
     /// 2026-10-30).
-    pub fn members_in_cell_near(
+    pub(crate) fn members_in_cell_near(
         &self,
         galaxy: &Galaxy,
         band: MassBand,
         cell: NestedCell,
         near: &PointLy,
-        within: f64,
+        within: LightYears,
         out: &mut Vec<(MemberRecord, PointLy)>,
     ) {
+        let within = within.value();
         out.clear();
         let (proposal, local) = self.proposal(band, cell);
         let n = count_from_mean(

@@ -172,13 +172,13 @@ impl FeatureCellCache for FeatureCellHandle<'_> {
 /// The feature interiors of every galaxy the server holds, in one byte budget: each feature's
 /// cluster model with the class table and nested grid built on it (P09.T40.a).
 ///
-/// A feature with no members (a cloud, an association, a dissolved cluster) has no interior, and
-/// none is stored: the sim answers it from its marks in microseconds
-/// ([`ClusterModel::from_record`](hyperion_sim::galaxy::features::cluster::ClusterModel::from_record)).
 /// A feature a range query looked up but whose grid its bound kept clear of the sphere
 /// ([`FeatureInteriorCache::grid_reach`]) is held by that bound alone, a hundred bytes or so
 /// against the interior's tens of kilobytes, so that a query near it again tests it without its
-/// cluster model; a feature with no members is held so too.
+/// cluster model. A feature with no members (a cloud, an association, a dissolved cluster) has no
+/// interior: it is held by its bound's `None` once a query has tested it, and nothing is stored
+/// for it otherwise. A lookup that finds a feature's bound counts as a hit, the interior lookup
+/// that then builds it too.
 #[derive(Debug)]
 pub struct SharedClusterModelCache {
     interiors: SharedByteLru<(GalaxyKey, FeatureId), HeldFeature>,
@@ -733,6 +733,36 @@ mod tests {
             .build()
             .expect("a query");
         range_query(galaxy(), &mut NoCache::new(), &[&source], &query)
+    }
+
+    /// The census, bit for bit, and the hits of queries about a cluster do not depend on the order
+    /// they are asked in through one shared cache, which tests a feature by its held bound or its
+    /// interior's grid (P09.T40.a).
+    #[test]
+    fn a_range_query_s_members_do_not_depend_on_the_order_of_queries() {
+        let feature = a_cluster();
+        let [x, y, z] = feature.position().to_light_years_f64();
+        let queries = [(0.0, 2.0), (6.0, 4.0), (-40.0, 30.0)].map(|(dx, radius)| {
+            let centre = GalacticPosition::from_light_years([x + dx, y, z]).expect("in the cube");
+            RangeQuery::builder(centre, LightYears::new(radius))
+                .build()
+                .expect("a query")
+        });
+        let cells = SharedFeatureCellCache::new(64 << 20);
+        let interiors = SharedClusterModelCache::new(64 << 20);
+        hyperion_testkit::order::assert_order_independent(&queries, |query| {
+            let (cells, interiors) = (cells.handle(key()), interiors.handle(key()));
+            let source = FeatureMemberSource::new(&cells, &interiors);
+            let result = range_query(galaxy(), &mut NoCache::new(), &[&source], query);
+            let census: Vec<u64> = result
+                .census()
+                .expected()
+                .to_array()
+                .into_iter()
+                .map(hyperion_testkit::float::bits)
+                .collect();
+            (census, result.systems().to_vec())
+        });
     }
 
     /// Eviction never changes a reply: a range query about a cluster with its members' source

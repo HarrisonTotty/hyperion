@@ -15,7 +15,7 @@
 //!   ([`FeatureInterior::member_speed_bound`], P09.T23.b), so that where the bound is the lower the
 //!   cells are the layer's. The features are looked up about the sphere padded at
 //!   [`UNBOUND_PAD_SPEED`], above every feature's bound. Only the candidates placed within the
-//!   radius padded at the bound are drawn ([`FeatureInterior::members_in_cell_near`], P09.T40.a),
+//!   radius padded at the bound are drawn (`FeatureInterior::members_in_cell_near`, P09.T40.a),
 //!   since no other can reach the sphere. Each member is then tested at the sphere's time,
 //!   drifting in a straight line from its epoch position at its velocity, the cluster's bulk
 //!   motion plus its own (P09.T10), against the unpadded radius. Members not yet born at that time
@@ -107,9 +107,11 @@ impl<'a> KeepInteriors<'a> {
         }
     }
 
+    /// Checks that `galaxy` is the cache's own.
+    ///
     /// # Panics
     ///
-    /// If `galaxy` is not the cache's own.
+    /// If it is not.
     fn check(&self, galaxy: &Galaxy) {
         assert!(
             std::ptr::eq(galaxy, self.galaxy),
@@ -331,20 +333,22 @@ fn band_reach(
 }
 
 /// How far from a query's centre a member at the epoch may lie and still be inside its sphere of
-/// `radius` at `t`, ly, for members moving below `bound` (P09.T40.a): the radius plus the
-/// farthest such a member drifts, with margins over the rounding.
+/// `radius` at `t`, for members moving below `bound` (P09.T40.a): the radius plus the farthest
+/// such a member drifts, with margins over the rounding.
 ///
 /// A member's local position, which this is compared with, and its galactic one, which
 /// [`hit_at`] tests, differ by the rounding of a translation and a distance, some 10⁻¹² ly at a
 /// feature's 4,096 ly reach; the margins are far above it, and above the rounding of the drift, so
 /// that no member [`hit_at`] keeps is left undrawn.
 #[must_use]
-fn member_reach(radius: LightYears, t: UniverseTime, bound: KilometresPerSecond) -> f64 {
+fn member_reach(radius: LightYears, t: UniverseTime, bound: KilometresPerSecond) -> LightYears {
     /// The relative margin on the drift.
     const DRIFT_MARGIN: f64 = 1e-9;
     /// The absolute margin, ly.
     const NEAR_MARGIN_LY: f64 = 1e-6;
-    radius.value() + pad_for(t, bound).value() * (1.0 + DRIFT_MARGIN) + NEAR_MARGIN_LY
+    LightYears::new(
+        radius.value() + pad_for(t, bound).value() * (1.0 + DRIFT_MARGIN) + NEAR_MARGIN_LY,
+    )
 }
 
 /// The hit a member makes in `sphere`, drifting at `velocity` for `elapsed` since the epoch, or
@@ -379,7 +383,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::{Mutex, OnceLock};
 
-    use hyperion_testkit::float::assert_same_bits;
+    use hyperion_testkit::float::{assert_same_bits, bits};
+    use hyperion_testkit::order::assert_order_independent;
 
     use super::*;
     use crate::galaxy::PointLy;
@@ -415,6 +420,7 @@ mod tests {
     fn the_member_source_finds_and_counts_what_a_scan_finds() {
         a_query_in_an_open_cluster_finds_every_member_a_scan_finds();
         skipping_the_grids_that_miss_the_sphere_changes_nothing();
+        the_answers_do_not_depend_on_the_order_queries_are_asked_in();
         drawing_only_the_near_members_keeps_every_near_member();
         the_census_does_not_depend_on_what_is_cached();
         hits_count_in_their_band_s_layer_and_the_unborn_are_dropped();
@@ -657,6 +663,46 @@ mod tests {
     }
 
     /// Run on its one build of the fixture by
+    /// [`the_member_source_finds_and_counts_what_a_scan_finds`]: the census, bit for bit, and the
+    /// hits of spheres near the open cluster, asked through one keeping cache in every order, and
+    /// through a fresh one each, whether a feature is tested by its bound or its kept grid's reach
+    /// (P09.T40.a).
+    fn the_answers_do_not_depend_on_the_order_queries_are_asked_in() {
+        let galaxy = galaxy();
+        let [x, y, z] = open_cluster().feature().position().to_light_years_f64();
+        let spheres = [
+            sphere_at(
+                GalacticPosition::from_light_years([x + 1.5, y, z - 1.0]).unwrap(),
+                12.0,
+                0,
+            ),
+            sphere_at(
+                GalacticPosition::from_light_years([x - 30.0, y, z]).unwrap(),
+                25.0,
+                0,
+            ),
+            sphere_at(
+                GalacticPosition::from_light_years([x, y + 4.0, z]).unwrap(),
+                6.0,
+                -600,
+            ),
+        ];
+        let answer = |interiors: &dyn FeatureInteriorCache, sphere: &QuerySphere| {
+            let source = FeatureMemberSource::new(&NoFeatureCache, interiors);
+            let census = source.expected_in_sphere(galaxy, sphere);
+            let mut hits = Vec::new();
+            source.systems_in_sphere(galaxy, sphere, all_layers(), &mut hits);
+            let bits: Vec<u64> = Layer::ALL.iter().map(|&l| bits(census.get(l))).collect();
+            (bits, hits)
+        };
+        let kept = KeepInteriors::new(galaxy);
+        assert_order_independent(&spheres, |sphere| answer(&kept, sphere));
+        assert_order_independent(&spheres, |sphere| {
+            answer(&KeepInteriors::new(galaxy), sphere)
+        });
+    }
+
+    /// Run on its one build of the fixture by
     /// [`the_member_source_finds_and_counts_what_a_scan_finds`].
     fn drawing_only_the_near_members_keeps_every_near_member() {
         let galaxy = galaxy();
@@ -671,7 +717,8 @@ mod tests {
                 .cells_touching(&near, LightYears::new(within))
             {
                 interior.members_in_cell(galaxy, band, cell, &mut all);
-                interior.members_in_cell_near(galaxy, band, cell, &near, within, &mut kept);
+                let reach = LightYears::new(within);
+                interior.members_in_cell_near(galaxy, band, cell, &near, reach, &mut kept);
                 all.retain(|(_, p)| {
                     let (dx, dy, dz) = (p.x - near.x, p.y - near.y, p.z - near.z);
                     (dx * dx + dy * dy + dz * dz).sqrt() <= within

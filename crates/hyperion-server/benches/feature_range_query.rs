@@ -75,7 +75,7 @@ fn query_at(centre: GalacticPosition, radius_ly: f64) -> RangeQuery {
         .limit(NonZeroU32::new(MAX_CENSUS_LIMIT).expect("the limit is above zero"))
         .cell_budget(MAX_QUERY_CELLS)
         .build()
-        .expect("a valid query")
+        .expect("a sphere of positive radius at the epoch within the limits is a valid query")
 }
 
 /// The Sun-like point, 26,000 ly from the centre on +y.

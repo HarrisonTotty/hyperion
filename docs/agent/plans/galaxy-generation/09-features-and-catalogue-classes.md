@@ -4750,6 +4750,19 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - Left undone: a detail of a feature that is none at the time is untested; no job checks its
     cancel token between features. Bright shells stay `not_generated` until P09.T37.
   - Golden: `tests/golden/features.golden` pins the four answers' frames.
+- **P09.T40.a, the served query's speed (lane `perf-range-query`, 2026-10-30, at 23 and 3; no
+  output moves).**
+  - `FeatureInteriorCache::grid_reach` (provided; never below the lent interior's grid reach,
+    `None` only where it lends none): `FeatureMemberSource` builds an interior only where that
+    bound meets the sphere, and draws only the candidates within the radius padded at
+    `member_speed_bound` (`FeatureInterior::members_in_cell_near`). New:
+    `FeatureInterior::grid_reach_bound`, `ClusterParameters::of_record`.
+  - `SharedClusterModelCache` holds a feature by its bound until its interior is built; its
+    counters count both. `FeatureInterior::of` asserts the speed bound in release too.
+    `ClassProfile` tabulates its distribution when first read.
+  - Bench: `hyperion-server/benches/feature_range_query.rs`. Left: the grid and the feature cells
+    keep the Sun-like query over 5 ms cold, and remnant draws a globular core's (the lane's
+    findings).
 - **P09.T41.a, records (lane `p09-t41`, 2026-10-30, at 23 and 3; client only, no output moves).**
   - The guide keeps its one Greek cross for every kind, the kind named by the label (`OC GPF F207`),
     in place of the task text's "a symbol per kind"; it gains the cross's proportions, the label's

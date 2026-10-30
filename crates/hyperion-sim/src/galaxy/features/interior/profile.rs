@@ -126,7 +126,7 @@ impl ProfileShape {
 }
 
 /// A class's normalised radial profile, per cubic light-year (module documentation).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct ClassProfile {
     shape: ProfileShape,
     tidal: f64,
@@ -152,6 +152,21 @@ pub struct ClassProfile {
 /// whether either has made it.
 #[derive(Debug, Clone, Default)]
 struct Tabulated(OnceLock<Box<[f64]>>);
+
+impl std::fmt::Debug for ClassProfile {
+    /// Every field, the cumulative distribution tabulated if no reading has yet, so that a
+    /// profile prints the same whatever has read it.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClassProfile")
+            .field("shape", &self.shape)
+            .field("tidal", &self.tidal)
+            .field("flattening", &self.flattening)
+            .field("norm", &self.norm)
+            .field("t_max", &self.t_max)
+            .field("cdf", &self.cdf())
+            .finish()
+    }
+}
 
 impl PartialEq for Tabulated {
     fn eq(&self, _: &Self) -> bool {
@@ -191,6 +206,7 @@ impl ClassProfile {
     }
 
     /// The cumulative distribution's knots, tabulated on the first call ([`Tabulated`]).
+    #[must_use]
     fn cdf(&self) -> &[f64] {
         self.cdf.0.get_or_init(|| {
             let shell = shell(self.shape, self.tidal);
@@ -441,6 +457,38 @@ mod tests {
             }
             assert_eq!(read_forward, unread.clone());
             assert_eq!(read_forward.heap_bytes(), charge);
+        }
+    }
+
+    /// The lazily tabulated distribution reads as the eager table did, bit for bit: values taken
+    /// from the build before P09.T40.a, which tabulated it in the constructor.
+    #[test]
+    fn the_lazy_table_reads_as_the_eager_one_did() {
+        let expected: [(ProfileShape, [u64; 2], [u64; 2]); 3] = [
+            (
+                ProfileShape::cored(2.0, 1.0, 8.0),
+                [0x3f61_337c_26bd_a203, 0x3fe8_118e_b998_9a80],
+                [0x4002_b1ec_5378_65be, 0x403b_2bbd_9a13_023d],
+            ),
+            (
+                ProfileShape::Cusp { slope: 1.8 },
+                [0x3f7b_3b0d_c5a9_3189, 0x3fdb_97c9_f136_3791],
+                [0x4013_3574_1189_6ac9, 0x4043_902f_247c_7eda],
+            ),
+            (
+                ProfileShape::Plummer { scale: 1.5 },
+                [0x3fa0_6522_f28e_b354, 0x3fef_c7b6_8ce9_5345],
+                [0x3fe9_07eb_d5a6_104a, 0x4015_5e9f_ede5_a476],
+            ),
+        ];
+        for (shape, cumulative, quantile) in expected {
+            let profile = ClassProfile::new(shape, 60.0, 1.0);
+            for (r, bits) in [0.5, 17.0].into_iter().zip(cumulative) {
+                assert_same_bits(profile.cumulative(r), f64::from_bits(bits));
+            }
+            for (u, bits) in [0.1, 0.9].into_iter().zip(quantile) {
+                assert_same_bits(profile.radius_quantile(u), f64::from_bits(bits));
+            }
         }
     }
 
