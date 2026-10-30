@@ -22,12 +22,12 @@
  * applies around the tone mapper. See NOTICE at the repository root.
  */
 
+import { log2, pow } from "../../lib/pinnedMath";
+
 /**
  * A linear colour, one value per channel (red, green, blue): the one per-channel triple R05, R07
  * and R08 share.
  */
-import { log2, pow } from "../../lib/pinnedMath";
-
 export type Rgb = readonly [number, number, number];
 
 /** A 3 × 3 matrix as its rows. */

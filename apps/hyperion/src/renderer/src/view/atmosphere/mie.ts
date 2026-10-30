@@ -28,6 +28,8 @@
  * depend on it.
  */
 
+import { cbrt, cos, sin } from "../../lib/pinnedMath";
+
 /**
  * A complex refractive index relative to the medium around the sphere, m = n + ik.
  *
@@ -35,8 +37,6 @@
  * The index of the sphere's material divided by the medium's real index, as tables of optical
  * constants give n and k (k ≥ 0 absorbing; Bohren and Huffman's sign).
  */
-import { cbrt, cos, sin } from "../../lib/pinnedMath";
-
 export interface ComplexIndex {
   /** The real part, the phase index, finite and > 0. */
   readonly n: number;

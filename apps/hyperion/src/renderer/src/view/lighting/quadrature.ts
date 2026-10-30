@@ -3,9 +3,9 @@
  * Design note 6; T10.b).
  */
 
-/** A Gauss–Legendre rule on [−1, 1]. */
 import { cos } from "../../lib/pinnedMath";
 
+/** A Gauss–Legendre rule on [−1, 1]. */
 export interface GaussLegendreRule {
   /** The nodes. */
   readonly x: Float64Array;

@@ -5,9 +5,10 @@
  * `golden/math/client_pairs.golden`; each port gives every one of them bit for bit.
  *
  * @remarks
- * The sweeps' generator, domains and digest are the Rust test's, line for line: Mulberry32, a
- * binary exponent uniform over the domain's range with a uniform significand, and MurmurHash3's
- * 32-bit body over each result's words, high first, a NaN as `0x7ff80000` and 0.
+ * The sweeps' generator and domains are the Rust test's, and their digest the testkit's
+ * `golden::f64_word_digest`, line for line: Mulberry32, a binary exponent uniform over the
+ * domain's range with a uniform significand, and MurmurHash3's 32-bit body over each result's
+ * words, high first, a NaN as `0x7ff80000` and 0.
  */
 import { describe, expect, it } from "vitest";
 
@@ -164,7 +165,7 @@ function drawer(text: string): (next: () => number) => number {
   };
 }
 
-/** The Rust test's `Digest` over `values`: MurmurHash3's 32-bit body and finaliser. */
+/** The testkit's `golden::f64_word_digest`: MurmurHash3's 32-bit body and finaliser. */
 class Digest {
   private hash = 0;
   private words = 0;
@@ -213,6 +214,9 @@ describe("the pinned ports against libm 0.2.16", () => {
       SWEEPS.some((s) => s.name === name),
     ]);
     expect(counts).toEqual(NAMES.map((name) => [name, true, true]));
+  });
+
+  it("names no function the client does not port", () => {
     expect(new Set([...PAIRS, ...SWEEPS].map((p) => p.name))).toEqual(new Set(NAMES));
   });
 

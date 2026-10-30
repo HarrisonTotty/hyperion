@@ -59,10 +59,12 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/thick/read.ts",
     "../view/atmosphere/thick/spectralColumn.ts",
     "../view/atmosphere/thick/sphericalBeam.ts",
-    // Two more whose platform maths moved no bit under the nudge, pinned at no cost: the channel
-    // fit, which `channels.json` records, and the Earth line paths' fixture.
+    // Three more whose platform maths moved no bit under the nudge, pinned at no cost: the channel
+    // fit, which `channels.json` records, the Earth line paths' fixture, and the sweep boundary's
+    // near-sun test, which `sweepBoundary.json`'s classes read.
     "../view/atmosphere/channels.ts",
     "../test/earthLinePaths.ts",
+    "../view/atmosphere/reference/sweepBoundary.ts",
     // The tone curve and exposure `gate.ts` reads for its colours.
     "../view/photometry/toneCurve.ts",
     "../view/photometry/exposure.ts",
@@ -73,7 +75,7 @@ const MODULES = import.meta.glob<string>(
 );
 
 /** How many modules the list names: the glob drops a path that no longer exists. */
-const LISTED = 45;
+const LISTED = 46;
 
 /** The transcendental functions of `Math` whose results depend on the platform. */
 const PLATFORM_MATH =
@@ -87,6 +89,13 @@ function blank(c: string): string {
 /**
  * `source` with its comments and the contents of its string and template literals replaced by
  * spaces, line breaks kept, so that a match's offset gives its line.
+ *
+ * @remarks
+ * It knows no regular-expression literal, so one holding a quote, a backtick or a comment's
+ * opener would open a literal that never closes and blank the rest of the module; such a module
+ * is refused rather than passed on what the scan could not see.
+ *
+ * @throws Error where `source` ends inside a string, a template or a block comment.
  */
 function codeOf(source: string): string {
   const out: string[] = [];
@@ -126,7 +135,10 @@ function codeOf(source: string): string {
     }
     if (c === "/" && next === "*") {
       const end = source.indexOf("*/", i + 2);
-      const stop = end < 0 ? source.length : end + 2;
+      if (end < 0) {
+        throw new Error("the scan reads a block comment that never closes");
+      }
+      const stop = end + 2;
       out.push(source.slice(i, stop).replaceAll(/[^\n]/gu, " "));
       i = stop;
       continue;
@@ -140,6 +152,9 @@ function codeOf(source: string): string {
     }
     out.push(c);
     i += 1;
+  }
+  if (stack.length > 0) {
+    throw new Error(`the scan ends inside ${String(stack.at(-1))}: a literal it cannot read`);
   }
   return out.join("");
 }
@@ -215,6 +230,13 @@ describe("the scan", () => {
       "const m = myMath.exp(x);",
     ].join("\n");
     expect(platformMathIn(source)).toEqual([]);
+  });
+
+  it("refuses a module it cannot read to its end, such as a regular expression with a quote", () => {
+    expect(() => platformMathIn('const quote = /"/u;\nconst a = Math.exp(x);')).toThrow(
+      /cannot read/u,
+    );
+    expect(() => platformMathIn("const a = 1; /* never closed")).toThrow(/never closes/u);
   });
 
   it("scans the code inside a template literal's substitutions", () => {

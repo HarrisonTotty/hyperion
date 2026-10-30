@@ -26,9 +26,9 @@
  *   Table 1 for bound–free and Bell and Berrington for free–free.
  */
 
-/** The H⁻ photodetachment threshold, µm: λ₀ = 1.6419 (John 1988, Eq. 3's text). */
 import { expm1, pow } from "../../../lib/pinnedMath";
 
+/** The H⁻ photodetachment threshold, µm: λ₀ = 1.6419 (John 1988, Eq. 3's text). */
 export const H_MINUS_THRESHOLD_UM = 1.6419;
 
 /**

@@ -55,6 +55,7 @@ import {
   verticalOpticalDepth,
 } from "../thick/regime";
 import { recorded, type RecordValue, RECORD_SIGNIFICANT_FIGURES } from "./caseGate";
+import { cos, sin } from "../../../lib/pinnedMath";
 
 // --- The constants -------------------------------------------------------------------------------
 
@@ -516,16 +517,16 @@ export interface RecomputedPoint {
 function unitOf(direction: SweepDirection): readonly [number, number, number] {
   const zenith = (direction.zenithDeg * Math.PI) / 180;
   const azimuth = (direction.azimuthDeg * Math.PI) / 180;
-  const s = Math.sin(zenith);
-  return [s * Math.cos(azimuth), s * Math.sin(azimuth), Math.cos(zenith)];
+  const s = sin(zenith);
+  return [s * cos(azimuth), s * sin(azimuth), cos(zenith)];
 }
 
 /** Whether a geometry's view lies within {@link NEAR_SUN_DEG}° of its sun, `sweep.rs`'s `near_sun`. */
 export function nearSun(geometry: SweepCaseGeometry): boolean {
   const v = unitOf(geometry.view);
   const s = unitOf(geometry.sun);
-  const cos = v[0] * s[0] + v[1] * s[1] + v[2] * s[2];
-  return cos >= Math.cos((NEAR_SUN_DEG * Math.PI) / 180) - 1e-12;
+  const cosine = v[0] * s[0] + v[1] * s[1] + v[2] * s[2];
+  return cosine >= cos((NEAR_SUN_DEG * Math.PI) / 180) - 1e-12;
 }
 
 /** A value as the output writes it: seven significant figures, Rust's `{:.6e}`. */

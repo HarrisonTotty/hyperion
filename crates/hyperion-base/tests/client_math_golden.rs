@@ -8,9 +8,11 @@
 //! [`hyperion_base::math`], which is exactly `libm`), the file holds its value at:
 //!
 //! - the special values every function shares (signed zeros, the subnormal and normal extremes,
-//!   ±1, ±2, ±½, the largest double, the infinities and a NaN), and for `atan2` and `pow` every pair
-//!   of them;
-//! - each threshold the function's source tests a high word against, with its neighbours;
+//!   ±1 and 1's neighbours, ±2, ±½, 3, the largest double, the infinities and a NaN), and for
+//!   `atan2` and `pow` every pair of them;
+//! - each threshold the function's source tests a high word against (its own file's, with
+//!   `rem_pio2.rs`'s and `k_tan.rs`'s for the circular functions; for `cbrt`, which tests none, the
+//!   edges of the subnormal and normal binades), with its neighbours;
 //! - its own hard cases: the multiples of π/2 that `rem_pio2` cancels against, Ng's worst case for
 //!   the reduction, exact cubes and CORE-MATH's two hard roots, `pow`'s integer, huge and
 //!   overflowing powers;
@@ -22,7 +24,12 @@
 //! - 64 random inputs from [`Lcg`];
 //!
 //! and, for each of its sweeps, a digest of its values at 2¹⁷ inputs drawn by a generator both
-//! languages run ([`Mulberry32`], [`Domain`]), which the client recomputes.
+//! languages run ([`Mulberry32`], [`Domain`]), the testkit's [`golden::f64_word_digest`], which the
+//! client recomputes.
+//!
+//! A bump of the pinned `libm` moves this file's values with the generator version, as every
+//! golden of the crate moves; a change to the inputs alone (a function added, a domain changed)
+//! re-blesses it at the same version, since only the client reads it.
 //!
 //! # Line format
 //!
@@ -77,7 +84,7 @@ const UNARY: [Unary; 12] = [
 const BINARY: [Binary; 2] = [("atan2", math::atan2), ("pow", math::powf)];
 
 /// The values every function is pinned at, by their bits: ±0, the least and greatest subnormals,
-/// the least normal, ±1 and its two neighbours, ±2, ±½, the greatest double, ±∞ and a NaN.
+/// the least normal, ±1 and its two neighbours, ±2, ±½, the greatest double, ±∞, a NaN and 3.
 const SPECIAL: [u64; 24] = [
     0x0000_0000_0000_0000,
     0x8000_0000_0000_0000,
@@ -106,7 +113,8 @@ const SPECIAL: [u64; 24] = [
 ];
 
 /// The high words each function's source compares |x|'s against (`libm` 0.2.16's
-/// `src/math/<name>.rs`), by function.
+/// `src/math/<name>.rs`, and `rem_pio2.rs` and `k_tan.rs` for the circular functions; `cbrt`'s
+/// are the edges of its binades, since its source compares none), by function.
 fn thresholds(name: &str) -> &'static [u32] {
     match name {
         "exp" => &[
@@ -226,7 +234,7 @@ fn hard_cases(name: &str) -> Vec<u64> {
         }
         // The multiples of π/2 the reduction cancels against, of both signs, and Ng's worst case
         // for it, 6381956970095103 × 2⁷⁹⁷ (K. C. Ng 1992, "Argument reduction for huge
-        // arguments: good to the last bit", table 1), with 10²², 10³⁰⁰ and the greatest double.
+        // arguments: good to the last bit", table 1), with 10²² and 10³⁰⁰ and their neighbours.
         "sin" | "cos" | "tan" => {
             for k in [
                 1.0,
@@ -250,13 +258,14 @@ fn hard_cases(name: &str) -> Vec<u64> {
             inputs.extend(with_neighbours(1e22));
             inputs.extend(with_neighbours(1e300));
         }
-        // ±½, √3 ÷ 2 and the ends' neighbours.
+        // ±½, √3 ÷ 2 and ±0.975, where `asin` changes its square root's split.
         "asin" | "acos" => {
             for x in [0.5, -0.5, 0.866_025_403_784_438_6, 0.975, -0.975] {
                 inputs.extend(with_neighbours(x));
             }
         }
-        // The reduction's centres 0.5, 1, 1.5 and the 2⁶⁶ edge of its last interval.
+        // The reduction's centres 0.5 and ±1.5 (1 is a special value), the 2.4375 edge of its
+        // third interval and the 2⁶⁶ edge of its last.
         "atan" => {
             for x in [0.5, 1.5, -1.5, 2.4375, 7.378_697_629_483_821e19] {
                 inputs.extend(with_neighbours(x));
@@ -501,50 +510,6 @@ impl Domain {
     }
 }
 
-/// `MurmurHash3`'s 32-bit body (Austin Appleby) over each value's two words, high first, a NaN as
-/// `0x7ff8_0000` and 0, and its finaliser over the count of words.
-struct Digest {
-    hash: u32,
-    words: u32,
-}
-
-impl Digest {
-    const fn new() -> Self {
-        Self { hash: 0, words: 0 }
-    }
-
-    fn word(&mut self, word: u32) {
-        let k = word
-            .wrapping_mul(0xcc9e_2d51)
-            .rotate_left(15)
-            .wrapping_mul(0x1b87_3593);
-        self.hash = (self.hash ^ k)
-            .rotate_left(13)
-            .wrapping_mul(5)
-            .wrapping_add(0xe654_6b64);
-        self.words += 1;
-    }
-
-    fn value(&mut self, x: f64) {
-        let b = if x.is_nan() {
-            0x7ff8_0000_0000_0000
-        } else {
-            bits(x)
-        };
-        self.word(u32::try_from(b >> 32).expect("the high word"));
-        self.word(u32::try_from(b & 0xffff_ffff).expect("the low word"));
-    }
-
-    fn finish(self) -> u32 {
-        let mut h = self.hash ^ self.words;
-        h ^= h >> 16;
-        h = h.wrapping_mul(0x85eb_ca6b);
-        h ^= h >> 13;
-        h = h.wrapping_mul(0xc2b2_ae35);
-        h ^ (h >> 16)
-    }
-}
-
 /// The inputs a sweep draws.
 const SWEEP_COUNT: u32 = 1 << 17;
 
@@ -599,6 +564,10 @@ fn the_pinned_functions_are_written_for_the_client() {
     let mut lcg = Lcg::new(0x5208_7420);
     let mut seed = 0_u32;
     for (name, f) in UNARY {
+        assert!(
+            !thresholds(name).is_empty() && !unary_sweeps(name).is_empty(),
+            "{name} has thresholds and sweeps"
+        );
         let mut inputs: Vec<u64> = SPECIAL.to_vec();
         inputs.extend(threshold_inputs(name));
         inputs.extend(hard_cases(name));
@@ -611,25 +580,27 @@ fn the_pinned_functions_are_written_for_the_client() {
         for domain in unary_sweeps(name) {
             seed += 1;
             let mut g = Mulberry32(seed);
-            let mut digest = Digest::new();
-            for _ in 0..SWEEP_COUNT {
-                digest.value(f(domain.draw(&mut g)));
-            }
+            let digest = golden::f64_word_digest((0..SWEEP_COUNT).map(|_| f(domain.draw(&mut g))));
             w.line(&format!(
-                "sweep {name} {} {SWEEP_COUNT} {seed} {:08x}",
-                domain.text(),
-                digest.finish()
+                "sweep {name} {} {SWEEP_COUNT} {seed} {digest:08x}",
+                domain.text()
             ));
         }
     }
     for (name, f) in BINARY {
+        assert!(
+            !binary_hard_cases(name).is_empty() && !binary_sweeps(name).is_empty(),
+            "{name} has hard cases and sweeps"
+        );
         let mut pairs: Vec<(u64, u64)> = SPECIAL
             .iter()
             .flat_map(|&a| SPECIAL.iter().map(move |&b| (a, b)))
             .collect();
         pairs.extend(binary_hard_cases(name));
         let midpoints = midpoint_inputs(name, &mut lcg);
-        pairs.extend(midpoints.as_chunks::<2>().0.iter().map(|&[a, b]| (a, b)));
+        let (midpoint_pairs, rest) = midpoints.as_chunks::<2>();
+        assert!(rest.is_empty(), "{name}'s midpoint inputs come in pairs");
+        pairs.extend(midpoint_pairs.iter().map(|&[a, b]| (a, b)));
         let first = random_inputs(&mut lcg);
         let second = random_inputs(&mut lcg);
         pairs.extend(first.into_iter().zip(second));
@@ -640,17 +611,15 @@ fn the_pinned_functions_are_written_for_the_client() {
         for (first, second) in binary_sweeps(name) {
             seed += 1;
             let mut g = Mulberry32(seed);
-            let mut digest = Digest::new();
-            for _ in 0..SWEEP_COUNT {
+            let digest = golden::f64_word_digest((0..SWEEP_COUNT).map(|_| {
                 let a = first.draw(&mut g);
                 let b = second.draw(&mut g);
-                digest.value(f(a, b));
-            }
+                f(a, b)
+            }));
             w.line(&format!(
-                "sweep {name} {} {} {SWEEP_COUNT} {seed} {:08x}",
+                "sweep {name} {} {} {SWEEP_COUNT} {seed} {digest:08x}",
                 first.text(),
-                second.text(),
-                digest.finish()
+                second.text()
             ));
         }
     }

@@ -714,6 +714,21 @@ describe("a thinned table's rows (R08.T4.e's economy E3)", () => {
     }
   });
 
+  it("are stored at the client's standard pressures, to the bit", async () => {
+    // As above: the client's module is loaded at run time and its table narrowed. Both grids take
+    // their powers of ten from the pinned pow (R08.T20).
+    const url = new URL(
+      "../renderer/src/view/atmosphere/absorbers/kDistribution.ts",
+      import.meta.url,
+    ).href;
+    const client: unknown = await import(/* @vite-ignore */ url);
+    const standard: unknown =
+      typeof client === "object" && client !== null
+        ? Reflect.get(client, "STANDARD_PRESSURES_PA")
+        : undefined;
+    expect(standard).toEqual(STORED_PRESSURES_PA);
+  });
+
   it("read a g-point's σ at a node exactly", () => {
     const pressures = [1e3, 1e4, 1e5, 1e6];
     expect(sigmaAtPressure(pressures, [1, 2, 3, 4], 1e5)).toBe(3);

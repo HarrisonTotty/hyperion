@@ -395,11 +395,65 @@ pub fn f32_digest(values: &[f32]) -> u64 {
         .fold(FNV_OFFSET, |h, v| fnv1a(h, &v.to_le_bytes()))
 }
 
+/// A 32-bit digest of `values` for a golden file that a JavaScript test recomputes with
+/// `Math.imul`: `MurmurHash3`'s 32-bit body (Austin Appleby's `MurmurHash3_x86_32`, from seed 0)
+/// over each value's IEEE 754 bits as two words, the high word first, then its finaliser over the
+/// count of words (plan R08, R08.T20).
+///
+/// A NaN, whose bits are not specified, is hashed as `0x7ff8_0000_0000_0000`, so that the digest
+/// pins only that a value is a NaN. A `-0.0` and a `0.0` give different digests. The values are
+/// read once, in order, so a sweep can pass them as an iterator.
+#[must_use]
+pub fn f64_word_digest(values: impl IntoIterator<Item = f64>) -> u32 {
+    let mut hash = 0_u32;
+    let mut words = 0_u32;
+    let mut word = |w: u32| {
+        let k = w
+            .wrapping_mul(0xcc9e_2d51)
+            .rotate_left(15)
+            .wrapping_mul(0x1b87_3593);
+        hash = (hash ^ k)
+            .rotate_left(13)
+            .wrapping_mul(5)
+            .wrapping_add(0xe654_6b64);
+        words = words.wrapping_add(1);
+    };
+    for value in values {
+        let bits = if value.is_nan() {
+            0x7ff8_0000_0000_0000
+        } else {
+            value.to_bits()
+        };
+        let [b0, b1, b2, b3, b4, b5, b6, b7] = bits.to_be_bytes();
+        word(u32::from_be_bytes([b0, b1, b2, b3]));
+        word(u32::from_be_bytes([b4, b5, b6, b7]));
+    }
+    let mut h = hash ^ words;
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x85eb_ca6b);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0xc2b2_ae35);
+    h ^ (h >> 16)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    #[test]
+    fn f64_word_digest_hashes_each_values_words_high_first() {
+        // No words: the finaliser of 0 is 0. The others are an independent Python transcription's
+        // (the body and finaliser of Appleby's `MurmurHash3_x86_32`, the count of words in place of
+        // the length).
+        assert_eq!(f64_word_digest([]), 0);
+        assert_eq!(f64_word_digest([1.0]), 0x25d4_8799);
+        assert_eq!(f64_word_digest([1.0, f64::NAN, -0.0]), 0xc27a_ed66);
+        assert_eq!(f64_word_digest([-f64::NAN]), f64_word_digest([f64::NAN]));
+        assert_ne!(f64_word_digest([0.0]), f64_word_digest([-0.0]));
+        assert_ne!(f64_word_digest([1.0, 2.0]), f64_word_digest([2.0, 1.0]));
+    }
 
     #[test]
     fn f32_digest_hashes_each_values_little_endian_bits() {

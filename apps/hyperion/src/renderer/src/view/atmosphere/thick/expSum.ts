@@ -30,9 +30,9 @@
  * Pure: no state, no clock, no platform API.
  */
 
-/** The grid's k a decade of kU, for the non-negative fit. */
 import { exp, log, pow } from "../../../lib/pinnedMath";
 
+/** The grid's k a decade of kU, for the non-negative fit. */
 export const EXP_SUM_GRID_PER_DECADE = 8;
 
 /**
