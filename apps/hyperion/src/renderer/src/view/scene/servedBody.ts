@@ -8,30 +8,34 @@
  *   its own grant: its designation, kind, Hill radius at pericentre, appearance (its figure, with
  *   its pole, and its photometry) and rotation. A body drawn as a contact, one without a figure, a
  *   giant's envelope (`surfaceless`), or one whose rotation is not given, is no served world.
- * - **The star** is the body's host: the first star up its parents, or the system's first star
- *   for a body that orbits a pair or the barycentre, which a world flown alone in a kept scene
- *   cannot show beside its other star (a lean of T15.b.1's record).
+ * - **The star** is the body's host, up its record's parents: the star it orbits; for a body that
+ *   orbits a pair, the pair's first star, the lowest body index under the hierarchy's pair node
+ *   that its host names; or the system's first star for a body that orbits the barycentre. A world
+ *   flown alone in a kept scene cannot show the pair's other star beside it (T15.b.1's record).
  * - **Its rotation** is its rotation section's law at any time (`bodyRotationAt`), so that a
  *   served world turns it at times of its own from the push's (`ServedBody.epoch`).
  * - **The star's place** is its drawn centre less the body's at the push, and the body's galactic
  *   position its own drawn centre from the barycentre the scene states, at which a `sky` request
  *   answers the host discs that light it ({@link servedHostDiscs}).
  */
-import type {
-  BodyIdHex,
-  BulkManifestDto,
-  GalacticPosition,
-  HostDiscDto,
-  PendingBulkRequest,
-  RequestOf,
-  ResponseFor,
-  SystemIdHex,
-  UniverseIdHex,
-  UniverseTime,
+import {
+  type BodyIdHex,
+  type BulkManifestDto,
+  formatBodyId,
+  type GalacticPosition,
+  type HostDiscDto,
+  type PendingBulkRequest,
+  type RequestOf,
+  type ResponseFor,
+  type SystemIdHex,
+  type UniverseIdHex,
+  type UniverseTime,
 } from "@hyperion/protocol";
 
 import { norm, sub, type Vec3 } from "../../geometry/vec3";
-import type { SceneModel } from "../../lib/scene/model";
+import type { SceneModel, SceneSystem } from "../../lib/scene/model";
+import { layoutHierarchy } from "../../lib/system/hierarchy";
+import type { SystemBody } from "../../lib/system/model";
 import type { WireAppearance } from "../appearance/fromWire";
 import { galacticTranslated } from "../coords/position";
 import type { Rotation3 } from "../coords/rotation";
@@ -110,22 +114,39 @@ function servedKind(body: ViewBody): ServedBodyKind | null {
   return kind;
 }
 
-/** `body`'s host star in `scene`: the first star up its parents, else the scene's first star. */
-function hostStar(scene: ViewScene, body: ViewBody): ViewBody | null {
-  const byId = new Map(scene.bodies.map((each) => [each.id, each]));
-  let parent = body.parent;
+/**
+ * The host star in `scene` of the body whose record is `record`, up its record's parents: the star
+ * it orbits; for a pair (`OrbitHostDto`'s `pair`, keyed by its outer member's first star), the
+ * lowest-indexed star under that pair node; else the scene's first star, which is the system's.
+ */
+function hostStar(scene: ViewScene, system: SceneSystem, record: SystemBody): ViewBody | null {
+  const records = new Map(system.bodies.bodies.map((each) => [each.id, each]));
+  const firstStar = scene.bodies.find((each) => each.kind === "star") ?? null;
+  // A star the scene does not draw falls back to the first star, as a broken chain does.
+  const drawnStar = (id: BodyIdHex | undefined): ViewBody | null =>
+    scene.bodies.find((each) => each.kind === "star" && each.id === id) ?? firstStar;
+  const systemId = system.model.system;
+  let host = record.parent;
   // The walk is bounded by the bodies, since a parent chain is one of them at most each.
-  for (let steps = 0; parent !== null && steps <= scene.bodies.length; steps += 1) {
-    const next = byId.get(parent);
-    if (next === undefined) {
-      break;
+  for (let steps = 0; host !== null && steps <= records.size; steps += 1) {
+    switch (host.kind) {
+      case "body":
+        host = records.get(host.id)?.parent ?? null;
+        break;
+      case "star":
+        return drawnStar(formatBodyId({ system: systemId, bodyIndex: host.bodyIndex }));
+      case "pair": {
+        const layout = layoutHierarchy(system.model.hierarchy, system.model.hosts);
+        const key = formatBodyId({ system: systemId, bodyIndex: host.keyBodyIndex });
+        const pair = layout.pairKeyedBy.get(key);
+        // `pairStars` lists a pair's stars in body-index order.
+        return drawnStar(pair === undefined ? undefined : layout.pairStars.get(pair)?.[0]);
+      }
+      case "barycentre":
+        return firstStar;
     }
-    if (next.kind === "star") {
-      return next;
-    }
-    parent = next.parent;
   }
-  return scene.bodies.find((each) => each.kind === "star") ?? null;
+  return firstStar;
 }
 
 /**
@@ -171,7 +192,7 @@ export function servedBodyOf(
   if (section.state !== "ok") {
     return gap("no rotation");
   }
-  const star = hostStar(scene, drawn);
+  const star = hostStar(scene, system, record);
   if (star === null) {
     return gap("no star");
   }
