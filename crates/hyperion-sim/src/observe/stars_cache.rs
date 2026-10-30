@@ -120,5 +120,11 @@ pub fn stars_of(
                 record.id()
             )
         }
+        SystemOrigin::GlobalListMember { .. } => {
+            panic!(
+                "a global-list member's stars are its member record's, through its list: {:?}",
+                record.id()
+            )
+        }
     }
 }

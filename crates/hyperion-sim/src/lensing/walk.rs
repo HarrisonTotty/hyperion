@@ -469,7 +469,11 @@ pub fn lens_mass_at(
                         .expect("a feature member's record resolves in the galaxy that placed it")
                         .stars(galaxy)
                 }
-                SystemOrigin::CentreMember { .. } => return None,
+                // A global-list member's stars are its member record's, which its list and tube
+                // tables give (plan 10): no lens from the system record alone.
+                SystemOrigin::CentreMember { .. } | SystemOrigin::GlobalListMember { .. } => {
+                    return None;
+                }
             };
             let mass = stars
                 .stars()

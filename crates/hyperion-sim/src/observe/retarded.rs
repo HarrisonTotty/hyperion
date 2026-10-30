@@ -9,6 +9,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::features::members::{
     FeatureInteriorCache, MemberRecord, NoInteriorCache, resolve_member,
 };
+use crate::galaxy::global_list::members::GlobalMemberRecord;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::query::epoch_velocity;
 use crate::id::{SystemId, SystemIdKind};
@@ -49,6 +50,10 @@ pub enum TraceMotionError {
     /// not built; a straight line would misplace it by more than a tidal radius a century at 1 ly
     /// (brainstorm, "Orbits and time"), so no line is given for any centre member until then.
     CentreOrbitNotBuilt(SystemId),
+    /// The system is a member of the global list, a stream's or a dwarf core's (plan 10): its
+    /// velocity is its member record's, which the caller's list and tube tables give, so its line
+    /// is [`Drift::of_global_member`]'s, not one from the system record alone.
+    GlobalListMember(SystemId),
 }
 
 impl fmt::Display for TraceMotionError {
@@ -57,6 +62,11 @@ impl fmt::Display for TraceMotionError {
             Self::CentreOrbitNotBuilt(id) => write!(
                 f,
                 "the centre member {} follows an orbit that is not built yet",
+                id.raw()
+            ),
+            Self::GlobalListMember(id) => write!(
+                f,
+                "the global-list member {} is traced from its member record",
                 id.raw()
             ),
         }
@@ -221,7 +231,9 @@ impl Drift {
     /// # Errors
     ///
     /// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre, whose Kepler
-    /// regime and orbit wait for plan 09's P09.T28 (P12.T2 as built, provisional).
+    /// regime and orbit wait for plan 09's P09.T28 (P12.T2 as built, provisional), and
+    /// [`TraceMotionError::GlobalListMember`] for a stream's or a dwarf core's member, whose line
+    /// is [`of_global_member`](Self::of_global_member)'s.
     ///
     /// # Panics
     ///
@@ -260,6 +272,9 @@ impl Drift {
             SystemOrigin::CentreMember { .. } => {
                 return Err(TraceMotionError::CentreOrbitNotBuilt(record.id()));
             }
+            SystemOrigin::GlobalListMember { .. } => {
+                return Err(TraceMotionError::GlobalListMember(record.id()));
+            }
         };
         Ok(Self::new(*record.epoch_position(), velocity))
     }
@@ -285,6 +300,13 @@ impl Drift {
     /// The line a feature member follows, from the member itself.
     #[must_use]
     pub fn of_member(member: &MemberRecord) -> Self {
+        Self::new(*member.record().epoch_position(), member.velocity())
+    }
+
+    /// The line a global-list member follows, a stream's or a dwarf core's, from the member
+    /// itself: straight, at its own velocity (plan 10, P10.T8.c).
+    #[must_use]
+    pub fn of_global_member(member: &GlobalMemberRecord) -> Self {
         Self::new(*member.record().epoch_position(), member.velocity())
     }
 

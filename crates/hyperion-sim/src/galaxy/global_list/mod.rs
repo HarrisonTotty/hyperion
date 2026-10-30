@@ -31,6 +31,7 @@
 mod debris;
 pub mod dwarf_core;
 pub mod dwarfs;
+pub mod members;
 pub mod orbit;
 pub mod orphans;
 pub mod share;

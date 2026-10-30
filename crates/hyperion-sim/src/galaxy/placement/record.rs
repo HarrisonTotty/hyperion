@@ -102,6 +102,13 @@ pub enum SystemOrigin {
         /// The primary's redraw attempt ([`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt)).
         attempt: u16,
     },
+    /// A member of the global list (plan 10, Design note 13): a stream's or a dwarf core's, its ID
+    /// saying which, and the attempt its primary's draws are read at, as a feature member's. Its
+    /// age, metallicity and velocity are its stream's or core's, so it carries no component.
+    GlobalListMember {
+        /// The primary's redraw attempt ([`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt)).
+        attempt: u16,
+    },
 }
 
 /// What a system is, as its layer says (plan 13, Design note 10): a star system, a free-floating
@@ -197,6 +204,14 @@ impl SystemRecord {
                 matches!(id.kind(), SystemIdKind::Centre(_)),
                 "a centre member's record needs a centre member ID, got {id:?}"
             ),
+            SystemOrigin::GlobalListMember { .. } => assert!(
+                matches!(
+                    id.kind(),
+                    SystemIdKind::Stream(_) | SystemIdKind::DwarfCore(_)
+                ),
+                "a global-list member's record needs a stream's or a dwarf core's member ID, got \
+                 {id:?}"
+            ),
         }
         Self {
             id,
@@ -256,6 +271,18 @@ impl SystemRecord {
                     }
                 }
             }
+            // A stream member's ID carries its band; a dwarf core's slot is a feature member's.
+            SystemOrigin::GlobalListMember { .. } => match self.id.kind() {
+                SystemIdKind::Stream(member) => member.band(),
+                SystemIdKind::DwarfCore(member) => match member.slot() {
+                    MemberSlot::InCell { band, .. } => band,
+                    MemberSlot::FeatureLevel { .. } => {
+                        super::layer_for_initial_mass(self.primary_initial_mass)
+                            .expect("a member's primary is of 0.08-150 M_sun")
+                    }
+                },
+                _ => unreachable!("a global-list member's record is built with its member ID"),
+            },
         }
     }
 
@@ -288,7 +315,9 @@ impl SystemRecord {
     pub fn component(&self) -> Option<ComponentId> {
         match self.origin {
             SystemOrigin::Grid(component) => Some(component),
-            SystemOrigin::FeatureMember { .. } | SystemOrigin::CentreMember { .. } => None,
+            SystemOrigin::FeatureMember { .. }
+            | SystemOrigin::CentreMember { .. }
+            | SystemOrigin::GlobalListMember { .. } => None,
         }
     }
 

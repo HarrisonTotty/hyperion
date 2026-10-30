@@ -203,3 +203,5 @@ dwarf.core.metallicity (Galaxy) = 0xbd1b119c20498aa9
 stream.spray.release (Galaxy) = 0x530a54c1c2a5c79d
 stream.spray.offsets (Galaxy) = 0x79ce3e8131fb9430
 stream.tube.gaps (Galaxy) = 0x0e05c44f9a7f726e
+dwarf.core.age (System) = 0x39d9bba9ad586bf1
+dwarf.core.abundance (System) = 0x1c0b00dec12dfa85

@@ -609,6 +609,9 @@ Risks._
 
 ### P10.T7 Dwarf cores
 
+_T7.a–b built (lanes `p10-share` and `p10-t6c`, 2026-10-28 and 2026-10-30); see "Deviations in
+P10.T7.a, as built" and "P10.T7.b as built" in Risks._
+
 - **P10.T7.a The model.** `DwarfCoreModel::from_spec`: a Plummer profile flattened along an axis of
   its grid with a half-mass radius from the dwarfs' size–mass relation, up to 8,500 ly;
   `NestedGrid::new(w, 16, 8)` with w a power of two in 16–64 ly, chosen by plan 09's
@@ -1953,3 +1956,37 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
     Slow, by name, in `tests/global_list_tube.rs` (`testing`, `--ignored`):
     `cells_touching_holds_every_point_of_the_test_tubes_in_a_sphere`. Bench:
     `benches/global_list.rs` (`testing`).
+- **P10.T7.b as built (lane `p10-t6c`, 2026-10-30, at `GENERATOR_VERSION` 24).** No served
+  output moved: no source places a core's members yet (T9, T10.b). New unwired golden
+  `galaxy/global_list/dwarf_core_members.golden`; tags `dwarf.core.age` and `dwarf.core.abundance`
+  (`System`) appended, so `rng/tags.golden` is extended only.
+  - _Items._ `global_list::members::GlobalMemberRecord` (record, class, composition, velocity,
+    `attempt`, `stars`); on `DwarfCoreModel`: `member_id`, `expected_candidates`,
+    `candidate_count`, `candidate`, `members_in_cell`, `feature_level_list`, `member_speed_bound`,
+    `peak_candidates`, `check_index_headroom`; in `dwarf_core`: `resolve_dwarf_core_member`,
+    `ExceedDwarfCoreIndexError`, `quenching_time`, `QUENCHING_TIME_YR`.
+    `SystemOrigin::GlobalListMember { attempt }`, with an arm in every match on the origin;
+    `TraceMotionError::GlobalListMember` and `Drift::of_global_member`.
+  - _`resolve_with`_ resolves a core's member by drawing the galaxy's `Debris` (about 0.2 s in
+    release) until P10.T4's list holds the cores' specifications; `resolve` still refuses it.
+  - _Research-p10's notes, as ruled (2026-10-30)._ `dispersion_at` is flat; the tail ends
+    `quenching_time` of the infall mass after the accretion (1 Gyr to 10⁷ M☉, 2 at 10⁸, 9.5 from
+    10⁹, linear in log M★), so the class tables move (T7.a's tests restated).
+  - _Members._ Plan 09's placement on `member.cell`, `member.position` and `member.accept`; the star
+    by attempts as the centre's (age per attempt on `dwarf.core.age`; a living star kept below its
+    age's turn-off at its own [Fe/H]; a remnant kept if of its class's kind, with no kick cut, as
+    T7.a keeps every remnant); [Fe/H] the mean plus the spread times one normal; velocity the bulk
+    plus N(0, σ) on each axis with no escape cut (lean, 2026-10-30: a cut at the truncated
+    isothermal halo's escape speed would take a quarter of the members at the extent, against the
+    flat profile); multiplicity `Free`. The feature-level list is empty until P09.T33, T34 and T36.
+  - _Capacity (lean, 2026-10-30; a question for main)._ A core's fullest cell holds about 10⁻³ of
+    its systems whatever the grid's width, so cores above some 4 × 10⁶ M☉ overflow the 13-bit
+    index: 12 of the 252 cores of 64 drawn galaxies' dwarfs (as drawn, unscaled) peak at
+    8,343–55,616. `check_index_headroom` refuses them as a typed error, as the centre's check does;
+    whoever plays a core calls it first.
+  - _For T8.a._ A dwarf's tube takes the core's history only to the tube's own stripping, not the
+    stars the core forms after it (research-p10 §4).
+  - _Tests._ Fast, `dwarf_core::members::tests`: the laws, the profiles by KS, IDs and resolving,
+    stars of their class, the headroom, order independence, the golden. Slow, by name:
+    `resolve_with_reaches_a_drawn_core_s_members`, and plan 12's
+    `source_horizon_sweep_every_source_answers_at_the_horizons_start` gains the cores' row.

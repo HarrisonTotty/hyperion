@@ -130,7 +130,8 @@ impl MemberRecord {
     pub fn attempt(&self) -> u32 {
         match self.record.origin() {
             SystemOrigin::FeatureMember { attempt, .. }
-            | SystemOrigin::CentreMember { attempt } => u32::from(attempt),
+            | SystemOrigin::CentreMember { attempt }
+            | SystemOrigin::GlobalListMember { attempt } => u32::from(attempt),
             SystemOrigin::Grid(_) => 0,
         }
     }

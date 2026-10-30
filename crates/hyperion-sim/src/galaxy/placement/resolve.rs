@@ -18,8 +18,9 @@ use super::{CandidateOutcome, CellKey, ResolveSystemError, SystemRecord};
 use crate::galaxy::Galaxy;
 use crate::galaxy::features::centre::members::resolve_centre_member;
 use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
-use crate::galaxy::global_list::TubeLookup;
-use crate::id::{SystemId, SystemIdKind};
+use crate::galaxy::global_list::dwarf_core::{DwarfCoreModel, resolve_dwarf_core_member};
+use crate::galaxy::global_list::{Debris, TubeLookup};
+use crate::id::{DwarfCoreMemberId, SystemId, SystemIdKind};
 
 /// The system `id` names in `galaxy`.
 ///
@@ -95,8 +96,12 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
 ///
 /// # Errors
 ///
-/// As [`resolve`]. A stream's or a dwarf core's member answers
-/// [`ResolveSystemError::KindNotGenerated`] until plan 10 places them (P10.T8.b and P10.T7.b).
+/// As [`resolve`]. A stream's member answers [`ResolveSystemError::KindNotGenerated`] until plan
+/// 10 places it (P10.T8.b). A dwarf core's member is plan 10's
+/// [`resolve_dwarf_core_member`] in its core's model (P10.T7.b), the core's specification drawn
+/// from the galaxy's [`Debris`] until the list holds the cores' (P10.T4); it is
+/// [`ResolveSystemError::NoSuchSystem`] in a galaxy without its kinematic tables, whose debris is
+/// not defined, or for a core the galaxy does not have.
 ///
 /// # Examples
 ///
@@ -135,15 +140,32 @@ pub fn resolve_with(
     _lookup: &dyn TubeLookup,
 ) -> Result<SystemRecord, ResolveSystemError> {
     match id.kind() {
-        SystemIdKind::Stream(_) | SystemIdKind::DwarfCore(_) => {
-            Err(ResolveSystemError::KindNotGenerated)
-        }
+        SystemIdKind::Stream(_) => Err(ResolveSystemError::KindNotGenerated),
+        SystemIdKind::DwarfCore(member) => resolve_core_member(galaxy, member),
         SystemIdKind::Grid(_)
         | SystemIdKind::FeatureMember(_)
         | SystemIdKind::Centre(_)
         | SystemIdKind::Pinned(_)
         | SystemIdKind::Catalogue(_) => resolve(galaxy, id),
     }
+}
+
+/// A dwarf core's member, its core's model built from the galaxy's debris ([`resolve_with`]).
+fn resolve_core_member(
+    galaxy: &Galaxy,
+    id: DwarfCoreMemberId,
+) -> Result<SystemRecord, ResolveSystemError> {
+    if galaxy.kinematics().is_none() {
+        return Err(ResolveSystemError::NoSuchSystem);
+    }
+    let debris = Debris::generate(galaxy);
+    let spec = debris
+        .cores()
+        .iter()
+        .find(|core| core.number().get() == id.number())
+        .ok_or(ResolveSystemError::NoSuchSystem)?;
+    let model = DwarfCoreModel::from_spec(galaxy, spec);
+    resolve_dwarf_core_member(galaxy, &model, id).map(|member| *member.record())
 }
 
 /// The record of candidate `index` of `key`, if the cell has that candidate and the thinning kept
@@ -420,10 +442,11 @@ mod tests {
         }
     }
 
-    /// Plan 10, P10.T1: a stream's and a dwarf core's members are not resolved by either
-    /// resolver yet, and `resolve` never will resolve them.
+    /// Plan 10: `resolve` never resolves a stream's or a dwarf core's member; `resolve_with`
+    /// resolves a core's from P10.T7.b, here in a galaxy without its kinematic tables, which has
+    /// none, and a stream's not yet (P10.T8.b).
     #[test]
-    fn stream_and_dwarf_core_members_are_not_generated_yet() {
+    fn stream_and_dwarf_core_members_are_not_generated_by_resolve() {
         let galaxy = galaxy();
         let lookup = NoTubes(GlobalList::default());
         let stream = SystemId::from(StreamMemberId::new(3, Layer::D, 900, [31, 32], 0).unwrap());
@@ -447,9 +470,15 @@ mod tests {
                 resolve(&galaxy, id),
                 Err(ResolveSystemError::KindNotGenerated)
             );
+        }
+        assert_eq!(
+            resolve_with(&galaxy, stream, &lookup),
+            Err(ResolveSystemError::KindNotGenerated)
+        );
+        for id in [core, listed] {
             assert_eq!(
                 resolve_with(&galaxy, id, &lookup),
-                Err(ResolveSystemError::KindNotGenerated)
+                Err(ResolveSystemError::NoSuchSystem)
             );
         }
     }

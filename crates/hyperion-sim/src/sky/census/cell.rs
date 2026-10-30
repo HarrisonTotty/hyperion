@@ -1817,6 +1817,8 @@ fn bright_retarded(
             tally.centre_members += 1;
             return None;
         }
+        // No source the census walks holds the global list's members yet (plan 10, P10.T10.b).
+        Err(TraceMotionError::GlobalListMember(_)) => return None,
     };
     let observer = query.observer();
     let r = retarded(observer, &drift);

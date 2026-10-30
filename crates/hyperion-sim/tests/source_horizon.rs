@@ -8,10 +8,10 @@
 //! start.
 //!
 //! The sources built so far are the grid's seven layers, the catalogue features' members (plan 09,
-//! P09.T21), and the supernova entry of plan 09's phase 4 as a value. The displaced remnants (plan
-//! 08, P08.T12), the galactic centre's members (P09.T24–T28), the streams' and dwarf cores' members
-//! (plan 10) and the catalogue classes' grids (P09.T32–T35) are not placed yet; each is added here
-//! by the task that places it (P12.T0 as built).
+//! P09.T21), the dwarf cores' members (plan 10, P10.T7.b), and the supernova entry of plan 09's
+//! phase 4 as a value. The displaced remnants (plan 08, P08.T12), the galactic centre's members
+//! (P09.T24–T28), the streams' members (plan 10) and the catalogue classes' grids (P09.T32–T35)
+//! are not placed yet; each is added here by the task that places it (P12.T0 as built).
 
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
@@ -25,13 +25,15 @@ use hyperion_sim::galaxy::catalogue_classes::supernova::{
 };
 use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
 use hyperion_sim::galaxy::features::members::FeatureInterior;
+use hyperion_sim::galaxy::global_list::Debris;
+use hyperion_sim::galaxy::global_list::dwarf_core::DwarfCoreModel;
 use hyperion_sim::galaxy::imf::MassBand;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellKey, Existence, SystemRecord, generate_cell};
 use hyperion_sim::galaxy::query::{UNBOUND_PAD_SPEED, position_at};
 use hyperion_sim::galaxy::snr::{ExplosionEnergy, SiteGas, shell_window};
 use hyperion_sim::id::{Layer, SystemId};
-use hyperion_sim::observe::{Drift, Observer, Trajectory, retarded};
+use hyperion_sim::observe::{Drift, Observer, TraceMotionError, Trajectory, retarded};
 use hyperion_sim::stellar::brief::BriefModel;
 use hyperion_sim::stellar::remnant::SupernovaType;
 use hyperion_sim::stellar::system::{SystemExistence, SystemStars};
@@ -249,6 +251,49 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
         member_swept >= 1,
         "the feature has no member in bands A, C or E"
     );
+
+    // A dwarf core's members (plan 10, P10.T7.b): one of each band its cells have, on the line
+    // its own velocity gives it, which the system record alone cannot.
+    let core = Debris::generate(&galaxy)
+        .cores()
+        .iter()
+        .map(|spec| DwarfCoreModel::from_spec(&galaxy, spec))
+        .find(|core| core.check_index_headroom().is_ok())
+        .expect("the fixture keeps a core under its index");
+    let mut core_members = Vec::new();
+    let mut core_swept = 0;
+    for band in [MassBand::A, MassBand::C, MassBand::E] {
+        let found = core.grid().owned_cells().find_map(|c| {
+            core.members_in_cell(&galaxy, band, c, &mut core_members);
+            core_members.first().map(|(m, _)| *m)
+        });
+        let Some(member) = found else { continue };
+        let line = Drift::of_global_member(&member);
+        assert_eq!(
+            Drift::of_record(&galaxy, member.record()),
+            Err(TraceMotionError::GlobalListMember(member.record().id()))
+        );
+        let stars = member.stars(&galaxy);
+        for t in TIMES {
+            assert_in_padded_cube("a core member", &line.position_at(t));
+            let exists = member.record().existence_at(t) == Existence::Exists;
+            let summary = stars.summary_at(t);
+            assert_eq!(summary.existence() == SystemExistence::Exists, exists);
+            assert_eq!(stars.brief_at(t).is_some(), exists);
+        }
+        for t in [ClockWindow::START, ClockWindow::END] {
+            let away = GalacticPosition::from_light_years([-20_000.0, -20_000.0, 30_000.0])
+                .expect("in range");
+            let seen = retarded(&Observer::new(away, t).expect("inside"), &line);
+            assert!(SourceHorizon::contains(seen.emitted()));
+            assert_in_padded_cube(
+                "a core member's apparent position",
+                seen.apparent_position(),
+            );
+        }
+        core_swept += 1;
+    }
+    assert!(core_swept >= 1, "the core has no member in bands A, C or E");
 
     // The supernova entry as a value: exploding at the horizon's start and at the epoch.
     let site = SiteGas::uniform(HydrogenPerCm3::new(1.0), KelvinPerCm3::new(3_800.0))

@@ -30,16 +30,17 @@
 //!   per system formed over the core's [`StarFormationHistory`], each age with its own turn-off,
 //!   scaled together to the specification's expected systems.
 //! - **Ages** follow the core's own [`StarFormationHistory`], set by the progenitor's stellar mass
-//!   at infall: an old burst 10–13 Gyr ago and a tail of constant rate from 10 Gyr ago to the
-//!   accretion, which holds more of the stars the more massive the dwarf.
+//!   at infall: an old burst 10–13 Gyr ago and a tail of constant rate from 10 Gyr ago to a
+//!   quenching time after the accretion ([`quenching_time`]), which holds more of the stars the
+//!   more massive the dwarf.
 //! - **Metallicity**: the core's mean is Kirby et al. 2013's eq. 4 at the progenitor's stellar mass
 //!   at infall ([`mass_metallicity`]) plus one Gaussian offset of [`MEAN_METALLICITY_SCATTER_DEX`],
 //!   on `dwarf.core.metallicity`; its members spread about that mean by
 //!   [`metallicity_spread`] (the desktop's ruling on plan 10's re-validation, issue #123, point
 //!   4).
 //! - **Motion**: the bulk motion is the core's epoch state on its orbit, from which the leapfrog
-//!   integrates it (P10.T4); its members add the Plummer dispersion of [`velocity_dispersion`]
-//!   ([`DwarfCoreModel::dispersion_at`]).
+//!   integrates it (P10.T4); its members add the measured dispersion of [`velocity_dispersion`],
+//!   flat in radius ([`DwarfCoreModel::dispersion_at`]).
 //!
 //! Which mass each figure reads: the size, the extent and the dispersion the core's present
 //! stellar mass ([`DwarfCoreSpec::mass`], after the share's scaling), since they describe what is
@@ -71,6 +72,10 @@ use crate::units::{Dex, HeliumExcess, KilometresPerSecond, LightYears, SolarMass
 
 use super::DwarfCoreNumber;
 use super::spec::DwarfCoreSpec;
+
+mod members;
+
+pub use members::{ExceedDwarfCoreIndexError, resolve_dwarf_core_member};
 
 /// The dwarfs' size–mass relation, `log₁₀(R_e ÷ pc) = a + b log₁₀(M★ ÷ M☉)`, as `(a, b)`.
 ///
@@ -169,16 +174,44 @@ pub const OLD_SHARE: (f64, f64, f64, f64) = (0.8, -0.25, 0.3, 0.8);
 /// (`interior::counts`), which the class only labels.
 const BLACK_HOLE_PROGENITOR_MIN_MSUN: f64 = 20.0;
 
+/// The time a dwarf of stellar mass `mass` at infall goes on forming stars after its accretion,
+/// `τ_q`: 1 Gyr at and below 10⁷ M☉, 2 Gyr at 10⁸ M☉ and 9.5 Gyr at 10⁹ M☉ and above, linear in
+/// log₁₀ M★ between ([`QUENCHING_TIME_YR`]).
+///
+/// Wetzel, Tollerud and Weisz 2015 (ApJL 808, L27, abstract) find quenching after infall "< 2 Gyr"
+/// below 10⁸ M☉ and "more rapid at lower `M_star`", the timescale then increasing "rapidly …
+/// peaking at ~9.5 Gyr for `M_star` ~ 10⁹ `M_sun`"; Fillingham et al. 2015 (MNRAS 454, 2039,
+/// abstract) find about 2 Gyr at 10⁶–10⁸ M☉. Their "< 5 Gyr" above 5 × 10⁹ M☉ lies beyond the
+/// recent progenitors' 10⁹·⁵ M☉. Main's ruling of 2026-10-30, after the research lane
+/// `research-p10` (its advice §4): the points are read from the abstracts, not from Wetzel et
+/// al.'s Fig. 3, a parameter of the generator version.
+#[must_use]
+pub fn quenching_time(mass: SolarMasses) -> Years {
+    let x = math::log10(mass.value());
+    let [(x0, t0), (x1, t1), (x2, t2)] = QUENCHING_TIME_YR;
+    Years::new(if x <= x0 {
+        t0
+    } else if x <= x1 {
+        t0 + (x - x0) / (x1 - x0) * (t1 - t0)
+    } else if x <= x2 {
+        t1 + (x - x1) / (x2 - x1) * (t2 - t1)
+    } else {
+        t2
+    })
+}
+
+/// [`quenching_time`]'s points, `(log₁₀(M★ ÷ M☉), τ_q ÷ yr)`: 1 Gyr at 10⁷, 2 Gyr at 10⁸ and
+/// 9.5 Gyr at 10⁹, held beyond the ends.
+pub const QUENCHING_TIME_YR: [(f64, f64); 3] = [(7.0, 1e9), (8.0, 2e9), (9.0, 9.5e9)];
+
 /// A dwarf core's star formation history (module documentation).
 ///
 /// It is an old burst of constant rate over [`OLD_BURST_AGES_YR`] holding
 /// [`old_share`](Self::old_share) of the stars, and a tail of constant rate from the burst's
-/// younger end to the accretion holding the rest. The tail ends at the accretion, as plan 10 has
-/// it, at every mass: it is its share of the stars, not its length, that grows with the dwarf's
-/// mass. Satellites go on forming stars for some
-/// time after infall, longer the more massive (Wetzel, Tollerud and Weisz 2015, ApJL 808, L27,
-/// Fig. 3: under 1.5 Gyr below 10⁷ M☉, 2–3 Gyr at 10⁷–10⁸, about 5 Gyr at 10⁸–10⁹), which this
-/// leaves out (P10.T7.a, as built).
+/// younger end to [`quenching_time`] after the accretion, or to the epoch where that has not come,
+/// holding the rest. So both the tail's share of the stars and its length grow with the dwarf's
+/// mass (plan 10, P10.T7.a: "a tail that lasts longer the more massive the dwarf"): a dwarf of
+/// 10⁹ M☉ accreted within 6 Gyr still forms stars at the epoch, as the Magellanic Clouds do.
 ///
 /// # Examples
 ///
@@ -186,27 +219,33 @@ const BLACK_HOLE_PROGENITOR_MIN_MSUN: f64 = 20.0;
 /// use hyperion_sim::galaxy::global_list::dwarf_core::StarFormationHistory;
 /// use hyperion_sim::units::{SolarMasses, Years};
 ///
-/// // A Sagittarius-sized dwarf accreted 5 Gyr ago forms most of its stars in the tail.
+/// // A Sagittarius-sized dwarf accreted 5 Gyr ago forms most of its stars in the tail, which
+/// // goes on 5.6 Gyr after its accretion, to the epoch.
 /// let history = StarFormationHistory::of(SolarMasses::new(3e8), Years::new(5e9));
 /// assert!(history.old_share() < 0.5);
 /// let (youngest, oldest) = (history.age_quantile(0.0), history.age_quantile(1.0));
-/// assert!((youngest.value() - 5e9).abs() < 1.0 && (oldest.value() - 13e9).abs() < 1.0);
+/// assert!(youngest.value() < 1.0 && (oldest.value() - 13e9).abs() < 1.0);
+/// // One of 10⁸ M☉ accreted as long ago stopped 2 Gyr after it.
+/// let small = StarFormationHistory::of(SolarMasses::new(1e8), Years::new(5e9));
+/// assert!((small.age_quantile(0.0).value() - 3e9).abs() < 1.0);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StarFormationHistory {
     old_share: f64,
-    /// The tail's ages, years: the accretion's to the burst's younger end.
+    /// The tail's ages, years: its end's, [`quenching_time`] after the accretion, to the burst's
+    /// younger end.
     tail: (f64, f64),
 }
 
 impl StarFormationHistory {
     /// The history of a dwarf of stellar mass `mass` at infall, accreted `accreted` ago (0–6 Gyr;
-    /// a value beyond the burst's younger end leaves no tail).
+    /// an end beyond the burst's younger end leaves no tail).
     #[must_use]
     pub fn of(mass: SolarMasses, accreted: Years) -> Self {
         let (a, b, lo, hi) = OLD_SHARE;
         let old_share = (a + b * (math::log10(mass.value()) - 5.0)).clamp(lo, hi);
-        let young = accreted.value().clamp(0.0, OLD_BURST_AGES_YR.0);
+        let end = accreted.value() - quenching_time(mass).value();
+        let young = end.clamp(0.0, OLD_BURST_AGES_YR.0);
         let tail = (young, OLD_BURST_AGES_YR.0);
         let old_share = if tail.1 > tail.0 { old_share } else { 1.0 };
         Self { old_share, tail }
@@ -457,19 +496,19 @@ impl DwarfCoreModel {
         KilometresPerSecond::new(self.dispersion)
     }
 
-    /// The one-dimensional velocity dispersion of its members at ellipsoidal radius `r`: an
-    /// isotropic Plummer sphere's, scaled to the core's [`dispersion`](Self::dispersion).
+    /// The one-dimensional velocity dispersion of its members at ellipsoidal radius `r`: the
+    /// core's [`dispersion`](Self::dispersion) at every radius.
     ///
-    /// It is `σ(r)² = σ₀² (1 + r² ÷ a²)^(−½)`, whose mass-weighted mean square is the core's σ².
-    /// In a Plummer sphere the mean is `π G M ÷ (32 a)` against the centre's `G M ÷ (6 a)`, so
-    /// `σ₀² = 16 σ² ÷ (3π)`. The mass is the dark-dominated one the dispersion implies, not the
-    /// stars'. Measured dwarf spheroidals' profiles are nearer flat (Walker et al. 2007, ApJ 667,
-    /// L53; P10.T7.a, as built).
+    /// Walker et al. 2007 (ApJ 667, L53, abstract) find in each of seven dwarf spheroidals a
+    /// dispersion "of order 10 km/s that remains approximately constant with distance from the
+    /// dSph center, out to and in some cases beyond the radius at which the mean surface
+    /// brightness falls to the background level", and an isotropic tracer in the isothermal halo
+    /// the extent assumes has a constant σ. A Plummer sphere's shape falls to 0.56 σ₀ at three
+    /// scales (main's ruling of 2026-10-30, after the research lane `research-p10`, its advice
+    /// §2).
     #[must_use]
-    pub fn dispersion_at(&self, r: LightYears) -> KilometresPerSecond {
-        let x = r.value() / self.scale;
-        let centre_sq = 16.0 * self.dispersion * self.dispersion / (3.0 * core::f64::consts::PI);
-        KilometresPerSecond::new((centre_sq / (1.0 + x * x).sqrt()).sqrt())
+    pub fn dispersion_at(&self, _r: LightYears) -> KilometresPerSecond {
+        KilometresPerSecond::new(self.dispersion)
     }
 
     /// Its star formation history, which its members' ages follow.
@@ -533,7 +572,7 @@ fn jacobi_radius(galaxy: &Galaxy, position: &GalacticDisplacement, stars: f64, s
 /// A star dies at the end of its main sequence, and every remnant stays. The neutron stars and
 /// black holes are plan 08's per primary formed (through plan 09's retention table, which reads
 /// them whatever the escape speed), counted from the ages at which an 8 M☉ star has died: a core
-/// accreted in the last 40 Myr leaves out its youngest remnants.
+/// still forming stars leaves out the remnants of its last 40 Myr.
 #[must_use]
 fn classes(
     f: &dyn MassFunction,
@@ -725,11 +764,13 @@ mod tests {
     }
 
     /// P10.T7.a: the age distribution of a 10⁸ M☉ core spreads over more than 2 Gyr, however
-    /// recently it was accreted; the history's nodes integrate its shares.
+    /// recently it was accreted; the history's nodes integrate its shares; its tail ends 2 Gyr
+    /// after the accretion, or at the epoch.
     #[test]
     fn a_10_8_core_s_ages_spread_over_more_than_two_gyr() {
         for accreted in [0.0, 1e9, 3e9, 6e9] {
             let history = StarFormationHistory::of(SolarMasses::new(1e8), Years::new(accreted));
+            let end = (accreted - 2e9).max(0.0);
             assert!((history.old_share() - 0.3).abs() < 1e-12);
             let spread = history.age_quantile(0.95).value() - history.age_quantile(0.05).value();
             assert!(spread > 2e9, "accreted {accreted}: {spread}");
@@ -738,15 +779,38 @@ mod tests {
             assert!((total - 1.0).abs() < 1e-13);
             // The mean age by the nodes against the pieces' midpoints.
             let mean = nodes.iter().fold(0.0, |s, &(a, w)| s + a * w);
-            let want = 0.3 * 11.5e9 + 0.7 * f64::midpoint(accreted, 10e9);
+            let want = 0.3 * 11.5e9 + 0.7 * f64::midpoint(end, 10e9);
             assert!((mean / want - 1.0).abs() < 1e-12, "{mean} {want}");
-            assert!((history.age_quantile(0.0).value() - accreted).abs() < 1e-3);
+            assert!((history.age_quantile(0.0).value() - end).abs() < 1e-3);
             assert!((history.age_quantile(1.0).value() / 13e9 - 1.0).abs() < 1e-12);
         }
         // A small dwarf formed most of its stars in the burst, a large one in the tail.
         let small = StarFormationHistory::of(SolarMasses::new(3e4), Years::new(2e9));
         let large = StarFormationHistory::of(SolarMasses::new(3e9), Years::new(2e9));
         assert!((small.old_share() - 0.8).abs() < 1e-12 && (large.old_share() - 0.3).abs() < 1e-12);
+    }
+
+    /// The tail ends `τ_q(M★)` after the accretion (main's ruling of 2026-10-30): 1 Gyr up to
+    /// 10⁷ M☉, 2 Gyr at 10⁸ and 9.5 Gyr from 10⁹, linear in log₁₀ M★ between, so that a dwarf of
+    /// 10⁹ M☉ accreted within 6 Gyr still forms stars at the epoch.
+    #[test]
+    fn the_tail_ends_a_mass_dependent_quenching_time_after_the_accretion() {
+        let tau = |m: f64| quenching_time(SolarMasses::new(m)).value();
+        for (m, want) in [
+            (1e5, 1e9),
+            (1e7, 1e9),
+            (math::exp10(7.5), 1.5e9),
+            (1e8, 2e9),
+            (math::exp10(8.5), 5.75e9),
+            (1e9, 9.5e9),
+            (math::exp10(9.5), 9.5e9),
+        ] {
+            assert!((tau(m) / want - 1.0).abs() < 1e-12, "{m:e}: {}", tau(m));
+        }
+        let history = StarFormationHistory::of(SolarMasses::new(1e9), Years::new(6e9));
+        assert!(history.tail().0.value().abs() < 1e-3);
+        let early = StarFormationHistory::of(SolarMasses::new(1e6), Years::new(6e9));
+        assert!((early.tail().0.value() - 5e9).abs() < 1e-3);
     }
 
     /// P10.T7.a: the profile integrates to the specification's system count, the extent stays
@@ -841,16 +905,17 @@ mod tests {
     }
 
     #[test]
-    fn a_core_s_classes_hold_every_remnant_and_its_dispersion_averages_to_the_observed() {
+    fn a_core_s_classes_hold_every_remnant_and_its_dispersion_is_flat() {
         let galaxy = milky_way();
-        let spec = spec(&galaxy, 1e7, 4e7, 2e9, [40_000.0, 25_000.0, -8_000.0]);
+        let spec = spec(&galaxy, 1e7, 4e7, 4e9, [40_000.0, 25_000.0, -8_000.0]);
         let core = DwarfCoreModel::from_spec(&galaxy, &spec);
         let kinds = |kind: ClassKind| core.table().expected_of(kind);
         assert!(kinds(ClassKind::Living) > 0.0 && kinds(ClassKind::WhiteDwarf) > 0.0);
         assert!(kinds(ClassKind::NeutronStar) > 0.0 && kinds(ClassKind::BlackHole) > 0.0);
         assert!(core.table().tail(MassBand::A).is_none());
-        // Old: nothing above the youngest stars' turn-off lives, about 1.5 M☉ at 2 Gyr, so bands D
-        // and E hold only remnants.
+        // Old: its tail ended 2.4 Gyr ago, τ_q of 1.6 Gyr after its accretion 4 Gyr ago, and
+        // nothing above that age's turn-off, about 1.5 M☉, lives, so bands D and E hold only
+        // remnants.
         for band in [MassBand::D, MassBand::E] {
             assert!(
                 core.table()
@@ -868,34 +933,20 @@ mod tests {
                 assert!((d / reference - 1.0).abs() < 1e-12, "{band:?} {i}");
             }
         }
-        // The Plummer dispersion's density-weighted mean square, untapered, is the observed one's:
-        // ∫ x² (1 + x²)^(−3) dx ÷ ∫ x² (1 + x²)^(−5/2) dx = 3π ÷ 16 of the centre's.
-        let a = core.plummer_scale().value();
-        let weighted = |f: &dyn Fn(f64) -> f64| {
-            (0..256)
-                .map(|i| {
-                    let (t0, t1) = (f64::from(i) * 0.05, f64::from(i + 1) * 0.05);
-                    gl16(
-                        |t| {
-                            let r = a * math::exp_m1(t);
-                            let x = r / a;
-                            r * r * math::powf(1.0 + x * x, -2.5) * f(r) * (r + a)
-                        },
-                        t0,
-                        t1,
-                    )
-                })
-                .sum::<f64>()
-        };
-        let mean_sq = weighted(&|r| {
-            let s = core.dispersion_at(LightYears::new(r)).value();
-            s * s
-        }) / weighted(&|_| 1.0);
+        // Flat in radius (Walker et al. 2007): the observed dispersion everywhere.
         let observed = core.dispersion().value();
-        assert!(
-            (mean_sq / (observed * observed) - 1.0).abs() < 1e-6,
-            "{mean_sq} {observed}"
-        );
+        for r in [
+            0.0,
+            100.0,
+            core.plummer_scale().value(),
+            core.extent().value(),
+        ] {
+            assert_eq!(
+                core.dispersion_at(LightYears::new(r)).value(),
+                observed,
+                "{r}"
+            );
+        }
     }
 
     /// Every core the dwarfs of six drawn galaxies leave, as drawn and unscaled, has a model whose

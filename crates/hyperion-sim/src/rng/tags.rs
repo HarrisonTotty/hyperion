@@ -937,6 +937,19 @@ domain_tags! {
     /// words `2k` and `2k + 1`, a Box–Muller pair whose first normal is the noise's node `k` along
     /// ψ, from the trailing arm's tip.
     STREAM_TUBE_GAPS: Galaxy = "stream.tube.gaps";
+
+    // Plan 10, P10.T7.b: a dwarf core's members, placed by plan 09's machinery on its `member.*`
+    // tags and keyed by their `DwarfCoreMemberId` (Design note 14), with scope `System`, beside
+    // the "Plan 10" heading's `Galaxy` tags. Appended here, after P10.T6.b's gaps, because the
+    // macro's order fixes `ALL`.
+
+    /// A dwarf core member's age, by the inverse transform of its core's star formation history:
+    /// word `k`, one uniform, for attempt `k` of its star's draw (P10.T7.b).
+    DWARF_CORE_AGE: System = "dwarf.core.age";
+
+    /// A dwarf core member's offset of its \[Fe/H\] from its core's mean, in units of the core's
+    /// spread: one normal draw, two words (P10.T7.b).
+    DWARF_CORE_ABUNDANCE: System = "dwarf.core.abundance";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface

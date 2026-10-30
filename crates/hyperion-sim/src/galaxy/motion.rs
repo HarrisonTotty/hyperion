@@ -1137,7 +1137,9 @@ pub fn loss_cone_verdict(galaxy: &Galaxy, start: &EpochState) -> LossConeVerdict
 fn verdict_on(motion: &CentreMotion, start: &EpochState) -> LossConeVerdict {
     match start.record.origin() {
         SystemOrigin::CentreMember { .. } => return LossConeVerdict::Clear,
-        SystemOrigin::Grid(_) | SystemOrigin::FeatureMember { .. } => {}
+        SystemOrigin::Grid(_)
+        | SystemOrigin::FeatureMember { .. }
+        | SystemOrigin::GlobalListMember { .. } => {}
     }
     let p = PointLy::from(start.record.epoch_position());
     let velocity_km_s = start.velocity.metres_per_second().map(|c| c / 1e3);
@@ -1445,7 +1447,9 @@ pub(crate) fn kepler_regime_position_at(
                 StateAt::NoSuchSystem => drifted(record, start.velocity, t),
             }
         }
-        SystemOrigin::FeatureMember { .. } | SystemOrigin::CentreMember { .. } => {
+        SystemOrigin::FeatureMember { .. }
+        | SystemOrigin::CentreMember { .. }
+        | SystemOrigin::GlobalListMember { .. } => {
             drifted(record, epoch_velocity(galaxy, record), t)
         }
     }

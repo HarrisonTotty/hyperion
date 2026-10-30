@@ -171,7 +171,10 @@ pub(crate) async fn extinction(
                             Ok((position, _)) => position,
                             // Nor has a system the server cannot place yet: a centre member,
                             // refused at every time so that no answer depends on the time.
-                            Err(TraceMotionError::CentreOrbitNotBuilt(_)) => {
+                            Err(
+                                TraceMotionError::CentreOrbitNotBuilt(_)
+                                | TraceMotionError::GlobalListMember(_),
+                            ) => {
                                 return TargetExtinction::NoSuchSystem;
                             }
                         },
