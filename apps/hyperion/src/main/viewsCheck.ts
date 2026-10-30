@@ -579,7 +579,7 @@ export class ViewsCheckSession {
 
   /**
    * Builds an atmosphere run's results from its renderer's record (R08.T10.b), judges them by its
-   * captures and writes them.
+   * captures and its faults (R08.T10.g) and writes them.
    */
   async writeAtmosphereResults(record: AtmosphereCheckRecord): Promise<SpikeResultsPaths> {
     const run = await this.#run;
@@ -672,7 +672,7 @@ export class ViewsCheckSession {
               ? "the atmosphere run ended with no results written"
               : results.overall === "pass"
                 ? null
-                : `the atmosphere run's captures failed: ${atmosphereFailures(results)}`;
+                : `the atmosphere run's checks failed: ${atmosphereFailures(results)}`;
           break;
         }
       }

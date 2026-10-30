@@ -617,17 +617,29 @@ describe("an atmosphere run's session (R08.T10.b)", () => {
     ]);
   });
 
-  it("records the GPU process's exits and the console's errors without judging them", async () => {
-    const { session: run, atmosphereWritten } = atmosphereSession();
+  it("judges the GPU process's exits, and records the console's errors without judging them", async () => {
+    const lines: string[] = [];
+    const {
+      session: run,
+      deps,
+      atmosphereWritten,
+    } = atmosphereSession({
+      log: (line) => lines.push(line),
+    });
     run.gpuProcessGone();
     run.consoleError("a pass timer's read-back failed");
     await run.capture("fixture-test-earth");
     await run.writeAtmosphereResults(ATMOSPHERE_RECORD);
+    run.end(0, null);
     expect([
       atmosphereWritten[0]?.overall,
       atmosphereWritten[0]?.findings.faults.gpuProcessExits,
       atmosphereWritten[0]?.findings.consoleErrors.count,
-    ]).toEqual(["pass", 1, 1]);
+    ]).toEqual(["fail", 1, 1]);
+    expect(deps.exit).toHaveBeenCalledWith(1);
+    expect(lines.at(-1)).toBe(
+      "views check: FAIL the atmosphere run's checks failed: 1 exits of the GPU process",
+    );
   });
 
   it("ends with 0 when its captures pass", async () => {
@@ -636,6 +648,24 @@ describe("an atmosphere run's session (R08.T10.b)", () => {
     await run.writeAtmosphereResults(ATMOSPHERE_RECORD);
     run.end(0, null);
     expect(deps.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("ends with 1 when a capture was not drawn photorealistic, whatever its end says", async () => {
+    const failing: AtmosphereCheckRecord = {
+      ...ATMOSPHERE_RECORD,
+      captures: ATMOSPHERE_RECORD.captures.map((capture) =>
+        capture.label === "fixture-test-mars" ? { ...capture, style: "wireframe" } : capture,
+      ),
+    };
+    const lines: string[] = [];
+    const { session: run, deps } = atmosphereSession({ log: (line) => lines.push(line) });
+    await run.capture("fixture-test-mars");
+    await run.writeAtmosphereResults(failing);
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(1);
+    expect(lines.at(-1)).toBe(
+      "views check: FAIL the atmosphere run's checks failed: fixture-test-mars: drawn wireframe, not photorealistic",
+    );
   });
 
   it("ends with 1 when a capture showed a fault line, whatever its end says", async () => {
@@ -652,7 +682,7 @@ describe("an atmosphere run's session (R08.T10.b)", () => {
     run.end(0, null);
     expect(deps.exit).toHaveBeenCalledWith(1);
     expect(lines.at(-1)).toBe(
-      `views check: FAIL the atmosphere run's captures failed: fixture-test-mars: atmosphere fault: ${NOT_AVAILABLE}`,
+      `views check: FAIL the atmosphere run's checks failed: fixture-test-mars: atmosphere fault: ${NOT_AVAILABLE}`,
     );
   });
 
@@ -663,7 +693,7 @@ describe("an atmosphere run's session (R08.T10.b)", () => {
     run.end(0, null);
     expect(deps.exit).toHaveBeenCalledWith(1);
     expect(lines.at(-1)).toBe(
-      "views check: FAIL the atmosphere run's captures failed: the main process saved no capture",
+      "views check: FAIL the atmosphere run's checks failed: the main process saved no capture",
     );
   });
 

@@ -54,8 +54,9 @@
  * and phase are recorded as reckoned, and every stage as flown (`AtmosphereCheckRecord.stages`).
  *
  * Each capture records the primary's frame times since the capture before (the views probe's),
- * its label block's statements and its fault lines. The main process fails the run on any fault
- * line, or where no capture was taken.
+ * the style its canvas's accessible name said it drew, and its label block's statements and fault
+ * lines. The main process fails the run on any fault line, a capture not drawn photorealistic, an
+ * engine fault or an exit of the GPU process, or where no capture was taken (R08.T10.g).
  */
 
 import type {
@@ -688,14 +689,15 @@ export async function runAtmosphereCheck(
     await until("AUTO did not resume on ENABLE", () => !offered());
   };
   /**
-   * Captures the page as `label` once `AUTO` has settled, with what the primary's label block says
-   * and its frames: a fixture's at its place as reckoned, or the night's (`null`).
+   * Captures the page as `label` once `AUTO` has settled, with the style the primary drew, what its
+   * label block says and its frames: a fixture's at its place as reckoned, or the night's (`null`).
    */
   const capture = async (label: string, place: ReckonedPlace | null): Promise<void> => {
     const exposureSettleMs = await exposureSettled(label);
     await framesDrawn(timing.framesBeforeCapture);
     const atMs = deps.nowMs();
     const said = plate();
+    const style = controls.styleOf(PRIMARY_NAME);
     const window = views.window(windowFromMs, atMs, driver.shownViews());
     stopped();
     await deps.api.capture(label);
@@ -703,6 +705,7 @@ export async function runAtmosphereCheck(
       label,
       camera: said.line("CAMERA"),
       exposure: said.line("EXPOSURE"),
+      style,
       exposureSettleMs,
       atMs,
       frames: captureFrames(window),

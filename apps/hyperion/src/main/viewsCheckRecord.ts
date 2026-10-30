@@ -957,6 +957,11 @@ function nonNegativeOrNull(value: unknown): number | null | undefined {
   return value === null ? null : isNonNegative(value) ? value : undefined;
 }
 
+/** A view's style, or `null`; `undefined` where it is neither. */
+function styleOrNull(value: unknown): ViewsCheckStyle | null | undefined {
+  return value === null ? null : (style(value) ?? undefined);
+}
+
 /** The primary's frames over an atmosphere-run capture's window (R08.T10.b). */
 function atmosphereFrames(value: unknown): AtmosphereCheckFrames | null {
   if (!isRecord(value)) {
@@ -979,16 +984,21 @@ function atmosphereFrames(value: unknown): AtmosphereCheckFrames | null {
     : null;
 }
 
-/** What every capture of the atmosphere run records, whichever its kind (R08.T10.b). */
+/**
+ * What every capture of the atmosphere run records, whichever its kind (R08.T10.b), its style a
+ * style or `null` (R08.T10.g).
+ */
 function atmosphereCaptureTaken(value: Rec): AtmosphereCheckCaptureTaken | null {
   const frames = atmosphereFrames(value["frames"]);
   const statements = strings(value["statements"]);
   const faults = strings(value["faults"]);
+  const drawn = styleOrNull(value["style"]);
   const { label, camera, exposure, exposureSettleMs, atMs } = value;
   if (
     !isCaptureLabel(label) ||
     !isTextOrNull(camera) ||
     !isTextOrNull(exposure) ||
+    drawn === undefined ||
     !isNonNegative(exposureSettleMs) ||
     !isFiniteNumber(atMs) ||
     frames === null ||
@@ -997,7 +1007,17 @@ function atmosphereCaptureTaken(value: Rec): AtmosphereCheckCaptureTaken | null 
   ) {
     return null;
   }
-  return { label, camera, exposure, exposureSettleMs, atMs, frames, statements, faults };
+  return {
+    label,
+    camera,
+    exposure,
+    style: drawn,
+    exposureSettleMs,
+    atMs,
+    frames,
+    statements,
+    faults,
+  };
 }
 
 /** A fixture capture's own fields, which the night's capture never carries. */

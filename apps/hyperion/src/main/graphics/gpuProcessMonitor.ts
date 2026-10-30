@@ -1,16 +1,21 @@
 /**
  * Watches the GPU process, reports its crashes to every window and relaunches once into the
- * declared safe mode when they become a loop.
+ * declared safe mode when they become a loop, or, in a views check, ends the launch.
  *
  * @remarks
  * The probe of 2026-09-29 saw each crash fire `child-process-gone` with `type: "GPU"`, then
  * `gpu-info-update`, and nothing reach `render-process-gone`; the feature status is read only after
  * `gpu-info-update`, since at `ready` it is stale (R01 Design notes 2 and 6).
+ *
+ * A views check never relaunches (plan R08, R08.T10.g): its script takes this first process's exit
+ * for the run's and then kills its process group, the relaunch with it, so a relaunch's exit 0
+ * would pass a run that wrote no results. It ends the launch with exit 1 instead, and a line naming
+ * the crashes counted, and the feature status where it dropped short of the loop's count.
  */
 
 import type { GpuProcessGoneReport, GraphicsLaunchMode } from "../../preload/api";
 import { GPU_PROCESS_GONE_CHANNEL } from "../../preload/graphicsLaunch";
-import { crashLoopDecision, type GpuProcessEvent } from "./crashLoop";
+import { CRASH_LOOP_COUNT, crashLoopDecision, type GpuProcessEvent } from "./crashLoop";
 import { readFeatureStatus } from "./featureStatus";
 import { SAFE_MODE_SWITCH } from "./switches";
 
@@ -51,6 +56,11 @@ export interface GpuProcessMonitorOptions {
   readonly args: readonly string[];
   /** A monotonic clock, in milliseconds. */
   readonly nowMs: () => number;
+  /**
+   * A views check's log, which a crash loop's line is written to as the launch ends with exit 1;
+   * `null` for every other launch, which relaunches into safe mode on a loop instead.
+   */
+  readonly viewsCheckLog: ((line: string) => void) | null;
 }
 
 /** Keeps the GPU process's history for this launch and acts on the crash-loop policy. */
@@ -58,7 +68,8 @@ export class GpuProcessMonitor {
   readonly #options: GpuProcessMonitorOptions;
   readonly #history: GpuProcessEvent[] = [];
   #crashes = 0;
-  #relaunched = false;
+  /** Whether a loop has ended this launch, relaunched or not. */
+  #ended = false;
 
   readonly #onChildProcessGone = (_event: unknown, details: ChildProcessGoneDetails): void => {
     if (details.type !== "GPU") {
@@ -114,17 +125,29 @@ export class GpuProcessMonitor {
   }
 
   #decide(): void {
-    if (this.#relaunched) {
+    if (this.#ended) {
       return;
     }
     switch (crashLoopDecision(this.#history, this.#options.mode)) {
       case "none":
         return;
-      case "relaunch-safe":
-        this.#relaunched = true;
+      case "relaunch-safe": {
+        this.#ended = true;
+        const log = this.#options.viewsCheckLog;
+        if (log !== null) {
+          // Short of the loop's count of crashes, the feature status dropping made the loop.
+          log(
+            this.#crashes >= CRASH_LOOP_COUNT
+              ? `views check: FAIL the GPU process crashed ${String(this.#crashes)} times`
+              : `views check: FAIL the GPU's feature status dropped Vulkan or WebGPU (the GPU process crashed ${String(this.#crashes)} times)`,
+          );
+          this.#options.app.exit(1);
+          return;
+        }
         this.#options.app.relaunch({ args: [...this.#options.args, `--${SAFE_MODE_SWITCH}`] });
         this.#options.app.exit(0);
         return;
+      }
     }
   }
 }

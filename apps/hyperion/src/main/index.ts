@@ -266,7 +266,7 @@ function spikeWatchdogMs(launch: SpikeLaunch): number {
   return (launch.smoke ? 180_000 : 45 * 60_000) + measurementMs;
 }
 
-/** Writes one line of a spike run's log to stdout, where the recipe reads it. */
+/** Writes one line of a spike run's or a views check's log to stdout, where the recipe reads it. */
 function logLine(line: string): void {
   process.stdout.write(`${line}\n`);
 }
@@ -641,6 +641,7 @@ async function main(): Promise<void> {
     mode: graphics.launchMode,
     args: process.argv.slice(1),
     nowMs: () => performance.now(),
+    viewsCheckLog: args.viewsCheck === undefined ? null : logLine,
   });
   app.once("will-quit", () => {
     gpuMonitor.dispose();

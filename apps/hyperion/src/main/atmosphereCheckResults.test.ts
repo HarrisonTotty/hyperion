@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import type { AtmosphereCheckCapture, AtmosphereCheckRecord } from "../preload/api";
+import type {
+  AtmosphereCheckCapture,
+  AtmosphereCheckRecord,
+  ViewsCheckStyle,
+} from "../preload/api";
 import {
   ATMOSPHERE_CHECK_SCHEMA,
   type AtmosphereCheckInput,
   atmosphereCaptureFailures,
   atmosphereCheckMarkdown,
   atmosphereFailures,
+  atmosphereFaultFailures,
   atmosphereFaultKind,
   buildAtmosphereCheckResults,
   rangeText,
@@ -62,6 +67,20 @@ function withFaults(index: number, faults: ReadonlyArray<string>): AtmosphereChe
   };
 }
 
+/** `record` with capture `index` drawn in `style`. */
+function withStyle(
+  index: number,
+  style: ViewsCheckStyle | null,
+  record: AtmosphereCheckRecord = ATMOSPHERE_RECORD,
+): AtmosphereCheckRecord {
+  return {
+    ...record,
+    captures: record.captures.map((capture, i): AtmosphereCheckCapture =>
+      i === index ? { ...capture, style } : capture,
+    ),
+  };
+}
+
 describe("the atmosphere run's pass rule", () => {
   it("passes a run whose captures were taken and saved, with no fault line", () => {
     expect(atmosphereCaptureFailures(ATMOSPHERE_RECORD, true)).toEqual([]);
@@ -92,6 +111,44 @@ describe("the atmosphere run's pass rule", () => {
     ]);
   });
 
+  it("fails a capture drawn in the wireframe, naming it and the style it drew", () => {
+    expect(atmosphereCaptureFailures(withStyle(2, "wireframe"), true)).toEqual([
+      "fixture-test-mars: drawn wireframe, not photorealistic",
+    ]);
+  });
+
+  it("fails a capture drawn in no style, naming it", () => {
+    expect(atmosphereCaptureFailures(withStyle(0, null), true)).toEqual([
+      "moonlit-night: drawn in no style, not photorealistic",
+    ]);
+  });
+
+  it("names a capture's style before its fault lines", () => {
+    const line = "GRAPHICS FAULT: device lost, reopen VIEW to retry";
+    const record = withStyle(1, "wireframe", withFaults(1, [line]));
+    expect(atmosphereCaptureFailures(record, true)).toEqual([
+      "fixture-test-earth-o3-slab: drawn wireframe, not photorealistic",
+      `fixture-test-earth-o3-slab: graphics fault: ${line}`,
+    ]);
+  });
+
+  it("passes a run with no engine fault and no exit of the GPU process", () => {
+    expect(atmosphereFaultFailures(ATMOSPHERE_RECORD, 0)).toEqual([]);
+  });
+
+  it("fails each engine fault and the GPU process's exits, as the hand-over check words them", () => {
+    expect(
+      atmosphereFaultFailures(
+        { ...ATMOSPHERE_RECORD, faults: ["device-lost: unknown", "gpu-process-gone: 2"] },
+        2,
+      ),
+    ).toEqual([
+      "a fault: device-lost: unknown",
+      "a fault: gpu-process-gone: 2",
+      "2 exits of the GPU process",
+    ]);
+  });
+
   it("classes the atmosphere's two lines as its own and every other as graphics", () => {
     expect(
       [
@@ -108,7 +165,7 @@ describe("the atmosphere run's results", () => {
   it("pass the fixture's record", () => {
     const results = buildAtmosphereCheckResults(input());
     expect([results.schema, results.version, results.overall, atmosphereFailures(results)]).toEqual(
-      [ATMOSPHERE_CHECK_SCHEMA, 3, "pass", ""],
+      [ATMOSPHERE_CHECK_SCHEMA, 4, "pass", ""],
     );
   });
 
@@ -154,6 +211,23 @@ describe("the atmosphere run's results", () => {
     ]);
   });
 
+  it("fail a capture not drawn photorealistic, judging that capture alone", () => {
+    const results = buildAtmosphereCheckResults(input(withStyle(3, "wireframe")));
+    expect([
+      results.overall,
+      results.captures.map((capture) => capture.verdict),
+      results.captures[3]?.style,
+      results.findings.captures.verdict,
+      atmosphereFailures(results),
+    ]).toEqual([
+      "fail",
+      ["pass", "pass", "pass", "fail", "pass"],
+      "wireframe",
+      "fail",
+      "fixture-test-saturn: drawn wireframe, not photorealistic",
+    ]);
+  });
+
   it("fail a run whose captures were not saved, the run block saying why", () => {
     const results = buildAtmosphereCheckResults({
       ...input(),
@@ -175,18 +249,47 @@ describe("the atmosphere run's results", () => {
     );
   });
 
-  it("record the engine's faults, the GPU process's exits and the console's errors without judging them", () => {
+  it("fail on the engine's faults and the GPU process's exits, counting the console's errors without judging them", () => {
     const results = buildAtmosphereCheckResults(
       input(
         { ...ATMOSPHERE_RECORD, faults: ["device-lost: unknown"] },
         { gpuProcessExits: 1, consoleErrors: ["one", "two"] },
       ),
     );
-    expect([results.overall, results.findings.faults, results.findings.consoleErrors]).toEqual([
+    expect([
+      results.overall,
+      results.findings.captures.verdict,
+      results.findings.faults,
+      results.findings.consoleErrors,
+    ]).toEqual([
+      "fail",
       "pass",
-      { record: ["device-lost: unknown"], gpuProcessExits: 1 },
+      {
+        verdict: "fail",
+        reasons: ["a fault: device-lost: unknown", "1 exits of the GPU process"],
+        record: ["device-lost: unknown"],
+        gpuProcessExits: 1,
+      },
       { count: 2, first: ["one", "two"] },
     ]);
+  });
+
+  it("pass with the console's errors alone", () => {
+    const results = buildAtmosphereCheckResults(
+      input(ATMOSPHERE_RECORD, { consoleErrors: ["a pass timer's read-back failed"] }),
+    );
+    expect([results.overall, results.findings.faults.verdict, atmosphereFailures(results)]).toEqual(
+      ["pass", "pass", ""],
+    );
+  });
+
+  it("join the captures' reasons and then the faults' into one line", () => {
+    const results = buildAtmosphereCheckResults(
+      input(withFaults(2, [NOT_AVAILABLE]), { gpuProcessExits: 3 }),
+    );
+    expect(atmosphereFailures(results)).toBe(
+      `fixture-test-mars: atmosphere fault: ${NOT_AVAILABLE}; 3 exits of the GPU process`,
+    );
   });
 
   it("note a smoke run's times as the harness's proof", () => {
@@ -216,21 +319,27 @@ describe("the atmosphere run's summary", () => {
       "- **Overall:** fail",
       "- **Media ready:** 4.2 s after the scene's choice",
       "- **Captures (not committed):** `target/views-check/atmosphere/captures-x`",
-      "- **Faults:** fault lines 1 atmosphere, 0 graphics; recorded, not judged: 0 engine faults, 0 GPU-process exits, console errors 0",
+      "- **Faults:** fault lines 1 atmosphere, 0 graphics; 0 engine faults, 0 GPU-process exits; recorded, not judged: console errors 0",
     ]) {
       expect(text).toContain(row);
     }
   });
 
-  it("lists each capture with its camera, range, phase, exposure, AUTO's settling, frames and statements", () => {
+  it("lists each capture with its camera, style, range, phase, exposure, AUTO's settling, frames and statements", () => {
     const text = summary();
     expect(text).toContain(
-      "| fixture-test-earth | TEST EARTH | FREE · RATE 316 km/s | 51.0 Mm | 45.0° | EV100 12.0 AUTO | 2.0 | 1078 | 16.7 / 18.2 | 4.10 / 5.30 | PHOTOREALISTIC · TARGET TEST EARTH | — |",
+      "| fixture-test-earth | TEST EARTH | FREE · RATE 316 km/s | photorealistic | 51.0 Mm | 45.0° | EV100 12.0 AUTO | 2.0 | 1078 | 16.7 / 18.2 | 4.10 / 5.30 | PHOTOREALISTIC · TARGET TEST EARTH | — |",
     );
     expect(text).toContain(
-      "| moonlit-night | — | SEAT | — | — | EV100 -3.0 AUTO | 22.0 | 898 | 16.7 / 18.2 | 4.10 / 5.30 | PHOTOREALISTIC · NIGHT SIDE | — |",
+      "| moonlit-night | — | SEAT | photorealistic | — | — | EV100 -3.0 AUTO | 22.0 | 898 | 16.7 / 18.2 | 4.10 / 5.30 | PHOTOREALISTIC · NIGHT SIDE | — |",
     );
     expect(text).toContain(`| atmosphere: ${NOT_AVAILABLE} |`);
+  });
+
+  it("writes a capture drawn in no style as —", () => {
+    expect(
+      atmosphereCheckMarkdown(buildAtmosphereCheckResults(input(withStyle(0, null)))),
+    ).toContain("| moonlit-night | — | SEAT | — | — | — |");
   });
 
   it("lists each stage as flown, with its rate step read back, its hold planned and held and its longest step", () => {
@@ -253,6 +362,16 @@ describe("the atmosphere run's summary", () => {
     );
     expect(atmosphereCheckMarkdown(buildAtmosphereCheckResults(input()))).toContain(
       "## Reasons\n\nNone.\n",
+    );
+  });
+
+  it("lists the faults' reasons after the captures'", () => {
+    expect(
+      atmosphereCheckMarkdown(
+        buildAtmosphereCheckResults(input(withFaults(2, [NOT_AVAILABLE]), { gpuProcessExits: 1 })),
+      ),
+    ).toContain(
+      `## Reasons\n\n- fixture-test-mars: atmosphere fault: ${NOT_AVAILABLE}\n- 1 exits of the GPU process\n`,
     );
   });
 
@@ -318,7 +437,7 @@ describe("the atmosphere run's files", () => {
     );
     expect(JSON.parse(written.get(json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.atmosphere-results",
-      version: 3,
+      version: 4,
       overall: "pass",
       mediaReadyMs: 4200,
     });

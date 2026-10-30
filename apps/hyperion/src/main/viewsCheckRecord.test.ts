@@ -313,6 +313,20 @@ describe("the atmosphere run's record (R08.T10.b)", () => {
     expect(readAtmosphereCheckRecord(structuredClone(back))).toEqual(back);
   });
 
+  it("is read back with a capture drawn in the wireframe and one in no style", () => {
+    const drawn = {
+      ...ATMOSPHERE_RECORD,
+      captures: ATMOSPHERE_RECORD.captures.map((capture, i) =>
+        i === 0
+          ? { ...capture, style: "wireframe" }
+          : i === 1
+            ? { ...capture, style: null }
+            : capture,
+      ),
+    };
+    expect(readAtmosphereCheckRecord(structuredClone(drawn))).toEqual(drawn);
+  });
+
   it("is read back with fault lines, no capture and no frame times", () => {
     const night = {
       ...MOONLIT_NIGHT,
@@ -362,6 +376,9 @@ describe("the atmosphere run's record (R08.T10.b)", () => {
     [["captures", 1, "phaseDeg"], -1],
     [["captures", 1, "phaseDeg"], null],
     [["captures", 0, "exposure"], 12],
+    [["captures", 0, "style"], "photoreal"],
+    [["captures", 1, "style"], "PHOTOREALISTIC"],
+    [["captures", 1, "style"], undefined],
     [["captures", 0, "exposureSettleMs"], -1],
     [["captures", 1, "exposureSettleMs"], null],
     [["captures", 0, "atMs"], Number.POSITIVE_INFINITY],
@@ -395,6 +412,13 @@ describe("the atmosphere run's record (R08.T10.b)", () => {
     ["phaseDeg", null],
   ])("refuses a night's capture that carries a fixture's %s", (field, value) => {
     const night = { ...MOONLIT_NIGHT, [field]: value };
+    expect(readAtmosphereCheckRecord({ ...ATMOSPHERE_RECORD, captures: [night] })).toBeNull();
+  });
+
+  it("refuses a capture that records no style", () => {
+    const night = Object.fromEntries(
+      Object.entries(MOONLIT_NIGHT).filter(([field]) => field !== "style"),
+    );
     expect(readAtmosphereCheckRecord({ ...ATMOSPHERE_RECORD, captures: [night] })).toBeNull();
   });
 

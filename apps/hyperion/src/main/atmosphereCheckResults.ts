@@ -1,19 +1,27 @@
 /**
  * The atmosphere run's results file and its summary (plan R08, R08.T10.b): what the renderer
  * recorded of its hand flight on `ATMOSPHERE TEST`, the moonlit night captured from the seat and
- * then each air fixture from a few radii, judged by its captures.
+ * then each air fixture from a few radii, judged by its captures and by its faults.
  *
  * @remarks
- * The verdict is the captures' alone ({@link atmosphereCaptureFailures}): the run passes when it
- * took a capture, the main process saved its pictures, and no capture's fault line held a line.
- * Every fault line on this plate is a graphics fault, a terrain fault (which this kept scene, with
- * no terrain, cannot raise) or an atmosphere fault (`ATMOSPHERE NOT AVAILABLE: …`,
- * `ATMOSPHERE DATA INVALID: …`); the reasons name each failing capture and its line, and class the
- * line as `atmosphere` (those two) or `graphics` (any other) ({@link atmosphereFaultKind}).
+ * The run passes when both its findings pass (R08.T10.g).
  *
- * The engine's faults over the run, the GPU process's exits and the page's console errors are
- * recorded in the findings, not judged: the run's rule is the captures'. A device lost under the
- * flight stands on the primary's fault line, and so fails the capture taken under it.
+ * - The captures' ({@link atmosphereCaptureFailures}): the run took a capture, the main process
+ *   saved its pictures, and every capture's primary was drawn photorealistic with nothing on its
+ *   fault line. Every fault line on this plate is a graphics fault, a terrain fault (which this
+ *   kept scene, with no terrain, cannot raise) or an atmosphere fault (`ATMOSPHERE NOT AVAILABLE:
+ *   …`, `ATMOSPHERE DATA INVALID: …`); the reasons name each failing capture and its line, and
+ *   class the line as `atmosphere` (those two) or `graphics` (any other)
+ *   ({@link atmosphereFaultKind}).
+ * - The faults' ({@link atmosphereFaultFailures}): no engine fault over the run and no exit of the
+ *   GPU process, as the hand-over check's rule.
+ *
+ * The fault lines alone miss a lost device. The GPU process's fault clears once the adapter answers
+ * again, and where the photorealistic style cannot be remade the primary goes back to the
+ * wireframe with no fault line, so a capture taken after the loss shows a clean plate over a lost
+ * picture: its drawn style names it. A device that comes back photorealistic may still have lost
+ * its state (the air's tables, the exposure): the engine's faults and the GPU process's exits name
+ * that. The page's console errors are recorded, not judged.
  *
  * The frame and GPU times are provisional: the run is hidden, on a shared machine (the load
  * average at the start is recorded with them).
@@ -46,9 +54,10 @@ export const ATMOSPHERE_CHECK_SCHEMA = "hyperion.views-check.atmosphere-results"
 /**
  * The schema's version; bumped with any change to the file's shape: 2 with each capture's `kind`
  * (a fixture's or the night's, the night's with no designation, range or phase) and its
- * `exposureSettleMs`; 3 with the flight's `stages`.
+ * `exposureSettleMs`; 3 with the flight's `stages`; 4 with each capture's drawn `style` and the
+ * faults' `verdict` and `reasons` (R08.T10.g).
  */
-export const ATMOSPHERE_CHECK_VERSION = 3;
+export const ATMOSPHERE_CHECK_VERSION = 4;
 
 /**
  * The run, as the main process describes it at its start: the terrain run's description, without
@@ -60,7 +69,7 @@ export type AtmosphereCheckRunInput = Omit<TerrainCheckRunInput, "fixture">;
 export interface AtmosphereCheckInput {
   readonly run: AtmosphereCheckRunInput;
   readonly record: AtmosphereCheckRecord;
-  /** The GPU process's exits over the run, recorded, not judged. */
+  /** The GPU process's exits over the run, judged with the engine's faults. */
   readonly gpuProcessExits: number;
   /** The page's console errors over the run, in order, recorded, not judged. */
   readonly consoleErrors: ReadonlyArray<string>;
@@ -89,7 +98,7 @@ export function atmosphereFaultKind(line: string): AtmosphereFaultKind {
 /** A capture's judgement: its fault lines classed, and its verdict. */
 export interface AtmosphereCaptureJudgement {
   readonly faults: ReadonlyArray<AtmosphereFaultLine>;
-  /** `pass` when its fault line held no line. */
+  /** `pass` when its primary was drawn photorealistic and its fault line held no line. */
   readonly verdict: Verdict;
 }
 
@@ -129,7 +138,10 @@ export interface AtmosphereCheckResults {
   /** The flight's stages as flown, in order, recorded, not judged. */
   readonly stages: ReadonlyArray<AtmosphereCheckStage>;
   readonly findings: {
-    /** The run's rule: a capture taken and saved, and no capture's fault line holding a line. */
+    /**
+     * The captures' rule: a capture taken and saved, every capture drawn photorealistic, and no
+     * capture's fault line holding a line.
+     */
     readonly captures: {
       readonly verdict: Verdict;
       readonly reasons: ReadonlyArray<string>;
@@ -137,24 +149,32 @@ export interface AtmosphereCheckResults {
       readonly atmosphereFaults: number;
       readonly graphicsFaults: number;
     };
-    /** The engine's faults and the GPU process's exits over the run, recorded, not judged. */
+    /** The faults' rule: no engine fault over the run and no exit of the GPU process. */
     readonly faults: {
+      readonly verdict: Verdict;
+      readonly reasons: ReadonlyArray<string>;
       readonly record: ReadonlyArray<string>;
       readonly gpuProcessExits: number;
     };
     /** The page's console errors, recorded, not judged: their count and the first five. */
     readonly consoleErrors: { readonly count: number; readonly first: ReadonlyArray<string> };
   };
-  /** The captures' verdict. */
+  /** `pass` when both findings pass. */
   readonly overall: Verdict;
 }
 
+/** The drawn style a capture's verdict needs. */
+const CAPTURE_STYLE = "photorealistic";
+
 /**
- * Why the run's captures fail, one reason a failure; empty for a pass: the run's rule (R08.T10.b).
+ * Why the run's captures fail, one reason a failure; empty for a pass: the captures' rule
+ * (R08.T10.b, R08.T10.g).
  *
  * @remarks
- * A run fails when its record holds no capture, when the main process saved no picture of any, or
- * when any capture's fault line held a line, each such line named with its capture and its class.
+ * A run fails when its record holds no capture, when the main process saved no picture of any,
+ * when any capture's primary was not drawn photorealistic, named with its capture and the style it
+ * drew, or when any capture's fault line held a line, each such line named with its capture and its
+ * class.
  *
  * @param captured - Whether the main process saved a picture of the run's captures (the session's
  * captures directory measured).
@@ -166,9 +186,30 @@ export function atmosphereCaptureFailures(
   return [
     ...(record.captures.length === 0 ? ["no capture was taken"] : []),
     ...(captured ? [] : ["the main process saved no capture"]),
-    ...record.captures.flatMap((capture) =>
-      capture.faults.map((line) => `${capture.label}: ${atmosphereFaultKind(line)} fault: ${line}`),
-    ),
+    ...record.captures.flatMap((capture) => [
+      ...(capture.style === CAPTURE_STYLE
+        ? []
+        : [`${capture.label}: drawn ${capture.style ?? "in no style"}, not ${CAPTURE_STYLE}`]),
+      ...capture.faults.map(
+        (line) => `${capture.label}: ${atmosphereFaultKind(line)} fault: ${line}`,
+      ),
+    ]),
+  ];
+}
+
+/**
+ * Why the run's faults fail, one reason a failure; empty for a pass: the faults' rule (R08.T10.g),
+ * worded as the hand-over check's: each engine fault over the run, and the GPU process's exits.
+ *
+ * @param gpuProcessExits - The GPU process's exits over the run, as the session counted them.
+ */
+export function atmosphereFaultFailures(
+  record: AtmosphereCheckRecord,
+  gpuProcessExits: number,
+): ReadonlyArray<string> {
+  return [
+    ...record.faults.map((line) => `a fault: ${line}`),
+    ...(gpuProcessExits > 0 ? [`${String(gpuProcessExits)} exits of the GPU process`] : []),
   ];
 }
 
@@ -178,10 +219,11 @@ export function buildAtmosphereCheckResults(input: AtmosphereCheckInput): Atmosp
   const captures = record.captures.map((capture): AtmosphereCaptureFigures => ({
     ...capture,
     faults: capture.faults.map((line) => ({ kind: atmosphereFaultKind(line), line })),
-    verdict: capture.faults.length === 0 ? "pass" : "fail",
+    verdict: capture.style === CAPTURE_STYLE && capture.faults.length === 0 ? "pass" : "fail",
   }));
   const lines = captures.flatMap((capture) => capture.faults);
   const reasons = atmosphereCaptureFailures(record, run.captures.value !== null);
+  const faultsReasons = atmosphereFaultFailures(record, input.gpuProcessExits);
   const quiet = quietOf(run.platform, run.machine.loadAverage);
   const load = run.machine.loadAverage[0];
   const provisional = [
@@ -195,6 +237,7 @@ export function buildAtmosphereCheckResults(input: AtmosphereCheckInput): Atmosp
       : []),
   ].join("; ");
   const verdict: Verdict = reasons.length === 0 ? "pass" : "fail";
+  const faultsVerdict: Verdict = faultsReasons.length === 0 ? "pass" : "fail";
   return {
     schema: ATMOSPHERE_CHECK_SCHEMA,
     version: ATMOSPHERE_CHECK_VERSION,
@@ -225,16 +268,26 @@ export function buildAtmosphereCheckResults(input: AtmosphereCheckInput): Atmosp
         atmosphereFaults: lines.filter((each) => each.kind === "atmosphere").length,
         graphicsFaults: lines.filter((each) => each.kind === "graphics").length,
       },
-      faults: { record: record.faults, gpuProcessExits: input.gpuProcessExits },
+      faults: {
+        verdict: faultsVerdict,
+        reasons: faultsReasons,
+        record: record.faults,
+        gpuProcessExits: input.gpuProcessExits,
+      },
       consoleErrors: { count: input.consoleErrors.length, first: input.consoleErrors.slice(0, 5) },
     },
-    overall: verdict,
+    overall: verdict === "pass" && faultsVerdict === "pass" ? "pass" : "fail",
   };
+}
+
+/** Every reason a run's results failed, the captures' then the faults'. */
+function failureReasons(results: AtmosphereCheckResults): ReadonlyArray<string> {
+  return [...results.findings.captures.reasons, ...results.findings.faults.reasons];
 }
 
 /** The reasons a run's results failed, as one line; empty for a pass. */
 export function atmosphereFailures(results: AtmosphereCheckResults): string {
-  return results.findings.captures.reasons.join("; ");
+  return failureReasons(results).join("; ");
 }
 
 /** A figure's text, or its reason in brackets. */
@@ -306,9 +359,10 @@ export function atmosphereCheckMarkdown(results: AtmosphereCheckResults): string
         ? "—"
         : capture.faults.map((each) => `${each.kind}: ${each.line}`).join("; ");
     const [designation, range, phase] = placeCells(capture);
-    return `| ${cell(capture.label)} | ${designation} | ${cell(capture.camera ?? "—")} | ${range} | ${phase} | ${cell(capture.exposure ?? "—")} | ${(capture.exposureSettleMs / 1000).toFixed(1)} | ${String(frames.draws)} | ${msText(frames.intervalMedianMs, 1)} / ${msText(frames.intervalP95Ms, 1)} | ${msText(frames.gpuMedianMs, 2)} / ${msText(frames.gpuP95Ms, 2)} | ${cell(capture.statements.length === 0 ? "—" : capture.statements.join(" · "))} | ${cell(faults)} |`;
+    return `| ${cell(capture.label)} | ${designation} | ${cell(capture.camera ?? "—")} | ${capture.style ?? "—"} | ${range} | ${phase} | ${cell(capture.exposure ?? "—")} | ${(capture.exposureSettleMs / 1000).toFixed(1)} | ${String(frames.draws)} | ${msText(frames.intervalMedianMs, 1)} / ${msText(frames.intervalP95Ms, 1)} | ${msText(frames.gpuMedianMs, 2)} / ${msText(frames.gpuP95Ms, 2)} | ${cell(capture.statements.length === 0 ? "—" : capture.statements.join(" · "))} | ${cell(faults)} |`;
   });
   const errors = findings.consoleErrors;
+  const reasons = failureReasons(results);
   return [
     `# Atmosphere flight: ${run.machine.name}, ${run.setting}, ${run.startedAt.slice(0, 10)}`,
     "",
@@ -318,12 +372,12 @@ export function atmosphereCheckMarkdown(results: AtmosphereCheckResults): string
     `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; the primary ${String(results.canvas.widthPx)} × ${String(results.canvas.heightPx)} px; pass timer ${results.timer}`,
     `- **Media ready:** ${(results.mediaReadyMs / 1000).toFixed(1)} s after the scene's choice`,
     `- **Captures (not committed):** ${textOf(run.captures, (dir) => `\`${dir}\``)}`,
-    `- **Faults:** fault lines ${String(findings.captures.atmosphereFaults)} atmosphere, ${String(findings.captures.graphicsFaults)} graphics; recorded, not judged: ${String(findings.faults.record.length)} engine faults, ${String(findings.faults.gpuProcessExits)} GPU-process exits, console errors ${String(errors.count)}${errors.first.length === 0 ? "" : ` (${errors.first.join(" | ")})`}`,
+    `- **Faults:** fault lines ${String(findings.captures.atmosphereFaults)} atmosphere, ${String(findings.captures.graphicsFaults)} graphics; ${String(findings.faults.record.length)} engine faults, ${String(findings.faults.gpuProcessExits)} GPU-process exits; recorded, not judged: console errors ${String(errors.count)}${errors.first.length === 0 ? "" : ` (${errors.first.join(" | ")})`}`,
     "",
     "## Captures (provisional times)",
     "",
-    "| Capture | Designation | Camera | Range | Phase | Exposure | AUTO settled (s) | Draws | Frame interval median / p95 (ms) | GPU median / p95 (ms) | Statements | Fault lines |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Capture | Designation | Camera | Style | Range | Phase | Exposure | AUTO settled (s) | Draws | Frame interval median / p95 (ms) | GPU median / p95 (ms) | Statements | Fault lines |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...rows,
     "",
     "## Stages (as reckoned)",
@@ -338,9 +392,7 @@ export function atmosphereCheckMarkdown(results: AtmosphereCheckResults): string
     "",
     "## Reasons",
     "",
-    ...(findings.captures.reasons.length === 0
-      ? ["None."]
-      : findings.captures.reasons.map((reason) => `- ${reason}`)),
+    ...(reasons.length === 0 ? ["None."] : reasons.map((reason) => `- ${reason}`)),
     "",
   ].join("\n");
 }

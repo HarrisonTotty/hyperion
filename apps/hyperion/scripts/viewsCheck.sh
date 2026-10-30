@@ -54,13 +54,15 @@
 # <date>-<machine>-<setting>-atmosphere.json and .md
 # under target/views-check/atmosphere/ for a smoke and docs/measurements/atmosphere-flight/
 # otherwise, and exits 1 when a capture shows an ATMOSPHERE NOT AVAILABLE, ATMOSPHERE DATA INVALID
-# or graphics fault line, or no capture was taken. --atmosphere with --terrain is refused by the
-# client.
+# or graphics fault line or was not drawn photorealistic, when the engine raised a fault or the GPU
+# process exited over the run (plan R08, R08.T10.g), or when no capture was taken. --atmosphere
+# with --terrain is refused by the client.
 #
 # Each launch gets a fresh `--user-data-dir`, removed afterwards; Electron runs in a process group
 # of its own under `timeout`, killed when the launch ends or the script ends for any reason. The
 # exit status is the client's: 0 the run is recorded (and, for the terrain and atmosphere runs,
-# passes), 1 it could not finish or a terrain check or an atmosphere capture failed, 3 the watchdog.
+# passes), 1 it could not finish or a terrain check or an atmosphere check failed, 3 the watchdog.
+# A GPU-process crash loop ends a launch with 1, never relaunching into safe mode (R08.T10.g).
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

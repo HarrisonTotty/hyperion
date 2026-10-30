@@ -1649,7 +1649,7 @@ export interface AtmosphereCheckFrames {
 
 /**
  * What every capture of the atmosphere run records (plan R08, R08.T10.b), whichever its kind: its
- * label, what the primary's label block said as it was taken, and its frames.
+ * label, the style the primary drew and what its label block said as it was taken, and its frames.
  */
 export interface AtmosphereCheckCaptureTaken {
   /**
@@ -1661,6 +1661,11 @@ export interface AtmosphereCheckCaptureTaken {
   readonly camera: string | null;
   /** The `EXPOSURE` line's reading as it was taken; `null` where none was shown. */
   readonly exposure: string | null;
+  /**
+   * The style the primary's canvas's accessible name said it drew as it was taken; `null` where it
+   * named none (R08.T10.g).
+   */
+  readonly style: ViewsCheckStyle | null;
   /**
    * How long the run waited before it, from the camera's arrival (or the night's meter chosen)
    * until the `EXPOSURE` line's EV held steady, `AUTO` settled, ms.

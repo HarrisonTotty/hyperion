@@ -4845,6 +4845,25 @@ each after its file's phase and name.
   `ATMOSPHERE_OPTICS_VERSION`, PROTOCOL, wire, table, shader, kernel, engine, label or figure
   change. _Built 2026-10-27_ (Risks, "Deviations in R08.T10.f, as built", and its "Deferred
   findings (2026-10-13 rule)" (R08.T10.f)).
+- **R08.T10.g The atmosphere run judges lost captures.** From the research advice on the views
+  check (2026-10-29, §2, in main's orchestration records), with main's rulings of that day: the
+  run also judges the engine's faults, as the hand-over check does, and the advice's second hole,
+  the safe-mode relaunch, is in scope as an optional last item. A GPU-process exit, an engine fault
+  or a capture whose primary was not drawn photorealistic fails `just views-check --atmosphere` on
+  every machine, as the terrain and hand-over runs do. Each capture records the style its primary's
+  canvas named as it was taken (`AtmosphereCheckCaptureTaken.style`, read through
+  `ViewControls.styleOf` in `atmosphereCheckRun.ts`), which the record's reader takes as a style
+  or `null` (`viewsCheckRecord.ts`). `atmosphereCheckResults.ts` fails a capture not drawn
+  photorealistic, judges the faults by the hand-over check's rule (`atmosphereFaultFailures`), and
+  passes the run only where both findings pass; its summary's faults line and captures' table
+  follow, and `ATMOSPHERE_CHECK_VERSION` is 4. During a views check `GpuProcessMonitor` never
+  relaunches into safe mode: a crash loop ends the launch with exit 1 and its line. Acceptance:
+  `pnpm --filter hyperion exec vitest run` over `src/main/atmosphereCheckResults`,
+  `src/main/viewsCheck.test`, `src/main/viewsCheckRecord`, `src/main/graphics/gpuProcessMonitor`
+  and `displays/view/check/atmosphereCheckRun`, and `pnpm typecheck`, `pnpm lint` and `pnpm test`,
+  pass; the record's version is 4; and no GENERATOR_VERSION, `ATMOSPHERE_OPTICS_VERSION`,
+  PROTOCOL, wire, table, shader, kernel, engine, label or figure change. _Built 2026-10-29_
+  (Risks, "Deviations in R08.T10.g, as built").
 
 `assemble.ts`, `optics.worker.ts`, `AtmosphereCache.ts` build, from the body's appearance and its
 surface section, in a module worker, cached as Design note 14 says. The appearance is the scene's
@@ -22785,3 +22804,54 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
   - _The deck's one-band march has no GPU frame._ Its text and bindings are pinned, and the slab's
     frames hold the transform byte for byte, but no smoke frame draws the shared read's variant.
     Lean: a Venus-class deck frame beside R05's Earth in part 12, if main wants one.
+- **Deviations in R08.T10.g, as built** (2026-10-29; the research advice on the views check,
+  2026-10-29, §2, in main's orchestration records, and main's rulings on it). Edited:
+  `preload/api.ts`; `displays/view/check/atmosphereCheckRun.ts`; `main/`'s `viewsCheckRecord.ts`,
+  `atmosphereCheckResults.ts`, `viewsCheck.ts`, `fixtures/atmosphereRecord.ts`,
+  `graphics/gpuProcessMonitor.ts` and `index.ts`; `scripts/viewsCheck.sh`'s header; and their
+  tests. It replaces R08.T10.b's rule, "the run fails on any fault line, an exposure that never
+  settles, or no capture" (Risks, "Deviations in T10.b, as built", _The flight_), whose records
+  of 2026-10-27 stand as run under it.
+  - _Why_ (the advice's §2.2). R08.T10.b's record gave no reason to record the GPU process's exits
+    without judging them, and the module's own, that a lost device stands on the primary's fault
+    line, does not hold for one: the GPU-process fault clears once the adapter answers again
+    (`view/engine/status.ts`), and where the photorealistic style cannot be remade the primary
+    goes back to the wireframe with no fault line (`ViewDisplay.tsx`), so a capture taken after the
+    loss showed a clean plate over a lost picture, and passed, in an earlier pod run. Every other
+    views-check run already failed on an exit on every machine (the terrain run, the hand-over
+    check, which also fails on any engine fault, and the several-views run), and the brainstorm's
+    Testing section asks for "no lost device, no lost GPU process". The owner's nine
+    views-check-family records, all on the desktop, each record no exit, so a false failure there
+    is unlikely; one costs a re-run, where a false pass commits a wrong verdict.
+  - _The rule as built._ The run passes when both findings pass.
+    - The captures' (`atmosphereCaptureFailures`): R08.T10.b's, and each capture's primary drawn
+      photorealistic, failing `<label>: drawn wireframe, not photorealistic`, or
+      `<label>: drawn in no style, not photorealistic` for a canvas whose accessible name gave no
+      style. A capture's own verdict needs both. Its reasons stand capture by capture, the style's
+      before its fault lines.
+    - The faults' (`atmosphereFaultFailures(record, gpuProcessExits)`), worded as the hand-over
+      check's: `a fault: <line>` for each engine fault over the run, and
+      `<n> exits of the GPU process`. `findings.faults` gains its `verdict` and `reasons`.
+    - `atmosphereFailures` and the summary's Reasons list the captures' reasons, then the faults'.
+      The page's console errors are still counted and never a reason.
+    - The summary's line reads "Faults: fault lines A atmosphere, B graphics; N engine faults, M
+      GPU-process exits; recorded, not judged: console errors K", and its captures' table gains a
+      Style column after the camera's, `—` for no style.
+    - The session's failure reads "the atmosphere run's checks failed: …".
+  - _The style recorded._ `capture` reads `ViewControls.styleOf(PRIMARY_NAME)` beside the plate,
+    once `AUTO` has settled and before the picture is asked for; the record's field stands between
+    `exposure` and `exposureSettleMs`. The reader takes a style or `null` and refuses a capture with
+    any other value or none. The results file, which carries it, is version 4.
+  - _The safe-mode relaunch_ (the advice's §2.3, the optional item, built).
+    `GpuProcessMonitorOptions.viewsCheckLog` is the views check's log, `null` for every other
+    launch. Where the crash-loop policy calls for the relaunch, a views check instead writes its
+    line and ends the launch with exit 1, never relaunching: the script takes the first process's
+    exit for the run's and kills its process group, so the relaunch's exit 0 would pass a run with
+    no results written (read from the code, not run). The line is
+    `views check: FAIL the GPU process crashed <n> times` once the crashes reach the loop's count
+    (`CRASH_LOOP_COUNT`, 3). A loop the feature status made short of it reads
+    `views check: FAIL the GPU's feature status dropped Vulkan or WebGPU (the GPU process crashed <n> times)`
+    (lean, 2026-10-29: the policy's decision does not carry its cause, and its API is left as it
+    is; three crashes spread over more than its window with the status dropped read as the
+    crashes'). Safe and default modes, which never relaunch, are unchanged. Every views-check run
+    kind takes it; a spike launch still relaunches.

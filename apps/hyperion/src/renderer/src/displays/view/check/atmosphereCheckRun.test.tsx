@@ -832,6 +832,29 @@ describe("the atmosphere run's script (R08.T10.b)", () => {
     ]);
   });
 
+  it("records each capture drawn photorealistic, as the primary's canvas names it", async () => {
+    const { record } = await smoke();
+    expect(record.captures.map((each) => each.style)).toEqual(["photorealistic", "photorealistic"]);
+  });
+
+  it("records a capture drawn in the wireframe where the primary's canvas names it so", async () => {
+    const run = fakeRun();
+    let holds = 0;
+    // From the fixture's leg's first hold, after the night's capture, the canvas reads
+    // `VIEW, WIREFRAME, PRIMARY, FREE`, as where the photorealistic style could not be remade.
+    run.view.onHold = () => {
+      holds += 1;
+      if (holds === 2) {
+        run.view.style = "wireframe";
+      }
+    };
+    const record = await runAtmosphereCheck(run.deps);
+    expect(record.captures.map((each) => [each.label, each.style])).toEqual([
+      ["moonlit-night", "photorealistic"],
+      ["fixture-test-earth-o3-slab", "wireframe"],
+    ]);
+  });
+
   it("takes the night only once AUTO has settled there, and records the wait", async () => {
     const { record } = await smoke();
     const [night] = record.captures;
