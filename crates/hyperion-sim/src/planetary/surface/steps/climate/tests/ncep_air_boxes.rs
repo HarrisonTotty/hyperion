@@ -41,20 +41,23 @@
 //! - Each point's temperature, plus Γ max(0, z) where Natural Earth's land share of its 2.5° cell
 //!   (its latitude and longitude ± 1.25°, clipped at the poles; even–odd scanlines, 40 to 2.5° of
 //!   latitude, each weighted by cos φ, as [`earth_land`](super::earth_land)'s) exceeds 0.5, with Γ
-//!   [`ncep_air`](super::ncep_air)'s `REDUCTION_LAPSE_RATE_K_PER_M`, 5.829 K km⁻¹: its reduction
-//!   (where z is negative, over the spectral orography's ringing beside the Andes, none). The σ =
-//!   0.995 level's own height above the ground, about 40 m, is not added: 0.2 K.
+//!   [`REDUCTION_LAPSE_RATE_K_PER_M`](super::ncep_air::REDUCTION_LAPSE_RATE_K_PER_M), 5.829 K km⁻¹:
+//!   [`ncep_air`](super::ncep_air)'s reduction (where z is negative, over the spectral orography's
+//!   ringing beside the Andes, none). The σ = 0.995 level's own height above the ground, about
+//!   40 m, is not added: 0.2 K.
 //! - A box's value: the solid-angle mean of the points' 2.5° cells over it, its latitudes the upper
 //!   half of one row's cells and the lower half of the next's, by their solid angles, and its
 //!   longitudes ¼, ½ and ¼ of three columns' cells.
 //! - Printed in hundredths of a kelvin (the packing's precision is 0.063 K a value).
 //! - The check, against the 2 m field: the same reduction's band means over all longitudes, by the
-//!   same latitude weights, against [`ncep_air`](super::ncep_air)'s `SEA_LEVEL_AIR_K`, from 58.75°
-//!   S to 58.75° N, 0.34 K RMS over the months and bands, 1.10 K at worst; to 76.25° N, 0.45 K and
-//!   1.80 K; over every band, 1.02 K RMS and 5.59 K at worst, at 88.75° S in May. The σ = 0.995
-//!   level lies above the polar winter's surface inversion: from 63.75° S south the σ = 0.995 field
-//!   is warmer by up to 5.6 K in May–August, and over the Arctic Ocean (86.25° N and 88.75° N, no
-//!   land) by 1.1–1.3 K in the annual mean.
+//!   same latitude weights, against [`SEA_LEVEL_AIR_K`](super::ncep_air::SEA_LEVEL_AIR_K), from
+//!   58.75° S to 58.75° N, 0.34 K RMS over the months and bands, 1.10 K at worst; to 76.25° N,
+//!   0.45 K and 1.80 K; over every band, 1.02 K RMS and 5.59 K at worst, at 88.75° S in May. Those
+//!   bands are mostly sea, so over land the difference may be two or three times larger. The σ =
+//!   0.995 level, some 30–40 m up, stands within the polar winter's surface inversion, above its
+//!   steepest lowest layer: from 63.75° S south the σ = 0.995 field is warmer by up to 5.6 K in
+//!   May–August, and over the Arctic Ocean (86.25° N and 88.75° N, no land) by 1.1–1.3 K in the
+//!   annual mean.
 //!
 //! The lane's scripts (`arl_reduce.py`, `ne_grid_land.py`, `climatology.py` and `emit_tables.py`)
 //! are in its outbox, not the repository.
