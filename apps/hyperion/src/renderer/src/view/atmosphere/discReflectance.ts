@@ -1,7 +1,7 @@
 /**
  * R07's disc as R08 widens it (plan R08, R08.T18.a and R08.T16.b; decision-composition §1.9): the
- * ground's thermal emission on the disc of a body above the visibility cut. R08.T16.b adds the
- * disc's reflectance table to this module; until then it holds the emission term alone.
+ * ground's thermal emission on the disc of a body above the visibility cut, and the air of a body
+ * drawn by its reflectance table beyond the 10⁹ m boundary.
  *
  * @remarks
  * A disc record of a body whose ground the cut draws carries a {@link DiscEmission}
@@ -22,10 +22,26 @@
  * branch never entered costs the disc kernels 0.05–0.7 ms on the RTX 3080 by its presence alone).
  * The emissive forms read the record's emission block past the records ({@link packDiscEmission},
  * {@link DISC_EMISSION_ROWS} rows, row 46's y its first; 0 for none).
+ *
+ * **The air** (R08.T16.b; Design note 13). A disc record of a body with an atmosphere drawn beyond
+ * the 10⁹ m boundary (`draw.ts`' `planLitBodies`, with R07's hysteresis) carries a {@link DiscAir}:
+ * its body's reflectance table (`discTable.ts`, baked by `thick/discBake.ts`). Its kernels are the
+ * plain kernels' air forms ({@link withDiscAir}): `shade` hands its sample's light to `disc_air`
+ * (`discAir.wgsl`), which dims it by the march's mean transmittance along the view and adds each
+ * light's air, so that the disc draws what the full passes draw over the mesh inside the boundary,
+ * its class map, normal map and eclipses its own; their block past the records is one row
+ * ({@link packDiscAir}, row 46's z its first). The table binds at group 2's binding 15
+ * (`draw.ts`' `DISC_AIR_TEXTURES`). A record carries emission or air, never both: a body with air
+ * has no ground field (`thermal.ts`' `groundTemperatureFieldOf`), and the plan gives a tabled record
+ * none.
  */
 
 import { dot, type Vec3 } from "../../geometry/vec3";
+import type { TextureHandle } from "../engine/types";
 import type { Rgb } from "../photometry/toneCurve";
+import type { DiscReflectanceTable } from "./discTable";
+import type { BodyGravity } from "./oblate";
+import discAirWgsl from "./shaders/discAir.wgsl?raw";
 import discEmissionWgsl from "./shaders/discEmission.wgsl?raw";
 import {
   aboveThermalCut,
@@ -192,4 +208,48 @@ export function withDiscEmission(source: string): string {
     );
   }
   return `${parts.join(EMISSIVE_SHADE_END)}\n${THERMAL_WGSL}\n${discEmissionWgsl}`;
+}
+
+/** A disc's air beyond the boundary (the module's remarks): its body's table, as its draws bind it. */
+export interface DiscAir {
+  readonly table: DiscReflectanceTable;
+  /** The table's texture (`AtmosphereTables.discReflectance`), at binding 15. */
+  readonly texture: TextureHandle;
+  /** ln s_b of the body's tables' bands, ascending, which the twin reads the bands by. */
+  readonly lnBands: ReadonlyArray<number>;
+  /**
+   * The body's gravity, whose s at a point's latitude the bands are read at, as the body's table
+   * (`oblate.wgsl`'s `gravityRatioAt`) gives it to the kernels; `null` for a body of one band at s
+   * = 1 with no spheroid.
+   */
+  readonly gravity: BodyGravity | null;
+}
+
+/** `vec4f` rows of a record's air block (`discAir.wgsl`'s). */
+export const DISC_AIR_ROWS = 1;
+
+/** A disc's air block as `discAir.wgsl` reads it: its table's light slots, its sun's floor, 0, 0. */
+export function packDiscAir(air: DiscAir): Float32Array {
+  return Float32Array.of(air.table.slots, air.table.sunFloor, 0, 0);
+}
+
+/** {@link SHADE_END} with the sample's light handed to `disc_air` before the return. */
+const AIR_SHADE_END =
+  "    out.radiance = out.radiance + source.xyz * misc.z * reflectance * transmitted;\n  }\n  out.radiance = disc_air(body, q, ray, out.radiance);\n  return out;\n}";
+
+/**
+ * A disc kernel's air form (the module's remarks): `source`, a composition of `bodyDisc.wgsl`, with
+ * `shade` handing each sample's light to `disc_air` as its last step, and the air's read
+ * (`discAir.wgsl`) appended, which declares the table at group 2's binding 15.
+ *
+ * @throws Error unless `shade`'s end occurs exactly once in `source`.
+ */
+export function withDiscAir(source: string): string {
+  const parts = source.split(SHADE_END);
+  if (parts.length !== 2) {
+    throw new Error(
+      `a disc kernel's air form needs bodyDisc.wgsl's shade once, found ${parts.length - 1}`,
+    );
+  }
+  return `${parts.join(AIR_SHADE_END)}\n${discAirWgsl}`;
 }

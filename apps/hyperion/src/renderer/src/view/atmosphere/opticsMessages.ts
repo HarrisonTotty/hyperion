@@ -14,9 +14,11 @@
 import type { AbsorberCurve, AbsorberCurveSums, AbsorberSpec, CurveShare } from "./absorbers";
 import type { AssembledMedium } from "./assemble";
 import type { BodyAtmosphereInput } from "./atmosphereInput";
+import type { DiscReflectanceTable } from "./discTable";
 import type { AtmosphereMedium } from "./medium";
 import type { BakeSpectrum } from "./spectralColour";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
+import type { DiscBakeAir } from "./thick/discBake";
 import type { PolarisationTable } from "./thick/polarisation";
 import type { SpectralColumn } from "./thick/spectralColumn";
 
@@ -36,6 +38,10 @@ import type { SpectralColumn } from "./thick/spectralColumn";
  * - `polarisation-bake` (R08.T14.e): the polarisation correction's tables
  *   (`thick/polarisation.ts`) of `column` on `body`, laid out as `thick-bake`'s and with its
  *   absorbers formed the same way, for any world with air, thin or thick.
+ * - `disc-bake` (R08.T16.b): the disc's reflectance table (`thick/discBake.ts`) of every band in
+ *   `bands` and light in `slots`, `thick-bake`'s fields with the medium as the tables hold it and
+ *   the body's bakes that have landed (`air`): J from its routed bake where given, else baked as
+ *   `thick-bake` bakes it.
  *
  * `slots` index the input's lights, which are its light slots in `lightsAt`'s order. A kept
  * body's bake (`input.kind === "kept"`, whose medium the scene built and no assembly gives specs or
@@ -78,6 +84,18 @@ export type OpticsRequest =
       readonly body: ThickBakeBody;
       /** A kept body's absorber specs and light spectra, in place of the input's. */
       readonly kept?: KeptBakeLights;
+    }
+  | {
+      readonly kind: "disc-bake";
+      readonly id: number;
+      readonly input: BodyAtmosphereInput;
+      readonly slots: ReadonlyArray<number>;
+      readonly bands: ReadonlyArray<number>;
+      readonly column: SpectralColumn;
+      readonly body: ThickBakeBody;
+      /** A kept body's absorber specs and light spectra, in place of the input's. */
+      readonly kept?: KeptBakeLights;
+      readonly air: DiscBakeAir;
     };
 
 /**
@@ -129,6 +147,9 @@ export function keptBakeLightsOf(
  *   slots the lights asked in theirs.
  * - `polarisation-bake-failed`: a `polarisation-bake` that threw or was refused, as
  *   `thick-bake-failed` is, never `failed`.
+ * - `disc-baked`: a `disc-bake`'s table.
+ * - `disc-bake-failed`: a `disc-bake` that threw or was refused, as `thick-bake-failed` is, never
+ *   `failed`.
  * - `failed`: the job threw, a bug (`decision-r08-t10a-leans.md` item 6), with its message.
  */
 export type OpticsReply =
@@ -165,6 +186,8 @@ export type OpticsReply =
       readonly bands: ReadonlyArray<number>;
       readonly message: string;
     }
+  | { readonly kind: "disc-baked"; readonly id: number; readonly table: DiscReflectanceTable }
+  | { readonly kind: "disc-bake-failed"; readonly id: number; readonly message: string }
   | { readonly kind: "failed"; readonly id: number; readonly message: string };
 
 /** A worker's reply and the buffers it transfers with it. */

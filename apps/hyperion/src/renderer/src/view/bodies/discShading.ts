@@ -57,9 +57,12 @@ import type { BodyIdHex } from "@hyperion/protocol";
 import { cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { ClassMapDiscSurface, UniformDiscSurface } from "../appearance/bodyAppearance";
 import {
+  DISC_AIR_ROWS,
   DISC_EMISSION_ROWS,
+  type DiscAir,
   type DiscEmission,
   discEmissionAt,
+  packDiscAir,
   packDiscEmission,
 } from "../atmosphere/discReflectance";
 import {
@@ -97,6 +100,8 @@ import {
   MAX_DISC_CLASSES,
 } from "./discSurface";
 import { oblateAlbedoScale } from "./oblate";
+import { discAzimuthOf, discTableAt } from "../atmosphere/discTable";
+import { gravityRatio } from "../atmosphere/oblate";
 
 /**
  * A sample is lit directly where a star's horizon and eclipse terms exceed this share of the
@@ -305,6 +310,11 @@ export interface DiscCellSet {
    * emissive form shades: a set's records all do, or none.
    */
   readonly emissive: boolean;
+  /**
+   * Whether its records carry their air beyond the boundary (R08.T16.b), which the kernel's air
+   * form shades: a set's records all do, or none.
+   */
+  readonly air: boolean;
 }
 
 /**
@@ -660,11 +670,12 @@ export function faceBandSpans(record: DiscRecord, frame: DiscLimbFrame): LimbSpa
  * weight, the one-texel airless tables).
  */
 function boundTexturesOf(record: DiscRecord): ReadonlyArray<TextureHandle | null> {
-  const { surface, atmosphere } = record;
+  const { surface, atmosphere, air } = record;
   const mapped = surface.kind === "class-map";
   return [
     mapped ? surface.weights : null,
     mapped ? (surface.normals?.texture ?? null) : null,
+    air?.texture ?? null,
     ...(atmosphere === undefined ? [null] : Object.values(surfaceLightingDrawTextures(atmosphere))),
   ];
 }
@@ -710,8 +721,9 @@ function plannedCellsOf(record: DiscRecord, frame: DiscLimbFrame | null): Planne
 
 /**
  * The records that may share a dispatch (R07.T8.e), each set's by index, in the order of its first
- * record, each record's textures taken once: those that bind the same textures and either all carry
- * their ground's emission or none do (R08.T18.a), which the kernel's two forms shade.
+ * record, each record's textures taken once: those that bind the same textures, either all carry
+ * their ground's emission or none do (R08.T18.a), and either all carry their air or none do
+ * (R08.T16.b), which the kernel's forms shade.
  */
 function boundSets(
   records: ReadonlyArray<DiscRecord>,
@@ -720,6 +732,7 @@ function boundSets(
   const sets: Array<{
     readonly textures: ReadonlyArray<TextureHandle | null>;
     readonly emissive: boolean;
+    readonly air: boolean;
     readonly indices: number[];
   }> = [];
   records.forEach((record, index) => {
@@ -728,11 +741,13 @@ function boundSets(
     }
     const textures = boundTexturesOf(record);
     const emissive = record.emission !== undefined;
+    const air = record.air !== undefined;
     const set = sets.find(
-      (each) => each.emissive === emissive && sameTextures(each.textures, textures),
+      (each) =>
+        each.emissive === emissive && each.air === air && sameTextures(each.textures, textures),
     );
     if (set === undefined) {
-      sets.push({ textures, emissive, indices: [index] });
+      sets.push({ textures, emissive, air, indices: [index] });
     } else {
       set.indices.push(index);
     }
@@ -812,16 +827,21 @@ function runsOf(
  * @param emissiveCells - Whether the kernel's emissive form is there to shade the records that
  *   carry their ground's emission (R08.T18.a); without it they take no jobs, and their draws sum
  *   their own cells.
+ * @param airCells - Whether the kernel's air form is there to shade the records that carry their
+ *   air (R08.T16.b); without it they take no jobs, as without the emissive form.
  */
 export function discCellJobs(
   records: ReadonlyArray<DiscRecord>,
   maxJobs: number = MAX_CELL_JOBS,
   frame: DiscLimbFrame | null = null,
   emissiveCells = false,
+  airCells = false,
 ): DiscCellJobs {
   const most = Math.min(maxJobs, MAX_CELL_JOBS);
   const planned = records.map((record) =>
-    record.emission !== undefined && !emissiveCells ? null : plannedCellsOf(record, frame),
+    (record.emission !== undefined && !emissiveCells) || (record.air !== undefined && !airCells)
+      ? null
+      : plannedCellsOf(record, frame),
   );
   let count = 0;
   let spanRows = 0;
@@ -882,6 +902,7 @@ export function discCellJobs(
         firstGroup,
         groups: groupCount - firstGroup,
         emissive: records[head]?.emission !== undefined,
+        air: records[head]?.air !== undefined,
       });
     }
   }
@@ -977,6 +998,12 @@ export interface DiscRecord {
    * it, when the plain kernels draw it as before.
    */
   readonly emission?: DiscEmission;
+  /**
+   * Its body's air drawn by its reflectance table beyond the 10⁹ m boundary (plan R08, R08.T16.b;
+   * `discReflectance.ts`' `DiscAir`), which the kernels' air forms draw; absent for a body drawn
+   * airless, or by the full passes inside the boundary, when the plain kernels draw it as before.
+   */
+  readonly air?: DiscAir;
 }
 
 /** The pole's stretch M x = x + (a ÷ c − 1)(x · p) p. */
@@ -1070,7 +1097,9 @@ function bodyAxesOf(rotation: Rotation3): readonly [Vec3, Vec3] {
  *
  * Past the spans, each record that carries its ground's emission (R08.T18.a) has its block,
  * `DISC_EMISSION_ROWS` rows in the records' order (`packDiscEmission`, at the record's exposure
- * scale), whose first row its row 46's y holds; 0 there for every other record, as before.
+ * scale), whose first row its row 46's y holds; 0 there for every other record, as before. Past
+ * those, each record that carries its air (R08.T16.b) has its block, `DISC_AIR_ROWS` rows in the
+ * records' order (`packDiscAir`), whose first row its row 46's z holds; 0 for every other record.
  *
  * @param cells - The `disc cells` pass's jobs for these records, whose ranges row 51 carries; `null`
  *   where no pass runs, when every record's row 51 says its draws sum their own cells.
@@ -1086,7 +1115,8 @@ export function packDiscRecords(
     );
   }
   const recordRows = records.length * DISC_ROWS;
-  // The emission blocks past the spans, each record's first row by its index (R08.T18.a).
+  // The emission blocks past the spans, each record's first row by its index (R08.T18.a), then the
+  // air blocks (R08.T16.b).
   const firstBlockRow = recordRows + (cells?.spanRows ?? 0);
   const blockRows = new Map<number, number>();
   records.forEach((record, index) => {
@@ -1094,7 +1124,14 @@ export function packDiscRecords(
       blockRows.set(index, firstBlockRow + blockRows.size * DISC_EMISSION_ROWS);
     }
   });
-  const out = new Float32Array((firstBlockRow + blockRows.size * DISC_EMISSION_ROWS) * 4);
+  const firstAirRow = firstBlockRow + blockRows.size * DISC_EMISSION_ROWS;
+  const airRows = new Map<number, number>();
+  records.forEach((record, index) => {
+    if (record.air !== undefined) {
+      airRows.set(index, firstAirRow + airRows.size * DISC_AIR_ROWS);
+    }
+  });
+  const out = new Float32Array((firstAirRow + airRows.size * DISC_AIR_ROWS) * 4);
   records.forEach((record, index) => {
     const base = index * DISC_ROWS * 4;
     const put = (rowIndex: number, values: ReadonlyArray<number>): void => {
@@ -1168,11 +1205,21 @@ export function packDiscRecords(
       put(FIRST_OCCLUDER_ROW + slot, [c.x, c.y, c.z, occluder.radius]);
     });
     const secondaries = record.secondaries.slice(0, MAX_DISC_SECONDARIES);
-    // y: the first row of its emission block, 0 for none (R08.T18.a).
-    put(SECONDARY_COUNT_ROW, [secondaries.length, blockRows.get(index) ?? 0, 0, 0]);
+    // y: the first row of its emission block, 0 for none (R08.T18.a); z: of its air block, 0 for
+    // none (R08.T16.b).
+    put(SECONDARY_COUNT_ROW, [
+      secondaries.length,
+      blockRows.get(index) ?? 0,
+      airRows.get(index) ?? 0,
+      0,
+    ]);
     const blockRow = blockRows.get(index);
     if (record.emission !== undefined && blockRow !== undefined) {
       out.set(packDiscEmission(record.emission, record.exposureOverPi * Math.PI), blockRow * 4);
+    }
+    const airRow = airRows.get(index);
+    if (record.air !== undefined && airRow !== undefined) {
+      out.set(packDiscAir(record.air), airRow * 4);
     }
     secondaries.forEach((source, j) => {
       const first = FIRST_SECONDARY_ROW + j * SECONDARY_ROWS;
@@ -1572,6 +1619,119 @@ function localAzimuthOf(frame: LocalFrame, d: Vec3): number {
   return towardsNorth === 0 && towardsEast === 0 ? 0 : Math.atan2(towardsEast, towardsNorth);
 }
 
+/**
+ * A star's light at `q` towards it, `distanceOverA` off in units of a and of angular radius
+ * `starAngularRadiusRad`, through the record's occluders per channel (`eclipseVisible`): each
+ * occluder's hidden fraction taken off, held at 0.
+ */
+function eclipseVisibleAt(
+  body: ViewBody,
+  light: DiscLight,
+  q: Vec3,
+  towards: Vec3,
+  distanceOverA: number,
+  starAngularRadiusRad: number,
+): Rgb {
+  const visible: [number, number, number] = [1, 1, 1];
+  for (const occluder of body.occluders) {
+    const toOccluder = sub(occluder.centre, q);
+    const occluderDistance = norm(toOccluder);
+    if (occluderDistance >= distanceOverA) {
+      continue;
+    }
+    if (occluderDistance <= occluder.radius) {
+      return [0, 0, 0];
+    }
+    const occluderRadius = Math.asin(occluder.radius / occluderDistance);
+    const along = scale(toOccluder, 1 / occluderDistance);
+    const separation = Math.atan2(norm(cross(along, towards)), dot(along, towards));
+    for (const c of CHANNELS) {
+      visible[c] -=
+        1 -
+        annulusVisibleFraction(
+          light.annuli[c],
+          occluderRadius / starAngularRadiusRad,
+          separation / starAngularRadiusRad,
+        );
+    }
+  }
+  return [Math.max(visible[0], 0), Math.max(visible[1], 0), Math.max(visible[2], 0)];
+}
+
+/**
+ * The sample's light beyond the boundary (plan R08, R08.T16.b; `discAir.wgsl`'s `disc_air`): its
+ * ground's light `ground` dimmed by the march's mean transmittance (the table's alpha at light slot
+ * 0), and each light's air: a star's under its eclipse, at its light slot; a planetshine source's at
+ * slot 0 by the inverse square from the body's centre. A light under the table's floor lights none.
+ */
+function airAt(
+  body: ViewBody,
+  record: DiscRecord,
+  air: DiscAir,
+  q: Vec3,
+  ray: Vec3,
+  normal: Vec3,
+  ground: Rgb,
+): Rgb {
+  const { table, lnBands, gravity } = air;
+  const toCamera = scale(ray, -1);
+  const sinLatitude = Math.min(Math.max(dot(normal, body.pole), -1), 1);
+  const s = gravity === null ? 1 : gravityRatio(gravity, Math.asin(sinLatitude));
+  const muView = dot(normal, toCamera);
+  const through = discTableAt(table, lnBands, s, 0, muView, 1, 0)[3];
+  const out: [number, number, number] = [
+    ground[0] * through,
+    ground[1] * through,
+    ground[2] * through,
+  ];
+  for (const [j, { place, light }] of body.lights.entries()) {
+    const toStar = sub(place, q);
+    const distance = norm(toStar);
+    const towards = scale(toStar, 1 / distance);
+    const mu0 = dot(normal, towards);
+    if (mu0 < table.sunFloor) {
+      continue;
+    }
+    const starAngularRadiusRad = Math.asin(Math.min(1, light.radius / distance));
+    const visible = eclipseVisibleAt(body, light, q, towards, distance, starAngularRadiusRad);
+    const lit = discTableAt(
+      table,
+      lnBands,
+      s,
+      j,
+      muView,
+      mu0,
+      discAzimuthOf(normal, toCamera, towards),
+    );
+    for (const c of CHANNELS) {
+      out[c] += light.illuminance[c] * record.exposureOverPi * lit[c] * visible[c];
+    }
+  }
+  for (const { place, source } of body.secondaries) {
+    const toSource = sub(place, q);
+    const distance = norm(toSource);
+    const towards = scale(toSource, 1 / distance);
+    const mu0 = dot(normal, towards);
+    if (mu0 < table.sunFloor) {
+      continue;
+    }
+    const near = source.distance / distance;
+    const lit = discTableAt(
+      table,
+      lnBands,
+      s,
+      0,
+      muView,
+      mu0,
+      discAzimuthOf(normal, toCamera, towards),
+    );
+    for (const c of CHANNELS) {
+      out[c] += source.illuminance[c] * near * near * record.exposureOverPi * lit[c];
+    }
+  }
+  return out;
+}
+
 function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
   const stretch2 = body.stretch * body.stretch;
   // The datum's normal ν, the spheroid's.
@@ -1631,31 +1791,7 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
       continue;
     }
     const starRadius = Math.asin(Math.min(1, light.radius / distance));
-    let visible: [number, number, number] = [1, 1, 1];
-    for (const occluder of body.occluders) {
-      const toOccluder = sub(occluder.centre, q);
-      const occluderDistance = norm(toOccluder);
-      if (occluderDistance >= distance) {
-        continue;
-      }
-      if (occluderDistance <= occluder.radius) {
-        visible = [0, 0, 0];
-        break;
-      }
-      const occluderRadius = Math.asin(occluder.radius / occluderDistance);
-      const along = scale(toOccluder, 1 / occluderDistance);
-      const separation = Math.atan2(norm(cross(along, towards)), dot(along, towards));
-      for (const c of CHANNELS) {
-        visible[c] -=
-          1 -
-          annulusVisibleFraction(
-            light.annuli[c],
-            occluderRadius / starRadius,
-            separation / starRadius,
-          );
-      }
-    }
-    visible = [Math.max(visible[0], 0), Math.max(visible[1], 0), Math.max(visible[2], 0)];
+    const visible = eclipseVisibleAt(body, light, q, towards, distance, starRadius);
     // The sky light shares the point's eclipse: the air above the point lies in the shadow with it.
     for (const c of CHANNELS) {
       radiance[c] += light.illuminance[c] * record.exposureOverPi * meanA[c] * sky[c] * visible[c];
@@ -1732,6 +1868,10 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
     for (const c of CHANNELS) {
       radiance[c] += emitted[c];
     }
+  }
+  // Beyond the boundary the air's, its last step (R08.T16.b; `disc_air`).
+  if (record.air !== undefined) {
+    return { radiance: airAt(body, record, record.air, q, ray, normal, radiance), lit };
   }
   return { radiance, lit };
 }

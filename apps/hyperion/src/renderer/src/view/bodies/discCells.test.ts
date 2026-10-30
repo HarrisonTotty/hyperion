@@ -692,7 +692,15 @@ describe("the cell pass for every record (R07.T8.e)", () => {
     const sets = expected.map((indices) => {
       const count = indices.reduce((sum, i) => sum + (pixels[i] ?? 0), 0);
       const groups = indices.reduce((sum, i) => sum + groupsOf(i), 0);
-      const set = { first, count, record: indices[0], firstGroup, groups, emissive: false };
+      const set = {
+        first,
+        count,
+        record: indices[0],
+        firstGroup,
+        groups,
+        emissive: false,
+        air: false,
+      };
       first += count;
       firstGroup += groups;
       return set;
@@ -1080,7 +1088,7 @@ describe("a large disc's limb through the cell pass (R07.T8.f)", () => {
       true,
       count,
       expected,
-      [{ first: 0, count, record: 0, firstGroup: 0, groups, emissive: false }],
+      [{ first: 0, count, record: 0, firstGroup: 0, groups, emissive: false, air: false }],
       LIMB_SPAN_ROWS * spans.rows,
     ]);
   });

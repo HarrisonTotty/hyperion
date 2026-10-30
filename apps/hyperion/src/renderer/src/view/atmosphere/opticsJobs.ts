@@ -31,13 +31,17 @@
  *   bin, the thick bake's layers, and the fits in the channels' three bins) once a request, and one
  *   table a band asked. A thick world asks for both: they share no work but the layers' rule and
  *   the absorber specs a worker keeps.
+ * - **The disc's table** (R08.T16.b; `thick/discBake.ts`): its lights formed as the thick bake's,
+ *   J the routed bake's where the request carries it and otherwise baked here as a `thick-bake`
+ *   bakes it, the correction summed in where carried, then every band's and light's table marched.
  * - **The answer** is a structured copy of the reply, whose every buffer is transferred: the copy
  *   is made in the worker, off the render thread, and leaves the worker's own arrays (its kept
  *   assemblies, and any table a medium references, such as a cross-section's) attached.
  *
  * A throw in a job is a bug (`decision-r08-t10a-leans.md` item 6) and is answered `failed` with its
- * message, but for a bake's, which is answered `thick-bake-failed` or `polarisation-bake-failed`: a
- * failed bake is never the medium's fault (decision-r08-t10a-leans, UX review item 1). A k-table
+ * message, but for a bake's, which is answered `thick-bake-failed`, `polarisation-bake-failed` or
+ * `disc-bake-failed`: a failed bake is never the medium's fault (decision-r08-t10a-leans, UX review
+ * item 1). A k-table
  * that cannot be loaded rejects, so that the worker raises its error and the pool replaces it.
  */
 
@@ -62,9 +66,11 @@ import type { BakeSpectrum } from "./spectralColour";
 import {
   bakeMultipleScattering,
   prepareBake,
+  thickBakeBands,
   type ThickBakeLight,
   thickBakeLights,
 } from "./thick/bake";
+import { discReflectanceFor } from "./thick/discBake";
 import { bakePolarisationCorrection, preparePolarisation } from "./thick/polarisation";
 
 /** How many bodies' assemblies, or absorber specs, a worker keeps, by key, the latest asked. */
@@ -156,6 +162,30 @@ export class OpticsJobs {
         };
         break;
       }
+      case "disc-bake": {
+        const bands = thickBakeBands(request.body);
+        const table = discReflectanceFor(
+          request.air,
+          request.bands.map((band) => {
+            const geometry = bands[band];
+            if (geometry === undefined) {
+              throw new RangeError(
+                `the body has ${bands.length} latitude bands, not a band ${band}`,
+              );
+            }
+            return geometry;
+          }),
+          () => {
+            // The lights only where J is solved here: a routed bake's carries its own.
+            const prepared = prepareBake(request.column, this.#bakeLights(request, options));
+            return request.bands.map((band) =>
+              bakeMultipleScattering(prepared, request.body, band),
+            );
+          },
+        );
+        reply = { kind: "disc-baked", id: request.id, table };
+        break;
+      }
       case "polarisation-bake": {
         const lights = this.#bakeLights(request, options);
         const prepared = preparePolarisation(request.column, lights);
@@ -225,7 +255,7 @@ export class OpticsJobs {
   #heldAbsorbers(
     request: Extract<
       OpticsRequest,
-      { kind: "curve-sums" | "curve-join" | "thick-bake" | "polarisation-bake" }
+      { kind: "curve-sums" | "curve-join" | "thick-bake" | "polarisation-bake" | "disc-bake" }
     >,
     options: AssembleOptions,
   ): HeldAbsorbers {
@@ -245,7 +275,7 @@ export class OpticsJobs {
    * absorber the body does not have.
    */
   #bakeLights(
-    request: Extract<OpticsRequest, { kind: "thick-bake" | "polarisation-bake" }>,
+    request: Extract<OpticsRequest, { kind: "thick-bake" | "polarisation-bake" | "disc-bake" }>,
     options: AssembleOptions,
   ): ReadonlyArray<ThickBakeLight> {
     const { specs, spectra } =
@@ -333,6 +363,9 @@ function failed(request: OpticsRequest, error: unknown): OpticsAnswer {
       break;
     case "polarisation-bake":
       reply = { kind: "polarisation-bake-failed", id: request.id, bands: request.bands, message };
+      break;
+    case "disc-bake":
+      reply = { kind: "disc-bake-failed", id: request.id, message };
       break;
     case "assemble":
     case "curve-sums":
