@@ -26,7 +26,7 @@ use crate::galaxy::motion::{KeplerRegimeRules, carved_by_the_loss_cone};
 use crate::galaxy::shares::ShareMatrix;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{Layer, SystemId};
-use crate::rng::{Mark, ObjectKey, Seed, Stream, tags};
+use crate::rng::{Mark, ObjectKey, Seed, Stream, Threshold, tags};
 
 /// How far outside plan 02's bound the thinning pads it before drawing, relative: 10⁻¹²
 /// (P03.T4.b).
@@ -259,6 +259,9 @@ fn pick_component(
     if bound.is_nan() || bound <= 0.0 {
         return None;
     }
+    if key.band() != MassBand::RoguePlanet {
+        return pick_unsaturated(galaxy, key, bound, position, mark);
+    }
     let fields = galaxy.fields();
     let shares = galaxy.shares();
     let mut densities = [0.0; MAX_COMPONENTS];
@@ -303,6 +306,70 @@ fn pick_component(
     })
 }
 
+/// [`pick_component`] for a band whose weights never saturate, every band but the rogue planets':
+/// [`Mark::pick_weighted`] over `share × density` in component order, each density evaluated only
+/// when the running sum reaches it, so that none after the picked component is (P09.T40.a).
+///
+/// The sums and thresholds are the pick's own, in its order, so the pick is its pick bit for bit.
+/// A cold 50 ly query at the Sun-like point accepts 99% of its candidates, nearly all in the first
+/// seven components, the discs, and so skips most of the other twelve's densities, some 2 ms of
+/// its grid's 10 (measured 2026-10-30). Debug builds evaluate the rest too, and check that the
+/// whole total is under the bound and that `pick_weighted` over every weight picks the same.
+fn pick_unsaturated(
+    galaxy: &Galaxy,
+    key: CellKey,
+    bound: f64,
+    position: &GalacticPosition,
+    mark: Mark,
+) -> Option<ComponentId> {
+    let fields = galaxy.fields();
+    let shares = galaxy.shares();
+    let band = key.band();
+    let padded_bound = bound * (1.0 + BOUND_PADDING);
+    let mut densities = fields.densities_lazily(&PointLy::from(position));
+    let mut weights = [0.0; MAX_COMPONENTS];
+    let mut sum = 0.0;
+    let mut picked = None;
+    for (i, (component, density)) in densities.by_ref().enumerate() {
+        // `share × density`, the product plan 02's layer density and bound take.
+        let weight = shares.component_share(band, component) * density;
+        weights[i] = weight;
+        sum += weight;
+        if mark.is_below(Threshold::from_ratio(sum, padded_bound)) {
+            picked = Some(i);
+            break;
+        }
+    }
+    if cfg!(debug_assertions) {
+        let count = fields.components().len();
+        let rest = picked.map_or(count, |i| i + 1);
+        for (slot, (component, density)) in weights[rest..count].iter_mut().zip(densities) {
+            *slot = shares.component_share(band, component) * density;
+        }
+        let weights = &weights[..count];
+        debug_assert!(
+            weighted_density(weights) <= padded_bound,
+            "the density of layer {} is {} at {:?}, above its bound {bound} over the {} ly cell {:?}",
+            key.layer().letter(),
+            weighted_density(weights),
+            position.to_light_years_f64(),
+            key.size_ly(),
+            key.gen_cell().to_array(),
+        );
+        debug_assert_eq!(
+            mark.pick_weighted(weights, padded_bound),
+            picked,
+            "the lazy pick at {:?} is not the pick over every weight",
+            position.to_light_years_f64()
+        );
+    }
+    picked.map(|index| {
+        fields
+            .component_id(index)
+            .expect("the weights are one per component, so a picked index is one of them")
+    })
+}
+
 /// The weights added from 0 in component order: the running total [`Mark::pick_weighted`] reaches,
 /// bit for bit, and not the unweighted sum
 /// [`Fields::densities`](crate::galaxy::fields::Fields::densities) returns.
@@ -337,6 +404,35 @@ mod tests {
     /// The Sun-like point: in the plane, 26,000 ly out on the +y axis, clear of the bar.
     fn sunlike() -> GalacticPosition {
         GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap()
+    }
+
+    /// The densities read one at a time for the lazy pick are `Fields::densities`' entries, bit
+    /// for bit, at points over the whole root cube, most of them near the plane (P09.T40.a).
+    #[test]
+    fn the_densities_read_one_at_a_time_are_the_densities_bit_for_bit() {
+        let galaxy = galaxy();
+        let fields = galaxy.fields();
+        let mut stream = Stream::open(Seed::new(SEED), tags::SELFTEST_STREAM, ObjectKey::galaxy());
+        let mut all = [0.0; MAX_COMPONENTS];
+        for i in 0..20_000 {
+            let mut c = [0.0; 3].map(|_| 65_536.0 * (2.0 * stream.uniform() - 1.0));
+            // Three in four within 2,000 ly of the plane, one in two of those within 200 ly.
+            if i % 4 != 0 {
+                c[2] *= if i % 2 == 0 { 200.0 } else { 2_000.0 } / 65_536.0;
+            }
+            let p = PointLy::new(c[0], c[1], c[2]);
+            fields.densities(&p, &mut all);
+            let lazy: Vec<f64> = fields.densities_lazily(&p).map(|(_, d)| d).collect();
+            assert_eq!(lazy.len(), fields.components().len());
+            for (&one, &every) in lazy.iter().zip(&all) {
+                assert_same_bits(one, every);
+            }
+            for (component, (lazy_component, _)) in
+                fields.components().iter().zip(fields.densities_lazily(&p))
+            {
+                assert!(std::ptr::eq(component, lazy_component));
+            }
+        }
     }
 
     /// `n` candidates of `layer` at the Sun-like point, as `(cell, index)`, running on into the

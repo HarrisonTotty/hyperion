@@ -505,6 +505,20 @@ impl Fields {
         sum
     }
 
+    /// Every component's density at `p`, in component order, each when it is read: the same bits
+    /// as [`densities`](Self::densities)' entries, the arm phase evaluated once for every disc as
+    /// there. Placement's pick reads them only as far as the component it picks (P09.T40.a).
+    pub(crate) fn densities_lazily(
+        &self,
+        p: &PointLy,
+    ) -> impl Iterator<Item = (&Component, f64)> + '_ {
+        let site = Site::new(p);
+        let arm = self.arms.point_with(site.x, site.y, site.r_sq, site.r);
+        self.components
+            .iter()
+            .map(move |component| (component, component.shape.density_at(&site, &arm)))
+    }
+
     /// The density of `population` at `p`, systems per cubic light-year: the sum of its
     /// components' in component order.
     #[must_use]
