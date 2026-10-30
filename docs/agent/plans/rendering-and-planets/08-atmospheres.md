@@ -5845,7 +5845,11 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       every site, and Earth's ground-s90 by one view on each case), which stops the table, read,
       kernels and twins for main's ruling.
     - **T14.d.3, Mars's aureole** (precondition 2): one of its options (a) or (b), then m = 3
-      measured again on Mars alone.
+      measured again on Mars alone. _Partial, 2026-10-30_ (Risks, "R08.T14.d.3, as measured"):
+      (a) built, measured and not landed, since it leaves the aureole rows missing; (b), probed as
+      worded, misses too; the lever the measurements point to, the bake's truncation made the
+      lobes' own, is neither option and would amend precondition 2 (main's); m = 3 measured, not
+      built.
     - **T14.d.4, the gates and the route.** The Venus- and Titan-class cases above,
       preconditions 3–5 (the 2 MB row counting the thick and correction tables), the bake's time
       on the UHD 620's host, `classifyRegime`'s route, `CORRECTION_ROUTED` and the labels.
@@ -23544,3 +23548,26 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     before their re-bless and not re-traced (each sweep output's `caseSha256` names the old case
     text); `negligible.ts` and `src/tools/` still use V8's maths; the owner's macOS run.
   - 1990ecd fails the table tests until cecae9b re-blesses them: land the two together.
+- **R08.T14.d.3, as measured** (2026-10-30, pod, 8 vCPU). **Partial.** The vector gate by hand on
+  the CPU twin, each variant in a scratch tree; its tables in main's orchestration records. No code,
+  table, record, golden or contract moved.
+  - _(a) is not landed._ Mars 167 → 220 misses; its aureole rows from 24 of 24 missing dim
+    (0.62–0.93 of the vector I) to 19 bright (1.01–1.46). Earth's and Saturn's verdicts held.
+  - _The science check:_ dropping E's term is right (it is delta-M's core of the orders' tail), but
+    the double count left is the solve's I′_d, which corrects T14.f's _The lobes_, (a)'s premise.
+  - _Why:_ E's term is 0.6–6.4% of the aureole rows, the whole orders 11–79%. The bake truncates
+    f − f_c = 0.14–0.25 of Mars's dust at the channels, the lobes P = 0.62–0.70.
+  - _A probe, (a) with the bake truncated at f_c + P:_ the aureole 7 of 24 missing, 3–8° at
+    0.99–1.07, but Mars 203 (aerial 0 → 6, limb 6 → 12), its p′ negative forward.
+  - _The probe's sound form_ (the science check): per lobed term, the moments of the phase beyond
+    30° over 1 − f_c − P.
+  - _(b) as worded_, the orders less (1 − e^(−xP)) p(θ), is below 0 within 8° of the sun. Held at
+    0, Mars stays 167, the aureole 20 of 24 missing; its consistent form, less E's term, is (a).
+  - _m = 3 is not built:_ Mars's gate fails at m ≤ 3 (153 on today's bake, 223 on (a), 148 against
+    169 on the rows main ruled for T14.d.2, 14 of 1/64 below the horizontal).
+  - _Earth's s90 at m ≤ 3_ (asked beside Mars), on those rows: 2 → 0 misses, but its ramp stays
+    (v85 −2/−4% sunward, +6/+7% anti-sun, r/g), so it is the column's, not the modes'.
+  - _Mars's twilight_ (T14.d.2's hand-over), on those rows: s90 17 → 19 misses (worst 8.78), s95
+    6 (6.97), the rows short of its −0.3196. Left for main with the aureole's lever.
+  - Mars stays `ATMOSPHERE: APPROXIMATE`. Its lever is main's (lean, 2026-10-30: (a) with the
+    probe's sound form, its aerial and limb images measured first).
