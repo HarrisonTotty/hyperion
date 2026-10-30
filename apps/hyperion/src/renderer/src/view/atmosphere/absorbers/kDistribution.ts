@@ -873,22 +873,32 @@ function lagrangeWeights(xs: readonly [number, number, number, number], x: numbe
 }
 
 /**
+ * Where an interpolation reads its grid: `along[i]` the axis's value at the grid's node i (the node
+ * itself, or its logarithm), and `x` the axis's value at the point read. Each is formed once a
+ * read, not once a node visited.
+ */
+interface Axis {
+  readonly along: ReadonlyArray<number>;
+  readonly x: number;
+}
+
+/**
  * The interval of an ascending grid that holds x, held to the grid's ends, the fraction of x
- * across it by `along`, and the four nodes nearest the interval, held inside the grid.
+ * across it on `axis`, and the four nodes nearest the interval, held inside the grid.
  */
 function bracket(
   grid: ReadonlyArray<number>,
   x: number,
-  along: (v: number) => number,
+  axis: Axis,
 ): { readonly index: number; readonly fraction: number; readonly stencil: number[] } {
   const n = grid.length;
   let i = 0;
   while (i < n - 2 && (grid[i + 1] ?? Infinity) < x) {
     i += 1;
   }
-  const lo = along(grid[i] ?? Number.NaN);
-  const hi = along(grid[Math.min(i + 1, n - 1)] ?? Number.NaN);
-  const clamped = Math.min(Math.max(along(x), Math.min(lo, hi)), Math.max(lo, hi));
+  const lo = axis.along[i] ?? Number.NaN;
+  const hi = axis.along[Math.min(i + 1, n - 1)] ?? Number.NaN;
+  const clamped = Math.min(Math.max(axis.x, Math.min(lo, hi)), Math.max(lo, hi));
   const fraction = hi === lo ? 0 : (clamped - lo) / (hi - lo);
   const first = Math.min(Math.max(i - 1, 0), Math.max(n - 4, 0));
   return {
@@ -906,26 +916,25 @@ function bracket(
 function cubicOnLog(
   grid: ReadonlyArray<number>,
   x: number,
-  along: (v: number) => number,
+  axis: Axis,
   valueAt: (node: number) => number,
 ): number {
-  const { index, fraction, stencil } = bracket(grid, x, along);
+  const { index, fraction, stencil } = bracket(grid, x, axis);
   const a = valueAt(index);
   const b = valueAt(Math.min(index + 1, grid.length - 1));
   const values = stencil.map(valueAt);
   if (stencil.length < 4 || !values.every((v) => v > 0)) {
     return a + (b - a) * fraction;
   }
-  const at = Math.min(
-    Math.max(along(x), along(grid[0] ?? Number.NaN)),
-    along(grid.at(-1) ?? Number.NaN),
-  );
+  const { along } = axis;
+  const at = Math.min(Math.max(axis.x, along[0] ?? Number.NaN), along.at(-1) ?? Number.NaN);
+  // The stencil's four nodes lie inside the grid here.
   const w = lagrangeWeights(
     [
-      along(grid[stencil[0] ?? 0] ?? 0),
-      along(grid[stencil[1] ?? 0] ?? 0),
-      along(grid[stencil[2] ?? 0] ?? 0),
-      along(grid[stencil[3] ?? 0] ?? 0),
+      along[stencil[0] ?? 0] ?? Number.NaN,
+      along[stencil[1] ?? 0] ?? Number.NaN,
+      along[stencil[2] ?? 0] ?? Number.NaN,
+      along[stencil[3] ?? 0] ?? Number.NaN,
     ],
     at,
   );
@@ -964,6 +973,7 @@ export function kDistributionAt(
   const pressures = table.pressuresPa.length;
   const perVariant = table.temperaturesK.length * pressures;
   const shares = table.variants.length === 2 ? [selfShare, 1 - selfShare] : [1];
+  const inTemperature: Axis = { along: table.temperaturesK, x: temperatureK };
   const cells = table.cells.map((cell) => {
     const g = cell.weights.length;
     const sigmas = new Float64Array(pressures * g);
@@ -975,11 +985,8 @@ export function kDistributionAt(
         sigmas[k] =
           (sigmas[k] ?? 0) +
           share *
-            cubicOnLog(
-              table.temperaturesK,
-              temperatureK,
-              (t) => t,
-              (t) => storedSigma(cell, (v * perVariant + t * pressures) * g + k),
+            cubicOnLog(table.temperaturesK, temperatureK, inTemperature, (t) =>
+              storedSigma(cell, (v * perVariant + t * pressures) * g + k),
             );
       }
     }
@@ -989,7 +996,7 @@ export function kDistributionAt(
   const inEstimatedInterval = table.estimatedTemperaturesK.some(
     ([a, b]) => temperatureK >= a && temperatureK <= b,
   );
-  const { index } = bracket(table.temperaturesK, temperatureK, (t) => t);
+  const { index } = bracket(table.temperaturesK, temperatureK, inTemperature);
   const next = Math.min(index + 1, table.temperaturesK.length - 1);
   const shapeTo = Math.min(table.measuredShapeTo[index] ?? -1, table.measuredShapeTo[next] ?? -1);
   // At a node the read is that node's alone; between two, either's flag holds.
@@ -1031,13 +1038,14 @@ export function cellSigmasAt(kd: SpeciesKDistribution, broadeningPa: number): Fl
     throw new RangeError(`a broadening pressure is finite and above 0 Pa, not ${broadeningPa}`);
   }
   const node = kd.pressuresPa.indexOf(broadeningPa);
+  const inLogPressure: Axis = { along: kd.pressuresPa.map((p) => log(p)), x: log(broadeningPa) };
   return kd.cells.map((cell) => {
     const g = cell.weights.length;
     if (node >= 0) {
       return cell.sigmas.slice(node * g, (node + 1) * g);
     }
     return Float64Array.from({ length: g }, (_, k) =>
-      cubicOnLog(kd.pressuresPa, broadeningPa, log, (p) => cell.sigmas[p * g + k] ?? 0),
+      cubicOnLog(kd.pressuresPa, broadeningPa, inLogPressure, (p) => cell.sigmas[p * g + k] ?? 0),
     );
   });
 }
