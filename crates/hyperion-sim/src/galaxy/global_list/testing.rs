@@ -12,6 +12,7 @@
 use crate::coords::{GalacticDisplacement, GalacticVelocity};
 use crate::galaxy::PointLy;
 use crate::galaxy::features::FeatureId;
+use crate::galaxy::features::interior::counts::CANONICAL_SLOPE;
 use crate::galaxy::features::testing::{PAL_5, named_cluster};
 use crate::galaxy::params::{GalaxyParams, Orbit};
 use crate::galaxy::potential::PotentialTables;
@@ -62,9 +63,14 @@ pub fn pal5_like(tables: &PotentialTables) -> StreamSpec {
         progenitor_mass: mass,
         tidal_radius: tidal,
         mass_loss: MassLoss::Steady(SolarMassesPerYear::new(rate)),
+        // A test stream's figures (lean, 2026-10-30), where a drawn globular takes plan 09's from
+        // its model: it keeps its present mass's share of its birth mass, and a dynamically old
+        // cluster's flat slope.
         stars: Some(ClusterStars {
             fe_h: Dex::new(-1.41),
             age,
+            kept: cluster.mass / math::exp10(cluster.log_initial_mass),
+            depleted_slope: 0.0,
         }),
     }
 }
@@ -107,6 +113,8 @@ pub fn gd1_like(tables: &PotentialTables) -> StreamSpec {
         stars: Some(ClusterStars {
             fe_h: Dex::new(-1.9),
             age,
+            kept: 0.0,
+            depleted_slope: CANONICAL_SLOPE,
         }),
     }
 }

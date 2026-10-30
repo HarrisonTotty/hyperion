@@ -39,6 +39,7 @@
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::PointLy;
+use crate::galaxy::features::interior::counts::CANONICAL_SLOPE;
 use crate::galaxy::features::kinds::globular::{
     ACCRETED_AGES, GLOBULAR_CORE, METALLICITY_LAWS, orbit as turning_points,
 };
@@ -204,7 +205,12 @@ pub(crate) fn orphans(galaxy: &Galaxy, living: u32, room: usize) -> Vec<StreamSp
                 mass_loss: MassLoss::Dissolved {
                     ago: Years::new(dissolved * window.value()),
                 },
-                stars: Some(ClusterStars { fe_h, age }),
+                stars: Some(ClusterStars {
+                    fe_h,
+                    age,
+                    kept: 0.0,
+                    depleted_slope: CANONICAL_SLOPE,
+                }),
             })
         })
         .take(room)

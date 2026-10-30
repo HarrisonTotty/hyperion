@@ -263,3 +263,42 @@ fn integrate_with_the_leapfrog(galaxy: &Galaxy, debris: &Debris) {
         "integrated pericentres inside corotation (Design note 2)"
     );
 }
+
+/// P10.T8.a: a living globular's stream carries what plan 09's model says the cluster keeps, a
+/// share in (0, 1] and a depleted slope at or above the canonical −1.5; an orphan's keeps nothing.
+/// Each stream's band shares sum to 1.
+#[test]
+#[ignore = "slow: builds a Milky Way galaxy's full potential and walks its globulars"]
+fn a_living_globular_s_stream_carries_what_its_cluster_keeps() {
+    use hyperion_sim::galaxy::global_list::members::StreamBandShares;
+    use hyperion_sim::galaxy::imf::MassBand;
+    let galaxy = Galaxy::from_params(Seed::new(0x0a10_8a10), GalaxyParams::milky_way_like())
+        .expect("the fixture's parameters are valid")
+        .with_full_potential();
+    let debris = Debris::generate(&galaxy);
+    let (mut living, mut orphans) = (0, 0);
+    for spec in debris.streams() {
+        let shares = StreamBandShares::of(&galaxy, spec);
+        let total: f64 = MassBand::ALL.iter().map(|&b| shares.share(b)).sum();
+        assert!((total - 1.0).abs() < 1e-12, "{:?}", spec.number());
+        let Some(stars) = spec.stars() else { continue };
+        match spec.origin() {
+            StreamOrigin::LivingGlobular(_) => {
+                assert!(
+                    stars.kept() > 0.0 && stars.kept() <= 1.0,
+                    "{}",
+                    stars.kept()
+                );
+                assert!(stars.depleted_slope() >= -1.5, "{}", stars.depleted_slope());
+                living += 1;
+            }
+            StreamOrigin::Orphan => {
+                assert_eq!(stars.kept(), 0.0);
+                orphans += 1;
+            }
+            StreamOrigin::Dwarf(_) => unreachable!("a dwarf's stream carries no cluster's stars"),
+        }
+    }
+    eprintln!("{living} living globulars' streams and {orphans} orphans'");
+    assert!(living > 0 && orphans > 0);
+}

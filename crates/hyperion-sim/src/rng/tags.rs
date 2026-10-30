@@ -950,6 +950,20 @@ domain_tags! {
     /// A dwarf core member's offset of its \[Fe/H\] from its core's mean, in units of the core's
     /// spread: one normal draw, two words (P10.T7.b).
     DWARF_CORE_ABUNDANCE: System = "dwarf.core.abundance";
+
+    // Plan 10, P10.T8: a stream's members, keyed by their `StreamMemberId` (Design note 14), with
+    // scope `System`, beside the "Plan 10" heading's `Galaxy` tags; their initial masses are on
+    // plan 09's `member.mass`. Appended here, after P10.T7.b's, because the macro's order fixes
+    // `ALL`.
+
+    /// A dwarf's stream member's age, by the inverse transform of its dwarf's history: word `k`,
+    /// one uniform, for attempt `k` of its star's draw (P10.T8.a). A globular's stream's members
+    /// take its cluster's age and read none.
+    STREAM_MEMBER_AGE: System = "stream.member.age";
+
+    /// A dwarf's stream member's offset of its \[Fe/H\] from its dwarf's mean, in units of the
+    /// dwarf's spread: one normal draw, two words (P10.T8.a).
+    STREAM_MEMBER_ABUNDANCE: System = "stream.member.abundance";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface

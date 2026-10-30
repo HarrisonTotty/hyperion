@@ -28,6 +28,8 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::PointLy;
 use crate::galaxy::features::FeatureProcess;
 use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureMarks, bulk_velocity};
+use crate::galaxy::features::cluster::ClusterModel;
+use crate::galaxy::features::interior::counts::{CANONICAL_SLOPE, class_counts};
 use crate::galaxy::features::kinds::globular::history;
 use crate::units::{LightYears, SolarMassesPerYear};
 
@@ -199,7 +201,21 @@ pub(crate) fn living_globulars(galaxy: &Galaxy) -> Vec<StreamSpec> {
             );
             let window = stripping_time(&orbit, tidal, [last_merger, marks.age()]);
             let mass = h.mass_loss_rate * window.value();
-            (mass > 0.0).then(|| StreamSpec {
+            if mass <= 0.0 {
+                return None;
+            }
+            // What the cluster still holds sets what its stream holds (P10.T8.a): plan 09's model
+            // of a living globular. A globular with no model is dissolved, which one with a bulk
+            // velocity and a tube is not; it would keep nothing, as an orphan, and its stream is
+            // kept so that no stream's number moves.
+            let (kept, depleted_slope) = ClusterModel::from_record(galaxy, &feature).map_or(
+                (0.0, CANONICAL_SLOPE),
+                |model| {
+                    let counts = class_counts(galaxy, &model, feature.reach());
+                    (counts.scale, counts.depleted_slope)
+                },
+            );
+            Some(StreamSpec {
                 number: StreamNumber(0),
                 origin: StreamOrigin::LivingGlobular(feature.id()),
                 position: GalacticPosition::ORIGIN.displacement_to(feature.position()),
@@ -213,6 +229,8 @@ pub(crate) fn living_globulars(galaxy: &Galaxy) -> Vec<StreamSpec> {
                 stars: Some(ClusterStars {
                     fe_h: marks.fe_h(),
                     age: marks.age(),
+                    kept,
+                    depleted_slope,
                 }),
             })
         })

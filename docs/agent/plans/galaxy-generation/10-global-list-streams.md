@@ -1990,3 +1990,26 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
     stars of their class, the headroom, order independence, the golden. Slow, by name:
     `resolve_with_reaches_a_drawn_core_s_members`, and plan 12's
     `source_horizon_sweep_every_source_answers_at_the_horizons_start` gains the cores' row.
+- **P10.T8.a as built (lane `p10-t6c`, 2026-10-30, at `GENERATOR_VERSION` 24).** No served
+  output moved. Tags `stream.member.age` and `stream.member.abundance` (`System`) appended.
+  - _Items._ `global_list::members::StreamBandShares`: `of(&Galaxy, &StreamSpec)`, `share`,
+    `living`, `white_dwarfs`, `mean_member_mass`, `composition(&Galaxy, SystemId)`, `draw_star`;
+    `ClusterStars::{kept, depleted_slope}`, set from plan 09's `class_counts` for a living
+    globular (`Debris::generate` now builds each tubed globular's `ClusterModel`), 0 and −1.5 for
+    an orphan; `StarFormationHistory::no_younger_than` (crate-visible); `dwarf_core::classes`
+    crate-visible.
+  - _What a globular lost._ Per system formed: `φ(m) (1 − K d(m))` for a living star below the
+    turn-off and `φ(m) (1 − K)` for a white dwarf's progenitor to 8 M☉, NS and BH zero. An orphan
+    keeps nothing (lean, 2026-10-30: `K = 0`), so its stream is the evolved canonical population
+    and "the slope of a cluster at the end of its life" changes nothing. Every member is first
+    population (lean, 2026-10-30, as plan 09's tails).
+  - _A dwarf's tube._ The core's classes over `StarFormationHistory::of(infall, accreted)` cut at
+    the tube's last pericentre, at the core's mean [Fe/H] and spread; the infall mass and time are
+    the galaxy's recent progenitor `j`'s.
+  - _For T8.b._ `draw_star` keeps a mass by its weight's odds over the band's greatest, a living
+    star below its age's turn-off and a dead one only if its remnant is a white dwarf; as in plan
+    09's clusters, a star past the turn-off but not yet a remnant is of the white-dwarf class.
+    The count's mean system mass is the stream's own, `mean_member_mass`.
+  - _Tests._ Fast, `members::tests`: the shares, no NS or BH, a dwarf's tube's ages and [Fe/H];
+    `dwarf_core::tests::a_history_cut_at_an_age_keeps_the_older_stars_only`. Slow, by name:
+    `a_living_globular_s_stream_carries_what_its_cluster_keeps` (`tests/global_list_debris.rs`).

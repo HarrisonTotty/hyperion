@@ -257,6 +257,29 @@ impl StarFormationHistory {
         self.old_share
     }
 
+    /// The history of the stars formed at least `age` ago: the tail cut there, its share of the
+    /// stars cut with it, for a dwarf's tube, which holds only stars formed before its last
+    /// stripping (plan 10, P10.T8.a; research-p10's advice §4).
+    #[must_use]
+    pub(crate) fn no_younger_than(self, age: Years) -> Self {
+        let (young, old) = self.tail;
+        if age.value() <= young {
+            return self;
+        }
+        let cut = age.value().min(old);
+        // The tail's rate is constant, so the share left is the length left.
+        let tail = (1.0 - self.old_share) * (old - cut) / (old - young);
+        let old_share = if old > cut {
+            self.old_share / (self.old_share + tail)
+        } else {
+            1.0
+        };
+        Self {
+            old_share,
+            tail: (cut, old),
+        }
+    }
+
     /// The tail's youngest and oldest ages.
     #[must_use]
     pub fn tail(&self) -> (Years, Years) {
@@ -574,7 +597,7 @@ fn jacobi_radius(galaxy: &Galaxy, position: &GalacticDisplacement, stars: f64, s
 /// them whatever the escape speed), counted from the ages at which an 8 M☉ star has died: a core
 /// still forming stars leaves out the remnants of its last 40 Myr.
 #[must_use]
-fn classes(
+pub(crate) fn classes(
     f: &dyn MassFunction,
     composition: &Composition,
     history: &StarFormationHistory,
@@ -788,6 +811,28 @@ mod tests {
         let small = StarFormationHistory::of(SolarMasses::new(3e4), Years::new(2e9));
         let large = StarFormationHistory::of(SolarMasses::new(3e9), Years::new(2e9));
         assert!((small.old_share() - 0.8).abs() < 1e-12 && (large.old_share() - 0.3).abs() < 1e-12);
+    }
+
+    /// A dwarf's tube's history (P10.T8.a): cut at an age, the tail's share falls with its length
+    /// and the shares still sum to 1; cut past the tail, only the burst is left.
+    #[test]
+    fn a_history_cut_at_an_age_keeps_the_older_stars_only() {
+        let full = StarFormationHistory::of(SolarMasses::new(1e8), Years::new(5e9));
+        assert!((full.tail().0.value() - 3e9).abs() < 1e-3);
+        let cut = full.no_younger_than(Years::new(6.5e9));
+        assert!((cut.tail().0.value() - 6.5e9).abs() < 1e-3);
+        // The tail held 0.7 over 7 Gyr; 3.5 Gyr of it is left, 0.35 against the burst's 0.3.
+        assert!(
+            (cut.old_share() - 0.3 / 0.65).abs() < 1e-12,
+            "{}",
+            cut.old_share()
+        );
+        assert!(cut.age_quantile(0.0).value() >= 6.5e9 - 1e-3);
+        assert_eq!(full.no_younger_than(Years::new(1e9)), full);
+        let burst = full.no_younger_than(Years::new(11e9));
+        assert!((burst.old_share() - 1.0).abs() < 1e-15);
+        let nodes = burst.nodes();
+        assert_eq!(nodes.len(), GL32_NODES.len());
     }
 
     /// The tail ends `τ_q(M★)` after the accretion (main's ruling of 2026-10-30): 1 Gyr up to

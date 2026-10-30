@@ -439,12 +439,18 @@ pub enum MassLoss {
     },
 }
 
-/// A globular cluster's stars, which a globular's or an orphan's stream shares: its [Fe/H] and its
-/// age. A dwarf's stream takes its core's instead (plan 10, P10.T7).
+/// A globular cluster's stars, which a globular's or an orphan's stream shares: its [Fe/H], its
+/// age, and what plan 09's model says it still holds of them, which sets what its stream holds
+/// (P10.T8.a). A dwarf's stream takes its core's instead (plan 10, P10.T7).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClusterStars {
     pub(super) fe_h: Dex,
     pub(super) age: Years,
+    /// `K`, the share of every class but the black holes that the cluster keeps (plan 09's
+    /// `ClassCounts::scale`): 0 for an orphan, which keeps nothing.
+    pub(super) kept: f64,
+    /// Its present slope over 0.2–0.8 M☉ (plan 09's `ClassCounts::depleted_slope`).
+    pub(super) depleted_slope: f64,
 }
 
 impl ClusterStars {
@@ -458,6 +464,20 @@ impl ClusterStars {
     #[must_use]
     pub const fn age(&self) -> Years {
         self.age
+    }
+
+    /// The share of every class but its black holes that the cluster still holds, plan 09's `K`:
+    /// 0 for an orphan.
+    #[must_use]
+    pub const fn kept(&self) -> f64 {
+        self.kept
+    }
+
+    /// The cluster's present slope of its mass function over 0.2–0.8 M☉, plan 09's depleted
+    /// slope; an orphan's is the canonical −1.5, which it no longer applies (it keeps nothing).
+    #[must_use]
+    pub const fn depleted_slope(&self) -> f64 {
+        self.depleted_slope
     }
 }
 
