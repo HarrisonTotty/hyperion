@@ -1,10 +1,10 @@
 /**
  * The smoke page's check of the ground's thermal emission on R07's disc (plan R08, R08.T18.a;
  * `view/atmosphere/discReflectance.ts`): the lit bodies' kernels' emissive forms against their CPU
- * twin on SwiftShader, for an airless magma ocean, whose night side its own light alone draws at the
- * solidus and above, for the protocol fixture's locked lava world on its dayside, and for that world's
- * night side under a two-class map whose second class is `Melt`, which alone glows there, at the
- * melt's least temperature.
+ * twin on SwiftShader, for a young airless magma ocean, whose night side its own light alone draws
+ * at the solidus and above, for the protocol fixture's locked lava world on its dayside, and for
+ * that world's night side under a two-class map whose second class is `Melt`, which alone glows
+ * there, at the melt's least temperature.
  *
  * @remarks
  * Each case is planned as the photorealistic frame plans it (`planLitBodies`, its body given its

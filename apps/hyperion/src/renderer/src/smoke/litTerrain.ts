@@ -22,7 +22,7 @@
  * that the check can fail.
  *
  * Then the ground's thermal emission (plan R08, R08.T18.a): the block drawn by the lit material's
- * emissive form with no star and no planetshine, its ground a magma ocean's field about the star's
+ * emissive form with no star and no planetshine, its ground a young magma ocean's field about the star's
  * old direction, so that its light is its own alone. Each texel the first frame draws as terrain
  * must emit, in luminance, between the least and the most that `thermal.ts`' shared function gives
  * any of the block's laws' A, its laws' and its maturity nodes', over the field's temperature

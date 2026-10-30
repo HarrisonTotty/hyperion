@@ -22909,20 +22909,23 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     683 lm W⁻¹, the 2019 SI's (the CIE's K_m at ȳ's peak, 683.002, is 3 × 10⁻⁶ above), times the
     exposure scale, which the disc's block carries; no star multiplies it. The shared function is
     `thermalLuminance` (`thermal_luminance` in WGSL), for the luminance it returns.
-  - _Kirchhoff on the laws' A_ (lean, 2026-10-29). ε = 1 − A per bin takes the disc's or the
-    terrain's law's A, c A_N scaled for the figure, in place of the hemispherical albedo
-    Kirchhoff's law takes. A_N carries the opposition surge, so it exceeds the hemispherical
-    albedo and biases ε low: for the dark ground hot enough to glow (lava and basalt, A_N about
-    0.05 to 0.15) by a few hundredths of A, ε 2–3% low, the glow up to 3–5% faint at A_N 0.15
-    (the science check); a bright frost never passes the cut. The terrain takes its laws' A
-    without `terrain_decoration`'s albedo factor (1 today, R11's hook), which its reflected light
-    takes.
+  - _Kirchhoff on the laws' A_ (lean, 2026-10-29; its figure and cause corrected by main's
+    research, 2026-10-30). ε = 1 − A per bin takes the disc's or the terrain's law's A, c A_N
+    scaled for the figure, in place of the hemispherical albedo Kirchhoff's law takes. The
+    templates' backscattering phase curve puts c A_N above the hemispherical albedo, so ε is low:
+    on solid ground 4–9% low (the first record had 3–5% and blamed the opposition surge; the
+    research's advice, §2 and §4), at A 0.10–0.15, 2–3% at 0.05 (the science check, from the
+    templates' phase integrals). The melt, which carries the glow, already matches Fresnel, a
+    hemispherical ε of 0.88–0.91 (n 1.5–1.7). Kept as built; a bright frost never passes the
+    cut. The terrain
+    takes its laws' A without `terrain_decoration`'s albedo factor (1 today, R11's hook), which its
+    reflected light takes.
   - _The temperature field_ (lean, 2026-10-29; `surfaceTemperatureFieldOf`). A world locked 1:1
     (`climateRegime.forcing` `locked`) takes the sim's eyeball, σT⁴ = σT_n⁴ + (σT_ss⁴ − σT_n⁴)
     max(μ, 0), T_ss⁴ = T_n⁴ + (3/2)(T_d⁴ − T_n⁴), Cowan and Agol's local model (§2), T_d and T_n
     their eqs. 4–5 as the sim scales them, T_s (8/3 − 5ε/3)^¼ and T_s ε^¼, with ε solved by
     bisection from the record's T_s and day–night contrast: on the protocol fixture's lava world
-    T_ss 1,751.8 K and T_n 21.4 K, its emission mean T_s to 10⁻⁹. Its equator–pole contrast, the
+    T_ss 1,751.8 K and T_n 21.3 K, its emission mean T_s to 10⁻⁹. Its equator–pole contrast, the
     sim's zonal model's, is not added: the eyeball holds the poles on the terminator. Any other
     world takes T_s + T₂ P₂(sin φ) + (3/4) ΔT_dn μ, T₂ = −(2/3)(T(0°) − T(90°)) as R09 shapes the
     contrast and the day–night term a P₁ about the brightest star, whose hemispheres' μ-weighted
@@ -22933,9 +22936,10 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     locked world, the band or caps of area f on another): on the lava world 1,473.1 K,
     `basalt_reduced`'s transition 1,473.15 K to 0.05 K. On a rotating world it is P₂'s value at the
     edge, where the sim reads its 64-point modal profile, so it matches the lid's transition only
-    roughly; no test holds it. A `magma_ocean` surface is held everywhere at the dry peridotite
-    solidus the sim holds its mean at, 1,394 K (Hirschmann's 1,393.81 K, rounded as the sim's), its
-    night side included, where its record's contrast alone would put 21 K: its melt area is 1.
+    roughly; no test holds it. A young `magma_ocean` (its surface age 0) or a turning one is held
+    everywhere at the dry peridotite solidus the sim holds a young one's mean at, 1,394 K
+    (Hirschmann's 1,393.81 K, rounded as the sim's), its night side included: its melt area is 1.
+    A locked one its star alone holds molten has a solid night (main's ruling, 2026-10-30, below).
   - _The cut_ (lean on its floor, 2026-10-29; `aboveThermalCut`). A body is drawn emitting where
     its field's peak, emitted at any of its laws' A, exceeds 10⁻⁶ of the brightest law's A face-on
     to its stars, E A ÷ π summed, in some channel; the reflected never under 10⁻⁵ cd m⁻², the
@@ -22944,10 +22948,25 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     2.1 × 10⁻¹⁹ cd m⁻² in red at A 0.3, 1.6 × 10⁻²³ of its reflected light at 1 au, and less in
     green and blue; the lava world at 0.048 au emits 11% of its reflected red at
     its substellar point.
-  - _The night side's test_ (lean, 2026-10-29). The task's lava world whose night side its own light
-    lights is drawn as the protocol fixture's world made a `magma_ocean` (melt area 1): the
-    fixture's locked lava world's night is its 21.4 K floor and its melt pool is on its dayside, so
-    its night side draws black, its own light being nil there. Asked of main.
+  - _The night side's test_ (lean, 2026-10-29; its fixture made young, 2026-10-30). The task's
+    lava world whose night side its own light lights is drawn as the protocol fixture's world made
+    a young `magma_ocean` as the sim publishes one (melt area 1, surface age 0, T_s the 1,394 K
+    solidus; `magmaOceanSurface`): the fixture's locked lava world's night is its 21.3 K floor and
+    its melt pool is on its dayside, so its night side draws black, its own light being nil there.
+  - _A locked magma ocean held molten by its star_ (main's ruling, 2026-10-30, on research's
+    advice; a visibly wrong picture fixed). As first built every `magma_ocean` was held at the
+    solidus everywhere, so a locked ocean its star alone holds molten drew its solid night at about
+    2,040 cd m⁻². The solidus floor now holds only for a young ocean (`surfaceAgeS` 0) or one not
+    locked (`surfaceTemperatureFieldOf`'s `molten`); a locked, older one is a dayside lava ocean
+    over a cold night (Léger et al. 2011, Icarus 213, 1; Kite et al. 2016, ApJ 828, 80; Zhang et
+    al. 2024, ApJL 961, L44), its floor 2.725 K and its night the eyeball's. `meltK` is kept as
+    built: the eyeball's value at the melt's edge, which for a melt area of 1 is the night's, so
+    no `Melt` texel lights the night (a `meltK` at the solidus would). The test fixture
+    `heldMagmaOceanSurface` (locked, the fixture's surface age 3 × 10¹⁶ s, T_s 1,500 K, the lava
+    world's contrast scaled to it, its night 25.8 K) draws black at night (`thermal.test.ts`,
+    `discReflectance.test.ts`), and turned (`forcing` `seasonal`) keeps the floor. The smoke's
+    magma-ocean cases glow at night through the young fixture; their expected values are the
+    twin's, so no digest moved and no WGSL changed.
   - _Which bodies._ `groundTemperatureFieldOf` takes an `airless` surface, or one with no volatile
     air that is not `tenuous`; every other is T18.b's. The atmosphere cache, which holds every lit
     body's `body_detail` already, gives the field (`AtmosphereCache.groundFieldOf`, read once a

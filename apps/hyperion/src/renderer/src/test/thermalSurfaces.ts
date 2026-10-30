@@ -51,8 +51,9 @@ export function earthSurface(): BodySurface {
 }
 
 /**
- * The lava world as a magma ocean with no volatile air (`magma_ocean`, molten everywhere): its
- * night, 21 K by its record's contrast, held at the solidus.
+ * The lava world as a young magma ocean with no volatile air, as the sim publishes one
+ * (`magma_ocean`, molten everywhere, its surface age 0 and its mean the 1,394 K solidus): its
+ * night, some 220 K by its record's contrast, held at the solidus.
  */
 export function magmaOceanSurface(): BodySurface {
   const lava = lavaWorldSurface();
@@ -62,6 +63,28 @@ export function magmaOceanSurface(): BodySurface {
   return {
     ...lava,
     state: "magma_ocean",
+    meanSurfaceTemperatureK: 1_394,
+    surfaceAgeS: 0,
+    crust: { kind: "value", value: { ...lava.crust.value, meltAreaFraction: 1 } },
+  };
+}
+
+/**
+ * The lava world as a locked magma ocean its star alone holds molten (`magma_ocean`, with the
+ * fixture's surface age): T_s 1,500 K, its day–night contrast the lava world's scaled to it, so
+ * that its night, some 26 K, is solid.
+ */
+export function heldMagmaOceanSurface(): BodySurface {
+  const lava = lavaWorldSurface();
+  if (lava.crust.kind !== "value") {
+    throw new Error("the lava world's crust is modelled");
+  }
+  const meanK = 1_500;
+  return {
+    ...lava,
+    state: "magma_ocean",
+    meanSurfaceTemperatureK: meanK,
+    dayNightContrastK: (lava.dayNightContrastK * meanK) / lava.meanSurfaceTemperatureK,
     crust: { kind: "value", value: { ...lava.crust.value, meltAreaFraction: 1 } },
   };
 }

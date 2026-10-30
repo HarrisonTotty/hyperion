@@ -6,6 +6,7 @@ import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import {
   groundFieldOf,
+  heldMagmaOceanSurface,
   lavaWorldSurface,
   magmaOceanSurface,
   warmAirlessSurface,
@@ -264,7 +265,7 @@ describe("the disc's emission (R08.T18.a)", () => {
     expect([...packed.subarray(308 * 4)]).toEqual([...packDiscEmission(emission, EXPOSURE)]);
   });
 
-  it("lights a lava world's night side by itself alone: its radiance there is the emission term, its reflected light 0", () => {
+  it("lights a young magma ocean's night side by itself alone: its radiance there is the emission term, its reflected light 0", () => {
     const field = groundFieldOf(magmaOceanSurface());
     // The star behind the body: the camera sees the night side face-on at the disc's centre.
     const record = recordOf(field, 0.048, 180);
@@ -288,6 +289,33 @@ describe("the disc's emission (R08.T18.a)", () => {
     expect(term[0]).toBeGreaterThan(0);
     // Its luminance at the solidus, emissivity 1 − A: thousands of cd m⁻² before the exposure.
     expect(term[0] / EXPOSURE).toBeGreaterThan(1e3);
+  });
+
+  it("draws a locked magma ocean its star alone holds molten black on its night side, its solid ground some 26 K", () => {
+    const field = groundFieldOf(heldMagmaOceanSurface());
+    // The star behind the body, as above: its dayside's glow keeps the record above the cut.
+    const record = recordOf(field, 0.048, 180);
+    if (record.emission === undefined) {
+      throw new Error("the held magma ocean is above the cut");
+    }
+    const drawn = shadeDiscPoint(record, CAMERA, vec3(0, 0, 1), vec3(0, 0, -1));
+    expect(drawn.lit).toBe(false);
+    expect(fieldTemperatureK(field, -1, 0)).toBeLessThan(30);
+    expect(drawn.radiance).toEqual([0, 0, 0]);
+    // Nor does a Melt class light it: the melt's least temperature is the night's.
+    const melt = discEmissionAt(
+      { field, star: vec3(0, 0, 1), meltClasses: [true] },
+      1,
+      vec3(0, 0, -1),
+      vec3(0, 0, 1),
+      vec3(0, 1, 0),
+      [0, 1],
+      [
+        [0.1, 0.1, 0.1],
+        [0.05, 0.05, 0.05],
+      ],
+    );
+    expect(melt).toEqual([0, 0, 0]);
   });
 
   it("adds the emission to the dayside's reflected light, which it leaves as it was", () => {

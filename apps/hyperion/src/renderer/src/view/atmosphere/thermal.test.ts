@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { SPEED_OF_LIGHT_M_PER_S } from "../../lib/scene/lightTime";
 import {
   earthSurface,
+  heldMagmaOceanSurface,
   lavaWorldSurface,
   magmaOceanSurface,
   warmAirlessSurface,
@@ -305,11 +306,34 @@ describe("the temperature field (R08.T18.a)", () => {
     expect(field.floorK).toBe(FIELD_LEAST_K);
   });
 
-  it("holds a magma ocean everywhere at the solidus at least, its night included", () => {
+  it("holds a young magma ocean everywhere at the solidus at least, its night included", () => {
     const field = surfaceTemperatureFieldOf(magmaOceanSurface());
     expect(field.floorK).toBe(SILICATE_SOLIDUS_K);
     expect(fieldTemperatureK(field, -1, 0)).toBe(SILICATE_SOLIDUS_K);
     expect(fieldTemperatureK(field, 1, 0)).toBeGreaterThan(1_700);
+  });
+
+  it("gives a locked magma ocean its star alone holds molten a solid night, drawn black", () => {
+    const field = surfaceTemperatureFieldOf(heldMagmaOceanSurface());
+    expect(field.floorK).toBe(FIELD_LEAST_K);
+    const nightK = fieldTemperatureK(field, -1, 0);
+    expect(nightK).toBeLessThan(30);
+    expect(fieldTemperatureK(field, 1, 0)).toBeGreaterThan(2_000);
+    expect(thermalLuminance([0.1, 0.1, 0.1], 1, nightK)).toEqual([0, 0, 0]);
+    // Its melt's least temperature is the eyeball's at the melt's edge, its whole surface's: its
+    // night's.
+    expect(field.meltK).toBeCloseTo(nightK, 9);
+  });
+
+  it("holds a turning magma ocean at the solidus at least, its night included, whatever its age", () => {
+    const held = heldMagmaOceanSurface();
+    expect(held.surfaceAgeS).toBeGreaterThan(0);
+    const field = surfaceTemperatureFieldOf({
+      ...held,
+      climateRegime: { ...held.climateRegime, forcing: "seasonal" },
+    });
+    expect(field.floorK).toBe(SILICATE_SOLIDUS_K);
+    expect(fieldTemperatureK(field, -1, 0)).toBe(SILICATE_SOLIDUS_K);
   });
 
   it("gives a rotating world its zonal profile, its ends the equator–pole contrast apart", () => {

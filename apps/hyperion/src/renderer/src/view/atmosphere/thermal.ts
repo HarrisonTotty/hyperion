@@ -35,8 +35,10 @@
  * bake's ground rule (`bake.ts`' `binGroundAlbedo`: linear in wavelength between the render
  * channels' wavelengths and held at the nearer channel outside them), each held to [0, 1]. A is the
  * disc's or the terrain's law's A per channel, c A_N scaled for the figure, which stands for the
- * hemispherical albedo that Kirchhoff's law takes: the two differ little for the dark surfaces hot
- * enough to glow (R08's Risks, "Deviations in T18.a, as built").
+ * hemispherical albedo that Kirchhoff's law takes: the templates' backscattering phase curve puts
+ * it above, so that solid ground's ε is 4–9% low at A 0.10–0.15, while the melt, which carries
+ * the glow, matches Fresnel's hemispherical ε of 0.88–0.91 (R08's Risks, "Deviations in T18.a, as
+ * built").
  *
  * **The temperature field** ({@link SurfaceTemperatureField}) is built from the record's surface
  * section as the wire carries it at generator version 23 (`BodySurface`, P14.T24.a, P14.T51.c):
@@ -66,9 +68,17 @@
  *   value at the melt's edge: T_sol⁴ = T_n⁴ + (1 − 2f)(T_ss⁴ − T_n⁴) on a locked world (the sim's
  *   cap of μ above 1 − 2f), and the zonal profile at sin φ = f, or at 1 − f where the poles are the
  *   warmer. The terrain's `Melt` texels, and a disc's `Melt` classes, emit at no less than it
- *   ({@link SurfaceTemperatureField.meltK}). A `magma_ocean` surface is molten everywhere (its melt
- *   area is 1), so the whole surface is held at no less than the dry peridotite solidus the sim
- *   holds it at, 1,394 K ({@link SILICATE_SOLIDUS_K}; {@link SurfaceTemperatureField.floorK}).
+ *   ({@link SurfaceTemperatureField.meltK}).
+ * - **A magma ocean** (`magma_ocean`, its melt area 1) is molten everywhere while it is young (its
+ *   surface age 0: the sim's young terrestrial planet, its crust not yet formed, its mean at least
+ *   the solidus) or while it turns, so the whole surface is held at no less than the dry peridotite
+ *   solidus the sim holds it at, 1,394 K ({@link SILICATE_SOLIDUS_K};
+ *   {@link SurfaceTemperatureField.floorK}). A
+ *   locked one held molten by its star alone is a dayside lava ocean over a solid, cold night
+ *   (Léger et al. 2011, Icarus 213, 1; Kite et al. 2016, ApJ 828, 80; Zhang et al. 2024, ApJL 961,
+ *   L44): its floor is {@link FIELD_LEAST_K} and its night the eyeball's. Its melt's least
+ *   temperature, the eyeball's value at the melt's edge, is its night's, so its `Melt` classes do
+ *   not light the night either.
  * - A body with a medium (any volatile air, or a `tenuous` haze) is R08.T18.b's, whose ground is
  *   seen through it ({@link groundTemperatureFieldOf}).
  *
@@ -361,7 +371,12 @@ export interface ZonalProfile {
 /** The temperature of a body's ground (the module's remarks). */
 export interface SurfaceTemperatureField {
   readonly profile: SubstellarProfile | ZonalProfile;
-  /** The least temperature anywhere, K: a molten surface's solidus, else {@link FIELD_LEAST_K}. */
+  /**
+   * The least temperature anywhere, K: the solidus ({@link SILICATE_SOLIDUS_K}) for a magma ocean
+   * molten everywhere, a young one (its surface age 0) or one not locked to its star; else
+   * {@link FIELD_LEAST_K}, a locked magma ocean held molten by its star alone among them, whose
+   * night is solid (the module's remarks).
+   */
   readonly floorK: number;
   /** The least temperature of the melt, K, its lid's transition; `null` with no melt. */
   readonly meltK: number | null;
@@ -399,7 +414,13 @@ function redistributionOf(contrast: number): number {
 export function surfaceTemperatureFieldOf(surface: BodySurface): SurfaceTemperatureField {
   const meanK = surface.meanSurfaceTemperatureK;
   const melt = surface.crust.kind === "value" ? surface.crust.value.meltAreaFraction : 0;
-  const floorK = surface.state === "magma_ocean" ? SILICATE_SOLIDUS_K : FIELD_LEAST_K;
+  // A magma ocean is molten everywhere while it is young (its surface age 0) or turning; a
+  // locked one held molten by its star alone has a solid night (Léger et al. 2011; Kite et al.
+  // 2016; Zhang et al. 2024).
+  const molten =
+    surface.state === "magma_ocean" &&
+    (surface.surfaceAgeS === 0 || surface.climateRegime.forcing !== "locked");
+  const floorK = molten ? SILICATE_SOLIDUS_K : FIELD_LEAST_K;
   if (surface.climateRegime.forcing === "locked") {
     const [day, night] = dayNightOf(redistributionOf(surface.dayNightContrastK / meanK));
     const dayK = day * meanK;
