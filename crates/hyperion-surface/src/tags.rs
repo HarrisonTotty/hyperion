@@ -37,6 +37,7 @@
 //! | `surface.coarse.erosion` | `SurfaceCoarse` | `surface_cell` | random receivers and the multigrid's jitter                    |
 //! | `surface.relief`         | `SurfaceDetail` | `surface_item` | structural noise: a 3D lattice corner's word, as R05's [`noise`](crate::noise) keys it, and the octaves' offsets, words 2⁴⁰ + 4m + axis of item 0 |
 //! | `surface.channel`        | `SurfaceDetail` | `surface_cell` | Dendry key points per cell and level                           |
+//! | `surface.channel.bend`   | `SurfaceDetail` | `surface_cell` | a world dry now's trunk's bend, a word for each interior vertex of its two chords |
 //! | `surface.crater`         | `SurfaceDetail` | `surface_cell` | craters below the boundary diameter, per octave cell           |
 
 hyperion_base::domain_tags! {
@@ -83,6 +84,13 @@ hyperion_base::domain_tags! {
     /// Dendry level's cells, instance 0: each cell's drawn key point, its face coordinates s and t
     /// from the top 24 bits of words 0 and 1 (R09.T6.a); no other word is drawn yet.
     SURFACE_CHANNEL: SurfaceDetail = "surface.channel";
+
+    /// The synthesis's bent trunks on a world dry now (R09, Design note 13; R09.T6.h), keyed by
+    /// `surface_cell` of the trunk's coarse cell, instance 0, both of its chords: chord c's
+    /// interior vertex k (c = 1 to its crossing, 2 beyond; 1 ≤ k < D, D the parts a chord is split
+    /// into) takes word (c − 1)(D − 1) + k − 1, its displacement across the chord u =
+    /// 2 ((w >> 11) × 2⁻⁵³) − 1, uniform in [−1, 1) and exact.
+    SURFACE_CHANNEL_BEND: SurfaceDetail = "surface.channel.bend";
 
     /// The synthesis's craters below the boundary diameter (R09, Design note 13), keyed by
     /// `surface_cell` of an octave's quadtree cells, instance 0, the level naming the octave

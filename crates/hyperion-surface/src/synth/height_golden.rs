@@ -337,7 +337,8 @@ fn channelled_cells(field: &CoarseField, count: usize) -> Vec<PatchKey> {
 
 /// The first of `field`'s coarse cells, in cell-index order, whose steady-state trunk's valley the
 /// synthesis holds to its base level (R09.T6.f, R09.T6.g), where its closed forms fall below
-/// R09.T6.b's cell-alone `channel_variance`.
+/// R09.T6.b's cell-alone `channel_variance`; a world dry now's trunks are its epoch's, not held,
+/// whose graded closed form can fall below the cell-alone one too (R09.T6.h).
 fn held_trunk_cells(field: &CoarseField) -> Vec<PatchKey> {
     let body = ChannelBody::of(field.header());
     let whole = Metres::new(1e7);
@@ -346,6 +347,7 @@ fn held_trunk_cells(field: &CoarseField) -> Vec<PatchKey> {
             let record = field.cell(c).expect("a whole field");
             let drawn = unresolved_channel_variance(field, c, whole).expect("a whole field");
             !record.is_under_water()
+                && !record.epoch_incision.is_epoch()
                 && drawn.value() > 0.0
                 && drawn.value() < channel_variance(record, body, whole).value()
         })
@@ -1395,6 +1397,48 @@ fn playas() -> String {
     w.finish()
 }
 
+/// The text of the bends golden (R09.T6.h): three of the Mars-like world's bent trunks, the
+/// first whose receiver lies across a face edge and two spread through cell-index order, each its
+/// cell, receiver and exit, its length and every point of its course, and its depth below its top
+/// at five parameters along it.
+fn bends() -> String {
+    let field = world(SyntheticWorld::MarsLike);
+    let synth = Synthesiser::new(field, SEED);
+    let body = ChannelBody::of(field.header());
+    let mut network = synth.channels().network(field);
+    let trunks: Vec<(PatchKey, Segment)> = coarse_cells(field)
+        .filter(|&c| {
+            epoch_valley(field.cell(c).expect("a whole field"), body)
+                .is_some_and(|valley| valley.depth().value() > 0.0)
+        })
+        .filter_map(|c| Some((c, network.segment(c).expect("a whole field")?)))
+        .filter(|(_, segment)| segment.bend_m().is_some())
+        .collect();
+    let across = trunks
+        .iter()
+        .position(|(c, segment)| {
+            matches!(segment.outlet(), Outlet::Cell { receiver, .. } if receiver.face() != c.face())
+        })
+        .expect("a bent trunk crosses a face edge");
+    let mut w = writer();
+    for k in [across, trunks.len() / 3, 2 * trunks.len() / 3] {
+        let (c, segment) = &trunks[k];
+        let Outlet::Cell { receiver, exit } = segment.outlet() else {
+            unreachable!("a coarse cell's segment is a trunk");
+        };
+        w.line(&format!("trunk {} into {}", key(*c), key(receiver)));
+        w.f64("exit", exit);
+        w.f64("length", segment.length().value());
+        for (n, p) in segment.bend_m().expect("a bent trunk").iter().enumerate() {
+            w.line(&format!("point {n} = {}", hex3(*p)));
+        }
+        for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            w.f64(&format!("below top at {t}"), segment.below_top(t).value());
+        }
+    }
+    w.finish()
+}
+
 /// The text of the levels golden.
 fn levels() -> String {
     let mut w = writer();
@@ -1660,6 +1704,11 @@ fn the_playas_heights_match_their_golden() {
     golden!("height/playas", &playas());
 }
 
+#[test]
+fn the_bent_trunks_match_their_golden() {
+    golden!("height/bends", &bends());
+}
+
 /// The playas' floored heights are the same forwards, backwards and interleaved through one cache
 /// that every query fills, and from an empty cache (the sim-determinism skill's "Order
 /// independence"): the floor's corners are cached per coarse cell (R09.T6.g).
@@ -1692,9 +1741,10 @@ fn the_playas_heights_are_independent_of_the_cache_and_the_order() {
 /// Tests that read files, which the browser target cannot.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod native_only {
-    /// The height goldens: two of each of the six worlds, four of all of them and the Earth-like
-    /// world's playas.
-    const HEIGHT_GOLDENS: usize = 17;
+    /// The height goldens: two of each of the six worlds, four of all of them, the Earth-like
+    /// world's playas, and the Mars-like world's bent trunks and its graded forms (the latter
+    /// written by the channels' own tests).
+    const HEIGHT_GOLDENS: usize = 19;
 
     /// Every golden file under `tests/golden/height/` carries `GENERATOR_VERSION`, not R05's
     /// `TEST_PLANET_VERSION`, which heads the files directly under `tests/golden/`.

@@ -5,7 +5,7 @@ header radius m = 0x4149dc1e00000000  # 3389500.0
 header figure equatorial radius m = 0x4149e92a7c18584e  # 3396180.9694929486
 header figure polar radius m = 0x4149c218bb56ad01  # 3376177.4635826354
 header boundary diameter m = 0x40f60b4f3f4a1167  # 90292.9529514961
-header sea level m = 0xc0b44be4cfd41b20  # -5195.893796211836
+header sea level m = 0xc0b44beea6db85e5  # -5195.932233543576
 header lapse rate K m-1 = 0x0000000000000000  # 0.0
 header spectrum exponent = 0x4000000000000000  # 2.0
 header spectrum unit degree variance m2 = 0x413075f143453201  # 1078769.262774587
@@ -22,8 +22,8 @@ header craters target density kg m-3 = 0x40a3ec0000000000  # 2550.0
 header craters system age Gyr = 0x4012449ba5e353f8  # 4.567
 header climate model 2 (RadiativeEquilibrium)
 header precipitation 0 (Heuristic)
-header realised sigma_h m = 0x40a6a7ffdfc7ec2f  # 2899.999754188138
-header realised relief m = 0x40dc49e8420cf452  # 28967.629031408876
+header realised sigma_h m = 0x40a6a7ffadf976a9  # 2899.999374194846
+header realised relief m = 0x40dc49fb9825da96  # 28967.93116136881
 header months 12
 header season eccentricity = 0x3fb7ef9db22d0e56  # 0.0935
 header reference temperature K = 0x406ac00000000000  # 214.0
@@ -78,25 +78,25 @@ palette[3] transition K = 0x4094ac999999999a  # 1323.15
 palette[3] mechanics 0 (Silicate)
 palette[3] liquid none
 palette[3] FeO mass fraction none
-cells elevation_mm digest = 0x72e0ed5a2411080c
+cells elevation_mm digest = 0x9d26da11526b1998
 cells boundary_distance_km digest = 0xfa4c5d3a5ce22325
 cells plate digest = 0x3b2dc8fe17122325
 cells crust digest = 0x9b64616129a8eaa5
 cells boundary digest = 0x3b2dc8fe17122325
 cells boundary_obliquity digest = 0x3b2dc8fe17122325
-cells flow digest = 0x2c46bebd44f8c57d
-cells drainage digest = 0x35aeb4be4dba2b2e
-cells steepness digest = 0x3c667c353c1f1252
+cells flow digest = 0xb67d1236f13fe658
+cells drainage digest = 0xdf6fd256332b5072
+cells steepness digest = 0xc35a420bcd05342a
 cells runoff digest = 0x79e5e3825e98b4a5
-cells catchment_runoff digest = 0x14d5c5c72c811f14
+cells catchment_runoff digest = 0x19fc49459775d2c0
 cells epoch_incision digest = 0x3735e04f5cbdf661
-cells water_surface_mm digest = 0x72e0ed5a2411080c
+cells water_surface_mm digest = 0x9d26da11526b1998
 cells ice digest = 0x849ce82a062481bd
 cells substances digest = 0xddd655300b16c5ed
 cells class digest = 0x88721ed471427dc5
 cells crater_state digest = 0x71b443ecd40467c6
 cells seafloor digest = 0x3b2dc8fe17122325
-cells elevation mm min -6480455 max 22487174
+cells elevation mm min -6480498 max 22487433
 cells by crust Continental 0 Oceanic 0 Lid 54874 Province 43430
 cells by boundary Absent 98304 Subduction 0 Collision 0 Divergent 0 Transform 0
 cells under water 0
@@ -118,4 +118,4 @@ craters degradation digest = 0x72f120c8c734d411
 craters reach digest = 0xb2a2f858c1e728ee
 craters degradation min 7 max 110
 payload blocks 4 bytes 3852141 lengths 1048565,1048556,1048554,706466
-payload digest = 0x5e333af72034ea35
+payload digest = 0x826ff4c47d9585cd

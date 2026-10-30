@@ -252,7 +252,12 @@ fn the_height_is_its_contributions_summed_in_order() {
 
 #[test]
 fn no_height_depends_on_the_order_of_queries_or_the_cache() {
-    for kind in [SyntheticWorld::EarthLike, SyntheticWorld::MoonLike] {
+    // The Mars-like world's trunks are bent, each reading its cell's edge neighbours (R09.T6.h).
+    for kind in [
+        SyntheticWorld::EarthLike,
+        SyntheticWorld::MarsLike,
+        SyntheticWorld::MoonLike,
+    ] {
         let field = world(kind);
         let synth = Synthesiser::new(field, SEED);
         let coarse = field.header().level().get();

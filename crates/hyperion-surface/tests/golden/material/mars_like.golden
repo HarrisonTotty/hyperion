@@ -127,7 +127,7 @@
 4 0xbfe78676081c96d4 0x3fe38dbe5eb3cd84 14 Dust 3
 1 0x3fedd0cad475ef23 0x3fde9238d1eade95 14 Dust 3
 1 0x3fed4474729aaa43 0xbfd8816babc883a9 14 Dust 3
-0 0xbfce2f07af35db38 0x3fb15e2b458cf87a 4 Sediment 0
+0 0xbfce2f07af35db38 0x3fb15e2b458cf87a 14 Dust 3
 4 0x3fc1b7bc5d5011b8 0xbfe045257226ac8f 14 Dust 3
 3 0x3fe89d17df566de3 0xbfae6cc2fc52b986 14 Dust 3
 2 0x3fe2cc9cf907b18a 0x3fd88fcd4d4674eb 14 Dust 3
@@ -236,7 +236,7 @@
 3 0x3fa51da4d01a907a 0xbfe3b146367d4613 14 Dust 3
 3 0xbfe87297c4a1c1ea 0xbfd7c65a0446080d 14 Dust 3
 5 0xbfc5c5207ddc1904 0x3febfb7a9f1f7ea1 14 Dust 3
-0 0x3f7a4e75aec13e2f 0x3feed6823ada1cf3 4 Sediment 0
+0 0x3f7a4e75aec13e2f 0x3feed6823ada1cf3 14 Dust 3
 4 0x3fec5bd2179920ad 0x3fd8406aa0c15fe2 14 Dust 3
 0 0x3fe3d9d3bd64a223 0x3fe43335d4309fe0 14 Dust 3
 5 0xbfb4a2c5baa4bd99 0x3fa3b95ee525f199 7 Glacier 1
@@ -444,7 +444,7 @@
 5 0x3fdf59ec29ed6486 0xbfe9cb2c93a341cd 14 Dust 3
 0 0x3fcce4c48648e3d4 0x3fdb1fb34420e984 14 Dust 3
 4 0xbfed657cdccc30a9 0x3feda2c58bf08977 14 Dust 3
-2 0x3fe580e947f4dad2 0x3fbaf3f4b87d69b6 14 Dust 3
+2 0x3fe580e947f4dad2 0x3fbaf3f4b87d69b6 4 Sediment 0
 1 0xbfd6f18c380654da 0x3fe48c5970b66205 14 Dust 3
 2 0x3fe5c39a7b7cf03b 0xbfc73a70e4c01535 14 Dust 3
 1 0xbfdcb1e834c7865a 0x3fc0f5562d807878 14 Dust 3

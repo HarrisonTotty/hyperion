@@ -1294,7 +1294,7 @@ mod tests {
     }
 
     /// R09's names are in the registries the disjointness assertion above lists, so it covers
-    /// them: the eight `surface.*` tags in the surface crate's, `body.surface.detail` in this one.
+    /// them: the nine `surface.*` tags in the surface crate's, `body.surface.detail` in this one.
     #[test]
     fn the_disjointness_check_covers_r09_s_names() {
         use hyperion_surface::tags as surface;
@@ -1306,6 +1306,7 @@ mod tests {
             surface::SURFACE_COARSE_EROSION,
             surface::SURFACE_RELIEF,
             surface::SURFACE_CHANNEL,
+            surface::SURFACE_CHANNEL_BEND,
             surface::SURFACE_CRATER,
         ];
         for tag in surface_tags {

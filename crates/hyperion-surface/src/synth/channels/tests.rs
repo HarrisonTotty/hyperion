@@ -134,6 +134,9 @@ fn segment_bits(s: &Segment) -> Vec<u64> {
             bits(s.below_top(t).value()),
         ]);
     }
+    if let Some(points) = s.bend_m() {
+        out.extend(points.iter().flat_map(|p| p.map(bits)));
+    }
     out
 }
 
@@ -678,6 +681,13 @@ fn the_same_seed_draws_the_same_network_and_another_seed_another() {
             once.network(field).key_point(c),
             other.network(field).key_point(c)
         );
+        // A world dry now's bend, drawn on its own tag, moves with the seed too (R09.T6.h).
+        let bent = once.network(field).segment(c).unwrap();
+        if let Some(bent) = bent.as_ref().and_then(Segment::bend_m) {
+            let elsewhere = other.network(field).segment(c).unwrap().unwrap();
+            let moved = elsewhere.bend_m().unwrap();
+            assert_ne!(bent[1].map(bits), moved[1].map(bits));
+        }
     }
 }
 
@@ -760,18 +770,25 @@ fn king_distances(cell: PatchKey, radius: u8) -> std::collections::BTreeMap<Patc
 /// The farthest king moves from a coarse cell that its segments' reads reach, to L + 3.
 const READ_RADIUS: u8 = 3;
 
+/// The farthest king moves from a coarse cell of a world dry now that its trunk's reads reach: its
+/// receiver's, and for its bend its edge neighbours', its largest inflow among them (R09.T6.h).
+const BENT_READ_RADIUS: u8 = 1;
+
 #[test]
 fn the_segments_below_a_coarse_cell_read_within_three_king_moves_of_it() {
     let mut farthest = 0;
-    for field in [earth(), mars()] {
+    let mut bent_farthest = 0;
+    for field in [earth(), mars(), world(SyntheticWorld::MarsLike)] {
         let channels = Channels::new(field.header(), SEED);
         for c in channelled(field, 8) {
+            let bent = field.cell(c).unwrap().epoch_incision.is_epoch();
             let view = Recorder {
                 inner: field,
                 reads: RefCell::new(BTreeSet::new()),
             };
             let mut network = channels.network(&view);
-            for cell in cells_below(c, DEPTH) {
+            // The coarse cell's own trunk, then the levels below it.
+            for cell in std::iter::once(c).chain(cells_below(c, DEPTH)) {
                 let _ = network.segment(cell).unwrap();
             }
             let within = king_distances(c, READ_RADIUS + 2);
@@ -780,7 +797,11 @@ fn the_segments_below_a_coarse_cell_read_within_three_king_moves_of_it() {
                     .get(&read)
                     .copied()
                     .unwrap_or_else(|| panic!("{c:?} read {read:?}, beyond 5 king moves"));
-                farthest = farthest.max(d);
+                if bent {
+                    bent_farthest = bent_farthest.max(d);
+                } else {
+                    farthest = farthest.max(d);
+                }
             }
             // Without the coarse cell itself, the first tributary names it.
             let view = Without {
@@ -809,4 +830,5 @@ fn the_segments_below_a_coarse_cell_read_within_three_king_moves_of_it() {
         }
     }
     assert_eq!(farthest, READ_RADIUS);
+    assert_eq!(bent_farthest, BENT_READ_RADIUS);
 }

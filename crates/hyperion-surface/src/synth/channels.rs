@@ -39,7 +39,10 @@
 //!   edge near a cube corner: two cells across a face edge are not together convex, since a row of
 //!   cells bends there, and the straight chord between their key points can pass through a third
 //!   cell; on the synthetic worlds the hold binds on under 0.2% of the trunks, nearly all of them
-//!   across face edges (R09.T6.a's test).
+//!   across face edges (R09.T6.a's test). On a world dry now each trunk's two chords are **bent**
+//!   (R09.T6.h): split into [`BEND_PARTS`] sub-chords each, through a spline and a displacement
+//!   drawn on `surface.channel.bend`, each half held in its own cell, its ends the straight
+//!   trunk's (the [`bend`] module).
 //! - **Every later level's** new key point joins the nearest point of the segments of all coarser
 //!   levels (a *tributary*), found at each coarser level in the 3 × 3 graph neighbourhood of the
 //!   key point's cell there (its cell, its four edge neighbours and its corner neighbours, by the
@@ -68,7 +71,9 @@
 //! incision, ten times as wide as deep (each wall 5:1), its floor its bankfull channel, and no
 //! sub-cell tributary is drawn, so
 //! that a short epoch's valleys are the coarse pass's own channels and the upland between them
-//! stays undissected (main's ruling for T6.c, option A). A world wet now or never wet carries no
+//! stays undissected (main's ruling for T6.c, option A). Each trunk's course is bent, and its depth
+//! grades along its second chord by a smoothstep from its own cell's G to its receiver's, never
+//! outside the two (R09.T6.h; [`Segment::below_top`]). A world wet now or never wet carries no
 //! epoch's code and keeps the steady state as T6.b builds it, to the bit wherever every channelled
 //! cell's catchment sheds runoff; where one's does not, it heads no trunk, a join target the less
 //! for its neighbours' tributaries.
@@ -139,7 +144,9 @@
 //! # What it reads, and the incision
 //!
 //! The network reads the coarse cells through the view: their flow directions, steepness indices,
-//! drainage areas, runoffs and water surfaces. A tributary's join reads the trunks of the 3 × 3
+//! drainage areas, runoffs and water surfaces. A trunk reads its cell and its receiver, and on a
+//! world dry now its cell's four edge neighbours, for its bend's largest inflow. A tributary's join
+//! reads the trunks of the 3 × 3
 //! coarse cells about its own, each with its receiver, and the finer segments about it, each with
 //! its own join, so the segments below a coarse cell read cells up to three king moves from it
 //! (R09.T6.a's test), inside the margin's five (Design note 15 budgets four for the first level);
@@ -151,6 +158,7 @@
 //! and no result depends on what it has computed before.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use hyperion_base::math;
 use hyperion_base::rng::{DetailSeed, ObjectKey};
@@ -163,18 +171,23 @@ use crate::cube::{Edge, Face, FaceUv, MAX_LEVEL, PatchKey, face_uv_to_xyz, st_to
 use crate::field::{BodyRef, FieldHeader, FieldView, LogRunoff, LogSteepness, SynthesisCell};
 use crate::num;
 use crate::spheroid::Spheroid;
-use crate::tags::SURFACE_CHANNEL;
+use crate::tags::{SURFACE_CHANNEL, SURFACE_CHANNEL_BEND};
 
+mod bend;
 pub mod incision;
 
+pub use bend::{BEND_FACTOR, BEND_PARTS};
+use bend::{Bend, CourseEnds};
+
 pub use incision::{
-    CHANNEL_HEAD_AREA, CUT_WIDTH, ChannelBody, DEBRIS_FLOW_SLOPE, EpochValley, MEAN_SAMPLES,
-    MEAN_TRIBUTARY_LENGTH, MEAN_TRUNK_LENGTH, TRIBUTARY_SHARE, TRIBUTARY_VARIANCE_SHARE,
-    VALLEY_RELIEF_SHARE, VALLEY_WALL_GRADIENT, VALLEY_WALL_SHARE, WALL_RUN_PER_DEPTH,
-    WHOLE_VARIANCE_SHARE, channel_head_area, channel_structure_function, channel_variance,
-    deepest_level, drawn_channel_variance, epoch_valley, valley_depth,
+    CHANNEL_HEAD_AREA, CUT_WIDTH, ChannelBody, DEBRIS_FLOW_SLOPE, EPOCH_TRUNK_SINUOSITY,
+    EpochValley, MEAN_SAMPLES, MEAN_TRIBUTARY_LENGTH, MEAN_TRUNK_LENGTH, TRIBUTARY_SHARE,
+    TRIBUTARY_VARIANCE_SHARE, VALLEY_RELIEF_SHARE, VALLEY_WALL_GRADIENT, VALLEY_WALL_SHARE,
+    WALL_RUN_PER_DEPTH, WHOLE_VARIANCE_SHARE, channel_head_area, channel_structure_function,
+    channel_variance, deepest_level, drawn_channel_variance, epoch_valley, valley_depth,
 };
 pub(crate) use incision::{ChannelCache, trunk_valley_m, unresolved_channel_variance};
+use incision::{graded_depth_m, receiver_valley_m};
 
 /// ε, the share of a cell's side by which a drawn key point keeps from each of its edges: 0.25,
 /// so that it lies in the cell's central half (Design note 13; Dendry's `GeneratePoint` draws
@@ -828,14 +841,16 @@ pub enum Outlet {
 }
 
 /// What a segment is: where it goes, and how its bed and drainage vary along it.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Kind {
     /// A trunk: its receiver, its crossing's parameter and spheroid point (metres), the coarse
     /// cell's drainage area along it, square metres, its valley's depth, metres ([`valley_depth`]
     /// held to its base level, R09.T6.f, or on a world dry now the epoch's valley's,
     /// [`EpochValley`]'s G), and on a world dry now
-    /// that valley's wall width, metres (`None` for T6.b's steady state); its bed runs straight
-    /// between its ends.
+    /// that valley's wall width, metres (`None` for T6.b's steady state); its bent course, `None`
+    /// for two straight chords; and its receiver's valley depth, metres, to which its depth grades
+    /// along its second chord, `None` for one depth all along it (R09.T6.h). Its bed runs straight
+    /// between its ends, in proportion to the length along it.
     Trunk {
         receiver: PatchKey,
         exit: f64,
@@ -843,6 +858,8 @@ enum Kind {
         area_m2: f64,
         valley_m: f64,
         epoch_wall_m: Option<f64>,
+        bend: Option<Arc<Bend>>,
+        receiver_valley_m: Option<f64>,
     },
     /// A tributary: the cell heading the segment it joins and the parameter there, its steepness
     /// index (m^0.9, [`tributary_steepness_m0_9`]), the main stream's length above its key point and
@@ -859,13 +876,13 @@ enum Kind {
 }
 
 /// One segment of the network: the chord from a key point down to where its channel goes (two
-/// chords, through its crossing, for a trunk), with its bed's profile along it (see the module
-/// documentation) and its channel's mean discharge, bankfull width and bankfull depth at its
-/// outlet.
+/// chords, through its crossing, for a trunk, each bent into [`BEND_PARTS`] sub-chords on a world
+/// dry now), with its bed's profile along it (see the module documentation) and its channel's mean
+/// discharge, bankfull width and bankfull depth at its outlet.
 ///
 /// A point along it is given by a parameter t, 0 at the key point and 1 at the outlet, in
 /// proportion to the length along it. Plain data, read through getters; `Clone`, not `Copy`, at
-/// 176 bytes.
+/// about 200 bytes, a bent course shared behind an [`Arc`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Segment {
     cell: PatchKey,
@@ -911,7 +928,8 @@ impl Segment {
     }
 
     /// The point at parameter `t`, body-fixed, metres: (1 − t) from + t to on a tributary, and on
-    /// a trunk the same along each of its two chords, the crossing at its exit.
+    /// a trunk the same along each of its two chords, the crossing at its exit, or along each
+    /// sub-chord of its bent course.
     ///
     /// # Panics
     ///
@@ -920,6 +938,10 @@ impl Segment {
     pub fn point_m(&self, t: f64) -> [f64; 3] {
         check_parameter(t);
         match self.kind {
+            Kind::Trunk {
+                bend: Some(ref bend),
+                ..
+            } => bend.point_m(t),
             Kind::Trunk {
                 exit, crossing_m, ..
             } => {
@@ -943,10 +965,28 @@ impl Segment {
         }
     }
 
-    /// Its length along it: the chord's, or a trunk's two chords'.
+    /// Its course's points, body-fixed, metres, where it is a bent trunk (R09.T6.h): its key
+    /// point, its first chord's [`BEND_PARTS`] − 1, its crossing, its second chord's and its
+    /// receiver's key point; `None` for a straight trunk or a tributary.
+    #[must_use]
+    pub fn bend_m(&self) -> Option<&[[f64; 3]]> {
+        match self.kind {
+            Kind::Trunk {
+                bend: Some(ref bend),
+                ..
+            } => Some(bend.points()),
+            Kind::Trunk { .. } | Kind::Tributary { .. } => None,
+        }
+    }
+
+    /// Its length along it: the chord's, a trunk's two chords', or its bent course's sub-chords'.
     #[must_use]
     pub fn length(&self) -> Metres {
         Metres::new(match self.kind {
+            Kind::Trunk {
+                bend: Some(ref bend),
+                ..
+            } => bend.length_m(),
             Kind::Trunk { crossing_m, .. } => {
                 distance(self.from_m, crossing_m) + distance(crossing_m, self.to_m)
             }
@@ -1083,9 +1123,10 @@ impl Segment {
     /// How far its bed lies below its trunk's valley top at parameter `t`, metres: the trunk's
     /// valley depth along a trunk ([`valley_depth`], held to no more than its cell stands above its
     /// base level, its receiver's water or the sea, R09.T6.f; or on a world dry now the epoch's
-    /// valley's depth, [`EpochValley`]), and along a tributary the inherited top less
-    /// its bed there, which falls upstream as the bed rises and is below zero where the channel
-    /// has risen above the top (see [`Channels::incision_at`]).
+    /// valley's depth, [`EpochValley`], graded along its second chord by a smoothstep from its own
+    /// to its receiver's, never outside the two, R09.T6.h), and along a tributary the inherited top
+    /// less its bed there, which falls upstream as the bed rises and is below zero where the
+    /// channel has risen above the top (see [`Channels::incision_at`]).
     ///
     /// # Panics
     ///
@@ -1094,6 +1135,12 @@ impl Segment {
     pub fn below_top(&self, t: f64) -> Metres {
         check_parameter(t);
         Metres::new(match self.kind {
+            Kind::Trunk {
+                valley_m,
+                receiver_valley_m: Some(receiver_m),
+                exit,
+                ..
+            } => graded_depth_m(valley_m, receiver_m, exit, t).0,
             Kind::Trunk { valley_m, .. } => valley_m,
             Kind::Tributary { top_m, .. } => top_m - self.bed_at(t).value(),
         })
@@ -1109,14 +1156,18 @@ impl Segment {
     fn top_at(&self, t: f64) -> f64 {
         check_parameter(t);
         match self.kind {
+            Kind::Trunk {
+                receiver_valley_m: Some(_),
+                ..
+            } => self.bed_at(t).value() + self.below_top(t).value(),
             Kind::Trunk { valley_m, .. } => self.bed_at(t).value() + valley_m,
             Kind::Tributary { top_m, .. } => top_m,
         }
     }
 
-    /// A trunk's two chords, each with the parameters it spans: from its key point to its crossing
-    /// over [0, exit], and from its crossing to its receiver's key point over [exit, 1]; `None` for
-    /// a tributary.
+    /// A trunk's two straight chords, each with the parameters it spans: from its key point to its
+    /// crossing over [0, exit], and from its crossing to its receiver's key point over [exit, 1];
+    /// `None` for a tributary. A bent trunk's sub-chords are [`chord`](Self::chord)'s.
     #[must_use]
     fn chords(&self) -> Option<[Chord; 2]> {
         match self.kind {
@@ -1134,6 +1185,49 @@ impl Segment {
                     span: (exit, 1.0),
                 },
             ]),
+            Kind::Tributary { .. } => None,
+        }
+    }
+
+    /// How many straight chords its course has: a trunk's two, or its bent course's 2D, and a
+    /// tributary's one.
+    #[must_use]
+    fn chord_count(&self) -> usize {
+        match self.kind {
+            Kind::Trunk { bend: Some(_), .. } => 2 * BEND_PARTS,
+            Kind::Trunk { .. } => 2,
+            Kind::Tributary { .. } => 1,
+        }
+    }
+
+    /// Its course's chord `k`, below [`chord_count`](Self::chord_count), with the parameters it
+    /// spans, in order from its key point.
+    #[must_use]
+    fn chord(&self, k: usize) -> Chord {
+        match (&self.kind, self.chords()) {
+            (
+                Kind::Trunk {
+                    bend: Some(bend), ..
+                },
+                _,
+            ) => bend
+                .chords(k / BEND_PARTS)
+                .nth(k % BEND_PARTS)
+                .expect("a bent course has 2D sub-chords"),
+            (_, Some(chords)) => chords[k],
+            (_, None) => Chord {
+                from: self.from_m,
+                to: self.to_m,
+                span: (0.0, 1.0),
+            },
+        }
+    }
+
+    /// Its bent course, where it is a bent trunk.
+    #[must_use]
+    fn bend(&self) -> Option<&Arc<Bend>> {
+        match self.kind {
+            Kind::Trunk { ref bend, .. } => bend.as_ref(),
             Kind::Tributary { .. } => None,
         }
     }
@@ -1270,6 +1364,19 @@ impl Channels {
             gravity: self.gravity,
             field_marks: self.field_marks,
         }
+    }
+
+    /// The bent course through `ends`, its ends the straight trunk's spheroid points `straight_m`,
+    /// drawn on `surface.channel.bend` keyed by the trunk's coarse cell (R09.T6.h).
+    #[must_use]
+    fn bend(&self, ends: &CourseEnds, straight_m: [[f64; 3]; 3]) -> Bend {
+        let cell = ends.cell;
+        let stream = self.seed.stream(
+            SURFACE_CHANNEL_BEND,
+            ObjectKey::surface_cell(cell.face().index(), cell.level(), cell.i(), cell.j(), 0)
+                .expect("a patch key is a surface cell"),
+        );
+        Bend::new(ends, straight_m, self.figure, &stream, BEND_FACTOR)
     }
 
     /// The key point `cell` draws for itself on `surface.channel`, before inheritance.
@@ -1513,8 +1620,9 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
     /// # Errors
     ///
     /// [`ReadCellError`] naming the first cell read that the view does not hold, in a fixed order:
-    /// the coarse cell, its receiver, then for a tributary each candidate's cells, level by level
-    /// and in each level's 3 × 3 order.
+    /// the coarse cell, its receiver, then for a world dry now's trunk its cell's edge neighbours in
+    /// [`Edge::ALL`]'s order, and for a tributary each candidate's cells, level by level and in each
+    /// level's 3 × 3 order.
     ///
     /// # Panics
     ///
@@ -1540,7 +1648,8 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
     }
 
     /// The trunk of coarse cell `coarse`, from its key point to its receiver's; none where its
-    /// flow is terminal or no water reaches it, its catchment shedding none (R09.T6.c).
+    /// flow is terminal or no water reaches it, its catchment shedding none (R09.T6.c). On a world
+    /// dry now its course is bent and its depth graded to its receiver's (R09.T6.h).
     fn trunk(&mut self, coarse: PatchKey) -> Result<Option<Segment>, ReadCellError> {
         let own = read(self.field, coarse)?;
         let Some(edge) = own.flow.edge() else {
@@ -1555,9 +1664,23 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
         let to = self.key_point(receiver).dir();
         let figure = self.channels.figure;
         let (from_m, to_m) = (figure.point(from), figure.point(to));
-        let crossing_m = figure.point(crossing(coarse, edge, from, to));
-        let before = distance(from_m, crossing_m);
-        let exit = before / (before + distance(crossing_m, to_m));
+        let crossed = crossing(coarse, edge, from, to);
+        let crossing_m = figure.point(crossed);
+        // A world dry now's trunk is bent (R09.T6.h); its ends stay the straight trunk's.
+        let bend = if own.epoch_incision.is_epoch() {
+            let ends = self.course_ends(coarse, receiver, into, [from, crossed, to])?;
+            Some(Arc::new(
+                self.channels.bend(&ends, [from_m, crossing_m, to_m]),
+            ))
+        } else {
+            None
+        };
+        let exit = if let Some(bend) = &bend {
+            bend.exit()
+        } else {
+            let before = distance(from_m, crossing_m);
+            before / (before + distance(crossing_m, to_m))
+        };
         let area = own.drainage.area();
         let (discharge, width_m, depth_m) = channel_size(
             own.catchment_runoff.metres_per_year(),
@@ -1568,13 +1691,21 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
         // height its cell stands above its base level (R09.T6.f); none where the cell carries no
         // tributaries. On a world dry now, the epoch's valley instead (R09.T6.c): no deeper than
         // its incision, ten times as wide as deep.
-        let (valley_m, epoch_wall_m) = if own.epoch_incision.is_epoch() {
+        // Its depth grades along its second chord to its receiver's valley, none where the
+        // receiver cuts none or is under water (R09.T6.h).
+        let (valley_m, epoch_wall_m, receiver_valley_m) = if own.epoch_incision.is_epoch() {
             let epoch = epoch_valley(own, self.channels.body())
                 .expect("a dry-now cell with a receiver and water has its epoch's valley");
-            (epoch.depth().value(), Some(epoch.wall().value()))
+            let onward = receiver_valley_m(into, self.channels.body());
+            (
+                epoch.depth().value(),
+                Some(epoch.wall().value()),
+                Some(num::assert_finite(onward)),
+            )
         } else {
             (
                 trunk_valley_m(own, into, self.channels.sea_level(), self.channels.body()),
+                None,
                 None,
             )
         };
@@ -1594,8 +1725,62 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
                 area_m2: area.value(),
                 valley_m: num::assert_finite(valley_m),
                 epoch_wall_m,
+                bend,
+                receiver_valley_m,
             },
         }))
+    }
+
+    /// The ends a bent trunk of the coarse cell `coarse` runs through to `receiver`, whose record
+    /// is `into`, its key point, crossing and receiver's key point the unit directions `straight`
+    /// ([`CourseEnds`]): the crossing into it of its largest inflow, by drainage and then by the
+    /// higher packed cell key, among its edge neighbours that drain into it and head a trunk out of
+    /// the water; and the receiver's own crossing, where the receiver heads a trunk out of the
+    /// water. Each crossing is the bits its own trunk computes.
+    fn course_ends(
+        &mut self,
+        coarse: PatchKey,
+        receiver: PatchKey,
+        into: &SynthesisCell,
+        [key, crossed, onward]: [[f64; 3]; 3],
+    ) -> Result<CourseEnds, ReadCellError> {
+        let heads_trunk = |cell: &SynthesisCell| {
+            cell.flow.edge().is_some()
+                && cell.catchment_runoff != LogRunoff::NONE
+                && !cell.is_under_water()
+        };
+        let mut largest: Option<(crate::field::LogArea, u64, PatchKey, Edge)> = None;
+        for edge in Edge::ALL {
+            let (neighbour, back) = coarse.edge_neighbour_and_back(edge);
+            let donor = read(self.field, neighbour)?;
+            if donor.flow.edge() != Some(back) || !heads_trunk(donor) {
+                continue;
+            }
+            let rank = (donor.drainage, neighbour.to_u64());
+            if largest.is_none_or(|(area, packed, _, _)| rank > (area, packed)) {
+                largest = Some((rank.0, rank.1, neighbour, back));
+            }
+        }
+        let before = largest.map(|(_, _, donor, back)| {
+            let from = self.key_point(donor).dir();
+            crossing(donor, back, from, key)
+        });
+        let after = match into.flow.edge() {
+            Some(edge) if heads_trunk(into) => {
+                let beyond = self.key_point(receiver.edge_neighbour(edge)).dir();
+                Some(crossing(receiver, edge, onward, beyond))
+            }
+            Some(_) | None => None,
+        };
+        Ok(CourseEnds {
+            cell: coarse,
+            receiver,
+            before,
+            key,
+            crossing: crossed,
+            onward,
+            after,
+        })
     }
 
     /// The tributary of `cell`, finer than the first level.
@@ -1627,18 +1812,13 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
                 let Some(segment) = self.segment(around)? else {
                     continue;
                 };
-                if let Some(chords) = segment.chords() {
-                    // A trunk's two chords, the first offered first.
-                    for chord in chords {
-                        offer(nearest_on(q, &part(around, &segment, chord), level));
-                    }
-                } else {
-                    let chord = Chord {
-                        from: segment.from_m,
-                        to: segment.to_m,
-                        span: (0.0, 1.0),
-                    };
-                    offer(nearest_on(q, &part(around, &segment, chord), level));
+                // A trunk's chords in order from its key point, the first offered first.
+                for k in 0..segment.chord_count() {
+                    offer(nearest_on(
+                        q,
+                        &part(around, &segment, segment.chord(k)),
+                        level,
+                    ));
                 }
             }
         }

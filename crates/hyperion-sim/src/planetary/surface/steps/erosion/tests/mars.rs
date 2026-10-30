@@ -9,11 +9,12 @@
 use std::time::Instant;
 
 use hyperion_surface::field::{
-    CoarseLevel, Crust, LogIncision, LogRunoff, LogSteepness, SynthesisCell,
+    CoarseLevel, Crust, LogIncision, LogRunoff, LogSteepness, SynthesisCell, cell_at_index,
+    cell_index,
 };
 use hyperion_surface::num;
 use hyperion_surface::synth::channels::{
-    ChannelBody, MEAN_TRIBUTARY_LENGTH, MEAN_TRUNK_LENGTH, TRIBUTARY_SHARE,
+    ChannelBody, EPOCH_TRUNK_SINUOSITY, MEAN_TRIBUTARY_LENGTH, MEAN_TRUNK_LENGTH, TRIBUTARY_SHARE,
     TRIBUTARY_VARIANCE_SHARE, VALLEY_WALL_GRADIENT, VALLEY_WALL_SHARE, WALL_RUN_PER_DEPTH,
     WHOLE_VARIANCE_SHARE, bankfull_depth, bankfull_width, channel_forming_discharge_m3_s,
     channel_head_area, channel_variance, deepest_level, epoch_valley, hack_area, head_length,
@@ -594,7 +595,8 @@ fn grooves(cell: &SynthesisCell, body: ChannelBody) -> Vec<Groove> {
         body.gravity,
     );
     // A world dry now's trunk is its epoch's valley alone (R09.T6.c): T6.b's depth no deeper than
-    // the coded incision, its walls running 5 G each, held to T6.b's.
+    // the coded incision, its walls running 5 G each, held to T6.b's, its bent course
+    // `EPOCH_TRUNK_SINUOSITY` times as long (R09.T6.h).
     if let Some(incision) = cell.epoch_incision.incision() {
         let steepness =
             channels.then(|| tributaries.unwrap_or_else(|| cell.steepness.index_m0_9()));
@@ -603,7 +605,7 @@ fn grooves(cell: &SynthesisCell, body: ChannelBody) -> Vec<Groove> {
         if g > 0.0 && cell.catchment_runoff != LogRunoff::NONE {
             out.push(Groove {
                 level,
-                density: MEAN_TRUNK_LENGTH / mean_cell_width(r, level),
+                density: MEAN_TRUNK_LENGTH * EPOCH_TRUNK_SINUOSITY / mean_cell_width(r, level),
                 depth: g,
                 floor: 0.5 * width,
                 wall: num::min(WALL_RUN_PER_DEPTH * g, wall),
@@ -807,6 +809,21 @@ fn print_valleys_by_class(valleys: &[(f64, f64)]) {
     }
 }
 
+/// The valley depth of the receiver of the cell of index `c` of `records`, a coarse field's cells
+/// of `body`'s level, to which its trunk's second chord grades on the final field; zero where it
+/// has none or is under water, as the synthesis takes it (R09.T6.h).
+fn receiver_valley(records: &[SynthesisCell], c: usize, body: ChannelBody) -> Metres {
+    let key = cell_at_index(body.level, u32::try_from(c).expect("a cell index")).expect("a cell");
+    records[c].flow.edge().map_or(Metres::ZERO, |edge| {
+        let receiver = cell_index(key.edge_neighbour(edge));
+        let record = &records[usize::try_from(receiver).expect("a cell index")];
+        if record.is_under_water() {
+            return Metres::ZERO;
+        }
+        epoch_valley(record, body).map_or(Metres::ZERO, |v| v.depth())
+    })
+}
+
 /// R09.T6.c on the reference Mars, its whole pass (plan R09's T6.c Tests; decision-r09-t14-choices
 /// F2; decision-r09-t14-mars-ceiling §5; main's ruling, option A):
 ///
@@ -814,12 +831,15 @@ fn print_valleys_by_class(valleys: &[(f64, f64)]) {
 ///   crater's rim and every renewed `Province` cell is [`LogIncision::UNCUT`]; and the cells that
 ///   draw a valley on one side alone, the branch's or the final field's, are counted;
 /// - the coarse lowering is the void of the valley the synthesis draws, its closed form on the
-///   final field's codes ([`epoch_valley`]): the two differ only where the final routing moves a
-///   cell's steepness, drainage or catchment runoff, recorded, with (A2) both ways;
+///   final field's codes ([`epoch_valley`], its bent course [`EPOCH_TRUNK_SINUOSITY`] times as
+///   long and its second chord graded to its receiver's valley, R09.T6.h): the two differ only
+///   where the final routing moves a cell's steepness, drainage or catchment runoff, recorded,
+///   with (A2) both ways;
 /// - (A2) on the drawn valleys' void at least 1.2 m (Luo, Cang and Howard 2017), and above 6.1 m a
 ///   finding (printed);
-/// - the drawn valleys' density over the eroded `Lid` cells recorded against Hynek et al.'s 0.0115
-///   km⁻¹ for Noachian units (one trunk a cell of 38 km is already 0.026 km⁻¹);
+/// - the drawn valleys' density over the eroded `Lid` cells, at their bent length, recorded
+///   against Hynek et al.'s 0.0115 km⁻¹ for Noachian units (one trunk a cell of 38 km is already
+///   0.026 km⁻¹);
 /// - the drawn valleys' depth by drainage class recorded, the share deeper than 350 m, the p90 and
 ///   the maximum: G is the solver's incision wherever T6.b's steady state does not bind, so the
 ///   tail is T14's (18.2%, 30.8% and 35.7%), a finding for a depth relation by drainage, not in K t;
@@ -868,9 +888,10 @@ fn the_reference_mars_s_valleys_are_its_epoch_s() {
             1.5 * g / valley.wall().value() <= 0.3 + 1e-12,
             "cell {c}: a wall steeper than 0.3"
         );
+        let onward = receiver_valley(&records, c, body);
         let lowering = num::min(
             ceiling.incision(c),
-            MEAN_TRUNK_LENGTH * valley.void_m2() / width,
+            MEAN_TRUNK_LENGTH * EPOCH_TRUNK_SINUOSITY * valley.trunk_void_m2(onward) / width,
         );
         synthesised += omega[c] * lowering;
         if dry.lowering_m[c] > 0.0 {
@@ -884,7 +905,7 @@ fn the_reference_mars_s_valleys_are_its_epoch_s() {
         slopes.push(slope);
         valleys.push((record.drainage.area().value(), g));
         if lid {
-            lid_length += omega[c] * MEAN_TRUNK_LENGTH / width;
+            lid_length += omega[c] * MEAN_TRUNK_LENGTH * EPOCH_TRUNK_SINUOSITY / width;
         }
     }
     assert!(drawn > 0);

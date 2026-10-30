@@ -435,6 +435,9 @@ fn segment_bits(s: &Segment) -> Vec<u64> {
         bits(s.bankfull_depth().value()),
         bits(s.below_top(0.5).value()),
     ]);
+    if let Some(points) = s.bend_m() {
+        out.extend(points.iter().flat_map(|p| p.map(bits)));
+    }
     out
 }
 
@@ -1227,6 +1230,7 @@ fn every_groove_is_within_its_level_s_cap() {
                     {
                         let deepest_groove = match groove.depth {
                             Depth::Constant(d) => d,
+                            Depth::Graded { from_m, to_m, .. } => from_m.max(to_m),
                             Depth::Tributary { floor_m, cap_m, .. } => floor_m.max(cap_m),
                         };
                         assert!(deepest_groove <= groove_cap_m(radius_m, level));
@@ -1255,7 +1259,9 @@ fn with_epoch_valleys(field: &impl FieldView, count: usize) -> Vec<PatchKey> {
 /// R09.T6.c (main's ruling, option A): on a world dry now, each coarse cell's trunk cuts its
 /// epoch's valley, of depth G = min(T6.b's steady-state groove, the coded incision), its floor the
 /// bankfull channel and each wall 5 G wide at most T6.b's; no segment heads a finer cell below it;
-/// the cut ends at the coarse level; and the closed form's one term is that valley's.
+/// the cut ends at the coarse level; and the closed form's one term is that valley's, its course
+/// bent ([`EPOCH_TRUNK_SINUOSITY`]) and, as the synthesis cuts it, its second half graded to its
+/// receiver's valley (R09.T6.h).
 #[test]
 fn a_world_dry_now_draws_its_epoch_s_trunks_alone() {
     let field = mars_epoch();
@@ -1297,10 +1303,25 @@ fn a_world_dry_now_draws_its_epoch_s_trunks_alone() {
             bits(segment.bankfull_width().value())
         );
         assert!(1.5 * g / valley.wall().value() <= 0.3 + 1e-12, "{coarse:?}");
-        assert_eq!(bits(segment.below_top(0.5).value()), bits(g));
+        let Outlet::Cell { receiver, exit } = segment.outlet() else {
+            panic!("a trunk");
+        };
+        let onward = receiver_valley_m(field.cell(receiver).unwrap(), body);
+        assert_eq!(bits(segment.below_top(0.5 * exit).value()), bits(g));
+        assert_eq!(bits(segment.below_top(exit).value()), bits(g));
         let groove = Groove::of(&segment, radius_m).expect("a valley");
-        assert_eq!(groove.depth, Depth::Constant(g));
-        assert_eq!(bits(groove.wall_m), bits(valley.wall().value()));
+        assert_eq!(
+            groove.depth,
+            Depth::Graded {
+                from_m: g,
+                to_m: onward,
+                exit
+            }
+        );
+        assert_eq!(
+            bits(groove.wall_m),
+            bits(num::min(WALL_RUN_PER_DEPTH * g.max(onward), wall_cap))
+        );
         assert_eq!(
             bits(groove.floor_m),
             bits(0.5 * valley.floor_width().value())
@@ -1311,15 +1332,22 @@ fn a_world_dry_now_draws_its_epoch_s_trunks_alone() {
                 assert_eq!(network.segment(cell).unwrap(), None, "{cell:?}");
             }
         }
+        let density = MEAN_TRUNK_LENGTH * EPOCH_TRUNK_SINUOSITY / mean_cell_width(radius_m, first);
         let terms = level_terms(record, body);
         let expected = level_term(
             first,
-            MEAN_TRUNK_LENGTH / mean_cell_width(radius_m, first),
+            density,
             g,
             0.5 * valley.floor_width().value(),
             valley.wall().value(),
         );
         assert_eq!(terms, vec![expected], "{coarse:?}");
+        let (_, drawn) = synthesised_terms(field, coarse).unwrap();
+        assert_eq!(
+            drawn,
+            vec![epoch_trunk_term(first, density, &valley, onward)],
+            "{coarse:?}"
+        );
     }
     // The epoch, not the steady state, sets most of the Mars-like world's valleys.
     assert!(
@@ -1329,10 +1357,33 @@ fn a_world_dry_now_draws_its_epoch_s_trunks_alone() {
     );
 }
 
+/// `segment`, a trunk, on its two straight chords and of one depth: its course unbent and its
+/// depth ungraded.
+fn straightened(segment: &Segment) -> Segment {
+    let mut straight = segment.clone();
+    let Kind::Trunk {
+        bend,
+        receiver_valley_m,
+        exit,
+        crossing_m,
+        ..
+    } = &mut straight.kind
+    else {
+        panic!("a trunk");
+    };
+    *bend = None;
+    *receiver_valley_m = None;
+    let before = super::super::distance(segment.from_m, *crossing_m);
+    *exit = before / (before + super::super::distance(*crossing_m, segment.to_m));
+    straight
+}
+
 /// R09.T6.c's cross-section (decision-r09-t14-mars-ceiling §5): across an epoch trunk's chord its
 /// groove is G on its floor, half the bankfull width either side, falls as T6.b's smoothstep over
 /// the wall W to zero at the floor's edge plus W, its analytic gradient across is the depth's
-/// central difference, and no wall is steeper than 1.5 G ÷ W, at most 0.3.
+/// central difference, and no wall is steeper than 1.5 G ÷ W, at most 0.3: on the trunk's straight
+/// chords, where one chord's groove is the whole (a bent course's sub-chords meet in their maximum,
+/// `bend::no_step_crosses_a_bend` and `bend::a_bent_groove_s_gradient_is_its_central_difference`).
 #[test]
 fn an_epoch_valley_is_ten_times_as_wide_as_deep() {
     let field = mars_epoch();
@@ -1341,7 +1392,7 @@ fn an_epoch_valley_is_ten_times_as_wide_as_deep() {
     let radius_m = channels.body().radius.value();
     let mut network = channels.network(field);
     for coarse in with_epoch_valleys(field, 6) {
-        let segment = network.segment(coarse).unwrap().unwrap();
+        let segment = straightened(&network.segment(coarse).unwrap().unwrap());
         let groove = Groove::of(&segment, radius_m).unwrap();
         let Depth::Constant(g) = groove.depth else {
             panic!("a trunk's groove is constant along it");
@@ -1420,11 +1471,14 @@ fn a_cell_the_epoch_did_not_cut_or_no_water_reaches_draws_nothing() {
 
 /// R09.T6.c's closure is the drawn valleys' void: over the epoch Mars's cells with a valley, the
 /// realised first level's mean incision over each coarse cell, the void the synthesis adds back to
-/// the upland, summed by area, against the closed form's `MEAN_TRUNK_LENGTH` G (`w_bf` + W) ÷ w²
-/// that the coarse pass's width closure takes from each cell, within a quarter; recorded: 1.19
-/// as built (the Mars-like world's trunks run 1.12 coarse cells, against the closed form's
-/// [`MEAN_TRUNK_LENGTH`] of 1.0, R09.T6.b's measurement, and each groove's ends add their caps), so
-/// that the upland stands about a fifth of the cell's lowering above its construction.
+/// the upland, summed by area, against the closed form's `MEAN_TRUNK_LENGTH`
+/// [`EPOCH_TRUNK_SINUOSITY`] V ÷ w² that the coarse pass's width closure takes from each cell, V
+/// the trunk's void a unit length graded to its receiver's valley ([`EpochValley::trunk_void_m2`];
+/// R09.T6.h), within a quarter; recorded: 1.136 as built for R09.T6.h's bent trunks, 1.19 for
+/// R09.T6.c's straight ones (the Mars-like world's trunks run 1.12 coarse cells, against the closed
+/// form's [`MEAN_TRUNK_LENGTH`] of 1.0, R09.T6.b's measurement, and each groove's ends add their
+/// caps), so that the upland stands about a seventh of the cell's lowering above its
+/// construction.
 #[test]
 fn the_drawn_valleys_void_is_the_closure_s() {
     let field = mars_epoch();
@@ -1436,11 +1490,14 @@ fn the_drawn_valleys_void_is_the_closure_s() {
     let mut cache = SynthCache::new();
     let (mut realised, mut closed) = (0.0, 0.0);
     for c in with_epoch_valleys(field, 120) {
-        let valley = epoch_valley(field.cell(c).unwrap(), body).unwrap();
+        let record = field.cell(c).unwrap();
+        let valley = epoch_valley(record, body).unwrap();
+        let receiver = c.edge_neighbour(record.flow.edge().unwrap());
+        let onward = Metres::new(receiver_valley_m(field.cell(receiver).unwrap(), body));
         let mean = channels.incision(field, &mut cache).mean(first, c).unwrap();
         let width = mean_cell_width(radius_m, first);
         realised += -mean;
-        closed += MEAN_TRUNK_LENGTH * valley.void_m2() / width;
+        closed += MEAN_TRUNK_LENGTH * EPOCH_TRUNK_SINUOSITY * valley.trunk_void_m2(onward) / width;
     }
     eprintln!(
         "the realised first level's void {realised:.4} m against the closure's {closed:.4} m"
@@ -1452,5 +1509,6 @@ fn the_drawn_valleys_void_is_the_closure_s() {
     );
 }
 
+mod bend;
 mod depth;
 mod water;

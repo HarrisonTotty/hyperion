@@ -8,6 +8,7 @@ surface.coarse.crater (SurfaceCoarse) = 0xac7452e29dc1fc10
 surface.coarse.erosion (SurfaceCoarse) = 0x15f0e6c4244ab204
 surface.relief (SurfaceDetail) = 0xd815850b4e7adcaf
 surface.channel (SurfaceDetail) = 0x750f092b405d16d1
+surface.channel.bend (SurfaceDetail) = 0x21e550303bb89562
 surface.crater (SurfaceDetail) = 0x9205520bbb531a25
 event.selftest (Event) = 0x9442133d71ca154d
 galaxy.params.stellar_mass (Galaxy) = 0x7d41a975d717b0a1

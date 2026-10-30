@@ -15,12 +15,15 @@
 //! craters (also `craters-uncached`, each point from an empty crater cache, the cell draw) and the
 //! coarse craters' rims through the level's set, and `height` their sum, against Design note 14's
 //! targets in WebAssembly (interpolation 0.2 µs, relief 1.5 µs, channels 3.5 µs, craters 2 µs)
-//! and the brainstorm's 10 µs a point. `surface/patch/<world>/<n>/{warm,cold}` bakes the patch's
+//! and the brainstorm's 10 µs a point. `surface/channels/mars/through-7` is the Mars-like world's,
+//! a world dry now whose bent trunks are its only level, at the 65 × 65 vertices of a patch of
+//! L + 4 on a trunk (R09.T6.h). `surface/patch/<world>/<n>/{warm,cold}` bakes the patch's
 //! heights, parent-band heights and gradients (`Synthesiser::bake_patch`), 4,225 queries at its
 //! level and 1,089 at its parent's, from the warm cache and from an empty one, against the
 //! brainstorm's 40 ms a patch. The worlds are the Earth-like, at the coarse level plus four (12)
-//! and its band limit's level (19), the deepest any patch needs, and the Moon-like on a coarse
-//! crater's rim, at 10 and 17. Figures taken while other work shares the machine are provisional.
+//! and its band limit's level (19), the deepest any patch needs, the Moon-like on a coarse
+//! crater's rim, at 10 and 17, and the Mars-like on a bent trunk, at 11 and 17 (R09.T6.h). Figures
+//! taken while other work shares the machine are provisional.
 //! CI compiles these and never runs them.
 //!
 //! On the browser target, which has no Criterion, `surface/point` runs as `wasm-bindgen-test`'s
@@ -100,10 +103,10 @@ mod shared {
     use hyperion_base::rng::DetailSeed;
     use hyperion_surface::cube::{PatchKey, unit_dir};
     use hyperion_surface::field::{CoarseField, FieldView, cell_at_index};
-    use hyperion_surface::synth::channels::{ChannelBody, deepest_level};
+    use hyperion_surface::synth::channels::{ChannelBody, deepest_level, epoch_valley};
     use hyperion_surface::synth::craters::CraterCache;
     use hyperion_surface::synth::interp::base_elevation;
-    use hyperion_surface::synth::{BandLevel, SynthCache, Synthesiser};
+    use hyperion_surface::synth::{BandLevel, Channels, SynthCache, Synthesiser};
     use hyperion_surface::testing::{SyntheticWorld, synthetic_field};
 
     /// The detail seed the bench draws from, the channels' tests' own.
@@ -168,9 +171,38 @@ mod shared {
         unit_dir([0, 1, 2].map(|k| cos * c[k] + sin * e[k] / n))
     }
 
+    /// A direction on the first trunk of `field`, a world dry now, in cell-index order, that cuts
+    /// its epoch's valley: its key point, where its course starts bent or straight (R09.T6.h).
+    pub fn on_a_trunk(field: &CoarseField) -> [f64; 3] {
+        let header = field.header();
+        let level = header.level().get();
+        let body = ChannelBody::of(header);
+        let coarse = (0..header.level().cell_count())
+            .map(|n| cell_at_index(level, n).expect("a cell of the level"))
+            .find(|&c| {
+                field.cell(c).is_some_and(|cell| {
+                    epoch_valley(cell, body).is_some_and(|valley| valley.depth().value() > 0.0)
+                })
+            })
+            .expect("the Mars-like world draws its epoch's valleys");
+        let channels = Channels::new(header, SEED);
+        let trunk = channels
+            .network(field)
+            .segment(coarse)
+            .expect("the whole field is held")
+            .expect("a cell that cuts a valley has a trunk");
+        let p = trunk.from_m();
+        let figure = header.figure();
+        unit_dir([
+            p[0] / figure.equatorial_radius_m,
+            p[1] / figure.equatorial_radius_m,
+            p[2] / figure.polar_radius_m,
+        ])
+    }
+
     /// The worlds and patches of `surface/point` and `surface/patch`: the Earth-like world at
-    /// L + 4 and 19 inside [`key`]'s cell, and the Moon-like on its first crater's rim at L + 4
-    /// and 17.
+    /// L + 4 and 19 inside [`key`]'s cell, the Moon-like on its first crater's rim at L + 4 and 17,
+    /// and the Mars-like, a world dry now, on a bent trunk at L + 4 and 17 (R09.T6.h).
     pub fn cases() -> Vec<(&'static str, CoarseField, PatchKey)> {
         let earth = synthetic_field(SyntheticWorld::EarthLike);
         let coarse = earth.header().level().get();
@@ -184,6 +216,13 @@ mod shared {
         for level in [coarse + 4, 17] {
             let patch = PatchKey::containing(level, rim).expect("a level is a level");
             cases.push(("moon", moon.clone(), patch));
+        }
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        let trunk = on_a_trunk(&mars);
+        let coarse = mars.header().level().get();
+        for level in [coarse + 4, 17] {
+            let patch = PatchKey::containing(level, trunk).expect("a level is a level");
+            cases.push(("mars", mars.clone(), patch));
         }
         cases
     }
@@ -272,40 +311,58 @@ mod bench {
     use hyperion_surface::synth::{BandLevel, Channels, SynthCache, Synthesiser};
     use hyperion_surface::testing::{SyntheticWorld, synthetic_field};
 
-    use super::shared::{SEED, cases, directions, each_part, key, sweep};
+    use super::shared::{SEED, cases, directions, each_part, key, on_a_trunk, sweep};
 
     pub fn channels(c: &mut Criterion) {
+        let mut group = c.benchmark_group("surface");
         let field = synthetic_field(SyntheticWorld::EarthLike);
+        let dirs = directions(key(&field));
+        channels_of(&mut group, "", &field, &dirs, 4);
+        // A world dry now draws its bent trunks alone, the coarse level (R09.T6.h).
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        let level = mars.header().level().get() + 4;
+        let patch = PatchKey::containing(level, on_a_trunk(&mars)).expect("a level is a level");
+        channels_of(&mut group, "mars/", &mars, &directions(patch), 0);
+        group.finish();
+    }
+
+    /// The channels' incision of `field` at `dirs` through each level from the first to `finer`
+    /// below it, from a warm cache and as a bake, named `channels/<prefix>through-<k>`.
+    fn channels_of(
+        group: &mut BenchmarkGroup<'_, WallTime>,
+        prefix: &str,
+        field: &CoarseField,
+        dirs: &[[f64; 3]],
+        finer: u8,
+    ) {
         let channels = Channels::new(field.header(), SEED);
         let first = channels.first_level();
-        let dirs = directions(key(&field));
-        let mut group = c.benchmark_group("surface");
-        for through in first..=first + 4 {
+        for through in first..=first + finer {
             let mut warm = SynthCache::new();
-            for d in &dirs {
+            for d in dirs {
                 channels
-                    .incision_at(&field, *d, through, &mut warm)
+                    .incision_at(field, *d, through, &mut warm)
                     .expect("the whole field is held");
             }
-            group.bench_function(format!("channels/through-{through}/cached"), |b| {
+            group.bench_function(format!("channels/{prefix}through-{through}/cached"), |b| {
                 b.iter(|| {
                     let mut sum = 0.0;
-                    for d in &dirs {
+                    for d in dirs {
                         sum += channels
-                            .incision_at(&field, *d, through, &mut warm)
+                            .incision_at(field, *d, through, &mut warm)
                             .expect("the whole field is held")
                             .height_m;
                     }
                     black_box(sum)
                 });
             });
-            group.bench_function(format!("channels/through-{through}/bake"), |b| {
+            group.bench_function(format!("channels/{prefix}through-{through}/bake"), |b| {
                 b.iter(|| {
                     let mut cache = SynthCache::new();
                     let mut sum = 0.0;
-                    for d in &dirs {
+                    for d in dirs {
                         sum += channels
-                            .incision_at(&field, *d, through, &mut cache)
+                            .incision_at(field, *d, through, &mut cache)
                             .expect("the whole field is held")
                             .height_m;
                     }
@@ -313,7 +370,6 @@ mod bench {
                 });
             });
         }
-        group.finish();
     }
 
     /// Each part of the height function, and the whole, at the vertices of `patch` of `field`
