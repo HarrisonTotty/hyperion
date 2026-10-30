@@ -393,18 +393,27 @@ def assign_records(lines: list[str], items: list[RiskItem], prefix: str, task_id
             item.why = f"its {where} names several tasks: " + ", ".join(keys)
 
 
+def unfenced(lines: list[str], item: RiskItem) -> tuple[list[str], bool]:
+    """A Risks item's lines after its first that lie outside its code fences (a fence's own lines
+    count as inside), and whether a fence is still open at its end."""
+    fenced, out = False, []
+    for line in lines[item.start + 1 : item.body_end]:
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced:
+            out.append(line)
+    return out, fenced
+
+
 def split_mark(lines: list[str], item: RiskItem) -> str | None:
     """The split's mark a Risks bullet holds (KEEP_MARK, or a FILE_MARK naming its task): a line
     of its own at the indent of the bullet's text, outside a code fence (a mark quoted in a fence,
     or nested deeper, marks nothing); the last if several; None for none."""
     depth = len(re.match(r"(?:[-*+]|\d+[.)])\s+|", lines[item.start]).group(0))
-    fenced, found = False, None
-    for line in lines[item.start + 1 : item.body_end]:
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
-        elif not fenced and depth and indent(line) == depth:
-            if line.strip() == KEEP_MARK or FILE_MARK_RE.fullmatch(line.strip()):
-                found = line.strip()
+    found = None
+    for line in unfenced(lines, item)[0]:
+        if depth and indent(line) == depth and (line.strip() == KEEP_MARK or FILE_MARK_RE.fullmatch(line.strip())):
+            found = line.strip()
     return found
 
 

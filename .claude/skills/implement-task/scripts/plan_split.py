@@ -27,7 +27,8 @@ Usage (from the repository root, as `python3 -I`):
 What moves: each top-level bullet of "Risks and open points" that belongs to one task of the plan
 by plan_task.assign_records()'s rule, filed under plan_task.record_file_key(); a bullet stays in
 Risks when it names no task of the plan (an open point, a ruling across tasks), when it is a
-re-validation, when it is under a sub-heading of the section, and when it has a keep mark. The
+re-validation, when it is under a sub-heading of the section (unless it has a file mark), and when
+it has a keep mark. The
 marks are lines of their own inside a bullet, at its text's indent, which Prettier leaves as they
 are: `<!-- plan-split: keep -->` (plan_task.KEEP_MARK), which `--keep` adds, keeps it in Risks, and
 `<!-- plan-split: file under P06.T28.f -->` (plan_task.FILE_MARK), which `--assign` adds, files it
@@ -175,9 +176,18 @@ def first_line(line: str) -> str:
     return re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", plain(line)).strip()
 
 
-def fence_open(p: list[str], item: pt.RiskItem) -> bool:
-    """Whether a bullet ends inside a code fence, where a mark would be code."""
-    return sum(p[i].lstrip().startswith(("```", "~~~")) for i in range(item.start, item.body_end)) % 2 == 1
+@dataclass(frozen=True)
+class Whole:
+    """A Risks bullet named by its whole text, its lines joined without its mark: how `--verify`
+    names the bullets a split's marks record (recorded_overrides()), where a first line could name
+    several, or a bullet filed before the revision."""
+
+    text: str
+
+
+def bullet_text(p: list[str], item: pt.RiskItem, without: str | None = None) -> str:
+    """A bullet's lines joined, less any line that is `without` (a mark) once stripped."""
+    return "\n".join(x for x in p[item.start : item.body_end] if without is None or x.strip() != without)
 
 
 def apply_overrides(p, result_items, firsts, assign, keep, ids) -> tuple[list[str], dict[int, str]]:
@@ -185,48 +195,69 @@ def apply_overrides(p, result_items, firsts, assign, keep, ids) -> tuple[list[st
     an override moves from where the rule puts it is to gain (by its index): a file mark naming the
     task for `--assign`, the keep mark for `--keep`. A bullet the rule puts there already, or marked
     so, needs none; one marked otherwise refuses the override, as does one that ends inside a code
-    fence."""
+    fence, or one that the other override names too. The overrides given by first line come first;
+    one given by a Whole (recorded_overrides()') applies only to a bullet no other override names
+    and that is the only bullet of its text, and else to none."""
     problems: list[str] = []
     marks: dict[int, str] = {}
+    named: dict[int, str] = {}  # item index -> the override that names it, "--assign" or "--keep"
 
-    def find(text: str) -> int | None:
-        hits = [k for k, (it, f) in enumerate(zip(result_items, firsts)) if it.kind == "bullet" and f.startswith(text)]
+    def find(sel: str | Whole, what: str) -> int | None:
+        if isinstance(sel, Whole):
+            hits = [k for k, it in enumerate(result_items) if it.kind == "bullet" and bullet_text(p, it) == sel.text]
+            return hits[0] if len(hits) == 1 and hits[0] not in named else None
+        hits = [k for k, (it, f) in enumerate(zip(result_items, firsts)) if it.kind == "bullet" and f.startswith(sel)]
         if len(hits) != 1:
-            problems.append(f"{len(hits)} Risks bullets start with {text!r}, not one")
+            problems.append(f"{len(hits)} Risks bullets start with {sel!r}, not one")
+            return None
+        if named.get(hits[0], what) != what:
+            problems.append(f"{what} {sel!r}: the bullet is named by {named[hits[0]]} too")
             return None
         return hits[0]
 
-    for text, task in assign:
+    def assign_one(sel: str | Whole, task: str) -> None:
         task = pt.normalise_id(task)
         key = pt.record_file_key(task, ids)
         if key is None:
-            problems.append(f"--assign {text!r}: {task} has no entry under Tasks, nor has its parent")
-            continue
-        if (k := find(text)) is None:
-            continue
+            problems.append(f"--assign {sel!r}: {task} has no entry under Tasks, nor has its parent")
+            return
+        if (k := find(sel, "--assign")) is None:
+            return
+        named[k] = "--assign"
         item, mark = result_items[k], pt.split_mark(p, result_items[k])
         filed = pt.FILE_MARK_RE.fullmatch(mark or "")
         if mark is not None and not (filed and pt.record_file_key(filed.group(1), ids) == key):
-            problems.append(f"--assign {text!r}: the bullet has the mark `{mark}`; delete its line first")
+            problems.append(f"--assign {sel!r}: the bullet has the mark `{mark}`; delete its line first")
         elif mark is None and item.key == key:
             pass  # the rule files it there already
-        elif mark is None and fence_open(p, item):
-            problems.append(f"--assign {text!r}: the bullet ends inside a code fence; close it first")
+        elif mark is None and pt.unfenced(p, item)[1]:
+            problems.append(f"--assign {sel!r}: the bullet ends inside a code fence; close it first")
         elif mark is None:
             item.key, item.why = key, f"--assign {task}, marked"
             marks[k] = pt.FILE_MARK.format(task=task)
-    for text in keep:
-        if (k := find(text)) is None or result_items[k].key is None:
-            continue  # the rule keeps it already (a keep mark among the reasons)
+
+    def keep_one(sel: str | Whole) -> None:
+        if (k := find(sel, "--keep")) is None:
+            return
+        named[k] = "--keep"
         item, mark = result_items[k], pt.split_mark(p, result_items[k])
-        if mark is not None or k in marks:
-            problems.append(f"--keep {text!r}: the bullet has the mark `{mark or marks[k]}` (or an --assign); "
-                            "delete its line first")
-        elif fence_open(p, item):
-            problems.append(f"--keep {text!r}: the bullet ends inside a code fence; close it first")
+        if item.key is None:
+            pass  # the rule keeps it already (a keep mark among the reasons)
+        elif mark is not None:
+            problems.append(f"--keep {sel!r}: the bullet has the mark `{mark}`; delete its line first")
+        elif pt.unfenced(p, item)[1]:
+            problems.append(f"--keep {sel!r}: the bullet ends inside a code fence; close it first")
         else:
             item.key, item.why = None, "--keep, marked"
             marks[k] = pt.KEEP_MARK
+
+    for given in (True, False):
+        for sel, task in assign:
+            if isinstance(sel, Whole) != given:
+                assign_one(sel, task)
+        for sel in keep:
+            if isinstance(sel, Whole) != given:
+                keep_one(sel)
     return problems, marks
 
 
@@ -615,30 +646,28 @@ def records_dirty(root: Path, plan: Path) -> bool:
     return out.returncode == 0 and bool(out.stdout.strip())
 
 
-def recorded_overrides(rev_text: str, text: str, records: dict[str, str]) -> tuple[list[tuple[str, str]], list[str]]:
-    """The overrides a committed split records in its marks, for `--verify` to split REV's plan as
-    it was split: `--assign` for each record file's bullet (`records`, the working tree's) with a
-    file mark, `--keep` for each bullet of the plan's Risks (`text`) with a keep mark, each by its
-    first line, where REV's Risks has a bullet of that first line (one filed before REV has not)."""
+def recorded_overrides(text: str, records: dict[str, str]) -> tuple[list[tuple[Whole, str]], list[Whole]]:
+    """The overrides a committed split records in its marks, for `--verify` to split the revision's
+    plan as it was split: `--assign` for each record file's bullet (`records`, the working tree's)
+    with a file mark, `--keep` for each bullet of the plan's Risks (`text`) with a keep mark, each
+    named by its whole text without the mark (a Whole), so that each applies only to the bullet the
+    split marked, as it stood unmarked; a bullet filed or marked before the revision gets none."""
     def bullets(q: list[str], start: int, stop: int) -> list[pt.RiskItem]:
         return [it for it in pt.top_items(q, start, stop) if it.kind == "bullet"]
 
-    rp = [plain(x) for x in split_lines(rev_text)]
-    span = pt.named_section(rp, "risks")
-    at_rev = {first_line(rp[it.start]) for it in bullets(rp, span[0] + 1, span[1])} if span else set()
-    assign: list[tuple[str, str]] = []
-    keep: list[str] = []
+    assign: list[tuple[Whole, str]] = []
+    keep: list[Whole] = []
     p = [plain(x) for x in split_lines(text)]
     span = pt.named_section(p, "risks")
     for it in bullets(p, span[0] + 1, span[1]) if span else []:
-        if pt.split_mark(p, it) == pt.KEEP_MARK and first_line(p[it.start]) in at_rev:
-            keep.append(first_line(p[it.start]))
+        if pt.split_mark(p, it) == pt.KEEP_MARK:
+            keep.append(Whole(bullet_text(p, it, pt.KEEP_MARK)))
     for body in records.values():
         q = [plain(x) for x in split_lines(body)]
         for it in bullets(q, 0, len(q)):
-            filed = pt.FILE_MARK_RE.fullmatch(pt.split_mark(q, it) or "")
-            if filed and first_line(q[it.start]) in at_rev:
-                assign.append((first_line(q[it.start]), filed.group(1)))
+            mark = pt.split_mark(q, it)
+            if filed := pt.FILE_MARK_RE.fullmatch(mark or ""):
+                assign.append((Whole(bullet_text(q, it, mark)), filed.group(1)))
     return assign, keep
 
 
@@ -674,10 +703,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.verify:
             root = pt.repo_root()
             original, existing = at_revision(root, plan, args.verify)
-            # The overrides the committed split made, from its marks, beside any given.
-            marked_assign, marked_keep = recorded_overrides(original, read_text(plan), existing_records(plan))
-            assign += [a for a in marked_assign if a not in assign]
-            keep += [k for k in marked_keep if k not in keep]
+            # The overrides the committed split made, from its marks; the given ones come first.
+            marked_assign, marked_keep = recorded_overrides(read_text(plan), existing_records(plan))
+            assign += marked_assign
+            keep += marked_keep
         else:
             original, existing = read_text(plan), existing_records(plan)
         result = split_text(plan, original, existing, assign, keep)

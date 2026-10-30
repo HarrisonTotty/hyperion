@@ -336,17 +336,43 @@ class FileMark(unittest.TestCase):
         first = split_fixture(keep=["**Deviations in T4.a–b"],
                               assign=[("**Deviations in T1, under a sub-heading.**", "P07.T1"),
                                       ("**An open point.**", "P07.T2.b")])
-        assign, keep = ps.recorded_overrides(PLAN, first.text, first.records)
-        self.assertEqual(sorted(assign), [("**An open point.** It names no task.", "P07.T2.b"),
-                                          ("**Deviations in T1, under a sub-heading.** It stays.", "P07.T1")])
-        self.assertEqual(keep, ["**Deviations in T4.a–b, as built.** Both subtasks."])
+        assign, keep = ps.recorded_overrides(first.text, first.records)
+        self.assertEqual(sorted((w.text, task) for w, task in assign),
+                         [("- **An open point.** It names no task.", "P07.T2.b"),
+                          ("- **Deviations in T1, under a sub-heading.** It stays.", "P07.T1")])
+        self.assertEqual(keep, [ps.Whole("- **Deviations in T4.a–b, as built.** Both subtasks.")])
         again = split_fixture(assign=assign, keep=keep)
         self.assertEqual((again.text, again.records), (first.text, first.records))
         # An --assign to where the rule files it already adds no mark.
         self.assertEqual(split_fixture(assign=[("**Deviations in T1, as built.**", "P07.T1")]).marked, {})
-        # Against the split itself, every bullet already filed or marked: no override.
-        self.assertEqual(ps.recorded_overrides(first.text, first.text, first.records),
-                         ([], ["**Deviations in T4.a–b, as built.** Both subtasks."]))
+        # Against the split itself, every bullet already filed or marked: they apply to none.
+        again = split_fixture(first.text, dict(first.records), assign=assign, keep=keep)
+        self.assertEqual((again.text, again.records, again.marked), (first.text, {}, {}))
+
+    def test_a_recorded_override_names_its_bullet_whole(self) -> None:
+        # A marked bullet filed before the revision, whose first line a bullet of the revision
+        # shares, names no bullet there; nor does a keep mark the revision holds already, beside a
+        # bullet whose first line starts the same.
+        filed = {"P07.T4.b": "- **An open point.** Another body, filed earlier.\n" + FILED}
+        assign, _ = ps.recorded_overrides(PLAN, filed)
+        self.assertEqual(split_fixture(assign=assign).marked, {})
+        marked = PLAN.replace("- **Deviations in T1, as built.** T1's record.\n",
+                              "- **Deviations in T1, as built.** T1's record.\n" + KEEP
+                              + "- **Deviations in T1, as built.** T1's record, and more.\n")
+        _, keep = ps.recorded_overrides(marked, {})
+        self.assertEqual(len(keep), 1)
+        result = split_fixture(marked, keep=keep)  # no "2 Risks bullets start with" refusal
+        self.assertEqual((result.marked, result.text.count(pt.KEEP_MARK)), ({}, 1))
+
+    def test_a_given_override_comes_before_a_recorded_one_and_two_given_kinds_conflict(self) -> None:
+        recorded = (ps.Whole("- **An open point.** It names no task."), "P07.T2.b")
+        result = split_fixture(assign=[("**An open point.**", "P07.T4.b"), recorded])
+        self.assertEqual(by_first(result)["**An open point.** It names no"].key, "P07.T4.b")
+        self.assertIn(pt.FILE_MARK.format(task="P07.T4.b"), result.records["P07.T4.b"])
+        with self.assertRaises(ps.UsageError) as caught:  # the rule files it under P07.T1 already
+            split_fixture(assign=[("**Deviations in T1, as built.**", "P07.T1")],
+                          keep=["**Deviations in T1, as built.**"])
+        self.assertIn("named by --assign too", str(caught.exception))
 
 
 class AgainSplit(unittest.TestCase):
