@@ -14,8 +14,10 @@
 //!   padded at the larger of the band's layer's [`pad_speed`] and the feature's own members' bound
 //!   ([`FeatureInterior::member_speed_bound`], P09.T23.b), so that where the bound is the lower the
 //!   cells are the layer's. The features are looked up about the sphere padded at
-//!   [`UNBOUND_PAD_SPEED`], above every feature's bound. Each member is then tested at the sphere's
-//!   time, drifting in a straight line from its epoch position at its velocity, the cluster's bulk
+//!   [`UNBOUND_PAD_SPEED`], above every feature's bound. Only the candidates placed within the
+//!   radius padded at the bound are drawn ([`FeatureInterior::members_in_cell_near`], P09.T40.a),
+//!   since no other can reach the sphere. Each member is then tested at the sphere's time,
+//!   drifting in a straight line from its epoch position at its velocity, the cluster's bulk
 //!   motion plus its own (P09.T10), against the unpadded radius. Members not yet born at that time
 //!   (a young nursery's, drawn with ages from −H) are dropped.
 //!
@@ -263,13 +265,14 @@ impl SystemSource for FeatureMemberSource<'_> {
         for interior in self.interiors_near(galaxy, sphere.centre(), padded) {
             let local = local_offset(interior.feature().position(), sphere.centre());
             let bound = interior.member_speed_bound();
+            let within = member_reach(sphere.radius(), t, bound);
             for band in BANDS_COARSEST_FIRST {
                 if !layers.contains(band.layer()) {
                     continue;
                 }
                 let reach = band_reach(sphere.radius(), t, band.layer(), bound);
                 for cell in interior.grid().cells_touching(&local, reach) {
-                    interior.members_in_cell(galaxy, band, cell, &mut members);
+                    interior.members_in_cell_near(galaxy, band, cell, &local, within, &mut members);
                     for (member, _) in &members {
                         if let Some(hit) =
                             hit_at(member.record(), member.velocity(), sphere, elapsed)
@@ -327,6 +330,23 @@ fn band_reach(
     radius + pad_for(t, KilometresPerSecond::new(speed))
 }
 
+/// How far from a query's centre a member at the epoch may lie and still be inside its sphere of
+/// `radius` at `t`, ly, for members moving below `bound` (P09.T40.a): the radius plus the
+/// farthest such a member drifts, with margins over the rounding.
+///
+/// A member's local position, which this is compared with, and its galactic one, which
+/// [`hit_at`] tests, differ by the rounding of a translation and a distance, some 10⁻¹² ly at a
+/// feature's 4,096 ly reach; the margins are far above it, and above the rounding of the drift, so
+/// that no member [`hit_at`] keeps is left undrawn.
+#[must_use]
+fn member_reach(radius: LightYears, t: UniverseTime, bound: KilometresPerSecond) -> f64 {
+    /// The relative margin on the drift.
+    const DRIFT_MARGIN: f64 = 1e-9;
+    /// The absolute margin, ly.
+    const NEAR_MARGIN_LY: f64 = 1e-6;
+    radius.value() + pad_for(t, bound).value() * (1.0 + DRIFT_MARGIN) + NEAR_MARGIN_LY
+}
+
 /// The hit a member makes in `sphere`, drifting at `velocity` for `elapsed` since the epoch, or
 /// `None` if it is outside the unpadded radius then or not yet born.
 #[must_use]
@@ -362,6 +382,7 @@ mod tests {
     use hyperion_testkit::float::assert_same_bits;
 
     use super::*;
+    use crate::galaxy::PointLy;
     use crate::galaxy::features::FeatureId;
     use crate::galaxy::features::FeatureProcess;
     use crate::galaxy::features::catalogue::{FeatureMarks, NoFeatureCache};
@@ -392,6 +413,7 @@ mod tests {
     fn the_member_source_finds_and_counts_what_a_scan_finds() {
         a_query_in_an_open_cluster_finds_every_member_a_scan_finds();
         skipping_the_grids_that_miss_the_sphere_changes_nothing();
+        drawing_only_the_near_members_keeps_every_near_member();
         the_census_does_not_depend_on_what_is_cached();
         hits_count_in_their_band_s_layer_and_the_unborn_are_dropped();
         a_cluster_s_speed_bound_is_its_bulk_and_larger_term_and_holds_its_members();
@@ -616,6 +638,33 @@ mod tests {
             }
         }
         assert!(skipped > 0, "no grid is kept clear");
+    }
+
+    /// Run on its one build of the fixture by
+    /// [`the_member_source_finds_and_counts_what_a_scan_finds`].
+    fn drawing_only_the_near_members_keeps_every_near_member() {
+        let galaxy = galaxy();
+        let interior = open_cluster();
+        let near = PointLy::new(1.5, -0.5, 1.0);
+        let within = 3.0;
+        let (mut all, mut kept) = (Vec::new(), Vec::new());
+        let mut found = 0;
+        for band in MassBand::ALL {
+            for cell in interior
+                .grid()
+                .cells_touching(&near, LightYears::new(within))
+            {
+                interior.members_in_cell(galaxy, band, cell, &mut all);
+                interior.members_in_cell_near(galaxy, band, cell, &near, within, &mut kept);
+                all.retain(|(_, p)| {
+                    let (dx, dy, dz) = (p.x - near.x, p.y - near.y, p.z - near.z);
+                    (dx * dx + dy * dy + dz * dz).sqrt() <= within
+                });
+                assert_eq!(kept, all, "band {band:?}, cell {cell:?}");
+                found += kept.len();
+            }
+        }
+        assert!(found > 5, "{found} members within {within} ly");
     }
 
     fn all_layers() -> LayerSet {

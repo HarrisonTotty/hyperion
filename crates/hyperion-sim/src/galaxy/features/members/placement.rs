@@ -262,11 +262,29 @@ impl FeatureInterior {
         proposal: &CellProposal,
         local: &LocalCell,
     ) -> Option<(MemberRecord, PointLy)> {
+        self.candidate_where(galaxy, band, cell, index, (proposal, local), |_| true)
+    }
+
+    /// [`candidate_under`](Self::candidate_under), drawn only if `keep` takes its local position:
+    /// one it refuses is `None`, its class and its member unmade. Each candidate's draws are on
+    /// streams of its own ID, so leaving one unmade changes no other.
+    fn candidate_where(
+        &self,
+        galaxy: &Galaxy,
+        band: MassBand,
+        cell: NestedCell,
+        index: u16,
+        (proposal, local): (&CellProposal, &LocalCell),
+        keep: impl Fn(&PointLy) -> bool,
+    ) -> Option<(MemberRecord, PointLy)> {
         let id = self.member_id(band, cell, index);
         let key = ObjectKey::from(SystemId::from(id));
         let mut position = Stream::open(galaxy.seed(), tags::MEMBER_POSITION, key);
         let u = [0; 3].map(|_| position.uniform());
         let (p, bound) = proposal.place(local, u)?;
+        if !keep(&p) {
+            return None;
+        }
         let mark = Stream::open(galaxy.seed(), tags::MEMBER_ACCEPT, key).mark();
         let class = self.table.pick(band, &p, mark, bound)?;
         let at = self.galactic(&p);
@@ -317,6 +335,40 @@ impl FeatureInterior {
         out.extend(
             (0..n).filter_map(|i| self.candidate_under(galaxy, band, cell, i, &proposal, &local)),
         );
+    }
+
+    /// The accepted members of `band` in `cell` within `within` ly of the local point `near`, in
+    /// index order, with their local positions, into `out` (cleared first):
+    /// [`members_in_cell`](Self::members_in_cell)'s that lie so near, the rest left undrawn
+    /// (P09.T40.a).
+    ///
+    /// A range query keeps only the members its sphere holds at its time, and a member's draw, its
+    /// class, mass, age and velocity, is nearly all its cost: in a 1 ly query about a globular's
+    /// centre the cells it touches hold four times the members its sphere does (measured
+    /// 2026-10-30).
+    pub fn members_in_cell_near(
+        &self,
+        galaxy: &Galaxy,
+        band: MassBand,
+        cell: NestedCell,
+        near: &PointLy,
+        within: f64,
+        out: &mut Vec<(MemberRecord, PointLy)>,
+    ) {
+        out.clear();
+        let (proposal, local) = self.proposal(band, cell);
+        let n = count_from_mean(
+            galaxy,
+            self.member_id(band, cell, 0),
+            proposal.expected(&local),
+        );
+        let keep = |p: &PointLy| {
+            let (dx, dy, dz) = (p.x - near.x, p.y - near.y, p.z - near.z);
+            (dx * dx + dy * dy + dz * dz).sqrt() <= within
+        };
+        out.extend((0..n).filter_map(|i| {
+            self.candidate_where(galaxy, band, cell, i, (&proposal, &local), keep)
+        }));
     }
 }
 
