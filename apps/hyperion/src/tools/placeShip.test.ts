@@ -261,6 +261,10 @@ class FakeServer {
       case "extinction_map":
       case "extinction":
       case "resolve_system":
+      case "features_in_range":
+      case "galaxy_features":
+      case "feature_detail":
+      case "black_hole_state":
         break;
     }
     return { code: "unsupported", message: `not faked: ${body.kind}`, field: null };

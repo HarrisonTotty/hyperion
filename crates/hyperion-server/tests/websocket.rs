@@ -5,8 +5,8 @@ mod common;
 
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
-    ErrorCode, GalacticPosition, MassLayer, PROTOCOL_VERSION, RequestBody, RequestId, ResponseBody,
-    ServerMessage, SystemsInRangeRequest, UniverseTime,
+    BlackHoleStateRequest, ErrorCode, GalacticPosition, MassLayer, PROTOCOL_VERSION, RequestBody,
+    RequestId, ResponseBody, ServerMessage, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
 };
 use hyperion_server::limits::{MAX_CONSECUTIVE_MALFORMED_FRAMES, MAX_INBOUND_FRAME_BYTES};
 
@@ -134,6 +134,32 @@ async fn a_request_that_does_not_parse_is_answered_under_its_id() {
         error_code(&client.next_message().await, 4),
         ErrorCode::Unsupported
     );
+    client.close().await;
+    server.stop().await;
+}
+
+/// Plan 09's kinds are the protocol's (P09.T39), so a request of one parses and is answered under
+/// its own ID as a server that does not serve the kind answers it: `unsupported`, not
+/// `bad_request`, until P09.T40.b serves it (plan 04, design note 15).
+#[tokio::test]
+async fn a_feature_kind_is_answered_unsupported_until_it_is_served() {
+    let server = TestServer::start().await;
+    let mut client = server.connect().await;
+    client.hello().await;
+    let error = client
+        .request(RequestBody::BlackHoleState(BlackHoleStateRequest {
+            universe: UniverseIdHex::from_u64(42),
+            time: UniverseTime::default(),
+        }))
+        .await
+        .expect_err("the kind is not served yet");
+    assert_eq!(error.code, ErrorCode::Unsupported, "{error:?}");
+    assert_eq!(
+        error.message,
+        "request kind `black_hole_state` is not served by this server yet"
+    );
+    assert_eq!(error.field, None);
+    assert_eq!(client.ping(3).await, ServerMessage::Pong { nonce: 3 });
     client.close().await;
     server.stop().await;
 }

@@ -286,6 +286,9 @@ pub(crate) mod tests {
                     stellar: None,
                     fe_h_dex: None,
                     observed: Some(observed()),
+                    origin: None,
+                    member_class: None,
+                    supernova: None,
                 },
             })),
             json!({

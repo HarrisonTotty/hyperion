@@ -165,6 +165,19 @@ hex64_newtype!(
     "a system ID"
 );
 
+hex64_newtype!(
+    /// A large feature's ID (galaxy plan 09, P09.T39): the system ID its members share, with the
+    /// member's own bits zeroed, so it also says where to regenerate the feature from.
+    ///
+    /// A catalogue feature's is the word plan 01's `FeatureRef::object_word` gives, the members'
+    /// IDs with bits 30–0 zero (`e842000280000000` for candidate 5 of feature cell (0, 0, 0)); the
+    /// galactic centre's is its members' prefix with every lower bit zero, `f000000000000000`.
+    /// The server resolves every feature ID a client sends before using it, since a well-formed ID
+    /// need not name a feature.
+    FeatureIdHex,
+    "a feature ID"
+);
+
 /// The number of hexadecimal digits in the body index of a body ID's text form.
 const BODY_INDEX_DIGITS: usize = 4;
 
@@ -338,6 +351,27 @@ mod tests {
         assert_wire_form(
             &SystemIdHex::from_u64(0x0200_0800_2000_0000),
             json!("0200080020000000"),
+        );
+        assert_wire_form(
+            &FeatureIdHex::from_u64(0xe842_0002_8000_0000),
+            json!("e842000280000000"),
+        );
+    }
+
+    #[test]
+    fn a_feature_id_is_refused_as_a_system_id_is() {
+        assert_eq!(
+            FeatureIdHex::try_from("E842000280000000".to_owned()),
+            Err(ParseHex64Error::InvalidDigit)
+        );
+        assert_eq!(
+            FeatureIdHex::try_from("e8420002800000".to_owned()),
+            Err(ParseHex64Error::WrongLength)
+        );
+        let error = serde_json::from_value::<FeatureIdHex>(json!(1234)).unwrap_err();
+        assert!(
+            error.to_string().contains("invalid type"),
+            "unexpected error: {error}"
         );
     }
 

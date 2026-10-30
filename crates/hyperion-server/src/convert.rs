@@ -556,6 +556,10 @@ fn system_record_moving(
         stellar: brief,
         fe_h_dex,
         observed,
+        // Plan 09's P09.T40 says what placed each row; until then every row is plan 04's.
+        origin: None,
+        member_class: None,
+        supernova: None,
     }
 }
 

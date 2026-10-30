@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::features::{MemberClassWire, SupernovaStateWire, SystemOriginWire};
 use crate::observe::{ObservedDto, QueryModeDto};
 use crate::primitives::{GalacticPosition, SeedHex, SystemIdHex, UniverseIdHex, UniverseTime};
 use crate::stellar::StellarBriefDto;
@@ -590,6 +591,28 @@ pub struct SystemRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub observed: Option<ObservedDto>,
+    /// What placed it: a layer's grid, a feature, the galactic centre or a catalogue class (plan
+    /// 09, P09.T39).
+    ///
+    /// Absent from a server that does not say, as one built before P09.T40 does not, so that its
+    /// row is exactly plan 04's; a server that says sends it on every row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub origin: Option<SystemOriginWire>,
+    /// Its class in its feature's tables, for a member of a feature or of the galactic centre
+    /// (plan 09, P09.T39); absent from every other row, and from every row of a server that does
+    /// not send `origin`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub member_class: Option<MemberClassWire>,
+    /// What a supernova catalogue entry is at the query's time: its progenitor, the supernova and
+    /// its shell, or the bare remnant (plan 09, P09.T39). Absent from every other row, and from
+    /// every row of a server that does not send `origin`.
+    // Boxed: the state is larger than the rest of the row's optional fields, and few rows carry
+    // one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<SupernovaStateWire>", optional)]
+    pub supernova: Option<Box<SupernovaStateWire>>,
 }
 
 #[cfg(test)]
@@ -1014,6 +1037,9 @@ mod tests {
                 stellar: None,
                 fe_h_dex: None,
                 observed: None,
+                origin: None,
+                member_class: None,
+                supernova: None,
             },
             SystemRecord {
                 id: SystemIdHex::from_u64(0x6000_0000_0000_0001),
@@ -1030,6 +1056,9 @@ mod tests {
                 stellar: None,
                 fe_h_dex: None,
                 observed: None,
+                origin: None,
+                member_class: None,
+                supernova: None,
             },
         ]
     }
@@ -1331,6 +1360,9 @@ mod tests {
                 }),
                 fe_h_dex: None,
                 observed: None,
+                origin: None,
+                member_class: None,
+                supernova: None,
             },
             json!({
                 "id": "0200080020000000",
@@ -1437,6 +1469,9 @@ mod tests {
             }),
             fe_h_dex: None,
             observed: None,
+            origin: None,
+            member_class: None,
+            supernova: None,
             ..two_rows().remove(1)
         };
         let brown_dwarf = SystemRecord {
@@ -1461,6 +1496,9 @@ mod tests {
             }),
             fe_h_dex: None,
             observed: None,
+            origin: None,
+            member_class: None,
+            supernova: None,
         };
         let rogue_planet = SystemRecord {
             id: SystemIdHex::from_u64(0xc1ff_3657_7ff8_0005),
@@ -1477,6 +1515,9 @@ mod tests {
             stellar: None,
             fe_h_dex: Some(-0.375),
             observed: None,
+            origin: None,
+            member_class: None,
+            supernova: None,
         };
         vec![star, brown_dwarf, rogue_planet]
     }
@@ -1668,5 +1709,75 @@ mod tests {
             (LayerStatus::BelowMassFloor, "below_mass_floor"),
             (LayerStatus::OverCellBudget, "over_cell_budget"),
         ]);
+    }
+
+    /// Plan 09's three row fields (P09.T39): a cluster member's origin and class, and a catalogue
+    /// supernova's origin and state. Each is absent from the rows above, as a server built before
+    /// P09.T40 sends them.
+    #[test]
+    fn system_record_wire_form_with_an_origin_a_member_class_and_a_supernova() {
+        use crate::features::tests::{FEATURE, young_supernova, young_supernova_json};
+        use crate::features::{
+            CatalogueClassWire, ClassKindWire, GenerationWire, MultiplicityWire,
+        };
+        use crate::primitives::FeatureIdHex;
+
+        let row_json = |extra: serde_json::Value| {
+            let mut row = json!({
+                "id": "0200080020000000",
+                "designation": "Vorth AB-C e4-17",
+                "position": { "cell_ly": [26_012, -3, -2], "offset_m": [1.5e15, 0.0, 9.0e15] },
+                "layer": "e",
+                "initial_mass_msun": 11.25,
+                "age_myr": 7_250.5,
+                "population": "old_thin_disc",
+                "velocity_km_s": [-12.5, 231.25, 7.0],
+            });
+            for (key, value) in extra.as_object().unwrap() {
+                row[key] = value.clone();
+            }
+            row
+        };
+
+        let mut member = two_rows().swap_remove(0);
+        member.origin = Some(SystemOriginWire::FeatureMember {
+            feature: FeatureIdHex::from_u64(FEATURE),
+        });
+        member.member_class = Some(MemberClassWire::Cluster {
+            kind: ClassKindWire::WhiteDwarf,
+            band: MassLayer::D,
+            generation: GenerationWire::Second,
+            multiplicity: MultiplicityWire::Single,
+        });
+        assert_wire_form(
+            &member,
+            row_json(json!({
+                "origin": { "type": "feature_member", "feature": "e842000280000000" },
+                "member_class": {
+                    "type": "cluster",
+                    "kind": "white_dwarf",
+                    "band": "d",
+                    "generation": "second",
+                    "multiplicity": "single",
+                },
+            })),
+        );
+
+        let mut supernova = two_rows().swap_remove(0);
+        supernova.origin = Some(SystemOriginWire::CatalogueSystem {
+            class: CatalogueClassWire::CoreCollapse,
+        });
+        supernova.supernova = Some(Box::new(young_supernova()));
+        assert_wire_form(
+            &supernova,
+            row_json(json!({
+                "origin": { "type": "catalogue_system", "class": "core_collapse" },
+                "supernova": young_supernova_json(),
+            })),
+        );
+
+        let mut grid = two_rows().swap_remove(0);
+        grid.origin = Some(SystemOriginWire::Grid);
+        assert_wire_form(&grid, row_json(json!({ "origin": { "type": "grid" } })));
     }
 }

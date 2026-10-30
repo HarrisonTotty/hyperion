@@ -4083,3 +4083,86 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     the wasip1 suite (wasmtime 49.0.1). Run by name on the pod before the gate, it passes in
     12.1 s with the digest blessed natively on x86-64; the gate's wasip1 suite runs it again with
     the module's other fast tests.
+- **P09.T39 as built (lane `p09-wire`, 2026-10-29, on 7a674ea at `GENERATOR_VERSION` 23 and
+  `PROTOCOL_VERSION` 3; no output moves).** Types only. `hyperion-protocol` gains plan 09's four
+  kinds and their payloads (`features.rs`, new; `FeatureIdHex` in `primitives.rs`; the kinds in
+  `envelope.rs`, appended to `REQUEST_KINDS` as `features_in_range`, `galaxy_features`,
+  `feature_detail` and `black_hole_state`) and the range row's optional `origin`, `member_class`
+  and `supernova` (`galaxy.rs`). The server answers each kind `unsupported` through
+  `not_served_yet` until P09.T40.b, as plan 04's design note 15 has a server answer a kind it does
+  not serve, classes `features_in_range` and `galaxy_features` large in `is_large`, and writes the
+  three row fields `None` (`convert.rs`, and the range-query bench's row), so no wire form, server
+  golden, protocol fixture or client fixture moves. `just gen-protocol` adds 40 binding files and
+  changes three, every new type exported from `packages/protocol/src/index.ts`; the client's fake
+  server in `apps/hyperion/src/tools/placeShip.test.ts` lists the four kinds. Every shape is free to
+  change until the first build that sends a value of it (P09.T40). Choices the task leaves open
+  (lean, 2026-10-29), as built:
+  - _IDs._ `FeatureIdHex` is the 64-bit word a feature's members share with their member bits
+    zeroed: `FeatureRef::object_word` for a catalogue feature, `f000000000000000` for the galactic
+    centre (a wire convention the sim does not name, which P09.T40 resolves). The word is also a
+    well-formed member `SystemId` (a zero slot is band A's member 0 of nested cell 0), so T40
+    refuses a word that does not round-trip.
+  - _Requests._ `FeatureDetailRequest` is `{ universe, feature, time }`, not `{ feature }`: an ID
+    names no universe, and a feature's kind and structure depend on the time. Each `kinds` list is
+    non-empty with no repeat, which T40.b validates.
+  - _`features_in_range`._ `FeatureSummary` adds `designation`, for P09.T41.c, beside the plan's
+    fields; `age_myr` (a cloud has none), `emission` and `bubble_radius_ly` are nullable, and
+    `extent_ly` is the radius at the time, not `reach()`. A feature is within range when its sphere
+    of `extent_ly` meets the query's. The census has a line per requested kind,
+    `{ kind, returned, status }`, with `status` one of `included`, `over_cell_budget` and
+    `not_generated` (streams and dwarf cores, plan 10's global list); the plan names no limit, so
+    there is no `expected` and no `over_limit`.
+  - _`galaxy_features`._ Its kinds are `MapFeatureKindWire` (`globular`, `galactic_centre`,
+    `bright_shell`), not `FeatureKindWire`, because a bright shell is no `FeatureKind`. A bright
+    shell is a remnant whose shell is non-radiative (free expansion or Sedov–Taylor), sent as
+    `BrightShell { system, designation, site, age_yr, shell }`. The answer's lists are tagged by
+    kind, so that a kind fixes its entries' type (TypeScript review), each `complete` or
+    `not_generated`. There is no `pending` on the wire: the request waits, as the density map's
+    does, and P09.T41.b's "pending" is the client's own request state.
+  - _`feature_detail`._ The reply echoes `universe` and `time` and carries the `FeatureSummary`
+    beside a structure tagged `cluster` (radii, central escape speed, relaxation time, the
+    core-collapse flag, the black-hole count and the classes), `centre` (the influence and
+    loss-cone radii and the classes) or `cloud` (core radius, central density). `ClassCountWire` is
+    `{ class, initial_mass_min_msun, initial_mass_max_msun, mean_mass_msun, expected }`; a profile's
+    shape and a tail's length are not sent. `MemberClassWire` is tagged
+    `cluster { kind, band, generation, multiplicity }`, `centre { kind, band, episode, tracer }` or
+    `listed { class }` (an entry of a feature-level list), with `band` as `MassLayer`. The episode
+    is the index into the centre's `age_components`, without which its four `Stars` episodes would
+    share one class (plan-conformance review).
+  - _The shell._ `ShellSummary` is the shell alone (radius, shock speed, phase, emission flags). The
+    remnant's offset, its bow shock, its nebula and a Type Ia survivor's offset are a
+    `RemnantSummary` beside it, as the sim splits `ShellState` and `RemnantState`, so that a bare
+    remnant keeps them; the plan's text puts the offset and the nebula in `ShellSummary`.
+    `SupernovaStateWire` is `progenitor { until_explosion_yr, pair_period_s }`,
+    `supernova { age_yr, shell, remnant }` or `bare_remnant { age_yr, remnant }`.
+  - _`black_hole_state`._ It adds the black hole's `id` (`f000000700000000`). `luminosity` is
+    optional on the wire, as the lane's brief set it while P09.T30.b was building `luminosity_at`;
+    that is in the tree now, and T40 may send it on every answer. It comes by part (quiescent,
+    flares, tails, total; unabsorbed 2–10 keV). The plan's "recent disruptions" are every
+    disruption at or before the time, newest first, back to the start of the source horizon
+    (`TidalDisruptionWire { victim, time, star_mass_msun, outcome, peak_luminosity_w }`).
+  - _Origins._ `SystemOriginWire` is `grid` (with no component: the row names its population),
+    `feature_member { feature }`, `centre_member` and `catalogue_system { class }`, and
+    `CatalogueClassWire` holds the registry's nine values in value order. The sim's
+    `SystemOrigin::CatalogueSystem(ClassId)` is P09.T33.a's and was not in this lane's tree: nothing
+    here changes when it lands, and T40 converts it by `ClassId::value()`. The row's `supernova` is
+    boxed, since few rows carry one.
+  - _Not taken (reviews)._ Nesting `member_class` and `supernova` under `origin` (TypeScript
+    review): the plan and the lane's brief name three row fields, a supernova host can be a feature
+    member as well as a catalogue system, and a member class spans two origins; a narrowing helper
+    is P09.T41.c's if it wants one. Tagging `RemnantSummary` by whether a compact remnant exists: it
+    mirrors the sim's `RemnantState`, whose offset is absent for a remnant without a kick too.
+  - _Open, for the owner._ (1) `SystemOriginWire` is a closed enum, and plan 10's P10.T10.a adds
+    `stream` and `dwarf_core`; pinned content (`110`) would add another. Lean: name it growing in
+    plan 04's reserved list, as `Population` is, with P09.T41.c reading an unknown origin as
+    Missing; until that is ruled, P09.T40 sends no `origin` before P10.T10.a's variants exist, or
+    P10.T10.a bumps. (2) `CatalogueClassWire` likewise: the registry leaves values 9–63 free and
+    design note 16 appends later classes. Lean: growing too.
+  - _Tests._ Wire forms with JSON round trips for every request and reply (features in range, also
+    with nothing in range; the map's lists of each kind and status; a cluster's, the centre's and a
+    cloud's structure; the black hole with and without a luminosity), every `SystemOriginWire`,
+    `SupernovaStateWire` and `MemberClassWire` variant and every string enum, and the row with each
+    new field absent (the existing rows) and present; `FeatureIdHex`'s form and its refusals;
+    `request_kinds_are_pinned` and the envelope's walk over every kind; the server's
+    `kinds_without_a_handler_are_answered_unsupported`, now over nine kinds, and over the WebSocket
+    `a_feature_kind_is_answered_unsupported_until_it_is_served`.

@@ -38,6 +38,7 @@
 
 mod bulk;
 mod envelope;
+mod features;
 mod galaxy;
 mod modelled;
 mod observe;
@@ -57,6 +58,16 @@ pub use envelope::{
     ClientMessage, ErrorCode, NotificationBody, REQUEST_KINDS, RequestBody, RequestError,
     RequestId, ResponseBody, ServerMessage, SubscribeRequest, Subscribed, SubscriptionState,
     SubscriptionTopic, UnsubscribeRequest,
+};
+pub use features::{
+    BlackHoleLuminosityWire, BlackHoleState, BlackHoleStateRequest, BrightShell,
+    CatalogueClassWire, CentreStructure, CentreTracerWire, ClassCountWire, ClassKindWire,
+    CloudStructure, ClusterStructure, DisruptionOutcomeWire, EmissionClassWire, FeatureDetail,
+    FeatureDetailRequest, FeatureKindCensus, FeatureKindStatus, FeatureKindWire, FeatureStructure,
+    FeatureSummary, FeaturesInRange, FeaturesInRangeRequest, GalaxyFeatures, GalaxyFeaturesRequest,
+    GenerationWire, MapFeatureKindWire, MapFeatureList, MapFeatures, MapShells, MemberClassWire,
+    MultiplicityWire, PulsarWindNebulaWire, RemnantSummary, ShellEmissionWire, ShellPhaseWire,
+    ShellSummary, SupernovaStateWire, SystemOriginWire, TidalDisruptionWire,
 };
 pub use galaxy::{
     Census, DensityMap, DensityMapRequest, ExtinctionMap, ExtinctionMapRequest, ExtinctionRequest,
@@ -89,8 +100,8 @@ pub use planetary::{
     ZoneDto,
 };
 pub use primitives::{
-    BodyIdHex, DetailSeedHex, GalacticPosition, ParseBodyIdHexError, ParseHex64Error, SeedHex,
-    SystemIdHex, UniverseIdHex, UniverseTime,
+    BodyIdHex, DetailSeedHex, FeatureIdHex, GalacticPosition, ParseBodyIdHexError, ParseHex64Error,
+    SeedHex, SystemIdHex, UniverseIdHex, UniverseTime,
 };
 pub use scene::{
     BodyGrantDto, CameraReportDto, FramePositionDto, KinematicsDto, SceneArrivalDto, SceneBodyDto,

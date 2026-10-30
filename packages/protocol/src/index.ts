@@ -207,6 +207,47 @@ import type { SystemSummaryRequest } from "./generated/SystemSummaryRequest";
 import type { SystemsInRange } from "./generated/SystemsInRange";
 import type { SystemsInRangeRequest } from "./generated/SystemsInRangeRequest";
 import type { TargetExtinction } from "./generated/TargetExtinction";
+// Plan 09's features, the black hole and a range row's origin (P09.T39).
+import type { BlackHoleLuminosityWire } from "./generated/BlackHoleLuminosityWire";
+import type { BlackHoleState } from "./generated/BlackHoleState";
+import type { BlackHoleStateRequest } from "./generated/BlackHoleStateRequest";
+import type { BrightShell } from "./generated/BrightShell";
+import type { CatalogueClassWire } from "./generated/CatalogueClassWire";
+import type { CentreStructure } from "./generated/CentreStructure";
+import type { CentreTracerWire } from "./generated/CentreTracerWire";
+import type { ClassCountWire } from "./generated/ClassCountWire";
+import type { ClassKindWire } from "./generated/ClassKindWire";
+import type { CloudStructure } from "./generated/CloudStructure";
+import type { ClusterStructure } from "./generated/ClusterStructure";
+import type { DisruptionOutcomeWire } from "./generated/DisruptionOutcomeWire";
+import type { EmissionClassWire } from "./generated/EmissionClassWire";
+import type { FeatureDetail } from "./generated/FeatureDetail";
+import type { FeatureDetailRequest } from "./generated/FeatureDetailRequest";
+import type { FeatureIdHex } from "./generated/FeatureIdHex";
+import type { FeatureKindCensus } from "./generated/FeatureKindCensus";
+import type { FeatureKindStatus } from "./generated/FeatureKindStatus";
+import type { FeatureKindWire } from "./generated/FeatureKindWire";
+import type { FeatureStructure } from "./generated/FeatureStructure";
+import type { FeatureSummary } from "./generated/FeatureSummary";
+import type { FeaturesInRange } from "./generated/FeaturesInRange";
+import type { FeaturesInRangeRequest } from "./generated/FeaturesInRangeRequest";
+import type { GalaxyFeatures } from "./generated/GalaxyFeatures";
+import type { GalaxyFeaturesRequest } from "./generated/GalaxyFeaturesRequest";
+import type { GenerationWire } from "./generated/GenerationWire";
+import type { MapFeatureKindWire } from "./generated/MapFeatureKindWire";
+import type { MapFeatureList } from "./generated/MapFeatureList";
+import type { MapFeatures } from "./generated/MapFeatures";
+import type { MapShells } from "./generated/MapShells";
+import type { MemberClassWire } from "./generated/MemberClassWire";
+import type { MultiplicityWire } from "./generated/MultiplicityWire";
+import type { PulsarWindNebulaWire } from "./generated/PulsarWindNebulaWire";
+import type { RemnantSummary } from "./generated/RemnantSummary";
+import type { ShellEmissionWire } from "./generated/ShellEmissionWire";
+import type { ShellPhaseWire } from "./generated/ShellPhaseWire";
+import type { ShellSummary } from "./generated/ShellSummary";
+import type { SupernovaStateWire } from "./generated/SupernovaStateWire";
+import type { SystemOriginWire } from "./generated/SystemOriginWire";
+import type { TidalDisruptionWire } from "./generated/TidalDisruptionWire";
 import type { Unit } from "./generated/Unit";
 import type { UniverseIdHex } from "./generated/UniverseIdHex";
 import type { UniverseInfo } from "./generated/UniverseInfo";
@@ -218,6 +259,46 @@ import type { VariableKindDto } from "./generated/VariableKindDto";
 import type { ZoneDto } from "./generated/ZoneDto";
 
 export type {
+  BlackHoleLuminosityWire,
+  BlackHoleState,
+  BlackHoleStateRequest,
+  BrightShell,
+  CatalogueClassWire,
+  CentreStructure,
+  CentreTracerWire,
+  ClassCountWire,
+  ClassKindWire,
+  CloudStructure,
+  ClusterStructure,
+  DisruptionOutcomeWire,
+  EmissionClassWire,
+  FeatureDetail,
+  FeatureDetailRequest,
+  FeatureIdHex,
+  FeatureKindCensus,
+  FeatureKindStatus,
+  FeatureKindWire,
+  FeatureStructure,
+  FeatureSummary,
+  FeaturesInRange,
+  FeaturesInRangeRequest,
+  GalaxyFeatures,
+  GalaxyFeaturesRequest,
+  GenerationWire,
+  MapFeatureKindWire,
+  MapFeatureList,
+  MapFeatures,
+  MapShells,
+  MemberClassWire,
+  MultiplicityWire,
+  PulsarWindNebulaWire,
+  RemnantSummary,
+  ShellEmissionWire,
+  ShellPhaseWire,
+  ShellSummary,
+  SupernovaStateWire,
+  SystemOriginWire,
+  TidalDisruptionWire,
   BeltComponentDto,
   BeltCompositionDto,
   BeltDto,

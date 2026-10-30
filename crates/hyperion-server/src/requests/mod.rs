@@ -207,8 +207,9 @@ fn open_topic(
 /// this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
 /// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
 /// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
-/// 15): `body_events` until plan 14's P14.T31. Each handler that names a universe starts from
-/// [`universe::openable_universe`].
+/// 15): `body_events` until plan 14's P14.T31, and plan 09's `features_in_range`,
+/// `galaxy_features`, `feature_detail` and `black_hole_state` until its P09.T40.b. Each handler
+/// that names a universe starts from [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
 
@@ -276,6 +277,18 @@ impl Handler for Handlers {
             RequestBody::ResolveSystem(request) => {
                 Box::pin(observe::resolve_system(state, request, token).map(answered))
             }
+            // Plan 09's kinds are the protocol's (P09.T39), answered as an older server would
+            // until P09.T40.b serves them.
+            RequestBody::FeaturesInRange(_) => {
+                Box::pin(ready(Err(not_served_yet("features_in_range"))))
+            }
+            RequestBody::GalaxyFeatures(_) => {
+                Box::pin(ready(Err(not_served_yet("galaxy_features"))))
+            }
+            RequestBody::FeatureDetail(_) => Box::pin(ready(Err(not_served_yet("feature_detail")))),
+            RequestBody::BlackHoleState(_) => {
+                Box::pin(ready(Err(not_served_yet("black_hole_state"))))
+            }
         }
     }
 
@@ -330,6 +343,10 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::ExtinctionMap(_) => "extinction_map",
         RequestBody::Extinction(_) => "extinction",
         RequestBody::ResolveSystem(_) => "resolve_system",
+        RequestBody::FeaturesInRange(_) => "features_in_range",
+        RequestBody::GalaxyFeatures(_) => "galaxy_features",
+        RequestBody::FeatureDetail(_) => "feature_detail",
+        RequestBody::BlackHoleState(_) => "black_hole_state",
     }
 }
 
@@ -345,12 +362,16 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 /// The sky's JSON is small but its census and hosts grow with the request, and rendering plan R06
 /// classes it large (`is_large`; Design note 17's size class). Rendering plan R09 classes its
 /// `surface_field` large as plan 04's row R09 requires, whose payload runs to some 15 MB, though
-/// its JSON is a header and a cover; its `survey_pass` answers one revision.
+/// its JSON is a header and a cover; its `survey_pass` answers one revision. Plan 09's
+/// `features_in_range` can, as `systems_in_range` can, and so can its `galaxy_features`, a list
+/// over the whole galaxy; one feature's detail and the black hole's state cannot.
 pub(crate) fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
         | ResponseBody::ExtinctionMap(_)
         | ResponseBody::SystemsInRange(_)
+        | ResponseBody::FeaturesInRange(_)
+        | ResponseBody::GalaxyFeatures(_)
         | ResponseBody::SystemBodies(_)
         | ResponseBody::BodyEvents(_)
         | ResponseBody::Sky(_)
@@ -369,7 +390,9 @@ pub(crate) fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::SceneCameras
         | ResponseBody::SurveyPass(_)
         | ResponseBody::Extinction(_)
-        | ResponseBody::ResolveSystem(_) => false,
+        | ResponseBody::ResolveSystem(_)
+        | ResponseBody::FeatureDetail(_)
+        | ResponseBody::BlackHoleState(_) => false,
     }
 }
 
@@ -1123,15 +1146,17 @@ mod tests {
     use std::collections::BTreeMap;
 
     use hyperion_protocol::{
-        BodyDetailRequest, BodyEventsRequest, BodyIdHex, CreateUniverseRequest, DensityMap,
-        DensityMapRequest, DetailLevelDto, ExtinctionMap, ExtinctionMapRequest, ExtinctionRequest,
-        ExtinctionResult, ExtinctionTarget, FramePositionDto, GalacticPosition,
-        GalaxyParametersRequest, KinematicsDto, MapPopulation, MapView, MassLayer,
-        OpenUniverseRequest, SceneCamerasRequest, SceneClockDto, SceneClockStateDto,
-        SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SkyRequest,
-        SubscribeRequest, Subscribed, SubscriptionTopic, SurfaceFieldRequest, SurveyPassRequest,
-        SurveySourceDto, SystemBodiesRequest, SystemIdHex, SystemSummaryRequest,
-        SystemsInRangeRequest, TargetExtinction, UniverseIdHex, UniverseTime, UnsubscribeRequest,
+        BlackHoleStateRequest, BodyDetailRequest, BodyEventsRequest, BodyIdHex,
+        CreateUniverseRequest, DensityMap, DensityMapRequest, DetailLevelDto, ExtinctionMap,
+        ExtinctionMapRequest, ExtinctionRequest, ExtinctionResult, ExtinctionTarget,
+        FeatureDetailRequest, FeatureIdHex, FeatureKindWire, FeaturesInRangeRequest,
+        FramePositionDto, GalacticPosition, GalaxyFeaturesRequest, GalaxyParametersRequest,
+        KinematicsDto, MapFeatureKindWire, MapPopulation, MapView, MassLayer, OpenUniverseRequest,
+        SceneCamerasRequest, SceneClockDto, SceneClockStateDto, SceneShipRequest, SceneShipSet,
+        SceneStateDto, SceneSubscribeRequest, SkyRequest, SubscribeRequest, Subscribed,
+        SubscriptionTopic, SurfaceFieldRequest, SurveyPassRequest, SurveySourceDto,
+        SystemBodiesRequest, SystemIdHex, SystemSummaryRequest, SystemsInRangeRequest,
+        TargetExtinction, UniverseIdHex, UniverseTime, UnsubscribeRequest,
     };
 
     use tokio::time::timeout;
@@ -1261,6 +1286,27 @@ mod tests {
                 system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
                 time: UniverseTime::default(),
                 mode: hyperion_protocol::QueryModeDto::Now,
+            }),
+            RequestBody::FeaturesInRange(FeaturesInRangeRequest {
+                universe: UniverseIdHex::from_u64(42),
+                centre: GalacticPosition::default(),
+                radius_ly: 1_000.0,
+                time: UniverseTime::default(),
+                kinds: vec![FeatureKindWire::Globular],
+            }),
+            RequestBody::GalaxyFeatures(GalaxyFeaturesRequest {
+                universe: UniverseIdHex::from_u64(42),
+                kinds: vec![MapFeatureKindWire::Globular],
+                time: UniverseTime::default(),
+            }),
+            RequestBody::FeatureDetail(FeatureDetailRequest {
+                universe: UniverseIdHex::from_u64(42),
+                feature: FeatureIdHex::from_u64(0xe842_0002_8000_0000),
+                time: UniverseTime::default(),
+            }),
+            RequestBody::BlackHoleState(BlackHoleStateRequest {
+                universe: UniverseIdHex::from_u64(42),
+                time: UniverseTime::default(),
             }),
         ]
     }
@@ -1429,9 +1475,9 @@ mod tests {
     async fn kinds_without_a_handler_are_answered_unsupported() {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
         // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
-        // kinds the connection routes, `scene_cameras` until R03.T8 serves it, and R06's `sky`
+        // kinds the connection routes, `scene_cameras` until R03.T8 serves it, R06's `sky`
         // while its switch is off (R06.T11.c), as this test turns it: it is on by default since
-        // rendering plan R13's R13.T2.
+        // rendering plan R13's R13.T2, and plan 09's four kinds until P09.T40.b serves them.
         let harness = Harness::start_configured(Handlers, ConnectionLimits::default(), |config| {
             config.sky_service(SkyService::Unsupported)
         })
@@ -1446,10 +1492,14 @@ mod tests {
                         | RequestBody::Unsubscribe(_)
                         | RequestBody::SceneCameras(_)
                         | RequestBody::Sky(_)
+                        | RequestBody::FeaturesInRange(_)
+                        | RequestBody::GalaxyFeatures(_)
+                        | RequestBody::FeatureDetail(_)
+                        | RequestBody::BlackHoleState(_)
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 9);
         for body in events {
             let name = kind(&body);
             let answer = Handlers

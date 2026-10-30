@@ -14,6 +14,10 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::features::{
+    BlackHoleState, BlackHoleStateRequest, FeatureDetail, FeatureDetailRequest, FeaturesInRange,
+    FeaturesInRangeRequest, GalaxyFeatures, GalaxyFeaturesRequest,
+};
 use crate::galaxy::{
     DensityMap, DensityMapRequest, ExtinctionMap, ExtinctionMapRequest, ExtinctionRequest,
     ExtinctionResult, GalaxyParameters, GalaxyParametersRequest, SystemsInRange,
@@ -306,6 +310,14 @@ pub enum RequestBody {
     Extinction(ExtinctionRequest),
     /// One system by its ID at a time, now or as an observer receives it (plan 12).
     ResolveSystem(ResolveSystemRequest),
+    /// The large features within range of a point at a time (plan 09).
+    FeaturesInRange(FeaturesInRangeRequest),
+    /// The features the galaxy map draws at a time (plan 09).
+    GalaxyFeatures(GalaxyFeaturesRequest),
+    /// One feature's structure at a time (plan 09).
+    FeatureDetail(FeatureDetailRequest),
+    /// The central black hole's state at a time (plan 09).
+    BlackHoleState(BlackHoleStateRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -358,6 +370,15 @@ pub enum ResponseBody {
     // Boxed, as `SystemBodies` is: a range row is several times the size of most answers.
     /// The system's row.
     ResolveSystem(Box<ResolvedSystem>),
+    /// The features found, with their census.
+    FeaturesInRange(FeaturesInRange),
+    /// The map's features, kind by kind.
+    GalaxyFeatures(GalaxyFeatures),
+    // Boxed, as `BodyDetail` is: a summary and a structure make it one of the largest answers.
+    /// The feature and its structure.
+    FeatureDetail(Box<FeatureDetail>),
+    /// The black hole's state.
+    BlackHoleState(BlackHoleState),
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -386,6 +407,10 @@ pub const REQUEST_KINDS: &[&str] = &[
     "extinction_map",
     "extinction",
     "resolve_system",
+    "features_in_range",
+    "galaxy_features",
+    "feature_detail",
+    "black_hole_state",
 ];
 
 #[cfg(test)]
@@ -396,6 +421,10 @@ mod tests {
 
     use super::*;
     use crate::bulk::BulkManifestDto;
+    use crate::features::{
+        self, CloudStructure, FeatureKindWire, FeatureStructure, MapFeatureKindWire,
+        MapFeatureList, MapShells,
+    };
     use crate::galaxy::{
         Census, ExtinctionTarget, MapPopulation, MapView, MassLayer, ParameterGroup, Population,
         SystemRecord, SystemsInRange, TargetExtinction,
@@ -406,7 +435,8 @@ mod tests {
         BodyKindDto, BodyRecordDto, BodyStateDto, DetailLevelDto, OrbitHostDto, SectionDto,
     };
     use crate::primitives::{
-        BodyIdHex, GalacticPosition, SeedHex, SystemIdHex, UniverseIdHex, UniverseTime,
+        BodyIdHex, FeatureIdHex, GalacticPosition, SeedHex, SystemIdHex, UniverseIdHex,
+        UniverseTime,
     };
     use crate::scene::{
         CameraReportDto, FramePositionDto, KinematicsDto, SceneClockDto, SceneClockStateDto,
@@ -647,7 +677,36 @@ mod tests {
                     },
                 }))
             }
-            Some(RequestBody::ResolveSystem(_)) => None,
+            Some(RequestBody::ResolveSystem(_)) => {
+                Some(RequestBody::FeaturesInRange(FeaturesInRangeRequest {
+                    universe,
+                    centre: GalacticPosition::default(),
+                    radius_ly: 1_000.0,
+                    time: UniverseTime::default(),
+                    kinds: vec![FeatureKindWire::OpenCluster],
+                }))
+            }
+            Some(RequestBody::FeaturesInRange(_)) => {
+                Some(RequestBody::GalaxyFeatures(GalaxyFeaturesRequest {
+                    universe,
+                    kinds: vec![MapFeatureKindWire::Globular],
+                    time: UniverseTime::default(),
+                }))
+            }
+            Some(RequestBody::GalaxyFeatures(_)) => {
+                Some(RequestBody::FeatureDetail(FeatureDetailRequest {
+                    universe,
+                    feature: FeatureIdHex::from_u64(features::tests::FEATURE),
+                    time: UniverseTime::default(),
+                }))
+            }
+            Some(RequestBody::FeatureDetail(_)) => {
+                Some(RequestBody::BlackHoleState(BlackHoleStateRequest {
+                    universe,
+                    time: UniverseTime::default(),
+                }))
+            }
+            Some(RequestBody::BlackHoleState(_)) => None,
         }
     }
 
@@ -814,10 +873,51 @@ mod tests {
                         stellar: None,
                         fe_h_dex: None,
                         observed: None,
+                        origin: None,
+                        member_class: None,
+                        supernova: None,
                     },
                 })))
             }
-            Some(ResponseBody::ResolveSystem(_)) => None,
+            Some(ResponseBody::ResolveSystem(_)) => {
+                Some(ResponseBody::FeaturesInRange(FeaturesInRange {
+                    universe,
+                    centre: GalacticPosition::default(),
+                    radius_ly: 1_000.0,
+                    time: UniverseTime::default(),
+                    census: Vec::new(),
+                    features: Vec::new(),
+                }))
+            }
+            Some(ResponseBody::FeaturesInRange(_)) => {
+                Some(ResponseBody::GalaxyFeatures(GalaxyFeatures {
+                    universe,
+                    time: UniverseTime::default(),
+                    lists: vec![MapFeatureList::BrightShell(MapShells::NotGenerated)],
+                }))
+            }
+            Some(ResponseBody::GalaxyFeatures(_)) => {
+                Some(ResponseBody::FeatureDetail(Box::new(FeatureDetail {
+                    universe,
+                    time: UniverseTime::default(),
+                    feature: features::tests::star_forming_region(),
+                    structure: FeatureStructure::Cloud(CloudStructure {
+                        core_radius_ly: 25.0,
+                        central_density_per_cm3: 125.0,
+                    }),
+                })))
+            }
+            Some(ResponseBody::FeatureDetail(_)) => {
+                Some(ResponseBody::BlackHoleState(BlackHoleState {
+                    universe,
+                    time: UniverseTime::default(),
+                    id: SystemIdHex::from_u64(0xf000_0007_0000_0000),
+                    mass_msun: 4.25e6,
+                    luminosity: None,
+                    disruptions: Vec::new(),
+                }))
+            }
+            Some(ResponseBody::BlackHoleState(_)) => None,
         }
     }
 
@@ -1108,6 +1208,10 @@ mod tests {
                 "extinction_map",
                 "extinction",
                 "resolve_system",
+                "features_in_range",
+                "galaxy_features",
+                "feature_detail",
+                "black_hole_state",
             ]
         );
     }
