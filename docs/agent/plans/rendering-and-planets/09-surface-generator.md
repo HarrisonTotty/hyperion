@@ -1863,7 +1863,10 @@ _Built 2026-10-10_ (`67a6a9cf`; follow-up 1 `f2d96549`; follow-up 2 and item 8 f
     the epoch's incision at the segment; a tributary's incision follows from its cell's at the
     same K t in the short-time regime, ∝ (r_t A_t)^m S_t ÷ (r̄ A)^m S;
   - its cross-section is mars-ceiling §5's: the floor its bankfull channel, half T6.b's
-    `bankfull_width` either side, and each wall rising over W_w = 5 G as T6.b's 1 − smoothstep,
+    `bankfull_width` either side, and each wall rising over W_w = 5 G as T6.b's 1 − smoothstep
+    (§5 amended by main's ruling 1 of 2026-10-30, R09.T6.h: along a trunk's second chord, G grades
+    by a smoothstep from its own cell's to its receiver's, never outside the two; each wall 5 G at
+    every point),
     so a top width of w_bf + 10 G, a void of G (w_bf + 5 G) per unit length and a steepest wall
     of 0.3, under `VALLEY_WALL_GRADIENT`'s 0.6 (width about ten times depth: Luo, Cang and Howard
     2017 after Williams and Phillips 2001, whose top width is linear in depth below 125 m and whose
@@ -2054,6 +2057,9 @@ channel_water_worlds --cargo-profile slow-test --profile slow --run-ignored only
     `worker::` and `field::`; `cargo test -p hyperion-sim planetary::surface::steps::erosion` and
     `planetary::surface::coarse_golden`; the slow `the_reference_mars_s_slow_record` by name;
     `just test-wasm-fast`, `just test-wasm-slow` and `just test-wasm-browser`.
+  - _Built 2026-10-30_ (lane r09-t6h-bend, on R09.T6.g re-cut at 24; its records). D = 16 in two
+    Dendry passes, f 0.1, `EPOCH_TRUNK_SINUOSITY` 1.05; the look is no longer a visibly wrong
+    picture.
 
 Acceptance: `cargo test -p hyperion-surface synth::channels`.
 
