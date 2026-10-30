@@ -687,7 +687,7 @@ function addGeometric(
     const q0 = lower.curve[c] ?? 0;
     const q1 = upper.curve[c] ?? 0;
     if (l0 > 0 && l1 > 0) {
-      const level = l0 ** (1 - f) * l1 ** f;
+      const level = pow(l0, 1 - f) * pow(l1, f);
       out.level[c] = (out.level[c] ?? 0) + w * level;
       out.slope[c] = (out.slope[c] ?? 0) + w * level * ((1 - f) * (g0 / l0) + f * (g1 / l1));
       out.curve[c] = (out.curve[c] ?? 0) + w * level * ((1 - f) * (q0 / l0) + f * (q1 / l1));
