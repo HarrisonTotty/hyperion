@@ -9,7 +9,7 @@
  * Rewritten by `HYPERION_BLESS=1 pnpm --filter hyperion exec vitest run
  * src/renderer/src/view/atmosphere/reference/venusAlbedo.test.ts`, and its reference traced afresh
  * by `cargo run --release -p hyperion-fit -- atmosphere-reference <case> --out <reference> --samples
- * 2048 --stokes --threads 4`; `hyperion-fit`'s `venus_uv_absorber` tests hold that reference to
+ * 6144 --stokes --threads 4`; `hyperion-fit`'s `venus_uv_absorber` tests hold that reference to
  * Venus's albedos. The deck's Mie at six wavelengths runs for about a minute and a half.
  */
 

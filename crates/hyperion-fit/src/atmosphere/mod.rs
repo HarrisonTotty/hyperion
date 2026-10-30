@@ -64,6 +64,8 @@ pub mod reference;
 mod spheroid;
 pub mod sweep;
 mod transport;
+#[cfg(test)]
+mod venus_uv_absorber;
 
 use std::num::{NonZeroU64, NonZeroUsize};
 
