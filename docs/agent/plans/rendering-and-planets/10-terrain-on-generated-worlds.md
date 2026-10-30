@@ -4119,8 +4119,8 @@ pass.
     and R10.T10.a's `sample_worlds()` case, with two pieces of code the split leaves it: the
     hand-over check's μ-floor exclusion (its per-texel bound leaving out each cell where
     n′ · v < ½ μ_ν, those cells counted in the record) and an instrument for the horizon map's
-    share of the workers' bake time. Records:
-    [10-terrain-on-generated-worlds/records/R10.T15.b.md](10-terrain-on-generated-worlds/records/R10.T15.b.md).
+    share of the workers' bake time.
+    Records: [10-terrain-on-generated-worlds/records/R10.T15.b.md](10-terrain-on-generated-worlds/records/R10.T15.b.md).
     _T15.b.1 built 2026-10-29 (`2206d2d`, `500aba6`, `2700d8b`, `35c69d5`)._
   - _From earlier tasks' records_ (gathered at RM5's close-out, 2026-10-29: item 30's step as
     decision-r10-item30 §6 rules it, the rest the records' hand-offs, each source's text binding;

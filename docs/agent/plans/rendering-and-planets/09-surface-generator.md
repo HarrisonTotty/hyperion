@@ -2447,8 +2447,8 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
     - `bowl_permanent_shadow`'s fit (`hyperion-fit`) reads the cap through it, and its 0.003
       acceptance cannot tell 4.4 × 10⁻¹⁶.
   - _Built 2026-10-19_ (`a941eba4`, under P14.T51.i, lane `p14-t51hij`; galaxy plan 14's Risks,
-    "Deviations in P14.T51.i, as built"). Records:
-    [09-surface-generator/records/R09.T7.k.md](09-surface-generator/records/R09.T7.k.md).
+    "Deviations in P14.T51.i, as built").
+    Records: [09-surface-generator/records/R09.T7.k.md](09-surface-generator/records/R09.T7.k.md).
 
 Acceptance: `cargo test -p hyperion-surface craters` (T7.a–c, T7.e, T7.i and T7.j, with
 `cargo test -p hyperion-sim --lib planetary::surface::steps::craters` for T7.i–j) and
