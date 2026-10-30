@@ -3,6 +3,9 @@
 //! Mars, its target classes and densities against Singer et al. 2019's Charon, and the inversion
 //! within an octave.
 
+use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
+
 use super::*;
 use crate::craters::{
     CraterParamsParts, CraterTarget, SOLAR_SYSTEM_AGE, Screening, TargetClass, lunar_chronology,
@@ -868,5 +871,119 @@ fn the_density_is_the_same_twice() {
             assert_same_bits(a.value(), b.value());
             assert!(a.value().is_finite(), "{name}");
         }
+    }
+}
+
+/// [`diameter_in_octave`] as R09.T7.a built it, everything built afresh at each call: every panel
+/// of each count evaluated, and the lunar diameter mapped twice a node, once for its logarithm and
+/// once for the map's slope.
+fn diameter_as_built(p: &CraterParams, octave: DiameterOctave, u: UnitUniform) -> Metres {
+    let production = Production::of(p);
+    let differential = |d_km: f64| {
+        let x = production.lunar_log10(d_km);
+        let jacobian = production
+            .map
+            .as_ref()
+            .map_or(1.0, |map| map.log_slope(d_km, map.lunar(d_km)));
+        -lunar_slope(x) * jacobian * production.n_1km * math::exp10(lunar_log_shape(x))
+    };
+    let lower_km = octave.lower().value() / 1e3;
+    let upper_km = octave.upper().value() / 1e3;
+    let (lo, hi) = (math::ln(lower_km), math::ln(upper_km));
+    let screened = cutoff_km(p).map(|cutoff| Screened::new(production, cutoff));
+    let below = production.cumulative(lower_km);
+    let between = |v: f64| match &screened {
+        Some(screened) => screened.down(lo, v, 0.0, |a, b| {
+            let (half, mid) = (0.5 * (b - a), f64::midpoint(a, b));
+            let mut sum = 0.0;
+            for (node, weight) in GAUSS_LEGENDRE_8 {
+                let x = mid + half * node;
+                sum += weight * taper(x, screened.ln_cutoff) * differential(math::exp(x));
+            }
+            half * sum
+        }),
+        None => below - production.cumulative(math::exp(v)),
+    };
+    let target = u.get() * between(hi);
+    let (mut a, mut b) = (lo, hi);
+    for _ in 0..BISECTION_STEPS {
+        let mid = f64::midpoint(a, b);
+        if between(mid) < target {
+            a = mid;
+        } else {
+            b = mid;
+        }
+    }
+    let d_km = math::exp(f64::midpoint(a, b));
+    Metres::new((d_km * 1e3).clamp(octave.lower().value(), octave.upper().value().next_down()))
+}
+
+#[test]
+fn an_octave_s_kept_inverse_is_the_inversion_as_built_to_the_bit() {
+    // Every body, at the octaves from 1 m to 64 km, which meet the panels' grid and the
+    // production's kinks in every arrangement, at both ends and 22 shares between (6 on the
+    // browser target, `crate::test_sizes`).
+    let between = per_target(22, 6);
+    let mut shares = vec![0.0, 1.0_f64.next_down()];
+    shares.extend((0..between).map(|k| (f64::from(k) + 0.5) / f64::from(between)));
+    for (_, p) in every_body() {
+        let mut lower = 1.0;
+        while lower < 64e3 {
+            let octave = DiameterOctave::new(Metres::new(lower)).unwrap();
+            let inverse = OctaveInverse::new(&p, octave);
+            for &share in &shares {
+                let u = UnitUniform::new(share).unwrap();
+                let kept = inverse.diameter(u).value();
+                assert_same_bits(kept, diameter_as_built(&p, octave, u).value());
+                assert_same_bits(kept, diameter_in_octave(&p, octave, u).value());
+            }
+            lower *= 2.0;
+        }
+    }
+}
+
+#[test]
+fn bisections_stepped_in_turn_on_kept_counts_end_at_their_diameters_within_their_bounds() {
+    // Screened Mars at 2–4 m, the unscreened Moon at 1–2 km and Venus at 8–16 km: 200 bisections
+    // each, stepped in turn, every count kept by its node from the first bisection that took it,
+    // as the synthesis's cache keeps them, end at the diameters each alone ends at; and at every
+    // step the bound holds the diameter.
+    for (p, lower_m) in [(mars(), 2.0), (moon(), 1e3), (venus(), 8e3)] {
+        let octave = DiameterOctave::new(Metres::new(lower_m)).unwrap();
+        let inverse = OctaveInverse::new(&p, octave);
+        let mut rng = Lcg::new(0x7374_6570_7065_6400);
+        let shares: Vec<UnitUniform> = (0..per_target(200, 40))
+            .map(|_| UnitUniform::new(rng.next_f64()).unwrap())
+            .collect();
+        let alone: Vec<Metres> = shares.iter().map(|&u| inverse.diameter(u)).collect();
+        let mut bisections: Vec<Bisection> = shares.iter().map(|&u| inverse.start(u)).collect();
+        let mut kept: BTreeMap<u64, f64> = BTreeMap::new();
+        let mut reused = 0;
+        while bisections.iter().any(|b| !b.is_done()) {
+            for (bisection, &diameter) in bisections.iter_mut().zip(&alone) {
+                if bisection.is_done() {
+                    continue;
+                }
+                let bound = inverse.diameter_bound(bisection);
+                assert!(bound >= diameter, "{bound:?} below {diameter:?}");
+                let count = match kept.entry(bisection.node()) {
+                    Entry::Occupied(count) => {
+                        reused += 1;
+                        *count.get()
+                    }
+                    Entry::Vacant(slot) => *slot.insert(inverse.count(bisection)),
+                };
+                bisection.step(count);
+            }
+        }
+        for (bisection, &diameter) in bisections.iter().zip(&alone) {
+            assert_same_bits(inverse.finish(bisection).value(), diameter.value());
+            let bound = inverse.diameter_bound(bisection);
+            assert!(bound >= diameter, "{bound:?} below {diameter:?} at the end");
+        }
+        assert!(
+            reused > per_target(1_000, 200),
+            "only {reused} counts reused"
+        );
     }
 }

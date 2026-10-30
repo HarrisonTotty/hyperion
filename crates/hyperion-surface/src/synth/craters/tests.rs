@@ -17,11 +17,11 @@ use wasm_bindgen_test::wasm_bindgen_test as test;
 use hyperion_testkit::lcg::Lcg;
 
 use super::*;
-use crate::craters::{CraterParamsParts, TargetClass};
-use crate::cube::xyz_to_face_uv;
+use crate::craters::{CraterParamsParts, TargetClass, diameter_in_octave};
 use crate::field::{CoarseField, PartialField};
 use crate::geometry::finest_level;
 use crate::synth::test_support::{random_cells, random_points_in};
+use crate::test_sizes::per_target;
 use crate::testing::{SyntheticWorld, synthetic_field};
 
 /// The detail seed the tests draw from.
@@ -1610,6 +1610,213 @@ fn the_cache_moves_no_height() {
         assert_eq!(bits(fresh.height_m), bits(warm.height_m));
         assert_eq!(fresh.gradient.map(bits), warm.gradient.map(bits));
     }
+}
+
+/// The craters of octaves 0 to `through` whose reach holds `dir`, every crater of each octave's
+/// 3 × 3 made, in [`SmallCraters::craters_reaching`]'s order: the search as R09.T7.b built it,
+/// before the lazy draw.
+fn reaching_eagerly(
+    craters: &SmallCraters,
+    dir: [f64; 3],
+    through: u8,
+    cache: &mut CraterCache,
+) -> Vec<SmallCrater> {
+    let p = craters.octaves.inputs.figure.point(dir);
+    let last = num_octaves_through(craters.octaves().octaves().len(), through);
+    let mut found = Vec::new();
+    for octave in 0..last {
+        let level = craters.octaves().octaves()[usize::from(octave)].level();
+        let (cells, n) = neighbourhood(PatchKey::containing(level, dir).unwrap());
+        for &cell in &cells[..n] {
+            for crater in craters.craters_in(octave, cell, cache) {
+                let chord = [0, 1, 2].map(|k| p[k] - crater.point_m()[k]);
+                let reach = crater.shape().reach().value();
+                if dot(chord, chord) < reach * reach {
+                    found.push(*crater);
+                }
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn the_lazy_draw_finds_what_making_every_crater_finds() {
+    // On each cratered world, a 4 × 4 grid of points 80 m apart, as band level 4's texel samples
+    // the finest level on the Mars-like world, then the same points moved 3 m, so that the craters
+    // the first pass left under way are taken up again; and points by a face edge, at a cube
+    // corner and on a boundary of the finest octave's cells (2 × 2 on the browser target). The
+    // craters found from one cache shared in that order, from a fresh cache, and from the shared
+    // cache again after an eager search on it has made whole every cell a query left half made,
+    // are those an eager search on a cache of its own finds, in its order.
+    let side = per_target(4, 2);
+    for kind in WORLDS {
+        let craters = small(kind);
+        let radius = world(kind).header().radius().value();
+        let centre = unit_dir([0.31, -0.62, 0.72]);
+        let mut points = Vec::new();
+        for step in [0.0, 3.0] {
+            for a in 0..side {
+                for b in 0..side {
+                    let (x, y) = (80.0 * f64::from(a) + step, 80.0 * f64::from(b) + step);
+                    let arc = math::hypot(x, y) / radius;
+                    points.push(towards(centre, arc, math::atan2(y, x)));
+                }
+            }
+        }
+        points.push(unit_dir([1.0, 1.0, 0.3]));
+        points.push(unit_dir([1.0, 0.999_99, 0.999_98]));
+        let finest = craters.octaves().octaves().last().unwrap().level();
+        let home = PatchKey::containing(finest, centre).unwrap();
+        let edge = st_to_uv(f64::from(home.i() + 1) / f64::from(1_u32 << finest));
+        let FaceUv { face, v, .. } = xyz_to_face_uv(centre);
+        points.push(unit_dir(face_uv_to_xyz(FaceUv { face, u: edge, v })));
+        let mut shared = CraterCache::new();
+        let mut eager = CraterCache::new();
+        let mut found = 0;
+        for (n, &dir) in points.iter().enumerate() {
+            let expected = reaching_eagerly(&craters, dir, ALL, &mut eager);
+            assert_eq!(
+                craters.craters_reaching(dir, ALL, &mut shared),
+                expected,
+                "{kind:?} at {dir:?}"
+            );
+            assert_eq!(
+                craters.craters_reaching(dir, ALL, &mut CraterCache::new()),
+                expected,
+                "{kind:?} at {dir:?}, fresh"
+            );
+            // Every other point, the cells it left half made made whole, and asked again.
+            if n % 2 == 1 {
+                assert_eq!(
+                    reaching_eagerly(&craters, dir, ALL, &mut shared),
+                    expected,
+                    "{kind:?} at {dir:?}, made whole"
+                );
+                assert_eq!(
+                    craters.craters_reaching(dir, ALL, &mut shared),
+                    expected,
+                    "{kind:?} at {dir:?}, after"
+                );
+            }
+            found += expected.len();
+        }
+        // The Earth-like world's air screens its craters below about 100 m, which few points meet.
+        assert!(
+            kind == SyntheticWorld::EarthLike || found > points.len(),
+            "{kind:?}: only {found} craters found"
+        );
+    }
+}
+
+#[test]
+fn a_cell_s_gap_is_at_most_the_chord_to_any_of_its_craters() {
+    // Every crater of each octave's 3 × 3 about 24 random points and three beside face edges and a
+    // cube corner, on every cratered world, lies at least the cell's gap from the point, less the
+    // margins; and the finest octaves put some cells beyond their reach.
+    for kind in WORLDS {
+        let craters = small(kind);
+        let figure = world(kind).header().figure();
+        let mut cache = CraterCache::new();
+        let mut dirs = random_dirs(0x6761_7073, per_target(24, 6));
+        dirs.push(unit_dir([1.0, 1.0, 0.3]));
+        dirs.push(unit_dir([1.0, 0.999_99, 0.999_98]));
+        dirs.push(unit_dir([-1.0, 0.2, 1.0]));
+        let (mut beyond, mut searched) = (0, 0);
+        for dir in dirs {
+            let p = figure.point(dir);
+            let at = xyz_to_face_uv(dir);
+            for octave in craters.octaves().octaves() {
+                let home = PatchKey::containing(octave.level(), dir).unwrap();
+                let widest = octave.diameters().lower().value() * (1.0 + MAX_EXTERIOR_WIDTH);
+                let (cells, n) = neighbourhood(home);
+                for &cell in &cells[..n] {
+                    let gap = gap_m(at, home, cell, &figure);
+                    let short = gap * (1.0 - GAP_MARGIN) - GAP_SLACK_M;
+                    searched += 1;
+                    if short >= widest {
+                        beyond += 1;
+                    }
+                    for crater in craters.craters_in(octave.index(), cell, &mut cache) {
+                        let chord = [0, 1, 2].map(|k| p[k] - crater.point_m()[k]);
+                        let chord = dot(chord, chord).sqrt();
+                        assert!(
+                            chord >= short,
+                            "{kind:?} at {dir:?}, octave {}: a crater {chord} m away in a cell \
+                             {gap} m away",
+                            octave.index()
+                        );
+                    }
+                }
+            }
+        }
+        assert!(
+            beyond * 10 > searched,
+            "{kind:?}: {beyond} of {searched} cells beyond reach"
+        );
+    }
+}
+
+#[test]
+fn a_row_s_area_elements_and_a_cell_s_area_are_area_density_s_to_the_bit() {
+    // On every cratered world's figure and every face: a row's elements at random nodes, and
+    // cells' areas at the face, at level 1 on both sides of the warp's kink, and at levels 8 and
+    // 19, against the area element summed as R09.T7.b built it.
+    let mut rng = Lcg::new(0x6172_6561);
+    for kind in WORLDS {
+        let figure = world(kind).header().figure();
+        for face in Face::ALL {
+            for _ in 0..per_target(16, 4) {
+                let s = rng.next_f64();
+                let ts: [f64; 8] = core::array::from_fn(|_| rng.next_f64());
+                let row = row_elements(face, Warped::at(s), &ts.map(Warped::at), &figure);
+                for (element, t) in row.into_iter().zip(ts) {
+                    assert_same_bits(element, area_density(face, s, t, &figure).1);
+                }
+            }
+            for level in [0, 1, 8, 19] {
+                let side = 1_u32 << level;
+                for (i, j) in [(0, 0), (side / 2, side - 1), (side - 1, side / 3)] {
+                    let cell = PatchKey::new(face, level, i, j).unwrap();
+                    assert_same_bits(
+                        cell_area(cell, &figure).value(),
+                        area_as_built(cell, &figure),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// [`cell_area`] as R09.T7.b built it: [`area_density`] at each node of each part, row by row.
+fn area_as_built(cell: PatchKey, figure: &Spheroid) -> f64 {
+    let parts = |(lo, hi): (f64, f64)| -> [(f64, f64); 2] {
+        if lo < 0.5 && hi > 0.5 {
+            [(lo, 0.5), (0.5, hi)]
+        } else {
+            [(lo, hi), (hi, hi)]
+        }
+    };
+    let mut area = 0.0;
+    for (s0, s1) in parts(span(cell, cell.i())) {
+        for (t0, t1) in parts(span(cell, cell.j())) {
+            if s1 <= s0 || t1 <= t0 {
+                continue;
+            }
+            let (hs, ht) = (0.5 * (s1 - s0), 0.5 * (t1 - t0));
+            let (ms, mt) = (f64::midpoint(s0, s1), f64::midpoint(t0, t1));
+            let mut sum = 0.0;
+            for (ns, ws) in GAUSS_LEGENDRE_8 {
+                let mut row = 0.0;
+                for (nt, wt) in GAUSS_LEGENDRE_8 {
+                    row += wt * area_density(cell.face(), ms + hs * ns, mt + ht * nt, figure).1;
+                }
+                sum += ws * row;
+            }
+            area += hs * ht * sum;
+        }
+    }
+    area
 }
 
 #[test]

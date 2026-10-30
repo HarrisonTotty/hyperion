@@ -35,7 +35,7 @@
 //!   within the cell and a third that accepts with the area element over its bound on the cell
 //!   ([`MAX_PLACEMENT_ATTEMPTS`] at most, near one on the fine cells most octaves use);
 //! - a word for its diameter within the octave by the body's size–frequency distribution
-//!   ([`diameter_in_octave`]);
+//!   ([`diameter_in_octave`](crate::craters::diameter_in_octave));
 //! - a word for its age;
 //!
 //! and the last octave drops the craters it draws under 2 m, so that it keeps the production's
@@ -186,12 +186,14 @@ use hyperion_base::units::{Gigayears, Metres, PerSquareKilometre, SquareMetres};
 
 use super::{BandLevel, LevelSet};
 use crate::craters::chronology::{EXPONENTIAL_COEFFICIENT, EXPONENTIAL_RATE, LINEAR_RATE};
-use crate::craters::density::GAUSS_LEGENDRE_8;
+use crate::craters::density::{Bisection, GAUSS_LEGENDRE_8, OctaveInverse};
 use crate::craters::{
     CraterParams, CraterShape, DiameterOctave, SOLAR_SYSTEM_AGE, UnitUniform, chronology_age,
-    crater_shape, cumulative_density, diameter_in_octave, lunar_chronology, saturation,
+    crater_shape, cumulative_density, lunar_chronology, saturation,
 };
-use crate::cube::{Edge, Face, FaceUv, MAX_LEVEL, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
+use crate::cube::{
+    Edge, Face, FaceUv, MAX_LEVEL, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir, xyz_to_face_uv,
+};
 use crate::field::{FieldHeader, FieldView};
 use crate::geometry::{BAND_LIMIT_M, min_rate, vertex_spacing};
 use crate::height::HeightSample;
@@ -1171,6 +1173,10 @@ pub struct CraterOctaves {
     octaves: Vec<CraterOctave>,
     /// Each octave's nodes, by index: none for an octave of no density.
     nodes: Vec<Vec<OctaveNode>>,
+    /// Each octave's inversion of the body's distribution over its diameters, by index, which
+    /// draws its craters' ([`diameter_in_octave`](crate::craters::diameter_in_octave), built
+    /// once).
+    inverses: Vec<OctaveInverse>,
 }
 
 impl CraterOctaves {
@@ -1227,6 +1233,7 @@ impl CraterOctaves {
         let smallest_radius_m = num::min(figure.equatorial_radius_m, figure.polar_radius_m);
         let mut octaves: Vec<CraterOctave> = Vec::new();
         let mut nodes: Vec<Vec<OctaveNode>> = Vec::new();
+        let mut inverses: Vec<OctaveInverse> = Vec::new();
         let mut lower_m = d_b;
         for index in 0..MAX_OCTAVES {
             lower_m *= 0.5;
@@ -1277,17 +1284,20 @@ impl CraterOctaves {
                 ground_variance: SquareMetres::ZERO,
                 reach_area_m2: 0.0,
             };
-            let moments = octave_moments(&params, &octave);
+            let inverse = OctaveInverse::new(&params, diameters);
+            let moments = octave_moments(&params, &octave, &inverse);
             octave.variance = moments.variance;
             octave.ground_variance = moments.ground_variance;
             octave.reach_area_m2 = moments.reach_area_m2;
             octaves.push(octave);
             nodes.push(moments.nodes);
+            inverses.push(inverse);
         }
         Self {
             inputs,
             octaves,
             nodes,
+            inverses,
         }
     }
 
@@ -1500,14 +1510,15 @@ fn octave_wavelength(octave: &CraterOctave) -> f64 {
     (smallest * upper).sqrt()
 }
 
-/// Octave `octave`'s moments on the body of `params` (the module documentation), first its
+/// Octave `octave`'s moments on the body of `params`, whose diameters `inverse` draws (the module
+/// documentation), first its
 /// closed-form variance, square metres: its kept density per m² times its kept craters' mean
 /// ∫h² dA over their diameters and its window's ages, at full resolution.
 ///
 /// At full resolution a crater is its fresh profile times its relief factor g, so its ∫h² dA is
 /// the fresh one's, π R² ∫f² 2x dx, times g². The mean over the diameters is eight-point
-/// Gauss–Legendre in the diameter's share, by the octave's own inversion ([`diameter_in_octave`])
-/// over the shares it keeps, from 1 − kept to 1; a power law fitted to the octave's ends at the
+/// Gauss–Legendre in the diameter's share, by the octave's own inversion
+/// ([`diameter_in_octave`](crate::craters::diameter_in_octave)) over the shares it keeps, from 1 − kept to 1; a power law fitted to the octave's ends at the
 /// same nodes lay 12% high on Mars (R09.T7.b's build). The mean of g² over the ages is
 /// [`OctaveWear::mean_square_relief`]'s, in closed form where the production is linear and in N
 /// where the closure binds (R09.T7.j): g² falls by orders of magnitude across a window where κ
@@ -1522,7 +1533,11 @@ fn octave_wavelength(octave: &CraterOctave) -> f64 {
 /// covers a point a Poisson number of times, of mean the density times that area). All are zero,
 /// and there are no nodes, for an octave of no density.
 #[must_use]
-fn octave_moments(params: &CraterParams, octave: &CraterOctave) -> OctaveMoments {
+fn octave_moments(
+    params: &CraterParams,
+    octave: &CraterOctave,
+    inverse: &OctaveInverse,
+) -> OctaveMoments {
     let density_per_m2 = octave.density().value() * 1e-6;
     if density_per_m2 <= 0.0 {
         return OctaveMoments {
@@ -1540,7 +1555,7 @@ fn octave_moments(params: &CraterParams, octave: &CraterOctave) -> OctaveMoments
     for (node, weight) in GAUSS_LEGENDRE_8 {
         let node_share = dropped + octave.kept * f64::midpoint(1.0, node);
         let size = UnitUniform::new(node_share).expect("a node's share lies in [0, 1)");
-        let diameter = diameter_in_octave(params, octave.diameters, size);
+        let diameter = inverse.diameter(size);
         let shape = crater_shape(params, diameter);
         let rim_m = 0.5 * diameter.value();
         let fresh = CraterProfile::filleted(shape, Metres::ZERO).square_moment();
@@ -1612,9 +1627,33 @@ fn warp_rate(s: f64) -> f64 {
 /// unit sphere to the spheroid.
 #[must_use]
 fn area_density(face: Face, s: f64, t: f64, figure: &Spheroid) -> ([f64; 3], f64) {
-    let (u, v) = (st_to_uv(s), st_to_uv(t));
+    area_element(face, Warped::at(s), Warped::at(t), figure)
+}
+
+/// A cell coordinate s through the face's warp: u = [`st_to_uv`] of it, and du ÷ ds there.
+#[derive(Debug, Clone, Copy)]
+struct Warped {
+    u: f64,
+    rate: f64,
+}
+
+impl Warped {
+    /// The warp at `s`.
+    #[must_use]
+    fn at(s: f64) -> Self {
+        Self {
+            u: st_to_uv(s),
+            rate: warp_rate(s),
+        }
+    }
+}
+
+/// [`area_density`] at the warped coordinates `s` and `t`, each taken through the warp once.
+#[must_use]
+fn area_element(face: Face, s: Warped, t: Warped, figure: &Spheroid) -> ([f64; 3], f64) {
+    let (u, v) = (s.u, t.u);
     let rho2 = 1.0 + u * u + v * v;
-    let solid = warp_rate(s) * warp_rate(t) / (rho2 * rho2.sqrt());
+    let solid = s.rate * t.rate / (rho2 * rho2.sqrt());
     let dir = unit_dir(face_uv_to_xyz(FaceUv { face, u, v }));
     let (equatorial_m, polar_m) = (figure.equatorial_radius_m, figure.polar_radius_m);
     let inverse = [
@@ -1624,6 +1663,31 @@ fn area_density(face: Face, s: f64, t: f64, figure: &Spheroid) -> ([f64; 3], f64
     ];
     let norm = (inverse[0] * inverse[0] + inverse[1] * inverse[1] + inverse[2] * inverse[2]).sqrt();
     (dir, solid * (equatorial_m * equatorial_m * polar_m * norm))
+}
+
+/// [`area_element`]'s area at `along_s` and each of `along_t`, bit for bit, with no branch in a
+/// lane.
+#[must_use]
+fn row_elements(face: Face, along_s: Warped, along_t: &[Warped; 8], figure: &Spheroid) -> [f64; 8] {
+    let (equatorial_m, polar_m) = (figure.equatorial_radius_m, figure.polar_radius_m);
+    let scale = equatorial_m * equatorial_m * polar_m;
+    let mut out = [0.0; 8];
+    for (element, node) in out.iter_mut().zip(along_t) {
+        let (u, v) = (along_s.u, node.u);
+        let rho2 = 1.0 + u * u + v * v;
+        let solid = along_s.rate * node.rate / (rho2 * rho2.sqrt());
+        let xyz = face_uv_to_xyz(FaceUv { face, u, v });
+        let length = (xyz[0] * xyz[0] + xyz[1] * xyz[1] + xyz[2] * xyz[2]).sqrt();
+        let inverse = [
+            xyz[0] / length / equatorial_m,
+            xyz[1] / length / equatorial_m,
+            xyz[2] / length / polar_m,
+        ];
+        let norm =
+            (inverse[0] * inverse[0] + inverse[1] * inverse[1] + inverse[2] * inverse[2]).sqrt();
+        *element = solid * (scale * norm);
+    }
+    out
 }
 
 /// The cell coordinates `cell` spans along one axis, from its index `index`: [i ÷ 2ⁿ,
@@ -1654,11 +1718,17 @@ pub fn cell_area(cell: PatchKey, figure: &Spheroid) -> SquareMetres {
             }
             let (hs, ht) = (0.5 * (s1 - s0), 0.5 * (t1 - t0));
             let (ms, mt) = (f64::midpoint(s0, s1), f64::midpoint(t0, t1));
+            // Each node's warp once, and a row's elements before its sum, in the nodes' order:
+            // 1.58 µs a cell against 2.23 µs at the band limit's level on the Mars-like world (pod,
+            // 8 vCPU, slow-test profile), a fifth of a texel's time at band level 4 there.
+            let along_t = GAUSS_LEGENDRE_8.map(|(nt, _)| Warped::at(mt + ht * nt));
             let mut sum = 0.0;
             for (ns, ws) in GAUSS_LEGENDRE_8 {
+                let along_s = Warped::at(ms + hs * ns);
+                let elements = row_elements(cell.face(), along_s, &along_t, figure);
                 let mut row = 0.0;
-                for (nt, wt) in GAUSS_LEGENDRE_8 {
-                    row += wt * area_density(cell.face(), ms + hs * ns, mt + ht * nt, figure).1;
+                for ((_, wt), element) in GAUSS_LEGENDRE_8.iter().zip(elements) {
+                    row += wt * element;
                 }
                 sum += ws * row;
             }
@@ -1757,11 +1827,55 @@ impl SmallCrater {
 ///
 /// No height depends on what it holds, only the time a query takes: it holds the craters of one
 /// body's draw, starting afresh when it is used for another (another seed or header), and when it
-/// has grown to 16,384 cells.
+/// has grown to 16,384 cells (its kept counts, at most 4,095 an octave, only with its owner). It
+/// holds each cell's draw, the
+/// craters' places and words, and makes a crater from them only as far as a query needs it, so a
+/// cell may have only some of its craters made; and the counts its craters' diameters' bisections
+/// compare, by octave and node, in the top 12 levels of each octave's tree, which every crater of
+/// the octave walks.
 #[derive(Debug, Clone, Default)]
 pub struct CraterCache {
     owner: Option<(DetailSeed, Inputs)>,
-    cells: BTreeMap<u64, Vec<SmallCrater>>,
+    cells: BTreeMap<u64, CellDraw>,
+    counts: BTreeMap<u64, f64>,
+}
+
+/// The levels of an octave's tree of bisections whose counts a [`CraterCache`] keeps: 12, the
+/// nodes below 2^12. On the Mars-like world four texels at band level 4, 16,384 finest points
+/// from a cache a texel, took 1.86 million steps, 29% of them on counts kept from another crater
+/// of the octave.
+const KEPT_LEVELS: u32 = 12;
+
+/// One cell's draw as a [`CraterCache`] holds it: each crater's centre and age's word, in draw
+/// order, with its diameter's bisection as far as queries have taken it, or the crater it made.
+#[derive(Debug, Clone, Default)]
+struct CellDraw {
+    /// Every crater the cell's stream drew, in draw order, the last octave's under 2 m included.
+    draws: Vec<Draw>,
+    /// The cell's craters, every draw made and those under 2 m dropped:
+    /// [`SmallCraters::craters_in`]'s answer, once it is asked.
+    craters: Option<Vec<SmallCrater>>,
+}
+
+/// One crater's draw: its centre, its centre's spheroid point and its age's word, and its
+/// diameter's bisection or the crater it made.
+#[derive(Debug, Clone, Copy)]
+struct Draw {
+    centre: [f64; 3],
+    point_m: [f64; 3],
+    age_share: f64,
+    made: Made,
+}
+
+/// How far a [`Draw`]'s crater is made.
+#[derive(Debug, Clone, Copy)]
+enum Made {
+    /// Not yet made: its diameter's bisection, under way.
+    Pending(Bisection),
+    /// Narrower than its octave's smallest kept diameter, and dropped: the last octave's under 2 m.
+    Dropped,
+    /// Made.
+    Kept(SmallCrater),
 }
 
 impl CraterCache {
@@ -1771,6 +1885,7 @@ impl CraterCache {
         Self {
             owner: None,
             cells: BTreeMap::new(),
+            counts: BTreeMap::new(),
         }
     }
 
@@ -1829,7 +1944,7 @@ impl SmallCraters {
     ///
     /// # Panics
     ///
-    /// If the body has no octave `octave`, or `cell` is not at its level; or if a crater drawn has
+    /// If the body has no octave `octave`, or `cell` is not at its level; or if a crater made has
     /// an exterior wider than [`MAX_EXTERIOR_WIDTH`] (a bug).
     pub fn craters_in<'c>(
         &self,
@@ -1837,6 +1952,39 @@ impl SmallCraters {
         cell: PatchKey,
         cache: &'c mut CraterCache,
     ) -> &'c [SmallCrater] {
+        self.own(cache);
+        let CellDraw { draws, craters } = self.cell_draw(octave, cell, &mut cache.cells);
+        let counts = &mut cache.counts;
+        craters.get_or_insert_with(|| {
+            draws
+                .iter_mut()
+                .filter_map(|draw| self.made_within(octave, draw, 0.0, counts).copied())
+                .collect()
+        })
+    }
+
+    /// Takes `cache` for this body's draw, emptying it if it held another's.
+    fn own(&self, cache: &mut CraterCache) {
+        let owner = (self.seed, self.octaves.inputs);
+        if cache.owner != Some(owner) {
+            cache.cells.clear();
+            cache.counts.clear();
+            cache.owner = Some(owner);
+        }
+    }
+
+    /// The draw of `cell` of octave `octave`'s level, from `cells`, a [`CraterCache`]'s of this
+    /// body, or drawn into it, its craters made as far as earlier queries made them.
+    ///
+    /// # Panics
+    ///
+    /// If the body has no octave `octave`, or `cell` is not at its level.
+    fn cell_draw<'c>(
+        &self,
+        octave: u8,
+        cell: PatchKey,
+        cells: &'c mut BTreeMap<u64, CellDraw>,
+    ) -> &'c mut CellDraw {
         let index = usize::from(octave);
         assert!(
             index < self.octaves.octaves.len(),
@@ -1847,28 +1995,22 @@ impl SmallCraters {
             self.octaves.octaves[index].level,
             "the cell is not at the octave's level"
         );
-        let owner = (self.seed, self.octaves.inputs);
-        if cache.owner != Some(owner) {
-            cache.cells.clear();
-            cache.owner = Some(owner);
-        }
         let key = (u64::from(octave) << 56) | cell.to_u64();
-        if cache.cells.len() >= CACHE_CELLS && !cache.cells.contains_key(&key) {
-            cache.cells.clear();
+        if cells.len() >= CACHE_CELLS && !cells.contains_key(&key) {
+            cells.clear();
         }
-        cache
-            .cells
-            .entry(key)
-            .or_insert_with(|| self.draw(octave, cell))
+        cells.entry(key).or_insert_with(|| CellDraw {
+            draws: self.draw(octave, cell),
+            craters: None,
+        })
     }
 
-    /// The craters of `cell` of octave `octave`, drawn from the cell's own stream (the module
-    /// documentation).
+    /// The draws of `cell` of octave `octave`, from the cell's own stream (the module
+    /// documentation), their craters not yet made: every word a crater takes is drawn here, so
+    /// that making it moves no word of the stream.
     #[must_use]
-    fn draw(&self, octave: u8, cell: PatchKey) -> Vec<SmallCrater> {
-        let inputs = &self.octaves.inputs;
-        let figure = inputs.figure;
-        let params = &inputs.params;
+    fn draw(&self, octave: u8, cell: PatchKey) -> Vec<Draw> {
+        let figure = self.octaves.inputs.figure;
         let band = &self.octaves.octaves[usize::from(octave)];
         let km2 = cell_area(cell, &figure).value() * 1e-6;
         let mean = band.drawn_density().value() * km2;
@@ -1881,39 +2023,137 @@ impl SmallCraters {
         let bound = area_density_bound(cell, &figure);
         // A capacity hint alone, which a count beyond usize's range (never reached: the mean is a
         // few craters a cell) leaves at none; the loop draws every crater whatever it is.
-        let mut craters = Vec::with_capacity(usize::try_from(count).unwrap_or(0));
+        let mut draws = Vec::with_capacity(usize::try_from(count).unwrap_or(0));
         for _ in 0..count {
             let centre = place(cell, &figure, bound, &mut stream);
             let size = UnitUniform::new(stream.uniform()).expect("a uniform is in [0, 1)");
             let age_share = stream.uniform();
-            let diameter = diameter_in_octave(params, band.diameters, size);
-            // The last octave draws below the band limit too, and keeps what is at or above it.
-            if diameter.value() < band.smallest.value() {
-                continue;
-            }
-            let age = chronology_age(band.wear.window_density() * age_share, params.system_age());
-            let shape = crater_shape(params, diameter);
-            assert!(
-                shape.exterior_width() <= MAX_EXTERIOR_WIDTH,
-                "a crater's exterior width {} exceeds the search's bound",
-                shape.exterior_width()
-            );
-            craters.push(SmallCrater {
-                octave,
+            draws.push(Draw {
                 centre,
                 point_m: figure.point(centre),
-                shape,
-                age,
-                wear: CraterWear::of_age(age, &band.wear),
+                age_share,
+                made: Made::Pending(self.octaves.inverses[usize::from(octave)].start(size)),
             });
         }
-        craters
+        draws
+    }
+
+    /// The crater `draw` of octave `octave` makes if it may reach a point whose chord from its
+    /// centre is `d2_m2` square metres, made only as far as it takes to tell, its bisection's
+    /// counts kept in `counts`: the bisection steps while the bound on its diameter leaves the
+    /// point in reach, and is left under way, for a later point, once the point is beyond it.
+    /// `None` where the point is beyond its reach or the last octave drops it, under 2 m. At a
+    /// chord of zero, which every crater's reach holds, the crater is made whole.
+    ///
+    /// # Panics
+    ///
+    /// If the crater is made and has an exterior wider than [`MAX_EXTERIOR_WIDTH`] (a bug).
+    fn made_within<'d>(
+        &self,
+        octave: u8,
+        draw: &'d mut Draw,
+        d2_m2: f64,
+        counts: &mut BTreeMap<u64, f64>,
+    ) -> Option<&'d SmallCrater> {
+        let band = &self.octaves.octaves[usize::from(octave)];
+        let inverse = &self.octaves.inverses[usize::from(octave)];
+        while let Made::Pending(mut bisection) = draw.made {
+            draw.made = if bisection.is_done() {
+                self.make(octave, draw, &bisection)
+            } else {
+                let bound = inverse.diameter_bound(&bisection).value();
+                if bound < band.smallest.value() {
+                    // Its diameter ends at most at the bound: the last octave drops it.
+                    Made::Dropped
+                } else {
+                    // The reach of a crater of the bound's diameter at the widest exterior,
+                    // computed as `CraterShape::reach` computes one, (D × ½) × (1 + a): rounding
+                    // is monotone, so it is at least the crater's own.
+                    let reach = bound * 0.5 * (1.0 + MAX_EXTERIOR_WIDTH);
+                    if d2_m2 >= reach * reach {
+                        return None;
+                    }
+                    self.step(octave, &mut bisection, counts);
+                    Made::Pending(bisection)
+                }
+            };
+        }
+        match &draw.made {
+            Made::Kept(crater) => Some(crater),
+            Made::Dropped => None,
+            Made::Pending(_) => unreachable!("the loop leaves no bisection under way"),
+        }
+    }
+
+    /// Takes the next step of `bisection`, a diameter's in octave `octave`, its count from
+    /// `counts` by its node where it is kept there, else computed and, in the tree's top
+    /// [`KEPT_LEVELS`], kept.
+    fn step(&self, octave: u8, bisection: &mut Bisection, counts: &mut BTreeMap<u64, f64>) {
+        let inverse = &self.octaves.inverses[usize::from(octave)];
+        let node = bisection.node();
+        let count = if node < 1 << KEPT_LEVELS {
+            *counts
+                .entry((u64::from(octave) << 32) | node)
+                .or_insert_with(|| inverse.count(bisection))
+        } else {
+            inverse.count(bisection)
+        };
+        bisection.step(count);
+    }
+
+    /// The crater `draw` of octave `octave` makes, its diameter's bisection, `bisection`, ended:
+    /// [`Made::Dropped`] under the octave's smallest kept diameter.
+    ///
+    /// # Panics
+    ///
+    /// If the crater has an exterior wider than [`MAX_EXTERIOR_WIDTH`] (a bug).
+    #[must_use]
+    fn make(&self, octave: u8, draw: &Draw, bisection: &Bisection) -> Made {
+        let params = &self.octaves.inputs.params;
+        let band = &self.octaves.octaves[usize::from(octave)];
+        let diameter = self.octaves.inverses[usize::from(octave)].finish(bisection);
+        // The last octave draws below the band limit too, and keeps what is at or above it.
+        if diameter.value() < band.smallest.value() {
+            return Made::Dropped;
+        }
+        let age = chronology_age(
+            band.wear.window_density() * draw.age_share,
+            params.system_age(),
+        );
+        let shape = crater_shape(params, diameter);
+        assert!(
+            shape.exterior_width() <= MAX_EXTERIOR_WIDTH,
+            "a crater's exterior width {} exceeds the search's bound",
+            shape.exterior_width()
+        );
+        Made::Kept(SmallCrater {
+            octave,
+            centre: draw.centre,
+            point_m: draw.point_m,
+            shape,
+            age,
+            wear: CraterWear::of_age(age, &band.wear),
+        })
     }
 
     /// The craters of octaves 0 to `through` (inclusive, and never past the body's last) whose
     /// reach holds the unit direction `dir`, octave by octave from the largest, each octave's
     /// cells by key and each cell's in draw order, with each one's chord from its centre, metres,
     /// and the chord's vector from the centre's spheroid point.
+    ///
+    /// **The lazy draw.** A crater is made only as far as it takes to tell whether it reaches
+    /// `dir`. One whose centre lies beyond its octave's widest reach, (1 + [`MAX_EXTERIOR_WIDTH`])
+    /// times its lower diameter, is not made at all; a nearer one's diameter is bisected a step at
+    /// a time ([`made_within`](Self::made_within)) until the bound on it puts `dir` out of reach
+    /// or the bisection ends, and its counts at the top of its octave's tree are those `cache`
+    /// kept from the octave's other craters. Every bound is at least the crater's own reach, so no
+    /// crater that reaches `dir` is passed over, and a crater is made from its own words whenever
+    /// it is made, so the craters found and their bits are those of every crater made. A cell
+    /// wholly beyond the octave's widest reach is not drawn at all ([`gap_m`]). On the Mars-like
+    /// world a texel at band level 4, 4,096 finest points from a cache of its own, took 0.88 s
+    /// against 25.6 s with every crater of every cell searched made (pod, 8 vCPU, slow-test
+    /// profile). A crater's exterior width is checked when it is made, so a crater never made is
+    /// never checked.
     fn each_reaching(
         &self,
         dir: [f64; 3],
@@ -1921,16 +2161,38 @@ impl SmallCraters {
         cache: &mut CraterCache,
         mut emit: impl FnMut(&SmallCrater, [f64; 3], f64),
     ) {
-        let p = self.octaves.inputs.figure.point(dir);
+        self.own(cache);
         let last = num_octaves_through(self.octaves.octaves.len(), through);
+        if last == 0 {
+            return;
+        }
+        let figure = self.octaves.inputs.figure;
+        let p = figure.point(dir);
+        let at = xyz_to_face_uv(dir);
+        // The gaps' planes are through the centre, so a point's distance from them scales with
+        // `dir`'s length, which a unit direction has as 1 to within its rounding.
+        let length = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
         for octave in 0..last {
-            let level = self.octaves.octaves[usize::from(octave)].level;
-            let home = PatchKey::containing(level, dir).expect("an octave's level is a level");
+            let band = &self.octaves.octaves[usize::from(octave)];
+            let widest = band.diameters.lower().value() * (1.0 + MAX_EXTERIOR_WIDTH);
+            let home = PatchKey::containing(band.level, dir).expect("an octave's level is a level");
             let (cells, n) = neighbourhood(home);
             for &cell in &cells[..n] {
-                for crater in self.craters_in(octave, cell, cache) {
-                    let delta = [0, 1, 2].map(|k| p[k] - crater.point_m[k]);
+                let gap = gap_m(at, home, cell, &figure) * length;
+                if gap * (1.0 - GAP_MARGIN) - GAP_SLACK_M >= widest {
+                    // No crater of the octave in the cell reaches `dir`: it is not drawn.
+                    continue;
+                }
+                let drawn = self.cell_draw(octave, cell, &mut cache.cells);
+                for draw in &mut drawn.draws {
+                    let delta = [0, 1, 2].map(|k| p[k] - draw.point_m[k]);
                     let d2 = delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
+                    if d2 >= widest * widest {
+                        continue;
+                    }
+                    let Some(crater) = self.made_within(octave, draw, d2, &mut cache.counts) else {
+                        continue;
+                    };
                     let reach = crater.shape.reach().value();
                     if d2 < reach * reach {
                         emit(crater, delta, d2.sqrt());
@@ -1946,7 +2208,7 @@ impl SmallCraters {
     /// # Panics
     ///
     /// When an octave is searched: if `dir` is zero or has a component that is not finite; and if
-    /// a crater drawn has an exterior wider than [`MAX_EXTERIOR_WIDTH`] (a bug).
+    /// a crater the search makes has an exterior wider than [`MAX_EXTERIOR_WIDTH`] (a bug).
     #[must_use]
     pub fn craters_reaching(
         &self,
@@ -1972,8 +2234,8 @@ impl SmallCraters {
     /// # Panics
     ///
     /// When an octave is searched: if `dir` is zero or has a component that is not finite; and if a
-    /// crater drawn has an exterior wider than [`MAX_EXTERIOR_WIDTH`] or a height is not finite
-    /// (bugs).
+    /// crater the search makes has an exterior wider than [`MAX_EXTERIOR_WIDTH`] or a height is not
+    /// finite (bugs).
     pub fn at(
         &self,
         dir: [f64; 3],
@@ -2003,6 +2265,64 @@ impl SmallCraters {
             gradient: gradient.map(num::assert_finite),
         }
     }
+}
+
+/// The relative margin a cell's [`gap_m`] is taken short by before it puts a cell beyond an
+/// octave's reach: 10⁻⁹, far beyond the rounding of the gap and of the craters' and the point's
+/// spheroid points, a few times 2.2 × 10⁻¹⁶ of them.
+const GAP_MARGIN: f64 = 1e-9;
+
+/// The absolute margin a cell's [`gap_m`] is taken short by, metres: 1 µm, beyond the rounding of
+/// a spheroid point's position, about 10⁻⁹ m on a Mars-sized body.
+const GAP_SLACK_M: f64 = 1e-6;
+
+/// A bound below on the chord from the spheroid point of the unit direction whose face
+/// coordinates are `at` to any point of `cell`, metres, where `cell` is one of the 3 × 3 about
+/// `home`, the point's own cell: zero but for an edge or corner neighbour on `home`'s face, and
+/// there the chord to the plane through the centre that holds the boundary between the two, the
+/// larger such plane's at a corner.
+///
+/// On a face a boundary of constant u is a great circle, whose plane's normal n has n · xyz =
+/// u₁ − u at the face's (1, u, v) and |n| = √(1 + u₁²); the cell lies wholly across it from the
+/// point, so any chord to it crosses the plane's image under the spheroid's map M·d, whose
+/// distance from the point is |n · d| ÷ |M⁻¹n|, at least min(a, c) |u − u₁| ÷ (√(1 + u² + v²)
+/// √(1 + u₁²)). A crater's centre lies in its cell's coordinates, and [`st_to_uv`] is monotone, so
+/// a centre is no nearer than the boundary but for its rounding, which [`GAP_MARGIN`] and
+/// [`GAP_SLACK_M`] cover. On the Mars-like world at band level 4, whose points lie farther apart
+/// than the finest octaves' cells, 63% of the cells the 3 × 3s search are beyond their octave's
+/// reach (1.47 of 2.34 million over four texels).
+#[must_use]
+fn gap_m(at: FaceUv, home: PatchKey, cell: PatchKey, figure: &Spheroid) -> f64 {
+    if cell.face() != home.face() || at.face != home.face() {
+        return 0.0;
+    }
+    let side = f64::from(1_u32 << home.level());
+    let rho = (1.0 + at.u * at.u + at.v * at.v).sqrt();
+    // The sine of the angle to the boundary along one axis, from the point's coordinate `q` and
+    // the two cells' indices along it; zero where they share it, or the point is not inside.
+    let across = |q: f64, own: u32, other: u32| -> f64 {
+        let (edge, gap) = match other.cmp(&own) {
+            core::cmp::Ordering::Greater => {
+                let edge = st_to_uv(f64::from(own + 1) / side);
+                (edge, edge - q)
+            }
+            core::cmp::Ordering::Less => {
+                let edge = st_to_uv(f64::from(own) / side);
+                (edge, q - edge)
+            }
+            core::cmp::Ordering::Equal => return 0.0,
+        };
+        if gap > 0.0 {
+            gap / (rho * (1.0 + edge * edge).sqrt())
+        } else {
+            0.0
+        }
+    };
+    let larger = num::max(
+        across(at.u, home.i(), cell.i()),
+        across(at.v, home.j(), cell.j()),
+    );
+    num::min(figure.equatorial_radius_m, figure.polar_radius_m) * larger
 }
 
 /// The number of octaves 0 to `through` among a body's `count`.

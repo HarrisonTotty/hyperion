@@ -266,7 +266,7 @@ fn lunar_slope(x: f64) -> f64 {
 }
 
 /// The π-group map from a body's crater diameters to the Moon's (the module documentation).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct DiameterMap {
     /// The body's transition diameter, km.
     transition_km: f64,
@@ -356,16 +356,17 @@ impl DiameterMap {
         }
     }
 
-    /// d ln φ ÷ d ln D at the body's crater of `d_km`: the product of the two collapses' slopes
-    /// and the cavities' exponent.
+    /// d ln φ ÷ d ln D at the body's crater of `d_km`, whose lunar crater is `lunar_km`
+    /// ([`lunar`](Self::lunar) of it): the product of the two collapses' slopes and the cavities'
+    /// exponent.
     #[must_use]
-    fn log_slope(&self, d_km: f64) -> f64 {
+    fn log_slope(&self, d_km: f64, lunar_km: f64) -> f64 {
         let body = if d_km <= self.transition_km {
             1.0
         } else {
             1.0 / COLLAPSE_EXPONENT
         };
-        let moon = if self.lunar(d_km) <= MOON_TRANSITION_KM {
+        let moon = if lunar_km <= MOON_TRANSITION_KM {
             1.0
         } else {
             COLLAPSE_EXPONENT
@@ -375,7 +376,7 @@ impl DiameterMap {
 }
 
 /// A body's unscreened production, N(>D) per km² at D in km.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Production {
     /// The lunar-equivalent N☾(>1 km), km⁻².
     n_1km: f64,
@@ -410,12 +411,17 @@ impl Production {
     }
 
     /// −dN(>D) ÷ d ln D per km² at D = `d_km`: the differential production per unit ln D.
+    ///
+    /// The lunar diameter is mapped once, for both its logarithm and the map's slope, which read
+    /// the same value.
     #[must_use]
     fn differential(&self, d_km: f64) -> f64 {
-        let x = self.lunar_log10(d_km);
-        let jacobian = match &self.map {
-            Some(map) => map.log_slope(d_km),
-            None => 1.0,
+        let (x, jacobian) = match &self.map {
+            Some(map) => {
+                let lunar = map.lunar(d_km);
+                (math::log10(lunar), map.log_slope(d_km, lunar))
+            }
+            None => (math::log10(d_km), 1.0),
         };
         -lunar_slope(x) * jacobian * self.n_1km * math::exp10(lunar_log_shape(x))
     }
@@ -464,7 +470,7 @@ fn panel(production: &Production, ln_cutoff: f64, a: f64, b: f64) -> f64 {
 
 /// A body's screened integrand: its production, ln `D_c` and the ln D (km) of the production's
 /// kinks, fixed per body.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Screened {
     production: Production,
     ln_cutoff: f64,
@@ -483,7 +489,8 @@ impl Screened {
     }
 
     /// `total` plus ∫ f n d ln D from ln D = `lo` to `hi` (D in km): the screened craters per km²
-    /// between the two.
+    /// between the two, each panel from a to b `panel_of(a, b)`, which is [`panel`] of the body's
+    /// integrand over it ([`Self::panel`]), or that value kept from before ([`OctaveInverse`]).
     ///
     /// The panels lie on one grid fixed for the body, the multiples of [`PANEL_WIDTH`] in ln D
     /// (km) with the production's kinks added, so that no panel straddles a kink, and are summed
@@ -495,7 +502,7 @@ impl Screened {
     ///
     /// If `lo` or `hi` is not finite, or `lo` exceeds `hi`.
     #[must_use]
-    fn down(&self, lo: f64, hi: f64, total: f64) -> f64 {
+    fn down(&self, lo: f64, hi: f64, total: f64, mut panel_of: impl FnMut(f64, f64) -> f64) -> f64 {
         assert!(
             lo.is_finite() && hi.is_finite() && lo <= hi,
             "a screened integral runs between finite bounds in order, not from {lo} to {hi}"
@@ -521,11 +528,17 @@ impl Screened {
                 .find(|&&kink| kink < upper)
                 .map_or(grid, |&kink| if kink > grid { kink } else { grid });
             if lower <= lo {
-                return total + panel(&self.production, self.ln_cutoff, lo, upper);
+                return total + panel_of(lo, upper);
             }
-            total += panel(&self.production, self.ln_cutoff, lower, upper);
+            total += panel_of(lower, upper);
             upper = lower;
         }
+    }
+
+    /// The panel of the body's integrand from ln D = `a` to `b` ([`panel`]).
+    #[must_use]
+    fn panel(&self, a: f64, b: f64) -> f64 {
+        panel(&self.production, self.ln_cutoff, a, b)
     }
 }
 
@@ -708,7 +721,8 @@ pub fn cumulative_density(p: &CraterParams, d: Metres) -> PerSquareKilometre {
         return PerSquareKilometre::new(production.cumulative(d_km));
     }
     let tail = production.cumulative(math::exp(hi));
-    PerSquareKilometre::new(Screened::new(production, cutoff).down(lo, hi, tail))
+    let screened = Screened::new(production, cutoff);
+    PerSquareKilometre::new(screened.down(lo, hi, tail, |a, b| screened.panel(a, b)))
 }
 
 /// Trask's crater saturation, the equilibrium density N(>D) = 0.079 D⁻² km⁻² with D in km.
@@ -844,30 +858,215 @@ impl UnitUniform {
 /// diameter, and below its upper.
 #[must_use]
 pub fn diameter_in_octave(p: &CraterParams, octave: DiameterOctave, u: UnitUniform) -> Metres {
-    let production = Production::of(p);
-    let lower_km = octave.lower().value() / 1e3;
-    let upper_km = octave.upper().value() / 1e3;
-    let lo = math::ln(lower_km);
-    let hi = math::ln(upper_km);
-    let screened = cutoff_km(p).map(|cutoff| Screened::new(production, cutoff));
-    let below = production.cumulative(lower_km);
-    // The craters per km² from the octave's lower diameter to e^v km.
-    let between = |v: f64| match &screened {
-        Some(screened) => screened.down(lo, v, 0.0),
-        None => below - production.cumulative(math::exp(v)),
-    };
-    let target = u.get() * between(hi);
-    let (mut a, mut b) = (lo, hi);
-    for _ in 0..BISECTION_STEPS {
-        let mid = f64::midpoint(a, b);
-        if between(mid) < target {
-            a = mid;
+    OctaveInverse::new(p, octave).diameter(u)
+}
+
+/// The most panels an [`OctaveInverse`] keeps: 8. An octave spans ln 2 in ln D, which holds at
+/// most two of the grid's points ([`PANEL_WIDTH`]) and the production's four kinks, so its
+/// integral meets at most seven panels; one more is margin, and a panel not kept is evaluated.
+const KEPT_PANELS: usize = 8;
+
+/// A body's size–frequency distribution within one diameter octave, as [`diameter_in_octave`]
+/// inverts it: everything the inversion reads but the variate, built once, so that each crater a
+/// body's octave draws pays for its bisection alone (the synthesis's small craters,
+/// [`crate::synth::craters`]).
+///
+/// Under an atmosphere it keeps the panels of the octave's whole integral by their bounds, each
+/// [`panel`]'s value there. Every integral the bisection takes, from the octave's lower diameter to
+/// a midpoint, meets the same panels below its top one, the grid's and the kinks' alone, and reads
+/// those kept; a panel it does not find kept is evaluated. A crater's 40 integrals so evaluate
+/// their top panel alone (the whole octave's is taken once, by [`new`](Self::new)), and every count is [`Screened::down`]'s, to the bit. Built once with its
+/// panels kept, and with the lunar diameter mapped once a node, a crater's diameter on the
+/// Mars-like world took 78 µs against 146 µs, averaged over its 16 octaves (pod, 8 vCPU,
+/// slow-test profile).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OctaveInverse {
+    octave: DiameterOctave,
+    /// ln D of the octave's lower and upper diameters, D in km.
+    lo: f64,
+    hi: f64,
+    production: Production,
+    /// The screened integrand, under an atmosphere.
+    screened: Option<Screened>,
+    /// N(>D) per km² at the octave's lower diameter, from which an unscreened count is the
+    /// production's closed form at its upper bound taken away.
+    below: f64,
+    /// The screened whole integral's panels, (a, b, value), the first `kept` of them.
+    panels: [(f64, f64, f64); KEPT_PANELS],
+    kept: usize,
+    /// The craters per km² over the whole octave, its count to `hi`.
+    whole: f64,
+}
+
+impl OctaveInverse {
+    /// The inverse of `p`'s distribution within `octave`.
+    #[must_use]
+    pub(crate) fn new(p: &CraterParams, octave: DiameterOctave) -> Self {
+        let production = Production::of(p);
+        let lower_km = octave.lower().value() / 1e3;
+        let upper_km = octave.upper().value() / 1e3;
+        let lo = math::ln(lower_km);
+        let hi = math::ln(upper_km);
+        let screened = cutoff_km(p).map(|cutoff| Screened::new(production, cutoff));
+        let below = production.cumulative(lower_km);
+        let mut panels = [(0.0, 0.0, 0.0); KEPT_PANELS];
+        let mut kept = 0;
+        let whole = if let Some(screened) = &screened {
+            screened.down(lo, hi, 0.0, |a, b| {
+                let value = screened.panel(a, b);
+                if kept < KEPT_PANELS {
+                    panels[kept] = (a, b, value);
+                    kept += 1;
+                }
+                value
+            })
         } else {
-            b = mid;
+            below - production.cumulative(math::exp(hi))
+        };
+        Self {
+            octave,
+            lo,
+            hi,
+            production,
+            screened,
+            below,
+            panels,
+            kept,
+            whole,
         }
     }
-    let d_km = math::exp(f64::midpoint(a, b));
-    Metres::new((d_km * 1e3).clamp(octave.lower().value(), octave.upper().value().next_down()))
+
+    /// The craters per km² from the octave's lower diameter to e^`v` km.
+    #[must_use]
+    fn between(&self, v: f64) -> f64 {
+        match &self.screened {
+            Some(screened) => screened.down(self.lo, v, 0.0, |a, b| {
+                self.panels[..self.kept]
+                    .iter()
+                    .find(|&&(pa, pb, _)| pa.total_cmp(&a).is_eq() && pb.total_cmp(&b).is_eq())
+                    .map_or_else(|| screened.panel(a, b), |&(_, _, value)| value)
+            }),
+            None => self.below - self.production.cumulative(math::exp(v)),
+        }
+    }
+
+    /// The diameter below which a share `u` of the octave's craters lie ([`diameter_in_octave`]):
+    /// its bisection from [`start`](Self::start), every step taken.
+    #[must_use]
+    pub(crate) fn diameter(&self, u: UnitUniform) -> Metres {
+        let mut bisection = self.start(u);
+        while !bisection.is_done() {
+            let count = self.count(&bisection);
+            bisection.step(count);
+        }
+        self.finish(&bisection)
+    }
+
+    /// The bisection of a share `u`'s diameter, before its first step.
+    #[must_use]
+    pub(crate) fn start(&self, u: UnitUniform) -> Bisection {
+        Bisection {
+            target: u.get() * self.whole,
+            a: self.lo,
+            b: self.hi,
+            steps: 0,
+            node: 1,
+        }
+    }
+
+    /// The craters per km² from the octave's lower diameter to the midpoint of `bisection`'s
+    /// interval, which its next step compares with its target.
+    #[must_use]
+    pub(crate) fn count(&self, bisection: &Bisection) -> f64 {
+        self.between(f64::midpoint(bisection.a, bisection.b))
+    }
+
+    /// The diameter `bisection` ends at.
+    ///
+    /// # Panics
+    ///
+    /// If a step is left to take.
+    #[must_use]
+    pub(crate) fn finish(&self, bisection: &Bisection) -> Metres {
+        assert!(
+            bisection.is_done(),
+            "a bisection ends after {BISECTION_STEPS} steps"
+        );
+        let d_km = math::exp(f64::midpoint(bisection.a, bisection.b));
+        self.clamped(d_km)
+    }
+
+    /// A bound on the diameter `bisection` ends at, whatever its steps left, metres: e to its
+    /// interval's upper end with a margin of 10⁻⁹, clamped as [`finish`](Self::finish) clamps.
+    ///
+    /// Every midpoint lies in its interval and each step keeps one half, so the last midpoint lies
+    /// below the upper end; `exp` is within an ulp of e^x, so the margin covers its rounding, and
+    /// the product with 1,000 and the clamp are monotone.
+    #[must_use]
+    pub(crate) fn diameter_bound(&self, bisection: &Bisection) -> Metres {
+        self.clamped(math::exp(bisection.b) * DIAMETER_BOUND_MARGIN)
+    }
+
+    /// A diameter of `d_km` kilometres, in the octave: at least its lower diameter, and below its
+    /// upper.
+    #[must_use]
+    fn clamped(&self, d_km: f64) -> Metres {
+        let octave = self.octave;
+        Metres::new((d_km * 1e3).clamp(octave.lower().value(), octave.upper().value().next_down()))
+    }
+}
+
+/// The margin of [`OctaveInverse::diameter_bound`] over e to a bisection's upper end: 1 + 10⁻⁹, far
+/// beyond `exp`'s rounding of under an ulp, 2.2 × 10⁻¹⁶ of the value.
+const DIAMETER_BOUND_MARGIN: f64 = 1.0 + 1e-9;
+
+/// A bisection of [`OctaveInverse::diameter`] under way: its target, its interval in ln D (D in
+/// km), its steps taken and its node in the octave's tree of bisections, so that it can be taken a
+/// step at a time and resumed later, to the same bits.
+///
+/// Every bisection of an octave starts from the same interval, so a node, the path of halves from
+/// the root, names its interval and the count at its midpoint whatever the target: the root is 1,
+/// and a node n's lower half 2n and upper half 2n + 1.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Bisection {
+    target: f64,
+    a: f64,
+    b: f64,
+    steps: u32,
+    node: u64,
+}
+
+impl Bisection {
+    /// Takes the next step, given `count`, which is [`OctaveInverse::count`] of the bisection, bit
+    /// for bit: computed now, or kept by its node from another bisection of the same octave.
+    ///
+    /// # Panics
+    ///
+    /// If every step is taken.
+    pub(crate) fn step(&mut self, count: f64) {
+        assert!(!self.is_done(), "a bisection steps {BISECTION_STEPS} times");
+        let mid = f64::midpoint(self.a, self.b);
+        self.node *= 2;
+        if count < self.target {
+            self.a = mid;
+            self.node += 1;
+        } else {
+            self.b = mid;
+        }
+        self.steps += 1;
+    }
+
+    /// The node of the octave's tree its next step compares at, below 2^40 while a step is left.
+    #[must_use]
+    pub(crate) const fn node(&self) -> u64 {
+        self.node
+    }
+
+    /// Whether every step is taken.
+    #[must_use]
+    pub(crate) const fn is_done(&self) -> bool {
+        self.steps >= BISECTION_STEPS
+    }
 }
 
 #[cfg(test)]
