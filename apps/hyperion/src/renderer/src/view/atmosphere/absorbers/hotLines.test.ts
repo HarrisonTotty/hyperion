@@ -55,10 +55,10 @@ const RANGES: Readonly<Record<Drawn, readonly [number, number]>> = {
 };
 
 /**
- * Where a drawn table's measured range ends below its top node, K: VO's at 3,500 K, the top of the
- * range over which REPACK chose HyVO's strong lines.
+ * Where a drawn table's measured range ends below its top node, K: VO's at 3,000 K, its last
+ * comparison.
  */
-const MEASURED_TO: Readonly<Partial<Record<Drawn, number>>> = { VO: 3_500 };
+const MEASURED_TO: Readonly<Partial<Record<Drawn, number>>> = { VO: 3_000 };
 
 /**
  * Where a drawn table's ladder starts after an off-ladder first node, K: H₂S's, whose first node is
@@ -379,10 +379,10 @@ describe.each(DRAWN)("%s's curves", (key) => {
   );
 });
 
-describe("VO's table above REPACK's 3,500 K", () => {
-  it("reads measured to 3,500 K and estimated above it, to its 4,000 K node", () => {
+describe("VO's table above its last comparison, 3,000 K", () => {
+  it("reads measured to 3,000 K and estimated above it, to its 4,000 K node", () => {
     const vo = hotTable("VO");
-    expect([3_500, 3_600, 4_000].map((t) => kDistributionAt(vo, t).provenance)).toEqual([
+    expect([3_000, 3_300, 4_000].map((t) => kDistributionAt(vo, t).provenance)).toEqual([
       "measured",
       "estimated",
       "estimated",

@@ -563,16 +563,21 @@ ruled 2026-10-09 and 2026-10-10).
   Mon. Not. R. Astron. Soc. 460 (2016) 4063-4074, DOI: 10.1093/mnras/stw1133); and Harris's H12C14N
   (G. J. Harris et al., Mon. Not. R. Astron. Soc. 367 (2006) 400-406, DOI:
   10.1111/j.1365-2966.2005.09960.x; R. J. Barber et al., Mon. Not. R. Astron. Soc. 437 (2014)
-  1828-1835, DOI: 10.1093/mnras/stt2011); POKAZATEL's 1H2-16O, its transitions of 13100-26400
-  cm-1 and its MARVELised states, fetched from ExoMol's site
-  (https://www.exomol.com/db/H2O/1H2-16O/POKAZATEL/, 2026-10-29; O. L. Polyansky, A. A. Kyuberis, N.
-  F. Zobov, J. Tennyson, S. N. Yurchenko and L. Lodi, Mon. Not. R. Astron. Soc. 480 (2018)
-  2597-2608, DOI: 10.1093/mnras/sty1877); and HyVO's 51V16O (C. A. Bowesman, Q. Qu, L. K.
-  McKemmish, S. N. Yurchenko and J. Tennyson, Mon. Not. R. Astron. Soc. 529 (2024) 1321-1332, DOI:
-  10.1093/mnras/stae542), its strong lines as P. E. Cubillos's REPACK holds them (Repacked ExoMol
-  Opacity Line Lists, Zenodo, DOI: 10.5281/zenodo.14266247, the record licensed CC BY 4.0,
-  https://creativecommons.org/licenses/by/4.0/; P. E. Cubillos, Astrophys. J. 850 (2017) 32, DOI:
-  10.3847/1538-4357/aa9228), its .def and .pf fetched from ExoMol's own site. That
+  1828-1835, DOI: 10.1093/mnras/stt2011). Hot H2O's k-distributions and reference curves are
+  reduced from POKAZATEL's 1H2-16O (O. L. Polyansky, A. A. Kyuberis, N. F. Zobov, J. Tennyson, S.
+  N. Yurchenko and L. Lodi, Mon. Not. R. Astron. Soc. 480 (2018) 2597-2608, DOI:
+  10.1093/mnras/sty1877), not from the database's archive, which holds POKAZATEL's opacities but
+  not its transitions, but from its transitions of 13100-26400 cm-1 and its MARVELised states as
+  fetched from ExoMol's own site (https://www.exomol.com/db/H2O/1H2-16O/POKAZATEL/, 2026-10-29),
+  under CC BY-SA 4.0 as above. VO's k-distributions and reference curves are reduced
+  from HyVO's 51V16O (C. A. Bowesman, Q. Qu, L. K. McKemmish, S. N. Yurchenko and J. Tennyson,
+  Mon. Not. R. Astron. Soc. 529 (2024) 1321-1332, DOI: 10.1093/mnras/stae542), not from the
+  database's archive but from its strong lines as P. E. Cubillos repacked them ("Repacked ExoMol
+  Opacity Line Lists", version 3, 2025-09-20, Zenodo, DOI: 10.5281/zenodo.14266247, licensed under
+  CC BY 4.0, https://creativecommons.org/licenses/by/4.0/; HyVO's lines less those under 0.01 of a
+  stronger line at its centre at both 100 and 3500 K, by the method of P. E. Cubillos, Astrophys.
+  J. 850 (2017) 32, DOI: 10.3847/1538-4357/aa9228), its .def and .pf fetched from ExoMol's own
+  site; the lines remain ExoMol's, under CC BY-SA 4.0 as above. All this
   adapted material is offered under CC BY-SA 4.0 (its README.md beside it); the line lists' files
   are not committed.
 

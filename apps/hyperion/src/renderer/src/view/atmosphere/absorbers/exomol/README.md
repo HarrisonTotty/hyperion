@@ -30,8 +30,8 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
   R08.T4.f): their k-distributions per 1 nm cell, reduced by super-lines on the grid and in the
   16-bit format each sidecar states, from these lists, their files fetched from the database's
   archive of each dataset on Zenodo (each record's DOI in its sidecar), whose records state CC BY
-  4.0 (read 2026-10-29), the database's own licence quoted above, but H₂O's and VO's, as their
-  entries say:
+  4.0 (read 2026-10-29), the database's own licence quoted above, all but H₂O's and VO's (their
+  items):
   - `FeH`: MoLLIST's FeH as ExoMol carries it (M. Dulick et al., Astrophys. J. 594 (2003) 651; S.
     Wende, A. Reiners, A. Seifahrt and P. F. Bernath, Astron. Astrophys. 523 (2010) A58; P. F.
     Bernath, J. Quant. Spectrosc. Radiat. Transf. 240 (2020) 106687).
@@ -53,18 +53,24 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
   - `HCN`: Harris's H¹²C¹⁴N (G. J. Harris et al., Mon. Not. R. Astron. Soc. 367 (2006) 400, DOI
     10.1111/j.1365-2966.2005.09960.x; R. J. Barber et al., Mon. Not. R. Astron. Soc. 437 (2014)
     1828, DOI 10.1093/mnras/stt2011).
-  - `H2O`: POKAZATEL's ¹H₂¹⁶O, its transitions of 13,100–26,400 cm⁻¹ and its MARVELised states,
-    fetched from <https://www.exomol.com/db/H2O/1H2-16O/POKAZATEL/> on 2026-10-29 (O. L.
-    Polyansky, A. A. Kyuberis, N. F. Zobov, J. Tennyson, S. N. Yurchenko and L. Lodi, Mon. Not. R.
-    Astron. Soc. 480 (2018) 2597, DOI 10.1093/mnras/sty1877), each profile less its value at the
-    cut-off, the continuum's convention.
+  - `H2O`: POKAZATEL's ¹H₂¹⁶O (O. L. Polyansky, A. A. Kyuberis, N. F. Zobov, J. Tennyson, S. N.
+    Yurchenko and L. Lodi, Mon. Not. R. Astron. Soc. 480 (2018) 2597, DOI 10.1093/mnras/sty1877),
+    not from the database's archive, which holds POKAZATEL's opacities but not its transitions, but
+    from ExoMol's own site (<https://www.exomol.com/db/H2O/1H2-16O/POKAZATEL/>, fetched
+    2026-10-29): its transitions of 13,100–26,400 cm⁻¹ and its MARVELised states, under the
+    database's licence quoted above, each profile less its value at the cut-off, the continuum's
+    convention.
   - `VO`: HyVO's ⁵¹V¹⁶O (C. A. Bowesman, Q. Qu, L. K. McKemmish, S. N. Yurchenko and J. Tennyson,
-    Mon. Not. R. Astron. Soc. 529 (2024) 1321, DOI 10.1093/mnras/stae542), its strong lines as P. E.
-    Cubillos's REPACK holds them (Repacked ExoMol Opacity Line Lists, Zenodo record 14266247,
-    version 3, DOI 10.5281/zenodo.14266247, whose record states CC BY 4.0,
-    <https://creativecommons.org/licenses/by/4.0/>, read 2026-10-30; the method P. E. Cubillos,
-    Astrophys. J. 850 (2017) 32, DOI 10.3847/1538-4357/aa9228), with HyVO's `.def` and `.pf` from
-    ExoMol's own site, under the database's licence quoted above.
+    Mon. Not. R. Astron. Soc. 529 (2024) 1321, DOI 10.1093/mnras/stae542), not from the database's
+    archive but as P. E. Cubillos repacked its strong lines (Repacked ExoMol Opacity Line Lists,
+    Zenodo record 14266247, version 3, 2025-09-20, DOI 10.5281/zenodo.14266247: HyVO's lines less
+    those under 0.01 of a stronger line at its centre at both 100 and 3,500 K, by the method of
+    P. E. Cubillos, Astrophys. J. 850 (2017) 32, DOI 10.3847/1538-4357/aa9228), with HyVO's `.def`
+    and `.pf` from ExoMol's own site. That record states CC BY 4.0
+    (<https://creativecommons.org/licenses/by/4.0/>, read 2026-10-30), which covers Cubillos's
+    repacking alone: the lines are still HyVO's, under the database's licence quoted above, whose
+    ShareAlike binds this table. CC BY 4.0 lets an adaptation be offered under CC BY-SA 4.0 (its
+    Section 3(a)(4)), so the table is offered under CC BY-SA 4.0 alone, with both attributions.
 - `lineReferencesNH3.json` and `lineReferencesN2O.json` (plan R08, R08.T4.g), and
   `lineReferencesHot.json` (plan R08, R08.T4.f): named cells' curves of growth at three node
   pressures and three midpoints, computed from the same lists, beside the reduction's own, which
@@ -73,8 +79,9 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
   assignment, and each merged cell's bands by list and its mean cross-sections, which the tests
   read.
 - None of the line lists' files (`.def`, `.def.json`, `.states`, `.trans`, `.pf`, `.broad`,
-  REPACK's `_lbl.dat`), nor any decompressed, filtered or binned copy of them, is committed; they are fetched by URL and
-  checked against the SHA-256 the sidecars and `src/tools/exomolCli.ts` name.
+  REPACK's `_lbl.dat`), nor any decompressed, filtered or binned copy of them, is committed; they
+  are fetched by URL and checked against the SHA-256 the sidecars and `src/tools/exomolCli.ts`
+  name.
 - This adapted material is offered under CC BY-SA 4.0. It is kept in files of its own, never
   merged into `crossSections.json` or into code (decision-composition §5), and `NOTICE` carries
   its attribution. ExoMol asks that the line lists' papers be cited; the database's release paper

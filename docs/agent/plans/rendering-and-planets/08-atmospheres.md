@@ -23327,12 +23327,14 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     3,000 K took VOMYT's Q; HyVO's `.pf` gives 0.974.
   - _The range._ 1,000–4,000 K on E1′'s 18 nodes (E2, as TiO; V dissolves in the Ti-bearing
     condensates, which cold-trap it below about 1,500–2,000 K, K. Lodders, Astrophys. J. 577 (2002)
-    974, its abstract, the science check's), measured to 3,500 K, REPACK's top, as main ruled
-    (`hotTable`'s `measuredToK`, the sidecar's `measuredRangeK` [1,000, 3,500]), and estimated
-    above it, where the hot weak lines' share grows. The comparisons reach 3,000 K; the deficit
-    extrapolates to about 3–4% summed at 3,500 K, at main's 3% gate (a question below), and to
-    about 5% at 4,000 K. Above 4,000 K the 4,000 K node is held, estimated, HyVO being valid to
-    5,400 K.
+    974, its abstract, the science check's), measured to 3,000 K, the last temperature compared
+    (main, 2026-10-30, on research advice: REPACK's kept lines by lower-state energy, fitted to the
+    three comparisons, put the summed deficit at about 3.0% at 3,300 K, 3.3–3.4% at 3,500 K and
+    4.0–4.3% at 4,000 K; `hotTable`'s `measuredToK`, the sidecar's `measuredRangeK` [1,000,
+    3,000]), and estimated above it, where the hot weak lines' share grows. It was first measured
+    to 3,500 K, REPACK's top, the sidecar edited in place to what the merge writes, the lane's
+    partials being gone (no part changes). Above 4,000 K the 4,000 K node is held, estimated, HyVO
+    being valid to 5,400 K.
   - _The licence._ HyVO is ExoMol's, under CC BY-SA 4.0; REPACK's record states CC BY 4.0 for its
     repacking, which ExoMol's share-alike still binds. The table keeps CC BY-SA 4.0 in files of its
     own, with `exomol/README.md` and `NOTICE` citing Bowesman et al. 2024 (MNRAS 529, 1321), REPACK's
@@ -23344,7 +23346,7 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
 
     | Species | Cells | Nodes, K        | P (kept, kPa)     | G = 1 |        Node |       Chain |      16-bit |        1 Pa | Beyond cap | Parts |     Bytes | Basis                                    |
     | ------- | ----: | --------------- | ----------------- | ----: | ----------: | ----------: | ----------: | ----------: | ---------: | ----: | --------: | ---------------------------------------- |
-    | VO      |   381 | 1,000–4,000, 18 | 22 (177.8, 562.3) |     0 | 8.09 × 10⁻⁴ | 1.29 × 10⁻³ | 1.69 × 10⁻⁵ | 1.71 × 10⁻³ |       0.00 |    10 | 4,492,386 | `measured` to 3,500 K, `estimated` above |
+    | VO      |   381 | 1,000–4,000, 18 | 22 (177.8, 562.3) |     0 | 8.09 × 10⁻⁴ | 1.29 × 10⁻³ | 1.69 × 10⁻⁵ | 1.71 × 10⁻³ |       0.00 |    10 | 4,492,487 | `measured` to 3,000 K, `estimated` above |
 
     Its first pass, on E3's 20 pressures, failed the chain tier (to 2.33 × 10⁻³ at 688 and
     732–733 nm, 1,000–1,100 K) at the dropped alternates, so it was reduced again whole on the 22
@@ -23369,18 +23371,23 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
       laptop commit may raise it too. Lean: a single raise to 4 covering both when they are merged.
       Ruled 2026-10-30 (main, on research advice): 4 for both, every cache keyed on it lasting one
       session.
-    - REPACK's record states CC BY 4.0: lean, the table stays CC BY-SA 4.0, HyVO's.
+    - REPACK's record states CC BY 4.0: lean, the table stays CC BY-SA 4.0, HyVO's. Ruled
+      2026-10-30 (main, on research advice): CC BY-SA 4.0 alone, attributing both HyVO (ExoMol)
+      and REPACK (Cubillos, CC BY 4.0); the README's and `NOTICE`'s items now say VO's lines come
+      from REPACK, not the database's archive, as H₂O's say it of ExoMol's site.
     - `ExoMolSource` as a union on `kind`, the REPACK reader beside ExoMol's own files: lean, as
       built; a list streamed file by file (the advice's HyVO option 1) would be a third kind. The
       TypeScript review's "consider", one union of a source and its states for `streamPass`, was
       not taken: the guards it would remove are tested.
     - VO measured to 3,500 K, as ruled, though the comparisons stop at 3,000 K and the deficit
       extrapolates to 3–4% summed at 3,500 K (the science check's should-fix): lean, as ruled, the
-      notes saying so; `measuredToK` 3,000 if main prefers, a re-merge with no part changed.
+      notes saying so; `measuredToK` 3,000 if main prefers, a re-merge with no part changed. Ruled
+      2026-10-30 (main, on research advice): 3,000 K, the last temperature compared.
 - **Deferred findings (2026-10-13 rule)** (R08.T4.f's part 2). Recorded and deferred: each leaves the
   algorithm and every contract as they are.
-  - _VO's weak lines._ REPACK's dropped lines are 1–3% of the summed cell means at 1,000–3,000 K and
-    up to 17% in the weakest window cells; streaming HyVO's own files would remove the deficit, for
+  - _VO's weak lines._ REPACK's dropped lines are 1–3% of the summed cell means at 1,000–3,000 K,
+    estimated at 3.3–3.4% summed at 3,500 K and 4.0–4.3% at 4,000 K, and up to 17% in the weakest
+    window cells; streaming HyVO's own files would remove the deficit, for
     a later task on a machine that reaches ExoMol's site.
   - _VO's widths._ Every line takes HyVO's default width, 0.07 cm⁻¹ bar⁻¹ with n = 0.5, so every
     line shape is `estimated`, as every hot table's is.
@@ -23431,8 +23438,8 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     Its first pass, on E3's 20 pressures, failed the chain tier at the dropped 177.8 kPa alternate
     (39 states in 12 cells over 581–756 nm, 300–550 K, to 2.49 × 10⁻³), so it was reduced again
     whole on the 21 the merge asked for, as H₂S, HCN and VO were. Its parts are 446,496–478,904
-    bytes. T4.f's tables now hold 42,251,989 bytes of its 71,366,237 (part 1's 26,233,897, VO's
-    4,492,386 and H₂O's); the cap's directories hold 120,885,752 of 150,000,000. References: 717
+    bytes. T4.f's tables now hold 42,252,090 bytes of its 71,366,237 (part 1's 26,233,897, VO's
+    4,492,487 and H₂O's); the cap's directories hold 120,885,853 of 150,000,000. References: 717
     and 620 nm, the projection's strongest and median samples.
 
   - _The hand-over_ at 300 K, as CO's and HCN's. Over the columns at which R08.T4.d's table

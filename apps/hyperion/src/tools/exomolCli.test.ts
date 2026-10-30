@@ -337,9 +337,9 @@ describe("R08.T4.f's hot tables (decision-r08-t4ef-storage §1.4; decision-r08-t
     expect([nodes[0], nodes.at(-1)]).toEqual([first, last]);
   });
 
-  it("measure VO to 3,500 K, REPACK's top, its nodes running on to 4,000 K", () => {
+  it("measure VO to 3,000 K, its last comparison, its nodes running on to 4,000 K", () => {
     expect([hot("VO").measuredRangeK, hot("VO").temperaturesK.at(-1)]).toEqual([
-      [1_000, 3_500],
+      [1_000, 3_000],
       4_000,
     ]);
   });
