@@ -250,7 +250,7 @@ export async function venusClassFixture(): Promise<VenusFixture> {
  * Titan's haze (M. G. Tomasko et al., Planet. Space Sci. 56 (2008) 669–707, not read here: S. M.
  * Hörst, JGR Planets 122 (2017) 432, quotes it as 4,000 monomers of 0.04 µm), well mixed through
  * the column, of vertical optical depth 8.1 at 550 nm: the column Huygens' DISR measured (Tomasko
- * et al. 2008, Fig. 47, as M. Bazzon, H. M. Schmid and E. Buenzli, A&A 572 (2014) A6, eqs.
+ * et al. 2008, Fig. 47, as A. Bazzon, H. M. Schmid and E. Buenzli, A&A 572 (2014) A6, eqs.
  * A.8–A.10, fit it: 3.94 above 80 km, 2.79 from 30 to 80 km and 1.37 below), as `hyperion-sim`'s
  * Titan haze takes it.
  */
