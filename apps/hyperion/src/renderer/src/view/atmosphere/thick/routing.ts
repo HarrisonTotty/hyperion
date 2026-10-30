@@ -71,3 +71,13 @@ export function correctionRouted(
 ): boolean {
   return routed && correctionBySources(column) !== false;
 }
+
+/**
+ * Whether a body drawn from `column` takes its disc's reflectance table (plan R08, R08.T16.b),
+ * which R07's disc reads beyond the 10⁹ m boundary: every world with air whose column has a term
+ * (lean, 2026-10-30: asked for every drawn body, near or far, so that a body's table is held before
+ * it crosses the boundary; until it lands the full passes draw it at every distance).
+ */
+export function discTableRouted(column: SpectralColumn): boolean {
+  return column.terms.length > 0;
+}

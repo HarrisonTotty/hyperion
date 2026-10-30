@@ -19,9 +19,11 @@ import {
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { microtasks } from "../../test/opticsFakes";
 import { lavaWorldSurface } from "../../test/thermalSurfaces";
+import { DISC_LAYER_VALUES } from "../atmosphere/discTable";
 import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import {
+  BODY_DISC_CELLS_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
@@ -421,6 +423,47 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     // The tone-mapping pass reads the composite's target, not the scene target the sky drew in.
     const tonemapped = view.frames[0]?.draws[0]?.textures["hdrColour"];
     expect(tonemapped).not.toBe(composite?.textures["sceneColour"]);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("draws a body past 1.1 × 10⁹ m by its disc table, with no composite, once the air forms are prepared, and by its full passes until then (R08.T16.b)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    // Some 7 px across the test's 64 px view.
+    const planet = {
+      ...bodyAt("0200080020000000.0300", vec3(0, 0, -1.5e9)),
+      figure: { equatorialRadiusM: 1e8, polarRadiusM: 1e8, pole: null },
+    };
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 1e8);
+    tables.setDiscReflectance({
+      bands: 1,
+      slots: 1,
+      sunFloor: -0.18,
+      values: new Float32Array(DISC_LAYER_VALUES),
+    });
+    const frame = { ...frameWith([]), bodies: [planet], atmospheres: [airOf(planet, tables)] };
+    const before = renderer.render(view, frame);
+    expect([
+      before?.tabled.size,
+      engine.targetFrames.map((f) => f.label).includes(ATMOSPHERE_COMPOSITE_PASS),
+    ]).toEqual([0, true]);
+    await renderer.prepareAir();
+    engine.targetFrames.length = 0;
+    const after = renderer.render(view, { ...frame, previousTabled: before?.tabled });
+    const discs = engine.targetFrames.find((f) => f.label === PHOTOREAL_PASS_LABELS.discs);
+    expect([
+      [...(after?.tabled ?? [])],
+      after?.regimes.get(planet.id),
+      engine.targetFrames.map((f) => f.label).includes(ATMOSPHERE_COMPOSITE_PASS),
+      discs?.draws.map((draw) => draw.material.name),
+      discs?.draws[0]?.textures["discReflectance"],
+    ]).toEqual([
+      [planet.id],
+      "disc",
+      false,
+      ["bodies:discAir", "bodies:discLimbAir"],
+      tables.discReflectance?.texture,
+    ]);
     renderer.dispose();
     tables.dispose();
   });
@@ -835,7 +878,9 @@ async function overlayDatums(
 /**
  * Every kernel VIEW makes on a device (plan R01, R01.T15): the photorealistic renderer's histogram
  * and disc cells, and since R08.T18.a the disc cells' emissive form, for a body above the thermal
- * emission's visibility cut (`withDiscEmission`); the atmosphere's per-frame kernels, its sky view,
+ * emission's visibility cut (`withDiscEmission`), and since R08.T16.b their air form, for a body
+ * drawn by its disc table beyond the 10⁹ m boundary (`withDiscAir`); the atmosphere's per-frame
+ * kernels, its sky view,
  * aerial perspective, its two marches' footprint entry points, each general, specialised for one band
  * and no layer edge (R08.T11.d) and for one band, edged (R08.T11.g), their centre ray's entry points
  * under R08.T11.d's tile cull (off for a view) and the march's fill; since R08.T14.c the sky view, the
@@ -845,13 +890,14 @@ async function overlayDatums(
  * WGSL fixed text with no value of a medium, a body or a setting in it (term counts, slices, bands
  * and light slots are uniforms; the specialised and one-band marches and the thick read are
  * variants of fixed text, chosen from the tables), so the records a device's cache holds for VIEW
- * are bounded by this list's length, 28, however many bodies a session visits. The smoke's kernel
+ * are bounded by this list's length, 29, however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
 const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   HISTOGRAM_KERNEL,
   BODY_DISC_CELLS_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_AIR_KERNEL,
   SKY_VIEW_KERNEL,
   AERIAL_PERSPECTIVE_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
@@ -1039,15 +1085,16 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // pass); none after adds a kernel. The thin first pass makes 14: the view's, made up front with
     // both reads' one-band marches among them (R08.T11.g, which the slab Earth takes by slot and the
     // deck over the shared read), and the tables' four. The thick pass makes 6 more, 20 in all,
-    // bounded however many bodies follow. All but eight are made: the sky bake's four are the
+    // bounded however many bodies follow. All but nine are made: the sky bake's four are the
     // sky's, the march's fill a reader's, which no frame asks, the tile cull's two centre ray's
-    // kernels its own cover's, which a view never takes (R08.T11.d), and the disc cells' emissive
-    // form a body's above the thermal cut, which none of these is (R08.T18.a).
+    // kernels its own cover's, which a view never takes (R08.T11.d), the disc cells' emissive
+    // form a body's above the thermal cut, which none of these is (R08.T18.a), and their air form
+    // a body's drawn by its disc table, which none of these has (R08.T16.b).
     expect(new Set(held.slice(0, kinds.length).slice(-1))).toEqual(
-      new Set([VIEW_KERNELS.length - BAKE_KERNELS.length - 4 - 6]),
+      new Set([VIEW_KERNELS.length - BAKE_KERNELS.length - 5 - 6]),
     );
     expect(new Set(held.slice(2 * kinds.length - 1))).toEqual(new Set([held.at(-1)]));
-    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 4);
+    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 5);
     // Each body's tables made their own handles all the while.
     expect(engine.counts.kernels).toBeGreaterThan(2 * airs.length);
     renderer.dispose();

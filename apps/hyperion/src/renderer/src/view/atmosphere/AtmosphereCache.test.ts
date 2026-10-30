@@ -77,9 +77,13 @@ import {
   type ThickBake,
   type ThickBakeAsk,
   type ThickBakeOutcome,
+  type DiscBake,
+  type DiscBakeAsk,
+  type DiscBakeOutcome,
 } from "./opticsPool";
 import { EARTH_CASE, EARTH_REFERENCE_RADIUS_M, referenceCaseBakeLights } from "./reference/cases";
-import { type AtmosphereBody, perPlanetRowOf, tablesPlanOf } from "./tables";
+import { type AtmosphereBody, kernelMedium, perPlanetRowOf, tablesPlanOf } from "./tables";
+import { DISC_LAYER_VALUES, type DiscReflectanceTable } from "./discTable";
 import { type MsSourceTable, thickBakeBands } from "./thick/bake";
 import { spectralColumnOf } from "./thick/columnLayout";
 import type { PolarisationTable } from "./thick/polarisation";
@@ -112,15 +116,48 @@ interface ScriptedCorrection {
   readonly settle: (outcome: PolarisationBakeOutcome) => void;
 }
 
+/** A disc table the scripted builder holds, landed by the test (R08.T16.b). */
+interface ScriptedDisc {
+  readonly ask: DiscBakeAsk;
+  settled: boolean;
+  cancelled: boolean;
+  readonly settle: (outcome: DiscBakeOutcome) => void;
+}
+
 /**
- * A builder in the optics pool's place, whose builds, thick bakes and polarisation corrections the
- * test lands, fails or leaves running.
+ * A builder in the optics pool's place, whose builds, thick bakes, polarisation corrections and
+ * disc tables the test lands, fails or leaves running.
  */
 class ScriptedBuilder implements AtmosphereBuilder {
   readonly builds: ScriptedBuild[] = [];
   readonly bakes: ScriptedBake[] = [];
   readonly corrections: ScriptedCorrection[] = [];
+  readonly discs: ScriptedDisc[] = [];
   terminated = false;
+
+  bakeDisc(ask: DiscBakeAsk): DiscBake {
+    let resolve: (outcome: DiscBakeOutcome) => void = ignore;
+    const outcome = new Promise<DiscBakeOutcome>((settleWith) => {
+      resolve = settleWith;
+    });
+    const disc: ScriptedDisc = {
+      ask,
+      settled: false,
+      cancelled: false,
+      settle: (result) => {
+        disc.settled = true;
+        resolve(result);
+      },
+    };
+    this.discs.push(disc);
+    return {
+      outcome,
+      cancel: () => {
+        disc.cancelled = true;
+        disc.settle({ kind: "cancelled" });
+      },
+    };
+  }
 
   bakePolarisation(ask: ThickBakeAsk): PolarisationBake {
     let resolve: (outcome: PolarisationBakeOutcome) => void = ignore;
@@ -1961,6 +1998,226 @@ describe("a body's polarisation correction (R08.T14.f)", () => {
   });
 });
 
+/** The latest disc table asked, or a test failure. */
+function latestDisc(h: Harness): ScriptedDisc {
+  const disc = h.builder.discs.at(-1);
+  if (disc === undefined) {
+    throw new Error("no disc table was asked");
+  }
+  return disc;
+}
+
+describe("a body's disc table (R08.T16.b)", () => {
+  /** A disc table of the first tables' plan's bands, one slot, its values zero. */
+  function aTable(h: Harness): DiscReflectanceTable {
+    const bands = madeAt(h, 0).plan.bands.length;
+    return {
+      bands,
+      slots: 1,
+      sunFloor: -0.18,
+      values: new Float32Array(bands * DISC_LAYER_VALUES),
+    };
+  }
+
+  it("asks every drawn world with air its table once its tables are made, its thick bake's request with the medium as the tables hold it", async () => {
+    const h = harness();
+    await drawn(h, [lit(A)], airAssembly());
+    const { ask } = latestDisc(h);
+    expect([
+      h.builder.discs.length,
+      ask.bands,
+      ask.slots,
+      ask.input === h.builder.latestOf(A).input,
+      ask.column,
+      ask.air.medium,
+      ask.air.kernelMedium,
+      ask.air.curves,
+      ask.air.bake,
+      ask.air.correction,
+    ]).toEqual([
+      1,
+      [0],
+      [0],
+      true,
+      spectralColumnOf(R05_EARTH_REFERENCE, R05_EARTH_REFERENCE.terms.map(channelSource)),
+      R05_EARTH_REFERENCE,
+      kernelMedium(R05_EARTH_REFERENCE),
+      madeAt(h, 0).built.curves,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  /** A cache with A drawn with air, its table asked, landed `table` (or {@link aTable}'s). */
+  async function landed(h: Harness, table?: DiscReflectanceTable): Promise<DiscReflectanceTable> {
+    await drawn(h, [lit(A)], airAssembly());
+    const given = table ?? aTable(h);
+    latestDisc(h).settle({ kind: "baked", table: given });
+    await microtasks();
+    return given;
+  }
+
+  it("gives the landed table to its tables, with no label of its own", async () => {
+    const h = harness();
+    const table = await landed(h);
+    const after = note(h, [lit(A)]);
+    expect([after.labels, madeAt(h, 0).discs]).toEqual([[], [table]]);
+  });
+
+  it("logs a failed table once, the body drawn by its full passes with no label or fault", async () => {
+    const h = harness();
+    await drawn(h, [lit(A)], airAssembly());
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    latestDisc(h).settle({ kind: "failed", message: "refused" });
+    await microtasks();
+    const report = note(h, [lit(A)]);
+    expect([
+      report.labels,
+      report.problems.size,
+      madeAt(h, 0).discs,
+      errors.mock.calls.map(([text]) => String(text)),
+    ]).toEqual([[], 0, [], [`the disc table of ${A} failed: refused`]]);
+  });
+
+  it("gives its tables the table at a later frame where the device was lost as it landed", async () => {
+    const h = harness();
+    await drawn(h, [lit(A)], airAssembly());
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    const tables = madeAt(h, 0);
+    tables.discThrows = new EngineUnavailable("createTexture");
+    const table = aTable(h);
+    latestDisc(h).settle({ kind: "baked", table });
+    await microtasks();
+    note(h, [lit(A)]);
+    const during = tables.discs.length;
+    tables.discThrows = null;
+    note(h, [lit(A)]);
+    expect([during, tables.discs, errors.mock.calls.length]).toEqual([0, [table], 0]);
+  });
+
+  it("fails the table where its tables refuse it, with one console.error, giving it no more", async () => {
+    const h = harness();
+    await drawn(h, [lit(A)], airAssembly());
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    const tables = madeAt(h, 0);
+    tables.discThrows = new RangeError("a table of 2 bands");
+    latestDisc(h).settle({ kind: "baked", table: aTable(h) });
+    await microtasks();
+    tables.discThrows = null;
+    const report = note(h, [lit(A)]);
+    expect([report.labels, report.problems.size, tables.discs, errors.mock.calls.length]).toEqual([
+      [],
+      0,
+      [],
+      1,
+    ]);
+  });
+
+  it("gives tables made again after an eviction the table, asking none again", async () => {
+    const h = harness(20_000_000);
+    const table = await landed(h);
+    await drawn(h, [lit(bodyId(1))], airAssembly());
+    const evicted = madeAt(h, 0).disposed;
+    note(h, [lit(A)]);
+    const remade = h.made.find((tables, n) => n > 0 && tables.built === madeAt(h, 0).built);
+    expect([evicted, remade?.discs, h.builder.discs.length]).toEqual([true, [table], 2]);
+  });
+
+  it("asks a table that waited on a bake once an eviction's tables are made again", async () => {
+    const h = harness(20_000_000, routedThick);
+    await drawn(h, [lit(A)], thickAssembly());
+    const bakeOfA = h.builder.bakes[0];
+    if (bakeOfA === undefined) {
+      throw new Error("A's thick bake was asked");
+    }
+    await drawn(h, [lit(bodyId(1))], thickAssembly());
+    const evicted = madeAt(h, 0).disposed;
+    const bake = patternedThickBake(madeAt(h, 0).plan.bands, R05_EARTH_REFERENCE, 1);
+    bakeOfA.settle({ kind: "baked", tables: bake });
+    await microtasks();
+    const whileEvicted = h.builder.discs.length;
+    note(h, [lit(A)]);
+    expect([
+      evicted,
+      whileEvicted,
+      h.builder.discs.length,
+      latestDisc(h).ask.air.bake === bake,
+    ]).toEqual([true, 0, 1, true]);
+  });
+
+  it("waits for a routed body's thick bake and correction, and reads J from both once landed", async () => {
+    const h = harness(undefined, routedThick, routedCorrects);
+    await drawn(h, [lit(A)], thickAssembly());
+    expect(h.builder.discs).toHaveLength(0);
+    const bake = patternedThickBake(madeAt(h, 0).plan.bands, R05_EARTH_REFERENCE, 1);
+    latestBake(h).settle({ kind: "baked", tables: bake });
+    await microtasks();
+    expect(h.builder.discs).toHaveLength(0);
+    const correction = patternedCorrection(madeAt(h, 0).plan.bands, R05_EARTH_REFERENCE, 1);
+    latestCorrection(h).settle({ kind: "baked", tables: correction });
+    await microtasks();
+    const { ask } = latestDisc(h);
+    expect([
+      h.builder.discs.length,
+      ask.air.bake === bake,
+      ask.air.correction === correction,
+    ]).toEqual([1, true, true]);
+  });
+
+  it("asks once a routed bake has failed, baking its own J", async () => {
+    const h = harness(undefined, routedThick);
+    await drawn(h, [lit(A)], thickAssembly());
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    latestBake(h).settle({ kind: "failed", message: "refused" });
+    await microtasks();
+    expect([h.builder.discs.length, latestDisc(h).ask.air.bake]).toEqual([1, undefined]);
+  });
+
+  it("asks none for a medium with no sources", async () => {
+    const h = harness();
+    const air = airAssembly();
+    if (air.drawn === undefined) {
+      throw new Error("the assembly draws a medium");
+    }
+    await drawn(h, [lit(A)], { ...air, drawn: { ...air.drawn, sources: [] } });
+    expect(h.builder.discs).toHaveLength(0);
+  });
+
+  it("asks none for a body lit by no star, drawn by its full passes", async () => {
+    const h = harness();
+    await drawn(h, [lit(A, "disc", [])], airAssembly());
+    expect([h.made.length, h.builder.discs.length]).toEqual([1, 0]);
+  });
+
+  it("cancels the table under way when the cache is disposed", async () => {
+    const h = harness();
+    await drawn(h, [lit(A)], airAssembly());
+    const disc = latestDisc(h);
+    h.cache.dispose();
+    expect(disc.cancelled).toBe(true);
+  });
+
+  it("cancels the table under way when the body is dropped", async () => {
+    const h = harness();
+    await drawn(h, [lit(A)], airAssembly());
+    vi.spyOn(console, "error").mockImplementation(ignore);
+    h.view.reportDrawFailure(A, new Error("a bug in the draw"), "VIEW 1");
+    await microtasks();
+    expect(latestDisc(h).cancelled).toBe(true);
+  });
+
+  it("cancels the table under way when a new key's build lands, asking the new entry's", async () => {
+    const h = harness();
+    await drawn(h, [lit(A)], airAssembly());
+    const first = latestDisc(h);
+    const lights = [SUN_LIGHT, { ...SUN_LIGHT, star: `${FIXTURE_SYSTEM}.0101` }];
+    note(h, [lit(A, "disc", lights)]);
+    await land(h, A, { kind: "built", assembled: airAssembly() });
+    note(h, [lit(A, "disc", lights)]);
+    expect([first.cancelled, h.builder.discs.length]).toEqual([true, 2]);
+  });
+});
+
 describe("the cache and the pool on the render thread", () => {
   const graph = [
     ...runTimeGraph(`${RENDERER_ROOT}view/atmosphere/AtmosphereCache.ts`),
@@ -2084,8 +2341,10 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
       builder: pool,
       routes: routedThick,
       tables: (built) => new FakeTables(built, 1),
-      // The bake's request alone: the correction's is posted in its own tests (R08.T14.f).
+      // The bake's request alone: the correction's is posted in its own tests (R08.T14.f), and
+      // the disc table's (R08.T16.b).
       corrects: options.corrects ?? (() => false),
+      discs: () => false,
     });
     onTestFinished(() => {
       cache.dispose();

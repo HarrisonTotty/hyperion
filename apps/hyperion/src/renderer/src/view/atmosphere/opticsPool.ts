@@ -38,6 +38,10 @@
  * `polarisation-bake` job, asked as a thick bake is, with the same request's fields, and failing as
  * one does: its own failure, never a build's.
  *
+ * **A disc's table** ({@link OpticsWorkerPool.bakeDisc}; R08.T16.b) is one `disc-bake` job, asked as a
+ * thick bake is, with its request's fields and the medium and landed bakes it marches with, and
+ * failing as one does: its own failure, never a build's.
+ *
  * The workers start at the first build or bake, so a session that draws no disc loads none of the
  * optics. This module takes only types of `assemble.ts` and of the thick bake's modules, whose
  * tables stay in the workers.
@@ -52,7 +56,9 @@ import {
   type OpticsRequest,
   transferablesOf,
 } from "./opticsMessages";
+import type { DiscReflectanceTable } from "./discTable";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
+import type { DiscBakeAir } from "./thick/discBake";
 import type { PolarisationTable } from "./thick/polarisation";
 import type { SpectralColumn } from "./thick/spectralColumn";
 
@@ -177,6 +183,29 @@ export interface PolarisationBake {
   cancel(): void;
 }
 
+/**
+ * What a disc's table asks (plan R08, R08.T16.b): a `disc-bake` request's fields, a thick bake's
+ * with every band of the tables and what the march takes of them.
+ */
+export interface DiscBakeAsk extends ThickBakeAsk {
+  readonly air: DiscBakeAir;
+}
+
+/** How a disc's table's bake ended (R08.T16.b), as a thick bake's does. */
+export type DiscBakeOutcome =
+  | { readonly kind: "baked"; readonly table: DiscReflectanceTable }
+  /** The bake failed, as a thick bake fails, with the message for the console's log. */
+  | { readonly kind: "failed"; readonly message: string }
+  | { readonly kind: "cancelled" };
+
+/** A disc's table's bake under way (R08.T16.b). */
+export interface DiscBake {
+  /** Settles once with how the bake ended; never rejects. */
+  readonly outcome: Promise<DiscBakeOutcome>;
+  /** Drops its job if not yet sent and ignores its answer if sent; settles it `cancelled`. */
+  cancel(): void;
+}
+
 /** What builds a body's medium and its curves for the atmosphere cache: the pool, or a test's. */
 export interface AtmosphereBuilder {
   /** Builds a body's assembly and its light slots' curves. */
@@ -188,6 +217,8 @@ export interface AtmosphereBuilder {
    * request's fields, for a thin or a thick body.
    */
   bakePolarisation(ask: ThickBakeAsk): PolarisationBake;
+  /** Bakes a body's disc reflectance table (R08.T16.b), every band and light in one request. */
+  bakeDisc(ask: DiscBakeAsk): DiscBake;
   /** Stops every worker; builds and bakes under way settle `cancelled`. */
   terminate(): void;
 }
@@ -507,6 +538,35 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
     };
   }
 
+  /**
+   * Bakes a body's disc reflectance table (see the module's remarks): one `disc-bake` job asking
+   * every band and slot of `ask`.
+   *
+   * @throws Error once the pool is terminated.
+   */
+  bakeDisc(ask: DiscBakeAsk): DiscBake {
+    if (this.#terminated) {
+      throw new Error("the optics-worker pool was terminated");
+    }
+    this.#start();
+    const job = this.#submit((id) => ({ kind: "disc-bake", id, ...ask }), []);
+    let cancelled = false;
+    const settled = job.outcome.then(
+      (outcome): DiscBakeOutcome => (cancelled ? CANCELLED : discOutcomeOf(outcome)),
+      (error: unknown): DiscBakeOutcome => ({
+        kind: "failed",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return {
+      outcome: settled,
+      cancel: () => {
+        cancelled = true;
+        job.cancel();
+      },
+    };
+  }
+
   /** Stops every worker; every job settles `cancelled`, and the pool cannot be used afterwards. */
   terminate(): void {
     if (this.#terminated) {
@@ -773,6 +833,34 @@ function polarisationOutcomeOf(outcome: JobOutcome, ask: ThickBakeAsk): Polarisa
         kind: "failed",
         message: "an optics worker failed with the polarisation correction's request",
       };
+      break;
+    case "cancelled":
+      baked = CANCELLED;
+      break;
+  }
+  return baked;
+}
+
+/** A `disc-bake` job's outcome as its bake's. */
+function discOutcomeOf(outcome: JobOutcome): DiscBakeOutcome {
+  let baked: DiscBakeOutcome;
+  switch (outcome.kind) {
+    case "answered": {
+      const { reply } = outcome;
+      if (reply.kind === "disc-baked") {
+        baked = { kind: "baked", table: reply.table };
+      } else if (reply.kind === "disc-bake-failed") {
+        baked = { kind: "failed", message: reply.message };
+      } else {
+        baked = { kind: "failed", message: `a disc's bake was answered ${reply.kind}` };
+      }
+      break;
+    }
+    case "failed":
+      baked = outcome;
+      break;
+    case "lost":
+      baked = { kind: "failed", message: "an optics worker failed with the disc's bake's request" };
       break;
     case "cancelled":
       baked = CANCELLED;

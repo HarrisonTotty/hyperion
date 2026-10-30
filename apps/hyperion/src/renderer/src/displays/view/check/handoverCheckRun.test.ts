@@ -14,6 +14,8 @@ describe("a frame's regime", () => {
     [["bodies:smoothMesh", "bodies:discLimb"], "figure"],
     [["bodies:smoothMeshEmissive", "bodies:discLimbEmissive"], "figure"],
     [["bodies:discEmissive", "bodies:discLimbEmissive"], "disc"],
+    [["bodies:smoothMeshAir", "bodies:discLimbAir"], "figure"],
+    [["bodies:discAir", "bodies:discLimbAir"], "disc"],
     [["bodies:smoothMesh", "terrain-lit-high"], "terrain"],
     [["sky:stars"], "none"],
   ] as const)("of the materials %j is %s", (materials, regime) => {

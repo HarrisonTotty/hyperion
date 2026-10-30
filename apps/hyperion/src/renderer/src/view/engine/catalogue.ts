@@ -30,10 +30,13 @@ import {
 } from "../atmosphere/hillaire";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
 import {
+  BODY_DISC_AIR_MATERIALS,
+  BODY_DISC_CELLS_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
   BODY_DISC_EMISSIVE_MATERIALS,
   BODY_DISC_MATERIALS,
+  SMOOTH_MESH_AIR_MATERIAL,
   SMOOTH_MESH_EMISSIVE_MATERIAL,
   SMOOTH_MESH_MATERIAL,
 } from "../bodies/draw";
@@ -264,6 +267,19 @@ export const THERMAL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...TERRAIN_LIT_EMISSIVE_MATERIALS.map((spec): CatalogueEntry => ({ kind: "material", spec })),
 ];
 
+/**
+ * R08.T16.b's air forms of the lit bodies' kernels (`discReflectance.ts`' `withDiscAir`): the disc's
+ * interior and limb, the mesh regime's figure and the `disc cells` kernel, each reading the body's
+ * disc table beyond the 10⁹ m boundary, made only for a body drawn by it. The smoke page compiles
+ * them in part 9, beside their twin's group (`smoke/page.ts`), after R08.T18.a's emissive forms.
+ */
+export const DISC_AIR_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "material", spec: BODY_DISC_AIR_MATERIALS.interior },
+  { kind: "material", spec: BODY_DISC_AIR_MATERIALS.limb },
+  { kind: "material", spec: SMOOTH_MESH_AIR_MATERIAL },
+  { kind: "compute", spec: BODY_DISC_CELLS_AIR_KERNEL },
+];
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
@@ -277,5 +293,6 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...SPLAT_ENTRIES,
   ...LIT_BODY_ENTRIES,
   ...THERMAL_ENTRIES,
+  ...DISC_AIR_ENTRIES,
   ...SKY_ENTRIES,
 ];

@@ -106,6 +106,15 @@
  *   next computed. Like a failed thick bake, it is never item 6's fault.
  *
  * A medium with no sources to bake from asks for none, and is drawn as before.
+ *
+ * **The disc's table** (R08.T16.b; `thick/discBake.ts`). Every drawn body with air that has sources
+ * to bake from ({@link AtmosphereCacheOptions.discs}) has its disc reflectance table asked once its
+ * tables are made and its thick bake and polarisation correction, where asked, have landed or
+ * failed, so that its J is read from them as the march reads it ({@link AtmosphereBuilder.bakeDisc}),
+ * and given to its tables when it lands (`AtmosphereTables.setDiscReflectance`), kept with the entry
+ * as a bake is. R07's disc reads it beyond the 10⁹ m boundary in place of the full passes. It
+ * changes no label: until it lands, and where it fails (one `console.error`, never item 6's fault),
+ * the body is drawn by the full passes at every distance, as before.
  */
 
 import type {
@@ -151,14 +160,22 @@ import { bodyGravity } from "./oblate";
 import { keptBakeLightsOf } from "./opticsMessages";
 import type {
   AtmosphereBuilder,
+  DiscBake,
+  DiscBakeAsk,
   OpticsBuild,
   PolarisationBake,
   ThickBake,
   ThickBakeAsk,
 } from "./opticsPool";
+import type { DiscReflectanceTable } from "./discTable";
 import type { BakeSpectrum } from "./spectralColour";
 import { groundTemperatureFieldOf, type SurfaceTemperatureField } from "./thermal";
-import { type AbsorberCurveSlots, type AtmosphereBody, AtmosphereTables } from "./tables";
+import {
+  type AbsorberCurveSlots,
+  type AtmosphereBody,
+  AtmosphereTables,
+  kernelMedium,
+} from "./tables";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
 import { spectralColumnOf } from "./thick/columnLayout";
 import type { PolarisationTable } from "./thick/polarisation";
@@ -170,7 +187,7 @@ import {
   classifyRegime,
   THICK_REASON,
 } from "./thick/regime";
-import { correctionRouted, thickBakeRouted } from "./thick/routing";
+import { correctionRouted, discTableRouted, thickBakeRouted } from "./thick/routing";
 import type { SpectralColumn, SpectralSource } from "./thick/spectralColumn";
 
 /**
@@ -203,6 +220,7 @@ export type CachedTables = Pick<
   | "dispose"
   | "setThickTables"
   | "setPolarisationCorrection"
+  | "setDiscReflectance"
   | "plan"
   | "body"
   | "bottomRadiusM"
@@ -405,6 +423,12 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
    * on (`CORRECTION_ROUTED`), and then every world with air; a test's choice otherwise.
    */
   readonly corrects?: (column: SpectralColumn) => boolean;
+  /**
+   * Whether a body drawn from `column` takes its disc's table (R08.T16.b): `thick/routing.ts`'s
+   * `discTableRouted` if absent, every world with air whose column has a term; a test's choice
+   * otherwise.
+   */
+  readonly discs?: (column: SpectralColumn) => boolean;
 }
 
 /**
@@ -532,6 +556,20 @@ interface HeldCorrection<T> {
   readonly state: CorrectionState<T>;
 }
 
+/** Where a drawn entry's disc table stands (R08.T16.b). */
+type DiscState<T> =
+  /** Asked once the entry's thick bake and correction under way have settled. */
+  | { readonly kind: "waiting"; readonly entry: ToDraw; readonly built: BuiltAtmosphere }
+  | { readonly kind: "baking"; readonly handle: DiscBake }
+  | {
+      readonly kind: "baked";
+      readonly table: DiscReflectanceTable;
+      /** The tables that hold it; `null` before any did, or once another set stands. */
+      given: T | null;
+    }
+  /** Its bake failed: the body is drawn by the full passes at every distance. */
+  | { readonly kind: "failed" };
+
 /** A body as the cache holds it. */
 interface HeldBody<T> {
   readonly id: BodyIdHex;
@@ -559,6 +597,8 @@ interface HeldBody<T> {
   bake: HeldBake<T> | null;
   /** The drawn entry's polarisation correction; `null` where none is asked, or nothing is drawn. */
   correction: HeldCorrection<T> | null;
+  /** The drawn entry's disc table (R08.T16.b); `null` where none is asked, or nothing is drawn. */
+  disc: DiscState<T> | null;
   problem: AtmosphereProblem | null;
 }
 
@@ -567,6 +607,7 @@ const WAITING: Fetch = { kind: "waiting" };
 const FAILED: AtmosphereProblem = { kind: "failed" };
 const LOAD_FAILED: AtmosphereProblem = { kind: "loadFailed" };
 const BAKE_FAILED = { kind: "failed" } as const;
+const DISC_FAILED = { kind: "failed" } as const;
 
 /**
  * Why a body whose polarisation correction failed carries `atmosphereApproximate` (R08.T14.f), as
@@ -899,6 +940,43 @@ function thickBakeAskOf(
   };
 }
 
+/**
+ * A drawn body's disc table request (R08.T16.b): its thick bake's request (`thickBakeAskOf`), every
+ * band and light slot in one, with the medium as the tables hold it, its kernels' medium, the
+ * tables' curves, and the routed bake and correction that have landed, which the job reads J from
+ * in place of baking its own; `null` where no light lights it to bake under.
+ *
+ * @throws RangeError as `thickBakeAskOf`.
+ */
+function discBakeAskOf(
+  input: BodyAtmosphereInput | null,
+  built: BuiltAtmosphere,
+  tables: CachedTables,
+  lights: ReadonlyArray<BodyLight>,
+  landed: {
+    readonly bake: ReadonlyArray<MsSourceTable> | undefined;
+    readonly correction: ReadonlyArray<PolarisationTable> | undefined;
+  },
+): DiscBakeAsk | null {
+  if (built.sources === undefined) {
+    return null;
+  }
+  const ask = thickBakeAskOf(input, built, built.sources, tables, lights);
+  if (ask === null) {
+    return null;
+  }
+  return {
+    ...ask,
+    air: {
+      medium: built.medium,
+      kernelMedium: kernelMedium(built.medium),
+      curves: built.curves,
+      ...(landed.bake === undefined ? {} : { bake: landed.bake }),
+      ...(landed.correction === undefined ? {} : { correction: landed.correction }),
+    },
+  };
+}
+
 /** `setTimeout`'s schedule. */
 const scheduleTimeout: AtmosphereSchedule = (run, delayMs) => {
   const timer = setTimeout(run, delayMs);
@@ -915,6 +993,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   readonly #schedule: AtmosphereSchedule;
   readonly #routes: (regime: AtmosphereRegime) => boolean;
   readonly #corrects: (column: SpectralColumn) => boolean;
+  readonly #discs: (column: SpectralColumn) => boolean;
   /** Every body held, least recently wanted first. */
   readonly #bodies = new Map<BodyIdHex, HeldBody<T>>();
   /** Each open view's wanted bodies, as its latest frame noted them. */
@@ -930,6 +1009,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     this.#schedule = opts.schedule ?? scheduleTimeout;
     this.#routes = opts.routes ?? ((regime): boolean => thickBakeRouted(regime));
     this.#corrects = opts.corrects ?? ((column): boolean => correctionRouted(column));
+    this.#discs = opts.discs ?? ((column): boolean => discTableRouted(column));
   }
 
   /** How many bodies the cache holds, drawn or not. */
@@ -1138,6 +1218,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       drawn: null,
       bake: null,
       correction: null,
+      disc: null,
       problem: null,
     };
     this.#bodies.set(body.id, held);
@@ -1418,6 +1499,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       // The entry replaced takes its bakes with it: the new ones are another computation.
       this.#cancelBake(held);
       this.#cancelCorrection(held);
+      this.#cancelDisc(held);
       held.build = null;
       held.problem = null;
       held.drawn = { ...entry, tables };
@@ -1431,6 +1513,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       }
       if (tables !== null && entry.built !== null) {
         this.#correct(held, entry, entry.built, tables);
+        this.#disc(held, entry, entry.built);
       }
     } else if (drawn !== null && drawn.built !== null && drawn.tables === null) {
       const made = this.#make(held, drawn.built);
@@ -1440,6 +1523,9 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     }
     this.#giveBake(held);
     this.#giveCorrection(held);
+    this.#giveDisc(held);
+    // A table that waited on tables taken away (an eviction, a lost device) is asked once they're back.
+    this.#askWaitingDisc(held);
   }
 
   /**
@@ -1494,11 +1580,13 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           state: { kind: "baked", tables: outcome.tables, given: null },
         });
         this.#giveBake(held);
+        this.#askWaitingDisc(held);
         break;
       case "failed":
         // The bake's failure alone: the body stays drawn, under APPROXIMATE, with no fault.
         console.error(`the thick bake of ${held.id} failed: ${outcome.message}`);
         this.#showBake(held, { made: bake.made, state: BAKE_FAILED });
+        this.#askWaitingDisc(held);
         break;
       case "cancelled":
         this.#cancelBake(held);
@@ -1635,11 +1723,13 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           state: { kind: "baked", tables: outcome.tables, given: null },
         });
         this.#giveCorrection(held);
+        this.#askWaitingDisc(held);
         break;
       case "failed":
         // The correction's failure alone: the body stays drawn, under APPROXIMATE, with no fault.
         console.error(`the polarisation correction of ${held.id} failed: ${outcome.message}`);
         this.#showCorrection(held, { made: correction.made, state: BAKE_FAILED });
+        this.#askWaitingDisc(held);
         break;
       case "cancelled":
         this.#cancelCorrection(held);
@@ -1675,6 +1765,122 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       );
       this.#showCorrection(held, { made: correction.made, state: BAKE_FAILED });
     }
+  }
+
+  /**
+   * Asks a drawn entry's disc table (the module's remarks) where its column takes one, or waits for
+   * its thick bake and correction under way; a request that cannot be formed or asked is a failed
+   * table, with one `console.error`.
+   */
+  #disc(held: HeldBody<T>, entry: ToDraw, built: BuiltAtmosphere): void {
+    if (built.sources === undefined || built.sources.length === 0) {
+      return;
+    }
+    try {
+      if (!this.#discs(spectralColumnOf(built.medium, built.sources))) {
+        return;
+      }
+    } catch (error: unknown) {
+      console.error(`the disc table of ${held.id} could not be asked:`, error);
+      held.disc = DISC_FAILED;
+      return;
+    }
+    held.disc = { kind: "waiting", entry, built };
+    this.#askWaitingDisc(held);
+  }
+
+  /** Asks a waiting disc table once neither the thick bake nor the correction is under way. */
+  #askWaitingDisc(held: HeldBody<T>): void {
+    const { disc } = held;
+    const tables = held.drawn?.tables ?? null;
+    if (
+      disc?.kind !== "waiting" ||
+      tables === null ||
+      held.bake?.state.kind === "baking" ||
+      held.correction?.state.kind === "baking"
+    ) {
+      return;
+    }
+    const { entry, built } = disc;
+    let handle: DiscBake;
+    try {
+      const ask = discBakeAskOf(entry.input, built, tables, held.lights, {
+        bake: held.bake?.state.kind === "baked" ? held.bake.state.tables : undefined,
+        correction:
+          held.correction?.state.kind === "baked" ? held.correction.state.tables : undefined,
+      });
+      if (ask === null) {
+        // No light to bake under: drawn by the full passes at every distance.
+        held.disc = null;
+        return;
+      }
+      handle = this.#builder.bakeDisc(ask);
+    } catch (error: unknown) {
+      console.error(`the disc table of ${held.id} could not be asked:`, error);
+      held.disc = DISC_FAILED;
+      return;
+    }
+    const baking: DiscState<T> = { kind: "baking", handle };
+    held.disc = baking;
+    void this.#discLanded(held, baking, handle).catch((error: unknown) => {
+      // A bug in taking the table: it failed, and the body is drawn by the full passes.
+      console.error(`the disc table of ${held.id} could not be taken:`, error);
+      if (!this.#disposed && this.#bodies.get(held.id) === held && held.disc === baking) {
+        held.disc = DISC_FAILED;
+      }
+    });
+  }
+
+  /** Takes a disc table's outcome, unless the body has moved on from it. */
+  async #discLanded(held: HeldBody<T>, baking: DiscState<T>, handle: DiscBake): Promise<void> {
+    const outcome = await handle.outcome;
+    if (this.#disposed || this.#bodies.get(held.id) !== held || held.disc !== baking) {
+      return;
+    }
+    switch (outcome.kind) {
+      case "baked":
+        held.disc = { kind: "baked", table: outcome.table, given: null };
+        this.#giveDisc(held);
+        break;
+      case "failed":
+        // The table's failure alone: the body stays drawn by the full passes, with no fault.
+        console.error(`the disc table of ${held.id} failed: ${outcome.message}`);
+        held.disc = DISC_FAILED;
+        break;
+      case "cancelled":
+        held.disc = null;
+        break;
+    }
+  }
+
+  /**
+   * Gives a body's tables its disc table where they do not hold it, as {@link #giveBake} gives a
+   * thick bake; tables that refuse it otherwise make it a failed table, with one `console.error`.
+   */
+  #giveDisc(held: HeldBody<T>): void {
+    const { disc } = held;
+    const tables = held.drawn?.tables ?? null;
+    if (disc?.kind !== "baked" || tables === null || disc.given === tables) {
+      return;
+    }
+    try {
+      tables.setDiscReflectance(disc.table);
+      disc.given = tables;
+    } catch (error: unknown) {
+      if (error instanceof EngineUnavailable) {
+        return;
+      }
+      console.error(`the disc table of ${held.id} could not be given to its tables:`, error);
+      held.disc = DISC_FAILED;
+    }
+  }
+
+  /** Cancels a body's disc table under way, or drops one held. */
+  #cancelDisc(held: HeldBody<T>): void {
+    if (held.disc?.kind === "baking") {
+      held.disc.handle.cancel();
+    }
+    held.disc = null;
   }
 
   /** A body's tables, or `unavailable` while the device is lost, or `failed` (its problem set). */
@@ -1798,6 +2004,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   #dropDrawn(held: HeldBody<T>): void {
     this.#cancelBake(held);
     this.#cancelCorrection(held);
+    this.#cancelDisc(held);
     held.drawn?.tables?.dispose();
     held.drawn = null;
   }

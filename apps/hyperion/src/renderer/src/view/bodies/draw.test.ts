@@ -65,6 +65,10 @@ import {
 import { type LitRegime, sphereFootprint } from "./regime";
 import { limbDistanceM } from "../terrain/handover";
 import { DISC_LIMB_DEPTHS, rotationColumns } from "./smoothMesh";
+import type { DiscAir } from "../atmosphere/discReflectance";
+import { DISC_LAYER_VALUES } from "../atmosphere/discTable";
+import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
@@ -721,6 +725,85 @@ describe("the plan", () => {
         previous,
       );
       expect(empty).toEqual(without);
+    });
+  });
+
+  describe("a body drawn by its disc table beyond 10⁹ m (R08.T16.b)", () => {
+    /** A body's disc air: a table of one band and slot, its texture a stand-in. */
+    const AIR: DiscAir = {
+      table: {
+        bands: 1,
+        slots: 1,
+        sunFloor: -0.18,
+        values: new Float32Array(DISC_LAYER_VALUES),
+      },
+      texture: { kind: "texture", name: "disc table" },
+      lnBands: [0],
+      gravity: null,
+    };
+    /** A body with air `distanceM` ahead, its air's shell given as a frame that draws its air does. */
+    function airPlan(
+      distanceM: number,
+      options: Partial<BodyFrameOptions>,
+      body: Partial<LitBodyInput> = {},
+    ): { readonly plan: BodyFramePlan; readonly id: BodyIdHex } {
+      const radiusM = 6e7;
+      const { body: lit, hosts } = scene(distanceM, 30, {
+        figure: { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: null },
+        air: AIR,
+        ...body,
+      });
+      const plan = planLitBodies(
+        [lit],
+        hosts,
+        { ...OPTIONS, depthBodyShellRadiiM: new Map([[lit.id, 1.01 * radiusM]]), ...options },
+        new Map([[lit.id, "disc"]]),
+      );
+      return { plan, id: lit.id };
+    }
+
+    it("draws it as a disc whose record carries its air past 1.1 × 10⁹ m, and names it tabled", () => {
+      const { plan, id } = airPlan(1.2e9, { drawsAir: true });
+      expect([plan.regimes.get(id), plan.discs[0]?.air, [...plan.tabled]]).toEqual([
+        "disc",
+        AIR,
+        [id],
+      ]);
+      // A body drawn by its table is not drawn as a mesh for its air: none of it is meshed.
+      expect(plan.meshes).toHaveLength(0);
+    });
+
+    it("keeps its full passes inside 1.1 × 10⁹ m until it was tabled, and then to 0.9 × 10⁹ m", () => {
+      const tabled = (distanceM: number, was: boolean): boolean =>
+        airPlan(distanceM, {
+          drawsAir: true,
+          previousTabled: was ? new Set([aLitBody().body]) : new Set(),
+        }).plan.tabled.size > 0;
+      expect([tabled(1.05e9, false), tabled(1.15e9, false)]).toEqual([false, true]);
+      expect([tabled(0.95e9, true), tabled(0.85e9, true)]).toEqual([true, false]);
+      const inside = airPlan(1.05e9, { drawsAir: true });
+      expect([inside.plan.regimes.get(inside.id), inside.plan.discs[0]?.air]).toEqual([
+        "mesh",
+        undefined,
+      ]);
+    });
+
+    it("keeps its full passes while the air forms are not prepared", () => {
+      const { plan, id } = airPlan(1.2e9, {});
+      expect([plan.regimes.get(id), plan.discs[0]?.air, plan.tabled.size]).toEqual([
+        "mesh",
+        undefined,
+        0,
+      ]);
+    });
+
+    it("gives a record drawn by its table no emission", () => {
+      const field = surfaceTemperatureFieldOf(lavaWorldSurface());
+      const { plan } = airPlan(1.2e9, { drawsAir: true }, { thermal: field });
+      expect([plan.discs[0]?.air, plan.discs[0]?.emission]).toEqual([AIR, undefined]);
+      // Inside the boundary the same body's record carries its emission and no air.
+      const inside = airPlan(1.05e9, { drawsAir: true }, { thermal: field }).plan.discs[0];
+      expect([inside?.air, inside?.emission === undefined]).toEqual([undefined, false]);
     });
   });
 
@@ -1542,6 +1625,8 @@ describe("the renderer", () => {
         "bodies:no atmosphere",
         // R10.T10.c's mask of no surveyed cell, bound where a mesh body has no survey.
         "bodies:no coverage",
+        // R08.T16.b's disc table of zeros, bound where a record carries no air.
+        "bodies:no disc table",
       ].toSorted(),
     );
   });

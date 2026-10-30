@@ -51,6 +51,21 @@ export const GAS_GIANT_FULL_PASS_BOUNDARY_M = 1e9;
 /** Each threshold's hysteresis, a fraction of it (Design note 1). */
 export const REGIME_HYSTERESIS = 0.1;
 
+/**
+ * Whether a body with an atmosphere is drawn by its disc table beyond the full passes' boundary
+ * (plan R08, R08.T16.b; Design note 13), with {@link REGIME_HYSTERESIS}: a body drawn by its full
+ * passes takes its table past (1 + h) × 10⁹ m, and one drawn by its table keeps it down to
+ * (1 − h) × 10⁹ m, so that a body at the boundary does not flip every frame.
+ *
+ * @param distanceM - Its centre's distance from the camera, m.
+ * @param wasTabled - Whether it was drawn by its table on the previous frame.
+ */
+export function drawnByTable(distanceM: number, wasTabled: boolean): boolean {
+  const threshold =
+    GAS_GIANT_FULL_PASS_BOUNDARY_M * (wasTabled ? 1 - REGIME_HYSTERESIS : 1 + REGIME_HYSTERESIS);
+  return distanceM > threshold;
+}
+
 /** A lit body as the regime and the painter order see it. */
 export interface LitSphere {
   readonly id: BodyIdHex;

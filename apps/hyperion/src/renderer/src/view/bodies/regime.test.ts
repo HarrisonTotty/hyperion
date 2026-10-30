@@ -11,11 +11,13 @@ import { OUTSIDE_VIEW_MARGIN_PX, sphereOutsideView, sphereScreenRect } from "../
 import { type DiscRecord, rasteriseDisc } from "./discShading";
 import {
   drawnAsMesh,
+  drawnByTable,
   type LitRegime,
   type LitSphere,
   litRegimes,
   GAS_GIANT_FULL_PASS_BOUNDARY_M,
   POINT_BELOW_PX,
+  REGIME_HYSTERESIS,
   promoteOverlapping,
   type ScreenCircle,
   sphereFootprint,
@@ -148,6 +150,24 @@ describe("the brainstorm's figures, re-derived", () => {
       );
     },
   );
+});
+
+describe("drawnByTable (plan R08, R08.T16.b)", () => {
+  it("draws a body by its table past (1 + h) × 10⁹ m and keeps it there down to (1 − h) × 10⁹ m", () => {
+    const b = GAS_GIANT_FULL_PASS_BOUNDARY_M;
+    const h = REGIME_HYSTERESIS;
+    expect([b, h]).toEqual([1e9, 0.1]);
+    expect([
+      drawnByTable(b * (1 + h) * 0.999, false),
+      drawnByTable(b * (1 + h) * 1.001, false),
+    ]).toEqual([false, true]);
+    expect([
+      drawnByTable(b * (1 - h) * 1.001, true),
+      drawnByTable(b * (1 - h) * 0.999, true),
+    ]).toEqual([true, false]);
+    // Between the two, a body keeps the side it was on.
+    expect([drawnByTable(b, false), drawnByTable(b, true)]).toEqual([false, true]);
+  });
 });
 
 describe("promoteOverlapping", () => {

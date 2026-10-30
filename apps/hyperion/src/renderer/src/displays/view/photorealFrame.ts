@@ -83,6 +83,11 @@ export interface PhotorealInputs {
   readonly cube: DrawItem | null;
   readonly previousRegimes: ReadonlyMap<BodyIdHex, LitRegime>;
   /**
+   * The bodies drawn by their disc tables on the previous frame (plan R08, R08.T16.b), for the 10⁹ m
+   * boundary's hysteresis; absent, none.
+   */
+  readonly previousTabled?: ReadonlySet<BodyIdHex> | undefined;
+  /**
    * The symbology's canvas pass, which the renderer builds once it has the frame's plan (R10.T16.f),
    * or `null`.
    */
@@ -326,6 +331,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     // counted by its regime (R10.T16.c); lit craft will add theirs.
     depthWriters: [],
     previousRegimes: inputs.previousRegimes,
+    previousTabled: inputs.previousTabled,
     terrain: inputs.terrain,
     overlay: inputs.overlay,
     meter: inputs.meter,

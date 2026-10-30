@@ -143,11 +143,15 @@ function keptCache(): AtmosphereCache<CachedTables> {
       bakePolarisation: () => {
         throw new Error("these bodies take no polarisation correction");
       },
+      bakeDisc: () => {
+        throw new Error("these bodies take no disc table");
+      },
       terminate: () => undefined,
     },
     tables: (built) => new FakeTables(built, 0),
     // The router's labels alone: the correction's COMPUTING is `AtmosphereCache.test.ts`'s.
     corrects: () => false,
+    discs: () => false,
   });
 }
 

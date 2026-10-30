@@ -56,6 +56,15 @@ import {
   lobeIsDrawn,
 } from "./forwardLobe";
 import { forwardPeakEntry } from "./forwardPeak";
+import {
+  DISC_LAYER_VALUES,
+  DISC_TABLE_FORMAT,
+  DISC_TABLE_HEIGHT,
+  DISC_TABLE_WIDTH,
+  type DiscReflectanceTable,
+  discTableBytes,
+  discTableHalves,
+} from "./discTable";
 import type { MsSourceTable } from "./thick/bake";
 import type { PolarisationTable } from "./thick/polarisation";
 import {
@@ -2238,6 +2247,11 @@ export class AtmosphereTables {
   #thickBands: ReadonlyArray<MsSourceTable> | null = null;
   /** The body's polarisation correction, which the table holds, or `null` (R08.T14.f). */
   #correction: ReadonlyArray<PolarisationTable> | null = null;
+  /**
+   * The disc's reflectance table (R08.T16.b; {@link AtmosphereTables.setDiscReflectance}), uploaded,
+   * or `null`.
+   */
+  #disc: { readonly table: DiscReflectanceTable; readonly texture: TextureHandle } | null = null;
 
   /**
    * Makes the tables and builds them for `medium`.
@@ -2289,12 +2303,17 @@ export class AtmosphereTables {
       const thick = this.#thick?.packed ?? null;
       const bands = this.#thickBands;
       const correction = this.#correction;
+      const disc = this.#disc?.table ?? null;
       this.#thick = null;
+      this.#disc = null;
       this.setMedium(this.#medium, this.#bottomRadiusM, this.#curves, this.#body);
       if (thick !== null) {
         this.#thick = { packed: thick, texture: this.#uploadThick(thick) };
         this.#thickBands = bands;
         this.#correction = correction;
+      }
+      if (disc !== null) {
+        this.#disc = { table: disc, texture: this.#uploadDisc(disc) };
       }
     });
   }
@@ -2425,8 +2444,92 @@ export class AtmosphereTables {
     return (
       this.#row.baseBytes +
       (this.#slotDepthsRefusal === null ? this.#row.slotDepthBytes : 0) +
-      this.thickBytes
+      this.thickBytes +
+      this.discBytes
     );
+  }
+
+  /**
+   * The disc's reflectance table's bytes as allocated, B (R08.T16.b; `discTable.ts`'s
+   * `DISC_LAYER_BYTES`, 53,248 a band and light slot); 0 without one.
+   */
+  get discBytes(): number {
+    return this.#disc === null ? 0 : discTableBytes(this.#disc.table);
+  }
+
+  /**
+   * The disc's reflectance table as R07's disc binds it beyond the 10⁹ m boundary (plan R08,
+   * R08.T16.b; `discTable.ts`), or `null` before its bake lands; a new handle after a restore.
+   */
+  get discReflectance(): {
+    readonly table: DiscReflectanceTable;
+    readonly texture: TextureHandle;
+  } | null {
+    const disc = this.#disc;
+    return disc === null ? null : { table: disc.table, texture: disc.texture };
+  }
+
+  /**
+   * Gives the tables the body's disc reflectance table (plan R08, R08.T16.b), uploaded as the disc
+   * reads it, or takes it away (`null`). A rebuild for another medium takes it away too, since it
+   * belongs to the medium.
+   *
+   * @throws RangeError for a table of other bands than the tables' plan, or whose values are not
+   *   its layers'; `EngineUnavailable` while
+   *   the engine has no device (a loss); or Error once they are disposed.
+   */
+  setDiscReflectance(table: DiscReflectanceTable | null): void {
+    if (this.#disposed) {
+      throw new Error(
+        "the atmosphere's tables were disposed: a caller holds them past their release",
+      );
+    }
+    if (table === null) {
+      this.#releaseDisc();
+      return;
+    }
+    if (table.bands !== this.#plan.bands.length) {
+      throw new RangeError(
+        `a disc table of ${table.bands} bands is not the tables' ${this.#plan.bands.length}`,
+      );
+    }
+    const layers = table.bands * table.slots;
+    if (!(table.slots >= 1) || table.values.length !== layers * DISC_LAYER_VALUES) {
+      throw new RangeError(
+        `a disc table of ${table.values.length} values is not ${layers} layers of ${DISC_LAYER_VALUES}`,
+      );
+    }
+    const texture = this.#uploadDisc(table);
+    this.#releaseDisc();
+    this.#disc = { table, texture };
+  }
+
+  /** Makes and fills a texture for a disc's table, its values as halves. */
+  #uploadDisc(table: DiscReflectanceTable): TextureHandle {
+    const layers = table.bands * table.slots;
+    const texture = this.#engine.createTexture({
+      name: "atmosphere disc table",
+      size: [DISC_TABLE_WIDTH, DISC_TABLE_HEIGHT, layers],
+      dimension: "2d",
+      format: DISC_TABLE_FORMAT,
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "atmosphere-tables",
+    });
+    this.#engine.writeTexture(
+      texture,
+      [0, 0, 0],
+      [DISC_TABLE_WIDTH, DISC_TABLE_HEIGHT, layers],
+      discTableHalves(table),
+    );
+    return texture;
+  }
+
+  #releaseDisc(): void {
+    if (this.#disc !== null) {
+      this.#engine.releaseTexture(this.#disc.texture);
+      this.#disc = null;
+    }
   }
 
   /**
@@ -2718,10 +2821,12 @@ export class AtmosphereTables {
     this.#row = row;
     this.#key = null;
     this.#irradianceBuilt = false;
-    // A thick table and a correction belong to the medium they were baked for (R08.T14.c, R08.T14.f).
+    // A thick table and a correction belong to the medium they were baked for (R08.T14.c, R08.T14.f),
+    // as does the disc's table (R08.T16.b).
     this.#releaseThick();
     this.#thickBands = null;
     this.#correction = null;
+    this.#releaseDisc();
     const engine = this.#engine;
     const r = this.#resources;
     engine.writeBuffer(r.terms, 0, terms);
@@ -3110,6 +3215,7 @@ export class AtmosphereTables {
     this.#disposed = true;
     this.#offRestored();
     this.#releaseThick();
+    this.#releaseDisc();
     releaseResources(this.#engine, this.#resources);
   }
 

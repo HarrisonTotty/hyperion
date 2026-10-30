@@ -41,12 +41,14 @@ import {
   type SunState,
   tablesFigureOf,
 } from "../atmosphere/hillaire";
+import type { DiscAir } from "../atmosphere/discReflectance";
 import { gravityRatio } from "../atmosphere/oblate";
 import { skySources } from "../atmosphere/sources";
 import { surfaceLightingTablesOf } from "../atmosphere/surfaceLighting";
 import { absorberCount, type AtmosphereTables } from "../atmosphere/tables";
 import { CORRECTION_ROUTED } from "../atmosphere/thick/routing";
 import {
+  BODY_DISC_CELLS_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
@@ -104,6 +106,7 @@ import { sphereOutsideView, type SurveyedDatumFrame, WIREFRAME_MESHES } from "..
 import { surveyedDatumsOf } from "./overlay";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 import { createSceneTarget } from "./sceneTarget";
+import { log } from "../../lib/pinnedMath";
 
 /**
  * What draws the terrain of a photorealistic frame's bodies handed over to it (plan R10, R10.T10.e;
@@ -221,6 +224,11 @@ export interface PhotorealFrame {
   /** Each body's regime on the previous frame, for the hysteresis. */
   readonly previousRegimes: ReadonlyMap<BodyIdHex, LitRegime>;
   /**
+   * The bodies drawn by their disc tables on the previous frame (`BodyFramePlan.tabled`, plan R08,
+   * R08.T16.b), for the 10⁹ m boundary's hysteresis; absent, none.
+   */
+  readonly previousTabled?: ReadonlySet<BodyIdHex> | undefined;
+  /**
    * The terrain of the bodies handed over to it (plan R10, R10.T10.e), or absent, when a body
    * handed over is drawn as a mesh body is.
    */
@@ -275,8 +283,11 @@ function blueNoiseTexels(): Uint16Array {
   return blueNoiseHalves;
 }
 
-/** The emissive `disc cells` kernel as one device's renderer asks for it (R08.T18.a). */
-interface EmissiveCells {
+/**
+ * A form of the `disc cells` kernel as one device's renderer asks for it: R08.T18.a's emissive, or
+ * R08.T16.b's air.
+ */
+interface FormCells {
   readonly generation: number;
   /** The kernel, once made; `null` before, and where it could not be made. */
   kernel: ComputeHandle | null;
@@ -319,7 +330,8 @@ function radPerPx(camera: ProjectionCamera, viewport: Viewport): number {
 
 /**
  * The frame's lit bodies with their atmospheres' tables, through which each one's surface is lit
- * (plan R08, R08.T9.b's `surfaceLighting.wgsl`; R08.T10.b).
+ * (plan R08, R08.T9.b's `surfaceLighting.wgsl`; R08.T10.b), and their disc tables where the tables
+ * hold one (R08.T16.b), by which a body is drawn beyond the 10⁹ m boundary.
  */
 function withAtmospheres(
   bodies: ReadonlyArray<LitBodyInput>,
@@ -331,8 +343,33 @@ function withAtmospheres(
   const tables = new Map(atmospheres.map((each) => [each.id, each.tables]));
   return bodies.map((body) => {
     const own = tables.get(body.id);
-    return own === undefined ? body : { ...body, atmosphere: surfaceLightingTablesOf(own) };
+    if (own === undefined) {
+      return body;
+    }
+    const air = discAirOf(own);
+    return {
+      ...body,
+      atmosphere: surfaceLightingTablesOf(own),
+      ...(air === null ? {} : { air }),
+    };
   });
+}
+
+/**
+ * A body's disc air from its tables (R08.T16.b): their disc table, their bands' ln s and the body's
+ * gravity, which the twin reads the bands by; `null` before the table lands.
+ */
+export function discAirOf(tables: AtmosphereTables): DiscAir | null {
+  const disc = tables.discReflectance;
+  if (disc === null) {
+    return null;
+  }
+  return {
+    table: disc.table,
+    texture: disc.texture,
+    lnBands: tables.plan.bands.map((band) => log(band.gravityRatio)),
+    gravity: tables.body?.gravity ?? null,
+  };
 }
 
 /**
@@ -411,11 +448,13 @@ export class PhotorealRenderer {
   /** The colour the latest frame's later passes read: its last composite's, or the scene's. */
   #drawnColour: TextureHandle | null = null;
   /**
-   * The `disc cells` kernel's emissive form (R08.T18.a), made at the first frame with a record that
-   * carries its ground's emission, or at {@link PhotorealRenderer.prepareEmissive}, on the
-   * generation it was asked on; `kernel` `null` until made.
+   * The `disc cells` kernel's forms: its emissive form (R08.T18.a), made at the first frame with a
+   * record that carries its ground's emission, or at {@link PhotorealRenderer.prepareEmissive}, and
+   * its air form (R08.T16.b), at the first with a record that carries its air, or at
+   * {@link PhotorealRenderer.prepareAir}, each on the generation it was asked on; `kernel` `null`
+   * until made.
    */
-  #emissiveCells: EmissiveCells | null = null;
+  #formCells: { emissive: FormCells | null; air: FormCells | null } = { emissive: null, air: null };
   readonly #unsubscribe: () => void;
 
   constructor(engine: RenderEngine, viewName: string) {
@@ -432,7 +471,7 @@ export class PhotorealRenderer {
       this.#drawnColour = null;
       // Their shared kernels died with the device; each is made again at its next frame.
       this.#releaseAtmospheres();
-      this.#emissiveCells = null;
+      this.#formCells = { emissive: null, air: null };
       this.#histogram = undefined;
       this.#making = null;
       this.#status = "idle";
@@ -657,6 +696,9 @@ export class PhotorealRenderer {
     const atmospheres = frame.atmospheres ?? [];
     const bodies = withAtmospheres(frame.bodies, atmospheres);
     const shellRadiiM = new Map(atmospheres.map((each) => [each.id, airShellRadiusM(each.tables)]));
+    // A body given its disc table is drawn by it beyond the boundary once the air forms are
+    // prepared, their making begun at the first such body (R08.T16.b).
+    const drawsAir = bodies.some((body) => body.air !== undefined) && this.#bodies.airReady();
     const planned = planLitBodies(
       bodies,
       frame.lights,
@@ -670,6 +712,8 @@ export class PhotorealRenderer {
         depthWriters: frame.depthWriters,
         depthBodyShellRadiiM: shellRadiiM,
         setting: frame.setting,
+        drawsAir,
+        ...(frame.previousTabled === undefined ? {} : { previousTabled: frame.previousTabled }),
       },
       frame.previousRegimes,
     );
@@ -700,7 +744,8 @@ export class PhotorealRenderer {
         projection,
         size: { widthPx: viewport.widthPx, heightPx: viewport.heightPx },
       },
-      this.#emissiveCellsFor(plan),
+      this.#cellsFor(plan, "emissive"),
+      this.#cellsFor(plan, "air"),
     );
     // The mesh bodies' figures, with depth, before the sequence, then the terrain of the bodies
     // handed over to it over them; no pass where there are none. On the high setting the terrain's
@@ -831,7 +876,8 @@ export class PhotorealRenderer {
    *
    * @remarks
    * A body's air is drawn where the plan holds its record, where the camera is inside its air,
-   * and where its shell, a + H ÷ s_e, meets the view though its figure does not
+   * and where its shell, a + H ÷ s_e, meets the view though its figure does not, but for a body the
+   * plan draws by its disc table beyond the 10⁹ m boundary (R08.T16.b)
    * (`decision-r08-t10b-leans.md` §3), its limb's glow then still in the picture. Its sky takes the
    * sources its record was shaded from (`BodyFramePlan.sources`, Design note 7's one list), less
    * Design note 7's skips (`skySources`), a star past the light slots its tables hold left out
@@ -861,6 +907,10 @@ export class PhotorealRenderer {
     const byId = new Map(lit.bodies.map((body) => [body.id, body]));
     const drawn: Array<{ readonly air: FrameAtmosphere; readonly sources: BodyLightSources }> = [];
     for (const air of frame.atmospheres ?? []) {
+      // A body drawn by its disc table beyond the boundary takes none of its full passes (R08.T16.b).
+      if (plan.tabled.has(air.id)) {
+        continue;
+      }
       const sources = plan.sources.get(air.id);
       const centreM = byId.get(air.id)?.centreM;
       const shellM = lit.shellRadiiM.get(air.id);
@@ -984,33 +1034,43 @@ export class PhotorealRenderer {
   }
 
   /**
-   * The `disc cells` kernel's emissive form for a plan with a record that carries its ground's
-   * emission (R08.T18.a), or `null`: asked for at the first such plan, off the frame, as the
-   * renderer's other kernels are made, so that the frame never waits on its compile; until it is
-   * made those records take no cells and their draws sum their own. A failure is reported once and
-   * leaves them so.
+   * A form of the `disc cells` kernel for a plan with a record that needs it (R08.T18.a's emission,
+   * R08.T16.b's air), or `null`: asked for at the first such plan, off the frame, as the renderer's
+   * other kernels are made, so that the frame never waits on its compile; until it is made those
+   * records take no cells and their draws sum their own. A failure is reported once and leaves them
+   * so.
    */
-  #emissiveCellsFor(plan: BodyFramePlan): ComputeHandle | null {
-    const held = this.#emissiveCells;
+  #cellsFor(plan: BodyFramePlan, kind: "emissive" | "air"): ComputeHandle | null {
+    const held = this.#formCells[kind];
     if (held !== null && held.generation === this.#generation) {
       return held.kernel;
     }
-    if (plan.discs.some((record) => record.emission !== undefined)) {
-      this.#askEmissiveCells();
+    const needed =
+      kind === "emissive"
+        ? plan.discs.some((record) => record.emission !== undefined)
+        : plan.discs.some((record) => record.air !== undefined);
+    if (needed) {
+      this.#askCells(kind);
     }
     return null;
   }
 
-  /** Asks for the emissive `disc cells` kernel on this generation's device. */
-  #askEmissiveCells(): EmissiveCells {
-    const making: EmissiveCells = {
+  /** Asks for a form of the `disc cells` kernel on this generation's device. */
+  #askCells(kind: "emissive" | "air"): FormCells {
+    const making: FormCells = {
       generation: this.#generation,
       kernel: null,
       made: Promise.resolve(),
     };
-    making.made = this.#makeEmissiveCells(making);
-    this.#emissiveCells = making;
+    making.made = this.#makeCells(kind, making);
+    this.#formCells[kind] = making;
     return making;
+  }
+
+  /** A form's `disc cells` kernel as asked on this generation, asked now where it was not. */
+  #cellsMaking(kind: "emissive" | "air"): FormCells {
+    const held = this.#formCells[kind];
+    return held !== null && held.generation === this.#generation ? held : this.#askCells(kind);
   }
 
   /**
@@ -1019,22 +1079,33 @@ export class PhotorealRenderer {
    * resolves once both are made, or could not be.
    */
   async prepareEmissive(): Promise<void> {
-    const held = this.#emissiveCells;
-    const making =
-      held !== null && held.generation === this.#generation ? held : this.#askEmissiveCells();
-    await Promise.all([this.#bodies.prepareEmissive(), making.made]);
+    await Promise.all([this.#bodies.prepareEmissive(), this.#cellsMaking("emissive").made]);
   }
 
   /**
-   * Makes the emissive `disc cells` kernel into `making`; a failure is reported, a loss's not, and
-   * it never rejects.
+   * Makes the lit bodies' air forms and the air `disc cells` kernel (R08.T16.b) ahead of a body's
+   * first frame drawn by its disc table, as a timed run needs them made before its timed frames;
+   * resolves once both are made, or could not be.
    */
-  async #makeEmissiveCells(making: { kernel: ComputeHandle | null }): Promise<void> {
+  async prepareAir(): Promise<void> {
+    await Promise.all([this.#bodies.prepareAir(), this.#cellsMaking("air").made]);
+  }
+
+  /**
+   * Makes a form's `disc cells` kernel into `making`; a failure is reported, a loss's not, and it
+   * never rejects.
+   */
+  async #makeCells(
+    kind: "emissive" | "air",
+    making: { kernel: ComputeHandle | null },
+  ): Promise<void> {
     try {
-      making.kernel = await this.#engine.createComputeAsync(BODY_DISC_CELLS_EMISSIVE_KERNEL);
+      making.kernel = await this.#engine.createComputeAsync(
+        kind === "emissive" ? BODY_DISC_CELLS_EMISSIVE_KERNEL : BODY_DISC_CELLS_AIR_KERNEL,
+      );
     } catch (error: unknown) {
       if (!lostDevice(error)) {
-        console.error(`the emissive disc cells of ${this.#name} could not be made:`, error);
+        console.error(`the ${kind} disc cells of ${this.#name} could not be made:`, error);
       }
     }
   }

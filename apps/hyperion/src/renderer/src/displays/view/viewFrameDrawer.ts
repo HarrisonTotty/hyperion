@@ -311,6 +311,8 @@ export class ViewFrameDrawer {
   /** The contour interval the view's wireframe terrain last held, its hysteresis's (R10.T11). */
   #contourIntervalM: number | null = null;
   #regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
+  /** The bodies the last photorealistic plan drew by their disc tables (R08.T16.b), its hysteresis's. */
+  #tabled: ReadonlySet<BodyIdHex> = new Set();
   /**
    * Each body's sources on its last photorealistic plan (`BodyFramePlan.sources`), the lights the
    * atmosphere cache builds its medium for (R08.T10.b); none before such a frame.
@@ -604,6 +606,7 @@ export class ViewFrameDrawer {
           discs: this.#discs,
           cube: cube === null ? null : this.#cubes.draw(cube, "hdr", exposed),
           previousRegimes: this.#regimes,
+          previousTabled: this.#tabled,
           meter: inputs.meter,
           classMaps: inputs.classMaps,
           reliefs: inputs.reliefs,
@@ -625,6 +628,7 @@ export class ViewFrameDrawer {
         return { drawn: false, terrain: null };
       }
       this.#regimes = plan.regimes;
+      this.#tabled = plan.tabled;
       this.#sources = plan.sources;
       this.#frameFailed = false;
       return { drawn: true, terrain: terrain?.annunciation ?? null };
