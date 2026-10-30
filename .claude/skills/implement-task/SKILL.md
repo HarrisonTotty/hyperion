@@ -1,6 +1,6 @@
 ---
 name: implement-task
-description: Implements one task or subtask of a HYPERION action plan (IDs like P02.T5, P05.T1.a or R04.T3.c, plans under docs/agent/plans/) end to end. It gathers the task, the design notes it cites and the brainstorm sections it touches, builds the task under the project rules, validates, reviews, and records deviations in the plan's records (its Risks, or the task's record file once the plan is split). Use whenever the user asks to implement, start, continue or finish a plan task, a milestone step or "the next task", even if they give only the ID.
+description: Implements one task or subtask of a HYPERION action plan (IDs like P02.T5, P05.T1.a, R04.T3.c or P14.T54.b.l, plans under docs/agent/plans/) end to end. It gathers the task, the design notes it cites and the brainstorm sections it touches, builds the task under the project rules, validates, reviews, and records deviations in the plan's records (its Risks, or the task's record file once the plan is split). Use whenever the user asks to implement, start, continue or finish a plan task, a milestone step or "the next task", even if they give only the ID.
 argument-hint: "<task-id> [--feature <plan-set>]"
 ---
 
@@ -31,12 +31,14 @@ Task <id>:
 
 ## 1. Load the task
 
-Plans are long. Run the extractor from the repository root instead of paging through them. It
-prints the plan header, the ordering notes, the task (with its phase intro, and for a subtask the
-parent intro and the paragraphs shared by all subtasks), the design notes the task cites, and the
-other lines in the plan set that mention the task. `--context` adds the plan's Generator version
-and Risks sections and, in a split plan, the task's record files. It works from headings and
-labels, so if a section looks cut short, read the plan around the lines it names:
+Plans are long. Run the extractor from the repository root instead of paging through them. It prints
+the plan header, the ordering notes, the task (with its phase intro, and for a subtask the parent
+intro and the paragraphs shared by all subtasks; a sub-subtask such as P14.T54.b.l, a bullet nested
+in its subtask's entry, comes inside its subtask's own text, without its siblings'), the design
+notes the task cites, and the other lines in the plan set that mention the task. `--context` adds
+the plan's Generator version and Risks sections and, in a split plan, the task's record files. It
+works from headings and labels, so if a section looks cut short, read the plan around the lines it
+names:
 
 ```bash
 python3 .claude/skills/implement-task/scripts/plan_task.py P02.T5.a --context     # the task in context

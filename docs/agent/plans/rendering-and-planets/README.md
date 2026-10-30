@@ -187,10 +187,11 @@ version, the tests and the Figures rule. Only what differs is stated here.
   is split, then one file per task beside the plan, such as
   `08-atmospheres/records/R08.T8.e.md`, linked from the task's entry.
 
-- **Task IDs** are `R<nn>.T<n>`, with subtasks `R05.T3.a`. Galaxy tasks keep `P<nn>.T<n>` and are
-  cited as "galaxy plan 14" or `P14.T23`. The `implement-task` and `validate` skills' scripts
+- **Task IDs** are `R<nn>.T<n>`, with subtasks `R05.T3.a` and sub-subtasks such as `P14.T54.b.l`,
+  headed by a bullet nested in their subtask's entry. Galaxy tasks keep `P<nn>.T<n>` and are cited
+  as "galaxy plan 14" or `P14.T23`. The `implement-task` and `validate` skills' scripts
   (`plan_task.py`'s `ID_RE`, `select_checks.py`'s `TASK_RE`) take both prefixes since R04.T7.c, the
-  prefix picking the plan set.
+  prefix picking the plan set, and sub-subtasks too.
 - **Two crates join the workspace** (R04). `hyperion-base`, beneath the sim, holds `math`, `rng`
   (with the part of `id` it needs), `units` and `version`; `libm` pinned with `=` becomes its one
   runtime dependency, and the sim re-exports every path it exposed, so `hyperion_sim::math` and the

@@ -360,6 +360,220 @@ class AcceptanceLists(unittest.TestCase):
         self.assertEqual(pt.with_lists(lines, spans, set()), [(0, 3), (3, 4)])
 
 
+# Sub-subtasks as the plans head them: P14.T54.b's, nested two levels under its subtask's bullet
+# (under its `_The split_` item) with a title that wraps, and P10.T3.d's, nested one level. The
+# subtask's own items carry labels nested under its bullets (`_Tests:_` under `_It adds_`), and Risks
+# holds nested records that name sub-subtasks.
+NESTED_PLAN = """\
+# Plan 14
+
+## Tasks
+
+#### P14.T54 The batches
+
+The batches' intro.
+
+- **P14.T54.a The 22 → 23 batch.** Its body.
+  - _Riders_ board.
+- **P14.T54.b The 23 → 24 batch.** As T54.a.
+  - _It adds_ the members.
+
+    _Tests:_
+    - Mercury's albedo.
+  - _The split_ (decision-x). Twelve subtasks:
+    - **P14.T54.b.a The vertical structure** (B1).
+      - The member converts. Acceptance: `just a-check`.
+    - **P14.T54.b.c The modifiers, the header's parts and the palette's FeO_T, `ferric` and
+      `tholin`** (B1; after P14.T54.b.a).
+      - Its body.
+    - **P14.T54.b.l The bump** (B4, alone).
+      - It deletes every hold. Acceptance: `just l-check`.
+    - **P14.T99.b.a Another subtask's ID** (no marker here).
+
+### P10.T3 Which debris
+
+- **P10.T3.c Dwarfs.** Body.
+- **P10.T3.d The discrete share.** Split in two; both parts' records are T3.d's.
+  - **P10.T3.d.a The share, pure.** `discrete_share`. Acceptance: `just da-check`.
+  - **P10.T3.d.b The share stored.** The one call.
+
+  Back at the subtask's items, the last one's: a closing note.
+
+  Files: `global_list/share.rs`.
+
+- **P10.T3.e The tail.** After the split subtask, as P14.T51.h follows P14.T51.g.
+
+## Risks and open points
+
+- **P14.T54.b as built (lane `x`).** Body.
+  - **P14.T54.b.i's record** (nested, so never a marker).
+  - **P14.T54.b.i as built** (nested under a record, so never a marker).
+- **P14.T54.b.l's follow-up.** The bump's record, for T54.b.l.
+"""
+
+
+def nested_fixture() -> tuple[list[str], list[pt.Marker]]:
+    lines = NESTED_PLAN.splitlines()
+    return lines, pt.markers(lines)
+
+
+def run_on(text: str, fn, *args) -> str:
+    """fn's output on a repository holding `text` as galaxy plan 14."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        plans = root / "docs" / "agent" / "plans" / "galaxy-generation"
+        plans.mkdir(parents=True)
+        (plans / "14-planetary-systems.md").write_text(text, encoding="utf-8")
+        (plans / "10-global-list-streams.md").write_text(text, encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            fn(root, *args)
+    return out.getvalue()
+
+
+class SubSubtasks(unittest.TestCase):
+    def test_ids_with_a_second_letter_are_task_ids(self) -> None:
+        for task_id in ("P14.T54.b.l", "P10.T3.d.a", "R09.T7.g.aa"):
+            self.assertIsNotNone(pt.ID_RE.fullmatch(task_id), task_id)
+        self.assertIsNone(pt.ID_RE.fullmatch("P14.T54.b.l.a"))
+        self.assertEqual(pt.normalise_id("p14.T54.B.L"), "P14.T54.b.l")
+
+    def test_nested_bullets_are_markers_inside_their_own_subtask_only(self) -> None:
+        lines, found = nested_fixture()
+        tasks = pt.task_markers(lines, found)
+        self.assertEqual(
+            [(m.task_id, m.level) for m in tasks],
+            [("P14.T54", 4), ("P14.T54.a", 7), ("P14.T54.b", 7), ("P14.T54.b.a", pt.NESTED), ("P14.T54.b.c", pt.NESTED),
+             ("P14.T54.b.l", pt.NESTED), ("P10.T3", 3), ("P10.T3.c", 7), ("P10.T3.d", 7), ("P10.T3.d.a", pt.NESTED),
+             ("P10.T3.d.b", pt.NESTED), ("P10.T3.e", 7)],
+        )
+        by_id = {m.task_id: m for m in found}
+        self.assertEqual(by_id["P14.T54.b.c"].title, "The modifiers, the header's parts and the palette's FeO_T, `ferric` and `tholin`")
+        self.assertEqual(by_id["P10.T3.d.a"].title, "The share, pure")
+        # A nested record is never a marker, whether its ID is followed by "'s" or it sits in Risks.
+        nested_records = [i for i, line in enumerate(lines) if line.startswith("  - **P14.T54.b.i")]
+        self.assertEqual(len(nested_records), 2)
+        self.assertFalse({m.line for m in found} & set(nested_records))
+
+    def test_a_nested_section_ends_at_its_sibling_or_back_at_its_indent(self) -> None:
+        lines, found = nested_fixture()
+        by_id = {m.task_id: m for m in reversed(found)}  # the first of each ID, the Tasks section's
+        self.assertEqual(pt.section_end(lines, by_id["P14.T54.b.a"], found), by_id["P14.T54.b.c"].line)
+        end = pt.section_end(lines, by_id["P10.T3.d.b"], found)
+        self.assertEqual(lines[end], "  Back at the subtask's items, the last one's: a closing note.")  # after a blank
+        self.assertEqual(pt.section_end(lines, by_id["P14.T54.b"], found), lines.index("### P10.T3 Which debris"))
+
+    def test_a_sub_subtasks_text_is_its_own_inside_its_subtasks_without_its_siblings(self) -> None:
+        out = run_on(NESTED_PLAN, pt.show_task, "P14.T54.b.l", None, True)
+        task = out.split("## Task\n", 1)[1].split("\n## ", 1)[0]
+        self.assertTrue(out.startswith("# P14.T54.b.l The bump\n"))
+        for text in ("The batches' intro.", "- **P14.T54.b The 23 → 24 batch.** As T54.a.", "    _Tests:_",
+                     "  - _The split_ (decision-x). Twelve subtasks:", "    - **P14.T54.b.l The bump** (B4, alone).",
+                     "      - It deletes every hold.", "    - **P14.T99.b.a Another subtask's ID** (no marker here)."):
+            self.assertIn(text, task)
+        for text in ("P14.T54.a The 22", "P14.T54.b.a The vertical", "The member converts", "P14.T54.b.c", "Its body."):
+            self.assertNotIn(text, task)
+        self.assertEqual(task.count("[…]"), 2)  # T54.a before the subtask, b.a and b.c before the bump
+
+    def test_a_label_nested_under_a_subtasks_bullet_is_not_shared_by_the_task(self) -> None:
+        lines, found = nested_fixture()
+        parent = next(m for m in found if m.task_id == "P14.T54")
+        _, children, own, shared = pt.subtasks(lines, found, parent)
+        self.assertEqual([c.task_id for c in children], ["P14.T54.a", "P14.T54.b"])  # not the sub-subtasks
+        self.assertEqual(shared, [])
+        self.assertIn(lines.index("    _Tests:_"), [a for a, _ in own["P14.T54.b"]])
+        self.assertNotIn("[Shared by all subtasks", run_on(NESTED_PLAN, pt.show_task, "P14.T54.a", None))
+
+    def test_the_acceptance_of_a_sub_subtask(self) -> None:
+        out = run_on(NESTED_PLAN, pt.show_acceptance, "P14.T54.b.l", None)
+        self.assertIn("[P14.T54.b.l]\n- It deletes every hold. Acceptance: `just l-check`.\n", out)
+        self.assertEqual(quoted_commands(out), ["just l-check"])
+        # The Risks bullets naming it, or its subtask as a whole, are its as-built corrections.
+        self.assertIn("**P14.T54.b.l's follow-up.**", out)
+        self.assertIn("**P14.T54.b as built (lane `x`).**", out)
+        self.assertEqual(quoted_commands(run_on(NESTED_PLAN, pt.show_acceptance, "P10.T3.d.a", None)), ["just da-check"])
+        self.assertEqual(quoted_commands(run_on(NESTED_PLAN, pt.show_acceptance, "P14.T54.b", None)),
+                         ["just a-check", "just l-check"])
+
+    def test_sub_subtasks_divide_their_subtask_as_subtasks_divide_a_task(self) -> None:
+        # The last keeps what follows it (P14.T51.g.b's "the rest of this entry"), but for a labelled
+        # paragraph whose label no earlier one uses, which binds them all.
+        def task_of(task_id: str) -> str:
+            return run_on(NESTED_PLAN, pt.show_task, task_id, None).split("## Task\n", 1)[1].split("\n## ", 1)[0]
+
+        first, last = task_of("P10.T3.d.a"), task_of("P10.T3.d.b")
+        for task in (first, last):
+            self.assertIn("Split in two; both parts' records are T3.d's.", task)
+            self.assertIn("[Shared by all sub-subtasks of P10.T3.d]\n\n  Files: `global_list/share.rs`.", task)
+            self.assertNotIn("Dwarfs.", task)
+            self.assertNotIn("The tail.", task)
+        self.assertNotIn("The one call.", first)
+        self.assertNotIn("a closing note", first)
+        self.assertIn("  - **P10.T3.d.b The share stored.** The one call.\n\n  Back at the subtask's items, the last one's", last)
+        self.assertNotIn("discrete_share", last)
+
+    def test_its_records_are_its_subtasks(self) -> None:
+        out = run_on(NESTED_PLAN, pt.show_records, "P14.T54.b.l", None)
+        self.assertIn("records/P14.T54.b.md (not yet made)", out)
+        self.assertIn("## P14.T54.b's records (the Risks bullets filed under it)", out)
+
+    def test_the_listing_indents_it_and_marks_its_own_commit(self) -> None:
+        log = "feat(sim): P14.T54.b.l The bump\nfeat(sim): P10.T3.d.ab Not this one\n"
+        with mock.patch.object(pt, "commit_subjects", return_value=log):
+            listing = run_on(NESTED_PLAN, pt.show_list, "P14", None).splitlines()
+        self.assertIn("    P14.T54.b.l  The bump  [commit]", listing)
+        self.assertIn("    P14.T54.b.a  The vertical structure", listing)
+        self.assertIn("  P14.T54.b  The 23 → 24 batch  [records]", listing)  # no commit names the subtask itself
+        self.assertIn("    P10.T3.d.a  The share, pure", listing)
+
+    def test_a_sub_subtask_before_its_siblings_says_they_follow(self) -> None:
+        out = run_on(NESTED_PLAN, pt.show_task, "P14.T54.b.a", None)
+        task = out.split("## Task\n", 1)[1].split("\n## ", 1)[0]
+        self.assertTrue(task.rstrip().endswith("Acceptance: `just a-check`.\n\n[…]"), task[-200:])
+
+    def test_a_bold_four_part_id_at_the_margin_is_no_sub_subtask(self) -> None:
+        # Only a heading or a nested bullet heads one; at the margin it stays its subtask's marker,
+        # as a Risks record (`- **P11.T8.e.b as built**`) always read, and cuts no section short.
+        lines = [
+            "## Tasks",
+            "",
+            "### P01.T1 Task",
+            "",
+            "- **P01.T1.a Sub.** Body.",
+            "- **P01.T1.b Other.** Body.",
+            "- **P01.T1.b.a Three.** Body.",
+            "",
+            "Files (all of T1): `x.rs`. Acceptance: all.",
+            "",
+            "##### P01.T1.b.b A heading sub-subtask",
+        ]
+        found = pt.markers(lines)
+        self.assertEqual([(m.task_id, m.level) for m in found],
+                         [("P01.T1", 3), ("P01.T1.a", 7), ("P01.T1.b", 7), ("P01.T1.b", 7), ("P01.T1.b.b", 5)])
+        _, _, _, shared = pt.subtasks(lines, found, found[0])
+        self.assertEqual(shared, [(8, 9)])
+
+    def test_a_deep_label_that_says_it_is_shared_shares_what_follows(self) -> None:
+        lines = [
+            "### P06.T5 Task",
+            "",
+            "- **P06.T5.a First.** Body.",
+            "- **P06.T5.c Last.** Body.",
+            "  - Its point.",
+            "    - _Acceptance for T5, and for each subtask:_",
+            "    - `just every-check`.",
+        ]
+        found = pt.markers(lines)
+        _, _, own, shared = pt.subtasks(lines, found, found[0])
+        self.assertEqual(shared, [(5, 6), (6, 7)])
+        self.assertEqual(own["P06.T5.c"], [(3, 4), (4, 5)])
+
+    def test_an_id_past_a_sub_subtask_is_refused(self) -> None:
+        with self.assertRaises(SystemExit) as caught:
+            run_on(NESTED_PLAN, pt.show_task, "P14.T54.b.l.a", None)
+        self.assertIn("P14.T54.b.l", str(caught.exception))
+
+
 REPO = Path(__file__).resolve().parents[4]
 PLANS = REPO / "docs" / "agent" / "plans"
 

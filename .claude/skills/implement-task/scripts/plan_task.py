@@ -14,14 +14,17 @@ Usage:
     plan_task.py P14.T53.b --records   The task's records as built: its record file's path (where
                                        a new record goes) and its records, in either layout, with
                                        its parent's, then the records of other tasks naming it.
-    plan_task.py --list [P02]          Every task ID and title under Tasks, marked [commit] where a
+    plan_task.py --list [P02]          Every task ID and title under Tasks, a subtask indented by
+                                       two spaces and a sub-subtask by four, marked [commit] where a
                                        commit subject starts with the ID and [records] where the
                                        task has records of its own.
     --feature <dir>                    Pick the plan set when an ID exists in several.
 
 IDs are case-insensitive: p02.t5.a is read as P02.T5.a. The prefix picks the plan set: `P` for
-galaxy-generation, `R` for rendering-and-planets (`--feature` overrides it). `--records` also
-takes a sub-subtask (P14.T54.b.i), whose records are its subtask's.
+galaxy-generation, `R` for rendering-and-planets (`--feature` overrides it). Every mode takes a
+sub-subtask (P14.T54.b.l, P09.T28.b.b, P10.T3.d.a): its text is its own bullet inside its
+subtask's own paragraphs (without its siblings'), under its task's intro and shared paragraphs,
+and its records are its subtask's.
 
 Records as built come in two layouts, read alike. Inline: top-level bullets of the plan's "Risks
 and open points". Split (plan_split.py beside this script makes it): one file per task,
@@ -32,7 +35,9 @@ by assign_records()'s rule.
 
 Task markers the parser understands: `### P01.T1 Title` / `#### P01.T1.a Title` headings,
 `**P05.T1.a Title.** body` paragraphs and `- **P08.T2.a Title.** body` bullets, whose bold title
-may wrap onto the next lines of its paragraph (R06.T8.g's does). A subtask also gets its parent's
+may wrap onto the next lines of its paragraph (R06.T8.g's does), and a sub-subtask's bullet nested
+in its subtask's entry under Tasks, `    - **P14.T54.b.l The bump** (B4, …).`, an ID and a title
+(a nested record such as `  - **P14.T54.b.i's …**` is no marker). A subtask also gets its parent's
 intro, the intro of the enclosing `### Phase …` heading, and the paragraphs its parent shares among
 all subtasks: a labelled paragraph (Files, Accept, Acceptance, Tests) that says so ("Acceptance for
 T6", "Files (all of T2)"), and the labelled paragraphs after the last subtask whose label no earlier
@@ -65,14 +70,23 @@ sys.dont_write_bytecode = True
 
 # The task-ID prefix names the plan set: P for the galaxy plans, R for the rendering plans.
 PREFIX_SETS = {"P": "galaxy-generation", "R": "rendering-and-planets"}
-ID_RE = re.compile(r"([PR])(\d{2})\.T(\d+)(?:\.([a-z]+))?")
-HEADING_TASK_RE = re.compile(r"^(#{2,6})\s+([PR]\d{2}\.T\d+(?:\.[a-z]+)?)\b\s*(.*)$")
+# A task (P02.T5), a subtask (P05.T1.a) or a sub-subtask (P14.T54.b.l). A sub-subtask is headed
+# by a heading or by a bullet nested in its subtask's entry, never at the margin, where a Risks
+# record such as `- **P11.T8.e.b as built**` reads as its subtask's marker, as it always has.
+ID_RE = re.compile(r"([PR])(\d{2})\.T(\d+)(?:\.([a-z]+)(?:\.([a-z]+))?)?")
+HEADING_TASK_RE = re.compile(r"^(#{2,6})\s+([PR]\d{2}\.T\d+(?:\.[a-z]+){0,2})\b\s*(.*)$")
 INLINE_TASK_RE = re.compile(r"^(?:[-*]\s+)?\*\*([PR]\d{2}\.T\d+(?:\.[a-z]+)?)\b\s*([^*]*?)\.?\*\*")
 # A bold title that wraps (R06.T8.g's `- **R06.T8.g Census cost: … P11.T16 and` / `  P11.T17.c).**`),
 # matched against the marker's line joined to the next lines of its paragraph. Only an ID followed by
 # a title counts, so a wrapped Risks record such as `- **P14.T1.a's … as built …**` stays out.
 WRAPPED_OPEN_RE = re.compile(r"^(?:[-*]\s+)?\*\*[PR]\d{2}\.T\d+(?:\.[a-z]+)?(?:\s|$)")
 WRAPPED_TASK_RE = re.compile(r"^(?:[-*]\s+)?\*\*([PR]\d{2}\.T\d+(?:\.[a-z]+)?)\s+([^*]*?)\.?\*\*")
+# A sub-subtask's bullet nested in its subtask's entry (`    - **P14.T54.b.l The bump** (B4, …).`,
+# `  - **P10.T3.d.a The share, pure.** …`): its ID, then a title, so that a nested record such as
+# `  - **P14.T54.b.i's …**` stays out. markers() takes it only inside its own subtask's section.
+NESTED_OPEN_RE = re.compile(r"^\s+[-*]\s+\*\*[PR]\d{2}\.T\d+(?:\.[a-z]+){2}(?:\s|$)")
+NESTED_TASK_RE = re.compile(r"^\s+[-*]\s+\*\*([PR]\d{2}\.T\d+(?:\.[a-z]+){2})\s+([^*]*?)\.?\*\*")
+NESTED = 8  # a nested sub-subtask marker's level, below an inline marker's 7
 WRAP_LINES = 3  # lines a wrapped title may continue onto (R06.T7.c's takes two)
 HEADING_RE = re.compile(r"^(#{1,6})\s")
 BULLET_RE = re.compile(r"^\s*[-*]\s")
@@ -125,7 +139,7 @@ class Marker:
     line: int  # 0-based index into the plan's lines
     task_id: str
     title: str
-    level: int  # heading level, or 7 for an inline paragraph/bullet marker
+    level: int  # heading level, 7 for an inline paragraph/bullet marker, NESTED for a nested one
 
 
 # The records layout. A plan's as-built records are either inline, as top-level bullets of its
@@ -442,22 +456,27 @@ def find_plan(root: Path, prefix: str, plan_no: str, feature: str | None) -> Pat
     return matches[0]
 
 
-def wrapped_marker(lines: list[str], i: int) -> re.Match[str] | None:
+def wrapped_marker(lines: list[str], i: int, opener=WRAPPED_OPEN_RE, title=WRAPPED_TASK_RE) -> re.Match[str] | None:
     """A bold task title that opens on line `i` and closes on one of the next `WRAP_LINES` lines of
     the same paragraph (no blank line, bullet or heading between), matched on the joined lines."""
-    if not WRAPPED_OPEN_RE.match(lines[i]):
+    if not opener.match(lines[i]):
         return None
     text = lines[i].rstrip()
+    if m := title.match(text):
+        return m
     for line in lines[i + 1 : i + 1 + WRAP_LINES]:
         if not line.strip() or BULLET_RE.match(line) or HEADING_RE.match(line):
             return None
         text += " " + line.strip()
-        if m := WRAPPED_TASK_RE.match(text):
+        if m := title.match(text):
             return m
     return None
 
 
 def markers(lines: list[str]) -> list[Marker]:
+    """The plan's task markers in line order: headings and bold titles at the margin anywhere (a
+    Risks record that opens with an ID reads as one too; task_markers() keeps the Tasks section's),
+    and a sub-subtask's nested bullet inside its subtask's section under Tasks (`NESTED_TASK_RE`)."""
     found = []
     for i, line in enumerate(lines):
         if m := HEADING_TASK_RE.match(line):
@@ -466,7 +485,17 @@ def markers(lines: list[str]) -> list[Marker]:
             found.append(Marker(i, m.group(1), m.group(2).strip(), 7))
         elif m := wrapped_marker(lines, i):
             found.append(Marker(i, m.group(1), " ".join(m.group(2).split()), 7))
-    return found
+    tasks = named_section(lines, "tasks")
+    nested = []
+    for k, owner in enumerate(found):
+        if owner.task_id.count(".") != 2 or (tasks is not None and not tasks[0] < owner.line < tasks[1]):
+            continue
+        stop = min(found[k + 1].line if k + 1 < len(found) else len(lines), section_end(lines, owner, found))
+        for i in range(owner.line + 1, stop):
+            m = wrapped_marker(lines, i, NESTED_OPEN_RE, NESTED_TASK_RE)
+            if m and m.group(1).rsplit(".", 1)[0] == owner.task_id:
+                nested.append(Marker(i, m.group(1), " ".join(m.group(2).split()), NESTED))
+    return sorted(found + nested, key=lambda mk: mk.line)
 
 
 def heading_level(line: str) -> int | None:
@@ -475,7 +504,11 @@ def heading_level(line: str) -> int | None:
 
 
 def section_end(lines: list[str], marker: Marker, all_markers: list[Marker]) -> int:
-    """First line after the marker's section."""
+    """First line after the marker's section. A heading's runs to the next heading of its level or
+    above; an inline marker's to the next heading or inline marker; a nested marker's also to the
+    next nested one, or to the first line back at its bullet's indent that starts a block (a bullet,
+    or a line after a blank one)."""
+    ends = {m.line for m in all_markers if m.level in (7, marker.level)} if marker.level > 6 else set()
     for j in range(marker.line + 1, len(lines)):
         level = heading_level(lines[j])
         if marker.level <= 6:
@@ -484,7 +517,14 @@ def section_end(lines: list[str], marker: Marker, all_markers: list[Marker]) -> 
         else:
             if level is not None:
                 return j
-            if any(m.line == j and m.level == 7 for m in all_markers):
+            if j in ends:
+                return j
+            if (
+                marker.level == NESTED
+                and lines[j].strip()
+                and indent(lines[j]) <= indent(lines[marker.line])
+                and (BULLET_RE.match(lines[j]) or not lines[j - 1].strip())
+            ):
                 return j
     return len(lines)
 
@@ -615,13 +655,18 @@ def criteria(lines: list[str], spans: list[tuple[int, int]], task_lines: set[int
     return ["\n".join(lines[a:b]) for a, b in with_lists(lines, spans, task_lines or set())]
 
 
-def span_lines(lines: list[str], spans: list[tuple[int, int]]) -> list[str]:
-    """The spans' lines in order, with one blank line where the plan had a gap between them."""
+def span_lines(lines: list[str], spans: list[tuple[int, int]], cut: list[tuple[int, int]] = ()) -> list[str]:
+    """The spans' lines in order, with one blank line where the plan had a gap between them, or a
+    `[…]` line where a range of `cut` (a sibling left out) lies in the gap or after the last."""
     out: list[str] = []
     for k, (a, b) in enumerate(spans):
-        if k and a > spans[k - 1][1]:
+        if k and any(spans[k - 1][1] <= c < a for c, _ in cut):
+            out += ["", "[…]", ""]
+        elif k and a > spans[k - 1][1]:
             out.append("")
         out += lines[a:b]
+    if spans and any(c >= spans[-1][1] for c, _ in cut):
+        out += ["", "[…]"]
     return out
 
 
@@ -635,7 +680,7 @@ def label_of(line: str) -> str | None:
 def load(root: Path, task_id: str, feature: str | None):
     m = ID_RE.fullmatch(task_id)
     if m is None:
-        sys.exit(f"{task_id!r} is not a task ID like P02.T5, P05.T1.a or R04.T3.c")
+        sys.exit(f"{task_id!r} is not a task ID like P02.T5, P05.T1.a, R04.T3.c or P14.T54.b.l")
     plan = find_plan(root, m.group(1), m.group(2), feature)
     lines = plan.read_text(encoding="utf-8").splitlines()
     all_markers = markers(lines)
@@ -650,6 +695,7 @@ def load(root: Path, task_id: str, feature: str | None):
 
 
 def parent_of(task_id: str, all_markers: list[Marker]) -> Marker | None:
+    """A subtask's or sub-subtask's task (P14.T54 for P14.T54.b and P14.T54.b.l); None for a task."""
     parts = task_id.split(".")
     if len(parts) < 3:
         return None
@@ -675,19 +721,23 @@ def phase_intro(lines: list[str], all_markers: list[Marker], top: Marker) -> tup
     return "", []
 
 
-def subtasks(lines: list[str], all_markers: list[Marker], parent: Marker):
+def subtasks(lines: list[str], all_markers: list[Marker], parent: Marker, end: int | None = None):
     """A parent task's subtasks, each subtask's own paragraphs (line spans), and the paragraphs
     shared by all of them. A paragraph that starts with a task marker is never shared. A labelled
-    paragraph is shared when it says so; so is everything from the first labelled paragraph after
-    the last subtask whose label no earlier subtask uses for a paragraph of its own (P01.T4's
+    paragraph is shared when it says so, and so is everything after it in the last subtask; so is
+    everything from the first labelled paragraph after the last subtask whose label no earlier
+    subtask uses for a paragraph of its own (P01.T4's
     `Files: … Acceptance: …`, P06.T5's `- **Files:** … **Accept:** …`, P14.T6's `- _Accept:_`),
     or, after a bulleted last subtask, from the first labelled paragraph back at the margin
     (R06.T8's `Files: … Bench: …`). Plans that give each subtask its own labelled paragraphs
-    (plan 05) keep the last one's as its own.
+    (plan 05) keep the last one's as its own. In a bulleted last subtask, only a label among the
+    bullet's own items counts: one nested deeper, under a bullet of its own (P14.T54.b's `_Tests:_`
+    under its `_It adds_`), is the subtask's. A sub-subtask is part of its subtask's paragraphs.
+    A subtask's sub-subtasks divide it the same way (sub_subtasks()), within `end`.
     """
-    parent_end = section_end(lines, parent, all_markers)
+    parent_end = section_end(lines, parent, all_markers) if end is None else end
     children = [
-        mk for mk in all_markers if parent.line < mk.line < parent_end and mk.task_id.startswith(parent.task_id + ".")
+        mk for mk in all_markers if parent.line < mk.line < parent_end and mk.task_id.rsplit(".", 1)[0] == parent.task_id
     ]
     if not children:
         return parent_end, children, {}, []
@@ -706,20 +756,57 @@ def subtasks(lines: list[str], all_markers: list[Marker], parent: Marker):
     # A bulleted subtask ends where the text returns to the margin, so a labelled paragraph there is
     # the parent's whatever labels the subtasks use.
     bullet = BULLET_RE.match(lines[children[-1].line]) is not None
+    items = len(re.match(r"\s*(?:[-*]\s+)?", lines[children[-1].line]).group(0))  # the bullet's items' indent
     for k in range(1, len(last)):
-        label = label_of(lines[last[k][0]])
-        margin = bullet and not lines[last[k][0]][:1].isspace()
-        if label and (last[k] in shared or label not in earlier or margin):
+        line = lines[last[k][0]]
+        label = label_of(line)
+        margin = bullet and not line[:1].isspace()
+        nested = bullet and indent(line) > items
+        if label and (last[k] in shared or not nested and (label not in earlier or margin)):
             shared.update(last[k:])
             break
+    # A sub-subtask's paragraphs are its own, never shared.
+    inner = [
+        (mk.line, section_end(lines, mk, all_markers))
+        for mk in all_markers
+        if children[0].line < mk.line < parent_end and mk.task_id.count(".") > parent.task_id.count(".") + 1
+    ]
+    shared = {s for s in shared if not any(a <= s[0] < b for a, b in inner)}
     own = {child.task_id: [s for s in spans if s not in shared] for child, spans in zip(children, regions)}
     return parent_end, children, own, sorted(shared)
+
+
+def subtask_of(task_id: str, all_markers: list[Marker]) -> Marker | None:
+    """A sub-subtask's subtask (P14.T54.b for P14.T54.b.l); None for a task or a subtask."""
+    parts = task_id.split(".")
+    if len(parts) < 4:
+        return None
+    return next((mk for mk in all_markers if mk.task_id == ".".join(parts[:3])), None)
+
+
+def sub_subtasks(lines: list[str], all_markers: list[Marker], sub: Marker | None, task_own: dict):
+    """A subtask's sub-subtasks, dividing the subtask's own paragraphs (`task_own[sub]`, as
+    subtasks() gives them for its task) as a task's subtasks divide the task: each one's own
+    paragraphs, to the next one (the last keeps what follows it, as P14.T51.g.b keeps "the rest of
+    this entry", unless a label shares it); the subtask's intro before the first; the paragraphs
+    shared by all of them; and each one's lines. All empty for no subtask, or one outside its task."""
+    spans = task_own.get(sub.task_id, []) if sub else []
+    if not spans:
+        return {}, [], [], []
+    _, kids, own, shared = subtasks(lines, all_markers, sub, spans[-1][1])
+    mine = {a for a, _ in spans}  # a paragraph the task shares is not the subtask's
+    own = {k: [s for s in v if s[0] in mine] for k, v in own.items()}
+    intro = [s for s in spans if kids and s[0] < kids[0].line]
+    ranges = [(kid.line, kids[k + 1].line if k + 1 < len(kids) else spans[-1][1]) for k, kid in enumerate(kids)]
+    return own, intro, [s for s in shared if s[0] in mine], ranges
 
 
 def task_blocks(lines, all_markers, target) -> tuple[list[str], tuple[int, int], tuple[int, int] | None]:
     """The text to show: the phase intro, then for a subtask the parent's intro, the subtask, and
     the parent's paragraphs shared by all subtasks ("Acceptance for T6, and for each subtask",
-    "Files (all of T2)", or the labelled paragraphs after the last subtask)."""
+    "Files (all of T2)", or the labelled paragraphs after the last subtask). A sub-subtask comes
+    after its subtask's intro, without its siblings', and before the paragraphs its subtask shares
+    among them."""
     end = section_end(lines, target, all_markers)
     parent = parent_of(target.task_id, all_markers)
     heading, intro_lines = phase_intro(lines, all_markers, parent or target)
@@ -727,11 +814,20 @@ def task_blocks(lines, all_markers, target) -> tuple[list[str], tuple[int, int],
     if parent is None:
         return phase + lines[target.line : end], (target.line, end), None
     parent_end, children, own, shared = subtasks(lines, all_markers, parent)
-    if target.task_id not in own:
+    sub = subtask_of(target.task_id, all_markers)
+    kids, sub_intro, sub_shared, ranges = sub_subtasks(lines, all_markers, sub, own)
+    if target.task_id not in own and target.task_id not in kids:
         return phase + lines[target.line : end], (target.line, end), (parent.line, parent_end)
-    mine = own[target.task_id]
     intro = "\n".join(lines[parent.line : children[0].line]).rstrip().splitlines()
-    block = phase + intro + ["", "[…]", ""] + span_lines(lines, mine)
+    if sub is None:
+        mine = own[target.task_id]
+        block = phase + intro + ["", "[…]", ""] + span_lines(lines, mine)
+    else:
+        mine = kids[target.task_id]
+        cut = [r for r in ranges if r[0] != target.line]
+        block = phase + intro + ["", "[…]", ""] + span_lines(lines, sub_intro + mine, cut)
+        if sub_shared:
+            block += ["", "[Shared by all sub-subtasks of " + sub.task_id + "]", ""] + span_lines(lines, sub_shared)
     if shared:
         block += ["", "[Shared by all subtasks of " + parent.task_id + "]", ""] + span_lines(lines, shared)
     return block, (target.line, mine[-1][1]), (parent.line, parent_end)
@@ -739,8 +835,9 @@ def task_blocks(lines, all_markers, target) -> tuple[list[str], tuple[int, int],
 
 def acceptance_groups(lines, all_markers, target) -> list[tuple[str, list[str]]]:
     """(label, paragraphs) in plan order: the phase intro, the parent's intro, each subtask's own
-    paragraphs (only the target's, for a subtask) and the paragraphs shared by all subtasks. Each
-    bullet is its own paragraph, except in the list an acceptance lead-in introduces."""
+    paragraphs (only the target's, for a subtask; for a sub-subtask, its subtask's intro, its own
+    and those shared by all its siblings) and the paragraphs shared by all subtasks. Each bullet is its own
+    paragraph, except in the list an acceptance lead-in introduces."""
     parent = parent_of(target.task_id, all_markers)
     top = parent or target
     task_lines = {mk.line for mk in all_markers}
@@ -750,13 +847,19 @@ def acceptance_groups(lines, all_markers, target) -> list[tuple[str, list[str]]]
         spans = paragraph_spans(intro_lines, 0, len(intro_lines))
         groups.append((f"[{heading.lstrip('#').strip()}, intro]", criteria(intro_lines, spans)))
     _, children, own, shared = subtasks(lines, all_markers, top)
-    if not children or (parent is not None and target.task_id not in own):
+    sub = subtask_of(target.task_id, all_markers)
+    kids, sub_intro, sub_shared, _ = sub_subtasks(lines, all_markers, sub, own)
+    if not children or (parent is not None and target.task_id not in own and target.task_id not in kids):
         end = section_end(lines, target, all_markers)
         return groups + [(f"[{target.task_id}]", criteria(lines, paragraph_spans(lines, target.line, end), task_lines))]
     intro = paragraph_spans(lines, top.line, children[0].line)
     groups.append((f"[{top.task_id}, intro]", criteria(lines, intro, task_lines)))
     for child in children:
-        if parent is None or child.task_id == target.task_id:
+        if sub is not None and child.task_id == sub.task_id:
+            groups.append((f"[{child.task_id}, intro]", criteria(lines, sub_intro, task_lines)))
+            groups.append((f"[{target.task_id}]", criteria(lines, kids[target.task_id], task_lines)))
+            groups.append((f"[Shared by all sub-subtasks of {child.task_id}]", criteria(lines, sub_shared, task_lines)))
+        elif parent is None or child.task_id == target.task_id:
             groups.append((f"[{child.task_id}]", criteria(lines, own[child.task_id], task_lines)))
     groups.append((f"[Shared by all subtasks of {top.task_id}]", criteria(lines, shared, task_lines)))
     return groups
@@ -946,15 +1049,15 @@ def reads_stdin(cmd: str) -> bool:
 
 def risk_notes(rel: Path, lines: list[str], task_id: str, span: tuple[int, int] | None = None) -> list[str]:
     """Bullets of the plan's Risks and open points (or of `span`, the heading line before it
-    excluded: a record file's) that name the task, or, for a subtask, its parent as a whole: the
-    whole bullet when its title names it, else only the clauses that do."""
+    excluded: a record file's) that name the task, or, for a subtask, its parent as a whole (for a
+    sub-subtask, its subtask and its task as wholes): the whole bullet when its title names it,
+    else only the clauses that do."""
     span = span or named_section(lines, "risks")
     if span is None:
         return []
     short = task_id.split(".", 1)[1]
-    names = [re.escape(short)]
-    if short.count("."):
-        names.append(re.escape(short.split(".")[0]) + r"(?!\.[a-z])")
+    parts = short.split(".")
+    names = [re.escape(short)] + [re.escape(".".join(parts[:n])) + r"(?!\.[a-z])" for n in range(len(parts) - 1, 0, -1)]
     name_re = re.compile(r"(?<![\w.`])(?:" + task_id[:3] + r"\.)?(?:" + "|".join(names) + r")(?![\w`])")
     found = []
     for a, b in paragraph_spans(lines, span[0] + 1, span[1]):
@@ -1044,7 +1147,7 @@ def show_records(root: Path, task_id: str, feature: str | None) -> None:
     key = record_key(task_id)
     m = ID_RE.fullmatch(key)
     if m is None:
-        sys.exit(f"{task_id!r} is not a task ID like P02.T5, P05.T1.a or P14.T54.b.i")
+        sys.exit(f"{task_id!r} is not a task ID like P02.T5, P05.T1.a, R04.T3.c or P14.T54.b.l")
     plan = find_plan(root, m.group(1), m.group(2), feature)
     lines = plan.read_text(encoding="utf-8").splitlines()
     ids = {mk.task_id for mk in task_markers(lines, markers(lines))}
@@ -1130,7 +1233,7 @@ def show_list(root: Path, plan_filter: str | None, feature: str | None) -> None:
             print(f"## {plan.relative_to(root)}")
             for mk in task_markers(lines, markers(lines)):
                 named = re.search(CONVENTIONAL_PREFIX + re.escape(mk.task_id) + r"(?![\w.])", log, re.M) is not None
-                indent = "  " if mk.task_id.count(".") == 2 else ""
+                indent = "  " * (mk.task_id.count(".") - 1)  # a subtask by two spaces, a sub-subtask by four
                 flag = ("  [commit]" if named else "") + ("  [records]" if mk.task_id in with_records else "")
                 print(f"{indent}{mk.task_id}  {mk.title}{flag}")
             print()
@@ -1140,7 +1243,7 @@ def show_list(root: Path, plan_filter: str | None, feature: str | None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("task_id", nargs="?", help="task ID such as P02.T5, P05.T1.a or R04.T3.c")
+    parser.add_argument("task_id", nargs="?", help="task ID such as P02.T5, P05.T1.a, R04.T3.c or P14.T54.b.l")
     parser.add_argument("--acceptance", action="store_true", help="print only the acceptance criteria")
     parser.add_argument("--context", action="store_true", help="also print the Generator version and Risks sections")
     parser.add_argument("--records", action="store_true", help="print the task's records as built and its record file")
