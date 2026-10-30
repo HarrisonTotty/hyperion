@@ -23642,3 +23642,34 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     port; an edit to either keeps both bit for bit `libm`'s (`pinnedMath.test.ts`).
   - `vitest.config.mts` loads `pinnedMath.ts` natively (`server.deps.external`): the module must
     import nothing.
+- **R08.T12.b.2, as built** (2026-10-30; what later tasks consume; measurements in the lane's
+  outbox):
+  - `reference/thickCases.ts`: `thickReferenceCases()` (built on first need, about 70 s of Mie;
+    never on the render thread), `THICK_CASE_NAMES`, cases `venus-92bar`, `venus-58bar`,
+    `titan-class` and `giant-deck` (seeds 4–7), each `<name>.case.json` and `.reference.json`.
+    `giant-deck` stands on a sphere of `tableRadiusM(SATURN_OBLATE_SPHEROID)`, not the spheroid.
+  - The higher limb is two cases of their own, `earth-high-limb` and `earth-ozone-slab-high-limb`
+    (`HIGH_LIMB_CASES`, seeds 8 and 9, image `limb-air`: 0.1–10 of the air's 8.45 km and the slab's
+    base and top), so T12.b.1's references stand.
+  - The tracer reads absorbers of kind `pair` (`pairDensityPerM6`) and curves with pressure rows
+    (`logPressures`, `readTopLogPressure`) at the path's Curtis–Godson pressure over the case's
+    `pressureBar`, whose nodes become shell boundaries where a curve reads pressure
+    (`AbsorberAmount`, `AbsorberDensity`, `Curve::{Row, Rows}`). `caseJson` writes them and
+    `ReferenceCase.significantFigures` (the thick cases' 9).
+  - `aerosolTerm(spec, column, optics?)` with `aerosolTermOptics`; `atPressure` is exported from
+    `aerosol.ts`; `modeOpticsWithIndex` in `sizeDistribution.ts`.
+  - Counts (`sampleCounts.json`): the thick cases' floor is 1,024 (T12.b.1's 4,096) at budgets a pod
+    allowed, not ruling 8's 12 h; Venus's geometries at the floor, its `flux-lsfr` at 32,768.
+  - `references.test.ts` covers the ten references; `refusals.json` lists the new refusals;
+    `sanityRanges.json` pins the Venus-class and Titan-class ranges and Venus's red shift.
+  - Left undone: `ATMOSPHERE TEST`'s thick bodies (a worker must build their media), so the flight
+    past them, R08.T10.b's open condition, is NOT RUN; the line absorbers' lines in the cases (the
+    added-file hook); §2.5.
+- **R08.T5.e, as built** (2026-10-30):
+  - `ACID_UV_K365 = 1.49e-3`, `ACID_UV_DECAY_NM = 47.6` (past Spacek et al.'s 26.9 nm bound, a
+    deviation); `acidUvAbsorberK(λ, absorber?)`; the materials tool's `--acid-uv-from` and `--only`.
+    `condensate_extinction_7`'s inputs hash moved, its body did not: no version bump.
+  - `test/venusAlbedo.ts` (`albedoCaseJson`, `geometricAlbedo`), `venus-92bar-albedo.case.json`
+    (seed 10) and `.reference.json` (6,144 samples), `venus-uv-fit.json` (every trial).
+  - `venus_uv_absorber`'s tests hold p(365) and p(B) ÷ p(V); p(g′) ÷ p(r′) is held at 4σ and refused
+    for its σ.
