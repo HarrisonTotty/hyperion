@@ -46,9 +46,10 @@
 //! forwards again, at the schedule's step in ruling 146.3's table of the total potential
 //! ([`SprayForce`]), keeping its state at every boundary (P10.T5.b); its pericentres there are
 //! where a dwarf's pulses fall. At a release each tracer starts from a Lagrange point with the
-//! offsets of Fardal, Huang and Weinberg (2015, MNRAS 452, 301, §2.4 eqs. 3–9, §4.2 eqs. 19–24),
-//! in the frame of the progenitor's galactocentric direction `x̂`, its orbit's pole `ẑ` and the
-//! direction ahead, `ŷ = ẑ × x̂`:
+//! offsets of Fardal, Huang and Weinberg (2015, MNRAS 452, 301, §2.4 eqs. 3–9, §4.2 eqs. 19–24;
+//! quoted and numbered here from arXiv:1410.1861v1, the preprint), in the frame of the
+//! progenitor's galactocentric direction `x̂`, its orbit's pole `ẑ` and the direction ahead,
+//! `ŷ = ẑ × x̂`:
 //!
 //! ```text
 //! x = x_p ± k_r r_t x̂ + k_z r_t ẑ        v = v_p ± k_vφ Ω r_t ŷ + k_vz Ω r_t ẑ
@@ -69,17 +70,19 @@
 //!   as the cube of the tidal radius's ratio between them. `f_t`, their satellites' initial King
 //!   radius over the tidal radius at apocentre (eq. 10), is [`FILLING_FACTOR`], 0.8, that of the
 //!   five runs of their Table 1 without a suffix, since no progenitor here has a King radius.
-//! - `k_z` and `k_vz` about zero with dispersion [`VERTICAL_SPREAD`], 0.5 (eqs. 22–24).
+//! - `k_z` and `k_vz` about zero (eq. 22) with dispersion [`VERTICAL_SPREAD`], 0.5 (eqs. 23–24).
 //!
-//! Each is cut at [`OFFSET_CUT`], ±2.5 dispersions, by inverse transform of one word of
-//! `stream.spray.offsets`, four a tracer. Fardal et al. find their Gaussians "unlikely to be
-//! accurate in the extremes of the distribution" (§2.4), and blame "an excessively long tail" in
-//! another recipe on Gaussians used "rather than a more sharply truncated distribution" (§5.1).
-//! The cut leaves `1 − 2a φ(a) ÷ (2Φ(a) − 1)` of the Gaussian's variance at `a` = 2.5, 0.9113, so
-//! each draw's Gaussian is widened by [`cut_widening`], 1.0476, and the cut distribution keeps the
-//! fitted dispersion (main's ruling of 2026-10-29). The cut still keeps `k_r + k_vφ` at 0.204 or
-//! more at the largest dispersion, 0.4, so that near a circular orbit, where a tracer's guiding
-//! radius moves by about `(k_r + k_vφ) r_t`, every tracer drifts the way its arm does.
+//! Each is drawn by inverse transform of one word of `stream.spray.offsets`, four a tracer, from a
+//! Gaussian cut at [`OFFSET_CUT`], ±2.5 of its dispersions. Fardal et al. find their Gaussians
+//! "unlikely to be accurate in the extremes of the distribution" (§2.4), and trace the most
+//! common deficiency of their own model streams, "an excessively long tail of debris", in part to
+//! "our use of simple Gaussian distributions of the space and velocity offsets rather than a more
+//! sharply truncated distribution" (§5.1). The cut leaves `1 − 2a φ(a) ÷ (2Φ(a) − 1)` of the
+//! Gaussian's variance at `a` = 2.5, 0.9113, so each Gaussian is widened by [`cut_widening`],
+//! 1.0476, and the cut distribution keeps the fitted dispersion (main's ruling of 2026-10-29):
+//! the cut lies at ±2.619 of the fitted dispersions. It still keeps `k_r + k_vφ` at 0.204 or more
+//! at the largest dispersion, 0.4, so that near a circular orbit, where a tracer's guiding radius
+//! moves by about `(k_r + k_vφ) r_t`, every tracer drifts the way its arm does.
 //!
 //! # The integration
 //!
@@ -88,10 +91,23 @@
 //! progenitor out on purpose: it "can be omitted with an appropriate choice of release constants
 //! (equations 19–24); the time-integrated effect of the progenitor is encapsulated by our larger
 //! action offset" (§6), the `k̄_r` = 2 and `k̄_vφ` = 0.3 above, so a progenitor's sphere added to
-//! them would count its pull twice. They tested it on a Sagittarius of 8.5 × 10⁻⁴ of its host's
-//! mass and found "the agreement is extremely good" (§5.2) (main's ruling of 2026-10-29, dropping
-//! plan 10's Plummer sphere for every progenitor). The progenitor's bound mass still sets each
-//! release's tidal radius. Every body sums the angle it sweeps
+//! them would count its pull twice. Main's ruling of 2026-10-29 drops plan 10's Plummer sphere
+//! for every progenitor. The recipe's reach is narrower than that:
+//!
+//! - Fardal et al. calibrated it on satellites of 10⁶ M☉, 3.5 × 10⁻⁶ of their host's mass (§3,
+//!   Table 1), "for small progenitor masses" where "we can still specify the behavior of stars
+//!   fairly well in terms of orbits in the host potential alone" (§2.4).
+//! - Beyond that range they tested it on a Sagittarius of 8.5 × 10⁻⁴ of its host's mass: "the
+//!   agreement is extremely good", though "the model stream is somewhat longer and in some places
+//!   narrower than the N-body results" (§5.2).
+//! - "At very large satellite masses the effect of the satellite will not converge within an
+//!   orbital wrap and this will alter the morphology of the tidal stream (Choi et al. 2007), making
+//!   explicit inclusion of the satellite force necessary" (§6).
+//!
+//! So a dwarf above about 10⁻³ of the host's mass, up to plan 02's 10⁹·⁵ M☉, lies beyond every
+//! test of the recipe, a finding for the owner (P10.T5.b, the spray's fix, as built). The
+//! progenitor's bound mass still sets each release's tidal radius. Every body sums the angle it
+//! sweeps
 //! about the centre at each step, `atan2(|x₀ × x₁|, x₀ · x₁)` by [`math::atan2`], the angle in its
 //! own orbital plane, as [`Leapfrog::integrate`](super::orbit::Leapfrog::integrate) does. A
 //! tracer's ψ is its angle less the progenitor's over the same steps: positive for one that gains
@@ -100,8 +116,9 @@
 //! # The arms
 //!
 //! A tracer's arm is the Lagrange point it left from, and nearly every tracer's ψ has its arm's
-//! sign: in their tests at v23, one of `sagittarius_like`'s 2,000 does not, and none of six
-//! sampled streams of a drawn Milky Way galaxy. The Plummer sphere this module once added sent up
+//! sign: in this module's slow tests (`tests/global_list_spray.rs`) at v23, one of
+//! `sagittarius_like`'s 2,000 does not, and none of six sampled streams of a drawn Milky Way
+//! galaxy. The Plummer sphere this module once added sent up
 //! to 1.6 % of a drawn galaxy's tracers onto the other arm's orbits, some a radian or more along
 //! it (P10.T5.b, as built). Fardal et al. describe the same artefact in another recipe, stars
 //! thrown "backwards into the stream emerging from the opposing Lagrange point" (§5.1). So
@@ -127,7 +144,7 @@ use crate::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{LightYears, Radians, Seconds, SolarMasses, Years};
 
 use super::MassLoss;
-use super::orbit::{BuildLeapfrogError, FORCE_IN_SI, FixedStep, cross, dot};
+use super::orbit::{BuildLeapfrogError, FixedStep, cross, dot};
 use super::spec::StreamSpec;
 
 mod force;
@@ -161,11 +178,12 @@ pub const FILLING_FACTOR: f64 = 0.8;
 pub const OFFSET_CUT: f64 = 2.5;
 
 /// How much each release offset's Gaussian is widened, so that, cut at [`OFFSET_CUT`], it keeps
-/// the dispersion Fardal et al. fitted (module documentation, "The release"):
-/// `1 ÷ √(1 − 2a φ(a) ÷ (2Φ(a) − 1))` at `a` = [`OFFSET_CUT`], 1.0476, with `φ` and `Φ` the
+/// the dispersion Fardal et al. fitted (module documentation, "The release").
+///
+/// It is `1 ÷ √(1 − 2a φ(a) ÷ (2Φ(a) − 1))` at `a` = [`OFFSET_CUT`], 1.0476, with `φ` and `Φ` the
 /// standard normal density and distribution function: the inverse square root of the variance of
 /// a standard normal truncated to `[−a, a]` (Johnson, Kotz and Balakrishnan 1994, *Continuous
-/// Univariate Distributions*, vol. 1, 2nd ed., ch. 13, the truncated normal distribution).
+/// Univariate Distributions*, vol. 1, 2nd ed., ch. 13 §10.1, the truncated normal distribution).
 #[must_use]
 pub fn cut_widening() -> f64 {
     let a = OFFSET_CUT;
@@ -700,11 +718,7 @@ impl<'a> Spray<'a> {
             .orbit()
             .fixed_step(Seconds::from(spec.stripping_time()))?;
         let (h, steps) = (fixed.step().value(), fixed.count());
-        let field = |x: [f64; 3]| {
-            force
-                .acceleration_ly(x.map(|c| c / METRES_PER_LIGHT_YEAR))
-                .map(|a| a * FORCE_IN_SI)
-        };
+        let field = |x: [f64; 3]| force.acceleration_m_s2(&GalacticDisplacement::new(x));
         // Backwards from the epoch to the start of the stripping time, then forwards again.
         let mut body = (
             spec.position().metres(),
@@ -913,13 +927,11 @@ impl<'a> Spray<'a> {
         )
     }
 
-    /// The acceleration at `x` (m), m/s²: the table's, the host's alone (module documentation,
-    /// "The integration").
+    /// The acceleration at `x` (m), m/s²: the table's, the host's alone, as the progenitor's
+    /// (module documentation, "The integration").
     #[must_use]
     fn acceleration(&self, x: [f64; 3]) -> [f64; 3] {
-        self.force
-            .acceleration_ly(x.map(|c| c / METRES_PER_LIGHT_YEAR))
-            .map(|a| a * FORCE_IN_SI)
+        self.force.acceleration_m_s2(&GalacticDisplacement::new(x))
     }
 }
 

@@ -1521,11 +1521,15 @@ grows with the registry")]`.
     progenitor", and its science check's finding.
   - _The cut keeps the fitted dispersions (item 13)._ `spray::cut_widening()`,
     `1 ÷ √(1 − 2a φ(a) ÷ (2Φ(a) − 1))` at `a` = 2.5, 1.04756: each offset's Gaussian is widened by
-    it, so that cut at ±2.5σ (which drops 1.24 % of draws and leaves 0.9113 of the variance) it
-    keeps eq. 21's and eqs. 22–24's dispersions; `k_r + k_vφ` stays at 0.204 or more.
+    it, so that cut at ±2.5 of its dispersions (which drops 1.24 % of draws and leaves 0.9113 of
+    the variance; ±2.619 of the fitted dispersions) it keeps eq. 21's and eqs. 23–24's
+    dispersions; `k_r + k_vφ` stays at 0.204 or more.
     `Spray::in_plane_spread()` is still eq. 21's σ. `f_t` = 0.8 stays (item 12), its documentation
-    citing §5.2's Sagittarius run beside Table 1. Test: `spray::tests::the_cut_offsets_keep_their_fitted_dispersion` (the cut
-    distribution's variance by a stratified midpoint rule, to 10⁻⁸).
+    citing §5.2's Sagittarius run beside Table 1. Tests:
+    `spray::tests::the_widening_restores_a_cut_gaussian_s_variance` (the cut distribution's
+    variance by a stratified midpoint rule, to 10⁻⁸), and, in the Milky Way fixture's test, the
+    variances of 20,000 tracers' drawn offsets to 3 % and every offset within the cut;
+    `spray.golden` pins `cut_widening`'s bits.
   - _Tracers on the other arm's side, measured again._ `pal5_like` 0, `gd1_like` 0 and
     `sagittarius_like` 1 of 2,000 (27 with the sphere); the drawn galaxy's six sampled streams 0
     each (13, 0, 24, 20, 13 and 32 with it). So the drawn orphans' strays, which "T5.a–b as built"
@@ -1534,8 +1538,18 @@ grows with the registry")]`.
     `sagittarius_like` (was 60) and 0.5 % of a drawn stream's tracers (was 2.5 %). The tracks
     depart from their orbits within one wrap by 35.3, 11.2 and 9.4 tidal radii (were 39.0, 12.2
     and 9.0).
-  - _For the owner._ Chen, Valluri, Gnedin and Ash 2025 (arXiv:2408.01496) find host-only Fardal
-    streams 15–50 % too narrow for globulars, and give a release distribution calibrated with the
-    progenitor's gravity for 10⁴–10⁶ M☉ and `e` ≤ 0.6 (gala's `ChenStreamDF`): the globulars'
-    option, a new release model. Dwarfs above about 10⁻³ of the host's mass, up to 10⁹·⁵ M☉, are an
-    extrapolation of every calibration (Fardal et al. §2.2).
+  - _For the owner._
+    - Chen, Valluri, Gnedin and Ash 2025 (ApJS, doi:10.3847/1538-4365/ad9904; arXiv:2408.01496)
+      find host-only Fardal streams 15–50 % too narrow for globulars (15–30 % at `e` = 0, 30–50 %
+      at `e` = 0.6), with `f_t` = 1, and their own host-only variant fails to separate the arms
+      in R and μ_φ1, "highlighting the importance of including the progenitor's potential". They
+      give a release distribution calibrated with the progenitor's gravity for 10⁴–10⁶ M☉ and
+      `e` ≤ 0.6 (gala's `ChenStreamDF`): the globulars' option, a new release model.
+    - Fardal et al. calibrated on satellites of 10⁶ M☉, 3.5 × 10⁻⁶ of their host (§3, Table 1),
+      and tested beyond that range on a Sagittarius of 8.5 × 10⁻⁴ (§5.2); their §6 says that at
+      very large satellite masses the satellite's force must be included explicitly. Dwarfs above
+      about 10⁻³ of the host's mass, up to 10⁹·⁵ M☉, lie beyond every test of the recipe, and
+      beyond the linear frequency expansion (§2.2, after Bovy 2014). The ruling drops the sphere
+      for them too: a conflict between the source's caveat and the ruling, recorded, not acted on.
+    - The Fardal quotes and numbers are checked against arXiv:1410.1861v1; the refereed text was
+      out of the pod's reach.

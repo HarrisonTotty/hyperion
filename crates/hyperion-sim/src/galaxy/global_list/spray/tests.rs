@@ -239,9 +239,9 @@ fn the_same_stream_gives_the_same_schedule() {
 /// the dispersion they were fitted with (main's ruling of 2026-10-29): the cut distribution's
 /// variance by a stratified midpoint rule over its distribution function, the draw's own
 /// inverse transform, is the widening's inverse square to 10⁻⁸ (the rule's own error is 2.6 ×
-/// 10⁻⁹).
+/// 10⁻⁹). The spray's own draws are checked on the Milky Way fixture below.
 #[test]
-fn the_cut_offsets_keep_their_fitted_dispersion() {
+fn the_widening_restores_a_cut_gaussian_s_variance() {
     let widening = cut_widening();
     assert!((widening - 1.0476).abs() < 5e-5, "{widening}");
     let below = 0.5 * math::erfc(OFFSET_CUT * core::f64::consts::FRAC_1_SQRT_2);
@@ -337,6 +337,7 @@ mod milky_way {
         golden_sprays();
         the_table_is_its_potential_s_gradient_and_near_the_leapfrog_s();
         tracers_are_pure_functions_of_their_index_and_weigh_the_tube();
+        the_drawn_offsets_keep_their_dispersions_within_the_cut();
     }
 
     /// The bits of each test stream's specification and of a spray of four tracers an arm, and of
@@ -347,6 +348,7 @@ mod milky_way {
     fn golden_sprays() {
         let mut writer = GoldenWriter::new();
         writer.header(crate::GENERATOR_VERSION.get());
+        writer.f64("cut_widening", cut_widening());
         let force = &fixture().force;
         for (name, [x, y, z]) in [
             ("sun", [26_000.0, 0.0, 30.0]),
@@ -446,6 +448,54 @@ mod milky_way {
         }
         assert!(worst_potential < 2e-5, "{worst_potential:e}");
         assert!(worst_force < 1e-3, "{worst_force:e}");
+    }
+
+    /// The offsets a spray draws (main's ruling of 2026-10-29): over 20,000 tracers' words, the
+    /// in-plane offsets' variances about their means are eq. 21's dispersion squared and the
+    /// vertical ones' [`VERTICAL_SPREAD`]'s, each to 3 %, a variance's error being about 1 % here
+    /// and the cut without the widening 8.9 % narrow; and every offset lies within the cut, at
+    /// [`OFFSET_CUT`] widened dispersions. For `pal5_like`'s dispersion, 0.278, and
+    /// `sagittarius_like`'s, the cap of 0.4.
+    fn the_drawn_offsets_keep_their_dispersions_within_the_cut() {
+        let streams = test_streams();
+        for (name, spec) in [&streams[0], &streams[2]] {
+            let sprayed = spray(SEED, spec, 4);
+            let spread = sprayed.in_plane_spread();
+            let n = 20_000_u32;
+            let mut squares = [0.0; 4];
+            for i in 0..n {
+                let offsets = sprayed.offsets(i);
+                let deviations = [
+                    offsets[0] - RADIAL_OFFSET,
+                    offsets[1] - TANGENTIAL_OFFSET,
+                    offsets[2],
+                    offsets[3],
+                ];
+                for (k, (d, sigma)) in deviations
+                    .into_iter()
+                    .zip([spread, spread, VERTICAL_SPREAD, VERTICAL_SPREAD])
+                    .enumerate()
+                {
+                    assert!(
+                        d.abs() <= OFFSET_CUT * cut_widening() * sigma * (1.0 + 1e-12),
+                        "{name}: tracer {i}'s offset {k}, {d}, beyond the cut"
+                    );
+                    squares[k] += d * d;
+                }
+            }
+            for (k, (square, sigma)) in squares
+                .into_iter()
+                .zip([spread, spread, VERTICAL_SPREAD, VERTICAL_SPREAD])
+                .enumerate()
+            {
+                let variance = square / f64::from(n);
+                assert!(
+                    (variance / (sigma * sigma) - 1.0).abs() < 0.03,
+                    "{name}: offset {k}'s variance {variance} against {}",
+                    sigma * sigma
+                );
+            }
+        }
     }
 
     /// A tracer is a pure function of its index, so a pool may integrate them in any order and
