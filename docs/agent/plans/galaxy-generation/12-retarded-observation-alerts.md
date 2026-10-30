@@ -457,17 +457,31 @@ Files: `galaxy/query/segment.rs`, `lensing/{mod,walk,point_lens}.rs`. Acceptance
 
 - **P12.T5.a Types, reach, flux.** The types under Provides; a registry row per `TransientKind`:
   class, peak luminosity bound per band, longest duration D, light-curve function (plans 06, 09,
-  11); the central black hole's flare row reads plan 09's
-  `flares::{BIN_SECONDS, LOOK_BACK_BINS, MAX_DURATION, MAX_PEAK_LUMINOSITY_WATTS}` and
-  `CentreFlare::luminosity_watts_at` (P09.T30.a as built: plan 09's Risks, "P09.T30.a as built"),
-  and its tidal disruptions' bound, duration and light curve are P09.T30.b's; `class_reach` (Design
-  note 5); flux = L ÷ 4πd² × 10^(−0.4 A_band), with A_band from plan 07's
-  `sightline` (`NoiseMode::Realised`, `Quality::Budget`, the modifiers of plan 09's `FeatureGas`
-  along the segment, the caller's `NoiseCache` from `AlertContext`) from the apparent position to
-  the observer, and `Sightline::in_band`. `AlertBand::XRay` takes `xray_optical_depth` and plan 11's
-  `xray_luminosity` (Design note 14). Tests: reach grows monotonically as the limit falls and caps
-  at the diagonal; flux of a pinned nova at three distances; the X-ray depth is unity at an A_V the
-  doc comment states from σ_X, and is unchanged by adding hot coronal gas to a test sightline.
+  11). The rows' sources as built (Risks, "Re-validated for P12.T5.a"): plan 09's supernova
+  templates, `catalogue_classes::supernova::LightCurve::luminosity`, a bolometric `Watts` of the
+  `SupernovaKind` and the age (P09.T19.b); the central black hole's flare row reads plan 09's
+  `flares::{BIN_SECONDS, LOOK_BACK_BINS, MAX_DURATION, MAX_PEAK_LUMINOSITY_WATTS}` (in
+  `features::centre::events`) and `CentreFlare::luminosity_watts_at` (P09.T30.a as built: plan 09's
+  Risks, "P09.T30.a as built"), in unabsorbed 2–10 keV; its tidal disruptions' bound, duration and
+  light curve are P09.T30.b's, in `features::centre::events::luminosity`: the bound `XRAY_SHARE` ×
+  `eddington_luminosity_watts` of the galaxy's black hole, which is
+  `DisruptionTail::peak_luminosity_watts` for a tail above Eddington's rate, no end
+  (`TAIL_LOOK_BACK_BINS`), and `DisruptionTail::luminosity_watts_at`; plan 06's
+  `stellar::events::{flares, fu_orionis, glitches}`. `class_reach` (Design note 5); flux = L ÷ 4πd²
+  × 10^(−0.4 A_band), with A_band from plan 07's `galaxy::gas::extinction::sightline`
+  (`NoiseMode::Realised`, `Quality::Budget`, the modifiers of plan 09's
+  `features::gas_overlay::FeatureGas` along the segment, gathered through
+  `galaxy::gas::modifiers::GasModifierSource`, the caller's `galaxy::gas::noise::NoiseCache` from
+  `AlertContext`) from the apparent position to the observer, and `Sightline::in_band`, a
+  `Magnitudes`. `AlertBand::XRay` takes `xray_optical_depth`, from `Sightline::a_v` and
+  `galaxy::gas::ccm::HYDROGEN_COLUMN_PER_MAG`, and plan 11's `xray_luminosity` (Design note 14).
+  _Slice:_ plan 11's light curves and `xray_luminosity` (P11.T9), the magnetar bursts (P06.T28.c)
+  and the giant eruptions (P06.T28.e, with plan 09's class, P09.T43) are not built, so their rows'
+  bounds, durations and light curves are documented `None`s that name the task that fills them, and
+  the flux takes the luminosity as a plain argument. Tests: reach grows monotonically as the limit
+  falls and caps at the diagonal; flux of a pinned nova at three distances; the X-ray depth is unity
+  at an A_V the doc comment states from σ_X, and is unchanged by adding hot coronal gas to a test
+  sightline.
 - **P12.T5.b One-shot classes.** Core collapse, Type Ia, stellar mergers, neutron-star mergers: walk
   the class's cells in the widened reach sphere (`CatalogueClassSource::cells_in_sphere`), take each
   entry's T, compute its arrival, test the window of Design note 6, emit a `Detection` with its
@@ -2187,3 +2201,42 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     reaches 3 px over the furniture's foot and the legend's first line, and its hover and pressed
     fills over the two-line box; the interface scales of 80% and 125%; the orbit map on the
     galactic axis, whose note now runs beside the scale bar; a screen reader over the census row.
+- **Re-validated for P12.T5.a at `b5a5ecd` (lane `p12-alerts`, 2026-10-30, at `GENERATOR_VERSION`
+  23).** T5.a's Consumes only, checked against the code; T5.b–T5.e are pending re-validation, each
+  by its own lane. T5.a's text now names its sources as built. The corrections:
+  - _Plan 07._ The names are in `galaxy::gas`'s submodules, not at its root:
+    `extinction::{sightline, Sightline, NoiseMode, Quality}`, `noise::NoiseCache`,
+    `modifiers::{GasModifier, GasModifierSource, NoModifiers}` and
+    `ccm::{Band, HYDROGEN_COLUMN_PER_MAG}`. `HYDROGEN_COLUMN_PER_MAG` is Bohlin, Savage and Drake's
+    5.8 × 10²¹ ÷ `R_V`, 1.871 × 10²¹ cm⁻² mag⁻¹. `Sightline::a_v` and `in_band` return `Magnitudes`,
+    and `hydrogen_column` returns `PerCm2`. `sightline` takes the modifiers as a slice, so the
+    caller first gathers them from a `GasModifierSource`. `Quality::Budget` takes a `NonZeroU32`.
+    Plan 07's `SIGHTLINE_QUALITY` (`Budget(256)`) asks that a third reader take a constant of its
+    own.
+  - _Plan 09._ `features::gas_overlay::FeatureGas::new(galaxy, cache, time)` is the
+    `GasModifierSource`. Its features sit at their epoch positions, at one evaluation time that the
+    caller picks.
+  - _Plan 09, the centre._ The flares are at `features::centre::events::flares`, with `CentreFlare`
+    re-exported from `features::centre::events`. The luminosities are bare `f64` watts, in the
+    unabsorbed 2–10 keV band and above the quiescence. P09.T30.b has landed: its tails are
+    `luminosity::DisruptionTail`. Their bound is `XRAY_SHARE` × `eddington_luminosity_watts` of the
+    galaxy's black hole, so it depends on the galaxy, and they have no end (`TAIL_LOOK_BACK_BINS`).
+    Main ruled on 2026-10-29 that T30.b's luminosity law is physically absurd for the Milky Way.
+    P09.T30.c replaces it behind a hold at 25, in which the efficiency falls with the fallback rate.
+    The Eddington cap bounds the tails under either law.
+  - _Plan 09, the supernovae._ `LightCurve::luminosity` is bolometric. No band is split out of it.
+  - _Plan 06._ The event kinds as built are `stellar::events::{flares, fu_orionis, glitches}`. A
+    star flare and an FU Orionis outburst give a luminosity factor over the star's quiescent
+    luminosity (`Flare::luminosity_factor_at`, `Outburst::luminosity_factor_at`); a glitch gives no
+    light. The magnetar bursts (P06.T28.c) and the LBV giant eruptions (P06.T28.e) are not in the
+    tree.
+  - _Plan 11._ `stellar::binary::events` (P11.T9: `light_curve` and `xray_luminosity`) and the scan
+    marks (P11.T8) are not built. Of plan 11, only the class values in `catalogue_classes::ClassId`
+    exist.
+  - _Not in the code_, so T5.a defines them in `alerts`: `ClassSet`, and the root cube's diagonal (2
+    × `coords::ROOT_HALF_WIDTH_LY` × √3, 227,023.36 ly).
+  - _For T5.b–T5.e, noted and not re-validated._ The catalogue-class interface as built (P09.T32) is
+    `catalogue_classes::{ClassProcess, ClassLookup, ProductionClasses, resolve}` with the free
+    `grid::cells_in_sphere`, not a `CatalogueClassSource`. `expected_hosts_in_sphere` and
+    `catalogue_classes::lbv` do not exist yet. No class has a process (P09.T33.a is in lane
+    `p09-classes`).
