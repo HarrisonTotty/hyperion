@@ -940,7 +940,9 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    - The field's rain shadows and its winds' components along the bands therefore agree month by
      month.
 
-   The offline check against ExoPlaSim is a recorded task, never run on arrival.
+   The two-dimensional, monthly fields are checked against observed climatologies on Earth's own
+   land (R09.T13.l, GPCP and NCEP R1 by 2.5° × 5° box), which replaced the offline check against
+   ExoPlaSim; ExoPlaSim stays an optional pod run.
 
    _The transport law_ (researched 2026-10-09, by R09.T0.b; medium confidence). The FILLET ensemble
    cannot test a cap. Its protocol (Deitrick et al. 2023, arXiv:2302.04980, and its v1.1,
@@ -3284,9 +3286,39 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   - _Built 2026-10-21_ (batch 1 `a5bd4f33`, `60a85b5a`, `5ffd64fd`, `8fb1bfa0`, 2026-10-20; batch 2
     `768481cd`, `84573e84`, `4880791f`, `5dd04c2b`).
 
-Offline check (recorded, not in CI): the reference Earth's monthly fields against an ExoPlaSim run
-of the same inputs, with the differences written into this plan. Acceptance:
-`cargo test -p hyperion-sim planetary::surface::steps::climate`.
+- **R09.T13.l The geographic model against observed monthly climatologies** (after R09.T13.i;
+  main's ruling of 2026-10-29 on RM5's close-out research, its Q6, which replaces the offline check
+  against ExoPlaSim this plan recorded here). The zonal fields are held to observations already
+  (T13.a's and T13.i's ERA-Interim, GPCP and NCEP tests); this checks the two-dimensional, monthly
+  structure, which no test held: rain shadows, continental interiors, west-coast deserts and the
+  monsoon's seasonal shift. Test code and test data only: no output moves (`GENERATOR_VERSION` 23,
+  `golden_diff.py`: nothing changed).
+  Records: [09-surface-generator/records/R09.T13.l.md](09-surface-generator/records/R09.T13.l.md).
+  - _The test_ (`steps/climate/tests/climatology.rs`, slow): the geographic model on the relief
+    Earth of `tests/earth_land.rs` (T13.g's synthetic sea at level 7), compared per month over the
+    land boxes (the 2.5° × 5° boxes at least half land by Natural Earth) with GPCP v2.3's monthly
+    precipitation climatology and NCEP/NCAR R1's monthly near-surface air temperature, 1991–2020,
+    both regridded to the boxes.
+  - _It prints_ the pattern correlations and RMS of temperature and precipitation each month, and
+    the heuristic's named signatures: the rain shadows of the Andes, the Sierra Nevada and the
+    Himalaya; the west-coast deserts; and the Indian monsoon's JJA-against-DJF shift.
+  - _It asserts_ only what the first run showed to be robust, the rest recorded as figures. A badly
+    wrong signature (a visibly wrong climate is a blocker class) is reported to main with its
+    figures; the model is not tuned in this task.
+  - _The data_: the derived tables only, each under 500 kB, with their inputs' SHA-256 and terms, as
+    `ncep_air.rs` does, and in `NOTICE`'s test-data section.
+  - _The regimes Earth cannot test_ (locked and slow rotators): the published GCM figures for the
+    locked contrast's shape (Merlis and Schneider 2010, Yang et al. 2014, Haqq-Misra et al. 2018,
+    read), recorded to compare, not asserted (T13.b's record sent the locked Earth's 124 K contrast
+    here).
+  - _ExoPlaSim_ stays an optional pod run on a generated, non-Earth geography, if a GCM's view of a
+    geography with no observations is ever wanted: the research lane built and ran it in a pod
+    (PlaSim at T21, about 4.2 minutes a model year on 4 vCPU; the record).
+  - _Acceptance:_ the test built, reviewed (the Rust rules; the science-checker on the comparison's
+    method) and run by name; `just smart-ci <base> --hook-checks`; the record filed with every
+    figure.
+
+The climate step's acceptance: `cargo test -p hyperion-sim planetary::surface::steps::climate`.
 
 ### R09.T14 Erosion
 
