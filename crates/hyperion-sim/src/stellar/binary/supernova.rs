@@ -204,8 +204,9 @@ impl Engine {
         );
     }
 
-    /// The kick of member `i`'s `remnant` after its own `death` (plan 06's law, P06.T19), its
-    /// progenitor marked companion-stripped if the binary took its envelope.
+    /// The kick of member `i`'s `remnant` after its own `death` (plan 06's law under the pair's
+    /// stellar rules, P06.T19), its progenitor marked companion-stripped if the binary took its
+    /// envelope.
     #[must_use]
     fn companion_kick(
         &self,
@@ -228,7 +229,7 @@ impl Engine {
                 p.stripping()
             },
         );
-        Some(StandardKickLaw::default().kick(
+        Some(StandardKickLaw::under(self.ctx.rules()).kick(
             channel,
             &progenitor,
             remnant,

@@ -477,7 +477,7 @@ pub(super) struct Pin {
 /// The primary's single-star death if design note 16 pins it: a primary of `m_cc(Z) − 1` M☉ or
 /// more (plan 11's `stripped_mark_min_mass`, ruling 93.3) whose death is a collapse, read as plan
 /// 06's `StarModel` reads it (`Track::fate_with` its remnant draws, the companion-stripped mark,
-/// and the kick law).
+/// and the kick law under the input's stellar rules).
 #[must_use]
 fn pinned_death(input: &BinaryInput, full: Option<Arc<Track>>) -> Option<PinnedTrack> {
     let m1 = input.masses()[0];
@@ -491,7 +491,7 @@ fn pinned_death(input: &BinaryInput, full: Option<Arc<Track>>) -> Option<PinnedT
     if !fate.death.kind().is_sudden() {
         return None;
     }
-    let law = StandardKickLaw::default();
+    let law = StandardKickLaw::under(input.rules());
     let death =
         law.with_stripped_mark(fate.death, draws, track.initial_mass(), track.composition());
     let kick = law.natal_kick(&death, &fate.remnant, draws);

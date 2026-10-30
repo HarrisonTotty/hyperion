@@ -40,6 +40,7 @@ use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::remnant::{KickMode, RemnantKind};
+use crate::stellar::rules::StellarRules;
 use crate::stellar::system::{StarModel, SystemStars};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{Dex, KilometresPerSecond, LightYears, Metres, SolarMasses, Years};
@@ -239,6 +240,7 @@ pub fn draw_member(
                     address,
                     age,
                     (v_eff, systemic),
+                    galaxy.rules().stellar,
                 )
             }
         };
@@ -274,7 +276,8 @@ pub fn draw_member(
 }
 
 /// Whether the attempt's star of initial mass `mass` leaves a remnant of `kind` kicked below `v_eff`
-/// (km/s), a low-mode neutron star judged on its pair's `systemic` speed instead (km/s).
+/// (km/s), a low-mode neutron star judged on its pair's `systemic` speed instead (km/s), with the
+/// star built under the galaxy's stellar `rules`.
 pub(crate) fn remnant_fits(
     kind: ClassKind,
     mass: f64,
@@ -282,6 +285,7 @@ pub(crate) fn remnant_fits(
     (universe, system, attempt): (crate::Seed, SystemId, u32),
     age: Years,
     (v_eff, systemic): (f64, f64),
+    rules: StellarRules,
 ) -> bool {
     let want = match kind {
         ClassKind::WhiteDwarf => RemnantKind::WhiteDwarf,
@@ -290,7 +294,8 @@ pub(crate) fn remnant_fits(
         ClassKind::Living | ClassKind::Tail => return true,
     };
     let draws = StarDraws::for_attempt(universe, BodyId::new(system, 0), attempt);
-    let Ok(star) = StarModel::new(SolarMasses::new(mass), *composition, draws, age) else {
+    let Ok(star) = StarModel::new_under(SolarMasses::new(mass), *composition, draws, age, rules)
+    else {
         return false;
     };
     let Some(remnant) = star.remnant() else {

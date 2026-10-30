@@ -17,11 +17,16 @@
 //! - [`kepler_regime`](GalaxyRules::kepler_regime), at [`KEPLER_REGIME_VERSION`] (plan 09,
 //!   P09.T28.b.b): the Kepler regime in the drift hook, the grid's loss-cone carve-out and the
 //!   walks' pad for the orbits.
+//! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
+//!   galaxy hands to the stellar stage's entry points as an argument.
 //!
-//! The next train's bump deletes each hold with its field, its held arm and its tripwire.
+//! The next train's bump deletes each galaxy hold with its field, its held arm and its tripwire.
+//! The `stellar` field stays through every bump: a bump deletes only a stellar hold's own field
+//! inside [`StellarRules`].
 
 use crate::GeneratorVersion;
 use crate::galaxy::motion::{KEPLER_REGIME_VERSION, KeplerRegimeRules};
+use crate::stellar::rules::StellarRules;
 
 /// The galaxy-side holds of the next galaxy train, carried by the `Galaxy` value
 /// (decision-galaxy-25-train §1).
@@ -30,6 +35,9 @@ pub(crate) struct GalaxyRules {
     /// The law a Kepler-regime grid system moves by, whether the loss cone carves the grid's
     /// plunging orbits out, and the pad the walks choose cells by (P09.T28.b.b).
     pub(crate) kepler_regime: KeplerRegimeRules,
+    /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
+    /// stellar law read from the galaxy and hand down as an argument.
+    pub(crate) stellar: StellarRules,
 }
 
 impl GalaxyRules {
@@ -42,6 +50,7 @@ impl GalaxyRules {
             } else {
                 KeplerRegimeRules::Straight
             },
+            stellar: StellarRules::of_version(version),
         }
     }
 
@@ -95,6 +104,35 @@ mod tests {
         assert_eq!(substellar.rules(), GalaxyRules::every_25_hold());
     }
 
+    /// `Galaxy::with_rules` keeps the centre's model while the stellar rules stay as they were, and
+    /// empties it when they change, so that the next read builds it under them. It keeps the
+    /// centre's motion, which reads no stellar law. Built again, the model is the same, since its
+    /// classes read only the kick law's parameters, which no stellar arm changes.
+    #[test]
+    fn with_rules_resets_the_centre_s_model_when_the_stellar_rules_change() {
+        let galaxy = Galaxy::from_params(
+            Seed::new(0x0928_bb00_0000_0002),
+            GalaxyParams::milky_way_like(),
+        )
+        .expect("the Milky Way fixture builds");
+        let model = galaxy
+            .centre()
+            .expect("the fixture's centre builds")
+            .clone();
+        let kepler = galaxy.clone().with_rules(GalaxyRules {
+            kepler_regime: KeplerRegimeRules::Kepler,
+            ..galaxy.rules()
+        });
+        assert!(kepler.centre.0.get().is_some(), "the same stellar rules");
+        let probed = galaxy.with_rules(GalaxyRules {
+            stellar: StellarRules::probe(),
+            ..GalaxyRules::of_version(GENERATOR_VERSION)
+        });
+        assert!(probed.centre.0.get().is_none(), "other stellar rules");
+        assert!(probed.centre_motion.0.get().is_some());
+        assert_eq!(probed.centre().expect("built again"), &model);
+    }
+
     /// Each hold's arm follows its version: held below it, new from it on.
     #[test]
     fn each_hold_turns_on_at_its_version() {
@@ -107,5 +145,15 @@ mod tests {
             GalaxyRules::every_25_hold().kepler_regime,
             KeplerRegimeRules::Kepler
         );
+        assert_eq!(
+            GalaxyRules::every_25_hold().stellar,
+            StellarRules::every_25_hold()
+        );
+        for v in [23, 24, 25, 26] {
+            assert_eq!(
+                GalaxyRules::of_version(GeneratorVersion::new(v)).stellar,
+                StellarRules::of_version(GeneratorVersion::new(v))
+            );
+        }
     }
 }

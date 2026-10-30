@@ -1083,7 +1083,7 @@ fn source_entries(
     nodes: &[MassNodes; 2],
 ) -> (Vec<SourceEntry>, Vec<Vec<KickBinShares>>, Vec<usize>) {
     let fields = galaxy.fields();
-    let law = StandardKickLaw::default();
+    let law = StandardKickLaw::under(galaxy.rules().stellar);
     let mut sources: Vec<SourceEntry> = Vec::with_capacity(SOURCES.len());
     let mut kicks: Vec<KickSet> = Vec::with_capacity(SOURCES.len());
     let mut kick_of = Vec::with_capacity(SOURCES.len());

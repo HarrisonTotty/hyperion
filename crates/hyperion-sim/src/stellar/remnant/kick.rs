@@ -54,6 +54,7 @@ use crate::math;
 use crate::rng::{Mark, Threshold};
 use crate::stellar::Composition;
 use crate::stellar::draws::{REDRAW_TRIES, StandardNormal, StarDraws};
+use crate::stellar::rules::StellarRules;
 use crate::tables::kick_rank;
 use crate::units::{KilometresPerSecond, MetresPerSecond, SolarMasses};
 
@@ -429,6 +430,49 @@ impl KickRankTable {
     }
 }
 
+impl KickRankTable {
+    /// The table the stellar stage's `rules` choose: the one `match` on their
+    /// [`kick_rank`](StellarRules::kick_rank) field.
+    ///
+    /// Every reader of the generator's law reaches it through [`StandardKickLaw::under`]. At the
+    /// version's rules it is [`generator`](Self::generator).
+    #[must_use]
+    pub(crate) fn of(rules: StellarRules) -> Self {
+        match rules.kick_rank {
+            KickRankRules::Committed => Self::generator(),
+            #[cfg(test)]
+            KickRankRules::Probe => Self::probe(),
+        }
+    }
+
+    /// The test-only second table ([`KickRankRules::Probe`]): the generator's quantiles, each
+    /// doubled.
+    ///
+    /// Every score inside the table ranks as half of itself would, so every ordinary kick above the
+    /// rank clamp's floor is slower. It is no physical table. It only shows that a reader of the
+    /// law takes the table its rules choose.
+    #[cfg(test)]
+    #[must_use]
+    fn probe() -> Self {
+        Self::new(kick_rank::SCORE_QUANTILES.iter().map(|q| 2.0 * q).collect())
+            .expect("doubling keeps the committed quantiles finite and strictly increasing")
+    }
+}
+
+/// Which rank table the ordinary kick reads (the stellar rules' `kick_rank` field).
+///
+/// Every version takes the committed table. No later version holds another one: the production
+/// table of plan 15's P15.T5.a replaces the committed one with version 25's bump (P06.T19.e).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum KickRankRules {
+    /// The committed table, [`kick_rank::SCORE_QUANTILES`] ([`KickRankTable::generator`]).
+    Committed,
+    /// A test-only second table ([`KickRankTable::of`]'s `probe`), which no version takes: the
+    /// tests' door to show that every reader of the law goes through its choke point.
+    #[cfg(test)]
+    Probe,
+}
+
 impl Default for KickRankTable {
     fn default() -> Self {
         Self::generator()
@@ -544,6 +588,17 @@ impl StandardKickLaw {
     #[must_use]
     pub const fn new(params: KickLawParams, table: KickRankTable) -> Self {
         Self { params, table }
+    }
+
+    /// The generator's law under the stellar stage's `rules`: the generator's parameters over the
+    /// rank table the rules choose ([`KickRankTable::of`]).
+    ///
+    /// Every reader of the law on the record takes it from here, with the rules of its galaxy, its
+    /// star or its pair. At the version's rules it is [`StandardKickLaw::default`], which
+    /// `hyperion-fit` and the tests keep.
+    #[must_use]
+    pub(crate) fn under(rules: StellarRules) -> Self {
+        Self::new(KickLawParams::default(), KickRankTable::of(rules))
     }
 
     /// The law's parameters.

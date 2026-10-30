@@ -300,14 +300,29 @@ impl Galaxy {
     /// potential's grid twice.
     ///
     /// It is what [`from_params_with_rules`](Self::from_params_with_rules) builds from the same
-    /// seed and parameters, with the builders after it, since nothing a galaxy builds or holds
-    /// reads its rules: each held call site reads them when asked, and a test holds the two equal.
-    /// It keeps the centre's motion and model if they have been read, which holds only while
-    /// neither memo reads the rules; a hold whose arm reaches one must reset them here.
+    /// seed and parameters, with the builders after it, since nothing a galaxy builds when it is
+    /// built reads its rules: each held call site reads them when asked, and a test holds the two
+    /// equal. It keeps the centre's motion if it has been read, since the motion reads only the
+    /// parameters and the mass model. It keeps the centre's model only if the stellar rules
+    /// ([`GalaxyRules::stellar`]) stay as they were. The model's classes are built from the stellar
+    /// law (the kick law's parameters and the turn-off), so under other stellar rules the memo is
+    /// emptied. The reset is pre-emptive: no stellar field reaches the model yet, and it builds
+    /// again to the same bits. The first stellar hold that reaches it must also pass the galaxy's
+    /// stellar rules into `CentreModel::from_parts`, since the reset alone does not route them. A
+    /// galaxy-side hold whose arm reaches either memo must reset it here too.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn with_rules(self, rules: GalaxyRules) -> Self {
-        Self { rules, ..self }
+        let centre = if rules.stellar == self.rules.stellar {
+            self.centre
+        } else {
+            CentreModelCell::default()
+        };
+        Self {
+            centre,
+            rules,
+            ..self
+        }
     }
 
     /// [`from_params`](Self::from_params) under `rules`.

@@ -23,6 +23,7 @@ use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::GENERATOR_VERSION;
 use crate::coords::SystemVelocity;
 use crate::galaxy::fields::Component;
 use crate::galaxy::placement::{Existence, SystemKind, SystemOrigin, SystemRecord};
@@ -53,6 +54,7 @@ use crate::stellar::remnant::{
     StandardKickLaw,
 };
 use crate::stellar::rotation::{self, Activity, Magnetism, Rotation};
+use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{self, PhasePredicate, Track, TrackOptions};
 use crate::stellar::variability::{Variability, VariabilityInputs, variability};
 use crate::stellar::{Composition, ObjectKind, Phase, StarState, substellar};
@@ -243,6 +245,9 @@ pub struct StarModel {
     age_at_epoch: Years,
     evolution: Evolution,
     remnant: Option<RemnantStage>,
+    /// The stellar stage's rules its remnant stage reads (`stellar::rules`): the version's, or
+    /// those of the galaxy it was generated in.
+    rules: StellarRules,
 }
 
 /// How a [`StarModel`] evolves.
@@ -267,15 +272,17 @@ struct RemnantStage {
 impl RemnantStage {
     /// The stage of a star of initial mass `m0` and composition `comp` that died `death` leaving
     /// `remnant`, with its `draws`: the death with the companion-stripped mark applied, and the
-    /// kick of the generator's law (P06.T19), which read `star.stripped` and `star.kick.*`.
+    /// kick of the generator's law under `rules` (P06.T19), which read `star.stripped` and
+    /// `star.kick.*`.
     #[must_use]
     fn new(
         death: Death,
         remnant: CompactRemnant,
         draws: &StarDraws,
         (m0, comp): (SolarMasses, &Composition),
+        rules: StellarRules,
     ) -> Self {
-        let law = StandardKickLaw::default();
+        let law = StandardKickLaw::under(rules);
         let death = law.with_stripped_mark(death, draws, m0, comp);
         Self {
             death,
@@ -287,15 +294,16 @@ impl RemnantStage {
 
 /// The remnant stage of a star whose `track` has reached its death, from its `draws`, or `None`
 /// if the track has not: the death and remnant that `track` gives the remnant draws
-/// (`star.remnant.*`), and the natal kick from `star.stripped` and `star.kick.*`.
+/// (`star.remnant.*`), and the natal kick from `star.stripped` and `star.kick.*` under `rules`.
 #[must_use]
-fn remnant_stage(track: &Track, draws: &StarDraws) -> Option<RemnantStage> {
+fn remnant_stage(track: &Track, draws: &StarDraws, rules: StellarRules) -> Option<RemnantStage> {
     let fate = track.fate_with(RemnantDraws::of(draws))?;
     Some(RemnantStage::new(
         fate.death,
         fate.remnant,
         draws,
         (track.initial_mass(), track.composition()),
+        rules,
     ))
 }
 
@@ -314,6 +322,29 @@ impl StarModel {
         draws: StarDraws,
         age_at_epoch: Years,
     ) -> Result<Self, BuildStarModelError> {
+        Self::new_under(
+            m0,
+            composition,
+            draws,
+            age_at_epoch,
+            StellarRules::of_version(GENERATOR_VERSION),
+        )
+    }
+
+    /// [`new`](Self::new) under the stellar stage's `rules` in place of the generator version's:
+    /// what a star generated in a galaxy is built with, from `galaxy.rules().stellar`
+    /// (`stellar::rules`).
+    ///
+    /// # Errors
+    ///
+    /// As [`new`](Self::new).
+    pub(crate) fn new_under(
+        m0: SolarMasses,
+        composition: Composition,
+        draws: StarDraws,
+        age_at_epoch: Years,
+        rules: StellarRules,
+    ) -> Result<Self, BuildStarModelError> {
         if !(substellar::MIN_MASS.value()..=MAX_STAR_MASS.value()).contains(&m0.value()) {
             return Err(BuildStarModelError::MassOutsideRange(m0));
         }
@@ -327,6 +358,7 @@ impl StarModel {
             age_at_epoch,
             evolution: Evolution::Cooling,
             remnant: None,
+            rules,
         };
         if m0 >= sse::MIN_INITIAL_MASS {
             let end = model.age_at(ClockWindow::END).value();
@@ -336,7 +368,7 @@ impl StarModel {
                 &model.draws,
                 Years::new(if end > 0.0 { end } else { 0.0 }),
             );
-            model.remnant = remnant_stage(&track, &model.draws);
+            model.remnant = remnant_stage(&track, &model.draws, model.rules);
             model.evolution = Evolution::Track(Arc::new(track));
         }
         Ok(model)
@@ -765,6 +797,7 @@ impl StarModel {
                     fate.remnant,
                     &self.draws,
                     (self.track_mass(), &self.composition),
+                    self.rules,
                 )
             })),
         }
@@ -1401,11 +1434,12 @@ impl SystemStars {
     ) -> Self {
         let composition = *composition;
         let age = record.age_at_epoch();
-        let primary = StarModel::new(
+        let primary = StarModel::new_under(
             record.primary_initial_mass(),
             composition,
             primary_draws(galaxy, record),
             age,
+            galaxy.rules().stellar,
         )
         .expect("a grid record's primary is a star or a brown dwarf, with a finite age");
         let carves = crate::stellar::binary::carve::grid_redraws(record, ctx);
@@ -1435,7 +1469,7 @@ impl SystemStars {
         attempt: RedrawAttempt,
     ) -> Self {
         let (hierarchy, stars) = models_at(galaxy, record, primary, ctx, attempt);
-        let pairs = run_pairs(&hierarchy, &stars);
+        let pairs = run_pairs(&hierarchy, &stars, galaxy.rules().stellar);
         Self {
             record: *record,
             hierarchy,
@@ -1873,9 +1907,14 @@ fn models_at(
     stars.push(primary.clone());
     stars.extend(hierarchy.stars().iter().skip(1).map(|slot| {
         let draws = StarDraws::for_attempt(galaxy.seed(), slot.body(), u32::from(attempt.get()));
-        StarModel::new(slot.initial_mass(), composition, draws, age).expect(
-            "a companion is of 13 Jupiter masses up to its primary's mass, with a finite age",
+        StarModel::new_under(
+            slot.initial_mass(),
+            composition,
+            draws,
+            age,
+            galaxy.rules().stellar,
         )
+        .expect("a companion is of 13 Jupiter masses up to its primary's mass, with a finite age")
     }));
     (hierarchy, stars)
 }
@@ -1892,11 +1931,12 @@ fn models_at(
 /// As [`SystemStars::generate`].
 #[must_use]
 pub(crate) fn first_attempt_models(galaxy: &Galaxy, record: &SystemRecord) -> Vec<StarModel> {
-    let primary = StarModel::new(
+    let primary = StarModel::new_under(
         record.primary_initial_mass(),
         draw_metallicity(galaxy, record),
         primary_draws(galaxy, record),
         record.age_at_epoch(),
+        galaxy.rules().stellar,
     )
     .expect("a grid record's primary is a star or a brown dwarf, with a finite age");
     models_at(
@@ -1993,9 +2033,14 @@ fn summarised<'a>(
 /// the end of the clock window, +H, so that its timeline covers the source horizon. Any other pair
 /// is two single stars on their orbit, in no class, whose timeline would be one detached segment of
 /// its models, so it is not run. A pair with a brown dwarf, or with a member that is itself a pair,
-/// is not run either.
+/// is not run either. Each pair runs under the stellar stage's `rules`, those of the galaxy the
+/// stars were generated in.
 #[must_use]
-fn run_pairs(hierarchy: &SystemHierarchy, stars: &[StarModel]) -> Vec<PairTimeline> {
+fn run_pairs(
+    hierarchy: &SystemHierarchy,
+    stars: &[StarModel],
+    rules: StellarRules,
+) -> Vec<PairTimeline> {
     hierarchy
         .pairs()
         .filter_map(|(node, orbit)| {
@@ -2022,7 +2067,8 @@ fn run_pairs(hierarchy: &SystemHierarchy, stars: &[StarModel]) -> Vec<PairTimeli
                 [first.draws().clone(), second.draws().clone()],
                 first.age_at_epoch(),
             )
-            .expect("a pair's stars are of 0.08-150 M_sun with a finite age");
+            .expect("a pair's stars are of 0.08-150 M_sun with a finite age")
+            .with_rules(rules);
             let until = Years::new(first.age_at(ClockWindow::END).value().max(0.0));
             let tracks = [first.shared_track(), second.shared_track()];
             // A pair that cannot interact by +H is two single stars on their orbit, and with no
@@ -2753,7 +2799,7 @@ mod tests {
             kick_low: [crate::stellar::draws::StandardNormal::new(0.6).unwrap(); 3],
             ..star.draws().parts().clone()
         });
-        let stage = remnant_stage(track, &turned).unwrap();
+        let stage = remnant_stage(track, &turned, star.rules).unwrap();
         assert_eq!((stage.death, stage.remnant), (own.death, own.remnant));
         assert_ne!(
             stage.natal_kick,
@@ -2767,7 +2813,7 @@ mod tests {
                 remnant_fallback: crate::rng::Mark::from_word(word),
                 ..star.draws().parts().clone()
             });
-            let stage = remnant_stage(track, &draws).unwrap();
+            let stage = remnant_stage(track, &draws, star.rules).unwrap();
             hyperion_testkit::float::assert_same_bits(
                 stage.death.age().value(),
                 own.death.age().value(),

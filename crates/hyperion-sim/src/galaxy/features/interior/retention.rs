@@ -67,7 +67,7 @@ use crate::math;
 use crate::stellar::Composition;
 use crate::stellar::binary::{CLUSTER_MERGED_BINARY_FATE, MergedBinaryFate};
 use crate::stellar::composition::{Z_FIT_MAX, Z_FIT_MIN, Z_SOLAR};
-use crate::stellar::remnant::{KickMode, RemnantKind, StandardKickLaw};
+use crate::stellar::remnant::{KickLawParams, KickMode, RemnantKind, StandardKickLaw};
 use crate::tables::cluster_retention;
 use crate::units::{Dex, HeliumExcess, KilometresPerSecond, SolarMasses};
 
@@ -374,9 +374,9 @@ pub fn retention_from_rows(
     );
     let v = v_eff.value();
     assert!(v > 0.0 && v.is_finite(), "an escape speed of {v} km/s");
-    let law = StandardKickLaw::default();
+    let params = KickLawParams::default();
     let low_kept = maxwell_cdf(v, PAIR_SYSTEMIC_SIGMA);
-    let envelope_kept = maxwell_cdf(v, law.params().wd_sigma_km_s);
+    let envelope_kept = maxwell_cdf(v, params.wd_sigma_km_s);
     // Place in [Fe/H] of z_fit and in log v.
     let nodes = fe_h_nodes();
     let x = math::log10(composition.z_fit().value() / Z_SOLAR.value())
@@ -428,7 +428,7 @@ pub fn retention_from_rows(
     Retention {
         neutron_stars: share(0),
         black_holes: share(1),
-        white_dwarfs: maxwell_cdf(v, law.params().wd_sigma_km_s),
+        white_dwarfs: maxwell_cdf(v, params.wd_sigma_km_s),
         neutron_stars_per_primary: total[0] * per_primary,
         black_holes_per_primary: total[1] * per_primary,
     }

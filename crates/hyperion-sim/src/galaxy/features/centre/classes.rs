@@ -83,6 +83,8 @@ use crate::galaxy::quad::gl_log_panels;
 use crate::math;
 use crate::stellar::Composition;
 use crate::stellar::composition::Z_SOLAR;
+use crate::stellar::remnant::KickLawParams;
+#[cfg(test)]
 use crate::stellar::remnant::StandardKickLaw;
 use crate::stellar::sse::turn_off_mass;
 use crate::tables::cluster_retention;
@@ -421,7 +423,7 @@ fn tabulated_progenitors(
     composition: &Composition,
     average: &ProfileAverage<'_>,
 ) -> Vec<Progenitor> {
-    let law = StandardKickLaw::default();
+    let params = KickLawParams::default();
     let nodes = fe_h_nodes();
     let x = math::log10(composition.z_fit().value() / Z_SOLAR.value())
         .clamp(nodes[0], nodes[FE_H_NODES - 1]);
@@ -455,7 +457,7 @@ fn tabulated_progenitors(
                         share,
                         ordinary
                             + fallback
-                            + envelope * maxwell_cdf(v, law.params().wd_sigma_km_s)
+                            + envelope * maxwell_cdf(v, params.wd_sigma_km_s)
                             + low * maxwell_cdf(v, PAIR_SYSTEMIC_SIGMA),
                     )
                 };

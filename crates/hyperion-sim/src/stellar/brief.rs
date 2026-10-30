@@ -71,6 +71,7 @@ use crate::stellar::multiplicity::{MultiplicityContext, StarIndex, drawn_single,
 use crate::stellar::remnant::NeutronStar;
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::wd_spectral::white_dwarf_type;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{
     MAX_INITIAL_MASS, MIN_INITIAL_MASS, RemnantModel, Track, TrackOptions, remnant_of,
 };
@@ -400,7 +401,9 @@ impl BriefModel {
             let draws = primary_draws(galaxy, record);
             let primary = table_primary(fate, composition, &draws, age_at_epoch, m0)
                 .or_else(|| exact_remnant(m0, composition, &draws, age_at_epoch))
-                .unwrap_or_else(|| exact(m0, composition, draws, age_at_epoch));
+                .unwrap_or_else(|| {
+                    exact(m0, composition, draws, age_at_epoch, galaxy.rules().stellar)
+                });
             return Self {
                 primary,
                 star_count,
@@ -435,7 +438,13 @@ impl BriefModel {
                 age_at_epoch,
             }
         } else {
-            exact(m0, composition, primary_draws(galaxy, record), age_at_epoch)
+            exact(
+                m0,
+                composition,
+                primary_draws(galaxy, record),
+                age_at_epoch,
+                galaxy.rules().stellar,
+            )
         };
         Self {
             primary,
@@ -736,16 +745,17 @@ fn pulsar_class_holds(
         })
 }
 
-/// The exact primary: its [`StarModel`].
+/// The exact primary: its [`StarModel`], under the galaxy's stellar `rules`.
 #[must_use]
 fn exact(
     m0: SolarMasses,
     composition: Composition,
     draws: StarDraws,
     age_at_epoch: Years,
+    rules: StellarRules,
 ) -> Primary {
     Primary::Exact(Box::new(
-        StarModel::new(m0, composition, draws, age_at_epoch)
+        StarModel::new_under(m0, composition, draws, age_at_epoch, rules)
             .expect("a grid record's primary is a star or a brown dwarf, with a finite age"),
     ))
 }

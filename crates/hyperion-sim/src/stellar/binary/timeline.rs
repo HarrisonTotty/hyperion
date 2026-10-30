@@ -14,10 +14,12 @@ use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::GENERATOR_VERSION;
 use crate::coords::SystemVelocity;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::{CompactRemnant, NatalKick};
+use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{self, ZCoeffs};
 use crate::stellar::{Composition, Phase, StarState, substellar};
 use crate::units::consts::SOLAR_RADIUS_M;
@@ -259,6 +261,8 @@ pub struct BinaryInput {
     draws: [StarDraws; 2],
     age_at_epoch: Years,
     params: BinaryParams,
+    /// The stellar stage's rules the engine's kicks read (`stellar::rules`).
+    rules: StellarRules,
 }
 
 /// Why [`BinaryInput::new`] refused its inputs.
@@ -292,7 +296,7 @@ impl Error for BuildBinaryInputError {}
 impl BinaryInput {
     /// A pair of initial masses `m1` and `m2` of composition `comp` on `orbit` at zero age, with
     /// the stars' draws `draws` and the system's age at the epoch `age_at_epoch`, under the
-    /// generator's [`BinaryParams`].
+    /// generator's [`BinaryParams`] and the generator version's stellar rules.
     ///
     /// # Errors
     ///
@@ -323,6 +327,7 @@ impl BinaryInput {
             draws,
             age_at_epoch,
             params: BinaryParams::default(),
+            rules: StellarRules::of_version(GENERATOR_VERSION),
         })
     }
 
@@ -330,6 +335,13 @@ impl BinaryInput {
     #[must_use]
     pub const fn with_params(self, params: BinaryParams) -> Self {
         Self { params, ..self }
+    }
+
+    /// The same input under the stellar stage's `rules`: those of the galaxy whose system the pair
+    /// is, which `SystemStars` sets (`stellar::rules`).
+    #[must_use]
+    pub(crate) const fn with_rules(self, rules: StellarRules) -> Self {
+        Self { rules, ..self }
     }
 
     /// The initial masses, M☉, primary first.
@@ -367,6 +379,12 @@ impl BinaryInput {
     pub const fn params(&self) -> &BinaryParams {
         &self.params
     }
+
+    /// The stellar stage's rules the engine runs under.
+    #[must_use]
+    pub(crate) const fn rules(&self) -> StellarRules {
+        self.rules
+    }
 }
 
 /// What every segment of one timeline shares: the pair's composition, coefficients, draws and
@@ -378,6 +396,8 @@ pub(crate) struct Context {
     draws: [StarDraws; 2],
     params: BinaryParams,
     age_at_epoch: Years,
+    /// The stellar stage's rules the engine's kicks read.
+    rules: StellarRules,
     /// The lightest helium main-sequence star that burns helium, M☉.
     lightest_helium_star: f64,
     /// x of HPT equation 47, for BSE equation 57.
@@ -385,19 +405,23 @@ pub(crate) struct Context {
 }
 
 impl Context {
-    /// The context of `input`.
+    /// The context of `input`, under its stellar rules.
     #[must_use]
     pub(crate) fn of(input: &BinaryInput) -> Self {
-        Self::from_parts(
-            input.composition,
-            input.draws.clone(),
-            input.params,
-            input.age_at_epoch,
-        )
+        Self {
+            rules: input.rules,
+            ..Self::from_parts(
+                input.composition,
+                input.draws.clone(),
+                input.params,
+                input.age_at_epoch,
+            )
+        }
     }
 
     /// The context of a pair of `composition`, `draws` and `params` whose system is
-    /// `age_at_epoch` old at the epoch, without an input: a timeline built from marks (P11.T5).
+    /// `age_at_epoch` old at the epoch, without an input: a timeline built from marks (P11.T5),
+    /// which runs no engine, under the generator version's stellar rules.
     #[must_use]
     pub(crate) fn from_parts(
         composition: Composition,
@@ -414,6 +438,7 @@ impl Context {
             draws,
             params,
             age_at_epoch,
+            rules: StellarRules::of_version(GENERATOR_VERSION),
         }
     }
 
@@ -440,6 +465,14 @@ impl Context {
     #[must_use]
     pub(crate) const fn age_at_epoch(&self) -> Years {
         self.age_at_epoch
+    }
+
+    /// The stellar stage's rules the engine's kicks read ([`StandardKickLaw::under`]).
+    ///
+    /// [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
+    #[must_use]
+    pub(crate) const fn rules(&self) -> StellarRules {
+        self.rules
     }
 
     #[must_use]

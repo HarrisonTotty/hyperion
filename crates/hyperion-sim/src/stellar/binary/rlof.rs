@@ -1125,7 +1125,7 @@ impl Engine {
     /// Müller remnant), with the low-mode kick of accretion-induced collapse (P06.T19).
     pub(super) fn accretion_induced_collapse(&mut self, i: usize, m: f64) {
         let remnant = electron_capture_remnant();
-        let law = StandardKickLaw::default();
+        let law = StandardKickLaw::under(self.ctx.rules());
         let progenitor = ProgenitorAtDeath::new(
             SolarMasses::new(m.min(remnant.mass().value().max(m))),
             SolarMasses::new(m),

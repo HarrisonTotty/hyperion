@@ -711,6 +711,7 @@ fn draw_star(
                 (seed, system, attempt),
                 age,
                 (escape, systemic),
+                galaxy.rules().stellar,
             )
         {
             return Some((mass, attempt, age));
