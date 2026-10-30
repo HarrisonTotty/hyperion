@@ -23632,3 +23632,8 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     6 (6.97), the rows short of its −0.3196. Left for main with the aureole's lever.
   - Mars stays `ATMOSPHERE: APPROXIMATE`. Its lever is main's (lean, 2026-10-30: (a) with the
     probe's sound form, its aerial and limb images measured first).
+- **R08.T20's pinned maths made fast, for the next task** (2026-10-30).
+  - `lib/pinnedMath.ts`'s most-called functions take a fast path, then `<name>Port`, the whole
+    port; an edit to either keeps both bit for bit `libm`'s (`pinnedMath.test.ts`).
+  - `vitest.config.mts` loads `pinnedMath.ts` natively (`server.deps.external`): the module must
+    import nothing.

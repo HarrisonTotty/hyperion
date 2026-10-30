@@ -110,6 +110,17 @@ export default defineConfig({
     // that jsdom applies no layout rules; one imported as text (`?raw`) keeps its text, so that a
     // test can read a rule the guide requires, such as a plate's `--surface-0` (R07.T16.a).
     css: { include: [/\.css\?raw$/u] },
+    // `lib/pinnedMath.ts`, the client's transcendentals (R08.T20), loads as Node's own module, its
+    // types stripped, not through Vite's module runner. The runner reads an import through a getter
+    // on an object V8 keeps as a dictionary, at every use: about 30 ns a call, where the bundled
+    // app calls the function itself. The optics' and the bakes' loops call these millions of
+    // times: through the runner, the generated Earth's optics share took 1,490 ms against 1,200 ms
+    // natively, the same code (pod, 8 vCPU, 2026-10-30), and a bench's export tracker added
+    // 550 ms more. A native load needs the module to import nothing, as it does.
+    server: { deps: { external: [/\/lib\/pinnedMath\.ts$/u] } },
+    // That load finds no `"type"` in the package's manifest and reparses the file as a module, which
+    // Node would warn of once a worker.
+    execArgv: ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON"],
     projects: [
       {
         extends: true,
