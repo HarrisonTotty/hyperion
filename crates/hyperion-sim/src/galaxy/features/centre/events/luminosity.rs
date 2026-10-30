@@ -11,8 +11,9 @@
 //! - **Flares**: P09.T30.a's, each [`CentreFlare::luminosity_watts_at`](super::CentreFlare::luminosity_watts_at)
 //!   above the quiescence.
 //! - **Tails** ([`DisruptionTail`]): the debris of a disrupted victim falls back from its
-//!   fallback time `t_fb` on at `Ṁ = (M★ ÷ 3 t_fb) (Δt ÷ t_fb)^(−5⁄3)` (Stone, Sari and Loeb 2013,
-//!   MNRAS 435, 1809, equations 49–50; Stone and Metzger 2016, MNRAS 455, 859, §3, equation 23),
+//!   fallback time `t_fb` (Stone and Metzger 2016, MNRAS 455, 859, §3, equation 23) on at
+//!   `Ṁ = (M★ ÷ 3 t_fb) (Δt ÷ t_fb)^(−5⁄3)` (Stone, Sari and Loeb 2013, MNRAS 435, 1809,
+//!   equations 49–50),
 //!   and radiates `ε Ṁ c²`, at most the black hole's Eddington luminosity, of which
 //!   [`XRAY_SHARE`], one part in 15.8, is in the band. The efficiency ε is η = 0.1 at every rate
 //!   until version 25; from it, it falls with the fallback rate (below).
@@ -171,8 +172,9 @@ pub(crate) fn radiative_efficiency(eddington_ratio: f64) -> f64 {
 }
 
 /// A tail's bolometric luminosity over its unabsorbed 2–10 keV luminosity: 15.8, the median
-/// bolometric correction of low-luminosity active nuclei (Ho 2009, ApJ 699, 626, §3: "sources with
-/// `L_bol/L_Edd` ≲ 0.1 have a median `C_X` = 15.8"). Part of the generator version.
+/// bolometric correction of low-luminosity active nuclei below a tenth of Eddington (Ho 2009, ApJ
+/// 699, 626, §2.1: "sources with Lbol/LEdd ≲ 0.1 have a median CX = 15.8, with an interquartile
+/// range of 9.6"). Part of the generator version.
 ///
 /// It is extrapolated below about 10⁻⁶ of Eddington's luminosity, where it errs bright: Sgr A*
 /// itself, near 10⁻⁹, has `C_X` of about 190–380 (EHT 2022's bolometric luminosity over Baganoff
@@ -195,7 +197,8 @@ pub const TAIL_LOOK_BACK_BINS: u32 = 257;
 /// The Eddington luminosity of a black hole of `mass`, W: `4π G M m_p c ÷ σ_T` for ionised
 /// hydrogen, 1.257 × 10³¹ W (1.257 × 10³⁸ erg/s) per solar mass with the IAU 2015 nominal `GM☉`
 /// and CODATA 2018's `m_p` and `σ_T`; 5.41 × 10³⁷ W at the Milky Way's 4.30 × 10⁶ M☉. Stone and
-/// Metzger (2016, equation 24) take a solar-composition opacity, 0.34 cm² g⁻¹, some 17% higher.
+/// Metzger (2016, after equation 24) take `L_Edd ≃ 1.5 × 10⁴⁶ M₈ erg/s`, some 19% higher, as for an
+/// opacity of about 0.33 cm² g⁻¹.
 #[must_use]
 pub fn eddington_luminosity_watts(mass: SolarMasses) -> f64 {
     EDDINGTON_WATTS_PER_SOLAR_MASS * mass.value()
