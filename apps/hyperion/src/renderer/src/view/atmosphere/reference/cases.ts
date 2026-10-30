@@ -62,9 +62,14 @@ import {
   referenceSunIlluminanceLx,
   WGS84_LEVEL_SPHEROID,
 } from "../earth";
-import { tableRadiusM } from "../hillaire";
 import { type AtmosphereMedium, localScaleHeightM, type MediumTerm } from "../medium";
-import { bodyGravity, type BodyGravity, gravityRatio, type LevelSpheroid } from "../oblate";
+import {
+  bodyGravity,
+  type BodyGravity,
+  gravityRatio,
+  type LevelSpheroid,
+  tableRadiusM,
+} from "../oblate";
 import { type KeptBakeLights, keptBakeLightsOf } from "../opticsMessages";
 import { BOLTZMANN_J_PER_K, type GasFractions, molecularTerm } from "../rayleigh";
 import type { SpectralSource } from "../thick/spectralColumn";

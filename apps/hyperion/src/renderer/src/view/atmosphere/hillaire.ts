@@ -81,7 +81,14 @@ import {
 } from "./marchArea";
 import { DRAWN_SURFACE_BAND_M, type MarchDepthSteps } from "./marchSteps";
 import { type AtmosphereMedium, localScaleHeightM } from "./medium";
-import { type BodyGravity, bodyGravity, gravityRatio, principalRadiiM } from "./oblate";
+import {
+  type BodyGravity,
+  bodyGravity,
+  geodeticOf,
+  gravityRatio,
+  principalRadiiM,
+  tableRadiusM,
+} from "./oblate";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
 import aerialReadWgsl from "./shaders/aerialRead.wgsl?raw";
@@ -123,7 +130,7 @@ import {
   THICK_SUN_COSINES,
   THICK_TRAVEL_COSINES,
 } from "./thick/read";
-import { acos, atan2, cbrt, cos, sin, tan } from "../../lib/pinnedMath";
+import { atan2, sin, tan } from "../../lib/pinnedMath";
 
 /** A 3D table's size, texels. */
 export interface VolumeSize {
@@ -495,96 +502,6 @@ export interface AtmosphereInputs {
   readonly gravityRatio: number;
 }
 
-/** A point's geodetic latitude and height on a spheroid, with its Gaussian radius. */
-export interface Geodetic {
-  readonly latitudeRad: number;
-  readonly longitudeRad: number;
-  readonly heightM: number;
-  readonly normal: Vec3;
-  /** √(MN), m: the Gaussian radius of curvature at the latitude. */
-  readonly gaussianRadiusM: number;
-}
-
-/**
- * Vermeille 2002's k of a body-fixed point on the spheroid of first eccentricity squared `e2` and
- * equatorial radius `a`, with k ÷ (k + e²), which takes the point's distance from the axis ρ to D
- * ({@link geodeticOf}), in Karney 2011's forms: `hyperion-fit`'s `LevelSpheroid::vermeille`
- * (`atmosphere/spheroid.rs`, R08.T12.d), operation for operation.
- */
-function vermeille(p: Vec3, a: number, e2: number): readonly [number, number] {
-  const e4 = e2 * e2;
-  const inverseA2 = 1 / (a * a);
-  const pp = (p.x * p.x + p.y * p.y) * inverseA2;
-  const q = (1 - e2) * p.z * p.z * inverseA2;
-  const r = (pp + q - e4) / 6;
-  const e4pq = e4 * pp * q;
-  const evolute = 8 * r * r * r + e4pq;
-  let u: number;
-  if (evolute > 0) {
-    const sum = Math.sqrt(e4pq) + Math.sqrt(evolute);
-    const bigR = cbrt(sum * sum);
-    u = r + 0.5 * bigR + (2 * r * r) / bigR;
-  } else if (r < 0) {
-    const magnitude = -r;
-    const cosTheta = Math.min(Math.max(e4pq / (4 * magnitude * magnitude * magnitude) - 1, -1), 1);
-    u = magnitude * (2 * cos(acos(cosTheta) / 3) - 1);
-  } else {
-    // On the axis at the evolute's cusp, z = ±(a² − c²) ÷ c, where u = 0 is the root.
-    u = 0;
-  }
-  const v = Math.sqrt(u * u + e4 * q);
-  const w = (e2 * (u + v - q)) / (2 * v);
-  const uv = u + v;
-  const root = Math.sqrt(uv + w * w);
-  const k = w > 0 ? uv / (root + w) : root - w;
-  return [k, k / (k + e2)];
-}
-
-/**
- * A body-fixed point's geodetic coordinates on the spheroid (a, a, c), by Vermeille 2002's closed
- * form (plan R08, R08.T6.e), for any flattening.
- *
- * @remarks
- * Vermeille 2002 (J. Geodesy 76, 451–454, doi:10.1007/s00190-002-0273-6) in the forms Karney 2011
- * restates it in (arXiv:1102.1215, App. B), as R08.T12.d's `hyperion-fit` takes it
- * (`atmosphere/spheroid.rs`'s `LevelSpheroid::geodetic`): p = ρ² ÷ a², q = (1 − e²) z² ÷ a²,
- * r = (p + q − e⁴) ÷ 6; u, the largest root of u²(u − 3r) = e⁴pq ÷ 2, outside the evolute
- * (8r³ + e⁴pq > 0) as r + ½R + 2r² ÷ R with R = ∛((√(e⁴pq) + √(8r³ + e⁴pq))²), which is
- * Karney's u = r + T + r² ÷ T with no division by r and none of Vermeille's own form's cancellation
- * where r < 0, and inside it (only above the poles of a body with c ÷ a < 1 ÷ √2) the cubic's
- * largest root by Viète's trigonometric form, |r|(2 cos(θ ÷ 3) − 1), where Karney takes the smallest,
- * r(1 + 2 cos(ψ ÷ 3)): any real root gives the same k; v = √(u² + e⁴q), w = e²(u + v − q) ÷ 2v, k = √(u + v + w²) − w, taken as
- * (u + v) ÷ (√(u + v + w²) + w) where w > 0, D = kρ ÷ (k + e²), and then h = (k + e² − 1) √(D² + z²)
- * ÷ k and φ = atan2(z, D). It replaces R05's fixed-point iteration on φ and h, which did not
- * converge above a flattening of about 0.04 (4.7 mm at f = 0.05, metres at 0.1), where Saturn's
- * is 0.098; on WGS 84 the two agree to under 10⁻⁸ m. Valid at every point on or outside the datum
- * and just below it, not inside the body's equatorial disc ρ ≤ ae², which no camera reaches.
- * N = a ÷ √(1 − e² sin²φ) (NIMA TR8350.2, eq. 4-15) and M = a(1 − e²) ÷ (1 − e² sin²φ)^(3/2)
- * (TR8350.2, §7) give the Gaussian radius.
- */
-export function geodeticOf(p: Vec3, figure: SpheroidFigure): Geodetic {
-  const a = figure.equatorialRadiusM;
-  const c = figure.polarRadiusM;
-  const e2 = ((a - c) * (a + c)) / (a * a);
-  const rho = Math.hypot(p.x, p.y);
-  const longitudeRad = atan2(p.y, p.x);
-  const [k, along] = vermeille(p, a, e2);
-  const d = along * rho;
-  const length = Math.hypot(d, p.z);
-  const latitudeRad = atan2(p.z, d);
-  const sinLatitude = p.z / length;
-  const w2 = 1 - e2 * sinLatitude * sinLatitude;
-  const n = a / Math.sqrt(w2);
-  const m = (a * (1 - e2)) / (w2 * Math.sqrt(w2));
-  return {
-    latitudeRad,
-    longitudeRad,
-    heightM: ((k + e2 - 1) / k) * length,
-    normal: { x: (p.x * along) / length, y: (p.y * along) / length, z: sinLatitude },
-    gaussianRadiusM: Math.sqrt(m * n),
-  };
-}
-
 /**
  * DN 16's lookup inputs at the camera: r = √(MN) + h, h the geodetic height, the spheroid normal μ
  * is measured against, and, since R08.T6.f, the geodetic latitude and s = g(φ) ÷ g_ref there.
@@ -629,14 +546,6 @@ export function bodyOfFigure(figure: SpheroidFigure): AtmosphereBody | null {
 }
 
 /**
- * The figure's mean radius R₁ = (2a + c) ÷ 3, m: the per-planet tables' ground; the "mean
- * radius of semi-axes" of NIMA TR8350.2, Table 3.3 (6,371,008.7714 m on WGS 84).
- */
-export function tableRadiusM(figure: SpheroidFigure): number {
-  return (2 * figure.equatorialRadiusM + figure.polarRadiusM) / 3;
-}
-
-/**
  * The camera's height on the sky view's sphere, m: `view.wgsl`'s `skyViewHeight`, which keeps it
  * 1 m clear of the ground and of the top, where the table's horizon split degenerates.
  *
@@ -678,6 +587,13 @@ export interface ViewExact {
  * table for the lit passes without a cycle of imports.
  */
 export { FIT_SCALE_FLOOR_M, localScaleHeightM } from "./medium";
+
+/**
+ * A body-fixed point's geodetic coordinates and the per-planet tables' ground (plan R08,
+ * R08.T12.b.2): `oblate.ts`'s, so that the reference cases' import graph, which the thick cases'
+ * worker takes, stays free of the engine.
+ */
+export { type Geodetic, geodeticOf, tableRadiusM } from "./oblate";
 
 /**
  * The view's {@link ViewExact} for a camera at `positionM` with its {@link atmosphereInputs}. Each

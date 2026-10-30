@@ -58,8 +58,8 @@ import {
   meanMolarMassGPerMol,
 } from "../column";
 import { R06_SOLAR_BAKE_SPECTRUM } from "../earth";
-import { tableRadiusM } from "../hillaire";
 import { type AtmosphereMedium, columnLengthM, type MediumTerm } from "../medium";
+import { tableRadiusM } from "../oblate";
 import type { GasFractions } from "../rayleigh";
 import { molecularTerm } from "../rayleigh";
 import { absorberSourceOf, type SpectralSource } from "../thick/spectralColumn";

@@ -19,6 +19,7 @@
 
 import type { HostDiscDto } from "@hyperion/protocol";
 
+import { AU_M } from "../../lib/system/constants";
 import { starIlluminance } from "../lighting/illuminance";
 import {
   frozenHostDisc,
@@ -28,8 +29,8 @@ import {
   sunLikeHostDisc,
 } from "../lighting/hostDisc";
 import type { Rgb } from "../photometry/toneCurve";
-import { AU_M } from "../scenes/kept";
 import {
+  type AbsorberCurveSlots,
   type AbsorberLayer,
   type AbsorberProfileNode,
   type AbsorberSpec,
@@ -54,7 +55,6 @@ import {
 import { type LevelSpheroid, referenceGravity } from "./oblate";
 import { type GasFractions, molecularTerm } from "./rayleigh";
 import { bakeSpectrumOf } from "./spectralColour";
-import type { AbsorberCurveSlots } from "./tables";
 import type { SpectralSource } from "./thick/spectralColumn";
 import { pow } from "../../lib/pinnedMath";
 

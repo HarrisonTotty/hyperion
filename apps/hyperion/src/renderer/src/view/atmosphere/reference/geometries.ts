@@ -18,7 +18,7 @@
  */
 
 import type { Vec3 } from "../../../geometry/vec3";
-import { geodeticOf, type SpheroidFigure } from "../hillaire";
+import { geodeticOf, type SpheroidFigure } from "../oblate";
 import { acos, atan2, cos, sin } from "../../../lib/pinnedMath";
 
 /** A direction in an observer's local frame, degrees. */

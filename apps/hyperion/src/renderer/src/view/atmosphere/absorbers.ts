@@ -2789,6 +2789,20 @@ export interface AbsorberCurve {
   readonly opticalDepth: readonly [Float64Array, Float64Array, Float64Array];
 }
 
+/**
+ * Each light's curves of growth for a medium's absorbers (plan R08, Design note 5): light slot
+ * k's curves, one an absorber slot, in the order of the medium's absorber terms
+ * (`tables.ts`'s `absorberSlots`), each `absorbers.ts`'s `absorberCurve(term.absorber.spec, spectrum)`
+ * for that light's spectrum.
+ *
+ * @remarks
+ * Slot 0 is the body's brightest star, whose curves a planetshine source takes (Design note 7).
+ * Since R08.T7 each source of the per-frame kernels takes its own slot's, and the per-planet
+ * multiple-scattering table has one layer a slot, each built with that slot's curves (plan R08's
+ * Risks, "Which star's absorber curve the shared tables are built with").
+ */
+export type AbsorberCurveSlots = ReadonlyArray<ReadonlyArray<AbsorberCurve>>;
+
 /** One absorber's curves of growth in each bake bin under one sun (Design note 5). */
 export interface AbsorberBinCurves {
   /** The absorber's kind, as {@link AbsorberCurve.kind}. */

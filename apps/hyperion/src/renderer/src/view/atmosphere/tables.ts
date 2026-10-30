@@ -48,7 +48,7 @@ import type { KernelPair } from "../engine/kernels";
 import { bytesPerTexel } from "../engine/memory";
 import type { BufferHandle, ComputeHandle, RenderEngine, TextureHandle } from "../engine/types";
 import { MAX_BODY_LIGHTS } from "../lighting/hostLights";
-import type { AbsorberAmount, AbsorberCurve } from "./absorbers";
+import type { AbsorberAmount, AbsorberCurve, AbsorberCurveSlots } from "./absorbers";
 import {
   FORWARD_LOBE_X_NODES,
   FORWARD_ORDERS_ENTRIES,
@@ -410,18 +410,10 @@ const CURVE_NODES_PER_DECADE = 40;
 export const ABSORBER_CURVE_DEPTH_MAX = -log(1e-6);
 
 /**
- * Each light's curves of growth for a medium's absorbers (plan R08, Design note 5): light slot
- * k's curves, one an absorber slot, in the order of the medium's absorber terms
- * ({@link absorberSlots}), each `absorbers.ts`'s `absorberCurve(term.absorber.spec, spectrum)`
- * for that light's spectrum.
- *
- * @remarks
- * Slot 0 is the body's brightest star, whose curves a planetshine source takes (Design note 7).
- * Since R08.T7 each source of the per-frame kernels takes its own slot's, and the per-planet
- * multiple-scattering table has one layer a slot, each built with that slot's curves (plan R08's
- * Risks, "Which star's absorber curve the shared tables are built with").
+ * Each light's curves of growth for a medium's absorbers: `absorbers.ts`'s, so that the media's
+ * modules take it free of the engine (plan R08, R08.T12.b.2).
  */
-export type AbsorberCurveSlots = ReadonlyArray<ReadonlyArray<AbsorberCurve>>;
+export type { AbsorberCurveSlots } from "./absorbers";
 
 /** No light's curves: what a medium with no absorber term takes. */
 export const NO_ABSORBER_CURVES: AbsorberCurveSlots = [];

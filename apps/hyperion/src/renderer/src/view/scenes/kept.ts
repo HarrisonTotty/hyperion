@@ -5,6 +5,7 @@ import {
   type UniverseTime,
 } from "@hyperion/protocol";
 
+import { AU_M } from "../../lib/system/constants";
 import type { CameraPose } from "../camera/pose";
 import type { ViewScene } from "../scene/model";
 
@@ -34,8 +35,8 @@ export function keptBody(index: number): BodyIdHex {
 /** The kept system's barycentre: Design note 19's Sun-like point, [0, 26,000, 0] ly. */
 export const KEPT_BARYCENTRE = galacticPositionFromLy([0, 26_000, 0]);
 
-/** One astronomical unit, m (IAU 2012 Resolution B2). */
-export const AU_M = 149_597_870_700;
+/** One astronomical unit, m: `lib/system/constants.ts`'s, which a worker can take. */
+export { AU_M } from "../../lib/system/constants";
 
 /** The kept system's tidal radius, m: the Sun's, some 2.7 × 10⁵ au (R03's design note 7). */
 export const KEPT_TIDAL_RADIUS_M = 2.7e5 * AU_M;

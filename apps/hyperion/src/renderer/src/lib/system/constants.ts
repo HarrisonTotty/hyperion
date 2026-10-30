@@ -17,3 +17,9 @@ export const GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 = 6.674_3e-11;
  * M m_u.
  */
 export const ATOMIC_MASS_CONSTANT_KG = 1.660_539_068_92e-27;
+
+/**
+ * One astronomical unit, m: the simulation's `hyperion_base::units::consts::METRES_PER_AU`,
+ * 149,597,870,700 exactly (IAU 2012 Resolution B2).
+ */
+export const AU_M = 149_597_870_700;
