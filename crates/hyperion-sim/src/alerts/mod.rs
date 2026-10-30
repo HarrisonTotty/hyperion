@@ -31,7 +31,7 @@ use std::num::NonZeroU32;
 use crate::coords::GalacticPosition;
 use crate::events::TimeWindow;
 use crate::galaxy::Galaxy;
-use crate::galaxy::catalogue_classes::{ALL_CLASSES, ClassId};
+use crate::galaxy::catalogue_classes::{ALL_CLASSES, CatalogueCellKey, ClassId};
 use crate::galaxy::gas::ccm::Band;
 use crate::galaxy::gas::extinction::{NoiseMode, SIGHTLINE_QUALITY, Sightline, sightline};
 use crate::galaxy::gas::modifiers::{GasModifier, GasModifierSource};
@@ -42,10 +42,12 @@ use crate::time::{ClockWindow, UniverseTime};
 use crate::units::{LightYears, WattsPerSquareMetre};
 
 pub mod light;
+pub mod oneshot;
 pub mod reach;
 pub mod registry;
 
 pub use light::{band_share, supernova_luminosity, supernova_peak};
+pub use oneshot::{NoOneShotCells, OneShotCells, OneShotClass, OneShotEvent, one_shot_detections};
 pub use reach::{
     ROOT_CUBE_DIAGONAL, class_reach, flux, inverse_square_flux, kind_reach, reach, transmission,
     xray_optical_depth,
@@ -545,7 +547,7 @@ pub enum DetectionPhase {
 /// One event seen by the sensor (plan 12's Provides): which event, of which host, when it left and
 /// arrived, how bright it is and where it appears.
 ///
-/// Built by the alert walks (P12.T5.b–P12.T5.e).
+/// Built by the alert walks (P12.T5.b–P12.T5.e): the one-shot classes' by [`one_shot_detections`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Detection {
     event: EventId,
@@ -716,12 +718,14 @@ impl AlertResult {
 /// whose holes and clouds lie along a line of sight, plan 09's
 /// [`FeatureGas`](crate::galaxy::features::gas_overlay::FeatureGas) in production (at an
 /// evaluation time the caller picks, its features at their epoch positions) or
-/// [`NoModifiers`](crate::galaxy::gas::modifiers::NoModifiers). The walks add theirs: plan 09's
-/// class lookup and `FeatureCatalogue` with their cell caches (P12.T5.b–P12.T5.d) and plan 10's
-/// `GlobalList` (P12.T5.d).
+/// [`NoModifiers`](crate::galaxy::gas::modifiers::NoModifiers). T5.b's is the one-shot classes'
+/// cells ([`OneShotCells`], [`with_one_shot_cells`](Self::with_one_shot_cells)); without one, each
+/// cell is generated for its visit. The later walks add theirs: plan 09's `FeatureCatalogue` with
+/// its cell cache (P12.T5.c–P12.T5.d) and plan 10's `GlobalList` (P12.T5.d).
 pub struct AlertContext<'a> {
     noise: &'a mut NoiseCache,
     gas: &'a dyn GasModifierSource,
+    one_shot_cells: Option<&'a mut dyn OneShotCells>,
     /// The modifiers of the last line of sight, kept for its allocation.
     modifiers: Vec<GasModifier>,
 }
@@ -739,7 +743,31 @@ impl<'a> AlertContext<'a> {
         Self {
             noise,
             gas,
+            one_shot_cells: None,
             modifiers: Vec::new(),
+        }
+    }
+
+    /// The same context, lending the one-shot walk its classes' cells from `cells` (P12.T5.b).
+    #[must_use]
+    pub fn with_one_shot_cells(self, cells: &'a mut dyn OneShotCells) -> Self {
+        Self {
+            one_shot_cells: Some(cells),
+            ..self
+        }
+    }
+
+    /// Calls `visit` with the one-shot events of the class cell `key`, from the context's cells or
+    /// from `generate`.
+    pub(crate) fn one_shot_events(
+        &mut self,
+        key: CatalogueCellKey,
+        generate: &mut dyn FnMut() -> Vec<OneShotEvent>,
+        visit: &mut dyn FnMut(&[OneShotEvent]),
+    ) {
+        match self.one_shot_cells.as_deref_mut() {
+            Some(cells) => cells.with_events(key, generate, visit),
+            None => NoOneShotCells.with_events(key, generate, visit),
         }
     }
 

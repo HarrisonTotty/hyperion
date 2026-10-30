@@ -2652,3 +2652,33 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _For T5.c–T5.e._ A later row takes `band_share` at its own temperature (star flares, giant
     eruptions, FU Orionis outbursts) and stores its shares the same way. The magnetars' 2–10 keV
     shares are constants of the event's whole output, not `band_share`.
+  - _The walk (second commit)._ `alerts/oneshot.rs`, re-exported:
+    `one_shot_detections(galaxy, context, query, process, out)`, generic over
+    `OneShotClass: ClassProcess` (`kind`, `event`), implemented for `CoreCollapseProcess`;
+    `OneShotEvent::of_supernova(&SupernovaEntry, &CatalogueMotion)`; `OneShotCells` and
+    `NoOneShotCells`, lent by `AlertContext::with_one_shot_cells`. The plan's
+    `CatalogueClassSource::cells_in_sphere` is `catalogue_classes::cells_in_sphere`. Detections
+    are struct literals of the child module (no constructor); `Retardation::of_emission`
+    (crate-private) gives the onset's light exactly.
+  - _Not built: the Type Ia in production._ `TypeIaProcess` (P09.T34.a) is not in the tree; that
+    task adds `impl OneShotClass for TypeIaProcess` (member 0's `SupernovaEntry` and motion). The
+    tests' Type Ia class is a toy on its documented interface. The two merger classes wait on
+    P11.T8–T9.
+  - _Leans (2026-10-30)._ One detection per event, in the sensor's band where its flux stands
+    highest over the detection limit (the first in `AlertBand::ALL` on a tie). An onset reports its
+    peak flux there (`supernova_peak`), an event in progress its flux at t₁. "In progress" is
+    judged at t₁ alone, Design note 6's words, so an event still rising below the limit at t₁ is
+    not reported. The sphere is the kind's reach, not widened by 1%: `cells_in_sphere` pads it by
+    4,096 ly, and the walk reads each site at T. The retardation is the onset's.
+  - _Tests._ `tests/alerts_oneshot.rs` with `tests/common/observe.rs`
+    (`brute_force_detections(galaxy, context, cells, process, query)`, `Seen`, `KeepCells`,
+    `observer_at`), included by `#[path]` so that no other test binary compiles it. The toy class
+    runs for three observers over a year and a century; slow, the core collapses of seed 9 about two
+    recent deaths. Acceptance: `cargo test -p hyperion-sim alerts`, and the slow one with
+    `--test alerts_oneshot -- --ignored`.
+  - _For T5.c–T5.e._ T5.d's `alerts_in` calls `one_shot_detections` per one-shot class after its
+    census, and T8's server keeps the one-shot cells. T5.c's magnetars walk the same
+    `CORE_COLLAPSE` cells with a cache of their own.
+  - _A gate fix outside the lane._ The server's extinction request matched `TraceMotionError`
+    without P09.T33.a's `CatalogueMotionNotTraced` and did not compile on the tip with P09.T33.a;
+    a catalogue system now ends no line of sight, as a centre member ends none.
