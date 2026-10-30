@@ -166,7 +166,7 @@ function knownCatalogueClassWords(value: CatalogueClassWire): string {
       words = "CORE-COLLAPSE SUPERNOVA";
       break;
     case "type_ia":
-      words = "TYPE IA SUPERNOVA";
+      words = "TYPE Ia SUPERNOVA";
       break;
     case "stellar_merger":
       words = "STELLAR MERGER";
@@ -298,4 +298,14 @@ export function shellPhaseWords(phase: ShellPhaseWire): string {
       break;
   }
   return words;
+}
+
+/**
+ * What a display does not model, composed as the guide composes it: the names, the last joined by
+ * `AND`, a colon, and the state, `STREAM AND DWARF CORE: NOT YET MODELLED`, `SNR: NOT YET MODELLED`.
+ */
+export function notYetModelledWords(names: ReadonlyArray<string>): string {
+  const last = names.at(-1) ?? "";
+  const named = names.length > 1 ? `${names.slice(0, -1).join(", ")} AND ${last}` : last;
+  return `${named}: NOT YET MODELLED`;
 }

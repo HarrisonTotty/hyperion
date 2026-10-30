@@ -73,8 +73,22 @@ export interface LocalChartState {
   readonly featureState: RequestState<"features_in_range">;
   /** Why the features' answer cannot be charted, in words, or `null` when nothing is wrong. */
   readonly featureFault: string | null;
-  /** The selected feature, or `null` while none is, a system among them. */
+  /**
+   * The selected feature, or `null` while none is, a system among them: from the features of the
+   * chart on show, or while those are awaited, from the answer kept for the chart before.
+   */
   readonly selectedFeature: ChartFeature | null;
+  /**
+   * Whether the selected feature is read from the answer kept for the chart before, while the
+   * features of the chart on show are awaited: a snapshot, read as stale.
+   */
+  readonly selectedFeatureStale: boolean;
+  /**
+   * What the operator selected, a system or a feature, whether or not the chart on show holds it
+   * yet: what the panel's list and its feature's detail follow, so that neither moves while the
+   * chart's two answers arrive apart.
+   */
+  readonly selection: ChartSelection | null;
   /**
    * The extinction from the centre of the chart on show to the selected system, at the chart's
    * time (plan 07, P07.T11.c): `idle` with nothing selected.
@@ -249,11 +263,24 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
   const selected =
     chosen?.kind === "system" ? (systems.find((system) => system.id === chosen.id) ?? null) : null;
   const selectedId = selected?.id ?? null;
+  // While the features of a new chart are awaited, the selected feature is read from the answer
+  // kept for the chart before, a snapshot, so that the selection does not drop out as the chart
+  // refreshes; an answer for the chart on show that lacks it drops it, as a system's does.
+  const kept = featureQuery.shown;
+  const keptFeatures =
+    shown !== null && answeredFeatures === null && kept !== null && featureDataFault(kept) === null
+      ? kept
+      : null;
   const selectedFeature =
     chosen?.kind === "feature"
-      ? (features?.features.find((feature) => feature.id === chosen.id) ?? null)
+      ? ((features ?? keptFeatures)?.features.find((feature) => feature.id === chosen.id) ?? null)
       : null;
-  const selectedMarkId = selectedFeature === null ? selectedId : featureMarkId(selectedFeature.id);
+  const selectedFeatureStale = selectedFeature !== null && features === null;
+  // A feature read from the answer before is not drawn, so it brackets nothing.
+  const selectedMarkId =
+    selectedFeature === null || selectedFeatureStale
+      ? selectedId
+      : featureMarkId(selectedFeature.id);
   const centre = shown?.centreLy ?? null;
   const extinction = useExtinction({
     universe: open?.id ?? null,
@@ -301,6 +328,8 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     featureState: featureQuery.state,
     featureFault,
     selectedFeature,
+    selectedFeatureStale,
+    selection: chosen,
     extinction,
     retryExtinction: () => {
       setExtinctionGeneration((count) => count + 1);

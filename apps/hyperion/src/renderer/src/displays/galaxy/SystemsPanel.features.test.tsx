@@ -54,6 +54,14 @@ function Chart() {
       >
         PICK ON CHART
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          chart.setTime(100);
+        }}
+      >
+        CHART AT +100 yr
+      </button>
       <SystemsPanel chart={chart} onOpenSystem={() => undefined} />
     </>
   );
@@ -163,7 +171,7 @@ describe("SystemsPanel's features (plan 09, P09.T41.c)", () => {
         .map((row) => row.querySelector(".system-list__designation")?.textContent),
     ).toEqual(["GPF F207", "GPG F336", "GPG F530"]);
     expect(
-      within(panel()).getByText(statusLine("STREAM, DWARF CORE NOT YET MODELLED")),
+      within(panel()).getByText(statusLine("STREAM AND DWARF CORE: NOT YET MODELLED")),
     ).toBeVisible();
   });
 
@@ -261,5 +269,120 @@ describe("SystemsPanel's features (plan 09, P09.T41.c)", () => {
       /^GPF F207,/u,
     );
     expect(featureReading("KIND")).toBe("OPEN CLUSTER");
+  });
+
+  it("draws and lists no features from an answer for another chart than the one on show", async () => {
+    const { user, socket } = await renderChart();
+    await server(() => {
+      socket.serverAnswers("features_in_range", (body) =>
+        aFeaturesInRange({ centreLy: CENTRE, radiusLy: body.radius_ly * 2 }),
+      );
+    });
+
+    await user.click(within(panel()).getByRole("button", { name: "FEATURES" }));
+
+    expect(within(panel()).getByText(statusLine("FEATURES PENDING"))).toBeInTheDocument();
+    expect(within(panel()).queryByRole("listbox", { name: "Features by distance" })).toBeNull();
+  });
+
+  it("keeps the selected feature, stale, while a new chart's features are awaited", async () => {
+    const { user, socket } = await renderChart();
+    await answerFeatures(socket);
+    await user.click(screen.getByRole("button", { name: "PICK ON CHART" }));
+    await server(() => {
+      socket.serverAnswers("feature_detail", () => ({
+        ...aClusterDetail(),
+        time: { seconds: 0, nanos: 0 },
+      }));
+    });
+    expect(featureReading("TIDAL RADIUS")).toBe("26.9 ly");
+
+    await user.click(screen.getByRole("button", { name: "CHART AT +100 yr" }));
+    await server(() => {
+      socket.serverAnswers("systems_in_range", (body) =>
+        aSystemsInRange({
+          centreLy: CENTRE,
+          radiusLy: body.radius_ly,
+          timeYr: 100,
+          systems: [{ relLy: [1, 0, 0], layer: "c" }],
+        }),
+      );
+    });
+
+    // The systems are the new chart's and its features are awaited: the feature stays selected,
+    // read from the answer before as a snapshot, its structure too, for a time the chart has left.
+    expect(within(panel()).getByRole("button", { name: "FEATURES", pressed: true })).toBeVisible();
+    expect(featureReading("DESIG")).toMatch(/^GPF F207 S/u);
+    expect(featureReading("TIDAL RADIUS")).toMatch(/^26\.9 ly S/u);
+    expect(socket.requestsOfKind("feature_detail").at(-1)?.body.time).toEqual({
+      seconds: 3_155_760_000,
+      nanos: 0,
+    });
+
+    await server(() => {
+      socket.serverAnswers("features_in_range", (body) =>
+        aFeaturesInRange({ centreLy: CENTRE, radiusLy: body.radius_ly, timeYr: 100 }),
+      );
+    });
+    expect(featureReading("DESIG")).toBe("GPF F207");
+  });
+
+  it("keeps the structure, stale, when its request at the chart's new time fails, with RETRY", async () => {
+    const { user, socket } = await renderChart();
+    await answerFeatures(socket);
+    await user.click(screen.getByRole("button", { name: "PICK ON CHART" }));
+    await server(() => {
+      socket.serverAnswers("feature_detail", () => ({
+        ...aClusterDetail(),
+        time: { seconds: 0, nanos: 0 },
+      }));
+    });
+    await user.click(screen.getByRole("button", { name: "CHART AT +100 yr" }));
+    await server(() => {
+      socket.serverAnswers("systems_in_range", (body) =>
+        aSystemsInRange({ centreLy: CENTRE, radiusLy: body.radius_ly, timeYr: 100 }),
+      );
+      socket.serverAnswers("features_in_range", (body) =>
+        aFeaturesInRange({ centreLy: CENTRE, radiusLy: body.radius_ly, timeYr: 100 }),
+      );
+    });
+    // The structure is asked again at the chart's new time, and that request fails.
+    const request = socket.requestsOfKind("feature_detail").at(-1);
+    expect(request?.body.time).toEqual({ seconds: 3_155_760_000, nanos: 0 });
+    await server(() => {
+      socket.serverRejects(request?.id ?? 0, { code: "internal", message: "failed", field: null });
+    });
+
+    expect(featureReading("TIDAL RADIUS")).toMatch(/^26\.9 ly S/u);
+    expect(within(panel()).getByText(statusLine("STRUCTURE REJECTED: failed"))).toBeInTheDocument();
+  });
+
+  it("reads the black hole stale once the chart's time has left the one it was answered for", async () => {
+    const { user, socket } = await renderChart();
+    await answerFeatures(socket, [GALACTIC_CENTRE]);
+    await user.click(within(panel()).getByRole("button", { name: "FEATURES" }));
+    featureList().focus();
+    await user.keyboard("{Home}");
+    await server(() => {
+      socket.serverAnswers("black_hole_state", () => aBlackHoleState());
+    });
+    expect(featureReading("X-RAY LUMINOSITY")).toBe("1.69E28 W");
+
+    await user.click(screen.getByRole("button", { name: "CHART AT +100 yr" }));
+    await server(() => {
+      socket.serverAnswers("systems_in_range", (body) =>
+        aSystemsInRange({ centreLy: CENTRE, radiusLy: body.radius_ly, timeYr: 100 }),
+      );
+      socket.serverAnswers("features_in_range", (body) =>
+        aFeaturesInRange({
+          centreLy: CENTRE,
+          radiusLy: body.radius_ly,
+          timeYr: 100,
+          features: [GALACTIC_CENTRE],
+        }),
+      );
+    });
+
+    expect(featureReading("X-RAY LUMINOSITY")).toMatch(/^1\.69E28 W S/u);
   });
 });

@@ -8,12 +8,13 @@ import { type ReactNode, useId, useState } from "react";
 import { RequestStatus } from "../../components/RequestStatus";
 import { StatusLine } from "../../components/StatusLine";
 import { StatusText } from "../../components/StatusText";
-import { featureKindAbbreviation } from "../../lib/galaxy/featureWords";
+import { featureKindAbbreviation, notYetModelledWords } from "../../lib/galaxy/featureWords";
 import { NOW_MODE, sameQueryMode } from "../../lib/galaxy/model";
 import { useUniverse } from "../../lib/universe";
 import type { RequestState } from "../../lib/useServerRequest";
 import { type SummaryTarget, useSystemSummary } from "../system/useSystemSummary";
 import { type SystemTarget, systemTargetFor } from "../system/systemTarget";
+import { selectionMarkId } from "./chartModel";
 import { FeatureList } from "./FeatureList";
 import { FeatureReadout } from "./FeatureReadout";
 import { SystemList } from "./SystemList";
@@ -39,10 +40,10 @@ const LISTS: ReadonlyArray<{ readonly list: ChartList; readonly label: string }>
 
 /**
  * What the features' census says beyond the list (plan 09, P09.T41.c), or `null` with nothing to
- * say: the kinds left out by the server's cell budget, as the systems' census says of a layer, and
- * those it does not generate, plan 10's streams and dwarf cores, in the data state for what this
- * generator version does not compute, so that neither reads as none; or, where every kind is in and
- * none is in range, that none is.
+ * say: that none is in range, the kinds left out by the server's cell budget, as the systems'
+ * census says of a layer, and those it does not generate, plan 10's streams and dwarf cores, in
+ * the data state for what this generator version does not compute, composed as the guide composes
+ * it, so that neither reads as none.
  */
 export function featureCensusWords(
   census: ReadonlyArray<FeatureKindCensus>,
@@ -55,15 +56,13 @@ export function featureCensusWords(
   const overBudget = of("over_cell_budget");
   const notGenerated = of("not_generated");
   const parts = [
+    returned === 0 && overBudget.length === 0 ? "NO FEATURES IN RANGE" : null,
     overBudget.length === 0
       ? null
       : `LARGE VOLUME: ${overBudget.join(", ")} over the server cell budget; reduce radius`,
-    notGenerated.length === 0 ? null : `${notGenerated.join(", ")} NOT YET MODELLED`,
+    notGenerated.length === 0 ? null : notYetModelledWords(notGenerated),
   ].filter((part) => part !== null);
-  if (parts.length === 0) {
-    return returned === 0 ? "NO FEATURES IN RANGE" : null;
-  }
-  return parts.join(" · ");
+  return parts.length === 0 ? null : parts.join(" · ");
 }
 
 /** Whether a request ended in a failure, which leaves an answer kept from before a snapshot. */
@@ -138,15 +137,15 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
   const selected = chart.selected;
   const selectedFeature = chart.selectedFeature;
   const [listChoice, setListChoice] = useState<ChartList>("systems");
-  // A selection made on the chart shows the list it is in, so that it is shown in both places.
-  const selectionKey =
-    selectedFeature === null ? chart.selectedId : `feature:${selectedFeature.id}`;
+  // A selection made on the chart shows the list it is in, so that it is shown in both places: the
+  // operator's selection, which stays while the chart's two answers arrive apart.
+  const selectionKey = chart.selection === null ? null : selectionMarkId(chart.selection);
   const [seenSelection, setSeenSelection] = useState<string | null>(null);
   let list = listChoice;
   if (selectionKey !== seenSelection) {
     setSeenSelection(selectionKey);
     const wanted: ChartList | null =
-      selectedFeature === null ? (selected === null ? null : "systems") : "features";
+      chart.selection === null ? null : chart.selection.kind === "feature" ? "features" : "systems";
     if (wanted !== null && wanted !== listChoice) {
       list = wanted;
       setListChoice(wanted);
@@ -156,7 +155,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
   const [featureGeneration, setFeatureGeneration] = useState(0);
   const detail = useFeatureDetail({
     universe: open?.id ?? null,
-    feature: selectedFeature?.id ?? null,
+    feature: chart.selection?.kind === "feature" ? chart.selection.id : null,
     timeYr: chartTimeYr,
     generation: featureGeneration,
   });
@@ -332,7 +331,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
           feature={selectedFeature}
           timeYr={chartTimeYr}
           distanceDecimals={chart.distanceDecimals}
-          stale={stale}
+          stale={stale || chart.selectedFeatureStale}
           detail={detail.shown}
           detailStale={detailStale}
           blackHole={centreSelected ? blackHole.shown : null}

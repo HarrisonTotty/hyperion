@@ -156,7 +156,7 @@ describe("SystemReadout's origin (plan 09, P09.T41.c)", () => {
       aSystem({ origin: { type: "feature_member", feature: "e859e05c80000000" } }),
     );
 
-    expect(valueOf(readout, "ORIGIN")).toBe("E859E05C80000000");
+    expect(valueOf(readout, "ORIGIN")).toBe("FEATURE E859E05C80000000");
     // A member whose row carries no class reads it Missing.
     expect(valueOf(readout, "MEMBER CLASS")).toBe("—");
   });
@@ -198,7 +198,7 @@ describe("SystemReadout's origin (plan 09, P09.T41.c)", () => {
 
     expect(valueOf(readout, "ORIGIN")).toBe("CORE-COLLAPSE SUPERNOVA");
     expect(valueOf(readout, "SUPERNOVA")).toBe("REMNANT SHELL");
-    expect(valueOf(readout, "SN AGE")).toBe("2400 yr");
+    expect(valueOf(readout, "SN AGE")).toBe("2.40 kyr");
     expect(valueOf(readout, "SHELL RADIUS")).toBe("30.0 ly");
     expect(valueOf(readout, "SHELL PHASE")).toBe("SEDOV-TAYLOR");
     expect(valueOf(readout, "SHELL EMISSION")).toBe("X-RAY AND RADIO · OPTICAL");
@@ -217,8 +217,8 @@ describe("SystemReadout's origin (plan 09, P09.T41.c)", () => {
     );
 
     expect(valueOf(readout, "SUPERNOVA")).toBe("PROGENITOR");
-    expect(valueOf(readout, "EXPLODES IN")).toBe("812 yr");
-    expect(valueOf(readout, "PAIR PERIOD")).toBe("95.5 s");
+    expect(valueOf(readout, "EXPLODES IN")).toBe("0.812 kyr");
+    expect(valueOf(readout, "PAIR PERIOD")).toBe("1.11E-3 d");
   });
 });
 
@@ -251,13 +251,20 @@ describe("SystemReadout's values this build does not know (plan 09, P09.T41.c)",
   });
 
   it("reads a listed member's class it does not know, magnetar, Missing, and the rest as before", () => {
+    const known = renderReadout(
+      aSystem({
+        origin: { type: "centre_member" },
+        member_class: { type: "listed", class: "tidal_disruption_victim" },
+      }),
+    );
+    const others = readings(known).filter(([label]) => label !== "MEMBER CLASS");
+    known.remove();
+
     const readout = renderReadout(
       aSystem({ origin: { type: "centre_member" }, member_class: LISTED_UNKNOWN }),
     );
 
     expect(valueOf(readout, "MEMBER CLASS")).toBe("—");
-    expect(valueOf(readout, "ORIGIN")).toBe("CENTRE");
-    expect(valueOf(readout, "DESIG")).toBe("H7K 4C0RFZ C-1");
-    expect(valueOf(readout, "POPULATION")).toBe("OLD THIN DISC");
+    expect(readings(readout).filter(([label]) => label !== "MEMBER CLASS")).toEqual(others);
   });
 });

@@ -136,6 +136,13 @@ function drawRank(kind: MapFeatureKindWire): number {
   return rank;
 }
 
+/**
+ * A shell's label's rank: above every globular's, whose rank is its mass of at most some 10⁶ M☉, and
+ * below the centre's, so that a shell, the rarer and the brighter in X-rays, is never left unlabelled
+ * for a globular beside it.
+ */
+const SHELL_LABEL_PRIORITY = 1e12;
+
 /** A candidate before its label is placed, with the order labels are placed in. */
 interface Candidate {
   readonly place: Omit<PlacedMapFeature, "label">;
@@ -186,7 +193,7 @@ export function placeMapFeatures(
               circlePx: shell.radiusLy * scale,
             },
             text: mapFeatureKindLabel(layer.kind),
-            priority: 1,
+            priority: SHELL_LABEL_PRIORITY,
             rank,
           });
         }

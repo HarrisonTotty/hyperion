@@ -2,7 +2,7 @@ import type { MapFeatureKindWire } from "@hyperion/protocol";
 
 import { annunciation } from "../../components/RequestStatus";
 import type { StatusStanding } from "../../components/StatusLine";
-import { mapFeatureKindLabel } from "../../lib/galaxy/featureWords";
+import { mapFeatureKindLabel, notYetModelledWords } from "../../lib/galaxy/featureWords";
 import type { GalaxyFeaturesQuery } from "./useGalaxyFeatures";
 
 /** What the galaxy map's page says of its feature overlay, on its line for the views' wait. */
@@ -51,5 +51,5 @@ export function mapFeatureStatus(
   );
   return missing.length === 0
     ? null
-    : { text: `${missing.join(", ")} NOT YET MODELLED`, standing: "waiting", retry: false };
+    : { text: notYetModelledWords(missing), standing: "waiting", retry: false };
 }

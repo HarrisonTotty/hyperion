@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { formatSci, formatSignificant } from "../../lib/format";
+import { formatAge, formatPeriod, formatSci, formatSignificant } from "../../lib/format";
 import {
   catalogueClassWords,
   featureMarkLabel,
@@ -29,8 +29,8 @@ type OriginShown =
 
 /**
  * A system's `ORIGIN`: its birth population for one its layer's grid placed, its feature's kind and
- * designation for a feature's member (`OC GPF F207`, or its feature's ID where the chart holds no
- * such feature), `CENTRE` for the centre's, its class in words for a catalogue system; Missing for
+ * designation for a feature's member (`OC GPF F207`, or `FEATURE` and its feature's ID where the chart
+ * holds no such feature), `CENTRE` for the centre's, its class in words for a catalogue system; Missing for
  * an origin or a class this build does not know; and `NOT YET MODELLED`, a status, for a row from a
  * server that does not say.
  */
@@ -50,7 +50,7 @@ function originShown(system: ChartSystem, features: ReadonlyArray<ChartFeature>)
         kind: "value",
         text:
           feature === undefined
-            ? formatHex64(origin.feature)
+            ? `FEATURE ${formatHex64(origin.feature)}`
             : featureMarkLabel(feature.kind, feature.designation),
       };
       break;
@@ -78,6 +78,23 @@ function isMember(system: ChartSystem): boolean {
     system.memberClass !== null
   );
 }
+
+/** Julian years in a kiloyear and in a megayear, for the ages' ladder. */
+const YR_PER_KYR = 1_000;
+const YR_PER_MYR = 1_000_000;
+
+/**
+ * A supernova's age, or a progenitor's time left, on the guide's ladder of ages: in `kyr` to three
+ * figures below a megayear, and in `Myr` and `Gyr` from there, as an age is (`formatAge`).
+ */
+function eventAge(yr: number): { readonly value: string; readonly unit: string } {
+  return Math.abs(yr) < YR_PER_MYR
+    ? { value: formatSignificant(yr / YR_PER_KYR), unit: "kyr" }
+    : formatAge(yr / YR_PER_MYR);
+}
+
+/** Seconds in a day of 86,400 s, the day of every period's `d`. */
+const S_PER_DAY = 86_400;
 
 /** What a supernova catalogue entry is, in words. */
 function supernovaWords(state: SupernovaState): string {
@@ -156,15 +173,15 @@ function SupernovaReadings({ state, stale }: SupernovaReadingsProps) {
           {head}
           <Reading
             label="EXPLODES IN"
-            value={formatSignificant(state.untilExplosionYr)}
-            unit="yr"
+            value={eventAge(state.untilExplosionYr).value}
+            unit={eventAge(state.untilExplosionYr).unit}
             stale={stale}
           />
           {state.pairPeriodS === null ? null : (
             <Reading
               label="PAIR PERIOD"
-              value={formatSignificant(state.pairPeriodS)}
-              unit="s"
+              value={formatPeriod(state.pairPeriodS / S_PER_DAY).value}
+              unit={formatPeriod(state.pairPeriodS / S_PER_DAY).unit}
               stale={stale}
             />
           )}
@@ -175,7 +192,12 @@ function SupernovaReadings({ state, stale }: SupernovaReadingsProps) {
       content = (
         <>
           {head}
-          <Reading label="SN AGE" value={formatSignificant(state.ageYr)} unit="yr" stale={stale} />
+          <Reading
+            label="SN AGE"
+            value={eventAge(state.ageYr).value}
+            unit={eventAge(state.ageYr).unit}
+            stale={stale}
+          />
           <Reading
             label="SHELL RADIUS"
             value={formatSignificant(state.shell.radiusLy)}
@@ -208,7 +230,12 @@ function SupernovaReadings({ state, stale }: SupernovaReadingsProps) {
       content = (
         <>
           {head}
-          <Reading label="SN AGE" value={formatSignificant(state.ageYr)} unit="yr" stale={stale} />
+          <Reading
+            label="SN AGE"
+            value={eventAge(state.ageYr).value}
+            unit={eventAge(state.ageYr).unit}
+            stale={stale}
+          />
           <RemnantReadings remnant={state.remnant} stale={stale} />
         </>
       );

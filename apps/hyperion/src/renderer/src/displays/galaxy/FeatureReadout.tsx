@@ -57,6 +57,15 @@ function expectedWords(expected: number): string {
   return expected > 0 ? `~${formatSignificant(expected)}` : NONE;
 }
 
+/**
+ * A feature's expected members, Estimated, or `null`, Missing, for the zero the server sends for a
+ * feature it gives no cluster model, a cloud, an association or an unbound region, whose stars it
+ * does not count as members: a value it does not compute, never none.
+ */
+function membersWords(expected: number): string | null {
+  return expected > 0 ? `~${formatSignificant(expected)}` : null;
+}
+
 interface StructureReadingsProps {
   readonly structure: FeatureStructure;
   readonly stale: boolean;
@@ -190,9 +199,9 @@ function StructureReadings({ structure, stale }: StructureReadingsProps) {
  * the chart's time, the sphere the chart draws it at. `AGE` is given at the chart's time, after a
  * middle dot, as a system's is, and is the em dash for a molecular cloud, which has none, and for
  * the centre, whose six episodes have no one age. `MEMBERS` is the model's expected count over
- * its member classes, an Estimated value, `~459`, or `NONE` for a feature placed with none, as a
- * cloud, an association or an unbound region is: an expectation, never the number of systems a
- * range query returns. `EMISSION` names its emission class (`H II`, `REFLECTION`, `DARK CLOUD`), or
+ * its member classes, an Estimated value, `~459`, or the em dash for the zero the server sends for a
+ * feature it gives no cluster model, a cloud, an association or an unbound region: an expectation,
+ * never the number of systems a range query returns. `EMISSION` names its emission class (`H II`, `REFLECTION`, `DARK CLOUD`), or
  * `NONE` for a feature that shines as nothing but its stars; `SUPERBUBBLE` is a nursery's bubble's
  * radius, or `NONE`.
  *
@@ -279,7 +288,7 @@ export function FeatureReadout({
               wide
               stale={stale}
             />
-            <Reading label="MEMBERS" value={expectedWords(feature.expectedMembers)} stale={stale} />
+            <Reading label="MEMBERS" value={membersWords(feature.expectedMembers)} stale={stale} />
             <Reading
               label="EMISSION"
               value={feature.emission === null ? NONE : emissionWords(feature.emission)}

@@ -4510,8 +4510,9 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     in place of the task text's "a symbol per kind"; it gains the cross's proportions, the label's
     and a superbubble's form, and the legend's `FEATURE` and `TRUE RADIUS`.
   - Spatial view: `SymbolShape` gains `greek-cross`; `FeatureMark` (a `PointMark` with `radius`) and
-    `ShellMark` (centre, radius, label) ride `SpatialScene.features` and `.shells`. A feature is
-    placed, picked and labelled with the points; circles at true radius are drawn first.
+    `ShellMark` (centre, radius, label; its own type, since a `SphereMark` is about the view
+    centre) ride `SpatialScene.features` and `.shells`. A feature is placed, picked and labelled
+    with the points; circles at true radius are drawn first.
   - Chart: `useFeaturesInRange` asks every kind beside the range query; `LocalChartState` gains
     `features` (only an answer for the chart's own centre, radius and time), `featureState`,
     `featureFault`, `selectedFeature`, `selectFeature`, `selectMark` and `retryFeatures`. A mark's ID
@@ -4527,10 +4528,10 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `placeMapFeatures` (`lib/galaxy/mapFeatures.ts`) places them per view, pure; `MapFeatureOverlay`
     draws them over each picture; `MapFeatureToggles` (`GC`, `CENTRE`, `SNR`) stands in the face-on
     view's words, through `GalaxyMapView`'s new `remPx`, `featureLayers`, `featureKinds` and
-    `featureControls` props.
+    `featureControls` props; the toggles, each beside its sample, are the overlay's legend.
   - "Pending" is the request's own state, said on the page's line for the views' wait after the
     link's state and a stale view's `PENDING`, with a failure's `RETRY`; a shown kind the server
-    does not generate reads `SNR NOT YET MODELLED` there.
+    does not generate reads `SNR: NOT YET MODELLED` there.
   - `mapLayout`'s face-on words gain `FEATURES_ROW_REM` = 2.25 rem, estimated, not measured: plan 07's
     hidden runs should re-measure it (the stacked overlay's room at 1920 × 1080 now has 20 px).
   - Not drawn: a globular beyond the edge-on picture's ±32,768 ly; nothing is pegged.
@@ -4541,13 +4542,19 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `toChartSystem`; unknown values are found by `Object.hasOwn` against the known tags and classes.
   - The panel shows one of two lists, `SYSTEMS` or `FEATURES` (`FeatureList`), one tab stop; a feature
     selected shows `FeatureReadout`, with `useFeatureDetail` (`STRUCTURE`) and, for the centre,
-    `useBlackHoleState` (`BLACK HOLE`: mass, total 2–10 keV luminosity, disruptions). P09.T42's
-    `BLACK HOLE` readout builds on that heading.
+    `useBlackHoleState` (`BLACK HOLE`: mass, total 2–10 keV luminosity, disruptions). That is
+    P09.T42's `BLACK HOLE` readout's half, mass and luminosity at the chart's time; T42 keeps the
+    fine radius steps and the distance units.
   - `OriginReadings` adds `ORIGIN`, `MEMBER CLASS` and the supernova rows to the system readout,
-    `SystemReadout` taking the chart's `features`; T44's remnant rows are these.
+    `SystemReadout` taking the chart's `features`. They are in the `GALAXY` readout only: the
+    `SYSTEM` display's host readout, which T44 also names, gets none, since `system_summary` carries
+    no supernova state.
+  - The selection is the operator's (`LocalChartState.selection`): while a new chart's features are
+    awaited the selected feature is read, stale, from the answer before (`selectedFeatureStale`).
   - Leans (2026-10-30): a grid system's `ORIGIN` is its population alone until P08.T15.a sends a
-    placement; an absent origin reads `NOT YET MODELLED`; zero expected members read `NONE`; the slow
-    hosts' accreting white dwarfs read `SLOW ACCRETING WD`.
+    placement; an absent origin reads `NOT YET MODELLED`; a member of a feature the chart lacks reads
+    `FEATURE` and its ID; the server's zero `expected_members` (no cluster model) reads Missing; the
+    slow hosts' accreting white dwarfs read `SLOW ACCRETING WD`; supernova ages are in `kyr`.
 - **P09.T33.a as built (lane `p09-classes`, 2026-10-29, at `GENERATOR_VERSION` 23, no output
   moves).** The first production class, registered: `ProductionClasses` has the
   `CORE_COLLAPSE` arm and plan 03's `placement::resolve` hands every `111` ID to the class grid

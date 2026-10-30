@@ -79,11 +79,12 @@ describe("FeatureReadout (plan 09, P09.T41.c)", () => {
     expect(valueOf(readout, "SUPERBUBBLE")).toBe("379 ly");
   });
 
-  it("reads a feature placed with no members NONE, and its emission class by the guide's name", () => {
+  it("reads the zero members of a feature with no cluster model Missing, and its emission class by the guide's name", () => {
     const readout = renderReadout(aFeature(ASSOCIATION));
 
     expect(valueOf(readout, "KIND")).toBe("OB ASSOCIATION");
-    expect(valueOf(readout, "MEMBERS")).toBe("NONE");
+    // The zero the server sends for a feature it gives no cluster model, not none (P09.T40.b).
+    expect(valueOf(readout, "MEMBERS")).toBe("—");
     expect(valueOf(readout, "EMISSION")).toBe("H II");
   });
 

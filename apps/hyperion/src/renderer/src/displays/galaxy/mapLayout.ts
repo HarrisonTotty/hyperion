@@ -64,6 +64,9 @@ interface LayoutWordsRem {
   readonly overlay: ViewWordsRem;
 }
 
+/** The feature overlay's `FEATURES` toggles: one line of 2 rem targets, and the 0.25 rem gap. */
+const FEATURES_ROW_REM = 2.25;
+
 /**
  * The tallest words a view shows beside its picture, in `rem`, as measured in hidden runs of the
  * console (decision-gg-port-d0 §3.4), each plus the 0.5 rem of headroom the ruling asks for B612 as
@@ -85,9 +88,6 @@ interface LayoutWordsRem {
  * the feature overlay's toggles under the legends (plan 09, P09.T41.b), estimated from their one
  * line of 2 rem targets and the words' 0.25 rem gap, not yet measured in a hidden run.
  */
-/** The feature overlay's `FEATURES` toggles: one line of 2 rem targets, and the 0.25 rem gap. */
-const FEATURES_ROW_REM = 2.25;
-
 const WORDS_REM: Readonly<Record<MapLayout, LayoutWordsRem>> = {
   // 150 px face-on and 128 px edge-on plain, 222 px and 200 px under the overlay, at 1280 × 720 and
   // 1536 × 864 (a 27–28 rem column).

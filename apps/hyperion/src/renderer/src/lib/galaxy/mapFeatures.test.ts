@@ -149,4 +149,19 @@ describe("placeMapFeatures (plan 09, P09.T41.b)", () => {
 
     expect(globular?.label?.leftPx ?? 400).toBeLessThan(globular?.xPx ?? 0);
   });
+
+  it("labels a shell before a globular whose label would cross it", () => {
+    const beside = { ...GLOBULAR, position: galacticPositionFromLy([8_000, 2_000, 30]) };
+    const crowded = toMapFeatureLayers(
+      aGalaxyFeatures({ globulars: [beside], centre: [], shells: [BRIGHT_SHELL] }),
+    );
+
+    const places = placeMapFeatures("face_on", FACE_ON, crowded, EVERY_KIND, SQUARE);
+    const shell = places.find((place) => place.kind === "bright_shell");
+    const globular = places.find((place) => place.kind === "globular");
+
+    // To the right is the shell's, so the globular's goes to the left.
+    expect(shell?.label?.leftPx ?? 0).toBeGreaterThan(shell?.xPx ?? 0);
+    expect(globular?.label?.leftPx ?? 400).toBeLessThan(globular?.xPx ?? 0);
+  });
 });

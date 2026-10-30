@@ -118,7 +118,7 @@ describe("GalaxyMapPanel's feature overlay (plan 09, P09.T41.b)", () => {
       "Features: 1 globular cluster, the galactic centre",
     ]);
     expect(screen.queryByText(statusLine("FEATURES PENDING"))).not.toBeInTheDocument();
-    expect(screen.getByText(statusLine("SNR NOT YET MODELLED"))).toBeInTheDocument();
+    expect(screen.getByText(statusLine("SNR: NOT YET MODELLED"))).toBeInTheDocument();
   });
 
   it("takes a kind off both views with its toggle, and puts it back", async () => {
@@ -169,7 +169,7 @@ describe("GalaxyMapPanel's feature overlay (plan 09, P09.T41.b)", () => {
 
     await user.click(screen.getByRole("checkbox", { name: "SNR" }));
 
-    expect(screen.queryByText(statusLine("SNR NOT YET MODELLED"))).not.toBeInTheDocument();
+    expect(screen.queryByText(statusLine("SNR: NOT YET MODELLED"))).not.toBeInTheDocument();
   });
 
   it("reports a failure with RETRY, which asks again from FEATURES PENDING", async () => {
