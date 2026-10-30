@@ -30,7 +30,9 @@
 //! alerts can name it.
 //!
 //! Light curves are templates by type, documented as ours (Design note 18, the brainstorm names no
-//! source), built from sums of smooth terms so that no template has a join ([`LightCurve`]).
+//! source), built from sums of smooth terms so that no template has a join ([`LightCurve`]). The
+//! terms are read apart too ([`SupernovaTerms`]), so that plan 12's alerts can weight each by its
+//! share of the light in a band (P12.T5.b).
 
 use crate::coords::GalacticVelocity;
 use crate::galaxy::Galaxy;
@@ -450,9 +452,36 @@ impl LightCurve {
     /// This template's luminosity `age` after the explosion; zero before it.
     #[must_use]
     pub fn at(&self, age: Years) -> Watts {
+        self.terms_at(age).total()
+    }
+
+    /// This template's three terms `age` after the explosion, each zero before it: what plan 12's
+    /// alerts weight by band (P12.T5.b). Their [`total`](SupernovaTerms::total) is
+    /// [`at`](Self::at) to the bit.
+    ///
+    /// # Examples
+    ///
+    /// A plateau supernova a month in shines by its plateau and its radioactive heating, its shock
+    /// breakout long gone:
+    ///
+    /// ```
+    /// use hyperion_sim::galaxy::catalogue_classes::supernova::{LightCurve, SupernovaKind};
+    /// use hyperion_sim::stellar::remnant::SupernovaType;
+    /// use hyperion_sim::units::Years;
+    ///
+    /// let curve = LightCurve::of(SupernovaKind::CoreCollapse(SupernovaType::IIP)).ok_or("a type")?;
+    /// let month = Years::new(30.0 / 365.25);
+    /// let terms = curve.terms_at(month);
+    /// assert_eq!(terms.breakout().value(), 0.0);
+    /// assert!(terms.plateau() > terms.radioactive());
+    /// assert_eq!(terms.total(), curve.at(month));
+    /// # Ok::<(), &str>(())
+    /// ```
+    #[must_use]
+    pub fn terms_at(&self, age: Years) -> SupernovaTerms {
         let seconds = age.value() * crate::units::consts::SECONDS_PER_JULIAN_YEAR;
         if seconds.is_nan() || seconds < 0.0 {
-            return Watts::ZERO;
+            return SupernovaTerms::ZERO;
         }
         let days = seconds / SECONDS_PER_DAY;
         let (peak, fold) = self.breakout;
@@ -481,7 +510,73 @@ impl LightCurve {
             * math::exp(-days / COBALT_DAYS)
             * ((1.0 - POSITRON_SHARE) * trapped + POSITRON_SHARE);
         let radioactive = self.nickel * released * (nickel * trapped + cobalt);
-        Watts::new((breakout + plateau + radioactive) * WATTS_PER_ERG_S)
+        SupernovaTerms {
+            breakout,
+            plateau,
+            radioactive,
+        }
+    }
+}
+
+/// A light curve's three terms at one age (P12.T5.b): the shock breakout, the plateau and the
+/// radioactive heating, each bolometric ([`LightCurve::terms_at`]).
+///
+/// The terms are kept in erg/s, as the template computes them, and converted to watts once, so
+/// that their [`total`](Self::total) is [`LightCurve::at`]'s bits, and so is
+/// [`weighted`](Self::weighted) by shares of 1.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SupernovaTerms {
+    /// erg/s.
+    breakout: f64,
+    /// erg/s.
+    plateau: f64,
+    /// erg/s.
+    radioactive: f64,
+}
+
+impl SupernovaTerms {
+    /// No light: every term zero, a template's before the explosion.
+    pub const ZERO: Self = Self {
+        breakout: 0.0,
+        plateau: 0.0,
+        radioactive: 0.0,
+    };
+
+    /// The shock breakout's luminosity.
+    #[must_use]
+    pub fn breakout(&self) -> Watts {
+        Watts::new(self.breakout * WATTS_PER_ERG_S)
+    }
+
+    /// The plateau's luminosity: zero for a template without one.
+    #[must_use]
+    pub fn plateau(&self) -> Watts {
+        Watts::new(self.plateau * WATTS_PER_ERG_S)
+    }
+
+    /// The radioactive heating the ejecta release.
+    #[must_use]
+    pub fn radioactive(&self) -> Watts {
+        Watts::new(self.radioactive * WATTS_PER_ERG_S)
+    }
+
+    /// The bolometric luminosity, the terms summed in erg/s in the order breakout, plateau,
+    /// radioactive and converted once: [`LightCurve::at`].
+    #[must_use]
+    pub fn total(&self) -> Watts {
+        Watts::new((self.breakout + self.plateau + self.radioactive) * WATTS_PER_ERG_S)
+    }
+
+    /// The luminosity of the terms weighted by `shares`, in the order breakout, plateau,
+    /// radioactive, summed as [`total`](Self::total) sums them and converted once: a band's
+    /// luminosity, given each term's share of its light in the band (plan 12's alerts).
+    #[must_use]
+    pub fn weighted(&self, shares: [f64; 3]) -> Watts {
+        let [breakout, plateau, radioactive] = shares;
+        Watts::new(
+            (self.breakout * breakout + self.plateau * plateau + self.radioactive * radioactive)
+                * WATTS_PER_ERG_S,
+        )
     }
 }
 
@@ -1503,6 +1598,40 @@ mod tests {
                 );
                 last = l;
             }
+        }
+    }
+
+    /// P12.T5.b: a template's terms add back to its luminosity to the bit, by their total and by
+    /// shares of 1, and in watts each to the last place; each is non-negative, the breakout alone
+    /// at the explosion, and the terms a template lacks are zero.
+    #[test]
+    fn the_terms_add_back_to_the_light_curve() {
+        use hyperion_testkit::float::assert_same_bits;
+
+        for kind in ALL_KINDS {
+            let curve = LightCurve::of(kind).unwrap();
+            for k in 0..=4_000 {
+                let seconds = math::exp10(9.0 * f64::from(k) / 4_000.0) - 1.0;
+                let age = Years::new(seconds / crate::units::consts::SECONDS_PER_JULIAN_YEAR);
+                let terms = curve.terms_at(age);
+                let total = curve.at(age).value();
+                assert_same_bits(terms.total().value(), total);
+                assert_same_bits(terms.weighted([1.0; 3]).value(), total);
+                let parts =
+                    [terms.breakout(), terms.plateau(), terms.radioactive()].map(Watts::value);
+                assert!(parts.iter().all(|&part| part >= 0.0), "{kind:?}: {parts:?}");
+                let sum = parts[0] + parts[1] + parts[2];
+                assert!(
+                    (sum - total).abs() <= 4.0 * f64::EPSILON * total,
+                    "{kind:?}"
+                );
+                if curve.plateau.is_none() {
+                    assert_eq!(terms.plateau(), Watts::ZERO, "{kind:?}");
+                }
+            }
+            let start = curve.terms_at(Years::ZERO);
+            assert_eq!(start.total(), start.breakout(), "{kind:?}");
+            assert_eq!(curve.terms_at(Years::new(-1.0)), SupernovaTerms::ZERO);
         }
     }
 

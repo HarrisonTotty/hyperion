@@ -2628,3 +2628,27 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
       as one with no hosts, not as a missing class.
     - This departs from T5.a's lean that an unbuilt class reaches nothing: the row's source is
       built, though the class's is not.
+- **P12.T5.b as built (lane `p12-t5b`, 2026-10-30, at `GENERATOR_VERSION` 23).** No generated
+  output moves. `alerts/registry.golden` is new (every row's bounds band by band, the templates'
+  peaks and their light at 20 days): from here a change to a row or to the band light is a bless.
+  - _The band light (first commit; main's ruling of 2026-10-30 on item 5)._ New file
+    `alerts/light.rs`: `band_share(Kelvin, AlertBand) -> f64` (16-point Gauss–Legendre),
+    `supernova_luminosity(SupernovaKind, Years, AlertBand) -> Watts` (Σₖ Lₖ sₖ through plan 09's
+    `terms_at`), `supernova_peak(SupernovaKind, AlertBand) -> Watts` (the template's greatest on a
+    fixed grid), `TOP_HAT_FWHM_UM`, `N_BAND_UM`. A band's luminosity is defined on `AlertBand`'s
+    doc. Five spectra and six templates' peaks are stored and recomputed to the bit.
+  - _One bound per band._ `TransientRow::peak_bound` reads one bound per band; new
+    `CORE_COLLAPSE_BAND_PEAKS` and `TYPE_IA_BAND_PEAKS` (`[Watts; 11]`, `AlertBand::ALL`'s order).
+    `CORE_COLLAPSE_PEAK` and `TYPE_IA_PEAK` stay, as the bolometric bounds over them. V:
+    2.1922 × 10³⁴ and 1.4081 × 10³⁵ W, which reach 4,415 and 11,189 ly at a V limit of 10⁻⁶ W m⁻².
+    The core collapses' X-ray bound is 8.0931 × 10³⁶ W (the Ib and Ic breakout), so
+    `kind_reach(CoreCollapse)` is the diagonal for any X-ray limit under 1.4 × 10⁻⁷ W m⁻².
+  - _X-ray bursts_ are `Recurrent` over `XRAY_BINARY` (still pending on P11.T9): T5.c walks them,
+    and T5.e's list loses "bursts".
+  - _Leans (2026-10-30)._ The Ib and Ic breakout at 1 keV, the low end of 1–2 keV (0.809 in
+    2–10 keV); the IIb's at the red supergiants' 2.9 × 10⁵ K; a 7,000 K blackbody for every
+    radioactive term but the Type Ia's, the IIP's and IIL's included; the Type Ia's colours a
+    10⁴ K blackbody's; the plateau's `BC_V` +0.14 (IAU scale).
+  - _For T5.c–T5.e._ A later row takes `band_share` at its own temperature (star flares, giant
+    eruptions, FU Orionis outbursts) and stores its shares the same way. The magnetars' 2–10 keV
+    shares are constants of the event's whole output, not `band_share`.

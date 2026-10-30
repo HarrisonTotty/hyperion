@@ -14,7 +14,9 @@
 //!   peak luminosity in each band, its longest duration and its light curve ([`TransientRow`]);
 //! - reach and flux ([`reach`](mod@reach)): how far a sensor can see a class (Design note 5),
 //!   the flux at the observer with plan 07's extinction, and the X-ray band's optical depth
-//!   (Design note 14).
+//!   (Design note 14);
+//! - a source's light in each band ([`light`]): the bands' top hats, a blackbody's share of its
+//!   light in a band, and plan 09's supernova templates band by band (P12.T5.b).
 //!
 //! The walk itself belongs to the later subtasks: the one-shot classes (P12.T5.b), the recurrent
 //! ones (P12.T5.c), the census with the feature-level and global lists (P12.T5.d) and the local
@@ -39,16 +41,19 @@ use crate::observe::{Bearing, Retardation};
 use crate::time::{ClockWindow, UniverseTime};
 use crate::units::{LightYears, WattsPerSquareMetre};
 
+pub mod light;
 pub mod reach;
 pub mod registry;
 
+pub use light::{band_share, supernova_luminosity, supernova_peak};
 pub use reach::{
     ROOT_CUBE_DIAGONAL, class_reach, flux, inverse_square_flux, kind_reach, reach, transmission,
     xray_optical_depth,
 };
 pub use registry::{
-    CORE_COLLAPSE_PEAK, GIANT_ERUPTION_PEAK, LightCurveSource, LongestDuration,
-    MAGNETAR_BURST_PEAK, PeakBound, Route, TYPE_IA_PEAK, TransientKind, TransientRow,
+    CORE_COLLAPSE_BAND_PEAKS, CORE_COLLAPSE_PEAK, GIANT_ERUPTION_PEAK, LightCurveSource,
+    LongestDuration, MAGNETAR_BURST_PEAK, PeakBound, Route, TYPE_IA_BAND_PEAKS, TYPE_IA_PEAK,
+    TransientKind, TransientRow,
 };
 
 /// How many bands there are: plan 07's ten photometric bands and X-rays.
@@ -60,6 +65,12 @@ const BAND_COUNT: usize = 11;
 /// and not a value of [`Band`]: plan 07's extinction runs through the Cardelli law, which stops at
 /// 0.1 µm, while X-rays are absorbed photoelectrically by the metals whose column the dust traces,
 /// which [`xray_optical_depth`] models from `A_V`.
+///
+/// A band's luminosity, and a sensor's limit in it, are in-band powers (P12.T5.b): the light
+/// through a top hat of the band's full width at half maximum about plan 07's
+/// [`Band::wavelength`], Bessell's (2005) widths for U to I and Tokunaga's (2000) for J to K and
+/// the mid infrared's N band, and the light between 2 and 10 keV in X-rays. Radio takes no thermal
+/// light ([`light`] has the widths and their sources).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AlertBand {
     /// One of plan 07's photometric bands.
@@ -108,7 +119,8 @@ impl AlertBand {
 /// A sensor's two flux limits in one band (plan 12's Provides; Design note 10): the faintest flux
 /// it detects, and the faintest at which it resolves the host, which is no fainter.
 ///
-/// A flux here is the energy flux in the band at the observer, W m⁻², after extinction.
+/// A flux here is the energy flux in the band at the observer, W m⁻², after extinction: the
+/// in-band power through the band's top hat ([`AlertBand`]).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct BandLimits {
     detect: WattsPerSquareMetre,

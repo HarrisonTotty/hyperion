@@ -1,6 +1,6 @@
 //! The registry of transient kinds: one row per [`TransientKind`] with its classes, how its events
 //! are found, the bound on its peak luminosity in each band, its longest duration and its light
-//! curve (plan 12, P12.T5.a and P12.T5.a.2).
+//! curve (plan 12, P12.T5.a, P12.T5.a.2 and P12.T5.b).
 //!
 //! The rows read their sources' own constants where the sources state them. Plan 09's supernova
 //! templates and plan 06's giant eruptions and magnetar outbursts state no peak, so their bounds
@@ -8,8 +8,8 @@
 //!
 //! | Kind                | Route     | Photometric     | X-ray           | D        | Curve      |
 //! | ------------------- | --------- | --------------- | --------------- | -------- | ---------- |
-//! | `CoreCollapse`      | one-shot  | 10³⁸ W          | none            | unending | supernova  |
-//! | `TypeIa`            | one-shot  | 1.0730 × 10³⁶ W | none            | unending | supernova  |
+//! | `CoreCollapse`      | one-shot  | per band        | 8.0931 × 10³⁶ W | unending | supernova  |
+//! | `TypeIa`            | one-shot  | per band        | none            | unending | supernova  |
 //! | `GiantEruption`     | recurrent | 1.2106 × 10³⁴ W | none            | 20 yr    | eruption   |
 //! | `TidalDisruption`   | centre    | `L_Edd` of M•   | `L_Edd` ÷ 15.8  | unending | tail       |
 //! | `CentralFlare`      | centre    | none            | 3.5965 × 10²⁸ W | 8,175 s  | flare      |
@@ -18,9 +18,12 @@
 //! | `MagnetarBurst`     | recurrent | none            | 5 × 10⁴⁰ W      | 3 s      | top hat    |
 //! | `FuOrionisOutburst` | local     | per host        | none            | 500 yr   | outburst   |
 //!
-//! The other seven wait on plan 11's sources, P11.T9 (below): `LuminousRedNova` and `Kilonova`
-//! (one-shot), `Nova`, `XrayTransient` and `BeXOutburst` (recurrent) and `DwarfNova` and
-//! `XrayBurst` (local).
+//! The supernovae's bound in V is 2.1922 × 10³⁴ W for a core collapse and 1.4081 × 10³⁵ W for a
+//! Type Ia ([`CORE_COLLAPSE_BAND_PEAKS`], [`TYPE_IA_BAND_PEAKS`]). The other seven rows wait on
+//! plan 11's sources, P11.T9 (below): `LuminousRedNova` and `Kilonova` (one-shot), `Nova`,
+//! `XrayTransient`, `XrayBurst` and `BeXOutburst` (recurrent) and `DwarfNova` (local). X-ray bursts
+//! are seen across the Galaxy, so they are walked over the X-ray binaries, by the reasoning of the
+//! magnetars' ruling (below; plan 12's Risks, "P12.T5.b as built").
 //!
 //! A kind's hosts are a class's ([`TransientRow::classes`]): the supernovae are the two supernova
 //! classes', plan 11's kinds its classes' (novae and dwarf novae both accreting white dwarf
@@ -57,14 +60,17 @@
 //!
 //! # The bands
 //!
-//! The photometric bound bounds a kind's luminosity in any of plan 07's bands. Where the source is
-//! bolometric (the supernova templates, the tails' bolometric light, the giant eruptions, the star
-//! flares and the FU Orionis outbursts) the bound is the bolometric one, an upper bound on every
-//! band, so a reach from it errs long and the flux decides (Design note 5). The X-ray bound is
-//! filled where the source models the 2–10 keV band itself, the centre's flares and its tails,
-//! and for the magnetars, whose energies are the event's whole output, so that their bound bounds
-//! the band too. The supernova templates' shock breakout radiates in X-rays and the ultraviolet,
-//! which the templates do not split out (plan 12's Risks, "P12.T5.a as built").
+//! A bound is on the kind's light in the band, its in-band power through the band's top hat
+//! ([`light`](super::light)), and a row has one per band ([`TransientRow::peak_bound`]). The
+//! supernovae's are their templates' light band by band, each term weighted by its spectrum's share
+//! (P12.T5.b): their shock breakouts, bright but far in the ultraviolet, give V little, and the
+//! stripped stars' gives the core collapses their X-rays. Every other row bounds the photometric
+//! bands alike. Where its source is bolometric (the tails' bolometric light, the giant eruptions,
+//! the star flares and the FU Orionis outbursts) that is the bolometric bound, an upper bound on
+//! every band, so a reach from it errs long and the flux decides (Design note 5). The X-ray bound
+//! is also filled where the source models the 2–10 keV band itself, the centre's flares and its
+//! tails, and for the magnetars, whose energies are the event's whole output, so that their bound
+//! bounds the band too.
 //!
 //! # The centre's tails
 //!
@@ -83,7 +89,7 @@ use crate::stellar::events::{flares, fu_orionis, lbv, magnetar};
 use crate::time::Span;
 use crate::units::Watts;
 
-use super::{AlertBand, ClassSet};
+use super::{AlertBand, BAND_COUNT, ClassSet};
 
 #[cfg(doc)]
 use crate::galaxy::catalogue_classes::supernova::{LightCurve, SupernovaKind};
@@ -269,8 +275,9 @@ pub enum LongestDuration {
 /// event it holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LightCurveSource {
-    /// Plan 09's supernova templates, [`LightCurve::luminosity`] of the entry's [`SupernovaKind`]
-    /// and its age since T: bolometric (P09.T19.b).
+    /// Plan 09's supernova templates (P09.T19.b), the entry's [`SupernovaKind`] at its age since
+    /// T, in each band by its terms' shares ([`supernova_luminosity`](super::supernova_luminosity),
+    /// P12.T5.b); [`LightCurve::luminosity`] is their bolometric light.
     SupernovaTemplate,
     /// [`DisruptionTail::luminosity_watts_at`] in X-rays, and
     /// [`DisruptionTail::bolometric_watts_at`] as the bound on every other band (P09.T30.b).
@@ -310,10 +317,8 @@ pub struct TransientRow {
 enum RowSource {
     /// The source is built.
     Built {
-        /// The bound in every photometric band.
-        photometric: Option<PeakBound>,
-        /// The bound in X-rays.
-        xray: Option<PeakBound>,
+        /// The bound in each band, in [`AlertBand::ALL`]'s order.
+        bounds: [Option<PeakBound>; BAND_COUNT],
         /// The longest an event lasts.
         duration: LongestDuration,
         /// The light curve, if the kind gives light.
@@ -344,14 +349,13 @@ impl TransientRow {
         self.route
     }
 
-    /// The bound on the kind's peak luminosity in `band`; `None` where the source models no light
-    /// in the band, or is not built ([`pending`](Self::pending)).
+    /// The bound on the kind's peak luminosity in `band`, its in-band power; `None` where the
+    /// source models no light in the band, or is not built ([`pending`](Self::pending)).
     #[must_use]
     pub const fn peak_bound(&self, band: AlertBand) -> Option<PeakBound> {
-        match (self.source, band) {
-            (RowSource::Built { photometric, .. }, AlertBand::Photometric(_)) => photometric,
-            (RowSource::Built { xray, .. }, AlertBand::XRay) => xray,
-            (RowSource::Pending(_), _) => None,
+        match self.source {
+            RowSource::Built { bounds, .. } => bounds[band.index()],
+            RowSource::Pending(_) => None,
         }
     }
 
@@ -419,8 +423,7 @@ impl TransientRow {
             classes,
             route,
             source: RowSource::Built {
-                photometric: Some(PeakBound::Watts(photometric)),
-                xray: None,
+                bounds: bands_alike(Some(PeakBound::Watts(photometric)), None),
                 duration: LongestDuration::AtMost(Span::ZERO),
                 light_curve: None,
             },
@@ -428,19 +431,92 @@ impl TransientRow {
     }
 }
 
-/// The bound on a core collapse's luminosity in any band, W: 10³⁸ (10⁴⁵ erg/s), the shock
+/// The bound on a core collapse's bolometric luminosity, W: 10³⁸ (10⁴⁵ erg/s), the shock
 /// breakout's peak in plan 09's brightest templates (IIP, IIL and IIb; [`LightCurve::of`]) at the
 /// instant of the explosion, before the plateau and the radioactive heating begin, after which
-/// every term falls or rises far below it. Ib and Ic break out at a tenth of it. Bolometric. The
-/// IIP and IIL breakouts are typical (Nakar and Sari 2010, ApJ 725, 904, equation A-8 and §4.1:
-/// about 9 × 10⁴⁷ erg over some 20 minutes at 500 R☉); IIb's was not read at source.
+/// every term falls or rises far below it. Ib and Ic break out at a tenth of it. The IIP and IIL
+/// breakouts are typical (Nakar and Sari 2010, ApJ 725, 904, equation A-8 and §4.1: about 9 ×
+/// 10⁴⁷ erg over some 20 minutes at 500 R☉); IIb's was not read at source. It bounds every band's
+/// bound ([`CORE_COLLAPSE_BAND_PEAKS`]), which the row takes.
 pub const CORE_COLLAPSE_PEAK: Watts = Watts::new(1e38);
 
-/// The bound on a Type Ia's luminosity in any band, W: 1.0730 × 10³⁶ (1.0730 × 10⁴³ erg/s), the
+/// The bound on a Type Ia's bolometric luminosity, W: 1.0730 × 10³⁶ (1.0730 × 10⁴³ erg/s), the
 /// peak of plan 09's template for the merger, double-detonation and hydrogen-donor channels,
 /// 1.07291 × 10³⁶ W at 15.13 days ([`LightCurve::of`]), rounded up at the fifth figure. The Type
-/// Iax template peaks at 1.345 × 10³⁵ W. Bolometric.
+/// Iax template peaks at 1.345 × 10³⁵ W. It bounds every band's bound ([`TYPE_IA_BAND_PEAKS`]),
+/// which the row takes.
 pub const TYPE_IA_PEAK: Watts = Watts::new(1.0730e36);
+
+/// The bound on a core collapse's luminosity in each band, W, in [`AlertBand::ALL`]'s order: the
+/// greatest of the IIP, IIL, IIb, Ib and Ic templates' light in the band
+/// ([`supernova_luminosity`](super::supernova_luminosity)) at any age, rounded up at the fifth
+/// figure (P12.T5.b).
+///
+/// | Band  | Bound (W)       | Set by                                              |
+/// | ----- | --------------- | --------------------------------------------------- |
+/// | U     | 1.8819 × 10³⁴   | the Ib's and Ic's radioactive light, 14.6 days in   |
+/// | B     | 2.6861 × 10³⁴   | the same                                            |
+/// | V     | 2.1922 × 10³⁴   | a IIL's plateau, 8.9 days in                        |
+/// | R     | 3.5972 × 10³⁴   | the same, 8.8 days in                               |
+/// | I     | 2.5631 × 10³⁴   | the same, 8.75 days in                              |
+/// | J     | 1.4989 × 10³⁴   | the same, 8.6 days in                               |
+/// | H     | 7.3777 × 10³³   | the same, 8.6 days in                               |
+/// | K     | 4.1255 × 10³³   | the same, 8.55 days in                              |
+/// | N     | 1.9515 × 10³²   | the same, 8.5 days in                               |
+/// | radio | none            |                                                     |
+/// | X     | 8.0931 × 10³⁶   | the stripped stars' breakout at the explosion       |
+///
+/// A test holds each at or above a fine search about its templates' peaks, and within 10⁻⁴ of
+/// it.
+pub const CORE_COLLAPSE_BAND_PEAKS: [Watts; BAND_COUNT] = [
+    Watts::new(1.8819e34),
+    Watts::new(2.6861e34),
+    Watts::new(2.1922e34),
+    Watts::new(3.5972e34),
+    Watts::new(2.5631e34),
+    Watts::new(1.4989e34),
+    Watts::new(7.3777e33),
+    Watts::new(4.1255e33),
+    Watts::new(1.9515e32),
+    Watts::ZERO,
+    Watts::new(8.0931e36),
+];
+
+/// The bound on a Type Ia's luminosity in each band, W, in [`AlertBand::ALL`]'s order: the greatest
+/// of the four channels' templates' light in the band
+/// ([`supernova_luminosity`](super::supernova_luminosity)) at any age, rounded up at the fifth
+/// figure (P12.T5.b).
+///
+/// | Band  | Bound (W)       |
+/// | ----- | --------------- |
+/// | U     | 2.1374 × 10³⁵   |
+/// | B     | 2.2751 × 10³⁵   |
+/// | V     | 1.4081 × 10³⁵   |
+/// | R     | 1.8823 × 10³⁵   |
+/// | I     | 1.0445 × 10³⁵   |
+/// | J     | 4.3014 × 10³⁴   |
+/// | H     | 1.8505 × 10³⁴   |
+/// | K     | 9.3988 × 10³³   |
+/// | N     | 3.6453 × 10³²   |
+/// | radio | none            |
+/// | X     | none            |
+///
+/// The normal template sets every band at its peak, 15.15 days in, with SN 2011fe's V share,
+/// 0.131; the Type Iax's peaks some ten times fainter. A test holds each at or above a fine search
+/// about its templates' peaks, and within 10⁻⁴ of it.
+pub const TYPE_IA_BAND_PEAKS: [Watts; BAND_COUNT] = [
+    Watts::new(2.1374e35),
+    Watts::new(2.2751e35),
+    Watts::new(1.4081e35),
+    Watts::new(1.8823e35),
+    Watts::new(1.0445e35),
+    Watts::new(4.3014e34),
+    Watts::new(1.8505e34),
+    Watts::new(9.3988e33),
+    Watts::new(3.6453e32),
+    Watts::ZERO,
+    Watts::ZERO,
+];
 
 /// The bound on a giant eruption's own light in any band, W: 1.2106 × 10³⁴, 10^7.5 L☉, the top of
 /// plan 06's law for its peak ([`lbv::LOG_PEAK_LUMINOSITY_SOLAR_LUMINOSITIES`]) with the IAU's
@@ -457,6 +533,31 @@ pub const GIANT_ERUPTION_PEAK: Watts = Watts::new(1.2106e34);
 /// optical light for them.
 pub const MAGNETAR_BURST_PEAK: Watts = Watts::new(5e40);
 
+/// The bounds of a row that bounds every photometric band alike by `photometric`, and X-rays by
+/// `xray`.
+const fn bands_alike(
+    photometric: Option<PeakBound>,
+    xray: Option<PeakBound>,
+) -> [Option<PeakBound>; BAND_COUNT] {
+    let mut bounds = [photometric; BAND_COUNT];
+    bounds[AlertBand::XRay.index()] = xray;
+    bounds
+}
+
+/// The bounds of a row with one constant bound per band, `peaks`: a band of no light, whose peak
+/// is zero, has none.
+const fn band_by_band(peaks: [Watts; BAND_COUNT]) -> [Option<PeakBound>; BAND_COUNT] {
+    let mut bounds = [None; BAND_COUNT];
+    let mut i = 0;
+    while i < BAND_COUNT {
+        if peaks[i].value() > 0.0 {
+            bounds[i] = Some(PeakBound::Watts(peaks[i]));
+        }
+        i += 1;
+    }
+    bounds
+}
+
 /// Both classes of accreting white dwarf, the hosts of novae and dwarf novae.
 const ACCRETING_WHITE_DWARFS: ClassSet =
     ClassSet::of(ClassId::ACCRETING_WHITE_DWARF).with(ClassId::ACCRETING_WHITE_DWARF_SLOW);
@@ -468,8 +569,7 @@ static ROWS: [TransientRow; 16] = [
         classes: ClassSet::of(ClassId::CORE_COLLAPSE),
         route: Route::OneShot,
         source: RowSource::Built {
-            photometric: Some(PeakBound::Watts(CORE_COLLAPSE_PEAK)),
-            xray: None,
+            bounds: band_by_band(CORE_COLLAPSE_BAND_PEAKS),
             duration: LongestDuration::Unending,
             light_curve: Some(LightCurveSource::SupernovaTemplate),
         },
@@ -479,8 +579,7 @@ static ROWS: [TransientRow; 16] = [
         classes: ClassSet::of(ClassId::TYPE_IA),
         route: Route::OneShot,
         source: RowSource::Built {
-            photometric: Some(PeakBound::Watts(TYPE_IA_PEAK)),
-            xray: None,
+            bounds: band_by_band(TYPE_IA_BAND_PEAKS),
             duration: LongestDuration::Unending,
             light_curve: Some(LightCurveSource::SupernovaTemplate),
         },
@@ -518,7 +617,7 @@ static ROWS: [TransientRow; 16] = [
     TransientRow::pending_on(
         TransientKind::XrayBurst,
         ClassSet::of(ClassId::XRAY_BINARY),
-        Route::Local,
+        Route::Recurrent,
         "P11.T9",
     ),
     TransientRow::pending_on(
@@ -532,8 +631,7 @@ static ROWS: [TransientRow; 16] = [
         classes: ClassSet::of(ClassId::LUMINOUS_BLUE_VARIABLE),
         route: Route::Recurrent,
         source: RowSource::Built {
-            photometric: Some(PeakBound::Watts(GIANT_ERUPTION_PEAK)),
-            xray: None,
+            bounds: bands_alike(Some(PeakBound::Watts(GIANT_ERUPTION_PEAK)), None),
             duration: LongestDuration::AtMost(lbv::MAX_DURATION),
             light_curve: Some(LightCurveSource::GiantEruption),
         },
@@ -543,8 +641,10 @@ static ROWS: [TransientRow; 16] = [
         classes: ClassSet::of(ClassId::TIDAL_DISRUPTION_VICTIM),
         route: Route::Centre,
         source: RowSource::Built {
-            photometric: Some(PeakBound::EddingtonShare(1.0)),
-            xray: Some(PeakBound::EddingtonShare(XRAY_SHARE)),
+            bounds: bands_alike(
+                Some(PeakBound::EddingtonShare(1.0)),
+                Some(PeakBound::EddingtonShare(XRAY_SHARE)),
+            ),
             duration: LongestDuration::Unending,
             light_curve: Some(LightCurveSource::DisruptionTail),
         },
@@ -554,10 +654,12 @@ static ROWS: [TransientRow; 16] = [
         classes: ClassSet::EMPTY,
         route: Route::Centre,
         source: RowSource::Built {
-            photometric: None,
-            xray: Some(PeakBound::Watts(Watts::new(
-                centre_flares::MAX_PEAK_LUMINOSITY_WATTS,
-            ))),
+            bounds: bands_alike(
+                None,
+                Some(PeakBound::Watts(Watts::new(
+                    centre_flares::MAX_PEAK_LUMINOSITY_WATTS,
+                ))),
+            ),
             duration: LongestDuration::AtMost(centre_flares::MAX_DURATION),
             light_curve: Some(LightCurveSource::CentreFlare),
         },
@@ -567,8 +669,7 @@ static ROWS: [TransientRow; 16] = [
         classes: ClassSet::EMPTY,
         route: Route::Local,
         source: RowSource::Built {
-            photometric: Some(PeakBound::PerHost),
-            xray: None,
+            bounds: bands_alike(Some(PeakBound::PerHost), None),
             duration: LongestDuration::AtMost(flares::MAX_DURATION),
             light_curve: Some(LightCurveSource::StarFlare),
         },
@@ -578,8 +679,7 @@ static ROWS: [TransientRow; 16] = [
         classes: ClassSet::EMPTY,
         route: Route::Local,
         source: RowSource::Built {
-            photometric: None,
-            xray: None,
+            bounds: bands_alike(None, None),
             duration: LongestDuration::AtMost(Span::ZERO),
             light_curve: None,
         },
@@ -589,8 +689,7 @@ static ROWS: [TransientRow; 16] = [
         classes: ClassSet::of(ClassId::CORE_COLLAPSE),
         route: Route::Recurrent,
         source: RowSource::Built {
-            photometric: None,
-            xray: Some(PeakBound::Watts(MAGNETAR_BURST_PEAK)),
+            bounds: bands_alike(None, Some(PeakBound::Watts(MAGNETAR_BURST_PEAK))),
             duration: LongestDuration::AtMost(magnetar::MAX_BURST_DURATION),
             light_curve: Some(LightCurveSource::MagnetarBurst),
         },
@@ -600,8 +699,7 @@ static ROWS: [TransientRow; 16] = [
         classes: ClassSet::EMPTY,
         route: Route::Local,
         source: RowSource::Built {
-            photometric: Some(PeakBound::PerHost),
-            xray: None,
+            bounds: bands_alike(Some(PeakBound::PerHost), None),
             duration: LongestDuration::AtMost(fu_orionis::MAX_DURATION),
             light_curve: Some(LightCurveSource::FuOrionisOutburst),
         },
@@ -626,8 +724,9 @@ mod tests {
     use crate::units::consts::SOLAR_LUMINOSITY_W;
     use crate::units::{LightYears, SolarMasses, SolarRadii, WattsPerSquareMetre, Years};
 
+    use super::super::light;
     use super::super::reach::{ROOT_CUBE_DIAGONAL, class_reach, kind_reach, reach};
-    use super::super::{BandLimits, SensorHorizon};
+    use super::super::{BandLimits, SensorHorizon, supernova_luminosity, supernova_peak};
 
     #[test]
     fn every_kind_has_its_own_row_in_order() {
@@ -665,17 +764,37 @@ mod tests {
         );
     }
 
-    /// The photometric slot bounds every photometric band alike.
+    /// A row bounded alike bounds every photometric band by one bound; the supernovae's rows take
+    /// one bound per band, none where a band has no light.
     #[test]
-    fn a_photometric_bound_covers_every_photometric_band() {
-        let row = TransientKind::TypeIa.row();
+    fn a_row_takes_one_bound_per_band() {
+        let row = TransientKind::Flare.row();
         for band in Band::ALL {
             assert_eq!(
                 row.peak_bound(AlertBand::Photometric(band)),
-                Some(PeakBound::Watts(TYPE_IA_PEAK))
+                Some(PeakBound::PerHost)
             );
         }
         assert_eq!(row.peak_bound(AlertBand::XRay), None);
+        for (kind, peaks) in [
+            (TransientKind::CoreCollapse, CORE_COLLAPSE_BAND_PEAKS),
+            (TransientKind::TypeIa, TYPE_IA_BAND_PEAKS),
+        ] {
+            for (band, peak) in AlertBand::ALL.into_iter().zip(peaks) {
+                let expected = (peak.value() > 0.0).then_some(PeakBound::Watts(peak));
+                assert_eq!(
+                    kind.row().peak_bound(band),
+                    expected,
+                    "{kind:?} in {band:?}"
+                );
+            }
+        }
+        let radio = AlertBand::Photometric(Band::Radio);
+        assert_eq!(TransientKind::CoreCollapse.row().peak_bound(radio), None);
+        assert_eq!(
+            TransientKind::TypeIa.row().peak_bound(AlertBand::XRay),
+            None
+        );
     }
 
     /// Plan 09's templates never exceed the rows' bounds over the first three years, sampled every
@@ -722,6 +841,57 @@ mod tests {
             "{:e}",
             brightest[1]
         );
+    }
+
+    /// Each supernova row's bound in each band holds over its templates' light in the band, at and
+    /// above a fine search about each template's peak on the grid (steps of 10⁻⁴ day over a fifth
+    /// of a day), within 10⁻⁴ of the brightest, and under the bolometric bound; a band no template
+    /// lights has none.
+    #[test]
+    fn the_band_bounds_hold_over_their_templates() {
+        let collapses = [
+            SupernovaType::IIP,
+            SupernovaType::IIL,
+            SupernovaType::IIb,
+            SupernovaType::Ib,
+        ]
+        .map(SupernovaKind::CoreCollapse);
+        let thermonuclear = [IaChannel::Merger, IaChannel::Iax].map(SupernovaKind::TypeIa);
+        for (peaks, bolometric, kinds) in [
+            (CORE_COLLAPSE_BAND_PEAKS, CORE_COLLAPSE_PEAK, &collapses[..]),
+            (TYPE_IA_BAND_PEAKS, TYPE_IA_PEAK, &thermonuclear[..]),
+        ] {
+            for (band, bound) in AlertBand::ALL.into_iter().zip(peaks) {
+                let mut brightest = 0.0_f64;
+                for &kind in kinds {
+                    let mut on_grid = (0.0_f64, Years::ZERO);
+                    for age in light::peak_grid() {
+                        let watts = supernova_luminosity(kind, age, band).value();
+                        if watts > on_grid.0 {
+                            on_grid = (watts, age);
+                        }
+                    }
+                    assert_same_bits(on_grid.0, supernova_peak(kind, band).value());
+                    let day = on_grid.1.value() * 365.25;
+                    let fine = (-1_000..=1_000)
+                        .map(|step| day + f64::from(step) * 1e-4)
+                        .filter(|&day| day >= 0.0)
+                        .map(|day| {
+                            supernova_luminosity(kind, Years::new(day / 365.25), band).value()
+                        })
+                        .fold(on_grid.0, f64::max);
+                    brightest = brightest.max(fine);
+                }
+                let bound = bound.value();
+                assert!(brightest <= bound, "{band:?}: {brightest:e} over {bound:e}");
+                if brightest > 0.0 {
+                    assert!(bound / brightest - 1.0 < 1e-4, "{band:?}: {bound:e}");
+                } else {
+                    assert_same_bits(bound, 0.0);
+                }
+                assert!(bound < bolometric.value(), "{band:?}");
+            }
+        }
     }
 
     /// The centre's rows read plan 09's own figures: the flares' bound and duration, and the tails'
@@ -878,9 +1048,10 @@ mod tests {
         assert_eq!(row.light_curve(), Some(LightCurveSource::GiantEruption));
     }
 
-    /// An X-ray sensor at 10⁻¹³ W m⁻² sees the core collapses' class to the cube's diagonal through
-    /// its magnetars, even a short burst at its bound, though the supernovae themselves have no
-    /// X-ray bound; a visual sensor sees no magnetar.
+    /// An X-ray sensor at 10⁻¹³ W m⁻² sees the core collapses' class to the cube's diagonal, through
+    /// its magnetars, even a short burst at its bound, and through the stripped stars' breakout,
+    /// whose bound is 8.0931 × 10³⁶ W, which at 10⁻⁶ W m⁻² still reaches 84,826 ly. A visual sensor
+    /// sees no magnetar.
     #[test]
     fn the_core_collapses_reach_the_diagonal_in_x_rays() {
         let w = WattsPerSquareMetre::new;
@@ -896,8 +1067,14 @@ mod tests {
         );
         assert_eq!(
             kind_reach(TransientKind::CoreCollapse, &xray),
-            LightYears::ZERO
+            ROOT_CUBE_DIAGONAL
         );
+        let bright = BandLimits::new(w(1e-6), w(1e-6)).unwrap();
+        let breakout = kind_reach(
+            TransientKind::CoreCollapse,
+            &SensorHorizon::new([(AlertBand::XRay, bright)]).unwrap(),
+        );
+        assert!((breakout.value() - 84_826.0).abs() < 1.0, "{breakout:?}");
         assert_eq!(reach(Watts::new(2.512e36), limits), ROOT_CUBE_DIAGONAL);
         let visual = SensorHorizon::new([(AlertBand::Photometric(Band::V), limits)]).unwrap();
         assert_eq!(
@@ -939,6 +1116,80 @@ mod tests {
                 TransientKind::MagnetarBurst,
             ]
         );
+    }
+
+    /// X-ray bursts are walked over the X-ray binaries' class, as the magnetars over the core
+    /// collapses', not found locally; their row waits on P11.T9, so they reach nothing yet.
+    #[test]
+    fn x_ray_bursts_are_walked_over_the_x_ray_binaries() {
+        let row = TransientKind::XrayBurst.row();
+        assert_eq!(row.route(), Route::Recurrent);
+        assert_eq!(row.classes(), ClassSet::of(ClassId::XRAY_BINARY));
+        assert_eq!(row.pending(), Some("P11.T9"));
+        let w = WattsPerSquareMetre::new;
+        let limits = BandLimits::new(w(1e-13), w(1e-13)).unwrap();
+        let xray = SensorHorizon::new([(AlertBand::XRay, limits)]).unwrap();
+        assert_eq!(class_reach(ClassId::XRAY_BINARY, &xray), LightYears::ZERO);
+    }
+
+    /// Every row and the band light pinned: each row's route, classes, bounds in every band,
+    /// duration and curve, the spectra's shares and the templates' peaks. From P12.T5.b, which
+    /// reads the rows, a change to any is a bless.
+    #[test]
+    fn registry_golden() {
+        use hyperion_testkit::golden;
+        use hyperion_testkit::golden::GoldenWriter;
+
+        use crate::GENERATOR_VERSION;
+
+        let mut w = GoldenWriter::new();
+        w.header(GENERATOR_VERSION.get());
+        for kind in TransientKind::ALL {
+            let row = kind.row();
+            let classes: Vec<_> = row.classes().iter().map(ClassId::name).collect();
+            w.line(&format!(
+                "{kind:?}: {:?} over {classes:?}, pending {:?}, lasting {:?}, curve {:?}",
+                row.route(),
+                row.pending(),
+                row.duration(),
+                row.light_curve(),
+            ));
+            for band in AlertBand::ALL {
+                match row.peak_bound(band) {
+                    Some(PeakBound::Watts(watts)) => {
+                        w.f64(&format!("{kind:?} in {band:?}"), watts.value());
+                    }
+                    Some(PeakBound::EddingtonShare(share)) => {
+                        w.f64(&format!("{kind:?} in {band:?}, Eddington share"), share);
+                    }
+                    Some(PeakBound::PerHost) => {
+                        w.line(&format!("{kind:?} in {band:?}: per host"));
+                    }
+                    None => {}
+                }
+            }
+        }
+        let kinds = [
+            SupernovaKind::CoreCollapse(SupernovaType::IIP),
+            SupernovaKind::CoreCollapse(SupernovaType::IIL),
+            SupernovaKind::CoreCollapse(SupernovaType::IIb),
+            SupernovaKind::CoreCollapse(SupernovaType::Ib),
+            SupernovaKind::TypeIa(IaChannel::Merger),
+            SupernovaKind::TypeIa(IaChannel::Iax),
+        ];
+        for kind in kinds {
+            for band in AlertBand::ALL {
+                w.f64(
+                    &format!("{kind:?} peak in {band:?}"),
+                    supernova_peak(kind, band).value(),
+                );
+                w.f64(
+                    &format!("{kind:?} at 20 d in {band:?}"),
+                    supernova_luminosity(kind, Years::new(20.0 / 365.25), band).value(),
+                );
+            }
+        }
+        golden!("alerts/registry", w.as_str());
     }
 
     /// The local kinds keep their sources' look-backs as their longest durations.

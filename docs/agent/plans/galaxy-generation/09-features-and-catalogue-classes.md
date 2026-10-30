@@ -5151,3 +5151,10 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     target is `no_such_system` (own commit).
   - _At 26._ The census's Type Ia share of shells (0.19–0.21) is against field core collapses
     alone; from P09.T2.c it moves to T36.a's or T38's census.
+- **P12.T5.b's addition to `supernova.rs` (lane `p12-t5b`, 2026-10-30, at 23, no output moves).**
+  `LightCurve::terms_at(Years) -> SupernovaTerms` (`breakout`, `plateau`, `radioactive`, `total`,
+  `weighted([f64; 3])`, `ZERO`). The terms stay in erg/s and are converted once, so `total` and
+  `weighted([1.0; 3])` are `at`'s bits; `at` is now `terms_at(age).total()`, and
+  `phase_four_golden` is unchanged. A retune of a template (the Type Ia's rise among them) moves
+  plan 12's band tables and bounds in `alerts::light` and `alerts::registry`; their recompute tests
+  and `alerts/registry.golden` catch it.

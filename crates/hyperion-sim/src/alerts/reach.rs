@@ -15,9 +15,14 @@
 //!   centre is one host, and local events are not walked by reach;
 //! - a kind whose source is not built, or with no light in the band, reaches nothing.
 //!
-//! The local kinds ([`Route::Local`]: dwarf novae, X-ray bursts, flares) add nothing to their
-//! classes' reach: they come with the range query (P12.T5.e), and dwarf novae and X-ray bursts are
-//! excluded from distant scans by reach (P12.T5.c).
+//! A bound is the kind's in its band: the in-band power through the band's top hat
+//! ([`light`](super::light)), so that the supernovae's shock breakouts, bright but far in the
+//! ultraviolet, do not carry their reach across the cube in V (P12.T5.b).
+//!
+//! The local kinds ([`Route::Local`]: dwarf novae, flares) add nothing to their classes' reach:
+//! they come with the range query (P12.T5.e), and dwarf novae are excluded from distant scans by
+//! reach (P12.T5.c). X-ray bursts are walked over the X-ray binaries' class, as the magnetars are
+//! over the core collapses' (P12.T5.b, by the reasoning of main's ruling for the magnetars).
 //!
 //! # Flux
 //!
@@ -125,14 +130,7 @@ impl Mm83Row {
 
 /// The X-ray band, keV: 2–10, the band the centre's flares and tails are given in (Design note
 /// 14).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "MM83's rows are the stored nodes' source record, which a test recomputes to the bit"
-    )
-)]
-const XRAY_BAND_KEV: (f64, f64) = (2.0, 10.0);
+pub(super) const XRAY_BAND_KEV: (f64, f64) = (2.0, 10.0);
 
 /// The rows of Morrison and McCammon's (1983, ApJ 270, 119, Table 2) fit that cover the X-ray band,
 /// 1.840–10 keV, broken at the K edges of sulphur, argon, calcium, iron and nickel.
@@ -473,11 +471,12 @@ pub fn kind_reach(kind: TransientKind, sensor: &SensorHorizon) -> LightYears {
 /// let w = WattsPerSquareMetre::new;
 /// let visual = BandLimits::new(w(1e-6), w(1e-5))?;
 /// let sensor = SensorHorizon::new([(AlertBand::Photometric(Band::V), visual)])?;
-/// // A Type Ia's bolometric peak falls to a microwatt per square metre at about 31,000 ly; a core
-/// // collapse's shock breakout reaches the whole cube.
+/// // A Type Ia's peak in V falls to a microwatt per square metre at about 11,190 ly, a core
+/// // collapse's, a IIL's plateau, at about 4,415 ly.
 /// let ia = class_reach(ClassId::TYPE_IA, &sensor).value();
-/// assert!((30_000.0..32_000.0).contains(&ia));
-/// assert!(class_reach(ClassId::CORE_COLLAPSE, &sensor).value() > 227_000.0);
+/// assert!((11_150.0..11_250.0).contains(&ia));
+/// let collapse = class_reach(ClassId::CORE_COLLAPSE, &sensor).value();
+/// assert!((4_390.0..4_440.0).contains(&collapse));
 /// // Plan 11's classes have no light curve yet.
 /// assert_eq!(class_reach(ClassId::ACCRETING_WHITE_DWARF, &sensor).value(), 0.0);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -529,7 +528,7 @@ mod tests {
 
     use super::*;
     use crate::Seed;
-    use crate::alerts::{AlertContext, BandLimits, CORE_COLLAPSE_PEAK, TYPE_IA_PEAK};
+    use crate::alerts::{AlertContext, BandLimits, CORE_COLLAPSE_BAND_PEAKS, TYPE_IA_BAND_PEAKS};
     use crate::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
     use crate::galaxy::Galaxy;
     use crate::galaxy::features::centre::events::flares as centre_flares;
@@ -578,8 +577,16 @@ mod tests {
         }
         let flares = Watts::new(centre_flares::MAX_PEAK_LUMINOSITY_WATTS);
         let cases = [
-            (Of::Class(ClassId::CORE_COLLAPSE), V, CORE_COLLAPSE_PEAK),
-            (Of::Class(ClassId::TYPE_IA), V, TYPE_IA_PEAK),
+            (
+                Of::Class(ClassId::CORE_COLLAPSE),
+                V,
+                CORE_COLLAPSE_BAND_PEAKS[V.index()],
+            ),
+            (
+                Of::Class(ClassId::TYPE_IA),
+                V,
+                TYPE_IA_BAND_PEAKS[V.index()],
+            ),
             (
                 Of::Kind(TransientKind::CentralFlare),
                 AlertBand::XRay,
