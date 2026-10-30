@@ -3,7 +3,8 @@
  * (plan R08, R08.T16.b; `view/atmosphere/discReflectance.ts`, `discAir.wgsl`): the lit bodies'
  * kernels' air forms against their CPU twin on SwiftShader, for a small disc through the `disc
  * cells` pass's air form, a large disc of four latitude bands, read at each pixel's latitude
- * between them, and a body drawn in the mesh regime.
+ * between them, and a body drawn in the mesh regime; and their forms for emission and air together
+ * (R08.T18.b), a glowing magma ocean under the air whose table holds the air's own light.
  *
  * @remarks
  * Each case is planned as the photorealistic frame plans it (`planLitBodies` with its body's disc
@@ -33,10 +34,13 @@ import {
   DISC_VIEW_COSINES,
   type DiscReflectanceTable,
   discTableHalves,
+  discTableLayers,
   discTableValuesOf,
   discTexelIndex,
 } from "../view/atmosphere/discTable";
 import { tableRadiusM } from "../view/atmosphere/hillaire";
+import type { SurfaceTemperatureField } from "../view/atmosphere/thermal";
+import { groundFieldOf, magmaOceanSurface } from "../test/thermalSurfaces";
 import { gravityRatio } from "../view/atmosphere/oblate";
 import {
   SATURN_OBLATE_GRAVITY,
@@ -58,6 +62,8 @@ import {
 } from "../view/bodies/discShading";
 import {
   BODY_DISC_CELLS_AIR_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
   type LitBodyEngine,
@@ -128,8 +134,8 @@ const BODY = "0200080020000000.0001";
  * A table of `bands` bands and one slot whose texels follow a pattern in every axis, as halves, its
  * air's light falling to 0 at the floor's row as a bake's does (the sun there grazes the air's top).
  */
-function patternedTable(bands: number): DiscReflectanceTable {
-  const values = new Float32Array(bands * DISC_LAYER_VALUES);
+function patternedTable(bands: number, glowing = false): DiscReflectanceTable {
+  const values = new Float32Array(bands * (glowing ? 2 : 1) * DISC_LAYER_VALUES);
   for (let b = 0; b < bands; b += 1) {
     for (let s = 0; s < DISC_SUN_COSINES; s += 1) {
       // A step at the floor would hold a limb cell across it to one point's weight, which R07's
@@ -148,8 +154,37 @@ function patternedTable(bands: number): DiscReflectanceTable {
       }
     }
   }
-  return { bands, slots: 1, sunFloor: -0.18, values: discTableValuesOf(values) };
+  if (!glowing) {
+    return { bands, slots: 1, sunFloor: -0.18, values: discTableValuesOf(values) };
+  }
+  // The air's own light (R08.T18.b): a thermal layer a band past the light slots', in a pattern by
+  // view cosine, the same at every sun row and azimuth, as a bake holds it.
+  for (let b = 0; b < bands; b += 1) {
+    for (let s = 0; s < DISC_SUN_COSINES; s += 1) {
+      for (let v = 0; v < DISC_VIEW_COSINES; v += 1) {
+        for (let k = 0; k < DISC_AZIMUTHS; k += 1) {
+          const at = discTexelIndex(bands + b, s, v, k);
+          for (let c = 0; c < 3; c += 1) {
+            values[at + c] = 0.5 + 0.3 * Math.sin(0.61 * v + 1.1 * c + b);
+          }
+        }
+      }
+    }
+  }
+  return {
+    bands,
+    slots: 1,
+    sunFloor: -0.18,
+    values: discTableValuesOf(values),
+    thermalScale: GLOW_SCALE,
+  };
 }
+
+/**
+ * The glowing case's thermal layers' scale, π cd m⁻²: at the cases' exposure the air's own light
+ * draws about as bright as the reflected (R08.T18.b).
+ */
+const GLOW_SCALE = 3e4;
 
 /** One case: a body with air drawn in a view, its record's lighting as the twin reads it. */
 interface AirCase {
@@ -166,6 +201,8 @@ interface AirCase {
   readonly reader: SurfaceLightingReader;
   /** Whether a craft's footprint over it promotes it to the mesh regime. */
   readonly mesh: boolean;
+  /** Its ground's temperature field, where the ground glows under the air (R08.T18.b). */
+  readonly thermal?: SurfaceTemperatureField;
 }
 
 /** Airless lighting as the twin reads it, the star hidden below the datum's horizon. */
@@ -200,6 +237,7 @@ function planOf(item: AirCase): BodyFramePlan {
     photometry: PROVISIONAL_PHOTOMETRY,
     lighting: undefined,
     air: item.air,
+    ...(item.thermal === undefined ? {} : { thermal: item.thermal }),
     ...(item.lighting === null ? {} : { atmosphere: item.lighting }),
   };
   const centrePx = {
@@ -293,7 +331,7 @@ async function drawPlan(
   sums: () => BufferHandle | null,
   plan: BodyFramePlan,
   item: AirCase,
-  kernels: { readonly plain: ComputeHandle; readonly air: ComputeHandle },
+  kernels: CellKernels,
 ): Promise<{
   readonly image: Float32Array;
   readonly sums: Float32Array | null;
@@ -306,8 +344,9 @@ async function drawPlan(
       plan,
       kernels.plain,
       { viewRotation, projection, size },
-      null,
+      kernels.emissive,
       kernels.air,
+      kernels.emissiveAir,
     );
     target.render({
       label: PHOTOREAL_PASS_LABELS.bodies,
@@ -372,7 +411,7 @@ function sumsAgreement(
   engine: RenderEngine,
 ): { readonly whole: SumsArm; readonly limb: SumsArm } {
   const fits = Math.floor(engine.capabilities.maxStorageBufferBindingSize / CELL_SUM_BYTES);
-  const cells = discCellJobs(plan.discs, fits, frameOf(item), false, true);
+  const cells = discCellJobs(plan.discs, fits, frameOf(item), true, true, true);
   const twins: Array<{ readonly job: number; readonly rgb: Rgb; readonly coverage: number }> = [];
   for (let g = 0; g < cells.groups.length; g += 4) {
     const first = cells.groups[g] ?? 0;
@@ -520,12 +559,33 @@ function casesOf(saturnLighting: SurfaceLightingTables): ReadonlyArray<AirCase> 
       reader: AIRLESS,
       mesh: true,
     },
+    {
+      name: "a 96 px glowing body's air at 120°, its ground's emission and the air's own light",
+      viewport: { widthPx: 128, heightPx: 112 },
+      camera: wide,
+      figure: sphere(2e9 * Math.sin(48 / (128 / (2 * Math.tan(Math.PI / 6))))),
+      distanceM: 2e9,
+      phaseDeg: 120,
+      air: { ...oneBand, table: patternedTable(1, true) },
+      lighting: null,
+      reader: AIRLESS,
+      mesh: false,
+      thermal: groundFieldOf(magmaOceanSurface()),
+    },
   ];
+}
+
+/** The `disc cells` kernel's forms the cases are drawn by. */
+interface CellKernels {
+  readonly plain: ComputeHandle;
+  readonly emissive: ComputeHandle;
+  readonly air: ComputeHandle;
+  readonly emissiveAir: ComputeHandle;
 }
 
 /** A case's table uploaded as `AtmosphereTables.setDiscReflectance` uploads it. */
 function uploaded(engine: RenderEngine, air: DiscAir): DiscAir {
-  const layers = air.table.bands * air.table.slots;
+  const layers = discTableLayers(air.table);
   const texture = engine.createTexture({
     name: "smoke disc air: table",
     size: [DISC_TABLE_WIDTH, DISC_TABLE_HEIGHT, layers],
@@ -555,10 +615,14 @@ export async function checkDiscAir(engine: RenderEngine, checks: Checks): Promis
   const bodyTable = saturnBodyTable(engine);
   const made: TextureHandle[] = [airless.body, bodyTable];
   try {
-    const [plain, air] = await Promise.all([
+    const [plain, emissive, air, emissiveAir] = await Promise.all([
       engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
+      engine.createComputeAsync(BODY_DISC_CELLS_EMISSIVE_KERNEL),
       engine.createComputeAsync(BODY_DISC_CELLS_AIR_KERNEL),
+      engine.createComputeAsync(BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL),
       renderer.prepareAir(),
+      renderer.prepareEmissive(),
+      renderer.prepareEmissiveAir(),
     ]);
     for (const given of casesOf({ ...airless, body: bodyTable })) {
       const item = { ...given, air: uploaded(engine, given.air) };
@@ -566,13 +630,26 @@ export async function checkDiscAir(engine: RenderEngine, checks: Checks): Promis
       const plan = planOf(item);
       const record = plan.discs[0];
       const regime = plan.regimes.get(BODY);
-      if (record === undefined || record.air === undefined) {
-        checks.check(`R08.T16.b ${item.name}`, false, "the body was not drawn by its table");
+      if (
+        record === undefined ||
+        record.air === undefined ||
+        (item.thermal !== undefined) !== (record.emission !== undefined)
+      ) {
+        checks.check(
+          `${item.thermal === undefined ? "R08.T16.b" : "R08.T18.b"} ${item.name}`,
+          false,
+          "the body was not drawn by its table, or not with its ground's emission",
+        );
         continue;
       }
       // The harness reads its targets back in order.
       // oxlint-disable-next-line no-await-in-loop
-      const drawn = await drawPlan(engine, renderer, kept.sums, plan, item, { plain, air });
+      const drawn = await drawPlan(engine, renderer, kept.sums, plan, item, {
+        plain,
+        emissive,
+        air,
+        emissiveAir,
+      });
       const image = imageAgreement(record, item, drawn.image);
       const sums = drawn.sums === null ? null : sumsAgreement(plan, item, drawn.sums, engine);
       const s = (latitudeRad: number): number =>
@@ -589,7 +666,7 @@ export async function checkDiscAir(engine: RenderEngine, checks: Checks): Promis
         image.worst <= 1 &&
         image.classes;
       checks.check(
-        `R08.T16.b ${item.name}`,
+        `${item.thermal === undefined ? "R08.T16.b" : "R08.T18.b"} ${item.name}`,
         ok,
         `${String(regime)}, s ${s(0).toFixed(4)} to ${s(Math.PI / 2).toFixed(4)}; the air disc cells' sums of its ${String(sums?.whole.pixels ?? 0)} wholly covered pixels within ${(sums?.whole.worst ?? Number.POSITIVE_INFINITY).toFixed(3)} of 10⁻³ of the twin's (worst at ${sums?.whole.where ?? "none"}), of its ${String(sums?.limb.pixels ?? 0)} on the limb within ${(sums?.limb.worst ?? Number.POSITIVE_INFINITY).toFixed(3)} of the image's tolerance; its ${String(image.pixels)} pixels within ${image.worst.toFixed(3)} of the image's tolerance, its classes ${String(image.classes)}`,
       );

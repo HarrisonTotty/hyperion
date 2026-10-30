@@ -31,9 +31,13 @@
  * light's air, so that the disc draws what the full passes draw over the mesh inside the boundary,
  * its class map, normal map and eclipses its own; their block past the records is one row
  * ({@link packDiscAir}, row 46's z its first). The table binds at group 2's binding 15
- * (`draw.ts`' `DISC_AIR_TEXTURES`). A record carries emission or air, never both: a body with air
- * has no ground field (`thermal.ts`' `groundTemperatureFieldOf`), and the plan gives a tabled record
- * none.
+ * (`draw.ts`' `DISC_AIR_TEXTURES`).
+ *
+ * **Emission and air together** (R08.T18.b): a record that carries both, a body with air whose
+ * ground glows drawn by its table, is drawn by the kernels' third form
+ * ({@link withDiscEmissionAndAir}): `shade` adds the ground's emission, then hands the sum to
+ * `disc_air`, which dims it by the air's mean transmittance as the full passes' composite dims a
+ * drawn surface, and adds the air's light, its own glow among it where the table holds one.
  */
 
 import { dot, type Vec3 } from "../../geometry/vec3";
@@ -210,6 +214,30 @@ export function withDiscEmission(source: string): string {
   return `${parts.join(EMISSIVE_SHADE_END)}\n${THERMAL_WGSL}\n${discEmissionWgsl}`;
 }
 
+/**
+ * {@link SHADE_END} with the emission added and the sum handed to `disc_air` before the return
+ * (R08.T18.b).
+ */
+const EMISSIVE_AIR_SHADE_END =
+  "    out.radiance = out.radiance + source.xyz * misc.z * reflectance * transmitted;\n  }\n  out.radiance = out.radiance + disc_emission(body, normal, surface, laws);\n  out.radiance = disc_air(body, q, ray, out.radiance);\n  return out;\n}";
+
+/**
+ * A disc kernel's form for emission and air together (the module's remarks; R08.T18.b): `source`
+ * with `shade` adding the ground's emission and handing the sum to `disc_air` as its last steps, and
+ * the shared function, the emission's term and the air's read appended.
+ *
+ * @throws Error unless `shade`'s end occurs exactly once in `source`.
+ */
+export function withDiscEmissionAndAir(source: string): string {
+  const parts = source.split(SHADE_END);
+  if (parts.length !== 2) {
+    throw new Error(
+      `a disc kernel's emissive form with air needs bodyDisc.wgsl's shade once, found ${parts.length - 1}`,
+    );
+  }
+  return `${parts.join(EMISSIVE_AIR_SHADE_END)}\n${THERMAL_WGSL}\n${discEmissionWgsl}\n${discAirWgsl}`;
+}
+
 /** A disc's air beyond the boundary (the module's remarks): its body's table, as its draws bind it. */
 export interface DiscAir {
   readonly table: DiscReflectanceTable;
@@ -228,9 +256,12 @@ export interface DiscAir {
 /** `vec4f` rows of a record's air block (`discAir.wgsl`'s). */
 export const DISC_AIR_ROWS = 1;
 
-/** A disc's air block as `discAir.wgsl` reads it: its table's light slots, its sun's floor, 0, 0. */
+/**
+ * A disc's air block as `discAir.wgsl` reads it: its table's light slots, its sun's floor, its
+ * thermal layers' scale (R08.T18.b; 0 for none), 0.
+ */
 export function packDiscAir(air: DiscAir): Float32Array {
-  return Float32Array.of(air.table.slots, air.table.sunFloor, 0, 0);
+  return Float32Array.of(air.table.slots, air.table.sunFloor, air.table.thermalScale ?? 0, 0);
 }
 
 /** {@link SHADE_END} with the sample's light handed to `disc_air` before the return. */

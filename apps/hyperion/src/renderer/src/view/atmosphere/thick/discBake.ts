@@ -30,6 +30,12 @@
  * mapping ({@link DISC_SUN_TABLE}), each node's optical depth and absorber amounts by Simpson's rule
  * along its ray to the top, the light slot's curves added at each node; read bilinearly. Its ground
  * shadow is the sphere's, as `source.wgsl`'s.
+ *
+ * **The air's own light** (R08.T18.b; `thermalSource.ts`): a self-luminous medium's view rays also
+ * gather what the kernels' thermal forms gather, each step's B̃ at its h\* times the depth it absorbs
+ * through slot 0's path and step factor, and σ_s,k J_th of the bake's scattered thermal light where
+ * it holds it, at the step's travel cosine; one value a view cosine, π L_th, held in a thermal layer
+ * a band past the light slots' ({@link DiscReflectanceTable.thermalScale}).
  */
 
 import type { Rgb } from "../../photometry/toneCurve";
@@ -62,6 +68,15 @@ import {
   transmittanceUvToRMu,
 } from "../opticalDepth";
 import type { MsSourceTable, ThickBakeBand } from "./bake";
+import {
+  bandsScattering,
+  type MediumTemperature,
+  type ThermalRgb,
+  type ThermalSource,
+  thermalPlanckInto,
+  thermalScatteringInto,
+  thermalSourceOf,
+} from "../thermalSource";
 import type { PolarisationTable } from "./polarisation";
 import { fromHalfBits } from "../../sky/half";
 import {
@@ -105,6 +120,8 @@ export interface DiscBakeInput {
   readonly bands: ReadonlyArray<ThickBakeBand>;
   /** The thick table J is read from, `thick` kind, one layer a band and light slot. */
   readonly source: PackedThickTable;
+  /** A self-luminous medium's thermal source (R08.T18.b), for the table's thermal layers. */
+  readonly thermal?: ThermalSource;
 }
 
 /** A medium term as the bake reads it, in its band's frame. */
@@ -351,6 +368,11 @@ interface ViewStep {
   readonly throughput: Float64Array;
   /** Its length times stepFactor of its optical depth per channel, slot by slot. */
   readonly weight: Float64Array;
+  /**
+   * Slot 0's depth the step absorbs, its terms' (σ_ext − σ_s) and its absorbers' curves', times
+   * stepFactor of its optical depth, per channel: the emission's weight (R08.T18.b).
+   */
+  readonly absorbedWeight: Float64Array;
 }
 
 /** A view ray of one view cosine, slot by slot, and its throughput at the datum. */
@@ -420,6 +442,7 @@ function viewRayOf(
     });
     const before = new Float64Array(slots * 3);
     const weight = new Float64Array(slots * 3);
+    const absorbedWeight = new Float64Array(3);
     for (let slot = 0; slot < slots; slot += 1) {
       const slotThroughput = throughput[slot] ?? [1, 1, 1];
       const slotDepth = pathDepth[slot] ?? [0, 0, 0];
@@ -433,6 +456,11 @@ function viewRayOf(
         const stepDepth = (sigma[c] ?? 0) * dt + absorbed;
         before[slot * 3 + c] = slotThroughput[c] ?? 1;
         weight[slot * 3 + c] = dt * stepFactor(stepDepth);
+        if (slot === 0) {
+          absorbedWeight[c] =
+            (((sigma[c] ?? 0) - (kernelScattering[c] ?? 0)) * dt + absorbed) *
+            stepFactor(stepDepth);
+        }
         slotThroughput[c] = (slotThroughput[c] ?? 1) * exp(-stepDepth);
       }
     }
@@ -446,9 +474,46 @@ function viewRayOf(
       kernelScattering,
       throughput: before,
       weight,
+      absorbedWeight,
     });
   }
   return { muView, steps: out, through: throughput };
+}
+
+/**
+ * A view ray's own light (the module's remarks, "The air's own light"), π L_th per channel, cd m⁻²
+ * times π: each step's B̃ through slot 0's emission weight, and σ_s,k J_th of the band's scattered
+ * thermal light at the step's travel cosine.
+ *
+ * @param lnBands - ln s_b of the body's bands, the scattered light's read.
+ * @param s - The band's own s_b, at which the read takes its own layer.
+ */
+function thermalAirInto(
+  ray: ViewRay,
+  thermal: ThermalSource,
+  lnBands: ArrayLike<number>,
+  s: number,
+  out: ThermalRgb,
+): void {
+  const muView = ray.muView;
+  const sinView = Math.sqrt(Math.max(1 - muView * muView, 0));
+  const planck: ThermalRgb = [0, 0, 0];
+  const scattered: ThermalRgb = [0, 0, 0];
+  out.fill(0);
+  for (const step of ray.steps) {
+    const travel = (sinView * step.x + muView * step.z) / step.rM;
+    thermalPlanckInto(thermal, step.heightM, planck);
+    thermalScatteringInto(thermal, lnBands, s, step.heightM, travel, scattered);
+    for (const c of CHANNELS) {
+      out[c] +=
+        (step.throughput[c] ?? 0) *
+        (planck[c] * (step.absorbedWeight[c] ?? 0) +
+          (step.weight[c] ?? 0) * step.kernelScattering[c] * scattered[c]);
+    }
+  }
+  for (const c of CHANNELS) {
+    out[c] *= Math.PI;
+  }
 }
 
 /** The colour channels, red, green and blue. */
@@ -692,6 +757,33 @@ export function discSunFloorOf(
   return floor;
 }
 
+/**
+ * One band's own light at any view cosine (R08.T18.b), the bake's own march, for the tests: π L_th
+ * per channel, cd m⁻² times π.
+ *
+ * @throws RangeError for a band the input does not hold, or an input without a thermal source.
+ */
+export function discThermalMarcher(
+  input: DiscBakeInput,
+  band: number,
+  options: DiscBakeOptions = {},
+): (muView: number) => readonly [number, number, number] {
+  const geometry = input.bands[band];
+  const thermal = input.thermal;
+  if (geometry === undefined || thermal === undefined) {
+    throw new RangeError(`the disc's bake has no band ${band} with a thermal source`);
+  }
+  const frame = bandFrameOf(input.medium, geometry);
+  const lnBands = input.bands.map((each) => log(each.gravityRatio));
+  const steps = options.viewSteps ?? DISC_VIEW_STEPS;
+  return (muView) => {
+    const ray = viewRayOf(frame, input.source, input.curves, input.source.slots, muView, steps);
+    const out: ThermalRgb = [0, 0, 0];
+    thermalAirInto(ray, thermal, lnBands, geometry.gravityRatio, out);
+    return out;
+  };
+}
+
 /** A bake's options, for the tests' convergence. */
 export interface DiscBakeOptions {
   /** The view ray's steps: {@link DISC_VIEW_STEPS}. */
@@ -773,16 +865,30 @@ export function bakeDiscReflectance(
   }
   const slots = source.slots;
   const sunFloor = discSunFloorOf(bands, input.medium.topHeightM);
-  const values = new Float32Array(bands.length * slots * DISC_LAYER_VALUES);
+  const lit = bands.length * slots * DISC_LAYER_VALUES;
+  const { thermal } = input;
+  const values = new Float32Array(
+    lit + (thermal === undefined ? 0 : bands.length * DISC_LAYER_VALUES),
+  );
   const steps = options.viewSteps ?? DISC_VIEW_STEPS;
   const scratch = nodeScratch();
   const air: [number, number, number] = [0, 0, 0];
+  const lnBands = bands.map((each) => log(each.gravityRatio));
+  // π L_th of each band at each view cosine, rgb, where the medium is self-luminous.
+  const own = new Float64Array(bands.length * DISC_VIEW_COSINES * 3);
   bands.forEach((geometry, b) => {
     const frame = bandFrameOf(input.medium, geometry);
     const rays = sunRaysOf(frame);
     const views = Array.from({ length: DISC_VIEW_COSINES }, (_, v) =>
       viewRayOf(frame, source, input.curves, slots, discViewCosineAt(v), steps),
     );
+    if (thermal !== undefined) {
+      const glow: ThermalRgb = [0, 0, 0];
+      views.forEach((ray, v) => {
+        thermalAirInto(ray, thermal, lnBands, geometry.gravityRatio, glow);
+        own.set(glow, (b * DISC_VIEW_COSINES + v) * 3);
+      });
+    }
     for (let slot = 0; slot < slots; slot += 1) {
       const sun = sunTableOf(frame, rays, input.curves[slot] ?? input.curves[0] ?? []);
       const layer = b * slots + slot;
@@ -803,7 +909,38 @@ export function bakeDiscReflectance(
       }
     }
   });
-  return { bands: bands.length, slots, sunFloor, values: discTableValuesOf(values) };
+  // The thermal layers, a band's at every sun row and azimuth, over their brightest, so that the
+  // half floats hold them whatever the glow's luminance.
+  const scale = Math.max(0, ...own);
+  if (thermal === undefined || !(scale > 0)) {
+    return {
+      bands: bands.length,
+      slots,
+      sunFloor,
+      values: discTableValuesOf(values.subarray(0, lit)),
+    };
+  }
+  const base = bands.length * slots;
+  for (let b = 0; b < bands.length; b += 1) {
+    for (let s = 0; s < DISC_SUN_COSINES; s += 1) {
+      for (let k = 0; k < DISC_AZIMUTHS; k += 1) {
+        for (let v = 0; v < DISC_VIEW_COSINES; v += 1) {
+          const at = (b * DISC_VIEW_COSINES + v) * 3;
+          values.set(
+            [(own[at] ?? 0) / scale, (own[at + 1] ?? 0) / scale, (own[at + 2] ?? 0) / scale, 0],
+            discTexelIndex(base + b, s, v, k),
+          );
+        }
+      }
+    }
+  }
+  return {
+    bands: bands.length,
+    slots,
+    sunFloor,
+    values: discTableValuesOf(values),
+    thermalScale: scale,
+  };
 }
 
 /**
@@ -825,6 +962,11 @@ export interface DiscBakeAir {
   readonly bake?: ReadonlyArray<MsSourceTable>;
   /** The body's polarisation correction, one table a band, where it has landed: summed into J. */
   readonly correction?: ReadonlyArray<PolarisationTable>;
+  /**
+   * A self-luminous medium's column temperature (R08.T18.b), from which the table's thermal layers
+   * are baked, the bake's scattered thermal light among them where it holds it.
+   */
+  readonly temperature?: MediumTemperature;
 }
 
 /**
@@ -843,10 +985,22 @@ export function discReflectanceFor(
   bands: ReadonlyArray<ThickBakeBand>,
   solve: () => ReadonlyArray<MsSourceTable>,
 ): DiscReflectanceTable {
+  const baked = air.bake ?? solve();
   const source = packThickTable(
-    air.bake ?? solve(),
+    baked,
     air.kernelMedium,
     air.correction === undefined ? null : { bands: air.correction, medium: air.medium },
   );
-  return bakeDiscReflectance({ medium: air.kernelMedium, curves: air.curves, bands, source });
+  const scattering = bandsScattering(baked);
+  const thermal =
+    air.temperature === undefined
+      ? undefined
+      : thermalSourceOf(air.temperature, air.kernelMedium.topHeightM, scattering);
+  return bakeDiscReflectance({
+    medium: air.kernelMedium,
+    curves: air.curves,
+    bands,
+    source,
+    ...(thermal === undefined ? {} : { thermal }),
+  });
 }

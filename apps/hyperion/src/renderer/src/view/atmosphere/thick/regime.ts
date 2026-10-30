@@ -16,6 +16,7 @@
  */
 
 import type { Rgb } from "../../photometry/toneCurve";
+import { type MediumTemperature, selfLuminousOf } from "../thermalSource";
 import {
   type AtmosphereMedium,
   columnLengthM,
@@ -506,9 +507,10 @@ export function regimeChannels(
  * @remarks
  * Until R08.T14.d's and R08.T15's gates pass, a thick regime is drawn with the analytic term under
  * `ATMOSPHERE: APPROXIMATE` (Design note 9's routing), which clears only when its regime's gate
- * passes.
+ * passes. Any of them may be `selfLuminous` (R08.T18.b): the medium's own light is above the
+ * visibility cut, and its kernels' thermal forms draw it.
  */
-export type AtmosphereRegime =
+export type AtmosphereRegime = (
   | { readonly kind: "thin" }
   | { readonly kind: "thickScattering" }
   | {
@@ -518,7 +520,24 @@ export type AtmosphereRegime =
        * reflecting boundary, or an envelope's floor.
        */
       readonly deckAltitudeM: number;
-    };
+    }
+) & {
+  /**
+   * Whether the medium's thermal emission exceeds 10⁻⁶ of the body's reflected light in some
+   * channel (`thermalSource.ts`' `selfLuminousOf`, R08.T18.b); absent, as `false`, below the cut,
+   * where nothing of it is computed.
+   */
+  readonly selfLuminous?: boolean;
+};
+
+/**
+ * What the cut that sets {@link AtmosphereRegime}'s `selfLuminous` reads beside the medium
+ * (R08.T18.b): its column's temperature and the record's stellar flux at the body, W m⁻².
+ */
+export interface RegimeThermal {
+  readonly temperature: MediumTemperature;
+  readonly stellarFluxWM2: number;
+}
 
 /**
  * A condensate deck of a body's cover, as the deck rule reads it (P14.T24.c's inventory; B1's
@@ -616,9 +635,22 @@ export function envelopeFloorM(medium: AtmosphereMedium): number {
  *   `thickScattering`, and `thin` otherwise.
  *
  * Every thick regime carries `ATMOSPHERE: APPROXIMATE` until its gate passes (Design note 9's
- * routing).
+ * routing). With `thermal`, a medium above the thermal cut is `selfLuminous` (R08.T18.b).
  */
-export function classifyRegime(medium: AtmosphereMedium, cover: BodyCover): AtmosphereRegime {
+export function classifyRegime(
+  medium: AtmosphereMedium,
+  cover: BodyCover,
+  thermal?: RegimeThermal,
+): AtmosphereRegime {
+  const regime = routedRegime(medium, cover);
+  return thermal !== undefined &&
+    selfLuminousOf(medium, thermal.temperature, thermal.stellarFluxWM2)
+    ? { ...regime, selfLuminous: true }
+    : regime;
+}
+
+/** {@link classifyRegime}'s route alone: the deck rule, then the boundary. */
+function routedRegime(medium: AtmosphereMedium, cover: BodyCover): AtmosphereRegime {
   if (cover.envelope) {
     return { kind: "cloudDeck", deckAltitudeM: envelopeFloorM(medium) };
   }

@@ -64,7 +64,15 @@ import {
   type DiscReflectanceTable,
   discTableBytes,
   discTableHalves,
+  discTableLayers,
 } from "./discTable";
+import {
+  bandsScattering,
+  type MediumTemperature,
+  packThermalSource,
+  type ThermalSource,
+  thermalSourceOf,
+} from "./thermalSource";
 import type { MsSourceTable } from "./thick/bake";
 import type { PolarisationTable } from "./thick/polarisation";
 import {
@@ -2244,6 +2252,17 @@ export class AtmosphereTables {
    * or `null`.
    */
   #disc: { readonly table: DiscReflectanceTable; readonly texture: TextureHandle } | null = null;
+  /** The column's temperature where the medium is self-luminous (R08.T18.b), or `null`. */
+  #temperature: MediumTemperature | null = null;
+  /**
+   * The medium's thermal source (R08.T18.b; {@link AtmosphereTables.setThermalSource}), packed and
+   * uploaded, the thick bake's scattered thermal light in it where the bake holds it, or `null`.
+   */
+  #thermal: {
+    readonly source: ThermalSource;
+    readonly buffer: BufferHandle;
+    readonly bytes: number;
+  } | null = null;
 
   /**
    * Makes the tables and builds them for `medium`.
@@ -2296,8 +2315,10 @@ export class AtmosphereTables {
       const bands = this.#thickBands;
       const correction = this.#correction;
       const disc = this.#disc?.table ?? null;
+      const temperature = this.#temperature;
       this.#thick = null;
       this.#disc = null;
+      this.#thermal = null;
       this.setMedium(this.#medium, this.#bottomRadiusM, this.#curves, this.#body);
       if (thick !== null) {
         this.#thick = { packed: thick, texture: this.#uploadThick(thick) };
@@ -2306,6 +2327,10 @@ export class AtmosphereTables {
       }
       if (disc !== null) {
         this.#disc = { table: disc, texture: this.#uploadDisc(disc) };
+      }
+      if (temperature !== null) {
+        this.#temperature = temperature;
+        this.#packThermal();
       }
     });
   }
@@ -2437,8 +2462,74 @@ export class AtmosphereTables {
       this.#row.baseBytes +
       (this.#slotDepthsRefusal === null ? this.#row.slotDepthBytes : 0) +
       this.thickBytes +
-      this.discBytes
+      this.discBytes +
+      this.thermalBytes
     );
+  }
+
+  /** The thermal source's bytes as allocated, B (R08.T18.b); 0 without one. */
+  get thermalBytes(): number {
+    return this.#thermal?.bytes ?? 0;
+  }
+
+  /**
+   * The medium's thermal source as the kernels' thermal forms read it (R08.T18.b,
+   * `thermalSource.wgsl`), or `null` for a medium that is not self-luminous.
+   */
+  get thermalSource(): BufferHandle | null {
+    return this.#thermal?.buffer ?? null;
+  }
+
+  /** The thermal source the buffer holds, for its twin; `null` without one. */
+  get thermal(): ThermalSource | null {
+    return this.#thermal?.source ?? null;
+  }
+
+  /**
+   * Gives the tables a self-luminous medium's column temperature (plan R08, R08.T18.b), from which
+   * they make the thermal source the kernels' thermal forms read, with the thick bake's scattered
+   * thermal light in it once the bake they hold carries it; or takes it away (`null`). A rebuild for
+   * another medium takes it away too.
+   *
+   * @throws `EngineUnavailable` while the engine has no device (a loss), or Error once they are
+   *   disposed.
+   */
+  setThermalSource(temperature: MediumTemperature | null): void {
+    if (this.#disposed) {
+      throw new Error(
+        "the atmosphere's tables were disposed: a caller holds them past their release",
+      );
+    }
+    this.#temperature = temperature;
+    this.#packThermal();
+  }
+
+  /** Packs and uploads the thermal source of the held temperature and bake, or releases it. */
+  #packThermal(): void {
+    const temperature = this.#temperature;
+    if (temperature === null) {
+      this.#releaseThermal();
+      return;
+    }
+    const scattering = bandsScattering(this.#thickBands);
+    const source = thermalSourceOf(temperature, this.#medium.topHeightM, scattering);
+    const packed = packThermalSource(source);
+    const buffer = this.#engine.createBuffer({
+      name: "atmosphere thermal source",
+      bytes: packed.byteLength,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "atmosphere-tables",
+    });
+    this.#engine.writeBuffer(buffer, 0, packed);
+    this.#releaseThermal();
+    this.#thermal = { source, buffer, bytes: packed.byteLength };
+  }
+
+  #releaseThermal(): void {
+    if (this.#thermal !== null) {
+      this.#engine.releaseBuffer(this.#thermal.buffer);
+      this.#thermal = null;
+    }
   }
 
   /**
@@ -2485,7 +2576,7 @@ export class AtmosphereTables {
         `a disc table of ${table.bands} bands is not the tables' ${this.#plan.bands.length}`,
       );
     }
-    const layers = table.bands * table.slots;
+    const layers = discTableLayers(table);
     if (!(table.slots >= 1) || table.values.length !== layers * DISC_LAYER_VALUES) {
       throw new RangeError(
         `a disc table of ${table.values.length} values is not ${layers} layers of ${DISC_LAYER_VALUES}`,
@@ -2498,7 +2589,7 @@ export class AtmosphereTables {
 
   /** Makes and fills a texture for a disc's table, its values as halves. */
   #uploadDisc(table: DiscReflectanceTable): TextureHandle {
-    const layers = table.bands * table.slots;
+    const layers = discTableLayers(table);
     const texture = this.#engine.createTexture({
       name: "atmosphere disc table",
       size: [DISC_TABLE_WIDTH, DISC_TABLE_HEIGHT, layers],
@@ -2635,6 +2726,9 @@ export class AtmosphereTables {
       this.#releaseThick();
       this.#thickBands = null;
       this.#correction = null;
+      if (this.#temperature !== null) {
+        this.#packThermal();
+      }
       return;
     }
     const packed = packThickTable(
@@ -2647,6 +2741,10 @@ export class AtmosphereTables {
     this.#thick = { packed, texture };
     this.#thickBands = bands;
     this.#correction = correction;
+    // The scattered thermal light rides the bake (R08.T18.b).
+    if (this.#temperature !== null) {
+      this.#packThermal();
+    }
   }
 
   /** Makes and fills a texture for a packed thick table. */
@@ -2819,6 +2917,9 @@ export class AtmosphereTables {
     this.#thickBands = null;
     this.#correction = null;
     this.#releaseDisc();
+    // So does its thermal source (R08.T18.b), whose temperature is the medium's column's.
+    this.#releaseThermal();
+    this.#temperature = null;
     const engine = this.#engine;
     const r = this.#resources;
     engine.writeBuffer(r.terms, 0, terms);
@@ -3208,6 +3309,7 @@ export class AtmosphereTables {
     this.#offRestored();
     this.#releaseThick();
     this.#releaseDisc();
+    this.#releaseThermal();
     releaseResources(this.#engine, this.#resources);
   }
 

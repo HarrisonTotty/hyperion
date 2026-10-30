@@ -2606,9 +2606,6 @@ export async function timeAtmosphereFrame(
     );
     const bareMissing = await timedPart("(G)", () => timeBare(on, checks, ledger, measured));
     const lava = groundTemperatureFieldOf(lavaWorldSurface());
-    if (lava === null) {
-      throw new Error("the lava world has no medium");
-    }
     const emittingMissing = await timedPart("(O)", () =>
       timeBare(on, checks, ledger, measured, lava),
     );

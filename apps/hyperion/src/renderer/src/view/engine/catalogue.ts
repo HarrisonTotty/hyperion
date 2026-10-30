@@ -10,7 +10,9 @@
 
 import {
   AERIAL_PERSPECTIVE_KERNEL,
+  AERIAL_PERSPECTIVE_THERMAL_KERNEL,
   AERIAL_PERSPECTIVE_THICK_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
   COMPOSITE_MATERIAL,
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_FILL_KERNEL,
@@ -20,23 +22,32 @@ import {
   RAY_MARCH_SLOTS_KERNEL,
   RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_THERMAL_KERNEL,
   RAY_MARCH_SLOTS_THICK_KERNEL,
   RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL,
   RAY_MARCH_SPECIAL_KERNEL,
+  RAY_MARCH_THERMAL_KERNEL,
   RAY_MARCH_THICK_KERNEL,
   RAY_MARCH_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_THERMAL_KERNEL,
   SKY_VIEW_KERNEL,
+  SKY_VIEW_THERMAL_KERNEL,
   SKY_VIEW_THICK_KERNEL,
+  SKY_VIEW_THICK_THERMAL_KERNEL,
 } from "../atmosphere/hillaire";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
 import {
   BODY_DISC_AIR_MATERIALS,
   BODY_DISC_CELLS_AIR_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_EMISSIVE_AIR_MATERIALS,
   BODY_DISC_EMISSIVE_MATERIALS,
   BODY_DISC_MATERIALS,
   SMOOTH_MESH_AIR_MATERIAL,
+  SMOOTH_MESH_EMISSIVE_AIR_MATERIAL,
   SMOOTH_MESH_EMISSIVE_MATERIAL,
   SMOOTH_MESH_MATERIAL,
 } from "../bodies/draw";
@@ -180,6 +191,23 @@ export const ATMOSPHERE_THICK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 ].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
 
 /**
+ * R08.T18.b's per-frame atmosphere with the medium's own light (`hillaire.ts`' `withThermalSource`):
+ * the sky view, the aerial perspective and both marches' footprints, of the thin read and of the
+ * thick, made only for a self-luminous body. The smoke page compiles them in the thick read's part
+ * (`smoke/page.ts`), for the watchdog of the part that compiles the rest.
+ */
+export const ATMOSPHERE_THERMAL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  SKY_VIEW_THERMAL_KERNEL,
+  AERIAL_PERSPECTIVE_THERMAL_KERNEL,
+  RAY_MARCH_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_THERMAL_KERNEL,
+  SKY_VIEW_THICK_THERMAL_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
+  RAY_MARCH_THICK_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL,
+].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
+
+/**
  * R05.T11.b's terrain pass, one material per vertex path, T11.c's lit view's display pass,
  * R10.T10.b's lit terrain, one material per vertex path, R10.T16.c's lit terrain as depth
  * alone for the symbology's pass, one per vertex path, R10.T11's wireframe terrain, one per
@@ -280,6 +308,19 @@ export const DISC_AIR_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "compute", spec: BODY_DISC_CELLS_AIR_KERNEL },
 ];
 
+/**
+ * R08.T18.b's forms of the lit bodies' kernels for emission and air together
+ * (`discReflectance.ts`' `withDiscEmissionAndAir`): the disc's interior and limb, the mesh regime's
+ * figure and the `disc cells` kernel, made only for a glowing body drawn by its disc table. The
+ * smoke page compiles them in part 9, after the air forms.
+ */
+export const DISC_EMISSIVE_AIR_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "material", spec: BODY_DISC_EMISSIVE_AIR_MATERIALS.interior },
+  { kind: "material", spec: BODY_DISC_EMISSIVE_AIR_MATERIALS.limb },
+  { kind: "material", spec: SMOOTH_MESH_EMISSIVE_AIR_MATERIAL },
+  { kind: "compute", spec: BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL },
+];
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
@@ -289,10 +330,12 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...ATMOSPHERE_VIEW_ENTRIES,
   ...ATMOSPHERE_ONE_BAND_ENTRIES,
   ...ATMOSPHERE_THICK_ENTRIES,
+  ...ATMOSPHERE_THERMAL_ENTRIES,
   ...TERRAIN_ENTRIES,
   ...SPLAT_ENTRIES,
   ...LIT_BODY_ENTRIES,
   ...THERMAL_ENTRIES,
   ...DISC_AIR_ENTRIES,
+  ...DISC_EMISSIVE_AIR_ENTRIES,
   ...SKY_ENTRIES,
 ];

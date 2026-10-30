@@ -67,14 +67,31 @@ export interface DiscReflectanceTable {
   readonly sunFloor: number;
   /**
    * Four values a texel, row-major in each layer, layer after layer: the air's π L ÷ E in r, g and
-   * b, and the march's mean transmittance in a, each a half float's value.
+   * b, and the march's mean transmittance in a, each a half float's value; then, with
+   * {@link DiscReflectanceTable.thermalScale}, a thermal layer a band.
    */
   readonly values: Float32Array;
+  /**
+   * The scale of the air's own light (R08.T18.b), cd m⁻² times π: a self-luminous medium's table
+   * holds, past its bands' light slots, one layer a band of π L_th ÷ this in r, g and b, L_th the
+   * air's thermal emission and its scattering seen at each view cosine, the same at every sun row
+   * and azimuth; absent for a medium that is not self-luminous.
+   */
+  readonly thermalScale?: number;
+}
+
+/** A table's layers: a band's light slots, and its thermal layer where it holds one (R08.T18.b). */
+export function discTableLayers(
+  table: Pick<DiscReflectanceTable, "bands" | "slots" | "thermalScale">,
+): number {
+  return table.bands * (table.slots + (table.thermalScale === undefined ? 0 : 1));
 }
 
 /** The bytes a table's texture allocates, B: {@link DISC_LAYER_BYTES} a layer. */
-export function discTableBytes(table: Pick<DiscReflectanceTable, "bands" | "slots">): number {
-  return table.bands * table.slots * DISC_LAYER_BYTES;
+export function discTableBytes(
+  table: Pick<DiscReflectanceTable, "bands" | "slots" | "thermalScale">,
+): number {
+  return discTableLayers(table) * DISC_LAYER_BYTES;
 }
 
 /** View cosine node v's μ_v. */
@@ -215,6 +232,43 @@ export function discTableAt(
   addLayer(table, lower * table.slots + k, place, 1 - w, out);
   addLayer(table, (lower + 1) * table.slots + k, place, w, out);
   return out;
+}
+
+/**
+ * The air's own light at s and the view cosine `muView` (R08.T18.b), cd m⁻² times π, rgb: its
+ * thermal layers at the top sun row and azimuth 0, read as {@link discTableAt} reads the bands, times
+ * the table's scale; 0 for a table without them (`discAir.wgsl`'s `disc_air_thermal_at`).
+ */
+export function discThermalAt(
+  table: DiscReflectanceTable,
+  lnBands: ArrayLike<number>,
+  s: number,
+  muView: number,
+): readonly [number, number, number] {
+  const scale = table.thermalScale;
+  if (scale === undefined) {
+    return [0, 0, 0];
+  }
+  const out: [number, number, number, number] = [0, 0, 0, 0];
+  const base = table.bands * table.slots;
+  const place = [DISC_SUN_COSINES - 1, discViewPlace(muView), 0] as const;
+  const last = table.bands - 1;
+  const ls = log(s);
+  if (last === 0 || !(ls > (lnBands[0] ?? Number.NaN))) {
+    addLayer(table, base, place, 1, out);
+  } else if (!(ls < (lnBands[last] ?? Number.NaN))) {
+    addLayer(table, base + last, place, 1, out);
+  } else {
+    let lower = 0;
+    while (lower + 1 < last && (lnBands[lower + 1] ?? Number.NaN) <= ls) {
+      lower += 1;
+    }
+    const l0 = lnBands[lower] ?? Number.NaN;
+    const w = (ls - l0) / ((lnBands[lower + 1] ?? Number.NaN) - l0);
+    addLayer(table, base + lower, place, 1 - w, out);
+    addLayer(table, base + lower + 1, place, w, out);
+  }
+  return [out[0] * scale, out[1] * scale, out[2] * scale];
 }
 
 /**

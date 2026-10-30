@@ -797,10 +797,10 @@ describe("the plan", () => {
       ]);
     });
 
-    it("gives a record drawn by its table no emission", () => {
+    it("gives a record drawn by its table its emission beside its air (R08.T18.b)", () => {
       const field = surfaceTemperatureFieldOf(lavaWorldSurface());
       const { plan } = airPlan(1.2e9, { drawsAir: true }, { thermal: field });
-      expect([plan.discs[0]?.air, plan.discs[0]?.emission]).toEqual([AIR, undefined]);
+      expect([plan.discs[0]?.air, plan.discs[0]?.emission === undefined]).toEqual([AIR, false]);
       // Inside the boundary the same body's record carries its emission and no air.
       const inside = airPlan(1.05e9, { drawsAir: true }, { thermal: field }).plan.discs[0];
       expect([inside?.air, inside?.emission === undefined]).toEqual([undefined, false]);

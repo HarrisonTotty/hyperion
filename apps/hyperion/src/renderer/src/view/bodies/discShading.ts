@@ -100,7 +100,7 @@ import {
   MAX_DISC_CLASSES,
 } from "./discSurface";
 import { oblateAlbedoScale } from "./oblate";
-import { discAzimuthOf, discTableAt } from "../atmosphere/discTable";
+import { discAzimuthOf, discTableAt, discThermalAt } from "../atmosphere/discTable";
 import { gravityRatio } from "../atmosphere/oblate";
 
 /**
@@ -829,6 +829,8 @@ function runsOf(
  *   their own cells.
  * @param airCells - Whether the kernel's air form is there to shade the records that carry their
  *   air (R08.T16.b); without it they take no jobs, as without the emissive form.
+ * @param emissiveAirCells - Whether its form for emission and air together is there to shade the
+ *   records that carry both (R08.T18.b); without it they take no jobs.
  */
 export function discCellJobs(
   records: ReadonlyArray<DiscRecord>,
@@ -836,12 +838,18 @@ export function discCellJobs(
   frame: DiscLimbFrame | null = null,
   emissiveCells = false,
   airCells = false,
+  emissiveAirCells = false,
 ): DiscCellJobs {
   const most = Math.min(maxJobs, MAX_CELL_JOBS);
+  // A record takes cells where the kernel of its form is made: its emission's, its air's, or both's
+  // (R08.T18.b).
+  const formMade = (record: DiscRecord): boolean => {
+    const emits = record.emission !== undefined;
+    const aired = record.air !== undefined;
+    return emits && aired ? emissiveAirCells : emits ? emissiveCells : aired ? airCells : true;
+  };
   const planned = records.map((record) =>
-    (record.emission !== undefined && !emissiveCells) || (record.air !== undefined && !airCells)
-      ? null
-      : plannedCellsOf(record, frame),
+    formMade(record) ? plannedCellsOf(record, frame) : null,
   );
   let count = 0;
   let spanRows = 0;
@@ -1727,6 +1735,14 @@ function airAt(
     );
     for (const c of CHANNELS) {
       out[c] += source.illuminance[c] * near * near * record.exposureOverPi * lit[c];
+    }
+  }
+  // A self-luminous medium's own light (R08.T18.b; `disc_air_thermal_at`): π L_th times the
+  // exposure over π, no star's.
+  if (table.thermalScale !== undefined) {
+    const glow = discThermalAt(table, lnBands, s, muView);
+    for (const c of CHANNELS) {
+      out[c] += glow[c] * record.exposureOverPi;
     }
   }
   return out;

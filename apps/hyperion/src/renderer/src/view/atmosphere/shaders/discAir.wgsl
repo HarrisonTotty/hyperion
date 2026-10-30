@@ -99,6 +99,34 @@ fn disc_air_at(air : OblateBody, s : f32, slot : u32, slots : u32, place : vec3f
     + disc_air_layer((lower + 1u) * slots + k, place) * w;
 }
 
+// The air's own light (R08.T18.b; `discThermalAt`), pi L_th over the table's scale: its thermal
+// layers past its bands' light slots, one a band, at the top sun row and azimuth 0, the bands read as
+// `disc_air_at` reads them.
+fn disc_air_thermal_at(air : OblateBody, s : f32, slots : u32, view_place : f32) -> vec3f {
+  let bands = oblateBandCount(air);
+  let base = bands * slots;
+  let last = bands - 1u;
+  let place = vec3f(f32(DISC_SUN_COSINES - 1u), view_place, 0.0);
+  if (last == 0u) {
+    return disc_air_layer(base, place).rgb;
+  }
+  let ls = log(s);
+  if (!(ls > oblateBand(atmosphere_body, 0u).y)) {
+    return disc_air_layer(base, place).rgb;
+  }
+  if (!(ls < oblateBand(atmosphere_body, last).y)) {
+    return disc_air_layer(base + last, place).rgb;
+  }
+  var lower = 0u;
+  while (lower + 1u < last && oblateBand(atmosphere_body, lower + 1u).y <= ls) {
+    lower++;
+  }
+  let l0 = oblateBand(atmosphere_body, lower).y;
+  let w = (ls - l0) / (oblateBand(atmosphere_body, lower + 1u).y - l0);
+  return disc_air_layer(base + lower, place).rgb * (1.0 - w)
+    + disc_air_layer(base + lower + 1u, place).rgb * w;
+}
+
 // A star's light at `q` towards it through the eclipse's occluders, per channel: `shade`'s term
 // (`eclipseVisible`), each occluder's hidden fraction taken off.
 fn disc_air_visible(q : vec3f, j : u32, towards : vec3f, distance : f32, star_radius : f32) -> vec3f {
@@ -190,6 +218,11 @@ fn disc_air(body : Body, q : vec3f, ray : vec3f, ground : vec3f) -> vec3f {
       f32(DISC_AZIMUTHS - 1u) * disc_air_azimuth(normal, to_camera, towards) / TRIG_PI
     ));
     out = out + source.xyz * (near * near) * misc.z * lit.rgb;
+  }
+  // A self-luminous medium's own light (R08.T18.b): its thermal layers times their scale, the
+  // block's z, 0 for a table without them.
+  if (block.z > 0.0) {
+    out = out + disc_air_thermal_at(air, s, slots, view_place) * block.z * misc.z;
   }
   return out;
 }

@@ -355,8 +355,10 @@ describe("the temperature field (R08.T18.a)", () => {
     expect(dayWeighted - nightWeighted).toBeCloseTo(10, 3);
   });
 
-  it("leaves a body with a medium to R08.T18.b", () => {
-    expect(groundTemperatureFieldOf(earthSurface())).toBeNull();
+  it("gives a body with a medium its ground's field too, seen through its air (R08.T18.b)", () => {
+    expect(groundTemperatureFieldOf(earthSurface())).toEqual(
+      surfaceTemperatureFieldOf(earthSurface()),
+    );
   });
 
   it("takes an airless body and a magma ocean with no volatile air", () => {

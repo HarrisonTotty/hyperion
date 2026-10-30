@@ -595,11 +595,17 @@ describe("the ground's temperature field (R08.T18.a)", () => {
     );
   });
 
-  it("is none for a body with a medium", async () => {
+  it("is a body with a medium's ground's too, seen through its air (R08.T18.b)", async () => {
     const h = harness();
     note(h, [lit(A)]);
     await answer(h, A, answerFor(A, earthDetail()));
-    expect(h.cache.groundFieldOf(A)).toBeNull();
+    const converted = toBodyDetail(answerFor(A, earthDetail()), FIXTURE_SYSTEM, DESIGNATION);
+    if (converted.kind !== "ok" || converted.detail.record.surface.state !== "ok") {
+      throw new Error("the Earth fixture's record converts, its surface ok");
+    }
+    expect(h.cache.groundFieldOf(A)).toEqual(
+      groundTemperatureFieldOf(converted.detail.record.surface.value),
+    );
   });
 
   it("reads a reply's field once, however many frames ask it", async () => {
@@ -2006,6 +2012,43 @@ function latestDisc(h: Harness): ScriptedDisc {
   }
   return disc;
 }
+
+/** A self-luminous {@link airAssembly} or {@link thickAssembly}: its column at 2,600 K. */
+function glowing(assembled: AssembledMedium): AssembledMedium {
+  if (assembled.medium === undefined) {
+    throw new Error("a glowing assembly draws a medium");
+  }
+  const temperature = {
+    heightsM: Float64Array.of(0, 100_000),
+    temperaturesK: Float64Array.of(2_600, 2_600),
+  };
+  return {
+    ...assembled,
+    drawn: { ...assembled.drawn, temperature },
+    regime: { ...assembled.regime, selfLuminous: true },
+  };
+}
+
+describe("a self-luminous medium's thermal source (R08.T18.b)", () => {
+  it("builds its tables with the column's temperature, and none below the cut", async () => {
+    const h = harness();
+    await drawn(h, [lit(A)], glowing(airAssembly()));
+    expect(madeAt(h, 0).built.temperature?.temperaturesK[0]).toBe(2_600);
+    const cold = harness();
+    await drawn(cold, [lit(A)], airAssembly());
+    expect(madeAt(cold, 0).built.temperature).toBeUndefined();
+  });
+
+  it("asks its thick bake's column and its disc table with the temperature", async () => {
+    const h = harness(undefined, routedThick);
+    await drawn(h, [lit(A)], glowing(thickAssembly()));
+    expect(latestBake(h).ask.column.temperature?.temperaturesK[0]).toBe(2_600);
+    vi.spyOn(console, "error").mockImplementation(ignore);
+    latestBake(h).settle({ kind: "failed", message: "refused" });
+    await microtasks();
+    expect(latestDisc(h).ask.air.temperature?.temperaturesK[0]).toBe(2_600);
+  });
+});
 
 describe("a body's disc table (R08.T16.b)", () => {
   /** A disc table of the first tables' plan's bands, one slot, its values zero. */

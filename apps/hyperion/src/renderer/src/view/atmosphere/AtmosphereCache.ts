@@ -170,6 +170,7 @@ import type {
 import type { DiscReflectanceTable } from "./discTable";
 import type { BakeSpectrum } from "./spectralColour";
 import { groundTemperatureFieldOf, type SurfaceTemperatureField } from "./thermal";
+import type { MediumTemperature } from "./thermalSource";
 import {
   type AbsorberCurveSlots,
   type AtmosphereBody,
@@ -241,6 +242,12 @@ export interface BuiltAtmosphere {
    * (`DrawnMedium.sources`), a kept case's; absent for a kept medium that cannot bake.
    */
   readonly sources?: ReadonlyArray<SpectralSource>;
+  /**
+   * The column's temperature of a self-luminous medium (R08.T18.b; `AtmosphereRegime`'s
+   * `selfLuminous`), from which its tables make its thermal source and its thick bake its thermal
+   * field; absent below the thermal cut, where nothing of it is computed.
+   */
+  readonly temperature?: MediumTemperature;
 }
 
 /**
@@ -258,8 +265,24 @@ export type AtmosphereTablesFactory<T extends CachedTables> = (built: BuiltAtmos
 export function atmosphereTablesOn(
   engine: RenderEngine,
 ): AtmosphereTablesFactory<AtmosphereTables> {
-  return (built) =>
-    new AtmosphereTables(engine, built.medium, built.bottomRadiusM, built.curves, built.body);
+  return (built) => {
+    const tables = new AtmosphereTables(
+      engine,
+      built.medium,
+      built.bottomRadiusM,
+      built.curves,
+      built.body,
+    );
+    if (built.temperature !== undefined) {
+      try {
+        tables.setThermalSource(built.temperature);
+      } catch (error: unknown) {
+        tables.dispose();
+        throw error;
+      }
+    }
+    return tables;
+  };
 }
 
 /**
@@ -785,6 +808,9 @@ function toDrawOf(key: string, input: BodyAtmosphereInput, assembled: AssembledM
           curves: drawn.curves,
           body: drawn.body,
           sources: drawn.sources,
+          ...(assembled.regime.selfLuminous === true && drawn.temperature !== undefined
+            ? { temperature: drawn.temperature }
+            : {}),
         }
       : null,
     input,
@@ -921,7 +947,9 @@ function thickBakeAskOf(
   tables: CachedTables,
   lights: ReadonlyArray<BodyLight>,
 ): ThickBakeAsk | null {
-  const column = spectralColumnOf(built.medium, sources);
+  // A self-luminous medium's column carries its temperature, so that the bake solves its thermal
+  // field beside its beams (R08.T18.b).
+  const column = spectralColumnOf(built.medium, sources, built.temperature);
   const body = bakeBodyOf(tables);
   const bands = tables.plan.bands.map((_, band) => band);
   if (input !== null) {
@@ -973,6 +1001,8 @@ function discBakeAskOf(
       curves: built.curves,
       ...(landed.bake === undefined ? {} : { bake: landed.bake }),
       ...(landed.correction === undefined ? {} : { correction: landed.correction }),
+      // A self-luminous medium's table holds its own light (R08.T18.b).
+      ...(built.temperature === undefined ? {} : { temperature: built.temperature }),
     },
   };
 }
@@ -1059,8 +1089,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
 
   /**
    * A body's ground temperature field (plan R08, R08.T18.a; `thermal.ts`' `groundTemperatureFieldOf`)
-   * from the record the cache holds for it, read once a reply: `null` for a body with a medium, one
-   * whose surface section is not `ok`, or one of no record held.
+   * from the record the cache holds for it, read once a reply, a body with a medium's too since
+   * R08.T18.b: `null` for one whose surface section is not `ok`, or one of no record held.
    */
   groundFieldOf(body: BodyIdHex): SurfaceTemperatureField | null {
     const held = this.#bodies.get(body);

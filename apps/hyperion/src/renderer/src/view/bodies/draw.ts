@@ -99,6 +99,7 @@ import {
   discEmissionOf,
   withDiscAir,
   withDiscEmission,
+  withDiscEmissionAndAir,
 } from "../atmosphere/discReflectance";
 import type { SurfaceTemperatureField } from "../atmosphere/thermal";
 import {
@@ -593,10 +594,10 @@ function discRecordOf(
     radius: source.radiusM / a,
     illuminance: source.illuminance,
   }));
-  // Its ground's emission above the cut (R08.T18.a), about its brightest star; none for a record
-  // drawn by its air's table (R08.T16.b), whose forms draw no emission.
+  // Its ground's emission above the cut (R08.T18.a), about its brightest star, beside its air's
+  // table where it is drawn by it (R08.T18.b), whose third form dims it by the air.
   const emission =
-    body.thermal === undefined || air !== undefined
+    body.thermal === undefined
       ? null
       : discEmissionOf(
           body.thermal,
@@ -1013,6 +1014,35 @@ export const BODY_DISC_AIR_MATERIALS: Readonly<Record<"interior" | "limb", WgslM
     };
   })();
 
+/**
+ * The disc's two materials' forms for emission and air together (plan R08, R08.T18.b;
+ * `discReflectance.ts`' `withDiscEmissionAndAir`), drawn for the records that carry both: a body
+ * with air whose ground glows, drawn by its disc table beyond the 10⁹ m boundary; the air forms'
+ * uniforms, states and table.
+ */
+export const BODY_DISC_EMISSIVE_AIR_MATERIALS: Readonly<
+  Record<"interior" | "limb", WgslMaterialSpec>
+> = (() => {
+  const source = withDiscEmissionAndAir(DISC_SOURCE);
+  const { interior, limb } = BODY_DISC_AIR_MATERIALS;
+  return {
+    interior: {
+      ...interior,
+      name: "bodies:discEmissiveAir",
+      displayName: "GLOWING ATMOSPHERIC DISCS",
+      vertexWgsl: source,
+      fragmentWgsl: source,
+    },
+    limb: {
+      ...limb,
+      name: "bodies:discLimbEmissiveAir",
+      displayName: "GLOWING ATMOSPHERIC LIMBS",
+      vertexWgsl: source,
+      fragmentWgsl: source,
+    },
+  };
+})();
+
 const SMOOTH_MESH_SOURCE = LIT_SOURCE + patchVertexWgsl + smoothMeshWgsl;
 
 /** The group 2 binding of a mesh body's coverage mask (`smoothMesh.wgsl`, R10.T10.c), past the disc's. */
@@ -1085,6 +1115,21 @@ export const SMOOTH_MESH_AIR_MATERIAL: WgslMaterialSpec = (() => {
 })();
 
 /**
+ * The mesh regime's material's form for emission and air together (plan R08, R08.T18.b;
+ * `withDiscEmissionAndAir`), for the records that carry both; the air form's bindings and states.
+ */
+export const SMOOTH_MESH_EMISSIVE_AIR_MATERIAL: WgslMaterialSpec = (() => {
+  const source = withDiscEmissionAndAir(SMOOTH_MESH_SOURCE);
+  return {
+    ...SMOOTH_MESH_AIR_MATERIAL,
+    name: "bodies:smoothMeshEmissiveAir",
+    displayName: "GLOWING ATMOSPHERIC MESHES",
+    vertexWgsl: source,
+    fragmentWgsl: source,
+  };
+})();
+
+/**
  * The `disc cells` pass's label (R07.T8.d), between R06's sky and the mesh bodies' figures, which
  * read its sums as the `discs` pass does (`PHOTOREAL_PASS_LABELS.discCells`).
  */
@@ -1131,6 +1176,19 @@ export const BODY_DISC_CELLS_EMISSIVE_KERNEL: KernelPair = {
 export const BODY_DISC_CELLS_AIR_KERNEL: KernelPair = {
   name: "BODY DISC CELLS, with air",
   reference: withDiscAir(LIT_SOURCE + bodyDiscCellsWgsl),
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/**
+ * The `disc cells` kernel's form for emission and air together (plan R08, R08.T18.b;
+ * `withDiscEmissionAndAir`), one dispatch a set of records that carry both
+ * (`DiscCellSet.emissive` and `DiscCellSet.air`): one kernel more in R01.T15's bounded cache, made
+ * at the first frame that has such a record.
+ */
+export const BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, emissive, with air",
+  reference: withDiscEmissionAndAir(LIT_SOURCE + bodyDiscCellsWgsl),
   subgroup: null,
   readback: "bit-exact",
 };
@@ -1245,6 +1303,11 @@ interface DeviceResources {
    * once prepared; `null` until then.
    */
   air: FormMaterials | null;
+  /**
+   * Their forms for emission and air together (R08.T18.b), made and prepared at the first record
+   * that carries both; `null` until then.
+   */
+  emissiveAir: FormMaterials | null;
 }
 
 /**
@@ -1260,8 +1323,11 @@ interface FormMaterials {
   prepared: Promise<void>;
 }
 
-/** The kernels' forms beside the plain ones: R08.T18.a's emissive and R08.T16.b's air. */
-type FormKind = "emissive" | "air";
+/**
+ * The kernels' forms beside the plain ones: R08.T18.a's emissive, R08.T16.b's air, and R08.T18.b's
+ * emissive with air.
+ */
+type FormKind = "emissive" | "air" | "emissiveAir";
 
 /** Each form's materials and what its failure to prepare is reported as. */
 const FORM_SPECS: Readonly<
@@ -1287,6 +1353,12 @@ const FORM_SPECS: Readonly<
     mesh: SMOOTH_MESH_AIR_MATERIAL,
     what: "the air forms of the lit bodies",
   },
+  emissiveAir: {
+    interior: BODY_DISC_EMISSIVE_AIR_MATERIALS.interior,
+    limb: BODY_DISC_EMISSIVE_AIR_MATERIALS.limb,
+    mesh: SMOOTH_MESH_EMISSIVE_AIR_MATERIAL,
+    what: "the emissive forms with air of the lit bodies",
+  },
 };
 
 /**
@@ -1301,6 +1373,16 @@ interface DrawnPlan {
   readonly emissive: FormMaterials | null;
   /** The prepared air forms its records with air are drawn by; `null` where none has air. */
   readonly air: FormMaterials | null;
+  /**
+   * The prepared forms its records with emission and air are drawn by (R08.T18.b); `null` where
+   * none has both.
+   */
+  readonly emissiveAir: FormMaterials | null;
+}
+
+/** Whether a record carries its ground's emission and its air together (R08.T18.b). */
+function withEmissionAndAir(record: DiscRecord): boolean {
+  return record.emission !== undefined && record.air !== undefined;
 }
 
 /** A record without its emission, as the plain forms draw it. */
@@ -1327,6 +1409,9 @@ function formsOf(
   drawn: DrawnPlan,
   plain: Pick<FormMaterials, "interior" | "limb" | "mesh">,
 ): Pick<FormMaterials, "interior" | "limb" | "mesh"> {
+  if (record.air !== undefined && record.emission !== undefined && drawn.emissiveAir !== null) {
+    return drawn.emissiveAir;
+  }
   if (record.air !== undefined && drawn.air !== null) {
     return drawn.air;
   }
@@ -1445,6 +1530,7 @@ export class LitBodyRenderer {
       noDiscTable: this.#noDiscTable(),
       emissive: null,
       air: null,
+      emissiveAir: null,
     };
   }
 
@@ -1528,6 +1614,15 @@ export class LitBodyRenderer {
   }
 
   /**
+   * Makes the forms for emission and air together and prepares their pipelines (R08.T18.b), ahead
+   * of a glowing body's first frame drawn by its disc table; resolves once they are, or could not
+   * be.
+   */
+  prepareEmissiveAir(): Promise<void> {
+    return this.#formMade("emissiveAir").prepared;
+  }
+
+  /**
    * Whether the air forms are prepared to draw a body by its disc table (R08.T16.b), their making
    * begun at the first call: a plan's `drawsAir`, so that a body keeps its full passes until they
    * are.
@@ -1545,18 +1640,30 @@ export class LitBodyRenderer {
     if (this.#drawn?.plan === plan) {
       return this.#drawn;
     }
-    const emits = plan.discs.some((record) => record.emission !== undefined);
+    const both = withEmissionAndAir;
+    const emits = plan.discs.some((record) => record.emission !== undefined && !both(record));
     const emissive = emits ? this.#formMaterials("emissive") : null;
     const aired = plan.discs.some((record) => record.air !== undefined);
     const air = aired ? this.#formMaterials("air") : null;
-    let records = plan.discs;
-    if (emits && emissive === null) {
-      records = records.map(withoutEmission);
-    }
-    if (aired && air === null) {
-      records = records.map(withoutAir);
-    }
-    this.#drawn = { plan, records, emissive, air };
+    const glowing = plan.discs.some(both);
+    const emissiveAir = glowing ? this.#formMaterials("emissiveAir") : null;
+    // A record keeps what a prepared form draws: with emission and air, by their form, or else by
+    // the air's without its emission (R08.T18.b); either alone by its own; the rest dropped.
+    const drawnOf = (record: DiscRecord): DiscRecord => {
+      if (both(record) && emissiveAir !== null) {
+        return record;
+      }
+      let out = both(record) ? withoutEmission(record) : record;
+      if (out.emission !== undefined && emissive === null) {
+        out = withoutEmission(out);
+      }
+      if (out.air !== undefined && air === null) {
+        out = withoutAir(out);
+      }
+      return out;
+    };
+    const records = emits || aired ? plan.discs.map(drawnOf) : plan.discs;
+    this.#drawn = { plan, records, emissive, air, emissiveAir };
     return this.#drawn;
   }
 
@@ -1774,6 +1881,7 @@ export class LitBodyRenderer {
     frame: DiscCellFrame,
     emissiveKernel: ComputeHandle | null = null,
     airKernel: ComputeHandle | null = null,
+    emissiveAirKernel: ComputeHandle | null = null,
   ): boolean {
     if (this.#written?.plan === plan) {
       return false;
@@ -1781,7 +1889,14 @@ export class LitBodyRenderer {
     // As many pixels' sums as one storage binding holds; a disc past them sums its own cells.
     const fits = Math.floor(this.#engine.capabilities.maxStorageBufferBindingSize / CELL_SUM_BYTES);
     const { records } = this.#drawnPlan(plan);
-    const cells = discCellJobs(records, fits, frame, emissiveKernel !== null, airKernel !== null);
+    const cells = discCellJobs(
+      records,
+      fits,
+      frame,
+      emissiveKernel !== null,
+      airKernel !== null,
+      emissiveAirKernel !== null,
+    );
     if (cells.count === 0) {
       this.#upload(plan);
       return false;
@@ -1797,11 +1912,17 @@ export class LitBodyRenderer {
       if (record === undefined) {
         throw new Error(`the cell pass's set from job ${set.first} has no record ${set.record}`);
       }
-      const setKernel = set.air ? airKernel : set.emissive ? emissiveKernel : kernel;
+      const setKernel =
+        set.air && set.emissive
+          ? emissiveAirKernel
+          : set.air
+            ? airKernel
+            : set.emissive
+              ? emissiveKernel
+              : kernel;
       if (setKernel === null) {
-        throw new Error(
-          `the cell pass's ${set.air ? "air" : "emissive"} set from job ${set.first} has no kernel`,
-        );
+        const form = set.air && set.emissive ? "emissive with air" : set.air ? "air" : "emissive";
+        throw new Error(`the cell pass's ${form} set from job ${set.first} has no kernel`);
       }
       this.#engine.dispatch(
         setKernel,

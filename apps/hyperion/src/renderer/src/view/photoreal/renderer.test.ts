@@ -24,6 +24,7 @@ import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import {
   BODY_DISC_CELLS_AIR_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
@@ -54,7 +55,15 @@ import {
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
   RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
+  AERIAL_PERSPECTIVE_THERMAL_KERNEL,
   AERIAL_PERSPECTIVE_THICK_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL,
+  RAY_MARCH_THERMAL_KERNEL,
+  RAY_MARCH_THICK_THERMAL_KERNEL,
+  SKY_VIEW_THERMAL_KERNEL,
+  SKY_VIEW_THICK_THERMAL_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_THICK_KERNEL,
   RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
@@ -879,18 +888,20 @@ async function overlayDatums(
  * Every kernel VIEW makes on a device (plan R01, R01.T15): the photorealistic renderer's histogram
  * and disc cells, and since R08.T18.a the disc cells' emissive form, for a body above the thermal
  * emission's visibility cut (`withDiscEmission`), and since R08.T16.b their air form, for a body
- * drawn by its disc table beyond the 10⁹ m boundary (`withDiscAir`); the atmosphere's per-frame
- * kernels, its sky view,
+ * drawn by its disc table beyond the 10⁹ m boundary (`withDiscAir`), and since R08.T18.b their form
+ * for both (`withDiscEmissionAndAir`); the atmosphere's per-frame kernels, its sky view,
  * aerial perspective, its two marches' footprint entry points, each general, specialised for one band
  * and no layer edge (R08.T11.d) and for one band, edged (R08.T11.g), their centre ray's entry points
  * under R08.T11.d's tile cull (off for a view) and the march's fill; since R08.T14.c the sky view, the
  * aerial perspective and both marches' footprints,
  * general and specialised, reading the thick table (`withThickRead`), for a body whose tables hold
- * one; its per-planet tables' four; and the sky bake's four. Each is a module constant, its
+ * one; since R08.T18.b the sky view, the aerial perspective and both marches' footprints of each
+ * read in their thermal forms (`withThermalSource`), for a self-luminous body; its per-planet
+ * tables' four; and the sky bake's four. Each is a module constant, its
  * WGSL fixed text with no value of a medium, a body or a setting in it (term counts, slices, bands
  * and light slots are uniforms; the specialised and one-band marches and the thick read are
  * variants of fixed text, chosen from the tables), so the records a device's cache holds for VIEW
- * are bounded by this list's length, 29, however many bodies a session visits. The smoke's kernel
+ * are bounded by this list's length, 38, however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
 const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
@@ -898,6 +909,7 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   BODY_DISC_CELLS_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_AIR_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   SKY_VIEW_KERNEL,
   AERIAL_PERSPECTIVE_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
@@ -915,6 +927,14 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   RAY_MARCH_SLOTS_THICK_KERNEL,
   RAY_MARCH_THICK_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
+  SKY_VIEW_THERMAL_KERNEL,
+  AERIAL_PERSPECTIVE_THERMAL_KERNEL,
+  RAY_MARCH_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_THERMAL_KERNEL,
+  SKY_VIEW_THICK_THERMAL_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
+  RAY_MARCH_THICK_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL,
   TRANSMITTANCE_KERNEL,
   MULTI_SCATTERING_KERNEL,
   SLOT_DEPTHS_KERNEL,
@@ -1085,16 +1105,18 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // pass); none after adds a kernel. The thin first pass makes 14: the view's, made up front with
     // both reads' one-band marches among them (R08.T11.g, which the slab Earth takes by slot and the
     // deck over the shared read), and the tables' four. The thick pass makes 6 more, 20 in all,
-    // bounded however many bodies follow. All but nine are made: the sky bake's four are the
+    // bounded however many bodies follow. All but eighteen are made: the sky bake's four are the
     // sky's, the march's fill a reader's, which no frame asks, the tile cull's two centre ray's
     // kernels its own cover's, which a view never takes (R08.T11.d), the disc cells' emissive
-    // form a body's above the thermal cut, which none of these is (R08.T18.a), and their air form
-    // a body's drawn by its disc table, which none of these has (R08.T16.b).
+    // form a body's above the thermal cut, which none of these is (R08.T18.a), their air form
+    // a body's drawn by its disc table, which none of these has (R08.T16.b), and their form for
+    // both and the per-frame kernels' eight thermal forms a glowing or self-luminous body's, which
+    // none of these is (R08.T18.b).
     expect(new Set(held.slice(0, kinds.length).slice(-1))).toEqual(
-      new Set([VIEW_KERNELS.length - BAKE_KERNELS.length - 5 - 6]),
+      new Set([VIEW_KERNELS.length - BAKE_KERNELS.length - 14 - 6]),
     );
     expect(new Set(held.slice(2 * kinds.length - 1))).toEqual(new Set([held.at(-1)]));
-    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 5);
+    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 14);
     // Each body's tables made their own handles all the while.
     expect(engine.counts.kernels).toBeGreaterThan(2 * airs.length);
     renderer.dispose();

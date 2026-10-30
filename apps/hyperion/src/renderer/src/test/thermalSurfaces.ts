@@ -32,17 +32,9 @@ export function lavaWorldSurface(): BodySurface {
   return surfaceOf(lavaWorldDetail());
 }
 
-/**
- * The ground temperature field of a surface the client draws with no medium.
- *
- * @throws Error for a surface with a medium, whose field is R08.T18.b's.
- */
+/** The ground temperature field of a surface, with a medium or without (R08.T18.b). */
 export function groundFieldOf(surface: BodySurface): SurfaceTemperatureField {
-  const field = groundTemperatureFieldOf(surface);
-  if (field === null) {
-    throw new Error("the surface has a medium");
-  }
-  return field;
+  return groundTemperatureFieldOf(surface);
 }
 
 /** The fixture's Earth: `temperate`, 287.9 K, under its N₂–O₂ air. */

@@ -48,8 +48,10 @@
 
 import {
   ATMOSPHERE_ONE_BAND_ENTRIES,
+  ATMOSPHERE_THERMAL_ENTRIES,
   ATMOSPHERE_THICK_ENTRIES,
   DISC_AIR_ENTRIES,
+  DISC_EMISSIVE_AIR_ENTRIES,
   THERMAL_ENTRIES,
   WGSL_CATALOGUE,
 } from "../view/engine/catalogue";
@@ -85,6 +87,7 @@ import {
   checkMarchOneBand,
   checkMarchSpecialised,
   checkCorrectionFrameTwinsEarth,
+  checkThermalFrameTwins,
   checkThickFrameTwinsEarth,
   checkThickFrameTwinsSaturn,
   checkThickMarchSpecialised,
@@ -383,13 +386,17 @@ async function run(
   // took 33 s more under load, the part past its watchdog. R08.T11.g's one-band march's two are
   // compiled in part 9, first: with them part 1 went from 170 s to past its watchdog on one variant
   // on a slower machine (4 vCPU, 2026-10-29). R08.T18.a's emissive forms are compiled in part 9 too,
-  // the lightest, beside their twin's group, and R08.T16.b's air forms after them.
+  // the lightest, beside their twin's group, and R08.T16.b's air forms after them, and R08.T18.b's
+  // forms with both after those. R08.T18.b's thermal forms of the per-frame kernels are compiled in
+  // part 12, beside their twins' group.
   const thin = WGSL_CATALOGUE.filter(
     (entry) =>
       !ATMOSPHERE_THICK_ENTRIES.includes(entry) &&
       !ATMOSPHERE_ONE_BAND_ENTRIES.includes(entry) &&
+      !ATMOSPHERE_THERMAL_ENTRIES.includes(entry) &&
       !THERMAL_ENTRIES.includes(entry) &&
-      !DISC_AIR_ENTRIES.includes(entry),
+      !DISC_AIR_ENTRIES.includes(entry) &&
+      !DISC_EMISSIVE_AIR_ENTRIES.includes(entry),
   );
   const entries = fixture === "broken-wgsl" ? [...thin, BROKEN_ENTRY] : thin;
   await group(1, "T9.b catalogue", () => checkCatalogue(engine, status, entries, checks));
@@ -530,6 +537,10 @@ async function run(
   await group(9, "R08.T16.b the disc's air beyond 10⁹ m against its twin", () =>
     checkDiscAir(engine, checks),
   );
+  // R08.T18.b's forms with emission and air together, compiled after the air forms.
+  await group(9, "T9.b catalogue: the emissive forms with air", () =>
+    checkCatalogue(engine, status, DISC_EMISSIVE_AIR_ENTRIES, checks),
+  );
   await group(7, "R10.T10.b the lit terrain", () => checkLitTerrain(engine, checks));
   await group(7, "R10.T10.c the survey edge", () => checkSurveyEdge(engine, checks));
   await group(7, "R10.T16 the frame", () => checkTerrainFrame(engine, checks));
@@ -563,6 +574,14 @@ async function run(
   // march by slot, so that neither part's GPU process compiles both reads' marches.
   await group(12, "R08.T11.d the specialised march over the shared read", () =>
     checkMarchSpecialised(engine, checks, summary.fallback),
+  );
+  // R08.T18.b's thermal forms of the per-frame kernels, compiled and held to their twins, in part 12,
+  // the lightest (54 s at 03e12ec's tree).
+  await group(12, "T9.b catalogue: the thermal forms", () =>
+    checkCatalogue(engine, status, ATMOSPHERE_THERMAL_ENTRIES, checks),
+  );
+  await group(12, "R08.T18.b the medium's own light against its twins", () =>
+    checkThermalFrameTwins(engine, checks, twins),
   );
   // In part 13, last: in part 6 it took the part to its watchdog (180 s), and beside the thin one
   // in part 12 to 166 to 172 s under load.

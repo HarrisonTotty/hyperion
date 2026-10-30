@@ -174,6 +174,8 @@ import {
   venusClassMedium,
 } from "../test/atmosphereFixtures";
 import { patternedCorrection, patternedThickBake } from "../test/thickTables";
+import type { MediumTemperature, ThermalScattering } from "../view/atmosphere/thermalSource";
+import type { TwinThermal } from "../view/atmosphere/tablesCpu";
 import {
   type DrawItem,
   type PassTimes,
@@ -1872,6 +1874,7 @@ async function planetOf(
       multiScattering: first,
       ...(bySlot.length > 1 ? { multiScatteringBySlot: bySlot } : {}),
       ...thickOf(atmosphere.tables),
+      ...thermalOf(atmosphere.tables),
     },
   };
 }
@@ -1883,6 +1886,15 @@ async function planetOf(
 function thickOf(tables: AtmosphereTables): { readonly thick?: PackedThickTable } {
   const packed = tables.thickPacked;
   return packed === null ? {} : { thick: packed };
+}
+
+/**
+ * The thermal source the tables hold, for a twin's planet (R08.T18.b), at the smoke's exposure scale
+ * narrowed to `f32` as the view's `marchSky.w` holds it; nothing where they hold none.
+ */
+function thermalOf(tables: AtmosphereTables): { readonly thermal?: TwinThermal } {
+  const source = tables.thermal;
+  return source === null ? {} : { thermal: { source, scale: Math.fround(SMOKE_EXPOSURE_SCALE) } };
 }
 
 /**
@@ -1921,6 +1933,7 @@ function oblatePlanetOf(
       multiScatteringBySlot: layers.slice(b * perBand, (b + 1) * perBand),
     })),
     ...thickOf(tables),
+    ...thermalOf(tables),
   };
 }
 
@@ -2087,12 +2100,15 @@ async function checkFrameTwins(
  */
 interface ThickTwinBody {
   readonly name: string;
-  readonly table: ThickTableKind;
+  /** The thick table it draws over, or `none` for the thin read (R08.T18.b's thermal forms). */
+  readonly table: ThickTableKind | "none";
   readonly medium: AtmosphereMedium;
   readonly curves: AbsorberCurveSlots;
   readonly figure: SpheroidFigure;
   readonly gravity: BodyGravity;
   readonly frames: ReadonlyArray<TwinFrame>;
+  /** Its column's temperature, where it draws the medium's own light (R08.T18.b). */
+  readonly thermal?: MediumTemperature;
 }
 
 /**
@@ -2196,6 +2212,56 @@ export async function checkThickFrameTwinsSaturn(
   ]);
 }
 
+/** A column isothermal at 3,000 K to 10⁶ m, past any medium's top the smoke draws. */
+const HOT_COLUMN: MediumTemperature = {
+  heightsM: Float64Array.of(0, 1e6),
+  temperaturesK: Float64Array.of(3_000, 3_000),
+};
+
+/**
+ * R08.T18.b: the kernels' thermal forms (`hillaire.ts`' `withThermalSource`) against their CPU twin,
+ * to 10⁻³ above 10⁻⁶ of the largest (R08.T6.b's bound), over the GPU's own per-planet tables and the
+ * same thermal source, at 3,000 K, so that the air's own light is most of each frame's: the measured
+ * Earth (its ozone under the Sun's curves, whose absorbers' depth emits) by the thin read, and over
+ * the thick table with a patterned scattered thermal light, from 2 km over a surface 60 km ahead and
+ * from 400 km at the limb, on high. In part 12, after the forms' catalogue.
+ *
+ * @remarks
+ * Not R05's Earth: its ozone's tent falls linearly to 0 at 40 km, so that at the limb a faint texel's
+ * emission comes from samples just under the tent's edge, where `f32`'s heights move a density near
+ * 0 by a share the 10⁻³ bound does not allow (1.9 × 10⁻³ measured, its emission alone), a profile's
+ * kink sunlight never shows, since ozone only dims it.
+ */
+export async function checkThermalFrameTwins(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  const frames = THICK_TWIN_FRAMES.slice(0, 2);
+  await checkThickTwinBodies(engine, checks, twins, [
+    {
+      name: "the measured Earth at 3,000 K",
+      table: "none",
+      medium: EARTH_REFERENCE,
+      curves: EARTH_REFERENCE_CURVES,
+      figure: WGS84,
+      gravity: EARTH_GRAVITY,
+      frames,
+      thermal: HOT_COLUMN,
+    },
+    {
+      name: "the measured Earth at 3,000 K",
+      table: "thick",
+      medium: EARTH_REFERENCE,
+      curves: EARTH_REFERENCE_CURVES,
+      figure: WGS84,
+      gravity: EARTH_GRAVITY,
+      frames,
+      thermal: HOT_COLUMN,
+    },
+  ]);
+}
+
 /** {@link checkThickFrameTwinsEarth}'s and {@link checkThickFrameTwinsSaturn}'s frames, in order. */
 async function checkThickTwinBodies(
   engine: RenderEngine,
@@ -2216,17 +2282,32 @@ async function checkThickTwinBodies(
       );
       try {
         // The check's head names the table it draws over.
-        let over: string;
+        let task: string;
+        let table: string;
         switch (body.table) {
           case "thick":
-            withThickTable(atmosphere.tables, body.curves.length);
-            over = "R08.T14.c {label}: {what}, over the thick table,";
+            withThickTable(atmosphere.tables, body.curves.length, body.thermal !== undefined);
+            task = "R08.T14.c";
+            table = ", over the thick table";
             break;
           case "correction":
             withCorrectionTable(atmosphere.tables, body.curves.length);
-            over = "R08.T14.f {label}: {what}, beside the correction alone,";
+            task = "R08.T14.f";
+            table = ", beside the correction alone";
+            break;
+          case "none":
+            task = "R08.T6.b";
+            table = "";
             break;
         }
+        // A self-luminous body's kernels are the thermal forms, its tables the thermal source's.
+        let light = "";
+        if (body.thermal !== undefined) {
+          atmosphere.tables.setThermalSource(body.thermal);
+          task = "R08.T18.b";
+          light = ", with the medium's own light";
+        }
+        const over = `${task} {label}: {what}${table}${light},`;
         const read = kernelMedium(body.medium);
         // The harness's GPU work runs in order: each body's tables are read back before the next's.
         // oxlint-disable-next-line no-await-in-loop
@@ -2971,10 +3052,31 @@ function withCorrectionTable(tables: AtmosphereTables, slots: number): void {
  * read it. The read's cost and arithmetic do not depend on the values, so a pattern that varies in
  * every axis holds the kernels to their twin, and to each other, as a bake's would.
  */
-function withThickTable(tables: AtmosphereTables, slots: number): void {
+function withThickTable(tables: AtmosphereTables, slots: number, thermal = false): void {
   const count = Math.max(1, slots);
-  tables.setThickTables(patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), count));
+  const bands = patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), count);
+  tables.setThickTables(
+    thermal
+      ? bands.map((band) => ({ ...band, thermal: patternedThermal(band.altitudesM) }))
+      : bands,
+  );
   tables.setPolarisationCorrection(patternedCorrection(tables.plan.bands, tables.medium, count));
+}
+
+/**
+ * A band's scattered thermal light in a pattern (R08.T18.b), so that its read's every axis moves:
+ * 5,000 to 15,000 cd m⁻² per unit of scattering, by altitude, travel cosine and channel.
+ */
+function patternedThermal(altitudesM: Float64Array): ThermalScattering {
+  const values = new Float32Array(altitudesM.length * 16 * 3);
+  for (let a = 0; a < altitudesM.length; a += 1) {
+    for (let v = 0; v < 16; v += 1) {
+      for (let c = 0; c < 3; c += 1) {
+        values[(a * 16 + v) * 3 + c] = 1e4 * (1 + 0.5 * Math.sin(0.37 * a + 0.71 * v + 1.3 * c));
+      }
+    }
+  }
+  return { altitudesM: altitudesM.slice(), values };
 }
 
 /**

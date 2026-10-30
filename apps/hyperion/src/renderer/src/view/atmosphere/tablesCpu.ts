@@ -162,6 +162,7 @@ import {
   irradianceDirections,
 } from "./irradianceQuadrature";
 import type { SurfaceLightingReader } from "./surfaceLighting";
+import { type ThermalSource, thermalPlanckInto, thermalScatteringInto } from "./thermalSource";
 import {
   ABSORBER_SLOTS,
   type AbsorberCurveSlots,
@@ -1878,6 +1879,21 @@ export interface PlanetTwin extends TwinTransmittance {
    * holds it; absent for a body drawn by Ψ_ms alone.
    */
   readonly thick?: PackedThickTable;
+  /**
+   * The medium's thermal source and the frame's scale (plan R08, R08.T18.b;
+   * `AtmosphereTables.thermal`), which the kernels' thermal forms draw; absent below the cut.
+   */
+  readonly thermal?: TwinThermal;
+}
+
+/**
+ * A self-luminous medium's thermal source as a twin's march reads it (R08.T18.b;
+ * `thermalSource.ts`): its B̃ and its scattered thermal light, and the frame's pre-exposure scale,
+ * `view.marchSky.w`, which multiplies both.
+ */
+export interface TwinThermal {
+  readonly source: ThermalSource;
+  readonly scale: number;
 }
 
 /**
@@ -1960,6 +1976,8 @@ export interface TwinSources {
    * its kind, as `thickRead.wgsl`'s `thickMultipleAt` does.
    */
   readonly thick?: TwinThickSource;
+  /** The planet's thermal source, where it holds one ({@link PlanetTwin.thermal}). */
+  readonly thermal?: TwinThermal;
 }
 
 /** The thick table's read for a twin's march (R08.T14.c, R08.T14.f; {@link TwinSources.thick}). */
@@ -2051,6 +2069,7 @@ export function tableSources(planet: PlanetTwin, read: SunRead = "curves"): Twin
     ...(planet.thick === undefined
       ? {}
       : { thick: { kind: planet.thick.kind, read: thickSourceOf(planet.thick) } }),
+    ...(planet.thermal === undefined ? {} : { thermal: planet.thermal }),
     sunOpticalDepth: (heightM, muSun, out) => {
       const rM = bottom + Math.min(Math.max(heightM, 0), atmosphereM);
       const [u, v] = transmittanceRMuToUv(shell, rM, muSun);
@@ -2403,6 +2422,9 @@ interface MarchFrame {
 /** The origin, for a direction taken into the body-fixed axes. */
 const NO_OFFSET: Vec3 = { x: 0, y: 0, z: 0 };
 
+/** ln s of a sphere's one band, at s = 1: the thermal source's read on a sphere's march. */
+const ONE_BAND = Float64Array.of(0);
+
 /** The body-fixed axes themselves, about the body's centre: the ray march's frame. */
 const BODY_FRAME: MarchFrame = {
   originM: NO_OFFSET,
@@ -2470,6 +2492,11 @@ class Marcher {
   /** The thick table's kind where the tables hold one, read with Ψ_ms (R08.T14.c, R08.T14.f). */
   readonly #thick: ThickTableKind | null;
   readonly #thickRead: TwinRgb = [0, 0, 0];
+  /** The medium's thermal source where its tables hold one (R08.T18.b), else `null`. */
+  readonly #thermal: TwinThermal | null;
+  /** The sample's B̃ times the frame's scale (`SampleMedium.planck`), 0 without a source. */
+  readonly #planck: TwinRgb = [0, 0, 0];
+  readonly #thermalRead: TwinRgb = [0, 0, 0];
 
   constructor(
     terms: readonly TwinTerm[],
@@ -2507,6 +2534,8 @@ class Marcher {
       (reads.kind === "oblate" || reads.sources.sunOpticalDepth !== undefined);
     this.#thick =
       reads.kind === "oblate" ? reads.reader.thickKind : (reads.sources.thick?.kind ?? null);
+    this.#thermal =
+      reads.kind === "oblate" ? reads.reader.thermal : (reads.sources.thermal ?? null);
     // A path a light slot under an absorber, slot 0's always (the views' mean transmittance), and
     // one path for every source of a medium with none, as `hillaire.ts`'s `frameSourcesOf` sends
     // them (`source.wgsl`'s `ViewMarch`).
@@ -2630,7 +2659,32 @@ class Marcher {
       }
       this.#addShare(source, lit);
     }
+    const thermal = this.#thermal;
+    if (thermal !== null) {
+      const muView = (d.x * gx + d.y * gy + d.z * gz) / gLength;
+      thermalScatteringInto(thermal.source, ONE_BAND, 1, heightM, -muView, this.#thermalRead);
+      this.#addThermal(thermal, heightM);
+    }
     this.#advance(dtM);
+  }
+
+  /**
+   * A self-luminous medium's step (R08.T18.b; `thermalSource.wgsl`): the sample's B̃ at its h\*
+   * times the frame's scale, which {@link Marcher.#advance} emits through slot 0's path, and the
+   * scattered thermal light read into {@link Marcher.#thermalRead}, σ_s,k J_th times the scale,
+   * added to slot 0's share (`thermalSharesOf`).
+   */
+  #addThermal(thermal: TwinThermal, scaledHeightM: number): void {
+    thermalPlanckInto(thermal.source, scaledHeightM, this.#planck);
+    const share = this.#paths.get(0)?.share;
+    if (share === undefined) {
+      throw new Error("a march has light slot 0's path");
+    }
+    const local = this.#local;
+    for (const c of CHANNELS) {
+      this.#planck[c] *= thermal.scale;
+      share[c] += (local[c] ?? Number.NaN) * this.#thermalRead[c] * thermal.scale;
+    }
   }
 
   /**
@@ -2700,6 +2754,15 @@ class Marcher {
       }
       this.#addShare(source, lit);
     }
+    const thermal = this.#thermal;
+    if (thermal !== null) {
+      const d = geodeticHeights
+        ? inBodyAxes(reads.frame, this.#ray.direction, false)
+        : this.#ray.direction;
+      const muView = (d.x * normal.x + d.y * normal.y + d.z * normal.z) / normalLength;
+      reader.thermalScatteringInto(s, scaledHeightM, -muView, this.#thermalRead);
+      this.#addThermal(thermal, scaledHeightM);
+    }
     this.#advance(dtM);
   }
 
@@ -2717,14 +2780,28 @@ class Marcher {
     }
   }
 
-  /** Each slot's share's in-scattering over the step `dtM` through its own path. */
+  /**
+   * Each slot's share's in-scattering over the step `dtM` through its own path, and on slot 0's a
+   * self-luminous medium's emission, B̃ times the depth the step absorbs (`thermalSource.wgsl`'s
+   * rewrite of `viewMarchStep`).
+   */
   #advance(dtM: number): void {
     const local = this.#local;
-    for (const { path, throughput, share, absorbed } of this.#paths.values()) {
+    const emitting = this.#thermal !== null;
+    for (const [slot, { path, throughput, share, absorbed }] of this.#paths.entries()) {
       path.stepInto(local, dtM, absorbed);
       for (const c of CHANNELS) {
         const stepDepth = (local[3 + c] ?? Number.NaN) * dtM + absorbed[c];
-        this.luminance[c] += throughput[c] * share[c] * dtM * exactStepFactor(stepDepth);
+        if (emitting && slot === 0) {
+          const emitted =
+            this.#planck[c] *
+            (((local[3 + c] ?? Number.NaN) - (local[c] ?? Number.NaN)) * dtM + absorbed[c]);
+          this.luminance[c] +=
+            throughput[c] * (share[c] * dtM + emitted) * exactStepFactor(stepDepth);
+        } else {
+          // As before the thermal source, to the bit.
+          this.luminance[c] += throughput[c] * share[c] * dtM * exactStepFactor(stepDepth);
+        }
         throughput[c] *= exp(-stepDepth);
       }
     }
@@ -4526,6 +4603,8 @@ export interface OblatePlanetTwin {
    * (`thick/read.ts`; R08.T14.c); absent for a body drawn by Ψ_ms alone.
    */
   readonly thick?: PackedThickTable;
+  /** The medium's thermal source and the frame's scale (R08.T18.b), absent below the cut. */
+  readonly thermal?: TwinThermal;
 }
 
 /**
@@ -5249,6 +5328,24 @@ class OblateReader {
    */
   get thickKind(): ThickTableKind | null {
     return this.#planet.thick?.kind ?? null;
+  }
+
+  /** The body's thermal source (R08.T18.b; {@link OblatePlanetTwin.thermal}), or `null`. */
+  get thermal(): TwinThermal | null {
+    return this.#planet.thermal ?? null;
+  }
+
+  /**
+   * The thermal source's J_th at s, h\* = `scaledHeightM` and the travel cosine `muTravel` into
+   * `out`, its bands in ln s as the body's (`thermalSource.wgsl`'s thermalScatteringAt); 0 without.
+   */
+  thermalScatteringInto(s: number, scaledHeightM: number, muTravel: number, out: TwinRgb): void {
+    const thermal = this.#planet.thermal;
+    if (thermal === undefined) {
+      out.fill(0);
+      return;
+    }
+    thermalScatteringInto(thermal.source, this.#lnBands, s, scaledHeightM, muTravel, out);
   }
 
   /**

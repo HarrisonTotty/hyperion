@@ -6018,6 +6018,9 @@ Acceptance: `pnpm test` and `just test-render`.
     `pnpm --filter hyperion exec vitest run view/atmosphere/thermal view/atmosphere/discReflectance`
     and `just test-render`.
 
+    _T18.b built 2026-10-30_ (Risks, "Deviations in T18.b, as built"), the solver's thermal source
+    with it.
+
 This assigns the roadmap's open item on visible thermal emission (README, "Open across plans").
 
 - Tests:
@@ -23748,3 +23751,27 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     both settings, pass with no fault line; each thick body routes `thickScattering`, drawn by the
     thin method under `ATMOSPHERE: APPROXIMATE`. Its captures are unframed (R01.T16's F3), so the
     looks by eye and the frame times are pending: the owner's RTX run.
+- **Deviations in T18.b, as built** (2026-10-30; lane `r08-t18b`; the split is the task entry's).
+  Client only: no generated output, version or golden moves.
+  - _The solver's thermal source_ was not built (its header left it to T18): `discreteOrdinates.ts`'
+    `ThermalEmission` and `ThermalSolution`, mode 0, B linear in τ through each layer, the ground at
+    1 − its directional albedo; Kirchhoff's law holds to 4 × 10⁻¹⁵. The beams' assembly is shared
+    (`assembledMode`), their arithmetic unchanged.
+  - _The bakes._ The thick bake solves the thermal field beside its beams (`MsSourceTable.thermal`,
+    J_th per unit of σ_s,k by V_cb), its gases' terms the first light's (lean, 2026-10-30). A thin
+    body bakes none (lean, 2026-10-30); Ψ_ms and the sky irradiance take no thermal term (findings).
+  - _The per-frame kernels._ Eight thermal forms (`hillaire.ts`' `withThermalSource`), a step
+    emitting B̃_c(T(h\*)) times the depth it absorbs, Kirchhoff in the channel (lean, 2026-10-30),
+    beside σ_s,k J_th; the buffer at binding 25 (`AtmosphereTables.setThermalSource`), the frame's
+    scale in `view.marchSky.w`. R01.T15's bounded cache: `VIEW_KERNELS` 29 → 38, with the cells'
+    third form. A self-luminous body takes no specialised, one-band or culled march.
+  - _`selfLuminous`_ on `AtmosphereRegime` (`classifyRegime`'s `RegimeThermal`): the column's
+    hottest black body where it absorbs against 10⁻⁶ of A E ÷ π, E the record's
+    `stellarFluxWM2` at E-490's efficacy; `DrawnMedium.temperature`, the column's, isothermal today.
+  - _The ground under air._ `groundTemperatureFieldOf` gives every surface's field. Beyond 10⁹ m
+    the third form (`withDiscEmissionAndAir`, `DISC_EMISSIVE_AIR_ENTRIES`) adds the emission and
+    dims it by the table's alpha; the disc table holds a thermal layer a band (`thermalScale`).
+  - _Smoke._ Part 12's thermal forms against their twins; part 9's glowing disc. The twins take the
+    measured Earth: R05's ozone tent misses 10⁻³ at the limb once it emits (findings).
+  - _Left:_ the thermal forms' frame cost, pending: the owner's RTX run; P14.T24.e's temperature
+    nodes; a giant's deck emission (T16.a).

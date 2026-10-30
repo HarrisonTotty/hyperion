@@ -13,7 +13,9 @@ import {
 import {
   BODY_DISC_AIR_MATERIALS,
   BODY_DISC_CELLS_AIR_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_EMISSIVE_AIR_MATERIALS,
   BODY_DISC_MATERIALS,
   type BodyFramePlan,
   type DiscCellFrame,
@@ -21,6 +23,7 @@ import {
   LitBodyRenderer,
   planLitBodies,
   SMOOTH_MESH_AIR_MATERIAL,
+  SMOOTH_MESH_EMISSIVE_AIR_MATERIAL,
   SMOOTH_MESH_MATERIAL,
 } from "../bodies/draw";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
@@ -36,7 +39,16 @@ import type { PlacedLight } from "../lighting/hostLights";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import { AU_M } from "../scenes/kept";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
-import { type DiscAir, DISC_AIR_ROWS, packDiscAir, withDiscAir } from "./discReflectance";
+import {
+  type DiscAir,
+  DISC_AIR_ROWS,
+  packDiscAir,
+  withDiscAir,
+  withDiscEmissionAndAir,
+} from "./discReflectance";
+import discEmissionWgsl from "./shaders/discEmission.wgsl?raw";
+import { surfaceTemperatureFieldOf, type SurfaceTemperatureField, THERMAL_WGSL } from "./thermal";
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
 import {
   DISC_AZIMUTHS,
   DISC_LAYER_VALUES,
@@ -82,26 +94,42 @@ const AIR: DiscAir = {
   gravity: null,
 };
 
-/** A body with air `px` across beyond the boundary, lit by a Sun 1 au off at phase `phaseDeg`. */
-function planOf(phaseDeg: number, px = 200, air: DiscAir | null = AIR): BodyFramePlan {
+/** One body of a plan: its air and its ground's field where it glows, and its place across. */
+interface PlannedBody {
+  readonly air: DiscAir | null;
+  readonly thermal?: SurfaceTemperatureField;
+  /** Its centre's offset along x from the view's axis, m. */
+  readonly acrossM: number;
+}
+
+/**
+ * Bodies `px` across beyond the boundary, lit by a Sun 1 au off at phase `phaseDeg` from the
+ * first, each with its air and its ground's field where it glows (R08.T18.b).
+ */
+function planOfBodies(
+  phaseDeg: number,
+  px: number,
+  planned: ReadonlyArray<PlannedBody>,
+): BodyFramePlan {
   const distanceM = 2e9;
   const radiusM = distanceM * Math.sin(px / 2 / PX_PER_RAD);
-  const centreM = vec3(0, 0, -distanceM);
   const towardsStar = vec3(Math.sin(phaseDeg * RAD), 0, Math.cos(phaseDeg * RAD));
   const lit = aLitBody();
-  const body: LitBodyInput = {
-    id: lit.body,
-    centreM,
+  const bodies = planned.map(({ air, thermal, acrossM }, i): LitBodyInput => ({
+    id: i === 0 ? lit.body : `0200080020000000.000${String(i + 2)}`,
+    centreM: vec3(acrossM, 0, -distanceM),
     figure: { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: vec3(0, 1, 0) },
     photometry: lit.photometry,
     lighting: undefined,
     ...(air === null ? {} : { air }),
-  };
+    ...(thermal === undefined ? {} : { thermal }),
+  }));
+  const first = bodies[0]?.centreM ?? vec3(0, 0, -distanceM);
   const hosts: PlacedLight[] = [
-    { disc: aHostDisc(), centreM: add(centreM, scale(towardsStar, AU_M)) },
+    { disc: aHostDisc(), centreM: add(first, scale(towardsStar, AU_M)) },
   ];
   return planLitBodies(
-    [body],
+    bodies,
     hosts,
     {
       camera: CAMERA,
@@ -113,8 +141,23 @@ function planOf(phaseDeg: number, px = 200, air: DiscAir | null = AIR): BodyFram
       setting: "high",
       drawsAir: true,
     },
-    new Map([[body.id, "disc"]]),
+    new Map(bodies.map((body) => [body.id, "disc"] as const)),
   );
+}
+
+/**
+ * A body with air `px` across beyond the boundary, lit by a Sun 1 au off at phase `phaseDeg`, its
+ * ground's field `thermal` where it glows (R08.T18.b).
+ */
+function planOf(
+  phaseDeg: number,
+  px = 200,
+  air: DiscAir | null = AIR,
+  thermal?: SurfaceTemperatureField,
+): BodyFramePlan {
+  return planOfBodies(phaseDeg, px, [
+    { air, ...(thermal === undefined ? {} : { thermal }), acrossM: 0 },
+  ]);
 }
 
 /** {@link planOf}'s record. */
@@ -277,6 +320,126 @@ describe("the disc's air in its twin (R08.T16.b)", () => {
       true,
     ]);
     expect(discCellJobs([record], 2 ** 24, FRAME, false, false).count).toBe(0);
+  });
+});
+
+/** The materials' names of a plan's draws, in order. */
+function names(renderer: LitBodyRenderer, plan: BodyFramePlan): string[] {
+  return renderer.draws(plan).map((draw) => draw.material.name);
+}
+
+describe("the disc's kernels' forms for emission and air together (R08.T18.b)", () => {
+  const BOTH_LINES =
+    "  out.radiance = out.radiance + disc_emission(body, normal, surface, laws);\n" +
+    "  out.radiance = disc_air(body, q, ray, out.radiance);\n";
+
+  it.each([
+    [
+      "the disc's interior",
+      BODY_DISC_MATERIALS.interior,
+      BODY_DISC_EMISSIVE_AIR_MATERIALS.interior,
+    ],
+    ["the disc's limb", BODY_DISC_MATERIALS.limb, BODY_DISC_EMISSIVE_AIR_MATERIALS.limb],
+    ["the mesh regime's figure", SMOOTH_MESH_MATERIAL, SMOOTH_MESH_EMISSIVE_AIR_MATERIAL],
+  ] as const)(
+    "makes %s's from its own source: the emission added, then handed to disc_air, the air's table bound",
+    (_name, plain, both) => {
+      const appended = `\n${THERMAL_WGSL}\n${discEmissionWgsl}\n${discAirWgsl}`;
+      expect(both.fragmentWgsl.endsWith(appended)).toBe(true);
+      const head = both.fragmentWgsl.slice(0, -appended.length);
+      expect(head.split(BOTH_LINES)).toHaveLength(2);
+      expect(head.replace(BOTH_LINES, "")).toBe(plain.fragmentWgsl);
+      expect((both.textures ?? []).some((texture) => texture.binding === 15)).toBe(true);
+    },
+  );
+
+  it("makes the disc cells' so, and refuses a source without shade's end", () => {
+    expect(BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL.reference).toBe(
+      withDiscEmissionAndAir(BODY_DISC_CELLS_KERNEL.reference),
+    );
+    expect(() => withDiscEmissionAndAir("fn main() {}")).toThrow(/once, found 0/u);
+  });
+
+  /** A glowing body's plan with air, its ground the lava world's. */
+  const glowingPlan = (air: DiscAir | null = AIR): BodyFramePlan =>
+    planOf(150, 200, air, surfaceTemperatureFieldOf(lavaWorldSurface()));
+
+  it("draws a glowing record with air by their form once it is prepared", async () => {
+    const renderer = new LitBodyRenderer(
+      await countingRenderEngine(),
+      WIREFRAME_MATERIALS.starSprite,
+    );
+    await renderer.prepareEmissiveAir();
+    expect(names(renderer, glowingPlan())).toEqual([
+      "bodies:discEmissiveAir",
+      "bodies:discLimbEmissiveAir",
+    ]);
+    renderer.dispose();
+  });
+
+  it("draws a glowing record with air by the air's forms without its emission till then", async () => {
+    const renderer = new LitBodyRenderer(
+      await countingRenderEngine(),
+      WIREFRAME_MATERIALS.starSprite,
+    );
+    await renderer.prepareAir();
+    expect(names(renderer, glowingPlan())).toEqual(["bodies:discAir", "bodies:discLimbAir"]);
+    renderer.dispose();
+  });
+
+  it("draws a glowing record with air by the plain forms while neither is prepared", async () => {
+    const renderer = new LitBodyRenderer(
+      await countingRenderEngine(),
+      WIREFRAME_MATERIALS.starSprite,
+    );
+    expect(names(renderer, glowingPlan())).toEqual(["bodies:disc", "bodies:discLimb"]);
+    renderer.dispose();
+  });
+
+  it("draws a plan's emitting record by the emissive forms beside a glowing one with air by the air's", async () => {
+    const renderer = new LitBodyRenderer(
+      await countingRenderEngine(),
+      WIREFRAME_MATERIALS.starSprite,
+    );
+    await Promise.all([renderer.prepareEmissive(), renderer.prepareAir()]);
+    const field = surfaceTemperatureFieldOf(lavaWorldSurface());
+    // Two discs 200 px across, 300 px apart, each in the frame.
+    const apartM = (2e9 * 300) / PX_PER_RAD;
+    const plan = planOfBodies(150, 200, [
+      { air: null, thermal: field, acrossM: -apartM / 2 },
+      { air: AIR, thermal: field, acrossM: apartM / 2 },
+    ]);
+    // The plan orders its records by distance, not as given.
+    expect(
+      new Set(
+        plan.discs.map((record) => `${record.emission !== undefined} ${record.air !== undefined}`),
+      ),
+    ).toEqual(new Set(["true false", "true true"]));
+    expect(new Set(names(renderer, plan))).toEqual(
+      new Set([
+        "bodies:discEmissive",
+        "bodies:discLimbEmissive",
+        "bodies:discAir",
+        "bodies:discLimbAir",
+      ]),
+    );
+    renderer.dispose();
+  });
+
+  it("shades a glowing record with air's cells with their kernel alone", () => {
+    const record = recordOf(150, 13);
+    const glowing = planOf(150, 13, AIR, surfaceTemperatureFieldOf(lavaWorldSurface())).discs[0];
+    if (glowing === undefined) {
+      throw new Error("the glowing body is drawn as a disc");
+    }
+    expect(discCellJobs([glowing], 2 ** 24, FRAME, true, true, false).count).toBe(0);
+    expect(
+      discCellJobs([glowing], 2 ** 24, FRAME, false, false, true).sets.map((set) => [
+        set.emissive,
+        set.air,
+      ]),
+    ).toEqual([[true, true]]);
+    expect(discCellJobs([record], 2 ** 24, FRAME, false, false, true).count).toBe(0);
   });
 });
 

@@ -485,8 +485,8 @@ async function drawInto(
     // old direction.
     const star = lighting.lights[0];
     const ocean = groundTemperatureFieldOf(magmaOceanSurface());
-    if (star === undefined || ocean === null) {
-      throw new Error("the frame has a star and the magma ocean no medium");
+    if (star === undefined) {
+      throw new Error("the frame has a star");
     }
     writeBlock(MORPH_M, true);
     resources.setLighting({
@@ -505,8 +505,8 @@ async function drawInto(
     // The locked lava world's night side over the block: its ground at its 21 K night, its first
     // slot's `Melt` at the melt's least temperature.
     const lava = groundTemperatureFieldOf(lavaWorldSurface());
-    if (lava === null || lava.meltK === null) {
-      throw new Error("the lava world has no medium and a melt");
+    if (lava.meltK === null) {
+      throw new Error("the lava world has a melt");
     }
     resources.setLighting({
       ...lighting,

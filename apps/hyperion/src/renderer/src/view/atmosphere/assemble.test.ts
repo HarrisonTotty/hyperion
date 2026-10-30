@@ -157,6 +157,32 @@ describe("a body's labels by the section its air comes from", () => {
     ]);
   });
 
+  it("gives the drawn medium its column's temperature, a temperate world's under the thermal cut (R08.T18.b)", () => {
+    const result = assembled(earthDetail());
+    if (result.medium === undefined) {
+      throw new Error("Earth's air is drawn");
+    }
+    const temperature = result.drawn.temperature;
+    const surface = detailOf(earthDetail()).record.surface;
+    if (temperature === undefined || surface.state !== "ok") {
+      throw new Error("the drawn medium holds its column's temperature");
+    }
+    expect(new Set(temperature.temperaturesK)).toEqual(
+      new Set([surface.value.meanSurfaceTemperatureK]),
+    );
+    expect(temperature.heightsM[0]).toBe(0);
+    expect(result.regime.selfLuminous).toBeUndefined();
+  });
+
+  it("makes a world of 2,600 K selfLuminous, its air's own light above the cut (R08.T18.b)", () => {
+    const hot = withSurface(earthDetail(), (surface) => ({
+      ...surface,
+      mean_surface_temperature_k: 2_600,
+    }));
+    const result = assembled(hot);
+    expect(result.medium === undefined ? undefined : result.regime.selfLuminous).toBe(true);
+  });
+
   it("draws no air for a melt with no volatile air, and says SILICATE VAPOUR alone", () => {
     const melt = withSurface(earthDetail(), (surface) => ({
       ...surface,

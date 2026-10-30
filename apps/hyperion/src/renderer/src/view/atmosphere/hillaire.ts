@@ -106,6 +106,7 @@ import rayMarchSlotsWgsl from "./shaders/rayMarchSlots.wgsl?raw";
 import scatteringWgsl from "./shaders/scattering.wgsl?raw";
 import skyViewWgsl from "./shaders/skyView.wgsl?raw";
 import sourceWgsl from "./shaders/source.wgsl?raw";
+import thermalSourceWgsl from "./shaders/thermalSource.wgsl?raw";
 import thickReadWgsl from "./shaders/thickRead.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
 import {
@@ -1069,6 +1070,152 @@ export const RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL = withMarchSpecialised(
 );
 
 /**
+ * The thermal source's rewrites of a per-frame kernel's sources (plan R08, R08.T18.b;
+ * `thermalSource.ts`): each sample's medium gains its black body B̃ at its h* times the frame's
+ * scale and its terms' absorption, summed as its extinction is (not σ_ext − σ_s, which cancels in
+ * `f32` where the air scatters far more than it absorbs), `scattering.wgsl`'s struct, its loop and
+ * its one constructor; `source.wgsl`'s step adds slot 0's emission, B̃ times the depth the step
+ * absorbs, its terms' and its absorbers' curves',
+ * through the step factor it scatters through; and each kernel's step adds the scattered thermal
+ * light to slot 0's share (`thermalSharesOf`), the light travelling to the eye at −(ray · zenith),
+ * one of the last three a kernel.
+ */
+const THERMAL_SOURCE: ReadonlyArray<{
+  readonly general: string;
+  readonly thermal: string;
+  readonly least: number;
+  readonly most: number;
+}> = [
+  {
+    general: "  pressureColumns : AbsorberColumns,\n  densities : TermDensities,\n}",
+    thermal:
+      "  pressureColumns : AbsorberColumns,\n  densities : TermDensities,\n  planck : vec3f,\n" +
+      "  absorbing : vec3f,\n}",
+    least: 1,
+    most: 1,
+  },
+  {
+    general: "fn sampleMediumAt(heightM : f32) -> SampleMedium {\n  var scattering = vec3f(0.0);",
+    thermal:
+      "fn sampleMediumAt(heightM : f32) -> SampleMedium {\n  var scattering = vec3f(0.0);\n" +
+      "  var absorbing = vec3f(0.0);",
+    least: 1,
+    most: 1,
+  },
+  {
+    general:
+      "    extinction += (term.scattering.rgb + term.absorption.rgb) * d;\n" +
+      "    columns = addColumns(columns, termColumns(term, d), 1.0);",
+    thermal:
+      "    extinction += (term.scattering.rgb + term.absorption.rgb) * d;\n" +
+      "    absorbing += term.absorption.rgb * d;\n" +
+      "    columns = addColumns(columns, termColumns(term, d), 1.0);",
+    least: 1,
+    most: 1,
+  },
+  {
+    general: "return SampleMedium(scattering, extinction, columns, pressureColumns, densities);",
+    thermal:
+      "return SampleMedium(scattering, extinction, columns, pressureColumns, densities, " +
+      "thermalPlanckAt(heightM) * view.marchSky.w, absorbing);",
+    least: 1,
+    most: 1,
+  },
+  {
+    general: "(*march).luminance += throughput0 * shares.slot0 * dtM * stepFactor(stepDepth0);",
+    thermal:
+      "(*march).luminance += throughput0 * (shares.slot0 * dtM + local.planck * " +
+      "(local.absorbing * dtM + (next0.depth - path0.depth))) * stepFactor(stepDepth0);",
+    least: 1,
+    most: 1,
+  },
+  {
+    general: "let shares = rayMarchSourcesAt(body, start, datum.normal, ray.dir, lobes, local);",
+    thermal:
+      "let shares = thermalSharesOf(rayMarchSourcesAt(body, start, datum.normal, ray.dir, lobes, " +
+      "local), start, local, -dot(ray.dir, datum.normal));",
+    least: 0,
+    most: 1,
+  },
+  {
+    general: "let shares = viewSourcesAt(body, start, up, dir, lobes, local);",
+    thermal:
+      "let shares = thermalSharesOf(viewSourcesAt(body, start, up, dir, lobes, local), start, " +
+      "local, -dot(dir, up));",
+    least: 0,
+    most: 1,
+  },
+  {
+    general: "let shares = skySourcesAt(body, start, up, ray.dir, frame, lobes, local);",
+    thermal:
+      "let shares = thermalSharesOf(skySourcesAt(body, start, up, ray.dir, frame, lobes, local), " +
+      "start, local, -dot(ray.dir, up));",
+    least: 0,
+    most: 1,
+  },
+];
+
+/** The last three of {@link THERMAL_SOURCE}: each kernel's step holds one of them. */
+const THERMAL_STEP_REWRITES = 3;
+
+/**
+ * `pair`, a per-frame kernel (the sky view, the aerial perspective or a ray march, of the thin read
+ * or the thick), drawing the medium's own light (plan R08, R08.T18.b; `thermalSource.ts`): the
+ * rewrites of {@link THERMAL_SOURCE} and `thermalSource.wgsl` appended, its buffer at
+ * `thermalSource` beside the kernel's own bindings. Every other line is the kernel's own, so that a
+ * body below the thermal cut draws by the kernel as it was to the byte.
+ *
+ * @throws Error naming the kernel when its sources hold a rewritten line more or fewer times than
+ *   {@link THERMAL_SOURCE} allows, or no step's or more than one.
+ */
+export function withThermalSource(pair: KernelPair): KernelPair {
+  const rewrite = (wgsl: string): string => {
+    let steps = 0;
+    const code = THERMAL_SOURCE.reduce((text, { general, thermal, least, most }, i) => {
+      const count = text.split(general).length - 1;
+      if (count < least || count > most) {
+        throw new Error(
+          `kernel ${pair.name} holds ${count} places for: ${general}, not ${least} to ${most}`,
+        );
+      }
+      if (i >= THERMAL_SOURCE.length - THERMAL_STEP_REWRITES) {
+        steps += count;
+      }
+      return text.replaceAll(general, thermal);
+    }, wgsl);
+    if (steps !== 1) {
+      throw new Error(`kernel ${pair.name} holds ${steps} steps' shares, not 1`);
+    }
+    return `${code}\n${thermalSourceWgsl}`;
+  };
+  return {
+    ...pair,
+    name: `${pair.name}, thermal`,
+    reference: rewrite(pair.reference),
+    subgroup: pair.subgroup === null ? null : rewrite(pair.subgroup),
+  };
+}
+
+/** {@link SKY_VIEW_KERNEL} drawing the medium's own light ({@link withThermalSource}; R08.T18.b). */
+export const SKY_VIEW_THERMAL_KERNEL = withThermalSource(SKY_VIEW_KERNEL);
+/** {@link AERIAL_PERSPECTIVE_KERNEL} drawing the medium's own light (R08.T18.b). */
+export const AERIAL_PERSPECTIVE_THERMAL_KERNEL = withThermalSource(AERIAL_PERSPECTIVE_KERNEL);
+/** {@link RAY_MARCH_KERNEL} drawing the medium's own light (R08.T18.b). */
+export const RAY_MARCH_THERMAL_KERNEL = withThermalSource(RAY_MARCH_KERNEL);
+/** {@link RAY_MARCH_SLOTS_KERNEL} drawing the medium's own light (R08.T18.b). */
+export const RAY_MARCH_SLOTS_THERMAL_KERNEL = withThermalSource(RAY_MARCH_SLOTS_KERNEL);
+/** {@link SKY_VIEW_THICK_KERNEL} drawing the medium's own light and its thick bake's (R08.T18.b). */
+export const SKY_VIEW_THICK_THERMAL_KERNEL = withThermalSource(SKY_VIEW_THICK_KERNEL);
+/** {@link AERIAL_PERSPECTIVE_THICK_KERNEL} likewise (R08.T18.b). */
+export const AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL = withThermalSource(
+  AERIAL_PERSPECTIVE_THICK_KERNEL,
+);
+/** {@link RAY_MARCH_THICK_KERNEL} likewise (R08.T18.b). */
+export const RAY_MARCH_THICK_THERMAL_KERNEL = withThermalSource(RAY_MARCH_THICK_KERNEL);
+/** {@link RAY_MARCH_SLOTS_THICK_KERNEL} likewise (R08.T18.b). */
+export const RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL = withThermalSource(RAY_MARCH_SLOTS_THICK_KERNEL);
+
+/**
  * Whether a body's tables take the specialised march ({@link withMarchSpecialised}; plan R08,
  * R08.T11.d): one slice and one band in their plan, and no layer edge in their medium's, from the
  * tables alone, never the body's class.
@@ -1266,6 +1413,109 @@ interface FrameKernels {
    * them.
    */
   readonly thick: () => ThickKernels;
+  /**
+   * The kernels' thermal forms ({@link withThermalSource}; plan R08, R08.T18.b), of the thin read
+   * (`false`) or the thick (`true`), for a body whose tables hold a thermal source
+   * ({@link AtmosphereTables.thermalSource}): made at the first frame of such tables where they were
+   * not made ahead ({@link FrameKernelsAhead.thermal}), as the thick kernels are, so that a view of
+   * bodies under the thermal cut compiles none of them.
+   */
+  readonly thermal: (thick: boolean) => ThermalKernels;
+}
+
+/**
+ * The per-frame kernels' thermal forms (R08.T18.b; {@link FrameKernels.thermal}): the sky view, the
+ * aerial perspective and each read's march, its footprint's entry point alone, which a
+ * self-luminous body takes under every cover (no specialised march and no tile cull).
+ */
+interface ThermalKernels {
+  readonly skyView: ComputeHandle;
+  readonly aerial: ComputeHandle;
+  readonly rayMarch: () => ComputeHandle;
+  readonly rayMarchSlots: () => ComputeHandle;
+}
+
+/** The thermal forms of one read's kernels. */
+interface ThermalPairs {
+  readonly skyView: KernelPair;
+  readonly aerial: KernelPair;
+  readonly rayMarch: KernelPair;
+  readonly rayMarchSlots: KernelPair;
+}
+
+/** The thin read's and the thick read's thermal forms. */
+const THERMAL_PAIRS: { readonly thin: ThermalPairs; readonly thick: ThermalPairs } = {
+  thin: {
+    skyView: SKY_VIEW_THERMAL_KERNEL,
+    aerial: AERIAL_PERSPECTIVE_THERMAL_KERNEL,
+    rayMarch: RAY_MARCH_THERMAL_KERNEL,
+    rayMarchSlots: RAY_MARCH_SLOTS_THERMAL_KERNEL,
+  },
+  thick: {
+    skyView: SKY_VIEW_THICK_THERMAL_KERNEL,
+    aerial: AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
+    rayMarch: RAY_MARCH_THICK_THERMAL_KERNEL,
+    rayMarchSlots: RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL,
+  },
+};
+
+/**
+ * The thermal forms made synchronously on `engine` at their first ask, each pair through `as`, each
+ * march's at the first frame that takes it.
+ */
+function thermalKernelsOf(
+  engine: RenderEngine,
+  as: (pair: KernelPair) => KernelPair,
+): (thick: boolean) => ThermalKernels {
+  const made = new Map<boolean, ThermalKernels>();
+  return (thick) => {
+    const held = made.get(thick);
+    if (held !== undefined) {
+      return held;
+    }
+    const pairs = thick ? THERMAL_PAIRS.thick : THERMAL_PAIRS.thin;
+    let shared: ComputeHandle | null = null;
+    let slots: ComputeHandle | null = null;
+    const kernels: ThermalKernels = {
+      skyView: engine.createCompute(as(pairs.skyView)),
+      aerial: engine.createCompute(as(pairs.aerial)),
+      rayMarch: () => (shared ??= engine.createCompute(as(pairs.rayMarch))),
+      rayMarchSlots: () => (slots ??= engine.createCompute(as(pairs.rayMarchSlots))),
+    };
+    made.set(thick, kernels);
+    return kernels;
+  };
+}
+
+/**
+ * The thermal forms made up front by `createComputeAsync` ({@link FrameKernelsAhead.thermal}): the
+ * thin read's and the thick read's, each march as `reads` asks; a read not asked is made at its
+ * first frame.
+ */
+async function thermalKernelsAhead(
+  engine: RenderEngine,
+  reads: MarchReads,
+): Promise<(thick: boolean) => ThermalKernels> {
+  const ahead = async (pairs: ThermalPairs): Promise<ThermalKernels> => {
+    const [skyView, aerial, shared, slots] = await Promise.all([
+      engine.createComputeAsync(pairs.skyView),
+      engine.createComputeAsync(pairs.aerial),
+      reads === "by slot" ? Promise.resolve(null) : engine.createComputeAsync(pairs.rayMarch),
+      reads === "shared read"
+        ? Promise.resolve(null)
+        : engine.createComputeAsync(pairs.rayMarchSlots),
+    ]);
+    let rayMarch = shared;
+    let rayMarchSlots = slots;
+    return {
+      skyView,
+      aerial,
+      rayMarch: () => (rayMarch ??= engine.createCompute(pairs.rayMarch)),
+      rayMarchSlots: () => (rayMarchSlots ??= engine.createCompute(pairs.rayMarchSlots)),
+    };
+  };
+  const [thin, thick] = await Promise.all([ahead(THERMAL_PAIRS.thin), ahead(THERMAL_PAIRS.thick)]);
+  return (isThick) => (isThick ? thick : thin);
 }
 
 /**
@@ -1424,6 +1674,12 @@ export interface FrameKernelsAhead {
    * at the first frame of tables that hold one.
    */
   readonly thick?: boolean;
+  /**
+   * Whether the kernels' thermal forms are made too (plan R08, R08.T18.b): for a caller that draws a
+   * self-luminous body, as the smoke's thermal group does. Not where absent; then made at the first
+   * frame of tables that hold a thermal source.
+   */
+  readonly thermal?: boolean;
 }
 
 /**
@@ -1504,6 +1760,10 @@ export async function createAtmosphereFrameKernels(
     ahead.thick === true
       ? await thickKernelsAhead(engine, reads)
       : thickKernelsOf(engine, (pair) => pair);
+  const thermal =
+    ahead.thermal === true
+      ? await thermalKernelsAhead(engine, reads)
+      : thermalKernelsOf(engine, (pair) => pair);
   // The fill is a reader's (the smoke's), which a view's frame never asks: made at the first ask.
   let fill: ComputeHandle | null = null;
   return {
@@ -1513,6 +1773,7 @@ export async function createAtmosphereFrameKernels(
     rayMarchSlots,
     rayMarchFill: () => (fill ??= engine.createCompute(RAY_MARCH_FILL_KERNEL)),
     thick,
+    thermal,
     composite,
     triangle,
   };
@@ -1953,6 +2214,7 @@ function marchKernelsOf(engine: RenderEngine, as: (pair: KernelPair) => KernelPa
       )),
     rayMarchFill: () => (fill ??= engine.createCompute(as(RAY_MARCH_FILL_KERNEL))),
     thick: thickKernelsOf(engine, as),
+    thermal: thermalKernelsOf(engine, as),
   };
 }
 
@@ -2565,9 +2827,13 @@ export class HillaireAtmosphere {
     const perFrameMedium = packMediumUniform(medium, inputs.radiusM - inputs.heightM, 1);
     // A body whose tables hold the thick table draws by the kernels that read it (R08.T14.c).
     const thickTable = tables.thickTable;
-    const thick = thickTable === null ? null : kernels.thick();
+    // A self-luminous body draws by the kernels' thermal forms, of its read (R08.T18.b), and makes
+    // none of the others.
+    const thermalSource = tables.thermalSource;
+    const thermal = thermalSource === null ? null : kernels.thermal(thickTable !== null);
+    const thick = thickTable === null || thermal !== null ? null : kernels.thick();
     const common = {
-      buffers: { terms: tables.terms },
+      buffers: { terms: tables.terms, ...(thermalSource === null ? {} : { thermalSource }) },
       sampled: {
         densityTables: tables.densityTables,
         phaseTables: tables.phaseTables,
@@ -2588,7 +2854,7 @@ export class HillaireAtmosphere {
     const marchUniforms = this.#marchBlock(viewUniforms, suns, scene, medium);
     const skyView = (): void => {
       engine.dispatch(
-        thick?.skyView ?? kernels.skyView,
+        thermal?.skyView ?? thick?.skyView ?? kernels.skyView,
         {
           ...common,
           uniforms: { medium: perFrameMedium, view: viewUniforms, layerEdges: tables.layerEdges },
@@ -2600,7 +2866,7 @@ export class HillaireAtmosphere {
     };
     const aerial = (): void => {
       engine.dispatch(
-        thick?.aerial ?? kernels.aerial,
+        thermal?.aerial ?? thick?.aerial ?? kernels.aerial,
         {
           ...common,
           uniforms: { medium: perFrameMedium, view: viewUniforms },
@@ -2626,7 +2892,8 @@ export class HillaireAtmosphere {
     // those no footprint can blend in, and the footprint's the rest; on the area and the whole
     // frame the footprint's takes every tile, as the one kernel did.
     // A thick body's march takes no cull (R08.T14.c): its area's every tile, exact as the cull is.
-    const tileCull = this.#cover === "tiles" && thick === null;
+    // Nor does a self-luminous body's (R08.T18.b), which takes its read's thermal footprint alone.
+    const tileCull = this.#cover === "tiles" && thick === null && thermal === null;
     const shell = topShellOf(this.#figure, medium.topHeightM, this.#gravity);
     const area =
       this.#cover === "whole frame"
@@ -2639,7 +2906,7 @@ export class HillaireAtmosphere {
     // its slot's layer (R08.T8.e, lever 5); every other the shared read.
     const slotDepths = tables.slotDepths;
     // The march's kernels: the thin read's, with the tile cull's centre ray, or the thick read's.
-    const march: FrameMarch =
+    const march = (): FrameMarch =>
       thick === null
         ? {
             kind: "thin",
@@ -2666,20 +2933,28 @@ export class HillaireAtmosphere {
         storage: { rayMarchOut: { texture: outputs.rayMarch, level: 0 } },
       };
       const tiles = [area.tilesAcross, area.tilesDown, 1] as const;
-      if (tileCull && march.kind === "thin") {
-        engine.dispatch(march.kernels.centre(), bindings, tiles, ATMOSPHERE_VIEW_PASS);
+      const marched = thermal === null ? march() : null;
+      if (tileCull && marched?.kind === "thin") {
+        engine.dispatch(marched.kernels.centre(), bindings, tiles, ATMOSPHERE_VIEW_PASS);
       }
       // A view's area over a body of one band with no layer edge takes the specialised march
       // (R08.T11.d), and over a thin one of one band with layer edges the one-band march
       // (R08.T11.g): each exact there, and the general one on the reference path and under the cull.
-      const footprint =
-        this.#cover !== "area"
-          ? march.kernels.footprint
-          : marchSpecialisedFor(tables)
-            ? march.kernels.special()
-            : march.kind === "thin" && marchOneBandFor(tables)
-              ? march.kernels.oneBand()
-              : march.kernels.footprint;
+      // A self-luminous body takes its read's thermal footprint under every cover (R08.T18.b).
+      let footprint: ComputeHandle;
+      if (thermal !== null) {
+        footprint = slotDepths === null ? thermal.rayMarch() : thermal.rayMarchSlots();
+      } else if (marched === null) {
+        throw new Error("a frame without the thermal forms marches by its read's kernels");
+      } else if (this.#cover !== "area") {
+        footprint = marched.kernels.footprint;
+      } else if (marchSpecialisedFor(tables)) {
+        footprint = marched.kernels.special();
+      } else if (marched.kind === "thin" && marchOneBandFor(tables)) {
+        footprint = marched.kernels.oneBand();
+      } else {
+        footprint = marched.kernels.footprint;
+      }
       engine.dispatch(footprint, bindings, tiles, ATMOSPHERE_VIEW_PASS);
     }
     // The rest of the target, (0, 0, 0, 1), for a reader of the whole (R08.T11.d): the frame's
@@ -2922,7 +3197,14 @@ export class HillaireAtmosphere {
     const thinSky = ground?.thinSky ?? null;
     // And the band over the datum within which a drawn surface takes the bare ground's count
     // (R08.T11.b), 0 where the bare ground keeps the setting's.
-    set("marchSky", [thinSky?.samples ?? 0, thinSky?.depthG ?? 0, ground?.drawnBandM ?? 0, 0]);
+    // Its w, the frame's pre-exposure scale, is the thermal forms' factor for the medium's own light,
+    // which no star weights (R08.T18.b); the other kernels read none of it.
+    set("marchSky", [
+      thinSky?.samples ?? 0,
+      thinSky?.depthG ?? 0,
+      ground?.drawnBandM ?? 0,
+      scene.exposureScale,
+    ]);
     // The composite's own: the atmosphere's height, formed in f64 (R08.T6.g), how many of the
     // medium's terms are absorbers, whose columns its transmittance to space reads (R08.T6.c), and
     // its line slots, whose pressure channels the read takes (R08.T4.d).

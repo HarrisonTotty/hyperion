@@ -117,6 +117,7 @@ import { molecularMixture, molecularTerm, type RayleighApproximation } from "./r
 import { REGISTRY_OPTICS_FLAGS } from "./registryFlags";
 import type { ModeOptics, SizeDistribution } from "./sizeDistribution";
 import type { BakeSpectrum } from "./spectralColour";
+import type { MediumTemperature } from "./thermalSource";
 import { absorberSourceOf, type SpectralSource } from "./thick/spectralColumn";
 import {
   approximateRegime,
@@ -190,6 +191,11 @@ export interface DrawnMedium {
    * and σ_ext(550) (`aerosol.ts`'s `aerosolTerm`).
    */
   readonly sources: ReadonlyArray<SpectralSource>;
+  /**
+   * The column's temperature at its levels (R08.T18.b), which the medium's thermal source and the
+   * thick bake's thermal field read; absent for a kept medium, which emits nothing.
+   */
+  readonly temperature?: MediumTemperature;
 }
 
 /** What every assembly gives, drawn or not. */
@@ -1336,7 +1342,14 @@ export function assembleMedium(
       shown.push(...sizeConvergenceReasons(material, phase, [...term.channels, term.at550]));
     }
   }
-  const regime = classifyRegime(medium, bodyCoverOf(plan.air.surface, column));
+  const temperature: MediumTemperature = {
+    heightsM: column.altitudesM,
+    temperaturesK: column.temperaturesK,
+  };
+  const regime = classifyRegime(medium, bodyCoverOf(plan.air.surface, column), {
+    temperature,
+    stellarFluxWM2: plan.air.surface.stellarFluxWM2,
+  });
   if (approximateRegime(regime)) {
     shown.push(THICK_REASON);
   }
@@ -1352,6 +1365,7 @@ export function assembleMedium(
       spectra: plan.spectra,
       curves: [],
       sources,
+      temperature,
     },
     labels: ordered([...plan.air.labels, ...approximate]),
     reasons: reasonsShown,

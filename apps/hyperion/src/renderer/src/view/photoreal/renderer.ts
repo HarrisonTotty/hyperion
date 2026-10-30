@@ -49,6 +49,7 @@ import { absorberCount, type AtmosphereTables } from "../atmosphere/tables";
 import { CORRECTION_ROUTED } from "../atmosphere/thick/routing";
 import {
   BODY_DISC_CELLS_AIR_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
@@ -58,6 +59,7 @@ import {
   LitBodyRenderer,
   planLitBodies,
 } from "../bodies/draw";
+import type { DiscRecord } from "../bodies/discShading";
 import type { LitRegime, ScreenCircle } from "../bodies/regime";
 import {
   NEAR_PLANE_M,
@@ -83,6 +85,7 @@ import type {
   TextureHandle,
   ViewSize,
 } from "../engine/types";
+import type { KernelPair } from "../engine/kernels";
 import type { PlacedLight } from "../lighting/hostLights";
 import { bloomKernel, bloomThreshold, levelWeight } from "../post/bloom";
 import {
@@ -283,9 +286,19 @@ function blueNoiseTexels(): Uint16Array {
   return blueNoiseHalves;
 }
 
+/** A form of the `disc cells` kernel: R08.T18.a's emissive, R08.T16.b's air, or R08.T18.b's both. */
+type CellForm = "emissive" | "air" | "emissiveAir";
+
+/** Each form's kernel. */
+const CELL_FORM_KERNELS: Readonly<Record<CellForm, KernelPair>> = {
+  emissive: BODY_DISC_CELLS_EMISSIVE_KERNEL,
+  air: BODY_DISC_CELLS_AIR_KERNEL,
+  emissiveAir: BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
+};
+
 /**
- * A form of the `disc cells` kernel as one device's renderer asks for it: R08.T18.a's emissive, or
- * R08.T16.b's air.
+ * A form of the `disc cells` kernel as one device's renderer asks for it: R08.T18.a's emissive,
+ * R08.T16.b's air, or R08.T18.b's emissive with air.
  */
 interface FormCells {
   readonly generation: number;
@@ -293,6 +306,18 @@ interface FormCells {
   kernel: ComputeHandle | null;
   /** Settles once it is made, or could not be; never rejects. */
   made: Promise<void>;
+}
+
+/** The form of the `disc cells` kernel a record is shaded by, or `null` for the plain kernel. */
+function cellFormOf(record: DiscRecord): CellForm | null {
+  const emits = record.emission !== undefined;
+  const aired = record.air !== undefined;
+  return emits && aired ? "emissiveAir" : aired ? "air" : emits ? "emissive" : null;
+}
+
+/** No form of the `disc cells` kernel asked yet. */
+function noFormCells(): Record<CellForm, FormCells | null> {
+  return { emissive: null, air: null, emissiveAir: null };
 }
 
 /** The renderer's GPU objects on one device. */
@@ -451,10 +476,10 @@ export class PhotorealRenderer {
    * The `disc cells` kernel's forms: its emissive form (R08.T18.a), made at the first frame with a
    * record that carries its ground's emission, or at {@link PhotorealRenderer.prepareEmissive}, and
    * its air form (R08.T16.b), at the first with a record that carries its air, or at
-   * {@link PhotorealRenderer.prepareAir}, each on the generation it was asked on; `kernel` `null`
-   * until made.
+   * {@link PhotorealRenderer.prepareAir}, and its form for both (R08.T18.b), at the first with a
+   * record that carries both, each on the generation it was asked on; `kernel` `null` until made.
    */
-  #formCells: { emissive: FormCells | null; air: FormCells | null } = { emissive: null, air: null };
+  #formCells: Record<CellForm, FormCells | null> = noFormCells();
   readonly #unsubscribe: () => void;
 
   constructor(engine: RenderEngine, viewName: string) {
@@ -471,7 +496,7 @@ export class PhotorealRenderer {
       this.#drawnColour = null;
       // Their shared kernels died with the device; each is made again at its next frame.
       this.#releaseAtmospheres();
-      this.#formCells = { emissive: null, air: null };
+      this.#formCells = noFormCells();
       this.#histogram = undefined;
       this.#making = null;
       this.#status = "idle";
@@ -746,6 +771,7 @@ export class PhotorealRenderer {
       },
       this.#cellsFor(plan, "emissive"),
       this.#cellsFor(plan, "air"),
+      this.#cellsFor(plan, "emissiveAir"),
     );
     // The mesh bodies' figures, with depth, before the sequence, then the terrain of the bodies
     // handed over to it over them; no pass where there are none. On the high setting the terrain's
@@ -1040,15 +1066,12 @@ export class PhotorealRenderer {
    * records take no cells and their draws sum their own. A failure is reported once and leaves them
    * so.
    */
-  #cellsFor(plan: BodyFramePlan, kind: "emissive" | "air"): ComputeHandle | null {
+  #cellsFor(plan: BodyFramePlan, kind: CellForm): ComputeHandle | null {
     const held = this.#formCells[kind];
     if (held !== null && held.generation === this.#generation) {
       return held.kernel;
     }
-    const needed =
-      kind === "emissive"
-        ? plan.discs.some((record) => record.emission !== undefined)
-        : plan.discs.some((record) => record.air !== undefined);
+    const needed = plan.discs.some((record) => cellFormOf(record) === kind);
     if (needed) {
       this.#askCells(kind);
     }
@@ -1056,7 +1079,7 @@ export class PhotorealRenderer {
   }
 
   /** Asks for a form of the `disc cells` kernel on this generation's device. */
-  #askCells(kind: "emissive" | "air"): FormCells {
+  #askCells(kind: CellForm): FormCells {
     const making: FormCells = {
       generation: this.#generation,
       kernel: null,
@@ -1068,7 +1091,7 @@ export class PhotorealRenderer {
   }
 
   /** A form's `disc cells` kernel as asked on this generation, asked now where it was not. */
-  #cellsMaking(kind: "emissive" | "air"): FormCells {
+  #cellsMaking(kind: CellForm): FormCells {
     const held = this.#formCells[kind];
     return held !== null && held.generation === this.#generation ? held : this.#askCells(kind);
   }
@@ -1092,17 +1115,21 @@ export class PhotorealRenderer {
   }
 
   /**
+   * Makes the lit bodies' forms for emission and air together and their `disc cells` kernel
+   * (R08.T18.b) ahead of a glowing body's first frame drawn by its disc table; resolves once both are
+   * made, or could not be.
+   */
+  async prepareEmissiveAir(): Promise<void> {
+    await Promise.all([this.#bodies.prepareEmissiveAir(), this.#cellsMaking("emissiveAir").made]);
+  }
+
+  /**
    * Makes a form's `disc cells` kernel into `making`; a failure is reported, a loss's not, and it
    * never rejects.
    */
-  async #makeCells(
-    kind: "emissive" | "air",
-    making: { kernel: ComputeHandle | null },
-  ): Promise<void> {
+  async #makeCells(kind: CellForm, making: { kernel: ComputeHandle | null }): Promise<void> {
     try {
-      making.kernel = await this.#engine.createComputeAsync(
-        kind === "emissive" ? BODY_DISC_CELLS_EMISSIVE_KERNEL : BODY_DISC_CELLS_AIR_KERNEL,
-      );
+      making.kernel = await this.#engine.createComputeAsync(CELL_FORM_KERNELS[kind]);
     } catch (error: unknown) {
       if (!lostDevice(error)) {
         console.error(`the ${kind} disc cells of ${this.#name} could not be made:`, error);

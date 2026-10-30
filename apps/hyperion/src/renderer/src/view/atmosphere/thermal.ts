@@ -79,8 +79,10 @@
  *   L44): its floor is {@link FIELD_LEAST_K} and its night the eyeball's. Its melt's least
  *   temperature, the eyeball's value at the melt's edge, is its night's, so its `Melt` classes do
  *   not light the night either.
- * - A body with a medium (any volatile air, or a `tenuous` haze) is R08.T18.b's, whose ground is
- *   seen through it ({@link groundTemperatureFieldOf}).
+ * - A body with a medium (any volatile air, or a `tenuous` haze) takes the same field since
+ *   R08.T18.b, its ground seen through the medium: inside the 10⁹ m boundary its draws' emission
+ *   under the full passes, whose composite dims it by the air's mean transmittance, and beyond it by
+ *   its disc table's form for emission and air ({@link groundTemperatureFieldOf}).
  *
  * **The cut** (decision-composition §1.9): a body whose emitted luminance is nowhere above
  * {@link THERMAL_CUT} of its reflected luminance in any channel computes nothing
@@ -445,14 +447,12 @@ export function surfaceTemperatureFieldOf(surface: BodySurface): SurfaceTemperat
 }
 
 /**
- * The field of a body whose ground this task draws, or `null` for one with a medium, R08.T18.b's
- * (the module's remarks): an `airless` surface, or one with no volatile air that is not `tenuous`,
- * as a melt surface whose volatiles are gone.
+ * The field of a body's ground (the module's remarks): R08.T18.a's for an `airless` surface or one
+ * with no volatile air, and since R08.T18.b the same for one with a medium, whose ground is seen
+ * through it.
  */
-export function groundTemperatureFieldOf(surface: BodySurface): SurfaceTemperatureField | null {
-  const noMedium =
-    surface.state === "airless" || (surface.gases.length === 0 && surface.state !== "tenuous");
-  return noMedium ? surfaceTemperatureFieldOf(surface) : null;
+export function groundTemperatureFieldOf(surface: BodySurface): SurfaceTemperatureField {
+  return surfaceTemperatureFieldOf(surface);
 }
 
 /**
