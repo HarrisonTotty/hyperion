@@ -31350,6 +31350,12 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         - the kept 23 fits (`GREENHOUSE_CARBON_DIOXIDE`, `GREENHOUSE_WATER` and
           `EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`, now documented as version 23's);
         - P14.T17.b's and T51.g.a's pure laws.
+    - _The cost after the bump_ (lane `perf-24`, 2026-10-30; decision-24-cost D5): bit-identical
+      levers only, no golden moved. New, crate-private: `helmholtz::Isotherm`,
+      `liquid::CompressionSlot` (in `AirborneWeights`) and `cover::FillSlot` (one a greenhouse);
+      `cover::water_under`, `StepClimate::at` and `own_ocean_weight` take their slot, and
+      `CrustRecord` the body's insolation table. The `planetary` bench's `cost_20_generate` and
+      `cost_20_snapshot_at` are D5's probe. D5 is still missed in `snapshot_at` (the lane's report).
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

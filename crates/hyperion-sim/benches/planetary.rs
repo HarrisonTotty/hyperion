@@ -26,6 +26,12 @@
 //! - (vi) `system_bodies_surface`: `snapshot_at` at the epoch degraded to `Surface`, what the
 //!   server's `system_bodies` computes at `surface`, for the Solar-like golden, generated
 //!   beforehand.
+//! - (vii) `cost_20_generate` and (viii) `cost_20_snapshot_at`: decision-24-cost D5's probe, the
+//!   cost limits a generator version is measured against (`generate` ≤ 1.8× and `snapshot_at` ≤
+//!   2.0× of the version before): `generate`, then `snapshot_at` at the epoch of the systems
+//!   generated beforehand, over the first 20 field systems of the system tests' universe
+//!   ([`sample_contexts`] of seed `0x5eed_0014_0030`, [`SampleFilter::ALL`]), their contexts built
+//!   beforehand. Each figure is the whole 20's.
 //!
 //! Measured on 2026-10-14 by `just bench --bench planetary` under the heavy-test lock, in the
 //! `lane/13-p14-t33-port` lane, at generator version 22, on the development machine (an i7-8665U,
@@ -43,6 +49,17 @@
 //! An earlier run that afternoon, at a load of 0.6–1.4 and with (v) taking its bodies at a
 //! stride that left out the list's last few percent, read 6.52 ms, 3.57 s, 4.42 µs, 171 ms and
 //! 5.07 ms.
+//!
+//! (vii) and (viii), by `cargo bench -p hyperion-sim --bench planetary --features testing --
+//! cost_20` (criterion's mean and its interval, ten samples), on 2026-10-30 in P14.T54.b.l's
+//! performance lane, pod, 16 vCPU (a pod runs this probe at about half the owner's desktop's
+//! speed), at generator version 24 before and after the lane's bit-identical levers, with version
+//! 23's tree beside them; the ratios are of 23, against D5's 1.8× and 2.0×, both still missed:
+//!
+//! | Bench | 23 | 24 before | 24 after |
+//! | ----- | -- | --------- | -------- |
+//! | (vii) `cost_20_generate` | 235.6 ms (235.3–235.9) | 1.972 s (1.970–1.974), 8.37× | 434.8 ms (431.5–441.1), 1.85× |
+//! | (viii) `cost_20_snapshot_at` | 499.3 ms (498.8–499.8) | 3.201 s (3.199–3.204), 6.41× | 1.782 s (1.781–1.783), 3.57× |
 //!
 //! The misses are findings, provisional with their ruling deferred (plan 14's Risks, "Deferred
 //! findings (2026-10-13 rule), from P14.T33.a–b"). (i) and (ii) are 3.6 and 2.9 times version
@@ -79,6 +96,13 @@ const FIELD_SYSTEMS: usize = 1_000;
 
 /// How many bodies (v) resolves.
 const SAMPLE_BODIES: usize = 1_000;
+
+/// The seed of the system tests' universe, whose first [`COST_SYSTEMS`] field systems (vii) and
+/// (viii) generate (`planetary::system::tests::SEED`).
+const COST_SEED: u64 = 0x5eed_0014_0030;
+
+/// How many field systems (vii) and (viii) take: decision-24-cost D5's 20.
+const COST_SYSTEMS: usize = 20;
 
 /// `generate` plus `snapshot_at` at the epoch, what a request for a system costs this stage.
 fn generate_and_snapshot(seed: Seed, context: &SystemContext) -> usize {
@@ -172,6 +196,37 @@ fn planetary_stage(c: &mut Criterion) {
             system
                 .snapshot_at(black_box(&solar), UniverseTime::EPOCH)
                 .degrade(DetailLevel::Surface)
+        });
+    });
+    // (vii) and (viii), decision-24-cost D5's probe.
+    let cost_seed = Seed::new(COST_SEED);
+    let cost = sample_contexts(COST_SYSTEMS, cost_seed, SampleFilter::ALL)
+        .expect("the solar circle holds twenty systems");
+    let cost_systems: Vec<PlanetarySystem> = cost
+        .iter()
+        .map(|context| planetary::generate(cost_seed, context))
+        .collect();
+    group.sample_size(10);
+    group.bench_function("cost_20_generate", |b| {
+        b.iter(|| {
+            black_box(&cost)
+                .iter()
+                .map(|context| planetary::generate(cost_seed, context).bodies().len())
+                .sum::<usize>()
+        });
+    });
+    group.bench_function("cost_20_snapshot_at", |b| {
+        b.iter(|| {
+            black_box(&cost)
+                .iter()
+                .zip(&cost_systems)
+                .map(|(context, system)| {
+                    system
+                        .snapshot_at(context, UniverseTime::EPOCH)
+                        .bodies()
+                        .len()
+                })
+                .sum::<usize>()
         });
     });
     group.finish();
