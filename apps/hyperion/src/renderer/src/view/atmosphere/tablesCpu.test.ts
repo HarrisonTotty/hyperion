@@ -40,6 +40,7 @@ import {
   venusClassMedium,
 } from "../../test/atmosphereFixtures";
 import { memoised } from "../../test/memo";
+import { patternedDeckTables } from "../../test/thickTables";
 import { quaternion } from "../camera/quaternion";
 import type { Rgb } from "../photometry/toneCurve";
 import { fromHalfBits, HALF_MAX, toHalfBits } from "../sky/half";
@@ -95,6 +96,8 @@ import {
   unitFromTexelUv,
 } from "./opticalDepth";
 import commonWgsl from "./shaders/common.wgsl?raw";
+import type { DeckSlot, DeckTables } from "./thick/deck";
+import { packDeckTable } from "./thick/deckRead";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
 import type { BakeSpectrum } from "./spectralColour";
 import {
@@ -171,6 +174,22 @@ beforeAll(() => {
 }, 60_000);
 
 const CHANNELS = [0, 1, 2] as const;
+
+/** A deck band with every table 0 but its sky-lit radiance's m = 0, `diffuse` in each channel. */
+function withSlotsOf(band: DeckTables, diffuse: number): DeckTables {
+  return {
+    ...band,
+    slots: band.slots.map((slot): DeckSlot => ({
+      reflectance: new Float32Array(slot.reflectance.length),
+      beamReflection: new Float32Array(slot.beamReflection.length),
+      singleGeometry: new Float32Array(slot.singleGeometry.length),
+      singleBeamGeometry: new Float32Array(slot.singleBeamGeometry.length),
+      diffuse: slot.diffuse.map((_, i) => (i % (3 * band.diffuseModes) < 3 ? diffuse : 0)),
+      phase: slot.phase,
+      solves: slot.solves,
+    })),
+  };
+}
 
 /** The largest relative difference between two tables' texels, over texels where `b` is not 0. */
 function worstRelative(a: Float64Array, b: Float64Array): number {
@@ -1177,6 +1196,58 @@ describe("the per-frame twins' steps", () => {
     }
     expect(off).toEqual([]);
     expect(compared).toBeGreaterThan(0);
+  });
+
+  // R08.T15.a.2: over a deck the bare ground's light is the deck's read, in place of the albedo's.
+  it("draw a deck at the bare ground in place of the albedo: a dark deck as a black ground, to the bit, and its sky-lit light on the ground's texels alone", () => {
+    const orbit = twinView(equatorCamera(WGS84, 400_000), sunAt(30), WGS84, 0.1);
+    const settings = { ...TABLE_SIZES.high, rayMarchSamples: 24, marchDepthSteps: null };
+    const pattern = patternedDeckTables(
+      [{ gravityRatio: 1, latitudeRad: 0, bottomRadiusM: R1, coefficientFactor: 1 }],
+      kernelMedium(R05_EARTH_REFERENCE),
+      1,
+      1_000,
+    );
+    // The deck's every table 0 but its sky-lit radiance's m = 0, `diffuse` in each channel.
+    const darkened = (diffuse: number): ReturnType<typeof packDeckTable> =>
+      packDeckTable(pattern.map((band) => withSlotsOf(band, diffuse)));
+    const black = { ...earth, medium: { ...earth.medium, groundAlbedo: [0, 0, 0] as const } };
+    const dark = { ...earth, deck: darkened(0) };
+    const lit = { ...earth, deck: darkened(0.01) };
+    const off: string[] = [];
+    let grounds = 0;
+    let skies = 0;
+    for (let y = 0; y < 32; y += 4) {
+      for (let x = 0; x < 64; x += 8) {
+        const marched = rayMarchRayTwin(
+          R05_EARTH_REFERENCE,
+          orbit,
+          (x + 0.5) / 64,
+          (y + 0.5) / 32,
+          0,
+          settings,
+        );
+        if (marched === null) {
+          continue;
+        }
+        const plain = rayMarchTexelTwin(black, orbit, settings, marched);
+        const darkTexel = rayMarchTexelTwin(dark, orbit, settings, marched);
+        const brighter = rayMarchTexelTwin(lit, orbit, settings, marched);
+        const ground = marched.bareGroundM !== null;
+        const brightened = [0, 1, 2].every((c) => (brighter[c] ?? 0) > (plain[c] ?? 0));
+        const same = [0, 1, 2, 3].every((c) => brighter[c] === plain[c]);
+        if (![0, 1, 2, 3].every((c) => darkTexel[c] === plain[c])) {
+          off.push(`texel (${x}, ${y}) over the dark deck`);
+        }
+        if (ground ? !brightened : !same) {
+          off.push(`texel (${x}, ${y}) over the lit deck`);
+        }
+        grounds += ground ? 1 : 0;
+        skies += ground ? 0 : 1;
+      }
+    }
+    expect(off).toEqual([]);
+    expect([grounds > 0, skies > 0]).toEqual([true, true]);
   });
 
   // R08.T8.e: high's count by a segment's optical depth (`marchSteps.ts`'s `marchSamplesOf`), and

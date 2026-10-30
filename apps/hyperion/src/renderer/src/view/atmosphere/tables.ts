@@ -74,6 +74,14 @@ import {
   thermalSourceOf,
 } from "./thermalSource";
 import type { MsSourceTable } from "./thick/bake";
+import type { DeckTables } from "./thick/deck";
+import {
+  DECK_TABLE_FORMAT,
+  deckAboveTables,
+  deckTableBytes,
+  packDeckTable,
+  type PackedDeckTable,
+} from "./thick/deckRead";
 import type { PolarisationTable } from "./thick/polarisation";
 import {
   packThickTable,
@@ -2263,6 +2271,11 @@ export class AtmosphereTables {
     readonly buffer: BufferHandle;
     readonly bytes: number;
   } | null = null;
+  /**
+   * The cloud deck's table the march reads at its ground (R08.T15.a.2;
+   * {@link AtmosphereTables.setDeckTables}), packed and uploaded, or `null`.
+   */
+  #deck: { readonly packed: PackedDeckTable; texture: TextureHandle } | null = null;
 
   /**
    * Makes the tables and builds them for `medium`.
@@ -2316,9 +2329,11 @@ export class AtmosphereTables {
       const correction = this.#correction;
       const disc = this.#disc?.table ?? null;
       const temperature = this.#temperature;
+      const deck = this.#deck?.packed ?? null;
       this.#thick = null;
       this.#disc = null;
       this.#thermal = null;
+      this.#deck = null;
       this.setMedium(this.#medium, this.#bottomRadiusM, this.#curves, this.#body);
       if (thick !== null) {
         this.#thick = { packed: thick, texture: this.#uploadThick(thick) };
@@ -2331,6 +2346,9 @@ export class AtmosphereTables {
       if (temperature !== null) {
         this.#temperature = temperature;
         this.#packThermal();
+      }
+      if (deck !== null) {
+        this.#deck = { packed: deck, texture: this.#uploadDeck(deck) };
       }
     });
   }
@@ -2463,7 +2481,8 @@ export class AtmosphereTables {
       (this.#slotDepthsRefusal === null ? this.#row.slotDepthBytes : 0) +
       this.thickBytes +
       this.discBytes +
-      this.thermalBytes
+      this.thermalBytes +
+      this.deckBytes
     );
   }
 
@@ -2774,6 +2793,84 @@ export class AtmosphereTables {
     }
   }
 
+  /**
+   * Gives the tables a cloud deck as their medium's ground (plan R08, R08.T15.a.2; Design note 9;
+   * `thick/deckRead.ts`): the deck's table, which the march reads where a ray meets the ground, and
+   * the bake's J above it as the thick table, its altitudes from the split, with the correction the
+   * tables hold summed into it; or takes both away (`null`), leaving the correction alone. The
+   * tables' medium is the deck's upper medium, its ground the split, and their body's datum the
+   * deck's level surface (`deckRead.ts`'s `upperMediumOf` and `deckDatumOf`): the caller builds
+   * them so. A rebuild for another medium takes the deck away too.
+   *
+   * @param bands - The deck's tables (`thick/deck.ts`'s `bakeDeck`), one a latitude band of the
+   *   tables' plan, in its order, each at its band's s.
+   * @throws RangeError for bands that are not the plan's, as `packDeckTable` or `packThickTable`
+   *   refuse them or the correction held, and the tables keep what they held; `EngineUnavailable`
+   *   while the engine has no device (a loss); or Error once they are disposed.
+   */
+  setDeckTables(bands: ReadonlyArray<DeckTables> | null): void {
+    this.#checkPlanBands("deck", bands);
+    if (bands === null) {
+      this.#releaseDeck();
+      this.#pack(null, this.#correction);
+      return;
+    }
+    const packed = packDeckTable(bands);
+    this.#pack(deckAboveTables(bands), this.#correction);
+    const texture = this.#uploadDeck(packed);
+    this.#releaseDeck();
+    this.#deck = { packed, texture };
+  }
+
+  /**
+   * The cloud deck's table, `rgba32uint`, one layer a band and light slot (`thick/deckRead.ts`;
+   * plan R08, R08.T15.a.2), which the march reads at its ground (`hillaire.ts`'s `withDeckRead`),
+   * or `null`; a new handle after a restore.
+   */
+  get deckTable(): TextureHandle | null {
+    return this.#deck?.texture ?? null;
+  }
+
+  /** The deck's table as packed, for its CPU twin (the smoke's), or `null` (R08.T15.a.2). */
+  get deckPacked(): PackedDeckTable | null {
+    return this.#deck?.packed ?? null;
+  }
+
+  /**
+   * The deck's table's bytes as allocated, B (R08.T15.a.2; `thick/deckRead.ts`'s
+   * `deckTableBytes`): 159,744 a band and light slot; 0 without one.
+   */
+  get deckBytes(): number {
+    return this.#deck === null ? 0 : deckTableBytes(this.#deck.packed);
+  }
+
+  /** Makes and fills a texture for a packed deck table. */
+  #uploadDeck(packed: PackedDeckTable): TextureHandle {
+    const texture = this.#engine.createTexture({
+      name: "atmosphere deck table",
+      size: [packed.widthTexels, packed.heightTexels, packed.layers],
+      dimension: "2d",
+      format: DECK_TABLE_FORMAT,
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "atmosphere-tables",
+    });
+    this.#engine.writeTexture(
+      texture,
+      [0, 0, 0],
+      [packed.widthTexels, packed.heightTexels, packed.layers],
+      packed.texels,
+    );
+    return texture;
+  }
+
+  #releaseDeck(): void {
+    if (this.#deck !== null) {
+      this.#engine.releaseTexture(this.#deck.texture);
+      this.#deck = null;
+    }
+  }
+
   /** The slices and bands the tables are built in ({@link tablesPlanOf}). */
   get plan(): TablesPlan {
     return this.#plan;
@@ -2911,12 +3008,13 @@ export class AtmosphereTables {
     this.#row = row;
     this.#key = null;
     this.#irradianceBuilt = false;
-    // A thick table and a correction belong to the medium they were baked for (R08.T14.c, R08.T14.f),
-    // as does the disc's table (R08.T16.b).
+    // A thick table, a correction and a deck belong to the medium they were baked for (R08.T14.c,
+    // R08.T14.f, R08.T15.a.2), as does the disc's table (R08.T16.b).
     this.#releaseThick();
     this.#thickBands = null;
     this.#correction = null;
     this.#releaseDisc();
+    this.#releaseDeck();
     // So does its thermal source (R08.T18.b), whose temperature is the medium's column's.
     this.#releaseThermal();
     this.#temperature = null;
@@ -3310,6 +3408,7 @@ export class AtmosphereTables {
     this.#releaseThick();
     this.#releaseDisc();
     this.#releaseThermal();
+    this.#releaseDeck();
     releaseResources(this.#engine, this.#resources);
   }
 

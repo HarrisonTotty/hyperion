@@ -1,14 +1,20 @@
 /**
- * Synthetic thick bakes and polarisation corrections for the read path's tests and the smoke page's
- * checks (plan R08, R08.T14.c and R08.T14.f): `bake.ts`'s `MsSourceTable` and `polarisation.ts`'s
- * `PolarisationTable` shapes on the bake's grid, with values set so that the packed table's J⁰, G
- * and G₂ (`thick/read.ts`) follow a pattern in every axis, without running a solve. The values are a
- * test's, not a world's.
+ * Synthetic thick bakes, polarisation corrections and deck tables for the read path's tests and the
+ * smoke page's checks (plan R08, R08.T14.c, R08.T14.f and R08.T15.a.2): `bake.ts`'s
+ * `MsSourceTable`, `polarisation.ts`'s `PolarisationTable` and `deck.ts`'s `DeckTables` shapes on
+ * the bake's grid, with values set so that the packed tables (`thick/read.ts`, `thick/deckRead.ts`)
+ * follow a pattern in every axis, without running a solve. The values are a test's, not a world's.
  */
 
 import type { AtmosphereMedium } from "../view/atmosphere/medium";
 import type { TablesBand } from "../view/atmosphere/tables";
 import type { MsSourceSlot, MsSourceTable } from "../view/atmosphere/thick/bake";
+import type { DeckSlot, DeckTables } from "../view/atmosphere/thick/deck";
+import {
+  DECK_TABLE_MODES,
+  DECK_TABLE_PHASE_ENTRIES,
+  DECK_TABLE_VIEW_COSINES,
+} from "../view/atmosphere/thick/deckRead";
 import type { PolarisationSlot, PolarisationTable } from "../view/atmosphere/thick/polarisation";
 import {
   THICK_ALTITUDES,
@@ -218,6 +224,122 @@ export function patternedCorrection(
       travelCosines,
       modes: THICK_CORRECTION_MODES,
       slots: slotTables,
+    };
+  });
+}
+
+/**
+ * The deck's pattern at sun cosine row `s`, view cosine `v`, band `b` and light slot `k` (R08.T15.a.2),
+ * per channel: each mode's quotient over sinᵐ θ_v sinᵐ θ₀ (`thick/deckRead.ts`'s stored value) of
+ * either sign, falling with m, the beam's ρ − ρ_ss about 0.1 at m = 0, its βρ 0.8 of it, the sky-lit
+ * D about 0.02 sr⁻¹ at m = 0, and G and G_β about 0.2 sr.
+ */
+export function deckPatternAt(
+  s: number,
+  v: number,
+  b: number,
+  k: number,
+  m: number,
+  c: number,
+): { readonly reflectance: number; readonly diffuse: number; readonly single: number } {
+  const wave = Math.cos(0.23 * s + 0.41 * v + 0.37 * m + 0.3 * c + 0.5 * b + 0.2 * k);
+  const fall = 0.5 ** m;
+  return {
+    reflectance: (m === 0 ? 0.1 + 0.03 * wave : 0.04 * wave) * fall,
+    diffuse: (m === 0 ? 0.02 + 0.005 * wave : 0.006 * wave) * fall,
+    single: 0.2 + 0.05 * Math.sin(0.19 * s + 0.31 * v + 0.4 * c + b - 0.3 * k),
+  };
+}
+
+/** The deck's phase's pattern, sr⁻¹, at entry `i` of its 256 and channel `c`: smooth, forward-peaked. */
+export function deckPhasePatternAt(i: number, c: number, b: number, k: number): number {
+  const u = i / (DECK_TABLE_PHASE_ENTRIES - 1);
+  return 0.03 + 0.6 * (1 - u) ** 3 + 0.02 * Math.cos(9 * u + 0.4 * c + 0.3 * b + 0.2 * k);
+}
+
+/**
+ * Deck tables whose packed values follow {@link deckPatternAt} and {@link deckPhasePatternAt}
+ * (R08.T15.a.2), one a band of `bands` (a tables plan's, in its order), with `slots` light slots, on
+ * the deck's grid, the split at `deckAltitudeM` over the body's datum: the J above it
+ * {@link patternedThickBake}'s over `medium`, the upper medium as the kernels read it, its altitudes
+ * from the split up. Its beam's rows below the horizontal hold 0, as a bake's do.
+ */
+export function patternedDeckTables(
+  bands: ReadonlyArray<TablesBand>,
+  medium: AtmosphereMedium,
+  slots: number,
+  deckAltitudeM: number,
+): DeckTables[] {
+  const above = patternedThickBake(bands, medium, slots);
+  const { sunCosines } = patternGrid(medium);
+  const viewCosines = Float64Array.from(
+    { length: DECK_TABLE_VIEW_COSINES },
+    (_, v) => (v + 0.5) / DECK_TABLE_VIEW_COSINES,
+  );
+  const suns = THICK_SUN_COSINES;
+  const views = DECK_TABLE_VIEW_COSINES;
+  const modes = DECK_TABLE_MODES;
+  const diffuseModes = THICK_SOURCE_MODES;
+  return bands.map((_, b): DeckTables => {
+    const table = above[b];
+    if (table === undefined) {
+      throw new Error(`the pattern has a band ${b}`);
+    }
+    const deckSlots = Array.from({ length: slots }, (__, k): DeckSlot => {
+      const reflectance = new Float32Array(suns * views * modes * 3);
+      const beamReflection = new Float32Array(suns * views * modes * 3);
+      const diffuse = new Float32Array(suns * views * diffuseModes * 3);
+      const singleGeometry = new Float32Array(suns * views * 3);
+      const singleBeamGeometry = new Float32Array(suns * views * 3);
+      const phase = Float32Array.from({ length: DECK_TABLE_PHASE_ENTRIES * 3 }, (___, i) =>
+        deckPhasePatternAt(Math.floor(i / 3), i % 3, b, k),
+      );
+      for (let s = 0; s < suns; s += 1) {
+        const mu0 = sunCosines[s] ?? Number.NaN;
+        const lit = mu0 > 0;
+        for (let v = 0; v < views; v += 1) {
+          const muV = viewCosines[v] ?? Number.NaN;
+          const sines = Math.sqrt((1 - mu0 * mu0) * (1 - muV * muV));
+          const point = s * views + v;
+          for (let c = 0; c < 3; c += 1) {
+            for (let m = 0; m < modes; m += 1) {
+              const pattern = deckPatternAt(s, v, b, k, m, c);
+              const at = (point * modes + m) * 3 + c;
+              const power = sines ** m;
+              reflectance[at] = lit ? pattern.reflectance * power : 0;
+              beamReflection[at] = lit ? 0.8 * pattern.reflectance * power : 0;
+              if (m < diffuseModes) {
+                diffuse[(point * diffuseModes + m) * 3 + c] = pattern.diffuse * power;
+              }
+            }
+            const single = deckPatternAt(s, v, b, k, 0, c).single;
+            singleGeometry[point * 3 + c] = lit ? single : 0;
+            singleBeamGeometry[point * 3 + c] = lit ? 0.7 * single : 0;
+          }
+        }
+      }
+      return {
+        reflectance,
+        diffuse,
+        beamReflection,
+        singleGeometry,
+        singleBeamGeometry,
+        phase,
+        solves: 0,
+      };
+    });
+    return {
+      band: table.band,
+      deckAltitudeM,
+      floorAltitudeM: 0,
+      above: { ...table, altitudesM: table.altitudesM.map((h) => h + deckAltitudeM) },
+      sunCosines,
+      viewCosines,
+      modes,
+      diffuseModes,
+      deckOpticalDepth: new Float64Array(15),
+      slots: deckSlots,
+      below: null,
     };
   });
 }

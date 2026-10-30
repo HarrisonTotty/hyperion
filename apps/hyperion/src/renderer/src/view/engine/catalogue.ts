@@ -15,10 +15,14 @@ import {
   AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
   COMPOSITE_MATERIAL,
   RAY_MARCH_CENTRE_KERNEL,
+  RAY_MARCH_DECK_KERNEL,
+  RAY_MARCH_DECK_SPECIAL_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
   RAY_MARCH_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
+  RAY_MARCH_SLOTS_DECK_KERNEL,
+  RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
   RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
@@ -208,6 +212,18 @@ export const ATMOSPHERE_THERMAL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 ].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
 
 /**
+ * R08.T15.a.2's ray marches over a cloud deck (`hillaire.ts`'s `withDeckRead`), both reads'
+ * footprints, each with its form specialised for one band and no layer edge. The smoke page compiles
+ * them in a part of their own (`smoke/page.ts`), beside the deck's twins.
+ */
+export const ATMOSPHERE_DECK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  RAY_MARCH_DECK_KERNEL,
+  RAY_MARCH_SLOTS_DECK_KERNEL,
+  RAY_MARCH_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
+].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
+
+/**
  * R05.T11.b's terrain pass, one material per vertex path, T11.c's lit view's display pass,
  * R10.T10.b's lit terrain, one material per vertex path, R10.T16.c's lit terrain as depth
  * alone for the symbology's pass, one per vertex path, R10.T11's wireframe terrain, one per
@@ -331,6 +347,7 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...ATMOSPHERE_ONE_BAND_ENTRIES,
   ...ATMOSPHERE_THICK_ENTRIES,
   ...ATMOSPHERE_THERMAL_ENTRIES,
+  ...ATMOSPHERE_DECK_ENTRIES,
   ...TERRAIN_ENTRIES,
   ...SPLAT_ENTRIES,
   ...LIT_BODY_ENTRIES,

@@ -107,6 +107,7 @@ import scatteringWgsl from "./shaders/scattering.wgsl?raw";
 import skyViewWgsl from "./shaders/skyView.wgsl?raw";
 import sourceWgsl from "./shaders/source.wgsl?raw";
 import thermalSourceWgsl from "./shaders/thermalSource.wgsl?raw";
+import deckReadWgsl from "./shaders/deckRead.wgsl?raw";
 import thickReadWgsl from "./shaders/thickRead.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
 import {
@@ -1196,6 +1197,55 @@ export function withThermalSource(pair: KernelPair): KernelPair {
   };
 }
 
+/**
+ * The deck read's rewrites of a thick ray march's bare ground (plan R08, R08.T15.a.2;
+ * `thick/deckRead.ts`): each source's light on the bare ground, where the ray meets the kernels'
+ * datum with nothing drawn, is `deckRead.wgsl`'s `deckGroundAt` in place of the Lambertian
+ * max(μ₀, 0) A ÷ π, its own transmittance to the ground passed to it for a source the bake did not
+ * carry. Each is one line and stands once in each march.
+ */
+const DECK_READ: ReadonlyArray<readonly [string, string]> = [
+  [
+    "luminance += viewThroughputOf(&march, slot) * source.weight.rgb * toSun",
+    "luminance += viewThroughputOf(&march, slot) * source.weight.rgb",
+  ],
+  [
+    "* max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW;",
+    "* deckGroundAt(body, s, datum.normal, dir, source.direction.xyz, slot, toSun);",
+  ],
+];
+
+/**
+ * `pair`, a thick ray march's ({@link withThickRead}), reading a cloud deck as its ground (plan
+ * R08, R08.T15.a.2; Design note 9; `thick/deckRead.ts`): the bare ground's light is the deck's
+ * ({@link DECK_READ}), its table bound at `deckTable` beside the thick table. Every other line is
+ * the thick kernel's own, so that a body with no deck keeps its kernels to the byte.
+ *
+ * @throws Error naming the kernel when its sources hold a rewritten line other than once, or it
+ *   does not read the thick table.
+ */
+export function withDeckRead(pair: KernelPair): KernelPair {
+  const rewrite = (wgsl: string): string => {
+    if (!wgsl.includes("fn thickSourceAt(")) {
+      throw new Error(`kernel ${pair.name} reads no thick table, which a deck's march stands on`);
+    }
+    const code = DECK_READ.reduce((text, [general, deck]) => {
+      const count = text.split(general).length - 1;
+      if (count !== 1) {
+        throw new Error(`kernel ${pair.name} holds ${count} places for: ${general}, not 1`);
+      }
+      return text.replace(general, deck);
+    }, wgsl);
+    return `${code}\n${deckReadWgsl}`;
+  };
+  return {
+    ...pair,
+    name: `${pair.name}, over a deck`,
+    reference: rewrite(pair.reference),
+    subgroup: pair.subgroup === null ? null : rewrite(pair.subgroup),
+  };
+}
+
 /** {@link SKY_VIEW_KERNEL} drawing the medium's own light ({@link withThermalSource}; R08.T18.b). */
 export const SKY_VIEW_THERMAL_KERNEL = withThermalSource(SKY_VIEW_KERNEL);
 /** {@link AERIAL_PERSPECTIVE_KERNEL} drawing the medium's own light (R08.T18.b). */
@@ -1214,6 +1264,16 @@ export const AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL = withThermalSource(
 export const RAY_MARCH_THICK_THERMAL_KERNEL = withThermalSource(RAY_MARCH_THICK_KERNEL);
 /** {@link RAY_MARCH_SLOTS_THICK_KERNEL} likewise (R08.T18.b). */
 export const RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL = withThermalSource(RAY_MARCH_SLOTS_THICK_KERNEL);
+/** {@link RAY_MARCH_THICK_KERNEL} over a cloud deck ({@link withDeckRead}; R08.T15.a.2). */
+export const RAY_MARCH_DECK_KERNEL = withDeckRead(RAY_MARCH_THICK_KERNEL);
+/** {@link RAY_MARCH_SLOTS_THICK_KERNEL} over a cloud deck (R08.T15.a.2). */
+export const RAY_MARCH_SLOTS_DECK_KERNEL = withDeckRead(RAY_MARCH_SLOTS_THICK_KERNEL);
+/** {@link RAY_MARCH_DECK_KERNEL} specialised for one band and no layer edge (R08.T15.a.2). */
+export const RAY_MARCH_DECK_SPECIAL_KERNEL = withMarchSpecialised(RAY_MARCH_DECK_KERNEL);
+/** {@link RAY_MARCH_SLOTS_DECK_KERNEL} specialised likewise (R08.T15.a.2). */
+export const RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL = withMarchSpecialised(
+  RAY_MARCH_SLOTS_DECK_KERNEL,
+);
 
 /**
  * Whether a body's tables take the specialised march ({@link withMarchSpecialised}; plan R08,
@@ -1541,6 +1601,13 @@ interface ThickKernels {
   readonly rayMarch: () => ThickMarchKernels;
   /** The march by slot ({@link RAY_MARCH_SLOTS_THICK_KERNEL}). */
   readonly rayMarchSlots: () => ThickMarchKernels;
+  /**
+   * The march over a cloud deck ({@link RAY_MARCH_DECK_KERNEL}; R08.T15.a.2), for tables that hold
+   * a deck table, made at its first frame.
+   */
+  readonly deckRayMarch: () => ThickMarchKernels;
+  /** The march by slot over a cloud deck ({@link RAY_MARCH_SLOTS_DECK_KERNEL}). */
+  readonly deckRayMarchSlots: () => ThickMarchKernels;
 }
 
 /**
@@ -1563,6 +1630,8 @@ function thickKernelsOf(
     (made ??= (() => {
       let shared: ThickMarchKernels | null = null;
       let slots: ThickMarchKernels | null = null;
+      let deckShared: ThickMarchKernels | null = null;
+      let deckSlots: ThickMarchKernels | null = null;
       return {
         skyView: engine.createCompute(as(SKY_VIEW_THICK_KERNEL)),
         aerial: engine.createCompute(as(AERIAL_PERSPECTIVE_THICK_KERNEL)),
@@ -1570,6 +1639,10 @@ function thickKernelsOf(
           (shared ??= marchOf(RAY_MARCH_THICK_KERNEL, RAY_MARCH_THICK_SPECIAL_KERNEL)),
         rayMarchSlots: () =>
           (slots ??= marchOf(RAY_MARCH_SLOTS_THICK_KERNEL, RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL)),
+        deckRayMarch: () =>
+          (deckShared ??= marchOf(RAY_MARCH_DECK_KERNEL, RAY_MARCH_DECK_SPECIAL_KERNEL)),
+        deckRayMarchSlots: () =>
+          (deckSlots ??= marchOf(RAY_MARCH_SLOTS_DECK_KERNEL, RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL)),
       };
     })());
 }
@@ -1616,7 +1689,19 @@ async function thickKernelsAhead(
       RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
     ),
   ]);
-  const kernels: ThickKernels = { skyView, aerial, rayMarch, rayMarchSlots };
+  // The deck's marches are made at their first frame: no view routes a deck before R08.T15.b.2.
+  const [deckRayMarch, deckRayMarchSlots] = await Promise.all([
+    marchOf(false, RAY_MARCH_DECK_KERNEL, RAY_MARCH_DECK_SPECIAL_KERNEL),
+    marchOf(false, RAY_MARCH_SLOTS_DECK_KERNEL, RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL),
+  ]);
+  const kernels: ThickKernels = {
+    skyView,
+    aerial,
+    rayMarch,
+    rayMarchSlots,
+    deckRayMarch,
+    deckRayMarchSlots,
+  };
   return () => kernels;
 }
 
@@ -2832,6 +2917,9 @@ export class HillaireAtmosphere {
     const thermalSource = tables.thermalSource;
     const thermal = thermalSource === null ? null : kernels.thermal(thickTable !== null);
     const thick = thickTable === null || thermal !== null ? null : kernels.thick();
+    // A body whose tables hold a deck table marches by the kernels that read it at the ground
+    // (R08.T15.a.2), beside the thick table that holds its J above the deck.
+    const deckTable = tables.deckTable;
     const common = {
       buffers: { terms: tables.terms, ...(thermalSource === null ? {} : { thermalSource }) },
       sampled: {
@@ -2914,7 +3002,14 @@ export class HillaireAtmosphere {
           }
         : {
             kind: "thick",
-            kernels: slotDepths === null ? thick.rayMarch() : thick.rayMarchSlots(),
+            kernels:
+              deckTable === null
+                ? slotDepths === null
+                  ? thick.rayMarch()
+                  : thick.rayMarchSlots()
+                : slotDepths === null
+                  ? thick.deckRayMarch()
+                  : thick.deckRayMarchSlots(),
           };
     if (area.tilesAcross > 0 && area.tilesDown > 0) {
       const bindings = {
@@ -2923,6 +3018,7 @@ export class HillaireAtmosphere {
           ...common.sampled,
           sceneDepth: scene.depth,
           ...(slotDepths === null ? {} : { slotDepths }),
+          ...(deckTable === null ? {} : { deckTable }),
         },
         uniforms: {
           medium: perFrameMedium,

@@ -127,6 +127,7 @@ import {
   type TransmittanceTextures,
   TRANSMITTANCE_SIZE,
 } from "../view/atmosphere/tables";
+import type { PolarisationTable } from "../view/atmosphere/thick/polarisation";
 import type { PackedThickTable, ThickTableKind } from "../view/atmosphere/thick/read";
 import {
   type FarLimbShells,
@@ -171,11 +172,18 @@ import {
   SATURN_SPHEROID,
   saturnBody,
   saturnClassMedium,
+  saturnScaleHeightM,
   venusClassMedium,
 } from "../test/atmosphereFixtures";
-import { patternedCorrection, patternedThickBake } from "../test/thickTables";
+import { patternedCorrection, patternedDeckTables, patternedThickBake } from "../test/thickTables";
 import type { MediumTemperature, ThermalScattering } from "../view/atmosphere/thermalSource";
 import type { TwinThermal } from "../view/atmosphere/tablesCpu";
+import {
+  deckCorrectionAbove,
+  deckDatumOf,
+  type PackedDeckTable,
+  upperMediumOf,
+} from "../view/atmosphere/thick/deckRead";
 import {
   type DrawItem,
   type PassTimes,
@@ -1880,12 +1888,20 @@ async function planetOf(
 }
 
 /**
- * The thick table the tables hold, as packed, for a twin's planet (R08.T14.c): the bits the kernels
- * read, so that the twin is judged on the read's arithmetic alone; nothing where they hold none.
+ * The thick table the tables hold, as packed, for a twin's planet (R08.T14.c), and the deck's table
+ * where they hold one (R08.T15.a.2): the bits the kernels read, so that the twin is judged on the
+ * read's arithmetic alone; nothing where they hold none.
  */
-function thickOf(tables: AtmosphereTables): { readonly thick?: PackedThickTable } {
+function thickOf(tables: AtmosphereTables): {
+  readonly thick?: PackedThickTable;
+  readonly deck?: PackedDeckTable;
+} {
   const packed = tables.thickPacked;
-  return packed === null ? {} : { thick: packed };
+  const deck = tables.deckPacked;
+  return {
+    ...(packed === null ? {} : { thick: packed }),
+    ...(deck === null ? {} : { deck }),
+  };
 }
 
 /**
@@ -2100,8 +2116,11 @@ async function checkFrameTwins(
  */
 interface ThickTwinBody {
   readonly name: string;
-  /** The thick table it draws over, or `none` for the thin read (R08.T18.b's thermal forms). */
-  readonly table: ThickTableKind | "none";
+  /**
+   * The thick table it draws over, `none` for the thin read (R08.T18.b's thermal forms), or `deck`
+   * for a deck's (R08.T15.a.2), the medium its upper medium.
+   */
+  readonly table: ThickTableKind | "none" | "deck";
   readonly medium: AtmosphereMedium;
   readonly curves: AbsorberCurveSlots;
   readonly figure: SpheroidFigure;
@@ -2109,6 +2128,8 @@ interface ThickTwinBody {
   readonly frames: ReadonlyArray<TwinFrame>;
   /** Its column's temperature, where it draws the medium's own light (R08.T18.b). */
   readonly thermal?: MediumTemperature;
+  /** A deck's split, h\* in m over the body's datum (R08.T15.a.2): the figure is its datum. */
+  readonly deckAltitudeM?: number;
 }
 
 /**
@@ -2262,6 +2283,61 @@ export async function checkThermalFrameTwins(
   ]);
 }
 
+/**
+ * R08.T15.a.2's frames over a deck: from 400 km over its datum, in the march band, with nothing
+ * drawn, so that the march's rays below the horizon end on the deck and read it at the bare ground:
+ * the sun 20° up ahead (the deck's forward lobe), 30° up behind (its backward one), and 3° below
+ * the horizontal (the deck's sky-lit radiance from its rows below, its beam's 0).
+ */
+const DECK_TWIN_FRAMES: ReadonlyArray<TwinFrame> = [
+  { name: "400 km, the sun 20° up ahead", heightM: 400_000, suns: [sunAt(20)], surfaceM: null },
+  { name: "400 km, the sun 30° up behind", heightM: 400_000, suns: [sunAt(150)], surfaceM: null },
+  { name: "400 km, the sun 3° down", heightM: 400_000, suns: [sunAt(-3)], surfaceM: null },
+];
+
+/** R05's Earth's deck's split for the check: 3 km over the datum, in its gas and under its ozone. */
+const EARTH_DECK_ALTITUDE_M = 3_000;
+
+/**
+ * R08.T15.a.2: the march reading a cloud deck at its ground, held to its CPU twin over the GPU's own
+ * per-planet tables, the same packed thick table (the deck's J above it, with the correction) and
+ * the same packed deck table, to 10⁻³ above 10⁻⁶ of the largest (R08.T6.b's bound,
+ * `decision-r08-t6b-floor.md`), with the sky view and the aerial perspective over the thick table:
+ * R05's Earth's upper medium over a deck 3 km up, on the deck's datum (one band), and the
+ * Saturn-class air's over its NH₃-like deck's top, 0.5 bar (five slices, four bands), each over
+ * {@link DECK_TWIN_FRAMES}, on high.
+ */
+export async function checkDeckFrameTwins(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  const saturn = saturnBody();
+  const saturnDeckM = saturnScaleHeightM() * Math.log(2);
+  await checkThickTwinBodies(engine, checks, twins, [
+    {
+      name: "R05's Earth over a deck",
+      table: "deck",
+      medium: upperMediumOf(R05_EARTH_REFERENCE, EARTH_DECK_ALTITUDE_M),
+      curves: NO_ABSORBER_CURVES,
+      figure: deckDatumOf(WGS84, EARTH_GRAVITY, EARTH_DECK_ALTITUDE_M),
+      gravity: EARTH_GRAVITY,
+      frames: DECK_TWIN_FRAMES,
+      deckAltitudeM: EARTH_DECK_ALTITUDE_M,
+    },
+    {
+      name: "the Saturn-class figure over its deck",
+      table: "deck",
+      medium: upperMediumOf(saturnClassMedium(), saturnDeckM),
+      curves: NO_ABSORBER_CURVES,
+      figure: deckDatumOf(SATURN_SPHEROID, saturn.gravity, saturnDeckM),
+      gravity: saturn.gravity,
+      frames: DECK_TWIN_FRAMES,
+      deckAltitudeM: saturnDeckM,
+    },
+  ]);
+}
+
 /** {@link checkThickFrameTwinsEarth}'s and {@link checkThickFrameTwinsSaturn}'s frames, in order. */
 async function checkThickTwinBodies(
   engine: RenderEngine,
@@ -2298,6 +2374,11 @@ async function checkThickTwinBodies(
           case "none":
             task = "R08.T6.b";
             table = "";
+            break;
+          case "deck":
+            withDeckTable(atmosphere.tables, body.curves.length, body.deckAltitudeM ?? Number.NaN);
+            task = "R08.T15.a.2";
+            table = ", over the deck";
             break;
         }
         // A self-luminous body's kernels are the thermal forms, its tables the thermal source's.
@@ -3033,6 +3114,32 @@ export async function checkMarchOneBand(
     engine.releaseMaterial(kernels.composite);
     engine.releaseMesh(kernels.triangle);
   }
+}
+
+/**
+ * A smoke check's deck for `tables` (R08.T15.a.2): `test/thickTables.ts`'s deck pattern over the
+ * tables' medium, the deck's upper medium, and its J above it with the correction's pattern summed
+ * in, one layer a band and light slot of `slots` (at least one): the deck's every series, G, G_β
+ * and its phase in every texel of its read, and the march's bare ground read through them.
+ */
+function withDeckTable(tables: AtmosphereTables, slots: number, deckAltitudeM: number): void {
+  const count = Math.max(1, slots);
+  tables.setDeckTables(
+    patternedDeckTables(tables.plan.bands, kernelMedium(tables.medium), count, deckAltitudeM),
+  );
+  // The correction over the deck stands on the J's altitudes from the split up, to the bit, as the
+  // deck's bake lays it; brought to the split as the deck's J is.
+  const correction = patternedCorrection(tables.plan.bands, tables.medium, count).map(
+    (band): PolarisationTable => ({
+      band: band.band,
+      altitudesM: band.altitudesM.map((h) => h + deckAltitudeM),
+      sunCosines: band.sunCosines,
+      travelCosines: band.travelCosines,
+      modes: band.modes,
+      slots: band.slots,
+    }),
+  );
+  tables.setPolarisationCorrection(deckCorrectionAbove(correction, deckAltitudeM));
 }
 
 /**

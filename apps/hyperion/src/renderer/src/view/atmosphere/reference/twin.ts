@@ -56,6 +56,15 @@
  * or in R05.T12.e's placement, each by building that part of the tables from the medium with its
  * layer edges dropped. A medium with no layer edge reads the same either way, to the bit.
  *
+ * **A cloud deck** ({@link TwinOptions.deck}, R08.T15.a.2; `thick/deckRead.ts`): the twin draws the
+ * deck's upper medium alone (`upperMediumOf`), its ground the split, on the deck's datum
+ * (`deckDatumOf`, a sphere's radius raised by the split), with the deck's J above it and the
+ * correction over it as its thick table, and where a ray from orbit meets the deck, nothing drawn
+ * there, the march reads the deck's own tables in place of the bare ground's albedo, as the kernels
+ * over a deck do (`hillaire.ts`'s `withDeckRead`). The observers stand where the case puts them, on
+ * its own datum; one below the split, R08.T15.b.2's, is refused. The deck's bake is made on the
+ * case's own body (`twinBakeBody`), whose split `thick/deck.ts`'s `prepareDeck` takes.
+ *
  * **The multiple scattering** ({@link TwinOptions.multipleScattering}, R08.T13.c2): drawn, or
  * zeroed for the attribution of a miss, every band's multiple-scattering layer replaced by zeros
  * of its shape after the tables are built, so that the sky view, the march, aerial perspective and
@@ -120,6 +129,14 @@ import {
 } from "../tablesCpu";
 import type { MsSourceTable, ThickBakeBody } from "../thick/bake";
 import type { PolarisationTable } from "../thick/polarisation";
+import type { DeckTables } from "../thick/deck";
+import {
+  deckAboveTables,
+  deckCorrectionAbove,
+  deckDatumOf,
+  packDeckTable,
+  upperMediumOf,
+} from "../thick/deckRead";
 import { packThickTable } from "../thick/read";
 import type { CaseFigure } from "./cases";
 import {
@@ -200,11 +217,29 @@ export interface TwinOptions {
    */
   readonly polarisation: ReadonlyArray<PolarisationTable> | null;
   /**
+   * A cloud deck as the medium's ground (plan R08, R08.T15.a.2; `thick/deckRead.ts`): the twin then
+   * draws the upper medium alone, its ground the split, on the deck's datum, reads the deck's J above
+   * it with the correction summed in, and the deck's own tables where a ray meets it, as the kernels
+   * over a deck do; none by default. Taken with no `thick` and no `polarisation` of its own.
+   */
+  readonly deck: TwinDeck | null;
+  /**
    * The multiple-scattering table's size, its μ_s across and its height down: the kernels'
    * `MULTI_SCATTERING_SIZE` by default; R08.T14.c's resolution control takes four times its μ_s
    * (`decision-r08-t13c2-classes.md` §1).
    */
   readonly multiScatteringSize: TableSize;
+}
+
+/** A cloud deck a twin reads as its medium's ground ({@link TwinOptions.deck}; R08.T15.a.2). */
+export interface TwinDeck {
+  /** The deck's tables (`thick/deck.ts`'s `bakeDeck`), one a band of the twin's slicing, in its order. */
+  readonly tables: ReadonlyArray<DeckTables>;
+  /**
+   * The polarisation correction over the deck (`thick/deck.ts`'s `bakeDeckPolarisation`), one a
+   * band, its altitudes `above`'s, summed into J; or `null`.
+   */
+  readonly polarisation: ReadonlyArray<PolarisationTable> | null;
 }
 
 /** The options a twin takes where its caller gives none. */
@@ -219,6 +254,7 @@ export const DEFAULT_TWIN_OPTIONS: TwinOptions = {
   multipleScattering: "drawn",
   thick: null,
   polarisation: null,
+  deck: null,
   multiScatteringSize: MULTI_SCATTERING_SIZE,
 };
 
@@ -476,6 +512,37 @@ function hasLayerEdges(medium: AtmosphereMedium): boolean {
   return medium.terms.some((term) => layerEdgesM(term.density).length > 0);
 }
 
+/**
+ * The figure a twin over a deck split at `splitM` draws its kernels on (`thick/deckRead.ts`'s
+ * `deckDatumOf`): a sphere's radius raised by the split, or a spheroid's datum the spheroid through
+ * the deck's level surface at the equator and the poles, its gravity's s(φ) the body's own.
+ */
+function deckTwinFigure(figure: TwinFigure, splitM: number): TwinFigure {
+  let raised: TwinFigure;
+  switch (figure.kind) {
+    case "sphere":
+      raised = { kind: "sphere", radiusM: figure.radiusM + splitM };
+      break;
+    case "spheroid": {
+      const { gravity } = figure;
+      const datum = deckDatumOf(gravity.spheroid, gravity, splitM);
+      raised = {
+        kind: "spheroid",
+        gravity: {
+          ...gravity,
+          spheroid: {
+            ...gravity.spheroid,
+            equatorialRadiusM: datum.equatorialRadiusM,
+            polarRadiusM: datum.polarRadiusM,
+          },
+        },
+      };
+      break;
+    }
+  }
+  return raised;
+}
+
 /** The body a figure's tables are built on, its slicing as `slicing` asks. */
 function bodyOf(figure: TwinFigure, datum: SpheroidFigure, slicing: TwinSlicing): TwinBody {
   let body: TwinBody;
@@ -600,18 +667,32 @@ function withoutMultipleScattering(tables: OblatePlanetTwin): OblatePlanetTwin {
  * The twin of a medium on a figure (the module's remarks): its tables built once, each sun's sky
  * view as it is first read.
  *
- * @throws RangeError as `oblatePlanetTwin`, for a medium the tables refuse, or for the steps'
- *   options on a medium with layer edges over several slices or bands.
+ * @throws RangeError as `oblatePlanetTwin`, for a medium the tables refuse, for the steps'
+ *   options on a medium with layer edges over several slices or bands, or for a deck beside a thick
+ *   bake or a correction of its own, of other bands than the twin's, or as `upperMediumOf` and the
+ *   packings refuse it; and, at a read, for an observer below a deck's split.
  */
 export function referenceTwin(
   medium: AtmosphereMedium,
-  figure: TwinFigure,
+  caseFigure: TwinFigure,
   options: Partial<TwinOptions> = {},
 ): ReferenceTwin {
   const settings: TwinOptions = { ...DEFAULT_TWIN_OPTIONS, ...options };
-  const drawn = kernelMedium(medium);
+  const { deck } = settings;
+  if (deck !== null && (settings.thick !== null || settings.polarisation !== null)) {
+    throw new RangeError(
+      "a twin over a deck reads the deck's J, and takes no thick bake of its own",
+    );
+  }
+  // Over a deck the kernels draw the upper medium on the deck's datum (`thick/deckRead.ts`); the
+  // observers stand where the case puts them, on its own datum.
+  const splitM = deck === null ? 0 : (deck.tables[0]?.deckAltitudeM ?? Number.NaN);
+  const caseDatum = twinDatum(caseFigure);
+  const drawnMedium = deck === null ? medium : upperMediumOf(medium, splitM);
+  const figure = deck === null ? caseFigure : deckTwinFigure(caseFigure, splitM);
+  const drawn = kernelMedium(drawnMedium);
   const datum = twinDatum(figure);
-  const body = bodyOf(figure, datum, settings.slicing);
+  const body = bodyOf(caseFigure, datum, settings.slicing);
   const asBuilt = tablesOf(drawn, body, settings);
   // Every read below takes its multiple scattering from the bands' layers alone.
   let oblate: OblatePlanetTwin;
@@ -649,6 +730,25 @@ export function referenceTwin(
       ),
     };
   }
+  if (deck !== null) {
+    if (deck.tables.length !== oblate.bands.length) {
+      throw new RangeError(
+        `a deck of ${deck.tables.length} bands for a twin of ${oblate.bands.length}`,
+      );
+    }
+    const correction = deck.polarisation;
+    oblate = {
+      ...oblate,
+      thick: packThickTable(
+        deckAboveTables(deck.tables),
+        drawn,
+        correction === null
+          ? null
+          : { bands: deckCorrectionAbove(correction, splitM), medium: drawnMedium },
+      ),
+      deck: packDeckTable(deck.tables),
+    };
+  }
   const marched = oblate.medium;
   const [band] = oblate.bands;
   const [first, ...more] = band?.multiScatteringBySlot ?? [];
@@ -662,6 +762,7 @@ export function referenceTwin(
     multiScattering: first,
     ...(more.length > 0 ? { multiScatteringBySlot: band.multiScatteringBySlot } : {}),
     ...(oblate.thick === undefined ? {} : { thick: oblate.thick }),
+    ...(oblate.deck === undefined ? {} : { deck: oblate.deck }),
   };
   // The sky's irradiance at the ground: the table's ground row, which the ground reads alone.
   const groundRow = Array.from({ length: IRRADIANCE_SIZE.widthTexels }, (_, x) => [x, 0] as const);
@@ -673,8 +774,14 @@ export function referenceTwin(
   const sphere = figure.kind === "sphere";
   const sources = tableSources(planet);
 
-  const observerOf = (geometry: ReferenceGeometry): Vec3 =>
-    geodeticPoint(datum, geometry.observer.latitudeDeg, geometry.observer.heightM);
+  const observerOf = (geometry: ReferenceGeometry): Vec3 => {
+    if (deck !== null && geometry.observer.heightM < splitM) {
+      throw new RangeError(
+        `the twin draws no observer below a deck's split, R08.T15.b.2's: ${geometry.name}`,
+      );
+    }
+    return geodeticPoint(caseDatum, geometry.observer.latitudeDeg, geometry.observer.heightM);
+  };
   const cameraAlong = (originM: Vec3, direction: Vec3, fovXRad: number): AtmosphereCamera => ({
     positionM: originM,
     orientation: lookAlong(direction, normalise(originM)),
@@ -783,7 +890,8 @@ export function referenceTwin(
     const originM = observerOf(geometry);
     const sun = sunState(geometry);
     const view = twinView(cameraAlong(originM, direction, defaultFovRad), sun, datum, NEAR_M);
-    const groundM = figureGroundDistanceM(originM, direction, figure);
+    // Over a deck nothing is drawn at the ground: the march reads the deck there.
+    const groundM = deck === null ? figureGroundDistanceM(originM, direction, figure) : null;
     const depth = groundM === null ? 0 : NEAR_M / groundM;
     const x = (TWIN_VIEWPORT.widthPx - 1) / 2;
     const y = (TWIN_VIEWPORT.heightPx - 1) / 2;
@@ -858,7 +966,7 @@ export function referenceTwin(
 
   const radianceAlong = (geometry: ReferenceGeometry, direction: Vec3): TwinParts => {
     let parts: TwinParts;
-    const kind = twinGeometryKind(geometry, drawn, sizes);
+    const kind = twinGeometryKind(geometry, deck === null ? drawn : medium, sizes);
     switch (kind) {
       case "ground":
         parts = groundAlong(geometry, direction);
@@ -940,7 +1048,8 @@ export function referenceTwin(
     surfaceLighting: lighting,
     radiance: (geometry) => coneOf(geometry).total,
     surfaceRadiance: (geometry) => coneOf(geometry).surface,
-    groundConeShare: (geometry) => groundConeShare(geometry, figure, settings.detectorHalfAngleDeg),
+    groundConeShare: (geometry) =>
+      groundConeShare(geometry, caseFigure, settings.detectorHalfAngleDeg),
     radianceAlong,
     litGroundRadiance,
     transmittanceAlong,

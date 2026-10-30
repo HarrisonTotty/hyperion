@@ -101,6 +101,12 @@ import {
 } from "./absorbers";
 import { type ForwardLobe, forwardLobeAt, forwardLobeOfTable, lobeIsDrawn } from "./forwardLobe";
 import {
+  deckGroundInto,
+  type DeckReadScratch,
+  deckReadScratch,
+  type PackedDeckTable,
+} from "./thick/deckRead";
+import {
   type PackedThickTable,
   thickAnalyticShare,
   thickAnalyticWeight,
@@ -1884,6 +1890,12 @@ export interface PlanetTwin extends TwinTransmittance {
    * `AtmosphereTables.thermal`), which the kernels' thermal forms draw; absent below the cut.
    */
   readonly thermal?: TwinThermal;
+  /**
+   * The cloud deck's table the ray march reads at its ground in place of the Lambertian term
+   * (`thick/deckRead.ts`; plan R08, R08.T15.a.2), as `AtmosphereTables.deckPacked` holds it; absent
+   * for a body with a ground of its own.
+   */
+  readonly deck?: PackedDeckTable;
 }
 
 /**
@@ -3603,6 +3615,18 @@ interface RayMarchContext {
   readonly samples: number;
   /** The count by a segment's optical depth (R08.T8.e), or `null` for `samples` everywhere. */
   readonly depthSteps: MarchDepthSteps | null;
+  /** The cloud deck the bare ground reads in place of its albedo (R08.T15.a.2), or `null`. */
+  readonly deck: MarchDeck | null;
+}
+
+/** A march's cloud deck at its ground (R08.T15.a.2; `thick/deckRead.ts`). */
+interface MarchDeck {
+  readonly table: PackedDeckTable;
+  /** ln s_b of the body's bands, ascending: `[0]` on a sphere's one band. */
+  readonly lnBands: Float64Array;
+  /** The body's gravity, which gives s at the ground, or `null` for s ≡ 1. */
+  readonly gravity: BodyGravity | null;
+  readonly scratch: DeckReadScratch;
 }
 
 /** Each planet's ray-march read, decided once ({@link rayMarchSunReadOf}). */
@@ -3658,6 +3682,15 @@ function rayMarchContext(
     view,
     samples: Math.max(Math.floor(settings.rayMarchSamples), 2),
     depthSteps: settings.marchDepthSteps,
+    deck:
+      planet.deck === undefined
+        ? null
+        : {
+            table: planet.deck,
+            lnBands: Float64Array.of(0),
+            gravity: null,
+            scratch: deckReadScratch(),
+          },
   };
 }
 
@@ -3707,9 +3740,20 @@ function rayMarchTexelInto(
     const toSun: TwinRgb = [0, 0, 0];
     // Each source's light on it, weighted as the sky is, through its own slot's throughput (R08.T7).
     const lights = ray.sources ?? [{ direction: ray.sun, weight: [1, 1, 1], slot: 0 }];
+    const deck = context.deck;
+    const reflected: [number, number, number] = [0, 0, 0];
     for (const light of lights) {
       const muSun = groundLightInto(reads, view.figure, groundM, light, toSun);
       const through = marcher.throughputOf(light.slot);
+      if (deck !== null) {
+        // Over a cloud deck its own light in place of the albedo's (R08.T15.a.2), as
+        // `deckRead.wgsl`'s `deckGroundAt` forms it from the datum's normal there.
+        deckLightInto(deck, view.figure, groundM, d, light, muSun, toSun, reflected);
+        for (const c of CHANNELS) {
+          luminance[c] += through[c] * light.weight[c] * reflected[c];
+        }
+        continue;
+      }
       for (const c of CHANNELS) {
         luminance[c] +=
           (through[c] * light.weight[c] * toSun[c] * Math.max(muSun, 0) * medium.groundAlbedo[c]) /
@@ -3719,6 +3763,55 @@ function rayMarchTexelInto(
     meanTransmittance = 0;
   }
   out.set([...luminance, meanTransmittance]);
+}
+
+/**
+ * A cloud deck's light at the bare ground `groundM` for one source into `out`, per unit of its
+ * weight (`deckRead.wgsl`'s `deckGroundAt`, `thick/deckRead.ts`'s `deckGroundInto`): the datum's
+ * unit normal there, the ray's direction `direction`, the source's cosine `muSun` against that
+ * normal and its transmittance `toSun` to the ground, s at the ground's geodetic latitude.
+ */
+function deckLightInto(
+  deck: MarchDeck,
+  figure: SpheroidFigure,
+  groundM: Vec3,
+  direction: Vec3,
+  light: TwinRaySource,
+  muSun: number,
+  toSun: TwinRgb,
+  out: [number, number, number],
+): void {
+  let n: Vec3;
+  let s = 1;
+  if (deck.gravity === null) {
+    const a2 = figure.equatorialRadiusM ** 2;
+    const c2 = figure.polarRadiusM ** 2;
+    const nx = groundM.x / a2;
+    const ny = groundM.y / a2;
+    const nz = groundM.z / c2;
+    const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    n = { x: nx / length, y: ny / length, z: nz / length };
+  } else {
+    const geodetic = geodeticOf(groundM, figure);
+    n = geodetic.normal;
+    s = gravityRatio(deck.gravity, geodetic.latitudeRad);
+  }
+  const sun = light.direction;
+  const muView = direction.x * n.x + direction.y * n.y + direction.z * n.z;
+  const along = direction.x * sun.x + direction.y * sun.y + direction.z * sun.z;
+  deckGroundInto(
+    deck.table,
+    deck.lnBands,
+    s,
+    muSun,
+    -muView,
+    along - muView * muSun,
+    along,
+    light.slot,
+    toSun,
+    deck.scratch,
+    out,
+  );
 }
 
 /**
@@ -4605,6 +4698,11 @@ export interface OblatePlanetTwin {
   readonly thick?: PackedThickTable;
   /** The medium's thermal source and the frame's scale (R08.T18.b), absent below the cut. */
   readonly thermal?: TwinThermal;
+  /**
+   * The cloud deck's table, one layer a band and light slot in {@link bands}' order
+   * (`thick/deckRead.ts`; R08.T15.a.2); absent for a body with a ground of its own.
+   */
+  readonly deck?: PackedDeckTable;
 }
 
 /**
@@ -6361,6 +6459,15 @@ function oblateRayMarchContext(
     view,
     samples: Math.max(Math.floor(settings.rayMarchSamples), 2),
     depthSteps: settings.marchDepthSteps,
+    deck:
+      planet.deck === undefined
+        ? null
+        : {
+            table: planet.deck,
+            lnBands: Float64Array.from(planet.bands, (band) => log(band.gravityRatio)),
+            gravity: planet.body.gravity,
+            scratch: deckReadScratch(),
+          },
   };
 }
 

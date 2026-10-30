@@ -1,0 +1,637 @@
+/**
+ * The cloud deck as the kernels read it (plan R08, R08.T15.a.2; Design notes 9 and 17): the upper
+ * medium as the kernels' medium, its ground the split, and the deck's own tables (`deck.ts`'s
+ * `DeckTables`) packed for the GPU, with their read, which the ray march makes at a ray's hit on the
+ * deck in place of the bare ground's Lambertian term (`shaders/deckRead.wgsl`) and the CPU twin
+ * makes alike (`tablesCpu.ts`).
+ *
+ * @remarks
+ * **The kernels' medium and ground.** Over a deck the kernels draw the upper medium alone, its
+ * ground the split h\* = `deckAltitudeM` ({@link upperMediumOf}: each term's density from the split
+ * up, the top lowered by it), and the bake's J above the deck (`DeckTables.above`) and the
+ * correction over it with their altitudes from the split ({@link deckAboveTables},
+ * {@link deckCorrectionAbove}), so that T14.c's table and its read serve unchanged. Their datum is
+ * the deck's level surface h\* = `deckAltitudeM`, at geometric height h\* ÷ s(φ) above the body's
+ * datum (Design note 17): {@link deckDatumOf} takes it as the spheroid through it at the equator and
+ * the poles, (a + h\* ÷ s_e, c + h\* ÷ s_p), the form the kernels' top and layer-edge shells take
+ * (R08.T6.f), so that every kernel's ground test, its slicing and its heights take that surface
+ * with no line of theirs changed. Between the equator and the poles the spheroid departs from the
+ * level surface by {@link deckDatumDeparture}: on a Saturn-class figure by at most 1.7% of h\* ÷ s,
+ * at 46.5° and whatever the split, 0.012 of the local scale height for a split at 0.5 bar, which
+ * reads the column above the deck some 1.2% off there (`deckRead.test.ts`), a stated approximation
+ * over Design note 17's 1% of geometry.
+ *
+ * **What the table holds** ({@link packDeckTable}), per band and light slot, at the deck's sun
+ * cosines (the thick table's 46 rows) and its eight upward view cosines, per channel, each mode of
+ * the deck's three series stored over sinᵐ θ_v sinᵐ θ₀ at the cell's centre, as `read.ts` stores G
+ * and G₂, so that the read stays continuous where the view or the sun is vertical:
+ *
+ * - ρᵐ − ρ_ssᵐ, the multiple-scattering part of the deck's reflectance, m = 0 … 7, for a beam the
+ *   bake did not carry;
+ * - βρᵐ, the same weighted term by term by the bake's own beam at the deck, for the beam it did;
+ * - Dᵐ, the deck's sky-lit radiance, at its modes (the bake's 3, or 8 under the test's option), 0
+ *   beyond them;
+ * - G and G_β, the exact single scattering's geometry factor and its beam's;
+ * - and per channel the deck's phase p(Θ), sr⁻¹, on the kernels' phase tables' u = √(θ ÷ π) grid.
+ *
+ * **The read** ({@link deckGroundInto}), per source of the view at a ray's hit on the deck, per unit
+ * of the source's weight: (max(μ₀, 0) ÷ π)(Σ_m βρᵐ cᵐ + G_β p(Θ)) + w(μ₀) Σ_m Dᵐ cᵐ, held at 0, with
+ * cᵐ = sinᵐ θ_v sinᵐ θ₀ cos mΔφ formed from the horizontal parts of the view and the source without
+ * Δφ (c⁰ = 1, c¹ = h_⊥, cᵐ⁺¹ = 2 h_⊥ cᵐ − (1 − μ_v²)(1 − μ₀²) cᵐ⁻¹, Chebyshev's recurrence; h_⊥ as
+ * `read.ts`'s), cos Θ = s·v between the source's and the view's directions, w(μ₀) = clamp(32 μ₀ + 7,
+ * 0, 1) the thick table's share, so that the sky-lit radiance fades with J at the rows' edge, and
+ * the beam's term at μ₀ > 0 alone, whose rows hold 0 below the horizontal. A source the bake did not
+ * carry (a light slot past the table's) reads ρᵐ − ρ_ssᵐ and G times the kernels' own transmittance
+ * to the deck in place of βρᵐ and G_β, and the nearest slot's sky-lit radiance, as J's read takes the
+ * nearest slot. The beam's term takes no other visibility of the source: the bake's beam is already
+ * in βρ and G_β, and an eclipse or a ring's shadow is in the source's weight.
+ *
+ * The read is linear between the cells' centres in μ₀ (the thick table's rows, `read.ts`'s
+ * `thickSunPlace`, the beam's terms held at the first row above the horizontal below it), in μ_v
+ * (μ_v = (v + ½) ÷ 8, held at the edges), in u for the phase, and in ln s between the bands about
+ * the hit's s, as `thickRead.wgsl`'s `thickBandsAt` reads them.
+ *
+ * **The texture** is `rgba32uint`, a 2D array of one layer a band and light slot (layer
+ * b × slots + k), each texel's first three words three `f32` values' bits (red, green, blue), the
+ * fourth 0: {@link DECK_TABLE_WIDTH} texels across, eight cells of {@link DECK_TEXELS_A_CELL} a row,
+ * cell v of row s at texels v × 26 … v × 26 + 25 (the eight ρᵐ − ρ_ssᵐ, the eight βρᵐ, the eight Dᵐ,
+ * G and G_β), and the phase's 256 entries after the 46 rows, entry i at texel (i mod 208,
+ * 46 + ⌊i ÷ 208⌋): 208 × 48 texels, 159,744 B a band and light. The values are `f32`, as the
+ * texture's words hold them: the deck's table is read once a ray, not a step, so the half floats of
+ * the thick table, and their least normal, do not arise.
+ */
+
+import type { Rgb } from "../../photometry/toneCurve";
+import {
+  type AtmosphereMedium,
+  densityAt,
+  type MediumTerm,
+  type TabulatedDensity,
+} from "../medium";
+import { type BodyGravity, gravityRatio, type SpheroidFigure } from "../oblate";
+import type { MsSourceTable } from "./bake";
+import type { DeckTables } from "./deck";
+import type { PolarisationTable } from "./polarisation";
+import {
+  THICK_SUN_COSINES,
+  THICK_SUN_COSINES_BELOW,
+  thickSunCosineAt,
+  thickSunPlace,
+} from "./read";
+import { acos, cos, exp, log, sin } from "../../../lib/pinnedMath";
+
+/** The deck table's modes: `deck.ts`'s `DECK_MODES`, 8, held equal by `deckRead.test.ts`. */
+export const DECK_TABLE_MODES = 8;
+/** The deck table's upward view cosines: 8, at (v + ½) ÷ 8, the bake's. */
+export const DECK_TABLE_VIEW_COSINES = 8;
+/** The deck's phase's entries: `deck.ts`'s `DECK_PHASE_U`, 256 even in u = √(θ ÷ π). */
+export const DECK_TABLE_PHASE_ENTRIES = 256;
+/** A cell's texels: the eight ρᵐ − ρ_ssᵐ, the eight βρᵐ, the eight Dᵐ, G and G_β. */
+export const DECK_TEXELS_A_CELL = 3 * DECK_TABLE_MODES + 2;
+/** The texel of a cell where each series begins (the module's remarks). */
+export const DECK_CELL_REFLECTANCE = 0;
+export const DECK_CELL_BEAM = DECK_TABLE_MODES;
+export const DECK_CELL_DIFFUSE = 2 * DECK_TABLE_MODES;
+export const DECK_CELL_SINGLE = 3 * DECK_TABLE_MODES;
+export const DECK_CELL_SINGLE_BEAM = 3 * DECK_TABLE_MODES + 1;
+/** The texels a row: 208, eight cells of 26. */
+export const DECK_TABLE_WIDTH = DECK_TABLE_VIEW_COSINES * DECK_TEXELS_A_CELL;
+/** The phase's first row, after the 46 sun cosine rows. */
+export const DECK_PHASE_ROW = THICK_SUN_COSINES;
+/** The rows a layer: the 46 sun cosines' and the phase's two. */
+export const DECK_TABLE_ROWS =
+  DECK_PHASE_ROW + Math.ceil(DECK_TABLE_PHASE_ENTRIES / DECK_TABLE_WIDTH);
+/** The texture's format: four 32-bit words a texel, three `f32` values' bits and a 0. */
+export const DECK_TABLE_FORMAT = "rgba32uint";
+/** A layer's bytes as allocated, B: 208 × 48 texels × 16 B, 159,744. */
+export const DECK_LAYER_BYTES = DECK_TABLE_WIDTH * DECK_TABLE_ROWS * 16;
+
+/** The thick table's share at μ₀ (`read.ts`'s `thickAnalyticShare`'s complement): clamp(32 μ₀ + 7, 0, 1). */
+const SHARE_CELLS_A_UNIT = 32;
+const SHARE_EDGE_CELLS = 7;
+
+/**
+ * A body's deck tables, packed: what the kernels' `deckTable` holds and the CPU twin reads (the
+ * module's remarks). Structured-cloneable.
+ */
+export interface PackedDeckTable {
+  /** Texels a row: {@link DECK_TABLE_WIDTH}. */
+  readonly widthTexels: number;
+  /** Rows a layer: {@link DECK_TABLE_ROWS}. */
+  readonly heightTexels: number;
+  /** Bands × slots. */
+  readonly layers: number;
+  /** The light slots a band. */
+  readonly slots: number;
+  /** The latitude bands, in the body's order. */
+  readonly bands: number;
+  /** The deck's sky-lit radiance's modes, those past them held 0. */
+  readonly diffuseModes: number;
+  /** Four words a texel, row-major in each layer, layer after layer. */
+  readonly texels: Uint32Array;
+}
+
+/** The bytes a packed deck table allocates, B: {@link DECK_LAYER_BYTES} a layer. */
+export function deckTableBytes(table: Pick<PackedDeckTable, "layers">): number {
+  return table.layers * DECK_LAYER_BYTES;
+}
+
+/** A cosine grid's check: `n` values, each `cosineAt(i)`, to 10⁻¹². */
+function onCosines(values: Float64Array, n: number, cosineAt: (i: number) => number): boolean {
+  return values.length === n && values.every((value, i) => Math.abs(value - cosineAt(i)) <= 1e-12);
+}
+
+/** The view cosine of column `v`: (v + ½) ÷ 8. */
+function viewCosineAt(v: number): number {
+  return (v + 0.5) / DECK_TABLE_VIEW_COSINES;
+}
+
+/**
+ * A body's deck tables packed for the kernels (the module's remarks): each band and light slot's
+ * three series over sinᵐ θ_v sinᵐ θ₀, G, G_β and the phase.
+ *
+ * @param bands - The deck's tables (`deck.ts`'s `bakeDeck`), one a latitude band in the body's
+ *   order, each with the same light slots.
+ * @throws RangeError for no band or no light slot, bands with other light slots or modes, a table
+ *   off the grid ({@link THICK_SUN_COSINES} μ₀ at `read.ts`'s `thickSunCosineAt`, eight view
+ *   cosines at (v + ½) ÷ 8, {@link DECK_TABLE_MODES} modes, at most as many of the sky-lit radiance,
+ *   {@link DECK_TABLE_PHASE_ENTRIES} phase entries), or a value that is not finite.
+ */
+export function packDeckTable(bands: ReadonlyArray<DeckTables>): PackedDeckTable {
+  const [first] = bands;
+  if (first === undefined) {
+    throw new RangeError("a deck table has at least one band");
+  }
+  const slots = first.slots.length;
+  if (slots === 0) {
+    throw new RangeError("a deck table has at least one light slot");
+  }
+  const diffuseModes = first.diffuseModes;
+  for (const [b, band] of bands.entries()) {
+    if (
+      band.slots.length !== slots ||
+      band.modes !== DECK_TABLE_MODES ||
+      band.diffuseModes !== diffuseModes ||
+      diffuseModes > DECK_TABLE_MODES ||
+      !onCosines(band.sunCosines, THICK_SUN_COSINES, thickSunCosineAt) ||
+      !onCosines(band.viewCosines, DECK_TABLE_VIEW_COSINES, viewCosineAt) ||
+      band.slots.some((slot) => slot.phase.length !== DECK_TABLE_PHASE_ENTRIES * 3)
+    ) {
+      throw new RangeError(`the deck's band ${b} is off the deck table's grid, modes or slots`);
+    }
+  }
+  const layerWords = DECK_TABLE_WIDTH * DECK_TABLE_ROWS * 4;
+  const layers = bands.length * slots;
+  const texels = new Uint32Array(layers * layerWords);
+  const values = new Float32Array(texels.buffer);
+  const views = DECK_TABLE_VIEW_COSINES;
+  const modes = DECK_TABLE_MODES;
+  const put = (at: number, rgb: Rgb, where: () => string): void => {
+    for (let c = 0; c < 3; c += 1) {
+      const value = rgb[c] ?? Number.NaN;
+      if (!Number.isFinite(value) || !Number.isFinite(Math.fround(value))) {
+        throw new RangeError(`the deck table's ${where()} is ${value} in channel ${c}`);
+      }
+      values[at * 4 + c] = value;
+    }
+  };
+  for (const [b, band] of bands.entries()) {
+    for (const [k, slot] of band.slots.entries()) {
+      const base = (b * slots + k) * DECK_TABLE_WIDTH * DECK_TABLE_ROWS;
+      for (let s = 0; s < THICK_SUN_COSINES; s += 1) {
+        const mu0 = band.sunCosines[s] ?? Number.NaN;
+        const sunSine = Math.sqrt(1 - mu0 * mu0);
+        for (let v = 0; v < views; v += 1) {
+          const muV = band.viewCosines[v] ?? Number.NaN;
+          const sines = sunSine * Math.sqrt(1 - muV * muV);
+          const cell = base + s * DECK_TABLE_WIDTH + v * DECK_TEXELS_A_CELL;
+          const point = s * views + v;
+          const where =
+            (what: string, m: number | null): (() => string) =>
+            () =>
+              `${what}${m === null ? "" : ` mode ${m}`} at band ${b}, slot ${k}, μ₀ ${s}, μ_v ${v}`;
+          let power = 1;
+          for (let m = 0; m < modes; m += 1) {
+            const series = (table: Float32Array, stride: number): Rgb => {
+              const at = (point * stride + m) * 3;
+              return [
+                (table[at] ?? Number.NaN) / power,
+                (table[at + 1] ?? Number.NaN) / power,
+                (table[at + 2] ?? Number.NaN) / power,
+              ];
+            };
+            put(cell + DECK_CELL_REFLECTANCE + m, series(slot.reflectance, modes), where("ρ", m));
+            put(cell + DECK_CELL_BEAM + m, series(slot.beamReflection, modes), where("βρ", m));
+            if (m < diffuseModes) {
+              put(cell + DECK_CELL_DIFFUSE + m, series(slot.diffuse, diffuseModes), where("D", m));
+            }
+            power *= sines;
+          }
+          const at = point * 3;
+          const single = (table: Float32Array): Rgb => [
+            table[at] ?? Number.NaN,
+            table[at + 1] ?? Number.NaN,
+            table[at + 2] ?? Number.NaN,
+          ];
+          put(cell + DECK_CELL_SINGLE, single(slot.singleGeometry), where("G", null));
+          put(cell + DECK_CELL_SINGLE_BEAM, single(slot.singleBeamGeometry), where("G_β", null));
+        }
+      }
+      for (let i = 0; i < DECK_TABLE_PHASE_ENTRIES; i += 1) {
+        const texel =
+          base +
+          (DECK_PHASE_ROW + Math.floor(i / DECK_TABLE_WIDTH)) * DECK_TABLE_WIDTH +
+          (i % DECK_TABLE_WIDTH);
+        put(
+          texel,
+          [
+            slot.phase[i * 3] ?? Number.NaN,
+            slot.phase[i * 3 + 1] ?? Number.NaN,
+            slot.phase[i * 3 + 2] ?? Number.NaN,
+          ],
+          () => `phase entry ${i} at band ${b}, slot ${k}`,
+        );
+      }
+    }
+  }
+  return {
+    widthTexels: DECK_TABLE_WIDTH,
+    heightTexels: DECK_TABLE_ROWS,
+    layers,
+    slots,
+    bands: bands.length,
+    diffuseModes,
+    texels,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// The read.
+
+/** Each packed table's words read as `f32`, made once a table. */
+const VALUES = new WeakMap<Uint32Array, Float32Array>();
+
+/** A texel's three values, read from its words' bits. */
+function texelAt(table: PackedDeckTable, layer: number, x: number, y: number, out: number[]): void {
+  const at = ((layer * DECK_TABLE_ROWS + y) * DECK_TABLE_WIDTH + x) * 4;
+  let values = VALUES.get(table.texels);
+  if (values === undefined) {
+    values = new Float32Array(table.texels.buffer, table.texels.byteOffset, table.texels.length);
+    VALUES.set(table.texels, values);
+  }
+  out[0] = values[at] ?? 0;
+  out[1] = values[at + 1] ?? 0;
+  out[2] = values[at + 2] ?? 0;
+}
+
+/** The deck's read's scratch, kept by a reader between reads. */
+export interface DeckReadScratch {
+  readonly texel: number[];
+  /** The Chebyshev factors cᵐ, m = 0 … 7. */
+  readonly harmonics: Float64Array;
+  readonly beam: [number, number, number];
+  readonly sky: [number, number, number];
+}
+
+/** A zeroed {@link DeckReadScratch}. */
+export function deckReadScratch(): DeckReadScratch {
+  return {
+    texel: [0, 0, 0],
+    harmonics: new Float64Array(DECK_TABLE_MODES),
+    beam: [0, 0, 0],
+    sky: [0, 0, 0],
+  };
+}
+
+/**
+ * Where `muTravel` lies among the view cosines: the column below it and its share to the next, held
+ * at the edges (y = 8 μ_v − ½ in [0, 7]).
+ */
+function viewPlace(muTravel: number): { readonly v0: number; readonly fv: number } {
+  const y = Math.min(
+    Math.max(muTravel * DECK_TABLE_VIEW_COSINES - 0.5, 0),
+    DECK_TABLE_VIEW_COSINES - 1,
+  );
+  const v0 = Math.min(Math.floor(y), DECK_TABLE_VIEW_COSINES - 2);
+  return { v0, fv: y - v0 };
+}
+
+/** A row place's row below it, at most 44, and its share to the next. */
+function rowOf(x: number): { readonly s0: number; readonly fs: number } {
+  const s0 = Math.min(Math.floor(x), THICK_SUN_COSINES - 2);
+  return { s0, fs: x - s0 };
+}
+
+/**
+ * One layer's beam and sky-lit series at a point into `scratch.beam` and `scratch.sky`, added at
+ * `weight` (`deckRead.wgsl`'s `deckLayerAt`): the beam's Σ_m Xᵐ cᵐ + G p(Θ) of the beam's set
+ * (βρ and G_β where `carried`, else ρ − ρ_ss and G), its rows held at the first above the horizontal,
+ * and the sky-lit Σ_m Dᵐ cᵐ, each bilinear over the cells' centres about the point.
+ */
+function addDeckLayer(
+  table: PackedDeckTable,
+  layer: number,
+  muSun: number,
+  muTravel: number,
+  phase: number,
+  carried: boolean,
+  weight: number,
+  scratch: DeckReadScratch,
+): void {
+  const { texel, harmonics, beam, sky } = scratch;
+  const place = thickSunPlace(muSun);
+  const lit = rowOf(Math.max(place, THICK_SUN_COSINES_BELOW));
+  const all = rowOf(place);
+  const { v0, fv } = viewPlace(muTravel);
+  const series = carried ? DECK_CELL_BEAM : DECK_CELL_REFLECTANCE;
+  const single = carried ? DECK_CELL_SINGLE_BEAM : DECK_CELL_SINGLE;
+  // The phase's two entries about u, each channel's.
+  const u = phase * (DECK_TABLE_PHASE_ENTRIES - 1);
+  const i0 = Math.min(Math.floor(u), DECK_TABLE_PHASE_ENTRIES - 2);
+  const fu = u - i0;
+  const p: [number, number, number] = [0, 0, 0];
+  for (const [i, w] of [
+    [i0, 1 - fu],
+    [i0 + 1, fu],
+  ] as const) {
+    texelAt(
+      table,
+      layer,
+      i % DECK_TABLE_WIDTH,
+      DECK_PHASE_ROW + Math.floor(i / DECK_TABLE_WIDTH),
+      texel,
+    );
+    for (let c = 0; c < 3; c += 1) {
+      p[c] = (p[c] ?? 0) + w * (texel[c] ?? 0);
+    }
+  }
+  for (const ds of [0, 1] as const) {
+    for (const [dv, wv] of [
+      [0, 1 - fv],
+      [1, fv],
+    ] as const) {
+      const x0 = (v0 + dv) * DECK_TEXELS_A_CELL;
+      const beamWeight = weight * (ds === 0 ? 1 - lit.fs : lit.fs) * wv;
+      const skyWeight = weight * (ds === 0 ? 1 - all.fs : all.fs) * wv;
+      const beamRow = lit.s0 + ds;
+      const skyRow = all.s0 + ds;
+      for (let m = 0; m < DECK_TABLE_MODES; m += 1) {
+        const h = harmonics[m] ?? 0;
+        texelAt(table, layer, x0 + series + m, beamRow, texel);
+        for (let c = 0; c < 3; c += 1) {
+          beam[c] = (beam[c] ?? 0) + beamWeight * h * (texel[c] ?? 0);
+        }
+        texelAt(table, layer, x0 + DECK_CELL_DIFFUSE + m, skyRow, texel);
+        for (let c = 0; c < 3; c += 1) {
+          sky[c] = (sky[c] ?? 0) + skyWeight * h * (texel[c] ?? 0);
+        }
+      }
+      texelAt(table, layer, x0 + single, beamRow, texel);
+      for (let c = 0; c < 3; c += 1) {
+        beam[c] = (beam[c] ?? 0) + beamWeight * (texel[c] ?? 0) * (p[c] ?? 0);
+      }
+    }
+  }
+}
+
+/**
+ * The deck's light at a ray's hit on it for one source, per unit of the source's weight, into `out`
+ * (the module's remarks; `deckRead.wgsl`'s `deckGroundAt`), sr⁻¹ per unit of the source's
+ * irradiance: the beam's term and the sky-lit radiance, held at 0.
+ *
+ * @param lnBands - ln s_b of the body's bands, ascending, one a band of the table.
+ * @param s - The hit's gravity ratio.
+ * @param muSun - The source's cosine against the deck's normal at the hit.
+ * @param muTravel - The reflected light's travel cosine, −(v·n), v the view's direction.
+ * @param horizontal - h_⊥ = v·s − (v·n)(s·n), the view's and the source's horizontal parts' dot product.
+ * @param cosTheta - s·v, the cosine of the scattering angle.
+ * @param toSun - The kernels' own transmittance to the hit from the source, which a source the bake
+ *   did not carry takes in place of its beam's.
+ */
+export function deckGroundInto(
+  table: PackedDeckTable,
+  lnBands: ArrayLike<number>,
+  s: number,
+  muSun: number,
+  muTravel: number,
+  horizontal: number,
+  cosTheta: number,
+  slot: number,
+  toSun: Readonly<Rgb>,
+  scratch: DeckReadScratch,
+  out: [number, number, number],
+): void {
+  const { harmonics, beam, sky } = scratch;
+  const crossed = (1 - muTravel * muTravel) * (1 - muSun * muSun);
+  harmonics[0] = 1;
+  harmonics[1] = horizontal;
+  for (let m = 2; m < DECK_TABLE_MODES; m += 1) {
+    harmonics[m] = 2 * horizontal * (harmonics[m - 1] ?? 0) - crossed * (harmonics[m - 2] ?? 0);
+  }
+  beam.fill(0);
+  sky.fill(0);
+  const carried = slot < table.slots;
+  const k = Math.min(slot, table.slots - 1);
+  const phase = Math.sqrt(acos(Math.min(Math.max(cosTheta, -1), 1)) / Math.PI);
+  const last = table.bands - 1;
+  const ls = log(s);
+  if (last === 0 || !(ls > (lnBands[0] ?? Number.NaN))) {
+    addDeckLayer(table, k, muSun, muTravel, phase, carried, 1, scratch);
+  } else if (!(ls < (lnBands[last] ?? Number.NaN))) {
+    addDeckLayer(table, last * table.slots + k, muSun, muTravel, phase, carried, 1, scratch);
+  } else {
+    let lower = 0;
+    while (lower + 1 < last && (lnBands[lower + 1] ?? Number.NaN) <= ls) {
+      lower += 1;
+    }
+    const l0 = lnBands[lower] ?? Number.NaN;
+    const w = (ls - l0) / ((lnBands[lower + 1] ?? Number.NaN) - l0);
+    addDeckLayer(table, lower * table.slots + k, muSun, muTravel, phase, carried, 1 - w, scratch);
+    addDeckLayer(table, (lower + 1) * table.slots + k, muSun, muTravel, phase, carried, w, scratch);
+  }
+  const direct = Math.max(muSun, 0) / Math.PI;
+  const share = Math.min(Math.max(muSun * SHARE_CELLS_A_UNIT + SHARE_EDGE_CELLS, 0), 1);
+  for (let c = 0; c < 3; c += 1) {
+    const transmitted = carried ? 1 : (toSun[c] ?? 0);
+    out[c] = Math.max(direct * transmitted * (beam[c] ?? 0) + share * (sky[c] ?? 0), 0);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The kernels' medium and datum.
+
+/** A tabulated profile from `splitM` up, its heights less `splitM`: exact for its linear read. */
+function tabulatedAbove(profile: TabulatedDensity, splitM: number): TabulatedDensity {
+  const heights: number[] = [0];
+  const relative: number[] = [densityAt(profile, splitM)];
+  for (const [i, h] of profile.altitudesM.entries()) {
+    if (h > splitM) {
+      heights.push(h - splitM);
+      relative.push(profile.relative[i] ?? Number.NaN);
+    }
+  }
+  if (heights.length === 1) {
+    heights.push(1);
+    relative.push(relative[0] ?? Number.NaN);
+  }
+  const edgesM = profile.edgesM?.map((e) => e - splitM).filter((e) => e > 0);
+  return {
+    kind: "tabulated",
+    altitudesM: Float64Array.from(heights),
+    relative: Float64Array.from(relative),
+    ...(edgesM === undefined ? {} : { edgesM }),
+  };
+}
+
+/** A term from `splitM` up (the module's remarks): its density from there, its ground there. */
+function termAbove(term: MediumTerm, splitM: number): MediumTerm {
+  const density = term.density;
+  let above: MediumTerm;
+  switch (density.kind) {
+    case "exponential": {
+      // e^(−(h + h*) ÷ H): the profile's own, its coefficients and amount at the split.
+      const at = exp(-splitM / density.scaleHeightM);
+      const scaled = (rgb: Rgb): Rgb => [rgb[0] * at, rgb[1] * at, rgb[2] * at];
+      const absorber = term.absorber;
+      let moved: MediumTerm["absorber"];
+      if (absorber === undefined) {
+        moved = undefined;
+      } else {
+        switch (absorber.kind) {
+          case "column":
+            moved = { ...absorber, numberDensityPerM3: absorber.numberDensityPerM3 * at };
+            break;
+          case "pair":
+            moved = { ...absorber, pairDensityPerM6: absorber.pairDensityPerM6 * at };
+            break;
+        }
+      }
+      above = {
+        ...term,
+        scattering: scaled(term.scattering),
+        absorption: scaled(term.absorption),
+        ...(moved === undefined ? {} : { absorber: moved }),
+      };
+      break;
+    }
+    case "tent":
+      above = {
+        ...term,
+        density: {
+          kind: "tent",
+          bottomM: density.bottomM - splitM,
+          peakM: density.peakM - splitM,
+          topM: density.topM - splitM,
+        },
+      };
+      break;
+    case "tabulated":
+      above = { ...term, density: tabulatedAbove(density, splitM) };
+      break;
+  }
+  return above;
+}
+
+/**
+ * The upper medium of a deck split at `splitM` as the kernels' medium (the module's remarks): each
+ * term's density from the split up, h\* measured from the split, the top lowered by it, and the
+ * pressure profile with them; the ground's albedo the medium's, which the march's deck read
+ * replaces at the ground.
+ *
+ * @throws RangeError for a split that is not inside the medium, (0, top).
+ */
+export function upperMediumOf(medium: AtmosphereMedium, splitM: number): AtmosphereMedium {
+  if (!(splitM > 0 && splitM < medium.topHeightM)) {
+    throw new RangeError(
+      `a deck's split lies inside its medium, (0, ${medium.topHeightM}) m, not at ${splitM} m`,
+    );
+  }
+  const pressureBar = medium.pressureBar;
+  return {
+    ...medium,
+    name: `${medium.name} above its deck`,
+    topHeightM: medium.topHeightM - splitM,
+    terms: medium.terms.map((term) => termAbove(term, splitM)),
+    ...(pressureBar === undefined ? {} : { pressureBar: tabulatedAbove(pressureBar, splitM) }),
+  };
+}
+
+/** A table's altitudes from the split: each less `splitM`, the split's own exactly 0. */
+function fromSplit(altitudesM: Float64Array, splitM: number): Float64Array {
+  return altitudesM.map((h) => h - splitM);
+}
+
+/**
+ * The bake's J above the deck, one table a band, its altitudes from the split, as the upper medium's
+ * kernels read it (`read.ts`'s `packThickTable` against {@link upperMediumOf}'s kernel medium).
+ */
+export function deckAboveTables(bands: ReadonlyArray<DeckTables>): MsSourceTable[] {
+  return bands.map((band) => ({
+    ...band.above,
+    altitudesM: fromSplit(band.above.altitudesM, band.deckAltitudeM),
+  }));
+}
+
+/**
+ * The polarisation correction over a deck (`deck.ts`'s `bakeDeckPolarisation`), one table a band,
+ * its altitudes from the split at `splitM`, to sum into {@link deckAboveTables}' J.
+ */
+export function deckCorrectionAbove(
+  bands: ReadonlyArray<PolarisationTable>,
+  splitM: number,
+): PolarisationTable[] {
+  return bands.map((band) => ({ ...band, altitudesM: fromSplit(band.altitudesM, splitM) }));
+}
+
+/**
+ * The kernels' datum over a deck split at `splitM` (the module's remarks): the spheroid
+ * (a + h\* ÷ s_e, c + h\* ÷ s_p) through the deck's level surface at the equator and the poles, s
+ * the body's gravity ratio there (1 for a body with no spheroid).
+ *
+ * @throws RangeError for a split that is not finite and above 0.
+ */
+export function deckDatumOf(
+  figure: SpheroidFigure,
+  gravity: BodyGravity,
+  splitM: number,
+): SpheroidFigure {
+  if (!(Number.isFinite(splitM) && splitM > 0)) {
+    throw new RangeError(`a deck's split lies above the datum, not at ${splitM} m`);
+  }
+  return {
+    equatorialRadiusM: figure.equatorialRadiusM + splitM / gravityRatio(gravity, 0),
+    polarRadiusM: figure.polarRadiusM + splitM / gravityRatio(gravity, Math.PI / 2),
+  };
+}
+
+/**
+ * How far {@link deckDatumOf}'s spheroid lies from the deck's level surface at geodetic latitude φ,
+ * m: its height above the body's datum along the datum's normal there, less h\* ÷ s(φ), the level
+ * surface's (Design note 17). 0 at the equator and the poles.
+ */
+export function deckDatumDeparture(
+  figure: SpheroidFigure,
+  gravity: BodyGravity,
+  splitM: number,
+  geodeticLatitudeRad: number,
+): number {
+  const raised = deckDatumOf(figure, gravity, splitM);
+  const a = figure.equatorialRadiusM;
+  const c = figure.polarRadiusM;
+  const sinLatitude = sin(geodeticLatitudeRad);
+  const cosLatitude = cos(geodeticLatitudeRad);
+  // The datum's point at φ and its normal; then t along the normal to the raised spheroid, the
+  // root of (ρ + t cos φ)² ÷ A² + (z + t sin φ)² ÷ C² = 1.
+  const n =
+    (a * a) / Math.sqrt(a * a * cosLatitude * cosLatitude + c * c * sinLatitude * sinLatitude);
+  const rho = n * cosLatitude;
+  const z = ((n * c * c) / (a * a)) * sinLatitude;
+  const big = raised.equatorialRadiusM;
+  const small = raised.polarRadiusM;
+  const qa =
+    (cosLatitude * cosLatitude) / (big * big) + (sinLatitude * sinLatitude) / (small * small);
+  const qb = (rho * cosLatitude) / (big * big) + (z * sinLatitude) / (small * small);
+  const qc = (rho * rho) / (big * big) + (z * z) / (small * small) - 1;
+  const t = -qc / (qb + Math.sqrt(qb * qb - qa * qc));
+  return t - splitM / gravityRatio(gravity, geodeticLatitudeRad);
+}

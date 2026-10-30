@@ -8,12 +8,12 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in thirteen parts, each a run of its own under the harness's watchdog (perf-smoke,
- * 2026-10-13), parts 2 to 6 and 8 to 13 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
- * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f), part 4 with
- * R05.T12.e's marches before them and part 6 with R05.T12.c's frames, part 7 R10's terrain groups,
- * part 13 R08.T14.c's thick read and R08.T14.f's correction, and part 1 every other; with no part given the page runs them all, in
- * its order.
+ * groups are in fourteen parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * 2026-10-13), parts 2 to 6 and 8 to 14 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
+ * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f, R08.T15.a.2),
+ * part 4 with R05.T12.e's marches before them and part 6 with R05.T12.c's frames, part 7 R10's
+ * terrain groups, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14 R08.T15.a.2's
+ * deck, and part 1 every other; with no part given the page runs them all, in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
@@ -47,6 +47,7 @@
  */
 
 import {
+  ATMOSPHERE_DECK_ENTRIES,
   ATMOSPHERE_ONE_BAND_ENTRIES,
   ATMOSPHERE_THERMAL_ENTRIES,
   ATMOSPHERE_THICK_ENTRIES,
@@ -88,6 +89,7 @@ import {
   checkMarchSpecialised,
   checkCorrectionFrameTwinsEarth,
   checkThermalFrameTwins,
+  checkDeckFrameTwins,
   checkThickFrameTwinsEarth,
   checkThickFrameTwinsSaturn,
   checkThickMarchSpecialised,
@@ -230,8 +232,11 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * 133 s and 46 to 135 s, which the catalogue, the Earth's twins and the specialised march would
  * take to some 160 to 166 s at their slowest, so part 13 joined, with those three; the
  * Saturn-class figure's twins, the smallest, went to part 3 (67 to 126 s) (2026-10-27).
+ * R08.T15.a.2's deck brought its marches' catalogue and its twins on Earth and on a Saturn-class
+ * figure, which part 13 (156 s on a pod at R08.T14.d.1's gate) and part 9 (112 s) could not take
+ * whole, so part 14 joined, with both (2026-10-30).
  */
-type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
+type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -265,6 +270,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 12;
     case "13":
       return 13;
+    case "14":
+      return 14;
     default:
       return null;
   }
@@ -392,6 +399,7 @@ async function run(
   const thin = WGSL_CATALOGUE.filter(
     (entry) =>
       !ATMOSPHERE_THICK_ENTRIES.includes(entry) &&
+      !ATMOSPHERE_DECK_ENTRIES.includes(entry) &&
       !ATMOSPHERE_ONE_BAND_ENTRIES.includes(entry) &&
       !ATMOSPHERE_THERMAL_ENTRIES.includes(entry) &&
       !THERMAL_ENTRIES.includes(entry) &&
@@ -405,6 +413,10 @@ async function run(
   );
   await group(9, "T9.b catalogue: the one-band march's kernels", () =>
     checkCatalogue(engine, status, ATMOSPHERE_ONE_BAND_ENTRIES, checks),
+  );
+  // R08.T15.a.2's deck's marches, in part 14 with its twins, first.
+  await group(14, "T9.b catalogue: the deck's marches", () =>
+    checkCatalogue(engine, status, ATMOSPHERE_DECK_ENTRIES, checks),
   );
   await group(1, "T9.a clear and triangle", () => checkClearAndTriangle(engine, checks));
   await group(1, "T9.d three canvases", () => checkThreeCanvases(engine, checks));
@@ -587,6 +599,10 @@ async function run(
   // in part 12 to 166 to 172 s under load.
   await group(13, "R08.T14.c the thick read's specialised march", () =>
     checkThickMarchSpecialised(engine, checks, summary.fallback),
+  );
+  // In part 14 after the deck's catalogue, whose marches it draws by.
+  await group(14, "R08.T15.a.2 the deck's march against its twins", () =>
+    checkDeckFrameTwins(engine, checks, twins),
   );
   await group(4, "R08.T8.b the far limb", () => checkFarLimb(engine, checks, twins));
   await group(11, "R08.T8.c the far limb's footprint", () =>
