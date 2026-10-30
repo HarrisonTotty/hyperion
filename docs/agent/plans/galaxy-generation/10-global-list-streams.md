@@ -724,7 +724,9 @@ centre's part waits on P09.T29's `CentreMemberSource`, which P09.T28.b.a must pr
   bounding radii, the living progenitor's feature ID as plan 09's `FeatureIdHex`,
   `TrackStatusWire`); `StreamTrack { universe, stream }` → per arm a polyline of at most 128 points
   with widths and mean speed, or `Pending`. `SystemOriginWire` gains `stream` and `dwarf_core`.
-  `just gen-protocol`. Tests: wire forms for each message and variant. _At the base:_
+  It is a growing enum (plan 04's reserved list), so this needs no bump; whichever of P10.T7.b,
+  T8.b and T10.a comes first adds the two variants, and they are sent only from P10.T10.b's
+  registration. `just gen-protocol`. Tests: wire forms for each message and variant. _At the base:_
   `FeatureIdHex` and `SystemOriginWire` exist nowhere: they are P09.T39's, which T10.a waits on.
   `REQUEST_KINDS`, `RequestBody` and `ResponseBody` are `crates/hyperion-protocol/src/envelope.rs`
   (about 368, 267 and 315); a new kind or an optional field needs no `PROTOCOL_VERSION` bump (plan

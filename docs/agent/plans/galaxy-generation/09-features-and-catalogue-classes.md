@@ -1468,8 +1468,13 @@ for `hello`.
   with interior mutability because `SystemSource` takes `&self`. The `SystemsInRange` handler
   registers `FeatureMemberSource`, `CentreMemberSource` and `CatalogueClassSource`, and passes
   `FeatureGas` wherever it passed `NoModifiers`. Tests: eviction never changes a reply; a range
-  query over the WebSocket inside a globular returns members with their origin. Rendering plan
-  R06's R06.T16.a reads only the features' part: `FeatureCellCache`, `ClusterModelCache`,
+  query over the WebSocket inside a globular returns members with their origin. Every row carries
+  `origin` from the build that registers the features' source, for the variants that the
+  registered sources place (plan 04's reserved list names `SystemOriginWire`, `CatalogueClassWire`
+  and `MemberClassWire` growing). `CatalogueClassWire` comes from `ClassId` by a match on the
+  registry's constants, and a test walks `ALL_CLASSES` and finds a distinct wire string for each,
+  in value order. `PROTOCOL_VERSION`'s documentation and `features.rs` name the three as growing
+  (`just gen-protocol`). Rendering plan R06's R06.T16.a reads only the features' part: `FeatureCellCache`, `ClusterModelCache`,
   `FeatureMemberSource` registered, and `FeatureGas` passed. That part may be built ahead of the
   centre's and the catalogue classes' sources, which wait on P09.T29 and T37 (decided 2026-10-05,
   `decision-r06-t16a-scope.md`).
@@ -1492,7 +1497,13 @@ for `hello`.
 - **P09.T41.c Lists and readouts.** The chart lists features in a second list with the same keyboard
   selection, and `FeatureReadout` shows designation, kind, distance, extent, age, mass, member count
   and emission class. A selected system's readout gains its origin, member class and supernova
-  state. Component tests for the lists and readouts.
+  state. Component tests for the lists and readouts. An origin, a catalogue class or a member
+  class this build does not know reads Missing, and the readout's other rows read as before (plan
+  04's reserved list): `toChartSystem` maps the wire's origin to the model's with an explicit
+  unknown arm, so the readout's switches stay exhaustive. Tests: a row whose origin is
+  `{ "type": "pinned" }`, one whose `catalogue_system` class is `"magnetar"` and a `listed` member
+  class of `"magnetar"`, each cast at the test's boundary, read Missing where they are unknown,
+  keep the row, and change no other reading.
 
 #### P09.T42 Client: the centre's fine radius steps
 
@@ -4175,6 +4186,16 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     Missing; until that is ruled, P09.T40 sends no `origin` before P10.T10.a's variants exist, or
     P10.T10.a bumps. (2) `CatalogueClassWire` likewise: the registry leaves values 9–63 free and
     design note 16 appends later classes. Lean: growing too.
+  - _Ruled (2026-10-30, main)._ `SystemOriginWire`, `CatalogueClassWire` and `MemberClassWire` join
+    plan 04's growing list (its reserved list), before any build sent a value of any of them, so
+    no bump. Every row carries `origin` from the build that registers the features' source, for the
+    variants the registered sources place; P09.T33.a's `catalogue_system` and P10.T10.a's `stream`
+    and `dwarf_core` join without a bump, as would a member class of plan 10's own. Registering
+    `FeatureMemberSource` waits for P09.T2.c, at version 26, since members registered before it are
+    counted twice (`decision-r06-t16a-scope.md`): P09.T40.a builds the registration behind a switch
+    that is off at 23, so no row carries an `origin` before then and the range query's replies do
+    not change. P09.T41.c reads an origin, a catalogue class or a member class it does not know as
+    Missing.
   - _Tests._ Wire forms with JSON round trips for every request and reply (features in range, also
     with nothing in range; the map's lists of each kind and status; a cluster's, the centre's and a
     cloud's structure; the black hole with and without a luminosity), every `SystemOriginWire`,

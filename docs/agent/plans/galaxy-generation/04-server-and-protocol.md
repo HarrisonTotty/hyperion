@@ -501,9 +501,17 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   frame.
 - Any `SystemIdHex` or body ID arriving from a client goes through the sim's `resolve` before use,
   as the brainstorm requires of IDs read from the protocol. M1 has no such inbound field.
-- `MassLayer`, `Population`, `LayerStatus`, `Unit` and `ErrorCode` will grow. TypeScript switches
-  over them are exhaustive with no `default`, so a new value is a compile error where it matters.
-  The `PARAMETERS` page reads a unit it does not know as Missing (P07.T10.b).
+- `MassLayer`, `Population`, `LayerStatus`, `Unit`, `ErrorCode`, `SystemOriginWire`,
+  `CatalogueClassWire` and `MemberClassWire` will grow. TypeScript switches over them are
+  exhaustive with no `default`, so a new value is a compile error where it matters. The
+  `PARAMETERS` page reads a unit it does not know as Missing (P07.T10.b). `SystemOriginWire`,
+  `CatalogueClassWire` and `MemberClassWire` are plan 09's (P09.T39), named here before any build
+  sent a value of any of them (ruled 2026-10-30): plan 10's P10.T10.a adds the `stream` and
+  `dwarf_core` origins and pinned content (prefix `110`) one more, a catalogue class registered
+  after plan 09's nine takes one of the registry's free values 9–63 (plan 09's design note 16),
+  and a member class of plan 10's own would be one more tag. A system readout reads an origin, a
+  catalogue class or a member class it does not know as Missing, from P09.T41.c, the first build
+  that reads any of them.
 - Optional request fields `region` (density map) and `include_substellar` (range query).
 
 ## Tasks
