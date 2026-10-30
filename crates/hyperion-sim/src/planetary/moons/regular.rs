@@ -3673,6 +3673,7 @@ mod tests {
                     spin,
                     heat_flow: figures.heat_flow(),
                     ocean_weight: figures.ocean_weight(),
+                    holds_liquid_water: air.lists_liquid_water(),
                 };
                 assert_eq!(inputs.material, SurfaceMaterial::Ice, "{name} at {rank:?}");
                 let conditions = SurfaceConditions::derive(&inputs).expect("it has a surface");

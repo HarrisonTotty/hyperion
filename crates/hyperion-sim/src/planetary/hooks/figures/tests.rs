@@ -3055,6 +3055,7 @@ fn under_every_24_hold_a_past_only_runaway_s_lid_and_ice_follow_its_water() {
                 spin: spin_of("Earth"),
                 heat_flow: figures.heat_flow(),
                 ocean_weight: figures.ocean_weight(),
+                holds_liquid_water: air.lists_liquid_water(),
             })
             .expect("an Earth has a surface");
             let inputs = cover::IceInputs {

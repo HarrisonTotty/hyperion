@@ -2651,6 +2651,16 @@ impl Atmosphere {
         self.present
     }
 
+    /// Whether the condensates its pass published list liquid water.
+    ///
+    /// It is its area mix's, `false` before it, and for a gas envelope and a magma ocean, which
+    /// publish none. A world locked 1:1 takes its substellar deck over open water alone
+    /// (P14.T24.j), which the next pass reads through its context.
+    #[must_use]
+    pub const fn lists_liquid_water(&self) -> bool {
+        self.liquid_water
+    }
+
     /// The state its water follows (P14.T53.b part 1 (a)): the state of the climate's division,
     /// which the greenhouse's steps read, so that their θ, the pass's published partition and the
     /// record's agree to the bit.
@@ -2727,6 +2737,7 @@ impl Atmosphere {
     ///     },
     ///     heat_flow: WattsPerSquareMetre::new(0.0925),
     ///     ocean_weight: OceanWeight::FULL,
+    ///     holds_liquid_water: air.lists_liquid_water(),
     /// })
     /// .ok_or("an Earth has a surface")?;
     /// let ice = ice_fraction(&IceInputs {
@@ -3488,6 +3499,8 @@ impl<'a> StepClimate<'a> {
                     heat_flow: spun.context.heat_flow(),
                     inventory: column,
                     ceiling: GreenhouseCeiling::of(inputs),
+                    stellar_flux: spun.stellar_flux,
+                    holds_liquid_water: spun.context.holds_liquid_water(),
                 },
                 water: WaterGate::new(state, retained, water, spun.record.bulk()),
                 context: &spun.context,

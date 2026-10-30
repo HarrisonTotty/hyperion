@@ -3,7 +3,8 @@
 //!
 //! [`SurfaceConditions::derive`] gives, from plain values ([`SurfaceInputs`]):
 //!
-//! - the mean surface temperature, P14.T13's;
+//! - the mean surface temperature, P14.T13's, or on a world locked 1:1 with open water its
+//!   substellar deck's (P14.T24.j, from generator version 26, the crate's `deck`);
 //! - the **equator–pole contrast**, signed (a warm pole is negative), from the obliquity to the
 //!   seasonal orbit, the rotation and the column;
 //! - the **day–night contrast**, from the rotation state and the column, stated about the
@@ -162,6 +163,7 @@ use crate::units::{
     WattsPerSquareMetre,
 };
 
+pub(crate) mod deck;
 pub mod regime;
 
 pub use regime::{ClimateInputs, ClimateRegime, Forcing, ThermalRegime};
@@ -836,6 +838,12 @@ pub struct SurfaceInputs<'a> {
     /// Its ocean's weight θ in the contrasts, P14.T24.b's from its potential ocean
     /// (science-p14-t24b-laws §4.4; [`GlobalFigures::ocean_weight`]).
     pub ocean_weight: OceanWeight,
+    /// Whether its surface holds liquid water, as its published condensates list it (P14.T24.j).
+    ///
+    /// A world locked 1:1 takes its substellar deck only over open water, from generator version
+    /// 26; no other body reads it. On the record it is the flag its published pass read, at a pass
+    /// the previous pass's.
+    pub holds_liquid_water: bool,
 }
 
 /// How a body turns under the host that sets its seasons, as its contrasts read it: its
@@ -1112,6 +1120,7 @@ impl SurfaceConditions {
     ///     },
     ///     heat_flow: WattsPerSquareMetre::new(0.0925),
     ///     ocean_weight: OceanWeight::FULL,
+    ///     holds_liquid_water: derived.atmosphere().lists_liquid_water(),
     /// })
     /// .expect("an Earth has a surface");
     /// // Its fractions are by number and sum to 1, its equator is the warmer, its poles stay
@@ -1140,12 +1149,26 @@ impl SurfaceConditions {
             inputs.material,
             inputs.equilibrium_temperature,
         );
-        let ColumnClimate {
-            zonal,
-            response,
-            day_and_night: (day, night),
-            range,
-        } = climate_of(&column, &inputs.spin, inputs.ocean_weight, ground, floor);
+        // A world locked 1:1 with open water takes its substellar deck in its column (P14.T24.j).
+        let deck::Decked {
+            column,
+            climate:
+                ColumnClimate {
+                    zonal,
+                    response,
+                    day_and_night: (day, night),
+                    range,
+                },
+            ..
+        } = deck::under_deck(
+            &column,
+            &deck::DeckBody {
+                spin: inputs.spin,
+                stellar_flux: inputs.stellar_flux,
+                liquid_water: inputs.holds_liquid_water,
+            },
+            |column| climate_of(column, &inputs.spin, inputs.ocean_weight, ground, floor),
+        );
         let equator_pole = zonal.ends.0 - zonal.ends.1;
         let air = AirTransport {
             redistribution: heat_redistribution(&column),
@@ -1190,6 +1213,12 @@ impl SurfaceConditions {
     /// The mean surface temperature (P14.T13.c), which rendering plan R08's profile starts from:
     /// the surface's emission mean, (⟨σT⁴⟩ ÷ σ)^¼, about 1.3 K above the area mean for Earth-like
     /// contrasts (decision-p14-t57a-fits §2.2).
+    ///
+    /// On a world locked 1:1 under its substellar deck (P14.T24.j, from generator version 26) it is
+    /// the deck's column's, `T_s,w`, colder than T13.c's own, the air's
+    /// ([`Atmosphere::surface_temperature`]), which the air's gases, pressure and greenhouse are
+    /// taken at: the two differ on such a world (the table's Earth locked about an M dwarf's
+    /// orbit, 245.4 K against 290.4 K).
     #[must_use]
     pub const fn mean_surface_temperature(&self) -> Kelvin {
         self.mean_surface_temperature
@@ -1267,8 +1296,9 @@ impl SurfaceConditions {
         self.mean_molar_mass_g_per_mol
     }
 
-    /// The gases' mixed ideal-gas `c_p` ÷ R at the [mean surface
-    /// temperature](Self::mean_surface_temperature), Σ xᵢ (`c_p,ᵢ` ÷ R).
+    /// The gases' mixed ideal-gas `c_p` ÷ R at T13.c's mean surface temperature, the air's,
+    /// Σ xᵢ (`c_p,ᵢ` ÷ R): the [published mean](Self::mean_surface_temperature) but under a
+    /// locked world's substellar deck.
     ///
     /// It is summed over [`gases`](Self::gases) in its order: T49.b's statistical sum
     /// ([`mixture_heat_capacity_over_r_at`]), the one its column's specific heat takes, since
@@ -1277,6 +1307,9 @@ impl SurfaceConditions {
     /// below NASA Glenn's by 1.6% for CO₂, 4.7% for H₂O and 1.1% for N₂. `None` with an empty
     /// `gases` (an airless body, or a surface holding melt with no volatile air), and at a mean
     /// surface temperature not above 0 K or not finite, where the statistical sum has no `c_p`.
+    ///
+    /// On a world locked 1:1 under its substellar deck (P14.T24.j) it is at T13.c's own mean, the
+    /// air's, which its column's specific heat reads, not at the deck's published mean.
     #[must_use]
     pub const fn heat_capacity_over_r(&self) -> Option<f64> {
         self.heat_capacity_over_r
@@ -1345,6 +1378,14 @@ impl SurfaceConditions {
         self.air
     }
 
+    /// The spin the conditions were derived under, a solar day that is not positive taken as none:
+    /// what a census reads of a locked world (P14.T24.j's).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn spin(&self) -> SeasonalSpin {
+        self.spin
+    }
+
     /// The conditions' first stage, with no climate regime, as [`derive`](Self::derive) gives
     /// them: what a test compares a rebuilt derivation with.
     #[cfg(test)]
@@ -1411,6 +1452,7 @@ impl SurfaceConditions {
     /// #     },
     /// #     heat_flow: WattsPerSquareMetre::new(0.0925),
     /// #     ocean_weight: OceanWeight::FULL,
+    /// #     holds_liquid_water: derived.atmosphere().lists_liquid_water(),
     /// # })
     /// # .expect("an Earth has a surface");
     /// // An Earth's annual mean falls from its equator to its poles, through its mean near 30°.
@@ -2082,6 +2124,12 @@ pub(crate) struct ClimateBody {
     /// The ceiling its grey surface is held under (P14.T53.a): where it binds, the greenhouse gain
     /// is 0 ([`GreenhouseCeiling::binds`]).
     pub(crate) ceiling: GreenhouseCeiling,
+    /// The flux of its hosts' light at it, orbit-averaged, which a locked world's deck reads
+    /// ([`deck`], P14.T24.j).
+    pub(crate) stellar_flux: WattsPerSquareMetre,
+    /// Whether its surface holds liquid water as the previous pass published it, the context's
+    /// (P14.T24.j): a locked world's deck needs open water under it ([`deck`]).
+    pub(crate) holds_liquid_water: bool,
 }
 
 /// The span of the climate of the body `body` at a step of T13.c's passes whose mean surface
@@ -2098,7 +2146,10 @@ pub(crate) struct ClimateBody {
 /// [`AIRLESS_PRESSURE`], as T13.c's state is but for a molten surface, which T13.c calls a
 /// `MagmaOcean` and on which nothing condenses. So a body's last step reads the range its record
 /// publishes, but where the range does not hold the mean, whose ends are then widened to it
-/// ([`ClimateSpan::about`]). It allocates nothing.
+/// ([`ClimateSpan::about`]). On a world locked 1:1 with open water, the previous pass's
+/// ([`ClimateBody::holds_liquid_water`]), the column takes its substellar deck first, as the
+/// record's does ([`deck`], P14.T24.j), while the span's mean stays the step's own. It allocates
+/// nothing.
 #[must_use]
 pub(crate) fn step_climate(
     body: &ClimateBody,
@@ -2128,7 +2179,17 @@ pub(crate) fn step_climate(
         return ClimateSpan::isothermal(surface_temperature);
     };
     let floor = night_floor(body.heat_flow);
-    let climate = climate_of(&column, &body.spin, ocean_weight, body.ground, floor);
+    // The record's rule (P14.T24.j): a world locked 1:1 with open water under its deck.
+    let climate = deck::under_deck(
+        &column,
+        &deck::DeckBody {
+            spin: body.spin,
+            stellar_flux: body.stellar_flux,
+            liquid_water: body.holds_liquid_water,
+        },
+        |column| climate_of(column, &body.spin, ocean_weight, body.ground, floor),
+    )
+    .climate;
     ClimateSpan::about(climate.range, surface_temperature)
 }
 

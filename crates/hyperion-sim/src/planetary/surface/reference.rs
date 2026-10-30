@@ -84,6 +84,7 @@ use crate::planetary::hooks::figures::wet_epoch::{
 };
 use crate::planetary::hooks::figures::{Crust as CrustClass, ICY_PROJECTILE_DENSITY};
 use crate::planetary::hooks::surface::annual_insolation_at;
+use crate::planetary::hooks::surface::deck::LockedClimateRules;
 use crate::substance::{self, resolve_palette_entry};
 use crate::units::consts::{SECONDS_PER_DAY, SOLAR_CONSTANT_W_PER_M2};
 use crate::units::{
@@ -649,6 +650,22 @@ const LOCKED_EARTH_EQUATOR_POLE_K: f64 = 32.9;
 /// redistribution of its air (P14.T24.a), which a test holds to 1 K; the table's Earth takes 1.1 K
 /// under its own spin, against the reference Earth's placeholder of 3 K.
 const LOCKED_EARTH_DAY_NIGHT_K: f64 = 59.8;
+
+/// The reference locked Earth's equator–pole contrast under its substellar deck, K: 25.2
+/// (25.22), plan 14's for its table's Earth under the lock's spin from generator version 26
+/// (P14.T24.j's deck in P14.T24.a's column, `hooks::surface::deck`), which a test holds to 1 K.
+const LOCKED_EARTH_DECK_EQUATOR_POLE_K: f64 = 25.2;
+
+/// The reference locked Earth's day–night contrast under its substellar deck, K: 47.2 (47.21),
+/// plan 14's for its table's Earth under the lock's spin from generator version 26 (P14.T24.j),
+/// which a test holds to 1 K.
+const LOCKED_EARTH_DECK_DAY_NIGHT_K: f64 = 47.2;
+
+/// How much colder the reference locked Earth's mean is than the reference Earth's under its
+/// substellar deck, K: 45.03, plan 14's own mean of its table's Earth under the lock's spin less
+/// under the Earth's own (245.35 against 290.38 K, P14.T24.j from generator version 26), which a
+/// test holds to 1 K. Before the deck plan 14's two means are one.
+const LOCKED_EARTH_DECK_COOLING_K: f64 = 45.03;
 
 /// The reference locked Earth's host's luminosity, log₁₀ of L☉: −2.03, an M3.5V dwarf's (3,270 K,
 /// 0.300 R☉), from Mamajek's online main-sequence table, "A Modern Mean Dwarf Stellar Color and
@@ -1362,8 +1379,12 @@ pub fn europa_like() -> CoarseInputs {
 /// | orbit | e 0, a = √(L S☉ ÷ F) au = 0.0966 au, F the reference Earth's mean flux, its year a^1.5 ÷ √(M ÷ M☉) sidereal years, 21.10 d | Kepler's third law, the planet's mass (10⁻⁵ of the host's) neglected; the climate tests' locked Earth takes 24 d about an illustrative dwarf of 0.3 M☉ and 0.012 L☉ |
 /// | spin | locked 1:1: its rotation its year, no solar day, no obliquity, no equinox phase | a tidally locked world (P14.T48.d's `Forcing::Locked`), its obliquity damped, as the climate tests' locked Earth |
 /// | climate | locked forcing, the locked energy-balance model, the Earth's thermal regime and condensable | Design note 8; P14.T48.d |
-/// | contrasts | 32.9 K equator–pole, 59.8 K day–night about the substellar axis | plan 14's for its Solar System table's Earth under the lock's spin (P14.T24.a's `SurfaceConditions::derive`), which a test holds to 1 K; the climate tests' locked Earth keeps the reference Earth's 42 and 3 K, a rotator's |
-/// | everything else | the reference Earth's ([`earth_like`]'s table): its figure, mean temperature, air, ocean, ice, crust, palette, regime, heat flow, ages, crater contract and wet epoch | as the climate tests' locked Earth; plan 14's mean is the same under the lock (290.6 K for its table's Earth under either spin); its crater contract stands for the dwarf's own system's, and its ice's density, at the Earth's coldest zone, for its night's (918.6 kg m⁻³ at 260 K) |
+/// | contrasts | 32.9 K equator–pole, 59.8 K day–night about the substellar axis; under the substellar deck (generator version 26), 25.2 and 47.2 K | plan 14's for its Solar System table's Earth under the lock's spin (P14.T24.a's `SurfaceConditions::derive`, from 26 with P14.T24.j's deck), which a test holds to 1 K; the climate tests' locked Earth keeps the reference Earth's 42 and 3 K, a rotator's |
+/// | mean temperature | the reference Earth's; under the substellar deck (generator version 26), 45.03 K under it, 242.97 K | plan 14's mean is the same under the lock before the deck (290.4 K for its table's Earth under either spin); under it, plan 14's locked mean less its own (245.35 against 290.38 K), which a test holds to 1 K |
+/// | everything else | the reference Earth's ([`earth_like`]'s table): its figure, air, ocean, ice, crust, palette, regime, heat flow, ages, crater contract and wet epoch | as the climate tests' locked Earth; its crater contract stands for the dwarf's own system's, and its ice's density, at the Earth's coldest zone, for its night's (918.6 kg m⁻³ at 260 K) |
+///
+/// The figures read the rules in force when it is built: P14.T24.j's deck from generator
+/// version 26 (`LockedClimateRules::in_force`), and the held figures before it.
 ///
 /// # Panics
 ///
@@ -1379,10 +1400,25 @@ pub fn locked_earth_like() -> CoarseInputs {
             * SIDEREAL_YEAR_DAYS
             * SECONDS_PER_DAY,
     );
+    // Plan 14's locked Earth: its contrasts, and its mean against its own, under the rules in
+    // force (P14.T24.j's deck from 26).
+    let (equator_pole, day_night, mean) = match LockedClimateRules::in_force() {
+        LockedClimateRules::Held => (
+            LOCKED_EARTH_EQUATOR_POLE_K,
+            LOCKED_EARTH_DAY_NIGHT_K,
+            earth.mean_surface_temperature(),
+        ),
+        LockedClimateRules::Deck => (
+            LOCKED_EARTH_DECK_EQUATOR_POLE_K,
+            LOCKED_EARTH_DECK_DAY_NIGHT_K,
+            Kelvin::new(earth.mean_surface_temperature().value() - LOCKED_EARTH_DECK_COOLING_K),
+        ),
+    };
     builder_of(&earth)
         .body(BodyRef::new(0, 6))
-        .equator_pole_contrast_k(LOCKED_EARTH_EQUATOR_POLE_K)
-        .day_night_contrast_k(LOCKED_EARTH_DAY_NIGHT_K)
+        .equator_pole_contrast_k(equator_pole)
+        .day_night_contrast_k(day_night)
+        .mean_surface_temperature(mean)
         .spin(Spin {
             obliquity: Radians::ZERO,
             rotation_period: year,
@@ -1629,10 +1665,15 @@ mod tests {
             (locked.climate().forcing, locked.climate().model),
             (Forcing::Locked, ClimateModelKind::LockedEnergyBalance)
         );
-        // The rest is the reference Earth's.
+        // The rest is the reference Earth's, but under the substellar deck its mean (P14.T24.j,
+        // from 26).
+        let cooling = match LockedClimateRules::in_force() {
+            LockedClimateRules::Held => 0.0,
+            LockedClimateRules::Deck => LOCKED_EARTH_DECK_COOLING_K,
+        };
         assert_eq!(
             locked.mean_surface_temperature(),
-            earth.mean_surface_temperature()
+            Kelvin::new(earth.mean_surface_temperature().value() - cooling)
         );
         assert_eq!(locked.palette(), earth.palette());
         assert_eq!(locked.crust(), earth.crust());
@@ -2264,46 +2305,67 @@ mod tests {
     }
 
     /// The reference locked Earth's contrasts are plan 14's to 1 K: P14.T24.a's conditions of its
-    /// Solar System table's Earth under the lock's spin, with no obliquity and no solar day; and
-    /// plan 14's mean is the same under the lock as under the Earth's own spin.
+    /// Solar System table's Earth under the lock's spin, with no obliquity and no solar day, under
+    /// either rules of P14.T24.j's hold. Before the deck plan 14's mean is the same under the lock
+    /// as under the Earth's own spin, and the fixture's is the reference Earth's; under it, the
+    /// fixture's mean lies as far under the reference Earth's as plan 14's locked mean under its
+    /// own, to 1 K.
     #[test]
     fn the_locked_earth_s_contrasts_are_plan_14_s() {
         use crate::planetary::hooks::surface::SeasonalSpin;
+        use crate::planetary::hooks::surface::deck::with_locked_climate;
         use crate::planetary::hooks::surface::tests::{conditions_of, spin_of};
         let earth = crate::planetary::derive::solar::historic("Earth");
-        let locked = locked_earth_like();
-        let spin = SeasonalSpin {
-            obliquity: Radians::ZERO,
-            rotation_period: locked.spin().rotation_period,
-            solar_day: None,
-        };
-        let plan14 = conditions_of(&earth, spin).unwrap();
-        let own = conditions_of(&earth, spin_of("Earth")).unwrap();
-        for (name, held, theirs) in [
-            (
-                "equator–pole",
-                locked.equator_pole_contrast_k(),
-                plan14.equator_pole_contrast_k(),
-            ),
-            (
-                "day–night",
-                locked.day_night_contrast_k(),
-                plan14.day_night_contrast_k(),
-            ),
-        ] {
-            assert!(
-                (held - theirs).abs() < 1.0,
-                "{name}: {held} K against {theirs} K"
-            );
+        for rules in [LockedClimateRules::Held, LockedClimateRules::Deck] {
+            with_locked_climate(rules, || {
+                let locked = locked_earth_like();
+                let spin = SeasonalSpin {
+                    obliquity: Radians::ZERO,
+                    rotation_period: locked.spin().rotation_period,
+                    solar_day: None,
+                };
+                let plan14 = conditions_of(&earth, spin).unwrap();
+                let own = conditions_of(&earth, spin_of("Earth")).unwrap();
+                for (name, held, theirs) in [
+                    (
+                        "equator–pole",
+                        locked.equator_pole_contrast_k(),
+                        plan14.equator_pole_contrast_k(),
+                    ),
+                    (
+                        "day–night",
+                        locked.day_night_contrast_k(),
+                        plan14.day_night_contrast_k(),
+                    ),
+                ] {
+                    assert!(
+                        (held - theirs).abs() < 1.0,
+                        "{rules:?}, {name}: {held} K against {theirs} K"
+                    );
+                }
+                let (mean, own_mean) = (
+                    plan14.mean_surface_temperature().value(),
+                    own.mean_surface_temperature().value(),
+                );
+                let reference_mean = earth_like().mean_surface_temperature().value();
+                let fixture = locked.mean_surface_temperature().value() - reference_mean;
+                match rules {
+                    LockedClimateRules::Held => {
+                        assert!(
+                            (mean - own_mean).abs() < 1e-9,
+                            "{mean} K against {own_mean} K"
+                        );
+                        hyperion_testkit::float::assert_same_bits(fixture, 0.0);
+                    }
+                    LockedClimateRules::Deck => {
+                        assert!(
+                            (fixture - (mean - own_mean)).abs() < 1.0,
+                            "the fixture's {fixture} K against plan 14's {mean} − {own_mean} K"
+                        );
+                    }
+                }
+            });
         }
-        let (mean, own_mean) = (
-            plan14.mean_surface_temperature().value(),
-            own.mean_surface_temperature().value(),
-        );
-        assert!(
-            (mean - own_mean).abs() < 1e-9,
-            "{mean} K against {own_mean} K"
-        );
     }
 
     /// The reference Earth's water carries the registry's scattering, to the bit: its copy, as

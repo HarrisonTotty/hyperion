@@ -797,6 +797,64 @@ fn locked_earth_like_matches_its_golden() {
     golden!("planetary/surface/locked_earth_like", &text);
 }
 
+/// Under every 26 hold (P14.T24.j's substellar deck, with the reference locked Earth's plan 14
+/// figures under it), R09 shows the locked Earth's substellar sea at most 285 K and open (the
+/// pilot's 276.3 K, against 333.2 K before the deck), and its antistellar point at least 205 K
+/// (217.9 K): the cells within 2.5° of each point, at their shown temperature, the sea level's
+/// less the lapse over the water surface. Prints the wettest climate cell-month (the pilot's
+/// 71.2 mm/day before R09.T13.m, against 403.3 before the deck).
+#[test]
+#[ignore = "slow: the reference locked Earth's coarse pass at level 8, about 22 s in the test \
+            profile"]
+fn under_every_26_hold_r09_shows_the_locked_earth_s_sea_under_its_deck() {
+    let field = crate::planetary::testing::with_every_26_hold(|| {
+        coarse_pass(reference::SEED, &reference::locked_earth_like())
+    });
+    let header = field.header();
+    let graph = CellGraph::for_field(header.level());
+    let climate = field.climate_layer();
+    // A field cell's shown temperature: its climate parent's sea-level temperature, less the
+    // lapse over its water surface (the climate layer's four children share their parent).
+    let shown = |n: usize, cell: &SynthesisCell| {
+        header.sea_level_temperature(&climate[n >> 2]).value()
+            - header.lapse_rate_k_per_m()
+                * (cell.water_surface().value() - header.sea_level().value())
+    };
+    // A 1:1 lock's substellar point is the body frame's +x.
+    let near = crate::math::cos(2.5_f64.to_radians());
+    let (mut sea, mut ice, mut night) = (Vec::new(), 0_u32, Vec::new());
+    for (n, (cell, centre)) in field.synthesis().iter().zip(graph.centres()).enumerate() {
+        if centre[0] > near && cell.is_under_water() {
+            sea.push(shown(n, cell));
+            ice += u32::from(cell.ice > 0);
+        }
+        if -centre[0] > near {
+            night.push(shown(n, cell));
+        }
+    }
+    let wettest = climate
+        .iter()
+        .flat_map(|c| c.month_precipitation[..usize::from(header.months())].iter())
+        .fold(0.0_f64, |most, p| most.max(p.rate_kg_per_m2_s()))
+        * crate::units::consts::SECONDS_PER_DAY;
+    let warmest = sea.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let coldest = night.iter().copied().fold(f64::INFINITY, f64::min);
+    let mean = |v: &[f64]| v.iter().sum::<f64>() / f64::from(u32::try_from(v.len()).unwrap());
+    eprintln!(
+        "the locked Earth under its deck: substellar sea {} cells, {:.1} K mean, {warmest:.1} K \
+         at most, {ice} with ice; antistellar {} cells, {:.1} K mean, {coldest:.1} K at least; \
+         the wettest cell-month {wettest:.1} mm/day",
+        sea.len(),
+        mean(&sea),
+        night.len(),
+        mean(&night)
+    );
+    assert!(!sea.is_empty() && !night.is_empty());
+    assert!(warmest <= 285.0, "the substellar sea at {warmest} K");
+    assert_eq!(ice, 0, "the substellar sea is open");
+    assert!(coldest >= 205.0, "the antistellar point at {coldest} K");
+}
+
 /// [`byte_digest`] is [`f64_digest`] over the bytes as `f64`s, for every byte value and a run of
 /// them.
 #[test]

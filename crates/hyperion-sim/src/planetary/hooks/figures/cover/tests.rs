@@ -328,6 +328,7 @@ fn the_table_s_ices_are_the_ruling_s() {
         spin,
         heat_flow: figures.heat_flow(),
         ocean_weight: figures.ocean_weight(),
+        holds_liquid_water: derived.atmosphere().lists_liquid_water(),
     })
     .unwrap();
     let europa = figures.with_surface(&conditions, VolatileHistory::NONE);
@@ -1024,6 +1025,7 @@ fn the_table_s_mars_over_its_record_takes_the_record_s_ice_in_its_passes() {
         spin: spin_of("Mars"),
         heat_flow: context.heat_flow(),
         ocean_weight: spun.ocean_weight(),
+        holds_liquid_water: air.lists_liquid_water(),
     })
     .expect("Mars has a surface");
     let pass = read

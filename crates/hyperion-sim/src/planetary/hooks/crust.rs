@@ -1219,6 +1219,7 @@ impl CrustComposition {
     /// #     },
     /// #     heat_flow: WattsPerSquareMetre::new(0.0925),
     /// #     ocean_weight: OceanWeight::FULL,
+    /// #     holds_liquid_water: derived.atmosphere().lists_liquid_water(),
     /// # })
     /// # .expect("an Earth has a surface");
     /// use hyperion_sim::planetary::chem::solar_magnesium_to_silicon;

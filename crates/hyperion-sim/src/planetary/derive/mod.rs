@@ -135,8 +135,8 @@ use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::limits::TidalPlanet;
 use crate::planetary::derive::pass_record::{
-    InertiaLid, PassBulk, PassContext, PassRecord, PassRecordOf, RecordCrust, Resurfacing,
-    WaterGate,
+    InertiaLid, OpenWater, PassBulk, PassContext, PassRecord, PassRecordOf, RecordCrust,
+    Resurfacing, WaterGate,
 };
 use crate::planetary::derive::passes::Convergence;
 use crate::planetary::derive::photometry::area_mix::{self, HostShade, HostShadeSum, ShadeBook};
@@ -148,7 +148,7 @@ use crate::planetary::hooks::crust::{
 };
 use crate::planetary::hooks::figures::cover::UNDER_ICE_MELTING_POINT;
 use crate::planetary::hooks::ocean::OceanSolutes;
-use crate::planetary::hooks::surface::{COSMIC_BACKGROUND_TEMPERATURE, OceanWeight};
+use crate::planetary::hooks::surface::{COSMIC_BACKGROUND_TEMPERATURE, OceanWeight, deck};
 use crate::planetary::params::{
     GAS_GIANT_ENVELOPE_FRACTION, ICE_GIANT_MASS, ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION,
 };
@@ -160,8 +160,8 @@ use crate::time::UniverseTime;
 use crate::units::consts::{GM_EARTH, GRAVITATIONAL_CONSTANT};
 use crate::units::{
     EarthFluxes, EarthMasses, EarthRadii, Gigayears, JoulesPerSquareMetre, JupiterMasses, Kelvin,
-    Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecond, MetresPerSecondSquared, Seconds,
-    SolarMasses, Watts, WattsPerSquareMetre, Years,
+    Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecond, MetresPerSecondSquared, Pascals,
+    Seconds, SolarMasses, Watts, WattsPerSquareMetre, Years,
 };
 
 /// A body as the derivation reads it: its mass and orbit, where it formed, and its one drawn
@@ -2399,9 +2399,27 @@ impl PassBody<'_> {
                 .as_ref()
                 .zip(context.surface_age())
                 .map(|(basis, age)| Resurfacing::of(basis.unresurfaced(age)));
+            // A locked world's deck reads the pass's open water at the next (P14.T24.j), at its
+            // column's pressure, none in the airless and tenuous states.
+            let pressure = match air.state() {
+                SurfaceState::Airless | SurfaceState::Tenuous => Pascals::ZERO,
+                SurfaceState::GasEnvelope
+                | SurfaceState::MagmaOcean
+                | SurfaceState::RunawayGreenhouse
+                | SurfaceState::SteamEnvelope
+                | SurfaceState::Temperate
+                | SurfaceState::Snowball => air.surface_pressure().unwrap_or(Pascals::ZERO),
+            };
+            let reads = deck::reads_open_water(&record.spin, record.radius, stellar_flux, pressure);
+            let open_water = if reads && air.lists_liquid_water() {
+                OpenWater::Open
+            } else {
+                OpenWater::Dry
+            };
             context
                 .with_lid(lid.as_ref().map(InertiaLid::of), unresurfaced)
                 .with_present(air.carried_state())
+                .with_open_water(open_water)
         };
         let solve = || {
             let solved = passes::solve_in_context(

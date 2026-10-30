@@ -456,6 +456,26 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     })
 }
 
+/// `run`'s result with every landed hold at generator version 26 in force on this thread, for a
+/// test that asserts a 26 figure: every 25 hold ([`with_every_25_hold`]) and those at 26, each with
+/// its switch, which sets its rules back as it returns, a panic in `run` included. A test may set
+/// one hold back inside it to compare 26 with and without it.
+///
+/// The holds at 26:
+///
+/// - the substellar deck of a world locked 1:1, `LOCKED_CLIMATE_VERSION` (P14.T24.j), at
+///   `LockedClimateRules::Deck` through `with_locked_climate`: its column's deck albedo and locked
+///   greenhouse over open water, which its record and its passes' steps read.
+///
+/// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
+/// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
+/// here; 26's bump deletes this helper with its holds.
+#[cfg(test)]
+pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
+    with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

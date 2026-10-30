@@ -285,6 +285,19 @@ impl Resurfacing {
     }
 }
 
+/// Whether a pass gives the next pass's substellar deck open water (P14.T24.j): its published
+/// condensates list liquid water ([`Atmosphere::lists_liquid_water`]) and a deck reads it
+/// (`deck::reads_open_water`). A key member of a pass's context, which only a locked world's
+/// passes over open water can change, so that no other body's passes see it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum OpenWater {
+    /// No open water under a deck: no liquid water listed, or no deck reads it (at C₀, under the
+    /// deck's hold, off its domain).
+    Dry,
+    /// Liquid water listed under a deck that reads it.
+    Open,
+}
+
 /// The context a pass reads beside its albedo (P14.T54.a; decision-p14-t54a-passes §1.1): the
 /// figures' first stage of the previous pass's own air ([`PassFigures`]), K(P), with a moon's tide
 /// at that pass.
@@ -304,6 +317,7 @@ impl Resurfacing {
 /// | inertia lid | the pass's own lid ([`InertiaLid`]), whose row the next pass's ground reads | key |
 /// | `lid_of`'s unresurfaced test | the surface age against the time since the magma ocean, which the next pass's lid takes ([`Resurfacing`]) | key |
 /// | carried state | the state the pass carries by P14.T53.e's rules 5–7 ([`Atmosphere::carried_state`]), which the next pass's state-keyed branches read; `None` under their hold and where the rules agree with its climate's class | key |
+/// | open water | whether the pass's published condensates list liquid water where the next pass's substellar deck reads it ([`OpenWater`], P14.T24.j); dry under its hold and where no deck reads it | key |
 ///
 /// Every member a pass reads is ranked: the lid a pass takes reads the surface age (a float), the
 /// tide's branch, the unresurfaced test and the basis, which no pass moves; its ground reads the
@@ -319,6 +333,7 @@ pub(crate) struct PassContext {
     lid: Option<InertiaLid>,
     unresurfaced: Option<Resurfacing>,
     present: Option<PresentClimate>,
+    open_water: OpenWater,
 }
 
 /// How many float members a context holds beside its basins': the water share, the heat flow, the
@@ -387,6 +402,9 @@ pub(crate) struct PassContextKey {
     /// The state the pass carries by P14.T53.e's rules 5–7, `None` under their hold and where
     /// they agree with its climate's class.
     pub(crate) present: Option<PresentClimate>,
+    /// Whether the pass's published condensates list liquid water, where a locked world's deck
+    /// reads it (P14.T24.j); dry under its hold and elsewhere.
+    pub(crate) open_water: OpenWater,
 }
 
 impl PassContext {
@@ -402,6 +420,7 @@ impl PassContext {
         lid: None,
         unresurfaced: None,
         present: None,
+        open_water: OpenWater::Dry,
     };
 
     /// The context of the first stage `figures` and the tide `tide`, a moon's or none (K(P)), with
@@ -426,6 +445,7 @@ impl PassContext {
             lid: None,
             unresurfaced: None,
             present: None,
+            open_water: OpenWater::Dry,
         };
         let (floats, n) = context.floats();
         assert!(
@@ -470,6 +490,21 @@ impl PassContext {
     #[must_use]
     pub(crate) const fn present(&self) -> Option<PresentClimate> {
         self.present
+    }
+
+    /// The context with its pass's open water `open_water`, which the next pass's substellar deck
+    /// reads (P14.T24.j), [`OpenWater::Dry`] where none does.
+    #[must_use]
+    pub(crate) const fn with_open_water(self, open_water: OpenWater) -> Self {
+        Self { open_water, ..self }
+    }
+
+    /// Whether the previous pass's published condensates listed liquid water, as a locked world's
+    /// substellar deck reads it (P14.T24.j): false at C₀, under the deck's hold and where no deck
+    /// reads it.
+    #[must_use]
+    pub(crate) fn holds_liquid_water(&self) -> bool {
+        self.open_water == OpenWater::Open
     }
 
     /// A moon's tide at the pass it is of.
@@ -653,6 +688,7 @@ impl Context for PassContext {
             lid: self.lid,
             unresurfaced: self.unresurfaced,
             present: self.present,
+            open_water: self.open_water,
         }
     }
 

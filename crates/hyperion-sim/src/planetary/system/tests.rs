@@ -1228,8 +1228,9 @@ fn capped_gases(air: &crate::planetary::derive::Atmosphere) -> Vec<Gas> {
 /// The members of the discrete key that differ between `a` and `b` (decision-p14-t54a-passes
 /// §1.5): the figures present, the basins' shape, the water share's outgassing branch, the regime,
 /// the craters' crust class, a moon's tide branch, the inertia lid, `lid_of`'s unresurfaced test
-/// and the state P14.T53.e's rules 5–7 carry (from 25). The key is destructured, so that a member
-/// added to it is a compile error here.
+/// the state P14.T53.e's rules 5–7 carry (from 25) and the open water a locked world's deck reads
+/// (P14.T24.j, from 26). The key is destructured, so that a member added to it is a compile error
+/// here.
 fn key_members(
     a: &crate::planetary::derive::pass_record::PassContextKey,
     b: &crate::planetary::derive::pass_record::PassContextKey,
@@ -1244,6 +1245,7 @@ fn key_members(
         lid,
         unresurfaced,
         present,
+        open_water,
     } = *a;
     [
         ("figures", figures != b.figures),
@@ -1255,6 +1257,7 @@ fn key_members(
         ("lid", lid != b.lid),
         ("resurfacing", unresurfaced != b.unresurfaced),
         ("carried state", present != b.present),
+        ("open water", open_water != b.open_water),
     ]
     .into_iter()
     .filter_map(|(member, differs)| differs.then_some(member))
@@ -3888,6 +3891,7 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
                 spin,
                 heat_flow: basis.heat_flow,
                 ocean_weight: basis.ocean_weight,
+                holds_liquid_water: derived.atmosphere().lists_liquid_water(),
             };
             let frame = rotation.frame();
             let under_planet = SeasonalSpin::of(frame, t, &seasonal, SeasonsFrom::Planet);

@@ -73,6 +73,7 @@ pub(crate) fn inputs_of(body: &DerivedBody, spin: SeasonalSpin) -> SurfaceInputs
         spin,
         heat_flow: heat_flow_of(body),
         ocean_weight: ocean_weight_of(body),
+        holds_liquid_water: body.atmosphere().lists_liquid_water(),
     }
 }
 
@@ -2910,6 +2911,8 @@ fn climate_body(body: &DerivedBody, spin: SeasonalSpin) -> ClimateBody {
         heat_flow: heat_flow_of(body),
         inventory: *body.atmosphere().inventory_weights(),
         ceiling: body.atmosphere().greenhouse_ceiling(),
+        stellar_flux: WattsPerSquareMetre::from(body.flux()),
+        holds_liquid_water: body.atmosphere().lists_liquid_water(),
     }
 }
 

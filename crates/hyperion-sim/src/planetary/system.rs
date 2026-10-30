@@ -5845,6 +5845,11 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         spin,
         heat_flow: basis.heat_flow,
         ocean_weight: basis.ocean_weight,
+        // The open water its published pass's deck read, its context's, so that a locked world's
+        // conditions are that pass's own to the bit (P14.T24.j; rule (f)).
+        holds_liquid_water: sky
+            .spun
+            .is_some_and(|spun| spun.context().holds_liquid_water()),
     };
     let Some(conditions) = SurfaceConditions::derive(&inputs) else {
         return Section::NotApplicable;
@@ -6668,6 +6673,8 @@ pub(crate) mod envelope;
 pub(crate) mod events;
 #[cfg(test)]
 mod exposed_ice_tests;
+#[cfg(test)]
+mod locked_climate_tests;
 mod modifiers;
 pub(crate) mod moon_ice;
 #[cfg(test)]

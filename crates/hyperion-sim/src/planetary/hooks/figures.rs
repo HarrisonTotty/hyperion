@@ -2446,6 +2446,7 @@ impl GlobalFigures {
     ///     },
     ///     heat_flow: figures.heat_flow(),
     ///     ocean_weight: figures.ocean_weight(),
+    ///     holds_liquid_water: derived.atmosphere().lists_liquid_water(),
     /// })
     /// .expect("an Earth has a surface");
     /// // The second stage reads them.

@@ -585,6 +585,8 @@ fn spun_conditions(
         spin: record.spin,
         heat_flow: spun.context.heat_flow(),
         ocean_weight: OceanWeight::of_potential_ocean(ground.potential_ocean),
+        // The previous pass's open water, the context's, as the pass's steps read it (P14.T24.j).
+        holds_liquid_water: spun.context.holds_liquid_water(),
     })
 }
 

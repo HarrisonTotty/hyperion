@@ -2161,6 +2161,8 @@ fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) 
         heat_flow: WattsPerSquareMetre::new(0.0925),
         inventory: airborne.column_weights(weight),
         ceiling: GreenhouseCeiling::of(inputs),
+        stellar_flux: WattsPerSquareMetre::from(inputs.flux),
+        holds_liquid_water: true,
     };
     step_climate(&body, OceanWeight::NONE, t, partials)
 }
@@ -3969,6 +3971,7 @@ fn remnant_record(inputs: &AtmosphereInputs, air: &Atmosphere) -> RemnantRecord 
         spin,
         heat_flow: figures.heat_flow(),
         ocean_weight: figures.ocean_weight(),
+        holds_liquid_water: air.lists_liquid_water(),
     })
     .expect("it has a surface");
     let table = conditions.zonal_insolation();
@@ -4389,6 +4392,8 @@ fn table_mars_at_its_spin() -> (DerivedBody, AtmosphereInputs, Atmosphere, Clima
         heat_flow: heat_flow_of(&mars),
         inventory: *stand_in.inventory_weights(),
         ceiling: stand_in.greenhouse_ceiling(),
+        stellar_flux: WattsPerSquareMetre::from(inputs.flux),
+        holds_liquid_water: stand_in.lists_liquid_water(),
     };
     let climate = |t: Kelvin, p: &PartialPressures| step_climate(&body, OceanWeight::NONE, t, p);
     let air = atmosphere_under(
@@ -6175,6 +6180,7 @@ fn under_every_24_hold_a_tenuous_record_lists_its_air_over_an_airless_climate() 
             },
             heat_flow: WattsPerSquareMetre::new(0.003),
             ocean_weight: OceanWeight::NONE,
+            holds_liquid_water: air.lists_liquid_water(),
         })
         .expect("Pluto has a surface")
     };
