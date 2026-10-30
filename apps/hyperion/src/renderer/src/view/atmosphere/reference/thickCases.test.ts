@@ -22,6 +22,7 @@ import titanClassCase from "./titan-class.case.json" with { type: "json" };
 import venus58barCase from "./venus-58bar.case.json" with { type: "json" };
 import venus92barCase from "./venus-92bar.case.json" with { type: "json" };
 import sampleCounts from "./sampleCounts.json" with { type: "json" };
+import { ATMOSPHERE_FIXTURES, builtFigureOf, builtOfCase } from "../../scenes/atmosphereScene";
 import { SATURN_OBLATE_REFERENCE } from "./cases";
 import { angleBetweenDeg, LEAST_SUN_DISTANCE_DEG } from "./geometries";
 import {
@@ -33,6 +34,7 @@ import {
   VENUS_DECK_MODES,
   venusDeckPressurePa,
 } from "./thickCases";
+import { thickCasesReplyOf } from "./thickCasesMessages";
 
 /** Each case's own counts, from its pilot (`decision-r08-t12b-scope.md`, ruling 8). */
 const COUNTS: Readonly<Record<string, SampleCounts>> = sampleCounts;
@@ -201,4 +203,36 @@ describe("giant-deck's medium", { timeout: BUILD_MS }, () => {
     const deck = termOf(medium.terms, GIANT_DECK.name);
     expect(verticalDepth(deck, medium.topHeightM)[1]).toBeGreaterThan(10);
   });
+});
+
+describe("ATMOSPHERE TEST's thick bodies", () => {
+  it(
+    "reach the render thread whole through the worker's structured clone",
+    { timeout: BUILD_MS },
+    () => {
+      const reply = thickCasesReplyOf(thickReferenceCases);
+      expect([reply.kind, structuredClone(reply)]).toEqual(["built", reply]);
+    },
+  );
+
+  it(
+    "are drawn on their cases' own spheres, shaded as their cases' grounds",
+    { timeout: BUILD_MS },
+    () => {
+      const reply = thickCasesReplyOf(thickReferenceCases);
+      if (reply.kind !== "built") {
+        throw new Error(`the thick cases were not built: ${reply.message}`);
+      }
+      const drawn = THICK_CASE_NAMES.map((name) => {
+        const built = builtOfCase(reply.cases[name], name);
+        return [name, builtFigureOf(built), built.medium.groundAlbedo];
+      });
+      const restated = THICK_CASE_NAMES.map((name) => {
+        const fixture = ATMOSPHERE_FIXTURES.find(({ caseName }) => caseName === name);
+        const ground = fixture?.groundAlbedo ?? Number.NaN;
+        return [name, fixture?.figure, [ground, ground, ground]];
+      });
+      expect(drawn).toEqual(restated);
+    },
+  );
 });

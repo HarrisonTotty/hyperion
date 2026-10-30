@@ -23733,3 +23733,18 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
   - _Smoke._ Part 9's group holds the kernel arm's floor at 10⁻³ of the largest, not 10⁻⁶: R07's
     limb weights are `f32`'s (`smoke/discAir.ts`). Frame timing (P) is pending: the owner's RTX run.
   - _Left:_ T16.b.2; the air beyond the datum's limb; a body drawn as a point has no air.
+- **R08.T12.b.2's thick bodies, as built** (2026-10-30; closes the record's "Left undone" but §2.5
+  and the line absorbers' lines):
+  - `ATMOSPHERE TEST` carries `thickCases.ts`'s four as `TEST VENUS`, `TEST VENUS 5.80 MPa`,
+    `TEST TITAN` and `TEST SATURN NH3 ICE DECK` (lean, 2026-10-30: the four names), on legs on
+    from `TEST SATURN` along +z and +x in turn; the guide's rows name them.
+  - Their media come from `reference/thickCases.worker.ts` (`loadThickCases`,
+    `thickCasesReplyOf`): `AtmosphereFixtures(load, loadThick)` holds each load's media in `loads`
+    (`fixtureLoadOf`), so a failed load fails its own four alone.
+  - For the worker's graph, `geodeticOf`, `Geodetic` and `tableRadiusM` are `oblate.ts`'s,
+    `AbsorberCurveSlots` `absorbers.ts`'s and `AU_M` `lib/system/constants.ts`'s, each re-exported
+    where it was; the atmosphere run waits `mediaWaitMs` (180 s) for the media.
+  - The flight past them (R08.T10.b's acceptance): `just views-check --software --atmosphere`,
+    both settings, pass with no fault line; each thick body routes `thickScattering`, drawn by the
+    thin method under `ATMOSPHERE: APPROXIMATE`. Its captures are unframed (R01.T16's F3), so the
+    looks by eye and the frame times are pending: the owner's RTX run.

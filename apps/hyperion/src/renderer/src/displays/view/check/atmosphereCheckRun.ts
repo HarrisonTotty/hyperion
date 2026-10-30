@@ -9,9 +9,10 @@
  * In order:
  *
  * 1. `VIEW` is put on `ATMOSPHERE TEST`, the primary alone and photorealistic (the style key `4`),
- *    and the run waits, at most {@link AtmosphereCheckTiming.waitMs}, for the scene's media to land
- *    (`AtmosphereFixtures.media`) and for no `ATMOSPHERE: PENDING` to stand on the primary's label
- *    block. A failed load ends the run.
+ *    and the run waits, at most {@link AtmosphereCheckTiming.mediaWaitMs}, for the scene's media to
+ *    land, its thick cases' from their worker's minute of Mie among them
+ *    (`AtmosphereFixtures.media`), then at most {@link AtmosphereCheckTiming.waitMs} for no
+ *    `ATMOSPHERE: PENDING` to stand on the primary's label block. A failed load ends the run.
  * 2. The exposure is put under `AUTO` (`ENABLE`) on the `AVG` meter and, once `AUTO` has settled,
  *    the seat's look at the moon is captured as `moonlit-night`.
  * 3. The meter is put on `LIT`, the camera in `FREE` (the key `3`), and the tour flown
@@ -111,14 +112,19 @@ export type AtmosphereTourStep =
  * `TEST EARTH`'s radii, towards `TEST MOON`, about 47° up, so that the camera leaves the ground
  * upwards, since the line from the seat to `TEST EARTH O3 SLAB` runs 30° below the horizon; then
  * each fixture on the scene's legs: `TEST EARTH O3 SLAB` a quarter of the way round the star,
- * seen at about 45° of phase, `TEST MARS` and `TEST SATURN` at about 60°, and back to
- * `TEST EARTH`, which so comes on its day side at about 45°.
+ * seen at about 45° of phase, `TEST MARS`, `TEST SATURN` and R08.T12.b.2's four under cloud or
+ * haze, `TEST VENUS`, `TEST VENUS 5.80 MPa`, `TEST TITAN` and `TEST SATURN NH3 ICE DECK`, at about
+ * 60°, and back to `TEST EARTH`, which so comes on its day side at about 45°.
  */
 export const ATMOSPHERE_TOUR: ReadonlyArray<AtmosphereTourStep> = [
   { kind: "toward", designation: MOON_DESIGNATION, distanceM: 5e7 },
   { kind: "fixture", designation: "TEST EARTH O3 SLAB" },
   { kind: "fixture", designation: "TEST MARS" },
   { kind: "fixture", designation: "TEST SATURN" },
+  { kind: "fixture", designation: "TEST VENUS" },
+  { kind: "fixture", designation: "TEST VENUS 5.80 MPa" },
+  { kind: "fixture", designation: "TEST TITAN" },
+  { kind: "fixture", designation: "TEST SATURN NH3 ICE DECK" },
   { kind: "fixture", designation: "TEST EARTH" },
 ];
 
@@ -168,13 +174,18 @@ export interface AtmosphereLeg {
 
 /**
  * A fixture's capture label: `fixture-` and its designation in lower kebab case,
- * `fixture-test-earth-o3-slab`, as `ViewsCheckApi.capture` takes one.
+ * `fixture-test-earth-o3-slab`, a decimal point between two digits a hyphen too,
+ * `fixture-test-venus-5-80-mpa`, as `ViewsCheckApi.capture` takes one.
  *
- * @throws Error for a designation that makes no such label (other than letters, digits and
- *   spaces, or too long).
+ * @throws Error for a designation that makes no such label (other than letters, digits, spaces
+ *   and decimal points, or too long).
  */
 export function fixtureCaptureLabel(designation: string): string {
-  const label = `fixture-${designation.trim().toLowerCase().split(/\s+/u).join("-")}`;
+  const words = designation
+    .trim()
+    .toLowerCase()
+    .replaceAll(/(?<=\d)\.(?=\d)/gu, "-");
+  const label = `fixture-${words.split(/\s+/u).join("-")}`;
   if (!/^[a-z0-9-]{1,48}$/u.test(label)) {
     throw new Error(`views check: ${designation} makes no capture label`);
   }
@@ -452,8 +463,13 @@ export function rateStepOfCameraLine(cameraLine: string | null): number | null {
 
 /** How long each part of the atmosphere run takes. */
 export interface AtmosphereCheckTiming {
-  /** The longest wait for a control to take effect, and for the media, ms. */
+  /** The longest wait for a control to take effect, and for no `ATMOSPHERE: PENDING`, ms. */
   readonly waitMs: number;
+  /**
+   * The longest wait for the scene's media to land, ms: its thick cases' worker runs about a
+   * minute of Mie (pod, 4 vCPU; 33 s on 16).
+   */
+  readonly mediaWaitMs: number;
   /** How often a wait looks again, ms. */
   readonly pollMs: number;
   /** How far apart the `EXPOSURE` line's EV is read while `AUTO` settles, ms. */
@@ -482,6 +498,7 @@ export const ATMOSPHERE_CHECK_TIMING: {
 } = {
   full: {
     waitMs: 60_000,
+    mediaWaitMs: 180_000,
     pollMs: 100,
     settleStepMs: 1_000,
     settleToleranceEv: 0.1,
@@ -493,6 +510,7 @@ export const ATMOSPHERE_CHECK_TIMING: {
   },
   smoke: {
     waitMs: 60_000,
+    mediaWaitMs: 180_000,
     pollMs: 100,
     settleStepMs: 1_000,
     settleToleranceEv: 0.1,
@@ -726,9 +744,13 @@ export async function runAtmosphereCheck(
         )
         ?.getAttribute("aria-label") ?? null;
     const isTarget = (): boolean => selected()?.startsWith(`${designation},`) === true;
-    const options = document.querySelectorAll(
+    const shown = document.querySelectorAll(
       '[role="listbox"][aria-label="Marks in view"] [role="option"]',
-    ).length;
+    );
+    // The list is windowed: it renders the rows about its window alone, each option carrying the
+    // whole list's length as its `aria-setsize`.
+    const setSize = Number.parseInt(shown[0]?.getAttribute("aria-setsize") ?? "", 10);
+    const options = Math.max(shown.length, Number.isFinite(setSize) ? setSize : 0);
     const step = async (left: number): Promise<void> => {
       if (isTarget()) {
         return;
@@ -824,7 +846,22 @@ export async function runAtmosphereCheck(
   await driver.chooseScene(ATMOSPHERE_SCENE_NAME);
   const chosenAtMs = deps.nowMs();
   await driver.configure({ primary: "photorealistic", instruments: [null, null] });
-  await until("ATMOSPHERE TEST's media did not load", () => deps.fixtures.media.kind !== "loading");
+  const mediaDeadlineMs = deps.nowMs() + timing.mediaWaitMs;
+  /** Waits for the media to land or fail, at most {@link AtmosphereCheckTiming.mediaWaitMs}. */
+  const mediaSettled = async (): Promise<void> => {
+    stopped();
+    if (deps.fixtures.media.kind !== "loading") {
+      return;
+    }
+    if (deps.nowMs() > mediaDeadlineMs) {
+      throw new Error(
+        `views check: ATMOSPHERE TEST's media did not load within ${String(timing.mediaWaitMs / 1000)} s`,
+      );
+    }
+    await wait(timing.pollMs);
+    await mediaSettled();
+  };
+  await mediaSettled();
   if (deps.fixtures.media.kind === "failed") {
     throw new Error("views check: ATMOSPHERE TEST's media did not load");
   }

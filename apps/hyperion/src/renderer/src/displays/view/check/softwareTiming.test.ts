@@ -33,6 +33,7 @@ describe("the software mode's timings (R01.T16)", () => {
       expect(atmosphereCheckTimingOf(timing, "software")).toEqual({
         ...timing,
         waitMs: 5 * timing.waitMs,
+        mediaWaitMs: 5 * timing.mediaWaitMs,
         settleMaxMs: 5 * timing.settleMaxMs,
       });
     }

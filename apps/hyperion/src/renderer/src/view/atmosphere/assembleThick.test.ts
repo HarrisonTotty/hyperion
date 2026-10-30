@@ -24,8 +24,9 @@ import {
 } from "../../test/atmosphereRecords";
 import { FakeTables } from "../../test/atmosphereCacheFakes";
 import { sweepMedium } from "../../test/atmosphereSweep";
+import { standInThickCases } from "../../test/thickFixtureStandIns";
 import { earthDetail, FIXTURE_SYSTEM } from "../../test/planetaryFixture";
-import { ATMOSPHERE_FIXTURES, AtmosphereFixtures } from "../scenes/atmosphereScene";
+import { ATMOSPHERE_FIXTURES, AtmosphereFixtures, fixtureLoadOf } from "../scenes/atmosphereScene";
 import { type AssembledMedium, assembleMedium, bodyCoverOf, THICK_REASON } from "./assemble";
 import { AtmosphereCache, type CachedTables, type KeptBodyAtmosphere } from "./AtmosphereCache";
 import { hydrostaticColumn } from "./column";
@@ -292,13 +293,19 @@ describe("a kept scene's medium at the cache (R08.T13.d)", () => {
   });
 
   it("names TEST EARTH, TEST EARTH O3 SLAB, TEST MARS and TEST SATURN on one line of the plate, in the new words", async () => {
-    const fixtures = new AtmosphereFixtures(() => Promise.resolve(cases));
+    const fixtures = new AtmosphereFixtures(
+      () => Promise.resolve(cases),
+      () => Promise.resolve(standInThickCases()),
+    );
     await fixtures.ready();
-    const { media } = fixtures;
+    const media = fixtures.loads.cases;
     if (media.kind !== "ready") {
       throw new Error("ATMOSPHERE TEST's media did not load");
     }
-    const settings = ATMOSPHERE_FIXTURES.map(({ id, designation }) => {
+    const cloudFree = ATMOSPHERE_FIXTURES.filter(
+      ({ caseName }) => fixtureLoadOf(caseName) === "cases",
+    );
+    const settings = cloudFree.map(({ id, designation }) => {
       const held = media.media.get(id);
       if (held === undefined) {
         throw new Error(`ATMOSPHERE TEST holds no medium for ${designation}`);
@@ -307,7 +314,7 @@ describe("a kept scene's medium at the cache (R08.T13.d)", () => {
     });
     const { reasons } = keptRouted(settings);
     const lines = atmosphereApproximateLines(
-      ATMOSPHERE_FIXTURES.map(({ designation }, i) => ({
+      cloudFree.map(({ designation }, i) => ({
         designation,
         reasons: reasons.get(bodyId(i)) ?? [],
       })),

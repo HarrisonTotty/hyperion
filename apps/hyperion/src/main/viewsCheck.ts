@@ -173,7 +173,7 @@ export function viewsCheckDirs(
  * takes the same, and 15 minutes more on a served world (R10.T15.b), whose body's coarse field the
  * server computes, about a minute at level 8 (R09.T16.a), and sends whole, some 15 MB, once to read
  * the world and once to each look's session; the atmosphere run's (plan R08, R08.T10.b), its media
- * awaited and a flight to four air fixtures and the seat's night, 8 and 15. Each is
+ * awaited and a flight to eight air fixtures and the seat's night, 8 and 15. Each is
  * {@link SOFTWARE_WAIT_FACTOR} times as long in the check-only software mode (plan R01, R01.T16),
  * as the renderer's waits are.
  */

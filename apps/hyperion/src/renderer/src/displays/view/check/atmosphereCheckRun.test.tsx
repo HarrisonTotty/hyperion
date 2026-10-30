@@ -68,6 +68,10 @@ describe("the atmosphere run's captures' labels", () => {
       "fixture-test-earth-o3-slab",
       "fixture-test-mars",
       "fixture-test-saturn",
+      "fixture-test-venus",
+      "fixture-test-venus-5-80-mpa",
+      "fixture-test-titan",
+      "fixture-test-saturn-nh3-ice-deck",
     ]);
   });
 
@@ -94,12 +98,9 @@ describe("the atmosphere run's tour", () => {
   });
 
   it("comes on each fixture's day side, between 40° and 75° of phase", () => {
-    expect(captured.map(({ phaseDeg }) => phaseDeg > 40 && phaseDeg < 75)).toEqual([
-      true,
-      true,
-      true,
-      true,
-    ]);
+    expect(captured.map(({ phaseDeg }) => phaseDeg > 40 && phaseDeg < 75)).toEqual(
+      ATMOSPHERE_FIXTURES.map(() => true),
+    );
   });
 
   it("chains its legs and their stages, each starting where the one before ended", () => {
@@ -133,6 +134,10 @@ describe("the atmosphere run's tour", () => {
       ["TEST EARTH O3 SLAB", 3],
       ["TEST MARS", 2],
       ["TEST SATURN", 1],
+      ["TEST VENUS", 2],
+      ["TEST VENUS 5.80 MPa", 2],
+      ["TEST TITAN", 2],
+      ["TEST SATURN NH3 ICE DECK", 1],
       ["TEST EARTH", 3],
     ]);
   });
@@ -171,8 +176,8 @@ describe("the atmosphere run's tour", () => {
 
   it("refuses a fixture the scene does not have", () => {
     expect(() =>
-      atmosphereLegs(atmosphereSeatM(), [{ kind: "fixture", designation: "TEST VENUS" }]),
-    ).toThrow("has no fixture TEST VENUS");
+      atmosphereLegs(atmosphereSeatM(), [{ kind: "fixture", designation: "TEST JUPITER" }]),
+    ).toThrow("has no fixture TEST JUPITER");
   });
 
   it("refuses a leg towards a body that would reach it", () => {
@@ -385,6 +390,9 @@ const MARKS: ReadonlyArray<{ readonly designation: string; readonly centreM: Vec
   ...ATMOSPHERE_FIXTURES.map(({ designation, centreM }) => ({ designation, centreM })),
   { designation: "TEST MOON", centreM: ATMOSPHERE_MOON_CENTRE_M },
 ];
+
+/** The marks' rows the fake's windowed list renders, fewer than its marks. */
+const MARK_WINDOW_ROWS = 6;
 
 /** How the fake `AUTO` moves the exposure, EV/s: `AUTO`'s own speeds unless a test slows them. */
 interface AutoSpeeds {
@@ -654,11 +662,17 @@ class FakeView {
       "aria-label",
       `VIEW, ${this.style === "wireframe" ? "WIREFRAME" : "PHOTOREALISTIC"}, PRIMARY, ${this.preset}`,
     );
+    // Windowed as `ViewMarkList` is: the rows about the selected one alone, each giving the
+    // list's length as its `aria-setsize`.
+    const from = Math.max(0, Math.min((this.selected ?? 0) - 2, MARKS.length - MARK_WINDOW_ROWS));
     this.#marks.replaceChildren(
-      ...MARKS.map((mark, index) => {
+      ...MARKS.slice(from, from + MARK_WINDOW_ROWS).map((mark, shown) => {
+        const index = from + shown;
         const option = document.createElement("div");
         option.setAttribute("role", "option");
         option.setAttribute("aria-selected", String(index === this.selected));
+        option.setAttribute("aria-posinset", String(index + 1));
+        option.setAttribute("aria-setsize", String(MARKS.length));
         option.setAttribute("aria-label", `${mark.designation}, PLANET, range 1.00 AU`);
         return option;
       }),
@@ -667,11 +681,15 @@ class FakeView {
   }
 }
 
-/** The media as they land: loading until {@link MEDIA_MS} after the scene's choice, then ready. */
-function landing(view: () => FakeView | null, clock: () => number): () => AtmosphereFixtureMedia {
+/** The media as they land: loading until `mediaMs` after the scene's choice, then ready. */
+function landing(
+  view: () => FakeView | null,
+  clock: () => number,
+  mediaMs: number,
+): () => AtmosphereFixtureMedia {
   return () => {
     const chosenAtMs = view()?.chosenAtMs ?? null;
-    return chosenAtMs !== null && clock() >= chosenAtMs + MEDIA_MS
+    return chosenAtMs !== null && clock() >= chosenAtMs + mediaMs
       ? { kind: "ready", media: new Map() }
       : { kind: "loading" };
   };
@@ -689,6 +707,8 @@ interface FakeRun {
 function fakeRun(
   options: {
     readonly media?: AtmosphereFixtureMedia;
+    /** When the media land after the scene's choice, ms: {@link MEDIA_MS} by default. */
+    readonly mediaMs?: number;
     readonly speeds?: AutoSpeeds;
     readonly stall?: Stall;
     /**
@@ -702,7 +722,8 @@ function fakeRun(
   const clock = (): number => now;
   let made: FakeView | null = null;
   const given = options.media;
-  const media = given === undefined ? landing(() => made, clock) : () => given;
+  const media =
+    given === undefined ? landing(() => made, clock, options.mediaMs ?? MEDIA_MS) : () => given;
   const view = new FakeView(
     clock,
     media,
@@ -810,6 +831,31 @@ describe("the atmosphere run's script (R08.T10.b)", () => {
     await recordAtmosphereCheck(api, () => runAtmosphereCheck(deps), controller.signal);
     expect(api.end.mock.calls).toEqual([
       [{ status: "fail", reason: "views check: ATMOSPHERE TEST's media did not load" }],
+    ]);
+  });
+
+  it("waits past a control's wait for media that land within the media's, as the thick cases' do", async () => {
+    const run = fakeRun({ mediaMs: 90_000 });
+    const record = await runAtmosphereCheck(run.deps);
+    expect([
+      record.mediaReadyMs >= 90_000,
+      ATMOSPHERE_CHECK_TIMING.smoke.waitMs < 90_000,
+      record.captures.length,
+    ]).toEqual([true, true, 2]);
+  });
+
+  it("ends the run with its reason when the media do not land within the media's wait", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { deps, controller } = fakeRun({ media: { kind: "loading" } });
+    const api = ending();
+    await recordAtmosphereCheck(api, () => runAtmosphereCheck(deps), controller.signal);
+    expect(api.end.mock.calls).toEqual([
+      [
+        {
+          status: "fail",
+          reason: "views check: ATMOSPHERE TEST's media did not load within 180 s",
+        },
+      ],
     ]);
   });
 

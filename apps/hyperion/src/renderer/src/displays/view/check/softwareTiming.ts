@@ -47,6 +47,7 @@ export function atmosphereCheckTimingOf(
     ? {
         ...timing,
         waitMs: stretched(timing.waitMs),
+        mediaWaitMs: stretched(timing.mediaWaitMs),
         settleMaxMs: stretched(timing.settleMaxMs),
       }
     : timing;

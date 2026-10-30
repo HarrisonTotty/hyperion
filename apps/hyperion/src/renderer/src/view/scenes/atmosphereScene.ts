@@ -5,35 +5,42 @@
  *
  * @remarks
  * - **Its bodies.** A Sun-like star, `TEST STAR`, at the barycentre, lit by the scene's own host disc
- *   (`sunLikeHostDisc`, as `PHASE TEST`'s); four air fixtures about 1 au out, each carrying a
- *   reference case's medium (`reference/cases.ts`): `TEST EARTH` (`earth`, the measured Earth),
- *   `TEST EARTH O3 SLAB` (`earth-ozone-slab`, T6.d's 300 DU slab), `TEST MARS` (`mars`, with its hand
- *   dust) and `TEST SATURN` (`saturn-oblate`, the Saturn-class air on Saturn's level spheroid, its
- *   pole +z); and `TEST MOON`, airless, of the Moon's radius, full in `TEST EARTH`'s night sky.
- *   R08.T12.b.2's thick cases, Venus at 92 and 58 bar, Titan and the giant's deck, are not among
- *   them yet: their optics run for about a minute, which the page's lazy import would run on the
- *   render thread, so they wait for a worker to build their media (R08's records, T12.b.2).
+ *   (`sunLikeHostDisc`, as `PHASE TEST`'s); eight air fixtures about 1 au out, each carrying a
+ *   reference case's medium: `reference/cases.ts`'s cloud-free four, `TEST EARTH` (`earth`, the
+ *   measured Earth), `TEST EARTH O3 SLAB` (`earth-ozone-slab`, T6.d's 300 DU slab), `TEST MARS`
+ *   (`mars`, with its hand dust) and `TEST SATURN` (`saturn-oblate`, the Saturn-class air on
+ *   Saturn's level spheroid, its pole +z); `thickCases.ts`'s four (R08.T12.b.2), `TEST VENUS`
+ *   (`venus-92bar`, Venus's air at its 9.2 MPa under P14.T24.g's four-mode sulphuric-acid deck),
+ *   `TEST VENUS 5.80 MPa` (`venus-58bar`, the same air and deck at plan 14's 5.80 MPa),
+ *   `TEST TITAN` (`titan-class`, a Titan-class air under its tholin haze) and
+ *   `TEST SATURN NH3 ICE DECK` (`giant-deck`, the Saturn-class air over a thick NH3 ice deck, on a
+ *   sphere of Saturn's mean radius); and `TEST MOON`, airless, of the Moon's radius, full in
+ *   `TEST EARTH`'s night sky.
  * - **Its layout** ({@link ATMOSPHERE_FIXTURES}): `TEST EARTH` 1 au out along +x, and the other air
  *   fixtures a quarter of the way round the star, 1.41 au from it, so that its night is lit by its
- *   moon alone; there each after `TEST EARTH O3 SLAB` lies {@link ATMOSPHERE_LEG_M} from the one before,
- *   half of it farther from the star and the rest across its light, each leg turned a quarter from
- *   the last about the star's direction, so that a camera flown from one to the next at a few radii
- *   sees each at about 60° of phase, passing none on its way, and no fixture stands in another's
- *   shadow. The legs between `TEST EARTH` and the others come on each at 45°.
- * - **Its media** are the cases' own, loaded lazily: importing `reference/cases.ts` pulls
- *   `hillaire.ts` and the optics' data, which no other kept scene needs, so the import starts when
- *   `VIEW` chooses the scene (its `SceneOption`'s `prepare`, from an effect;
- *   {@link prepareAtmosphereScene}), never as the scene is made, and each air body is stated `loading`
- *   (`ATMOSPHERE: PENDING`) until it lands, then its case's medium, built once and held, since the
- *   atmosphere cache compares a kept medium by identity. A failed import is logged once and states
- *   each air body `failed`, item 6's failure, which a page cannot retry: `ATMOSPHERE NOT AVAILABLE:
- *   computation failed for <designations>, relaunch to retry` (`decision-r08-t10b-ux.md`, item 4),
- *   standing when `VIEW` is shown again. Each air body is drawn on its medium's own figure, the one its tables take
- *   (`hillaire.ts`'s `tablesFigureOf`): a sphere of the case's ground radius, or Saturn's spheroid;
- *   before the import lands, on the same figures restated here, which the test holds to the cases'.
- *   Its disc is a grey Lambert sphere of its medium's ground albedo, provisional
- *   (`BODY PHOTOMETRY: NOT YET MODELLED`), so that the ground the composite's march draws at the limb
- *   is the disc's (`decision-r08-t10b-depth.md`, text B).
+ *   moon alone; there each after `TEST EARTH O3 SLAB` lies {@link ATMOSPHERE_LEG_M} from the one
+ *   before, half of it farther from the star and the rest across its light, along +z and +x in
+ *   turn, each leg so turned a quarter from the last about the star's direction, so that a camera
+ *   flown from one to the next at a few radii sees each at about 60° of phase, passing none on its
+ *   way, and no fixture stands in another's shadow. The legs between `TEST EARTH` and the others
+ *   come on each at 45°.
+ * - **Its media** are the cases' own, in two loads ({@link AtmosphereFixtureLoad}), both started
+ *   when `VIEW` chooses the scene (its `SceneOption`'s `prepare`, from an effect;
+ *   {@link prepareAtmosphereScene}), never as the scene is made: the cloud-free four from a lazy
+ *   import of `reference/cases.ts`, which pulls the optics' data that no other kept scene needs;
+ *   and the thick four from `thickCases.ts`, whose Mie runs for about a minute, built by a worker
+ *   of their own (`reference/thickCases.worker.ts`; {@link loadThickCases}), off the render thread.
+ *   Each air body is stated `loading` (`ATMOSPHERE: PENDING`) until its load lands, then its case's
+ *   medium, built once and held, since the atmosphere cache compares a kept medium by identity. A
+ *   failed load is logged once and states each of its air bodies `failed`, item 6's failure, which
+ *   a page cannot retry: `ATMOSPHERE NOT AVAILABLE: computation failed for <designations>, relaunch
+ *   to retry` (`decision-r08-t10b-ux.md`, item 4), standing when `VIEW` is shown again; the other
+ *   load's bodies are drawn as it lands. Each air body is drawn on its medium's own figure, the one
+ *   its tables take (`hillaire.ts`'s `tablesFigureOf`): a sphere of the case's ground radius, or
+ *   Saturn's spheroid; before its load lands, on the same figures restated here, which the test
+ *   holds to the cases'. Its disc is a grey Lambert sphere of its medium's ground albedo,
+ *   provisional (`BODY PHOTOMETRY: NOT YET MODELLED`), so that the ground the composite's march
+ *   draws at the limb is the disc's (`decision-r08-t10b-depth.md`, text B).
  * - **The moonlit night.** The own ship, `TEST HULL`, stands body-fixed {@link ATMOSPHERE_SHIP_HEIGHT_M}
  *   over `TEST EARTH`'s ground on its night side, pitched up at the moon and clear of the ground, the star {@link ATMOSPHERE_SUN_DEPRESSION_DEG}
  *   below the horizon there, beyond the measured Earth's twilight limit (about 20°, `sources.ts`'s
@@ -57,6 +64,11 @@ import {
 import { lawFor } from "../appearance/phase";
 import type { BuiltAtmosphere, KeptBodyAtmosphere } from "../atmosphere/AtmosphereCache";
 import type { ReferenceCase } from "../atmosphere/reference/cases";
+import type {
+  FixtureCase,
+  ThickCasesReply,
+  ThickFixtureCases,
+} from "../atmosphere/reference/thickCasesMessages";
 import type { CameraPose, Quaternion } from "../camera/pose";
 import { lookAlong, rotate } from "../camera/quaternion";
 import { frozenHostDisc, SUN_RADIUS_M, sunLikeHostDisc } from "../lighting/hostDisc";
@@ -109,8 +121,52 @@ export const ATMOSPHERE_SATURN = keptBody(BODY_INDEX_BASE + 4);
 /** `TEST MOON`. */
 export const ATMOSPHERE_MOON = keptBody(BODY_INDEX_BASE + 5);
 
-/** The reference case an air fixture carries, by its name in `reference/cases.ts`. */
-export type AtmosphereFixtureCase = "earth" | "earth-ozone-slab" | "mars" | "saturn-oblate";
+/** `TEST VENUS`. */
+export const ATMOSPHERE_VENUS = keptBody(BODY_INDEX_BASE + 6);
+
+/** `TEST VENUS 5.80 MPa`. */
+export const ATMOSPHERE_VENUS_58 = keptBody(BODY_INDEX_BASE + 7);
+
+/** `TEST TITAN`. */
+export const ATMOSPHERE_TITAN = keptBody(BODY_INDEX_BASE + 8);
+
+/** `TEST SATURN NH3 ICE DECK`. */
+export const ATMOSPHERE_GIANT_DECK = keptBody(BODY_INDEX_BASE + 9);
+
+/** A cloud-free reference case an air fixture carries, by its name in `reference/cases.ts`. */
+export type AtmosphereCloudFreeCase = "earth" | "earth-ozone-slab" | "mars" | "saturn-oblate";
+
+/** A cloudy or hazy reference case an air fixture carries, by its name in `thickCases.ts`. */
+export type AtmosphereThickCase = keyof ThickFixtureCases;
+
+/** The reference case an air fixture carries. */
+export type AtmosphereFixtureCase = AtmosphereCloudFreeCase | AtmosphereThickCase;
+
+/**
+ * Where an air fixture's case is loaded from: `cases`, the lazy import of `reference/cases.ts`;
+ * `thick`, the thick cases' worker.
+ */
+export type AtmosphereFixtureLoad = "cases" | "thick";
+
+/** The load a case comes in. */
+export function fixtureLoadOf(caseName: AtmosphereFixtureCase): AtmosphereFixtureLoad {
+  let load: AtmosphereFixtureLoad;
+  switch (caseName) {
+    case "earth":
+    case "earth-ozone-slab":
+    case "mars":
+    case "saturn-oblate":
+      load = "cases";
+      break;
+    case "venus-92bar":
+    case "venus-58bar":
+    case "titan-class":
+    case "giant-deck":
+      load = "thick";
+      break;
+  }
+  return load;
+}
 
 /** A figure as a body's tables take it: its equatorial and polar radii, m. */
 export interface AtmosphereFixtureFigure {
@@ -159,19 +215,25 @@ const FIXTURES_START_M: Vec3 = vec3(0, AU_M, 0);
 const ACROSS_M = (Math.sqrt(3) / 2) * ATMOSPHERE_LEG_M;
 
 /**
- * The legs from one air fixture to the next after `TEST EARTH O3 SLAB`, in order: each half away
- * from the star (+y) and the rest across its light, so that the next is seen at 60° of phase from
- * the one before, turning a quarter about the star's direction (+z, then +x), so that no leg runs
- * on through the fixture it leaves, and no fixture stands behind another, in its shadow.
+ * The leg `index` from one air fixture to the next after `TEST EARTH O3 SLAB`: half away from the
+ * star (+y) and the rest across its light, so that the next is seen at 60° of phase from the one
+ * before, along +z and +x in turn, each so turned a quarter from the last about the star's
+ * direction, so that no leg runs on through the fixture it leaves, and the fixtures climb away
+ * across the light, none behind another, in its shadow, as legs turning one way would bring the
+ * fifth behind the first.
  */
-const LEG_STEPS: ReadonlyArray<Vec3> = [
-  vec3(0, 0.5 * ATMOSPHERE_LEG_M, ACROSS_M),
-  vec3(ACROSS_M, 0.5 * ATMOSPHERE_LEG_M, 0),
-];
+function legStep(index: number): Vec3 {
+  return index % 2 === 0
+    ? vec3(0, 0.5 * ATMOSPHERE_LEG_M, ACROSS_M)
+    : vec3(ACROSS_M, 0.5 * ATMOSPHERE_LEG_M, 0);
+}
 
 /** The air fixture `legs` legs on from `TEST EARTH O3 SLAB`. */
 function legsOn(legs: number): Vec3 {
-  return LEG_STEPS.slice(0, legs).reduce((atM, stepM) => add(atM, stepM), FIXTURES_START_M);
+  return Array.from({ length: legs }, (_, index) => legStep(index)).reduce(
+    (atM, stepM) => add(atM, stepM),
+    FIXTURES_START_M,
+  );
 }
 
 /**
@@ -197,6 +259,24 @@ const MARS_GROUND_ALBEDO = 0.25;
 
 /** The Saturn-class ground in `saturn-oblate`: 0.3 (`SATURN_OBLATE_GROUND_ALBEDO`). */
 const SATURN_GROUND_ALBEDO = 0.3;
+
+/** Venus's sphere in `venus-92bar` and `venus-58bar`: 6,051.8 km (`thickCases.ts`'s `VENUS_RADIUS_M`). */
+const VENUS_SPHERE_M = 6_051_800;
+
+/** Titan's sphere in `titan-class`: 2,574.73 km (`TITAN_RADIUS_M`). */
+const TITAN_SPHERE_M = 2_574_730;
+
+/** The giant's sphere in `giant-deck`: Saturn's figure's (2a + c) ÷ 3, 58,300 km (`GIANT_RADIUS_M`). */
+const GIANT_SPHERE_M = (2 * SATURN_FIGURE.equatorialRadiusM + SATURN_FIGURE.polarRadiusM) / 3;
+
+/** The Venus-class ground: 0.15 (`VENUS_GROUND_ALBEDO`). */
+const VENUS_GROUND_ALBEDO = 0.15;
+
+/** The Titan-class ground: 0.3 (`TITAN_GROUND_ALBEDO`). */
+const TITAN_GROUND_ALBEDO = 0.3;
+
+/** The giant's ground under its deck: black (`GIANT_GROUND_ALBEDO`). */
+const GIANT_GROUND_ALBEDO = 0;
 
 /** A sphere of `radiusM`. */
 function sphere(radiusM: number): AtmosphereFixtureFigure {
@@ -240,6 +320,42 @@ export const ATMOSPHERE_FIXTURES: ReadonlyArray<AtmosphereFixture> = [
     figure: SATURN_FIGURE,
     surfaceless: true,
     groundAlbedo: SATURN_GROUND_ALBEDO,
+  },
+  {
+    id: ATMOSPHERE_VENUS,
+    designation: "TEST VENUS",
+    caseName: "venus-92bar",
+    centreM: legsOn(3),
+    figure: sphere(VENUS_SPHERE_M),
+    surfaceless: false,
+    groundAlbedo: VENUS_GROUND_ALBEDO,
+  },
+  {
+    id: ATMOSPHERE_VENUS_58,
+    designation: "TEST VENUS 5.80 MPa",
+    caseName: "venus-58bar",
+    centreM: legsOn(4),
+    figure: sphere(VENUS_SPHERE_M),
+    surfaceless: false,
+    groundAlbedo: VENUS_GROUND_ALBEDO,
+  },
+  {
+    id: ATMOSPHERE_TITAN,
+    designation: "TEST TITAN",
+    caseName: "titan-class",
+    centreM: legsOn(5),
+    figure: sphere(TITAN_SPHERE_M),
+    surfaceless: false,
+    groundAlbedo: TITAN_GROUND_ALBEDO,
+  },
+  {
+    id: ATMOSPHERE_GIANT_DECK,
+    designation: "TEST SATURN NH3 ICE DECK",
+    caseName: "giant-deck",
+    centreM: legsOn(6),
+    figure: sphere(GIANT_SPHERE_M),
+    surfaceless: true,
+    groundAlbedo: GIANT_GROUND_ALBEDO,
   },
 ];
 
@@ -357,7 +473,7 @@ function airPhotometry(fixture: AtmosphereFixture): BodyPhotometry {
  */
 const MOON_PHOTOMETRY = lambertPhotometry(0.12);
 
-/** The reference cases the scene's media are built from, as `reference/cases.ts` exports them. */
+/** The cloud-free cases the scene's media are built from, as `reference/cases.ts` exports them. */
 export interface AtmosphereFixtureCases {
   readonly EARTH_CASE: ReferenceCase;
   readonly EARTH_OZONE_SLAB_CASE: ReferenceCase;
@@ -365,8 +481,8 @@ export interface AtmosphereFixtureCases {
   readonly SATURN_OBLATE_CASE: ReferenceCase;
 }
 
-/** The case of `name` among `cases`. */
-function caseOf(cases: AtmosphereFixtureCases, name: AtmosphereFixtureCase): ReferenceCase {
+/** The cloud-free case of `name` among `cases`. */
+function caseOf(cases: AtmosphereFixtureCases, name: AtmosphereCloudFreeCase): ReferenceCase {
   let found: ReferenceCase;
   switch (name) {
     case "earth":
@@ -396,7 +512,7 @@ function caseOf(cases: AtmosphereFixtureCases, name: AtmosphereFixtureCase): Ref
  * @throws Error for a case named otherwise than `expected`, whose medium would be another's.
  */
 export function builtOfCase(
-  referenceCase: ReferenceCase,
+  referenceCase: FixtureCase,
   expected: AtmosphereFixtureCase,
 ): BuiltAtmosphere {
   if (referenceCase.name !== expected) {
@@ -441,11 +557,16 @@ export interface HeldMedium {
   readonly setting: KeptBodyAtmosphere;
 }
 
-/** The fixtures' media: loading, built and held by body, or failed to load. */
+/** One load's media, or the scene's whole: loading, built and held by body, or failed to load. */
 export type AtmosphereFixtureMedia =
   | { readonly kind: "loading" }
   | { readonly kind: "ready"; readonly media: ReadonlyMap<BodyIdHex, HeldMedium> }
   | { readonly kind: "failed" };
+
+/** Each load's media, by load. */
+export type AtmosphereFixtureLoads = Readonly<
+  Record<AtmosphereFixtureLoad, AtmosphereFixtureMedia>
+>;
 
 /** No medium in force on a kept body: the setting before an import lands, and after one fails. */
 const LOADING: KeptBodyAtmosphere = { kind: "loading" };
@@ -453,61 +574,215 @@ const FAILED: KeptBodyAtmosphere = { kind: "failed" };
 const UNSET: KeptBodyAtmosphere = { kind: "unset" };
 const AIRLESS: KeptBodyAtmosphere = { kind: "airless" };
 
+/** A load's media before it lands, and its failure. */
+const MEDIA_LOADING: AtmosphereFixtureMedia = { kind: "loading" };
+const MEDIA_FAILED: AtmosphereFixtureMedia = { kind: "failed" };
+
 /** A kept medium's labels: none of the scene's own; the cache adds the router's where it applies. */
 const NO_LABELS: ReadonlyArray<never> = Object.freeze([]);
 
+/** The held media of the air fixtures of `load`, each built from its case by `caseNamed`. */
+function heldMedia(
+  load: AtmosphereFixtureLoad,
+  caseNamed: (name: AtmosphereFixtureCase) => FixtureCase,
+): ReadonlyMap<BodyIdHex, HeldMedium> {
+  const media = new Map<BodyIdHex, HeldMedium>();
+  for (const fixture of ATMOSPHERE_FIXTURES) {
+    if (fixtureLoadOf(fixture.caseName) !== load) {
+      continue;
+    }
+    const built = builtOfCase(caseNamed(fixture.caseName), fixture.caseName);
+    media.set(fixture.id, {
+      figure: builtFigureOf(built),
+      setting: { kind: "medium", built, labels: NO_LABELS },
+    });
+  }
+  return media;
+}
+
+/** The cloud-free case of a fixture of the `cases` load. */
+function cloudFreeCaseOf(cases: AtmosphereFixtureCases, name: AtmosphereFixtureCase): FixtureCase {
+  let found: FixtureCase;
+  switch (name) {
+    case "earth":
+    case "earth-ozone-slab":
+    case "mars":
+    case "saturn-oblate":
+      found = caseOf(cases, name);
+      break;
+    case "venus-92bar":
+    case "venus-58bar":
+    case "titan-class":
+    case "giant-deck":
+      throw new Error(`ATMOSPHERE TEST loads case ${name} from the thick cases' worker`);
+  }
+  return found;
+}
+
+/** The thick case of a fixture of the `thick` load. */
+function thickCaseOf(cases: ThickFixtureCases, name: AtmosphereFixtureCase): FixtureCase {
+  let found: FixtureCase;
+  switch (name) {
+    case "venus-92bar":
+    case "venus-58bar":
+    case "titan-class":
+    case "giant-deck":
+      found = cases[name];
+      break;
+    case "earth":
+    case "earth-ozone-slab":
+    case "mars":
+    case "saturn-oblate":
+      throw new Error(`ATMOSPHERE TEST loads case ${name} from reference/cases.ts`);
+  }
+  return found;
+}
+
 /**
- * The scene's media, loaded once from the reference cases: the import started at the first
- * {@link AtmosphereFixtures.ready}, each fixture's medium built once when it lands and held, or the
- * failure logged once.
+ * The scene's whole media from each load's: `failed` once either has failed, `ready` with every
+ * fixture's once both have landed, and `loading` until then.
+ */
+function wholeMediaOf(loads: AtmosphereFixtureLoads): AtmosphereFixtureMedia {
+  const { cases, thick } = loads;
+  if (cases.kind === "failed" || thick.kind === "failed") {
+    return MEDIA_FAILED;
+  }
+  if (cases.kind === "ready" && thick.kind === "ready") {
+    return { kind: "ready", media: new Map([...cases.media, ...thick.media]) };
+  }
+  return MEDIA_LOADING;
+}
+
+/**
+ * The scene's media, loaded once a page from the reference cases in two loads (the module's
+ * remarks): both started at the first {@link AtmosphereFixtures.ready}, each fixture's medium built
+ * once when its load lands and held, or its load's failure logged once.
  */
 export class AtmosphereFixtures {
   readonly #load: () => Promise<AtmosphereFixtureCases>;
-  #media: AtmosphereFixtureMedia = { kind: "loading" };
+  readonly #loadThick: () => Promise<ThickFixtureCases>;
+  #loads: AtmosphereFixtureLoads = { cases: MEDIA_LOADING, thick: MEDIA_LOADING };
+  #media: AtmosphereFixtureMedia = MEDIA_LOADING;
   #ready: Promise<void> | null = null;
 
-  /** @param load - Loads the cases: the lazy import of `reference/cases.ts` in the app. */
-  constructor(load: () => Promise<AtmosphereFixtureCases>) {
+  /**
+   * @param load - Loads the cloud-free cases: the lazy import of `reference/cases.ts` in the app.
+   * @param loadThick - Loads the thick cases: their worker's in the app ({@link loadThickCases}).
+   */
+  constructor(
+    load: () => Promise<AtmosphereFixtureCases>,
+    loadThick: () => Promise<ThickFixtureCases>,
+  ) {
     this.#load = load;
+    this.#loadThick = loadThick;
   }
 
-  /** The media as they stand. */
+  /** The scene's whole media as they stand, which a run that waits for every fixture reads. */
   get media(): AtmosphereFixtureMedia {
     return this.#media;
   }
 
+  /** Each load's media as they stand, the same object until that load lands or fails. */
+  get loads(): AtmosphereFixtureLoads {
+    return this.#loads;
+  }
+
   /**
-   * Starts the load where it has not started, and returns what settles once it has landed or
-   * failed; it never rejects, a failure being the media's `failed`, held for the page: a dynamic
-   * import that failed stays failed in it (`decision-r08-t10b-ux.md`, item 4).
+   * Starts both loads where they have not started, and returns what settles once each has landed
+   * or failed; it never rejects, a failure being its load's `failed`, held for the page: a dynamic
+   * import that failed stays failed in it, as a build that threw would again
+   * (`decision-r08-t10b-ux.md`, item 4).
    */
   ready(): Promise<void> {
-    this.#ready ??= this.#landed();
+    this.#ready ??= Promise.all([
+      this.#landed("cases", async () => {
+        const cases = await this.#load();
+        return heldMedia("cases", (name) => cloudFreeCaseOf(cases, name));
+      }),
+      this.#landed("thick", async () => {
+        const cases = await this.#loadThick();
+        return heldMedia("thick", (name) => thickCaseOf(cases, name));
+      }),
+    ]).then(() => undefined);
     return this.#ready;
   }
 
-  /** Loads the cases and builds each fixture's medium, or holds and logs the failure. */
-  async #landed(): Promise<void> {
+  /** Runs `load`'s build and holds its media, or holds and logs its failure. */
+  async #landed(
+    load: AtmosphereFixtureLoad,
+    build: () => Promise<ReadonlyMap<BodyIdHex, HeldMedium>>,
+  ): Promise<void> {
+    let media: AtmosphereFixtureMedia;
     try {
-      const cases = await this.#load();
-      const media = new Map<BodyIdHex, HeldMedium>();
-      for (const fixture of ATMOSPHERE_FIXTURES) {
-        const built = builtOfCase(caseOf(cases, fixture.caseName), fixture.caseName);
-        media.set(fixture.id, {
-          figure: builtFigureOf(built),
-          setting: { kind: "medium", built, labels: NO_LABELS },
-        });
-      }
-      this.#media = { kind: "ready", media };
+      media = { kind: "ready", media: await build() };
     } catch (error: unknown) {
-      console.error("ATMOSPHERE TEST: the fixtures' media did not load:", error);
-      this.#media = { kind: "failed" };
+      console.error(`ATMOSPHERE TEST: the fixtures' media did not load (${load}):`, error);
+      media = MEDIA_FAILED;
     }
+    this.#loads = { ...this.#loads, [load]: media };
+    this.#media = wholeMediaOf(this.#loads);
   }
 }
 
-/** The page's media, from the lazy import of `reference/cases.ts`, shared by every scene made. */
-const PAGE_FIXTURES = new AtmosphereFixtures(() => import("../atmosphere/reference/cases"));
+/** The part of a `Worker` {@link loadThickCases} uses, so that tests can stand in for one. */
+export interface ThickCasesWorkerLike {
+  addEventListener(type: "message", listener: (event: MessageEvent<ThickCasesReply>) => void): void;
+  /** An `ErrorEvent` when the script threw, a plain `Event` when the module failed to load. */
+  addEventListener(type: "error" | "messageerror", listener: (event: Event) => void): void;
+  terminate(): void;
+}
+
+/** Starts the thick cases' worker on the renderer's own module, as the page's load does. */
+export function startThickCasesWorker(): ThickCasesWorkerLike {
+  return new Worker(new URL("../atmosphere/reference/thickCases.worker.ts", import.meta.url), {
+    type: "module",
+    name: "thick-cases",
+  });
+}
+
+/**
+ * The thick cases from one worker's one reply, the worker ended once it has answered or failed.
+ *
+ * @throws Error, as the promise's rejection, where the worker's build failed, its script did not
+ *   load or run, or its reply could not be read.
+ */
+export function loadThickCases(
+  start: () => ThickCasesWorkerLike = startThickCasesWorker,
+): Promise<ThickFixtureCases> {
+  return new Promise((resolve, reject) => {
+    const worker = start();
+    worker.addEventListener("message", (event) => {
+      worker.terminate();
+      const reply = event.data;
+      switch (reply.kind) {
+        case "built":
+          resolve(reply.cases);
+          break;
+        case "failed":
+          reject(new Error(`the thick cases' worker could not build them: ${reply.message}`));
+          break;
+      }
+    });
+    const failed = (event: Event): void => {
+      worker.terminate();
+      // An `ErrorEvent` says what threw; a module that failed to load says nothing.
+      const said =
+        "message" in event && typeof event.message === "string" ? `: ${event.message}` : "";
+      reject(new Error(`the thick cases' worker failed (${event.type})${said}`));
+    };
+    worker.addEventListener("error", failed);
+    worker.addEventListener("messageerror", failed);
+  });
+}
+
+/**
+ * The page's media, from the lazy import of `reference/cases.ts` and the thick cases' worker,
+ * shared by every scene made.
+ */
+const PAGE_FIXTURES = new AtmosphereFixtures(
+  () => import("../atmosphere/reference/cases"),
+  () => loadThickCases(),
+);
 
 /**
  * Starts the loading of `ATMOSPHERE TEST`'s media on the page where it has not started (its
@@ -516,7 +791,7 @@ const PAGE_FIXTURES = new AtmosphereFixtures(() => import("../atmosphere/referen
  */
 export function prepareAtmosphereScene(fixtures: AtmosphereFixtures = PAGE_FIXTURES): void {
   fixtures.ready().catch((error: unknown) => {
-    // `ready` holds a failure as the media's `failed`; anything else reaching here is a bug.
+    // `ready` holds a failure as its load's `failed`; anything else reaching here is a bug.
     console.error("ATMOSPHERE TEST: the fixtures' media could not be started:", error);
   });
 }
@@ -594,7 +869,7 @@ const ATMOSPHERE_HOST_DISCS: ReadonlyArray<HostDiscDto> = Object.freeze([
   frozenHostDisc(sunLikeHostDisc({ star: 0 })),
 ]);
 
-/** An air fixture's body under the media as they stand. */
+/** An air fixture's body under its load's media as they stand. */
 function airBody(fixture: AtmosphereFixture, media: AtmosphereFixtureMedia): ViewBody {
   let held: HeldMedium | undefined;
   let setting: KeptBodyAtmosphere;
@@ -636,8 +911,8 @@ function airBody(fixture: AtmosphereFixture, media: AtmosphereFixtureMedia): Vie
   };
 }
 
-/** The scene's bodies under the media as they stand: the star, the air fixtures and the moon. */
-function bodiesOf(media: AtmosphereFixtureMedia): ReadonlyArray<ViewBody> {
+/** The scene's bodies under the loads as they stand: the star, the air fixtures and the moon. */
+function bodiesOf(loads: AtmosphereFixtureLoads): ReadonlyArray<ViewBody> {
   const starCentreM = vec3(0, 0, 0);
   return [
     {
@@ -654,7 +929,9 @@ function bodiesOf(media: AtmosphereFixtureMedia): ReadonlyArray<ViewBody> {
       symbol: bodyKindSymbol("star"),
       orbitNormal: null,
     },
-    ...ATMOSPHERE_FIXTURES.map((fixture) => airBody(fixture, media)),
+    ...ATMOSPHERE_FIXTURES.map((fixture) =>
+      airBody(fixture, loads[fixtureLoadOf(fixture.caseName)]),
+    ),
     {
       id: ATMOSPHERE_MOON,
       parent: ATMOSPHERE_EARTH,
@@ -691,13 +968,13 @@ function bodiesOf(media: AtmosphereFixtureMedia): ReadonlyArray<ViewBody> {
  *   cases, unless a test gives its own.
  */
 export function atmosphereScene(fixtures: AtmosphereFixtures = PAGE_FIXTURES): KeptScene {
-  // The bodies made again only when the media change, so that a frame's settings and figures are
-  // the ones the frame before held.
-  let shown: { readonly media: AtmosphereFixtureMedia; readonly bodies: ReadonlyArray<ViewBody> } =
-    { media: fixtures.media, bodies: bodiesOf(fixtures.media) };
+  // The bodies made again only when a load lands or fails, so that a frame's settings and figures
+  // are the ones the frame before held.
+  let shown: { readonly loads: AtmosphereFixtureLoads; readonly bodies: ReadonlyArray<ViewBody> } =
+    { loads: fixtures.loads, bodies: bodiesOf(fixtures.loads) };
   const sceneAt = (tS: number): ViewScene => {
-    if (shown.media !== fixtures.media) {
-      shown = { media: fixtures.media, bodies: bodiesOf(fixtures.media) };
+    if (shown.loads !== fixtures.loads) {
+      shown = { loads: fixtures.loads, bodies: bodiesOf(fixtures.loads) };
     }
     return {
       provenance: { kind: "kept", name: ATMOSPHERE_SCENE_NAME },
