@@ -1,8 +1,8 @@
 //! The class weights on the sample worlds (rendering plan R10, T2): at the band levels n − 1 to
-//! n − 6 from each world's finest level n, and at the class map's level (band level 4, Design note
-//! 8), `weights_at` agrees with the classes `material_at` gives, counted over each texel's
-//! footprint, to within ten percentage points in the mean over a thousand texels a level (a hundred
-//! at the Mars-like world's class-map level, for its cost: [`MARS_CLASS_MAP_TEXELS`]); every
+//! n − 6 from each world's finest level n, and at band level 4 ([`FIXED_BAND`]), `weights_at`
+//! agrees with the classes `material_at` gives, counted over each texel's footprint, to within ten
+//! percentage points in the mean over a thousand texels a level (a hundred at the Mars-like world's
+//! band level 4, for its cost: [`MARS_FIXED_BAND_TEXELS`]); every
 //! texel's bytes sum to 255; and the weights at a patch's 65 × 65 vertices never name more than
 //! eight materials, a failure naming the patch.
 //!
@@ -17,7 +17,7 @@
 //! band level m is the square of one vertex spacing about a vertex of the level's lattice, in the
 //! face's (s, t): a cell of quadtree level m + 6 (R10's "Deviations in T2, as built"). Its weights
 //! are `weights_at` at its centre, and its classes are `material_at`'s at the centres of an 8 × 8
-//! grid of its equal steps at n − 1 to n − 6, and of a 64 × 64 grid at the class map's level. The
+//! grid of its equal steps at n − 1 to n − 6, and of a 64 × 64 grid at band level 4. The
 //! measure is the texel's total variation, ½ Σ |weight ÷ 255 − fraction| over the materials of
 //! either: the share of the texel the weights give to the wrong material. Half the texels lie at
 //! random points of the cells the weights find hardest ([`hard_kinds`]) and half at random over the
@@ -83,28 +83,31 @@ const LOCKED_EARTH: &str = "locked_earth_like";
 /// The worlds the slow tests run, one each.
 const TESTED: [&str; 6] = [EARTH, MARS, MOON, CERES, EUROPA, LOCKED_EARTH];
 
-/// The class map's band level (Design note 8).
-const CLASS_MAP_LEVEL: u8 = 4;
+/// Band level 4, the one level the agreement measures at a fixed band level rather than below the
+/// finest (R10.T2's tests): a texel a cell of quadtree level 10. It is not the class map's, whose
+/// weights are at band level 0 ([`hyperion_surface::worker::CLASS_MAP_BAND`], R10.T10.d; Design
+/// note 8).
+const FIXED_BAND: u8 = 4;
 
 /// The agreement the plan asks of the coarse weights in the mean over a level's texels: ten
 /// percentage points.
 const AGREEMENT: f64 = 0.10;
 
-/// The texels a level, at n − 1 to n − 6 and at the class map's level: the plan's thousand, but for
-/// the class map's level on the Mars-like world ([`MARS_CLASS_MAP_TEXELS`]).
+/// The texels a level, at n − 1 to n − 6 and at band level 4: the plan's thousand, but for band
+/// level 4 on the Mars-like world ([`MARS_FIXED_BAND_TEXELS`]).
 const TEXELS: usize = 1_000;
 
-/// The class map's texels on the Mars-like world: a hundred, by decision-r10-t2-weights §1
+/// The texels at band level 4 on the Mars-like world: a hundred, by decision-r10-t2-weights §1
 /// (2026-10-26), which settles R10.T2's deferred "slow cases' cost" for this binary. Its finest
 /// points cost about 2–4 ms each away from a cache (this binary's 20-texel probe, and 1,536 s for
 /// about 7.9 × 10⁵ points in its full run, 2026-10-26, both under load), so the plan's thousand
 /// texels of 4,096 points would take some two to five hours alone.
-const MARS_CLASS_MAP_TEXELS: usize = 100;
+const MARS_FIXED_BAND_TEXELS: usize = 100;
 
-/// The points along a texel's side at n − 1 to n − 6 (64 a texel), and at the class map's level
-/// (4,096 a texel): the plan's.
+/// The points along a texel's side at n − 1 to n − 6 (64 a texel), and at band level 4 (4,096 a
+/// texel): the plan's.
 const LEVEL_SIDE: u32 = 8;
-const CLASS_MAP_SIDE: u32 = 64;
+const FIXED_BAND_SIDE: u32 = 64;
 
 /// The patches whose palette is checked at each of the levels n − 1, n − 3, n − 6 and 4, each about
 /// a random point of a hard cell: the first cell of each kind, taken in turn.
@@ -473,7 +476,7 @@ fn patch_palette(
 fn patches(name: &str, cells: &[PatchKey], finest: u8) -> Vec<PatchKey> {
     let mut rng = sampler(PATCH_SAMPLES, name);
     let mut out = Vec::new();
-    for level in [finest - 1, finest - 3, finest - 6, CLASS_MAP_LEVEL] {
+    for level in [finest - 1, finest - 3, finest - 6, FIXED_BAND] {
         for k in 0..PATCHES {
             let dir = if cells.is_empty() {
                 random_dir(&mut rng)
@@ -495,7 +498,7 @@ fn patches(name: &str, cells: &[PatchKey], finest: u8) -> Vec<PatchKey> {
 /// largest summed bytes, so nothing fails at run time, and a level-4 patch on the Earth is a
 /// fallback leaf only; the test admits it at nine by name (decision-r10-t2-weights §3, 2026-10-26).
 fn nine_material_patch() -> PatchKey {
-    PatchKey::new(Face::PosX, CLASS_MAP_LEVEL, 2, 1).expect("a patch of level 4")
+    PatchKey::new(Face::PosX, FIXED_BAND, 2, 1).expect("a patch of level 4")
 }
 
 /// The most materials a patch of the world named `name` may need: [`MAX_CLASSES`], and nine for
@@ -508,7 +511,7 @@ fn allowed_classes(name: &str, patch: PatchKey) -> usize {
     }
 }
 
-/// Holds `world`'s weights to [`AGREEMENT`] at every level, n − 1 to n − 6 and the class map's,
+/// Holds `world`'s weights to [`AGREEMENT`] at every level, n − 1 to n − 6 and band level 4,
 /// and its patches' palettes to [`MAX_CLASSES`], printing each level's figures as it is measured;
 /// a failure names the level's worst texels and their cells, or the patch and its materials.
 fn assert_the_weights_hold(world: &SampleWorld) {
@@ -525,14 +528,14 @@ fn assert_the_weights_hold(world: &SampleWorld) {
          trunks, rims) {counts:?}, {} taken",
         hard.len()
     );
-    let class_map_texels = if name == MARS {
-        MARS_CLASS_MAP_TEXELS
+    let fixed_texels = if name == MARS {
+        MARS_FIXED_BAND_TEXELS
     } else {
         TEXELS
     };
     let levels = (1..=6_u8)
         .map(|k| (finest - k, TEXELS, LEVEL_SIDE))
-        .chain([(CLASS_MAP_LEVEL, class_map_texels, CLASS_MAP_SIDE)]);
+        .chain([(FIXED_BAND, fixed_texels, FIXED_BAND_SIDE)]);
     let mut misses = Vec::new();
     for at_level in levels {
         let a = agreement(&synth, &hard, at_level, &mut rng);
@@ -591,26 +594,26 @@ fn the_weights_hold_on_the_earth_like_sample_world() {
 }
 
 #[test]
-#[ignore = "slow: 10^3 texels a level, 4 x 10^5 finest points at the class map's level, about 4 ms \
+#[ignore = "slow: 10^3 texels a level, 4 x 10^5 finest points at band level 4, about 4 ms \
             each"]
 fn the_weights_hold_on_the_mars_like_sample_world() {
     assert_the_weights_hold(sample_world(MARS));
 }
 
 #[test]
-#[ignore = "slow: 10^3 texels a level, 4 x 10^6 finest points at the class map's level"]
+#[ignore = "slow: 10^3 texels a level, 4 x 10^6 finest points at band level 4"]
 fn the_weights_hold_on_the_moon_like_sample_world() {
     assert_the_weights_hold(sample_world(MOON));
 }
 
 #[test]
-#[ignore = "slow: 10^3 texels a level, 4 x 10^6 finest points at the class map's level"]
+#[ignore = "slow: 10^3 texels a level, 4 x 10^6 finest points at band level 4"]
 fn the_weights_hold_on_the_ceres_like_sample_world() {
     assert_the_weights_hold(sample_world(CERES));
 }
 
 #[test]
-#[ignore = "slow: 10^3 texels a level, 4 x 10^6 finest points at the class map's level"]
+#[ignore = "slow: 10^3 texels a level, 4 x 10^6 finest points at band level 4"]
 fn the_weights_hold_on_the_europa_like_sample_world() {
     assert_the_weights_hold(sample_world(EUROPA));
 }
