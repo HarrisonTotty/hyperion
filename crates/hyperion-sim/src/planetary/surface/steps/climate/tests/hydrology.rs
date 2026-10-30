@@ -35,7 +35,7 @@ use crate::planetary::surface::inputs::{CoarseInputs, SeasonalOrbit, Spin};
 use crate::planetary::surface::steps::{Pass, Working};
 use crate::planetary::surface::{quantise, reference, steps};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
-use crate::units::{Metres, Pascals, Radians, Seconds};
+use crate::units::{Kelvin, Metres, Pascals, Radians, Seconds};
 use hyperion_testkit::float::assert_same_bits;
 
 /// Seconds in a day, for rates in mm of water a day (1 kg m⁻² of water is 1 mm).
@@ -3531,13 +3531,12 @@ fn identical_columns_have_one_budget_to_the_bit_and_it_is_the_zonal_one() {
         .map(|k| hydrology::blend_share(&circulation, &grid, k))
         .collect();
     let columns = hydrology::ColumnBudgets::of(
-        &grid,
-        &model,
-        &circulation,
+        (&grid, &model, &circulation),
         &t_k,
         (&zonal, &bands),
         &sea,
         &blend,
+        hydrology::ColumnAir::Own,
     );
     let first = &columns.budgets[0];
     for c in 1..grid.columns() {
@@ -3702,4 +3701,456 @@ fn a_stream_keeps_its_air_under_a_uniform_zonal_wind_and_sheds_it_where_the_wind
         "the slowing lower branch: {checked} cells; the northern streams' shares {least:.6}–{most:.6}"
     );
     assert!(checked > 0);
+}
+
+/// The columns' air of `air`, made with [`hydrology::Columns::Own`].
+fn shown_points(air: &hydrology::ShownAir) -> &partition::Bands {
+    match air.columns() {
+        Some(hydrology::ColumnAir::Shown(points)) => points,
+        other => panic!("the columns' points, got {other:?}"),
+    }
+}
+
+/// R09.T13.n's split of the partition ([`partition::budget_in_air`]): its energy flux, its
+/// energy-flux equator and its centre are its bands', to the bit, whatever its air; its air's h
+/// sets ψ's gross moist stability (ψ (`h_T` − h) the same w F, to 10⁻¹², for an air 5 K colder),
+/// and its air's L q its E − P (the bands' h with a drier air's L q leaves ψ to the bit and moves
+/// E − P; an air of no L q has none).
+#[test]
+fn the_partition_s_flux_and_equators_are_its_bands_and_its_stability_and_moisture_its_air_s() {
+    let inputs = reference::earth_like();
+    let model = EnergyBalance::for_inputs(&inputs);
+    let circulation = Circulation::for_inputs(&inputs, partition::Turning::Rotating);
+    let grid = ModelGrid::geographic();
+    let profile = |offset_k: f64| -> Vec<f64> {
+        (0..LATITUDE_BANDS)
+            .map(|k| {
+                let x = grid.centre_sine(k) - 0.15;
+                301.0 + offset_k - 45.0 * x * x
+            })
+            .collect()
+    };
+    let bands = partition::Bands::of(&model, &grid, &grid.broadcast(&profile(0.0)));
+    let colder = partition::Bands::of(&model, &grid, &grid.broadcast(&profile(-5.0)));
+    let own = partition::budget(&grid, &model, &circulation, &bands);
+    let stability = |air: &partition::Bands, edge: usize| -> f64 {
+        let greatest = air
+            .energy_j_per_kg
+            .iter()
+            .fold(f64::NEG_INFINITY, |most, &h| most.max(h));
+        partition::UPPER_BRANCH_ENERGY_RATIO * greatest
+            - f64::midpoint(air.energy_j_per_kg[edge], air.energy_j_per_kg[edge - 1])
+    };
+    let in_colder = partition::budget_in_air(&grid, &model, &circulation, &bands, &colder);
+    let drier = partition::Bands {
+        energy_j_per_kg: bands.energy_j_per_kg.clone(),
+        latent_j_per_kg: colder.latent_j_per_kg.clone(),
+    };
+    let in_drier = partition::budget_in_air(&grid, &model, &circulation, &bands, &drier);
+    let dry = partition::Bands {
+        energy_j_per_kg: bands.energy_j_per_kg.clone(),
+        latent_j_per_kg: vec![0.0; LATITUDE_BANDS],
+    };
+    let in_dry = partition::budget_in_air(&grid, &model, &circulation, &bands, &dry);
+    for budget in [&in_colder, &in_drier, &in_dry] {
+        assert_same_bits(budget.efe_sine, own.efe_sine);
+        assert_same_bits(budget.centre_sine, own.centre_sine);
+        for (&f, &g) in budget.flux_w_m2.iter().zip(&own.flux_w_m2) {
+            assert_same_bits(f, g);
+        }
+    }
+    let mut checked = 0_u32;
+    for edge in 1..LATITUDE_BANDS {
+        let (ours, theirs) = (
+            in_colder.mass_flux_kg_m2_s[edge] * stability(&colder, edge),
+            own.mass_flux_kg_m2_s[edge] * stability(&bands, edge),
+        );
+        if theirs.abs() > 0.0 {
+            assert!(
+                (ours / theirs - 1.0).abs() <= 1e-12,
+                "edge {edge}: {ours} against {theirs}"
+            );
+            assert!(
+                (in_colder.mass_flux_kg_m2_s[edge] / own.mass_flux_kg_m2_s[edge] - 1.0).abs() > 0.0
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0);
+    for (&a, &b) in in_drier
+        .mass_flux_kg_m2_s
+        .iter()
+        .zip(&own.mass_flux_kg_m2_s)
+    {
+        assert_same_bits(a, b);
+    }
+    assert!(
+        largest_off(
+            &in_drier.evaporation_less_precipitation_kg_m2_s,
+            &own.evaporation_less_precipitation_kg_m2_s
+        ) > 1e-3
+    );
+    for &e in &in_dry.evaporation_less_precipitation_kg_m2_s {
+        assert_same_bits(e.abs(), 0.0);
+    }
+}
+
+/// R09.T13.n's column budgets ([`hydrology::ColumnBudgets::of`]): with the shown air at each
+/// point the h and L q of its own temperature, every column's budget, rates and convergence are
+/// the own air's to the bit, on a field that varies in longitude.
+#[test]
+fn shown_air_at_the_columns_own_temperatures_gives_their_own_budgets_to_the_bit() {
+    let inputs = reference::earth_like();
+    let model = EnergyBalance::for_inputs(&inputs);
+    let moisture = model.moisture.expect("the reference Earth is wet");
+    let circulation = Circulation::for_inputs(&inputs, partition::Turning::Rotating);
+    let grid = ModelGrid::geographic();
+    let t_k: Vec<f64> = (0..grid.points())
+        .map(|p| {
+            let (k, c) = (p / grid.columns(), p % grid.columns());
+            let x = grid.centre_sine(k) - 0.15;
+            let longitude = core::f64::consts::TAU * f64::from(u32::try_from(c).unwrap())
+                / f64::from(u32::try_from(grid.columns()).unwrap());
+            301.0 - 45.0 * x * x + 4.0 * math::cos(longitude)
+        })
+        .collect();
+    let bands = partition::Bands::of(&model, &grid, &t_k);
+    let zonal = partition::budget(&grid, &model, &circulation, &bands);
+    let areas = vec![1.0; LATITUDE_BANDS];
+    let evaporation: Vec<f64> = (0..LATITUDE_BANDS)
+        .map(|k| 3.0e-5 * grid.centre_cosine(k))
+        .collect();
+    let sea = SeaBands::of(
+        &evaporation,
+        &areas,
+        &vec![0.7; LATITUDE_BANDS],
+        &zonal.evaporation_less_precipitation_kg_m2_s,
+    );
+    let blend: Vec<f64> = (0..LATITUDE_BANDS)
+        .map(|k| hydrology::blend_share(&circulation, &grid, k))
+        .collect();
+    let points = partition::Bands {
+        energy_j_per_kg: t_k.iter().map(|&t| model.energy(t)).collect(),
+        latent_j_per_kg: t_k
+            .iter()
+            .map(|&t| moisture.latent_heat_j_per_kg * moisture.specific_humidity(t))
+            .collect(),
+    };
+    let [own, shown] = [
+        hydrology::ColumnAir::Own,
+        hydrology::ColumnAir::Shown(&points),
+    ]
+    .map(|air| {
+        hydrology::ColumnBudgets::of(
+            (&grid, &model, &circulation),
+            &t_k,
+            (&zonal, &bands),
+            &sea,
+            &blend,
+            air,
+        )
+    });
+    assert!(
+        largest_off(
+            &own.budgets[0].mass_flux_kg_m2_s,
+            &own.budgets[36].mass_flux_kg_m2_s
+        ) > 0.0
+    );
+    for c in 0..grid.columns() {
+        for (a, b) in [
+            (
+                &shown.budgets[c].mass_flux_kg_m2_s,
+                &own.budgets[c].mass_flux_kg_m2_s,
+            ),
+            (
+                &shown.budgets[c].evaporation_less_precipitation_kg_m2_s,
+                &own.budgets[c].evaporation_less_precipitation_kg_m2_s,
+            ),
+            (
+                &shown.evaporation_less_precipitation_kg_m2_s[c],
+                &own.evaporation_less_precipitation_kg_m2_s[c],
+            ),
+            (&shown.rates_kg_m2_s[c], &own.rates_kg_m2_s[c]),
+            (&shown.convergence_kg_m2_s[c], &own.convergence_kg_m2_s[c]),
+        ] {
+            for (&x, &y) in a.iter().zip(b) {
+                assert_same_bits(x, y);
+            }
+        }
+    }
+}
+
+/// R09.T13.n, the shown climate's means ([`hydrology::ShownAir`]): climate cells all at one
+/// temperature give every band and every point that temperature's h and L q to the bit; two cells in
+/// a band give their solid-angle mean to 10⁻¹², and the bands and points with no cell take it
+/// (the nearest band's, and a point's band's); a dry world's L q is zero.
+#[test]
+fn the_shown_air_is_the_climate_cells_solid_angle_mean() {
+    let inputs = reference::earth_like();
+    let (field, climate) = grids(5);
+    let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
+    let grid = ModelGrid::geographic();
+    let model = EnergyBalance::for_inputs(&inputs);
+    let moisture = model.moisture.expect("the reference Earth is wet");
+    let latent = |t: f64| moisture.latent_heat_j_per_kg * moisture.specific_humidity(t);
+    let places = hydrology::ClimatePlaces::of(&pass, &grid, Coordinates::Geographic);
+    let omegas = climate.solid_angles_sr();
+    let t = 291.25;
+    let air = hydrology::ShownAir::of(
+        (&model, &grid),
+        &places,
+        omegas,
+        omegas.iter().map(|_| t),
+        hydrology::Columns::Own,
+    );
+    let points = shown_points(&air);
+    for (values, expected) in [
+        (&air.bands.energy_j_per_kg, model.energy(t)),
+        (&air.bands.latent_j_per_kg, latent(t)),
+        (&points.energy_j_per_kg, model.energy(t)),
+        (&points.latent_j_per_kg, latent(t)),
+    ] {
+        for &v in values {
+            assert_same_bits(v, expected);
+        }
+    }
+    let at = u32::try_from(grid.point(40, 3)).unwrap();
+    let pair = hydrology::ClimatePlaces::of_parts(&grid, vec![40, 40], vec![at, at]);
+    let air = hydrology::ShownAir::of(
+        (&model, &grid),
+        &pair,
+        &[1.0e-3, 3.0e-3],
+        [280.0, 300.0],
+        hydrology::Columns::Own,
+    );
+    let points = shown_points(&air);
+    for (bands, cells, of) in [
+        (
+            &air.bands.energy_j_per_kg,
+            &points.energy_j_per_kg,
+            (|m: &EnergyBalance, t: f64| m.energy(t)) as fn(&EnergyBalance, f64) -> f64,
+        ),
+        (
+            &air.bands.latent_j_per_kg,
+            &points.latent_j_per_kg,
+            |m, t| {
+                let moisture = m.moisture.expect("wet");
+                moisture.latent_heat_j_per_kg * moisture.specific_humidity(t)
+            },
+        ),
+    ] {
+        let expected = (1.0 * of(&model, 280.0) + 3.0 * of(&model, 300.0)) / 4.0;
+        for &v in bands.iter().chain(cells) {
+            assert!(
+                (v / expected - 1.0).abs() <= 1e-12,
+                "{v} against {expected}"
+            );
+        }
+    }
+    let dry = EnergyBalance::for_inputs(&dry_earth());
+    let air = hydrology::ShownAir::of(
+        (&dry, &grid),
+        &places,
+        omegas,
+        omegas.iter().map(|_| t),
+        hydrology::Columns::Zonal,
+    );
+    assert!(air.columns().is_none());
+    for &v in &air.bands.latent_j_per_kg {
+        assert_same_bits(v, 0.0);
+    }
+}
+
+/// The reference locked Earth's coarse pass to the climate at its coarse level (level 8) under
+/// R09.T13.n's partition, the shown climate's thermodynamics
+/// ([`partition::with_partition_thermodynamics`]), its input mean surface temperature `mean_k`
+/// where given, K; and, with `deep`, its water cycle again on a clone of the finished state at
+/// the deep tolerance, under the same rule: the run, and the deep run's diagnostics and records.
+fn shown_locked_run(
+    mean_k: Option<f64>,
+    deep: bool,
+) -> (
+    Run,
+    Option<(hydrology::Diagnostics, Vec<steps::ClimateState>)>,
+) {
+    let inputs = match mean_k {
+        Some(mean_k) => builder_of(&reference::locked_earth_like())
+            .mean_surface_temperature(Kelvin::new(mean_k))
+            .build()
+            .expect("the locked Earth at another mean is valid"),
+        None => reference::locked_earth_like(),
+    };
+    let level = hyperion_surface::field::coarse_level(inputs.radius());
+    let (field, climate) = (CellGraph::for_field(level), CellGraph::for_climate(level));
+    let (working, diagnostics, deep) =
+        partition::with_partition_thermodynamics(partition::PartitionThermodynamics::Shown, || {
+            let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
+            let mut working = Working::initial(&pass);
+            steps::plates::run(&pass, &mut working);
+            steps::relief::run(&pass, &mut working);
+            steps::craters::run(&pass, &mut working);
+            steps::relief::run_after_craters(&pass, &mut working);
+            let model = normalised(&pass, &working);
+            let kept = model.clone();
+            let diagnostics = finish(&pass, &mut working, model);
+            let deep = deep.then(|| {
+                let mut deep_working = working.clone();
+                let water = hydrology::run_with(
+                    &pass,
+                    &mut deep_working,
+                    &kept,
+                    &Parameters::deep().with_tolerance(EARTH_DEEP_TOLERANCE),
+                )
+                .expect("the locked Earth's model keeps its own records");
+                (water, deep_working.climate)
+            });
+            (working, diagnostics, deep)
+        });
+    let run = Run {
+        field,
+        climate,
+        inputs,
+        working,
+        diagnostics,
+    };
+    (run, deep)
+}
+
+/// A locked run's month-0 rates by tidally locked band `bands` (each from the south pole of the
+/// tidally locked frame, its north pole the substellar point): the all-sea climate cells' solid-angle
+/// mean and the all-land ones' greatest, mm/day, printed, and the all-sea means returned, one each
+/// of `bands`; NaN where a band holds no such cell.
+fn report_locked_bands(run: &Run, bands: &[usize]) -> Vec<f64> {
+    let land = run.land_counts();
+    let locked = Coordinates::TidallyLocked;
+    let mut rows = vec![(0.0, 0.0, 0.0_f64); LATITUDE_BANDS];
+    for (((&up, &omega), state), &count) in run
+        .climate
+        .centres()
+        .iter()
+        .zip(run.climate.solid_angles_sr())
+        .zip(&run.working.climate)
+        .zip(&land)
+    {
+        let row = &mut rows[ModelGrid::band_of(locked.to_model(up)[2])];
+        let rate = state.month_precipitation_kg_m2_s[0] * DAY_S;
+        match count {
+            0 => {
+                row.0 += omega * rate;
+                row.1 += omega;
+            }
+            4 => row.2 = row.2.max(rate),
+            _ => {}
+        }
+    }
+    bands
+        .iter()
+        .map(|&k| {
+            let (sum, area, most) = rows[k];
+            let sea = if area > 0.0 { sum / area } else { f64::NAN };
+            eprintln!(
+                "  TL band {k} ({:.2}°): the all-sea cells' mean {sea:.2} mm/day, the all-land \
+                 cells' greatest {most:.2}",
+                -88.75 + 2.5 * f64::from(u32::try_from(k).unwrap())
+            );
+            sea
+        })
+        .collect()
+}
+
+/// The balance factor a locked Earth's month keeps under R09.T13.n's partition: within [0.85,
+/// 1.15], the ruled Earth test's window (R09.T13.e; its pilot 0.903, as built 0.755).
+const SHOWN_SCALE_WINDOW: (f64, f64) = (0.85, 1.15);
+
+/// The reference locked Earth's wettest climate cell-month under R09.T13.n, mm/day: at most 265, a
+/// pin (its pilot 255.2, as built 272.6), since plan 14's 333 K substellar sea stands
+/// (research-r09-t13m-landing's Part 2; main's ruling 4 leaves it out of R09).
+const LOCKED_WETTEST_PIN_MM_PER_DAY: f64 = 265.0;
+
+/// R09.T13.n on the reference locked Earth (level 8), the shown climate's thermodynamics in its
+/// partition ([`shown_locked_run`]): its balance factor lies within [`SHOWN_SCALE_WINDOW`], its
+/// wettest climate cell-month is at most [`LOCKED_WETTEST_PIN_MM_PER_DAY`], and its solve
+/// converges within [`SAMPLE_RESTARTS`] with every land climate cell within 1% of the deep solve's
+/// (decision-r09-t13m §3.7; [`assert_the_solve_converges`]). Prints its sea and land at 88.75°,
+/// 76.25° and 61.25° of the tidally locked frame.
+#[test]
+#[ignore = "slow: the reference locked Earth's coarse pass at level 8 under R09.T13.n's partition, \
+            and its water cycle again at the deep tolerance, about 40 s"]
+fn the_locked_earth_s_partition_reads_the_shown_climate_and_balances_near_one() {
+    let (run, deep) = shown_locked_run(None, true);
+    let scale = run.water().months[0].scale;
+    eprintln!("The reference locked Earth under R09.T13.n: k {scale:.4}");
+    report_locked_bands(&run, &[71, 66, 60]);
+    let wettest = report_wettest(&run);
+    let (deep, deep_climate) = deep.expect("the deep run");
+    assert_the_solve_converges(&run, &deep, &deep_climate);
+    assert!(
+        (SHOWN_SCALE_WINDOW.0..=SHOWN_SCALE_WINDOW.1).contains(&scale),
+        "k {scale}"
+    );
+    assert!(
+        wettest <= LOCKED_WETTEST_PIN_MM_PER_DAY,
+        "the wettest climate cell-month {wettest} mm/day"
+    );
+}
+
+/// The mechanism's locked Earth: the reference locked Earth's input mean surface temperature, K,
+/// at which its shown substellar sea stands near 300 K, GCM-like (research-r09-t13m-landing's
+/// pilot: 300.3 K), as plan 14's 333 K does not.
+const MECHANISM_MEAN_K: f64 = 255.0;
+
+/// The mechanism's wettest climate cell-month, mm/day: at most 120 (its pilot 101.7, as built
+/// 183.7).
+const MECHANISM_WETTEST_MM_PER_DAY: f64 = 120.0;
+
+/// The mechanism's substellar band's (87.5–90° of the tidally locked frame) all-sea mean rate,
+/// mm/day: at most 80, the plan's ceiling (its pilot 57.2, as built 111.0). The source gives a
+/// floor, not a ceiling: Merlis and Schneider's locked aquaplanet's "large precipitation rates
+/// (≥ 40 mm/day) around the subsolar point" (2010, JAMES 2, 13, arXiv:1001.5117, §3b, its slowly
+/// rotating case, a 365-day year, at 1,367 W m⁻², as research-r09-t13m-landing read it; not
+/// re-read here).
+const MECHANISM_SUBSTELLAR_SEA_MM_PER_DAY: f64 = 80.0;
+
+/// The least all-sea mean rate of each 2.5° band of the mechanism's evaporating ring, 35–50° of
+/// tidally locked latitude (40–55° from the substellar point), mm/day: more than 1 (its pilot
+/// 1.8–6.8, as built 0–0.08).
+const MECHANISM_RING_LEAST_MM_PER_DAY: f64 = 1.0;
+
+/// R09.T13.n's mechanism (research-r09-t13m-landing's Part 2): the reference locked Earth with its
+/// input mean surface temperature at [`MECHANISM_MEAN_K`], a test variant whose shown substellar
+/// sea stands near 300 K, under the shown climate's thermodynamics ([`shown_locked_run`]). Its
+/// wettest climate cell-month is at most [`MECHANISM_WETTEST_MM_PER_DAY`]; its substellar band's
+/// all-sea mean at most [`MECHANISM_SUBSTELLAR_SEA_MM_PER_DAY`]; and every 2.5° band of its ring,
+/// 35–50° of the tidally locked frame, rains on its sea more than
+/// [`MECHANISM_RING_LEAST_MM_PER_DAY`] (40–55° from the substellar point): the ring evaporates
+/// and rains again, where the own
+/// record's thermodynamics left it dry.
+#[test]
+#[ignore = "slow: the reference locked Earth's coarse pass at level 8 at a 255 K mean under \
+            R09.T13.n's partition, about 30 s"]
+fn on_a_locked_earth_at_a_cooler_mean_the_shown_partition_rains_its_ring_and_tempers_its_core() {
+    let (run, _) = shown_locked_run(Some(MECHANISM_MEAN_K), false);
+    eprintln!(
+        "The reference locked Earth at a {MECHANISM_MEAN_K} K mean under R09.T13.n: k {:.4}",
+        run.water().months[0].scale
+    );
+    let ring: Vec<usize> = (50..=55).collect();
+    let seas = report_locked_bands(&run, &[71, 66, 60]);
+    let ring_seas = report_locked_bands(&run, &ring);
+    let wettest = report_wettest(&run);
+    assert!(
+        wettest <= MECHANISM_WETTEST_MM_PER_DAY,
+        "the wettest climate cell-month {wettest} mm/day"
+    );
+    assert!(
+        seas[0] <= MECHANISM_SUBSTELLAR_SEA_MM_PER_DAY,
+        "the substellar band's sea {} mm/day",
+        seas[0]
+    );
+    for (&k, &sea) in ring.iter().zip(&ring_seas) {
+        assert!(
+            sea > MECHANISM_RING_LEAST_MM_PER_DAY,
+            "TL band {k}'s sea {sea} mm/day"
+        );
+    }
 }

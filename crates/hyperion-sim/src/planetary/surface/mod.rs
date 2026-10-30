@@ -360,6 +360,31 @@ mod tests {
         ]);
     }
 
+    /// R09.T13.n's water cycle ahead of the 26 bump, the partition's shown thermodynamics
+    /// ([`steps::climate::with_partition_thermodynamics`]): the small Earth's pass (its column
+    /// budgets read the shown air) gives the same field and payload twice, the second through
+    /// [`coarse_pass_with_solves`], and a field other than the held rule's; and under two seeds it
+    /// is order-independent. The fast tier holds the step's (`climate`'s
+    /// `under_the_shown_thermodynamics_the_step_writes_the_same_bits_from_the_same_state`). 26's
+    /// bump deletes the switch, and the tests above then hold these.
+    #[test]
+    #[ignore = "slow: eleven of the small Earth's coarse passes, about 1,000 s"]
+    fn under_the_shown_thermodynamics_the_pass_is_the_same_twice_and_order_independent() {
+        use steps::climate::{PartitionThermodynamics, with_partition_thermodynamics};
+        let inputs = small_earth();
+        let held = with_partition_thermodynamics(PartitionThermodynamics::OwnRecord, || {
+            coarse_pass(reference::SEED, &inputs)
+        });
+        with_partition_thermodynamics(PartitionThermodynamics::Shown, || {
+            let first = coarse_pass(reference::SEED, &inputs);
+            let (second, _) = coarse_pass_with_solves(reference::SEED, &inputs);
+            assert_eq!(first, second);
+            assert_eq!(bytes(&first), bytes(&second));
+            assert_ne!(first, held, "the shown rule moves the small Earth's field");
+            assert_order_independent_over(&[small_earth()]);
+        });
+    }
+
     /// The pass is order-independent on the four reference worlds themselves, the reference Earth
     /// at level 8 interleaved with the small worlds: the fast test's property at the Earth's own
     /// level, for a hidden state only level 8 would show (decision-r09-t13-test-cost §2.2).

@@ -147,6 +147,10 @@ pub(crate) use airless::regolith_inertia_of;
 /// the lakes' (`after_erosion::assert_the_net_loss_shares_its_month_terms`) on one climate pass.
 #[cfg(test)]
 pub(crate) use hydrology::assert_the_sea_rates_share_their_month_terms;
+/// R09.T13.n's hold and the tests' switch, under which the pass's determinism tests run version
+/// 26's water cycle ahead of its bump.
+#[cfg(test)]
+pub(crate) use partition::{PartitionThermodynamics, with_partition_thermodynamics};
 mod transport;
 mod wind;
 

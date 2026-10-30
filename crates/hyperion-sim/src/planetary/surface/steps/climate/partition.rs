@@ -19,6 +19,11 @@
 //!   model's flux form, F = −Λ (cos φ ÷ Δφ)(`h_k` − `h_k−1`) per 2πR² ([`ModelGrid::edge_conductance`],
 //!   the discretisation of the model's own convergence). Since that form is linear, the band means
 //!   give the geographic model's zonal-mean flux exactly.
+//! - **The air** (R09.T13.n, held at [`SHOWN_THERMODYNAMICS_VERSION`]): the h and L q that set
+//!   `h_T`, the gross moist stability `h_T` − h, the latent flux and E − P are the own record's to
+//!   version 25 and from 26 the climate the world shows, while F and the energy-flux equators stay
+//!   the own record's ([`budget_in_air`]). A modelling choice, not Siler et al.'s: their partition
+//!   splits one model's flux of its own air.
 //! - **The energy-flux equator** is the (−, +) zero of F in the band of greatest h, ties to the
 //!   lower band index, interpolated linearly in x across the band ([`energy_flux_equator`]): the
 //!   greatest h makes F ≤ 0 at the band's southern edge and ≥ 0 at its northern, so the band always
@@ -58,9 +63,9 @@ use core::f64::consts::PI;
 use super::ebm::EnergyBalance;
 use super::grid::{LATITUDE_BANDS, ModelGrid};
 use super::transport::{REFERENCE_PRESSURE_PA, rotation_ratio};
-use crate::math;
 use crate::planetary::surface::inputs::CoarseInputs;
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
+use crate::{GENERATOR_VERSION, GeneratorVersion, math};
 
 /// The Hadley cell's edge at Earth's rotation, degrees: 25.1°, Kaspi and Showman 2015's (ApJ 804,
 /// 60) Fig. 6a width at Ω⊕, as the lane read it (decision-r09-t13ge §2.5, e5). With the ruled
@@ -476,10 +481,9 @@ pub(super) struct Budget {
 }
 
 /// The month's budget on `grid` of `model`'s bands `bands` under `circulation` (the [module
-/// documentation](self)): F, its energy-flux equator and the centre; w at each edge; ψ =
-/// w F ÷ (`h_T` − h), h the edge's mean of its two bands; the latent flux (1 − w) times the
-/// diffusive flux of L q, less ψ L q at the edge's mean L q; E − P each band's divergence of it,
-/// (`F_q,k+1` − `F_q,k`) ÷ (`w_k` L), with L the condensable's latent heat.
+/// documentation](self)), the bands' own thermodynamics its air's: [`budget_in_air`] with `bands`
+/// for both, the arithmetic as R09.T13.e built it: the tests' form.
+#[cfg(test)]
 #[must_use]
 pub(super) fn budget(
     grid: &ModelGrid,
@@ -487,13 +491,35 @@ pub(super) fn budget(
     circulation: &Circulation,
     bands: &Bands,
 ) -> Budget {
+    budget_in_air(grid, model, circulation, bands, bands)
+}
+
+/// The month's budget on `grid` under `circulation` of `model`'s energy flux over the bands
+/// `bands`, its air's thermodynamics those of `air` (the [module documentation](self)): F from
+/// `bands`' h, its energy-flux equator and the centre; w at each edge; ψ = w F ÷ (`h_T` − h), with
+/// `h_T` and h, the edge's mean of its two bands, `air`'s; the latent flux (1 − w) times the
+/// diffusive flux of `air`'s L q, less ψ L q at the edge's mean of it; E − P each band's divergence
+/// of it, (`F_q,k+1` − `F_q,k`) ÷ (`w_k` L), with L the condensable's latent heat. With `air` the
+/// bands themselves it is R09.T13.e's budget, to the bit.
+///
+/// The energy-flux equator is F's zero in the band of `bands`' greatest h, while `h_T` is
+/// [`UPPER_BRANCH_ENERGY_RATIO`] times `air`'s greatest: the two greatest need not share a band,
+/// and Siler et al.'s `h_T` = 1.06 h(0) takes one model's air for both (R09.T13.n).
+#[must_use]
+pub(super) fn budget_in_air(
+    grid: &ModelGrid,
+    model: &EnergyBalance,
+    circulation: &Circulation,
+    bands: &Bands,
+    air: &Bands,
+) -> Budget {
     let lambda = model.transport_kg_m2_s;
     let flux = edge_fluxes(grid, lambda, &bands.energy_j_per_kg);
-    let diffusive_latent = edge_fluxes(grid, lambda, &bands.latent_j_per_kg);
+    let diffusive_latent = edge_fluxes(grid, lambda, &air.latent_j_per_kg);
     let efe_sine = energy_flux_equator(grid, &flux, &bands.energy_j_per_kg);
     let centre_sine = circulation.centre_sine(efe_sine);
     let greatest =
-        bands.energy_j_per_kg.iter().fold(
+        air.energy_j_per_kg.iter().fold(
             f64::NEG_INFINITY,
             |most, &h| {
                 if h > most { h } else { most }
@@ -504,8 +530,8 @@ pub(super) fn budget(
     let mut latent_flux = vec![0.0; LATITUDE_BANDS + 1];
     for edge in 1..LATITUDE_BANDS {
         let share = circulation.share(grid.edge_sine(edge), centre_sine);
-        let energy = f64::midpoint(bands.energy_j_per_kg[edge], bands.energy_j_per_kg[edge - 1]);
-        let latent = f64::midpoint(bands.latent_j_per_kg[edge], bands.latent_j_per_kg[edge - 1]);
+        let energy = f64::midpoint(air.energy_j_per_kg[edge], air.energy_j_per_kg[edge - 1]);
+        let latent = f64::midpoint(air.latent_j_per_kg[edge], air.latent_j_per_kg[edge - 1]);
         let psi = share * flux[edge] / (upper - energy);
         mass_flux[edge] = psi;
         latent_flux[edge] = (1.0 - share) * diffusive_latent[edge] - psi * latent;
@@ -534,9 +560,10 @@ pub(super) fn budget(
 
 /// The Hadley cell's part H of `budget`'s E − P, kg m⁻² s⁻¹, one a band (decision-r09-t13m §1.1).
 ///
-/// On `grid` over `model`'s bands `bands`: the divergence of its lower branch's latent heat flux −ψ
-/// L q alone, over L, (`F_k+1` − `F_k`) ÷ (`w_k` L), each edge's L q the mean of its two bands', as
-/// [`budget`] takes it; zero on a dry world. Its eddies' part is the rest of the budget's E − P.
+/// On `grid` over the air `bands` of `model` the budget read (its L q, [`budget_in_air`]'s `air`):
+/// the divergence of its lower branch's latent heat flux −ψ L q alone, over L, (`F_k+1` − `F_k`) ÷
+/// (`w_k` L), each edge's L q the mean of its two bands', as [`budget_in_air`] takes it; zero on a
+/// dry world. Its eddies' part is the rest of the budget's E − P.
 #[must_use]
 pub(super) fn hadley_part_kg_m2_s(
     grid: &ModelGrid,
@@ -562,6 +589,75 @@ pub(super) fn hadley_part_kg_m2_s(
             }
         })
         .collect()
+}
+
+/// The generator version from which the partition's thermodynamics are the climate the world shows
+/// (R09.T13.n): 26, so that at 25 nothing moves and the rule lands after 25's bump without waiting
+/// for 26's train (main's ruling of 2026-10-30).
+///
+/// Below it [`PartitionThermodynamics::in_force`] is [`PartitionThermodynamics::OwnRecord`], so
+/// that every water cycle is R09.T13.m's bit for bit. 26's bump deletes this hold, the enum and
+/// its `OwnRecord` arm, the tests' switch [`with_partition_thermodynamics`], and its tripwire
+/// (`the_shown_thermodynamics_are_held_only_until_the_26_bump`).
+pub(crate) const SHOWN_THERMODYNAMICS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whose thermodynamics, h and L q, the partition's air reads ([`budget_in_air`]'s `air`; the hold,
+/// [`SHOWN_THERMODYNAMICS_VERSION`]). Its energy flux F, and with it the energy-flux equators, is
+/// the model's own record's under either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum PartitionThermodynamics {
+    /// The model's own records', before R09.T13.d's correction (decision-r09-t13ge §2.11), as
+    /// R09.T13.e built it: to version 25.
+    OwnRecord,
+    /// The climate the world shows, its climate cells' at their sea-level month temperatures
+    /// (R09.T13.n): from version 26.
+    Shown,
+}
+
+impl PartitionThermodynamics {
+    /// The rule this generator version gives: [`Self::Shown`] from
+    /// [`SHOWN_THERMODYNAMICS_VERSION`], [`Self::OwnRecord`] below it; in the tests, the rule a
+    /// test's switch sets on its thread ([`with_partition_thermodynamics`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rule) = PARTITION_THERMODYNAMICS.with(core::cell::Cell::get) {
+            return rule;
+        }
+        if GENERATOR_VERSION >= SHOWN_THERMODYNAMICS_VERSION {
+            Self::Shown
+        } else {
+            Self::OwnRecord
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The partition's thermodynamics a test sets on its thread, `None` for the version's.
+    static PARTITION_THERMODYNAMICS: core::cell::Cell<Option<PartitionThermodynamics>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the partition's thermodynamics `rule` on this thread, for the tests to reach
+/// 26's water cycle ahead of the bump; the version's rule is set back after, a panic in `run`
+/// included. The water cycle reads it as it runs ([`PartitionThermodynamics::in_force`]), so a
+/// test runs its pass inside it, never through a pass a fixture built outside. 26's bump deletes
+/// it with the hold.
+#[cfg(test)]
+pub(crate) fn with_partition_thermodynamics<R>(
+    rule: PartitionThermodynamics,
+    run: impl FnOnce() -> R,
+) -> R {
+    /// Sets the thread's rule back as it drops.
+    struct Restore(Option<PartitionThermodynamics>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PARTITION_THERMODYNAMICS.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(PARTITION_THERMODYNAMICS.with(|cell| cell.replace(Some(rule))));
+    run()
 }
 
 #[cfg(test)]
@@ -730,5 +826,35 @@ mod tests {
         let flux = edge_fluxes(&grid, 1.0, &flat);
         let efe = energy_flux_equator(&grid, &flux, &flat);
         assert!((efe - grid.edge_sine(36)).abs() < 1e-15, "{efe}");
+    }
+
+    /// R09.T13.n's hold: below [`SHOWN_THERMODYNAMICS_VERSION`] the partition reads the own
+    /// record's thermodynamics, and the tests' switch sets the shown climate's and back.
+    #[test]
+    fn the_shown_thermodynamics_are_held_only_until_the_26_bump() {
+        assert!(
+            GENERATOR_VERSION < SHOWN_THERMODYNAMICS_VERSION,
+            "the 25 → 26 bump puts R09.T13.n's partition thermodynamics on the generator: every \
+             water cycle reads its air's h and L q from the climate the world shows. Delete \
+             `SHOWN_THERMODYNAMICS_VERSION`, `PartitionThermodynamics` and its `OwnRecord` arm \
+             (`water_cycle`'s `air` then always the shown climate's, and `budget` its \
+             `budget_in_air`), the tests' switch `with_partition_thermodynamics` and its thread's \
+             rule, and this test; re-bless `planetary/surface/earth_like` and \
+             `locked_earth_like` by name in the bump commit."
+        );
+        assert_eq!(
+            PartitionThermodynamics::in_force(),
+            PartitionThermodynamics::OwnRecord
+        );
+        with_partition_thermodynamics(PartitionThermodynamics::Shown, || {
+            assert_eq!(
+                PartitionThermodynamics::in_force(),
+                PartitionThermodynamics::Shown
+            );
+        });
+        assert_eq!(
+            PartitionThermodynamics::in_force(),
+            PartitionThermodynamics::OwnRecord
+        );
     }
 }
