@@ -8,12 +8,14 @@
  */
 
 import type { AtmosphereMedium } from "../medium";
+import type { MediumTemperature } from "../thermalSource";
 import type { SpectralColumn, SpectralSource, SpectralTerm } from "./spectralColumn";
 
 /**
  * A drawn medium's spectral column: its name, top, ground, pressure profile and each term's name
  * and density, with `sources[i]` the source of `medium.terms[i]` (R08.T14.c's hand-off: the
- * assembly gives the sources beside its terms).
+ * assembly gives the sources beside its terms), and the column's `temperature` where it emits
+ * (R08.T18.b).
  *
  * @throws RangeError for a source count other than the terms', an absorber term without an
  *   absorber source of its kind, or an absorber source on a term that absorbs by none.
@@ -21,6 +23,7 @@ import type { SpectralColumn, SpectralSource, SpectralTerm } from "./spectralCol
 export function spectralColumnOf(
   medium: AtmosphereMedium,
   sources: ReadonlyArray<SpectralSource>,
+  temperature?: MediumTemperature,
 ): SpectralColumn {
   if (sources.length !== medium.terms.length) {
     throw new RangeError(
@@ -47,6 +50,7 @@ export function spectralColumnOf(
     groundAlbedo: medium.groundAlbedo,
     terms,
     ...(medium.pressureBar === undefined ? {} : { pressureBar: medium.pressureBar }),
+    ...(temperature === undefined ? {} : { temperature }),
   };
 }
 

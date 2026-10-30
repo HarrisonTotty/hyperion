@@ -93,6 +93,18 @@
  *
  * **The ground** is Lambertian in each solve, its albedo in a bin linear in wavelength between the
  * render channels' wavelengths and held at the nearer channel outside them.
+ *
+ * **Thermal emission** (plan R08, R08.T18.b): a column with a temperature (`SpectralColumn`'s) is
+ * solved for its thermal field beside its beams, each bin's Planck radiance B_λ(λ_b, T(h\*)) at the
+ * layers' interfaces, linear in τ through each, and the ground's at the column's bottom emitted at
+ * 1 − its albedo (`discreteOrdinates.ts`' `ThermalEmission`). The field's source of every order is
+ * formed as a beam's diffuse field's is, E_th = σ_s [(f − f_c) I′ + (1 − f) ∫ p′ I′ dΩ′] at mode 0,
+ * with no beam's terms, its gases' terms weighted by the first light's (lean, 2026-10-30: the
+ * Planck spectrum across a bin weights a gas's curve of growth otherwise than a star's), and held
+ * per unit of the kernels' scattering in each bin, J_th = E_th ÷ (σ_s (1 − f_c)), converted to the
+ * channels' luminance by V_cb (`thermal.ts`' `EMISSION_CHANNEL_WEIGHTS`), cd m⁻² per unit of σ_s,k
+ * ({@link MsSourceTable.thermal}). The kernels add the emission (1 − ω) B itself, step by step
+ * (`thermalSource.ts`).
  */
 
 import type { Rgb } from "../../photometry/toneCurve";
@@ -129,6 +141,12 @@ import {
   fitExpSum,
 } from "./expSum";
 import { type SphericalBeam, sphericalBeamPath } from "./sphericalBeam";
+import { EMISSION_CHANNEL_WEIGHTS, planckRadiance } from "../thermal";
+import {
+  mediumTemperatureK,
+  THERMAL_TRAVEL_COSINES,
+  type ThermalScattering,
+} from "../thermalSource";
 import {
   channelRuleAt,
   forwardDeltaShare,
@@ -334,6 +352,11 @@ export interface MsSourceTable {
   readonly verticalOpticalDepth: Float64Array;
   /** One a light of the bake, in its order. */
   readonly slots: ReadonlyArray<MsSourceSlot>;
+  /**
+   * The thermal field's source J_th of a column with a temperature (the module's remarks,
+   * "Thermal emission"), at the table's altitudes and travel cosines; absent for one without.
+   */
+  readonly thermal?: ThermalScattering;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -471,6 +494,11 @@ export interface PreparedBake {
   /** Per bin, per table altitude. */
   readonly pointOptics: ReadonlyArray<ReadonlyArray<PointOptics>>;
   readonly lights: ReadonlyArray<PreparedLight>;
+  /**
+   * Per bin, B_λ(λ_b, T) at each interface from the top down, W m⁻² sr⁻¹ nm⁻¹, the last the
+   * ground's (R08.T18.b); absent for a column without a temperature.
+   */
+  readonly interfacePlanck?: ReadonlyArray<Float64Array>;
 }
 
 /**
@@ -824,11 +852,21 @@ export function prepareBake(
   );
   const everyBin = Array.from({ length: BAKE_BIN_COUNT }, (_, b) => b);
   const bins = bakeLightBins(column, layout?.fitLayering ?? layering, lights, everyBin, options);
+  const { temperature } = column;
+  const interfacePlanck =
+    temperature === undefined
+      ? undefined
+      : BAKE_WAVELENGTHS_NM.map((nm) =>
+          Float64Array.from(interfaceHeightsM, (h) =>
+            planckRadiance(nm, mediumTemperatureK(temperature, h)),
+          ),
+        );
   return {
     column,
     grid,
     interfaceHeightsM,
     altitudesM,
+    ...(interfacePlanck === undefined ? {} : { interfacePlanck }),
     binOptics,
     groundAlbedo: Float64Array.from(BAKE_WAVELENGTHS_NM, (nm) =>
       binGroundAlbedo(column.groundAlbedo, nm),
@@ -1128,6 +1166,11 @@ export interface BinSolve {
   readonly light: Float64Array;
   /** The ground other than Lambertian the solve took (R08.T15's deck), or `undefined` for the albedo. */
   readonly groundReflectance: GroundReflectance | undefined;
+  /**
+   * E_th of this solve alone (the module's remarks, "Thermal emission"), A × V, in the bin's
+   * radiance unit per metre, weight 1; absent for a column without a temperature.
+   */
+  readonly thermalSource?: Float64Array;
 }
 
 /**
@@ -1222,6 +1265,7 @@ function solveOf(
     kernelDepths[p] = Math.max(tau - tauS * delta, 0);
   }
   const radius = band.bottomRadiusM;
+  const planck = prepared.interfacePlanck?.[bin];
   const scaledBeams = Array.from(grid.sunCosines, (mu0) =>
     sphericalBeamPath(radius, interfaceHeightsM, scaledDepths, mu0),
   );
@@ -1243,6 +1287,9 @@ function solveOf(
     maxMode: THICK_BAKE_MODES - 1,
     streams: THICK_BAKE_STREAMS,
     beamPaths: scaledBeams,
+    ...(planck === undefined
+      ? {}
+      : { thermal: { interfacePlanck: planck, groundPlanck: planck[layers] ?? Number.NaN } }),
   });
   const points = prepared.pointOptics[bin] ?? [];
   const altitudes = prepared.altitudesM.length;
@@ -1334,7 +1381,88 @@ function solveOf(
       }
     }
   }
-  return { solution, scaledBeams, kernelBeams, source, leftOut, light, groundReflectance };
+  const thermalSource =
+    solution.thermal === undefined
+      ? undefined
+      : thermalSourceOf(solution, points, layers, grid.altitudeStride, views, legendre);
+  return {
+    solution,
+    scaledBeams,
+    kernelBeams,
+    source,
+    leftOut,
+    light,
+    groundReflectance,
+    ...(thermalSource === undefined ? {} : { thermalSource }),
+  };
+}
+
+/**
+ * E_th at the table's points (the module's remarks, "Thermal emission"): mode 0 of the thermal
+ * field as {@link solveOf} forms a beam's diffuse field's, with no beam's terms, A × V, the travel
+ * cosines downward then upward.
+ */
+function thermalSourceOf(
+  solution: DiscreteOrdinatesSolution,
+  points: ReadonlyArray<PointOptics>,
+  layers: number,
+  stride: number,
+  views: number,
+  legendre: SourceLegendre,
+): Float64Array {
+  const mode = solution.thermal?.mode;
+  const nodeL = legendre.nodes[0];
+  const viewL = legendre.views[0];
+  if (mode === undefined || nodeL === undefined || viewL === undefined) {
+    throw new Error("a thermal solve has mode 0");
+  }
+  const order = THICK_BAKE_STREAMS;
+  const { nodes, weights } = solution.quadrature;
+  const n = nodes.length;
+  const v2 = 2 * views;
+  const out = new Float64Array(points.length * v2);
+  const half = new Float64Array(order);
+  for (const [a, point] of points.entries()) {
+    if (point.scatteringPerM === 0) {
+      continue;
+    }
+    const k = layers - a * stride;
+    for (let l = 0; l < order; l += 1) {
+      const sign = l % 2 === 0 ? 1 : -1;
+      let sum = 0;
+      for (let j = 0; j < n; j += 1) {
+        sum +=
+          (weights[j] ?? Number.NaN) *
+          (nodeL[l * n + j] ?? Number.NaN) *
+          ((mode.quadratureUp[k * n + j] ?? Number.NaN) +
+            sign * (mode.quadratureDown[k * n + j] ?? Number.NaN));
+      }
+      half[l] = sum;
+    }
+    for (let u = 0; u < views; u += 1) {
+      let even = 0;
+      let odd = 0;
+      for (let l = 0; l < order; l += 1) {
+        const c =
+          (2 * l + 1) *
+          (point.moments[l] ?? Number.NaN) *
+          (viewL[l * views + u] ?? Number.NaN) *
+          (half[l] ?? Number.NaN);
+        if (l % 2 === 0) {
+          even += c;
+        } else {
+          odd += c;
+        }
+      }
+      const intensityUp = mode.userUp[k * views + u] ?? Number.NaN;
+      const intensityDown = mode.userDown[k * views + u] ?? Number.NaN;
+      out[a * v2 + views + u] =
+        point.scatteringPerM * (point.lobe * intensityUp + point.kept * 0.5 * (even + odd));
+      out[a * v2 + views - 1 - u] =
+        point.scatteringPerM * (point.lobe * intensityDown + point.kept * 0.5 * (even - odd));
+    }
+  }
+  return out;
 }
 
 /**
@@ -1374,6 +1502,11 @@ export function bakeMultipleScattering(
     deficit: 0,
   }));
   const verticalOpticalDepth = new Float64Array(BAKE_BIN_COUNT);
+  // E_th per bin, A × V, over the first light's terms (the module's remarks, "Thermal emission").
+  const thermalBins =
+    prepared.interfacePlanck === undefined
+      ? null
+      : Array.from({ length: BAKE_BIN_COUNT }, () => new Float64Array(altitudes * views));
   for (let b = 0; b < BAKE_BIN_COUNT; b += 1) {
     const base = bandBinOf(prepared, b, geometry.coefficientFactor);
     verticalOpticalDepth[b] = base.extinction.reduce((sum, tau) => sum + tau, 0);
@@ -1399,6 +1532,12 @@ export function bakeMultipleScattering(
         const w = term.weight;
         for (const [i, value] of solve.source.entries()) {
           binValues[i] = (binValues[i] ?? 0) + w * value;
+        }
+        const thermalBin = thermalBins?.[b];
+        if (slot === 0 && thermalBin !== undefined && solve.thermalSource !== undefined) {
+          for (const [i, value] of solve.thermalSource.entries()) {
+            thermalBin[i] = (thermalBin[i] ?? 0) + w * value;
+          }
         }
         for (const [i, value] of solve.leftOut.entries()) {
           leftOut[i] = (leftOut[i] ?? 0) + w * value;
@@ -1465,6 +1604,10 @@ export function bakeMultipleScattering(
     };
   });
   const upward = grid.upwardCosines;
+  const thermal =
+    thermalBins === null
+      ? undefined
+      : thermalScatteringOf(prepared, thermalBins, perScattering, views);
   return {
     band: geometry,
     altitudesM: prepared.altitudesM.slice(),
@@ -1477,5 +1620,43 @@ export function bakeMultipleScattering(
     modes: THICK_BAKE_MODES,
     verticalOpticalDepth,
     slots,
+    ...(thermal === undefined ? {} : { thermal }),
   };
+}
+
+/**
+ * A band's J_th from its bins' E_th (the module's remarks, "Thermal emission"): each over its bin's
+ * kernel scattering at the altitude, then V_cb into the channels, cd m⁻² per unit of σ_s,k.
+ *
+ * @throws Error for a grid whose travel cosines are not the read's {@link THERMAL_TRAVEL_COSINES}.
+ */
+function thermalScatteringOf(
+  prepared: PreparedBake,
+  thermalBins: ReadonlyArray<Float64Array>,
+  perScattering: ReadonlyArray<Float64Array>,
+  views: number,
+): ThermalScattering {
+  if (views !== THERMAL_TRAVEL_COSINES) {
+    throw new Error(
+      `the scattered thermal light is read at ${THERMAL_TRAVEL_COSINES} travel cosines, not ${views}`,
+    );
+  }
+  const altitudes = prepared.altitudesM.length;
+  const values = new Float32Array(altitudes * views * 3);
+  for (let i = 0; i < altitudes * views; i += 1) {
+    const a = Math.floor(i / views);
+    const rgb = [0, 0, 0];
+    for (let b = 0; b < BAKE_BIN_COUNT; b += 1) {
+      const x = (thermalBins[b]?.[i] ?? Number.NaN) * (perScattering[b]?.[a] ?? Number.NaN);
+      const weights = EMISSION_CHANNEL_WEIGHTS[b];
+      if (weights === undefined) {
+        throw new Error(`bin ${b} has no channel weights`);
+      }
+      for (const c of [0, 1, 2] as const) {
+        rgb[c] = (rgb[c] ?? 0) + weights[c] * x;
+      }
+    }
+    values.set(rgb, i * 3);
+  }
+  return { altitudesM: prepared.altitudesM.slice(), values };
 }

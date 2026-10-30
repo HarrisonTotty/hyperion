@@ -55,6 +55,7 @@ import {
   type TermAbsorber,
 } from "../medium";
 import { type GasFractions, molecularMixture, type MolecularMixture } from "../rayleigh";
+import type { MediumTemperature } from "../thermalSource";
 import { pow } from "../../../lib/pinnedMath";
 
 /** The wavelength an aerosol mode's column scale is set at, nm: `aerosolTerm`'s 550. */
@@ -171,6 +172,11 @@ export interface SpectralColumn {
    * `AtmosphereMedium.pressureBar`), which an absorber whose curves have pressure rows needs.
    */
   readonly pressureBar?: TabulatedDensity;
+  /**
+   * The column's temperature by h\* (R08.T18.b), from which the bake solves the medium's thermal
+   * field beside its beams; none, as a kept medium's, for a column that emits nothing.
+   */
+  readonly temperature?: MediumTemperature;
 }
 
 /**
