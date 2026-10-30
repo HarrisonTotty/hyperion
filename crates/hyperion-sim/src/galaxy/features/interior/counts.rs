@@ -68,9 +68,9 @@
 //!
 //! A core-collapsed cluster's classes all take its cusp.
 
-use crate::galaxy::Galaxy;
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
 use crate::galaxy::quad::gl_log_panels;
+use crate::galaxy::{Galaxy, PointLy};
 use crate::math;
 use crate::units::{LightYears, SolarMasses, Years};
 
@@ -168,29 +168,18 @@ impl TailWindow {
 pub fn tail_window(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) -> TailWindow {
     use super::super::kinds::open_cluster::{disruption_survival, evolution_survival};
     use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
-    let p = model.position();
-    let r = LightYears::new((p.x * p.x + p.y * p.y + p.z * p.z).sqrt());
-    let r_t = model.tidal_radius().value();
     let age = model.age().value().max(0.0);
-    let (omega, kappa) = if r.value() > 0.0 {
-        (
-            galaxy.potential().omega(r).value(),
-            galaxy.potential().kappa(r).value(),
-        )
-    } else {
-        (0.0, 0.0)
-    };
-    // ly per year.
-    let drift = if kappa > 0.0 {
-        2.0 * omega * (4.0 * omega * omega / (kappa * kappa) - 1.0).abs() * r_t
-    } else {
-        0.0
-    };
-    let length = if drift > 0.0 {
-        ((reach.value().min(r_t + drift * age)) - r_t).max(0.0)
-    } else {
-        0.0
-    };
+    let TailReach {
+        drift_ly_per_year: drift,
+        length,
+    } = TailReach::of(
+        galaxy,
+        &model.position(),
+        model.tidal_radius(),
+        model.age(),
+        reach,
+    );
+    let length = length.value();
     let tau = if drift > 0.0 { length / drift } else { 0.0 };
     let m0 = model.initial_mass();
     let (mass, lost) = match model.kind() {
@@ -219,6 +208,70 @@ pub fn tail_window(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) -> 
         mass: SolarMasses::new(mass),
         lost: SolarMasses::new(lost),
     }
+}
+
+/// How far a cluster's tail runs: [`tail_window`]'s drift and length, which a bound on the tail's
+/// reach reads without the cluster model (P09.T40.a).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TailReach {
+    /// The escapers' mean drift along the tail, ly per year.
+    pub(crate) drift_ly_per_year: f64,
+    /// How far the tail runs beyond the tidal radius on each side.
+    pub(crate) length: LightYears,
+}
+
+impl TailReach {
+    /// The tail of a cluster at `position` (ly from the galactic centre) of tidal radius `tidal`
+    /// and age `age`, cut at `reach` from the cluster's centre.
+    #[must_use]
+    pub(crate) fn of(
+        galaxy: &Galaxy,
+        position: &PointLy,
+        tidal: LightYears,
+        age: Years,
+        reach: LightYears,
+    ) -> Self {
+        let (drift, length) = tail_drift_and_length(galaxy, position, tidal, age, reach);
+        Self {
+            drift_ly_per_year: drift,
+            length: LightYears::new(length),
+        }
+    }
+}
+
+/// [`TailReach::of`]'s drift, ly per year, and length, ly.
+#[must_use]
+fn tail_drift_and_length(
+    galaxy: &Galaxy,
+    position: &PointLy,
+    tidal: LightYears,
+    age: Years,
+    reach: LightYears,
+) -> (f64, f64) {
+    let p = position;
+    let r = LightYears::new((p.x * p.x + p.y * p.y + p.z * p.z).sqrt());
+    let r_t = tidal.value();
+    let age = age.value().max(0.0);
+    let (omega, kappa) = if r.value() > 0.0 {
+        (
+            galaxy.potential().omega(r).value(),
+            galaxy.potential().kappa(r).value(),
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    // ly per year.
+    let drift = if kappa > 0.0 {
+        2.0 * omega * (4.0 * omega * omega / (kappa * kappa) - 1.0).abs() * r_t
+    } else {
+        0.0
+    };
+    let length = if drift > 0.0 {
+        ((reach.value().min(r_t + drift * age)) - r_t).max(0.0)
+    } else {
+        0.0
+    };
+    (drift, length)
 }
 
 /// Every class of a cluster (module documentation).

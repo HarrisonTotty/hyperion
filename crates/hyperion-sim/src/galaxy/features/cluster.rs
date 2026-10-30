@@ -206,102 +206,12 @@ pub struct ClusterParameters {
     pub marks: ClusterMarks,
 }
 
-/// One cluster's structure, time scales and remnants (module documentation).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ClusterModel {
-    parameters: ClusterParameters,
-    composition: Composition,
-    tidal_radius: LightYears,
-    core_radius: LightYears,
-    turn_off: SolarMasses,
-    relaxation_time: Years,
-    escape_central: KilometresPerSecond,
-    escape_birth: KilometresPerSecond,
-    central_density: f64,
-    retention: Retention,
-    black_hole_fraction: f64,
-}
-
-impl ClusterModel {
-    /// The model of the cluster `parameters` describe, in `galaxy` (module documentation).
-    ///
-    /// Its retention reads `tables::cluster_retention` (ruling 139.5), so it costs microseconds;
-    /// the caller still caches the interior built on it.
-    ///
-    /// # Panics
-    ///
-    /// If a mass or radius is not positive and finite.
+impl ClusterParameters {
+    /// The parameters of a catalogue feature's cluster, or `None` for one that is no cluster at
+    /// the epoch: what [`ClusterModel::from_record`] builds its model from (its documentation says
+    /// how), without the model's time scales and remnants.
     #[must_use]
-    pub fn new(galaxy: &Galaxy, parameters: &ClusterParameters) -> Self {
-        let p = *parameters;
-        for value in [
-            p.mass.value(),
-            p.initial_mass.value(),
-            p.half_mass_radius.value(),
-            p.birth_half_mass_radius.value(),
-        ] {
-            assert!(
-                value > 0.0 && value.is_finite(),
-                "a cluster parameter of {value}"
-            );
-        }
-        let composition = Composition::from_fe_h(p.fe_h, HeliumExcess::ZERO);
-        let tidal_radius = LightYears::new(
-            galaxy.potential().tidal_radius(p.mass, &p.position).value() / METRES_PER_LIGHT_YEAR,
-        );
-        let r_h = p.half_mass_radius.value();
-        let core_radius = LightYears::new(p.core_radius.map_or_else(
-            || {
-                (tidal_radius.value() / math::exp10(p.concentration))
-                    .min(r_h / math::exp10(MIN_LOG_HALF_MASS_OVER_CORE))
-            },
-            LightYears::value,
-        ));
-        let turn_off = turn_off_mass(Years::new(p.age.value().max(0.0)), &composition);
-        let relaxation_time = relaxation_time(p.mass, p.half_mass_radius);
-        let escape_central = central_escape_speed(p.mass, p.half_mass_radius, core_radius);
-        let birth_ratio =
-            (p.initial_mass.value() / p.mass.value()) * (r_h / p.birth_half_mass_radius.value());
-        let escape_birth = KilometresPerSecond::new(escape_central.value() * birth_ratio.sqrt());
-        let central_density =
-            central_density(p.mass.value(), core_radius.value(), tidal_radius.value());
-        let v_eff = KilometresPerSecond::new(escape_birth.value() * EFFECTIVE_ESCAPE_FACTOR);
-        // The table, not the sixteen-track quadrature it was made from (ruling 139.5).
-        let kept = retention_tabulated(galaxy.mass_function(), &composition, v_eff);
-        let f0 = BLACK_HOLE_BIRTH_FRACTION * kept.black_holes;
-        let black_hole_fraction = black_hole_fraction(
-            f0,
-            BH_CLOCK_FACTOR * p.age.value() / relaxation_time.value(),
-        );
-        Self {
-            parameters: p,
-            composition,
-            tidal_radius,
-            core_radius,
-            turn_off,
-            relaxation_time,
-            escape_central,
-            escape_birth,
-            central_density,
-            retention: kept,
-            black_hole_fraction,
-        }
-    }
-
-    /// The model of a catalogue feature, or `None` for one that is no cluster at the epoch: a
-    /// cloud, an association, an unbound embedded region or a dissolved cluster.
-    ///
-    /// An open cluster, old or a young bound nursery, takes Lamers et al. 2005's present mass
-    /// and disruption rate ([`open_cluster`](super::kinds::open_cluster)), its birth half-mass
-    /// radius equal to today's. A globular takes its history (P09.T13) on its bulk velocity, or on
-    /// a circular orbit in a galaxy built without its kinematic tables. The cluster's own marks are
-    /// drawn on its `feature.cluster` stream.
-    #[must_use]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one arm per kind of feature, each a short list of its parameters"
-    )]
-    pub fn from_record(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
+    pub(crate) fn of_record(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
         use super::kinds::nursery::NurseryStage;
         use super::kinds::open_cluster::{dissolution_time, evolution_survival, present_mass};
         let position = PointLy::from(feature.position());
@@ -345,7 +255,7 @@ impl ClusterModel {
                 marks,
             })
         };
-        let parameters = match feature.marks() {
+        match feature.marks() {
             FeatureMarks::Cloud(_) => None,
             FeatureMarks::OpenCluster(m) => open(
                 m.age_at_epoch(),
@@ -401,8 +311,115 @@ impl ClusterModel {
                     marks,
                 })
             }
-        }?;
-        Some(Self::new(galaxy, &parameters))
+        }
+    }
+
+    /// The cluster's tidal radius in `galaxy`: its model's ([`ClusterModel::tidal_radius`]), bit
+    /// for bit, without the rest of the model.
+    #[must_use]
+    pub(crate) fn tidal_radius(&self, galaxy: &Galaxy) -> LightYears {
+        LightYears::new(
+            galaxy
+                .potential()
+                .tidal_radius(self.mass, &self.position)
+                .value()
+                / METRES_PER_LIGHT_YEAR,
+        )
+    }
+}
+
+/// One cluster's structure, time scales and remnants (module documentation).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClusterModel {
+    parameters: ClusterParameters,
+    composition: Composition,
+    tidal_radius: LightYears,
+    core_radius: LightYears,
+    turn_off: SolarMasses,
+    relaxation_time: Years,
+    escape_central: KilometresPerSecond,
+    escape_birth: KilometresPerSecond,
+    central_density: f64,
+    retention: Retention,
+    black_hole_fraction: f64,
+}
+
+impl ClusterModel {
+    /// The model of the cluster `parameters` describe, in `galaxy` (module documentation).
+    ///
+    /// Its retention reads `tables::cluster_retention` (ruling 139.5), so it costs microseconds;
+    /// the caller still caches the interior built on it.
+    ///
+    /// # Panics
+    ///
+    /// If a mass or radius is not positive and finite.
+    #[must_use]
+    pub fn new(galaxy: &Galaxy, parameters: &ClusterParameters) -> Self {
+        let p = *parameters;
+        for value in [
+            p.mass.value(),
+            p.initial_mass.value(),
+            p.half_mass_radius.value(),
+            p.birth_half_mass_radius.value(),
+        ] {
+            assert!(
+                value > 0.0 && value.is_finite(),
+                "a cluster parameter of {value}"
+            );
+        }
+        let composition = Composition::from_fe_h(p.fe_h, HeliumExcess::ZERO);
+        let tidal_radius = p.tidal_radius(galaxy);
+        let r_h = p.half_mass_radius.value();
+        let core_radius = LightYears::new(p.core_radius.map_or_else(
+            || {
+                (tidal_radius.value() / math::exp10(p.concentration))
+                    .min(r_h / math::exp10(MIN_LOG_HALF_MASS_OVER_CORE))
+            },
+            LightYears::value,
+        ));
+        let turn_off = turn_off_mass(Years::new(p.age.value().max(0.0)), &composition);
+        let relaxation_time = relaxation_time(p.mass, p.half_mass_radius);
+        let escape_central = central_escape_speed(p.mass, p.half_mass_radius, core_radius);
+        let birth_ratio =
+            (p.initial_mass.value() / p.mass.value()) * (r_h / p.birth_half_mass_radius.value());
+        let escape_birth = KilometresPerSecond::new(escape_central.value() * birth_ratio.sqrt());
+        let central_density =
+            central_density(p.mass.value(), core_radius.value(), tidal_radius.value());
+        let v_eff = KilometresPerSecond::new(escape_birth.value() * EFFECTIVE_ESCAPE_FACTOR);
+        // The table, not the sixteen-track quadrature it was made from (ruling 139.5).
+        let kept = retention_tabulated(galaxy.mass_function(), &composition, v_eff);
+        let f0 = BLACK_HOLE_BIRTH_FRACTION * kept.black_holes;
+        let black_hole_fraction = black_hole_fraction(
+            f0,
+            BH_CLOCK_FACTOR * p.age.value() / relaxation_time.value(),
+        );
+        Self {
+            parameters: p,
+            composition,
+            tidal_radius,
+            core_radius,
+            turn_off,
+            relaxation_time,
+            escape_central,
+            escape_birth,
+            central_density,
+            retention: kept,
+            black_hole_fraction,
+        }
+    }
+
+    /// The model of a catalogue feature, or `None` for one that is no cluster at the epoch: a
+    /// cloud, an association, an unbound embedded region or a dissolved cluster.
+    ///
+    /// An open cluster, old or a young bound nursery, takes Lamers et al. 2005's present mass
+    /// and disruption rate ([`open_cluster`](super::kinds::open_cluster)), its birth half-mass
+    /// radius equal to today's. A globular takes its history (P09.T13) on its bulk velocity, or on
+    /// a circular orbit in a galaxy built without its kinematic tables. The cluster's own marks are
+    /// drawn on its `feature.cluster` stream.
+    #[must_use]
+    pub fn from_record(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
+        ClusterParameters::of_record(galaxy, feature)
+            .map(|parameters| Self::new(galaxy, &parameters))
     }
 
     /// The parameters it was built from.

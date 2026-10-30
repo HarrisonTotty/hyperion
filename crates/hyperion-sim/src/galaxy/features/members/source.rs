@@ -386,7 +386,9 @@ mod tests {
     use crate::galaxy::features::FeatureId;
     use crate::galaxy::features::FeatureProcess;
     use crate::galaxy::features::catalogue::{FeatureMarks, NoFeatureCache};
+    use crate::galaxy::features::cluster::ClusterParameters;
     use crate::galaxy::features::ids::PackedFeature;
+    use crate::galaxy::features::interior::counts::{TailReach, tail_window};
     use crate::galaxy::features::members::{MemberRecord, equipartition_factor};
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::SystemOrigin;
@@ -632,6 +634,20 @@ mod tests {
             assert_eq!(bound.is_some(), interior.is_some(), "{:?}", feature.id());
             if let (Some(bound), Some(interior)) = (bound, interior) {
                 assert!(bound.value() >= interior.grid().reach().value());
+                // The bound reads the model's tidal radius and tail without the model.
+                let parameters = ClusterParameters::of_record(galaxy, &feature).unwrap();
+                assert_eq!(parameters, *interior.model().parameters());
+                let tidal = parameters.tidal_radius(galaxy);
+                assert_same_bits(tidal.value(), interior.model().tidal_radius().value());
+                let tail = TailReach::of(
+                    galaxy,
+                    &parameters.position,
+                    tidal,
+                    parameters.age,
+                    feature.reach(),
+                );
+                let window = tail_window(galaxy, interior.model(), feature.reach());
+                assert_same_bits(tail.length.value(), window.length.value());
                 if !grid_may_touch(&feature, &centre, bound, LightYears::new(40.0)) {
                     skipped += 1;
                 }

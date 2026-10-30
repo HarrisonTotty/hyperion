@@ -36,8 +36,8 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{KilometresPerSecond, LightYears};
 
 use super::super::catalogue::{FeatureCatalogue, FeatureRecord, bulk_velocity};
-use super::super::cluster::ClusterModel;
-use super::super::interior::counts::tail_window;
+use super::super::cluster::{ClusterModel, ClusterParameters};
+use super::super::interior::counts::TailReach;
 use super::super::interior::{CellProposal, LocalCell, MemberClassTable};
 use super::super::nested::{NestedCell, NestedGrid};
 use super::level_list::FeatureLevelList;
@@ -99,22 +99,32 @@ impl FeatureInterior {
     }
 
     /// A bound on the reach of the nested grid [`of`](Self::of) builds for `feature`, ly, from its
-    /// cluster model and tail window alone ([`MemberClassTable::grid_reach_bound`]), or `None`
-    /// where `of` builds no interior: what a query tests before it builds one (P09.T40.a).
+    /// cluster's tidal radius and its tails' length alone ([`MemberClassTable::grid_reach_bound`]),
+    /// or `None` where `of` builds no interior: what a query tests before it builds one
+    /// (P09.T40.a).
     ///
     /// The interior's class table, which chooses the grid's width, costs a hundred times the
-    /// model; a 50 ly query at the Sun-like point looks up some hundred features whose reach
-    /// touches it, and one of their grids (measured 2026-10-30).
+    /// cluster model, and the model a hundred times this; a 50 ly query at the Sun-like point
+    /// looks up some hundred features whose reach touches it, and one of their grids meets it
+    /// (measured 2026-10-30).
     #[must_use]
     pub fn grid_reach_bound(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<LightYears> {
-        // `bulk_velocity`'s conditions, without its draw.
+        // `bulk_velocity`'s conditions, without its draw, and `ClusterModel::from_record`'s.
         feature.component()?;
         galaxy.kinematics()?;
-        let model = ClusterModel::from_record(galaxy, feature)?;
-        let tidal = model.tidal_radius().value();
-        let window = tail_window(galaxy, &model, feature.reach());
+        let parameters = ClusterParameters::of_record(galaxy, feature)?;
+        // The model's tidal radius and `tail_window`'s length, bit for bit.
+        let tidal = parameters.tidal_radius(galaxy);
+        let tail = TailReach::of(
+            galaxy,
+            &parameters.position,
+            tidal,
+            parameters.age,
+            feature.reach(),
+        );
+        let tidal = tidal.value();
         // A tail's reach as `MemberClassTable::from_counts` cuts it at the feature's.
-        let tails = (tidal + window.length.value()).min(feature.reach().value());
+        let tails = (tidal + tail.length.value()).min(feature.reach().value());
         Some(MemberClassTable::grid_reach_bound(tidal, tails))
     }
 
