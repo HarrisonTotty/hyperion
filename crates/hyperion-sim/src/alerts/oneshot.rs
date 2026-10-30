@@ -26,8 +26,9 @@
 //!    at `t₁`, `t₁` − `t_a` after its onset reached the observer
 //!    ([`supernova_luminosity`](super::supernova_luminosity)), is still above the limit. One that
 //!    arrives at or after `t₂` is the next window's. So a window split in two finds each onset of
-//!    the whole once, and the second half finds in progress again the events the first saw begin
-//!    that are still above the limit at its start.
+//!    the whole once, and its first half the whole's events in progress; the second half finds in
+//!    progress the events that arrived before it and are still above the limit at its start,
+//!    whether or not the first half saw them begin.
 //! 4. The flux in each of the sensor's bands, through plan 07's line of sight from the site to the
 //!    observer ([`AlertContext::sightline`], [`flux`]), which the walk marches only for an entry
 //!    whose unextinguished flux reaches a band's limit. The event is detected in the band in which

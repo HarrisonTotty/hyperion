@@ -295,9 +295,11 @@ where a name has changed by the time this plan runs only the call sites here cha
    under the limit is dropped. So the census is complete per class for what the sensor could see.
 6. **An event belongs to the window its light arrives in.** An event emitted at T from a host at
    x_s(T) arrives at t_a = T + |x_s(T) − x_o| ÷ c, which is a closed form with no iteration, and it
-   is reported in the window [t₁, t₂) that holds t_a. That makes a split window return exactly the
-   detections of the whole. To find the candidates, a host at present light time s is evaluated over
-   the emission interval [t₁ − s − D − ε, t₂ − s + ε], where D is the class's longest event duration
+   is reported in the window [t₁, t₂) that holds t_a. That makes a split window return each onset
+   of the whole exactly once, in the part its light arrives in; each part also reports in progress
+   the events still above the limit at its own start (below), so the first part's events in
+   progress are the whole's and a later part's are its own. To find the candidates, a host at
+   present light time s is evaluated over the emission interval [t₁ − s − D − ε, t₂ − s + ε], where D is the class's longest event duration
    (plan 06's look-back idea) and ε = s × pad speed ÷ c covers the change in light time over the
    interval. Events whose arrival precedes t₁ and which are still above the limit at t₁ are reported
    as `InProgress`. One-shot entries compare the arrival of their T directly.
@@ -525,8 +527,9 @@ Files: `galaxy/query/segment.rs`, `lensing/{mod,walk,point_lens}.rs`. Acceptance
   lists within reach through plan 09's `FeatureCatalogue::near`; the global list's entries through
   plan 10's `GlobalList::entries_with_class_members` (the centre's tidal disruptions and flares;
   dwarf cores and streams where they hold class members). Tests: a class over the limit returns no
-  detections and says so; halving the reach brings it back; a window split in two gives the same
-  detections as the whole; any order of classes gives the same result.
+  detections and says so; halving the reach brings it back; a window split in two gives the
+  whole's onsets, each once, and its first half the whole's events in progress (Design note 6); any
+  order of classes gives the same result.
 - **P12.T5.e Local events.** `local_events`: for the systems of an observed-mode range result,
   flares, glitches, FU Orionis outbursts and dwarf novae over each system's retarded interval,
   through plans 06 and 11. Magnetar bursts moved to T5.c (P12.T5.a.2), and X-ray bursts
@@ -606,8 +609,9 @@ Files: `crates/hyperion-server/src/knowledge/{mod,record,store,persist}.rs`. Acc
 
 - **P12.T8.a Schedule and advance.** `AlertSchedule`, `Subscription`, and the pure core
   `advance(previous: Observer, next: Observer) -> Advance { due, rescan }` (Design notes 8–9).
-  Tests: advancing in one step or in ten pushes the same detections once each; a backwards clock or
-  a moved observer requests a rescan; nothing from the old position survives a jump.
+  Tests: advancing in one step or in ten pushes each onset once, and an event a later step finds
+  in progress is not pushed again if an earlier step pushed it (Design note 6); a backwards clock
+  or a moved observer requests a rescan; nothing from the old position survives a jump.
 - **P12.T8.b Scans on the pool.** Interactive classes as one `Priority::Interactive` job; background
   classes as `Priority::Bulk` jobs of a few hundred catalogue cells each under a `CancelToken`,
   merged only when all have finished (Design note 7); look-ahead renewal; the `ByteLru` of schedules
@@ -855,7 +859,8 @@ complete.
   Knowledge contact for it (T5, T7).
 - **Linearity:** an extrapolated jump lands on the star (T2).
 - **Completeness per class:** exact set equality with brute force for every class, with split
-  windows and any order (T5); a class over its limit returns nothing and says so.
+  windows (each onset once, each part's events in progress at its start) and any order (T5); a
+  class over its limit returns nothing and says so.
 - **Honesty:** curvature error figures match the brainstorm's; an unresolved contact leaks no host
   at the JSON level; present state is never shown in observed mode.
 - **Time:** the source-horizon sweep; dead supergiants seen alive.
@@ -2686,9 +2691,11 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     - T5.d's `alerts_in` calls `one_shot_detections` per one-shot class after its census, and
       T8's server keeps the one-shot cells. T5.c's magnetars walk the same `CORE_COLLAPSE` cells
       with a cache of their own.
-    - A split window gives each onset once; its second half also finds in progress the events the
-      first saw begin that are still above the limit at its start, so T5.d's split test compares
-      onsets (lean, 2026-10-30).
+    - A split window gives each onset once, and its first half the whole's events in progress; a
+      later half's are judged at its own start (lean, 2026-10-30, agreed by main's research;
+      Design note 6, T5.d, T8.a and Verification say so). Tests:
+      `one_shot_alerts_in_progress_in_a_first_half_are_the_whole_windows`,
+      `one_shot_alerts_see_a_slow_riser_at_its_onset_not_while_it_rises_below_the_limit`.
     - The tails' photometric bound is still their bolometric light (`EddingtonShare(1.0)`): T5.d
       gives them a share.
     - An X-ray sensor fainter than 1.4 × 10⁻⁷ W m⁻² takes the core collapses' reach to the

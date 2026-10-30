@@ -373,7 +373,9 @@ pub const DEFAULT_HOST_LIMIT: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24
 /// Provides).
 ///
 /// An event belongs to the window its light arrives in (Design note 6), so a window split in two
-/// returns exactly the detections of the whole.
+/// returns each onset of the whole once, in the half its light arrives in; each half also reports
+/// in progress the events still above the limit at its own start, so the first half's events in
+/// progress are the whole's.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlertQuery {
     observer_position: GalacticPosition,

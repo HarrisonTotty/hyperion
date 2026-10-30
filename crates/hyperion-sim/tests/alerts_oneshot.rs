@@ -2,7 +2,7 @@
 //! windows of a year and a century, the walk's detections are the brute force's, as sets, field by
 //! field and bit by bit (`common/observe.rs`).
 //!
-//! Two classes are walked:
+//! Three classes are walked:
 //!
 //! - **A dense toy Type Ia class**, not physics, which stands in for P09.T34.a's process until it
 //!   lands, on the interface that task documents: entries on the Type Ia grid of 512 ly cells, each
@@ -13,6 +13,8 @@
 //! - **The production core collapses** of a galaxy, about two of whose recent deaths three
 //!   observers stand: above the one in the past to see it go off, beside it to see it in progress,
 //!   and 50 ly from the one still to come (slow).
+//! - **A lone Type Ia**, a class of one entry, to see a slow riser at its onset and not while it
+//!   rises below the limit at a window's start.
 //!
 //! The walk also gives each query the same detections whatever it walked before with the same
 //! caches.
@@ -27,7 +29,8 @@ use common::observe::{KeepCells, Seen, brute_force_detections, observer_at};
 use hyperion_sim::Seed;
 use hyperion_sim::alerts::{
     AlertBand, AlertContext, AlertQuery, BandLimits, ClassSet, DetectionPhase, NoOneShotCells,
-    OneShotClass, OneShotEvent, SensorHorizon, TransientKind, one_shot_detections,
+    OneShotClass, OneShotEvent, SensorHorizon, TransientKind, inverse_square_flux,
+    one_shot_detections, supernova_luminosity, supernova_peak,
 };
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
 use hyperion_sim::events::TimeWindow;
@@ -257,6 +260,13 @@ fn window(at: f64, offset: f64, years: f64) -> TimeWindow {
     TimeWindow::new(at_years(at + offset), at_years(at + offset + years)).unwrap()
 }
 
+/// The window from `years` before `at` to `years` after it, and its halves, which meet at `at`
+/// exactly.
+fn halves(at: f64, years: f64) -> [TimeWindow; 3] {
+    let (start, middle, end) = (at_years(at - years), at_years(at), at_years(at + years));
+    [(start, end), (start, middle), (middle, end)].map(|(a, b)| TimeWindow::new(a, b).unwrap())
+}
+
 /// The walk's detections, as the oracle sees them, sorted.
 fn walked<P: OneShotClass>(
     galaxy: &Galaxy,
@@ -428,9 +438,7 @@ fn one_shot_alerts_of_a_split_window_find_each_onset_once() {
             .unwrap();
         walked(&galaxy, &mut noise, &mut cells, &process, &query)
     };
-    let whole = run(window(target.years, -3.0, 6.0));
-    let early = run(window(target.years, -3.0, 3.0));
-    let late = run(window(target.years, 0.0, 3.0));
+    let [whole, early, late] = halves(target.years, 3.0).map(&mut run);
     let onsets = |seen: &[Seen]| -> BTreeSet<_> {
         seen.iter()
             .filter(|s| s.phase == DetectionPhase::Onset)
@@ -444,14 +452,218 @@ fn one_shot_alerts_of_a_split_window_find_each_onset_once() {
         early_onsets.union(&late_onsets).copied().collect()
     );
     assert!(early_onsets.len() >= 5 && late_onsets.len() >= 5);
-    // What the late half sees in progress began before it: in the early half, or before both.
+    // What the late half sees in progress arrived before it.
+    let middle = at_years(target.years);
     for seen in late
         .iter()
         .filter(|s| s.phase == DetectionPhase::InProgress)
     {
-        let before = whole.iter().any(|s| s.event == seen.event);
-        assert!(before, "{seen:?}");
+        assert!(seen.arrival < middle, "{seen:?}");
     }
+}
+
+/// A window split in two: the first half's events in progress are the whole window's, bit for
+/// bit, since both are judged at the window's start, and the whole's detections are the first
+/// half's with the second half's onsets (Design note 6: onsets once, and each window's own events
+/// in progress at its start).
+#[test]
+fn one_shot_alerts_in_progress_in_a_first_half_are_the_whole_windows() {
+    let galaxy = Galaxy::new(Seed::new(0x0125_0b00));
+    let process = ToyTypeIa::new();
+    let sensor = sensor(&[(AlertBand::Photometric(Band::V), 1.25e-4)]);
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let mut cells = KeepCells::default();
+    let mut late_counts = [0; 2];
+    for target in TARGETS {
+        let at = observer_at(target.position);
+        let mut run = |window| {
+            let query = AlertQuery::builder(at, window, sensor.clone())
+                .build()
+                .unwrap();
+            walked(&galaxy, &mut noise, &mut cells, &process, &query)
+        };
+        let [whole, early, late] = halves(target.years, 0.5).map(&mut run);
+        let in_progress = |seen: &[Seen]| -> Vec<Seen> {
+            seen.iter()
+                .filter(|s| s.phase == DetectionPhase::InProgress)
+                .copied()
+                .collect()
+        };
+        assert_ne!(in_progress(&whole).len(), 0, "{target:?}");
+        assert_eq!(in_progress(&early), in_progress(&whole), "{target:?}");
+        // The second halves have onsets and events in progress of their own.
+        for (count, phase) in late_counts
+            .iter_mut()
+            .zip([DetectionPhase::Onset, DetectionPhase::InProgress])
+        {
+            *count += late.iter().filter(|s| s.phase == phase).count();
+        }
+        let mut joined: Vec<_> = early
+            .iter()
+            .chain(late.iter().filter(|s| s.phase == DetectionPhase::Onset))
+            .copied()
+            .collect();
+        joined.sort();
+        assert_eq!(joined, whole, "{target:?}");
+    }
+    assert!(late_counts.iter().all(|&n| n > 0), "{late_counts:?}");
+}
+
+/// One Type Ia, not physics: the Type Ia grid's one entry, candidate 0 of the cell holding `site`
+/// (fifty expected there, so that candidate 0 is all but certain to exist, none elsewhere), a
+/// normal Type Ia exploding at `explosion` and standing still.
+struct Lone {
+    site: GalacticPosition,
+    explosion: UniverseTime,
+    window: ShellWindow,
+}
+
+impl ClassProcess for Lone {
+    type Candidate = CatalogueSystemId;
+    type Entry = (SupernovaEntry, CatalogueMotion);
+
+    fn class(&self) -> ClassId {
+        ClassId::TYPE_IA
+    }
+
+    fn bound(&self, _: &Galaxy, cell: &CatalogueCellKey) -> PerCubicLightYear {
+        let home = CatalogueCellKey::containing(ClassId::TYPE_IA, &self.site);
+        PerCubicLightYear::new(if home == Some(*cell) {
+            50.0 / cell.volume_ly3()
+        } else {
+            0.0
+        })
+    }
+
+    fn candidate(
+        &self,
+        _: &Galaxy,
+        _: &CatalogueCellKey,
+        id: CatalogueSystemId,
+        _: PerCubicLightYear,
+    ) -> Option<CatalogueSystemId> {
+        (id.index() == 0).then_some(id)
+    }
+
+    fn test(&self, _: &Galaxy, id: CatalogueSystemId) -> Option<Self::Entry> {
+        let entry = SupernovaEntry::new(
+            SystemId::from(id),
+            self.explosion,
+            SupernovaKind::TypeIa(IaChannel::Merger),
+            self.window,
+        );
+        let still = GalacticVelocity::default();
+        let motion = CatalogueMotion::broken(self.site, self.explosion, still, still);
+        Some((entry, motion))
+    }
+
+    fn members(&self, _: &Self::Entry) -> u8 {
+        1
+    }
+
+    fn system(&self, _: &Galaxy, member: &CatalogueMember<Self::Entry>) -> CatalogueSystem {
+        let (_, motion) = member.entry().value();
+        let record = SystemRecord::from_parts(
+            SystemId::from(member.id()),
+            motion.position_at(UniverseTime::EPOCH),
+            SystemOrigin::CatalogueSystem(ClassId::TYPE_IA),
+            Population::OldThinDisc,
+            SolarMasses::new(1.0),
+            Years::new(5e9),
+        );
+        CatalogueSystem::new(record, *motion)
+    }
+}
+
+impl OneShotClass for Lone {
+    fn kind(&self) -> TransientKind {
+        TransientKind::TypeIa
+    }
+
+    fn event(&self, entry: &Self::Entry) -> OneShotEvent {
+        OneShotEvent::of_supernova(&entry.0, entry.1)
+    }
+}
+
+/// A slow riser whose first light arrives below the limit: a Type Ia gives no light at its onset
+/// and peaks 15 days on, here at twice a V sensor's limit 500 ly above it, out of the plane.
+///
+/// - A window that holds its onset sees it, at its peak, though its first light is below the
+///   limit.
+/// - A window that opens a day after its onset, while it is still rising below the limit, sees
+///   nothing, though it passes the limit inside the window: "in progress" is judged at the
+///   window's start (Design note 6), and the onset was the earlier window's.
+/// - A window that opens 20 days after its onset, past its peak and still above the limit, sees it
+///   in progress, at its light then: through the same line of sight, the two fluxes stand as the
+///   peak to the light 20 days on.
+///
+/// The brute force agrees each time.
+#[test]
+fn one_shot_alerts_see_a_slow_riser_at_its_onset_not_while_it_rises_below_the_limit() {
+    let galaxy = Galaxy::new(Seed::new(0x0125_0b01));
+    let site = observer_at([0.0, 26_000.0, 2_000.0]);
+    let at = observer_at([0.0, 26_000.0, 2_500.0]);
+    let gas = SiteGas::uniform(HydrogenPerCm3::new(0.1), KelvinPerCm3::new(3_000.0)).unwrap();
+    let process = Lone {
+        site,
+        explosion: at_years(-500.0),
+        window: shell_window(&gas, ExplosionEnergy::MEDIAN, Dex::new(0.0)),
+    };
+    let ia = SupernovaKind::TypeIa(IaChannel::Merger);
+    let v = AlertBand::Photometric(Band::V);
+    let distance = site.distance_to(&at);
+    let bare = |watts| inverse_square_flux(watts, distance).unwrap().value();
+    let day_in_years = 1.0 / 365.25;
+    let at_day = |days: f64| bare(supernova_luminosity(ia, Years::new(days * day_in_years), v));
+    let peak = bare(supernova_peak(ia, v));
+    let limit = 0.5 * peak;
+    let sensor = sensor(&[(v, limit)]);
+    let onset = process
+        .explosion
+        .checked_add(light_time(distance))
+        .unwrap()
+        .since_epoch()
+        .as_julian_years_f64();
+    assert!(
+        at_day(0.0) < limit && at_day(1.0) < limit && at_day(20.0) > limit,
+        "{:e}, {:e} and {:e} W m⁻² at 0, 1 and 20 days against {limit:e}",
+        at_day(0.0),
+        at_day(1.0),
+        at_day(20.0)
+    );
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let mut cells = KeepCells::default();
+    let mut run = |window| {
+        let query = AlertQuery::builder(at, window, sensor.clone())
+            .build()
+            .unwrap();
+        let walk = walked(&galaxy, &mut noise, &mut cells, &process, &query);
+        let oracle = brute(&galaxy, &mut noise, &mut cells, &process, &query);
+        assert_eq!(walk, oracle, "{window:?}");
+        walk
+    };
+
+    let seen = run(window(onset, -0.5, 1.0));
+    let [riser] = seen.as_slice() else {
+        panic!("one detection: {seen:?}");
+    };
+    assert_eq!(riser.phase, DetectionPhase::Onset);
+    let flux = f64::from_bits(riser.flux);
+    assert!(flux >= limit && flux <= peak, "{flux:e} against {limit:e}");
+
+    let rising = run(window(onset, day_in_years, 1.0));
+    assert_eq!(rising, [], "still below the limit a day on");
+
+    let seen = run(window(onset, 20.0 * day_in_years, 1.0));
+    let [past] = seen.as_slice() else {
+        panic!("one detection: {seen:?}");
+    };
+    assert_eq!(past.phase, DetectionPhase::InProgress);
+    assert_eq!(past.event, riser.event);
+    let flux = f64::from_bits(past.flux);
+    assert!(flux >= limit, "{flux:e}");
+    let ratio = f64::from_bits(riser.flux) / flux / (peak / at_day(20.0));
+    assert!((ratio - 1.0).abs() < 1e-9, "{ratio}");
 }
 
 /// The production core collapses: three observers about two recent deaths of the galaxy of seed 9
