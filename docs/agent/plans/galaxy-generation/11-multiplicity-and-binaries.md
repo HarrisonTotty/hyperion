@@ -6424,8 +6424,8 @@ galaxy_sweeps`.
       - The published code's k₂ is `hrdiag`'s per star (`mrenv.f`, up to 0.4 on giants), not HPT's
         fixed 0.1; HYPERION keeps the paper's (`sse::ENVELOPE_GYRATION`'s doc).
     - **A later collapse in an unbound pair** keeps the label `Disrupted { by: <the first> }`,
-      the star whose collapse unbound the pair; the engine's `explode` relabels it by the later
-      star (an engine quirk, recorded, not changed here).
+      the star whose collapse unbound the pair. _The train's fix (2026-10-30):_ the engine's
+      `explode` keeps it too (`a_disrupted_pair_keeps_the_label_of_the_death_that_unbound_it`).
     - **A collapse at the age asked itself** is not reached, as the engine's own deaths at its
       age are not: the build-age comparisons skip that instant.
     - **The build-age contract** holds bit for bit where the pre-test, and the pre-test asked
@@ -6582,7 +6582,7 @@ galaxy_sweeps`.
       refit for the train (lean, 2026-10-28). It costs the census more table reads and the brief
       gate fewer certified rows; no verdict is wrong.
     - **The engine's `explode` relabels `Disrupted { by }`** by a later collapse in an unbound
-      pair (the closed form keeps the first).
+      pair (the closed form keeps the first). Fixed in the train (above).
     - **Citations not re-read in the pod** (no web access): HTP02 §2.2 for Jeans's mode (the
       plan's), HPT equations 107–110 and BSE equation 35. The science check derived every formula
       (all ok) and leaves the section and equation numbers to a check against the sources.

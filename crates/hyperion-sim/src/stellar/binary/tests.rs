@@ -4984,6 +4984,51 @@ fn a_taken_over_star_keeps_its_zero_age_spin() {
     }
 }
 
+/// P11.T4.l's label in the engine too (the train's fix): a pair its primary's collapse unbinds is
+/// `Disrupted { by: Primary }` from then on, its companion's later collapse included, as the
+/// closed form labels it (`Engine::passed_over`). 15 + 10.5 M☉ at 10 d (median draws, \[Fe/H\] 0),
+/// which the engine runs: the primary's neutron star unbinds the pair at 14.32 Myr, and the
+/// companion collapses alone at 19.75 Myr.
+#[test]
+fn a_disrupted_pair_keeps_the_label_of_the_death_that_unbound_it() {
+    let input = pair(15.0, 10.5, 10.0, 0.0, 0.02);
+    let until = Years::new(1.0e8);
+    assert!(can_interact(&input, until));
+    let timeline = evolve(&input, until);
+    let [first, second] = timeline.supernovae() else {
+        panic!("two collapses: {}", describe(&timeline));
+    };
+    assert_eq!(first.component(), Component::Primary);
+    assert!(!first.bound(), "{}", describe(&timeline));
+    assert_eq!(second.component(), Component::Secondary);
+    assert!(
+        (first.age().value() - 14.32e6).abs() < 1.0e4
+            && (second.age().value() - 19.75e6).abs() < 1.0e4,
+        "{}",
+        describe(&timeline)
+    );
+    let after: Vec<&Segment> = timeline
+        .segments()
+        .iter()
+        .filter(|s| s.start() >= first.age())
+        .collect();
+    assert!(
+        after.iter().any(|s| s.start() >= second.age()),
+        "{}",
+        describe(&timeline)
+    );
+    for segment in after {
+        assert_eq!(
+            segment.kind(),
+            SegmentKind::Disrupted {
+                by: Component::Primary
+            },
+            "{}",
+            describe(&timeline)
+        );
+    }
+}
+
 /// P11.T4.l: the pre-test asked again after a passed-over pair's bound collapse never passes over
 /// an interaction. Over 3,000 wide massive pairs ([`wide_massive_pair`]) run to their ages, every
 /// pair whose bound collapse the closed form keeps on its fixed orbit shows no stable transfer,

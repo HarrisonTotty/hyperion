@@ -373,6 +373,10 @@ impl Engine {
     /// Member `i`, of mass `before`, explodes now into `remnant` with `kick` (BSE appendix A1), the
     /// member already replaced by what it leaves: the orbit after it, or the pair unbound, and the
     /// record.
+    ///
+    /// A pair this death unbinds is [`SegmentKind::Disrupted`] by `i`. A pair already unbound keeps
+    /// its label, that of the death that unbound it ([`Engine::quiet_kind`]), as the closed form
+    /// ([`Engine::passed_over`]) and the white dwarf's birth in [`Engine::die`] do.
     pub(super) fn explode(
         &mut self,
         i: usize,
@@ -382,6 +386,7 @@ impl Engine {
     ) {
         let after = remnant.mass().value();
         let kick = kick.filter(|_| self.ctx.params().natal_kicks);
+        let was_bound = self.orbit.is_some();
         let (velocities, bound) = self.lose_mass(i, before, after, kick);
         self.supernovae.push(SupernovaRecord::new(
             Years::new(self.age),
@@ -391,7 +396,7 @@ impl Engine {
             bound,
             velocities,
         ));
-        self.kind = if bound || self.orbit.is_some() {
+        self.kind = if bound || self.orbit.is_some() || !was_bound {
             self.quiet_kind()
         } else if self.members.iter().any(Member::is_gone) {
             SegmentKind::Merged
@@ -453,7 +458,7 @@ impl Engine {
     /// - **Bound:** the pair goes on, on the new orbit's fixed elements; a later collapse is
     ///   applied the same way on that orbit. **Unbound:** [`SegmentKind::Disrupted`] by the star
     ///   that died, both stars their own models; a later collapse is recorded, alone, and the label
-    ///   stays the first's (the engine's `explode` relabels it by the later star).
+    ///   stays the first's, as the engine's [`Engine::explode`] keeps it.
     /// - Every collapse writes its [`SupernovaRecord`], and the stars stay their own tracks bit for
     ///   bit: only the orbit and the records change. A white dwarf's birth keeps the orbit (the
     ///   physics of finding F1, under its own ruling).
