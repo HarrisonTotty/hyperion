@@ -2101,6 +2101,22 @@ export function caseGateRecord(
   };
 }
 
+/**
+ * One case's section of the gate alone (plan R08, R08.T15.a.2: `giant-deck` read through its deck):
+ * its headline, its images' tallies, its misses and every geometry's row, as {@link caseGateRecord}
+ * writes each case's, against the `kind` radiance of the reference's geometries, from the twin's
+ * values of the case's `case` setting.
+ *
+ * @throws Error for a geometry of the reference whose values `values` lacks, or that the case lacks.
+ */
+export function caseGateSection(
+  gateCase: GateCase,
+  values: TwinValues,
+  kind: RadianceKind,
+): RecordValue {
+  return caseSection(caseGateOf(gateCase, values, kind), values);
+}
+
 // --- Reading a committed record back -------------------------------------------------------------
 
 /**

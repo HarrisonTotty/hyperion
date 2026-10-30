@@ -80,6 +80,17 @@
  *   timed frames, `PhotorealRenderer.prepareAir`) and by its full passes (the same tables without
  *   it), each combination both ways: what the table saves beside the full passes there.
  *
+ * R08.T15.a.2 adds one under the same flag, for the owner's RTX run (whether the deck read keeps
+ * the frame under 15.67 and 16.67 ms):
+ *
+ * - (Q) the measured Earth over a cloud deck 3 km up: its upper medium on the deck's datum
+ *   (`thick/deckRead.ts`), its own tables holding a patterned deck on both light slots with the
+ *   correction over it (the smoke's `withDeckTable`: the read's cost, not a bake's values), so that
+ *   the march reads the deck at its bare ground (`hillaire.ts`'s `withDeckRead`); (A)'s
+ *   combinations, whose drawn body hides the deck (the deck read runs only where nothing is
+ *   drawn), and (B)'s, the atmosphere alone over an empty scene, where every ray of the march that
+ *   meets the ground reads it.
+ *
  * The timed parts take QW2's and QW3's form (`decision-r08-t8-leans.md` §10;
  * `frameTimingLedger.ts`' `QW_FORM` and `runTimed`): each combination's 10 warm-up frames, then 30
  * timed, back to back; two sweeps over every combination, the second in the reverse order. There
@@ -122,6 +133,7 @@ import { keptBakeLightsOf } from "../view/atmosphere/opticsMessages";
 import type { MsSourceTable } from "../view/atmosphere/thick/bake";
 import { bakeKeptCase, bakeKeptCorrection } from "../view/atmosphere/thick/keptBake";
 import type { PolarisationTable } from "../view/atmosphere/thick/polarisation";
+import { deckDatumOf, upperMediumOf } from "../view/atmosphere/thick/deckRead";
 import { THICK_TABLE_BYTES_A_SLOT } from "../view/atmosphere/thick/read";
 import { thickBakeBands } from "../view/atmosphere/thick/bake";
 import { discReflectanceFor } from "../view/atmosphere/thick/discBake";
@@ -172,6 +184,7 @@ import {
   SLICES_EARTH,
   SMOKE_EV100,
   SMOKE_EXPOSURE_SCALE,
+  withDeckTable,
 } from "./atmosphere";
 import { addCanvas } from "./frames";
 import {
@@ -265,6 +278,7 @@ const CHECK_NAMES = {
   tables: `${TASK} the per-planet tables' builds`,
   bytes: `${TASK} the per-view bytes of a body's air`,
   firstAir: `${TASK} the first air frame on the main thread, high`,
+  deckAlone: `${TASK} the atmosphere alone over a cloud deck's timings, high`,
   dropped: `${TASK} no timed frame dropped`,
   wall: `${TASK} the group's parts' wall times`,
 } as const;
@@ -290,6 +304,7 @@ const EARTH_IDS = {
   thickClassMap: "0200080020000000.0318",
   corrected: "0200080020000000.0319",
   correctedClassMap: "0200080020000000.031a",
+  deck: "0200080020000000.031b",
 } as const;
 
 /** (H)'s three small bodies' ids, in `SMALL_TRIO`'s order. */
@@ -1047,7 +1062,8 @@ function timingTarget(
 }
 
 /**
- * (B): the atmosphere alone over the same tables and (A)'s sources, on high, `x1` and `x2`.
+ * (B): the atmosphere alone over the same tables and (A)'s sources, on high, `x1` and `x2`; and
+ * (Q)'s, over its deck, under `name`.
  *
  * @returns Its timed frames with a resolve missing.
  */
@@ -1057,6 +1073,7 @@ async function timeAlone(
   ledger: ResolveLedger,
   media: ReadonlyArray<FrameMedium>,
   frames: FrameTimings,
+  name: string = CHECK_NAMES.alone,
 ): Promise<number> {
   const viewport = settingOutput("high");
   const aspect = viewport.widthPx / viewport.heightPx;
@@ -1171,7 +1188,7 @@ async function timeAlone(
       missingSources.length === 0 &&
       kept.every(({ frames: f }) => f.length === TIMED_IN_ALL && framesFinite(f));
     checks.check(
-      CHECK_NAMES.alone,
+      name,
       held,
       [
         `high at ${viewport.widthPx} × ${viewport.heightPx}, the atmosphere alone as R08.T8.c's far limb timings draw it (its frame over an empty scene at depth 0, then its composite), over the same tables with the sources (A)'s plan gave each combination`,
@@ -2376,7 +2393,8 @@ async function firstAirFrame(
  * The group's summary checks, which fail together without `timestamp-query`: each setting's and
  * medium's table of (A), and (B), (C), (H), (G), R08.T18.a's (O), (I)'s two tables, (J)'s on each
  * setting, (D), (E) and (F)'s, and the dropped frames', by the full run's own templates
- * ({@link CHECK_NAMES}). (K) to (N), which only `options.thickRead` runs, are not among them.
+ * ({@link CHECK_NAMES}). (K) to (N) and (Q), which only `options.thickRead` runs, are not among
+ * them.
  */
 function summaryCheckNames(): string[] {
   const frameTables = (["high", "low"] as const).flatMap((setting) =>
@@ -2403,9 +2421,9 @@ function summaryCheckNames(): string[] {
 /** What a run of {@link timeAtmosphereFrame} takes beyond its checks. */
 export interface FrameTimingOptions {
   /**
-   * Whether (K) to (N) run: the measured Earth through the thick read, its bake forced on, and with
-   * its polarisation correction alone (plan R08, R08.T14.c and R08.T14.f; the page's `thickRead`,
-   * `--smoke-thick-read=1`).
+   * Whether (K) to (N) and (Q) run: the measured Earth through the thick read, its bake forced on,
+   * with its polarisation correction alone, and over a cloud deck (plan R08, R08.T14.c, R08.T14.f
+   * and R08.T15.a.2; the page's `thickRead`, `--smoke-thick-read=1`).
    */
   readonly thickRead: boolean;
 }
@@ -2423,6 +2441,12 @@ const CORRECTED_EARTH_NAME = "the measured Earth with its polarisation correctio
 /** (N)'s medium's name in its checks. */
 const CORRECTED_CLASS_MAP_NAME =
   "the measured Earth under R10's smoke class map, with its polarisation correction alone";
+
+/** (Q)'s medium's name in its checks. */
+const DECK_EARTH_NAME = "the measured Earth over a cloud deck";
+
+/** (Q)'s deck's split over WGS 84, m: 3 km, in the gas and under the ozone, as part 14's R05 Earth. */
+const DECK_SPLIT_M = 3_000;
 
 /** The measured Earth's bake and correction for (K) to (N), made on the page, and their times. */
 interface MeasuredBakes {
@@ -2512,11 +2536,39 @@ function thickMeasuredMedium(
 }
 
 /**
+ * (Q)'s medium (R08.T15.a.2): the measured Earth's air above a cloud deck {@link DECK_SPLIT_M} up,
+ * its upper medium on the deck's datum, its own tables holding the smoke's patterned deck on both
+ * light slots with the correction over it, held by `releases`, with what its rows say of the tables.
+ */
+function deckMeasuredMedium(
+  engine: RenderEngine,
+  releases: Releases,
+  measured: FrameMedium,
+): { readonly medium: FrameMedium; readonly about: string } {
+  const { gravity } = earthBody();
+  const figure = deckDatumOf(SLICES_EARTH.figure, gravity, DECK_SPLIT_M);
+  const medium = upperMediumOf(measured.medium, DECK_SPLIT_M);
+  const { curves } = measured.tables;
+  const tables = releases.hold(
+    new AtmosphereTables(engine, medium, tableRadiusM(figure), curves, { figure, gravity }),
+    (made) => {
+      made.dispose();
+    },
+  );
+  withDeckTable(tables, curves.length, DECK_SPLIT_M);
+  const deck = tables.deckPacked;
+  return {
+    medium: { ...measured, name: DECK_EARTH_NAME, id: EARTH_IDS.deck, medium, tables, figure },
+    about: `its tables (its own, beside (A)'s) hold the upper medium over a cloud deck ${(DECK_SPLIT_M / 1_000).toFixed(0)} km up on the deck's datum and the smoke's patterned deck (R08.T15.a.2's smoke-only override; nothing routes a deck): ${deck?.bands ?? 0} band and ${deck?.slots ?? 0} light slots, the deck table ${tables.deckBytes.toLocaleString("en-GB")} B and the J above it ${tables.thickBytes.toLocaleString("en-GB")} B, the row's ${tables.rowBytes.toLocaleString("en-GB")} B in all; the sky view and the aerial perspective read the J above, and the march the deck at its bare ground where nothing is drawn (withDeckRead)`,
+  };
+}
+
+/**
  * R08.T11's photorealistic frame's timings (the module's remarks): (D) first, so that its cold
  * builds are as cold as the page leaves them, then (A), (B) on (A)'s sources, (C), (G), R08.T18.a's
- * (O), R08.T11.c's (H), (I) and (J), R08.T14.c's (K) and (L) and R08.T14.f's (M) and (N) where
- * `options.thickRead` asks (their bake and correction made before the renderer, with (I)'s and
- * (J)'s media), then (E) and (F);
+ * (O), R08.T11.c's (H), (I) and (J), R08.T14.c's (K) and (L), R08.T14.f's (M) and (N) and
+ * R08.T15.a.2's (Q) where `options.thickRead` asks (their bake, correction and deck made before the
+ * renderer, with (I)'s and (J)'s media), then (E) and (F);
  * a check a table, one per combination with its per-frame sums, and one that no timed frame was
  * dropped. Without `timestamp-query` each check fails with the reason.
  */
@@ -2564,6 +2616,7 @@ export async function timeAtmosphereFrame(
     const thick = bakes === null ? null : thickMeasuredMedium(engine, releases, measured, bakes);
     const corrected =
       bakes === null ? null : correctedMeasuredMedium(engine, releases, measured, bakes);
+    const deck = options.thickRead ? deckMeasuredMedium(engine, releases, measured) : null;
     const judged = specs.find((spec) => spec.name === CLASS_MAP_NAME);
     if (judged === undefined) {
       throw new Error("(I)'s judged class map is among its specs");
@@ -2660,6 +2713,16 @@ export async function timeAtmosphereFrame(
       );
       thickMissing += missingOf(correctedFrames) + missingOf(correctedMappedFrames);
     }
+    let deckMissing = 0;
+    if (deck !== null) {
+      const deckFrames = await timedPart("(Q)", () => timeFrames(on, ledger, [deck.medium]));
+      reportFrames(checks, deckFrames, () => deck.about);
+      // The march's deck read on every ray that meets the ground, which (Q)'s drawn body hides.
+      const deckAloneMissing = await timedPart("(Q) alone", () =>
+        timeAlone(engine, checks, ledger, [deck.medium], deckFrames, CHECK_NAMES.deckAlone),
+      );
+      deckMissing = missingOf(deckFrames) + deckAloneMissing;
+    }
     const frameMissing = missingOf(frames);
     const mappedMissing = missingOf(mappedFrames);
     const saturnMissing = missingOf(saturnFrames);
@@ -2673,11 +2736,12 @@ export async function timeAtmosphereFrame(
       trioMissing +
       mappedMissing +
       saturnMissing +
-      thickMissing;
+      thickMissing +
+      deckMissing;
     checks.check(
       CHECK_NAMES.dropped,
       missing === 0,
-      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (O) ${emittingMissing}, (P) ${pastMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) to (N) ${thickMissing}`}`,
+      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (O) ${emittingMissing}, (P) ${pastMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) to (N) ${thickMissing}`}${deck === null ? "" : `, (Q) ${deckMissing}`}`,
     );
     const bytes = await timedPart("(E)", () => perViewBytes(engine, checks, measured));
     await timedPart("(F)", () =>

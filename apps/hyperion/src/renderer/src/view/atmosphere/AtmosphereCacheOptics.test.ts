@@ -870,6 +870,16 @@ describe("the optics-worker pool's deck bake (R08.T15.a.2)", () => {
       (id: number): OpticsReply => ({ kind: "deck-baked", id, tables: [], correction: null }),
       { kind: "failed", message: "a deck of 1 bands was answered with 0 tables" },
     ],
+    [
+      "with a correction fewer than its bands, as failed",
+      (id: number): OpticsReply => ({
+        kind: "deck-baked",
+        id,
+        tables: decksFor(deckAsk()),
+        correction: [],
+      }),
+      { kind: "failed", message: "a deck of 1 bands was answered with a correction of 0" },
+    ],
   ] satisfies ReadonlyArray<readonly [string, (id: number) => OpticsReply, DeckBakeOutcome]>)(
     "settles a deck answered %s",
     async (_, replyOf, expected) => {
@@ -890,7 +900,7 @@ describe("the optics-worker pool's deck bake (R08.T15.a.2)", () => {
   });
 });
 
-/** Fails the pool's one worker, and each replacement, until its place is given up. */ /** Fails the pool's one worker, and each replacement, until its place is given up. */
+/** Fails the pool's one worker, and each replacement, until its place is given up. */
 function failEveryTime(workers: ReadonlyArray<ScriptedOpticsWorker>): void {
   for (let n = 0; n < MAX_CONSECUTIVE_OPTICS_FAILURES; n += 1) {
     workerAt(workers, n).fail();

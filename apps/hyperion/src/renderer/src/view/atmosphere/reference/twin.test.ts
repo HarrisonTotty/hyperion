@@ -7,6 +7,7 @@ import {
   type SweepGeometry,
   type SweepPoint,
 } from "../../../test/atmosphereSweep";
+import { patternedDeckTables } from "../../../test/thickTables";
 import { DEFAULT_FOV_DEG } from "../../camera/projection";
 import { lookAlong } from "../../camera/quaternion";
 import { EARTH_SLAB_REFERENCE, EARTH_SLAB_REFERENCE_CURVES } from "../earth";
@@ -30,6 +31,8 @@ import {
   twinView,
   type TwinRgb,
 } from "../tablesCpu";
+import type { DeckSlot, DeckTables } from "../thick/deck";
+import { upperMediumOf } from "../thick/deckRead";
 import {
   EARTH_REFERENCE_RADIUS_M,
   SATURN_OBLATE_GRAVITY,
@@ -52,6 +55,7 @@ import {
   type TwinFigure,
   twinGeometryKind,
   type ReferenceTwin,
+  type TwinDeck,
 } from "./twin";
 
 const RADIUS_M = EARTH_REFERENCE_RADIUS_M;
@@ -724,3 +728,78 @@ describe("the reference twin's ground observers (R08.T13.c1)", { timeout: TWIN_T
     expect(() => twin.radiance(geometry)).toThrow(RangeError);
   });
 });
+
+describe("a twin over a cloud deck (R08.T15.a.2)", () => {
+  /** The split: 3 km over the sweep's Earth-sized sphere, in its air and under its aerosol's top. */
+  const SPLIT_M = 3_000;
+  const medium = sweepMedium(POINT);
+  const upper = kernelMedium(upperMediumOf(medium, SPLIT_M));
+  const ONE_BAND = [
+    { gravityRatio: 1, latitudeRad: 0, bottomRadiusM: RADIUS_M, coefficientFactor: 1 },
+  ];
+  /** The patterned deck over the upper medium, its light scaled by `scale` (0 for none). */
+  const deckOf = (scale: number): TwinDeck => ({
+    tables: patternedDeckTables(ONE_BAND, upper, 1, SPLIT_M).map((band) => scaledDeck(band, scale)),
+    polarisation: null,
+  });
+  /** From orbit straight down at the deck, the sun 30° up. */
+  const NADIR: ReferenceGeometry = {
+    name: "nadir",
+    image: "disc-p60",
+    observer: { heightM: 2_000_000, latitudeDeg: 0 },
+    view: { zenithDeg: 180, azimuthDeg: 0 },
+    sun: { zenithDeg: 60, azimuthDeg: 0 },
+  };
+
+  it(
+    "draws the deck's own light at its ground from orbit, nothing of it with its light 0",
+    { timeout: TWIN_TIMEOUT_MS },
+    () => {
+      const lit = referenceTwin(medium, FIGURE, { deck: deckOf(1) }).radiance(NADIR);
+      const dark = referenceTwin(medium, FIGURE, { deck: deckOf(0) }).radiance(NADIR);
+      // The deck's patterned light is of the order of the air's above it: the nadir's radiance
+      // measured 1.9 to 2.1 times the dark deck's by channel (2026-10-30).
+      expect([0, 1, 2].every((c) => (lit[c] ?? 0) > 1.5 * (dark[c] ?? 0))).toBe(true);
+    },
+  );
+
+  it(
+    "refuses a deck beside a thick bake of its own, a deck of other bands, and an observer below the split",
+    { timeout: TWIN_TIMEOUT_MS },
+    () => {
+      const tables = deckOf(1).tables;
+      expect(() =>
+        referenceTwin(medium, FIGURE, {
+          deck: deckOf(1),
+          thick: tables.map((band) => band.above),
+        }),
+      ).toThrow(/takes no thick bake of its own/u);
+      expect(() =>
+        referenceTwin(medium, FIGURE, {
+          deck: { tables: [...tables, ...tables], polarisation: null },
+        }),
+      ).toThrow(/a deck of 2 bands for a twin of 1/u);
+      const twin = referenceTwin(medium, FIGURE, { deck: deckOf(1) });
+      expect(() =>
+        twin.radiance({ ...NADIR, name: "under", observer: { heightM: 100, latitudeDeg: 0 } }),
+      ).toThrow(/below a deck's split/u);
+    },
+  );
+});
+
+/** A deck band whose own light is scaled by `scale`: its series, G and G_β. */
+function scaledDeck(band: DeckTables, scale: number): DeckTables {
+  const by = (values: Float32Array): Float32Array => values.map((value) => value * scale);
+  return {
+    ...band,
+    slots: band.slots.map((slot): DeckSlot => ({
+      reflectance: by(slot.reflectance),
+      beamReflection: by(slot.beamReflection),
+      diffuse: by(slot.diffuse),
+      singleGeometry: by(slot.singleGeometry),
+      singleBeamGeometry: by(slot.singleBeamGeometry),
+      phase: slot.phase,
+      solves: slot.solves,
+    })),
+  };
+}

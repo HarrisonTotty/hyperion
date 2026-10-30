@@ -1061,7 +1061,7 @@ function deckBuiltOf(built: BuiltAtmosphere, splitM: number): BuiltAtmosphere {
     return { ...built, medium, bottomRadiusM: built.bottomRadiusM + splitM };
   }
   const figure = deckDatumOf(body.figure, body.gravity, splitM);
-  const raised =
+  const raisedM =
     (2 * (figure.equatorialRadiusM - body.figure.equatorialRadiusM) +
       (figure.polarRadiusM - body.figure.polarRadiusM)) /
     3;
@@ -1069,7 +1069,7 @@ function deckBuiltOf(built: BuiltAtmosphere, splitM: number): BuiltAtmosphere {
     ...built,
     medium,
     body: { ...body, figure },
-    bottomRadiusM: built.bottomRadiusM + raised,
+    bottomRadiusM: built.bottomRadiusM + raisedM,
   };
 }
 

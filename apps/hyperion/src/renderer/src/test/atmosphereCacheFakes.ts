@@ -34,6 +34,8 @@ export class FakeTables implements CachedTables {
   discThrows: Error | null = null;
   /** Every deck {@link FakeTables.setDeckTables} took, in order, `null` for one taken away (R08.T15.a.2). */
   readonly decks: Array<ReadonlyArray<DeckTables> | null> = [];
+  /** What `setDeckTables` throws while set, taking nothing. */
+  deckThrows: Error | null = null;
   disposed = false;
 
   constructor(built: BuiltAtmosphere, rowBytes: number) {
@@ -76,6 +78,9 @@ export class FakeTables implements CachedTables {
   }
 
   setDeckTables(bands: ReadonlyArray<DeckTables> | null): void {
+    if (this.deckThrows !== null) {
+      throw this.deckThrows;
+    }
     this.decks.push(bands);
   }
 

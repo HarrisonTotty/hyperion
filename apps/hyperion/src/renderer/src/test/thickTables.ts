@@ -258,6 +258,27 @@ export function deckPhasePatternAt(i: number, c: number, b: number, k: number): 
 }
 
 /**
+ * {@link patternedCorrection}'s correction over a deck (R08.T15.a.2), its altitudes from the split
+ * at `deckAltitudeM` up, on the J's altitudes to the bit, as the deck's bake lays it: one table a
+ * band of `bands`, with `slots` light slots, over `medium`, the upper medium as the kernels read it.
+ */
+export function patternedDeckCorrection(
+  bands: ReadonlyArray<TablesBand>,
+  medium: AtmosphereMedium,
+  slots: number,
+  deckAltitudeM: number,
+): PolarisationTable[] {
+  return patternedCorrection(bands, medium, slots).map((band): PolarisationTable => ({
+    band: band.band,
+    altitudesM: band.altitudesM.map((h) => h + deckAltitudeM),
+    sunCosines: band.sunCosines,
+    travelCosines: band.travelCosines,
+    modes: band.modes,
+    slots: band.slots,
+  }));
+}
+
+/**
  * Deck tables whose packed values follow {@link deckPatternAt} and {@link deckPhasePatternAt}
  * (R08.T15.a.2), one a band of `bands` (a tables plan's, in its order), with `slots` light slots, on
  * the deck's grid, the split at `deckAltitudeM` over the body's datum: the J above it
@@ -279,7 +300,8 @@ export function patternedDeckTables(
   const suns = THICK_SUN_COSINES;
   const views = DECK_TABLE_VIEW_COSINES;
   const modes = DECK_TABLE_MODES;
-  const diffuseModes = THICK_SOURCE_MODES;
+  // Every mode of the sky-lit radiance, past a bake's 3, so that the read's every texel of D is held.
+  const diffuseModes = DECK_TABLE_MODES;
   return bands.map((_, b): DeckTables => {
     const table = above[b];
     if (table === undefined) {

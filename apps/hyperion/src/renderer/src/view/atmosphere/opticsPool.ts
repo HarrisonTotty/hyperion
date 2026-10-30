@@ -944,14 +944,20 @@ function deckOutcomeOf(outcome: JobOutcome, ask: DeckBakeAsk): DeckBakeOutcome {
       const { reply } = outcome;
       if (reply.kind === "deck-baked") {
         const bands = ask.bands.length;
-        baked =
-          reply.tables.length === bands &&
-          (reply.correction === null || reply.correction.length === bands)
-            ? { kind: "baked", tables: reply.tables, correction: reply.correction }
-            : {
-                kind: "failed",
-                message: `a deck of ${bands} bands was answered with ${reply.tables.length} tables`,
-              };
+        const corrected = reply.correction?.length ?? bands;
+        if (reply.tables.length !== bands) {
+          baked = {
+            kind: "failed",
+            message: `a deck of ${bands} bands was answered with ${reply.tables.length} tables`,
+          };
+        } else if (corrected !== bands) {
+          baked = {
+            kind: "failed",
+            message: `a deck of ${bands} bands was answered with a correction of ${corrected}`,
+          };
+        } else {
+          baked = { kind: "baked", tables: reply.tables, correction: reply.correction };
+        }
       } else if (reply.kind === "deck-bake-failed") {
         baked = { kind: "failed", message: reply.message };
       } else {

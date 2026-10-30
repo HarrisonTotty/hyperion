@@ -28,6 +28,19 @@
  *   bake's largest |Jᵐ|, its m = 2's largest share of J⁰, and G₂'s rounding against its `f32`
  *   values, as a share of J⁰, in the bake's own packed table and in the routed one with the
  *   correction summed in (R08.T14.d.1).
+ * - **`giant-deck` through its deck** (R08.T15.a.2; the record's `deck`). The case is read through
+ *   the `cloudDeck` split `classifyRegime` gives it under its own cover, the NH₃ deck of τ(550) 20
+ *   under a cloud fraction of 1 (`thickCases.ts`'s "so that R08.T15 splits the medium at it"; lean,
+ *   2026-10-30): split at the deck's top, the deck read to the black ground beneath, its bake and
+ *   correction over the deck baked on the twin's body (`bakeKeptDeck`), and its twin drawing the
+ *   upper medium over the deck (`twin.ts`'s `deck`), against the vector I over the geometries above
+ *   the split; those below it, its ground and aerial views, are R08.T15.b.2's reads. Beside the
+ *   route: the deck's multiple-scattering part cut to m < 3 and m < 6 (the route's 8,
+ *   `DECK_MODES`), its sky-lit radiance at the deck's modes (`diffuseModes`), its floor white, the
+ *   case split as a gas envelope's at τ 10 (R08.T16.a's route) over its black floor at τ 1,000 and
+ *   over a white one, each with its twin ÷ reference by image, the bake's own plane albedo against
+ *   each aggregate's upwelling flux, the deck's co-albedo at its floor, and the deck's share of each
+ *   orbit image's radiance (its light set to 0). A miss is a finding against R08.T15.b.2's routing.
  *
  * The twin's values on the route and the diagnostic, each case setting's radiance and drawn-surface
  * share (the values `thickRuns.test.ts` replaces), are the record's; every other value is c1's.
@@ -39,17 +52,40 @@
  * to the record's, and `earth`'s route is baked and its twin's values recomputed at
  * {@link SAMPLED} and held equal to them; under `HYPERION_SLOW_TESTS=1` the whole record is formed
  * from its values and held to the committed file byte for byte (some 90 s on a pod's 4 vCPU, the
- * route's alone 30 s).
+ * route's alone 30 s; with `giant-deck`'s deck, whose sections are formed from its values and its
+ * bakes' figures as the record holds them, some 70 s more for the thick cases' optics).
  */
 
 import { describe, expect, it } from "vitest";
 
 import type { Rgb } from "../../photometry/toneCurve";
+import { cos } from "../../../lib/pinnedMath";
 import { expectCommittedTable } from "../../../test/bless";
+import { aggregatePasses, aggregateRefusal } from "../gate";
 import { densityAt } from "../medium";
 import { kernelMedium } from "../tables";
-import type { MsSourceTable } from "../thick/bake";
-import { bakeKeptCase, bakeKeptCorrection } from "../thick/keptBake";
+import {
+  bakeBinSolve,
+  type MsSourceTable,
+  type ThickBakeBody,
+  thickBakeBands,
+} from "../thick/bake";
+import {
+  DECK_MODES,
+  deckGround,
+  deckLayersOf,
+  type DeckSlot,
+  type DeckSplit,
+  type DeckTables,
+} from "../thick/deck";
+import {
+  deckAboveTables,
+  deckCorrectionAbove,
+  deckTableBytes,
+  packDeckTable,
+  upperMediumOf,
+} from "../thick/deckRead";
+import { bakeKeptCase, bakeKeptCorrection, bakeKeptDeck, type KeptDeck } from "../thick/keptBake";
 import type { PolarisationTable } from "../thick/polarisation";
 import {
   type PackedThickTable,
@@ -59,11 +95,17 @@ import {
   type ThickTableKind,
   thickTableBytes,
 } from "../thick/read";
-import { type AtmosphereRegime, CLEAR_COVER, classifyRegime } from "../thick/regime";
+import {
+  type AtmosphereRegime,
+  type BodyCover,
+  CLEAR_COVER,
+  classifyRegime,
+} from "../thick/regime";
 import committedGate from "./caseGate.json" with { type: "json" };
 import {
   blockingValues,
   caseGateRecord,
+  caseGateSection,
   caseTwin,
   type GateCase,
   recorded,
@@ -80,9 +122,12 @@ import {
 import { EARTH_CASE, REFERENCE_CASES, type ReferenceCase, referenceCaseBakeLights } from "./cases";
 import earthReference from "./earth.reference.json" with { type: "json" };
 import earthOzoneSlabReference from "./earth-ozone-slab.reference.json" with { type: "json" };
+import giantDeckCase from "./giant-deck.case.json" with { type: "json" };
+import giantDeckReference from "./giant-deck.reference.json" with { type: "json" };
 import marsReference from "./mars.reference.json" with { type: "json" };
-import type { ReferenceFile } from "./references";
+import { fluxReadingsOf, type ReferenceFile } from "./references";
 import saturnOblateReference from "./saturn-oblate.reference.json" with { type: "json" };
+import { GIANT_DECK, thickReferenceCases } from "./thickCases";
 import { twinBakeBody, type TwinOptions } from "./twin";
 import committed from "./vectorGate.json" with { type: "json" };
 
@@ -130,8 +175,11 @@ const LIMIT_MS = { whole: 3_600_000, record: 600_000 } as const;
 /** The record's file, from this test. */
 const RECORD_FILE = "./vectorGate.json";
 
-/** The record's format: 2 from R08.T14.d.1, which adds the cut modes and the bake's figures. */
-const VECTOR_GATE_FORMAT = 2;
+/**
+ * The record's format: 2 from R08.T14.d.1, which adds the cut modes and the bake's figures; 3 from
+ * R08.T15.a.2, which adds `giant-deck`'s gate through its deck (`deck`).
+ */
+const VECTOR_GATE_FORMAT = 3;
 
 /** Who writes the record, as each of its records' heads says. */
 const WRITER = "vectorGate.test.ts, through caseGate.ts (plan R08, R08.T14.f)";
@@ -528,21 +576,385 @@ function cutModesRecord(
     Object.fromEntries(records.map(([name, record]) => [name, recordImagesOf(record, caseName)]));
 }
 
+// --- R08.T15.a.2: `giant-deck` through its deck -----------------------------------------------------
+
+/** The deck's gate's case: R08.T12.b.2's `giant-deck`, a Saturn-class air over its NH₃ ice deck. */
+const DECK_CASE = "giant-deck";
+
+/**
+ * The deck's gate's variants (the module's remarks), by the record's name: the route, its deck's
+ * multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its
+ * floor white (the case's own ground under the deck), the case split at the envelope's floor
+ * (R08.T16.a's route) with its black floor at τ 1,000 and white, and no deck at all (the deck's own
+ * light 0), whose share of each orbit image's radiance the record gives.
+ */
+const DECK_VARIANTS = [
+  "route",
+  "m < 3",
+  "m < 6",
+  "diffuse at 8",
+  "floor at 1",
+  "as an envelope",
+  "as an envelope, floor at 1",
+  "no deck",
+] as const;
+
+type DeckVariant = (typeof DECK_VARIANTS)[number];
+
+/** The giant's deck term's top, the highest level of its tabulated density above 0, m. */
+function deckTopM(referenceCase: ReferenceCase): number {
+  const term = referenceCase.medium.terms.find((t) => t.name === GIANT_DECK.name);
+  if (term?.density.kind !== "tabulated") {
+    throw new Error(`${referenceCase.name} has its tabulated deck ${GIANT_DECK.name}`);
+  }
+  const { altitudesM, relative } = term.density;
+  const last = relative.findLastIndex((d) => d > 0);
+  return altitudesM[Math.min(last + 1, altitudesM.length - 1)] ?? Number.NaN;
+}
+
+/**
+ * `giant-deck`'s cover (the module's remarks): its NH₃ deck of τ(550) 20 under a cloud fraction of
+ * 1, from the ground to its top, so that `classifyRegime` splits it at the deck's top as the case
+ * was built for (`thickCases.ts`), the deck read to the black ground beneath; or, `envelope`, a gas
+ * envelope's, split at the envelope's floor, τ 10 from the top (R08.T16.a's route).
+ */
+function giantCover(referenceCase: ReferenceCase, envelope: boolean): BodyCover {
+  return {
+    cloudFraction: 1,
+    decks: [
+      {
+        opticalDepth550: GIANT_DECK.opticalDepth550,
+        baseAltitudeM: 0,
+        topAltitudeM: deckTopM(referenceCase),
+      },
+    ],
+    envelope,
+  };
+}
+
+/** The split `classifyRegime` gives `giant-deck` under {@link giantCover}, its floor the cover's. */
+function giantSplit(referenceCase: ReferenceCase, envelope: boolean): DeckSplit {
+  const regime = classifyRegime(referenceCase.medium, giantCover(referenceCase, envelope));
+  if (regime.kind !== "cloudDeck") {
+    throw new Error(`${referenceCase.name} routes ${regime.kind}, not cloudDeck`);
+  }
+  return { altitudeM: regime.deckAltitudeM, floor: envelope ? "envelope" : "ground" };
+}
+
+/**
+ * The case's gate over its geometries above the split alone, which the twin draws from above the
+ * deck; those below it, its ground and aerial views, are R08.T15.b.2's reads (`twin.ts` refuses
+ * them).
+ */
+function deckGateCase(referenceCase: ReferenceCase, splitM: number): GateCase {
+  const above = new Set(
+    referenceCase.geometries.filter((g) => g.observer.heightM > splitM).map((g) => g.name),
+  );
+  return {
+    referenceCase,
+    reference: {
+      ...giantDeckReference,
+      geometries: giantDeckReference.geometries.filter((g) => above.has(g.name)),
+    },
+  };
+}
+
+/** The deck's gate's values of a twin, each gated geometry's radiance and surface share, as recorded. */
+function deckValuesOf(twin: ReturnType<typeof caseTwin>, gateCase: GateCase): Map<string, Rgb> {
+  const { referenceCase } = gateCase;
+  return valuesOf(
+    twin,
+    referenceCase,
+    gateCase.reference.geometries.flatMap((g) =>
+      (["radiance", "surfaceShare"] as const).map((quantity): TwinValueSpec => ({
+        quantity,
+        setting: "case",
+        caseName: referenceCase.name,
+        name: g.name,
+      })),
+    ),
+  );
+}
+
+/** A deck's tables with the multiple-scattering part's modes from `modes` up set to 0: a test's cut. */
+function cutDeckModes(tables: ReadonlyArray<DeckTables>, modes: number): DeckTables[] {
+  const cut = (values: Float32Array): Float32Array =>
+    values.map((value, i) => (Math.floor(i / 3) % DECK_MODES < modes ? value : 0));
+  return tables.map((band) =>
+    withDeckSlots(band, (slot) => ({
+      ...slot,
+      reflectance: cut(slot.reflectance),
+      beamReflection: cut(slot.beamReflection),
+    })),
+  );
+}
+
+/** A deck's tables with its own light 0: every series, G and G_β, its phase kept. */
+function darkDeck(tables: ReadonlyArray<DeckTables>): DeckTables[] {
+  return tables.map((band) =>
+    withDeckSlots(band, (slot) => ({
+      ...slot,
+      reflectance: new Float32Array(slot.reflectance.length),
+      beamReflection: new Float32Array(slot.beamReflection.length),
+      diffuse: new Float32Array(slot.diffuse.length),
+      singleGeometry: new Float32Array(slot.singleGeometry.length),
+      singleBeamGeometry: new Float32Array(slot.singleBeamGeometry.length),
+    })),
+  );
+}
+
+/** A deck band with each slot made by `slotOf`. */
+function withDeckSlots(band: DeckTables, slotOf: (slot: DeckSlot) => DeckSlot): DeckTables {
+  return { ...band, slots: band.slots.map(slotOf) };
+}
+
+/**
+ * The deck bake's own plane albedo (the module's remarks): in band 0, each bin's and term's solve of
+ * the upper medium over the deck, its upward flux at the top over μ₀ at each of the grid's μ₀ above
+ * the horizontal, weighted over the bin's terms and converted to the channels, then linear in μ₀ at
+ * each aggregate's sun; as the client's upwelling flux, that times the reference's incident flux.
+ */
+function deckPlaneAlbedoOf(
+  kept: KeptDeck,
+  body: ThickBakeBody,
+): ReadonlyArray<readonly [string, number, number, number]> {
+  const { prepared } = kept;
+  const [band] = thickBakeBands(body);
+  const light = prepared.upper.lights[0];
+  if (band === undefined || light === undefined) {
+    throw new Error("the deck has a band and a light");
+  }
+  const { grid } = prepared.upper;
+  const ground = deckGround(prepared, band);
+  const suns = grid.sunCosines.length;
+  const perBin = light.bins.map((bin, b) => {
+    const albedos = new Float64Array(suns);
+    for (const term of bin.terms) {
+      const { solution } = bakeBinSolve(prepared.upper, band, b, term, ground);
+      solution.beams.forEach((beam, s) => {
+        const mu0 = grid.sunCosines[s] ?? Number.NaN;
+        if (mu0 > 0) {
+          albedos[s] =
+            (albedos[s] ?? 0) + (term.weight * (beam.fluxes.diffuseUp[0] ?? Number.NaN)) / mu0;
+        }
+      });
+    }
+    return albedos;
+  });
+  const channelAt = (c: number, mu0: number): number => {
+    const factors = light.conversion.factors[c] ?? [];
+    const at = (s: number): number =>
+      perBin.reduce((sum, bin, b) => sum + (factors[b] ?? Number.NaN) * (bin[s] ?? Number.NaN), 0);
+    let s = 0;
+    while (s + 1 < suns && (grid.sunCosines[s + 1] ?? Number.NaN) < mu0) {
+      s += 1;
+    }
+    const s0 = Math.min(s, suns - 2);
+    const m0 = grid.sunCosines[s0] ?? Number.NaN;
+    const m1 = grid.sunCosines[s0 + 1] ?? Number.NaN;
+    const t = Math.min(Math.max((mu0 - m0) / (m1 - m0), 0), 1);
+    return at(s0) * (1 - t) + at(s0 + 1) * t;
+  };
+  return giantDeckReference.aggregates.map((aggregate) => {
+    const asked = giantDeckCase.aggregates.find((a) => a.name === aggregate.name);
+    const zenith = asked?.sunDirections[0]?.zenithDeg;
+    if (zenith === undefined) {
+      throw new Error(`${aggregate.name} has a sun`);
+    }
+    const mu0 = cos((zenith * Math.PI) / 180);
+    return [
+      `${aggregate.name}/upwelling`,
+      recorded(channelAt(0, mu0) * (aggregate.incidentTop[0] ?? Number.NaN)),
+      recorded(channelAt(1, mu0) * (aggregate.incidentTop[1] ?? Number.NaN)),
+      recorded(channelAt(2, mu0) * (aggregate.incidentTop[2] ?? Number.NaN)),
+    ] as const;
+  });
+}
+
+/**
+ * The deck's single-scattering co-albedo at its floor, 1 − ω of its lowest layer, in band 0, each
+ * bin's weighted over its terms and converted to the channels.
+ */
+function floorCoAlbedoOf(kept: KeptDeck, body: ThickBakeBody): Rgb {
+  const { prepared } = kept;
+  const [band] = thickBakeBands(body);
+  const light = prepared.upper.lights[0];
+  if (band === undefined || light === undefined) {
+    throw new Error("the deck has a band and a light");
+  }
+  const perBin = light.bins.map((bin, b) =>
+    bin.terms.reduce((sum, term) => {
+      const { layers, truncated } = deckLayersOf(prepared, band, b, term);
+      const layer = layers.at(-1);
+      const f = truncated.at(-1) ?? 0;
+      // ω′ = (1 − f)ω ÷ (1 − ωf), undone: ω = ω′ ÷ (1 − f + f ω′).
+      const scaled = layer?.singleScatteringAlbedo ?? Number.NaN;
+      const omega = scaled / (1 - f + f * scaled);
+      return sum + term.weight * (1 - omega);
+    }, 0),
+  );
+  const channel = (c: number): number => {
+    const factors = light.conversion.factors[c] ?? [];
+    return recorded(perBin.reduce((sum, x, b) => sum + (factors[b] ?? Number.NaN) * x, 0));
+  };
+  return [channel(0), channel(1), channel(2)];
+}
+
+/** What the deck's section takes beside its twins' values: its bakes' own figures. */
+interface DeckFigures {
+  readonly split: DeckSplit;
+  readonly envelopeSplit: DeckSplit;
+  readonly floorAltitudeM: number;
+  readonly floorCoAlbedo: Rgb;
+  /** The bake's upwelling flux at the top by aggregate, `[name, r, g, b]`. */
+  readonly planeAlbedo: ReadonlyArray<readonly [string, number, number, number]>;
+  readonly tables: Record<string, unknown>;
+}
+
+/**
+ * `giant-deck`'s gate through its deck (the module's remarks): the route's case section against the
+ * vector I, each variant's tallies, the route's ratios, the bake's plane albedo against the
+ * reference's aggregates, the deck's share of each orbit image's radiance, the bakes' figures and
+ * every variant's twin values.
+ */
+function deckSectionOf(
+  values: ReadonlyMap<DeckVariant, TwinValues>,
+  figures: DeckFigures,
+): Record<string, unknown> {
+  const referenceCase = thickReferenceCases()[DECK_CASE];
+  const gateCase = deckGateCase(referenceCase, figures.split.altitudeM);
+  const variant = (name: DeckVariant): TwinValues => {
+    const held = values.get(name);
+    if (held === undefined) {
+      throw new Error(`the deck's gate has no values ${name}`);
+    }
+    return held;
+  };
+  const envelopeCase = deckGateCase(referenceCase, figures.envelopeSplit.altitudeM);
+  const gateOf = (name: DeckVariant): unknown =>
+    caseGateSection(
+      name === "as an envelope" || name === "as an envelope, floor at 1" ? envelopeCase : gateCase,
+      variant(name),
+      "vector",
+    );
+  const route = gateOf("route");
+  const asRecord = (section: unknown): unknown => ({ cases: { [DECK_CASE]: section } });
+  // A variant's tallies and its twin ÷ reference by image, which a refusal leaves out of the tallies.
+  const judged = (name: DeckVariant): Record<string, unknown> => {
+    const section = asRecord(gateOf(name));
+    return {
+      tallies: recordImagesOf(section, DECK_CASE),
+      ratios: recordRatiosOf(section, DECK_CASE),
+    };
+  };
+  const gated = gateCase.reference.geometries.map((g) => g.name);
+  // Each orbit image's radiance with the deck's light and without it, by channel.
+  const images = new Map<string, [number, number, number, number, number, number]>();
+  for (const geometry of referenceCase.geometries) {
+    if (!gated.includes(geometry.name)) {
+      continue;
+    }
+    const key = (from: DeckVariant): Rgb =>
+      variant(from).get(
+        twinValueKey({
+          quantity: "radiance",
+          setting: "case",
+          caseName: DECK_CASE,
+          name: geometry.name,
+        }),
+      ) ?? [Number.NaN, Number.NaN, Number.NaN];
+    const lit = key("route");
+    const dark = key("no deck");
+    const held = images.get(geometry.image) ?? [0, 0, 0, 0, 0, 0];
+    images.set(geometry.image, [
+      held[0] + lit[0],
+      held[1] + lit[1],
+      held[2] + lit[2],
+      held[3] + dark[0],
+      held[4] + dark[1],
+      held[5] + dark[2],
+    ]);
+  }
+  const fluxes = fluxReadingsOf(giantDeckReference, "vector");
+  const channels = [0, 1, 2] as const;
+  return {
+    case: DECK_CASE,
+    route:
+      "the deck's cloudDeck split (classifyRegime under its cover), the upper medium the kernels', its J with the correction summed in, the deck its ground at DECK_MODES",
+    cover: giantCover(referenceCase, false),
+    split: figures.split,
+    floorAltitudeM: recorded(figures.floorAltitudeM),
+    gated,
+    belowTheSplit: referenceCase.geometries
+      .filter((g) => !gated.includes(g.name))
+      .map((g) => g.name),
+    routed: recordImagesOf(asRecord(route), DECK_CASE),
+    routedRatios: recordRatiosOf(asRecord(route), DECK_CASE),
+    geometries: sectionOf(route, "geometries"),
+    byDeckModes: Object.fromEntries(
+      (["m < 3", "m < 6"] as const).map((name) => [name, judged(name)]),
+    ),
+    diffuseAtDeckModes: judged("diffuse at 8"),
+    floorAtOne: judged("floor at 1"),
+    asAnEnvelope: { split: figures.envelopeSplit, ...judged("as an envelope") },
+    envelopeFloorAtOne: judged("as an envelope, floor at 1"),
+    floorCoAlbedo: figures.floorCoAlbedo,
+    planeAlbedo: figures.planeAlbedo.map(([name, r, g, b]) => {
+      const reading = fluxes.find((f) => f.name === name);
+      if (reading === undefined) {
+        throw new Error(`the reference has no aggregate ${name}`);
+      }
+      const client: Rgb = [r, g, b];
+      return [
+        name,
+        r,
+        g,
+        b,
+        ...recordedRgb(reading.flux),
+        ...channels.map((c) => recorded(client[c] / reading.flux[c])),
+        ...channels.map((c) =>
+          aggregateRefusal(reading, c) !== undefined
+            ? "refused"
+            : aggregatePasses(client[c], reading, c)
+              ? "pass"
+              : "miss",
+        ),
+      ];
+    }),
+    deckShare: [...images].map(([image, sums]) => {
+      const share = (c: 0 | 1 | 2): number => {
+        const lit = sums[c];
+        return recorded(lit > 0 ? 1 - (sums[c + 3] ?? Number.NaN) / lit : 0);
+      };
+      return [image, share(0), share(1), share(2)];
+    }),
+    tables: figures.tables,
+    twinValues: Object.fromEntries(
+      DECK_VARIANTS.map((name) => [
+        name,
+        [...variant(name)].map(([key, rgb]) => [key, rgb[0], rgb[1], rgb[2]]),
+      ]),
+    ),
+  };
+}
+
 /**
  * The record of both paths' values, the route at the cut modes and each case's tables (the module's
- * remarks), each case's last two by `modes` and `tables`.
+ * remarks), each case's last two by `modes` and `tables`, and `giant-deck`'s gate through its deck,
+ * `deck` (R08.T15.a.2).
  */
 function vectorGateRecord(
   paths: Readonly<Record<PathName, TwinValues>>,
   modes: (caseName: string) => unknown,
   tables: (caseName: string) => unknown,
+  deck: unknown,
 ): Record<string, unknown> {
   const routed = vectorRecordOf(paths.routed);
   const diagnostic = vectorRecordOf(paths.diagnostic);
   const uncorrected = caseGateRecord(CASES, C1_VALUES, { writer: WRITER, radiance: "vector" });
   return {
     description:
-      "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; and each case's tables. Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
+      "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
     format: VECTOR_GATE_FORMAT,
     cases: Object.fromEntries(
       CASES.map(({ referenceCase }) => {
@@ -569,6 +981,175 @@ function vectorGateRecord(
     routedMarsAureole: sectionOf(routed, "marsAureole"),
     routedSaturnOblateness: sectionOf(routed, "saturnOblateness"),
     twinValues: { routed: rowsOf(paths.routed), diagnostic: rowsOf(paths.diagnostic) },
+    deck,
+  };
+}
+
+/**
+ * `giant-deck`'s deck baked, by hand (the module's remarks): the route's bake and the variants'
+ * (the sky-lit radiance at the deck's modes, the floor white, split as an envelope over its black
+ * floor and its white), each with its correction over the deck, their twins over the gated
+ * geometries, and the deck's section.
+ */
+function deckGateBaked(): Record<string, unknown> {
+  const referenceCase = thickReferenceCases()[DECK_CASE];
+  const lights = referenceCaseBakeLights(referenceCase);
+  const body = twinBakeBody(referenceCase.figure);
+  const split = giantSplit(referenceCase, false);
+  const envelopeSplit = giantSplit(referenceCase, true);
+  const route = bakeKeptDeck(referenceCase, lights, body, split);
+  const wide = bakeKeptDeck(referenceCase, lights, body, split, {
+    band: { diffuseModes: DECK_MODES },
+  });
+  const white = bakeKeptDeck(referenceCase, lights, body, split, { deck: { floorAlbedo: 1 } });
+  const envelope = bakeKeptDeck(referenceCase, lights, body, envelopeSplit);
+  const whiteEnvelope = bakeKeptDeck(referenceCase, lights, body, envelopeSplit, {
+    deck: { floorAlbedo: 1 },
+  });
+  const gateCase = deckGateCase(referenceCase, split.altitudeM);
+  const envelopeCase = deckGateCase(referenceCase, envelopeSplit.altitudeM);
+  const twinOf = (
+    tables: ReadonlyArray<DeckTables>,
+    correction: ReadonlyArray<PolarisationTable> | null,
+    at: GateCase = gateCase,
+  ): Map<string, Rgb> =>
+    deckValuesOf(caseTwin(referenceCase, { deck: { tables, polarisation: correction } }), at);
+  const values = new Map<DeckVariant, TwinValues>([
+    ["route", twinOf(route.tables, route.correction)],
+    ["m < 3", twinOf(cutDeckModes(route.tables, 3), route.correction)],
+    ["m < 6", twinOf(cutDeckModes(route.tables, 6), route.correction)],
+    ["diffuse at 8", twinOf(wide.tables, wide.correction)],
+    ["floor at 1", twinOf(white.tables, white.correction)],
+    ["as an envelope", twinOf(envelope.tables, envelope.correction, envelopeCase)],
+    [
+      "as an envelope, floor at 1",
+      twinOf(whiteEnvelope.tables, whiteEnvelope.correction, envelopeCase),
+    ],
+    ["no deck", twinOf(darkDeck(route.tables), route.correction)],
+  ]);
+  const [first] = route.tables;
+  const upper = upperMediumOf(referenceCase.medium, split.altitudeM);
+  const above = packThickTable(
+    deckAboveTables(route.tables),
+    kernelMedium(upper),
+    route.correction === null
+      ? null
+      : { bands: deckCorrectionAbove(route.correction, split.altitudeM), medium: upper },
+  );
+  return deckSectionOf(values, {
+    split,
+    envelopeSplit,
+    floorAltitudeM: first?.floorAltitudeM ?? Number.NaN,
+    floorCoAlbedo: floorCoAlbedoOf(route, body),
+    planeAlbedo: deckPlaneAlbedoOf(route, body),
+    tables: {
+      bands: route.tables.length,
+      slots: first?.slots.length ?? 0,
+      modes: first?.modes ?? 0,
+      diffuseModes: first?.diffuseModes ?? 0,
+      deckBytes: deckTableBytes(packDeckTable(route.tables)),
+      aboveBytes: thickTableBytes(above),
+      deckSolves: first?.slots[0]?.solves ?? 0,
+      aboveSolves: first?.above.slots[0]?.solves ?? 0,
+      corrected: route.correction !== null,
+      // The phase's least entry by channel, sr⁻¹: a moments term's series less its delta may ring.
+      phaseLeast: [0, 1, 2].map((c) =>
+        recorded(
+          Math.min(
+            ...(first?.slots ?? []).flatMap((slot) =>
+              Array.from(slot.phase).filter((_, i) => i % 3 === c),
+            ),
+          ),
+        ),
+      ),
+    },
+  });
+}
+
+/** The committed record's deck section, read back. */
+function committedDeck(): unknown {
+  return Reflect.get(committed, "deck");
+}
+
+/** The committed deck section's twin values, by variant. */
+function committedDeckValues(): Map<DeckVariant, TwinValues> {
+  const held = sectionOf(committedDeck(), "twinValues");
+  return new Map(
+    DECK_VARIANTS.map((name) => {
+      const rows: unknown = sectionOf(held, name);
+      const values = new Map<string, Rgb>();
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          if (
+            Array.isArray(row) &&
+            typeof row[0] === "string" &&
+            typeof row[1] === "number" &&
+            typeof row[2] === "number" &&
+            typeof row[3] === "number"
+          ) {
+            values.set(row[0], [row[1], row[2], row[3]]);
+          }
+        }
+      }
+      return [name, values];
+    }),
+  );
+}
+
+/**
+ * Three numbers at `at` of a committed row.
+ *
+ * @throws Error for a row whose values there are not numbers.
+ */
+function rgbOfRow(row: ReadonlyArray<unknown>, at: number): Rgb {
+  const [r, g, b] = [row[at], row[at + 1], row[at + 2]];
+  if (typeof r !== "number" || typeof g !== "number" || typeof b !== "number") {
+    throw new Error("vectorGate.json's deck section holds a value not a number");
+  }
+  return [r, g, b];
+}
+
+/**
+ * The committed deck section's bakes' figures, read back as its JSON holds them.
+ *
+ * @throws Error for a record whose deck section lacks one.
+ */
+function committedDeckFigures(): DeckFigures {
+  const deck = committedDeck();
+  const splitOf = (value: unknown): DeckSplit => {
+    const altitudeM: unknown = sectionOf(value, "altitudeM");
+    const floor: unknown = sectionOf(value, "floor");
+    if (typeof altitudeM !== "number" || (floor !== "ground" && floor !== "envelope")) {
+      throw new Error("vectorGate.json's deck section holds no split");
+    }
+    return { altitudeM, floor };
+  };
+  const floorAltitudeM: unknown = sectionOf(deck, "floorAltitudeM");
+  const coAlbedo: unknown = sectionOf(deck, "floorCoAlbedo");
+  const planeAlbedo: unknown = sectionOf(deck, "planeAlbedo");
+  const tables: unknown = sectionOf(deck, "tables");
+  if (
+    typeof floorAltitudeM !== "number" ||
+    !Array.isArray(coAlbedo) ||
+    !Array.isArray(planeAlbedo) ||
+    typeof tables !== "object" ||
+    tables === null
+  ) {
+    throw new Error("vectorGate.json's deck section holds no bakes' figures");
+  }
+  return {
+    split: splitOf(sectionOf(deck, "split")),
+    envelopeSplit: splitOf(sectionOf(sectionOf(deck, "asAnEnvelope"), "split")),
+    floorAltitudeM,
+    floorCoAlbedo: rgbOfRow(coAlbedo, 0),
+    planeAlbedo: planeAlbedo.map((row: unknown) => {
+      if (!Array.isArray(row) || typeof row[0] !== "string") {
+        throw new Error("vectorGate.json's deck section holds a plane albedo row not one");
+      }
+      const [r, g, b] = rgbOfRow(row, 1);
+      return [row[0], r, g, b] as const;
+    }),
+    tables: Object.fromEntries(Object.entries(tables)),
   };
 }
 
@@ -610,6 +1191,7 @@ describe.skipIf(!BAKES)("R08.T14.f's vector gates, baked (by hand)", () => {
         paths,
         cutModesRecord(cuts),
         (name) => tables.get(name) ?? null,
+        deckGateBaked(),
       );
       await expect(expectCommittedTable(record, committed, RECORD_FILE)).resolves.toBeUndefined();
     },
@@ -637,6 +1219,7 @@ describe.skipIf(BAKES)("R08.T14.f's vector gates' record", () => {
         { routed: committedValues("routed"), diagnostic: committedValues("diagnostic") },
         (name) => committedCaseSection(name, "routedByModes"),
         (name) => committedCaseSection(name, "tables"),
+        deckSectionOf(committedDeckValues(), committedDeckFigures()),
       );
       await expect(expectCommittedTable(record, committed, RECORD_FILE)).resolves.toBeUndefined();
     },

@@ -39,6 +39,7 @@ import { ScriptedOpticsWorker } from "../../test/scriptedOpticsWorker";
 import { between, seededRandom } from "../../test/seededRandom";
 import {
   patternedCorrection,
+  patternedDeckCorrection,
   patternedDeckTables,
   patternedThickBake,
 } from "../../test/thickTables";
@@ -68,6 +69,7 @@ import {
   clampedGroundAlbedo,
 } from "./atmosphereInput";
 import { EARTH_COLUMN, R05_EARTH_REFERENCE } from "./earth";
+import type { MediumTerm } from "./medium";
 import { ATMOSPHERE_ANSWER_UNREADABLE, type AtmosphereLabel } from "./labels";
 import { keptBakeLightsOf, type OpticsRequest } from "./opticsMessages";
 import {
@@ -95,7 +97,12 @@ import { type MsSourceTable, thickBakeBands } from "./thick/bake";
 import { spectralColumnOf } from "./thick/columnLayout";
 import type { PolarisationTable } from "./thick/polarisation";
 import { keptColumnOf, sphereBakeBody } from "./thick/keptBake";
-import { type AtmosphereRegime, type BodyCover, THICK_REASON } from "./thick/regime";
+import {
+  type AtmosphereRegime,
+  type BodyCover,
+  envelopeFloorM,
+  THICK_REASON,
+} from "./thick/regime";
 import { correctionRouted, thickBakeRouted } from "./thick/routing";
 import { channelSource, type SpectralColumn } from "./thick/spectralColumn";
 
@@ -1550,17 +1557,7 @@ describe("a cloud deck's bake (R08.T15.a.2)", () => {
     ]);
     const bands = tables.plan.bands;
     const decks = patternedDeckTables(bands, tables.built.medium, 1, 5_000);
-    // The correction over the deck, its altitudes from the split up, as the deck's bake lays it.
-    const correction = patternedCorrection(bands, tables.built.medium, 1).map(
-      (band): PolarisationTable => ({
-        band: band.band,
-        altitudesM: band.altitudesM.map((at) => at + 5_000),
-        sunCosines: band.sunCosines,
-        travelCosines: band.travelCosines,
-        modes: band.modes,
-        slots: band.slots,
-      }),
-    );
+    const correction = patternedDeckCorrection(bands, tables.built.medium, 1, 5_000);
     latestDeck(h).settle({ kind: "baked", tables: decks, correction });
     await microtasks();
     const baked = view.noteFrame({
@@ -1582,7 +1579,7 @@ describe("a cloud deck's bake (R08.T15.a.2)", () => {
     ]);
   });
 
-  it("splits an envelope's deck at its floor, and draws an envelope split at its ground as before", () => {
+  it("draws an envelope whose τ never reaches the split's as before: no deck stands at its ground", () => {
     const h = harness(undefined, routedDeck);
     note(
       h,
@@ -1595,6 +1592,84 @@ describe("a cloud deck's bake (R08.T15.a.2)", () => {
       { kind: "cloudDeck", deckAltitudeM: 0 },
       0,
     ]);
+  });
+
+  it("splits an envelope at its floor, its deck read to the envelope's own", () => {
+    const h = harness(undefined, routedDeck);
+    // A grey cloud of τ 20 to the datum over R05's Earth: τ 10 is reached inside the air.
+    const cloud: MediumTerm = {
+      name: "aerosol:cloud",
+      density: { kind: "exponential", scaleHeightM: 2_000 },
+      scattering: [1e-2, 1e-2, 1e-2],
+      absorption: [0, 0, 0],
+      phase: { kind: "cornette-shanks", asymmetry: 0.8 },
+    };
+    const medium = { ...R05_EARTH_REFERENCE, terms: [...R05_EARTH_REFERENCE.terms, cloud] };
+    const clouded: BuiltAtmosphere = {
+      ...keptEarth(),
+      medium,
+      sources: medium.terms.map(channelSource),
+    };
+    note(
+      h,
+      [
+        kept(A, {
+          kind: "medium",
+          built: clouded,
+          labels: [],
+          cover: { ...COVER, envelope: true },
+        }),
+      ],
+      0,
+      null,
+    );
+    const floorM = envelopeFloorM(medium);
+    expect(floorM).toBeGreaterThan(0);
+    expect(latestDeck(h).ask.split).toEqual({ altitudeM: floorM, floor: "envelope" });
+  });
+
+  it("falls back to APPROXIMATE with its reason where the deck's bake fails, giving its tables nothing and raising no fault", async () => {
+    const h = harness(undefined, routedDeck);
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    const body = [kept(A, { kind: "medium", built, labels: [], cover: COVER })];
+    note(h, body, 0, null);
+    latestDeck(h).settle({ kind: "failed", message: "a deck's solve refused a layer" });
+    await microtasks();
+    const report = note(h, body, 1, null);
+    expect([
+      report.labels,
+      [...report.reasons],
+      report.problems.size,
+      madeAt(h, 0).decks.length,
+      errors.mock.calls.length,
+    ]).toEqual([["atmosphereApproximate"], [[A, [THICK_REASON]]], 0, 0, 1]);
+  });
+
+  it("cancels the deck's bake when the body's cover moves it off its deck", () => {
+    const h = harness(undefined, routedDeck);
+    note(h, [kept(A, { kind: "medium", built, labels: [], cover: COVER })], 0, null);
+    const deck = latestDeck(h);
+    note(h, [kept(A, { kind: "medium", built, labels: [] })], 1, null);
+    expect([deck.settled, h.cache.entryOf(A)?.regime, h.builder.decks.length]).toEqual([
+      true,
+      { kind: "thickScattering" },
+      1,
+    ]);
+  });
+
+  it("gives its tables the deck at a later frame where the device was lost as it landed", async () => {
+    const h = harness(undefined, routedDeck);
+    const body = [kept(A, { kind: "medium", built, labels: [], cover: COVER })];
+    note(h, body, 0, null);
+    const tables = madeAt(h, 0);
+    tables.deckThrows = new EngineUnavailable("createTexture");
+    const decks = patternedDeckTables(tables.plan.bands, tables.built.medium, 1, 5_000);
+    latestDeck(h).settle({ kind: "baked", tables: decks, correction: null });
+    await microtasks();
+    const during = tables.decks.length;
+    tables.deckThrows = null;
+    note(h, body, 1, null);
+    expect([during, tables.decks.at(-1) === decks]).toEqual([0, true]);
   });
 });
 

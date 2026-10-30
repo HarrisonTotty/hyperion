@@ -47,17 +47,20 @@
  *   E_p = e^(−τ′_above x) (1 − e^(−τ′_p x)), x = 1 ÷ μ₀ + 1 ÷ μ, the plane-parallel slab's own.
  *   Taken out, a cloud top's single-scattering peaks no longer ask the table for its modes: on a
  *   Cornette–Shanks g 0.75 deck, m ≤ 7 of the rest misses ρ by 0.45% where μ and μ₀ are at least
- *   0.25 (research advice of 2026-10-29), where the whole reflectance at m ≤ 7 misses by 1.9%, and a
- *   Mie deck's by 15%.
+ *   0.25 (main's research advice of 2026-10-29; pod, 4 vCPU), where the whole reflectance at m ≤ 7
+ *   misses by 1.9%, and a Mie deck's by 15–17%.
  * - _The exact single scattering_ (T. Nakajima and M. Tanaka, JQSRT 40 (1988) 51–69, their TMS, the
- *   truncated single scattering replaced by the full phase function's on the delta-M layers): ρ_TMS =
+ *   truncated single scattering replaced by the full phase function's on the delta-M layers, as the
+ *   DISORT report restates it: K. Stamnes, S.-C. Tsay, W. Wiscombe and I. Laszlo, DISORT v1.1
+ *   (2000), §3.6.2, eq. 68): ρ_TMS =
  *   π Σ_p (ω′_p ÷ (1 − f_p)) p_p(Θ) E_p ÷ (μ₀ + μ), p_p the layer's whole phase function per
  *   steradian, its terms' mixed by their scattering, so that ω′ ÷ (1 − f) per unit of τ′ is the
  *   true scattering per unit of τ. It is stored separable, G(μ, μ₀) p(Θ) ({@link deckSingleGeometry}):
  *   G = π Σ_p (ω′_p ÷ (1 − f_p)) E_p ÷ (μ₀ + μ), and p the layers' phases mixed by G's weights at
  *   the nadir pair, μ = μ₀ = 1, a stated approximation for a deck of several modes at different
- *   depths (the research advice measured ≤ 0.012% on three decks of one mode; R08.T15.a.2 the rest,
- *   plan R08's records), on the u = √(θ ÷ π) grid of the kernels' phase tables
+ *   depths (the research advice measured ≤ 0.012% of ρ on three decks of one mode; R08.T15.a.2
+ *   ≤ 0.024% after the bins' conversion, on the NH₃-like envelope, `giant-deck` and a deck of CS
+ *   g 0.85 over g 0.4, 2026-10-30), on the u = √(θ ÷ π) grid of the kernels' phase tables
  *   ({@link DECK_PHASE_U}).
  *
  * **Stated approximations.**
@@ -74,6 +77,10 @@
  *   (`diffuseModes`, a test's option, takes it to the deck's).
  * - The exact single scattering is separable, G(μ, μ₀) p(Θ), each bin's phase mixed by G's weights
  *   at the nadir pair, and the bins' into a channel's by their converted weights there.
+ * - The deck's reflection of the aureole, in `diffuse`, keeps delta-M's truncated reflectance at
+ *   the bake's modes, not the exact single scattering and {@link DECK_MODES}: light of about
+ *   τ_s (f − f_c) ÷ μ₀ of the beam over the deck (the science check's estimate, under 1% for a
+ *   thin haze above it, more at low suns; not measured).
  * - An envelope's floor is black: a conservative deck of g 0.8 read to τ 1,000 ÷ s loses 0.9–1.3%
  *   of its incident flux through it (measured, the four bands of a Saturn-class figure).
  *
@@ -94,7 +101,7 @@
  *   `diffuse` add up to the deck's radiance exactly where a bin's gases take several terms;
  * - and the exact single scattering's G, its beam's G_β = T_k G term by term, and its phase per
  *   channel, so that the deck's upward radiance per unit of the star's irradiance is
- *   (μ₀ ÷ π) Σ_m (βρ^m cos mΔφ + G_β p(Θ)) + Σ_m D^m cos mΔφ.
+ *   (μ₀ ÷ π) (Σ_m βρ^m cos mΔφ + G_β p(Θ)) + Σ_m D^m cos mΔφ.
  * - Below the horizontal the beam's tables are 0, since no beam reaches the deck there.
  *
  * **Below the deck** (R08.T15.b.1; {@link BelowDeckTable}). Under a deck over a surface the sky and
@@ -174,7 +181,7 @@ export const DECK_LAYERS = 32;
 /**
  * The deck's own tables' azimuthal modes, m = 0 … 7 (R08.T15.a.2; main's ruling 2 of 2026-10-29): of
  * its reflectance less its single scattering, which the kernels compute exactly (the module's
- * remarks). The research advice measured m ≤ 7 of it to miss ρ by 0.45–0.98% at μ, μ₀ ≥ 0.25 and
+ * remarks). The research advice measured m ≤ 7 of it to miss ρ by 0.45–1.0% at μ, μ₀ ≥ 0.25 and
  * 3.8–7.9% at ≥ 0.1 on three decks, m ≤ 5 by 0.9–2.7% and 11–23%; the `giant-deck` gate is recorded
  * at 3, 6 and 8. The upper medium's J and its coupling to the deck keep `bake.ts`'s
  * `THICK_BAKE_MODES`.
@@ -564,8 +571,9 @@ function layerEscapes(layers: ReadonlyArray<OrdinateLayer>, mu: number, mu0: num
 /**
  * The single scattering of a slab's layers as their own discrete-ordinates solve holds it
  * (`deckReflectance`'s, the module's remarks): per mode m = 0 … `maxMode`, ρ_ss^m(μ, μ′) =
- * ((2 − δ_m0) ÷ 4) Σ_p ω_p P_p^m(μ, −μ′) E_p ÷ (μ′ + μ), P_p^m = Σ_l (2l + 1) χ_l Λ_l^m(μ) Λ_l^m(−μ′)
- * over the layer's moments the solve takes (χ₀ … χ_{NSTR−1}), the slab's beam plane-parallel at μ′
+ * ((2 − δ_m0) ÷ 4) Σ_p ω′_p P′_p^m(μ, −μ′) E_p ÷ (μ′ + μ), P′_p^m = Σ_l (2l + 1) χ′_l Λ_l^m(μ)
+ * Λ_l^m(−μ′) over the layer's moments the solve takes (χ′₀ … χ′_{NSTR−1}; the primes the deck's
+ * delta-M scaling, its layers' as they are given), the slab's beam plane-parallel at μ′
  * of flux 1 normal to itself, at the outgoing and incident cosines of `cosines`.
  *
  * @param streams - NSTR of the slab's solve: its moments χ₀ … χ_{NSTR−1} are read.
@@ -721,7 +729,9 @@ export interface DeckSlot {
    * row-major, entry `((s V + v) M + m) 3 + c`: s the sun's cosine, v the upward view cosine (the
    * reflected light's direction of travel; an observer looking down at elevation −e reads
    * μ_v = sin e), m the mode of {@link DeckTables.modes}, c red, green, blue; 0 below the horizontal.
-   * Each bin's is the mean over its gases' terms by their weights. For a beam the bake did not carry.
+   * Each bin's is the mean over its gases' terms by their weights. The kernels read it, times
+   * their own transmittance, in place of {@link DeckSlot.beamReflection} for a beam the bake did
+   * not carry.
    */
   readonly reflectance: Float32Array;
   /**

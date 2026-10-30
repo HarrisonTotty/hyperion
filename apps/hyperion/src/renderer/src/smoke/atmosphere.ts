@@ -127,7 +127,6 @@ import {
   type TransmittanceTextures,
   TRANSMITTANCE_SIZE,
 } from "../view/atmosphere/tables";
-import type { PolarisationTable } from "../view/atmosphere/thick/polarisation";
 import type { PackedThickTable, ThickTableKind } from "../view/atmosphere/thick/read";
 import {
   type FarLimbShells,
@@ -175,7 +174,12 @@ import {
   saturnScaleHeightM,
   venusClassMedium,
 } from "../test/atmosphereFixtures";
-import { patternedCorrection, patternedDeckTables, patternedThickBake } from "../test/thickTables";
+import {
+  patternedCorrection,
+  patternedDeckCorrection,
+  patternedDeckTables,
+  patternedThickBake,
+} from "../test/thickTables";
 import type { MediumTemperature, ThermalScattering } from "../view/atmosphere/thermalSource";
 import type { TwinThermal } from "../view/atmosphere/tablesCpu";
 import {
@@ -2116,11 +2120,7 @@ async function checkFrameTwins(
  */
 interface ThickTwinBody {
   readonly name: string;
-  /**
-   * The thick table it draws over, `none` for the thin read (R08.T18.b's thermal forms), or `deck`
-   * for a deck's (R08.T15.a.2), the medium its upper medium.
-   */
-  readonly table: ThickTableKind | "none" | "deck";
+  readonly table: ThickTwinTable;
   readonly medium: AtmosphereMedium;
   readonly curves: AbsorberCurveSlots;
   readonly figure: SpheroidFigure;
@@ -2128,9 +2128,21 @@ interface ThickTwinBody {
   readonly frames: ReadonlyArray<TwinFrame>;
   /** Its column's temperature, where it draws the medium's own light (R08.T18.b). */
   readonly thermal?: MediumTemperature;
-  /** A deck's split, h\* in m over the body's datum (R08.T15.a.2): the figure is its datum. */
-  readonly deckAltitudeM?: number;
 }
+
+/**
+ * The table a {@link ThickTwinBody}'s frames draw over: a thick table of its kind, `none` for the
+ * thin read (R08.T18.b's thermal forms), or a deck's (R08.T15.a.2), the body's medium its upper
+ * medium and its figure the deck's datum.
+ */
+type ThickTwinTable =
+  | { readonly kind: ThickTableKind }
+  | { readonly kind: "none" }
+  | {
+      readonly kind: "deck";
+      /** The deck's split, h\* in m over the body's own datum. */
+      readonly deckAltitudeM: number;
+    };
 
 /**
  * R08.T14.c's frames: R08.T6.b's two (from 2 km at a sun 20° up with a surface 60 km ahead, and
@@ -2167,7 +2179,7 @@ export async function checkThickFrameTwinsEarth(
   await checkThickTwinBodies(engine, checks, twins, [
     {
       name: "R05's Earth",
-      table: "thick",
+      table: { kind: "thick" },
       medium: R05_EARTH_REFERENCE,
       curves: NO_ABSORBER_CURVES,
       figure: WGS84,
@@ -2194,7 +2206,7 @@ export async function checkCorrectionFrameTwinsEarth(
   await checkThickTwinBodies(engine, checks, twins, [
     {
       name: "R05's Earth",
-      table: "correction",
+      table: { kind: "correction" },
       medium: R05_EARTH_REFERENCE,
       curves: NO_ABSORBER_CURVES,
       figure: WGS84,
@@ -2223,7 +2235,7 @@ export async function checkThickFrameTwinsSaturn(
   await checkThickTwinBodies(engine, checks, twins, [
     {
       name: "the Saturn-class figure",
-      table: "thick",
+      table: { kind: "thick" },
       medium: saturnClassMedium(),
       curves: NO_ABSORBER_CURVES,
       figure: SATURN_SPHEROID,
@@ -2262,7 +2274,7 @@ export async function checkThermalFrameTwins(
   await checkThickTwinBodies(engine, checks, twins, [
     {
       name: "the measured Earth at 3,000 K",
-      table: "none",
+      table: { kind: "none" },
       medium: EARTH_REFERENCE,
       curves: EARTH_REFERENCE_CURVES,
       figure: WGS84,
@@ -2272,7 +2284,7 @@ export async function checkThermalFrameTwins(
     },
     {
       name: "the measured Earth at 3,000 K",
-      table: "thick",
+      table: { kind: "thick" },
       medium: EARTH_REFERENCE,
       curves: EARTH_REFERENCE_CURVES,
       figure: WGS84,
@@ -2317,23 +2329,21 @@ export async function checkDeckFrameTwins(
   await checkThickTwinBodies(engine, checks, twins, [
     {
       name: "R05's Earth over a deck",
-      table: "deck",
+      table: { kind: "deck", deckAltitudeM: EARTH_DECK_ALTITUDE_M },
       medium: upperMediumOf(R05_EARTH_REFERENCE, EARTH_DECK_ALTITUDE_M),
       curves: NO_ABSORBER_CURVES,
       figure: deckDatumOf(WGS84, EARTH_GRAVITY, EARTH_DECK_ALTITUDE_M),
       gravity: EARTH_GRAVITY,
       frames: DECK_TWIN_FRAMES,
-      deckAltitudeM: EARTH_DECK_ALTITUDE_M,
     },
     {
       name: "the Saturn-class figure over its deck",
-      table: "deck",
+      table: { kind: "deck", deckAltitudeM: saturnDeckM },
       medium: upperMediumOf(saturnClassMedium(), saturnDeckM),
       curves: NO_ABSORBER_CURVES,
       figure: deckDatumOf(SATURN_SPHEROID, saturn.gravity, saturnDeckM),
       gravity: saturn.gravity,
       frames: DECK_TWIN_FRAMES,
-      deckAltitudeM: saturnDeckM,
     },
   ]);
 }
@@ -2360,7 +2370,8 @@ async function checkThickTwinBodies(
         // The check's head names the table it draws over.
         let task: string;
         let table: string;
-        switch (body.table) {
+        const drawn = body.table;
+        switch (drawn.kind) {
           case "thick":
             withThickTable(atmosphere.tables, body.curves.length, body.thermal !== undefined);
             task = "R08.T14.c";
@@ -2376,7 +2387,7 @@ async function checkThickTwinBodies(
             table = "";
             break;
           case "deck":
-            withDeckTable(atmosphere.tables, body.curves.length, body.deckAltitudeM ?? Number.NaN);
+            withDeckTable(atmosphere.tables, body.curves.length, drawn.deckAltitudeM);
             task = "R08.T15.a.2";
             table = ", over the deck";
             break;
@@ -3122,22 +3133,21 @@ export async function checkMarchOneBand(
  * in, one layer a band and light slot of `slots` (at least one): the deck's every series, G, G_β
  * and its phase in every texel of its read, and the march's bare ground read through them.
  */
-function withDeckTable(tables: AtmosphereTables, slots: number, deckAltitudeM: number): void {
+export function withDeckTable(
+  tables: AtmosphereTables,
+  slots: number,
+  deckAltitudeM: number,
+): void {
   const count = Math.max(1, slots);
   tables.setDeckTables(
     patternedDeckTables(tables.plan.bands, kernelMedium(tables.medium), count, deckAltitudeM),
   );
-  // The correction over the deck stands on the J's altitudes from the split up, to the bit, as the
-  // deck's bake lays it; brought to the split as the deck's J is.
-  const correction = patternedCorrection(tables.plan.bands, tables.medium, count).map(
-    (band): PolarisationTable => ({
-      band: band.band,
-      altitudesM: band.altitudesM.map((h) => h + deckAltitudeM),
-      sunCosines: band.sunCosines,
-      travelCosines: band.travelCosines,
-      modes: band.modes,
-      slots: band.slots,
-    }),
+  // The correction over the deck, brought to the split as the deck's J is.
+  const correction = patternedDeckCorrection(
+    tables.plan.bands,
+    tables.medium,
+    count,
+    deckAltitudeM,
   );
   tables.setPolarisationCorrection(deckCorrectionAbove(correction, deckAltitudeM));
 }

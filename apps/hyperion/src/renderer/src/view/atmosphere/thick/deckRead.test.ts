@@ -23,7 +23,7 @@ import {
   DECK_TEXELS_A_CELL,
   deckAboveTables,
   deckCorrectionAbove,
-  deckDatumDeparture,
+  deckDatumDepartureM,
   deckDatumOf,
   deckGroundInto,
   deckReadScratch,
@@ -415,9 +415,9 @@ describe("the kernels' datum over a deck (R08.T15.a.2)", () => {
     const raised = deckDatumOf(SATURN_SPHEROID, gravity, splitM);
     expect(raised.equatorialRadiusM).toBeGreaterThan(SATURN_SPHEROID.equatorialRadiusM);
     for (const latitude of [0, Math.PI / 2]) {
-      expect(Math.abs(deckDatumDeparture(SATURN_SPHEROID, gravity, splitM, latitude))).toBeLessThan(
-        1e-6,
-      );
+      expect(
+        Math.abs(deckDatumDepartureM(SATURN_SPHEROID, gravity, splitM, latitude)),
+      ).toBeLessThan(1e-6);
     }
   });
 
@@ -426,7 +426,7 @@ describe("the kernels' datum over a deck (R08.T15.a.2)", () => {
     let worstScale = 0;
     for (let degrees = 0; degrees <= 90; degrees += 1) {
       const latitude = (degrees * Math.PI) / 180;
-      const departure = deckDatumDeparture(SATURN_SPHEROID, gravity, splitM, latitude);
+      const departure = deckDatumDepartureM(SATURN_SPHEROID, gravity, splitM, latitude);
       const level = splitM / gravityRatio(gravity, latitude);
       worst = Math.max(worst, Math.abs(departure) / level);
       worstScale = Math.max(
@@ -436,9 +436,15 @@ describe("the kernels' datum over a deck (R08.T15.a.2)", () => {
     }
     // Measured 2026-10-30: 1.73% of h* ÷ s at most, at 46.5°, whatever the split (the spheroid's
     // height and the level surface's both go as h*), 0.012 of the local scale height H ÷ s for this
-    // split, so that the column above the deck reads some 1.2% off there.
+    // split, so that the medium at a given height above the deck's top reads some 1.2% dense there.
     expect(worst).toBeLessThan(0.02);
     expect(worstScale).toBeLessThan(0.02);
+  });
+
+  it("refuses a split at or below the datum, or not finite", () => {
+    for (const split of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => deckDatumOf(SATURN_SPHEROID, gravity, split)).toThrow(RangeError);
+    }
   });
 
   it("is a sphere's radius raised by the split on a body with no spheroid", () => {

@@ -16,10 +16,11 @@
  * the poles, (a + h\* ÷ s_e, c + h\* ÷ s_p), the form the kernels' top and layer-edge shells take
  * (R08.T6.f), so that every kernel's ground test, its slicing and its heights take that surface
  * with no line of theirs changed. Between the equator and the poles the spheroid departs from the
- * level surface by {@link deckDatumDeparture}: on a Saturn-class figure by at most 1.7% of h\* ÷ s,
- * at 46.5° and whatever the split, 0.012 of the local scale height for a split at 0.5 bar, which
- * reads the column above the deck some 1.2% off there (`deckRead.test.ts`), a stated approximation
- * over Design note 17's 1% of geometry.
+ * level surface by {@link deckDatumDepartureM}: on a Saturn-class figure by at most 1.7% of h\* ÷ s,
+ * at 46.5° and whatever the split, 0.012 of the local scale height for a split at 0.5 bar: the
+ * column from the deck's top up is whole, but the top lies 0.012 H ÷ s off its level surface there,
+ * so that the medium at a given height above it reads some 1.2% dense (`deckRead.test.ts`), a
+ * stated approximation over Design note 17's 1% of geometry (pending the owner's ruling).
  *
  * **What the table holds** ({@link packDeckTable}), per band and light slot, at the deck's sun
  * cosines (the thick table's 46 rows) and its eight upward view cosines, per channel, each mode of
@@ -88,12 +89,12 @@ export const DECK_TABLE_VIEW_COSINES = 8;
 export const DECK_TABLE_PHASE_ENTRIES = 256;
 /** A cell's texels: the eight ρᵐ − ρ_ssᵐ, the eight βρᵐ, the eight Dᵐ, G and G_β. */
 export const DECK_TEXELS_A_CELL = 3 * DECK_TABLE_MODES + 2;
-/** The texel of a cell where each series begins (the module's remarks). */
-export const DECK_CELL_REFLECTANCE = 0;
-export const DECK_CELL_BEAM = DECK_TABLE_MODES;
-export const DECK_CELL_DIFFUSE = 2 * DECK_TABLE_MODES;
-export const DECK_CELL_SINGLE = 3 * DECK_TABLE_MODES;
-export const DECK_CELL_SINGLE_BEAM = 3 * DECK_TABLE_MODES + 1;
+// The texel of a cell where each series begins (the module's remarks), as `deckRead.wgsl` holds them.
+const DECK_CELL_REFLECTANCE = 0;
+const DECK_CELL_BEAM = DECK_TABLE_MODES;
+const DECK_CELL_DIFFUSE = 2 * DECK_TABLE_MODES;
+const DECK_CELL_SINGLE = 3 * DECK_TABLE_MODES;
+const DECK_CELL_SINGLE_BEAM = 3 * DECK_TABLE_MODES + 1;
 /** The texels a row: 208, eight cells of 26. */
 export const DECK_TABLE_WIDTH = DECK_TABLE_VIEW_COSINES * DECK_TEXELS_A_CELL;
 /** The phase's first row, after the 46 sun cosine rows. */
@@ -609,7 +610,7 @@ export function deckDatumOf(
  * m: its height above the body's datum along the datum's normal there, less h\* ÷ s(φ), the level
  * surface's (Design note 17). 0 at the equator and the poles.
  */
-export function deckDatumDeparture(
+export function deckDatumDepartureM(
   figure: SpheroidFigure,
   gravity: BodyGravity,
   splitM: number,

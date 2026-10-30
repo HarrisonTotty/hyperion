@@ -544,10 +544,50 @@ export function prepareDeck(
   split: DeckSplit, // the split's altitude (`AtmosphereRegime`'s deckAltitudeM) and its floor
   options?: DeckOptions, // the grid, the sums' options, the deck's layers
 ): PreparedDeck;
-/** Above: the deck as a reflecting boundary (its ρ^m and its sky-lit radiance, the solver's over
- * the deck's layers) and J_ms over it; below: downwelling radiance (R08.T15.b.1). One latitude
- * band. */
-export function bakeDeck(prepared: PreparedDeck, body: ThickBakeBody, band: number): DeckTables;
+/** Above: the deck as a reflecting boundary (R08.T15.a.2: at DECK_MODES = 8 its reflectance less
+ * its delta-M single scattering, and its beam's; its sky-lit radiance at the bake's modes; the exact
+ * single scattering's G, G_β and phase p(Θ), Nakajima and Tanaka's TMS) and J_ms over it on the
+ * grid's 46 rows; below: downwelling radiance at the daylit rows (R08.T15.b.1). One latitude band.
+ * `options.diffuseModes` is a test's (the sky-lit radiance to the deck's modes). */
+export function bakeDeck(
+  prepared: PreparedDeck,
+  body: ThickBakeBody,
+  band: number,
+  options?: DeckBandOptions,
+): DeckTables;
+/** The deck read (R08.T15.a.2, `thick/deckRead.ts`): the kernels draw the upper medium over the
+ * deck's datum, its J above it as T14.c's table, and the deck's own tables at their ground. */
+export function upperMediumOf(medium: AtmosphereMedium, splitM: number): AtmosphereMedium;
+export function deckDatumOf(
+  figure: SpheroidFigure,
+  gravity: BodyGravity,
+  splitM: number,
+): SpheroidFigure;
+export function deckAboveTables(bands: ReadonlyArray<DeckTables>): MsSourceTable[];
+export function deckCorrectionAbove(
+  bands: ReadonlyArray<PolarisationTable>,
+  splitM: number,
+): PolarisationTable[];
+/** `deckTable`, rgba32uint of f32 bits, 208 × 48 texels, 159,744 B a band and light. */
+export function packDeckTable(bands: ReadonlyArray<DeckTables>): PackedDeckTable;
+/** The twin's read, `deckRead.wgsl`'s `deckGroundAt`: per unit of the source's weight. */
+export function deckGroundInto(
+  table: PackedDeckTable,
+  lnBands: ArrayLike<number>,
+  s: number,
+  muSun: number,
+  muTravel: number,
+  horizontal: number,
+  cosTheta: number,
+  slot: number,
+  toSun: Rgb,
+  scratch: DeckReadScratch,
+  out: [number, number, number],
+): void;
+// The job: `deck-bake` (`opticsMessages.ts`), `OpticsWorkerPool.bakeDeck(ask: DeckBakeAsk): DeckBake`,
+// answered `deck-baked` { tables, correction } or `deck-bake-failed`; `bakeKeptDeck` directly.
+// The tables: `AtmosphereTables.setDeckTables(bands)`, `deckTable`, `deckPacked`, `deckBytes`;
+// the kernels: `hillaire.ts`'s `withDeckRead`, `RAY_MARCH_DECK_KERNEL` and its three siblings.
 /** Everything of the correction but the band (R08.T14.e, as built): the column's optics with each
  * term's matrix moments at the render channels (and 570 nm for the layers), the thick bake's
  * layers, and each light's exponential sums in the channels' bins. */
@@ -575,7 +615,7 @@ export function needsPolarisationCorrection(column: SpectralColumn): boolean;
 Files: `thick/regime.ts` (R08.T13), `thick/discreteOrdinates.ts` and `thick/bake.ts` (R08.T14),
 with `thick/spectralColumn.ts`, `thick/expSum.ts`, `thick/sphericalBeam.ts` and
 `thick/binConversion.ts` (R08.T14.b), `thick/polarisation.ts` (R08.T14.e), `thick/deck.ts`
-(R08.T15).
+(R08.T15), `thick/deckRead.ts` and `shaders/deckRead.wgsl` (R08.T15.a.2).
 
 ### For R07's analytic disc (`discReflectance.ts`)
 
@@ -5893,7 +5933,8 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       with the deck as a depolarising lower boundary.
     - T15.a.2, after R08.T12.b.2's `giant-deck` reference and R08.T14.f: the twin's and the
       kernels' read of the deck as the upper medium's ground (with `just test-render`), the optics
-      worker's job, and the `giant-deck` gate against the vector I.
+      worker's job, and the `giant-deck` gate against the vector I. _Built 2026-10-30; the gate
+      recorded, the owner's runs pending_ (Risks, "Deviations in T15.a.2, as built").
 - **R08.T15.b Below the deck.** The plane-parallel downwelling table by altitude, view angle and
   sun angle, one layer a band, gives sky and aerial perspective beneath. Tests:
   - the Venus-class surface passes the gate and the flux sanity test of R08.T12.b;
@@ -5927,8 +5968,11 @@ Acceptance: `pnpm test`.
     vertical τ(550) from the top, the gas's and every mode's at its coverage, each mode's by its
     published profile, reaches `CLOUD_DECK_SPLIT_OPTICAL_DEPTH`, whether a deck sets it or the
     gas does (a clear class III, or a hot giant whose decks lie below its photosphere); it is
-    baked by T15's deck machinery, which reads the medium below it no deeper than τ(550) 1,000
-    from the top (the discrete-ordinate check (f)'s depth), so it has a defined floor;
+    baked by T15's deck machinery, which reads the medium below it to τ(550) 1,000 from the top in
+    the reference frame, s = 1, so that the floor lies at one height in every band and a band of
+    gravity ratio s reads τ 1,000 ÷ s (the discrete-ordinate check (f)'s depth, at which the solver
+    is tested; R08.T15.a.1's 1% test runs it to τ 3,456), over a black floor, so it has a defined
+    floor;
   - every deck and mode lies at the pressure its input states. One that straddles the floor
     enters the medium with the τ its profile puts above it, the share
     ((p ÷ p_b)^(f+1) − (p_t ÷ p_b)^(f+1)) ÷ (1 − (p_t ÷ p_b)^(f+1)) of its τ at the floor's p,
@@ -22520,8 +22564,12 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
   - _The deck's sphericity._ It reflects as a plane-parallel slab at the upper medium's μ₀: against
     the whole pseudo-spherical column, 1.9 × 10⁻⁴ at the split on the test deck, larger at low suns
     and on thicker decks, unmeasured.
-  - _The deck's 32 layers_ are a lean, not a convergence: a deck's layer count moves only how its
-    optics vary within a layer, since each layer's terms are their exact integrals.
+  - _The deck's 32 layers_, measured (research, 2026-10-29; pod, 4 vCPU). Against 64 layers, each
+    mode of the deck's `reflectance`, `beamReflection` and `diffuse` moves by at most 0.022% of its
+    point's m = 0 value (0.073% at 16 layers), on the NH₃-like envelope's band 0 and the
+    Venus-class deck; J_ms above it by 0.084% (0.43%); the Venus-class surface flux by 0.04% at
+    μ₀ 0.42 and 0.42% at μ₀ 0.20 against 128 layers (1.4% at 16). Kept; 16 layers is a cost lever
+    (a Venus-class band's bake about 8.2 → 6.3 s).
   - _Two layer mixers._ `deck.ts`'s mirrors `bake.ts`'s private `bandBinOf` with its delta-M step,
     held equal to it bit for bit by the whole column's solve against T14.b's own; one exported
     from `bake.ts` would serve both once its lane is quiet.
@@ -23775,3 +23823,36 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     measured Earth: R05's ozone tent misses 10⁻³ at the limb once it emits (findings).
   - _Left:_ the thermal forms' frame cost, pending: the owner's RTX run; P14.T24.e's temperature
     nodes; a giant's deck emission (T16.a).
+- **Deviations in T15.a.2, as built** (2026-10-30; `thick/deck.ts`, `thick/deckRead.ts`,
+  `shaders/deckRead.wgsl`, the kernels, tables, twins, optics job, cache, smoke and vector gate).
+  - _Deck tables._ `reflectance` and `beamReflection` hold ρᵐ − ρ_ssᵐ at `DECK_MODES` 8; `diffuse` at
+    `DeckTables.diffuseModes` (3; 8 under the test-only `DeckBandOptions.diffuseModes`); the exact
+    single scattering in `singleGeometry`, `singleBeamGeometry` and `phase` (TMS).
+  - _Rows._ `prepareDeck` defaults to `THICK_BAKE_GRID`, its guard gone: `above` and the deck's
+    tables take all 46 rows, the beam's 0 below the horizontal; `BelowDeckTable` keeps the daylit 32.
+  - _The deck's own solve_ takes m = 0–7 at the kernels' cosines, `solves` twice `above`'s: the
+    solver has no least mode, and the coupling's ρ is at the upper solve's cosines (lean, 2026-10-30).
+  - _Shared lines._ `bake.ts`: `PreparedBake.binPhases`, `BakeBandOptions.solveModes`, `solveOf`'s
+    modes. `deck.ts` exports `DeckOrdinateLayers`, `deckLayersOf`, `deckSingleScattering` and
+    `deckSingleGeometry`; `caseGate.ts` exports `caseGateSection`.
+  - _The kernels_ draw `upperMediumOf(medium, h*)` on `deckDatumOf`'s spheroid, J above as T14.c's
+    table (`deckAboveTables`, `deckCorrectionAbove`), and `deckTable` (group 0, binding 25) at the
+    bare ground: `withDeckRead`'s four marches, `RAY_MARCH_DECK_KERNEL` and its siblings.
+  - _R01.T15's bound._ `VIEW_KERNELS` 28 → 32 with the four deck marches; every thin and thick
+    digest holds.
+  - _The deck term_ stands where the bare ground did, where nothing is drawn: a drawn body hides the
+    deck (lean, 2026-10-30; T15.b.2's, with the routing).
+  - _Tables and twins._ `AtmosphereTables.setDeckTables(bands | null)`, `deckTable`, `deckPacked`,
+    `deckBytes`; `PlanetTwin.deck`; `TwinOptions.deck: TwinDeck | null`, which refuses a thick bake
+    beside it, other bands and an observer below the split.
+  - _The job._ `deck-bake`, answered `deck-baked { tables, correction }` or `deck-bake-failed`;
+    `OpticsWorkerPool.bakeDeck`, `AtmosphereBuilder.bakeDeck`, `bakeKeptDeck`. The cache asks it for
+    a routed `cloudDeck` body, none yet; `ATMOSPHERE_OPTICS_VERSION` stays 4.
+  - _The gate._ `vectorGate.json` format 3's `deck`: `giant-deck` split at its deck's top over its
+    ground (lean, 2026-10-30), split as an envelope a variant; its views below the split are T15.b.2's.
+  - _Smoke._ Part 14 (the deck marches' catalogue, `checkDeckFrameTwins`); frame timing's (Q), the
+    deck read, under `--smoke-thick-read=1`.
+  - _Closed._ T15.a.1's "_No TMS for the deck_" and "_The envelope's floor_" (ruled 2026-10-29);
+    T14.d.1's "_The deck's J_ms_"; T14.d.2's rows question and `packThickTable`'s 46 rows.
+  - _Pending: the owner's runs._ The UHD 620's deck bake (`deck.bench.ts`); the RTX 3080's (Q) and
+    part 14's deck twins.

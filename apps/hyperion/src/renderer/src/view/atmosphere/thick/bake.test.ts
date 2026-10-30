@@ -31,6 +31,7 @@ import {
   THICK_BAKE_MAX_TERMS_PER_BIN,
   THICK_BAKE_MODES,
   THICK_BAKE_REFERENCE_BIN,
+  THICK_BAKE_STREAMS,
   thickBakeBands,
   type ThickBakeBody,
   type ThickBakeGrid,
@@ -674,6 +675,14 @@ describe("the bake's latitude bands", () => {
 
   it("refuses a band the body does not have", () => {
     expect(() => bakeMultipleScattering(prepared(), titanBody(), 1)).toThrow(RangeError);
+  });
+
+  it("refuses solves of fewer modes than the bake's or more than its streams (R08.T15.a.2)", () => {
+    for (const solveModes of [THICK_BAKE_MODES - 1, THICK_BAKE_STREAMS + 1, 3.5]) {
+      expect(() => bakeMultipleScattering(prepared(), titanBody(), 0, { solveModes })).toThrow(
+        /modes, not/u,
+      );
+    }
   });
 
   it("gives a two-band body's bands vertical optical depths in the inverse ratio of their gravities, to 10⁻¹²", () => {
