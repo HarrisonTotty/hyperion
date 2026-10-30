@@ -42,7 +42,7 @@
 //!   across face edges (R09.T6.a's test). On a world dry now each trunk's two chords are **bent**
 //!   (R09.T6.h): split into [`BEND_PARTS`] sub-chords each, through a spline and a displacement
 //!   drawn on `surface.channel.bend`, each half held in its own cell, its ends the straight
-//!   trunk's (the [`bend`] module).
+//!   trunk's (the `bend` module).
 //! - **Every later level's** new key point joins the nearest point of the segments of all coarser
 //!   levels (a *tributary*), found at each coarser level in the 3 × 3 graph neighbourhood of the
 //!   key point's cell there (its cell, its four edge neighbours and its corner neighbours, by the
