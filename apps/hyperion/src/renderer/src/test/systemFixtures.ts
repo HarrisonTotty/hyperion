@@ -302,6 +302,15 @@ export function anUnsupportedBodiesError(): RequestError {
   };
 }
 
+/** The server's answer to `body_events` before P14.T36.b, as `Handlers` answered it. */
+export function anUnsupportedEventsError(): RequestError {
+  return {
+    code: "unsupported",
+    message: "body_events is not served yet",
+    field: null,
+  };
+}
+
 /** `planetary.rs`'s `section_not_modelled_wire_form`. */
 export const SECTION_NOT_MODELLED: SectionDto<never> = { state: "not_modelled" };
 

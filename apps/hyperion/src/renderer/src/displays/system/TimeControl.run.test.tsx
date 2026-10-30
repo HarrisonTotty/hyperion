@@ -18,6 +18,7 @@ import { stubMatchMedia } from "../../test/stubMatchMedia";
 import {
   A_CENTURY,
   anUnsupportedBodiesError,
+  anUnsupportedEventsError,
   aSummaryResponse,
   aSystemSummary,
   aSystemTarget,
@@ -86,6 +87,14 @@ async function renderAnswered(time: UniverseTime = A_CENTURY): Promise<Rendered>
     const [request] = socket.requestsOfKind("system_bodies").toReversed();
     if (request !== undefined) {
       socket.serverRejects(request.id, anUnsupportedBodiesError());
+    }
+  });
+  // The events of the century, which the display asks for once the system is known: unserved, as
+  // a server before P14.T36.b answers, so that nothing waits on them.
+  await server(() => {
+    const [events] = socket.requestsOfKind("body_events").toReversed();
+    if (events !== undefined) {
+      socket.serverRejects(events.id, anUnsupportedEventsError());
     }
   });
   // The first paint of the answer, so that what follows counts only what running asks for.

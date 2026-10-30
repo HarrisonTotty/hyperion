@@ -3674,6 +3674,168 @@ body {
 }
 
 /*
+ * The events stand under the display time in the map's column (P14.T43.c), 14rem tall where the
+ * column has room, the map taking the rest, and 11rem at the least, two rows of the list with its
+ * head, its span and its position, so that at 1280 x 720 the map keeps its stage.
+ */
+.system .system__events {
+  flex: 0 1 14rem;
+  min-height: 11rem;
+}
+
+/* The span listed, and the century asked for when a busy system's list holds less of it. */
+.events-panel__span {
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.25rem 0.75rem;
+}
+
+/*
+ * One reading a line, never broken inside a time: the widest, the clock window's edges,
+ * `UT -1000 yr 000/00:00:00 – +1000 yr 000/00:00:00`, and its S.
+ */
+.events-panel__value {
+  min-width: 50ch;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.event-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/*
+ * Columns shared by the head and every row: the time, its widest the clock window's edge,
+ * `UT -1000 yr 000/00:00:00`; the countdown, `T-2000 yr 000/00:00:00` at the widest, an event at
+ * one edge of the window and the display time at the other; the kind, `GREAT STORM` with its
+ * letter spacing; and the body. The times are right-aligned, so that their days and clocks line up
+ * whatever their years.
+ */
+.event-list__head,
+.event-list__row {
+  display: grid;
+  grid-template-columns: 24ch 22ch 13ch minmax(0, 1fr);
+  align-items: center;
+  gap: 0 0.75rem;
+}
+
+.event-list__head > :is(:first-child, :nth-child(2)) {
+  text-align: right;
+}
+
+.event-list__head {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.event-list__scroll {
+  flex: 1 1 0;
+  min-height: 4rem;
+  overflow-y: auto;
+}
+
+.event-list__scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* As tall as every row, so that the scrollbar measures the whole list, not the window rendered. */
+.event-list__rows {
+  position: relative;
+}
+
+.event-list__row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2rem;
+  padding: 0 0.125rem;
+  cursor: pointer;
+}
+
+.event-list__row:hover {
+  background: var(--surface-2);
+}
+
+/* A row whose body is not on show chooses nothing, so it offers nothing to the pointer. */
+.event-list__row[aria-disabled="true"] {
+  cursor: default;
+}
+
+.event-list__row[aria-disabled="true"]:hover {
+  background: none;
+}
+
+/* The row the keys have reached, while the list has the focus: an inset rule, not a colour. */
+.event-list__scroll:focus-visible .event-list__row--active {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* The event chosen, whose body the display selected, carries a rule down its edge. */
+.event-list__row[aria-selected="true"] {
+  border-left: 2px solid var(--accent);
+  background: var(--surface-2);
+  padding-left: 0;
+}
+
+.event-list__number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.event-list__kind {
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* The designation, cut at its end where it is long, and the stale S after it, never cut. */
+.event-list__body {
+  display: flex;
+  min-width: 0;
+}
+
+.event-list__designation {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-list__body > .stale-slot {
+  flex: none;
+  margin-left: auto;
+}
+
+/* Why the active row chooses nothing, on the line of the position and total. */
+.event-list__foot {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.event-list__foot > .list-position {
+  margin-left: auto;
+}
+
+.event-list__note {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  letter-spacing: 0.1em;
+}
+
+/* An answer the link no longer backs: muted, as the bodies' list is, with its S. */
+.events-panel--stale :is(.events-panel__span, .event-list) {
+  color: var(--text-muted);
+}
+
+/*
  * The VIEW display (plan R02, R02.T15): the scene bar over the view and its side columns, the view
  * taking what they leave. Clipped, never scrolled: a control focused below the foot of a column
  * too long for a window under the least size cannot move the console frame (R07.T19.b).

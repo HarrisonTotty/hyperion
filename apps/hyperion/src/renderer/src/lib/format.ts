@@ -933,6 +933,27 @@ export function formatUniverseTimeDhms(time: UniverseTime): string {
 }
 
 /**
+ * Formats a countdown from the display time `now` to an event at `event`, in the guide's `T-` form
+ * with {@link formatUniverseTimeDhms}'s span of years, days and the time of day: `T-12 yr
+ * 183/14:08:33` before the event, `T+0 yr 000/00:00:30` after it, and `T+0 yr 000/00:00:00` at it.
+ *
+ * @remarks
+ * The guide's countdown is negative before the event and positive after it, so the sign is that
+ * of `now` less `event`. The difference is taken in whole seconds, each instant's rounded towards
+ * negative infinity as the wire gives them, with integer arithmetic alone; the nanoseconds are not
+ * shown.
+ *
+ * @throws RangeError when either time's seconds are not a whole number that a JavaScript number
+ *   holds exactly.
+ */
+export function formatCountdown(now: UniverseTime, event: UniverseTime): string {
+  if (!Number.isSafeInteger(now.seconds) || !Number.isSafeInteger(event.seconds)) {
+    throw new RangeError(`${String(now.seconds)} or ${String(event.seconds)} is not whole`);
+  }
+  return `T${formatUniverseTimeDhms({ seconds: now.seconds - event.seconds, nanos: 0 })}`;
+}
+
+/**
  * Formats the rows of a scrolling list that are in view and the total: `12-24 of 87`.
  *
  * @remarks

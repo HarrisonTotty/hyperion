@@ -31,7 +31,9 @@ type ResponseName =
   | "body_detail_mass_and_orbit"
   | "body_detail_contact"
   | "body_detail_lava_world"
-  | "body_detail_titan";
+  | "body_detail_titan"
+  | "body_events_response"
+  | "body_events_populated";
 
 /** The fixture's system, which every body ID extends. */
 export const FIXTURE_SYSTEM = "0200080020000000";
@@ -54,6 +56,20 @@ function response<K extends RequestKind>(name: ResponseName, kind: K): ResponseF
     throw new Error(`the fixture's ${name} is not a ${kind} response`);
   }
   return message.body;
+}
+
+/**
+ * The century about the epoch's events of the fixture's system: one of each kind, in time order, a
+ * comet, an Earth's eruption and a Jupiter's impact before the epoch, a dust storm and a Jupiter's
+ * great storm after it (P14.T36.b, illustrative values).
+ */
+export function populatedEvents(): ResponseFor<"body_events"> {
+  return response("body_events_populated", "body_events");
+}
+
+/** The century about the epoch with no event: a quiet century. */
+export function noEvents(): ResponseFor<"body_events"> {
+  return response("body_events_response", "body_events");
 }
 
 /** The slice's answer: one Sun-like star, its zone, an Earth and a Jupiter. */

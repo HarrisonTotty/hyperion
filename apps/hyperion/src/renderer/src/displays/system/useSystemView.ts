@@ -48,6 +48,7 @@ import {
 } from "./orbitMap";
 import { type BodiesKnown, smallBodySections, systemNotes } from "./systemNote";
 import type { SystemTarget } from "./systemTarget";
+import { type BodyEventsQuery, useBodyEvents } from "./useBodyEvents";
 import { useBodyDetail } from "./useBodyDetail";
 import { type DisplayTime, useDisplayTime } from "./useDisplayTime";
 import { useSystemData } from "./useSystemData";
@@ -118,6 +119,16 @@ export interface SystemViewState {
   readonly layout: HierarchyLayout | null;
   /** The system's bodies on show; `null` before them, or while the server does not serve them. */
   readonly bodies: SystemBodies | null;
+  /**
+   * The events on the system's bodies in the century around the display time, and where their
+   * request stands (P14.T43.c); idle until the system is known to have formed.
+   */
+  readonly events: BodyEventsQuery;
+  /**
+   * Whether the events on show are a stale snapshot: the link that backed them is down, or their
+   * newer request was refused or timed out.
+   */
+  readonly eventsStale: boolean;
   /**
    * The orbit map's reference plane as it is drawn: the system's, or the focused body's equatorial
    * plane; `null` without a formed system.
@@ -350,6 +361,7 @@ export function useSystemView(target: SystemTarget): SystemViewState {
   const selectedHost = chosenBody === undefined ? (chosenHost ?? hosts[0] ?? null) : null;
   const selectedId = chosenBody?.id ?? selectedHost?.id ?? null;
   const detail = useBodyDetail(target, chosenBody?.id ?? null, data.requestTime, generation);
+  const events = useBodyEvents(formed === null ? null : target, displayTime.time, generation);
   const time = displayTime.time;
 
   // The focus holds while its body is in the answer on show, present and on an orbit; a body that
@@ -555,6 +567,9 @@ export function useSystemView(target: SystemTarget): SystemViewState {
         (bodies !== null && failed(data.bodiesState))),
     layout,
     bodies,
+    events,
+    eventsStale:
+      events.shown !== null && (linkDownReason(linkStatus) !== null || failed(events.state)),
     plane: focusPlane ?? plane,
     fitRadii,
     fitRadiusAu: focusFitAu ?? fitRadii?.[zoom] ?? null,

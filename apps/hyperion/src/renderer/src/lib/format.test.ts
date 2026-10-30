@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SECONDS_PER_JULIAN_YEAR } from "@hyperion/protocol";
+import { SECONDS_PER_JULIAN_YEAR, type UniverseTime } from "@hyperion/protocol";
 
 import {
   type BodyDistanceUnit,
   type PressureUnit,
   type SurfaceRangeUnit,
   formatAge,
+  formatCountdown,
   formatBearingCapacity,
   formatBearingDeg,
   formatBodyDistance,
@@ -589,6 +590,43 @@ describe("formatGravity", () => {
 
   it("refuses a negative gravity", () => {
     expect(() => formatGravity(-9.81)).toThrow(RangeError);
+  });
+});
+
+/** The instant `seconds` whole seconds from the epoch. */
+function at(seconds: number): UniverseTime {
+  return { seconds, nanos: 0 };
+}
+
+describe("formatCountdown", () => {
+  it.each([
+    ["an event a day ahead", 0, 86_400, "T-0 yr 001/00:00:00"],
+    ["one half a minute past", 30, 0, "T+0 yr 000/00:00:30"],
+    ["one at the display time", 5, 5, "T+0 yr 000/00:00:00"],
+    [
+      "one 12 years ahead",
+      0,
+      12 * SECONDS_PER_JULIAN_YEAR + 183 * 86_400 + 14 * 3_600 + 8 * 60 + 33,
+      "T-12 yr 183/14:08:33",
+    ],
+    [
+      "one at -H from +H",
+      1_000 * SECONDS_PER_JULIAN_YEAR,
+      -1_000 * SECONDS_PER_JULIAN_YEAR,
+      "T+2000 yr 000/00:00:00",
+    ],
+  ])("counts %s as %s", (_, now, event, expected) => {
+    expect(formatCountdown(at(now), at(event))).toBe(expected);
+  });
+
+  it("counts from whole seconds, as the wire gives them", () => {
+    expect(formatCountdown({ seconds: 10, nanos: 900_000_000 }, { seconds: 10, nanos: 0 })).toBe(
+      "T+0 yr 000/00:00:00",
+    );
+  });
+
+  it("refuses a time that is not a whole number of seconds", () => {
+    expect(() => formatCountdown({ seconds: 0.5, nanos: 0 }, at(0))).toThrow(RangeError);
   });
 });
 

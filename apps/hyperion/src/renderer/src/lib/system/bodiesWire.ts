@@ -305,7 +305,7 @@ function validNanos(nanos: number): boolean {
 }
 
 /** A time the client computes with: whole seconds that a JavaScript number holds exactly. */
-function usableTime(time: UniverseTime): boolean {
+export function usableTime(time: UniverseTime): boolean {
   return Number.isSafeInteger(time.seconds) && validNanos(time.nanos);
 }
 

@@ -1,4 +1,5 @@
 import { BodiesPanel } from "./BodiesPanel";
+import { EventsPanel } from "./EventsPanel";
 import { OrbitMapPanel } from "./OrbitMapPanel";
 import type { SystemTarget } from "./systemTarget";
 import { TimeControl } from "./TimeControl";
@@ -11,13 +12,14 @@ export interface SystemViewProps {
 
 /**
  * One opening of the `SYSTEM` display, on a fixed layout that fills the work area without
- * scrolling: the orbit map and the display time in the first column, the bodies in the second
- * (plan 14, P14.T41–T44).
+ * scrolling: the orbit map, the display time and the events in the first column, the bodies in the
+ * second (plan 14, P14.T41–T44).
  *
  * @remarks
  * The map and the time are used together, the time's steps moving what the map shows, so they share
- * a column, the map taking what the time leaves; the list and the readout are paired with the map,
- * as the chart's are, and stand beside it.
+ * a column, the map taking what the time and the events leave; the events count down from the
+ * display time, so they stand under it. The list and the readout are paired with the map, as the
+ * chart's are, and stand beside it.
  */
 export function SystemView({ target }: SystemViewProps) {
   const view = useSystemView(target);
@@ -26,6 +28,7 @@ export function SystemView({ target }: SystemViewProps) {
       <div className="system__column system__column--map">
         <OrbitMapPanel view={view} />
         <TimeControl time={view.displayTime} />
+        <EventsPanel view={view} />
       </div>
       <div className="system__column system__column--bodies">
         <BodiesPanel view={view} />

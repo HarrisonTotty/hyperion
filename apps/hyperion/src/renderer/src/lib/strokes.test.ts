@@ -310,6 +310,8 @@ describe("the strokes changed here and --surface-2 (decision-thin-line-contrast,
       '.system-list__row[aria-selected="true"]',
       ".body-list__row:hover",
       '.body-list__row[aria-selected="true"]',
+      ".event-list__row:hover",
+      '.event-list__row[aria-selected="true"]',
       ".view-list__row:hover",
       '.view-list__row[aria-selected="true"]',
     ]);

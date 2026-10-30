@@ -4484,6 +4484,7 @@ src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displ
     before the display time counts `T+` and one after it `T-`, each with its time-system label.
   - _Accept:_ `pnpm test`.
   - _Slice:_ T43.c waits for T31 and `body_events`; there is no events panel in the first display.
+  - _Built_ 2026-10-30: Risks, "Deviations in P14.T43.c, as built".
 - **P14.T43.d The readout's names, as signed off** (signoff-11, item 21; a display change only,
   no wire, output or protocol change).
   - `displays/system/BodyRecordReadings.tsx`: the surface's temperature row reads `T SURF`, not
@@ -32869,3 +32870,35 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - _Accept, as built:_ `cargo test -p hyperion-server --test body_events --test system_bodies`,
     `cargo test -p hyperion-server --lib compute::bodies` and
     `cargo test -p hyperion-sim --lib planetary::system::events`.
+- **Deviations in P14.T43.c, as built (2026-10-30).**
+  - _Files._ The `EVENTS` panel stands under the display time, in the map's column:
+    `displays/system/{EventsPanel, EventList}.tsx`, `eventRows.ts`, `useBodyEvents.ts`,
+    `lib/system/eventsWire.ts` and `lib/format.ts`'s `formatCountdown`.
+  - _Requests._ The panel asks for the century about the display time, [t − 50, t + 50) yr held to
+    the clock window, once the system is known to have formed. It asks again once the display time
+    leaves the middle half of the span listed.
+  - _Rows._ Each row reads:
+    - its `UT` time in the display time's form;
+    - its countdown in the same form, `T-12 yr 183/14:08:33`;
+    - its kind in words, `IMPACT`, `ERUPTION`, `GREAT STORM`, `DUST STORM` or `COMET`;
+    - its body's designation, or `—` for a body the list does not hold.
+
+    The list is a windowed listbox.
+    - The keys move its active row, outlined under the focus, and choose nothing.
+    - `Enter`, `Space` or a click chooses the event and selects its body. The row is
+      `aria-selected` while that body stays selected.
+    - A row whose body the list does not hold is `aria-disabled` and chooses nothing. Its name
+      says `body not listed`, and the list's foot says `BODY NOT LISTED` while it is active.
+
+    `LISTED` reads the span listed, and `ASKED` the century where the list is cut, one a line, each
+    in the long form, `UT -50 yr 000/00:00:00 – +50 yr 000/00:00:00`.
+
+  - _For the owner:_ the guide's countdowns are `T-00:04:12`. Events lie years off, so the
+    countdown takes the display time's form.
+  - _States._ `NOT YET FORMED`; `NOT YET MODELLED` for an `unsupported` answer; `NO EVENTS`; a
+    fault with `RETRY`; and stale with its `S`.
+  - _Tests._ The events list's share of (a)–(c) is in `SystemView.events.test.tsx`: the keys,
+    choosing, the readout, position and total, and `T+` and `T-`. The rows for `DESTROYED` and the
+    readout's sections are the body list's, and stand as T43.a–b built them.
+  - _Not here:_ eruptions are not told lava or ice (T31.a's R7).
+  - _Not done:_ a visual check at 1920×1080 and 1280×720, which needs a display.
