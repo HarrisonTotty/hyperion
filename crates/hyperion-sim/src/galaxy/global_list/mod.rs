@@ -17,8 +17,9 @@
 //! kinds, the cache trait, the orbit integrator ([`orbit`]), the debris the list is built from
 //! ([`Debris`]: which progenitors get a tube or a core, P10.T3, with [`spec`], [`orphans`] and
 //! [`dwarfs`]), the halo's discrete share it makes up ([`discrete_share`], P10.T3.d.a, in
-//! [`share`]), the dwarf cores' model ([`dwarf_core`], P10.T7.a) and the particle spray that
-//! measures a stream's track ([`spray`], P10.T5).
+//! [`share`]), the dwarf cores' model ([`dwarf_core`], P10.T7.a), the particle spray that
+//! measures a stream's track ([`spray`], P10.T5) and the tube table it is reduced to ([`tube`],
+//! P10.T6.a).
 //!
 //! # Caches
 //!

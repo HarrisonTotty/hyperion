@@ -559,7 +559,9 @@ fn spherical_pericentres(
         .collect()
 }
 
-/// Which Lagrange point a tracer left from (module documentation, "The release").
+/// Which Lagrange point a tracer left from (module documentation, "The release"), or which arm of
+/// a tube, which takes a tracer's from the sign of its ψ
+/// ([`TubeTable::arm`](super::TubeTable::arm)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Arm {
     /// The inner point: the tracer gains on the progenitor, so its ψ is positive, but for the few
@@ -623,6 +625,29 @@ impl Tracer {
     #[must_use]
     pub const fn psi(&self) -> Radians {
         self.psi
+    }
+
+    /// A tracer from its parts, for the tube table's tests of synthetic streams.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn from_parts(
+        arm: Arm,
+        release_step: u32,
+        released: Years,
+        weight: SolarMasses,
+        position: GalacticDisplacement,
+        velocity: GalacticVelocity,
+        psi: Radians,
+    ) -> Self {
+        Self {
+            arm,
+            release_step,
+            released,
+            weight,
+            position,
+            velocity,
+            psi,
+        }
     }
 }
 

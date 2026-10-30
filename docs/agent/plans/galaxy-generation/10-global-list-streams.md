@@ -67,7 +67,10 @@ All Rust paths are under `hyperion_sim::galaxy` unless they start with another m
   observes (P10.T3, as built).
 - `global_list::spray::{Tracer, SprayParams, spray}` and
   `global_list::tube::{TubeTable, TubeKnot, TubeArm, KnotHash}`:
-  `TubeTable::build(&Galaxy, &StreamSpec) -> TubeTable`, `TubeTable::byte_size()`,
+  `TubeTable::build(&Galaxy, &StreamSpec) -> TubeTable` (as built,
+  `-> Result<TubeTable, BuildTubeTableError>`, with
+  `TubeTable::from_tracers(&StreamSpec, &[Tracer])` for a pool's tracers: Risks, "P10.T6.a as
+  built"), `TubeTable::byte_size()`,
   `TubeTable::locate(u, a, b) -> GalacticPosition`, `TubeTable::mean_velocity(u)`,
   `TubeTable::cells_touching(sphere) -> impl Iterator<Item = TubeCell>`.
 - `global_list::tube::TubeLookup`, the trait a caller's cache implements:
@@ -562,7 +565,19 @@ which T4 checks (Risks, "T3.a–c as built").
   `mean_velocity`, the inverse of Λ. Tests: `pal5_like` gives a length near 82,000 ly, widths of
   120–380 ly and dispersions of 0.9–3.5 km/s; `gd1_like` near 159,000 ly, 100–260 ly and 0.7–1.3
   km/s; an orphan shows the central gap; a dwarf shows the pile-up at apocentre; frames orthonormal
-  to 10⁻¹².
+  to 10⁻¹². _Deviation from the plan's text (main's rulings of 2026-10-29, after the research
+  lane `research-galaxy-leans`, items 11 and 15 and its findings for T6.a):_ each arm is the
+  tracers of one sign of ψ, not of one Lagrange point; `TubeTable::from_tracers` reduces the
+  tracers a caller's pool gathered by index, and `build` sprays them in turn; the length tests are
+  restated, since the helpers' stripping times (Design note 5) make `pal5_like` about 230,000 ly
+  and `gd1_like` about 117,000 ly through their tracers: each tube's knots' arc length lies within
+  5 % of its own tracers' path through 48-tracer bins over the same stretch, and each length is
+  recorded against the brainstorm's 30,000–160,000 ly for globular streams; the dwarf test is
+  reworded: for each pulse's tracers separately the line density per unit arc length is higher
+  near the centre line's apocentric points (local maxima of galactocentric radius) than near its
+  pericentric points; a test that every tracer whose Lagrange point's arm is not its ψ's lies
+  inside the other arm's tube at its ψ is added; and widths and dispersions that miss their
+  brackets are recorded, not tuned (Risks, "P10.T6.a as built").
 - **P10.T6.b Gaps.** The noise of design note 8 with an amplitude of the generator version. Tests:
   the total expected count is unchanged to 10⁻¹²; the power of the density contrast along `gd1_like`
   peaks at scales of a few thousand light-years.
@@ -1553,3 +1568,131 @@ grows with the registry")]`.
       for them too: a conflict between the source's caveat and the ruling, recorded, not acted on.
     - The Fardal quotes and numbers are checked against arXiv:1410.1861v1; the refereed text was
       out of the pod's reach.
+- **P10.T6.a as built (lane `p10-t6a`, 2026-10-29, on `7a674ea` at `GENERATOR_VERSION` 23).** No
+  output moved: nothing reads a tube before P10.T8, and the tube goldens are T6.c's, so no golden
+  is added. Main's rulings of 2026-10-29 (items 11 and 15 and the findings for T6.a, after the
+  research lane `research-galaxy-leans`) are in the task's text. Every figure is v23's, x86-64,
+  measured in a pod (4 vCPU).
+  - _Items._ In `global_list::tube`: `TubeTable`, `TubeArm`, `TubeKnot`, `BuildTubeTableError`,
+    `KNOTS_PER_ARM`, `KERNEL_TRACERS` and `KERNEL_WIDTH`. `TubeTable`'s `build`, `from_tracers`,
+    `stream`, `mass`, `arm`, `knots`, `length`, `locate`, `mean_velocity` and `psi`;
+    `TubeArm::{knots, tracers, mass}`; `TubeKnot`'s `centre`, `frame`, `velocity`, `widths`,
+    `dispersions`, `cumulative_mass` and `psi`;
+    `BuildTubeTableError::{Spray, TooFewTracers}`. `spray::Arm` names a tube's arms too.
+    _Deviations from Provides:_ `TubeTable::build(&Galaxy, &StreamSpec)` returns
+    `Result<TubeTable, BuildTubeTableError>`, since the spray fails on a galaxy without the full
+    potential; `from_tracers(&StreamSpec, &[Tracer])`, the pool's entry, takes no `&Galaxy` (T6.b
+    adds what its noise needs). `KnotHash`, `byte_size` and `cells_touching` stay T6.c's and T8's.
+    _For T9 and T10.b:_ `TubeLookup::tube` cannot fail, so `TubeTableCache` must `expect` the
+    error, which is safe for a galaxy with the full potential, as the server builds it (no stream
+    of a drawn galaxy's 309 met `TooFewTracers`), or the trait returns a `Result`. `locate` takes
+    across coordinates within `ACROSS_LIMIT`, 1,000 widths, and makes the interpolated normal and
+    binormal unit vectors again, as the widths' own measurement does (on `sagittarius_like`'s
+    54° turns the plain interpolation would shorten them to 0.89 at mid-segment).
+    `tube::tests::tracers_of_equal_psi_keep_their_order` pins the stable sort, which a spray's
+    last release on the epoch's boundary needs (its pair has ψ of +0.0 both). For T6.c: a tube
+    golden must be a lib unit test (the `wasm32-wasip1` run turns `testing` off), at 48 tracers an
+    arm or more (`KERNEL_TRACERS`), or on the synthetic tracers of `tube::tests`; and its
+    order-independence test is still to come.
+  - _The arms (item 11)._ ψ ≥ 0, either zero, is the leading arm's, ψ < 0 the trailing arm's;
+    the tracers are sorted by ψ with `total_cmp`, stably, so the table is a pure function of the
+    list in index order. Each arm's knots run in increasing ψ, the along coordinate's order: the
+    trailing arm's from its tip to its root.
+  - _Knots (Design note 6)._ 256 an arm at equal steps of its cumulative weight, counted to each
+    tracer's middle, the end knots at the arm's ends; the kernel is the 48 tracers nearest in
+    rank, Gaussian with σ = 12 ranks. _Leans (2026-10-29):_ σ = 12, so that the 48 span ±2σ (the
+    plan makes the width a parameter of the generator version without a value); the centre line
+    and the mean velocity are the kernel's local-linear averages (the intercept of the
+    kernel-weighted line in rank, its mean where the tracers lie evenly about the knot), since at
+    an arm's end the plain mean lies inside the end and turns the mean velocity there: on a
+    synthetic circle it put 2.4 times the dispersion along the normal at the tips; ψ at a knot is
+    the tracers' own at its rank, the inverse of their Λ(ψ), not a kernel mean, so the knots keep
+    their order and their arm's sign. The widths and dispersions are kernel means of the squared
+    offsets about the centre line and the mean velocity interpolated at each tracer's own rank.
+    The reduction costs 2.8 ms a stream in release, against the spray's 4.30 s serial for
+    `pal5_like` (210 ns a tracer-step; `gd1_like` 3.44 s, `sagittarius_like` 0.54 s; a scratch
+    probe, not committed), so T6.c's budget is the spray's.
+  - _Frame._ The tangent is the kernel fit's direction (on the synthetic stream the binormal
+    strays 2.8° from the pole at most, against 9° with the chord through the neighbours, the worst
+    at the arms' ends); the normal is carried by the double reflection of Wang, Jüttler, Zheng and
+    Liu (2008, ACM Trans. Graph. 27(1), article 2, §4: fourth order for exact tangents, but noisy
+    tangents set its error here) from the trailing arm's root, where the binormal starts on the
+    orbit's pole, and made perpendicular to each tangent; orthonormal to 10⁻¹². From knot to knot
+    the normal turns by at most 6.4° on `pal5_like` and 7.5° on `gd1_like`, but by 54° on
+    `sagittarius_like`, inside its most recent pulse, 448 tracers some 1,500 ly wide over 22,000
+    ly of track, where the fitted direction is noise; it never flips. The binormal strays from each
+    knot's own orbital pole by at most 11.7° on `pal5_like` and 6.9° on `gd1_like` (their planes
+    precess), so the two widths are near the in-plane and vertical ones; the cross-section's tilt
+    is not stored. The local-linear fit is Fan and Gijbels's (1992, Ann. Statist. 20, 2008–2036),
+    an end knot's fit resting on an effective 7 tracers against an inner knot's 39.
+  - _Lengths (the restated test)._ The knots' path over the bins' stretch against the tracers'
+    48-tracer bins: `pal5_like` 217,410 against 218,861 ly (−0.66 %), `gd1_like` 112,540 against
+    113,681 ly (−1.00 %), `sagittarius_like` 724,505 against 711,460 ly (+1.83 %). From tip to
+    tip, which the bins stop about 24 tracers short of where the oldest tracers lie sparse:
+    281,431, 135,899 and 814,020 ly, and over the central 90 % of the mass 157,363, 91,641 and
+    609,015 ly. _Finding, for the owner:_ against the brainstorm's 30,000–160,000 ly for globular
+    streams, `pal5_like` lies above from tip to tip (its stripping time is the 10 Gyr cap, Design
+    note 5) and inside over its central 90 %, and `gd1_like` inside; the detected Pal 5 tails span
+    some 20° (about 25,000 ly) and GD-1 some 100°, so a length by a mass quantile is the fairer
+    comparison; a drawn Milky Way galaxy's 308 globular
+    streams (seed `0x0a10_3000_0000_0000`) measure 16,641–590,021 ly from tip to tip, median
+    108,500 ly, 226 inside the bracket, 78 above and 4 below.
+  - _Widths and dispersions (recorded, not tuned)._ The medians over the knots: `pal5_like`'s
+    widths 156 and 252 ly, inside 120–380 ly (asserted), and dispersions along the tangent, the
+    normal and the binormal 0.55, 0.81 and 1.11 km/s against 0.9–3.5 km/s; `gd1_like`'s widths 52
+    and 56 ly against 100–260 ly and dispersions 0.16, 0.49 and 0.24 km/s against 0.7–1.3 km/s.
+    The misses are pinned as found, to a quarter; `f_t` = 1 is not pulled. _Finding, for the
+    owner_ (the science check, with sources read through archived copies): a width here is the
+    rms offset, a Gaussian σ, as observers fit one. GD-1's observed σ is about 65–114 ly (Koposov,
+    Rix and Hogg 2010; Valluri et al. 2025, arXiv:2407.06336), so the plan's 100 ly floor sits
+    above two of three readings, and `gd1_like`'s 52–56 ly is 0.7–0.85 of it, as Chen et al.'s
+    15–50 % narrow host-only streams predict ("P10.T5.b, the spray's fix, as built"); GD-1's
+    dispersion is an upper limit, about 1 km/s or less (Bonaca et al. 2020, arXiv:2001.07215),
+    so the plan's 0.7 km/s floor has no detection behind it; Pal 5's widths match (σ about
+    0.1–0.15°, Bonaca et al. 2020, arXiv:1910.00592), its observed dispersion is 2.1 ± 0.4 km/s
+    (Kuzma et al. 2015). The dispersions agree with the widths through the epicyclic and vertical
+    frequencies (`pal5_like` 0.85 and 0.97 km/s predicted, 0.81 and 1.11 measured), so the misses
+    are the spray's, not the reduction's. Read as a full width at half maximum (2.355σ),
+    `gd1_like`'s widths would lie inside 100–260 ly and `pal5_like`'s second above 380: which width
+    the brackets mean is the owner's.
+  - _The gap and the pile-up._ `gd1_like`'s central 5 % of ψ holds 0.0033 of its mass against
+    0.05 in an even tube (asserted under 0.005), `pal5_like`'s 0.198. `sagittarius_like`'s
+    centre line has one apocentric point, at about 162,000 ly, and two pericentric, at about
+    66,000 and 60,000 ly; its oldest pulse, 914 tracers, spans them all, with 4.0 × 10⁻⁶ of its
+    tracers a light-year within 20,000 ly of the apocentre against 5 × 10⁻⁸ and 3 × 10⁻⁸ near the
+    pericentres. The two later pulses span no apocentric point, so the test compares the pulses
+    that span both, and requires one: so one pulse of three, not "each". Both pericentric points
+    lie within 0.7 rad of the progenitor, between the oldest pulse's two clumps (drifted some 1.6
+    and 2.4 rad from it), so the contrast, some 100 times against an r_a ÷ r_p of about 2.5, is
+    mostly the pulse's own clumping, though its leading clump peaks at the apocentre. For the
+    owner: a dwarf with a longer stripping history would test the pile-up itself; `pal5_like`'s
+    steady release cannot, its track running from a pericentre at one tip through its one
+    apocentre to a pericentre at the other, outside the central 90 % of its tracers.
+  - _Strays (item 11's test)._ `sagittarius_like` has one stray under the tests' seed and one
+    under eight more seeds, at 4.78 and 4.53 widths out: beyond the tube's cut at four widths,
+    where 1–3 of each spray's 2,000 tracers lie, and within the reach of its other tracers (8.3
+    and 14.2 widths). _Lean (2026-10-29), for main:_ the test reads the ruling's "inside the
+    other arm's tube at its ψ" as within the reach of the tube's other tracers, not the four-width
+    cut, which both strays miss; `pal5_like` and `gd1_like` have none.
+  - _Finding: ψ's sign fails for eccentric orphans near apocentre._ A census of the same drawn
+    galaxy, every stream sprayed (6 minutes on four threads in release-like `slow-test`, a scratch
+    probe, not committed): 40 of its 309 streams have strays, 17 more than 2 %, up to 1,219 of
+    2,000. Every one of the 17 is an orphan with `e` 0.79–0.96, 410,000–960,000 ly out at the
+    epoch, near apocentre, the central 90 % of its tracers within |ψ| of 0.004–0.055 rad: they
+    have hardly drifted (T3's frequency spread is about 2 r_t ÷ r_p), and ψ's swing through the
+    orbit hides the sign of the drift. Their tubes are blobs ordered by ψ, 45,000–330,000 ly of
+    knots for debris some 10⁴ ly across. None reaches the root cube (118 of the 309 tubes do), so
+    no member would be placed in one, and nothing is shown before P10.T11. Not a blocker; for the
+    owner and for T6.c and T11: such a tube needs another along coordinate (the tracers' orbital
+    phase or energy), or the list keeps it unreduced until it shears.
+  - _Tests._ Fast, `tube::tests` on a synthetic stream on a circle (`Tracer::from_parts`,
+    test-only): the split by ψ's sign with strays and zeros of both signs, the centre line, Λ and
+    the length, the frames, the widths and dispersions, `locate`, `mean_velocity` and `psi`
+    against the knots, purity and order, and the error. Slow, in `tests/global_list_tube.rs`
+    (`testing`), by name, about 16 s in the `slow-test` profile after its build:
+    `the_test_streams_tubes_follow_their_tracers`,
+    `the_globular_streams_widths_and_dispersions_are_pinned`,
+    `an_orphan_s_tube_holds_its_cluster_s_gap`, `a_dwarf_s_pulses_pile_up_at_apocentre` and
+    `the_strays_lie_inside_the_other_arm_s_tube`. Commands:
+    `cargo test -p hyperion-sim --lib -- galaxy::global_list` and
+    `cargo test -p hyperion-sim --features testing --test global_list_tube -- --ignored`.
