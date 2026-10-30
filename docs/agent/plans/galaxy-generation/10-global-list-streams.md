@@ -585,8 +585,9 @@ which T4 checks (Risks, "T3.a–c as built").
   reworded: for each pulse's tracers separately the line density per unit arc length is higher
   near the centre line's apocentric points (local maxima of galactocentric radius) than near its
   pericentric points; a test that every tracer whose Lagrange point's arm is not its ψ's lies
-  inside the other arm's tube at its ψ is added; and widths and dispersions that miss their
-  brackets are recorded, not tuned (Risks, "P10.T6.a as built").
+  inside the other arm's tube at its ψ, within its four-width cut or within two tidal radii of the
+  progenitor at the epoch, where the arms' roots meet, is added; and widths and dispersions that
+  miss their brackets are recorded, not tuned (Risks, "P10.T6.a as built").
 - **P10.T6.b Gaps.** The noise of design note 8 with an amplitude of the generator version. Tests:
   the total expected count is unchanged to 10⁻¹²; the power of the density contrast along `gd1_like`
   peaks at scales of a few thousand light-years.
@@ -1692,9 +1693,11 @@ grows with the registry")]`.
   - _Strays (item 11's test)._ `sagittarius_like` has one stray under the tests' seed and one
     under eight more seeds, at 4.78 and 4.53 widths out: beyond the tube's cut at four widths,
     where 1–3 of each spray's 2,000 tracers lie, and within the reach of its other tracers (8.3
-    and 14.2 widths). _Lean (2026-10-29), for main:_ the test reads the ruling's "inside the
-    other arm's tube at its ψ" as within the reach of the tube's other tracers, not the four-width
-    cut, which both strays miss; `pal5_like` and `gd1_like` have none.
+    and 14.2 widths). _Main's ruling (2026-10-30, after the research lane `research-p10-t6a`):_
+    the test reads "inside the other arm's tube at its ψ" as within its four-width cut there or
+    within two tidal radii of the progenitor at the epoch, where the arms' roots meet; both
+    strays lie at 0.80 and 0.88 tidal radii, and the strays weigh at most 0.5 % of a tube
+    (asserted); `pal5_like` and `gd1_like` have none.
   - _Finding: ψ's sign fails for eccentric orphans near apocentre._ A census of the same drawn
     galaxy, every stream sprayed (6 minutes on four threads in release-like `slow-test`, a scratch
     probe, not committed): 40 of its 309 streams have strays, 17 more than 2 %, up to 1,219 of

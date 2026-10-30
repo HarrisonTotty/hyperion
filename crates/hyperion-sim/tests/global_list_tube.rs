@@ -41,6 +41,7 @@ fn fixture() -> &'static Fixture {
 /// A test stream, its tracers at the generator's 2,000 and its tube.
 struct Sprayed {
     name: &'static str,
+    spec: StreamSpec,
     tracers: Vec<Tracer>,
     table: TubeTable,
 }
@@ -69,6 +70,7 @@ fn sprayed() -> &'static [Sprayed; 3] {
             let (tracers, table) = tube(SEED, &spec);
             Sprayed {
                 name,
+                spec,
                 tracers,
                 table,
             }
@@ -205,6 +207,7 @@ fn the_test_streams_tubes_follow_their_tracers() {
         name,
         tracers,
         table,
+        ..
     } in sprayed()
     {
         let knots: Vec<&TubeKnot> = table.knots().collect();
@@ -472,12 +475,14 @@ fn a_dwarf_s_pulses_pile_up_at_apocentre() {
 }
 
 /// Every tracer whose Lagrange point's arm is not its ψ's lies inside the other arm's tube at
-/// its ψ (main's ruling of 2026-10-29), in its across coordinates there no farther out than the
-/// tube's other tracers: `sagittarius_like`'s under the tests' seed and eight more, and the
-/// globular streams' (they have none). Measured at v23, x86-64: one stray under the tests' seed,
-/// at ψ 0.038, 2.16 and 4.78 widths out, and one under seed 7, at ψ 0.052, 3.82 and 4.53 widths
-/// out, both beyond the tube's cut at four widths, where 1–3 of each spray's 2,000 tracers lie,
-/// and within its other tracers' 8.3 and 14.2 widths.
+/// its ψ (main's ruling of 2026-10-29): within the tube's cut at four widths there, or within two
+/// of the stream's tidal radii of the progenitor at the epoch, where the arms' roots meet and
+/// Fardal et al.'s releases start, at a mean of two tidal radii out (main's ruling of
+/// 2026-10-30). The strays weigh at most 0.5 % of their tube. Checked on `sagittarius_like` under
+/// the tests' seed and eight more, and on the globular streams (they have none). Measured at v23,
+/// x86-64: two strays in the nine sprays, both at the root: under the tests' seed at ψ 0.038,
+/// 2.16 and 4.78 widths out, 0.80 tidal radii from the progenitor, and under seed 7 at ψ 0.052,
+/// 3.82 and 4.53 widths out, 0.88 tidal radii from it.
 #[test]
 #[ignore = "slow: sprays sagittarius_like under eight seeds"]
 fn the_strays_lie_inside_the_other_arm_s_tube() {
@@ -489,35 +494,46 @@ fn the_strays_lie_inside_the_other_arm_s_tube() {
         })
         .collect();
     let mut strays = 0;
-    for (name, tracers, table) in seeds
+    for (name, spec, tracers, table) in seeds
         .iter()
-        .map(|(name, tracers, table)| (name.as_str(), &tracers[..], table))
-        .chain(sprayed().iter().map(|s| (s.name, &s.tracers[..], &s.table)))
+        .map(|(name, tracers, table)| (name.as_str(), &spec, &tracers[..], table))
+        .chain(
+            sprayed()
+                .iter()
+                .map(|s| (s.name, &s.spec, &s.tracers[..], &s.table)),
+        )
     {
-        let (mut outermost, mut astray) = (0.0_f64, Vec::new());
+        let progenitor = spec.position().metres().map(|c| c / METRES_PER_LIGHT_YEAR);
+        let tidal_radius = spec.tidal_radius().value();
+        let (mut astray, mut weight) = (Vec::new(), 0.0);
         for t in tracers {
-            let [a, b, along] = tube_coordinates(table, t);
             let by_sign = if t.psi().value() >= 0.0 {
                 Arm::Leading
             } else {
                 Arm::Trailing
             };
-            if by_sign == t.arm() {
-                outermost = outermost.max(a.abs()).max(b.abs());
-            } else {
-                astray.push((t.psi().value(), [a, b, along]));
+            if by_sign != t.arm() {
+                let x = t.position().metres().map(|c| c / METRES_PER_LIGHT_YEAR);
+                let out = norm(sub(x, progenitor)) / tidal_radius;
+                astray.push((t.psi().value(), tube_coordinates(table, t), out));
+                weight += t.weight().value();
             }
         }
-        for (psi, [a, b, along]) in &astray {
+        for (psi, [a, b, along], out) in &astray {
             eprintln!(
                 "{name}: stray at ψ {psi:.4}, {a:.2} and {b:.2} widths out and {along:.0} ly \
-                 along; the tube's other tracers reach {outermost:.2} widths"
+                 along, {out:.2} tidal radii from the progenitor"
             );
             assert!(
-                a.abs().max(b.abs()) <= outermost,
-                "{name}: a stray at ψ {psi} lies outside the tube"
+                a.abs().max(b.abs()) <= 4.0 || *out <= 2.0,
+                "{name}: a stray at ψ {psi} lies outside the tube's cut and away from its root"
             );
         }
+        let share = weight / table.mass().value();
+        assert!(
+            share <= 0.005,
+            "{name}: the strays weigh {share} of the tube"
+        );
         strays += astray.len();
     }
     assert!(strays > 0, "no stray to check");
