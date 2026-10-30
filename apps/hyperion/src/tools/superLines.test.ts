@@ -196,6 +196,14 @@ describe("the kernel", () => {
       true,
     ]);
   });
+
+  it("takes the step's share of the profile less its pedestal where the cut-off splits a step", () => {
+    // The cut-off 5.5 in steps of 2.5 leaves the sample at 5 a share 0.7, as without the pedestal.
+    expect(circularKernel(64, 2.5, 5.5, 0.5, 0.1, true)[2]).toBeCloseTo(
+      0.7 * (voigtProfile(5, 0.5, 0.1) - voigtProfile(5.5, 0.5, 0.1)),
+      15,
+    );
+  });
 });
 
 /** Toy N₂O lines of one width (0.08 cm⁻¹ atm⁻¹, n 0.5) and E″ 0, about a cell. */
@@ -441,6 +449,29 @@ describe("a cell's super-line spectrum", () => {
     expect(Math.abs(mean - (cell.linesMeanCm2 + cell.superLinesMeanCm2)) / mean).toBeLessThan(
       1e-12,
     );
+  });
+
+  it("subtracts its super-lines' pedestal too where the shape asks one, as superLineCell does", () => {
+    const hitran = toyLines(cellNm, 40, 5);
+    const shape = { cutoffPerCm: 25, pedestal: true } as const;
+    const cell = mergedCell(cellNm, hitran, species, 296, 1e5, shape, new Map());
+    const plain = mergedCell(cellNm, hitran, species, 296, 1e5, PLAIN_SHAPE, new Map());
+    if (cell === undefined || plain === undefined) {
+      throw new Error("the toy cell has lines");
+    }
+    const points = cell.crossSectionsCm2.length;
+    const alone = superLineCell(cellNm, species, 296, 1e5, 25, points, new Map(), true);
+    if (alone === undefined) {
+      throw new Error("the toy cell has super-lines");
+    }
+    let sum = 0;
+    for (const v of alone.crossSectionsCm2) {
+      sum += v;
+    }
+    expect([
+      Math.abs(cell.superLinesMeanCm2 - sum / points) / cell.superLinesMeanCm2 < 1e-12,
+      cell.superLinesMeanCm2 < plain.superLinesMeanCm2,
+    ]).toEqual([true, true]);
   });
 
   it("takes every super-line band and no line below the split", () => {

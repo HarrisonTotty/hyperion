@@ -23351,7 +23351,8 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     Its first pass, on E3's 20 pressures, failed the chain tier (to 2.33 × 10⁻³ at 688 and
     732–733 nm, 1,000–1,100 K) at the dropped alternates, so it was reduced again whole on the 22
     the merge asked for, as H₂S and HCN were. The cap's directories hold 109,360,046 of
-    150,000,000 bytes, 40,639,954 left for hot H₂O. References: 548 and 721 nm, the projection's
+    150,000,000 bytes, 40,639,954 left for hot H₂O (109,360,147 and 40,639,853 since `VO.json`'s
+    in-place edit to 3,000 K, 101 bytes). References: 548 and 721 nm, the projection's
     strongest and median samples.
 
   - _`ATMOSPHERE_OPTICS_VERSION`_ is raised from 3 to 4, by its own rule: VO is drawn where it was
@@ -23393,6 +23394,7 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     line shape is `estimated`, as every hot table's is.
   - _`exomol/README.md`'s bounds bullet_ still lists every list R08.T4.c summed (HyVO, Toto,
     MoLLIST's FeH and the others) though their entries left `bounds.json` with their tables.
+    Resolved by hot H₂O's commit: the bullet names the lists still pending, TYM and C2018.
 - **Deviations in R08.T4.f's part 2, hot H₂O, as built** (2026-10-29, on the owner's laptop, which
   reaches ExoMol's site; main's move of hot H₂O to a laptop-side reduction, 2026-10-30;
   decision-r08-t4ef-storage, decision-r08-t4d-kdist.md §6.4 and decision-r08-licences). Built on
@@ -23437,8 +23439,8 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
 
     Its first pass, on E3's 20 pressures, failed the chain tier at the dropped 177.8 kPa alternate
     (39 states in 12 cells over 581–756 nm, 300–550 K, to 2.49 × 10⁻³), so it was reduced again
-    whole on the 21 the merge asked for, as H₂S, HCN and VO were. Its parts are 446,496–478,904
-    bytes. T4.f's tables now hold 42,252,090 bytes of its 71,366,237 (part 1's 26,233,897, VO's
+    whole on the 21 the merge asked for, as H₂S, HCN and VO were. Its parts are 376,112–478,904
+    bytes (the 25th the least, the others from 446,496). T4.f's tables now hold 42,252,090 bytes of its 71,366,237 (part 1's 26,233,897, VO's
     4,492,487 and H₂O's); the cap's directories hold 120,885,853 of 150,000,000. References: 717
     and 620 nm, the projection's strongest and median samples.
 
@@ -23451,7 +23453,7 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     | H₂O | the 82 above a hundredth of the peak cell's mean | 0.096 |   0.104 |
     | H₂O | all 381                                          | 0.548 |   0.598 |
     - The 82 stronger cells agree in mean at 10 Pa to a median 1.012 (0.68–1.17); over 680–760 nm,
-      where the bands are, 1.027 summed (median 0.994), and over 500–680 nm 0.95–1.04 summed. Their
+      where the bands are, 1.027 summed (median 0.994), and over 500–680 nm 0.95–1.04 summed in 60 nm windows. Their
       steps compound each cell's own ratio with POKAZATEL's default width (0.07 cm⁻¹ bar⁻¹, n =
       0.5) over HITRAN2024's measured air widths and exponents.
     - Below 500 nm, where both tables' cells are at most 3.3 × 10⁻³ of the peak, POKAZATEL's lines
@@ -23489,3 +23491,22 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     - No self width: lean, as part 1's tables (the list's default alone), the client labelling any
       H₂O share through `DIPOLAR_BROADENERS`; carrying R08.T4.d's self ratio, 4.87, as a stated
       estimate would be a later task's, if steam worlds' hot H₂O is to be less approximate.
+- **R08.T4.f's part 2, hot H₂O: its science check, reviews and gate** (2026-10-30, a pod lane; no
+  outside site reachable, so no source re-read).
+  - _Science check._ The pedestal is correct: the super-lines subtract per bin what
+    `molecularLines.ts` subtracts per line, and Voigt and Lorentz at the cut-off differ by at most
+    6.9 × 10⁻⁵ of it. The Rayleigh mirror equals `rayleigh.ts`, and its Z is now sourced. The
+    labels and nodes are as stated.
+  - _Pending a machine that reaches the sources:_ the `.def`'s maximum temperature (quoted), the
+    version, Q(296 K), the abundance 0.997 317, and CKD 1989's pedestal (§6.4).
+  - _Deferred: the hot bands' pedestals_, which the held continuum lacks. Above 296 K the table
+    draws too little, by up to a pedestal's share: under 2 × 10⁻³ of a line to 0.1 MPa, and 0.21 at
+    13.3 MPa.
+  - _Deferred: "where the two agree"_ holds in the 82 stronger cells only. The lists differ in the
+    blue, so the hand-over is at 300 K, as CO's and HCN's.
+  - _Deferred: steam's width step at 300 K._ R08.T4.d's self width is 4.873 times air; the hot
+    table has none.
+  - _Reviews._ `mergedCell`'s pedestal is now tested (TypeScript should-fix), and so is a step the
+    cut-off splits. Plan conformance's corrections are made above.
+  - _Gate._ `just smart-ci 37cc73fa8` ran over this tree. The laptop's failing goldens pass in the
+    pod.

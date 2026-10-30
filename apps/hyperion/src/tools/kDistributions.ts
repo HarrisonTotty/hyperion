@@ -1604,8 +1604,9 @@ export function carbonMonoxideRayleighCm2(wavelengthNm: number): number {
  * H₂O's Rayleigh cross-section, cm², at a vacuum wavelength, nm, as the client's `rayleigh.ts`
  * takes it (held equal by `kDistributions.test.ts`; R08.T4.f): Ciddor 1996's water-vapour
  * refractivity (Appl. Opt. 35, 1566, eq. 3), (n − 1) × 10⁸ = 1.022 (295.235 + 2.6422 σ² −
- * 0.032 38 σ⁴ + 0.004 028 σ⁶), σ in µm⁻¹, at 20 °C and 1,333 Pa with Z = 0.999 237, and the King
- * factor 1.001 (Murphy 1977, J. Chem. Phys. 67, 5877: ρₚ = (3.0 ± 1.4) × 10⁻⁴).
+ * 0.032 38 σ⁴ + 0.004 028 σ⁶), σ in µm⁻¹, at 20 °C and 1,333 Pa with the client's Z = 0.999 237
+ * (the NIST Chemistry WebBook's, SRD 69, from its density at that state), and the King factor 1.001
+ * (Murphy 1977, J. Chem. Phys. 67, 5877: ρₚ = (3.0 ± 1.4) × 10⁻⁴).
  */
 export function waterRayleighCm2(wavelengthNm: number): number {
   const s2 = perUmSquared(wavelengthNm);
