@@ -28,6 +28,7 @@ import type { LocalFrame } from "../geometry/frame";
 import { type BoxPx, halfExtentRem, type TextSizeRem, textSizeRem } from "./labels";
 import {
   boxGapPx,
+  GREEK_CROSS_ARM_SHARE,
   LABEL_EDGE_CLEARANCE_REM,
   LABEL_NEIGHBOUR_CLEARANCE_REM,
   LABEL_TEXT_CLEARANCE_REM,
@@ -1158,14 +1159,19 @@ function symbolReachPx(op: SymbolOp, strokes: ReticleStrokesCss): number {
       reachPx = op.radiusPx + strokes.shiftPx + halfStrokePx;
       break;
     case "polygon": {
+      const cornerPx = op.radiusPx + strokes.shiftPx / unitInradius(outline.points);
+      if (op.shape === "greek-cross") {
+        // An arm's outer corner, on the unit circle at (w, 3w), is square, and so mitred out by half
+        // the stroke along each of its sides.
+        const reach = cornerPx / Math.hypot(1, GREEK_CROSS_ARM_SHARE);
+        reachPx = Math.hypot(reach * GREEK_CROSS_ARM_SHARE + halfStrokePx, reach + halfStrokePx);
+        break;
+      }
       // A regular polygon's corner, of interior angle π(n − 2) ÷ n, is mitred out to half the
       // stroke over the sine of half that angle.
       const corners = outline.points.length - 1;
       const halfCornerAngle = (Math.PI * (corners - 2)) / (2 * corners);
-      reachPx =
-        op.radiusPx +
-        strokes.shiftPx / unitInradius(outline.points) +
-        halfStrokePx / Math.sin(halfCornerAngle);
+      reachPx = cornerPx + halfStrokePx / Math.sin(halfCornerAngle);
       break;
     }
     case "ringed-circle":

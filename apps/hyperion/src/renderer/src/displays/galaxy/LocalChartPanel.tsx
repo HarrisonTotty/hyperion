@@ -129,7 +129,7 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
           coreDistance={coreDistance}
           accessibleName="Local chart"
           stale={stale}
-          onSelect={chart.select}
+          onSelect={chart.selectMark}
         />
       )}
       <ChartControls
@@ -176,6 +176,7 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
         observed={answered?.kind === "observed"}
         // Of the systems the `STARS` filter shows, as the list and the HR diagram read them.
         unlistedLayer={chart.systems.some((system) => system.kind === "unknown")}
+        features={(chart.features?.features.length ?? 0) > 0}
       />
     </div>
   );

@@ -381,9 +381,11 @@ export function SpatialView({
   // label stands where it does whatever is selected (decision-r07-quality-and-destination, addendum
   // C, C1; R07.T16.j).
   const { chosenMarks, unselectedIds } = useMemo(() => {
-    const chosen = chooseLabels(scene.points, scene.selectedId, scene.destinationId);
+    // A feature's mark is labelled as a system's is (plan 09, P09.T41.a).
+    const marks = [...scene.points, ...(scene.features ?? [])];
+    const chosen = chooseLabels(marks, scene.selectedId, scene.destinationId);
     const unselected =
-      scene.selectedId === null ? chosen : chooseLabels(scene.points, null, scene.destinationId);
+      scene.selectedId === null ? chosen : chooseLabels(marks, null, scene.destinationId);
     return { chosenMarks: chosen, unselectedIds: new Set(unselected.map((mark) => mark.id)) };
   }, [scene]);
   const pinnedIds = [scene.selectedId, scene.destinationId].filter(

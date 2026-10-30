@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { localFrameAt } from "../geometry/frame";
 import { isAbovePlane, type SizeClass, type SymbolShape } from "./marks";
-import { SIZE_CLASS_REM, SYMBOL_STROKE_PX, symbolOutline } from "./symbols";
+import {
+  GREEK_CROSS_ARM_SHARE,
+  SIZE_CLASS_REM,
+  SYMBOL_STROKE_PX,
+  symbolOutline,
+  unitInradius,
+} from "./symbols";
 import { vec3 } from "../geometry/vec3";
 
 const POLYGONS: ReadonlyArray<SymbolShape> = ["diamond", "square", "triangle"];
@@ -79,6 +85,7 @@ const EVERY_SHAPE: ReadonlyArray<SymbolShape> = [
   ...POLYGONS,
   "ringed-circle",
   ...ADDED_POLYGONS,
+  "greek-cross",
 ];
 
 /** The screen size at 100%, where a `rem` is 16 px. */
@@ -207,5 +214,55 @@ describe("the outlines the later plans add", () => {
 
     expect(gapPx).toBeGreaterThanOrEqual(SYMBOL_STROKE_PX);
     expect(holePx).toBeGreaterThanOrEqual(SYMBOL_STROKE_PX);
+  });
+});
+
+/** The Greek cross's corners, checked to close, without the repeated first. */
+function crossCorners(): ReadonlyArray<{ readonly x: number; readonly y: number }> {
+  const outline = symbolOutline("greek-cross");
+  if (outline.kind !== "polygon") {
+    throw new Error("the Greek cross should be a polygon");
+  }
+  expect(outline.points.at(-1)).toEqual(outline.points[0]);
+  return outline.points.slice(0, -1);
+}
+describe("the Greek cross, a feature's mark (plan 09, P09.T41.a)", () => {
+  it("draws twelve corners about the centre, the outer ones on the unit circle", () => {
+    const corners = crossCorners();
+    const radii = corners.map((point) => Math.hypot(point.x, point.y));
+
+    expect(corners).toHaveLength(12);
+    expect(corners.reduce((sum, point) => sum + point.x, 0)).toBeCloseTo(0, 12);
+    expect(corners.reduce((sum, point) => sum + point.y, 0)).toBeCloseTo(0, 12);
+    expect(Math.max(...radii)).toBeCloseTo(1, 12);
+    expect(radii.filter((radius) => Math.abs(radius - 1) < 1e-12)).toHaveLength(8);
+  });
+
+  it("makes its arms as wide as they are long, a third of its span: five equal squares", () => {
+    const corners = crossCorners();
+    const reach = Math.max(...corners.map((point) => Math.abs(point.x)));
+    const xs = new Set(corners.map((point) => Math.abs(point.x).toFixed(12)));
+
+    expect(GREEK_CROSS_ARM_SHARE).toBe(1 / 3);
+    expect([...xs].map(Number).toSorted((a, b) => a - b)).toEqual([
+      Number((reach / 3).toFixed(12)),
+      Number(reach.toFixed(12)),
+    ]);
+    expect(Math.max(...corners.map((point) => Math.abs(point.y)))).toBeCloseTo(reach, 12);
+  });
+
+  it("moves its arms' sides out by the outline shift, its nearest sides being the arms'", () => {
+    const corners = crossCorners();
+    const reach = Math.max(...corners.map((point) => Math.abs(point.x)));
+
+    expect(unitInradius([...corners, corners[0] ?? { x: 0, y: 0 }])).toBeCloseTo(reach / 3, 12);
+  });
+
+  it("leaves each open arm a hole wider than its line at the largest size and 80% scale", () => {
+    const corners = crossCorners();
+    const reach = Math.max(...corners.map((point) => Math.abs(point.x)));
+    const armPx = 2 * (reach / 3) * pathRadiusPx(4, REM_PX * 0.8);
+
+    expect(armPx - SYMBOL_STROKE_PX).toBeGreaterThanOrEqual(SYMBOL_STROKE_PX);
   });
 });

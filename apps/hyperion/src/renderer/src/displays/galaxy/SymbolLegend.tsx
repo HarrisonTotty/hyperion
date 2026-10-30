@@ -4,7 +4,7 @@ import { RINGED_CIRCLE_MIN_SIZE_CLASS } from "../../lib/galaxy/starSymbols";
 import { LegendReticle } from "../../spatial/LegendReticle";
 import { LegendSymbol } from "../../spatial/LegendSymbol";
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
-import { formatBandMsun, type LayerBand, OBSERVER_LABEL } from "./chartModel";
+import { FEATURE_SIZE_CLASS, formatBandMsun, type LayerBand, OBSERVER_LABEL } from "./chartModel";
 import { StarShapeLegend } from "./StarShapeLegend";
 
 /**
@@ -31,6 +31,35 @@ interface SymbolLegendProps {
    * build does not know, listed and not drawn; `false` when absent.
    */
   readonly unlistedLayer?: boolean;
+  /**
+   * Whether the chart on show draws a large feature, its Greek cross and its circle at true radius
+   * (plan 09, P09.T41.a); `false` when absent.
+   */
+  readonly features?: boolean;
+}
+
+/** What the legend calls a feature's mark, the Greek cross (plan 09, P09.T41.a). */
+export const FEATURE_LEGEND = "FEATURE";
+
+/** What the legend calls a circle at true radius: a feature's, a shell's or a superbubble's. */
+export const TRUE_RADIUS_LEGEND = "TRUE RADIUS";
+
+/**
+ * A circle at true radius as the chart draws it: an arc of a circle wider than any mark, 1 px at
+ * the line scale, in the legend's `--text-muted`, as the chart's is.
+ */
+function TrueRadiusSample() {
+  return (
+    <svg
+      className="symbol-legend__mark symbol-legend__true-radius"
+      style={{ width: "1rem", height: "1rem" }}
+      viewBox="-5 -5 10 10"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M -4.5 4.5 A 9 9 0 0 1 4.5 -4.5" />
+    </svg>
+  );
 }
 
 /** The observer's eye as the chart draws it, open, at its 1 rem width. */
@@ -101,13 +130,16 @@ function ApparentSample() {
  *
  * A chart asked in observed mode also draws the observer's eye and the apparent positions' ticks
  * and dashed joiners, so the legend then names them in words, as it names every mark the chart can
- * draw (plan 12, P12.T11): `OBSERVER`, and `TICK APPARENT POSITION, DASHED TO PRESENT`.
+ * draw (plan 12, P12.T11): `OBSERVER`, and `TICK APPARENT POSITION, DASHED TO PRESENT`. So does a
+ * chart that draws a large feature (plan 09, P09.T41.a): `FEATURE` beside the Greek cross, at its
+ * size, and `TRUE RADIUS` beside an arc of the circle a feature, or a superbubble, is drawn at.
  */
 export function SymbolLegend({
   bands,
   brownDwarfFloorMsun = null,
   observed = false,
   unlistedLayer = false,
+  features = false,
 }: SymbolLegendProps) {
   const lightest = bands?.[0];
   const heaviest = bands?.at(-1);
@@ -164,6 +196,22 @@ export function SymbolLegend({
         <LegendReticle />
         BRACKET SELECTED
       </p>
+      {features ? (
+        <>
+          <p className="symbol-legend__item">
+            <LegendSymbol
+              shape="greek-cross"
+              diameterRem={SIZE_CLASS_REM[FEATURE_SIZE_CLASS]}
+              filled
+            />
+            {FEATURE_LEGEND}
+          </p>
+          <p className="symbol-legend__item">
+            <TrueRadiusSample />
+            {TRUE_RADIUS_LEGEND}
+          </p>
+        </>
+      ) : null}
       {observed ? (
         <>
           <p className="symbol-legend__item">

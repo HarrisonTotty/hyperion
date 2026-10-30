@@ -2253,7 +2253,8 @@ body {
  * the tick across its end as wide, both at the line scale, as the chart draws them (plan 12,
  * P12.T11; R07.T16.f).
  */
-.symbol-legend__apparent path {
+.symbol-legend__apparent path,
+.symbol-legend__true-radius path {
   stroke-width: calc(1px * var(--line-scale));
 }
 

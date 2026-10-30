@@ -9,6 +9,7 @@ import {
 import { apparentOffset } from "./apparent";
 import {
   type AnnulusMark,
+  type FeatureMark,
   isAbovePlane,
   type PathMark,
   type PathRole,
@@ -267,6 +268,8 @@ const TICK_EVERY_DEG = 10;
 const TICK_LENGTH_REM = 0.25;
 const SAME_RADIUS_TOLERANCE = 1e-9;
 const ANNULUS_WIDTH_PX = 1;
+/** The width of a feature's, a shell's or a superbubble's circle at its true radius. */
+const TRUE_RADIUS_WIDTH_PX = 1;
 /** How often a belt's radial ticks join its edges. */
 const BELT_TICK_EVERY_DEG = 10;
 /**
@@ -280,6 +283,11 @@ interface PlacedMark {
   readonly mark: PointMark;
   readonly at: Projected;
   readonly above: boolean;
+}
+
+/** A feature's mark where it ended up, with the radius it is also drawn at. */
+interface PlacedFeature extends PlacedMark {
+  readonly mark: FeatureMark;
 }
 
 // At equal depth the lower ID is drawn last, on top, because it is the one `pick` chooses: what
@@ -673,6 +681,59 @@ function sphereOps(
         xPx: centre.xPx,
         yPx: centre.yPx - radiusPx,
         stack,
+        centre,
+        radiusPx,
+      });
+    }
+  }
+  return { ops, labels };
+}
+
+/**
+ * The circles drawn at true radius (plan 09, P09.T41.a): each feature's whose circle is wider on the
+ * screen than its mark, about the mark, and each shell's about its centre, all solid `--text-muted`
+ * 1 px lines, which say where something lies, and so take the guide's 6:1 that `--line` does not
+ * reach (the orchestrator's ruling 35); and the shells' labels, at their circles.
+ */
+function trueRadiusOps(
+  features: ReadonlyArray<PlacedFeature>,
+  scene: SpatialScene,
+  basis: ViewBasis,
+  camera: Camera,
+  viewport: Viewport,
+): { ops: CircleOp[]; labels: CircleLabel[] } {
+  const ops: CircleOp[] = [];
+  const labels: CircleLabel[] = [];
+  for (const { mark, at } of features) {
+    const radiusPx = camera.pxPerUnit * mark.radius;
+    if (radiusPx > outerRadiusPx(mark, viewport)) {
+      ops.push({
+        kind: "circle",
+        centre: screen(at),
+        radiusPx,
+        stroke: "textMuted",
+        widthPx: TRUE_RADIUS_WIDTH_PX,
+      });
+    }
+  }
+  for (const shell of scene.shells ?? []) {
+    const centre = screen(project(shell.centre, basis, camera, viewport));
+    const radiusPx = camera.pxPerUnit * shell.radius;
+    ops.push({
+      kind: "circle",
+      centre,
+      radiusPx,
+      stroke: "textMuted",
+      widthPx: TRUE_RADIUS_WIDTH_PX,
+    });
+    if (shell.label.length > 0) {
+      labels.push({
+        key: `shell:${shell.id}`,
+        text: shell.label,
+        placement: "circle-top",
+        xPx: centre.xPx,
+        yPx: centre.yPx - radiusPx,
+        stack: 0,
         centre,
         radiusPx,
       });
@@ -1205,6 +1266,14 @@ function observerOps(
  * a selection's bracket about it, as a mark's label does. Neither gives an anchor, so neither is
  * picked.
  *
+ * A scene's features and shells (plan 09, P09.T41.a) change nothing else in the order either. A
+ * feature's mark is a point mark, the Greek cross, placed, stalked, filled, ordered and anchored
+ * with the systems', so that it is picked and bracketed as they are; where its sphere is wider on
+ * the screen than the mark, its circle at true radius comes first of all, with each shell's, every
+ * one a solid 1 px `--text-muted` circle, so that every mark and line lies on top of them. A
+ * shell gives no anchor, so it is never picked, and its label follows the spheres' in the curve
+ * labels, at its circle as theirs are.
+ *
  * The list holds the guide's CSS widths; `paint` draws them at no less than 2 device px
  * (R07.T16.f). A destination is four chevrons pointing at its mark, their apices at least
  * `minReticleGapPx` outside the selection's bracket's place, or 0.25 rem where that is more,
@@ -1222,11 +1291,13 @@ export function buildDrawList(
   minReticleGapPx: number,
 ): DrawList {
   const basis = viewBasis(scene.frame, camera);
-  const placed: PlacedMark[] = scene.points.map((mark) => ({
+  const place = <M extends PointMark>(mark: M): PlacedMark & { readonly mark: M } => ({
     mark,
     at: project(mark.position, basis, camera, viewport),
     above: isAbovePlane(scene.frame, mark.position),
-  }));
+  });
+  const features: PlacedFeature[] = (scene.features ?? []).map(place);
+  const placed: PlacedMark[] = [...scene.points.map(place), ...features];
   const above = placed.filter((entry) => entry.above).toSorted(byFarToNear);
   const below = placed.filter((entry) => !entry.above).toSorted(byFarToNear);
   const cameraAbove = camera.elevationDeg >= 0;
@@ -1236,8 +1307,10 @@ export function buildDrawList(
     ? [pieces.below, pieces.above]
     : [pieces.above, pieces.below];
 
-  // Before every mark, so that a joiner never crosses another system's symbol.
-  const ops: DrawOp[] = [...segmentOps(scene, placed, basis, camera, viewport)];
+  // The circles at true radius first, so that every mark and line lies on top of them; then, before
+  // every mark, the segments, so that a joiner never crosses another system's symbol.
+  const trueRadii = trueRadiusOps(features, scene, basis, camera, viewport);
+  const ops: DrawOp[] = [...trueRadii.ops, ...segmentOps(scene, placed, basis, camera, viewport)];
   for (const piece of farPieces) {
     ops.push(pathOp(piece, basis, camera, viewport));
   }
@@ -1268,6 +1341,7 @@ export function buildDrawList(
     anchors,
     curveLabels: [
       ...spheres.labels,
+      ...trueRadii.labels,
       ...ringLabels(scene, basis, camera, viewport),
       ...markCurveLabels(scene, basis, camera, viewport),
       ...observer.labels,

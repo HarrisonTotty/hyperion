@@ -7,7 +7,7 @@
  * offsets from the chart centre along the galactic axes, and its labels the text the view draws
  * beside each curve.
  */
-import type { MassLayer, ObjectKindDto } from "@hyperion/protocol";
+import type { FeatureIdHex, MassLayer, ObjectKindDto, SystemIdHex } from "@hyperion/protocol";
 
 import {
   formatNumber,
@@ -17,6 +17,8 @@ import {
 } from "../../lib/format";
 import {
   type ChartCensus,
+  type ChartFeature,
+  type ChartFeatures,
   type ChartLayer,
   type ChartLayerLine,
   type ChartLayerStatus,
@@ -28,15 +30,19 @@ import {
   type QueryMode,
   shownAgeMyr,
 } from "../../lib/galaxy/model";
+import { featureMarkLabel } from "../../lib/galaxy/featureWords";
 import { chartSymbol, starSizeClass } from "../../lib/galaxy/starSymbols";
 import { layerIndex, layerRank } from "../../lib/galaxy/wire";
 import type { LocalFrame } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
 import { APPARENT_OFFSET_MIN_PX } from "../../spatial/apparent";
 import type {
+  FeatureMark,
   PlaneRing,
   PointMark,
   SegmentMark,
+  ShellMark,
+  SizeClass,
   SpatialScene,
   SphereMark,
 } from "../../spatial/marks";
@@ -238,6 +244,79 @@ export function shownCount(shown: number, total: number, filter: StarFilter): Sh
   };
 }
 
+/** What a chart has selected: a system, or a large feature (plan 09, P09.T41.a). */
+export type ChartSelection =
+  | { readonly kind: "system"; readonly id: SystemIdHex }
+  | { readonly kind: "feature"; readonly id: FeatureIdHex };
+
+/**
+ * What a feature's mark's ID starts with: a feature's ID is also a well-formed member's system ID
+ * (plan 09, P09.T39), so the two must never share a mark's ID on one chart.
+ */
+const FEATURE_MARK_PREFIX = "feature:";
+
+/** The ID of a feature's mark on a chart. */
+export function featureMarkId(id: FeatureIdHex): string {
+  return `${FEATURE_MARK_PREFIX}${id}`;
+}
+
+/** The ID of a selection's mark on a chart: a system's own ID, or its feature's mark's. */
+export function selectionMarkId(selection: ChartSelection): string {
+  return selection.kind === "system" ? selection.id : featureMarkId(selection.id);
+}
+
+/** What a mark picked on a chart selects: the feature whose mark it is, or the system it is. */
+export function selectionOfMark(markId: string): ChartSelection {
+  return markId.startsWith(FEATURE_MARK_PREFIX)
+    ? { kind: "feature", id: markId.slice(FEATURE_MARK_PREFIX.length) }
+    : { kind: "system", id: markId };
+}
+
+/**
+ * A feature mark's size class: the largest, 1 rem across, since a feature is a group of systems
+ * or a cloud and its Greek cross must read open south of the plane, its arms a third of its span.
+ */
+export const FEATURE_SIZE_CLASS: SizeClass = 4;
+
+/**
+ * Where a feature's label ranks among the chart's: above every system's, whose rank is its initial
+ * mass of at most 150 M☉, since a feature's kind is named by its label alone on the chart (the
+ * guide's 3D conventions) where a system's is named by its shape; and among the features by mass.
+ */
+const FEATURE_LABEL_PRIORITY = 1e12;
+
+/** A superbubble's label at its circle: what it is, and the nursery it belongs to. */
+export function superbubbleLabel(designation: string): string {
+  return `SUPERBUBBLE ${designation}`;
+}
+
+/** A feature's mark: the Greek cross at its centre, labelled with its kind and designation. */
+function toFeatureMark(feature: ChartFeature): FeatureMark {
+  return {
+    id: featureMarkId(feature.id),
+    position: feature.relLy,
+    shape: "greek-cross",
+    sizeClass: FEATURE_SIZE_CLASS,
+    // Colour is kept free for status, and a feature has none on the chart yet.
+    status: "plain",
+    label: featureMarkLabel(feature.kind, feature.designation),
+    labelPriority: FEATURE_LABEL_PRIORITY + feature.massMsun,
+    radius: feature.extentLy,
+  };
+}
+
+/** A nursery's superbubble, a circle at its true radius about the feature, or none. */
+function toBubble(feature: ChartFeature): ShellMark | null {
+  return feature.bubbleRadiusLy === null
+    ? null
+    : {
+        id: `bubble:${feature.id}`,
+        centre: feature.relLy,
+        radius: feature.bubbleRadiusLy,
+        label: superbubbleLabel(feature.designation),
+      };
+}
+
 /** What a chart's scene is built from besides the query's answer. */
 export interface ChartSceneOptions {
   /** The named directions at the chart centre, which the grid and the triad follow. */
@@ -249,6 +328,11 @@ export interface ChartSceneOptions {
   readonly destinationId: string | null;
   /** Which systems are drawn; `all` when absent. */
   readonly starFilter?: StarFilter | undefined;
+  /**
+   * The features in range, from an answer for the chart's own centre, radius and time (plan 09,
+   * P09.T41.a); none when absent.
+   */
+  readonly features?: ReadonlyArray<ChartFeature> | undefined;
 }
 
 /** Whether the drive range's circle and plane ring belong on a chart of this query radius. */
@@ -377,9 +461,24 @@ function apparentSegment(system: ChartSystem, selected: boolean): SegmentMark | 
  * without one has none. The observer of a chart answered in observed mode ({@link answeredMode})
  * is drawn where it lies inside the view, labelled `OBSERVER`; one asked observed and answered in
  * `now`, by a server that ignores the mode, draws none.
+ *
+ * The features in range (plan 09, P09.T41.a) are each drawn as a Greek cross at its centre, at the
+ * largest size class, labelled with its kind's abbreviation and its designation (`OC GPF F207`),
+ * and with its extent as its true radius, which the view draws as a circle where it is wider than
+ * the mark; the `STARS` filter, which picks systems, leaves them all drawn. A nursery's
+ * superbubble is a shell of its own, a circle at its true radius about the feature labelled
+ * `SUPERBUBBLE` and the feature's designation, with no mark. A feature's mark takes an ID of its
+ * own ({@link featureMarkId}), so that it is picked and selected apart from any system.
  */
 export function toScene(result: ChartResult, options: ChartSceneOptions): SpatialScene {
-  const { frame, driveRangeLy, selectedId, destinationId, starFilter = "all" } = options;
+  const {
+    frame,
+    driveRangeLy,
+    selectedId,
+    destinationId,
+    starFilter = "all",
+    features = [],
+  } = options;
   const spacing = gridSpacing(result.radiusLy);
   const spheres: SphereMark[] = [];
   if (rangeIsShown(result.radiusLy, driveRangeLy)) {
@@ -409,9 +508,15 @@ export function toScene(result: ChartResult, options: ChartSceneOptions): Spatia
             return segment === null ? [] : [segment];
           });
   const [centreX, centreY, centreZ] = result.centreLy;
+  const bubbles = features.flatMap((feature) => {
+    const bubble = toBubble(feature);
+    return bubble === null ? [] : [bubble];
+  });
   return {
     frame,
     points: drawn.map(({ mark }) => mark),
+    ...(features.length === 0 ? {} : { features: features.map(toFeatureMark) }),
+    ...(bubbles.length === 0 ? {} : { shells: bubbles }),
     ...(segments.length === 0 ? {} : { segments }),
     ...(mode.kind === "observed"
       ? {
@@ -673,4 +778,40 @@ function observationUsable(observed: Observation): boolean {
     Number.isFinite(y) &&
     Number.isFinite(z)
   );
+}
+
+/** Whether a length or a mass that cannot be negative can be read and drawn. */
+function isUsableSize(value: number): boolean {
+  return Number.isFinite(value) && value >= 0;
+}
+
+/** Whether a feature's values can be read and drawn: finite, and no size below zero. */
+function featureUsable(feature: ChartFeature): boolean {
+  const { x, y, z } = feature.relLy;
+  return (
+    Number.isFinite(x) &&
+    Number.isFinite(y) &&
+    Number.isFinite(z) &&
+    isUsableSize(feature.extentLy) &&
+    isUsableSize(feature.massMsun) &&
+    isUsableSize(feature.expectedMembers) &&
+    (feature.ageMyr === null || Number.isFinite(feature.ageMyr)) &&
+    (feature.bubbleRadiusLy === null || isUsableSize(feature.bubbleRadiusLy))
+  );
+}
+
+/**
+ * Why a features-in-range answer cannot be charted, in words, or `null` when it can (plan 09,
+ * P09.T41.a).
+ *
+ * @remarks
+ * The counterpart of {@link chartDataFault}: the wire is decoded but not validated, so a feature
+ * whose position, extent, mass, expected members, age or bubble the chart could not draw or the
+ * readout could not print leaves the whole answer unshown, rather than a chart that misdraws one.
+ */
+export function featureDataFault(features: ChartFeatures): string | null {
+  if (!(features.radiusLy > 0) || !Number.isFinite(features.radiusLy)) {
+    return "query radius unusable";
+  }
+  return features.features.every(featureUsable) ? null : "feature unusable";
 }

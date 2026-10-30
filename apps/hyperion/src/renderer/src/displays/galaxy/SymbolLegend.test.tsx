@@ -6,7 +6,7 @@ import { PLANET_SYMBOL, starSymbol } from "../../lib/galaxy/starSymbols";
 import { aCensus } from "../../test/galaxyFixtures";
 import { stylesheetRule } from "../../test/stylesheet";
 import { layerBands } from "./chartModel";
-import { SymbolLegend } from "./SymbolLegend";
+import { FEATURE_LEGEND, SymbolLegend, TRUE_RADIUS_LEGEND } from "./SymbolLegend";
 
 /** Every kind the wire names, so that the legend is checked against the whole symbol set. */
 const EVERY_KIND: ReadonlyArray<ObjectKindDto> = [
@@ -112,5 +112,26 @@ describe("SymbolLegend", () => {
     render(<SymbolLegend bands={layerBands(aCensus().layers)} />);
 
     expect(within(legend()).getByText(/^RINGED CIRCLE SIZE AT LEAST 0\.75/u)).toBeInTheDocument();
+  });
+});
+
+describe("SymbolLegend with features (plan 09, P09.T41.a)", () => {
+  it("names the feature's cross and the circle at true radius while the chart draws a feature", () => {
+    render(<SymbolLegend bands={layerBands(aCensus().layers)} features />);
+
+    const items = within(legend())
+      .getAllByRole("paragraph")
+      .map((item) => item.textContent);
+    expect(items).toContain(FEATURE_LEGEND);
+    expect(items).toContain(TRUE_RADIUS_LEGEND);
+    const cross = within(legend()).getByText(FEATURE_LEGEND).querySelector("svg path");
+    expect(cross).not.toBeNull();
+  });
+
+  it("names neither while the chart draws no feature", () => {
+    render(<SymbolLegend bands={layerBands(aCensus().layers)} />);
+
+    expect(within(legend()).queryByText(FEATURE_LEGEND)).toBeNull();
+    expect(within(legend()).queryByText(TRUE_RADIUS_LEGEND)).toBeNull();
   });
 });

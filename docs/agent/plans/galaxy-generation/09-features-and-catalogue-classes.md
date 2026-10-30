@@ -4505,6 +4505,22 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - Left undone: a detail of a feature that is none at the time is untested; no job checks its
     cancel token between features. Bright shells stay `not_generated` until P09.T37.
   - Golden: `tests/golden/features.golden` pins the four answers' frames.
+- **P09.T41.a, records (lane `p09-t41`, 2026-10-30, at 23 and 3; client only, no output moves).**
+  - The guide keeps its one Greek cross for every kind, the kind named by the label (`OC GPF F207`),
+    in place of the task text's "a symbol per kind"; it gains the cross's proportions, the label's
+    and a superbubble's form, and the legend's `FEATURE` and `TRUE RADIUS`.
+  - Spatial view: `SymbolShape` gains `greek-cross`; `FeatureMark` (a `PointMark` with `radius`) and
+    `ShellMark` (centre, radius, label) ride `SpatialScene.features` and `.shells`. A feature is
+    placed, picked and labelled with the points; circles at true radius are drawn first.
+  - Chart: `useFeaturesInRange` asks every kind beside the range query; `LocalChartState` gains
+    `features` (only an answer for the chart's own centre, radius and time), `featureState`,
+    `featureFault`, `selectedFeature`, `selectFeature`, `selectMark` and `retryFeatures`. A mark's ID
+    is `feature:<id>` (`featureMarkId`, `selectionOfMark`), since a feature's word is also a member's.
+  - Model and adapter: `ChartFeature` and `ChartFeatures` in `lib/galaxy/model.ts`, built by
+    `lib/galaxy/featureWire.ts`; words in `lib/galaxy/featureWords.ts`; fixtures cut from the
+    server's `features.golden` in `test/featureFixtures.ts`.
+  - Not drawn: a remnant's shell on the chart, since a range row carries no explosion site; the
+    map's bright shells carry one (P09.T41.b).
 - **P09.T33.a as built (lane `p09-classes`, 2026-10-29, at `GENERATOR_VERSION` 23, no output
   moves).** The first production class, registered: `ProductionClasses` has the
   `CORE_COLLAPSE` arm and plan 03's `placement::resolve` hands every `111` ID to the class grid

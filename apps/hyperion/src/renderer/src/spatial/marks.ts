@@ -9,9 +9,10 @@ import type { ColourToken } from "./drawList";
  * One meaning per shape on every spatial display. `circle` is a star system; `diamond`, `square`
  * and `triangle` are drawn now and given their meaning by plan 06. Later plans add their own
  * shapes to this union: plan 06 the `ringed-circle` (a giant), plan 13 the `triangle-down` (a
- * planet), plan 14 the `pentagon` (a moon) and the `hexagon` (an unresolved contact). Each is drawn
- * here before the display that gives it its meaning is built, and every one is closed, since a mark
- * is filled above the reference plane and open below it.
+ * planet), plan 14 the `pentagon` (a moon) and the `hexagon` (an unresolved contact), and plan 09
+ * the `greek-cross` (a feature, a group of systems or a cloud of gas: {@link FeatureMark}). Each is
+ * drawn here before the display that gives it its meaning is built, and every one is closed, since
+ * a mark is filled above the reference plane and open below it.
  */
 export type SymbolShape =
   | "circle"
@@ -21,7 +22,8 @@ export type SymbolShape =
   | "ringed-circle"
   | "triangle-down"
   | "pentagon"
-  | "hexagon";
+  | "hexagon"
+  | "greek-cross";
 
 /** The size of a mark, 0 (smallest) to 4, which encodes a class and never depth. */
 export type SizeClass = 0 | 1 | 2 | 3 | 4;
@@ -42,6 +44,38 @@ export interface PointMark {
   readonly label: string;
   /** Higher values are labelled first when not every mark can be. */
   readonly labelPriority: number;
+}
+
+/**
+ * A large feature's mark (plan 09, P09.T41.a): a point mark in the Greek cross, which no system or
+ * body takes, with the feature's true radius.
+ *
+ * @remarks
+ * It is placed, stalked, filled, picked, bracketed and labelled as every point mark is, its label
+ * naming its kind by its abbreviation (`OC GPF F207`). Where its sphere is wider on the screen than
+ * the mark, the sphere's outline is drawn too, a solid `--text-muted` circle at its true radius
+ * about the mark, since a sphere is a circle in the orthographic view (the guide's 3D conventions).
+ */
+export interface FeatureMark extends PointMark {
+  readonly shape: "greek-cross";
+  /** The feature's radius at the scene's time, in scene units: its sphere's. */
+  readonly radius: number;
+}
+
+/**
+ * A sphere about a point of the scene with no mark of its own, such as a remnant's shell or a
+ * nursery's superbubble (plan 09, P09.T41.a): drawn as its outline at its true radius, a solid
+ * `--text-muted` circle, and labelled at it, never picked.
+ */
+export interface ShellMark {
+  /** Stable identity, which keys its label. */
+  readonly id: string;
+  /** Its centre, relative to the view centre in scene units and the scene's axes. */
+  readonly centre: Vec3;
+  /** Its radius in scene units. */
+  readonly radius: number;
+  /** Text of its label, at its circle; empty for none. */
+  readonly label: string;
 }
 
 /** A sphere about the view centre, drawn as its outline: a circle of the same radius. */
@@ -238,6 +272,10 @@ export interface SpatialScene {
   readonly observer?: ObserverMark | undefined;
   /** Bands on the reference plane, drawn with it and never picked; none when absent. */
   readonly annuli?: ReadonlyArray<AnnulusMark> | undefined;
+  /** Large features, drawn and picked with the points; none when absent (plan 09, P09.T41.a). */
+  readonly features?: ReadonlyArray<FeatureMark> | undefined;
+  /** Shells and superbubbles, drawn and never picked; none when absent (plan 09, P09.T41.a). */
+  readonly shells?: ReadonlyArray<ShellMark> | undefined;
   /** The selected mark, drawn with the `--accent` bracket reticle. */
   readonly selectedId: string | null;
   /** The commanded destination, drawn with the `--target` chevrons (R07.T16.h). */

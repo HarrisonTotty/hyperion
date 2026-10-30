@@ -92,6 +92,37 @@ const PENTAGON = regularPolygon(5, 0);
 const HEXAGON = regularPolygon(6, 30);
 
 /**
+ * How far each arm of the Greek cross reaches across it, as a share of its span: a third, so that
+ * the cross is five equal squares, the Greek cross's own proportions.
+ */
+export const GREEK_CROSS_ARM_SHARE = 1 / 3;
+
+/**
+ * The Greek cross, a feature's mark (plan 09, P09.T41.a): four equal arms, upright, traced from the
+ * top arm's left corner clockwise round its twelve corners, scaled so that the arms' outer corners
+ * lie on the unit circle, as every other outline lies inside it.
+ */
+const GREEK_CROSS = (() => {
+  // The arms' half-width w and reach a, with a = 3w and a² + w² = 1 at the outer corners.
+  const reach = 1 / Math.hypot(1, GREEK_CROSS_ARM_SHARE);
+  const half = reach * GREEK_CROSS_ARM_SHARE;
+  return closed([
+    { x: -half, y: -reach },
+    { x: half, y: -reach },
+    { x: half, y: -half },
+    { x: reach, y: -half },
+    { x: reach, y: half },
+    { x: half, y: half },
+    { x: half, y: reach },
+    { x: -half, y: reach },
+    { x: -half, y: half },
+    { x: -reach, y: half },
+    { x: -reach, y: -half },
+    { x: -half, y: -half },
+  ]);
+})();
+
+/**
  * How far out the ringed circle's disc reaches, as a share of its ring's radius.
  *
  * @remarks
@@ -115,6 +146,7 @@ const OUTLINES: Readonly<Record<SymbolShape, SymbolOutline>> = {
   "triangle-down": { kind: "polygon", points: TRIANGLE_DOWN },
   pentagon: { kind: "polygon", points: PENTAGON },
   hexagon: { kind: "polygon", points: HEXAGON },
+  "greek-cross": { kind: "polygon", points: GREEK_CROSS },
 };
 
 /**
@@ -136,9 +168,13 @@ export function symbolOutline(shape: SymbolShape): SymbolOutline {
  * Both drawers move a polygon's outline out by an outline shift δ on every side by moving its
  * corners δ over this (decision-r07-t16d-followups, (a)): the view's `bodySymbolMark` and the
  * spatial displays' `paint`, so that the legend, the picture and the view agree. That is exact only
- * for an outline whose sides all lie this far from its centre, as every polygon here does (each is
- * regular about its centre, the triangles about their centroids). An outline added later whose
- * sides do not, such as a four-point star, needs each side offset instead.
+ * for an outline whose sides all lie this far from its centre, as every regular polygon here does
+ * (each about its centre, the triangles about their centroids). The Greek cross's is its arms'
+ * half-width, 0.316, so its arms' sides move out by δ and its arms' ends by three times that, at
+ * most 1.25 device px (at a ratio of 0.78125), which keeps its hole as built and lengthens its arms
+ * by no more. An
+ * outline added later whose sides lie at no one distance and that cannot take that, such as a
+ * four-point star, needs each side offset instead.
  */
 export function unitInradius(points: ReadonlyArray<OutlinePoint>): number {
   let nearest = Infinity;

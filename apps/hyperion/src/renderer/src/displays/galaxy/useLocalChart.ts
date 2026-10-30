@@ -1,9 +1,11 @@
-import type { MassLayer, SystemIdHex, UniverseIdHex } from "@hyperion/protocol";
+import type { FeatureIdHex, MassLayer, SystemIdHex, UniverseIdHex } from "@hyperion/protocol";
 import { useMemo, useState } from "react";
 
 import type { DisplayMode } from "../../components/ModeControl";
 import {
   type CentreLy,
+  type ChartFeature,
+  type ChartFeatures,
   type ChartResult,
   type ChartSystem,
   NOW_MODE,
@@ -17,16 +19,21 @@ import type { SpatialScene } from "../../spatial/marks";
 import { vec3 } from "../../geometry/vec3";
 import {
   chartDataFault,
+  type ChartSelection,
   DEFAULT_DRIVE_RANGE_LY,
   distanceDecimalsFor,
+  featureDataFault,
+  featureMarkId,
   filterSystems,
   type LayerBand,
   layerBands,
   queryRadiusForDriveRange,
+  selectionOfMark,
   type StarFilter,
   toScene,
 } from "./chartModel";
 import { type Extinction, useExtinction } from "./useExtinction";
+import { useFeaturesInRange } from "./useFeaturesInRange";
 import { useRangeQuery } from "./useRangeQuery";
 
 /** Everything the `LOCAL CHART` panel and the panels beside it are drawn from. */
@@ -53,8 +60,21 @@ export interface LocalChartState {
   readonly starFilter: StarFilter;
   /** The mass bands of the last census, which label the floors and the legend. */
   readonly bands: ReadonlyArray<LayerBand> | null;
+  /** The selected system, or `null` while none is, a feature among them. */
   readonly selected: ChartSystem | null;
   readonly selectedId: SystemIdHex | null;
+  /**
+   * The features of the chart on show (plan 09, P09.T41.a): an answer for the chart's own centre,
+   * radius and time that the client can use, or `null` while there is none, before the first
+   * answer, while a newer chart's is awaited, and when it cannot be charted.
+   */
+  readonly features: ChartFeatures | null;
+  /** Where the features' query stands. */
+  readonly featureState: RequestState<"features_in_range">;
+  /** Why the features' answer cannot be charted, in words, or `null` when nothing is wrong. */
+  readonly featureFault: string | null;
+  /** The selected feature, or `null` while none is, a system among them. */
+  readonly selectedFeature: ChartFeature | null;
   /**
    * The extinction from the centre of the chart on show to the selected system, at the chart's
    * time (plan 07, P07.T11.c): `idle` with nothing selected.
@@ -92,6 +112,12 @@ export interface LocalChartState {
   /** Why the chart's controls are held back, such as `NO CARRIER`; `null` when they act. */
   readonly heldBack: string | null;
   readonly select: (id: SystemIdHex) => void;
+  /** Selects a feature of the chart on show, in place of any system. */
+  readonly selectFeature: (id: FeatureIdHex) => void;
+  /** Selects what a mark picked on the chart stands for: a system, or a feature. */
+  readonly selectMark: (markId: string) => void;
+  /** Asks for the features again, after a failure, without asking for the systems. */
+  readonly retryFeatures: () => void;
   readonly chooseRadius: (radiusLy: number) => void;
   readonly chooseMinLayer: (layer: MassLayer) => void;
   readonly chooseStarFilter: (filter: StarFilter) => void;
@@ -132,6 +158,12 @@ interface ModeChoice {
  * P07.T11.c). The scene and the frame keep their identity while nothing they are built from
  * changes, so that an idle chart paints nothing.
  *
+ * The features in range are asked for beside the systems, for the same centre, radius and time
+ * (plan 09, P09.T41.a), and drawn with the systems of an answer for those alone; one the client
+ * cannot use is reported and not drawn. The selection is a system or a feature, never both: picking
+ * either on the chart, or in its list, selects it in place of the other, and a feature drops out of
+ * the selection as a system does when a new answer no longer holds it.
+ *
  * The mode and the observer are the chart's too (plan 12, P12.T11), beside the radius and the time:
  * kept across a new centre and dropped with the universe. The query is asked in the mode, so a
  * changed mode or observer supersedes the one in flight, as a changed radius does. The first
@@ -148,11 +180,12 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
   const [minLayer, setMinLayer] = useState<MassLayer>("a");
   const [driveRangeLy, setDriveRange] = useState(DEFAULT_DRIVE_RANGE_LY);
   const [timeYr, setTime] = useState(0);
-  const [chosenId, setChosenId] = useState<SystemIdHex | null>(null);
+  const [chosen, setChosen] = useState<ChartSelection | null>(null);
   const [starFilter, setStarFilter] = useState<StarFilter>("all");
   const [modeChoice, setModeChoice] = useState<ModeChoice | null>(null);
   const [generation, setGeneration] = useState(0);
   const [extinctionGeneration, setExtinctionGeneration] = useState(0);
+  const [featureGeneration, setFeatureGeneration] = useState(0);
 
   const universe = open?.id ?? null;
   // Dropped with the universe it was chosen in, for good: adjusted during render, so that going
@@ -178,9 +211,25 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     generation,
   });
 
+  const featureQuery = useFeaturesInRange({
+    universe,
+    centreLy,
+    queryRadiusLy,
+    timeYr,
+    generation: generation + featureGeneration,
+  });
+
   // An answer the client cannot use is reported and not shown, as an unusable map is (T8.d).
   const fault = answered === null ? null : chartDataFault(answered);
   const shown = fault === null ? answered : null;
+  // The features are drawn with the systems of an answer for the same centre, radius and time,
+  // never beside another chart's (plan 09, P09.T41.a).
+  const answeredFeatures =
+    shown !== null && featureQuery.shown !== null && answersChart(featureQuery.shown, shown)
+      ? featureQuery.shown
+      : null;
+  const featureFault = answeredFeatures === null ? null : featureDataFault(answeredFeatures);
+  const features = featureFault === null ? answeredFeatures : null;
   const heldBack = linkDownReason(status);
   const shownCentreLy = shown?.centreLy ?? null;
   let observedHeldBack: string | null = heldBack;
@@ -197,8 +246,14 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     () => (shown === null ? [] : filterSystems(shown.systems, starFilter)),
     [shown, starFilter],
   );
-  const selected = systems.find((system) => system.id === chosenId) ?? null;
+  const selected =
+    chosen?.kind === "system" ? (systems.find((system) => system.id === chosen.id) ?? null) : null;
   const selectedId = selected?.id ?? null;
+  const selectedFeature =
+    chosen?.kind === "feature"
+      ? (features?.features.find((feature) => feature.id === chosen.id) ?? null)
+      : null;
+  const selectedMarkId = selectedFeature === null ? selectedId : featureMarkId(selectedFeature.id);
   const centre = shown?.centreLy ?? null;
   const extinction = useExtinction({
     universe: open?.id ?? null,
@@ -215,8 +270,15 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     () =>
       shown === null
         ? null
-        : toScene(shown, { frame, driveRangeLy, selectedId, destinationId: null, starFilter }),
-    [shown, frame, driveRangeLy, selectedId, starFilter],
+        : toScene(shown, {
+            frame,
+            driveRangeLy,
+            selectedId: selectedMarkId,
+            destinationId: null,
+            starFilter,
+            features: features?.features,
+          }),
+    [shown, frame, driveRangeLy, selectedMarkId, starFilter, features],
   );
   const bands = useMemo(() => (shown === null ? null : layerBands(shown.layers)), [shown]);
 
@@ -235,6 +297,10 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     bands,
     selected,
     selectedId,
+    features,
+    featureState: featureQuery.state,
+    featureFault,
+    selectedFeature,
     extinction,
     retryExtinction: () => {
       setExtinctionGeneration((count) => count + 1);
@@ -251,7 +317,18 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     observerMoveHeldBack,
     distanceDecimals: distanceDecimalsFor(shown?.radiusLy ?? queryRadiusLy),
     heldBack,
-    select: setChosenId,
+    select: (id) => {
+      setChosen({ kind: "system", id });
+    },
+    selectFeature: (id) => {
+      setChosen({ kind: "feature", id });
+    },
+    selectMark: (markId) => {
+      setChosen(selectionOfMark(markId));
+    },
+    retryFeatures: () => {
+      setFeatureGeneration((count) => count + 1);
+    },
     chooseRadius: setRadiusChoice,
     chooseMinLayer: setMinLayer,
     chooseStarFilter: setStarFilter,
@@ -278,4 +355,17 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
       setGeneration((count) => count + 1);
     },
   };
+}
+
+/** Whether a features answer is for a chart's own centre, radius and time. */
+function answersChart(features: ChartFeatures, result: ChartResult): boolean {
+  const [ax, ay, az] = features.centreLy;
+  const [bx, by, bz] = result.centreLy;
+  return (
+    ax === bx &&
+    ay === by &&
+    az === bz &&
+    features.radiusLy === result.radiusLy &&
+    features.timeYr === result.timeYr
+  );
 }

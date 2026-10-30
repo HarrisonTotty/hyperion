@@ -3,9 +3,11 @@
  *
  * @remarks
  * Wire shapes stop at `wire.ts`, which builds these types from plan 04's responses (plan 05,
- * design note D8), so that the rest of the client never reads a wire field name. The census's
- * layers are the one wire type passed through, since they are already a table, with only their
- * layer and status read into the model's own.
+ * design note D8), and at `featureWire.ts`, which builds the features' from plan 09's, so that the
+ * rest of the client never reads a wire field name. The census's layers and the features' census
+ * lines are the wire types passed through, since they are already tables, the layers with only
+ * their layer and status read into the model's own; so are the closed enums that name a feature's
+ * kind, a density map's population or an emission class.
  *
  * A mass layer, a population and a layer's status are of enums plan 04 names as growing, which a
  * newer server may send a new string of without a protocol bump. Each therefore has an `unknown`
@@ -13,6 +15,10 @@
  * Missing, so that the switches over them stay exhaustive.
  */
 import type {
+  EmissionClassWire,
+  FeatureIdHex,
+  FeatureKindCensus,
+  FeatureKindWire,
   LayerCensus,
   LayerStatus,
   MassLayer,
@@ -275,4 +281,51 @@ export interface ChartResult {
   readonly layers: ReadonlyArray<ChartLayerLine>;
   /** Every system returned, nearest first, ties by ID. */
   readonly systems: ReadonlyArray<ChartSystem>;
+}
+
+/**
+ * One large feature on a chart, as it is at the chart's time (plan 09): a cluster, an association,
+ * a star-forming region, a molecular cloud or the galactic centre.
+ */
+export interface ChartFeature {
+  /** The ID as on the wire, lower case: the word its members share with their own bits zeroed. */
+  readonly id: FeatureIdHex;
+  /** Its designation, derived from the ID (`GPF F207`, `CENTRE`): never a proper name. */
+  readonly designation: string;
+  readonly kind: FeatureKindWire;
+  /** Its centre's offset from the chart centre along the `GALACTIC` axes. */
+  readonly relLy: Vec3;
+  /** Straight-line distance from the chart centre to its centre. */
+  readonly distanceLy: number;
+  /** Its centre in the `GALACTIC` frame. */
+  readonly positionLy: Vec3;
+  /** Its radius at the chart's time: the sphere the chart draws it as. */
+  readonly extentLy: number;
+  /** Its age at the chart's time; `null` for a molecular cloud, which has none, and the centre. */
+  readonly ageMyr: number | null;
+  /** Its present mass, in M☉: its stars', or a molecular cloud's gas's. */
+  readonly massMsun: number;
+  /**
+   * The expected number of its member systems at the chart's time, the model's count over its
+   * classes: an expectation, not the number of rows a range query returns; zero for a cloud.
+   */
+  readonly expectedMembers: number;
+  /** What it shines as besides its stars; `null` for one that shines as nothing but them. */
+  readonly emission: EmissionClassWire | null;
+  /** The radius of a nursery's superbubble at the chart's time; `null` for one with none. */
+  readonly bubbleRadiusLy: number | null;
+}
+
+/** A features-in-range answer, ready to chart (plan 09, P09.T41.a). */
+export interface ChartFeatures {
+  /** The centre the server answered for, in the `GALACTIC` frame. */
+  readonly centreLy: CentreLy;
+  /** The radius the server answered for. */
+  readonly radiusLy: number;
+  /** The time the features were placed at, in years from the epoch. */
+  readonly timeYr: number;
+  /** One line for each kind asked for, in the order asked: whether it is included, and why not. */
+  readonly census: ReadonlyArray<FeatureKindCensus>;
+  /** Every feature of the included kinds within range, nearest first, ties by ID. */
+  readonly features: ReadonlyArray<ChartFeature>;
 }
