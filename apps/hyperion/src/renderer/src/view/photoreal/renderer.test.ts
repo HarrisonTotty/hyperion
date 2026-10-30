@@ -1126,11 +1126,11 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     expect([...distinct].filter((key) => !bound.has(key))).toEqual([]);
     // Every kind of air has been met by its first body thin, by its first thick (the second pass)
     // and by its first over a deck (the third); none after adds a kernel. The thin first pass makes
-    // 14: the view's, made up front with both reads' one-band marches among them (R08.T11.g, which
-    // the slab Earth takes by slot and the deck over the shared read), and the tables' four. The
-    // thick pass makes 7 more, the thick read's six and the sky's irradiance over the thick table
-    // (R08.T14.d.4), the deck's pass its four marches, 25 in all, bounded however many bodies
-    // follow. All but eighteen are made: the sky bake's four are the sky's, the march's fill
+    // 20: the view's, made up front with both reads' one-band marches among them (R08.T11.g, which
+    // the slab Earth takes by slot and the deck over the shared read) and, since the correction is
+    // routed (R08.T14.d.4), the thick read's six, made ahead; and the tables' four. The thick pass
+    // makes one more, the sky's irradiance over the thick table (R08.T14.d.4), and the deck's pass
+    // its four marches, 25 in all, bounded however many bodies follow. All but eighteen are made: the sky bake's four are the sky's, the march's fill
     // a reader's, which no frame asks, the tile cull's two centre ray's kernels its own cover's,
     // which a view never takes (R08.T11.d), the disc cells' emissive form a body's above the
     // thermal cut, which none of these is (R08.T18.a), their air form a body's drawn by its disc
@@ -1138,7 +1138,7 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // kernels' eight thermal forms a glowing or self-luminous body's, which none of these is
     // (R08.T18.b).
     expect([held[kinds.length - 1], held[2 * kinds.length - 1]]).toEqual([
-      VIEW_KERNELS.length - BAKE_KERNELS.length - 14 - 7 - 4,
+      VIEW_KERNELS.length - BAKE_KERNELS.length - 14 - 1 - 4,
       VIEW_KERNELS.length - BAKE_KERNELS.length - 14 - 4,
     ]);
     expect(new Set(held.slice(3 * kinds.length - 1))).toEqual(new Set([held.at(-1)]));

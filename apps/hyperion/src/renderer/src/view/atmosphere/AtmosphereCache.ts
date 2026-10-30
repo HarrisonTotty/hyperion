@@ -64,11 +64,12 @@
  *
  * **The thick bake** (R08.T14.c; Design note 9's routing). A drawn body whose regime the router
  * routes to its bake ({@link AtmosphereCacheOptions.routes}, `thick/routing.ts`'s
- * `thickBakeRouted`, which routes none until R08.T14.d's gates pass) has its bake asked once its
- * tables are made, every band in one request ({@link AtmosphereBuilder.bakeThick}), and the bake
- * given to its tables when it lands (`AtmosphereTables.setThickTables`). Its labels follow the
- * bake, at most one of `ATMOSPHERE: COMPUTING` and `ATMOSPHERE: APPROXIMATE` (`labels.ts`'s
- * precedence; the guide's rows):
+ * `thickBakeRouted`, which routes a `thickScattering` world within the range R08.T14.d.4's gates
+ * pass, and no other) has its bake asked once its tables are made, every band in one request
+ * ({@link AtmosphereBuilder.bakeThick}), and the bake given to its tables when it lands
+ * (`AtmosphereTables.setThickTables`). Its labels follow the bake, at most one of
+ * `ATMOSPHERE: COMPUTING` and `ATMOSPHERE: APPROXIMATE` (`labels.ts`'s precedence; the guide's
+ * rows):
  *
  * - while it bakes, `atmosphereComputing` stands in `atmosphereApproximate`'s place, and no reason
  *   is reported;
@@ -87,25 +88,34 @@
  *
  * **The polarisation correction** (R08.T14.f; Design note 10). Every drawn body whose medium needs
  * it ({@link AtmosphereCacheOptions.corrects}: `thick/routing.ts`'s `correctionRouted`, every world
- * with air, thin or thick, once the route is on; none in the product until main turns it on) has
- * its correction asked once its tables are made, beside any thick bake, every band in one request
- * ({@link AtmosphereBuilder.bakePolarisation}), and given to its tables when it lands
- * (`AtmosphereTables.setPolarisationCorrection`, which reads it beside Ψ_ms, or summed into the
- * thick bake where they hold one). Its labels follow it as a thick bake's do (the plan's "as for
- * any gated bake"), but `atmosphereComputing` takes `atmosphereApproximate`'s place for it only
+ * with air, thin or thick, since R08.T14.d.4's route; a thick world the route does not route asks
+ * for none) has its correction asked once its tables are made, beside any thick bake, every band
+ * in one request ({@link AtmosphereBuilder.bakePolarisation}), and given to its tables when it
+ * lands (`AtmosphereTables.setPolarisationCorrection`, which reads it beside Ψ_ms, or summed into
+ * the thick bake where they hold one). Its labels follow it as a thick bake's do (the plan's "as
+ * for any gated bake"), but `atmosphereComputing` takes `atmosphereApproximate`'s place for it only
  * where nothing the correction leaves holds `atmosphereApproximate` (the guide's row: the computed
  * light replaces the approximation):
  *
  * - while the thick bake runs, `atmosphereComputing` with no reason, as before;
  * - while the correction alone runs, `atmosphereComputing` with no reason where the entry's labels
  *   with its bakes landed carry no `atmosphereApproximate`, and those labels and reasons where they
- *   do, an unrouted thick world's `THICK_REASON` among them;
+ *   do;
  * - once both have landed, the entry's labels as each bake's outcome leaves them;
  * - a failed correction adds `atmosphereApproximate` with {@link POLARISATION_REASON}, since the sky
  *   it draws then carries the scalar error the correction takes out, until the body's atmosphere is
  *   next computed. Like a failed thick bake, it is never item 6's fault.
  *
  * A medium with no sources to bake from asks for none, and is drawn as before.
+ *
+ * **Deep twilight** (R08.T14.d.4; main's ruling with T14.d.2's step 3). The route's gates pass to
+ * the sun at the horizon, s90, and s95 lies past the pseudo-spherical model's limit. So where a
+ * view gives a routed body's observer ({@link AtmosphereFrameBody.observer}), its bake landed, the
+ * camera within its air and its brightest light below the camera's local horizontal, the view's
+ * report adds `atmosphereApproximate` with `thick/routing.ts`'s `TWILIGHT_REASON` for it, per view,
+ * never in its entry. It is a reason the correction leaves, so it stands in the correction's
+ * `atmosphereComputing`'s place; while the bake itself runs, `atmosphereComputing` stands as
+ * before.
  *
  * **The disc's table** (R08.T16.b; `thick/discBake.ts`). Every drawn body with air that has sources
  * to bake from ({@link AtmosphereCacheOptions.discs}) has its disc reflectance table asked once its
@@ -202,7 +212,12 @@ import {
   classifyRegime,
   THICK_REASON,
 } from "./thick/regime";
-import { correctionRouted, discTableRouted, thickBakeRouted } from "./thick/routing";
+import {
+  correctionRouted,
+  discTableRouted,
+  thickBakeRouted,
+  TWILIGHT_REASON,
+} from "./thick/routing";
 import type { SpectralColumn, SpectralSource } from "./thick/spectralColumn";
 
 /**
@@ -266,12 +281,17 @@ export interface BuiltAtmosphere {
 }
 
 /**
- * Makes a body's per-planet tables.
+ * Makes a body's per-planet tables, `thickSlots` the light slots of the thick table the body's
+ * route gives it, one a light, or 0 where it takes none, which their 2 MB row counts when it
+ * decides their slicing (R08.T14.d.4, T14.d's precondition 4; `tables.ts`'s `rowBodyOf`).
  *
  * @throws `EngineUnavailable` while the engine has no device, which the cache passes in silence
  *   and asks again at a later frame; anything else is the body's `failed` problem.
  */
-export type AtmosphereTablesFactory<T extends CachedTables> = (built: BuiltAtmosphere) => T;
+export type AtmosphereTablesFactory<T extends CachedTables> = (
+  built: BuiltAtmosphere,
+  thickSlots: number,
+) => T;
 
 /**
  * The app's factory: `new AtmosphereTables(engine, …)` on the engine's device, which rebuilds them
@@ -280,13 +300,15 @@ export type AtmosphereTablesFactory<T extends CachedTables> = (built: BuiltAtmos
 export function atmosphereTablesOn(
   engine: RenderEngine,
 ): AtmosphereTablesFactory<AtmosphereTables> {
-  return (built) => {
+  return (built, thickSlots) => {
     const tables = new AtmosphereTables(
       engine,
       built.medium,
       built.bottomRadiusM,
       built.curves,
       built.body,
+      "read",
+      thickSlots,
     );
     if (built.temperature !== undefined) {
       try {
@@ -355,6 +377,20 @@ export interface AtmosphereScene {
   readonly linkUp: boolean;
 }
 
+/**
+ * Where a view's camera stands at a lit body (plan R08, R08.T14.d.4): what a routed world's
+ * twilight reason reads (`thick/routing.ts`'s `TWILIGHT_REASON`).
+ */
+export interface AtmosphereObserver {
+  /** The camera's geodetic height above the body's datum, m. */
+  readonly heightM: number;
+  /**
+   * The sine of the body's brightest light's elevation at the camera over the datum's tangent plane
+   * there: below 0, the light stands below the camera's horizon.
+   */
+  readonly lightElevationSine: number;
+}
+
 /** One of a frame's lit bodies. */
 export interface AtmosphereFrameBody {
   readonly id: BodyIdHex;
@@ -364,6 +400,8 @@ export interface AtmosphereFrameBody {
   readonly lights: ReadonlyArray<BodyLight>;
   /** A kept scene's setting; absent for a server body, whose record is asked. */
   readonly kept?: KeptBodyAtmosphere;
+  /** Where the view's camera stands at it (R08.T14.d.4); absent where the view gives none. */
+  readonly observer?: AtmosphereObserver;
 }
 
 /** One frame of a view, as {@link AtmosphereView.noteFrame} takes it. */
@@ -414,10 +452,10 @@ export interface AtmosphereViewReport {
   readonly problems: ReadonlyMap<BodyIdHex, AtmosphereProblem>;
   /**
    * Why each wanted body drawn with `atmosphereApproximate` carries it, as player text, in its
-   * entry's order (R08.T10.c; `decision-r08-approximate-plate.md`, item 1b), so that the label block
-   * names each reason and its bodies: none for a body without the label (one with
-   * `atmosphereComputing` in its place among them), with a problem, pending, or whose entry holds
-   * no reason.
+   * entry's order and then the view's own, deep twilight's (R08.T10.c;
+   * `decision-r08-approximate-plate.md`, item 1b; R08.T14.d.4), so that the label block names each
+   * reason and its bodies: none for a body without the label (one with `atmosphereComputing` in its
+   * place among them), with a problem, pending, or whose entry holds no reason.
    */
   readonly reasons: ReadonlyMap<BodyIdHex, ReadonlyArray<string>>;
   /** Whether some wanted body is pending this frame, before the hold. */
@@ -456,15 +494,16 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
   /** How the busy re-asks wait; `setTimeout` if absent. */
   readonly schedule?: AtmosphereSchedule;
   /**
-   * Whether a body drawn in `regime` takes its thick bake (R08.T14.c): `thick/routing.ts`'s
-   * `thickBakeRouted` if absent, which routes no regime until R08.T14.d's gates pass; a test's
-   * routing otherwise.
+   * Whether a body drawn in `regime` from `medium` takes its thick bake (R08.T14.c):
+   * `thick/routing.ts`'s `thickBakeRouted` if absent, which routes a `thickScattering` world within
+   * the range its gates pass over (R08.T14.d.4); a test's routing otherwise.
    */
-  readonly routes?: (regime: AtmosphereRegime) => boolean;
+  readonly routes?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
   /**
    * Whether a body drawn from `column` takes its polarisation correction (R08.T14.f):
-   * `thick/routing.ts`'s `correctionRouted` if absent, which asks none until main turns the route
-   * on (`CORRECTION_ROUTED`), and then every world with air; a test's choice otherwise.
+   * `thick/routing.ts`'s `correctionRouted` if absent, every world with air since R08.T14.d.4's
+   * route (`CORRECTION_ROUTED`); a test's choice otherwise. A thick world the route does not route
+   * takes none, whatever this says (main, with T14.d's split).
    */
   readonly corrects?: (column: SpectralColumn) => boolean;
   /**
@@ -655,6 +694,11 @@ interface HeldBody<T> {
   ground: { readonly reply: BodyDetail; readonly field: SurfaceTemperatureField | null } | null;
   build: Build | null;
   drawn: AtmosphereEntry<T> | null;
+  /**
+   * The light slots of the thick table the drawn entry's tables were made to count (R08.T14.d.4),
+   * so that its tables made again after an eviction or a loss are sliced as they were; 0 before.
+   */
+  drawnThickSlots: number;
   /** The drawn entry's thick bake; `null` where none is asked, or nothing is drawn. */
   bake: HeldBake<T> | null;
   /** The drawn entry's polarisation correction; `null` where none is asked, or nothing is drawn. */
@@ -859,6 +903,26 @@ function toDrawOf(key: string, input: BodyAtmosphereInput, assembled: AssembledM
 }
 
 /**
+ * Whether a view stands in a routed thick world's deep twilight (R08.T14.d.4; the module's
+ * remarks): the world's bake landed, the camera in its air, and its brightest light below the
+ * camera's local horizontal, where the route's gates pass no view (`thick/routing.ts`'s
+ * `TWILIGHT_REASON`).
+ */
+function inDeepTwilight(
+  held: HeldBody<unknown>,
+  observer: AtmosphereObserver | undefined,
+): boolean {
+  const built = held.drawn?.built ?? null;
+  return (
+    observer !== undefined &&
+    built !== null &&
+    held.bake?.state.kind === "baked" &&
+    observer.heightM < built.medium.topHeightM &&
+    observer.lightElevationSine < 0
+  );
+}
+
+/**
  * An entry's labels and reasons under its landed thick bake's state (the module's remarks): baked,
  * the made reasons but `THICK_REASON`, and `atmosphereApproximate` only where one remains; failed,
  * `atmosphereApproximate` with every made reason and `THICK_REASON`.
@@ -994,6 +1058,8 @@ function thickBakeAskOf(
   const body = bakeBodyOf(tables);
   const bands = tables.plan.bands.map((_, band) => band);
   if (input !== null) {
+    // The tables' row counted these slots when they were made (`AtmosphereCache`'s
+    // `#thickSlotsOf`).
     const slots = input.kind === "record" ? input.lights.map((_, slot) => slot) : [];
     return slots.length === 0 ? null : { input, slots, bands, column, body };
   }
@@ -1101,7 +1167,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   readonly #builder: AtmosphereBuilder;
   readonly #tables: AtmosphereTablesFactory<T>;
   readonly #schedule: AtmosphereSchedule;
-  readonly #routes: (regime: AtmosphereRegime) => boolean;
+  readonly #routes: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
   readonly #corrects: (column: SpectralColumn) => boolean;
   readonly #discs: (column: SpectralColumn) => boolean;
   /** Every body held, least recently wanted first. */
@@ -1117,7 +1183,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     this.#builder = opts.builder;
     this.#tables = opts.tables;
     this.#schedule = opts.schedule ?? scheduleTimeout;
-    this.#routes = opts.routes ?? ((regime): boolean => thickBakeRouted(regime));
+    this.#routes = opts.routes ?? ((regime, medium): boolean => thickBakeRouted(regime, medium));
     this.#corrects = opts.corrects ?? ((column): boolean => correctionRouted(column));
     this.#discs = opts.discs ?? ((column): boolean => discTableRouted(column));
   }
@@ -1287,11 +1353,24 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       if (held.problem !== null) {
         problems.set(id, held.problem);
       } else if (held.drawn !== null) {
-        for (const label of held.drawn.labels) {
-          labels.add(label);
-        }
-        if (held.drawn.labels.includes("atmosphereApproximate") && held.drawn.reasons.length > 0) {
-          reasons.set(id, held.drawn.reasons);
+        const { drawn } = held;
+        const shown = drawn.labels.includes("atmosphereApproximate") ? drawn.reasons : [];
+        if (inDeepTwilight(held, wanted.get(id)?.observer)) {
+          // A reason the correction leaves: it stands in the correction's COMPUTING's place.
+          for (const label of drawn.labels) {
+            if (label !== "atmosphereComputing") {
+              labels.add(label);
+            }
+          }
+          labels.add("atmosphereApproximate");
+          reasons.set(id, [...shown, TWILIGHT_REASON]);
+        } else {
+          for (const label of drawn.labels) {
+            labels.add(label);
+          }
+          if (shown.length > 0) {
+            reasons.set(id, shown);
+          }
         }
       } else if (isPending(held)) {
         anyPending = true;
@@ -1326,6 +1405,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       ground: null,
       build: null,
       drawn: null,
+      drawnThickSlots: 0,
       bake: null,
       correction: null,
       disc: null,
@@ -1598,8 +1678,10 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     if (build?.kind === "landed") {
       const { entry } = build;
       let tables: T | null = null;
+      let thickSlots = 0;
       if (entry.built !== null) {
-        const made = this.#make(held, this.#tablesBuilt(entry, entry.built));
+        thickSlots = this.#thickSlotsOf(held, entry, entry.built);
+        const made = this.#make(held, this.#tablesBuilt(entry, entry.built), thickSlots);
         if (made === "unavailable" || made === "failed") {
           // Kept landed to be made again at a later frame, or dropped with the body's problem.
           return;
@@ -1616,7 +1698,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       held.build = null;
       held.problem = null;
       held.drawn = { ...entry, tables };
-      const deck = this.#deckSplitOf(entry);
+      held.drawnThickSlots = thickSlots;
+      const deck = entry.built === null ? null : this.#deckSplitOf(entry, entry.built.medium);
       if (tables !== null && entry.built !== null && deck !== null) {
         // A routed deck's bake carries the correction over it: none is asked beside it. Nor is a
         // disc table (R08.T16.b), whose bake reads no deck: beyond the boundary the full passes
@@ -1627,7 +1710,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           tables !== null &&
           entry.built !== null &&
           entry.regime !== null &&
-          this.#routes(entry.regime)
+          this.#routes(entry.regime, entry.built.medium)
         ) {
           this.#bake(held, entry, entry.built, tables);
         }
@@ -1637,7 +1720,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
         }
       }
     } else if (drawn !== null && drawn.built !== null && drawn.tables === null) {
-      const made = this.#make(held, this.#tablesBuilt(drawn, drawn.built));
+      const made = this.#make(held, this.#tablesBuilt(drawn, drawn.built), held.drawnThickSlots);
       if (made !== "unavailable" && made !== "failed") {
         held.drawn = { ...drawn, tables: made };
       }
@@ -1691,16 +1774,19 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   /**
    * A routed deck's split (the module's remarks, "The cloud deck"): its regime's `deckAltitudeM`
    * over a floor of the ground, or of an envelope where the body's cover is one's; `null` for an
-   * entry that is not `cloudDeck`, or not routed.
+   * entry that is not `cloudDeck`, or not routed with its own (whole) medium, `medium`.
    */
-  #deckSplitOf(entry: Pick<ToDraw, "regime" | "envelope">): DeckSplit | null {
+  #deckSplitOf(
+    entry: Pick<ToDraw, "regime" | "envelope">,
+    medium: AtmosphereMedium,
+  ): DeckSplit | null {
     const { regime } = entry;
     // An envelope whose τ never reaches the split's is split at its ground: no deck stands there.
     if (
       regime === null ||
       regime.kind !== "cloudDeck" ||
       !(regime.deckAltitudeM > 0) ||
-      !this.#routes(regime)
+      !this.#routes(regime, medium)
     ) {
       return null;
     }
@@ -1712,7 +1798,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     entry: Pick<ToDraw, "regime" | "envelope">,
     built: BuiltAtmosphere,
   ): BuiltAtmosphere {
-    const deck = this.#deckSplitOf(entry);
+    const deck = this.#deckSplitOf(entry, built.medium);
     return deck === null ? built : deckBuiltOf(built, deck.altitudeM);
   }
 
@@ -1917,12 +2003,12 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
    */
   #correct(held: HeldBody<T>, entry: ToDraw, built: BuiltAtmosphere, tables: T): void {
     const made: Labelled = { labels: entry.labels, reasons: entry.reasons };
-    if (built.sources === undefined || built.sources.length === 0) {
+    if (built.sources === undefined) {
       return;
     }
     let handle: PolarisationBake;
     try {
-      if (!this.#corrects(spectralColumnOf(built.medium, built.sources))) {
+      if (!this.#asksCorrection(entry, built)) {
         return;
       }
       const ask = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights);
@@ -2128,10 +2214,71 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     held.disc = null;
   }
 
-  /** A body's tables, or `unavailable` while the device is lost, or `failed` (its problem set). */
-  #make(held: HeldBody<T>, built: BuiltAtmosphere): T | "unavailable" | "failed" {
+  /**
+   * The light slots of the thick table a drawn entry's route gives it (R08.T14.d.4, T14.d's
+   * precondition 4), which its tables' row counts: its bake's where the router routes it, or else
+   * its correction's where it takes one, as {@link AtmosphereCache.#bake} and
+   * {@link AtmosphereCache.#correct} ask them, one slot a light (`thickBakeAskOf`); 0 where it
+   * takes neither. A kept body's are its lights as noted when its tables are made.
+   */
+  #thickSlotsOf(held: HeldBody<T>, entry: ToDraw, built: BuiltAtmosphere): number {
+    if (built.sources === undefined) {
+      return 0;
+    }
+    const routed = entry.regime !== null && this.#routes(entry.regime, built.medium);
+    let corrected = false;
+    if (!routed) {
+      try {
+        corrected = this.#asksCorrection(entry, built);
+      } catch {
+        // A column the correction cannot be asked of is its ask's failure, logged there.
+      }
+    }
+    if (!routed && !corrected) {
+      return 0;
+    }
+    // `thickBakeAskOf`'s slots, one a light: a kept body's lights, or the reference Sun alone.
+    if (entry.input === null) {
+      return Math.max(1, held.lights.length);
+    }
+    return entry.input.kind === "record" ? entry.input.lights.length : 0;
+  }
+
+  /**
+   * Whether a drawn entry is asked its polarisation correction (the module's remarks): a world with
+   * sources to bake from, thin or a thick one the route routes (an unrouted thick world takes none:
+   * main, with R08.T14.d's split, question 3), whose column the product's choice takes
+   * ({@link AtmosphereCacheOptions.corrects}).
+   *
+   * @throws RangeError as `spectralColumnOf` refuses the sources: a bug in what the body was built
+   *   from.
+   */
+  #asksCorrection(entry: ToDraw, built: BuiltAtmosphere): boolean {
+    if (built.sources === undefined || built.sources.length === 0) {
+      return false;
+    }
+    if (
+      entry.regime !== null &&
+      entry.regime.kind !== "thin" &&
+      !this.#routes(entry.regime, built.medium)
+    ) {
+      return false;
+    }
+    return this.#corrects(spectralColumnOf(built.medium, built.sources));
+  }
+
+  /**
+   * A body's tables, or `unavailable` while the device is lost, or `failed` (its problem set).
+   *
+   * @param thickSlots - As the factory's ({@link AtmosphereTablesFactory}).
+   */
+  #make(
+    held: HeldBody<T>,
+    built: BuiltAtmosphere,
+    thickSlots: number,
+  ): T | "unavailable" | "failed" {
     try {
-      return this.#tables(built);
+      return this.#tables(built, thickSlots);
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {
         return "unavailable";

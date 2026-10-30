@@ -14,7 +14,12 @@ import type { BodyLightSources } from "../../view/bodies/draw";
 import type { LitRegime } from "../../view/bodies/regime";
 import type { ViewBody, ViewScene } from "../../view/scene/model";
 import { phaseScene } from "../../view/scenes/phaseScene";
-import { atmosphereFrameOf, atmosphereShownOf, ViewAtmosphereHandle } from "./viewAtmosphere";
+import {
+  atmosphereFrameOf,
+  atmosphereObserverOf,
+  atmosphereShownOf,
+  ViewAtmosphereHandle,
+} from "./viewAtmosphere";
 
 /** A builder that never lands: a kept scene's bodies are never built, nor baked. */
 const NEVER: AtmosphereBuilder = {
@@ -216,5 +221,59 @@ describe("a view's handle on the atmosphere cache (R08.T10.b)", () => {
     expect(handle.inputFor(null, null, 4)).toBeUndefined();
     first.dispose();
     second.dispose();
+  });
+});
+
+describe("where a view's camera stands at a body (R08.T14.d.4)", () => {
+  const R = 6_371_000;
+  const sphere = { equatorialRadiusM: R, polarRadiusM: R, pole: vec3(0, 0, 1) };
+
+  const cameraM = vec3(R + 10, 0, 0);
+
+  it("gives its height above a sphere", () => {
+    expect(atmosphereObserverOf(cameraM, sphere, vec3(1, 0, 0)).heightM).toBeCloseTo(10, 6);
+  });
+
+  it.each([
+    ["overhead", vec3(1e11, 0, 0), 1],
+    ["underfoot", vec3(-1e11, 0, 0), -1],
+    ["on the horizontal", vec3(0, 1e11, 0), 0],
+    ["just below the horizontal", vec3(-1e10, 1e11, 0), -0.0995037],
+  ] as const)(
+    "gives a light %s its elevation sine over the local horizontal",
+    (_, towardM, sine) => {
+      expect(atmosphereObserverOf(cameraM, sphere, towardM).lightElevationSine).toBeCloseTo(
+        sine,
+        6,
+      );
+    },
+  );
+
+  it.each([
+    ["above the pole", vec3(0, 54_364e3 + 1e5, 0), vec3(0, 1, 0)],
+    ["above the equator", vec3(0, 0, 60_268e3 + 1e5), vec3(0, 0, 1)],
+  ] as const)(
+    "reads a flattened body's height and normal on its datum %s",
+    (_, cameraAtM, upward) => {
+      const giant = { equatorialRadiusM: 60_268e3, polarRadiusM: 54_364e3, pole: vec3(0, 1, 0) };
+      const observer = atmosphereObserverOf(cameraAtM, giant, upward);
+      expect(observer.heightM).toBeCloseTo(1e5, 3);
+      expect(observer.lightElevationSine).toBeCloseTo(1, 12);
+    },
+  );
+
+  it("notes each body's observer where the view gives one", () => {
+    const { scene, body } = phaseBody("TEST GIANT");
+    const regimes = new Map<BodyIdHex, LitRegime>([[body.id, "disc"]]);
+    const observer = { heightM: 5, lightElevationSine: -0.25 };
+    const frame = atmosphereFrameOf(
+      scene,
+      regimes,
+      new Map(),
+      { scene: null, nowMs: 0 },
+      true,
+      (each) => (each.id === body.id ? observer : undefined),
+    );
+    expect(frame.bodies.find((each) => each.id === body.id)?.observer).toEqual(observer);
   });
 });

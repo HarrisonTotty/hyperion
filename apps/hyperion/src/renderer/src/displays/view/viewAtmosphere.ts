@@ -6,16 +6,19 @@
 
 import { type BodyIdHex, formatBodyId } from "@hyperion/protocol";
 
+import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type {
   AtmosphereCache,
   AtmosphereFrame,
   AtmosphereFrameBody,
+  AtmosphereObserver,
   AtmosphereScene,
   AtmosphereView,
   AtmosphereViewReport,
   KeptBodyAtmosphere,
 } from "../../view/atmosphere/AtmosphereCache";
 import type { BodyLight } from "../../view/atmosphere/atmosphereInput";
+import { geodeticOf } from "../../view/atmosphere/oblate";
 import {
   atmosphereApproximateLines,
   type AtmosphereLabel,
@@ -28,8 +31,11 @@ import type { AtmosphereTables } from "../../view/atmosphere/tables";
 import type { SurfaceTemperatureField } from "../../view/atmosphere/thermal";
 import type { BodyLightSources } from "../../view/bodies/draw";
 import type { LitRegime } from "../../view/bodies/regime";
+import type { CameraPose } from "../../view/camera/pose";
+import { relativeToCamera } from "../../view/coords/relative";
 import { isLitBody } from "../../view/lighting/retarded";
-import type { ViewScene } from "../../view/scene/model";
+import { sceneOrigins, type ViewBody, type ViewScene } from "../../view/scene/model";
+import type { BodyFigure } from "../../view/terrain/planet";
 
 /** A view's atmospheres for its drawer's frame (`ViewFrameInputs.atmosphere`). */
 export interface ViewAtmosphereInput {
@@ -108,15 +114,70 @@ function bodyLightsOf(scene: ViewScene, sources: BodyLightSources | undefined): 
   }));
 }
 
+/** The origin of a body's own frame: its centre. */
+const CENTRE: Vec3 = vec3(0, 0, 0);
+
+/**
+ * Where a camera stands at a body (plan R08, R08.T14.d.4), for a routed world's twilight reason:
+ * its geodetic height above the body's datum and the sine of a light's elevation over the datum's
+ * tangent plane there.
+ *
+ * @param cameraFromCentreM - The camera's position from the body's centre, m, in the scene's axes.
+ * @param figure - The body's datum; its pole the scene's +z where it has none.
+ * @param towardLightM - The light's centre from the camera, m, in the same axes.
+ */
+export function atmosphereObserverOf(
+  cameraFromCentreM: Vec3,
+  figure: BodyFigure,
+  towardLightM: Vec3,
+): AtmosphereObserver {
+  const pole = figure.pole ?? vec3(0, 0, 1);
+  const along = dot(cameraFromCentreM, pole);
+  const across = sub(cameraFromCentreM, scale(pole, along));
+  const rho = norm(across);
+  const geodetic = geodeticOf(vec3(rho, 0, along), figure);
+  // On the axis the normal is the pole's own, whatever stands across it.
+  const out = rho > 0 ? scale(across, 1 / rho) : vec3(0, 0, 0);
+  const normal = add(scale(out, geodetic.normal.x), scale(pole, geodetic.normal.z));
+  return {
+    heightM: geodetic.heightM,
+    lightElevationSine: dot(normal, normalise(towardLightM)),
+  };
+}
+
+/**
+ * Each body's observer under a camera's pose (R08.T14.d.4; {@link atmosphereObserverOf}): its
+ * figure's, under its brightest light, or none for a body with no figure or no light.
+ */
+export function cameraObservers(
+  scene: ViewScene,
+  pose: CameraPose,
+): (body: ViewBody, lights: ReadonlyArray<BodyLight>) => AtmosphereObserver | undefined {
+  const origins = sceneOrigins(scene);
+  return (body, lights) => {
+    const figure = body.appearance?.figure ?? null;
+    const star = lights[0]?.star;
+    if (figure === null || star === undefined) {
+      return undefined;
+    }
+    const toBody = relativeToCamera({ kind: "body", body: body.id, m: CENTRE }, pose, origins);
+    const toStar = relativeToCamera({ kind: "body", body: star, m: CENTRE }, pose, origins);
+    return atmosphereObserverOf(scale(toBody, -1), figure, toStar);
+  };
+}
+
 /**
  * The frame a view notes with the atmosphere cache (`AtmosphereView.noteFrame`): each of the
  * scene's lit bodies, its regime on the view's last photorealistic plan (a point where it has none)
- * and the stars its record was shaded from, and on a kept scene its setting.
+ * and the stars its record was shaded from, on a kept scene its setting, and where `observerOf`
+ * gives one where the view's camera stands at it (R08.T14.d.4).
  *
  * @param regimes - The view's drawer's last plan's regimes (`ViewFrameDrawer.regimes`).
  * @param sources - That plan's sources by body (`BodyFramePlan.sources`).
  * @param drawsAtmosphere - Whether the frame is photorealistic: a wireframe frame draws none, and
  *   notes no body wanted.
+ * @param observerOf - Where the camera stands at a body under its lights ({@link cameraObservers});
+ *   none if absent.
  */
 export function atmosphereFrameOf(
   scene: ViewScene,
@@ -124,15 +185,23 @@ export function atmosphereFrameOf(
   sources: ReadonlyMap<BodyIdHex, BodyLightSources>,
   input: Pick<ViewAtmosphereInput, "scene" | "nowMs">,
   drawsAtmosphere: boolean,
+  observerOf?: (body: ViewBody, lights: ReadonlyArray<BodyLight>) => AtmosphereObserver | undefined,
 ): AtmosphereFrame {
   const kept = scene.provenance.kind === "kept";
   const bodies: AtmosphereFrameBody[] = drawsAtmosphere
     ? scene.bodies.filter(isLitBody).map((body): AtmosphereFrameBody => {
         const regime = regimes.get(body.id) ?? "point";
         const lights = bodyLightsOf(scene, sources.get(body.id));
-        return kept
-          ? { id: body.id, regime, lights, kept: body.atmosphere ?? UNSET }
-          : { id: body.id, regime, lights };
+        const observer = observerOf?.(body, lights);
+        if (kept) {
+          const setting = body.atmosphere ?? UNSET;
+          return observer === undefined
+            ? { id: body.id, regime, lights, kept: setting }
+            : { id: body.id, regime, lights, kept: setting, observer };
+        }
+        return observer === undefined
+          ? { id: body.id, regime, lights }
+          : { id: body.id, regime, lights, observer };
       })
     : [];
   return { nowMs: input.nowMs, scene: kept ? null : input.scene, bodies };

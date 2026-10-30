@@ -5987,6 +5987,9 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
     - **T14.d.4, the gates and the route.** The Venus- and Titan-class cases above,
       preconditions 3–5 (the 2 MB row counting the thick and correction tables), the bake's time
       on the UHD 620's host, `classifyRegime`'s route, `CORRECTION_ROUTED` and the labels.
+      _Built 2026-10-30_ for the worlds that pass (Risks, "R08.T14.d.4, as built"): Earth- and
+      Saturn-class routed, the correction on; Mars-, Venus- and Titan-class left APPROXIMATE;
+      precondition 5's frame and the UHD 620 host's bake time pending, the owner's runs.
   - _Ruled with the split_ (main, 2026-10-29):
     - An unrouted thick world takes no correction (question 3): `CORRECTION_ROUTED` turns on in
       T14.d.4's routing commit, for thin worlds and routed thick worlds alone. This amends Design
@@ -24088,3 +24091,81 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     10 µm water deck's term costs 0.9 s, against 2.5 s, once those two are re-traced. The three
     Venus case files are re-blessed (values moved by at most 4 × 10⁻⁶).
   - `aerosolTermOptics`'s `at550` is given at no angle; its matrix was unread.
+- **R08.T14.d.4, as built** (2026-10-30; lane `r08-t14d4`; the split's rulings of 2026-10-29 and
+  T14.d.2's "For T14.d.4"; its measurements in the lane's outbox).
+  - _The route._ `thick/routing.ts`'s `thickBakeRouted` routes a `thickScattering` world inside
+    `THICK_ROUTE_RANGE`, the range the passing kept cases span over `regimeChannels`: τ ≤ 0.728,
+    ω̄ ≥ 0.95, ḡ ≤ 0.388, ground albedo ≤ 0.3. `GATED_REGIMES` is gone.
+    - Joint bounds keep the box's corners out (the science check): τ ḡ ≤ 0.0838 and
+      τ (1 − ω̄) ≤ 0.0109 a channel. The absorbers' depth and R/H are not bounded.
+    - `earth`, `earth-ozone-slab` and `saturn-oblate` route. `mars` does not (ḡ 0.71–0.76,
+      τ ḡ 0.36–0.38), nor do the Venus- and Titan-class columns (τ 7–77). `cloudDeck` is not
+      routed.
+    - `earth` still misses two s90 views and its disc's red (below); whether it bounds the range
+      is main's to rule.
+  - _The correction._ `CORRECTION_ROUTED` is on, for thin worlds and routed thick worlds; an
+    unrouted thick world asks none (`AtmosphereCache`'s `#correct`).
+  - _Venus and Titan._ They pass no depth range: `refusals.json` refuses 97, 98 and 120 of their 120
+    geometries against the vector I (92 bar, 58 bar, Titan), and every aggregate. They wait on
+    r08-t12h's re-traced references.
+  - _Precondition 3, the ground's light._ The sky-irradiance table reads the thick table where the
+    tables hold one: `IRRADIANCE_THICK_KERNEL` (`irradianceThick.wgsl`, `thickRead.wgsl` split
+    with `thickReadBands.wgsl`) and the twin's `irradianceTwin(…, thick)`. It is rebuilt when the
+    table changes.
+    - Through the route, every unrefused channel of `flux-s0`–`flux-s80`'s downwelling passes
+      within 2% on both Earths (worst −0.59%; s80 blue refused for noise). The analytic diagnostic
+      misses at s60 blue (−2.9%) and at s80 (−2.8% to −8.9%).
+    - `vectorGate.json` is format 3, with `groundIrradiance`.
+  - _Precondition 4, the row._ `perPlanetRowOf`'s `thickBytes`, 388,864 B a band and light slot,
+    counts the thick table a body's route gives it, and `rowBodyOf` widens on it. The cache gives
+    the slots to the factory (`AtmosphereTablesFactory`'s `thickSlots`).
+    - `saturn-oblate` under one star is 2.31 MB at five slices and four bands, so it takes both
+      widenings: 1.64 MB at three slices and three bands. Under two stars it stays over at
+      2.80 MB, left over for main's ruling. Earth with its ozone comes to 0.83 MB.
+    - The recorded 2.81 MB is not the client's row; the smoke's tables make every column table at
+      full size.
+    - Widened `saturn-oblate` through the route, by hand: the same 43 misses, all at s95. Every
+      ratio below s95 is within 5 × 10⁻⁴ of the built slicing's.
+    - The correction's halved μ₀ axis (the correction route's precondition 3) is not built; it
+      predates the 46 uneven rows.
+  - _Pending, the owner's runs._ Precondition 5, the routed frame on the RTX host (part 1 with
+    `--smoke-gpu-timing=1 --smoke-thick-read=1`). The UHD 620 host's bake time. Neither blocks.
+  - _The labels._
+    - A routed world reads `ATMOSPHERE: COMPUTING` while its bake or correction runs. Once both
+      land, `THICK_REASON` drops and `ATMOSPHERE: APPROXIMATE` clears.
+    - Mars-, Venus- and Titan-class worlds keep `ATMOSPHERE: APPROXIMATE` with `THICK_REASON`,
+      with no bake and no correction. A tenuous world whose correction failed keeps it, as built.
+    - Deep twilight: `ATMOSPHERE: APPROXIMATE` with `TWILIGHT_REASON` ("Multiple scattering:
+      computed beyond its checked range, the brightest star below the local horizontal") on a
+      routed body baked, where the camera is inside its air and its brightest light is below its
+      local horizontal (`viewAtmosphere.ts`'s `atmosphereObserverOf`, `AtmosphereCache`'s
+      `inDeepTwilight`). It stands in the correction's COMPUTING's place, which leaves it; while
+      the bake runs, COMPUTING stands.
+  - _The gates through the route_ (`vectorGate.json`, by hand).
+    - `earth`: 4 misses of 360 comparisons. ground-s90-v85-a180 r and g, worst 1.160, are as
+      before. disc-p0 and disc-p30 red now read 0.9365 and 0.9373 (0.9386 and 0.9388 before).
+    - `earth-ozone-slab`: 0 misses. `saturn-oblate`: 43, all at s95, worst 6.99. `mars`: 168.
+    - `thickRuns.json`: `earth` 3 misses (2 before, disc-p0/r added), `mars` 168 (169 before).
+  - _For the owner's UX list_ (drafts for `docs/frontend/ux-guidelines.md`, built to; the UX
+    review's):
+    - `ATMOSPHERE: APPROXIMATE`: its example becomes "such as a Mars-, Venus- or Titan-class
+      world's". It gains: "It also stands for a world whose multiple scattering is computed while
+      the view's camera is inside its air and its brightest star is below the local horizontal,
+      beyond the range the computation was checked to (its reason line set in code: Multiple
+      scattering: computed beyond its checked range, the brightest star below the local
+      horizontal, for KX 4417 /3). It clears when the star rises or the camera leaves the air."
+    - `ATMOSPHERE: COMPUTING`: its example becomes "such as an Earth- or Saturn-class world's". It
+      gains: "It also stands while the console computes an atmosphere's polarisation correction, a
+      thin world's or one whose multiple scattering is computed, where nothing the correction
+      leaves holds `ATMOSPHERE: APPROXIMATE`. A world drawn by the thin-atmosphere method beyond its
+      checked range takes no correction. If the correction fails, `ATMOSPHERE: APPROXIMATE` stands
+      with `Multiple scattering: drawn without its polarisation`."
+    - Open: whether the twilight note takes onset and clear delays at its edges, and whether it
+      should stand all night (it does; `ATMOSPHERE TEST`'s default pose has the star 45° down).
+    - Open: the routed views it clears though their gate misses or never looked: `earth`'s
+      ground-s90-v85-a180 and its disc's red, a crescent from outside the air, a twilit limb.
+- **Deferred findings (2026-10-13 rule)** (R08.T14.d.4). Recorded and deferred:
+  - _The twilight test's height_ is geodetic, against `topHeightM`, which is in h* = s h; on
+    Saturn the edge sits up to 15% off the top (cosmetic at 16 H).
+  - _The ground's gate_ checks the total flux, of which the sky is 9–23% at s0; the sky's part alone
+    is within 2.1% (the science check), but a `diffuseGround` aggregate would test the read itself.

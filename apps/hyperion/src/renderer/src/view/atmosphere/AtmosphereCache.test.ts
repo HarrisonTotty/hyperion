@@ -54,6 +54,7 @@ import {
   ATMOSPHERE_CACHE_BYTES,
   AtmosphereCache,
   type AtmosphereFrameBody,
+  type AtmosphereObserver,
   type AtmosphereScene,
   type AtmosphereView,
   type AtmosphereViewReport,
@@ -90,7 +91,12 @@ import {
   type DiscBakeAsk,
   type DiscBakeOutcome,
 } from "./opticsPool";
-import { EARTH_CASE, EARTH_REFERENCE_RADIUS_M, referenceCaseBakeLights } from "./reference/cases";
+import {
+  EARTH_CASE,
+  EARTH_REFERENCE_RADIUS_M,
+  MARS_CASE,
+  referenceCaseBakeLights,
+} from "./reference/cases";
 import { type AtmosphereBody, kernelMedium, perPlanetRowOf, tablesPlanOf } from "./tables";
 import { DISC_LAYER_VALUES, type DiscReflectanceTable } from "./discTable";
 import { type MsSourceTable, thickBakeBands } from "./thick/bake";
@@ -103,7 +109,7 @@ import {
   envelopeFloorM,
   THICK_REASON,
 } from "./thick/regime";
-import { correctionRouted, thickBakeRouted } from "./thick/routing";
+import { correctionRouted, TWILIGHT_REASON } from "./thick/routing";
 import { channelSource, type SpectralColumn } from "./thick/spectralColumn";
 
 /** A build the scripted builder holds, landed by the test. */
@@ -316,35 +322,46 @@ interface Harness {
   readonly seam: BodyDetailSeam;
   readonly builder: ScriptedBuilder;
   readonly made: FakeTables[];
+  /** The light slots of the thick table the factory was told of, one a tables made. */
+  readonly thickSlots: number[];
   readonly cache: AtmosphereCache<FakeTables>;
   readonly view: AtmosphereView;
   /** The fake factory's behaviour: what it throws while set. */
   readonly factory: { throws: Error | null };
 }
 
+/** No route and no correction: a harness's defaults, so that a test asks only what it tests. */
+function routesNone(): boolean {
+  return false;
+}
+
 /**
  * A cache over the fakes, its tables reporting `rowBytes` each, or their per-planet row's, routing
- * its thick bakes by `routes`, or by the product's routing if absent, and asking polarisation
- * corrections by `corrects`, or by the product's if absent, which asks none until the route is on.
+ * its thick bakes by `routes`, or none if absent, and asking polarisation corrections by
+ * `corrects`, or none if absent; `product`, the product's routing and corrections in their place
+ * (R08.T14.d.4's route: an in-range thick world to its bake, every world with air its correction
+ * but an unrouted thick one).
  */
 function harness(
   rowBytes?: number,
-  routes?: (regime: AtmosphereRegime) => boolean,
-  corrects?: (column: SpectralColumn) => boolean,
+  routes: ((regime: AtmosphereRegime) => boolean) | "product" = routesNone,
+  corrects: ((column: SpectralColumn) => boolean) | "product" = routesNone,
 ): Harness {
   const seam = new BodyDetailSeam();
   const builder = new ScriptedBuilder();
   const made: FakeTables[] = [];
+  const thickSlots: number[] = [];
   const factory: { throws: Error | null } = { throws: null };
   const cache = new AtmosphereCache<FakeTables>({
     requests: seam.client,
     builder,
-    ...(routes === undefined ? {} : { routes }),
-    ...(corrects === undefined ? {} : { corrects }),
-    tables: (built) => {
+    ...(routes === "product" ? {} : { routes }),
+    ...(corrects === "product" ? {} : { corrects }),
+    tables: (built, slots) => {
       if (factory.throws !== null) {
         throw factory.throws;
       }
+      thickSlots.push(slots);
       const row = perPlanetRowOf(
         built.medium,
         built.curves,
@@ -355,7 +372,7 @@ function harness(
       return tables;
     },
   });
-  return { seam, builder, made, cache, view: cache.openView(), factory };
+  return { seam, builder, made, thickSlots, cache, view: cache.openView(), factory };
 }
 
 /** The scene's designation of record. */
@@ -444,9 +461,9 @@ function earthAssembly(
   };
 }
 
-/** A routing whose `thickScattering` gate has passed, as R08.T14.d's will (R08.T14.c). */
+/** A routing whose `thickScattering` gate passes over every medium (R08.T14.c). */
 function routedThick(regime: AtmosphereRegime): boolean {
-  return thickBakeRouted(regime, new Set(["thickScattering"]));
+  return regime.kind === "thickScattering";
 }
 
 /** An NH₄SH stand-in's reason, which a thick bake does not clear (R08.T14.c). */
@@ -2084,10 +2101,21 @@ describe("a body's polarisation correction (R08.T14.f)", () => {
     ]);
   });
 
-  it("asks no correction by default, the product's route held, a world with air drawn as before", async () => {
-    const h = harness();
+  it("asks a world with air its correction in the product, since the route (R08.T14.d.4)", async () => {
+    const h = harness(undefined, "product", "product");
     const report = await drawn(h, [lit(A)], airAssembly());
-    expect([h.builder.corrections.length, report.labels]).toEqual([0, []]);
+    expect([h.builder.corrections.length, h.builder.bakes.length, report.labels]).toEqual([
+      1,
+      0,
+      ["atmosphereComputing"],
+    ]);
+  });
+
+  it("counts a thin world's correction in its tables' row, one slot a light, and none where it takes none (R08.T14.d.4)", async () => {
+    const corrected = await correcting();
+    const uncorrected = harness();
+    await drawn(uncorrected, [lit(A)], airAssembly());
+    expect([corrected.thickSlots, uncorrected.thickSlots]).toEqual([[1], [0]]);
   });
 
   it("shows COMPUTING while it runs, with no reason, and clears it once the correction lands in its tables", async () => {
@@ -2103,22 +2131,14 @@ describe("a body's polarisation correction (R08.T14.f)", () => {
     ]).toEqual([[["atmosphereComputing"], []], true, [[], []], 1]);
   });
 
-  it("keeps an unrouted thick world's APPROXIMATE and its reason while its correction runs, which cannot clear it, and after", async () => {
-    const h = await correcting(thickAssembly());
-    const during = note(h, [lit(A)]);
-    await landCorrection(h);
-    const after = note(h, [lit(A)]);
+  it("asks an unrouted thick world no correction, its APPROXIMATE and its reason standing (R08.T14.d.4)", async () => {
+    const h = await correcting(thickAssembly(), routesNone);
+    const report = note(h, [lit(A)]);
     expect([
       h.builder.corrections.length,
       h.builder.bakes.length,
-      [during.labels, [...during.reasons]],
-      [after.labels, [...after.reasons]],
-    ]).toEqual([
-      1,
-      0,
-      [["atmosphereApproximate"], [[A, [THICK_REASON]]]],
-      [["atmosphereApproximate"], [[A, [THICK_REASON]]]],
-    ]);
+      [report.labels, [...report.reasons]],
+    ]).toEqual([0, 0, [["atmosphereApproximate"], [[A, [THICK_REASON]]]]]);
   });
 
   it("shows no COMPUTING on a routed thick world whose bake landed while its correction runs, where a stand-in still holds APPROXIMATE", async () => {
@@ -2213,6 +2233,15 @@ describe("a body's polarisation correction (R08.T14.f)", () => {
       h.builder.corrections.length,
       report.labels,
     ]).toEqual([true, true, 2, []]);
+  });
+
+  it("counts the correction in tables made again after an eviction, as when first made (R08.T14.d.4)", async () => {
+    const h = await correcting(airAssembly(), undefined, 20_000_000);
+    await drawn(h, [lit(bodyId(1))], airAssembly());
+    const evicted = madeAt(h, 0).disposed;
+    note(h, [lit(A)]);
+    const remade = h.made.findIndex((tables, n) => n > 0 && tables.built === madeAt(h, 0).built);
+    expect([evicted, remade > 0, h.thickSlots[remade]]).toEqual([true, true, 1]);
   });
 
   it("asks none for a medium with no sources to bake from, drawn as before", async () => {
@@ -2746,6 +2775,119 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
       [[A, [THICK_REASON]]],
       0,
       [`the thick bake of ${A} failed: every optics worker was given up`],
+    ]);
+  });
+});
+
+/** A kept frame of `bodies`, each with its setting and, where given, where the camera stands. */
+function keptFrame(
+  h: Harness,
+  bodies: ReadonlyArray<readonly [BodyIdHex, KeptBodyAtmosphere, AtmosphereObserver | undefined]>,
+): AtmosphereViewReport {
+  return h.view.noteFrame({
+    nowMs: 0,
+    scene: null,
+    bodies: bodies.map(([id, kept, observer]) => ({
+      id,
+      regime: "disc" as const,
+      lights: [SUN_LIGHT],
+      kept,
+      ...(observer === undefined ? {} : { observer }),
+    })),
+  });
+}
+
+describe("the product's route (R08.T14.d.4)", () => {
+  const EARTH: KeptBodyAtmosphere = {
+    kind: "medium",
+    built: builtOfCase(EARTH_CASE, "earth"),
+    labels: [],
+  };
+  const MARS: KeptBodyAtmosphere = {
+    kind: "medium",
+    built: builtOfCase(MARS_CASE, "mars"),
+    labels: [],
+  };
+  const B = bodyId(2);
+
+  /** A's thick bake landed: the patterned table on its tables' plan. */
+  async function landBake(h: Harness): Promise<void> {
+    const tables = patternedThickBake(madeAt(h, 0).plan.bands, kernelMedium(EARTH_CASE.medium), 1);
+    latestBake(h).settle({ kind: "baked", tables });
+    await microtasks();
+  }
+
+  /** A's correction landed: the patterned correction on its tables' plan. */
+  async function landCorrectionOfA(h: Harness): Promise<void> {
+    latestCorrection(h).settle({
+      kind: "baked",
+      tables: patternedCorrection(madeAt(h, 0).plan.bands, EARTH_CASE.medium, 1),
+    });
+    await microtasks();
+  }
+
+  it("bakes and corrects an Earth-class world, and leaves a Mars-class one APPROXIMATE with neither", () => {
+    const h = harness(undefined, "product", "product");
+    keptFrame(h, [
+      [A, EARTH, undefined],
+      [B, MARS, undefined],
+    ]);
+    expect([
+      h.builder.bakes.length,
+      h.builder.corrections.length,
+      h.cache.entryOf(A)?.labels,
+      h.cache.entryOf(B)?.labels,
+      h.cache.entryOf(B)?.reasons,
+    ]).toEqual([1, 1, ["atmosphereComputing"], ["atmosphereApproximate"], [THICK_REASON]]);
+  });
+
+  it("counts an Earth-class world's thick table in its tables' row, one slot a light, and none for a Mars-class one", () => {
+    const h = harness(undefined, "product", "product");
+    keptFrame(h, [
+      [A, EARTH, undefined],
+      [B, MARS, undefined],
+    ]);
+    expect(h.thickSlots).toEqual([1, 0]);
+  });
+
+  it("clears an Earth-class world's APPROXIMATE once its bake and correction land", async () => {
+    const h = harness(undefined, "product", "product");
+    keptFrame(h, [[A, EARTH, undefined]]);
+    await landBake(h);
+    await landCorrectionOfA(h);
+    const report = keptFrame(h, [[A, EARTH, undefined]]);
+    expect([report.labels, [...report.reasons]]).toEqual([[], []]);
+  });
+
+  it("says a baked world's twilight is past its range where the camera in its air has its star below the local horizontal", async () => {
+    const h = harness(undefined, "product", "product");
+    keptFrame(h, [[A, EARTH, undefined]]);
+    await landBake(h);
+    await landCorrectionOfA(h);
+    const at = (heightM: number, lightElevationSine: number): AtmosphereViewReport =>
+      keptFrame(h, [[A, EARTH, { heightM, lightElevationSine }]]);
+    const below = at(2, -0.05);
+    expect([
+      [below.labels, [...below.reasons]],
+      at(2, 0.05).reasons.get(A),
+      at(2e6, -0.05).reasons.get(A),
+    ]).toEqual([[["atmosphereApproximate"], [[A, [TWILIGHT_REASON]]]], undefined, undefined]);
+  });
+
+  it("shows COMPUTING in twilight while the bake runs, and nothing of twilight", () => {
+    const h = harness(undefined, "product", "product");
+    const baking = keptFrame(h, [[A, EARTH, { heightM: 2, lightElevationSine: -0.5 }]]);
+    expect([baking.labels, [...baking.reasons]]).toEqual([["atmosphereComputing"], []]);
+  });
+
+  it("shows twilight's reason in place of the correction's COMPUTING, which leaves it", async () => {
+    const h = harness(undefined, "product", "product");
+    keptFrame(h, [[A, EARTH, undefined]]);
+    await landBake(h);
+    const correcting = keptFrame(h, [[A, EARTH, { heightM: 2, lightElevationSine: -0.5 }]]);
+    expect([correcting.labels, [...correcting.reasons]]).toEqual([
+      ["atmosphereApproximate"],
+      [[A, [TWILIGHT_REASON]]],
     ]);
   });
 });

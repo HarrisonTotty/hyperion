@@ -41,6 +41,8 @@ import {
   R05_EARTH_REFERENCE,
 } from "./earth";
 import { tableRadiusM } from "./hillaire";
+import { SATURN_OBLATE_CASE, SATURN_OBLATE_GRAVITY } from "./reference/cases";
+import { THICK_LAYER_BYTES } from "./thick/read";
 import {
   ABSORBER_PRESSURE_FLOOR_PA,
   ABSORBER_PRESSURE_REFERENCE_PA,
@@ -2575,5 +2577,68 @@ describe("the unread column tables at one texel (R08.T11.e)", () => {
       widening: "none",
       over: false,
     });
+  });
+});
+
+// T14.d's precondition 4 (R08.T14.d.4): a routed body's row counts its thick table, so that the
+// slicing is decided on the bytes it will hold.
+describe("the 2 MB row with the thick table a body's route gives it (R08.T14.d.4)", () => {
+  const { medium } = SATURN_OBLATE_CASE;
+  const body = { figure: SATURN_OBLATE_GRAVITY.spheroid, gravity: SATURN_OBLATE_GRAVITY };
+  const radiusM = tableRadiusM(SATURN_OBLATE_GRAVITY.spheroid);
+
+  /** saturn-oblate's sliced body under `slots` light slots: its widening, slices, bands and row. */
+  function slicedUnder(slots: number): readonly [string, boolean, number, number, number] {
+    const sliced = rowBodyOf(medium, NO_ABSORBER_CURVES, body, radiusM, slots);
+    const plan = tablesPlanOf(sliced.body, radiusM);
+    const row = perPlanetRowOf(medium, NO_ABSORBER_CURVES, plan, "read", slots);
+    return [
+      sliced.widening,
+      sliced.over,
+      plan.kappa.length,
+      plan.bands.length,
+      row.baseBytes + row.thickBytes,
+    ];
+  }
+
+  it("counts 388,864 B a band and light slot apart from the base", () => {
+    const plan = tablesPlanOf(body, radiusM);
+    const none = perPlanetRowOf(medium, NO_ABSORBER_CURVES, plan);
+    const two = perPlanetRowOf(medium, NO_ABSORBER_CURVES, plan, "read", 2);
+    expect([THICK_LAYER_BYTES, none.thickBytes, two.thickBytes, two.baseBytes]).toEqual([
+      388_864,
+      0,
+      4 * 2 * 388_864,
+      none.baseBytes,
+    ]);
+  });
+
+  it("widens saturn-oblate under one star by both steps, to 1.64 MB, from 2.31 MB at four bands", () => {
+    const plan = tablesPlanOf(body, radiusM);
+    const unwidened = perPlanetRowOf(medium, NO_ABSORBER_CURVES, plan, "read", 1);
+    expect([slicedUnder(0), slicedUnder(1), unwidened.baseBytes + unwidened.thickBytes]).toEqual([
+      ["none", false, 5, 4, 755_196],
+      ["kappaAndBands", false, 3, 3, 1_635_020],
+      2_310_652,
+    ]);
+  });
+
+  it("leaves saturn-oblate under two stars over 2 MB after both widenings", () => {
+    expect(slicedUnder(2)).toEqual(["kappaAndBands", true, 3, 3, 2_801_612]);
+  });
+
+  it("slices a body's tables on the row with the thick table their route gives them", async () => {
+    const engine = await countingRenderEngine();
+    const made = (slots: number): AtmosphereTables =>
+      new AtmosphereTables(engine, medium, radiusM, NO_ABSORBER_CURVES, body, "read", slots);
+    const unrouted = made(0);
+    const routed = made(1);
+    expect([
+      [unrouted.widening, unrouted.plan.bands.length, unrouted.row.thickBytes],
+      [routed.widening, routed.plan.bands.length, routed.row.thickBytes],
+    ]).toEqual([
+      ["none", 4, 0],
+      ["kappaAndBands", 3, 3 * 388_864],
+    ]);
   });
 });

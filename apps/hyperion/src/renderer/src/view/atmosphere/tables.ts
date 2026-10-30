@@ -86,6 +86,7 @@ import type { PolarisationTable } from "./thick/polarisation";
 import {
   packThickTable,
   type PackedThickTable,
+  THICK_LAYER_BYTES,
   THICK_TABLE_FORMAT,
   thickIrradianceLayer,
   thickTableBytes,
@@ -979,6 +980,13 @@ export interface PerPlanetRow {
    * under an absorber, built or not; 0 for a medium with none.
    */
   readonly slotDepthBytes: number;
+  /**
+   * What the thick table a body's route gives it takes (R08.T14.d.4, T14.d's precondition 4):
+   * `thick/read.ts`'s `THICK_LAYER_BYTES`, 388,864 B, a band and light slot, its bake with the
+   * correction summed into it or a thin world's correction alone; 0 where it takes neither. Not in
+   * `baseBytes`: the tables count the table they hold ({@link AtmosphereTables.thickBytes}).
+   */
+  readonly thickBytes: number;
 }
 
 /** A texture's bytes at `format`: its texels times the format's (`engine/memory.ts`'s rule). */
@@ -997,12 +1005,16 @@ function bytesOf(format: GPUTextureFormat, ...extent: readonly number[]): number
  * unused, 393,224 B a slice with the depth's, so that a thin giant came to more
  * (`decision-r08-t8-leans.md` §13, text F; R08.T11.a's rows); since R08.T11.e each one a medium does
  * not read is one texel a slice ({@link columnTableSizes}), unless `columnTables` is `every`.
+ *
+ * @param thickSlots - The light slots of the thick table the body's route gives it, one a light
+ *   (R08.T14.d.4); 0, the default, where it takes none.
  */
 export function perPlanetRowOf(
   medium: AtmosphereMedium,
   curves: AbsorberCurveSlots,
   plan: TablesPlan,
   columnTables: ColumnTables = "read",
+  thickSlots = 0,
 ): PerPlanetRow {
   const slices = plan.kappa.length;
   const { widthTexels: w, heightTexels: h } = TRANSMITTANCE_SIZE;
@@ -1056,6 +1068,7 @@ export function perPlanetRowOf(
     mediumTableBytes,
     baseBytes,
     slotDepthBytes,
+    thickBytes: plan.bands.length * thickSlots * THICK_LAYER_BYTES,
   };
 }
 
@@ -1070,7 +1083,8 @@ export function perPlanetRowOf(
  *   absorber depth today's read takes, about 1.2% on the ice giants and 7% on Saturn (§13, point 1);
  * - `lightSlots`: the curves take more light slots than R07's `MAX_BODY_LIGHTS`, which no body's stars
  *   do (`settings.ts`'s `SKY_SUN_CAP`), only a test's or the smoke's;
- * - `row`: the per-planet row, as built, with the layers would pass {@link PER_PLANET_ROW_BYTES}.
+ * - `row`: the per-planet row, as built, with the layers would pass {@link PER_PLANET_ROW_BYTES},
+ *   the thick table the body's route gives it counted (R08.T14.d.4).
  */
 export type SlotDepthsRefusal =
   | { readonly kind: "noAbsorber" }
@@ -1084,11 +1098,14 @@ export type SlotDepthsRefusal =
  * the lights' curves and the plan, so that the body's ray march takes its read when its pipeline is
  * made (`decision-r08-t8-leans.md` §13, point 2). The layers never widen `KAPPA_STEP` or
  * `BAND_STEP`: the row is the plan's as it stands, with them.
+ *
+ * @param thickSlots - As {@link perPlanetRowOf}'s.
  */
 export function slotDepthsRefusal(
   medium: AtmosphereMedium,
   curves: AbsorberCurveSlots,
   plan: TablesPlan,
+  thickSlots = 0,
 ): SlotDepthsRefusal | null {
   if (absorberCount(medium) === 0) {
     return { kind: "noAbsorber" };
@@ -1099,8 +1116,8 @@ export function slotDepthsRefusal(
   if (curves.length > MAX_BODY_LIGHTS) {
     return { kind: "lightSlots", slots: curves.length, most: MAX_BODY_LIGHTS };
   }
-  const row = perPlanetRowOf(medium, curves, plan);
-  const rowBytes = row.baseBytes + row.slotDepthBytes;
+  const row = perPlanetRowOf(medium, curves, plan, "read", thickSlots);
+  const rowBytes = row.baseBytes + row.slotDepthBytes + row.thickBytes;
   return rowBytes > PER_PLANET_ROW_BYTES
     ? { kind: "row", rowBytes, mostBytes: PER_PLANET_ROW_BYTES }
     : null;
@@ -1118,30 +1135,37 @@ export interface RowBody {
   /** The body with the slicing the tables are built in: the given one, or it widened. */
   readonly body: AtmosphereBody | null;
   readonly widening: RowWidening;
-  /** Whether the row, the slot layers aside, still passes {@link PER_PLANET_ROW_BYTES} at it. */
+  /**
+   * Whether the row, the slot layers aside and the thick table the body's route gives it counted,
+   * still passes {@link PER_PLANET_ROW_BYTES} at it.
+   */
   readonly over: boolean;
 }
 
 /**
  * The slicing a body's tables are built in under the 2 MB row (plan R08, Design note 11; R08.T11.e,
  * `decision-r08-t11-frame.md` §5): the body's own where its per-planet row, the slot layers aside
- * (they never widen a step, `decision-r08-t8-leans.md` §13), is at most
- * {@link PER_PLANET_ROW_BYTES}; past it, κ's step widened to `WIDE_KAPPA_STEP` (`oblate.ts`'s
- * `respacedSlicing`), and still past it the bands' to `WIDE_BAND_STEP` as well, in Design note 11's
- * order. The row is the tables' own, with the column tables the medium reads
- * ({@link columnTableSizes}), so that tables made with every one at full size (`every`, the smoke's)
- * are sliced as the client's.
+ * (they never widen a step, `decision-r08-t8-leans.md` §13) and the thick table its route gives it
+ * counted (R08.T14.d.4, T14.d's precondition 4), is at most {@link PER_PLANET_ROW_BYTES}; past it,
+ * κ's step widened to `WIDE_KAPPA_STEP` (`oblate.ts`'s `respacedSlicing`), and still past it the
+ * bands' to `WIDE_BAND_STEP` as well, in Design note 11's order. The row is the tables' own, with
+ * the column tables the medium reads ({@link columnTableSizes}), so that tables made with every one
+ * at full size (`every`, the smoke's) are sliced as the client's.
  *
  * @remarks
  * A row still past 2 MB after both is left over it, and `over` says so. The ruling's next step for
  * the cap at f = 0.2, fewer bands and never a further κ widening (κ's slices carry the limb's colour
- * on every grazing ray), is not built: no fixture's row takes it. The excess it was ruled for is the
- * thick J_ms bands, which no table here holds yet, and the capped giants over 2 MB after both
+ * on every grazing ray), is not built. The excess it was ruled for is the thick J_ms bands, counted
+ * since R08.T14.d.4: `saturn-oblate`'s routed row under one star, 2.31 MB at its five slices and
+ * four bands, takes both widenings to 1.64 MB at three slices and three bands, whose vector gate
+ * through the route misses as the built slicing's does (R08.T14.d.4's record), and under two stars
+ * stays over at 2.80 MB, left over for main's ruling. The capped giants over 2 MB after both
  * widenings are over by their slices (two absorbers or more, 393 KB a slice), which fewer bands
  * cannot take, so they are left over rather than their picture coarsened. A row over by its curves
  * or its band layers could take fewer bands, its count chosen by Design note 10's metric on the
  * twin; none exists today (R08.T11.e's record). Memory only: R12.T3 judges it.
  *
+ * @param thickSlots - As {@link perPlanetRowOf}'s.
  * @throws RangeError as {@link tablesPlanOf}.
  */
 export function rowBodyOf(
@@ -1149,10 +1173,13 @@ export function rowBodyOf(
   curves: AbsorberCurveSlots,
   body: AtmosphereBody | null,
   referenceRadiusM: number,
+  thickSlots = 0,
 ): RowBody {
-  const over = (sliced: AtmosphereBody): boolean =>
-    perPlanetRowOf(medium, curves, tablesPlanOf(sliced, referenceRadiusM)).baseBytes >
-    PER_PLANET_ROW_BYTES;
+  const over = (sliced: AtmosphereBody): boolean => {
+    const plan = tablesPlanOf(sliced, referenceRadiusM);
+    const row = perPlanetRowOf(medium, curves, plan, "read", thickSlots);
+    return row.baseBytes + row.thickBytes > PER_PLANET_ROW_BYTES;
+  };
   if (body === null || !over(body)) {
     return { body, widening: "none", over: false };
   }
@@ -1189,6 +1216,7 @@ const EMPTY_ROW: PerPlanetRow = {
   mediumTableBytes: 0,
   baseBytes: 0,
   slotDepthBytes: 0,
+  thickBytes: 0,
 };
 
 /** The per-planet kernels, as built or as the kernel arm assembles them. */
@@ -2280,6 +2308,8 @@ export class AtmosphereTables {
   #widening: RowWidening = "none";
   /** Which column tables the tables make at full size (R08.T11.e, {@link ColumnTables}). */
   readonly #columnTables: ColumnTables;
+  /** The light slots of the thick table the body's route gives it, which its row counts. */
+  readonly #thickSlots: number;
   #plan: TablesPlan;
   /** The medium's layer edges, {@link packLayerEdges}'s, packed once a medium. */
   #layerEdges: Float32Array = new Float32Array(LAYER_EDGES_FLOATS);
@@ -2346,6 +2376,10 @@ export class AtmosphereTables {
    *   R05's tables.
    * @param columnTables - Which column tables are made at full size: those the medium reads, or,
    *   for the smoke's check that one texel moves no pixel, every one (R08.T11.e).
+   * @param thickSlots - The light slots of the thick table the body's route gives it, one a light,
+   *   which the 2 MB row counts when it decides the slicing (R08.T14.d.4, T14.d's precondition 4;
+   *   `AtmosphereCache.ts`'s factory's); 0, the default, where it takes none, as a caller that
+   *   gives its tables a thick table of its own choosing (the smoke's) has its row count none.
    * @throws Error or RangeError as {@link packMedium}, {@link packAbsorberCurves} and
    *   {@link tablesPlanOf}, and `EngineUnavailable` while the engine has no device (a loss), having
    *   released the buffer and textures it made before.
@@ -2357,6 +2391,7 @@ export class AtmosphereTables {
     curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
     body: AtmosphereBody | null = null,
     columnTables: ColumnTables = "read",
+    thickSlots = 0,
   ) {
     this.#engine = engine;
     this.#medium = medium;
@@ -2365,6 +2400,7 @@ export class AtmosphereTables {
     this.#body = body;
     this.#builtBody = body;
     this.#columnTables = columnTables;
+    this.#thickSlots = thickSlots;
     this.#plan = tablesPlanOf(body, bottomRadiusM);
     this.#resources = createResources(engine, columnTableSizes(medium, columnTables));
     try {
@@ -3041,7 +3077,7 @@ export class AtmosphereTables {
     const absorberCurves = packAbsorberCurves(medium, curves);
     const layerEdges = packLayerEdges(medium);
     // Design note 11's widening over the 2 MB row (R08.T11.e): the slicing the plan is built in.
-    const sliced = rowBodyOf(medium, curves, body, bottomRadiusM);
+    const sliced = rowBodyOf(medium, curves, body, bottomRadiusM, this.#thickSlots);
     const plan = tablesPlanOf(sliced.body, bottomRadiusM);
     const layersPerBand = multiScatteringLayersOf(medium, curves);
     const oblateBody = packOblateBody(
@@ -3055,8 +3091,8 @@ export class AtmosphereTables {
     // Whether the body takes the slot layers (R08.T8.e, `decision-r08-t8-leans.md` §13): decided
     // here, from what the build knows, so that its ray march takes its read when its pipeline is
     // made; the key above already holds all of it, so the choice sets off no rebuild of its own.
-    const refusal = slotDepthsRefusal(medium, curves, plan);
-    const row = perPlanetRowOf(medium, curves, plan, this.#columnTables);
+    const refusal = slotDepthsRefusal(medium, curves, plan, this.#thickSlots);
+    const row = perPlanetRowOf(medium, curves, plan, this.#columnTables, this.#thickSlots);
     this.#medium = medium;
     this.#bottomRadiusM = bottomRadiusM;
     this.#curves = curves;

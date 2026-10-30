@@ -71,7 +71,7 @@ import {
 } from "../../view/wireframe/drawList";
 import { NO_WIREFRAME_TERRAIN, WireframeRenderer } from "../../view/wireframe/submit";
 import { photorealFrame } from "./photorealFrame";
-import { atmosphereFrameOf, type ViewAtmosphereInput } from "./viewAtmosphere";
+import { atmosphereFrameOf, cameraObservers, type ViewAtmosphereInput } from "./viewAtmosphere";
 import { bakeInputOf, type DrawnSky } from "./useViewSky";
 import { runPose, sceneStarsStandIn, type ViewRun } from "./viewRun";
 
@@ -452,7 +452,14 @@ export class ViewFrameDrawer {
       air === undefined
         ? null
         : air.view.noteFrame(
-            atmosphereFrameOf(run.scene, this.#regimes, this.#sources, air, triesPhotoreal),
+            atmosphereFrameOf(
+              run.scene,
+              this.#regimes,
+              this.#sources,
+              air,
+              triesPhotoreal,
+              cameraObservers(run.scene, camera.pose),
+            ),
           );
     const cube = this.#cubeFor(inputs.sky, inputs.setting);
     const exposed = exposureScale(ev100);

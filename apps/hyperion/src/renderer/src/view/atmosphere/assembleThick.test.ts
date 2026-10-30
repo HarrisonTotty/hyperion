@@ -139,7 +139,7 @@ function keptCache(): AtmosphereCache<CachedTables> {
         throw new Error("a kept scene's medium is built by the scene");
       },
       bakeThick: () => {
-        throw new Error("the product's routing routes no body to its bake");
+        throw new Error("these bodies are routed to no bake");
       },
       bakePolarisation: () => {
         throw new Error("these bodies take no polarisation correction");
@@ -153,7 +153,9 @@ function keptCache(): AtmosphereCache<CachedTables> {
       terminate: () => undefined,
     },
     tables: (built) => new FakeTables(built, 0),
-    // The router's labels alone: the correction's COMPUTING is `AtmosphereCache.test.ts`'s.
+    // The router's labels alone: the bake's and the correction's COMPUTING are
+    // `AtmosphereCache.test.ts`'s.
+    routes: () => false,
     corrects: () => false,
     discs: () => false,
   });
