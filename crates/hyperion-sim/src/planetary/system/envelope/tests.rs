@@ -12,10 +12,12 @@ use super::*;
 use crate::Seed;
 use crate::math;
 use crate::planetary::chem::condense::DeckBound;
+use crate::planetary::chem::condense::{ResolveOpticalDepthError, SizeModeError};
 use crate::planetary::chem::escape::{EnvelopeHelium, host_helium_per_hydrogen};
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::derive::solar::{PLANETS, SOLAR_AGE, solar_disc, solar_system};
 use crate::planetary::derive::{DerivedBody, PlanetClass};
+use crate::planetary::hooks::aerosols::AerosolMode;
 use crate::planetary::hooks::envelope_atmosphere::{DECK_COLUMN_BOTTOM, DeckKind};
 use crate::planetary::hooks::structure::envelope::{
     ADIABAT_BOTTOM, MEAN_REDISTRIBUTION, OPACITY_RATIO, OPTICAL_DEPTH_EXPONENT,
@@ -26,8 +28,13 @@ use crate::planetary::label;
 use crate::planetary::record::{BodyRecord, RecordSection, SectionState};
 use crate::planetary::system::tests::{SEED, golden_systems_afresh, sample, thin_air_sets};
 use crate::planetary::system::{Body, Epoch, Part, PlanetarySystem, fate_host};
+use crate::planetary::testing::{EnvelopeByHand, envelope_by_hand, with_every_25_hold};
 use crate::planetary::{SystemContext, generate};
 use crate::stellar::Composition;
+use crate::substance::CondensedPhase;
+use crate::substance::aerosol::{
+    LIQUID_STAND_INS, MoltenDecksRules, ResolveAerosolError, with_molten_decks,
+};
 use crate::substance::{Element, SubstanceId, by_key};
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::METRES_PER_AU;
@@ -1040,4 +1047,407 @@ fn the_envelopes_are_stated() {
         1e3 * network_build,
     );
     assert!(counts.keys().any(|label| label.ends_with(" ok")));
+}
+
+/// The molten decks' liquids (P14.T49.p), the rows [`LIQUID_STAND_INS`] serves.
+fn molten_liquids() -> Vec<SubstanceId> {
+    LIQUID_STAND_INS.iter().map(|s| row(s.key())).collect()
+}
+
+/// Whether a mode's τ is refused as the molten decks' hold refuses it (P14.T49.p): its size for
+/// want of a density (a molten salt's), or its optics for want of a file (a molten refractory's).
+fn refused_as_held(mode: &AerosolMode) -> bool {
+    matches!(
+        mode.optical_depth(),
+        Err(
+            ResolveOpticalDepthError::Size(SizeModeError::NoDensity { .. })
+                | ResolveOpticalDepthError::Aerosol(ResolveAerosolError::NoFile { .. })
+        )
+    )
+}
+
+/// The records of the golden systems, generated afresh, at the epoch under every 25 hold with the
+/// molten decks' rules `rules`, by system.
+fn golden_records_at_25(rules: MoltenDecksRules) -> Vec<(&'static str, Vec<BodyRecord>)> {
+    with_every_25_hold(|| {
+        with_molten_decks(rules, || {
+            golden_systems_afresh()
+                .into_iter()
+                .map(|(name, ctx, system)| {
+                    let snapshot = system.snapshot_at(&ctx, UniverseTime::EPOCH);
+                    (name, snapshot.bodies().to_vec())
+                })
+                .collect()
+        })
+    })
+}
+
+/// P14.T49.p over the golden systems at the epoch, every other 25 hold in force: under the molten
+/// decks' rules each record is its held twin's to the bit (by `Debug`, signed zeros included) but
+/// for its molten modes. Each of those is a liquid of [`LIQUID_STAND_INS`]' rows whose twin's τ
+/// was refused for want of a file or a density, and it takes a size and a τ, its material, phase,
+/// deck, column mass, profile, coverage and temperature its twin's.
+#[test]
+fn under_every_25_hold_the_molten_decks_take_a_tau_and_move_nothing_else() {
+    let molten_rows = molten_liquids();
+    let held = golden_records_at_25(MoltenDecksRules::Held);
+    let molten = golden_records_at_25(MoltenDecksRules::Molten);
+    assert_eq!(held.len(), molten.len());
+    let mut gained: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for ((name, held), (_, molten)) in held.iter().zip(&molten) {
+        assert_eq!(held.len(), molten.len(), "{name}");
+        for (a, b) in held.iter().zip(molten) {
+            let at = format!("{name} {:04x}", a.index().get());
+            let (mut text_a, mut text_b) = (format!("{a:?}"), format!("{b:?}"));
+            if let (Section::Ok(was), Section::Ok(now)) = (a.envelope(), b.envelope()) {
+                let (was, now) = (was.atmosphere().modes(), now.atmosphere().modes());
+                assert_eq!(was.len(), now.len(), "{at}");
+                for (x, y) in was.iter().zip(now) {
+                    let (dx, dy) = (format!("{x:?}"), format!("{y:?}"));
+                    if dx == dy {
+                        continue;
+                    }
+                    let key = key_of(x.material());
+                    assert!(
+                        x.phase() == CondensedPhase::Liquid
+                            && molten_rows.contains(&x.material())
+                            && refused_as_held(x),
+                        "{at}: a mode that is not a molten deck's moves: {dx} against {dy}"
+                    );
+                    assert!(
+                        y.size().is_ok() && y.optical_depth().is_ok(),
+                        "{at} {key}: {dy}"
+                    );
+                    assert_eq!(
+                        (x.material(), x.phase(), x.deck(), x.shape()),
+                        (y.material(), y.phase(), y.deck(), y.shape()),
+                        "{at}"
+                    );
+                    assert_eq!(
+                        format!(
+                            "{:?}",
+                            (x.column_mass(), x.profile(), x.coverage(), x.temperature())
+                        ),
+                        format!(
+                            "{:?}",
+                            (y.column_mass(), y.profile(), y.coverage(), y.temperature())
+                        ),
+                        "{at} {key}"
+                    );
+                    text_a = text_a.replacen(&dx, "a molten mode", 1);
+                    text_b = text_b.replacen(&dy, "a molten mode", 1);
+                    *gained.entry(key).or_default() += 1;
+                }
+            }
+            assert_eq!(
+                text_a, text_b,
+                "{at}: the record moves beyond its molten modes"
+            );
+        }
+    }
+    eprintln!("the golden systems' molten modes that take a τ, by row: {gained:?}");
+    for key in ["MgSiO3", "Mg2SiO4", "Fe"] {
+        assert!(gained.contains_key(key), "{key}: {gained:?}");
+    }
+}
+
+/// The shared fixture's hot Jupiter (`packages/protocol/fixtures/planetary.json`'s
+/// `body_detail_hot_jupiter`, an HD 209458 b), as `hyperion-server`'s `fixture_giant` builds its
+/// inputs from the record's bulk section: its mass, radius, gravity, `T_eq` and `T_eff` copied
+/// from the fixture, the generator's fractions for its mass, formed at the slice zone's snow line,
+/// 3.1 Gyr old (Torres, Winn and Holman 2008), a solar host, starlit.
+fn fixture_hot_jupiter() -> EnvelopeByHand {
+    use crate::planetary::derive::{SnowLineSide, giant_composition};
+    use crate::units::consts::STEFAN_BOLTZMANN;
+    use crate::units::{Dex, EarthMasses, Kilograms, MetresPerSecondSquared, Watts, Years};
+    let mass = EarthMasses::from(Kilograms::new(1.300_215_349_175_194_7e27));
+    let (radius, t_eq, t_eff) = (97_157_628.0, 1_449.0, 1_456.9);
+    let snow_line = Metres::new(337_938_907_867.118_65);
+    let area = 4.0 * core::f64::consts::PI * radius * radius;
+    EnvelopeByHand {
+        mass,
+        fractions: giant_composition(mass, SnowLineSide::Beyond)
+            .expect("a giant's mass")
+            .fractions(),
+        radius: Metres::new(radius),
+        gravity: MetresPerSecondSquared::new(9.193_210_521_502_017),
+        equilibrium_temperature: Kelvin::new(t_eq),
+        internal_luminosity: Watts::new(
+            area * STEFAN_BOLTZMANN * (math::powi(t_eff, 4) - math::powi(t_eq, 4)),
+        ),
+        age: Years::new(3.1e9),
+        formation_distance: snow_line,
+        snow_line,
+        fe_h: Dex::ZERO,
+        alpha_fe: Dex::ZERO,
+        host: HostAbundances::of(Dex::ZERO, &AbundanceDraws::MEDIAN),
+        primordial_helium_per_hydrogen: Element::He.protosolar_abundance_per_hydrogen(),
+        starlit: true,
+    }
+}
+
+/// One deep deck's mode in count (x) (P14.T49.p): where, its row, its top, bar, its τ or why
+/// not, its basis, and whether its τ is refused as the molten decks' hold refuses it.
+#[derive(Debug, Clone)]
+struct DeepMode {
+    at: String,
+    key: String,
+    top_bar: f64,
+    tau: Result<f64, String>,
+    basis: Option<String>,
+    refused: bool,
+}
+
+/// Count (x)'s deep decks over `sets` at the epoch, every 25 hold in force with the molten decks'
+/// rules `rules`: each deck of a refractory, a sulphide or a salt based below its envelope's join,
+/// by `set id body deck`, with its τ above 1 bar, and its modes.
+fn deep_decks_at_25(
+    sets: &[(&'static str, Seed, SystemContext)],
+    rules: MoltenDecksRules,
+) -> std::collections::BTreeMap<String, (Option<f64>, Vec<DeepMode>)> {
+    let molten_rows = molten_liquids();
+    let mut decks = std::collections::BTreeMap::new();
+    with_every_25_hold(|| {
+        with_molten_decks(rules, || {
+            for (set, seed, ctx) in sets {
+                let system = generate(*seed, ctx);
+                walk(ctx, &system, UniverseTime::EPOCH, &mut |_, visit| {
+                    let Section::Ok(envelope) = visit.record.envelope() else {
+                        return;
+                    };
+                    let at = format!("{set} {} {:04x}", ctx.id(), visit.body.index.get());
+                    let atmosphere = envelope.atmosphere();
+                    let join = atmosphere.profile().join_pressure().value();
+                    for deck in atmosphere.decks() {
+                        let condensate = deck.condensate();
+                        let deep = matches!(
+                            DeckKind::of(condensate),
+                            Some(DeckKind::Refractory | DeckKind::SulphideOrSalt)
+                        ) && deck.base().value() > join;
+                        if !deep {
+                            continue;
+                        }
+                        let key = key_of(condensate);
+                        let modes = atmosphere
+                            .modes()
+                            .iter()
+                            .filter(|m| m.deck() == condensate)
+                            .map(|mode| DeepMode {
+                                at: at.clone(),
+                                key: key.clone(),
+                                top_bar: mode.profile().top().value() / 1e5,
+                                tau: mode
+                                    .optical_depth()
+                                    .map(|d| d.value())
+                                    .map_err(|e| format!("{e:?}")),
+                                basis: mode
+                                    .optical_depth()
+                                    .ok()
+                                    .map(|d| format!("{:?}", d.basis())),
+                                refused: mode.phase() == CondensedPhase::Liquid
+                                    && molten_rows.contains(&mode.material())
+                                    && refused_as_held(mode),
+                            })
+                            .collect();
+                        decks.insert(
+                            format!("{at} {key}"),
+                            (deck_tau_above(envelope, condensate, 1e5), modes),
+                        );
+                    }
+                });
+            }
+        });
+    });
+    decks
+}
+
+/// Count (x) re-run for P14.T49.p (decision-galaxy-25-train §6), every 25 hold in force, over
+/// [`census_sets`] at the epoch, printed (`--nocapture`): the deep decks' modes with no τ under
+/// the molten decks' hold that are topped above 10 bar, by row, with their τ, tops and bases under
+/// 25's rules and any still without one; every deep deck's τ above 1 bar under 25's ("TO MAIN" at
+/// 1 or more); and the fixture's hot Jupiter's τ above its photosphere, by deck, both ways. The
+/// galaxy-side hold at 25 (`KEPLER_REGIME_VERSION`) moves only the central 10 ly, which no census
+/// set reaches.
+#[test]
+#[ignore = "slow: count (x) over 102 systems, held and molten"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census, each of the entry's lines printed in turn"
+)]
+fn under_every_25_hold_count_x_states_the_molten_decks() {
+    use std::fmt::Write as _;
+    let sets = census_sets();
+    let held = deep_decks_at_25(&sets, MoltenDecksRules::Held);
+    let molten = deep_decks_at_25(&sets, MoltenDecksRules::Molten);
+    assert_eq!(
+        held.keys().collect::<Vec<_>>(),
+        molten.keys().collect::<Vec<_>>(),
+        "the same deep decks"
+    );
+    let mut gap: Vec<(&DeepMode, &DeepMode)> = Vec::new();
+    let mut deeper: Vec<&DeepMode> = Vec::new();
+    let mut unrefused_without_tau = Vec::new();
+    let mut envelopes = std::collections::BTreeSet::new();
+    let mut to_main = Vec::new();
+    for (deck, (_, was)) in &held {
+        let (above_one, now) = &molten[deck];
+        assert_eq!(was.len(), now.len(), "{deck}");
+        for (x, y) in was.iter().zip(now) {
+            if !x.refused {
+                assert_eq!(
+                    format!("{x:?}"),
+                    format!("{y:?}"),
+                    "{deck}: a mode the hold did not refuse moves"
+                );
+                if x.tau.is_err() && x.top_bar < 10.0 {
+                    unrefused_without_tau.push(format!("{deck}: {:?}", x.tau));
+                }
+                continue;
+            }
+            if let Err(why) = &y.tau {
+                to_main.push(format!(
+                    "{deck}: no τ at 25, topped at {:.3} bar ({why})",
+                    y.top_bar
+                ));
+            }
+            if x.top_bar < 10.0 {
+                gap.push((x, y));
+                envelopes.insert(x.at.clone());
+            } else {
+                deeper.push(y);
+            }
+        }
+        if above_one.is_some_and(|tau| tau >= 1.0) {
+            to_main.push(format!("{deck}: τ above 1 bar {above_one:?} at 25"));
+        }
+    }
+    let mut by_row: std::collections::BTreeMap<&str, Vec<&DeepMode>> =
+        std::collections::BTreeMap::new();
+    for (_, y) in &gap {
+        by_row.entry(&y.key).or_default().push(y);
+    }
+    let mut table = String::new();
+    writeln!(
+        table,
+        "| Row | Modes | Envelopes | τ min | τ median | τ max | Highest top, bar | Basis |"
+    )
+    .expect("a string takes a line");
+    writeln!(table, "| --- | --- | --- | --- | --- | --- | --- | --- |")
+        .expect("a string takes a line");
+    for (key, modes) in &by_row {
+        let mut taus: Vec<f64> = modes.iter().filter_map(|m| m.tau.clone().ok()).collect();
+        taus.sort_by(f64::total_cmp);
+        let on: std::collections::BTreeSet<&str> = modes.iter().map(|m| m.at.as_str()).collect();
+        let highest = modes
+            .iter()
+            .map(|m| m.top_bar)
+            .fold(f64::INFINITY, f64::min);
+        let bases: std::collections::BTreeSet<&str> =
+            modes.iter().filter_map(|m| m.basis.as_deref()).collect();
+        writeln!(
+            table,
+            "| {key} | {} | {} | {:.3e} | {:.3e} | {:.3e} | {highest:.4} | {bases:?} |",
+            modes.len(),
+            on.len(),
+            taus.first().copied().unwrap_or(f64::NAN),
+            taus.get(taus.len() / 2).copied().unwrap_or(f64::NAN),
+            taus.last().copied().unwrap_or(f64::NAN),
+        )
+        .expect("a string takes a line");
+    }
+    let mut above_one: Vec<(f64, &str)> = molten
+        .iter()
+        .filter_map(|(deck, (tau, _))| tau.map(|tau| (tau, deck.as_str())))
+        .collect();
+    above_one.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let hot = fixture_hot_jupiter();
+    let fixture = |rules| {
+        with_every_25_hold(|| {
+            with_molten_decks(rules, || {
+                let envelope = envelope_by_hand(&hot).expect("the fixture's hot Jupiter");
+                let photosphere = envelope
+                    .atmosphere()
+                    .profile()
+                    .photosphere_pressure()
+                    .value();
+                let decks: Vec<(String, Option<f64>)> = envelope
+                    .atmosphere()
+                    .decks()
+                    .iter()
+                    .map(|deck| {
+                        let condensate = deck.condensate();
+                        (
+                            key_of(condensate),
+                            deck_tau_above(&envelope, condensate, photosphere),
+                        )
+                    })
+                    .collect();
+                (photosphere, decks)
+            })
+        })
+    };
+    let (photosphere, fixture_held) = fixture(MoltenDecksRules::Held);
+    let (_, fixture_molten) = fixture(MoltenDecksRules::Molten);
+    let total = |decks: &[(String, Option<f64>)]| decks.iter().filter_map(|d| d.1).sum::<f64>();
+    let mut deeper_taus: Vec<f64> = deeper.iter().filter_map(|m| m.tau.clone().ok()).collect();
+    deeper_taus.sort_by(f64::total_cmp);
+    let mut modes = String::new();
+    for (_, y) in &gap {
+        writeln!(
+            modes,
+            "  {} {}: top {:.4} bar, τ {:?}, {:?}",
+            y.at, y.key, y.top_bar, y.tau, y.basis
+        )
+        .expect("a string takes a line");
+    }
+    eprintln!("the modes, each with its top, at 25:\n{modes}");
+    eprintln!(
+        "count (x) at 25 over {} systems: {} deep decks; {} modes with no τ under the hold topped \
+         above 10 bar, on {} envelopes\n{table}and {} more the hold refused topped below 10 bar, τ \
+         {:.3e} to {:.3e} at 25; deep modes with no τ the hold did not refuse, topped above 10 \
+         bar: {unrefused_without_tau:?}\nthe deep decks' τ above 1 bar at 25, the largest ten: \
+         {:?}\nthe fixture's hot Jupiter, its photosphere at {:.4} bar, τ above it by deck, held \
+         {:.3} in all: {fixture_held:?}\nmolten {:.3} in all: {fixture_molten:?}\nTO MAIN: \
+         {to_main:#?}",
+        sets.len(),
+        molten.len(),
+        gap.len(),
+        envelopes.len(),
+        deeper.len(),
+        deeper_taus.first().copied().unwrap_or(f64::NAN),
+        deeper_taus.last().copied().unwrap_or(f64::NAN),
+        above_one.iter().take(10).collect::<Vec<_>>(),
+        photosphere / 1e5,
+        total(&fixture_held),
+        total(&fixture_molten),
+    );
+    assert!(!gap.is_empty());
+    let untaken: Vec<&String> = to_main
+        .iter()
+        .filter(|line| line.contains("no τ"))
+        .collect();
+    assert_eq!(
+        untaken,
+        Vec::<&String>::new(),
+        "every refused mode takes a τ at 25"
+    );
+}
+
+/// The molten decks' arm gives the same envelope twice (the sim-determinism skill's rule), over
+/// the fixture's hot Jupiter, whose Fe deck it moves.
+#[test]
+fn under_every_25_hold_the_molten_decks_envelope_is_the_same_twice() {
+    let hot = fixture_hot_jupiter();
+    let twice: Vec<Envelope> = (0..2)
+        .map(|_| with_every_25_hold(|| envelope_by_hand(&hot).expect("the fixture's hot Jupiter")))
+        .collect();
+    assert_eq!(format!("{:?}", twice[0]), format!("{:?}", twice[1]));
+    assert!(
+        twice[0]
+            .atmosphere()
+            .modes()
+            .iter()
+            .any(|m| m.material() == row("Fe") && m.optical_depth().is_ok()),
+        "its Fe deck takes a τ"
+    );
 }

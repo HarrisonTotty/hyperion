@@ -40,7 +40,9 @@
 
 use hyperion_surface::field::MechanicsFamily;
 
+use super::aerosol::MoltenDecksRules;
 use super::diagram::measured_at;
+use super::rows::molten_salt;
 use super::{Source, Substance};
 use crate::units::{Kelvin, KilogramsPerCubicMetre};
 
@@ -220,8 +222,17 @@ impl CondensedColumns {
 impl Substance {
     /// Its condensed columns, for a row that can be a solid or a liquid and whose figures were
     /// read; `None` where they are not modelled.
+    ///
+    /// From generator version 25 (P14.T49.p's hold, `MOLTEN_DECKS_VERSION`) a molten salt's,
+    /// `KCl`'s or `Na2S`'s, give its liquid by temperature beside its solid; below it, its solid
+    /// alone, as version 24's.
     #[must_use]
-    pub const fn condensed(&self) -> Option<&CondensedColumns> {
+    pub fn condensed(&self) -> Option<&CondensedColumns> {
+        if MoltenDecksRules::in_force() == MoltenDecksRules::Molten
+            && let Some(molten) = molten_salt(self.key.as_str())
+        {
+            return Some(molten);
+        }
         self.condensed.as_ref()
     }
 
@@ -271,7 +282,7 @@ impl Substance {
         phase: CondensedPhase,
         temperature: Kelvin,
     ) -> Option<KilogramsPerCubicMetre> {
-        match self.condensed.as_ref()?.grain_density() {
+        match self.condensed()?.grain_density() {
             GrainDensity::Fixed { solid, liquid } => match phase {
                 CondensedPhase::Solid => solid,
                 CondensedPhase::Liquid => liquid,
@@ -302,6 +313,7 @@ mod tests {
     use hyperion_testkit::float::assert_same_bits;
 
     use super::*;
+    use crate::substance::aerosol::with_molten_decks;
     use crate::substance::{PhaseDiagram, by_key, condensables};
 
     /// A temperature range of a row's solid with no density: its key and from where, inclusive,
@@ -458,6 +470,104 @@ mod tests {
         // Each row's solid is its one fixed value, as at 23.
         for key in READ_LIQUIDS {
             assert_same_bits(read(key, solid, 300.0), read(key, solid, 1_000.0));
+        }
+    }
+
+    /// The molten salts (P14.T49.p): under 24's rules `KCl`'s and `Na2S`'s liquids have no
+    /// density and their columns are their rows'; under 25's each liquid follows its nodes, its
+    /// solid and transition kept to the bit, its source stated, and every other row's columns are
+    /// the same under both rules.
+    #[test]
+    fn the_molten_salts_liquids_are_served_from_25() {
+        let (solid, liquid) = (CondensedPhase::Solid, CondensedPhase::Liquid);
+        for (key, melt, deck) in [("KCl", 1_044.0, 1_780.0), ("Na2S", 1_445.0, 1_780.0)] {
+            let row = by_key(key).unwrap().substance();
+            assert_eq!(density(row, liquid, deck), None, "{key} at 24");
+            let held = row.condensed().unwrap().clone();
+            let molten = with_molten_decks(MoltenDecksRules::Molten, || {
+                row.condensed().unwrap().clone()
+            });
+            let GrainDensity::MeasuredLiquid {
+                solid: crystal,
+                liquid: nodes,
+            } = molten.grain_density()
+            else {
+                panic!("{key}'s molten columns give its liquid by temperature");
+            };
+            let GrainDensity::Fixed {
+                solid: Some(held_solid),
+                liquid: None,
+            } = held.grain_density()
+            else {
+                panic!("{key}'s columns at 24 are its solid's alone");
+            };
+            assert_same_bits(crystal.density().value(), held_solid.density().value());
+            assert_same_bits(crystal.at().value(), held_solid.at().value());
+            assert_same_bits(
+                molten.transition().temperature().value(),
+                held.transition().temperature().value(),
+            );
+            assert_eq!(
+                molten.transition().kind(),
+                held.transition().kind(),
+                "{key}"
+            );
+            assert_eq!(molten.mechanics(), held.mechanics(), "{key}");
+            assert!(
+                molten
+                    .sources()
+                    .iter()
+                    .any(|s| s.covers() == "liquid grain density"),
+                "{key}"
+            );
+            assert!(nodes.windows(2).all(|w| w[0].0 < w[1].0), "{key}");
+            assert!(
+                (nodes[0].0.value() - melt).abs() < 1e-9,
+                "{key}: from its melt"
+            );
+            for t in [melt, f64::midpoint(melt, deck), deck] {
+                let at = with_molten_decks(MoltenDecksRules::Molten, || density(row, liquid, t))
+                    .unwrap_or_else(|| panic!("{key} at {t} K at 25"));
+                assert!(
+                    at.is_finite() && at > 0.0 && at < crystal.density().value(),
+                    "{key}"
+                );
+                assert_same_bits(
+                    with_molten_decks(MoltenDecksRules::Molten, || density(row, solid, t)).unwrap(),
+                    density(row, solid, t).unwrap(),
+                );
+            }
+        }
+        // KCl's is Janz 1988's law, 2,135.9 − 0.5831 T kg m⁻³, inside its range and out to
+        // 1,800 K; Na2S's the solid's 1,856 kg m⁻³ over 1.2, to its printed digits, at every
+        // temperature.
+        let kcl = by_key("KCl").unwrap().substance();
+        for t in [1_044.0, 1_100.0, 1_212.0, 1_500.0, 1_800.0] {
+            let ours =
+                with_molten_decks(MoltenDecksRules::Molten, || density(kcl, liquid, t)).unwrap();
+            let janz = 2_135.9 - 0.583_1 * t;
+            assert!((ours / janz - 1.0).abs() < 1e-9, "KCl at {t} K: {ours}");
+        }
+        let na2s = by_key("Na2S").unwrap().substance();
+        for t in [1_445.0, 1_600.0, 1_800.0] {
+            let ours =
+                with_molten_decks(MoltenDecksRules::Molten, || density(na2s, liquid, t)).unwrap();
+            assert!((ours - 1_856.0 / 1.2).abs() < 0.05, "Na2S at {t} K: {ours}");
+        }
+        for id in crate::substance::ids() {
+            let row = id.substance();
+            if matches!(row.key().as_str(), "KCl" | "Na2S") {
+                continue;
+            }
+            assert_eq!(
+                format!("{:?}", row.condensed()),
+                with_molten_decks(MoltenDecksRules::Molten, || format!(
+                    "{:?}",
+                    row.condensed()
+                )),
+                "{}",
+                row.key()
+            );
         }
     }
 }

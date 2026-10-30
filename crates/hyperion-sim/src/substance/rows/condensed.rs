@@ -548,20 +548,39 @@ pub(in crate::substance) const POTASSIUM_CHLORIDE: CondensedColumns = CondensedC
     transition: at(TransitionKind::Melting, 1_044.0),
     mechanics: MechanicsFamily::Salt,
     sources: &[
-        source(
-            "grain density",
-            "sylvite's X-ray density from Wyckoff 1963 (COD 9008651: a 6.29294 Å, Z 4), \
-             1.9869 g cm⁻³, the Handbook of Mineralogy's D(calc.) 1.987 (D(meas.) 1.993(5)), \
-             ±0.3 per cent",
-            Basis::Fact,
-        ),
-        source(
-            "transition",
-            "1,044 K (NIST-JANAF table Cl-038, Chase 1998)",
-            Basis::Fact,
-        ),
+        POTASSIUM_CHLORIDE_GRAIN_DENSITY,
+        POTASSIUM_CHLORIDE_TRANSITION,
         SALT_FAMILY,
     ],
+};
+
+/// Sylvite's grain density source.
+const POTASSIUM_CHLORIDE_GRAIN_DENSITY: Source = source(
+    "grain density",
+    "sylvite's X-ray density from Wyckoff 1963 (COD 9008651: a 6.29294 Å, Z 4), 1.9869 g cm⁻³, \
+     the Handbook of Mineralogy's D(calc.) 1.987 (D(meas.) 1.993(5)), ±0.3 per cent",
+    Basis::Fact,
+);
+
+/// Potassium chloride's melting point's source.
+const POTASSIUM_CHLORIDE_TRANSITION: Source = source(
+    "transition",
+    "1,044 K (NIST-JANAF table Cl-038, Chase 1998)",
+    Basis::Fact,
+);
+
+/// Potassium chloride's columns from generator version 25 (P14.T49.p's hold,
+/// `MOLTEN_DECKS_VERSION`): [`POTASSIUM_CHLORIDE`]'s, with its melt by temperature (the `liquid
+/// grain density` source), for a hot giant's molten `KCl` deck. 25's bump folds it into the row.
+pub(in crate::substance) const MOLTEN_POTASSIUM_CHLORIDE: CondensedColumns = CondensedColumns {
+    grain_density: solid_and_liquid(1_987.0, 293.0, &KCL_LIQUID_NODES),
+    sources: &[
+        POTASSIUM_CHLORIDE_GRAIN_DENSITY,
+        source("liquid grain density", KCL_LIQUID_CITATION, Basis::Reduced),
+        POTASSIUM_CHLORIDE_TRANSITION,
+        SALT_FAMILY,
+    ],
+    ..POTASSIUM_CHLORIDE
 };
 
 /// Sodium chloride, halite.
@@ -621,26 +640,95 @@ pub(in crate::substance) const SODIUM_SULPHIDE: CondensedColumns = CondensedColu
     transition: at(TransitionKind::Melting, 1_445.0),
     mechanics: MechanicsFamily::Salt,
     sources: &[
-        source(
-            "grain density",
-            "the mean of two antifluorite cells' X-ray densities (Fm3̄m, Z 4): Zintl, Harder and \
-             Dauth 1934, Z. Elektrochem. 40, 588 (COD 1011374: a 6.526, possibly kX), 1,865, and \
-             Bonneau, Jarvis and Kaner 1992, Inorg. Chem. 31, 2127 (COD 4344366: a 6.547 Å), \
-             1,847 kg m⁻³; ±0.5 per cent",
-            Basis::Reduced,
-        ),
-        source(
-            "transition",
-            "1,445 K (NIST-JANAF table Na-033, Chase 1998), its λ at 1,276 K being in the solid",
-            Basis::Fact,
-        ),
-        source(
-            "mechanics",
-            "`Salt`: an ionic, soluble alkali sulphide",
-            Basis::Adopted,
-        ),
+        SODIUM_SULPHIDE_GRAIN_DENSITY,
+        SODIUM_SULPHIDE_TRANSITION,
+        SODIUM_SULPHIDE_FAMILY,
     ],
 };
+
+/// Sodium sulphide's grain density source.
+const SODIUM_SULPHIDE_GRAIN_DENSITY: Source = source(
+    "grain density",
+    "the mean of two antifluorite cells' X-ray densities (Fm3̄m, Z 4): Zintl, Harder and Dauth \
+     1934, Z. Elektrochem. 40, 588 (COD 1011374: a 6.526, possibly kX), 1,865, and Bonneau, Jarvis \
+     and Kaner 1992, Inorg. Chem. 31, 2127 (COD 4344366: a 6.547 Å), 1,847 kg m⁻³; ±0.5 per cent",
+    Basis::Reduced,
+);
+
+/// Sodium sulphide's melting point's source.
+const SODIUM_SULPHIDE_TRANSITION: Source = source(
+    "transition",
+    "1,445 K (NIST-JANAF table Na-033, Chase 1998), its λ at 1,276 K being in the solid",
+    Basis::Fact,
+);
+
+/// Sodium sulphide's mechanics family's source.
+const SODIUM_SULPHIDE_FAMILY: Source = source(
+    "mechanics",
+    "`Salt`: an ionic, soluble alkali sulphide",
+    Basis::Adopted,
+);
+
+/// Sodium sulphide's columns from generator version 25 (P14.T49.p's hold,
+/// `MOLTEN_DECKS_VERSION`): [`SODIUM_SULPHIDE`]'s, with its melt by temperature (the `liquid grain
+/// density` source), which a hot giant's `Na2S` deck forms above 1,445 K. 25's bump folds it into
+/// the row.
+pub(in crate::substance) const MOLTEN_SODIUM_SULPHIDE: CondensedColumns = CondensedColumns {
+    grain_density: solid_and_liquid(1_856.0, 293.0, &NA2S_LIQUID_NODES),
+    sources: &[
+        SODIUM_SULPHIDE_GRAIN_DENSITY,
+        source("liquid grain density", NA2S_LIQUID_CITATION, Basis::Adopted),
+        SODIUM_SULPHIDE_TRANSITION,
+        SODIUM_SULPHIDE_FAMILY,
+    ],
+    ..SODIUM_SULPHIDE
+};
+
+/// The molten salts' columns from generator version 25 by key, [`MOLTEN_POTASSIUM_CHLORIDE`] and
+/// [`MOLTEN_SODIUM_SULPHIDE`], which `Substance::condensed` gives in their rows' place under
+/// P14.T49.p's rules; `None` for every other row.
+#[must_use]
+pub(in crate::substance) fn molten_salt(key: &str) -> Option<&'static CondensedColumns> {
+    match key {
+        "KCl" => Some(&MOLTEN_POTASSIUM_CHLORIDE),
+        "Na2S" => Some(&MOLTEN_SODIUM_SULPHIDE),
+        _ => None,
+    }
+}
+
+/// Liquid KCl's nodes, kg m⁻³: Janz 1988's law at the row's melting point and at 1,800 K
+/// ([`KCL_LIQUID_CITATION`]).
+const KCL_LIQUID_NODES: [(Kelvin, KilogramsPerCubicMetre); 2] =
+    [node(1_044.0, 1_527.143_6), node(1_800.0, 1_086.32)];
+
+/// Liquid KCl's density source.
+const KCL_LIQUID_CITATION: &str = "molten KCl at one atmosphere, Janz 1988's recommended \
+     correlation (G. J. Janz, J. Phys. Chem. Ref. Data 17, Suppl. 2, Table 2.1.a, p. 42, read in \
+     NIST's open copy), ρ = 2.1359 − 5.831 × 10⁻⁴ T g cm⁻³, ±0.5 per cent, stated for \
+     1,053–1,212 K: its values at the row's melting point, 1,044 K, 9 K below that range, \
+     1,527.1436, and at 1,800 K, 1,086.32, linear between and held beyond. The molten decks of \
+     KCl and Na2S lie at 1,070–1,780 K together (P14.T54.b.i's count (x)), so above 1,212 K the \
+     law is carried past its range: Kirshenbaum, Cahill, McGonigal and Grosse's measurements to \
+     1,607 K (J. Inorg. Nucl. Chem. 24, 1287, 1962, as NSRDS-NBS 15, 1968, p. 5 gives them, ρ = \
+     2.062 − 5.350 × 10⁻⁴ T, 1,101–1,607 K) follow it within 1.5 per cent, and beyond 1,607 K no \
+     measurement was read";
+
+/// Liquid `Na2S`'s nodes, kg m⁻³: a labelled stand-in, the solid's density at the row's melting
+/// point over 1.2, the same at the melt and at 1,800 K ([`NA2S_LIQUID_CITATION`]).
+const NA2S_LIQUID_NODES: [(Kelvin, KilogramsPerCubicMetre); 2] =
+    [node(1_445.0, 1_546.7), node(1_800.0, 1_546.7)];
+
+/// Liquid `Na2S`'s density source.
+const NA2S_LIQUID_CITATION: &str = "a stand-in, since no measured density of molten Na2S was \
+     read (Janz 1988 tabulates the polysulphides Na2S3–Na2S5 alone): the row's solid density at \
+     its 1,445 ± 10 K melting point (NIST-JANAF table Na-033, Chase 1998; the ruling's 1,449 K \
+     is not JANAF's), 1,856 kg m⁻³, its room-temperature cell's, since no expansion of the solid \
+     to its melting point was read, over 1.2, the alkali halides' 17–25 per cent rise in volume \
+     on melting (decision-galaxy-25-train §6, not read at a source here): 1,546.7, held at every \
+     temperature. The solid's expansion to 1,445 K (about 10 per cent for the rock-salt \
+     halides, not read for Na2S) and an antifluorite's likely smaller rise on melting (Na2S's \
+     entropy of fusion per ion is about a third of KCl's, by NIST-JANAF's tables) partly \
+     offset, so the stand-in holds to about ±10 per cent";
 
 /// Manganese sulphide, alabandite.
 pub(in crate::substance) const MANGANESE_SULPHIDE: CondensedColumns = CondensedColumns {

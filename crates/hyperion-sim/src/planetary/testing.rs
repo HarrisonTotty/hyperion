@@ -427,7 +427,10 @@ impl Error for SampleContextsError {
 ///   cover within rounding of 1 as whole;
 /// - the rough plains', `ROUGH_PLAINS_VERSION` (R09.T7.g), at `PlainsModel::RayTraced` through
 ///   `with_rough_plains`: the plains' cold traps from the ray-traced table, which a system reads
-///   once as it is generated and carries to its passes, its record and R09's cold traps.
+///   once as it is generated and carries to its passes, its record and R09's cold traps;
+/// - the molten decks', `MOLTEN_DECKS_VERSION` (P14.T49.p), at `MoltenDecksRules::Molten` through
+///   `with_molten_decks`: the molten refractories' and salts' stand-in index files and the molten
+///   salts' densities.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 24's) is not
@@ -441,9 +444,11 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hooks::cold_traps::with_rough_plains;
     use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
     use crate::planetary::system::events::{StormEventsRules, with_storm_events};
+    use crate::substance::aerosol::{MoltenDecksRules, with_molten_decks};
     use hyperion_surface::cold_trap::PlainsModel;
     let run = || with_storm_events(StormEventsRules::Wired, run);
     let run = move || with_rough_plains(PlainsModel::RayTraced, run);
+    let run = move || with_molten_decks(MoltenDecksRules::Molten, run);
     with_steam_envelope(SteamEnvelopeRules::Steam, || {
         with_present_state(PresentStateRules::Present, || {
             with_exposed_ice(ExposedIceRules::Exposed, run)
@@ -719,6 +724,25 @@ mod tests {
             PlainsModel::RayTraced
         );
         assert_eq!(RecordRules::in_force().plains_model, PlainsModel::Bowls);
+    }
+
+    /// 25's molten decks' switch (P14.T49.p): in force inside 25's helper, held
+    /// outside it and where a test sets it back.
+    #[test]
+    fn the_molten_decks_hold_is_in_force_inside_25_s_helper_alone() {
+        use crate::substance::aerosol::{MoltenDecksRules, with_molten_decks};
+        assert_eq!(MoltenDecksRules::in_force(), MoltenDecksRules::Held);
+        assert_eq!(
+            with_every_25_hold(MoltenDecksRules::in_force),
+            MoltenDecksRules::Molten
+        );
+        assert_eq!(
+            with_every_25_hold(|| {
+                with_molten_decks(MoltenDecksRules::Held, MoltenDecksRules::in_force)
+            }),
+            MoltenDecksRules::Held
+        );
+        assert_eq!(MoltenDecksRules::in_force(), MoltenDecksRules::Held);
     }
 
     #[test]

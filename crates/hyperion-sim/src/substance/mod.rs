@@ -883,8 +883,18 @@ mod tests {
     /// nodes from its melting point, rising in temperature and falling in density (as 24 reads
     /// them, P14.T49.n); and every transition is finite and positive, a eutectic's composition a
     /// mass fraction.
+    ///
+    /// Under both of the molten decks' rules (P14.T49.p): the molten salts' columns from 25 too.
     #[test]
     fn substance_condensed_columns_cover_the_condensed_rows() {
+        use crate::substance::aerosol::{MoltenDecksRules, with_molten_decks};
+        for rules in [MoltenDecksRules::Held, MoltenDecksRules::Molten] {
+            with_molten_decks(rules, condensed_columns_cover_the_condensed_rows);
+        }
+    }
+
+    /// `substance_condensed_columns_cover_the_condensed_rows`' checks under the rules in force.
+    fn condensed_columns_cover_the_condensed_rows() {
         let mut count = 0;
         for id in ids() {
             let row = id.substance();

@@ -40,6 +40,7 @@
 
 mod condensed;
 mod diagrams;
+pub(super) use self::condensed::molten_salt;
 pub(super) mod equations;
 pub(super) mod liquids;
 mod melts;

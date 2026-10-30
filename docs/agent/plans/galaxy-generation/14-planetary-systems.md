@@ -6417,6 +6417,8 @@ rows' values.
     - `cargo test -p hyperion-sim substance`;
     - `cargo run -p hyperion-fit -- check`;
     - with a new file, `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere/materials`.
+  - _Built_ 2026-10-30, held at 25 (`MOLTEN_DECKS_VERSION`), with no new file: its record under
+    Risks.
 
 #### P14.T50 Elements and redox
 
@@ -32682,3 +32684,35 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - _The must-fix count_ (main's ruling of 2026-10-27, P14.T54.b's record, i's bullet): no gas
     envelope changes section inside the clock window, 0 of 63,669 (6,515) at the window's two ends,
     none with a recorded change inside it.
+- **Deviations in P14.T49.p, as built (2026-10-30).** Held at 25: `substance::aerosol`'s
+  `MOLTEN_DECKS_VERSION`, `MoltenDecksRules`, the tests' `with_molten_decks` (in
+  `with_every_25_hold`) and the tripwire `the_molten_decks_are_held_only_until_the_25_bump`;
+  nothing moves at 24.
+  - The file table is `aerosol::LIQUID_STAND_INS` (each a `LiquidStandIn`: key, file and
+    reason), read by `aerosol_optics` for a liquid of the substance itself that has no file; its
+    optics are flagged stand-ins. It also serves `KCl` and `Na2S` liquids by their solids' files,
+    since with a density their 12 modes would stop at `NoFile` (lean, 2026-10-30).
+  - A stand-in takes its solid file's entry as the entry says, so six of the seven droplets read
+    the hexahedra's phase table (`PhaseTable` basis) where the record and client draw a sphere;
+    Al₂O₃'s is the sphere fallback (lane findings).
+  - No measured file: no open visible n and k of molten Fe or Al₂O₃ were read (leads in the lane's
+    findings), so no `condensate_extinction_8`, no `materials/` change.
+  - The densities: `Substance::condensed` (now a plain `fn`) gives `rows/condensed.rs`'s
+    `MOLTEN_POTASSIUM_CHLORIDE` and `MOLTEN_SODIUM_SULPHIDE` (`molten_salt`) under the new arm; the
+    rows keep 24's columns. KCl(l) is Janz 1988's law carried from 1,044 to 1,800 K, past its
+    1,053–1,212 K (Kirshenbaum et al. 1962 follow it within 1.5% to 1,607 K). Na₂S(l) is the
+    entry's stand-in on the room-temperature solid, 1,856 ÷ 1.2 = 1,546.7 kg m⁻³, two equal nodes
+    at 1,445 K (JANAF's melting point, not the entry's 1,449) and 1,800 K; the 1.2 was not read at
+    a source.
+  - The wire carries no stand-in flag or reason on a mode: a molten mode reaches it as its
+    material and `liquid` phase, which the client resolves to its named analogue with its own
+    reason, the same file (`substance_aerosol_each_liquid_stand_in_is_its_key_s_only_file`).
+  - The census runs the planetary holds alone: its sets lie outside the central 10 ly that
+    `KEPLER_REGIME_VERSION` moves.
+  - Files beyond the entry's: `substance/condensed.rs`, `substance/rows.rs`, `substance/mod.rs`'s
+    test, `planetary/testing.rs`, `planetary/system/envelope/tests.rs`.
+  - _Accept, as built:_ also `cargo test -p hyperion-sim --lib under_every_25_hold_the_molten`,
+    and by name the ignored census `under_every_25_hold_count_x_states_the_molten_decks`.
+  - For 25's bump: the tripwire's list; at the bless, `substance/registry.golden`,
+    `planetary/condense.golden`, `planetary/envelope_atmosphere.golden`, and the protocol's
+    `substances.json` and `planetary.json` (the fixture hot Jupiter's Fe modes) move.
