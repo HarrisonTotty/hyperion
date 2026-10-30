@@ -17,17 +17,6 @@
 //! - The tag behind each event tag is an ordinary entry of scope `Event`, which the event-tag
 //!   registry in `id/event_tags.rs` names by constant.
 
-// `domain_tags!`'s compile-time check of its names (`assert_tag_names`) hashes every earlier name
-// again for each name, so its steps grow as the square of the registry. With P10.T7.a's
-// `dwarf.core.metallicity` they pass the step count at which rustc's const evaluator warns that a
-// loop may not end, a deny-by-default lint. The loop ends: it is finite, and rustc's own note says
-// such a lint may be allowed. A check that compared each tag's stored hash instead would keep it
-// linear in the hashing, a change to `hyperion-base` (P10.T7.a, as built).
-#![expect(
-    long_running_const_eval,
-    reason = "the registry's name check is finite; it only grows with the registry"
-)]
-
 use hyperion_base::domain_tags;
 
 pub use hyperion_base::rng::tags::SELFTEST_STREAM;
