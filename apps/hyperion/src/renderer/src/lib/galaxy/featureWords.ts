@@ -248,28 +248,38 @@ function tracerWords(tracer: CentreTracerWire): string {
  * A member's class in words, its parts joined by a middle dot as a reading's are: what its systems
  * are, the layer of its primaries' band, and a cluster's generation and multiplicity
  * (`LIVING · A · FIRST · BINARY`) or the centre's episode and tracer (`LIVING · A · EPISODE 0 ·
- * STARS`), or a listed entry's catalogue class; `null` for a class or a catalogue class this build
- * does not know, which reads Missing.
+ * STARS`), or a listed entry's catalogue class; `null` for a class, a band's layer or a catalogue
+ * class this build does not know, which reads Missing.
  */
 export function memberClassWords(memberClass: MemberClass): string | null {
   let words: string | null;
   switch (memberClass.kind) {
-    case "cluster":
-      words = [
-        classKindWords(memberClass.classKind),
-        layerLetter(memberClass.band),
-        memberClass.generation.toUpperCase(),
-        memberClass.multiplicity.toUpperCase(),
-      ].join(" · ");
+    case "cluster": {
+      const letter = layerLetter(memberClass.band);
+      words =
+        letter === null
+          ? null
+          : [
+              classKindWords(memberClass.classKind),
+              letter,
+              memberClass.generation.toUpperCase(),
+              memberClass.multiplicity.toUpperCase(),
+            ].join(" · ");
       break;
-    case "centre":
-      words = [
-        classKindWords(memberClass.classKind),
-        layerLetter(memberClass.band),
-        `EPISODE ${String(memberClass.episode)}`,
-        tracerWords(memberClass.tracer),
-      ].join(" · ");
+    }
+    case "centre": {
+      const letter = layerLetter(memberClass.band);
+      words =
+        letter === null
+          ? null
+          : [
+              classKindWords(memberClass.classKind),
+              letter,
+              `EPISODE ${String(memberClass.episode)}`,
+              tracerWords(memberClass.tracer),
+            ].join(" · ");
       break;
+    }
     case "listed":
       words = catalogueClassWords(memberClass.catalogueClass);
       break;

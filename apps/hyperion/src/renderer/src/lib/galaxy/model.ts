@@ -261,15 +261,18 @@ export type MemberClass =
   | {
       readonly kind: "cluster";
       readonly classKind: ClassKindWire;
-      /** The layer whose band its primaries' initial masses fall in. */
-      readonly band: MassLayer;
+      /**
+       * The layer whose band its primaries' initial masses fall in; `unknown` for one this build
+       * does not know, which reads Missing.
+       */
+      readonly band: ChartLayer;
       readonly generation: GenerationWire;
       readonly multiplicity: MultiplicityWire;
     }
   | {
       readonly kind: "centre";
       readonly classKind: ClassKindWire;
-      readonly band: MassLayer;
+      readonly band: ChartLayer;
       /** The index of the star-formation episode its members were born in, from 0, the oldest. */
       readonly episode: number;
       readonly tracer: CentreTracerWire;

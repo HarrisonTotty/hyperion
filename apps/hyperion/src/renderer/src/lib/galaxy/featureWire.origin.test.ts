@@ -8,7 +8,7 @@ import {
   aClusterDetail,
   OPEN_CLUSTER,
 } from "../../test/featureFixtures";
-import { UNIVERSE_ID } from "../../test/galaxyFixtures";
+import { anUnknownLayer, UNIVERSE_ID } from "../../test/galaxyFixtures";
 import {
   toBlackHole,
   toBlackHoleRequest,
@@ -118,6 +118,39 @@ describe("toMemberClass (plan 09, P09.T41.c)", () => {
     expect(toMemberClass({ type: "listed", class: decodedClass("magnetar") })).toEqual({
       kind: "listed",
       catalogueClass: "unknown",
+    });
+  });
+
+  it("reads a band's layer it does not know as unknown, keeping the class", () => {
+    expect(
+      toMemberClass({
+        type: "cluster",
+        kind: "living",
+        band: anUnknownLayer(),
+        generation: "first",
+        multiplicity: "binary",
+      }),
+    ).toEqual({
+      kind: "cluster",
+      classKind: "living",
+      band: "unknown",
+      generation: "first",
+      multiplicity: "binary",
+    });
+    expect(
+      toMemberClass({
+        type: "centre",
+        kind: "living",
+        band: anUnknownLayer(),
+        episode: 0,
+        tracer: "stars",
+      }),
+    ).toEqual({
+      kind: "centre",
+      classKind: "living",
+      band: "unknown",
+      episode: 0,
+      tracer: "stars",
     });
   });
 });

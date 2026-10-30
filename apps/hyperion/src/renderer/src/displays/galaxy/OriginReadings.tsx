@@ -31,8 +31,8 @@ type OriginShown =
  * A system's `ORIGIN`: its birth population for one its layer's grid placed, its feature's kind and
  * designation for a feature's member (`OC GPF F207`, or `FEATURE` and its feature's ID where the chart
  * holds no such feature), `CENTRE` for the centre's, its class in words for a catalogue system; Missing for
- * an origin or a class this build does not know; and `NOT YET MODELLED`, a status, for a row from a
- * server that does not say.
+ * an origin, a population or a class this build does not know; and `NOT YET MODELLED`, a status, for
+ * a row from a server that does not say.
  */
 function originShown(system: ChartSystem, features: ReadonlyArray<ChartFeature>): OriginShown {
   const { origin } = system;
@@ -42,7 +42,10 @@ function originShown(system: ChartSystem, features: ReadonlyArray<ChartFeature>)
       shown = { kind: "status", text: "NOT YET MODELLED" };
       break;
     case "grid":
-      shown = { kind: "value", text: populationLabel(system.population) };
+      shown =
+        system.population === "unknown"
+          ? { kind: "missing" }
+          : { kind: "value", text: populationLabel(system.population) };
       break;
     case "feature_member": {
       const feature = features.find((each) => each.id === origin.feature);

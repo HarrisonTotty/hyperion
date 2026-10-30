@@ -53,6 +53,7 @@ import type {
   SupernovaState,
   SystemOrigin,
 } from "./model";
+import { toChartLayer } from "./wire";
 
 /** The origin of the `GALACTIC` frame, from which absolute positions are measured. */
 const ORIGIN: GalacticPosition = { cell_ly: [0, 0, 0], offset_m: [0, 0, 0] };
@@ -296,7 +297,7 @@ export function toMemberClass(memberClass: MemberClassWire): MemberClass {
       model = {
         kind: "cluster",
         classKind: memberClass.kind,
-        band: memberClass.band,
+        band: toChartLayer(memberClass.band),
         generation: memberClass.generation,
         multiplicity: memberClass.multiplicity,
       };
@@ -305,7 +306,7 @@ export function toMemberClass(memberClass: MemberClassWire): MemberClass {
       model = {
         kind: "centre",
         classKind: memberClass.kind,
-        band: memberClass.band,
+        band: toChartLayer(memberClass.band),
         episode: memberClass.episode,
         tracer: memberClass.tracer,
       };

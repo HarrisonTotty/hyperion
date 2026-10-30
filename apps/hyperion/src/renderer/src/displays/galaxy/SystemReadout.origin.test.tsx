@@ -19,7 +19,7 @@ import { toChartResult } from "../../lib/galaxy/wire";
 import { localFrameAt } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
 import { aFeaturesInRange, OPEN_CLUSTER } from "../../test/featureFixtures";
-import { aSystemsInRange } from "../../test/galaxyFixtures";
+import { anUnknownLayer, anUnknownPopulation, aSystemsInRange } from "../../test/galaxyFixtures";
 import { SystemReadout } from "./SystemReadout";
 
 const CENTRE = [26_000, 0, 0] as const;
@@ -45,7 +45,9 @@ function anUnknownClass(): CatalogueClassWire {
 }
 
 /** One system 1 ly out, its row carrying what `row` adds, through the chart's adapter. */
-function aSystem(row: Partial<Pick<SystemRecord, "origin" | "member_class" | "supernova">>) {
+function aSystem(
+  row: Partial<Pick<SystemRecord, "origin" | "member_class" | "supernova" | "population">>,
+) {
   const response = aSystemsInRange({
     centreLy: CENTRE,
     systems: [{ relLy: [1, 0, 0], layer: "c" }],
@@ -262,6 +264,46 @@ describe("SystemReadout's values this build does not know (plan 09, P09.T41.c)",
 
     const readout = renderReadout(
       aSystem({ origin: { type: "centre_member" }, member_class: LISTED_UNKNOWN }),
+    );
+
+    expect(valueOf(readout, "MEMBER CLASS")).toBe("—");
+    expect(readings(readout).filter(([label]) => label !== "MEMBER CLASS")).toEqual(others);
+  });
+
+  it("reads a grid system's population it does not know, outer_halo, Missing", () => {
+    const readout = renderReadout(
+      aSystem({ origin: { type: "grid" }, population: anUnknownPopulation() }),
+    );
+
+    expect(valueOf(readout, "ORIGIN")).toBe("—");
+  });
+
+  it("reads a member's class whose band's layer it does not know Missing, and the rest as before", () => {
+    const cluster = (band: MemberClassWire & { type: "cluster" }) =>
+      aSystem({
+        origin: { type: "feature_member", feature: OPEN_CLUSTER.id },
+        member_class: band,
+      });
+    const known = renderReadout(
+      cluster({
+        type: "cluster",
+        kind: "living",
+        band: "c",
+        generation: "first",
+        multiplicity: "single",
+      }),
+    );
+    const others = readings(known).filter(([label]) => label !== "MEMBER CLASS");
+    known.remove();
+
+    const readout = renderReadout(
+      cluster({
+        type: "cluster",
+        kind: "living",
+        band: anUnknownLayer(),
+        generation: "first",
+        multiplicity: "single",
+      }),
     );
 
     expect(valueOf(readout, "MEMBER CLASS")).toBe("—");

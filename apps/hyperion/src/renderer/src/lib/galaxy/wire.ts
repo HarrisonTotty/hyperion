@@ -82,7 +82,11 @@ const LAYER_STATUSES: Readonly<Record<LayerStatus, true>> = {
 // The three enums grow without a protocol bump (galaxy plan 04's reserved list), and the decoder
 // trusts the generated types, so a newer server's string arrives typed as one this build knows.
 
-function toChartLayer(layer: MassLayer): ChartLayer {
+/**
+ * A mass layer as the chart reads it, `unknown` for one this build does not know: a row's layer,
+ * and a feature member's class's band (plan 09, P09.T41.c).
+ */
+export function toChartLayer(layer: MassLayer): ChartLayer {
   return Object.hasOwn(MASS_LAYERS, layer) ? layer : "unknown";
 }
 
