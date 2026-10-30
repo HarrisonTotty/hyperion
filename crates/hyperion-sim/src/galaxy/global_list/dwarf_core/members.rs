@@ -396,6 +396,7 @@ fn draw_star(
                 (seed, system, attempt),
                 age,
                 (f64::INFINITY, systemic),
+                galaxy.rules().stellar,
             ),
         };
         if keep {

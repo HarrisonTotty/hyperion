@@ -481,6 +481,7 @@ impl StreamBandShares {
                     (seed, system, attempt),
                     age,
                     (f64::INFINITY, systemic),
+                    galaxy.rules().stellar,
                 )
             {
                 share.white_dwarf_class
