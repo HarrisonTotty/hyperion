@@ -4765,6 +4765,18 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - Bench: `hyperion-server/benches/feature_range_query.rs`. Left: the grid and the feature cells
     keep the Sun-like query over 5 ms cold, and remnant draws a globular core's (the lane's
     findings).
+- **P09.T40.a, the served query's speed, second pass (lane `perf-range-query-2`, 2026-10-30; no
+  output moves).**
+  - New: `FeatureCatalogue::cell_through(galaxy, cell, last)`, `FeatureCellContents::holds`, and
+    `FeatureCellCache::contents_through` (provided; lends the whole cell by default).
+    `FeatureCatalogue::near` reads a cell only through the last process whose farthest reach
+    (crate-private `farthest_reach`) can touch the sphere. The server's cell cache holds such parts.
+    `counts()` is 0 for a process a part does not hold.
+  - A cell's disc proposals read shared column bounds (`Fields::component_bounds_of`).
+    `MemberClassTable::grid_width` reads only each doubling's new cells, and skips a level whose
+    ceiling is under the target; `peak_candidates` is unchanged in value. A change to the width
+    rule or the profiles keeps `level_ceiling` a ceiling
+    (`the_width_search_is_the_whole_grids_search_bit_for_bit` and its slow twin).
 - **P09.T41.a, records (lane `p09-t41`, 2026-10-30, at 23 and 3; client only, no output moves).**
   - The guide keeps its one Greek cross for every kind, the kind named by the label (`OC GPF F207`),
     in place of the task text's "a symbol per kind"; it gains the cross's proportions, the label's

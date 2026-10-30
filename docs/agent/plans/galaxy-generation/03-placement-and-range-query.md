@@ -1140,3 +1140,11 @@ Reserved so that later plans move no star they need not:
   `candidate_from`, and the rule is untouched (`tests/frame.rs` and `frame/frames.golden` pass
   unchanged; `candidate_at_gives_the_candidate_frame_at_weighs` is new). `None` outside the clock
   window, before the system is born, and at the exact galactic centre. No output moves.
+- **The served range query's speed, bit for bit (P03.T4.b and P03.T5.a, lane `perf-range-query-2`,
+  2026-10-30; no output moves).**
+  - The pick reads densities one at a time (`Fields::densities_lazily`, crate-private) only as far
+    as its pick, every band but the rogue planets'. Debug builds read them all and check the pick
+    against `Mark::pick_weighted`. A change to `Fields::densities` keeps `densities_lazily` its
+    bits (`the_densities_read_one_at_a_time_are_the_densities_bit_for_bit`).
+  - A galaxy holds its mass function as `imf::Kept<F>`, each stellar band's draw kept
+    (`RangeDraw`). A new mass-function kind implements `imf::Pieces` to be held.

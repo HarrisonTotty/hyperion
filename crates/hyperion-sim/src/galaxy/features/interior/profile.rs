@@ -85,6 +85,24 @@ impl ProfileShape {
         }
     }
 
+    /// Whether the shape's exponents show it never rising with the radius: none of them positive
+    /// as [`at`](Self::at) raises its bases, which never fall with `r`, and every scale positive.
+    /// What a class table's width search reads its ceilings by (P09.T40.a); `false` for a shape a
+    /// not-a-number makes.
+    #[must_use]
+    pub(crate) fn never_rises(&self) -> bool {
+        match *self {
+            Self::Core {
+                core,
+                exponent,
+                halo,
+                outer,
+            } => core > 0.0 && halo > 0.0 && exponent >= 0.0 && outer >= 0.0,
+            Self::Cusp { slope } => slope >= 0.0,
+            Self::Plummer { scale } => scale > 0.0,
+        }
+    }
+
     /// The shape at radius `r` (ly), without the taper.
     #[must_use]
     fn at(&self, r: f64) -> f64 {

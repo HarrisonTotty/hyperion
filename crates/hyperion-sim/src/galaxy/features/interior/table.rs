@@ -142,9 +142,12 @@ impl TailClass {
         self.bound_across(centre, radius, &mut Across::default())
     }
 
-    /// [`bound`](Self::bound), bit for bit, reading the sphere's place along the axis and the
-    /// Gaussian across it from `across`, filled by the first tail that reads them: every band's
-    /// tail shares its axis and width, and so both (P09.T40.a). `across` serves one sphere.
+    /// [`bound`](Self::bound), bit for bit, with what it reads of the sphere shared (P09.T40.a).
+    ///
+    /// The sphere's place along the axis and the Gaussian across it come from `across`, filled by
+    /// the first tail that reads them: every band's tail shares its axis and width, and so both.
+    /// `across` serves one sphere.
+    #[must_use]
     fn bound_across(&self, centre: &PointLy, radius: f64, across: &mut Across) -> f64 {
         let same = |a: f64, b: f64| a.total_cmp(&b).is_eq();
         let known = across.line.is_some_and(|(axis, width)| {
@@ -606,8 +609,11 @@ impl MemberClassTable {
     }
 
     /// The most candidates any band expects in the cells of `level` of `grid` that
-    /// [`peak_candidates`](Self::peak_candidates) reads and `admit` admits, each cell once, or the
-    /// most so far as soon as that passes `stop`. `marks` is scratch.
+    /// [`peak_candidates`](Self::peak_candidates) reads and `admit` admits.
+    ///
+    /// Each cell is read once, and the most so far is returned as soon as it passes `stop`.
+    /// `marks` is scratch.
+    #[must_use]
     fn level_peak(
         &self,
         grid: NestedGrid,
@@ -672,9 +678,12 @@ impl MemberClassTable {
         peak
     }
 
-    /// The most candidates any band expects in `cell`: the greatest over the bands of
-    /// [`cell_candidates`](Self::cell_candidates), bit for bit, with the cell's nearest radius and
-    /// bounding sphere and its tails' Gaussian found once for every band (P09.T40.a).
+    /// The most candidates any band expects in `cell` (P09.T40.a).
+    ///
+    /// It is the greatest over the bands of [`cell_candidates`](Self::cell_candidates), bit for
+    /// bit, with the cell's nearest radius and bounding sphere and its tails' Gaussian found once
+    /// for every band.
+    #[must_use]
     fn cell_peak(&self, cell: &LocalCell) -> f64 {
         let nearest = cell.nearest_radius();
         let (centre, radius) = cell.bounding_sphere();
@@ -727,10 +736,10 @@ impl MemberClassTable {
         }
         let extent = self.extent().value();
         let mut marks = PeakCells::new(feature_grid(k));
-        let mut whole = true;
-        while !reaches(k, extent) && self.doubled_holds(feature_grid(k + 1), whole, &mut marks) {
+        let mut read = Doubling::Whole;
+        while !reaches(k, extent) && self.doubled_holds(feature_grid(k + 1), read, &mut marks) {
             k += 1;
-            whole = false;
+            read = Doubling::Added;
         }
         feature_grid(k).width()
     }
@@ -738,25 +747,26 @@ impl MemberClassTable {
     /// Whether [`peak_candidates`](Self::peak_candidates) of `grid` is at most
     /// [`CELL_CANDIDATE_TARGET`], stopping at the first cell over it (P09.T40.a).
     ///
-    /// Unless `whole`, the grid half as wide is known to hold, and only the cells it lacks are
-    /// read: the grid's level `j` is that grid's level `j + 1`, cell for cell, with the same cells
-    /// read and owned, but for level 0's inner half, which that grid's level 1 leaves to its level
-    /// 0, and the outermost level, which it has not got. A cell's expected candidates are a
-    /// function of its box alone, so the answer is the whole grid's, bit for bit.
-    ///
+    /// For [`Doubling::Added`], the grid half as wide is known to hold, and only the cells it
+    /// lacks are read: the grid's level `j` is that grid's level `j + 1`, cell for cell, with the
+    /// same cells read and owned, but for level 0's inner half, which that grid's level 1 leaves to
+    /// its level 0, and the outermost level, which it has not got. A cell's expected candidates are
+    /// a function of its box alone, so the answer is the whole grid's, bit for bit.
     ///
     /// A level whose [`level_ceiling`](Self::level_ceiling) is under the target holds without its
     /// cells being read, level 0 once its eight cells with a corner at the centre, which the
-    /// ceiling leaves out, are read and hold.
-    fn doubled_holds(&self, grid: NestedGrid, whole: bool, marks: &mut PeakCells) -> bool {
+    /// ceiling leaves out, are read and hold. Debug builds read such a level too, and check that it
+    /// holds.
+    #[must_use]
+    fn doubled_holds(&self, grid: NestedGrid, read: Doubling, marks: &mut PeakCells) -> bool {
         let target = CELL_CANDIDATE_TARGET;
         let outermost = grid.levels() - 1;
         grid.all_levels().all(|level| {
-            let admit = match level.level() {
-                _ if whole => Admit::Owned,
-                0 if outermost > 0 => Admit::InnerHalf,
-                j if j == outermost => Admit::Owned,
-                _ => return true,
+            let admit = match (read, level.level()) {
+                (Doubling::Whole, _) => Admit::Owned,
+                (Doubling::Added, 0) if outermost > 0 => Admit::InnerHalf,
+                (Doubling::Added, j) if j == outermost => Admit::Owned,
+                (Doubling::Added, _) => return true,
             };
             let centre_holds = || {
                 let n = grid.cells_per_axis();
@@ -771,6 +781,12 @@ impl MemberClassTable {
                 })
             };
             if self.level_ceiling(grid, level) <= target && (level.level() > 0 || centre_holds()) {
+                debug_assert!(
+                    self.level_peak(grid, level, admit, marks, f64::INFINITY) <= target,
+                    "level {} of the {} ly grid passes its ceiling but not the target",
+                    level.level(),
+                    grid.width().value()
+                );
                 return true;
             }
             self.level_peak(grid, level, admit, marks, target) <= target
@@ -783,12 +799,23 @@ impl MemberClassTable {
     ///
     /// A higher level owns no cell nearer the centre than a quarter of its cells per axis, and
     /// those cells of level 0 none nearer than one edge, each exactly so in floating point. Every
-    /// profile is a power of `1 + (r ÷ a)²` or of `r² + ε²` with a negative exponent times a taper
-    /// falling with `r`, so it never rises with the radius, as computed, by more than `libm`'s last
-    /// bits, which [`CEILING_MARGIN`] covers; a tail's Gaussian across is at most 1. So each band's
-    /// cell bound is at most its profiles' bound at that radius plus its tail's axis density, and
-    /// the cell's candidates that times its volume, every step a monotone rounding.
+    /// profile is a power of `1 + (r ÷ a)²` or of `r² + ε²` with an exponent that is not positive
+    /// times a taper falling with `r`, so it never rises with the radius, as computed, by more than
+    /// `libm`'s last bits, which [`CEILING_MARGIN`] covers; a tail's Gaussian across is at most 1.
+    /// So each band's cell bound is at most its profiles' bound at that radius plus its tail's axis
+    /// density, and the cell's candidates that times its volume, every step a monotone rounding.
+    /// A table with a profile whose exponents do not show it falling
+    /// ([`ProfileShape::never_rises`]) has an infinite ceiling, and its levels are read.
+    #[must_use]
     fn level_ceiling(&self, grid: NestedGrid, level: NestedLevel) -> f64 {
+        if !self
+            .bands
+            .iter()
+            .flatten()
+            .all(|row| row.profile.shape().never_rises())
+        {
+            return f64::INFINITY;
+        }
         let edge = level.edge().value();
         let nearest = if level.level() == 0 {
             edge
@@ -939,6 +966,15 @@ const CUSP_MARGIN: f64 = 1e-9;
 /// and the rounding of its own products: 10⁻⁹, against `libm`'s few units in 10¹⁶.
 const CEILING_MARGIN: f64 = 1e-9;
 
+/// Which cells of a doubled grid [`MemberClassTable::doubled_holds`] reads (P09.T40.a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Doubling {
+    /// Every one: nothing is known of the grid half as wide.
+    Whole,
+    /// Those the grid half as wide, known to hold, lacks.
+    Added,
+}
+
 /// Which owned cells of a level [`MemberClassTable::level_peak`] reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Admit {
@@ -958,6 +994,7 @@ struct PeakCells {
 
 impl PeakCells {
     /// An empty bitmap for a level of `grid`.
+    #[must_use]
     fn new(grid: NestedGrid) -> Self {
         let n = usize::from(grid.cells_per_axis());
         Self {

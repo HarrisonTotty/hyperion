@@ -315,28 +315,51 @@ impl Piece {
     }
 
     /// `∫ₐᵇ` of the piece, for `lo ≤ a ≤ b ≤ hi`.
+    #[must_use]
     fn integral(&self, a: f64, b: f64) -> f64 {
-        self.integral_from(a, &self.ends(a, b))
+        self.ends(a, b).integral(a)
     }
 
-    /// What the piece's integral and inverse over `[a, b]` read of its ends, for `lo ≤ a ≤ b ≤
-    /// hi`: found once for a range and kept for every draw from it ([`RangeDraw`]), the same bits
-    /// as found for each.
+    /// The mass `x` in `[a, b]` with `∫ₐˣ = fraction × ∫ₐᵇ`, for `fraction` in `[0, 1]`.
+    #[must_use]
+    fn invert(&self, a: f64, b: f64, fraction: f64) -> f64 {
+        self.ends(a, b).invert(a, b, fraction)
+    }
+
+    /// The piece over `[a, b]` with what its integral and inverse read of the ends, for `lo ≤ a ≤
+    /// b ≤ hi` (P03.T5.a).
+    ///
+    /// Found once for a range and kept for every draw from it ([`RangeDraw`]), they are the same
+    /// bits as found for each.
+    #[must_use]
     fn ends(&self, a: f64, b: f64) -> Ends {
         match *self {
-            Self::Power { exponent, .. } => {
+            Self::Power {
+                coefficient,
+                exponent,
+                ..
+            } => {
                 let g = 1.0 - exponent;
                 let log_ratio = math::ln(b / a);
                 Ends::Power {
+                    coefficient,
                     g,
                     log_ratio,
                     grown: (g.abs() >= EXPONENT_ONE_TOLERANCE).then(|| math::exp_m1(g * log_ratio)),
                 }
             }
-            Self::LogNormal { centre, width, .. } => {
+            Self::LogNormal {
+                coefficient,
+                centre,
+                width,
+                ..
+            } => {
                 let scale = width * core::f64::consts::SQRT_2;
                 let (log_a, log_b) = (math::log10(a), math::log10(b));
                 Ends::LogNormal {
+                    coefficient,
+                    centre,
+                    width,
                     scale,
                     log_a,
                     log_b,
@@ -346,41 +369,61 @@ impl Piece {
             }
         }
     }
+}
 
-    /// [`integral`](Self::integral) over `[a, b]` from its `ends`.
-    fn integral_from(&self, a: f64, ends: &Ends) -> f64 {
-        match (*self, *ends) {
-            (
-                Self::Power { coefficient, .. },
-                Ends::Power {
-                    g,
-                    log_ratio,
-                    grown,
-                },
-            ) => match grown {
+/// A [`Piece`] over one range `[a, b]`, with what its integral and inverse read of the ends
+/// ([`Piece::ends`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Ends {
+    /// A power law's coefficient, `g = 1 − exponent`, `ln(b ÷ a)`, and `exp_m1(g ln(b ÷ a))`
+    /// unless `g` is within [`EXPONENT_ONE_TOLERANCE`] of 0, where the logarithmic form is taken.
+    Power {
+        coefficient: f64,
+        g: f64,
+        log_ratio: f64,
+        grown: Option<f64>,
+    },
+    /// A log-normal's coefficient, centre and width, `σ √2`, and `log₁₀` of each end and the error
+    /// function there.
+    LogNormal {
+        coefficient: f64,
+        centre: f64,
+        width: f64,
+        scale: f64,
+        log_a: f64,
+        log_b: f64,
+        erf_a: f64,
+        erf_b: f64,
+    },
+}
+
+impl Ends {
+    /// The piece's integral over `[a, b]`, `a` its lower end.
+    #[must_use]
+    fn integral(&self, a: f64) -> f64 {
+        match *self {
+            Self::Power {
+                coefficient,
+                g,
+                log_ratio,
+                grown,
+            } => match grown {
                 Some(grown) => coefficient * math::powf(a, g) * grown / g,
                 None => coefficient * log_ratio,
             },
-            (
-                Self::LogNormal {
-                    coefficient, width, ..
-                },
-                Ends::LogNormal { erf_a, erf_b, .. },
-            ) => coefficient * width * (0.5 * core::f64::consts::PI).sqrt() * (erf_b - erf_a),
-            (Self::Power { .. }, Ends::LogNormal { .. })
-            | (Self::LogNormal { .. }, Ends::Power { .. }) => {
-                unreachable!("a piece's ends are its own kind's")
-            }
+            Self::LogNormal {
+                coefficient,
+                width,
+                erf_a,
+                erf_b,
+                ..
+            } => coefficient * width * (0.5 * core::f64::consts::PI).sqrt() * (erf_b - erf_a),
         }
     }
 
-    /// The mass `x` in `[a, b]` with `∫ₐˣ = fraction × ∫ₐᵇ`, for `fraction` in `[0, 1]`.
+    /// The piece's inverse over `[a, b]`: [`Piece::invert`] of `fraction`.
+    #[must_use]
     fn invert(&self, a: f64, b: f64, fraction: f64) -> f64 {
-        self.invert_from(a, b, &self.ends(a, b), fraction)
-    }
-
-    /// [`invert`](Self::invert) over `[a, b]` from its `ends`.
-    fn invert_from(&self, a: f64, b: f64, ends: &Ends, fraction: f64) -> f64 {
         // The ends exactly: a bisection whose target sits on its bracket's end would drift away.
         if fraction <= 0.0 {
             return a;
@@ -388,59 +431,32 @@ impl Piece {
         if fraction >= 1.0 {
             return b;
         }
-        let x = match (*self, *ends) {
-            (
-                Self::Power { .. },
-                Ends::Power {
-                    g,
-                    log_ratio,
-                    grown,
-                },
-            ) => match grown {
+        let x = match *self {
+            Self::Power {
+                g,
+                log_ratio,
+                grown,
+                ..
+            } => match grown {
                 Some(grown) => a * math::exp(math::ln_1p(fraction * grown) / g),
                 None => a * math::exp(fraction * log_ratio),
             },
-            (
-                Self::LogNormal { centre, .. },
-                Ends::LogNormal {
-                    scale,
-                    log_a,
-                    log_b,
-                    erf_a,
-                    erf_b,
-                },
-            ) => {
+            Self::LogNormal {
+                centre,
+                scale,
+                log_a,
+                log_b,
+                erf_a,
+                erf_b,
+                ..
+            } => {
                 let target = erf_a + fraction * (erf_b - erf_a);
                 let log_m = invert_erf(centre, scale, target, (log_a, erf_a), log_b);
                 math::exp10(log_m)
             }
-            (Self::Power { .. }, Ends::LogNormal { .. })
-            | (Self::LogNormal { .. }, Ends::Power { .. }) => {
-                unreachable!("a piece's ends are its own kind's")
-            }
         };
         x.clamp(a, b)
     }
-}
-
-/// What a [`Piece`]'s integral and inverse over one range `[a, b]` read of its ends ([`Piece::ends`]).
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Ends {
-    /// A power law's `g = 1 − exponent`, `ln(b ÷ a)`, and `exp_m1(g ln(b ÷ a))` unless `g` is
-    /// within [`EXPONENT_ONE_TOLERANCE`] of 0, where the logarithmic form is taken.
-    Power {
-        g: f64,
-        log_ratio: f64,
-        grown: Option<f64>,
-    },
-    /// A log-normal's `σ √2`, `log₁₀` of each end and the error function there.
-    LogNormal {
-        scale: f64,
-        log_a: f64,
-        log_b: f64,
-        erf_a: f64,
-        erf_b: f64,
-    },
 }
 
 /// [`bisect`](super::quad::bisect) of `f(x) = erf((x − centre) ÷ scale) − target` on `[lo, hi]` over
@@ -563,9 +579,11 @@ fn pieces_quantile(pieces: &[Piece], lo: f64, hi: f64, u: f64) -> f64 {
 }
 
 /// What [`pieces_quantile`] reads of a list of pieces over one range, which a draw's uniform does
-/// not change: the range clipped to the stellar range, each piece's overlap with it, the overlap's
-/// ends' quantities and integral, and their total. Found once for a band and kept, a draw from it
-/// is the draw [`pieces_quantile`] makes, bit for bit (P03.T5.a, for P09.T40.a's range query).
+/// not change (P03.T5.a).
+///
+/// It holds the range clipped to the stellar range, each piece's overlap with it with the
+/// overlap's ends and integral, and their total. Found once for a band and kept, a draw from it is
+/// the draw [`pieces_quantile`] makes, bit for bit.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct RangeDraw {
     lo: f64,
@@ -574,11 +592,9 @@ struct RangeDraw {
     total: f64,
 }
 
-/// One piece's overlap `[a, b]` with a [`RangeDraw`]'s range: the piece, the overlap's ends'
-/// quantities and its integral.
+/// One piece's overlap `[a, b]` with a [`RangeDraw`]'s range: the piece there and its integral.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Overlap {
-    piece: Piece,
     a: f64,
     b: f64,
     ends: Ends,
@@ -590,7 +606,8 @@ impl RangeDraw {
     ///
     /// # Panics
     ///
-    /// If there are more than [`MAX_PIECES`] pieces.
+    /// If there are more than [`MAX_PIECES`] pieces and the range is not empty.
+    #[must_use]
     fn of(pieces: &[Piece], lo: f64, hi: f64) -> Self {
         let lo = lo.max(MASS_LIMIT_LO);
         let hi = hi.min(MASS_LIMIT_HI);
@@ -616,11 +633,10 @@ impl RangeDraw {
             overlap(p, lo, hi).map(|(a, b)| {
                 let ends = p.ends(a, b);
                 Overlap {
-                    piece: *p,
                     a,
                     b,
                     ends,
-                    mass: p.integral_from(a, &ends),
+                    mass: ends.integral(a),
                 }
             })
         })) {
@@ -639,6 +655,7 @@ impl RangeDraw {
     }
 
     /// The mass below which a fraction `u` of the range's integral lies.
+    #[must_use]
     fn quantile(&self, u: f64) -> f64 {
         let (lo, hi) = (self.lo, self.hi);
         if lo >= hi {
@@ -648,21 +665,14 @@ impl RangeDraw {
         let mut remaining = u * self.total;
         // The pieces are contiguous and cover the stellar range, so the overlap that reaches `hi`
         // is the last one.
-        for &Overlap {
-            piece,
-            a,
-            b,
-            ends,
-            mass,
-        } in self.overlaps.iter().flatten()
-        {
+        for &Overlap { a, b, ends, mass } in self.overlaps.iter().flatten() {
             if remaining <= mass || b >= hi {
                 let fraction = if mass > 0.0 {
                     (remaining / mass).clamp(0.0, 1.0)
                 } else {
                     0.0
                 };
-                return piece.invert_from(a, b, &ends, fraction).clamp(lo, hi);
+                return ends.invert(a, b, fraction).clamp(lo, hi);
             }
             remaining -= mass;
         }
@@ -673,6 +683,7 @@ impl RangeDraw {
 /// A mass function made of [`Piece`]s, whose band draws [`Kept`] can keep.
 pub(crate) trait Pieces: MassFunction {
     /// Its pieces, contiguous over the stellar range.
+    #[must_use]
     fn pieces(&self) -> &[Piece];
 }
 
@@ -689,12 +700,13 @@ impl Pieces for Chabrier {
 }
 
 /// A mass function with each stellar band's draw kept ([`RangeDraw`]), built with it from its
-/// pieces alone: what a galaxy holds, so that placement draws every primary from its band's kept
-/// ends (P03.T5.a). It is the function in every other respect, and prints as it.
+/// pieces alone (P03.T5.a).
 ///
-/// A draw from a kept band is [`MassFunction::sample_in_band`]'s, bit for bit, and costs about a
-/// sixth less: some 0.6 ms of a cold 50 ly query's 5,400 draws at the Sun-like point (measured
-/// 2026-10-30). The rest is the log-normal's bisection.
+/// It is what a galaxy holds, so that placement draws every primary from its band's kept ends; it
+/// is the function in every other respect, and prints as it. A draw from a kept band is
+/// [`MassFunction::sample_in_band`]'s, bit for bit, and costs about a sixth less: some 0.6 ms of a
+/// cold 50 ly query's 5,400 draws at the Sun-like point (measured 2026-10-30). The rest is the
+/// log-normal's bisection.
 #[derive(Clone, PartialEq)]
 pub(crate) struct Kept<F> {
     function: F,
@@ -703,6 +715,7 @@ pub(crate) struct Kept<F> {
 
 impl<F: Pieces> Kept<F> {
     /// `function` with its bands' draws.
+    #[must_use]
     pub(crate) fn new(function: F) -> Self {
         let bands = Box::new(
             MassBand::ALL.map(|band| RangeDraw::of(function.pieces(), band.lo(), band.hi())),

@@ -125,7 +125,8 @@ impl SharedFeatureCellCache {
     ///
     /// A cell made through fewer processes than a query needs is made again through more and
     /// replaces the one held, which is part of it; one is never stored over a cell holding more
-    /// that another job stored meanwhile (P09.T40.a).
+    /// that another job stored meanwhile (P09.T40.a). A held cell that holds too little counts as
+    /// a hit in the [`counters`](Self::counters), as it is found, though it is then made again.
     fn contents(
         &self,
         key: GalaxyKey,
@@ -146,7 +147,9 @@ impl SharedFeatureCellCache {
             return Arc::clone(contents);
         }
         let contents = Arc::new(FeatureCatalogue::cell_through(galaxy, cell, last));
-        // A cell larger than the whole budget is handed back and still lent.
+        // A cell larger than the whole budget is handed back and still lent, and one is lent and
+        // not stored where another job replaced the cell meanwhile: what it stored is the
+        // catalogue's too, through at least as many processes or as few, and either is lent right.
         let _ = self
             .cells
             .insert_if_unchanged(entry_key, held.as_ref(), Arc::clone(&contents));
@@ -171,7 +174,7 @@ impl FeatureCellHandle<'_> {
 }
 
 impl FeatureCellCache for FeatureCellHandle<'_> {
-    /// Lends the contents of `cell`, generating the cell if the cache has not got it.
+    /// Lends the whole contents of `cell`, generating the cell if the cache has not got it whole.
     ///
     /// # Panics
     ///
@@ -826,6 +829,34 @@ mod tests {
                 .map(hyperion_testkit::float::bits)
                 .collect();
             (census, result.systems().to_vec())
+        });
+    }
+
+    /// The features a lookup finds do not depend on the parts of cells one shared cache holds from
+    /// the lookups before it: at radii and centres that read the cells about the Sun-like point
+    /// through the clusters only, through the nurseries and whole, so that cells held in part are
+    /// lent for less and made again for more, and each is what it is uncached (P09.T40.a).
+    #[test]
+    fn a_lookup_s_features_do_not_depend_on_the_parts_of_cells_held() {
+        let lookups = [
+            ([0.0, 26_000.0, 0.0], 2.0),
+            ([0.0, 26_000.0, 0.0], 400.0),
+            ([2_000.0, 26_000.0, 300.0], 50.0),
+            ([0.0, 26_000.0, 0.0], 1_500.0),
+        ]
+        .map(|(centre, radius)| {
+            let centre = GalacticPosition::from_light_years(centre).expect("in the cube");
+            (centre, LightYears::new(radius))
+        });
+        let near = |(centre, radius): &(GalacticPosition, LightYears),
+                    cells: &dyn FeatureCellCache| {
+            FeatureCatalogue::near(galaxy(), centre, *radius, cells).collect::<Vec<_>>()
+        };
+        let cells = SharedFeatureCellCache::new(64 << 20);
+        hyperion_testkit::order::assert_order_independent(&lookups, |lookup| {
+            let found = near(lookup, &cells.handle(key()));
+            assert_eq!(found, near(lookup, &NoFeatureCache), "{lookup:?}");
+            found
         });
     }
 

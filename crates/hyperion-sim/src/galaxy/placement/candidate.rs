@@ -247,7 +247,8 @@ fn acceptance_mark(seed: Seed, id: SystemId) -> Mark {
 /// In debug builds, if the weighted density at the position exceeds the padded bound. This is the
 /// brainstorm's bound-check assertion ("Exact placement by thinning": a density above its bound
 /// leaves "a cell-shaped patch that no ordinary test would notice"), and the one the arm-ridge test
-/// of P03.T8.c exercises.
+/// of P03.T8.c exercises. Also in debug builds, if the lazy pick of a band but the rogue planets'
+/// is not [`Mark::pick_weighted`]'s over every weight ([`pick_unsaturated`]).
 #[must_use]
 fn pick_component(
     galaxy: &Galaxy,
@@ -275,17 +276,16 @@ fn pick_component(
         *slot = shares.component_share(band, component) * density;
     }
     let weights = &mut weights[..components.len()];
-    // The rogue planets saturate at the index limit (ruling 125): where the weights sum past it,
-    // each is scaled so that they sum to it, which keeps the component odds. Below it nothing is
-    // touched, so every unsaturated cell is bit for bit what it was.
-    if band == MassBand::RoguePlanet {
-        let total = weighted_density(weights);
-        let limit = rogue_planet_saturation_density();
-        if total > limit {
-            let scale = limit / total;
-            for weight in weights.iter_mut() {
-                *weight *= scale;
-            }
+    // The rogue planets, the band this path is left with, saturate at the index limit (ruling
+    // 125): where the weights sum past it, each is scaled so that they sum to it, which keeps the
+    // component odds. Below it nothing is touched, so every unsaturated cell is bit for bit what it
+    // was.
+    let total = weighted_density(weights);
+    let limit = rogue_planet_saturation_density();
+    if total > limit {
+        let scale = limit / total;
+        for weight in weights.iter_mut() {
+            *weight *= scale;
         }
     }
     let weights = &*weights;
@@ -306,15 +306,17 @@ fn pick_component(
     })
 }
 
-/// [`pick_component`] for a band whose weights never saturate, every band but the rogue planets':
-/// [`Mark::pick_weighted`] over `share × density` in component order, each density evaluated only
-/// when the running sum reaches it, so that none after the picked component is (P09.T40.a).
+/// [`pick_component`] for a band whose weights never saturate, every band but the rogue planets'
+/// (P03.T4.b).
 ///
+/// It is [`Mark::pick_weighted`] over `share × density` in component order, each density evaluated
+/// only when the running sum reaches it, so that none after the picked component is.
 /// The sums and thresholds are the pick's own, in its order, so the pick is its pick bit for bit.
 /// A cold 50 ly query at the Sun-like point accepts 99% of its candidates, nearly all in the first
 /// seven components, the discs, and so skips most of the other twelve's densities, some 2 ms of
 /// its grid's 10 (measured 2026-10-30). Debug builds evaluate the rest too, and check that the
 /// whole total is under the bound and that `pick_weighted` over every weight picks the same.
+#[must_use]
 fn pick_unsaturated(
     galaxy: &Galaxy,
     key: CellKey,

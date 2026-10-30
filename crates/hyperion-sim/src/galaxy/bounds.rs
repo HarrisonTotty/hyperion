@@ -473,9 +473,11 @@ impl Fields {
         self.component_bounds_of(cell, &[true; MAX_COMPONENTS], out);
     }
 
-    /// [`component_bounds`](Self::component_bounds) for the components `wanted` marks, by index,
-    /// the same bits; every other entry is set to 0. What plan 09's catalogue reads for its disc
-    /// processes' columns, so that the components it does not follow cost nothing (P09.T40.a).
+    /// [`component_bounds`](Self::component_bounds) for the components `wanted` marks, by index
+    /// (P09.T40.a).
+    ///
+    /// Those entries are the same bits, and every other is set to 0. Plan 09's catalogue reads it
+    /// for its disc processes' columns, so that the components it does not follow cost nothing.
     pub(crate) fn component_bounds_of(
         &self,
         cell: &CellBox,
