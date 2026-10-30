@@ -27,6 +27,7 @@ import { type MaterialIndexFile, resolveMaterial } from "../materials/materials"
 import committed from "./venus-92bar-albedo.case.json" with { type: "json" };
 import { seedOf } from "./cases";
 import { angleBetweenDeg } from "./geometries";
+import { cos } from "../../../lib/pinnedMath";
 
 /** The case's name, its file beside `venus-92bar`'s, and its seed its own. */
 const NAME = "venus-92bar-albedo";
@@ -74,7 +75,7 @@ describe("the albedo case", { timeout: SLOW_MS }, () => {
         const sun = g.sunDirections[0];
         return [
           g.observer.heightM > albedoCase.topHeightM,
-          Math.cos(((180 - g.view.zenithDeg) * Math.PI) / 180),
+          cos(((180 - g.view.zenithDeg) * Math.PI) / 180),
           sun === undefined ? Number.NaN : angleBetweenDeg(g.view, sun),
         ];
       }),

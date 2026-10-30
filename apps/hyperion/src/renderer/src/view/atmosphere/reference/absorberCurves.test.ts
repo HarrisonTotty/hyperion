@@ -32,7 +32,7 @@ import {
   EARTH_SLAB_REFERENCE_CURVES,
   R06_SOLAR_BAKE_SPECTRUM,
 } from "../earth";
-import { exp, log, pow } from "../../../lib/pinnedMath";
+import { exp, log, pow, sin } from "../../../lib/pinnedMath";
 import { columnLengthM } from "../medium";
 
 /** The file, from this test. */
@@ -91,9 +91,9 @@ function saturatedCurve(): AbsorberCurve {
 function rowsCurve(pressuresPa: ReadonlyArray<number>, readTopPa: number): AbsorberCurve {
   const columns = Float64Array.from(
     { length: 61 },
-    (_, k) => SATURATED_COLUMN_PER_M2 * 10 ** (-3 + k / 10),
+    (_, k) => SATURATED_COLUMN_PER_M2 * pow(10, -3 + k / 10),
   );
-  const logPressures = Float64Array.from(pressuresPa, (p) => Math.log(p));
+  const logPressures = Float64Array.from(pressuresPa, (p) => log(p));
   const depth = (law: (x: number, k: number, y: number) => number): Float64Array =>
     Float64Array.from(
       Array.from(logPressures).flatMap((y) =>
@@ -101,12 +101,12 @@ function rowsCurve(pressuresPa: ReadonlyArray<number>, readTopPa: number): Absor
       ),
     );
   const opticalDepth = [
-    depth((x, _, y) => 4 * x ** 0.6 * (1 + 0.5 * Math.sin(y))),
-    depth((x, k, y) => (k < 3 ? 0 : 0.5 * x ** 0.8 * (1 + y / 20))),
-    depth((x, _, y) => x * Math.exp(-y / 8)),
+    depth((x, _, y) => 4 * pow(x, 0.6) * (1 + 0.5 * sin(y))),
+    depth((x, k, y) => (k < 3 ? 0 : 0.5 * pow(x, 0.8) * (1 + y / 20))),
+    depth((x, _, y) => x * exp(-y / 8)),
   ] as const;
   const transmittance = opticalDepth.map((channel) =>
-    channel.map((tau) => Math.max(Math.exp(-tau), ABSORBER_TRANSMITTANCE_FLOOR)),
+    channel.map((tau) => Math.max(exp(-tau), ABSORBER_TRANSMITTANCE_FLOOR)),
   );
   const [red, green, blue] = transmittance;
   if (red === undefined || green === undefined || blue === undefined) {
@@ -114,9 +114,9 @@ function rowsCurve(pressuresPa: ReadonlyArray<number>, readTopPa: number): Absor
   }
   return {
     kind: "column",
-    logColumns: columns.map(Math.log),
+    logColumns: columns.map(log),
     logPressures,
-    readTopLogPressure: Math.log(readTopPa),
+    readTopLogPressure: log(readTopPa),
     transmittance: [red, green, blue],
     opticalDepth,
   };
@@ -201,7 +201,7 @@ function pressuresOf(curve: AbsorberCurve): number[] {
     curve.readTopLogPressure,
     last + 0.5,
     last + 4,
-  ].map(Math.exp);
+  ].map(exp);
 }
 
 /** An amount of a curve's kind. */

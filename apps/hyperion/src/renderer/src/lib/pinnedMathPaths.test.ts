@@ -65,6 +65,10 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/channels.ts",
     "../test/earthLinePaths.ts",
     "../view/atmosphere/reference/sweepBoundary.ts",
+    // The reference tracer's thick, higher-limb and albedo cases' writers (R08.T12.b.2, R08.T5.e).
+    "../view/atmosphere/reference/cases.ts",
+    "../view/atmosphere/reference/thickCases.ts",
+    "../test/venusAlbedo.ts",
     // The tone curve and exposure `gate.ts` reads for its colours.
     "../view/photometry/toneCurve.ts",
     "../view/photometry/exposure.ts",
@@ -83,8 +87,10 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/reference/references.test.ts",
     "../view/atmosphere/reference/sweepBoundary.test.ts",
     "../view/atmosphere/reference/sweepCases.test.ts",
+    "../view/atmosphere/reference/thickCases.test.ts",
     "../view/atmosphere/reference/thickRuns.test.ts",
     "../view/atmosphere/reference/vectorGate.test.ts",
+    "../view/atmosphere/reference/venusAlbedo.test.ts",
     // R05's descent profile, whose poses its tests pin by hash.
     "../view/spike/descentProfile.ts",
   ],
@@ -92,7 +98,7 @@ const MODULES = import.meta.glob<string>(
 );
 
 /** How many modules the list names: the glob drops a path that no longer exists. */
-const LISTED = 60;
+const LISTED = 65;
 
 /** Every renderer test, as its text: the scan finds among them the tests that bless a table. */
 const TESTS = import.meta.glob<string>("../**/*.test.ts", {

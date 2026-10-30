@@ -71,6 +71,7 @@ import {
   sphereCase,
 } from "./cases";
 import type { ReferenceAggregate } from "./geometries";
+import { pow } from "../../../lib/pinnedMath";
 
 /** The significant figures the thick cases' files write their terms to (the module's remarks). */
 export const THICK_CASE_SIGNIFICANT_FIGURES = 9;
@@ -225,7 +226,7 @@ export function venusColumn(surfacePa: number): AtmosphereColumn {
       surfaceK: VENUS_SURFACE_TEMPERATURE_K,
       surfacePa,
       beta: VENUS_ADIABAT_SCALE * dryAdiabatExponent(mixture),
-      skinK: 2 ** -0.25 * VENUS_BLACK_BODY_TEMPERATURE_K,
+      skinK: pow(2, -0.25) * VENUS_BLACK_BODY_TEMPERATURE_K,
     },
     meanMolarMassGPerMol: meanMolarMassGPerMol(mixture),
     referenceGravityMS2: VENUS_GRAVITY_MS2,
@@ -328,7 +329,7 @@ export function venusModeParticles(deckMode: VenusDeckMode): AerosolParticles {
 
 /** The pressure at a deck fraction u, Pa: p_base (p_top ÷ p_base)^u. */
 export function venusDeckPressurePa(u: number): number {
-  return VENUS_DECK.basePa * (VENUS_DECK.topPa / VENUS_DECK.basePa) ** u;
+  return VENUS_DECK.basePa * pow(VENUS_DECK.topPa / VENUS_DECK.basePa, u);
 }
 
 /** A deck mode's spec: its span's pressures, its share of the deck's τ(550), well mixed. */

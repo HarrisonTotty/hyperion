@@ -51,6 +51,7 @@ import {
   tabulatedPhaseJson,
   type TermJson,
 } from "./atmosphereCases";
+import { acos } from "../lib/pinnedMath";
 
 /**
  * The wavelengths the albedo is taken at, nm (R08.T5.e): 365, Lee et al. 2019's (Y. J. Lee et
@@ -110,7 +111,7 @@ function albedoGeometry(
   node: AlbedoNode,
   topHeightM: number,
 ): CaseJson["geometries"][number] {
-  const zenithDeg = (Math.acos(node.mu) * 180) / Math.PI;
+  const zenithDeg = (acos(node.mu) * 180) / Math.PI;
   return {
     name: `albedo-n${k}`,
     observer: { heightM: topHeightM + ALBEDO_OBSERVER_ABOVE_TOP_M, latitudeDeg: 0 },
