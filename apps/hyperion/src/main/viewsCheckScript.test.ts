@@ -24,6 +24,18 @@ import { afterEach, describe, expect, it } from "vitest";
 /** The script, from this file. */
 const SCRIPT = join(__dirname, "../../scripts/viewsCheck.sh");
 
+/** The smoke harness's runner, whose SwiftShader switches the software mode takes (R01.T16). */
+const TEST_RENDER = join(__dirname, "../../scripts/testRender.sh");
+
+/** The environment the stand-in reports for each launch, `<unset>` for a variable it lacks. */
+const REPORTED_ENV = [
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+  "XDG_SESSION_TYPE",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "HYPERION_VIEWS_CHECK_HIDDEN",
+] as const;
+
 /** Each test's own directory, removed after it. */
 let scratch: string | null = null;
 
@@ -37,10 +49,24 @@ afterEach(() => {
 /** What a run of the script did: each launch's arguments, its output and its exit. */
 interface ScriptRun {
   readonly launches: ReadonlyArray<ReadonlyArray<string>>;
+  /** Each launch's {@link REPORTED_ENV}, by name. */
+  readonly environments: ReadonlyArray<Readonly<Record<string, string>>>;
   readonly output: string;
   readonly status: number | null;
   /** The profiles' directory, which should be empty again. */
   readonly profiles: string;
+}
+
+/** What a run of the script is given beyond its arguments. */
+interface ScriptSetting {
+  /** The stand-in's exit for a launch at each setting (`default` for one with none), 0 otherwise. */
+  readonly exits?: Readonly<Record<string, number>>;
+  /** The setting of the launch at which the stand-in sends the script TERM, then waits. */
+  readonly terminateAt?: string;
+  /** Variables the script is run with, beside its own. */
+  readonly env?: Readonly<Record<string, string>>;
+  /** What a stand-in `uname -s` answers; absent, the machine's own answers. */
+  readonly uname?: string;
 }
 
 /**
@@ -53,9 +79,34 @@ function runScript(
   exits: Readonly<Record<string, number>> = {},
   terminateAt: string | null = null,
 ): ScriptRun {
+  return runScriptWith(args, { exits, ...(terminateAt === null ? {} : { terminateAt }) });
+}
+
+/** A log's lines, each split into its words; none for a log never written. */
+function logLines(path: string): ReadonlyArray<ReadonlyArray<string>> {
+  return existsSync(path)
+    ? readFileSync(path, "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => line.split(" "))
+    : [];
+}
+
+/** Runs the script with `args` as {@link ScriptSetting} says. */
+function runScriptWith(args: ReadonlyArray<string>, given: ScriptSetting): ScriptRun {
+  const exits = given.exits ?? {};
+  const terminateAt = given.terminateAt ?? null;
   const dir = mkdtempSync(join(tmpdir(), "hyperion-views-check-script-"));
   scratch = dir;
   const log = join(dir, "launches.log");
+  const envLog = join(dir, "environments.log");
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  if (given.uname !== undefined) {
+    const uname = join(bin, "uname");
+    writeFileSync(uname, `#!/usr/bin/env bash\necho ${given.uname}\n`);
+    chmodSync(uname, 0o755);
+  }
   const pidFile = join(dir, "script.pid");
   const profiles = join(dir, "profiles");
   mkdirSync(profiles);
@@ -65,6 +116,7 @@ function runScript(
     [
       "#!/usr/bin/env bash",
       `printf '%s\\n' "$*" >> "$STUB_LOG"`,
+      `printf '%s\\n' "${REPORTED_ENV.map((name) => `${name}=\${${name}-<unset>}`).join(" ")}" >> "$STUB_ENV_LOG"`,
       'setting=default; prev=""',
       'for arg in "$@"; do if [[ "$prev" == --setting ]]; then setting="$arg"; fi; prev="$arg"; done',
       // The launch the test stops the script at: TERM to the script, then a wait to be killed.
@@ -76,10 +128,12 @@ function runScript(
   );
   chmodSync(stub, 0o755);
   const env: Record<string, string> = {
-    PATH: process.env["PATH"] ?? "/usr/bin:/bin",
+    ...given.env,
+    PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
     HOME: dir,
     TMPDIR: profiles,
     STUB_LOG: log,
+    STUB_ENV_LOG: envLog,
     STUB_PID_FILE: pidFile,
     HYPERION_VIEWS_CHECK_ELECTRON: stub,
     ...(terminateAt === null ? {} : { STUB_TERMINATE_AT: terminateAt }),
@@ -93,14 +147,46 @@ function runScript(
     ["-c", 'echo "$$" > "$STUB_PID_FILE"; exec bash "$0" "$@"', SCRIPT, ...args],
     { env, encoding: "utf8", timeout: 60_000 },
   );
-  const launches = existsSync(log)
-    ? readFileSync(log, "utf8")
-        .split("\n")
-        .filter((line) => line.length > 0)
-        .map((line) => line.split(" "))
-    : [];
-  return { launches, output: result.stdout, status: result.status, profiles };
+  const environments = logLines(envLog).map((line) =>
+    Object.fromEntries(
+      line.map((pair) => {
+        const at = pair.indexOf("=");
+        return [pair.slice(0, at), pair.slice(at + 1)];
+      }),
+    ),
+  );
+  return {
+    launches: logLines(log),
+    environments,
+    output: result.stdout,
+    status: result.status,
+    profiles,
+  };
 }
+
+/** A bash array's words as `script` assigns it on its own lines, `name=(…)`. */
+function bashArray(script: string, name: string): ReadonlyArray<string> {
+  const match = new RegExp(`^${name}=\\(([^)]*)\\)`, "mu").exec(readFileSync(script, "utf8"));
+  if (match?.[1] === undefined) {
+    throw new Error(`${script} assigns no ${name}`);
+  }
+  return match[1].split(/\s+/u).filter((word) => word.length > 0);
+}
+
+/** The software mode's switches after test-render's own (R01.T16). */
+const SOFTWARE_SWITCHES = [
+  "--hyperion-graphics-software",
+  "--ozone-override-screen-size=1920,1080",
+  "--disable-gpu-watchdog",
+];
+
+/** A desktop session's display variables, which a software launch must not see. */
+const DESKTOP_ENV = {
+  DISPLAY: ":0",
+  WAYLAND_DISPLAY: "wayland-0",
+  XDG_SESSION_TYPE: "wayland",
+  DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
+};
 
 /** The value after `flag` in `launch`, or `null`. */
 function valueOf(launch: ReadonlyArray<string>, flag: string): string | null {
@@ -188,6 +274,66 @@ describe.runIf(process.platform === "linux")("the views check's script", () => {
   it("makes no second launch once it is terminated during the first, and exits 143", () => {
     const run = runScript(["--terrain"], {}, "high");
     expect([run.launches.length, run.status, readdirSync(run.profiles)]).toEqual([1, 143, []]);
+  });
+
+  it("holds its SwiftShader switches equal to testRender.sh's (R01.T16)", () => {
+    for (const name of ["adapter_switches", "headless_switches"]) {
+      expect(bashArray(SCRIPT, name)).toEqual(bashArray(TEST_RENDER, name));
+    }
+  });
+
+  it("launches --software hidden, in test-render's environment and switches (R01.T16)", () => {
+    const run = runScriptWith(["--software", "--smoke", "--atmosphere"], { env: DESKTOP_ENV });
+    const switches = [
+      ...bashArray(TEST_RENDER, "adapter_switches"),
+      ...bashArray(TEST_RENDER, "headless_switches"),
+      ...SOFTWARE_SWITCHES,
+    ];
+    expect([
+      run.status,
+      run.launches.map((launch) => launch.slice(0, switches.length)),
+      run.launches.some((launch) => launch.includes("--ozone-platform=x11")),
+      run.environments,
+    ]).toEqual([
+      0,
+      [switches, switches],
+      false,
+      [0, 1].map(() => ({
+        DISPLAY: "<unset>",
+        WAYLAND_DISPLAY: "<unset>",
+        XDG_SESSION_TYPE: "<unset>",
+        DBUS_SESSION_BUS_ADDRESS: "unix:path=/nonexistent",
+        HYPERION_VIEWS_CHECK_HIDDEN: "1",
+      })),
+    ]);
+  });
+
+  it("gives each software launch five times its limit", () => {
+    const limits = [
+      ["--smoke"],
+      ["--smoke", "--atmosphere"],
+      ["--terrain", "--setting=high"],
+      ["--terrain", "--handover", "--universe", "u", "--body", "b", "--setting=low"],
+    ].map((args) => {
+      const run = runScriptWith(["--software", ...args], {});
+      return /each launch's limit (\d+) s/u.exec(run.output)?.[1];
+    });
+    expect(limits).toEqual(["1500", "3000", "12000", "18000"]);
+  });
+
+  it("refuses --software off Linux, with exit 2 and no launch", () => {
+    const run = runScriptWith(["--software", "--smoke"], { uname: "Darwin" });
+    expect([run.status, run.launches]).toEqual([2, []]);
+  });
+
+  it("keeps a hardware launch's switches and environment as before", () => {
+    const run = runScriptWith(["--hidden", "--smoke"], { env: DESKTOP_ENV });
+    expect([
+      run.launches[0]?.[0],
+      run.launches[0]?.includes("--hyperion-graphics-software"),
+    ]).toEqual(["--ozone-platform=x11", false]);
+    expect(run.environments).toEqual([{ ...DESKTOP_ENV, HYPERION_VIEWS_CHECK_HIDDEN: "1" }]);
+    expect(run.output).not.toContain("software mode");
   });
 
   it("makes T20's one launch, at the client's default, with no --setting", () => {

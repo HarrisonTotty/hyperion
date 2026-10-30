@@ -1,0 +1,74 @@
+import { describe, expect, it } from "vitest";
+
+import { ATMOSPHERE_CHECK_TIMING } from "./atmosphereCheckRun";
+import { HANDOVER_CHECK_TIMING } from "./handoverCheckRun";
+import {
+  atmosphereCheckTimingOf,
+  handoverCheckTimingOf,
+  SOFTWARE_WAIT_FACTOR,
+  terrainCheckTimingOf,
+  viewsCheckTimingOf,
+} from "./softwareTiming";
+import { TERRAIN_CHECK_TIMING } from "./terrainCheckRun";
+import { VIEWS_CHECK_TIMING } from "./viewsCheckRun";
+
+const OTHER_MODES = ["default", "vulkan", "safe"] as const;
+
+describe("the software mode's timings (R01.T16)", () => {
+  it("stretch by five, fixed (main's ruling, 2026-10-29)", () => {
+    expect(SOFTWARE_WAIT_FACTOR).toBe(5);
+  });
+
+  it("stretch T20's control wait alone, its measured windows as they are", () => {
+    for (const timing of [VIEWS_CHECK_TIMING.smoke, VIEWS_CHECK_TIMING.full]) {
+      expect(viewsCheckTimingOf(timing, "software")).toEqual({
+        ...timing,
+        waitMs: 5 * timing.waitMs,
+      });
+    }
+  });
+
+  it("stretch the atmosphere run's wait and AUTO's settle limit, its holds as they are", () => {
+    for (const timing of [ATMOSPHERE_CHECK_TIMING.smoke, ATMOSPHERE_CHECK_TIMING.full]) {
+      expect(atmosphereCheckTimingOf(timing, "software")).toEqual({
+        ...timing,
+        waitMs: 5 * timing.waitMs,
+        settleMaxMs: 5 * timing.settleMaxMs,
+      });
+    }
+  });
+
+  it("stretch the terrain run's control and restore waits, its script times as they are", () => {
+    for (const timing of [TERRAIN_CHECK_TIMING.smoke, TERRAIN_CHECK_TIMING.full]) {
+      expect(terrainCheckTimingOf(timing, "software")).toEqual({
+        ...timing,
+        waitMs: 5 * timing.waitMs,
+        restoreMs: 5 * timing.restoreMs,
+      });
+    }
+  });
+
+  it("stretch the hand-over check's wait and a look's overrun", () => {
+    expect(handoverCheckTimingOf(HANDOVER_CHECK_TIMING, "software")).toEqual({
+      ...HANDOVER_CHECK_TIMING,
+      waitMs: 300_000,
+      overrunMs: 300_000,
+    });
+  });
+
+  it("leave every other mode's timings as they are", () => {
+    for (const mode of OTHER_MODES) {
+      expect([
+        viewsCheckTimingOf(VIEWS_CHECK_TIMING.full, mode),
+        atmosphereCheckTimingOf(ATMOSPHERE_CHECK_TIMING.smoke, mode),
+        terrainCheckTimingOf(TERRAIN_CHECK_TIMING.full, mode),
+        handoverCheckTimingOf(HANDOVER_CHECK_TIMING, mode),
+      ]).toEqual([
+        VIEWS_CHECK_TIMING.full,
+        ATMOSPHERE_CHECK_TIMING.smoke,
+        TERRAIN_CHECK_TIMING.full,
+        HANDOVER_CHECK_TIMING,
+      ]);
+    }
+  });
+});

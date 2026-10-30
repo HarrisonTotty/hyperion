@@ -343,10 +343,12 @@ async function run(
     summary.architecture !== "swiftshader" || summary.fallback,
     `${summary.vendor}/${summary.architecture}, fallback ${String(summary.fallback)}`,
   );
+  // The harness's own launch mode, under which the client refuses the style (R01.T16 alone lifts it).
+  const styles = styleAvailability(summary, status.getSnapshot().launchMode);
   checks.check(
     "T9.c the photorealistic style is refused on a fallback adapter",
-    !summary.fallback || !styleAvailability(summary).photorealistic,
-    `photorealistic ${String(styleAvailability(summary).photorealistic)}`,
+    !summary.fallback || !styles.photorealistic,
+    `photorealistic ${String(styles.photorealistic)}`,
   );
   // The default run takes the subgroup path wherever the adapter offers subgroups, so that T10's
   // twins run on both paths across the two variants; the no-subgroups run never does.

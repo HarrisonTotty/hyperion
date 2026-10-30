@@ -46,7 +46,7 @@ describe("the crash-loop policy", () => {
     expect(crashLoopDecision(history, "vulkan")).toBe("none");
   });
 
-  it("never relaunches in safe or default mode", () => {
+  it("never relaunches in safe, software or default mode", () => {
     const history = [
       crash(0),
       crash(1_000),
@@ -55,6 +55,7 @@ describe("the crash-loop policy", () => {
       status(4_000, "disabled_off", "disabled"),
     ];
     expect(crashLoopDecision(history, "safe")).toBe("none");
+    expect(crashLoopDecision(history, "software")).toBe("none");
     expect(crashLoopDecision(history, "default")).toBe("none");
   });
 

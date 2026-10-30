@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { GraphicsLaunchMode } from "../../../../preload/api";
 import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO, SWIFTSHADER_INFO } from "../../test/fakeGpu";
 import {
   type AdapterOutcome,
@@ -11,8 +12,11 @@ import {
   requiredLimits,
   styleAvailability,
   summariseAdapter,
+  takesFallbackAdapter,
   WANTED_FEATURES,
 } from "./platform";
+
+const MODES: ReadonlyArray<GraphicsLaunchMode> = ["default", "vulkan", "safe", "software"];
 
 /** The UHD 620's features under the forced switches (probes of 2026-09-29). */
 const INTEL_FEATURES: ReadonlyArray<GPUFeatureName> = [
@@ -61,10 +65,11 @@ describe("adapter acquisition", () => {
     const outcome = await outcomeOf(
       new FakeAdapter({ info: INTEL_UHD_620_INFO, features: INTEL_FEATURES }),
     );
-    expect(outcome.kind === "adapter" ? outcome.styles : undefined).toEqual({
-      wireframe: true,
-      photorealistic: true,
-    });
+    for (const mode of MODES) {
+      expect(
+        outcome.kind === "adapter" ? styleAvailability(outcome.summary, mode) : undefined,
+      ).toEqual({ wireframe: true, photorealistic: true });
+    }
     expect(outcome.kind === "adapter" ? outcome.summary : undefined).toEqual({
       vendor: "intel",
       architecture: "gen-9",
@@ -73,14 +78,28 @@ describe("adapter acquisition", () => {
     });
   });
 
-  it("offers the wireframe only on SwiftShader", async () => {
+  it("offers the wireframe only on SwiftShader, in every mode but the software one", async () => {
     const outcome = await outcomeOf(
       new FakeAdapter({ info: SWIFTSHADER_INFO, features: SWIFTSHADER_FEATURES }),
     );
-    expect(outcome.kind === "adapter" ? outcome.styles : undefined).toEqual({
-      wireframe: true,
-      photorealistic: false,
-    });
+    for (const mode of ["default", "vulkan", "safe"] as const) {
+      expect(
+        outcome.kind === "adapter" ? styleAvailability(outcome.summary, mode) : undefined,
+      ).toEqual({ wireframe: true, photorealistic: false });
+    }
+  });
+
+  it("offers both styles on SwiftShader in the check-only software mode (R01.T16)", async () => {
+    const outcome = await outcomeOf(
+      new FakeAdapter({ info: SWIFTSHADER_INFO, features: SWIFTSHADER_FEATURES }),
+    );
+    expect(
+      outcome.kind === "adapter" ? styleAvailability(outcome.summary, "software") : undefined,
+    ).toEqual({ wireframe: true, photorealistic: true });
+  });
+
+  it("takes a fallback adapter as a hardware one in the software mode alone", () => {
+    expect(MODES.filter((mode) => takesFallbackAdapter(mode))).toEqual(["software"]);
   });
 
   it("offers the wireframe only on either software signal alone", () => {
@@ -93,7 +112,7 @@ describe("adapter acquisition", () => {
       features: [],
     });
     for (const adapter of [flagged, named]) {
-      expect(styleAvailability(summariseAdapter(adapter).summary)).toEqual({
+      expect(styleAvailability(summariseAdapter(adapter).summary, "vulkan")).toEqual({
         wireframe: true,
         photorealistic: false,
       });

@@ -77,6 +77,45 @@ describe("the graphics condition", () => {
     expect(status.condition).toEqual({ kind: "software-adapter", summary: outcome.summary });
   });
 
+  it("is software-adapter on SwiftShader in default mode, as before", async () => {
+    const outcome = await adapterOutcome(SWIFTSHADER_INFO);
+    const status = reduce(launched("default"), { kind: "adapter-outcome", outcome });
+    expect(status.condition).toEqual({ kind: "software-adapter", summary: outcome.summary });
+  });
+
+  it("is nominal with both styles on SwiftShader in the software mode (R01.T16)", async () => {
+    const outcome = await adapterOutcome(SWIFTSHADER_INFO);
+    const status = reduce(launched("software"), { kind: "adapter-outcome", outcome });
+    expect([status.condition, graphicsAnnunciation(status)]).toEqual([
+      {
+        kind: "nominal",
+        summary: outcome.summary,
+        styles: { wireframe: true, photorealistic: true },
+      },
+      null,
+    ]);
+  });
+
+  it("is nominal on a hardware adapter in the software mode", async () => {
+    const outcome = await adapterOutcome();
+    const status = reduce(launched("software"), { kind: "adapter-outcome", outcome });
+    expect(status.condition).toEqual({
+      kind: "nominal",
+      summary: outcome.summary,
+      styles: { wireframe: true, photorealistic: true },
+    });
+  });
+
+  it("is nominal on SwiftShader restored after a loss in the software mode", async () => {
+    const first = await adapterOutcome(SWIFTSHADER_INFO);
+    const fresh = await adapterOutcome(SWIFTSHADER_INFO);
+    const status = reduce(launched("software"), { kind: "adapter-outcome", outcome: first }, LOST, {
+      kind: "device-restored",
+      outcome: fresh,
+    });
+    expect([status.condition.kind, status.fault]).toEqual(["nominal", null]);
+  });
+
   it("is safe-mode in a safe launch whatever the adapter", async () => {
     const outcome = await adapterOutcome();
     const status = reduce(launched("safe"), { kind: "adapter-outcome", outcome });
@@ -532,6 +571,19 @@ describe("the status feed", () => {
     const end = feedGraphicsStatus(store, fakeGraphics("vulkan").api, gpu);
     await vi.waitFor(() => {
       expect(store.getSnapshot().condition.kind).toBe("nominal");
+    });
+    end();
+  });
+
+  it("takes SwiftShader's answer as nominal in the software mode (R01.T16)", async () => {
+    const store = new GraphicsStatusStore(launched("software"));
+    const gpu = new FakeGpu([new FakeAdapter({ info: SWIFTSHADER_INFO, features: [] })]);
+    const end = feedGraphicsStatus(store, fakeGraphics("software").api, gpu);
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().condition).toMatchObject({
+        kind: "nominal",
+        styles: { wireframe: true, photorealistic: true },
+      });
     });
     end();
   });

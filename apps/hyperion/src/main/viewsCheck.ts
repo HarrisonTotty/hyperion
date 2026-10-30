@@ -34,6 +34,7 @@ import type { ContentTracing, IpcMainInvokeEvent, TraceConfig } from "electron";
 import type {
   AtmosphereCheckRecord,
   CheckPhaseName,
+  GraphicsLaunchMode,
   HandoverCheckRecord,
   SpikeResultsPaths,
   TerrainCheckPhaseName,
@@ -56,6 +57,7 @@ import {
   handoverFailures,
   writeHandoverResults,
 } from "./handoverCheckResults";
+import { SOFTWARE_WAIT_FACTOR } from "./graphics/softwareMode";
 import { type Measured, measured, missing } from "./measured";
 import {
   readTraceFileEvents,
@@ -83,6 +85,7 @@ import {
   type NamedSlice,
   NO_WINDOW_REASON,
   type PhaseTraceFigures,
+  softwareViewsCheckFailures,
   type ViewsCheckResults,
   type ViewsCheckRunInput,
   writeViewsCheckResults,
@@ -120,6 +123,80 @@ export const VIEWS_CHECK_TRACE_CATEGORIES: ReadonlyArray<string> = [
  * buffer stops recording when full rather than dropping the window's start.
  */
 export const VIEWS_CHECK_TRACE_BUFFER_KB = 512 * 1024;
+
+/**
+ * Where a views check writes, from the repository's root: T20's under `target/views-check/` for a
+ * smoke and `docs/measurements/several-views/` otherwise, the terrain run's (R10.T16.d;
+ * decision-r10-t16-contracts §6), and its hand-over check's beside it (R10.T10.g), under
+ * `target/views-check/terrain/` and `docs/measurements/terrain-check/`, and the atmosphere run's
+ * (plan R08, R08.T10.b) under `target/views-check/atmosphere/` and
+ * `docs/measurements/atmosphere-flight/`; the captures under the smoke's directory either way.
+ *
+ * @remarks
+ * A run in the check-only software mode (plan R01, R01.T16) writes under the smoke's directory, a
+ * full run's included: its frame times are SwiftShader's and its file names carry a test machine's
+ * name, so it never writes under `docs/measurements/` (main's ruling, 2026-10-29). `--out` still
+ * names a directory of its own, as for any run.
+ */
+export function viewsCheckDirs(
+  launch: ViewsCheckLaunch,
+  launchMode: GraphicsLaunchMode,
+): {
+  readonly out: string;
+  readonly captures: string;
+} {
+  let dirs: { readonly smoke: string; readonly full: string };
+  switch (launch.run) {
+    case "several-views":
+      dirs = { smoke: "target/views-check", full: "docs/measurements/several-views" };
+      break;
+    case "terrain":
+    case "handover":
+      dirs = { smoke: "target/views-check/terrain", full: "docs/measurements/terrain-check" };
+      break;
+    case "atmosphere":
+      dirs = {
+        smoke: "target/views-check/atmosphere",
+        full: "docs/measurements/atmosphere-flight",
+      };
+      break;
+  }
+  const kept = launch.smoke || launchMode === "software";
+  return { out: kept ? dirs.smoke : dirs.full, captures: dirs.smoke };
+}
+
+/**
+ * How long a views check may take before the main process ends it with status 3: T20's smoke 4
+ * minutes and its full run 20; the terrain run's smoke, whose loss phase plays its script to the
+ * field's revision rise at 120 s, 8 minutes, and its full run, three phases of about five minutes
+ * each, 30; its hand-over check (R10.T10.g), three looks of about 3.5 minutes (a smoke's about one),
+ * takes the same, and 15 minutes more on a served world (R10.T15.b), whose body's coarse field the
+ * server computes, about a minute at level 8 (R09.T16.a), and sends whole, some 15 MB, once to read
+ * the world and once to each look's session; the atmosphere run's (plan R08, R08.T10.b), its media
+ * awaited and a flight to four air fixtures and the seat's night, 8 and 15. Each is
+ * {@link SOFTWARE_WAIT_FACTOR} times as long in the check-only software mode (plan R01, R01.T16),
+ * as the renderer's waits are.
+ */
+export function viewsCheckWatchdogMs(
+  launch: ViewsCheckLaunch,
+  launchMode: GraphicsLaunchMode,
+): number {
+  let ms: number;
+  switch (launch.run) {
+    case "several-views":
+      ms = launch.smoke ? 240_000 : 20 * 60_000;
+      break;
+    case "terrain":
+    case "handover":
+      ms =
+        (launch.smoke ? 8 * 60_000 : 30 * 60_000) + (launch.served === undefined ? 0 : 15 * 60_000);
+      break;
+    case "atmosphere":
+      ms = launch.smoke ? 8 * 60_000 : 15 * 60_000;
+      break;
+  }
+  return launchMode === "software" ? ms * SOFTWARE_WAIT_FACTOR : ms;
+}
 
 /** The tracing configuration of a phase's window. */
 export function viewsCheckTraceConfig(): TraceConfig {
@@ -383,6 +460,8 @@ export class ViewsCheckSession {
   readonly #consoleErrors: string[] = [];
   #recording: CheckPhaseName | null = null;
   #captured = false;
+  /** T20's results once written, judged in the check-only software mode alone (R01.T16). */
+  #viewsResults: ViewsCheckResults | null = null;
   /** A terrain run's results once written, judged. */
   #terrainResults: TerrainCheckResults | null = null;
   /** A hand-over check's results once written, judged (R10.T10.g). */
@@ -543,6 +622,7 @@ export class ViewsCheckSession {
     });
     const write = this.#deps.write ?? writeViewsCheckResults;
     const paths = await write(this.#deps.outDir, results);
+    this.#viewsResults = results;
     this.#deps.log(`views check: wrote ${paths.json} and ${paths.markdown}`);
     return paths;
   }
@@ -636,15 +716,23 @@ export class ViewsCheckSession {
   /**
    * Ends the run with an exit status, and a reason for a failure; a terrain run, a hand-over
    * check or an atmosphere run that would end with 0 ends with 1 unless its results were written
-   * and pass.
+   * and pass, and so does T20's in the check-only software mode (R01.T16) when its results fail
+   * {@link softwareViewsCheckFailures}.
    */
   end(code: number, reason: string | null): void {
     // Why a run that would end with 0 fails: no results written, or results that fail.
     let failure: string | null = null;
     if (code === 0) {
       switch (this.#deps.launch.run) {
-        case "several-views":
+        case "several-views": {
+          // The renderer ends with 0 only once its results are written.
+          const results = this.#viewsResults;
+          const failures =
+            results?.run.launchMode === "software" ? softwareViewsCheckFailures(results) : null;
+          failure =
+            failures === null ? null : `the software run's views were not as asked: ${failures}`;
           break;
+        }
         case "terrain": {
           const results = this.#terrainResults;
           failure =

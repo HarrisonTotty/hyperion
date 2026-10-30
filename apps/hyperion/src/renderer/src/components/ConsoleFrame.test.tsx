@@ -128,6 +128,13 @@ describe("ConsoleFrame", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows no graphics banner in the check-only software mode (R01.T16)", () => {
+    renderFrame("link", () => {}, graphicsStore("software", []));
+    expect(
+      within(screen.getByRole("banner")).queryByRole("status", { name: "Graphics mode" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the same banner on every display", () => {
     const store = graphicsStore("safe", []);
     const texts = DISPLAYS.map(({ id }) => {

@@ -325,7 +325,12 @@ export function App() {
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>
       {viewsCheck === undefined || probes === null ? null : (
-        <ViewsCheckRunner api={viewsCheck} probe={probes.views} run={probes.run} />
+        <ViewsCheckRunner
+          api={viewsCheck}
+          probe={probes.views}
+          run={probes.run}
+          launchMode={window.hyperion.graphics.launchMode}
+        />
       )}
       <ServerLinkContext value={link}>
         <UniverseProvider>

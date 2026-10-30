@@ -1,8 +1,10 @@
 /**
  * How this launch runs the GPU: Chromium's own path off Linux (no switches, never relaunched), the
- * forced Vulkan path on Linux, or the declared safe mode, which has no WebGPU.
+ * forced Vulkan path on Linux, the declared safe mode, which has no WebGPU, or the check-only
+ * software mode, a views check's on Linux on the command line's own SwiftShader switches, which
+ * draws both styles on a fallback adapter (plan R01, R01.T16).
  */
-export type GraphicsLaunchMode = "default" | "vulkan" | "safe";
+export type GraphicsLaunchMode = "default" | "vulkan" | "safe" | "software";
 
 /** A GPU-process crash, as the main process reports it to the renderer. */
 export interface GpuProcessGoneReport {

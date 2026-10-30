@@ -47,6 +47,7 @@ describe("ViewsCheckRunner", () => {
         api={checkApi()}
         probe={new ViewsProbe()}
         run={{ kind: "several-views" }}
+        launchMode="vulkan"
       />,
     );
     expect(window.requestAnimationFrame).not.toBe(own);
@@ -60,7 +61,12 @@ describe("ViewsCheckRunner", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const api = checkApi();
     const { unmount } = render(
-      <ViewsCheckRunner api={api} probe={new ViewsProbe()} run={{ kind: "several-views" }} />,
+      <ViewsCheckRunner
+        api={api}
+        probe={new ViewsProbe()}
+        run={{ kind: "several-views" }}
+        launchMode="vulkan"
+      />,
     );
 
     unmount();
@@ -83,7 +89,12 @@ describe("ViewsCheckRunner", () => {
       checkScenes: scenes.sceneOptions,
     });
     render(
-      <ViewsCheckRunner api={api} probe={views} run={{ kind: "handover", terrain, scenes }} />,
+      <ViewsCheckRunner
+        api={api}
+        probe={views}
+        run={{ kind: "handover", terrain, scenes }}
+        launchMode="vulkan"
+      />,
     );
 
     // jsdom draws no VIEW, so the check's first wait runs out.
@@ -96,7 +107,14 @@ describe("ViewsCheckRunner", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const failed = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const api = { ...checkApi(), launch: { ...checkApi().launch, run: "atmosphere" as const } };
-    render(<ViewsCheckRunner api={api} probe={new ViewsProbe()} run={{ kind: "atmosphere" }} />);
+    render(
+      <ViewsCheckRunner
+        api={api}
+        probe={new ViewsProbe()}
+        run={{ kind: "atmosphere" }}
+        launchMode="vulkan"
+      />,
+    );
 
     // jsdom draws no VIEW, so the run's first wait runs out.
     await vi.advanceTimersByTimeAsync(61_000);
@@ -104,6 +122,37 @@ describe("ViewsCheckRunner", () => {
     expect([failed.mock.calls[0]?.[0], api.end.mock.calls]).toEqual([
       "views check: the atmosphere run failed:",
       [[{ status: "fail", reason: "views check: VIEW did not show its primary view within 60 s" }]],
+    ]);
+  });
+
+  it("waits five times as long in the check-only software mode (R01.T16)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const api = { ...checkApi(), launch: { ...checkApi().launch, run: "atmosphere" as const } };
+    render(
+      <ViewsCheckRunner
+        api={api}
+        probe={new ViewsProbe()}
+        run={{ kind: "atmosphere" }}
+        launchMode="software"
+      />,
+    );
+
+    // Past the hardware's 60 s wait, the software mode's still waits.
+    await vi.advanceTimersByTimeAsync(61_000);
+    const early = api.end.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(240_000);
+
+    expect([early, api.end.mock.calls]).toEqual([
+      0,
+      [
+        [
+          {
+            status: "fail",
+            reason: "views check: VIEW did not show its primary view within 300 s",
+          },
+        ],
+      ],
     ]);
   });
 });

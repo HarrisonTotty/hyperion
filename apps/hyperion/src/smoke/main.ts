@@ -211,7 +211,7 @@ const childSwitches =
   childSeconds > 0
     ? graphicsSwitches({
         platform: process.platform,
-        mode: launchModeOf(process.platform, false),
+        mode: launchModeOf(process.platform, { safe: false, software: false }),
         gpuTiming: true,
       })
     : [];

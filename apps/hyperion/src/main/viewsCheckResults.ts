@@ -757,6 +757,34 @@ export function buildViewsCheckResults(input: ViewsCheckInput): ViewsCheckResult
   };
 }
 
+/**
+ * Why a several-views check in the check-only software mode fails (plan R01, R01.T16), as one
+ * line, or `null` where it passes: an exit of the GPU process over the run, or a phase whose
+ * primary was not drawn in the style the phase asks for when it ended, its capture's moment.
+ *
+ * @remarks
+ * A hardware run is recorded, not judged (R07.T20), and stays so. On SwiftShader a lost GPU
+ * process takes the photorealistic primary back to the wireframe, which a run recorded alone
+ * passed (the research lane's F1, 2026-10-29), so a software run is judged on both.
+ */
+export function softwareViewsCheckFailures(results: ViewsCheckResults): string | null {
+  const reasons: string[] = [];
+  const exits = results.findings.faults.gpuProcessExits;
+  if (exits > 0) {
+    reasons.push(`${String(exits)} exits of the GPU process`);
+  }
+  for (const phase of results.phases) {
+    const asked = PHASE_VIEWS[phase.name][0];
+    const drawn = phase.views.find((view) => view.slot === "PRIMARY")?.style;
+    if (drawn !== asked) {
+      reasons.push(
+        `${phase.name}'s primary was drawn ${drawn ?? "in no style"}, not ${asked ?? ""}`,
+      );
+    }
+  }
+  return reasons.length === 0 ? null : reasons.join("; ");
+}
+
 /** A figure's text, or its reason in brackets. */
 function textOf<T>(figure: Measured<T>, text: (value: T) => string): string {
   return figure.value === null ? `— (${figure.reason})` : text(figure.value);

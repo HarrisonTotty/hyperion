@@ -43,6 +43,10 @@ const NO_VIEWS = "GRAPHICS NOT AVAILABLE";
  * software adapter's refusal of the photorealistic style, `GRAPHICS ACQUIRING ADAPTER` before the
  * answer, the graphics' annunciation for both styles where no view can be drawn, and
  * {@link PHOTOREAL_NOT_CREATED} where the photorealistic view failed to make its pipelines.
+ *
+ * @remarks
+ * In the check-only software mode a software adapter's condition is `nominal`, with both styles
+ * (R01.T16), so that only {@link PHOTOREAL_NOT_CREATED} holds the photorealistic style back there.
  */
 export function styleRefusals(status: GraphicsStatus, photoreal: PhotorealStatus): StyleRefusals {
   const { condition } = status;

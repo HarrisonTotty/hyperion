@@ -4,8 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   AtmosphereCheckRecord,
+  GraphicsLaunchMode,
   HandoverCheckRecord,
   TerrainCheckRecord,
+  ViewsCheckLaunch,
   ViewsCheckRecord,
   ViewsCheckRunKind,
 } from "../preload/api";
@@ -23,9 +25,11 @@ import {
   registerViewsCheckHandlers,
   VIEWS_CHECK_CHANNELS,
   VIEWS_CHECK_TRACE_CATEGORIES,
+  viewsCheckDirs,
   viewsCheckTraceConfig,
   ViewsCheckSession,
   type ViewsCheckSessionDeps,
+  viewsCheckWatchdogMs,
   WindowScan,
 } from "./viewsCheck";
 import type { TerrainCheckResults } from "./terrainCheckResults";
@@ -361,6 +365,156 @@ describe("the views check's session", () => {
     run.end(1, "INSTRUMENT 1 did not open");
     expect(run.ended).toBe(true);
     expect(deps.exit).toHaveBeenCalledWith(1);
+  });
+});
+
+/** A T20 session whose run describes itself in `launchMode`. */
+function moded(
+  launchMode: GraphicsLaunchMode,
+  overrides: Partial<ViewsCheckSessionDeps> = {},
+): ReturnType<typeof session> {
+  const base = session();
+  return session({
+    describe: () => base.deps.describe().then((run) => ({ ...run, launchMode })),
+    ...overrides,
+  });
+}
+
+/** A phase's record whose primary drew `style`. */
+function primaryPhase(style: "photorealistic" | "wireframe"): ViewsCheckRecord["phases"][number] {
+  return {
+    name: "photoreal-alone",
+    startMs: 0,
+    endMs: 1000,
+    views: [
+      {
+        name: "view",
+        style,
+        canvas: { widthPx: 1280, heightPx: 720 },
+        draws: 10,
+        gpuMs: [],
+        submitMs: [],
+        passLabels: [],
+        scales: [],
+      },
+    ],
+    frameIntervalsMs: [],
+    primaryIntervalsMs: [],
+    mainThreadMs: [],
+    frameGpuMs: [],
+    untimedFrames: 0,
+    droppedResolves: 0,
+    unattributedGpuMs: 0,
+  };
+}
+
+describe("the views check's session in the software mode (R01.T16)", () => {
+  it("ends with 0 when every primary was drawn as asked", async () => {
+    const { session: run, deps } = moded("software");
+    await run.writeResults({ ...RECORD, phases: [primaryPhase("photorealistic")] });
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("ends with 1 when the GPU process exited, whatever its end says", async () => {
+    const lines: string[] = [];
+    const exit = vi.fn<(code: number) => void>();
+    const { session: run } = moded("software", {
+      exit,
+      log: (line) => {
+        lines.push(line);
+      },
+    });
+    run.gpuProcessGone();
+    await run.writeResults({ ...RECORD, phases: [primaryPhase("photorealistic")] });
+    run.end(0, null);
+    expect([exit.mock.calls, lines.at(-1)]).toEqual([
+      [[1]],
+      "views check: FAIL the software run's views were not as asked: 1 exits of the GPU process",
+    ]);
+  });
+
+  it("ends with 1 when a primary went back to the wireframe", async () => {
+    const { session: run, deps } = moded("software");
+    await run.writeResults({ ...RECORD, phases: [primaryPhase("wireframe")] });
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("leaves a hardware run recorded, not judged, as before", async () => {
+    const { session: run, deps } = moded("vulkan");
+    run.gpuProcessGone();
+    await run.writeResults({ ...RECORD, phases: [primaryPhase("wireframe")] });
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(0);
+  });
+});
+
+describe("a views check's directories and watchdog", () => {
+  const LAUNCHES: ReadonlyArray<ViewsCheckLaunch> = (
+    ["several-views", "terrain", "handover", "atmosphere"] as const
+  ).flatMap((run) =>
+    [false, true].map((smoke) => ({
+      setting: "high" as const,
+      smoke,
+      out: null,
+      run,
+      fixture: "terrain-test" as const,
+    })),
+  );
+
+  it("writes a software run under the smoke's directory, a full run's included", () => {
+    for (const launch of LAUNCHES) {
+      const dirs = viewsCheckDirs(launch, "software");
+      expect([dirs.out, dirs.out === dirs.captures]).toEqual([dirs.captures, true]);
+      expect(dirs.out.startsWith("target/views-check")).toBe(true);
+    }
+  });
+
+  it("writes every other mode's full run under docs/measurements/, as before", () => {
+    for (const mode of ["default", "vulkan", "safe"] as const) {
+      expect(
+        LAUNCHES.map((launch) => viewsCheckDirs(launch, mode).out).filter((dir) =>
+          dir.startsWith("docs/measurements/"),
+        ),
+      ).toEqual([
+        "docs/measurements/several-views",
+        "docs/measurements/terrain-check",
+        "docs/measurements/terrain-check",
+        "docs/measurements/atmosphere-flight",
+      ]);
+    }
+  });
+
+  it("gives a software run five times the watchdog", () => {
+    for (const launch of LAUNCHES) {
+      expect(viewsCheckWatchdogMs(launch, "software")).toBe(
+        5 * viewsCheckWatchdogMs(launch, "vulkan"),
+      );
+    }
+  });
+
+  it("keeps every other mode's watchdog as before", () => {
+    for (const mode of ["default", "vulkan", "safe"] as const) {
+      expect(LAUNCHES.map((launch) => viewsCheckWatchdogMs(launch, mode) / 60_000)).toEqual([
+        20, 4, 30, 8, 30, 8, 15, 8,
+      ]);
+    }
+  });
+
+  it("gives a served world's hand-over check 15 minutes more, five times in software", () => {
+    const served: ViewsCheckLaunch = {
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "handover",
+      fixture: "terrain-test",
+      served: { universe: "u", body: "b" },
+    };
+    expect([
+      viewsCheckWatchdogMs(served, "vulkan"),
+      viewsCheckWatchdogMs(served, "software"),
+    ]).toEqual([45 * 60_000, 225 * 60_000]);
   });
 });
 

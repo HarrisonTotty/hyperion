@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import type { ViewsCheckApi } from "../../../../../preload/api";
+import type { GraphicsLaunchMode, ViewsCheckApi } from "../../../../../preload/api";
 import { pageAtmosphereFixtures } from "../../../view/scenes/atmosphereScene";
 import {
   ATMOSPHERE_CHECK_TIMING,
@@ -9,6 +9,12 @@ import {
 } from "./atmosphereCheckRun";
 import { HANDOVER_CHECK_TIMING, recordHandoverCheck, runHandoverCheck } from "./handoverCheckRun";
 import type { HandoverScenes } from "./handoverScenes";
+import {
+  atmosphereCheckTimingOf,
+  handoverCheckTimingOf,
+  terrainCheckTimingOf,
+  viewsCheckTimingOf,
+} from "./softwareTiming";
 import { recordTerrainCheck, runTerrainCheck, TERRAIN_CHECK_TIMING } from "./terrainCheckRun";
 import type { TerrainProbe } from "./terrainProbe";
 import { recordViewsCheck, runViewsCheck, STOPPED, VIEWS_CHECK_TIMING } from "./viewsCheckRun";
@@ -39,6 +45,11 @@ export interface ViewsCheckRunnerProps {
   readonly probe: ViewsProbe;
   /** The launch's run, with its own probes. */
   readonly run: CheckedRun;
+  /**
+   * The launch's graphics mode, `window.hyperion.graphics.launchMode`: the check-only software
+   * mode's waits are five times as long (plan R01, R01.T16).
+   */
+  readonly launchMode: GraphicsLaunchMode;
 }
 
 /** The name of each phase's measured window in the trace's user timing. */
@@ -67,9 +78,10 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  * (or a terrain check, the hand-over's verdict or an atmosphere capture failed).
  *
  * @remarks
- * Renders nothing. Mounted only on a `--views-check` launch, beside the consoles.
+ * Renders nothing. Mounted only on a `--views-check` launch, beside the consoles. In the check-only
+ * software mode each run's waits are stretched (`softwareTiming.ts`), its measured windows not.
  */
-export function ViewsCheckRunner({ api, probe, run }: ViewsCheckRunnerProps) {
+export function ViewsCheckRunner({ api, probe, run, launchMode }: ViewsCheckRunnerProps) {
   useEffect(() => {
     const controller = new AbortController();
     const restoreFrames = probe.installFrameClock(window);
@@ -94,7 +106,10 @@ export function ViewsCheckRunner({ api, probe, run }: ViewsCheckRunnerProps) {
               ...shared,
               api,
               probe,
-              timing: api.launch.smoke ? VIEWS_CHECK_TIMING.smoke : VIEWS_CHECK_TIMING.full,
+              timing: viewsCheckTimingOf(
+                api.launch.smoke ? VIEWS_CHECK_TIMING.smoke : VIEWS_CHECK_TIMING.full,
+                launchMode,
+              ),
             }),
           controller.signal,
         );
@@ -113,9 +128,10 @@ export function ViewsCheckRunner({ api, probe, run }: ViewsCheckRunnerProps) {
                 new Promise<number>((resolve) => {
                   window.requestAnimationFrame(resolve);
                 }),
-              timing: api.launch.smoke
-                ? ATMOSPHERE_CHECK_TIMING.smoke
-                : ATMOSPHERE_CHECK_TIMING.full,
+              timing: atmosphereCheckTimingOf(
+                api.launch.smoke ? ATMOSPHERE_CHECK_TIMING.smoke : ATMOSPHERE_CHECK_TIMING.full,
+                launchMode,
+              ),
             }),
           controller.signal,
         );
@@ -133,7 +149,10 @@ export function ViewsCheckRunner({ api, probe, run }: ViewsCheckRunnerProps) {
               terrain,
               setting: api.launch.setting,
               fixture: api.launch.fixture,
-              timing: api.launch.smoke ? TERRAIN_CHECK_TIMING.smoke : TERRAIN_CHECK_TIMING.full,
+              timing: terrainCheckTimingOf(
+                api.launch.smoke ? TERRAIN_CHECK_TIMING.smoke : TERRAIN_CHECK_TIMING.full,
+                launchMode,
+              ),
             }),
           controller.signal,
         );
@@ -152,7 +171,7 @@ export function ViewsCheckRunner({ api, probe, run }: ViewsCheckRunnerProps) {
               terrain,
               scenes,
               setting: api.launch.setting,
-              timing: HANDOVER_CHECK_TIMING,
+              timing: handoverCheckTimingOf(HANDOVER_CHECK_TIMING, launchMode),
             }),
           controller.signal,
         );
@@ -167,6 +186,6 @@ export function ViewsCheckRunner({ api, probe, run }: ViewsCheckRunnerProps) {
       restoreFrames();
       stopWatching?.();
     };
-  }, [api, probe, run]);
+  }, [api, probe, run, launchMode]);
   return null;
 }

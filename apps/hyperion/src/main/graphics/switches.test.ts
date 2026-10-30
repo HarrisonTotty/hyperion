@@ -10,7 +10,7 @@ import {
 } from "./switches";
 
 const PLATFORMS: ReadonlyArray<NodeJS.Platform> = ["linux", "win32", "darwin", "freebsd"];
-const MODES: ReadonlyArray<GraphicsLaunchMode> = ["default", "vulkan", "safe"];
+const MODES: ReadonlyArray<GraphicsLaunchMode> = ["default", "vulkan", "safe", "software"];
 
 const VULKAN_SET: ReadonlyArray<ChromiumSwitch> = [
   { name: "use-angle", value: "vulkan" },
@@ -46,9 +46,9 @@ describe("the graphics switches", () => {
     );
   });
 
-  it("gives nothing in safe and default modes, with or without timing", () => {
+  it("gives nothing in safe, software and default modes, with or without timing", () => {
     for (const platform of PLATFORMS) {
-      for (const mode of ["safe", "default"] as const) {
+      for (const mode of ["safe", "software", "default"] as const) {
         for (const gpuTiming of [false, true]) {
           expect(graphicsSwitches({ platform, mode, gpuTiming })).toEqual([]);
         }
@@ -84,16 +84,29 @@ describe("the graphics switches", () => {
 });
 
 describe("the launch mode", () => {
-  it("is default off Linux whatever the switch", () => {
+  const SWITCHES = [false, true].flatMap((safe) =>
+    [false, true].map((software) => ({ safe, software })),
+  );
+
+  it("is default off Linux whatever the switches", () => {
     for (const platform of ["win32", "darwin", "freebsd"] as const) {
-      expect(launchModeOf(platform, false)).toBe("default");
-      expect(launchModeOf(platform, true)).toBe("default");
+      for (const switches of SWITCHES) {
+        expect(launchModeOf(platform, switches)).toBe("default");
+      }
     }
   });
 
   it("is safe on Linux only with the switch", () => {
-    expect(launchModeOf("linux", true)).toBe("safe");
-    expect(launchModeOf("linux", false)).toBe("vulkan");
+    expect(launchModeOf("linux", { safe: true, software: false })).toBe("safe");
+    expect(launchModeOf("linux", { safe: false, software: false })).toBe("vulkan");
+  });
+
+  it("is software on Linux only with its switch (R01.T16)", () => {
+    expect(launchModeOf("linux", { safe: false, software: true })).toBe("software");
+  });
+
+  it("is safe with both switches, so that a relaunched crash loop never draws", () => {
+    expect(launchModeOf("linux", { safe: true, software: true })).toBe("safe");
   });
 });
 

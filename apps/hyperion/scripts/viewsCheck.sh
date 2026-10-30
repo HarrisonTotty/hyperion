@@ -6,7 +6,7 @@
 # photorealistic and a wireframe instrument, and alone), then writes the results file and its
 # summary. No server is needed.
 #
-#   viewsCheck.sh [--hidden] [--setting high|low] [--smoke] [--out <dir>]
+#   viewsCheck.sh [--hidden] [--software] [--setting high|low] [--smoke] [--out <dir>]
 #                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered] | --atmosphere]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
@@ -58,6 +58,22 @@
 # process exited over the run (plan R08, R08.T10.g), or when no capture was taken. --atmosphere
 # with --terrain is refused by the client.
 #
+# --software runs any of these checks hidden on SwiftShader, Chromium's CPU Vulkan, with no GPU and
+# no display, as a pod or a CI machine has (plan R01, R01.T16): Linux only (exit 2 elsewhere), and
+# implying --hidden. It is the check-only software mode, a test-tool exception to R01 Design note 8
+# (the owner's ruling, 2026-10-29): the client draws both styles on the fallback adapter, its
+# GRAPHICS panel reads SOFTWARE and the record's launch mode `software`. Electron runs in
+# test-render's environment (DISPLAY, WAYLAND_DISPLAY and XDG_SESSION_TYPE unset, the session's
+# D-Bus out of reach) with test-render's adapter and headless switches,
+# --hyperion-graphics-software, --ozone-override-screen-size=1920,1080 (headless Ozone's screen
+# would hold the window at its 1024 x 640 minimum) and --disable-gpu-watchdog (Chromium's GPU
+# watchdog ended SwiftShader's frames of up to 30 s with exit_code=512), and never
+# --ozone-platform=x11. Every wait of the run, the client's watchdog and each launch's limit here
+# are five times as long. Its results go under the smoke's target/views-check/ directories, a full
+# run's included (never docs/measurements/), its frame times are SwiftShader's, and a GPU-process
+# exit or a primary not drawn in the style its phase asks for fails the several-views check too. The
+# client refuses the switch without --views-check and in a packaged build.
+#
 # Each launch gets a fresh `--user-data-dir`, removed afterwards; Electron runs in a process group
 # of its own under `timeout`, killed when the launch ends or the script ends for any reason. The
 # exit status is the client's: 0 the run is recorded (and, for the terrain and atmosphere runs,
@@ -71,6 +87,7 @@ repo="$(cd "$here/../.." && pwd)"
 electron="${HYPERION_VIEWS_CHECK_ELECTRON:-$here/node_modules/.bin/electron}"
 
 hidden=0
+software=0
 smoke=0
 terrain=0
 served=0
@@ -80,6 +97,7 @@ check_args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --hidden) hidden=1; shift ;;
+        --software) software=1; hidden=1; shift ;;
         --smoke) smoke=1; check_args+=("$1"); shift ;;
         --terrain) terrain=1; check_args+=("$1"); shift ;;
         --handover) check_args+=("$1"); shift ;;
@@ -95,6 +113,12 @@ while [[ $# -gt 0 ]]; do
         *) check_args+=("$1"); shift ;;
     esac
 done
+
+# The software mode's switches are the smoke harness's, which only Linux runs headless.
+if [[ $software -eq 1 && "$(uname -s)" != Linux ]]; then
+    echo "views check: --software runs on Linux only" >&2
+    exit 2
+fi
 
 # The settings to launch: the one given, or for the terrain or the atmosphere run with none, high
 # then low (a setting holds for a launch); T20's run with none takes the client's default, high.
@@ -125,15 +149,27 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
+# testRender.sh's adapter and headless switches, word for word (viewsCheckScript.test.ts holds the
+# two lists equal), for --software alone.
+adapter_switches=(--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader)
+headless_switches=(--ozone-platform=headless --use-angle=swiftshader --enable-features=Vulkan
+    --use-vulkan=swiftshader)
+
 env_run=()
+switches=()
+if [[ $software -eq 1 ]]; then
+    # testRender.sh's environment: no display, and the session's D-Bus out of reach.
+    env_run+=(-u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE
+        DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent)
+    switches=("${adapter_switches[@]}" "${headless_switches[@]}" --hyperion-graphics-software
+        --ozone-override-screen-size=1920,1080 --disable-gpu-watchdog)
+elif [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
+    # As the `client` recipe does: on Wayland the client would relaunch itself through XWayland, and
+    # this script would take the first process's exit for the run's.
+    switches=(--ozone-platform=x11)
+fi
 if [[ $hidden -eq 1 ]]; then
     env_run+=(HYPERION_VIEWS_CHECK_HIDDEN=1)
-fi
-# As the `client` recipe does: on Wayland the client would relaunch itself through XWayland, and
-# this script would take the first process's exit for the run's.
-x11=()
-if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
-    x11=(--ozone-platform=x11)
 fi
 # Each launch's limit: T20's smoke 5 minutes and its full run 25; the terrain run's 10 and 40, above
 # the client's own watchdogs (8 and 30 minutes); the atmosphere run's 10 and 20, above its (8 and
@@ -144,6 +180,13 @@ elif [[ $atmosphere -eq 1 ]]; then
     limit=$(( smoke == 1 ? 600 : 1200 ))
 else
     limit=$(( smoke == 1 ? 300 : 1500 ))
+fi
+# The software mode's, five times as long, as the client's watchdog and waits are (main's ruling,
+# 2026-10-29: fixed, not a variable).
+software_factor=5
+if [[ $software -eq 1 ]]; then
+    limit=$(( limit * software_factor ))
+    echo "views check: software mode, on SwiftShader; each launch's limit $limit s"
 fi
 cd "$repo"
 result=0
@@ -157,7 +200,7 @@ for each in "${settings[@]}"; do
     status=0
     start=$(date +%s)
     echo "views check: launching, setting $label"
-    env "${env_run[@]}" setsid timeout --kill-after=10 "$limit" "$electron" "${x11[@]}" \
+    env "${env_run[@]}" setsid timeout --kill-after=10 "$limit" "$electron" "${switches[@]}" \
         "$here/out/main/index.js" --views-check "${setting_args[@]}" "${check_args[@]}" \
         "--user-data-dir=$profile" &
     group=$!

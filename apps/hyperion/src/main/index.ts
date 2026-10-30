@@ -33,6 +33,7 @@ import {
   GPU_TIMING_SWITCH,
   launchModeOf,
   SAFE_MODE_SWITCH,
+  SOFTWARE_MODE_SWITCH,
 } from "./graphics/switches";
 import { isOwnPage } from "./ipcSender";
 import { reduceTraceFile } from "./reduceTrace";
@@ -46,8 +47,15 @@ import {
 import { LoadSampler } from "./sizesResults";
 import { launchSwitches, registerSpikeHandlers, SpikeTrace } from "./spike";
 import { SpikeSession } from "./spikeSession";
-import { reduceWindowFile, registerViewsCheckHandlers, ViewsCheckSession } from "./viewsCheck";
+import {
+  reduceWindowFile,
+  registerViewsCheckHandlers,
+  viewsCheckDirs,
+  ViewsCheckSession,
+  viewsCheckWatchdogMs,
+} from "./viewsCheck";
 import { GpuProcessMonitor } from "./graphics/gpuProcessMonitor";
+import { softwareModeRefusal } from "./graphics/softwareMode";
 import { x11RelaunchArgs } from "./graphics/x11Relaunch";
 import { isSafeExternalUrl, isSameDocument } from "./navigation";
 import { denyPermissionRequests } from "./permissions";
@@ -395,65 +403,6 @@ const VIEWS_CHECK_HIDDEN_ENV = "HYPERION_VIEWS_CHECK_HIDDEN";
 const RIGHT_WAY_UP_TIMEOUT_MS = 180_000;
 
 /**
- * Where a views check writes, from the repository's root: T20's under `target/views-check/` for a
- * smoke and `docs/measurements/several-views/` otherwise, the terrain run's (R10.T16.d;
- * decision-r10-t16-contracts §6), and its hand-over check's beside it (R10.T10.g), under
- * `target/views-check/terrain/` and `docs/measurements/terrain-check/`, and the atmosphere run's
- * (plan R08, R08.T10.b) under `target/views-check/atmosphere/` and
- * `docs/measurements/atmosphere-flight/`; the captures under the smoke's directory either way.
- */
-function viewsCheckDirs(launch: ViewsCheckLaunch): {
-  readonly out: string;
-  readonly captures: string;
-} {
-  let dirs: { readonly smoke: string; readonly full: string };
-  switch (launch.run) {
-    case "several-views":
-      dirs = { smoke: "target/views-check", full: "docs/measurements/several-views" };
-      break;
-    case "terrain":
-    case "handover":
-      dirs = { smoke: "target/views-check/terrain", full: "docs/measurements/terrain-check" };
-      break;
-    case "atmosphere":
-      dirs = {
-        smoke: "target/views-check/atmosphere",
-        full: "docs/measurements/atmosphere-flight",
-      };
-      break;
-  }
-  return { out: launch.smoke ? dirs.smoke : dirs.full, captures: dirs.smoke };
-}
-
-/**
- * How long a views check may take before the main process ends it with status 3: T20's smoke 4
- * minutes and its full run 20; the terrain run's smoke, whose loss phase plays its script to the
- * field's revision rise at 120 s, 8 minutes, and its full run, three phases of about five minutes
- * each, 30; its hand-over check (R10.T10.g), three looks of about 3.5 minutes (a smoke's about one),
- * takes the same, and 15 minutes more on a served world (R10.T15.b), whose body's coarse field the
- * server computes, about a minute at level 8 (R09.T16.a), and sends whole, some 15 MB, once to read
- * the world and once to each look's session; the atmosphere run's (plan R08, R08.T10.b), its media
- * awaited and a flight to four air fixtures and the seat's night, 8 and 15.
- */
-function viewsCheckWatchdogMs(launch: ViewsCheckLaunch): number {
-  let ms: number;
-  switch (launch.run) {
-    case "several-views":
-      ms = launch.smoke ? 240_000 : 20 * 60_000;
-      break;
-    case "terrain":
-    case "handover":
-      ms =
-        (launch.smoke ? 8 * 60_000 : 30 * 60_000) + (launch.served === undefined ? 0 : 15 * 60_000);
-      break;
-    case "atmosphere":
-      ms = launch.smoke ? 8 * 60_000 : 15 * 60_000;
-      break;
-  }
-  return ms;
-}
-
-/**
  * Asks the person at a shown check whether every view is the right way up (R07.T20).
  *
  * @remarks
@@ -496,7 +445,7 @@ function startViewsCheckSession(
   const startedAt = new Date();
   const stamp = startedAt.toISOString().replaceAll(/[-:]/g, "").slice(0, 15);
   const repo = process.cwd();
-  const dirs = viewsCheckDirs(launch);
+  const dirs = viewsCheckDirs(launch, graphics.launchMode);
   const checkSession = new ViewsCheckSession({
     launch,
     describe: async () => ({
@@ -564,10 +513,13 @@ function startViewsCheckSession(
       checkSession.gpuProcessGone();
     }
   });
-  const watchdog = setTimeout(() => {
-    process.stdout.write("views check: WATCHDOG the run did not end\n");
-    app.exit(3);
-  }, viewsCheckWatchdogMs(launch));
+  const watchdog = setTimeout(
+    () => {
+      process.stdout.write("views check: WATCHDOG the run did not end\n");
+      app.exit(3);
+    },
+    viewsCheckWatchdogMs(launch, graphics.launchMode),
+  );
   app.once("will-quit", () => {
     clearTimeout(watchdog);
   });
@@ -587,6 +539,11 @@ function startViewsCheckSession(
  * Sets up the GPU before `ready`: relaunches a Wayland session through XWayland, or puts the
  * launch's graphics switches on the command line.
  *
+ * @remarks
+ * With the software switch (plan R01, R01.T16) there is no relaunch, no switch of the client's and
+ * no timing toggle: the check runs on the command line's own SwiftShader and headless switches,
+ * and a relaunch's `--ozone-platform=x11` would win over headless Ozone.
+ *
  * @returns The launch's graphics set-up, or `undefined` once a relaunch has been asked for and this
  * process is exiting.
  */
@@ -596,8 +553,11 @@ function prepareGraphics(
 ):
   | { readonly graphics: GraphicsLaunch; readonly switches: ReadonlyArray<ChromiumSwitch> }
   | undefined {
+  const software = app.commandLine.hasSwitch(SOFTWARE_MODE_SWITCH);
   // `process.argv.slice(1)`: Electron supplies the executable itself (R01 Design note 3).
-  const relaunchArgs = x11RelaunchArgs(process.argv.slice(1), process.env, process.platform);
+  const relaunchArgs = software
+    ? undefined
+    : x11RelaunchArgs(process.argv.slice(1), process.env, process.platform);
   if (relaunchArgs !== undefined) {
     app.relaunch({ args: [...relaunchArgs] });
     app.exit(0);
@@ -606,7 +566,10 @@ function prepareGraphics(
   // Without it Chromium blocked WebGPU for the page after the second GPU-process crash, so the
   // client never got the chance to report and recover (R01 Design note 6).
   app.disableDomainBlockingFor3DAPIs();
-  const mode = launchModeOf(process.platform, app.commandLine.hasSwitch(SAFE_MODE_SWITCH));
+  const mode = launchModeOf(process.platform, {
+    safe: app.commandLine.hasSwitch(SAFE_MODE_SWITCH),
+    software,
+  });
   // The timing toggle is one of the forced path's switches: nothing else lifts the quantization.
   // A spike run always asks for it (T14.b's `launchSwitches`), and so does a views check (R07.T20).
   const gpuTiming =
@@ -624,6 +587,17 @@ async function main(): Promise<void> {
   // Before the app is ready, so that `--help` and a usage error answer without a window appearing.
   const args = resolveArgs();
   if (args === undefined) {
+    return;
+  }
+  // The check-only software mode is a views check's alone, never a player's (plan R01, R01.T16).
+  const softwareRefusal = softwareModeRefusal({
+    software: app.commandLine.hasSwitch(SOFTWARE_MODE_SWITCH),
+    packaged: app.isPackaged,
+    viewsCheck: args.viewsCheck !== undefined,
+  });
+  if (softwareRefusal !== null) {
+    process.stderr.write(`${softwareRefusal}\n`);
+    app.exit(2);
     return;
   }
   const serverUrl = serverUrlOf(args);

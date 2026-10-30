@@ -42,6 +42,37 @@ describe("the graphics launch hand-off", () => {
   it("carries nothing for a plain Vulkan launch", () => {
     expect(graphicsArguments("vulkan", false)).toEqual([]);
   });
+
+  it("is software on Linux only with its switch (R01.T16)", () => {
+    const argv = [...RENDERER_ARGV, ...graphicsArguments("software", false)];
+    expect(graphicsArguments("software", false)).toEqual(["--hyperion-graphics-software"]);
+    expect(graphicsLaunchFromArgv(argv, "linux").launchMode).toBe("software");
+    expect(graphicsLaunchFromArgv(argv, "win32").launchMode).toBe("default");
+  });
+
+  it("reports no timing in software mode, whatever the switch", () => {
+    const timed = [...RENDERER_ARGV, ...graphicsArguments("software", true)];
+    expect(graphicsLaunchFromArgv(timed, "linux")).toEqual({
+      launchMode: "software",
+      gpuTiming: false,
+    });
+  });
+
+  it("carries the vulkan, safe and default launches' arguments as before", () => {
+    expect([
+      graphicsArguments("vulkan", true),
+      graphicsArguments("safe", false),
+      graphicsArguments("safe", true),
+      graphicsArguments("default", false),
+      graphicsArguments("default", true),
+    ]).toEqual([
+      ["--hyperion-gpu-timing"],
+      ["--hyperion-graphics-safe"],
+      ["--hyperion-graphics-safe", "--hyperion-gpu-timing"],
+      [],
+      ["--hyperion-gpu-timing"],
+    ]);
+  });
 });
 
 describe("reading a crash report", () => {

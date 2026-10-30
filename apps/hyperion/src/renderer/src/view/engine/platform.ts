@@ -4,9 +4,12 @@
  * @remarks
  * The client requests its own adapter and hands it to the engine (R01 Design note 24), so that
  * every adapter the engine sees has been summarised and, if it is a software one, refused the
- * photorealistic style (Design note 8). An adapter is consumed by its first `requestDevice`, so a
- * rebuild after a device loss asks for a fresh one here and never reuses the old one.
+ * photorealistic style (Design note 8) in every launch mode but the check-only software mode
+ * (R01.T16). An adapter is consumed by its first `requestDevice`, so a rebuild after a device loss
+ * asks for a fresh one here and never reuses the old one.
  */
+
+import type { GraphicsLaunchMode } from "../../../../preload/api";
 
 /** Who made the adapter and whether it is a software one. */
 export interface AdapterSummary {
@@ -46,7 +49,13 @@ export interface StyleAvailability {
   readonly photorealistic: boolean;
 }
 
-/** What asking for an adapter gave. */
+/**
+ * What asking for an adapter gave.
+ *
+ * @remarks
+ * The styles it may draw are the launch's to decide from its summary ({@link styleAvailability}),
+ * since the check-only software mode draws both on a fallback adapter (R01.T16).
+ */
 export type AdapterOutcome =
   /** `navigator.gpu` is absent. */
   | { readonly kind: "no-webgpu" }
@@ -57,7 +66,6 @@ export type AdapterOutcome =
       readonly adapter: GPUAdapter;
       readonly summary: AdapterSummary;
       readonly capabilities: GpuCapabilities;
-      readonly styles: StyleAvailability;
     };
 
 /**
@@ -170,13 +178,30 @@ export function featuresNotEnabled(
 }
 
 /**
- * The styles an adapter may draw.
+ * Whether a launch takes a fallback adapter as it takes a hardware one: only the check-only
+ * software mode does (R01.T16).
  *
- * @returns The wireframe always; the photorealistic style only on a hardware adapter, since the
- * brainstorm confines the software adapter's refusal to that style (R01 Design note 8).
+ * @remarks
+ * The owner's test-tool exception to R01 Design note 8 (2026-10-29). The mode comes from the main
+ * process's own switch, which it refuses without `--views-check` and in a packaged build, never
+ * from the adapter, so a failed hardware path never draws the photorealistic style on SwiftShader.
  */
-export function styleAvailability(summary: AdapterSummary): StyleAvailability {
-  return { wireframe: true, photorealistic: !summary.fallback };
+export function takesFallbackAdapter(launchMode: GraphicsLaunchMode): boolean {
+  return launchMode === "software";
+}
+
+/**
+ * The styles an adapter may draw in a launch.
+ *
+ * @returns The wireframe always; the photorealistic style on a hardware adapter, since the
+ * brainstorm confines the software adapter's refusal to that style (R01 Design note 8), and on a
+ * fallback one only where {@link takesFallbackAdapter}.
+ */
+export function styleAvailability(
+  summary: AdapterSummary,
+  launchMode: GraphicsLaunchMode,
+): StyleAvailability {
+  return { wireframe: true, photorealistic: !summary.fallback || takesFallbackAdapter(launchMode) };
 }
 
 /**
@@ -196,7 +221,7 @@ export async function requestAdapterOutcome(gpu: GPU | undefined): Promise<Adapt
     return { kind: "no-adapter" };
   }
   const { summary, capabilities } = summariseAdapter(adapter);
-  return { kind: "adapter", adapter, summary, capabilities, styles: styleAvailability(summary) };
+  return { kind: "adapter", adapter, summary, capabilities };
 }
 
 /**

@@ -14,6 +14,7 @@ import {
   NO_WINDOW_REASON,
   PHASE_VIEWS,
   type PhaseTraceFigures,
+  softwareViewsCheckFailures,
   type ViewsCheckInput,
   viewsCheckMarkdown,
   writeViewsCheckResults,
@@ -411,6 +412,41 @@ function memoryFiles(
     },
   };
 }
+
+describe("a software run's judgement (R01.T16)", () => {
+  it("passes a run with every primary as asked and no GPU-process exit", () => {
+    expect(softwareViewsCheckFailures(buildViewsCheckResults(input()))).toBeNull();
+  });
+
+  it("fails a run whose GPU process exited", () => {
+    const results = buildViewsCheckResults(input({ gpuProcessExits: 2 }));
+    expect(softwareViewsCheckFailures(results)).toBe("2 exits of the GPU process");
+  });
+
+  it("fails a phase whose photorealistic primary went back to the wireframe", () => {
+    const record: ViewsCheckRecord = {
+      ...RECORD,
+      phases: PHASES.map((name) =>
+        name === "photoreal-two-wireframe"
+          ? phaseRecord(name, ["wireframe", "wireframe", "wireframe"])
+          : phaseRecord(name),
+      ),
+    };
+    expect(softwareViewsCheckFailures(buildViewsCheckResults(input({ record })))).toBe(
+      "photoreal-two-wireframe's primary was drawn wireframe, not photorealistic",
+    );
+  });
+
+  it("fails a phase whose primary drew no view", () => {
+    const record: ViewsCheckRecord = {
+      ...RECORD,
+      phases: [phaseRecord("wireframe-alone", [])],
+    };
+    expect(softwareViewsCheckFailures(buildViewsCheckResults(input({ record })))).toBe(
+      "wireframe-alone's primary was drawn in no style, not wireframe",
+    );
+  });
+});
 
 describe("writeViewsCheckResults", () => {
   it("names the files by date, machine and setting, numbering a second run", async () => {

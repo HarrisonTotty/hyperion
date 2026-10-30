@@ -170,6 +170,20 @@ describe("GraphicsPanel", () => {
     expect(reading("Mode")).toHaveTextContent("DEFAULT");
   });
 
+  it("names the check-only software mode, its software adapter and both styles (R01.T16)", async () => {
+    renderPanel("software", {
+      kind: "adapter-outcome",
+      outcome: await adapter(SWIFTSHADER_INFO, ["subgroups"]),
+    });
+    expect([
+      reading("Mode").textContent,
+      reading("Software Adapter").textContent,
+      reading("Styles").textContent,
+    ]).toEqual(["SOFTWARE", "YES", "WIREFRAME, PHOTOREALISTIC"]);
+    const panel = screen.getByRole("region", { name: "Graphics" });
+    expect(within(panel).queryByText(/^GRAPHICS /)).not.toBeInTheDocument();
+  });
+
   it.each([
     { setting: "high", words: "HIGH" },
     { setting: "low", words: "LOW" },

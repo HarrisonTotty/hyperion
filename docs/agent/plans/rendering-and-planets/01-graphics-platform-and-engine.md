@@ -853,7 +853,11 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
    undefined. Without the unsafe flag Chromium never hands out a CPU adapter, so in the client the
    refusal is a guard; the harness, which does set the flag, is where it is exercised. The wireframe
    stays available on a software adapter, as the brainstorm confines the refusal to the
-   photorealistic style.
+   photorealistic style. _Excepted by T16 (the owner's ruling, 2026-10-29): the check-only software
+   mode, a views check's on Linux under `viewsCheck.sh --software`, takes a fallback adapter as a
+   hardware one and draws both styles. It is chosen only by its switch, refused without
+   `--views-check` and in a packaged build, and named on the panel (`SOFTWARE`) and in the record
+   (`launchMode`), so no launch falls back to it silently; every other mode refuses as above._
 
 9. _Amended by Design note 24 (marked in RM1 validation, 2026-10-02): there is no Babylon, so
    `doNotHandleContextLost` and `engine._device` are gone. The engine watches its own device's
@@ -1282,7 +1286,8 @@ T1 and T2 are the main process and can run in parallel. T3 needs nothing. T4 fol
 preload fields) and T3; T5 follows T4. T6 (the interface, the memory types and kernel selection)
 follows T3 and T4; T7 (dependency and chunk) follows T6; T8 (the Babylon engine) follows T4 and T7,
 its subtasks in order; T9 (harness) follows T8; T10 (the toy kernel pairs)
-follows T9. T11–T13 are by hand, after T9. T14 closes. T15, added 2026-10-27, follows it.
+follows T9. T11–T13 are by hand, after T9. T14 closes. T15, added 2026-10-27, follows it. T16,
+added 2026-10-30, follows T2, T4 and T5, and nothing waits on it.
 
 Paths are under `apps/hyperion/` unless given in full.
 
@@ -1889,6 +1894,62 @@ waits on it.
   `view/photoreal/renderer.test.ts`.
 - **Acceptance:** `pnpm test` and `just test-render`, and the measurements recorded.
 
+### R01.T16 The check-only software launch mode
+
+New, 2026-10-30, from the research lane's advice on running `VIEW`'s checks in a pod (main's brief,
+2026-10-29). It follows T2, T4 and T5, and nothing waits on it.
+
+- **The ruling.** The owner's (2026-10-29): a check-only software mode is allowed, as a test-tool
+  exception to Design note 8. It is chosen only by an explicit switch from the views check's
+  script, refused in packaged and player launches, and named on the panel and in the record.
+  Main's rulings on the advice's leans: the panel's word is `SOFTWARE`, with a guide row beside
+  `DEFAULT`, `VULKAN` and `SAFE MODE`, and no banner of its own; a software run's records go under
+  `target/` only, never `docs/measurements/`; its waits stretch five times, fixed, not a variable.
+- **The mode.** `GraphicsLaunchMode` gains `software`, from `SOFTWARE_MODE_SWITCH`
+  (`hyperion-graphics-software`), on Linux only, as the safe mode: `launchModeOf(platform,
+{ safe, software })`, the safe switch winning. `graphicsArguments` and `graphicsLaunchFromArgv`
+  carry it to the preload; it has no timing. `graphicsSwitches` gives nothing for it and
+  `crashLoopDecision` `none`. The `GRAPHICS` panel's `Mode` reads `SOFTWARE`.
+- **The fallback gate.** `takesFallbackAdapter(launchMode)` holds in `software` mode alone.
+  `styleAvailability(summary, launchMode)` then offers the photorealistic style on a fallback
+  adapter, `conditionOf` takes the adapter as `nominal` with both styles, and `styleRefusals`
+  offers both. The mode reaches them from `window.hyperion.graphics.launchMode` through the status.
+  Every other mode refuses as before (`GRAPHICS SOFTWARE ADAPTER`).
+- **The launch** (`src/main/index.ts`). With the switch, `prepareGraphics` asks for no X11
+  relaunch, applies no switch and no timing toggle. `softwareModeRefusal` refuses it, exit 2 and one
+  usage line, without `--views-check` and in a packaged build. `viewsCheckDirs` writes a software
+  run under the smoke's directory, a full run's included; `viewsCheckWatchdogMs` is five times as
+  long.
+- **The waits.** `check/softwareTiming.ts`: in `software` mode the views check's `waitMs`, the
+  atmosphere run's `waitMs` and `settleMaxMs`, the terrain run's `waitMs` and `restoreMs` and the
+  hand-over check's `waitMs` and `overrunMs` are five times as long; the measured windows, settles,
+  holds and script times are not. `ViewsCheckRunner` takes the launch's mode.
+- **The script.** `viewsCheck.sh --software`: Linux only (exit 2 elsewhere), implying `--hidden`,
+  in `testRender.sh`'s environment (`DISPLAY`, `WAYLAND_DISPLAY` and `XDG_SESSION_TYPE` unset, the
+  session's D-Bus out of reach), with `testRender.sh`'s adapter and headless switches,
+  `--hyperion-graphics-software`, `--ozone-override-screen-size=1920,1080` and
+  `--disable-gpu-watchdog`, never `--ozone-platform=x11`, and each launch's limit five times as
+  long.
+- **Judged (the advice's F1).** In `software` mode a GPU-process exit, or a phase whose primary was
+  not drawn in the style it asks for, fails the several-views check (`softwareViewsCheckFailures`).
+  The atmosphere run (R08.T10.g), the terrain run and the hand-over check already judge both on
+  every machine. Hardware runs of the several-views check stay recorded, not judged.
+- **Tests:** the mode, its switch and its hand-off, and `vulkan`, `safe` and `default` as before;
+  no switch and no relaunch decision for it; the fallback gate both ways, in the status, the
+  styles, the refusals, the panel and the header strip; the refusal; the directories and the
+  watchdog; the waits' factor, through the runner and alone; the judgement and the session's end;
+  the script's arguments, environment, limit and refusal off Linux with the stand-in Electron, and
+  its SwiftShader switches held equal to `testRender.sh`'s.
+- **Files:** `preload/{api,graphicsLaunch}.ts`, `main/graphics/{switches,crashLoop,softwareMode}.ts`,
+  `main/{index,viewsCheck,viewsCheckResults}.ts`, `smoke/main.ts`,
+  `renderer/src/view/engine/{platform,status}.ts`, `renderer/src/smoke/page.ts`,
+  `renderer/src/displays/view/styleRefusals.ts`, `renderer/src/displays/view/check/{ViewsCheckRunner.tsx,softwareTiming.ts}`,
+  `renderer/src/components/GraphicsPanel.tsx`, `renderer/src/App.tsx`, `scripts/viewsCheck.sh`,
+  their tests, and the guide's mode rows.
+- **Acceptance:** `pnpm test`; in a pod, `just views-check --atmosphere --software --smoke`,
+  `just views-check --software --smoke` and `just views-check --terrain --software --smoke` pass,
+  each run's time, exit and faults recorded, and their captures looked at by eye.
+
 ## Verification
 
 - **Platform, automatic:** the switch builder's tests (no unsafe flag, merged values, safe mode),
@@ -1910,8 +1971,8 @@ waits on it.
 No change to generated output and no bump: nothing here touches `hyperion-sim`. Nothing on the wire
 changes and `PROTOCOL_VERSION` stays at 2. The plan reserves the `view/engine/` directory, the
 `WGSL_CATALOGUE` into which later plans register every shader so that the offline test covers it,
-the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe` and
-`hyperion-gpu-timing`.
+the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe`,
+`hyperion-graphics-software` (T16) and `hyperion-gpu-timing`.
 
 ## Risks and open points
 
