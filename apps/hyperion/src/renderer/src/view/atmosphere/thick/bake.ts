@@ -19,12 +19,19 @@
  * absorber's amount divided by s_b, so that its vertical optical depth is the reference's over s_b.
  *
  * **The beam** is pseudo-spherical (`sphericalBeam.ts`, Dahlback and Stamnes 1991) on the band's
- * sphere, at each of {@link THICK_BAKE_GRID}'s μ₀ in (0, 1]: the domain the solver takes, on which
- * the beam is defined at every height, since a ray with μ₀ > 0 climbs from its point and never
- * meets the ground. A sun at or below a point's horizontal (μ₀ ≤ 0, twilight's lit upper air
- * included) is outside the table, and its read is R08.T14.c's and T14.d's to judge (R. P. Loughman
- * et al., JGR 109 (2004) D06303: plane-parallel diffuse fields read up to 8% high at 60 km tangent
- * height in Earth's limb, which Design note 9 takes as its warning for Titan).
+ * sphere, at each of {@link THICK_BAKE_GRID}'s μ₀ in (0, 1]: a ray with μ₀ > 0 climbs from its
+ * point and never meets the ground, so the beam is defined at every height. A grid may also hold
+ * μ₀ in [−1, 0), a sun below the point's horizontal (R08.T14.d.2): the beam then crosses the column
+ * under each lit interface twice, through its tangent point, and is 0 in the planet's shadow, where
+ * the solve's diffuse field from the lit air above remains, and a column whose top lies in the
+ * shadow (μ₀ below −√(1 − (R ÷ (R + h_top))²)) holds no light at all. {@link THICK_BAKE_GRID} holds
+ * none of those rows yet: a source at or below the horizontal is read by the analytic term
+ * (R08.T14.c), and the table's rows below it wait on main's ruling on the prototype's gates (plan
+ * R08's record of T14.d.2). Past about 90° the pseudo-spherical solve is not demonstrated
+ * (libRadtran's guide, §2.2.1; zenith-sky models agree within 6.6% only up to 94°, F. Hendrick et
+ * al., ACP 6 (2006) 93), and R. P. Loughman et al., JGR 109 (2004) D06303, find plane-parallel
+ * diffuse fields up to 8% high at 60 km tangent height in Earth's limb, which Design note 9 takes as
+ * its warning for Titan.
  *
  * **Delta-M** (W. J. Wiscombe, J. Atmos. Sci. 34 (1977) 1408–1422) on each layer's mixed moments,
  * 16 streams in all ({@link THICK_BAKE_STREAMS}, `aerosol.ts`'s `deltaMTruncation(…, 8)`): f = χ₁₆,
@@ -168,7 +175,7 @@ export interface ThickBakeGrid {
   readonly layers: number;
   /** The table holds every `altitudeStride`-th interface from the ground: L ÷ stride + 1 altitudes. */
   readonly altitudeStride: number;
-  /** μ₀, ascending in (0, 1]. */
+  /** μ₀, ascending in [−1, 1], none 0: below 0, a sun below the point's horizontal. */
   readonly sunCosines: Float64Array;
   /** The view cosines of one hemisphere, ascending in (0, 1]: each is stored upward and downward. */
   readonly upwardCosines: Float64Array;
@@ -178,7 +185,8 @@ export interface ThickBakeGrid {
  * Design note 9's grid: 64 layers, 33 altitudes (every second interface from the ground), 32 μ₀
  * and 16 μ_v, each at the centre of its cell of an even division, μ₀ = (s + ½) ÷ 32 and
  * μ_v = ±(v + ½) ÷ 8, so that a texture's linear filter with clamped edges reads the table at its
- * cells' centres (the read is R08.T14.c's).
+ * cells' centres (the read is R08.T14.c's). Its μ₀ lie above the horizontal: the rows below it
+ * (R08.T14.d.2) wait on main's ruling on the prototype's gates (plan R08's record of T14.d.2).
  */
 export const THICK_BAKE_GRID: ThickBakeGrid = {
   layers: 64,
@@ -300,7 +308,7 @@ export interface MsSourceTable {
   readonly band: ThickBakeBand;
   /** The table's altitudes, h\* above the ground, m, ascending: interfaces of the solve's layers. */
   readonly altitudesM: Float64Array;
-  /** μ₀, ascending in (0, 1]. */
+  /** μ₀, ascending: the grid's, in (0, 1] on {@link THICK_BAKE_GRID}. */
   readonly sunCosines: Float64Array;
   /**
    * The cosines of the light's direction of travel, positive upward, ascending: the downward
@@ -823,8 +831,9 @@ export function prepareBake(
 
 /**
  * Checks a bake's grid and lights against its column, as {@link prepareBake} does first: whole
- * strides, cosines in (0, 1], and each light's absorbers' curves one a column's absorber term of
- * its kind, with pressure rows only where the column has a pressure profile.
+ * strides, sun cosines in [−1, 1] other than 0 (below 0 a sun below the horizontal, R08.T14.d.2),
+ * view cosines in (0, 1], and each light's absorbers' curves one a column's absorber term of its
+ * kind, with pressure rows only where the column has a pressure profile.
  *
  * @throws RangeError as {@link prepareBake} does for them.
  */
@@ -840,9 +849,14 @@ export function checkBakeInputs(
   ) {
     throw new RangeError(`a bake's ${layers} layers take whole strides, not ${altitudeStride}`);
   }
-  for (const mu of [...grid.sunCosines, ...grid.upwardCosines]) {
+  for (const mu of grid.sunCosines) {
+    if (!(mu >= -1 && mu <= 1 && mu !== 0)) {
+      throw new RangeError(`a bake's sun cosines lie in [−1, 1] and are not 0, not ${mu}`);
+    }
+  }
+  for (const mu of grid.upwardCosines) {
     if (!(mu > 0 && mu <= 1)) {
-      throw new RangeError(`a bake's cosines lie in (0, 1], not ${mu}`);
+      throw new RangeError(`a bake's view cosines lie in (0, 1], not ${mu}`);
     }
   }
   const absorberIndices = absorberTermsOf(column);

@@ -18,7 +18,7 @@ import {
   type PhaseMatrixTable,
   phaseTable,
 } from "../medium";
-import { bakeMultipleScattering, prepareBake, THICK_BAKE_GRID } from "./bake";
+import { bakeMultipleScattering, prepareBake, THICK_BAKE_GRID, thickBakeBands } from "./bake";
 import {
   lightOf,
   titanClassFixture,
@@ -524,6 +524,57 @@ describe("the depolarisers (test 3)", () => {
       },
     );
   }
+});
+
+describe("the correction below the horizontal (R08.T14.d.2)", () => {
+  /** The Titan-class column's grid: a μ₀ past its top's shadow, two below the horizontal, one above. */
+  const twilightGrid = once(() => {
+    const fixture = titanClassFixture();
+    const band = thickBakeBands(fixture.body)[0];
+    if (band === undefined) {
+      throw new Error("Titan has one band");
+    }
+    const r = band.bottomRadiusM;
+    const limit = -Math.sqrt(1 - (r / (r + fixture.column.topHeightM)) ** 2);
+    return { ...THICK_BAKE_GRID, sunCosines: Float64Array.of(limit - 0.05, -0.1, -1 / 64, 0.5) };
+  });
+  /** Its correction's values, each with its sun cosine's index, under `matrices`. */
+  const correctionOf = (
+    matrices: "depolarising" | undefined,
+  ): ReadonlyArray<{ readonly value: number; readonly sun: number }> => {
+    const fixture = titanClassFixture();
+    const grid = twilightGrid();
+    const prepared = preparePolarisation(fixture.column, [lightOf(fixture)], {
+      grid,
+      ...(matrices === undefined ? {} : { matrices }),
+    });
+    const values = bakePolarisationCorrection(prepared, fixture.body, 0).slots[0]?.values ?? [];
+    const perSun = 2 * grid.upwardCosines.length * POLARISATION_MODES * 3;
+    return Array.from(values, (value, i) => ({
+      value,
+      sun: Math.floor(i / perSun) % grid.sunCosines.length,
+    }));
+  };
+  const polarised = once(() => correctionOf(undefined));
+
+  it("is finite at every sun cosine", { timeout: COLUMN_TIMEOUT_MS }, () => {
+    expect(polarised().every(({ value }) => Number.isFinite(value))).toBe(true);
+  });
+
+  it("is formed below the horizontal", { timeout: COLUMN_TIMEOUT_MS }, () => {
+    const below = polarised().filter(({ sun }) => sun === 1 || sun === 2);
+    expect(below.some(({ value }) => value !== 0)).toBe(true);
+  });
+
+  it("is 0 past the shadow of the table's top", { timeout: COLUMN_TIMEOUT_MS }, () => {
+    const past = polarised().filter(({ sun }) => sun === 0);
+    expect(Math.max(...past.map(({ value }) => Math.abs(value)))).toBe(0);
+  });
+
+  it("is 0 to 10⁻¹² with every term a depolariser", { timeout: COLUMN_TIMEOUT_MS }, () => {
+    const largest = Math.max(...correctionOf("depolarising").map(({ value }) => Math.abs(value)));
+    expect(largest).toBeLessThan(1e-12);
+  });
 });
 
 describe("the 8-stream correction against a 16-stream vector solve (test 4)", () => {

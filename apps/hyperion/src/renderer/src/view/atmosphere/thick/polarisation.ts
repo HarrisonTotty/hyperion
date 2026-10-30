@@ -555,7 +555,11 @@ export interface PolarisedProblem {
    * alone by its ρ^m and Q, U and V not at all.
    */
   readonly groundReflectance?: GroundReflectance;
-  /** μ₀ of each beam, in (0, 1]: an unpolarised beam of flux 1 normal to itself. */
+  /**
+   * μ₀ of each beam, in (0, 1], or in [−1, 0] for a beam below the horizontal, which needs its
+   * path and never reaches the ground (`discreteOrdinates.ts`'s `DiscreteOrdinatesProblem`): an
+   * unpolarised beam of flux 1 normal to itself.
+   */
   readonly beamCosines: ArrayLike<number>;
   /** The user cosines, in (0, 1]: each is solved upward and downward. */
   readonly userCosines: ArrayLike<number>;
@@ -2972,8 +2976,12 @@ export interface PolarisationSlot {
  * sense does not matter here. Stored per channel, from a solve at the channel's own wavelength, and
  * multiplied by the star's colour as every table is.
  *
- * **The beam.** μ₀ ∈ (0, 1], where the pseudo-spherical beam is defined at every height: no entry
- * is set to 0 for want of a beam, and μ₀ ≤ 0 lies outside the table (R08.T14.c and T14.d judge it).
+ * **The beam.** μ₀ ∈ (0, 1] on `bake.ts`'s `THICK_BAKE_GRID`, where the pseudo-spherical beam is
+ * defined at every height: no entry is set to 0 for want of a beam. A grid may also hold μ₀ in
+ * [−1, 0) (R08.T14.d.2), where the same beam as the scalar bake's crosses the column under each lit
+ * interface twice and is 0 in the planet's shadow (`sphericalBeam.ts`), so that ΔJ_pol is formed
+ * there too, in place of T14.e's 0 where the beam is undefined; the table's rows below the
+ * horizontal wait on main's ruling on the prototype's gates (plan R08's record of T14.d.2).
  *
  * **Size.** 33 × 32 × 16 × 3 × 3 values a band and slot, 608,256 B as `f32` (R08.T14.f's packing,
  * as `rgba16float` RGB, is 304,128 B before any padding to four channels).
@@ -2982,7 +2990,7 @@ export interface PolarisationTable {
   readonly band: ThickBakeBand;
   /** h\* above the ground, m, ascending: the thick bake's altitudes. */
   readonly altitudesM: Float64Array;
-  /** μ₀, ascending in (0, 1]. */
+  /** μ₀, ascending: the grid's, in (0, 1] on `bake.ts`'s `THICK_BAKE_GRID`. */
   readonly sunCosines: Float64Array;
   /** The travel cosines, positive upward, ascending: the downward half, then the upward. */
   readonly travelCosines: Float64Array;
@@ -3134,8 +3142,13 @@ function prepareBeams(
     moments: [1],
   }));
   return cosines.map((cosine, b) => {
-    requireIn("beamCosine", cosine, (v) => v > 0 && v <= 1, "in (0, 1]");
-    const path = paths?.[b] ?? planeParallelBeam(plain, cosine);
+    const given = paths?.[b];
+    if (given === undefined) {
+      requireIn("beamCosine", cosine, (v) => v > 0 && v <= 1, "in (0, 1] without a path");
+    } else {
+      requireIn("beamCosine", cosine, (v) => v >= -1 && v <= 1, "in [−1, 1]");
+    }
+    const path = given ?? planeParallelBeam(plain, cosine);
     const topTransmission = Float64Array.from(path.topTransmission);
     const slantFactor = Float64Array.from(path.slantFactor);
     if (topTransmission.length !== layers.length || slantFactor.length !== layers.length) {
@@ -3147,10 +3160,14 @@ function prepareBeams(
     slantFactor.forEach((lambda) => {
       requireIn(`beam ${b}'s slantFactor`, lambda, (v) => v > 0, "positive and finite");
     });
+    // A beam at or below the horizontal never reaches the ground, which lies in the planet's
+    // shadow (`discreteOrdinates.ts`'s `preparedBeam`).
     const last = layers.length - 1;
     const groundTransmission =
-      at(topTransmission, last) *
-      Math.exp(-at(slantFactor, last) * (layers[last]?.opticalDepth ?? Number.NaN));
+      cosine > 0
+        ? at(topTransmission, last) *
+          Math.exp(-at(slantFactor, last) * (layers[last]?.opticalDepth ?? Number.NaN))
+        : 0;
     return { index: b, cosine, topTransmission, slantFactor, groundTransmission };
   });
 }

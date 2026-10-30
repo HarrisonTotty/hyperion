@@ -35,6 +35,7 @@ import {
   wignerD,
 } from "./polarisation";
 import { phaseMoments } from "./spectralColumn";
+import { sphericalBeamPath } from "./sphericalBeam";
 
 /** An array's entry, or a test failure. */
 function entry(values: ArrayLike<number>, i: number): number {
@@ -706,6 +707,104 @@ describe("the depolarisers (test 3)", () => {
     });
     // Measured 1.1 × 10⁻¹⁴ of the largest I (2026-10-27).
     expect(worst).toBeLessThan(1e-12 * largest);
+  });
+});
+
+/** An exponential air's share of its column above a height: a scale height of 8 km. */
+function exponentialAbove(heightM: number): number {
+  return Math.exp(-heightM / 8_000);
+}
+
+describe("a beam below the horizontal (R08.T14.d.2)", () => {
+  // An exponential air of 16 layers over Earth's radius, τ 0.3 in all, its scale height 8 km; at
+  // μ₀ −1/64 the shadow's edge cuts the lowest layer, at −0.1 the 11th.
+  const radiusM = 6_371_000;
+  const heights = Float64Array.from({ length: 17 }, (_, k) => 100_000 * (1 - k / 16));
+  const whole = exponentialAbove(0) - exponentialAbove(100_000);
+  const depths = Float64Array.from(
+    { length: 16 },
+    (_, p) =>
+      (0.3 * (exponentialAbove(entry(heights, p + 1)) - exponentialAbove(entry(heights, p)))) /
+      whole,
+  );
+  const beamCosines = [-1 / 64, -0.1];
+  const beamPaths = beamCosines.map((mu0) => sphericalBeamPath(radiusM, heights, depths, mu0));
+  const common = {
+    groundAlbedo: 0,
+    beamCosines,
+    userCosines: [0.05, 0.5],
+    maxMode: 2,
+    streams: 16,
+    beamPaths,
+  };
+
+  it("conserves the beam its path deposits to 10⁻⁶ at ω 1 on Rayleigh air", () => {
+    const solution = solvePolarised({
+      ...common,
+      layers: Array.from(depths, (tau) => conservative(rayleigh(0.03), tau)),
+    });
+    solution.beams.forEach((beam, b) => {
+      const path = beamPaths[b];
+      if (path === undefined) {
+        throw new Error(`no path ${b}`);
+      }
+      const deposited = Array.from(depths).reduce((sum, tau, p) => {
+        const lambda = entry(path.slantFactor, p);
+        return sum + (entry(path.topTransmission, p) * -Math.expm1(-lambda * tau)) / lambda;
+      }, 0);
+      const { diffuseUp, diffuseDown, direct } = beam.fluxes;
+      const out = entry(diffuseUp, 0) + entry(diffuseDown, depths.length);
+      expect(Math.abs(out - deposited)).toBeLessThanOrEqual(1e-6 * deposited);
+      expect(Math.abs(entry(direct, depths.length))).toBe(0);
+    });
+  });
+
+  it("gives the scalar solver's I through the depolarisers to 10⁻¹², over a ground of albedo 0.3", () => {
+    const hg = Array.from({ length: 16 }, (_, l) => 0.75 ** l);
+    const layers = Array.from(depths, (tau, p): OrdinateLayer => ({
+      opticalDepth: tau,
+      singleScatteringAlbedo: p % 2 === 0 ? 0.999 : 0.9,
+      moments: p % 2 === 0 ? phaseMoments({ kind: "rayleigh", depolarisation: 0.03 }, 16) : hg,
+    }));
+    const scalar = solveDiscreteOrdinates({ ...common, groundAlbedo: 0.3, layers });
+    const vector = solvePolarised({
+      ...common,
+      groundAlbedo: 0.3,
+      layers: layers.map((layer) => ({
+        opticalDepth: layer.opticalDepth,
+        singleScatteringAlbedo: layer.singleScatteringAlbedo,
+        moments: depolarisingMoments(15, layer.moments),
+      })),
+    });
+    let worst = 0;
+    let largest = 0;
+    scalar.beams.forEach((beam, b) => {
+      beam.modes.forEach((mode, m) => {
+        const polarised = beamOf(vector, b).modes[m];
+        if (polarised === undefined) {
+          throw new Error(`no mode ${m}`);
+        }
+        const c = polarised.components;
+        for (const [one, other] of [
+          [mode.userUp, polarised.userUp],
+          [mode.userDown, polarised.userDown],
+        ] as const) {
+          one.forEach((value, k) => {
+            largest = Math.max(largest, Math.abs(value));
+            worst = Math.max(worst, Math.abs(value - entry(other, k * c)));
+          });
+        }
+      });
+    });
+    expect(largest).toBeGreaterThan(0);
+    expect(worst).toBeLessThan(1e-12 * largest);
+  });
+
+  it("refuses a cosine below the horizontal without its path", () => {
+    const { beamPaths: _paths, ...unpathed } = common;
+    expect(() =>
+      solvePolarised({ ...unpathed, layers: [conservative(rayleigh(0.03), 0.3)] }),
+    ).toThrow(/without a path/u);
   });
 });
 

@@ -210,9 +210,15 @@ describe("the thick bake on the thick fixtures", () => {
 });
 
 /** A small grid for the checks that need no full table. */
-function smallGrid(upwardCosines: Float64Array): ThickBakeGrid {
-  return { layers: 16, altitudeStride: 2, sunCosines: Float64Array.of(0.3, 0.7, 1), upwardCosines };
+function smallGrid(
+  upwardCosines: Float64Array,
+  sunCosines: Float64Array = Float64Array.of(0.3, 0.7, 1),
+): ThickBakeGrid {
+  return { layers: 16, altitudeStride: 2, sunCosines, upwardCosines };
 }
+
+/** Sun cosines below the horizontal and above it, Titan-class air's lit upper air at each (R08.T14.d.2). */
+const TWILIGHT_SUNS = Float64Array.of(-0.1, -1 / 64, 0.3, 1);
 
 /** A Rayleigh column of Titan's air, cheap to bake. */
 function rayleighColumn(): SpectralColumn {
@@ -239,46 +245,56 @@ function rayleighColumn(): SpectralColumn {
 const UNABSORBED: ThickBakeLight = { spectrum: planckBakeSpectrum(SUN_TEFF_K), absorbers: [] };
 
 describe("the stored source against the solver's own fields", () => {
-  it("integrates over all directions to σ_s times the diffuse field's whole mean intensity and the aureole, to 10⁻¹²", () => {
-    const fixture = titanClassFixture();
-    const quadrature = doubleGaussQuadrature(16);
-    const prepared = prepareBake(fixture.column, [lightOf(fixture)], smallGrid(quadrature.nodes));
-    const band = thickBakeBands(fixture.body)[0];
-    if (band === undefined) {
-      throw new Error("Titan has one band");
-    }
-    const bin = 13;
-    const terms = prepared.lights[0]?.bins[bin]?.terms ?? [];
-    const n = quadrature.nodes.length;
-    const suns = prepared.grid.sunCosines.length;
-    const views = 2 * n;
-    let worst = 0;
-    for (const term of terms) {
-      const solve = bakeBinSolve(prepared, band, bin, term);
-      for (const [a, point] of (prepared.pointOptics[bin] ?? []).entries()) {
-        const k = prepared.grid.layers - a * prepared.grid.altitudeStride;
-        for (let s = 0; s < suns; s += 1) {
-          let integral = 0;
-          for (let u = 0; u < n; u += 1) {
-            const cell = (a * suns + s) * views;
-            const up = solve.source[(cell + n + u) * THICK_BAKE_MODES] ?? Number.NaN;
-            const down = solve.source[(cell + n - 1 - u) * THICK_BAKE_MODES] ?? Number.NaN;
-            integral += 2 * Math.PI * (quadrature.weights[u] ?? Number.NaN) * (up + down);
+  it.each([
+    ["above the horizontal", Float64Array.of(0.3, 0.7, 1)],
+    ["below it too (R08.T14.d.2)", TWILIGHT_SUNS],
+  ] as const)(
+    "integrates over all directions to σ_s times the diffuse field's whole mean intensity and the aureole, to 10⁻¹², %s",
+    (_name, sunCosines) => {
+      const fixture = titanClassFixture();
+      const quadrature = doubleGaussQuadrature(16);
+      const prepared = prepareBake(
+        fixture.column,
+        [lightOf(fixture)],
+        smallGrid(quadrature.nodes, sunCosines),
+      );
+      const band = thickBakeBands(fixture.body)[0];
+      if (band === undefined) {
+        throw new Error("Titan has one band");
+      }
+      const bin = 13;
+      const terms = prepared.lights[0]?.bins[bin]?.terms ?? [];
+      const n = quadrature.nodes.length;
+      const suns = prepared.grid.sunCosines.length;
+      const views = 2 * n;
+      let worst = 0;
+      for (const term of terms) {
+        const solve = bakeBinSolve(prepared, band, bin, term);
+        for (const [a, point] of (prepared.pointOptics[bin] ?? []).entries()) {
+          const k = prepared.grid.layers - a * prepared.grid.altitudeStride;
+          for (let s = 0; s < suns; s += 1) {
+            let integral = 0;
+            for (let u = 0; u < n; u += 1) {
+              const cell = (a * suns + s) * views;
+              const up = solve.source[(cell + n + u) * THICK_BAKE_MODES] ?? Number.NaN;
+              const down = solve.source[(cell + n - 1 - u) * THICK_BAKE_MODES] ?? Number.NaN;
+              integral += 2 * Math.PI * (quadrature.weights[u] ?? Number.NaN) * (up + down);
+            }
+            const beam = solve.solution.beams[s];
+            const scaled = solve.scaledBeams[s]?.interfaceTransmission[k] ?? Number.NaN;
+            const kernel = solve.kernelBeams[s]?.interfaceTransmission[k] ?? Number.NaN;
+            const mean = (beam?.fluxes.meanIntensity[k] ?? Number.NaN) - scaled / (4 * Math.PI);
+            const expected =
+              point.scatteringPerM *
+              ((1 - point.forwardDelta) * 4 * Math.PI * mean +
+                point.kept * Math.max(scaled - kernel, 0));
+            worst = Math.max(worst, Math.abs(integral - expected) / Math.abs(expected));
           }
-          const beam = solve.solution.beams[s];
-          const scaled = solve.scaledBeams[s]?.interfaceTransmission[k] ?? Number.NaN;
-          const kernel = solve.kernelBeams[s]?.interfaceTransmission[k] ?? Number.NaN;
-          const mean = (beam?.fluxes.meanIntensity[k] ?? Number.NaN) - scaled / (4 * Math.PI);
-          const expected =
-            point.scatteringPerM *
-            ((1 - point.forwardDelta) * 4 * Math.PI * mean +
-              point.kept * Math.max(scaled - kernel, 0));
-          worst = Math.max(worst, Math.abs(integral - expected) / Math.abs(expected));
         }
       }
-    }
-    expect([terms.length > 1, worst < 1e-12]).toEqual([true, true]);
-  });
+      expect([terms.length > 1, worst < 1e-12]).toEqual([true, true]);
+    },
+  );
 
   it("is σ_s ∫ p I_d dΩ′ at each azimuth on a Rayleigh column, by a direct quadrature over the solver's own field, to 10⁻¹²", () => {
     const viewCosines = Float64Array.of(0.2, 0.6, 0.9);
@@ -501,18 +517,24 @@ describe("the bake's lights", () => {
 describe("the bake's refusals and ground", () => {
   const titanAir = once(() => titanClassFixture());
 
-  it("refuses a grid whose layers do not take whole strides, or whose cosines leave (0, 1]", () => {
+  it("refuses a grid whose layers do not take whole strides, or whose sun cosines leave [−1, 1] or hold 0", () => {
     const { column } = titanAir();
     const light = lightOf(titanAir());
     expect(() =>
       prepareBake(column, [light], { ...smallGrid(Float64Array.of(0.5)), layers: 15 }),
     ).toThrow(RangeError);
+    for (const sunCosines of [Float64Array.of(0, 1), Float64Array.of(-1.5, 1)]) {
+      expect(() =>
+        prepareBake(column, [light], { ...smallGrid(Float64Array.of(0.5)), sunCosines }),
+      ).toThrow(/sun cosines/u);
+    }
+  });
+
+  it("refuses a grid whose view cosines leave (0, 1]", () => {
+    const { column } = titanAir();
     expect(() =>
-      prepareBake(column, [light], {
-        ...smallGrid(Float64Array.of(0.5)),
-        sunCosines: Float64Array.of(0, 1),
-      }),
-    ).toThrow(RangeError);
+      prepareBake(column, [lightOf(titanAir())], smallGrid(Float64Array.of(-0.5))),
+    ).toThrow(/view cosines/u);
   });
 
   it("refuses a light whose absorbers' curves do not match the column's absorber terms", () => {
@@ -552,6 +574,74 @@ function uranusBody(): ThickBakeBody {
     bottomRadiusM: mediumTableRadiusM(figure),
   };
 }
+
+describe("the bake below the horizontal (R08.T14.d.2)", () => {
+  /** Titan-class Rayleigh air's bake at a μ₀ past its top's shadow, then {@link TWILIGHT_SUNS}. */
+  const twilight = once(() => {
+    const column = rayleighColumn();
+    const body = titanBody();
+    const band = thickBakeBands(body)[0];
+    if (band === undefined) {
+      throw new Error("Titan has one band");
+    }
+    // −√(1 − (R ÷ (R + h_top))²): the μ₀ past which the column's top lies in the planet's shadow.
+    const r = band.bottomRadiusM;
+    const limit = -Math.sqrt(1 - (r / (r + column.topHeightM)) ** 2);
+    const sunCosines = Float64Array.of(limit - 0.05, ...TWILIGHT_SUNS);
+    const views = Float64Array.of(0.2, 0.6, 0.9);
+    const prepared = prepareBake(column, [UNABSORBED], smallGrid(views, sunCosines));
+    const { values } = slotOf(bakeMultipleScattering(prepared, body, 0));
+    const perSun = 2 * views.length * THICK_BAKE_MODES * 3;
+    /** Each entry with its sun cosine's index and mode. */
+    const entries = Array.from(values, (value, i) => ({
+      value,
+      sun: Math.floor(i / perSun) % sunCosines.length,
+      mode: Math.floor(i / 3) % THICK_BAKE_MODES,
+    }));
+    return { entries, limit };
+  });
+
+  it("holds a finite J at every sun cosine", () => {
+    expect(twilight().entries.every(({ value }) => Number.isFinite(value))).toBe(true);
+  });
+
+  it("holds a J whose m = 0 is at least 0 below the horizontal and above it, and lit", () => {
+    const zeroth = twilight()
+      .entries.filter(({ sun, mode }) => sun > 0 && mode === 0)
+      .map(({ value }) => value);
+    const largest = Math.max(...zeroth);
+    expect([largest > 0, Math.min(...zeroth) >= -1e-12 * largest]).toEqual([true, true]);
+  });
+
+  it("joins J across the horizontal: at μ₀ ±10⁻⁶ every entry above 10⁻³ of the largest agrees to 10⁻³", () => {
+    const views = Float64Array.of(0.2, 0.6, 0.9);
+    const prepared = prepareBake(
+      rayleighColumn(),
+      [UNABSORBED],
+      smallGrid(views, Float64Array.of(-1e-6, 1e-6)),
+    );
+    const { values } = slotOf(bakeMultipleScattering(prepared, titanBody(), 0));
+    const perSun = 2 * views.length * THICK_BAKE_MODES * 3;
+    const largest = Math.max(...Array.from(values, Math.abs));
+    let worst = 0;
+    for (let i = 0; i < values.length; i += 2 * perSun) {
+      for (let j = 0; j < perSun; j += 1) {
+        const below = values[i + j] ?? Number.NaN;
+        const above = values[i + perSun + j] ?? Number.NaN;
+        if (Math.abs(above) >= 1e-3 * largest) {
+          worst = Math.max(worst, Math.abs(below - above) / Math.abs(above));
+        }
+      }
+    }
+    expect(worst).toBeLessThan(1e-3);
+  });
+
+  it("holds 0 past the shadow of the table's top", () => {
+    const { entries, limit } = twilight();
+    const past = entries.filter(({ sun }) => sun === 0).map(({ value }) => Math.abs(value));
+    expect([limit < -0.1, Math.max(...past)]).toEqual([true, 0]);
+  });
+});
 
 describe("the bake's latitude bands", () => {
   const prepared = once(() =>

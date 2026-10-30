@@ -242,9 +242,10 @@ function stackedLayering(above: BakeLayering, below: BakeLayering): BakeLayering
  * the deck's layers, and the upper medium's thick-bake preparation (the column's optics in the 15
  * bins, its table's point optics, and each light's exponential sums fitted over the whole column).
  *
- * @throws RangeError as `bake.ts`'s `prepareBake` refuses the grid or lights, for deck layers that
- *   are not a whole number of the grid's strides, for a split that does not lie above the floor and
- *   below the column's top, or as the column's optics refuse.
+ * @throws RangeError as `bake.ts`'s `prepareBake` refuses the grid or lights, for a grid with a sun
+ *   cosine at or below 0 (a sun below the horizontal over a deck is R08.T15.a.2's), for deck layers
+ *   that are not a whole number of the grid's strides, for a split that does not lie above the
+ *   floor and below the column's top, or as the column's optics refuse.
  */
 export function prepareDeck(
   column: SpectralColumn,
@@ -254,6 +255,15 @@ export function prepareDeck(
 ): PreparedDeck {
   const grid = options.grid ?? THICK_BAKE_GRID;
   checkBakeInputs(column, lights, grid);
+  // The bake takes a sun below the horizontal (R08.T14.d.2); over a deck that is R08.T15.a.2's.
+  // `bakeDeck` reads each sun's reflectance by its place among `groundCosinesOf`'s incident
+  // cosines, which hold the suns above the horizontal alone, and the upper medium stands on the
+  // deck's top, which such a sun may light where the solves hold the ground unlit.
+  if (grid.sunCosines.some((mu) => !(mu > 0))) {
+    throw new RangeError(
+      "a deck's sun cosines lie in (0, 1]: below the horizontal is R08.T15.a.2's",
+    );
+  }
   const deckLayers = options.deckLayers ?? DECK_LAYERS;
   if (!(
     Number.isInteger(deckLayers) &&

@@ -19,6 +19,7 @@ import {
   solveDiscreteOrdinates,
   solveLayerStack,
 } from "./discreteOrdinates";
+import { sphericalBeamPath } from "./sphericalBeam";
 
 /** Henyey–Greenstein's moments χ_l = g^l, l < count: the phase function cut at l = count − 1. */
 function henyeyGreenstein(g: number, count: number = DISCRETE_ORDINATE_STREAMS): Float64Array {
@@ -712,6 +713,122 @@ describe("the pseudo-spherical seam", () => {
     half.fluxes.diffuseUp.forEach((value, k) => {
       expect(value).toBeCloseTo(entry(implicit.fluxes.diffuseUp, k) / 2, 14);
     });
+  });
+});
+
+/** An exponential air's share of its column above a height: a scale height of 8 km. */
+function exponentialAbove(heightM: number): number {
+  return Math.exp(-heightM / 8_000);
+}
+
+describe("a beam below the horizontal (R08.T14.d.2)", () => {
+  // An exponential air of 64 layers over Earth's radius, τ 0.3 in all, its scale height 8 km.
+  const radiusM = 6_371_000;
+  const heights = Float64Array.from({ length: 65 }, (_, k) => 100_000 * (1 - k / 64));
+  const whole = exponentialAbove(0) - exponentialAbove(100_000);
+  const depths = Float64Array.from(
+    { length: 64 },
+    (_, p) =>
+      (0.3 * (exponentialAbove(entry(heights, p + 1)) - exponentialAbove(entry(heights, p)))) /
+      whole,
+  );
+  // μ₀ −1/64 puts the shadow's edge in the lowest layer, −0.1 in the 44th.
+  const beamCosines = [-1 / 64, -0.1];
+  const beamPaths = beamCosines.map((mu0) => sphericalBeamPath(radiusM, heights, depths, mu0));
+  /** Σ_p T_p (1 − e^(−λ_p τ_p)) ÷ λ_p: the beam each path deposits in the column. */
+  const deposited = (b: number): number => {
+    const path = beamPaths[b];
+    if (path === undefined) {
+      throw new Error(`no path ${b}`);
+    }
+    return Array.from(depths).reduce((sum, tau, p) => {
+      const lambda = path.slantFactor[p] ?? Number.NaN;
+      return sum + ((path.topTransmission[p] ?? Number.NaN) * -Math.expm1(-lambda * tau)) / lambda;
+    }, 0);
+  };
+  const unpathed = (
+    moments: ArrayLike<number>,
+    groundAlbedo: number,
+  ): DiscreteOrdinatesProblem => ({
+    layers: Array.from(depths, (opticalDepth) => ({
+      opticalDepth,
+      singleScatteringAlbedo: 1,
+      moments,
+    })),
+    groundAlbedo,
+    beamCosines,
+    userCosines: [0.5],
+    maxMode: 0,
+  });
+  const problem = (moments: ArrayLike<number>, groundAlbedo: number): DiscreteOrdinatesProblem => ({
+    ...unpathed(moments, groundAlbedo),
+    beamPaths,
+  });
+
+  for (const { name, moments } of [
+    { name: "Rayleigh", moments: RAYLEIGH },
+    { name: "Henyey–Greenstein g 0.85", moments: henyeyGreenstein(0.85) },
+  ]) {
+    it(`conserves the beam its path deposits to 10⁻⁶ at ω 1 on ${name}, a black and a white ground`, () => {
+      const black = solveDiscreteOrdinates(problem(moments, 0));
+      const white = solveDiscreteOrdinates(problem(moments, 1));
+      beamCosines.forEach((_, b) => {
+        const beam = deposited(b);
+        const { diffuseUp, diffuseDown } = beamAt(black, b).fluxes;
+        const out = entry(diffuseUp, 0) + entry(diffuseDown, depths.length);
+        expect(Math.abs(out - beam)).toBeLessThanOrEqual(1e-6 * beam);
+        const whiteUp = entry(beamAt(white, b).fluxes.diffuseUp, 0);
+        expect(Math.abs(whiteUp - beam)).toBeLessThanOrEqual(1e-6 * beam);
+      });
+    });
+  }
+
+  it("leaves the ground unlit by the beam, though the layer the shadow's edge cuts carries one to its base", () => {
+    const solution = solveDiscreteOrdinates(problem(RAYLEIGH, 0.3));
+    const path = beamPaths[0];
+    const last = depths.length - 1;
+    expect(path?.topTransmission[last]).toBeGreaterThan(0);
+    for (const [b, beam] of solution.beams.entries()) {
+      expect(Math.abs(entry(beam.fluxes.direct, depths.length))).toBe(0);
+      // Upward, below 0, through each lit interface.
+      expect(entry(beam.fluxes.direct, 0)).toBeLessThan(0);
+      expect(entry(beam.fluxes.direct, 0)).toBe(
+        (beamCosines[b] ?? Number.NaN) * (beamPaths[b]?.topTransmission[0] ?? Number.NaN),
+      );
+    }
+  });
+
+  it("reads no ground reflection of the beam, its ground cosines holding the beams above the horizontal alone", () => {
+    const cosines = groundCosinesOf(DISCRETE_ORDINATE_STREAMS, [0.5], [0.4, ...beamCosines]);
+    expect(Array.from(cosines.incidentCosines.subarray(-1))).toEqual([0.4]);
+    // A Lambertian ground as ρ⁰ = A solves a beam below the horizontal as the albedo does.
+    const albedo = 0.3;
+    const size = cosines.outgoingCosines.length * cosines.incidentCosines.length;
+    const ground: GroundReflectance = { ...cosines, modes: [new Float64Array(size).fill(albedo)] };
+    const byAlbedo = solveDiscreteOrdinates(problem(RAYLEIGH, albedo));
+    const byGround = solveDiscreteOrdinates({
+      ...problem(RAYLEIGH, 0),
+      groundReflectance: ground,
+    });
+    byAlbedo.beams.forEach((beam, b) => {
+      const other = beamAt(byGround, b);
+      expect(other.fluxes).toEqual(beam.fluxes);
+      expect(largestModeMiss(other, beam, depths.length + 1, (mode) => mode.userUp)).toBeLessThan(
+        1e-15,
+      );
+    });
+  });
+
+  it("refuses a cosine below the horizontal without its path, or below −1 with one", () => {
+    const base = problem(RAYLEIGH, 0);
+    expect(() => solveDiscreteOrdinates(unpathed(RAYLEIGH, 0))).toThrow(/without a path/u);
+    const [path] = beamPaths;
+    if (path === undefined) {
+      throw new Error("no path");
+    }
+    expect(() =>
+      solveDiscreteOrdinates({ ...base, beamCosines: [-1.01], beamPaths: [path] }),
+    ).toThrow(/in \[−1, 1\]/u);
   });
 });
 

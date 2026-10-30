@@ -295,7 +295,11 @@ export interface OrdinateLayer {
  * layer's slant optical depth over its vertical one, so that T_{p+1} = T_p e^{−λ_p τ_layer}: the
  * solver does not check it, and reports the direct flux at interface p as μ₀ T_p. The scattering
  * geometry is the beam's one μ₀ in every layer, the pseudo-spherical approximation's. The beam's
- * transmission at the ground is T_L e^{−λ_L τ_L} of the last layer.
+ * transmission at the ground is T_L e^{−λ_L τ_L} of the last layer above the horizontal, and 0 at
+ * or below it (μ₀ ≤ 0, R08.T14.d.2), where the ground lies in the planet's shadow for a column
+ * that stands on it, as every path `sphericalBeam.ts` makes for the bake, the deck and the
+ * correction does: the layer the shadow's edge cuts carries a beam to its base, which the ground
+ * never sees.
  */
 export interface BeamPath {
   /** T_p, per layer from the top: the beam's transmission at the layer's top, in [0, 1]. */
@@ -331,7 +335,10 @@ export interface GroundReflectance {
    * user cosine exactly ({@link groundCosinesOf}).
    */
   readonly outgoingCosines: Float64Array;
-  /** μ′ of the incident streams, in (0, 1]: every quadrature node and beam cosine of the solve. */
+  /**
+   * μ′ of the incident streams, in (0, 1]: every quadrature node and every beam cosine of the
+   * solve above the horizontal (a beam at or below it never reaches the ground).
+   */
   readonly incidentCosines: Float64Array;
   /**
    * ρ^m for m = 0 … `modes.length` − 1, each outgoing × incident, entry (i, j) at
@@ -350,8 +357,10 @@ export interface GroundCosines {
 
 /**
  * The cosines a solve of `streams` streams reads its ground's reflectance at: the nodes and the user
- * cosines going out, the nodes and the beams coming in, as a {@link GroundReflectance} must hold
- * them.
+ * cosines going out, the nodes and the beams above the horizontal coming in, as a
+ * {@link GroundReflectance} must hold them. A beam at or below the horizontal (μ₀ ≤ 0) never reaches
+ * the ground, which lies in the planet's shadow (`sphericalBeam.ts`), so the ground has no
+ * reflectance of it.
  *
  * @throws RangeError for a stream count that is not an even integer of at least 2.
  */
@@ -363,7 +372,10 @@ export function groundCosinesOf(
   const { nodes } = doubleGaussQuadrature(streams);
   return {
     outgoingCosines: Float64Array.from([...nodes, ...Array.from(userCosines)]),
-    incidentCosines: Float64Array.from([...nodes, ...Array.from(beamCosines)]),
+    incidentCosines: Float64Array.from([
+      ...nodes,
+      ...Array.from(beamCosines).filter((mu) => mu > 0),
+    ]),
   };
 }
 
@@ -378,7 +390,11 @@ export interface DiscreteOrdinatesProblem {
    * a Lambertian ground of albedo `groundAlbedo` when absent.
    */
   readonly groundReflectance?: GroundReflectance;
-  /** μ₀ of each beam, in (0, 1]; all are solved on each mode's one factorisation. */
+  /**
+   * μ₀ of each beam, in (0, 1], or in [−1, 0] for a beam below the horizontal, which needs its
+   * path (`sphericalBeam.ts`) and never reaches the ground; all are solved on each mode's one
+   * factorisation.
+   */
   readonly beamCosines: ArrayLike<number>;
   /** The user cosines, in (0, 1]: each is solved upward (+μ) and downward (−μ). */
   readonly userCosines: ArrayLike<number>;
@@ -406,7 +422,7 @@ export interface ModeIntensities {
 
 /** The m = 0 fluxes and mean intensity for one beam, at every interface k = 0 … L. */
 export interface InterfaceFluxes {
-  /** The direct beam's flux on a horizontal plane, μ₀ T(τ_k). */
+  /** The direct beam's flux on a horizontal plane, μ₀ T(τ_k): upward, below 0, where μ₀ < 0. */
   readonly direct: Float64Array;
   /** The diffuse downward flux, 2π Σ_i w_i μ_i I^0(τ_k, −μ_i). */
   readonly diffuseDown: Float64Array;
@@ -1144,7 +1160,10 @@ export interface GroundModeTerms {
   readonly nodes: Float64Array;
   /** The same from the nodes to each user cosine u, U × n, entry (u, j) at `u × n + j`. */
   readonly users: Float64Array;
-  /** Per beam in the solve's order, ρ^m(μ, μ₀) ÷ π at the nodes and then the user cosines: n + U. */
+  /**
+   * Per beam in the solve's order, ρ^m(μ, μ₀) ÷ π at the nodes and then the user cosines: n + U;
+   * 0 for a beam at or below the horizontal, which the ground never sees.
+   */
   readonly beams: ReadonlyArray<Float64Array>;
 }
 
@@ -1152,7 +1171,7 @@ export interface GroundModeTerms {
  * A ground's terms at mode m ({@link GroundReflectance}'s remarks), or `undefined` past its modes.
  *
  * @throws RangeError for a ground whose cosines miss one of the solve's nodes, user cosines or beam
- *   cosines.
+ *   cosines above the horizontal.
  */
 export function groundModeTerms(
   ground: GroundReflectance,
@@ -1188,7 +1207,11 @@ export function groundModeTerms(
     return out;
   };
   const beams = Array.from({ length: beamCosines.length }, (_, b) => {
-    const column = cosineIndexOf(incident, beamCosines[b] ?? Number.NaN, "incident");
+    const mu0 = beamCosines[b] ?? Number.NaN;
+    if (!(mu0 > 0)) {
+      return new Float64Array(n + users);
+    }
+    const column = cosineIndexOf(incident, mu0, "incident");
     return Float64Array.from(
       [...nodesOut, ...usersOut],
       (row) => at(rho, row * columns + column) / Math.PI,
@@ -1316,13 +1339,14 @@ interface PreparedBeam {
  *
  * @throws RangeError for a stream count that is not an even integer of at least 2; no layers; a
  *   τ that is negative or not finite; an ω outside [0, 1]; a moment that is not finite, or χ₀ more
- *   than 10⁻¹² from 1; a beam or user cosine outside (0, 1]; a ground albedo outside [0, 1]; a
+ *   than 10⁻¹² from 1; a user cosine outside (0, 1]; a beam cosine outside (0, 1] without a path
+ *   or outside [−1, 1] with one; a ground albedo outside [0, 1]; a
  *   mode that is not a whole number in [0, NSTR − 1]; beam paths that do not match the beams and
  *   layers, or hold a transmission outside [0, 1] or a slant factor not positive and finite;
  *   moments whose discrete scattering operator is not a contraction ({@link homogeneousSolution});
  *   or a `groundReflectance` beside an albedo other than 0, with a cosine outside (0, 1], a mode
- *   of the wrong size or not finite, or cosines that miss a node, user cosine or beam cosine of the
- *   solve ({@link checkGroundReflectance}, {@link groundModeTerms}).
+ *   of the wrong size or not finite, or cosines that miss a node, user cosine or beam cosine above
+ *   the horizontal of the solve ({@link checkGroundReflectance}, {@link groundModeTerms}).
  */
 export function solveDiscreteOrdinates(
   problem: DiscreteOrdinatesProblem,
@@ -1740,25 +1764,46 @@ function prepareBeams(
     throw new RangeError(`${paths.length} beam paths for ${cosines.length} beams`);
   }
   return cosines.map((cosine, b) => {
-    requireIn("beamCosine", cosine, (v) => v > 0 && v <= 1, "in (0, 1]");
-    const path = paths?.[b] ?? planeParallelBeam(problem.layers, cosine);
-    const topTransmission = Float64Array.from(path.topTransmission);
-    const slantFactor = Float64Array.from(path.slantFactor);
-    if (topTransmission.length !== layers.length || slantFactor.length !== layers.length) {
-      throw new RangeError(`beam ${b}'s path needs one entry a layer, ${layers.length} of them`);
+    const path = paths?.[b];
+    if (path === undefined) {
+      requireIn("beamCosine", cosine, (v) => v > 0 && v <= 1, "in (0, 1] without a path");
+    } else {
+      requireIn("beamCosine", cosine, (v) => v >= -1 && v <= 1, "in [−1, 1]");
     }
-    topTransmission.forEach((t) => {
-      requireIn(`beam ${b}'s topTransmission`, t, (v) => v >= 0 && v <= 1, "in [0, 1]");
-    });
-    slantFactor.forEach((lambda) => {
-      requireIn(`beam ${b}'s slantFactor`, lambda, (v) => v > 0, "positive and finite");
-    });
-    const last = layers.length - 1;
-    const groundTransmission =
-      at(topTransmission, last) *
-      Math.exp(-at(slantFactor, last) * (layers[last]?.opticalDepth ?? Number.NaN));
-    return { index: b, cosine, topTransmission, slantFactor, groundTransmission };
+    return preparedBeam(b, cosine, path ?? planeParallelBeam(problem.layers, cosine), layers);
   });
+}
+
+/**
+ * A beam's path as validated: its ground transmission T_L e^(−λ_L τ_L), and 0 for a beam at or
+ * below the horizontal, whose ground lies in the planet's shadow (`sphericalBeam.ts`), however the
+ * path's last layer carries it (the layer the shadow's edge cuts takes a beam that does not vanish
+ * at its base).
+ */
+function preparedBeam(
+  b: number,
+  cosine: number,
+  path: BeamPath,
+  layers: ReadonlyArray<Pick<PreparedLayer, "opticalDepth">>,
+): PreparedBeam {
+  const topTransmission = Float64Array.from(path.topTransmission);
+  const slantFactor = Float64Array.from(path.slantFactor);
+  if (topTransmission.length !== layers.length || slantFactor.length !== layers.length) {
+    throw new RangeError(`beam ${b}'s path needs one entry a layer, ${layers.length} of them`);
+  }
+  topTransmission.forEach((t) => {
+    requireIn(`beam ${b}'s topTransmission`, t, (v) => v >= 0 && v <= 1, "in [0, 1]");
+  });
+  slantFactor.forEach((lambda) => {
+    requireIn(`beam ${b}'s slantFactor`, lambda, (v) => v > 0, "positive and finite");
+  });
+  const last = layers.length - 1;
+  const groundTransmission =
+    cosine > 0
+      ? at(topTransmission, last) *
+        Math.exp(-at(slantFactor, last) * (layers[last]?.opticalDepth ?? Number.NaN))
+      : 0;
+  return { index: b, cosine, topTransmission, slantFactor, groundTransmission };
 }
 
 function requireStreams(streams: number): void {

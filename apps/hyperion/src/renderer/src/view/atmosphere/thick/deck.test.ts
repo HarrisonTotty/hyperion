@@ -673,6 +673,14 @@ describe("the deck's refusals", () => {
     ).toThrow(RangeError);
   });
 
+  it("refuses a grid with a sun below the horizontal, R08.T15.a.2's to take (R08.T14.d.2)", () => {
+    const { column, deckAltitudeM } = fixture();
+    const grid = { ...GRID, sunCosines: Float64Array.of(-0.05, ...GRID.sunCosines) };
+    expect(() =>
+      prepareDeck(column, [SUN], { altitudeM: deckAltitudeM, floor: "ground" }, { grid }),
+    ).toThrow(/below the horizontal/u);
+  });
+
   it("refuses deck layers that are not whole strides", () => {
     const { column, deckAltitudeM } = fixture();
     for (const deckLayers of [0, 7, 2.5]) {
