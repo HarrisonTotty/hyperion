@@ -37,6 +37,7 @@ import {
   walkSpot,
 } from "../../../test/atmosphereSweep";
 import { phaseTableAsymmetry } from "../aerosol";
+import { pow } from "../../../lib/pinnedMath";
 
 /** The smoke's file, from this test. */
 const SMOKE_FILE =
@@ -287,7 +288,7 @@ describe("the sweep's grid", () => {
     expect(SWEEP_TAU_CANDIDATES.map((c) => [c.tau, c.role])).toEqual([
       [1 / 32, "floor"],
       ...Array.from({ length: 14 }, (_, i) => [
-        expect.closeTo(2 ** ((i - 7) / 2), 14),
+        expect.closeTo(pow(2, (i - 7) / 2), 14),
         i % 2 === 1 ? "octave" : "half-octave",
       ]),
     ]);

@@ -49,10 +49,16 @@
  * software is freely granted, provided that this notice
  * is preserved.
  * ====================================================
+ * Copyright 2004 Sun Microsystems, Inc.  All Rights Reserved.
+ *
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
  * ```
  *
  * (SunSoft's files, `log`, `log2`, `asin`, `acos`, `atan2`, `k_sin`, `k_cos` and `k_rem_pio2`, carry the
- * first with "SunSoft" for "SunPro"; `exp`, `pow` and `k_tan`, the second.) `cbrt` is the CORE-MATH
+ * first with "SunSoft" for "SunPro"; `exp` and `pow`, the second; `k_tan`, the third.) `cbrt` is the CORE-MATH
  * project's (`core-math/src/binary64/cbrt/cbrt.c`, Copyright (c) 2021-2022 Alexei Sibidanov, MIT
  * licence; ported to Rust in 2025 by Trevor Gross). `libm` itself is under the MIT licence; see
  * `NOTICE`.
@@ -165,7 +171,7 @@ const EXP_P5 = 4.13813679705723846039e-8; /* 0x3E663769, 0x72BEA4D0 */
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/exp.rs` (FreeBSD's `e_exp.c`): `x` is reduced
  * to r = x − k ln 2 with |r| ≤ ½ ln 2, e^r comes from a degree-5 Remez fit of r (e^r + 1) ÷ (e^r − 1),
- * and the result is scaled by 2ᵏ. Under 1 ulp.
+ * and the result is scaled by 2ᵏ. Under 1 ulp (`exp.rs`'s own statement).
  */
 export function exp(x: number): number {
   let xr = x;
@@ -246,7 +252,7 @@ const X1P54 = fromWords(0x43500000, 0);
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/log.rs` (musl's form of FreeBSD's `e_log.c`):
  * `x` = 2ᵏ (1 + f) with 1 + f in [√2 ÷ 2, √2], and log(1 + f) from s = f ÷ (2 + f) by a degree-14
- * Remez polynomial in s. Under 1 ulp.
+ * Remez polynomial in s. Under 1 ulp (`log.rs`'s own statement).
  */
 export function log(x: number): number {
   let xr = x;
@@ -298,7 +304,7 @@ export function log(x: number): number {
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/log1p.rs` (FreeBSD's `s_log1p.c`): `log`'s
  * reduction and polynomial on u = 1 + `x`, with a correction c ≈ log(1 + x) − log(u) for the
- * rounding of u. Under 1 ulp.
+ * rounding of u. Under 1 ulp (`log1p.rs`'s own statement).
  */
 export function log1p(x: number): number {
   let f = 0;
@@ -364,8 +370,9 @@ const LOG2_IVLN2LO = 1.67517131648865118353e-10; /* 0x3de705fc, 0x2eefa200 */
  *
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/log2.rs` (FreeBSD's `e_log2.c`): {@link log}'s
- * reduction and polynomial, with log(1 + f) split into a 32-bit head and a tail before each is
- * scaled by 1 ÷ ln 2 in two pieces and the exponent added in extra precision. Under 1 ulp.
+ * reduction and polynomial, with log(1 + f) split into a head with its low word cleared and a tail
+ * before each is scaled by 1 ÷ ln 2 in two pieces and the exponent added in extra precision;
+ * within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16).
  */
 export function log2(x: number): number {
   let xr = x;
@@ -442,7 +449,7 @@ const EXPM1_Q5 = -2.01099218183624371326e-7; /* BE8AFDB7 6E09C32D */
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/expm1.rs` (FreeBSD's `s_expm1.c`): `exp`'s
  * reduction with its rounding error c carried, a rational fit of e^r − 1, and the scaling by 2ᵏ
- * arranged so that nothing cancels. Under 1 ulp.
+ * arranged so that nothing cancels; within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16).
  */
 export function expm1(x: number): number {
   let xr = x;
@@ -1065,7 +1072,7 @@ function remPio2Large(x: ReadonlyArray<number>, e0: number): number {
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/sin.rs` (FreeBSD's `s_sin.c`): `x` is reduced
  * by π/2 to [−π/4, π/4] (`rem_pio2`, Payne and Hanek's method past 2²⁰ π/2), and the quadrant's
- * kernel, `k_sin` or `k_cos`, evaluates it. Under 1 ulp.
+ * kernel, `k_sin` or `k_cos`, evaluates it; within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16).
  */
 export function sin(x: number): number {
   /* High word of x. */
@@ -1105,7 +1112,7 @@ export function sin(x: number): number {
  *
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/cos.rs` (FreeBSD's `s_cos.c`), with
- * {@link sin}'s reduction and kernels. Under 1 ulp.
+ * {@link sin}'s reduction and kernels; within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16).
  */
 export function cos(x: number): number {
   const ix = highWord(x) & 0x7fffffff;
@@ -1146,7 +1153,7 @@ export function cos(x: number): number {
  *
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/tan.rs` (FreeBSD's `s_tan.c`), with
- * {@link sin}'s reduction and the kernel `k_tan`. Under 1 ulp.
+ * {@link sin}'s reduction and the kernel `k_tan`; within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16).
  */
 export function tan(x: number): number {
   const ix = highWord(x) & 0x7fffffff;
@@ -1203,8 +1210,8 @@ function asinR(z: number): number {
  *
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/asin.rs` (FreeBSD's `e_asin.c`): a rational
- * fit below |x| = ½, and above it asin(x) = π/2 − 2 asin(√((1 − |x|) ÷ 2)) with the square root
- * split in two above 0.975. NaN outside [−1, 1]. Under 1 ulp.
+ * fit below |x| = ½, and above it asin(x) = π/2 − 2 asin(√((1 − |x|) ÷ 2)), the square root split
+ * into a head and a tail below |x| = 0.975. NaN outside [−1, 1]; within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16).
  */
 export function asin(x: number): number {
   let xr = x;
@@ -1251,7 +1258,7 @@ export function asin(x: number): number {
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/acos.rs` (FreeBSD's `e_acos.c`), with
  * {@link asin}'s rational fit: acos(x) = π/2 − (x + x R(x²)) below |x| = ½, and 2 asin(√((1 ∓ x) ÷
- * 2)) or its complement above. NaN outside [−1, 1]. Under 1 ulp.
+ * 2)) or its complement above. NaN outside [−1, 1]; within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16).
  */
 export function acos(x: number): number {
   const hx = highWord(x);
@@ -1333,7 +1340,7 @@ const ATAN_HUGE_TAIL = fromWords(0, 0x03800000);
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/atan.rs` (FreeBSD's `s_atan.c`): `x` is
  * reduced against atan(0.5), atan(1), atan(1.5) or atan(∞) by the matching identity, and the rest
- * comes from a degree-22 odd polynomial split in two. Under 1 ulp.
+ * comes from a degree-23 odd polynomial (11 coefficients in t²) split in two; within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16).
  */
 export function atan(x: number): number {
   let xr = x;
@@ -1408,8 +1415,9 @@ const ATAN2_PI_LO = 1.2246467991473531772e-16; /* 0x3CA1A626, 0x33145C07 */
  *
  * @remarks
  * Ported line for line from `libm` 0.2.16's `src/math/atan2.rs` (FreeBSD's `e_atan2.c`): the signs
- * and the special values pick the quadrant, and {@link atan} of |y ÷ x| the angle within it.
- * Under 2 ulp.
+ * and the special values pick the quadrant, and {@link atan} of |y ÷ x| the angle within it; within
+ * 2 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`,
+ * libm-v0.2.16).
  */
 export function atan2(y: number, x: number): number {
   if (Number.isNaN(x) || Number.isNaN(y)) {
@@ -1524,8 +1532,9 @@ const VELTKAMP_SPLIT = 134_217_729;
  *
  * @remarks
  * Dekker's error is exact, and so the fused multiply-add's to the bit, wherever the factors' split
- * does not overflow and no partial product underflows; `cbrt` asks it only of factors and products
- * of magnitude in [1, 8).
+ * does not overflow and no partial product underflows (|a|, |b| < 2⁹⁹⁵ and |ab| ≥ 2⁻⁹⁶⁸); `cbrt`
+ * asks it only of factors near its root of a number in [1, 8), and products of magnitude about 1 to
+ * 8, far inside that range.
  */
 function productError(a: number, b: number, product: number): number {
   let scaled = VELTKAMP_SPLIT * a;
@@ -1732,7 +1741,7 @@ const POW_IVLN2_L = 1.92596299112661746887e-8; /* 0x3e54ae0b_f85ddf44 =1/ln2 tai
  * Ported line for line from `libm` 0.2.16's `src/math/pow.rs` (FreeBSD's `e_pow.c`), as
  * `hyperion_base`'s `math/pow_base.rs` transcribes it: log₂|x| in two pieces of extra precision,
  * y log₂|x| = n + y′ with |y′| ≤ ½ in simulated multi-precision, and 2^y′ by `exp`'s fit, scaled by
- * 2ⁿ; the special values of C99's `pow` before it. Under 1 ulp, not correctly rounded: it is not
+ * 2ⁿ; the special values of C99's `pow` before it. It is within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16), not correctly rounded, and not
  * Linux's, macOS's or Windows's `pow`, which is why the committed tables call it.
  */
 export function pow(x: number, y: number): number {

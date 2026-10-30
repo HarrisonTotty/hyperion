@@ -76,6 +76,7 @@ import saturnOblateReference from "./saturn-oblate.reference.json" with { type: 
 import { readSweepCase, readSweepOutput, recomputePoint } from "./sweepBoundary";
 import committed from "./thickRuns.json" with { type: "json" };
 import { referenceTwin, twinBakeBody, type TwinOptions } from "./twin";
+import { pow } from "../../../lib/pinnedMath";
 
 /** The committed references, by case. */
 const REFERENCES: Readonly<Record<string, ReferenceFile>> = {
@@ -189,7 +190,7 @@ function halfFloatsOf(
     bakeJ2MostPerSr: figure(bakeJ2Most),
     j0PerSr: [figure(j0Least), figure(j0Most)],
     slopeMostPerSr: figure(slopeMost),
-    j0BelowLeastNormal: halves.filter((j) => j > 0 && j < 2 ** -14).length,
+    j0BelowLeastNormal: halves.filter((j) => j > 0 && j < pow(2, -14)).length,
     entries: halves.length,
   };
 }

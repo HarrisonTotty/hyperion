@@ -77,6 +77,7 @@ import {
 } from "./sweepBoundary";
 import type { ReferenceGeometry } from "./geometries";
 import { referenceTwin, type ReferenceTwin, type TwinMultipleScattering } from "./twin";
+import { pow } from "../../../lib/pinnedMath";
 
 /** The committed outputs, by file. */
 const OUTPUTS = import.meta.glob<unknown>(["./ms-sweep-w*.json", "!./ms-sweep-w*.case.json"], {
@@ -380,7 +381,7 @@ describe("the sweep's walk, sweep.rs's rules", () => {
       (i - 7) % 2 === 0 ? "octave" : "half-octave",
     ),
   ];
-  const taus = [1 / 32, ...Array.from({ length: 14 }, (_, i) => 2 ** ((i - 7) / 2))];
+  const taus = [1 / 32, ...Array.from({ length: 14 }, (_, i) => pow(2, (i - 7) / 2))];
   const walk = (
     outcome: (candidate: number) => SweepOutcome,
     past: Parameters<typeof walkSweepColumn>[2] = { kind: "no" },

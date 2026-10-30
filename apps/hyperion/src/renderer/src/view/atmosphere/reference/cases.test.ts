@@ -55,6 +55,7 @@ import {
   type ReferenceGeometry,
   SPHERE_LIMB_SCALE_HEIGHTS,
 } from "./geometries";
+import { acos } from "../../../lib/pinnedMath";
 
 /** Each case's own counts, from its pilot (`decision-r08-t12b-scope.md`, ruling 8). */
 const COUNTS: Readonly<Record<string, SampleCounts>> = sampleCounts;
@@ -233,7 +234,7 @@ describe("the geometry sets", () => {
         figure,
       ).normal;
       const cos = sun.x * normal.x + sun.y * normal.y + sun.z * normal.z;
-      return (Math.acos(cos) * 180) / Math.PI;
+      return (acos(cos) * 180) / Math.PI;
     });
     expect(zeniths).toEqual(limbs.map(() => expect.closeTo(90, 4)));
   });

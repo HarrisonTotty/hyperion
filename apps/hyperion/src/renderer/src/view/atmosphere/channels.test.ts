@@ -29,6 +29,7 @@ import { CHANNEL_WAVELENGTHS_NM, columnLengthM, densityAt } from "./medium";
 import { distanceToTopM, localRadiusM } from "./opticalDepth";
 import { molecularMixture } from "./rayleigh";
 import { bakeSpectrumOf, spectralRgb, sunWeights } from "./spectralColour";
+import { cos, expm1, log } from "../../lib/pinnedMath";
 
 /** Bruneton's triple, R05's `CHANNEL_WAVELENGTHS_NM` until R08.T6.d moved it to the fitted one. */
 const BRUNETON_NM: Rgb = [680, 550, 440];
@@ -144,8 +145,8 @@ describe("a view's response", () => {
     columnLengthM(EARTH_FIT_COLUMN.density, EARTH_FIT_COLUMN.topHeightM);
 
   it("is e^(−τ) at noon, τ dry air's Rayleigh column and the aerosol's, to 10⁻⁴", () => {
-    const aerosol = 0.1 * -Math.expm1(-EARTH_FIT_COLUMN.topHeightM / 1_200);
-    const depth = -Math.log(viewResponse(earth, { kind: "sun", sunZenithDeg: 0 }, 550));
+    const aerosol = 0.1 * -expm1(-EARTH_FIT_COLUMN.topHeightM / 1_200);
+    const depth = -log(viewResponse(earth, { kind: "sun", sunZenithDeg: 0 }, 550));
     expect(Math.abs(depth / (rayleigh550 + aerosol) - 1)).toBeLessThan(1e-4);
   });
 
@@ -165,7 +166,7 @@ describe("a view's response", () => {
       topRadiusM: earth.groundRadiusM + earth.topHeightM,
     };
     for (const sunZenithDeg of [85, 90]) {
-      const mu = Math.cos((sunZenithDeg * Math.PI) / 180);
+      const mu = cos((sunZenithDeg * Math.PI) / 180);
       const length = distanceToTopM(shell, earth.groundRadiusM, mu);
       let column = 0;
       for (let i = 0; i < 4_096; i += 1) {
@@ -174,7 +175,7 @@ describe("a view's response", () => {
         column += (densityAt(molecular.density, h) * length) / 4_096;
       }
       const response = viewResponse(columnOnly, { kind: "sun", sunZenithDeg }, 550);
-      expect(Math.abs(-Math.log(response) / 1e-5 / column - 1)).toBeLessThan(1e-4);
+      expect(Math.abs(-log(response) / 1e-5 / column - 1)).toBeLessThan(1e-4);
     }
   });
 
@@ -241,7 +242,7 @@ describe("Mars's dusty air", () => {
     if (dust === undefined) {
       throw new Error("Mars's fit air has a dust term");
     }
-    const at = (deg: number): number => dust.phasePerSr(Math.cos((deg * Math.PI) / 180), 650);
+    const at = (deg: number): number => dust.phasePerSr(cos((deg * Math.PI) / 180), 650);
     const ratio = at(150) / at(90);
     expect(ratio).toBeGreaterThan(0.5);
     expect(ratio).toBeLessThan(0.85);

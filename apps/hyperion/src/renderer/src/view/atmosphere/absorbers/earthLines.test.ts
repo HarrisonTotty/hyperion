@@ -30,6 +30,7 @@ import recordedReference from "./earthLineReference.json" with { type: "json" };
 import recordedPaths from "./earthLinePaths.json" with { type: "json" };
 import { loadKDistributions } from "./kDistribution";
 import { inlinePart } from "../../../test/kDistributionFixtures";
+import { exp, log } from "../../../lib/pinnedMath";
 
 /** A number to 7 significant figures, as the committed paths hold them. */
 function seven(value: number): number {
@@ -177,7 +178,7 @@ interface ReadFalls {
  * midway between nodes in ln u, as the kernels and the twin read it ({@link absorberTransmittance}).
  */
 function readFalls(curves: ReadonlyArray<AbsorberCurve>): ReadFalls {
-  const ceiling = -Math.log(ABSORBER_TRANSMITTANCE_FLOOR);
+  const ceiling = -log(ABSORBER_TRANSMITTANCE_FLOOR);
   let largestFall = 0;
   let outside = 0;
   for (const curve of curves) {
@@ -185,7 +186,7 @@ function readFalls(curves: ReadonlyArray<AbsorberCurve>): ReadFalls {
     const lnU = curve.logColumns;
     for (let r = 0; r + 1 < lnP.length; r += 1) {
       for (const f of [0, 0.5]) {
-        const p = Math.exp((lnP[r] ?? Number.NaN) * (1 - f) + (lnP[r + 1] ?? Number.NaN) * f);
+        const p = exp((lnP[r] ?? Number.NaN) * (1 - f) + (lnP[r + 1] ?? Number.NaN) * f);
         let previous: Rgb | undefined;
         for (let j = 0; j + 1 < 2 * lnU.length; j += 1) {
           const k = Math.floor(j / 2);
@@ -193,8 +194,8 @@ function readFalls(curves: ReadonlyArray<AbsorberCurve>): ReadFalls {
             j % 2 === 0
               ? (lnU[k] ?? Number.NaN)
               : 0.5 * ((lnU[k] ?? Number.NaN) + (lnU[k + 1] ?? Number.NaN));
-          const t = absorberTransmittance(curve, { kind: "column", columnPerM2: Math.exp(x) }, p);
-          const tau: Rgb = [-Math.log(t[0]), -Math.log(t[1]), -Math.log(t[2])];
+          const t = absorberTransmittance(curve, { kind: "column", columnPerM2: exp(x) }, p);
+          const tau: Rgb = [-log(t[0]), -log(t[1]), -log(t[2])];
           for (const [c, v] of tau.entries()) {
             if (!(v >= 0 && v <= ceiling + 1e-12)) {
               outside += 1;
@@ -286,7 +287,7 @@ function pathErrors({ o2, h2o, pair, pairSpec }: EarthCurves): ReadonlyArray<Pat
               (air?.[row] ?? 0) * (l.h2oAirPairPerM5[p] ?? 0);
           }
           for (const [c, weights] of optics.weights.entries()) {
-            passed[c] = (passed[c] ?? 0) + (weights[i] ?? 0) * lines * Math.exp(-tau);
+            passed[c] = (passed[c] ?? 0) + (weights[i] ?? 0) * lines * exp(-tau);
           }
         }
         const t = (c: 0 | 1 | 2): number =>

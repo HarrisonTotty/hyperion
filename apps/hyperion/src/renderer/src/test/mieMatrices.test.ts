@@ -20,6 +20,7 @@ import {
   tableIntegral,
   tableValue,
 } from "./mieMatrices";
+import { cos } from "../lib/pinnedMath";
 
 /** A committed file's fields that the tests read, which its JSON import's type satisfies. */
 interface CommittedFile {
@@ -198,7 +199,7 @@ describe("the writer against the benchmarks' own matrices", () => {
     // measured 3.6 × 10⁻⁶ of P1 at worst, against the file's six printed digits.
     const rows = iprtMatrix(iprtA3Matrix);
     expect(rows).toHaveLength(68);
-    const mu = Float64Array.from(rows, (r) => Math.cos(((r[0] ?? Number.NaN) * Math.PI) / 180));
+    const mu = Float64Array.from(rows, (r) => cos(((r[0] ?? Number.NaN) * Math.PI) / 180));
     const optics = sphereCaseOptics(caseNamed("iprt-a3"), mu);
     rows.forEach((row, j) => {
       const p1 = row[1] ?? Number.NaN;
@@ -218,7 +219,7 @@ describe("the writer against the benchmarks' own matrices", () => {
     // 450, where the water's resonances leave the client's Mie and libRadtran's apart.
     const rows = iprtMatrix(iprtA5Matrix);
     expect(rows).toHaveLength(91);
-    const mu = Float64Array.from(rows, (r) => Math.cos(((r[0] ?? Number.NaN) * Math.PI) / 180));
+    const mu = Float64Array.from(rows, (r) => cos(((r[0] ?? Number.NaN) * Math.PI) / 180));
     const optics = sphereCaseOptics(caseNamed("iprt-a5"), mu);
     rows.forEach((row, j) => {
       const p1 = row[1] ?? Number.NaN;

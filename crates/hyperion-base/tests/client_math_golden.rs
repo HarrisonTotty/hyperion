@@ -272,8 +272,8 @@ fn hard_cases(name: &str) -> Vec<u64> {
             }
         }
         // Exact cubes, of integers and of a 20-bit fraction, CORE-MATH's two hard roots
-        // (`cbrt.rs`'s 0x1.9b78223aa307cp+1 and 0x1.a202bfc89ddffp+2) and its directed roundings'
-        // hard cases, each also scaled by 2³ and 2⁻³⁰⁰.
+        // (`cbrt.rs`'s 0x1.9b78223aa307cp+1 and 0x1.a202bfc89ddffp+2), its directed roundings'
+        // hard cases and two near-midpoint roots, each also scaled by 2³ and 2⁻³⁰⁰.
         "cbrt" => {
             for k in 1..=40_u32 {
                 let k = f64::from(k);
@@ -291,6 +291,10 @@ fn hard_cases(name: &str) -> Vec<u64> {
                 0x400f_e18a_044a_5501,
                 0x401a_6bb8_c803_147b,
                 0x401a_c853_8a03_1cbd,
+                // Cubes of 2⁵³ + d, d odd near the root of 3·2⁵³d² + d³ = 2¹⁰⁶, rounded: roots
+                // within about 10⁻²² of a midpoint, which enter the second Newton pass.
+                0x3ff0_0000_04e6_2363,
+                0x3ff0_0000_04e6_2366,
             ] {
                 let x = f64::from_bits(hard);
                 inputs.push(hard);

@@ -66,6 +66,7 @@ import {
 import { type BakeSpectrum, bakeSpectrumOf, deltaUv } from "./spectralColour";
 import { packMedium } from "./tables";
 import { transmittanceTwin } from "./tablesCpu";
+import { exp, log, pow } from "../../lib/pinnedMath";
 
 /** Ozone's reference column: 300 DU, Earth's global mean (WMO/UNEP 2018, Q3). */
 const OZONE_COLUMN_PER_M2 = 300 * DOBSON_UNIT_PER_M2;
@@ -269,7 +270,7 @@ const ABSORBERS: ReadonlyArray<{
 ];
 
 /** The plan's gated span of column multiples: 0.1–10 × the reference, six to the decade. */
-const GATED_MULTIPLES = Array.from({ length: 13 }, (_, i) => 10 ** (-1 + i / 6));
+const GATED_MULTIPLES = Array.from({ length: 13 }, (_, i) => pow(10, -1 + i / 6));
 
 /** An absorber of the list by its position, for tests that read one. */
 function absorberAt(index: number): AbsorberSpec {
@@ -297,7 +298,7 @@ function signedRatio(optics: AbsorberOptics, channel: 0 | 1 | 2, u: number): num
   let passed = 0;
   let total = 0;
   for (const [i, w] of optics.weights[channel].entries()) {
-    passed += w * Math.exp(-(sigmaOf(optics)[i] ?? Number.NaN) * u);
+    passed += w * exp(-(sigmaOf(optics)[i] ?? Number.NaN) * u);
     total += w;
   }
   return passed / total;
@@ -310,7 +311,7 @@ function spectralColours(optics: AbsorberOptics, u: number): { star: Rgb; throug
   for (const [c, weights] of optics.weights.entries()) {
     for (const [i, w] of weights.entries()) {
       star[c] = (star[c] ?? 0) + w;
-      through[c] = (through[c] ?? 0) + w * Math.exp(-(sigmaOf(optics)[i] ?? Number.NaN) * u);
+      through[c] = (through[c] ?? 0) + w * exp(-(sigmaOf(optics)[i] ?? Number.NaN) * u);
     }
   }
   return {
@@ -397,7 +398,7 @@ function withoutExit(record: {
 function nodeColumn(spec: AbsorberSpec, k: number): number {
   return (
     amountValue(absorberVerticalAmount(spec)) *
-    10 ** (ABSORBER_CURVE_DECADES[0] + k / ABSORBER_CURVE_NODES_PER_DECADE)
+    pow(10, ABSORBER_CURVE_DECADES[0] + k / ABSORBER_CURVE_NODES_PER_DECADE)
   );
 }
 
@@ -481,7 +482,7 @@ function curvesTable() {
               curve,
               scaledAmount(absorberVerticalAmount(spec), m),
               undefined,
-            ).map((t) => roundMicro(-Math.log(t))),
+            ).map((t) => roundMicro(-log(t))),
           ),
           deltaUv: recordedMultiples.map((m) =>
             ceilMicro(channelColourError(spec, sun.spectrum, m)),
@@ -554,12 +555,12 @@ describe("a curve of growth", () => {
     for (const sun of SUNS) {
       const curve = absorberCurve(spec, sun.spectrum);
       for (const [k, x] of curve.logColumns.entries()) {
-        const expected = Math.max(sigma * Math.exp(x), 0);
+        const expected = Math.max(sigma * exp(x), 0);
         for (const channel of curve.opticalDepth) {
           const depth = channel[k] ?? Number.NaN;
           // Past the floor's 13.8 the curve holds the floor.
           expect(
-            Math.abs(depth - Math.min(expected, -Math.log(ABSORBER_TRANSMITTANCE_FLOOR))),
+            Math.abs(depth - Math.min(expected, -log(ABSORBER_TRANSMITTANCE_FLOOR))),
           ).toBeLessThan(1e-12 * Math.max(expected, 1));
         }
       }
@@ -572,11 +573,11 @@ describe("a curve of growth", () => {
     const [first, last] = ABSORBER_CURVE_DECADES;
     expect(curve.logColumns.length).toBe((last - first) * ABSORBER_CURVE_NODES_PER_DECADE + 1);
     expect(curve.logColumns[0]).toBeCloseTo(
-      Math.log(amountValue(absorberVerticalAmount(spec)) * 10 ** first),
+      log(amountValue(absorberVerticalAmount(spec)) * pow(10, first)),
       12,
     );
     expect(curve.logColumns.at(-1)).toBeCloseTo(
-      Math.log(amountValue(absorberVerticalAmount(spec)) * 10 ** last),
+      log(amountValue(absorberVerticalAmount(spec)) * pow(10, last)),
       12,
     );
   });
@@ -650,7 +651,7 @@ describe("a curve of growth", () => {
     let total = 0;
     for (const [i, w] of optics.weights[2].entries()) {
       const clipped = Math.max(w, 0);
-      passed += clipped * Math.exp(-(sigmaOf(optics)[i] ?? Number.NaN) * amountValue(amount));
+      passed += clipped * exp(-(sigmaOf(optics)[i] ?? Number.NaN) * amountValue(amount));
       total += clipped;
     }
     expect(channelTransmittance(optics, amount, undefined)[2]).toBeCloseTo(passed / total, 12);
@@ -676,7 +677,7 @@ describe("a curve of growth", () => {
   });
 
   it("reads back between its nodes within 5 × 10⁻⁴ in T where neither node is clamped", () => {
-    const floorDepth = -Math.log(ABSORBER_TRANSMITTANCE_FLOOR);
+    const floorDepth = -log(ABSORBER_TRANSMITTANCE_FLOOR);
     let compared = 0;
     for (const { spec } of ABSORBERS) {
       for (const sun of SUNS) {
@@ -684,7 +685,7 @@ describe("a curve of growth", () => {
         const curve = absorberCurve(spec, sun.spectrum);
         // Each node's exact transmittance, once: an interval reads both of its ends.
         const atNodes: ReadonlyArray<Rgb> = Array.from(curve.logColumns, (logColumn) =>
-          channelTransmittance(optics, amountLike(spec, Math.exp(logColumn)), undefined),
+          channelTransmittance(optics, amountLike(spec, exp(logColumn)), undefined),
         );
         const atNode = (j: number): Rgb => {
           const node = atNodes[j];
@@ -696,7 +697,7 @@ describe("a curve of growth", () => {
         for (let k = 0; k + 1 < curve.logColumns.length; k += 1) {
           const u = amountLike(
             spec,
-            Math.exp(0.5 * ((curve.logColumns[k] ?? 0) + (curve.logColumns[k + 1] ?? 0))),
+            exp(0.5 * ((curve.logColumns[k] ?? 0) + (curve.logColumns[k + 1] ?? 0))),
           );
           const exact = channelTransmittance(optics, u, undefined);
           const read = absorberTransmittance(curve, u, undefined);
@@ -724,9 +725,10 @@ describe("a curve of growth", () => {
     const exact = channelTransmittance(optics, u, undefined);
     const read = absorberTransmittance(curve, u, undefined);
     // Red and green; blue is clamped at 1 there under the Sun.
-    expect(
-      [0, 1].map((c) => Math.abs(Math.log(read[c] ?? 1) / Math.log(exact[c] ?? 1) - 1)),
-    ).toEqual([expect.closeTo(0, 3), expect.closeTo(0, 3)]);
+    expect([0, 1].map((c) => Math.abs(log(read[c] ?? 1) / log(exact[c] ?? 1) - 1))).toEqual([
+      expect.closeTo(0, 3),
+      expect.closeTo(0, 3),
+    ]);
   });
 
   it("reads nothing at no column", () => {
@@ -838,8 +840,8 @@ describe("a curve of growth", () => {
       },
       undefined,
     );
-    expect(-Math.log(green)).toBeGreaterThanOrEqual(0.02);
-    expect(-Math.log(green)).toBeLessThanOrEqual(0.04);
+    expect(-log(green)).toBeGreaterThanOrEqual(0.02);
+    expect(-log(green)).toBeLessThanOrEqual(0.04);
   });
 
   it("holds the floor where every point a channel weighs is saturated", () => {
@@ -893,13 +895,13 @@ describe("the bake bins' curves", () => {
     const curves = absorberBinCurves(spec, flat);
     expect(curves.transmittance).toHaveLength(BAKE_BIN_COUNT);
     for (const k of [0, 120, 200]) {
-      const u = Math.exp(curves.logColumns[k] ?? Number.NaN);
+      const u = exp(curves.logColumns[k] ?? Number.NaN);
       for (let b = 0; b < BAKE_BIN_COUNT; b += 1) {
         let passed = 0;
         let total = 0;
         for (const [i, s] of optics.light.entries()) {
           if (optics.bins[i] === b) {
-            passed += s * Math.exp(-(sigmaOf(optics)[i] ?? Number.NaN) * u);
+            passed += s * exp(-(sigmaOf(optics)[i] ?? Number.NaN) * u);
             total += s;
           }
         }
@@ -1212,13 +1214,13 @@ describe("absorbers on one profile", () => {
       let total = 0;
       for (const [i, w] of channel.entries()) {
         const clipped = Math.max(w, 0);
-        passed += clipped * Math.exp(-(sigmaOf(optics)[i] ?? Number.NaN) * 1e24);
+        passed += clipped * exp(-(sigmaOf(optics)[i] ?? Number.NaN) * 1e24);
         total += clipped;
       }
-      return -Math.log(passed / total);
+      return -log(passed / total);
     };
     const [red, green, blue] = optics.weights.map(clippedDepth);
-    const signedRed = -Math.log(signedRatio(optics, 0, 1e24));
+    const signedRed = -log(signedRatio(optics, 0, 1e24));
     expect([
       absorberRankingDepth(spec),
       Math.max(red ?? 0, green ?? 0, blue ?? 0) === green,
@@ -1276,7 +1278,7 @@ describe("an absorber's spec", () => {
       quadratic += positive ? 1 : 0;
       linear += positive ? 0 : 1;
       const expected = positive
-        ? Math.exp(0.375 * Math.log(a) + 0.75 * Math.log(b) - 0.125 * Math.log(c))
+        ? exp(0.375 * log(a) + 0.75 * log(b) - 0.125 * log(c))
         : 0.5 * (a + b);
       expect(Math.abs(value - expected)).toBeLessThanOrEqual(1e-12 * expected);
     }
@@ -1350,8 +1352,8 @@ describe("an absorber's spec", () => {
     const cold = crossSectionAt("CH4", 70);
     expect(cold?.provenance).toBe("measured");
     const i = Math.round((727 - 380) / 0.25);
-    const ln = [s100, s198, s296].map((s) => Math.log(s?.crossSectionsM2[i] ?? Number.NaN));
-    const expected = Math.exp(
+    const ln = [s100, s198, s296].map((s) => log(s?.crossSectionsM2[i] ?? Number.NaN));
+    const expected = exp(
       (weights[0] ?? 0) * (ln[0] ?? 0) +
         (weights[1] ?? 0) * (ln[1] ?? 0) +
         (weights[2] ?? 0) * (ln[2] ?? 0),
@@ -2472,19 +2474,19 @@ describe("a continuum pair's temperature laws (R08.T4.d)", () => {
 
   it("take a power law in T through the two temperatures, measured between them", () => {
     const cross = at(278);
-    const f = Math.log(278 / 260) / Math.log(296 / 260);
-    expect([cross?.provenance, (cross?.crossSectionsM5[1] ?? 0) / (4e-60 * 0.5 ** f)]).toEqual([
+    const f = log(278 / 260) / log(296 / 260);
+    expect([cross?.provenance, (cross?.crossSectionsM5[1] ?? 0) / (4e-60 * pow(0.5, f))]).toEqual([
       "measured",
       expect.closeTo(1, 12),
     ]);
   });
 
   it("extrapolate the power law within the law's range, estimated, and hold it beyond", () => {
-    const f = Math.log(200 / 260) / Math.log(296 / 260);
-    expect([at(200)?.provenance, (at(200)?.crossSectionsM5[1] ?? 0) / (4e-60 * 0.5 ** f)]).toEqual([
-      "estimated",
-      expect.closeTo(1, 12),
-    ]);
+    const f = log(200 / 260) / log(296 / 260);
+    expect([
+      at(200)?.provenance,
+      (at(200)?.crossSectionsM5[1] ?? 0) / (4e-60 * pow(0.5, f)),
+    ]).toEqual(["estimated", expect.closeTo(1, 12)]);
     expect(at(900)?.crossSectionsM5[1]).toBe(at(500)?.crossSectionsM5[1]);
   });
 

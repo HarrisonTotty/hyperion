@@ -9,7 +9,8 @@
  * scanned with its comments and string literals blanked. `Math.hypot`, which V8 computes from its
  * own arithmetic and `Math.sqrt`, and the exact `Math` functions are allowed. `.oxlintrc.json` has
  * no rule that can do this. A module joins the list when a committed table, or a test's bit-exact
- * pin, comes to read it.
+ * pin, comes to read it; every test that writes a committed table through `test/bless.ts` is in it,
+ * which the scan checks over every renderer test.
  */
 import { describe, expect, it } from "vitest";
 
@@ -34,7 +35,6 @@ const MODULES = import.meta.glob<string>(
     "../test/atmosphereSweep.ts",
     "../test/atmosphereCases.ts",
     "../test/mieMatrices.ts",
-    "../view/atmosphere/mieSharedCases.test.ts",
     // The modules whose platform maths a one-ulp nudge found moving a committed table's bits.
     "../view/atmosphere/forwardLobe.ts",
     "../view/atmosphere/forwardPeak.ts",
@@ -68,6 +68,23 @@ const MODULES = import.meta.glob<string>(
     // The tone curve and exposure `gate.ts` reads for its colours.
     "../view/photometry/toneCurve.ts",
     "../view/photometry/exposure.ts",
+    // Every test that writes a committed table through `test/bless.ts`, whose own bodies compute
+    // some of their tables' values.
+    "../test/bless.test.ts",
+    "../test/mieMatrices.test.ts",
+    "../view/atmosphere/absorbers.test.ts",
+    "../view/atmosphere/absorbers/earthLines.test.ts",
+    "../view/atmosphere/channels.test.ts",
+    "../view/atmosphere/mieSharedCases.test.ts",
+    "../view/atmosphere/reference/absorberCurves.test.ts",
+    "../view/atmosphere/reference/caseGate.test.ts",
+    "../view/atmosphere/reference/cases.test.ts",
+    "../view/atmosphere/reference/metricVerdicts.test.ts",
+    "../view/atmosphere/reference/references.test.ts",
+    "../view/atmosphere/reference/sweepBoundary.test.ts",
+    "../view/atmosphere/reference/sweepCases.test.ts",
+    "../view/atmosphere/reference/thickRuns.test.ts",
+    "../view/atmosphere/reference/vectorGate.test.ts",
     // R05's descent profile, whose poses its tests pin by hash.
     "../view/spike/descentProfile.ts",
   ],
@@ -75,7 +92,17 @@ const MODULES = import.meta.glob<string>(
 );
 
 /** How many modules the list names: the glob drops a path that no longer exists. */
-const LISTED = 46;
+const LISTED = 60;
+
+/** Every renderer test, as its text: the scan finds among them the tests that bless a table. */
+const TESTS = import.meta.glob<string>("../**/*.test.ts", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+
+/** An import of the bless helper, from any directory. */
+const BLESS_IMPORT = /from "(?:\.\.?\/)+(?:test\/)?bless"/u;
 
 /** The transcendental functions of `Math` whose results depend on the platform. */
 const PLATFORM_MATH =
@@ -187,6 +214,12 @@ function platformMathIn(source: string): string[] {
 describe("the committed tables' paths", () => {
   it("lists every module, each found", () => {
     expect(Object.keys(MODULES)).toHaveLength(LISTED);
+  });
+
+  it("lists every test that writes a committed table through bless.ts", () => {
+    const writers = Object.keys(TESTS).filter((file) => BLESS_IMPORT.test(TESTS[file] ?? ""));
+    expect(writers.length).toBeGreaterThanOrEqual(15);
+    expect(writers.filter((file) => !(file in MODULES))).toEqual([]);
   });
 
   it.each(Object.keys(MODULES))("%s computes its transcendentals through pinnedMath", (file) => {

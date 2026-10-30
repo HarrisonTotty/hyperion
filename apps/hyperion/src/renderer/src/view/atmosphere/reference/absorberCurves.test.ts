@@ -22,6 +22,7 @@ import {
   absorberTransmittance,
 } from "../absorbers";
 import { EARTH_REFERENCE_CURVES, EARTH_SLAB_REFERENCE_CURVES } from "../earth";
+import { exp, log, pow } from "../../../lib/pinnedMath";
 
 /** The file, from this test. */
 const FILE = "../../../../../../../../crates/hyperion-fit/src/atmosphere/absorber_curves.json";
@@ -42,17 +43,17 @@ const SATURATED_COLUMN_PER_M2 = 1e23;
 function saturatedCurve(): AbsorberCurve {
   const columns = Float64Array.from(
     { length: 241 },
-    (_, k) => SATURATED_COLUMN_PER_M2 * 10 ** (-3 + k / 40),
+    (_, k) => SATURATED_COLUMN_PER_M2 * pow(10, -3 + k / 40),
   );
   const depth = (law: (x: number, k: number) => number): Float64Array =>
     columns.map((u, k) => law(u / SATURATED_COLUMN_PER_M2, k));
   const opticalDepth = [
-    depth((x) => 4 * x ** 0.6),
-    depth((x, k) => (k < 10 ? 0 : 0.5 * x ** 0.8)),
+    depth((x) => 4 * pow(x, 0.6)),
+    depth((x, k) => (k < 10 ? 0 : 0.5 * pow(x, 0.8))),
     depth((x) => x),
   ] as const;
   const transmittance = opticalDepth.map((channel) =>
-    channel.map((tau) => Math.max(Math.exp(-tau), ABSORBER_TRANSMITTANCE_FLOOR)),
+    channel.map((tau) => Math.max(exp(-tau), ABSORBER_TRANSMITTANCE_FLOOR)),
   );
   const [red, green, blue] = transmittance;
   if (red === undefined || green === undefined || blue === undefined) {
@@ -60,9 +61,9 @@ function saturatedCurve(): AbsorberCurve {
   }
   return {
     kind: "column",
-    logColumns: columns.map(Math.log),
-    logPressures: Float64Array.of(Math.log(1e5)),
-    readTopLogPressure: Math.log(1e5),
+    logColumns: columns.map(log),
+    logPressures: Float64Array.of(log(1e5)),
+    readTopLogPressure: log(1e5),
     transmittance: [red, green, blue],
     opticalDepth,
   };
@@ -90,10 +91,10 @@ function columnsOf(curve: AbsorberCurve): number[] {
   );
   return [
     0,
-    Math.exp(first - 3),
-    Math.exp(first - 0.5),
-    ...inside.map(Math.exp),
-    ...[0.2, 1, 2, 4, 7, 11.5].map((d) => Math.exp(last + d)),
+    exp(first - 3),
+    exp(first - 0.5),
+    ...inside.map(exp),
+    ...[0.2, 1, 2, 4, 7, 11.5].map((d) => exp(last + d)),
   ];
 }
 
@@ -144,6 +145,6 @@ describe("the saturated synthetic curve", () => {
 
   it("is proportional to u below its first node", () => {
     // Blue's τ = u ÷ U there.
-    expect(at(1e18)[2]).toBeCloseTo(Math.exp(-1e-5), 15);
+    expect(at(1e18)[2]).toBeCloseTo(exp(-1e-5), 15);
   });
 });

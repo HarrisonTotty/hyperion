@@ -354,9 +354,19 @@ remainder of rem_pio2 is returned through module state rather than a tuple; the 
 multiply-adds of cbrt.rs are Dekker's exact product error, which equals them on cbrt's arguments;
 the paths no f64 argument reaches (rem_pio2_large's other precisions, cbrt's directed roundings)
 and the force_eval! calls, which raise exception flags and change no value, are left out. The file
-keeps the FreeBSD sources' Sun Microsystems notices: the 2004 notice quoted above, which e_exp.c,
-e_pow.c and k_tan.c carry, and this one, which the others carry (with "SunSoft" for "SunPro" in
-e_log.c, e_log2.c, e_asin.c, e_acos.c, e_atan2.c, k_sin.c, k_cos.c and k_rem_pio2.c):
+keeps the FreeBSD sources' Sun Microsystems notices: the 2004 notice quoted above, which e_exp.c
+and e_pow.c carry; k_tan.c's, worded
+
+  ====================================================
+  Copyright 2004 Sun Microsystems, Inc.  All Rights Reserved.
+
+  Permission to use, copy, modify, and distribute this
+  software is freely granted, provided that this notice
+  is preserved.
+  ====================================================
+
+and this one, which the others carry (with "SunSoft" for "SunPro" in e_log.c, e_log2.c, e_asin.c,
+e_acos.c, e_atan2.c, k_sin.c, k_cos.c and k_rem_pio2.c):
 
   ====================================================
   Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
