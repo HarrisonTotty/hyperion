@@ -6727,6 +6727,51 @@ galaxy_sweeps`.
       `sky_binary_light_d` are stale** by their fingerprint probes (0 stale at T4.l). The task
       leaves them to the train's wiring, and P11.T4.n's lane stales the same tables, so they are
       not refitted here (lean, 2026-10-29); the gate's freshness step fails by design until then.
+  - _The acceptance runs_ (over T4.m's commit, with T4.l's fix below it; pod, 4 vCPU; the slow
+    ones in the `slow-test` profile, by name, one at a time, none beside the gate):
+    - `cargo nextest run -p hyperion-sim -E 'test(binary::)'` (150 tests, among them the new unit
+      tests and `the_capped_bulge_record_is_bounded_star_by_star`), and the tests that filter
+      leaves out: `binary_classes`' fast ones (`a_helium_star_fed_less_than_its_wind_stays_a_helium_star`,
+      `a_helium_accretor_fed_to_its_end_is_not_capped`) and `stellar_system`'s
+      `a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star`: all pass.
+    - decision-observed-class-findings §A.5: `the_gate_is_conservative` and
+      `detached_generated_pairs_are_passed_over` pass; the slow
+      `no_detached_pair_is_passed_by_the_pre_test` passes with `Detached` as at T4.l (old A
+      0.9938, B 0.9676, C 0.7287, D 0.1992, E 0.0072; young 0.9979, 0.9911, 0.9774, 0.9055,
+      0.4993; the closed form reads no engine); P11.T17.c's `the_pair_verdicts_hold_against_the_engine`:
+      **0 violations and 0 engine panics** in its 18 sets (1,218 s), so the three stale tables'
+      verdicts still hold against the changed engine.
+    - The 10³-pair suites: `a_thousand_close_pairs_keep_the_engines_invariants` (`check_swells`
+      now in it), no capped timeline; `a_thousand_timelines_are_the_same_whatever_age_they_are_run_to`
+      (with T4.l's fix's record comparison): 397 run at both ages, 598 passed over, 5 through
+      collapses, 0 missed; between arrivals 60, 661, 0; the 100 wide massive pairs 10 passed over
+      and 90 through collapses, 0 missed; `a_hundred_timelines_run_to_just_past_their_events_are_the_same`:
+      3,773 runs just past events, 30 between arrivals.
+    - The pre-test's gates: `the_decay_bound_never_passes_over_an_interaction`, 0 misses (passes
+      2,262, 2,611, 5,041, as at T4.l); `the_second_pre_test_never_passes_over_an_interaction`,
+      1,071 bound after a collapse, 2 taken over, 1 interacting when forced, 0 missed.
+    - `binary_system` (3 of 3): ruling 137's share 0.472 over every collapse (2,723 of 5,765) and
+      **0.354 over the collapses that leave a neutron star** (1,291 of 3,651; asserted in
+      0.28–0.40 since T4.l's fix), as at T4.l; the marks: 1,407 of 1,752 marked primaries
+      stripped, 300 merged, the merger band 813 of 984 merged; Rucinski's contact pairs
+      2.84 × 10⁻³ a star; the bright exception 4 of 86,184 thin-disc systems.
+    - `binary_carve` (1 of 1): redrawn A 0, B 0, C 9.5 × 10⁻⁴ (19), D 6.35 × 10⁻³ (127), E
+      4.0 × 10⁻³ (40), against T4.l's 1.0 × 10⁻³, 6.85 × 10⁻³ and 4.0 × 10⁻³: within Poisson; no
+      system uses every attempt.
+    - `binary_classes` (4 of 4 slow): every class reached; 115 bound double neutron stars, 72
+      (63%) at e < 0.3, 26 merging, about 30 a Myr by VG18's yield; the shown class 115 against
+      115 by record; recycled pulsars' median periods 27.7 ms beside CO/ONe dwarfs (239) and
+      70.3 ms beside neutron stars (176).
+    - The R06 census (`a_hundred_thousand_systems_live_and_die_in_order`) passes in **387 s**
+      (T4.l 381 s, the same pod class); `multiple_systems_follow_the_model_over_ten_thousand_systems`
+      passes; `briefs_are_the_full_systems_over_thirty_thousand_systems` passes (23,888
+      table-routed rows inside their stated error, 515 s).
+    - R06's census oracles (`sky_census`, all seven): within 1,000 ly of the Sun, 476,140 of
+      1,411,018 systems generated in full, as at T4.l (1,348 s); 150 ly in motion 13,959 of 42,076
+      (24 s); the dwarfs 3,769 of 249,096 (7 s); and the four nuclear-disc ones, which T4.l's
+      lane did not run (D and E within 20 ly, at −x above the plane 165,297 of 220,301 generated,
+      2,408 s; −x below, 2,410 s; +x above, 2,392 s; +x below, 2,373 s, run alone after a
+      lost pod): all pass.
   - _Findings_ (recorded; not this task's):
     - **F16's miss is larger early in core helium burning**: −8.4% at y = 0.1, 8 M☉, Z = 0.02,
       beyond "up to 8%"; the swell's 1.1 bracket refuses that corner (above).
