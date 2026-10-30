@@ -48,6 +48,11 @@ const DAY_S: f64 = 86_400.0;
 /// constants are crate-private.
 const KOPPEN_ARID_MULTIPLE: f64 = 10.0;
 
+/// Köppen–Geiger's deserts' bound (BW) on the mean annual precipitation as a multiple of its
+/// threshold, "MAP < 5 × `P_threshold`", the arid climates' steppes (BS) lying between it and
+/// [`KOPPEN_ARID_MULTIPLE`] (Peel et al. 2007, Table 1).
+const KOPPEN_DESERT_MULTIPLE: f64 = 5.0;
+
 /// Köppen–Geiger's threshold's offset where the summer half-year holds 70% of the precipitation,
 /// mm a year: `P_threshold` = 2 MAT + 28 (Peel et al. 2007, Table 1).
 const KOPPEN_SUMMER_OFFSET_MM: f64 = 28.0;
@@ -402,6 +407,15 @@ impl Run {
             .map(|k| is_arid(k.precipitation_mm, k.celsius, k.summer_share))
             .collect()
     }
+
+    /// Whether each climate cell is a desert by Köppen–Geiger's bound ([`is_desert`]) on its
+    /// inputs ([`Run::koppen`]).
+    fn desert(&self) -> Vec<bool> {
+        self.koppen()
+            .iter()
+            .map(|k| is_desert(k.precipitation_mm, k.celsius, k.summer_share))
+            .collect()
+    }
 }
 
 /// A climate cell's Köppen–Geiger inputs ([`Run::koppen`]).
@@ -451,15 +465,27 @@ impl WarmHalf {
 /// ([`WarmHalf::of`]; Peel et al. 2007, Hydrol. Earth Syst. Sci. 11, 1633, Table 1;
 /// [`KOPPEN_ARID_MULTIPLE`]).
 pub(super) fn is_arid(precipitation_mm: f64, celsius: f64, summer_share: Option<f64>) -> bool {
-    if precipitation_mm <= 0.0 {
-        return true;
-    }
+    precipitation_mm <= 0.0
+        || precipitation_mm < KOPPEN_ARID_MULTIPLE * koppen_threshold_mm(celsius, summer_share)
+}
+
+/// Whether a climate cell of [`is_arid`]'s inputs is a desert (BW), MAP < 5 (2T + offset) mm a
+/// year, or where nothing falls (Peel et al. 2007, Table 1; [`KOPPEN_DESERT_MULTIPLE`]).
+fn is_desert(precipitation_mm: f64, celsius: f64, summer_share: Option<f64>) -> bool {
+    precipitation_mm <= 0.0
+        || precipitation_mm < KOPPEN_DESERT_MULTIPLE * koppen_threshold_mm(celsius, summer_share)
+}
+
+/// Köppen–Geiger's `P_threshold`, mm a year: 2T + offset at the annual mean temperature `celsius`
+/// (°C), the offset by the half-year that holds `summer_share` of the precipitation
+/// ([`WarmHalf::of`]; Peel et al. 2007, Table 1).
+fn koppen_threshold_mm(celsius: f64, summer_share: Option<f64>) -> f64 {
     let offset = match WarmHalf::of(summer_share) {
         WarmHalf::Summer => KOPPEN_SUMMER_OFFSET_MM,
         WarmHalf::Winter => 0.0,
         WarmHalf::Neither => KOPPEN_EVEN_OFFSET_MM,
     };
-    precipitation_mm < KOPPEN_ARID_MULTIPLE * (2.0 * celsius + offset)
+    2.0 * celsius + offset
 }
 
 /// The latitude and longitude of the body-frame unit vector `d`, degrees: the longitude
@@ -2949,7 +2975,9 @@ fn largest_off(values: &[f64], reference: &[f64]) -> f64 {
 /// the zonal field's largest value: 10⁻¹⁰. The ruling's 10⁻¹² (decision-r09-t13m §3.1) is below
 /// the partition's rounding: the columns' sea-level temperatures, alike to one unit in the last
 /// place (5.7 × 10⁻¹⁴ K at 288 K), give each column's ψ within 1.3 × 10⁻¹² and its E − P within
-/// 7.2 × 10⁻¹² of the zonal budget's (2026-10-30), the flux differencing adjacent bands' h.
+/// 7.2 × 10⁻¹² of the zonal budget's (2026-10-30), the flux differencing adjacent bands' h. Main
+/// ruled 10⁻¹⁰ for the budgets and kept 10⁻⁹ for the precipitation (2026-10-30, on
+/// research-r09-t13m-landing's Q2).
 const ALIKE_BUDGET_TOLERANCE: f64 = 1e-10;
 
 /// Decision-r09-t13m §3.1 and §3.8: on a world whose every column is alike, an aquaplanet and a
@@ -3199,7 +3227,7 @@ fn flat_continent(pass: &Pass<'_>, working: &mut Working) {
 
 /// The flat continent's JJA rate as built, mm/day: the solid-angle mean of its all-land climate
 /// cells within 10–15° N and 35–115° E, each month's rate the plain mean of June, July and August,
-/// as [`the_flat_continent_s_monsoon_is_wet_and_its_low_latitudes_are_not_arid`] measures it, on
+/// as [`the_flat_continent_s_monsoon_is_wet_and_its_low_latitudes_are_not_desert`] measures it, on
 /// the tree before R09.T13.m (2026-10-30; research-r09-climate's pilot read 3.08).
 const CONTINENT_AS_BUILT_JJA_MM_PER_DAY: f64 = 3.08;
 
@@ -3207,21 +3235,29 @@ const CONTINENT_AS_BUILT_JJA_MM_PER_DAY: f64 = 3.08;
 /// column budget at least: 1.75 (decision-r09-t13m §3.3; its pilot 1.96).
 const CONTINENT_JJA_RISE: f64 = 1.75;
 
+/// The most of the flat continent's all-land climate cells within 12.5° N that may be arid: 12,
+/// as built under each column's budget (decision-r09-t13m §3.3 as main ruled it, 2026-10-30, on
+/// research-r09-t13m-landing's Q1). The ruling's target stays none: these are the monsoon's
+/// northern edge falling short at the coast, semi-arid (BS), 0.76–0.999 of the bound, at
+/// 11.0–12.3° N, all but one at 31–43° E (as built before it, 130).
+const CONTINENT_LOW_ARID_CELLS: usize = 12;
+
 /// Decision-r09-t13m §3.3: on the reference Earth's inputs with one flat continent, 10° S–40° N by
 /// 30–120° E at 300 m ([`flat_continent`]), at level 7, the continent's own energy-flux equator in
 /// June–August lies far north of the zonal one, and each column's budget brings it its monsoon:
 /// the JJA rate of its all-land climate cells within 10–15° N and 35–115° E is at least
-/// [`CONTINENT_JJA_RISE`] times its as-built [`CONTINENT_AS_BUILT_JJA_MM_PER_DAY`], and no all-land
-/// climate cell of it within 12.5° of the equator in the summer hemisphere of its monsoon, the
-/// north, is arid by Köppen–Geiger's bound at its own temperature ([`Run::arid`]). Prints its JJA,
-/// DJF and annual rates by 5° band, and its arid cells by band.
+/// [`CONTINENT_JJA_RISE`] times its as-built [`CONTINENT_AS_BUILT_JJA_MM_PER_DAY`]; and of its
+/// all-land climate cells within 12.5° of the equator in the summer hemisphere of its monsoon, the
+/// north, none is a desert (BW, [`Run::desert`]) and at most [`CONTINENT_LOW_ARID_CELLS`] are arid
+/// by Köppen–Geiger's bound at their own temperature ([`Run::arid`]), as main ruled (2026-10-30).
+/// Prints its JJA, DJF and annual rates by 5° band, and its arid cells by band.
 #[test]
 #[ignore = "slow: the reference Earth's step at level 7 with a flat continent, about 60 s"]
-fn the_flat_continent_s_monsoon_is_wet_and_its_low_latitudes_are_not_arid() {
+fn the_flat_continent_s_monsoon_is_wet_and_its_low_latitudes_are_not_desert() {
     let run = run_world(reference::earth_like(), 7, Grid::Own, flat_continent);
     let counts = run.land_counts();
     let land = &counts;
-    let arid = run.arid();
+    let (arid, desert) = (run.arid(), run.desert());
     let season = |months: [usize; 3]| -> Vec<f64> {
         run.working
             .climate
@@ -3286,24 +3322,36 @@ fn the_flat_continent_s_monsoon_is_wet_and_its_low_latitudes_are_not_arid() {
         west: 30.0,
         east: 120.0,
     };
-    let arid_low: Vec<(f64, f64)> = (0..land.len())
-        .filter_map(|c| {
-            let at = latitude_longitude_deg(run.climate.centre(u32::try_from(c).unwrap()));
-            (inland(low)(c, at.0, at.1) && arid[c]).then_some(at)
-        })
-        .collect();
+    let within = |of: &[bool]| -> Vec<(f64, f64)> {
+        (0..land.len())
+            .filter_map(|c| {
+                let at = latitude_longitude_deg(run.climate.centre(u32::try_from(c).unwrap()));
+                (inland(low)(c, at.0, at.1) && of[c]).then_some(at)
+            })
+            .collect()
+    };
+    let (arid_low, desert_low) = (within(&arid), within(&desert));
     eprintln!(
         "  its 10–15° N land's JJA {summer:.2} mm/day, {:.2} times as built \
-         ({CONTINENT_AS_BUILT_JJA_MM_PER_DAY}); arid all-land climate cells within 12.5° N: {}",
+         ({CONTINENT_AS_BUILT_JJA_MM_PER_DAY}); all-land climate cells within 12.5° N arid {}, \
+         desert {}",
         summer / CONTINENT_AS_BUILT_JJA_MM_PER_DAY,
-        arid_low.len()
+        arid_low.len(),
+        desert_low.len()
     );
     report_wettest(&run);
     assert!(
         summer >= CONTINENT_JJA_RISE * CONTINENT_AS_BUILT_JJA_MM_PER_DAY,
         "the continent's 10–15° N JJA {summer} mm/day"
     );
-    assert!(arid_low.is_empty(), "arid within 12.5° N: {arid_low:?}");
+    assert!(
+        desert_low.is_empty(),
+        "desert within 12.5° N: {desert_low:?}"
+    );
+    assert!(
+        arid_low.len() <= CONTINENT_LOW_ARID_CELLS,
+        "arid within 12.5° N: {arid_low:?}"
+    );
 }
 
 /// The coarse pass's reference locked Earth (its generated continents, level 8) through the
