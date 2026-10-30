@@ -1199,6 +1199,27 @@ figure from 33.7° of position angle to the poles, and so covers the air's glow 
   outline's least semi-axis; the occluder's stride named and its altitude stretched; the smoke's
   `TEST SATURN` frames airless, in T16.g's group, which moves to part 10.
 
+#### R02.T19.b The datum's captures
+
+New, 2026-10-30, assigned by main from the research advice of 2026-10-29 on Electron in the cloud
+pods (its brief B): T19's datum on `TEST SATURN`'s spheroid, saved as `VIEW` draws it, for main's
+look, from the smoke harness, which runs in a pod where `VIEW` itself cannot.
+
+- **The captures.** `just test-render --part=1 --captures=<dir>` also saves
+  `datum-saturn-<style>-<framing>` for each variant: `TEST SATURN` (60,268 × 54,364 km) centred in
+  a 1280 × 720 view at a 60° field from a range where its disc fills about half the view's height,
+  equator-on (the pole up the view) and pole-on (looking down the pole), lit from behind the camera
+  and to one side; through `PhotorealRenderer` with `overlaySubmission` (the datum inside the
+  figure, `datumInsideAt`) and through `WireframeRenderer` (the limb centred). Eight PNGs: two
+  styles × two framings × the two variants.
+- **The captures' time.** If twice the capture groups' new total passes `CAPTURES_WATCHDOG_MS`,
+  it and `testRender.sh`'s `captures_allowance_s` rise together.
+- **Where.** `captureDatum(engine)` in `smoke/datumFrame.ts`, beside `checkDatumFrame`, and the
+  group `R02.T19 the datum captures` in `smoke/page.ts`, part 1, under `captures`. Done when a run
+  of part 1 with the captures saves the eight PNGs and `just test-render` passes.
+
+_Built 2026-10-30._
+
 ## Verification
 
 - `just ci` green after every task; the TypeScript and Rust tests above are the automatic proof of
@@ -2141,3 +2162,19 @@ highest step`, naming the key held back as the field of view's ends name theirs;
 - **Carried (R02.T19; `decision-r02-t19-leans.md` item 1), with no deadline.** The first latitude a
   console shows in words takes the graticule's convention, planetocentric, and names it in its
   glossary row; if it cannot, the guide then states the graticule's.
+- **Deviations in R02.T19.b, as built** (2026-10-30).
+  - _The range_ is 340 Mm, not the advice's 250 Mm: at a 60° horizontal field (`fovXRad`, as
+    the view's) 250 Mm makes the disc some 550 px across of the view's 720; at 340 Mm the figure's
+    polar diameter is 360 px equator-on, its disc 398 px pole-on (lean, 2026-10-30).
+  - _The frames._ `TEST SATURN`'s own medium, `ATMOSPHERE TEST`'s `saturn-oblate` on Saturn's
+    spheroid (`builtOfCase`), its disc a Lambert sphere of its ground albedo; the Sun-like disc at
+    1 au, at 64° of phase; a fixed EV100 of 15, no meter (lean, 2026-10-30).
+  - _The captures' time._ `CAPTURES_WATCHDOG_MS` stays 1,380 s: twice the capture groups' total
+    with the datum's, measured in a pod, stays within it.
+  - _What to look for:_ the limb on the figure's edge, inside it in the photorealistic style and
+    centred on it in the wireframe, and the graticule's meridians ending at the poles.
+  - _Found by the captures_, as built before them: a datum line that projects straight through
+    the sub-camera point is never subdivided, and its chords sag some 100 km behind the occluder's
+    4 × 10⁻⁶ d margin where the depth slope is near zero. At 340 Mm, equator-on in both styles, the
+    equator is gone ±17 px about the disc's centre and the central meridian ±38 px; pole-on, in
+    the wireframe, every meridian within 17 px of the pole. Not fixed here.
