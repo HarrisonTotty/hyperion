@@ -147,17 +147,18 @@ appended at the end under a "Rendering plan R09" comment, since the macro's orde
 Design note 4), which holds R05's `selftest.surface.test_planet` and tests the `surface.` prefix
 (`surface_tags_carry_the_surface_prefix`), under a "Plan R09" comment after R05's:
 
-| Tag                      | Scope           | Key            | Draws                                                                  |
-| ------------------------ | --------------- | -------------- | ---------------------------------------------------------------------- |
-| `body.surface.detail`    | `Body`          | `BodyId`       | the detail seed, one block output keyed by `BodyId`                    |
-| `surface.coarse.plates`  | `SurfaceCoarse` | `surface_item` | plate count, seeds, Euler poles, areas, continental nuclei             |
-| `surface.coarse.warp`    | `SurfaceCoarse` | `surface_cell` | the low-frequency warp's lattice, of boundaries and continents         |
-| `surface.coarse.relief`  | `SurfaceCoarse` | `surface_cell` | coarse landform noise, volcanic provinces                              |
-| `surface.coarse.crater`  | `SurfaceCoarse` | `surface_item` | craters of D_b and wider: count, place, diameter, age                  |
-| `surface.coarse.erosion` | `SurfaceCoarse` | `surface_cell` | random receivers and the multigrid's jitter                            |
-| `surface.relief`         | `SurfaceDetail` | `surface_item` | structural noise: a 3D lattice corner's word, as R05's `noise` keys it |
-| `surface.channel`        | `SurfaceDetail` | `surface_cell` | Dendry key points per cell and level                                   |
-| `surface.crater`         | `SurfaceDetail` | `surface_cell` | craters below D_b per octave cell                                      |
+| Tag                      | Scope           | Key            | Draws                                                                                         |
+| ------------------------ | --------------- | -------------- | --------------------------------------------------------------------------------------------- |
+| `body.surface.detail`    | `Body`          | `BodyId`       | the detail seed, one block output keyed by `BodyId`                                           |
+| `surface.coarse.plates`  | `SurfaceCoarse` | `surface_item` | plate count, seeds, Euler poles, areas, continental nuclei                                    |
+| `surface.coarse.warp`    | `SurfaceCoarse` | `surface_cell` | the low-frequency warp's lattice, of boundaries and continents                                |
+| `surface.coarse.relief`  | `SurfaceCoarse` | `surface_cell` | coarse landform noise, volcanic provinces                                                     |
+| `surface.coarse.crater`  | `SurfaceCoarse` | `surface_item` | craters of D_b and wider: count, place, diameter, age                                         |
+| `surface.coarse.erosion` | `SurfaceCoarse` | `surface_cell` | random receivers and the multigrid's jitter                                                   |
+| `surface.relief`         | `SurfaceDetail` | `surface_item` | structural noise: a 3D lattice corner's word, as R05's `noise` keys it                        |
+| `surface.channel`        | `SurfaceDetail` | `surface_cell` | Dendry key points per cell and level                                                          |
+| `surface.channel.bend`   | `SurfaceDetail` | `surface_cell` | a world dry now's trunk's bend, word (c − 1)(D − 1) + k − 1 for chord c's vertex k (R09.T6.h) |
+| `surface.crater`         | `SurfaceDetail` | `surface_cell` | craters below D_b per octave cell                                                             |
 
 `surface.relief` is keyed as R05's noise keys its lattice corners (`noise::Octave`'s corner
 gradient: object word i << 32 | j of the corner's 32-bit two's complements, draw number
@@ -1264,7 +1265,8 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     per coarse cell joined to the cell its `flow` names; each later level's key points, inherited
     from the coarser one and jittered on `surface.channel` (ε = 0.25), join the nearest segment of
     all coarser levels; neighbourhoods are graph neighbourhoods on the cube and distances 3D chords
-    between canonical key points, so a face edge needs no special case. The paper's height
+    between canonical key points, so a face edge needs no special case (on a world dry now a
+    trunk's chords are its bent course's sub-chords, R09.T6.h). The paper's height
     reconstruction is replaced by the physics: the bed at the steady-state slope S = k_s (r̄ ÷ r)^θ
     A^−θ, with A from Hack's law in SI (a geometric area, Hack 1957, p. 47), k_s the coarse cell's
     geometric index, r̄ its catchment runoff and r its own runoff, since a tributary's steady state
@@ -2008,6 +2010,50 @@ channel_water_worlds --cargo-profile slow-test --profile slow --run-ignored only
     `synth::height_golden`, `worker::` and `material::`; the sim's `planetary::surface::steps::relief`
     and `::erosion`; the slow `channel_water_worlds`, `surface_weights_worlds` and
     `surface_reading_worlds` by name; `just test-wasm-fast`.
+- **R09.T6.h The dry-now trunks bent and graded** (rides 25's plain bump with no hold, in series
+  after R09.T6.g, whose depth law (B), (A2) and s_net are measured on; main's rulings of
+  2026-10-30). R09.T6.c's look ("The trunks' look on the reference Mars", 2026-10-29) found a
+  visibly wrong picture on a world dry now: each trunk is one straight trough from key point to key
+  point (27.8, 39.0 and 51.0 km at p10, median and p90), of one depth and width, stepping at the
+  next key point to its receiver's valley and turning only there (41.8° at the median, 106.2° at
+  p90): roads at 150 m a pixel, faults at 600 m. The reference Mars's drawn courses already have
+  Mars's sinuosity over whole valleys (median 1.263 over 160–885 km, against Som, Montgomery and
+  Greenberg 2009's 1.10–1.57, median 1.14), but are exactly straight within a run, so the fix is
+  the planform below one run, not more length. Worlds wet now keep T6.b's trunks to the bit.
+  Records: [09-surface-generator/records/R09.T6.h.md](09-surface-generator/records/R09.T6.h.md).
+  - _(a) The bend_ (Dendry's `SubdivideSegments` and `DisplaceSegments`, built from their
+    description as T6.a was). On a world dry now each trunk's two chords are split into D parts
+    each, the D − 1 points on a Catmull–Rom spline through (the largest inflow's crossing, K_i,
+    C_i, K_j) and (K_i, C_i, K_j, C_j), with Dendry's reflected point where there is no inflow or
+    no onward trunk, and each displaced across its chord by u f times the chord turned 90°, u
+    uniform in [−1, 1) on the new tag `surface.channel.bend`, f calibrated so that the mean bent
+    over straight length s_net is 1.03–1.07 on the reference Mars (the run's scale, extrapolated
+    from Som et al.'s fractal dimension). Each half is built in its own cell's face plane and
+    clamped inside its cell; its ends stay the unbent trunk's, bit for bit; `point_m` and t follow
+    the bent length.
+  - _(b) The graded depth_ (ruling 1, amending decision-r09-t14-mars-ceiling §5). Along a trunk's
+    second chord, G grades by a smoothstep from its own cell's to its receiver's, never outside the
+    two; each wall 5 G at every point, capped as before, and the floor the trunk's own bankfull
+    channel. The groove's depth is the maximum over its sub-chords, so no step crosses a bend.
+  - _(c) The closed forms and the closure, in the same commit_ (mars-ceiling §2.2): a measured
+    `EPOCH_TRUNK_SINUOSITY` multiplies `MEAN_TRUNK_LENGTH` on dry-now cells, in both crates, and the
+    closure takes the graded second chord's void, reading the receiver on the solve's last routing.
+  - _Not in scope._ The reference Earth's tributaries (a separate item), the channel-initiation
+    area and the depth tail.
+  - _Tests._ On the reference Mars: every bent course in its cell and its receiver, its ends the
+    unbent trunk's, s_net's mean in 1.03–1.07, the whole courses' median sinuosity in Som's
+    1.10–1.57, and the spread by face position recorded; (A2) at least 1.2 m, (B)'s p99 at level 7
+    asserted and level 8's recorded, the density against Hynek et al.'s 0.0115 km⁻¹, no link above
+    `DEBRIS_FLOW_SLOPE`, the pass's σ_h and the realised void over the closure's. The gradient
+    against central differences and the reads, cache order and same seed on the epoch world; an
+    extension golden of three bent trunks' vertices; and a world wet now to the bit.
+  - _Version._ It moves the coarse pass of every world dry now (the closure) and its synthesis, so
+    it rides a bump. Its goldens: the Mars-like world's synthesis goldens and the sim's
+    `planetary/surface/mars_like`, and no Earth, locked Earth, Moon, Ceres or Europa golden.
+  - _Acceptance._ `cargo test -p hyperion-surface synth::channels`, `synth::height_golden`,
+    `worker::` and `field::`; `cargo test -p hyperion-sim planetary::surface::steps::erosion` and
+    `planetary::surface::coarse_golden`; the slow `the_reference_mars_s_slow_record` by name;
+    `just test-wasm-fast`, `just test-wasm-slow` and `just test-wasm-browser`.
 
 Acceptance: `cargo test -p hyperion-surface synth::channels`.
 
