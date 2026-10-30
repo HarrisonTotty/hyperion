@@ -83,7 +83,7 @@ use crate::planetary::hooks::figures::cover::{
     self, AIRLESS_ICE_TEMPERATURE, DRY_SURFACE_WATER_SHARE,
 };
 use crate::planetary::hooks::figures::cover::{
-    ICE_SHEET_THICKNESS, PERENNIAL_ICE_TEMPERATURE, melting_point,
+    FillSlot, ICE_SHEET_THICKNESS, PERENNIAL_ICE_TEMPERATURE, melting_point,
 };
 use crate::planetary::hooks::figures::relief::Hypsometry;
 use crate::planetary::hooks::surface::{FULL_OCEAN_FRACTION, OceanWeight};
@@ -445,6 +445,14 @@ impl Basins {
     pub fn area_filled(&self, depth: Metres) -> f64 {
         self.of
             .map_or(0.0, |filled| filled.hypsometry.fill(depth).1)
+    }
+
+    /// [`area_filled`](Self::area_filled), its fill through the slot `fills` ([`FillSlot`]): the
+    /// same bits.
+    #[must_use]
+    pub(crate) fn area_filled_in(&self, depth: Metres, fills: &FillSlot) -> f64 {
+        self.of
+            .map_or(0.0, |filled| fills.fill(&filled.hypsometry, depth).1)
     }
 
     /// The weight c, 0 to 1, of a liquid of global layer `depth` in its climate: min(1,

@@ -75,6 +75,7 @@ use crate::planetary::chem::escape::{
 };
 use crate::planetary::chem::partition::{CriticalColumn, Ground};
 use crate::planetary::chem::tenuous::holds_tenuous_air;
+use crate::planetary::hooks::figures::cover::FillSlot;
 use crate::planetary::params::THIN_ENVELOPE_FRACTION;
 use crate::substance::{Element, MOLAR_GAS_CONSTANT, heat_capacity_over_r_at};
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
@@ -998,7 +999,10 @@ impl Solve<'_> {
     /// some 10 K (recorded).
     #[must_use]
     fn climate(&self) -> (Kelvin, WaterPhase) {
-        let warmest = self.step.at(Kelvin::new(self.t), &self.partials).warmest();
+        let warmest = self
+            .step
+            .at(Kelvin::new(self.t), &self.partials, &FillSlot::default())
+            .warmest();
         (warmest, water_phase(warmest, self.partials.total()))
     }
 
@@ -1526,7 +1530,9 @@ impl<'b> Solver<'_, 'b> {
             column,
             (self.water_state, self.retained_water, self.surface_water),
         );
-        let climate_of = |t: Kelvin, partials: &PartialPressures| step.at(t, partials);
+        // A local of this greenhouse, whose steps often fill the basins at the step before's layer.
+        let fills = FillSlot::default();
+        let climate_of = |t: Kelvin, partials: &PartialPressures| step.at(t, partials, &fills);
         let (t, partials, tau, supercritical) = partitioned_greenhouse(
             &inventory,
             self.body.base,

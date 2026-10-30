@@ -582,6 +582,19 @@ pub enum Hypsometry {
 }
 
 impl Hypsometry {
+    /// Whether `other` is this hypsometry to the bit: as many populations, each's weight, mean and
+    /// width the same bits.
+    #[must_use]
+    pub(crate) fn same_bits(&self, other: &Self) -> bool {
+        let (ours, theirs) = (self.populations(), other.populations());
+        ours.len() == theirs.len()
+            && ours.iter().zip(theirs).all(|(a, b)| {
+                a.weight.total_cmp(&b.weight).is_eq()
+                    && a.mean.value().total_cmp(&b.mean.value()).is_eq()
+                    && a.width.value().total_cmp(&b.width.value()).is_eq()
+            })
+    }
+
     /// Its populations: the continental then the oceanic on a mobile lid, or the one.
     #[must_use]
     pub fn populations(&self) -> &[Population] {

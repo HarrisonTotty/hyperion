@@ -41,6 +41,8 @@
 //! condensable's availability. A cover weighted by θ or the climate here would publish one the
 //! albedo does not have.
 
+use core::cell::Cell;
+
 use crate::math;
 use crate::planetary::chem::partition::Basins;
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceState};
@@ -306,17 +308,67 @@ pub(crate) fn water_layer(surface_water: KilogramsPerSquareMetre) -> Metres {
 ///
 /// It is the one expression of both that a pass's greenhouse steps (θ from each step's
 /// partition), its published partition and the record's partition read, so that θ, the
-/// published water and the record's equal the pass's to the bit.
+/// published water and the record's equal the pass's to the bit. The basins are filled through
+/// the slot `fills`, the same bits ([`FillSlot`]).
 #[must_use]
 pub(crate) fn water_under(
     inputs: &SurfaceWaterInputs,
     basins: &Basins,
+    fills: &FillSlot,
 ) -> (KilogramsPerSquareMetre, f64) {
     let surface_water = surface_water_of(inputs);
     (
         surface_water,
-        basins.area_filled(water_layer(surface_water)),
+        basins.area_filled_in(water_layer(surface_water), fills),
     )
+}
+
+/// A local slot for a hypsometry's last fill: the hypsometry and the layer, and the level and
+/// share they gave, [`Hypsometry::fill`]'s to the bit.
+///
+/// A greenhouse's steps read their potential ocean at every step, and the water often stands where
+/// the step before left it: over the first 20 sample systems at version 24, `generate` filled
+/// basins 6,369 times, 4,548 of them at the fill before's hypsometry and layer to the bit
+/// (P14.T54.b.l's count), each fill 53 halvings over its populations' truncated normals. With the
+/// slot, `generate` over them fell from about 452 to 433–443 ms (pod, 8 vCPU, rounds of
+/// P14.T54.b.l's probe).
+///
+/// The slot is a local of one greenhouse, never a static or a thread's, as a derivation's
+/// cold-trap field slot is (P14.T54.b.f; decision-p14-t54b-f-coldtraps §4). A fill is a pure
+/// function of its hypsometry and layer, which the slot matches bit for bit, so a reuse gives the
+/// bits a fill would.
+#[derive(Debug, Default)]
+pub(crate) struct FillSlot {
+    held: Cell<Option<HeldFill>>,
+}
+
+/// A [`FillSlot`]'s fill: its hypsometry and layer, and the level and share they gave.
+#[derive(Debug, Clone, Copy)]
+struct HeldFill {
+    hypsometry: Hypsometry,
+    layer: Metres,
+    filled: (Metres, f64),
+}
+
+impl FillSlot {
+    /// [`Hypsometry::fill`] of `hypsometry` by the layer `depth`: the slot's where it holds them
+    /// to the bit, and otherwise the fill, which then takes the slot.
+    #[must_use]
+    pub(crate) fn fill(&self, hypsometry: &Hypsometry, depth: Metres) -> (Metres, f64) {
+        if let Some(held) = self.held.get()
+            && held.layer.value().total_cmp(&depth.value()).is_eq()
+            && held.hypsometry.same_bits(hypsometry)
+        {
+            return held.filled;
+        }
+        let filled = hypsometry.fill(depth);
+        self.held.set(Some(HeldFill {
+            hypsometry: *hypsometry,
+            layer: depth,
+            filled,
+        }));
+        filled
+    }
 }
 
 /// The share of a body's condensed water that lies at its surface at the present outgassing

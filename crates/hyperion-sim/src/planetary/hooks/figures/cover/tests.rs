@@ -1140,3 +1140,33 @@ fn the_truncation_s_constants_are_the_normal_s_own_to_the_bit() {
     assert_same_bits(ABOVE_TRUNCATION_CDF, normal_cdf(TRUNCATION));
     assert_same_bits(DENSITY_AT_TRUNCATION, normal_density(-TRUNCATION));
 }
+
+/// One [`FillSlot`] asked in turn for two hypsometries' fills, by layers repeated, interleaved,
+/// beyond the span's top and not positive, gives [`Hypsometry::fill`]'s bits every time.
+#[test]
+fn the_fill_slot_gives_the_fill_s_bits() {
+    let earth = earth_hypsometry();
+    let lid = *Relief::of(&ReliefInputs {
+        regime: TectonicRegime::StagnantLid,
+        continental_fraction: 0.0,
+        crust: Crust::Silicate,
+        surface_gravity: MetresPerSecondSquared::new(3.71),
+        radius: Metres::new(3.39e6),
+        crater_density: PerSquareKilometre::new(0.1),
+        volcanism: 1.0,
+        lithosphere: Metres::new(100e3),
+    })
+    .hypsometry();
+    let slot = FillSlot::default();
+    for hypsometry in [earth, earth, lid, earth, lid, lid] {
+        for layer in [
+            2_617.0, 2_617.0, 20.0, 0.0, -1.0, 9.2e6, 2_617.0, 1e-3, 20.0,
+        ] {
+            let depth = Metres::new(layer);
+            let (level, share) = slot.fill(&hypsometry, depth);
+            let (want_level, want_share) = hypsometry.fill(depth);
+            assert_same_bits(level.value(), want_level.value());
+            assert_same_bits(share, want_share);
+        }
+    }
+}

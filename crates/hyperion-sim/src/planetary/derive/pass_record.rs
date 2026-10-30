@@ -43,7 +43,7 @@ use crate::planetary::hooks::cold_traps::{ColdTrapSky, NoColdTraps};
 use crate::planetary::hooks::crust::{
     CrustLid, CrustLithology, CrustOrigin, LidCrust, TidalVolcanism,
 };
-use crate::planetary::hooks::figures::cover::{self, SurfaceWaterInputs};
+use crate::planetary::hooks::figures::cover::{self, FillSlot, SurfaceWaterInputs};
 use crate::planetary::hooks::figures::relief::Hypsometry;
 use crate::planetary::hooks::figures::{
     Crust, PartitionGround, PassFigures, TectonicRegime, WetEpoch,
@@ -590,6 +590,18 @@ impl PassContext {
         water: &WaterGate,
         vapour: Pascals,
     ) -> (KilogramsPerSquareMetre, f64) {
+        self.surface_water_in(water, vapour, &FillSlot::default())
+    }
+
+    /// [`surface_water`](Self::surface_water), its basins filled through the slot `fills`
+    /// ([`FillSlot`]): the same bits.
+    #[must_use]
+    pub(crate) fn surface_water_in(
+        &self,
+        water: &WaterGate,
+        vapour: Pascals,
+        fills: &FillSlot,
+    ) -> (KilogramsPerSquareMetre, f64) {
         cover::water_under(
             &SurfaceWaterInputs {
                 state: water.state,
@@ -601,6 +613,7 @@ impl PassContext {
                 share: self.water_share(),
             },
             &self.basins,
+            fills,
         )
     }
 
@@ -609,7 +622,19 @@ impl PassContext {
     /// 0 where all the water is airborne, as at a greenhouse's first step.
     #[must_use]
     pub(crate) fn ocean_weight(&self, water: &WaterGate, vapour: Pascals) -> OceanWeight {
-        OceanWeight::of_potential_ocean(self.surface_water(water, vapour).1)
+        self.ocean_weight_in(water, vapour, &FillSlot::default())
+    }
+
+    /// [`ocean_weight`](Self::ocean_weight), its basins filled through the slot `fills`
+    /// ([`FillSlot`]): the same bits.
+    #[must_use]
+    pub(crate) fn ocean_weight_in(
+        &self,
+        water: &WaterGate,
+        vapour: Pascals,
+        fills: &FillSlot,
+    ) -> OceanWeight {
+        OceanWeight::of_potential_ocean(self.surface_water_in(water, vapour, fills).1)
     }
 
     /// The partition's ground under this context of the atmosphere `air` of a body whose water is

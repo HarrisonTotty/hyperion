@@ -117,6 +117,7 @@ use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{PassContext, WaterGate};
 use crate::planetary::derive::photometry::area_mix::reference_cloud_column;
 use crate::planetary::hooks::crust::CrustLid;
+use crate::planetary::hooks::figures::cover::FillSlot;
 use crate::planetary::hooks::structure::{DRY_LAPSE_FACTOR, adiabat_temperature};
 use crate::planetary::hooks::surface::{
     ClimateBody, GroundInertia, STANDARD_GRAVITY, step_climate,
@@ -3510,9 +3511,10 @@ impl<'a> StepClimate<'a> {
 
     /// The climate at a step of mean surface temperature `t` over the partial pressures
     /// `partials`: the given one's, or P14.T24.a's range under the spin at θ from that step's own
-    /// partition ([`PassContext::ocean_weight`]; [`step_climate`]).
+    /// partition ([`PassContext::ocean_weight`]; [`step_climate`]), its basins filled through the
+    /// slot `fills` (the same bits, [`FillSlot`]).
     #[must_use]
-    fn at(&self, t: Kelvin, partials: &PartialPressures) -> ClimateSpan {
+    fn at(&self, t: Kelvin, partials: &PartialPressures, fills: &FillSlot) -> ClimateSpan {
         match self {
             Self::Given(climate_of) => climate_of(t, partials),
             Self::Spun {
@@ -3520,7 +3522,7 @@ impl<'a> StepClimate<'a> {
                 water,
                 context,
             } => {
-                let theta = context.ocean_weight(water, partials.of(Gas::Water));
+                let theta = context.ocean_weight_in(water, partials.of(Gas::Water), fills);
                 step_climate(body, theta, t, partials)
             }
         }
