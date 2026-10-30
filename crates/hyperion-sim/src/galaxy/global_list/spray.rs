@@ -975,6 +975,44 @@ pub fn spray(galaxy: &Galaxy, spec: &StreamSpec) -> Result<Vec<Tracer>, BuildLea
     Ok(spray.tracers())
 }
 
+/// The least and greatest distances from the galactic centre, ly, over the step boundaries of the
+/// body that starts at `position` and `velocity` and takes `fixed`'s steps in `force`'s field:
+/// the radii the global list's bounding shells are widened from (P10.T4,
+/// [`GlobalList`](super::GlobalList)).
+///
+/// Over a specification's stripping time backwards these are the steps [`Spray::new`] takes on
+/// its backward pass, in the same field from the same state, so the body is the spray's
+/// progenitor. The turning points are not refined between boundaries, as
+/// [`OrbitSummary`](super::orbit::OrbitSummary)'s are: at the step rule's 64 steps a pericentre
+/// crossing a turning point lies within about `r̈ h² ÷ 8 ≈ r_p ÷ 32,768` of the nearer boundary's
+/// distance (`r̈` near `v_p² ÷ r_p`), under 10⁻⁴ of itself, which the shells' widening dwarfs.
+#[must_use]
+pub(super) fn radii_over_ly(
+    force: &SprayForce,
+    position: GalacticDisplacement,
+    velocity: GalacticVelocity,
+    fixed: FixedStep,
+) -> [f64; 2] {
+    let field = |x: [f64; 3]| force.acceleration_m_s2(&GalacticDisplacement::new(x));
+    let mut body = (position.metres(), velocity.metres_per_second());
+    let mut acceleration = field(body.0);
+    let h = fixed.step().value();
+    let start = dot(body.0, body.0);
+    let (mut least, mut greatest) = (start, start);
+    for _ in 0..fixed.count() {
+        kick_drift_kick(&mut body, &mut acceleration, h, field);
+        let r2 = dot(body.0, body.0);
+        // Squared distances are never NaN or a negative zero, so the comparisons are exact.
+        if r2 < least {
+            least = r2;
+        }
+        if r2 > greatest {
+            greatest = r2;
+        }
+    }
+    [least, greatest].map(|r2| r2.sqrt() / METRES_PER_LIGHT_YEAR)
+}
+
 /// A body's position (m) and velocity (m/s).
 type Body = ([f64; 3], [f64; 3]);
 

@@ -246,6 +246,24 @@ impl CentreModel {
     pub fn influence_radius(&self) -> LightYears {
         self.profile.influence_radius()
     }
+
+    /// The centre's entry on plan 10's global list, its first
+    /// ([`GlobalList::build`](crate::galaxy::global_list::GlobalList::build)).
+    ///
+    /// It holds the entry's kind, the mass inside the reach, the black hole's and the cluster's
+    /// stars there ([`enclosed_mass`](Self::enclosed_mass)), and the shell its members lie in, the
+    /// reach about the origin, 128 ly ([`CentreProfile::reach`]). It reads no motion (plan 10's
+    /// P10.T4, `decision-galaxy-25-train` §2.2).
+    #[must_use]
+    pub fn as_global_entry(&self) -> crate::galaxy::global_list::GlobalEntry {
+        use crate::galaxy::global_list::{BoundingShell, GlobalEntry, GlobalEntryKind};
+        let reach = self.profile.reach();
+        GlobalEntry::new(
+            GlobalEntryKind::Centre,
+            self.enclosed_mass(reach),
+            BoundingShell::new(LightYears::ZERO, reach),
+        )
+    }
 }
 
 #[cfg(test)]

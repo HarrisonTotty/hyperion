@@ -436,8 +436,7 @@ impl DwarfCoreModel {
             .value()
             .min(HALF_MASS_RADIUS_LIMIT_LY / PLUMMER_HALF_MASS_OVER_SCALE);
         let dispersion = velocity_dispersion(mass).value();
-        let extent =
-            jacobi_radius(galaxy, &spec.position(), mass.value(), dispersion).min(EXTENT_LIMIT_LY);
+        let extent = extent_of(galaxy, spec).value();
         let history = StarFormationHistory::of(infall, spec.accreted());
         let fe_h = dwarf_mean_fe_h(galaxy, spec.progenitor(), infall);
         let composition = Composition::from_fe_h(fe_h, HeliumExcess::ZERO);
@@ -577,6 +576,19 @@ pub(crate) fn dwarf_mean_fe_h(galaxy: &Galaxy, progenitor: u32, infall: SolarMas
     let offset = Stream::open(galaxy.seed(), tags::DWARF_CORE_METALLICITY, key)
         .normal(0.0, MEAN_METALLICITY_SCATTER_DEX);
     Dex::new(mass_metallicity(infall).value() + offset)
+}
+
+/// How far the members of `spec`'s core reach from its centre, what
+/// [`DwarfCoreModel::extent`] gives, without building the model: its Jacobi radius at its present
+/// mass and dispersion, held to [`EXTENT_LIMIT_LY`]. The global list widens the core's bounding
+/// shell by it (P10.T4).
+#[must_use]
+pub(crate) fn extent_of(galaxy: &Galaxy, spec: &DwarfCoreSpec) -> LightYears {
+    let mass = spec.mass();
+    let dispersion = velocity_dispersion(mass).value();
+    LightYears::new(
+        jacobi_radius(galaxy, &spec.position(), mass.value(), dispersion).min(EXTENT_LIMIT_LY),
+    )
 }
 
 /// The Jacobi radius, ly, of a core of `stars` M☉ at `position` (m, about the galactic centre)

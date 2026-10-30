@@ -43,7 +43,9 @@ use super::{DwarfCoreNumber, StreamNumber, StreamOrigin};
 
 /// Every stream and dwarf core of one galaxy, numbered (module documentation): what P10.T4's
 /// global list is built from.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Its `Default` holds none, as the empty list's does.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Debris {
     streams: Vec<StreamSpec>,
     cores: Vec<DwarfCoreSpec>,

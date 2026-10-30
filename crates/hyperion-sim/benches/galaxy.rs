@@ -17,6 +17,9 @@
 //! - `global_list::discrete_share` from in-plane tables, of the Milky Way fixture, which has one
 //!   recent progenitor, and of the first sweep galaxy, which has eight, as a drawn galaxy has on
 //!   average: about 1.3 ms and 10 ms (plan 10, P10.T3.d.a, restated from "under a millisecond").
+//! - `GlobalList::build` of the Milky Way fixture, its centre's model, debris and shell orbits
+//!   included: about a second (plan 10, P10.T4); 1.55 s on a pod (8 vCPU), most of it the shell
+//!   orbits.
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -212,9 +215,10 @@ fn features(c: &mut Criterion) {
 /// The halo's discrete share, from a galaxy's parameters, seed and in-plane tables (plan 10,
 /// P10.T3.d.a): of the Milky Way fixture, about 1.3 ms, and of the first sweep galaxy of
 /// T3.d.a's summary, whose eight recent progenitors cost most of its 10 ms in their epoch states
-/// (pod, 4 vCPU).
+/// (pod, 4 vCPU). Then the fixture's whole list (P10.T4), each time on a copy of the galaxy whose
+/// centre is not yet built, which the list reads.
 fn global_list(c: &mut Criterion) {
-    use hyperion_sim::galaxy::global_list::discrete_share;
+    use hyperion_sim::galaxy::global_list::{GlobalList, discrete_share};
     let params = GalaxyParams::milky_way_like();
     let tables = PotentialTables::in_plane(&MassModel::new(&params));
     let sweep = Seed::new(0x0a10_3d00_0000_0000);
@@ -226,6 +230,18 @@ fn global_list(c: &mut Criterion) {
     });
     group.bench_function("discrete_share (sweep galaxy 0)", |b| {
         b.iter(|| discrete_share(black_box(sweep), black_box(&drawn), &drawn_tables));
+    });
+    let galaxy = Galaxy::from_params(Seed::new(7), params)
+        .expect("the Milky Way fixture's gas is mostly neutral")
+        .with_full_potential();
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(30));
+    group.bench_function("GlobalList::build", |b| {
+        b.iter_batched(
+            || galaxy.clone(),
+            |g| GlobalList::build(black_box(&g)),
+            BatchSize::LargeInput,
+        );
     });
     group.finish();
 }

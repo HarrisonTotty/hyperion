@@ -2066,3 +2066,30 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
     8.58 √2 times its tube's largest dispersion, plan 09's `INTERNAL_SPEED_SIGMAS`.
   - _Tests._ Fast: `members::tests::stream_members_move_with_their_tube_s_dispersions_in_every_band`
     and `tube::tests::the_frame_and_the_dispersions_at_an_along_coordinate_are_the_knots`.
+- **P10.T4 as built (lane `p10-t4`, 2026-10-30, at `GENERATOR_VERSION` 23).** No output moved:
+  nothing generated reads the list. New unwired golden `galaxy/global_list/list.golden` (a lib
+  test, so `wasm32-wasip1` runs it), re-blessed by name at the version in force while unwired.
+  - _Items._ `global_list::{GlobalList, GlobalEntry, BoundingShell, CUT_WIDTHS, SHELL_WIDENING}`;
+    `GlobalList::{build, entries, kinds, debris, stream(StreamNumber), core(DwarfCoreNumber),
+entries_touching(&QuerySphere), entries_with_class_members}`; `GlobalEntry::{kind, mass, shell,
+has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, touches}`;
+    `CentreModel::as_global_entry()` (mass inside the 128 ly reach, shell 0–128 ly; the name is
+    plan 09's Provides', though it builds an owned value). `GlobalList` is `PartialEq`, not `Eq`;
+    `Debris` gains `Default`. Crate-visible: `spray::radii_over_ly`, `dwarf_core::extent_of`.
+  - _Contracts._ `build` reads `Galaxy::centre()` and `expect`s it (no galaxy the builder allows
+    fails it) and panics without the kinematic tables, as `Debris::generate` does.
+    `entries_touching` tests the sphere's padded radius, so the caller pads for its members'
+    motion (T9: the centre's members need plan 09's own speed bound). `entries_with_class_members`
+    is the centre and every core.
+  - _Shells (deviation)._ Orbits step in the spray's `SprayForce`, not `Leapfrog`, so a stream's
+    backward leg over `T_s` is its spray progenitor's; forwards over `T_s` too when `T_s` is under
+    a radial period. A core goes one radial period each way and is widened by its extent, not by
+    widths. A stream's radii widen by `(CUT_WIDTHS + 2 SHELL_WIDENING) r_t ÷ r_p` of themselves,
+    `r_t` at the epoch mass plus the tube's or the spec's, the larger; `SHELL_WIDENING` = 4.
+  - _For T6 and T9._ The tubes' own four-width cut is not inside the shells: end knots' widths run
+    to about ten times the median, so a member cut there could lie far beyond every tracer (the
+    lane's report has the figures). `stream_shell` is private to `global_list`; its child modules can
+    call it.
+  - _Counts (lean, 2026-10-30)._ "About 240" is held as the mean over eight Milky Way seeds within
+    200–300; "150–1,500" is held on 24 galaxies, though some drawn galaxies expect fewer than 150
+    (a finding).

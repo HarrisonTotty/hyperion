@@ -763,9 +763,11 @@ mod tests {
             "tanh", "asinh", "acosh", "atanh", "exp", "exp2", "exp_m1", "ln", "log", "log2",
             "log10", "ln_1p", "powf", "powi", "cbrt", "hypot", "mul_add", "to_bits",
         ];
-        // The spray and its table integrate under the same rule (P10.T5.b).
+        // The spray and its table integrate under the same rule (P10.T5.b), and the list widens
+        // its shells from the spray's orbits (P10.T4).
         let sources = [
             ("global_list/orbit.rs", include_str!("orbit.rs")),
+            ("global_list/mod.rs", include_str!("mod.rs")),
             ("global_list/spray.rs", include_str!("spray.rs")),
             ("global_list/spray/force.rs", include_str!("spray/force.rs")),
             ("potential/force.rs", include_str!("../potential/force.rs")),
