@@ -1955,6 +1955,59 @@ channel_water_worlds --cargo-profile slow-test --profile slow --run-ignored only
     acceptance: a per-point floor at the sea level in `Synthesiser::height_at`. P1 and P2 hold on
     both Earths. The exception is trunk axes into lakes above the sea, which is deferred as a
     figure.
+- **R09.T6.g The trunks' depth and the channel budget** (rides a plain bump, with no hold: 25's if
+  it is ready before that bump's bless, else the next; built on its lane branch and picked just
+  before the bump commit, decision-bump-plan-after-22 §1.4; decision-r09-channel-term §9, which
+  binds). After T6.f three things are left. The steady-state trunks' `valley_depth` has a median of
+  1.3 km on the reference Earth (p90 2.5 km, maximum 4.0 km): canyon-scale on every trunk, four to
+  six times the real Earth's median relief at the coarse cell's scale (§9.2's Earth2014 census).
+  The coarse pass's `channel_variance` books 55,814 m² where the synthesis draws 15,569 m² on the
+  reference Earth (31,348 against 8,668 on the locked Earth), so the realised σ_h is about 0.3%
+  under plan 14's. And the synthesis's closed forms omit the neighbours' trunks reaching into a
+  cell, so dry ground's variance of z is 8.42 and 2.56 at band levels 3 and 4, and R10.T5's
+  `STYLE_GAP_Z` was re-pinned to 1.36 (R09.T6.f's record).
+  Records: [09-surface-generator/records/R09.T6.g.md](09-surface-generator/records/R09.T6.g.md).
+  - _(a) The trunks' depth._ `valley_depth` at the coarse cell's `k_s`, re-derived with a science
+    check (§9.2's likely cause: the stream-power rise from the channel heads, integrated at a
+    trunk's coarse steepness, a mountain belt's index laid on lowland tributaries). On both Earths
+    the drawn steady-state trunk valleys' median lies within a factor of 2 of 250 m, their p90 is
+    at most about 2 km, and their ratio to the cell's height above its base level is under 1
+    (§9.2's target, from Earth2014's 5′ census calibrated on four canyons). The tributaries follow
+    through their inherited top. Where `EpochValley`'s steady-state bound reads the law, a world
+    dry now's valleys follow it, and the bless note names them.
+  - _(b) The channel budget._ The coarse pass's `C_c` (`relief/budget.rs`) books what the synthesis
+    draws: the synthesis's own forms, with the receiver and T6.f's hold, in place of T6.b's
+    cell-alone `channel_variance`.
+  - _(c) The neighbours' trunks._ The closed forms (`unresolved_channel_variance`,
+    `channel_structure_function`) count the trunks of neighbouring cells that reach into a cell,
+    with the fade and the floor (decision-r10-t2-weights §2.5).
+  - _(d) Dry closed basins._ ℓ is the receiver's ground where the receiver is dry and terminal (a
+    playa's pit; the coarse pass's base levels, `erosion/branches.rs`), and the floor follows it
+    (§9.4's lean).
+  - _Not in scope._ A `has_sea` flag (§9.3: added with the first rule that must tell a sea from the
+    lowest ground, R11's ocean drawing among them, with its payload change); a river's last reach
+    one flow depth below the sea; a lake's outflow groove (§9.4, cosmetic); a correction for the
+    floor's mean lift (§9.1, recorded, none).
+  - _Tests._
+    - (a)'s census on the reference Earth, the locked Earth and the synthetic Earth-like world,
+      printed against §9.2's target and asserted to it.
+    - (b): the booked `C_c` within 1% of the synthesis's drawn channel variance over every
+      sixteenth cell, and the realised σ_h plan 14's to 0.1%.
+    - (c): dry ground's variance of z at band levels 3 and 4, and R10.T5's survey figures, printed
+      and recorded, `STYLE_GAP_Z` re-pinned from the run.
+    - (d): no playa's trunk is cut below its basin's floor.
+    - T6.f's P1–P3 rerun; P4 on the airless, flat and one-crater worlds, to the bit.
+    - T19.c's slow cases over the wire; `just test-wasm-fast` and `just test-wasm-slow`, since the
+      synthesis's new arithmetic runs in the client's module.
+  - _Version._ It moves the coarse field (through `C_c` and σ_h) and the synthesis on wet worlds,
+    and a world dry now's epoch valleys if (a) reaches them, so it rides a bump. In the bump
+    commit, re-blessed by name: decision-r09-channel-term §5's list, the sim's coarse goldens, and
+    the Mars-like world's where (a) moves them. Re-measured after it: R10.T2's, T4.a's and T5's
+    Earth figures and `level-bounds.json`. No payload layout moves.
+  - _Acceptance._ `cargo test -p hyperion-surface synth::channels`, `synth::levels`,
+    `synth::height_golden`, `worker::` and `material::`; the sim's `planetary::surface::steps::relief`
+    and `::erosion`; the slow `channel_water_worlds`, `surface_weights_worlds` and
+    `surface_reading_worlds` by name; `just test-wasm-fast`.
 
 Acceptance: `cargo test -p hyperion-surface synth::channels`.
 
@@ -3157,7 +3210,7 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate`, and the surface
     module's slow tests by name.
   - _Built 2026-10-20_ (`817e44c4`). Its ruled follow-ons A and B (decision-r09-t13h-scope §6.3; the
-    record) have no entry yet; both move thin-aired worlds' climate, so they ride a bump.
+    record) are R09.T13.k; both move thin-aired worlds' climate, so they ride a bump.
 - **R09.T13.j The land's water** (after T13.e and T13.f, before R09.T14–T16;
   decision-r09-t13e-revision, whose specification and tests bind). R09.T13.e's revision for its
   finding E-P1, land-heavy midlatitudes too dry. The sea rains its own evaporation plus its band's
@@ -3294,6 +3347,39 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     and the surface module's slow tests by name.
   - _Built 2026-10-21_ (batch 1 `a5bd4f33`, `60a85b5a`, `5ffd64fd`, `8fb1bfa0`, 2026-10-20; batch 2
     `768481cd`, `84573e84`, `4880791f`, `5dd04c2b`).
+- **R09.T13.k The thin air's slab capacity and calibration** (R09.T13.h's follow-on,
+  decision-r09-t13h-scope §6.3, which binds; rides a plain bump, with no hold, each part built on
+  its lane branch and picked just before the bump commit, decision-bump-plan-after-22 §1.4 and
+  decision-r09-t13h-scope §6.1). Two parts, A before B, each with a short design ruling first and
+  its own commit.
+  Records: [09-surface-generator/records/R09.T13.k.md](09-surface-generator/records/R09.T13.k.md).
+  - _A, the slab's own heat capacity_ (the thin-air ruling's T2). Kieffer 2013's eq. 6,
+    ∂T_a/∂t = (H_R + H_V) ÷ (c_p p ÷ g), its H_R from the prior step's surface ([45]), bounded at
+    T_fa with the excess to snow at each step ([46], eq. 7). One state per column replaces F̄, its
+    first orbit and the true-time mapping (decision-r09-t13h-scope §7), and cures the near-neutral
+    convergence at β → 1 (§4). The design ruling settles §6.3's three questions: an exponential or
+    implicit update; on the whole-days clock, the month's compression or full capacity; and the
+    slab's state in the jump. c_p is the registry's `heat_capacity_over_r_at`.
+  - _B, the calibration._ The frost's albedo and emissivity (T3), the reservoir's pressure (T4),
+    transport over the cap (T5), the high latitudes' inertia (T6, with P14.T54.a's law and
+    P14.T49.l's pore gas), dust's solar heating of the slab (Kieffer's H_V, from plan 14's aerosol
+    modes), β thinned with height and the frost point at the ground's own pressure (R5; 0.63 K km⁻¹
+    on Mars), the kind of the reference Mars's 214 K (D6), and the absorber's weighting of the
+    slab's level (T7; 141.7–144.5 K on Mars). B's build waits for P14.T49.l, which has no _Built_
+    mark in plan 14. Its design ruling can start from T13.h's as-built swing and clearing figures.
+  - _Files._ `steps/climate/airless.rs` and the climate step's `tests/thin_air.rs`. No contract
+    moves (§6.1's table). Nothing joins the payload or the record: frost by month stays out (§6.2).
+  - _Tests._ T13.h's tests 1–6 at their ruled forms. After B, test 4's tight window [0.20, 0.32]
+    (against 0.244) and test 5 (the north pole's CO₂ clears at Ls 70–100°, Kieffer and Titus 2001;
+    Piqueux et al. 2015) are asserted. Test 3's energy closes to 10⁻⁶ of ⟨S⟩. T13.c's airless tests
+    and every world without a thin air are unchanged to the bit.
+  - _Version._ It moves the climate of every thin-aired world (the reference Mars among R09.T16's
+    coarse goldens), so it rides a bump. The climate runs only in the sim's coarse pass, never in
+    the client's module. If main wants it on integration early, it takes a hold carried by the
+    pass's rules value, never a thread-local switch, since `relief/tests/sigma_h.rs`'s shared Mars
+    fixture is a whole pass, its climate included.
+  - _Acceptance._ `cargo test -p hyperion-sim --lib planetary::surface::steps::climate`, and the
+    climate's slow tests by name.
 
 - **R09.T13.l The geographic model against observed monthly climatologies** (after R09.T13.i;
   main's ruling of 2026-10-29 on RM5's close-out research, its Q6, which replaces the offline check
