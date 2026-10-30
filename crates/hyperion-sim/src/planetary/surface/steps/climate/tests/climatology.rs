@@ -48,7 +48,7 @@ struct LandBox {
     /// The model's sea-level air temperature, K: the solid-angle mean over the climate cells whose
     /// centres lie in the box of each one's annual sea-level temperature plus its month's anomaly.
     model_k: [f64; 12],
-    /// NCEP R1's σ = 0.995 air temperature reduced to the sea level over land, K
+    /// NCEP R1's 2 m air temperature reduced to the sea level over land, K
     /// ([`ncep_air_boxes`](super::ncep_air_boxes)).
     observed_k: [f64; 12],
     /// The model's precipitation, mm/day: the solid-angle mean over the same climate cells.
@@ -514,10 +514,8 @@ const INDIA: Region = Region {
     east: 90.0,
 };
 
-/// The latitudes within which NCEP R1's σ = 0.995 air temperature stands for the 2 m one to about
-/// 0.3 K in the zonal means (its band means against [`ncep_air`](super::ncep_air)'s, 0.34 K RMS
-/// from 58.75° S to 58.75° N; those bands are mostly sea, and over land the difference may be two
-/// or three times larger): the temperature's skill is also printed over the land boxes in them.
+/// The latitudes within which the temperature's skill is also printed over the land boxes: 60°,
+/// leaving out the polar boxes, whose reduction to the sea level the ice sheets' heights dominate.
 const TEMPERATE_DEG: f64 = 60.0;
 
 /// The northern extratropics' land, whose seasonal cycle of temperature is printed: 30–70° N.
@@ -893,8 +891,7 @@ fn the_observed_tables_hold_earth_s_land_boxes_in_order() {
 /// It prints, each month and for the annual means, the pattern correlation, the pattern
 /// correlation of the departures from each band's mean over its land boxes (the structure in
 /// longitude), the RMS and the bias, of the sea-level temperature (over every land box, and over
-/// those within 60° of the equator, where the reanalysis's σ = 0.995 field stands for its 2 m one)
-/// and of the precipitation; the named signatures of the precipitation heuristic: the rain shadows
+/// those within 60° of the equator) and of the precipitation; the named signatures of the precipitation heuristic: the rain shadows
 /// of the Andes, the Sierra Nevada and the Himalaya ([`RAIN_SHADOWS`]), the west coasts' deserts
 /// ([`WEST_COASTS`]) and the Indian monsoon's JJA-against-DJF shift; and the northern land's
 /// seasonal cycle.
