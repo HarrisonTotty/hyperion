@@ -32724,8 +32724,9 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     dark-lid ice bulk with ice (`planetary/systems`, `planetary/surface_conditions_published`).
 - **P14.T33.c's census, as built** (lane `p14-t33c`, 2026-10-30). The full tables are the tests'
   own print (`planetary::system::census_tests`, `--success-output immediate`): the ordinary
-  census, 6,800 systems and 103,830 bodies, in the fast tier on 8 threads (so `just test` runs it),
-  and the slow one, 68,000 systems and 1,046,470 bodies, under `just test-slow`.
+  census, 6,800 systems and 103,830 bodies, and the slow one, 68,000 systems and 1,046,470
+  bodies, each a slow test at 24 and under every 25 hold (lane `p14-census-25`, 2026-10-30: the
+  ordinary census left the fast tier).
   - _Never reached_ at either size, each listed in `UNREACHED` with its reason (the ordinary census
     holds the list exact):
     - `FeH`: no CEA record (`formation::NOT_MODELLED`), so every envelope lists it not modelled;
@@ -32754,6 +32755,22 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - _The must-fix count_ (main's ruling of 2026-10-27, P14.T54.b's record, i's bullet): no gas
     envelope changes section inside the clock window, 0 of 63,669 (6,515) at the window's two ends,
     none with a recorded change inside it.
+  - _Under every 25 hold_ (bodies of the 10⁶, then of the 10⁵; lane `p14-census-25`, 2026-10-30):
+    - 13 (1) `Snowball`s above 273.15 K, every one locked, its nightside ice 53–61% over an open
+      dayside sea: e.g. `02006b2ca0020001.0600`, 281.0 K. Rule 5 for a locked body is main's.
+    - No surface above 10 kbar.
+    - M3 on 3 (0) moons, whose sky counts their planet's glow in the maximum-greenhouse sum: e.g.
+      `41ffac9dffc00000.0301`. Main's.
+    - M6 on 3 (0) airless `Icy` planets, decision-p14-t56g §4's design case: e.g.
+      `42006cc200c00007.0500`, T0 311.8 K. Main's. Its 31 members are fixed (the next bullet).
+    - New: 29 (3) runaways with a sea, kept water under (c)'s decked hothouse, e.g.
+      `01ffeb2b60000000.0200`; and 1 (0) envelope changing section in the clock window,
+      `01ff1b2e1fff0000.0700`, its N₂ at T/T_c 1.0000.
+- **P14.T56.g's lag for a rocky belt's ice-bulk members, held at 25** (lane `p14-census-25`,
+  2026-10-30). `system::member_lag` (`MEMBER_LAG_VERSION` 25, `MemberLagRules`, `with_member_lag`
+  in `with_every_25_hold`) asks every belt member with no given bulk `SolvedLag::AboveMeltingOverIce`
+  (`PlacedBody::with_solved_lag`): lagged where its solved bulk is ice and T0 > 273.15 K. The
+  audit's M6 reads it, and the 25 censuses assert no member fails M6. 25's bump deletes the hold.
 - **Deviations in P14.T49.p, as built (2026-10-30).** Held at 25: `substance::aerosol`'s
   `MOLTEN_DECKS_VERSION`, `MoltenDecksRules`, the tests' `with_molten_decks` (in
   `with_every_25_hold`) and the tripwire `the_molten_decks_are_held_only_until_the_25_bump`;
