@@ -9,10 +9,11 @@
 //!
 //! The sources built so far are the grid's seven layers, the catalogue features' members (plan 09,
 //! P09.T21), the dwarf cores' and the streams' members (plan 10, P10.T7.b and P10.T8.b), the
-//! supernova entry of plan 09's phase 4 as a value, and the first catalogue class's entries, the
-//! core collapses (P09.T33.a). The displaced remnants (plan 08, P08.T12), the galactic centre's
-//! members (P09.T24–T28) and the other catalogue classes (P09.T34–T35, P09.T43, plan 11) are not
-//! placed yet; each is added here by the task that places it (P12.T0 as built).
+//! supernova entry of plan 09's phase 4 as a value, and the first two catalogue classes' entries,
+//! the core collapses (P09.T33.a) and the Type Ia (P09.T34.a). The displaced remnants (plan 08,
+//! P08.T12), the galactic centre's members (P09.T24–T28) and the other catalogue classes (P09.T35,
+//! P09.T43, plan 11) are not placed yet; each is added here by the task that places it (P12.T0 as
+//! built).
 
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
@@ -25,6 +26,7 @@ use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use hyperion_sim::galaxy::catalogue_classes::supernova::{
     SupernovaEntry, SupernovaKind, SupernovaState,
 };
+use hyperion_sim::galaxy::catalogue_classes::type_ia::TypeIaProcess;
 use hyperion_sim::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, ClassId, system_of,
 };
@@ -448,6 +450,46 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
             SupernovaState::Progenitor { .. } => assert!(t < entry.value().site().death()),
             SupernovaState::Supernova { age, .. } | SupernovaState::BareRemnant { age, .. } => {
                 assert!(t >= entry.value().site().death() && age.value().is_finite());
+            }
+        }
+    }
+
+    // A Type Ia entry of the class grid (plan 09, P09.T34.a), one with a survivor: each member on
+    // its line, the system's straight and the survivor's broken at the explosion, its record's
+    // existence and its supernova's state. Neither member has stars of the stellar stage's, and the
+    // observer's drift refuses both lines.
+    let process = TypeIaProcess::new(&galaxy);
+    let entry = [[0, 0, 0], [-1, -1, -1], [0, 0, -1], [-1, 0, 0]]
+        .into_iter()
+        .map(|cell| CatalogueCellKey::new(ClassId::TYPE_IA, cell).expect("a cell about the centre"))
+        .flat_map(|key| CatalogueClassCell::generate(&galaxy, &process, key).into_entries())
+        .find(|entry| entry.members() == 2)
+        .expect("the centre has a recent Type Ia with a survivor");
+    for member in 0..entry.members() {
+        let id = entry.member_id(member).expect("a member of the entry");
+        let catalogue = system_of(&galaxy, id).expect("a member resolves");
+        let record = catalogue.record();
+        assert!(catalogue.stars(&galaxy).is_none());
+        assert!(matches!(
+            Drift::of_record(&galaxy, record),
+            Err(TraceMotionError::CatalogueMotionNotTraced(_))
+        ));
+        for t in TIMES {
+            let p = catalogue.position_at(t);
+            assert_in_padded_cube("a Type Ia's member", &p);
+            assert_eq!(position_at(&galaxy, record, t), p);
+            assert!(record.age_at(t).value().is_finite());
+            match entry.value().supernova().state_at(t) {
+                SupernovaState::Progenitor { .. } => assert!(t < entry.value().site().death()),
+                SupernovaState::Supernova { age, remnant, .. }
+                | SupernovaState::BareRemnant { age, remnant } => {
+                    assert!(t >= entry.value().site().death() && age.value().is_finite());
+                    assert!(
+                        remnant
+                            .survivor_offset()
+                            .is_some_and(|offset| offset.value().is_finite())
+                    );
+                }
             }
         }
     }

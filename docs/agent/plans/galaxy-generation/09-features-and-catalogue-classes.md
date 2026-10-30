@@ -1353,6 +1353,8 @@ built" under Risks.
 
 #### P09.T34 The Type Ia class and the ancient survivors
 
+**P09.T34.a built** (2026-10-30; no output moves): see "P09.T34.a as built" under Risks.
+
 - **P09.T34.a The class.** `TypeIaProcess` on the same grid: sites follow every population's layer-D
   budget density weighted by its Type Ia rate, candidates use `IaProgenitor::draw`, the window reads
   the smooth gas at the site under `ShellEnvironment::TypeIa`, and the entry has member 1 where
@@ -5125,3 +5127,27 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     4,096 ly ÷ (L + 2H), about 4,649 km/s (`lifetime_cap`'s edge), could outrun the reach.
     `DeathMarks::of`'s doc now says so, and keeps the max as the fastest member's speed over the
     entry's lifetime, the brainstorm's v_fast. A debug guard at that speed is P09.T35's.
+- **P09.T34.a as built (lane `p09-t34a`, 2026-10-30, at `GENERATOR_VERSION` 23, no output
+  moves).** `type_ia::TypeIaProcess` (`type_ia/process.rs`), in `ProductionClasses`; golden
+  `catalogue_classes/type_ia_class` new; `rng/tags.golden` +3, `class.type_ia.` `site`,
+  `velocity` and `survivor`.
+  - _Sites._ Σ_c density × `DelayTimeDistribution::rate_per_system_per_year` (new) × the interval,
+    no `component_share`: the layer-D budget × its rate per layer-D system at 23. P09.T2.c brings
+    its (1 − φ) to this rate; T36's feature and globular hosts come out of it then.
+  - _Progenitors._ `IaProgenitor::draw_in(.., ComponentId, ..)` (new): `draw` after its pick, bit
+    for bit, with the site's mark choosing the component (lean, 2026-10-30). T36 can call it.
+  - _Member 0_ moves at its drawn velocity and carries the shell. P12.T5.b reads T and the site
+    from `TypeIaEntry::site()`, and the event from `supernova().explosion_event()`.
+  - _Member 1_ exists where `IaLeftover::has_survivor()`: a donor flung out isotropically from T, or
+    a Type Iax's unkicked dwarf. Its record's mass is its own star's (layer A–D). Before T it sits
+    at member 0's place, so T37 lists it from T only (lean).
+  - _No stars._ `observe::stars_of` and `BriefModel::of_record` now return `Result`,
+    `Err(KindNotGenerated)` for both members; R06's and P12's callers take the new signatures.
+  - _Pads._ A survivor outruns its layer's walk pad in ±H (3 of 7 at the centre). T34.b's layer-D
+    raise covers member 0 only; T37 pads this class by `v_fast`.
+  - _T34.b's tests._ P09.T34's "Tests, added" paragraph continues T34.b's bullet (the pad raise,
+    the hypervelocity weight), so T34.a does not build it.
+  - _Merge gap._ The extinction handler's match lacked T33.a's `CatalogueMotionNotTraced`; such a
+    target is `no_such_system` (own commit).
+  - _At 26._ The census's Type Ia share of shells (0.19–0.21) is against field core collapses
+    alone; from P09.T2.c it moves to T36.a's or T38's census.

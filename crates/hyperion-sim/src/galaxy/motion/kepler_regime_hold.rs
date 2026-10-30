@@ -18,6 +18,7 @@ use hyperion_testkit::order::assert_order_independent;
 use super::*;
 use crate::GENERATOR_VERSION;
 use crate::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+use crate::galaxy::catalogue_classes::type_ia::TypeIaProcess;
 use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId, system_of};
 use crate::galaxy::imf::MassFunctionKind;
 use crate::galaxy::placement::{
@@ -396,6 +397,112 @@ fn a_catalogue_system_moves_by_its_class_under_either_arm() {
     );
     // None lies inside the fixture's 7.19 ly edge, so the arms are told apart by the origin alone.
     assert_eq!((entries.len(), inside), (20, 0));
+}
+
+/// The Type Ia class moves by its class under either arm too (P09.T34.a over this hold): each
+/// member of each entry of the four class cells about the black hole, the system and the survivor,
+/// is placed by plan 03's `position_at` under both rules and by `kepler_regime_position_at` on its
+/// class's line, bit for bit, at the epoch, ±100 and ±1,000 yr and either side of any explosion
+/// inside the clock window; and a millennium on the far side of each explosion from the epoch, a
+/// survivor flung out is on its line and not on a drift at its epoch velocity. The cells and the
+/// systems are the same under both rules. Member 0 is of layer D and moves under its pad speed, so
+/// either arm's walk pad holds it; a survivor, at up to 2,500 km/s and of its own star's layer, can
+/// leave its layer's walk pad within the window, which P09.T34.b's pad for layer D and P09.T37's
+/// source, padding by the class's own `v_fast`, answer, so those are counted. The counts are pinned
+/// as measured.
+#[test]
+fn a_type_ia_s_members_move_by_their_class_under_either_arm() {
+    let (held, kepler) = (held(), kepler());
+    let (mut entries, mut survivors, mut past_pad, mut inside) = (0_u32, 0_u32, 0_u32, 0_u32);
+    let one_second = Span::from_seconds(1);
+    let millennium = Span::from_julian_years(1_000).expect("a millennium");
+    for cell in [[0, 0, 0], [-1, -1, -1], [0, 0, -1], [-1, 0, 0]] {
+        let key = CatalogueCellKey::new(ClassId::TYPE_IA, cell).expect("a cell about the centre");
+        let cell_entries =
+            CatalogueClassCell::generate(held, &TypeIaProcess::new(held), key).into_entries();
+        assert_eq!(
+            CatalogueClassCell::generate(kepler, &TypeIaProcess::new(kepler), key).into_entries(),
+            cell_entries,
+            "the class's cell reads no rule"
+        );
+        for entry in &cell_entries {
+            entries += 1;
+            let death = entry.value().site().death();
+            for member in 0..entry.members() {
+                let id = entry.member_id(member).expect("a member of the entry");
+                let system = system_of(held, id).expect("a member names its system");
+                assert_eq!(system_of(kepler, id), Ok(system));
+                let record = system.record();
+                if regime_of(held, record) == Regime::Kepler {
+                    inside += 1;
+                }
+                let layer = record.layer();
+                if member == 0 {
+                    assert_eq!(layer, Layer::D, "a Type Ia's primary is of layer D");
+                    let speed = system.motion().velocity_at(death).speed().value();
+                    assert!(speed < MetresPerSecond::from(pad_speed(layer)).value());
+                } else {
+                    survivors += 1;
+                }
+                let times = TIMES
+                    .map(years)
+                    .into_iter()
+                    .chain([UniverseTime::EPOCH])
+                    .chain(
+                        [Some(death), death.checked_sub(one_second)]
+                            .into_iter()
+                            .flatten(),
+                    )
+                    .filter(|&t| ClockWindow::contains(t));
+                let mut outran = false;
+                for t in times {
+                    let class = system.position_at(t);
+                    assert_eq!(position_at(held, record, t), class, "{id:?} at {t}");
+                    assert_eq!(position_at(kepler, record, t), class, "{id:?} at {t}");
+                    assert_eq!(
+                        kepler_regime_position_at(kepler, record, t),
+                        class,
+                        "{id:?} at {t}"
+                    );
+                    for galaxy in [held, kepler] {
+                        let pad = walk_pad(galaxy, layer, &class, LightYears::ZERO, t).value();
+                        let moved = apart(record.epoch_position(), &class);
+                        if member == 0 {
+                            assert!(moved <= pad, "{id:?} moved {moved} ly by {t}");
+                        }
+                        outran |= moved > pad;
+                    }
+                }
+                past_pad += u32::from(outran);
+                let flight = system.motion().velocity_at(death);
+                if member > 0
+                    && flight
+                        != system
+                            .motion()
+                            .velocity_at(death.checked_sub(one_second).expect("in range"))
+                {
+                    let far_leg = if death <= UniverseTime::EPOCH {
+                        death.checked_sub(millennium)
+                    } else {
+                        death.checked_add(millennium)
+                    }
+                    .expect("inside the clock's range");
+                    let class = system.position_at(far_leg);
+                    assert_eq!(kepler_regime_position_at(kepler, record, far_leg), class);
+                    assert_ne!(
+                        drifted(record, epoch_velocity(kepler, record), far_leg),
+                        class,
+                        "{id:?}: its flight moves it"
+                    );
+                }
+            }
+        }
+    }
+    println!(
+        "{entries} Type Ia in the class cells about the black hole, {survivors} survivors, \
+         {past_pad} members past their layer's walk pad, {inside} inside the influence radius"
+    );
+    assert_eq!((entries, survivors, past_pad, inside), (12, 7, 3, 0));
 }
 
 /// The seed whose central grid holds the one record of the census C1 that the loss cone carves

@@ -9,10 +9,10 @@
 //! every class implements, a class's cell ([`CatalogueClassCell`]), the resolve of a `111` ID
 //! ([`resolve`]) and the cells of a class about a sphere ([`cells_in_sphere`]). The registry's,
 //! the IDs' and the grid's items are re-exported here. Of the classes' processes, phase 7's first
-//! is built: the core collapses (P09.T33.a, [`core_collapse`]), the production lookup's
-//! ([`ProductionClasses`]) one arm, whose members are catalogue systems ([`system`]) that plan 03's
-//! resolve returns. The other processes and the carve-out follow in P09.T34–T35, P09.T43 and plan
-//! 11.
+//! two are built: the core collapses (P09.T33.a, [`core_collapse`]) and the Type Ia (P09.T34.a,
+//! [`type_ia::TypeIaProcess`]), the production lookup's ([`ProductionClasses`]) two arms, whose
+//! members are catalogue systems ([`system`]) that plan 03's resolve returns. The other processes
+//! and the carve-out follow in P09.T35, P09.T43 and plan 11.
 
 pub mod core_collapse;
 pub mod grid;

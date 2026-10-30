@@ -540,8 +540,11 @@ fn the_rest_of_the_sim_reads_an_entry_through_its_class() {
             let record = entry.value().record();
             let system = system_of(galaxy, entry.id()).unwrap();
             let stars = system.stars(galaxy).unwrap();
-            assert_eq!(stars_of(galaxy, &NoInteriorCache, record), stars);
-            let brief = BriefModel::of_record(galaxy, &NoInteriorCache, record);
+            assert_eq!(
+                stars_of(galaxy, &NoInteriorCache, record),
+                Ok(stars.clone())
+            );
+            let brief = BriefModel::of_record(galaxy, &NoInteriorCache, record).unwrap();
             assert_eq!(brief.star_count(), stars.star_count());
             let death = entry.value().site().death();
             let times = [
@@ -636,7 +639,7 @@ fn cells_do_not_depend_on_order() {
     assert_order_independent(&cells, |key| {
         // A stray resolve of another class's ID first, whose process is not built yet.
         let stray =
-            CatalogueSystemId::new(ClassId::TYPE_IA.value(), key.fine_cell(), 0, 0).unwrap();
+            CatalogueSystemId::new(ClassId::XRAY_BINARY.value(), key.fine_cell(), 0, 0).unwrap();
         assert_eq!(
             placement::resolve(galaxy, SystemId::from(stray)),
             Err(ResolveSystemError::KindNotGenerated)

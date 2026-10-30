@@ -89,7 +89,7 @@ use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::snr::{ShellEnvironment, ShellWindow};
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{BodyId, CatalogueSystemId, SystemId};
-use crate::rng::{ObjectKey, Stream, Threshold, tags};
+use crate::rng::{DomainTag, ObjectKey, Stream, Threshold, tags};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::system::{SystemStars, track_mass_of};
@@ -549,10 +549,33 @@ fn site_velocity(
     site: &GalacticPosition,
     key: ObjectKey,
 ) -> GalacticVelocity {
+    class_site_velocity(
+        galaxy,
+        component,
+        site,
+        tags::CLASS_CORE_COLLAPSE_VELOCITY,
+        key,
+    )
+}
+
+/// A class candidate's velocity at its site, galactic: the core collapses' and the Type Ia's one
+/// velocity (rule 6).
+///
+/// It is plan 08's draw of its `component`'s law at `site` on its class's velocity `tag` keyed by
+/// `key`, or zero in a galaxy built without its kinematic tables, as plan 08's `epoch_velocity`
+/// has it.
+#[must_use]
+pub(super) fn class_site_velocity(
+    galaxy: &Galaxy,
+    component: ComponentId,
+    site: &GalacticPosition,
+    tag: DomainTag,
+    key: ObjectKey,
+) -> GalacticVelocity {
     if galaxy.kinematics().is_none() {
         return GalacticVelocity::default();
     }
-    let mut stream = Stream::open(galaxy.seed(), tags::CLASS_CORE_COLLAPSE_VELOCITY, key);
+    let mut stream = Stream::open(galaxy.seed(), tag, key);
     draw_on(galaxy, component, site, &mut stream).velocity()
 }
 

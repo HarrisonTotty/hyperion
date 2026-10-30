@@ -673,7 +673,9 @@ domain_tags! {
     // note 23); the explosion's event tag is backed by an `Event` tag.
 
     /// A Type Ia progenitor's delay-first draw: its component, its age, its channel, its masses
-    /// and its time of explosion (P09.T18.b, `IaProgenitor::draw`).
+    /// and its time of explosion (P09.T18.b, `IaProgenitor::draw`). The class's candidates draw
+    /// with `IaProgenitor::draw_in`, whose component is their site's pick, so their word 0 is
+    /// unread (P09.T34.a).
     CLASS_TYPE_IA_PROGENITOR: System = "class.type_ia.progenitor";
 
     /// What a Type Ia leaves: the surviving donor's population and speed, two words (P09.T18.c,
@@ -1001,6 +1003,25 @@ domain_tags! {
     /// A core-collapse candidate's velocity at its site, galactic: plan 08's draw of its
     /// component's law, four words per attempt of the escape cut (P09.T33.a).
     CLASS_CORE_COLLAPSE_VELOCITY: System = "class.core_collapse.velocity";
+
+    // Plan 09, phase 7 (P09.T34.a): a Type Ia candidate's draws beside phase 4's
+    // `class.type_ia.progenitor` and `class.type_ia.leftover`, `System` tags under
+    // `class.type_ia.`, opened with `ObjectKey::from(SystemId)` of the candidate's ID, its member 0
+    // (Design note 23). Appended after P09.T33.a's `class.core_collapse.velocity`, because the
+    // macro's order fixes `ALL`.
+
+    /// A Type Ia candidate's site: words 0–2 its position in its 512 ly cell, x, y and z, and word
+    /// 3 the mark that thins it on the galaxy's Type Ia density and picks its density component
+    /// (P09.T34.a).
+    CLASS_TYPE_IA_SITE: System = "class.type_ia.site";
+
+    /// A Type Ia candidate's velocity at its site, galactic: plan 08's draw of its component's
+    /// law, four words per attempt of the escape cut (P09.T34.a).
+    CLASS_TYPE_IA_VELOCITY: System = "class.type_ia.velocity";
+
+    /// A Type Ia entry's survivor's direction of flight from the site, in the progenitor's frame:
+    /// two words, an isotropic direction (P09.T34.a).
+    CLASS_TYPE_IA_SURVIVOR: System = "class.type_ia.survivor";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1399,6 +1420,16 @@ mod tests {
         ] {
             assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
             assert!(tag.name().starts_with("class.core_collapse."));
+            assert!(ALL.contains(&tag));
+        }
+        // P09.T34.a: the Type Ia candidates' own, beside phase 4's two.
+        for tag in [
+            CLASS_TYPE_IA_SITE,
+            CLASS_TYPE_IA_VELOCITY,
+            CLASS_TYPE_IA_SURVIVOR,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.type_ia."));
             assert!(ALL.contains(&tag));
         }
     }

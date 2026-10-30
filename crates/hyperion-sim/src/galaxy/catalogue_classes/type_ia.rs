@@ -23,8 +23,15 @@
 //! secondary by its place in [`secondary_window`], the windows read at the drawn delay itself so
 //! that both lifetimes fit it. A lifetime is plan 06's track at solar composition and median draws,
 //! tabulated once per distribution.
+//!
+//! The class that places these entries on the class grid, [`TypeIaProcess`] (P09.T34.a), is in
+//! [`process`].
 
 use core::num::NonZeroU64;
+
+pub mod process;
+
+pub use self::process::{IaComponent, TypeIaCandidate, TypeIaEntry, TypeIaProcess, TypeIaSurvivor};
 
 use crate::galaxy::Galaxy;
 use crate::galaxy::Population;
@@ -32,6 +39,7 @@ use crate::galaxy::ages::AgeDistribution;
 use crate::galaxy::consts::{LIGHT_YEARS_PER_YEAR_PER_KM_S, YEARS_PER_GIGAYEAR};
 use crate::galaxy::displaced::class_table::SURVIVOR_POPULATIONS;
 use crate::galaxy::features::interior::counts::white_dwarf_mass;
+use crate::galaxy::fields::ComponentId;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::quad;
 use crate::galaxy::snr::SHELL_WINDOW_CAP;
@@ -288,6 +296,24 @@ impl DelayTimeDistribution {
             })
     }
 
+    /// The Type Ia rate per system of the field component `component` at the epoch, per year.
+    ///
+    /// It is the mass formed per system × the component's `E[ψ(age)]`. A component's systems, born
+    /// and unborn, are its density's integral ([`Component::count_with_unborn`]), so its density × this is its Type Ia
+    /// per cubic light-year per year, and their sum over the galaxy is
+    /// [`rate_per_year`](Self::rate_per_year). It is the same as the component's layer-D share of
+    /// systems × its rate per layer-D system, since every primary is of layer D.
+    ///
+    /// [`Component::count_with_unborn`]: crate::galaxy::fields::Component::count_with_unborn
+    ///
+    /// # Panics
+    ///
+    /// If `component` is not one of the galaxy's components the distribution was built from.
+    #[must_use]
+    pub fn rate_per_system_per_year(&self, component: ComponentId) -> f64 {
+        self.formed_mass * self.components[component.index()].mean_rate
+    }
+
     /// The share of `population`'s layer D that exploded before the interval and left nothing:
     /// its Type Ia before `−(SHELL_WINDOW_CAP + L + H)` per layer-D system. Every exploded system
     /// leaves its cell, whatever the channel: a surviving donor is plan 08's hypervelocity class,
@@ -495,7 +521,55 @@ impl IaProgenitor {
             .mark()
             .pick_weighted(&weights, total)
             .unwrap_or(weights.len() - 1);
-        let (index, component) = candidates[pick];
+        let (index, _) = candidates[pick];
+        Self::draw_after_pick(delays, stream, base, index, after, until)
+    }
+
+    /// A progenitor of the field component `component` exploding in `(after, until]`, drawn from
+    /// `stream` under `delays`, or `None` where [`draw`](Self::draw) would give none.
+    ///
+    /// It is `draw` once its first word has picked that component, at the same word offsets from
+    /// the stream's position on entry, that first word unread. `None` if the component has no Type
+    /// Ia (no age past [`MIN_DELAY`]) or, as `draw`, every proposal of the delay was rejected.
+    ///
+    /// The Type Ia class's candidates draw here (plan 09, P09.T34.a): a candidate's site has
+    /// already picked its component by that component's density there, and `draw`'s pick by the
+    /// population's rates would read the delay from another component's ages than the one whose
+    /// density placed it.
+    ///
+    /// # Panics
+    ///
+    /// As [`draw`](Self::draw).
+    #[must_use]
+    pub fn draw_in(
+        delays: &DelayTimeDistribution,
+        stream: &mut Stream,
+        component: ComponentId,
+        after: UniverseTime,
+        until: UniverseTime,
+    ) -> Option<Self> {
+        let rate = delays.components.get(component.index())?;
+        if rate.mean_rate.is_nan() || rate.mean_rate <= 0.0 {
+            return None;
+        }
+        let base = stream.position();
+        // `draw`'s first word, its component mark, which a given component does not read.
+        stream.seek(base + 1);
+        Self::draw_after_pick(delays, stream, base, component.index(), after, until)
+    }
+
+    /// The draw of component `index`'s progenitor from word `base` + 1 of `stream` on, `base`
+    /// being the word `draw`'s component mark was read at.
+    fn draw_after_pick(
+        delays: &DelayTimeDistribution,
+        stream: &mut Stream,
+        base: u64,
+        index: usize,
+        after: UniverseTime,
+        until: UniverseTime,
+    ) -> Option<Self> {
+        let component = &delays.components[index];
+        let population = component.population;
         let delay_years = draw_delay(stream, &component.ages)?;
         stream.seek(base + 1 + 2 * DELAY_ATTEMPTS);
         let bin = delay_bin(delay_years);
@@ -1118,6 +1192,48 @@ mod tests {
         assert_eq!(delay_bin(1e11), 23);
         let q = [0.0, 0.5, 1.0].map(|u| sampled(&type_ia_delay::PRIMARY_MASS_CDF[3][0], u));
         assert!(q[0].abs() < 1e-15 && (q[2] - 1.0).abs() < 1e-15 && q[1] > 0.0 && q[1] < 1.0);
+    }
+
+    /// P09.T34.a: `draw_in` is `draw` once its first word has picked the component: on the same
+    /// stream, whichever component `draw` picks, `draw_in` of that component gives the same
+    /// progenitor to the bit and leaves the stream where `draw` does, so phase 4's progenitors and
+    /// the class's are one law.
+    #[test]
+    fn draw_in_is_draw_for_the_component_it_picked() {
+        let galaxy = milky_way();
+        let delays = DelayTimeDistribution::from_galaxy(&galaxy);
+        let (after, until) = interval();
+        let mut seen = std::collections::BTreeSet::new();
+        for k in 0..4_000_u64 {
+            let population = POPULATIONS[usize::try_from(k % 7).unwrap()];
+            let (mut a, mut b) = (stream(k), stream(k));
+            let Some(p) = IaProgenitor::draw(&delays, &mut a, population, after, until) else {
+                continue;
+            };
+            let index = usize::try_from(p.component()).unwrap();
+            let component = galaxy.fields().component_id(index).unwrap();
+            assert_eq!(
+                IaProgenitor::draw_in(&delays, &mut b, component, after, until),
+                Some(p)
+            );
+            assert_eq!(a.position(), b.position());
+            // From a stream already moved on, the same words relative to where it stands.
+            let (mut a, mut b) = (stream(k), stream(k));
+            a.seek(5);
+            b.seek(5);
+            if let Some(p) = IaProgenitor::draw(&delays, &mut a, population, after, until) {
+                let index = usize::try_from(p.component()).unwrap();
+                let component = galaxy.fields().component_id(index).unwrap();
+                assert_eq!(
+                    IaProgenitor::draw_in(&delays, &mut b, component, after, until),
+                    Some(p)
+                );
+                assert_eq!(a.position(), b.position());
+            }
+            seen.insert(index);
+        }
+        eprintln!("components drawn: {seen:?}");
+        assert!(seen.len() >= 12, "{seen:?}");
     }
 
     /// The same stream gives the same progenitor.

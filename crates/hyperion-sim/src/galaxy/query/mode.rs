@@ -181,7 +181,7 @@ mod tests {
             let built = &mut self.built;
             f(self.kept.entry(record.id()).or_insert_with(|| {
                 *built += 1;
-                stars_of(galaxy, &NoInteriorCache, record)
+                stars_of(galaxy, &NoInteriorCache, record).unwrap()
             }))
         }
     }

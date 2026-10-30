@@ -58,7 +58,7 @@
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::features::members::{FeatureInteriorCache, MemberRecord, resolve_member};
-use crate::galaxy::placement::{SystemOrigin, SystemRecord};
+use crate::galaxy::placement::{ResolveSystemError, SystemOrigin, SystemRecord};
 use crate::id::SystemIdKind;
 use crate::math;
 use crate::rng::Mark;
@@ -332,6 +332,12 @@ impl BriefModel {
     /// taken from `interiors`, and a catalogue system's at its class's composition and context
     /// (plan 09, P09.T33.a).
     ///
+    /// # Errors
+    ///
+    /// [`ResolveSystemError::KindNotGenerated`] for a catalogue system whose class does not model
+    /// its members' stars by the stellar stage, a Type Ia's (plan 09, P09.T34.a), as
+    /// [`stars_of`](crate::observe::stars_of) answers for it.
+    ///
     /// # Panics
     ///
     /// - For a rogue planet, as [`BriefModel::new`], and for a member of the galactic centre,
@@ -339,24 +345,22 @@ impl BriefModel {
     /// - For a member of the global list, whose stars are its member record's, which the caller's
     ///   list gives.
     /// - If `record` is a feature member that does not resolve in `galaxy`, which only a record of
-    ///   another galaxy can be; and if it is a catalogue system that does not resolve, or whose
-    ///   class models no stars.
+    ///   another galaxy can be; and if it is a catalogue system that does not resolve.
     /// - As [`BriefModel::new`], if a committed pair-light table cannot be read.
-    #[must_use]
     pub fn of_record(
         galaxy: &Galaxy,
         interiors: &dyn FeatureInteriorCache,
         record: &SystemRecord,
-    ) -> Self {
+    ) -> Result<Self, ResolveSystemError> {
         match record.origin() {
-            SystemOrigin::Grid(_) => Self::new(galaxy, record),
+            SystemOrigin::Grid(_) => Ok(Self::new(galaxy, record)),
             SystemOrigin::FeatureMember { .. } => {
                 let SystemIdKind::FeatureMember(id) = record.id().kind() else {
                     unreachable!("a feature member's record is built with a member ID")
                 };
                 let member = resolve_member(galaxy, interiors, id)
                     .expect("a feature member's record resolves in the galaxy that placed it");
-                Self::of_member(galaxy, &member)
+                Ok(Self::of_member(galaxy, &member))
             }
             SystemOrigin::CentreMember { .. } => {
                 panic!(
@@ -372,18 +376,15 @@ impl BriefModel {
             }
             SystemOrigin::CatalogueSystem(_) => {
                 let system = system_of_record(galaxy, record);
-                let Some((composition, context)) = system.star_model() else {
-                    panic!(
-                        "a catalogue system whose class models no stars has none: {:?}",
-                        record.id()
-                    )
-                };
-                Self::build(
+                let (composition, context) = system
+                    .star_model()
+                    .ok_or(ResolveSystemError::KindNotGenerated)?;
+                Ok(Self::build(
                     galaxy,
                     system.record(),
                     (*composition, context),
                     &FittedFates::generator(),
-                )
+                ))
             }
         }
     }

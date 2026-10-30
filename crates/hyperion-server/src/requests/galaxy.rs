@@ -502,7 +502,9 @@ pub(super) async fn run<T: Send + 'static>(
 /// The wire briefs of `hits` at `time`, in order, from `cache`'s models of the galaxy `key` names.
 ///
 /// A rogue planet has no brief, since it has no stellar state (plan 13, P13.T5.d), so its row
-/// carries no `stellar` key; a brown dwarf's is its own, from the stellar stage.
+/// carries no `stellar` key; a brown dwarf's is its own, from the stellar stage. Nor has a
+/// catalogue system whose class does not model its stars, a Type Ia's (plan 09, P09.T34.a), which
+/// the brief cache refuses.
 fn briefs_of(
     cache: &SharedBriefCache,
     key: GalaxyKey,
@@ -513,10 +515,18 @@ fn briefs_of(
     hits.iter()
         .map(|hit| match hit.record().kind() {
             SystemKind::RoguePlanet => None,
-            SystemKind::Stellar | SystemKind::BrownDwarf => cache
-                .get_or_build(key, galaxy, hit.record())
-                .brief_at(time)
-                .map(|brief| brief_dto(&brief)),
+            SystemKind::Stellar | SystemKind::BrownDwarf => {
+                match cache.get_or_build(key, galaxy, hit.record()) {
+                    Ok(model) => model.brief_at(time).map(|brief| brief_dto(&brief)),
+                    // The cache refuses only a class's stars, `KindNotGenerated`; every refusal is
+                    // named, so that a new one is a decision here, and none is a row's error.
+                    Err(
+                        ResolveSystemError::KindNotGenerated
+                        | ResolveSystemError::NoSuchSystem
+                        | ResolveSystemError::LayerNotGenerated(_),
+                    ) => None,
+                }
+            }
         })
         .collect()
 }
@@ -525,10 +535,73 @@ fn briefs_of(
 mod tests {
     use hyperion_sim::galaxy::placement::NoCache;
     use hyperion_sim::galaxy::query::RangeQuery;
+    use hyperion_sim::id::SystemId;
     use hyperion_sim::units::LightYears;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
 
     use super::*;
+
+    /// A catalogue system's row (plan 09): a Type Ia's members have no brief, since their class
+    /// does not model their stars (P09.T34.a), where a core collapse's has its stars'; and the
+    /// observed row refuses either's line, which breaks at its explosion, before it builds any
+    /// stars. No range source places a catalogue system yet (P09.T37); these are the hits it will.
+    #[test]
+    fn a_catalogue_system_s_row_has_its_class_s_brief_and_no_traced_line() {
+        use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+        use hyperion_sim::galaxy::catalogue_classes::type_ia::TypeIaProcess;
+        use hyperion_sim::galaxy::catalogue_classes::{
+            CatalogueCellKey, CatalogueClassCell, ClassId,
+        };
+
+        let galaxy = Galaxy::new(Seed::new(0x4d2));
+        let key = GalaxyKey::new(0x4d2, GENERATOR_VERSION);
+        let cell = |class: ClassId, cell: [i32; 3]| {
+            CatalogueCellKey::new(class, cell).expect("a cell of the root cube")
+        };
+        let hit = |id: SystemId| {
+            let record = resolve(&galaxy, id).expect("a member resolves");
+            SystemHit::new(record, *record.epoch_position(), LightYears::ZERO)
+        };
+        let ia = TypeIaProcess::new(&galaxy);
+        let entry = [[0, 0, 0], [-1, -1, -1], [0, 0, -1], [-1, 0, 0]]
+            .into_iter()
+            .flat_map(|c| {
+                CatalogueClassCell::generate(&galaxy, &ia, cell(ClassId::TYPE_IA, c)).into_entries()
+            })
+            .find(|entry| entry.members() == 2)
+            .expect("the centre has a recent Type Ia with a survivor");
+        let core_collapses = CoreCollapseProcess::new(&galaxy);
+        let collapse = (8..28)
+            .flat_map(|y| {
+                let key = cell(ClassId::CORE_COLLAPSE, [0, y, 0]);
+                CatalogueClassCell::generate(&galaxy, &core_collapses, key).into_entries()
+            })
+            .next()
+            .expect("the inner disc has recent deaths");
+        let mut hits: Vec<SystemHit> = (0..entry.members())
+            .map(|member| hit(SystemId::from(entry.member_id(member).unwrap())))
+            .collect();
+        hits.push(hit(SystemId::from(collapse.id())));
+        let time = UniverseTime::default();
+        let briefs = SharedBriefCache::new(64 << 20);
+        let rows = briefs_of(&briefs, key, &galaxy, &hits, time);
+        assert_eq!(rows[..2], [None, None]);
+        assert!(
+            rows[2].is_some(),
+            "a core collapse's progenitor shines at the epoch"
+        );
+        assert_eq!(briefs.counters().entries(), 1);
+        let systems = SharedSystemCache::new(64 << 20);
+        let observer =
+            Observer::new(*hits[0].record().epoch_position(), time).expect("an observer");
+        for hit in &hits {
+            assert_eq!(
+                observe_row(&galaxy, &mut systems.handle(key), hit, &observer),
+                Err(TraceMotionError::CatalogueMotionNotTraced(hit.id()))
+            );
+        }
+        assert_eq!(systems.counters().entries(), 0);
+    }
 
     /// An observed query's rows, briefs and observations, are the same built whole or in four
     /// chunks appended in order, from an empty, a warm, a tight, a `system_summary`-filled or no

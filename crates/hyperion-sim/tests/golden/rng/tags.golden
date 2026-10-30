@@ -215,3 +215,6 @@ class.core_collapse.mass (System) = 0xc98ddd1e785b34f0
 class.core_collapse.metallicity (System) = 0x1d02e339489a384b
 class.core_collapse.death (System) = 0x7192140aca4e88c2
 class.core_collapse.velocity (System) = 0x066fe6fbc1ddf333
+class.type_ia.site (System) = 0xe87b1423464fd867
+class.type_ia.velocity (System) = 0xd54c32cdc9df36d7
+class.type_ia.survivor (System) = 0x9004724e3878d636

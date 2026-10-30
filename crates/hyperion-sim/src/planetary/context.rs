@@ -686,10 +686,18 @@ impl SystemContext {
     /// # Panics
     ///
     /// As [`stars_of`] does: for a record of another galaxy, a rogue planet, and a member of the
-    /// galactic centre, whose system stage is not generated yet.
+    /// galactic centre, whose system stage is not generated yet; and where `stars_of` refuses, for
+    /// a catalogue system whose class does not model its stars (a Type Ia's, plan 09, P09.T34.a),
+    /// which [`for_system`](Self::for_system) answers with `KindNotGenerated`.
     #[must_use]
     pub fn from_record(galaxy: &Galaxy, record: &SystemRecord) -> Self {
-        Self::from_stars(galaxy, &stars_of(galaxy, &NoInteriorCache, record))
+        let stars = stars_of(galaxy, &NoInteriorCache, record).unwrap_or_else(|error| {
+            panic!(
+                "{:?} has no stars of the stellar stage's: {error}",
+                record.id()
+            )
+        });
+        Self::from_stars(galaxy, &stars)
     }
 
     /// The context of the system whose stars `stars` are, for a caller that holds them

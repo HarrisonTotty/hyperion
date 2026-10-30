@@ -977,9 +977,18 @@ const FIFTY_LY_COUNTS: [[usize; 2]; 2] = [[2_902, 20], [2_890, 20]];
 
 // 6. The production lookup.
 
-/// P09.T33.a: the production lookup visits the core collapses alone; every other class's IDs name
-/// nothing in the grid, and plan 03's resolve answers each `111` ID through `system_of`, with the
-/// record its class gives the member, or as not generated for a placed class with no process yet.
+/// Whether the production lookup has class value `class`'s process: the core collapses
+/// (P09.T33.a) and the Type Ia (P09.T34.a).
+fn built(class: u8) -> bool {
+    [ClassId::CORE_COLLAPSE, ClassId::TYPE_IA]
+        .iter()
+        .any(|built| built.value() == class)
+}
+
+/// P09.T33.a and P09.T34.a: the production lookup visits the core collapses and the Type Ia alone;
+/// every other class's IDs name nothing in the grid, and plan 03's resolve answers each `111` ID
+/// through `system_of`, with the record its class gives the member, or as not generated for a
+/// placed class with no process yet.
 #[test]
 fn the_production_lookup_resolves_only_the_registered_classes() {
     struct Visited;
@@ -991,7 +1000,7 @@ fn the_production_lookup_resolves_only_the_registered_classes() {
     }
     let galaxy = galaxy();
     for class in ALL_CLASSES {
-        let registered = class == ClassId::CORE_COLLAPSE;
+        let registered = built(class.value());
         assert_eq!(
             ProductionClasses.visit_class(galaxy, class, Visited),
             registered.then_some(class),
@@ -1014,7 +1023,7 @@ fn the_production_lookup_resolves_only_the_registered_classes() {
         let member = u8::try_from(lcg.next_below(16)).unwrap();
         let id = CatalogueSystemId::new(class, cell, index, member).unwrap();
         let found = resolve(galaxy, &ProductionClasses, id, Found);
-        if class != ClassId::CORE_COLLAPSE.value() {
+        if !built(class) {
             assert_eq!(found, Err(ResolveSystemError::NoSuchSystem), "{id:?}");
         }
         // Plan 03's resolve hands every `111` ID to the grid (P09.T33.a): a placed class whose
@@ -1026,8 +1035,7 @@ fn the_production_lookup_resolves_only_the_registered_classes() {
             "{id:?}"
         );
         assert_eq!(record.is_ok(), found.is_ok(), "{id:?}");
-        let pending =
-            CatalogueCellKey::of(id).is_ok_and(|key| key.class() != ClassId::CORE_COLLAPSE);
+        let pending = CatalogueCellKey::of(id).is_ok_and(|key| !built(key.class().value()));
         if pending {
             assert_eq!(record, Err(ResolveSystemError::KindNotGenerated), "{id:?}");
         } else if record.is_err() {

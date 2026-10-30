@@ -105,7 +105,8 @@ pub(crate) async fn resolve_system(
 /// row for row what the sim's `range_query_observed` gives it (P12.T3's `query::mode` test). A
 /// rogue planet has no stars, and a member of the galactic centre none generated yet, so each is
 /// read on its own line alone, as `range_query_observed` reads a rogue planet: its retardation and
-/// its stated error, and no brief.
+/// its stated error, and no brief. A catalogue system's line is refused there too, before its
+/// stars are built, as `range_query_observed` refuses it.
 ///
 /// # Errors
 ///
@@ -119,8 +120,13 @@ pub(super) fn observe_row(
     observer: &Observer,
 ) -> Result<(ObservedDto, Option<StellarBrief>), TraceMotionError> {
     let record = hit.record();
+    // A catalogue system's line is refused below before any stars are built, whether its class
+    // models them (a core collapse) or not (a Type Ia; plan 09, P09.T34.a).
     let has_stars = record.kind() != SystemKind::RoguePlanet
-        && !matches!(record.origin(), SystemOrigin::CentreMember { .. });
+        && !matches!(
+            record.origin(),
+            SystemOrigin::CentreMember { .. } | SystemOrigin::CatalogueSystem(_)
+        );
     if has_stars {
         let seen = stars.with_stars(galaxy, record, |system| {
             observe_hit(galaxy, hit, system, observer)

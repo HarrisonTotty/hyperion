@@ -20,8 +20,8 @@
 //!   draw more candidates than the 24-bit index numbers.
 //!
 //! **The production lookup**, [`ProductionClasses`], has one arm per class whose process is built:
-//! P09.T33.a's core collapses so far. Every other `111` ID that reaches the grid answers
-//! [`NoSuchSystem`](ResolveSystemError::NoSuchSystem). Plan 03's
+//! P09.T33.a's core collapses and P09.T34.a's Type Ia so far. Every other `111` ID that reaches
+//! the grid answers [`NoSuchSystem`](ResolveSystemError::NoSuchSystem). Plan 03's
 //! [`placement::resolve`](crate::galaxy::placement::resolve) answers a `111` ID through it, with
 //! the record its class gives the member ([`ClassProcess::system`], [`system_of`]).
 //!
@@ -59,6 +59,7 @@ use super::supernova::{DeathMarks, lifetime_cap};
 use super::system::CatalogueSystem;
 #[cfg(doc)]
 use super::system::system_of;
+use super::type_ia::TypeIaProcess;
 use crate::coords::ROOT_HALF_WIDTH_LY;
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::ResolveSystemError;
@@ -759,10 +760,11 @@ pub trait ClassLookup {
 ///
 /// Each class's process is registered here by the task that builds it, as one arm,
 /// `ClassId::CORE_COLLAPSE => Some(visitor.visit(&CoreCollapseProcess::new(galaxy)))`:
-/// [`CORE_COLLAPSE`](ClassId::CORE_COLLAPSE) by P09.T33.a (registered), [`TYPE_IA`](ClassId::TYPE_IA)
-/// by P09.T34.a, [`LUMINOUS_BLUE_VARIABLE`](ClassId::LUMINOUS_BLUE_VARIABLE) by P09.T43, and plan
-/// 11's five by P11.T8. [`TIDAL_DISRUPTION_VICTIM`](ClassId::TIDAL_DISRUPTION_VICTIM) is never
-/// placed and gets none. Until its class's arm is added, every `111` ID of a class answers
+/// [`CORE_COLLAPSE`](ClassId::CORE_COLLAPSE) by P09.T33.a and [`TYPE_IA`](ClassId::TYPE_IA) by
+/// P09.T34.a (both registered), [`LUMINOUS_BLUE_VARIABLE`](ClassId::LUMINOUS_BLUE_VARIABLE) by
+/// P09.T43, and plan 11's five by P11.T8.
+/// [`TIDAL_DISRUPTION_VICTIM`](ClassId::TIDAL_DISRUPTION_VICTIM) is never placed and gets none.
+/// Until its class's arm is added, every `111` ID of a class answers
 /// [`NoSuchSystem`](ResolveSystemError::NoSuchSystem).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProductionClasses;
@@ -776,6 +778,7 @@ impl ClassLookup for ProductionClasses {
     ) -> Option<V::Output> {
         match class {
             ClassId::CORE_COLLAPSE => Some(visitor.visit(&CoreCollapseProcess::new(galaxy))),
+            ClassId::TYPE_IA => Some(visitor.visit(&TypeIaProcess::new(galaxy))),
             _ => None,
         }
     }
