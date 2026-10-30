@@ -1,4 +1,4 @@
-# generator_version = 23
+# generator_version = 24
 component 0 explosions per system = 0x3ee3392cf3d77ba6  # 9.166403851899374e-6
 component 1 explosions per system = 0x3ec32a3a8fcbf822  # 2.284640798654571e-6
 component 2 explosions per system = 0x3ea221fee5b9f859  # 5.403994225020727e-7
