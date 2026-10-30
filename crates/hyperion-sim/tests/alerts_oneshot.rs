@@ -10,15 +10,20 @@
 //!   observers, sites up to 3,000 ly from their cells, and their light reaches each observer
 //!   within a few years of a time of its own, so that every window holds onsets and events in
 //!   progress (fast).
-//! - **The production core collapses** of a galaxy, about three of whose recent deaths the
-//!   observers stand, to see one go off from above it, one in progress from beside it, and one
-//!   that has not yet happened from 50 ly away (slow).
+//! - **The production core collapses** of a galaxy, about two of whose recent deaths three
+//!   observers stand: above the one in the past to see it go off, beside it to see it in progress,
+//!   and 50 ly from the one still to come (slow).
+//!
+//! The walk also gives each query the same detections whatever it walked before with the same
+//! caches.
 
-#[path = "common/observe.rs"]
-mod observe;
+#[expect(dead_code, reason = "the one-shot alerts use only the alerts' oracle")]
+mod common;
 
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 
+use common::observe::{KeepCells, Seen, brute_force_detections, observer_at};
 use hyperion_sim::Seed;
 use hyperion_sim::alerts::{
     AlertBand, AlertContext, AlertQuery, BandLimits, ClassSet, DetectionPhase, NoOneShotCells,
@@ -45,7 +50,7 @@ use hyperion_sim::time::{Span, UniverseTime};
 use hyperion_sim::units::{
     Dex, HydrogenPerCm3, KelvinPerCm3, PerCubicLightYear, SolarMasses, WattsPerSquareMetre, Years,
 };
-use observe::{KeepCells, Seen, brute_force_detections, observer_at};
+use hyperion_testkit::order::assert_order_independent;
 
 /// The toy's sites lie up to this far from their cells, ly: within the class grid's 4,096 ly.
 const TOY_SCATTER_LY: f64 = 3_000.0;
@@ -232,7 +237,7 @@ impl OneShotClass for ToyTypeIa {
     }
 
     fn event(&self, entry: &Self::Entry) -> OneShotEvent {
-        OneShotEvent::of_supernova(&entry.0, &entry.1)
+        OneShotEvent::of_supernova(&entry.0, entry.1)
     }
 }
 
@@ -287,17 +292,19 @@ fn brute<P: OneShotClass>(
 
 /// The toy class's walk is the brute force's for three observers and windows of a year and a
 /// century, at times across the clock window, through V, B and K limits that reach some 1,000,
-/// 1,000 and 900 ly, and an X-ray band the class gives no light in;
-/// and the windows hold onsets and events in progress, seen in more than one band, resolvable and
-/// not, Type Ia and Type Iax. The walk without a cache gives the same.
+/// 1,040 and 750 ly, and an X-ray band the class gives no light in. The windows hold onsets and
+/// events in progress, seen in each of the three bands, resolvable and not. The walk without a
+/// cache gives the same, and a query that does not ask about the class finds nothing.
 #[test]
 fn one_shot_alerts_of_a_toy_class_are_the_brute_forces() {
     let galaxy = Galaxy::new(Seed::new(0x0125_0b00));
     let process = ToyTypeIa::new();
+    // At these limits a Type Ia, at SN 2011fe's colours, stands highest over B's through less
+    // than about 0.3 mag of A_V, over K's through more than about 0.7, and over V's between.
     let sensor = sensor(&[
         (AlertBand::Photometric(Band::V), 1.25e-4),
-        (AlertBand::Photometric(Band::B), 2.0e-4),
-        (AlertBand::Photometric(Band::K), 1.0e-5),
+        (AlertBand::Photometric(Band::B), 2.2e-4),
+        (AlertBand::Photometric(Band::K), 1.5e-5),
         (AlertBand::XRay, 1e-15),
     ]);
     let mut noise = NoiseCache::with_capacity(4_096);
@@ -333,10 +340,10 @@ fn one_shot_alerts_of_a_toy_class_are_the_brute_forces() {
          bands {bands:?}"
     );
     assert!(
-        onsets >= 30 && in_progress >= 3,
+        onsets >= 100 && in_progress >= 20,
         "{onsets} onsets, {in_progress} in progress"
     );
-    assert!(bands.len() >= 2, "{bands:?}");
+    assert_eq!(bands.len(), 3, "{bands:?}");
     assert!(
         resolvable > 0 && resolvable < total,
         "{resolvable} of {total}"
@@ -355,7 +362,8 @@ fn one_shot_alerts_of_a_toy_class_are_the_brute_forces() {
     let mut context = AlertContext::new(&mut noise, &NoModifiers).with_one_shot_cells(&mut nothing);
     let mut uncached = Vec::new();
     one_shot_detections(&galaxy, &mut context, &query, &process, &mut uncached);
-    assert_eq!(cached, uncached);
+    let seen = |detections: &[_]| detections.iter().map(Seen::of).collect::<Vec<_>>();
+    assert_eq!(seen(&cached), seen(&uncached));
     assert_ne!(cached.len(), 0, "the observer sees some");
 
     // A query that does not ask about the class finds nothing.
@@ -367,6 +375,39 @@ fn one_shot_alerts_of_a_toy_class_are_the_brute_forces() {
     let mut none = Vec::new();
     one_shot_detections(&galaxy, &mut context, &other, &process, &mut none);
     assert_eq!(none, []);
+}
+
+/// The walk gives each of six queries, the three observers' years and centuries, the same
+/// detections whatever it walked before it with the same cell and noise caches, forwards,
+/// backwards, shuffled and alone.
+#[test]
+fn one_shot_alerts_do_not_depend_on_what_was_walked_before() {
+    let galaxy = Galaxy::new(Seed::new(0x0125_0b00));
+    let process = ToyTypeIa::new();
+    let sensor = sensor(&[
+        (AlertBand::Photometric(Band::V), 1.25e-4),
+        (AlertBand::Photometric(Band::K), 1.0e-5),
+    ]);
+    let queries: Vec<_> = TARGETS
+        .iter()
+        .flat_map(|target| {
+            [(-0.5, 1.0), (-50.0, 100.0)].map(|(offset, years)| {
+                AlertQuery::builder(
+                    observer_at(target.position),
+                    window(target.years, offset, years),
+                    sensor.clone(),
+                )
+                .build()
+                .unwrap()
+            })
+        })
+        .collect();
+    let cells = RefCell::new(KeepCells::default());
+    let noise = RefCell::new(NoiseCache::with_capacity(4_096));
+    assert_order_independent(&queries, |query| {
+        let (mut noise, mut cells) = (noise.borrow_mut(), cells.borrow_mut());
+        walked(&galaxy, &mut noise, &mut cells, &process, query)
+    });
 }
 
 /// A window split in two finds each onset of the whole once, in the half its light arrives in, and
@@ -413,9 +454,9 @@ fn one_shot_alerts_of_a_split_window_find_each_onset_once() {
     }
 }
 
-/// The production core collapses: three observers about three recent deaths of the galaxy of seed
-/// 9 found along the solar circle, with windows of a year and a century, through V and K limits
-/// that reach some 1,600 ly; the walk is the brute force's, and each observer sees its death.
+/// The production core collapses: three observers about two recent deaths of the galaxy of seed 9
+/// found along the solar circle, with windows of a year and a century, through V and K limits that
+/// reach some 1,600 ly; the walk is the brute force's, and each observer sees its death.
 #[test]
 #[ignore = "slow: generates the core-collapse class's cells about three observers, a few seconds of cells each"]
 fn one_shot_alerts_of_the_core_collapses_are_the_brute_forces() {
@@ -490,7 +531,7 @@ fn one_shot_alerts_of_the_core_collapses_are_the_brute_forces() {
         (
             near,
             future,
-            [(-0.5, 1.0), (-20.0, 40.0)],
+            [(-0.5, 1.0), (-50.0, 100.0)],
             DetectionPhase::Onset,
         ),
     ];

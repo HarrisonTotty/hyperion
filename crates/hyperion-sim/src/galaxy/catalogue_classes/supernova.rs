@@ -455,9 +455,10 @@ impl LightCurve {
         self.terms_at(age).total()
     }
 
-    /// This template's three terms `age` after the explosion, each zero before it: what plan 12's
-    /// alerts weight by band (P12.T5.b). Their [`total`](SupernovaTerms::total) is
-    /// [`at`](Self::at) to the bit.
+    /// This template's three terms `age` after the explosion, each zero before it.
+    ///
+    /// They are what plan 12's alerts weight by band (P12.T5.b), and their
+    /// [`total`](SupernovaTerms::total) is [`at`](Self::at) to the bit.
     ///
     /// # Examples
     ///
@@ -472,9 +473,9 @@ impl LightCurve {
     /// let curve = LightCurve::of(SupernovaKind::CoreCollapse(SupernovaType::IIP)).ok_or("a type")?;
     /// let month = Years::new(30.0 / 365.25);
     /// let terms = curve.terms_at(month);
-    /// assert_eq!(terms.breakout().value(), 0.0);
+    /// assert!(terms.breakout().value() < 1e-30 * terms.plateau().value());
     /// assert!(terms.plateau() > terms.radioactive());
-    /// assert_eq!(terms.total(), curve.at(month));
+    /// hyperion_testkit::float::assert_same_bits(terms.total().value(), curve.at(month).value());
     /// # Ok::<(), &str>(())
     /// ```
     #[must_use]
@@ -511,9 +512,9 @@ impl LightCurve {
             * ((1.0 - POSITRON_SHARE) * trapped + POSITRON_SHARE);
         let radioactive = self.nickel * released * (nickel * trapped + cobalt);
         SupernovaTerms {
-            breakout,
-            plateau,
-            radioactive,
+            breakout_erg_s: breakout,
+            plateau_erg_s: plateau,
+            radioactive_erg_s: radioactive,
         }
     }
 }
@@ -524,57 +525,64 @@ impl LightCurve {
 /// The terms are kept in erg/s, as the template computes them, and converted to watts once, so
 /// that their [`total`](Self::total) is [`LightCurve::at`]'s bits, and so is
 /// [`weighted`](Self::weighted) by shares of 1.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "each field carries its unit, erg/s, in its name, as the terms are kept in it"
+)]
 pub struct SupernovaTerms {
-    /// erg/s.
-    breakout: f64,
-    /// erg/s.
-    plateau: f64,
-    /// erg/s.
-    radioactive: f64,
+    breakout_erg_s: f64,
+    plateau_erg_s: f64,
+    radioactive_erg_s: f64,
 }
 
 impl SupernovaTerms {
     /// No light: every term zero, a template's before the explosion.
     pub const ZERO: Self = Self {
-        breakout: 0.0,
-        plateau: 0.0,
-        radioactive: 0.0,
+        breakout_erg_s: 0.0,
+        plateau_erg_s: 0.0,
+        radioactive_erg_s: 0.0,
     };
 
     /// The shock breakout's luminosity.
     #[must_use]
     pub fn breakout(&self) -> Watts {
-        Watts::new(self.breakout * WATTS_PER_ERG_S)
+        Watts::new(self.breakout_erg_s * WATTS_PER_ERG_S)
     }
 
     /// The plateau's luminosity: zero for a template without one.
     #[must_use]
     pub fn plateau(&self) -> Watts {
-        Watts::new(self.plateau * WATTS_PER_ERG_S)
+        Watts::new(self.plateau_erg_s * WATTS_PER_ERG_S)
     }
 
     /// The radioactive heating the ejecta release.
     #[must_use]
     pub fn radioactive(&self) -> Watts {
-        Watts::new(self.radioactive * WATTS_PER_ERG_S)
+        Watts::new(self.radioactive_erg_s * WATTS_PER_ERG_S)
     }
 
     /// The bolometric luminosity, the terms summed in erg/s in the order breakout, plateau,
     /// radioactive and converted once: [`LightCurve::at`].
     #[must_use]
     pub fn total(&self) -> Watts {
-        Watts::new((self.breakout + self.plateau + self.radioactive) * WATTS_PER_ERG_S)
+        Watts::new(
+            (self.breakout_erg_s + self.plateau_erg_s + self.radioactive_erg_s) * WATTS_PER_ERG_S,
+        )
     }
 
     /// The luminosity of the terms weighted by `shares`, in the order breakout, plateau,
-    /// radioactive, summed as [`total`](Self::total) sums them and converted once: a band's
-    /// luminosity, given each term's share of its light in the band (plan 12's alerts).
+    /// radioactive.
+    ///
+    /// The weighted terms are summed as [`total`](Self::total) sums them and converted once: a
+    /// band's luminosity, given each term's share of its light in the band (plan 12's alerts).
     #[must_use]
     pub fn weighted(&self, shares: [f64; 3]) -> Watts {
         let [breakout, plateau, radioactive] = shares;
         Watts::new(
-            (self.breakout * breakout + self.plateau * plateau + self.radioactive * radioactive)
+            (self.breakout_erg_s * breakout
+                + self.plateau_erg_s * plateau
+                + self.radioactive_erg_s * radioactive)
                 * WATTS_PER_ERG_S,
         )
     }
@@ -1626,12 +1634,15 @@ mod tests {
                     "{kind:?}"
                 );
                 if curve.plateau.is_none() {
-                    assert_eq!(terms.plateau(), Watts::ZERO, "{kind:?}");
+                    assert_same_bits(terms.plateau().value(), 0.0);
                 }
             }
             let start = curve.terms_at(Years::ZERO);
-            assert_eq!(start.total(), start.breakout(), "{kind:?}");
-            assert_eq!(curve.terms_at(Years::new(-1.0)), SupernovaTerms::ZERO);
+            assert_same_bits(start.total().value(), start.breakout().value());
+            let before = curve.terms_at(Years::new(-1.0));
+            for term in [before.breakout(), before.plateau(), before.radioactive()] {
+                assert_same_bits(term.value(), 0.0);
+            }
         }
     }
 

@@ -596,16 +596,17 @@ pub fn retarded_from(
 
 impl Retardation {
     /// The reading of light that left `apparent_position` at `emitted`, from a source moving at
-    /// `velocity_then` from then on, as an observer at rest at `observer` receives it: observed at
-    /// `emitted` plus its light time, rounded to the nanosecond, with `present`, the source's
-    /// position then, for [`distance_now`](Self::distance_now). For an event whose time and place
-    /// are known, a one-shot alert's (plan 12, P12.T5.b), where no step on the light cone is
-    /// needed (Design note 6).
+    /// `velocity_then`, as an observer at rest at `observer` receives it.
+    ///
+    /// It is observed at `emitted` plus its light time, rounded to the nanosecond, and `present`,
+    /// the source's position then, gives [`distance_now`](Self::distance_now). It serves an event
+    /// whose time and place are known, a one-shot alert's (plan 12, P12.T5.b), which needs no step
+    /// on the light cone (Design note 6).
     ///
     /// # Panics
     ///
-    /// If the arrival leaves the clock, which a light time across the addressable range cannot
-    /// take a time on it to.
+    /// If the arrival falls off the clock, which no light time across the addressable range can
+    /// make it do from a time on the clock.
     #[must_use]
     pub(crate) fn of_emission(
         observer: &GalacticPosition,

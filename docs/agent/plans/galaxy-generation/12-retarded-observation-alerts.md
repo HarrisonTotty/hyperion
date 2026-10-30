@@ -516,8 +516,9 @@ Files: `galaxy/query/segment.rs`, `lensing/{mod,walk,point_lens}.rs`. Acceptance
   plan 11's scan marks only: slow hosts test the eruption times their marks carry, fast hosts ask
   the monotone phase for events in the emission interval of Design note 6. The core collapses'
   magnetars (P06.T28.c) are walked here too, from the entries whose death lies within 227,273
-  years before the emission interval (main's ruling of 2026-10-30; P12.T5.a.2). Dwarf novae and
-  X-ray bursts are excluded from distant scans by reach and come through T5.e. Tests: completeness
+  years before the emission interval (main's ruling of 2026-10-30; P12.T5.a.2). X-ray bursts are
+  walked over `XRAY_BINARY`'s bursters through the monotone phase (main's ruling of 2026-10-30;
+  P12.T5.b). Dwarf novae are excluded from distant scans by reach and come through T5.e. Tests: completeness
   as in T5.b on a 2,000 ly sphere; `scan_cell` over all cells equals one call over the whole
   sphere; plan 11's `scan::engine_calls()` stays at zero. Bench `awd_scan_marks_cell`.
 - **P12.T5.d Census, features, the global list.** `alerts_in` with Design note 7; feature-level
@@ -527,8 +528,9 @@ Files: `galaxy/query/segment.rs`, `lensing/{mod,walk,point_lens}.rs`. Acceptance
   detections and says so; halving the reach brings it back; a window split in two gives the same
   detections as the whole; any order of classes gives the same result.
 - **P12.T5.e Local events.** `local_events`: for the systems of an observed-mode range result,
-  flares, glitches, FU Orionis outbursts, dwarf novae and bursts over each system's retarded
-  interval, through plans 06 and 11. Magnetar bursts moved to T5.c (P12.T5.a.2). Tests: equals
+  flares, glitches, FU Orionis outbursts and dwarf novae over each system's retarded interval,
+  through plans 06 and 11. Magnetar bursts moved to T5.c (P12.T5.a.2), and X-ray bursts
+  (P12.T5.b). Tests: equals
   direct evaluation per system; adds under 1 ms to a 50 ly query at the reference density (bench, a
   finding).
 
@@ -2643,12 +2645,15 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     2.1922 × 10³⁴ and 1.4081 × 10³⁵ W, which reach 4,415 and 11,189 ly at a V limit of 10⁻⁶ W m⁻².
     The core collapses' X-ray bound is 8.0931 × 10³⁶ W (the Ib and Ic breakout), so
     `kind_reach(CoreCollapse)` is the diagonal for any X-ray limit under 1.4 × 10⁻⁷ W m⁻².
-  - _X-ray bursts_ are `Recurrent` over `XRAY_BINARY` (still pending on P11.T9): T5.c walks them,
-    and T5.e's list loses "bursts".
-  - _Leans (2026-10-30)._ The Ib and Ic breakout at 1 keV, the low end of 1–2 keV (0.809 in
-    2–10 keV); the IIb's at the red supergiants' 2.9 × 10⁵ K; a 7,000 K blackbody for every
-    radioactive term but the Type Ia's, the IIP's and IIL's included; the Type Ia's colours a
-    10⁴ K blackbody's; the plateau's `BC_V` +0.14 (IAU scale).
+  - _X-ray bursts_ are `Recurrent` over `XRAY_BINARY` (main's ruling of 2026-10-30, adopting the
+    advice's item 7; still pending on P11.T9): T5.c's and T5.e's text now say so.
+  - _Leans (2026-10-30)._ The Ib and Ic breakout at 1 keV, the low end of Nakar and Sari's 1–2
+    keV (0.809 in 2–10 keV); the IIb's at the red supergiants' 2.9 × 10⁵ K; a 7,000 K blackbody
+    for every radioactive term but the Type Ia's, the IIP's and IIL's included; the Type Ia's J to
+    N at a 10⁴ K blackbody's colours; the plateau's `BC_V` +0.14 (IAU scale).
+  - _The Type Ia's U to I (science check)._ They are SN 2011fe's peak shares from Pereira et al.'s
+    (2013) Table 1 magnitudes and Bessell, Castelli and Plez's zero points, not a 10⁴ K
+    blackbody's, which put I 1.75 times too bright. Its B bound is 2.6941 × 10³⁵ W.
   - _For T5.c–T5.e._ A later row takes `band_share` at its own temperature (star flares, giant
     eruptions, FU Orionis outbursts) and stores its shares the same way. The magnetars' 2–10 keV
     shares are constants of the event's whole output, not `band_share`.
@@ -2670,15 +2675,21 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     judged at t₁ alone, Design note 6's words, so an event still rising below the limit at t₁ is
     not reported. The sphere is the kind's reach, not widened by 1%: `cells_in_sphere` pads it by
     4,096 ly, and the walk reads each site at T. The retardation is the onset's.
-  - _Tests._ `tests/alerts_oneshot.rs` with `tests/common/observe.rs`
-    (`brute_force_detections(galaxy, context, cells, process, query)`, `Seen`, `KeepCells`,
-    `observer_at`), included by `#[path]` so that no other test binary compiles it. The toy class
-    runs for three observers over a year and a century; slow, the core collapses of seed 9 about two
-    recent deaths. Acceptance: `cargo test -p hyperion-sim alerts`, and the slow one with
-    `--test alerts_oneshot -- --ignored`.
-  - _For T5.c–T5.e._ T5.d's `alerts_in` calls `one_shot_detections` per one-shot class after its
-    census, and T8's server keeps the one-shot cells. T5.c's magnetars walk the same
-    `CORE_COLLAPSE` cells with a cache of their own.
-  - _A gate fix outside the lane._ The server's extinction request matched `TraceMotionError`
-    without P09.T33.a's `CatalogueMotionNotTraced` and did not compile on the tip with P09.T33.a;
-    a catalogue system now ends no line of sight, as a centre member ends none.
+  - _Tests._ `tests/alerts_oneshot.rs` with `tests/common/observe.rs`:
+    `brute_force_detections(galaxy, context, cells, process, query)`, for one-shot classes only,
+    walks a box 2 × (reach + 4,096 ly) wide, not the whole catalogue; `observer_at(ly)` takes no
+    galaxy. The toy class runs for three observers over a year and a century, a split window and
+    six queries in any order; slow, the core collapses of seed 9 about two recent deaths. The
+    acceptance adds `cargo test -p hyperion-sim supernova::` for plan 09's `terms_at` and
+    `phase_four_golden`, and the slow test runs with `--test alerts_oneshot -- --ignored`.
+  - _For T5.c–T5.e._
+    - T5.d's `alerts_in` calls `one_shot_detections` per one-shot class after its census, and
+      T8's server keeps the one-shot cells. T5.c's magnetars walk the same `CORE_COLLAPSE` cells
+      with a cache of their own.
+    - A split window gives each onset once; its second half also finds in progress the events the
+      first saw begin that are still above the limit at its start, so T5.d's split test compares
+      onsets (lean, 2026-10-30).
+    - The tails' photometric bound is still their bolometric light (`EddingtonShare(1.0)`): T5.d
+      gives them a share.
+    - An X-ray sensor fainter than 1.4 × 10⁻⁷ W m⁻² takes the core collapses' reach to the
+      diagonal, and their walk to every class cell of the cube: the census must count that cost.

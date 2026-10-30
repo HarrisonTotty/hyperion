@@ -22,8 +22,8 @@
 //! Type Ia ([`CORE_COLLAPSE_BAND_PEAKS`], [`TYPE_IA_BAND_PEAKS`]). The other seven rows wait on
 //! plan 11's sources, P11.T9 (below): `LuminousRedNova` and `Kilonova` (one-shot), `Nova`,
 //! `XrayTransient`, `XrayBurst` and `BeXOutburst` (recurrent) and `DwarfNova` (local). X-ray bursts
-//! are seen across the Galaxy, so they are walked over the X-ray binaries, by the reasoning of the
-//! magnetars' ruling (below; plan 12's Risks, "P12.T5.b as built").
+//! are seen across the Galaxy, so they are walked over the X-ray binaries, as the magnetars are
+//! over the core collapses (main's ruling of 2026-10-30; P12.T5.b).
 //!
 //! A kind's hosts are a class's ([`TransientRow::classes`]): the supernovae are the two supernova
 //! classes', plan 11's kinds its classes' (novae and dwarf novae both accreting white dwarf
@@ -489,11 +489,11 @@ pub const CORE_COLLAPSE_BAND_PEAKS: [Watts; BAND_COUNT] = [
 ///
 /// | Band  | Bound (W)       |
 /// | ----- | --------------- |
-/// | U     | 2.1374 × 10³⁵   |
-/// | B     | 2.2751 × 10³⁵   |
+/// | U     | 1.9674 × 10³⁵   |
+/// | B     | 2.6941 × 10³⁵   |
 /// | V     | 1.4081 × 10³⁵   |
-/// | R     | 1.8823 × 10³⁵   |
-/// | I     | 1.0445 × 10³⁵   |
+/// | R     | 1.5305 × 10³⁵   |
+/// | I     | 5.9617 × 10³⁴   |
 /// | J     | 4.3014 × 10³⁴   |
 /// | H     | 1.8505 × 10³⁴   |
 /// | K     | 9.3988 × 10³³   |
@@ -501,15 +501,15 @@ pub const CORE_COLLAPSE_BAND_PEAKS: [Watts; BAND_COUNT] = [
 /// | radio | none            |
 /// | X     | none            |
 ///
-/// The normal template sets every band at its peak, 15.15 days in, with SN 2011fe's V share,
-/// 0.131; the Type Iax's peaks some ten times fainter. A test holds each at or above a fine search
+/// The normal template sets every band at its peak, 15.15 days in, with SN 2011fe's shares in U to
+/// I (0.131 in V); the Type Iax's peaks some ten times fainter. A test holds each at or above a fine search
 /// about its templates' peaks, and within 10⁻⁴ of it.
 pub const TYPE_IA_BAND_PEAKS: [Watts; BAND_COUNT] = [
-    Watts::new(2.1374e35),
-    Watts::new(2.2751e35),
+    Watts::new(1.9674e35),
+    Watts::new(2.6941e35),
     Watts::new(1.4081e35),
-    Watts::new(1.8823e35),
-    Watts::new(1.0445e35),
+    Watts::new(1.5305e35),
+    Watts::new(5.9617e34),
     Watts::new(4.3014e34),
     Watts::new(1.8505e34),
     Watts::new(9.3988e33),
@@ -535,6 +535,7 @@ pub const MAGNETAR_BURST_PEAK: Watts = Watts::new(5e40);
 
 /// The bounds of a row that bounds every photometric band alike by `photometric`, and X-rays by
 /// `xray`.
+#[must_use]
 const fn bands_alike(
     photometric: Option<PeakBound>,
     xray: Option<PeakBound>,
@@ -546,6 +547,7 @@ const fn bands_alike(
 
 /// The bounds of a row with one constant bound per band, `peaks`: a band of no light, whose peak
 /// is zero, has none.
+#[must_use]
 const fn band_by_band(peaks: [Watts; BAND_COUNT]) -> [Option<PeakBound>; BAND_COUNT] {
     let mut bounds = [None; BAND_COUNT];
     let mut i = 0;

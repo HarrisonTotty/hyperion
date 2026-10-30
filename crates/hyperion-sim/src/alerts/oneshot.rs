@@ -23,8 +23,11 @@
 //!    positions; the walk reads each entry's site at T.
 //! 3. Each entry's arrival. One that arrives in the window is an [`Onset`], seen at its peak in
 //!    each band ([`supernova_peak`]); one that arrived before `t₁` is [`InProgress`] if its light
-//!    at `t₁`, `t₁` − `t_a` after its onset reached the observer ([`supernova_luminosity`]), is
-//!    still above the limit. One that arrives at or after `t₂` is the next window's.
+//!    at `t₁`, `t₁` − `t_a` after its onset reached the observer
+//!    ([`supernova_luminosity`](super::supernova_luminosity)), is still above the limit. One that
+//!    arrives at or after `t₂` is the next window's. So a window split in two finds each onset of
+//!    the whole once, and the second half finds in progress again the events the first saw begin
+//!    that are still above the limit at its start.
 //! 4. The flux in each of the sensor's bands, through plan 07's line of sight from the site to the
 //!    observer ([`AlertContext::sightline`], [`flux`]), which the walk marches only for an entry
 //!    whose unextinguished flux reaches a band's limit. The event is detected in the band in which
@@ -61,7 +64,7 @@ use crate::observe::{Retardation, bearing, light_time};
 use crate::time::UniverseTime;
 use crate::units::{LightYears, Metres, Watts, WattsPerSquareMetre, Years};
 
-use super::light::{supernova_luminosity, supernova_peak};
+use super::light::{supernova_luminosities, supernova_peak};
 use super::reach::{flux, inverse_square_flux, kind_reach};
 use super::registry::TransientKind;
 use super::{AlertBand, AlertContext, AlertQuery, BAND_COUNT, Detection, DetectionPhase};
@@ -80,13 +83,13 @@ pub struct OneShotEvent {
 impl OneShotEvent {
     /// The explosion of `entry`, whose member 0 moves by `motion`.
     #[must_use]
-    pub fn of_supernova(entry: &SupernovaEntry, motion: &CatalogueMotion) -> Self {
+    pub fn of_supernova(entry: &SupernovaEntry, motion: CatalogueMotion) -> Self {
         Self {
             event: entry.explosion_event(),
             host: entry.system(),
             supernova: entry.kind(),
             emitted: entry.explosion(),
-            motion: *motion,
+            motion,
         }
     }
 
@@ -135,9 +138,11 @@ impl OneShotEvent {
 /// plan 11's two merger classes from their own events (P11.T9).
 pub trait OneShotClass: ClassProcess {
     /// The kind of event the class's entries make.
+    #[must_use]
     fn kind(&self) -> TransientKind;
 
     /// The event `entry` makes.
+    #[must_use]
     fn event(&self, entry: &Self::Entry) -> OneShotEvent;
 }
 
@@ -147,7 +152,7 @@ impl OneShotClass for CoreCollapseProcess {
     }
 
     fn event(&self, entry: &CoreCollapseEntry) -> OneShotEvent {
-        OneShotEvent::of_supernova(entry.supernova(), entry.motion())
+        OneShotEvent::of_supernova(entry.supernova(), *entry.motion())
     }
 }
 
@@ -155,9 +160,11 @@ impl OneShotClass for CoreCollapseProcess {
 ///
 /// A class's cell is a pure function of the galaxy and its key, and costs milliseconds (P09.T33.a),
 /// so a caller that walks the same cells again (the next window, another sensor) keeps them. An
-/// implementation must lend exactly what `generate` returns, and one that keeps events between
-/// calls keys them by galaxy as well as by cell. Nothing the walk returns then depends on what the
-/// cache held.
+/// implementation must lend exactly what `generate` returns. The walk names a cell by its key alone,
+/// which holds its class, so a cache serves one galaxy and one process per class, as the production
+/// lookup has: a caller keeps one with its galaxy (the server's caches are per universe), and a
+/// galaxy's seed would not name it, since its parameters and rules shape the cells too. Nothing the
+/// walk returns then depends on what the cache held.
 ///
 /// # Examples
 ///
@@ -223,7 +230,7 @@ fn events_of<P: OneShotClass>(
 }
 
 /// An event the walk keeps for its line of sight: its arrival and phase, and its luminosity in
-/// each band at the time the phase reads it.
+/// each band when the phase reads it.
 #[derive(Debug, Clone, Copy)]
 struct Candidate {
     event: OneShotEvent,
@@ -241,7 +248,7 @@ struct Candidate {
 ///
 /// # Panics
 ///
-/// If the reach is not a positive length, which [`kind_reach`] never gives; and as
+/// If the reach is not finite, which [`kind_reach`] never gives; and as
 /// [`CatalogueClassCell::generate`] and the class's process do.
 ///
 /// # Examples
@@ -361,10 +368,10 @@ fn candidate(
                 .as_julian_years_f64(),
         )),
     };
-    let luminosity = AlertBand::ALL.map(|band| match age {
-        None => supernova_peak(event.supernova, band),
-        Some(age) => supernova_luminosity(event.supernova, age, band),
-    });
+    let luminosity = match age {
+        None => AlertBand::ALL.map(|band| supernova_peak(event.supernova, band)),
+        Some(age) => supernova_luminosities(event.supernova, age),
+    };
     let reaches = query.sensor().bands().any(|(band, limits)| {
         inverse_square_flux(luminosity[band.index()], distance)
             .is_some_and(|bare| bare >= limits.detect())
@@ -423,18 +430,16 @@ fn detect<P: OneShotClass>(
         &present,
     );
     debug_assert_eq!(retardation.observed(), candidate.arrival);
-    Some(Detection {
-        event: event.event,
-        host: event.host,
-        class: Some(process.class()),
+    Some(Detection::new(
+        event.event,
+        event.host,
+        Some(process.class()),
         kind,
-        emitted: event.emitted,
-        arrival: candidate.arrival,
-        phase: candidate.phase,
+        candidate.phase,
         band,
-        flux: seen,
-        bearing: bearing(observer, &site)?,
+        seen,
+        bearing(observer, &site)?,
         retardation,
-        resolvable: seen >= limits.resolve(),
-    })
+        seen >= limits.resolve(),
+    ))
 }

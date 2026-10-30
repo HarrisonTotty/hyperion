@@ -22,9 +22,9 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
 use hyperion_sim::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId};
 use hyperion_sim::id::{EventId, SystemId};
-use hyperion_sim::observe::{bearing, light_time};
+use hyperion_sim::observe::{Motion, bearing, light_time};
 use hyperion_sim::time::{Span, UniverseTime};
-use hyperion_sim::units::Years;
+use hyperion_sim::units::{LightYears, Years};
 use hyperion_testkit::float::bits;
 
 /// A detection as the walk and the oracle are compared: every field it reports, floats as bits.
@@ -43,6 +43,9 @@ pub struct Seen {
     pub bearing: [u64; 2],
     pub apparent: ([i32; 3], [u64; 3]),
     pub light_age: Span,
+    pub distance_now: u64,
+    pub velocity_then: [u64; 3],
+    pub motion: Motion,
 }
 
 impl Seen {
@@ -69,6 +72,9 @@ impl Seen {
             ],
             apparent: position_bits(retardation.apparent_position()),
             light_age: retardation.light_age(),
+            distance_now: bits(retardation.distance_now().value()),
+            velocity_then: retardation.velocity_then().metres_per_second().map(bits),
+            motion: retardation.motion(),
         }
     }
 }
@@ -151,85 +157,104 @@ pub fn brute_force_detections<P: OneShotClass>(
     )]
     let half = half as i32 + 1;
     let [cx, cy, cz] = centre.cell();
-    let window = query.window();
     let mut seen = Vec::new();
     for x in cx - half..=cx + half {
         for y in cy - half..=cy + half {
             for z in cz - half..=cz + half {
+                // A cell of the box outside the root cube is no cell of the class.
                 let Ok(key) = CatalogueCellKey::new(class, [x, y, z]) else {
                     continue;
                 };
                 for event in cells.events(galaxy, process, key).to_vec() {
-                    let site = event.site();
-                    let distance = site.distance_to(observer);
-                    let arrival = event.emitted().checked_add(light_time(distance)).unwrap();
-                    let phase = if window.start() <= arrival && arrival < window.end() {
-                        DetectionPhase::Onset
-                    } else if arrival < window.start() {
-                        DetectionPhase::InProgress
-                    } else {
-                        continue;
-                    };
-                    let light = |band| match phase {
-                        DetectionPhase::Onset => supernova_peak(event.supernova(), band),
-                        DetectionPhase::InProgress => {
-                            let age = window.start().checked_since(arrival).unwrap();
-                            supernova_luminosity(
-                                event.supernova(),
-                                Years::new(age.as_julian_years_f64()),
-                                band,
-                            )
-                        }
-                    };
-                    let bare = query.sensor().bands().any(|(band, limits)| {
-                        inverse_square_flux(light(band), distance)
-                            .is_some_and(|f| f >= limits.detect())
-                    });
-                    if !bare {
-                        continue;
-                    }
-                    let line = context.sightline(galaxy, &site, observer);
-                    let mut best = None;
-                    for band in AlertBand::ALL {
-                        let Some(limits) = query.sensor().limits(band) else {
-                            continue;
-                        };
-                        let Some(f) = flux(light(band), distance, &line, band) else {
-                            continue;
-                        };
-                        let over = f.value() / limits.detect().value();
-                        let better = match best {
-                            None => over >= 1.0,
-                            Some((_, _, most)) => over > most,
-                        };
-                        if better {
-                            best = Some((band, f, over));
-                        }
-                    }
-                    let Some((band, f, _)) = best else {
-                        continue;
-                    };
-                    let resolve = query.sensor().limits(band).unwrap().resolve();
-                    let to = bearing(observer, &site).unwrap();
-                    seen.push(Seen {
-                        arrival,
-                        event: event.event(),
-                        host: event.host(),
-                        class: Some(class),
-                        kind,
-                        emitted: event.emitted(),
-                        phase,
-                        band,
-                        flux: bits(f.value()),
-                        resolvable: f >= resolve,
-                        bearing: [bits(to.azimuth().value()), bits(to.elevation().value())],
-                        apparent: position_bits(&site),
-                        light_age: light_time(distance),
-                    });
+                    seen.extend(evaluated(galaxy, context, query, class, kind, &event));
                 }
             }
         }
     }
     seen.sort();
     seen
+}
+
+/// `event` as `query`'s sensor sees it, evaluated directly (module documentation), or `None`.
+fn evaluated(
+    galaxy: &Galaxy,
+    context: &mut AlertContext<'_>,
+    query: &AlertQuery,
+    class: ClassId,
+    kind: TransientKind,
+    event: &OneShotEvent,
+) -> Option<Seen> {
+    let observer = query.observer_position();
+    let window = query.window();
+    let site = event.site();
+    let distance = site.distance_to(observer);
+    let arrival = event.emitted().checked_add(light_time(distance)).unwrap();
+    let phase = if window.start() <= arrival && arrival < window.end() {
+        DetectionPhase::Onset
+    } else if arrival < window.start() {
+        DetectionPhase::InProgress
+    } else {
+        return None;
+    };
+    let light = |band| match phase {
+        DetectionPhase::Onset => supernova_peak(event.supernova(), band),
+        DetectionPhase::InProgress => {
+            let age = window.start().checked_since(arrival).unwrap();
+            supernova_luminosity(
+                event.supernova(),
+                Years::new(age.as_julian_years_f64()),
+                band,
+            )
+        }
+    };
+    let bare = query.sensor().bands().any(|(band, limits)| {
+        inverse_square_flux(light(band), distance).is_some_and(|f| f >= limits.detect())
+    });
+    if !bare {
+        return None;
+    }
+    let line = context.sightline(galaxy, &site, observer);
+    let mut best = None;
+    for band in AlertBand::ALL {
+        let Some(limits) = query.sensor().limits(band) else {
+            continue;
+        };
+        let Some(f) = flux(light(band), distance, &line, band) else {
+            continue;
+        };
+        let over = f.value() / limits.detect().value();
+        let better = match best {
+            None => over >= 1.0,
+            Some((_, _, most)) => over > most,
+        };
+        if better {
+            best = Some((band, f, over));
+        }
+    }
+    let (band, f, _) = best?;
+    let resolve = query.sensor().limits(band).unwrap().resolve();
+    let to = bearing(observer, &site).unwrap();
+    let present = event.motion().position_at(arrival);
+    Some(Seen {
+        arrival,
+        event: event.event(),
+        host: event.host(),
+        class: Some(class),
+        kind,
+        emitted: event.emitted(),
+        phase,
+        band,
+        flux: bits(f.value()),
+        resolvable: f >= resolve,
+        bearing: [bits(to.azimuth().value()), bits(to.elevation().value())],
+        apparent: position_bits(&site),
+        light_age: light_time(distance),
+        distance_now: bits(LightYears::from(observer.distance_to(&present)).value()),
+        velocity_then: event
+            .motion()
+            .velocity_at(event.emitted())
+            .metres_per_second()
+            .map(bits),
+        motion: Motion::Drift,
+    })
 }

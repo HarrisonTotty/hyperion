@@ -22,7 +22,7 @@
 //! The local kinds ([`Route::Local`]: dwarf novae, flares) add nothing to their classes' reach:
 //! they come with the range query (P12.T5.e), and dwarf novae are excluded from distant scans by
 //! reach (P12.T5.c). X-ray bursts are walked over the X-ray binaries' class, as the magnetars are
-//! over the core collapses' (P12.T5.b, by the reasoning of main's ruling for the magnetars).
+//! over the core collapses' (main's ruling of 2026-10-30; P12.T5.b).
 //!
 //! # Flux
 //!

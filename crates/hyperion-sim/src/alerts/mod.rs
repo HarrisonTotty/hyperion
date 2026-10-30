@@ -547,7 +547,8 @@ pub enum DetectionPhase {
 /// One event seen by the sensor (plan 12's Provides): which event, of which host, when it left and
 /// arrived, how bright it is and where it appears.
 ///
-/// Built by the alert walks (P12.T5.b–P12.T5.e): the one-shot classes' by [`one_shot_detections`].
+/// Built by the alert walks (P12.T5.b–P12.T5.e), through its crate-private constructor: the
+/// one-shot classes' by [`one_shot_detections`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Detection {
     event: EventId,
@@ -565,6 +566,44 @@ pub struct Detection {
 }
 
 impl Detection {
+    /// The detection of `event` of `host`, of its `class` and `kind`, in `phase`, seen in `band`
+    /// at `flux` from `bearing`, its light read by `retardation`, and whether it is `resolvable`.
+    ///
+    /// The emitted and arrival times are the retardation's, so that they cannot disagree with it.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a detection's fields, each found apart by the walk; the times come from the \
+                  retardation"
+    )]
+    #[must_use]
+    pub(super) const fn new(
+        event: EventId,
+        host: SystemId,
+        class: Option<ClassId>,
+        kind: TransientKind,
+        phase: DetectionPhase,
+        band: AlertBand,
+        flux: WattsPerSquareMetre,
+        bearing: Bearing,
+        retardation: Retardation,
+        resolvable: bool,
+    ) -> Self {
+        Self {
+            event,
+            host,
+            class,
+            kind,
+            emitted: retardation.emitted(),
+            arrival: retardation.observed(),
+            phase,
+            band,
+            flux,
+            bearing,
+            retardation,
+            resolvable,
+        }
+    }
+
     /// The event, the same from any distance (the shared re-observation test).
     #[must_use]
     pub const fn event(&self) -> EventId {

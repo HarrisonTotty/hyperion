@@ -31,31 +31,40 @@
 //! | red-supergiant flash | a 2.9 × 10⁵ K blackbody's           | the IIP, IIL and IIb breakout   |
 //! | stripped flash       | a 1 keV blackbody's                 | the Ib and Ic breakout          |
 //! | hydrogen plateau     | V by `BC_V` +0.14, 6,000 K colours  | the IIP and IIL plateau         |
-//! | Type Ia photosphere  | V by `BC_V` +0.087, 10⁴ K colours   | the Type Ia's radioactive light |
+//! | Type Ia photosphere  | SN 2011fe's U–I, 10⁴ K colours      | the Type Ia's radioactive light |
 //! | warm photosphere     | a 7,000 K blackbody's               | every other radioactive light   |
 //!
 //! - **The breakouts.** A red supergiant's breaks out at about 2.9 × 10⁵ K (Nakar and Sari 2010,
 //!   ApJ 725, 904, equation A-15). The IIb's progenitor, a yellow supergiant, takes the same, as no
-//!   source for its breakout was read (lean). A Wolf–Rayet star's lies at 1–2 keV, which puts
-//!   0.72–0.84 of its light in 2–10 keV; 1 keV, the range's low end, puts 0.809 there (lean). That
-//!   is the core collapses' X-ray light: the red supergiants' flash, at 25 eV, puts 10⁻³⁰ there.
-//! - **Observed V shares.** Where a bolometric correction is measured, the V share is the in-band
-//!   power a V magnitude implies through the top hat, `F_V0` `Δλ_V` ÷ f₀ × 10^(0.4 `BC_V`). Here
-//!   `F_V0` = 3.631 × 10⁻¹¹ W m⁻² nm⁻¹ is the zero point of V (Bessell, Castelli and Plez 1998, A&A
-//!   333, 231, Table A2), `Δλ_V` = 84 nm, and f₀ = 2.518 021 002 × 10⁻⁸ W m⁻² the zero point of
-//!   apparent bolometric magnitude (IAU 2015 Resolution B2), so the share is 0.121 13 × 10^(0.4
-//!   `BC_V`). The other bands keep a blackbody's colours, its shares scaled by the V share's ratio
-//!   to its own. No blackbody reaches the observed V shares of the plateau or of a Type Ia's peak.
+//!   source for its breakout was read (lean). A Wolf–Rayet star's is at 1–2 keV (their equations
+//!   41 and 44), where a blackbody puts 0.72–0.84 of its light in 2–10 keV; 1 keV, the range's low
+//!   end, puts 0.809 there (lean). That is the core collapses' X-ray light: the red supergiants'
+//!   flash, at 25 eV, puts 10⁻³⁰ there. Their spectrum is a flatter power law, not a blackbody, so
+//!   the share errs high: SN 2008D's 6.1 × 10⁴³ erg/s in 0.3–10 keV at a photon index of 2.3
+//!   (Soderberg et al. 2008, Nature 453, 469) is some 2 × 10⁴³ in 2–10 keV, against the template's
+//!   8.1 × 10⁴³ (a finding).
+//! - **Observed shares.** Where a bolometric correction is measured in a band, its share is the
+//!   in-band power a magnitude implies through the top hat, `F_0` Δλ ÷ f₀ × 10^(0.4 BC), with BC =
+//!   `M_bol` − M in the band. `F_0` is the band's zero point (Bessell, Castelli and Plez 1998, A&A
+//!   333, 231, Table A2: 417.5, 632, 363.1, 217.7 and 112.6 × 10⁻¹¹ erg cm⁻² s⁻¹ Å⁻¹ in U to I)
+//!   and f₀ = 2.518 021 002 × 10⁻⁸ W m⁻² the zero point of apparent bolometric magnitude (IAU 2015
+//!   Resolution B2), so V's share is 0.121 13 × 10^(0.4 `BC_V`). The other bands keep a
+//!   blackbody's colours, its shares scaled by the V share's ratio to its own. No blackbody reaches
+//!   the observed V shares of the plateau or of a Type Ia's peak.
 //!   - The plateau: `BC_V` = +0.14 on the IAU scale, Bersten and Hamuy's (2009, ApJ 701, 200,
-//!     §3.1) plateau, zero on their own zero point, moved to the IAU's; Lyman, Bersier and James
-//!     (2014, MNRAS 437, 3848, Table 3) give +0.06 to +0.19. The V share is 0.138, against a 6,000
-//!     K blackbody's 0.110.
-//!   - A Type Ia's peak: `BC_V` = +0.087, from SN 2011fe's `L_max,bol` = 1.17 × 10⁴³ erg/s and
-//!     `M_V,max` = −19.06 at one distance modulus (Pereira et al. 2013, A&A 554, A27), `M_bol` =
-//!     −18.973 on the IAU scale (L₀ = 3.0128 × 10²⁸ W). The V share is 0.131, against a 10⁴ K
-//!     blackbody's 0.087; the colours are a 10⁴ K blackbody's (lean).
+//!     §3.1) plateau, "around a value of zero" on their own zero point, moved to the IAU's; the
+//!     `BC_V`(V − R) fits of Lyman, Bersier and James (2014, MNRAS 437, 3848, Table 3) give +0.06
+//!     to +0.19 over the plateau's colours. The V share is 0.138, against a 6,000 K blackbody's
+//!     0.110.
+//!   - A Type Ia's peak: SN 2011fe's (Pereira et al. 2013, A&A 554, A27, Table 1). Its
+//!     `L_max,bol` = 1.17 × 10⁴³ erg/s is `M_bol` = −18.973 on the IAU scale (L₀ = 3.0128 × 10²⁸
+//!     W), and its peak magnitudes in U to I, −19.55, −19.10, −19.06, −19.02 and −18.74, give
+//!     shares of 0.183, 0.251, 0.131, 0.143 and 0.056 (`BC_V` = +0.087), against a 10⁴ K
+//!     blackbody's 0.132, 0.141, 0.087, 0.117 and 0.065. J to N keep a 10⁴ K blackbody's colours
+//!     (lean).
 //! - **The other radioactive light**, of the core collapses' ejecta and of a Type Iax, takes a
-//!   7,000 K blackbody's shares (lean).
+//!   7,000 K blackbody's shares (lean): a V share of 0.112, some 16% under a stripped-envelope
+//!   supernova's at its peak and 1.5 times a hydrogen-rich one's on its tail (findings).
 //!
 //! A template's peak in a band ([`supernova_peak`]) is the greatest of its light in the band on a
 //! fixed grid of ages: the explosion, every hour of the first day, and every twentieth of a day
@@ -135,7 +144,7 @@ const GAUSS_LEGENDRE_16: [(f64, f64); 8] = [
 /// assert!((sun - 0.1075).abs() < 1e-4);
 /// let flash = band_share(Kelvin::new(1.160_45e7), AlertBand::XRay);
 /// assert!((flash - 0.809).abs() < 1e-3);
-/// assert_eq!(band_share(Kelvin::new(1e4), AlertBand::Photometric(Band::Radio)), 0.0);
+/// assert!(band_share(Kelvin::new(1e4), AlertBand::Photometric(Band::Radio)) <= 0.0);
 /// ```
 #[must_use]
 pub fn band_share(temperature: Kelvin, band: AlertBand) -> f64 {
@@ -203,11 +212,19 @@ fn edges(band: AlertBand) -> Edges {
 }
 
 /// 15/π⁴ ∫ x³ ÷ (eˣ − 1) dx from `low` to `high` by the 16-point rule, the nodes summed in a fixed
-/// order. Where eˣ − 1 overflows the integrand is 0, as it all but is.
+/// order. Where eˣ − 1 overflows the integrand is 0, as it all but is, and not ∞ ÷ ∞ where x³
+/// overflows too.
 #[must_use]
 fn planck_share(low: f64, high: f64) -> f64 {
     let (middle, half) = (f64::midpoint(low, high), (high - low) / 2.0);
-    let integrand = |x: f64| x * x * x / crate::math::exp_m1(x);
+    let integrand = |x: f64| {
+        let denominator = crate::math::exp_m1(x);
+        if denominator.is_finite() {
+            x * x * x / denominator
+        } else {
+            0.0
+        }
+    };
     let sum = GAUSS_LEGENDRE_16
         .iter()
         .fold(0.0, |sum, &(abscissa, weight)| {
@@ -231,12 +248,62 @@ type BandShares = [f64; BAND_COUNT];
     )
 )]
 struct SpectrumSource {
-    /// The blackbody whose shares, or whose colours, the spectrum takes, K.
-    temperature: f64,
-    /// The observed bolometric correction in V on the IAU scale that sets the V share, the other
-    /// bands keeping the blackbody's colours; `None` for the blackbody's own shares.
-    bc_v: Option<f64>,
+    /// The blackbody whose shares, or whose colours, the spectrum takes.
+    temperature: Kelvin,
+    /// The observed bolometric corrections on the IAU scale, BC = `M_bol` − M in the band, that
+    /// set the shares of the bands they are given for; every other band keeps the blackbody's
+    /// colour against V, which then has one. Empty for the blackbody's own shares.
+    corrections: &'static [(Band, f64)],
 }
+
+/// SN 2011fe's bolometric magnitude at its peak on the IAU scale (L₀ = 3.0128 × 10²⁸ W): −18.973,
+/// from its `L_max,bol` of 1.17 × 10⁴³ erg/s (Pereira et al. 2013, A&A 554, A27, Table 1).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the spectra's sources are the stored shares' record, which a test recomputes to \
+                  the bit"
+    )
+)]
+const SN_2011FE_PEAK_M_BOL: f64 = -18.973;
+
+/// SN 2011fe's absolute magnitudes at its peak in U, B, V, R and I: −19.55, −19.10, −19.06, −19.02
+/// and −18.74, at the bolometric light's distance modulus (Pereira et al. 2013, Table 1).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the spectra's sources are the stored shares' record, which a test recomputes to \
+                  the bit"
+    )
+)]
+const SN_2011FE_PEAK_MAGNITUDES: [(Band, f64); 5] = [
+    (Band::U, -19.55),
+    (Band::B, -19.10),
+    (Band::V, -19.06),
+    (Band::R, -19.02),
+    (Band::I, -18.74),
+];
+
+/// SN 2011fe's bolometric corrections at its peak in U to I.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the spectra's sources are the stored shares' record, which a test recomputes to \
+                  the bit"
+    )
+)]
+const SN_2011FE_PEAK_CORRECTIONS: [(Band, f64); 5] = {
+    let mut corrections = SN_2011FE_PEAK_MAGNITUDES;
+    let mut i = 0;
+    while i < corrections.len() {
+        corrections[i].1 = SN_2011FE_PEAK_M_BOL - corrections[i].1;
+        i += 1;
+    }
+    corrections
+};
 
 /// The spectra of the supernova templates' terms (module documentation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,7 +314,7 @@ enum Spectrum {
     StrippedFlash,
     /// A hydrogen envelope's plateau: V by `BC_V` = +0.14, 6,000 K colours.
     HydrogenPlateau,
-    /// A Type Ia's photosphere: V by `BC_V` = +0.087, 10⁴ K colours.
+    /// A Type Ia's photosphere: U to I by SN 2011fe's peak, 10⁴ K colours beyond.
     TypeIaPhotosphere,
     /// Every other radioactive light: a 7,000 K blackbody.
     WarmPhotosphere,
@@ -280,33 +347,34 @@ impl Spectrum {
 const SPECTRUM_SOURCES: [SpectrumSource; 5] = [
     // Nakar and Sari 2010, equation A-15.
     SpectrumSource {
-        temperature: 2.9e5,
-        bc_v: None,
+        temperature: Kelvin::new(2.9e5),
+        corrections: &[],
     },
-    // kT = 1 keV.
+    // kT = 1 keV, the low end of Nakar and Sari's 1–2 keV (their equations 41 and 44).
     SpectrumSource {
-        temperature: 1.0 / KILOELECTRONVOLTS_PER_KELVIN,
-        bc_v: None,
+        temperature: Kelvin::new(1.0 / KILOELECTRONVOLTS_PER_KELVIN),
+        corrections: &[],
     },
     // Bersten and Hamuy 2009, §3.1, on the IAU scale.
     SpectrumSource {
-        temperature: 6_000.0,
-        bc_v: Some(0.14),
+        temperature: Kelvin::new(6_000.0),
+        corrections: &[(Band::V, 0.14)],
     },
-    // SN 2011fe (Pereira et al. 2013).
+    // SN 2011fe at its peak (Pereira et al. 2013, Table 1).
     SpectrumSource {
-        temperature: 1e4,
-        bc_v: Some(0.087),
+        temperature: Kelvin::new(1e4),
+        corrections: &SN_2011FE_PEAK_CORRECTIONS,
     },
     SpectrumSource {
-        temperature: 7_000.0,
-        bc_v: None,
+        temperature: Kelvin::new(7_000.0),
+        corrections: &[],
     },
 ];
 
 /// The spectra's shares in each band, in [`Spectrum::index`]'s order: [`band_share`] of each
-/// source's blackbody, scaled to its observed V share where it has one. Stored at full precision
-/// and recomputed from [`SPECTRUM_SOURCES`] to the bit by a test. Part of the generator version.
+/// source's blackbody, or the observed share in a band with an observed correction and the
+/// blackbody's colour against V in every other. Stored at full precision and recomputed from
+/// [`SPECTRUM_SOURCES`] to the bit by a test. Part of the generator version.
 const SPECTRA: [BandShares; 5] = [
     // The red-supergiant flash.
     [
@@ -352,15 +420,15 @@ const SPECTRA: [BandShares; 5] = [
     ],
     // The Type Ia photosphere.
     [
-        0.199_208_312_364_355_35,
-        0.212_044_641_161_824_3,
-        0.131_233_945_787_097_57,
-        0.175_431_489_361_194_76,
-        0.097_343_511_077_836_29,
-        0.040_090_599_492_884_57,
-        0.017_246_790_934_986_385,
-        0.008_760_001_209_796_935,
-        0.000_339_753_994_218_141_5,
+        0.183_362_485_975_264_1,
+        0.251_100_592_123_994_94,
+        0.131_233_945_787_097_52,
+        0.142_644_873_398_645_95,
+        0.055_564_800_993_890_82,
+        0.040_090_599_492_884_55,
+        0.017_246_790_934_986_374,
+        0.008_760_001_209_796_93,
+        0.000_339_753_994_218_141_34,
         0.0,
         0.0,
     ],
@@ -526,6 +594,19 @@ pub fn supernova_luminosity(kind: SupernovaKind, age: Years, band: AlertBand) ->
     }
 }
 
+/// [`supernova_luminosity`] in every band, in [`AlertBand::ALL`]'s order, from one evaluation of
+/// the template's terms: the same bits, band by band.
+#[must_use]
+pub(super) fn supernova_luminosities(kind: SupernovaKind, age: Years) -> [Watts; BAND_COUNT] {
+    match (Template::of(kind), LightCurve::of(kind)) {
+        (Some(template), Some(curve)) => {
+            let terms = curve.terms_at(age);
+            AlertBand::ALL.map(|band| terms.weighted(template.shares(band)))
+        }
+        _ => [Watts::ZERO; BAND_COUNT],
+    }
+}
+
 /// The peak in `band` of a supernova of `kind`: the greatest of its [`supernova_luminosity`] on
 /// the fixed grid of ages (module documentation), which is the event's flux at its brightest that
 /// a detection reports. Zero for a core collapse that made no supernova and in radio.
@@ -613,15 +694,15 @@ const TEMPLATE_PEAKS_W: [BandShares; 6] = [
     ],
     // Type Ia: the merger, double-detonation and hydrogen-donor channels.
     [
-        2.137_328_738_186_980_3e35,
-        2.275_051_176_101_456_6e35,
-        1.408_023_994_718_728_3e35,
-        1.882_224_488_247_390_5e35,
-        1.044_409_649_543_87e35,
-        4.301_366_213_602_773e34,
-        1.850_427_899_787_021_5e34,
-        9.398_705_360_249_735e33,
-        3.645_259_412_810_431e32,
+        1.967_317_056_848_193e35,
+        2.694_086_935_191_623_3e35,
+        1.408_023_994_718_727_7e35,
+        1.530_453_140_491_149_3e35,
+        5.961_610_968_254_62e34,
+        4.301_366_213_602_771e34,
+        1.850_427_899_787_020_3e34,
+        9.398_705_360_249_73e33,
+        3.645_259_412_810_429e32,
         0.0,
         0.0,
     ],
@@ -660,29 +741,39 @@ mod tests {
 
     const V: AlertBand = AlertBand::Photometric(Band::V);
 
-    /// The share of a V magnitude's in-band power through the top hat at a bolometric correction
-    /// of zero: `F_V0` `Δλ_V` ÷ f₀ (module documentation).
-    fn v_share_at_zero_bc() -> f64 {
-        /// The V zero point, W m⁻² nm⁻¹ (Bessell, Castelli and Plez 1998, Table A2).
-        const V_ZERO_POINT: f64 = 3.631e-11;
+    /// The share of a magnitude's in-band power through `band`'s top hat at a bolometric
+    /// correction of zero: `F_0` Δλ ÷ f₀ (module documentation), U to I.
+    fn share_at_zero_bc(band: Band) -> f64 {
+        /// The zero points of U, B, V, R and I, W m⁻² nm⁻¹ (Bessell, Castelli and Plez 1998,
+        /// Table A2: 417.5, 632, 363.1, 217.7 and 112.6 × 10⁻¹¹ erg cm⁻² s⁻¹ Å⁻¹).
+        const ZERO_POINTS: [f64; 5] = [4.175e-11, 6.32e-11, 3.631e-11, 2.177e-11, 1.126e-11];
         /// The zero point of apparent bolometric magnitude, W m⁻² (IAU 2015 Resolution B2).
         const BOLOMETRIC_ZERO_POINT: f64 = 2.518_021_002e-8;
-        V_ZERO_POINT * TOP_HAT_FWHM_UM[2] * 1e3 / BOLOMETRIC_ZERO_POINT
+        let i = AlertBand::Photometric(band).index();
+        ZERO_POINTS[i] * TOP_HAT_FWHM_UM[i] * 1e3 / BOLOMETRIC_ZERO_POINT
     }
 
     /// The spectra's shares recomputed from their sources.
     fn recomputed_spectra() -> [BandShares; 5] {
         SPECTRUM_SOURCES.map(|source| {
-            let blackbody =
-                AlertBand::ALL.map(|band| band_share(Kelvin::new(source.temperature), band));
-            match source.bc_v {
-                None => blackbody,
-                Some(bc_v) => {
-                    let scale =
-                        v_share_at_zero_bc() * math::exp10(0.4 * bc_v) / blackbody[V.index()];
-                    blackbody.map(|share| share * scale)
-                }
+            let blackbody = AlertBand::ALL.map(|band| band_share(source.temperature, band));
+            let observed = |band: Band| {
+                source
+                    .corrections
+                    .iter()
+                    .find(|&&(at, _)| at == band)
+                    .map(|&(_, bc)| share_at_zero_bc(band) * math::exp10(0.4 * bc))
+            };
+            let Some(v) = observed(Band::V) else {
+                assert!(source.corrections.is_empty(), "V sets the colours");
+                return blackbody;
+            };
+            let scale = v / blackbody[V.index()];
+            let mut shares = blackbody.map(|share| share * scale);
+            for &(band, _) in source.corrections {
+                shares[AlertBand::Photometric(band).index()] = observed(band).unwrap();
             }
+            shares
         })
     }
 
@@ -800,9 +891,9 @@ mod tests {
                     assert!((share - reference).abs() < 1e-12, "{t} K in {band:?}");
                 }
             }
-            assert_eq!(
+            assert_same_bits(
                 band_share(Kelvin::new(t), AlertBand::Photometric(Band::Radio)),
-                0.0
+                0.0,
             );
             let photometric = Band::ALL.into_iter().fold(0.0, |sum, band| {
                 sum + band_share(Kelvin::new(t), AlertBand::Photometric(band))
@@ -832,7 +923,11 @@ mod tests {
             "{most} at {at}00 K"
         );
         for nonsense in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            assert_eq!(share(nonsense, V), 0.0);
+            assert_same_bits(share(nonsense, V), 0.0);
+        }
+        // So cold that x³ overflows as well as eˣ − 1: no light, not ∞ ÷ ∞.
+        for band in AlertBand::ALL {
+            assert_same_bits(share(1e-200, band), 0.0);
         }
         assert!((kelvin_of_kev(1.0) / 1.160_45e7 - 1.0).abs() < 1e-5);
     }
@@ -848,10 +943,20 @@ mod tests {
                 assert_same_bits(a, b);
             }
         }
-        assert!((v_share_at_zero_bc() - 0.121_13).abs() < 1e-5);
+        assert!((share_at_zero_bc(Band::V) - 0.121_13).abs() < 1e-5);
         let v = |spectrum: Spectrum| SPECTRA[spectrum.index()][V.index()];
         assert!((v(Spectrum::HydrogenPlateau) - 0.137_8).abs() < 1e-4);
-        assert!((v(Spectrum::TypeIaPhotosphere) - 0.131_2).abs() < 1e-4);
+        let ia = SPECTRA[Spectrum::TypeIaPhotosphere.index()];
+        for (band, expected) in [
+            (Band::U, 0.183_3),
+            (Band::B, 0.251_1),
+            (Band::V, 0.131_2),
+            (Band::R, 0.142_7),
+            (Band::I, 0.055_6),
+        ] {
+            let share = ia[AlertBand::Photometric(band).index()];
+            assert!((share - expected).abs() < 1e-4, "{band:?}: {share}");
+        }
         assert!((v(Spectrum::WarmPhotosphere) - 0.111_8).abs() < 1e-4);
         assert!(
             (SPECTRA[Spectrum::StrippedFlash.index()][AlertBand::XRay.index()] - 0.809).abs()
@@ -859,9 +964,16 @@ mod tests {
         );
         // Pereira et al.'s figures give the Type Ia's correction: `M_bol` − M_V.
         let m_bol = -2.5 * math::log10(1.17e36 / 3.0128e28);
-        assert!((m_bol + 19.06 - SPECTRUM_SOURCES[3].bc_v.unwrap()).abs() < 5e-4);
+        assert!((m_bol - SN_2011FE_PEAK_M_BOL).abs() < 5e-4, "{m_bol}");
+        let corrections = SN_2011FE_PEAK_CORRECTIONS.map(|(_, bc)| bc);
+        for (bc, expected) in corrections
+            .into_iter()
+            .zip([0.577, 0.127, 0.087, 0.047, -0.233])
+        {
+            assert!((bc - expected).abs() < 1e-9, "{bc}");
+        }
         for spectrum in SPECTRA {
-            assert_eq!(spectrum[AlertBand::Photometric(Band::Radio).index()], 0.0);
+            assert_same_bits(spectrum[AlertBand::Photometric(Band::Radio).index()], 0.0);
             let photometric: f64 = spectrum[..Band::ALL.len()].iter().sum();
             assert!(photometric < 1.0, "{spectrum:?}");
         }
@@ -930,23 +1042,35 @@ mod tests {
                 }
             }
             for band in AlertBand::ALL {
-                assert_eq!(
-                    supernova_luminosity(kind, Years::new(-1e-3), band),
-                    Watts::ZERO
+                assert_same_bits(
+                    supernova_luminosity(kind, Years::new(-1e-3), band).value(),
+                    0.0,
                 );
             }
             let radio = AlertBand::Photometric(Band::Radio);
-            assert_eq!(
-                supernova_luminosity(kind, Years::new(0.05), radio),
-                Watts::ZERO
+            assert_same_bits(
+                supernova_luminosity(kind, Years::new(0.05), radio).value(),
+                0.0,
             );
-            assert_eq!(supernova_peak(kind, radio), Watts::ZERO);
+            assert_same_bits(supernova_peak(kind, radio).value(), 0.0);
+            for day in [0.0, 3.0, 30.0, 300.0, 3e4, 3e5] {
+                let age = Years::new(day / 365.25);
+                let all = supernova_luminosities(kind, age);
+                for (band, watts) in AlertBand::ALL.into_iter().zip(all) {
+                    assert_same_bits(watts.value(), supernova_luminosity(kind, age, band).value());
+                }
+            }
+            // No template gives light 228 years on: every term's exponential is below the
+            // smallest f64 (the one-shot walk's bound on what it must find).
+            for watts in supernova_luminosities(kind, Years::new(228.0)) {
+                assert_same_bits(watts.value(), 0.0);
+            }
         }
         let failed = SupernovaKind::CoreCollapse(SupernovaType::None);
-        assert_eq!(
-            supernova_luminosity(failed, Years::new(0.05), V),
-            Watts::ZERO
+        assert_same_bits(
+            supernova_luminosity(failed, Years::new(0.05), V).value(),
+            0.0,
         );
-        assert_eq!(supernova_peak(failed, V), Watts::ZERO);
+        assert_same_bits(supernova_peak(failed, V).value(), 0.0);
     }
 }
