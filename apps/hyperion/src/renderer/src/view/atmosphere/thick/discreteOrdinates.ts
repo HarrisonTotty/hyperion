@@ -83,9 +83,19 @@
  * the albedo's solve to the bit at the nodes, and at the user cosines to the rounding of the
  * ground's sum, taken as Σ_j R_uj I⁻_j in place of 2A Σ_j w_j μ_j I⁻_j.
  *
+ * **Thermal emission** (plan R08, R08.T18.b; Stamnes et al. 1988's emitting layers): a layer's
+ * own source (1 − ω) B(τ), its Planck radiance linear in τ through it, B(t) = b₀ + b₁t from the
+ * values at its faces, enters mode 0 alone, being isotropic. Its particular solution is
+ * I(t, μ_i) = b₀ + b₁t + b₁z_i, with (1 − (ω ÷ 2) D W) z = M1 on all 2N streams: since
+ * Σ_j w_j D(μ_i, μ_j) = 2 to the quadrature's exactness, b₀ + b₁t carries the source and z the
+ * stream's slope, z_i = μ_i ÷ (1 − ωχ₁) for a phase function of χ₁ alone. The ground emits
+ * (1 − a(μ)) B_g, a(μ) its directional albedo on the quadrature (Kirchhoff's law: 1 − A for a
+ * Lambertian ground), and nothing enters the top. At a user cosine the source is
+ * (b₀ + b₁t)(1 − ω + ω̃) + b₁ J_z(±μ_u), ω̃ the scattered constant's quadrature (ω), integrated in
+ * closed form through each layer ({@link ThermalEmission}).
+ *
  * Out of scope here (plan R08): delta-M and the Nakajima–Tanaka corrections and the optics worker
- * (R08.T14.b), thermal emission (R08.T18) and the vector mode (R08.T14.e). Pure: no state, no
- * clock, no platform API.
+ * (R08.T14.b) and the vector mode (R08.T14.e). Pure: no state, no clock, no platform API.
  */
 
 import { gaussLegendre } from "../irradianceQuadrature";
@@ -95,7 +105,9 @@ import {
   bandMatrix,
   choleskyLower,
   factorBand,
+  factorDense,
   solveBand,
+  solveDense,
   solveLower,
   solveLowerTransposed,
   symmetricEigen,
@@ -405,6 +417,26 @@ export interface DiscreteOrdinatesProblem {
   readonly streams?: number;
   /** One per beam, in `beamCosines`' order: their paths, plane-parallel when absent. */
   readonly beamPaths?: ReadonlyArray<BeamPath>;
+  /**
+   * The layers' and the ground's thermal emission (plan R08, R08.T18.b), solved as its own source
+   * beside the beams on mode 0's factorisation; none when absent.
+   */
+  readonly thermal?: ThermalEmission;
+}
+
+/**
+ * A column's thermal emission (the module's remarks, "Thermal emission"): the Planck radiance at
+ * each interface and the ground's, in one radiance unit of the caller's, which the solution's
+ * thermal field takes.
+ */
+export interface ThermalEmission {
+  /**
+   * B(τ_k) at each interface k = 0 … L from the top, finite and at least 0: linear in τ through
+   * each layer between its faces.
+   */
+  readonly interfacePlanck: ArrayLike<number>;
+  /** B_g, the ground's Planck radiance, finite and at least 0: it emits (1 − a(μ)) B_g. */
+  readonly groundPlanck: number;
 }
 
 /** One mode's intensities I^m for one beam, at every interface. */
@@ -465,6 +497,17 @@ export interface DiscreteOrdinatesSolution {
   readonly userCosines: Float64Array;
   /** One per beam cosine, in order. */
   readonly beams: ReadonlyArray<BeamSolution>;
+  /** The thermal field, of the problem's {@link ThermalEmission}; absent without one. */
+  readonly thermal?: ThermalSolution;
+}
+
+/**
+ * The thermal field (plan R08, R08.T18.b): its mode 0, the whole of it, in the emission's unit,
+ * and its fluxes, their direct beam 0.
+ */
+export interface ThermalSolution {
+  readonly mode: ModeIntensities;
+  readonly fluxes: InterfaceFluxes;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1347,7 +1390,8 @@ interface PreparedBeam {
  *   moments whose discrete scattering operator is not a contraction ({@link homogeneousSolution});
  *   or a `groundReflectance` beside an albedo other than 0, with a cosine outside (0, 1], a mode
  *   of the wrong size or not finite, or cosines that miss a node, user cosine or beam cosine above
- *   the horizontal of the solve ({@link checkGroundReflectance}, {@link groundModeTerms}).
+ *   the horizontal of the solve ({@link checkGroundReflectance}, {@link groundModeTerms}); or a
+ *   thermal emission without one Planck radiance an interface, or with one negative or not finite.
  */
 export function solveDiscreteOrdinates(
   problem: DiscreteOrdinatesProblem,
@@ -1378,7 +1422,10 @@ export function solveDiscreteOrdinates(
     interfaceDepths[p + 1] = at(interfaceDepths, p) + layer.opticalDepth;
   });
 
+  const planck =
+    problem.thermal === undefined ? undefined : checkedThermal(problem.thermal, layers);
   const perBeam: ModeIntensities[][] = beams.map(() => []);
+  let thermal: ThermalSolution | undefined;
   for (let m = 0; m <= problem.maxMode; m += 1) {
     const ground =
       groundReflectance === undefined
@@ -1388,6 +1435,10 @@ export function solveDiscreteOrdinates(
     beams.forEach((beam, b) => {
       perBeam[b]?.push(solveBeamMode(context, beam));
     });
+    if (m === 0 && planck !== undefined) {
+      const mode = solveThermalMode(context, planck.interfaces, planck.ground);
+      thermal = { mode, fluxes: thermalFluxesOf(mode, quadrature, layerCount, n) };
+    }
   }
 
   const solved = beams.map((beam, b): BeamSolution => {
@@ -1402,7 +1453,13 @@ export function solveDiscreteOrdinates(
       fluxes: fluxesOf(zeroth, beam, quadrature, layerCount, n),
     };
   });
-  return { quadrature, interfaceDepths, userCosines, beams: solved };
+  return {
+    quadrature,
+    interfaceDepths,
+    userCosines,
+    beams: solved,
+    ...(thermal === undefined ? {} : { thermal }),
+  };
 }
 
 /** A stream's direction of travel: up (+μ) or down (−μ). */
@@ -1537,8 +1594,7 @@ function solveBeamModeAt(
   beam: PreparedBeam,
   slantFactor: Float64Array,
 ): ModeIntensities {
-  const { m, quadrature, layerModes, faces, transfers, stack, nodeLegendre, userLegendre } =
-    context;
+  const { m, quadrature, layerModes, nodeLegendre, userLegendre } = context;
   const { userCosines, groundAlbedo, ground } = context;
   const n = quadrature.nodes.length;
   const span = 2 * n;
@@ -1611,6 +1667,79 @@ function solveBeamModeAt(
       (_, i) => at(reflectedBeam, i) * beam.cosine * beam.groundTransmission,
     );
   }
+  return assembledMode(
+    context,
+    {
+      top: particularTop,
+      bottom: particularBottom,
+      userUp: particularUserUp,
+      userDown: particularUserDown,
+    },
+    groundSource,
+    (quadratureDown, userUp) => {
+      if (m === 0 && groundAlbedo > 0) {
+        let flux = 0;
+        for (let j = 0; j < n; j += 1) {
+          flux +=
+            at(quadrature.weights, j) *
+            at(quadrature.nodes, j) *
+            at(quadratureDown, layerCount * n + j);
+        }
+        userUp.fill(2 * groundAlbedo * flux + groundBeam, layerCount * users);
+      }
+      if (ground !== undefined && reflectedBeam !== undefined) {
+        for (let u = 0; u < users; u += 1) {
+          let value = at(reflectedBeam, n + u) * beam.cosine * beam.groundTransmission;
+          for (let j = 0; j < n; j += 1) {
+            value += at(ground.users, u * n + j) * at(quadratureDown, layerCount * n + j);
+          }
+          userUp[layerCount * users + u] = value;
+        }
+      }
+    },
+  );
+}
+
+/** Each layer's particular solution at its faces and its user streams' share of it. */
+interface ModeParticulars {
+  /** Per layer, at its top: 2n, the upward streams then the downward. */
+  readonly top: ReadonlyArray<Float64Array>;
+  /** The same at its bottom. */
+  readonly bottom: ReadonlyArray<Float64Array>;
+  /** Per layer, its source integrated along each upward user stream to its top: U. */
+  readonly userUp: ReadonlyArray<Float64Array>;
+  /** The same along each downward user stream to its bottom. */
+  readonly userDown: ReadonlyArray<Float64Array>;
+}
+
+/**
+ * The ground's upward user intensities, row L of `userUp`, from the downward node intensities
+ * `quadratureDown` at every interface; a black ground leaves them 0.
+ */
+type GroundUserUp = (quadratureDown: Float64Array, userUp: Float64Array) => void;
+
+/**
+ * One source's mode from its particular solutions (a beam's or the thermal emission's): the stack
+ * solved, the intensities at the nodes at every interface, and those at the user cosines
+ * integrated down from the top and up from the ground.
+ */
+function assembledMode(
+  context: ModeContext,
+  particulars: ModeParticulars,
+  groundSource: Float64Array | undefined,
+  groundUserUp: GroundUserUp,
+): ModeIntensities {
+  const { m, quadrature, layerModes, faces, transfers, stack, userCosines } = context;
+  const n = quadrature.nodes.length;
+  const span = 2 * n;
+  const users = userCosines.length;
+  const layerCount = layerModes.length;
+  const {
+    top: particularTop,
+    bottom: particularBottom,
+    userUp: particularUserUp,
+    userDown: particularUserDown,
+  } = particulars;
   const coefficients = solveLayerStack(
     stack,
     layerStackRightHandSide(stack, particularTop, particularBottom, groundSource),
@@ -1652,25 +1781,7 @@ function solveBeamModeAt(
       userDown[(p + 1) * users + u] = value;
     }
   }
-  if (m === 0 && groundAlbedo > 0) {
-    let flux = 0;
-    for (let j = 0; j < n; j += 1) {
-      flux +=
-        at(quadrature.weights, j) *
-        at(quadrature.nodes, j) *
-        at(quadratureDown, layerCount * n + j);
-    }
-    userUp.fill(2 * groundAlbedo * flux + groundBeam, layerCount * users);
-  }
-  if (ground !== undefined && reflectedBeam !== undefined) {
-    for (let u = 0; u < users; u += 1) {
-      let value = at(reflectedBeam, n + u) * beam.cosine * beam.groundTransmission;
-      for (let j = 0; j < n; j += 1) {
-        value += at(ground.users, u * n + j) * at(quadratureDown, layerCount * n + j);
-      }
-      userUp[layerCount * users + u] = value;
-    }
-  }
+  groundUserUp(quadratureDown, userUp);
   for (let p = layerCount - 1; p >= 0; p -= 1) {
     const transfer = transfers[p];
     const part = particularUserUp[p];
@@ -1717,6 +1828,217 @@ function fluxesOf(
     diffuseDown[k] = 2 * Math.PI * down;
     diffuseUp[k] = 2 * Math.PI * up;
     meanIntensity[k] = mean / 2 + transmission / (4 * Math.PI);
+  }
+  return { direct, diffuseDown, diffuseUp, meanIntensity };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Thermal emission (R08.T18.b).
+
+/** A thermal emission as validated: B at each interface and the ground's. */
+interface CheckedThermal {
+  readonly interfaces: Float64Array;
+  readonly ground: number;
+}
+
+function checkedThermal(
+  thermal: ThermalEmission,
+  layers: ReadonlyArray<PreparedLayer>,
+): CheckedThermal {
+  const interfaces = Float64Array.from(thermal.interfacePlanck);
+  if (interfaces.length !== layers.length + 1) {
+    throw new RangeError(
+      `a thermal emission needs a Planck radiance an interface, ${layers.length + 1} of them, ` +
+        `not ${interfaces.length}`,
+    );
+  }
+  interfaces.forEach((b, k) => {
+    requireIn(`interface ${k}'s Planck radiance`, b, (v) => v >= 0, "finite and at least 0");
+  });
+  requireIn("groundPlanck", thermal.groundPlanck, (v) => v >= 0, "finite and at least 0");
+  return { interfaces, ground: thermal.groundPlanck };
+}
+
+/**
+ * z, the slope's share of a layer's thermal particular solution on all 2N streams, the upward
+ * then the downward: (1 − (ω ÷ 2) D W) z = M1 at mode 0 (the module's remarks, "Thermal emission").
+ */
+function thermalSlope(
+  lm: LayerMode,
+  quadrature: DoubleGaussQuadrature,
+  nodeLegendre: Float64Array,
+): Float64Array {
+  const { nodes, weights, streams } = quadrature;
+  const n = nodes.length;
+  const span = 2 * n;
+  const lmax = streams - 1;
+  const { omega, moments } = lm.layer;
+  // P_l at stream a: +μ_a for a < n, −μ_(a − n) beyond, P_l(−μ) = (−1)^l P_l(μ).
+  const legendreAt = (l: number, a: number): number =>
+    a < n ? at(nodeLegendre, l * n + a) : (l % 2 === 0 ? 1 : -1) * at(nodeLegendre, l * n + a - n);
+  const matrix = new Float64Array(span * span);
+  for (let a = 0; a < span; a += 1) {
+    for (let b = 0; b < span; b += 1) {
+      let d = 0;
+      for (let l = 0; l <= lmax; l += 1) {
+        d += (2 * l + 1) * at(moments, l) * legendreAt(l, a) * legendreAt(l, b);
+      }
+      const w = at(weights, b < n ? b : b - n);
+      matrix[a * span + b] = (a === b ? 1 : 0) - (omega / 2) * w * d;
+    }
+  }
+  const z = Float64Array.from({ length: span }, (_, a) =>
+    a < n ? at(nodes, a) : -at(nodes, a - n),
+  );
+  solveDense(factorDense(matrix, span), z);
+  return z;
+}
+
+/**
+ * The thermal field's mode 0 (the module's remarks, "Thermal emission"): each emitting layer's
+ * particular solution for its linear B, its source integrated along the user streams in closed form,
+ * the ground's emission (1 − a(μ)) B_g, and mode 0's stack solved once more.
+ */
+function solveThermalMode(
+  context: ModeContext,
+  planck: Float64Array,
+  groundPlanck: number,
+): ModeIntensities {
+  const { quadrature, layerModes, nodeLegendre, userLegendre, userCosines } = context;
+  const { groundAlbedo, ground, transfers } = context;
+  const n = quadrature.nodes.length;
+  const span = 2 * n;
+  const users = userCosines.length;
+  const layerCount = layerModes.length;
+  const ones = new Float64Array(n).fill(1);
+  const constantUp = new Float64Array(users);
+  const constantDown = new Float64Array(users);
+  const slopeUp = new Float64Array(users);
+  const slopeDown = new Float64Array(users);
+  const particularTop: Float64Array[] = [];
+  const particularBottom: Float64Array[] = [];
+  const particularUserUp: Float64Array[] = [];
+  const particularUserDown: Float64Array[] = [];
+  layerModes.forEach((lm, p) => {
+    const top = new Float64Array(span);
+    const bottom = new Float64Array(span);
+    const userUp = new Float64Array(users);
+    const userDown = new Float64Array(users);
+    const { omega, opticalDepth: depth } = lm.layer;
+    const b0 = at(planck, p);
+    const b1 = depth > 0 ? (at(planck, p + 1) - b0) / depth : 0;
+    // A layer that scatters all it meets emits nothing: (1 − ω) B is 0.
+    if (omega < 1 && (b0 !== 0 || b1 !== 0)) {
+      const z = thermalSlope(lm, quadrature, nodeLegendre);
+      for (let r = 0; r < span; r += 1) {
+        top[r] = b0 + b1 * at(z, r);
+        bottom[r] = b0 + b1 * depth + b1 * at(z, r);
+      }
+      // The source at the user cosines: (b₀ + b₁t)(1 − ω + ω̃) + b₁ J_z, ω̃ the constant's.
+      userSource(lm, quadrature, nodeLegendre, userLegendre, ones, ones, constantUp, constantDown);
+      userSource(
+        lm,
+        quadrature,
+        nodeLegendre,
+        userLegendre,
+        z.subarray(0, n),
+        z.subarray(n),
+        slopeUp,
+        slopeDown,
+      );
+      const transfer = transfers[p];
+      if (transfer === undefined) {
+        throw new Error(`layer ${p} has no user-angle transfer`);
+      }
+      for (let u = 0; u < users; u += 1) {
+        const mu = at(userCosines, u);
+        const e = at(transfer.attenuation, u);
+        const passed = -expm1(-depth / mu);
+        const kUp = 1 - omega + at(constantUp, u);
+        const kDown = 1 - omega + at(constantDown, u);
+        // ∫₀^Δ (a + ct) e^(−t ÷ μ) dt ÷ μ up to the top, and ∫₀^Δ (a + ct) e^(−(Δ − t) ÷ μ) dt ÷ μ
+        // down to the bottom.
+        userUp[u] =
+          (kUp * b0 + b1 * at(slopeUp, u)) * passed + kUp * b1 * (mu * passed - depth * e);
+        userDown[u] =
+          (kDown * b0 + b1 * at(slopeDown, u)) * passed + kDown * b1 * (depth - mu * passed);
+      }
+    }
+    particularTop.push(top);
+    particularBottom.push(bottom);
+    particularUserUp.push(userUp);
+    particularUserDown.push(userDown);
+  });
+  const particulars: ModeParticulars = {
+    top: particularTop,
+    bottom: particularBottom,
+    userUp: particularUserUp,
+    userDown: particularUserDown,
+  };
+  // The ground emits (1 − a(μ)) B_g, a(μ) its directional albedo on the quadrature: Σ_j R_ij.
+  const groundNodes = ground?.nodes;
+  const emissionAt = (row: Float64Array | undefined, i: number): number => {
+    if (row === undefined) {
+      return (1 - groundAlbedo) * groundPlanck;
+    }
+    let albedo = 0;
+    for (let j = 0; j < n; j += 1) {
+      albedo += at(row, i * n + j);
+    }
+    return (1 - albedo) * groundPlanck;
+  };
+  const groundSource =
+    groundPlanck > 0
+      ? Float64Array.from({ length: n }, (_, i) => emissionAt(groundNodes, i))
+      : undefined;
+  return assembledMode(context, particulars, groundSource, (quadratureDown, userUp) => {
+    const downAt = (j: number): number => at(quadratureDown, layerCount * n + j);
+    for (let u = 0; u < users; u += 1) {
+      let value: number;
+      if (ground === undefined) {
+        let flux = 0;
+        for (let j = 0; j < n; j += 1) {
+          flux += at(quadrature.weights, j) * at(quadrature.nodes, j) * downAt(j);
+        }
+        value = 2 * groundAlbedo * flux + (1 - groundAlbedo) * groundPlanck;
+      } else {
+        value = emissionAt(ground.users, u);
+        for (let j = 0; j < n; j += 1) {
+          value += at(ground.users, u * n + j) * downAt(j);
+        }
+      }
+      userUp[layerCount * users + u] = value;
+    }
+  });
+}
+
+/** The thermal field's fluxes and mean intensity at every interface: no direct beam. */
+function thermalFluxesOf(
+  mode: ModeIntensities,
+  quadrature: DoubleGaussQuadrature,
+  layerCount: number,
+  n: number,
+): InterfaceFluxes {
+  const direct = new Float64Array(layerCount + 1);
+  const diffuseDown = new Float64Array(layerCount + 1);
+  const diffuseUp = new Float64Array(layerCount + 1);
+  const meanIntensity = new Float64Array(layerCount + 1);
+  for (let k = 0; k <= layerCount; k += 1) {
+    let down = 0;
+    let up = 0;
+    let mean = 0;
+    for (let i = 0; i < n; i += 1) {
+      const w = at(quadrature.weights, i);
+      const mu = at(quadrature.nodes, i);
+      const iUp = at(mode.quadratureUp, k * n + i);
+      const iDown = at(mode.quadratureDown, k * n + i);
+      down += w * mu * iDown;
+      up += w * mu * iUp;
+      mean += w * (iUp + iDown);
+    }
+    diffuseDown[k] = 2 * Math.PI * down;
+    diffuseUp[k] = 2 * Math.PI * up;
+    meanIntensity[k] = mean / 2;
   }
   return { direct, diffuseDown, diffuseUp, meanIntensity };
 }
