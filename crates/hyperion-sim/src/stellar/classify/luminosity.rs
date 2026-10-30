@@ -1,12 +1,15 @@
 //! A living star's luminosity class, and the temperature scale against which each class's
 //! subtype is read (plan 06, P06.T23.b).
 //!
-//! **The class.** Straižys and Kuriliene (1981; [`sk81`](super::sk81)) give, for every spectral
-//! type from O5 to M6 and every class from V to Ia, the effective temperature, the bolometric
-//! magnitude and the surface gravity. A boundary between two classes joins, type by type, the
-//! points halfway between them in (log T<sub>eff</sub>, value), linear in log T<sub>eff</sub>
-//! between types and held beyond the table's hottest and coolest; a star is compared with the
-//! boundary at its own temperature.
+//! **The class.** Straižys and Kuriliene (1981, Astrophysics and Space Science 80, 353) give, for
+//! every spectral type from O5 to M6 and every class from V to Ia, the effective temperature (their
+//! Table III), the bolometric magnitude (Table IV) and the surface gravity (Table VII). A boundary
+//! between two classes joins, type by type, the points halfway between them in (log
+//! T<sub>eff</sub>, value), linear in log T<sub>eff</sub> between types and held beyond the
+//! table's hottest and coolest; a star is compared with the boundary at its own temperature. The
+//! boundaries are the fitted table [`class_boundaries`](crate::tables::class_boundaries), which `hyperion-fit`'s `class_boundaries`
+//! task draws from the paper's tables; the tables themselves are not committed (P06.T23.b's
+//! licence fix, decision-r08-licences).
 //!
 //! - **Gravity** separates the dwarfs (V), the subgiants (IV) and the rest, at the V/IV and
 //!   IV/III boundaries of the paper's Table VII. It is how spectra tell a subgiant from a dwarf,
@@ -37,10 +40,12 @@
 //! supergiant's. Giants and supergiants are typed no later than M9.5.
 
 use super::scales::{self, Node};
-use super::sk81::{Column, SK81, SOLAR_M_BOL_MAG, Sk81Row};
 use super::{SpectralCode, pm13};
 use crate::math;
 use crate::stellar::{Composition, Phase, StarState};
+use crate::tables::class_boundaries::{
+    IAB_IA_M_BOL, IB_IAB_M_BOL, II_IB_M_BOL, III_II_M_BOL, IV_III_LOG_G, V_IV_LOG_G,
+};
 use crate::units::Dex;
 use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
 
@@ -137,6 +142,11 @@ impl LuminosityClass {
     }
 }
 
+/// The Sun's bolometric magnitude on which [`class_boundaries`](crate::tables::class_boundaries)' magnitudes stand, mag:
+/// Straižys and Kuriliene's (1981, section 3) zero point M<sub>bol</sub>☉ = +4.72, as Torres
+/// (2010, AJ 140, 1158, section 4) also reads it.
+const SOLAR_M_BOL_MAG: f64 = 4.72;
+
 /// \[Fe/H\] below which a main-sequence dwarf is a subdwarf, dex: the plan's threshold
 /// (P06.T23.c).
 const SUBDWARF_FE_H: f64 = -1.0;
@@ -183,12 +193,8 @@ pub(crate) fn classify_living(
 #[must_use]
 fn luminosity_class(state: &StarState, log_teff: f64, log_l: f64, fe_h: Dex) -> LuminosityClass {
     let by_gravity = match state.surface_gravity() {
-        Some(g) if g.value() >= boundary(log_teff, log_g_of, Column::Dwarf, Column::Subgiant) => {
-            LuminosityClass::Dwarf
-        }
-        Some(g) if g.value() >= boundary(log_teff, log_g_of, Column::Subgiant, Column::Giant) => {
-            LuminosityClass::Subgiant
-        }
+        Some(g) if g.value() >= boundary(log_teff, &V_IV_LOG_G) => LuminosityClass::Dwarf,
+        Some(g) if g.value() >= boundary(log_teff, &IV_III_LOG_G) => LuminosityClass::Subgiant,
         Some(_) | None => by_luminosity(log_teff, log_l),
     };
     let below_giant = matches!(
@@ -244,31 +250,15 @@ const fn is_giant_phase(phase: Phase) -> bool {
 /// the III/II, II/Ib, Ib/Iab and Iab/Ia boundaries of Table IV at its temperature.
 #[must_use]
 fn by_luminosity(log_teff: f64, log_l: f64) -> LuminosityClass {
-    let steps = [
-        (
-            Column::Giant,
-            Column::BrightGiant,
-            LuminosityClass::BrightGiant,
-        ),
-        (
-            Column::BrightGiant,
-            Column::SupergiantIb,
-            LuminosityClass::LessLuminousSupergiant,
-        ),
-        (
-            Column::SupergiantIb,
-            Column::SupergiantIab,
-            LuminosityClass::Supergiant,
-        ),
-        (
-            Column::SupergiantIab,
-            Column::SupergiantIa,
-            LuminosityClass::LuminousSupergiant,
-        ),
+    let steps: [(&[(f64, f64)], LuminosityClass); 4] = [
+        (&III_II_M_BOL, LuminosityClass::BrightGiant),
+        (&II_IB_M_BOL, LuminosityClass::LessLuminousSupergiant),
+        (&IB_IAB_M_BOL, LuminosityClass::Supergiant),
+        (&IAB_IA_M_BOL, LuminosityClass::LuminousSupergiant),
     ];
     let mut class = LuminosityClass::Giant;
-    for (fainter, brighter, next) in steps {
-        let m_bol = boundary(log_teff, m_bol_of, fainter, brighter);
+    for (nodes, next) in steps {
+        let m_bol = boundary(log_teff, nodes);
         let log_l_boundary = (SOLAR_M_BOL_MAG - m_bol) / 2.5;
         if log_l > log_l_boundary {
             class = next;
@@ -290,38 +280,13 @@ fn is_hypergiant(log_teff: f64, log_l: f64) -> bool {
     log_l > HYPERGIANT_LOG_L && log_l > log_l_hd - HYPERGIANT_DEPTH_DEX
 }
 
-/// Table VII's gravities of a row.
+/// A boundary of [`class_boundaries`](crate::tables::class_boundaries) at `log_teff`: linear in log T<sub>eff</sub> between its
+/// `nodes` (log T<sub>eff</sub>, value), which fall strictly in temperature (a test checks), and
+/// held beyond the first and the last.
 #[must_use]
-fn log_g_of(row: &Sk81Row) -> &[Option<f64>; 7] {
-    &row.log_g
-}
-
-/// Table IV's bolometric magnitudes of a row.
-#[must_use]
-fn m_bol_of(row: &Sk81Row) -> &[Option<f64>; 7] {
-    &row.m_bol
-}
-
-/// The boundary between classes `a` and `b` of one of the paper's tables at `log_teff`.
-///
-/// At every spectral type that gives both classes the boundary passes halfway between their points
-/// (log T<sub>eff</sub>, value); it is linear in log T<sub>eff</sub> between those types and held
-/// beyond the first and the last. The points' temperatures fall strictly down the table for every
-/// boundary used here, which a test checks.
-#[must_use]
-fn boundary(log_teff: f64, table: fn(&Sk81Row) -> &[Option<f64>; 7], a: Column, b: Column) -> f64 {
+fn boundary(log_teff: f64, nodes: &[(f64, f64)]) -> f64 {
     let mut previous: Option<(f64, f64)> = None;
-    for row in &SK81 {
-        let values = table(row);
-        let (Some(ya), Some(yb), Some(xa), Some(xb)) = (
-            values[a.index()],
-            values[b.index()],
-            row.column_log_teff(a),
-            row.column_log_teff(b),
-        ) else {
-            continue;
-        };
-        let (x, y) = (f64::midpoint(xa, xb), f64::midpoint(ya, yb));
+    for &(x, y) in nodes {
         if log_teff >= x {
             return match previous {
                 None => y,
@@ -381,53 +346,22 @@ mod tests {
     use super::*;
     use crate::units::HeliumExcess;
 
-    const GRAVITY_BOUNDARIES: [(Column, Column); 2] = [
-        (Column::Dwarf, Column::Subgiant),
-        (Column::Subgiant, Column::Giant),
-    ];
+    const GRAVITY_BOUNDARIES: [&[(f64, f64)]; 2] = [&V_IV_LOG_G, &IV_III_LOG_G];
 
-    const LUMINOSITY_BOUNDARIES: [(Column, Column); 4] = [
-        (Column::Giant, Column::BrightGiant),
-        (Column::BrightGiant, Column::SupergiantIb),
-        (Column::SupergiantIb, Column::SupergiantIab),
-        (Column::SupergiantIab, Column::SupergiantIa),
-    ];
-
-    /// One of the paper's tables, and the boundaries drawn from it.
-    type Boundaries = (
-        fn(&Sk81Row) -> &[Option<f64>; 7],
-        &'static [(Column, Column)],
-    );
+    const LUMINOSITY_BOUNDARIES: [&[(f64, f64)]; 4] =
+        [&III_II_M_BOL, &II_IB_M_BOL, &IB_IAB_M_BOL, &IAB_IA_M_BOL];
 
     fn class_of(state: &StarState) -> LuminosityClass {
         classify_living(state, &Composition::SOLAR).1
     }
 
-    /// The points of every boundary fall strictly in log T<sub>eff</sub> down the table, which the
-    /// interpolation assumes.
+    /// The nodes of every boundary fall strictly in log T<sub>eff</sub>, which the interpolation
+    /// assumes, and each spans at least 28 of the paper's types.
     #[test]
     fn every_boundarys_points_fall_in_temperature() {
-        let tables: [Boundaries; 2] = [
-            (log_g_of, &GRAVITY_BOUNDARIES),
-            (m_bol_of, &LUMINOSITY_BOUNDARIES),
-        ];
-        for (table, pairs) in tables {
-            for &(a, b) in pairs {
-                let xs: Vec<f64> = SK81
-                    .iter()
-                    .filter_map(|row| {
-                        let values = table(row);
-                        values[a.index()]?;
-                        values[b.index()]?;
-                        Some(f64::midpoint(
-                            row.column_log_teff(a)?,
-                            row.column_log_teff(b)?,
-                        ))
-                    })
-                    .collect();
-                assert!(xs.len() >= 28, "{a:?}/{b:?}: {}", xs.len());
-                assert!(xs.windows(2).all(|w| w[0] > w[1]), "{a:?}/{b:?}: {xs:?}");
-            }
+        for nodes in GRAVITY_BOUNDARIES.into_iter().chain(LUMINOSITY_BOUNDARIES) {
+            assert!(nodes.len() >= 28, "{}", nodes.len());
+            assert!(nodes.windows(2).all(|w| w[0].0 > w[1].0), "{nodes:?}");
         }
     }
 
@@ -437,12 +371,12 @@ mod tests {
     fn the_boundaries_never_cross() {
         let mut log_t = 3.3;
         while log_t < 4.9 {
-            let v_iv = boundary(log_t, log_g_of, Column::Dwarf, Column::Subgiant);
-            let iv_iii = boundary(log_t, log_g_of, Column::Subgiant, Column::Giant);
+            let v_iv = boundary(log_t, &V_IV_LOG_G);
+            let iv_iii = boundary(log_t, &IV_III_LOG_G);
             assert!(v_iv > iv_iii, "log T {log_t}: {v_iv} ≤ {iv_iii}");
             let magnitudes: Vec<f64> = LUMINOSITY_BOUNDARIES
                 .iter()
-                .map(|&(a, b)| boundary(log_t, m_bol_of, a, b))
+                .map(|nodes| boundary(log_t, nodes))
                 .collect();
             assert!(
                 magnitudes.windows(2).all(|w| w[0] > w[1]),
@@ -452,17 +386,18 @@ mod tests {
         }
     }
 
-    /// A boundary passes through the midpoint at each type the table gives both classes, and is
-    /// held beyond the table.
+    /// A boundary passes through the midpoint at each type the paper gives both classes, and is
+    /// held beyond the table. The values asserted are the paper's (Table VII).
     #[test]
     fn a_boundary_passes_halfway_between_its_classes() {
         // A0: V 4.07 and IV 3.91 at log T 3.982.
-        let at_a0 = boundary(3.982, log_g_of, Column::Dwarf, Column::Subgiant);
+        let at_a0 = boundary(3.982, &V_IV_LOG_G);
         assert!((at_a0 - 3.99).abs() < 1e-12, "{at_a0}");
-        // Held above O5 and below K1, the last type with a class IV.
-        let hot = boundary(4.9, log_g_of, Column::Dwarf, Column::Subgiant);
+        // Held above O5 (V 3.9, IV 3.86) and below K1, the last type with a class IV (IV 3.55,
+        // III 2.78).
+        let hot = boundary(4.9, &V_IV_LOG_G);
         assert!((hot - 3.88).abs() < 1e-12, "{hot}");
-        let cool = boundary(3.4, log_g_of, Column::Subgiant, Column::Giant);
+        let cool = boundary(3.4, &IV_III_LOG_G);
         assert!((cool - f64::midpoint(3.55, 2.78)).abs() < 1e-12, "{cool}");
     }
 

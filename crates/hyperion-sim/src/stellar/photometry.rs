@@ -888,8 +888,8 @@ mod tests {
     }
 
     /// P06.T43.a's M6 III case of the module's note, before and after: at the class III
-    /// temperatures and gravities of Straižys and Kuriliene (1981, Tables III and VII, as
-    /// `classify::sk81` transcribes them: log₁₀ T<sub>eff</sub> 3.562, 3.531 and 3.512, log g 1.12,
+    /// temperatures and gravities of Straižys and Kuriliene (1981, Tables III and VII, as P06.T23.b
+    /// read them from the paper's scan: log₁₀ T<sub>eff</sub> 3.562, 3.531 and 3.512, log g 1.12,
     /// 0.76 and 0.52), the dwarf table's correction (before) and the giants' (after), mag, so that
     /// M3, M5 and M6 giants read 0.16, 0.77 and 1.34 mag fainter in V; and Worthey and Lee's own
     /// giant-minus-dwarf difference at log g 4.5, 0.27, 0.95 and 1.59 mag, against the note's

@@ -1,0 +1,18 @@
+# Straižys and Kuriliene's (1981) calibration of MK types, from which the luminosity classes'
+# boundaries are drawn (plan 06, P06.T23.b). A fetched dataset: Springer holds the article and
+# states no licence for its tables, so only this file is committed, and the transcription is read
+# from `crates/hyperion-fit/data/cache/straizys_kuriliene_1981/`, which git ignores. Only the
+# boundaries derived from it are committed, in `crates/hyperion-sim/src/tables/class_boundaries.rs`
+# (`run class_boundaries`). The scan is not machine-readable: the file is P06.T23.b's transcription
+# of it, one row per type, in the column order its header gives.
+dataset = "straizys_kuriliene_1981"
+class = "fetched"
+citation = "Straižys and Kuriliene (1981), Astrophysics and Space Science 80, 353-368, DOI 10.1007/BF00652936: Tables III (log T_eff for V, III and I-II), IV (M_bol, M_bol,sun = +4.72), VI (log M) and VII (log g), O5 to M6"
+url = "https://articles.adsabs.harvard.edu/pdf/1981Ap&SS..80..353S"
+retrieved = "2026-09-23"
+release = "P06.T23.b's transcription of the ADS scan's Tables III, IV, VI and VII, written as this text file on 2026-10-30"
+licence = "none stated; Springer (then D. Reidel) holds the article, and its permissions page (read 2026-10-30 as archived 2026-08-28) licenses reuse of article content and says nothing of the data. The values are the authors' calibration, facts with the citation: only the boundaries derived from them are committed (decision-r08-licences)"
+
+[[files]]
+name = "sk81_tables.txt"
+sha256 = "b44dd1611987e2d3af568129e11941faafc48a70b72f00b00a7a562a899c252f"

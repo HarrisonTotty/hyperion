@@ -28,7 +28,6 @@ mod luminosity;
 mod peculiar;
 pub(crate) mod pm13;
 mod scales;
-mod sk81;
 
 use core::fmt;
 

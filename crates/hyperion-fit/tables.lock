@@ -85,6 +85,17 @@ provisional = false
 acceptance = "s = 0.9201 (1σ 0.8507–0.9927; under the IFMRs of Cummings 2018 0.8957, El-Badry 2018 0.9352); over primaries below 8 M☉: band shares A–D 67.7, 12.0, 16.8, 3.45% against 66.5, 12.8, 17.8, 2.85%, misses of -0.73, +1.19, +1.15, -1.53 Poisson errors, χ² 5.62 on 2 dof (passes); all stars below 0.5 M☉ 69.84% in 67.8–71.0% (passes); local mid-plane mean per system in stars and white dwarfs 0.5517 M☉ in 0.54–0.60 (passes). Reported: the all-inclusive local mean 0.6115 M☉, of which neutron stars and black holes 0.0530; the primaries' mean present mass 0.4027 M☉ against the census's 0.437"
 
 [[table]]
+name = "class_boundaries"
+path = "class_boundaries.rs"
+task = "class_boundaries"
+revision = 0
+inputs_sha256 = "5aed79e7cd8430e16aa019d0e3a2e2f1374c82eadd0e3345fc23192bd8574e85"
+body_sha256 = "0e15d474bb5a8758a5834a4b4d9012e4633c5f4621f032fad210cec8ff4626e8"
+since_generator_version = 24
+provisional = false
+acceptance = "Table VII's 257 gravities follow from Tables III, IV and VI by the paper's formula within 0.044 dex (at most 0.045); the six boundaries' 30, 28, 37, 39, 39, 39 nodes each fall strictly in temperature"
+
+[[table]]
 name = "cluster_bh"
 path = "cluster_dynamics.rs"
 task = "cluster_bh"

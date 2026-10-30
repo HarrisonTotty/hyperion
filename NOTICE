@@ -969,6 +969,14 @@ ruled 2026-10-09 and 2026-10-10).
   crates/hyperion-sim/src/stellar/photometry/wl11.rs (galaxy plan 6, P06.T43.a). Not taken from
   CDS's copy of the same table, which CDS offers under CC BY-NC.
 
+- The luminosity classes' boundaries: V. Straižys and G. Kuriliene, "Fundamental stellar
+  parameters derived from the evolutionary tracks", Astrophys. Space Sci. 80 (1981) 353-368, DOI:
+  10.1007/BF00652936, Tables III, IV and VII (with Table VI to check their transcription). Reduced
+  to the six boundaries between classes, V/IV and IV/III in log g and III/II to Iab/Ia in M_bol,
+  each the points halfway between two classes in (log T_eff, value) at the spectral types that give
+  both, in crates/hyperion-sim/src/tables/class_boundaries.rs (galaxy plan 6, P06.T23.b). The
+  tables themselves are not committed.
+
 ================================================================================
 Test data (not shipped)
 

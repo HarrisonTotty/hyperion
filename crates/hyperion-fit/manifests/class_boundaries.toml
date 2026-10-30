@@ -1,0 +1,7 @@
+# The boundaries between the luminosity classes (plan 06, P06.T23.b), drawn from Straižys and
+# Kuriliene's (1981) Tables III, IV and VII, the transcription checked against their Table VI. No
+# parameters.
+task = "class_boundaries"
+datasets = ["straizys_kuriliene_1981"]
+
+[params]

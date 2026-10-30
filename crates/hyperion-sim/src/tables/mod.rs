@@ -34,6 +34,7 @@ pub mod binary_pair_light_d;
 pub mod binary_pair_light_e;
 pub mod binary_reach;
 pub mod chabrier;
+pub mod class_boundaries;
 pub mod cluster_dynamics;
 pub mod cluster_retention;
 // The eight `condensate_extinction` tables are written whole by `hyperion-fit`, so their one lint
@@ -167,6 +168,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "chabrier",
         revision: 1,
         since_generator_version: 14,
+        provisional: false,
+    },
+    TableInfo {
+        name: "class_boundaries",
+        revision: 0,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {
