@@ -1271,10 +1271,14 @@ fn assert_same_correction(name: &str, a: &ebm::MeanCorrection, b: &ebm::MeanCorr
         assert_same_bits(p.u, q.u);
         assert_same_bits(p.mean_k, q.mean_k);
         assert_eq!(
-            (p.orbits, p.jumps, p.converged, p.searched),
-            (q.orbits, q.jumps, q.converged, q.searched),
+            (p.orbits, p.jumps, p.converged, p.searched, p.held),
+            (q.orbits, q.jumps, q.converged, q.searched, q.held),
             "{name}"
         );
+        assert_eq!(p.drift_k.is_some(), q.drift_k.is_some(), "{name}");
+        if let (Some(a), Some(b)) = (p.drift_k, q.drift_k) {
+            assert_same_bits(a, b);
+        }
     }
 }
 
@@ -2184,6 +2188,7 @@ fn a_locked_world_with_obliquity_has_twelve_months_that_differ() {
 
 mod climatology;
 mod cold_traps;
+mod convergence;
 mod earth_land;
 mod gpcp_boxes;
 mod hydrology;

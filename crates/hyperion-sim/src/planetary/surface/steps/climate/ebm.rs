@@ -318,6 +318,49 @@ pub(super) const JUMP_AGREEMENT: f64 = 0.05;
 /// 40).
 pub(super) const MAX_REJECTS: u32 = 2;
 
+/// The least ratio of G1's surface mean's change over an orbit to the one before, in each of two
+/// successive orbits, at which its drift stop ends it ([`drifting`]): 0.9 (`Adopted`, the lane's
+/// lean, 2026-10-30). A mode shrinking by 0.9 an orbit needs 22 orbits to fall tenfold, and at a
+/// change of [`DRIFT_K`] its remainder is 0.45 K, nine times its probe's bound: such a G1 measures d
+/// late or not at all. Below the extrapolation's top ratio, 0.97 ([`JUMP_RATIO_RANGE`]), a jump
+/// might still speed such a mode, but where the mean drifted so the small Earth's G1 had two jumps
+/// rejected in its first seven orbits, and the held G2 settles in 11–13 (plan 09's R09.T13.i
+/// records, "The G runs hold their branch"). A ratio this high marks a fold's slowing, or an orbit
+/// short against the sea's relaxation time C ÷ B (about 2–3.7 years on an Earth, so that r =
+/// e^(−P ÷ τ) ≥ 0.9 for an orbit of about 80–140 days), where the held G2 serves too. On the small
+/// Earth (`reference::small_earth`) under the reference seed G1
+/// fell 0.25 K an orbit at a ratio of 1.00 and, marched on, ran to a snowball of 206.9 K in about
+/// 175 orbits; under seed 9 it fell 0.10 K an orbit at 0.95–1.01.
+pub(super) const DRIFT_RATIO: f64 = 0.9;
+
+/// The least change of G1's surface mean over an orbit at which its drift stop reads it, K:
+/// [`PROBE_STOP_K`]'s figure (`Adopted`, the lane's lean, 2026-10-30), the precision d is measured
+/// to; it moves with that bound. The reference Earth's G1 changes by at most 0.031 K an orbit, so
+/// its run is the ruled one.
+pub(super) const DRIFT_K: f64 = PROBE_STOP_K;
+
+/// The change of u, dimensionless, between the two zonal runs whose drifts measure the drift's
+/// sensitivity to u ([`EnergyBalance::drift_sensitivity`]): 0.01 (`Adopted`, the lane's lean,
+/// 2026-10-30), a 1% cut of the emission, about 2.4 W m⁻² on an Earth and 4 K of the small Earth's
+/// zonal mean near its fold. Over 0 to 0.01 the small Earth's drifts were linear in u to
+/// a few per cent under five seeds, at 43–52 K an orbit per unit of u on the geographic grid and
+/// 44–50 on the zonal one.
+pub(super) const SENSITIVITY_STEP: f64 = 0.01;
+
+/// The share of its surface mean's miss of T\* that the held run's u aims to close in each orbit
+/// ([`EnergyBalance::held`]): 0.2 (`Adopted`, the lane's lean, 2026-10-30). Over seven seeds of the
+/// small Earth whose G1 drifted, with [`HOLD_DRIFT_SHARE`], each held run stopped in 11–13 orbits within
+/// 0.02 K of T\*; at 0.3 with all of the drift cancelled, in 10–25, ringing, and at 0.5 it rang for
+/// 30 orbits on the reference seed.
+pub(super) const HOLD_GAIN: f64 = 0.2;
+
+/// The share of its drift that the held run's u aims to cancel in each orbit
+/// ([`EnergyBalance::held`]): 0.6 (`Adopted`, the lane's lean, 2026-10-30), tuned with
+/// [`HOLD_GAIN`], whose figures it shares. A step of u moves the next orbit's mean at once by only
+/// part of the drift's sensitivity (31 against 50 K per unit of u on the small Earth), the rest
+/// arriving over the orbits after, so that cancelling the whole drift at once overshoots.
+pub(super) const HOLD_DRIFT_SHARE: f64 = 0.6;
+
 /// The bound of G1's probe stop on its surface mean's remainder, K: 0.05 (`Adopted`,
 /// decision-r09-t13i's §2.4 follow-up 8 §1). G1 measures d and G2's start, not the climate, so it
 /// needs only d's precision: half the climate's bound, so that d's error (at most 0.05 K, moving
@@ -537,6 +580,24 @@ fn settled_probe(
     MeanProbe::of(orbits, (mean_k, change_k), ratios, ratio)
 }
 
+/// Whether G1's drift stop ends its run after an orbit, `fresh` orbits since its start or its last
+/// jump that stood, over which its surface mean changed by `change_k` after the fresh changes
+/// `earlier`, K (the lane's lean, 2026-10-30): after at least [`PROBE_FRESH_ORBITS`] fresh orbits,
+/// where the mean's last two ratios are each at least [`DRIFT_RATIO`] and its change at least
+/// [`DRIFT_K`]. Such a G1 is not settling at a rate its probe can read before [`MAX_ORBITS`]: its u
+/// lies past its branch's fold, or near it, where the seasonal climate slows critically.
+#[must_use]
+fn drifting(fresh: u32, change_k: f64, earlier: [Option<f64>; 2]) -> bool {
+    let Some([rho, rho_before]) = mean_ratios(change_k, earlier) else {
+        return false;
+    };
+    // By comparison, so that a ratio or a change that is not a number never ends it.
+    fresh >= PROBE_FRESH_ORBITS
+        && rho >= DRIFT_RATIO
+        && rho_before >= DRIFT_RATIO
+        && change_k.abs() >= DRIFT_K
+}
+
 /// A seasonal run's stop (decision-r09-t13i §2.4 and its §2.4 follow-ups 4 and 8).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Stop {
@@ -549,6 +610,9 @@ struct Stop {
     /// G1's probe stop's bound on its surface mean's remainder, K ([`probe_end`]), where the run is
     /// G1; `None` for every other run.
     probe_k: Option<f64>,
+    /// Whether its drift stop ends it ([`drifting`]) on a grid of more than one column: G1's, on the
+    /// whole grid (the lane's lean, 2026-10-30).
+    drift_ends: bool,
 }
 
 /// The climate's runs' stop: [`CONVERGENCE_K`], extrapolating.
@@ -557,12 +621,14 @@ const CLIMATE_STOP: Stop = Stop {
     jumps: Jumps::Allowed,
     max_orbits: MAX_ORBITS,
     probe_k: None,
+    drift_ends: false,
 };
 
 /// G1's stop: the climate's, or its probe stop at [`PROBE_STOP_K`] where that comes first
-/// (decision-r09-t13i's §2.4 follow-up 8 §1).
+/// (decision-r09-t13i's §2.4 follow-up 8 §1), or its drift stop (the lane's lean, 2026-10-30).
 const G1_STOP: Stop = Stop {
     probe_k: Some(PROBE_STOP_K),
+    drift_ends: true,
     ..CLIMATE_STOP
 };
 
@@ -572,6 +638,7 @@ const SEARCH_STOP: Stop = Stop {
     jumps: Jumps::Allowed,
     max_orbits: MAX_ORBITS,
     probe_k: None,
+    drift_ends: false,
 };
 
 /// Whether a run may extrapolate its slow mode.
@@ -3322,14 +3389,18 @@ impl EnergyBalance {
     ///    the run at the answer's u from its end state broadcast to every column, with its return
     ///    temperatures, under [`G1_STOP`]: the climate's stop, or its probe stop where that comes
     ///    first, once the surface mean's own last two ratios agree and its remainder is at most
-    ///    [`PROBE_STOP_K`] ([`probe_end`], as follow-up 9 §1 amends it).
-    /// 4. **G2**, always: where G1's probe measured its mean's extrapolated limit T̂, at u = `u_Z` −
-    ///    d ÷ `S_Z`, d = T̂ − `T̄_Z` the geographic run's departure from the zonal one at the same u
-    ///    and `S_Z` the search's own slope ([`defect_slope`]), held to the fit's bracket, from G1's
-    ///    end plus the zonal predictor's change ([`g2_start`]), under the climate's stop (a defect
-    ///    correction, follow-up 6 §2, no second search); where it did not, G1 having reached its
-    ///    last orbit under neither stop, run A, at u₀ from the fit's steady state broadcast
-    ///    ([`second_run`]).
+    ///    [`PROBE_STOP_K`] ([`probe_end`], as follow-up 9 §1 amends it), or its drift stop where
+    ///    its mean does not settle at a rate the probe reads ([`drifting`]; the lane's lean,
+    ///    2026-10-30).
+    /// 4. **G2**, always: where G1's probe measured its mean's extrapolated limit T̂ on the fit's
+    ///    branch, at u = `u_Z` − d ÷ `S_Z`, d = T̂ − `T̄_Z` the geographic run's departure from the
+    ///    zonal one at the same u and `S_Z` the search's own slope ([`defect_slope`]), held to the
+    ///    fit's bracket, from G1's end plus the zonal predictor's change ([`g2_start`]), under the
+    ///    climate's stop (a defect correction, follow-up 6 §2, no second search); where it did not,
+    ///    G1 having drifted, reached its last orbit under none of its stops, or ended on another
+    ///    branch than the fit's (their ice shares more than [`SNOWBALL_FOLD_ICE_SHARE`] apart), the
+    ///    held run from the fit's steady state broadcast ([`held`](Self::held), [`second_run`]; the
+    ///    lane's lean, 2026-10-30, in place of run A at u₀, which drifts where G1 did).
     /// 5. **Kept** ([`kept_run`]): G2 where it converged; G1 where only it met the climate's stop;
     ///    the nearer where neither did, flagged.
     ///
@@ -3390,8 +3461,16 @@ impl EnergyBalance {
             None => geographic(at.u0, steady(), G1_STOP),
         };
         let (g1, g1_probe) = (first.3, first.0.mean_probe);
+        let g1_ice = ice_share(
+            self.freezing,
+            run.grid,
+            run.ground,
+            &first.0.climate.annual_k,
+        );
+        let fit_ice = ice_share(self.freezing, zonal.grid, zonal.ground, steady_k);
+        let measured = on_the_fit_s_branch(g1_probe, g1_ice, fit_ice);
         let search = zonal_search.records();
-        let (second, defect, g2_start_k) = match second_run(answer, &search, g1_probe) {
+        let (second, defect, g2_start_k) = match second_run(answer, &search, measured) {
             SecondRun::Defect {
                 answer: i,
                 defect_k,
@@ -3420,7 +3499,7 @@ impl EnergyBalance {
                     Some(start_k),
                 )
             }
-            SecondRun::RunA => (geographic(at.u0, steady(), CLIMATE_STOP), None, None),
+            SecondRun::Held => (self.held(run, zonal, &at, steady_k), None, None),
         };
         let g2 = second.3;
         let kept = kept_run(&g1, &g2, mean_k);
@@ -3470,6 +3549,184 @@ impl EnergyBalance {
         );
         let record = CorrectionRun::of(u, run, &orbited);
         (orbited, factor, radiation, record)
+    }
+
+    /// G2 where G1 measured no d (the lane's lean, 2026-10-30): the seasonal run `run` from the fit's
+    /// steady state `steady_k`, K (on the zonal grid), broadcast to every column, begun at the fit's
+    /// u₀ (`at`), its u held orbit by orbit toward T\* = `at`'s mean: after each orbit of surface
+    /// mean `T̄_n` and change `δ_n` from the orbit before, u moves by ([`HOLD_GAIN`] (T\* − `T̄_n`) −
+    /// [`HOLD_DRIFT_SHARE`] `δ_n`) ÷ k, k the drift's sensitivity to u on the zonal model `zonal`,
+    /// K an orbit per unit of u ([`drift_sensitivity`](Self::drift_sensitivity)), so that the drift
+    /// is damped and a share of the mean's miss closed; run A as ruled where k is not positive. It ends at the climate's stop on its moves ([`settled`] at
+    /// [`CONVERGENCE_K`], at least [`MIN_ORBITS`] orbits) once its mean lies within
+    /// [`PROBE_STOP_K`] of T\*, the precision G1's d is measured to, or unconverged at
+    /// [`MAX_ORBITS`] or where its state stops being finite, with no jumps. The drift's response
+    /// to u, an orbit's forcing stored in the sea, stays finite and positive at a fold, where the
+    /// slope of the steady climate in u does not, so the step stays regular where a run at a fixed
+    /// u slows critically or leaves its branch: the run, its last orbit's emission factor and
+    /// radiation, and its record at that orbit's u. k is read once, at the fit's ice cover: under
+    /// more sea ice the true response is larger, the ice's heat capacity smaller.
+    ///
+    /// It holds T\* on whichever branch has the surface mean T\*: where T\* lies in the gap of
+    /// the branch's fold, that is the middle branch between the warm fold and the snowball's, a
+    /// state that a run at its own fixed u would leave (North 1975, J. Atmos. Sci. 32, 2033; Cahalan
+    /// and North 1979, J. Atmos. Sci. 36, 1178, as the science check read them from memory). Its
+    /// convergence certifies the held run, then, not the stability of a climate at its u; the fold
+    /// guard (decision-r09-t13ge §1.4, g4) keeps only stable states, so whether such a state may be
+    /// kept awaits a ruling (plan 09's R09.T13.i records, "The G runs hold their branch").
+    ///
+    /// Why: on the small Earth under the reference seed G1 at the zonal answer's u, 0.501, and run
+    /// A at u₀ both slid toward the snowball, ending at the cap at 279.1 and 280.4 K after 40 orbits
+    /// each; the warm branch holds T\* only from about u₀ + 0.005, at 288.02 K, near its fold. Held,
+    /// the run stopped in 11–13 orbits within 0.02 K of T\* under the reference seed and the six
+    /// seeds of eleven others that failed so (pod, 16 vCPU, 2026-10-30).
+    #[must_use]
+    fn held(
+        &self,
+        run: &Seasonal<'_>,
+        zonal: &Seasonal<'_>,
+        at: &FitAt,
+        steady_k: &[f64],
+    ) -> (Orbited, f64, Radiation, CorrectionRun) {
+        let mut begun = (run.grid.broadcast(steady_k), Start::Steady);
+        let Some(sensitivity) = self.drift_sensitivity(zonal, at, steady_k, at.u0) else {
+            // Run A as ruled, where the drift does not rise with u, as no lit world's does.
+            let (x, radiation) = at.at(at.u0);
+            let orbited = self.orbits(
+                run.grid,
+                run.sunlight,
+                &radiation,
+                begun,
+                run.sea_share,
+                run.ground,
+                run.ocean,
+                CLIMATE_STOP,
+            );
+            let record = CorrectionRun::of(at.u0, run, &orbited);
+            return (orbited, x, radiation, record);
+        };
+        // One marched orbit at a time: a bound of nothing never stops a run before its last orbit.
+        let one = Stop {
+            bound_k: 0.0,
+            max_orbits: 1,
+            ..CLIMATE_STOP
+        };
+        let mut u = at.u0;
+        // The last orbit's surface mean and annual means.
+        let mut last: Option<(f64, Vec<f64>)> = None;
+        let (mut before, mut history, mut met) = (None, Vec::new(), (false, false));
+        #[cfg(test)]
+        let mut started = None;
+        let mut orbits = 0;
+        loop {
+            let (x, radiation) = at.at(u);
+            let mut orbited = self.orbits(
+                run.grid,
+                run.sunlight,
+                &radiation,
+                begun,
+                run.sea_share,
+                run.ground,
+                run.ocean,
+                one,
+            );
+            orbits += 1;
+            #[cfg(test)]
+            started.get_or_insert_with(|| orbited.started.clone());
+            let annual = &orbited.climate.annual_k;
+            let finite = annual.iter().all(|t| t.is_finite());
+            let mean = surface_mean(run.ground, run.grid, annual);
+            let drift = match &last {
+                Some((last_mean, last_annual)) if finite => {
+                    let moved = annual
+                        .iter()
+                        .zip(last_annual)
+                        .fold(0.0, |most: f64, (a, b)| {
+                            let d = (a - b).abs();
+                            if d > most { d } else { most }
+                        });
+                    history.push(moved);
+                    let enough = orbits >= MIN_ORBITS;
+                    met = (
+                        enough && settled_after(moved, before, CONVERGENCE_K, None),
+                        enough && settled_after(moved, before, SEARCH_CONVERGENCE_K, None),
+                    );
+                    before = Some(moved);
+                    mean - last_mean
+                }
+                Some(_) | None => 0.0,
+            };
+            // Its mean holds at T\* to the probe's precision, as G1's d is measured.
+            let held = met.0 && (mean - at.mean_k).abs() <= PROBE_STOP_K;
+            if held || !finite || orbits >= MAX_ORBITS {
+                orbited.climate.orbits = orbits;
+                orbited.climate.converged = held;
+                orbited.searched = held && met.1;
+                orbited.moves_k = history;
+                orbited.start = RunStart::Steady;
+                #[cfg(test)]
+                {
+                    orbited.started = started.expect("an orbit ran");
+                }
+                let record = CorrectionRun {
+                    held: true,
+                    ..CorrectionRun::of(u, run, &orbited)
+                };
+                return (orbited, x, radiation, record);
+            }
+            let step = (HOLD_GAIN * (at.mean_k - mean) - HOLD_DRIFT_SHARE * drift) / sensitivity;
+            // A step that is not finite, from a mean or a drift that is not, keeps u.
+            if step.is_finite() {
+                u = (u + step).clamp(0.0, math::ln(EMISSION_FACTOR_MAX));
+            }
+            begun = (orbited.final_k, Start::Continued(orbited.returning));
+            last = Some((mean, orbited.climate.annual_k));
+        }
+    }
+
+    /// The sensitivity to u of a run's drift, the change of its surface mean between its first two
+    /// orbits, K an orbit per unit of u (the lane's lean, 2026-10-30): on the zonal model `zonal`
+    /// from the steady state `steady_k`, K, the drift at u = `u` + [`SENSITIVITY_STEP`] less that at
+    /// `u`, over the step, the radiation at each u `at`'s; `None` where it is not positive, as it is
+    /// on a lit world, whose emission u lowers. Four orbits of the zonal model, about an eighteenth
+    /// of one on the geographic grid. On the small Earth under five seeds, 48–50 from the fit's
+    /// steady state, as on the geographic grid (43–52); a one-mode model of the sea's storage, the
+    /// emission over a year over the mean heat capacity, gives 48–50 too (the science check).
+    #[must_use]
+    fn drift_sensitivity(
+        &self,
+        zonal: &Seasonal<'_>,
+        at: &FitAt,
+        steady_k: &[f64],
+        u: f64,
+    ) -> Option<f64> {
+        // One orbit each: a bound of nothing never stops a run before its last orbit.
+        let one = Stop {
+            bound_k: 0.0,
+            max_orbits: 1,
+            ..SEARCH_STOP
+        };
+        let drift = |u: f64| {
+            let radiation = at.at(u).1;
+            let orbit = |begun: (Vec<f64>, Start)| {
+                self.orbits(
+                    zonal.grid,
+                    zonal.sunlight,
+                    &radiation,
+                    begun,
+                    zonal.sea_share,
+                    zonal.ground,
+                    zonal.ocean,
+                    one,
+                )
+            };
+            let first = orbit((steady_k.to_vec(), Start::Steady));
+            let first_mean = surface_mean(zonal.ground, zonal.grid, &first.climate.annual_k);
+            let second = orbit((first.final_k, Start::Continued(first.returning)));
+            surface_mean(zonal.ground, zonal.grid, &second.climate.annual_k) - first_mean
+        };
+        let sensitivity = (drift(u + SENSITIVITY_STEP) - drift(u)) / SENSITIVITY_STEP;
+        positive(sensitivity).then_some(sensitivity)
     }
 
     /// One probe of τ's solve: the annual-mean steady state under `insolation_w_m2` over the
@@ -3631,6 +3888,9 @@ impl EnergyBalance {
         // ended (follow-ups 8 §1 and 9 §1).
         let mut trail = MeanTrail::default();
         let mut mean_probe = None;
+        // G1's drift where its drift stop ended it, on the whole grid (the lane's lean, 2026-10-30).
+        let drift_stop = stop.drift_ends && grid.columns() > 1;
+        let mut drift_k = None;
         while orbits < stop.max_orbits {
             annual.fill(0.0);
             for month in &mut months {
@@ -3732,6 +3992,10 @@ impl EnergyBalance {
                         mean_probe = Some(probe);
                         break;
                     }
+                    if drift_stop && drifting(trail.fresh, means.1, trail.changes) {
+                        drift_k = Some(means.1);
+                        break;
+                    }
                     trail.push(means.1);
                 }
                 if let (Some(gain), Some(stored)) = (
@@ -3776,6 +4040,7 @@ impl EnergyBalance {
             rejects: extrapolation.rejects,
             start: begun,
             mean_probe,
+            drift_k,
             #[cfg(test)]
             started,
         }
@@ -3882,9 +4147,68 @@ impl EnergyBalance {
                 jumps,
                 max_orbits: orbits.unwrap_or(MAX_ORBITS),
                 probe_k: None,
+                drift_ends: false,
             },
         )
         .climate
+    }
+
+    /// The held run ([`held`](Self::held)) over [`run`](Self::run)'s set-up, of a world that is lit,
+    /// from the fit's steady state shifted by `shift_k`, K, at every point (the lane's lean,
+    /// 2026-10-30): its climate and its record.
+    #[cfg(test)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "run's own set-up, and the start's shift"
+    )]
+    #[must_use]
+    pub(super) fn held_at_fit(
+        &self,
+        grid: &ModelGrid,
+        sunlight: &Sunlight,
+        mean_k: f64,
+        sea_share: &[f64],
+        ground: Ground<'_>,
+        currents: Option<&Currents>,
+        shift_k: f64,
+    ) -> (GridClimate, CorrectionRun) {
+        let (on_grid, on_zonal) = ground.on_grids();
+        let zonal = ModelGrid::zonal();
+        let annual = grid.band_means(sunlight.annual());
+        let zonal_sea = grid.band_means(sea_share);
+        let ocean = currents.map(|currents| OceanGrid::new(grid, sea_share.to_vec(), currents));
+        let zonal_ocean =
+            currents.map(|currents| OceanGrid::new(&zonal, zonal_sea.clone(), currents));
+        let fitted = self.fit(&zonal, &annual, mean_k, on_zonal, zonal_ocean.as_ref());
+        let banded = sunlight.band_means(grid);
+        let run = Seasonal {
+            grid,
+            sunlight,
+            sea_share,
+            ground: on_grid,
+            ocean: ocean.as_ref(),
+        };
+        let zonal_run = Seasonal {
+            grid: &zonal,
+            sunlight: if grid.columns() == 1 {
+                sunlight
+            } else {
+                &banded
+            },
+            sea_share: &zonal_sea,
+            ground: on_zonal,
+            ocean: zonal_ocean.as_ref(),
+        };
+        let at = FitAt {
+            u0: math::ln(fitted.emission_factor),
+            factor: fitted.emission_factor,
+            radiation: fitted.radiation,
+            greenhouse: self.greenhouse,
+            mean_k,
+        };
+        let start: Vec<f64> = fitted.steady.t_k.iter().map(|t| t + shift_k).collect();
+        let (orbited, _, _, record) = self.held(&run, &zonal_run, &at, &start);
+        (orbited.climate, record)
     }
 
     /// The zonal search [`run`](Self::run) makes over the zonal set-up of `grid`, of a world that
@@ -4337,15 +4661,17 @@ enum SecondRun {
         /// d = T̂ − `T̄_Z`, K.
         defect_k: f64,
     },
-    /// Run A, at u₀ from the fit's steady state broadcast.
-    RunA,
+    /// The held run from the fit's steady state broadcast ([`EnergyBalance::held`]; the lane's
+    /// lean, 2026-10-30, in place of run A).
+    Held,
 }
 
 /// G2's run after the zonal search's runs `search`, its answer `answer`, and G1's probe `probe`:
 /// the defect's step, d = T̂ − `T̄_Z` with T̂ the probe's extrapolated limit, where G1 measured it
-/// and the search has an answer; run A where G1 measured no d, having reached its last orbit
-/// under neither of its stops or its state having stopped being finite, or where no zonal run's
-/// mean is finite (decision-r09-t13i's §2.4 follow-up 8 §1.4).
+/// and the search has an answer; the held run where G1 measured no d, having drifted, reached its
+/// last orbit under none of its stops, ended on another branch than the fit's or its state having
+/// stopped being finite, or where no zonal run's mean is finite (decision-r09-t13i's §2.4
+/// follow-up 8 §1.4, run A there; the lane's lean, 2026-10-30).
 #[must_use]
 fn second_run(answer: Option<usize>, search: &[SearchRun], probe: Option<MeanProbe>) -> SecondRun {
     match (answer, probe) {
@@ -4353,8 +4679,21 @@ fn second_run(answer: Option<usize>, search: &[SearchRun], probe: Option<MeanPro
             answer: i,
             defect_k: probe.limit_k - search[i].run.mean_k,
         },
-        (Some(_), None) | (None, _) => SecondRun::RunA,
+        (Some(_), None) | (None, _) => SecondRun::Held,
     }
+}
+
+/// G1's probe `probe` where G1 ended on the fit's branch, `None` otherwise (the lane's lean,
+/// 2026-10-30): where G1's annual field's ice share `g1_ice` and the fit's steady state's
+/// `fit_ice`, of the sphere ([`ice_share`]), differ by more than [`SNOWBALL_FOLD_ICE_SHARE`], the
+/// fold guard's measure of a snowball-class difference, G1 settled on another branch (from a zonal
+/// answer that was a snowball, under the small Earth's seed 5, at 227.0 K against T\* = 288 K) and
+/// measured no d of the fit's. It reads only a snowball-class difference: a smaller jump of the
+/// ice edge keeps the probe.
+#[must_use]
+fn on_the_fit_s_branch(probe: Option<MeanProbe>, g1_ice: f64, fit_ice: f64) -> Option<MeanProbe> {
+    // By comparison, so that a share that is not a number drops the probe.
+    probe.filter(|_| (g1_ice - fit_ice).abs() <= SNOWBALL_FOLD_ICE_SHARE)
 }
 
 /// One zonal search toward the surface mean `target_k`, K, Z(target) (decision-r09-t13i's §2.4
@@ -4862,6 +5201,12 @@ pub(super) struct CorrectionRun {
     /// Whether its last orbit met the search's stop, [`SEARCH_CONVERGENCE_K`]: the search's secant
     /// and the defect's slope read it.
     pub(super) searched: bool,
+    /// G1's surface mean's change over its last orbit, K, where its drift stop ended it
+    /// ([`drifting`]).
+    pub(super) drift_k: Option<f64>,
+    /// Whether its u was held orbit by orbit, its last orbit's u the record's: G2 where G1 measured
+    /// no d ([`EnergyBalance::held`]).
+    pub(super) held: bool,
 }
 
 impl CorrectionRun {
@@ -4877,6 +5222,8 @@ impl CorrectionRun {
             start: orbited.start,
             converged: orbited.climate.converged,
             searched: orbited.searched,
+            drift_k: orbited.drift_k,
+            held: false,
         }
     }
 }
@@ -4931,7 +5278,8 @@ pub(super) enum KeptRun {
     /// not converge and G1 met the climate's stop, or where neither converged and G1 lies nearer,
     /// or as near.
     G1,
-    /// G2, the defect's step, or run A where G1 measured no d or the search has no answer.
+    /// G2, the defect's step, or the held run where G1 measured no d or the search has no answer
+    /// ([`EnergyBalance::held`]).
     G2,
 }
 
@@ -4960,8 +5308,9 @@ pub(super) enum MeanCorrection {
         /// G1.
         g1: CorrectionRun,
         /// G1's probe at the orbit it ended: its R̄ and T̂ (decision-r09-t13i's §2.4 follow-up 8
-        /// §1); `None` where it reached its last orbit under neither of its stops, or its state
-        /// stopped being finite.
+        /// §1); `None` where it reached its last orbit under neither of its stops, its drift stop
+        /// ended it ([`drifting`]), or its state stopped being finite. d reads it only where G1
+        /// ended on the fit's branch ([`on_the_fit_s_branch`]).
         g1_probe: Option<Box<MeanProbe>>,
         /// d = T̂ − `T̄_Z`, K, and the defect step's zonal slope, where G2 took it.
         defect: Option<(f64, DefectSlope)>,
@@ -5011,9 +5360,12 @@ struct Orbited {
     /// How it began: from a steady state, or continued from a run's end.
     start: RunStart,
     /// G1's probe at the orbit its run ended, by its probe stop or the climate's; `None` for every
-    /// other run, and for a G1 that reached its last orbit under neither or whose state stopped
-    /// being finite (decision-r09-t13i's §2.4 follow-up 8 §1).
+    /// other run, and for a G1 that reached its last orbit under neither, that its drift stop ended
+    /// ([`drifting`]) or whose state stopped being finite (decision-r09-t13i's §2.4 follow-up 8 §1).
     mean_probe: Option<MeanProbe>,
+    /// G1's surface mean's change over its last orbit, K, where its drift stop ended it
+    /// ([`drifting`]); `None` otherwise.
+    drift_k: Option<f64>,
     /// The state it began from, K, and the return temperatures it began with: the search's test of
     /// its predicted starts reads them.
     #[cfg(test)]
@@ -5603,6 +5955,33 @@ pub(super) fn solve_continued(
         ground,
         currents.as_ref(),
         u,
+    )
+}
+
+/// The held run of [`solve`]'s set-up from its fit's steady state shifted by `shift_k`, K
+/// ([`EnergyBalance::held_at_fit`]).
+#[cfg(test)]
+#[must_use]
+pub(super) fn solve_held(
+    inputs: &CoarseInputs,
+    grid: &ModelGrid,
+    sea_share: &[f64],
+    step: Seconds,
+    ground: Ground<'_>,
+    ocean: OceanTransport,
+    shift_k: f64,
+) -> (GridClimate, CorrectionRun) {
+    let model = EnergyBalance::for_inputs(inputs);
+    let sunlight = Sunlight::of(inputs, grid, step);
+    let currents = currents_of(inputs, &model, ocean, Turning::Rotating);
+    model.held_at_fit(
+        grid,
+        &sunlight,
+        inputs.mean_surface_temperature().value(),
+        sea_share,
+        ground,
+        currents.as_ref(),
+        shift_k,
     )
 }
 
@@ -6688,6 +7067,56 @@ mod tests {
         assert!(settled(0.005, Some(0.02), SEARCH_CONVERGENCE_K));
     }
 
+    /// G1's drift stop (the lane's lean, 2026-10-30): after at least four fresh orbits, a surface
+    /// mean whose last two ratios are each at least 0.9 and whose change is at least 0.05 K ends
+    /// the run, falling or rising; a shrinking mean, a small change, too few orbits or too few
+    /// changes do not, nor does a change or a ratio that is not a number.
+    #[test]
+    fn the_drift_stop_reads_two_ratios_and_a_change() {
+        // The small Earth's G1 under the reference seed: about −0.25 K an orbit at a ratio of 1.
+        let falling = [Some(-0.249), Some(-0.248)];
+        assert!(drifting(4, -0.255, falling));
+        assert!(drifting(4, 0.255, [Some(0.249), Some(0.248)]));
+        // Ratios just over 0.9, and a change of 0.05 K exactly, at the edge.
+        assert!(drifting(4, -0.0905, [Some(-0.1), Some(-0.11)]));
+        assert!(drifting(4, -DRIFT_K, [Some(-DRIFT_K), Some(-DRIFT_K)]));
+        // Shrinking at 0.8 an orbit: the probe's to read.
+        assert!(!drifting(4, -0.128, [Some(-0.16), Some(-0.2)]));
+        // One ratio under 0.9.
+        assert!(!drifting(4, -0.2, [Some(-0.2), Some(-0.25)]));
+        // The reference Earth's G1: changes of 0.01–0.03 K, even at a ratio of 1.
+        assert!(!drifting(6, -0.012, [Some(-0.011), Some(-0.013)]));
+        assert!(!drifting(6, -0.012, [Some(-0.012), Some(-0.012)]));
+        assert!(!drifting(4, -0.0499, [Some(-0.0499), Some(-0.0499)]));
+        assert!(!drifting(3, -0.255, falling));
+        assert!(!drifting(4, -0.255, [Some(-0.249), None]));
+        // A reversal is no drift.
+        assert!(!drifting(4, 0.255, falling));
+        assert!(!drifting(4, f64::NAN, falling));
+        assert!(!drifting(4, -0.255, [Some(f64::NAN), Some(-0.248)]));
+    }
+
+    /// G1's probe measures d only on the fit's branch (the lane's lean, 2026-10-30): an ice share
+    /// within half the sphere of the fit's steady state's keeps it; a snowball's, or one that is not
+    /// a number, drops it, and G2 is then the held run.
+    #[test]
+    fn g1_s_probe_on_another_branch_measures_no_d() {
+        let probe = MeanProbe::of(5, (288.2, -0.01), None, 0.5);
+        assert_eq!(on_the_fit_s_branch(Some(probe), 0.09, 0.05), Some(probe));
+        assert_eq!(on_the_fit_s_branch(Some(probe), 0.45, 0.05), Some(probe));
+        assert_eq!(on_the_fit_s_branch(Some(probe), 1.0, 0.05), None);
+        assert_eq!(on_the_fit_s_branch(Some(probe), 0.05, 0.6), None);
+        assert_eq!(on_the_fit_s_branch(Some(probe), f64::NAN, 0.05), None);
+        assert_eq!(on_the_fit_s_branch(None, 0.05, 0.05), None);
+        let search = [SearchRun {
+            run: record(0.5, 288.2, true),
+            target_k: 288.0,
+            step: SearchStep::Fit,
+        }];
+        let measured = on_the_fit_s_branch(Some(probe), 1.0, 0.05);
+        assert_eq!(second_run(Some(0), &search, measured), SecondRun::Held);
+    }
+
     /// A run's record for the tests: converged at the climate's stop as `converged` says, and at
     /// the search's too where it did.
     fn record(u: f64, mean_k: f64, converged: bool) -> CorrectionRun {
@@ -6700,6 +7129,8 @@ mod tests {
             start: RunStart::Continued,
             converged,
             searched: converged,
+            drift_k: None,
+            held: false,
         }
     }
 
@@ -7025,11 +7456,11 @@ mod tests {
 
     /// The probe stop's fallback (decision-r09-t13i's §2.4 follow-up 8 §1.4, its test): a G1 that
     /// reaches its last orbit under neither of its stops, here the reference Earth's zonal model
-    /// for two orbits, fewer than either stop needs, records no probe, and G2 is then run A; where
-    /// G1's probe measured T̂ and the search has an answer, G2 takes the defect's step, d = T̂ −
-    /// `T̄_Z`.
+    /// for two orbits, fewer than either stop needs, records no probe, and G2 is then the held run
+    /// (run A as ruled; the lane's lean, 2026-10-30); where G1's probe measured T̂ and the search
+    /// has an answer, G2 takes the defect's step, d = T̂ − `T̄_Z`.
     #[test]
-    fn a_g1_that_never_meets_its_probe_stop_makes_g2_run_a() {
+    fn a_g1_that_never_meets_its_probe_stop_makes_g2_the_held_run() {
         let (model, sun, grid) = earth();
         let radiation = Radiation::at(model.greenhouse, 1.6, 288.0);
         let g1 = model.orbits(
@@ -7053,9 +7484,9 @@ mod tests {
             target_k: 288.0,
             step: SearchStep::Fit,
         }];
-        assert_eq!(second_run(Some(0), &search, g1.mean_probe), SecondRun::RunA);
+        assert_eq!(second_run(Some(0), &search, g1.mean_probe), SecondRun::Held);
         let probe = MeanProbe::of(5, (287.9, -0.01), None, 0.8);
-        assert_eq!(second_run(None, &search, Some(probe)), SecondRun::RunA);
+        assert_eq!(second_run(None, &search, Some(probe)), SecondRun::Held);
         let SecondRun::Defect { answer, defect_k } = second_run(Some(0), &search, Some(probe))
         else {
             panic!("a measured G1 takes the defect's step");
