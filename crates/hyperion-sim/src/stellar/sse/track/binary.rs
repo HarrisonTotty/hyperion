@@ -43,6 +43,11 @@ use super::{
 };
 
 /// k′₂ of BSE equation 35 (HPT equation 109): the envelope's share of I ÷ (M R²).
+///
+/// The papers' fixed value. Hurley's published code takes k₂ per star from `hrdiag` (`evolv2.f`,
+/// lines 284 and 717 of AMUSE's copy), through `mrenv.f`'s fits for Z = 0.02 alone: 0.04–0.21 at
+/// the zero age, and toward 0.4 on the giant branches, above k′₃. HYPERION follows the papers,
+/// whose k′₂ < k′₃ the engine's bounds on the spin rely on.
 pub(crate) const ENVELOPE_GYRATION: f64 = 0.1;
 
 /// k′₃ of BSE equation 35 (HPT equation 109): a core's I ÷ (M R²), an n = 3/2 polytrope.

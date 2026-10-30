@@ -600,17 +600,21 @@ impl Engine {
     /// The spin angular momentum, M☉ R☉² yr⁻¹, that the engine carries member `k` with when it
     /// takes over a passed-over pair after a collapse ([`Engine::passed_over`]): for a living star
     /// on its own track, the angular momentum it arrived on its main sequence with, the engine's
-    /// own start there ([`Engine::new`]: HPT equations 107 and 108, BSE equation 35), but no more
-    /// than its moment of inertia now at its break-up rate √(G M ÷ R³). `None` for any other
-    /// member, which keeps [`Engine::new`]'s.
+    /// own start there ([`Engine::new`]: HPT equations 107 and 108, BSE equation 35), times the
+    /// wind's factor (M ÷ M₀)^{2/(3k′₃)} for its mass M now and M₀ then, but no more than its
+    /// moment of inertia now at its break-up rate √(G M ÷ R³). `None` for any other member, which
+    /// keeps [`Engine::new`]'s.
     ///
-    /// A single star loses spin to its wind and to magnetic braking, so the zero-age angular
-    /// momentum bounds what it has then from above. [`Engine::new`]'s own start, the zero-age
-    /// velocity at the star's radius then, would spin a red supergiant past break-up (a 10 M☉ star
-    /// at 500 R☉: 232 km/s against 62 km/s). A star its wind has stripped to a compact helium star
-    /// cannot hold its zero-age angular momentum below break-up (1.0–2.8 times it for 25–40 M☉
-    /// twins, the science check), so the cap holds it there. The lane's choice, plan 11's Risks,
-    /// "P11.T4.l as built".
+    /// An upper bound on the spin of the single star it has been until then, in HPT's model
+    /// (k′₂ = 0.1), held at break-up as BSE holds a star's. A single star only loses spin after its
+    /// zero age: to its wind, which takes (2/3) ΔM R² Ω (HPT equation 110), and to magnetic braking
+    /// (BSE equation 50). With a moment of inertia of at most k′₃ M R² (BSE equation 35, k′₂ < k′₃
+    /// and Rc ≤ R), the wind alone leaves at most J₀ (M ÷ M₀)^{2/(3k′₃)}, in discrete steps too
+    /// (Bernoulli's inequality), and braking only lowers it. Hurley's published `evolv2.f` caps each
+    /// star's spin at break-up on every step of nonzero length (SSE's `evolv1.f` does not).
+    /// [`Engine::new`]'s own start, the zero-age velocity at the star's radius then, would spin a red
+    /// supergiant past break-up (a 10 M☉ star at 500 R☉: 232 km/s against 62 km/s). The lane's
+    /// choice, plan 11's Risks, "P11.T4.l as built".
     #[must_use]
     pub(super) fn zero_age_spin(&self, k: usize) -> Option<f64> {
         let Member::Track { track, offset } = &self.members[k] else {
@@ -626,11 +630,13 @@ impl Engine {
         let zero_age_momentum = super::star::moment_of_inertia(&zero_age)
             * super::star::zams_spin(zero_age.state.mass().value(), r0);
         let (m, r) = (now.state.mass().value(), now.state.radius().value());
-        if !(positive(m) && positive(r)) {
+        let m0 = zero_age.state.mass().value();
+        if !(positive(m) && positive(r) && positive(m0)) {
             return Some(zero_age_momentum);
         }
+        let wind = crate::math::powf_positive(m / m0, 2.0 / (3.0 * sse::CORE_GYRATION));
         let break_up = (super::star::G * m / (r * r * r)).sqrt();
-        Some(zero_age_momentum.min(super::star::moment_of_inertia(&now) * break_up))
+        Some((zero_age_momentum * wind).min(super::star::moment_of_inertia(&now) * break_up))
     }
 
     /// After a member's change of phase: a carried main sequence that has reached its end goes

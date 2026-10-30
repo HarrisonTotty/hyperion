@@ -6417,9 +6417,12 @@ galaxy_sweeps`.
       equation 35), held at most at its break-up now, √(G M ÷ R³). A single star only loses spin,
       so this bounds its spin from above. `Engine::new`'s start, the zero-age velocity at the
       star's radius then, spins a red supergiant past break-up (a 10 M☉ star at 500 R☉: 232 km/s
-      against 62 km/s), and the cap is for a companion its wind has stripped to a compact helium
-      star (1.0–2.8 times break-up for 25–40 M☉ twins, the science check). The remnant keeps
-      `Engine::new`'s.
+      against 62 km/s). The remnant keeps `Engine::new`'s.
+      - _The train's fix (2026-10-30):_ the zero-age J is multiplied by the wind's factor
+        (M ÷ M₀)^{2/(3k′₃)} before the cap, a tighter upper bound. The cap's source is Hurley's
+        published `evolv2.f` (break-up on every step). It moves `stellar/passed_over_collapses`.
+      - The published code's k₂ is `hrdiag`'s per star (`mrenv.f`, up to 0.4 on giants), not HPT's
+        fixed 0.1; HYPERION keeps the paper's (`sse::ENVELOPE_GYRATION`'s doc).
     - **A later collapse in an unbound pair** keeps the label `Disrupted { by: <the first> }`,
       the star whose collapse unbound the pair; the engine's `explode` relabels it by the later
       star (an engine quirk, recorded, not changed here).

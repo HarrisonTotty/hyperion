@@ -16,50 +16,50 @@ pair 17367 to 1.3787e10 yr: 12.1799 + 10.2325 M☉, P 36708.1 d, e 0.769, 9 segm
   segment 1 e = 0x3fef9f6a8c021e5e  # 0.9882099852120054
   segment 2: Detached, NeutronStar | HertzsprungGap
   segment 2 start, yr = 0x41782c0cc14e6142  # 25346252.08163572
-  segment 2 end, yr = 0x41783aff1de032b9  # 25407473.867235873
+  segment 2 end, yr = 0x41783aff14b5ece8  # 25407473.294415385
   segment 2 primary, M☉ = 0x3ffce87d89883707  # 1.80676034663651
   segment 2 secondary, M☉ = 0x4024701b471503ca  # 10.218958112063678
   segment 2 axis, m = 0x42a0aa00bdac3b8e  # 9161171457565.777
   segment 2 e = 0x3fef9f6a8c01f2d7  # 0.9882099852107683
   segment 3: CommonEnvelope, NeutronStar | HeliumMainSequence
-  segment 3 start, yr = 0x41783aff1de032b9  # 25407473.867235873
-  segment 3 end, yr = 0x41783aff1de032b9  # 25407473.867235873
+  segment 3 start, yr = 0x41783aff14b5ece8  # 25407473.294415385
+  segment 3 end, yr = 0x41783aff14b5ece8  # 25407473.294415385
   segment 3 primary, M☉ = 0x3ffce87d89883707  # 1.80676034663651
-  segment 3 secondary, M☉ = 0x40020946c79c90e1  # 2.254529532876504
-  segment 3 axis, m = 0x41d0e8f64c33e1cc  # 1134811440.8106565
+  segment 3 secondary, M☉ = 0x40020946982ddb1d  # 2.2545291794771303
+  segment 3 axis, m = 0x41d0e8d79d589464  # 1134780021.384057
   segment 3 e = 0x0000000000000000  # 0.0
   segment 4: Detached, NeutronStar | HeliumMainSequence
-  segment 4 start, yr = 0x41783aff1de032b9  # 25407473.867235873
-  segment 4 end, yr = 0x417bc6e657cef003  # 29126245.48802186
+  segment 4 start, yr = 0x41783aff14b5ece8  # 25407473.294415385
+  segment 4 end, yr = 0x417bc6e65fb66695  # 29126245.982031424
   segment 4 primary, M☉ = 0x3ffce87d89883707  # 1.80676034663651
-  segment 4 secondary, M☉ = 0x40020946c79c90e1  # 2.254529532876504
-  segment 4 axis, m = 0x41d0e8f64c33e1cc  # 1134811440.8106565
+  segment 4 secondary, M☉ = 0x40020946982ddb1d  # 2.2545291794771303
+  segment 4 axis, m = 0x41d0e8d79d589464  # 1134780021.384057
   segment 4 e = 0x0000000000000000  # 0.0
-  segment 5: Detached, NeutronStar | HeliumMainSequence
-  segment 5 start, yr = 0x417bc6e657cef003  # 29126245.48802186
-  segment 5 end, yr = 0x417beaca953883e0  # 29273257.32629764
-  segment 5 primary, M☉ = 0x3ffceebe47abaabe  # 1.8082869338638115
-  segment 5 secondary, M☉ = 0x4001eb545ac95af1  # 2.2399069874476187
-  segment 5 axis, m = 0x41d09336ecebc0b6  # 1112333235.6836371
+  segment 5: Detached, NeutronStar | HeliumHertzsprungGap
+  segment 5 start, yr = 0x417bc6e65fb66695  # 29126245.982031424
+  segment 5 end, yr = 0x417beacab02697d3  # 29273259.009422135
+  segment 5 primary, M☉ = 0x3ffceebe5411093f  # 1.8082869800424104
+  segment 5 secondary, M☉ = 0x4001eb542c2143eb  # 2.2399066398288503
+  segment 5 axis, m = 0x41d09315adf8ab49  # 1112299191.8854544
   segment 5 e = 0x0000000000000000  # 0.0
   segment 6: StableTransfer { donor: Secondary }, NeutronStar | HeliumHertzsprungGap
-  segment 6 start, yr = 0x417beaca953883e0  # 29273257.32629764
-  segment 6 end, yr = 0x417bf6284edd9d9b  # 29319812.929105382
-  segment 6 primary, M☉ = 0x3ffcef715e968470  # 1.8084577269403574
-  segment 6 secondary, M☉ = 0x4001e875d6977d06  # 2.2385060086231787
-  segment 6 axis, m = 0x41d070a12509ffd1  # 1103266964.1562388
+  segment 6 start, yr = 0x417beacab02697d3  # 29273259.009422135
+  segment 6 end, yr = 0x417bf6286a3eca8a  # 29319814.640329875
+  segment 6 primary, M☉ = 0x3ffcef716a48c2e4  # 1.8084577705123417
+  segment 6 secondary, M☉ = 0x4001e875a5ee1a5e  # 2.238505646065547
+  segment 6 axis, m = 0x41d070a91103e08c  # 1103275076.0605803
   segment 6 e = 0x0000000000000000  # 0.0
   segment 7: Detached, NeutronStar | OxygenNeonWhiteDwarf
-  segment 7 start, yr = 0x417bf6284edd9d9b  # 29319812.929105382
-  segment 7 end, yr = 0x41edaa7c0cfb34c3  # 3981697127.8501906
-  segment 7 primary, M☉ = 0x3ffcf4188a777031  # 1.8095937165117102
-  segment 7 secondary, M☉ = 0x3ff38d34d52a38f8  # 1.2219742132907054
-  segment 7 axis, m = 0x41e2de9fbef49575  # 2532638199.6432443
+  segment 7 start, yr = 0x417bf6286a3eca8a  # 29319814.640329875
+  segment 7 end, yr = 0x41edaaa6401cdf11  # 3981783552.90223
+  segment 7 primary, M☉ = 0x3ffcf41897b4415f  # 1.8095937658254895
+  segment 7 secondary, M☉ = 0x3ff38d35e2254509  # 1.221975215321722
+  segment 7 axis, m = 0x41e2dea6e00ac536  # 2532652800.3365736
   segment 7 e = 0x0000000000000000  # 0.0
   segment 8: Merged, BlackHole | NoRemnant
-  segment 8 start, yr = 0x41edaa7c0cfb34c3  # 3981697127.8501906
+  segment 8 start, yr = 0x41edaaa6401cdf11  # 3981783552.90223
   segment 8 end, yr = 0x4209ae2766000000  # 13787000000.0
-  segment 8 primary, M☉ = 0x400840a6afd0d494  # 3.0315679298024154
+  segment 8 primary, M☉ = 0x400840a73cecc334  # 3.0315689811472115
   segment 8 secondary, M☉ = 0x0000000000000000  # 0.0
   segment 8: unbound
   supernova 0: Primary into a NeutronStar, bound true
@@ -117,24 +117,24 @@ pair 29814 to 1.3787e10 yr: 8.5438 + 4.6384 M☉, P 82280.6 d, e 0.424, 9 segmen
   segment 5 e = 0x3feeef893df3a73a  # 0.9667402467723385
   segment 6: Detached, NeutronStar | ThermallyPulsingAgb
   segment 6 start, yr = 0x41a1a4e8596921dc  # 148010028.70533645
-  segment 6 end, yr = 0x41a1b2ea4bd97563  # 148469029.9247237
+  segment 6 end, yr = 0x41a1b2ea49def476  # 148469028.93545884
   segment 6 primary, M☉ = 0x3ff2a8e7501ba87c  # 1.1662362221927927
   segment 6 secondary, M☉ = 0x4012173e4da4ad9b  # 4.52269860570541
-  segment 6 axis, m = 0x429549720cb47ce2  # 5851297557791.221
-  segment 6 e = 0x3fecf18b590349fb  # 0.904485391476839
+  segment 6 axis, m = 0x42954903faf77340  # 5850835893724.8125
+  segment 6 e = 0x3fecf17ba432271d  # 0.904477902121673
   segment 7: CommonEnvelope, NeutronStar | CarbonOxygenWhiteDwarf
-  segment 7 start, yr = 0x41a1b2ea4bd97563  # 148469029.9247237
-  segment 7 end, yr = 0x41a1b2ea4bd97563  # 148469029.9247237
+  segment 7 start, yr = 0x41a1b2ea49def476  # 148469028.93545884
+  segment 7 end, yr = 0x41a1b2ea49def476  # 148469028.93545884
   segment 7 primary, M☉ = 0x3ff2a8e7501ba87c  # 1.1662362221927927
-  segment 7 secondary, M☉ = 0x3fedd6e615abef5b  # 0.9324827597879265
-  segment 7 axis, m = 0x4201a04d683078d1  # 9462983942.058992
+  segment 7 secondary, M☉ = 0x3fedd6e5ff056508  # 0.9324827175979928
+  segment 7 axis, m = 0x4201a0451f2c6e93  # 9462916069.553991
   segment 7 e = 0x0000000000000000  # 0.0
   segment 8: Detached, NeutronStar | CarbonOxygenWhiteDwarf
-  segment 8 start, yr = 0x41a1b2ea4bd97563  # 148469029.9247237
+  segment 8 start, yr = 0x41a1b2ea49def476  # 148469028.93545884
   segment 8 end, yr = 0x4209ae2766000000  # 13787000000.0
   segment 8 primary, M☉ = 0x3ff2a8e7501ba87c  # 1.1662362221927927
-  segment 8 secondary, M☉ = 0x3fedd6e615abef5b  # 0.9324827597879265
-  segment 8 axis, m = 0x4201a04d683078d1  # 9462983942.058992
+  segment 8 secondary, M☉ = 0x3fedd6e5ff056508  # 0.9324827175979928
+  segment 8 axis, m = 0x4201a0451f2c6e93  # 9462916069.553991
   segment 8 e = 0x0000000000000000  # 0.0
   supernova 0: Primary into a NeutronStar, bound true
   supernova 0 age, yr = 0x4181b003b1a93c74  # 37093494.20763484
@@ -250,50 +250,50 @@ pair 35928 to 1.3787e10 yr: 8.3032 + 5.8848 M☉, P 56572.6 d, e 0.471, 10 segme
   segment 2 e = 0x3fefce7c43c3875f  # 0.9939557384025014
   segment 3: Detached, NeutronStar | FirstGiantBranch
   segment 3 start, yr = 0x419139eae9ec4578  # 72252090.48073375
-  segment 3 end, yr = 0x41913ea0322d8052  # 72329228.54443482
+  segment 3 end, yr = 0x41913ea01a15648d  # 72329222.52089138
   segment 3 primary, M☉ = 0x3ff428f5c28f5c29  # 1.26
   segment 3 secondary, M☉ = 0x4017713080727730  # 5.860536581980156
   segment 3 axis, m = 0x42a6ecec2e2c8d2e  # 12603415270982.59
   segment 3 e = 0x3fefce7c43c38665  # 0.9939557384024736
   segment 4: CommonEnvelope, NeutronStar | HeliumMainSequence
-  segment 4 start, yr = 0x41913ea0322d8052  # 72329228.54443482
-  segment 4 end, yr = 0x41913ea0322d8052  # 72329228.54443482
+  segment 4 start, yr = 0x41913ea01a15648d  # 72329222.52089138
+  segment 4 end, yr = 0x41913ea01a15648d  # 72329222.52089138
   segment 4 primary, M☉ = 0x3ff428f5c28f5c29  # 1.26
-  segment 4 secondary, M☉ = 0x3ff1149afb8ec2eb  # 1.0675306154700432
-  segment 4 axis, m = 0x41c77d4b251a3461  # 788174410.2047235
+  segment 4 secondary, M☉ = 0x3ff1149ae898840f  # 1.0675305448314736
+  segment 4 axis, m = 0x41c77d085e6d2c1a  # 788140220.8529084
   segment 4 e = 0x0000000000000000  # 0.0
   segment 5: Detached, NeutronStar | HeliumMainSequence
-  segment 5 start, yr = 0x41913ea0322d8052  # 72329228.54443482
-  segment 5 end, yr = 0x4195a49d89036f71  # 90777442.2533548
+  segment 5 start, yr = 0x41913ea01a15648d  # 72329222.52089138
+  segment 5 end, yr = 0x4195a49d7c480561  # 90777439.07033302
   segment 5 primary, M☉ = 0x3ff428f5c28f5c29  # 1.26
-  segment 5 secondary, M☉ = 0x3ff1149afb8ec2eb  # 1.0675306154700432
-  segment 5 axis, m = 0x41c77d4b251a3461  # 788174410.2047235
+  segment 5 secondary, M☉ = 0x3ff1149ae898840f  # 1.0675305448314736
+  segment 5 axis, m = 0x41c77d085e6d2c1a  # 788140220.8529084
   segment 5 e = 0x0000000000000000  # 0.0
   segment 6: Detached, NeutronStar | HeliumMainSequence
-  segment 6 start, yr = 0x4195a49d89036f71  # 90777442.2533548
-  segment 6 end, yr = 0x4195ff5b43de7219  # 92264144.96723212
-  segment 6 primary, M☉ = 0x3ff43a30422452f2  # 1.264206179014931
-  segment 6 secondary, M☉ = 0x3ff0aeee646c785c  # 1.042707817344783
-  segment 6 axis, m = 0x41c5ea028611b274  # 735315212.1382585
+  segment 6 start, yr = 0x4195a49d7c480561  # 90777439.07033302
+  segment 6 end, yr = 0x4195ff5a7588ee38  # 92264093.38372123
+  segment 6 primary, M☉ = 0x3ff43a307d5488b9  # 1.2642063995086075
+  segment 6 secondary, M☉ = 0x3ff0aeee52a9a03a  # 1.0427077511794907
+  segment 6 axis, m = 0x41c5e9ad68f63590  # 735271633.9235096
   segment 6 e = 0x0000000000000000  # 0.0
   segment 7: StableTransfer { donor: Secondary }, NeutronStar | HeliumHertzsprungGap
-  segment 7 start, yr = 0x4195ff5b43de7219  # 92264144.96723212
-  segment 7 end, yr = 0x41961ac1e902116e  # 92713082.25201961
-  segment 7 primary, M☉ = 0x3ff442683a42dd9e  # 1.2662126804187674
-  segment 7 secondary, M☉ = 0x3ff086d83a22d8ed  # 1.032921053976277
-  segment 7 axis, m = 0x41c53413e5ca9faa  # 711469003.5829976
+  segment 7 start, yr = 0x4195ff5a7588ee38  # 92264093.38372123
+  segment 7 end, yr = 0x41961ac173ae324b  # 92713052.92011373
+  segment 7 primary, M☉ = 0x3ff442685161ad03  # 1.2662127665487908
+  segment 7 secondary, M☉ = 0x3ff086d9260ffc2f  # 1.0329219328703052
+  segment 7 axis, m = 0x41c533bbae23fe18  # 711423836.2811918
   segment 7 e = 0x0000000000000000  # 0.0
   segment 8: Detached, NeutronStar | CarbonOxygenWhiteDwarf
-  segment 8 start, yr = 0x41961ac1e902116e  # 92713082.25201961
-  segment 8 end, yr = 0x41b2453ccf0649b3  # 306527439.02456206
-  segment 8 primary, M☉ = 0x3ff475bc7c60f50e  # 1.278744207243395
-  segment 8 secondary, M☉ = 0x3fe83dbad2954762  # 0.7575353730155536
-  segment 8 axis, m = 0x41cacf5a2369b324  # 899593286.8257794
+  segment 8 start, yr = 0x41961ac173ae324b  # 92713052.92011373
+  segment 8 end, yr = 0x41b24464e57988e8  # 306472165.4747453
+  segment 8 primary, M☉ = 0x3ff475c015a647ff  # 1.2787476392445567
+  segment 8 secondary, M☉ = 0x3fe83dba3680ae35  # 0.7575350822930377
+  segment 8 axis, m = 0x41caceea52ade3b9  # 899536037.358512
   segment 8 e = 0x0000000000000000  # 0.0
   segment 9: Merged, BlackHole | NoRemnant
-  segment 9 start, yr = 0x41b2453ccf0649b3  # 306527439.02456206
+  segment 9 start, yr = 0x41b24464e57988e8  # 306472165.4747453
   segment 9 end, yr = 0x4209ae2766000000  # 13787000000.0
-  segment 9 primary, M☉ = 0x40004a4cf2d5cc60  # 2.036279580258949
+  segment 9 primary, M☉ = 0x40004a4e98734f8d  # 2.0362827215375945
   segment 9 secondary, M☉ = 0x0000000000000000  # 0.0
   segment 9: unbound
   supernova 0: Primary into a NeutronStar, bound true
@@ -351,24 +351,24 @@ pair 57273 to 1.3787e10 yr: 8.5000 + 5.0053 M☉, P 35977.3 d, e 0.546, 9 segmen
   segment 5 e = 0x3fef9e392818e8ff  # 0.9880643637800687
   segment 6: Detached, NeutronStar | ThermallyPulsingAgb
   segment 6 start, yr = 0x419bce9726da9620  # 116630985.7134633
-  segment 6 end, yr = 0x419beaf85d66cf75  # 117095959.35040076
+  segment 6 end, yr = 0x419beaf85cc6559c  # 117095959.19368595
   segment 6 primary, M☉ = 0x3ff331cc7d8eaa53  # 1.199657907922888
   segment 6 secondary, M☉ = 0x4013830aa0b07743  # 4.877970228930113
   segment 6 axis, m = 0x42c8dc2a7264236e  # 54667768023110.86
   segment 6 e = 0x3fef9e392818e8ff  # 0.9880643637800687
   segment 7: CommonEnvelope, NeutronStar | CarbonOxygenWhiteDwarf
-  segment 7 start, yr = 0x419beaf85d66cf75  # 117095959.35040076
-  segment 7 end, yr = 0x419beaf85d66cf75  # 117095959.35040076
+  segment 7 start, yr = 0x419beaf85cc6559c  # 117095959.19368595
+  segment 7 end, yr = 0x419beaf85cc6559c  # 117095959.19368595
   segment 7 primary, M☉ = 0x3ff331cc7d8eaa53  # 1.199657907922888
-  segment 7 secondary, M☉ = 0x3ff097c704543375  # 1.037055031690412
-  segment 7 axis, m = 0x4213165ce865bf75  # 20494891545.43697
+  segment 7 secondary, M☉ = 0x3ff097c701b4dd9b  # 1.0370550219211967
+  segment 7 axis, m = 0x42131651b15aa5a0  # 20494707798.661743
   segment 7 e = 0x0000000000000000  # 0.0
   segment 8: Detached, NeutronStar | CarbonOxygenWhiteDwarf
-  segment 8 start, yr = 0x419beaf85d66cf75  # 117095959.35040076
+  segment 8 start, yr = 0x419beaf85cc6559c  # 117095959.19368595
   segment 8 end, yr = 0x4209ae2766000000  # 13787000000.0
   segment 8 primary, M☉ = 0x3ff331cc7d8eaa53  # 1.199657907922888
-  segment 8 secondary, M☉ = 0x3ff097c704543375  # 1.037055031690412
-  segment 8 axis, m = 0x4213165ce865bf75  # 20494891545.43697
+  segment 8 secondary, M☉ = 0x3ff097c701b4dd9b  # 1.0370550219211967
+  segment 8 axis, m = 0x42131651b15aa5a0  # 20494707798.661743
   segment 8 e = 0x0000000000000000  # 0.0
   supernova 0: Primary into a NeutronStar, bound true
   supernova 0 age, yr = 0x418285d55b8dd85a  # 38845099.444260314
@@ -407,54 +407,54 @@ pair 68325 to 1.3787e10 yr: 17.5461 + 10.2541 M☉, P 12119.9 d, e 0.500, 11 seg
   segment 3 end, yr = 0x41783b887be41634  # 25409671.743185237
   segment 3 primary, M☉ = 0x4012a9330b8b592c  # 4.66523378408446
   segment 3 secondary, M☉ = 0x40246b8084a1a685  # 10.209964890225146
-  segment 3 axis, m = 0x4299f7a9139fba95  # 7137871063022.6455
-  segment 3 e = 0x3feeb234c0581d04  # 0.9592536694262042
+  segment 3 axis, m = 0x4299f778c75cd99e  # 7137668486966.404
+  segment 3 e = 0x3feeb23255ab62cb  # 0.9592525170547445
   segment 4: Detached, BlackHole | CoreHeliumBurning
   segment 4 start, yr = 0x41783b887be41634  # 25409671.743185237
   segment 4 end, yr = 0x417ac5c1d005eb90  # 28072989.001445353
   segment 4 primary, M☉ = 0x4012a9330b8b592c  # 4.66523378408446
   segment 4 secondary, M☉ = 0x40246b3534faff29  # 10.209390311850784
-  segment 4 axis, m = 0x4260cd7f2f58d2b8  # 577337129670.585
-  segment 4 e = 0x3fd8b2305d20406a  # 0.385875788634627
+  segment 4 axis, m = 0x4260cd5227415fa4  # 577313520138.9888
+  segment 4 e = 0x3fd8b17689addc96  # 0.38583148427228176
   segment 5: Detached, BlackHole | EarlyAgb
   segment 5 start, yr = 0x417ac5c1d005eb90  # 28072989.001445353
-  segment 5 end, yr = 0x417ac5c2334de3c0  # 28072995.206516027
+  segment 5 end, yr = 0x417ac5c2332624dc  # 28072995.196812496
   segment 5 primary, M☉ = 0x4012a9330b8b592c  # 4.66523378408446
   segment 5 secondary, M☉ = 0x4023e422a2b1c360  # 9.945576748084648
-  segment 5 axis, m = 0x42611bb885f5cd7a  # 587836174254.4211
-  segment 5 e = 0x3fd89ba00139c143  # 0.38449859733284003
+  segment 5 axis, m = 0x42611b8aee336e90  # 587812270491.4551
+  segment 5 e = 0x3fd89ae5f2b53e10  # 0.38445423795653344
   segment 6: CommonEnvelope, BlackHole | HeliumHertzsprungGap
-  segment 6 start, yr = 0x417ac5c2334de3c0  # 28072995.206516027
-  segment 6 end, yr = 0x417ac5c2334de3c0  # 28072995.206516027
+  segment 6 start, yr = 0x417ac5c2332624dc  # 28072995.196812496
+  segment 6 end, yr = 0x417ac5c2332624dc  # 28072995.196812496
   segment 6 primary, M☉ = 0x4012a9330b8b592c  # 4.66523378408446
   segment 6 secondary, M☉ = 0x400a54cd8dd1d43d  # 3.29140768810842
-  segment 6 axis, m = 0x420ad44e2283f535  # 14403880016.49473
+  segment 6 axis, m = 0x420ad44e2773871e  # 14403880174.440975
   segment 6 e = 0x0000000000000000  # 0.0
   segment 7: Detached, BlackHole | HeliumHertzsprungGap
-  segment 7 start, yr = 0x417ac5c2334de3c0  # 28072995.206516027
-  segment 7 end, yr = 0x417aeb501aafa984  # 28226817.667886272
+  segment 7 start, yr = 0x417ac5c2332624dc  # 28072995.196812496
+  segment 7 end, yr = 0x417aeb501a88b1fc  # 28226817.658372864
   segment 7 primary, M☉ = 0x4012a9330b8b592c  # 4.66523378408446
   segment 7 secondary, M☉ = 0x400a54cd8dd1d43d  # 3.29140768810842
-  segment 7 axis, m = 0x420ad44e2283f535  # 14403880016.49473
+  segment 7 axis, m = 0x420ad44e2773871e  # 14403880174.440975
   segment 7 e = 0x0000000000000000  # 0.0
   segment 8: StableTransfer { donor: Secondary }, BlackHole | HeliumHertzsprungGap
-  segment 8 start, yr = 0x417aeb501aafa984  # 28226817.667886272
-  segment 8 end, yr = 0x417aebd048f2744b  # 28228868.559192937
-  segment 8 primary, M☉ = 0x4012aac8cdc0404d  # 4.666781630381661
-  segment 8 secondary, M☉ = 0x400a22482f6d5cdb  # 3.2667392449617245
-  segment 8 axis, m = 0x420a850eaa09ed30  # 14237685057.240814
+  segment 8 start, yr = 0x417aeb501a88b1fc  # 28226817.658372864
+  segment 8 end, yr = 0x417aebd048caaf5d  # 28228868.549483646
+  segment 8 primary, M☉ = 0x4012aac8cdc02854  # 4.66678163037621
+  segment 8 secondary, M☉ = 0x400a22482f6b165a  # 3.2667392448955015
+  segment 8 axis, m = 0x420a850eaeed6286  # 14237685213.673107
   segment 8 e = 0x0000000000000000  # 0.0
   segment 9: Detached, BlackHole | HeliumGiantBranch
-  segment 9 start, yr = 0x417aebd048f2744b  # 28228868.559192937
-  segment 9 end, yr = 0x417aec18ddea740e  # 28230029.869739585
-  segment 9 primary, M☉ = 0x4012aad66c416b7b  # 4.666833583348189
-  segment 9 secondary, M☉ = 0x40018b625f32923c  # 2.193058723192989
-  segment 9 axis, m = 0x421293c79b2b0889  # 19947185866.758335
+  segment 9 start, yr = 0x417aebd048caaf5d  # 28228868.549483646
+  segment 9 end, yr = 0x417aec18ddc2b52a  # 28230029.860036053
+  segment 9 primary, M☉ = 0x4012aad66c41435b  # 4.6668335833390655
+  segment 9 secondary, M☉ = 0x40018b625f4dc6bc  # 2.1930587239847608
+  segment 9 axis, m = 0x421293c79e000259  # 19947186048.002293
   segment 9 e = 0x0000000000000000  # 0.0
   segment 10: Disrupted { by: Secondary }, BlackHole | NeutronStar
-  segment 10 start, yr = 0x417aec18ddea740e  # 28230029.869739585
+  segment 10 start, yr = 0x417aec18ddc2b52a  # 28230029.860036053
   segment 10 end, yr = 0x4209ae2766000000  # 13787000000.0
-  segment 10 primary, M☉ = 0x4012aad66c416b80  # 4.666833583348193
+  segment 10 primary, M☉ = 0x4012aad66c414360  # 4.66683358333907
   segment 10 secondary, M☉ = 0x3ff899326f63d6a4  # 1.537401614300884
   segment 10: unbound
   supernova 0: Primary into a BlackHole, bound true
@@ -468,15 +468,15 @@ pair 68325 to 1.3787e10 yr: 17.5461 + 10.2541 M☉, P 12119.9 d, e 0.500, 11 seg
   supernova 0 velocity 1.1, m/s = 0xc0be50c1d8a0a80b  # -7760.757211724306
   supernova 0 velocity 1.2, m/s = 0xc0bfdd1848c824e0  # -8157.094860562327
   supernova 1: Secondary into a NeutronStar, bound false
-  supernova 1 age, yr = 0x417aec18ddea740e  # 28230029.869739585
+  supernova 1 age, yr = 0x417aec18ddc2b52a  # 28230029.860036053
   supernova 1 remnant, M☉ = 0x3ff899326f63d6a4  # 1.537401614300884
   supernova 1 kick, m/s = 0x410474c4caa40752  # 167576.59894567222
-  supernova 1 velocity 0.0, m/s = 0xc0e1240a6c315dff  # -35104.32570713385
-  supernova 1 velocity 0.1, m/s = 0x40d9442437600cce  # 25872.565879833703
-  supernova 1 velocity 0.2, m/s = 0xc0e9aa4f297eda28  # -52562.47381537064
-  supernova 1 velocity 1.0, m/s = 0x40ea89b1b65bac55  # 54349.55351051005
-  supernova 1 velocity 1.1, m/s = 0x40e2bbd2060e63d5  # 38366.56323928355
-  supernova 1 velocity 1.2, m/s = 0x410e741a72d91a56  # 249475.30607815337
+  supernova 1 velocity 0.0, m/s = 0xc0d34363f933910f  # -19725.56208504835
+  supernova 1 velocity 0.1, m/s = 0x40bf04b3f071bdfd  # 7940.702887638935
+  supernova 1 velocity 0.2, m/s = 0xc0efb0d75e9e289d  # -64902.730300025294
+  supernova 1 velocity 1.0, m/s = 0x40d51dd0ff10d07a  # 21623.2655679737
+  supernova 1 velocity 1.1, m/s = 0x40f2aede497cd639  # 76525.89294131928
+  supernova 1 velocity 1.2, m/s = 0x4110d45e61f4a2a9  # 275735.59565977246
 pair 80075 to 1.3787e10 yr: 9.9362 + 3.1952 M☉, P 46176.9 d, e 0.465, 8 segments
   segment 0: Detached, Protostar | Protostar
   segment 0 start, yr = 0x0000000000000000  # 0.0
@@ -511,23 +511,23 @@ pair 80075 to 1.3787e10 yr: 9.9362 + 3.1952 M☉, P 46176.9 d, e 0.465, 8 segmen
   segment 4 end, yr = 0x41b38ab8de7bdc36  # 327858398.4838289
   segment 4 primary, M☉ = 0x4002a63be36c18d2  # 2.331168915497167
   segment 4 secondary, M☉ = 0x40098ce4808ab34e  # 3.193795208199311
-  segment 4 axis, m = 0x4290612ba249a4c3  # 4502382482025.19
-  segment 4 e = 0x3feeb47d8c2f6295  # 0.9595325220098682
+  segment 4 axis, m = 0x4290612b94267f97  # 4502382250399.897
+  segment 4 e = 0x3feeb47d8b100f46  # 0.9595325199193006
   segment 5: Detached, BlackHole | EarlyAgb
   segment 5 start, yr = 0x41b38ab8de7bdc36  # 327858398.4838289
-  segment 5 end, yr = 0x41b3a5c03266639e  # 329629746.39995754
+  segment 5 end, yr = 0x41b3a5c0325b4efd  # 329629746.356674
   segment 5 primary, M☉ = 0x4002a63be36c18d2  # 2.331168915497167
   segment 5 secondary, M☉ = 0x400943dc8ed240ab  # 3.15813552455082
-  segment 5 axis, m = 0x42907babbaf04817  # 4530837044242.022
-  segment 5 e = 0x3feeb47d8c2f1265  # 0.9595325220075891
+  segment 5 axis, m = 0x42907babacb64385  # 4530836811152.88
+  segment 5 e = 0x3feeb47d8b0fbf16  # 0.9595325199170215
   segment 6: CommonEnvelope, BlackHole | NoRemnant
-  segment 6 start, yr = 0x41b3a5c03266639e  # 329629746.39995754
-  segment 6 end, yr = 0x41b3a5c03266639e  # 329629746.39995754
+  segment 6 start, yr = 0x41b3a5c0325b4efd  # 329629746.356674
+  segment 6 end, yr = 0x41b3a5c0325b4efd  # 329629746.356674
   segment 6 primary, M☉ = 0x4002a63be36c18d2  # 2.331168915497167
   segment 6 secondary, M☉ = 0x0000000000000000  # 0.0
   segment 6: unbound
   segment 7: Merged, BlackHole | NoRemnant
-  segment 7 start, yr = 0x41b3a5c03266639e  # 329629746.39995754
+  segment 7 start, yr = 0x41b3a5c0325b4efd  # 329629746.356674
   segment 7 end, yr = 0x4209ae2766000000  # 13787000000.0
   segment 7 primary, M☉ = 0x4002a63be36c18d2  # 2.331168915497167
   segment 7 secondary, M☉ = 0x0000000000000000  # 0.0

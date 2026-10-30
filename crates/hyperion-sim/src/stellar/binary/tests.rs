@@ -4907,11 +4907,12 @@ fn a_passed_over_pair_is_the_same_whatever_age_it_is_run_to() {
 }
 
 /// P11.T4.l: the engine that takes over a passed-over pair at a collapse carries each living star
-/// with its zero-age spin's angular momentum, held at most at its break-up now, where
-/// [`super::evolve::Engine::new`] gives it the zero-age velocity at its radius then. 15 + 14.9 M☉
-/// (median draws, \[Fe/H\] 0): at the primary's death (14.32 Myr) the companion has left its
-/// main sequence, and `Engine::new`'s start would spin it past break-up; a 3 M☉ companion is still
-/// on its main sequence and keeps its zero-age angular momentum. The remnant keeps `Engine::new`'s.
+/// with its zero-age spin's angular momentum times the wind's factor (M ÷ M₀)^{2/(3k′₃)}, held at
+/// most at its break-up now, where [`super::evolve::Engine::new`] gives it the zero-age velocity
+/// at its radius then. 15 + 14.9 M☉ (median draws, \[Fe/H\] 0): at the primary's death (14.32
+/// Myr) the companion has left its main sequence, and `Engine::new`'s start would spin it past
+/// break-up; a 3 M☉ companion is still on its main sequence and keeps its zero-age angular
+/// momentum less its wind's factor's ulps. The remnant keeps `Engine::new`'s.
 #[test]
 fn a_taken_over_star_keeps_its_zero_age_spin() {
     use std::sync::Arc;
@@ -4953,10 +4954,14 @@ fn a_taken_over_star_keeps_its_zero_age_spin() {
                 zero_age.state.radius().value(),
             );
         let (m, r) = (now.state.mass().value(), now.state.radius().value());
+        let m0 = zero_age.state.mass().value();
+        let wind =
+            crate::math::powf_positive(m / m0, 2.0 / (3.0 * crate::stellar::sse::CORE_GYRATION));
+        assert!(wind <= 1.0, "{m} M☉ from {m0}");
         let break_up = moment_of_inertia(&now) * (G * m / (r * r * r)).sqrt();
         assert_eq!(
             bits(engine.spins[1]),
-            bits(zero_age_momentum.min(break_up)),
+            bits((zero_age_momentum * wind).min(break_up)),
             "{:?}",
             now.state
         );
@@ -4970,7 +4975,11 @@ fn a_taken_over_star_keeps_its_zero_age_spin() {
             assert!(started[1] > break_up, "{} against {break_up}", started[1]);
             assert!(engine.spins[1] < started[1]);
         } else {
-            assert_eq!(bits(engine.spins[1]), bits(zero_age_momentum));
+            assert!(
+                1.0 - wind < 1e-5,
+                "a main sequence's wind takes little: {wind}"
+            );
+            assert_eq!(bits(engine.spins[1]), bits(zero_age_momentum * wind));
         }
     }
 }
