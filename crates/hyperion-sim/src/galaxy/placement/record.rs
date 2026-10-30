@@ -180,7 +180,9 @@ impl SystemRecord {
     /// # Panics
     ///
     /// If `origin` is [`SystemOrigin::Grid`] and `id` is not a grid ID, which would leave
-    /// [`layer`](Self::layer) with no answer.
+    /// [`layer`](Self::layer) with no answer, or if a member's origin does not match its ID's kind:
+    /// a feature member's its feature's member ID, a centre member's a centre member ID, a
+    /// global-list member's a stream's or a dwarf core's member ID.
     #[must_use]
     pub fn from_parts(
         id: SystemId,
@@ -281,7 +283,13 @@ impl SystemRecord {
                             .expect("a member's primary is of 0.08-150 M_sun")
                     }
                 },
-                _ => unreachable!("a global-list member's record is built with its member ID"),
+                SystemIdKind::Grid(_)
+                | SystemIdKind::FeatureMember(_)
+                | SystemIdKind::Centre(_)
+                | SystemIdKind::Pinned(_)
+                | SystemIdKind::Catalogue(_) => {
+                    unreachable!("a global-list member's record is built with its member ID")
+                }
             },
         }
     }

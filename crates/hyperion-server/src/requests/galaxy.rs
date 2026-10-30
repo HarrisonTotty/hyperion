@@ -170,7 +170,8 @@ pub(crate) async fn extinction(
                         Ok(record) => match system_motion(&galaxy, &record, wanted.time()) {
                             Ok((position, _)) => position,
                             // Nor has a system the server cannot place yet: a centre member,
-                            // refused at every time so that no answer depends on the time.
+                            // refused at every time so that no answer depends on the time, or a
+                            // global-list member, which `resolve` never gives.
                             Err(
                                 TraceMotionError::CentreOrbitNotBuilt(_)
                                 | TraceMotionError::GlobalListMember(_),

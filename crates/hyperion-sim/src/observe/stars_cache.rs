@@ -91,6 +91,9 @@ impl StarsCache for NoStarsCache {
 ///
 /// - For a rogue planet, which has no stars, and for a member of the galactic centre, whose stars
 ///   wait for plan 09's centre composition (the server's system cache refuses them too).
+/// - For a member of the global list, whose stars are its member record's
+///   ([`GlobalMemberRecord::stars`](crate::galaxy::global_list::members::GlobalMemberRecord::stars)),
+///   which the caller's list gives.
 /// - If `record` is a feature member that does not resolve in `galaxy`, which only a record of
 ///   another galaxy can be.
 #[must_use]

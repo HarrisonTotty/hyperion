@@ -334,6 +334,8 @@ impl BriefModel {
     ///
     /// - For a rogue planet, as [`BriefModel::new`], and for a member of the galactic centre,
     ///   whose stars wait for plan 09's centre composition.
+    /// - For a member of the global list, whose stars are its member record's, which the caller's
+    ///   list gives.
     /// - If `record` is a feature member that does not resolve in `galaxy`, which only a record of
     ///   another galaxy can be.
     /// - As [`BriefModel::new`], if a committed pair-light table cannot be read.

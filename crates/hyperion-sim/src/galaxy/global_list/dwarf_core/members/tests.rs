@@ -192,6 +192,11 @@ fn members_follow_their_class_profiles() {
 fn every_member_s_id_round_trips_and_resolves_to_it() {
     let (galaxy, core) = (milky_way(), small());
     let members = members();
+    // Every ID round-trips; a sample of them resolves, the rest placed by the same function.
+    for (_, _, member, _) in members {
+        let id = member.record().id();
+        assert_eq!(SystemId::from_raw(id.raw()), Ok(id));
+    }
     for (band, cell, member, _) in members.iter().step_by(37) {
         let id = member.record().id();
         let decoded = SystemId::from_raw(id.raw()).unwrap();
@@ -228,7 +233,12 @@ fn every_member_s_id_round_trips_and_resolves_to_it() {
         cell: [8, 8, 8],
         index: 0,
     };
-    assert!(DwarfCoreMemberId::new(1, inner).is_err());
+    assert_eq!(
+        DwarfCoreMemberId::new(1, inner),
+        Err(crate::id::BuildSystemIdError::NotCanonical(
+            crate::id::DecodeSystemIdError::InnerCellOwnedByLowerLevel
+        ))
+    );
     let listed = DwarfCoreMemberId::new(1, MemberSlot::FeatureLevel { index: 1 }).unwrap();
     let other = DwarfCoreMemberId::new(2, core.member_id(band, cell, 0).slot()).unwrap();
     for id in [past, listed, other] {
@@ -317,6 +327,19 @@ fn no_cell_of_a_core_under_the_headroom_expects_the_index() {
     assert!(error.expected > 8_192.0, "{error:?}");
     let message = error.to_string();
     assert!(!message.starts_with(char::is_uppercase) && !message.ends_with('.'));
+}
+
+/// P10.T7.b: no member of the core moves faster than its speed bound, the range query's pad.
+#[test]
+fn no_member_moves_faster_than_the_core_s_speed_bound() {
+    let bound = small().member_speed_bound().value();
+    let fastest = members()
+        .iter()
+        .map(|(_, _, m, _)| KilometresPerSecond::from(m.velocity().speed()).value())
+        .fold(0.0, f64::max);
+    assert!(fastest <= bound, "{fastest} km/s against {bound}");
+    let bulk = KilometresPerSecond::from(small().velocity().speed()).value();
+    assert!(fastest > bulk, "the members move about the bulk");
 }
 
 /// P10.T7.b: a member is a pure function of its ID and its core, whatever was placed before it.

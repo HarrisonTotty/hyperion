@@ -175,8 +175,9 @@ pub const OLD_SHARE: (f64, f64, f64, f64) = (0.8, -0.25, 0.3, 0.8);
 const BLACK_HOLE_PROGENITOR_MIN_MSUN: f64 = 20.0;
 
 /// The time a dwarf of stellar mass `mass` at infall goes on forming stars after its accretion,
-/// `τ_q`: 1 Gyr at and below 10⁷ M☉, 2 Gyr at 10⁸ M☉ and 9.5 Gyr at 10⁹ M☉ and above, linear in
-/// log₁₀ M★ between ([`QUENCHING_TIME_YR`]).
+/// `τ_q`: 1 Gyr at and below 10⁷ M☉ (ours: a reading of "< 2 Gyr" and "more rapid at lower
+/// `M_star`", below), 2 Gyr at 10⁸ M☉ and 9.5 Gyr at 10⁹ M☉ and above, linear in log₁₀ M★
+/// between ([`QUENCHING_TIME_YR`]).
 ///
 /// Wetzel, Tollerud and Weisz 2015 (ApJL 808, L27, abstract) find quenching after infall "< 2 Gyr"
 /// below 10⁸ M☉ and "more rapid at lower `M_star`", the timescale then increasing "rapidly …
@@ -438,10 +439,7 @@ impl DwarfCoreModel {
         let extent =
             jacobi_radius(galaxy, &spec.position(), mass.value(), dispersion).min(EXTENT_LIMIT_LY);
         let history = StarFormationHistory::of(infall, spec.accreted());
-        let key = ObjectKey::galaxy_item(ProgenitorKind::Recent(spec.progenitor()).number());
-        let offset = Stream::open(galaxy.seed(), tags::DWARF_CORE_METALLICITY, key)
-            .normal(0.0, MEAN_METALLICITY_SCATTER_DEX);
-        let fe_h = Dex::new(mass_metallicity(infall).value() + offset);
+        let fe_h = dwarf_mean_fe_h(galaxy, spec.progenitor(), infall);
         let composition = Composition::from_fe_h(fe_h, HeliumExcess::ZERO);
         let shape = ProfileShape::Plummer { scale };
         let classes = classes(
@@ -525,10 +523,11 @@ impl DwarfCoreModel {
     /// Walker et al. 2007 (ApJ 667, L53, abstract) find in each of seven dwarf spheroidals a
     /// dispersion "of order 10 km/s that remains approximately constant with distance from the
     /// dSph center, out to and in some cases beyond the radius at which the mean surface
-    /// brightness falls to the background level", and an isotropic tracer in the isothermal halo
-    /// the extent assumes has a constant σ. A Plummer sphere's shape falls to 0.56 σ₀ at three
-    /// scales (main's ruling of 2026-10-30, after the research lane `research-p10`, its advice
-    /// §2).
+    /// brightness falls to the background level", where a Plummer sphere's shape falls to
+    /// 0.56 σ₀ at three scales (main's ruling of 2026-10-30, after the research lane
+    /// `research-p10`, its advice §2). Their dwarf spheroidals are of about 10⁵·⁵–10⁷·³ M☉: above
+    /// about 2 × 10⁷ M☉, where the Magellanic Clouds and Sagittarius rotate, the flat profile is an
+    /// extrapolation.
     #[must_use]
     pub fn dispersion_at(&self, _r: LightYears) -> KilometresPerSecond {
         KilometresPerSecond::new(self.dispersion)
@@ -563,6 +562,21 @@ impl DwarfCoreModel {
     pub const fn grid(&self) -> &NestedGrid {
         &self.grid
     }
+}
+
+/// The youngest age, years, a member's turn-off is read at: 10⁴, past the zero of a history still
+/// forming stars, as plan 09's centre reads it.
+pub(crate) const YOUNGEST_TURN_OFF_AGE_YR: f64 = 1e4;
+
+/// The mean \[Fe/H\] of recent progenitor `progenitor`'s stars, of stellar mass `infall` at
+/// infall: Kirby et al. 2013's eq. 4 plus its offset, two words of `dwarf.core.metallicity`
+/// keyed by the progenitor's number, which its core and its tube share (P10.T7.a, P10.T8.a).
+#[must_use]
+pub(crate) fn dwarf_mean_fe_h(galaxy: &Galaxy, progenitor: u32, infall: SolarMasses) -> Dex {
+    let key = ObjectKey::galaxy_item(ProgenitorKind::Recent(progenitor).number());
+    let offset = Stream::open(galaxy.seed(), tags::DWARF_CORE_METALLICITY, key)
+        .normal(0.0, MEAN_METALLICITY_SCATTER_DEX);
+    Dex::new(mass_metallicity(infall).value() + offset)
 }
 
 /// The Jacobi radius, ly, of a core of `stars` M☉ at `position` (m, about the galactic centre)

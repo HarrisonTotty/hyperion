@@ -1399,7 +1399,8 @@ pericentre_speed()`, `|L| ÷ r_p` of the spherical approximation, which is `√(
     tail's weight grows with mass, not its length. _Deferred finding (2026-10-13 rule):_ satellites
     go on forming stars after infall, longer the more massive (Wetzel, Tollerud and Weisz 2015,
     Fig. 3: under 1.5 Gyr below 10⁷ M☉, 2–3 Gyr at 10⁷–10⁸, about 5 Gyr at 10⁸–10⁹), which the
-    plan's "ending at accretion" leaves out.
+    plan's "ending at accretion" leaves out. _Superseded by main's ruling of 2026-10-30:_ the tail
+    ends a quenching time after the accretion ("P10.T7.b as built").
   - _Metallicity, as ruled (issue #123, point 4)._ Eq. 4 at `accreted_mass` plus one 0.17 dex
     normal on `dwarf.core.metallicity`; the science check found eq. 4 fitted over 10³·⁷–10⁸·⁰ M☉
     (Coma Berenices to IC 1613, Table 4), the paper's "unbroken … up to 5 × 10⁸ M☉ (NGC 205)" not
@@ -1971,7 +1972,8 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
     `SystemOrigin::GlobalListMember { attempt }`, with an arm in every match on the origin;
     `TraceMotionError::GlobalListMember` and `Drift::of_global_member`.
   - _`resolve_with`_ resolves a core's member by drawing the galaxy's `Debris` (about 0.2 s in
-    release) until P10.T4's list holds the cores' specifications; `resolve` still refuses it.
+    release) until P10.T4's list holds the cores' specifications, and refuses a core that fails
+    `check_index_headroom`; `resolve` still refuses it.
   - _Research-p10's notes, as ruled (2026-10-30)._ `dispersion_at` is flat; the tail ends
     `quenching_time` of the infall mass after the accretion (1 Gyr to 10⁷ M☉, 2 at 10⁸, 9.5 from
     10⁹, linear in log M★), so the class tables move (T7.a's tests restated).
@@ -1989,9 +1991,14 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
     whoever plays a core calls it first.
   - _For T8.a._ A dwarf's tube takes the core's history only to the tube's own stripping, not the
     stars the core forms after it (research-p10 §4).
-  - _Tests._ Fast, `dwarf_core::members::tests`: the laws, the profiles by KS, IDs and resolving,
-    stars of their class, the headroom, order independence, the golden. Slow, by name:
-    `resolve_with_reaches_a_drawn_core_s_members`, and plan 12's
+  - _Research-p10's item 3, measured again._ Of the 252 drawn cores, 59 have their extent inside
+    their half-mass radius and 35 inside their Plummer scale; the research's cap, `a ≤ r_J ÷ 2`,
+    is not applied (low confidence, not ruled).
+  - _Tests._ Fast, `dwarf_core::members::tests`: the laws, the profiles by KS, every ID's round
+    trip and resolving, stars of their class, the speed bound, the headroom, order independence,
+    the golden; `dwarf_core::tests::the_tail_ends_a_mass_dependent_quenching_time_after_the_accretion`;
+    `placement::resolve::tests::stream_and_dwarf_core_members_are_not_generated_by_resolve`. Slow,
+    by name: `resolve_with_reaches_a_drawn_core_s_members`, and plan 12's
     `source_horizon_sweep_every_source_answers_at_the_horizons_start` gains the cores' row.
 - **P10.T8.a as built (lane `p10-t6c`, 2026-10-30, at `GENERATOR_VERSION` 24).** No served
   output moved. Tags `stream.member.age` and `stream.member.abundance` (`System`) appended.
@@ -2009,10 +2016,13 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
   - _A dwarf's tube._ The core's classes over `StarFormationHistory::of(infall, accreted)` cut at
     the tube's last pericentre, at the core's mean [Fe/H] and spread; the infall mass and time are
     the galaxy's recent progenitor `j`'s.
-  - _For T8.b._ `draw_star` keeps a mass by its weight's odds over the band's greatest, a living
-    star below its age's turn-off and a dead one only if its remnant is a white dwarf; as in plan
-    09's clusters, a star past the turn-off but not yet a remnant is of the white-dwarf class.
-    The count's mean system mass is the stream's own, `mean_member_mass`.
+  - _For T8.b._ `draw_star` (a `MemberStar`) keeps a mass by its weight's odds over the band's
+    greatest, a living star below its age's turn-off and a dead one only if its remnant is a white
+    dwarf; as in plan 09's clusters, a star past the turn-off but not yet a remnant is of the
+    white-dwarf class.
+  - _Test restated._ An orphan's band A share equals the canonical evolved share (`K = 0`); only a
+    living globular's lies above it, so most streams, orphans, are not bottom-heavy (a question for
+    main).
   - _Tests._ Fast, `members::tests`: the shares, no NS or BH, a dwarf's tube's ages and [Fe/H];
     `dwarf_core::tests::a_history_cut_at_an_age_keeps_the_older_stars_only`. Slow, by name:
     `a_living_globular_s_stream_carries_what_its_cluster_keeps` (`tests/global_list_debris.rs`).
@@ -2021,12 +2031,15 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
   (`Cell`) and `stream.member.position` (`System`) appended.
   - _Items._ In `global_list::members`: `expected_members`, `stream_member_id`,
     `stream_member_count`, `stream_member`, `stream_cell_members` and `resolve_stream_member`,
-    each taking the `TubeTable` and the stream's `StreamBandShares`; `TubeCell` from a
-    `StreamMemberId`. `resolve_with` resolves a stream's member with the lookup's tube and the
-    spec drawn from the galaxy's `Debris` (as for cores, until P10.T4's list).
-  - _The mean._ The tube's mass over the stream's own mean member mass (T8.a's, not the halo's
-    the along cells were cut with) and its along cells, times the noise, the band's share and the
-    two normal masses over the cut's. The means sum to the tube's expected members to 10⁻⁹.
+    each taking the `TubeTable` and the stream's `StreamBandShares`
+    (`StreamBandShares::mean_system_mass`). `resolve_with` resolves a stream's member with the
+    lookup's tube and the spec drawn from the galaxy's `Debris` (as for cores, until P10.T4's list).
+  - _The mean._ The tube's mass over the halo's mean system mass, companions included (Design note
+    7, as the cores and the share count), and its along cells, times the noise, the band's share
+    and the two normal masses over the cut's. The means sum to the tube's expected members to 10⁻⁹.
+  - _The fullest cell._ `sagittarius_like`'s axis cell at its greatest noise expects 42.5 M dwarfs
+    against the plan's "about 180" (along cells held at 16,384; the cell about 0.0025 of a
+    cross-section); pinned as found at 30–90.
   - _A member._ `u` uniform in its along cell, `a` and `b` by the truncated normal's inverse
     transform, its position `locate`'s, so `cells_touching` finds it; its velocity, for T8.c, the
     tube's mean velocity.

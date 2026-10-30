@@ -119,9 +119,11 @@ fn no_member_of_a_globular_stream_is_a_neutron_star_or_a_black_hole() {
             for index in 0..400 {
                 let system = member(number, band, index);
                 let composition = shares.composition(galaxy, system);
-                let (class, mass, attempt, age) = shares
+                let star = shares
                     .draw_star(galaxy, band, system, &composition)
                     .expect("a band with members draws a star");
+                let (class, mass, attempt, age) =
+                    (*star.class(), star.mass(), star.attempt(), star.age());
                 assert!(
                     matches!(class.kind, ClassKind::Living | ClassKind::WhiteDwarf),
                     "{name} {band:?}: {class:?}"
@@ -197,9 +199,10 @@ fn a_dwarf_s_tube_holds_no_star_younger_than_its_last_stripping() {
     for index in 0..2_000 {
         let system = member(spec.number().get(), MassBand::A, index);
         let composition = shares.composition(galaxy, system);
-        let (_, _, _, age) = shares
+        let age = shares
             .draw_star(galaxy, MassBand::A, system, &composition)
-            .expect("band A holds members");
+            .expect("band A holds members")
+            .age();
         assert!(
             age.value() >= last_pericentre.value() - 1.0,
             "{}",
@@ -226,9 +229,9 @@ fn a_dwarf_s_tube_holds_no_star_younger_than_its_last_stripping() {
 }
 
 /// The synthetic tube's radius, ly, and the tube's mass, M☉: a stream on a circle in the plane
-/// with 2,000 M☉ over 64 along cells.
+/// with 3,000 M☉ over 64 along cells.
 const RADIUS: f64 = 50_000.0;
-const MASS: f64 = 2_000.0;
+const MASS: f64 = 3_000.0;
 
 /// `per_arm` tracers from each Lagrange point of a stream on a circle of `radius` ly in the
 /// galactic plane, one radian an arm, 100 ly wide, at 220 km/s with dispersions of 3, 1 and 0.5
@@ -355,10 +358,10 @@ fn synthetic_members() -> &'static Synthetic {
 fn the_counts_along_follow_the_line_density_and_the_gap_noise() {
     let (tube, shares, _, by_along, counted) = synthetic_members();
     let cells = tube.along_cells();
-    let per_cell = tube.mass().value() / (shares.mean_member_mass().value() * f64::from(cells));
+    let per_cell = tube.mass().value() / (shares.mean_system_mass().value() * f64::from(cells));
     let expected: Vec<f64> = (0..cells).map(|i| per_cell * tube.noise(i)).collect();
     let total: f64 = expected.iter().sum();
-    let want = tube.mass().value() / shares.mean_member_mass().value();
+    let want = tube.mass().value() / shares.mean_system_mass().value();
     assert!((total / want - 1.0).abs() < 1e-9, "{total} {want}");
     // The across factors of one along cell and band sum to 1.
     let one: f64 = every_cell(tube)
@@ -494,8 +497,9 @@ fn members_outside_the_root_cube_are_dropped_and_their_indices_kept() {
     assert!(placed < counted && placed > 0, "{placed} of {counted}");
 }
 
-/// P10.T8.b's golden: two test streams' tubes on the Milky Way fixture at 64 tracers an arm, a
-/// few cells' expected members and counts by band, and the first members of the fullest cells in
+/// P10.T8.b's golden: the three test streams' tubes on the Milky Way fixture at 64 tracers an
+/// arm (`pal5_like`'s a living globular's, which keeps a share of its stars, so its draw thins),
+/// a few cells' expected members and counts by band, and the first members of those cells in
 /// full. They move with the spray, the tube, the band shares and the members' draws.
 #[test]
 fn stream_members_golden() {
@@ -515,6 +519,7 @@ fn stream_members_golden() {
     let mut w = GoldenWriter::new();
     w.header(crate::GENERATOR_VERSION.get());
     for (name, spec) in [
+        ("pal5", pal5_like(&tables)),
         ("gd1", gd1_like(&tables)),
         ("sagittarius", sagittarius_like(&tables)),
     ] {

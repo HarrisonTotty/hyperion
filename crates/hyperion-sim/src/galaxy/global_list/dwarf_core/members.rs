@@ -76,7 +76,7 @@ use crate::units::{Dex, HeliumExcess, KilometresPerSecond, SolarMasses, Years};
 
 use super::super::DwarfCoreNumber;
 use super::super::members::GlobalMemberRecord;
-use super::{DwarfCoreModel, StarFormationHistory};
+use super::{DwarfCoreModel, StarFormationHistory, YOUNGEST_TURN_OFF_AGE_YR};
 
 /// Standard deviations of a Poisson count the index must spare (plan 03, Design note 6), as plan
 /// 09's centre spares.
@@ -112,10 +112,6 @@ impl Error for ExceedDwarfCoreIndexError {}
 /// features' bound is: a member's speed is the norm of its bulk plus its internal velocity, which
 /// can pass their sum by a few units in the last place.
 const SPEED_BOUND_MARGIN: f64 = 1e-9;
-
-/// The youngest age a turn-off is read at, years: 10⁴, as plan 09's centre reads it, past the
-/// zero a history still forming stars reaches.
-const YOUNGEST_TURN_OFF_AGE: f64 = 1e4;
 
 impl DwarfCoreModel {
     /// The ID of candidate `index` of `band` in `cell`.
@@ -168,6 +164,10 @@ impl DwarfCoreModel {
     /// Candidate `index` of `band` in `cell`, if the thinning keeps it and its draw does not
     /// exhaust its attempts, with its local position (ly from the core's centre). The index is
     /// not checked against the count.
+    ///
+    /// # Panics
+    ///
+    /// As [`member_id`](Self::member_id), for an index of 8,192 or more.
     #[must_use]
     pub fn candidate(
         &self,
@@ -181,6 +181,7 @@ impl DwarfCoreModel {
     }
 
     /// [`candidate`](Self::candidate) with the cell's bound and box given.
+    #[must_use]
     fn candidate_under(
         &self,
         galaxy: &Galaxy,
@@ -355,6 +356,7 @@ impl DwarfCoreModel {
 /// # Panics
 ///
 /// In debug builds, if the draw exhausts its attempts.
+#[must_use]
 fn draw_star(
     galaxy: &Galaxy,
     class: &MemberClass,
@@ -381,7 +383,7 @@ fn draw_star(
         let keep = match class.kind {
             ClassKind::Living | ClassKind::Tail => {
                 let turn_off = turn_off_mass(
-                    Years::new(age.value().max(YOUNGEST_TURN_OFF_AGE)),
+                    Years::new(age.value().max(YOUNGEST_TURN_OFF_AGE_YR)),
                     composition,
                 );
                 mass < turn_off.value()
@@ -409,6 +411,7 @@ fn draw_star(
 /// # Panics
 ///
 /// In debug builds, if the draw passes the index.
+#[must_use]
 fn count_from_mean(galaxy: &Galaxy, first: DwarfCoreMemberId, mean: f64) -> u16 {
     let word = SystemId::from(first).raw();
     let drawn = Stream::open(galaxy.seed(), tags::MEMBER_CELL, ObjectKey::cell(word)).poisson(mean);
@@ -422,6 +425,9 @@ fn count_from_mean(galaxy: &Galaxy, first: DwarfCoreMemberId, mean: f64) -> u16 
 
 /// The member `id` names in the core `model` of `galaxy`: a candidate in a cell, or nothing at
 /// feature level, whose classes wait on plan 09's supernova processes (module documentation).
+/// The model is its core's own ([`DwarfCoreModel::from_spec`]), which a saved ID does not carry,
+/// so a caller resolves through [`resolve_with`](crate::galaxy::placement::resolve_with), which
+/// refuses a core that fails [`DwarfCoreModel::check_index_headroom`].
 ///
 /// # Errors
 ///

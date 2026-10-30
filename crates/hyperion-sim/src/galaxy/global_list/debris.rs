@@ -201,7 +201,8 @@ pub(crate) fn living_globulars(galaxy: &Galaxy) -> Vec<StreamSpec> {
             );
             let window = stripping_time(&orbit, tidal, [last_merger, marks.age()]);
             let mass = h.mass_loss_rate * window.value();
-            if mass <= 0.0 {
+            // As `(mass > 0.0).then(..)` had it: a NaN mass keeps no stream.
+            if mass.is_nan() || mass <= 0.0 {
                 return None;
             }
             // What the cluster still holds sets what its stream holds (P10.T8.a): plan 09's model

@@ -849,7 +849,8 @@ fn cells_touching_holds_every_point_of_the_test_tubes_in_a_sphere() {
 }
 
 /// P10.T8.b: the fullest cell of `sagittarius_like`'s tube, on its axis at its along cell of
-/// greatest gap noise, expects some 70 M-dwarf members against the plan's "about 180", and no
+/// greatest gap noise, expects some 43 M-dwarf members against the plan's "about 180" (its along
+/// cells held at 16,384, the axis cell about 0.0025 of a cross-section; pinned as found), and no
 /// cell of the three test streams' tubes approaches the 13-bit index's 8,192.
 #[test]
 #[ignore = "slow: sprays three test streams of 2,000 tracers, 20,000 steps for the longest"]
@@ -885,7 +886,7 @@ fn the_fullest_cell_of_sagittarius_like_s_tube_stays_far_under_the_index() {
         );
         assert!(peak < 1_000.0, "{name}: {peak}");
         if *name == "sagittarius" {
-            assert!((40.0..120.0).contains(&peak), "{peak}");
+            assert!((30.0..90.0).contains(&peak), "{peak}");
         }
     }
 }

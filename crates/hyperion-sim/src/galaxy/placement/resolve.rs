@@ -101,8 +101,9 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
 /// which `lookup` gives (P10.T8.b), and a dwarf core's [`resolve_dwarf_core_member`] in its core's
 /// model (P10.T7.b); the stream's and the core's specifications are drawn from the galaxy's
 /// [`Debris`] until the list holds them (P10.T4). Either is [`ResolveSystemError::NoSuchSystem`]
-/// in a galaxy without its kinematic tables, whose debris is not defined, or for a stream or a
-/// core the galaxy does not have, which reads no tube.
+/// in a galaxy without its kinematic tables, whose debris is not defined, for a stream or a core
+/// the galaxy does not have, which reads no tube, or for a core whose fullest cell can pass its
+/// index ([`DwarfCoreModel::check_index_headroom`]).
 ///
 /// # Examples
 ///
@@ -187,6 +188,11 @@ fn resolve_core_member(
         .find(|core| core.number().get() == id.number())
         .ok_or(ResolveSystemError::NoSuchSystem)?;
     let model = DwarfCoreModel::from_spec(galaxy, spec);
+    // A core whose fullest cell can pass the index is not played (P10.T7.b): its clamped
+    // counts would drop members.
+    model
+        .check_index_headroom()
+        .map_err(|_| ResolveSystemError::NoSuchSystem)?;
     resolve_dwarf_core_member(galaxy, &model, id).map(|member| *member.record())
 }
 

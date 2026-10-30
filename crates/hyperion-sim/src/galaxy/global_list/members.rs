@@ -38,11 +38,13 @@
 //! Members are a Poisson process in the tube's own coordinates, cell by cell of a [`TubeCell`]
 //! and a band (Design notes 7 and 8):
 //!
-//! - **The mean** of a cell is the tube's mass over the stream's mean member mass and its along
-//!   cells, times the cell's gap noise, the band's share, and along each across axis the normal
-//!   distribution's mass over the cell's span divided by its mass within the cut at ±4 widths
-//!   ([`expected_members`]). So the means of every cell and band sum to the tube's mass over the
-//!   mean member mass, its expected members, to the gap noise's rounding.
+//! - **The mean** of a cell is the tube's mass over the halo's mean system mass and its along
+//!   cells (Design note 7; the halo's, companions included, as the dwarf cores and the discrete
+//!   share count, since a member draws its own companions), times the cell's gap noise, the band's
+//!   share, and along each across axis the normal distribution's mass over the cell's span divided
+//!   by its mass within the cut at ±4 widths ([`expected_members`]). So the means of every cell
+//!   and band sum to the tube's mass over the mean system mass, its expected members, to the gap
+//!   noise's rounding.
 //! - **The count** is a Poisson draw of that mean on `stream.cell`, keyed by `ObjectKey::cell` of
 //!   the raw ID of the cell's member 0 in its band, clamped at the 13-bit index's 8,192 with a
 //!   debug assertion, as plan 03 clamps a grid cell's.
@@ -89,8 +91,7 @@ use crate::units::{Dex, HeliumExcess, MetresPerSecond, SolarMasses, Years};
 
 use super::StreamOrigin;
 use super::dwarf_core::{
-    MEAN_METALLICITY_SCATTER_DEX, StarFormationHistory, classes, mass_metallicity,
-    metallicity_spread,
+    StarFormationHistory, YOUNGEST_TURN_OFF_AGE_YR, classes, dwarf_mean_fe_h, metallicity_spread,
 };
 use super::spec::{MassLoss, StreamSpec};
 use super::tube::{CUT_WIDTHS, TubeCell, TubeTable};
@@ -180,10 +181,6 @@ impl GlobalMemberRecord {
     }
 }
 
-/// The youngest age a turn-off is read at, years: 10⁴, past the zero of a history still forming
-/// stars, as plan 09's centre reads it.
-const YOUNGEST_TURN_OFF_AGE: f64 = 1e4;
-
 /// One band of a stream's members: the shares of its living stars and its white dwarfs in all the
 /// stream's members, their classes, and the greatest weight a mass of the band has.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -243,8 +240,9 @@ enum StreamStars {
 pub struct StreamBandShares {
     bands: [BandShare; 5],
     stars: StreamStars,
-    /// The members' mean present mass, M☉.
-    mean_mass: f64,
+    mean_member_mass: SolarMasses,
+    /// The halo's mean system mass, which a count divides the tube's mass by.
+    mean_system_mass: SolarMasses,
 }
 
 impl StreamBandShares {
@@ -268,6 +266,7 @@ impl StreamBandShares {
                 let bands =
                     MassBand::ALL.map(|band| cluster_band(f, band, turn_off, (kept, slope)));
                 Self::normalised(
+                    galaxy,
                     bands,
                     StreamStars::Cluster {
                         age: stars.age(),
@@ -293,11 +292,7 @@ impl StreamBandShares {
                     MassLoss::Steady(_) | MassLoss::Dissolved { .. } => Years::new(0.0),
                 };
                 let history = StarFormationHistory::of(infall, accreted).no_younger_than(stripped);
-                // The core's mean, offset on its own stream (P10.T7.a).
-                let key = ObjectKey::galaxy_item(ProgenitorKind::Recent(j).number());
-                let offset = Stream::open(galaxy.seed(), tags::DWARF_CORE_METALLICITY, key)
-                    .normal(0.0, MEAN_METALLICITY_SCATTER_DEX);
-                let fe_h = Dex::new(mass_metallicity(infall).value() + offset);
+                let fe_h = dwarf_mean_fe_h(galaxy, j, infall);
                 let composition = Composition::from_fe_h(fe_h, HeliumExcess::ZERO);
                 let counts = classes(
                     f,
@@ -326,6 +321,7 @@ impl StreamBandShares {
                     }
                 });
                 Self::normalised(
+                    galaxy,
                     bands,
                     StreamStars::Dwarf {
                         history,
@@ -337,9 +333,9 @@ impl StreamBandShares {
         }
     }
 
-    /// `bands` with their shares divided by their sum.
+    /// `bands` with their shares divided by their sum, in `galaxy`.
     #[must_use]
-    fn normalised(mut bands: [BandShare; 5], stars: StreamStars) -> Self {
+    fn normalised(galaxy: &Galaxy, mut bands: [BandShare; 5], stars: StreamStars) -> Self {
         let total: f64 = bands.iter().map(|b| b.living + b.white_dwarfs).sum();
         assert!(
             total > 0.0 && total.is_finite(),
@@ -355,7 +351,8 @@ impl StreamBandShares {
         Self {
             bands,
             stars,
-            mean_mass: mass,
+            mean_member_mass: SolarMasses::new(mass),
+            mean_system_mass: galaxy.mean_system_mass(Population::Halo),
         }
     }
 
@@ -384,11 +381,19 @@ impl StreamBandShares {
         band.is_stellar().then(|| &self.bands[band.index()])
     }
 
-    /// The members' mean present mass: a living star's initial mass, a white dwarf's its
-    /// Kalirai et al. 2008 mass.
+    /// The members' mean present mass, their primaries' alone: a living star's initial mass, a
+    /// white dwarf's its Kalirai et al. 2008 mass.
     #[must_use]
     pub fn mean_member_mass(&self) -> SolarMasses {
-        SolarMasses::new(self.mean_mass)
+        self.mean_member_mass
+    }
+
+    /// The mean system mass a count divides the tube's mass by: the halo's, companions included,
+    /// as the along cells were cut with (P10.T6.b) and the dwarf cores and the discrete share
+    /// count (P10.T3.d.a), since a member draws its own companions as a field star does.
+    #[must_use]
+    pub const fn mean_system_mass(&self) -> SolarMasses {
+        self.mean_system_mass
     }
 
     /// The composition of the member `system`: its globular's [Fe/H], or its dwarf's mean plus
@@ -409,9 +414,8 @@ impl StreamBandShares {
         }
     }
 
-    /// The star of the member `system` in `band`, of `composition` (module documentation): its
-    /// class, its primary's initial mass, the attempt its draws are read at and its age; `None` if
-    /// the band holds no member or the draw exhausts its attempts.
+    /// The star of the member `system` in `band`, of `composition` (module documentation); `None`
+    /// if the band holds no member or the draw exhausts its attempts.
     ///
     /// # Panics
     ///
@@ -423,7 +427,7 @@ impl StreamBandShares {
         band: MassBand,
         system: SystemId,
         composition: &Composition,
-    ) -> Option<(MemberClass, SolarMasses, u32, Years)> {
+    ) -> Option<MemberStar> {
         let share = self.band(band)?;
         if share.living + share.white_dwarfs <= 0.0 {
             return None;
@@ -447,7 +451,7 @@ impl StreamBandShares {
             let mark = masses.mark();
             let systemic = systemic_speed(&mut masses);
             let turn_off = turn_off_mass(
-                Years::new(age.value().max(YOUNGEST_TURN_OFF_AGE)),
+                Years::new(age.value().max(YOUNGEST_TURN_OFF_AGE_YR)),
                 composition,
             )
             .value();
@@ -483,13 +487,53 @@ impl StreamBandShares {
             } else {
                 continue;
             };
-            return Some((class, SolarMasses::new(mass), attempt, age));
+            return Some(MemberStar {
+                class,
+                mass: SolarMasses::new(mass),
+                attempt,
+                age,
+            });
         }
         debug_assert!(
             false,
             "a stream member of band {band:?} exhausted its attempts"
         );
         None
+    }
+}
+
+/// A stream member's star as [`StreamBandShares::draw_star`] draws it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MemberStar {
+    class: MemberClass,
+    mass: SolarMasses,
+    attempt: u32,
+    age: Years,
+}
+
+impl MemberStar {
+    /// Its class: its band's living stars or white dwarfs.
+    #[must_use]
+    pub const fn class(&self) -> &MemberClass {
+        &self.class
+    }
+
+    /// Its primary's initial mass.
+    #[must_use]
+    pub const fn mass(&self) -> SolarMasses {
+        self.mass
+    }
+
+    /// The attempt its draws are read at, which its record's origin carries.
+    #[must_use]
+    pub const fn attempt(&self) -> u32 {
+        self.attempt
+    }
+
+    /// Its age at the epoch.
+    #[must_use]
+    pub const fn age(&self) -> Years {
+        self.age
     }
 }
 
@@ -605,7 +649,7 @@ pub fn expected_members(
         return 0.0;
     }
     let per_cell =
-        tube.mass().value() / (shares.mean_member_mass().value() * f64::from(tube.along_cells()));
+        tube.mass().value() / (shares.mean_system_mass().value() * f64::from(tube.along_cells()));
     let cut = cut_mass();
     let across = cell
         .across_widths()
@@ -628,6 +672,12 @@ pub fn stream_member_id(
     assert!(
         band.is_stellar(),
         "a stream's members are stars, not {band:?}"
+    );
+    assert!(
+        cell.along() < tube.along_cells(),
+        "the tube has {} along cells, not {}",
+        tube.along_cells(),
+        cell.along()
     );
     let along = u16::try_from(cell.along()).expect("a tube's along cells number at most 16,384");
     StreamMemberId::new(
@@ -710,20 +760,20 @@ pub fn stream_member(
         return None;
     }
     let composition = shares.composition(galaxy, system);
-    let (class, mass, attempt, age) = shares.draw_star(galaxy, band, system, &composition)?;
+    let star = shares.draw_star(galaxy, band, system, &composition)?;
     let record = SystemRecord::from_parts(
         system,
         position,
         SystemOrigin::GlobalListMember {
-            attempt: u16::try_from(attempt).expect("an attempt below 4,096 fits in u16"),
+            attempt: u16::try_from(star.attempt()).expect("an attempt below 4,096 fits in u16"),
         },
         Population::Halo,
-        mass,
-        age,
+        star.mass(),
+        star.age(),
     );
     Some(GlobalMemberRecord::new(
         record,
-        class,
+        *star.class(),
         composition,
         member_velocity(galaxy, tube, system, u),
     ))
@@ -763,6 +813,38 @@ fn member_velocity(
 /// # Panics
 ///
 /// As [`stream_member_count`].
+///
+/// # Examples
+///
+/// A query's sphere about a point of a stream's tube, its members walked cell by cell, as
+/// plan 10's query path does (P10.T9):
+///
+/// ```no_run
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::global_list::members::{StreamBandShares, stream_cell_members};
+/// use hyperion_sim::galaxy::global_list::{Debris, TubeTable};
+/// use hyperion_sim::galaxy::imf::MassBand;
+/// use hyperion_sim::galaxy::params::GalaxyParams;
+/// use hyperion_sim::units::LightYears;
+///
+/// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?
+///     .with_full_potential();
+/// let debris = Debris::generate(&galaxy);
+/// let spec = &debris.streams()[0];
+/// let tube = TubeTable::build(&galaxy, spec)?;
+/// let shares = StreamBandShares::of(&galaxy, spec);
+/// let centre = tube.locate(0.5, 0.0, 0.0);
+/// let mut members = Vec::new();
+/// for cell in tube.cells_touching(&centre, LightYears::new(50.0)) {
+///     stream_cell_members(&galaxy, &tube, &shares, cell, MassBand::A, &mut members);
+///     // Each lies in its cell, which the sphere may or may not reach: the query tests it.
+///     for member in &members {
+///         let _distance = member.record().epoch_position().distance_to(&centre);
+///     }
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 pub fn stream_cell_members(
     galaxy: &Galaxy,
     tube: &TubeTable,
@@ -779,7 +861,9 @@ pub fn stream_cell_members(
     out.extend((0..count).filter_map(|i| stream_member(galaxy, tube, shares, cell, band, i)));
 }
 
-/// The member `id` names in the stream of `tube`, whose band shares are `shares`.
+/// The member `id` names in the stream of `tube`, whose band shares are `shares`: those of the
+/// stream's own specification ([`StreamBandShares::of`]), which a saved ID does not carry, so a
+/// caller resolves through [`resolve_with`](crate::galaxy::placement::resolve_with) and its list.
 ///
 /// # Errors
 ///
