@@ -2974,3 +2974,198 @@ fn the_record_at_a_pressure_reads_the_compressed_density() {
         );
     }
 }
+
+// P14.T54.b.l's performance lane: the isotherm's shared powers and the compression's steps, each
+// against the direct computation it stands in for, to the bit.
+
+/// `φʳ_δ` and `φʳ_δδ` of `equation` at `density` and `temperature` term by term, every power a
+/// direct [`math::powi`] or [`math::powf`] and every exponential its own [`math::exp`], as the
+/// equation first evaluated them before P14.T54.b.l shared them: the oracle of
+/// [`HelmholtzResidual::density_derivatives`] and of its isotherm's.
+fn direct_density_derivatives(
+    equation: &HelmholtzResidual,
+    density: f64,
+    temperature: f64,
+) -> (f64, f64) {
+    let delta = density / equation.reducing_density.value();
+    let tau = equation.reducing_temperature.value() / temperature;
+    let (mut first, mut second) = (0.0, 0.0);
+    for term in equation.power {
+        let d = f64::from(term.d);
+        let tau_t = math::powf(tau, term.t);
+        if term.c == 0 {
+            first += term.n * d * math::powi(delta, term.d - 1) * tau_t;
+            second += term.n * d * (d - 1.0) * math::powi(delta, term.d - 2) * tau_t;
+        } else {
+            let c = f64::from(term.c);
+            let delta_c = math::powi(delta, term.c);
+            let e = math::exp(-delta_c);
+            let g = d - c * delta_c;
+            first += term.n * e * math::powi(delta, term.d - 1) * tau_t * g;
+            second += term.n
+                * e
+                * math::powi(delta, term.d - 2)
+                * tau_t
+                * (g * (d - 1.0 - c * delta_c) - c * c * delta_c);
+        }
+    }
+    for term in equation.gaussian {
+        let d = f64::from(term.d);
+        let dd = delta - term.epsilon;
+        let tt = tau - term.gamma;
+        let e = math::exp(-term.alpha * dd * dd - term.beta * tt * tt);
+        let tau_t = math::powf(tau, term.t);
+        let delta_d = math::powi(delta, term.d);
+        first += term.n * delta_d * tau_t * e * (d / delta - 2.0 * term.alpha * dd);
+        second += term.n
+            * tau_t
+            * e
+            * (-2.0 * term.alpha * delta_d + 4.0 * term.alpha * term.alpha * delta_d * dd * dd
+                - 4.0 * d * term.alpha * math::powi(delta, term.d - 1) * dd
+                + d * (d - 1.0) * math::powi(delta, term.d - 2));
+    }
+    for term in equation.non_analytic {
+        let dm = delta - 1.0;
+        let tm = tau - 1.0;
+        let dm2 = dm * dm;
+        let half_inverse_beta = 1.0 / (2.0 * term.beta);
+        let theta = (1.0 - tau) + term.big_a * math::powf(dm2, half_inverse_beta);
+        let distance = theta * theta + term.big_b * math::powf(dm2, term.a);
+        let psi = math::exp(-term.big_c * dm2 - term.big_d * tm * tm);
+        let psi_d = -2.0 * term.big_c * dm * psi;
+        let psi_dd = (2.0 * term.big_c * dm2 - 1.0) * 2.0 * term.big_c * psi;
+        let (distance_d, distance_dd) = if dm2 > 0.0 {
+            let d1 = dm
+                * (term.big_a * theta * 2.0 / term.beta * math::powf(dm2, half_inverse_beta - 1.0)
+                    + 2.0 * term.big_b * term.a * math::powf(dm2, term.a - 1.0));
+            let inner = math::powf(dm2, half_inverse_beta - 1.0);
+            let d2 = d1 / dm
+                + dm2
+                    * (4.0 * term.big_b * term.a * (term.a - 1.0) * math::powf(dm2, term.a - 2.0)
+                        + 2.0 * term.big_a * term.big_a / (term.beta * term.beta) * inner * inner
+                        + term.big_a * theta * 4.0 / term.beta
+                            * (half_inverse_beta - 1.0)
+                            * math::powf(dm2, half_inverse_beta - 2.0));
+            (d1, d2)
+        } else {
+            (0.0, 0.0)
+        };
+        let power = math::powf(distance, term.b);
+        let power_d = term.b * math::powf(distance, term.b - 1.0) * distance_d;
+        let power_dd = term.b
+            * (math::powf(distance, term.b - 1.0) * distance_dd
+                + (term.b - 1.0) * math::powf(distance, term.b - 2.0) * distance_d * distance_d);
+        first += term.n * (power * (psi + delta * psi_d) + power_d * delta * psi);
+        second += term.n
+            * (power * (2.0 * psi_d + delta * psi_dd)
+                + 2.0 * power_d * (psi + delta * psi_d)
+                + power_dd * delta * psi);
+    }
+    for term in equation.associating {
+        let d = f64::from(term.d);
+        let dd = delta - term.epsilon;
+        let tt = tau - term.gamma;
+        let e = math::exp(-term.eta * dd * dd + 1.0 / (term.beta * tt * tt + term.b));
+        let tau_t = math::powf(tau, term.t);
+        let delta_d = math::powi(delta, term.d);
+        first += term.n * delta_d * tau_t * e * (d / delta - 2.0 * term.eta * dd);
+        second += term.n
+            * tau_t
+            * e
+            * (-2.0 * term.eta * delta_d + 4.0 * term.eta * term.eta * delta_d * dd * dd
+                - 4.0 * d * term.eta * math::powi(delta, term.d - 1) * dd
+                + d * (d - 1.0) * math::powi(delta, term.d - 2));
+    }
+    (first, second)
+}
+
+/// Every compressible row's equation over its liquid range and from a thin gas to a liquid half as
+/// dense again, its reduced density 1 exactly among them: the equation's derivatives and its
+/// isotherm's are the direct computation's to the bit.
+#[test]
+fn the_isotherm_s_shared_powers_give_the_direct_derivatives() {
+    for id in compressible_rows() {
+        let substance = id.substance();
+        let key = substance.key();
+        let (equation, diagram) = equation_of_state(substance).unwrap();
+        let (triple, critical) = (
+            diagram.triple_temperature().value(),
+            diagram.critical_temperature().value(),
+        );
+        let reducing = equation.reducing_density().value();
+        for fraction in [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99, 0.999, 1.0, 1.2] {
+            let t = triple + (critical - triple) * fraction;
+            let isotherm = equation.isotherm(Kelvin::new(t));
+            for scale in [1e-4, 0.01, 0.2, 0.9, 1.0, 1.1, 2.0, 2.5, 3.0, 3.5] {
+                let rho = KilogramsPerCubicMetre::new(reducing * scale);
+                let (first, second) = direct_density_derivatives(equation, rho.value(), t);
+                let ours = equation.density_derivatives(rho, Kelvin::new(t));
+                let along = isotherm.density_derivatives(rho);
+                for (got, want) in [
+                    (ours.first, first),
+                    (ours.second, second),
+                    (along.first, first),
+                    (along.second, second),
+                ] {
+                    assert!(
+                        got.total_cmp(&want).is_eq(),
+                        "{key} at {t} K, {} kg m⁻³: {got:e} against {want:e}",
+                        rho.value()
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The two Newton solves, which stop where a density repeats, end where their fixed counts of
+/// single steps do, to the bit: the saturated liquid's four steps by the equation's pressure and
+/// `κ_T` as the release writes them, and the compression's [`COMPRESSION_STEPS`] from it, over
+/// every compressible row's liquid range and from just above its vapour pressure to past the
+/// ceiling.
+#[test]
+fn the_newton_solves_end_where_their_steps_do() {
+    use super::super::helmholtz::COMPRESSION_STEPS;
+    for id in compressible_rows() {
+        let substance = id.substance();
+        let key = substance.key();
+        let (equation, diagram) = equation_of_state(substance).unwrap();
+        let (triple, critical) = (
+            diagram.triple_temperature().value(),
+            diagram.critical_temperature().value(),
+        );
+        for fraction in [0.0, 0.05, 0.2, 0.4, 0.6, 0.8, 0.9, 0.95, 0.99, 0.999] {
+            let t = Kelvin::new(triple + (critical - triple) * fraction);
+            let saturated = substance.grain_density(CondensedPhase::Liquid, t).unwrap();
+            let vapour = diagram.saturation_pressure(t);
+            let mut stepped = saturated;
+            for _ in 0..4 {
+                let miss = vapour.value() - equation.pressure(stepped, t).value();
+                let step =
+                    miss * stepped.value() * equation.isothermal_compressibility_per_pa(stepped, t);
+                stepped = KilogramsPerCubicMetre::new(stepped.value() + step);
+            }
+            let at_vapour = equation.density_at_pressure(saturated, vapour, t);
+            assert_same_bits(at_vapour.value(), stepped.value());
+            for p in [
+                vapour.value() * 1.01 + 1e3,
+                vapour.value() + 1e6,
+                22.5e6_f64.max(vapour.value() * 1.5),
+                1e8,
+                1e9,
+                3e9,
+            ] {
+                let target = Pascals::new(p);
+                let mut stepped = at_vapour;
+                for _ in 0..COMPRESSION_STEPS {
+                    stepped = equation.compressed_density_in(stepped, target, t, 1);
+                }
+                let rho = equation.compressed_density(at_vapour, target, t);
+                assert!(
+                    rho.value().total_cmp(&stepped.value()).is_eq(),
+                    "{key} at {t:?} under {p} Pa: {rho:?} against {stepped:?}"
+                );
+            }
+        }
+    }
+}

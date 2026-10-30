@@ -338,7 +338,17 @@ impl HelmholtzResidual {
         temperature: Kelvin,
     ) -> DensityDerivatives {
         let tau = self.reducing_temperature.value() / temperature.value();
-        self.density_derivatives_with(density, tau, |_, t| math::powf(tau, t))
+        self.density_derivatives_with(density, tau, |_, t| math::powf(tau, t), self.delta_top())
+    }
+
+    /// The highest power of δ the terms' derivatives in δ read: a power term's d − 1 and c, and a
+    /// Gaussian or associating term's d ([`DeltaPowers`]).
+    #[must_use]
+    fn delta_top(&self) -> i32 {
+        let power = self.power.iter().map(|term| (term.d - 1).max(term.c));
+        let gaussian = self.gaussian.iter().map(|term| term.d);
+        let associating = self.associating.iter().map(|term| term.d);
+        power.chain(gaussian).chain(associating).fold(0, i32::max)
     }
 
     /// The equation along the isotherm at `temperature`, its τ-powers taken once
@@ -360,20 +370,24 @@ impl HelmholtzResidual {
             temperature,
             tau,
             tau_t,
+            delta_top: self.delta_top(),
         }
     }
 
     /// [`density_derivatives`](Self::density_derivatives) at `density` and the inverse reduced
     /// temperature `tau`, with `tau_t(k, t)` giving τ^t of the `k`-th term counted over the power,
-    /// Gaussian and associating terms in that order, `t` its exponent.
+    /// Gaussian and associating terms in that order, `t` its exponent, and δ's powers taken up to
+    /// `delta_top` ([`delta_top`](Self::delta_top)).
     #[must_use]
     fn density_derivatives_with(
         &self,
         density: KilogramsPerCubicMetre,
         tau: f64,
         tau_t: impl Fn(usize, f64) -> f64,
+        delta_top: i32,
     ) -> DensityDerivatives {
         let delta = density.value() / self.reducing_density.value();
+        let powers = DeltaPowers::new(delta, delta_top);
         let mut first = 0.0;
         let mut second = 0.0;
         // δ^c and exp(−δ^c) of the last exponential term, which the next term with the same c
@@ -384,24 +398,24 @@ impl HelmholtzResidual {
             let d = f64::from(term.d);
             let tau_t = tau_t(k, term.t);
             if term.c == 0 {
-                first += term.n * d * math::powi(delta, term.d - 1) * tau_t;
-                second += term.n * d * (d - 1.0) * math::powi(delta, term.d - 2) * tau_t;
+                first += term.n * d * powers.get(term.d - 1) * tau_t;
+                second += term.n * d * (d - 1.0) * powers.get(term.d - 2) * tau_t;
             } else {
                 let c = f64::from(term.c);
                 let (delta_c, e) = match shared {
                     Some((at, delta_c, e)) if at == term.c => (delta_c, e),
                     _ => {
-                        let delta_c = math::powi(delta, term.c);
+                        let delta_c = powers.get(term.c);
                         let e = math::exp(-delta_c);
                         shared = Some((term.c, delta_c, e));
                         (delta_c, e)
                     }
                 };
                 let g = d - c * delta_c;
-                first += term.n * e * math::powi(delta, term.d - 1) * tau_t * g;
+                first += term.n * e * powers.get(term.d - 1) * tau_t * g;
                 second += term.n
                     * e
-                    * math::powi(delta, term.d - 2)
+                    * powers.get(term.d - 2)
                     * tau_t
                     * (g * (d - 1.0 - c * delta_c) - c * c * delta_c);
             }
@@ -413,14 +427,14 @@ impl HelmholtzResidual {
             let tt = tau - term.gamma;
             let e = math::exp(-term.alpha * dd * dd - term.beta * tt * tt);
             let tau_t = tau_t(gaussian_from + k, term.t);
-            let delta_d = math::powi(delta, term.d);
+            let delta_d = powers.get(term.d);
             first += term.n * delta_d * tau_t * e * (d / delta - 2.0 * term.alpha * dd);
             second += term.n
                 * tau_t
                 * e
                 * (-2.0 * term.alpha * delta_d + 4.0 * term.alpha * term.alpha * delta_d * dd * dd
-                    - 4.0 * d * term.alpha * math::powi(delta, term.d - 1) * dd
-                    + d * (d - 1.0) * math::powi(delta, term.d - 2));
+                    - 4.0 * d * term.alpha * powers.get(term.d - 1) * dd
+                    + d * (d - 1.0) * powers.get(term.d - 2));
         }
         for term in self.non_analytic {
             let (first_term, second_term) = term.density_derivatives(delta, tau);
@@ -434,14 +448,14 @@ impl HelmholtzResidual {
             let tt = tau - term.gamma;
             let e = math::exp(-term.eta * dd * dd + 1.0 / (term.beta * tt * tt + term.b));
             let tau_t = tau_t(associating_from + k, term.t);
-            let delta_d = math::powi(delta, term.d);
+            let delta_d = powers.get(term.d);
             first += term.n * delta_d * tau_t * e * (d / delta - 2.0 * term.eta * dd);
             second += term.n
                 * tau_t
                 * e
                 * (-2.0 * term.eta * delta_d + 4.0 * term.eta * term.eta * delta_d * dd * dd
-                    - 4.0 * d * term.eta * math::powi(delta, term.d - 1) * dd
-                    + d * (d - 1.0) * math::powi(delta, term.d - 2));
+                    - 4.0 * d * term.eta * powers.get(term.d - 1) * dd
+                    + d * (d - 1.0) * powers.get(term.d - 2));
         }
         DensityDerivatives { first, second }
     }
@@ -667,6 +681,43 @@ impl HelmholtzResidual {
     }
 }
 
+/// How many powers of δ [`DeltaPowers`] holds, from δ⁻² up: to δ²¹, past every equation's
+/// highest (IAPWS-95's δ¹⁴).
+const DELTA_POWERS: usize = 24;
+
+/// δ^k for every k from −2 (a Gaussian term's d − 2 at d = 0) to an equation's highest, each
+/// [`math::powi`]`(δ, k)`, the call the terms made one by one: one evaluation of `φʳ_δ` and
+/// `φʳ_δδ` took 111 of them for IAPWS-95's 56 terms, against 17 here. With [`iterate`]'s cycles
+/// of any period, `generate` over the first 20 sample systems fell from 595 to 557 ms (pod, 8
+/// vCPU, P14.T54.b.l's probe).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DeltaPowers {
+    delta: f64,
+    top: i32,
+    table: [f64; DELTA_POWERS],
+}
+
+impl DeltaPowers {
+    /// δ's powers from −2 to `top`, or to δ²¹, the table's last.
+    #[must_use]
+    fn new(delta: f64, top: i32) -> Self {
+        let mut table = [0.0; DELTA_POWERS];
+        for (slot, k) in table.iter_mut().zip(-2..=top) {
+            *slot = math::powi(delta, k);
+        }
+        Self { delta, top, table }
+    }
+
+    /// [`math::powi`]`(δ, k)`, to the bit: the table's where it holds k, the call otherwise.
+    #[must_use]
+    fn get(&self, k: i32) -> f64 {
+        match usize::try_from(k + 2) {
+            Ok(at) if k <= self.top && at < DELTA_POWERS => self.table[at],
+            _ => math::powi(self.delta, k),
+        }
+    }
+}
+
 /// One equation along one isotherm: τ^t of each of its terms, which every evaluation of `φʳ_δ`
 /// and `φʳ_δδ` at that temperature reads, taken once.
 ///
@@ -690,6 +741,8 @@ pub(crate) struct Isotherm<'a> {
     /// τ^t of every power term, then every Gaussian term, then every associating term, each in
     /// its published order.
     tau_t: Vec<f64>,
+    /// [`HelmholtzResidual::delta_top`].
+    delta_top: i32,
 }
 
 impl Isotherm<'_> {
@@ -699,8 +752,12 @@ impl Isotherm<'_> {
         &self,
         density: KilogramsPerCubicMetre,
     ) -> DensityDerivatives {
-        self.equation
-            .density_derivatives_with(density, self.tau, |k, _| self.tau_t[k])
+        self.equation.density_derivatives_with(
+            density,
+            self.tau,
+            |k, _| self.tau_t[k],
+            self.delta_top,
+        )
     }
 
     /// [`HelmholtzResidual::density_at_pressure`] on this isotherm: each step's pressure and
@@ -790,32 +847,39 @@ impl Isotherm<'_> {
     }
 }
 
+/// How many of [`iterate`]'s densities it keeps to find a repeat in: past
+/// [`COMPRESSION_STEPS`] and [`NEWTON_STEPS`], and the tests' longer runs.
+const ITERATE_HISTORY: usize = 32;
+
 /// The density after `steps` Newton steps `step` from `start`, or where a step gives `None`, the
 /// density it would step from: what a loop of `steps` calls gives, to the bit.
 ///
-/// A step reads the density alone, so once a density repeats, bit for bit, the rest of the steps
-/// are known and are not taken: a fixed point stays, and a 2-cycle alternates, the steps left
-/// giving which of its two the loop ends on.
+/// A step reads the density alone, so once a density repeats one before it, bit for bit, the
+/// sequence cycles from there and the rest of the steps are known, not taken: the cycle's period
+/// and the steps left give the density the loop ends on. Near its root a compression's rounding
+/// settles into cycles of one to six densities: over the first 20 sample systems the compression
+/// took 12.95 steps a call when only fixed points and 2-cycles ended it, and 11.14 at any period
+/// (P14.T54.b.l's count).
 #[must_use]
 fn iterate(start: f64, steps: usize, step: impl Fn(f64) -> Option<f64>) -> f64 {
+    let mut seen = [0.0; ITERATE_HISTORY];
+    seen[0] = start;
     let mut density = start;
-    let mut before: Option<f64> = None;
     for taken in 0..steps {
         let Some(next) = step(density) else {
             break;
         };
-        if next.total_cmp(&density).is_eq() {
-            break;
+        // Every density from the start to this one is kept while the history holds them.
+        if taken + 1 < ITERATE_HISTORY {
+            if let Some(from) = seen[..=taken]
+                .iter()
+                .position(|before| before.total_cmp(&next).is_eq())
+            {
+                let period = taken + 1 - from;
+                return seen[from + (steps - from) % period];
+            }
+            seen[taken + 1] = next;
         }
-        if before.is_some_and(|before| next.total_cmp(&before).is_eq()) {
-            let left = steps - taken - 1;
-            return if left.is_multiple_of(2) {
-                next
-            } else {
-                density
-            };
-        }
-        before = Some(density);
         density = next;
     }
     density
@@ -923,5 +987,63 @@ impl NonAnalyticTerm {
                 + power_tau * (psi + delta * psi_d)
                 + power_delta_tau * delta * psi);
         (second, mixed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
+    use super::*;
+
+    /// [`iterate`] is the plain loop of `steps` steps to the bit: over sequences of a tail of up
+    /// to five densities into a cycle of one to seven, and one whose step ends, at every count of
+    /// steps to 40, past its history.
+    #[test]
+    fn iterating_ends_where_the_plain_loop_does() {
+        let plain = |start: f64, steps: usize, step: &dyn Fn(f64) -> Option<f64>| {
+            let mut density = start;
+            for _ in 0..steps {
+                let Some(next) = step(density) else {
+                    break;
+                };
+                density = next;
+            }
+            density
+        };
+        for tail in 0..=5_u32 {
+            for period in 1..=7_u32 {
+                // The densities 1, 2, …: the tail's, then the cycle's, whose last returns to its
+                // first.
+                let last = tail + period;
+                let step = |x: f64| {
+                    let next = if x.total_cmp(&f64::from(last)).is_eq() {
+                        f64::from(tail + 1)
+                    } else {
+                        x + 1.0
+                    };
+                    Some(next)
+                };
+                for steps in 0..=40 {
+                    assert_same_bits(iterate(1.0, steps, step), plain(1.0, steps, &step));
+                }
+            }
+        }
+        let ending = |x: f64| (x < 4.0).then_some(x + 1.0);
+        for steps in 0..=40 {
+            assert_same_bits(iterate(1.0, steps, ending), plain(1.0, steps, &ending));
+        }
+    }
+
+    /// [`DeltaPowers`] gives [`math::powi`]'s bits at every exponent, inside its table and past
+    /// it.
+    #[test]
+    fn the_powers_of_delta_are_powi_s() {
+        for delta in [0.0, 1e-3, 0.37, 1.0, 1.0 + 1e-9, 2.8, 3.5] {
+            let powers = DeltaPowers::new(delta, 14);
+            for k in -4..=30 {
+                assert_same_bits(powers.get(k), math::powi(delta, k));
+            }
+        }
     }
 }
