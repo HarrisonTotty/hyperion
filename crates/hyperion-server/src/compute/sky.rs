@@ -68,11 +68,14 @@ use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
+use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+use hyperion_sim::galaxy::features::catalogue::{FeatureCellCache, FeatureCellContents};
+use hyperion_sim::galaxy::features::gas_overlay::FeatureGas;
+use hyperion_sim::galaxy::gas::modifiers::{GasModifier, GasModifierSource};
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::placement::CellKey;
-use hyperion_sim::id::Layer;
+use hyperion_sim::id::{FeatureCell, Layer};
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::band::{
@@ -93,13 +96,14 @@ use hyperion_sim::sky::limits::{
     self, EyeCutSteps, EyeVisibility, Glare, PRE_PASS_SPEC, PrePassRows,
 };
 use hyperion_sim::sky::luminosity::LuminosityTables;
-use hyperion_sim::units::{LightYears, Magnitudes};
+use hyperion_sim::time::UniverseTime;
+use hyperion_sim::units::{LightYears, Magnitudes, Years};
 use tokio::sync::mpsc;
 use tokio::sync::oneshot::error::RecvError;
 
 use super::{
     CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver, Priority,
-    SharedSkyCellCache,
+    SharedFeatureCellCache, SharedSkyCellCache,
 };
 use crate::limits::BULK_QUEUE_CAPACITY;
 
@@ -401,7 +405,8 @@ impl fmt::Display for ForceSkyCapsError {
 impl Error for ForceSkyCapsError {}
 
 /// What a sky's jobs read beside the galaxy: its luminosity tables, the brightness envelope and its
-/// cells' offset bounds (Design notes 7, 8 and 10).
+/// cells' offset bounds (Design notes 7, 8 and 10), and, once plan 09's feature members are served,
+/// the feature cells its jobs' gas looks features up in (P09.T40.a).
 ///
 /// Built once per galaxy and kept by the [`SkyTablesService`](super::SkyTablesService).
 #[derive(Debug)]
@@ -409,6 +414,7 @@ pub(crate) struct SkyTables {
     tables: LuminosityTables,
     envelope: BrightnessEnvelope,
     offsets: CellOffsets,
+    features: Option<SkyFeatureCells>,
 }
 
 impl SkyTables {
@@ -420,20 +426,53 @@ impl SkyTables {
             tables,
             envelope: BrightnessEnvelope::build(galaxy),
             offsets: CellOffsets::build(galaxy),
+            features: None,
         }
     }
 
-    /// The bytes the tables, the envelope and the offset bounds own on the heap.
+    /// These tables, whose jobs take plan 09's features' gas from the feature cells `cells` holds
+    /// of the galaxy `key` names (P09.T40.a): what the [`SkyTablesService`](super::SkyTablesService)
+    /// builds when the feature members are served.
+    #[must_use]
+    pub(crate) fn with_features(self, cells: Arc<SharedFeatureCellCache>, key: GalaxyKey) -> Self {
+        Self {
+            features: Some(SkyFeatureCells { cells, key }),
+            ..self
+        }
+    }
+
+    /// The bytes the tables, the envelope and the offset bounds own on the heap. The feature cells
+    /// are the server's shared cache's, charged there.
     #[must_use]
     pub(crate) fn heap_bytes(&self) -> usize {
         self.tables.heap_bytes() + self.envelope.heap_bytes() + self.offsets.heap_bytes()
     }
 
-    /// A job's own context over these tables, with a noise cache of `noise_slots`, the cells'
-    /// entries from `cells`, no sources beyond the grid and no gas modifiers (plan 09's
-    /// feature members and their gas, from R06.T16.a).
+    /// The gas a job at `t` marches through beside `galaxy`'s smooth field: plan 09's features' at
+    /// `t` ([`FeatureGas`]) if these tables have the feature cells, and nothing otherwise, the sky's
+    /// gas until the feature members are served (P09.T40.a).
     #[must_use]
-    fn context<'a>(&'a self, noise_slots: usize, cells: &'a dyn SkyCellCache) -> SkyContext<'a> {
+    pub(crate) fn gas<'a>(&'a self, galaxy: &'a Galaxy, t: UniverseTime) -> SkyGas<'a> {
+        match &self.features {
+            None => SkyGas::Smooth,
+            Some(cells) => SkyGas::Features(FeatureGas::new(
+                galaxy,
+                cells,
+                Years::new(t.since_epoch().as_julian_years_f64()),
+            )),
+        }
+    }
+
+    /// A job's own context over these tables, with a noise cache of `noise_slots`, the cells'
+    /// entries from `cells`, no sources beyond the grid (plan 09's feature members, from
+    /// R06.T16.a) and the gas modifiers `modifiers`, the job's [`gas`](Self::gas).
+    #[must_use]
+    fn context<'a>(
+        &'a self,
+        noise_slots: usize,
+        cells: &'a dyn SkyCellCache,
+        modifiers: &'a dyn GasModifierSource,
+    ) -> SkyContext<'a> {
         SkyContext {
             tables: &self.tables,
             envelope: &self.envelope,
@@ -441,17 +480,57 @@ impl SkyTables {
             noise: NoiseCache::with_capacity(noise_slots),
             cells,
             sources: &[],
-            modifiers: &NoModifiers,
+            modifiers,
         }
     }
 
-    /// A context for a job that marches many rays: the eye's pre-pass, the illumination and the
-    /// band.
+    /// A context for a job that marches many rays through `modifiers`: the eye's pre-pass, the
+    /// illumination and the band.
     ///
     /// They read no cell, so it has no cell cache.
     #[must_use]
-    pub(crate) fn march_context(&self) -> SkyContext<'_> {
-        self.context(MARCH_NOISE_SLOTS, &NoSkyCellCache)
+    pub(crate) fn march_context<'a>(
+        &'a self,
+        modifiers: &'a dyn GasModifierSource,
+    ) -> SkyContext<'a> {
+        self.context(MARCH_NOISE_SLOTS, &NoSkyCellCache, modifiers)
+    }
+}
+
+/// The feature cells a galaxy's sky tables lend their jobs' gas: the server's shared cache, for the
+/// galaxy `key` names (P09.T40.a).
+#[derive(Debug)]
+struct SkyFeatureCells {
+    cells: Arc<SharedFeatureCellCache>,
+    key: GalaxyKey,
+}
+
+impl FeatureCellCache for SkyFeatureCells {
+    fn contents(&self, galaxy: &Galaxy, cell: FeatureCell) -> Arc<FeatureCellContents> {
+        self.cells.handle(self.key).contents(galaxy, cell)
+    }
+}
+
+/// The gas a sky's job marches through beside the smooth field ([`SkyTables::gas`]).
+#[derive(Debug)]
+pub(crate) enum SkyGas<'a> {
+    /// None: plan 07's field alone, as every sky has had it until P09.T40.a.
+    Smooth,
+    /// Plan 09's features' superbubbles, clouds and embedded regions at the job's time.
+    Features(FeatureGas<'a>),
+}
+
+impl GasModifierSource for SkyGas<'_> {
+    fn modifiers_near_segment(
+        &self,
+        a: &GalacticPosition,
+        b: &GalacticPosition,
+        out: &mut Vec<GasModifier>,
+    ) {
+        match self {
+            Self::Smooth => {}
+            Self::Features(gas) => gas.modifiers_near_segment(a, b, out),
+        }
     }
 }
 
@@ -563,7 +642,14 @@ pub(crate) async fn illumination(
     let jobs = row_jobs(ILLUMINATION_SPEC, ILLUMINATION_JOB_ROWS).map(move |(face, rows)| {
         let (galaxy, tables) = (Arc::clone(&galaxy), Arc::clone(&tables));
         move || {
-            Illumination::march_rows(&galaxy, &mut tables.march_context(), &observer, face, rows)
+            let gas = tables.gas(&galaxy, observer.time());
+            Illumination::march_rows(
+                &galaxy,
+                &mut tables.march_context(&gas),
+                &observer,
+                face,
+                rows,
+            )
         }
     });
     let parts = BulkJobs::submit(pool, token, jobs).await?.results().await?;
@@ -652,9 +738,10 @@ async fn pre_pass(
             Arc::clone(illumination),
         );
         move || {
+            let gas = tables.gas(&galaxy, observer.time());
             limits::pre_pass_rows(
                 &galaxy,
-                &mut tables.march_context(),
+                &mut tables.march_context(&gas),
                 &observer,
                 &eye,
                 band_cut,
@@ -1401,7 +1488,8 @@ fn census_job(
         } else {
             &handle
         };
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, cache);
+        let gas = tables.gas(&galaxy, query.observer().time());
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, cache, &gas);
         let (mut stars, mut tallies, mut cost) = (Vec::new(), None, CensusCost::default());
         let layer = work.layer;
         loop {
@@ -1521,7 +1609,8 @@ pub(crate) async fn march(
             Arc::clone(&replies),
         );
         move || {
-            let mut ctx = tables.march_context();
+            let gas = tables.gas(&galaxy, query.observer().time());
+            let mut ctx = tables.march_context(&gas);
             Arc::new(march_rows(
                 &galaxy,
                 &mut ctx,
@@ -1689,7 +1778,7 @@ async fn eye_offsets(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::num::NonZeroUsize;
 
     use hyperion_sim::coords::GalacticPosition;
@@ -1699,6 +1788,8 @@ mod tests {
     use hyperion_sim::{GENERATOR_VERSION, Seed};
     use tokio::sync::oneshot;
     use tokio::time::timeout;
+
+    use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
 
     use super::*;
     use crate::compute::SkyCellCounters;
@@ -1740,7 +1831,7 @@ mod tests {
         plan: &CensusPlan,
         shells: &[Shell],
     ) -> SkyCensus {
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache);
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &NoModifiers);
         let mut stars = Vec::new();
         let mut tallies = None;
         for &shell in shells {
@@ -1896,7 +1987,7 @@ mod tests {
             }
         }
         // The last step's is the one pass over the plan's cells, merged to its whole completeness.
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache);
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &NoModifiers);
         let mut stars = Vec::new();
         let mut tallies = None;
         for key in plan.cells() {
@@ -2201,7 +2292,7 @@ mod tests {
         ] {
             let march = march_rows(
                 &galaxy,
-                &mut tables.march_context(),
+                &mut tables.march_context(&NoModifiers),
                 &query,
                 plan.replies(),
                 &spec,
@@ -2351,7 +2442,7 @@ mod tests {
             .await
             .expect("timed out lighting")
             .unwrap();
-        let mut ctx = tables.march_context();
+        let mut ctx = tables.march_context(&NoModifiers);
         assert_eq!(
             *light,
             Illumination::march(&galaxy, &mut ctx, &sun()),
@@ -2695,7 +2786,7 @@ mod tests {
         for face in CubeFace::ALL {
             hyperion_sim::sky::band::band_rows(
                 &galaxy,
-                &mut tables.march_context(),
+                &mut tables.march_context(&NoModifiers),
                 &query,
                 &SkyCensus::empty(),
                 &CompleteTo::nowhere(),
@@ -2872,5 +2963,82 @@ mod tests {
             .build()
             .unwrap());
         assert!(derived.forced_caps().is_none());
+    }
+
+    /// The modifiers `FeatureGas` gives at `years` along the segment from `from` to `to`, its cells
+    /// looked up through none: what a job's gas must give.
+    pub(crate) fn feature_gas_at(
+        galaxy: &Galaxy,
+        years: f64,
+        from: &GalacticPosition,
+        to: &GalacticPosition,
+    ) -> Vec<GasModifier> {
+        let mut out = Vec::new();
+        FeatureGas::new(
+            galaxy,
+            &hyperion_sim::galaxy::features::catalogue::NoFeatureCache,
+            Years::new(years),
+        )
+        .modifiers_near_segment(from, to, &mut out);
+        out
+    }
+
+    /// A nursery within reach of `from` whose gas along the segment to it differs between the
+    /// epoch and a thousand years on: its bubble grows, or its gas disperses.
+    pub(crate) fn an_ageing_nursery(galaxy: &Galaxy, from: &GalacticPosition) -> GalacticPosition {
+        use hyperion_sim::galaxy::features::catalogue::{
+            FeatureCatalogue, FeatureMarks, NoFeatureCache,
+        };
+        FeatureCatalogue::near(galaxy, from, LightYears::new(3_000.0), &NoFeatureCache)
+            .filter(|feature| matches!(feature.marks(), FeatureMarks::Nursery(_)))
+            .map(|feature| *feature.position())
+            .find(|to| {
+                let now = feature_gas_at(galaxy, 0.0, from, to);
+                !now.is_empty() && now != feature_gas_at(galaxy, 1_000.0, from, to)
+            })
+            .expect("a nursery near the Sun whose gas changes within a thousand years")
+    }
+
+    /// A sky's job marches through plan 09's features' gas at its own time once its tables carry
+    /// the feature cells, the gas [`FeatureGas`] gives through the sim's own lookup, and through
+    /// none otherwise (P09.T40.a). The tables are one galaxy's, shared by every request, so a
+    /// nursery that ages between two jobs' times shows that each takes its own.
+    #[test]
+    fn a_job_s_gas_is_the_features_at_its_own_time_once_the_tables_carry_their_cells() {
+        let galaxy = Galaxy::new(Seed::new(0x4d2));
+        let key = GalaxyKey::new(0x4d2, GENERATOR_VERSION);
+        let from = *sun().position();
+        let to = an_ageing_nursery(&galaxy, &from);
+        let smooth = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
+        let cells = Arc::new(SharedFeatureCellCache::new(64 << 20));
+        let featured = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy)
+            .with_features(Arc::clone(&cells), key);
+        let mut found = Vec::new();
+        for years in [0_i32, 1_000] {
+            let t = UniverseTime::from_julian_years(i64::from(years)).unwrap();
+            let mut none = Vec::new();
+            smooth
+                .gas(&galaxy, t)
+                .modifiers_near_segment(&from, &to, &mut none);
+            assert!(
+                none.is_empty(),
+                "no feature's gas without the cells: {none:?}"
+            );
+            let mut at = Vec::new();
+            featured
+                .gas(&galaxy, t)
+                .modifiers_near_segment(&from, &to, &mut at);
+            assert_eq!(
+                at,
+                feature_gas_at(&galaxy, f64::from(years), &from, &to),
+                "{years} y"
+            );
+            found.push(at);
+        }
+        assert_ne!(found[0], found[1], "each job's own time");
+        assert!(
+            cells.counters().entries() > 0,
+            "looked up through the shared cells"
+        );
     }
 }

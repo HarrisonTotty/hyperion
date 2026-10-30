@@ -14,9 +14,9 @@
 //! and test them against the same line. Features sit at their epoch positions; their bulk motion,
 //! at most some ten light-years over plan 01's source horizon, is not applied.
 //!
-//! Plan 09 as written has the server pass `FeatureGas` where it passed `NoModifiers`. The server has
-//! no such call site yet (plan 07's sight lines are not served), so there is nothing to change
-//! there until one exists.
+//! Plan 09 has the server pass `FeatureGas` where it passed `NoModifiers`: the sky's sightlines and
+//! the `extinction` request's (P09.T40.a), each at its own time, behind the server's gate that
+//! holds plan 09's feature members back until P09.T2.c.
 
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;

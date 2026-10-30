@@ -974,6 +974,7 @@ fn chromaticity([r, g]: [f64; 2]) -> [f64; 2] {
 mod tests {
     use hyperion_protocol::{CreateUniverseRequest, GalacticPosition, UniverseIdHex};
     use hyperion_sim::Seed;
+    use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
     use hyperion_sim::galaxy::placement::CellKey;
     use hyperion_sim::sky::MAX_CUT_V as SIM_MAX_CUT_V;
     use hyperion_sim::sky::REFERENCE_SP_RATIO;
@@ -1032,7 +1033,7 @@ mod tests {
             let observer = SkyAsk::try_from(&request()).unwrap().observer;
             Arc::new(Illumination::march(
                 &galaxy,
-                &mut tables.march_context(),
+                &mut tables.march_context(&NoModifiers),
                 &observer,
             ))
         }))
@@ -1248,7 +1249,7 @@ mod tests {
 
         let galaxy = Galaxy::new(Seed::new(SEED));
         let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
-        let ctx = tables.march_context();
+        let ctx = tables.march_context(&NoModifiers);
         let observer = SkyAsk::try_from(&request()).unwrap().observer;
         let mut noise = NoiseCache::with_capacity(1 << 14);
         let resolution = CapResolution::new(96, 8).unwrap();
@@ -1423,7 +1424,7 @@ mod tests {
         let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
         let asked = SkyAsk::try_from(&request()).unwrap();
         let query = asked.query(None, light(), caps);
-        let mut ctx = tables.march_context();
+        let mut ctx = tables.march_context(&NoModifiers);
         let plan = hyperion_sim::sky::census::census_plan(
             &galaxy,
             ctx.tables,
@@ -1506,7 +1507,7 @@ mod tests {
         let mut texels = Vec::new();
         hyperion_sim::sky::band::band_rows(
             &galaxy,
-            &mut tables.march_context(),
+            &mut tables.march_context(&NoModifiers),
             query,
             &SkyCensus::empty(),
             &CompleteTo::nowhere(),
@@ -1567,7 +1568,7 @@ mod tests {
         let mut texels = Vec::new();
         hyperion_sim::sky::band::band_rows(
             &galaxy,
-            &mut tables.march_context(),
+            &mut tables.march_context(&NoModifiers),
             &query,
             &SkyCensus::empty(),
             &CompleteTo::nowhere(),

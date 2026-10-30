@@ -40,8 +40,9 @@ use axum::{Router, routing::get};
 
 use crate::compute::{
     CpuPool, DensityMapService, ExtinctionMapService, GalaxyCache, SharedBodyCache,
-    SharedBriefCache, SharedCellCache, SharedSightlineCache, SharedSkyCellCache, SharedSystemCache,
-    ShutDownPoolError, SkyCaps, SkyTablesService, StartPoolError,
+    SharedBriefCache, SharedCellCache, SharedClusterModelCache, SharedFeatureCellCache,
+    SharedSightlineCache, SharedSkyCellCache, SharedSystemCache, ShutDownPoolError, SkyCaps,
+    SkyTablesService, StartPoolError,
 };
 use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
@@ -52,7 +53,9 @@ use crate::surface::SurfaceService;
 use crate::universe::{LoadRegistryError, UniverseRegistry, UniverseStore};
 use crate::ws::ConnectionLimits;
 
-pub use config::{ServerArgs, ServerConfig, ServerConfigBuilder, SkyService};
+pub use config::{
+    FEATURE_MEMBERS_FROM, FeatureMembers, ServerArgs, ServerConfig, ServerConfigBuilder, SkyService,
+};
 pub use stats::{OutboundCounters, RequestCounters, ServerStats};
 
 /// Address the server listens on when neither `--address` and `--port` nor their variables are
@@ -107,6 +110,22 @@ pub(crate) struct AppState {
     /// The planetary systems generated so far, each with its context, in the configured byte
     /// budget: what `system_bodies` and `body_detail` read (plan 14, P14.T36).
     pub(crate) bodies: SharedBodyCache,
+    /// Plan 09's feature cells generated so far, in the configured byte budget: what the feature
+    /// requests, the range query's feature members and the sky's feature gas look features up in
+    /// (P09.T40.a).
+    ///
+    /// Shared with the [`SkyTablesService`], whose tables lend it to the sky's jobs.
+    pub(crate) feature_cells: Arc<SharedFeatureCellCache>,
+    /// Plan 09's feature interiors built so far, in the configured byte budget: what the range
+    /// query's feature members and a feature's detail read (P09.T40.a).
+    ///
+    /// Shared with [`AppState::systems`] and [`AppState::briefs`], which resolve a feature's
+    /// members through it.
+    pub(crate) cluster_models: Arc<SharedClusterModelCache>,
+    /// Whether the range query serves plan 09's feature members, each row its origin, and the sky
+    /// the features' gas: P09.T40.a's serve gate, held until
+    /// [`FEATURE_MEMBERS_FROM`](config::FEATURE_MEMBERS_FROM).
+    pub(crate) feature_members: FeatureMembers,
     /// What answers each request: [`Handlers`], or a test's double.
     pub(crate) handler: Arc<dyn Handler>,
     /// The open WebSocket connections, which shutdown closes and waits for.
@@ -192,15 +211,15 @@ impl Server {
         );
         let sightlines = SharedSightlineCache::new(config.sightline_cache_bytes());
         let cells = SharedCellCache::new(config.cell_cache_bytes());
-        let systems = SharedSystemCache::new(config.system_cache_bytes());
-        let briefs = SharedBriefCache::new(config.brief_cache_bytes());
+        let (feature_cells, cluster_models) = feature_caches(&config);
+        // A feature member's stars and brief take its feature's interior from the shared cache.
+        let systems = SharedSystemCache::new(config.system_cache_bytes())
+            .with_interiors(Arc::clone(&cluster_models));
+        let briefs = SharedBriefCache::new(config.brief_cache_bytes())
+            .with_interiors(Arc::clone(&cluster_models));
         let bodies = SharedBodyCache::new(Arc::clone(&pool), config.body_cache_bytes());
         let sky_cells = Arc::new(SharedSkyCellCache::new(config.sky_cache_bytes()));
-        let sky_tables = SkyTablesService::new(
-            Arc::clone(&pool),
-            config.sky_caps().tables(),
-            config.sky_tables_bytes(),
-        );
+        let sky_tables = sky_tables_service(&config, Arc::clone(&pool), &feature_cells);
         let surface = SurfaceService::new(
             Arc::clone(&pool),
             Arc::clone(config.surface_inputs()),
@@ -222,6 +241,9 @@ impl Server {
             sky_service = ?config.sky_service(),
             extinction_map_cache_mib = config.extinction_map_cache_bytes() / (1 << 20),
             sightline_cache_mib = config.sightline_cache_bytes() / (1 << 20),
+            feature_cache_mib = config.feature_cache_bytes() / (1 << 20),
+            cluster_model_cache_mib = config.cluster_model_cache_bytes() / (1 << 20),
+            feature_members = ?config.feature_members(),
             "server started"
         );
         Ok(Self {
@@ -236,6 +258,9 @@ impl Server {
                 systems,
                 briefs,
                 bodies,
+                feature_cells,
+                cluster_models,
+                feature_members: config.feature_members(),
                 handler,
                 connections: Connections::new(),
                 request_stats: RequestStats::new(),
@@ -358,6 +383,36 @@ pub fn tap_socket(tcp: &tokio::net::TcpStream) {
     }
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
     let _ = tcp;
+}
+
+/// The caches of plan 09's feature cells and interiors, in the budgets `config` gives (P09.T40.a).
+#[must_use]
+fn feature_caches(
+    config: &ServerConfig,
+) -> (Arc<SharedFeatureCellCache>, Arc<SharedClusterModelCache>) {
+    (
+        Arc::new(SharedFeatureCellCache::new(config.feature_cache_bytes())),
+        Arc::new(SharedClusterModelCache::new(
+            config.cluster_model_cache_bytes(),
+        )),
+    )
+}
+
+/// The sky tables' service `config` asks for, on `pool`: one whose tables lend their jobs the
+/// features' gas from `feature_cells` once the feature members are served (P09.T40.a's gate), so
+/// that no sky moves before P09.T2.c.
+#[must_use]
+fn sky_tables_service(
+    config: &ServerConfig,
+    pool: Arc<CpuPool>,
+    feature_cells: &Arc<SharedFeatureCellCache>,
+) -> SkyTablesService {
+    let service =
+        SkyTablesService::new(pool, config.sky_caps().tables(), config.sky_tables_bytes());
+    match config.feature_members() {
+        FeatureMembers::Held => service,
+        FeatureMembers::Served => service.with_features(Arc::clone(feature_cells)),
+    }
 }
 
 async fn healthz() -> &'static str {
@@ -521,6 +576,8 @@ mod tests {
                 defaults.extinction_map_cache_bytes(),
             ),
             (fresh.sightlines(), defaults.sightline_cache_bytes()),
+            (fresh.feature_cells(), defaults.feature_cache_bytes()),
+            (fresh.cluster_models(), defaults.cluster_model_cache_bytes()),
         ] {
             assert_eq!(
                 (
@@ -616,5 +673,53 @@ mod tests {
             ),
             "{error:?}"
         );
+    }
+
+    /// The gate decides whether the sky's tables lend the feature cells: held, the default at the
+    /// version in force, a sky marches the smooth field alone; served, its jobs take the features'
+    /// gas (P09.T40.a).
+    #[tokio::test]
+    async fn the_sky_takes_the_features_gas_only_once_the_gate_serves_them() {
+        use hyperion_sim::galaxy::gas::modifiers::GasModifierSource;
+        use hyperion_sim::time::UniverseTime;
+        use hyperion_sim::units::LightYears;
+        use hyperion_sim::{GENERATOR_VERSION, Seed};
+
+        use crate::compute::GalaxyKey;
+        use crate::compute::sky::tests::{an_ageing_nursery, feature_gas_at};
+
+        let pool = Arc::new(
+            CpuPool::new(
+                std::num::NonZeroUsize::MIN,
+                INTERACTIVE_QUEUE_CAPACITY,
+                BULK_QUEUE_CAPACITY,
+            )
+            .unwrap(),
+        );
+        let galaxy = Arc::new(hyperion_sim::galaxy::Galaxy::new(Seed::new(0x4d2)));
+        let key = GalaxyKey::new(0x4d2, GENERATOR_VERSION);
+        let from = hyperion_sim::coords::GalacticPosition::from_light_years([0.0, 26_000.0, 68.0])
+            .unwrap();
+        let to = an_ageing_nursery(&galaxy, &from);
+        let t = UniverseTime::from_julian_years(1_000).unwrap();
+        for members in [FeatureMembers::Held, FeatureMembers::Served] {
+            let config = ServerConfig::builder()
+                .sky_caps(SkyCaps::forced(LightYears::new(10.0)).unwrap())
+                .feature_members(members)
+                .build();
+            let (cells, _) = feature_caches(&config);
+            let service = sky_tables_service(&config, Arc::clone(&pool), &cells);
+            let tables = service.get(key, &galaxy).await.unwrap();
+            let mut found = Vec::new();
+            tables
+                .gas(&galaxy, t)
+                .modifiers_near_segment(&from, &to, &mut found);
+            let expected = match members {
+                FeatureMembers::Held => Vec::new(),
+                FeatureMembers::Served => feature_gas_at(&galaxy, 1_000.0, &from, &to),
+            };
+            assert_eq!(found, expected, "{members:?}");
+        }
+        pool.shutdown().await.unwrap();
     }
 }

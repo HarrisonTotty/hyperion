@@ -249,6 +249,14 @@ impl FeatureCellContents {
     pub fn features(&self) -> &[FeatureRecord] {
         &self.features
     }
+
+    /// The bytes the contents own on the heap: the features' buffer, by its capacity, since a
+    /// [`FeatureRecord`] owns nothing on the heap itself. What a caller's byte-bounded cache
+    /// charges a cell (P09.T40.a).
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.features.capacity() * size_of::<FeatureRecord>()
+    }
 }
 
 /// Where a caller keeps feature cells between lookups (P09.T3.b).

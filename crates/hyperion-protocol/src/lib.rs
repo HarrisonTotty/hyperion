@@ -165,7 +165,8 @@ pub use universe::{
 /// (`decision-p14-t35e-wire.md`; galaxy plan 04's Design note 15).
 ///
 /// An enum that galaxy plan 04's reserved list names as growing (`MassLayer`, `Population`,
-/// `LayerStatus`, `Unit` and `ErrorCode`) takes a new string without a bump, as `MassLayer` took
+/// `LayerStatus`, `Unit`, `ErrorCode`, and plan 09's `SystemOriginWire`, `CatalogueClassWire` and
+/// `MemberClassWire`) takes a new string without a bump, as `MassLayer` took
 /// `brown_dwarf` and `rogue_planet` and `Unit` takes `per_cm3`, `k_per_cm3` and `mag` for the gas
 /// parameters (galaxy plan 07, P07.T10.b): every string a build already sends keeps its bytes and
 /// its meaning, and a client that does not know the new one misreads nothing (one built before

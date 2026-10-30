@@ -31,6 +31,7 @@ use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::{CatalogueSystem, system_of};
+use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
 use hyperion_sim::galaxy::features::members::{MemberRecord, NoInteriorCache, resolve_member};
 use hyperion_sim::galaxy::placement::{
     ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve,
@@ -40,7 +41,7 @@ use hyperion_sim::observe::{StarsCache, stars_of};
 use hyperion_sim::stellar::brief::BriefModel;
 use hyperion_sim::stellar::system::SystemStars;
 
-use super::GalaxyKey;
+use super::{GalaxyKey, SharedClusterModelCache};
 use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
 
 /// A system as resolved for its stars: a feature member and a catalogue class's system bring their
@@ -66,16 +67,30 @@ impl HeapBytes for SystemStars {
 #[derive(Debug)]
 pub struct SharedSystemCache {
     systems: SharedByteLru<SystemEntryKey, SystemStars>,
+    interiors: FeatureInteriors,
 }
 
 impl SharedSystemCache {
-    /// An empty cache that holds at most `budget_bytes` of charged systems.
+    /// An empty cache that holds at most `budget_bytes` of charged systems, and resolves a feature
+    /// member through no interior cache, building its feature's interior each time.
     ///
     /// A budget of zero caches nothing: every system is generated, answered from and dropped.
     #[must_use]
     pub fn new(budget_bytes: usize) -> Self {
         Self {
             systems: SharedByteLru::new(budget_bytes),
+            interiors: FeatureInteriors(None),
+        }
+    }
+
+    /// This cache, resolving a feature member through the server's feature interiors
+    /// `interiors` (plan 09, P09.T40.a), so that a feature's members share one build of its
+    /// interior. The stars are the same either way.
+    #[must_use]
+    pub fn with_interiors(self, interiors: Arc<SharedClusterModelCache>) -> Self {
+        Self {
+            interiors: FeatureInteriors(Some(interiors)),
+            ..self
         }
     }
 
@@ -124,9 +139,10 @@ impl SharedSystemCache {
         // its stars: its feature's interior is the costly part. So is a catalogue class's system, whose
         // stars are its class's (plan 09, P09.T33.a).
         let resolved = match id.kind() {
-            SystemIdKind::FeatureMember(member) => {
-                Resolved::Member(resolve_member(galaxy, &NoInteriorCache, member)?)
-            }
+            SystemIdKind::FeatureMember(member) => Resolved::Member(
+                self.interiors
+                    .lend(key, |interiors| resolve_member(galaxy, interiors, member))?,
+            ),
             SystemIdKind::Catalogue(system) => Resolved::Catalogue(system_of(galaxy, system)?),
             SystemIdKind::Grid(_)
             | SystemIdKind::Centre(_)
@@ -187,7 +203,10 @@ impl SharedSystemCache {
         if let Some(stars) = self.systems.get(&entry_key) {
             return stars;
         }
-        let stars = Arc::new(stars_of(galaxy, &NoInteriorCache, record));
+        let stars = Arc::new(
+            self.interiors
+                .lend(key, |interiors| stars_of(galaxy, interiors, record)),
+        );
         // A system larger than the whole budget is handed back and still answered from.
         let _ = self.systems.insert(entry_key, Arc::clone(&stars));
         stars
@@ -261,16 +280,29 @@ impl HeapBytes for BriefModel {
 #[derive(Debug)]
 pub struct SharedBriefCache {
     briefs: SharedByteLru<SystemEntryKey, BriefModel>,
+    interiors: FeatureInteriors,
 }
 
 impl SharedBriefCache {
-    /// An empty cache that holds at most `budget_bytes` of charged models.
+    /// An empty cache that holds at most `budget_bytes` of charged models, and builds a feature
+    /// member's model through no interior cache, building its feature's interior each time.
     ///
     /// A budget of zero caches nothing: every model is built, answered from and dropped.
     #[must_use]
     pub fn new(budget_bytes: usize) -> Self {
         Self {
             briefs: SharedByteLru::new(budget_bytes),
+            interiors: FeatureInteriors(None),
+        }
+    }
+
+    /// This cache, building a feature member's model through the server's feature interiors
+    /// `interiors` (plan 09, P09.T40.a). The models are the same either way.
+    #[must_use]
+    pub fn with_interiors(self, interiors: Arc<SharedClusterModelCache>) -> Self {
+        Self {
+            interiors: FeatureInteriors(Some(interiors)),
+            ..self
         }
     }
 
@@ -281,8 +313,8 @@ impl SharedBriefCache {
     /// one costs its primary's main sequence or its track, or for a system whose pair can have
     /// changed its primary its stars and the binary engine ([`BriefModel::new`], P11.T11.a), so
     /// this belongs on a pool job. A catalogue feature's member is routed through its member record
-    /// ([`BriefModel::of_record`]), at its cluster's composition; the server keeps no feature
-    /// interiors yet, so each member's miss builds its feature's interior again.
+    /// ([`BriefModel::of_record`]), at its cluster's composition, and its feature's interior
+    /// through the cache's feature interiors ([`with_interiors`](Self::with_interiors)).
     ///
     /// # Panics
     ///
@@ -306,7 +338,9 @@ impl SharedBriefCache {
         if let Some(model) = self.briefs.get(&entry_key) {
             return model;
         }
-        let model = Arc::new(BriefModel::of_record(galaxy, &NoInteriorCache, record));
+        let model = Arc::new(self.interiors.lend(key, |interiors| {
+            BriefModel::of_record(galaxy, interiors, record)
+        }));
         // A model larger than the whole budget is handed back and still answered from.
         let _ = self.briefs.insert(entry_key, Arc::clone(&model));
         model
@@ -317,6 +351,21 @@ impl SharedBriefCache {
     #[must_use]
     pub fn counters(&self) -> LruCounters {
         self.briefs.counters()
+    }
+}
+
+/// The feature interiors a system or brief cache resolves members through: the server's shared
+/// cache, or none.
+#[derive(Debug)]
+struct FeatureInteriors(Option<Arc<SharedClusterModelCache>>);
+
+impl FeatureInteriors {
+    /// `f` with the interiors of the galaxy `key` names.
+    fn lend<R>(&self, key: GalaxyKey, f: impl FnOnce(&dyn FeatureInteriorCache) -> R) -> R {
+        match &self.0 {
+            Some(cache) => f(&cache.handle(key)),
+            None => f(&NoInteriorCache),
+        }
     }
 }
 

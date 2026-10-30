@@ -8,10 +8,11 @@
 //! has a server answer a kind it does not serve, and leaves the range row's three new fields off
 //! the wire. A type's shape is fixed by the first build that sends a value of it
 //! (`PROTOCOL_VERSION`'s documentation), which is P09.T40's; until then a shape here may still
-//! change without a bump. Every enum here is closed: it carries all its variants from that build.
-//! Two of them are known to grow, [`SystemOriginWire`] (plan 10's members) and
-//! [`CatalogueClassWire`] (classes registered later), so their first send waits on a ruling (plan
-//! 09's Risks, "P09.T39 as built").
+//! change without a bump. Every enum here is closed, carrying all its variants from that build, but
+//! the three plan 04's reserved list names as growing (ruled 2026-10-30, before any build sent a
+//! value of them): [`SystemOriginWire`] (plan 10's members and pinned content),
+//! [`CatalogueClassWire`] (classes registered later) and [`MemberClassWire`], each of which takes
+//! a new variant without a bump.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -378,6 +379,9 @@ pub struct ClassCountWire {
 
 /// The class of a feature's member, tagged by `type`: what it is, and where in its feature's
 /// tables it was drawn from.
+///
+/// The enum grows (plan 04's reserved list): a later tag, such as one of plan 10's own, needs no
+/// bump, and a client that does not know it reads the class as Missing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
@@ -475,8 +479,9 @@ pub enum CentreTracerWire {
 ///
 /// Every class the registry allocates is here, those plan 11 fills among them. A tidal-disruption
 /// victim is only ever an entry of the centre's feature-level list, never a catalogue system. The
-/// registry leaves values 9–63 free for classes registered later, which this closed enum would
-/// take only with a bump (plan 09's Risks, "P09.T39 as built").
+/// registry leaves values 9–63 free for classes registered later. The enum grows (plan 04's
+/// reserved list): a class registered later takes a new string without a bump, and a client that
+/// does not know it reads it as Missing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -503,9 +508,9 @@ pub enum CatalogueClassWire {
 
 /// What placed a system, tagged by `type` (plan 03's `SystemOrigin`, as plan 09 extends it).
 ///
-/// Plan 10's members of streams and dwarf cores have no value here yet: P10.T10.a adds them, and
-/// the enum is closed from the first build that sends an origin (plan 09's Risks, "P09.T39 as
-/// built").
+/// Plan 10's members of streams and dwarf cores have no value here yet: P10.T10.a adds them. The
+/// enum grows (plan 04's reserved list), so they, and pinned content's, take new strings without a
+/// bump, and a client that does not know one reads the origin as Missing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]

@@ -9,6 +9,9 @@ import type { MultiplicityWire } from "./MultiplicityWire";
 /**
  * The class of a feature's member, tagged by `type`: what it is, and where in its feature's
  * tables it was drawn from.
+ *
+ * The enum grows (plan 04's reserved list): a later tag, such as one of plan 10's own, needs no
+ * bump, and a client that does not know it reads the class as Missing.
  */
 export type MemberClassWire = { "type": "cluster", 
 /**

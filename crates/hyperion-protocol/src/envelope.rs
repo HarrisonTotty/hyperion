@@ -238,8 +238,9 @@ pub enum ErrorCode {
     HelloRequired,
     /// No universe has the given ID.
     UnknownUniverse,
-    /// A well-formed system ID that names no system of the universe; `field` names the request's
-    /// field.
+    /// A well-formed system ID that names no system of the universe, or one that resolves but
+    /// cannot be placed yet (a member of the galactic centre, as `resolve_system` answers it);
+    /// `field` names the request's field.
     UnknownSystem,
     /// A well-formed body ID that names no body of its system, or none the detail level asked for
     /// resolves; `field` names the request's field.

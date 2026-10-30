@@ -5,9 +5,9 @@ import type { FeatureIdHex } from "./FeatureIdHex";
 /**
  * What placed a system, tagged by `type` (plan 03's `SystemOrigin`, as plan 09 extends it).
  *
- * Plan 10's members of streams and dwarf cores have no value here yet: P10.T10.a adds them, and
- * the enum is closed from the first build that sends an origin (plan 09's Risks, "P09.T39 as
- * built").
+ * Plan 10's members of streams and dwarf cores have no value here yet: P10.T10.a adds them. The
+ * enum grows (plan 04's reserved list), so they, and pinned content's, take new strings without a
+ * bump, and a client that does not know one reads the origin as Missing.
  */
 export type SystemOriginWire = { "type": "grid" } | { "type": "feature_member", 
 /**

@@ -4405,6 +4405,88 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     from the pod): Weinberg 1972 §8.6, Murray and Dermott §6.8, Merritt 2013 §4.4.1 (which the plan
     marks "to re-check"), Binney and Tremaine §3.2.3, and GRAVITY 2020's printed 12.1′ (their
     elements give 12.156′).
+- **P09.T40.a, the features' part, as built (lane `p09-t40`, 2026-10-30, on 1e55cff at
+  `GENERATOR_VERSION` 23 and `PROTOCOL_VERSION` 3; no output moves).** Main's rulings of
+  2026-10-30 narrow it to the features' part (`decision-r06-t16a-scope.md`): `CentreMemberSource`,
+  `CatalogueClassSource`, `CentreOrbitCache`, `NestedCellCache` and `CatalogueClassCellCache` wait
+  on P09.T37, and with them "P09.T29 as built"'s _For P09.T40.a_ (`check_index_headroom`, the
+  centre model's bytes in `GalaxyCache`). No server golden, wire form or fixture moves;
+  `golden_diff.py` reports nothing to reconcile, and `just gen-protocol` changes three bindings'
+  comments.
+  - _Names._ `compute::SharedFeatureCellCache` is a `SharedByteLru` over `(GalaxyKey, FeatureCell)`
+    of `FeatureCellContents`, and `compute::SharedClusterModelCache` one over
+    `(GalaxyKey, FeatureId)` of `FeatureInterior` (the cluster model with its class table and nested
+    grid). They stand for Provides' `FeatureCellCache` and `ClusterModelCache`: the sim's caller-supplied trait
+    is already `FeatureCellCache`, and the server's caches are `Shared*`. Each lends the sim's trait
+    through a handle for one galaxy (`FeatureCellHandle`, `ClusterModelHandle`) that asserts the
+    seed; `SharedClusterModelCache::kept` gives one job a `KeptInteriors` over it, so a range
+    query's census, hits and rows build each interior at most once whatever the budget. A feature
+    without members is not stored, and a galaxy without its kinematic tables never reads the cache
+    (its key is its full-potential twin's). Added: `--feature-cache` (`HYPERION_FEATURE_CACHE_MB`,
+    16 MiB) and `--cluster-model-cache` (`HYPERION_CLUSTER_MODEL_CACHE_MB`, 64 MiB);
+    `ServerStats::{feature_cells, cluster_models}`; in the sim, `FeatureCellContents::heap_bytes`,
+    `MemberClassTable::heap_bytes` and `FeatureInterior::heap_bytes`, which the caches charge (a
+    record is 168 bytes, a cell near the Sun about 38 kB; an interior 27 kB on average over the 477
+    within 3,000 ly of the Sun-like point; 2026-10-30). The system and brief caches resolve a
+    feature member through the interior cache (`with_interiors`), plan 07's deferred finding (1).
+  - _The switch (lean, 2026-10-30)._ A version hold, `config::FEATURE_MEMBERS_FROM` = 26, with
+    `FeatureMembers::{Held, Served}` (default `of_version(GENERATOR_VERSION)`), in the pattern of
+    the surface's serve gate `GENERATED_SURFACES_FROM`, rather than a flag: it opens with the bump
+    that carries P09.T2.c without a lane having to remember it, and its tripwire,
+    `the_feature_members_gate_holds_until_its_version`, fails at 26, so that bump opens it with
+    P09.T2.c and R06.T16.a or raises it to P09.T2.c's train. No option or variable serves members,
+    so no running server counts them twice; tests serve them through
+    `ServerConfigBuilder::feature_members`. Held, the handler registers no source, no row carries
+    `origin` or `member_class`, and neither the sky nor `extinction` takes any modifier: the replies
+    are as before, bit for bit (`behind_the_gate_a_query_inside_a_globular_answers_as_the_grid`
+    reads the frame for the keys).
+  - _Served._ The `SystemsInRange` handler registers `FeatureMemberSource` over both caches, in
+    both modes. Every row carries `origin`, grid rows included (`grid`,
+    `feature_member { feature }`); a centre member or a later origin panics, since no registered source places one. A
+    member's row carries `member_class` (`cluster { … }`; `listed` is never placed, as
+    `FeatureLevelList::member` is `None`) and its own velocity, its cluster's and its own: both its
+    member record's, resolved again through the job's kept interiors (`convert::RowOrigins::Sent`),
+    since a hit carries its record alone. `supernova` stays absent.
+  - _Feature gas._ The server passed `NoModifiers` in the sky's job context, and an empty list in
+    the `extinction` request's lines, which plan 07's P07.T10.c names as a `NoModifiers` site.
+    Served, `SkyTablesService::with_features` lends every table the shared feature cells and each
+    job marches `FeatureGas` at its observer's time (`SkyTables::gas`, `SkyGas`; `march_context`
+    takes the modifiers); `extinction`'s lines take `FeatureGas` at the request's time
+    (`compute::LineGas`), keyed by that time, a smooth line keeping its key. The extinction maps
+    take none: `render_extinction_rows` integrates the smooth field. The caps' rays read no
+    modifiers (before this task too), so served, the census's sightlines see the features' gas and
+    the caps' do not: R06.T16.a's to reconcile. Each served segment looks its feature cells up
+    through the shared cache's one lock from every worker; unmeasured.
+  - _Catalogue classes._ `convert::features::catalogue_class(ClassId) -> Option<CatalogueClassWire>`
+    matches the registry's constants and is `None` past plan 09's nine, since `ClassId` is a struct;
+    `every_registered_class_has_a_distinct_wire_string` walks `ALL_CLASSES` in value order. Its
+    first caller is P09.T33.a's origin. "P09.T39 as built"'s "by `ClassId::value()`" gives way to
+    the match. The docs of `PROTOCOL_VERSION`, `features.rs` and the three enums name them growing;
+    `TargetExtinction::NoSuchSystem` and `ErrorCode::UnknownSystem` say a system that resolves but
+    cannot be placed is answered so too (plan 07's deferred finding (2)).
+  - _Costs (served; test profile, the sim at opt-level 2; pod; 2026-10-30)._ A cold 50 ly query at
+    the Sun-like point builds 115 interiors, one for every feature whose reach (a nursery's up to
+    1,750 ly) touches the padded sphere, in 10.1 s, about 88 ms each, against 22 ms for the grid
+    alone; warm, 28 ms. A 1 ly query in the core of the globular nearest the Sun (43 members, 68
+    interiors) costs some 12 s cold, nearly all P09.T23's member draws. A finding against the
+    brainstorm's 5 ms cold target, not a blocker (2026-10-13 rule). Levers for the lane that opens
+    the gate: test a feature's nested grid against the sphere before building its interior, or warm
+    the interiors at open.
+  - _Not tested._ A served answer of more than `BRIEF_CHUNK_ROWS` rows (the chunked conversion
+    takes the same `RowOrigins`), too dear in a globular's core in a test build; and observed
+    members' lines, which the sim's `Drift::of_record` builds through `NoInteriorCache`
+    (`of_record_in` is crate-private), so each observed member row builds its interior again.
+  - _Tests._ `compute::features`: `a_feature_cell_is_the_catalogue_s_and_the_second_ask_is_a_hit`,
+    `an_interior_is_the_sim_s_charged_and_lent_again`, `eviction_never_changes_a_range_query_s_members`
+    (hits and census, cold and warm, keeping nothing, evicting and keeping all, and kept for a job);
+    `convert::features`: the class strings, the origins, a member class; `compute::sky`'s and
+    `compute::sky_tables`' feature gas at a nursery's two times, through the tables and through the
+    service, and `the_sky_takes_the_features_gas_only_once_the_gate_serves_them`;
+    `compute::sightlines::a_line_through_the_features_gas_is_the_sim_s_at_its_own_time`; the gate's
+    tripwire and `the_feature_members_gate_opens_at_its_version`; over the WebSocket,
+    `tests/feature_members.rs`: served, a query inside a globular returns its members with their
+    origin, class and velocity, the sim's own rows at 0 and 1,000 yr, the same warm, and with
+    briefs and observed; near the Sun every row says `grid`; held, no member and no key.
 - **P09.T33.a as built (lane `p09-classes`, 2026-10-29, at `GENERATOR_VERSION` 23, no output
   moves).** The first production class, registered: `ProductionClasses` has the
   `CORE_COLLAPSE` arm and plan 03's `placement::resolve` hands every `111` ID to the class grid

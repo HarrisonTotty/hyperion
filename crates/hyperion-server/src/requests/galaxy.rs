@@ -15,24 +15,27 @@ use hyperion_protocol::{
     SystemsInRangeRequest, TargetExtinction,
 };
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::features::members::source::{FeatureInteriorCache, FeatureMemberSource};
 use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemKind, resolve};
-use hyperion_sim::galaxy::query::{QueryMode, RangeQuery, RangeResult, SystemHit, range_query};
+use hyperion_sim::galaxy::query::{
+    QueryMode, RangeQuery, RangeResult, SystemHit, SystemSource, range_query,
+};
 use hyperion_sim::observe::{Observer, TraceMotionError};
 use hyperion_sim::time::UniverseTime;
 
 use super::observe::observe_row;
 use super::universe::openable_universe;
-use crate::AppState;
 use crate::compute::{
-    CancelToken, EXTINCTION_FLOOR_LOG10_MAG, GalaxyKey, JobError, Priority, SharedBriefCache,
-    SharedSystemCache, quantise_map, quantise_map_with_floor,
+    CancelToken, EXTINCTION_FLOOR_LOG10_MAG, GalaxyKey, JobError, LineGas, Priority,
+    SharedBriefCache, SharedSystemCache, quantise_map, quantise_map_with_floor,
 };
 use crate::convert::{
-    ExtinctionMapQuery, ExtinctionQuery, LineEnd, MapRequest, RangeRequest, brief_dto, density_map,
-    extinction_map as extinction_map_answer, extinction_result, galaxy_parameters, system_motion,
-    systems_in_range, target_extinction, untraced,
+    ExtinctionMapQuery, ExtinctionQuery, LineEnd, MapRequest, RangeRequest, RowOrigins, brief_dto,
+    density_map, extinction_map as extinction_map_answer, extinction_result, galaxy_parameters,
+    system_motion, systems_in_range, target_extinction, untraced,
 };
 use crate::limits::BRIEF_CHUNK_ROWS;
+use crate::{AppState, FeatureMembers};
 
 /// The galaxy's parameters: the groups of plan 04's P04.T14.b table, in its order.
 ///
@@ -135,7 +138,9 @@ pub(crate) async fn extinction_map(
 /// [`resolve`] and placed at the request's time by [`system_motion`], by its origin, as every ID
 /// from a client is, and each line is the
 /// [`SharedSightlineCache`](crate::compute::SharedSightlineCache)'s or is marched in the seed's own
-/// gas at a fixed budget of steps, through one noise cache the job owns. A target whose ID names no
+/// gas at a fixed budget of steps, through one noise cache the job owns, and, once plan 09's feature
+/// members are served, through the features' gas at the request's time (P09.T40.a). A target whose
+/// ID names no
 /// system, one of a kind or layer this generator does not place yet, or one `system_motion` cannot
 /// place yet (a member of the galactic centre, at every time, the epoch included) is answered
 /// `no_such_system`, and the rest are still answered. The answer is small, so its frame is
@@ -159,7 +164,17 @@ pub(crate) async fn extinction(
     let galaxy = state.galaxies.get(key).await?;
     let shared = Arc::clone(&state);
     let answer = move |_: &CancelToken| {
-        let mut lines = shared.sightlines.marcher(key, &galaxy);
+        // Once the feature members are served, the lines take the features' gas at the request's
+        // time, as the sky's do (P09.T40.a's gate); held, the smooth field alone, as before.
+        let cells = shared.feature_cells.handle(key);
+        let gas = match shared.feature_members {
+            FeatureMembers::Held => LineGas::Smooth,
+            FeatureMembers::Served => LineGas::Features {
+                cells: &cells,
+                t: wanted.time(),
+            },
+        };
+        let mut lines = shared.sightlines.marcher(key, &galaxy, gas);
         let targets = wanted
             .ends()
             .iter()
@@ -225,6 +240,12 @@ pub(crate) async fn extinction(
 /// Each row's brief and observation are pure functions of its system, the time and the observer,
 /// so neither the chunks nor the caches change a byte of the answer.
 ///
+/// Once P09.T40.a's gate is open ([`FeatureMembers::Served`]), the query takes plan 09's feature
+/// members from a [`FeatureMemberSource`] beside the grid, reading the server's feature cells and
+/// interiors, and every row carries its origin, a member's with its class and its own velocity
+/// ([`RowOrigins::Sent`]); both caches hold epoch state alone, so they change no byte either.
+/// Held, the default until P09.T2.c's version, the grid is the whole answer, as in plan 04.
+///
 /// # Errors
 ///
 /// Those of [`openable_universe`] for a universe this server cannot serve, `bad_request` naming
@@ -249,9 +270,20 @@ pub(crate) async fn systems(
     let job_galaxy = Arc::clone(&galaxy);
     let queried = move |_: &CancelToken| {
         let mut cells = shared.cells.handle(key);
-        // No sources: the grid is the whole answer in the first milestone (plan 03's
-        // `range_query`). Observed mode finds the same systems (plan 12, Design note 4).
-        let result = range_query(&job_galaxy, &mut cells, &[], &query);
+        // One kept view for the whole job: its census, its hits and its rows' members read the
+        // same interiors, each built at most once whatever the shared cache's budget.
+        let (features, interiors) = (
+            shared.feature_cells.handle(key),
+            shared.cluster_models.kept(key),
+        );
+        let members = FeatureMemberSource::new(&features, &interiors);
+        // Held, no sources: the grid is the whole answer, as in plan 04 (P09.T40.a's gate).
+        // Observed mode finds the same systems (plan 12, Design note 4).
+        let sources: &[&dyn SystemSource] = match shared.feature_members {
+            FeatureMembers::Held => &[],
+            FeatureMembers::Served => &[&members],
+        };
+        let result = range_query(&job_galaxy, &mut cells, sources, &query);
         if work.is_needed() && result.systems().len() > BRIEF_CHUNK_ROWS {
             return Ok(Queried::Chunked(Box::new((request, query, result))));
         }
@@ -270,6 +302,7 @@ pub(crate) async fn systems(
             &result,
             extras.briefs,
             extras.observed,
+            row_origins(shared.feature_members, &interiors),
         )))
     };
     let (request, query, result) = match run(&state, &token, queried).await?? {
@@ -307,7 +340,9 @@ pub(crate) async fn systems(
                 .map_err(untraced)?,
         );
     }
+    let shared = Arc::clone(&state);
     let convert = move |_: &CancelToken| {
+        let interiors = shared.cluster_models.kept(key);
         systems_in_range(
             &galaxy,
             request,
@@ -315,6 +350,7 @@ pub(crate) async fn systems(
             &result,
             extras.briefs,
             extras.observed,
+            row_origins(shared.feature_members, &interiors),
         )
     };
     // As a chunk does, the conversion waits for room rather than refusing a query that has run.
@@ -325,6 +361,17 @@ pub(crate) async fn systems(
         .await
         .unwrap_or_else(|closed| Err(JobError::from(closed)))?;
     Ok(ResponseBody::SystemsInRange(answered))
+}
+
+/// What a range answer's rows say of what placed them under the gate `members`: nothing while it
+/// holds the feature members back, and every row's origin once it serves them, a member's resolved
+/// through `interiors` (P09.T40.a).
+#[must_use]
+fn row_origins(members: FeatureMembers, interiors: &dyn FeatureInteriorCache) -> RowOrigins<'_> {
+    match members {
+        FeatureMembers::Held => RowOrigins::Unsent,
+        FeatureMembers::Served => RowOrigins::Sent(interiors),
+    }
 }
 
 /// What the query's job hands back: the answer, or the parts of one whose rows are chunked.

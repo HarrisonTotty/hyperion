@@ -6,7 +6,8 @@
  *
  * Every class the registry allocates is here, those plan 11 fills among them. A tidal-disruption
  * victim is only ever an entry of the centre's feature-level list, never a catalogue system. The
- * registry leaves values 9–63 free for classes registered later, which this closed enum would
- * take only with a bump (plan 09's Risks, "P09.T39 as built").
+ * registry leaves values 9–63 free for classes registered later. The enum grows (plan 04's
+ * reserved list): a class registered later takes a new string without a bump, and a client that
+ * does not know it reads it as Missing.
  */
 export type CatalogueClassWire = "core_collapse" | "type_ia" | "stellar_merger" | "neutron_star_merger" | "luminous_blue_variable" | "xray_binary" | "accreting_white_dwarf" | "tidal_disruption_victim" | "accreting_white_dwarf_slow";

@@ -15,10 +15,11 @@
 //! [`RawDensityMap`] and quantised for each response by [`quantise_map`]; an extinction map by
 //! [`ExtinctionMapService`] into the same raw type, quantised by [`quantise_map_with_floor`]
 //! (plan 07, P07.T10.a). [`SharedSightlineCache`] holds the lines of sight the `extinction`
-//! request marches (P07.T10.c). A sky's caps, census, band and limit map run as bulk jobs, as far
-//! as its [`SkyCaps`] reach, each census cell's bright subset kept in the sky's own cell cache, and
-//! each galaxy's sky tables built once on the pool and kept in a cache of their own (rendering plan
-//! R06).
+//! request marches (P07.T10.c). [`SharedFeatureCellCache`] holds plan 09's feature cells and
+//! [`SharedClusterModelCache`] their interiors (P09.T40.a). A sky's caps, census, band and limit
+//! map run as bulk jobs, as far as its [`SkyCaps`] reach, each census cell's bright subset kept in
+//! the sky's own cell cache, and each galaxy's sky tables built once on the pool and kept in a cache
+//! of their own (rendering plan R06).
 
 mod bodies;
 mod cancel;
@@ -26,6 +27,7 @@ mod cells;
 mod density_map;
 mod error;
 mod extinction_map;
+mod features;
 mod float_mode;
 mod galaxies;
 mod key;
@@ -49,6 +51,9 @@ pub use error::ComputeError;
 pub use extinction_map::{
     EXTINCTION_FLOOR_LOG10_MAG, ExtinctionMapKey, ExtinctionMapService, Mag, RawExtinctionMap,
 };
+pub use features::{
+    ClusterModelHandle, FeatureCellHandle, SharedClusterModelCache, SharedFeatureCellCache,
+};
 pub use float_mode::{FlushProbe, probe_flush_to_zero};
 pub use galaxies::{GalaxyCache, GalaxyCounters};
 pub use key::GalaxyKey;
@@ -56,7 +61,7 @@ pub use pool::{
     CpuPool, JobError, JobReceiver, PoolCounters, Priority, ShutDownPoolError, StartPoolError,
     SubmitJobError,
 };
-pub use sightlines::{SharedSightlineCache, SightlineMarcher};
+pub use sightlines::{LineGas, SharedSightlineCache, SightlineMarcher};
 pub use single_flight::{Flight, SingleFlight};
 pub use sky::{ForceSkyCapsError, SkyCaps, SkyTablesSource};
 pub use sky_cells::SkyCellCounters;

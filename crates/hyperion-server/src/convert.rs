@@ -13,6 +13,7 @@
 
 mod events;
 mod extinction;
+mod features;
 mod motion;
 mod observe;
 mod planetary;
@@ -34,12 +35,14 @@ use hyperion_protocol::{
     SystemsInRange, SystemsInRangeRequest, Unit, UniverseInfo, UniverseList,
 };
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity, LyCell};
+use hyperion_sim::galaxy::features::members::resolve_member;
+use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
 use hyperion_sim::galaxy::gas::params::GasParams;
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::{
     ArmParams, GalaxyParams, HaloComponentKind, HaloComponentParams, HaloParams,
 };
-use hyperion_sim::galaxy::placement::{SystemKind, SystemRecord, layer_spec};
+use hyperion_sim::galaxy::placement::{SystemKind, SystemOrigin, SystemRecord, layer_spec};
 use hyperion_sim::galaxy::potential::PotentialTables;
 use hyperion_sim::galaxy::query::{
     BuildRangeQueryError, Census, CensusStop, MassFloor, RangeQuery, RangeResult,
@@ -47,7 +50,7 @@ use hyperion_sim::galaxy::query::{
 };
 use hyperion_sim::galaxy::substellar::SubstellarAbundance;
 use hyperion_sim::galaxy::{Galaxy, POPULATIONS, Population};
-use hyperion_sim::id::Layer;
+use hyperion_sim::id::{Layer, SystemIdKind};
 use hyperion_sim::stellar::system::draw_metallicity;
 use hyperion_sim::time::{CLOCK_WINDOW_H, ClockWindow, UniverseTime};
 use hyperion_sim::units::{
@@ -435,10 +438,13 @@ fn refused_query(error: BuildRangeQueryError) -> ConvertRequestError {
 /// which the handler builds in observed mode (plan 12, P12.T6), row k carries observation k; the
 /// briefs are then each primary's when its light left it. Without either, every row is plan 04's.
 ///
+/// `origins` says whether each row carries what placed it ([`RowOrigins`]): not while P09.T40.a's
+/// gate holds the feature members back, when every row is a grid system's and plan 04's.
+///
 /// # Panics
 ///
 /// If `briefs` or `observed` does not hold one entry per system found, which only a handler bug
-/// can cause.
+/// can cause, and as [`RowOrigins`] says for a row whose origin cannot be sent.
 #[must_use]
 pub(crate) fn systems_in_range(
     galaxy: &Galaxy,
@@ -447,6 +453,7 @@ pub(crate) fn systems_in_range(
     result: &RangeResult,
     briefs: Option<Vec<Option<StellarBriefDto>>>,
     observed: Option<Vec<ObservedDto>>,
+    origins: RowOrigins<'_>,
 ) -> SystemsInRange {
     let hits = result.systems();
     if let Some(briefs) = &briefs {
@@ -472,7 +479,24 @@ pub(crate) fn systems_in_range(
                 )
             });
             let observed = observed.as_mut().and_then(Iterator::next);
-            system_record(galaxy, hit, query.time(), stellar, observed)
+            match origins {
+                RowOrigins::Unsent => system_record(galaxy, hit, query.time(), stellar, observed),
+                RowOrigins::Sent(interiors) => {
+                    let (velocity, origin, member_class) = placed_by(galaxy, interiors, hit);
+                    hyperion_protocol::SystemRecord {
+                        origin: Some(origin),
+                        member_class,
+                        ..system_record_moving(
+                            galaxy,
+                            hit,
+                            velocity,
+                            query.time(),
+                            stellar,
+                            observed,
+                        )
+                    }
+                }
+            }
         })
         .collect();
     SystemsInRange {
@@ -482,6 +506,74 @@ pub(crate) fn systems_in_range(
         time: request.time,
         census: census(query, result),
         systems,
+    }
+}
+
+/// Whether a range answer's rows carry what placed them (plan 09, P09.T40.a).
+#[derive(Clone, Copy)]
+pub(crate) enum RowOrigins<'a> {
+    /// No row carries an origin: P09.T40.a's gate holds the feature members back, so every row is
+    /// a grid system's, with plan 08's velocity, and the answer is the bytes it was before P09.T40.
+    Unsent,
+    /// Every row carries its origin, as the growing [`SystemOriginWire`] gives it. A feature
+    /// member's row carries its class too, and moves at its own velocity, its cluster's motion and
+    /// its own: both are its member record's, which it is resolved to again through `interiors`,
+    /// the server's feature interiors, since a range hit carries its record alone.
+    ///
+    /// A member of the galactic centre, or a system of an origin the sim adds later, panics: no
+    /// source the server registers places one yet ([`system_origin`]).
+    ///
+    /// [`SystemOriginWire`]: hyperion_protocol::SystemOriginWire
+    /// [`system_origin`]: features::system_origin
+    Sent(&'a dyn FeatureInteriorCache),
+}
+
+impl fmt::Debug for RowOrigins<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unsent => f.write_str("Unsent"),
+            Self::Sent(_) => f.write_str("Sent"),
+        }
+    }
+}
+
+/// The velocity `hit`'s row carries, what placed it, and its member class if it is a feature's
+/// member ([`RowOrigins::Sent`]).
+///
+/// # Panics
+///
+/// For a member of the galactic centre or an origin the sim adds later, which no registered
+/// source places yet, and for a feature member that does not resolve in `galaxy`, which only a
+/// hit of another galaxy can be.
+#[must_use]
+fn placed_by(
+    galaxy: &Galaxy,
+    interiors: &dyn FeatureInteriorCache,
+    hit: &SystemHit,
+) -> (
+    GalacticVelocity,
+    hyperion_protocol::SystemOriginWire,
+    Option<hyperion_protocol::MemberClassWire>,
+) {
+    let record = hit.record();
+    let origin = features::system_origin(record.origin());
+    match record.origin() {
+        SystemOrigin::Grid(_) => (epoch_velocity(galaxy, record), origin, None),
+        SystemOrigin::FeatureMember { .. } => {
+            let SystemIdKind::FeatureMember(id) = record.id().kind() else {
+                unreachable!("a feature member's record is built with a member ID")
+            };
+            let member = resolve_member(galaxy, interiors, id)
+                .expect("a feature member found by the range query resolves in its galaxy");
+            (
+                member.velocity(),
+                origin,
+                Some(features::member_class(member.class())),
+            )
+        }
+        other => unreachable!(
+            "no source the server registers places a range row of origin {other:?} (P09.T40.a)"
+        ),
     }
 }
 
@@ -2191,7 +2283,15 @@ mod tests {
                 })
                 .collect()
         });
-        systems_in_range(milky_way(), request.clone(), &query, &result, briefs, None)
+        systems_in_range(
+            milky_way(),
+            request.clone(),
+            &query,
+            &result,
+            briefs,
+            None,
+            RowOrigins::Unsent,
+        )
     }
 
     #[test]

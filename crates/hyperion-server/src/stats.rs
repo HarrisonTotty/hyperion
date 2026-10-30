@@ -32,6 +32,8 @@ pub struct ServerStats {
     surface: SurfaceCounters,
     extinction_maps: LruCounters,
     sightlines: LruCounters,
+    feature_cells: LruCounters,
+    cluster_models: LruCounters,
 }
 
 impl ServerStats {
@@ -54,6 +56,8 @@ impl ServerStats {
             surface: state.surface.counters(),
             extinction_maps: state.extinction_maps.counters(),
             sightlines: state.sightlines.counters(),
+            feature_cells: state.feature_cells.counters(),
+            cluster_models: state.cluster_models.counters(),
         }
     }
 
@@ -159,6 +163,21 @@ impl ServerStats {
     #[must_use]
     pub fn sightlines(&self) -> LruCounters {
         self.sightlines
+    }
+
+    /// The feature cell cache's contents and use, including its byte budget: a query near a
+    /// feature reads its cells there (plan 09, P09.T40.a).
+    #[must_use]
+    pub fn feature_cells(&self) -> LruCounters {
+        self.feature_cells
+    }
+
+    /// The cluster model cache's contents and use, including its byte budget: a feature's
+    /// interior is built once and lent to every query and request that reads its members or its
+    /// structure (plan 09, P09.T40.a).
+    #[must_use]
+    pub fn cluster_models(&self) -> LruCounters {
+        self.cluster_models
     }
 }
 

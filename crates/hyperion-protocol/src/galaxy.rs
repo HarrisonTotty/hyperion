@@ -369,7 +369,8 @@ pub enum TargetExtinction {
         /// `hydrogen_column_per_cm2`.
         neutral_hydrogen_column_per_cm2: f64,
     },
-    /// The target's ID names no system of this universe.
+    /// The target's ID names no system of this universe, or one that resolves but cannot be
+    /// placed yet: a member of the galactic centre, at every time (plan 07, P07.T10.c).
     NoSuchSystem,
 }
 

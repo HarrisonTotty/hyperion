@@ -17,6 +17,8 @@
 //! | `--brief-cache`          | `HYPERION_BRIEF_CACHE_MB`          | 64 (MiB)                                               |
 //! | `--extinction-map-cache` | `HYPERION_EXTINCTION_MAP_CACHE_MB` | 16 (MiB)                                               |
 //! | `--sightline-cache`      | `HYPERION_SIGHTLINE_CACHE_MB`      | 4 (MiB)                                                |
+//! | `--feature-cache`        | `HYPERION_FEATURE_CACHE_MB`        | 16 (MiB)                                               |
+//! | `--cluster-model-cache`  | `HYPERION_CLUSTER_MODEL_CACHE_MB`  | 64 (MiB)                                               |
 //! | `--sky-cache`            | `HYPERION_SKY_CACHE_MB`            | 0 (MiB), off                                           |
 //! | `--sky-tables`           | `HYPERION_SKY_TABLES_MB`           | 160 (MiB)                                              |
 //! | `--surface-cache`        | `HYPERION_SURFACE_CACHE_MB`        | 128 (MiB)                                              |
@@ -56,6 +58,7 @@ use std::sync::Arc;
 
 use clap::builder::{BoolishValueParser, TypedValueParser};
 use clap::{ArgAction, Parser};
+use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
 use crate::DEFAULT_ADDR;
 use crate::compute::SkyCaps;
@@ -85,6 +88,10 @@ pub const ENV_BRIEF_CACHE_MB: &str = "HYPERION_BRIEF_CACHE_MB";
 pub const ENV_EXTINCTION_MAP_CACHE_MB: &str = "HYPERION_EXTINCTION_MAP_CACHE_MB";
 /// The variable giving the sightline cache's budget in MiB, for `--sightline-cache`.
 pub const ENV_SIGHTLINE_CACHE_MB: &str = "HYPERION_SIGHTLINE_CACHE_MB";
+/// The variable giving the feature cell cache's budget in MiB, for `--feature-cache`.
+pub const ENV_FEATURE_CACHE_MB: &str = "HYPERION_FEATURE_CACHE_MB";
+/// The variable giving the cluster model cache's budget in MiB, for `--cluster-model-cache`.
+pub const ENV_CLUSTER_MODEL_CACHE_MB: &str = "HYPERION_CLUSTER_MODEL_CACHE_MB";
 /// The variable giving the sky's cell cache's budget in MiB, for `--sky-cache`.
 pub const ENV_SKY_CACHE_MB: &str = "HYPERION_SKY_CACHE_MB";
 /// The variable giving the sky tables' cache's budget in MiB, for `--sky-tables`.
@@ -123,6 +130,19 @@ pub const DEFAULT_EXTINCTION_MAP_CACHE_MIB: usize = 16;
 /// P07.T10.c): a line is charged its 32 bytes and the cache's 96 an entry, 128 bytes, so this holds
 /// 32,768, a few hundred charts' selections.
 pub const DEFAULT_SIGHTLINE_CACHE_MIB: usize = 4;
+/// The feature cell cache's budget when `--feature-cache` is not given, in MiB (plan 09,
+/// P09.T40.a): a cell's contents are charged their records, 168 bytes each, so a 4,096 ly cell
+/// near the Sun, some 220 features, is about 38 kB (measured 2026-10-30 on the server's tests'
+/// galaxy: the 64 cells a lookup within 3,000 ly of the Sun-like point reads, 2.4 MB in all), and
+/// this holds some 440 of them, seven such lookups' cells.
+pub const DEFAULT_FEATURE_CACHE_MIB: usize = 16;
+/// The cluster model cache's budget when `--cluster-model-cache` is not given, in MiB (plan 09,
+/// P09.T40.a): each feature's interior, its cluster model, class table and nested grid, which
+/// costs 14–17 ms to build (plan 09's Risks, "Ruling 139 as built", 139.5) and is charged its class
+/// table's rows and profiles,
+/// 27 kB on average (measured 2026-10-30: the 477 interiors of the features within 3,000 ly of the
+/// Sun-like point, 13 MB), so this holds some 2,400.
+pub const DEFAULT_CLUSTER_MODEL_CACHE_MIB: usize = 64;
 /// The sky's cell cache's budget when `--sky-cache` is not given, in MiB: 0, which turns the cache
 /// off (rendering plan R06, R06.T8.o and Design note 12; decided 2026-10-10,
 /// `decision-r06-t8n.md`).
@@ -184,6 +204,12 @@ const DEFAULT_EXTINCTION_MAP_CACHE: CacheBudget = CacheBudget {
 };
 const DEFAULT_SIGHTLINE_CACHE: CacheBudget = CacheBudget {
     bytes: DEFAULT_SIGHTLINE_CACHE_MIB * BYTES_PER_MIB,
+};
+const DEFAULT_FEATURE_CACHE: CacheBudget = CacheBudget {
+    bytes: DEFAULT_FEATURE_CACHE_MIB * BYTES_PER_MIB,
+};
+const DEFAULT_CLUSTER_MODEL_CACHE: CacheBudget = CacheBudget {
+    bytes: DEFAULT_CLUSTER_MODEL_CACHE_MIB * BYTES_PER_MIB,
 };
 const DEFAULT_SKY_CACHE: CacheBudget = CacheBudget {
     bytes: DEFAULT_SKY_CACHE_MIB * BYTES_PER_MIB,
@@ -247,6 +273,14 @@ pub struct ServerArgs {
     #[arg(long, value_name = "MIB", env = ENV_SIGHTLINE_CACHE_MB, default_value_t = DEFAULT_SIGHTLINE_CACHE)]
     sightline_cache: CacheBudget,
 
+    /// Budget of the cache of the large features' catalogue cells, in MiB; 0 caches nothing
+    #[arg(long, value_name = "MIB", env = ENV_FEATURE_CACHE_MB, default_value_t = DEFAULT_FEATURE_CACHE)]
+    feature_cache: CacheBudget,
+
+    /// Budget of the cache of the large features' interiors, in MiB; 0 caches nothing
+    #[arg(long, value_name = "MIB", env = ENV_CLUSTER_MODEL_CACHE_MB, default_value_t = DEFAULT_CLUSTER_MODEL_CACHE)]
+    cluster_model_cache: CacheBudget,
+
     /// Budget of the cache of the sky census's cells, in MiB; 0, the default, keeps no cells, and
     /// 1280 holds a warm sky
     #[arg(long, value_name = "MIB", env = ENV_SKY_CACHE_MB, default_value_t = DEFAULT_SKY_CACHE)]
@@ -306,6 +340,55 @@ pub enum SkyService {
     Served,
 }
 
+/// The generator version from which the server serves plan 09's feature members: 26, P09.T2.c's,
+/// the serve gate of P09.T40.a (main's ruling of 2026-10-30; plan 09's Risks, "P09.T39 as built").
+///
+/// Until P09.T2.c gives up φ, each population's share in the features, the field still places the
+/// whole of every population, so a feature's members registered beside it would be counted twice
+/// (`decision-r06-t16a-scope.md`). The gate holds the registration back until then, in the pattern
+/// of the surface's serve gate (`GENERATED_SURFACES_FROM`): the range query's
+/// `FeatureMemberSource`, every row's `origin`, and the features' gas in the sky's sightlines all
+/// wait for it, so that at the version in force no reply moves. Its tripwire,
+/// `the_feature_members_gate_holds_until_its_version`, fails at the version, so that the bump that
+/// reaches it opens the gate with P09.T2.c, or raises it to the train P09.T2.c rides.
+pub const FEATURE_MEMBERS_FROM: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether the server serves plan 09's feature members (P09.T40.a): the serve gate,
+/// [`FEATURE_MEMBERS_FROM`].
+///
+/// Served, the range query registers the catalogue features' members as a source beside the grid
+/// (`FeatureMemberSource`, over the server's feature caches), every row carries its `origin`, and
+/// the sky's sightlines take the features' gas (`FeatureGas`). Held, the server answers as before
+/// P09.T40.a, bit for bit. The galactic centre's members and the catalogue classes' systems are not
+/// among them: their sources wait on P09.T29's and P09.T37's tasks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum FeatureMembers {
+    /// No feature member is served, and no row carries an origin: the server's answer below
+    /// [`FEATURE_MEMBERS_FROM`].
+    Held,
+    /// The features' members, the rows' origins and the features' gas are served.
+    Served,
+}
+
+impl FeatureMembers {
+    /// The gate's arm at `version`: served from [`FEATURE_MEMBERS_FROM`], held below it.
+    #[must_use]
+    pub const fn of_version(version: GeneratorVersion) -> Self {
+        if version.get() >= FEATURE_MEMBERS_FROM.get() {
+            Self::Served
+        } else {
+            Self::Held
+        }
+    }
+}
+
+impl Default for FeatureMembers {
+    /// The arm of the generator version in force.
+    fn default() -> Self {
+        Self::of_version(GENERATOR_VERSION)
+    }
+}
+
 /// The sky's service that a switch asks for.
 #[must_use]
 fn sky_service(serve: bool) -> SkyService {
@@ -340,6 +423,8 @@ impl From<ServerArgs> for ServerConfig {
             brief_cache,
             extinction_map_cache,
             sightline_cache,
+            feature_cache,
+            cluster_model_cache,
             sky_cache,
             sky_tables,
             surface_cache,
@@ -358,6 +443,8 @@ impl From<ServerArgs> for ServerConfig {
             .brief_cache_bytes(brief_cache.bytes)
             .extinction_map_cache_bytes(extinction_map_cache.bytes)
             .sightline_cache_bytes(sightline_cache.bytes)
+            .feature_cache_bytes(feature_cache.bytes)
+            .cluster_model_cache_bytes(cluster_model_cache.bytes)
             .sky_cache_bytes(sky_cache.bytes)
             .sky_tables_bytes(sky_tables.bytes)
             .surface_cache_bytes(surface_cache.bytes)
@@ -431,6 +518,8 @@ pub struct ServerConfig {
     brief_cache_bytes: usize,
     extinction_map_cache_bytes: usize,
     sightline_cache_bytes: usize,
+    feature_cache_bytes: usize,
+    cluster_model_cache_bytes: usize,
     sky_cache_bytes: usize,
     sky_tables_bytes: usize,
     surface_cache_bytes: usize,
@@ -438,6 +527,7 @@ pub struct ServerConfig {
     /// (`default_surface_passes`).
     surface_passes: Option<NonZeroUsize>,
     sky_service: SkyService,
+    feature_members: FeatureMembers,
     stdin_stop: StdinStop,
     entropy: Arc<dyn Entropy>,
     scene_knowledge: Arc<dyn SceneKnowledge>,
@@ -513,6 +603,18 @@ impl ServerConfig {
         self.sightline_cache_bytes
     }
 
+    /// The feature cell cache's budget, in bytes (plan 09, P09.T40.a).
+    #[must_use]
+    pub fn feature_cache_bytes(&self) -> usize {
+        self.feature_cache_bytes
+    }
+
+    /// The cluster model cache's budget, in bytes (plan 09, P09.T40.a).
+    #[must_use]
+    pub fn cluster_model_cache_bytes(&self) -> usize {
+        self.cluster_model_cache_bytes
+    }
+
     /// The sky's cell cache's budget, in bytes (rendering plan R06, Design note 12).
     #[must_use]
     pub fn sky_cache_bytes(&self) -> usize {
@@ -543,6 +645,13 @@ impl ServerConfig {
     #[must_use]
     pub fn sky_service(&self) -> SkyService {
         self.sky_service
+    }
+
+    /// Whether the server serves plan 09's feature members (P09.T40.a's serve gate,
+    /// [`FEATURE_MEMBERS_FROM`]).
+    #[must_use]
+    pub fn feature_members(&self) -> FeatureMembers {
+        self.feature_members
     }
 
     /// Whether the end of standard input stops the server.
@@ -606,11 +715,14 @@ impl Default for ServerConfigBuilder {
                 brief_cache_bytes: DEFAULT_BRIEF_CACHE.bytes,
                 extinction_map_cache_bytes: DEFAULT_EXTINCTION_MAP_CACHE.bytes,
                 sightline_cache_bytes: DEFAULT_SIGHTLINE_CACHE.bytes,
+                feature_cache_bytes: DEFAULT_FEATURE_CACHE.bytes,
+                cluster_model_cache_bytes: DEFAULT_CLUSTER_MODEL_CACHE.bytes,
                 sky_cache_bytes: DEFAULT_SKY_CACHE.bytes,
                 sky_tables_bytes: DEFAULT_SKY_TABLES.bytes,
                 surface_cache_bytes: DEFAULT_SURFACE_CACHE.bytes,
                 surface_passes: None,
                 sky_service: SkyService::default(),
+                feature_members: FeatureMembers::default(),
                 stdin_stop: StdinStop::default(),
                 entropy: Arc::new(OsEntropy),
                 scene_knowledge: Arc::new(GrantAsked),
@@ -698,6 +810,20 @@ impl ServerConfigBuilder {
         self
     }
 
+    /// The feature cell cache's budget, in bytes. Zero caches nothing: every cell is generated.
+    #[must_use]
+    pub fn feature_cache_bytes(mut self, bytes: usize) -> Self {
+        self.config.feature_cache_bytes = bytes;
+        self
+    }
+
+    /// The cluster model cache's budget, in bytes. Zero caches nothing: every interior is built.
+    #[must_use]
+    pub fn cluster_model_cache_bytes(mut self, bytes: usize) -> Self {
+        self.config.cluster_model_cache_bytes = bytes;
+        self
+    }
+
     /// The sky's cell cache's budget, in bytes.
     ///
     /// Zero, the default, turns the cache off: each census reads no cache and keeps no cell
@@ -743,6 +869,19 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn sky_service(mut self, service: SkyService) -> Self {
         self.config.sky_service = service;
+        self
+    }
+
+    /// Whether the server serves plan 09's feature members; the generator version's
+    /// ([`FeatureMembers::of_version`]) by default, [`FeatureMembers::Held`] until
+    /// [`FEATURE_MEMBERS_FROM`].
+    ///
+    /// Tests serve them, so that the range query's members, their rows' origins and the features'
+    /// gas are tested before the gate opens; no option or variable sets it, so that no server
+    /// counts a feature's members twice before P09.T2.c (P09.T40.a).
+    #[must_use]
+    pub fn feature_members(mut self, members: FeatureMembers) -> Self {
+        self.config.feature_members = members;
         self
     }
 
@@ -867,15 +1006,17 @@ mod tests {
     }
 
     /// The address, the data directory, the workers, the surface passes run at once, the caches'
-    /// budgets (cells, maps, systems, bodies, briefs, extinction maps, lines of sight, the sky's
-    /// cells, the sky tables and the surface), the sky's switch and the stop on standard input.
+    /// budgets (cells, maps, systems, bodies, briefs, extinction maps, lines of sight, feature
+    /// cells, feature interiors, the sky's cells, the sky tables and the surface), the sky's
+    /// switch, the feature members' gate and the stop on standard input.
     type Fields<'a> = (
         SocketAddr,
         &'a Path,
         usize,
         usize,
-        [usize; 10],
+        [usize; 12],
         SkyService,
+        FeatureMembers,
         StdinStop,
     );
 
@@ -893,11 +1034,14 @@ mod tests {
                 config.brief_cache_bytes(),
                 config.extinction_map_cache_bytes(),
                 config.sightline_cache_bytes(),
+                config.feature_cache_bytes(),
+                config.cluster_model_cache_bytes(),
                 config.sky_cache_bytes(),
                 config.sky_tables_bytes(),
                 config.surface_cache_bytes(),
             ],
             config.sky_service(),
+            config.feature_members(),
             config.stdin_stop(),
         )
     }
@@ -928,11 +1072,14 @@ mod tests {
                     64 * 1024 * 1024,
                     16 * 1024 * 1024,
                     4 * 1024 * 1024,
+                    16 * 1024 * 1024,
+                    64 * 1024 * 1024,
                     0,
                     160 * 1024 * 1024,
                     128 * 1024 * 1024,
                 ],
                 SkyService::Served,
+                FeatureMembers::Held,
                 StdinStop::Ignore,
             )
         );
@@ -963,6 +1110,10 @@ mod tests {
             "11",
             "--sightline-cache",
             "13",
+            "--feature-cache",
+            "31",
+            "--cluster-model-cache",
+            "37",
             "--sky-cache",
             "17",
             "--sky-tables",
@@ -989,11 +1140,14 @@ mod tests {
                     7 << 20,
                     11 << 20,
                     13 << 20,
+                    31 << 20,
+                    37 << 20,
                     17 << 20,
                     19 << 20,
                     23 << 20
                 ],
                 SkyService::Unsupported,
+                FeatureMembers::Held,
                 StdinStop::Watch,
             )
         );
@@ -1076,6 +1230,11 @@ mod tests {
                     Some("HYPERION_EXTINCTION_MAP_CACHE_MB")
                 ),
                 (Some("sightline-cache"), Some("HYPERION_SIGHTLINE_CACHE_MB")),
+                (Some("feature-cache"), Some("HYPERION_FEATURE_CACHE_MB")),
+                (
+                    Some("cluster-model-cache"),
+                    Some("HYPERION_CLUSTER_MODEL_CACHE_MB")
+                ),
                 (Some("sky-cache"), Some("HYPERION_SKY_CACHE_MB")),
                 (Some("sky-tables"), Some("HYPERION_SKY_TABLES_MB")),
                 (Some("surface-cache"), Some("HYPERION_SURFACE_CACHE_MB")),
@@ -1230,6 +1389,8 @@ mod tests {
         assert_eq!(DEFAULT_BRIEF_CACHE.to_string(), "64");
         assert_eq!(DEFAULT_EXTINCTION_MAP_CACHE.to_string(), "16");
         assert_eq!(DEFAULT_SIGHTLINE_CACHE.to_string(), "4");
+        assert_eq!(DEFAULT_FEATURE_CACHE.to_string(), "16");
+        assert_eq!(DEFAULT_CLUSTER_MODEL_CACHE.to_string(), "64");
         assert_eq!(DEFAULT_SKY_CACHE.to_string(), "0");
         assert_eq!(DEFAULT_SKY_TABLES.to_string(), "160");
         assert_eq!(DEFAULT_SURFACE_CACHE.to_string(), "128");
@@ -1342,11 +1503,14 @@ mod tests {
             .brief_cache_bytes(50)
             .extinction_map_cache_bytes(60)
             .sightline_cache_bytes(70)
+            .feature_cache_bytes(110)
+            .cluster_model_cache_bytes(120)
             .sky_cache_bytes(80)
             .sky_tables_bytes(90)
             .surface_cache_bytes(100)
             .surface_passes(NonZeroUsize::new(3).unwrap())
             .sky_service(SkyService::Unsupported)
+            .feature_members(FeatureMembers::Served)
             .stdin_stop(StdinStop::Watch)
             .build();
         assert_eq!(
@@ -1356,10 +1520,43 @@ mod tests {
                 Path::new("/tmp/x"),
                 2,
                 3,
-                [10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+                [10, 20, 30, 40, 50, 60, 70, 110, 120, 80, 90, 100],
                 SkyService::Unsupported,
+                FeatureMembers::Served,
                 StdinStop::Watch,
             )
         );
+    }
+
+    /// The feature members' gate's tripwire: it holds until [`FEATURE_MEMBERS_FROM`], and the
+    /// bump that reaches it opens it with P09.T2.c or raises it (P09.T40.a).
+    #[test]
+    fn the_feature_members_gate_holds_until_its_version() {
+        assert!(
+            GENERATOR_VERSION < FEATURE_MEMBERS_FROM,
+            "generator version {} reaches the feature members' gate's {}: if P09.T2.c gives up φ \
+             in this bump, open the gate (delete `FEATURE_MEMBERS_FROM`, `FeatureMembers` with \
+             its `Held` arm and the matches on it, and this test, and re-bless the server's range \
+             pins, whose rows then carry their origins); otherwise raise the constant to the bump \
+             P09.T2.c rides, since members served before it are counted twice \
+             (`decision-r06-t16a-scope.md`; plan 09's P09.T40.a)",
+            GENERATOR_VERSION.get(),
+            FEATURE_MEMBERS_FROM.get()
+        );
+        assert_eq!(FeatureMembers::default(), FeatureMembers::Held);
+        assert_eq!(
+            ServerConfig::builder().build().feature_members(),
+            FeatureMembers::Held
+        );
+    }
+
+    /// The gate's arm follows its version: held below it, served from it on.
+    #[test]
+    fn the_feature_members_gate_opens_at_its_version() {
+        let at = |v| FeatureMembers::of_version(GeneratorVersion::new(v));
+        assert_eq!(at(23), FeatureMembers::Held);
+        assert_eq!(at(25), FeatureMembers::Held);
+        assert_eq!(at(26), FeatureMembers::Served);
+        assert_eq!(at(27), FeatureMembers::Served);
     }
 }

@@ -5,17 +5,14 @@
 
 mod common;
 
-use std::sync::OnceLock;
-
 use common::TestServer;
-use common::origins::{GRID_SYSTEM, a_feature_member, the_centre_s_members};
+use common::origins::{GRID_SYSTEM, a_feature_member, at_years, galaxy, the_centre_s_members};
 use common::scene::{next_scene, set_ship, subscribe, universe_on};
 use hyperion_protocol::{
     BodyIdHex, DetailLevelDto, ErrorCode, ExtinctionRequest, ExtinctionTarget, FramePositionDto,
     GalacticPosition, KinematicsDto, RequestBody, ResponseBody, SceneShipRequest,
     SystemBodiesRequest, SystemIdHex, TargetExtinction, UniverseTime,
 };
-use hyperion_sim::Seed;
 use hyperion_sim::coords::{LyCell, SystemPosition};
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::gas::ccm::Band;
@@ -27,27 +24,6 @@ use hyperion_sim::id::SystemId;
 use hyperion_sim::observe::{Drift, Trajectory};
 use hyperion_sim::time;
 use hyperion_sim::units::consts::METRES_PER_AU;
-
-/// The seed of every universe these tests create, the other server tests' own.
-const SEED: u64 = 0x4d2;
-
-/// Seconds in a Julian year, the sim's year.
-const SECONDS_PER_JULIAN_YEAR: i64 = 31_557_600;
-
-/// The galaxy of [`SEED`] as the server builds it, with its kinematic tables, in which plan 03's
-/// `position_at` panics for any record but a grid record's away from the epoch.
-fn galaxy() -> &'static Galaxy {
-    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| Galaxy::new(Seed::new(SEED)).with_full_potential())
-}
-
-/// The instant `years` Julian years from the epoch, as the wire carries it.
-fn at_years(years: i64) -> UniverseTime {
-    UniverseTime {
-        seconds: years * SECONDS_PER_JULIAN_YEAR,
-        nanos: 0,
-    }
-}
 
 fn sim_time(at: UniverseTime) -> time::UniverseTime {
     time::UniverseTime::new(at.seconds, at.nanos).expect("a valid time")

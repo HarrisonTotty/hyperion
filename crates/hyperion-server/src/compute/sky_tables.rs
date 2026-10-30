@@ -48,7 +48,10 @@ use hyperion_sim::sky::luminosity::{
 use tokio::task::JoinSet;
 
 use super::sky::{BulkJobs, SkyTables, SkyTablesSource, bulk};
-use super::{CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, SingleFlight};
+use super::{
+    CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, SharedFeatureCellCache,
+    SingleFlight,
+};
 use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
 
 impl HeapBytes for SkyTables {
@@ -98,6 +101,9 @@ pub(crate) struct SkyTablesService {
     /// flight lives with no sky waiting ([`prefetch`](Self::prefetch)); aborted at shutdown or when
     /// the service is dropped.
     prefetching: Mutex<JoinSet<()>>,
+    /// The feature cells every table this service builds lends its jobs' gas, once plan 09's
+    /// feature members are served (P09.T40.a); `None`, the smooth field alone, until then.
+    features: Option<Arc<SharedFeatureCellCache>>,
 }
 
 impl SkyTablesService {
@@ -115,6 +121,18 @@ impl SkyTablesService {
             flights: SingleFlight::new(),
             builds: Arc::new(AtomicU64::new(0)),
             prefetching: Mutex::new(JoinSet::new()),
+            features: None,
+        }
+    }
+
+    /// This service, whose tables lend their jobs plan 09's features' gas from `cells`
+    /// ([`SkyTables::with_features`]): the server's, once the feature members are served
+    /// (P09.T40.a).
+    #[must_use]
+    pub(crate) fn with_features(self, cells: Arc<SharedFeatureCellCache>) -> Self {
+        Self {
+            features: Some(cells),
+            ..self
         }
     }
 
@@ -212,11 +230,12 @@ impl SkyTablesService {
     /// once more inside the flight, then builds them from the service's source and keeps them.
     fn flight(&self, key: GalaxyKey, galaxy: &Arc<Galaxy>) -> Flight<SkyTables, ComputeError> {
         let source = self.source;
-        let (pool, held, builds, galaxy) = (
+        let (pool, held, builds, galaxy, features) = (
             Arc::clone(&self.pool),
             Arc::clone(&self.held),
             Arc::clone(&self.builds),
             Arc::clone(galaxy),
+            self.features.clone(),
         );
         self.flights.run(key, move || async move {
             // As in `GalaxyCache::get`: a caller can arrive just after another flight has
@@ -230,7 +249,7 @@ impl SkyTablesService {
             // Cancels the build's queued jobs once every waiter on this flight has gone.
             let _cancel_on_drop = CancelOnDrop::new(token.clone());
             let started = Instant::now();
-            let tables = Arc::new(match source {
+            let tables = match source {
                 SkyTablesSource::Galaxy => build_on_pool(&pool, &galaxy, &token).await?,
                 SkyTablesSource::Dark => {
                     let galaxy = Arc::clone(&galaxy);
@@ -239,6 +258,10 @@ impl SkyTablesService {
                     })
                     .await?
                 }
+            };
+            let tables = Arc::new(match features {
+                Some(cells) => tables.with_features(cells, key),
+                None => tables,
             });
             builds.fetch_add(1, Ordering::Relaxed);
             tracing::info!(
@@ -664,5 +687,45 @@ mod tests {
         let (_, galaxy) = galaxy();
         let other = GalaxyKey::new(SEED + 1, GENERATOR_VERSION);
         drop(service.get(other, &galaxy).await);
+    }
+
+    /// A service given the feature cells builds tables that lend them to their jobs' gas, and one
+    /// without builds tables whose jobs march the smooth field alone (P09.T40.a).
+    #[tokio::test]
+    async fn a_service_with_the_feature_cells_lends_them_to_its_tables() {
+        use super::super::sky::tests::{an_ageing_nursery, feature_gas_at};
+        use hyperion_sim::time::UniverseTime;
+
+        let pool = one_worker();
+        let (key, galaxy) = galaxy();
+        let cells = Arc::new(SharedFeatureCellCache::new(64 << 20));
+        let smooth = SkyTablesService::new(Arc::clone(&pool), SkyTablesSource::Dark, 64 << 20);
+        let featured = SkyTablesService::new(Arc::clone(&pool), SkyTablesSource::Dark, 64 << 20)
+            .with_features(Arc::clone(&cells));
+        let from = hyperion_sim::coords::GalacticPosition::from_light_years([0.0, 26_000.0, 68.0])
+            .unwrap();
+        let to = an_ageing_nursery(&galaxy, &from);
+        let t = UniverseTime::from_julian_years(1_000).unwrap();
+        for (service, featured) in [(&smooth, false), (&featured, true)] {
+            let tables = timeout(WAIT, service.get(key, &galaxy))
+                .await
+                .unwrap()
+                .unwrap();
+            let mut found = Vec::new();
+            hyperion_sim::galaxy::gas::modifiers::GasModifierSource::modifiers_near_segment(
+                &tables.gas(&galaxy, t),
+                &from,
+                &to,
+                &mut found,
+            );
+            let expected = if featured {
+                feature_gas_at(&galaxy, 1_000.0, &from, &to)
+            } else {
+                Vec::new()
+            };
+            assert_eq!(found, expected, "featured: {featured}");
+        }
+        assert!(cells.counters().entries() > 0);
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 }

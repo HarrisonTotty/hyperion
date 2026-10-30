@@ -289,6 +289,22 @@ impl MemberClassTable {
         self.tails.get(band.index()).and_then(Option::as_ref)
     }
 
+    /// The bytes the table owns on the heap: each band's rows, by their buffers' capacities, and
+    /// each row's profile ([`ClassProfile::heap_bytes`]). A tail owns nothing on the heap.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.bands
+            .iter()
+            .map(|rows| {
+                rows.capacity() * size_of::<Row>()
+                    + rows
+                        .iter()
+                        .map(|row| row.profile.heap_bytes())
+                        .sum::<usize>()
+            })
+            .sum()
+    }
+
     /// The millisecond pulsars the cluster's neutron stars hold: `model`'s encounter-rate law
     /// (P09.T9.e), never more than the neutron stars themselves, since a pulsar is a mark inside
     /// that class (ruling 126.3).

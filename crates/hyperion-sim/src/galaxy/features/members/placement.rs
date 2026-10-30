@@ -121,6 +121,14 @@ impl FeatureInterior {
         &self.grid
     }
 
+    /// The bytes it owns on the heap: its class table's ([`MemberClassTable::heap_bytes`]). The
+    /// feature, the cluster model and the grid own nothing there. What a caller's byte-bounded
+    /// cache charges an interior (P09.T40.a).
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.table.heap_bytes()
+    }
+
     /// Its bulk velocity, galactic.
     #[must_use]
     pub const fn bulk_velocity(&self) -> GalacticVelocity {
