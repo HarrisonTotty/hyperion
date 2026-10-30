@@ -189,7 +189,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "cluster_retention",
         revision: 0,
-        since_generator_version: 16,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {
@@ -279,14 +279,14 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "kick_defaults",
         revision: 0,
-        since_generator_version: 23,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {
         name: "kick_rank",
         revision: 1,
-        since_generator_version: 16,
-        provisional: true,
+        since_generator_version: 24,
+        provisional: false,
     },
     TableInfo {
         name: "lbv",

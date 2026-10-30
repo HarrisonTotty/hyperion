@@ -308,14 +308,14 @@ death at T-28758927533536900.000000000 s by EnvelopeLoss
 t = -500 yr: Exists
   CarbonOxygenWhiteDwarf WhiteDwarf DA5.5
   age = 0x41ed5a733e7129ca  # 3939736051.536351
-  mass = 0x3fe3d38bdd0b290c  # 0.6195735280282704
-  core = 0x3fe3d38bdd0b290c  # 0.6195735280282704
-  L = 0x3f503d21483c8172  # 0.0009911370297644687
-  R = 0x3f89a27acb132629  # 0.012516936609603029
-  Teff = 0x40c1e0ff7f262185  # 9153.996067777984
+  mass = 0x3fe3d38c43047fa6  # 0.6195737179696053
+  core = 0x3fe3d38c43047fa6  # 0.6195737179696053
+  L = 0x3f503d21ee605502  # 0.0009911376341780746
+  R = 0x3f89a27a74d6b806  # 0.012516934099803489
+  Teff = 0x40c1e0ffcaf39b9a  # 9153.998381091096
   M_V none
-  B-V = 0x3fa70d1bb04f37a2  # 0.045021882316731224
-  remnant WhiteDwarf = 0x3fe3d38bdd0b290c  # 0.6195735280282704
+  B-V = 0x3fa70d16517a3db8  # 0.04502172226522866
+  remnant WhiteDwarf = 0x3fe3d38c43047fa6  # 0.6195737179696053
   no death in the window
   binary class None
   rotation none
@@ -325,14 +325,14 @@ t = -500 yr: Exists
 t = 0 yr: Exists
   CarbonOxygenWhiteDwarf WhiteDwarf DA5.5
   age = 0x41ed5a737cf129ca  # 3939736551.536351
-  mass = 0x3fe3d38bdd0b290c  # 0.6195735280282704
-  core = 0x3fe3d38bdd0b290c  # 0.6195735280282704
-  L = 0x3f503d2045f456d8  # 0.00099113609014039
-  R = 0x3f89a27acb132629  # 0.012516936609603029
-  Teff = 0x40c1e0ff380e8e99  # 9153.993898219707
+  mass = 0x3fe3d38c43047fa6  # 0.6195737179696053
+  core = 0x3fe3d38c43047fa6  # 0.6195737179696053
+  L = 0x3f503d20ec181d86  # 0.0009911366945532809
+  R = 0x3f89a27a74d6b806  # 0.012516934099803489
+  Teff = 0x40c1e0ff83dc06cc  # 9153.996211531943
   M_V none
-  B-V = 0x3fa70d20b9b4d276  # 0.04502203242228557
-  remnant WhiteDwarf = 0x3fe3d38bdd0b290c  # 0.6195735280282704
+  B-V = 0x3fa70d1b5adfe54e  # 0.04502187237080567
+  remnant WhiteDwarf = 0x3fe3d38c43047fa6  # 0.6195737179696053
   no death in the window
   binary class None
   rotation none
@@ -342,14 +342,14 @@ t = 0 yr: Exists
 t = 500 yr: Exists
   CarbonOxygenWhiteDwarf WhiteDwarf DA5.5
   age = 0x41ed5a73bb7129ca  # 3939737051.536351
-  mass = 0x3fe3d38bdd0b290c  # 0.6195735280282704
-  core = 0x3fe3d38bdd0b290c  # 0.6195735280282704
-  L = 0x3f503d1f43ac4686  # 0.0009911351505177703
-  R = 0x3f89a27acb132629  # 0.012516936609603029
-  Teff = 0x40c1e0fef0f6ff99  # 9153.991728663257
+  mass = 0x3fe3d38c43047fa6  # 0.6195737179696053
+  core = 0x3fe3d38c43047fa6  # 0.6195737179696053
+  L = 0x3f503d1fe9d00055  # 0.0009911357549299467
+  R = 0x3f89a27a74d6b806  # 0.012516934099803489
+  Teff = 0x40c1e0ff3cc475ed  # 9153.994041974622
   M_V none
-  B-V = 0x3fa70d25c31a3a40  # 0.045022182527749255
-  remnant WhiteDwarf = 0x3fe3d38bdd0b290c  # 0.6195735280282704
+  B-V = 0x3fa70d206445597d  # 0.04502202247629137
+  remnant WhiteDwarf = 0x3fe3d38c43047fa6  # 0.6195737179696053
   no death in the window
   binary class None
   rotation none
@@ -677,14 +677,14 @@ death at T-9747680549465404.000000000 s by DirectCollapse
 t = -500 yr: Exists
   BlackHole BlackHole BH
   age = 0x41b2b1a948e5b250  # 313633096.8972521
-  mass = 0x401e26120d60d0f8  # 7.537178238901326
-  core = 0x401e26120d60d0f8  # 7.537178238901326
+  mass = 0x40228cc2c6410594  # 9.274923510968428
+  core = 0x40228cc2c6410594  # 9.274923510968428
   L = 0x0000000000000000  # 0.0
-  R = 0x3f00c6583612280f  # 3.1995360367423444e-5
+  R = 0x3f04a46efc4f749a  # 3.9372097979864173e-5
   Teff = 0x0000000000000000  # 0.0
   M_V none
   B-V none
-  remnant BlackHole = 0x401e26120d60d0f8  # 7.537178238901326
+  remnant BlackHole = 0x40228cc2c6410594  # 9.274923510968428
   no death in the window
   binary class None
   black hole spin = 0x3f809efc7dab8d1b  # 0.00811574228777672
@@ -695,14 +695,14 @@ t = -500 yr: Exists
 t = 0 yr: Exists
   BlackHole BlackHole BH
   age = 0x41b2b1ab3ce5b250  # 313633596.8972521
-  mass = 0x401e26120d60d0f8  # 7.537178238901326
-  core = 0x401e26120d60d0f8  # 7.537178238901326
+  mass = 0x40228cc2c6410594  # 9.274923510968428
+  core = 0x40228cc2c6410594  # 9.274923510968428
   L = 0x0000000000000000  # 0.0
-  R = 0x3f00c6583612280f  # 3.1995360367423444e-5
+  R = 0x3f04a46efc4f749a  # 3.9372097979864173e-5
   Teff = 0x0000000000000000  # 0.0
   M_V none
   B-V none
-  remnant BlackHole = 0x401e26120d60d0f8  # 7.537178238901326
+  remnant BlackHole = 0x40228cc2c6410594  # 9.274923510968428
   no death in the window
   binary class None
   black hole spin = 0x3f809efc7dab8d1b  # 0.00811574228777672
@@ -713,14 +713,14 @@ t = 0 yr: Exists
 t = 500 yr: Exists
   BlackHole BlackHole BH
   age = 0x41b2b1ad30e5b250  # 313634096.8972521
-  mass = 0x401e26120d60d0f8  # 7.537178238901326
-  core = 0x401e26120d60d0f8  # 7.537178238901326
+  mass = 0x40228cc2c6410594  # 9.274923510968428
+  core = 0x40228cc2c6410594  # 9.274923510968428
   L = 0x0000000000000000  # 0.0
-  R = 0x3f00c6583612280f  # 3.1995360367423444e-5
+  R = 0x3f04a46efc4f749a  # 3.9372097979864173e-5
   Teff = 0x0000000000000000  # 0.0
   M_V none
   B-V none
-  remnant BlackHole = 0x401e26120d60d0f8  # 7.537178238901326
+  remnant BlackHole = 0x40228cc2c6410594  # 9.274923510968428
   no death in the window
   binary class None
   black hole spin = 0x3f809efc7dab8d1b  # 0.00811574228777672
@@ -841,7 +841,7 @@ companions at t = 500 yr: Exists
   [2] not variable
 
 companions of C system = 0x42002cb200000000
-[1] initial mass = 0x3ff07fc6140eb977  # 1.0311947616097237
+[1] initial mass = 0x3ff07fc63818d673  # 1.0311948958673411
 companions at t = -500 yr: Exists
   [1] NoRemnant NoRemnant NONE
   [1] age = 0x41ed5a733e7129ca  # 3939736051.536351
@@ -952,15 +952,15 @@ companions at t = 500 yr: Exists
   [1] ZzCeti amplitude = 0x3fc40ba27bf79e83  # 0.15660506299103724
 
 companions of D system = 0x6200596800000001
-[1] initial mass = 0x3fa3f28e9abe5159  # 0.03895993842084761
+[1] initial mass = 0x3fa3f28e9e7b9ee1  # 0.03895993885617855
 companions at t = -500 yr: Exists
   [1] Substellar Substellar T7
   [1] age = 0x41f165bb146823be  # 4670075206.508726
-  [1] mass = 0x3fa3f28e9abe5159  # 0.03895993842084761
+  [1] mass = 0x3fa3f28e9e7b9ee1  # 0.03895993885617855
   [1] core = 0x0000000000000000  # 0.0
-  [1] L = 0x3ecaee2b35b9ec78  # 3.2103475129919764e-6
-  [1] R = 0x3fb6c4ee823f23a3  # 0.08894243888711499
-  [1] Teff = 0x408999e65fdc4b92  # 819.2374875269472
+  [1] L = 0x3ecaee2b430de0d3  # 3.210347607692738e-6
+  [1] R = 0x3fb6c4ee81b40df8  # 0.08894243876061825
+  [1] Teff = 0x408999e663556012  # 819.23749415111
   [1] M_V none
   [1] B-V none
   [1] remnant none
@@ -973,11 +973,11 @@ companions at t = -500 yr: Exists
 companions at t = 0 yr: Exists
   [1] Substellar Substellar T7
   [1] age = 0x41f165bb33a823be  # 4670075706.508726
-  [1] mass = 0x3fa3f28e9abe5159  # 0.03895993842084761
+  [1] mass = 0x3fa3f28e9e7b9ee1  # 0.03895993885617855
   [1] core = 0x0000000000000000  # 0.0
-  [1] L = 0x3ecaee2af6d75bfe  # 3.210347066167056e-6
-  [1] R = 0x3fb6c4ee7fcfac32  # 0.08894243832007545
-  [1] Teff = 0x408999e65248cc92  # 819.2374616324835
+  [1] L = 0x3ecaee2b042b5039  # 3.210347160867804e-6
+  [1] R = 0x3fb6c4ee7f44968a  # 0.08894243819357875
+  [1] Teff = 0x408999e655c1e10d  # 819.2374682566457
   [1] M_V none
   [1] B-V none
   [1] remnant none
@@ -990,11 +990,11 @@ companions at t = 0 yr: Exists
 companions at t = 500 yr: Exists
   [1] Substellar Substellar T7
   [1] age = 0x41f165bb52e823be  # 4670076206.508726
-  [1] mass = 0x3fa3f28e9abe5159  # 0.03895993842084761
+  [1] mass = 0x3fa3f28e9e7b9ee1  # 0.03895993885617855
   [1] core = 0x0000000000000000  # 0.0
-  [1] L = 0x3ecaee2ab7f4cc9c  # 3.210346619342254e-6
-  [1] R = 0x3fb6c4ee7d6034c5  # 0.08894243775303597
-  [1] Teff = 0x408999e644b54db6  # 819.2374357380238
+  [1] L = 0x3ecaee2ac548c0ac  # 3.2103467140429838e-6
+  [1] R = 0x3fb6c4ee7cd51f1f  # 0.08894243762653929
+  [1] Teff = 0x408999e6482e622a  # 819.2374423621852
   [1] M_V none
   [1] B-V none
   [1] remnant none
@@ -1283,14 +1283,14 @@ companions at t = -500 yr: Exists
   [1] not variable
   [2] BlackHole BlackHole BH
   [2] age = 0x41b2b1a948e5b250  # 313633096.8972521
-  [2] mass = 0x401809572315eb8c  # 6.009121463978669
-  [2] core = 0x401809572315eb8c  # 6.009121463978669
+  [2] mass = 0x4017dd3585e296de  # 5.9660244864987515
+  [2] core = 0x4017dd3585e296de  # 5.9660244864987515
   [2] L = 0x0000000000000000  # 0.0
-  [2] R = 0x3efabf740e349764  # 2.550875150322071e-5
+  [2] R = 0x3efa8e580a76c17e  # 2.5325804612287468e-5
   [2] Teff = 0x0000000000000000  # 0.0
   [2] M_V none
   [2] B-V none
-  [2] remnant BlackHole = 0x401809572315eb8c  # 6.009121463978669
+  [2] remnant BlackHole = 0x4017dd3585e296de  # 5.9660244864987515
   [2] no death in the window
   [2] binary class None
   [2] black hole spin = 0x3facd928ebb759b4  # 0.0563442981471555
@@ -1298,22 +1298,18 @@ companions at t = -500 yr: Exists
   [2] no field
   [2] no activity
   [2] not variable
-  [3] NeutronStar NeutronStar NS
-  [3] age = 0x41b2484369de6c3a  # 306725737.8688389
-  [3] mass = 0x3ff9a0b954d27322  # 1.601739245735367
-  [3] core = 0x3ff9a0b954d27322  # 1.601739245735367
-  [3] L = 0x3e93a27892f83ed8  # 2.925791191274642e-7
-  [3] R = 0x3ef2635cf9422719  # 1.753629437976139e-5
-  [3] Teff = 0x40df4e2a18dfd418  # 32056.65776820862
+  [3] NoRemnant NoRemnant NONE
+  [3] age = 0x41b2b1a948e5b250  # 313633096.8972521
+  [3] mass = 0x0000000000000000  # 0.0
+  [3] core = 0x0000000000000000  # 0.0
+  [3] L = 0x0000000000000000  # 0.0
+  [3] R = 0x0000000000000000  # 0.0
+  [3] Teff = 0x0000000000000000  # 0.0
   [3] M_V none
-  [3] B-V = 0xbfd3af3b43dcf22d  # -0.30757028224232635
-  [3] remnant NeutronStar = 0x3ff9a0b954d27322  # 1.601739245735367
+  [3] B-V none
+  [3] remnant None = 0x0000000000000000  # 0.0
   [3] no death in the window
   [3] binary class None
-  [3] pulsar NeutronStar
-  [3] pulsar P = 0x40117a688b538854  # 4.369539429639264
-  [3] pulsar Pdot = 0x3cafe4fd419027cf  # 2.2131247793751406e-16
-  [3] pulsar B = 0x426d1a94a2000000  # 1000000000000.0
   [3] rotation none
   [3] no field
   [3] no activity
@@ -1337,14 +1333,14 @@ companions at t = 0 yr: Exists
   [1] not variable
   [2] BlackHole BlackHole BH
   [2] age = 0x41b2b1ab3ce5b250  # 313633596.8972521
-  [2] mass = 0x401809572315eb8c  # 6.009121463978669
-  [2] core = 0x401809572315eb8c  # 6.009121463978669
+  [2] mass = 0x4017dd3585e296dd  # 5.966024486498751
+  [2] core = 0x4017dd3585e296dd  # 5.966024486498751
   [2] L = 0x0000000000000000  # 0.0
-  [2] R = 0x3efabf740e349764  # 2.550875150322071e-5
+  [2] R = 0x3efa8e580a76c17d  # 2.5325804612287464e-5
   [2] Teff = 0x0000000000000000  # 0.0
   [2] M_V none
   [2] B-V none
-  [2] remnant BlackHole = 0x401809572315eb8c  # 6.009121463978669
+  [2] remnant BlackHole = 0x4017dd3585e296dd  # 5.966024486498751
   [2] no death in the window
   [2] binary class None
   [2] black hole spin = 0x3facd928ebb759b4  # 0.0563442981471555
@@ -1352,22 +1348,18 @@ companions at t = 0 yr: Exists
   [2] no field
   [2] no activity
   [2] not variable
-  [3] NeutronStar NeutronStar NS
-  [3] age = 0x41b248455dde6c3a  # 306726237.8688389
-  [3] mass = 0x3ff9a0b954d27322  # 1.601739245735367
-  [3] core = 0x3ff9a0b954d27322  # 1.601739245735367
-  [3] L = 0x3e93a2745e210a30  # 2.9257816270083987e-7
-  [3] R = 0x3ef2635cf9422719  # 1.753629437976139e-5
-  [3] Teff = 0x40df4e286ba5b64c  # 32056.63157027056
+  [3] NoRemnant NoRemnant NONE
+  [3] age = 0x41b2b1ab3ce5b250  # 313633596.8972521
+  [3] mass = 0x0000000000000000  # 0.0
+  [3] core = 0x0000000000000000  # 0.0
+  [3] L = 0x0000000000000000  # 0.0
+  [3] R = 0x0000000000000000  # 0.0
+  [3] Teff = 0x0000000000000000  # 0.0
   [3] M_V none
-  [3] B-V = 0xbfd3af3addb65809  # -0.3075701871069901
-  [3] remnant NeutronStar = 0x3ff9a0b954d27322  # 1.601739245735367
+  [3] B-V none
+  [3] remnant None = 0x0000000000000000  # 0.0
   [3] no death in the window
   [3] binary class None
-  [3] pulsar NeutronStar
-  [3] pulsar P = 0x40117a6975ac63f5  # 4.369542921683196
-  [3] pulsar Pdot = 0x3cafe4fb95ec158d  # 2.2131230106938176e-16
-  [3] pulsar B = 0x426d1a94a2000000  # 1000000000000.0
   [3] rotation none
   [3] no field
   [3] no activity
@@ -1391,14 +1383,14 @@ companions at t = 500 yr: Exists
   [1] not variable
   [2] BlackHole BlackHole BH
   [2] age = 0x41b2b1ad30e5b250  # 313634096.8972521
-  [2] mass = 0x401809572315eb8c  # 6.009121463978669
-  [2] core = 0x401809572315eb8c  # 6.009121463978669
+  [2] mass = 0x4017dd3585e296dd  # 5.966024486498751
+  [2] core = 0x4017dd3585e296dd  # 5.966024486498751
   [2] L = 0x0000000000000000  # 0.0
-  [2] R = 0x3efabf740e349764  # 2.550875150322071e-5
+  [2] R = 0x3efa8e580a76c17d  # 2.5325804612287464e-5
   [2] Teff = 0x0000000000000000  # 0.0
   [2] M_V none
   [2] B-V none
-  [2] remnant BlackHole = 0x401809572315eb8c  # 6.009121463978669
+  [2] remnant BlackHole = 0x4017dd3585e296dd  # 5.966024486498751
   [2] no death in the window
   [2] binary class None
   [2] black hole spin = 0x3facd928ebb759b4  # 0.0563442981471555
@@ -1406,22 +1398,18 @@ companions at t = 500 yr: Exists
   [2] no field
   [2] no activity
   [2] not variable
-  [3] NeutronStar NeutronStar NS
-  [3] age = 0x41b2484751de6c3a  # 306726737.8688389
-  [3] mass = 0x3ff9a0b954d27322  # 1.601739245735367
-  [3] core = 0x3ff9a0b954d27322  # 1.601739245735367
-  [3] L = 0x3e93a270294b2f93  # 2.925772062789053e-7
-  [3] R = 0x3ef2635cf9422719  # 1.753629437976139e-5
-  [3] Teff = 0x40df4e26be6bdd78  # 32056.605372396734
+  [3] NoRemnant NoRemnant NONE
+  [3] age = 0x41b2b1ad30e5b250  # 313634096.8972521
+  [3] mass = 0x0000000000000000  # 0.0
+  [3] core = 0x0000000000000000  # 0.0
+  [3] L = 0x0000000000000000  # 0.0
+  [3] R = 0x0000000000000000  # 0.0
+  [3] Teff = 0x0000000000000000  # 0.0
   [3] M_V none
-  [3] B-V = 0xbfd3af3a778fc8d9  # -0.30757009197180946
-  [3] remnant NeutronStar = 0x3ff9a0b954d27322  # 1.601739245735367
+  [3] B-V none
+  [3] remnant None = 0x0000000000000000  # 0.0
   [3] no death in the window
   [3] binary class None
-  [3] pulsar NeutronStar
-  [3] pulsar P = 0x40117a6a6005334f  # 4.369546413724335
-  [3] pulsar Pdot = 0x3cafe4f9ea48467f  # 2.2131212420167358e-16
-  [3] pulsar B = 0x426d1a94a2000000  # 1000000000000.0
   [3] rotation none
   [3] no field
   [3] no activity

@@ -364,9 +364,10 @@ pub fn quantiles_of(scores: &mut [f64]) -> [f64; QUANTILES] {
 /// of `seed`, at ranks i ÷ 256 (P06.T19.b): the members of sample stars 0, 1, 2, … in order, scored
 /// by [`ReferencePopulation::scores`] in chunks and cut at the n-th, then [`quantiles_of`].
 ///
-/// The committed table, [`tables::kick_rank`](crate::tables::kick_rank), is this with n = 10⁶;
-/// plan 15's P15.T5.a calls it with 10⁷. Each member costs one full track of a massive star, about
-/// a millisecond, and a little under half the sample stars are members (ruling 147.2).
+/// The committed table, [`tables::kick_rank`](crate::tables::kick_rank), is this with n = 10⁷
+/// (plan 15's P15.T5.a, swapped in by P06.T19.e); P06.T19.b's provisional table was its first 10⁶.
+/// Each member costs one full track of a massive star, about a millisecond, and a little under half
+/// the sample stars are members (ruling 147.2).
 ///
 /// # Panics
 ///

@@ -102,10 +102,10 @@ task = "cluster_bh"
 revision = 1
 inputs_sha256 = "757274b19f5d79b654bad73f7ef259f976999b1aea2dad6100f31ac3823b6f49"
 body_sha256 = "964586543142493ab4b88be0dd39b88e609d69f935c3e231310b7227bbdc8b20"
-fingerprint = [0.5859340259539524, 0.04870347946249036, 7.98070989792187]
+fingerprint = [0.5859340259539524, 0.048716933237337584, 7.98070989792187]
 since_generator_version = 15
 provisional = false
-acceptance = "adopted β = 0.0028, ψ₁ = 147, k = 2.5 and c = 0.138 (Antonini and Gieles 2020; ruling 126.4; decision-p15-t8-blocks); on the Baumgardt–Hilker catalogue at 12 Gyr through the sim's ClusterModel, the most in a cluster past 14 t★ 0.00 (under 1; passes), 47 Tucanae 144 (20–400; passes), ω Centauri 8374 (3,000–20,000; passes), 12695 over the catalogue (10⁴–10⁵; passes), 0.218 past the core-collapse line with none (0.15–0.25; passes). Reported: the median over 3 × 10⁵ M☉ 0 (tens to a few hundred); the CMC fit over 124 models at 14 Gyr (1 of them dissolved to under 500 M☉ and left out), 97 retaining any, rms 1.716 dex in log₁₀(1 + N) over those at the adopted constants and 0.476 at the best fit (under 0.3), 26 of 113 and 19 of 34 predicted empty are empty (at least 85%), the best fit's ψ₁ = 6.48e19 and β ψ₁ = 0.1012 (β and c enter only as β ÷ c)"
+acceptance = "adopted β = 0.0028, ψ₁ = 147, k = 2.5 and c = 0.138 (Antonini and Gieles 2020; ruling 126.4; decision-p15-t8-blocks); on the Baumgardt–Hilker catalogue at 12 Gyr through the sim's ClusterModel, the most in a cluster past 14 t★ 0.00 (under 1; passes), 47 Tucanae 144 (20–400; passes), ω Centauri 8376 (3,000–20,000; passes), 12699 over the catalogue (10⁴–10⁵; passes), 0.218 past the core-collapse line with none (0.15–0.25; passes). Reported: the median over 3 × 10⁵ M☉ 0 (tens to a few hundred); the CMC fit over 124 models at 14 Gyr (1 of them dissolved to under 500 M☉ and left out), 97 retaining any, rms 1.716 dex in log₁₀(1 + N) over those at the adopted constants and 0.476 at the best fit (under 0.3), 26 of 113 and 19 of 34 predicted empty are empty (at least 85%), the best fit's ψ₁ = 1.90e19 and β ψ₁ = 0.1012 (β and c enter only as β ÷ c)"
 
 [[table]]
 name = "cluster_retention"
@@ -113,9 +113,9 @@ path = "cluster_retention.rs"
 task = "cluster_retention"
 revision = 0
 inputs_sha256 = "b23c1c962b071a17cf39dd5aabc161d29b71e684795831b4b0f0d7d64f66f2d7"
-body_sha256 = "65ecdd71d874b61205cc20026918e47b7b8c7d793f51082432b9448b30133ec9"
-fingerprint = [7.999999999999998, 100.00000000000004, -2.3010299956639813, 0.17609125905568124, 0.1, 499.9999999999999, 0.9999999999999918, 0.0, 0.38320536780072606, 0.0, 0.0, 0.02276411725143112, 0.416991557056143, 0.616794632124647, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4356036781681426, 0.0, 0.0, 0.0, 0.0, 0.001737317651571491, 0.012566721104308134, 0.12534630987471304, 0.5643963218318642, 0.2654526734144497, 0.0, 0.0, 0.0, 0.10462624428328901, 0.27664812006638173, 0.2989380580986681, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-since_generator_version = 16
+body_sha256 = "298043d3e70b46c84ceb0ce33d474d014bc48a2f379b36b615ffcf86ca5872f2"
+fingerprint = [7.999999999999998, 100.00000000000004, -2.3010299956639813, 0.17609125905568124, 0.1, 499.9999999999999, 0.9999999999999918, 0.0, 0.38320536780072606, 0.0, 0.0, 0.02292717566558393, 0.41763698538911553, 0.6167946321343014, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4356036781681426, 0.0, 0.0, 0.0, 0.0, 0.0017459143332028797, 0.012587744393284266, 0.12608523808861172, 0.5643963218318642, 0.2654526734144497, 0.0, 0.0, 0.0, 0.10490522456677719, 0.27668852085901047, 0.2989381591143712, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+since_generator_version = 24
 provisional = false
 acceptance = "at 64 off-node points ([Fe/H] [-1.95, -1.1, -0.43, 0.05], v [3.3, 17.0, 45.0, 120.0] km/s, Chabrier and Kroupa), the tabulated neutron-star and black-hole retention within 0.00002 absolute of the exact quadrature where it is 0.05 or less and 0.0195 relative where it exceeds 0.05 (ruling 139.5: 0.005 and 3%; met); largest absolute 0.01299"
 
@@ -291,23 +291,23 @@ path = "kick_defaults.rs"
 task = "kick_defaults"
 revision = 0
 inputs_sha256 = "7b6481cc2abe295203ef521c333320d9048f62dc43cf60de8dc49a4fbce15dd0"
-body_sha256 = "e62302ed9e906d96c0a1e1895bed49cbb8a17e40efdea7e39085a4fc31df712b"
+body_sha256 = "4e77d2e6c0669cc049d1d8eb6c71a660c53345473374d190ae99c939853c3c62"
 fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.972260428913055, 10.409751131825592, 11.927653994931292, 15.691973502837042, 0.45, 1.26, 46428852.83850509, 0.4194029742056137, 0.5246263558962185, 0.518193502001322, 2.0, 3.0, 0.75, 0.1, 1.0]
-since_generator_version = 23
+since_generator_version = 24
 provisional = false
-acceptance = "at the committed defaults on the committed table every observable passes, the two figures ruling 147.2 holds reported as held (sky share under 50 km/s 0.0708 against 0.03–0.07, escape share 0.1159 against 0.12–0.20); resolution: the centre on its rebuild of 100000 scores within 0.0019 in ln(v ÷ km/s) (ordinary ln v sd) and 0.0008 in a share (escape share) of the committed table; rebuilds: the low-mode ramp, 0 of 10 equal to the centre's bit for bit; the single-star window, 12 of 12 equal to the centre's bit for bit; the companion-stripped window, 8 of 8 equal to the centre's bit for bit; findings: none"
+acceptance = "at the committed defaults on the committed table every observable passes, the two figures ruling 147.2 holds reported as held (sky share under 50 km/s 0.0710 against 0.03–0.07, escape share 0.1156 against 0.12–0.20); resolution: the centre on its rebuild of 100000 scores within 0.0020 in ln(v ÷ km/s) (ordinary ln v sd) and 0.0008 in a share (light black holes above 100 km/s) of the committed table; rebuilds: the low-mode ramp, 0 of 10 equal to the centre's bit for bit; the single-star window, 12 of 12 equal to the centre's bit for bit; the companion-stripped window, 8 of 8 equal to the centre's bit for bit; findings: none"
 
 [[table]]
 name = "kick_rank"
 path = "kick_rank.rs"
 task = "kick_rank"
 revision = 1
-inputs_sha256 = "997c5f8c2bc05e7533413420e12f3bd12c1ebf068117256ea67d4f3369a01a04"
-body_sha256 = "46c38ec84d72ea4686dad6f34231e7a62831bbc4a22d1798e02aa604bef2ee73"
+inputs_sha256 = "0bda1fb5858dec8176782d2329ca84461be30dbc43884c2a001b84d504e8c953"
+body_sha256 = "a6f036f6fbea9d8a11d904b4cf1982f17dcfa7e2de46df791304d59b1f11dc64"
 fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.972260428913055, 10.409751131825592, 11.927653994931292, 15.691973502837042, 0.45, 1.26, 46428852.83850509, 0.4194029742056137, 0.5246263558962185, 0.518193502001322]
-since_generator_version = 16
-provisional = true
-acceptance = "100000 fresh scores through the table give ln(v ÷ km/s) of mean 5.6000 and standard deviation 0.6774, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.06227"
+since_generator_version = 24
+provisional = false
+acceptance = "1000000 fresh scores through the table give ln(v ÷ km/s) of mean 5.5996 and standard deviation 0.6775, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.00092"
 
 [[table]]
 name = "lbv"

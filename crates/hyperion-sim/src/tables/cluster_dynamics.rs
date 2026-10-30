@@ -33,7 +33,7 @@
 // inputs-sha256: 757274b19f5d79b654bad73f7ef259f976999b1aea2dad6100f31ac3823b6f49
 // manifest: crates/hyperion-fit/manifests/cluster_bh.toml
 // data: `cmc@cc49168e45c3`
-// sim-fingerprint: 7f0e8692d3102caf2afbf5e23f1ae0d1e60f17dbe1de324b911fb5a0fbc8b615
+// sim-fingerprint: 16ad173d3a5e32d535ec1e4873f2903d028021ef247b5795b8d1a23369a2a69b
 // since-generator-version: 15
 // source: Antonini and Gieles (2020, MNRAS 492, 2936), §2.4's fit and §2.3.2's eqs. 10, 12 and
 //   14, for the constants; Kremer et al. (2020, ApJS 247, 48), Table A1; Breen and Heggie (2013,
@@ -42,13 +42,13 @@
 // acceptance: adopted β = 0.0028, ψ₁ = 147, k = 2.5 and c = 0.138 (Antonini and Gieles 2020;
 //   ruling 126.4; decision-p15-t8-blocks); on the Baumgardt–Hilker catalogue at 12 Gyr through
 //   the sim's ClusterModel, the most in a cluster past 14 t★ 0.00 (under 1; passes), 47 Tucanae
-//   144 (20–400; passes), ω Centauri 8374 (3,000–20,000; passes), 12695 over the catalogue
+//   144 (20–400; passes), ω Centauri 8376 (3,000–20,000; passes), 12699 over the catalogue
 //   (10⁴–10⁵; passes), 0.218 past the core-collapse line with none (0.15–0.25; passes).
 //   Reported: the median over 3 × 10⁵ M☉ 0 (tens to a few hundred); the CMC fit over 124 models
 //   at 14 Gyr (1 of them dissolved to under 500 M☉ and left out), 97 retaining any, rms 1.716
 //   dex in log₁₀(1 + N) over those at the adopted constants and 0.476 at the best fit (under
 //   0.3), 26 of 113 and 19 of 34 predicted empty are empty (at least 85%), the best fit's ψ₁ =
-//   6.48e19 and β ψ₁ = 0.1012 (β and c enter only as β ÷ c)
+//   1.90e19 and β ψ₁ = 0.1012 (β and c enter only as β ÷ c)
 
 /// β: black-hole mass lost per relaxation time, in cluster masses (Antonini and Gieles 2020).
 pub const BH_LOSS_BETA: f64 = 0.002_8;

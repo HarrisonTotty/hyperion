@@ -17,9 +17,10 @@ use hyperion_sim::tables::kick_rank;
 const COMMITTED: &str = include_str!("../../hyperion-sim/src/tables/kick_rank.rs");
 
 /// The committed body is the task's rendering of the committed quantiles, byte for byte. The fit
-/// itself takes a quarter of an hour, so it is not rerun here: `hyperion-fit check` holds the
-/// file to its inputs hash and body hash, and the sim's slow test
-/// `ranks_of_fresh_reference_scores_are_uniform` checks the quantiles against fresh scores.
+/// itself takes some ten minutes on sixteen threads, so it is not rerun here: `hyperion-fit check`
+/// holds the file to its inputs hash and body hash, and the sim's slow test
+/// `ranks_of_fresh_reference_scores_are_uniform` checks the quantiles against fresh scores. The
+/// notes, which the body leaves out, name the committed sample's size.
 #[test]
 fn the_committed_body_is_the_rendering_of_its_quantiles() {
     let fit = KickRankFit {
@@ -30,13 +31,9 @@ fn the_committed_body_is_the_rendering_of_its_quantiles() {
     let committed = TableText::of_file(COMMITTED);
     assert_eq!(render(&fit).body().unwrap(), committed.body);
     let header = committed.header().unwrap();
-    assert_eq!(
-        header.kind,
-        Some(HeaderKind::Provisional {
-            by: "P06.T19.b".to_owned()
-        })
-    );
+    assert_eq!(header.kind, Some(HeaderKind::Generated));
     assert_eq!(header.task.as_deref(), Some("kick_rank"));
+    assert!(COMMITTED.contains(&format!("over {DRAWS} scores of seed")));
 }
 
 #[test]
@@ -63,7 +60,7 @@ fn the_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_thread_count()
     assert_eq!(texts[0], texts[1]);
     let split = TableText::of_file(&texts[0]);
     let header = split.header().unwrap();
-    assert!(matches!(header.kind, Some(HeaderKind::Provisional { .. })));
+    assert_eq!(header.kind, Some(HeaderKind::Generated));
     assert_eq!(
         header.manifest.as_deref(),
         Some("crates/hyperion-fit/manifests/kick_rank.smoke.toml")

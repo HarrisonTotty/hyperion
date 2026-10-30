@@ -676,8 +676,8 @@ mod tests {
     /// Failing it is the point at which the fallback is due: a refit of `CLASS_SHARES`, a new
     /// class on the centre's list or a higher cap has brought the heaviest centre within a factor
     /// of two of the bound, and the ruling's next step is the same rule with the index at
-    /// `[31:0]`. Measured at `GENERATOR_VERSION` 23: 27,380.9 indices to spare at eight standard
-    /// deviations under Chabrier's function and 39,936.8 under Kroupa's.
+    /// `[31:0]`. Measured on plan 15's production rank table (P06.T19.e): 27,381.5 indices to spare
+    /// at eight standard deviations under Chabrier's function and 39,937.2 under Kroupa's.
     #[test]
     fn twice_either_cap_s_candidates_fit_the_centre_s_index() {
         let limit = ListIndex::Centre.limit();

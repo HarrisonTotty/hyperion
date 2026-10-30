@@ -1348,7 +1348,8 @@ Records: [06-stellar-stage/records/P06.T19.md](06-stellar-stage/records/P06.T19.
   6. Black holes: at least half unkicked; among those under 12 M☉, 50–70% unkicked and 12–26% above
      100 km/s (Nagarajan and El-Badry 2025).
 - **P06.T19.e Swap in plan 15's rank table** when it lands: replace the file, bump the generator
-  version, regenerate goldens, rerun T19.d.
+  version, regenerate goldens, rerun T19.d. _Built 2026-10-30 on a lane branch, for version 25's
+  bump (records)._
 - **Files:** `stellar/remnant/kick.rs`, `reference.rs`, `tables/kick_rank.rs`, `tables/mod.rs`,
   `rng/tags.rs`.
 - **Accept:** `just test-slow` passes the six tests; a golden pins the kicks of three pinned IDs.

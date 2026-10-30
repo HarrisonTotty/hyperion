@@ -6,7 +6,7 @@
 //! manifest: crates/hyperion-fit/manifests/kick_defaults.toml
 //! data: none
 //! sim-fingerprint: ff1bb6b19a401adf1d15bfcc252781a4663b64b3e2e6cee873aec7d46946454b
-//! since-generator-version: 23
+//! since-generator-version: 24
 //! source: the brainstorm's "Testing" list, through plan 06's kick-law tests (P06.T19.d,
 //!   `crates/hyperion-sim/tests/stellar_kick.rs`): Willcox et al. (2021, ApJ Letters 920, L37)
 //!   for the slow isolated pulsars; Igoshev et al. (2021, MNRAS 508, 3345) for the low mode;
@@ -16,12 +16,13 @@
 //!   Podsiadlowski (1995, MNRAS 274, 461) for the toy double neutron stars, and Grichener et al.
 //!   (2026) for their observed eccentricities
 //! acceptance: at the committed defaults on the committed table every observable passes, the two
-//!   figures ruling 147.2 holds reported as held (sky share under 50 km/s 0.0708 against
-//!   0.03–0.07, escape share 0.1159 against 0.12–0.20); resolution: the centre on its rebuild of
-//!   100000 scores within 0.0019 in ln(v ÷ km/s) (ordinary ln v sd) and 0.0008 in a share (escape
-//!   share) of the committed table; rebuilds: the low-mode ramp, 0 of 10 equal to the centre's
-//!   bit for bit; the single-star window, 12 of 12 equal to the centre's bit for bit; the
-//!   companion-stripped window, 8 of 8 equal to the centre's bit for bit; findings: none
+//!   figures ruling 147.2 holds reported as held (sky share under 50 km/s 0.0710 against
+//!   0.03–0.07, escape share 0.1156 against 0.12–0.20); resolution: the centre on its rebuild of
+//!   100000 scores within 0.0020 in ln(v ÷ km/s) (ordinary ln v sd) and 0.0008 in a share (light
+//!   black holes above 100 km/s) of the committed table; rebuilds: the low-mode ramp, 0 of 10
+//!   equal to the centre's bit for bit; the single-star window, 12 of 12 equal to the centre's
+//!   bit for bit; the companion-stripped window, 8 of 8 equal to the centre's bit for bit;
+//!   findings: none
 //!
 //! No generator code reads this table. It is plan 15's review of the kick law's four defaults,
 //! which moves none of them (decision-p15-revalidation Q2 and Q3).
@@ -32,11 +33,11 @@
 //! 0x0619b00000000000 at that point's membership. The black-hole factor's points use the centre's
 //! rebuild. The ramp's two ends move together, its width held.
 //!
-//! Resolution: the centre on its rebuild differs from the committed table by at most 0.0019 in ln(v
-//! ÷ km/s) (ordinary ln v sd) and 0.0008 in a share (escape share) (the K–S p-value aside). An
-//! interval's ends are good to one grid step. An end at the grid's first or last point is open, and
-//! is not counted as an edge. A default one step or more from a closed end lies within a tenth of
-//! the interval's width of it only on a grid of over ten steps.
+//! Resolution: the centre on its rebuild differs from the committed table by at most 0.0020 in ln(v
+//! ÷ km/s) (ordinary ln v sd) and 0.0008 in a share (light black holes above 100 km/s) (the K–S
+//! p-value aside). An interval's ends are good to one grid step. An end at the grid's first or last
+//! point is open, and is not counted as an edge. A default one step or more from a closed end lies
+//! within a tenth of the interval's width of it only on a grid of over ten steps.
 //!
 //! Rebuilds: the low-mode ramp, 0 of 10 equal to the centre's bit for bit; the single-star window,
 //! 12 of 12 equal to the centre's bit for bit; the companion-stripped window, 8 of 8 equal to the
@@ -126,20 +127,20 @@ pub const HELD_WINDOWS: [(f64, f64); 2] = [
 /// escape share. Rows 0 and 1 are ln(v ÷ km/s), row 2 is a p-value, and the rest are shares.
 #[rustfmt::skip]
 pub const CENTRE_ON_COMMITTED_TABLE: [f64; 14] = [
-    5.557_405_625_339_96,
-    0.630_739_218_311_990_3,
-    0.872_880_331_405_416_8,
-    0.090_306_722_240_034_19,
+    5.556_314_435_140_901,
+    0.630_855_788_334_758_1,
+    0.898_439_100_946_317_7,
+    0.090_413_594_100_673_29,
     0.273_992_207_998_727_8,
     0.273_992_207_998_727_8,
     0.278_285_759_720_124_04,
-    0.323_209_032_360_658_34,
-    0.771_442_736_737_729_3,
+    0.323_288_542_577_721_2,
+    0.771_465_397_580_805_1,
     0.710_965_350_064_166_5,
     0.670_299_284_320_104_1,
-    0.136_304_489_264_801_57,
-    0.070_793_304_025_196_42,
-    0.115_932_970_587_250_84,
+    0.135_816_525_699_414_44,
+    0.070_966_421_478_706_47,
+    0.115_599_075_806_071_9,
 ];
 
 /// The figures at the committed defaults on the centre's own rebuild of the rank table, which every

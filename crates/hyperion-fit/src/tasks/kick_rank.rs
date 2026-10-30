@@ -2,20 +2,17 @@
 //! and Müller's ordinary kick score over the reference population, which
 //! `hyperion_sim::stellar::remnant::KickRankTable` interpolates.
 //!
-//! The committed table is P06.T19.b's provisional one, made by the sim's own [`score_quantiles`]
-//! with 10⁶ scores, and `manifests/kick_rank.toml` describes it. Plan 15's P15.T5.a takes the task
-//! over: [`KickRankTask`] runs the same computation in chunks through
-//! [`map_reduce_chunks`] ([`fit_parallel`]), bit for bit the
-//! same as [`score_quantiles`] for every chunking and thread count, and the production run of 10⁷
-//! scores is `manifests/kick_rank.production.toml`, written with `--out` to a scratch path. Plan
-//! 06's P06.T19.e is the commit that swaps it in, with the bumped generator version. Every score
-//! costs a full track of a massive star, about a millisecond, so the task is slow; its tests run
-//! it on a small sample.
+//! The committed table is plan 15's production one (P15.T5.a), which plan 06's P06.T19.e swapped
+//! in for P06.T19.b's provisional table: 10⁷ scores, which `manifests/kick_rank.toml` describes,
+//! the first 10⁶ of them the provisional table's. [`KickRankTask`] runs the sim's own
+//! [`score_quantiles`] in chunks through [`map_reduce_chunks`] ([`fit_parallel`]), bit for bit the
+//! same for every chunking and thread count. Every score costs a full track of a massive star,
+//! about a millisecond, so the task is slow; its tests run it on a small sample.
 //!
 //! The run's acceptance figures are the moments of ln(speed ÷ km/s) of fresh reference scores
 //! mapped through the new table ([`acceptance`]): uniform ranks give 5.60 and 0.68 before the
-//! kick law's truncation at 1,000 km/s, its rank clamp to 0.001–0.999 taking a few thousandths
-//! off the standard deviation (0.6758 over the committed table's 10⁵ fresh scores).
+//! kick law's truncation at 1,000 km/s, its rank clamp to 0.001–0.999 taking 0.0013 off the
+//! standard deviation, analytically, and leaving the mean unchanged (decision-galaxy-25-train §4).
 
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
@@ -44,8 +41,8 @@ use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput};
 /// neutron stars with the companion-stripped mark applied.
 pub const VERSION: u32 = 1;
 
-/// The scores the committed table is made from: 10⁶ (P06.T19.b).
-pub const DRAWS: u64 = 1_000_000;
+/// The scores the committed table is made from: 10⁷ (P15.T5.a).
+pub const DRAWS: u64 = 10_000_000;
 
 /// The seed of the committed table's sample.
 pub const SEED: u64 = 0x0619_b000_0000_0000;
@@ -72,7 +69,8 @@ pub struct KickRankFit {
     pub seed: u64,
 }
 
-/// The committed table's fit: [`DRAWS`] scores under [`SEED`], on one thread.
+/// The committed table's fit: [`DRAWS`] scores under [`SEED`], on one thread, which takes hours;
+/// the task runs [`fit_parallel`].
 #[must_use]
 pub fn fit() -> KickRankFit {
     fit_with(DRAWS, SEED)
@@ -230,12 +228,16 @@ pub fn acceptance(
 #[must_use]
 pub fn render(fit: &KickRankFit) -> RustTable {
     let params = KickLawParams::default();
+    // The provenance is the committed sample's, not a smoke or scratch run's.
+    let provenance = if fit.draws == DRAWS && fit.seed == SEED {
+        "\n\nPlan 15's production table (P15.T5.a), swapped in by plan 06's P06.T19.e: the \
+         provisional\ntable of P06.T19.b was the first 10⁶ of these scores."
+    } else {
+        ""
+    };
     let notes = format!(
         "\
-The four defaults are the constants `stellar::remnant::KickLawParams::default` reads.
-
-**Provisional** (P06.T19.b): plan 15's P15.T5.a replaces the quantiles with a run of 10⁷
-scores and takes the file over, with a generator-version bump (P06.T19.e).
+The four defaults are the constants `stellar::remnant::KickLawParams::default` reads.{provenance}
 
 Inputs: `stellar::remnant::reference::score_quantiles` over {draws} scores of seed
 {seed:#018x}: Kroupa primaries of {lo}–{hi} M☉ (slope {slope}) at Z = 0.02 on the
@@ -294,7 +296,8 @@ with ξ normal about 1 of relative scatter {scatter} redrawn until positive.",
     }
 }
 
-/// The task: P06.T19.b's provisional table, taken over by plan 15 (P15.T5.a); slow.
+/// The task: plan 15's production rank table (P15.T5.a), which replaced P06.T19.b's provisional
+/// one (P06.T19.e); slow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct KickRankTask;
 
@@ -404,7 +407,7 @@ impl FitTask for KickRankTask {
                 },
                 figures.largest_rank_shift,
             ),
-            provisional: Some("P06.T19.b"),
+            provisional: None,
         })
     }
 }
@@ -429,7 +432,10 @@ mod tests {
             panic!("the body is one verbatim item");
         };
         assert!(body.contains("pub const SCORE_QUANTILES: [f64; 257] = ["));
-        assert!(table.notes.iter().any(|l| l.contains("Provisional")));
+        assert!(!table.notes.iter().any(|l| l.contains("**Provisional**")));
+        assert!(!table.notes.iter().any(|l| l.contains("P15.T5.a")));
+        let committed = render(&KickRankFit { draws: DRAWS, ..a });
+        assert!(committed.notes.iter().any(|l| l.contains("P15.T5.a")));
         assert!(table.notes.iter().any(|l| l.contains("200 scores of seed")));
         assert!(table.notes.iter().any(|l| l.contains("0x0619b00000000000")));
         assert_eq!(body.matches(",\n").count(), QUANTILES);
