@@ -39,7 +39,7 @@
  * constant from its context as a boxed number at every use; where `libm` writes a double's words
  * only to scale it by a power of two or to clear its low word, it forms the same double
  * arithmetically ({@link twoTo}, {@link zeroLowWord}). Nothing on a fast path allocates, and a
- * port's result reaches it through {@link asNumber}. Per call on the case gate's and the optics'
+ * port's result reaches it through a unary plus, which types it as a number. Per call on the case gate's and the optics'
  * arguments, the ports alone against the fast paths (pod, 16 vCPU, 2026-10-30): `exp` 14.2 against 11.3 ns, `expm1` 19.3 against 8.1, `log` 29.7 against 13.5,
  * `sin` 26.2 against 18.4, `atan2` 34.7 against 25.5, `cbrt` 66.1 against 37.5, and `pow` of a
  * fractional power 186 against 124.
@@ -185,18 +185,6 @@ const POWERS_OF_TWO = ((): Float64Array => {
 })();
 
 /**
- * `x` itself, typed as a number for V8: a fast path returns a port's result through it, so that V8,
- * which knows nothing of an un-inlined call's result, need not box the fast path's own result to
- * merge the two (exp on wide arguments: 14.0 ns a call against 16.9 without it; pod, 16 vCPU,
- * 2026-10-30).
- */
-function asNumber(x: number): number {
-  // The conversion is the point: V8 types its result as a number, as the TSDoc above says.
-  // oxlint-disable-next-line no-unnecessary-type-conversion
-  return +x;
-}
-
-/**
  * 2ⁿ, exact, for an integer n in [−1074, 1023], and NaN outside: where n is normal, the double
  * `scalbn` multiplies by, read from a table where `libm` writes its words.
  */
@@ -265,8 +253,12 @@ export function exp(x: number): number {
     const c = xr - xx * (p1 + xx * (p2 + xx * (p3 + xx * (p4 + xx * p5))));
     return (1 + ((xr * c) / (2 - c) - lo + hi)) * twoTo(k);
   }
-  // The rest, NaN included, through the port (see `asNumber`).
-  return asNumber(expPort(x));
+  // The rest, NaN included, through the port. The unary plus types the port's result as a number
+  // for V8, which knows nothing of an un-inlined call's result and would otherwise box this
+  // function's own results to merge the two (the optics share 446 ms against 509 with a shared
+  // helper, and 1,455 against 1,640 with neither; pod, 2026-10-30).
+  // oxlint-disable-next-line no-unnecessary-type-conversion
+  return +expPort(x);
 }
 
 /**
@@ -385,8 +377,10 @@ export function log(x: number): number {
     const dk = k;
     return s * (hfsq + r) + dk * ln2Lo - hfsq + f + dk * ln2Hi;
   }
-  // Zero, a subnormal, a negative number, ∞ and NaN, through the port (see `asNumber`).
-  return asNumber(logPort(x));
+  // Zero, a subnormal, a negative number, ∞ and NaN, through the port; the unary plus types its
+  // result as a number (see `exp`).
+  // oxlint-disable-next-line no-unnecessary-type-conversion
+  return +logPort(x);
 }
 
 /**
@@ -613,8 +607,10 @@ export function expm1(x: number): number {
     const e = hxs * ((r1 - t) / (6 - x * t));
     return x - (x * e - hxs);
   }
-  // The rest, NaN included, through the port (see `asNumber`).
-  return asNumber(expm1Port(x));
+  // The rest, NaN included, through the port; the unary plus types its result as a number (see
+  // `exp`).
+  // oxlint-disable-next-line no-unnecessary-type-conversion
+  return +expm1Port(x);
 }
 
 /**
@@ -1601,7 +1597,9 @@ export function atan(x: number): number {
   }
   if (!(ax < 73786976294838206464)) {
     /* |x| >= 2^66 (high word 0x44100000), or NaN */
-    return asNumber(atanPort(x));
+    // The unary plus types the port's result as a number (see `exp`).
+    // oxlint-disable-next-line no-unnecessary-type-conversion
+    return +atanPort(x);
   }
   let xr: number;
   let hi: number; /* atanhi[id] */
@@ -1730,7 +1728,9 @@ export function atan2(y: number, x: number): number {
   const piLo = 1.2246467991473531772e-16; /* 0x3CA1A626, 0x33145C07 */
   if (!(Number.isFinite(x) && Number.isFinite(y)) || x === 0 || y === 0 || x === 1) {
     /* NaN, an infinity, a zero or x = 1.0 */
-    return asNumber(atan2Port(y, x));
+    // The unary plus types the port's result as a number (see `exp`).
+    // oxlint-disable-next-line no-unnecessary-type-conversion
+    return +atan2Port(y, x);
   }
   BITS.setFloat64(0, x);
   let ix = BITS.getUint32(0);
@@ -1915,7 +1915,9 @@ export function cbrt(x: number): number {
   const x1p75 = 2.6469779601696886e-23; /* 0x1p-75 */
   if (!(x >= 2.2250738585072014e-308 && x < Infinity)) {
     /* x not positive, normal and finite */
-    return asNumber(cbrtPort(x));
+    // The unary plus types the port's result as a number (see `exp`).
+    // oxlint-disable-next-line no-unnecessary-type-conversion
+    return +cbrtPort(x);
   }
   BITS.setFloat64(0, x);
   const biased = BITS.getUint32(0) >>> 20; /* the sign is 0 */
@@ -1960,7 +1962,9 @@ export function cbrt(x: number): number {
   if (ady0 < x1p75 || ady1 < x1p75 || ((BITS.getUint32(0) & 3) === 0 && BITS.getUint32(4) <= 1)) {
     /* near a rounding boundary: cbrt.rs's second pass, or its correction where cvt3's low 34
     bits are 0 or 1 */
-    return asNumber(cbrtPort(x));
+    // The unary plus types the port's result as a number (see `exp`).
+    // oxlint-disable-next-line no-unnecessary-type-conversion
+    return +cbrtPort(x);
   }
   /* cbrt.rs's cvt3, y1 with et - 342 - 1023 added to its exponent: y1 × 2^(et - 1365), normal */
   return y1 * twoTo(et - 1365);
@@ -2209,7 +2213,9 @@ export function pow(x: number, y: number): number {
   ) {
     /* x not positive, normal and finite (high word in [0x00100000, 0x7ff00000)), or x = 1; |y| >
     2**31 (high word above 0x41e00000), y not finite, or y = 0.5 */
-    return asNumber(powPort(x, y));
+    // The unary plus types the port's result as a number (see `exp`).
+    // oxlint-disable-next-line no-unnecessary-type-conversion
+    return +powPort(x, y);
   }
 
   BITS.setFloat64(0, x);
@@ -2284,7 +2290,9 @@ export function pow(x: number, y: number): number {
   const jz = BITS.getUint32(0) | 0;
   if (jz >= 0x40900000 || (jz & 0x7fffffff) >= 0x4090cc00) {
     /* z >= 1024 or z <= -1075: pow.rs's overflow and underflow tests, from z's words */
-    return asNumber(powPort(x, y));
+    // The unary plus types the port's result as a number (see `exp`).
+    // oxlint-disable-next-line no-unnecessary-type-conversion
+    return +powPort(x, y);
   }
 
   /* compute 2**(p_h+p_l) */
@@ -2314,7 +2322,9 @@ export function pow(x: number, y: number): number {
   z = 1.0 - (rz - z);
   if (m < -1021 || m > 1023) {
     /* z 2**n subnormal, or 2**n beyond the table: pow.rs's scalbn and word edits */
-    return asNumber(powPort(x, y));
+    // The unary plus types the port's result as a number (see `exp`).
+    // oxlint-disable-next-line no-unnecessary-type-conversion
+    return +powPort(x, y);
   }
   /* pow.rs adds n to z's exponent, z being in [1/sqrt(2), sqrt(2)]: z × 2**n, normal; its sign
   s is 1 */
