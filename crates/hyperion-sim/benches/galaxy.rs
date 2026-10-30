@@ -24,6 +24,10 @@
 //!   and an orphan's rejected attempt skipping its apocentre, the debris from 158 to 110 ms; with
 //!   the centre's model held, 669 and 376 ms; sweep galaxies 0 and 1, 634 and 408 ms, and 1.94 and
 //!   1.13 s.
+//! - `Spray::tracers` of the fixture's stream 0, a living globular's, and stream 4, the first
+//!   orphan's, 2,000 tracers each (plan 10, P10.T5.b), under P10.T6.c's 0.2 s of parallel wall time
+//!   for a tube: 3.28 and 2.24 s, then 1.96 and 1.33 s with the tracers stepped side by side,
+//!   bit for bit (pod, 16 vCPU).
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -222,8 +226,10 @@ fn features(c: &mut Criterion) {
 /// (pod, 4 vCPU). Then whole lists (P10.T4), each time on a fresh copy of the galaxy: the
 /// fixture's, whose centre the list reads and builds; the fixture's with its centre built already,
 /// as a server's galaxy cache holds it; and the lists of the first two sweep galaxies, of 219 and
-/// 751 entries, centres included.
+/// 751 entries, centres included. Then the fixture's sprays (P10.T5) of a living globular's stream
+/// and of an orphan's, their 2,000 tracers each.
 fn global_list(c: &mut Criterion) {
+    use hyperion_sim::galaxy::global_list::spray::{Spray, SprayForce, SprayParams};
     use hyperion_sim::galaxy::global_list::{GlobalList, discrete_share};
     let params = GalaxyParams::milky_way_like();
     let tables = PotentialTables::in_plane(&MassModel::new(&params));
@@ -272,6 +278,17 @@ fn global_list(c: &mut Criterion) {
                 |g| GlobalList::build(black_box(&g)),
                 BatchSize::LargeInput,
             );
+        });
+    }
+    let list = GlobalList::build(&galaxy);
+    let tables = galaxy.potential();
+    let force = SprayForce::new(tables).expect("the fixture has the full potential");
+    for (n, what) in [(0, "a living globular's"), (4, "the first orphan's")] {
+        let spec = &list.debris().streams()[n];
+        let spray = Spray::new(galaxy.seed(), &force, tables, spec, &SprayParams::default())
+            .expect("a specification's stripping time is finite");
+        group.bench_function(format!("Spray::tracers (stream {n}, {what})"), |b| {
+            b.iter(|| black_box(&spray).tracers());
         });
     }
     group.finish();

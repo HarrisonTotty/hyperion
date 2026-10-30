@@ -338,6 +338,7 @@ mod milky_way {
         the_table_is_its_potential_s_gradient_and_near_the_leapfrog_s();
         the_force_inside_the_table_is_the_full_lookup_s_gradient_bit_for_bit();
         tracers_are_pure_functions_of_their_index_and_weigh_the_tube();
+        the_lanes_give_every_tracer_s_bits_alone();
         the_drawn_offsets_keep_their_dispersions_within_the_cut();
     }
 
@@ -480,6 +481,48 @@ mod milky_way {
                 "at {:?} ly: {shortcut:?} against {full:?}",
                 [x, y, z]
             );
+        }
+    }
+
+    /// Stepped side by side in lanes ([`Spray::tracers`]), every tracer of the three test
+    /// streams' sprays, three times as many as the lanes, is [`Spray::tracer`]'s, bit for bit; and
+    /// a leg with no step to take, among others, keeps its starting radii.
+    fn the_lanes_give_every_tracer_s_bits_alone() {
+        let bits = |t: &Tracer| {
+            let mut v = t.position().metres().to_vec();
+            v.extend(t.velocity().metres_per_second());
+            v.extend([t.psi().value(), t.weight().value(), t.released().value()]);
+            (t.arm(), t.release_step(), f64_digest(&v))
+        };
+        let per_arm = u32::try_from(3 * LANES / 2).expect("a few lanes");
+        for (name, spec) in test_streams() {
+            let sprayed = spray(SEED, &spec, per_arm);
+            let lanes = sprayed.tracers();
+            assert_eq!(lanes.len(), 3 * LANES);
+            for (i, t) in (0_u32..).zip(&lanes) {
+                assert_eq!(bits(t), bits(&sprayed.tracer(i)), "{name}: tracer {i}");
+            }
+        }
+        // The lanes hand a body with no step to take back before stepping it: legs of no steps
+        // among short ones, more than the lanes, through the shells' lanes, which share them.
+        let force = &fixture().force;
+        let legs: Vec<Leg> = test_streams()
+            .iter()
+            .flat_map(|(_, spec)| {
+                let span = Seconds::from(spec.stripping_time()).value();
+                [0.0, -span / 1_000.0, 0.0, -span / 100.0, span / 300.0].map(|by| {
+                    let fixed = spec
+                        .orbit()
+                        .fixed_step(Seconds::new(by))
+                        .expect("a finite span");
+                    Leg::new(spec.position(), spec.velocity(), fixed)
+                })
+            })
+            .collect();
+        assert!(legs.len() > LANES && legs.iter().any(|leg| leg.fixed.count() == 0));
+        for (n, (lanes, leg)) in radii_over_ly(force, &legs).iter().zip(&legs).enumerate() {
+            let alone = radii_over_ly_alone(force, leg);
+            assert_eq!(f64_digest(lanes), f64_digest(&alone), "leg {n}");
         }
     }
 

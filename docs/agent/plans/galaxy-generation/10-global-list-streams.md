@@ -2100,3 +2100,8 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
   `Located::logs` and `acceleration_at` (`acceleration_ly` is gone), and `globular::RadialMotion`
   gives an orbit's turning points one at a time, which the orphans' draws use. If the spray's
   steps change, `radii_over_ly_alone` (test-only) holds the lanes to them bit for bit.
+- **P10.T5.b's spray, faster (a performance lane, 2026-10-30).** No output moved.
+  `Spray::tracers` steps its tracers side by side in lanes, earliest releases first, and gives
+  them in index order through `spray::step_in_lanes`, which the shell orbits share (a `Lane` trait
+  over a `Walker`). `Spray::tracer(i)` stays the scalar path a pool calls; the spray's lib test
+  holds the two bit for bit.

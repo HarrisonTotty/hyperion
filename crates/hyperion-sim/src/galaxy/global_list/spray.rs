@@ -129,9 +129,10 @@
 //!
 //! Each tracer is integrated alone from its release to the epoch, so [`Spray::tracer`] is a pure
 //! function of its index: a caller's pool (plan 04's) runs tracers in parallel and gathers them by
-//! index (ruling 146.3), and [`Spray::tracers`] runs them in order. The kick–drift–kick steps are
-//! the leapfrog's, with `+ − × ÷`, `sqrt` and [`math`] only (P10.T2.c's source check reads this
-//! file too).
+//! index (ruling 146.3). [`Spray::tracers`] runs them all on one thread, side by side in lanes, as
+//! the global list's shell orbits are run, and gives them in index order, each with
+//! [`Spray::tracer`]'s bits. The kick–drift–kick steps are the leapfrog's, with `+ − × ÷`, `sqrt`
+//! and [`math`] only (P10.T2.c's source check reads this file too).
 
 use std::num::NonZeroU32;
 
@@ -852,13 +853,75 @@ impl<'a> Spray<'a> {
     /// a value that is not finite, which no tracer of a valid specification does.
     #[must_use]
     pub fn tracer(&self, index: u32) -> Tracer {
+        let mut lane = self.launch(index);
+        let walker = &mut lane.walker;
+        for _ in 0..walker.left {
+            let before_m = walker.body.0;
+            kick_drift_kick(
+                &mut walker.body,
+                &mut walker.acceleration_m_s2,
+                walker.step_s,
+                |x| self.acceleration(x),
+            );
+            lane.angle_rad += swept(before_m, walker.body.0);
+        }
+        self.finish(&lane)
+    }
+
+    /// Every tracer, in index order: [`tracer`](Self::tracer)'s, bit for bit, stepped side by side
+    /// in lanes on one thread, as the global list's shell orbits are (module documentation, "A
+    /// pool").
+    ///
+    /// # Panics
+    ///
+    /// If the integration leaves a value that is not finite, which no tracer of a valid
+    /// specification does.
+    #[must_use]
+    pub fn tracers(&self) -> Vec<Tracer> {
+        let count = self.tracer_count();
+        let mut tracers = vec![
+            None;
+            usize::try_from(count).expect(
+                "a u32 fits a usize on every target the sim builds for, of 32 bits or more"
+            )
+        ];
+        // In index order, the earliest releases, which have the most steps to take, come first:
+        // the schedule's releases are in time order.
+        step_in_lanes(
+            self.force,
+            (0..count).map(|index| self.launch(index)),
+            |lane: TracerLane| {
+                tracers[usize::try_from(lane.index).expect(
+                    "a u32 fits a usize on every target the sim builds for, of 32 bits or more",
+                )] = Some(self.finish(&lane));
+            },
+        );
+        tracers
+            .into_iter()
+            .map(|tracer| tracer.expect("every tracer is stepped to the epoch"))
+            .collect()
+    }
+
+    /// The release of tracer `index`, `index ÷ 2`.
+    ///
+    /// # Panics
+    ///
+    /// If `index` is not below [`tracer_count`](Self::tracer_count).
+    #[must_use]
+    fn release_of(&self, index: u32) -> Release {
         assert!(
             index < self.tracer_count(),
             "tracer {index} of a spray of {}",
             self.tracer_count()
         );
-        let release = self.schedule.releases()[usize::try_from(index / 2)
-            .expect("a u32 fits a usize on every target the sim builds for, of 32 bits or more")];
+        self.schedule.releases()[usize::try_from(index / 2)
+            .expect("a u32 fits a usize on every target the sim builds for, of 32 bits or more")]
+    }
+
+    /// Tracer `index` at its release, with the steps it takes to the epoch.
+    #[must_use]
+    fn launch(&self, index: u32) -> TracerLane {
+        let release = self.release_of(index);
         let arm = if index.is_multiple_of(2) {
             Arm::Leading
         } else {
@@ -867,45 +930,56 @@ impl<'a> Spray<'a> {
         let start = usize::try_from(release.step())
             .expect("a u32 fits a usize on every target the sim builds for, of 32 bits or more");
         let from = self.track[start];
-        let mut body = self.release(&from, release.bound_mass(), arm, index);
-        let mut acceleration = self.acceleration(body.0);
-        let h = self.schedule.step().step().value();
-        let steps = self.schedule.step().count();
-        let mut angle = 0.0;
-        for _ in release.step()..steps {
-            let before = body.0;
-            kick_drift_kick(&mut body, &mut acceleration, h, |x| self.acceleration(x));
-            angle += swept(before, body.0);
+        let body = self.release(&from, release.bound_mass(), arm, index);
+        TracerLane {
+            index,
+            arm,
+            release,
+            from_swept_rad: from.swept_rad,
+            walker: Walker {
+                acceleration_m_s2: self.acceleration(body.0),
+                body,
+                step_s: self.schedule.step().step().value(),
+                left: self.schedule.step().count().saturating_sub(release.step()),
+            },
+            angle_rad: 0.0,
         }
+    }
+
+    /// The tracer `lane` has stepped to the epoch.
+    ///
+    /// # Panics
+    ///
+    /// If the integration left a value that is not finite.
+    #[must_use]
+    fn finish(&self, lane: &TracerLane) -> Tracer {
+        let steps = self.schedule.step().count();
         let last = self
             .track
             .last()
             .expect("the track holds its first boundary");
-        let psi = angle - (last.swept_rad - from.swept_rad);
+        let psi = lane.angle_rad - (last.swept_rad - lane.from_swept_rad);
+        let (position, velocity) = lane.walker.body;
         // P10.T6 sorts the tracers by ψ, and a NaN's sign, which `total_cmp` reads, is not
         // portable (the sim-determinism skill's "Hazards across targets").
         assert!(
-            body.0.iter().chain(&body.1).all(|c| c.is_finite()) && psi.is_finite(),
-            "tracer {index} left the integration with a value that is not finite"
+            position.iter().chain(&velocity).all(|c| c.is_finite()) && psi.is_finite(),
+            "tracer {} left the integration with a value that is not finite",
+            lane.index
         );
+        let release = lane.release;
         Tracer {
-            arm,
+            arm: lane.arm,
             release_step: release.step(),
             released: Years::new(
                 self.stripping_time.value()
                     * (1.0 - f64::from(release.step()) / f64::from(steps.max(1))),
             ),
             weight: release.weight(),
-            position: GalacticDisplacement::new(body.0),
-            velocity: GalacticVelocity::new(body.1),
+            position: GalacticDisplacement::new(position),
+            velocity: GalacticVelocity::new(velocity),
             psi: Radians::new(psi),
         }
-    }
-
-    /// Every tracer, in index order ([`tracer`](Self::tracer)).
-    #[must_use]
-    pub fn tracers(&self) -> Vec<Tracer> {
-        (0..self.tracer_count()).map(|i| self.tracer(i)).collect()
     }
 
     /// The release offsets `[k_r, k_vφ, k_z, k_vz]` of tracer `index`, from its four words.
@@ -1003,13 +1077,16 @@ impl Leg {
     }
 }
 
-/// The legs [`radii_over_ly`] steps side by side.
+/// The bodies [`step_in_lanes`] steps side by side.
 ///
 /// A step waits on its own lookup, a chain of divisions, a square root and two logarithms, so a
-/// leg stepped alone leaves the core idle for most of it: 98 ns a step for some 690 instructions,
-/// on the Milky Way fixture's 5.1 × 10⁶ shell steps. In lanes the chains of different legs
+/// body stepped alone leaves the core idle for most of it: 98 ns a step for some 690 instructions,
+/// on the Milky Way fixture's 5.1 × 10⁶ shell steps. In lanes the chains of different bodies
 /// overlap: 58 ns a step with 2 lanes, 49.6 with 4, 49.5 with 8 and 49.8 with 16 (P10.T4's list
-/// bench, pod, 16 vCPU). Eight leaves room for a core with a deeper pipeline.
+/// bench, pod, 16 vCPU). A spray's tracer, which also sums its swept angle, took 103 ns a step
+/// alone, and 62.0, 61.5, 62.2 and 62.7 in 4, 8, 12 and 16 lanes, over the 6,000 tracers of three
+/// of the fixture's streams (P10.T5.b, the same pod). Eight leaves room for a core with a deeper
+/// pipeline.
 const LANES: usize = 8;
 
 /// The least and greatest distances from the galactic centre, ly, over the step boundaries of each
@@ -1023,58 +1100,26 @@ const LANES: usize = 8;
 /// crossing a turning point lies within about `r̈ h² ÷ 8 ≈ r_p ÷ 32,768` of the nearer boundary's
 /// distance (`r̈` near `v_p² ÷ r_p`), under 10⁻⁴ of itself, which the shells' widening dwarfs.
 ///
-/// The legs are stepped [`LANES`] at a time, longest first, in lockstep. Each lane takes the
-/// spray's own kick–drift–kick steps, with the force's lookup split in three passes over the
-/// lanes ([`SprayForce::locate`], [`Located::logs`](force::Located::logs) and
-/// [`SprayForce::acceleration_at`]) so that the lanes' logarithms are taken together. A leg's
-/// radii are the same bits however the legs are grouped.
+/// The legs are stepped side by side, longest first ([`step_in_lanes`]); a leg's radii are the
+/// same bits however the legs are grouped.
 #[must_use]
 pub(super) fn radii_over_ly(force: &SprayForce, legs: &[Leg]) -> Vec<[f64; 2]> {
     let mut radii = vec![[0.0; 2]; legs.len()];
     let mut order: Vec<usize> = (0..legs.len()).collect();
     // Longest first, so that the lanes run full until only short legs are left.
     order.sort_by_key(|&n| core::cmp::Reverse(legs[n].fixed.count()));
-    let mut queue = order.into_iter().map(|n| Lane::new(force, n, &legs[n]));
-    let mut lanes: Vec<Lane> = queue.by_ref().take(LANES).collect();
-    let mut located = [force::Located::default(); LANES];
-    let mut logarithms = [[0.0; 2]; LANES];
-    loop {
-        let mut n = 0;
-        while let Some(lane) = lanes.get(n) {
-            if lane.left > 0 {
-                n += 1;
-                continue;
-            }
-            radii[lane.leg] = lane.radii();
-            if let Some(next) = queue.next() {
-                lanes[n] = next;
-            } else {
-                lanes.swap_remove(n);
-            }
-        }
-        if lanes.is_empty() {
-            return radii;
-        }
-        for (lane, at) in lanes.iter_mut().zip(&mut located) {
-            kick_drift(&mut lane.body, lane.acceleration_m_s2, lane.step_s);
-            *at = force.locate(lane.body.0);
-        }
-        for (at, logs) in located.iter().zip(&mut logarithms).take(lanes.len()) {
-            *logs = at.logs();
-        }
-        for ((lane, at), logs) in lanes.iter_mut().zip(&located).zip(&logarithms) {
-            lane.acceleration_m_s2 = force.acceleration_at(at, *logs);
-            kick(&mut lane.body, lane.acceleration_m_s2, lane.step_s);
-            lane.reach();
-            lane.left -= 1;
-        }
-    }
+    step_in_lanes(
+        force,
+        order
+            .into_iter()
+            .map(|n| ShellLane::new(force, n, &legs[n])),
+        |lane| radii[lane.leg] = lane.radii(),
+    );
+    radii
 }
 
-/// A leg in one of [`radii_over_ly`]'s lanes.
-struct Lane {
-    /// Its place among the legs.
-    leg: usize,
+/// A body as [`step_in_lanes`] steps it.
+struct Walker {
     body: Body,
     /// The acceleration at the body's position.
     acceleration_m_s2: [f64; 3],
@@ -1082,12 +1127,89 @@ struct Lane {
     step_s: f64,
     /// The steps left.
     left: u32,
+}
+
+/// A body stepped side by side with others ([`step_in_lanes`]).
+trait Lane {
+    /// The body.
+    #[must_use]
+    fn walker_mut(&mut self) -> &mut Walker;
+
+    /// Takes in a step that moved the body from `before_m` to its new position.
+    fn stepped(&mut self, before_m: [f64; 3]);
+}
+
+/// Steps every body of `queue` to its last step in `force`'s field, [`LANES`] at a time in
+/// lockstep, and hands each to `done` once it has taken its last.
+///
+/// Each takes the spray's own kick–drift–kick steps ([`kick_drift_kick`]), with the force's
+/// lookup split in three passes over the lanes ([`SprayForce::locate`],
+/// [`Located::logs`](force::Located::logs) and [`SprayForce::acceleration_at`]) so that the
+/// lanes' logarithms are taken together. A body's bits are the same however the bodies are
+/// grouped; only the order in which `done` sees them depends on the queue. The passes are as
+/// measured (pod, 16 vCPU): taking the logarithms in the lookup's first pass cost a shell step 65
+/// ns against 49.5 (P10.T4's list bench) and a tracer's step 77 against 61.5 (P10.T5.b, 6,000
+/// tracers of the fixture), and taking [`Lane::stepped`] in a fourth pass 50.5 and 61.7.
+fn step_in_lanes<L: Lane>(
+    force: &SprayForce,
+    mut queue: impl Iterator<Item = L>,
+    mut done: impl FnMut(L),
+) {
+    let mut lanes: Vec<L> = queue.by_ref().take(LANES).collect();
+    let mut located = [force::Located::default(); LANES];
+    let mut logarithms = [[0.0; 2]; LANES];
+    let mut before_m = [[0.0; 3]; LANES];
+    loop {
+        let mut n = 0;
+        while n < lanes.len() {
+            if lanes[n].walker_mut().left > 0 {
+                n += 1;
+                continue;
+            }
+            let finished = match queue.next() {
+                Some(next) => core::mem::replace(&mut lanes[n], next),
+                None => lanes.swap_remove(n),
+            };
+            done(finished);
+        }
+        if lanes.is_empty() {
+            return;
+        }
+        for ((lane, at), before) in lanes.iter_mut().zip(&mut located).zip(&mut before_m) {
+            let walker = lane.walker_mut();
+            *before = walker.body.0;
+            kick_drift(&mut walker.body, walker.acceleration_m_s2, walker.step_s);
+            *at = force.locate(walker.body.0);
+        }
+        for (at, logs) in located.iter().zip(&mut logarithms).take(lanes.len()) {
+            *logs = at.logs();
+        }
+        for (((lane, at), logs), before) in lanes
+            .iter_mut()
+            .zip(&located)
+            .zip(&logarithms)
+            .zip(before_m)
+        {
+            let walker = lane.walker_mut();
+            walker.acceleration_m_s2 = force.acceleration_at(at, *logs);
+            kick(&mut walker.body, walker.acceleration_m_s2, walker.step_s);
+            walker.left -= 1;
+            lane.stepped(before);
+        }
+    }
+}
+
+/// A leg in one of [`radii_over_ly`]'s lanes.
+struct ShellLane {
+    /// Its place among the legs.
+    leg: usize,
+    walker: Walker,
     /// The least and greatest squared distances from the centre so far.
     least_m2: f64,
     greatest_m2: f64,
 }
 
-impl Lane {
+impl ShellLane {
     /// Leg `leg`, `start`, at its first boundary.
     #[must_use]
     fn new(force: &SprayForce, leg: usize, start: &Leg) -> Self {
@@ -1095,18 +1217,33 @@ impl Lane {
         let r2 = dot(body.0, body.0);
         Self {
             leg,
-            body,
-            acceleration_m_s2: force.acceleration_m_s2(&GalacticDisplacement::new(body.0)),
-            step_s: start.fixed.step().value(),
-            left: start.fixed.count(),
+            walker: Walker {
+                acceleration_m_s2: force.acceleration_m_s2(&GalacticDisplacement::new(body.0)),
+                body,
+                step_s: start.fixed.step().value(),
+                left: start.fixed.count(),
+            },
             least_m2: r2,
             greatest_m2: r2,
         }
     }
 
-    /// Takes the body's distance at its boundary into the least and greatest.
-    fn reach(&mut self) {
-        let r2 = dot(self.body.0, self.body.0);
+    /// The least and greatest distances from the centre, ly.
+    #[must_use]
+    fn radii(&self) -> [f64; 2] {
+        [self.least_m2, self.greatest_m2].map(|r2| r2.sqrt() / METRES_PER_LIGHT_YEAR)
+    }
+}
+
+impl Lane for ShellLane {
+    fn walker_mut(&mut self) -> &mut Walker {
+        &mut self.walker
+    }
+
+    /// Takes the body's distance at its new boundary into the least and greatest.
+    fn stepped(&mut self, _before_m: [f64; 3]) {
+        let position = self.walker.body.0;
+        let r2 = dot(position, position);
         // Squared distances are never NaN or a negative zero, so the comparisons are exact.
         if r2 < self.least_m2 {
             self.least_m2 = r2;
@@ -1115,11 +1252,28 @@ impl Lane {
             self.greatest_m2 = r2;
         }
     }
+}
 
-    /// The least and greatest distances from the centre, ly.
-    #[must_use]
-    fn radii(&self) -> [f64; 2] {
-        [self.least_m2, self.greatest_m2].map(|r2| r2.sqrt() / METRES_PER_LIGHT_YEAR)
+/// A tracer of a [`Spray`] between its release and the epoch.
+struct TracerLane {
+    index: u32,
+    arm: Arm,
+    release: Release,
+    /// The progenitor's swept angle at the release.
+    from_swept_rad: f64,
+    walker: Walker,
+    /// The angle the tracer has swept since its release.
+    angle_rad: f64,
+}
+
+impl Lane for TracerLane {
+    fn walker_mut(&mut self) -> &mut Walker {
+        &mut self.walker
+    }
+
+    /// Adds the step's swept angle.
+    fn stepped(&mut self, before_m: [f64; 3]) {
+        self.angle_rad += swept(before_m, self.walker.body.0);
     }
 }
 
