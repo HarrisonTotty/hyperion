@@ -8,9 +8,11 @@
  * The verbose reporter prints each phase's table. Each fixture's phases are timed as the optics
  * worker would run them for one light on the default grids: the preparation (the column's optics
  * in the 15 bins, the layers and the exponential sums over the whole column), one band's deck bake
- * (every bin and term, the deck's solve and the upper medium's, m = 0 and 1, and under a deck over a
- * surface the whole column's for the table below), and, on the giant, one band of the polarisation
- * correction over the deck. A phase's name carries its solves, its terms and its bytes.
+ * (every bin and term, the deck's solve at the bake's modes for the upper medium's ground and its own
+ * at its eight at the kernels' cosines, the upper medium's on the grid's 46 rows, and under a deck
+ * over a surface the whole column's for the table below), and, on the giant, one band of the
+ * polarisation correction over the deck. A phase's name carries its solves, its terms and its
+ * bytes.
  */
 import { describe, expect, test } from "vitest";
 
@@ -112,11 +114,15 @@ describe("one deck bake, one band and one light", () => {
     const terms = slot?.bins.map((bin) => bin.terms).join(" ") ?? "";
     const solves = slot?.solves ?? 0;
     const below = tables.below?.slots[0];
+    const deck = tables.slots[0];
     const bytes =
       (slot?.values.byteLength ?? 0) +
-      (tables.slots[0]?.reflectance.byteLength ?? 0) +
-      (tables.slots[0]?.diffuse.byteLength ?? 0) +
-      (tables.slots[0]?.beamReflection.byteLength ?? 0) +
+      (deck?.reflectance.byteLength ?? 0) +
+      (deck?.diffuse.byteLength ?? 0) +
+      (deck?.beamReflection.byteLength ?? 0) +
+      (deck?.singleGeometry.byteLength ?? 0) +
+      (deck?.singleBeamGeometry.byteLength ?? 0) +
+      (deck?.phase.byteLength ?? 0) +
       (below?.radiance.byteLength ?? 0) +
       (below?.irradiance.byteLength ?? 0) +
       (below?.direct.byteLength ?? 0);
@@ -125,7 +131,7 @@ describe("one deck bake, one band and one light", () => {
       prepareDeck(fixture.column, [fixture.light], fixture.split);
     }).run(RUNS);
     await bench(
-      `one band's deck bake${tables.below === null ? "" : " with the table below"}: ${solves} solves of each, the bins' terms ${terms}, ${bytes} B as f32`,
+      `one band's deck bake${tables.below === null ? "" : " with the table below"}: ${solves} solves of the table above, ${deck?.solves ?? 0} of the deck, the bins' terms ${terms}, ${bytes} B as f32`,
       () => {
         bakeDeck(prepared, fixture.body, 0);
       },

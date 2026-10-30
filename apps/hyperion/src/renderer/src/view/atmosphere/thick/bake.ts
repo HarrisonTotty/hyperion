@@ -153,6 +153,7 @@ import {
   phaseMoments,
   type SpectralColumn,
   spectralOptics,
+  type SpectralPhase,
 } from "./spectralColumn";
 import { log } from "../../../lib/pinnedMath";
 
@@ -204,8 +205,8 @@ export interface ThickBakeGrid {
  * s = 0 … 13, 14 rows of 1/64 below the horizontal to the cell edge −7/32 (R08.T14.d.2), then
  * (s − 13.5) ÷ 32 for s = 14 … 45, the 32 daylit rows of R08.T14.b. `read.ts` reads the table
  * linearly between the cells' centres above μ₀ = 1/64 and J⁰ geometrically below it, and the
- * analytic term below the rows (its remarks). The deck takes the daylit rows alone
- * ({@link THICK_BAKE_DAY_GRID}).
+ * analytic term below the rows (its remarks). The deck's upper medium takes all 46, its own tables
+ * and the table below it the daylit rows alone (`deck.ts`, R08.T15.a.2).
  */
 export const THICK_BAKE_GRID: ThickBakeGrid = {
   layers: 64,
@@ -217,8 +218,8 @@ export const THICK_BAKE_GRID: ThickBakeGrid = {
 };
 
 /**
- * {@link THICK_BAKE_GRID} with its 32 rows above the horizontal alone, μ₀ = (s + ½) ÷ 32: the
- * deck's grid (`deck.ts`). Whether the deck takes the rows below the horizontal is R08.T15.a.2's.
+ * {@link THICK_BAKE_GRID} with its 32 rows above the horizontal alone, μ₀ = (s + ½) ÷ 32: the rows
+ * the correction's daylit tests and a deck's own tables take (`deck.ts`, R08.T15.a.2).
  */
 export const THICK_BAKE_DAY_GRID: ThickBakeGrid = {
   ...THICK_BAKE_GRID,
@@ -487,6 +488,12 @@ export interface PreparedBake {
   readonly altitudesM: Float64Array;
   /** Per bin, per term. */
   readonly binOptics: ReadonlyArray<ReadonlyArray<BinTermOptics>>;
+  /**
+   * Per bin, per term, its whole phase function at the bin's wavelength (`spectralColumn.ts`'s
+   * `SpectralPhase`), of which `binOptics` holds the first moments: what the deck's exact single
+   * scattering reads (R08.T15.a.2, `deck.ts`).
+   */
+  readonly binPhases: ReadonlyArray<ReadonlyArray<SpectralPhase>>;
   /** Per bin, the ground's albedo. */
   readonly groundAlbedo: Float64Array;
   /** Per term, per layer from the top, ∫ρ dh over it, m. */
@@ -868,6 +875,7 @@ export function prepareBake(
     altitudesM,
     ...(interfacePlanck === undefined ? {} : { interfacePlanck }),
     binOptics,
+    binPhases: optics.map((terms) => terms.map((t) => t.phase)),
     groundAlbedo: Float64Array.from(BAKE_WAVELENGTHS_NM, (nm) =>
       binGroundAlbedo(column.groundAlbedo, nm),
     ),
@@ -1194,6 +1202,12 @@ export interface BakeBandOptions {
    * that a caller reads its fields (the deck, its radiance at the ground) without a second solve.
    */
   readonly onSolve?: (bin: number, term: BinTerm, solve: BinSolve) => void;
+  /**
+   * The azimuthal modes each solve takes, its ground's among them: {@link THICK_BAKE_MODES} by
+   * default, more for a reader of the solves' own fields (R08.T15.a.2's test-only option, the deck's
+   * sky-lit radiance at its own modes). The table holds J to {@link THICK_BAKE_MODES} whatever.
+   */
+  readonly solveModes?: number;
 }
 
 /**
@@ -1241,6 +1255,7 @@ function solveOf(
   term: BinTerm,
   legendre: SourceLegendre,
   ground?: BakeGround,
+  solveModes: number = THICK_BAKE_MODES,
 ): BinSolve {
   const { grid, interfaceHeightsM } = prepared;
   const layers = grid.layers;
@@ -1276,7 +1291,7 @@ function solveOf(
     bin,
     term,
     groundCosinesOf(THICK_BAKE_STREAMS, grid.upwardCosines, grid.sunCosines),
-    THICK_BAKE_MODES - 1,
+    solveModes - 1,
   );
   const solution = solveDiscreteOrdinates({
     layers: scaled,
@@ -1284,7 +1299,7 @@ function solveOf(
     ...(groundReflectance === undefined ? {} : { groundReflectance }),
     beamCosines: grid.sunCosines,
     userCosines: grid.upwardCosines,
-    maxMode: THICK_BAKE_MODES - 1,
+    maxMode: solveModes - 1,
     streams: THICK_BAKE_STREAMS,
     beamPaths: scaledBeams,
     ...(planck === undefined
@@ -1472,9 +1487,10 @@ function thermalSourceOf(
  * the altitude (sr⁻¹ per unit of that scattering), converted to the channels.
  *
  * @param band - The band's index in {@link thickBakeBands}' order.
- * @param options - A ground other than Lambertian and a reader of each solve (R08.T15's deck);
- *   neither by default.
- * @throws RangeError for a band the body does not have, or as the solver refuses a layer (which
+ * @param options - A ground other than Lambertian, a reader of each solve and the solves' modes
+ *   (R08.T15's deck); none and {@link THICK_BAKE_MODES} by default.
+ * @throws RangeError for a band the body does not have, solves' modes not whole in
+ *   [{@link THICK_BAKE_MODES}, {@link THICK_BAKE_STREAMS}], or as the solver refuses a layer (which
  *   delta-M's truncation is there to prevent).
  */
 export function bakeMultipleScattering(
@@ -1487,6 +1503,16 @@ export function bakeMultipleScattering(
   const geometry = bands[band];
   if (geometry === undefined || !Number.isInteger(band)) {
     throw new RangeError(`the body has ${bands.length} latitude bands, not a band ${band}`);
+  }
+  const solveModes = options?.solveModes ?? THICK_BAKE_MODES;
+  if (!(
+    Number.isInteger(solveModes) &&
+    solveModes >= THICK_BAKE_MODES &&
+    solveModes <= THICK_BAKE_STREAMS
+  )) {
+    throw new RangeError(
+      `a band's solves take ${THICK_BAKE_MODES} to ${THICK_BAKE_STREAMS} modes, not ${solveModes}`,
+    );
   }
   const { grid } = prepared;
   const legendre = sourceLegendre(prepared);
@@ -1524,7 +1550,7 @@ export function bakeMultipleScattering(
       for (const term of lightBin.terms) {
         let solve = solved.get(term);
         if (solve === undefined) {
-          solve = solveOf(prepared, geometry, b, base, term, legendre, options?.ground);
+          solve = solveOf(prepared, geometry, b, base, term, legendre, options?.ground, solveModes);
           solved.set(term, solve);
           options?.onSolve?.(b, term, solve);
         }

@@ -21,8 +21,8 @@ import {
 import { BAKE_WAVELENGTHS_NM } from "../medium";
 import {
   bakeBinSolve,
+  deltaMLayer,
   prepareBake,
-  THICK_BAKE_DAY_GRID,
   THICK_BAKE_GRID,
   THICK_BAKE_MODES,
   THICK_BAKE_STREAMS,
@@ -37,9 +37,15 @@ import {
   bakeDeckPolarisation,
   type BelowDeckTable,
   DECK_FLOOR_OPTICAL_DEPTH,
+  DECK_MODES,
+  DECK_PHASE_U,
   deckColumnSolve,
   deckGround,
+  deckLayersOf,
   deckPolarisationGround,
+  deckReflectance,
+  deckSingleGeometry,
+  deckSingleScattering,
   type DeckTables,
   prepareDeck,
   prepareDeckPolarisation,
@@ -51,6 +57,7 @@ import {
   type GroundReflectance,
 } from "./discreteOrdinates";
 import { EXP_SUM_OPTIONS } from "./expSum";
+import { cornetteShanksMoments } from "./spectralColumn";
 import { polarisationSources } from "./polarisation";
 
 /** A value computed on its first use, so that a describe block's setup runs inside its tests. */
@@ -264,7 +271,7 @@ describe("an NH₃-like deck on a Saturn-class figure", () => {
     expect(worst).toBeLessThan(1e-12);
   });
 
-  it("stores the deck's reflectance, radiance and beam's reflection by the bins' conversion: a grey deck's as its own, to f32", () => {
+  it("stores the deck's tables by the bins' conversion: a grey deck's as its own, to f32", () => {
     const { column, deckAltitudeM } = fixture();
     // The deck alone, grey: every bin solves the same deck, which a flat spectrum converts to itself.
     const grey = prepareDeck(
@@ -284,42 +291,89 @@ describe("an NH₃-like deck on a Saturn-class figure", () => {
     const ground = deckGround(grey, geometry);
     const rho = ground(BIN, term, cosines, THICK_BAKE_MODES - 1);
     const solve = bakeBinSolve(grey.upper, geometry, BIN, term, ground);
+    // The deck's own tables at the kernels' cosines: the views out, the suns in.
+    const kernelCosines = { outgoingCosines: GRID.upwardCosines, incidentCosines: GRID.sunCosines };
+    const layered = deckLayersOf(grey, geometry, BIN, term);
+    const own = deckReflectance(
+      layered.layers,
+      entry(grey.floorAlbedo, BIN),
+      kernelCosines,
+      DECK_MODES - 1,
+    );
+    const single = deckSingleScattering(layered.layers, kernelCosines, DECK_MODES - 1);
+    const g = deckSingleGeometry(layered.layers, layered.truncated, kernelCosines);
     const n = THICK_BAKE_STREAMS / 2;
     const columns = cosines.incidentCosines.length;
+    const suns = GRID.sunCosines.length;
     const views = GRID.upwardCosines.length;
     const layers = GRID.layers;
     let worst = 0;
+    const miss = (stored: Float32Array, i: number, value: number): number => {
+      let most = 0;
+      for (let c = 0; c < 3; c += 1) {
+        most = Math.max(
+          most,
+          Math.abs(entry(stored, i * 3 + c) - value) / Math.max(Math.abs(value), 1e-3),
+        );
+      }
+      return most;
+    };
     GRID.sunCosines.forEach((mu0, s) => {
       const kernel = entry(solve.kernelBeams[s]?.interfaceTransmission ?? [], layers);
       for (let v = 0; v < views; v += 1) {
+        const point = s * views + v;
+        const at = v * suns + s;
+        worst = Math.max(
+          worst,
+          miss(slot.singleGeometry, point, entry(g, at)),
+          miss(slot.singleBeamGeometry, point, kernel * entry(g, at)),
+        );
+        for (let m = 0; m < DECK_MODES; m += 1) {
+          const multiple = entry(own.modes[m] ?? [], at) - entry(single.modes[m] ?? [], at);
+          const i = point * DECK_MODES + m;
+          worst = Math.max(
+            worst,
+            miss(slot.reflectance, i, multiple),
+            miss(slot.beamReflection, i, kernel * multiple),
+          );
+        }
         for (let m = 0; m < THICK_BAKE_MODES; m += 1) {
           const r = entry(rho.modes[m] ?? [], (n + v) * columns + n + s);
           const leaving = entry(
             solve.solution.beams[s]?.modes[m]?.userUp ?? [],
             layers * views + v,
           );
-          const diffuse = leaving - ((mu0 * kernel) / Math.PI) * r;
-          const i = (s * views + v) * THICK_BAKE_MODES + m;
-          const miss = (stored: Float32Array, value: number, c: number): number =>
-            Math.abs(entry(stored, i * 3 + c) - value) / Math.max(Math.abs(value), 1e-3);
-          for (let c = 0; c < 3; c += 1) {
-            worst = Math.max(
-              worst,
-              miss(slot.reflectance, r, c),
-              miss(slot.diffuse, diffuse, c),
-              miss(slot.beamReflection, kernel * r, c),
-            );
-          }
+          // The deck's own solve at the kernels' cosines is the coupling's at its modes.
+          worst = Math.max(
+            worst,
+            Math.abs(entry(own.modes[m] ?? [], at) - r) / Math.max(Math.abs(r), 1e-3),
+          );
+          worst = Math.max(
+            worst,
+            miss(
+              slot.diffuse,
+              point * THICK_BAKE_MODES + m,
+              leaving - ((mu0 * kernel) / Math.PI) * r,
+            ),
+          );
         }
       }
     });
-    // Measured 2026-10-29: 4.4 × 10⁻⁸, the f32's rounding.
+    // The grey deck's one term's phase, each channel's alone.
+    const phase = grey.termPhases[BIN]?.[0];
+    if (phase === undefined) {
+      throw new Error("the grey deck's term has a phase");
+    }
+    for (let i = 0; i < DECK_PHASE_U.length; i += 1) {
+      worst = Math.max(worst, miss(slot.phase, i, entry(phase, i)));
+    }
+    // Measured 2026-10-30: 1.3 × 10⁻⁷, the f32's rounding.
     expect(worst).toBeLessThan(1e-6);
   });
 
-  it("solves the deck once a solve of the table above it", () => {
+  it("solves the deck twice a solve of the table above it: its ground's and its own", () => {
     const table = tables()[0];
-    expect([table?.slots[0]?.solves, table?.above.slots[0]?.solves]).toEqual([15, 15]);
+    expect([table?.slots[0]?.solves, table?.above.slots[0]?.solves]).toEqual([30, 15]);
   });
 
   it("holds finite tables of the grid's size", () => {
@@ -328,13 +382,28 @@ describe("an NH₃-like deck on a Saturn-class figure", () => {
       table.slots[0]?.reflectance.length,
       table.slots[0]?.diffuse.length,
       table.slots[0]?.beamReflection.length,
+      table.slots[0]?.singleGeometry.length,
+      table.slots[0]?.singleBeamGeometry.length,
+      table.slots[0]?.phase.length,
       table.slots.every((slot) =>
-        [...slot.reflectance, ...slot.diffuse, ...slot.beamReflection].every(Number.isFinite),
+        [
+          ...slot.reflectance,
+          ...slot.diffuse,
+          ...slot.beamReflection,
+          ...slot.singleGeometry,
+          ...slot.singleBeamGeometry,
+          ...slot.phase,
+        ].every(Number.isFinite),
       ),
     ]);
     const above = 9 * 3 * 4 * THICK_BAKE_MODES * 3;
-    const deck = 3 * 2 * THICK_BAKE_MODES * 3;
-    expect(sizes).toEqual(Array.from({ length: 4 }, () => [above, deck, deck, deck, true]));
+    const deck = 3 * 2 * DECK_MODES * 3;
+    const diffuse = 3 * 2 * THICK_BAKE_MODES * 3;
+    const single = 3 * 2 * 3;
+    const phase = DECK_PHASE_U.length * 3;
+    expect(sizes).toEqual(
+      Array.from({ length: 4 }, () => [above, deck, diffuse, deck, single, single, phase, true]),
+    );
   });
 });
 
@@ -363,43 +432,63 @@ describe("a deck under a gas of several terms a bin", () => {
     }
     const ground = deckGround(prepared(), geometry);
     const views = GRID.upwardCosines.length;
+    const suns = GRID.sunCosines.length;
     const layers = GRID.layers;
-    const size = GRID.sunCosines.length * views * THICK_BAKE_MODES;
-    // Each bin's upward radiance at the deck, Σ_t w_t I_t, from its own solves.
-    const leaving = light.bins.map((bin, b) => {
-      const sum = new Float64Array(size);
+    const size = suns * views * THICK_BAKE_MODES;
+    const kernelCosines = { outgoingCosines: GRID.upwardCosines, incidentCosines: GRID.sunCosines };
+    // Each bin's upward radiance at the deck, Σ_t w_t I_t, from its own solves, and the beam's
+    // reflection by the deck's single scattering, Σ_t w_t T_k,t ρ_ss,t, which the stored
+    // `beamReflection` leaves out.
+    const perBin = light.bins.map((bin, b) => {
+      const leaving = new Float64Array(size);
+      const single = new Float64Array(size);
       for (const term of bin.terms) {
         const solve = bakeBinSolve(prepared().upper, geometry, b, term, ground);
-        for (let s = 0; s < GRID.sunCosines.length; s += 1) {
+        const ss = deckSingleScattering(
+          deckLayersOf(prepared(), geometry, b, term).layers,
+          kernelCosines,
+          THICK_BAKE_MODES - 1,
+        );
+        for (let s = 0; s < suns; s += 1) {
+          const kernel = entry(solve.kernelBeams[s]?.interfaceTransmission ?? [], layers);
           for (let v = 0; v < views; v += 1) {
             for (let m = 0; m < THICK_BAKE_MODES; m += 1) {
               const i = (s * views + v) * THICK_BAKE_MODES + m;
               const up = solve.solution.beams[s]?.modes[m]?.userUp ?? [];
-              sum[i] = entry(sum, i) + term.weight * entry(up, layers * views + v);
+              leaving[i] = entry(leaving, i) + term.weight * entry(up, layers * views + v);
+              single[i] =
+                entry(single, i) + term.weight * kernel * entry(ss.modes[m] ?? [], v * suns + s);
             }
           }
         }
       }
-      return sum;
+      return { leaving, single };
     });
     let worst = 0;
     light.conversion.factors.forEach((factors, c) => {
-      const expected = Array.from({ length: size }, (_, i) => {
-        let x = 0;
-        leaving.forEach((bin, b) => {
-          x += entry(factors, b) * entry(bin, i);
+      const convert = (of: (bin: (typeof perBin)[number]) => Float64Array): number[] =>
+        Array.from({ length: size }, (_, i) => {
+          let x = 0;
+          perBin.forEach((bin, b) => {
+            x += entry(factors, b) * entry(of(bin), i);
+          });
+          return x;
         });
-        return x;
-      });
+      const expected = convert((bin) => bin.leaving);
+      const single = convert((bin) => bin.single);
       const largest = Math.max(...expected.map(Math.abs));
       expected.forEach((value, i) => {
-        const mu0 = entry(GRID.sunCosines, Math.floor(i / (views * THICK_BAKE_MODES)));
-        const stored =
-          entry(slot.diffuse, i * 3 + c) + (mu0 / Math.PI) * entry(slot.beamReflection, i * 3 + c);
+        const s = Math.floor(i / (views * THICK_BAKE_MODES));
+        const v = Math.floor(i / THICK_BAKE_MODES) % views;
+        const m = i % THICK_BAKE_MODES;
+        const mu0 = entry(GRID.sunCosines, s);
+        const beam =
+          entry(slot.beamReflection, ((s * views + v) * DECK_MODES + m) * 3 + c) + entry(single, i);
+        const stored = entry(slot.diffuse, i * 3 + c) + (mu0 / Math.PI) * beam;
         worst = Math.max(worst, Math.abs(stored - value) / largest);
       });
     });
-    // Measured 2026-10-29: 3.1 × 10⁻⁸, the f32's rounding. The bins' mean T_k times `reflectance`
+    // Measured 2026-10-30: 3.2 × 10⁻⁸, the f32's rounding. The bins' mean T_k times `reflectance`
     // in its place misses the radiance by up to 1.1% here (m = 0, the terms 1 2 4 3 4 3 4 3 3 4 4
     // 3 3 3 3 by bin).
     expect(worst).toBeLessThan(1e-6);
@@ -655,6 +744,169 @@ describe("below a deck over a surface (R08.T15.b.1)", () => {
   });
 });
 
+describe("the deck's own tables (R08.T15.a.2)", () => {
+  const fixture = once(nh3DeckFixture);
+  const prepared = once(() => preparedOf(fixture(), "envelope"));
+  const body = saturnBakeBody();
+  const table = once(() => bakeDeck(prepared(), body, 0));
+  const cosines = Float64Array.of(0.15, 0.4, 0.8, 1);
+  const pairs = { outgoingCosines: cosines, incidentCosines: cosines };
+
+  it("takes the solver's own single scattering out: a thin slab's reflectance at every mode, to 10⁻⁶", () => {
+    // Cornette–Shanks g 0.75 by delta-M at 16 streams, τ′ 10⁻⁷ over a black floor: the solve's
+    // reflectance is its single scattering to O(τ′).
+    const scaled = deltaMLayer(1e-7, 0.9e-7, cornetteShanksMoments(0.75, 16), 0);
+    const layers = [scaled.layer];
+    const solved = deckReflectance(layers, 0, pairs, DECK_MODES - 1);
+    const single = deckSingleScattering(layers, pairs, DECK_MODES - 1);
+    let worst = 0;
+    for (let m = 0; m < DECK_MODES; m += 1) {
+      const rho = solved.modes[m] ?? new Float64Array();
+      const largest = Math.max(...Array.from(rho, Math.abs));
+      rho.forEach((value, i) => {
+        worst = Math.max(worst, Math.abs(entry(single.modes[m] ?? [], i) - value) / largest);
+      });
+    }
+    // Measured 2026-10-30: 6.6 × 10⁻⁷ of each mode's largest, the slab's second order, which goes as
+    // τ′ (6.6 τ′ from 10⁻³ down to 10⁻⁷, the most at μ 0.15).
+    expect(worst).toBeLessThan(1e-6);
+  });
+
+  it("gives the same single scattering by its geometry and phase where delta-M truncates nothing, to 10⁻¹²", () => {
+    // Two Rayleigh layers of other albedos (χ₂ alone, f = 0): G p(Θ) is the series' sum.
+    const rayleigh = Float64Array.from({ length: 17 }, (_, l) => (l === 0 ? 1 : l === 2 ? 0.1 : 0));
+    const layers = [
+      deltaMLayer(0.3, 0.27, rayleigh, 0).layer,
+      deltaMLayer(0.5, 0.2, rayleigh, 0).layer,
+    ];
+    const single = deckSingleScattering(layers, pairs, THICK_BAKE_STREAMS - 1);
+    const g = deckSingleGeometry(layers, [0, 0], pairs);
+    const n = cosines.length;
+    let worst = 0;
+    for (const [i, mu] of cosines.entries()) {
+      for (const [j, mu0] of cosines.entries()) {
+        for (let degrees = 0; degrees <= 180; degrees += 15) {
+          const dphi = (degrees * Math.PI) / 180;
+          let series = 0;
+          for (let m = 0; m < THICK_BAKE_STREAMS; m += 1) {
+            series += entry(single.modes[m] ?? [], i * n + j) * Math.cos(m * dphi);
+          }
+          const cosTheta = -mu * mu0 + Math.sqrt((1 - mu * mu) * (1 - mu0 * mu0)) * Math.cos(dphi);
+          const phase = (3 / (16 * Math.PI)) * (1 + cosTheta * cosTheta);
+          worst = Math.max(worst, Math.abs(entry(g, i * n + j) * phase - series) / series);
+        }
+      }
+    }
+    expect(worst).toBeLessThan(1e-12);
+  });
+
+  it("holds J per unit of the kernels' scattering above the deck, as R08.T14.d.1's bake does, to f32", () => {
+    const deck = prepared();
+    const geometry = bandOf(body, 0);
+    const ground = deckGround(deck, geometry);
+    const light = deck.upper.lights[0];
+    if (light === undefined) {
+      throw new Error("a light");
+    }
+    const points = GRID.sunCosines.length * 2 * GRID.upwardCosines.length * THICK_BAKE_MODES;
+    // Each bin's J: its solve's E over the bin's own kernel scattering at the altitude, σ_s (1 − f_c).
+    const perBin = BAKE_WAVELENGTHS_NM.map((_, b) => {
+      const { source } = bakeBinSolve(deck.upper, geometry, b, onlyTerm(deck, b), ground);
+      return source.map((value, i) => {
+        const point = deck.upper.pointOptics[b]?.[Math.floor(i / points)];
+        const kernel = (point?.scatteringPerM ?? Number.NaN) * (1 - (point?.forwardDelta ?? 0));
+        return kernel > 0 ? value / kernel : 0;
+      });
+    });
+    const values = table().above.slots[0]?.values ?? new Float32Array();
+    let worst = 0;
+    light.conversion.factors.forEach((factors, c) => {
+      const expected = Array.from({ length: values.length / 3 }, (_, i) =>
+        perBin.reduce((sum, bin, b) => sum + entry(factors, b) * entry(bin, i), 0),
+      );
+      const largest = Math.max(...expected.map(Math.abs));
+      expected.forEach((value, i) => {
+        worst = Math.max(worst, Math.abs(entry(values, i * 3 + c) - value) / largest);
+      });
+    });
+    // Measured 2026-10-30: 5.2 × 10⁻⁸ of the largest, the f32's rounding.
+    expect(worst).toBeLessThan(1e-6);
+  });
+
+  it("takes the sky-lit radiance to the deck's modes under the test's option, its first modes as they were", () => {
+    const wide = bakeDeck(prepared(), body, 0, { diffuseModes: DECK_MODES });
+    const narrow = table();
+    const points = GRID.sunCosines.length * GRID.upwardCosines.length;
+    let worst = 0;
+    let higher = 0;
+    for (let point = 0; point < points; point += 1) {
+      for (let m = 0; m < DECK_MODES; m += 1) {
+        for (let c = 0; c < 3; c += 1) {
+          const value = entry(wide.slots[0]?.diffuse ?? [], (point * DECK_MODES + m) * 3 + c);
+          if (m < THICK_BAKE_MODES) {
+            const held = entry(
+              narrow.slots[0]?.diffuse ?? [],
+              (point * THICK_BAKE_MODES + m) * 3 + c,
+            );
+            worst = Math.max(worst, Math.abs(value - held) / Math.max(Math.abs(held), 1e-9));
+          } else {
+            higher = Math.max(higher, Math.abs(value));
+          }
+        }
+      }
+    }
+    expect([wide.diffuseModes, narrow.diffuseModes]).toEqual([DECK_MODES, THICK_BAKE_MODES]);
+    expect(worst).toBeLessThan(1e-6);
+    expect(higher).toBeGreaterThan(0);
+  });
+
+  it("lights the deck below the horizontal by the sky alone: no beam's tables there, its sky-lit radiance above 0", () => {
+    const grid = { ...GRID, sunCosines: Float64Array.of(-0.05, ...GRID.sunCosines) };
+    const deck = prepareDeck(
+      fixture().column,
+      [SUN],
+      { altitudeM: fixture().deckAltitudeM, floor: "envelope" },
+      { grid, deckLayers: DECK_LAYERS },
+    );
+    const twilight = bakeDeck(deck, body, 0);
+    const slot = twilight.slots[0];
+    if (slot === undefined) {
+      throw new Error("a slot");
+    }
+    const views = grid.upwardCosines.length;
+    const beam = [
+      ...slot.reflectance.subarray(0, views * DECK_MODES * 3),
+      ...slot.beamReflection.subarray(0, views * DECK_MODES * 3),
+      ...slot.singleGeometry.subarray(0, views * 3),
+      ...slot.singleBeamGeometry.subarray(0, views * 3),
+    ];
+    const sky = Array.from({ length: views * 3 }, (_, i) =>
+      entry(slot.diffuse, Math.floor(i / 3) * THICK_BAKE_MODES * 3 + (i % 3)),
+    );
+    expect(Array.from(twilight.sunCosines)).toEqual(Array.from(grid.sunCosines));
+    expect(Math.max(...beam.map(Math.abs))).toBe(0);
+    expect(Math.min(...sky)).toBeGreaterThan(0);
+    expect(twilight.above.sunCosines.length).toBe(grid.sunCosines.length);
+  });
+
+  it("reflects more over a white floor than a black one, the test's option", () => {
+    const { column, deckAltitudeM } = fixture();
+    const split = { altitudeM: deckAltitudeM, floor: "envelope" } as const;
+    const white = prepareDeck(column, [SUN], split, {
+      grid: GRID,
+      deckLayers: DECK_LAYERS,
+      floorAlbedo: 1,
+    });
+    expect(Array.from(white.floorAlbedo).every((albedo) => albedo === 1)).toBe(true);
+    const rho = (deck: PreparedDeck): number =>
+      entry(
+        bakeDeck(deck, body, 0).slots[0]?.reflectance ?? [],
+        (2 * GRID.upwardCosines.length + 1) * DECK_MODES * 3,
+      );
+    expect(rho(white)).toBeGreaterThan(rho(prepared()));
+  });
+});
+
 describe("the deck's refusals", () => {
   const fixture = once(nh3DeckFixture);
 
@@ -674,24 +926,31 @@ describe("the deck's refusals", () => {
     ).toThrow(RangeError);
   });
 
-  it("refuses a grid with a sun below the horizontal, R08.T15.a.2's to take (R08.T14.d.2)", () => {
-    const { column, deckAltitudeM } = fixture();
-    const split = { altitudeM: deckAltitudeM, floor: "ground" } as const;
-    const grid = { ...GRID, sunCosines: Float64Array.of(-0.05, ...GRID.sunCosines) };
-    expect(() => prepareDeck(column, [SUN], split, { grid })).toThrow(/below the horizontal/u);
-    expect(() => prepareDeck(column, [SUN], split, { grid: THICK_BAKE_GRID })).toThrow(
-      /below the horizontal/u,
-    );
-  });
-
-  it("takes the bake's grid's daylit rows by default, its 32 of 1/32 (R08.T14.d.2)", () => {
-    expect(THICK_BAKE_DAY_GRID).toEqual({
-      ...THICK_BAKE_GRID,
-      sunCosines: Float64Array.from({ length: 32 }, (_, s) => (s + 0.5) / 32),
-    });
+  it("takes the bake's grid by default, its 46 rows, the 14 below the horizontal among them (R08.T15.a.2)", () => {
     const { column, deckAltitudeM } = fixture();
     const deck = prepareDeck(column, [SUN], { altitudeM: deckAltitudeM, floor: "ground" });
-    expect(deck.upper.grid).toBe(THICK_BAKE_DAY_GRID);
+    expect(deck.upper.grid).toBe(THICK_BAKE_GRID);
+  });
+
+  it("refuses a floor albedo outside [0, 1]", () => {
+    const { column, deckAltitudeM } = fixture();
+    for (const floorAlbedo of [-0.1, 1.5, Number.NaN]) {
+      expect(() =>
+        prepareDeck(
+          column,
+          [SUN],
+          { altitudeM: deckAltitudeM, floor: "envelope" },
+          { grid: GRID, deckLayers: 8, floorAlbedo },
+        ),
+      ).toThrow(RangeError);
+    }
+  });
+
+  it("refuses the deck's sky-lit radiance at modes outside the bake's to its own", () => {
+    const deck = preparedOf(fixture(), "envelope");
+    for (const diffuseModes of [THICK_BAKE_MODES - 1, DECK_MODES + 1, 4.5]) {
+      expect(() => bakeDeck(deck, saturnBakeBody(), 0, { diffuseModes })).toThrow(RangeError);
+    }
   });
 
   it("refuses deck layers that are not whole strides", () => {
