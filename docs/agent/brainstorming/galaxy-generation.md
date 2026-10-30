@@ -1239,8 +1239,9 @@ within a bin.
 per 10⁴ years for the Milky Way's black hole (Stone and Metzger 2016), separate from the Kepler
 members, whose loss cone is empty by construction. The victim is a list member on a near-parabolic
 orbit. The black hole's luminosity is quiescence plus flares plus the t^−5/3 tails of recent
-disruptions, still 10³⁹ erg/s a thousand years on, which matches the light echoes seen around Sgr
-A\* (Ponti et al. 2010).
+disruptions, radiatively inefficient once the fallback falls below a few thousandths of
+Eddington's rate. The light echoes around Sgr A\* record short outbursts of about 10³⁹ erg/s a
+century or two ago, and a mean below 10³⁶ erg/s since (Ponti et al. 2010; Clavel et al. 2013).
 
 **Alerts.** "What went off?" walks the catalogue classes within the sensor's horizon and evaluates
 each host over the retarded interval, under the census rule: complete per class or nothing. A
@@ -2714,7 +2715,8 @@ Figures above are rounded and should be re-checked against these when they becom
   MNRAS 520; Fardal, Huang and Weinberg 2015, MNRAS 452.
 - Kochanek, Adams and Belczynski 2014, MNRAS 443 (stellar mergers); Pala et al. 2020, MNRAS 494
   (cataclysmic variables); Corral-Santana et al. 2016, A&A 587.
-- Stone and Metzger 2016, MNRAS 455; Ponti et al. 2010, ApJ 714; Neilsen et al. 2013, ApJ 774.
+- Stone and Metzger 2016, MNRAS 455; Ponti et al. 2010, ApJ 714; Neilsen et al. 2013, ApJ 774;
+  Clavel et al. 2013, A&A 558; Xie and Yuan 2012, MNRAS 427 (the hot flow's falling efficiency).
 - Contreras Peña, Naylor and Morrell 2019, MNRAS 486; Melatos, Peralta and Wyithe 2008, ApJ 672;
   Fuentes et al. 2017, A&A 608.
 - Popov et al. 2010, MNRAS 401, 2675; Faucher-Giguère and Kaspi 2006, ApJ 643, 332 (pulsars'
