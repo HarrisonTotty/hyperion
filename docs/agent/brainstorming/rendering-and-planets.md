@@ -346,7 +346,11 @@ Three consequences, which should be written down rather than discovered:
    `swiftshader`) and reports that, any adapter or device loss, and any GPU-process crash in the
    guide's language, as a console Fault or a status of its own (`GRAPHICS …`), never an Alert or a
    Caution, which a console never invents (R01 Design note 10), rather than crashing or drawing at a
-   few frames a second. After a crash loop it relaunches once without the Vulkan features, into a
+   few frames a second. One test tool is excepted: the views check's check-only software mode
+   (`just views-check --software`, R01.T16), which draws both styles on SwiftShader on a machine
+   with no GPU. It is chosen only by its own switch, refused in packaged and player launches, and
+   named on the `GRAPHICS` panel (`SOFTWARE`) and in the record, so it never falls back silently.
+   After a crash loop it relaunches once without the Vulkan features, into a
    declared safe mode that has no views: without the `Vulkan` feature X11 gives WebGPU no adapter at
    all, so the consoles stay and every view states the mode instead of a picture (R01 Design note
    5). Chromium's own fallback would be undeclared. The probe saw Vulkan, and with it WebGPU, drop
@@ -2881,8 +2885,9 @@ worse than no test. Headless software rendering exists and is fine for a smoke t
 "did every shader compile and did a frame complete", which is worth having and is all it is worth
 having. It runs Electron's WebGPU on SwiftShader, the CPU Vulkan implementation Electron ships, as
 Dawn's fallback adapter (`--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader`, in the test
-harness only: the unsafe flag is needed there because Chromium blocklists CPU adapters, and is never
-set by the client). With no display it also needs `--ozone-platform=headless`,
+harnesses only, the smoke harness and the views check's check-only software mode, whose script puts
+them on the command line (R01.T16): the unsafe flag is needed there because Chromium blocklists CPU
+adapters, and the client never sets it itself). With no display it also needs `--ozone-platform=headless`,
 `--use-angle=swiftshader`, `--enable-features=Vulkan` and `--use-vulkan=swiftshader`, and a window
 made as `BrowserWindow({ show: false, webPreferences: { offscreen: true } })`, since headless Ozone
 without `offscreen` segfaults and Electron's `--headless` aborts (R01 Design note 17). It reads the

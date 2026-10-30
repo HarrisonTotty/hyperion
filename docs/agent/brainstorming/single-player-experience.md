@@ -722,7 +722,9 @@ required, with the switches forced and no WebGL2 fallback, and that every featur
 playable on the UHD 620, which is the floor. The switches are set on every Linux machine, so that
 the forced path is the only one and the tested one, and under a Wayland session the client runs
 through XWayland. `--enable-unsafe-webgpu` is not among them, because it would let a failed hardware
-path fall back silently to a software adapter. See the rendering brainstorm's
+path fall back silently to a software adapter. (The views check's software mode, a test tool, takes
+it on its own command line and is refused for players; see the rendering brainstorm's
+[Testing](rendering-and-planets.md#testing).) See the rendering brainstorm's
 [Intel problem](rendering-and-planets.md#the-graphics-api-and-the-intel-problem). A native
 engine talks to Vulkan directly and has no such gate.
 
