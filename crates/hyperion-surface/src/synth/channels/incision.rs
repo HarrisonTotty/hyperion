@@ -2283,7 +2283,7 @@ pub(crate) fn unresolved_channel_variance(
 ///
 /// The terms are none in a cell under water; the trunk level counts the trunks that run in the
 /// cell, its own trunk's first half and each dry donor's second half, each held to its base level
-/// ([`trunk_valley_m`]), its own faded towards a receiver under water; and the tributary levels
+/// (`trunk_valley_m`), its own faded towards a receiver under water; and the tributary levels
 /// are its own, below a top as much lower as its trunk is held. A world dry now's cell takes its
 /// epoch valley whole, as [`channel_variance`] does. `None` where `cells` lacks the cell, its
 /// receiver, or, where water drains through it, one of its four edge neighbours.
