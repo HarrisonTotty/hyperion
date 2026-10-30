@@ -66,7 +66,8 @@ All Rust paths are under `hyperion_sim::galaxy` unless they start with another m
   numbered stream and core specifications P10.T4 builds the list from and plan 15's P15.T11
   observes (P10.T3, as built).
 - `global_list::spray::{Tracer, SprayParams, spray}` and
-  `global_list::tube::{TubeTable, TubeKnot, TubeArm, KnotHash}`:
+  `global_list::tube::{TubeTable, TubeKnot, TubeArm, KnotHash}` (as built in P10.T6.c, no
+  `KnotHash`, a scan instead, and `TubeCell` added: Risks, "P10.T6.c as built"):
   `TubeTable::build(&Galaxy, &StreamSpec) -> TubeTable` (as built,
   `-> Result<TubeTable, BuildTubeTableError>`, with
   `TubeTable::from_tracers(&StreamSpec, &[Tracer])` for a pool's tracers: Risks, "P10.T6.a as
@@ -74,7 +75,8 @@ All Rust paths are under `hyperion_sim::galaxy` unless they start with another m
   seed and the halo's mean system mass first, with `TubeTable::along_cells()` and
   `TubeTable::noise(cell)`: Risks, "P10.T6.b as built"), `TubeTable::byte_size()`,
   `TubeTable::locate(u, a, b) -> GalacticPosition`, `TubeTable::mean_velocity(u)`,
-  `TubeTable::cells_touching(sphere) -> impl Iterator<Item = TubeCell>`.
+  `TubeTable::cells_touching(sphere) -> impl Iterator<Item = TubeCell>` (as built,
+  `cells_touching(&GalacticPosition, LightYears)`, a centre and a radius).
 - `global_list::tube::TubeLookup`, the trait a caller's cache implements:
   `fn global_list(&self) -> &GlobalList` and `fn tube(&self, StreamNumber) -> Arc<TubeTable>`.
 - `placement::resolve_with(galaxy, id, &dyn TubeLookup) -> Result<SystemRecord, ResolveSystemError>`
@@ -569,8 +571,9 @@ which T4 checks (Risks, "T3.a–c as built").
 
 ### P10.T6 The tube table
 
-_T6.a–b built (lanes `p10-t6a` and `p10-t6b`, 2026-10-29 and 2026-10-30, at `GENERATOR_VERSION`
-23); see "P10.T6.a as built" and "P10.T6.b as built" in Risks._
+_T6.a–c built (lanes `p10-t6a`, `p10-t6b` and `p10-t6c`, 2026-10-29 and 2026-10-30, at
+`GENERATOR_VERSION` 23); see "P10.T6.a as built", "P10.T6.b as built" and "P10.T6.c as built" in
+Risks._
 
 - **P10.T6.a Reduction.** Per arm about 256 knots per design note 6: centre line (as integer
   light-years plus offset), a local frame carried along the track by parallel transport so that it
@@ -1920,3 +1923,33 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
     peak read at the scale `1 ÷ k` (Bovy, Erkal and Sanders 2017's axis) in `k P(k)` (this task's
     choice, so that a peak exists), and
     `build_cuts_the_tube_with_the_galaxy_s_seed_and_its_halo_s_mean_mass`.
+- **P10.T6.c as built (lane `p10-t6c`, 2026-10-30, at `GENERATOR_VERSION` 23).** No output
+  moved: nothing reads a tube before P10.T8. New unwired golden `galaxy/global_list/tube.golden`
+  (a lib unit test, so `wasm32-wasip1` compares it), blessed by name.
+  - _Items._ In `tube`: `TubeCell` (`along`, `across`, `across_widths`, `From<StreamMemberId>`),
+    `CUT_WIDTHS` (4) and `ACROSS_CELLS` (64); `TubeTable::byte_size` and
+    `TubeTable::cells_touching(&GalacticPosition, LightYears)`, a centre and a radius as plan 09's
+    `NestedGrid::cells_touching` takes, so that T9 asks once for the census's unpadded radius and
+    once for the hits' padded one. `TubeKnot` keeps the tangent and the normal only; `frame()`
+    recomputes the binormal to the same bits and is no longer `const`.
+  - _No `KnotHash` (main's fallback, ruling of 2026-10-30)._ Each arm stores its segments'
+    reaches, and `cells_touching` scans the 510 padded segment boxes. The per-tube hash, built in a
+    scratch probe and not committed, was no faster, larger (5.6–64 kB a tube against 4 kB), and
+    over the lean's 2,000 entries for `pal5_like` and `sagittarius_like` and for 152 of a drawn
+    galaxy's 306 tubes (module documentation, "Finding the segments"). The brainstorm's "small
+    spatial hash of knots" is now this scan; T9's "the knot hash" is `cells_touching`'s.
+  - _For T8.b and T9._ `cells_touching` is conservative: it yields every cell holding a point
+    `locate` puts within the radius, and may yield cells holding none, so T8.b must place members
+    with `locate`. Once T9's census sums the yielded cells' means, the set is output, and with it
+    the test's constants (`MARGIN_LY`, `EDGE`, `PIECE_CHORD`, `MAX_PIECES`). Across cell `j` spans
+    `−4 + j ÷ 8` to `−4 + (j + 1) ÷ 8` widths (`across_widths`).
+  - _For T10.b._ `build` sprays serially: 2.12 s for `pal5_like`, or 0.138 s with its tracers on a
+    16-thread pool through `from_tracers` (pod, 16 vCPU). A table holds 90,256 bytes, not 80 kB,
+    so T10.b's cache budget is about an eighth more a tube. Ruling 146.3's `τ_p ÷ 32` is not
+    applied (lean, 2026-10-30): the pool meets 0.2 s.
+  - _Tests._ Fast, `tube::tests`: the golden and order independence
+    (`milky_way::the_test_streams_tubes_are_pinned_and_order_independent`), the scan, the reach,
+    `cells_touching` against points drawn in spheres, the cells, `byte_size` and the frame's bits.
+    Slow, by name, in `tests/global_list_tube.rs` (`testing`, `--ignored`):
+    `cells_touching_holds_every_point_of_the_test_tubes_in_a_sphere`. Bench:
+    `benches/global_list.rs` (`testing`).

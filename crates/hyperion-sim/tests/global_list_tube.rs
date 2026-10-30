@@ -1,6 +1,7 @@
-//! The tube table's slow tests (plan 10, P10.T6.a and T6.b): the three test streams of
+//! The tube table's slow tests (plan 10, P10.T6.a–c): the three test streams of
 //! `global_list::testing`, reduced from the generator's 2,000 tracers, the strays of
-//! `sagittarius_like` under several seeds, and the power of `gd1_like`'s gap noise.
+//! `sagittarius_like` under several seeds, the power of `gd1_like`'s gap noise, and the cells a
+//! sphere touches.
 //!
 //! The (R, z) grid costs seconds to build, so the test streams read one set of tables, the Milky
 //! Way fixture's, and its spray table, as `tests/global_list_spray.rs` does, and each stream is
@@ -15,13 +16,16 @@ use std::sync::OnceLock;
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::global_list::spray::{self, Arm, Spray, SprayForce, SprayParams, Tracer};
 use hyperion_sim::galaxy::global_list::testing::{gd1_like, pal5_like, sagittarius_like};
-use hyperion_sim::galaxy::global_list::tube::{GAP_NOISE_AMPLITUDE, KNOTS_PER_ARM, TubeKnot};
+use hyperion_sim::galaxy::global_list::tube::{
+    ACROSS_CELLS, CUT_WIDTHS, GAP_NOISE_AMPLITUDE, KNOTS_PER_ARM, TubeCell, TubeKnot,
+};
 use hyperion_sim::galaxy::global_list::{StreamSpec, TubeTable};
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::potential::{MassModel, PotentialTables};
 use hyperion_sim::galaxy::{Galaxy, Population};
-use hyperion_sim::units::SolarMasses;
+use hyperion_sim::rng::{ObjectKey, Stream, tags};
 use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+use hyperion_sim::units::{LightYears, SolarMasses};
 use hyperion_sim::{Seed, math};
 
 const SEED: Seed = Seed::new(0x0a10_5b00_0000_0000);
@@ -727,4 +731,118 @@ fn build_cuts_the_tube_with_the_galaxy_s_seed_and_its_halo_s_mean_mass() {
     };
     assert_eq!(built, reduced(galaxy.seed()));
     assert_ne!(built, reduced(Seed::new(1)));
+}
+
+/// The cell `(along, [a, b])` of the point at along coordinate `u` and across coordinates `a` and
+/// `b` within the cut, in a tube of `cells` along cells.
+fn cell_of(u: f64, across: [f64; 2], cells: u32) -> (u32, [u8; 2]) {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "each index is floored and clamped to its cells first"
+    )]
+    let index = |x: f64, n: u32| x.floor().clamp(0.0, f64::from(n - 1)) as u32;
+    let across = across.map(|c| {
+        let j = index(
+            (c + CUT_WIDTHS) * f64::from(ACROSS_CELLS) / (2.0 * CUT_WIDTHS),
+            u32::from(ACROSS_CELLS),
+        );
+        u8::try_from(j).expect("below 64")
+    });
+    (index(u * f64::from(cells), cells), across)
+}
+
+/// Spheres about one test tube: about random points within and beyond the cut, and about the
+/// middles of the five segments where the frame turns most, of radii from 10 ly to 30,000 ly.
+fn spheres(table: &TubeTable, n: u32) -> Vec<(f64, GalacticPosition, f64)> {
+    let mut draws = Stream::open(
+        Seed::new(0x0a10_6c04),
+        tags::SELFTEST_STREAM,
+        ObjectKey::galaxy_item(u64::from(table.stream().get())),
+    );
+    let mut uniform = move || draws.uniform();
+    let knots: Vec<&TubeKnot> = table.knots().collect();
+    let total = table.mass().value();
+    let mut turns: Vec<(f64, f64)> = knots
+        .windows(2)
+        .filter(|pair| pair[1].cumulative_mass().value() > pair[0].cumulative_mass().value())
+        .map(|pair| {
+            let (n0, n1) = (pair[0].frame()[1], pair[1].frame()[1]);
+            let middle = f64::midpoint(
+                pair[0].cumulative_mass().value(),
+                pair[1].cumulative_mass().value(),
+            );
+            (dot(n0, n1), middle / total)
+        })
+        .collect();
+    turns.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut centres: Vec<f64> = turns.iter().take(5).map(|t| t.1).collect();
+    centres.extend((0..n).map(|_| uniform()));
+    centres
+        .into_iter()
+        .map(|u| {
+            let (a, b) = (12.0 * uniform() - 6.0, 12.0 * uniform() - 6.0);
+            let radius = 10.0 * math::powf(3_000.0, uniform());
+            (u, table.locate(u, a, b), radius)
+        })
+        .collect()
+}
+
+/// `cells_touching` finds every cell that holds a point of a test tube within a sphere (P10.T6.c),
+/// on the generator's tubes, where `sagittarius_like`'s frame turns by up to 54° from knot to
+/// knot (P10.T6.a, as built): points drawn within the cut at along coordinates about each
+/// sphere's, every one inside the sphere in a cell it found, the cells ascending and unique. The
+/// table, its 512 knots of 168 bytes and its 510 segments' reaches, holds about 90 kB, against
+/// the brainstorm's 80 kB.
+#[test]
+#[ignore = "slow: sprays three test streams of 2,000 tracers, 20,000 steps for the longest"]
+fn cells_touching_holds_every_point_of_the_test_tubes_in_a_sphere() {
+    for Sprayed { name, table, .. } in sprayed() {
+        let cells = table.along_cells();
+        let mut draws = Stream::open(
+            Seed::new(0x0a10_6c05),
+            tags::SELFTEST_STREAM,
+            ObjectKey::galaxy_item(u64::from(table.stream().get())),
+        );
+        let mut uniform = move || draws.uniform();
+        let (mut inside, mut found) = (0_u32, 0_usize);
+        for (u_centre, centre, radius) in spheres(table, 40) {
+            let touched: Vec<TubeCell> = table
+                .cells_touching(&centre, LightYears::new(radius))
+                .collect();
+            assert!(
+                touched.windows(2).all(|w| w[0] < w[1]),
+                "{name}: ascending and unique"
+            );
+            found += touched.len();
+            let set: std::collections::BTreeSet<(u32, [u8; 2])> =
+                touched.iter().map(|c| (c.along(), c.across())).collect();
+            for k in 0..3_000_u32 {
+                // Half the points within 0.003 of the centre's along coordinate, half within 0.03.
+                let spread = if k % 2 == 0 { 0.003 } else { 0.03 };
+                let u = (u_centre + spread * (2.0 * uniform() - 1.0)).clamp(0.0, 1.0 - 1e-12);
+                let across = [8.0 * uniform() - 4.0, 8.0 * uniform() - 4.0];
+                let point = table.locate(u, across[0], across[1]);
+                if point.distance_to(&centre).value() <= radius * METRES_PER_LIGHT_YEAR {
+                    inside += 1;
+                    let cell = cell_of(u, across, cells);
+                    assert!(
+                        set.contains(&cell),
+                        "{name}: {cell:?} of ({u}, {across:?}) within {radius} ly of the \
+                         sphere about u = {u_centre}"
+                    );
+                }
+            }
+        }
+        eprintln!(
+            "{name}: {inside} points inside 45 spheres, each in a cell found; {found} cells \
+             found; the table holds {} bytes",
+            table.byte_size()
+        );
+        assert!(
+            inside > 2_000,
+            "{name}: {inside} points drawn inside the spheres"
+        );
+        assert!(table.byte_size() < 100_000, "{}", table.byte_size());
+    }
 }

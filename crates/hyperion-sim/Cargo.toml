@@ -86,6 +86,12 @@ harness = false
 # `planetary::testing::sample_contexts` builds (ii)'s field systems.
 required-features = ["testing"]
 
+[[bench]]
+name = "global_list"
+harness = false
+# `global_list::testing::pal5_like` is the stream the tube table's bench builds (P10.T6.c).
+required-features = ["testing"]
+
 [lints]
 workspace = true
 

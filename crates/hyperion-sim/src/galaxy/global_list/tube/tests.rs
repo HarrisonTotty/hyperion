@@ -657,3 +657,400 @@ fn the_along_cells_follow_the_rule_and_its_clamp() {
 fn a_mean_system_mass_of_zero_is_a_broken_invariant() {
     let _ = along_cells(SolarMasses::new(1e4), SolarMasses::new(0.0));
 }
+
+/// A knot dropped its stored binormal (P10.T6.c): it is the tangent × the normal, recomputed to
+/// the bits the frames were built with, so that a knot is 168 bytes on every target.
+#[test]
+fn a_knot_keeps_two_frame_vectors_in_168_bytes() {
+    assert_eq!(size_of::<TubeKnot>(), 168);
+    let tracers = circle(300, 2);
+    let tube = table(&tracers);
+    // The frames as `from_tracers` builds them, from the arms by ψ's sign.
+    let mut along: Vec<&Tracer> = tracers.iter().collect();
+    along.sort_by(|a, b| a.psi().value().total_cmp(&b.psi().value()));
+    let (trailing, leading) = along.split_at(along.partition_point(|t| t.psi().value() < 0.0));
+    let built = frames(&[Reduced::new(trailing), Reduced::new(leading)]);
+    let read: Vec<[[f64; 3]; 3]> = tube.knots().map(TubeKnot::frame).collect();
+    assert_eq!(read, built.concat());
+}
+
+/// Spheres about the synthetic tube and beyond it, of radii from 1 ly to beyond the tube's span.
+fn spheres(tube: &TubeTable, n: u32) -> Vec<(GalacticPosition, f64)> {
+    let mut draws = Stream::open(
+        Seed::new(0x0a10_6c01),
+        tags::SELFTEST_STREAM,
+        ObjectKey::galaxy(),
+    );
+    (0..n)
+        .map(|_| {
+            let (u, a, b) = (
+                draws.uniform(),
+                12.0 * draws.uniform() - 6.0,
+                12.0 * draws.uniform() - 6.0,
+            );
+            let radius = math::powf(10.0, 5.5 * draws.uniform());
+            (tube.locate(u, a, b), radius)
+        })
+        .collect()
+}
+
+/// The scan of the segments' padded boxes finds every segment whose reach meets a sphere, as a
+/// test of each segment's distance alone does, in the order of the along coordinate, for spheres
+/// from 1 ly to 3 × 10⁵ ly, the largest spanning the tube.
+#[test]
+fn the_scan_finds_every_segment_a_sphere_reaches() {
+    let tube = table(&circle(600, 0));
+    let mut met = 0;
+    for (centre, radius) in spheres(&tube, 400) {
+        let near: Vec<f64> = tube
+            .segments_near(&centre, radius)
+            .map(|near| near.knots[0].cumulative_mass.value())
+            .collect();
+        assert!(near.windows(2).all(|w| w[0] < w[1]), "ascending and unique");
+        let reached: Vec<f64> = tube
+            .arms
+            .iter()
+            .flat_map(|arm| arm.knots.windows(2).zip(&arm.reaches_ly))
+            .filter(|(pair, reach)| {
+                let (q, d) = (
+                    pair[0].centre.displacement_to(&centre).metres(),
+                    pair[0].centre.displacement_to(&pair[1].centre).metres(),
+                );
+                distance_to_segment(q, d) <= (radius + **reach + MARGIN_LY) * METRES_PER_LIGHT_YEAR
+            })
+            .map(|(pair, _)| pair[0].cumulative_mass.value())
+            .collect();
+        assert_eq!(near, reached, "{radius} ly");
+        met += usize::from(!near.is_empty());
+    }
+    assert!(met > 300, "{met} of 400 spheres meet the tube");
+    assert_eq!(
+        tube.arms
+            .iter()
+            .map(|arm| arm.reaches_ly.len())
+            .sum::<usize>(),
+        510
+    );
+}
+
+/// Every point within the cut lies within its segment's reach of the segment's centre line, the
+/// premise of the scan of the segments, at the cut's corners too.
+#[test]
+fn every_point_within_the_cut_lies_within_its_segment_s_reach() {
+    let tube = table(&circle(300, 0));
+    let mut draws = Stream::open(
+        Seed::new(0x0a10_6c02),
+        tags::SELFTEST_STREAM,
+        ObjectKey::galaxy(),
+    );
+    for i in 0..20_000_u32 {
+        let u = draws.uniform();
+        let (a, b) = if i % 4 == 0 {
+            (CUT_WIDTHS, -CUT_WIDTHS)
+        } else {
+            (8.0 * draws.uniform() - 4.0, 8.0 * draws.uniform() - 4.0)
+        };
+        let point = tube.locate(u, a, b);
+        let (from, to, _) = tube.segment(u);
+        let reach = segment_reach_ly(from, to) * METRES_PER_LIGHT_YEAR;
+        let off = distance_to_segment(
+            from.centre.displacement_to(&point).metres(),
+            from.centre.displacement_to(&to.centre).metres(),
+        );
+        assert!(off <= reach, "{u}, {a}, {b}: {off} against {reach}");
+    }
+}
+
+/// The tube cell of the point at `(u, a, b)` in a tube of `cells` along cells.
+fn cell_of(u: f64, [a, b]: [f64; 2], cells: u32) -> TubeCell {
+    let index = |c: f64| cell_u8(across_span(c, c, 1.0).expect("within the cut")[0]);
+    TubeCell {
+        along: along_index(u * f64::from(cells), cells),
+        across: [index(a), index(b)],
+    }
+}
+
+/// `cells_touching` finds every cell holding a point of the tube within the sphere: for spheres
+/// on and off the tube of radii from 1 ly to 30,000 ly, points drawn within the cut at along
+/// coordinates about the sphere's, each inside the sphere in its cell. Its cells are ascending and
+/// unique, and a sphere far from the tube finds none.
+#[test]
+fn cells_touching_finds_every_cell_holding_a_point_in_the_sphere() {
+    let tube = table(&circle(600, 2));
+    let cells = tube.along_cells();
+    let mut draws = Stream::open(
+        Seed::new(0x0a10_6c03),
+        tags::SELFTEST_STREAM,
+        ObjectKey::galaxy(),
+    );
+    let (mut inside, mut found) = (0_u32, 0_usize);
+    for _ in 0..60 {
+        let centre_u = draws.uniform();
+        let across = [12.0 * draws.uniform() - 6.0, 12.0 * draws.uniform() - 6.0];
+        let radius = math::powf(10.0, 4.5 * draws.uniform());
+        let centre = tube.locate(centre_u, across[0], across[1]);
+        let touched: Vec<TubeCell> = tube
+            .cells_touching(&centre, LightYears::new(radius))
+            .collect();
+        assert!(
+            touched.windows(2).all(|w| w[0] < w[1]),
+            "ascending and unique"
+        );
+        found += touched.len();
+        // The tube is 100,000 ly long, so a sphere's along coordinates lie within its radius plus
+        // the cut's 400 ly over 10⁵ of the centre's.
+        let reach = ((radius + 1_000.0) / 1e5).min(1.0);
+        for _ in 0..4_000 {
+            let u = (centre_u + reach * (2.0 * draws.uniform() - 1.0)).clamp(0.0, 1.0 - 1e-12);
+            let ab = [8.0 * draws.uniform() - 4.0, 8.0 * draws.uniform() - 4.0];
+            let point = tube.locate(u, ab[0], ab[1]);
+            if point.distance_to(&centre).value() <= radius * METRES_PER_LIGHT_YEAR {
+                inside += 1;
+                let cell = cell_of(u, ab, cells);
+                assert!(
+                    touched.binary_search(&cell).is_ok(),
+                    "{cell:?} of ({u}, {ab:?}) within {radius} ly of ({centre_u}, {across:?})"
+                );
+            }
+        }
+    }
+    assert!(inside > 10_000, "{inside} points drawn inside the spheres");
+    assert!(found > 0);
+    let far = GalacticPosition::from_light_years([0.0, 0.0, 30_000.0]).expect("in range");
+    assert_eq!(
+        tube.cells_touching(&far, LightYears::new(1_000.0)).count(),
+        0
+    );
+}
+
+/// A sphere on the axis finds a cross-section's middle, not the whole of it: of radius 10 ly,
+/// a tenth of a width, about the tube's middle, a few along cells and some 4 × 4 across cells
+/// each.
+#[test]
+fn a_small_sphere_on_the_axis_touches_a_few_cells() {
+    let tube = table(&circle(600, 0));
+    let centre = tube.locate(0.25, 0.0, 0.0);
+    let touched: Vec<TubeCell> = tube
+        .cells_touching(&centre, LightYears::new(10.0))
+        .collect();
+    let along: Vec<u32> = touched.iter().map(|c| c.along()).collect();
+    assert!(
+        along.first() >= Some(&127) && along.last() <= Some(&129),
+        "{along:?}"
+    );
+    assert!(touched.len() <= 80, "{} cells", touched.len());
+    for cell in &touched {
+        for j in cell.across() {
+            assert!((28..36).contains(&j), "{cell:?}");
+        }
+    }
+}
+
+/// A cell's across coordinates are an eighth of a width each, from −4 to +4 widths.
+#[test]
+fn a_tube_cell_spans_an_eighth_of_a_width_across() {
+    let cell = TubeCell {
+        along: 3,
+        across: [0, 63],
+    };
+    assert_eq!(cell.across_widths(), [[-4.0, -3.875], [3.875, 4.0]]);
+    assert_eq!(
+        TubeCell {
+            along: 0,
+            across: [32, 31]
+        }
+        .across_widths(),
+        [[0.0, 0.125], [-0.125, 0.0]]
+    );
+    let id = crate::id::StreamMemberId::new(5, crate::id::Layer::C, 16_383, [63, 7], 12)
+        .expect("fields in range");
+    assert_eq!(
+        TubeCell::from(id),
+        TubeCell {
+            along: 16_383,
+            across: [63, 7]
+        }
+    );
+    assert_eq!(across_span(-1.0, 1.0, 0.0), Some([0, 63]));
+    assert_eq!(across_span(1.0, 2.0, 0.0), None);
+    assert_eq!(across_span(-100.0, -50.0, 10.0), None);
+    assert_eq!(across_span(-0.05, 0.05, 1.0), Some([31, 32]));
+}
+
+/// `byte_size` counts the table, its knots and its segments' reaches: 512 knots of 168 bytes and
+/// 510 reaches of 8, 90,096 bytes beyond the table's own.
+#[test]
+fn byte_size_counts_the_knots_and_the_reaches() {
+    let tube = table(&circle(600, 0));
+    assert_eq!(
+        tube.byte_size(),
+        size_of::<TubeTable>() + 512 * 168 + 510 * 8
+    );
+}
+
+/// A sphere's radius is finite and not negative.
+#[test]
+#[should_panic(expected = "a sphere's radius is finite and not negative: -1")]
+fn a_negative_radius_is_a_broken_invariant() {
+    let tube = table(&circle(300, 0));
+    let _ = tube
+        .cells_touching(&tube.locate(0.5, 0.0, 0.0), LightYears::new(-1.0))
+        .count();
+}
+
+/// The three test streams' tubes on the Milky Way fixture, at 64 tracers an arm: the golden file
+/// and order independence (P10.T6.c). Here rather than in an integration test, so that the sim's
+/// fast suite compares the golden on `wasm32-wasip1` too, where `global_list::testing`'s feature
+/// is off.
+mod milky_way {
+    use std::num::NonZeroU32;
+    use std::sync::OnceLock;
+
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::{GoldenWriter, f64_digest};
+    use hyperion_testkit::order::assert_order_independent;
+
+    use super::*;
+    use crate::galaxy::global_list::spray::{Spray, SprayForce, SprayParams};
+    use crate::galaxy::global_list::testing::{gd1_like, pal5_like, sagittarius_like};
+    use crate::galaxy::potential::{MassModel, PotentialTables};
+
+    const SEED: Seed = Seed::new(0x0a10_6c00_0000_0000);
+
+    /// Tracers an arm: 64, past a kernel's 48 with room for the strays (P10.T6.a, as built).
+    const TRACERS_PER_ARM: u32 = 64;
+
+    /// The streams' names, specifications and tracers, and the fixture halo's mean system mass.
+    struct Sprayed {
+        mean_mass: SolarMasses,
+        streams: Vec<(&'static str, StreamSpec, Vec<Tracer>)>,
+    }
+
+    fn sprayed() -> &'static Sprayed {
+        static SPRAYED: OnceLock<Sprayed> = OnceLock::new();
+        SPRAYED.get_or_init(|| {
+            let params = GalaxyParams::milky_way_like();
+            let tables = PotentialTables::full(&MassModel::new(&params));
+            let force = SprayForce::new(&tables).expect("the full tables");
+            let spray = SprayParams::new(NonZeroU32::new(TRACERS_PER_ARM).expect("not zero"));
+            let streams = [
+                ("pal5", pal5_like(&tables)),
+                ("gd1", gd1_like(&tables)),
+                ("sagittarius", sagittarius_like(&tables)),
+            ]
+            .into_iter()
+            .map(|(name, spec)| {
+                let tracers = Spray::new(SEED, &force, &tables, &spec, &spray)
+                    .expect("a finite stripping time")
+                    .tracers();
+                (name, spec, tracers)
+            })
+            .collect();
+            Sprayed {
+                mean_mass: params.mean_system_mass(crate::galaxy::Population::Halo),
+                streams,
+            }
+        })
+    }
+
+    fn tube(stream: usize) -> TubeTable {
+        let Sprayed { mean_mass, streams } = sprayed();
+        let (_, spec, tracers) = &streams[stream];
+        TubeTable::from_tracers(SEED, *mean_mass, spec, tracers).expect("enough tracers an arm")
+    }
+
+    /// The sphere the golden and the order check ask about: half a width about a point of the
+    /// tube's middle, off its axis.
+    fn touched(tube: &TubeTable) -> Vec<TubeCell> {
+        let centre = tube.locate(0.5, 1.5, -0.5);
+        let width = tube.knots().nth(256).expect("512 knots").widths()[0];
+        tube.cells_touching(&centre, width * 0.5).collect()
+    }
+
+    /// Every stored quantity of a knot, in a fixed order: the centre's light-year cell and
+    /// offset, the tangent and the normal and the binormal read from them, the velocity, the
+    /// widths, the dispersions, Λ and ψ.
+    fn values(k: &TubeKnot) -> Vec<f64> {
+        let cell = k.centre().cell().to_array().map(f64::from);
+        let mut v = cell.to_vec();
+        v.extend(k.centre().offset_metres());
+        v.extend(k.frame().into_iter().flatten());
+        v.extend(k.velocity().metres_per_second());
+        v.extend(k.widths().map(LightYears::value));
+        v.extend(k.dispersions().map(MetresPerSecond::value));
+        v.extend([k.cumulative_mass().value(), k.psi().value()]);
+        v
+    }
+
+    /// The golden file first, so that a failing check does not keep `just bless` from writing
+    /// it, then order independence.
+    #[test]
+    fn the_test_streams_tubes_are_pinned_and_order_independent() {
+        golden_tubes();
+        tubes_are_order_independent();
+    }
+
+    /// The bits of each test stream's tube at 64 tracers an arm: its counts, its mass and length,
+    /// a digest of every knot's quantities and the arms' ends and roots in full, the along cells
+    /// and four cells' gap noise, which no other golden pins (P10.T6.b, as built), and the cells
+    /// one sphere touches. They depend on the spray and the reduction, so a change to the
+    /// potential, the step rule, the release, the kernel, the frame, the noise or the cells' test
+    /// moves them; every architecture the sim's tests run on must reproduce them.
+    fn golden_tubes() {
+        let mut writer = GoldenWriter::new();
+        writer.header(crate::GENERATOR_VERSION.get());
+        for (stream, (name, _, _)) in sprayed().streams.iter().enumerate() {
+            let tube = tube(stream);
+            let [trailing, leading] = [Arm::Trailing, Arm::Leading].map(|arm| tube.arm(arm));
+            writer.line(&format!(
+                "{name}.tracers {} {}",
+                trailing.tracers(),
+                leading.tracers()
+            ));
+            writer.f64(&format!("{name}.mass"), tube.mass().value());
+            writer.f64(&format!("{name}.trailing.mass"), trailing.mass().value());
+            writer.f64(&format!("{name}.length"), tube.length().value());
+            let all: Vec<f64> = tube.knots().flat_map(values).collect();
+            writer.u64_hex(&format!("{name}.knots.digest"), f64_digest(&all));
+            for k in [0, 255, 256, 511] {
+                let knot = tube.knots().nth(k).expect("512 knots");
+                let [x, y, z] = knot.centre().to_light_years_f64();
+                for (axis, value) in ["x", "y", "z"].iter().zip([x, y, z]) {
+                    writer.f64(&format!("{name}.knot.{k}.centre.{axis}"), value);
+                }
+                let [normal, binormal] = knot.widths();
+                writer.f64(&format!("{name}.knot.{k}.width.normal"), normal.value());
+                writer.f64(&format!("{name}.knot.{k}.width.binormal"), binormal.value());
+                writer.f64(&format!("{name}.knot.{k}.psi"), knot.psi().value());
+            }
+            let cells = tube.along_cells();
+            writer.line(&format!("{name}.along_cells {cells}"));
+            for cell in [0, cells / 3, cells / 2, cells - 1] {
+                writer.f64(&format!("{name}.noise.{cell}"), tube.noise(cell));
+            }
+            let touched = touched(&tube);
+            let flat: Vec<f64> = touched
+                .iter()
+                .flat_map(|c| {
+                    let [a, b] = c.across();
+                    [f64::from(c.along()), f64::from(a), f64::from(b)]
+                })
+                .collect();
+            writer.line(&format!("{name}.touched {}", touched.len()));
+            writer.u64_hex(&format!("{name}.touched.digest"), f64_digest(&flat));
+        }
+        golden!("galaxy/global_list/tube", writer.as_str());
+    }
+
+    /// A tube is a pure function of its seed, its mass, its stream and its tracers, and so are
+    /// its gap noise and the cells a sphere touches: the three tubes in any order give the same
+    /// bits.
+    fn tubes_are_order_independent() {
+        assert_order_independent(&[0, 1, 2], |&stream| {
+            let tube = tube(stream);
+            let noise: Vec<f64> = (0..tube.along_cells()).map(|c| tube.noise(c)).collect();
+            let touched = touched(&tube);
+            (tube, noise, touched)
+        });
+    }
+}

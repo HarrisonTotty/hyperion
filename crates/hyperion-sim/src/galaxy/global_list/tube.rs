@@ -4,7 +4,8 @@
 //! integrated in the potential ([`spray`]), reduced to about 256 knots per arm
 //! (brainstorm, "Streams and accreted structure"). It costs about 0.2 s and 80 kB, so it is a
 //! cache and never stored, and the cache is the caller's ("Runtime and code shape"): the sim asks
-//! for a table through [`TubeLookup`] and keeps none itself.
+//! for a table through [`TubeLookup`] and keeps none itself. `pal5_like`'s takes 2.1 s sprayed
+//! alone and 0.14 s on 16 threads, and holds 90 kB (`benches/global_list.rs`).
 //!
 //! # The arms
 //!
@@ -105,13 +106,57 @@
 //! over the tube's cells, summed in cell order when the table is built, so the cells' factors sum
 //! to the cell count and the tube's expected total is unchanged. The table keeps only `m`, and
 //! a cell's factor is recomputed from the seed.
+//!
+//! # Cells
+//!
+//! A member lies in a cell of the tube's own coordinates, a [`TubeCell`]: an along cell, and
+//! across each of the normal and the binormal one of [`ACROSS_CELLS`] cells spanning
+//! ±[`CUT_WIDTHS`] local widths, where the tube is cut (Design note 7).
+//! [`TubeTable::cells_touching`] finds the cells that may hold a point within a radius of a
+//! centre, conservatively: every cell holding such a point is found, and a few holding none may
+//! be. For each knot segment whose reach (below) meets the sphere, and each along cell's stretch
+//! of it, it bounds a point's distance from the centre from below in an orthonormal basis made
+//! from the frame at the stretch's middle (the normal, the binormal made perpendicular to it, and
+//! their cross product):
+//!
+//! - the centre line's motion over the stretch moves each coordinate by at most the chord's
+//!   component times half the stretch, and the along coordinate's least magnitude is read over it;
+//! - a point at across coordinates `a` and `b` moves, as the frame and the widths change over the
+//!   stretch, by at most `|a|` times the normal's width change plus the larger normal width times
+//!   the chord between the normal's unit vectors at the stretch's ends, and as much along the
+//!   binormal for `|b|`, which widens the radius for the cell's farthest `a` and `b`; the stretch
+//!   is cut into pieces over which the frame turns by a chord of at most 0.05;
+//! - then each row of binormal cells is an interval test, and the normal cells a row allows an
+//!   interval too, found for the cut's farthest `a` and then again for the farthest it allows.
+//!
+//! The rows are tested apart from the normal's coordinate, so the found cells cover the ball's
+//! cross-section by a square's, not a disc's. Once the census sums the found cells' means (plan
+//! 10, P10.T9), this test is output.
+//!
+//! # Finding the segments
+//!
+//! Every point of a knot segment's tube within the cut lies within the segment's *reach* of its
+//! centre line: [`CUT_WIDTHS`] times `√(w_n² + w_b² + 2 w_n w_b c)`, with each width the larger at
+//! the segment's two knots and `c` a bound on the cosine between the normal and the binormal as
+//! they are interpolated between them, zero at the knots. Each arm keeps its segments' reaches,
+//! and [`TubeTable::cells_touching`] scans the 510 segments' boxes, padded by their reaches, for
+//! those whose reach about the centre line meets the sphere. A hash of the boxes on a grid of
+//! cells sized to each tube (main's ruling of 2026-10-30, which left this scan as the fallback)
+//! was measured against it on the three test streams and a drawn Milky Way galaxy's 306 tubes
+//! (pod, 16 vCPU, P10.T6.c): the scan alone finds a 50 ly sphere's segments as fast, in
+//! 2.3–7.1 µs against the hash's 2.1–9.9 µs on the test streams, since a cell of 2,048–65,536 ly holds many segments a
+//! small sphere misses, and it keeps 4 kB a tube against the hash's 5.6–25 kB there and up to
+//! 64 kB in the drawn galaxy.
+//!
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::galaxy::{Galaxy, Population};
+use crate::id::StreamMemberId;
 use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
@@ -175,6 +220,28 @@ const _: () = assert!(
 /// are this lean's, not figures read from those papers.
 pub const GAP_NOISE_AMPLITUDE: f64 = 0.3;
 
+/// The tube's cut, in widths either side of the centre line along each across axis, a parameter
+/// of the generator version: 4 (brainstorm, "Streams and accreted structure": "the tube is cut at
+/// four widths"; plan 10, Design note 7).
+pub const CUT_WIDTHS: f64 = 4.0;
+
+/// The cells across the tube along each across axis, spanning ±[`CUT_WIDTHS`]: 64 (plan 10,
+/// Design note 7), which the 6 bits of each across field of a stream member's ID hold (plan 01's
+/// `StreamMemberId`).
+pub const ACROSS_CELLS: u8 = 64;
+
+/// What the cells' tests add to every distance, ly: far above the rounding of the float
+/// light-years they compare (69 km at 50,000 ly, `GalacticPosition::to_light_years_f64`), far
+/// below a cell across (an eighth of a width).
+const MARGIN_LY: f64 = 1e-3;
+
+/// The farthest the frame may turn, as the chord between its unit vectors, over one piece of the
+/// cells' test (module documentation, "Cells"): 0.05, about 2.9°.
+const PIECE_CHORD: f64 = 0.05;
+
+/// The most pieces one segment's stretch of an along cell is cut into for the cells' test.
+const MAX_PIECES: u32 = 32;
+
 /// A tube table could not be built.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BuildTubeTableError {
@@ -225,7 +292,9 @@ impl From<BuildLeapfrogError> for BuildTubeTableError {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TubeKnot {
     centre: GalacticPosition,
-    frame: [[f64; 3]; 3],
+    /// The tangent and the normal; the binormal is their cross product, recomputed when read, to
+    /// the bits it was built with (P10.T6.c: 24 bytes a knot).
+    frame: [[f64; 3]; 2],
     velocity: GalacticVelocity,
     widths: [LightYears; 2],
     dispersions: [MetresPerSecond; 3],
@@ -244,8 +313,9 @@ impl TubeKnot {
     /// direction of increasing ψ, which is the direction of motion; the normal; and the binormal,
     /// tangent × normal (module documentation, "The frame").
     #[must_use]
-    pub const fn frame(&self) -> [[f64; 3]; 3] {
-        self.frame
+    pub fn frame(&self) -> [[f64; 3]; 3] {
+        let [tangent, normal] = self.frame;
+        [tangent, normal, cross(tangent, normal)]
     }
 
     /// The tracers' mean velocity at the knot, in the galactic frame.
@@ -285,6 +355,9 @@ impl TubeKnot {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TubeArm {
     knots: Vec<TubeKnot>,
+    /// Each segment's reach, from knot `k` to knot `k + 1` (module documentation, "Finding the
+    /// segments").
+    reaches_ly: Vec<f64>,
     tracers: u32,
     mass: SolarMasses,
 }
@@ -592,7 +665,7 @@ impl TubeTable {
         );
         let (from, to, f) = self.segment(u);
         let along = from.centre.displacement_to(&to.centre).metres();
-        let [_, normal, binormal] = interpolated_frame(&from.frame, &to.frame, f);
+        let [_, normal, binormal] = interpolated_frame(&from.frame(), &to.frame(), f);
         let lerp = |p: f64, q: f64| p + f * (q - p);
         let (width_n, width_b) = (
             lerp(from.widths[0].value(), to.widths[0].value()) * METRES_PER_LIGHT_YEAR,
@@ -665,6 +738,436 @@ impl TubeTable {
             }
         }
     }
+
+    /// The bytes the table holds, its knots' and its segments' reaches included: what a caller's
+    /// cache counts against its budget (plan 10, "Provides"). A `Vec`'s pointer and lengths are
+    /// `usize`s, so the count differs between 32- and 64-bit targets; it is never output.
+    #[must_use]
+    pub fn byte_size(&self) -> usize {
+        let arms: usize = self
+            .arms
+            .iter()
+            .map(|arm| {
+                arm.knots.capacity() * size_of::<TubeKnot>()
+                    + arm.reaches_ly.capacity() * size_of::<f64>()
+            })
+            .sum();
+        size_of::<Self>() + arms
+    }
+
+    /// Every cell of the tube's own coordinates that may hold a member within `radius` of
+    /// `centre`, in the order of [`TubeCell`]'s `Ord`: along, then across the normal, then
+    /// across the binormal.
+    ///
+    /// A member is the point [`locate`](Self::locate) gives for its coordinates, within the cut.
+    /// The answer is conservative (module documentation, "Cells"): every cell that holds such a
+    /// point within `radius` is yielded, and a cell near the sphere that holds none may be. The
+    /// knot segments to test are found by a scan (module documentation, "Finding the segments").
+    ///
+    /// # Panics
+    ///
+    /// If `radius` is negative or not finite.
+    pub fn cells_touching(
+        &self,
+        centre: &GalacticPosition,
+        radius: LightYears,
+    ) -> impl Iterator<Item = TubeCell> + use<> {
+        let radius_ly = radius.value();
+        assert!(
+            radius_ly.is_finite() && radius_ly >= 0.0,
+            "a sphere's radius is finite and not negative: {radius_ly}"
+        );
+        let (cells, total) = (f64::from(self.along_cells), self.mass.value());
+        let mut rows: BTreeMap<u32, [u64; ACROSS]> = BTreeMap::new();
+        for segment in self.segments_near(centre, radius_ly) {
+            let [from, to] = segment.knots;
+            // The along cells whose share of the mass meets the segment's, one more at each end
+            // where the segment ends on a cell's edge, since a member's `u Λ_total` rounds.
+            let (low, high) = (from.cumulative_mass.value(), to.cumulative_mass.value());
+            let fraction =
+                |boundary: u32| (f64::from(boundary) / cells * total - low) / (high - low);
+            let first = along_index(low / total * cells - EDGE, self.along_cells);
+            let last = along_index(high / total * cells + EDGE, self.along_cells);
+            for along in first..=last {
+                let stretch = [
+                    (fraction(along) - EDGE).clamp(0.0, 1.0),
+                    (fraction(along + 1) + EDGE).clamp(0.0, 1.0),
+                ];
+                let mut bits = [0_u64; ACROSS];
+                segment.mark(&mut bits, stretch);
+                if bits.iter().any(|&row| row != 0) {
+                    let row = rows.entry(along).or_insert([0; ACROSS]);
+                    for (marked, new) in row.iter_mut().zip(bits) {
+                        *marked |= new;
+                    }
+                }
+            }
+        }
+        rows.into_iter().flat_map(|(along, bits)| {
+            (0..ACROSS_CELLS).flat_map(move |a| {
+                let row = bits[usize::from(a)];
+                (0..ACROSS_CELLS)
+                    .filter(move |&b| (row >> b) & 1 == 1)
+                    .map(move |b| TubeCell {
+                        along,
+                        across: [a, b],
+                    })
+            })
+        })
+    }
+
+    /// The knot segments whose reach about their centre lines meets the ball of `radius_ly` about
+    /// `centre`, in the order of the along coordinate, each about the ball (module documentation,
+    /// "Finding the segments").
+    fn segments_near<'a>(
+        &'a self,
+        centre: &GalacticPosition,
+        radius_ly: f64,
+    ) -> impl Iterator<Item = NearSegment<'a>> + use<'a> {
+        let (c, centre) = (centre.to_light_years_f64(), *centre);
+        self.arms.iter().flat_map(move |arm| {
+            let first = arm.knots[0].centre.to_light_years_f64();
+            arm.knots
+                .windows(2)
+                .zip(&arm.reaches_ly)
+                .scan(first, |p, (pair, &reach_ly)| {
+                    let q = pair[1].centre.to_light_years_f64();
+                    Some((pair, reach_ly, core::mem::replace(p, q), q))
+                })
+                .filter_map(move |(pair, reach_ly, p, q)| {
+                    let pad = radius_ly + reach_ly + MARGIN_LY;
+                    let boxed = (0..3).all(|axis| {
+                        c[axis] >= p[axis].min(q[axis]) - pad
+                            && c[axis] <= p[axis].max(q[axis]) + pad
+                    });
+                    if !boxed {
+                        return None;
+                    }
+                    let near = NearSegment::new([&pair[0], &pair[1]], &centre, radius_ly);
+                    (distance_to_segment(near.centre_m, near.chord_m)
+                        <= near.radius_m + reach_ly * METRES_PER_LIGHT_YEAR)
+                        .then_some(near)
+                })
+        })
+    }
+}
+
+/// [`ACROSS_CELLS`] as an index.
+const ACROSS: usize = ACROSS_CELLS as usize;
+
+/// What [`TubeTable::cells_touching`] widens a fraction by at a cell's or a segment's edge, so
+/// that a member whose `u Λ_total` rounds across the edge is still counted.
+const EDGE: f64 = 1e-9;
+
+/// One cell of a tube's own coordinates (plan 10, Design note 7): an along cell, one of the
+/// tube's [`along_cells`](TubeTable::along_cells) of equal mass, and an across cell along each of
+/// the frame's normal and binormal, one of [`ACROSS_CELLS`] spanning ±[`CUT_WIDTHS`] local widths.
+///
+/// A stream member's ID carries the three (plan 01's `StreamMemberId`: along in 14 bits, across
+/// in 6 + 6). [`TubeTable::cells_touching`] yields them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TubeCell {
+    along: u32,
+    across: [u8; 2],
+}
+
+impl TubeCell {
+    /// The along cell: it holds the along coordinates `[along, along + 1) ÷ cells` of a tube of
+    /// `cells` along cells.
+    #[must_use]
+    pub const fn along(self) -> u32 {
+        self.along
+    }
+
+    /// The across cells along the normal and the binormal, each below [`ACROSS_CELLS`].
+    #[must_use]
+    pub const fn across(self) -> [u8; 2] {
+        self.across
+    }
+
+    /// The across coordinates the cell spans along the normal and the binormal, in local widths:
+    /// `[low, high]` each, an eighth of a width across, from −[`CUT_WIDTHS`] for cell 0 to
+    /// +[`CUT_WIDTHS`] for the last.
+    #[must_use]
+    pub fn across_widths(self) -> [[f64; 2]; 2] {
+        self.across.map(across_range)
+    }
+}
+
+impl From<StreamMemberId> for TubeCell {
+    /// The cell a member's ID names. The ID's fields hold 14 and 6 + 6 bits, so the across cells
+    /// are below [`ACROSS_CELLS`]; whether the along cell is below its tube's
+    /// [`along_cells`](TubeTable::along_cells) is the tube's to check.
+    fn from(id: StreamMemberId) -> Self {
+        Self {
+            along: u32::from(id.along()),
+            across: id.across(),
+        }
+    }
+}
+
+/// The across coordinates across cell `j` spans, in widths: `[−4 + j ÷ 8, −4 + (j + 1) ÷ 8]` at the
+/// generator's cut and cells, each exact in binary.
+#[must_use]
+fn across_range(j: u8) -> [f64; 2] {
+    let step = 2.0 * CUT_WIDTHS / f64::from(ACROSS_CELLS);
+    [
+        -CUT_WIDTHS + f64::from(j) * step,
+        -CUT_WIDTHS + f64::from(j + 1) * step,
+    ]
+}
+
+/// The along cell holding the fractional cell index `x`, held to the tube's `cells`.
+#[must_use]
+fn along_index(x: f64, cells: u32) -> u32 {
+    debug_assert!(x.is_finite(), "a share of a finite mass is finite: {x}");
+    let floor = x.floor().clamp(0.0, f64::from(cells - 1));
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "floor is a whole number clamped to [0, cells − 1], cells at most 16,384"
+    )]
+    let cell = floor as u32;
+    cell
+}
+
+/// The farthest a point of the segment `[from, to]` within the cut lies from its centre line, ly:
+/// [`CUT_WIDTHS`] times `√(w_n² + w_b² + 2 w_n w_b c)`, each width the larger at the segment's
+/// ends and `c` a bound on the cosine between the normal and the binormal interpolated between
+/// them (module documentation, "Finding the segments").
+#[must_use]
+fn segment_reach_ly(from: &TubeKnot, to: &TubeKnot) -> f64 {
+    let [n, b] = [0, 1].map(|axis| from.widths[axis].value().max(to.widths[axis].value()));
+    let ([_, n0, b0], [_, n1, b1]) = (from.frame(), to.frame());
+    // Between orthonormal ends, (1 − f) n₀ + f n₁ and the like for b have the dot product
+    // f (1 − f) (n₀·b₁ + n₁·b₀), and lengths of at least half their ends' sums, at f = ½.
+    let sums = [
+        length(core::array::from_fn(|i| n0[i] + n1[i])),
+        length(core::array::from_fn(|i| b0[i] + b1[i])),
+    ];
+    let skew = if sums[0] > 0.0 && sums[1] > 0.0 {
+        ((dot(n0, b1) + dot(n1, b0)).abs() / (sums[0] * sums[1]) + 1e-12).min(1.0)
+    } else {
+        1.0
+    };
+    CUT_WIDTHS * (n * n + b * b + 2.0 * n * b * skew).sqrt()
+}
+
+/// The distance from the point `q` to the segment from the origin to `d`.
+#[must_use]
+fn distance_to_segment(q: [f64; 3], d: [f64; 3]) -> f64 {
+    let square = dot(d, d);
+    let t = if square > 0.0 {
+        (dot(q, d) / square).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    length(core::array::from_fn(|i| q[i] - t * d[i]))
+}
+
+/// The length of `v`.
+#[must_use]
+fn length(v: [f64; 3]) -> f64 {
+    dot(v, v).sqrt()
+}
+
+/// One knot segment about a sphere's centre, for [`TubeTable::cells_touching`]'s test of the
+/// across cells (module documentation, "Cells"), from the segment's first knot.
+struct NearSegment<'a> {
+    knots: [&'a TubeKnot; 2],
+    frames: [[[f64; 3]; 3]; 2],
+    /// The sphere's centre.
+    centre_m: [f64; 3],
+    /// The centre line from the first knot to the second.
+    chord_m: [f64; 3],
+    /// The sphere's radius with the margin.
+    radius_m: f64,
+}
+
+impl<'a> NearSegment<'a> {
+    /// The segment `knots` about the sphere of `radius_ly` about `centre`.
+    #[must_use]
+    fn new(knots: [&'a TubeKnot; 2], centre: &GalacticPosition, radius_ly: f64) -> Self {
+        let [from, to] = knots;
+        let centre_m = from.centre.displacement_to(centre).metres();
+        let chord_m = from.centre.displacement_to(&to.centre).metres();
+        let scale = length(centre_m) + length(chord_m);
+        Self {
+            knots,
+            frames: [from.frame(), to.frame()],
+            centre_m,
+            chord_m,
+            radius_m: (radius_ly + MARGIN_LY) * METRES_PER_LIGHT_YEAR + 1e-12 * scale,
+        }
+    }
+
+    /// Marks in `bits`, row `a` and bit `b`, every across cell `[a, b]` that may hold a point of
+    /// the segment within the sphere at fractions `[f₀, f₁]` of the way along it: the stretch cut
+    /// into pieces over which the frame turns by at most [`PIECE_CHORD`].
+    fn mark(&self, bits: &mut [u64; ACROSS], [f0, f1]: [f64; 2]) {
+        let ([_, n0, b0], [_, n1, b1]) = (self.frame(f0), self.frame(f1));
+        let turn = distance(n0, n1).max(distance(b0, b1));
+        debug_assert!(
+            turn.is_finite(),
+            "unit vectors lie a finite chord apart: {turn}"
+        );
+        let pieces = (turn / PIECE_CHORD)
+            .ceil()
+            .clamp(1.0, f64::from(MAX_PIECES));
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "pieces is a whole number clamped to [1, MAX_PIECES]; a chord is finite"
+        )]
+        let pieces = pieces as u32;
+        let at = |k: u32| f0 + (f1 - f0) * (f64::from(k) / f64::from(pieces));
+        for k in 0..pieces {
+            self.mark_piece(bits, [at(k), at(k + 1)]);
+        }
+    }
+
+    /// [`mark`](Self::mark) over one piece, `[g₀, g₁]`.
+    fn mark_piece(&self, bits: &mut [u64; ACROSS], [g0, g1]: [f64; 2]) {
+        let [from, to] = self.knots;
+        let ([_, n0, b0], [_, n1, b1]) = (self.frame(g0), self.frame(g1));
+        let (middle, half) = (f64::midpoint(g0, g1), 0.5 * (g1 - g0));
+        let [_, normal, binormal] = self.frame(middle);
+        let width = |axis: usize, f: f64| {
+            let (p, q) = (from.widths[axis].value(), to.widths[axis].value());
+            (p + f * (q - p)) * METRES_PER_LIGHT_YEAR
+        };
+        // How far a point at across coordinate `c` moves, per unit of |c|, from where the frame
+        // and the widths at the middle put it: the width's change over half the piece, and the
+        // larger width times the chord between the unit vectors at the piece's ends, which bounds
+        // the chord between any two of them on the arc they sweep.
+        let drift = |axis: usize, ends: [[f64; 3]; 2]| {
+            (to.widths[axis].value() - from.widths[axis].value()).abs()
+                * METRES_PER_LIGHT_YEAR
+                * half
+                + width(axis, g0).max(width(axis, g1)) * distance(ends[0], ends[1])
+        };
+        let (drift_n, drift_b) = (drift(0, [n0, n1]), drift(1, [b0, b1]));
+        let (w_n, w_b) = (width(0, middle), width(1, middle));
+        // An orthonormal basis from the middle's frame: the normal, the binormal made
+        // perpendicular to it, and their cross product, nearly the tangent.
+        let along_normal = dot(binormal, normal);
+        let Some(e2) = unit(core::array::from_fn(|i| {
+            binormal[i] - along_normal * normal[i]
+        })) else {
+            *bits = [u64::MAX; ACROSS];
+            return;
+        };
+        let (e1, e3) = (normal, cross(normal, e2));
+        let (c1, c2, c3) = (along_normal, dot(binormal, e2), dot(binormal, e3));
+        // The centre line at the middle, from the sphere's centre, in the basis; and how far each
+        // coordinate moves with the centre line over half the piece.
+        let offset: [f64; 3] =
+            core::array::from_fn(|i| middle * self.chord_m[i] - self.centre_m[i]);
+        let coordinate = |e: [f64; 3]| (dot(offset, e), dot(self.chord_m, e).abs() * half);
+        let ((x1, s1), (x2, s2), (x3, s3)) = (coordinate(e1), coordinate(e2), coordinate(e3));
+        // Along the tube no cell of the piece comes within the widest limit, any a and b's.
+        let nearest = (x3.abs() - s3 - CUT_WIDTHS * w_b * c3.abs()).max(0.0);
+        if nearest > self.radius_m + CUT_WIDTHS * (drift_n + drift_b) {
+            return;
+        }
+        for b in 0..ACROSS_CELLS {
+            let [low, high] = across_range(b);
+            let farthest = low.abs().max(high.abs());
+            let along = (x3.abs() - s3 - farthest * w_b * c3.abs()).max(0.0);
+            // The binormal's coordinate over the row and the piece; c2 is not negative.
+            let (lowest, highest) = (x2 - s2 + low * w_b * c2, x2 + s2 + high * w_b * c2);
+            let gap = if lowest > 0.0 {
+                lowest
+            } else if highest < 0.0 {
+                -highest
+            } else {
+                0.0
+            };
+            let skew = [low * w_b * c1, high * w_b * c1];
+            // At a signed zero either zero is returned; the bounds below differ from it by the
+            // finite `allowed`, so the cell indices do not depend on which.
+            let (skew_low, skew_high) = (skew[0].min(skew[1]), skew[0].max(skew[1]));
+            // The normal's coordinate is x1 + a w_n + b w_b c1, within what the radius, widened by
+            // the drift of the farthest a and b, leaves of it.
+            let span = |a: f64| {
+                let limit = self.radius_m + a * drift_n + farthest * drift_b;
+                let left = limit * limit - along * along - gap * gap;
+                if left < 0.0 {
+                    return None;
+                }
+                let allowed = left.sqrt();
+                across_span(
+                    -allowed - x1 - s1 - skew_high,
+                    allowed - x1 + s1 - skew_low,
+                    w_n,
+                )
+            };
+            // First for any a within the cut, then again for the farthest a that allows.
+            let Some([first, last]) = span(CUT_WIDTHS) else {
+                continue;
+            };
+            let a = across_range(cell_u8(first))[0]
+                .abs()
+                .max(across_range(cell_u8(last))[1].abs());
+            if let Some([first, last]) = span(a) {
+                for row in &mut bits[first..=last] {
+                    *row |= 1 << b;
+                }
+            }
+        }
+    }
+
+    /// The frame a fraction `f` of the way along the segment, as [`TubeTable::locate`] reads it.
+    #[must_use]
+    fn frame(&self, f: f64) -> [[f64; 3]; 3] {
+        interpolated_frame(&self.frames[0], &self.frames[1], f)
+    }
+}
+
+/// The across cells, first and last, whose coordinates `c` in widths, within the cut, put
+/// `c × width` in `[low, high]`, or `None` if none does.
+#[must_use]
+fn across_span(low: f64, high: f64, width: f64) -> Option<[usize; 2]> {
+    if low > high {
+        return None;
+    }
+    let (from, to) = if width > 0.0 {
+        (low / width, high / width)
+    } else if low <= 0.0 && high >= 0.0 {
+        (-CUT_WIDTHS, CUT_WIDTHS)
+    } else {
+        return None;
+    };
+    if to < -CUT_WIDTHS || from > CUT_WIDTHS {
+        return None;
+    }
+    let cell = |c: f64| {
+        debug_assert!(!c.is_nan(), "a bound of finite coordinates is not NaN");
+        let scaled = ((c.clamp(-CUT_WIDTHS, CUT_WIDTHS) + CUT_WIDTHS) * f64::from(ACROSS_CELLS)
+            / (2.0 * CUT_WIDTHS))
+            .floor()
+            .min(f64::from(ACROSS_CELLS - 1));
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "scaled is a whole number in [0, ACROSS_CELLS − 1]"
+        )]
+        let cell = scaled as usize;
+        cell
+    };
+    Some([cell(from), cell(to)])
+}
+
+/// An across cell's index as the `u8` it is, below [`ACROSS_CELLS`].
+#[must_use]
+fn cell_u8(cell: usize) -> u8 {
+    u8::try_from(cell).expect("an across cell is below ACROSS_CELLS, 64")
+}
+
+/// The distance between two points.
+#[must_use]
+fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+    length(core::array::from_fn(|i| a[i] - b[i]))
 }
 
 /// One arm's knots before their frames: the kernel's means, and what the widths and dispersions
@@ -843,7 +1346,7 @@ impl<'a> Reduced<'a> {
                         .expect(
                             "a tracer's position, and so a mean of them, fits a light-year cell",
                         ),
-                    frame: *frame,
+                    frame: [frame[0], frame[1]],
                     velocity: GalacticVelocity::new(mean.velocity_m_s),
                     widths: [
                         LightYears::new(rms[0] / METRES_PER_LIGHT_YEAR),
@@ -858,9 +1361,14 @@ impl<'a> Reduced<'a> {
                     psi: Radians::new(mean.psi),
                 }
             })
+            .collect::<Vec<_>>();
+        let reaches_ly = knots
+            .windows(2)
+            .map(|pair| segment_reach_ly(&pair[0], &pair[1]))
             .collect();
         TubeArm {
             knots,
+            reaches_ly,
             tracers,
             mass: SolarMasses::new(self.mass),
         }
