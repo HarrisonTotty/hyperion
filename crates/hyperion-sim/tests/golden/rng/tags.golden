@@ -207,3 +207,5 @@ dwarf.core.age (System) = 0x39d9bba9ad586bf1
 dwarf.core.abundance (System) = 0x1c0b00dec12dfa85
 stream.member.age (System) = 0xe5b2b4e68172f2b2
 stream.member.abundance (System) = 0xe5fe15b575cf248a
+stream.cell (Cell) = 0x1b7f076306b358e9
+stream.member.position (System) = 0x5a29c64d04ad9360

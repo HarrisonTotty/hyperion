@@ -8,10 +8,10 @@
 //! start.
 //!
 //! The sources built so far are the grid's seven layers, the catalogue features' members (plan 09,
-//! P09.T21), the dwarf cores' members (plan 10, P10.T7.b), and the supernova entry of plan 09's
-//! phase 4 as a value. The displaced remnants (plan 08, P08.T12), the galactic centre's members
-//! (P09.T24–T28), the streams' members (plan 10) and the catalogue classes' grids (P09.T32–T35)
-//! are not placed yet; each is added here by the task that places it (P12.T0 as built).
+//! P09.T21), the dwarf cores' and the streams' members (plan 10, P10.T7.b and P10.T8.b), and the
+//! supernova entry of plan 09's phase 4 as a value. The displaced remnants (plan 08, P08.T12), the
+//! galactic centre's members (P09.T24–T28) and the catalogue classes' grids (P09.T32–T35) are not
+//! placed yet; each is added here by the task that places it (P12.T0 as built).
 
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
@@ -25,14 +25,16 @@ use hyperion_sim::galaxy::catalogue_classes::supernova::{
 };
 use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
 use hyperion_sim::galaxy::features::members::FeatureInterior;
-use hyperion_sim::galaxy::global_list::Debris;
 use hyperion_sim::galaxy::global_list::dwarf_core::DwarfCoreModel;
+use hyperion_sim::galaxy::global_list::members::{StreamBandShares, stream_cell_members};
+use hyperion_sim::galaxy::global_list::tube::TubeCell;
+use hyperion_sim::galaxy::global_list::{Debris, TubeTable};
 use hyperion_sim::galaxy::imf::MassBand;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellKey, Existence, SystemRecord, generate_cell};
 use hyperion_sim::galaxy::query::{UNBOUND_PAD_SPEED, position_at};
 use hyperion_sim::galaxy::snr::{ExplosionEnergy, SiteGas, shell_window};
-use hyperion_sim::id::{Layer, SystemId};
+use hyperion_sim::id::{Layer, StreamMemberId, SystemId};
 use hyperion_sim::observe::{Drift, Observer, TraceMotionError, Trajectory, retarded};
 use hyperion_sim::stellar::brief::BriefModel;
 use hyperion_sim::stellar::remnant::SupernovaType;
@@ -40,8 +42,10 @@ use hyperion_sim::stellar::system::{SystemExistence, SystemStars};
 use hyperion_sim::time::{
     CLOCK_WINDOW_H, ClockWindow, LIGHT_CROSSING_L, SourceHorizon, Span, UniverseTime,
 };
-use hyperion_sim::units::consts::SPEED_OF_LIGHT;
-use hyperion_sim::units::{Dex, HydrogenPerCm3, KelvinPerCm3, KilometresPerSecond, LightYears};
+use hyperion_sim::units::consts::{METRES_PER_LIGHT_YEAR, SPEED_OF_LIGHT};
+use hyperion_sim::units::{
+    Dex, HydrogenPerCm3, KelvinPerCm3, KilometresPerSecond, LightYears, Seconds,
+};
 
 const SEED: u64 = 0x1200_0000_0000_0000;
 
@@ -254,7 +258,8 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
 
     // A dwarf core's members (plan 10, P10.T7.b): one of each band its cells have, on the line
     // its own velocity gives it, which the system record alone cannot.
-    let core = Debris::generate(&galaxy)
+    let debris = Debris::generate(&galaxy);
+    let core = debris
         .cores()
         .iter()
         .map(|spec| DwarfCoreModel::from_spec(&galaxy, spec))
@@ -294,6 +299,75 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
         core_swept += 1;
     }
     assert!(core_swept >= 1, "the core has no member in bands A, C or E");
+
+    // A stream's members (plan 10, P10.T8.b): the cheapest stream to spray whose progenitor lies
+    // well inside the root cube, one member of each band its axis cells have.
+    let spec = debris
+        .streams()
+        .iter()
+        .filter(|s| {
+            let m = s.position().metres();
+            (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]).sqrt() < 4e4 * METRES_PER_LIGHT_YEAR
+        })
+        .min_by_key(|s| {
+            s.orbit()
+                .fixed_step(Seconds::from(s.stripping_time()))
+                .expect("a finite stripping time")
+                .count()
+        })
+        .expect("a stream inside 40,000 ly");
+    let tube = TubeTable::build(&galaxy, spec).expect("the full potential");
+    let shares = StreamBandShares::of(&galaxy, spec);
+    let mut stream_members = Vec::new();
+    let mut stream_swept = 0;
+    for band in [MassBand::A, MassBand::C] {
+        let found = (0..tube.along_cells()).find_map(|along| {
+            let id = StreamMemberId::new(
+                spec.number().get(),
+                band.layer(),
+                u16::try_from(along).expect("at most 16,384 cells"),
+                [32, 32],
+                0,
+            )
+            .expect("a cell's ID");
+            stream_cell_members(
+                &galaxy,
+                &tube,
+                &shares,
+                TubeCell::from(id),
+                band,
+                &mut stream_members,
+            );
+            stream_members.first().copied()
+        });
+        let Some(member) = found else { continue };
+        let line = Drift::of_global_member(&member);
+        let stars = member.stars(&galaxy);
+        for t in TIMES {
+            assert_in_padded_cube("a stream member", &line.position_at(t));
+            let exists = member.record().existence_at(t) == Existence::Exists;
+            assert_eq!(
+                stars.summary_at(t).existence() == SystemExistence::Exists,
+                exists
+            );
+            assert_eq!(stars.brief_at(t).is_some(), exists);
+        }
+        for t in [ClockWindow::START, ClockWindow::END] {
+            let away = GalacticPosition::from_light_years([-20_000.0, -20_000.0, 30_000.0])
+                .expect("in range");
+            let seen = retarded(&Observer::new(away, t).expect("inside"), &line);
+            assert!(SourceHorizon::contains(seen.emitted()));
+            assert_in_padded_cube(
+                "a stream member's apparent position",
+                seen.apparent_position(),
+            );
+        }
+        stream_swept += 1;
+    }
+    assert!(
+        stream_swept >= 1,
+        "the stream has no member in bands A or C on its axis"
+    );
 
     // The supernova entry as a value: exploding at the horizon's start and at the epoch.
     let site = SiteGas::uniform(HydrogenPerCm3::new(1.0), KelvinPerCm3::new(3_800.0))

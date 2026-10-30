@@ -1,0 +1,180 @@
+# generator_version = 24
+gd1.share.A = 0x3fe5ad3d62a82454  # 0.6773974348917684
+gd1.share.B = 0x3fbea43918e2dda4  # 0.11969334466527087
+gd1.share.C = 0x3fc58d223dd69b17  # 0.16836956042717396
+gd1.share.D = 0x3fa1af2eac5d9321  # 0.034539660015786795
+gd1.share.E = 0x0000000000000000  # 0.0
+gd1.mean_member_mass = 0x3fd726bf40402278  # 0.36173993372407365
+gd1.64.31.32.A.expected = 0x3fd435cb64c84ff2  # 0.31578335611379693
+gd1.64.31.32.A.count 0 members 0
+gd1.64.31.32.C.expected = 0x3fb417dc5540414d  # 0.07848908501933245
+gd1.64.31.32.C.count 0 members 0
+gd1.64.32.32.A.expected = 0x3fd435cb64c84ff8  # 0.31578335611379726
+gd1.64.32.32.A.count 0 members 0
+gd1.64.32.32.C.expected = 0x3fb417dc55404153  # 0.07848908501933254
+gd1.64.32.32.C.count 0 members 0
+gd1.64.36.28.A.expected = 0x3fcf7d5529f92fc8  # 0.24601234960061746
+gd1.64.36.28.A.count 1 members 1
+gd1.64.36.28.A.0.id = 0xf200040081238000
+gd1.64.36.28.A.0.class Living attempt 0
+gd1.64.36.28.A.0.position.x = 0xc0c00d30a10aefb1  # -8218.379914633786
+gd1.64.36.28.A.0.position.y = 0x40e5eadec060ed44  # 44886.96098371831
+gd1.64.36.28.A.0.position.z = 0x40c28f5c697d155f  # 9502.721969256816
+gd1.64.36.28.A.0.mass = 0x3fda9812d256a9be  # 0.41553183117744286
+gd1.64.36.28.A.0.age = 0x4200c388d0000000  # 9000000000.0
+gd1.64.36.28.A.0.fe_h = 0xbffe666666666666  # -1.9
+gd1.64.36.28.A.0.velocity.x = 0x410839366310707e  # 198438.79837119946
+gd1.64.36.28.A.0.velocity.y = 0x40e18e4e5b480b6d  # 35954.448642751995
+gd1.64.36.28.A.0.velocity.z = 0x410322d12bf9fcfc  # 156762.14647290844
+gd1.64.36.28.C.expected = 0x3faf4eb148e6d61e  # 0.06114725127137553
+gd1.64.36.28.C.count 0 members 0
+sagittarius.share.A = 0x3fe5ad3d62a82453  # 0.6773974348917683
+sagittarius.share.B = 0x3fbea43918e2dda5  # 0.11969334466527089
+sagittarius.share.C = 0x3fc58d223dd69b18  # 0.168369560427174
+sagittarius.share.D = 0x3fa1af2eac5d9323  # 0.03453966001578681
+sagittarius.share.E = 0x0000000000000000  # 0.0
+sagittarius.mean_member_mass = 0x3fd7beadf3d77d9d  # 0.3710131531970207
+sagittarius.8192.31.32.A.expected = 0x403b869a23646cbb  # 27.525789463060146
+sagittarius.8192.31.32.A.count 32 members 32
+sagittarius.8192.31.32.A.0.id = 0xf200084000fc0000
+sagittarius.8192.31.32.A.0.class Living attempt 0
+sagittarius.8192.31.32.A.0.position.x = 0x40d1d911688b1aa3  # 18276.27200582124
+sagittarius.8192.31.32.A.0.position.y = 0xc0c50da1946dac51  # -10779.262342175616
+sagittarius.8192.31.32.A.0.position.z = 0x40ee6530602de84e  # 62249.51174064037
+sagittarius.8192.31.32.A.0.mass = 0x3fd90be44bc88313  # 0.3913508167334367
+sagittarius.8192.31.32.A.0.age = 0x41f205ea548f244c  # 4838040904.946362
+sagittarius.8192.31.32.A.0.fe_h = 0xbff5162084d3aef9  # -1.3179021061468446
+sagittarius.8192.31.32.A.0.velocity.x = 0xc0ec4b910085355f  # -57948.53131351875
+sagittarius.8192.31.32.A.0.velocity.y = 0x4111f32fe77b4421  # 294091.97605616046
+sagittarius.8192.31.32.A.0.velocity.z = 0x40f73f91952a5650  # 95225.09891732899
+sagittarius.8192.31.32.A.1.id = 0xf200084000fc0001
+sagittarius.8192.31.32.A.1.class Living attempt 0
+sagittarius.8192.31.32.A.1.position.x = 0x40d1f4d953804ded  # 18387.39572150812
+sagittarius.8192.31.32.A.1.position.y = 0xc0c4f3e19520beaf  # -10727.762363522632
+sagittarius.8192.31.32.A.1.position.z = 0x40ee8525ae1cab2c  # 62505.17750390465
+sagittarius.8192.31.32.A.1.mass = 0x3fb4ec25adffdcf7  # 0.08172832010301422
+sagittarius.8192.31.32.A.1.age = 0x420469673221c4b1  # 10958464580.22104
+sagittarius.8192.31.32.A.1.fe_h = 0xbff385032a5354ca  # -1.2199737218227704
+sagittarius.8192.31.32.A.1.velocity.x = 0xc0ec4b910085355f  # -57948.53131351875
+sagittarius.8192.31.32.A.1.velocity.y = 0x4111f32fe77b4421  # 294091.97605616046
+sagittarius.8192.31.32.A.1.velocity.z = 0x40f73f91952a5650  # 95225.09891732899
+sagittarius.8192.31.32.C.expected = 0x401b5dd534e6730f  # 6.8416336312918835
+sagittarius.8192.31.32.C.count 8 members 8
+sagittarius.8192.31.32.C.0.id = 0xf200094000fc0000
+sagittarius.8192.31.32.C.0.class Living attempt 0
+sagittarius.8192.31.32.C.0.position.x = 0x40d20c6c3c5f311c  # 18481.691184804877
+sagittarius.8192.31.32.C.0.position.y = 0xc0c4e6d323f7b943  # -10701.649535146198
+sagittarius.8192.31.32.C.0.position.z = 0x40ee81dd0c67a0e6  # 62478.907764257674
+sagittarius.8192.31.32.C.0.mass = 0x3fe8faf4e1963113  # 0.7806343465795486
+sagittarius.8192.31.32.C.0.age = 0x41ea8597adb895bc  # 3559701869.768278
+sagittarius.8192.31.32.C.0.fe_h = 0xc0000efcff8ffef6  # -2.0073184934443544
+sagittarius.8192.31.32.C.0.velocity.x = 0xc0ec4b910085355f  # -57948.53131351875
+sagittarius.8192.31.32.C.0.velocity.y = 0x4111f32fe77b4421  # 294091.97605616046
+sagittarius.8192.31.32.C.0.velocity.z = 0x40f73f91952a5650  # 95225.09891732899
+sagittarius.8192.31.32.C.1.id = 0xf200094000fc0001
+sagittarius.8192.31.32.C.1.class WhiteDwarf attempt 0
+sagittarius.8192.31.32.C.1.position.x = 0x40d20ab34bdb41ed  # 18474.801504911786
+sagittarius.8192.31.32.C.1.position.y = 0xc0c4eeac05109297  # -10717.3439045635
+sagittarius.8192.31.32.C.1.position.z = 0x40ee6a45c9fa7f2d  # 62290.180905578985
+sagittarius.8192.31.32.C.1.mass = 0x3ff513775c065090  # 1.3172525019372507
+sagittarius.8192.31.32.C.1.age = 0x420551af77664396  # 11445595884.783
+sagittarius.8192.31.32.C.1.fe_h = 0xbff93e4b86f962da  # -1.5777087471416764
+sagittarius.8192.31.32.C.1.velocity.x = 0xc0ec4b910085355f  # -57948.53131351875
+sagittarius.8192.31.32.C.1.velocity.y = 0x4111f32fe77b4421  # 294091.97605616046
+sagittarius.8192.31.32.C.1.velocity.z = 0x40f73f91952a5650  # 95225.09891732899
+sagittarius.8192.32.32.A.expected = 0x403b869a23646cc4  # 27.52578946306018
+sagittarius.8192.32.32.A.count 23 members 23
+sagittarius.8192.32.32.A.0.id = 0xf200084001040000
+sagittarius.8192.32.32.A.0.class Living attempt 0
+sagittarius.8192.32.32.A.0.position.x = 0x40d1e04a92a43790  # 18305.165200285206
+sagittarius.8192.32.32.A.0.position.y = 0xc0c516127b3e3425  # -10796.144386077367
+sagittarius.8192.32.32.A.0.position.z = 0x40ee392b9b7510ba  # 61897.36272671954
+sagittarius.8192.32.32.A.0.mass = 0x3fd479d7041679bb  # 0.31993651770781256
+sagittarius.8192.32.32.A.0.age = 0x41e644f45c548d30  # 2988942050.642235
+sagittarius.8192.32.32.A.0.fe_h = 0xbff5d5adcf2938c3  # -1.3646677105166851
+sagittarius.8192.32.32.A.0.velocity.x = 0xc0ec4b910085355f  # -57948.53131351875
+sagittarius.8192.32.32.A.0.velocity.y = 0x4111f32fe77b4421  # 294091.97605616046
+sagittarius.8192.32.32.A.0.velocity.z = 0x40f73f91952a5650  # 95225.09891732899
+sagittarius.8192.32.32.A.1.id = 0xf200084001040001
+sagittarius.8192.32.32.A.1.class Living attempt 0
+sagittarius.8192.32.32.A.1.position.x = 0x40d1e3542a4efef6  # 18317.315082310663
+sagittarius.8192.32.32.A.1.position.y = 0xc0c50c7af5c08edd  # -10776.96062476135
+sagittarius.8192.32.32.A.1.position.z = 0x40ee541778e3b75b  # 62112.73350702106
+sagittarius.8192.32.32.A.1.mass = 0x3fc55ba48b01dbad  # 0.16685921466316014
+sagittarius.8192.32.32.A.1.age = 0x41f753930a35b0a2  # 6261649571.355623
+sagittarius.8192.32.32.A.1.fe_h = 0xbfe898ddeda2a746  # -0.7686605111423226
+sagittarius.8192.32.32.A.1.velocity.x = 0xc0ec4b910085355f  # -57948.53131351875
+sagittarius.8192.32.32.A.1.velocity.y = 0x4111f32fe77b4421  # 294091.97605616046
+sagittarius.8192.32.32.A.1.velocity.z = 0x40f73f91952a5650  # 95225.09891732899
+sagittarius.8192.32.32.C.expected = 0x401b5dd534e67317  # 6.841633631291891
+sagittarius.8192.32.32.C.count 8 members 8
+sagittarius.8192.32.32.C.0.id = 0xf200094001040000
+sagittarius.8192.32.32.C.0.class Living attempt 0
+sagittarius.8192.32.32.C.0.position.x = 0x40d1cc7dd6bab235  # 18225.96623103526
+sagittarius.8192.32.32.C.0.position.y = 0xc0c52e1505d30585  # -10844.164240243621
+sagittarius.8192.32.32.C.0.position.z = 0x40ee0ed589b5260e  # 61558.67306001122
+sagittarius.8192.32.32.C.0.mass = 0x3fee1d0ce4ef692b  # 0.9410461875334354
+sagittarius.8192.32.32.C.0.age = 0x41f3ca08ac1be76e  # 5312121537.744001
+sagittarius.8192.32.32.C.0.fe_h = 0xbff4feb4aa4c87cf  # -1.3121840145399692
+sagittarius.8192.32.32.C.0.velocity.x = 0xc0ec4b910085355f  # -57948.53131351875
+sagittarius.8192.32.32.C.0.velocity.y = 0x4111f32fe77b4421  # 294091.97605616046
+sagittarius.8192.32.32.C.0.velocity.z = 0x40f73f91952a5650  # 95225.09891732899
+sagittarius.8192.32.32.C.1.id = 0xf200094001040001
+sagittarius.8192.32.32.C.1.class Living attempt 0
+sagittarius.8192.32.32.C.1.position.x = 0x40d1f29a3cc6c6dd  # 18378.40995950146
+sagittarius.8192.32.32.C.1.position.y = 0xc0c508e90607b0fe  # -10769.820496522352
+sagittarius.8192.32.32.C.1.position.z = 0x40ee410fa86465dd  # 61960.48930568595
+sagittarius.8192.32.32.C.1.mass = 0x3ff428d59032f00d  # 1.2599692948124386
+sagittarius.8192.32.32.C.1.age = 0x41e4cda6e5f690ec  # 2792175407.7051907
+sagittarius.8192.32.32.C.1.fe_h = 0xbff9565332fb6160  # -1.5835754386408425
+sagittarius.8192.32.32.C.1.velocity.x = 0xc0ec4b910085355f  # -57948.53131351875
+sagittarius.8192.32.32.C.1.velocity.y = 0x4111f32fe77b4421  # 294091.97605616046
+sagittarius.8192.32.32.C.1.velocity.z = 0x40f73f91952a5650  # 95225.09891732899
+sagittarius.8192.36.28.A.expected = 0x403571af5963258a  # 21.444081865983698
+sagittarius.8192.36.28.A.count 19 members 19
+sagittarius.8192.36.28.A.0.id = 0xf200084001238000
+sagittarius.8192.36.28.A.0.class Living attempt 0
+sagittarius.8192.36.28.A.0.position.x = 0x40d2346154654914  # 18641.52077610146
+sagittarius.8192.36.28.A.0.position.y = 0xc0c54f03444ceddd  # -10910.025521865982
+sagittarius.8192.36.28.A.0.position.z = 0x40ecc79910315a78  # 58940.78322665853
+sagittarius.8192.36.28.A.0.mass = 0x3fcb88d5a2f5e50d  # 0.21511335808808277
+sagittarius.8192.36.28.A.0.age = 0x41f5a245838afba3  # 5807298616.686435
+sagittarius.8192.36.28.A.0.fe_h = 0xbffc1ff65be54312  # -1.7578033055944542
+sagittarius.8192.36.28.A.0.velocity.x = 0xc0ec4b910085355f  # -57948.53131351875
+sagittarius.8192.36.28.A.0.velocity.y = 0x4111f32fe77b4421  # 294091.97605616046
+sagittarius.8192.36.28.A.0.velocity.z = 0x40f73f91952a5650  # 95225.09891732899
+sagittarius.8192.36.28.A.1.id = 0xf200084001238001
+sagittarius.8192.36.28.A.1.class Living attempt 0
+sagittarius.8192.36.28.A.1.position.x = 0x40d2337aca506ba6  # 18637.918598275304
+sagittarius.8192.36.28.A.1.position.y = 0xc0c54df452f17669  # -10907.908781225984
+sagittarius.8192.36.28.A.1.position.z = 0x40eccd1b48b24d1a  # 58984.85262408313
+sagittarius.8192.36.28.A.1.mass = 0x3fc8aaad09db705a  # 0.19270861607845086
+sagittarius.8192.36.28.A.1.age = 0x41dc117d7e9fa853  # 1883633146.4946487
+sagittarius.8192.36.28.A.1.fe_h = 0xbff1f1522164e133  # -1.1214162163215178
+sagittarius.8192.36.28.A.1.velocity.x = 0xc0ec4b910085355f  # -57948.53131351875
+sagittarius.8192.36.28.A.1.velocity.y = 0x4111f32fe77b4421  # 294091.97605616046
+sagittarius.8192.36.28.A.1.velocity.z = 0x40f73f91952a5650  # 95225.09891732899
+sagittarius.8192.36.28.C.expected = 0x401551ec69ecfc30  # 5.330003409470962
+sagittarius.8192.36.28.C.count 7 members 7
+sagittarius.8192.36.28.C.0.id = 0xf200094001238000
+sagittarius.8192.36.28.C.0.class Living attempt 0
+sagittarius.8192.36.28.C.0.position.x = 0x40d20c6bb30dedcd  # 18481.68280361388
+sagittarius.8192.36.28.C.0.position.y = 0xc0c57099cbf5fc2b  # -10977.20153689206
+sagittarius.8192.36.28.C.0.position.z = 0x40eca58eca3d1edf  # 58668.46218734769
+sagittarius.8192.36.28.C.0.mass = 0x3fef4d1d3f7aee27  # 0.9781633605811678
+sagittarius.8192.36.28.C.0.age = 0x41ef86b73f6f3b69  # 4231379451.476002
+sagittarius.8192.36.28.C.0.fe_h = 0xc006415865d87fb7  # -2.7819068867392747
+sagittarius.8192.36.28.C.0.velocity.x = 0xc0ec4b910085355f  # -57948.53131351875
+sagittarius.8192.36.28.C.0.velocity.y = 0x4111f32fe77b4421  # 294091.97605616046
+sagittarius.8192.36.28.C.0.velocity.z = 0x40f73f91952a5650  # 95225.09891732899
+sagittarius.8192.36.28.C.1.id = 0xf200094001238001
+sagittarius.8192.36.28.C.1.class Living attempt 0
+sagittarius.8192.36.28.C.1.position.x = 0x40d226eb5efec252  # 18587.67767304398
+sagittarius.8192.36.28.C.1.position.y = 0xc0c55d658419b7c2  # -10938.793093886114
+sagittarius.8192.36.28.C.1.position.z = 0x40ecb18525a84b9f  # 58764.16084685106
+sagittarius.8192.36.28.C.1.mass = 0x3fed9fda3cd7d50c  # 0.9257632435170833
+sagittarius.8192.36.28.C.1.age = 0x420018ea343ea5e5  # 8642184839.831003
+sagittarius.8192.36.28.C.1.fe_h = 0xbfe92bbd41dd61ef  # -0.7865892683431052
+sagittarius.8192.36.28.C.1.velocity.x = 0xc0ec4b910085355f  # -57948.53131351875
+sagittarius.8192.36.28.C.1.velocity.y = 0x4111f32fe77b4421  # 294091.97605616046
+sagittarius.8192.36.28.C.1.velocity.z = 0x40f73f91952a5650  # 95225.09891732899

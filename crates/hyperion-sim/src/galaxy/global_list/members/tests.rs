@@ -1,13 +1,19 @@
-//! The global list's members: a stream's band shares (P10.T8.a).
+//! The global list's members: a stream's band shares (P10.T8.a) and its members in its tube's
+//! cells (P10.T8.b).
 
 use std::sync::OnceLock;
+
+use hyperion_testkit::order::assert_order_independent;
+use hyperion_testkit::stats::{
+    ALPHA, assert_p_value, assert_poisson_count, chi_square_gof, ks_one_sample,
+};
 
 use super::*;
 use crate::galaxy::Population;
 use crate::galaxy::global_list::testing::{gd1_like, pal5_like, sagittarius_like};
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemRecord;
-use crate::id::StreamMemberId;
+use crate::id::{Layer, StreamMemberId};
 use crate::rng::Seed;
 use crate::stellar::ObjectKind;
 use crate::time::UniverseTime;
@@ -217,4 +223,361 @@ fn a_dwarf_s_tube_holds_no_star_younger_than_its_last_stripping() {
         (spread / want_spread.value() - 1.0).abs() < 0.05,
         "{spread}"
     );
+}
+
+/// The synthetic tube's radius, ly, and the tube's mass, M☉: a stream on a circle in the plane
+/// with 2,000 M☉ over 64 along cells.
+const RADIUS: f64 = 50_000.0;
+const MASS: f64 = 2_000.0;
+
+/// `per_arm` tracers from each Lagrange point of a stream on a circle of `radius` ly in the
+/// galactic plane, one radian an arm, 100 ly wide, at 220 km/s with dispersions of 3, 1 and 0.5
+/// km/s along, outward and up, weighing [`MASS`] in all (as the tube's own tests' stream).
+fn circle(per_arm: u32, radius: f64) -> Vec<crate::galaxy::global_list::spray::Tracer> {
+    use crate::coords::GalacticDisplacement;
+    use crate::galaxy::global_list::spray::{Arm, Tracer};
+    use crate::math;
+    use crate::units::Radians;
+    use crate::units::consts::METRES_PER_LIGHT_YEAR;
+    let mut draws = Stream::open(
+        Seed::new(0x0a10_8b00),
+        tags::SELFTEST_STREAM,
+        ObjectKey::galaxy(),
+    );
+    let weight = SolarMasses::new(MASS / f64::from(2 * per_arm));
+    (0..2 * per_arm)
+        .map(|i| {
+            let k = i / 2;
+            let arm = if i.is_multiple_of(2) {
+                Arm::Leading
+            } else {
+                Arm::Trailing
+            };
+            let gained = (f64::from(k) + draws.uniform()) / f64::from(per_arm);
+            let psi = if arm == Arm::Trailing {
+                -gained
+            } else {
+                gained
+            };
+            let (sin, cos) = math::sin_cos(psi);
+            let out = radius + 100.0 * draws.standard_normal();
+            let up = 100.0 * draws.standard_normal();
+            let position = [out * cos, out * sin, up].map(|c| c * METRES_PER_LIGHT_YEAR);
+            let along = 2.2e5 + 3_000.0 * draws.standard_normal();
+            let outward = 1_000.0 * draws.standard_normal();
+            let vertical = 500.0 * draws.standard_normal();
+            let velocity = [
+                -along * sin + outward * cos,
+                along * cos + outward * sin,
+                vertical,
+            ];
+            Tracer::from_parts(
+                arm,
+                0,
+                Years::new(1e9),
+                weight,
+                GalacticDisplacement::new(position),
+                GalacticVelocity::new(velocity),
+                Radians::new(psi),
+            )
+        })
+        .collect()
+}
+
+/// The synthetic tube of `gd1_like`'s stream (number 1) on a circle of `radius` ly, and its band
+/// shares, an orphan's.
+fn synthetic(radius: f64) -> (TubeTable, StreamBandShares) {
+    let galaxy = milky_way();
+    let spec = gd1_like(galaxy.potential());
+    let tube = TubeTable::from_tracers(
+        galaxy.seed(),
+        galaxy.mean_system_mass(Population::Halo),
+        &spec,
+        &circle(300, radius),
+    )
+    .expect("enough tracers an arm");
+    (tube, StreamBandShares::of(galaxy, &spec))
+}
+
+/// Every cell of a tube with its along and across indices, in [`TubeCell`]'s order.
+fn every_cell(tube: &TubeTable) -> impl Iterator<Item = TubeCell> + '_ {
+    (0..tube.along_cells()).flat_map(|along| {
+        (0..64_u8).flat_map(move |a| {
+            (0..64_u8).map(move |b| {
+                TubeCell::from(
+                    StreamMemberId::new(1, Layer::A, u16::try_from(along).unwrap(), [a, b], 0)
+                        .unwrap(),
+                )
+            })
+        })
+    })
+}
+
+/// A placed member with its band, cell and tube coordinates.
+type Placed = (MassBand, TubeCell, GlobalMemberRecord, [f64; 3]);
+
+/// The synthetic tube, its shares, its members, its counts summed by along cell, and its count.
+type Synthetic = (TubeTable, StreamBandShares, Vec<Placed>, Vec<u64>, u64);
+
+/// Every member of the synthetic tube on a circle of [`RADIUS`], with its band, cell and tube
+/// coordinates, and every cell's count summed by along cell.
+fn synthetic_members() -> &'static Synthetic {
+    static MEMBERS: OnceLock<Synthetic> = OnceLock::new();
+    MEMBERS.get_or_init(|| {
+        let galaxy = milky_way();
+        let (tube, shares) = synthetic(RADIUS);
+        let mut members = Vec::new();
+        let mut by_along = vec![0_u64; usize::try_from(tube.along_cells()).unwrap()];
+        let mut counted = 0;
+        let mut cell_members = Vec::new();
+        for cell in every_cell(&tube) {
+            for band in MassBand::ALL {
+                let count = stream_member_count(galaxy, &tube, &shares, cell, band);
+                by_along[usize::try_from(cell.along()).unwrap()] += u64::from(count);
+                counted += u64::from(count);
+                if count == 0 {
+                    continue;
+                }
+                stream_cell_members(galaxy, &tube, &shares, cell, band, &mut cell_members);
+                members.extend(cell_members.iter().map(|m| {
+                    let at = member_coordinates(galaxy, m.record().id(), cell, tube.along_cells());
+                    (band, cell, *m, at)
+                }));
+            }
+        }
+        (tube, shares, members, by_along, counted)
+    })
+}
+
+/// P10.T8.b: the cells' means sum to the tube's expected members, and the counts along the tube
+/// follow its line density times its gap noise, by a chi-square test over its along cells.
+#[test]
+fn the_counts_along_follow_the_line_density_and_the_gap_noise() {
+    let (tube, shares, _, by_along, counted) = synthetic_members();
+    let cells = tube.along_cells();
+    let per_cell = tube.mass().value() / (shares.mean_member_mass().value() * f64::from(cells));
+    let expected: Vec<f64> = (0..cells).map(|i| per_cell * tube.noise(i)).collect();
+    let total: f64 = expected.iter().sum();
+    let want = tube.mass().value() / shares.mean_member_mass().value();
+    assert!((total / want - 1.0).abs() < 1e-9, "{total} {want}");
+    // The across factors of one along cell and band sum to 1.
+    let one: f64 = every_cell(tube)
+        .take(64 * 64)
+        .map(|c| expected_members(tube, shares, c, MassBand::A))
+        .sum();
+    assert!((one / (per_cell * tube.noise(0) * shares.share(MassBand::A)) - 1.0).abs() < 1e-9);
+    // The total by its Poisson law, the distribution along by the chi-square test of the counts
+    // against the means scaled to it.
+    assert_poisson_count("the tube's members", *counted, total, ALPHA);
+    let n = f64::from(u32::try_from(*counted).unwrap());
+    let scaled: Vec<f64> = expected.iter().map(|e| e * n / total).collect();
+    let chi = chi_square_gof(by_along, &scaled);
+    assert_p_value("the counts along", chi.p_value, ALPHA);
+}
+
+/// P10.T8.b: the members' across coordinates are normal, truncated to the cut at ±4 widths, by
+/// a one-sample Kolmogorov–Smirnov test of each, and every member is the point `locate` gives
+/// for its coordinates, in a cell `cells_touching` finds about it.
+#[test]
+fn members_are_normal_across_the_tube_and_lie_where_their_coordinates_say() {
+    let (tube, _, members, _, _) = synthetic_members();
+    assert!(members.len() > 3_000, "{}", members.len());
+    let cut = cut_mass();
+    let truncated = |x: f64| (normal_cdf(x) - normal_cdf(-CUT_WIDTHS)) / cut;
+    for axis in 0..2 {
+        let mut across: Vec<f64> = members.iter().map(|(_, _, _, at)| at[1 + axis]).collect();
+        let ks = ks_one_sample(&mut across, truncated);
+        assert_p_value(&format!("across {axis}"), ks.p_value, ALPHA);
+    }
+    for (band, cell, member, [u, a, b]) in members.iter().step_by(97) {
+        let at = tube.locate(*u, *a, *b);
+        assert!(at.is_same_point(member.record().epoch_position()));
+        assert!(*u * f64::from(tube.along_cells()) >= f64::from(cell.along()));
+        let [[a0, a1], [b0, b1]] = cell.across_widths();
+        assert!((a0..=a1).contains(a) && (b0..=b1).contains(b), "{band:?}");
+        let touched: Vec<TubeCell> = tube
+            .cells_touching(&at, crate::units::LightYears::new(1.0))
+            .collect();
+        assert!(touched.binary_search(cell).is_ok(), "{cell:?}");
+    }
+}
+
+/// P10.T8.b: every member's ID round-trips and resolves to the same member; an index past its
+/// cell's count, another stream's ID and an along cell past the tube's resolve to nothing.
+#[test]
+fn every_stream_member_s_id_round_trips_and_resolves_to_it() {
+    let galaxy = milky_way();
+    let (tube, shares, members, _, _) = synthetic_members();
+    for (_, _, member, _) in members.iter().step_by(53) {
+        let id = member.record().id();
+        assert_eq!(SystemId::from_raw(id.raw()).unwrap(), id);
+        let crate::id::SystemIdKind::Stream(stream_id) = id.kind() else {
+            panic!("a stream member's ID decodes as one: {id:?}")
+        };
+        assert_eq!(
+            resolve_stream_member(galaxy, tube, shares, stream_id),
+            Ok(*member)
+        );
+    }
+    let (band, cell, ..) = members[0];
+    let count = stream_member_count(galaxy, tube, shares, cell, band);
+    let past = stream_member_id(tube, cell, band, count);
+    let other = StreamMemberId::new(2, band.layer(), 0, [32, 32], 0).unwrap();
+    let beyond = StreamMemberId::new(
+        1,
+        band.layer(),
+        u16::try_from(tube.along_cells()).unwrap(),
+        [32, 32],
+        0,
+    )
+    .unwrap();
+    for id in [past, other, beyond] {
+        assert_eq!(
+            resolve_stream_member(galaxy, tube, shares, id),
+            Err(ResolveSystemError::NoSuchSystem),
+            "{id:?}"
+        );
+    }
+}
+
+/// P10.T8.b: a stream's member is a pure function of its ID and its tube, whatever was placed
+/// before it.
+#[test]
+fn stream_members_are_order_independent() {
+    let galaxy = milky_way();
+    let (tube, shares, members, _, _) = synthetic_members();
+    let keys: Vec<(MassBand, TubeCell, u16)> = members
+        .iter()
+        .step_by(173)
+        .map(|(band, cell, m, _)| {
+            let crate::id::SystemIdKind::Stream(id) = m.record().id().kind() else {
+                unreachable!("a stream member's ID")
+            };
+            (*band, *cell, id.index())
+        })
+        .collect();
+    assert!(keys.len() > 20);
+    assert_order_independent(&keys, |&(band, cell, index)| {
+        stream_member(galaxy, tube, shares, cell, band, index)
+    });
+}
+
+/// P10.T8.b: a member outside the root cube is dropped and its index kept: on a circle of
+/// 66,000 ly, whose middle lies past the cube's 65,536 ly and whose tips inside it, cells count
+/// members that are not placed, every member placed is inside, and the indices of those placed
+/// keep their order.
+#[test]
+fn members_outside_the_root_cube_are_dropped_and_their_indices_kept() {
+    let galaxy = milky_way();
+    let (tube, shares) = synthetic(66_000.0);
+    let (mut counted, mut placed) = (0_u32, 0_u32);
+    let mut out = Vec::new();
+    for cell in every_cell(&tube).filter(|c| c.across() == [32, 32] || c.across() == [31, 33]) {
+        let count = stream_member_count(galaxy, &tube, &shares, cell, MassBand::A);
+        stream_cell_members(galaxy, &tube, &shares, cell, MassBand::A, &mut out);
+        assert!(
+            out.iter()
+                .all(|m| m.record().epoch_position().in_root_cube())
+        );
+        counted += u32::from(count);
+        placed += u32::try_from(out.len()).unwrap();
+        for (k, m) in out.iter().enumerate().skip(1) {
+            let crate::id::SystemIdKind::Stream(id) = m.record().id().kind() else {
+                unreachable!("a stream member's ID")
+            };
+            let crate::id::SystemIdKind::Stream(before) = out[k - 1].record().id().kind() else {
+                unreachable!("a stream member's ID")
+            };
+            assert!(id.index() > before.index());
+        }
+    }
+    assert!(placed < counted && placed > 0, "{placed} of {counted}");
+}
+
+/// P10.T8.b's golden: two test streams' tubes on the Milky Way fixture at 64 tracers an arm, a
+/// few cells' expected members and counts by band, and the first members of the fullest cells in
+/// full. They move with the spray, the tube, the band shares and the members' draws.
+#[test]
+fn stream_members_golden() {
+    use std::num::NonZeroU32;
+
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+
+    use crate::galaxy::global_list::spray::{Spray, SprayForce, SprayParams};
+    use crate::galaxy::potential::{MassModel, PotentialTables};
+
+    let galaxy = milky_way();
+    let params = GalaxyParams::milky_way_like();
+    let tables = PotentialTables::full(&MassModel::new(&params));
+    let force = SprayForce::new(&tables).expect("the full tables");
+    let spray_params = SprayParams::new(NonZeroU32::new(64).expect("not zero"));
+    let mut w = GoldenWriter::new();
+    w.header(crate::GENERATOR_VERSION.get());
+    for (name, spec) in [
+        ("gd1", gd1_like(&tables)),
+        ("sagittarius", sagittarius_like(&tables)),
+    ] {
+        let tracers = Spray::new(galaxy.seed(), &force, &tables, &spec, &spray_params)
+            .expect("a finite stripping time")
+            .tracers();
+        let tube = TubeTable::from_tracers(
+            galaxy.seed(),
+            galaxy.mean_system_mass(Population::Halo),
+            &spec,
+            &tracers,
+        )
+        .expect("enough tracers an arm");
+        let shares = StreamBandShares::of(galaxy, &spec);
+        for band in MassBand::ALL {
+            w.f64(&format!("{name}.share.{band:?}"), shares.share(band));
+        }
+        w.f64(
+            &format!("{name}.mean_member_mass"),
+            shares.mean_member_mass().value(),
+        );
+        let along = tube.along_cells() / 2;
+        let mut out = Vec::new();
+        for (a, b) in [(31, 32), (32, 32), (36, 28)] {
+            let cell = TubeCell::from(
+                StreamMemberId::new(1, Layer::A, u16::try_from(along).unwrap(), [a, b], 0).unwrap(),
+            );
+            for band in [MassBand::A, MassBand::C] {
+                let label = format!("{name}.{along}.{a}.{b}.{band:?}");
+                w.f64(
+                    &format!("{label}.expected"),
+                    expected_members(&tube, &shares, cell, band),
+                );
+                stream_cell_members(galaxy, &tube, &shares, cell, band, &mut out);
+                w.line(&format!(
+                    "{label}.count {} members {}",
+                    stream_member_count(galaxy, &tube, &shares, cell, band),
+                    out.len()
+                ));
+                for (k, m) in out.iter().take(2).enumerate() {
+                    let record = m.record();
+                    let at = format!("{label}.{k}");
+                    w.u64_hex(&format!("{at}.id"), record.id().raw());
+                    w.line(&format!(
+                        "{at}.class {:?} attempt {}",
+                        m.class().kind,
+                        m.attempt()
+                    ));
+                    for (axis, c) in ["x", "y", "z"]
+                        .iter()
+                        .zip(record.epoch_position().to_light_years_f64())
+                    {
+                        w.f64(&format!("{at}.position.{axis}"), c);
+                    }
+                    w.f64(&format!("{at}.mass"), record.primary_initial_mass().value());
+                    w.f64(&format!("{at}.age"), record.age_at_epoch().value());
+                    w.f64(&format!("{at}.fe_h"), m.composition().fe_h().value());
+                    for (axis, v) in ["x", "y", "z"].iter().zip(m.velocity().metres_per_second()) {
+                        w.f64(&format!("{at}.velocity.{axis}"), v);
+                    }
+                }
+            }
+        }
+    }
+    golden!("galaxy/global_list/stream_members", w.as_str());
 }

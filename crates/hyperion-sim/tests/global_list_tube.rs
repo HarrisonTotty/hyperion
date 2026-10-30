@@ -1,7 +1,8 @@
-//! The tube table's slow tests (plan 10, P10.T6.a–c): the three test streams of
+//! The tube table's slow tests (plan 10, P10.T6.a–c, T8.b): the three test streams of
 //! `global_list::testing`, reduced from the generator's 2,000 tracers, the strays of
-//! `sagittarius_like` under several seeds, the power of `gd1_like`'s gap noise, and the cells a
-//! sphere touches.
+//! `sagittarius_like` under several seeds, the power of `gd1_like`'s gap noise, the cells a
+//! sphere touches, the fullest cell of a tube, and a drawn stream's members through
+//! `resolve_with`.
 //!
 //! The (R, z) grid costs seconds to build, so the test streams read one set of tables, the Milky
 //! Way fixture's, and its spray table, as `tests/global_list_spray.rs` does, and each stream is
@@ -845,4 +846,153 @@ fn cells_touching_holds_every_point_of_the_test_tubes_in_a_sphere() {
         );
         assert!(table.byte_size() < 100_000, "{}", table.byte_size());
     }
+}
+
+/// P10.T8.b: the fullest cell of `sagittarius_like`'s tube, on its axis at its along cell of
+/// greatest gap noise, expects some 70 M-dwarf members against the plan's "about 180", and no
+/// cell of the three test streams' tubes approaches the 13-bit index's 8,192.
+#[test]
+#[ignore = "slow: sprays three test streams of 2,000 tracers, 20,000 steps for the longest"]
+fn the_fullest_cell_of_sagittarius_like_s_tube_stays_far_under_the_index() {
+    use hyperion_sim::galaxy::global_list::members::{StreamBandShares, expected_members};
+    use hyperion_sim::galaxy::imf::MassBand;
+    use hyperion_sim::id::{Layer, StreamMemberId};
+    let galaxy = Galaxy::from_params(SEED, GalaxyParams::milky_way_like())
+        .expect("the fixture's parameters are valid");
+    for Sprayed {
+        name, spec, table, ..
+    } in sprayed()
+    {
+        let shares = StreamBandShares::of(&galaxy, spec);
+        let (fullest, along) = (0..table.along_cells())
+            .map(|i| (table.noise(i), i))
+            .fold((0.0, 0), |best, x| if x.0 > best.0 { x } else { best });
+        let cell = TubeCell::from(
+            StreamMemberId::new(
+                table.stream().get(),
+                Layer::A,
+                u16::try_from(along).expect("at most 16,384 cells"),
+                [31, 32],
+                0,
+            )
+            .expect("a cell's ID"),
+        );
+        let peak = expected_members(table, &shares, cell, MassBand::A);
+        eprintln!(
+            "{name}: {} along cells, the fullest's noise {fullest:.2}, its axis cell expects \
+             {peak:.1} M dwarfs",
+            table.along_cells()
+        );
+        assert!(peak < 1_000.0, "{name}: {peak}");
+        if *name == "sagittarius" {
+            assert!((40.0..120.0).contains(&peak), "{peak}");
+        }
+    }
+}
+
+/// A drawn Milky Way galaxy with its debris, and its cheapest stream to spray whose progenitor
+/// lies well inside the root cube, with its tube, built once.
+fn drawn_stream() -> &'static (Galaxy, StreamSpec, std::sync::Arc<TubeTable>) {
+    static DRAWN: OnceLock<(Galaxy, StreamSpec, std::sync::Arc<TubeTable>)> = OnceLock::new();
+    DRAWN.get_or_init(|| {
+        use hyperion_sim::galaxy::global_list::Debris;
+        use hyperion_sim::units::Seconds;
+        let galaxy = Galaxy::from_params(SEED, GalaxyParams::milky_way_like())
+            .expect("the fixture's parameters are valid")
+            .with_full_potential();
+        let debris = Debris::generate(&galaxy);
+        let spec = debris
+            .streams()
+            .iter()
+            .filter(|s| norm(s.position().metres()) < 40_000.0 * METRES_PER_LIGHT_YEAR)
+            .min_by_key(|s| {
+                s.orbit()
+                    .fixed_step(Seconds::from(s.stripping_time()))
+                    .expect("a finite stripping time")
+                    .count()
+            })
+            .expect("a stream inside 40,000 ly")
+            .clone();
+        let tube = TubeTable::build(&galaxy, &spec).expect("the full potential");
+        (galaxy, spec, std::sync::Arc::new(tube))
+    })
+}
+
+/// A lookup that hands out one stream's tube.
+struct OneTube(
+    hyperion_sim::galaxy::global_list::GlobalList,
+    StreamSpec,
+    std::sync::Arc<TubeTable>,
+);
+
+impl hyperion_sim::galaxy::global_list::TubeLookup for OneTube {
+    fn global_list(&self) -> &hyperion_sim::galaxy::global_list::GlobalList {
+        &self.0
+    }
+
+    fn tube(
+        &self,
+        stream: hyperion_sim::galaxy::global_list::StreamNumber,
+    ) -> std::sync::Arc<TubeTable> {
+        assert_eq!(
+            stream,
+            self.1.number(),
+            "the lookup holds one stream's tube"
+        );
+        std::sync::Arc::clone(&self.2)
+    }
+}
+
+/// P10.T8.b: `resolve_with` reaches a drawn stream's members through the caller's tube, each
+/// the record placing it gave; plan 03's `resolve` does not. A member is in the cells its tube's
+/// `cells_touching` finds about it.
+#[test]
+#[ignore = "slow: builds a galaxy's full potential and debris and sprays one of its streams"]
+fn resolve_with_reaches_a_drawn_stream_s_members() {
+    use hyperion_sim::galaxy::global_list::members::{StreamBandShares, stream_cell_members};
+    use hyperion_sim::galaxy::imf::MassBand;
+    use hyperion_sim::galaxy::placement::{ResolveSystemError, resolve, resolve_with};
+    use hyperion_sim::id::{Layer, StreamMemberId};
+    use hyperion_sim::units::LightYears;
+    let (galaxy, spec, tube) = drawn_stream();
+    let shares = StreamBandShares::of(galaxy, spec);
+    let lookup = OneTube(
+        hyperion_sim::galaxy::global_list::GlobalList::default(),
+        spec.clone(),
+        std::sync::Arc::clone(tube),
+    );
+    let mut members = Vec::new();
+    let mut resolved = 0;
+    for along in (0..tube.along_cells()).step_by(3) {
+        for across in [[31, 32], [32, 31], [32, 32]] {
+            let cell = TubeCell::from(
+                StreamMemberId::new(
+                    spec.number().get(),
+                    Layer::A,
+                    u16::try_from(along).expect("at most 16,384 cells"),
+                    across,
+                    0,
+                )
+                .expect("a cell's ID"),
+            );
+            stream_cell_members(galaxy, tube, &shares, cell, MassBand::A, &mut members);
+            for m in &members {
+                let id = m.record().id();
+                assert_eq!(resolve_with(galaxy, id, &lookup), Ok(*m.record()));
+                assert_eq!(
+                    resolve(galaxy, id),
+                    Err(ResolveSystemError::KindNotGenerated)
+                );
+                let touched: Vec<TubeCell> = tube
+                    .cells_touching(m.record().epoch_position(), LightYears::new(0.5))
+                    .collect();
+                assert!(touched.binary_search(&cell).is_ok());
+                resolved += 1;
+            }
+        }
+        if resolved >= 20 {
+            break;
+        }
+    }
+    assert!(resolved >= 20, "{resolved} members resolved");
 }

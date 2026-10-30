@@ -19,8 +19,9 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::features::centre::members::resolve_centre_member;
 use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
 use crate::galaxy::global_list::dwarf_core::{DwarfCoreModel, resolve_dwarf_core_member};
-use crate::galaxy::global_list::{Debris, TubeLookup};
-use crate::id::{DwarfCoreMemberId, SystemId, SystemIdKind};
+use crate::galaxy::global_list::members::{StreamBandShares, resolve_stream_member};
+use crate::galaxy::global_list::{Debris, StreamNumber, TubeLookup};
+use crate::id::{DwarfCoreMemberId, StreamMemberId, SystemId, SystemIdKind};
 
 /// The system `id` names in `galaxy`.
 ///
@@ -96,12 +97,12 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
 ///
 /// # Errors
 ///
-/// As [`resolve`]. A stream's member answers [`ResolveSystemError::KindNotGenerated`] until plan
-/// 10 places it (P10.T8.b). A dwarf core's member is plan 10's
-/// [`resolve_dwarf_core_member`] in its core's model (P10.T7.b), the core's specification drawn
-/// from the galaxy's [`Debris`] until the list holds the cores' (P10.T4); it is
-/// [`ResolveSystemError::NoSuchSystem`] in a galaxy without its kinematic tables, whose debris is
-/// not defined, or for a core the galaxy does not have.
+/// As [`resolve`]. A stream's member is plan 10's [`resolve_stream_member`] in its stream's tube,
+/// which `lookup` gives (P10.T8.b), and a dwarf core's [`resolve_dwarf_core_member`] in its core's
+/// model (P10.T7.b); the stream's and the core's specifications are drawn from the galaxy's
+/// [`Debris`] until the list holds them (P10.T4). Either is [`ResolveSystemError::NoSuchSystem`]
+/// in a galaxy without its kinematic tables, whose debris is not defined, or for a stream or a
+/// core the galaxy does not have, which reads no tube.
 ///
 /// # Examples
 ///
@@ -137,10 +138,10 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
 pub fn resolve_with(
     galaxy: &Galaxy,
     id: SystemId,
-    _lookup: &dyn TubeLookup,
+    lookup: &dyn TubeLookup,
 ) -> Result<SystemRecord, ResolveSystemError> {
     match id.kind() {
-        SystemIdKind::Stream(_) => Err(ResolveSystemError::KindNotGenerated),
+        SystemIdKind::Stream(member) => resolve_listed_stream_member(galaxy, lookup, member),
         SystemIdKind::DwarfCore(member) => resolve_core_member(galaxy, member),
         SystemIdKind::Grid(_)
         | SystemIdKind::FeatureMember(_)
@@ -148,6 +149,27 @@ pub fn resolve_with(
         | SystemIdKind::Pinned(_)
         | SystemIdKind::Catalogue(_) => resolve(galaxy, id),
     }
+}
+
+/// A stream's member, its stream's specification from the galaxy's debris and its tube from
+/// `lookup` ([`resolve_with`]).
+fn resolve_listed_stream_member(
+    galaxy: &Galaxy,
+    lookup: &dyn TubeLookup,
+    id: StreamMemberId,
+) -> Result<SystemRecord, ResolveSystemError> {
+    if galaxy.kinematics().is_none() {
+        return Err(ResolveSystemError::NoSuchSystem);
+    }
+    let debris = Debris::generate(galaxy);
+    let spec = debris
+        .streams()
+        .iter()
+        .find(|stream| stream.number() == StreamNumber::from(id))
+        .ok_or(ResolveSystemError::NoSuchSystem)?;
+    let tube = lookup.tube(spec.number());
+    let shares = StreamBandShares::of(galaxy, spec);
+    resolve_stream_member(galaxy, &tube, &shares, id).map(|member| *member.record())
 }
 
 /// A dwarf core's member, its core's model built from the galaxy's debris ([`resolve_with`]).
@@ -443,8 +465,8 @@ mod tests {
     }
 
     /// Plan 10: `resolve` never resolves a stream's or a dwarf core's member; `resolve_with`
-    /// resolves a core's from P10.T7.b, here in a galaxy without its kinematic tables, which has
-    /// none, and a stream's not yet (P10.T8.b).
+    /// resolves both (P10.T7.b, T8.b), here in a galaxy without its kinematic tables, which has
+    /// none and reads no tube.
     #[test]
     fn stream_and_dwarf_core_members_are_not_generated_by_resolve() {
         let galaxy = galaxy();
@@ -471,11 +493,7 @@ mod tests {
                 Err(ResolveSystemError::KindNotGenerated)
             );
         }
-        assert_eq!(
-            resolve_with(&galaxy, stream, &lookup),
-            Err(ResolveSystemError::KindNotGenerated)
-        );
-        for id in [core, listed] {
+        for id in [stream, core, listed] {
             assert_eq!(
                 resolve_with(&galaxy, id, &lookup),
                 Err(ResolveSystemError::NoSuchSystem)

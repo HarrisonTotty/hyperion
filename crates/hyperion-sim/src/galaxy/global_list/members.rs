@@ -32,9 +32,32 @@
 //! six words of `member.mass` from `6k`, an initial mass in its band and a mark that keeps it with
 //! its weight's odds over the band's greatest; a living star is kept below its age's turn-off, a
 //! dead one only if its remnant is a white dwarf.
+//!
+//! # A stream's members (P10.T8.b)
+//!
+//! Members are a Poisson process in the tube's own coordinates, cell by cell of a [`TubeCell`]
+//! and a band (Design notes 7 and 8):
+//!
+//! - **The mean** of a cell is the tube's mass over the stream's mean member mass and its along
+//!   cells, times the cell's gap noise, the band's share, and along each across axis the normal
+//!   distribution's mass over the cell's span divided by its mass within the cut at ±4 widths
+//!   ([`expected_members`]). So the means of every cell and band sum to the tube's mass over the
+//!   mean member mass, its expected members, to the gap noise's rounding.
+//! - **The count** is a Poisson draw of that mean on `stream.cell`, keyed by `ObjectKey::cell` of
+//!   the raw ID of the cell's member 0 in its band, clamped at the 13-bit index's 8,192 with a
+//!   debug assertion, as plan 03 clamps a grid cell's.
+//! - **Member `i`**'s three uniforms on `stream.member.position`, keyed by its
+//!   [`StreamMemberId`], put it uniformly in its along cell and in each across cell by the
+//!   inverse transform of the normal distribution truncated to it, through plan 06's
+//!   [`normal_quantile`](crate::math::normal_quantile); its position is the tube's
+//!   [`locate`](TubeTable::locate) of the three, so [`TubeTable::cells_touching`] finds it. A
+//!   member outside the root cube is dropped and its index kept. Nothing is thinned: every member
+//!   counted is a member, its star drawn by [`StreamBandShares::draw_star`].
+//! - **Its velocity** is the tube's mean velocity where it lies ([`TubeTable::mean_velocity`]).
 
 use crate::coords::GalacticVelocity;
 use crate::galaxy::Galaxy;
+use crate::galaxy::Population;
 use crate::galaxy::features::interior::counts::{
     WHITE_DWARF_PROGENITOR_MAX, depletion, moments, white_dwarf_mass,
 };
@@ -44,8 +67,10 @@ use crate::galaxy::features::interior::{
 use crate::galaxy::features::members::{ATTEMPT_WORDS, MAX_ATTEMPTS, remnant_fits, systemic_speed};
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
 use crate::galaxy::params::ProgenitorKind;
+use crate::galaxy::placement::ResolveSystemError;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
-use crate::id::SystemId;
+use crate::id::{MemberSlot, StreamMemberId, SystemId};
+use crate::math;
 use crate::rng::{ObjectKey, Stream, Threshold, tags};
 use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
@@ -59,6 +84,7 @@ use super::dwarf_core::{
     metallicity_spread,
 };
 use super::spec::{MassLoss, StreamSpec};
+use super::tube::{CUT_WIDTHS, TubeCell, TubeTable};
 
 /// A member of the global list: its record and what it carries beyond one (Design note 13).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -324,23 +350,29 @@ impl StreamBandShares {
         }
     }
 
-    /// `band`'s share of the members, its living stars' and white dwarfs'; the shares sum to 1.
+    /// `band`'s share of the members, its living stars' and white dwarfs'; the stellar bands'
+    /// shares sum to 1, and a substellar band holds none.
     #[must_use]
     pub fn share(&self, band: MassBand) -> f64 {
-        let b = &self.bands[band.index()];
-        b.living + b.white_dwarfs
+        self.band(band).map_or(0.0, |b| b.living + b.white_dwarfs)
     }
 
     /// `band`'s living stars' share of the members.
     #[must_use]
     pub fn living(&self, band: MassBand) -> f64 {
-        self.bands[band.index()].living
+        self.band(band).map_or(0.0, |b| b.living)
     }
 
     /// `band`'s white dwarfs' share of the members.
     #[must_use]
     pub fn white_dwarfs(&self, band: MassBand) -> f64 {
-        self.bands[band.index()].white_dwarfs
+        self.band(band).map_or(0.0, |b| b.white_dwarfs)
+    }
+
+    /// The shares of a stellar band, or `None` for a substellar one.
+    #[must_use]
+    fn band(&self, band: MassBand) -> Option<&BandShare> {
+        band.is_stellar().then(|| &self.bands[band.index()])
     }
 
     /// The members' mean present mass: a living star's initial mass, a white dwarf's its
@@ -383,7 +415,7 @@ impl StreamBandShares {
         system: SystemId,
         composition: &Composition,
     ) -> Option<(MemberClass, SolarMasses, u32, Years)> {
-        let share = &self.bands[band.index()];
+        let share = self.band(band)?;
         if share.living + share.white_dwarfs <= 0.0 {
             return None;
         }
@@ -531,6 +563,211 @@ fn cluster_band(
         ),
         peak: peak.max(1.0 - kept),
     }
+}
+
+/// The standard normal distribution's cumulative function, by the complementary error function,
+/// which keeps its tail's digits.
+#[must_use]
+fn normal_cdf(x: f64) -> f64 {
+    0.5 * math::erfc(-x / core::f64::consts::SQRT_2)
+}
+
+/// The standard normal distribution's mass within the cut, `Φ(4) − Φ(−4)`.
+#[must_use]
+fn cut_mass() -> f64 {
+    normal_cdf(CUT_WIDTHS) - normal_cdf(-CUT_WIDTHS)
+}
+
+/// The expected members of `band` in `cell` of `tube`, whose stream's band shares are `shares`
+/// (module documentation, "A stream's members").
+///
+/// # Panics
+///
+/// If `cell`'s along cell is not below the tube's [`along_cells`](TubeTable::along_cells).
+#[must_use]
+pub fn expected_members(
+    tube: &TubeTable,
+    shares: &StreamBandShares,
+    cell: TubeCell,
+    band: MassBand,
+) -> f64 {
+    let share = shares.share(band);
+    if share <= 0.0 {
+        return 0.0;
+    }
+    let per_cell =
+        tube.mass().value() / (shares.mean_member_mass().value() * f64::from(tube.along_cells()));
+    let cut = cut_mass();
+    let across = cell
+        .across_widths()
+        .map(|[lo, hi]| (normal_cdf(hi) - normal_cdf(lo)) / cut);
+    per_cell * tube.noise(cell.along()) * share * across[0] * across[1]
+}
+
+/// The ID of member `index` of `band` in `cell` of `tube`.
+///
+/// # Panics
+///
+/// If `band` is not stellar, `cell` is not one of the tube's or `index` is 8,192 or more.
+#[must_use]
+pub fn stream_member_id(
+    tube: &TubeTable,
+    cell: TubeCell,
+    band: MassBand,
+    index: u16,
+) -> StreamMemberId {
+    assert!(
+        band.is_stellar(),
+        "a stream's members are stars, not {band:?}"
+    );
+    let along = u16::try_from(cell.along()).expect("a tube's along cells number at most 16,384");
+    StreamMemberId::new(
+        tube.stream().get(),
+        band.layer(),
+        along,
+        cell.across(),
+        index,
+    )
+    .expect("a tube's cell, a stellar band and an index below 8,192 make an ID")
+}
+
+/// The member count of `band` in `cell` of `tube` (module documentation, "A stream's members").
+///
+/// # Panics
+///
+/// As [`stream_member_id`]; in debug builds, if the draw passes the index.
+#[must_use]
+pub fn stream_member_count(
+    galaxy: &Galaxy,
+    tube: &TubeTable,
+    shares: &StreamBandShares,
+    cell: TubeCell,
+    band: MassBand,
+) -> u16 {
+    let mean = expected_members(tube, shares, cell, band);
+    let word = SystemId::from(stream_member_id(tube, cell, band, 0)).raw();
+    let drawn = Stream::open(galaxy.seed(), tags::STREAM_CELL, ObjectKey::cell(word)).poisson(mean);
+    let limit = MemberSlot::INDEX_LIMIT;
+    debug_assert!(
+        drawn <= u64::from(limit),
+        "a tube cell drew {drawn} members on a mean of {mean}, past its index's {limit}"
+    );
+    u16::try_from(drawn.min(u64::from(limit))).expect("a count clamped at 8,192 fits in u16")
+}
+
+/// The tube coordinates `(u, a, b)` of the member `system` in `cell` of a tube of `cells` along
+/// cells: three uniforms of `stream.member.position` (module documentation).
+#[must_use]
+pub(crate) fn member_coordinates(
+    galaxy: &Galaxy,
+    system: SystemId,
+    cell: TubeCell,
+    cells: u32,
+) -> [f64; 3] {
+    let mut stream = Stream::open(
+        galaxy.seed(),
+        tags::STREAM_MEMBER_POSITION,
+        ObjectKey::from(system),
+    );
+    let u = (f64::from(cell.along()) + stream.uniform()) / f64::from(cells);
+    let [a, b] = cell.across_widths().map(|[lo, hi]| {
+        let (p, q) = (normal_cdf(lo), normal_cdf(hi));
+        // Inside (0, 1) by the cut's ±4 widths, which no rounding of the ranks leaves.
+        math::normal_quantile(p + stream.uniform() * (q - p)).clamp(lo, hi)
+    });
+    [u, a, b]
+}
+
+/// Member `index` of `band` in `cell` of `tube`, whose stream's band shares are `shares`, or
+/// `None` if it lies outside the root cube or its star's draw exhausts its attempts (module
+/// documentation, "A stream's members"). The index is not checked against the count.
+///
+/// # Panics
+///
+/// As [`stream_member_id`].
+#[must_use]
+pub fn stream_member(
+    galaxy: &Galaxy,
+    tube: &TubeTable,
+    shares: &StreamBandShares,
+    cell: TubeCell,
+    band: MassBand,
+    index: u16,
+) -> Option<GlobalMemberRecord> {
+    let system = SystemId::from(stream_member_id(tube, cell, band, index));
+    let [u, a, b] = member_coordinates(galaxy, system, cell, tube.along_cells());
+    let position = tube.locate(u, a, b);
+    if !position.in_root_cube() {
+        return None;
+    }
+    let composition = shares.composition(galaxy, system);
+    let (class, mass, attempt, age) = shares.draw_star(galaxy, band, system, &composition)?;
+    let record = SystemRecord::from_parts(
+        system,
+        position,
+        SystemOrigin::GlobalListMember {
+            attempt: u16::try_from(attempt).expect("an attempt below 4,096 fits in u16"),
+        },
+        Population::Halo,
+        mass,
+        age,
+    );
+    Some(GlobalMemberRecord::new(
+        record,
+        class,
+        composition,
+        tube.mean_velocity(u),
+    ))
+}
+
+/// Every member of `band` in `cell` of `tube`, in index order, into `out` (cleared first): the
+/// cell's count, each index's member if it is one (module documentation, "A stream's members").
+///
+/// # Panics
+///
+/// As [`stream_member_count`].
+pub fn stream_cell_members(
+    galaxy: &Galaxy,
+    tube: &TubeTable,
+    shares: &StreamBandShares,
+    cell: TubeCell,
+    band: MassBand,
+    out: &mut Vec<GlobalMemberRecord>,
+) {
+    out.clear();
+    if !band.is_stellar() {
+        return;
+    }
+    let count = stream_member_count(galaxy, tube, shares, cell, band);
+    out.extend((0..count).filter_map(|i| stream_member(galaxy, tube, shares, cell, band, i)));
+}
+
+/// The member `id` names in the stream of `tube`, whose band shares are `shares`.
+///
+/// # Errors
+///
+/// [`ResolveSystemError::NoSuchSystem`] if `id` is not of `tube`'s stream, its band is not
+/// stellar, its along cell is past the tube's, its index is at or past its cell's count, or its
+/// member lies outside the root cube or its draw exhausted its attempts.
+pub fn resolve_stream_member(
+    galaxy: &Galaxy,
+    tube: &TubeTable,
+    shares: &StreamBandShares,
+    id: StreamMemberId,
+) -> Result<GlobalMemberRecord, ResolveSystemError> {
+    let band = MassBand::of_layer(id.band());
+    let cell = TubeCell::from(id);
+    if id.number() != tube.stream().get()
+        || !band.is_stellar()
+        || cell.along() >= tube.along_cells()
+    {
+        return Err(ResolveSystemError::NoSuchSystem);
+    }
+    if id.index() >= stream_member_count(galaxy, tube, shares, cell, band) {
+        return Err(ResolveSystemError::NoSuchSystem);
+    }
+    stream_member(galaxy, tube, shares, cell, band, id.index())
+        .ok_or(ResolveSystemError::NoSuchSystem)
 }
 
 #[cfg(test)]

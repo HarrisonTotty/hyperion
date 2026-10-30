@@ -964,6 +964,14 @@ domain_tags! {
     /// A dwarf's stream member's offset of its \[Fe/H\] from its dwarf's mean, in units of the
     /// dwarf's spread: one normal draw, two words (P10.T8.a).
     STREAM_MEMBER_ABUNDANCE: System = "stream.member.abundance";
+
+    /// A tube cell's member count in a band (P10.T8.b), opened with `ObjectKey::cell` of the raw
+    /// ID of the cell's member 0 in the band (Design note 14): one Poisson draw from word 0.
+    STREAM_CELL: Cell = "stream.cell";
+
+    /// A stream member's place in its tube cell (P10.T8.b): three uniforms, its along coordinate
+    /// in its along cell, then its two across coordinates' ranks in their truncated normals.
+    STREAM_MEMBER_POSITION: System = "stream.member.position";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface

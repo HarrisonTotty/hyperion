@@ -2013,3 +2013,24 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
   - _Tests._ Fast, `members::tests`: the shares, no NS or BH, a dwarf's tube's ages and [Fe/H];
     `dwarf_core::tests::a_history_cut_at_an_age_keeps_the_older_stars_only`. Slow, by name:
     `a_living_globular_s_stream_carries_what_its_cluster_keeps` (`tests/global_list_debris.rs`).
+- **P10.T8.b as built (lane `p10-t6c`, 2026-10-30, at `GENERATOR_VERSION` 24).** No served
+  output moved. New unwired golden `galaxy/global_list/stream_members.golden`; tags `stream.cell`
+  (`Cell`) and `stream.member.position` (`System`) appended.
+  - _Items._ In `global_list::members`: `expected_members`, `stream_member_id`,
+    `stream_member_count`, `stream_member`, `stream_cell_members` and `resolve_stream_member`,
+    each taking the `TubeTable` and the stream's `StreamBandShares`; `TubeCell` from a
+    `StreamMemberId`. `resolve_with` resolves a stream's member with the lookup's tube and the
+    spec drawn from the galaxy's `Debris` (as for cores, until P10.T4's list).
+  - _The mean._ The tube's mass over the stream's own mean member mass (T8.a's, not the halo's
+    the along cells were cut with) and its along cells, times the noise, the band's share and the
+    two normal masses over the cut's. The means sum to the tube's expected members to 10⁻⁹.
+  - _A member._ `u` uniform in its along cell, `a` and `b` by the truncated normal's inverse
+    transform, its position `locate`'s, so `cells_touching` finds it; its velocity, for T8.c, the
+    tube's mean velocity.
+  - _For T9._ A cell's members are `stream_cell_members` over `cells_touching`'s cells, each
+    tested at the query's time; the census sums `expected_members` over them.
+  - _Tests._ Fast, `members::tests`: the counts along by chi-square, the across coordinates by KS,
+    IDs and resolving, order independence, members outside the root cube dropped, the golden.
+    Slow, by name: `the_fullest_cell_of_sagittarius_like_s_tube_stays_far_under_the_index` and
+    `resolve_with_reaches_a_drawn_stream_s_members` (`tests/global_list_tube.rs`); plan 12's sweep
+    gains the streams' row.
