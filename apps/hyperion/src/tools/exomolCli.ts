@@ -67,6 +67,7 @@ import {
   checkFile,
   type ExoMolDefinition,
   type ExoMolFile,
+  type ExoMolFilesSource,
   type ExoMolSource,
   packVibration,
   partitionFileOf,
@@ -76,6 +77,7 @@ import {
   parsePartitionFunction,
   readDefinition,
   readStates,
+  type RepackSource,
   type StatesLayout,
   streamPass,
   type SurveyedBand,
@@ -267,7 +269,8 @@ const NH3_BROADENERS: ReadonlyArray<BroadeningFile> = [
 ];
 
 /** C2018 (¹⁴NH₃), ExoMol's list valid to 300 K. */
-export const C2018: ExoMolSource = {
+export const C2018: ExoMolFilesSource = {
+  kind: "exomol",
   species: "NH3",
   citation:
     "ExoMol line list C2018 for 14NH3, version 20170131 (P. A. Coles, R. I. Ovsyannikov, O. L. " +
@@ -307,7 +310,8 @@ export const C2018: ExoMolSource = {
 };
 
 /** TYM (¹⁴N₂¹⁶O), ExoMol's list valid to 2,000 K. */
-export const TYM: ExoMolSource = {
+export const TYM: ExoMolFilesSource = {
+  kind: "exomol",
   species: "N2O",
   citation:
     "ExoMol line list TYM for 14N2-16O, version 20240527 (S. N. Yurchenko, T. M. Mellor and J. " +
@@ -387,6 +391,8 @@ export type ExoMolTable =
   | HotTable
   | (ExoMolTableBase & {
       readonly kind: "merged";
+      /** TYM's own files: its states' quanta match its bands to HITRAN2024's. */
+      readonly exomol: ExoMolFilesSource;
       /** The HITRAN2024 part: its lines' source and band assignments, and where the merge splits. */
       readonly hitran: {
         readonly source: LineSource;
@@ -410,7 +416,7 @@ export interface HotTable extends ExoMolTableBase {
    * The list's other isotopologues, binned with it into one set of bins, each at its own Q and
    * abundance (Toto's four minor Ti isotopologues), or none.
    */
-  readonly isotopologues: ReadonlyArray<ExoMolSource>;
+  readonly isotopologues: ReadonlyArray<ExoMolFilesSource>;
   /** What the sidecar records beyond the reduction: the range, holds and choices, each with why. */
   readonly notes: string;
 }
@@ -535,8 +541,9 @@ function archivedList(list: {
   readonly assumedWidth?: AssumedWidth;
   readonly maxDeltaV?: number;
   readonly intensityScale?: ExoMolSource["intensityScale"];
-}): ExoMolSource {
+}): ExoMolFilesSource {
   return {
+    kind: "exomol",
     species: list.species,
     citation: `${list.citation}; ${EXOMOL_2024}`,
     url: archiveUrl(list.record),
@@ -564,10 +571,11 @@ function oneFile(name: string, bytes: number, sha256: string): ReadonlyArray<Tra
  * The representative isotopic compositions of the elements R08.T4.f's lists name that HITRAN holds
  * no abundance for, IUPAC's (J. Meija et al., Isotopic compositions of the elements 2013, Pure
  * Appl. Chem. 88 (2016) 293, Table 1): ¹H 0.999 885, ¹⁶O 0.997 57, ⁴⁶Ti 0.0825, ⁴⁷Ti 0.0744, ⁴⁸Ti
- * 0.7372, ⁴⁹Ti 0.0541, ⁵⁰Ti 0.0518, ⁵⁶Fe 0.917 54, ²⁸Si 0.922 23. Ti's and Fe's were read through
- * `periodictable` 2.1.0's copy of CIAAW's table; H's, O's and Si's, which it holds only as CIAAW
- * 2021's intervals, as NIST's Atomic Weights and Isotopic Compositions tabulates them (through
- * `molmass`'s copy, the science check's); Table 1 itself was not reachable to re-read.
+ * 0.7372, ⁴⁹Ti 0.0541, ⁵⁰Ti 0.0518, ⁵¹V 0.997 50, ⁵⁶Fe 0.917 54, ²⁸Si 0.922 23. Ti's, V's and Fe's
+ * were read through `periodictable` 2.1.0's copy of CIAAW's table; H's, O's and Si's, which it
+ * holds only as CIAAW 2021's intervals, as NIST's Atomic Weights and Isotopic Compositions
+ * tabulates them (through `molmass`'s copy, the science check's); Table 1 itself was not reachable
+ * to re-read.
  */
 const ISOTOPE_FRACTIONS = {
   H1: 0.999_885,
@@ -577,6 +585,7 @@ const ISOTOPE_FRACTIONS = {
   Ti48: 0.737_2,
   Ti49: 0.054_1,
   Ti50: 0.051_8,
+  V51: 0.997_5,
   Fe56: 0.917_54,
   Si28: 0.922_23,
 } as const;
@@ -600,7 +609,7 @@ function totoList(
     readonly pf: readonly [number, string];
     readonly trans: readonly [number, string];
   },
-): ExoMolSource {
+): ExoMolFilesSource {
   const iso = `${mass}Ti-16O__Toto`;
   return archivedList({
     species: "TiO",
@@ -616,7 +625,7 @@ function totoList(
 }
 
 /** Toto's ⁴⁸Ti¹⁶O, the main isotopologue (archive record 5716758). */
-export const TOTO_48: ExoMolSource = totoList(48, 5_716_758, {
+export const TOTO_48: ExoMolFilesSource = totoList(48, 5_716_758, {
   def: [6_844, "5fdf86107b5afa9f40e5a92fc8ce1d3cab547856a9e0e8545527ee38481aec60"],
   states: [5_434_787, "6bd2cb3df67dc10c2c17303098c14572b4ab5b727f61b0515b2c6c66d9439b75"],
   pf: [200_000, "38c80b7adaed26bce40f6c31f52280305626c1ea021028474f48b23d08ab9c30"],
@@ -624,7 +633,7 @@ export const TOTO_48: ExoMolSource = totoList(48, 5_716_758, {
 });
 
 /** Toto's four minor Ti isotopologues (archive records 5716754, 5716756, 5716760 and 5716762). */
-export const TOTO_MINOR: ReadonlyArray<ExoMolSource> = [
+export const TOTO_MINOR: ReadonlyArray<ExoMolFilesSource> = [
   totoList(46, 5_716_754, {
     def: [6_757, "b685a16559f068da2eb7e5646305bf8463fe400f53737160a13bc8479dde53dd"],
     states: [5_401_846, "1d99b13b14daa17cf9f8afbd9dc039c5f13fdf0a97a040c7c3f6c6abb06c08c8"],
@@ -903,6 +912,79 @@ export const WCCRMT: ExoMolSource = archivedList({
   assumedWidth: WCCRMT_WIDTH,
 });
 
+/** HyVO's directory on ExoMol's site, whose `.def` and `.pf` VO's table takes. */
+const HYVO_URL = "https://www.exomol.com/db/VO/51V-16O/HyVO/";
+
+/** Cubillos's REPACK record on Zenodo (version 3, 2025-09-20), which holds HyVO's strong lines. */
+const REPACK_RECORD = 14_266_247;
+
+/**
+ * The terms of VO's lines: HyVO's, the database's licence, which binds REPACK's repacking of it
+ * (whose record states CC BY 4.0), each read at its fetch.
+ */
+const REPACK_TERMS =
+  "CC BY-SA 4.0, the ExoMol database's licence ('All data in ExoMol is released under the Creative " +
+  "Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence', " +
+  "https://www.exomol.com/data/licence/, as read 2026-10-29), HyVO being ExoMol's; REPACK's record " +
+  "on Zenodo, its strong lines repacked from HyVO, states CC BY 4.0 (read 2026-10-30); the values " +
+  "here are reduced from them, adapted material offered under CC BY-SA 4.0 (README.md beside this " +
+  "directory, and NOTICE); the line list's files are not committed (decision-r08-licences.md)";
+
+/**
+ * HyVO's ⁵¹V¹⁶O (ExoMol's recommended VO list, version 20231218, valid to 5,400 K by its
+ * definition) through its strong lines, as Cubillos's REPACK record holds them (version 3: every
+ * line whose line-centre opacity passes a hundredth of the other lines' there at some temperature
+ * of its 100–3,500 K), with HyVO's `.def` and `.pf` from ExoMol's site. Main's ruling of
+ * 2026-10-30: HyVO's 27 transition files over the range are 92.7 GB, and VOMYT's lines carry half
+ * HyVO's strength.
+ */
+export const HYVO_REPACK: RepackSource = {
+  kind: "repack",
+  species: "VO",
+  citation:
+    "ExoMol line list HyVO for 51V-16O, version 20231218 (C. A. Bowesman, Q. Qu, L. K. McKemmish, " +
+    "S. N. Yurchenko and J. Tennyson, ExoMol line lists - LV: Hyperfine-resolved molecular line " +
+    "list for vanadium monoxide (51V16O), Mon. Not. R. Astron. Soc. 529 (2024) 1321-1332, DOI " +
+    "10.1093/mnras/stae542), its strong lines as P. E. Cubillos's REPACK holds them (Repacked " +
+    "ExoMol Opacity Line Lists, Zenodo record 14266247, version 3, 2025-09-20, DOI " +
+    "10.5281/zenodo.14266247, threshold 0.01 over 100-3500 K; the method P. E. Cubillos, An " +
+    "Algorithm to Compress Line-transition Data for Radiative-transfer Calculations, Astrophys. J. " +
+    `850 (2017) 32, ADS 2017ApJ...850...32C); ${EXOMOL_2024}`,
+  url: `${archiveUrl(REPACK_RECORD)}; HyVO's .def and .pf ${HYVO_URL}`,
+  fetched:
+    "2026-10-30, REPACK's file from Zenodo (its MD5 the record's); HyVO's .def and .pf 2026-10-29 " +
+    "from ExoMol's site",
+  terms: REPACK_TERMS,
+  def: {
+    ...fetched(
+      "51V-16O__HyVO.def",
+      7_777,
+      "3f45e96cd915c74906a43d9018c77fbe40f110e140da181224b713c0bc9a290d",
+    ),
+    format: "text",
+  },
+  lines: {
+    ...fetched(
+      "VO_exomol_hyvo_0.22-50um_100-3500K_threshold_0.01_lbl.dat",
+      1_593_290_104,
+      "949a06a2f430d387c52a595e87319b79f38ca071e9f3bca2fcdf614eb54f4dac",
+    ),
+    md5: "cf548637f7977b9754a73ab3ad048d0f",
+    // REPACK's isotope name for 51V16O (its isotopes.dat), on every record.
+    isotope: 16,
+  },
+  partition: {
+    from: "pf",
+    file: fetched(
+      "51V-16O__HyVO.pf",
+      134_999,
+      "33b052747d800f4a6d8dcba4ae651513167bf895f397fcfb8782cacec4d1d63f",
+    ),
+  },
+  abundance: ISOTOPE_FRACTIONS.V51 * ISOTOPE_FRACTIONS.O16,
+  binRangePerCm: HOT_BIN_RANGE_PER_CM,
+};
+
 /** What every R08.T4.f reduction's statement shares (R08.T4.g's, on decision-r08-t4ef-storage's economies). */
 const HOT_SUPER_LINE_REDUCTION =
   "Each 1 nm vacuum cell's absorption at each node from super-lines: every line's S(T) (ExoMol's " +
@@ -938,8 +1020,10 @@ const HOT_TOP_K = 4_000;
  */
 function hotTable(spec: {
   readonly exomol: ExoMolSource;
-  readonly isotopologues?: ReadonlyArray<ExoMolSource>;
+  readonly isotopologues?: ReadonlyArray<ExoMolFilesSource>;
   readonly temperaturesK: ReadonlyArray<number>;
+  /** Where its measured range ends below its top node, K (VO's 3,500 K, REPACK's top), or none. */
+  readonly measuredToK?: number;
   readonly rayleighCm2: RayleighCrossSection;
   readonly what: string;
   readonly notes: string;
@@ -957,7 +1041,7 @@ function hotTable(spec: {
     exomol: spec.exomol,
     isotopologues: spec.isotopologues ?? [],
     basis: spec.basis,
-    measuredRangeK: [first, last],
+    measuredRangeK: [first, spec.measuredToK ?? last],
     temperaturesK: spec.temperaturesK,
     policy: CUTOFF_25,
     saturation: undefined,
@@ -1120,6 +1204,18 @@ export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
       "positive (C3Piu-B3Pig) bands are not in it: the band model of both systems stays pending " +
       "as N2's secondPositive part (bounds.json), its cells over 380-459 nm reaching 10^3-10^7 " +
       "times the table's.",
+  }),
+  VO: hotTable({
+    exomol: HYVO_REPACK,
+    temperaturesK: ladderTemperatures(1_000, HOT_TOP_K, "E1prime"),
+    measuredToK: 3_500,
+    rayleighCm2: heliumRayleighCm2,
+    basis: "measured",
+    what: "VO's bands (HyVO's strong lines, as Cubillos's REPACK holds them, R08.T4.f), from 1000 K (E2).",
+    notes:
+      "Below 1000 K the 1000 K node is held, estimated (decision-r08-t4ef-storage section 1.4, " +
+      "E2); measured to 3500 K, REPACK's top, and estimated above it; above 4000 K the 4000 K " +
+      "node is held, estimated, HyVO being valid to 5400 K.",
   }),
 };
 
@@ -1354,11 +1450,27 @@ export function tableLists(table: ExoMolTable): ReadonlyArray<ExoMolSource> {
   return lists;
 }
 
-/** Checks a list's fetched files against its record: definition, states, transitions and `.pf`. */
+/** The files that hold a list's lines: its states and transition files, or its REPACK file. */
+function linesFilesOf(source: ExoMolSource): ReadonlyArray<ExoMolFile> {
+  let files: ReadonlyArray<ExoMolFile>;
+  switch (source.kind) {
+    case "exomol":
+      files = [source.states, ...source.transitions];
+      break;
+    case "repack":
+      files = [source.lines];
+      break;
+  }
+  return files;
+}
+
+/**
+ * Checks a list's fetched files against its record: definition, states, transitions (or its
+ * REPACK file) and `.pf`.
+ */
 function checkInputs(data: string, source: ExoMolSource): void {
   checkFile(join(data, source.def.name), source.def);
-  checkFile(join(data, source.states.name), source.states);
-  for (const file of source.transitions) {
+  for (const file of linesFilesOf(source)) {
     checkFile(join(data, file.name), file);
   }
   const pf = partitionFileOf(source);
@@ -1394,7 +1506,12 @@ async function sharedPass(
   temperaturesK: ReadonlyArray<number>,
   jobs: number,
 ): Promise<TablePass> {
-  const sources = tableLists(table);
+  const sources = [table.exomol, ...table.isotopologues].map((source) => {
+    if (source.kind !== "exomol") {
+      throw new Error(`${source.species}'s isotopologues share bins from ExoMol's own files only`);
+    }
+    return source;
+  });
   const definitions = sources.map((source) => readDefinition(data, source));
   const heaviestDa = Math.max(...definitions.map((d) => d.molecularMassDa));
   const [low, high] = table.exomol.binRangePerCm;
@@ -1486,7 +1603,7 @@ export async function runExomolBins(rest: readonly string[]): Promise<void> {
     checkInputs(data, list);
   }
   const definition = readDefinition(data, source);
-  const broadening = source.broadeners.map((file) => {
+  const broadening = (source.kind === "exomol" ? source.broadeners : []).map((file) => {
     const dir = values.broad ?? data;
     return parseBroadening(readCheckedText(join(dir, file.name), file.sha256), file, definition);
   });
@@ -1502,7 +1619,10 @@ export async function runExomolBins(rest: readonly string[]): Promise<void> {
   if (table.kind === "hot" && table.isotopologues.length > 0) {
     pass = await sharedPass(table, data, temperaturesK, jobs);
   } else {
-    const states = await readStates(join(data, source.states.name), source);
+    const states =
+      source.kind === "exomol"
+        ? await readStates(join(data, source.states.name), source)
+        : undefined;
     const own = await streamPass(source, definition, states, data, {
       temperaturesK,
       target: { kind: "own", apart },
@@ -2009,12 +2129,14 @@ export function mergeFailures(
 function tableInputs(table: ExoMolTable): string {
   const files: ExoMolFile[] = [];
   for (const s of tableLists(table)) {
-    files.push(s.def, s.states, ...s.transitions);
+    files.push(s.def, ...linesFilesOf(s));
     const pf = partitionFileOf(s);
     if (pf !== undefined) {
       files.push(pf);
     }
-    files.push(...s.broadeners);
+    if (s.kind === "exomol") {
+      files.push(...s.broadeners);
+    }
   }
   const own = files.map((f) => `${f.name} ${f.sha256}`).join(", ");
   const hitran = table.kind === "merged" ? table.hitran : undefined;

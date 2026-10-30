@@ -31,6 +31,10 @@
  *   fetched from the database's archive of each dataset on Zenodo (each record's DOI in its source),
  *   whose definitions are the `.def` text files ({@link parseDefinitionText}). Where a file's
  *   SHA-256 was recorded at an earlier fetch from ExoMol's site, the two are compared.
+ * - **A REPACK file** (R08.T4.f's VO): a list's strong lines as P. E. Cubillos's `repack` writes
+ *   them ({@link RepackFile}), each with its own ν, E″ and g″f and no states file. Its g″f is
+ *   g_u A_ul ÷ (8π² c ν² r_e), so that S(T) = π r_e g″f × e^(−c₂E_l ÷ T) (1 − e^(−c₂ν ÷ T)) ÷ Q(T),
+ *   the intensity above ({@link repackStrengthCm}).
  */
 
 import { spawn } from "node:child_process";
@@ -38,6 +42,7 @@ import { createHash } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { ELECTRON_RADIUS_CM } from "./atomicLines";
 import { SECOND_RADIATION_CONSTANT_CM_K, SPEED_OF_LIGHT_M_PER_S } from "./molecularLines";
 import {
   applyStimulatedEmission,
@@ -127,10 +132,19 @@ export interface BroadeningFile extends ExoMolFile {
 }
 
 /**
- * An ExoMol line list's source record, as R08.T4.g and R08.T4.f read it: one isotopologue's files,
- * layout and abundance.
+ * A REPACK file of a list's strong lines (P. E. Cubillos, Astrophys. J. 850 (2017) 32; its `repack`
+ * code's `read_lbl` and `struct.pack("dddi", …)`): no header, then 28-byte little-endian records,
+ * each f64 ν (cm⁻¹), f64 E″ (cm⁻¹), f64 g″f and i32 isotope tag, mostly in ν's order. Its record's
+ * MD5 is the archive's published checksum, beside the SHA-256 taken at the fetch.
  */
-export interface ExoMolSource {
+export interface RepackFile extends ExoMolFile {
+  readonly md5: string;
+  /** The tag every record carries: the one isotopologue the file holds. */
+  readonly isotope: number;
+}
+
+/** What an ExoMol line list's source record names, whatever file holds its lines. */
+interface LineListRecord {
   /** The registry key. */
   readonly species: string;
   /** The citation: the list's paper and the database's. */
@@ -140,11 +154,8 @@ export interface ExoMolSource {
   readonly fetched: string;
   readonly terms: string;
   readonly def: DefinitionFile;
-  readonly states: ExoMolFile & { readonly layout: StatesLayout };
-  readonly transitions: ReadonlyArray<TransitionFile>;
   /** Where Q(T) comes from ({@link PartitionSource}). */
   readonly partition: PartitionSource;
-  readonly broadeners: ReadonlyArray<BroadeningFile>;
   /**
    * The isotopologue's natural abundance: HITRAN's (hitran.org/docs/iso-meta/) for a species HITRAN
    * holds, and otherwise the product of its atoms' (each source names its own).
@@ -155,16 +166,40 @@ export interface ExoMolSource {
   /** The width every line takes where the definition gives none, a stated estimate. */
   readonly assumedWidth?: AssumedWidth;
   /**
-   * The largest v′ − v″ a transition keeps, by the states' `v` ({@link StatesLayout.v}), or none:
-   * Li2015's CO bands from Δv = 8 are dropped (decision-r08-t4b-t12c.md follow-up 3).
-   */
-  readonly maxDeltaV?: number;
-  /**
    * A factor every binned line's intensity takes, with why, a stated estimate (Li2015's Δv = 7
    * bands scaled to HITRAN2024's measurement-anchored 7–0, as R08.T4.c's bound is), or none.
    */
   readonly intensityScale?: { readonly factor: number; readonly why: string };
 }
+
+/**
+ * An ExoMol line list as its own files hold it, as R08.T4.g and R08.T4.f read it: one
+ * isotopologue's states and transition files, layout and abundance.
+ */
+export interface ExoMolFilesSource extends LineListRecord {
+  readonly kind: "exomol";
+  readonly states: ExoMolFile & { readonly layout: StatesLayout };
+  readonly transitions: ReadonlyArray<TransitionFile>;
+  readonly broadeners: ReadonlyArray<BroadeningFile>;
+  /**
+   * The largest v′ − v″ a transition keeps, by the states' `v` ({@link StatesLayout.v}), or none:
+   * Li2015's CO bands from Δv = 8 are dropped (decision-r08-t4b-t12c.md follow-up 3).
+   */
+  readonly maxDeltaV?: number;
+}
+
+/**
+ * An ExoMol line list's strong lines as a REPACK file holds them ({@link RepackFile}; R08.T4.f's
+ * VO): no states file, so Q(T) is the list's `.pf`, and the mass and default width its `.def`'s.
+ */
+export interface RepackSource extends LineListRecord {
+  readonly kind: "repack";
+  readonly lines: RepackFile;
+  readonly partition: { readonly from: "pf"; readonly file: ExoMolFile };
+}
+
+/** An ExoMol line list's source record: its own files, or a REPACK file of its strong lines. */
+export type ExoMolSource = ExoMolFilesSource | RepackSource;
 
 /**
  * What a list's `def.json` gives the reduction, read from the checksummed file and never typed
@@ -297,7 +332,7 @@ export function readDefinition(dataDir: string, source: ExoMolSource): ExoMolDef
   return source.def.format === "json"
     ? parseDefinition(
         text,
-        source.broadeners.map((file) => file.gas),
+        source.kind === "exomol" ? source.broadeners.map((file) => file.gas) : [],
         source.def.name,
       )
     : parseDefinitionText(text, source.def.name, source.assumedWidth);
@@ -638,7 +673,7 @@ function grown<T extends Float64Array | Int32Array>(
  */
 export async function readStates(
   path: string,
-  source: ExoMolSource,
+  source: ExoMolFilesSource,
   readLines: LineReader = streamBzip2Lines,
 ): Promise<ExoMolStates> {
   const { layout } = source.states;
@@ -767,15 +802,21 @@ export function partitionSumFromPf(pf: ReadonlyMap<number, number>, temperatureK
 /**
  * Q(T) as a list takes it ({@link PartitionSource}): the states' sum, or its `.pf`'s, the file read
  * from the data directory, checked by the caller.
+ *
+ * @param states - The list's states, or none for a list read without them (a REPACK file's).
+ * @throws Error for a sum over states where none are given.
  */
 export function partitionSumsOf(
   source: ExoMolSource,
-  states: ExoMolStates,
+  states: ExoMolStates | undefined,
   dataDir: string,
 ): (temperatureK: number) => number {
   let q: (temperatureK: number) => number;
   switch (source.partition.from) {
     case "states":
+      if (states === undefined) {
+        throw new Error(`${source.species}'s Q(T) is its states' sum, but no states were read`);
+      }
       q = (t) => partitionSum(states, t);
       break;
     case "pf": {
@@ -985,21 +1026,135 @@ export interface PassBins {
 }
 
 /**
- * One streaming pass over a list's transition files: each line within the binned range binned at
- * every temperature asked for (`superLines.ts`), its band's lines binned apart where asked, and the
- * pass's records ({@link PassRecord}); `jobs` files decompressed at once. Q(T) is its source's
- * ({@link PartitionSource}): the states' sum ({@link partitionSum}), or the list's `.pf`, read from
- * `dataDir` ({@link partitionSumFromPf}). A transition past its source's cut on v′ − v″
- * ({@link ExoMolSource.maxDeltaV}) is read and not binned.
+ * Reads a list's transition files that overlap its binned range (or `options.filesPerCm`), each
+ * line given to `onLine`: up to `jobs` decompressions at once, their lines parsed in turn. The first
+ * failure empties the queue and stops the others' reads, and is thrown once every reader has
+ * stopped.
  *
+ * @throws RangeError for a number of jobs that is not a whole number from 1.
+ */
+async function readTransitionFiles(
+  source: ExoMolFilesSource,
+  dataDir: string,
+  options: PassOptions,
+  readLines: LineReader,
+  onLine: (bytes: Uint8Array, start: number, end: number) => void,
+): Promise<void> {
+  const [filesLow, filesHigh] = options.filesPerCm ?? source.binRangePerCm;
+  const files = source.transitions.filter((f) => f.toPerCm > filesLow && f.fromPerCm < filesHigh);
+  if (!(Number.isInteger(options.jobs) && options.jobs >= 1)) {
+    throw new RangeError(`a pass takes a whole number of jobs from 1, not ${options.jobs}`);
+  }
+  const queue = [...files];
+  const stop = new AbortController();
+  let failure: unknown;
+  const workers = Array.from({ length: options.jobs }, async () => {
+    for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
+      const begun = performance.now();
+      try {
+        // Each worker takes its files one after another, so that `jobs` run at once and no more.
+        // oxlint-disable-next-line eslint/no-await-in-loop
+        const read = await readLines(join(dataDir, file.name), onLine, stop.signal);
+        process.stdout.write(
+          `exomol-bins: ${file.name} ${read} lines, ${((performance.now() - begun) / 1000).toFixed(0)} s\n`,
+        );
+      } catch (error: unknown) {
+        failure ??= error;
+        queue.length = 0;
+        stop.abort();
+      }
+    }
+  });
+  await Promise.all(workers);
+  if (failure !== undefined) {
+    throw failure instanceof Error
+      ? failure
+      : new Error("a pass's reader failed", { cause: failure });
+  }
+}
+
+/** A REPACK record's bytes: three f64 and an i32 ({@link RepackFile}). */
+export const REPACK_RECORD_BYTES = 28;
+
+/** The records a REPACK file is read by at once: 28 MiB a read. */
+const REPACK_CHUNK_RECORDS = 1 << 20;
+
+/**
+ * A REPACK file's records ({@link RepackFile}), each given to `onRecord` in the file's order as its
+ * ν (cm⁻¹), E″ (cm⁻¹), g″f and isotope tag; the file read in chunks, never held whole.
+ *
+ * @returns The records read.
+ * @throws Error for a file whose size is not a whole number of records.
+ */
+export function readRepackLines(
+  path: string,
+  onRecord: (nu: number, eLower: number, gf: number, isotope: number) => void,
+): number {
+  const bytes = statSync(path).size;
+  if (bytes % REPACK_RECORD_BYTES !== 0) {
+    throw new Error(
+      `${path} is ${bytes} bytes, not a whole number of ${REPACK_RECORD_BYTES}-byte records`,
+    );
+  }
+  const buffer = Buffer.allocUnsafe(REPACK_CHUNK_RECORDS * REPACK_RECORD_BYTES);
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  const fd = openSync(path, "r");
+  let records = 0;
+  let position = 0;
+  try {
+    while (position < bytes) {
+      const read = readSync(fd, buffer, 0, Math.min(buffer.length, bytes - position), position);
+      if (read === 0 || read % REPACK_RECORD_BYTES !== 0) {
+        throw new Error(`${path}: a read at ${position} gave ${read} bytes, not whole records`);
+      }
+      for (let at = 0; at < read; at += REPACK_RECORD_BYTES) {
+        onRecord(
+          view.getFloat64(at, true),
+          view.getFloat64(at + 8, true),
+          view.getFloat64(at + 16, true),
+          view.getInt32(at + 24, true),
+        );
+      }
+      records += read / REPACK_RECORD_BYTES;
+      position += read;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return records;
+}
+
+/**
+ * A REPACK line's strength before the Boltzmann factor, Q(T) and stimulated emission, cm a
+ * molecule: π r_e g″f, which is g_u A_ul ÷ (8π c ν²), ExoMol's, since `repack` writes
+ * g″f = g_u A_ul ÷ (8π² c ν² r_e) (its `utils.py`: g A C1 ÷ (8π c ν²) with C1 = 4ε₀ mₑ c² ÷ e² =
+ * 1 ÷ (π r_e), cm⁻¹; and its own S = C3 g″f e^(−c₂E″ ÷ T) (1 − e^(−c₂ν ÷ T)) ÷ Q, C3 = πe² ÷
+ * (mₑc²) = π r_e). r_e is CODATA 2018's ({@link ELECTRON_RADIUS_CM}).
+ */
+export function repackStrengthCm(gf: number): number {
+  return Math.PI * ELECTRON_RADIUS_CM * gf;
+}
+
+/**
+ * One streaming pass over a list's lines: each line within the binned range binned at every
+ * temperature asked for (`superLines.ts`), its band's lines binned apart where asked, and the
+ * pass's records ({@link PassRecord}). An ExoMol list's transition files are read against its
+ * states, `jobs` files decompressed at once; a REPACK file's records are read in turn
+ * ({@link readRepackLines}), each its own ν, E″ and g″f ({@link repackStrengthCm}). Q(T) is its
+ * source's ({@link PartitionSource}): the states' sum ({@link partitionSum}), or the list's `.pf`,
+ * read from `dataDir` ({@link partitionSumFromPf}). A transition past its source's cut on v′ − v″
+ * ({@link ExoMolFilesSource.maxDeltaV}) is read and not binned.
+ *
+ * @param states - The list's states, or none for a REPACK file's lines.
  * @param dataDir - The directory holding the source's fetched files, each checked by the caller.
- * @throws Error for a transition whose state is unknown or has no energy.
+ * @throws Error for a transition whose state is unknown or has no energy, an ExoMol list given no
+ *   states, or a REPACK record of another isotopologue.
  * @throws RangeError for shared bins not one a temperature.
  */
 export async function streamPass(
   source: ExoMolSource,
   definition: ExoMolDefinition,
-  states: ExoMolStates,
+  states: ExoMolStates | undefined,
   dataDir: string,
   options: PassOptions,
   readLines: LineReader = streamBzip2Lines,
@@ -1061,11 +1216,11 @@ export async function streamPass(
   const surveyed = survey.map(() => new Map<number, SurveyedBand>());
   let linesRead = 0;
   let linesBinned = 0;
-  const { energiesPerCm, degeneracies } = states;
   const scale = source.intensityScale?.factor ?? 1;
-  const vOf = source.maxDeltaV === undefined ? undefined : states.v;
-  const maxDeltaV = source.maxDeltaV ?? Infinity;
-  if (source.maxDeltaV !== undefined && vOf === undefined) {
+  const cutDeltaV = source.kind === "exomol" ? source.maxDeltaV : undefined;
+  const vOf = cutDeltaV === undefined ? undefined : states?.v;
+  const maxDeltaV = cutDeltaV ?? Infinity;
+  if (cutDeltaV !== undefined && vOf === undefined) {
     throw new Error(`${source.species}'s cut on v' - v'' needs its states' v`);
   }
   // The hot loop's arrays: each set's values, and each temperature's reciprocal step (both sets
@@ -1075,32 +1230,18 @@ export async function streamPass(
   const apartValues = apart?.map((b) => b.values);
   const inverseSteps = Float64Array.from(main, (b) => 1 / b.stepPerCm);
   const emptyValues = new Float64Array(0);
-  const fields = new Int32Array(16);
-  const onLine = (bytes: Uint8Array, start: number, end: number): void => {
-    linesRead += 1;
-    const n = splitFields(bytes, start, end, fields);
-    const upper = parseNumber(bytes, fields[0] ?? 0, fields[1] ?? 0);
-    const lower = parseNumber(bytes, fields[2] ?? 0, fields[3] ?? 0);
-    const eUpper = energiesPerCm[upper] ?? Number.NaN;
-    const eLower = energiesPerCm[lower] ?? Number.NaN;
-    const nu = n >= 4 ? parseNumber(bytes, fields[6] ?? 0, fields[7] ?? 0) : eUpper - eLower;
-    if (!(nu >= low && nu <= high)) {
-      return;
-    }
-    if (!Number.isFinite(eUpper) || !Number.isFinite(eLower)) {
-      throw new Error(`a transition ${upper} - ${lower} names a state the states file lacks`);
-    }
-    if (vOf !== undefined && (vOf[upper] ?? 0) - (vOf[lower] ?? 0) > maxDeltaV) {
-      return;
-    }
-    const a = parseNumber(bytes, fields[4] ?? 0, fields[5] ?? 0);
-    const strength = (scale * (degeneracies[upper] ?? 0) * a) / (8 * Math.PI * cCmPerS * nu * nu);
-    if (!(strength > 0)) {
-      return;
-    }
+  // A line's binning at every temperature and its records, from its ν (within [low, high]), E″ and
+  // strength before the Boltzmann factor and Q, cm a molecule; its states' IDs where it has them.
+  const deposit = (
+    nu: number,
+    eLower: number,
+    strength: number,
+    upper: number,
+    lower: number,
+  ): void => {
     linesBinned += 1;
     let band = -1;
-    if (states.vibration !== undefined && apartRange !== undefined) {
+    if (states?.vibration !== undefined && apartRange !== undefined) {
       if (nu >= apartRange[0] && nu <= apartRange[1]) {
         band = bandKey(states.vibration[upper] ?? 0, states.vibration[lower] ?? 0);
       }
@@ -1164,9 +1305,9 @@ export async function streamPass(
       }
     }
     if (broadening.length > 0) {
-      const uJ = states.j[upper] ?? 0;
-      const lJ = states.j[lower] ?? 0;
-      const lK = states.k?.[lower] ?? 0;
+      const uJ = states?.j[upper] ?? 0;
+      const lJ = states?.j[lower] ?? 0;
+      const lK = states?.k?.[lower] ?? 0;
       for (const sums of broadening) {
         const [gamma, exponent] = broadWidth(sums.table, uJ, lJ, lK);
         sums.intensityHalfWidthPerBar += s296 * gamma;
@@ -1174,38 +1315,57 @@ export async function streamPass(
       }
     }
   };
-  const [filesLow, filesHigh] = options.filesPerCm ?? [low, high];
-  const files = source.transitions.filter((f) => f.toPerCm > filesLow && f.fromPerCm < filesHigh);
-  // Up to `jobs` decompressions at once, their lines parsed here in turn. The first failure
-  // empties the queue and stops the others' reads, and is thrown once every worker has stopped.
-  if (!(Number.isInteger(options.jobs) && options.jobs >= 1)) {
-    throw new RangeError(`a pass takes a whole number of jobs from 1, not ${options.jobs}`);
-  }
-  const queue = [...files];
-  const stop = new AbortController();
-  let failure: unknown;
-  const workers = Array.from({ length: options.jobs }, async () => {
-    for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
-      const begun = performance.now();
-      try {
-        // Each worker takes its files one after another, so that `jobs` run at once and no more.
-        // oxlint-disable-next-line eslint/no-await-in-loop
-        const read = await readLines(join(dataDir, file.name), onLine, stop.signal);
-        process.stdout.write(
-          `exomol-bins: ${file.name} ${read} lines, ${((performance.now() - begun) / 1000).toFixed(0)} s\n`,
-        );
-      } catch (error: unknown) {
-        failure ??= error;
-        queue.length = 0;
-        stop.abort();
-      }
+  const energiesPerCm = states?.energiesPerCm ?? emptyValues;
+  const degeneracies = states?.degeneracies ?? emptyValues;
+  const fields = new Int32Array(16);
+  // An ExoMol transition: upper and lower state IDs, A, and ν where the file gives it.
+  const onLine = (bytes: Uint8Array, start: number, end: number): void => {
+    linesRead += 1;
+    const n = splitFields(bytes, start, end, fields);
+    const upper = parseNumber(bytes, fields[0] ?? 0, fields[1] ?? 0);
+    const lower = parseNumber(bytes, fields[2] ?? 0, fields[3] ?? 0);
+    const eUpper = energiesPerCm[upper] ?? Number.NaN;
+    const eLower = energiesPerCm[lower] ?? Number.NaN;
+    const nu = n >= 4 ? parseNumber(bytes, fields[6] ?? 0, fields[7] ?? 0) : eUpper - eLower;
+    if (!(nu >= low && nu <= high)) {
+      return;
     }
-  });
-  await Promise.all(workers);
-  if (failure !== undefined) {
-    throw failure instanceof Error
-      ? failure
-      : new Error("a pass's reader failed", { cause: failure });
+    if (!Number.isFinite(eUpper) || !Number.isFinite(eLower)) {
+      throw new Error(`a transition ${upper} - ${lower} names a state the states file lacks`);
+    }
+    if (vOf !== undefined && (vOf[upper] ?? 0) - (vOf[lower] ?? 0) > maxDeltaV) {
+      return;
+    }
+    const a = parseNumber(bytes, fields[4] ?? 0, fields[5] ?? 0);
+    const strength = (scale * (degeneracies[upper] ?? 0) * a) / (8 * Math.PI * cCmPerS * nu * nu);
+    if (strength > 0) {
+      deposit(nu, eLower, strength, upper, lower);
+    }
+  };
+  switch (source.kind) {
+    case "exomol":
+      if (states === undefined) {
+        throw new Error(`${source.species}'s transitions are read against its states: none given`);
+      }
+      await readTransitionFiles(source, dataDir, options, readLines, onLine);
+      break;
+    case "repack": {
+      const { name, isotope } = source.lines;
+      readRepackLines(join(dataDir, name), (nu, eLower, gf, tag) => {
+        linesRead += 1;
+        if (!(nu >= low && nu <= high)) {
+          return;
+        }
+        if (tag !== isotope) {
+          throw new Error(`${name}'s line at ${nu} cm-1 is of isotope ${tag}, not ${isotope}`);
+        }
+        const strength = scale * repackStrengthCm(gf);
+        if (strength > 0) {
+          deposit(nu, eLower, strength, -1, -1);
+        }
+      });
+      break;
+    }
   }
   // Shared bins take stimulated emission from their caller, once every list is in them.
   for (const bins of target.kind === "own" ? [...main, ...(apart ?? [])] : []) {

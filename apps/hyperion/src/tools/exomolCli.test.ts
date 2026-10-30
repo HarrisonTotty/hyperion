@@ -229,7 +229,12 @@ describe("the grids and the records", () => {
       // Every file of every list the table takes, its isotopologues' among them, with its SHA-256.
       const files: ExoMolFile[] = [];
       for (const list of tableLists(table)) {
-        files.push(list.def, list.states, ...list.transitions, ...list.broadeners);
+        files.push(
+          list.def,
+          ...(list.kind === "exomol"
+            ? [list.states, ...list.transitions, ...list.broadeners]
+            : [list.lines]),
+        );
         const pf = partitionFileOf(list);
         if (pf !== undefined) {
           files.push(pf);
@@ -237,7 +242,9 @@ describe("the grids and the records", () => {
       }
       expect(source.terms).toMatch(/CC BY-SA 4\.0/u);
       expect(files.filter((f) => !source.inputs.includes(`${f.name} ${f.sha256}`))).toEqual([]);
-      expect(files.length).toBeGreaterThanOrEqual(4);
+      // Each list names three files at least: its definition and its states and a transition
+      // file, or its definition, its REPACK file and its .pf.
+      expect(files.length).toBeGreaterThanOrEqual(3 * tableLists(table).length);
       expect(source.description).toMatch(/CC BY-SA 4\.0/u);
     }
   });
@@ -323,9 +330,17 @@ describe("R08.T4.f's hot tables (decision-r08-t4ef-storage §1.4; decision-r08-t
     ["H2S", 296, 1_500],
     ["CO", 300, 4_000],
     ["HCN", 300, 4_000],
+    ["VO", 1_000, 4_000],
   ] as const)("run %s from its floor or hand-over, %i K, to %i K (E2)", (species, first, last) => {
     const nodes = hot(species).temperaturesK;
     expect([nodes[0], nodes.at(-1)]).toEqual([first, last]);
+  });
+
+  it("measure VO to 3,500 K, REPACK's top, its nodes running on to 4,000 K", () => {
+    expect([hot("VO").measuredRangeK, hot("VO").temperaturesK.at(-1)]).toEqual([
+      [1_000, 3_500],
+      4_000,
+    ]);
   });
 
   it("take E1′'s 18 nodes over 1,000–4,000 K", () => {
