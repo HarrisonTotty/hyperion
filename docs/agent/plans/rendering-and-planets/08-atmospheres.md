@@ -23274,3 +23274,98 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     the table's own limit, −√(1 − (R ÷ (R + h_top))²), to first order, not Design note 7's (the
     camera's). The plan's entry ("over the lit air above the planet's shadow") already reads
     correctly; this is for main's next brief.
+- **Deviations in R08.T4.f's part 2, as built** (2026-10-30, lane r08-t4f2; main's VO ruling of
+  2026-10-30, on research advice; decision-r08-t4ef-storage and decision-r08-licences). Part 1's
+  pending pair: VO is drawn here; hot H₂O is built on the owner's laptop instead (main, 2026-10-30),
+  its record that branch's.
+  - _Files._ `src/tools/exomolLines.ts` (`ExoMolSource` a union on `kind`: `ExoMolFilesSource`,
+    every earlier list's states and transition files, and `RepackSource`, a REPACK file of a list's
+    strong lines; `RepackFile`, `readRepackLines`, `REPACK_RECORD_BYTES` and `repackStrengthCm`;
+    `streamPass` and `partitionSumsOf` take a list's states or none, the pass's per-line deposit
+    shared by its two readers, its ExoMol path unchanged, the files' queue split out as
+    `readTransitionFiles`), `exomolCli.ts` (`HYVO_REPACK`, `ISOTOPE_FRACTIONS.V51`, `hotTable`'s
+    `measuredToK`, `linesFilesOf`, the narrowing where states and transition files are read, and
+    VO's `HOT_TABLES` entry), with their tests; the client's
+    `absorbers/exomol/kDistributions/VO.json` and its ten parts, new;
+    `exomol/lineReferencesHot.json`; `exomol/bounds.json` and `transparency.ts`, VO's pending entry
+    gone; `atmosphereInput.ts` (`ATMOSPHERE_OPTICS_VERSION` 4); `exomol/README.md` and `NOTICE`;
+    tests `hotLines.test.ts` and `assemble.test.ts`. No Rust, wire, WGSL or generator change, and
+    no GENERATOR_VERSION bump.
+  - _The source, superseding the bullet's "VO (ExoMol's HyVO list, cited at fetch)"_: HyVO's strong
+    lines as P. E. Cubillos's REPACK record on Zenodo holds them (record 14266247, version 3,
+    2025-09-20, DOI 10.5281/zenodo.14266247; the method Cubillos 2017, Astrophys. J. 850, 32): every
+    HyVO line whose line-centre opacity passes a hundredth of the other lines' there at some
+    temperature of 100–3,500 K. HyVO's own 27 transition files over the range are 92.7 GB, past
+    the cap on any machine the lane reaches, and VOMYT (McKemmish et al. 2016), the other list,
+    carries about half HyVO's strength over the range (0.50 summed, 0.38–0.68 by system: the
+    research advice), so main ruled for REPACK. HyVO's `.def` and `.pf` came from ExoMol's site
+    through the owner's machine; the REPACK file (1,593,290,104 bytes, its MD5 the record's) from
+    Zenodo.
+  - _The format and the strength._ `repack`'s `read_lbl` and its `struct.pack("dddi", …)` give
+    28-byte little-endian records: f64 ν, f64 E″, f64 g″f and an i32 isotope tag (16, ⁵¹V¹⁶O's, on
+    every record, the reader refusing another). Its `utils.py` writes g″f = g′A C1 ÷ (8π c ν²) with
+    C1 = 4ε₀mₑc² ÷ e² = 1 ÷ (π r_e), and its `pack.py` applies the isotope ratio only when it
+    evaluates a line, so the pipeline's S = π r_e g″f is ExoMol's g′A ÷ (8π c ν²) and takes the
+    abundance as every list does (CIAAW's ⁵¹V, 0.997 50, through `periodictable` 2.1.0, times
+    ¹⁶O's). Every later step is the pipeline's: the Boltzmann factor on E″, Q(T) from HyVO's `.pf`,
+    stimulated emission, the bins. A toy REPACK file bins as the same lines given as transitions do,
+    to 10⁻¹² (`exomolLines.test.ts`).
+  - _The waiver_ (main, 2026-10-30): decision-r08-t4ef-storage §5.4's "not reduced by intensity
+    cut-offs" is waived for VO, since REPACK keeps HyVO's strong lines alone: 7,594,976 of its
+    56,903,218 records lie in 13,100–26,400 cm⁻¹. The rule's reasons (a cut-off saves no download,
+    and drops the hot bands' weak-line quasi-continuum) are met by measurement instead. Against the
+    removed bound's HyVO cell means (ExoMol's cross-section service, per molecule of ⁵¹V¹⁶O) the
+    pass's direct sums over the cells above a hundredth of the peak are 0.991, 0.985 and 0.974
+    summed at 1,000, 2,000 and 3,000 K (main's gate: within 3%); cell by cell 0.947–1.008 between
+    the 10th and 90th percentiles, 0.904–1.053 at the extremes (623 and 607 nm; 653 nm), and to
+    0.83 in a cell at a thousandth of the peak (602 nm at 1,000 K). The research's 0.970 at
+    3,000 K took VOMYT's Q; HyVO's `.pf` gives 0.974.
+  - _The range._ 1,000–4,000 K on E1′'s 18 nodes (E2, as TiO), measured to 3,500 K, REPACK's top
+    (`hotTable`'s `measuredToK`, the sidecar's `measuredRangeK` [1,000, 3,500]), and estimated
+    above it, where the hot weak lines' share grows (the deficit extrapolates to about 5% summed at
+    4,000 K); above 4,000 K the 4,000 K node is held, estimated, HyVO being valid to 5,400 K.
+  - _The licence._ HyVO is ExoMol's, under CC BY-SA 4.0; REPACK's record states CC BY 4.0 for its
+    repacking, which ExoMol's share-alike still binds. The table keeps CC BY-SA 4.0 in files of its
+    own, with `exomol/README.md` and `NOTICE` citing Bowesman et al. 2024 (MNRAS 529, 1321), REPACK's
+    record and Cubillos 2017, as decision-r08-licences rules for share-alike data and part 1's
+    tables are.
+  - _The projection_ (pod, 8 vCPU): 381 cells, G 20/12/32 (548/721/547 nm), 5.92 MB on E1′–E3 (as
+    specified 29.82 MB), 1.17 CPU-s a cell-node; no refinement.
+  - _The table, as built_ (the columns as part 1's table above):
+
+    | Species | Cells | Nodes, K        | P (kept, kPa)     | G = 1 |        Node |       Chain |      16-bit |        1 Pa | Beyond cap | Parts |     Bytes | Basis                                    |
+    | ------- | ----: | --------------- | ----------------- | ----: | ----------: | ----------: | ----------: | ----------: | ---------: | ----: | --------: | ---------------------------------------- |
+    | VO      |   381 | 1,000–4,000, 18 | 22 (177.8, 562.3) |     0 | 8.09 × 10⁻⁴ | 1.29 × 10⁻³ | 1.69 × 10⁻⁵ | 1.71 × 10⁻³ |       0.00 |    10 | 4,491,939 | `measured` to 3,500 K, `estimated` above |
+
+    Its first pass, on E3's 20 pressures, failed the chain tier (to 2.33 × 10⁻³ at 688 and
+    732–733 nm, 1,000–1,100 K) at the dropped alternates, so it was reduced again whole on the 22
+    the merge asked for, as H₂S and HCN were. The cap's directories hold 109,359,599 of
+    150,000,000 bytes, 40,640,401 left for hot H₂O. References: 548 and 721 nm, the projection's
+    strongest and median samples.
+
+  - _`ATMOSPHERE_OPTICS_VERSION`_ is raised from 3 to 4, by its own rule: VO is drawn where it was
+    pending.
+  - _Hot H₂O, as this lane left it._ POKAZATEL's 133 transition files over the range (8.46 GB) were
+    shared with the lane and checked by SHA-256; its source record, `HOT_TABLES` entry and H₂O's
+    Rayleigh mirror were written (20af738), and its first binning pass reached 74 of the 133 files
+    before the pod was lost with the owner's machine's reboot. Sending the files through that
+    machine had exhausted its memory, so main moved H₂O to a laptop-side reduction, and 20af738 is
+    reverted (ff1430c): landing may skip both. The hand-over's step was not measured here.
+  - _Costs_ (pod, 8 vCPU, 32 GiB). Downloads 1.59 GB (REPACK, from Zenodo, 406 s); the VO bins
+    11 s; the projection 63 CPU-s; the reductions 3.07 cell-hours over both passes, eight workers
+    at once, about 11 min of wall time each, 450 MB peak resident a worker; references 27 s.
+  - _Questions, with leans_ (2026-10-30), listed for main:
+    - One raise of `ATMOSPHERE_OPTICS_VERSION` for part 2: VO's commit takes it to 4, and H₂O's
+      laptop commit may raise it too. Lean: a single raise to 4 covering both when they are merged.
+    - REPACK's record states CC BY 4.0: lean, the table stays CC BY-SA 4.0, HyVO's.
+    - `ExoMolSource` as a union on `kind`, the REPACK reader beside ExoMol's own files: lean, as
+      built; a list streamed file by file (the advice's HyVO option 1) would be a third kind.
+- **Deferred findings (2026-10-13 rule)** (R08.T4.f's part 2). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _VO's weak lines._ REPACK's dropped lines are 1–3% of the summed cell means at 1,000–3,000 K and
+    up to 17% in the weakest window cells; streaming HyVO's own files would remove the deficit, for
+    a later task on a machine that reaches ExoMol's site.
+  - _VO's widths._ Every line takes HyVO's default width, 0.07 cm⁻¹ bar⁻¹ with n = 0.5, so every
+    line shape is `estimated`, as every hot table's is.
+  - _`exomol/README.md`'s bounds bullet_ still lists every list R08.T4.c summed (HyVO, Toto,
+    MoLLIST's FeH and the others) though their entries left `bounds.json` with their tables.
