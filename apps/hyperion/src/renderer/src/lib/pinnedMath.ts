@@ -16,7 +16,8 @@
  *
  * JavaScript's `+ - * /` and `Math.sqrt` are IEEE 754's correctly rounded operations on every
  * platform, and V8's compilers never fuse a multiply and an add, so these ports, which use nothing
- * else (with `Math.abs`, `Math.floor` and the reinterpretation of a double's bits, all exact), give
+ * else (with `Math.abs`, `Math.floor`, `Math.trunc` and the reinterpretation of a double's bits,
+ * all exact), give
  * the same bits everywhere: the bits of `libm` itself, as `hyperion_base::math` returns them on
  * every target of the sim. `src/math/<name>.rs` below is that crate's file. `crates/hyperion-base`'s
  * `tests/client_math_golden.rs` writes `libm`'s values at random inputs, each function's special
@@ -30,6 +31,19 @@
  * `force_eval!` calls, which raise floating-point exception flags and change no value, are left
  * out, as are the paths no `f64` input reaches (`rem_pio2_large`'s other precisions, `cbrt`'s
  * directed roundings).
+ *
+ * The functions the optics, the bakes and the case gate call most (`exp`, `expm1`, `log`, `pow`,
+ * `sin`, `cos`, `atan`, `atan2` and `cbrt`) take their common arguments by a fast path first, and
+ * hand the rest to the whole port, `<name>Port`. A fast path is the port's own path for those
+ * arguments, its operations in its order, with its constants local to the function, since V8 reads
+ * a module's constant from its context as a boxed number at every use; where `libm` writes a
+ * double's words only to scale it by a power of two or to clear its low word, it forms the same
+ * double arithmetically ({@link twoTo}, {@link zeroLowWord}). Nothing on a fast path allocates, and
+ * a port's result reaches it through {@link asNumber}. Per call on the
+ * case gate's and the optics' arguments, the ports alone against the fast paths (pod, 16 vCPU,
+ * 2026-10-30): `exp` 14.2 against 11.3 ns, `expm1` 19.3 against 8.1, `log` 29.7 against 13.5,
+ * `sin` 26.2 against 18.4, `atan2` 34.7 against 25.5, `cbrt` 66.1 against 37.5, and `pow` of a
+ * fractional power 186 against 124.
  *
  * The FreeBSD msun sources these ports descend from carry Sun Microsystems' notice, which is
  * preserved here as `libm` carries it:
@@ -153,6 +167,41 @@ function scalbn(x: number, n: number): number {
   return y * fromWords((0x3ff + m) * 0x100000, 0);
 }
 
+/**
+ * 2ⁿ at n + 1074, for each power of two a double holds (n in [−1074, 1023]): 1 doubled and halved,
+ * each step exact.
+ */
+const POWERS_OF_TWO = ((): Float64Array => {
+  const powers = new Float64Array(1074 + 1024);
+  for (let n = 0, power = 1; n <= 1023; n += 1, power *= 2) {
+    powers[1074 + n] = power;
+  }
+  for (let n = 0, power = 1; n >= -1074; n -= 1, power *= 0.5) {
+    powers[1074 + n] = power;
+  }
+  return powers;
+})();
+
+/**
+ * `x` itself, typed as a number for V8: a fast path returns a port's result through it, so that V8,
+ * which knows nothing of an un-inlined call's result, need not box the fast path's own result to
+ * merge the two (exp on wide arguments: 14.0 ns a call against 16.9 without it; pod, 16 vCPU,
+ * 2026-10-30).
+ */
+function asNumber(x: number): number {
+  // The conversion is the point: V8 types its result as a number, as the TSDoc above says.
+  // oxlint-disable-next-line no-unnecessary-type-conversion
+  return +x;
+}
+
+/**
+ * 2ⁿ for an integer n in [−1074, 1023], exact: the double `scalbn` multiplies by where n is
+ * normal, from a table where `libm` writes its words.
+ */
+function twoTo(n: number): number {
+  return POWERS_OF_TWO[1074 + n] ?? Number.NaN;
+}
+
 // `src/math/exp.rs` (FreeBSD's e_exp.c).
 const EXP_LN2HI = 6.9314718036912381649e-1; /* 0x3fe62e42, 0xfee00000 */
 const EXP_LN2LO = 1.90821492927058770002e-10; /* 0x3dea39ef, 0x35793c76 */
@@ -172,8 +221,57 @@ const EXP_P5 = 4.13813679705723846039e-8; /* 0x3E663769, 0x72BEA4D0 */
  * Ported line for line from `libm` 0.2.16's `src/math/exp.rs` (FreeBSD's `e_exp.c`): `x` is reduced
  * to r = x − k ln 2 with |r| ≤ ½ ln 2, e^r comes from a degree-5 Remez fit of r (e^r + 1) ÷ (e^r − 1),
  * and the result is scaled by 2ᵏ. Under 1 ulp (`exp.rs`'s own statement).
+ *
+ * Below |x| = 708.39…, where `exp.rs` reduces and scales with 2ᵏ normal, this takes its path
+ * itself, with its constants local and 2ᵏ from {@link twoTo}; {@link expPort} takes the rest.
  */
 export function exp(x: number): number {
+  const ln2Hi = 6.9314718036912381649e-1; /* 0x3fe62e42, 0xfee00000 */
+  const ln2Lo = 1.90821492927058770002e-10; /* 0x3dea39ef, 0x35793c76 */
+  // exp.rs's literal for 1 ÷ ln 2, kept as written (the double Math.LOG2E is).
+  // oxlint-disable-next-line approx-constant
+  const invLn2 = 1.442695040888963387; /* 0x3ff71547, 0x652b82fe */
+  const p1 = 1.66666666666666019037e-1; /* 0x3FC55555, 0x5555553E */
+  const p2 = -2.77777777770155933842e-3; /* 0xBF66C16C, 0x16BEBD93 */
+  const p3 = 6.61375632143793436117e-5; /* 0x3F11566A, 0xAF25DE2C */
+  const p4 = -1.6533902205465251539e-6; /* 0xBEBBBD41, 0xC5D26BF1 */
+  const p5 = 4.13813679705723846039e-8; /* 0x3E663769, 0x72BEA4D0 */
+  const ax = Math.abs(x);
+  if (ax < 0.3465735912322998) {
+    /* |x| <= 0.5 ln2 (high word 0x3fd62e42) */
+    if (ax < 3.725293851175593e-9) {
+      /* |x| <= 2**-28 (high word 0x3e300000): inexact if x!=0 */
+      return 1 + x;
+    }
+    /* k = 0, hi = x and lo = 0 */
+    const xx = x * x;
+    const c = x - xx * (p1 + xx * (p2 + xx * (p3 + xx * (p4 + xx * p5))));
+    return 1 + ((x * c) / (2 - c) - 0 + x);
+  }
+  if (ax < 708.39599609375) {
+    /* |x| < 708.39... (high word 0x4086232b): 2**k normal */
+    const k =
+      ax >= 1.0397205352783203 /* |x| >= 1.5 ln2: high word 0x3ff0a2b2 */
+        ? (invLn2 * x + (x < 0 ? -0.5 : 0.5)) | 0
+        : x < 0
+          ? -1
+          : 1;
+    const hi = x - k * ln2Hi; /* k*ln2hi is exact here */
+    const lo = k * ln2Lo;
+    const xr = hi - lo;
+    const xx = xr * xr;
+    const c = xr - xx * (p1 + xx * (p2 + xx * (p3 + xx * (p4 + xx * p5))));
+    return (1 + ((xr * c) / (2 - c) - lo + hi)) * twoTo(k);
+  }
+  // The rest, NaN included, through the port (see `asNumber`).
+  return asNumber(expPort(x));
+}
+
+/**
+ * `exp.rs` ported whole, for every argument: {@link exp} sends it those at or above 708.39… in
+ * magnitude, its special values and the arguments `scalbn` scales outside the normal range.
+ */
+function expPort(x: number): number {
   let xr = x;
   let hi: number;
   let lo: number;
@@ -253,8 +351,47 @@ const X1P54 = fromWords(0x43500000, 0);
  * Ported line for line from `libm` 0.2.16's `src/math/log.rs` (musl's form of FreeBSD's `e_log.c`):
  * `x` = 2ᵏ (1 + f) with 1 + f in [√2 ÷ 2, √2], and log(1 + f) from s = f ÷ (2 + f) by a degree-14
  * Remez polynomial in s. Under 1 ulp (`log.rs`'s own statement).
+ *
+ * For a positive, normal and finite `x`, this takes `log.rs`'s path itself, with its constants
+ * local; {@link logPort} takes the rest.
  */
 export function log(x: number): number {
+  const ln2Hi = 6.9314718036912381649e-1; /* 3fe62e42 fee00000 */
+  const ln2Lo = 1.90821492927058770002e-10; /* 3dea39ef 35793c76 */
+  const lg1 = 6.66666666666673513e-1; /* 3FE55555 55555593 */
+  const lg2 = 3.999999999940941908e-1; /* 3FD99999 9997FA04 */
+  const lg3 = 2.857142874366239149e-1; /* 3FD24924 94229359 */
+  const lg4 = 2.222219843214978396e-1; /* 3FCC71C5 1D8E78AF */
+  const lg5 = 1.818357216161805012e-1; /* 3FC74664 96CB03DE */
+  const lg6 = 1.531383769920937332e-1; /* 3FC39A09 D078C69F */
+  const lg7 = 1.479819860511658591e-1; /* 3FC2F112 DF3E5244 */
+  BITS.setFloat64(0, x);
+  const hx = BITS.getUint32(0);
+  if (hx >= 0x00100000 && hx < 0x7ff00000) {
+    /* x positive, normal and finite; x = 1 gives log.rs's 0 here too */
+    /* reduce x into [sqrt(2)/2, sqrt(2)]: log.rs's reduced x keeps x's significand, and is
+    x × 2**-k exactly */
+    const k = ((hx + (0x3ff00000 - 0x3fe6a09e)) >>> 20) - 0x3ff;
+    const f = x * twoTo(-k) - 1;
+    const hfsq = 0.5 * f * f;
+    const s = f / (2 + f);
+    const z = s * s;
+    const w = z * z;
+    const t1 = w * (lg2 + w * (lg4 + w * lg6));
+    const t2 = z * (lg1 + w * (lg3 + w * (lg5 + w * lg7)));
+    const r = t2 + t1;
+    const dk = k;
+    return s * (hfsq + r) + dk * ln2Lo - hfsq + f + dk * ln2Hi;
+  }
+  // Zero, a subnormal, a negative number, ∞ and NaN, through the port (see `asNumber`).
+  return asNumber(logPort(x));
+}
+
+/**
+ * `log.rs` ported whole, for every argument: {@link log} sends it zero, the subnormal and negative
+ * numbers, ∞ and NaN.
+ */
+function logPort(x: number): number {
   let xr = x;
   let hx = highWord(xr);
   let lx = lowWord(xr);
@@ -450,8 +587,39 @@ const EXPM1_Q5 = -2.01099218183624371326e-7; /* BE8AFDB7 6E09C32D */
  * Ported line for line from `libm` 0.2.16's `src/math/expm1.rs` (FreeBSD's `s_expm1.c`): `exp`'s
  * reduction with its rounding error c carried, a rational fit of e^r − 1, and the scaling by 2ᵏ
  * arranged so that nothing cancels; within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16).
+ *
+ * Up to |x| = ½ ln 2, where `expm1.rs` reduces nothing (k = 0), this takes its path itself, with
+ * its constants local; {@link expm1Port} takes the rest.
  */
 export function expm1(x: number): number {
+  const q1 = -3.33333333333331316428e-2; /* BFA11111 111110F4 */
+  const q2 = 1.58730158725481460165e-3; /* 3F5A01A0 19FE5585 */
+  const q3 = -7.93650757867487942473e-5; /* BF14CE19 9EAADBB7 */
+  const q4 = 4.00821782732936239552e-6; /* 3ED0CFCA 86E65239 */
+  const q5 = -2.01099218183624371326e-7; /* BE8AFDB7 6E09C32D */
+  const ax = Math.abs(x);
+  if (ax < 0.3465735912322998) {
+    /* |x| <= 0.5 ln2 (high word 0x3fd62e42): k = 0 and c = 0 */
+    if (ax < 5.551115123125783e-17) {
+      /* |x| < 2**-54 (high word 0x3c900000), return x */
+      return x;
+    }
+    const hfx = 0.5 * x;
+    const hxs = x * hfx;
+    const r1 = 1 + hxs * (q1 + hxs * (q2 + hxs * (q3 + hxs * (q4 + hxs * q5))));
+    const t = 3 - r1 * hfx;
+    const e = hxs * ((r1 - t) / (6 - x * t));
+    return x - (x * e - hxs);
+  }
+  // The rest, NaN included, through the port (see `asNumber`).
+  return asNumber(expm1Port(x));
+}
+
+/**
+ * `expm1.rs` ported whole, for every argument: {@link expm1} sends it those above ½ ln 2 in
+ * magnitude, and NaN.
+ */
+function expm1Port(x: number): number {
   let xr = x;
   let hi: number;
   let lo: number;
@@ -552,39 +720,41 @@ export function expm1(x: number): number {
   return y;
 }
 
-// `src/math/k_sin.rs` (FreeBSD's k_sin.c).
-const SIN_S1 = -1.66666666666666324348e-1; /* 0xBFC55555, 0x55555549 */
-const SIN_S2 = 8.33333333332248946124e-3; /* 0x3F811111, 0x1110F8A6 */
-const SIN_S3 = -1.98412698298579493134e-4; /* 0xBF2A01A0, 0x19C161D5 */
-const SIN_S4 = 2.75573137070700676789e-6; /* 0x3EC71DE3, 0x57B1FE7D */
-const SIN_S5 = -2.50507602534068634195e-8; /* 0xBE5AE5E6, 0x8A2B9CEB */
-const SIN_S6 = 1.58969099521155010221e-10; /* 0x3DE5D93A, 0x5ACFD57C */
-
-/** sin(x + y) on [−π/4, π/4], y the tail of x, or 0 where `iy` is 0: `libm`'s `k_sin`. */
+/**
+ * sin(x + y) on [−π/4, π/4], y the tail of x, or 0 where `iy` is 0: `libm`'s `k_sin`
+ * (`src/math/k_sin.rs`, FreeBSD's `k_sin.c`), its constants local (see {@link exp}).
+ */
 function kSin(x: number, y: number, iy: number): number {
+  const s1 = -1.66666666666666324348e-1; /* 0xBFC55555, 0x55555549 */
+  const s2 = 8.33333333332248946124e-3; /* 0x3F811111, 0x1110F8A6 */
+  const s3 = -1.98412698298579493134e-4; /* 0xBF2A01A0, 0x19C161D5 */
+  const s4 = 2.75573137070700676789e-6; /* 0x3EC71DE3, 0x57B1FE7D */
+  const s5 = -2.50507602534068634195e-8; /* 0xBE5AE5E6, 0x8A2B9CEB */
+  const s6 = 1.58969099521155010221e-10; /* 0x3DE5D93A, 0x5ACFD57C */
   const z = x * x;
   const w = z * z;
-  const r = SIN_S2 + z * (SIN_S3 + z * SIN_S4) + z * w * (SIN_S5 + z * SIN_S6);
+  const r = s2 + z * (s3 + z * s4) + z * w * (s5 + z * s6);
   const v = z * x;
   if (iy === 0) {
-    return x + v * (SIN_S1 + z * r);
+    return x + v * (s1 + z * r);
   }
-  return x - (z * (0.5 * y - v * r) - y - v * SIN_S1);
+  return x - (z * (0.5 * y - v * r) - y - v * s1);
 }
 
-// `src/math/k_cos.rs` (FreeBSD's k_cos.c).
-const COS_C1 = 4.16666666666666019037e-2; /* 0x3FA55555, 0x5555554C */
-const COS_C2 = -1.38888888888741095749e-3; /* 0xBF56C16C, 0x16C15177 */
-const COS_C3 = 2.48015872894767294178e-5; /* 0x3EFA01A0, 0x19CB1590 */
-const COS_C4 = -2.75573143513906633035e-7; /* 0xBE927E4F, 0x809C52AD */
-const COS_C5 = 2.0875723212981748279e-9; /* 0x3E21EE9E, 0xBDB4B1C4 */
-const COS_C6 = -1.13596475577881948265e-11; /* 0xBDA8FAE9, 0xBE8838D4 */
-
-/** cos(x + y) on [−π/4, π/4], y the tail of x: `libm`'s `k_cos`. */
+/**
+ * cos(x + y) on [−π/4, π/4], y the tail of x: `libm`'s `k_cos` (`src/math/k_cos.rs`, FreeBSD's
+ * `k_cos.c`), its constants local.
+ */
 function kCos(x: number, y: number): number {
+  const c1 = 4.16666666666666019037e-2; /* 0x3FA55555, 0x5555554C */
+  const c2 = -1.38888888888741095749e-3; /* 0xBF56C16C, 0x16C15177 */
+  const c3 = 2.48015872894767294178e-5; /* 0x3EFA01A0, 0x19CB1590 */
+  const c4 = -2.75573143513906633035e-7; /* 0xBE927E4F, 0x809C52AD */
+  const c5 = 2.0875723212981748279e-9; /* 0x3E21EE9E, 0xBDB4B1C4 */
+  const c6 = -1.13596475577881948265e-11; /* 0xBDA8FAE9, 0xBE8838D4 */
   const z = x * x;
   const w = z * z;
-  const r = z * (COS_C1 + z * (COS_C2 + z * COS_C3)) + w * w * (COS_C4 + z * (COS_C5 + z * COS_C6));
+  const r = z * (c1 + z * (c2 + z * c3)) + w * w * (c4 + z * (c5 + z * c6));
   const hz = 0.5 * z;
   const w1 = 1 - hz;
   return w1 + (1 - w1 - hz + (z * r - x * y));
@@ -609,9 +779,25 @@ const TAN_T = [
 const TAN_PIO4 = 7.85398163397448278999e-1; /* 3FE921FB, 54442D18 */
 const TAN_PIO4_LO = 3.06161699786838301793e-17; /* 3C81A626, 33145C07 */
 
-/** `x` with its low word cleared: `k_tan.rs`'s `zero_low_word`. */
+/**
+ * `x` with its low word cleared, its significand's leading 21 bits: `k_tan.rs`'s
+ * `zero_low_word`, and `libm`'s `with_set_low_word(x, 0)`.
+ *
+ * @remarks
+ * Where x's exponent field e is at least 21, x × 2^(1043 − e) lies in [2²⁰, 2²¹) in magnitude, and
+ * truncating it and scaling it back, each step exact, gives the same double. That spares writing a
+ * word into a double held in memory and reading the double back, which stalls the load until the
+ * store retires: 14.6 ns a call against 6.2 (pod, 8 vCPU, 2026-10-30).
+ */
 function zeroLowWord(x: number): number {
-  return fromWords(highWord(x), 0);
+  BITS.setFloat64(0, x);
+  const e = (BITS.getUint32(0) >>> 20) & 0x7ff;
+  if (e < 21) {
+    /* |x| < 2**-1002: zero, subnormal or tiny */
+    BITS.setUint32(4, 0);
+    return BITS.getFloat64(0);
+  }
+  return Math.trunc(x * twoTo(1043 - e)) * twoTo(e - 1043);
 }
 
 /**
@@ -664,23 +850,12 @@ function kTan(x0: number, y0: number, odd: number): number {
   return a0 + a * (1 + a0 * w0 + a0 * v);
 }
 
-// `src/math/rem_pio2.rs` (FreeBSD's e_rem_pio2.c, optimized by Bruce D. Evans).
-const REM_EPS = 2.2204460492503131e-16;
-const REM_TO_INT = 1.5 / REM_EPS;
-/** 53 bits of 2/pi */
-const REM_INV_PIO2 = 6.36619772367581382433e-1; /* 0x3FE45F30, 0x6DC9C883 */
+// `src/math/rem_pio2.rs` (FreeBSD's e_rem_pio2.c, optimized by Bruce D. Evans); the medium case's
+// constants are local to it.
 /** first 33 bits of pi/2 */
 const REM_PIO2_1 = 1.57079632673412561417; /* 0x3FF921FB, 0x54400000 */
 /** pi/2 - PIO2_1 */
 const REM_PIO2_1T = 6.07710050650619224932e-11; /* 0x3DD0B461, 0x1A626331 */
-/** second 33 bits of pi/2 */
-const REM_PIO2_2 = 6.0771005063039659766e-11; /* 0x3DD0B461, 0x1A600000 */
-/** pi/2 - (PIO2_1+PIO2_2) */
-const REM_PIO2_2T = 2.02226624879595063154e-21; /* 0x3BA3198A, 0x2E037073 */
-/** third 33 bits of pi/2 */
-const REM_PIO2_3 = 2.0222662487111664558e-21; /* 0x3BA3198A, 0x2E000000 */
-/** pi/2 - (PIO2_1+PIO2_2+PIO2_3) */
-const REM_PIO2_3T = 8.47842766036889956997e-32; /* 0x397B839A, 0x252049C1 */
 
 /** 2²⁴. */
 const X1P24 = fromWords(0x41700000, 0);
@@ -688,46 +863,64 @@ const X1P24 = fromWords(0x41700000, 0);
 const X1P_24 = fromWords(0x3e700000, 0);
 
 /**
- * The remainder's head and tail from {@link remPio2}: x − n π/2 = `remHead` + `remTail`. Module
- * state in place of the Rust tuple, so that the circular functions allocate nothing; JavaScript
- * runs one call at a time, and each caller reads them at once.
+ * The remainder's head and tail from {@link remPio2}: x − n π/2 = {@link remHead} + {@link remTail}.
+ * A typed scratch in place of the Rust tuple, so that storing them allocates nothing, as a module
+ * variable holding a double would at every store; JavaScript runs one call at a time, and each
+ * caller reads them at once.
  */
-let remHead = 0;
-let remTail = 0;
+const REM = new Float64Array(2);
+
+/** The remainder's head, `REM[0]`. */
+function remHead(): number {
+  return REM[0] ?? Number.NaN;
+}
+
+/** The remainder's tail, `REM[1]`. */
+function remTail(): number {
+  return REM[1] ?? Number.NaN;
+}
 
 /**
  * `rem_pio2`'s `medium` case: n = rint(x ÷ (π/2)) for |x| ≲ 2²⁰ π/2, and x − n π/2 in `remHead` and
  * `remTail`, in up to three rounds of π/2's 33-bit pieces.
  */
 function remPio2Medium(x: number, ix: number): number {
+  const toInt = 6755399441055744; /* 1.5 / EPS, 1.5 * 2**52 */
+  const invPio2 = 6.36619772367581382433e-1; /* 0x3FE45F30, 0x6DC9C883: 53 bits of 2/pi */
+  const pio2_1 = 1.57079632673412561417; /* 0x3FF921FB, 0x54400000: first 33 bits of pi/2 */
+  const pio2_1t = 6.07710050650619224932e-11; /* 0x3DD0B461, 0x1A626331: pi/2 - pio2_1 */
+  const pio2_2 = 6.0771005063039659766e-11; /* 0x3DD0B461, 0x1A600000: second 33 bits */
+  const pio2_2t = 2.02226624879595063154e-21; /* 0x3BA3198A, 0x2E037073 */
+  const pio2_3 = 2.0222662487111664558e-21; /* 0x3BA3198A, 0x2E000000: third 33 bits */
+  const pio2_3t = 8.47842766036889956997e-32; /* 0x397B839A, 0x252049C1 */
   /* rint(x/(pi/2)), Assume round-to-nearest. */
-  const tmp = x * REM_INV_PIO2 + REM_TO_INT;
-  const fN = tmp - REM_TO_INT;
+  const tmp = x * invPio2 + toInt;
+  const fN = tmp - toInt;
   const n = fN | 0;
-  let r = x - fN * REM_PIO2_1;
-  let w = fN * REM_PIO2_1T; /* 1st round, good to 85 bits */
+  let r = x - fN * pio2_1;
+  let w = fN * pio2_1t; /* 1st round, good to 85 bits */
   let y0 = r - w;
   const ey = (highWord(y0) >>> 20) & 0x7ff;
   const ex = ix >>> 20;
   if (ex - ey > 16) {
     /* 2nd round, good to 118 bits */
     let t = r;
-    w = fN * REM_PIO2_2;
+    w = fN * pio2_2;
     r = t - w;
-    w = fN * REM_PIO2_2T - (t - r - w);
+    w = fN * pio2_2t - (t - r - w);
     y0 = r - w;
     const ey2 = (highWord(y0) >>> 20) & 0x7ff;
     if (ex - ey2 > 49) {
       /* 3rd round, good to 151 bits, covers all cases */
       t = r;
-      w = fN * REM_PIO2_3;
+      w = fN * pio2_3;
       r = t - w;
-      w = fN * REM_PIO2_3T - (t - r - w);
+      w = fN * pio2_3t - (t - r - w);
       y0 = r - w;
     }
   }
-  remHead = y0;
-  remTail = r - y0 - w;
+  REM[0] = y0;
+  REM[1] = r - y0 - w;
   return n;
 }
 
@@ -749,23 +942,23 @@ function remPio2(x: number): number {
       /* |x| ~<= 3pi/4 */
       if (sign === 0) {
         const z = x - REM_PIO2_1; /* one round good to 85 bits */
-        remHead = z - REM_PIO2_1T;
-        remTail = z - remHead - REM_PIO2_1T;
+        REM[0] = z - REM_PIO2_1T;
+        REM[1] = z - remHead() - REM_PIO2_1T;
         return 1;
       }
       const z = x + REM_PIO2_1;
-      remHead = z + REM_PIO2_1T;
-      remTail = z - remHead + REM_PIO2_1T;
+      REM[0] = z + REM_PIO2_1T;
+      REM[1] = z - remHead() + REM_PIO2_1T;
       return -1;
     } else if (sign === 0) {
       const z = x - 2 * REM_PIO2_1;
-      remHead = z - 2 * REM_PIO2_1T;
-      remTail = z - remHead - 2 * REM_PIO2_1T;
+      REM[0] = z - 2 * REM_PIO2_1T;
+      REM[1] = z - remHead() - 2 * REM_PIO2_1T;
       return 2;
     }
     const z = x + 2 * REM_PIO2_1;
-    remHead = z + 2 * REM_PIO2_1T;
-    remTail = z - remHead + 2 * REM_PIO2_1T;
+    REM[0] = z + 2 * REM_PIO2_1T;
+    REM[1] = z - remHead() + 2 * REM_PIO2_1T;
     return -2;
   }
   if (ix <= 0x401c463b) {
@@ -778,13 +971,13 @@ function remPio2(x: number): number {
       }
       if (sign === 0) {
         const z = x - 3 * REM_PIO2_1;
-        remHead = z - 3 * REM_PIO2_1T;
-        remTail = z - remHead - 3 * REM_PIO2_1T;
+        REM[0] = z - 3 * REM_PIO2_1T;
+        REM[1] = z - remHead() - 3 * REM_PIO2_1T;
         return 3;
       }
       const z = x + 3 * REM_PIO2_1;
-      remHead = z + 3 * REM_PIO2_1T;
-      remTail = z - remHead + 3 * REM_PIO2_1T;
+      REM[0] = z + 3 * REM_PIO2_1T;
+      REM[1] = z - remHead() + 3 * REM_PIO2_1T;
       return -3;
     }
     if (ix === 0x401921fb) {
@@ -793,13 +986,13 @@ function remPio2(x: number): number {
     }
     if (sign === 0) {
       const z = x - 4 * REM_PIO2_1;
-      remHead = z - 4 * REM_PIO2_1T;
-      remTail = z - remHead - 4 * REM_PIO2_1T;
+      REM[0] = z - 4 * REM_PIO2_1T;
+      REM[1] = z - remHead() - 4 * REM_PIO2_1T;
       return 4;
     }
     const z = x + 4 * REM_PIO2_1;
-    remHead = z + 4 * REM_PIO2_1T;
-    remTail = z - remHead + 4 * REM_PIO2_1T;
+    REM[0] = z + 4 * REM_PIO2_1T;
+    REM[1] = z - remHead() + 4 * REM_PIO2_1T;
     return -4;
   }
   if (ix < 0x413921fb) {
@@ -811,8 +1004,8 @@ function remPio2(x: number): number {
    */
   if (ix >= 0x7ff00000) {
     /* x is inf or NaN */
-    remHead = x - x;
-    remTail = remHead;
+    REM[0] = x - x;
+    REM[1] = remHead();
     return 0;
   }
   /* set z = scalbn(|x|,-ilogb(x)+23) */
@@ -831,8 +1024,8 @@ function remPio2(x: number): number {
   }
   const n = remPio2Large(tx.slice(0, i + 1), (ix >>> 20) - (0x3ff + 23));
   if (sign !== 0) {
-    remHead = -remHead;
-    remTail = -remTail;
+    REM[0] = -remHead();
+    REM[1] = -remTail();
     return -n;
   }
   return n;
@@ -1057,12 +1250,12 @@ function remPio2Large(x: ReadonlyArray<number>, e0: number): number {
   for (let i = jz; i >= 0; i -= 1) {
     fw += at(fq, i);
   }
-  remHead = ih === 0 ? fw : -fw;
+  REM[0] = ih === 0 ? fw : -fw;
   fw = at(fq, 0) - fw;
   for (let i = 1; i <= jz; i += 1) {
     fw += at(fq, i);
   }
-  remTail = ih === 0 ? fw : -fw;
+  REM[1] = ih === 0 ? fw : -fw;
   return n & 7;
 }
 
@@ -1094,16 +1287,28 @@ export function sin(x: number): number {
   }
 
   /* argument reduction needed */
-  const n = remPio2(x);
+  if (ix <= 0x4002d97c && (ix & 0xfffff) !== 0x921fb) {
+    /* |x| ~<= 3pi/4 but ~pi/2: rem_pio2's one round, good to 85 bits, n = +-1 */
+    if (x > 0) {
+      const z = x - 1.57079632673412561417; /* x - pio2_1 */
+      const y0 = z - 6.07710050650619224932e-11; /* z - pio2_1t */
+      return kCos(y0, z - y0 - 6.07710050650619224932e-11);
+    }
+    const z = x + 1.57079632673412561417;
+    const y0 = z + 6.07710050650619224932e-11;
+    return -kCos(y0, z - y0 + 6.07710050650619224932e-11);
+  }
+  /* rem_pio2 takes 9pi/4 < |x| < 2**20 pi/2 to its medium case */
+  const n = ix > 0x401c463b && ix < 0x413921fb ? remPio2Medium(x, ix) : remPio2(x);
   switch (n & 3) {
     case 0:
-      return kSin(remHead, remTail, 1);
+      return kSin(remHead(), remTail(), 1);
     case 1:
-      return kCos(remHead, remTail);
+      return kCos(remHead(), remTail());
     case 2:
-      return -kSin(remHead, remTail, 1);
+      return -kSin(remHead(), remTail(), 1);
     default:
-      return -kCos(remHead, remTail);
+      return -kCos(remHead(), remTail());
   }
 }
 
@@ -1135,16 +1340,28 @@ export function cos(x: number): number {
   }
 
   /* argument reduction needed */
-  const n = remPio2(x);
+  if (ix <= 0x4002d97c && (ix & 0xfffff) !== 0x921fb) {
+    /* |x| ~<= 3pi/4 but ~pi/2: rem_pio2's one round, good to 85 bits, n = +-1 */
+    if (x > 0) {
+      const z = x - 1.57079632673412561417; /* x - pio2_1 */
+      const y0 = z - 6.07710050650619224932e-11; /* z - pio2_1t */
+      return -kSin(y0, z - y0 - 6.07710050650619224932e-11, 1);
+    }
+    const z = x + 1.57079632673412561417;
+    const y0 = z + 6.07710050650619224932e-11;
+    return kSin(y0, z - y0 + 6.07710050650619224932e-11, 1);
+  }
+  /* rem_pio2 takes 9pi/4 < |x| < 2**20 pi/2 to its medium case */
+  const n = ix > 0x401c463b && ix < 0x413921fb ? remPio2Medium(x, ix) : remPio2(x);
   switch (n & 3) {
     case 0:
-      return kCos(remHead, remTail);
+      return kCos(remHead(), remTail());
     case 1:
-      return -kSin(remHead, remTail, 1);
+      return -kSin(remHead(), remTail(), 1);
     case 2:
-      return -kCos(remHead, remTail);
+      return -kCos(remHead(), remTail());
     default:
-      return kSin(remHead, remTail, 1);
+      return kSin(remHead(), remTail(), 1);
   }
 }
 
@@ -1174,7 +1391,7 @@ export function tan(x: number): number {
 
   /* argument reduction */
   const n = remPio2(x);
-  return kTan(remHead, remTail, n & 1);
+  return kTan(remHead(), remTail(), n & 1);
 }
 
 // `src/math/asin.rs` (FreeBSD's e_asin.c) and `src/math/acos.rs` (e_acos.c).
@@ -1341,8 +1558,80 @@ const ATAN_HUGE_TAIL = fromWords(0, 0x03800000);
  * Ported line for line from `libm` 0.2.16's `src/math/atan.rs` (FreeBSD's `s_atan.c`): `x` is
  * reduced against atan(0.5), atan(1), atan(1.5) or atan(∞) by the matching identity, and the rest
  * comes from a degree-23 odd polynomial (11 coefficients in t²) split in two; within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16).
+ *
+ * Below |x| = 2⁶⁶ this takes `atan.rs`'s path itself, with its constants local and its tests of
+ * |x|'s high word made on |x| (each bound's low word is 0); {@link atanPort} takes the rest, and NaN.
  */
 export function atan(x: number): number {
+  const at0 = 3.33333333333329318027e-1; /* 0x3FD55555, 0x5555550D */
+  const at1 = -1.99999999998764832476e-1; /* 0xBFC99999, 0x9998EBC4 */
+  const at2 = 1.42857142725034663711e-1; /* 0x3FC24924, 0x920083FF */
+  const at3 = -1.1111110405462355788e-1; /* 0xBFBC71C6, 0xFE231671 */
+  const at4 = 9.09088713343650656196e-2; /* 0x3FB745CD, 0xC54C206E */
+  const at5 = -7.69187620504482999495e-2; /* 0xBFB3B0F2, 0xAF749A6D */
+  const at6 = 6.66107313738753120669e-2; /* 0x3FB10D66, 0xA0D03D51 */
+  const at7 = -5.83357013379057348645e-2; /* 0xBFADDE2D, 0x52DEFD9A */
+  const at8 = 4.97687799461593236017e-2; /* 0x3FA97B4B, 0x24760DEB */
+  const at9 = -3.6531572744216915527e-2; /* 0xBFA2B444, 0x2C6A6C2F */
+  const at10 = 1.62858201153657823623e-2; /* 0x3F90AD3A, 0xE322DA11 */
+  const ax = Math.abs(x);
+  if (ax < 0.4375) {
+    /* |x| < 0.4375 (high word 0x3fdc0000) */
+    if (ax < 7.450580596923828e-9) {
+      /* |x| < 2^-27 (high word 0x3e400000) */
+      return x;
+    }
+    /* id = -1 */
+    const z = x * x;
+    const w = z * z;
+    /* break sum from i=0 to 10 AT[i]z**(i+1) into odd and even poly */
+    const s1 = z * (at0 + w * (at2 + w * (at4 + w * (at6 + w * (at8 + w * at10)))));
+    const s2 = w * (at1 + w * (at3 + w * (at5 + w * (at7 + w * at9))));
+    return x - x * (s1 + s2);
+  }
+  if (!(ax < 73786976294838206464)) {
+    /* |x| >= 2^66 (high word 0x44100000), or NaN */
+    return asNumber(atanPort(x));
+  }
+  let xr: number;
+  let hi: number; /* atanhi[id] */
+  let lo: number; /* atanlo[id] */
+  if (ax < 1.1875) {
+    /* |x| < 1.1875 (high word 0x3ff30000) */
+    if (ax < 0.6875) {
+      /* 7/16 <= |x| < 11/16 (high word 0x3fe60000): id = 0 */
+      xr = (2 * ax - 1) / (2 + ax);
+      hi = 4.63647609000806093515e-1; /* atan(0.5)hi 0x3FDDAC67, 0x0561BB4F */
+      lo = 2.26987774529616870924e-17; /* atan(0.5)lo 0x3C7A2B7F, 0x222F65E2 */
+    } else {
+      /* 11/16 <= |x| < 19/16: id = 1 */
+      xr = (ax - 1) / (ax + 1);
+      hi = 7.85398163397448278999e-1; /* atan(1.0)hi 0x3FE921FB, 0x54442D18 */
+      lo = 3.06161699786838301793e-17; /* atan(1.0)lo 0x3C81A626, 0x33145C07 */
+    }
+  } else if (ax < 2.4375) {
+    /* |x| < 2.4375 (high word 0x40038000): id = 2 */
+    xr = (ax - 1.5) / (1 + 1.5 * ax);
+    hi = 9.82793723247329054082e-1; /* atan(1.5)hi 0x3FEF730B, 0xD281F69B */
+    lo = 1.39033110312309984516e-17; /* atan(1.5)lo 0x3C700788, 0x7AF0CBBD */
+  } else {
+    /* 2.4375 <= |x| < 2^66: id = 3 */
+    xr = -1 / ax;
+    hi = 1.570796326794896558; /* atan(inf)hi 0x3FF921FB, 0x54442D18 */
+    lo = 6.12323399573676603587e-17; /* atan(inf)lo 0x3C91A626, 0x33145C07 */
+  }
+  const z = xr * xr;
+  const w = z * z;
+  const s1 = z * (at0 + w * (at2 + w * (at4 + w * (at6 + w * (at8 + w * at10)))));
+  const s2 = w * (at1 + w * (at3 + w * (at5 + w * (at7 + w * at9))));
+  const zr = hi - (xr * (s1 + s2) - lo - xr);
+  return x < 0 ? -zr : zr;
+}
+
+/**
+ * `atan.rs` ported whole, for every argument: {@link atan} sends it |x| ≥ 2⁶⁶ and NaN.
+ */
+function atanPort(x: number): number {
   let xr = x;
   let ix = highWord(xr);
   const sign = ix >>> 31;
@@ -1418,8 +1707,52 @@ const ATAN2_PI_LO = 1.2246467991473531772e-16; /* 0x3CA1A626, 0x33145C07 */
  * and the special values pick the quadrant, and {@link atan} of |y ÷ x| the angle within it; within
  * 2 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`,
  * libm-v0.2.16).
+ *
+ * For finite and nonzero arguments, x ≠ 1, this takes `atan2.rs`'s path itself, with its constants
+ * local; {@link atan2Port} takes the rest.
  */
 export function atan2(y: number, x: number): number {
+  // atan2.rs's literal for π, kept as written (the double Math.PI is).
+  // oxlint-disable-next-line approx-constant
+  const pi = 3.141592653589793116; /* 0x400921FB, 0x54442D18 */
+  // atan2.rs's literal as written; it reads as the nearest double, as Rust's does.
+  // oxlint-disable-next-line no-loss-of-precision
+  const piLo = 1.2246467991473531772e-16; /* 0x3CA1A626, 0x33145C07 */
+  if (!(Number.isFinite(x) && Number.isFinite(y)) || x === 0 || y === 0 || x === 1) {
+    /* NaN, an infinity, a zero or x = 1.0 */
+    return asNumber(atan2Port(y, x));
+  }
+  BITS.setFloat64(0, x);
+  let ix = BITS.getUint32(0);
+  BITS.setFloat64(0, y);
+  let iy = BITS.getUint32(0);
+  const m = ((iy >>> 31) & 1) | ((ix >>> 30) & 2); /* 2*sign(x)+sign(y) */
+  ix &= 0x7fffffff;
+  iy &= 0x7fffffff;
+  /* |y/x| > 0x1p64 */
+  if (ix + (64 << 20) < iy) {
+    return (m & 1) !== 0 ? -pi / 2 : pi / 2;
+  }
+  /* z = atan(|y/x|) without spurious underflow */
+  const z =
+    (m & 2) !== 0 && iy + (64 << 20) < ix ? 0 : atan(Math.abs(y / x)); /* |y/x| < 0x1p-64, x<0 */
+  switch (m) {
+    case 0:
+      return z; /* atan(+,+) */
+    case 1:
+      return -z; /* atan(-,+) */
+    case 2:
+      return pi - (z - piLo); /* atan(+,-) */
+    default:
+      return z - piLo - pi; /* atan(-,-) */
+  }
+}
+
+/**
+ * `atan2.rs` ported whole, for every pair of arguments: {@link atan2} sends it NaN, the
+ * infinities, the zeros and x = 1.
+ */
+function atan2Port(y: number, x: number): number {
   if (Number.isNaN(x) || Number.isNaN(y)) {
     return x + y;
   }
@@ -1522,9 +1855,6 @@ const CBRT_HARD_1_ROOT = hf64("0x1.79d15d0e8d59cp+0");
 const CBRT_HARD_2 = hf64("0x1.a202bfc89ddffp+2");
 const CBRT_HARD_2_ROOT = hf64("0x1.de87aa837820fp+0");
 
-/** Veltkamp's splitter for doubles, 2²⁷ + 1. */
-const VELTKAMP_SPLIT = 134_217_729;
-
 /**
  * a × b − `product`, exactly, for `product` = a × b rounded: what `cbrt.rs`'s `a.fma(b, -product)`
  * returns, by Dekker's product (Dekker 1971, Numer. Math. 18, 224), as `hyperion_base::math`'s
@@ -1537,10 +1867,11 @@ const VELTKAMP_SPLIT = 134_217_729;
  * 8, far inside that range.
  */
 function productError(a: number, b: number, product: number): number {
-  let scaled = VELTKAMP_SPLIT * a;
+  const split = 134_217_729; /* Veltkamp's splitter for doubles, 2**27 + 1 */
+  let scaled = split * a;
   const aHigh = scaled - (scaled - a);
   const aLow = a - aHigh;
-  scaled = VELTKAMP_SPLIT * b;
+  scaled = split * b;
   const bHigh = scaled - (scaled - b);
   const bLow = b - bHigh;
   return aHigh * bHigh - product + aHigh * bLow + aLow * bHigh + aLow * bLow;
@@ -1554,8 +1885,82 @@ function productError(a: number, b: number, product: number): number {
  * rounding to nearest: a cubic fit of z^(1/3) on [1, 2], one cubic and one linear Newton step with
  * the cube carried to about 106 bits, and a second pass where the result lies near a rounding
  * boundary. The fused multiply-adds are {@link productError}'s.
+ *
+ * For a positive and normal `x` this takes `cbrt.rs`'s path itself, with its constants local and
+ * the words it writes into z, zz and the result, which scale a double by a power of two, by
+ * {@link twoTo}; {@link cbrtPort} takes the rest, and the results near a rounding boundary that
+ * `cbrt.rs` takes a second pass or a correction for.
  */
 export function cbrt(x: number): number {
+  const escale1 = 1.2599210498948732; /* 0x1.428a2f98d728bp+0: 2^(1/3) */
+  const escale2 = 1.5874010519681996; /* 0x1.965fea53d6e3dp+0: 2^(2/3) */
+  const c0c = 0.5528234184016472; /* 0x1.1b0babccfef9cp-1 */
+  const c1c = 0.5871142918266982; /* 0x1.2c9a3e94d1da5p-1 */
+  const c2c = -0.16296967194987905; /* -0x1.4dc30b1a1ddbap-3 */
+  const c3c = 0.02310496411078147; /* 0x1.7a8d3e4ec9b07p-6 */
+  const u0 = 0.3333333333333333; /* 0x1.5555555555555p-2 */
+  const u1 = 0.2222222222222222; /* 0x1.c71c71c71c71cp-3 */
+  const off = 1.1102230246251565e-16; /* 0x1p-53: off[Round::Nearest] */
+  const x1p52 = 2.220446049250313e-16; /* 0x1p-52 */
+  const x1p75 = 2.6469779601696886e-23; /* 0x1p-75 */
+  if (!(x >= 2.2250738585072014e-308 && x < Infinity)) {
+    /* x not positive, normal and finite */
+    return asNumber(cbrtPort(x));
+  }
+  BITS.setFloat64(0, x);
+  const biased = BITS.getUint32(0) >>> 20; /* the sign is 0 */
+  const e = biased + 3072;
+  const et = Math.floor(e / 3);
+  const it = e % 3;
+
+  /* cbrt.rs's z, x's significand in [1, 2) (high word mant_hi | 0x3ff00000): x × 2^(1023 - e);
+  and zz, z × 2^it */
+  const z = x * twoTo(1023 - biased);
+  const zz = z * twoTo(it);
+  /* cbrt(zz) = cbrt(z)*isc, where isc encodes 1, 2^(1/3) or 2^(2/3), and 1 <= z < 2 */
+  const isc = it === 0 ? 1 : it === 1 ? escale1 : escale2;
+  const r = 1 / z;
+  const rr = r * (it === 0 ? 1 : it === 1 ? 0.5 : 0.25); /* rsc[it << 1] */
+  const z2 = z * z;
+  const c0 = c0c + z * c1c;
+  const c2 = c2c + z * c3c;
+  let y = c0 + z2 * c2;
+  let y2 = y * y;
+
+  /* y is an approximation of z^(1/3) */
+  let h = y2 * (y * r) - 1;
+
+  /* h determines the error between y and z^(1/3) */
+  y -= h * y * (u0 - u1 * h);
+  y *= isc;
+
+  /* another Newton-Raphson iteration, with a linear approximation only */
+  y2 = y * y;
+  const y2l = productError(y, y, y2);
+  const y3 = y2 * y;
+  const y3l = productError(y, y2, y3) + y * y2l;
+  h = (y3 - zz + y3l) * rr;
+  let dy = h * (y * u0);
+  const y1 = y - dy;
+  dy = y - y1 - dy;
+  const ady = Math.abs(dy);
+  const ady0 = Math.abs(ady - off);
+  const ady1 = Math.abs(ady - (x1p52 + off));
+  BITS.setFloat64(0, y1);
+  if (ady0 < x1p75 || ady1 < x1p75 || ((BITS.getUint32(0) & 3) === 0 && BITS.getUint32(4) <= 1)) {
+    /* near a rounding boundary: cbrt.rs's second pass, or its correction where cvt3's low 34
+    bits are 0 or 1 */
+    return asNumber(cbrtPort(x));
+  }
+  /* cbrt.rs's cvt3, y1 with et - 342 - 1023 added to its exponent: y1 × 2^(et - 1365), normal */
+  return y1 * twoTo(et - 1365);
+}
+
+/**
+ * `cbrt.rs` ported whole, for every argument: {@link cbrt} sends it the arguments that are not
+ * positive, normal and finite, and the results near a rounding boundary.
+ */
+function cbrtPort(x: number): number {
   /* rm=0 for rounding to nearest, and other values for directed roundings */
   const hx = highWord(x);
   let mantHi = hx & 0x000fffff;
@@ -1743,8 +2148,173 @@ const POW_IVLN2_L = 1.92596299112661746887e-8; /* 0x3e54ae0b_f85ddf44 =1/ln2 tai
  * y log₂|x| = n + y′ with |y′| ≤ ½ in simulated multi-precision, and 2^y′ by `exp`'s fit, scaled by
  * 2ⁿ; the special values of C99's `pow` before it. It is within 1 ulp of the correctly rounded value in `libm`'s own tests (`libm-test`'s `precision.rs`, libm-v0.2.16), not correctly rounded, and not
  * Linux's, macOS's or Windows's `pow`, which is why the committed tables call it.
+ *
+ * For y = 0, ±1 or 2 this returns `pow.rs`'s value for every x itself. For a positive, normal and
+ * finite `x` other than 1, and 0 < |y| ≤ 2³¹ but ½, where `pow.rs` takes its main path, this
+ * takes that path itself, with its constants local, and those of its word edits that scale a
+ * double by a power of two, or clear its low word, done arithmetically; {@link powPort} takes the
+ * rest, and the results that overflow, underflow or go subnormal.
  */
 export function pow(x: number, y: number): number {
+  const l1 = 5.99999999999994648725e-1; /* 0x3fe33333_33333303 */
+  const l2 = 4.28571428578550184252e-1; /* 0x3fdb6db6_db6fabff */
+  const l3 = 3.33333329818377432918e-1; /* 0x3fd55555_518f264d */
+  const l4 = 2.72728123808534006489e-1; /* 0x3fd17460_a91d4101 */
+  const l5 = 2.30660745775561754067e-1; /* 0x3fcd864a_93c9db65 */
+  const l6 = 2.06975017800338417784e-1; /* 0x3fca7e28_4a454eef */
+  const p1 = 1.66666666666666019037e-1; /* 0x3fc55555_5555553e */
+  const p2 = -2.77777777770155933842e-3; /* 0xbf66c16c_16bebd93 */
+  const p3 = 6.61375632143793436117e-5; /* 0x3f11566a_af25de2c */
+  const p4 = -1.6533902205465251539e-6; /* 0xbebbbd41_c5d26bf1 */
+  const p5 = 4.13813679705723846039e-8; /* 0x3e663769_72bea4d0 */
+  // pow.rs's literal for ln 2, kept as written (the double Math.LN2 is).
+  // oxlint-disable-next-line approx-constant
+  const lg2 = 6.93147180559945286227e-1; /* 0x3fe62e42_fefa39ef */
+  const lg2H = 6.93147182464599609375e-1; /* 0x3fe62e43_00000000 */
+  const lg2L = -1.90465429995776804525e-9; /* 0xbe205c61_0ca86c39 */
+  const cp = 9.61796693925975554329e-1; /* 0x3feec709_dc3a03fd =2/(3ln2) */
+  const cpH = 9.61796700954437255859e-1; /* 0x3feec709_e0000000 =(float)cp */
+  const cpL = -7.02846165095275826516e-9; /* 0xbe3e2fe0_145b01f5 =tail of cp_h*/
+  const dpH1 = 5.84962487220764160156e-1; /* dp_h[1]: 0x3fe2b803_40000000 */
+  const dpL1 = 1.35003920212974897128e-8; /* dp_l[1]: 0x3E4CFDEB, 0x43CFD006 */
+
+  /* x**0 = 1, x**1 = x, x**-1 = 1/x and x**2 = x*x for every x, as pow.rs's tests before them
+  leave them (x = 1 and x NaN give the same) */
+  if (y === 0) {
+    return 1.0;
+  }
+  if (y === 1) {
+    return x;
+  }
+  if (y === -1) {
+    return 1.0 / x;
+  }
+  if (y === 2) {
+    return x * x;
+  }
+  if (
+    !(x >= 2.2250738585072014e-308 && x < Infinity && x !== 1) ||
+    !(Math.abs(y) < 2147485696) ||
+    y === 0.5
+  ) {
+    /* x not positive, normal and finite (high word in [0x00100000, 0x7ff00000)), or x = 1; |y| >
+    2**31 (high word above 0x41e00000), y not finite, or y = 0.5 */
+    return asNumber(powPort(x, y));
+  }
+
+  BITS.setFloat64(0, x);
+  const ix = BITS.getUint32(0);
+  let n = (ix >> 20) - 0x3ff;
+  const j = ix & 0x000fffff;
+
+  /* determine interval */
+  let jx = j | 0x3ff00000; /* normalize ix */
+  let kk: number;
+  if (j <= 0x3988e) {
+    /* |x|<sqrt(3/2) */
+    kk = 0;
+  } else if (j < 0xbb67a) {
+    /* |x|<sqrt(3)   */
+    kk = 1;
+  } else {
+    kk = 0;
+    n += 1;
+    jx -= 0x00100000;
+  }
+  /* pow.rs's ax, x with the high word jx: x × 2**-n */
+  const ax = x * twoTo(-n);
+
+  /* compute ss = s_h+s_l = (x-1)/(x+1) or (x-1.5)/(x+1.5) */
+  const bp = kk === 0 ? 1.0 : 1.5; /* bp[0]=1.0, bp[1]=1.5 */
+  const u = ax - bp;
+  const v = 1.0 / (ax + bp);
+  const ss = u * v;
+  const sH = zeroLowWord(ss);
+
+  /* t_h=ax+bp[k] High: the double of high word h and low word 0, the significand's 21 bits as an
+  integer times 2**(e - 1043), e being h's exponent field (0x3ff or 0x400 here) */
+  const h = ((jx >>> 1) | 0x20000000) + 0x00080000 + kk * 0x40000;
+  let tH = (0x00100000 + (h & 0x000fffff)) * twoTo((h >>> 20) - 1043);
+  let tL = ax - (tH - bp);
+  const sL = v * (u - sH * tH - sH * tL);
+
+  /* compute log(ax) */
+  let s2 = ss * ss;
+  let r = s2 * s2 * (l1 + s2 * (l2 + s2 * (l3 + s2 * (l4 + s2 * (l5 + s2 * l6)))));
+  r += sL * (sH + ss);
+  s2 = sH * sH;
+  /* 3 + s2 + r lies in [2, 4) here, where clearing its low word keeps 19 bits after the point */
+  const th = 3.0 + s2 + r;
+  tH = th >= 2 && th < 4 ? Math.trunc(th * 524288) * 1.9073486328125e-6 : zeroLowWord(th);
+  tL = r - (tH - 3.0 - s2);
+
+  /* u+v = ss*(1+...) */
+  const uu = sH * tH;
+  const vv = sL * tH + tL * ss;
+
+  /* 2/(3log2)*(ss+...) */
+  const pH0 = zeroLowWord(uu + vv);
+  const pL0 = vv - (pH0 - uu);
+  const zH = cpH * pH0; /* cp_h+cp_l = 2/(3*log2) */
+  const zL = cpL * pH0 + pL0 * cp + (kk === 0 ? 0.0 : dpL1);
+
+  /* log2(ax) = (ss+..)*2/(3*log2) = n + dp_h + z_h + z_l */
+  const t = n;
+  const dpH = kk === 0 ? 0.0 : dpH1;
+  const t1 = zeroLowWord(zH + zL + dpH + t);
+  const t2 = zL - (t1 - t - dpH - zH);
+
+  /* split up y into y1+y2 and compute (y1+y2)*(t1+t2) */
+  const y1 = zeroLowWord(y);
+  const pL = (y - y1) * t1 + y * t2;
+  let pH = y1 * t1;
+  let z = pL + pH;
+  BITS.setFloat64(0, z);
+  const jz = BITS.getUint32(0) | 0;
+  if (jz >= 0x40900000 || (jz & 0x7fffffff) >= 0x4090cc00) {
+    /* z >= 1024 or z <= -1075: pow.rs's overflow and underflow tests, from z's words */
+    return asNumber(powPort(x, y));
+  }
+
+  /* compute 2**(p_h+p_l) */
+  const i = jz & 0x7fffffff;
+  let k = (i >> 20) - 0x3ff;
+  let m = 0; /* pow.rs's n, the integer part */
+  if (i > 0x3fe00000) {
+    /* if |z| > 0.5, set n = [z+0.5] */
+    m = jz + (0x00100000 >> (k + 1));
+    k = ((m & 0x7fffffff) >> 20) - 0x3ff; /* new k for n */
+    m = ((m & 0x000fffff) | 0x00100000) >> (20 - k);
+    if (jz < 0) {
+      m = -m;
+    }
+    /* pow.rs's t, the double of n's sign, exponent and integer bits and no others, is n */
+    pH -= m;
+  }
+
+  const tz = zeroLowWord(pL + pH);
+  const uz = tz * lg2H;
+  const vz = (pL - (tz - pH)) * lg2 + tz * lg2L;
+  z = uz + vz;
+  const w = vz - (z - uz);
+  const tt = z * z;
+  const tt1 = z - tt * (p1 + tt * (p2 + tt * (p3 + tt * (p4 + tt * p5))));
+  const rz = (z * tt1) / (tt1 - 2.0) - (w + z * w);
+  z = 1.0 - (rz - z);
+  if (m < -1021 || m > 1023) {
+    /* z 2**n subnormal, or 2**n beyond the table: pow.rs's scalbn and word edits */
+    return asNumber(powPort(x, y));
+  }
+  /* pow.rs adds n to z's exponent, z being in [1/sqrt(2), sqrt(2)]: z × 2**n, normal; its sign
+  s is 1 */
+  return z * twoTo(m);
+}
+
+/**
+ * `pow.rs` ported whole, for every pair of arguments: {@link pow} sends it those its main path
+ * does not take, and the results that overflow, underflow or go subnormal.
+ */
+function powPort(x: number, y: number): number {
   let t1: number;
   let t2: number;
 
