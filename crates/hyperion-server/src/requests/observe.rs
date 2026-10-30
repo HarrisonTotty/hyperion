@@ -63,7 +63,8 @@ pub(crate) async fn resolve_system(
         let time = wanted.time();
         // A grid system is placed as the range query places it, bit for bit; a feature member moves
         // on its own line, which plan 08's draw is not. A centre member is refused at every time,
-        // as `system_summary` refuses it.
+        // as `system_summary` refuses it. A catalogue system, whose line breaks at its explosion, is
+        // refused at every time too.
         let (position, velocity) = system_motion(&galaxy, &record, time)
             .map_err(|error| untraced_system(&request.system, error))?;
         // The system's own sphere: its hit is at its present position, no distance from the centre.

@@ -32,8 +32,8 @@ use crate::scene::{SceneClock, SceneSetting, ShipPosition, ShipStandIn};
 /// Those of [`openable_universe`]; the field checks of [`ShipRequest`] (`bad_request` naming
 /// `time_rate`, `ship.time`, `ship.velocity_m_s` or `ship.position`); for a system frame,
 /// `unknown_system` naming `ship.position` if plan 03's `resolve` refuses the ID or the system
-/// cannot be placed yet (a member of the galactic centre, at every time, the epoch included;
-/// P07.T10.c), and `bad_request` if the offset takes the ship out of the galactic frame's range;
+/// cannot be placed yet (a member of the galactic centre, or a catalogue system, at every time, the
+/// epoch included; P07.T10.c and P09.T33.a), and `bad_request` if the offset takes the ship out of the galactic frame's range;
 /// for a body frame, `unknown_system` likewise and `unknown_body` if the system holds no such body
 /// or the body is not present at the pose's time; those of the galaxy cache; and `queue_full`,
 /// `internal` or `cancelled` from the pool job that resolves the frame.
@@ -114,8 +114,9 @@ async fn check_frame(
         let record =
             resolve(&galaxy, system).map_err(|error| unknown_frame_system(&what(), error))?;
         // Placed by its origin, as every system named by a client: a feature member on its own
-        // line, and a member of the galactic centre refused at every time, the epoch included, so
-        // that the scene's core can place every frame this accepts at every later time.
+        // line, and a member of the galactic centre or a catalogue system refused at every time,
+        // the epoch included, so that the scene's core can place every frame this accepts at every
+        // later time.
         let (barycentre, _) = system_motion(&galaxy, &record, t)
             .map_err(|error| untraced_frame_system(&what(), error))?;
         offset

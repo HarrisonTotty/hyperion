@@ -197,15 +197,16 @@ fn in_frame_of(system: SystemId, time: UniverseTime) -> KinematicsDto {
 }
 
 /// Run by [`a_client_s_system_is_placed_by_its_origin_in_every_request`] on its shared server: a
-/// system frame on the grid system or the feature member is accepted, and on each centre member is
-/// `unknown_system` naming `ship.position`, at the epoch and a century after it.
+/// system frame on the grid system or the feature member is accepted, and on each centre member
+/// and the catalogue system is `unknown_system` naming `ship.position`, at the epoch and a century
+/// after it.
 async fn scene_ship_places_a_system_frame_by_its_origin(server: &TestServer, origins: &Origins) {
     let (mut client, universe) = universe_on(server, "Origins: scene_ship").await;
     for time in [at_years(0), at_years(100)] {
         for record in [origins.grid, origins.member] {
             set_ship(&mut client, &universe, in_frame_of(record.id(), time), 0).await;
         }
-        for id in origins.centre {
+        for id in origins.centre.into_iter().chain([origins.catalogue]) {
             let error = client
                 .request(RequestBody::SceneShip(SceneShipRequest {
                     universe: universe.clone(),
@@ -213,7 +214,7 @@ async fn scene_ship_places_a_system_frame_by_its_origin(server: &TestServer, ori
                     time_rate: 0,
                 }))
                 .await
-                .expect_err("a centre member cannot be placed yet");
+                .expect_err("a centre member or a catalogue system cannot be placed yet");
             assert_eq!(
                 (error.code, error.field.as_deref()),
                 (ErrorCode::UnknownSystem, Some("ship.position")),

@@ -58,7 +58,8 @@ pub(crate) fn observed_dto(retardation: &Retardation, error: CurvatureError) -> 
 }
 
 /// The refusal of an observed answer for a system whose motion the sim cannot trace yet: a member
-/// of the galactic centre until plan 09's P09.T28 builds its orbit (P12.T2 as built). It is
+/// of the galactic centre until plan 09's P09.T28 builds its orbit (P12.T2 as built), or a
+/// catalogue system, whose line breaks at its explosion (P09.T33.a). It is
 /// `bad_request` naming `mode`, since the same request asked `now` is served.
 #[must_use]
 pub(crate) fn untraced(error: TraceMotionError) -> RequestError {
