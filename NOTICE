@@ -566,8 +566,9 @@ ruled 2026-10-09 and 2026-10-10).
   1828-1835, DOI: 10.1093/mnras/stt2011); and HyVO's 51V16O (C. A. Bowesman, Q. Qu, L. K.
   McKemmish, S. N. Yurchenko and J. Tennyson, Mon. Not. R. Astron. Soc. 529 (2024) 1321-1332, DOI:
   10.1093/mnras/stae542), its strong lines as P. E. Cubillos's REPACK holds them (Repacked ExoMol
-  Opacity Line Lists, Zenodo, DOI: 10.5281/zenodo.14266247, the record licensed CC BY 4.0; P. E.
-  Cubillos, Astrophys. J. 850 (2017) 32), its .def and .pf fetched from ExoMol's own site. That
+  Opacity Line Lists, Zenodo, DOI: 10.5281/zenodo.14266247, the record licensed CC BY 4.0,
+  https://creativecommons.org/licenses/by/4.0/; P. E. Cubillos, Astrophys. J. 850 (2017) 32, DOI:
+  10.3847/1538-4357/aa9228), its .def and .pf fetched from ExoMol's own site. That
   adapted material is offered under CC BY-SA 4.0 (its README.md beside it); the line lists' files
   are not committed.
 

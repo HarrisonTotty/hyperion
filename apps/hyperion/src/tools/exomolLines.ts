@@ -132,8 +132,9 @@ export interface BroadeningFile extends ExoMolFile {
 }
 
 /**
- * A REPACK file of a list's strong lines (P. E. Cubillos, Astrophys. J. 850 (2017) 32; its `repack`
- * code's `read_lbl` and `struct.pack("dddi", …)`): no header, then 28-byte little-endian records,
+ * A REPACK file of a list's strong lines (P. E. Cubillos, Astrophys. J. 850 (2017) 32, DOI
+ * 10.3847/1538-4357/aa9228; its `repack` code's `read_lbl` and `pack.py`'s
+ * `struct.pack("dddi", …)`): no header, then 28-byte little-endian records,
  * each f64 ν (cm⁻¹), f64 E″ (cm⁻¹), f64 g″f and i32 isotope tag, mostly in ν's order. Its record's
  * MD5 is the archive's published checksum, beside the SHA-256 taken at the fetch.
  */
@@ -1088,7 +1089,12 @@ const REPACK_CHUNK_RECORDS = 1 << 20;
  */
 export function readRepackLines(
   path: string,
-  onRecord: (nu: number, eLower: number, gf: number, isotope: number) => void,
+  onRecord: (
+    wavenumberPerCm: number,
+    lowerEnergyPerCm: number,
+    gf: number,
+    isotope: number,
+  ) => void,
 ): number {
   const bytes = statSync(path).size;
   if (bytes % REPACK_RECORD_BYTES !== 0) {
@@ -1127,9 +1133,10 @@ export function readRepackLines(
 /**
  * A REPACK line's strength before the Boltzmann factor, Q(T) and stimulated emission, cm a
  * molecule: π r_e g″f, which is g_u A_ul ÷ (8π c ν²), ExoMol's, since `repack` writes
- * g″f = g_u A_ul ÷ (8π² c ν² r_e) (its `utils.py`: g A C1 ÷ (8π c ν²) with C1 = 4ε₀ mₑ c² ÷ e² =
- * 1 ÷ (π r_e), cm⁻¹; and its own S = C3 g″f e^(−c₂E″ ÷ T) (1 − e^(−c₂ν ÷ T)) ÷ Q, C3 = πe² ÷
- * (mₑc²) = π r_e). r_e is CODATA 2018's ({@link ELECTRON_RADIUS_CM}).
+ * g″f = g_u A_ul ÷ (8π² c ν² r_e) (`repack/utils/utilities.py`: g A C1 ÷ (8π c ν²), with
+ * `repack/constants/constants.py`'s C1 = 4ε₀ mₑ c² ÷ e² = 1 ÷ (π r_e), cm⁻¹; and `pack.py`'s own
+ * S = C3 g″f r_iso e^(−c₂E″ ÷ T) (1 − e^(−c₂ν ÷ T)) ÷ Q, C3 = πe² ÷ (mₑc²) = π r_e, its isotope ratio
+ * r_iso applied there, not stored). r_e is CODATA 2018's ({@link ELECTRON_RADIUS_CM}).
  */
 export function repackStrengthCm(gf: number): number {
   return Math.PI * ELECTRON_RADIUS_CM * gf;

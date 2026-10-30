@@ -23,6 +23,7 @@ import {
   parseNumber,
   partitionSum,
   partitionSumFromPf,
+  partitionSumsOf,
   readRepackLines,
   readStates,
   REPACK_RECORD_BYTES,
@@ -645,6 +646,27 @@ describe("a streaming pass over a list", () => {
 
   it("refuses a REPACK record of another isotopologue", async () => {
     await expect(repackPass(toyRepack("toy-other.lbl", 26))).rejects.toThrow("isotope 26");
+  });
+
+  it("refuses a pass over an ExoMol list's transitions given none of its states", async () => {
+    // Q(T) from a .pf, so that the pass reaches its transitions.
+    writeFileSync(join(directory, "toy-unread.pf"), "   296.0 1\n   300.0 1\n");
+    const fromPf: ExoMolFilesSource = {
+      ...TOY,
+      partition: { from: "pf", file: { name: "toy-unread.pf", bytes: 0, sha256: "" } },
+    };
+    await expect(
+      streamPass(fromPf, TOY_DEFINITION, undefined, directory, {
+        temperaturesK: [300],
+        target: OWN,
+        broadening: [],
+        jobs: 1,
+      }),
+    ).rejects.toThrow("none given");
+  });
+
+  it("refuses Q(T) summed over states where none were read", () => {
+    expect(() => partitionSumsOf(TOY, undefined, directory)).toThrow("no states were read");
   });
 
   /** The toy list's 300 K bins, a matched band apart, written to the cache; and the set apart's peak. */

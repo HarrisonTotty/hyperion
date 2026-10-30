@@ -54,9 +54,10 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
   - `VO`: HyVO's ⁵¹V¹⁶O (C. A. Bowesman, Q. Qu, L. K. McKemmish, S. N. Yurchenko and J. Tennyson,
     Mon. Not. R. Astron. Soc. 529 (2024) 1321, DOI 10.1093/mnras/stae542), its strong lines as P. E.
     Cubillos's REPACK holds them (Repacked ExoMol Opacity Line Lists, Zenodo record 14266247,
-    version 3, DOI 10.5281/zenodo.14266247, whose record states CC BY 4.0, read 2026-10-30; the
-    method P. E. Cubillos, Astrophys. J. 850 (2017) 32), with HyVO's `.def` and `.pf` from ExoMol's
-    own site, under the database's licence quoted above.
+    version 3, DOI 10.5281/zenodo.14266247, whose record states CC BY 4.0,
+    <https://creativecommons.org/licenses/by/4.0/>, read 2026-10-30; the method P. E. Cubillos,
+    Astrophys. J. 850 (2017) 32, DOI 10.3847/1538-4357/aa9228), with HyVO's `.def` and `.pf` from
+    ExoMol's own site, under the database's licence quoted above.
 - `lineReferencesNH3.json` and `lineReferencesN2O.json` (plan R08, R08.T4.g), and
   `lineReferencesHot.json` (plan R08, R08.T4.f): named cells' curves of growth at three node
   pressures and three midpoints, computed from the same lists, beside the reduction's own, which

@@ -357,6 +357,13 @@ describe("R08.T4.f's hot tables (decision-r08-t4ef-storage §1.4; decision-r08-t
     expect([lists.length, share]).toEqual([5, expect.closeTo(0.997_57, 9)]);
   });
 
+  it("bin isotopologues together only beside a list's own files, never a REPACK file", () => {
+    const shared = Object.values(HOT_TABLES).filter((t) => t.isotopologues.length > 0);
+    expect(shared.filter((t) => t.exomol.kind !== "exomol").map((t) => t.exomol.species)).toEqual(
+      [],
+    );
+  });
+
   it("take each list's Q(T) from its .pf", () => {
     const lists = Object.values(HOT_TABLES).flatMap(tableLists);
     expect(lists.filter((list) => list.partition.from !== "pf").map((l) => l.species)).toEqual([]);

@@ -932,9 +932,10 @@ const REPACK_TERMS =
 
 /**
  * HyVO's ⁵¹V¹⁶O (ExoMol's recommended VO list, version 20231218, valid to 5,400 K by its
- * definition) through its strong lines, as Cubillos's REPACK record holds them (version 3: every
- * line whose line-centre opacity passes a hundredth of the other lines' there at some temperature
- * of its 100–3,500 K), with HyVO's `.def` and `.pf` from ExoMol's site. Main's ruling of
+ * definition) through its strong lines, as Cubillos's REPACK record holds them (version 3: a line is
+ * dropped where, at both 100 and 3,500 K, its strength is at most 0.01 times a stronger kept
+ * line's at its centre, by that line's Doppler profile, within six Doppler widths; `repack`'s
+ * `pack.py` and `cutils.c`), with HyVO's `.def` and `.pf` from ExoMol's site. Main's ruling of
  * 2026-10-30: HyVO's 27 transition files over the range are 92.7 GB, and VOMYT's lines carry half
  * HyVO's strength.
  */
@@ -947,9 +948,9 @@ export const HYVO_REPACK: RepackSource = {
     "list for vanadium monoxide (51V16O), Mon. Not. R. Astron. Soc. 529 (2024) 1321-1332, DOI " +
     "10.1093/mnras/stae542), its strong lines as P. E. Cubillos's REPACK holds them (Repacked " +
     "ExoMol Opacity Line Lists, Zenodo record 14266247, version 3, 2025-09-20, DOI " +
-    "10.5281/zenodo.14266247, threshold 0.01 over 100-3500 K; the method P. E. Cubillos, An " +
+    "10.5281/zenodo.14266247, threshold 0.01 at 100 and 3500 K; the method P. E. Cubillos, An " +
     "Algorithm to Compress Line-transition Data for Radiative-transfer Calculations, Astrophys. J. " +
-    `850 (2017) 32, ADS 2017ApJ...850...32C); ${EXOMOL_2024}`,
+    `850 (2017) 32, DOI 10.3847/1538-4357/aa9228); ${EXOMOL_2024}`,
   url: `${archiveUrl(REPACK_RECORD)}; HyVO's .def and .pf ${HYVO_URL}`,
   fetched:
     "2026-10-30, REPACK's file from Zenodo (its MD5 the record's); HyVO's .def and .pf 2026-10-29 " +
@@ -1214,22 +1215,27 @@ export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
     what: "VO's bands (HyVO's strong lines, as Cubillos's REPACK holds them, R08.T4.f), from 1000 K (E2).",
     notes:
       "Below 1000 K the 1000 K node is held, estimated (decision-r08-t4ef-storage section 1.4, " +
-      "E2: V's refractory condensates cold-trap it below about 1500-2000 K at photospheric " +
-      "pressures). REPACK keeps HyVO's strong lines alone, those whose line-centre opacity passes " +
-      "a hundredth of the other lines' there at some temperature of 100-3500 K (threshold 0.01, " +
-      "Cubillos 2017): 7594976 of its 56903218 records lie in 13100-26400 cm-1, and the weak " +
-      "lines' quasi-continuum is left out (main's ruling of 2026-10-30 waives " +
+      "E2: V dissolves in the Ti-bearing condensates, which cold-trap it below about 1500-2000 K " +
+      "at photospheric pressures, K. Lodders, Astrophys. J. 577 (2002) 974, DOI " +
+      "10.1086/342241, its abstract). REPACK keeps HyVO's strong lines alone: a line is dropped " +
+      "where, at both 100 and 3500 K, its strength is at most 0.01 times a stronger kept line's " +
+      "at its centre, by that line's Doppler profile, within six Doppler widths (repack's pack.py " +
+      "and cutils.c; Cubillos 2017). 7594976 of its 56903218 records lie in 13100-26400 cm-1, and " +
+      "the weak lines' quasi-continuum is left out (main's ruling of 2026-10-30 waives " +
       "decision-r08-t4ef-storage section 5.4's no-cut-off rule for VO). Against the pending " +
       "bound's HyVO cell means (ExoMol's cross-section service, per molecule of 51V16O) the direct " +
       "sums over the cells above a hundredth of its peak are 0.991, 0.985 and 0.974 summed at " +
       "1000, 2000 and 3000 K; cell by cell 0.947-1.008 between the 10th and 90th percentiles and " +
       "0.904-1.053 at the extremes (623 and 607 nm; 653 nm), and to 0.83 in a cell at a " +
       "thousandth of the peak (602 nm at 1000 K), the deficit growing with temperature as the hot " +
-      "weak lines' share does. So the table is measured to 3500 K, REPACK's top, and estimated " +
-      "above it; above 4000 K the 4000 K node is held, estimated, HyVO being valid to 5400 K. Q(T) " +
-      "is HyVO's .pf, and the mass and default width (0.07 cm-1 per bar with n = 0.5, estimated) " +
-      "its .def's. VOMYT (McKemmish et al. 2016) was not taken: its lines carry about half HyVO's " +
-      "strength over the range (0.50 summed, 0.38-0.68 by system, main's research advice).",
+      "weak lines' share does. Cell means test the thin limit alone: the weak lines' share of the " +
+      "window opacity at large columns is not measured. The table is measured to 3500 K, REPACK's " +
+      "top, as main ruled, the comparisons reaching 3000 K and the deficit extrapolated to about " +
+      "3-4% summed at 3500 K, and estimated above it; above 4000 K the 4000 K node is held, " +
+      "estimated, HyVO being valid to 5400 K. Q(T) is HyVO's .pf, and the mass and default width " +
+      "(0.07 cm-1 per bar with n = 0.5, estimated) its .def's. VOMYT (McKemmish et al. 2016) was " +
+      "not taken: its lines carry about half HyVO's strength over the range (0.50 summed; " +
+      "0.38-0.68 over 450-760 nm and 1.2-1.4 times below 450 nm, main's research advice).",
   }),
 };
 

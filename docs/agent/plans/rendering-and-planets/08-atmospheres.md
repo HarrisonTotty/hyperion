@@ -23293,18 +23293,21 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     no GENERATOR_VERSION bump.
   - _The source, superseding the bullet's "VO (ExoMol's HyVO list, cited at fetch)"_: HyVO's strong
     lines as P. E. Cubillos's REPACK record on Zenodo holds them (record 14266247, version 3,
-    2025-09-20, DOI 10.5281/zenodo.14266247; the method Cubillos 2017, Astrophys. J. 850, 32): every
-    HyVO line whose line-centre opacity passes a hundredth of the other lines' there at some
-    temperature of 100–3,500 K. HyVO's own 27 transition files over the range are 92.7 GB, past
-    the cap on any machine the lane reaches, and VOMYT (McKemmish et al. 2016), the other list,
-    carries about half HyVO's strength over the range (0.50 summed, 0.38–0.68 by system: the
+    2025-09-20, DOI 10.5281/zenodo.14266247; the method Cubillos 2017, Astrophys. J. 850, 32, DOI
+    10.3847/1538-4357/aa9228): HyVO's lines less those that, at both 100 and 3,500 K, are at most
+    0.01 times a stronger kept line's strength at their centre, by that line's Doppler profile,
+    within six Doppler widths (`repack`'s `pack.py` and `cutils.c`, read by the science check).
+    HyVO's own 27 transition files over the range are 92.7 GB, past the cap on any machine the lane
+    reaches, and VOMYT (McKemmish et al. 2016), the other list, carries about half HyVO's strength
+    over the range (0.50 summed; 0.38–0.68 over 450–760 nm and 1.2–1.4 times below 450 nm: the
     research advice), so main ruled for REPACK. HyVO's `.def` and `.pf` came from ExoMol's site
     through the owner's machine; the REPACK file (1,593,290,104 bytes, its MD5 the record's) from
     Zenodo.
   - _The format and the strength._ `repack`'s `read_lbl` and its `struct.pack("dddi", …)` give
     28-byte little-endian records: f64 ν, f64 E″, f64 g″f and an i32 isotope tag (16, ⁵¹V¹⁶O's, on
-    every record, the reader refusing another). Its `utils.py` writes g″f = g′A C1 ÷ (8π c ν²) with
-    C1 = 4ε₀mₑc² ÷ e² = 1 ÷ (π r_e), and its `pack.py` applies the isotope ratio only when it
+    every record, the reader refusing another). Its `utils/utilities.py` writes g″f = g′A C1 ÷
+    (8π c ν²) with `constants.py`'s C1 = 4ε₀mₑc² ÷ e² = 1 ÷ (π r_e), and its `pack.py` applies the
+    isotope ratio only when it
     evaluates a line, so the pipeline's S = π r_e g″f is ExoMol's g′A ÷ (8π c ν²) and takes the
     abundance as every list does (CIAAW's ⁵¹V, 0.997 50, through `periodictable` 2.1.0, times
     ¹⁶O's). Every later step is the pipeline's: the Boltzmann factor on E″, Q(T) from HyVO's `.pf`,
@@ -23312,18 +23315,24 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     to 10⁻¹² (`exomolLines.test.ts`).
   - _The waiver_ (main, 2026-10-30): decision-r08-t4ef-storage §5.4's "not reduced by intensity
     cut-offs" is waived for VO, since REPACK keeps HyVO's strong lines alone: 7,594,976 of its
-    56,903,218 records lie in 13,100–26,400 cm⁻¹. The rule's reasons (a cut-off saves no download,
-    and drops the hot bands' weak-line quasi-continuum) are met by measurement instead. Against the
+    56,903,218 records lie in 13,100–26,400 cm⁻¹. Of the rule's reasons, the first (a cut-off saves
+    no download) is reversed here, the cut being what saves the 92.7 GB, and the second (it drops
+    the hot bands' weak-line quasi-continuum) is measured in the thin limit alone: cell means, not
+    the window opacity at large columns. Against the
     removed bound's HyVO cell means (ExoMol's cross-section service, per molecule of ⁵¹V¹⁶O) the
     pass's direct sums over the cells above a hundredth of the peak are 0.991, 0.985 and 0.974
     summed at 1,000, 2,000 and 3,000 K (main's gate: within 3%); cell by cell 0.947–1.008 between
     the 10th and 90th percentiles, 0.904–1.053 at the extremes (623 and 607 nm; 653 nm), and to
     0.83 in a cell at a thousandth of the peak (602 nm at 1,000 K). The research's 0.970 at
     3,000 K took VOMYT's Q; HyVO's `.pf` gives 0.974.
-  - _The range._ 1,000–4,000 K on E1′'s 18 nodes (E2, as TiO), measured to 3,500 K, REPACK's top
+  - _The range._ 1,000–4,000 K on E1′'s 18 nodes (E2, as TiO; V dissolves in the Ti-bearing
+    condensates, which cold-trap it below about 1,500–2,000 K, K. Lodders, Astrophys. J. 577 (2002)
+    974, its abstract, the science check's), measured to 3,500 K, REPACK's top, as main ruled
     (`hotTable`'s `measuredToK`, the sidecar's `measuredRangeK` [1,000, 3,500]), and estimated
-    above it, where the hot weak lines' share grows (the deficit extrapolates to about 5% summed at
-    4,000 K); above 4,000 K the 4,000 K node is held, estimated, HyVO being valid to 5,400 K.
+    above it, where the hot weak lines' share grows. The comparisons reach 3,000 K; the deficit
+    extrapolates to about 3–4% summed at 3,500 K, at main's 3% gate (a question below), and to
+    about 5% at 4,000 K. Above 4,000 K the 4,000 K node is held, estimated, HyVO being valid to
+    5,400 K.
   - _The licence._ HyVO is ExoMol's, under CC BY-SA 4.0; REPACK's record states CC BY 4.0 for its
     repacking, which ExoMol's share-alike still binds. The table keeps CC BY-SA 4.0 in files of its
     own, with `exomol/README.md` and `NOTICE` citing Bowesman et al. 2024 (MNRAS 529, 1321), REPACK's
@@ -23335,12 +23344,12 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
 
     | Species | Cells | Nodes, K        | P (kept, kPa)     | G = 1 |        Node |       Chain |      16-bit |        1 Pa | Beyond cap | Parts |     Bytes | Basis                                    |
     | ------- | ----: | --------------- | ----------------- | ----: | ----------: | ----------: | ----------: | ----------: | ---------: | ----: | --------: | ---------------------------------------- |
-    | VO      |   381 | 1,000–4,000, 18 | 22 (177.8, 562.3) |     0 | 8.09 × 10⁻⁴ | 1.29 × 10⁻³ | 1.69 × 10⁻⁵ | 1.71 × 10⁻³ |       0.00 |    10 | 4,491,939 | `measured` to 3,500 K, `estimated` above |
+    | VO      |   381 | 1,000–4,000, 18 | 22 (177.8, 562.3) |     0 | 8.09 × 10⁻⁴ | 1.29 × 10⁻³ | 1.69 × 10⁻⁵ | 1.71 × 10⁻³ |       0.00 |    10 | 4,492,386 | `measured` to 3,500 K, `estimated` above |
 
     Its first pass, on E3's 20 pressures, failed the chain tier (to 2.33 × 10⁻³ at 688 and
     732–733 nm, 1,000–1,100 K) at the dropped alternates, so it was reduced again whole on the 22
-    the merge asked for, as H₂S and HCN were. The cap's directories hold 109,359,599 of
-    150,000,000 bytes, 40,640,401 left for hot H₂O. References: 548 and 721 nm, the projection's
+    the merge asked for, as H₂S and HCN were. The cap's directories hold 109,360,046 of
+    150,000,000 bytes, 40,639,954 left for hot H₂O. References: 548 and 721 nm, the projection's
     strongest and median samples.
 
   - _`ATMOSPHERE_OPTICS_VERSION`_ is raised from 3 to 4, by its own rule: VO is drawn where it was
@@ -23359,7 +23368,12 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
       laptop commit may raise it too. Lean: a single raise to 4 covering both when they are merged.
     - REPACK's record states CC BY 4.0: lean, the table stays CC BY-SA 4.0, HyVO's.
     - `ExoMolSource` as a union on `kind`, the REPACK reader beside ExoMol's own files: lean, as
-      built; a list streamed file by file (the advice's HyVO option 1) would be a third kind.
+      built; a list streamed file by file (the advice's HyVO option 1) would be a third kind. The
+      TypeScript review's "consider", one union of a source and its states for `streamPass`, was
+      not taken: the guards it would remove are tested.
+    - VO measured to 3,500 K, as ruled, though the comparisons stop at 3,000 K and the deficit
+      extrapolates to 3–4% summed at 3,500 K (the science check's should-fix): lean, as ruled, the
+      notes saying so; `measuredToK` 3,000 if main prefers, a re-merge with no part changed.
 - **Deferred findings (2026-10-13 rule)** (R08.T4.f's part 2). Recorded and deferred: each leaves the
   algorithm and every contract as they are.
   - _VO's weak lines._ REPACK's dropped lines are 1–3% of the summed cell means at 1,000–3,000 K and
