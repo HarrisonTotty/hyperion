@@ -1177,11 +1177,51 @@ hundred innermost members.
     land pure. `KeplerOrbit::propagate` keeps the two-body law, and T28.a's `kepler.golden` stays.
     The secular step is a method of its own. _Built (lane `p09-secular`, 2026-10-29, at
     `GENERATOR_VERSION` 23, no output moved): see Risks, "P09.T28.d.a as built"._
-  - **P09.T28.d.b The term** (behind `KEPLER_SECULAR_VERSION` = 25; after P09.T28.b.b). Its term in
-    `position_velocity_at` sits behind `KEPLER_SECULAR_VERSION` = 25, apart from T28.b.b's hold for
-    attribution, and may re-pin T28.b.b's 25-arm figures by name (§1.3). The plan's "Bump
-    `GENERATOR_VERSION`" becomes the 25 wiring's. Its D2 and C1 run with `kepler_regime` on, under
-    `every_25_hold()`; its term reaches generated output only through T28.b.b's swap.
+  - **P09.T28.d.b The term** (behind `KEPLER_SECULAR_VERSION` = 25; after P09.T28.b.b; restated
+    2026-10-30 on research advice). A Kepler-regime state with a bound orbit in the centre's Ψ
+    follows that orbit exactly, with the Schwarzschild advance (`schwarzschild_rate`) as the one
+    secular rate. T28.d.a's secular step and its averages stay pure and unwired.
+    - _The orbit._ From the epoch state, E = v² ÷ 2 − Ψ(r₀) and L, with
+      `v_r² = v_r0² + 2(Ψ(r) − Ψ(r₀)) + L²(1 ÷ r₀² − 1 ÷ r²)`, which avoids E's rounding.
+      - The turning points r_p and r_a come from a safeguarded Newton solve in a bracket, a fixed
+        step count, started from the Kepler orbit's.
+      - Hénon's anomaly is `r = r̄ − Δ cos η`. dt/dη and dψ/dη are taken at N = 64 fixed nodes
+        η_j = 2π(j + ½) ÷ N and kept as K = 32 cosine terms each, in the form regular at the
+        turning points, `Δ ÷ √H(cos η)` with `H = v_r² ÷ (1 − cos² η)`.
+      - At t, η solves t(η) = t(η₀) + t by a safeguarded Newton solve with a fixed step count.
+        The position is r(η), turned in the plane by ψ(η) − ψ(η₀) + ω̇_GR t; the velocity is from
+        the same series. t = 0 returns the epoch state to the bit.
+    - _Edges._
+      - A near-circular orbit, with Δ ÷ r̄ under a threshold the task measures, takes the
+        epicyclic limit, since v_r² cancels there.
+      - A state with no apocentre inside Ψ's table keeps the two-body law, which is T28.b.b's.
+      - The task measures e ≥ 0.97, where the Fourier series converges slowest.
+    - _The carrier._ A Ψ table on `SecularTable`'s pattern: the black hole's 1/r exact, the rest at
+      32 knots a decade. It is built once with the galaxy's `CentreMotion`, behind `GalaxyRules`,
+      under T28.d.a's lazy-value notes.
+    - _What follows._
+      - At every radius, the true orbit is no faster than the Kepler orbit about μ = G M(<r₀), and
+        its radial range lies inside that orbit's. Both follow from M(<r) ≶ M(<r₀) on either side
+        of r₀, to the dark halo's share of about 10⁻³.
+      - So P09.T29's shells and pads, T28.b.b's loss-cone verdict and T28.c's radius, all taken on
+        the Kepler orbit, stay valid bounds and stay as built. The verdict then errs towards
+        carving out, and the radius towards the smaller. The task re-checks this.
+    - _Tests._
+      - Against a direct integration in Ψ over ±1,000 yr from 0.1, 1 and 5 ly, on a circular orbit
+        and four eccentric ones: under a tenth of T28.c's radius, the plan's bound. This replaces
+        T28.d.a's pinned misses.
+      - A harmonic core about a point mass: the radial period and the apsidal angle against their
+        closed forms.
+      - S2's 12′.
+      - t = 0 to the bit, and the same bits twice.
+      - T28.b's continuity at the regime's edge.
+      - A bench of `Trajectory::of` and `state_at` against the two-body law's, in
+        `benches/centre.rs`.
+    - _The hold._ The term in `position_velocity_at` sits behind `KEPLER_SECULAR_VERSION` = 25,
+      apart from T28.b.b's hold for attribution, and may re-pin T28.b.b's 25-arm figures by name
+      (decision-galaxy-25-train §1.3). The plan's "Bump `GENERATOR_VERSION`" becomes the 25
+      wiring's. Its D2 and C1 run with `kepler_regime` on, under `every_25_hold()`; its term
+      reaches generated output only through T28.b.b's swap.
 
 #### P09.T29 The range query at the centre
 
