@@ -3315,6 +3315,8 @@ register the five event tags of Provides, each in `rng/tags.rs` (scope `Event`) 
   white spots) and `body.duststorm` for desert planets with thin atmospheres with P = the orbital
   period, a skip mark of two in three and events held to the perihelion season (Mars).
 - **P14.T31.c `events_between`** merges them, sorted by time then `EventId`.
+  - _Built_ 2026-10-30, held at 25 (`STORM_EVENTS_VERSION`): Risks, "Deviations in P14.T31.c, as
+    built".
 - _Ruling 84.5 (from `belts`, round 8):_ the halo's `comet_rate(L)` counts every long-period comet,
   new and returning, three times `new_comet_rate`. Returning comets need `system.comet`'s
   eccentricities widened from 1 − 10⁻⁴–1 to about 1 − 10⁻²–1. Test (a)'s 5–20 comets a year inside
@@ -32493,3 +32495,53 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - For 25's bump: the tripwire's list, the `SurfaceStateDto` and guide rows, and the goldens it
     moves (`planetary/systems/close_binary`, `m_dwarf_resonant_chain`, `solar_like`,
     `planetary/surface_conditions_published`).
+- **Deviations in P14.T31.c, as built (2026-10-30).** Held at 25 over all five kinds:
+  `STORM_EVENTS_VERSION`, `StormEventsRules`, the tests' `with_storm_events` (in
+  `with_every_25_hold`) and the tripwire `the_body_events_are_held_only_until_the_25_bump`. Below
+  25 `event_models` reads nothing and `events_between` lists no event (lean, 2026-10-30), so nothing
+  moves at 24. T36.b and T43.c follow with no bump (decision-galaxy-25-train §5.2).
+  - _API._ `planetary/system/events.rs`: `PlanetarySystem::events_between` as Provides (a reversed
+    or empty window lists none), and `PlanetarySystem::event_models(ctx)`, which gives a
+    `planetary::system::SystemEvents` (`between(TimeWindow)`, `event(EventId)`, `is_empty`,
+    `system`; its documentation states the inputs). `planetary/events/body_events.rs`: `BodyEvent`
+    (`Impact`, `Eruption`, `Storm`, `DustStorm`, `Comet` with the comet boxed; `id`, `time`,
+    `body`, which for a comet is its halo's index), `STORM_PERIOD_FLOOR`, `storm_period`,
+    `has_water_deck`. An event's time is an impact's instant, an onset, or a comet's perihelion.
+  - _Inputs_ from `snapshot_at(EPOCH)`, for each planet, member and moon present then (lean,
+    2026-10-30: a body absent at the epoch, and every body of a system unborn then, has none).
+    Impacts read the figures' `Impactors`; a planet or member without figures (a giant, a
+    sub-Neptune) gets `impactors()` on its `host_orbiter` and bulk, with T_eq and no water, which
+    only its crust reads. A moon without figures has none. Eruptions read `figures.heat_flow()`.
+    Dust storms go where the `mars_dust` mode's τ(550) > 0, and a moon's clock is its planet's
+    orbit (lean). Comets read the halo record's `comet_rate`, the host stars' summed L and M at the
+    epoch, and the largest star's radius (lean). The perihelion passage is EPOCH − (M₀ ÷ 2π) P.
+  - _Existence._ An event is kept only while its body is present: its fate's `formed_at` to its
+    `ending`, and for a moon until its own loss (`moon_state`). Comets end where the halo's record
+    at the clock window's end is unbound, at its host's first death.
+  - _decision-galaxy-25-train §5.2._ Point 1 is `STORM_PERIOD_FLOOR`, 10 Julian years, applied
+    through `storm_period` as a plain input, so T31.b's module and the `planetary/events` golden
+    stand. Point 2 is `has_water_deck`: an `Ok` envelope that lists an H₂O deck, liquid or ice;
+    `NotModelled` gives none. An ice giant whose water deck lies below the 100-bar base lists none,
+    so it has no storms. Li and Ingersoll's ~1% critical ratio is not built. Points 1 and 2 meet
+    T31.b's deferred hot-Jupiter and giants-by-class findings.
+  - _Declined, with §5.2's reasons._ Point 3, Saturn's northern-summer season: the mechanism is
+    internal, timed by radiative cooling; 2010's storm came out of season; six events can't size
+    it; and the hemisphere is a question of visibility. A later train may take it as an
+    `Option<Radians>`. Point 4, the bands drawn apart (39% repeats): alternation is a figure on six
+    events. A later refinement may read cycle n − 1's band mark.
+  - _Plan text (D15):_ "giant storms … with the orbital period as P" gains "floored at 10 years"
+    (§5.2).
+  - _Golden:_ the new `planetary/system_events` (header 24, under every 25 hold): each golden
+    system's century [−50, 50) yr, with counts by kind, digests, every storm and the first events.
+    No other golden moves. Any later 25 hold that moves the golden systems' records re-blesses it
+    by name. At 25's bump it moves by its header.
+  - _Census_ (the 400, run by name with `--ignored`:
+    `cargo test -p hyperion-sim --lib under_every_25_hold_the_storm_census_is_stated`): of 144 giants present at the epoch, 99 keep great storms (57 of them on
+    the floor). 45 lose them: 44 have an `Ok` envelope with no H₂O deck (T_eq 47–1,308 K), and 1 is
+    `NotModelled`. 5 of 22 dusty bodies have P < 0.2 yr, with storms of 1.7–11.2 days.
+  - _Accept, as built:_ `cargo test -p hyperion-sim --lib planetary::system::events` and
+    `planetary::testing`, and `cargo test -p hyperion-sim --doc planetary::events`.
+  - _For P14.T36.b and T43.c:_ keep one `SystemEvents` per cached system, since each
+    `events_between` reads a whole epoch snapshot. A young system lists up to about 2 × 10⁵ events
+    a century (the golden `subgiant`: 176,697).
+  - _Not here:_ lava and cryovolcanism are not told apart (T31.a's R7, for T43).

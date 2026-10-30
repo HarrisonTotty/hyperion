@@ -19,7 +19,7 @@
 //!
 //! The monotone phases (P14.T31.b), each on a [`LinearClock`] whose period is the body's orbital
 //! period, from a perihelion passage for the dust storms and from a plain origin for the storms,
-//! which P14.T31.c sets at one:
+//! which P14.T31.c sets at one, with the storms' period floored at [`STORM_PERIOD_FLOOR`]:
 //!
 //! - [`storms`]: `body.storm` (0x0402), the great storms of giant planets, Saturn's great white
 //!   spots: one a cycle, on a phase that diffuses across the source horizon, each with a duration
@@ -28,10 +28,15 @@
 //!   Mars's: one in about three cycles, on a phase locked to the orbit so that every onset falls in
 //!   the perihelion season, each with a duration.
 //!
-//! P14.T31.c merges every kind into `PlanetarySystem::events_between`. Until then nothing on the
-//! record calls these modules: each takes what a body's record or hooks give as plain values,
-//! which P14.T31.c reads once, at the epoch (design note 23 of plan 06), so that a rate never
-//! depends on the time asked.
+//! Each module takes what a body's record gives as plain values. P14.T31.c reads them once, from
+//! the system's records at the epoch (design note 23 of plan 06), so that a rate never depends on
+//! the time asked, and merges every kind into one list sorted by time and then by event ID:
+//! [`PlanetarySystem::events_between`](crate::planetary::PlanetarySystem::events_between), of
+//! [`BodyEvent`]s, from a system's
+//! [`SystemEvents`](crate::planetary::system::SystemEvents). It gives a great storm only to a giant whose
+//! envelope holds a water deck ([`has_water_deck`]), on a clock of at least
+//! [`STORM_PERIOD_FLOOR`] ([`storm_period`]; decision-galaxy-25-train §5.2), and lists nothing
+//! before generator version 25, its hold's.
 //!
 //! No event leaves a mark (design note 15): an impact made during play is below the resolution of
 //! the global figures, and no event changes any `body_at` result.
@@ -43,6 +48,7 @@
 //!   one by their composition, and the comets their nuclei from another.
 //! - [`SurfacePoint`]: a place on a body, uniform over its sphere.
 
+pub mod body_events;
 pub mod comets;
 pub mod dust_storms;
 pub mod eruptions;
@@ -53,6 +59,7 @@ use core::f64::consts::TAU;
 use std::error::Error;
 use std::fmt;
 
+pub use body_events::{BodyEvent, STORM_PERIOD_FLOOR, has_water_deck, storm_period};
 pub use comets::{BuildCometModelError, Comet, CometInputs, CometModel};
 pub use dust_storms::{BuildDustStormModelError, DustStorm, DustStormInputs, DustStormModel};
 pub use eruptions::{BuildEruptionModelError, Eruption, EruptionInputs, EruptionModel};

@@ -417,7 +417,10 @@ impl Error for SampleContextsError {
 ///   `SteamEnvelope` state;
 /// - the present climate's state, `PRESENT_STATE_VERSION` (P14.T53.e), at
 ///   `PresentStateRules::Present` through `with_present_state`: rules 5–7 of the published state
-///   on each pass's figures, which the next pass's state-keyed branches read.
+///   on each pass's figures, which the next pass's state-keyed branches read;
+/// - the events on the record, `STORM_EVENTS_VERSION` (P14.T31.c), at `StormEventsRules::Wired`
+///   through `with_storm_events`: a system's events from its records at the epoch, the storms
+///   floored at 10 years and gated on a water deck.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 24's) is not
@@ -428,6 +431,8 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::atmosphere::{
         PresentStateRules, SteamEnvelopeRules, with_present_state, with_steam_envelope,
     };
+    use crate::planetary::system::events::{StormEventsRules, with_storm_events};
+    let run = || with_storm_events(StormEventsRules::Wired, run);
     with_steam_envelope(SteamEnvelopeRules::Steam, || {
         with_present_state(PresentStateRules::Present, run)
     })
@@ -639,6 +644,25 @@ mod tests {
             PresentStateRules::Held
         );
         assert_eq!(PresentStateRules::in_force(), PresentStateRules::Held);
+    }
+
+    /// The events' switch (P14.T31.c): in force inside 25's helper, held outside it and where a
+    /// test sets it back.
+    #[test]
+    fn the_body_events_hold_is_in_force_inside_25_s_helper_alone() {
+        use crate::planetary::system::events::{StormEventsRules, with_storm_events};
+        assert_eq!(StormEventsRules::in_force(), StormEventsRules::Held);
+        assert_eq!(
+            with_every_25_hold(StormEventsRules::in_force),
+            StormEventsRules::Wired
+        );
+        assert_eq!(
+            with_every_25_hold(|| {
+                with_storm_events(StormEventsRules::Held, StormEventsRules::in_force)
+            }),
+            StormEventsRules::Held
+        );
+        assert_eq!(StormEventsRules::in_force(), StormEventsRules::Held);
     }
 
     #[test]

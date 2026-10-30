@@ -82,8 +82,14 @@
 //! `NotModelled` below generator version 24, and from it where the generator does not model it
 //! (P14.T54.b.i), and a dwarf planet's rings `NotModelled`. Its
 //! `hooks` hold the body's detail seed alone (the rendering plans' R09.T1.b): [`Section::Ok`] for
-//! a planet, moon or dwarf planet present at the time, `NotApplicable` otherwise. Events on bodies
-//! (P14.T31) are not built, so there is no `events_between`.
+//! a planet, moon or dwarf planet present at the time, `NotApplicable` otherwise.
+//!
+//! # Events (P14.T31.c)
+//!
+//! [`PlanetarySystem::events_between`]: every body's impacts, eruptions, great storms and global
+//! dust storms, and the halo's comets, merged by time and then by event ID, on inputs read once
+//! from the records at the epoch ([`PlanetarySystem::event_models`], [`SystemEvents`]), each
+//! while its body is present; none before generator version 25, the hold's.
 //!
 //! # Streams
 //!
@@ -218,6 +224,8 @@ use modifiers::{
 };
 use moon_ice::{HotHistory, MoonIce, kept_water, shell_lag};
 use small_bodies::SmallBodyTypes;
+
+pub use events::SystemEvents;
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then
 /// seven reserved.
@@ -6620,6 +6628,7 @@ mod audit_tests;
 #[cfg(test)]
 pub(crate) mod cold_trap_tests;
 pub(crate) mod envelope;
+pub(crate) mod events;
 mod modifiers;
 pub(crate) mod moon_ice;
 #[cfg(test)]
