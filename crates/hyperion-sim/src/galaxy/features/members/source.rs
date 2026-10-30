@@ -3,8 +3,9 @@
 //!
 //! The range query treats a feature as one more stack of layers. For a query sphere
 //! [`FeatureMemberSource`] takes the features whose reach touches it
-//! ([`FeatureCatalogue::near`]), and for each the owned nested cells that touch it, band by band
-//! from the coarsest mass band down:
+//! ([`FeatureCatalogue::near`]) and whose nested grid may, by a bound from the cluster model that
+//! needs no interior ([`FeatureInteriorCache::grid_reach`], P09.T40.a), and for each the owned
+//! nested cells that touch it, band by band from the coarsest mass band down:
 //!
 //! - **Census.** A feature's expected members in a band are the sum of the bound × volume of its
 //!   cells touching the sphere's unpadded radius, which errs high, as [`SystemSource`]'s contract
@@ -43,6 +44,8 @@ use crate::units::{KilometresPerSecond, LightYears, Seconds};
 use super::super::FeatureId;
 
 use super::super::catalogue::{FeatureCatalogue, FeatureCellCache, FeatureRecord};
+use super::super::interior::LocalCell;
+use super::super::nested::box_distance;
 use super::local_offset;
 use super::placement::FeatureInterior;
 
@@ -54,6 +57,15 @@ use super::placement::FeatureInterior;
 pub trait FeatureInteriorCache {
     /// The interior of `feature` in `galaxy`, or `None` for a feature with no members.
     fn interior(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureInterior>>;
+
+    /// A bound on the reach of `feature`'s nested grid in `galaxy`, ly, or `None` for a feature
+    /// with no members: [`FeatureInterior::grid_reach_bound`], which an implementation may keep,
+    /// or the reach of an interior it holds (P09.T40.a). An implementation never returns less
+    /// than the reach of the grid [`interior`](Self::interior) lends, and `None` only where it
+    /// lends none.
+    fn grid_reach(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<LightYears> {
+        FeatureInterior::grid_reach_bound(galaxy, feature)
+    }
 }
 
 /// The cache that keeps nothing: every lookup builds its interior.
@@ -79,6 +91,7 @@ impl FeatureInteriorCache for NoInteriorCache {
 pub struct KeepInteriors<'a> {
     galaxy: &'a Galaxy,
     kept: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureInterior>>>>,
+    reaches: Mutex<BTreeMap<FeatureId, Option<LightYears>>>,
 }
 
 impl<'a> KeepInteriors<'a> {
@@ -88,16 +101,24 @@ impl<'a> KeepInteriors<'a> {
         Self {
             galaxy,
             kept: Mutex::new(BTreeMap::new()),
+            reaches: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// # Panics
+    ///
+    /// If `galaxy` is not the cache's own.
+    fn check(&self, galaxy: &Galaxy) {
+        assert!(
+            std::ptr::eq(galaxy, self.galaxy),
+            "an interior cache is for the galaxy it was made for"
+        );
     }
 }
 
 impl FeatureInteriorCache for KeepInteriors<'_> {
     fn interior(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureInterior>> {
-        assert!(
-            std::ptr::eq(galaxy, self.galaxy),
-            "an interior cache is for the galaxy it was made for"
-        );
+        self.check(galaxy);
         let mut kept = self
             .kept
             .lock()
@@ -105,6 +126,25 @@ impl FeatureInteriorCache for KeepInteriors<'_> {
         kept.entry(feature.id())
             .or_insert_with(|| FeatureInterior::of(galaxy, feature).map(Arc::new))
             .clone()
+    }
+
+    /// The reach of the interior it keeps, or the bound, kept.
+    fn grid_reach(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<LightYears> {
+        self.check(galaxy);
+        if let Some(interior) = self
+            .kept
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&feature.id())
+        {
+            return interior.as_ref().map(|interior| interior.grid().reach());
+        }
+        *self
+            .reaches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(feature.id())
+            .or_insert_with(|| FeatureInterior::grid_reach_bound(galaxy, feature))
     }
 }
 
@@ -156,8 +196,11 @@ impl<'a> FeatureMemberSource<'a> {
         }
     }
 
-    /// The interiors of the features whose reach touches the sphere of `radius` about `centre`,
-    /// in the catalogue's order.
+    /// The interiors of the features whose nested grids may meet the sphere of `radius` about
+    /// `centre`, in the catalogue's order: of the features whose reach touches it, those whose
+    /// grid's reach bound does ([`FeatureInteriorCache::grid_reach`]; P09.T40.a). A grid that
+    /// misses the sphere has no cell touching it, so its feature adds nothing to the census or the
+    /// hits, and its interior is not built.
     fn interiors_near(
         &self,
         galaxy: &Galaxy,
@@ -165,6 +208,11 @@ impl<'a> FeatureMemberSource<'a> {
         radius: LightYears,
     ) -> impl Iterator<Item = Arc<FeatureInterior>> {
         FeatureCatalogue::near(galaxy, centre, radius, self.features)
+            .filter(move |f| {
+                self.interiors
+                    .grid_reach(galaxy, f)
+                    .is_some_and(|reach| grid_may_touch(f, centre, reach, radius))
+            })
             .filter_map(|f| self.interiors.interior(galaxy, &f))
     }
 }
@@ -237,6 +285,29 @@ impl SystemSource for FeatureMemberSource<'_> {
     fn suppresses(&self, _galaxy: &Galaxy, _record: &SystemRecord, _t: UniverseTime) -> bool {
         false
     }
+}
+
+/// Whether a grid of `reach` about `feature`'s centre may hold a cell that the ball of `radius`
+/// about `centre` touches: whether the ball meets the grid's cube, `[−reach, reach]³`.
+///
+/// Every owned cell lies in the cube, with its outer faces on the cube's, so the distance to the
+/// cube, taken as [`NestedGrid::cells_touching`](super::super::nested::NestedGrid::cells_touching)
+/// takes a cell's, is never more than a cell's in floating point either: where this is false, no
+/// cell touches the ball.
+#[must_use]
+fn grid_may_touch(
+    feature: &FeatureRecord,
+    centre: &GalacticPosition,
+    reach: LightYears,
+    radius: LightYears,
+) -> bool {
+    let local = local_offset(feature.position(), centre);
+    let reach = reach.value();
+    let cube = LocalCell {
+        min: [-reach; 3],
+        edge: 2.0 * reach,
+    };
+    box_distance(&cube, [local.x, local.y, local.z]) <= radius.value()
 }
 
 /// How far from a query's centre a feature's cells of `layer` are visited, for a sphere of
@@ -320,6 +391,7 @@ mod tests {
     #[test]
     fn the_member_source_finds_and_counts_what_a_scan_finds() {
         a_query_in_an_open_cluster_finds_every_member_a_scan_finds();
+        skipping_the_grids_that_miss_the_sphere_changes_nothing();
         the_census_does_not_depend_on_what_is_cached();
         hits_count_in_their_band_s_layer_and_the_unborn_are_dropped();
         a_cluster_s_speed_bound_is_its_bulk_and_larger_term_and_holds_its_members();
@@ -483,6 +555,67 @@ mod tests {
             assert!(!c_brute.is_empty(), "no band-C member inside 12 ly");
             assert_eq!(c_found, c_brute, "band C at {years} years");
         }
+    }
+
+    /// A cache that builds every interior and bounds no grid: the source as it was before it
+    /// tested the grids' reach (P09.T40.a).
+    struct EveryInterior<'a>(KeepInteriors<'a>);
+
+    impl FeatureInteriorCache for EveryInterior<'_> {
+        fn interior(
+            &self,
+            galaxy: &Galaxy,
+            feature: &FeatureRecord,
+        ) -> Option<Arc<FeatureInterior>> {
+            self.0.interior(galaxy, feature)
+        }
+
+        fn grid_reach(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<LightYears> {
+            self.interior(galaxy, feature).map(|_| LightYears::new(1e9))
+        }
+    }
+
+    /// Run on its one build of the fixture by
+    /// [`the_member_source_finds_and_counts_what_a_scan_finds`].
+    fn skipping_the_grids_that_miss_the_sphere_changes_nothing() {
+        let galaxy = galaxy();
+        let [x, y, z] = open_cluster().feature().position().to_light_years_f64();
+        let centre = GalacticPosition::from_light_years([x + 1.5, y, z - 1.0]).unwrap();
+        let every = EveryInterior(KeepInteriors::new(galaxy));
+        let skipping = KeepInteriors::new(galaxy);
+        for years in [0, -600] {
+            let sphere = sphere_at(centre, 40.0, years);
+            let old = FeatureMemberSource::new(&NoFeatureCache, &every);
+            let new = FeatureMemberSource::new(&NoFeatureCache, &skipping);
+            let (before, after) = (
+                old.expected_in_sphere(galaxy, &sphere),
+                new.expected_in_sphere(galaxy, &sphere),
+            );
+            for layer in Layer::ALL {
+                assert_same_bits(after.get(layer), before.get(layer));
+            }
+            let (mut before, mut after) = (Vec::new(), Vec::new());
+            old.systems_in_sphere(galaxy, &sphere, all_layers(), &mut before);
+            new.systems_in_sphere(galaxy, &sphere, all_layers(), &mut after);
+            assert!(before.len() > 20, "{} hits", before.len());
+            assert_eq!(after, before, "at {years} years");
+        }
+        // The bound never falls short of a grid, is `None` just where there is no interior, and
+        // keeps some grids clear of the sphere.
+        let near = FeatureCatalogue::near(galaxy, &centre, LightYears::new(40.0), &NoFeatureCache);
+        let mut skipped = 0;
+        for feature in near {
+            let bound = FeatureInterior::grid_reach_bound(galaxy, &feature);
+            let interior = every.interior(galaxy, &feature);
+            assert_eq!(bound.is_some(), interior.is_some(), "{:?}", feature.id());
+            if let (Some(bound), Some(interior)) = (bound, interior) {
+                assert!(bound.value() >= interior.grid().reach().value());
+                if !grid_may_touch(&feature, &centre, bound, LightYears::new(40.0)) {
+                    skipped += 1;
+                }
+            }
+        }
+        assert!(skipped > 0, "no grid is kept clear");
     }
 
     fn all_layers() -> LayerSet {

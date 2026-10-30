@@ -2,11 +2,12 @@
 //! feature's interior (P09.T40.a), and the galaxy map's globulars (P09.T40.b).
 //!
 //! A query near a feature looks up every feature cell within the feature reach of its sphere
-//! ([`FeatureCatalogue::near`]), and a feature with members builds its interior, its cluster model,
-//! class table and nested grid ([`FeatureInterior::of`]): 14–17 ms each by plan 09's Risks
-//! ("Ruling 139 as built", 139.5), and about 88 ms each in a test build (115 in 10.1 s, measured
-//! 2026-10-30 for a 50 ly query at the Sun-like point). Two queries near one another ask for the
-//! same ones, so the server keeps both:
+//! ([`FeatureCatalogue::near`]), and a feature with members whose nested grid may meet the sphere,
+//! by a bound from its cluster model ([`FeatureInterior::grid_reach_bound`]), builds its interior,
+//! its cluster model, class table and nested grid ([`FeatureInterior::of`]): 14–17 ms each by plan
+//! 09's Risks ("Ruling 139 as built", 139.5). A 50 ly query at the Sun-like point looks up 115
+//! features with members and builds one (measured 2026-10-30). Two queries near one another ask
+//! for the same ones, so the server keeps both:
 //! [`SharedFeatureCellCache`] is a [`SharedByteLru`] over `(GalaxyKey, FeatureCell)` and
 //! [`SharedClusterModelCache`] one over `(GalaxyKey, FeatureId)`, so that two saves of one seed
 //! share their entries and nothing generated under one generator version is lent for another
@@ -60,11 +61,26 @@ impl HeapBytes for FeatureCellContents {
     }
 }
 
-impl HeapBytes for FeatureInterior {
-    /// The sim's own count of what the interior owns on the heap: its class table's rows and
-    /// profiles ([`FeatureInterior::heap_bytes`]).
+/// What [`SharedClusterModelCache`] holds of one feature: its interior once a query has needed
+/// it, and before that the bound on its nested grid's reach that the query tested it by
+/// ([`FeatureInterior::grid_reach_bound`]; P09.T40.a).
+#[derive(Debug)]
+enum HeldFeature {
+    /// Its interior.
+    Interior(Arc<FeatureInterior>),
+    /// The bound on its grid's reach, or `None` for a feature with no members.
+    Reach(Option<LightYears>),
+}
+
+impl HeapBytes for HeldFeature {
+    /// An interior's own size, since it is lent behind an `Arc` of its own, and what it owns on the
+    /// heap: its class table's rows and profiles ([`FeatureInterior::heap_bytes`]). A bound owns
+    /// nothing.
     fn heap_bytes(&self) -> usize {
-        Self::heap_bytes(self)
+        match self {
+            Self::Interior(interior) => size_of::<FeatureInterior>() + interior.heap_bytes(),
+            Self::Reach(_) => 0,
+        }
     }
 }
 
@@ -157,11 +173,15 @@ impl FeatureCellCache for FeatureCellHandle<'_> {
 /// cluster model with the class table and nested grid built on it (P09.T40.a).
 ///
 /// A feature with no members (a cloud, an association, a dissolved cluster) has no interior, and
-/// is not stored: the sim answers it from its marks in microseconds
+/// none is stored: the sim answers it from its marks in microseconds
 /// ([`ClusterModel::from_record`](hyperion_sim::galaxy::features::cluster::ClusterModel::from_record)).
+/// A feature a range query looked up but whose grid its bound kept clear of the sphere
+/// ([`FeatureInteriorCache::grid_reach`]) is held by that bound alone, a hundred bytes or so
+/// against the interior's tens of kilobytes, so that a query near it again tests it without its
+/// cluster model; a feature with no members is held so too.
 #[derive(Debug)]
 pub struct SharedClusterModelCache {
-    interiors: SharedByteLru<(GalaxyKey, FeatureId), FeatureInterior>,
+    interiors: SharedByteLru<(GalaxyKey, FeatureId), HeldFeature>,
 }
 
 impl SharedClusterModelCache {
@@ -191,6 +211,7 @@ impl SharedClusterModelCache {
         KeptInteriors {
             shared: self.handle(galaxy),
             kept: Mutex::new(BTreeMap::new()),
+            reaches: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -220,13 +241,57 @@ impl SharedClusterModelCache {
         );
         galaxy.kinematics()?;
         let entry_key = (key, feature.id());
-        if let Some(interior) = self.interiors.get(&entry_key) {
-            return Some(interior);
+        if let Some(held) = self.interiors.get(&entry_key) {
+            match &*held {
+                HeldFeature::Interior(interior) => return Some(Arc::clone(interior)),
+                // The bound is `None` only where the sim builds no interior.
+                HeldFeature::Reach(None) => return None,
+                HeldFeature::Reach(Some(_)) => {}
+            }
         }
         let interior = Arc::new(FeatureInterior::of(galaxy, feature)?);
-        // An interior larger than the whole budget is handed back and still lent.
-        let _ = self.interiors.insert(entry_key, Arc::clone(&interior));
+        // An interior larger than the whole budget is handed back and still lent. It replaces the
+        // feature's bound, which its grid's reach supersedes.
+        let _ = self.interiors.insert(
+            entry_key,
+            Arc::new(HeldFeature::Interior(Arc::clone(&interior))),
+        );
         Some(interior)
+    }
+
+    /// The reach of the grid of `feature`'s interior in `galaxy`, the galaxy `key` names, if the
+    /// cache holds it, or else the bound on it, the cache's or computed and stored; `None` for a
+    /// feature with no members.
+    ///
+    /// As [`interior`](Self::interior), a galaxy without its kinematic tables never reads the cache.
+    fn grid_reach(
+        &self,
+        key: GalaxyKey,
+        galaxy: &Galaxy,
+        feature: &FeatureRecord,
+    ) -> Option<LightYears> {
+        assert_eq!(
+            galaxy.seed().get(),
+            key.seed(),
+            "a cluster model cache handle lends the interiors of one galaxy, and this is another's"
+        );
+        galaxy.kinematics()?;
+        let entry_key = (key, feature.id());
+        if let Some(held) = self.interiors.get(&entry_key) {
+            return match &*held {
+                HeldFeature::Interior(interior) => Some(interior.grid().reach()),
+                HeldFeature::Reach(reach) => *reach,
+            };
+        }
+        let reach = FeatureInterior::grid_reach_bound(galaxy, feature);
+        // Only if nothing was stored meanwhile, so that a bound never displaces an interior another
+        // job has just built.
+        let _ = self.interiors.insert_if_unchanged(
+            entry_key,
+            None,
+            Arc::new(HeldFeature::Reach(reach)),
+        );
+        reach
     }
 }
 
@@ -256,18 +321,30 @@ impl FeatureInteriorCache for ClusterModelHandle<'_> {
     fn interior(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureInterior>> {
         self.cache.interior(self.galaxy, galaxy, feature)
     }
+
+    /// Lends the reach of the grid of `feature`'s interior if the cache holds it, or else the
+    /// bound on it, computing the bound if the cache has not got it.
+    ///
+    /// # Panics
+    ///
+    /// As [`interior`](Self::interior).
+    fn grid_reach(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<LightYears> {
+        self.cache.grid_reach(self.galaxy, galaxy, feature)
+    }
 }
 
 /// One job's view of the [`SharedClusterModelCache`]: every interior the job reads is kept for as
 /// long as the job holds this, over the shared cache, so that a job builds each feature's interior
-/// at most once whatever the shared budget. A range query's census, its hits and its rows' members
-/// all read the same interiors, a hundred or so near the Sun.
+/// at most once whatever the shared budget, and so is every bound on a grid's reach it tests a
+/// feature by. A range query's census, its hits and its rows' members all read the same
+/// interiors, and its census and hits the bounds of some hundred features near the Sun.
 ///
 /// What it keeps is bounded by the features one job reads, and is dropped with it.
 #[derive(Debug)]
 pub struct KeptInteriors<'a> {
     shared: ClusterModelHandle<'a>,
     kept: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureInterior>>>>,
+    reaches: Mutex<BTreeMap<FeatureId, Option<LightYears>>>,
 }
 
 impl FeatureInteriorCache for KeptInteriors<'_> {
@@ -281,6 +358,29 @@ impl FeatureInteriorCache for KeptInteriors<'_> {
         kept.entry(feature.id())
             .or_insert_with(|| self.shared.interior(galaxy, feature))
             .clone()
+    }
+
+    /// Lends the reach of the grid of the interior the job keeps, or else the bound on it: the
+    /// job's own, or the shared cache's, kept.
+    ///
+    /// # Panics
+    ///
+    /// As [`ClusterModelHandle`]'s lookup, if `galaxy` is another's.
+    fn grid_reach(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<LightYears> {
+        if let Some(interior) = self
+            .kept
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&feature.id())
+        {
+            return interior.as_ref().map(|interior| interior.grid().reach());
+        }
+        *self
+            .reaches
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(feature.id())
+            .or_insert_with(|| self.shared.grid_reach(galaxy, feature))
     }
 }
 
@@ -565,13 +665,60 @@ mod tests {
         );
         assert_eq!(
             counters.bytes(),
-            expected.heap_bytes() + size_of::<FeatureInterior>() + ENTRY_OVERHEAD_BYTES
+            expected.heap_bytes()
+                + size_of::<FeatureInterior>()
+                + size_of::<HeldFeature>()
+                + ENTRY_OVERHEAD_BYTES
         );
         // A bare galaxy has no members: its features have no interior, and nothing is stored.
         let bare = hyperion_sim::galaxy::Galaxy::new(Seed::new(SEED));
         let empty = SharedClusterModelCache::new(64 << 20);
         assert!(empty.handle(key()).interior(&bare, feature).is_none());
         assert_eq!(empty.counters().entries(), 0);
+    }
+
+    /// A feature is held by the bound on its grid's reach until its interior is built, which
+    /// replaces it and is lent its grid's own reach; a feature with no members is held by its
+    /// `None`, and has no interior (P09.T40.a).
+    #[test]
+    fn a_feature_is_held_by_its_bound_until_its_interior_is_built() {
+        let cache = SharedClusterModelCache::new(64 << 20);
+        let handle = cache.handle(key());
+        let feature = a_cluster();
+        let bound = FeatureInterior::grid_reach_bound(galaxy(), feature);
+        assert!(bound.is_some(), "the cluster has members");
+        assert_eq!(handle.grid_reach(galaxy(), feature), bound);
+        assert_eq!(handle.grid_reach(galaxy(), feature), bound, "the cache's");
+        let counters = cache.counters();
+        assert_eq!(
+            (counters.misses(), counters.hits(), counters.entries()),
+            (1, 1, 1)
+        );
+        assert_eq!(
+            counters.bytes(),
+            size_of::<HeldFeature>() + ENTRY_OVERHEAD_BYTES
+        );
+        let interior = handle
+            .interior(galaxy(), feature)
+            .expect("the cluster has members");
+        assert_eq!(
+            cache.counters().entries(),
+            1,
+            "the interior replaces the bound"
+        );
+        let reach = handle.grid_reach(galaxy(), feature).expect("an interior");
+        assert_eq!(reach, interior.grid().reach());
+        assert!(reach.value() <= bound.expect("a bound").value());
+        // A feature with no members (a cloud, an association): its `None` is held, and it has no
+        // interior.
+        let memberless =
+            FeatureCatalogue::near(galaxy(), &sun(), LightYears::new(3_000.0), &NoFeatureCache)
+                .find(|feature| FeatureInterior::of(galaxy(), feature).is_none())
+                .expect("a feature with no members lies within 3,000 ly of the Sun");
+        let kept = cache.kept(key());
+        assert_eq!(kept.grid_reach(galaxy(), &memberless), None);
+        assert!(handle.interior(galaxy(), &memberless).is_none());
+        assert_eq!(cache.counters().entries(), 2);
     }
 
     /// The features' members as the range query finds them about `feature`, through `cells` and
@@ -593,9 +740,9 @@ mod tests {
     /// they keep nothing, evict all the time (a few kilobytes of cells, a few interiors of the
     /// hundred or so the query builds) or keep everything.
     ///
-    /// Each cold query builds the interior of every feature whose reach touches its padded sphere,
-    /// about a hundred near the Sun at some 90 ms each in a test build, so the budgets come in
-    /// three pairs rather than all their combinations.
+    /// Each cold query builds the interior of every feature whose grid may meet its padded sphere
+    /// by the bound on its reach, at some 90 ms each in a test build, so the budgets come in three
+    /// pairs rather than all their combinations.
     #[test]
     fn eviction_never_changes_a_range_query_s_members() {
         let feature = a_cluster();

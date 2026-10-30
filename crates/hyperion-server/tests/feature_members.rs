@@ -316,7 +316,7 @@ async fn a_query_inside_a_globular_returns_its_members_with_their_origin() {
         );
         assert_eq!(row.member_class, None);
     }
-    // Every feature whose reach touches the padded sphere has its interior built, the globular's
+    // Every feature whose grid may meet the padded sphere has its interior built, the globular's
     // among them, and each is built once and kept.
     let stats = server.stats();
     assert!(stats.feature_cells().entries() > 0);

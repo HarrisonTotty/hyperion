@@ -37,6 +37,7 @@ use crate::units::{KilometresPerSecond, LightYears};
 
 use super::super::catalogue::{FeatureCatalogue, FeatureRecord, bulk_velocity};
 use super::super::cluster::ClusterModel;
+use super::super::interior::counts::tail_window;
 use super::super::interior::{CellProposal, LocalCell, MemberClassTable};
 use super::super::nested::{NestedCell, NestedGrid};
 use super::level_list::FeatureLevelList;
@@ -95,6 +96,26 @@ impl FeatureInterior {
             bulk,
             speed_bound,
         })
+    }
+
+    /// A bound on the reach of the nested grid [`of`](Self::of) builds for `feature`, ly, from its
+    /// cluster model and tail window alone ([`MemberClassTable::grid_reach_bound`]), or `None`
+    /// where `of` builds no interior: what a query tests before it builds one (P09.T40.a).
+    ///
+    /// The interior's class table, which chooses the grid's width, costs a hundred times the
+    /// model; a 50 ly query at the Sun-like point looks up some hundred features whose reach
+    /// touches it, and one of their grids (measured 2026-10-30).
+    #[must_use]
+    pub fn grid_reach_bound(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<LightYears> {
+        // `bulk_velocity`'s conditions, without its draw.
+        feature.component()?;
+        galaxy.kinematics()?;
+        let model = ClusterModel::from_record(galaxy, feature)?;
+        let tidal = model.tidal_radius().value();
+        let window = tail_window(galaxy, &model, feature.reach());
+        // A tail's reach as `MemberClassTable::from_counts` cuts it at the feature's.
+        let tails = (tidal + window.length.value()).min(feature.reach().value());
+        Some(MemberClassTable::grid_reach_bound(tidal, tails))
     }
 
     /// The feature.

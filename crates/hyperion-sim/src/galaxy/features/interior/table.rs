@@ -670,6 +670,25 @@ impl MemberClassTable {
         self.grid_from(GRID_WIDTH_MIN_LOG2)
     }
 
+    /// A bound on the reach of [`grid`](Self::grid) for a table whose tidal radius is `tidal` and
+    /// whose tails run at most `tails` from the centre (ly), without the table: the reach of the
+    /// least grid from 1 ⁄ 64 ly that reaches both. [`grid_width`](Self::grid_width) stops
+    /// doubling once its grid reaches the table's [`extent`](Self::extent), which is the larger of
+    /// the two, so its grid is never wider (P09.T40.a).
+    ///
+    /// # Panics
+    ///
+    /// If neither is finite, since no grid of the nested grid's range of widths reaches them.
+    #[must_use]
+    pub fn grid_reach_bound(tidal: f64, tails: f64) -> LightYears {
+        let far = tidal.max(tails);
+        let mut k = GRID_WIDTH_MIN_LOG2;
+        while feature_grid(k).reach().value() < far {
+            k += 1;
+        }
+        feature_grid(k).reach()
+    }
+
     /// [`grid`](Self::grid) at [`grid_width_from`](Self::grid_width_from)`(floor_log2)`.
     ///
     /// # Panics
