@@ -34,6 +34,7 @@
  */
 
 import { BAKE_RANGE_NM } from "../medium";
+import { exp, log, pow } from "../../../lib/pinnedMath";
 
 /** Whether a table's values rest on measured line data or on a stated estimate. */
 export type KDistributionBasis = "measured" | "estimated";
@@ -562,7 +563,7 @@ export function mixLimitColumnM2(
     return Math.min(a, b);
   }
   const t = (selfShare - (shares[k] ?? 0)) / ((shares[k + 1] ?? 1) - (shares[k] ?? 0));
-  return Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * t);
+  return exp(log(a) + (log(b) - log(a)) * t);
 }
 
 /**
@@ -571,8 +572,8 @@ export function mixLimitColumnM2(
  * 10 MPa, and 13.3 MPa, 30 in all, as `src/tools/kDistributions.ts`'s `STORED_PRESSURES_PA`.
  */
 export const STANDARD_PRESSURES_PA: ReadonlyArray<number> = [
-  ...Array.from({ length: 21 }, (_, k) => 10 * 10 ** (k / 4)),
-  ...Array.from({ length: 9 }, (_, k) => 1e6 * 10 ** ((k + 1) / 8)),
+  ...Array.from({ length: 21 }, (_, k) => 10 * pow(10, k / 4)),
+  ...Array.from({ length: 9 }, (_, k) => 1e6 * pow(10, (k + 1) / 8)),
 ];
 
 /**
@@ -592,7 +593,7 @@ export const PRESSURE_LATTICE_PA: ReadonlyArray<number> = Array.from({ length: 5
   if (j >= 40) {
     return STANDARD_PRESSURES_PA[20 + (j - 40)] ?? Number.NaN;
   }
-  return j % 2 === 0 ? (STANDARD_PRESSURES_PA[j / 2] ?? Number.NaN) : 10 * 10 ** (j / 8);
+  return j % 2 === 0 ? (STANDARD_PRESSURES_PA[j / 2] ?? Number.NaN) : 10 * pow(10, j / 8);
 });
 
 /** Whether a table's node is a lattice midpoint: an odd j below 1 MPa. */
@@ -804,7 +805,7 @@ export function broadeningFactor(
     const unbounded = DIPOLAR_BROADENERS.has(gas) || (own && SELF_BROADENED_ATOMS.has(gas));
     const bounded = noWidth && !twoVariant && !unbounded;
     estimated ||= (foreign && twoVariant) || (noWidth && !bounded);
-    const atT = (ratio ?? 1) * (296 / temperatureK) ** (table.broadeningExponents.get(key) ?? 0);
+    const atT = (ratio ?? 1) * pow(296 / temperatureK, table.broadeningExponents.get(key) ?? 0);
     total += x;
     weighted += x * atT;
     self += own ? x * atT : 0;
@@ -928,13 +929,13 @@ function cubicOnLog(
     ],
     at,
   );
-  return Math.exp(w.reduce((sum, wk, k) => sum + wk * Math.log(values[k] ?? 1), 0));
+  return exp(w.reduce((sum, wk, k) => sum + wk * log(values[k] ?? 1), 0));
 }
 
 /** A cell's σ at its codes' index ((v × T + t) × P + p) × G + g, m². */
 function storedSigma(cell: KDistributionCell, index: number): number {
   const code = cell.codes[index] ?? 0;
-  return code === 0 ? 0 : Math.exp(cell.lnOffset + cell.lnStep * (code - 1));
+  return code === 0 ? 0 : exp(cell.lnOffset + cell.lnStep * (code - 1));
 }
 
 /**
@@ -1036,7 +1037,7 @@ export function cellSigmasAt(kd: SpeciesKDistribution, broadeningPa: number): Fl
       return cell.sigmas.slice(node * g, (node + 1) * g);
     }
     return Float64Array.from({ length: g }, (_, k) =>
-      cubicOnLog(kd.pressuresPa, broadeningPa, Math.log, (p) => cell.sigmas[p * g + k] ?? 0),
+      cubicOnLog(kd.pressuresPa, broadeningPa, log, (p) => cell.sigmas[p * g + k] ?? 0),
     );
   });
 }
@@ -1049,7 +1050,7 @@ export function cellTransmittance(
 ): number {
   let t = 0;
   for (let g = 0; g < weights.length; g += 1) {
-    t += (weights[g] ?? 0) * Math.exp(-(sigmasM2[g] ?? 0) * columnPerM2);
+    t += (weights[g] ?? 0) * exp(-(sigmasM2[g] ?? 0) * columnPerM2);
   }
   return t;
 }

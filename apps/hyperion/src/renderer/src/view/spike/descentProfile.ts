@@ -26,6 +26,7 @@ import { add, cross, dot, normalise, scale, type Vec3, vec3 } from "../../geomet
 import type { Quaternion } from "../camera/pose";
 import { quaternionFromRows } from "../camera/quaternion";
 import { type BodyFigure, spheroidNormal, surfacePoint } from "../terrain/planet";
+import { asin, cos, pow, sin } from "../../lib/pinnedMath";
 
 /** One segment of the descent (Design note 19), as data. */
 export interface DescentSegment {
@@ -949,7 +950,7 @@ export function splitMix64(state: bigint): readonly [bigint, bigint] {
 
 /** The unit fraction of a 64-bit draw's top 53 bits, in [0, 1), exact in a double. */
 export function unitOf(draw: bigint): number {
-  return Number(draw >> 11n) / 2 ** 53;
+  return Number(draw >> 11n) / pow(2, 53);
 }
 
 /**
@@ -978,9 +979,9 @@ export function landingSiteOf(seed: bigint): LandingSite {
   const [s1, a] = splitMix64(seed);
   const [s2, b] = splitMix64(s1);
   const [, c] = splitMix64(s2);
-  const sinLimit = Math.sin(SITE_LATITUDE_LIMIT_RAD);
+  const sinLimit = sin(SITE_LATITUDE_LIMIT_RAD);
   return {
-    latitudeRad: Math.asin((2 * unitOf(a) - 1) * sinLimit),
+    latitudeRad: asin((2 * unitOf(a) - 1) * sinLimit),
     longitudeRad: 2 * Math.PI * unitOf(b) - Math.PI,
     azimuthRad: 2 * Math.PI * unitOf(c),
   };
@@ -1056,18 +1057,10 @@ export class DescentProfile {
     this.#starts = starts;
     this.durationS = starts.at(-1) ?? 0;
     const { latitudeRad: lat, longitudeRad: lon, azimuthRad: az } = site;
-    this.#siteDir = vec3(
-      Math.cos(lat) * Math.cos(lon),
-      Math.cos(lat) * Math.sin(lon),
-      Math.sin(lat),
-    );
-    const east = vec3(-Math.sin(lon), Math.cos(lon), 0);
-    const north = vec3(
-      -Math.sin(lat) * Math.cos(lon),
-      -Math.sin(lat) * Math.sin(lon),
-      Math.cos(lat),
-    );
-    this.#heading = add(scale(north, Math.cos(az)), scale(east, Math.sin(az)));
+    this.#siteDir = vec3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
+    const east = vec3(-sin(lon), cos(lon), 0);
+    const north = vec3(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat));
+    this.#heading = add(scale(north, cos(az)), scale(east, sin(az)));
     this.#arcRadiusM = (figure.equatorialRadiusM + figure.polarRadiusM) / 2;
   }
 
@@ -1106,8 +1099,8 @@ export class DescentProfile {
   #trackAt(remainingM: number): { readonly dir: Vec3; readonly tangent: Vec3 } {
     // Back along the great circle from the site: the angle is the remaining distance over R.
     const angle = remainingM / this.#arcRadiusM;
-    const c = Math.cos(angle);
-    const s = Math.sin(angle);
+    const c = cos(angle);
+    const s = sin(angle);
     return {
       dir: add(scale(this.#siteDir, c), scale(this.#heading, -s)),
       tangent: add(scale(this.#siteDir, s), scale(this.#heading, c)),
@@ -1170,8 +1163,8 @@ export class DescentProfile {
     const velocityMps = scale(add(ahead, scale(behind, -1)), 1 / span);
     const heading = normalise(add(tangent, scale(up, -dot(tangent, up))));
     const pitch = pitchRad(horizontalSpeedMps);
-    const forward = add(scale(heading, Math.cos(pitch)), scale(up, -Math.sin(pitch)));
-    const cameraUp = add(scale(heading, Math.sin(pitch)), scale(up, Math.cos(pitch)));
+    const forward = add(scale(heading, cos(pitch)), scale(up, -sin(pitch)));
+    const cameraUp = add(scale(heading, sin(pitch)), scale(up, cos(pitch)));
     const right = cross(forward, cameraUp);
     const back = scale(forward, -1);
     // The rotation's columns are the camera's right, up and backward axes.

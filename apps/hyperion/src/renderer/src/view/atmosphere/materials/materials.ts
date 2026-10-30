@@ -79,6 +79,7 @@ import waterIce from "./water-ice.json" with { type: "json" };
 import water from "./water.json" with { type: "json" };
 import xenonLiquid from "./xenon-liquid.json" with { type: "json" };
 import zincSulphide from "./zinc-sulphide.json" with { type: "json" };
+import { pow } from "../../../lib/pinnedMath";
 
 /** The phase a material file describes. */
 export type MaterialPhase = "liquid" | "solid";
@@ -750,7 +751,7 @@ export function indexAt(resolved: ResolvedMaterial, wavelengthNm: number): Compl
   const k1 = file.k[i + 1] ?? Number.NaN;
   return {
     n: n0 + t * (n1 - n0),
-    k: k0 > 0 && k1 > 0 ? k0 * (k1 / k0) ** t : k0 + t * (k1 - k0),
+    k: k0 > 0 && k1 > 0 ? k0 * pow(k1 / k0, t) : k0 + t * (k1 - k0),
   };
 }
 

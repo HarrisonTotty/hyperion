@@ -31,6 +31,8 @@
  */
 
 /** The grid's k a decade of kU, for the non-negative fit. */
+import { exp, log, pow } from "../../../lib/pinnedMath";
+
 export const EXP_SUM_GRID_PER_DECADE = 8;
 
 /**
@@ -291,7 +293,7 @@ function largestError(x: Float64Array, t: Float64Array, terms: Terms): number {
 function sumAt(terms: Terms, x: number): number {
   let sum = 0;
   for (const [i, w] of terms.weights.entries()) {
-    sum += w * Math.exp(-at(terms.rates, i) * x);
+    sum += w * exp(-at(terms.rates, i) * x);
   }
   return sum;
 }
@@ -304,7 +306,7 @@ function weightsOn(x: Float64Array, t: Float64Array, rates: ReadonlyArray<number
   const b = new Float64Array(rows);
   for (const [j, xj] of x.entries()) {
     for (const [c, rate] of rates.entries()) {
-      a[j * columns + c] = Math.exp(-rate * xj);
+      a[j * columns + c] = exp(-rate * xj);
     }
     b[j] = at(t, j);
   }
@@ -335,7 +337,7 @@ function rateGrid(): ReadonlyArray<number> {
   const count = Math.round((last - first) * EXP_SUM_GRID_PER_DECADE) + 1;
   return [
     0,
-    ...Array.from({ length: count }, (_, m) => 10 ** (first + m / EXP_SUM_GRID_PER_DECADE)),
+    ...Array.from({ length: count }, (_, m) => pow(10, first + m / EXP_SUM_GRID_PER_DECADE)),
   ];
 }
 
@@ -407,7 +409,7 @@ function leastSquaresTerms(
     if (freeWeights) {
       theta[i] = at(start.weights, i);
     }
-    theta[size - n + i] = Math.log(bounded(at(start.rates, i)));
+    theta[size - n + i] = log(bounded(at(start.rates, i)));
   }
   const weightOf = (values: Float64Array, i: number): number =>
     freeWeights ? at(values, i) : at(start.weights, i);
@@ -416,7 +418,7 @@ function leastSquaresTerms(
     for (const [j, xj] of x.entries()) {
       let model = 0;
       for (let i = 0; i < n; i += 1) {
-        model += weightOf(values, i) * Math.exp(-Math.exp(at(values, size - n + i)) * xj);
+        model += weightOf(values, i) * exp(-exp(at(values, size - n + i)) * xj);
       }
       sum += (model - at(t, j)) ** 2;
     }
@@ -448,8 +450,8 @@ function leastSquaresTerms(
     for (const [j, xj] of x.entries()) {
       let model = 0;
       for (let i = 0; i < n; i += 1) {
-        const rate = Math.exp(at(theta, size - n + i));
-        const e = Math.exp(-rate * xj);
+        const rate = exp(at(theta, size - n + i));
+        const e = exp(-rate * xj);
         const w = weightOf(theta, i);
         model += w * e;
         if (freeWeights) {
@@ -489,9 +491,7 @@ function leastSquaresTerms(
         continue;
       }
       const trial = Float64Array.from(theta, (value, a) =>
-        a < size - n
-          ? Math.max(value + at(step, a), 0)
-          : Math.log(bounded(Math.exp(value + at(step, a)))),
+        a < size - n ? Math.max(value + at(step, a), 0) : log(bounded(exp(value + at(step, a)))),
       );
       const value = squares(trial);
       if (value < current) {
@@ -508,7 +508,7 @@ function leastSquaresTerms(
       break;
     }
   }
-  const rates = Float64Array.from({ length: n }, (_, i) => Math.exp(at(theta, size - n + i)));
+  const rates = Float64Array.from({ length: n }, (_, i) => exp(at(theta, size - n + i)));
   if (!freeWeights) {
     return { weights: start.weights, rates };
   }
@@ -626,8 +626,8 @@ export function fitExpSum(
     );
   }
   const middle = at(curve.logColumns, (nodes - 1) >> 1);
-  const x = Float64Array.from(curve.logColumns, (lnU) => Math.exp(lnU - middle));
-  const unit = Math.exp(middle);
+  const x = Float64Array.from(curve.logColumns, (lnU) => exp(lnU - middle));
+  const unit = exp(middle);
   const rowOf = (r: number): Float64Array =>
     curve.transmittance.subarray(r * nodes, (r + 1) * nodes);
   let reference = 0;
@@ -715,7 +715,7 @@ export function expSumRowsAt(fit: ExpSumFit, pressurePa: number | undefined): Ex
   }
   const first = at(fit.logPressures, 0);
   const top = Math.min(at(fit.logPressures, rows - 1), fit.readTopLogPressure);
-  const y = Math.min(Math.max(Math.log(pressurePa), first), top);
+  const y = Math.min(Math.max(log(pressurePa), first), top);
   let r = 0;
   while (r < rows - 2 && at(fit.logPressures, r + 1) < y) {
     r += 1;
@@ -738,9 +738,7 @@ export function expSumCoefficientsAt(fit: ExpSumFit, pressurePa: number | undefi
   return Float64Array.from({ length: n }, (_, i) => {
     const a = at(fit.coefficients, row * n + i);
     const b = at(fit.coefficients, next * n + i);
-    return a > 0 && b > 0
-      ? Math.exp(Math.log(a) + share * (Math.log(b) - Math.log(a)))
-      : a + share * (b - a);
+    return a > 0 && b > 0 ? exp(log(a) + share * (log(b) - log(a))) : a + share * (b - a);
   });
 }
 
@@ -749,7 +747,7 @@ export function expSumTransmittance(fit: ExpSumFit, row: number, amount: number)
   const n = fit.weights.length;
   let sum = 0;
   for (let i = 0; i < n; i += 1) {
-    sum += at(fit.weights, i) * Math.exp(-at(fit.coefficients, row * n + i) * amount);
+    sum += at(fit.weights, i) * exp(-at(fit.coefficients, row * n + i) * amount);
   }
   return sum;
 }

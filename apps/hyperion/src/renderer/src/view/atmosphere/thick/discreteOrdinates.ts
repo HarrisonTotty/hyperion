@@ -100,6 +100,7 @@ import {
   solveLowerTransposed,
   symmetricEigen,
 } from "./linearAlgebra";
+import { cos, exp, expm1 } from "../../../lib/pinnedMath";
 
 /**
  * The streams the solver takes by default: 16 in all, 8 a hemisphere, Stamnes et al. 1988's NSTR
@@ -966,7 +967,7 @@ function scalarFaces(lm: LayerMode): LayerFaces {
       }
       continue;
     }
-    const attenuation = Math.exp(-at(lm.decayRates, k) * depth);
+    const attenuation = exp(-at(lm.decayRates, k) * depth);
     for (let i = 0; i < n; i += 1) {
       const gUp = at(lm.up, k * n + i);
       const gDown = at(lm.down, k * n + i);
@@ -989,7 +990,7 @@ function scalarFaces(lm: LayerMode): LayerFaces {
 /** φ(z, Δ) = ∫₀^Δ e^{−zt} dt = (1 − e^{−zΔ}) ÷ z for z ≥ 0, Δ at z = 0. */
 function phi(z: number, depth: number): number {
   const x = z * depth;
-  return x === 0 ? depth : -Math.expm1(-x) / z;
+  return x === 0 ? depth : -expm1(-x) / z;
 }
 
 /**
@@ -997,7 +998,7 @@ function phi(z: number, depth: number): number {
  * for a, b ≥ 0: the divided difference that meets no singularity where the rates meet.
  */
 function psi(a: number, b: number, depth: number): number {
-  return Math.exp(-Math.min(a, b) * depth) * phi(Math.abs(a - b), depth);
+  return exp(-Math.min(a, b) * depth) * phi(Math.abs(a - b), depth);
 }
 
 /**
@@ -1067,7 +1068,7 @@ function userTransfer(
   const depth = lm.layer.opticalDepth;
   const up = new Float64Array(2 * n * users);
   const down = new Float64Array(2 * n * users);
-  const attenuation = Float64Array.from(userCosines, (mu) => Math.exp(-depth / mu));
+  const attenuation = Float64Array.from(userCosines, (mu) => exp(-depth / mu));
   const sourceUp = new Float64Array(users);
   const sourceDown = new Float64Array(users);
   const vectorUp = new Float64Array(n);
@@ -1107,7 +1108,7 @@ function userTransfer(
       );
       for (let u = 0; u < users; u += 1) {
         const mu = at(userCosines, u);
-        const passed = -Math.expm1(-depth / mu);
+        const passed = -expm1(-depth / mu);
         const e = at(attenuation, u);
         up[decaying * users + u] = at(constantUp, u) * passed;
         down[decaying * users + u] = at(constantDown, u) * passed;
@@ -1287,7 +1288,7 @@ export function planeParallelBeam(
   let above = 0;
   layers.forEach((layer, p) => {
     requireIn("opticalDepth", layer.opticalDepth, (v) => v >= 0, "finite and at least 0");
-    topTransmission[p] = Math.exp(-above / beamCosine);
+    topTransmission[p] = exp(-above / beamCosine);
     above += layer.opticalDepth;
   });
   return { topTransmission, slantFactor: new Float64Array(layers.length).fill(1 / beamCosine) };
@@ -1449,7 +1450,7 @@ export function intensityAtAzimuth(
     if (value === undefined || userIndex < 0 || userIndex >= users) {
       throw new RangeError(`no intensity at interface ${interfaceIndex}, user cosine ${userIndex}`);
     }
-    sum += value * Math.cos(field.mode * relativeAzimuthRad);
+    sum += value * cos(field.mode * relativeAzimuthRad);
   }
   return sum;
 }
@@ -1562,7 +1563,7 @@ function solveBeamModeAt(
     const { omega, opticalDepth: depth, moments } = lm.layer;
     if (transmission > 0 && omega > 0) {
       const z = particular(lm, quadrature, nodeLegendre, beamLegendre, lambda);
-      const through = Math.exp(-lambda * depth);
+      const through = exp(-lambda * depth);
       for (let i = 0; i < n; i += 1) {
         top[i] = transmission * at(z.up, i);
         top[n + i] = transmission * at(z.down, i);
@@ -1801,7 +1802,7 @@ function preparedBeam(
   const groundTransmission =
     cosine > 0
       ? at(topTransmission, last) *
-        Math.exp(-at(slantFactor, last) * (layers[last]?.opticalDepth ?? Number.NaN))
+        exp(-at(slantFactor, last) * (layers[last]?.opticalDepth ?? Number.NaN))
       : 0;
   return { index: b, cosine, topTransmission, slantFactor, groundTransmission };
 }

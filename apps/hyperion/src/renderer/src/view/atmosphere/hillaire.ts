@@ -123,6 +123,7 @@ import {
   THICK_SUN_COSINES,
   THICK_TRAVEL_COSINES,
 } from "./thick/read";
+import { acos, atan2, cbrt, cos, sin, tan } from "../../lib/pinnedMath";
 
 /** A 3D table's size, texels. */
 export interface VolumeSize {
@@ -520,12 +521,12 @@ function vermeille(p: Vec3, a: number, e2: number): readonly [number, number] {
   let u: number;
   if (evolute > 0) {
     const sum = Math.sqrt(e4pq) + Math.sqrt(evolute);
-    const bigR = Math.cbrt(sum * sum);
+    const bigR = cbrt(sum * sum);
     u = r + 0.5 * bigR + (2 * r * r) / bigR;
   } else if (r < 0) {
     const magnitude = -r;
     const cosTheta = Math.min(Math.max(e4pq / (4 * magnitude * magnitude * magnitude) - 1, -1), 1);
-    u = magnitude * (2 * Math.cos(Math.acos(cosTheta) / 3) - 1);
+    u = magnitude * (2 * cos(acos(cosTheta) / 3) - 1);
   } else {
     // On the axis at the evolute's cusp, z = ±(a² − c²) ÷ c, where u = 0 is the root.
     u = 0;
@@ -565,20 +566,20 @@ export function geodeticOf(p: Vec3, figure: SpheroidFigure): Geodetic {
   const c = figure.polarRadiusM;
   const e2 = ((a - c) * (a + c)) / (a * a);
   const rho = Math.hypot(p.x, p.y);
-  const longitudeRad = Math.atan2(p.y, p.x);
+  const longitudeRad = atan2(p.y, p.x);
   const [k, along] = vermeille(p, a, e2);
   const d = along * rho;
   const length = Math.hypot(d, p.z);
-  const latitudeRad = Math.atan2(p.z, d);
-  const sin = p.z / length;
-  const w2 = 1 - e2 * sin * sin;
+  const latitudeRad = atan2(p.z, d);
+  const sinLatitude = p.z / length;
+  const w2 = 1 - e2 * sinLatitude * sinLatitude;
   const n = a / Math.sqrt(w2);
   const m = (a * (1 - e2)) / (w2 * Math.sqrt(w2));
   return {
     latitudeRad,
     longitudeRad,
     heightM: ((k + e2 - 1) / k) * length,
-    normal: { x: (p.x * along) / length, y: (p.y * along) / length, z: sin },
+    normal: { x: (p.x * along) / length, y: (p.y * along) / length, z: sinLatitude },
     gaussianRadiusM: Math.sqrt(m * n),
   };
 }
@@ -825,10 +826,10 @@ export function frameSourcesOf(
     const e = sun.illuminanceLx;
     // The disc's solid angle 2π(1 − cos ρ), as 4π sin²(ρ ÷ 2), which keeps its digits for a small
     // disc where 1 − cos ρ would not even in f64 (a sun of 10⁻⁸ rad).
-    const solidAngle = 4 * Math.PI * Math.sin(sun.angularRadiusRad / 2) ** 2;
+    const solidAngle = 4 * Math.PI * sin(sun.angularRadiusRad / 2) ** 2;
     const disc = drawsDiscOf(sun) && solidAngle > 0 ? frameScale / solidAngle : 0;
     return {
-      direction: [s.x, s.y, s.z, Math.sin(sun.angularRadiusRad)],
+      direction: [s.x, s.y, s.z, sin(sun.angularRadiusRad)],
       weight: [e[0] * frameScale, e[1] * frameScale, e[2] * frameScale, absorbers ? slot : 0],
       disc: [e[0] * disc, e[1] * disc, e[2] * disc, 0],
     };
@@ -1817,7 +1818,7 @@ export function skyViewColumnOf(table: SkyViewTable, direction: Vec3): SkyViewCo
   const h = table.heightM;
   return {
     bottomRadiusM,
-    horizonAngleRad: Math.atan2(bottomRadiusM, Math.sqrt(h * (2 * bottomRadiusM + h))),
+    horizonAngleRad: atan2(bottomRadiusM, Math.sqrt(h * (2 * bottomRadiusM + h))),
   };
 }
 
@@ -1839,9 +1840,9 @@ function curvatureRadiusAlongM(
     along = n.z >= 0 ? -d.x : d.x;
     across = d.y;
   } else {
-    const cos = Math.sqrt(cos2);
-    across = (d.y * n.x - d.x * n.y) / cos;
-    along = (d.z * cos2 - n.z * (d.x * n.x + d.y * n.y)) / cos;
+    const cosTilt = Math.sqrt(cos2);
+    across = (d.y * n.x - d.x * n.y) / cosTilt;
+    along = (d.z * cos2 - n.z * (d.x * n.x + d.y * n.y)) / cosTilt;
   }
   const horizontal = along * along + across * across;
   if (!(horizontal > 1e-24)) {
@@ -2618,7 +2619,7 @@ export class HillaireAtmosphere {
           curvature.meridionalM === curvature.primeVerticalM
             ? {
                 bottomRadiusM: radiusM,
-                horizonAngleRad: Math.atan2(radiusM, Math.sqrt(heightM * (2 * radiusM + heightM))),
+                horizonAngleRad: atan2(radiusM, Math.sqrt(heightM * (2 * radiusM + heightM))),
               }
             : null,
       },
@@ -2933,7 +2934,7 @@ export class HillaireAtmosphere {
     );
     const axis = skyAxisOf(n, suns);
     const aspect = view.viewport.widthPx / view.viewport.heightPx;
-    const tanX = Math.tan(view.fovXRad / 2);
+    const tanX = tan(view.fovXRad / 2);
     const tanY = tanX / aspect;
     const right = rotate(view.orientation, { x: 1, y: 0, z: 0 });
     const up = rotate(view.orientation, { x: 0, y: 1, z: 0 });

@@ -19,6 +19,7 @@
 
 import type { Vec3 } from "../../../geometry/vec3";
 import { geodeticOf, type SpheroidFigure } from "../hillaire";
+import { acos, atan2, cos, sin } from "../../../lib/pinnedMath";
 
 /** A direction in an observer's local frame, degrees. */
 export interface LocalDirection {
@@ -100,8 +101,8 @@ interface Frame {
 }
 
 function frameAt(latitudeRad: number): Frame {
-  const s = Math.sin(latitudeRad);
-  const c = Math.cos(latitudeRad);
+  const s = sin(latitudeRad);
+  const c = cos(latitudeRad);
   return { up: { x: c, y: 0, z: s }, north: { x: -s, y: 0, z: c }, east: { x: 0, y: 1, z: 0 } };
 }
 
@@ -113,10 +114,10 @@ function dotOf(a: Vec, b: Vec): number {
 function directionIn(frame: Frame, direction: LocalDirection): Vec {
   const zenith = direction.zenithDeg * RAD;
   const azimuth = direction.azimuthDeg * RAD;
-  const s = Math.sin(zenith);
-  const c = Math.cos(zenith);
-  const north = Math.cos(azimuth) * s;
-  const east = Math.sin(azimuth) * s;
+  const s = sin(zenith);
+  const c = cos(zenith);
+  const north = cos(azimuth) * s;
+  const east = sin(azimuth) * s;
   return {
     x: frame.up.x * c + frame.north.x * north + frame.east.x * east,
     y: frame.up.y * c + frame.north.y * north + frame.east.y * east,
@@ -127,8 +128,8 @@ function directionIn(frame: Frame, direction: LocalDirection): Vec {
 /** A unit vector as a local direction in `frame`, the azimuth in [0, 360). */
 function localOf(frame: Frame, v: Vec): LocalDirection {
   const up = Math.min(Math.max(dotOf(v, frame.up), -1), 1);
-  const azimuth = Math.atan2(dotOf(v, frame.east), dotOf(v, frame.north)) / RAD;
-  return { zenithDeg: Math.acos(up) / RAD, azimuthDeg: azimuth < 0 ? azimuth + 360 : azimuth };
+  const azimuth = atan2(dotOf(v, frame.east), dotOf(v, frame.north)) / RAD;
+  return { zenithDeg: acos(up) / RAD, azimuthDeg: azimuth < 0 ? azimuth + 360 : azimuth };
 }
 
 /**
@@ -142,8 +143,8 @@ export function localDirectionVector(latitudeDeg: number, direction: LocalDirect
 /** The angle between two local directions in one frame, degrees. */
 export function angleBetweenDeg(a: LocalDirection, b: LocalDirection): number {
   const frame = frameAt(0);
-  const cos = dotOf(directionIn(frame, a), directionIn(frame, b));
-  return Math.acos(Math.min(Math.max(cos, -1), 1)) / RAD;
+  const cosine = dotOf(directionIn(frame, a), directionIn(frame, b));
+  return acos(Math.min(Math.max(cosine, -1), 1)) / RAD;
 }
 
 /**
@@ -159,9 +160,9 @@ function pointAt(figure: SpheroidFigure, latitudeRad: number, heightM: number): 
   const a = figure.equatorialRadiusM;
   const c = figure.polarRadiusM;
   const e2 = ((a - c) * (a + c)) / (a * a);
-  const s = Math.sin(latitudeRad);
+  const s = sin(latitudeRad);
   const n = a / Math.sqrt(1 - e2 * s * s);
-  return { x: (n + heightM) * Math.cos(latitudeRad), y: 0, z: (n * (1 - e2) + heightM) * s };
+  return { x: (n + heightM) * cos(latitudeRad), y: 0, z: (n * (1 - e2) + heightM) * s };
 }
 
 /** A geometry in the tracer's terms before its names. */
@@ -197,10 +198,14 @@ export function limbGeometry(
     z: tangent.z - distanceM * look.z,
   };
   // Turn about z by the observer's longitude, so that it stands on the meridian of longitude 0.
-  const longitude = Math.atan2(observer.y, observer.x);
-  const cos = Math.cos(-longitude);
-  const sin = Math.sin(-longitude);
-  const turned = (v: Vec): Vec => ({ x: v.x * cos - v.y * sin, y: v.x * sin + v.y * cos, z: v.z });
+  const longitude = atan2(observer.y, observer.x);
+  const cosTurn = cos(-longitude);
+  const sinTurn = sin(-longitude);
+  const turned = (v: Vec): Vec => ({
+    x: v.x * cosTurn - v.y * sinTurn,
+    y: v.x * sinTurn + v.y * cosTurn,
+    z: v.z,
+  });
   const position = turned(observer);
   const geodetic = geodeticOf(position, figure);
   const frame = frameAt(geodetic.latitudeRad);

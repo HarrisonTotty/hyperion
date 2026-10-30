@@ -138,6 +138,7 @@ import {
   type SpectralColumn,
   spectralOptics,
 } from "./spectralColumn";
+import { log } from "../../../lib/pinnedMath";
 
 /**
  * The bake's ceiling, s a world: 5 s on the UHD 620's host, timed by the owner (R08.T14.d); a
@@ -647,7 +648,7 @@ function lightBins(
         },
         absorber.columnPressurePa === undefined
           ? (curves.logPressures[0] ?? Number.NaN)
-          : Math.log(absorber.columnPressurePa),
+          : log(absorber.columnPressurePa),
         { ...options, maxTerms: Math.min(maxTerms, options.maxTerms) },
       );
     };

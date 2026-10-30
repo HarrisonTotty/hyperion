@@ -189,6 +189,7 @@ import {
   TRANSMITTANCE_SIZE,
   TRANSMITTANCE_STEPS_A_PIECE,
 } from "./tables";
+import { acos, asin, atan2, cos, exp, expm1, log, sin, tan } from "../../lib/pinnedMath";
 
 /** A radiance or transmittance per channel that a twin writes into. */
 export type TwinRgb = [number, number, number];
@@ -518,7 +519,7 @@ function bilinearChannelsInto(
  * `common.wgsl`'s `stepFactor` without the series it takes below 0.01 for `f32`.
  */
 export function exactStepFactor(x: number): number {
-  return x > 0 ? -Math.expm1(-x) / x : 1;
+  return x > 0 ? -expm1(-x) / x : 1;
 }
 
 // --- Transmittance -------------------------------------------------------------------------------
@@ -1007,7 +1008,7 @@ export function tableTransmittanceAtUnitTwin(
   const out: TwinRgb = [0, 0, 0];
   if (read === "slotDepths" && absorberSlots(medium).length > 0) {
     tableAtUnitInto(slotLayerAt(slotLayersOf(medium, tables), slot), u, v, out);
-    return [Math.exp(-out[0]), Math.exp(-out[1]), Math.exp(-out[2])];
+    return [exp(-out[0]), exp(-out[1]), exp(-out[2])];
   }
   transmittanceThroughTablesInto(
     tables,
@@ -1123,7 +1124,7 @@ const CURVE_FIRST_LN = ABSORBER_CURVE_DECADES[0] * Math.LN10;
 const CURVE_NODES_PER_LN = ABSORBER_CURVE_NODES_PER_DECADE / Math.LN10;
 
 /** The deepest optical depth a curve holds: −ln of `absorbers.ts`'s floor. */
-const CURVE_DEPTH_MAX = -Math.log(ABSORBER_TRANSMITTANCE_FLOOR);
+const CURVE_DEPTH_MAX = -log(ABSORBER_TRANSMITTANCE_FLOOR);
 
 /**
  * −ln T_c per channel through a path's column `relativeColumn`, u ÷ U, from one curve:
@@ -1156,7 +1157,7 @@ export function curveOpticalDepth(
     );
   }
   const out: TwinRgb = [0, 0, 0];
-  addCurveDepth(readerOf(curve), relativeColumn, Math.log(pressurePa ?? 1), out);
+  addCurveDepth(readerOf(curve), relativeColumn, log(pressurePa ?? 1), out);
   return out;
 }
 
@@ -1194,7 +1195,7 @@ function readerOf(curve: AbsorberCurve): CurveReader {
       logPressures: curve.logPressures,
       readTopLogPressure: curve.readTopLogPressure,
       depths: curve.opticalDepth,
-      logs: [r.map(Math.log), g.map(Math.log), b.map(Math.log)],
+      logs: [r.map(log), g.map(log), b.map(log)],
       row: [0, 0, 0],
     };
     CURVE_READERS.set(curve, reader);
@@ -1203,7 +1204,7 @@ function readerOf(curve: AbsorberCurve): CurveReader {
 }
 
 /** u ÷ U at a curve's node 0, 10⁻³: exp of {@link CURVE_FIRST_LN}. */
-const CURVE_FIRST_COLUMN = Math.exp(CURVE_FIRST_LN);
+const CURVE_FIRST_COLUMN = exp(CURVE_FIRST_LN);
 
 /**
  * Row `r`'s depth per channel at `node`, the column's place on the grid, unclamped
@@ -1227,7 +1228,7 @@ function rowDepthInto(reader: CurveReader, r: number, node: number, proportion: 
     const b = depths[offset + k + 1] ?? Number.NaN;
     const la = logs[offset + k] ?? Number.NaN;
     const lb = logs[offset + k + 1] ?? Number.NaN;
-    out[c] = a > 0 && b > 0 ? Math.exp(la + (lb - la) * t) : a + (b - a) * t;
+    out[c] = a > 0 && b > 0 ? exp(la + (lb - la) * t) : a + (b - a) * t;
   }
 }
 
@@ -1241,7 +1242,7 @@ function addCurveDepth(reader: CurveReader, x: number, lnP: number, out: TwinRgb
   if (!(x > 0)) {
     return;
   }
-  const node = (Math.log(x) - CURVE_FIRST_LN) * CURVE_NODES_PER_LN;
+  const node = (log(x) - CURVE_FIRST_LN) * CURVE_NODES_PER_LN;
   // exp(ln u − ln u₀) = (u ÷ U) ÷ 10⁻³, below node 0.
   const proportion = x / CURVE_FIRST_COLUMN;
   const rows = reader.rows;
@@ -1300,7 +1301,7 @@ function addCurveDepth(reader: CurveReader, x: number, lnP: number, out: TwinRgb
  * least {@link ABSORBER_PRESSURE_FLOOR_PA}, as `common.wgsl`'s `pathLogPressure` takes it.
  */
 function pathLogPressure(x: number, w: number): number {
-  return Math.log(Math.max((ABSORBER_PRESSURE_REFERENCE_PA * w) / x, ABSORBER_PRESSURE_FLOOR_PA));
+  return log(Math.max((ABSORBER_PRESSURE_REFERENCE_PA * w) / x, ABSORBER_PRESSURE_FLOOR_PA));
 }
 
 /**
@@ -1346,7 +1347,7 @@ function transmittanceThroughTablesInto(
   const { stored, columns, pressureColumns } = scratch;
   absorberDepthInto(absorbers, columns, pressureColumns, out);
   for (const c of CHANNELS) {
-    out[c] = Math.exp(-((stored[c] ?? Number.NaN) + out[c]));
+    out[c] = exp(-((stored[c] ?? Number.NaN) + out[c]));
   }
 }
 
@@ -1632,7 +1633,7 @@ function integrateDirectionInto(
       out[c] = (out[c] ?? 0) + throughput[c] * source * dtM * g;
       out[3 + c] = (out[3 + c] ?? 0) + throughput[c] * scattering * dtM * g;
       out[6 + c] = (out[6 + c] ?? 0) + throughput[c] * absorbedHere * g;
-      throughput[c] *= Math.exp(-stepDepth);
+      throughput[c] *= exp(-stepDepth);
     }
   }
   for (const c of CHANNELS) {
@@ -1665,7 +1666,7 @@ function integrateDirectionInto(
  * `transmittanceToSun`, R08.T7), the exponent held under 80; 1 where there is no lobe.
  */
 function lobeBoost(depth: number, lobe: number, extinctionPerM: number): number {
-  return lobe > 0 ? Math.exp(Math.min((depth * lobe) / Math.max(extinctionPerM, 1e-30), 80)) : 1;
+  return lobe > 0 ? exp(Math.min((depth * lobe) / Math.max(extinctionPerM, 1e-30), 80)) : 1;
 }
 
 /**
@@ -1735,7 +1736,7 @@ function multiScatteringSeriesAt(
     const theta = 2 * Math.PI * a;
     const cosPhi = 1 - 2 * b;
     const sinPhi = Math.sqrt(Math.max(1 - cosPhi * cosPhi, 0));
-    const dir = { x: Math.cos(theta) * sinPhi, y: Math.sin(theta) * sinPhi, z: cosPhi };
+    const dir = { x: cos(theta) * sinPhi, y: sin(theta) * sinPhi, z: cosPhi };
     integrateDirectionInto(inputs, rM, dir, sun, one, scratch);
     for (let i = 0; i < DIRECTION_FLOATS; i += 1) {
       sum[i] = (sum[i] ?? 0) + (one[i] ?? Number.NaN);
@@ -2034,7 +2035,7 @@ export function tableSources(planet: PlanetTwin, read: SunRead = "curves"): Twin
       }
       tableAtUnitInto(slotLayerAt(slotLayers, slot), u, v, out);
       for (const c of CHANNELS) {
-        out[c] = Math.exp(-out[c]);
+        out[c] = exp(-out[c]);
       }
     },
     multiScattering: (heightM, muSun, out, slot) => {
@@ -2491,7 +2492,7 @@ class Marcher {
     this.#marchSources = given.map((source) => {
       const s = source.direction;
       const cosTheta = d.x * s.x + d.y * s.y + d.z * s.z;
-      const theta = Math.acos(Math.min(Math.max(cosTheta, -1), 1));
+      const theta = acos(Math.min(Math.max(cosTheta, -1), 1));
       return {
         direction: source.direction,
         weight: source.weight,
@@ -2724,7 +2725,7 @@ class Marcher {
       for (const c of CHANNELS) {
         const stepDepth = (local[3 + c] ?? Number.NaN) * dtM + absorbed[c];
         this.luminance[c] += throughput[c] * share[c] * dtM * exactStepFactor(stepDepth);
-        throughput[c] *= Math.exp(-stepDepth);
+        throughput[c] *= exp(-stepDepth);
       }
     }
   }
@@ -2754,7 +2755,7 @@ class Marcher {
           continue;
         }
         const scattered = term.scattering[c] * (densities[k] ?? Number.NaN);
-        const boost = Math.exp(Math.min(x * lobe.share[c], 80));
+        const boost = exp(Math.min(x * lobe.share[c], 80));
         const phase = phases[k * 3 + c] ?? Number.NaN;
         this.#phased[c] += share * (scattered * boost * forwardLobeAt(lobe, c, x, entry, phase));
       }
@@ -2984,7 +2985,7 @@ function twinCamera(
   nearM: number,
 ): Omit<TwinView, "sun" | "sources" | "skyAxis"> {
   const inputs = atmosphereInputs(camera, figure);
-  const tanX = Math.tan(camera.fovXRad / 2);
+  const tanX = tan(camera.fovXRad / 2);
   const tanY = tanX / (camera.viewport.widthPx / camera.viewport.heightPx);
   return {
     cameraM: camera.positionM,
@@ -3102,15 +3103,15 @@ export function skyViewRayTwin(
   const unitX = unitOfTexel(x, w);
   const unitY = unitOfTexel(y, h);
   const vHorizon = Math.sqrt(Math.max(heightM * (2 * bottom + heightM), 0));
-  const beta = Math.acos(Math.min(Math.max(vHorizon / rM, -1), 1));
+  const beta = acos(Math.min(Math.max(vHorizon / rM, -1), 1));
   const zenithHorizon = Math.PI - beta;
   let viewZenithCos: number;
   if (unitY < 0.5) {
     const c = 1 - 2 * unitY;
-    viewZenithCos = Math.cos(zenithHorizon * (1 - c * c));
+    viewZenithCos = cos(zenithHorizon * (1 - c * c));
   } else {
     const c = unitY * 2 - 1;
-    viewZenithCos = Math.cos(zenithHorizon + beta * c * c);
+    viewZenithCos = cos(zenithHorizon + beta * c * c);
   }
   const phi = 2 * Math.PI * unitX;
   const viewZenithSin = Math.sqrt(Math.max(1 - viewZenithCos * viewZenithCos, 0));
@@ -3134,8 +3135,8 @@ export function skyViewRayTwin(
   return {
     originM: { x: 0, y: 0, z: rM },
     direction: {
-      x: viewZenithSin * Math.cos(phi),
-      y: viewZenithSin * Math.sin(phi),
+      x: viewZenithSin * cos(phi),
+      y: viewZenithSin * sin(phi),
       z: viewZenithCos,
     },
     sun: sources[0]?.direction ?? { x: 0, y: 0, z: 1 },
@@ -3256,9 +3257,9 @@ function skyViewReadOn(
     y: d.z * n.x - d.x * n.z,
     z: d.x * n.y - d.y * n.x,
   };
-  const zenith = Math.atan2(Math.hypot(across.x, across.y, across.z), mu);
+  const zenith = atan2(Math.hypot(across.x, across.y, across.z), mu);
   const vHorizon = Math.sqrt(Math.max(heightM * (2 * bottomRadiusM + heightM), 0));
-  const beta = Math.acos(Math.min(Math.max(vHorizon / rM, -1), 1));
+  const beta = acos(Math.min(Math.max(vHorizon / rM, -1), 1));
   const zenithHorizon = Math.PI - beta;
   const shell = { bottomRadiusM, topRadiusM: bottomRadiusM + atmosphereM };
   let v: number;
@@ -3269,7 +3270,7 @@ function skyViewReadOn(
   }
   const x = d.x * ax.x + d.y * ax.y + d.z * ax.z;
   const y = d.x * ay.x + d.y * ay.y + d.z * ay.z;
-  let phi = x === 0 && y === 0 ? 0 : Math.atan2(y, x);
+  let phi = x === 0 && y === 0 ? 0 : atan2(y, x);
   if (phi < 0) {
     phi += 2 * Math.PI;
   }
@@ -3700,10 +3701,10 @@ function lightDepthGOf(
       out,
       [0, 0, 0],
     );
-    return -Math.log(out[1]);
+    return -log(out[1]);
   }
   sphereLightInto(reads.sources.sunTransmittance, geometry, placeM, direction, out);
-  return -Math.log(out[1]);
+  return -log(out[1]);
 }
 
 /**
@@ -3854,7 +3855,7 @@ export function sphereSkyDepthG(
   return skyDepthG((placeM, direction) => {
     const out: TwinRgb = [0, 0, 0];
     sphereLightInto(transmittanceAt, geometry, placeM, direction, out);
-    return -Math.log(out[1]);
+    return -log(out[1]);
   }, ray);
 }
 
@@ -3875,7 +3876,7 @@ export function sphereBareGroundDepthG(
     (placeM, direction) => {
       const out: TwinRgb = [0, 0, 0];
       sphereLightInto(transmittanceAt, geometry, placeM, direction, out);
-      return -Math.log(out[1]);
+      return -log(out[1]);
     },
     ray,
     groundM,
@@ -4350,8 +4351,8 @@ export function farLimbFootprintTwin(
   }
   const d = rayAt(uc, vc);
   const tangent = add(o, scale(d, centre.alongM));
-  const sin = tangent.z / Math.hypot(tangent.x, tangent.y, tangent.z);
-  const s = shells.gravity === null ? 1 : gravityRatio(shells.gravity, Math.asin(sin));
+  const sinLatitude = tangent.z / Math.hypot(tangent.x, tangent.y, tangent.z);
+  const s = shells.gravity === null ? 1 : gravityRatio(shells.gravity, asin(sinLatitude));
   const scaleHeightM = tabulatedScaleHeightM(
     shells.scaleHeightsM,
     shells.topM,
@@ -4749,7 +4750,7 @@ function curvatureAlongM(
 
 /** The geodetic latitude of a geodetic normal, rad. */
 function latitudeOfNormal(n: Vec3): number {
-  return Math.atan2(n.z, Math.hypot(n.x, n.y));
+  return atan2(n.z, Math.hypot(n.x, n.y));
 }
 
 /**
@@ -4812,9 +4813,9 @@ class OblateReader {
       const bottomRadiusM = k * planet.referenceRadiusM;
       return { bottomRadiusM, topRadiusM: bottomRadiusM + this.#topM };
     });
-    this.#lnKappa = planet.kappa.map(Math.log);
+    this.#lnKappa = planet.kappa.map(log);
     this.#rootKappa = planet.kappa.map(Math.sqrt);
-    this.#lnBands = Float64Array.from(planet.bands, (band) => Math.log(band.gravityRatio));
+    this.#lnBands = Float64Array.from(planet.bands, (band) => log(band.gravityRatio));
     checkAbsorberCurves(planet.medium, planet.curves);
     this.absorbersAt(0);
     this.#absorbing = hasAbsorbers(this.#terms);
@@ -5011,7 +5012,7 @@ class OblateReader {
     const last = lnKappa.length - 1;
     const first = lnKappa[0] ?? Number.NaN;
     const top = lnKappa[last] ?? Number.NaN;
-    const lk = kappaStar > 0 ? Math.log(kappaStar) : Number.NEGATIVE_INFINITY;
+    const lk = kappaStar > 0 ? log(kappaStar) : Number.NEGATIVE_INFINITY;
     let lower = 0;
     let weight = 0;
     let beyondRange = 0;
@@ -5129,13 +5130,13 @@ class OblateReader {
     if (read === "slotDepths" && this.#absorbing) {
       this.#slotAlong(ray, slot, transmittance, depth);
       for (const c of CHANNELS) {
-        transmittance[c] = Math.exp(-transmittance[c]);
+        transmittance[c] = exp(-transmittance[c]);
       }
       return !ray.shadowed;
     }
     this.#depthsInto(ray, slot, depth);
     for (const c of CHANNELS) {
-      transmittance[c] = Math.exp(-(depth[c] + this.#absorbed[c]));
+      transmittance[c] = exp(-(depth[c] + this.#absorbed[c]));
     }
     return !ray.shadowed;
   }
@@ -5220,7 +5221,7 @@ class OblateReader {
     };
     const lnBands = this.#lnBands;
     const last = lnBands.length - 1;
-    const ls = Math.log(s);
+    const ls = log(s);
     if (last === 0 || !(ls > (lnBands[0] ?? Number.NaN))) {
       tableAtUnitInto(layerOf(bands[0]), u, v, out);
       return;
@@ -5346,9 +5347,9 @@ export function slicedSunTransmittance(
     storedOpticalDepth: [depth[0], depth[1], depth[2]],
     absorberOpticalDepth: absorbed,
     transmittance: [
-      Math.exp(-(depth[0] + absorbed[0])),
-      Math.exp(-(depth[1] + absorbed[1])),
-      Math.exp(-(depth[2] + absorbed[2])),
+      exp(-(depth[0] + absorbed[0])),
+      exp(-(depth[1] + absorbed[1])),
+      exp(-(depth[2] + absorbed[2])),
     ],
   };
 }
@@ -5495,8 +5496,8 @@ function directionOf(place: SurfacePlace, mu: number, azimuthRad: number): Vec3 
   const m = Math.min(Math.max(mu, -1), 1);
   const horizontal = Math.sqrt(Math.max((1 - m) * (1 + m), 0));
   const n = place.geodetic.normal;
-  const along = horizontal * Math.cos(azimuthRad);
-  const across = horizontal * Math.sin(azimuthRad);
+  const along = horizontal * cos(azimuthRad);
+  const across = horizontal * sin(azimuthRad);
   return {
     x: m * n.x + along * place.north.x + across * place.east.x,
     y: m * n.y + along * place.north.y + across * place.east.y,
@@ -5537,7 +5538,7 @@ export function surfaceLightingTwin(
   const slots = multiScatteringLayersOf(planet.medium, planet.curves);
   const slotOf = (curve: number): number => Math.min(Math.max(curve, 0), slots - 1);
   const severalBands = planet.bands.length > 1;
-  const lnBands = planet.bands.map((band) => Math.log(band.gravityRatio));
+  const lnBands = planet.bands.map((band) => log(band.gravityRatio));
   const a = figure.equatorialRadiusM;
   const c = figure.polarRadiusM;
   const e2 = ((a - c) * (a + c)) / (a * a);
@@ -5545,8 +5546,8 @@ export function surfaceLightingTwin(
     tabulatedScaleHeightM(scaleHeightsM, topM, scaledHeightM);
   const placeOf = (altitudeM: number, latitudeRad: number): SurfacePlace => {
     const latitude = clampLatitude(latitudeRad);
-    const sinL = Math.sin(latitude);
-    const cosL = Math.cos(latitude);
+    const sinL = sin(latitude);
+    const cosL = cos(latitude);
     const primeVertical = a / Math.sqrt(1 - e2 * sinL * sinL);
     const { meridionalM, primeVerticalM } = principalRadiiM(figure, latitude);
     return {
@@ -5576,9 +5577,9 @@ export function surfaceLightingTwin(
     const depth: TwinRgb = [0, 0, 0];
     const absorbed = reader.opticalDepthInto(ray, slotOf(curve), depth);
     return [
-      Math.exp(-(depth[0] + absorbed[0])),
-      Math.exp(-(depth[1] + absorbed[1])),
-      Math.exp(-(depth[2] + absorbed[2])),
+      exp(-(depth[0] + absorbed[0])),
+      exp(-(depth[1] + absorbed[1])),
+      exp(-(depth[2] + absorbed[2])),
     ];
   };
   const layerOf = (band: number, curve: number): TwinTable => {
@@ -5601,7 +5602,7 @@ export function surfaceLightingTwin(
       const u = muSun * 0.5 + 0.5;
       const v = Math.sqrt(Math.max(s * altitudeM, 0) / topM);
       const last = lnBands.length - 1;
-      const ls = Math.log(s);
+      const ls = log(s);
       if (last === 0 || !(ls > (lnBands[0] ?? Number.NaN))) {
         tableAtUnitInto(layerOf(0, curve), u, v, lower);
         return [lower[0], lower[1], lower[2]];
@@ -5644,8 +5645,8 @@ export function surfaceLightingTwin(
       const sinZenith = Math.hypot(across.x, across.y, across.z);
       const up = sinZenith > 1e-6 ? scale(across, 1 / sinZenith) : place.north;
       const delta = Math.min(Math.abs(angularRadiusRad) * SOURCE_NODE_OFFSET, Math.PI);
-      const cosDelta = Math.cos(delta);
-      const sinDelta = Math.sin(delta);
+      const cosDelta = cos(delta);
+      const sinDelta = sin(delta);
       const nodes: Vec3[] = [1, 0, -1].map((sign) => ({
         x: (sign === 0 ? 1 : cosDelta) * centre.x + sign * sinDelta * up.x,
         y: (sign === 0 ? 1 : cosDelta) * centre.y + sign * sinDelta * up.y,
@@ -5862,24 +5863,24 @@ export function oblateSkyViewRayTwin(
   const { widthTexels: w, heightTexels: h } = size;
   const phi = 2 * Math.PI * unitOfTexel(x, w);
   const horizontal = {
-    x: Math.cos(phi) * axes.x.x + Math.sin(phi) * axes.y.x,
-    y: Math.cos(phi) * axes.x.y + Math.sin(phi) * axes.y.y,
-    z: Math.cos(phi) * axes.x.z + Math.sin(phi) * axes.y.z,
+    x: cos(phi) * axes.x.x + sin(phi) * axes.y.x,
+    y: cos(phi) * axes.x.y + sin(phi) * axes.y.y,
+    z: cos(phi) * axes.x.z + sin(phi) * axes.y.z,
   };
   const bottom = curvatureAlongM(planet.body.figure, camera.latitudeRad, view.normal, horizontal);
   const heightM = skyViewHeight(view.heightM, camera.atmosphereM);
   const rM = bottom + heightM;
   const unitY = unitOfTexel(y, h);
   const vHorizon = Math.sqrt(Math.max(heightM * (2 * bottom + heightM), 0));
-  const beta = Math.acos(Math.min(Math.max(vHorizon / rM, -1), 1));
+  const beta = acos(Math.min(Math.max(vHorizon / rM, -1), 1));
   const zenithHorizon = Math.PI - beta;
   let viewZenithCos: number;
   if (unitY < 0.5) {
     const c = 1 - 2 * unitY;
-    viewZenithCos = Math.cos(zenithHorizon * (1 - c * c));
+    viewZenithCos = cos(zenithHorizon * (1 - c * c));
   } else {
     const c = unitY * 2 - 1;
-    viewZenithCos = Math.cos(zenithHorizon + beta * c * c);
+    viewZenithCos = cos(zenithHorizon + beta * c * c);
   }
   const viewZenithSin = Math.sqrt(Math.max(1 - viewZenithCos * viewZenithCos, 0));
   const inFrame = (s: Vec3): Vec3 => ({
@@ -5896,8 +5897,8 @@ export function oblateSkyViewRayTwin(
     ray: {
       originM: { x: 0, y: 0, z: rM },
       direction: {
-        x: viewZenithSin * Math.cos(phi),
-        y: viewZenithSin * Math.sin(phi),
+        x: viewZenithSin * cos(phi),
+        y: viewZenithSin * sin(phi),
         z: viewZenithCos,
       },
       sun: sources[0]?.direction ?? { x: 0, y: 0, z: 1 },
@@ -6492,9 +6493,9 @@ export function oblateCompositeTransmittanceTwin(
   const depth: TwinRgb = [0, 0, 0];
   const absorbed = reader.opticalDepthInto(ray, slot, depth);
   return [
-    Math.exp(-(depth[0] + absorbed[0])),
-    Math.exp(-(depth[1] + absorbed[1])),
-    Math.exp(-(depth[2] + absorbed[2])),
+    exp(-(depth[0] + absorbed[0])),
+    exp(-(depth[1] + absorbed[1])),
+    exp(-(depth[2] + absorbed[2])),
   ];
 }
 

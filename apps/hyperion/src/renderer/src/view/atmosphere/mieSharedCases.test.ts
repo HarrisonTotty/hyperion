@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import committed from "../../../../../../../crates/hyperion-fit/src/tasks/condensate_extinction/mie_cases.json" with { type: "json" };
 import { expectCommittedTable } from "../../test/bless";
 import { mieSphere } from "./mie";
+import { cos } from "../../lib/pinnedMath";
 
 /** The committed file, relative to this test file. */
 const FILE =
@@ -43,7 +44,7 @@ function pairs(values: Float64Array): ReadonlyArray<readonly [number, number]> {
 
 /** The table the fit's Mie is held to: each case's efficiencies, asymmetry and amplitudes. */
 function sharedCasesTable(): unknown {
-  const mu = Float64Array.from(ANGLES_DEG, (deg) => Math.cos((deg * Math.PI) / 180));
+  const mu = Float64Array.from(ANGLES_DEG, (deg) => cos((deg * Math.PI) / 180));
   return {
     description:
       "Written by apps/hyperion/src/renderer/src/view/atmosphere/mieSharedCases.test.ts (plan 14, P14.T49.e) from the client's Mie; read by crates/hyperion-fit/src/tasks/condensate_extinction/mie.rs, which holds its own Mie to it to 1e-6. Do not edit by hand.",

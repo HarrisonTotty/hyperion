@@ -40,6 +40,7 @@ import { gaussLegendre } from "../lighting/quadrature";
 import { ev100FromAverageLuminance, exposureScale } from "../photometry/exposure";
 import { type Rgb, toneCurve } from "../photometry/toneCurve";
 import { REC709_TO_XYZ } from "./spectralColour";
+import { cbrt, cos, exp, pow, sin } from "../../lib/pinnedMath";
 
 /** The metric's relative tolerance: 5% of the reference's radiance. */
 export const METRIC_RELATIVE_TOLERANCE = 0.05;
@@ -287,7 +288,7 @@ export function coneAverage(
   const u = normalise(cross(k, helper));
   const v = cross(k, u);
   const rule = gaussLegendre(polarNodes);
-  const lowest = Math.cos(halfAngleRad);
+  const lowest = cos(halfAngleRad);
   const sum: [number, number, number] = [0, 0, 0];
   let total = 0;
   for (const [i, x] of rule.x.entries()) {
@@ -296,8 +297,8 @@ export function coneAverage(
     const weight = rule.w[i] ?? Number.NaN;
     for (let j = 0; j < azimuthNodes; j += 1) {
       const phi = (2 * Math.PI * (j + 0.5)) / azimuthNodes;
-      const s = sinTheta * Math.cos(phi);
-      const t = sinTheta * Math.sin(phi);
+      const s = sinTheta * cos(phi);
+      const t = sinTheta * sin(phi);
       const radiance = radianceAt({
         x: k.x * cosTheta + u.x * s + v.x * t,
         y: k.y * cosTheta + u.y * s + v.y * t,
@@ -314,7 +315,7 @@ export function coneAverage(
 
 /** The direct beam as a radiance, E_c e^(−τ) ÷ π: a white Lambertian surface facing the sun. */
 export function beamRadiance(irradiance: number, opticalDepth: number): number {
-  return (irradiance * Math.exp(-opticalDepth)) / Math.PI;
+  return (irradiance * exp(-opticalDepth)) / Math.PI;
 }
 
 /** Whether the reference's beam depth equals the client's quadrature to 10⁻⁶ max(1, τ). */
@@ -440,8 +441,7 @@ function labOf(display: Rgb): Rgb {
   const white = xyzOf([1, 1, 1]);
   const [x, y, z] = xyzOf(display);
   const delta = 6 / 29;
-  const f = (t: number): number =>
-    t > delta ** 3 ? Math.cbrt(t) : t / (3 * delta * delta) + 4 / 29;
+  const f = (t: number): number => (t > pow(delta, 3) ? cbrt(t) : t / (3 * delta * delta) + 4 / 29);
   const fx = f(x / white[0]);
   const fy = f(y / white[1]);
   const fz = f(z / white[2]);

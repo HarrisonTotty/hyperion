@@ -27,6 +27,8 @@
  */
 
 /** The H⁻ photodetachment threshold, µm: λ₀ = 1.6419 (John 1988, Eq. 3's text). */
+import { expm1, pow } from "../../../lib/pinnedMath";
+
 export const H_MINUS_THRESHOLD_UM = 1.6419;
 
 /**
@@ -108,9 +110,9 @@ function boundFreeCm2(wavelengthUm: number): number {
   const x = 1 / wavelengthUm - 1 / H_MINUS_THRESHOLD_UM;
   let f = 0;
   for (const [n, c] of BOUND_FREE_C.entries()) {
-    f += c * x ** (n / 2);
+    f += c * pow(x, n / 2);
   }
-  return 1e-18 * wavelengthUm ** 3 * x ** 1.5 * f;
+  return 1e-18 * pow(wavelengthUm, 3) * pow(x, 1.5) * f;
 }
 
 /**
@@ -126,7 +128,7 @@ function boundFreeCm2(wavelengthUm: number): number {
 export function hMinusBoundFreeM2(wavelengthNm: number, temperatureK: number): number {
   checkArguments(wavelengthNm, temperatureK, BOUND_FREE_SHORTEST_UM);
   const um = wavelengthNm / 1_000;
-  const stimulated = -Math.expm1(-SECOND_RADIATION_UM_K / (um * temperatureK));
+  const stimulated = -expm1(-SECOND_RADIATION_UM_K / (um * temperatureK));
   return boundFreeCm2(um) * stimulated * M2_PER_CM2;
 }
 
@@ -149,7 +151,8 @@ export function hMinusFreeFreeCm4PerDyn(wavelengthNm: number, temperatureK: numb
   for (const [i, [a, b, c, d, e, f]] of table.entries()) {
     const n = i + 1;
     sum +=
-      theta ** ((n + 1) / 2) * (um * um * a + b + c / um + d / um ** 2 + e / um ** 3 + f / um ** 4);
+      pow(theta, (n + 1) / 2) *
+      (um * um * a + b + c / um + d / um ** 2 + e / pow(um, 3) + f / pow(um, 4));
   }
   return 1e-29 * sum;
 }

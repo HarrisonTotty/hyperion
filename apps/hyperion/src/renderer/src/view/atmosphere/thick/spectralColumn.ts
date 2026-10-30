@@ -55,6 +55,7 @@ import {
   type TermAbsorber,
 } from "../medium";
 import { type GasFractions, molecularMixture, type MolecularMixture } from "../rayleigh";
+import { pow } from "../../../lib/pinnedMath";
 
 /** The wavelength an aerosol mode's column scale is set at, nm: `aerosolTerm`'s 550. */
 export const AEROSOL_SCALE_WAVELENGTH_NM = 550;
@@ -680,8 +681,8 @@ export function cornetteShanksMoments(asymmetry: number, order: number): Float64
     const alpha = ((l + 1) * (l + 2)) / ((2 * l + 1) * (2 * l + 3));
     const beta = (2 * l * l + 2 * l - 1) / ((2 * l - 1) * (2 * l + 3));
     const gamma = l < 2 ? 0 : (l * (l - 1)) / ((2 * l - 1) * (2 * l + 1));
-    const below = l < 2 ? 0 : gamma * g ** (l - 2);
-    moments[l] = a * (g ** l * (1 + beta) + alpha * g ** (l + 2) + below);
+    const below = l < 2 ? 0 : gamma * pow(g, l - 2);
+    moments[l] = a * (pow(g, l) * (1 + beta) + alpha * pow(g, l + 2) + below);
   }
   return moments;
 }

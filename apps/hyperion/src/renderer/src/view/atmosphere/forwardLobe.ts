@@ -50,6 +50,7 @@ import { gaussLegendre } from "../lighting/quadrature";
 import type { Rgb } from "../photometry/toneCurve";
 import { FORWARD_PEAK_GRID_ENTRIES, FORWARD_PEAK_U } from "./forwardPeak";
 import type { PhaseTable } from "./medium";
+import { cos, exp, expm1, pow, sin } from "../../lib/pinnedMath";
 
 /** The forward lobe's reach: 30°, `science-r08-mmf.md` §3's forward part. */
 export const FORWARD_LOBE_RAD = Math.PI / 6;
@@ -133,7 +134,7 @@ export function besselJ0(x: number): number {
     y *
       (0.143_048_876_5e-3 +
         y * (-0.691_114_765_1e-5 + y * (0.762_109_516_1e-6 - y * 0.934_935_152e-7)));
-  return Math.sqrt(0.636_619_772 / ax) * (Math.cos(xx) * p - z * Math.sin(xx) * q);
+  return Math.sqrt(0.636_619_772 / ax) * (cos(xx) * p - z * sin(xx) * q);
 }
 
 /** The Gauss–Legendre rule on each u interval of the forward part's transform (order 8). */
@@ -189,7 +190,7 @@ function lobeTransforms(
     for (let q = 0; q < LOBE_GL.x.length; q += 1) {
       const t = 0.5 * (1 + (LOBE_GL.x[q] ?? 0));
       const uu = u0 + t * (u1 - u0);
-      const base = half * (LOBE_GL.w[q] ?? 0) * uu ** 3;
+      const base = half * (LOBE_GL.w[q] ?? 0) * pow(uu, 3);
       const at = (channel: Float64Array): number =>
         base * ((channel[i] ?? Number.NaN) * (1 - t) + (channel[i + 1] ?? Number.NaN) * t);
       const wr = at(r);
@@ -209,7 +210,7 @@ function lobeTransforms(
       }
     }
   }
-  const factor = 4 * Math.PI ** 3;
+  const factor = 4 * pow(Math.PI, 3);
   for (const channel of [...forward, ...whole]) {
     for (let j = 0; j < n; j += 1) {
       channel[j] = (channel[j] ?? 0) * factor;
@@ -280,9 +281,7 @@ export function forwardLobeOf(table: PhaseTable): ForwardLobe {
     const [r, g, b] = transforms.map((pHat, c) => {
       const p = share[c] ?? 0;
       const last = wide[c] ?? pHat;
-      const f = pHat.map(
-        (v, k) => (last[k] ?? Number.NaN) * (Math.exp(x * (v - p)) - Math.exp(-x * p)),
-      );
+      const f = pHat.map((v, k) => (last[k] ?? Number.NaN) * (exp(x * (v - p)) - exp(-x * p)));
       return inverted(f, rows);
     });
     if (r === undefined || g === undefined || b === undefined) {
@@ -366,7 +365,7 @@ export function slabOrders(
   const { forward } = lobeTransforms(table.u, table.values, FORWARD_LOBE_ENTRIES);
   const [r, g, b] = forward.map((pHat) => {
     return inverted(
-      pHat.map((v) => Math.expm1(x * v) - x * v),
+      pHat.map((v) => expm1(x * v) - x * v),
       rows,
     );
   });
@@ -391,7 +390,7 @@ export function forwardLobeAt(
   phase: number,
 ): number {
   if (!(entry < FORWARD_ORDERS_ENTRIES - 1)) {
-    return -Math.expm1(-Math.max(x, 0) * lobe.share[c]) * phase;
+    return -expm1(-Math.max(x, 0) * lobe.share[c]) * phase;
   }
   const last = FORWARD_LOBE_X_NODES - 1;
   const at = Math.min(Math.sqrt(Math.max(x, 0) / FORWARD_LOBE_X_MAX) * last, last);

@@ -46,6 +46,7 @@
  */
 
 import type { BeamPath } from "./discreteOrdinates";
+import { exp, expm1 } from "../../../lib/pinnedMath";
 
 /** The least slant factor a layer takes where the spherical slant depth falls downward (the module's remarks). */
 export const SLANT_FACTOR_FLOOR = 1e-6;
@@ -146,7 +147,7 @@ function slantBelowHorizon(
 
 /** (1 − e^(−x)) ÷ x: the beam e^(−λt) deposits over a layer of τ, per unit of its top's T and τ, x = λτ. */
 function deposit(x: number): number {
-  return -Math.expm1(-x) / x;
+  return -expm1(-x) / x;
 }
 
 /**
@@ -245,7 +246,7 @@ export function sphericalBeamPath(
   let accumulated = 0;
   let flooredLayers = 0;
   for (let p = 0; p < layers; p += 1) {
-    topTransmission[p] = Math.exp(-accumulated);
+    topTransmission[p] = exp(-accumulated);
     const tau = depthOf(p);
     let lambda: number;
     if (tau === 0) {
@@ -261,7 +262,7 @@ export function sphericalBeamPath(
     }
     slantFactor[p] = lambda;
     accumulated += lambda * tau;
-    interfaceTransmission[p + 1] = Math.exp(-accumulated);
+    interfaceTransmission[p + 1] = exp(-accumulated);
   }
   return {
     beamCosine,
@@ -295,10 +296,10 @@ function beamBelowHorizon(
   const slantFactor = new Float64Array(layers).fill(1);
   const interfaceTransmission = new Float64Array(layers + 1);
   let accumulated = slant[0] ?? Number.NaN;
-  interfaceTransmission[0] = Math.exp(-accumulated);
+  interfaceTransmission[0] = exp(-accumulated);
   let flooredLayers = 0;
   for (let p = 0; p < layers && lit(height(p)); p += 1) {
-    topTransmission[p] = Math.exp(-accumulated);
+    topTransmission[p] = exp(-accumulated);
     const tau = depthOf(p);
     const top = height(p);
     const bottom = height(p + 1);
@@ -315,7 +316,7 @@ function beamBelowHorizon(
       }
       slantFactor[p] = lambda;
       accumulated += lambda * tau;
-      interfaceTransmission[p + 1] = Math.exp(-accumulated);
+      interfaceTransmission[p + 1] = exp(-accumulated);
       continue;
     }
     // The shadow's edge: (R + h_s)² (1 − μ₀²) = R², h_s = R μ₀² ÷ (s (1 + s)), s = √(1 − μ₀²).
@@ -330,7 +331,7 @@ function beamBelowHorizon(
     } else {
       const litDepth = tau * litShare;
       const litLambda = Math.max((slantFrom(shadowM) - accumulated) / litDepth, SLANT_FACTOR_FLOOR);
-      const share = -Math.expm1(-litLambda * litDepth) / (litLambda * tau);
+      const share = -expm1(-litLambda * litDepth) / (litLambda * tau);
       slantFactor[p] = edgeSlant(share, litLambda * tau) / tau;
     }
   }
@@ -356,7 +357,7 @@ function deficitOf(
     for (let k = 1; k < slant.length; k += 1) {
       largestDeficit = Math.max(
         largestDeficit,
-        Math.exp(-(slant[k] ?? Number.NaN)) - (interfaceTransmission[k] ?? Number.NaN),
+        exp(-(slant[k] ?? Number.NaN)) - (interfaceTransmission[k] ?? Number.NaN),
       );
     }
   }

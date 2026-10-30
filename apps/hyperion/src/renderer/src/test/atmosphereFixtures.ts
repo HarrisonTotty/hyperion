@@ -58,6 +58,7 @@ import { BOLTZMANN_J_PER_K, type GasFractions, molecularTerm } from "../view/atm
 import { type BakeSpectrum, bakeSpectrumOf } from "../view/atmosphere/spectralColour";
 import type { AbsorberCurveSlots, AtmosphereBody } from "../view/atmosphere/tables";
 import { toyPart, toySidecar } from "./kDistributionToys";
+import { exp, expm1, log, pow } from "../lib/pinnedMath";
 
 /** One Dobson unit, molecules m⁻², `earth.ts`'s (WMO/UNEP 2018, _Twenty Questions_, glossary). */
 export { DOBSON_UNIT_PER_M2 };
@@ -86,7 +87,7 @@ export function planckBakeSpectrum(temperatureK: number): BakeSpectrum {
     let sum = 0;
     for (let j = 0; j < 64; j += 1) {
       const m = (BAKE_RANGE_NM[0] + (bin + (j + 0.5) / 64) * BAKE_BIN_WIDTH_NM) * 1e-9;
-      sum += 1 / (m ** 5 * Math.expm1((h * c) / (m * k * temperatureK)));
+      sum += 1 / (pow(m, 5) * expm1((h * c) / (m * k * temperatureK)));
     }
     return sum / 64;
   });
@@ -108,10 +109,10 @@ export function linearAbsorberCurve(spec: ColumnAbsorberSpec, crossSectionM2: Rg
   const nodes = (last - first) * ABSORBER_CURVE_NODES_PER_DECADE + 1;
   const columns = Float64Array.from(
     { length: nodes },
-    (_, j) => spec.columnPerM2 * 10 ** (first + j / ABSORBER_CURVE_NODES_PER_DECADE),
+    (_, j) => spec.columnPerM2 * pow(10, first + j / ABSORBER_CURVE_NODES_PER_DECADE),
   );
   const transmittance = crossSectionM2.map((sigma) =>
-    columns.map((u) => Math.max(Math.exp(-sigma * u), ABSORBER_TRANSMITTANCE_FLOOR)),
+    columns.map((u) => Math.max(exp(-sigma * u), ABSORBER_TRANSMITTANCE_FLOOR)),
   );
   const [red, green, blue] = transmittance;
   if (red === undefined || green === undefined || blue === undefined) {
@@ -119,15 +120,11 @@ export function linearAbsorberCurve(spec: ColumnAbsorberSpec, crossSectionM2: Rg
   }
   return {
     kind: "column",
-    logColumns: columns.map(Math.log),
-    logPressures: Float64Array.of(Math.log(spec.basePa)),
-    readTopLogPressure: Math.log(spec.basePa),
+    logColumns: columns.map(log),
+    logPressures: Float64Array.of(log(spec.basePa)),
+    readTopLogPressure: log(spec.basePa),
     transmittance: [red, green, blue],
-    opticalDepth: [
-      red.map((t) => -Math.log(t)),
-      green.map((t) => -Math.log(t)),
-      blue.map((t) => -Math.log(t)),
-    ],
+    opticalDepth: [red.map((t) => -log(t)), green.map((t) => -log(t)), blue.map((t) => -log(t))],
   };
 }
 
@@ -274,7 +271,7 @@ export function fourAbsorberMedium(
 }
 
 /** The toy line species' broadening pressures, Pa: 4 a decade from 10 Pa to 10 MPa. */
-const LINE_TOY_PRESSURES_PA = Array.from({ length: 25 }, (_, k) => 10 * 10 ** (k / 4));
+const LINE_TOY_PRESSURES_PA = Array.from({ length: 25 }, (_, k) => 10 * pow(10, k / 4));
 
 /** The toy line species' temperatures, K. */
 const LINE_TOY_TEMPERATURES_K = [150, 200, 250, 300, 350];
@@ -420,7 +417,7 @@ export function venusClassColumn(): AtmosphereColumn {
       surfaceK: 730,
       surfacePa: 92e5,
       beta: 0.8 * dryAdiabatExponent([{ properties: co2, moleFraction: 1 }]),
-      skinK: 2 ** -0.25 * 226.6,
+      skinK: pow(2, -0.25) * 226.6,
     },
     meanMolarMassGPerMol: co2.molarMassGPerMol,
     referenceGravityMS2: 8.87,

@@ -56,6 +56,7 @@ import { type GasFractions, molecularTerm } from "./rayleigh";
 import { bakeSpectrumOf } from "./spectralColour";
 import type { AbsorberCurveSlots } from "./tables";
 import type { SpectralSource } from "./thick/spectralColumn";
+import { pow } from "../../lib/pinnedMath";
 
 /**
  * Dry air's Rayleigh scattering coefficients at sea level, m⁻¹, at 680, 550 and 440 nm:
@@ -179,7 +180,7 @@ export const EARTH_GROUND_ALBEDO = 0.1;
 /** The aerosol's extinction at the ground per channel, m⁻¹: τ(λ) ÷ H with the Ångström law. */
 function aerosolExtinctionPerM(wavelengthNm: number): number {
   const opticalDepth =
-    AEROSOL_OPTICAL_DEPTH_550 * (wavelengthNm / 550) ** -AEROSOL_ANGSTROM_EXPONENT;
+    AEROSOL_OPTICAL_DEPTH_550 * pow(wavelengthNm / 550, -AEROSOL_ANGSTROM_EXPONENT);
   return opticalDepth / AEROSOL_SCALE_HEIGHT_M;
 }
 

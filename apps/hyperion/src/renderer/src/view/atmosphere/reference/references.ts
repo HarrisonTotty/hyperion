@@ -19,6 +19,7 @@ import {
 import { spheroidOpticalDepth } from "../tablesCpu";
 import type { CaseFigure, ReferenceCase } from "./cases";
 import { geodeticPoint, localDirectionVector, type ReferenceGeometry } from "./geometries";
+import { cos, pow } from "../../../lib/pinnedMath";
 
 /** One geometry of a reference file, the fields read here. */
 export interface ReferenceGeometryFile {
@@ -195,7 +196,7 @@ function sphereBeam(
   const { medium } = referenceCase;
   const top = radiusM + medium.topHeightM;
   let r = radiusM + geometry.observer.heightM;
-  let mu = Math.cos(geometry.sun.zenithDeg * RAD);
+  let mu = cos(geometry.sun.zenithDeg * RAD);
   if (r > top) {
     const discriminant = r * r * (mu * mu - 1) + top * top;
     if (mu >= 0 || discriminant <= 0) {
@@ -261,10 +262,15 @@ export function clientBeam(
     let depth: Rgb | null;
     switch (figure.kind) {
       case "sphere":
-        depth = sphereBeam(referenceCase, figure.radiusM, geometry, ORACLE_STEPS * 2 ** refinement);
+        depth = sphereBeam(
+          referenceCase,
+          figure.radiusM,
+          geometry,
+          ORACLE_STEPS * pow(2, refinement),
+        );
         break;
       case "spheroid":
-        depth = spheroidBeam(referenceCase, figure.gravity, geometry, 5_000 / 2 ** refinement);
+        depth = spheroidBeam(referenceCase, figure.gravity, geometry, 5_000 / pow(2, refinement));
         break;
     }
     return depth;

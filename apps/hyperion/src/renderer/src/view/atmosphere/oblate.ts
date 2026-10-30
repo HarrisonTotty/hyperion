@@ -64,6 +64,7 @@
 import type { FigureLawDto } from "@hyperion/protocol";
 
 import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../../lib/system/constants";
+import { atan, cbrt, cos, exp, log, sin } from "../../lib/pinnedMath";
 
 /**
  * The datum spheroid a body's gravity is found on: `hillaire.ts`'s `SpheroidFigure`, written here
@@ -204,10 +205,10 @@ function radiiOf(figure: SpheroidFigure): { readonly a: number; readonly c: numb
  */
 function qRatio(ePrime: number): number {
   if (ePrime >= SERIES_BELOW_E_PRIME) {
-    const atan = Math.atan(ePrime);
+    const arctan = atan(ePrime);
     const e2 = ePrime * ePrime;
-    const q0 = 0.5 * ((1 + 3 / e2) * atan - 3 / ePrime);
-    const q0Prime = 3 * (1 + 1 / e2) * (1 - atan / ePrime) - 1;
+    const q0 = 0.5 * ((1 + 3 / e2) * arctan - 3 / ePrime);
+    const q0Prime = 3 * (1 + 1 / e2) * (1 - arctan / ePrime) - 1;
     return (ePrime * q0Prime) / q0;
   }
   // Both series divided by e′³, in y = e′², summed from the smallest term (Horner's rule).
@@ -258,10 +259,10 @@ function poleAndEquator(body: LevelSpheroid): PoleAndEquator {
 
 /** Somigliana's closed form at geodetic latitude φ from γ_e and γ_p. */
 function somigliana(g: PoleAndEquator, latitudeRad: number): number {
-  const cos = Math.cos(latitudeRad);
-  const sin = Math.sin(latitudeRad);
-  const acos2 = g.a * cos * cos;
-  const csin2 = g.c * sin * sin;
+  const cosLat = cos(latitudeRad);
+  const sinLat = sin(latitudeRad);
+  const acos2 = g.a * cosLat * cosLat;
+  const csin2 = g.c * sinLat * sinLat;
   return (acos2 * g.equatorialMS2 + csin2 * g.polarMS2) / Math.sqrt(g.a * acos2 + g.c * csin2);
 }
 
@@ -271,14 +272,14 @@ function somigliana(g: PoleAndEquator, latitudeRad: number): number {
  * sin 2φ times its coefficients' difference (derived here).
  */
 function somiglianaSlope(g: PoleAndEquator, latitudeRad: number): number {
-  const cos = Math.cos(latitudeRad);
-  const sin = Math.sin(latitudeRad);
-  const c2 = cos * cos;
-  const s2 = sin * sin;
+  const cosLat = cos(latitudeRad);
+  const sinLat = sin(latitudeRad);
+  const c2 = cosLat * cosLat;
+  const s2 = sinLat * sinLat;
   const numerator = g.a * g.equatorialMS2 * c2 + g.c * g.polarMS2 * s2;
   const square = g.a * g.a * c2 + g.c * g.c * s2;
   const root = Math.sqrt(square);
-  const sin2 = 2 * sin * cos;
+  const sin2 = 2 * sinLat * cosLat;
   const numeratorSlope = sin2 * (g.c * g.polarMS2 - g.a * g.equatorialMS2);
   const squareSlope = sin2 * (g.c * g.c - g.a * g.a);
   return numeratorSlope / root - (numerator * squareSlope) / (2 * square * root);
@@ -336,8 +337,8 @@ function principalRadii(
   latitudeRad: number,
 ): { readonly m: number; readonly n: number } {
   const e2 = ((a - c) * (a + c)) / (a * a);
-  const sin = Math.sin(latitudeRad);
-  const w2 = 1 - e2 * sin * sin;
+  const sinLat = sin(latitudeRad);
+  const w2 = 1 - e2 * sinLat * sinLat;
   const w = Math.sqrt(w2);
   return { m: (a * (1 - e2)) / (w2 * w), n: a / w };
 }
@@ -365,9 +366,9 @@ export function directionalCurvatureRadiusM(
 ): number {
   const { a, c } = radiiOf(figure);
   const { m, n } = principalRadii(a, c, geodeticLatitudeRad);
-  const cos = Math.cos(azimuthRad);
-  const sin = Math.sin(azimuthRad);
-  return (m * n) / (n * cos * cos + m * sin * sin);
+  const cosAz = cos(azimuthRad);
+  const sinAz = sin(azimuthRad);
+  return (m * n) / (n * cosAz * cosAz + m * sinAz * sinAz);
 }
 
 /** One slice and one band, each the reference itself. */
@@ -378,9 +379,9 @@ function oneSliceAndBand(): OblateSlicing {
 /** `count` values from `low` to `high`, both exact, spaced evenly in their logarithm. */
 function logSpaced(low: number, high: number, count: number): Float64Array {
   const values = new Float64Array(count);
-  const span = Math.log(high / low);
+  const span = log(high / low);
   for (let i = 0; i < count; i += 1) {
-    values[i] = i === count - 1 ? high : low * Math.exp((span * i) / (count - 1));
+    values[i] = i === count - 1 ? high : low * exp((span * i) / (count - 1));
   }
   return values;
 }
@@ -392,7 +393,7 @@ function respacedAxis(values: Float64Array, step: number, oneBelow: number): Flo
   if (low === undefined || high === undefined) {
     throw new RangeError("a slicing holds at least one value an axis");
   }
-  const span = Math.log(high / low);
+  const span = log(high / low);
   return span <= oneBelow ? Float64Array.of(1) : logSpaced(low, high, 1 + Math.ceil(span / step));
 }
 
@@ -473,8 +474,8 @@ function slicingOf(g: PoleAndEquator, offsetMS2: number, referenceRadiusM: numbe
     sMin = Math.min(sMin, s);
     sMax = Math.max(sMax, s);
   }
-  const kappaSpan = Math.log(kappaMax / kappaMin);
-  const sSpan = Math.log(sMax / sMin);
+  const kappaSpan = log(kappaMax / kappaMin);
+  const sSpan = log(sMax / sMin);
   return {
     kappa:
       kappaSpan <= ONE_SLICE_BELOW
@@ -619,7 +620,7 @@ function figureSpin(
       const { a, c } = radiiOf(figure);
       spin = {
         angularVelocityRadS: Math.sqrt(SYNCHRONOUS_ZONAL_FORCING) * angularVelocityRadS,
-        gravityOffsetMS2: angularVelocityRadS * angularVelocityRadS * Math.cbrt(a * a * c),
+        gravityOffsetMS2: angularVelocityRadS * angularVelocityRadS * cbrt(a * a * c),
       };
       break;
     }

@@ -62,6 +62,7 @@ import {
   mieSphere,
   type MieResult,
 } from "./mie";
+import { cos, exp, log, log1p, pow } from "../../lib/pinnedMath";
 
 /**
  * A size distribution of spheres, by effective radius r_eff = ⟨r³⟩ ÷ ⟨r²⟩ and effective variance
@@ -149,7 +150,7 @@ export const PHASE_TABLE_U: Float64Array = Float64Array.from(
 );
 
 /** The cosines of the phase tables' scattering angles, cos(π u²), from 1 to −1; shared, so never written (each matrix holds its own copy). */
-export const PHASE_TABLE_MU: Float64Array = PHASE_TABLE_U.map((u) => Math.cos(Math.PI * u * u));
+export const PHASE_TABLE_MU: Float64Array = PHASE_TABLE_U.map((u) => cos(Math.PI * u * u));
 
 /**
  * A scattering matrix's six elements at a set of scattering-angle cosines, block-diagonal and
@@ -313,7 +314,7 @@ interface LogWeight {
   readonly meanSquareRadiusUm2: number;
 }
 
-const LOG_FLOOR = -Math.log(SIZE_WEIGHT_FLOOR);
+const LOG_FLOOR = -log(SIZE_WEIGHT_FLOOR);
 
 /** No scattering angles: Mie then sums the efficiencies alone. */
 const NO_ANGLES = new Float64Array(0);
@@ -406,7 +407,7 @@ function gammaWeight(a: number, b: number): LogWeight {
   const alpha = (1 - 2 * b) / b;
   const theta = a * b;
   return {
-    logNumberPerY: (y) => alpha * y - Math.exp(y) / theta,
+    logNumberPerY: (y) => alpha * y - exp(y) / theta,
     cut: (p, side) => gammaCut(alpha + p, theta, side),
     meanSquareRadiusUm2: a * a * (1 - b) * (1 - 2 * b),
   };
@@ -417,13 +418,13 @@ function gammaWeight(a: number, b: number): LogWeight {
  * is one of mean ln r_g + pσ²; and ⟨r²⟩ = r_g² e^(2σ²) = r_eff² (1 + v_eff)⁻³.
  */
 function logNormalWeight(a: number, b: number): LogWeight {
-  const sigma2 = Math.log1p(b);
+  const sigma2 = log1p(b);
   const sigma = Math.sqrt(sigma2);
-  const mu = Math.log(a) - 2.5 * sigma2;
+  const mu = log(a) - 2.5 * sigma2;
   return {
     logNumberPerY: (y) => -((y - mu) ** 2) / (2 * sigma2),
     cut: (p, side) => mu + p * sigma2 + side * sigma * Math.sqrt(2 * LOG_FLOOR),
-    meanSquareRadiusUm2: (a * a) / (1 + b) ** 3,
+    meanSquareRadiusUm2: (a * a) / pow(1 + b, 3),
   };
 }
 
@@ -446,8 +447,8 @@ function logWeight(sizes: SizeDistribution): LogWeight {
  * z = e^y ÷ θ, z − c − c ln(z ÷ c) = ln(1 ÷ floor), solved by bisection in ln z.
  */
 function gammaCut(c: number, theta: number, side: -1 | 1): number {
-  const peak = Math.log(c);
-  const excess = (lnZ: number): number => Math.exp(lnZ) - c - c * (lnZ - peak) - LOG_FLOOR;
+  const peak = log(c);
+  const excess = (lnZ: number): number => exp(lnZ) - c - c * (lnZ - peak) - LOG_FLOOR;
   let inner = peak;
   let outer = peak + side;
   while (excess(outer) < 0) {
@@ -461,7 +462,7 @@ function gammaCut(c: number, theta: number, side: -1 | 1): number {
       outer = middle;
     }
   }
-  return 0.5 * (inner + outer) + Math.log(theta);
+  return 0.5 * (inner + outer) + log(theta);
 }
 
 /**
@@ -473,7 +474,7 @@ function gammaCut(c: number, theta: number, side: -1 | 1): number {
  */
 export function sizeRange(sizes: SizeDistribution): SizeRange {
   const weight = logWeight(sizes);
-  return { fromUm: Math.exp(weight.cut(2, -1)), toUm: Math.exp(weight.cut(6, 1)) };
+  return { fromUm: exp(weight.cut(2, -1)), toUm: exp(weight.cut(6, 1)) };
 }
 
 /**
@@ -494,13 +495,13 @@ const PANEL_RULE = gaussLegendre(SIZE_PANEL_ORDER);
  * {@link SIZE_PANEL_LN_RADIUS} ÷ 2^level in ln r.
  */
 function panelEnds(low: number, high: number, wavenumberPerUm: number, level: number): number[] {
-  const dx = SIZE_PANEL_SIZE_PARAMETER / 2 ** level;
-  const dy = SIZE_PANEL_LN_RADIUS / 2 ** level;
+  const dx = SIZE_PANEL_SIZE_PARAMETER / pow(2, level);
+  const dy = SIZE_PANEL_LN_RADIUS / pow(2, level);
   const ends = [low];
   let y = low;
   while (y < high) {
-    const x = wavenumberPerUm * Math.exp(y);
-    y = Math.min(high, y + Math.min(dy, Math.log1p(dx / x)));
+    const x = wavenumberPerUm * exp(y);
+    y = Math.min(high, y + Math.min(dy, log1p(dx / x)));
     ends.push(y);
   }
   return ends;
@@ -508,7 +509,7 @@ function panelEnds(low: number, high: number, wavenumberPerUm: number, level: nu
 
 /** A level's node count from its panels alone, so that a level past a cap is never built. */
 function levelNodes(range: SizeRange, wavenumberPerUm: number, level: number): number {
-  const ends = panelEnds(Math.log(range.fromUm), Math.log(range.toUm), wavenumberPerUm, level);
+  const ends = panelEnds(log(range.fromUm), log(range.toUm), wavenumberPerUm, level);
   return (ends.length - 1) * SIZE_PANEL_ORDER;
 }
 
@@ -519,7 +520,7 @@ function quadratureOn(
   level: number,
 ): SizeQuadrature {
   const weight = logWeight(sizes);
-  const ends = panelEnds(Math.log(range.fromUm), Math.log(range.toUm), wavenumberPerUm, level);
+  const ends = panelEnds(log(range.fromUm), log(range.toUm), wavenumberPerUm, level);
   const nodes = (ends.length - 1) * SIZE_PANEL_ORDER;
   const radiiUm = new Float64Array(nodes);
   const logArea = new Float64Array(nodes);
@@ -530,12 +531,12 @@ function quadratureOn(
     for (let i = 0; i < SIZE_PANEL_ORDER; i += 1) {
       const y = from + half * (1 + (PANEL_RULE.x[i] ?? 0));
       const node = p * SIZE_PANEL_ORDER + i;
-      radiiUm[node] = Math.exp(y);
-      logArea[node] = Math.log(half * (PANEL_RULE.w[i] ?? 0)) + weight.logNumberPerY(y) + 2 * y;
+      radiiUm[node] = exp(y);
+      logArea[node] = log(half * (PANEL_RULE.w[i] ?? 0)) + weight.logNumberPerY(y) + 2 * y;
       peak = Math.max(peak, logArea[node] ?? -Infinity);
     }
   }
-  const areaWeights = logArea.map((l) => Math.exp(l - peak));
+  const areaWeights = logArea.map((l) => exp(l - peak));
   const total = areaWeights.reduce((sum, w) => sum + w, 0);
   return { radiiUm, areaWeights: areaWeights.map((w) => w / total) };
 }

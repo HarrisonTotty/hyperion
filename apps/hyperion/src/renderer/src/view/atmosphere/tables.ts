@@ -101,6 +101,7 @@ import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
 import scatteringWgsl from "./shaders/scattering.wgsl?raw";
 import slotDepthsWgsl from "./shaders/slotDepths.wgsl?raw";
 import transmittanceWgsl from "./shaders/transmittance.wgsl?raw";
+import { log, sin } from "../../lib/pinnedMath";
 
 /**
  * The most terms a medium may have: `MAX_TERMS` in `common.wgsl`, the length of the kernels'
@@ -307,10 +308,10 @@ export function packOblateBody(
   texels.set([plan.kappa.length, plan.bands.length, layersPerBand, topHeightM], 8);
   texels.set([a / c, (a / c) ** 2, inverseEquator, inversePole], 12);
   for (const [k, kappa] of plan.kappa.entries()) {
-    texels.set([kappa * referenceRadiusM, Math.sqrt(kappa), Math.log(kappa), 0], (4 + k) * 4);
+    texels.set([kappa * referenceRadiusM, Math.sqrt(kappa), log(kappa), 0], (4 + k) * 4);
   }
   for (const [b, band] of plan.bands.entries()) {
-    texels.set([band.gravityRatio, Math.log(band.gravityRatio), 0, 0], (4 + MAX_SLICES + b) * 4);
+    texels.set([band.gravityRatio, log(band.gravityRatio), 0, 0], (4 + MAX_SLICES + b) * 4);
   }
   texels.set([absorberCount(medium), lineSlotMask(medium), 0, 0], OBLATE_SURFACE_TEXEL * 4);
   texels.set(packedScaleHeightsM(medium), (OBLATE_SURFACE_TEXEL + 1) * 4);
@@ -397,7 +398,7 @@ const CURVE_NODES_PER_DECADE = 40;
  * `ABSORBER_TRANSMITTANCE_FLOOR` as an optical depth (held equal by a test) and `common.wgsl`'s
  * `CURVE_DEPTH_MAX`.
  */
-export const ABSORBER_CURVE_DEPTH_MAX = -Math.log(1e-6);
+export const ABSORBER_CURVE_DEPTH_MAX = -log(1e-6);
 
 /**
  * Each light's curves of growth for a medium's absorbers (plan R08, Design note 5): light slot
@@ -677,7 +678,7 @@ export function checkAbsorberCurves(medium: AtmosphereMedium, curves: AbsorberCu
         nodes.length === ABSORBER_CURVE_NODES &&
         nodes.every((x, j) => {
           const expected =
-            Math.log(vertical) + (CURVE_FIRST_DECADE + j / CURVE_NODES_PER_DECADE) * Math.LN10;
+            log(vertical) + (CURVE_FIRST_DECADE + j / CURVE_NODES_PER_DECADE) * Math.LN10;
           return Math.abs(x - expected) <= CURVE_GRID_TOLERANCE * Math.max(Math.abs(expected), 1);
         });
       const rows = curve.logPressures.length;
@@ -1468,7 +1469,7 @@ const PHASE_SIMPSON_PANELS_PER_ENTRY = 8;
 
 /** The integrand of {@link phaseIntegral} at u = x, where the phase is p. */
 function phaseIntegrand(x: number, p: number): number {
-  return p * x * Math.sin(Math.PI * x * x);
+  return p * x * sin(Math.PI * x * x);
 }
 
 /**

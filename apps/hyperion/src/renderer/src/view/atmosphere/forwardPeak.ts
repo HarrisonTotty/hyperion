@@ -17,6 +17,7 @@
  */
 
 import { gaussLegendre } from "../lighting/quadrature";
+import { cos, sin } from "../../lib/pinnedMath";
 
 /**
  * The table entries an unresolved forward peak is laid on: a triangle in u over the first 4
@@ -70,15 +71,7 @@ export function phaseTableMoment(
       const t = 0.5 * (1 + x);
       const uu = u0 + t * (u1 - u0);
       const angle = Math.PI * uu * uu;
-      sum +=
-        half *
-        w *
-        (v0 + t * (v1 - v0)) *
-        weight(Math.cos(angle)) *
-        Math.sin(angle) *
-        2 *
-        Math.PI *
-        uu;
+      sum += half * w * (v0 + t * (v1 - v0)) * weight(cos(angle)) * sin(angle) * 2 * Math.PI * uu;
     }
   }
   return 2 * Math.PI * sum;

@@ -56,6 +56,7 @@ import {
   type ScatteringMatrix,
   sphereScatteringMatrix,
 } from "../view/atmosphere/sizeDistribution";
+import { cos, exp, log, log1p, pow, sin } from "../lib/pinnedMath";
 
 /** The significant digits each table value is written to. */
 export const SIGNIFICANT_DIGITS = 10;
@@ -159,13 +160,13 @@ function logNumberPerLnRadius(distribution: RadiusDistribution, radiusUm: number
   let logNumber: number;
   switch (distribution.kind) {
     case "logNormal": {
-      const z = Math.log(radiusUm / distribution.modeRadiusUm) / distribution.lnSigma;
+      const z = log(radiusUm / distribution.modeRadiusUm) / distribution.lnSigma;
       logNumber = -0.5 * z * z;
       break;
     }
     case "gamma": {
       const { alpha, effectiveRadiusUm } = distribution;
-      logNumber = (alpha + 1) * Math.log(radiusUm) - ((alpha + 3) * radiusUm) / effectiveRadiusUm;
+      logNumber = (alpha + 1) * log(radiusUm) - ((alpha + 3) * radiusUm) / effectiveRadiusUm;
       break;
     }
   }
@@ -180,13 +181,13 @@ function gaussLegendreNodes(
   rule: Extract<RadiusRule, { kind: "gaussLegendre" }>,
   wavenumberPerUm: number,
 ): RadiusNodes {
-  const dx = SIZE_PANEL_SIZE_PARAMETER / 2 ** rule.level;
-  const dy = SIZE_PANEL_LN_RADIUS / 2 ** rule.level;
-  const high = Math.log(rule.toUm);
-  const ends = [Math.log(rule.fromUm)];
-  for (let y = Math.log(rule.fromUm); y < high;) {
-    const x = wavenumberPerUm * Math.exp(y);
-    y = Math.min(high, y + Math.min(dy, Math.log1p(dx / x)));
+  const dx = SIZE_PANEL_SIZE_PARAMETER / pow(2, rule.level);
+  const dy = SIZE_PANEL_LN_RADIUS / pow(2, rule.level);
+  const high = log(rule.toUm);
+  const ends = [log(rule.fromUm)];
+  for (let y = log(rule.fromUm); y < high;) {
+    const x = wavenumberPerUm * exp(y);
+    y = Math.min(high, y + Math.min(dy, log1p(dx / x)));
     ends.push(y);
   }
   const count = (ends.length - 1) * SIZE_PANEL_ORDER;
@@ -198,16 +199,15 @@ function gaussLegendreNodes(
     const half = 0.5 * ((ends[p + 1] ?? Number.NaN) - from);
     for (let i = 0; i < SIZE_PANEL_ORDER; i += 1) {
       const node = p * SIZE_PANEL_ORDER + i;
-      const radius = Math.exp(from + half * (1 + (PANEL_RULE.x[i] ?? Number.NaN)));
+      const radius = exp(from + half * (1 + (PANEL_RULE.x[i] ?? Number.NaN)));
       radiiUm[node] = radius;
       const logWeight =
-        Math.log(half * (PANEL_RULE.w[i] ?? Number.NaN)) +
-        logNumberPerLnRadius(distribution, radius);
+        log(half * (PANEL_RULE.w[i] ?? Number.NaN)) + logNumberPerLnRadius(distribution, radius);
       logWeights[node] = logWeight;
       peak = Math.max(peak, logWeight);
     }
   }
-  return { radiiUm, numberWeights: logWeights.map((l) => Math.exp(l - peak)) };
+  return { radiiUm, numberWeights: logWeights.map((l) => exp(l - peak)) };
 }
 
 /** libRadtran's grid and trapezoid in r (module remarks). */
@@ -236,15 +236,13 @@ function libRadtranNodes(
     const above = radii[i + 1] ?? radius;
     // n(r) dr of the trapezoid: half the span to the neighbours, and n(r) = (r n(r)) ÷ r.
     const logWeight =
-      Math.log(0.5 * (above - below)) +
-      logNumberPerLnRadius(distribution, radius) -
-      Math.log(radius);
+      log(0.5 * (above - below)) + logNumberPerLnRadius(distribution, radius) - log(radius);
     logWeights[i] = logWeight;
     peak = Math.max(peak, logWeight);
   }
   return {
     radiiUm: Float64Array.from(radii),
-    numberWeights: logWeights.map((l) => Math.exp(l - peak)),
+    numberWeights: logWeights.map((l) => exp(l - peak)),
   };
 }
 
@@ -354,7 +352,7 @@ export function evenU(entries: number): Float64Array {
 
 /** The cosines cos(π u²) of a table's scattering angles. */
 export function cosinesOf(u: Float64Array): Float64Array {
-  return u.map((x) => Math.cos(Math.PI * x * x));
+  return u.map((x) => cos(Math.PI * x * x));
 }
 
 const INTERVAL_RULE = gaussLegendre(16);
@@ -380,10 +378,10 @@ export function linearInUMoments(
       const t = 0.5 * (1 + (INTERVAL_RULE.x[k] ?? Number.NaN));
       const x = from + 2 * half * t;
       const value = low + (high - low) * t;
-      const measure = 4 * Math.PI * Math.PI * x * Math.sin(Math.PI * x * x);
+      const measure = 4 * Math.PI * Math.PI * x * sin(Math.PI * x * x);
       const w = half * (INTERVAL_RULE.w[k] ?? Number.NaN) * value * measure;
       integral += w;
-      firstMoment += w * Math.cos(Math.PI * x * x);
+      firstMoment += w * cos(Math.PI * x * x);
     }
   }
   return { integral, meanCosine: firstMoment / integral };
@@ -553,7 +551,7 @@ export const SPHERE_CASES: readonly SphereCase[] = [
     // σ_g 2.24, Emde et al.'s: `waso.mie.cdf` records 2.0, but only 2.24 reproduces its matrix.
     // Cut at 5 r_mod as IPRT's run was, g 0.550 against 0.703 to 10 r_mod: this is IPRT's
     // benchmark aerosol, not a physical model of OPAC's water-soluble aerosol.
-    distribution: { kind: "logNormal", modeRadiusUm: 0.0262, lnSigma: Math.log(2.24) },
+    distribution: { kind: "logNormal", modeRadiusUm: 0.0262, lnSigma: log(2.24) },
     rule: { kind: "libRadtran", radiusUm: 0.0262, nRMax: 5, dxMax: 0.03 },
     entries: 513,
   },

@@ -23,6 +23,7 @@ import {
   type MediumTerm,
   type PhaseTable,
 } from "../medium";
+import { cos, exp, log, pow, sin } from "../../../lib/pinnedMath";
 
 /**
  * The vertical optical depth at 550 nm above which a body-wide cloud deck splits the atmosphere in
@@ -122,17 +123,17 @@ export interface ThickBoundary {
 }
 
 /** 1/8, 2⁻³: a grid value of the sweep's half-octave ladder 2^(k ÷ 2). */
-const EIGHTH = 2 ** -3;
+const EIGHTH = pow(2, -3);
 /** √2/16, 2^(−3.5). */
-const ROOT2_SIXTEENTH = 2 ** -3.5;
+const ROOT2_SIXTEENTH = pow(2, -3.5);
 /** √2/8, 2^(−2.5). */
-const ROOT2_EIGHTH = 2 ** -2.5;
+const ROOT2_EIGHTH = pow(2, -2.5);
 /** ¼, 2⁻². */
-const QUARTER = 2 ** -2;
+const QUARTER = pow(2, -2);
 /** √2/4, 2^(−1.5). */
-const ROOT2_QUARTER = 2 ** -1.5;
+const ROOT2_QUARTER = pow(2, -1.5);
 /** ½, 2⁻¹. */
-const HALF = 2 ** -1;
+const HALF = pow(2, -1);
 
 /**
  * Hillaire's analytic multiple-scattering term's measured boundary, τ*(ω, g) and A*(ω, g), from
@@ -300,7 +301,7 @@ export function readThickBoundary(
   const firstG = boundary.g[0] ?? Number.NaN;
   const lastG = boundary.g[columns - 1] ?? Number.NaN;
   return {
-    tauStar: Math.exp(bilinear((row, column) => Math.log(at(boundary.tauStar, row, column)))),
+    tauStar: exp(bilinear((row, column) => log(at(boundary.tauStar, row, column)))),
     albedoStar: bilinear((row, column) => at(boundary.albedoStar, row, column)),
     albedoBelowGrid: omega < lastOmega,
     asymmetryOffGrid: g < firstG || g > lastG,
@@ -317,7 +318,7 @@ export function readThickBoundary(
 function gaussLegendreNodes(n: number): ReadonlyArray<readonly [number, number]> {
   const rule: Array<readonly [number, number]> = [];
   for (let i = 0; i < n; i += 1) {
-    let z = Math.cos((Math.PI * (i + 0.75)) / (n + 0.5));
+    let z = cos((Math.PI * (i + 0.75)) / (n + 0.5));
     let derivative = 0;
     for (let iteration = 0; iteration < 100; iteration += 1) {
       let p0 = 1;
@@ -362,7 +363,7 @@ function tableMeanCosine(table: PhaseTable, channel: 0 | 1 | 2): number {
       const f = 0.5 * (1 + x);
       const uu = u0 + f * (u1 - u0);
       const angle = Math.PI * uu * uu;
-      sum += half * w * (v0 + f * (v1 - v0)) * Math.cos(angle) * Math.sin(angle) * 2 * Math.PI * uu;
+      sum += half * w * (v0 + f * (v1 - v0)) * cos(angle) * sin(angle) * 2 * Math.PI * uu;
     }
   }
   return 2 * Math.PI * sum;

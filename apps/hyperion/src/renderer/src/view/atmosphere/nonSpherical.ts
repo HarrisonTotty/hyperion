@@ -92,6 +92,7 @@ import {
   sphereModeInRange,
   sphereModeOptics,
 } from "./sizeDistribution";
+import { acos, cbrt, cos, exp, log, pow, sin } from "../../lib/pinnedMath";
 
 // ---------------------------------------------------------------------------------------------
 // The phase files.
@@ -518,14 +519,14 @@ export function tabulatedRadiusDistribution(
   if (count < 2 || numberDensity.length !== count) {
     throw new RangeError("a tabulated distribution needs at least two radii and one density each");
   }
-  const lnR = Float64Array.from({ length: count }, (_, i) => Math.log(radiiUm[i] ?? Number.NaN));
+  const lnR = Float64Array.from({ length: count }, (_, i) => log(radiiUm[i] ?? Number.NaN));
   const lnRn = Float64Array.from({ length: count }, (_, i) => {
     const r = radiiUm[i] ?? Number.NaN;
     const n = numberDensity[i] ?? Number.NaN;
     if (!(r > 0 && n >= 0 && Number.isFinite(n))) {
       throw new RangeError(`a tabulated distribution's radius ${r} and density ${n} are bad`);
     }
-    return n > 0 ? Math.log(r * n) : -Infinity;
+    return n > 0 ? log(r * n) : -Infinity;
   });
   if (lnR.some((v, i) => i > 0 && !(v > (lnR[i - 1] ?? Infinity)))) {
     throw new RangeError("a tabulated distribution's radii must ascend strictly");
@@ -619,7 +620,7 @@ function a1At(
     const t = Math.min(Math.max((u - u0) / ((phaseU[i + 1] ?? Number.NaN) - u0), 0), 1);
     const a = logA1[offset + i] ?? Number.NaN;
     const b = logA1[offset + i + 1] ?? Number.NaN;
-    return Math.exp(a + t * (b - a));
+    return exp(a + t * (b - a));
   });
 }
 
@@ -633,7 +634,7 @@ interface TableAngles {
 const TABLE_ANGLES = new WeakMap<PhaseFileTable, TableAngles>();
 
 function cosineOfDegrees(degrees: number): number {
-  return Math.cos((degrees * Math.PI) / 180);
+  return cos((degrees * Math.PI) / 180);
 }
 
 /** A table's {@link TableAngles}, computed once a table. */
@@ -683,9 +684,9 @@ function nodeReachRefusal(
 ): string | null {
   const lengthUm = wavelengthNm / 1000 / (2 * Math.PI);
   const rTilde = radiiOverLength(node);
-  const top = Math.log((rTilde[rTilde.length - 1] ?? Number.NaN) * lengthUm);
-  return Math.log(distribution.toUm) > top + 1e-9
-    ? `the distribution reaches ${distribution.toUm} µm, past the ${table.material} table's ${Math.exp(top)} µm at ${wavelengthNm} nm`
+  const top = log((rTilde[rTilde.length - 1] ?? Number.NaN) * lengthUm);
+  return log(distribution.toUm) > top + 1e-9
+    ? `the distribution reaches ${distribution.toUm} µm, past the ${table.material} table's ${exp(top)} µm at ${wavelengthNm} nm`
     : null;
 }
 
@@ -698,9 +699,9 @@ function sumsOverNode(integral: TableIntegral, distribution: RadiusDistribution)
   }
   const lengthUm = wavelengthNm / 1000 / (2 * Math.PI);
   const rTilde = radiiOverLength(node);
-  const lnR = rTilde.map((r) => Math.log(r * lengthUm));
-  const lnFrom = Math.log(distribution.fromUm);
-  const lnTo = Math.log(distribution.toUm);
+  const lnR = rTilde.map((r) => log(r * lengthUm));
+  const lnFrom = log(distribution.fromUm);
+  const lnTo = log(distribution.toUm);
   const phaseCount = table.phaseAnglesDeg.length;
   const matrixCount = table.matrixAnglesDeg.length;
   const { phaseU, matrixU, tailMu } = anglesOf(table);
@@ -724,7 +725,7 @@ function sumsOverNode(integral: TableIntegral, distribution: RadiusDistribution)
   let spheresPerParticle: number;
   switch (integral.tailSphere) {
     case "volume":
-      sphereOverVa = Math.cbrt((3 * v0) / (4 * Math.PI)) / r0;
+      sphereOverVa = cbrt((3 * v0) / (4 * Math.PI)) / r0;
       spheresPerParticle = 1;
       break;
     case "volumeToArea":
@@ -759,7 +760,7 @@ function sumsOverNode(integral: TableIntegral, distribution: RadiusDistribution)
     const half = 0.5 * ((panels[p + 1] ?? Number.NaN) - a);
     for (const [x, w] of SIZE_GL) {
       const y = a + half * (1 + x);
-      const logW = Math.log(half * w) + distribution.logNumberPerLnR(y);
+      const logW = log(half * w) + distribution.logNumberPerLnR(y);
       nodesY.push(y);
       nodesW.push(logW);
       peak = Math.max(peak, logW);
@@ -784,11 +785,11 @@ function sumsOverNode(integral: TableIntegral, distribution: RadiusDistribution)
   ] as const;
   const um2 = lengthUm * lengthUm;
   for (const [q, y] of nodesY.entries()) {
-    const w = Math.exp((nodesW[q] ?? -Infinity) - peak);
+    const w = exp((nodesW[q] ?? -Infinity) - peak);
     if (!(w > 0)) {
       continue;
     }
-    const rUm = Math.exp(y);
+    const rUm = exp(y);
     number += w;
     if (y < first) {
       // Below the table: the equivalent spheres by Mie, each particle's weight on all but number.
@@ -799,7 +800,7 @@ function sumsOverNode(integral: TableIntegral, distribution: RadiusDistribution)
       const geometric = Math.PI * sphereUm * sphereUm;
       const cSca = mie.qSca * geometric;
       area += ws * geometric;
-      volume += ws * (4 / 3) * Math.PI * sphereUm ** 3;
+      volume += ws * (4 / 3) * Math.PI * pow(sphereUm, 3);
       extinction += ws * mie.qExt * geometric;
       scattering += ws * cSca;
       tailScattering += ws * cSca;
@@ -837,9 +838,9 @@ function sumsOverNode(integral: TableIntegral, distribution: RadiusDistribution)
     const s = lowerNode(lnR, y);
     const t = Math.min(Math.max((y - (lnR[s] ?? 0)) / ((lnR[s + 1] ?? 0) - (lnR[s] ?? 0)), 0), 1);
     const logLerp = (values: Float64Array): number =>
-      Math.exp(
-        Math.log(values[s] ?? Number.NaN) +
-          t * (Math.log(values[s + 1] ?? Number.NaN) - Math.log(values[s] ?? Number.NaN)),
+      exp(
+        log(values[s] ?? Number.NaN) +
+          t * (log(values[s + 1] ?? Number.NaN) - log(values[s] ?? Number.NaN)),
       );
     const cExt = logLerp(node.extinction) * um2;
     const cSca = logLerp(node.scattering) * um2;
@@ -853,14 +854,13 @@ function sumsOverNode(integral: TableIntegral, distribution: RadiusDistribution)
     for (let j = 0; j < phaseCount; j += 1) {
       const la = node.logA1[s * phaseCount + j] ?? Number.NaN;
       const lb = node.logA1[(s + 1) * phaseCount + j] ?? Number.NaN;
-      a1[j] = (a1[j] ?? 0) + w * cSca * Math.exp(la + t * (lb - la));
+      a1[j] = (a1[j] ?? 0) + w * cSca * exp(la + t * (lb - la));
     }
     const a1Lo = a1MatrixAt(s);
     const a1Hi = a1MatrixAt(s + 1);
     for (let j = 0; j < matrixCount; j += 1) {
-      const a1Here = Math.exp(
-        Math.log(a1Lo[j] ?? Number.NaN) +
-          t * (Math.log(a1Hi[j] ?? Number.NaN) - Math.log(a1Lo[j] ?? Number.NaN)),
+      const a1Here = exp(
+        log(a1Lo[j] ?? Number.NaN) + t * (log(a1Hi[j] ?? Number.NaN) - log(a1Lo[j] ?? Number.NaN)),
       );
       a1Matrix[j] = (a1Matrix[j] ?? 0) + w * cSca * a1Here;
       for (const e of ELEMENT_INDICES) {
@@ -1126,7 +1126,7 @@ export function forwardPeakSplit(
  */
 function matrixAt(table: PhaseFileTable, sums: NodeSums, mu: Float64Array): ScatteringMatrix {
   const { phaseU } = anglesOf(table);
-  const logA1 = sums.a1.map((v) => Math.log(v / sums.scattering));
+  const logA1 = sums.a1.map((v) => log(v / sums.scattering));
   // ∫ a₁ (1, cos θ) dΩ = 2π ∫₀¹ a₁(u) (1, cos πu²) sin(πu²) 2πu du, by Gauss–Legendre on each
   // interval, in units of 4π.
   let integral = 0;
@@ -1141,9 +1141,9 @@ function matrixAt(table: PhaseFileTable, sums: NodeSums, mu: Float64Array): Scat
       const t = 0.5 * (1 + x);
       const u = u0 + t * (u1 - u0);
       const angle = Math.PI * u * u;
-      const term = half * w * Math.exp(l0 + t * (l1 - l0)) * Math.sin(angle) * u;
+      const term = half * w * exp(l0 + t * (l1 - l0)) * sin(angle) * u;
       integral += term;
-      moment += term * Math.cos(angle);
+      moment += term * cos(angle);
     }
   }
   // 2π × 2π ÷ 4π.
@@ -1151,7 +1151,7 @@ function matrixAt(table: PhaseFileTable, sums: NodeSums, mu: Float64Array): Scat
   moment *= Math.PI;
   const split = forwardPeakSplit(integral, moment, sums.scatteringAsymmetry / sums.scattering);
   const norm = split.scale;
-  const clamped = mu.map((c) => Math.acos(Math.min(Math.max(c, -1), 1)));
+  const clamped = mu.map((c) => acos(Math.min(Math.max(c, -1), 1)));
   const targetU = clamped.map((theta) => Math.sqrt(theta / Math.PI));
   const a1 = a1At(logA1, 0, phaseU, targetU).map((v) => v * norm);
   const angles = table.matrixAnglesDeg;

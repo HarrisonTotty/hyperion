@@ -117,6 +117,7 @@ import {
   type TwinGeometryKind,
   type TwinOptions,
 } from "./twin";
+import { cos, exp, log, pow } from "../../../lib/pinnedMath";
 
 // --- The record's constants ----------------------------------------------------------------------
 
@@ -483,7 +484,7 @@ function groundToObserverTransmittance(
       break;
     }
   }
-  return perChannel((c) => Math.exp(-opticalDepth[c]));
+  return perChannel((c) => exp(-opticalDepth[c]));
 }
 
 /** The pieces of `spheroidOpticalDepth` in the attribution's quadrature, m: 1,000. */
@@ -580,7 +581,7 @@ export function downwellingLxOf(
   if (aggregate === undefined) {
     throw new Error(`${referenceCase.name} has no aggregate ${name}`);
   }
-  const mu = Math.cos((aggregate.sun.zenithDeg * Math.PI) / 180);
+  const mu = cos((aggregate.sun.zenithDeg * Math.PI) / 180);
   const latitudeRad = (aggregate.latitudeDeg * Math.PI) / 180;
   const azimuthRad = (aggregate.sun.azimuthDeg * Math.PI) / 180;
   const direct = twin.surfaceLighting.sunTransmittance(0, mu, latitudeRad, azimuthRad, 0);
@@ -1094,8 +1095,8 @@ function caseSection(caseGate: CaseGate, values: TwinValues): RecordValue {
 
 /** Whether a ground view is more than {@link OFF_SUN_DEG}° from its sun, to 10⁻¹² in cosine. */
 function offTheSun(geometry: ReferenceGeometry): boolean {
-  const cos = Math.cos((angleBetweenDeg(geometry.view, geometry.sun) * Math.PI) / 180);
-  return cos < Math.cos((OFF_SUN_DEG * Math.PI) / 180) - 1e-12;
+  const cosine = cos((angleBetweenDeg(geometry.view, geometry.sun) * Math.PI) / 180);
+  return cosine < cos((OFF_SUN_DEG * Math.PI) / 180) - 1e-12;
 }
 
 /** `mars`'s ground views away from the sun (check 1, {@link OFF_SUN_DEG}): kept for c2. */
@@ -1489,13 +1490,13 @@ export function chordTransmittance(referenceCase: ReferenceCase, geometry: Refer
   };
   let previous = at(ORACLE_STEPS);
   for (let k = 1; k <= 12; k += 1) {
-    const next = at(ORACLE_STEPS * 2 ** k);
+    const next = at(ORACLE_STEPS * pow(2, k));
     const before = previous;
     const change = Math.max(
       ...CHANNELS.map((c) => Math.abs(next[c] - before[c]) / Math.max(1, next[c])),
     );
     if (change < 1e-7) {
-      return perChannel((c) => Math.exp(-next[c]));
+      return perChannel((c) => exp(-next[c]));
     }
     previous = next;
   }
@@ -1532,7 +1533,7 @@ function slabSection(caseGate: CaseGate, values: TwinValues): RecordValue {
         "sun",
         steps,
         ...t,
-        ...depth.map((d) => (d === null ? null : recorded(Math.exp(-d)))),
+        ...depth.map((d) => (d === null ? null : recorded(exp(-d)))),
         ...compared.map((b) => b.ratio),
         ...compared.map((b) => b.verdict),
       ]);
@@ -1542,7 +1543,7 @@ function slabSection(caseGate: CaseGate, values: TwinValues): RecordValue {
       const truth = chordTransmittance(referenceCase, geometry);
       const maximum = caseGate.maxima.get(geometry.image) ?? [0, 0, 0];
       const compared = perChannel((c) =>
-        beamComparison(referenceCase.sunIlluminanceLx[c], t[c], -Math.log(truth[c]), maximum[c]),
+        beamComparison(referenceCase.sunIlluminanceLx[c], t[c], -log(truth[c]), maximum[c]),
       );
       const missed = CHANNELS.filter((c) => compared[c].verdict !== "pass");
       if (missed.length > 0) {
@@ -1781,7 +1782,7 @@ export function legsApartOf(referenceCase: ReferenceCase, geometry: ReferenceGeo
       }),
     );
     for (const c of CHANNELS) {
-      const w = weight[c] * Math.exp(-(depthToHere[c] + sunDepth[c]));
+      const w = weight[c] * exp(-(depthToHere[c] + sunDepth[c]));
       joint[c] += w * tJoint[c];
       product[c] += w * tView[c] * tSun[c];
     }

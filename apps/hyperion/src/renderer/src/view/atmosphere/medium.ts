@@ -14,6 +14,7 @@
 import type { Rgb } from "../photometry/toneCurve";
 import type { ColumnAbsorberSpec, PairAbsorberSpec } from "./absorbers";
 import { FITTED_CHANNEL_WAVELENGTHS_NM } from "./fittedChannels";
+import { acos, exp, expm1, pow } from "../../lib/pinnedMath";
 
 /**
  * The wavelengths the smooth terms are evaluated at for the three render channels, nm, red, green
@@ -407,11 +408,11 @@ export function phaseAt(phase: PhaseFunction, cosTheta: number): Rgb {
     case "cornette-shanks": {
       const g = phase.asymmetry;
       const k = ((3 / (8 * Math.PI)) * (1 - g * g)) / (2 + g * g);
-      value = (k * (1 + mu * mu)) / Math.max(1 + g * g - 2 * g * mu, 1e-6) ** 1.5;
+      value = (k * (1 + mu * mu)) / pow(Math.max(1 + g * g - 2 * g * mu, 1e-6), 1.5);
       break;
     }
     case "tabulated":
-      return tabulatedPhase(phase.table, Math.sqrt(Math.acos(mu) / Math.PI));
+      return tabulatedPhase(phase.table, Math.sqrt(acos(mu) / Math.PI));
   }
   return [value, value, value];
 }
@@ -523,7 +524,7 @@ export function densityAt(profile: DensityProfile, heightM: number): number {
   let density: number;
   switch (profile.kind) {
     case "exponential":
-      density = Math.exp(-h / profile.scaleHeightM);
+      density = exp(-h / profile.scaleHeightM);
       break;
     case "tent":
       if (h <= profile.bottomM || h >= profile.topM) {
@@ -584,7 +585,7 @@ export function columnLengthM(profile: DensityProfile, topM: number): number {
   let length: number;
   switch (profile.kind) {
     case "exponential":
-      length = profile.scaleHeightM * -Math.expm1(-topM / profile.scaleHeightM);
+      length = profile.scaleHeightM * -expm1(-topM / profile.scaleHeightM);
       break;
     case "tent":
       length = tentColumnM(profile.bottomM, profile.peakM, profile.topM, topM);

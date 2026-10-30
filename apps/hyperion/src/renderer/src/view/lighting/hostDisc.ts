@@ -23,6 +23,7 @@ import type { HostDiscDto } from "@hyperion/protocol";
 import { PARSEC_M, V0_ILLUMINANCE_LX } from "../photometry/magnitude";
 import type { Rgb } from "../photometry/toneCurve";
 import { CHANNEL_LUMINANCE } from "./illuminance";
+import { pow } from "../../lib/pinnedMath";
 
 /** The Sun's absolute V magnitude, Willmer 2018, ApJS 236, 47, Table 3. */
 export const SUN_ABSOLUTE_V = 4.81;
@@ -98,7 +99,7 @@ export function sunLikeHostDisc(
   const luxPerV0 = dto.lux_per_v0 ?? SUN_LUX_PER_V0;
   const tenParsecs = 10 * PARSEC_M;
   const mean =
-    (V0_ILLUMINANCE_LX * luxPerV0 * 10 ** (-0.4 * absoluteV) * tenParsecs * tenParsecs) /
+    (V0_ILLUMINANCE_LX * luxPerV0 * pow(10, -0.4 * absoluteV) * tenParsecs * tenParsecs) /
     (Math.PI * radius * radius);
   const [r, g, b] = colourRgb;
   const disc = 1 - (SUN_LIMB.c * SUN_LIMB.alpha) / (SUN_LIMB.alpha + 2);

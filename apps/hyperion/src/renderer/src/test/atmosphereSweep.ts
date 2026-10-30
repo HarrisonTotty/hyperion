@@ -80,6 +80,7 @@ import {
   twinGeometryKind,
 } from "../view/atmosphere/reference/twin";
 import { PHASE_TABLE_MU, PHASE_TABLE_U } from "../view/atmosphere/sizeDistribution";
+import { exp, pow } from "../lib/pinnedMath";
 
 /** The sweep format the writer writes, `sweep.rs`'s `SWEEP_FORMAT`. */
 export const SWEEP_FORMAT = 1;
@@ -139,7 +140,7 @@ export const SWEEP_TAU_CANDIDATES: ReadonlyArray<TauCandidate> = [
   { tau: 1 / 32, role: "floor" },
   ...Array.from({ length: 14 }, (_, i): TauCandidate => {
     const k = i - 7;
-    return { tau: 2 ** (k / 2), role: k % 2 === 0 ? "octave" : "half-octave" };
+    return { tau: pow(2, k / 2), role: k % 2 === 0 ? "octave" : "half-octave" };
   }),
 ];
 
@@ -226,7 +227,7 @@ export const SWEEP_AGGREGATE: ReferenceAggregate = {
  * the ground to the top (the module's remarks).
  */
 export function sweepExtinctionPerM(tau: number): number {
-  return tau / (SWEEP_SCALE_HEIGHT_M * (1 - Math.exp(-SWEEP_TOP_HEIGHT_M / SWEEP_SCALE_HEIGHT_M)));
+  return tau / (SWEEP_SCALE_HEIGHT_M * (1 - exp(-SWEEP_TOP_HEIGHT_M / SWEEP_SCALE_HEIGHT_M)));
 }
 
 /** A Henyey–Greenstein table on {@link PHASE_TABLE_U} for one channel, normalised (the remarks). */

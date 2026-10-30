@@ -26,6 +26,8 @@
  * A linear colour, one value per channel (red, green, blue): the one per-channel triple R05, R07
  * and R08 share.
  */
+import { log2, pow } from "../../lib/pinnedMath";
+
 export type Rgb = readonly [number, number, number];
 
 /** A 3 × 3 matrix as its rows. */
@@ -150,7 +152,7 @@ export function agxSigmoid(x: number): number {
 function agxRec2020(v: Rgb): Rgb {
   const inset = applyRows(AGX_INSET, [Math.max(0, v[0]), Math.max(0, v[1]), Math.max(0, v[2])]);
   const encoded = inset.map((channel) => {
-    const logEv = Math.log2(Math.max(channel, 1e-10));
+    const logEv = log2(Math.max(channel, 1e-10));
     const x = (logEv - AGX_MIN_EV) / (AGX_MAX_EV - AGX_MIN_EV);
     return agxSigmoid(Math.min(1, Math.max(0, x)));
   });
@@ -160,9 +162,9 @@ function agxRec2020(v: Rgb): Rgb {
     encoded[2] ?? Number.NaN,
   ]);
   return [
-    Math.max(0, outset[0]) ** 2.2,
-    Math.max(0, outset[1]) ** 2.2,
-    Math.max(0, outset[2]) ** 2.2,
+    pow(Math.max(0, outset[0]), 2.2),
+    pow(Math.max(0, outset[1]), 2.2),
+    pow(Math.max(0, outset[2]), 2.2),
   ];
 }
 

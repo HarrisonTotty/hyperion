@@ -77,6 +77,7 @@ import {
   bakeSpectrumOf,
   matchingFunctionsAt,
 } from "./spectralColour";
+import { exp, log, pow } from "../../lib/pinnedMath";
 
 /**
  * The absorber columns the per-planet tables store: 5, the transmittance table's alpha and a
@@ -851,9 +852,7 @@ function lnLinearInTemperature(table: TemperatureGrid, temperatureK: number): Fl
   const t = (temperatureK - lowK) / ((temperaturesK[k + 1] ?? Number.NaN) - lowK);
   return below.map((a, i) => {
     const b = above[i] ?? Number.NaN;
-    return a > 0 && b > 0
-      ? Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * t)
-      : (linear[i] ?? Number.NaN);
+    return a > 0 && b > 0 ? exp(log(a) + (log(b) - log(a)) * t) : (linear[i] ?? Number.NaN);
   });
 }
 
@@ -868,12 +867,10 @@ function lnLnLinearInTemperature(table: TemperatureGrid, temperatureK: number): 
     throw new Error(`${table.label}'s power law needs two temperatures`);
   }
   const linear = linearInTemperature(table, temperatureK);
-  const f = Math.log(temperatureK / t0) / Math.log(t1 / t0);
+  const f = log(temperatureK / t0) / log(t1 / t0);
   return s0.map((a, i) => {
     const b = s1[i] ?? Number.NaN;
-    return a > 0 && b > 0
-      ? Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * f)
-      : (linear[i] ?? Number.NaN);
+    return a > 0 && b > 0 ? exp(log(a) + (log(b) - log(a)) * f) : (linear[i] ?? Number.NaN);
   });
 }
 
@@ -907,7 +904,7 @@ function lnQuadraticInTemperature(table: TemperatureGrid, temperatureK: number):
     const a = s0[i] ?? Number.NaN;
     const c = s2[i] ?? Number.NaN;
     return a > 0 && b > 0 && c > 0
-      ? Math.exp(l0 * Math.log(a) + l1 * Math.log(b) + l2 * Math.log(c))
+      ? exp(l0 * log(a) + l1 * log(b) + l2 * log(c))
       : (linear[i] ?? Number.NaN);
   });
 }
@@ -988,9 +985,9 @@ export function profileMixingRatio(
   if (pressurePa === b.pressurePa) {
     return b.mixingRatio;
   }
-  const t = Math.log(a.pressurePa / pressurePa) / Math.log(a.pressurePa / b.pressurePa);
+  const t = log(a.pressurePa / pressurePa) / log(a.pressurePa / b.pressurePa);
   return a.mixingRatio > 0 && b.mixingRatio > 0
-    ? Math.exp(Math.log(a.mixingRatio) + t * Math.log(b.mixingRatio / a.mixingRatio))
+    ? exp(log(a.mixingRatio) + t * log(b.mixingRatio / a.mixingRatio))
     : a.mixingRatio + t * (b.mixingRatio - a.mixingRatio);
 }
 
@@ -1328,7 +1325,7 @@ function atPressure(
   }
   const p0 = pressuresPa[i] ?? Number.NaN;
   const p1 = pressuresPa[i + 1] ?? Number.NaN;
-  const t = Math.min(Math.max(Math.log(p0 / pressurePa) / Math.log(p0 / p1), 0), 1);
+  const t = Math.min(Math.max(log(p0 / pressurePa) / log(p0 / p1), 0), 1);
   const z0 = altitudesM[i] ?? Number.NaN;
   const z1 = altitudesM[i + 1] ?? Number.NaN;
   const k0 = temperaturesK[i] ?? Number.NaN;
@@ -1396,8 +1393,8 @@ function layerIntegralM(layer: LayerOnColumn, power: 1 | 2): number {
   let sum = 0;
   for (let i = 1; i < layer.altitudesM.length; i += 1) {
     const dz = (layer.altitudesM[i] ?? Number.NaN) - (layer.altitudesM[i - 1] ?? Number.NaN);
-    const n0 = (layer.relative[i - 1] ?? Number.NaN) ** power;
-    const n1 = (layer.relative[i] ?? Number.NaN) ** power;
+    const n0 = pow(layer.relative[i - 1] ?? Number.NaN, power);
+    const n1 = pow(layer.relative[i] ?? Number.NaN, power);
     sum += 0.5 * (n0 + n1) * dz;
   }
   return sum;
@@ -1412,8 +1409,8 @@ function layerTemperatureK(layer: LayerOnColumn, power: 1 | 2): number {
   let sum = 0;
   for (let i = 1; i < layer.altitudesM.length; i += 1) {
     const dz = (layer.altitudesM[i] ?? Number.NaN) - (layer.altitudesM[i - 1] ?? Number.NaN);
-    const n0 = (layer.relative[i - 1] ?? Number.NaN) ** power;
-    const n1 = (layer.relative[i] ?? Number.NaN) ** power;
+    const n0 = pow(layer.relative[i - 1] ?? Number.NaN, power);
+    const n1 = pow(layer.relative[i] ?? Number.NaN, power);
     weight += 0.5 * (n0 + n1) * dz;
     sum +=
       0.5 *
@@ -1938,11 +1935,11 @@ export function absorberRankingDepth(spec: AbsorberSpec): number {
       let total = 0;
       for (const [i, w] of channel.entries()) {
         if (w > 0) {
-          passed += w * Math.exp(-((sigma[i] ?? Number.NaN) - least) * u);
+          passed += w * exp(-((sigma[i] ?? Number.NaN) - least) * u);
           total += w;
         }
       }
-      return least * u - Math.log(passed / total);
+      return least * u - log(passed / total);
     }),
   );
 }
@@ -1963,7 +1960,7 @@ function layerDensity(
   const clamped = clampedLayer(column, basePa, topPa);
   const layer = layerOnColumn(column, clamped.basePa, clamped.topPa, profile);
   const altitudes = [...layer.altitudesM];
-  const relative = layer.relative.map((rho) => rho ** power);
+  const relative = layer.relative.map((rho) => pow(rho, power));
   if (layer.belowM !== undefined) {
     altitudes.unshift(layer.belowM);
     relative.unshift(0);
@@ -2525,10 +2522,10 @@ function lineCellTransmittances(
       if (Number.isNaN(mean)) {
         const values = perCell[c] ?? new Float64Array(0);
         for (const [g, w] of cell.weights.entries()) {
-          t += w * Math.exp(-(values[g] ?? 0) * u);
+          t += w * exp(-(values[g] ?? 0) * u);
         }
       } else {
-        t = Math.exp(-mean * u);
+        t = exp(-mean * u);
       }
       cells[at] = (cells[at] ?? 1) * t;
     }
@@ -2565,12 +2562,12 @@ function sumsAt(p: PreparedOptics, amountInKind: number, lineCells: Float64Array
   for (let i = 0; i < p.sigma.length; i += 1) {
     const cell = pointCells?.[i] ?? -1;
     const line = cell >= 0 ? (lineCells?.[cell] ?? 1) : 1;
-    const e = Math.exp(-((p.sigma[i] ?? Number.NaN) - p.leastSigma) * u) * line;
+    const e = exp(-((p.sigma[i] ?? Number.NaN) - p.leastSigma) * u) * line;
     passedRed += (red[i] ?? Number.NaN) * e;
     passedGreen += (green[i] ?? Number.NaN) * e;
     passedBlue += (blue[i] ?? Number.NaN) * e;
   }
-  const scale = Math.exp(-p.leastSigma * u);
+  const scale = exp(-p.leastSigma * u);
   const [totalRed, totalGreen, totalBlue] = p.channelTotals;
   return [
     clampedTransmittance((scale * passedRed) / totalRed),
@@ -2585,7 +2582,7 @@ function sumsAt(p: PreparedOptics, amountInKind: number, lineCells: Float64Array
  * underflows to 0 still has its logarithm; −σ̄u where the row takes a cell's mean.
  */
 function lineCellLog(lines: LineOptics, row: LineRow, at: number, u: number): number {
-  let log = 0;
+  let lnCell = 0;
   for (const [k, s] of lines.species.entries()) {
     const c = s.cellIndex.indexOf(at);
     const cell = s.lines.kDistribution.cells[c];
@@ -2594,19 +2591,19 @@ function lineCellLog(lines: LineOptics, row: LineRow, at: number, u: number): nu
     }
     const mean = row.means[k]?.[c] ?? Number.NaN;
     if (!Number.isNaN(mean)) {
-      log -= mean * u;
+      lnCell -= mean * u;
       continue;
     }
     const values = row.sigmas[k]?.[c] ?? new Float64Array(0);
-    const exponents = cell.weights.map((w, g) => Math.log(w) - (values[g] ?? 0) * u);
+    const exponents = cell.weights.map((w, g) => log(w) - (values[g] ?? 0) * u);
     const top = Math.max(...exponents);
     let sum = 0;
     for (const x of exponents) {
-      sum += Math.exp(x - top);
+      sum += exp(x - top);
     }
-    log += top + Math.log(sum);
+    lnCell += top + log(sum);
   }
-  return log;
+  return lnCell;
 }
 
 /**
@@ -2627,8 +2624,8 @@ function binLogPassed(
     const cell = p.lines?.pointCells[i] ?? -1;
     if (b === bin && inShare(cell, share)) {
       const line = cell >= 0 ? (lineCells?.[cell] ?? 1) : 1;
-      const logLine = line > 0 ? Math.log(line) : logOfCell(cell);
-      exponents.push(-(p.sigma[i] ?? Number.NaN) * u + logLine + Math.log(p.light[i] ?? 0));
+      const logLine = line > 0 ? log(line) : logOfCell(cell);
+      exponents.push(-(p.sigma[i] ?? Number.NaN) * u + logLine + log(p.light[i] ?? 0));
     }
   }
   const top = Math.max(...exponents);
@@ -2637,9 +2634,9 @@ function binLogPassed(
   }
   let passed = 0;
   for (const x of exponents) {
-    passed += Math.exp(x - top);
+    passed += exp(x - top);
   }
-  return top + Math.log(passed);
+  return top + log(passed);
 }
 
 /**
@@ -2726,19 +2723,19 @@ function dominantLines(absorber: AbsorberSpec): SpeciesLines | undefined {
 export function absorberCurvePressures(absorber: AbsorberSpec): Float64Array {
   const lines = dominantLines(absorber);
   if (lines === undefined) {
-    return Float64Array.of(Math.log(absorber.basePa));
+    return Float64Array.of(log(absorber.basePa));
   }
   const nodes = curveRowsPa(lines.kDistribution.pressuresPa);
   const f = lines.broadeningFactor;
   const deepest = nodes.findIndex((p) => p / f >= absorber.basePa);
   const last = deepest < 0 ? nodes.length - 1 : Math.min(deepest + 1, nodes.length - 1);
-  const rows = nodes.slice(0, last + 1).map((p) => Math.log(p / f));
+  const rows = nodes.slice(0, last + 1).map((p) => log(p / f));
   const low = rows[0] ?? Number.NaN;
   const high = rows.at(-1) ?? Number.NaN;
   const merge = MIDPOINT_MERGE_DECADES * Math.LN10;
   for (const s of absorber.kind === "column" ? absorber.species : []) {
     for (const p of s.lines?.kDistribution.pressuresPa ?? []) {
-      const row = Math.log(p / (s.lines?.broadeningFactor ?? 1));
+      const row = log(p / (s.lines?.broadeningFactor ?? 1));
       if (
         isLatticeMidpoint(p) &&
         row > low &&
@@ -2761,9 +2758,7 @@ export const MIDPOINT_MERGE_DECADES = 1 / 32;
  */
 export function absorberReadTopLogPressure(absorber: AbsorberSpec): number {
   const lines = dominantLines(absorber);
-  return Math.log(
-    lines === undefined ? absorber.basePa : LINE_TABLE_TOP_PA / lines.broadeningFactor,
-  );
+  return log(lines === undefined ? absorber.basePa : LINE_TABLE_TOP_PA / lines.broadeningFactor);
 }
 
 /** One absorber's curves of growth under one sun, computed at arrival (Design note 5). */
@@ -2823,7 +2818,7 @@ function curveColumns(absorber: AbsorberSpec): Float64Array {
   const nodes = (last - first) * ABSORBER_CURVE_NODES_PER_DECADE + 1;
   return Float64Array.from(
     { length: nodes },
-    (_, k) => amount * 10 ** (first + k / ABSORBER_CURVE_NODES_PER_DECADE),
+    (_, k) => amount * pow(10, first + k / ABSORBER_CURVE_NODES_PER_DECADE),
   );
 }
 
@@ -2953,14 +2948,14 @@ function sumsOf(context: CurveContext, share: CurveShare): AbsorberCurveSums {
   const binPassed = new Float64Array(BAKE_BIN_COUNT);
   for (const [r, logPressure] of logPressures.entries()) {
     const row =
-      lines === undefined ? undefined : lineRowAt(lines, Math.exp(logPressure), topColumnPerM2);
+      lines === undefined ? undefined : lineRowAt(lines, exp(logPressure), topColumnPerM2);
     for (const [k, u] of columns.entries()) {
       const lineCells = shareLineCells(lines, row, u, share);
       const at = r * nodes + k;
       for (const [j, i] of points.entries()) {
         const cell = lines?.pointCells[i] ?? -1;
         const line = cell >= 0 ? (lineCells?.[cell] ?? 1) : 1;
-        passedAt[j] = Math.exp(-((sigma[i] ?? Number.NaN) - leastSigma) * u) * line;
+        passedAt[j] = exp(-((sigma[i] ?? Number.NaN) - leastSigma) * u) * line;
       }
       for (const [s, p] of prepared.entries()) {
         const [red, green, blue] = p.channelWeights;
@@ -3040,7 +3035,7 @@ function curvesFromSums(
       `absorber ${absorber.name}'s curve sums are not every share of one split once, on its grid`,
     );
   }
-  const logColumns = columns.map(Math.log);
+  const logColumns = columns.map(log);
   return prepared.map((p, s) => {
     const transmittance: [Float64Array, Float64Array, Float64Array] = [
       new Float64Array(size),
@@ -3053,7 +3048,7 @@ function curvesFromSums(
     for (const [r] of logPressures.entries()) {
       for (const [k, u] of columns.entries()) {
         const at = r * nodes + k;
-        const scale = Math.exp(-p.leastSigma * u);
+        const scale = exp(-p.leastSigma * u);
         for (const [c, channel] of transmittance.entries()) {
           let passed = 0;
           for (const part of sums) {
@@ -3070,9 +3065,9 @@ function curvesFromSums(
           const total = p.binTotals[b] ?? Number.NaN;
           bin[at] =
             passed > 0
-              ? p.leastSigma * u - Math.log(passed / total)
+              ? p.leastSigma * u - log(passed / total)
               : -logSumOf(sums.map((part) => part.binLogs?.[s]?.[b]?.[at] ?? Number.NaN)) +
-                Math.log(total);
+                log(total);
         }
       }
     }
@@ -3084,9 +3079,9 @@ function curvesFromSums(
         readTopLogPressure,
         transmittance,
         opticalDepth: [
-          transmittance[0].map((t) => -Math.log(t)),
-          transmittance[1].map((t) => -Math.log(t)),
-          transmittance[2].map((t) => -Math.log(t)),
+          transmittance[0].map((t) => -log(t)),
+          transmittance[1].map((t) => -log(t)),
+          transmittance[2].map((t) => -log(t)),
         ],
       },
       bins:
@@ -3097,7 +3092,7 @@ function curvesFromSums(
               logColumns,
               logPressures,
               readTopLogPressure,
-              transmittance: binDepths.map((bin) => bin.map((t) => Math.exp(-t))),
+              transmittance: binDepths.map((bin) => bin.map((t) => exp(-t))),
               opticalDepth: binDepths,
             },
     };
@@ -3117,9 +3112,9 @@ function logSumOf(logs: ReadonlyArray<number>): number {
   }
   let sum = 0;
   for (const x of logs) {
-    sum += Math.exp(x - top);
+    sum += exp(x - top);
   }
-  return top + Math.log(sum);
+  return top + log(sum);
 }
 
 /**
@@ -3288,7 +3283,7 @@ function depthAt(logColumns: Float64Array, depths: Float64Array, row: number, x:
   const offset = row * nodes;
   const x0 = logColumns[0] ?? Number.NaN;
   if (x <= x0) {
-    return (depths[offset] ?? Number.NaN) * Math.exp(x - x0);
+    return (depths[offset] ?? Number.NaN) * exp(x - x0);
   }
   let k = 0;
   while (k < last - 1 && (logColumns[k + 1] ?? Number.NaN) < x) {
@@ -3299,11 +3294,11 @@ function depthAt(logColumns: Float64Array, depths: Float64Array, row: number, x:
   const a = depths[offset + k] ?? Number.NaN;
   const b = depths[offset + k + 1] ?? Number.NaN;
   const t = (x - xa) / (xb - xa);
-  return a > 0 && b > 0 ? Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * t) : a + (b - a) * t;
+  return a > 0 && b > 0 ? exp(log(a) + (log(b) - log(a)) * t) : a + (b - a) * t;
 }
 
 /** The largest optical depth a read takes, −ln {@link ABSORBER_TRANSMITTANCE_FLOOR}. */
-const CURVE_DEPTH_MAX = -Math.log(ABSORBER_TRANSMITTANCE_FLOOR);
+const CURVE_DEPTH_MAX = -log(ABSORBER_TRANSMITTANCE_FLOOR);
 
 /**
  * The optical depth at ln u and a pressure from a curve's rows, as the kernels and the twin read it
@@ -3338,7 +3333,7 @@ function depthAtPressure(
   }
   const first = logPressures[0] ?? Number.NaN;
   const top = Math.min(logPressures[rows - 1] ?? Number.NaN, readTopLogPressure);
-  const y = Math.min(Math.max(Math.log(pressurePa), first), top);
+  const y = Math.min(Math.max(log(pressurePa), first), top);
   let r = 0;
   while (r < rows - 2 && (logPressures[r + 1] ?? Number.NaN) < y) {
     r += 1;
@@ -3387,10 +3382,10 @@ export function absorberTransmittance(
   if (column === 0) {
     return [1, 1, 1];
   }
-  const x = Math.log(column);
+  const x = log(column);
   const read = (depths: Float64Array): number =>
     clampedTransmittance(
-      Math.exp(
+      exp(
         -depthAtPressure(
           curve.logColumns,
           curve.logPressures,
@@ -3420,11 +3415,11 @@ export function absorberBinTransmittance(
   pressurePa: number | undefined,
 ): Float64Array {
   const column = amountFor(amount, curves.kind);
-  const x = Math.log(column);
+  const x = log(column);
   return Float64Array.from(curves.opticalDepth, (depths) =>
     column === 0
       ? 1
-      : Math.exp(
+      : exp(
           -depthAtPressure(
             curves.logColumns,
             curves.logPressures,

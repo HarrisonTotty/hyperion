@@ -358,8 +358,10 @@ describe("the descent over the stretches' floors (decision-r05-descent-clearance
   it("flies the table with a climbing coast as before the ruling, bit for bit, where no floor lifts it", () => {
     // Fingerprints of the 64 Hz poses that 003a6a3's profile (before the ruling) gave, its coast
     // climbing 18.4 m/s into the arc's blend. A lifted low pass (the default track maximum, 0 m,
-    // above a site below the datum) now holds level, so those profiles changed on purpose.
-    const before = ["97246927f5515e5c", "0464f94febbca6d9", "4a035319bc790f00"];
+    // above a site below the datum) now holds level, so those profiles changed on purpose. Under
+    // V8's own sines on x86-64 they were 97246927f5515e5c, 0464f94febbca6d9 and 4a035319bc790f00,
+    // 003a6a3's to the bit; these are the same profiles on the pinned functions (R08.T20).
+    const before = ["61c0948c2ff717d6", "5303a7297df03a16", "7697d2cea0ab37f6"];
     for (const [k, terrain] of UNLIFTED.entries()) {
       expect(poseHash(new DescentProfile(WGS84_FIGURE, site, terrain, CLIMBING_COAST))).toBe(
         before[k],
@@ -368,9 +370,10 @@ describe("the descent over the stretches' floors (decision-r05-descent-clearance
   });
 
   it("changes only the coast and the arc by flying the coast level", () => {
-    // Today's fingerprints. From the approach on, the poses are the climbing coast's but for the
-    // rounding of the vertical integral, whose earlier knots moved.
-    const today = ["4b9b2c5a59b92386", "e37712068cbe2e8b", "4d2245eff68d5971"];
+    // Today's fingerprints, on the pinned functions (R08.T20; under V8's own sines on x86-64,
+    // 4b9b2c5a59b92386, e37712068cbe2e8b and 4d2245eff68d5971). From the approach on, the poses are
+    // the climbing coast's but for the rounding of the vertical integral, whose earlier knots moved.
+    const today = ["29ac2050511e36c1", "c910163b5173293b", "c55705520a06f0cd"];
     for (const [k, terrain] of UNLIFTED.entries()) {
       const level = new DescentProfile(WGS84_FIGURE, site, terrain);
       const climbing = new DescentProfile(WGS84_FIGURE, site, terrain, CLIMBING_COAST);
@@ -389,10 +392,11 @@ describe("the descent over the stretches' floors (decision-r05-descent-clearance
 
   it("flies a lifted low pass level, as before, bit for bit", () => {
     // A lifted low pass is now a `level` segment, no longer a flag of `flySegments`: with the
-    // climbing coast, these profiles are 2fc6d2d's bit for bit.
+    // climbing coast, these profiles are 2fc6d2d's bit for bit (3185eb4987d179ed and
+    // 21eecb9ac7de97be under V8's own sines on x86-64; here on the pinned functions, R08.T20).
     const lifted: ReadonlyArray<readonly [Readonly<Record<string, number>>, string]> = [
-      [RIDGES, "3185eb4987d179ed"],
-      [{ "low fast pass": 1500, "slowdown 3": 800 }, "21eecb9ac7de97be"],
+      [RIDGES, "3d19e8ce0a5be397"],
+      [{ "low fast pass": 1500, "slowdown 3": 800 }, "6604c12d5fe7e70d"],
     ];
     for (const [raised, hash] of lifted) {
       const terrain = { siteHeightM: SITE_M, stretchMaxHeightsM: floors(raised) };

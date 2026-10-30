@@ -66,6 +66,7 @@ import {
   sphereModeInRange,
 } from "./sizeDistribution";
 import type { Rgb } from "../photometry/toneCurve";
+import { exp, log, pow } from "../../lib/pinnedMath";
 
 /** An aerosol mode's particles: a size distribution of one material, or identical aggregates. */
 export type AerosolParticles =
@@ -188,7 +189,7 @@ export function phaseTableAsymmetry(table: PhaseTable, channel: 0 | 1 | 2): numb
  */
 export function henyeyGreenstein(asymmetry: number, mu: number): number {
   const g = asymmetry;
-  return (1 - g * g) / (4 * Math.PI * (1 + g * g - 2 * g * mu) ** 1.5);
+  return (1 - g * g) / (4 * Math.PI * pow(1 + g * g - 2 * g * mu, 1.5));
 }
 
 /**
@@ -404,12 +405,12 @@ export interface AerosolTerm {
 
 /** ln p at a level of the column. */
 function lnPressure(column: AtmosphereColumn, i: number): number {
-  return Math.log(column.pressuresPa[i] ?? Number.NaN);
+  return log(column.pressuresPa[i] ?? Number.NaN);
 }
 
 /** A column quantity at pressure p, linear in ln p between the levels that bracket it. */
 function atPressure(column: AtmosphereColumn, values: Float64Array, pressurePa: number): number {
-  const target = Math.log(pressurePa);
+  const target = log(pressurePa);
   const levels = column.pressuresPa.length;
   for (let i = 0; i + 1 < levels; i += 1) {
     const a = lnPressure(column, i);
@@ -450,9 +451,9 @@ export function aerosolTerm(spec: AerosolModeSpec, column: AtmosphereColumn): Ae
   if (!(basePa > topPa)) {
     throw new RangeError(`the mode ${spec.name} lies outside its column`);
   }
-  const lnDensity = column.density.relative.map(Math.log);
+  const lnDensity = column.density.relative.map(log);
   const relativeAt = (p: number): number =>
-    (p / spec.basePa) ** f * Math.exp(atPressure(column, lnDensity, p));
+    pow(p / spec.basePa, f) * exp(atPressure(column, lnDensity, p));
   const heights: number[] = [];
   const values: number[] = [];
   const levels = column.altitudesM.length;

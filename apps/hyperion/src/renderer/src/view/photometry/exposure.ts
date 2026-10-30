@@ -9,6 +9,7 @@
  */
 
 import type { MeterMode } from "../post/meter";
+import { log2, pow } from "../../lib/pinnedMath";
 
 /**
  * A camera's aperture, shutter, sensitivity and neutral-density filter: the view camera's setting
@@ -116,7 +117,7 @@ export const VIEW_CAMERA: ExposureProgram = {
   minShutterS: VIEW_MIN_SHUTTER_S,
   baseIso: 100,
   maxIso: 409_600,
-  maxNdEv: MAN_EV100_MAX - Math.log2((VIEW_APERTURE * VIEW_APERTURE) / VIEW_MIN_SHUTTER_S),
+  maxNdEv: MAN_EV100_MAX - log2((VIEW_APERTURE * VIEW_APERTURE) / VIEW_MIN_SHUTTER_S),
 };
 
 /**
@@ -141,15 +142,15 @@ export function programTriple(program: ExposureProgram, ev100: number): Exposure
   }
   const { aperture, frameShutterS, minShutterS, baseIso } = program;
   const squared = aperture * aperture;
-  const iso = 100 * (squared / frameShutterS) * 2 ** -ev100;
+  const iso = 100 * (squared / frameShutterS) * pow(2, -ev100);
   if (iso >= baseIso) {
     return { aperture, shutterS: frameShutterS, iso };
   }
-  const shutterS = ((squared * 100) / baseIso) * 2 ** -ev100;
+  const shutterS = ((squared * 100) / baseIso) * pow(2, -ev100);
   if (shutterS >= minShutterS) {
     return { aperture, shutterS, iso: baseIso };
   }
-  const ndEv = ev100 - (Math.log2(squared / minShutterS) - Math.log2(baseIso / 100));
+  const ndEv = ev100 - (log2(squared / minShutterS) - log2(baseIso / 100));
   // At the join itself rounding can leave no attenuation: the filter is then clear, and absent.
   return ndEv > 0
     ? { aperture, shutterS: minShutterS, iso: baseIso, ndEv }
@@ -185,7 +186,7 @@ export function ev100FromTriple(triple: ExposureTriple): number {
     );
   }
   const { aperture, shutterS, iso, ndEv } = triple;
-  return Math.log2((aperture * aperture) / shutterS) - Math.log2(iso / 100) + (ndEv ?? 0);
+  return log2((aperture * aperture) / shutterS) - log2(iso / 100) + (ndEv ?? 0);
 }
 
 /**
@@ -195,7 +196,7 @@ export function ev100FromTriple(triple: ExposureTriple): number {
  * @param averageCdPerM2 - The metered average luminance, cd/m², positive.
  */
 export function ev100FromAverageLuminance(averageCdPerM2: number): number {
-  return Math.log2((averageCdPerM2 * 100) / METER_CALIBRATION_K);
+  return log2((averageCdPerM2 * 100) / METER_CALIBRATION_K);
 }
 
 /**
@@ -209,7 +210,7 @@ export function ev100FromAverageLuminance(averageCdPerM2: number): number {
  * bruop.github.io/exposure.
  */
 export function exposureScale(ev100: number): number {
-  return 1 / ((SATURATION_CONSTANT / (LENS_ATTENUATION_Q * 100)) * 2 ** ev100);
+  return 1 / ((SATURATION_CONSTANT / (LENS_ATTENUATION_Q * 100)) * pow(2, ev100));
 }
 
 /**

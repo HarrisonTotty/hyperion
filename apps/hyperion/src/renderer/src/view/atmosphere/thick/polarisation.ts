@@ -169,6 +169,7 @@ import {
   solveLowerTransposed,
   symmetricEigen,
 } from "./linearAlgebra";
+import { cos, exp, expm1, pow, sin } from "../../../lib/pinnedMath";
 
 // ---------------------------------------------------------------------------------------------
 // The generalised spherical functions.
@@ -228,7 +229,7 @@ function wignerInto(
   }
   const below = Math.sqrt(Math.max((1 - mu) / 2, 0));
   const above = Math.sqrt(Math.max((1 + mu) / 2, 0));
-  let value = Math.sqrt(binomial) * below ** a * above ** b;
+  let value = Math.sqrt(binomial) * pow(below, a) * pow(above, b);
   if (n < m && (m - n) % 2 !== 0) {
     value = -value;
   }
@@ -419,8 +420,8 @@ export function tableMatrixMoments(
       const t = 0.5 * (1 + x);
       const uu = u0 + t * (u1 - u0);
       const angle = Math.PI * uu * uu;
-      const mu = Math.cos(angle);
-      const weight = half * w * Math.sin(angle) * 2 * Math.PI * uu;
+      const mu = cos(angle);
+      const weight = half * w * sin(angle) * 2 * Math.PI * uu;
       wignerInto(0, 0, order, mu, zero, 0, 1);
       wignerInto(2, 2, order, mu, plus, 0, 1);
       wignerInto(2, -2, order, mu, minus, 0, 1);
@@ -501,14 +502,15 @@ export function meridianPhaseMatrix(
       }
     }
     const factor = m === 0 ? 1 : 2;
-    const cos = Math.cos(m * deltaPhiRad);
-    const sin = Math.sin(m * deltaPhiRad);
+    const cosMode = cos(m * deltaPhiRad);
+    const sinMode = sin(m * deltaPhiRad);
     for (let c = 0; c < 4; c += 1) {
       for (let d = 0; d < 4; d += 1) {
         const value = at(pi, c * 4 + d);
         const diagonalBlock = c < 2 === d < 2;
         z[c * 4 + d] =
-          at(z, c * 4 + d) + factor * (diagonalBlock ? value * cos : -deltaSign(c) * value * sin);
+          at(z, c * 4 + d) +
+          factor * (diagonalBlock ? value * cosMode : -deltaSign(c) * value * sinMode);
       }
     }
   }
@@ -1188,8 +1190,8 @@ function userSourceMatrix(
 
 /** e^{−zΔ} for z = (re, im), as (re, im). */
 function expNeg(re: number, im: number, depth: number): readonly [number, number] {
-  const magnitude = Math.exp(-re * depth);
-  return [magnitude * Math.cos(im * depth), -magnitude * Math.sin(im * depth)];
+  const magnitude = exp(-re * depth);
+  return [magnitude * cos(im * depth), -magnitude * sin(im * depth)];
 }
 
 /** φ(z, Δ) = (1 − e^{−zΔ}) ÷ z, Re z ≥ 0, Δ at z = 0 (`discreteOrdinates.ts`'s, complex). */
@@ -1205,10 +1207,10 @@ function phiComplex(re: number, im: number, depth: number): readonly [number, nu
     return [depth * (1 - xr / 2 + x2r / 6 - x3r / 24), depth * (-xi / 2 + x2i / 6 - x3i / 24)];
   }
   // 1 − e^{−x} = −expm1(−x_r) cos x_i + 2 sin²(x_i ÷ 2) + i e^{−x_r} sin x_i.
-  const decay = Math.exp(-xr);
-  const sinHalf = Math.sin(xi / 2);
-  const nr = -Math.expm1(-xr) * Math.cos(xi) + 2 * sinHalf * sinHalf;
-  const ni = decay * Math.sin(xi);
+  const decay = exp(-xr);
+  const sinHalf = sin(xi / 2);
+  const nr = -expm1(-xr) * cos(xi) + 2 * sinHalf * sinHalf;
+  const ni = decay * sin(xi);
   // ÷ z.
   const d = re * re + im * im;
   return [(nr * re + ni * im) / d, (ni * re - nr * im) / d];
@@ -1221,7 +1223,7 @@ function psiComplex(re: number, im: number, b: number, depth: number): readonly 
     const [fr, fi] = phiComplex(b - re, -im, depth);
     return [er * fr - ei * fi, er * fi + ei * fr];
   }
-  const eb = Math.exp(-b * depth);
+  const eb = exp(-b * depth);
   const [fr, fi] = phiComplex(re - b, im, depth);
   return [eb * fr, eb * fi];
 }
@@ -1229,12 +1231,12 @@ function psiComplex(re: number, im: number, b: number, depth: number): readonly 
 /** φ(z, Δ), real (`discreteOrdinates.ts`'s). */
 function phi(z: number, depth: number): number {
   const x = z * depth;
-  return x === 0 ? depth : -Math.expm1(-x) / z;
+  return x === 0 ? depth : -expm1(-x) / z;
 }
 
 /** ψ(a, b, Δ), real (`discreteOrdinates.ts`'s). */
 function psi(a: number, b: number, depth: number): number {
-  return Math.exp(-Math.min(a, b) * depth) * phi(Math.abs(a - b), depth);
+  return exp(-Math.min(a, b) * depth) * phi(Math.abs(a - b), depth);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1349,7 +1351,7 @@ function vectorUserTransfer(lm: VectorLayerMode, userCosines: Float64Array): Vec
   const depth = lm.layer.opticalDepth;
   const up = new Float64Array(2 * n * width);
   const down = new Float64Array(2 * n * width);
-  const attenuation = Float64Array.from(userCosines, (mu) => Math.exp(-depth / mu));
+  const attenuation = Float64Array.from(userCosines, (mu) => exp(-depth / mu));
   const sourceUpRe = new Float64Array(width);
   const sourceDownRe = new Float64Array(width);
   const sourceUpIm = new Float64Array(width);
@@ -1375,7 +1377,7 @@ function vectorUserTransfer(lm: VectorLayerMode, userCosines: Float64Array): Vec
       userSourceVector(lm, vectorUp, vectorDown, sourceUpRe, sourceDownRe);
       for (let u = 0; u < users; u += 1) {
         const mu = at(userCosines, u);
-        const passed = -Math.expm1(-depth / mu);
+        const passed = -expm1(-depth / mu);
         const e = at(attenuation, u);
         for (let c = 0; c < components; c += 1) {
           const x = u * components + c;
@@ -1774,10 +1776,10 @@ export function stokesAtAzimuth(
       throw new RangeError(`no intensity at interface ${interfaceIndex}, user cosine ${userIndex}`);
     }
     const base = (interfaceIndex * users + userIndex) * field.components;
-    const cos = Math.cos(field.mode * relativeAzimuthRad);
-    const sin = Math.sin(field.mode * relativeAzimuthRad);
+    const cosMode = cos(field.mode * relativeAzimuthRad);
+    const sinMode = sin(field.mode * relativeAzimuthRad);
     for (let c = 0; c < field.components; c += 1) {
-      stokes[c] = (stokes[c] ?? 0) + at(values, base + c) * (c < 2 ? cos : sin);
+      stokes[c] = (stokes[c] ?? 0) + at(values, base + c) * (c < 2 ? cosMode : sinMode);
     }
   }
   return [stokes[0] ?? 0, stokes[1] ?? 0, stokes[2] ?? 0, stokes[3] ?? 0];
@@ -1909,7 +1911,7 @@ function solveVectorBeamModeAt(
     if (transmission > 0 && omega > 0) {
       const source = beamSource(lm, quadrature, functions.nodes, beamZero);
       const z = vectorParticular(lm, quadrature, source, lambda);
-      const through = Math.exp(-lambda * depth);
+      const through = exp(-lambda * depth);
       for (let a = 0; a < n; a += 1) {
         top[a] = transmission * at(z.up, a);
         top[n + a] = transmission * at(z.down, a);
@@ -3166,7 +3168,7 @@ function prepareBeams(
     const groundTransmission =
       cosine > 0
         ? at(topTransmission, last) *
-          Math.exp(-at(slantFactor, last) * (layers[last]?.opticalDepth ?? Number.NaN))
+          exp(-at(slantFactor, last) * (layers[last]?.opticalDepth ?? Number.NaN))
         : 0;
     return { index: b, cosine, topTransmission, slantFactor, groundTransmission };
   });

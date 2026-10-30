@@ -35,6 +35,7 @@ import {
   MOLAR_GAS_CONSTANT_J_PER_MOL_K,
   SECOND_RADIATION_CONSTANT_CM_K,
 } from "./molecularLines";
+import { pow } from "../renderer/src/lib/pinnedMath";
 
 /** The columns per decade at which the bisection searches for each node's worst error. */
 export const SEARCH_COLUMNS_PER_DECADE = 6;
@@ -449,11 +450,12 @@ export function sigmaAtPressure(
  * The stored pressures on the air-equivalent broadening pressure (`decision-r08-t4d-kdist.md`,
  * ruling 2; `decision-r08-t4d-kdist-chain.md` §8): 4 a decade from 10 Pa to 1 MPa, 8 a decade from
  * 1 to 10 MPa, and one node at 13.3 MPa only to centre the read's stencil, `estimated`: 30 nodes.
- * Below the first the 10 Pa table is held; above 10 MPa the read holds p̄ there.
+ * Below the first the 10 Pa table is held; above 10 MPa the read holds p̄ there. Its powers of ten
+ * are the client's (`absorbers/kDistribution.ts`), through the pinned `pow` (R08.T20).
  */
 export const STORED_PRESSURES_PA: ReadonlyArray<number> = [
-  ...Array.from({ length: 21 }, (_, k) => 10 * 10 ** (k / 4)),
-  ...Array.from({ length: 9 }, (_, k) => 1e6 * 10 ** ((k + 1) / 8)),
+  ...Array.from({ length: 21 }, (_, k) => 10 * pow(10, k / 4)),
+  ...Array.from({ length: 9 }, (_, k) => 1e6 * pow(10, (k + 1) / 8)),
 ];
 
 /**
@@ -467,7 +469,7 @@ export const PRESSURE_LATTICE_PA: ReadonlyArray<number> = Array.from({ length: 5
   if (j >= 40) {
     return STORED_PRESSURES_PA[20 + (j - 40)] ?? Number.NaN;
   }
-  return j % 2 === 0 ? (STORED_PRESSURES_PA[j / 2] ?? Number.NaN) : 10 * 10 ** (j / 8);
+  return j % 2 === 0 ? (STORED_PRESSURES_PA[j / 2] ?? Number.NaN) : 10 * pow(10, j / 8);
 });
 
 /** A pressure's index j on {@link PRESSURE_LATTICE_PA}, or −1 off it. */

@@ -31,6 +31,7 @@
  */
 
 import type { Vec3 } from "../../geometry/vec3";
+import { atan2, cos, sin } from "../../lib/pinnedMath";
 
 /** A Gauss–Legendre rule on [0, 1]: its nodes t_k, ascending, and weights, which sum to 1. */
 export interface UnitGaussRule {
@@ -53,7 +54,7 @@ export function gaussLegendre(n: number): UnitGaussRule {
   const nodes = new Float64Array(n);
   const weights = new Float64Array(n);
   for (let k = 1; k <= n; k += 1) {
-    let x = Math.cos((Math.PI * (k - 0.25)) / (n + 0.5));
+    let x = cos((Math.PI * (k - 0.25)) / (n + 0.5));
     let derivative = 1;
     for (let iteration = 0; iteration < 100; iteration += 1) {
       // P_n(x) in p1 and P_{n−1}(x) in p0, by Bonnet's recurrence.
@@ -118,7 +119,7 @@ interface Piece {
  */
 function piecesOf(muSun: number): readonly [Piece, Piece] {
   const across = Math.sqrt(Math.max((1 - muSun) * (1 + muSun), 0));
-  const gammaA = Math.atan2(Math.abs(muSun), across);
+  const gammaA = atan2(Math.abs(muSun), across);
   const uA = Math.sqrt(gammaA / Math.PI);
   const uB = Math.sqrt(1 - gammaA / Math.PI);
   const whole: Piece =
@@ -150,8 +151,8 @@ export function irradianceDirections(
     for (let i = 0; i < ringNodes; i += 1) {
       const u = piece.from + span * (ring.nodes[i] ?? Number.NaN);
       const gamma = Math.PI * u * u;
-      const sinGamma = Math.sin(gamma);
-      const cosGamma = Math.cos(gamma);
+      const sinGamma = sin(gamma);
+      const cosGamma = cos(gamma);
       // μ_v = A + B cos ψ along the ring.
       const a = mu * cosGamma;
       const b = across * sinGamma;
@@ -160,15 +161,15 @@ export function irradianceDirections(
         if (a <= -b) {
           psiMax = 0;
         } else if (a < b) {
-          psiMax = Math.atan2(Math.sqrt(Math.max((b - a) * (b + a), 0)), -a);
+          psiMax = atan2(Math.sqrt(Math.max((b - a) * (b + a), 0)), -a);
         }
       }
       // du dγ-measure 2π u sin(π u²), the piece's and the ring's Gauss weights, and the mirror's 2.
       const ringWeight = span * (ring.weights[i] ?? Number.NaN) * 2 * Math.PI * u * sinGamma * 2;
       for (let j = 0; j < arcNodes; j += 1) {
         const psi = psiMax * (arc.nodes[j] ?? Number.NaN);
-        const cosPsi = Math.cos(psi);
-        const sinPsi = Math.sin(psi);
+        const cosPsi = cos(psi);
+        const sinPsi = sin(psi);
         // cos γ s + sin γ (cos ψ e₁ + sin ψ e₂), e₁ = (0, −μ_s, √(1 − μ_s²)), e₂ = (1, 0, 0).
         const direction: Vec3 = {
           x: sinGamma * sinPsi,

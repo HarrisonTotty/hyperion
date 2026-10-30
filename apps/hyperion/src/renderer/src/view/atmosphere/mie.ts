@@ -35,6 +35,8 @@
  * The index of the sphere's material divided by the medium's real index, as tables of optical
  * constants give n and k (k ≥ 0 absorbing; Bohren and Huffman's sign).
  */
+import { cbrt, cos, sin } from "../../lib/pinnedMath";
+
 export interface ComplexIndex {
   /** The real part, the phase index, finite and > 0. */
   readonly n: number;
@@ -98,7 +100,7 @@ export const MIE_MIN_SIZE_PARAMETER = 1e-6;
  * @param sizeParameter - x = 2πr ÷ λ, with λ the wavelength in the medium; > 0.
  */
 export function mieTermCount(sizeParameter: number): number {
-  return Math.floor(sizeParameter + 4.05 * Math.cbrt(sizeParameter) + 2);
+  return Math.floor(sizeParameter + 4.05 * cbrt(sizeParameter) + 2);
 }
 
 /** The logarithmic derivatives Dₙ(z) of ψₙ(z), n = 0 … nMax, as {@link logarithmicDerivatives} returns them. */
@@ -264,7 +266,7 @@ const PSI1_SERIES_BELOW = 0.1;
  */
 function psi1(x: number): number {
   if (x >= PSI1_SERIES_BELOW) {
-    return Math.sin(x) / x - Math.cos(x);
+    return sin(x) / x - cos(x);
   }
   const x2 = x * x;
   return x2 * (1 / 3 - x2 * (1 / 30 - x2 * (1 / 840 - x2 * (1 / 45_360 - x2 / 3_991_680))));
@@ -370,8 +372,8 @@ export function mieCoefficients(sizeParameter: number, index: ComplexIndex): Mie
     bIm: new Float64Array(terms),
   };
   const xInv = 1 / x;
-  let psiPrevious = Math.sin(x);
-  let chiPrevious = Math.cos(x);
+  let psiPrevious = sin(x);
+  let chiPrevious = cos(x);
   let psi = psi1(x);
   let chi = chiPrevious * xInv + psiPrevious;
   for (let n = 1; n <= terms; n += 1) {

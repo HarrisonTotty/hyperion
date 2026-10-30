@@ -30,6 +30,7 @@ import {
   GAS_MOLAR_MASS_G_PER_MOL,
   MOLE_FRACTION_SUM_TOLERANCE,
 } from "./rayleigh";
+import { exp, expm1, log, pow } from "../../lib/pinnedMath";
 
 /**
  * An atmosphere's temperature against pressure (Design note 3).
@@ -109,7 +110,7 @@ function profileTemperatureK(profile: TemperatureProfile, pressurePa: number): n
       break;
     case "radiativeConvective":
       temperatureK = Math.max(
-        profile.surfaceK * (pressurePa / profile.surfacePa) ** profile.beta,
+        profile.surfaceK * pow(pressurePa / profile.surfacePa, profile.beta),
         profile.skinK,
       );
       break;
@@ -369,7 +370,7 @@ const TROPOPAUSE_MERGE_FRACTION = 1e-3;
 
 /** (e^x − 1) ÷ x, 1 at x = 0. */
 function expm1OverX(x: number): number {
-  return x === 0 ? 1 : Math.expm1(x) / x;
+  return x === 0 ? 1 : expm1(x) / x;
 }
 
 /**
@@ -387,7 +388,7 @@ function lnTropopausePa(profile: TemperatureProfile): number | null {
       lnPa =
         profile.beta === 0
           ? null
-          : Math.log(profile.surfacePa) + Math.log(profile.skinK / profile.surfaceK) / profile.beta;
+          : log(profile.surfacePa) + log(profile.skinK / profile.surfaceK) / profile.beta;
       break;
   }
   return lnPa;
@@ -421,14 +422,13 @@ function temperatureIntegralK(
         integral = (lnLowPa, lnHighPa) => temperatureK * (lnHighPa - lnLowPa);
         break;
       }
-      const lnSurfacePa = Math.log(profile.surfacePa);
+      const lnSurfacePa = log(profile.surfacePa);
       integral = (lnLowPa, lnHighPa) => {
         let sum = 0;
         const adiabatLow = Math.max(lnLowPa, lnTropopause);
         if (lnHighPa > adiabatLow) {
           const span = lnHighPa - adiabatLow;
-          sum +=
-            surfaceK * Math.exp(beta * (adiabatLow - lnSurfacePa)) * span * expm1OverX(beta * span);
+          sum += surfaceK * exp(beta * (adiabatLow - lnSurfacePa)) * span * expm1OverX(beta * span);
         }
         const skinHigh = Math.min(lnHighPa, lnTropopause);
         if (skinHigh > lnLowPa) {
@@ -447,7 +447,7 @@ function temperatureIntegralK(
  * tropopause added between two of them.
  */
 function levelLogPressures(lnSurfacePa: number, tropopause: number | null): Float64Array {
-  const span = Math.log(COLUMN_TOP_PRESSURE_RATIO);
+  const span = log(COLUMN_TOP_PRESSURE_RATIO);
   const step = span / COLUMN_INTERVALS;
   const even = new Float64Array(COLUMN_INTERVALS + 1);
   for (let i = 0; i <= COLUMN_INTERVALS; i += 1) {
@@ -509,8 +509,8 @@ export function hydrostaticColumn(input: ColumnInput): AtmosphereColumn {
     );
   }
   const profile = checkedProfile(input.temperature);
-  const lnSurfacePa = Math.log(surfacePa);
-  const lnTopPa = lnSurfacePa + Math.log(COLUMN_TOP_PRESSURE_RATIO);
+  const lnSurfacePa = log(surfacePa);
+  const lnTopPa = lnSurfacePa + log(COLUMN_TOP_PRESSURE_RATIO);
   const tropopause = lnTropopausePa(profile);
   const integralK = temperatureIntegralK(profile, tropopause);
   const metresPerKelvin =
@@ -531,7 +531,7 @@ export function hydrostaticColumn(input: ColumnInput): AtmosphereColumn {
   const surfaceK = profileTemperatureK(profile, surfacePa);
   for (const [i, lnPa] of lnLevels.entries()) {
     const pressurePa =
-      i === 0 ? surfacePa : i === last ? surfacePa * COLUMN_TOP_PRESSURE_RATIO : Math.exp(lnPa);
+      i === 0 ? surfacePa : i === last ? surfacePa * COLUMN_TOP_PRESSURE_RATIO : exp(lnPa);
     const temperatureK = profileTemperatureK(profile, pressurePa);
     altitudesM[i] = heightM(metresPerKelvin * integralK(lnPa, lnSurfacePa));
     pressuresPa[i] = pressurePa;

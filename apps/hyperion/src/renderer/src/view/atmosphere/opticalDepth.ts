@@ -28,6 +28,7 @@ import {
   extinction,
   type TermAbsorber,
 } from "./medium";
+import { log } from "../../lib/pinnedMath";
 
 /** The spherical shell an atmosphere's tables are built on, radii from the centre, m. */
 export interface Shell {
@@ -272,9 +273,9 @@ export function curvesOpticalDepth(
       throw new RangeError(`no amount for absorber ${k}`);
     }
     const t = absorberTransmittance(curve, amount, pressuresPa[k]);
-    depth[0] -= Math.log(t[0]);
-    depth[1] -= Math.log(t[1]);
-    depth[2] -= Math.log(t[2]);
+    depth[0] -= log(t[0]);
+    depth[1] -= log(t[1]);
+    depth[2] -= log(t[2]);
   }
   return depth;
 }

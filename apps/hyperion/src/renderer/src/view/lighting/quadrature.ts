@@ -4,6 +4,8 @@
  */
 
 /** A Gauss–Legendre rule on [−1, 1]. */
+import { cos } from "../../lib/pinnedMath";
+
 export interface GaussLegendreRule {
   /** The nodes. */
   readonly x: Float64Array;
@@ -16,7 +18,7 @@ export function gaussLegendre(n: number): GaussLegendreRule {
   const x = new Float64Array(n);
   const w = new Float64Array(n);
   for (let i = 0; i < n; i += 1) {
-    let z = Math.cos((Math.PI * (i + 0.75)) / (n + 0.5));
+    let z = cos((Math.PI * (i + 0.75)) / (n + 0.5));
     let derivative = 0;
     for (let iteration = 0; iteration < 100; iteration += 1) {
       let p0 = 1;

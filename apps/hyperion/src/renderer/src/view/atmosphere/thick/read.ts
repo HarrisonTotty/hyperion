@@ -100,6 +100,7 @@ import { fromHalfBits, HALF_MAX, toHalfBits } from "../../sky/half";
 import { type AtmosphereMedium, densityAt } from "../medium";
 import type { MsSourceTable } from "./bake";
 import type { PolarisationTable } from "./polarisation";
+import { log, pow } from "../../../lib/pinnedMath";
 
 /** The table's altitudes: the bake's 33 (`bake.ts`'s `THICK_BAKE_GRID`, 64 layers at stride 2). */
 export const THICK_ALTITUDES = 33;
@@ -267,7 +268,7 @@ export function packThickCurve(values: Rgb, where: () => string): number {
     }
     largest = Math.max(largest, Math.abs(value));
   }
-  if (largest > CURVE_MANTISSA_MOST * 2 ** (CURVE_EXPONENT_MOST - THICK_CURVE_EXPONENT_BIAS)) {
+  if (largest > CURVE_MANTISSA_MOST * pow(2, CURVE_EXPONENT_MOST - THICK_CURVE_EXPONENT_BIAS)) {
     throw new RangeError(`a thick table's ${where()} is ${largest}, past its word's 32,640`);
   }
   // The least exponent whose largest mantissa rounds to at most 255, by exact comparisons with
@@ -275,11 +276,11 @@ export function packThickCurve(values: Rgb, where: () => string): number {
   let exponent = 0;
   while (
     exponent < CURVE_EXPONENT_MOST &&
-    !(largest < (CURVE_MANTISSA_MOST + 0.5) * 2 ** (exponent - THICK_CURVE_EXPONENT_BIAS))
+    !(largest < (CURVE_MANTISSA_MOST + 0.5) * pow(2, exponent - THICK_CURVE_EXPONENT_BIAS))
   ) {
     exponent += 1;
   }
-  const scale = 2 ** (exponent - THICK_CURVE_EXPONENT_BIAS);
+  const scale = pow(2, exponent - THICK_CURVE_EXPONENT_BIAS);
   const field = (value: number): number => {
     const m = Math.sign(value) * Math.round(Math.abs(value) / scale);
     return (m + (1 << CURVE_BITS)) & ((1 << CURVE_BITS) - 1);
@@ -298,7 +299,7 @@ export function packThickCurve(values: Rgb, where: () => string): number {
 export function thickCurveChannel(word: number, c: number): number {
   const field = (word >>> (c * CURVE_BITS)) & ((1 << CURVE_BITS) - 1);
   const mantissa = field >= 1 << (CURVE_BITS - 1) ? field - (1 << CURVE_BITS) : field;
-  return mantissa * 2 ** ((word >>> (3 * CURVE_BITS)) - THICK_CURVE_EXPONENT_BIAS);
+  return mantissa * pow(2, (word >>> (3 * CURVE_BITS)) - THICK_CURVE_EXPONENT_BIAS);
 }
 
 /** A table's grid, as either bake gives it. */
@@ -658,7 +659,7 @@ export function thickBandsInto(
   const k = Math.min(slot, slots - 1);
   const row = thickRowAt(table, Math.max(scaledHeightM, 0));
   const last = table.bands - 1;
-  const ls = Math.log(s);
+  const ls = log(s);
   if (last === 0 || !(ls > (lnBands[0] ?? Number.NaN))) {
     addThickLayer(table, k, row, muSun, muTravel, 1, out);
     return;

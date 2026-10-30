@@ -128,6 +128,7 @@ import {
   REFERENCE_DETECTOR_HALF_ANGLE_DEG,
   type ReferenceGeometry,
 } from "./geometries";
+import { asin, atan, atan2, cos, sin, tan } from "../../../lib/pinnedMath";
 
 /**
  * The figure a twin's case stands on: a case's own (`cases.ts`'s `CaseFigure`), a sphere of the
@@ -697,8 +698,8 @@ export function referenceTwin(
     let n: Vec3;
     if (sphere) {
       n = normalise(groundM);
-      latitudeRad = Math.asin(Math.min(Math.max(n.z, -1), 1));
-      longitudeRad = Math.atan2(n.y, n.x);
+      latitudeRad = asin(Math.min(Math.max(n.z, -1), 1));
+      longitudeRad = atan2(n.y, n.x);
     } else {
       const geodetic = geodeticOf(groundM, datum);
       n = geodetic.normal;
@@ -709,11 +710,11 @@ export function referenceTwin(
       latitudeRad,
       n,
       north: {
-        x: -Math.sin(latitudeRad) * Math.cos(longitudeRad),
-        y: -Math.sin(latitudeRad) * Math.sin(longitudeRad),
-        z: Math.cos(latitudeRad),
+        x: -sin(latitudeRad) * cos(longitudeRad),
+        y: -sin(latitudeRad) * sin(longitudeRad),
+        z: cos(latitudeRad),
       },
-      east: { x: -Math.sin(longitudeRad), y: Math.cos(longitudeRad), z: 0 },
+      east: { x: -sin(longitudeRad), y: cos(longitudeRad), z: 0 },
     };
   };
 
@@ -722,7 +723,7 @@ export function referenceTwin(
     // lit pass gives them to `surfaceLighting.wgsl`.
     const { latitudeRad, n, north, east } = groundFrameOf(groundM);
     const muSun = n.x * sun.x + n.y * sun.y + n.z * sun.z;
-    const azimuthRad = Math.atan2(
+    const azimuthRad = atan2(
       east.x * sun.x + east.y * sun.y + east.z * sun.z,
       north.x * sun.x + north.y * sun.y + north.z * sun.z,
     );
@@ -804,7 +805,7 @@ export function referenceTwin(
   ): TwinParts => {
     const originM = observerOf(geometry);
     const sun = sunState(geometry);
-    const fovXRad = 2 * Math.atan(Math.tan(defaultFovRad / 2) * AERIAL_FROXEL_SCALE);
+    const fovXRad = 2 * atan(tan(defaultFovRad / 2) * AERIAL_FROXEL_SCALE);
     const view = twinView(cameraAlong(originM, direction, fovXRad), sun, datum, NEAR_M);
     const size = { widthTexels: 2, heightTexels: 2, slices: sizes.aerialPerspective.slices };
     const reachM = sizes.aerialPerspectiveReachM;

@@ -40,6 +40,7 @@
 import type { Rgb } from "../photometry/toneCurve";
 import type { AtmosphereColumn } from "./column";
 import { CHANNEL_WAVELENGTHS_NM, type MediumTerm } from "./medium";
+import { pow } from "../../lib/pinnedMath";
 
 /**
  * Every gas with a measured dispersion here, by formula.
@@ -728,7 +729,7 @@ export function crossSectionFromDispersionM2(
   const lambdaSquared = wavelengthM * wavelengthM;
   const density = referenceNumberDensityPerM3(dispersion);
   return (
-    ((24 * Math.PI ** 3) / (lambdaSquared * lambdaSquared * density * density)) *
+    ((24 * pow(Math.PI, 3)) / (lambdaSquared * lambdaSquared * density * density)) *
     lorentzLorenz *
     lorentzLorenz *
     king
@@ -864,7 +865,7 @@ const CUBIC_ANGSTROM_M3 = 1e-30;
  * The atomic unit of polarisability volume, a₀³, m³: the Bohr radius 5.291 772 105 44 × 10⁻¹¹ m
  * cubed (CODATA 2022), 0.148 184 7 Å³.
  */
-const BOHR_CUBED_M3 = 5.291_772_105_44e-11 ** 3;
+const BOHR_CUBED_M3 = pow(5.291_772_105_44e-11, 3);
 
 /** 25 °C, K: Ramaswamy's reference temperature. */
 const TWENTY_FIVE_CELSIUS_K = 298.15;
@@ -1221,7 +1222,7 @@ export function polarisabilityCrossSectionM2(
   const wavelengthM = wavelengthNm * 1e-9;
   const lambdaSquared = wavelengthM * wavelengthM;
   return (
-    ((128 / 3) * Math.PI ** 5 * polarisabilityM3 * polarisabilityM3) /
+    ((128 / 3) * pow(Math.PI, 5) * polarisabilityM3 * polarisabilityM3) /
     (lambdaSquared * lambdaSquared)
   );
 }
