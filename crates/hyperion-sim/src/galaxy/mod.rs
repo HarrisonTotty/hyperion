@@ -53,7 +53,7 @@ use self::features::shares::FeatureShares;
 use self::fields::Fields;
 use self::gas::field::GasField;
 use self::gas::params::BuildGasParamsError;
-use self::imf::{BandShares, Chabrier, Kroupa, MassFunction, MassFunctionKind};
+use self::imf::{BandShares, Chabrier, Kept, Kroupa, MassFunction, MassFunctionKind};
 use self::kinematics::KinematicTables;
 use self::motion::CentreMotion;
 use self::params::GalaxyParams;
@@ -787,11 +787,12 @@ impl fmt::Debug for CentrePotentialCell {
     }
 }
 
-/// A galaxy's mass function, held by value so that [`Galaxy`] stays `Clone` and comparable.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// A galaxy's mass function, held by value so that [`Galaxy`] stays `Clone` and comparable, with
+/// its bands' draws kept ([`Kept`]).
+#[derive(Debug, Clone, PartialEq)]
 enum HeldMassFunction {
-    Kroupa(Kroupa),
-    Chabrier(Chabrier),
+    Kroupa(Kept<Kroupa>),
+    Chabrier(Kept<Chabrier>),
 }
 
 impl HeldMassFunction {
@@ -799,8 +800,8 @@ impl HeldMassFunction {
     #[must_use]
     fn of(kind: MassFunctionKind) -> Self {
         match kind {
-            MassFunctionKind::Kroupa => Self::Kroupa(Kroupa),
-            MassFunctionKind::Chabrier => Self::Chabrier(Chabrier::provisional()),
+            MassFunctionKind::Kroupa => Self::Kroupa(Kept::new(Kroupa)),
+            MassFunctionKind::Chabrier => Self::Chabrier(Kept::new(Chabrier::provisional())),
         }
     }
 
