@@ -5029,6 +5029,73 @@ fn a_disrupted_pair_keeps_the_label_of_the_death_that_unbound_it() {
     }
 }
 
+/// P11.T4.e's label for a pinned pair instability (the train's fix): a pinned primary the binary
+/// carries off its own track, whose plan 06 death is a pair instability below the 150 M☉ cap,
+/// leaves nothing at its pin ([`super::star::Member::Gone`]), and the pair that death unbinds is
+/// `Disrupted { by: Primary }` from then on, as the closed form labels the same death: no merger,
+/// so no `merger_age`. 145 + 72.5 M☉ at 10 d, Z = 10⁻⁴ (median draws): a 66 M☉ helium core at
+/// the pin, 2.761 Myr, after a stable transfer from the primary.
+#[test]
+fn a_pinned_pair_instability_disrupts_the_pair() {
+    use crate::stellar::remnant::RemnantKind;
+
+    let input = pair(145.0, 72.5, 10.0, 0.0, 0.0001);
+    let until = Years::new(1.0e8);
+    let (_, pin) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
+    assert_eq!(pin.remnant.kind(), RemnantKind::None, "a pair instability");
+    assert!(can_interact(&input, until));
+    let timeline = evolve(&input, until);
+    let collapse = timeline
+        .supernovae()
+        .iter()
+        .find(|r| r.component() == Component::Primary)
+        .unwrap_or_else(|| panic!("the pin: {}", describe(&timeline)));
+    let at = pin.death.age().value();
+    assert!(
+        (collapse.age().value() - at).abs() <= 1e-9 * at,
+        "{collapse:?} at {at}"
+    );
+    assert_eq!(collapse.remnant().kind(), RemnantKind::None);
+    assert!(!collapse.bound(), "{}", describe(&timeline));
+    assert!(
+        timeline
+            .segments()
+            .iter()
+            .any(|s| s.start() < collapse.age()
+                && matches!(s.kind(), SegmentKind::StableTransfer { .. })),
+        "{}",
+        describe(&timeline)
+    );
+    assert_eq!(timeline.merger_age(), None, "{}", describe(&timeline));
+    // The companion collapses later, alone: `quiet_kind` keeps the label past it.
+    let companion = timeline
+        .supernovae()
+        .iter()
+        .find(|r| r.component() == Component::Secondary)
+        .unwrap_or_else(|| panic!("the companion's collapse: {}", describe(&timeline)));
+    let after: Vec<&Segment> = timeline
+        .segments()
+        .iter()
+        .filter(|s| s.start() >= collapse.age())
+        .collect();
+    assert!(
+        after.first().is_some_and(|s| s.members()[0].is_gone())
+            && after.iter().any(|s| s.start() >= companion.age()),
+        "{}",
+        describe(&timeline)
+    );
+    for segment in after {
+        assert_eq!(
+            segment.kind(),
+            SegmentKind::Disrupted {
+                by: Component::Primary
+            },
+            "{}",
+            describe(&timeline)
+        );
+    }
+}
+
 /// P11.T4.l: the pre-test asked again after a passed-over pair's bound collapse never passes over
 /// an interaction. Over 3,000 wide massive pairs ([`wide_massive_pair`]) run to their ages, every
 /// pair whose bound collapse the closed form keeps on its fixed orbit shows no stable transfer,

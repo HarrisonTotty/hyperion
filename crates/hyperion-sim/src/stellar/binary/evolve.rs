@@ -948,17 +948,18 @@ impl Engine {
         self.members[i] = member;
     }
 
-    /// The kind a pair without Roche-lobe overflow is in: detached while bound, merged when one
-    /// member is gone, disrupted once disrupted. An orbit a death unbinds is labelled by the
-    /// death itself, [`SegmentKind::Disrupted`] by the star that died (`Engine::explode`, and
-    /// `Engine::die` for a white dwarf's birth, P11.T4.j's F1); with no orbit, no member gone and
-    /// no disruption before, the kind is [`SegmentKind::Merged`].
+    /// The kind a pair without Roche-lobe overflow is in: detached while bound, disrupted once
+    /// disrupted, and merged otherwise.
+    ///
+    /// An orbit a death unbinds is labelled by the death itself,
+    /// [`SegmentKind::Disrupted`] by the star that died (`Engine::explode`, and `Engine::die` for a
+    /// white dwarf's birth, P11.T4.j's F1), and keeps that label whatever dies after, a member
+    /// that leaves nothing included (a pinned primary's pair instability, which is no merger); with
+    /// no orbit and no disruption before, the kind is [`SegmentKind::Merged`].
     #[must_use]
     pub(super) fn quiet_kind(&self) -> SegmentKind {
         if self.orbit.is_some() {
             SegmentKind::Detached
-        } else if self.members.iter().any(Member::is_gone) {
-            SegmentKind::Merged
         } else {
             match self.kind {
                 kind @ SegmentKind::Disrupted { .. } => kind,

@@ -1236,8 +1236,8 @@ impl StarSummary {
     }
 
     /// The class of the pair the binary engine ran the star in, at the time summarised (plan 11,
-    /// P11.T5 and T11): [`BinaryClass::None`] for a star in no such pair, a brown dwarf, and a
-    /// star merged into its companion.
+    /// P11.T5 and T11): [`BinaryClass::None`] for a star in no such pair, a brown dwarf, a star
+    /// merged into its companion, and a star its own death left nothing of.
     #[must_use]
     pub const fn binary_class(&self) -> BinaryClass {
         self.binary_class
@@ -2198,7 +2198,9 @@ impl SystemStars {
         })?;
         let (state, class) = self.pair_state_at(pair, t)?;
         let own = state.stars()[component.index()];
-        let gone = own.phase() == Phase::NoRemnant && pair.timeline.merger_age().is_some();
+        // A star merged into its companion, or one its own death left nothing of (a pair
+        // instability, which disrupts the pair: P11.T4.e's label), has no class of its own.
+        let gone = own.phase() == Phase::NoRemnant;
         let pulsar = (own.phase() == Phase::NeutronStar)
             .then(|| {
                 let age = self.stars[usize::from(index)].age_at(t);
@@ -3987,8 +3989,7 @@ mod tests {
                     let binary = stars.binary_state_at(pair.node(), t).unwrap();
                     assert_eq!(
                         summary.stars()[k].binary_class(),
-                        if now.phase() == Phase::NoRemnant && pair.timeline().merger_age().is_some()
-                        {
+                        if now.phase() == Phase::NoRemnant {
                             crate::stellar::binary::BinaryClass::None
                         } else {
                             pair.timeline().class_at(model.age_at(t))

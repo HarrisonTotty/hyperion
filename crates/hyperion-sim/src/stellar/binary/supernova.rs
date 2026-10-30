@@ -374,9 +374,12 @@ impl Engine {
     /// member already replaced by what it leaves: the orbit after it, or the pair unbound, and the
     /// record.
     ///
-    /// A pair this death unbinds is [`SegmentKind::Disrupted`] by `i`. A pair already unbound keeps
-    /// its label, that of the death that unbound it ([`Engine::quiet_kind`]), as the closed form
-    /// ([`Engine::passed_over`]) and the white dwarf's birth in [`Engine::die`] do.
+    /// A pair this death unbinds is [`SegmentKind::Disrupted`] by `i`, even if `i` leaves nothing (a
+    /// pinned primary's pair instability, [`Member::Gone`] from [`Engine::pinned_collapse`]): the
+    /// pair is a merger only if the other member is gone, as the closed form labels the same death.
+    /// A pair already unbound keeps its label, that of the death that unbound it
+    /// ([`Engine::quiet_kind`]), as the closed form ([`Engine::passed_over`]) and the white dwarf's
+    /// birth in [`Engine::die`] do.
     pub(super) fn explode(
         &mut self,
         i: usize,
@@ -398,7 +401,7 @@ impl Engine {
         ));
         self.kind = if bound || self.orbit.is_some() || !was_bound {
             self.quiet_kind()
-        } else if self.members.iter().any(Member::is_gone) {
+        } else if self.members[1 - i].is_gone() {
             SegmentKind::Merged
         } else {
             SegmentKind::Disrupted {

@@ -6985,3 +6985,10 @@ galaxy_sweeps`.
       departure).
     - **A merger product heavier than the pin's track dims at the switch** (above, the first
       departure).
+- **P11.T4.e's label for a pinned pair instability** (the train's fix, 2026-10-30). A pinned
+  primary off its own track whose plan 06 death leaves nothing becomes `Member::Gone` at its pin,
+  and the pair read `Merged` (a false `merger_age`). Now `explode` reads only the other member gone
+  as a merger, and `quiet_kind` keeps `Disrupted` whatever dies after, as the closed form does
+  (`a_pinned_pair_instability_disrupts_the_pair`). A `NoRemnant` star's summary class is `None`
+  whatever its pair (`paired_state`; lean, 2026-10-30). It needs a primary of 145–150 M☉ at
+  Z ≤ 2 × 10⁻⁴: none in an R06-style census of 10⁵ systems, and no golden moves.
