@@ -173,7 +173,7 @@ pub(crate) fn radiative_efficiency(eddington_ratio: f64) -> f64 {
 
 /// A tail's bolometric luminosity over its unabsorbed 2–10 keV luminosity: 15.8, the median
 /// bolometric correction of low-luminosity active nuclei below a tenth of Eddington (Ho 2009, ApJ
-/// 699, 626, §2.1: "sources with Lbol/LEdd ≲ 0.1 have a median CX = 15.8, with an interquartile
+/// 699, 626, §3: "sources with Lbol/LEdd ≲ 0.1 have a median CX = 15.8, with an interquartile
 /// range of 9.6"). Part of the generator version.
 ///
 /// It is extrapolated below about 10⁻⁶ of Eddington's luminosity, where it errs bright: Sgr A*

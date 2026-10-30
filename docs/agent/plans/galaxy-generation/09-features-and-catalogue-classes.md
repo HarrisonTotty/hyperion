@@ -4441,7 +4441,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     - If the templates feed recorded output by then, the retune rides a bump train.
   - _Ho's 15.8 is applied outside its range_ (P09.T30.b's tails;
     `features::centre::events::luminosity::BOLOMETRIC_CORRECTION`).
-    - Ho (2009, ApJ 699, 626, §2.1) gives 15.8 as the median for nuclei below a tenth of
+    - Ho (2009, ApJ 699, 626, §3) gives 15.8 as the median for nuclei below a tenth of
       Eddington, but the tails apply it up to the Eddington cap.
     - As plan 12's X-ray bound it errs high, which is safe for reach. The tails' X-ray light near
       the cap is overstated, though, since a more luminous nucleus puts a smaller share in X-rays

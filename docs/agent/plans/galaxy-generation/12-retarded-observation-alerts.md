@@ -2421,7 +2421,7 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
       equation 23 is the fallback time, t_fall = 3.5 × 10⁶ s, which `fallback_time` matches and
       cites rightly. Cite it as the fallback time.
     - (e) `BOLOMETRIC_CORRECTION`'s doc should read "15.8, the median bolometric correction of
-      low-luminosity active nuclei below a tenth of Eddington (Ho 2009, ApJ 699, 626, §2.1:
+      low-luminosity active nuclei below a tenth of Eddington (Ho 2009, ApJ 699, 626, §3:
       'sources with Lbol/LEdd ≲ 0.1 have a median CX = 15.8, with an interquartile range of
       9.6')". The quoted "median CX = Lbol/LX = 15.8" is not the paper's. _Corrected by
       P12.T5.a.2's science check:_ the median of about 8 is that of Ho's small sample of nuclei
@@ -2604,7 +2604,7 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     Firth et al.'s (2015) 18.98 ± 0.54 days and Scalzo et al.'s (2014) bolometric 16.5 ± 2 days.
     A retune moves `TYPE_IA_PEAK` with it, since its test holds the bound to the template. The
     detail is in plan 09's Risks.
-  - _Ho's 15.8 is applied at the Eddington cap_, outside Ho's (2009, §2.1) range below a tenth of
+  - _Ho's 15.8 is applied at the Eddington cap_, outside Ho's (2009, §3) range below a tenth of
     Eddington (plan 09's tails; P09.T30.c). As the tails' X-ray bound it errs high, which is safe
     for reach. The detail is in plan 09's Risks.
   - _The magnetars' completeness gap._
