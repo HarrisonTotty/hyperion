@@ -34,14 +34,19 @@
  * - **The disc's table** (R08.T16.b; `thick/discBake.ts`): its lights formed as the thick bake's,
  *   J the routed bake's where the request carries it and otherwise baked here as a `thick-bake`
  *   bakes it, the correction summed in where carried, then every band's and light's table marched.
+ * - **The deck** (R08.T15.a.2; `thick/deck.ts`): its lights formed as the thick bake's, the deck
+ *   prepared once a request (`prepareDeck`, the upper medium's thick-bake preparation among it),
+ *   each band asked baked (`bakeDeck`), and where the column needs it the correction over the deck
+ *   prepared once and baked a band (`bakeDeckPolarisation`), so that one job carries everything the
+ *   deck's route reads.
  * - **The answer** is a structured copy of the reply, whose every buffer is transferred: the copy
  *   is made in the worker, off the render thread, and leaves the worker's own arrays (its kept
  *   assemblies, and any table a medium references, such as a cross-section's) attached.
  *
  * A throw in a job is a bug (`decision-r08-t10a-leans.md` item 6) and is answered `failed` with its
- * message, but for a bake's, which is answered `thick-bake-failed`, `polarisation-bake-failed` or
- * `disc-bake-failed`: a failed bake is never the medium's fault (decision-r08-t10a-leans, UX review
- * item 1). A k-table
+ * message, but for a bake's, which is answered `thick-bake-failed`, `polarisation-bake-failed`,
+ * `disc-bake-failed` or `deck-bake-failed`: a failed bake is never the medium's fault
+ * (decision-r08-t10a-leans, UX review item 1). A k-table
  * that cannot be loaded rejects, so that the worker raises its error and the pool replaces it.
  */
 
@@ -63,6 +68,7 @@ import {
   transferablesOf,
 } from "./opticsMessages";
 import type { BakeSpectrum } from "./spectralColour";
+import type { PolarisationTable } from "./thick/polarisation";
 import {
   bakeMultipleScattering,
   prepareBake,
@@ -70,8 +76,13 @@ import {
   type ThickBakeLight,
   thickBakeLights,
 } from "./thick/bake";
+import { bakeDeck, bakeDeckPolarisation, prepareDeck, prepareDeckPolarisation } from "./thick/deck";
 import { discReflectanceFor } from "./thick/discBake";
-import { bakePolarisationCorrection, preparePolarisation } from "./thick/polarisation";
+import {
+  bakePolarisationCorrection,
+  needsPolarisationCorrection,
+  preparePolarisation,
+} from "./thick/polarisation";
 
 /** How many bodies' assemblies, or absorber specs, a worker keeps, by key, the latest asked. */
 export const OPTICS_MEDIA_KEPT = 2;
@@ -198,6 +209,20 @@ export class OpticsJobs {
         };
         break;
       }
+      case "deck-bake": {
+        const lights = this.#bakeLights(request, options);
+        const prepared = prepareDeck(request.column, lights, request.split);
+        const tables = request.bands.map((band) => bakeDeck(prepared, request.body, band));
+        let correction: ReadonlyArray<PolarisationTable> | null = null;
+        if (needsPolarisationCorrection(request.column)) {
+          const polarisation = prepareDeckPolarisation(prepared, lights);
+          correction = request.bands.map((band) =>
+            bakeDeckPolarisation(prepared, polarisation, request.body, band),
+          );
+        }
+        reply = { kind: "deck-baked", id: request.id, tables, correction };
+        break;
+      }
       case "curve-join": {
         const { specs, suns } = this.#absorbersUnder(request, options);
         const perAbsorber = specs.map((spec, k) =>
@@ -255,7 +280,15 @@ export class OpticsJobs {
   #heldAbsorbers(
     request: Extract<
       OpticsRequest,
-      { kind: "curve-sums" | "curve-join" | "thick-bake" | "polarisation-bake" | "disc-bake" }
+      {
+        kind:
+          | "curve-sums"
+          | "curve-join"
+          | "thick-bake"
+          | "polarisation-bake"
+          | "disc-bake"
+          | "deck-bake";
+      }
     >,
     options: AssembleOptions,
   ): HeldAbsorbers {
@@ -275,7 +308,10 @@ export class OpticsJobs {
    * absorber the body does not have.
    */
   #bakeLights(
-    request: Extract<OpticsRequest, { kind: "thick-bake" | "polarisation-bake" | "disc-bake" }>,
+    request: Extract<
+      OpticsRequest,
+      { kind: "thick-bake" | "polarisation-bake" | "disc-bake" | "deck-bake" }
+    >,
     options: AssembleOptions,
   ): ReadonlyArray<ThickBakeLight> {
     const { specs, spectra } =
@@ -352,7 +388,8 @@ function spectraOf(
 
 /**
  * A job's failure as its answer, nothing to transfer: a bug's message, `failed`, or a bake's own
- * failure, `thick-bake-failed` or `polarisation-bake-failed`, with the bands it asked.
+ * failure, `thick-bake-failed`, `polarisation-bake-failed` or `deck-bake-failed`, with the bands it
+ * asked.
  */
 function failed(request: OpticsRequest, error: unknown): OpticsAnswer {
   const message = error instanceof Error ? error.message : String(error);
@@ -366,6 +403,9 @@ function failed(request: OpticsRequest, error: unknown): OpticsAnswer {
       break;
     case "disc-bake":
       reply = { kind: "disc-bake-failed", id: request.id, message };
+      break;
+    case "deck-bake":
+      reply = { kind: "deck-bake-failed", id: request.id, bands: request.bands, message };
       break;
     case "assemble":
     case "curve-sums":

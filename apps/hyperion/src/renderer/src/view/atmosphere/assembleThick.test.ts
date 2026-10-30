@@ -147,6 +147,9 @@ function keptCache(): AtmosphereCache<CachedTables> {
       bakeDisc: () => {
         throw new Error("these bodies take no disc table");
       },
+      bakeDeck: () => {
+        throw new Error("the product's routing routes no body to its deck");
+      },
       terminate: () => undefined,
     },
     tables: (built) => new FakeTables(built, 0),

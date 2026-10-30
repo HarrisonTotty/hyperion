@@ -22,7 +22,11 @@ import {
   FIXTURE_SYSTEM,
 } from "../../test/planetaryFixture";
 import { ScriptedOpticsWorker } from "../../test/scriptedOpticsWorker";
-import { patternedCorrection, patternedThickBake } from "../../test/thickTables";
+import {
+  patternedCorrection,
+  patternedDeckTables,
+  patternedThickBake,
+} from "../../test/thickTables";
 import {
   type AbsorberCurve,
   type AbsorberCurveSums,
@@ -35,6 +39,8 @@ import { R05_EARTH_REFERENCE } from "./earth";
 import { OpticsJobs } from "./opticsJobs";
 import { type OpticsReply, type OpticsRequest, transferablesOf } from "./opticsMessages";
 import {
+  type DeckBakeAsk,
+  type DeckBakeOutcome,
   defaultOpticsWorkers,
   MAX_CONSECUTIVE_OPTICS_FAILURES,
   type OpticsBuildOutcome,
@@ -802,7 +808,89 @@ describe("the optics-worker pool's polarisation correction (R08.T14.f)", () => {
   });
 });
 
-/** Fails the pool's one worker, and each replacement, until its place is given up. */
+/** A deck's tables for `ask`, one a band it asks, split 3 km up (R08.T15.a.2). */
+function decksFor(ask: DeckBakeAsk): ReturnType<typeof patternedDeckTables> {
+  return patternedDeckTables(
+    thickBakeBands(ask.body),
+    R05_EARTH_REFERENCE,
+    ask.slots.length,
+    3_000,
+  );
+}
+
+describe("the optics-worker pool's deck bake (R08.T15.a.2)", () => {
+  /** A deck of R05's Earth's column, by its channels, split 3 km up on a sphere's one band. */
+  function deckAsk(): DeckBakeAsk {
+    const body = sphereBakeBody(6_371_008.8, 9.806_65);
+    return {
+      input: KEPT_UNSET,
+      slots: [0],
+      bands: thickBakeBands(body).map((_, band) => band),
+      column: spectralColumnOf(R05_EARTH_REFERENCE, R05_EARTH_REFERENCE.terms.map(channelSource)),
+      body,
+      split: { altitudeM: 3_000, floor: "ground" },
+    };
+  }
+
+  it("asks every band in one deck-bake request and lands its tables and correction as baked", async () => {
+    const { pool, workers } = scriptedPool(2);
+    const ask = deckAsk();
+    const deck = pool.bakeDeck(ask);
+    const worker = workerAt(workers, 0);
+    const posted = lastPosted(worker);
+    const tables = decksFor(ask);
+    const correction = correctionFor(ask);
+    worker.reply({ kind: "deck-baked", id: posted.id, tables, correction });
+    const outcome = await deck.outcome;
+    expect([
+      workers.map((each) => each.received.length),
+      posted,
+      outcome.kind === "baked" && outcome.tables === tables && outcome.correction === correction,
+    ]).toEqual([[1, 0], { kind: "deck-bake", id: posted.id, ...ask }, true]);
+  });
+
+  it.each([
+    [
+      "deck-bake-failed, as failed with its message",
+      (id: number): OpticsReply => ({
+        kind: "deck-bake-failed",
+        id,
+        bands: [0],
+        message: "a split lies above its deck's floor",
+      }),
+      { kind: "failed", message: "a split lies above its deck's floor" },
+    ],
+    [
+      "with another kind's answer, as failed",
+      (id: number): OpticsReply => ({ kind: "thick-baked", id, tables: [] }),
+      { kind: "failed", message: "a deck's bake was answered thick-baked" },
+    ],
+    [
+      "with a table fewer than its bands, as failed",
+      (id: number): OpticsReply => ({ kind: "deck-baked", id, tables: [], correction: null }),
+      { kind: "failed", message: "a deck of 1 bands was answered with 0 tables" },
+    ],
+  ] satisfies ReadonlyArray<readonly [string, (id: number) => OpticsReply, DeckBakeOutcome]>)(
+    "settles a deck answered %s",
+    async (_, replyOf, expected) => {
+      const { pool, workers } = scriptedPool(1);
+      const deck = pool.bakeDeck(deckAsk());
+      const worker = workerAt(workers, 0);
+      worker.reply(replyOf(lastPosted(worker).id));
+      expect(await deck.outcome).toEqual(expected);
+    },
+  );
+
+  it("settles a deck under way cancelled when the pool is terminated, and refuses one after", async () => {
+    const { pool } = scriptedPool(1);
+    const deck = pool.bakeDeck(deckAsk());
+    pool.terminate();
+    expect(await deck.outcome).toEqual({ kind: "cancelled" });
+    expect(() => pool.bakeDeck(deckAsk())).toThrow(/terminated/u);
+  });
+});
+
+/** Fails the pool's one worker, and each replacement, until its place is given up. */ /** Fails the pool's one worker, and each replacement, until its place is given up. */
 function failEveryTime(workers: ReadonlyArray<ScriptedOpticsWorker>): void {
   for (let n = 0; n < MAX_CONSECUTIVE_OPTICS_FAILURES; n += 1) {
     workerAt(workers, n).fail();

@@ -115,6 +115,16 @@
  * as a bake is. R07's disc reads it beyond the 10⁹ m boundary in place of the full passes. It
  * changes no label: until it lands, and where it fails (one `console.error`, never item 6's fault),
  * the body is drawn by the full passes at every distance, as before.
+ *
+ * **The cloud deck** (R08.T15.a.2; Design note 9's split). A drawn body whose regime is
+ * `cloudDeck` and which the router routes (`routes`, which routes no `cloudDeck` until R08.T15.b.2)
+ * is drawn over its deck: its tables are made of its upper medium on the deck's datum
+ * (`thick/deckRead.ts`'s `upperMediumOf` and `deckDatumOf`), its deck's bake asked in their thick
+ * bake's place, every band in one request ({@link AtmosphereBuilder.bakeDeck}), on the body's own
+ * figure, its split the regime's `deckAltitudeM` over a floor of the ground, or of an envelope where
+ * the body's cover is one's, and given to its tables when it lands (`AtmosphereTables`'
+ * `setDeckTables`, with the correction over the deck the same job bakes). Its labels and its
+ * failures are a thick bake's; it asks no correction of its own.
  */
 
 import type {
@@ -160,6 +170,8 @@ import { bodyGravity } from "./oblate";
 import { keptBakeLightsOf } from "./opticsMessages";
 import type {
   AtmosphereBuilder,
+  DeckBake,
+  DeckBakeAsk,
   DiscBake,
   DiscBakeAsk,
   OpticsBuild,
@@ -179,6 +191,8 @@ import {
 } from "./tables";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
 import { spectralColumnOf } from "./thick/columnLayout";
+import type { DeckSplit, DeckTables } from "./thick/deck";
+import { deckCorrectionAbove, deckDatumOf, upperMediumOf } from "./thick/deckRead";
 import type { PolarisationTable } from "./thick/polarisation";
 import {
   approximateRegime,
@@ -222,6 +236,7 @@ export type CachedTables = Pick<
   | "setThickTables"
   | "setPolarisationCorrection"
   | "setDiscReflectance"
+  | "setDeckTables"
   | "plan"
   | "body"
   | "bottomRadiusM"
@@ -374,8 +389,14 @@ export interface AtmosphereEntry<T> {
    */
   readonly regime: AtmosphereRegime | null;
   /**
+   * Whether the body's cover is a gas envelope's, whose deck reads to the envelope's floor
+   * (`thick/deck.ts`'s `DeckFloor`; R08.T15.a.2): a kept scene's cover's, never a server body's.
+   */
+  readonly envelope: boolean;
+  /**
    * What its tables are made from; `null` where it draws no medium, or holds an absorber and no
-   * light lights it, so that no curve exists.
+   * light lights it, so that no curve exists. Over a routed deck its tables are made of its upper
+   * medium instead (the module's remarks, "The cloud deck").
    */
   readonly built: BuiltAtmosphere | null;
   /** Its per-planet tables; `null` with no `built`, after an eviction, or while the device is lost. */
@@ -517,6 +538,11 @@ interface Labelled {
 interface ToDraw extends Labelled {
   readonly key: string;
   readonly regime: AtmosphereRegime | null;
+  /**
+   * Whether the body's cover is a gas envelope's (R08.T15.a.2): a kept scene's cover's; never a
+   * server body's, whose assembly draws a surface's air alone (`assemble.ts`'s `bodyCoverOf`).
+   */
+  readonly envelope: boolean;
   readonly built: BuiltAtmosphere | null;
   /**
    * The input a server body was built from, which its thick bake asks with; `null` for a kept
@@ -541,16 +567,29 @@ type Build =
 
 /** Where a drawn entry's thick bake stands (R08.T14.c). */
 type BakeState<T> =
-  | { readonly kind: "baking"; readonly handle: ThickBake }
+  | { readonly kind: "baking"; readonly handle: ThickBake | DeckBake }
   | {
       readonly kind: "baked";
       /** The bake's tables, one a band of the tables' plan, kept for tables made again. */
-      readonly tables: ReadonlyArray<MsSourceTable>;
+      readonly tables: BakedTables;
       /** The tables that hold them; `null` before any did, or once another set stands. */
       given: T | null;
     }
   /** Its bake failed: `atmosphereApproximate` stands with every reason. */
   | { readonly kind: "failed" };
+
+/**
+ * What a bake gave: a thick bake's tables, or a deck's (R08.T15.a.2) with the correction over it,
+ * its altitudes the bake's, and the split they stand on.
+ */
+type BakedTables =
+  | { readonly kind: "thick"; readonly tables: ReadonlyArray<MsSourceTable> }
+  | {
+      readonly kind: "deck";
+      readonly tables: ReadonlyArray<DeckTables>;
+      readonly correction: ReadonlyArray<PolarisationTable> | null;
+      readonly splitM: number;
+    };
 
 /** A drawn entry's thick bake, with the labels and reasons the entry was made with. */
 interface HeldBake<T> {
@@ -793,7 +832,7 @@ function ordered(labels: Iterable<AtmosphereLabel>): ReadonlyArray<AtmosphereLab
 function toDrawOf(key: string, input: BodyAtmosphereInput, assembled: AssembledMedium): ToDraw {
   const { labels, reasons } = assembled;
   if (assembled.medium === undefined) {
-    return { key, labels, reasons, regime: null, built: null, input };
+    return { key, labels, reasons, regime: null, envelope: false, built: null, input };
   }
   const { drawn } = assembled;
   const curved = drawn.absorbers.length === 0 || drawn.curves.length > 0;
@@ -802,6 +841,7 @@ function toDrawOf(key: string, input: BodyAtmosphereInput, assembled: AssembledM
     labels,
     reasons,
     regime: assembled.regime,
+    envelope: false,
     built: curved
       ? {
           medium: assembled.medium,
@@ -1006,6 +1046,45 @@ function discBakeAskOf(
       ...(built.temperature === undefined ? {} : { temperature: built.temperature }),
     },
   };
+}
+
+/**
+ * What a routed deck's tables are made of (the module's remarks, "The cloud deck"; R08.T15.a.2): the
+ * upper medium of `built` over the split at `splitM` (`thick/deckRead.ts`'s `upperMediumOf`), on the
+ * deck's datum (`deckDatumOf`), its R_ref raised with the datum's radii, (2a + c) ÷ 3; a body of one
+ * slice and one band on its sphere raised by the split.
+ */
+function deckBuiltOf(built: BuiltAtmosphere, splitM: number): BuiltAtmosphere {
+  const medium = upperMediumOf(built.medium, splitM);
+  const { body } = built;
+  if (body === null) {
+    return { ...built, medium, bottomRadiusM: built.bottomRadiusM + splitM };
+  }
+  const figure = deckDatumOf(body.figure, body.gravity, splitM);
+  const raised =
+    (2 * (figure.equatorialRadiusM - body.figure.equatorialRadiusM) +
+      (figure.polarRadiusM - body.figure.polarRadiusM)) /
+    3;
+  return {
+    ...built,
+    medium,
+    body: { ...body, figure },
+    bottomRadiusM: built.bottomRadiusM + raised,
+  };
+}
+
+/**
+ * The body a routed deck's bake is made on: the body's own figure and R_ref (`built`'s), the split
+ * being the bake's (`thick/deck.ts`'s `prepareDeck`), with its tables' gravity, whose slicing their
+ * plan's bands are of; a sphere of R_ref, as {@link bakeBodyOf} makes one, for tables of one band.
+ */
+function deckBakeBodyOf(built: BuiltAtmosphere, tables: CachedTables): ThickBakeBody {
+  const { body } = built;
+  const made = tables.body;
+  if (body === null || made === null) {
+    return bakeBodyOf({ ...tables, body: null, bottomRadiusM: built.bottomRadiusM });
+  }
+  return { figure: body.figure, gravity: made.gravity, bottomRadiusM: built.bottomRadiusM };
 }
 
 /** `setTimeout`'s schedule. */
@@ -1272,6 +1351,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           labels: kept.kind === "unset" ? ["atmosphereNotYetModelled"] : [],
           reasons: [],
           regime: null,
+          envelope: false,
           built: null,
           input: null,
         };
@@ -1289,7 +1369,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       case "medium": {
         // The router's note carries its reason, so that no APPROXIMATE on a kept scene stands
         // without one; a scene's own labels carry none (R08.T10.c).
-        const regime = classifyRegime(kept.built.medium, kept.cover ?? CLEAR_COVER);
+        const cover = kept.cover ?? CLEAR_COVER;
+        const regime = classifyRegime(kept.built.medium, cover);
         const approximate = approximateRegime(regime);
         entry = {
           key: `kept/medium/v${ATMOSPHERE_OPTICS_VERSION}`,
@@ -1299,6 +1380,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           ]),
           reasons: approximate ? [THICK_REASON] : [],
           regime,
+          envelope: cover.envelope,
           built: kept.built,
           input: null,
         };
@@ -1517,7 +1599,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       const { entry } = build;
       let tables: T | null = null;
       if (entry.built !== null) {
-        const made = this.#make(held, entry.built);
+        const made = this.#make(held, this.#tablesBuilt(entry, entry.built));
         if (made === "unavailable" || made === "failed") {
           // Kept landed to be made again at a later frame, or dropped with the body's problem.
           return;
@@ -1534,20 +1616,28 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       held.build = null;
       held.problem = null;
       held.drawn = { ...entry, tables };
-      if (
-        tables !== null &&
-        entry.built !== null &&
-        entry.regime !== null &&
-        this.#routes(entry.regime)
-      ) {
-        this.#bake(held, entry, entry.built, tables);
-      }
-      if (tables !== null && entry.built !== null) {
-        this.#correct(held, entry, entry.built, tables);
-        this.#disc(held, entry, entry.built);
+      const deck = this.#deckSplitOf(entry);
+      if (tables !== null && entry.built !== null && deck !== null) {
+        // A routed deck's bake carries the correction over it: none is asked beside it. Nor is a
+        // disc table (R08.T16.b), whose bake reads no deck: beyond the boundary the full passes
+        // draw the deck's body, as they draw any body whose table has not landed.
+        this.#bakeDeck(held, entry, entry.built, tables, deck);
+      } else {
+        if (
+          tables !== null &&
+          entry.built !== null &&
+          entry.regime !== null &&
+          this.#routes(entry.regime)
+        ) {
+          this.#bake(held, entry, entry.built, tables);
+        }
+        if (tables !== null && entry.built !== null) {
+          this.#correct(held, entry, entry.built, tables);
+          this.#disc(held, entry, entry.built);
+        }
       }
     } else if (drawn !== null && drawn.built !== null && drawn.tables === null) {
-      const made = this.#make(held, drawn.built);
+      const made = this.#make(held, this.#tablesBuilt(drawn, drawn.built));
       if (made !== "unavailable" && made !== "failed") {
         held.drawn = { ...drawn, tables: made };
       }
@@ -1598,6 +1688,114 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     });
   }
 
+  /**
+   * A routed deck's split (the module's remarks, "The cloud deck"): its regime's `deckAltitudeM`
+   * over a floor of the ground, or of an envelope where the body's cover is one's; `null` for an
+   * entry that is not `cloudDeck`, or not routed.
+   */
+  #deckSplitOf(entry: Pick<ToDraw, "regime" | "envelope">): DeckSplit | null {
+    const { regime } = entry;
+    // An envelope whose τ never reaches the split's is split at its ground: no deck stands there.
+    if (
+      regime === null ||
+      regime.kind !== "cloudDeck" ||
+      !(regime.deckAltitudeM > 0) ||
+      !this.#routes(regime)
+    ) {
+      return null;
+    }
+    return { altitudeM: regime.deckAltitudeM, floor: entry.envelope ? "envelope" : "ground" };
+  }
+
+  /** What an entry's tables are made of: its own, or over a routed deck its upper medium's. */
+  #tablesBuilt(
+    entry: Pick<ToDraw, "regime" | "envelope">,
+    built: BuiltAtmosphere,
+  ): BuiltAtmosphere {
+    const deck = this.#deckSplitOf(entry);
+    return deck === null ? built : deckBuiltOf(built, deck.altitudeM);
+  }
+
+  /**
+   * Asks a routed deck's bake (the module's remarks), as {@link #bake} asks a thick one, on the
+   * body's own figure, drawn meanwhile under `atmosphereComputing`.
+   */
+  #bakeDeck(
+    held: HeldBody<T>,
+    entry: ToDraw,
+    built: BuiltAtmosphere,
+    tables: T,
+    split: DeckSplit,
+  ): void {
+    const made: Labelled = { labels: entry.labels, reasons: entry.reasons };
+    if (built.sources === undefined) {
+      console.warn(
+        `the atmosphere of ${held.id} has no sources to bake: drawn by the thin-atmosphere method`,
+      );
+      this.#showBake(held, { made, state: BAKE_FAILED });
+      return;
+    }
+    let handle: DeckBake;
+    try {
+      const thick = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights);
+      if (thick === null) {
+        return;
+      }
+      const ask: DeckBakeAsk = { ...thick, body: deckBakeBodyOf(built, tables), split };
+      handle = this.#builder.bakeDeck(ask);
+    } catch (error: unknown) {
+      console.error(`the deck's bake of ${held.id} could not be asked:`, error);
+      this.#showBake(held, { made, state: BAKE_FAILED });
+      return;
+    }
+    const bake: HeldBake<T> = { made, state: { kind: "baking", handle } };
+    this.#showBake(held, bake);
+    void this.#deckLanded(held, bake, handle, split).catch((error: unknown) => {
+      console.error(`the deck's bake of ${held.id} could not be taken:`, error);
+      if (!this.#disposed && this.#bodies.get(held.id) === held && held.bake === bake) {
+        this.#showBake(held, { made, state: BAKE_FAILED });
+      }
+    });
+  }
+
+  /** Takes a deck's bake's outcome, unless the body has moved on from it, as {@link #bakeLanded}. */
+  async #deckLanded(
+    held: HeldBody<T>,
+    bake: HeldBake<T>,
+    handle: DeckBake,
+    split: DeckSplit,
+  ): Promise<void> {
+    const outcome = await handle.outcome;
+    if (this.#disposed || this.#bodies.get(held.id) !== held || held.bake !== bake) {
+      return;
+    }
+    switch (outcome.kind) {
+      case "baked":
+        this.#showBake(held, {
+          made: bake.made,
+          state: {
+            kind: "baked",
+            tables: {
+              kind: "deck",
+              tables: outcome.tables,
+              correction: outcome.correction,
+              splitM: split.altitudeM,
+            },
+            given: null,
+          },
+        });
+        this.#giveBake(held);
+        break;
+      case "failed":
+        console.error(`the deck's bake of ${held.id} failed: ${outcome.message}`);
+        this.#showBake(held, { made: bake.made, state: BAKE_FAILED });
+        break;
+      case "cancelled":
+        this.#cancelBake(held);
+        break;
+    }
+  }
+
   /** Takes a thick bake's outcome, unless the body has moved on from it. */
   async #bakeLanded(held: HeldBody<T>, bake: HeldBake<T>, handle: ThickBake): Promise<void> {
     const outcome = await handle.outcome;
@@ -1608,7 +1806,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       case "baked":
         this.#showBake(held, {
           made: bake.made,
-          state: { kind: "baked", tables: outcome.tables, given: null },
+          state: { kind: "baked", tables: { kind: "thick", tables: outcome.tables }, given: null },
         });
         this.#giveBake(held);
         this.#askWaitingDisc(held);
@@ -1641,7 +1839,19 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       return;
     }
     try {
-      tables.setThickTables(state.tables);
+      const baked = state.tables;
+      switch (baked.kind) {
+        case "thick":
+          tables.setThickTables(baked.tables);
+          break;
+        case "deck":
+          // The correction over the deck stands on the J's altitudes, from the split as J's do.
+          if (baked.correction !== null) {
+            tables.setPolarisationCorrection(deckCorrectionAbove(baked.correction, baked.splitM));
+          }
+          tables.setDeckTables(baked.tables);
+          break;
+      }
       state.given = tables;
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {
@@ -1836,7 +2046,11 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     let handle: DiscBake;
     try {
       const ask = discBakeAskOf(entry.input, built, tables, held.lights, {
-        bake: held.bake?.state.kind === "baked" ? held.bake.state.tables : undefined,
+        // A deck's body asks no disc table (`#draw`), so only a thick bake's J is read here.
+        bake:
+          held.bake?.state.kind === "baked" && held.bake.state.tables.kind === "thick"
+            ? held.bake.state.tables.tables
+            : undefined,
         correction:
           held.correction?.state.kind === "baked" ? held.correction.state.tables : undefined,
       });

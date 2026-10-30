@@ -37,7 +37,11 @@ import {
 import { RENDERER_ROOT, runTimeGraph } from "../../test/runTimeGraph";
 import { ScriptedOpticsWorker } from "../../test/scriptedOpticsWorker";
 import { between, seededRandom } from "../../test/seededRandom";
-import { patternedCorrection, patternedThickBake } from "../../test/thickTables";
+import {
+  patternedCorrection,
+  patternedDeckTables,
+  patternedThickBake,
+} from "../../test/thickTables";
 import { heldAppearanceOf } from "../appearance/fromWire";
 import type { LitRegime } from "../bodies/regime";
 import { EngineUnavailable } from "../engine/resilientEngine";
@@ -68,6 +72,9 @@ import { ATMOSPHERE_ANSWER_UNREADABLE, type AtmosphereLabel } from "./labels";
 import { keptBakeLightsOf, type OpticsRequest } from "./opticsMessages";
 import {
   type AtmosphereBuilder,
+  type DeckBake,
+  type DeckBakeAsk,
+  type DeckBakeOutcome,
   MAX_CONSECUTIVE_OPTICS_FAILURES,
   type OpticsBuild,
   type OpticsBuildOutcome,
@@ -88,7 +95,7 @@ import { type MsSourceTable, thickBakeBands } from "./thick/bake";
 import { spectralColumnOf } from "./thick/columnLayout";
 import type { PolarisationTable } from "./thick/polarisation";
 import { keptColumnOf, sphereBakeBody } from "./thick/keptBake";
-import { type AtmosphereRegime, THICK_REASON } from "./thick/regime";
+import { type AtmosphereRegime, type BodyCover, THICK_REASON } from "./thick/regime";
 import { correctionRouted, thickBakeRouted } from "./thick/routing";
 import { channelSource, type SpectralColumn } from "./thick/spectralColumn";
 
@@ -106,6 +113,13 @@ interface ScriptedBake {
   settled: boolean;
   cancelled: boolean;
   readonly settle: (outcome: ThickBakeOutcome) => void;
+}
+
+/** A deck's bake the scripted builder holds, landed by the test (R08.T15.a.2). */
+interface ScriptedDeck {
+  readonly ask: DeckBakeAsk;
+  settled: boolean;
+  readonly settle: (outcome: DeckBakeOutcome) => void;
 }
 
 /** A polarisation correction the scripted builder holds, landed by the test (R08.T14.f). */
@@ -133,6 +147,7 @@ class ScriptedBuilder implements AtmosphereBuilder {
   readonly bakes: ScriptedBake[] = [];
   readonly corrections: ScriptedCorrection[] = [];
   readonly discs: ScriptedDisc[] = [];
+  readonly decks: ScriptedDeck[] = [];
   terminated = false;
 
   bakeDisc(ask: DiscBakeAsk): DiscBake {
@@ -155,6 +170,28 @@ class ScriptedBuilder implements AtmosphereBuilder {
       cancel: () => {
         disc.cancelled = true;
         disc.settle({ kind: "cancelled" });
+      },
+    };
+  }
+
+  bakeDeck(ask: DeckBakeAsk): DeckBake {
+    let resolve: (outcome: DeckBakeOutcome) => void = ignore;
+    const outcome = new Promise<DeckBakeOutcome>((settleWith) => {
+      resolve = settleWith;
+    });
+    const deck: ScriptedDeck = {
+      ask,
+      settled: false,
+      settle: (result) => {
+        deck.settled = true;
+        resolve(result);
+      },
+    };
+    this.decks.push(deck);
+    return {
+      outcome,
+      cancel: () => {
+        deck.settle({ kind: "cancelled" });
       },
     };
   }
@@ -240,6 +277,9 @@ class ScriptedBuilder implements AtmosphereBuilder {
     }
     for (const correction of this.corrections) {
       correction.settle({ kind: "cancelled" });
+    }
+    for (const deck of this.decks) {
+      deck.settle({ kind: "cancelled" });
     }
   }
 
@@ -1436,6 +1476,127 @@ describe("the regime a server body's entry carries (R08.T13.d)", () => {
 function keptEarth(): BuiltAtmosphere {
   return { medium: R05_EARTH_REFERENCE, bottomRadiusM: 6_371_008.8, curves: [], body: null };
 }
+
+/** A router of `cloudDeck` alone, a test's: the product routes none before R08.T15.b.2. */
+function routedDeck(regime: AtmosphereRegime): boolean {
+  return regime.kind === "cloudDeck";
+}
+
+/** The latest deck's bake the cache asked, or a test failure. */
+function latestDeck(h: Harness): ScriptedDeck {
+  const deck = h.builder.decks.at(-1);
+  if (deck === undefined) {
+    throw new Error("no deck's bake was asked");
+  }
+  return deck;
+}
+
+describe("a cloud deck's bake (R08.T15.a.2)", () => {
+  /** A kept body's frame entry. */
+  function kept(id: BodyIdHex, setting: KeptBodyAtmosphere): AtmosphereFrameBody {
+    return { ...lit(id), kept: setting };
+  }
+
+  /** A deck of τ 30 under a cloud fraction of 1, its top 5 km up: `cloudDeck` at 5 km. */
+  const COVER: BodyCover = {
+    cloudFraction: 1,
+    decks: [{ opticalDepth550: 30, baseAltitudeM: 2_000, topAltitudeM: 5_000 }],
+    envelope: false,
+  };
+  /** R05's Earth kept with its sources, so that it bakes. */
+  const built: BuiltAtmosphere = {
+    ...keptEarth(),
+    sources: R05_EARTH_REFERENCE.terms.map(channelSource),
+  };
+  it("asks none by default: a cloudDeck body is drawn as before, on its own medium's tables", () => {
+    const h = harness();
+    note(h, [kept(A, { kind: "medium", built, labels: [], cover: COVER })], 0, null);
+    expect([
+      h.cache.entryOf(A)?.regime,
+      h.builder.decks.length,
+      h.builder.bakes.length,
+      madeAt(h, 0).built.medium,
+    ]).toEqual([{ kind: "cloudDeck", deckAltitudeM: 5_000 }, 0, 0, R05_EARTH_REFERENCE]);
+  });
+
+  it("draws a routed one on its upper medium, asks its deck's bake on its own figure, and gives its tables the deck and the correction over it", async () => {
+    const h = harness(undefined, routedDeck);
+    const view = h.cache.openView();
+    const asked = view.noteFrame({
+      nowMs: 0,
+      scene: null,
+      bodies: [kept(A, { kind: "medium", built, labels: [], cover: COVER })],
+    });
+    const tables = madeAt(h, 0);
+    const { ask } = latestDeck(h);
+    expect([
+      tables.built.medium.topHeightM,
+      tables.built.bottomRadiusM,
+      ask.split,
+      ask.body.bottomRadiusM,
+      ask.column,
+      h.builder.bakes.length,
+      h.builder.corrections.length,
+      asked.labels,
+    ]).toEqual([
+      R05_EARTH_REFERENCE.topHeightM - 5_000,
+      6_371_008.8 + 5_000,
+      { altitudeM: 5_000, floor: "ground" },
+      6_371_008.8,
+      spectralColumnOf(R05_EARTH_REFERENCE, R05_EARTH_REFERENCE.terms.map(channelSource)),
+      0,
+      0,
+      ["atmosphereComputing"],
+    ]);
+    const bands = tables.plan.bands;
+    const decks = patternedDeckTables(bands, tables.built.medium, 1, 5_000);
+    // The correction over the deck, its altitudes from the split up, as the deck's bake lays it.
+    const correction = patternedCorrection(bands, tables.built.medium, 1).map(
+      (band): PolarisationTable => ({
+        band: band.band,
+        altitudesM: band.altitudesM.map((at) => at + 5_000),
+        sunCosines: band.sunCosines,
+        travelCosines: band.travelCosines,
+        modes: band.modes,
+        slots: band.slots,
+      }),
+    );
+    latestDeck(h).settle({ kind: "baked", tables: decks, correction });
+    await microtasks();
+    const baked = view.noteFrame({
+      nowMs: 1,
+      scene: null,
+      bodies: [kept(A, { kind: "medium", built, labels: [], cover: COVER })],
+    });
+    expect([
+      tables.decks.at(-1) === decks,
+      Array.from(tables.correctionHeld?.[0]?.altitudesM ?? []).slice(0, 2),
+      baked.labels,
+    ]).toEqual([
+      true,
+      Array.from(patternedCorrection(bands, tables.built.medium, 1)[0]?.altitudesM ?? []).slice(
+        0,
+        2,
+      ),
+      [],
+    ]);
+  });
+
+  it("splits an envelope's deck at its floor, and draws an envelope split at its ground as before", () => {
+    const h = harness(undefined, routedDeck);
+    note(
+      h,
+      [kept(A, { kind: "medium", built, labels: [], cover: { ...COVER, envelope: true } })],
+      0,
+      null,
+    );
+    // R05's Earth never reaches the envelope's τ 10: its floor is the ground, and no deck stands.
+    expect([h.cache.entryOf(A)?.regime, h.builder.decks.length]).toEqual([
+      { kind: "cloudDeck", deckAltitudeM: 0 },
+      0,
+    ]);
+  });
+});
 
 describe("the cache's disposal", () => {
   /**

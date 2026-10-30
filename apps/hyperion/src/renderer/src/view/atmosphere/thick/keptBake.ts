@@ -1,8 +1,8 @@
 /**
- * A kept scene's thick bake and polarisation correction made directly, with no optics worker (plan
- * R08, R08.T14.c and R08.T14.f; `decision-r08-t13c2-classes.md` §6): for the tests, the recorded
- * runs and the vector gates, from a kept medium and its sources, as `opticsJobs.ts` answers a kept
- * body's `thick-bake` and `polarisation-bake`.
+ * A kept scene's thick bake, polarisation correction and deck made directly, with no optics worker
+ * (plan R08, R08.T14.c, R08.T14.f and R08.T15.a.2; `decision-r08-t13c2-classes.md` §6): for the
+ * tests, the recorded runs and the vector gates, from a kept medium and its sources, as
+ * `opticsJobs.ts` answers a kept body's `thick-bake`, `polarisation-bake` and `deck-bake`.
  *
  * @remarks
  * A kept medium is handed to the atmosphere cache whole and never assembled, so its terms' sources
@@ -27,7 +27,19 @@ import {
   thickBakeLights,
 } from "./bake";
 import {
+  bakeDeck,
+  bakeDeckPolarisation,
+  type DeckBandOptions,
+  type DeckOptions,
+  type DeckSplit,
+  type DeckTables,
+  prepareDeck,
+  prepareDeckPolarisation,
+  type PreparedDeck,
+} from "./deck";
+import {
   bakePolarisationCorrection,
+  needsPolarisationCorrection,
   type PolarisationTable,
   preparePolarisation,
 } from "./polarisation";
@@ -112,6 +124,56 @@ export function bakeKeptCorrection(
   );
   const bands = options.bands ?? thickBakeBands(body).map((_, band) => band);
   return bands.map((band) => bakePolarisationCorrection(prepared, body, band));
+}
+
+/** A kept medium's deck as a direct bake makes it (R08.T15.a.2). */
+export interface KeptDeck {
+  /** The deck's preparation, for a caller's records of its layers and floor. */
+  readonly prepared: PreparedDeck;
+  /** One a band asked, in its order, each with a slot a light. */
+  readonly tables: ReadonlyArray<DeckTables>;
+  /** The correction over the deck, one a band; `null` where the column needs none. */
+  readonly correction: ReadonlyArray<PolarisationTable> | null;
+}
+
+/** What a direct deck's bake takes beside a kept bake's options: the deck's and its bands'. */
+export interface KeptDeckOptions extends KeptBakeOptions {
+  /** The deck's preparation's options, the grid's from {@link KeptBakeOptions.grid}. */
+  readonly deck?: Omit<DeckOptions, "grid">;
+  /** Each band's options (`thick/deck.ts`'s `DeckBandOptions`). */
+  readonly band?: DeckBandOptions;
+}
+
+/**
+ * A kept medium's deck split at `split` (R08.T15.a.2), as `opticsJobs.ts` answers a kept body's
+ * `deck-bake`: `prepareDeck` of its column under the lights' bin curves, formed as
+ * {@link bakeKeptCase} forms them, each band asked's `bakeDeck`, and where the column needs it the
+ * correction over the deck a band.
+ *
+ * @throws RangeError as {@link keptColumnOf}, `thickBakeLights`, `prepareDeck`, `bakeDeck` and the
+ *   correction refuse their inputs (a band the body does not have).
+ */
+export function bakeKeptDeck(
+  kept: KeptMedium,
+  lights: KeptBakeLights,
+  body: ThickBakeBody,
+  split: DeckSplit,
+  options: KeptDeckOptions = {},
+): KeptDeck {
+  const column = keptColumnOf(kept);
+  const bakeLights = thickBakeLights(column, lights.absorbers, lights.spectra);
+  const prepared = prepareDeck(column, bakeLights, split, {
+    ...options.deck,
+    grid: options.grid ?? THICK_BAKE_GRID,
+  });
+  const bands = options.bands ?? thickBakeBands(body).map((_, band) => band);
+  const tables = bands.map((band) => bakeDeck(prepared, body, band, options.band));
+  let correction: ReadonlyArray<PolarisationTable> | null = null;
+  if (needsPolarisationCorrection(column)) {
+    const polarisation = prepareDeckPolarisation(prepared, bakeLights);
+    correction = bands.map((band) => bakeDeckPolarisation(prepared, polarisation, body, band));
+  }
+  return { prepared, tables, correction };
 }
 
 /**

@@ -19,6 +19,7 @@ import type { AtmosphereMedium } from "./medium";
 import type { BakeSpectrum } from "./spectralColour";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
 import type { DiscBakeAir } from "./thick/discBake";
+import type { DeckSplit, DeckTables } from "./thick/deck";
 import type { PolarisationTable } from "./thick/polarisation";
 import type { SpectralColumn } from "./thick/spectralColumn";
 
@@ -42,6 +43,10 @@ import type { SpectralColumn } from "./thick/spectralColumn";
  *   `bands` and light in `slots`, `thick-bake`'s fields with the medium as the tables hold it and
  *   the body's bakes that have landed (`air`): J from its routed bake where given, else baked as
  *   `thick-bake` bakes it.
+ * - `deck-bake` (R08.T15.a.2): a cloud-deck split's tables (`thick/deck.ts`) of `column` on `body`
+ *   at `split`, laid out and lit as `thick-bake`'s: the deck prepared once, each band's
+ *   `bakeDeck`, and, where the column needs it (`needsPolarisationCorrection`), each band's
+ *   polarisation correction over the deck.
  *
  * `slots` index the input's lights, which are its light slots in `lightsAt`'s order. A kept
  * body's bake (`input.kind === "kept"`, whose medium the scene built and no assembly gives specs or
@@ -96,6 +101,19 @@ export type OpticsRequest =
       /** A kept body's absorber specs and light spectra, in place of the input's. */
       readonly kept?: KeptBakeLights;
       readonly air: DiscBakeAir;
+    }
+  | {
+      readonly kind: "deck-bake";
+      readonly id: number;
+      readonly input: BodyAtmosphereInput;
+      readonly slots: ReadonlyArray<number>;
+      readonly bands: ReadonlyArray<number>;
+      readonly column: SpectralColumn;
+      readonly body: ThickBakeBody;
+      /** Where the split lies and how deep its deck is read (`thick/deck.ts`'s `DeckSplit`). */
+      readonly split: DeckSplit;
+      /** A kept body's absorber specs and light spectra, in place of the input's. */
+      readonly kept?: KeptBakeLights;
     };
 
 /**
@@ -150,6 +168,11 @@ export function keptBakeLightsOf(
  * - `disc-baked`: a `disc-bake`'s table.
  * - `disc-bake-failed`: a `disc-bake` that threw or was refused, as `thick-bake-failed` is, never
  *   `failed`.
+ * - `deck-baked`: a `deck-bake`'s tables, one a band asked in its order, their slots the lights
+ *   asked in theirs, and the correction over the deck the same way, or `null` where the column
+ *   needs none.
+ * - `deck-bake-failed`: a `deck-bake` that threw or was refused, as `thick-bake-failed` is, never
+ *   `failed`.
  * - `failed`: the job threw, a bug (`decision-r08-t10a-leans.md` item 6), with its message.
  */
 export type OpticsReply =
@@ -188,6 +211,18 @@ export type OpticsReply =
     }
   | { readonly kind: "disc-baked"; readonly id: number; readonly table: DiscReflectanceTable }
   | { readonly kind: "disc-bake-failed"; readonly id: number; readonly message: string }
+  | {
+      readonly kind: "deck-baked";
+      readonly id: number;
+      readonly tables: ReadonlyArray<DeckTables>;
+      readonly correction: ReadonlyArray<PolarisationTable> | null;
+    }
+  | {
+      readonly kind: "deck-bake-failed";
+      readonly id: number;
+      readonly bands: ReadonlyArray<number>;
+      readonly message: string;
+    }
   | { readonly kind: "failed"; readonly id: number; readonly message: string };
 
 /** A worker's reply and the buffers it transfers with it. */

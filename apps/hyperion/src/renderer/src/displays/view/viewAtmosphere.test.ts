@@ -22,6 +22,7 @@ const NEVER: AtmosphereBuilder = {
   bakeThick: () => ({ outcome: new Promise(() => undefined), cancel: () => undefined }),
   bakePolarisation: () => ({ outcome: new Promise(() => undefined), cancel: () => undefined }),
   bakeDisc: () => ({ outcome: new Promise(() => undefined), cancel: () => undefined }),
+  bakeDeck: () => ({ outcome: new Promise(() => undefined), cancel: () => undefined }),
   terminate: () => undefined,
 };
 

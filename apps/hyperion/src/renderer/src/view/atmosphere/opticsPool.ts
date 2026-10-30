@@ -41,6 +41,9 @@
  * **A disc's table** ({@link OpticsWorkerPool.bakeDisc}; R08.T16.b) is one `disc-bake` job, asked as a
  * thick bake is, with its request's fields and the medium and landed bakes it marches with, and
  * failing as one does: its own failure, never a build's.
+ * **A deck** ({@link OpticsWorkerPool.bakeDeck}; R08.T15.a.2) is one `deck-bake` job, a thick bake's
+ * fields and the split, answered with the deck's tables and the correction over it together, and
+ * failing as a thick bake does.
  *
  * The workers start at the first build or bake, so a session that draws no disc loads none of the
  * optics. This module takes only types of `assemble.ts` and of the thick bake's modules, whose
@@ -59,6 +62,7 @@ import {
 import type { DiscReflectanceTable } from "./discTable";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
 import type { DiscBakeAir } from "./thick/discBake";
+import type { DeckSplit, DeckTables } from "./thick/deck";
 import type { PolarisationTable } from "./thick/polarisation";
 import type { SpectralColumn } from "./thick/spectralColumn";
 
@@ -167,6 +171,35 @@ export interface ThickBake {
   cancel(): void;
 }
 
+/** What a deck's bake asks (R08.T15.a.2): a thick bake's fields and the split. */
+export interface DeckBakeAsk extends ThickBakeAsk {
+  /** Where the split lies and how deep its deck is read (`thick/deck.ts`'s `DeckSplit`). */
+  readonly split: DeckSplit;
+}
+
+/** How a deck's bake ended (R08.T15.a.2), as a thick bake's does. */
+export type DeckBakeOutcome =
+  /**
+   * One deck table a band asked, in their order, each with a slot a light asked, in theirs, and the
+   * correction over the deck the same way, or `null` where the column needs none.
+   */
+  | {
+      readonly kind: "baked";
+      readonly tables: ReadonlyArray<DeckTables>;
+      readonly correction: ReadonlyArray<PolarisationTable> | null;
+    }
+  /** The bake failed, as a thick bake fails, with the message for the console's log. */
+  | { readonly kind: "failed"; readonly message: string }
+  | { readonly kind: "cancelled" };
+
+/** A deck's bake under way (R08.T15.a.2). */
+export interface DeckBake {
+  /** Settles once with how the bake ended; never rejects. */
+  readonly outcome: Promise<DeckBakeOutcome>;
+  /** Drops its job if not yet sent and ignores its answer if sent; settles it `cancelled`. */
+  cancel(): void;
+}
+
 /** How a polarisation correction's bake ended (R08.T14.f), as a thick bake's does. */
 export type PolarisationBakeOutcome =
   /** One table a band asked, in their order, each with a slot a light asked, in theirs. */
@@ -219,6 +252,11 @@ export interface AtmosphereBuilder {
   bakePolarisation(ask: ThickBakeAsk): PolarisationBake;
   /** Bakes a body's disc reflectance table (R08.T16.b), every band and light in one request. */
   bakeDisc(ask: DiscBakeAsk): DiscBake;
+  /**
+   * Bakes a cloud-deck split's tables and the correction over it (R08.T15.a.2), every band in one
+   * request.
+   */
+  bakeDeck(ask: DeckBakeAsk): DeckBake;
   /** Stops every worker; builds and bakes under way settle `cancelled`. */
   terminate(): void;
 }
@@ -567,6 +605,35 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
     };
   }
 
+  /**
+   * Bakes a cloud-deck split's tables (see the module's remarks): one `deck-bake` job asking every
+   * band and slot of `ask`.
+   *
+   * @throws Error once the pool is terminated.
+   */
+  bakeDeck(ask: DeckBakeAsk): DeckBake {
+    if (this.#terminated) {
+      throw new Error("the optics-worker pool was terminated");
+    }
+    this.#start();
+    const job = this.#submit((id) => ({ kind: "deck-bake", id, ...ask }), []);
+    let cancelled = false;
+    const settled = job.outcome.then(
+      (outcome): DeckBakeOutcome => (cancelled ? CANCELLED : deckOutcomeOf(outcome, ask)),
+      (error: unknown): DeckBakeOutcome => ({
+        kind: "failed",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return {
+      outcome: settled,
+      cancel: () => {
+        cancelled = true;
+        job.cancel();
+      },
+    };
+  }
+
   /** Stops every worker; every job settles `cancelled`, and the pool cannot be used afterwards. */
   terminate(): void {
     if (this.#terminated) {
@@ -861,6 +928,42 @@ function discOutcomeOf(outcome: JobOutcome): DiscBakeOutcome {
       break;
     case "lost":
       baked = { kind: "failed", message: "an optics worker failed with the disc's bake's request" };
+      break;
+    case "cancelled":
+      baked = CANCELLED;
+      break;
+  }
+  return baked;
+}
+
+/** A deck's job's outcome as the bake's, as {@link bakeOutcomeOf} reads a thick one. */
+function deckOutcomeOf(outcome: JobOutcome, ask: DeckBakeAsk): DeckBakeOutcome {
+  let baked: DeckBakeOutcome;
+  switch (outcome.kind) {
+    case "answered": {
+      const { reply } = outcome;
+      if (reply.kind === "deck-baked") {
+        const bands = ask.bands.length;
+        baked =
+          reply.tables.length === bands &&
+          (reply.correction === null || reply.correction.length === bands)
+            ? { kind: "baked", tables: reply.tables, correction: reply.correction }
+            : {
+                kind: "failed",
+                message: `a deck of ${bands} bands was answered with ${reply.tables.length} tables`,
+              };
+      } else if (reply.kind === "deck-bake-failed") {
+        baked = { kind: "failed", message: reply.message };
+      } else {
+        baked = { kind: "failed", message: `a deck's bake was answered ${reply.kind}` };
+      }
+      break;
+    }
+    case "failed":
+      baked = outcome;
+      break;
+    case "lost":
+      baked = { kind: "failed", message: "an optics worker failed with the deck's request" };
       break;
     case "cancelled":
       baked = CANCELLED;
