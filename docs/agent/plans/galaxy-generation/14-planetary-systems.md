@@ -31001,14 +31001,16 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       refusal that variant and a host with no disc `NoDisc`, so that a refused zone is not
       modelled with its reason rather than read as no disc.
   - _P14.T54.b.l, the bump_ (B4, lane `p14-wire-24`, 2026-10-29; decision-p14-t54b-open, B3's
-    handoff). `GENERATOR_VERSION` 23 → 24; `PROTOCOL_VERSION` stays 3. Three commits, not the
-    brief's four: its first two are merged (lean, 2026-10-29), since a restatement can only be
-    checked once the holds are gone, and the restamps need the bump's `--since 24`.
+    handoff). `GENERATOR_VERSION` 23 → 24; `PROTOCOL_VERSION` stays 3. Five commits, the brief's
+    first two merged (lean, 2026-10-29), since a restatement can only be checked once the holds
+    are gone, and the restamps need the bump's `--since 24`.
     1. The holds' deletion, with every test deleted or restated at 24. It is still at version 23,
        so its goldens and `fit-check` fail there: skip it when bisecting. §C.7's first split, the
        system tests' continuity window, is in it too.
     2. The bump, the restamps and the bless, with the fixtures, the client and the bindings.
     3. §C.7's splits, the review's fixes, the docs and this record.
+    4. The slow measurements restated at 24's counts, after their runs by name (below).
+    5. This list's correction, before the gate.
     - _The holds deleted_, each with its tripwire, switch and arm:
       - `RAYLEIGH_FLOOR`;
       - `ESCAPE`, with `GreenhouseConstants::FITTED`, `CarbonDioxideTerm::SquareRoot`,
@@ -31062,7 +31064,7 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       - 3 are new: `the_record_s_moments_are_the_laws`, `a_kilobar_runaway_takes_the_thick_air_closure`
         and `a_table_body_that_does_not_qualify_publishes_t51a_s_entries`. §C.7's 10 slow twins are
         listed below.
-      - 100 are restated at 24's figures, each saying what 23 gave; this counts every test whose
+      - 101 are restated at 24's figures, each saying what 23 gave; this counts every test whose
         body's or doc's figures moved. 159 more lose a switch, a held half or a doc's hold, or
         take §C.7's chunk, with no figure moved. The lists are the outbox's
         (`tests-deleted-and-restated.md`).
