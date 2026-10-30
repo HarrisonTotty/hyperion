@@ -1214,8 +1214,22 @@ export const HOT_TABLES: Readonly<Record<string, HotTable>> = {
     what: "VO's bands (HyVO's strong lines, as Cubillos's REPACK holds them, R08.T4.f), from 1000 K (E2).",
     notes:
       "Below 1000 K the 1000 K node is held, estimated (decision-r08-t4ef-storage section 1.4, " +
-      "E2); measured to 3500 K, REPACK's top, and estimated above it; above 4000 K the 4000 K " +
-      "node is held, estimated, HyVO being valid to 5400 K.",
+      "E2: V's refractory condensates cold-trap it below about 1500-2000 K at photospheric " +
+      "pressures). REPACK keeps HyVO's strong lines alone, those whose line-centre opacity passes " +
+      "a hundredth of the other lines' there at some temperature of 100-3500 K (threshold 0.01, " +
+      "Cubillos 2017): 7594976 of its 56903218 records lie in 13100-26400 cm-1, and the weak " +
+      "lines' quasi-continuum is left out (main's ruling of 2026-10-30 waives " +
+      "decision-r08-t4ef-storage section 5.4's no-cut-off rule for VO). Against the pending " +
+      "bound's HyVO cell means (ExoMol's cross-section service, per molecule of 51V16O) the direct " +
+      "sums over the cells above a hundredth of its peak are 0.991, 0.985 and 0.974 summed at " +
+      "1000, 2000 and 3000 K; cell by cell 0.947-1.008 between the 10th and 90th percentiles and " +
+      "0.904-1.053 at the extremes (623 and 607 nm; 653 nm), and to 0.83 in a cell at a " +
+      "thousandth of the peak (602 nm at 1000 K), the deficit growing with temperature as the hot " +
+      "weak lines' share does. So the table is measured to 3500 K, REPACK's top, and estimated " +
+      "above it; above 4000 K the 4000 K node is held, estimated, HyVO being valid to 5400 K. Q(T) " +
+      "is HyVO's .pf, and the mass and default width (0.07 cm-1 per bar with n = 0.5, estimated) " +
+      "its .def's. VOMYT (McKemmish et al. 2016) was not taken: its lines carry about half HyVO's " +
+      "strength over the range (0.50 summed, 0.38-0.68 by system, main's research advice).",
   }),
 };
 

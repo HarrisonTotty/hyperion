@@ -51,6 +51,12 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
   - `HCN`: Harris's H¹²C¹⁴N (G. J. Harris et al., Mon. Not. R. Astron. Soc. 367 (2006) 400, DOI
     10.1111/j.1365-2966.2005.09960.x; R. J. Barber et al., Mon. Not. R. Astron. Soc. 437 (2014)
     1828, DOI 10.1093/mnras/stt2011).
+  - `VO`: HyVO's ⁵¹V¹⁶O (C. A. Bowesman, Q. Qu, L. K. McKemmish, S. N. Yurchenko and J. Tennyson,
+    Mon. Not. R. Astron. Soc. 529 (2024) 1321, DOI 10.1093/mnras/stae542), its strong lines as P. E.
+    Cubillos's REPACK holds them (Repacked ExoMol Opacity Line Lists, Zenodo record 14266247,
+    version 3, DOI 10.5281/zenodo.14266247, whose record states CC BY 4.0, read 2026-10-30; the
+    method P. E. Cubillos, Astrophys. J. 850 (2017) 32), with HyVO's `.def` and `.pf` from ExoMol's
+    own site, under the database's licence quoted above.
 - `lineReferencesNH3.json` and `lineReferencesN2O.json` (plan R08, R08.T4.g), and
   `lineReferencesHot.json` (plan R08, R08.T4.f): named cells' curves of growth at three node
   pressures and three midpoints, computed from the same lists, beside the reduction's own, which
@@ -58,8 +64,8 @@ Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) licence
 - `n2oMerge.json` (plan R08, R08.T4.g): HITRAN2024's N₂O bands against TYM's of the same
   assignment, and each merged cell's bands by list and its mean cross-sections, which the tests
   read.
-- None of the line lists' files (`.def`, `.def.json`, `.states`, `.trans`, `.pf`, `.broad`), nor
-  any decompressed, filtered or binned copy of them, is committed; they are fetched by URL and
+- None of the line lists' files (`.def`, `.def.json`, `.states`, `.trans`, `.pf`, `.broad`,
+  REPACK's `_lbl.dat`), nor any decompressed, filtered or binned copy of them, is committed; they are fetched by URL and
   checked against the SHA-256 the sidecars and `src/tools/exomolCli.ts` name.
 - This adapted material is offered under CC BY-SA 4.0. It is kept in files of its own, never
   merged into `crossSections.json` or into code (decision-composition §5), and `NOTICE` carries

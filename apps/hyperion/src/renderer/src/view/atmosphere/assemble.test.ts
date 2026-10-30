@@ -283,8 +283,8 @@ describe("the key the cache holds a medium under", () => {
     );
   });
 
-  it("keys on the optics' version 3, raised by R08.T4.f's hot tables", () => {
-    expect(ATMOSPHERE_OPTICS_VERSION).toBe(3);
+  it("keys on the optics' version 4, raised by R08.T4.f's hot tables and then its VO", () => {
+    expect(ATMOSPHERE_OPTICS_VERSION).toBe(4);
   });
 
   it.each(["unset", "airless"] as const)(

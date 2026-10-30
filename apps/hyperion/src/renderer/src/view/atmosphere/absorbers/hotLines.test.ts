@@ -32,15 +32,15 @@ import {
 import { NO_VISIBLE_ABSORPTION, PENDING_ABSORBERS } from "./transparency";
 
 /** The species R08.T4.f draws from ExoMol's lists (decision-r08-t4ef-storage §5.4's order). */
-const DRAWN = ["FeH", "TiO", "H2S", "CO", "HCN", "SiO", "N2"] as const;
+const DRAWN = ["FeH", "TiO", "H2S", "CO", "HCN", "SiO", "N2", "VO"] as const;
 
 /** A drawn species. */
 type Drawn = (typeof DRAWN)[number];
 
 /**
- * Each drawn table's first and last node, K: its floor (E2: TiO, FeH and SiO from 1,000 K; N₂ from
- * its stated none's 1,800 K), H₂S's 296 K, or its hand-over; and 4,000 K, R08.T4.f's top, or its
- * list's limit (AYT2's 1,500 K).
+ * Each drawn table's first and last node, K: its floor (E2: TiO, FeH, SiO and VO from 1,000 K; N₂
+ * from its stated none's 1,800 K), H₂S's 296 K, or its hand-over; and 4,000 K, R08.T4.f's top, or
+ * its list's limit (AYT2's 1,500 K).
  */
 const RANGES: Readonly<Record<Drawn, readonly [number, number]>> = {
   FeH: [1_000, 4_000],
@@ -50,7 +50,14 @@ const RANGES: Readonly<Record<Drawn, readonly [number, number]>> = {
   HCN: [300, 4_000],
   SiO: [1_000, 4_000],
   N2: [1_800, 4_000],
+  VO: [1_000, 4_000],
 };
+
+/**
+ * Where a drawn table's measured range ends below its top node, K: VO's at 3,500 K, the top of the
+ * range over which REPACK chose HyVO's strong lines.
+ */
+const MEASURED_TO: Readonly<Partial<Record<Drawn, number>>> = { VO: 3_500 };
 
 /**
  * Where a drawn table's ladder starts after an off-ladder first node, K: H₂S's, whose first node is
@@ -71,11 +78,11 @@ const ESTIMATED: ReadonlyArray<Drawn> = ["CO", "HCN", "N2"];
 const HANDED_OVER: ReadonlyArray<Drawn> = ["CO", "HCN"];
 
 /**
- * The species R08.T4.f leaves pending, each keeping its entry: VO and hot H₂O, whose lists (HyVO,
- * POKAZATEL) the reducing machine could not fetch; hot CO₂ (UCL-4000, its χ far wings beyond the
- * super-lines); hot NH₃ and N₂O (decision-r08-t4ef-storage §5.4).
+ * The species R08.T4.f leaves pending, each keeping its entry: hot H₂O, whose list (POKAZATEL) the
+ * reducing machine could not fetch; hot CO₂ (UCL-4000, its χ far wings beyond the super-lines); hot
+ * NH₃ and N₂O (decision-r08-t4ef-storage §5.4).
  */
-const PENDING = ["VO", "H2O", "CO2", "NH3", "N2O"] as const;
+const PENDING = ["H2O", "CO2", "NH3", "N2O"] as const;
 
 /**
  * T4.f's budget, bytes (decision-r08-t4ef-storage §1.3): the 150,000,000-byte cap less the
@@ -239,6 +246,11 @@ describe("the drawn tables' grids", () => {
     },
   );
 
+  it.each(DRAWN)("measure %s over its nodes, or to its stated limit", (key) => {
+    const { measuredRangeK, temperaturesK } = sidecarOf(key);
+    expect(measuredRangeK).toEqual([temperaturesK[0], MEASURED_TO[key] ?? temperaturesK.at(-1)]);
+  });
+
   it("start N₂'s table at its stated none's limit, the belowK contract's table branch", () => {
     const n2 = NO_VISIBLE_ABSORPTION.find((n) => n.species === "N2");
     expect([n2?.belowK, sidecarOf("N2").temperaturesK[0]]).toEqual([1_800, 1_800]);
@@ -365,6 +377,17 @@ describe.each(DRAWN)("%s's curves", (key) => {
     },
     60_000,
   );
+});
+
+describe("VO's table above REPACK's 3,500 K", () => {
+  it("reads measured to 3,500 K and estimated above it, to its 4,000 K node", () => {
+    const vo = hotTable("VO");
+    expect([3_500, 3_600, 4_000].map((t) => kDistributionAt(vo, t).provenance)).toEqual([
+      "measured",
+      "estimated",
+      "estimated",
+    ]);
+  });
 });
 
 /**

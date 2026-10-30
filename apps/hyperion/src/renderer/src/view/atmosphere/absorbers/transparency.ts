@@ -592,11 +592,6 @@ const PENDING: ReadonlyArray<PendingListing> = [
     what: "H2- free-free, from Bell 1980's table once a lawful copy is fetched",
   },
   {
-    key: "VO",
-    task: "R08.T4.f",
-    what: "its bands (ExoMol's HyVO), R08.T4.f's part 2: the list is in no archive the reducing machine could reach",
-  },
-  {
     key: "CO",
     task: "R08.T4.f",
     part: "overtones",
