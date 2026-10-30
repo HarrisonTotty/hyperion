@@ -21,6 +21,7 @@ import type {
   FeatureKindWire,
   LayerCensus,
   LayerStatus,
+  MapFeatureKindWire,
   MassLayer,
   ObjectKindDto,
   Population,
@@ -329,3 +330,45 @@ export interface ChartFeatures {
   /** Every feature of the included kinds within range, nearest first, ties by ID. */
   readonly features: ReadonlyArray<ChartFeature>;
 }
+
+/** A feature the galaxy map draws (plan 09, P09.T41.b): a globular or the centre, at the map's time. */
+export interface MapFeature {
+  /** The ID as on the wire, lower case. */
+  readonly id: FeatureIdHex;
+  readonly designation: string;
+  readonly kind: FeatureKindWire;
+  /** Its centre in the `GALACTIC` frame. */
+  readonly positionLy: Vec3;
+  /** Its radius at the map's time. */
+  readonly extentLy: number;
+  /** Its present mass, in M☉, which orders the labels. */
+  readonly massMsun: number;
+}
+
+/** A supernova remnant's bright shell the galaxy map draws (plan 09, P09.T41.b): about its site. */
+export interface MapShell {
+  /** The catalogue system that exploded. */
+  readonly system: SystemIdHex;
+  readonly designation: string;
+  /** The explosion site, the shell's centre, in the `GALACTIC` frame. */
+  readonly siteLy: Vec3;
+  /** The radius of its outer shock at the map's time. */
+  readonly radiusLy: number;
+}
+
+/**
+ * One kind's layer of the galaxy map's feature overlay (plan 09, P09.T41.b): all of the kind, or
+ * none, with the server's reason that it does not generate them.
+ */
+export type MapFeatureLayer =
+  | {
+      readonly kind: "globular" | "galactic_centre";
+      readonly status: "complete";
+      readonly features: ReadonlyArray<MapFeature>;
+    }
+  | {
+      readonly kind: "bright_shell";
+      readonly status: "complete";
+      readonly shells: ReadonlyArray<MapShell>;
+    }
+  | { readonly kind: MapFeatureKindWire; readonly status: "not_generated" };

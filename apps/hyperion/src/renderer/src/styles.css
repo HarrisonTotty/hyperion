@@ -1448,6 +1448,75 @@ body {
   stroke: var(--text);
 }
 
+/*
+ * The feature overlay over a map's picture (plan 09, P09.T41.b): one SVG in the picture's CSS px,
+ * under the cursor and the chart's centre, taking no pointer, so that a pick reaches the picture.
+ * Every line is cased in --surface-0, as any line over a raster is: the crosses at a mark's
+ * outline in --text, open, the circles at true radius 1 px in --text-muted, and the labels in
+ * --text, set as the views' labels are. Stale, the crosses and the labels are muted too.
+ */
+.map-features {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  fill: none;
+  pointer-events: none;
+}
+
+.map-features :is(path, circle) {
+  vector-effect: non-scaling-stroke;
+}
+
+.map-features__casing {
+  stroke: var(--surface-0);
+  stroke-width: calc(var(--mark-stroke) + 2px * var(--line-scale));
+}
+
+.map-features__cross {
+  stroke: var(--text);
+  stroke-width: var(--mark-stroke);
+}
+
+.map-features__circle-casing {
+  stroke: var(--surface-0);
+  stroke-width: calc(3px * var(--line-scale));
+}
+
+.map-features__circle {
+  stroke: var(--text-muted);
+  stroke-width: calc(1px * var(--line-scale));
+}
+
+.map-features__label {
+  fill: var(--text);
+  stroke: var(--surface-0);
+  stroke-width: calc(2px * var(--line-scale));
+  paint-order: stroke;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  letter-spacing: 0.1em;
+}
+
+.map-features--stale :is(.map-features__cross, .map-features__label) {
+  stroke: var(--text-muted);
+}
+
+.map-features--stale .map-features__label {
+  fill: var(--text-muted);
+  stroke: var(--surface-0);
+}
+
+/* The overlay's toggles under the face-on view's legends, each kind's sample beside its name. */
+.map-view__features {
+  margin-bottom: 0;
+}
+
+.map-features__sample circle {
+  stroke-width: calc(1px * var(--line-scale));
+}
+
 /* A mark pegged to the picture's edge: the arrow beside it says which way its point lies. */
 .map-view__peg {
   position: absolute;

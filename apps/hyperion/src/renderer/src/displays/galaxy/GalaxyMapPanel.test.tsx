@@ -582,7 +582,7 @@ describe("GalaxyMapPanel", () => {
     ["stacked", ...PAGE_1920_1080],
     ["compact", ...PAGE_1280_720],
   ])(
-    "keeps one tab order laid out %s: the choices, the toggle, then face-on and edge-on",
+    "keeps one tab order laid out %s: the choices, the toggles, then face-on and edge-on",
     async (_layout, widthPx, heightPx) => {
       stubPageSize(widthPx, heightPx);
       const { user, socket } = await renderPanel();
@@ -594,6 +594,13 @@ describe("GalaxyMapPanel", () => {
       expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toHaveFocus();
       await user.tab();
       expect(within(panel()).getByRole("button", { name: "D DUST OVERLAY" })).toHaveFocus();
+      // The feature overlay's toggles, under the face-on view's legends (plan 09, P09.T41.b).
+      await user.tab();
+      expect(within(panel()).getByRole("checkbox", { name: "GC" })).toHaveFocus();
+      await user.tab();
+      expect(within(panel()).getByRole("checkbox", { name: "CENTRE" })).toHaveFocus();
+      await user.tab();
+      expect(within(panel()).getByRole("checkbox", { name: "SNR" })).toHaveFocus();
       await user.tab();
       expect(
         within(panel()).getByRole("application", { name: "Galaxy map, face-on" }),

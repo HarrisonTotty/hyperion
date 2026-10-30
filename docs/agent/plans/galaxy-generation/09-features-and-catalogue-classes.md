@@ -4521,6 +4521,19 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     server's `features.golden` in `test/featureFixtures.ts`.
   - Not drawn: a remnant's shell on the chart, since a range row carries no explosion site; the
     map's bright shells carry one (P09.T41.b).
+- **P09.T41.b, records (lane `p09-t41`, 2026-10-30, at 23 and 3; client only).**
+  - `useGalaxyFeatures` (the page's one `galaxy_features` request, at the epoch) and
+    `toMapFeatureLayers` give `MapFeatureLayer`s (`MapFeature`, `MapShell` in `lib/galaxy/model.ts`);
+    `placeMapFeatures` (`lib/galaxy/mapFeatures.ts`) places them per view, pure; `MapFeatureOverlay`
+    draws them over each picture; `MapFeatureToggles` (`GC`, `CENTRE`, `SNR`) stands in the face-on
+    view's words, through `GalaxyMapView`'s new `remPx`, `featureLayers`, `featureKinds` and
+    `featureControls` props.
+  - "Pending" is the request's own state, said on the page's line for the views' wait after the
+    link's state and a stale view's `PENDING`, with a failure's `RETRY`; a shown kind the server
+    does not generate reads `SNR NOT YET MODELLED` there.
+  - `mapLayout`'s face-on words gain `FEATURES_ROW_REM` = 2.25 rem, estimated, not measured: plan 07's
+    hidden runs should re-measure it (the stacked overlay's room at 1920 × 1080 now has 20 px).
+  - Not drawn: a globular beyond the edge-on picture's ±32,768 ly; nothing is pegged.
 - **P09.T33.a as built (lane `p09-classes`, 2026-10-29, at `GENERATOR_VERSION` 23, no output
   moves).** The first production class, registered: `ProductionClasses` has the
   `CORE_COLLAPSE` arm and plan 03's `placement::resolve` hands every `111` ID to the class grid

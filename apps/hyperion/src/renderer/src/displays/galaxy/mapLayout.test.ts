@@ -63,10 +63,11 @@ describe("mapPictureWidth", () => {
     );
   });
 
-  it("leaves a short compact page's face-on row its tallest plain words, 9.875 rem", () => {
-    // 300 − 128 = 172 px for the rows; the face-on row keeps 158 px, and the edge-on picture,
-    // half the face-on's, the 14 px left: 2 × 14 = 28.
-    expect(mapPictureWidth(page(1_200, 300), "compact")).toBe(28);
+  it("leaves a short compact page's face-on row its tallest plain words, 12.125 rem", () => {
+    // 336 − 128 = 208 px for the rows; the face-on row keeps 194 px, its words and the feature
+    // toggles' row (plan 09, P09.T41.b), and the edge-on picture, half the face-on's, the 14 px
+    // left: 2 × 14 = 28.
+    expect(mapPictureWidth(page(1_200, 336), "compact")).toBe(28);
   });
 
   it("keeps the width even, so that the edge-on picture is whole pixels tall", () => {
@@ -89,9 +90,10 @@ describe("mapRows", () => {
   });
 
   it("gives a narrow stacked page's face-on view the height of its tallest plain words", () => {
-    // At 1280 × 1024 the 326 px picture is under the controls' and words' 26.375 rem, 422 px.
+    // At 1280 × 1024 the 326 px picture is under the controls' and words' 26.375 rem and the
+    // feature toggles' 2.25 rem (plan 09, P09.T41.b), 458 px.
     expect(mapRows(MEASURED["1280 × 1024"].plain, "stacked")).toEqual({
-      faceOnPx: 462,
+      faceOnPx: 498,
       edgeOnPx: 163,
     });
   });
@@ -136,11 +138,12 @@ describe("overlayHasRoom", () => {
     },
   );
 
-  it("needs the face-on view as tall as its words and the controls under the overlay, 31.125 rem stacked", () => {
-    // Stacked pages whose pictures are 496 px, one step short of the words' 498, and 498 px. The
-    // edge-on words, 14.125 rem, then fit too: half a 498 px picture is 249 px, over their 226.
-    expect(overlayHasRoom(page(968, 800), "stacked")).toBe(false);
-    expect(overlayHasRoom(page(970, 800), "stacked")).toBe(true);
+  it("needs the face-on view as tall as its words and the controls under the overlay, 33.375 rem stacked", () => {
+    // Stacked pages whose pictures are 532 px, one step short of the words' 534 (31.125 rem and
+    // the feature toggles' 2.25 rem, plan 09, P09.T41.b), and 534 px. The edge-on words, 14.125
+    // rem, then fit too: half a 534 px picture is 267 px, over their 226.
+    expect(overlayHasRoom(page(1_004, 880), "stacked")).toBe(false);
+    expect(overlayHasRoom(page(1_006, 880), "stacked")).toBe(true);
   });
 
   it("has no room before the page has room for any picture", () => {

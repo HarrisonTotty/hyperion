@@ -8,12 +8,16 @@
  * cells before offsets, as the range query's rows are.
  */
 import {
+  type BrightShell,
   type FeatureKindWire,
   type FeaturesInRange,
   type FeatureSummary,
   type GalacticPosition,
+  type GalaxyFeatures,
   galacticDeltaLy,
   galacticPositionFromLy,
+  type MapFeatureKindWire,
+  type MapFeatureList,
   type RequestOf,
   type UniverseIdHex,
   universeTimeFromYears,
@@ -21,7 +25,14 @@ import {
 } from "@hyperion/protocol";
 
 import type { Vec3 } from "../../geometry/vec3";
-import type { CentreLy, ChartFeature, ChartFeatures } from "./model";
+import type {
+  CentreLy,
+  ChartFeature,
+  ChartFeatures,
+  MapFeature,
+  MapFeatureLayer,
+  MapShell,
+} from "./model";
 
 /** The origin of the `GALACTIC` frame, from which absolute positions are measured. */
 const ORIGIN: GalacticPosition = { cell_ly: [0, 0, 0], offset_m: [0, 0, 0] };
@@ -117,5 +128,74 @@ export function toFeaturesRequest(
     radius_ly: radiusLy,
     time: universeTimeFromYears(timeYr),
     kinds: [...CHART_FEATURE_KINDS],
+  };
+}
+
+/** Every kind the galaxy map's overlay asks for, in the order its toggles offer them. */
+export const MAP_FEATURE_KINDS: ReadonlyArray<MapFeatureKindWire> = [
+  "globular",
+  "galactic_centre",
+  "bright_shell",
+];
+
+function toMapFeature(summary: FeatureSummary): MapFeature {
+  return {
+    id: summary.id,
+    designation: summary.designation,
+    kind: summary.kind,
+    positionLy: toVec3(galacticDeltaLy(ORIGIN, summary.position)),
+    extentLy: summary.extent_ly,
+    massMsun: summary.mass_msun,
+  };
+}
+
+function toMapShell(shell: BrightShell): MapShell {
+  return {
+    system: shell.system,
+    designation: shell.designation,
+    siteLy: toVec3(galacticDeltaLy(ORIGIN, shell.site)),
+    radiusLy: shell.shell.radius_ly,
+  };
+}
+
+/** One kind's list of the map's answer as the overlay holds it. */
+function toMapFeatureLayer(list: MapFeatureList): MapFeatureLayer {
+  let layer: MapFeatureLayer;
+  switch (list.kind) {
+    case "globular":
+    case "galactic_centre":
+      layer =
+        list.status === "complete"
+          ? { kind: list.kind, status: "complete", features: list.features.map(toMapFeature) }
+          : { kind: list.kind, status: "not_generated" };
+      break;
+    case "bright_shell":
+      layer =
+        list.status === "complete"
+          ? { kind: list.kind, status: "complete", shells: list.shells.map(toMapShell) }
+          : { kind: list.kind, status: "not_generated" };
+      break;
+  }
+  return layer;
+}
+
+/**
+ * Turns the galaxy map's features answer into the overlay's layers, one for each kind in the
+ * answer's order (plan 09, P09.T41.b).
+ */
+export function toMapFeatureLayers(response: GalaxyFeatures): ReadonlyArray<MapFeatureLayer> {
+  return response.lists.map(toMapFeatureLayer);
+}
+
+/**
+ * Builds the galaxy map's features request: every kind of {@link MAP_FEATURE_KINDS}, at the epoch,
+ * the time the map's own pictures are of.
+ */
+export function toGalaxyFeaturesRequest(universe: UniverseIdHex): RequestOf<"galaxy_features"> {
+  return {
+    kind: "galaxy_features",
+    universe,
+    kinds: [...MAP_FEATURE_KINDS],
+    time: universeTimeFromYears(0),
   };
 }

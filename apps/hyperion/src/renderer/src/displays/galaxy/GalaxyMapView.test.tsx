@@ -83,6 +83,9 @@ function viewOf(
           centreLy={centreLy}
           staleWaits={staleWaits}
           pageWaitId={PAGE_WAIT_ID}
+          remPx={16}
+          featureLayers={null}
+          featureKinds={new Set()}
         />
       </Activity>
     </ServerLinkHarness>

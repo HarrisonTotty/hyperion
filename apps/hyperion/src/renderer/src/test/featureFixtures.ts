@@ -10,6 +10,7 @@
  * that they can be passed straight to `FakeWebSocket.serverAnswers`.
  */
 import {
+  type BrightShell,
   type FeatureKindCensus,
   type FeatureKindWire,
   type FeatureSummary,
@@ -175,5 +176,50 @@ export function aFeaturesInRange({
       };
     }),
     features: [...features],
+  };
+}
+
+/** A bright shell for the galaxy map, as P09.T37's would be: none is generated at version 23. */
+export const BRIGHT_SHELL: BrightShell = {
+  system: "e400000500000000",
+  designation: "4RG C5",
+  site: galacticPositionFromLy([8_000, 2_000, 30]),
+  age_yr: 2_400,
+  shell: {
+    radius_ly: 30,
+    shock_speed_km_s: 2_600,
+    phase: "sedov_taylor",
+    emission: { x_ray_and_radio: true, optical: true, neutral_hydrogen: false },
+  },
+};
+
+/** What the galaxy map's features answer is built from. */
+export interface GalaxyFeaturesSpec {
+  readonly globulars?: ReadonlyArray<FeatureSummary>;
+  readonly centre?: ReadonlyArray<FeatureSummary>;
+  /** The bright shells, or `null` for the golden's `not_generated`. */
+  readonly shells?: ReadonlyArray<BrightShell> | null;
+}
+
+/**
+ * The galaxy map's features answer at the epoch: complete globulars and centre, and the bright
+ * shells not generated, as the golden has them at version 23, unless told otherwise.
+ */
+export function aGalaxyFeatures({
+  globulars = [GLOBULAR],
+  centre = [GALACTIC_CENTRE],
+  shells = null,
+}: GalaxyFeaturesSpec = {}): ResponseFor<"galaxy_features"> {
+  return {
+    kind: "galaxy_features",
+    universe: UNIVERSE_ID,
+    time: universeTimeFromYears(0),
+    lists: [
+      { kind: "globular", status: "complete", features: [...globulars] },
+      { kind: "galactic_centre", status: "complete", features: [...centre] },
+      shells === null
+        ? { kind: "bright_shell", status: "not_generated" }
+        : { kind: "bright_shell", status: "complete", shells: [...shells] },
+    ],
   };
 }

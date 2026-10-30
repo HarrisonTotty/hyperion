@@ -1,8 +1,10 @@
-import type { MapPopulation } from "@hyperion/protocol";
+import type { MapFeatureKindWire, MapPopulation } from "@hyperion/protocol";
 import { type CSSProperties, useEffect, useId, useState, useSyncExternalStore } from "react";
 
+import { StatusLine } from "../../components/StatusLine";
 import { StatusText } from "../../components/StatusText";
 import { formatScaleLength } from "../../lib/format";
+import { MAP_FEATURE_KINDS } from "../../lib/galaxy/featureWire";
 import type { CentreLy } from "../../lib/galaxy/model";
 import { populationLabel } from "../../lib/galaxy/wire";
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
@@ -18,8 +20,11 @@ import {
   takesOverlay,
 } from "./GalaxyMapView";
 import { MAP_ACROSS_LY } from "./mapCursor";
+import { MapFeatureToggles } from "./MapFeatureToggles";
+import { mapFeatureStatus } from "./mapFeatureStatus";
 import { mapLayout, mapPictureWidth, mapRows, overlayHasRoom } from "./mapLayout";
 import { StaleWaits, staleWaitText } from "./staleWaits";
+import { useGalaxyFeatures } from "./useGalaxyFeatures";
 
 /**
  * The name of each population a map may count, in the order offered.
@@ -132,6 +137,14 @@ interface GalaxyMapPanelProps {
  * page too narrow for that, its tallest plain words ({@link mapRows}), nothing on the page scrolls,
  * the pictures stand clear of the panel's page tabs, and the page's parts, and so its tab order,
  * are in one order.
+ *
+ * The page owns the feature overlay too (plan 09, P09.T41.b): it asks once per universe for the
+ * features both views draw (`useGalaxyFeatures`), the globulars, the centre and the bright shells,
+ * and holds which kinds are drawn, all of them to start with, through the `FEATURES` toggles,
+ * which stand in the face-on view's words under its legends. Where neither the link's state nor a
+ * stale view's wait stands, the page's line for the views' wait says how the features stand:
+ * `FEATURES PENDING` until they arrive, a failure with `RETRY`, or the shown kinds the server does
+ * not generate, `SNR NOT YET MODELLED`, so that no kind is ever read as none.
  */
 export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMapPanelProps) {
   const populationName = useId();
@@ -143,12 +156,20 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
   const [population, setPopulation] = useState<MapPopulation>("all");
   const [quantity, setQuantity] = useState<MapQuantity>("column_density");
   const [overlay, setOverlay] = useState(false);
+  const [featureKinds, setFeatureKinds] = useState<ReadonlySet<MapFeatureKindWire>>(
+    () => new Set(MAP_FEATURE_KINDS),
+  );
+  const [featureGeneration, setFeatureGeneration] = useState(0);
+  const featureQuery = useGalaxyFeatures(open?.id ?? null, featureGeneration);
   const { ref, size } = useElementSize();
   const [staleWaits] = useState(() => new StaleWaits());
   const waits = useSyncExternalStore(staleWaits.subscribe, staleWaits.getSnapshot);
   const linkReason = linkDownReason(status);
   // The views' stale wait, which the page states where the link's state stands, and never with it.
   const staleWait = linkReason === null ? staleWaitText(waits) : null;
+  // What the page says of its feature overlay, where neither of those stands (plan 09, P09.T41.b).
+  const featureStatus =
+    linkReason === null && staleWait === null ? mapFeatureStatus(featureQuery, featureKinds) : null;
   const inhibited = linkReason !== null;
   const layout = mapLayout(size);
   const pictureWidthPx = size === null ? 0 : mapPictureWidth(size, layout);
@@ -202,6 +223,7 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
     };
   }, [inhibited, overlayOffered, keysLive]);
   const devicePixelRatio = size?.devicePixelRatio ?? 1;
+  const remPx = size?.remPx ?? 16;
   const rows = size === null ? null : mapRows(size, layout);
   // The pictures' width and the views' heights, which the stylesheet lays the page out by.
   const gridStyle: CSSProperties & {
@@ -235,6 +257,24 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
               <output className="panel__inhibit galaxy-map__wait" id={waitId}>
                 {staleWait}
               </output>
+            )}
+            {featureStatus === null ? null : (
+              <div className="galaxy-map__wait">
+                <StatusLine
+                  text={featureStatus.text}
+                  standing={featureStatus.standing}
+                  action={
+                    featureStatus.retry
+                      ? {
+                          label: "RETRY",
+                          onAction: () => {
+                            setFeatureGeneration((count) => count + 1);
+                          },
+                        }
+                      : undefined
+                  }
+                />
+              </div>
             )}
             <fieldset className="form-choice galaxy-map__population">
               <legend className="form-field__label">POPULATION</legend>
@@ -344,6 +384,23 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
             centreLy={centreLy}
             staleWaits={staleWaits}
             pageWaitId={waitId}
+            remPx={remPx}
+            featureLayers={featureQuery.layers}
+            featureKinds={featureKinds}
+            featureControls={
+              <MapFeatureToggles
+                shown={featureKinds}
+                onToggle={(kind) => {
+                  setFeatureKinds((kinds) => {
+                    const next = new Set(kinds);
+                    if (!next.delete(kind)) {
+                      next.add(kind);
+                    }
+                    return next;
+                  });
+                }}
+              />
+            }
           />
           <GalaxyMapView
             universe={open.id}
@@ -358,6 +415,9 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
             centreLy={centreLy}
             staleWaits={staleWaits}
             pageWaitId={waitId}
+            remPx={remPx}
+            featureLayers={featureQuery.layers}
+            featureKinds={featureKinds}
           />
         </div>
       )}

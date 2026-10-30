@@ -81,14 +81,19 @@ interface LayoutWordsRem {
  * narrowest words column its layout gives (24 rem stacked, 27 rem compact), where the words wrap
  * the most. The figures and the runs are plan 07's P07.T11.b record, and its P07.T11.d record for
  * the stacked overlay's face-on words, which since then count the overlay's brightness line and
- * the page's line for the views' wait.
+ * the page's line for the views' wait. Each face-on figure then gains {@link FEATURES_ROW_REM},
+ * the feature overlay's toggles under the legends (plan 09, P09.T41.b), estimated from their one
+ * line of 2 rem targets and the words' 0.25 rem gap, not yet measured in a hidden run.
  */
+/** The feature overlay's `FEATURES` toggles: one line of 2 rem targets, and the 0.25 rem gap. */
+const FEATURES_ROW_REM = 2.25;
+
 const WORDS_REM: Readonly<Record<MapLayout, LayoutWordsRem>> = {
   // 150 px face-on and 128 px edge-on plain, 222 px and 200 px under the overlay, at 1280 × 720 and
   // 1536 × 864 (a 27–28 rem column).
   compact: {
-    plain: { faceOn: 9.875, edgeOn: 8.5 },
-    overlay: { faceOn: 14.375, edgeOn: 13 },
+    plain: { faceOn: 9.875 + FEATURES_ROW_REM, edgeOn: 8.5 },
+    overlay: { faceOn: 14.375 + FEATURES_ROW_REM, edgeOn: 13 },
   },
   // Face-on with the controls: 414 px plain at 1280 × 1024 (the 24 rem column, the link's reason
   // and the room's above the words); 490 px under the overlay, its name and brightness line among
@@ -96,8 +101,8 @@ const WORDS_REM: Readonly<Record<MapLayout, LayoutWordsRem>> = {
   // view's PENDING (P07.T11.d; 464 px without that line), at 1280 × 1024 and 1920 × 1080 alike;
   // edge-on 146 px plain and 218 px under the overlay, at both sizes too.
   stacked: {
-    plain: { faceOn: 26.375, edgeOn: 9.625 },
-    overlay: { faceOn: 31.125, edgeOn: 14.125 },
+    plain: { faceOn: 26.375 + FEATURES_ROW_REM, edgeOn: 9.625 },
+    overlay: { faceOn: 31.125 + FEATURES_ROW_REM, edgeOn: 14.125 },
   },
 };
 

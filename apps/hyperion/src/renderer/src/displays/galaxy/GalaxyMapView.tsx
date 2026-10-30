@@ -3,6 +3,7 @@ import {
   decodeExtinctionMap,
   type DensityMap,
   type ExtinctionMap,
+  type MapFeatureKindWire,
   type MapPopulation,
   type MapView,
   type RequestKind,
@@ -24,6 +25,7 @@ import { RequestStatus } from "../../components/RequestStatus";
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
 import { formatNumber, formatSci } from "../../lib/format";
+import { placeMapFeatures } from "../../lib/galaxy/mapFeatures";
 import {
   type MapGeometry,
   mapGeometry,
@@ -37,12 +39,13 @@ import {
   reducedLevels,
   turnClockwise,
 } from "../../lib/galaxy/mapPicture";
-import type { CentreLy } from "../../lib/galaxy/model";
+import type { CentreLy, MapFeatureLayer } from "../../lib/galaxy/model";
 import { buildRamp, type DecodedCodes, parseHexColour, rasterise } from "../../lib/galaxy/ramp";
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
 import { type RequestState, useServerRequest } from "../../lib/useServerRequest";
 import { DensityLegend } from "./DensityLegend";
 import { ExtinctionLegend } from "./ExtinctionLegend";
+import { MapFeatureOverlay } from "./MapFeatureOverlay";
 import {
   ARROW_KEYS,
   cursorInView,
@@ -776,6 +779,17 @@ interface GalaxyMapViewProps {
    * describes the canvas while its picture is stale.
    */
   readonly pageWaitId: string;
+  /** The root's rem, CSS px, which the feature overlay's marks and labels are sized by. */
+  readonly remPx: number;
+  /**
+   * The feature overlay's layers, from the page's one request (plan 09, P09.T41.b), or `null`
+   * while it has none to draw.
+   */
+  readonly featureLayers: ReadonlyArray<MapFeatureLayer> | null;
+  /** The kinds the overlay draws. */
+  readonly featureKinds: ReadonlySet<MapFeatureKindWire>;
+  /** The overlay's `FEATURES` toggles, which the face-on view stands under its legends. */
+  readonly featureControls?: ReactNode;
 }
 
 /**
@@ -818,6 +832,10 @@ function MapViewBody({
   centreLy,
   staleWaits,
   pageWaitId,
+  remPx,
+  featureLayers,
+  featureKinds,
+  featureControls,
   onRetry,
 }: MapViewBodyProps) {
   const titleId = useId();
@@ -1020,6 +1038,19 @@ function MapViewBody({
       ? null
       : markOnPicture(picture.geometry, cursorInView(view, centreLy));
   const axes = AXIS_LABELS[view];
+  const geometry = picture?.geometry ?? null;
+  // Placed once per picture, layers, kinds and size: a few hundred marks and their labels.
+  const featurePlaces = useMemo(
+    () =>
+      geometry === null || featureLayers === null
+        ? []
+        : placeMapFeatures(view, geometry, featureLayers, featureKinds, {
+            widthPx: pictureWidthPx,
+            heightPx: pictureHeightPx,
+            remPx,
+          }),
+    [view, geometry, featureLayers, featureKinds, pictureWidthPx, pictureHeightPx, remPx],
+  );
 
   let status: ReactNode;
   switch (decoding.kind) {
@@ -1069,6 +1100,15 @@ function MapViewBody({
             setFocused(false);
           }}
         />
+        {featureLayers === null ? null : (
+          <MapFeatureOverlay
+            places={featurePlaces}
+            widthPx={pictureWidthPx}
+            heightPx={pictureHeightPx}
+            remPx={remPx}
+            stale={linkDown}
+          />
+        )}
         {centrePlace === null ? null : <MapMark kind="centre" view={view} place={centrePlace} />}
         {cursorPlace === null ? null : <MapMark kind="cursor" view={view} place={cursorPlace} />}
         <span className="map-view__axis map-view__axis--across">{axes.across}</span>
@@ -1130,6 +1170,7 @@ function MapViewBody({
             )}
           </div>
         )}
+        {featureControls}
       </div>
       <div className="map-view__area">{content}</div>
     </section>
@@ -1197,6 +1238,13 @@ function MapViewBody({
  * the shared cursor's x. The chart's centre is drawn as a small diagonal cross in `--text`. A mark
  * whose point lies above or below the map is pegged to its edge with `↑` or `↓`. Moving either
  * paints nothing.
+ *
+ * Over the picture, under those two marks, stands the page's feature overlay (plan 09,
+ * P09.T41.b; {@link MapFeatureOverlay}): the globulars and the centre as the open Greek cross, the
+ * bright shells as circles at true radius, each labelled with its kind where its label fits,
+ * placed on this view's picture by `placeMapFeatures`; a feature beyond the view's extent is not
+ * drawn, and none is pegged. It is muted while the link is down, as the picture is stale then.
+ * The face-on view stands the page's `FEATURES` toggles under its legends.
  */
 export function GalaxyMapView(props: GalaxyMapViewProps) {
   const [attempt, setAttempt] = useState(0);
