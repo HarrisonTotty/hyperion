@@ -1133,3 +1133,10 @@ fn the_table_s_airless_bodies_keep_their_delivered_traps_through_the_passes() {
         }
     }
 }
+
+#[test]
+fn the_truncation_s_constants_are_the_normal_s_own_to_the_bit() {
+    assert_same_bits(BELOW_TRUNCATION, normal_cdf(-TRUNCATION));
+    assert_same_bits(ABOVE_TRUNCATION_CDF, normal_cdf(TRUNCATION));
+    assert_same_bits(DENSITY_AT_TRUNCATION, normal_density(-TRUNCATION));
+}

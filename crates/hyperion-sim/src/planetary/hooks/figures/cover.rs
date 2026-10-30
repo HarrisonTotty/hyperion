@@ -96,13 +96,28 @@ pub const ICE_SHEET_THICKNESS: Metres = Metres::new(1_930.0);
 /// (science-p14-t24b-laws §4.2), water's at 1 atm (IAPWS R10-06's 273.152 519 K, to 0.01 K).
 pub const UNDER_ICE_MELTING_POINT: Kelvin = Kelvin::new(273.15);
 
-/// How many halvings locate the ocean's level: 64, always that many, past the last bit of the
-/// populations' span (science-p14-t24b-laws §4.2's "64 halvings over ±50 km").
+/// How many halvings locate the ocean's level: 64, past the last bit of the populations' span
+/// (science-p14-t24b-laws §4.2's "64 halvings over ±50 km"); a halving that leaves the bracket
+/// as it was ends them, every later one repeating it.
 pub const OCEAN_LEVEL_HALVINGS: u32 = 64;
 
 /// The half-width of each population of the hypsometry, in its widths: 3, a truncation keeping
 /// 99.73% of a Gaussian's area (science-p14-t24b-laws §4.2).
 const TRUNCATION: f64 = 3.0;
+
+/// Φ(−3), the standard normal's share below the truncation: [`normal_cdf`]`(−`[`TRUNCATION`]`)`
+/// to the bit, a test holds. The ocean's fill evaluates the truncated normal 64 times a
+/// population ([`OCEAN_LEVEL_HALVINGS`]) at every greenhouse step, and its three constants were
+/// three of `truncated_depth`'s five transcendentals: 12.7% of `generate` and `snapshot_at` over
+/// the first 20 sample systems at version 24 (pod, 8 vCPU, P14.T54.b.l's profile).
+const BELOW_TRUNCATION: f64 = 0.001_349_898_031_630_095_7;
+
+/// Φ(3), [`normal_cdf`]`(`[`TRUNCATION`]`)` to the bit, a test holds ([`BELOW_TRUNCATION`]).
+const ABOVE_TRUNCATION_CDF: f64 = 0.998_650_101_968_369_9;
+
+/// φ(−3), [`normal_density`]`(−`[`TRUNCATION`]`)` to the bit, a test holds
+/// ([`BELOW_TRUNCATION`]).
+const DENSITY_AT_TRUNCATION: f64 = 0.004_431_848_411_938_007_5;
 
 /// The melting point of water ice, the triple temperature of water's phase diagram: 273.16 K
 /// (IAPWS-95's), where the diagram's solid and liquid meet at their vapour pressure, which
@@ -338,8 +353,8 @@ fn truncated_cdf(z: f64) -> f64 {
     if z >= TRUNCATION {
         return 1.0;
     }
-    let low = normal_cdf(-TRUNCATION);
-    (normal_cdf(z) - low) / (normal_cdf(TRUNCATION) - low)
+    let low = BELOW_TRUNCATION;
+    (normal_cdf(z) - low) / (ABOVE_TRUNCATION_CDF - low)
 }
 
 /// The truncated standard normal's mean depth below a level z, `G_t`(z) = ∫ from −3 to z of
@@ -353,10 +368,19 @@ fn truncated_depth(z: f64) -> f64 {
     if z >= TRUNCATION {
         return z;
     }
-    let (low, high) = (normal_cdf(-TRUNCATION), normal_cdf(TRUNCATION));
-    let edge = normal_density(-TRUNCATION);
+    let (low, high) = (BELOW_TRUNCATION, ABOVE_TRUNCATION_CDF);
+    let edge = DENSITY_AT_TRUNCATION;
     (z * normal_cdf(z) + normal_density(z) + TRUNCATION * low - edge - low * (z + TRUNCATION))
         / (high - low)
+}
+
+/// Whether a halving that moves the end `end` of a bracket to `middle` leaves it where it is, bit
+/// for bit: the bracket then stays as it is, and every later halving of
+/// [`OCEAN_LEVEL_HALVINGS`] would repeat this one, since each reads the bracket alone. Past the
+/// last bit of the populations' span, about 53 of the 64 halvings, the rest are not taken.
+#[must_use]
+fn settled(end: f64, middle: f64) -> bool {
+    middle.total_cmp(&end).is_eq()
 }
 
 impl Hypsometry {
@@ -441,8 +465,14 @@ impl Hypsometry {
         for _ in 0..OCEAN_LEVEL_HALVINGS {
             let middle = low + (high - low) * 0.5;
             if self.volume_below(Metres::new(middle)) < depth {
+                if settled(low, middle) {
+                    break;
+                }
                 low = middle;
             } else {
+                if settled(high, middle) {
+                    break;
+                }
                 high = middle;
             }
         }
@@ -468,8 +498,14 @@ impl Hypsometry {
         for _ in 0..OCEAN_LEVEL_HALVINGS {
             let middle = low + (high - low) * 0.5;
             if self.area_below(Metres::new(middle)) < area {
+                if settled(low, middle) {
+                    break;
+                }
                 low = middle;
             } else {
+                if settled(high, middle) {
+                    break;
+                }
                 high = middle;
             }
         }
