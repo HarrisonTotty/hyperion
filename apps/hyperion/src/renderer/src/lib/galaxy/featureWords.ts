@@ -13,8 +13,16 @@ import type {
   ShellPhaseWire,
 } from "@hyperion/protocol";
 
-import type { CatalogueClass, MemberClass } from "./model";
+import type { CatalogueClass, ChartLayer, MemberClass } from "./model";
 import { layerLetter } from "./wire";
+
+/**
+ * A band's letter in a composed reading: the em dash for a layer this build does not know, so that
+ * the reading keeps its other parts (the guide's data states, `MATERIAL REGOLITH · —`).
+ */
+function bandLetter(band: ChartLayer): string {
+  return layerLetter(band) ?? "—";
+}
 
 /**
  * A feature kind's abbreviation, as its mark's label and the list's `KIND` column write it: `GC`,
@@ -248,38 +256,29 @@ function tracerWords(tracer: CentreTracerWire): string {
  * A member's class in words, its parts joined by a middle dot as a reading's are: what its systems
  * are, the layer of its primaries' band, and a cluster's generation and multiplicity
  * (`LIVING · A · FIRST · BINARY`) or the centre's episode and tracer (`LIVING · A · EPISODE 0 ·
- * STARS`), or a listed entry's catalogue class; `null` for a class, a band's layer or a catalogue
- * class this build does not know, which reads Missing.
+ * STARS`), or a listed entry's catalogue class; `null` for a class or a catalogue class this build
+ * does not know, which reads Missing. A band's layer it does not know is the em dash in its place
+ * (`LIVING · — · FIRST · BINARY`).
  */
 export function memberClassWords(memberClass: MemberClass): string | null {
   let words: string | null;
   switch (memberClass.kind) {
-    case "cluster": {
-      const letter = layerLetter(memberClass.band);
-      words =
-        letter === null
-          ? null
-          : [
-              classKindWords(memberClass.classKind),
-              letter,
-              memberClass.generation.toUpperCase(),
-              memberClass.multiplicity.toUpperCase(),
-            ].join(" · ");
+    case "cluster":
+      words = [
+        classKindWords(memberClass.classKind),
+        bandLetter(memberClass.band),
+        memberClass.generation.toUpperCase(),
+        memberClass.multiplicity.toUpperCase(),
+      ].join(" · ");
       break;
-    }
-    case "centre": {
-      const letter = layerLetter(memberClass.band);
-      words =
-        letter === null
-          ? null
-          : [
-              classKindWords(memberClass.classKind),
-              letter,
-              `EPISODE ${String(memberClass.episode)}`,
-              tracerWords(memberClass.tracer),
-            ].join(" · ");
+    case "centre":
+      words = [
+        classKindWords(memberClass.classKind),
+        bandLetter(memberClass.band),
+        `EPISODE ${String(memberClass.episode)}`,
+        tracerWords(memberClass.tracer),
+      ].join(" · ");
       break;
-    }
     case "listed":
       words = catalogueClassWords(memberClass.catalogueClass);
       break;

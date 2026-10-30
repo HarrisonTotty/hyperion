@@ -4802,7 +4802,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     slow hosts' accreting white dwarfs read `SLOW ACCRETING WD`; supernova ages are in `kyr`.
   - Merged over the client's growing enums (2026-10-30): a member class's `band` is a `ChartLayer`
     through `wire.ts`'s `toChartLayer`, and a grid origin's unknown population reads Missing.
-    (lean, 2026-10-30) A class whose band's layer is unknown reads `MEMBER CLASS` Missing whole.
+    A class whose band's layer is unknown reads that letter Missing: `LIVING · — · FIRST · SINGLE`.
 - **P09.T33.a as built (lane `p09-classes`, 2026-10-29, at `GENERATOR_VERSION` 23, no output
   moves).** The first production class, registered: `ProductionClasses` has the
   `CORE_COLLAPSE` arm and plan 03's `placement::resolve` hands every `111` ID to the class grid
