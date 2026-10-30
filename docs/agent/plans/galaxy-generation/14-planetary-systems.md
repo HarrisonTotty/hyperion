@@ -31187,6 +31187,9 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
           run's draws, 108 s (73), each half holding the 10⁻³ share (0 of 15,090 saturated).
       - _To the slow tier whole:_ `records_of_halved_and_cut_drift_cells_…`, an order-independence
         test, at 977 s (656).
+      - _The slow twins, run by name_ (the slow-test profile): every twin passes. The system tests'
+        whole window takes 2,968 s. `radius_temperature_and_envelope_are_continuous_across_the_window_slow`,
+        the 400 over ±H, is not run: it would take many hours at 24, a sizing for main.
       - _The bless note's §4 has the table._
     - _Findings, recorded and deferred_ (the bless note's §5):
       - **TO MAIN:** the photometry walk's guards are missed at 24.
@@ -31194,10 +31197,19 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         - The jumps are 21 cover flips, mostly 15–28 K icy members gaining or losing argon ice
           between passes, with 2 onsets and a state edge.
         - They are pinned at 24 and 29, the planets at 8 (5 at 23).
+        - The same guards are missed by the slow measurements run by name. Over the first 60
+          systems' 892 bodies with a surface, 27 are bracketed (3.03%) and 23 jump (2.58%)
+          (`the_rayleigh_floor_holds_over_the_sample_and_the_passes_guards_with_it`). Over the
+          400's planets, 40 of 1,568 jump (2.55%, against main's 2%;
+          `the_passes_endings_over_the_whole_sample_are_recorded`). Each is pinned at its count.
       - **TO MAIN:** six hot `Snowball`s under H₂-led airs (K6's "any left goes to main"). Lean:
         not a blocker.
       - The hand Titan collapses at 6.39 Gyr. The sample's water seas all lie on `Snowball`s at
         the cap.
+      - The unlit census over the 400 counts 1,359 lit airless records at their night floor, with
+        1,202 argon ices, and 13 airs raised with their greenhouse's base. B3 counted 1,365, 1,121
+        and 7 on k's tree, before P14.T53.a's thick CO₂ closure. R10.T5's `STYLE_GAP_Z` is
+        re-pinned to 1.38 at 24 (R10.T5's record).
       - Behaviour-neutral cleanups left for a later lane (the review's):
         - `GreenhouseConstants`' always-`Some` `water_cloud`, `hydrogen` and `thick_air_anchor`;
         - `Atmosphere::escape`, always `Some`;
