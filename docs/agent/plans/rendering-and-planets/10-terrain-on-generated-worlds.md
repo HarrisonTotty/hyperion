@@ -2970,6 +2970,51 @@ src/renderer/src/view/terrain`, the console-ux checks, `just smart-ci origin/ren
   next task after R10.T11; before R10.T12 lands, and so before T15.
   - _Built 2026-10-20_ (`27f8af0b`).
 
+- **R10.T12.c The readout at the floor, the plates' widths and labels, and the baseline's answer**
+  (new; after R10.T15.b's served look; decision-r10-t12a-scope §7 items 2, 4 and 5, and R10.T12.a's
+  landing look; scope as ruled, 2026-10-29). Client-only: no wire, payload, golden or version
+  moves.
+  Records: [10-terrain-on-generated-worlds/records/R10.T12.c.md](10-terrain-on-generated-worlds/records/R10.T12.c.md).
+  - _The floor._ At 80 × 45 rem (1280 × 720 at 100%) the readout stands alone in its tallest
+    state, its state line beside the eight readings. The layout sets short readings two to a row on
+    the lower plate, or gives the readout a place of its own, chosen by measured looks (§7 item 2;
+    the landing look's "the whole lower plate gives way"). The picture's centre is kept clear of the
+    upper plate at the floor, by an upper plate capped short of the centre or short lines set two
+    to a row (decision-r10-view-block-room, "Seen" 1).
+  - _The width test._ A part whose widest unbroken run passes its plate gives way (`viewRoom`,
+    `plateMeasures`; §7 item 4), with a look at a tall, narrow window (about 80 × 74 rem, 1280 ×
+    1200 at 100%).
+  - _Labels whole everywhere._ The upper plate's and the instruments' labels are kept whole as the
+    lower plate's are (U4; §7 item 5).
+  - _Column B._ Every row the task adds is reckoned against `FULL_MIN_HEIGHT_REM` (49.5 rem, met
+    exactly at T12.a's landing) and its 52.5 rem bound.
+  - _The baseline's answer._ A `BASELINE` press asks the readout at once, not at the next 4 Hz ask.
+    The time from the press to the answer's `· BASELINE` is measured on the served world (0.4–1.2 s
+    at T12.a's landing) and recorded as a figure. If the worker's queue dominates, the readout
+    query's priority is the recorded lever.
+  - _Not in scope._ The instruments' ground readings (R10.T12.d, below); a nearer body on the line
+    of sight (§7 item 3, main's ruling); the photorealistic notes' composition
+    (decision-r10-view-block-room, "Seen" 2, a guide question).
+  - _The guide._ The rows the layout changes are drafted in the record and signed off before the
+    build, as U1–U4 were.
+  - _Tests_ (Vitest and Testing Library): the readout's tallest state standing at 80 × 45 rem; the
+    width test's give-way; labels whole on both plates and in the slots; column B's least height
+    within its bound; one ask at a `BASELINE` press, the next answer carrying the new baseline; the
+    console-ux checks. By arithmetic, in the record: each plate's rows against the plates at
+    1920 × 1080 at 100%, 125% and 150% and at 1280 × 720 at 100%. By hand, hidden, at landing: T12.a's
+    §9 captures, the floor-alone state and the tall narrow window.
+  - _Acceptance._
+    `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view src/renderer/src/view/terrain`
+    and `just test-render`.
+
+- **R10.T12.d The instruments' ground readings** (new; after R10.T12.c; decision-r10-t12a-scope
+  §7 item 1; its scope ruled when T12.c lands, from T12.c's measured plates). Where an instrument's
+  survey line, `DATUM`, readout, tripod and note stand; an instrument whose `FRAME` body is not the
+  primary's; an instrument in a window of its own; and the `BASELINE` row following `CONTROLS` onto
+  an instrument (decision-r10-t12a-scope §2.1). The candidates: the side column while `CONTROLS`
+  names the instrument, a slot reckoned at the readout's tallest, or a window of its own. Until
+  then the guide's G3 stands: an instrument in its slot states none.
+
 #### The drafts, for the owner
 
 _Drafted by lane 11 (2026-10-13); signed off 2026-10-14 under the owner's delegation
