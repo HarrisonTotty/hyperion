@@ -103,11 +103,35 @@
 //!   disperses nothing.
 //! - A land cell whose air does not move, or that has no downwind edge, passes nothing on: in the
 //!   steady state its column loses all that enters as runoff, (1 − ε) P A = `Q_in` + S A, the
-//!   recycled ε P raining again in place (eqs. 42–44 with no outflow). A wholly calm month makes
-//!   every land cell such a sink, P = S ÷ (1 − ε) where no air enters: with no wind the zonal
-//!   budget's convergence falls where it forms (decision-r09-t13e-revision §4.5).
+//!   recycled ε P raining again in place (eqs. 42–44 with no outflow). Into calm land no air enters
+//!   along the band (the exit, below), so it rains P = S ÷ (1 − ε), and a wholly calm month makes
+//!   every land cell such a sink: with no wind the zonal budget's convergence falls where it forms
+//!   (decision-r09-t13e-revision §4.5).
 //! - An edge is downwind only if ŵ · n̂ exceeds [`DOWNWIND_TOLERANCE`], so that a wind along an
 //!   edge, which rounding tilts either way, makes no pair of cells each the other's downwind.
+//!
+//! # The convergence exit (R09.T13.m; decision-r09-t13m §2)
+//!
+//! With its lengths fixed, the model keeps Hergarten and Robl's assumption "that the velocities
+//! are constant" (their eq. 5): a cell passes its whole flux along its wind however weak the wind,
+//! and the Q ∂u/∂x term is dropped. Where streams along the bands meet over land, or one runs into
+//! still air, the converging flux would rain out in one or two cells (plan 09's E-L7 and E-L6).
+//! The exit restores that term by mass continuity, with no constant of its own:
+//!
+//! - **The stream share.** Each cell's [`Month::stream_shares`] s, the share of its outflow that
+//!   stays in the stream, the caller's `u_out`⁺ ÷ max(`u_in`, `u_out`) of the along-band wind at
+//!   the cell's two edges: 1 where the wind holds or speeds up, 0 where it reverses. Each giver's
+//!   advective pull, (`ŵ_j` · n̂)⁺ ℓ ÷ `W_j`, is taken at its share, the land's and the sea's air
+//!   alike. Pulls only fall, so each exact block stays a column diagonally dominant M-matrix; the
+//!   dispersion, the components, the flow order, the iteration and its stop are unchanged.
+//! - **Calm land** takes nothing along the band: a land cell under still air rains its own source
+//!   alone, P = S ÷ (1 − ε).
+//! - **The exit**, X = (`Q_v` + `Q_c`)[(1 − s) + s Σ (ŵ · n̂)⁺ ℓ ÷ W over the downwind edges into
+//!   calm land], over each land cell whose air moves on ([`Orographic::exit_kg_s`]), leaves the
+//!   model, and the land's budget closes as inflow + source = runoff + outflow + exit. The model
+//!   rains none of it; the caller does ([`hydrology`](super::hydrology)'s stage 5).
+//!
+//! With every share 1 and no calm land the solve is as before, bit for bit.
 //!
 //! # The order and the solve
 //!
@@ -621,6 +645,13 @@ impl Mesh {
     pub(super) fn len(&self) -> u32 {
         u32::try_from(self.areas_m2.len()).expect("a mesh has under 2^32 cells")
     }
+
+    /// Each cell's area, m², its solid angle times R², in cell-index order: the areas the budget
+    /// and the exit ([`Orographic::exit_kg_s`]) are reckoned over.
+    #[must_use]
+    pub(super) fn areas_m2(&self) -> &[f64] {
+        &self.areas_m2
+    }
 }
 
 /// One month's inputs to [`solve`], each slice one value a cell in the mesh's cell order.
@@ -642,6 +673,12 @@ pub(super) struct Month<'a> {
     /// kg m⁻² s⁻¹, non-negative; read over the land alone, each land cell taking e^(−H/H₀) of it
     /// as its vapour source ([`Parameters::column_share`]).
     pub(super) convergence_kg_m2_s: &'a [f64],
+    /// Each cell's stream share s, in [0, 1] (decision-r09-t13m §2.3).
+    ///
+    /// The share of the air it passes along its wind that stays in the stream, the rest leaving it
+    /// as the exit; 1 where the wind neither slows nor reverses across the cell. Read for every
+    /// cell that gives air, land and sea.
+    pub(super) stream_shares: &'a [f64],
 }
 
 /// A month's orographic precipitation: each cell's rate and recycled share, and what the solve
@@ -655,6 +692,12 @@ pub(super) struct Orographic {
     /// (1 − ε) P (eq. 44): ε₀ e^(−H/H₀) on thawed land, zero on frozen land
     /// ([`Parameters::recycled_share_on`]) and over the sea.
     pub(super) recycled_shares: Vec<f64>,
+    /// Each cell's exit X, kg s⁻¹ (decision-r09-t13m §2.5).
+    ///
+    /// The water its air carried that left the stream, over land whose air moves on, zero
+    /// elsewhere. The model rains none of it; the caller spreads it
+    /// ([`hydrology`](super::hydrology)'s stage 5).
+    pub(super) exit_kg_s: Vec<f64>,
     /// What the solve did that is no output.
     pub(super) diagnostics: Diagnostics,
 }
@@ -679,7 +722,8 @@ pub(super) struct ComponentSizes {
 
 /// What a month's solve did that is no output (decision-r09-t13e-lfpm-convergence §3.2 item 7):
 /// its iteration, its components, and the land's water budget at its final state, which closes
-/// as inflow + source = runoff + outflow (decision-r09-t13e-revision §4.7).
+/// as inflow + source = runoff + outflow + exit (decision-r09-t13e-revision §4.7,
+/// decision-r09-t13m §2.5).
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Diagnostics {
     /// The GMRES restarts the solve took, at most its parameters' cap.
@@ -729,8 +773,13 @@ pub(super) struct Diagnostics {
     pub(super) runoff_kg_s: f64,
     /// The precipitation that evaporated back into the air, Σ ε P A over the land, kg s⁻¹.
     pub(super) recycled_kg_s: f64,
-    /// The water the land's air passed to the sea, kg s⁻¹.
+    /// The water the land's air passed to the sea, kg s⁻¹: the stream's share of what crosses
+    /// each coast.
     pub(super) outflow_kg_s: f64,
+    /// The water that left the land's streams, the exit, Σ X over the land, kg s⁻¹
+    /// (decision-r09-t13m §2.5): what the stream shares stopped, and what moving air would have
+    /// carried into calm land; the caller rains it ([`Orographic::exit_kg_s`]).
+    pub(super) exit_kg_s: f64,
 }
 
 /// The runoff-generating rate (1 − ε) P of a cell under precipitation `precipitation_kg_m2_s`,
@@ -976,6 +1025,26 @@ fn source_kg_s(mesh: &Mesh, month: &Month<'_>, parameters: &Parameters, i: usize
     month.convergence_kg_m2_s[i] * parameters.column_share(month.heights_m[i]) * mesh.areas_m2[i]
 }
 
+/// Whether cell `i` of `month` is calm land, a land cell under still air, into which nothing is
+/// carried along the band (decision-r09-t13m §2(b)).
+#[must_use]
+fn calm_land(month: &Month<'_>, i: usize) -> bool {
+    month.cover[i] == Cover::Land && matches!(month.winds[i], CellWind::Calm)
+}
+
+/// The width of the air that neighbour `j`, of wind `other`, passes across `face` into a cell, m.
+///
+/// It is (`ŵ_j` · n̂)⁺ ℓ times its stream share `s_j` (decision-r09-t13m §2.4), none where the cell
+/// is `still`, calm land. A share of 1 leaves the width as it was to the bit.
+#[must_use]
+fn given_m(month: &Month<'_>, face: &Face, other: &Local, j: usize, still: bool) -> f64 {
+    if still {
+        0.0
+    } else {
+        downwind(other.dots[usize::from(face.back)]) * face.length_m * month.stream_shares[j]
+    }
+}
+
 /// Cell `cell`'s balance, a land cell of `locals`, with or without the dispersion; its places in
 /// a block all [`OUTSIDE`].
 #[must_use]
@@ -989,6 +1058,7 @@ fn row(
 ) -> Row {
     let i = slot(cell);
     let (local, faces) = (&locals[i], &mesh.faces[i]);
+    let still = calm_land(month, i);
     let mut pulls = [0.0; 4];
     let mut outside_kg_s = [0.0; 2];
     let mut spread = 0.0;
@@ -999,7 +1069,7 @@ fn row(
             Dispersion::On => spread_m(parameters, face, k, local, other),
             Dispersion::Off => 0.0,
         };
-        let given = downwind(other.dots[usize::from(face.back)]) * face.length_m;
+        let given = given_m(month, face, other, j, still);
         match other.kind {
             Kind::Through => pulls[k] = (given + kappa_m) / other.width_m,
             Kind::Sea => {
@@ -2006,11 +2076,12 @@ fn sea_mean_kg_m2_s(mesh: &Mesh, month: &Month<'_>) -> f64 {
 }
 
 /// Checks that `month` holds one value a cell of `mesh`, its heights finite, its sea rates finite
-/// and non-negative over the sea and its convergence finite and non-negative over the land.
+/// and non-negative over the sea, its convergence finite and non-negative over the land and its
+/// stream shares in [0, 1].
 ///
 /// # Panics
 ///
-/// If it does not.
+/// If it does not, or a stream share lies outside [0, 1].
 fn check(mesh: &Mesh, month: &Month<'_>) {
     let cells = mesh.areas_m2.len();
     for (name, len) in [
@@ -2020,8 +2091,15 @@ fn check(mesh: &Mesh, month: &Month<'_>) {
         ("winds", month.winds.len()),
         ("sea rates", month.sea_rates_kg_m2_s.len()),
         ("convergences", month.convergence_kg_m2_s.len()),
+        ("stream shares", month.stream_shares.len()),
     ] {
         assert_eq!(len, cells, "a month holds {cells} {name}, one a cell");
+    }
+    for &share in month.stream_shares {
+        assert!(
+            (0.0..=1.0).contains(&share),
+            "a stream share lies in [0, 1], got {share}"
+        );
     }
     for ((&height_m, &cover), (&rate, &convergence)) in month.heights_m.iter().zip(month.cover).zip(
         month
@@ -2135,7 +2213,8 @@ pub(super) fn solve(mesh: &Mesh, month: &Month<'_>, parameters: &Parameters) -> 
         precipitation_kg_m2_s: &precipitation_kg_m2_s,
         recycled_shares: &recycled_shares,
     };
-    let mut diagnostics = budget(mesh, month, parameters, &solved, iteration.dispersion);
+    let (mut diagnostics, exit_kg_s) =
+        budget(mesh, month, parameters, &solved, iteration.dispersion);
     diagnostics.restarts = iteration.restarts;
     diagnostics.sweeps = iteration.sweeps;
     diagnostics.measure = iteration.measure;
@@ -2150,6 +2229,7 @@ pub(super) fn solve(mesh: &Mesh, month: &Month<'_>, parameters: &Parameters) -> 
     Orographic {
         precipitation_kg_m2_s,
         recycled_shares,
+        exit_kg_s,
         diagnostics,
     }
 }
@@ -2169,9 +2249,11 @@ struct Solved<'a> {
 
 /// The land's water budget and the global mean rate at `solved`'s values, summed in cell-index
 /// order and each cell's edges in turn: what the sea gave and took, the land's own source, what
-/// fell and recycled, and what passed to the sea, the dispersion counted as the final state's
-/// balances carried it (`dispersion`: none at the start); the iteration's fields left for
-/// [`solve`].
+/// fell and recycled, what passed to the sea and what left the stream, the dispersion counted as
+/// the final state's balances carried it (`dispersion`: none at the start); the iteration's fields
+/// left for [`solve`]. With it, each cell's exit X, kg s⁻¹ (decision-r09-t13m §2.5): over land
+/// whose air moves on, its outflow (`Q_v` + `Q_c`) times (1 − s) + s Σ (ŵ · n̂)⁺ ℓ ÷ W over its
+/// downwind edges into calm land; zero elsewhere.
 #[must_use]
 fn budget(
     mesh: &Mesh,
@@ -2179,7 +2261,7 @@ fn budget(
     parameters: &Parameters,
     solved: &Solved<'_>,
     dispersion: Dispersion,
-) -> Diagnostics {
+) -> (Diagnostics, Vec<f64>) {
     let Solved {
         locals,
         outflow_kg_s,
@@ -2204,7 +2286,9 @@ fn budget(
         runoff_kg_s: 0.0,
         recycled_kg_s: 0.0,
         outflow_kg_s: 0.0,
+        exit_kg_s: 0.0,
     };
+    let mut exits_kg_s = vec![0.0; locals.len()];
     let (mut rained_kg_s, mut area_m2) = (0.0, 0.0);
     for (i, local) in locals.iter().enumerate() {
         let a = mesh.areas_m2[i];
@@ -2219,6 +2303,19 @@ fn budget(
         diagnostics.runoff_kg_s += (1.0 - recycled_shares[i]) * fallen_kg_s;
         diagnostics.recycled_kg_s += recycled_shares[i] * fallen_kg_s;
         let own = outflow_kg_s[i][0] + outflow_kg_s[i][1];
+        let (share, still) = (month.stream_shares[i], calm_land(month, i));
+        if local.kind == Kind::Through {
+            let into_calm = mesh.faces[i]
+                .iter()
+                .enumerate()
+                .filter(|&(_, face)| calm_land(month, slot(face.neighbour)))
+                .fold(0.0, |sum, (k, face)| {
+                    sum + downwind(local.dots[k]) * face.length_m / local.width_m
+                });
+            let exit = own * ((1.0 - share) + share * into_calm);
+            exits_kg_s[i] = exit;
+            diagnostics.exit_kg_s += exit;
+        }
         for (k, face) in mesh.faces[i].iter().enumerate() {
             let j = slot(face.neighbour);
             let other = &locals[j];
@@ -2227,11 +2324,11 @@ fn budget(
             }
             if local.kind == Kind::Through {
                 diagnostics.outflow_kg_s +=
-                    downwind(local.dots[k]) * face.length_m / local.width_m * own;
+                    downwind(local.dots[k]) * face.length_m / local.width_m * own * share;
             }
             if other.kind == Kind::Sea {
                 let [vapour, cloud] = parameters.sea_air(month.sea_rates_kg_m2_s[j]);
-                let given = downwind(other.dots[usize::from(face.back)]) * face.length_m;
+                let given = given_m(month, face, other, j, still);
                 diagnostics.inflow_kg_s += (vapour + cloud) * given;
                 if dispersion == Dispersion::On && local.kind == Kind::Through {
                     let kappa_m = spread_m(parameters, face, k, local, other);
@@ -2241,7 +2338,7 @@ fn budget(
         }
     }
     diagnostics.global_mean_kg_m2_s = rained_kg_s / area_m2;
-    diagnostics
+    (diagnostics, exits_kg_s)
 }
 
 /// The index into a mesh's vectors of cell `cell`.

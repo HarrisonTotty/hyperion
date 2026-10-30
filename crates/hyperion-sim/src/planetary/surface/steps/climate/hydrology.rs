@@ -37,8 +37,21 @@
 //!    the zonal interpolant in the model's coordinates, held to its stencil's range. On an
 //!    aquaplanet `e_b` is the band mean Ē and `s_b` is 1, so `P_sea` is max(0, Ē − (E − P)) to the
 //!    bit.
-//! 4. **The winds** ([`wind`](super::wind)) at each climate cell, quantised and decoded into its
-//!    record.
+//!
+//!    **Each column's budget** (R09.T13.m; decision-r09-t13m §1; [`ColumnBudgets`]): on a rotating
+//!    world's geographic grid, each 5° column's own partition of its own h and L q, its centre its
+//!    own energy-flux equator held at the body's Φ₁, blended at band k with the zonal budget's
+//!    eddies, `b_k` (E − P)_c + (1 − `b_k`)((E − P)_z − `H_z` + `H_c`), H a budget's Hadley part
+//!    ([`partition::hadley_part_kg_m2_s`]) and `b_k` 1 within the Hadley edge, 0 beyond 1.5 edges
+//!    ([`blend_share`]); each column's sea rate and land source by the rule above, with the band's
+//!    `e_b` and `s_b`. The model's flux, −Λ∇h, is a gradient flow, so each column's zero of it is
+//!    the zonally varying energy-flux equator of Adam, Bischoff and Schneider 2016 (J. Climate 29,
+//!    7281), where a summer continent's convergence zone lies: the monsoon, which the zonal budget
+//!    averages away (plan 09's E-P9). A cell reads its two columns' values, each by the band
+//!    stencil, linear in longitude between their centres ([`ColumnRead`]). A locked world, and a
+//!    grid of one column, read the zonal budget alone.
+//! 4. **The winds** ([`wind`](super::wind)) at each climate cell, its lower branch's ψ its two
+//!    columns' with each column's budget, quantised and decoded into its record ([`MonthWind`]).
 //! 5. **The orography** ([`lfpm`](super::lfpm)): the land cells' rate along each field cell's
 //!    climate cell's decoded wind's component along the model's bands, east, west or calm by its
 //!    sign ([`wind::along_bands`]; decision-r09-t13e-revision §4.3), since the zonal budget
@@ -50,6 +63,15 @@
 //!    temperature at its surface, its climate cell's normalised month at its height, lies below
 //!    the condensable's freezing point ([`ground_of`]; §4.4). A wholly calm month needs no rule of
 //!    its own: every land cell is then a sink with its source (§4.5).
+//!
+//!    **The convergence exit** (R09.T13.m; decision-r09-t13m §2): each field cell's stream share s
+//!    = `u_out`⁺ ÷ max(`u_in`, `u_out`) ([`stream_share`]), u the drag balance's along-band wind of
+//!    the record's own meridional wind before its quantisation, at the cell's own sine latitude at
+//!    its two edges ([`FieldReads::stream_shares`]), carries what a slowing stream sheds, and all
+//!    that runs into calm land, out of the orographic model; that water falls once, over its unit's
+//!    land by area, before the balance ([`FieldReads::spread`]). Where streams meet, or run into
+//!    still air, it falls over a unit of the model's grid (2.5° × 5° on the geographic grid below
+//!    75.5°) instead of a cell (plan 09's E-L7 and E-L6).
 //! 6. **The water balance** (decision-r09-t13ge §2.8, e8): one factor k a month, k = Σ E ÷
 //!    (Σ `P_sea` over the sea + Σ (1 − ε) P over the land), ε the month's on each land cell,
 //!    solid-angle sums in cell-index order, applied to every cell's rate, so that the global
@@ -77,7 +99,7 @@ use super::ebm::{EnergyBalance, Freezing, Moisture};
 use super::evaporation::ClimateCellTerms;
 #[cfg(test)]
 use super::evaporation::OpenMonth;
-use super::grid::{BandStencil, LATITUDE_BANDS, ModelGrid};
+use super::grid::{BandStencil, ColumnRead, LATITUDE_BANDS, ModelGrid};
 use super::lfpm::{self, CellWind, Cover, GroundState, Mesh, Month, Parameters};
 use super::partition::{self, Bands, Budget, Circulation, DEGREE_RAD, Turning};
 use super::seas;
@@ -139,6 +161,9 @@ pub(super) struct MonthCycle {
     /// The orographic solve's diagnostics, or `None` where none ran (nothing evaporated, or no
     /// land).
     pub(super) orographic: Option<lfpm::Diagnostics>,
+    /// Each column's budget, on a rotating world's geographic grid (R09.T13.m); `None` on a locked
+    /// world and on a grid of one column, which read the zonal budget alone.
+    pub(super) columns: Option<ColumnBudgets>,
 }
 
 /// A month's field cells by the sense of their orographic wind along the model's bands.
@@ -214,7 +239,13 @@ pub(super) fn run(
     working: &mut Working,
     model: &Normalised,
 ) -> Option<Diagnostics> {
-    run_at(pass, working, model, &Parameters::HERGARTEN_ROBL)
+    run_at(
+        pass,
+        working,
+        model,
+        &Parameters::HERGARTEN_ROBL,
+        Columns::Own,
+    )
 }
 
 /// [`run`] with the orographic model's `parameters` in place of [`Parameters::HERGARTEN_ROBL`]:
@@ -226,23 +257,47 @@ pub(super) fn run_with(
     model: &Normalised,
     parameters: &Parameters,
 ) -> Option<Diagnostics> {
-    run_at(pass, working, model, parameters)
+    run_at(pass, working, model, parameters, Columns::Own)
 }
 
-/// [`run`] at the orographic model's `parameters`.
+/// [`run`] with the zonal budget alone at every longitude ([`Columns::Zonal`]): for the tests that
+/// hold the column budget to it (decision-r09-t13m §3.1).
+#[cfg(test)]
+pub(super) fn run_zonal(
+    pass: &Pass<'_>,
+    working: &mut Working,
+    model: &Normalised,
+) -> Option<Diagnostics> {
+    run_at(
+        pass,
+        working,
+        model,
+        &Parameters::HERGARTEN_ROBL,
+        Columns::Zonal,
+    )
+}
+
+/// Which budget a water cycle on the geographic grid reads at each longitude.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Columns {
+    /// Each column's own, in the tropics (R09.T13.m; [`ColumnBudgets`]): a rotating world's.
+    Own,
+    /// The zonal budget's, the same at every longitude, as R09.T13.e built it: a locked world's,
+    /// a grid of one column's, and the tests' reference.
+    Zonal,
+}
+
+/// [`run`] at the orographic model's `parameters`, its columns' budgets as `columns` says.
 fn run_at(
     pass: &Pass<'_>,
     working: &mut Working,
     model: &Normalised,
     parameters: &Parameters,
+    columns: Columns,
 ) -> Option<Diagnostics> {
     let Some(own) = &model.water else {
         calm(working);
         return None;
-    };
-    let turning = match model.coordinates {
-        Coordinates::Geographic => Turning::Rotating,
-        Coordinates::TidallyLocked => Turning::Locked,
     };
     Some(water_cycle(
         pass,
@@ -250,8 +305,8 @@ fn run_at(
         &model.grid,
         model.coordinates,
         own,
-        turning,
         parameters,
+        columns,
     ))
 }
 
@@ -366,23 +421,417 @@ impl SeaBands {
                 )
             });
             let c = -emp;
-            let rate = if c >= 0.0 {
-                e + c
-            } else if s > 0.0 {
-                e + c / s
-            } else {
-                0.0
-            };
             bands.evaporation_kg_m2_s.push(e);
             bands.sea_shares.push(s);
-            bands
-                .rates_kg_m2_s
-                .push(if rate > 0.0 { rate } else { 0.0 });
-            bands
-                .convergence_kg_m2_s
-                .push(if c > 0.0 { c } else { 0.0 });
+            bands.rates_kg_m2_s.push(sea_rate_kg_m2_s(e, s, c));
+            bands.convergence_kg_m2_s.push(positive(c));
         }
         bands
+    }
+}
+
+/// A month's column budgets on a rotating world's geographic grid (R09.T13.m; decision-r09-t13m
+/// §1), one each a column of 5° from −180°: each column's own partition, on its own points, of
+/// its own h and L q ([`Bands::of`] on one column), under the body's circulation, its cap the
+/// as-built Φ₁; and each column's E − P blended with the zonal budget's eddies, its sea's rate and
+/// its land's source.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ColumnBudgets {
+    /// Each column's own budget: its energy-flux equator, its centre, its ψ and its E − P.
+    pub(super) budgets: Vec<Budget>,
+    /// Each column's blended E − P at each band, kg m⁻² s⁻¹, `[column][band]`: at band k,
+    /// `b_k` (E − P)_c + (1 − `b_k`)((E − P)_z − `H_z` + `H_c`), the column's whole budget within
+    /// the Hadley edge and the zonal eddies with the column's own Hadley part beyond 1.5 edges
+    /// ([`blend_share`]), H a budget's Hadley part ([`partition::hadley_part_kg_m2_s`]).
+    pub(super) evaporation_less_precipitation_kg_m2_s: Vec<Vec<f64>>,
+    /// Each column's sea rate at each band before the balance, kg m⁻² s⁻¹, `[column][band]`:
+    /// [`SeaBands`]' rule on its blended convergence, with the band's `e_b` and `s_b`.
+    pub(super) rates_kg_m2_s: Vec<Vec<f64>>,
+    /// Each column's convergence max(0, C) at each band, kg m⁻² s⁻¹, `[column][band]`: its land's
+    /// vapour source at the sea level.
+    pub(super) convergence_kg_m2_s: Vec<Vec<f64>>,
+}
+
+impl ColumnBudgets {
+    /// The month's columns of `grid` (its points' sea-level temperatures `t_k`, K, one a point)
+    /// under `model` and `circulation`, about the month's zonal budget `zonal` of the bands
+    /// `zonal_bands`, its sea `sea` and each band's blend `blend` ([`blend_share`]).
+    #[must_use]
+    pub(super) fn of(
+        grid: &ModelGrid,
+        model: &EnergyBalance,
+        circulation: &Circulation,
+        t_k: &[f64],
+        (zonal, zonal_bands): (&Budget, &Bands),
+        sea: &SeaBands,
+        blend: &[f64],
+    ) -> Self {
+        let one = ModelGrid::zonal();
+        let zonal_hadley = partition::hadley_part_kg_m2_s(grid, model, zonal, zonal_bands);
+        let columns = grid.columns();
+        let mut budgets = Self {
+            budgets: Vec::with_capacity(columns),
+            evaporation_less_precipitation_kg_m2_s: Vec::with_capacity(columns),
+            rates_kg_m2_s: Vec::with_capacity(columns),
+            convergence_kg_m2_s: Vec::with_capacity(columns),
+        };
+        let mut column_k = vec![0.0; LATITUDE_BANDS];
+        for c in 0..columns {
+            for (k, t) in column_k.iter_mut().enumerate() {
+                *t = t_k[grid.point(k, c)];
+            }
+            let bands = Bands::of(model, &one, &column_k);
+            let budget = partition::budget(&one, model, circulation, &bands);
+            let hadley = partition::hadley_part_kg_m2_s(&one, model, &budget, &bands);
+            let (mut emps, mut rates, mut convergence) = (
+                Vec::with_capacity(LATITUDE_BANDS),
+                Vec::with_capacity(LATITUDE_BANDS),
+                Vec::with_capacity(LATITUDE_BANDS),
+            );
+            for (k, &b) in blend.iter().enumerate() {
+                let outer =
+                    zonal.evaporation_less_precipitation_kg_m2_s[k] - zonal_hadley[k] + hadley[k];
+                let emp = b * budget.evaporation_less_precipitation_kg_m2_s[k] + (1.0 - b) * outer;
+                let c = -emp;
+                emps.push(emp);
+                rates.push(sea_rate_kg_m2_s(
+                    sea.evaporation_kg_m2_s[k],
+                    sea.sea_shares[k],
+                    c,
+                ));
+                convergence.push(positive(c));
+            }
+            budgets.budgets.push(budget);
+            budgets.evaporation_less_precipitation_kg_m2_s.push(emps);
+            budgets.rates_kg_m2_s.push(rates);
+            budgets.convergence_kg_m2_s.push(convergence);
+        }
+        budgets
+    }
+
+    /// The lower branch's mass flux ψ, kg m⁻² s⁻¹ per 2πR², at the band read `edge`, read in
+    /// longitude by `read` between its two columns' ψ (decision-r09-t13m §1.4).
+    #[must_use]
+    pub(super) fn mass_flux_kg_m2_s_at(&self, read: ColumnRead, edge: EdgeRead) -> f64 {
+        let [west, east] = read.columns();
+        read.read(
+            edge.read(&self.budgets[west].mass_flux_kg_m2_s),
+            edge.read(&self.budgets[east].mass_flux_kg_m2_s),
+        )
+    }
+}
+
+/// The blend `b_k` of band `band` of `grid` under `circulation` (decision-r09-t13m §1.2): the
+/// column's whole budget's share, clamp((1.5 `φ_H` − |`φ_k`|) ÷ (0.5 `φ_H`), 0, 1), `φ_k` the
+/// band's centre latitude and `φ_H` the Hadley edge ([`Circulation::edge_deg`]): 1 within the edge,
+/// 0 beyond 1.5 edges (37.7° at Ω⊕, where Siler et al.'s Hadley share exp(−(x ÷ 0.3)²) is 0.016),
+/// their eddies carrying "essentially all energy transport poleward of 45°" (2018, §2, read;
+/// [`partition::HADLEY_WIDTH_AT_EARTH`]), linear between.
+#[must_use]
+pub(super) fn blend_share(circulation: &Circulation, grid: &ModelGrid, band: usize) -> f64 {
+    let edge = circulation.edge_deg();
+    let latitude = math::asin(grid.centre_sine(band).abs()) / DEGREE_RAD;
+    ((1.5 * edge - latitude) / (0.5 * edge)).clamp(0.0, 1.0)
+}
+
+/// The share s of a cell's along-band outflow that stays in its stream (decision-r09-t13m §2.3).
+///
+/// From the along-band wind at its upwind edge `u_in_m_s` and at its downwind edge `u_out_m_s`,
+/// m/s, each in the sense of the cell's own stream: 1 where the two are equal (bit for bit,
+/// whatever their sign, a −0 read as +0), else 0 where the wind at the downwind edge has stopped or
+/// reversed, else `u_out` ÷ max(`u_in`, `u_out`). The air that a slowing stream sheds by mass
+/// continuity leaves it, the term the model's fixed lengths drop (Hergarten and Robl 2022, Geosci.
+/// Model Dev. 15, 2063, eq. 5, "if we furthermore assume that the velocities are constant"); where
+/// the wind speeds up, the air that joins is subsiding or meridional, whose water the partition
+/// holds, and s is 1.
+#[must_use]
+pub(super) fn stream_share(u_in_m_s: f64, u_out_m_s: f64) -> f64 {
+    // + 0.0 turns a −0 into +0 and leaves every other value as it is, so that a still stream at
+    // both edges is equal whichever zero the drag balance gave each.
+    let (u_in_m_s, u_out_m_s) = (u_in_m_s + 0.0, u_out_m_s + 0.0);
+    if u_in_m_s.total_cmp(&u_out_m_s).is_eq() {
+        1.0
+    } else if u_out_m_s <= 0.0 {
+        0.0
+    } else if u_in_m_s > u_out_m_s {
+        u_out_m_s / u_in_m_s
+    } else {
+        1.0
+    }
+}
+
+/// What a field cell's stream share reads that is the same every month (decision-r09-t13m §2.1):
+/// its sine latitude x and |φ| in the model's frame, its band read, and its two edges along the
+/// band, the points p ∓ δ turned about the model's pole, δ = ½ √Ω ÷ cos φ its half-width in
+/// longitude: their places in column centres and their Coriolis parameters at their geographic
+/// latitudes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct StreamEdges {
+    x: f64,
+    latitude_deg: f64,
+    edge: EdgeRead,
+    /// The western edge's and the eastern edge's places in column centres
+    /// ([`ModelGrid::column_position`]).
+    positions: [f64; 2],
+    /// The Coriolis parameter at the western edge and at the eastern, s⁻¹.
+    coriolis_per_s: [f64; 2],
+}
+
+impl StreamEdges {
+    /// The edges of the field cell of model-frame centre `p`, solid angle `omega_sr` and place
+    /// `position` in `grid`'s column centres, on a world in `coordinates` of sidereal period
+    /// `rotation_period_s`; `None` where its centre lies within its own size of the model's pole,
+    /// cos φ ≤ √Ω, where its share is 1.
+    #[must_use]
+    fn of(
+        grid: &ModelGrid,
+        coordinates: Coordinates,
+        rotation_period_s: f64,
+        p: [f64; 3],
+        omega_sr: f64,
+        position: f64,
+    ) -> Option<Self> {
+        let cosine = (p[0] * p[0] + p[1] * p[1]).sqrt();
+        let size = omega_sr.sqrt();
+        if cosine <= size {
+            return None;
+        }
+        let delta = 0.5 * size / cosine;
+        let (sin, cos) = math::sin_cos(delta);
+        let coriolis = |sign: f64| {
+            let turned = [
+                cos * p[0] - sign * sin * p[1],
+                sign * sin * p[0] + cos * p[1],
+                p[2],
+            ];
+            wind::coriolis_per_s(rotation_period_s, coordinates.to_body(turned))
+        };
+        let half = delta / grid.column_width_rad();
+        Some(Self {
+            x: p[2],
+            latitude_deg: math::asin(p[2].abs()) / DEGREE_RAD,
+            edge: EdgeRead::at(grid, p[2]),
+            positions: [position - half, position + half],
+            coriolis_per_s: [coriolis(-1.0), coriolis(1.0)],
+        })
+    }
+}
+
+/// The water cycle's reads of the field cells that are the same every month (decision-r09-t13m
+/// §1.3, §2.1, §2.6), each a function of the field and the model's grid alone: each cell's band
+/// stencil in the model's coordinates, its place between the columns that bracket its longitude
+/// (with the column budget), its stream's edges and its exit unit.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct FieldReads {
+    stencils: Vec<BandStencil>,
+    columns: Option<Vec<ColumnRead>>,
+    edges: Vec<Option<StreamEdges>>,
+    /// Each cell's exit unit, a point of the grid ([`FieldReads::spread`]).
+    units: Vec<u32>,
+    /// The grid's points, which number the units.
+    points: usize,
+}
+
+impl FieldReads {
+    /// The reads of `pass`'s field cells on `grid` in `coordinates`, with their column reads where
+    /// the water cycle reads each column's budget ([`Columns::Own`]).
+    #[must_use]
+    pub(super) fn of(
+        pass: &Pass<'_>,
+        grid: &ModelGrid,
+        coordinates: Coordinates,
+        columns: Columns,
+    ) -> Self {
+        let field = pass.grid();
+        let rotation_period_s = pass.inputs().spin().rotation_period.value();
+        let cells = field.centres().len();
+        let merged: Vec<usize> = (0..LATITUDE_BANDS)
+            .map(|band| grid.merged_columns(band))
+            .collect();
+        let mut reads = Self {
+            stencils: Vec::with_capacity(cells),
+            columns: (columns == Columns::Own).then(|| Vec::with_capacity(cells)),
+            edges: Vec::with_capacity(cells),
+            units: Vec::with_capacity(cells),
+            points: grid.points(),
+        };
+        for (&up, &omega) in field.centres().iter().zip(field.solid_angles_sr()) {
+            let p = coordinates.to_model(up);
+            reads.stencils.push(BandStencil::at(p[2]));
+            let position = grid.column_position(math::atan2(p[1], p[0]));
+            if let Some(columns) = &mut reads.columns {
+                columns.push(ColumnRead::at(grid, position));
+            }
+            reads.edges.push(StreamEdges::of(
+                grid,
+                coordinates,
+                rotation_period_s,
+                p,
+                omega,
+                position,
+            ));
+            let point = grid.point_of(p);
+            let (band, column) = (point / grid.columns(), point % grid.columns());
+            let unit = grid.point(band, column / merged[band] * merged[band]);
+            reads
+                .units
+                .push(u32::try_from(unit).expect("a grid's points fit a u32"));
+        }
+        reads
+    }
+
+    /// Field cell `n`'s place between the columns.
+    ///
+    /// # Panics
+    ///
+    /// If the reads were made with no column reads.
+    #[must_use]
+    fn column_read(&self, n: usize) -> ColumnRead {
+        self.columns
+            .as_ref()
+            .expect("a month of column budgets has the field's column reads")[n]
+    }
+
+    /// The value at field cell `n` of `bands` (one a band), or, given them, of `columns` (one a
+    /// band of each column): the band stencil, held to its range, and with columns that read at
+    /// each of the two columns that bracket the cell, linear in longitude between them
+    /// (decision-r09-t13m §1.3).
+    #[must_use]
+    fn at(&self, n: usize, bands: &[f64], columns: Option<&[Vec<f64>]>) -> f64 {
+        let stencil = &self.stencils[n];
+        match columns {
+            Some(columns) => {
+                let read = self.column_read(n);
+                let [west, east] = read.columns();
+                read.read(
+                    stencil.clamped(&columns[west]),
+                    stencil.clamped(&columns[east]),
+                )
+            }
+            None => stencil.clamped(bands),
+        }
+    }
+
+    /// Field cell `n`'s sea rate before the balance, kg m⁻² s⁻¹: its band's `P_sea` from `sea`,
+    /// or its columns' with `columns`.
+    ///
+    /// # Panics
+    ///
+    /// If given `columns` with reads made for the zonal budget alone ([`Columns::Zonal`]).
+    #[must_use]
+    pub(super) fn sea_rate_kg_m2_s(
+        &self,
+        n: usize,
+        sea: &SeaBands,
+        columns: Option<&ColumnBudgets>,
+    ) -> f64 {
+        self.at(
+            n,
+            &sea.rates_kg_m2_s,
+            columns.map(|c| c.rates_kg_m2_s.as_slice()),
+        )
+    }
+
+    /// Field cell `n`'s convergence at the sea level, the land's vapour source before its column
+    /// share, kg m⁻² s⁻¹: its band's max(0, `C_b`) from `sea`, or its columns' with `columns`.
+    ///
+    /// # Panics
+    ///
+    /// If given `columns` with reads made for the zonal budget alone ([`Columns::Zonal`]).
+    #[must_use]
+    pub(super) fn convergence_kg_m2_s(
+        &self,
+        n: usize,
+        sea: &SeaBands,
+        columns: Option<&ColumnBudgets>,
+    ) -> f64 {
+        self.at(
+            n,
+            &sea.convergence_kg_m2_s,
+            columns.map(|c| c.convergence_kg_m2_s.as_slice()),
+        )
+    }
+
+    /// Each field cell's stream share this month into `shares` (decision-r09-t13m §2.2–§2.3), in
+    /// cell-index order: for a cell whose orographic wind `winds` blows along its band, towards
+    /// ±ê its local east `easts`, u at its upwind and downwind edges, the drag balance's u of the
+    /// month's meridional wind `month` at its own sine latitude there, under ψ read from the
+    /// zonal budget `zonal` or, with `columns`, from its edges' columns, each u taken in the sense
+    /// of its stream ([`stream_share`]); 1 under still air and at the model's pole.
+    pub(super) fn stream_shares(
+        &self,
+        month: &MonthWind,
+        (zonal, columns): (&Budget, Option<&ColumnBudgets>),
+        (winds, easts): (&[CellWind], &[Option<[f64; 3]>]),
+        grid: &ModelGrid,
+        shares: &mut Vec<f64>,
+    ) {
+        shares.clear();
+        shares.extend(
+            winds
+                .iter()
+                .zip(easts)
+                .zip(&self.edges)
+                .map(|((&wind, &east), &edges)| {
+                    let (CellWind::Towards(towards), Some(east), Some(edges)) = (wind, east, edges)
+                    else {
+                        return 1.0;
+                    };
+                    let psi = |side: usize| match columns {
+                        Some(budgets) => budgets.mass_flux_kg_m2_s_at(
+                            ColumnRead::at(grid, edges.positions[side]),
+                            edges.edge,
+                        ),
+                        None => edges.edge.read(&zonal.mass_flux_kg_m2_s),
+                    };
+                    let u = |side: usize| {
+                        let v = month.v_m_s(psi(side), edges.x, edges.latitude_deg);
+                        wind::drag_balance(v, edges.coriolis_per_s[side]).0
+                    };
+                    let (west, east_u) = (u(0), u(1));
+                    let eastward =
+                        towards[0] * east[0] + towards[1] * east[1] + towards[2] * east[2] > 0.0;
+                    if eastward {
+                        stream_share(west, east_u)
+                    } else {
+                        stream_share(-east_u, -west)
+                    }
+                }),
+        );
+    }
+
+    /// Rains the month's exit once, over each unit's land (decision-r09-t13m §2.6).
+    ///
+    /// Each unit is a grid point, its band's columns merged from column 0 in runs of `n_k`
+    /// ([`ModelGrid::merged_columns`]), so that it is at least half as wide as a band is tall;
+    /// `X_u` is the sum of `exits_kg_s` (one a cell, [`lfpm::Orographic::exit_kg_s`]) over its land
+    /// and `A_u` that of `areas_m2` over all its cells, land and sea, both in cell-index order; and
+    /// each of its land cells' `rates_kg_m2_s` is raised by `X_u` ÷ `A_u`, recycling its ε as any
+    /// rate does. The land takes its area's share of the exit, and the balance factor k
+    /// closes the rest. Over a unit with no exit, every rate stays as it was to the bit.
+    pub(super) fn spread(
+        &self,
+        cover: &[Cover],
+        areas_m2: &[f64],
+        exits_kg_s: &[f64],
+        rates_kg_m2_s: &mut [f64],
+    ) {
+        let (mut exits, mut areas) = (vec![0.0; self.points], vec![0.0; self.points]);
+        for (((&unit, &c), &area), &exit) in
+            self.units.iter().zip(cover).zip(areas_m2).zip(exits_kg_s)
+        {
+            let u = slot(unit);
+            areas[u] += area;
+            if c == Cover::Land {
+                exits[u] += exit;
+            }
+        }
+        for ((rate, &unit), &c) in rates_kg_m2_s.iter_mut().zip(&self.units).zip(cover) {
+            let u = slot(unit);
+            if c == Cover::Land && exits[u] > 0.0 {
+                *rate += exits[u] / areas[u];
+            }
+        }
     }
 }
 
@@ -429,13 +878,130 @@ pub(super) fn ground_of(working: &Working, cell: u32, m: usize, freezing: Freezi
 }
 
 /// The mass flux `edges` (one a band edge of `grid`) at the sine latitude `x`, linear in it
-/// between the edges of the band that holds it.
+/// between the edges of the band that holds it ([`EdgeRead`]).
 #[must_use]
 fn at_edges(grid: &ModelGrid, edges: &[f64], x: f64) -> f64 {
-    let band = ModelGrid::band_of(x);
-    let (south, north) = (grid.edge_sine(band), grid.edge_sine(band + 1));
-    let t = ((x - south) / (north - south)).clamp(0.0, 1.0);
-    edges[band] + (edges[band + 1] - edges[band]) * t
+    EdgeRead::at(grid, x).read(edges)
+}
+
+/// A sine latitude's place between the edges of the band of a [`ModelGrid`] that holds it, which
+/// reads a field of band edges linearly in sine latitude ([`at_edges`]), kept for a cell read
+/// every month.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct EdgeRead {
+    band: usize,
+    fraction: f64,
+}
+
+impl EdgeRead {
+    /// The read at sine latitude `x` on `grid`: the band that holds it and its fraction of the way
+    /// from the band's southern edge to its northern, held to [0, 1].
+    #[must_use]
+    pub(super) fn at(grid: &ModelGrid, x: f64) -> Self {
+        let band = ModelGrid::band_of(x);
+        let (south, north) = (grid.edge_sine(band), grid.edge_sine(band + 1));
+        Self {
+            band,
+            fraction: ((x - south) / (north - south)).clamp(0.0, 1.0),
+        }
+    }
+
+    /// The value of `edges`, one a band edge, at the read's place.
+    #[must_use]
+    pub(super) fn read(&self, edges: &[f64]) -> f64 {
+        edges[self.band] + (edges[self.band + 1] - edges[self.band]) * self.fraction
+    }
+}
+
+/// The sea's rate before the balance, kg m⁻² s⁻¹, under the evaporation per unit of sea `e`
+/// (`e_b`), the sea share `s` (`s_b`) and the convergence `c` (`C_b`; decision-r09-t13e-revision
+/// §4.1): max(0, e + c) where c ≥ 0, else max(0, e + c ÷ s), a divergent column's export falling
+/// on its sea alone; zero where it diverges and has no sea.
+#[must_use]
+fn sea_rate_kg_m2_s(e: f64, s: f64, c: f64) -> f64 {
+    let rate = if c >= 0.0 {
+        e + c
+    } else if s > 0.0 {
+        e + c / s
+    } else {
+        0.0
+    };
+    positive(rate)
+}
+
+/// max(0, `x`): `x` where it is positive, else +0.
+#[must_use]
+fn positive(x: f64) -> f64 {
+    if x > 0.0 { x } else { 0.0 }
+}
+
+/// A month's meridional 10 m wind at any point, as its records take it.
+///
+/// The [module documentation](self)'s stage 4 ([`wind`]): the Hadley cells' lower branch under a
+/// mass flux ψ, and on a rotating world the Ferrel and polar template about the zonal budget's
+/// centre and edges. The record's wind and the stream shares read the one function, so that the
+/// shares' speeds are the record's before its quantisation (decision-r09-t13m §1.4, §2.2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct MonthWind {
+    radius_m: f64,
+    gravity_m_s2: f64,
+    depth_pa: f64,
+    turning: Turning,
+    /// The zonal budget's centre, sine latitude.
+    centre_sine: f64,
+    /// The template's edge in the centre's hemisphere, degrees.
+    summer_edge_deg: f64,
+    /// The template's edge in the other hemisphere, degrees: the Hadley edge.
+    edge_deg: f64,
+}
+
+impl MonthWind {
+    /// The month of the zonal budget `budget` on the world of `pass` under `circulation`, which
+    /// turns as `turning` says.
+    #[must_use]
+    pub(super) fn of(
+        pass: &Pass<'_>,
+        circulation: &Circulation,
+        turning: Turning,
+        budget: &Budget,
+    ) -> Self {
+        let inputs = pass.inputs();
+        let reach = budget.centre_sine.abs() + circulation.edge_sine();
+        Self {
+            radius_m: inputs.radius().value(),
+            gravity_m_s2: inputs.gravity().value(),
+            depth_pa: LOWER_BRANCH_DEPTH_SHARE * inputs.surface_pressure().value(),
+            turning,
+            centre_sine: budget.centre_sine,
+            summer_edge_deg: if reach < 1.0 {
+                math::asin(reach) / DEGREE_RAD
+            } else {
+                90.0
+            },
+            edge_deg: circulation.edge_deg(),
+        }
+    }
+
+    /// The meridional wind v, m/s towards the model's north pole, at sine latitude `x` in the
+    /// model's frame, |φ| `latitude_deg` degrees, under the lower branch's mass flux `psi` there
+    /// (per 2πR², southward positive): [`wind::lower_branch_m_s`], plus on a rotating world off the
+    /// equator the template's poleward wind ([`wind::extratropical_m_s`]) at the edge of its
+    /// hemisphere.
+    #[must_use]
+    pub(super) fn v_m_s(&self, psi: f64, x: f64, latitude_deg: f64) -> f64 {
+        let mut v = wind::lower_branch_m_s(psi, x, self.radius_m, self.gravity_m_s2, self.depth_pa);
+        if self.turning == Turning::Rotating && x.abs() > 0.0 {
+            let summer = self.centre_sine.abs() > 0.0 && (x > 0.0) == (self.centre_sine > 0.0);
+            let edge = if summer {
+                self.summer_edge_deg
+            } else {
+                self.edge_deg
+            };
+            let poleward = wind::extratropical_m_s(latitude_deg, edge);
+            v += if x > 0.0 { poleward } else { -poleward };
+        }
+        v
+    }
 }
 
 /// What a run's evaporation reads (the [module documentation](self)'s stage 2): the climate
@@ -821,8 +1387,9 @@ pub(crate) fn assert_the_sea_rates_share_their_month_terms(
 }
 
 /// The precipitation heuristic's water cycle on `grid` in `coordinates` over the model's own
-/// records `own`, a circulation that turns as `turning` says, the orographic model at
-/// `parameters` (the [module documentation](self)).
+/// records `own`, its circulation a rotating world's in geographic coordinates and a locked
+/// world's in tidally locked ones, the orographic model at `parameters`, each column's budget
+/// read as `columns` says (the [module documentation](self)).
 #[expect(
     clippy::too_many_lines,
     reason = "one month's pipeline of seven stages in order, each a few lines over the same cells; \
@@ -834,9 +1401,13 @@ fn water_cycle(
     grid: &ModelGrid,
     coordinates: Coordinates,
     own: &OwnRecords,
-    turning: Turning,
     parameters: &Parameters,
+    columns: Columns,
 ) -> Diagnostics {
+    let turning = match coordinates {
+        Coordinates::Geographic => Turning::Rotating,
+        Coordinates::TidallyLocked => Turning::Locked,
+    };
     let inputs = pass.inputs();
     let field = pass.grid();
     let model = EnergyBalance::for_inputs(inputs);
@@ -883,9 +1454,6 @@ fn water_cycle(
 
     // 3–7, month by month.
     let sphere: f64 = field.solid_angles_sr().iter().sum();
-    let radius_m = inputs.radius().value();
-    let gravity = inputs.gravity().value();
-    let depth_pa = LOWER_BRANCH_DEPTH_SHARE * inputs.surface_pressure().value();
     let rotation_s = inputs.spin().rotation_period.value();
     let pole = coordinates.to_body([0.0, 0.0, 1.0]);
     let heights_m: Vec<f64> = working
@@ -913,8 +1481,26 @@ fn water_cycle(
             Cover::Land => land_area += omega,
         }
     }
-    // Each field cell's local frame, its local east about the model's pole (none at the pole)
-    // and its zonal stencil in the model's coordinates, the same every month.
+    // A rotating world on the geographic grid reads each column's budget (R09.T13.m), with each
+    // band's blend and each climate cell's place between the columns, the same every month.
+    let per_column = columns == Columns::Own && turning == Turning::Rotating && grid.columns() > 1;
+    let blend: Vec<f64> = (0..LATITUDE_BANDS)
+        .map(|band| blend_share(&circulation, grid, band))
+        .collect();
+    let climate_reads: Vec<(f64, Option<ColumnRead>)> = pass
+        .climate_grid()
+        .centres()
+        .iter()
+        .map(|&up| {
+            let p = coordinates.to_model(up);
+            let read = per_column
+                .then(|| ColumnRead::at(grid, grid.column_position(math::atan2(p[1], p[0]))));
+            (p[2], read)
+        })
+        .collect();
+    // Each field cell's local frame, its local east about the model's pole (none at the pole),
+    // its zonal stencil and column read in the model's coordinates, its stream's edges and its
+    // exit unit, the same every month.
     let frames: Vec<([f64; 3], [f64; 3])> = field
         .centres()
         .iter()
@@ -925,11 +1511,16 @@ fn water_cycle(
         .iter()
         .map(|&up| wind::model_east(pole, up))
         .collect();
-    let stencils: Vec<BandStencil> = field
-        .centres()
-        .iter()
-        .map(|&centre| BandStencil::at(coordinates.to_model(centre)[2]))
-        .collect();
+    let reads = FieldReads::of(
+        pass,
+        grid,
+        coordinates,
+        if per_column {
+            Columns::Own
+        } else {
+            Columns::Zonal
+        },
+    );
     let mut mesh: Option<Mesh> = None;
     let mut cycles = Vec::with_capacity(months);
     let mut winds_used = Vec::with_capacity(months);
@@ -937,9 +1528,11 @@ fn water_cycle(
     let mut sea_rates = vec![0.0; rates.len()];
     let mut convergence = vec![0.0; rates.len()];
     let mut ground = vec![GroundState::Thawed; rates.len()];
-    // Each month's headings, field-cell winds and record sums, allocated once and refilled.
+    // Each month's headings, field-cell winds, stream shares and record sums, allocated once and
+    // refilled.
     let mut headings: Vec<wind::Heading> = Vec::with_capacity(working.climate.len());
     let mut cell_winds: Vec<CellWind> = Vec::with_capacity(frames.len());
+    let mut stream_shares: Vec<f64> = Vec::with_capacity(frames.len());
     let mut sums: Vec<(f64, f64)> = Vec::with_capacity(working.climate.len());
     for (m, budget) in budgets.into_iter().enumerate() {
         let band_e = band_means(&band_evaporation[m], &band_area);
@@ -949,36 +1542,36 @@ fn water_cycle(
             &sea_area,
             &budget.evaporation_less_precipitation_kg_m2_s,
         );
+        // 3. Each column's budget, blended with the zonal budget's eddies.
+        let column_budgets = per_column.then(|| {
+            ColumnBudgets::of(
+                grid,
+                &model,
+                &circulation,
+                &own.months_k[m],
+                (&budget, &bands[m]),
+                &sea,
+                &blend,
+            )
+        });
 
-        // 4. The winds.
-        let summer_edge_deg = {
-            let reach = budget.centre_sine.abs() + circulation.edge_sine();
-            if reach < 1.0 {
-                math::asin(reach) / DEGREE_RAD
-            } else {
-                90.0
-            }
-        };
+        // 4. The winds: each climate cell's ψ its columns' with the column budget, the zonal
+        // budget's without.
+        let month_wind = MonthWind::of(pass, &circulation, turning, &budget);
         let mut codes = Vec::with_capacity(working.climate.len());
-        for (state, &up) in working
+        for ((state, &up), &(x, read)) in working
             .climate
             .iter_mut()
             .zip(pass.climate_grid().centres())
+            .zip(&climate_reads)
         {
-            let x = coordinates.to_model(up)[2];
-            let psi = at_edges(grid, &budget.mass_flux_kg_m2_s, x);
-            let mut v = wind::lower_branch_m_s(psi, x, radius_m, gravity, depth_pa);
-            if turning == Turning::Rotating && x.abs() > 0.0 {
-                let summer =
-                    budget.centre_sine.abs() > 0.0 && (x > 0.0) == (budget.centre_sine > 0.0);
-                let edge = if summer {
-                    summer_edge_deg
-                } else {
-                    circulation.edge_deg()
-                };
-                let poleward = wind::extratropical_m_s(math::asin(x.abs()) / DEGREE_RAD, edge);
-                v += if x > 0.0 { poleward } else { -poleward };
-            }
+            let psi = match (&column_budgets, read) {
+                (Some(budgets), Some(read)) => {
+                    budgets.mass_flux_kg_m2_s_at(read, EdgeRead::at(grid, x))
+                }
+                _ => at_edges(grid, &budget.mass_flux_kg_m2_s, x),
+            };
+            let v = month_wind.v_m_s(psi, x, math::asin(x.abs()) / DEGREE_RAD);
             let (u, _) = wind::drag_balance(v, wind::coriolis_per_s(rotation_s, up));
             let velocity_m_s = wind::towards_pole(pole, up).map_or([0.0; 3], |north| {
                 let across = wind::cross(north, up);
@@ -1019,24 +1612,23 @@ fn water_cycle(
         let band_winds = BandWinds::of(&cell_winds, &easts);
         let still = cell_winds.iter().all(|&w| w == CellWind::Calm);
         let mut frozen_area = 0.0;
-        for (n, (((((rate, source), state), stencil), &c), &omega)) in (0_u32..).zip(
+        for (n, ((((rate, source), state), &c), &omega)) in (0_u32..).zip(
             sea_rates
                 .iter_mut()
                 .zip(convergence.iter_mut())
                 .zip(ground.iter_mut())
-                .zip(&stencils)
                 .zip(&cover)
                 .zip(field.solid_angles_sr()),
         ) {
             match c {
                 Cover::Sea => {
-                    *rate = stencil.clamped(&sea.rates_kg_m2_s);
+                    *rate = reads.sea_rate_kg_m2_s(slot(n), &sea, column_budgets.as_ref());
                     *source = 0.0;
                     *state = GroundState::Thawed;
                 }
                 Cover::Land => {
                     *rate = 0.0;
-                    *source = stencil.clamped(&sea.convergence_kg_m2_s);
+                    *source = reads.convergence_kg_m2_s(slot(n), &sea, column_budgets.as_ref());
                     *state = ground_of(working, n, m, model.freezing);
                     if *state == GroundState::Frozen {
                         frozen_area += omega;
@@ -1050,6 +1642,13 @@ fn water_cycle(
         rates.fill(0.0);
         if evaporated > 0.0 && land {
             let mesh = mesh.get_or_insert_with(|| Mesh::of_graph(field, inputs.radius()));
+            reads.stream_shares(
+                &month_wind,
+                (&budget, column_budgets.as_ref()),
+                (&cell_winds, &easts),
+                grid,
+                &mut stream_shares,
+            );
             let solved = lfpm::solve(
                 mesh,
                 &Month {
@@ -1059,10 +1658,13 @@ fn water_cycle(
                     winds: &cell_winds,
                     sea_rates_kg_m2_s: &sea_rates,
                     convergence_kg_m2_s: &convergence,
+                    stream_shares: &stream_shares,
                 },
                 parameters,
             );
             rates.copy_from_slice(&solved.precipitation_kg_m2_s);
+            // The exit rains once, over each unit's land, before the balance.
+            reads.spread(&cover, mesh.areas_m2(), &solved.exit_kg_s, &mut rates);
             recycled_shares = Some(solved.recycled_shares);
             orographic = Some(solved.diagnostics);
         }
@@ -1139,6 +1741,7 @@ fn water_cycle(
             band_winds,
             calm: still,
             orographic,
+            columns: column_budgets,
         });
         winds_used.push(codes);
     }

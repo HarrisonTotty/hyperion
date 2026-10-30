@@ -13,9 +13,10 @@ use hyperion_surface::field::month_edges;
 
 use super::super::grid::{GEOGRAPHIC_COLUMNS, LATITUDE_BANDS, ModelGrid, index};
 use super::gpcp_boxes::GPCP_LAND_BOXES_HUNDREDTH_MM_PER_DAY;
-use super::ncep_air::MONTH_DAYS;
+use super::hydrology::is_arid;
+use super::ncep_air::{MONTH_DAYS, REDUCTION_LAPSE_RATE_K_PER_M};
 use super::ncep_air_boxes::NCEP_LAND_BOXES_HUNDREDTH_K;
-use super::{EARTH_HYPSOMETRY_M, EARTH_LAND_BOXES, grids, synthetic_sea};
+use super::{EARTH_BOX_MEDIAN_M, EARTH_HYPSOMETRY_M, EARTH_LAND_BOXES, grids, synthetic_sea};
 use crate::math;
 use crate::planetary::surface::reference;
 use crate::planetary::surface::steps::{Pass, Working};
@@ -537,9 +538,57 @@ const LEAST_TEMPERATURE_CORRELATION: f64 = 0.75;
 const POLAR_DEG: f64 = 70.0;
 
 /// The least pattern correlation of the precipitation over the land boxes asserted in each month:
-/// 0.25, below the first run's least, 0.356 in June (R09.T13.l's record). Its departures from the
-/// bands' means are held positive, the first run's least 0.238 in May.
-const LEAST_PRECIPITATION_CORRELATION: f64 = 0.25;
+/// 0.40 under each column's budget in the tropics (decision-r09-t13m §3.4; its pilot's least
+/// 0.462), raised from R09.T13.l's 0.25, below that first run's least, 0.356 in June. Its
+/// departures from the bands' means are held positive (the first run's least 0.238 in May).
+const LEAST_PRECIPITATION_CORRELATION: f64 = 0.40;
+
+/// The least JJA precipitation of [`INDIA`]'s land boxes asserted, mm/day: 5 (decision-r09-t13m
+/// §3.4; its pilot 8.04, GPCP 8.17, as built before it 1.92).
+const INDIA_LEAST_JJA_MM_PER_DAY: f64 = 5.0;
+
+/// The Ganges's plain, 22.5–27.5° N, 75–90° E, the Himalaya's windward side ([`RAIN_SHADOWS`]),
+/// whose annual precipitation is asserted.
+const GANGES_PLAIN: Region = Region {
+    name: "the Ganges's plain (22.5–27.5° N, 75–90° E)",
+    south: 22.5,
+    north: 27.5,
+    west: 75.0,
+    east: 90.0,
+};
+
+/// The least annual precipitation of [`GANGES_PLAIN`]'s land boxes asserted, mm/day: 1.5
+/// (decision-r09-t13m §3.4; its pilot 2.26, GPCP 3.47, as built before it 0.31, a desert).
+const GANGES_LEAST_ANNUAL_MM_PER_DAY: f64 = 1.5;
+
+/// The deserts whose land boxes are asserted at least half arid (decision-r09-t13m §3.4; its pilot
+/// 0.65 and 0.88 of their land boxes' solid angle; GPCP's and NCEP's boxes 1.00 each, as this
+/// test prints them, 2026-10-30): Arabia, 17.5–30° N, 40–55° E, and the Sahara, 20–30° N,
+/// 10° W–30° E (research-r09-climate's regions).
+const DESERTS: [Region; 2] = [
+    Region {
+        name: "Arabia (17.5–30° N, 40–55° E)",
+        south: 17.5,
+        north: 30.0,
+        west: 40.0,
+        east: 55.0,
+    },
+    Region {
+        name: "the Sahara (20–30° N, 10° W–30° E)",
+        south: 20.0,
+        north: 30.0,
+        west: -10.0,
+        east: 30.0,
+    },
+];
+
+/// The least arid share of each of [`DESERTS`]' land boxes' solid angle asserted: a half.
+const LEAST_DESERT_ARID_SHARE: f64 = 0.5;
+
+/// The wettest climate cell-month asserted, mm/day: at most 30 (decision-r09-t13m §3.4, the
+/// convergence exit's: its pilot 20.9, as built before it 15.0, and 86.9 under each column's
+/// winds without the exit; GPCP's wettest land box-month anywhere 18.2, at 2.5° × 5°).
+const WETTEST_CELL_MONTH_MM_PER_DAY: f64 = 30.0;
 
 /// Prints each month's and the annual skill of `model` against `observed` (each of a box's months)
 /// over `boxes`, under the heading `name`, and returns the monthly skills.
@@ -700,6 +749,64 @@ fn report_monsoon(boxes: &[LandBox]) -> (f64, f64) {
     (jja_model, djf_model)
 }
 
+/// Whether land box `b` is arid by Köppen–Geiger's bound ([`is_arid`]; Peel et al. 2007, Table 1)
+/// on the months `mm_per_day` and the sea-level temperatures `sea_level_k`, its temperature at its
+/// Earth2014 median land height ([`EARTH_BOX_MEDIAN_M`], read as 0 below the sea level) by the
+/// lapse rate `lapse_k_per_m`: its year's precipitation each month's days times its rate, its
+/// annual mean temperature by the months' days ([`annual`]), and its six warmest months' share,
+/// ties to the earlier month: the project's summer, as `hyperion_surface`'s classifier takes it,
+/// where Peel et al. take the warmer of ONDJFM and AMJJAS.
+fn box_is_arid(
+    b: &LandBox,
+    mm_per_day: &[f64; 12],
+    sea_level_k: &[f64; 12],
+    lapse_k_per_m: f64,
+) -> bool {
+    let height_m = f64::from(EARTH_BOX_MEDIAN_M[b.band][b.column].max(0));
+    let fallen: [f64; 12] = core::array::from_fn(|m| mm_per_day[m] * MONTH_DAYS[m]);
+    let year_mm = fallen.iter().sum::<f64>();
+    let celsius = annual(sea_level_k) - lapse_k_per_m * height_m - 273.15;
+    let mut warmest: [usize; 12] = core::array::from_fn(|m| m);
+    warmest.sort_by(|&a, &c| sea_level_k[c].total_cmp(&sea_level_k[a]).then(a.cmp(&c)));
+    let summer =
+        (year_mm > 0.0).then(|| warmest[..6].iter().map(|&m| fallen[m]).sum::<f64>() / year_mm);
+    is_arid(year_mm, celsius, summer)
+}
+
+/// Prints each of [`DESERTS`]' arid share of its land boxes' solid angle, the model's (at the
+/// model's lapse rate `lapse_k_per_m`) and the observed (at NCEP's own reduction's), and returns
+/// the model's.
+fn report_deserts(boxes: &[LandBox], lapse_k_per_m: f64) -> Vec<f64> {
+    DESERTS
+        .iter()
+        .map(|region| {
+            let (model, observed, count) = region.means(boxes, |b| {
+                let arid = |yes: bool| f64::from(u8::from(yes));
+                (
+                    arid(box_is_arid(
+                        b,
+                        &b.model_mm_per_day,
+                        &b.model_k,
+                        lapse_k_per_m,
+                    )),
+                    arid(box_is_arid(
+                        b,
+                        &b.observed_mm_per_day,
+                        &b.observed_k,
+                        REDUCTION_LAPSE_RATE_K_PER_M,
+                    )),
+                )
+            });
+            eprintln!(
+                "  {} ({count} boxes): arid over {model:.2} of its land boxes' solid angle, \
+                 observed {observed:.2}",
+                region.name
+            );
+            model
+        })
+        .collect()
+}
+
 /// Asserts that on the model each contrast's dry side is drier than its wet side: each of `ratios`,
 /// one a contrast of `contrasts`, under 1.
 fn assert_each_dry_side_is_drier(contrasts: &[Contrast], ratios: &[Ratio]) {
@@ -765,17 +872,23 @@ fn the_observed_tables_hold_earth_s_land_boxes_in_order() {
 /// centres lie in it, land and sea, as an observed box is the mean of its whole area; the model's
 /// month m stands for calendar month m ([`DJF`]).
 ///
-/// It asserts what its first run showed robust, each with a margin (R09.T13.l's record):
+/// It asserts what its first run showed robust, each with a margin (R09.T13.l's record), and the
+/// floors each column's budget raises them to (decision-r09-t13m §3.4):
 ///
 /// - every land box left out for holding no climate cell lies poleward of [`POLAR_DEG`];
 /// - every month's pattern correlation of the temperature is at least
 ///   [`LEAST_TEMPERATURE_CORRELATION`], 0.75;
 /// - every month's pattern correlation of the precipitation is at least
-///   [`LEAST_PRECIPITATION_CORRELATION`], 0.25, and that of its departures from the bands' means
+///   [`LEAST_PRECIPITATION_CORRELATION`], 0.40, and that of its departures from the bands' means
 ///   positive;
 /// - on the model each rain shadow's lee and each west coast is drier than its windward side or
 ///   east coast ([`RAIN_SHADOWS`], [`WEST_COASTS`]);
-/// - India's JJA is wetter than its DJF ([`INDIA`]).
+/// - India's JJA is wetter than its DJF, and at least [`INDIA_LEAST_JJA_MM_PER_DAY`] ([`INDIA`]);
+/// - the Ganges's plain's annual precipitation is at least [`GANGES_LEAST_ANNUAL_MM_PER_DAY`]
+///   ([`GANGES_PLAIN`]);
+/// - Arabia's and the Sahara's land boxes are at least [`LEAST_DESERT_ARID_SHARE`] arid by their
+///   solid angle ([`DESERTS`]);
+/// - no climate cell-month is wetter than [`WETTEST_CELL_MONTH_MM_PER_DAY`].
 ///
 /// It prints, each month and for the annual means, the pattern correlation, the pattern
 /// correlation of the departures from each band's mean over its land boxes (the structure in
@@ -874,5 +987,50 @@ fn the_relief_earth_s_months_follow_gpcp_and_ncep_r1_its_lees_and_west_coasts_ar
     assert!(
         summer_mm_per_day > winter_mm_per_day,
         "India's JJA {summer_mm_per_day} mm/day against its DJF {winter_mm_per_day}"
+    );
+    assert_the_monsoon_s_floors(&boxes, &working, summer_mm_per_day);
+}
+
+/// Prints and asserts the floors each column's budget raises (decision-r09-t13m §3.4) over
+/// `boxes` of the step's `working` state, India's JJA `india_mm_per_day` ([`report_monsoon`]'s):
+/// India's JJA at least [`INDIA_LEAST_JJA_MM_PER_DAY`], the Ganges's plain's year at least
+/// [`GANGES_LEAST_ANNUAL_MM_PER_DAY`], each of [`DESERTS`] at least [`LEAST_DESERT_ARID_SHARE`]
+/// arid ([`report_deserts`], at the step's lapse rate), and no climate cell-month wetter than
+/// [`WETTEST_CELL_MONTH_MM_PER_DAY`].
+fn assert_the_monsoon_s_floors(boxes: &[LandBox], working: &Working, india_mm_per_day: f64) {
+    let (ganges_mm_per_day, ganges_observed, _) = GANGES_PLAIN.means(boxes, |b| {
+        (annual(&b.model_mm_per_day), annual(&b.observed_mm_per_day))
+    });
+    eprintln!(
+        "  {}'s annual precipitation: the model's {ganges_mm_per_day:.2} mm/day, GPCP's \
+         {ganges_observed:.2}",
+        GANGES_PLAIN.name
+    );
+    let arid_shares = report_deserts(boxes, working.lapse_rate_k_per_m);
+    let wettest_mm_per_day = working.climate.iter().fold(0.0_f64, |most, state| {
+        state
+            .month_precipitation_kg_m2_s
+            .iter()
+            .fold(most, |most, &p| most.max(p * SECONDS_PER_DAY))
+    });
+    eprintln!("  the wettest climate cell-month: {wettest_mm_per_day:.2} mm/day");
+    assert!(
+        india_mm_per_day >= INDIA_LEAST_JJA_MM_PER_DAY,
+        "India's JJA {india_mm_per_day} mm/day"
+    );
+    assert!(
+        ganges_mm_per_day >= GANGES_LEAST_ANNUAL_MM_PER_DAY,
+        "the Ganges's plain's year {ganges_mm_per_day} mm/day"
+    );
+    for (region, &share) in DESERTS.iter().zip(&arid_shares) {
+        assert!(
+            share >= LEAST_DESERT_ARID_SHARE,
+            "{} is arid over {share} of its land boxes",
+            region.name
+        );
+    }
+    assert!(
+        wettest_mm_per_day <= WETTEST_CELL_MONTH_MM_PER_DAY,
+        "the wettest climate cell-month {wettest_mm_per_day} mm/day"
     );
 }

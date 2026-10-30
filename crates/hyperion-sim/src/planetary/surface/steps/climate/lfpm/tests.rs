@@ -166,6 +166,7 @@ struct World {
     winds: Vec<CellWind>,
     rates: Vec<f64>,
     convergence: Vec<f64>,
+    shares: Vec<f64>,
 }
 
 impl World {
@@ -178,11 +179,12 @@ impl World {
             winds: &self.winds,
             sea_rates_kg_m2_s: &self.rates,
             convergence_kg_m2_s: &self.convergence,
+            stream_shares: &self.shares,
         }
     }
 
     /// A world of `count` cells, each covered, raised and blown by `cell(i)`, the sea at
-    /// [`SEA_RATE`], its ground thawed and with no source.
+    /// [`SEA_RATE`], its ground thawed, with no source and every stream share 1.
     fn of(count: u32, cell: impl Fn(u32) -> (Cover, f64, CellWind)) -> Self {
         let (mut heights_m, mut cover, mut winds, mut rates) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -201,7 +203,17 @@ impl World {
             winds,
             rates,
             convergence: vec![0.0; cells],
+            shares: vec![1.0; cells],
         }
+    }
+
+    /// The world with each cell `i`'s stream share `share(i)` (decision-r09-t13m §2.3).
+    #[must_use]
+    fn with_shares(mut self, share: impl Fn(u32) -> f64) -> Self {
+        for (i, s) in (0_u32..).zip(&mut self.shares) {
+            *s = share(i);
+        }
+        self
     }
 
     /// The world with the zonal budget's convergence `convergence_kg_m2_s` at every land cell,
@@ -432,10 +444,11 @@ fn backward_share_of(mesh: &Mesh, locals: &[Local], components: &Components) -> 
     backward / internal
 }
 
-/// The land's budget's closure, (inflow + source − runoff − outflow) ÷ (inflow + source).
+/// The land's budget's closure, (inflow + source − runoff − outflow − exit) ÷ (inflow + source)
+/// (decision-r09-t13m §2.5).
 fn closure(d: &Diagnostics) -> f64 {
     let given = d.inflow_kg_s + d.source_kg_s;
-    (given - d.runoff_kg_s - d.outflow_kg_s) / given
+    (given - d.runoff_kg_s - d.outflow_kg_s - d.exit_kg_s) / given
 }
 
 /// Each land cell's error against a deep solve, |P − P*| ÷ max(P*, [`RATE_FLOOR_SHARE`] `P̄_sea`)
@@ -1060,7 +1073,11 @@ fn hill(cx: u32, cy: u32) -> impl Fn(u32, u32) -> f64 {
 #[test]
 fn the_land_s_water_budget_closes() {
     let row_major = |x: u32, y: u32| y * 30 + x;
-    let cases: [(&str, (Mesh, World)); 3] = [
+    let (half_mesh, half_world) = planar_world(30, 14, row_major, hill(10, 7), |_, _| false);
+    // Every third cell sheds half its stream, the sea's air and the land's alike
+    // (decision-r09-t13m §2.4–§2.5).
+    let half_world = half_world.with_shares(|i| if i % 3 == 0 { 0.5 } else { 1.0 });
+    let cases: [(&str, (Mesh, World)); 4] = [
         (
             "flat",
             planar_world(30, 14, row_major, |_, _| 0.0, |_, _| false),
@@ -1073,17 +1090,19 @@ fn the_land_s_water_budget_closes() {
             "hill and calm",
             planar_world(30, 14, row_major, hill(10, 7), |x, y| x == 20 && y > 4),
         ),
+        ("hill with half shares", (half_mesh, half_world)),
     ];
     for (name, (mesh, world)) in &cases {
         let d = solve(mesh, &world.month(), &Parameters::deep()).diagnostics;
-        let out = d.runoff_kg_s + d.outflow_kg_s;
+        let out = d.runoff_kg_s + d.outflow_kg_s + d.exit_kg_s;
         eprintln!(
-            "{name}: inflow {:.6e} kg/s, runoff {:.6e}, recycled {:.6e}, outflow {:.6e}; \
-             closure {:.1e}; {}",
+            "{name}: inflow {:.6e} kg/s, runoff {:.6e}, recycled {:.6e}, outflow {:.6e}, exit \
+             {:.6e}; closure {:.1e}; {}",
             d.inflow_kg_s,
             d.runoff_kg_s,
             d.recycled_kg_s,
             d.outflow_kg_s,
+            d.exit_kg_s,
             closure(&d),
             describe(&d)
         );
@@ -1282,6 +1301,7 @@ fn a_two_cell_cycle_equals_the_closed_form_of_its_balance_in_one_sweep() {
         winds: vec![east, east, west, west],
         rates: vec![SEA_RATE, 0.0, 0.0, 2.0 * SEA_RATE],
         convergence: vec![0.0; 4],
+        shares: vec![1.0; 4],
     };
     let result = solve(&mesh, &world.month(), &set);
     let d = &result.diagnostics;
@@ -1443,44 +1463,62 @@ fn a_solve_that_reaches_its_cap_is_flagged_and_returns_finite_rates() {
     }
 }
 
+/// Decision-r09-t13m §3.8: nothing is carried along the band into calm land, which rains its own
+/// source alone, P = S ÷ (1 − ε₀), to 10⁻¹², on a planar world of flat land within a rim of sea
+/// under a wind along +x, each land cell taking [`CONVERGENCE`]: a calm column beside moving rows,
+/// whose upwind neighbours' outflow across its edge leaves as the exit, and a wholly calm land,
+/// whose coastal column takes nothing of the sea's air. The budget closes with the exit at the
+/// deep tolerance, to 10⁻¹⁰ of inflow and source. With no source, a calm land rains nothing.
 #[test]
-fn a_calm_land_rains_out_its_coastal_inflow_and_nothing_inland() {
-    let set = Parameters::HERGARTEN_ROBL;
+fn calm_land_takes_nothing_along_the_band_and_rains_its_own_source() {
     let (nx, ny) = (10, 5);
     let label = |x: u32, y: u32| y * nx + x;
-    let (mesh, world) = planar_world(nx, ny, label, |_, _| 0.0, |_, _| true);
-    let result = solve(&mesh, &world.month(), &set);
-    // The coastal column takes the sea's L_l P_sea across each 33 km edge and keeps it all:
-    // (1 − ε₀) P A = L_l P_sea ℓ.
-    let coastal = LONG_RANGE_LENGTH_M * SEA_RATE / ((1.0 - SEA_LEVEL_RECYCLED_SHARE) * 33_000.0);
-    for y in 1..ny - 1 {
-        for x in 1..nx - 1 {
-            let p = result.precipitation_kg_m2_s[slot(label(x, y))];
-            if x == 1 {
-                assert!((p / coastal - 1.0).abs() < 1e-14, "{p} against {coastal}");
-            } else {
-                assert_same_bits(p, 0.0);
+    let floor = CONVERGENCE / (1.0 - SEA_LEVEL_RECYCLED_SHARE);
+    let column: fn(u32, u32) -> bool = |x, _| x == 5;
+    let everywhere: fn(u32, u32) -> bool = |_, _| true;
+    for (name, calm) in [("a calm column", column), ("a calm land", everywhere)] {
+        let (mesh, world) = planar_world(nx, ny, label, |_, _| 0.0, calm);
+        let world = world.with_convergence(CONVERGENCE);
+        let result = solve(&mesh, &world.month(), &Parameters::HERGARTEN_ROBL);
+        let deep = solve(&mesh, &world.month(), &Parameters::deep()).diagnostics;
+        let mut worst = 0.0_f64;
+        for y in 1..ny - 1 {
+            for x in (1..nx - 1).filter(|&x| calm(x, y)) {
+                let p = result.precipitation_kg_m2_s[slot(label(x, y))];
+                worst = worst.max((p / floor - 1.0).abs());
             }
         }
+        eprintln!(
+            "{name}: every calm cell within {worst:.1e} of S ÷ (1 − ε₀); deep: inflow {:.6e} kg/s, \
+             source {:.6e}, runoff {:.6e}, outflow {:.6e}, exit {:.6e}, closure {:.1e}",
+            deep.inflow_kg_s,
+            deep.source_kg_s,
+            deep.runoff_kg_s,
+            deep.outflow_kg_s,
+            deep.exit_kg_s,
+            closure(&deep)
+        );
+        assert!(worst <= 1e-12, "{name}: a calm cell is {worst} off");
+        assert!(closure(&deep).abs() <= 1e-10, "{name}: {deep:?}");
+        if name == "a calm land" {
+            assert_same_bits(deep.inflow_kg_s, 0.0);
+            assert_same_bits(deep.exit_kg_s, 0.0);
+        } else {
+            assert!(deep.exit_kg_s > 0.0, "{name}: {deep:?}");
+        }
+    }
+    let (mesh, world) = planar_world(nx, ny, label, |_, _| 0.0, everywhere);
+    let result = solve(&mesh, &world.month(), &Parameters::HERGARTEN_ROBL);
+    for &p in &result.precipitation_kg_m2_s {
+        assert_same_bits(p, 0.0);
     }
     let d = &result.diagnostics;
-    assert!((d.runoff_kg_s / d.inflow_kg_s - 1.0).abs() < 1e-14);
-    assert_same_bits(d.outflow_kg_s, 0.0);
+    assert_same_bits(d.inflow_kg_s, 0.0);
     // No land's air moves on, so the solve stops at the start.
     assert_eq!(
         (d.restarts, d.sweeps, d.components.single),
         (0, 1, d.land_cells)
     );
-    // A wholly calm month with no source brings the land nothing.
-    let still = World {
-        winds: vec![CellWind::Calm; world.winds.len()],
-        ..world
-    };
-    let result = solve(&mesh, &still.month(), &set);
-    for &p in &result.precipitation_kg_m2_s {
-        assert_same_bits(p, 0.0);
-    }
-    assert_same_bits(result.diagnostics.inflow_kg_s, 0.0);
 }
 
 #[test]
@@ -1720,11 +1758,12 @@ fn the_land_s_budget_with_a_source_closes_on_the_strip_the_ridge_and_the_ring() 
 }
 
 /// Decision-r09-t13e-revision §6.3, new unit test 4: a sink with a source. Between two seas under a
-/// wind along a planar chain, a land cell at 1,200 m whose air goes nowhere (calm, or blowing
-/// across the chain, where its downwind edge has no length) takes in the upwind sea's air across
-/// their shared edge, `Q_in` = `L_l` `P_sea` (ŵ · n̂)⁺ ℓ (eq. 31), and its own source S A, with
-/// S = C e^(−H/H₀) (§4.2), and runs it all off: P = (`Q_in` + S A) ÷ ((1 − ε) A) to 10⁻¹², with
-/// ε = ε₀ e^(−H/H₀) on thawed ground and 0 on frozen ground (§4.4).
+/// wind along a planar chain, a land cell at 1,200 m whose air goes nowhere blowing across the
+/// chain, where its downwind edge has no length, takes in the upwind sea's air across their shared
+/// edge, `Q_in` = `L_l` `P_sea` (ŵ · n̂)⁺ ℓ (eq. 31), and its own source S A, with S = C e^(−H/H₀)
+/// (§4.2), and runs it all off: P = (`Q_in` + S A) ÷ ((1 − ε) A) to 10⁻¹², with ε = ε₀ e^(−H/H₀)
+/// on thawed ground and 0 on frozen ground (§4.4). Under still air it takes nothing along the band
+/// (decision-r09-t13m §2(b)), `Q_in` = 0.
 #[test]
 fn a_sink_with_a_source_runs_off_its_inflow_and_its_source() {
     let set = Parameters::HERGARTEN_ROBL;
@@ -1754,6 +1793,7 @@ fn a_sink_with_a_source_runs_off_its_inflow_and_its_source() {
             .frozen_where(|_| ground == GroundState::Frozen);
             let result = solve(&mesh, &world.month(), &set);
             let d = &result.diagnostics;
+            let inflow_kg_s = if air == "calm" { 0.0 } else { inflow_kg_s };
             let expected = (inflow_kg_s + source_kg_s) / ((1.0 - share) * area_m2);
             let p = result.precipitation_kg_m2_s[1];
             let off = (p / expected - 1.0).abs();
@@ -1767,7 +1807,11 @@ fn a_sink_with_a_source_runs_off_its_inflow_and_its_source() {
             );
             assert_eq!((d.land_cells, d.components.single), (1, 1));
             assert!(off <= 1e-12, "{air}, {ground:?}: {p} against {expected}");
-            assert!((d.inflow_kg_s / inflow_kg_s - 1.0).abs() <= 1e-12, "{d:?}");
+            if air == "calm" {
+                assert_same_bits(d.inflow_kg_s, 0.0);
+            } else {
+                assert!((d.inflow_kg_s / inflow_kg_s - 1.0).abs() <= 1e-12, "{d:?}");
+            }
             assert!((d.source_kg_s / source_kg_s - 1.0).abs() <= 1e-12, "{d:?}");
             assert_same_bits(d.outflow_kg_s, 0.0);
             assert!(
@@ -1778,6 +1822,100 @@ fn a_sink_with_a_source_runs_off_its_inflow_and_its_source() {
     }
 }
 
+/// The land cells of each half of [`two_streams`]' chain: 40 of 25 km (1,000 km).
+const HALF_CELLS: u32 = 40;
+
+/// Two streams meeting head-on (decision-r09-t13m §3.8): a planar chain of 2 × [`HALF_CELLS`] flat
+/// land cells of 25 km between two seas, its western half under a wind along +x and its eastern
+/// along −x, every land cell taking [`CONVERGENCE`], the two cells where the streams meet at the
+/// stream share `meeting` and every other at 1. Each cell's (distance from its own half's coast,
+/// P), the western half's then the eastern's, each from its coast; the solve.
+fn two_streams(meeting: f64) -> (Vec<(f64, f64)>, Orographic) {
+    let (dx_m, n) = (25_000.0, 2 * HALF_CELLS + 2);
+    let mesh = Mesh::planar(n, 1, dx_m, 1_000.0, Ends::Closed, |x, _| x);
+    let west = CellWind::Towards([-1.0, 0.0, 0.0]);
+    let world = World::of(n, |x| {
+        let wind = if x <= HALF_CELLS { ALONG_X } else { west };
+        if x == 0 || x == n - 1 {
+            (Cover::Sea, 0.0, wind)
+        } else {
+            (Cover::Land, 0.0, wind)
+        }
+    })
+    .with_convergence(CONVERGENCE)
+    .with_shares(|x| {
+        if x == HALF_CELLS || x == HALF_CELLS + 1 {
+            meeting
+        } else {
+            1.0
+        }
+    });
+    let result = solve(&mesh, &world.month(), &Parameters::HERGARTEN_ROBL);
+    let from_coast = |k: u32| Chain::centre_at(dx_m, k);
+    let rates = (1..=HALF_CELLS)
+        .map(|k| (from_coast(k), result.precipitation_kg_m2_s[slot(k)]))
+        .chain(
+            (1..=HALF_CELLS)
+                .map(|k| (from_coast(k), result.precipitation_kg_m2_s[slot(n - 1 - k)])),
+        )
+        .collect();
+    (rates, result)
+}
+
+/// Decision-r09-t13m §3.8, the exit: two streams meeting head-on over a flat planar strip with a
+/// uniform source ([`two_streams`]), the two meeting cells' stream shares 0, so that what each
+/// carries to the meeting leaves as the exit. Every land cell's rate lies within 1% of the
+/// single-stream strip's at the same distance from its coast (a chain of [`HALF_CELLS`] under one
+/// wind between two seas, [`Chain`]), and the budget with the exit closes within 10⁻³ of inflow
+/// plus source. The control: with every share 1, the meeting cells, blowing into each other, read
+/// more than twice the strip's largest rate (plan 09's E-L7 trap).
+#[test]
+fn two_streams_meeting_head_on_leave_by_the_exit_and_each_rains_as_one_stream() {
+    let set = Parameters::HERGARTEN_ROBL;
+    let mut strip = Chain::new(HALF_CELLS, 25_000.0, |_| 0.0, Labels::AlongTheWind);
+    strip.world = strip.world.with_convergence(CONVERGENCE);
+    let (single, _) = strip.rates(&set);
+    let largest = single.iter().fold(0.0_f64, |most, &(_, p)| most.max(p));
+    let (rates, result) = two_streams(0.0);
+    let d = &result.diagnostics;
+    let worst = rates.iter().zip(single.iter().chain(&single)).fold(
+        0.0_f64,
+        |worst, (&(x, p), &(y, q))| {
+            assert_same_bits(x, y);
+            worst.max((p / q - 1.0).abs())
+        },
+    );
+    let (_, trapped) = two_streams(1.0);
+    let meeting = [HALF_CELLS, HALF_CELLS + 1]
+        .map(|x| trapped.precipitation_kg_m2_s[slot(x)])
+        .into_iter()
+        .fold(f64::INFINITY, f64::min);
+    eprintln!(
+        "two streams head-on: every land cell within {worst:.1e} of the single stream's; inflow \
+         {:.6e} kg/s, source {:.6e}, runoff {:.6e}, outflow {:.6e}, exit {:.6e}, closure \
+         {:.1e}; with every share 1 the meeting cells read at least {:.2} of the strip's largest \
+         rate; {}",
+        d.inflow_kg_s,
+        d.source_kg_s,
+        d.runoff_kg_s,
+        d.outflow_kg_s,
+        d.exit_kg_s,
+        closure(d),
+        meeting / largest,
+        describe(d)
+    );
+    assert!(
+        worst <= 0.01,
+        "a land cell is {worst} off the single stream"
+    );
+    assert!(closure(d).abs() <= 1e-3, "{d:?}");
+    assert!(d.exit_kg_s > 0.0, "{d:?}");
+    assert!(
+        meeting > 2.0 * largest,
+        "the trap's meeting cells read {meeting} against the strip's {largest}"
+    );
+}
+
 /// What unit test 5 pins of a world's solve
 /// ([`with_no_source_and_every_cell_thawed_five_worlds_solve_to_their_as_built_bits`]): its name,
 /// the sum of its land cells' rates in cell order, kg m⁻² s⁻¹, its [`Diagnostics::restarts`], and
@@ -1785,7 +1923,8 @@ fn a_sink_with_a_source_runs_off_its_inflow_and_its_source() {
 type Pinned = (&'static str, f64, u32, [f64; 3]);
 
 /// The as-built solves of unit test 5's worlds, as the test printed them (Debug's shortest
-/// round-trip form), 2026-10-20.
+/// round-trip form), 2026-10-20; the hill with a calm column's re-taken under decision-r09-t13m's
+/// calm rule, 2026-10-30.
 #[expect(
     clippy::unreadable_literal,
     reason = "the solves' printed digits as the test prints them, so that a re-take compares by eye"
@@ -1823,7 +1962,7 @@ const PINNED: [Pinned; 5] = [
     ),
     (
         "hill and calm",
-        0.017163815396264492,
+        0.007999844347153198,
         2,
         [
             2.962764042068446e-5,
@@ -1852,7 +1991,9 @@ const PINNED: [Pinned; 5] = [
 /// last land cells' rates by index. The literals are the as-built solves', which the lane's probe
 /// showed equal to the code before R09.T13.j (commit 1870973b) to the bit, by 64-bit fingerprints
 /// of every rate, share and budget figure, before and after. They are re-taken, as this test
-/// prints them, on a deliberate change to the solve.
+/// prints them, on a deliberate change to the solve. With every stream share 1, the four worlds
+/// with no calm land are as built to the bit (decision-r09-t13m §3.8): their pins are unchanged
+/// since R09.T13.j. Nothing is now carried into the hill's calm column, whose pin is re-taken.
 #[test]
 fn with_no_source_and_every_cell_thawed_five_worlds_solve_to_their_as_built_bits() {
     let set = Parameters::HERGARTEN_ROBL;
@@ -1905,6 +2046,92 @@ fn with_no_source_and_every_cell_thawed_five_worlds_solve_to_their_as_built_bits
         assert_eq!(*restarts, pinned_restarts, "{name}: the restarts");
         assert_same_bits(*sum, pinned_sum);
         for (&rate, &pinned) in rates.iter().zip(&pinned_rates) {
+            assert_same_bits(rate, pinned);
+        }
+    }
+}
+
+/// What [`the_exit_s_worlds_solve_to_their_pinned_bits`] pins of a world's solve: its name, the
+/// sum of its land cells' rates in cell order, kg m⁻² s⁻¹, its exit, kg s⁻¹, its restarts, and the
+/// rates of its first, middle and last land cells by index, kg m⁻² s⁻¹.
+type PinnedExit = (&'static str, f64, f64, u32, [f64; 3]);
+
+/// The exit's worlds' solves, as the test printed them (Debug's shortest round-trip form),
+/// 2026-10-30.
+#[expect(
+    clippy::unreadable_literal,
+    reason = "the solves' printed digits as the test prints them, so that a re-take compares by eye"
+)]
+const PINNED_EXIT: [PinnedExit; 2] = [
+    (
+        "hill with half shares",
+        0.0032346903066196543,
+        8719978.436836226,
+        2,
+        [
+            1.9790268365416758e-5,
+            1.4792632109248867e-5,
+            1.546926719908271e-5,
+        ],
+    ),
+    (
+        "two streams head-on",
+        0.0027063491611294694,
+        37085.31774294086,
+        0,
+        [
+            3.0140845070422534e-5,
+            3.698598191776874e-5,
+            3.0140845070422534e-5,
+        ],
+    ),
+];
+
+/// Decision-r09-t13m §2's arithmetic pinned in the fast suite, which every target runs: the hill
+/// world with every third cell's stream share ½, the sea's and the land's, and calm nowhere, and
+/// the two streams meeting head-on with a source ([`two_streams`]), solved at the production set;
+/// for each, the sum of its land cells' rates in cell order, its exit, its restarts and its first,
+/// middle and last land cells' rates, against f64 literals ([`PINNED_EXIT`]). Re-taken, as this
+/// test prints them, on a deliberate change to the solve.
+#[test]
+fn the_exit_s_worlds_solve_to_their_pinned_bits() {
+    let row_major = |x: u32, y: u32| y * 30 + x;
+    let (hill_mesh, hill_world) = planar_world(30, 14, row_major, hill(10, 7), |_, _| false);
+    let hill_world = hill_world.with_shares(|i| if i % 3 == 0 { 0.5 } else { 1.0 });
+    let hill_solve = solve(&hill_mesh, &hill_world.month(), &Parameters::HERGARTEN_ROBL);
+    let (_, streams_solve) = two_streams(0.0);
+    let n = 2 * HALF_CELLS + 2;
+    let streams_cover: Vec<Cover> = (0..n)
+        .map(|x| {
+            if x == 0 || x == n - 1 {
+                Cover::Sea
+            } else {
+                Cover::Land
+            }
+        })
+        .collect();
+    let solved = [
+        (&hill_solve, hill_world.cover.as_slice()),
+        (&streams_solve, streams_cover.as_slice()),
+    ];
+    for ((result, cover), &(name, sum, exit, restarts, rates)) in solved.iter().zip(&PINNED_EXIT) {
+        let land: Vec<usize> = (0..cover.len())
+            .filter(|&i| cover[i] == Cover::Land)
+            .collect();
+        let total = land
+            .iter()
+            .fold(0.0, |sum, &i| sum + result.precipitation_kg_m2_s[i]);
+        let cells = [land[0], land[land.len() / 2], land[land.len() - 1]];
+        let at = cells.map(|i| result.precipitation_kg_m2_s[i]);
+        let d = &result.diagnostics;
+        eprintln!(
+            "{name}: the rates' sum {total:?}, exit {:?}, {} restarts; cells {cells:?}: {at:?}",
+            d.exit_kg_s, d.restarts
+        );
+        assert_eq!(d.restarts, restarts, "{name}: the restarts");
+        assert_same_bits(total, sum);
+        assert_same_bits(d.exit_kg_s, exit);
+        for (&rate, &pinned) in at.iter().zip(&rates) {
             assert_same_bits(rate, pinned);
         }
     }

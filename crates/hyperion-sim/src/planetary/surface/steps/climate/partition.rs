@@ -532,6 +532,38 @@ pub(super) fn budget(
     }
 }
 
+/// The Hadley cell's part H of `budget`'s E − P, kg m⁻² s⁻¹, one a band (decision-r09-t13m §1.1).
+///
+/// On `grid` over `model`'s bands `bands`: the divergence of its lower branch's latent heat flux −ψ
+/// L q alone, over L, (`F_k+1` − `F_k`) ÷ (`w_k` L), each edge's L q the mean of its two bands', as
+/// [`budget`] takes it; zero on a dry world. Its eddies' part is the rest of the budget's E − P.
+#[must_use]
+pub(super) fn hadley_part_kg_m2_s(
+    grid: &ModelGrid,
+    model: &EnergyBalance,
+    budget: &Budget,
+    bands: &Bands,
+) -> Vec<f64> {
+    let latent_heat = model
+        .moisture
+        .as_ref()
+        .map_or(0.0, |moisture| moisture.latent_heat_j_per_kg);
+    let mut flux = vec![0.0; LATITUDE_BANDS + 1];
+    for (edge, f) in flux.iter_mut().enumerate().take(LATITUDE_BANDS).skip(1) {
+        let latent = f64::midpoint(bands.latent_j_per_kg[edge], bands.latent_j_per_kg[edge - 1]);
+        *f = -budget.mass_flux_kg_m2_s[edge] * latent;
+    }
+    (0..LATITUDE_BANDS)
+        .map(|k| {
+            if latent_heat > 0.0 {
+                (flux[k + 1] - flux[k]) / (grid.weight(k) * latent_heat)
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

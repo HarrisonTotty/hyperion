@@ -246,6 +246,36 @@ impl ModelGrid {
         self.point(band, column)
     }
 
+    /// The columns' width Δλ, rad: 2π over the grid's columns.
+    #[must_use]
+    pub(super) fn column_width_rad(&self) -> f64 {
+        self.column_width_rad
+    }
+
+    /// The position of the longitude `longitude_rad` (about the model frame's third axis, from its
+    /// first towards its second, in [−π, π]) in column centres: from −½ at −180° to `columns` − ½
+    /// at 180°, column j's centre at j.
+    #[must_use]
+    pub(super) fn column_position(&self, longitude_rad: f64) -> f64 {
+        (longitude_rad + PI) / self.column_width_rad - 0.5
+    }
+
+    /// The columns merged into each of band `band`'s units in longitude, `n_k`: the least whole
+    /// number with `n_k` cos φ Δλ ≥ ½ Δφ, φ the band's centre latitude and Δφ the bands' 2.5°, so
+    /// that a unit is at least half as wide as a band is tall (decision-r09-t13m §2.6): 1 below
+    /// 75.5° on the geographic grid's 5° columns and below 60° on the locked grid's 2.5°, and at
+    /// most the band's columns. Found by counting, with no rounding of a ratio. Runs from column 0
+    /// leave a band's last unit narrower where `n_k` does not divide its columns, as on the locked
+    /// grid's four bands nearest its poles (5 and 23 of 144); every `n_k` of the geographic grid
+    /// divides its 72.
+    #[must_use]
+    pub(super) fn merged_columns(&self, band: usize) -> usize {
+        let across = self.centre_cosine[band] * self.column_width_rad;
+        (1..self.columns)
+            .find(|&n| index(n) * across >= 0.5 * BAND_WIDTH_RAD)
+            .unwrap_or(self.columns)
+    }
+
     /// The area-weighted mean over the grid of `values`, one per point: Σ wₖ x ÷ (2 × columns),
     /// summed band by band from the south and column by column within each.
     #[must_use]
@@ -332,8 +362,7 @@ impl ModelGrid {
             };
         }
         let longitude = math::atan2(direction[1], direction[0]);
-        // The position in column centres, from −½ at −180° to `columns` − ½ at 180°.
-        let position = (longitude + PI) / self.column_width_rad - 0.5;
+        let position = self.column_position(longitude);
         let below = position.floor();
         let f = position - below;
         let columns = i64::try_from(self.columns).expect("a column count fits an i64");
@@ -414,6 +443,53 @@ impl BandStencil {
         } else {
             value
         }
+    }
+}
+
+/// The read of a field of a [`ModelGrid`]'s columns at a longitude (decision-r09-t13m §1.3).
+///
+/// Linear in longitude between the two columns whose centres bracket it, periodic round the band:
+/// v₁ + t (v₂ − v₁), t the longitude's fraction of the way from the first column's centre to the
+/// second's. Two columns alike read as their value to the bit (a −0 as +0). Kept small, two columns
+/// and a weight, as the water cycle reads one for each cell every month.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct ColumnRead {
+    columns: [u16; 2],
+    fraction: f64,
+}
+
+impl ColumnRead {
+    /// The read at `position`, a longitude's place in `grid`'s column centres
+    /// ([`ModelGrid::column_position`]), of any value: the column at or below it and the next one
+    /// round the band, and its fraction of the way between them.
+    ///
+    /// # Panics
+    ///
+    /// If the grid has more columns than a `u16` holds.
+    #[must_use]
+    pub(super) fn at(grid: &ModelGrid, position: f64) -> Self {
+        let below = position.floor();
+        let columns = i64::try_from(grid.columns).expect("a column count fits an i64");
+        let first = usize::try_from(finite_integer(below).rem_euclid(columns))
+            .expect("a column reduced by the column count is non-negative");
+        let column = |c: usize| u16::try_from(c).expect("a grid's columns fit a u16");
+        Self {
+            columns: [column(first), column((first + 1) % grid.columns)],
+            fraction: position - below,
+        }
+    }
+
+    /// The two columns it reads, west then east.
+    #[must_use]
+    pub(super) fn columns(&self) -> [usize; 2] {
+        self.columns.map(usize::from)
+    }
+
+    /// The value between `first`, the western column's, and `second`, the eastern's: `first` +
+    /// t (`second` − `first`).
+    #[must_use]
+    pub(super) fn read(&self, first: f64, second: f64) -> f64 {
+        first + self.fraction * (second - first)
     }
 }
 
@@ -1163,6 +1239,74 @@ mod tests {
                     .apply(&bands),
                 ModelGrid::stencil(z).apply(&bands),
             );
+        }
+    }
+
+    /// Decision-r09-t13m §3.8: a unit merges `n_k` columns, 1, 1 and 2 at 0°, 70° and 80° on the
+    /// geographic grid's 5° columns, 1 to below 60° and 2 above it on the locked grid's 2.5°, each
+    /// the least with `n_k` cos φ Δλ ≥ ½ Δφ, and a grid of one column takes its one.
+    #[test]
+    fn a_unit_merges_columns_towards_the_pole_to_half_a_band_s_height() {
+        let geographic = ModelGrid::geographic();
+        let at = |degrees: f64| ModelGrid::band_of(math::sin(degrees.to_radians()));
+        let merged = [0.0, 70.0, 80.0].map(|d| geographic.merged_columns(at(d)));
+        assert_eq!(merged, [1, 1, 2]);
+        let locked = ModelGrid::locked();
+        assert_eq!(locked.merged_columns(at(58.0)), 1);
+        assert_eq!(locked.merged_columns(at(61.0)), 2);
+        for grid in [&geographic, &locked] {
+            for band in 0..LATITUDE_BANDS {
+                let n = grid.merged_columns(band);
+                let width =
+                    |n: usize| index(n) * grid.centre_cosine(band) * grid.column_width_rad();
+                assert!(width(n) >= 0.5 * BAND_WIDTH_RAD, "band {band}: {n}");
+                assert!(
+                    n == 1 || width(n - 1) < 0.5 * BAND_WIDTH_RAD,
+                    "band {band}: {n}"
+                );
+            }
+        }
+        assert_eq!(ModelGrid::zonal().merged_columns(36), 1);
+    }
+
+    /// The column read (decision-r09-t13m §1.3) is linear between the two column centres that
+    /// bracket a longitude, periodic round the band: at a centre it reads that column to 10⁻¹², a
+    /// quarter of the way to the next the value a quarter of the way, halfway the midpoint, west of
+    /// the first centre between the last column and the first; two columns alike read as their
+    /// value to the bit.
+    #[test]
+    fn the_column_read_is_linear_between_the_bracketing_centres_and_periodic() {
+        let grid = ModelGrid::geographic();
+        let width = grid.column_width_rad();
+        let centre = |j: usize| -PI + (index(j) + 0.5) * width;
+        let values: Vec<f64> = (0..GEOGRAPHIC_COLUMNS).map(|j| 1.0 + index(j)).collect();
+        let read = |longitude: f64| {
+            let r = ColumnRead::at(&grid, grid.column_position(longitude));
+            let [west, east] = r.columns();
+            (r, r.read(values[west], values[east]))
+        };
+        for j in [0, 17, GEOGRAPHIC_COLUMNS - 2] {
+            let (_, v) = read(centre(j));
+            assert!((v - values[j]).abs() <= 1e-12, "{j}: {v}");
+            let (r, quarter) = read(centre(j) + 0.25 * width);
+            assert_eq!(r.columns(), [j, j + 1]);
+            let expected = values[j] + 0.25 * (values[j + 1] - values[j]);
+            assert!((quarter - expected).abs() <= 1e-12, "{j}: {quarter}");
+            let (_, halfway) = read(centre(j) + 0.5 * width);
+            assert!((halfway - f64::midpoint(values[j], values[j + 1])).abs() <= 1e-12);
+        }
+        let (r, v) = read(-PI + 0.25 * width);
+        assert_eq!(r.columns(), [GEOGRAPHIC_COLUMNS - 1, 0]);
+        let last = values[GEOGRAPHIC_COLUMNS - 1];
+        let expected = last + 0.75 * (values[0] - last);
+        assert!((v - expected).abs() <= 1e-12, "{v} against {expected}");
+        let (r, _) = read(PI);
+        assert_eq!(r.columns(), [GEOGRAPHIC_COLUMNS - 1, 0]);
+        for value in [3.25e-5, 0.0, -7.5] {
+            for longitude in [-3.0, -0.4, 0.0, 1.9, 3.1] {
+                let (r, _) = read(longitude);
+                assert_same_bits(r.read(value, value), value);
+            }
         }
     }
 }
