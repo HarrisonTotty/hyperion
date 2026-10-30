@@ -16,8 +16,9 @@
 //! order, the orphans in theirs, then the dwarfs by accretion time, the most recent first, ties
 //! by progenitor number; a core takes its progenitor's place among those that keep one, in the
 //! same order. When the halo's drawn discrete share is below the physical share, the dwarfs'
-//! tube and core masses are scaled down together to meet it ([`share`](super::share), Design note
-//! 1); [`dwarfs`](super::dwarfs) itself keeps them unscaled. A tube scaled to nothing is then
+//! tube and core masses are scaled down together to meet it, or to nothing where the globular
+//! tubes alone pass it ([`share`](super::share), Design note 1); [`dwarfs`](super::dwarfs) itself
+//! keeps them unscaled. A tube scaled to nothing is then
 //! dropped, and a core scaled under [`CORE_MIN_SYSTEMS`] too, without letting a fifth core take
 //! its number. Every figure depends on the potential, so a change to the mass model moves them
 //! all.

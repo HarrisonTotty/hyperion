@@ -254,7 +254,8 @@ lifetime` (only `ProvisionalFates` implements it); no item is named the evolved 
 
 1. **The drawn discrete share is a ceiling, and the physical share is what is applied.** Plan 02
    draws a discrete share of 2–15% and leaves it unapplied. This plan derives the physical share:
-   the expected systems in tubes and cores inside the cube ÷ the halo's budget, from 1.5 tubes per
+   the expected systems in tubes inside 65,000 ly and in cores, counted whole, which exist only
+   inside the cube, ÷ the halo's budget, from 1.5 tubes per
    expected globular at the orphan law's mean mass and the measured share of their mass inside
    65,000 ly, plus each recent progenitor's cold mass times
    the share of its orbital period spent inside 65,000 ly (a fixed quadrature of dr ÷ v_r in the
@@ -785,7 +786,8 @@ tubes inside 65,000 ly by the spray, and their cores) within 5% of the share's d
 tolerance of design note 1's period-share estimate; (ii) the globular tubes' part within 5% of the
 share's globular term in the mean over 64 sweep galaxies, and per galaxy within the band that sweep
 measures (0.71–1.33 of the term at `GLOBULAR_TUBES_INSIDE`'s 0.55; Risks, "P10.T3.d.a's globular
-part"); (iii) the applied share never below the globular tubes' share. And the sampled halo field
+part"); (iii) the applied share never below the share's globular term. T12 measures the band (ii) again
+with its spray's members. And the sampled halo field
 plus the discrete members against the halo's budget within Poisson error in eight volumes. **Contrast:** on its axis at 15–18 kpc a globular stream is
 about a thousandth of the reference density and roughly 7–15 times the smooth halo; the figure is
 recorded, and a value outside it is a finding, since the brainstorm's range is an estimate (see
@@ -1105,7 +1107,8 @@ pericentre_speed()`, `|L| ÷ r_p` of the spherical approximation, which is `√(
 - **The discrete share against the dwarf mass range.** The mixture table gives the discrete share
   2–15% of a halo that holds a few 10⁸ M☉, while dwarf progenitors run to 10⁹·⁵ M☉. Resolved by
   design note 1: the drawn share is a ceiling and scales down the cold debris of the largest dwarfs;
-  the 2% floor is not enforced, since a galaxy with no recent dwarf has under 1% in tubes. This
+  the 2% floor is not enforced, since a galaxy with no recent dwarf has under 1% in tubes at Milky
+  Way values. This
   departs from the letter of the mixture table's "2–15%" at the low end and is reported to the
   brainstorm's owner, who should either widen the row to "under 1% to 15%" or say what fills the
   gap. Until then the applied share is recorded per seed in P10.T3.d's golden summary.
@@ -1804,7 +1807,9 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
     moves with the orphans' orbits and the potential.
   - _The ceiling's guard._ `ShareFigures::applied` is `physical.min(drawn.max(globular))`: the
     globular tubes are never scaled, since P15.T11.b fits their 1.5 per globular, so the ceiling
-    yields to them. `dwarf_scale` keeps its form; it is already 0 there. Design note 1 says so.
+    yields to them. `dwarf_scale` keeps its form; it is already 0 there. Design note 1 says so,
+    and gives the range over drawn galaxies as "about 0.1–4%", from the summary's 0.13–3.86%,
+    where the research had "about 0.1–3.5%" (review fix).
   - _Where the guard acts._ None of the 2,000 summary galaxies' globular tubes reach the drawn
     share now (14 before). Over the first 40,000 sweep seeds, by their parameters alone, 9 do at
     0.55 (6 at 0.5), the widest by 1.33 times (sweep galaxy 7,805). The slow test
@@ -1849,9 +1854,9 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
     0.2%. The known thin streams inside 20 kpc hold about 6.8 × 10⁵ M☉ (Bonaca and Price-Whelan
     2024's table, as the science check summed it), so the model has about 3.5 times the known
     mass, plausible for an incomplete census.
-- **Research-p10's rulings for P10.T12, and its finding for P10.T7.b (lane `p10-fixes`,
-  2026-10-29).** Research `research-p10`'s items 1, 3 and 6 (change 5), as main ruled them
-  (2026-10-29). Docs only.
+- **Research-p10's rulings for P10.T12 (lane `p10-fixes`, 2026-10-29).** Research
+  `research-p10`'s items 1 and 6 (change 5), as main ruled them (2026-10-29). Docs only. It
+  supersedes the T3.d.a record's "P10.T12 counts members inside the cube" ("The dwarf term").
   - _P10.T12 counts as the share does (item 1)._ A tube counts by its members inside 65,000 ly and
     a core by every member, as `discrete_share` counts a dwarf's tube by its period share inside
     65,000 ly and its core whole (T3.d.a's record). T12 first counted "tubes and cores inside the
@@ -1869,12 +1874,13 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
     would fail on that noise alone, so T12 (ii) holds the mean over 64 galaxies to 5% and each
     galaxy to the sweep's band; the dwarfs, whose cold masses φ reads one by one, stay per galaxy.
     T12's "Budgets" says so.
-  - _Finding for P10.T7.b (item 3)._ In the research's probe, before these fixes, 11 of the 40
-    cores have an extent (T7.a's Jacobi radius) inside their own Plummer half-mass radius, 1.305 a,
-    and 6 inside a: cores at 10,000–35,000 ly from the centre, such as one at 10,159 ly with r_J =
-    365 ly against a = 449 ly. Such a core is disrupting, and tapering a Plummer sphere at r_J < a
-    packs its systems into a nearly uniform ball. The research's lean (low confidence), for T7.b:
-    cap the scale at a ≤ r_J ÷ 2 for such cores, a guard and not the physics, since tidal stripping
-    shrinks a core's radius only by a factor of about 2 even after 99% of its stars are lost
-    (Peñarrubia, Navarro and McConnachie 2008, ApJ 673, 226; abstract only). Not a blocker; T7.b
-    measures it again on these fixes' scaled cores.
+- **Finding for P10.T7.b, from research-p10's item 3 (lane `p10-fixes`, 2026-10-29).** The
+  research put it in T7.a's record and the cap as T7.b's lean; it is filed here for T7.b. In the
+  research's probe, before these fixes, 11 of the 40 cores have an extent (T7.a's Jacobi radius)
+  inside their own Plummer half-mass radius, 1.305 a, and 6 inside a: cores at 10,000–35,000 ly from the centre, such as one at 10,159 ly with r_J =
+  365 ly against a = 449 ly. Such a core is disrupting, and tapering a Plummer sphere at r_J < a
+  packs its systems into a nearly uniform ball. The research's lean (low confidence), for T7.b:
+  cap the scale at a ≤ r_J ÷ 2 for such cores, a guard and not the physics, since tidal stripping
+  shrinks a core's radius only by a factor of about 2 even after 99% of its stars are lost
+  (Peñarrubia, Navarro and McConnachie 2008, ApJ 673, 226; abstract only). Not a blocker; T7.b
+  measures it again on these fixes' scaled cores.

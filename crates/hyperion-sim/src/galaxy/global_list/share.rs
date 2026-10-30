@@ -77,7 +77,8 @@ pub const INSIDE_LY: f64 = 65_000.0;
 /// velocities that need the kinematic tables, so it takes the measured mean, as the brainstorm has
 /// φ come from the catalogue's rates and never from individual clusters (plan 10's records,
 /// "P10.T3.d.a's globular part"; pinned by `the_globular_tubes_inside_share_is_the_sweep_s_mean`).
-/// It moves with the orphans' orbits and the potential, and is measured again then.
+/// It moves with the orphans' orbits, the streams per globular (the mix of living tubes and
+/// orphans) and the potential, and is measured again then.
 pub const GLOBULAR_TUBES_INSIDE: f64 = 0.55;
 
 /// The halo's discrete share of the galaxy of `seed` and `params` with in-plane tables `tables`:
