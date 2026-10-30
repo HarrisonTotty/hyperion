@@ -649,6 +649,14 @@ impl Engine {
 
     /// After a member's change of phase: a carried main sequence that has reached its end goes
     /// on along a track of its mass from there (HPT section 7.1), whose mass the binary carries.
+    ///
+    /// A track with no Hertzsprung gap dies at its main sequence's end: plan 06's massive helium
+    /// stars collapse from their helium main sequence (one of 19.5 M☉ at Z = 2.1 × 10⁻⁴ in the
+    /// fit's sample 49 of E's cell 3579, `pair_light::FIT_SEED`). The star is placed at that death
+    /// and dies there ([`Engine::die`], BSE section 2.5's collapse with its mass loss and kick;
+    /// P11.T4.o). Before T4.o it was left at its remnant with nothing acted on, a remnant of the
+    /// carried mass with no supernova, and a transfer from it went on from a dead donor (the
+    /// engine finding of "P11.T17.b as built").
     pub(super) fn after_boundary(&mut self) {
         for i in 0..2 {
             let Member::MainSequence { helium, mass, tau } = &self.members[i] else {
@@ -699,6 +707,7 @@ impl Engine {
                 build,
                 |track| track.age_in_phase(phase, 0.0),
             );
+            let dies = placed.is_none() && track.lifetime().is_some();
             let start = placed
                 .or_else(|| track.lifetime().map(Years::value))
                 .unwrap_or(0.0);
@@ -707,6 +716,9 @@ impl Engine {
                 offset: super::evolve::offset_for(self.age, start),
                 mass: Path::starting(self.age, m),
             };
+            if dies {
+                self.die(i);
+            }
         }
     }
 }

@@ -1263,12 +1263,19 @@ mod tests {
 
     /// P11.T5: BSE's double neutron star (section 3.4, without kicks) is a supergiant high-mass
     /// X-ray binary before its second supernova, which the carve takes, and a double neutron star
-    /// after it, which it does not.
+    /// after it, which it does not once the source horizon (H + L) has passed the collapse. Since
+    /// P11.T4.o (finding F17's shorter steps) its helium star fills its lobe for the last 480 years
+    /// of its life, case BB onto the neutron star, an X-ray binary that the carve takes until then.
     #[test]
     fn the_papers_double_neutron_star_is_one() {
         let t = double_neutron_star();
         let second = t.supernovae()[1].age().value();
-        let after = Years::new(second * (1.0 + 1e-6));
+        let horizon = CLOCK_WINDOW_H.as_julian_years_f64() + LIGHT_CROSSING_L.as_julian_years_f64();
+        assert_eq!(
+            carved_class(&t, Years::new(second * (1.0 + 1e-6))),
+            Some(CarvedClass::XrayBinary)
+        );
+        let after = Years::new(second + 1.01 * horizon);
         assert_eq!(t.class_at(after), BinaryClass::DoubleNeutronStar);
         assert_eq!(carved_class(&t, after), None);
         let wind = segment(&t, |k, s| {

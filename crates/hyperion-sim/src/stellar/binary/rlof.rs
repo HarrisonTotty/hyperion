@@ -113,6 +113,10 @@ const EDGE_LIT_HELIUM: f64 = 0.15;
 
 /// The share of the donor's mass one step of stable transfer aims to move (BSE equation 92).
 const TRANSFER_STEP: f64 = 0.005;
+/// The most times a step of transfer that moves more than 2 × [`TRANSFER_STEP`] of the donor is
+/// taken again at half its length (finding F17, ruling p11-c2-swell §4.4; P11.T4.o): from a step
+/// of the longest a transfer takes, 10⁹ years, to one of about 4 Myr.
+const TRANSFER_HALVINGS: u32 = 8;
 /// Bisections of a step's transfer.
 const TRANSFER_BISECTIONS: u32 = 36;
 /// A non-giant donor overfilling its lobe by this factor merges (BSE section 2.6.3).
@@ -121,6 +125,14 @@ const OVERFILL_MERGER: f64 = 10.0;
 /// with none: BSE's window of 1 ≤ R ÷ `R_L` ≤ 1.002 at the onset (section 2.8), so that a donor at
 /// its lobe does not detach and refill at every step.
 const DETACHED_BY: f64 = 2e-3;
+
+#[cfg(test)]
+thread_local! {
+    /// The transfer steps this thread has started from a donor with nothing living
+    /// ([`Engine::transfer_phase`]'s backstop, P11.T4.o), which the tests count; the engine never
+    /// reads it.
+    pub(super) static DEAD_DONOR_STEPS: core::cell::Cell<u32> = const { core::cell::Cell::new(0) };
+}
 
 /// What the onset of transfer, or a step of it, leads to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -419,15 +431,21 @@ impl Engine {
                 self.collide();
                 return;
             };
-            // A transfer whose donor has died has ended (below): no step starts from one. A white
-            // dwarf gives mass as a remnant (BSE section 2.6.5).
-            debug_assert!(
-                sd.state.phase().is_living()
-                    || Kind::of(sd.state.phase(), s.masses[d]).is_white_dwarf(),
-                "a transfer step from a donor with nothing living, a {:?} at {} yr",
-                sd.state.phase(),
-                s.age
-            );
+            // A transfer whose donor has died has ended (below), so a donor with nothing living
+            // here died inside the last step without its limit landing on the death: it dies
+            // now, as at `Stop::Death`, dated at that step's end, at most a step late (P11.T4.o;
+            // the backstop, which no known pair reaches since `Engine::after_boundary` acts on a
+            // death at a main sequence's end). A white dwarf gives mass as a remnant (BSE section
+            // 2.6.5).
+            if !(sd.state.phase().is_living()
+                || Kind::of(sd.state.phase(), s.masses[d]).is_white_dwarf())
+            {
+                #[cfg(test)]
+                DEAD_DONOR_STEPS.with(|n| n.set(n.get() + 1));
+                self.die(d);
+                self.end_without_a_living_donor(d);
+                return;
+            }
             // The structures just evaluated are the ones `stability` would evaluate again: the
             // snapshot is the pair now.
             match self.stability_of(d, s.masses[d], s.masses[a_idx], &sd, &sa) {
@@ -460,13 +478,27 @@ impl Engine {
                 self.merge_dynamically(d);
                 return;
             }
-            let (dt, stop) = self.transfer_limit(&s, d, &sd, &sa);
-            let Some((next, rate, accretion, unfed)) = self.transfer_step(&s, d, dt, &sd, &sa)
-            else {
+            let (mut dt, mut stop) = self.transfer_limit(&s, d, &sd, &sa);
+            let mut solved = self.transfer_step(&s, d, dt, &sd, &sa);
+            // A step that moves more than twice BSE equation 92's share of the donor is taken
+            // again at half its length, which then lands on no event (finding F17, P11.T4.o):
+            // the accretion's regime and the swell are decided on the step's rate.
+            for _ in 0..TRANSFER_HALVINGS {
+                match solved {
+                    Some((_, rate, ..)) if rate * dt > 2.0 * TRANSFER_STEP * s.masses[d] => {
+                        dt *= 0.5;
+                        stop = None;
+                        solved = self.transfer_step(&s, d, dt, &sd, &sa);
+                    }
+                    Some(_) | None => break,
+                }
+            }
+            let Some((mut next, rate, accretion, unfed)) = solved else {
                 self.close_segment();
                 self.collide();
                 return;
             };
+            let stop = super::detached::main_sequence_end_landed(stop, &s, &mut next);
             let lands_on_death = matches!(
                 stop,
                 Some(super::detached::Stop::Death(_) | super::detached::Stop::Pinned)
@@ -520,9 +552,10 @@ impl Engine {
                 match stop {
                     // No step limit is the pair's age (`detached::StepLimit`).
                     super::detached::Stop::Until => return,
-                    super::detached::Stop::Boundary => {
+                    super::detached::Stop::Boundary | super::detached::Stop::MainSequenceEnd(_) => {
                         self.close_segment();
                         self.after_boundary();
+                        self.end_without_a_living_donor(d);
                         return;
                     }
                     super::detached::Stop::Death(i) => {
@@ -624,7 +657,10 @@ impl Engine {
                 Member::MainSequence { helium, .. } => {
                     let lifetime =
                         sse::main_sequence_lifetime(self.ctx.coeffs(), *helium, s.masses[i]);
-                    limits.event((1.0 - s.taus[i]).max(0.0) * lifetime, Stop::Boundary);
+                    limits.event(
+                        (1.0 - s.taus[i]).max(0.0) * lifetime,
+                        Stop::MainSequenceEnd(i),
+                    );
                     phase_limit = phase_limit.min(0.02 * lifetime);
                 }
                 Member::Cooling { .. }

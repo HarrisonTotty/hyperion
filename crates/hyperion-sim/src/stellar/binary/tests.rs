@@ -584,7 +584,8 @@ fn check_no_repeated_instants(timeline: &BinaryTimeline, what: &impl Fn() -> Str
 /// Checks P11.T4's invariants on the timeline of `input`: inside every segment the state is
 /// continuous (no jump above 1% between samples 10⁻⁶ of the segment apart); no main-sequence star
 /// is older than its effective lifetime; the pair's total mass never rises; the timeline never
-/// reaches the cap on segments; no detached segment widens the orbit past its mass loss; no
+/// reaches the cap on segments; no transfer step starts from a donor with nothing living (P11.T4.o);
+/// no detached segment widens the orbit past its mass loss; no
 /// pinned primary collapses from its hydrogen main sequence ([`check_no_main_sequence_collapse`]);
 /// every swelled giant starts with an envelope around its own core ([`check_swells`], P11.T4.m).
 ///
@@ -596,7 +597,7 @@ fn check_no_repeated_instants(timeline: &BinaryTimeline, what: &impl Fn() -> Str
     reason = "a sample's two states and their values"
 )]
 fn check_invariants(input: &BinaryInput, until: Years) {
-    let timeline = evolve(input, until);
+    let timeline = evolve_from_living_donors(input, until);
     let what = || {
         format!(
             "{:?} P {} d e {}\n{}",
@@ -1428,7 +1429,10 @@ fn pinned_pair(mix: &mut Mix, i: u32) -> BinaryInput {
 /// The engine's output is pinned bit for bit over 10³ pairs (written before the engine was sped
 /// up, and kept so that no optimisation moves a result): each line is one pair's [`digest`]. Every
 /// timeline also keeps P11.T4.k's invariants ([`check_collapses`]) and P11.T4.n's
-/// ([`check_no_main_sequence_collapse`]).
+/// ([`check_no_main_sequence_collapse`]), and P11.T4.o's: no transfer step starts from a dead
+/// donor, and no accepted step moves more than 1% of its donor ([`transfer_shares`]), but for
+/// pair 0171's one step at 693.35 Myr, 4.3% after its eight halvings (the first step of a helium
+/// white dwarf's transfer; plan 11's Risks, "P11.T4.o as built").
 #[test]
 fn a_thousand_timelines_are_pinned() {
     use hyperion_testkit::golden;
@@ -1440,10 +1444,24 @@ fn a_thousand_timelines_are_pinned() {
     let mut mix = Mix(0x0b1e_0001);
     for i in 0..1_000_u32 {
         let input = pinned_pair(&mut mix, i);
-        let timeline = evolve(&input, until);
+        let timeline = evolve_from_living_donors(&input, until);
         let what = || format!("pinned pair {i:04}: {}", describe(&timeline));
         check_collapses(&input, &timeline, &what);
         check_no_main_sequence_collapse(&input, &timeline, &what);
+        for (age, share) in transfer_shares(&timeline) {
+            // Pair 0171's first step from its new helium white dwarf onto its carbon–oxygen one, a
+            // ten-thousandth of the dwarf's Kelvin–Helmholtz time, keeps 4.3% after eight halvings.
+            let most = if i == 171 && (age / 693.353_165e6 - 1.0).abs() < 1e-8 {
+                0.043
+            } else {
+                0.01
+            };
+            assert!(
+                share <= most,
+                "{share} of the donor at {age} yr: {}",
+                what()
+            );
+        }
         let [m1, m2] = input.masses().map(SolarMasses::value);
         w.u64_hex(
             &format!(
@@ -1775,9 +1793,12 @@ fn a_held_bare_core_that_touches_its_companion_merges() {
 }
 
 /// Ruling 132.3: pair 0077 of the pinned thousand (2.23 + 1.16 M☉ at 0.56 d) feeds its companion
-/// to the end of its main sequence. The rejuvenated accretor leaves it at 1,052.889 Myr, once,
-/// where the steps used to close in on its receding end until the segment cap. (1,052.655 Myr
-/// before P11.T4.i, which starts the engine at the primary's arrival, 7 Myr before the
+/// to the end of its main sequence. The rejuvenated accretor leaves it at 1,035.446 Myr, once, at
+/// the first step aimed at that end over which it ages (P11.T4.o, finding F18), where the steps
+/// used to close in on its receding end until the segment cap. (1,052.889 Myr before T4.o: F18
+/// alone ends it 0.50 Myr sooner, at that step rather than after more of them, a segment each, and
+/// F17 alone 17.2 Myr sooner, its accretion taken in steps of at most 1% of the donor; 1,052.655
+/// Myr before P11.T4.i, which starts the engine at the primary's arrival, 7 Myr before the
 /// companion's, and so moves its knots.)
 #[test]
 fn a_rejuvenated_accretor_leaves_its_main_sequence_once() {
@@ -1798,7 +1819,7 @@ fn a_rejuvenated_accretor_leaves_its_main_sequence_once() {
         .map(|state| state.age().value())
         .expect("the accretor leaves its main sequence");
     assert!(
-        (left - 1.052_889e9).abs() <= 1.0e3,
+        (left - 1.035_446e9).abs() <= 1.0e3,
         "left at {left} yr: {}",
         describe(&timeline)
     );
@@ -2173,8 +2194,8 @@ enum EarlierRun {
 fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun {
     use super::star::Member;
 
-    let early = evolve(input, until);
-    let late = evolve(input, later);
+    let early = evolve_from_living_donors(input, until);
+    let late = evolve_from_living_donors(input, later);
     if can_interact(input, until) {
         assert!(!early.hit_segment_cap(), "{}", describe(&early));
         assert_same_history(&early, &late, until);
@@ -3991,16 +4012,17 @@ fn a_transfers_last_step_applies_the_pin() {
     );
 }
 
-/// P11.T4.k, finding A: pair 0741 of the pinned thousand (14.10 + 13.53 M☉, 72.1 d, e 0.61, [Fe/H]
-/// 0). After its common envelope at 17.508 Myr the companion is a helium star, which transfers onto
-/// the primary's 2.84 M☉ black hole from 18.6279 Myr (case BB, ruling 129.4b) and dies in that
-/// transfer at 18.6316 Myr, as Tauris, Langer and Podsiadlowski (2015) find most such donors do.
-/// The transfer's last step lands on the death and acts on it: a 1.411 M☉ neutron star, bound
-/// beside the black hole. No merger follows. Before T4.k the death was never seen, the dead donor
-/// was read past its death on its closed forms, and the pair showed a merger at 985.7 Myr.
+/// P11.T4.k, finding A: pair 0318 of the pinned thousand (11.32 + 10.62 M☉ at 14.7 d). The
+/// companion, its envelope taken, is a helium star, which transfers onto the primary's 1.51 M☉
+/// neutron star from 26.1266 Myr (case BB, ruling 129.4b) and dies in that transfer at 26.1370 Myr,
+/// as Tauris, Langer and Podsiadlowski (2015) find most such donors do. The transfer's last step
+/// lands on the death and acts on it: a 1.856 M☉ neutron star, bound beside the first. No merger
+/// follows. Before T4.k the death was never seen, and the dead donor was read past its death on its
+/// closed forms. (Until P11.T4.o this test read pair 0741, whose helium star now collapses
+/// detached: F17's shorter steps leave its primary 0.005 M☉ heavier after its first transfer.)
 #[test]
 fn a_transfers_last_step_applies_the_death() {
-    let input = pinned_sample_pair(741);
+    let input = pinned_sample_pair(318);
     let timeline = evolve(&input, Years::new(1.2e10));
     let record = *timeline
         .supernovae()
@@ -4008,7 +4030,7 @@ fn a_transfers_last_step_applies_the_death() {
         .find(|s| s.component() == Component::Secondary)
         .unwrap_or_else(|| panic!("the companion's collapse: {}", describe(&timeline)));
     let death = record.age().value();
-    assert!((death - 18.6316e6).abs() < 1.0e2, "{death}");
+    assert!((death - 26.136_98e6).abs() < 1.0e2, "{death}");
     assert_eq!(
         segment_ending_at(&timeline, death).kind(),
         SegmentKind::StableTransfer {
@@ -4024,13 +4046,13 @@ fn a_transfers_last_step_applies_the_death() {
         "a helium-star donor (case BB): {:?}",
         before.stars()[1]
     );
-    assert_eq!(before.stars()[0].phase(), Phase::BlackHole);
+    assert_eq!(before.stars()[0].phase(), Phase::NeutronStar);
     assert_eq!(
         record.remnant().kind(),
         crate::stellar::remnant::RemnantKind::NeutronStar
     );
     assert!(
-        (record.remnant().mass().value() - 1.411).abs() < 1e-3,
+        (record.remnant().mass().value() - 1.856).abs() < 1e-3,
         "{:?}",
         record.remnant()
     );
@@ -5615,14 +5637,16 @@ fn a_fed_helium_star_swells_around_its_own_core() {
 /// pulsing AGB star whose core is the dwarf's mass at the step's start, to 10⁻⁹, and whose
 /// envelope is the step's net gain. In pinned pair 0305 (3.30 + 2.22 M☉ at 76.9 d), whose dwarf
 /// was swelled bare before P11.T4.m, kept everything and grew to a 1.77 M☉ carbon–oxygen dwarf
-/// that collapsed at 526.2 Myr, the dwarf swells around its own 1.2745 M☉, and no carbon–oxygen
-/// dwarf above the Chandrasekhar mass is shown.
+/// that collapsed at 526.2 Myr, the dwarf swells around its own 0.8036 M☉ at 532.19 Myr, fed by
+/// its companion's Hertzsprung gap, and no carbon–oxygen dwarf above the Chandrasekhar mass is
+/// shown. (Between P11.T4.m and P11.T4.o it swelled at 526.23 Myr around 1.2745 M☉, which one
+/// 1.57 Myr step of 0.49 M☉ had brought it to: finding F17.)
 #[test]
 fn a_fed_white_dwarf_swells_around_itself() {
     use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
 
     let until = Years::new(1.2e10);
-    for (i, dwarf) in [(118, 0.715_027), (305, 1.274_548)] {
+    for (i, dwarf) in [(118, 0.715_027), (305, 0.803_613)] {
         let input = pinned_sample_pair(i);
         let timeline = evolve(&input, until);
         let swells = swells_of(&timeline);
@@ -5669,5 +5693,369 @@ fn a_fed_white_dwarf_swells_around_itself() {
                 );
             }
         }
+    }
+}
+
+// --- P11.T4.o: the transfer loop's steps -------------------------------------------------------
+
+/// The transfer steps this thread has started from a donor with nothing living
+/// (`rlof::DEAD_DONOR_STEPS`, `Engine::transfer_phase`'s backstop).
+fn dead_donor_steps() -> u32 {
+    super::rlof::DEAD_DONOR_STEPS.with(core::cell::Cell::get)
+}
+
+/// The timeline of `input` to `until`, asserting that no transfer step of it started from a donor
+/// with nothing living (P11.T4.o).
+fn evolve_from_living_donors(input: &BinaryInput, until: Years) -> BinaryTimeline {
+    let dead = dead_donor_steps();
+    let timeline = evolve(input, until);
+    assert_eq!(
+        dead_donor_steps(),
+        dead,
+        "a transfer step from a dead donor: {:?} P {} d\n{}",
+        input.masses(),
+        input.orbit().period().value() / 86_400.0,
+        describe(&timeline)
+    );
+    timeline
+}
+
+/// The share of its donor's mass that each accepted step of stable transfer in `timeline` moved:
+/// each knot of a transfer segment's rates is a step's end and its mean rate there, and the
+/// donor's mass path holds its mass at the step's start.
+fn transfer_shares(timeline: &BinaryTimeline) -> Vec<(f64, f64)> {
+    let mut shares = Vec::new();
+    for segment in timeline.segments() {
+        let SegmentKind::StableTransfer { donor } = segment.kind() else {
+            continue;
+        };
+        let (_, Some(rates)) = segment.paths() else {
+            continue;
+        };
+        let mut start = segment.start().value();
+        for &[age, rate] in rates.knots() {
+            let donor_mass = segment.members()[donor.index()].mass_at(start);
+            if positive(donor_mass) && age > start {
+                shares.push((age, rate * (age - start) / donor_mass));
+            }
+            start = age;
+        }
+    }
+    shares
+}
+
+/// P11.T4.o, finding F17 (ruling p11-c2-swell of 2026-10-06, §4.4): a step of transfer that moves
+/// more than 2 × BSE equation 92's 0.5% of its donor is taken again at half its length. In pinned
+/// pair 0305 (3.30 + 2.22 M☉ at 76.9 d) one 1.57 Myr step, which a slower step's longer hint had
+/// started, moved 0.49 M☉ onto its white dwarf at 526.23 Myr, 27% of its donor; no step of the
+/// pair moves more than 1% now.
+#[test]
+fn a_transfer_step_moves_at_most_a_hundredth_of_its_donor() {
+    let input = pinned_sample_pair(305);
+    let timeline = evolve(&input, Years::new(1.2e10));
+    let shares = transfer_shares(&timeline);
+    assert!(shares.len() > 100, "{}", describe(&timeline));
+    for (age, share) in shares {
+        assert!(share <= 0.01, "{share} of the donor at {age} yr");
+    }
+}
+
+/// P11.T4.o, finding F18: a fed accretor that does not age over the step aimed at its main
+/// sequence's end, its rejuvenation at or above its ageing, keeps its main sequence, and the step
+/// closes no segment. In sample 17 of D's cell 4783 (5.62 + 4.41 M☉ at 6.72 d, under a seed of
+/// P11.T4.o's probe, the fit's with its last byte changed) the gainer, 8.98 M☉ near its end, is fed so on three such steps in a row from
+/// 97.70 Myr; each ends inside its segment, with the gainer still on its main sequence.
+#[test]
+fn a_fed_accretor_that_does_not_age_keeps_its_main_sequence() {
+    use super::star::Member;
+
+    let grid = pair_light::PairGrid::of(crate::id::Layer::D).expect("D's grid");
+    let input = pair_light::sample_input(&grid, 4_783, 17, pair_light::FIT_SEED ^ 0x0d);
+    let timeline = evolve(&input, Years::new(pair_light::LAST_AGE_YEARS));
+    let coeffs = crate::stellar::sse::ZCoeffs::new(input.composition().z_fit());
+    let mut kept = 0;
+    for segment in timeline.segments() {
+        let SegmentKind::StableTransfer { donor } = segment.kind() else {
+            continue;
+        };
+        let Member::MainSequence { helium, mass, tau } = &segment.members()[1 - donor.index()]
+        else {
+            continue;
+        };
+        let (masses, taus) = (mass.knots(), tau.knots());
+        for k in 1..taus.len() {
+            let dt = taus[k][0] - taus[k - 1][0];
+            let rest = (1.0 - taus[k - 1][1])
+                * crate::stellar::sse::main_sequence_lifetime(&coeffs, *helium, masses[k - 1][1]);
+            let aimed = dt > 0.0 && (dt - rest).abs() <= 1e-9 * rest;
+            if aimed && masses[k][1] > masses[k - 1][1] && taus[k][1] <= taus[k - 1][1] {
+                assert!(
+                    k + 1 < taus.len(),
+                    "the step ends its segment: {}",
+                    describe(&timeline)
+                );
+                kept += 1;
+            }
+        }
+    }
+    assert_eq!(kept, 3, "{}", describe(&timeline));
+}
+
+/// P11.T4.o, finding F18: an unfed star's main sequence ends where it did before T4.o, to 10⁻⁹ of
+/// the age. A carried main sequence that is not fed lands short of its end only as its own wind
+/// lengthens its lifetime, and the phase goes on to land on it, closing no segment at the short
+/// landing (it closed one there before). Pinned pairs 0004, 0005, 0010 and 0015, each companion
+/// left on its own by its primary's death, have one, one, one and two segments fewer.
+#[test]
+fn an_unfed_main_sequence_ends_where_it_did() {
+    use super::star::Member;
+
+    for (i, end, segments) in [
+        (4, 1.019_593_633_871_585_5e7, 10),
+        (5, 1.744_360_084_346_238_4e8, 15),
+        (10, 7.287_576_551_262_443e7, 15),
+        (15, 1.269_029_482_407_306e7, 14),
+    ] {
+        let timeline = evolve(&pinned_sample_pair(i), Years::new(1.2e10));
+        let left = timeline
+            .segments()
+            .windows(2)
+            .find(|w| {
+                matches!(w[0].members()[1], Member::MainSequence { .. })
+                    && matches!(w[1].members()[1], Member::Shaped { .. })
+            })
+            .unwrap_or_else(|| panic!("pair {i:04}'s companion: {}", describe(&timeline)))[1]
+            .start()
+            .value();
+        assert!(
+            (left - end).abs() <= 1e-9 * end,
+            "pair {i:04}: {left} yr against {end} yr"
+        );
+        assert_eq!(timeline.segments().len(), segments, "pair {i:04}");
+    }
+}
+
+/// P11.T4.o, the engine finding of "P11.T17.b as built": the fit's sample 49 of E's cell 3579
+/// (32.75 + 31.83 M☉ at [Fe/H] −1.98, circular at 65.8 R☉). The secondary's common envelope leaves
+/// a 19.9 M☉ helium star, which gives mass to the primary's black hole until its helium main
+/// sequence ends at 8.5057 Myr, and plan 06's helium star of that mass has no Hertzsprung gap: the
+/// end is its death. It collapses there (BSE section 2.5) to a 19.14 M☉ black hole, bound beside
+/// the 12.51 M☉ one, which no transfer step follows. Before T4.o it was left at its remnant with
+/// nothing acted on, the next transfer step started from it (a debug assertion), and a release
+/// build merged the pair into one 31.65 M☉ black hole at once.
+#[test]
+fn a_helium_donor_whose_main_sequence_end_is_its_death_collapses() {
+    let grid = pair_light::PairGrid::of(crate::id::Layer::E).expect("E's grid");
+    let input = pair_light::sample_input(&grid, 3_579, 49, pair_light::FIT_SEED);
+    let timeline = evolve_from_living_donors(&input, Years::new(pair_light::LAST_AGE_YEARS));
+    let record = *timeline
+        .supernovae()
+        .iter()
+        .find(|s| s.component() == Component::Secondary)
+        .unwrap_or_else(|| panic!("the secondary's collapse: {}", describe(&timeline)));
+    let death = record.age().value();
+    assert!((death / 8.5057e6 - 1.0).abs() < 1e-4, "{death}");
+    assert_eq!(
+        record.remnant().kind(),
+        crate::stellar::remnant::RemnantKind::BlackHole
+    );
+    assert!(
+        (record.remnant().mass().value() - 19.14).abs() < 0.01,
+        "{record:?}"
+    );
+    assert!(record.bound(), "{}", describe(&timeline));
+    let before = timeline.state_at(Years::new(super::detached::last_living(death)));
+    assert_eq!(before.stars()[1].phase(), Phase::HeliumMainSequence);
+    let after = timeline.state_at(Years::new(death * (1.0 + 1e-6)));
+    assert_eq!(
+        after.kind(),
+        SegmentKind::Detached,
+        "{}",
+        describe(&timeline)
+    );
+    assert_eq!(after.stars().map(|s| s.phase()), [Phase::BlackHole; 2]);
+}
+
+/// P11.T4.o: a transfer step that would start from a donor with nothing living, its death inside
+/// the last step not landed on, acts on the death instead (the backstop of
+/// `Engine::transfer_phase`): a 19.5 M☉ helium star placed at its own death beside a 12.5 M☉
+/// black hole collapses, as at `Stop::Death`, and the transfer ends.
+#[test]
+fn a_transfer_from_a_dead_donor_acts_on_its_death() {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit, offset_for};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+
+    let age = 8.5e6;
+    let input = pair(32.75, 31.83, 7.7, 0.0, 2.1e-4);
+    let ctx = Arc::new(Context::of(&input));
+    let track = crate::stellar::sse::Track::helium_star_full(
+        SolarMasses::new(19.5),
+        ctx.composition(),
+        ctx.draws(1),
+    );
+    let lifetime = track.lifetime().expect("a helium star dies").value();
+    let donor = Member::Shaped {
+        track: Arc::new(track),
+        offset: offset_for(age, lifetime),
+        mass: Path::starting(age, 19.5),
+    };
+    let hole = Member::Remnant {
+        phase: Phase::BlackHole,
+        birth: 6.7e6,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, 12.5),
+    };
+    let k = input.orbit();
+    let orbit = LiveOrbit::new(age, 60.0, 0.0, *k.orientation(), k.mean_anomaly_at_epoch());
+    let mut engine = Engine::new(ctx, age, 1.0e10, [hole, donor], orbit, None);
+    engine.segment_start = age;
+    engine.kind = SegmentKind::StableTransfer {
+        donor: Component::Secondary,
+    };
+    let dead = dead_donor_steps();
+    engine.transfer_phase(1);
+    assert_eq!(dead_donor_steps(), dead + 1);
+    let record = engine
+        .supernovae
+        .iter()
+        .find(|s| s.component() == Component::Secondary)
+        .expect("the donor's collapse");
+    assert!(
+        (record.age().value() - age).abs() <= 1e-9 * age,
+        "{record:?}"
+    );
+    assert!(
+        !matches!(engine.kind, SegmentKind::StableTransfer { .. }),
+        "{:?}",
+        engine.kind
+    );
+}
+
+/// P11.T4.o, finding F18: [`super::detached::main_sequence_end_landed`]'s four cases, on member 1
+/// of a step from τ = 0.999: any other stop passes as it is; a step that reaches τ = 1 takes the
+/// end; a fed member that ages takes it early, with τ set to 1; a fed member that does not age,
+/// and an unfed one that falls short, land on nothing, their τ as the step left it.
+#[test]
+fn a_main_sequence_end_is_taken_where_reached_or_fed_and_aged() {
+    use super::detached::{Snapshot, Stop, main_sequence_end_landed};
+
+    let start = Snapshot {
+        age: 1.0e8,
+        j: 1.0,
+        e: 0.0,
+        spins: [1.0; 2],
+        masses: [1.0, 8.0],
+        taus: [0.5, 0.999],
+    };
+    let end = |mass: f64, tau: f64| Snapshot {
+        age: 1.01e8,
+        masses: [1.0, mass],
+        taus: [0.5, tau],
+        ..start
+    };
+    let ends = Some(Stop::MainSequenceEnd(1));
+    for (stop, mass, tau, landed, tau_after) in [
+        (
+            Some(Stop::Boundary),
+            8.0,
+            0.9995,
+            Some(Stop::Boundary),
+            0.9995,
+        ),
+        (ends, 7.99, 1.0, ends, 1.0),
+        (ends, 8.01, 0.9995, ends, 1.0),
+        (ends, 8.01, 0.9985, None, 0.9985),
+        (ends, 7.99, 0.9995, None, 0.9995),
+    ] {
+        let mut next = end(mass, tau);
+        assert_eq!(
+            main_sequence_end_landed(stop, &start, &mut next),
+            landed,
+            "{stop:?} to {mass} M☉ at τ {tau}"
+        );
+        assert_eq!(
+            hyperion_testkit::float::bits(next.taus[1]),
+            hyperion_testkit::float::bits(tau_after),
+            "{stop:?} to {mass} M☉ at τ {tau}: τ {}",
+            next.taus[1]
+        );
+    }
+}
+
+/// P11.T4.o, the dead donor's cause in a detached pair: a carried 19.5 M☉ helium main-sequence star
+/// at Z = 2.1 × 10⁻⁴, on a wide orbit beside a 12.5 M☉ black hole, whose helium-star track has no
+/// Hertzsprung gap, dies at its main sequence's end: a supernova record there, and a remnant on its
+/// own track from it. Before T4.o `Engine::after_boundary` placed it at its track's death and acted
+/// on nothing, so that it was shown as a remnant of the carried mass with no record.
+#[test]
+fn a_detached_helium_star_whose_main_sequence_end_is_its_death_collapses() {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+
+    let age = 8.0e6;
+    let input = pair(32.75, 31.83, 7.7, 0.0, 2.1e-4);
+    let ctx = Arc::new(Context::of(&input));
+    let star = Member::MainSequence {
+        helium: true,
+        mass: Path::starting(age, 19.5),
+        tau: Path::starting(age, 0.999),
+    };
+    let hole = Member::Remnant {
+        phase: Phase::BlackHole,
+        birth: 6.7e6,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, 12.5),
+    };
+    let k = input.orbit();
+    let orbit = LiveOrbit::new(age, 2.0e4, 0.0, *k.orientation(), k.mean_anomaly_at_epoch());
+    let mut engine = Engine::new(ctx, age, 1.0e10, [hole, star], orbit, None);
+    engine.segment_start = age;
+    for _ in 0..8 {
+        if !engine.supernovae.is_empty() {
+            break;
+        }
+        engine.detached_phase();
+    }
+    let record = engine
+        .supernovae
+        .iter()
+        .find(|s| s.component() == Component::Secondary)
+        .expect("the helium star's collapse at its main sequence's end");
+    assert!(record.age().value() > age, "{record:?}");
+    assert!(
+        matches!(&engine.members[1], Member::Track { .. }),
+        "{:?}",
+        engine.members[1].form()
+    );
+}
+
+/// P11.T4.o (the determinism audit): a timeline run to just past each of its events is the full
+/// run's to there, bit for bit, for pairs that reach each new path: pinned pairs 0305 and 0171
+/// (F17's halvings, 0171's eight), the fed accretor of D's cell 4783 that does not age over its
+/// steps aimed at its main sequence's end (F18), and E's cell 3579 sample 49, whose helium donor
+/// dies at its main sequence's end (`Engine::after_boundary`).
+#[test]
+fn the_steps_of_t4o_are_the_same_whatever_age_they_are_run_to() {
+    let grid = |layer| pair_light::PairGrid::of(layer).expect("a grid");
+    let inputs = [
+        pinned_sample_pair(305),
+        pinned_sample_pair(171),
+        pair_light::sample_input(
+            &grid(crate::id::Layer::D),
+            4_783,
+            17,
+            pair_light::FIT_SEED ^ 0x0d,
+        ),
+        pair_light::sample_input(&grid(crate::id::Layer::E), 3_579, 49, pair_light::FIT_SEED),
+    ];
+    for input in &inputs {
+        let [after_events, _] = check_after_events(input, Years::new(1.5e10));
+        assert!(after_events > 0, "{:?}", input.masses());
     }
 }

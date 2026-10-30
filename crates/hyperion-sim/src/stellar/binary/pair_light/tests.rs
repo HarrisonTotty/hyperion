@@ -850,8 +850,9 @@ fn the_pair_light_tables_bound_evolved_pairs() {
                 println!("  the engine's assertion fired: {line}");
             }
             violations += b.violations.len();
-            // The engine's debug assertion fires for about 1 in 3.9 × 10⁴ of E's samples; a rise
-            // would shrink what the test covers, so it fails past a few.
+            // The engine's dead-donor assertion fired for about 1 in 3.9 × 10⁴ of E's samples
+            // until P11.T4.o acted on that death; any panic shrinks what the test covers, so it
+            // fails past a few.
             assert!(
                 b.engine_panics.len() <= 5,
                 "the engine's assertion fired {} times",

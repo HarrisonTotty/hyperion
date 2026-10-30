@@ -1526,6 +1526,9 @@ P11.T4, as built"._
     agreement test re-run and passing; determinism-auditor, science-checker and rust-reviewer
     reviews.
 
+  _As built (lane p11-t4o, 2026-10-30; at version 23 on the train branch, held for 25's train): see
+  Risks, "P11.T4.o as built"._
+
 ### P11.T5 Classes from state
 
 Build `BinaryClass`, `classify`: Algol and contact pairs; blue straggler (a main-sequence star above
@@ -6994,3 +6997,41 @@ galaxy_sweeps`.
   (`a_pinned_pair_instability_disrupts_the_pair`). A `NoRemnant` star's summary class is `None`
   whatever its pair (`paired_state`; lean, 2026-10-30). It needs a primary of 145–150 M☉ at
   Z ≤ 2 × 10⁻⁴: none in an R06-style census of 10⁵ systems, and no golden moves.
+- **P11.T4.o as built** (lane p11-t4o, 2026-10-30; findings F18 and F17, and the engine finding of
+  "P11.T17.b as built"). Version 25's behaviour at version 23 on the train branch, no bump and no
+  hold; its goldens are re-blessed by name at header 23 (the task's text says 24).
+  - _F18:_ `detached::Stop::MainSequenceEnd(i)` replaces `Stop::Boundary` for a carried main
+    sequence's end in `step_limit` and `transfer_limit`; both phases act on it as a boundary.
+    `detached::main_sequence_end_landed(stop, start, &mut end)` takes the end, τ = 1 in `end`,
+    where τ reached 1 or where the member was fed (its mass rose) and aged; otherwise no segment
+    closes.
+  - _F18's rule (lean, 2026-10-30, for main):_ the task takes the end wherever the member aged, but
+    an unfed main sequence lands short too, as its own loss of mass lengthens t_MS. That rule moved
+    351 of the pinned thousand's 447 unfed ends by up to 10⁻⁴, against the task's own 10⁻⁹ test;
+    fed-only keeps every unfed end that F17 does not touch bit for bit.
+  - _F18's early end:_ at most Δτ = 1.1 × 10⁻³, 0.993 of the step's own τ increment, and
+    3 × 10⁵ yr, over the lane's probes; pair 0077's accretor 0.50 Myr (its 17.4 Myr in all,
+    1,052.889 → 1,035.446 Myr, is mostly F17's finer accretion).
+  - _The dead donor's cause_ was no step limit: `Engine::after_boundary` placed a carried helium
+    main sequence whose plan 06 track has no Hertzsprung gap (above about 18.7 M☉) at its death
+    and acted on nothing, in either phase. It now calls `die(i)` there, and the transfer's boundary
+    arm then `end_without_a_living_donor(d)`. The backstop at the top of `transfer_phase` is built
+    and unreached; the tests count it (`rlof::DEAD_DONOR_STEPS`, test builds only).
+  - _F17:_ `rlof::TRANSFER_HALVINGS` = 8; a halved step lands on no event, and `dt_hint` reads the
+    accepted dt. Over 1% after eight halvings: pinned pair 0171's first step from a new helium
+    white dwarf (4.3%, pinned so in `a_thousand_timelines_are_pinned`), and a few of the lane's
+    prior pairs and table samples (up to 9.5%).
+  - _The held floor:_ the rebuilt follow-up probes leave one capped timeline, sample 11 of D's cell
+    2027 under `FIT_SEED ^ 0x0d`, a helium donor's detach-and-refill cycle capped at its merged
+    neutron star, which holds no star. Dropping the floor in 25's wiring is main's call.
+  - _Tests restated:_ `light.rs`'s capped test is `the_follow_ups_hydrogen_gainer_is_not_capped`;
+    T4.k's `a_transfers_last_step_applies_the_death` reads pair 0318 (0741 no longer fills its
+    lobe); `a_fed_white_dwarf_swells_around_itself` reads 0305's dwarf at 0.8036 M☉; BSE §3.4's
+    double neutron star is carved an X-ray binary until its last 480 years, case BB, leave the
+    horizon.
+  - _For the 25 wiring:_ `binary_timelines` moves 370 of 1,000 digests (F18 233, F17 72, both
+    65), its segments 11,421 → 11,096; F17 alone moves `passed_over_collapses`, R06's
+    `census_near_sun` and `band_face_row`, and the server's `systems_in_range_briefs`.
+    `binary_pair_light_c`, `_d` and `sky_binary_light_d` stay stale until the `--since 25` refit;
+    P11.T17.b's slow `the_pair_light_tables_bound_evolved_pairs` fails on them in C and E at the
+    train's base and after T4.o alike (158 bins, the same).

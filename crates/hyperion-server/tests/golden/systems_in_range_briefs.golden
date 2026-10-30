@@ -1090,8 +1090,8 @@
         "stellar": {
           "kind": "neutron_star",
           "class": "NS",
-          "log_luminosity_lsun": -9.405705,
-          "teff_k": 6136.6465,
+          "log_luminosity_lsun": -9.4057045,
+          "teff_k": 6136.6475,
           "star_count": 3
         }
       },

@@ -104,6 +104,9 @@ pub(super) enum Stop {
     Until,
     /// A member reached the end of a phase (not its death).
     Boundary,
+    /// Member `i`'s carried main sequence reaches its end, τ = 1, where the step that lands there
+    /// takes it ([`main_sequence_end_landed`], P11.T4.o), and is acted on as a [`Stop::Boundary`].
+    MainSequenceEnd(usize),
     /// Member `i`'s own track dies.
     Death(usize),
     /// The primary's pinned death (design note 16).
@@ -205,7 +208,7 @@ impl Engine {
         let stop = self.integrate();
         match stop {
             Stop::Until => {}
-            Stop::Boundary => {
+            Stop::Boundary | Stop::MainSequenceEnd(_) => {
                 self.close_segment();
                 self.after_boundary();
             }
@@ -258,9 +261,10 @@ impl Engine {
             };
             let rates = self.rates(&start, &structures);
             let (dt, stop) = self.step_limit(&start, &structures, &rates);
-            let Some(next) = self.step_from(&start, &structures, &rates, dt) else {
+            let Some(mut next) = self.step_from(&start, &structures, &rates, dt) else {
                 return Stop::Coalescence;
             };
+            let stop = main_sequence_end_landed(stop, &start, &mut next);
             let Some(next_structures) = self.structures(&next) else {
                 return Stop::Coalescence;
             };
@@ -766,7 +770,7 @@ impl Engine {
                         *helium,
                         s.masses[i],
                     );
-                    limits.event((1.0 - s.taus[i]) * lifetime, Stop::Boundary);
+                    limits.event((1.0 - s.taus[i]) * lifetime, Stop::MainSequenceEnd(i));
                     limits.length(MAIN_SEQUENCE_STEP * lifetime);
                 }
                 Member::Cooling { .. }
@@ -868,6 +872,42 @@ const fn phase_step(kind: Kind) -> f64 {
         | Kind::NeutronStar
         | Kind::BlackHole
         | Kind::Massless => 1.0,
+    }
+}
+
+/// The event a step from `start` to `end` lands on, given its limit `stop`: a carried main
+/// sequence's end that the step takes, with τ set to 1 in `end`, or none where it falls short.
+///
+/// Only a limit of member `i`'s main-sequence end ([`Stop::MainSequenceEnd`]; finding F18,
+/// P11.T4.o) is decided here; any other passes as it is. The end is taken where τ has reached 1
+/// at `end`, or where the member was fed over the step (its mass at the end above its mass at the
+/// start) and aged (τ at the end above τ at the start). Otherwise the step lands on nothing, and
+/// the phase goes on with no segment closed: a fed member that did not age keeps its main
+/// sequence, and an unfed one, which lands short only as its own loss of mass lengthens its
+/// lifetime (HPT section 7.1), lands on the end at a later step, as before.
+///
+/// A fed accretor's rejuvenation lowers its τ over the step that aims at the end (BSE section
+/// 2.6.6, `Engine::rejuvenated_tau`), so the step lands short of τ = 1. The boundary closed a
+/// segment whether reached or not, and the next step, shorter by about τ Ṁ `t_MS` ÷ m, landed
+/// short again, to the cap on segments. So a fed main sequence ends early by at most the last
+/// step's rejuvenation, under that step's own increment of τ. BSE's floor on the evolution step
+/// it aims at the end, 10⁻⁷ Myr during transfer (`evolv2.f` 1960; 10⁻⁷ of the age when detached,
+/// 908), is not taken: it would still close a segment at every landing that falls short.
+#[must_use]
+pub(super) fn main_sequence_end_landed(
+    stop: Option<Stop>,
+    start: &Snapshot,
+    end: &mut Snapshot,
+) -> Option<Stop> {
+    let Some(Stop::MainSequenceEnd(i)) = stop else {
+        return stop;
+    };
+    let fed = end.masses[i] > start.masses[i];
+    if end.taus[i] >= 1.0 || (fed && end.taus[i] > start.taus[i]) {
+        end.taus[i] = 1.0;
+        stop
+    } else {
+        None
     }
 }
 
