@@ -23,6 +23,7 @@ import {
   expm1,
   log,
   log1p,
+  log2,
   pow,
   sin,
   tan,
@@ -32,6 +33,7 @@ import {
 const UNARY: Readonly<Record<string, (x: number) => number>> = {
   exp,
   log,
+  log2,
   log1p,
   expm1,
   sin,

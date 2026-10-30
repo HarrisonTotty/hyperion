@@ -3,8 +3,8 @@
 //! reads and holds `pinnedMath.ts` to bit for bit, so that the client's committed tables compute
 //! their transcendentals as the sim does.
 //!
-//! For each of the thirteen functions the client ports (`exp`, `log`, `log1p`, `expm1`, `sin`,
-//! `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `cbrt` and `pow`, here through
+//! For each of the fourteen functions the client ports (`exp`, `log`, `log2`, `log1p`, `expm1`,
+//! `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `cbrt` and `pow`, here through
 //! [`hyperion_base::math`], which is exactly `libm`), the file holds its value at:
 //!
 //! - the special values every function shares (signed zeros, the subnormal and normal extremes,
@@ -58,9 +58,10 @@ type Binary = (&'static str, fn(f64, f64) -> f64);
 
 /// The client's one-argument ports, each the `hyperion_base::math` wrapper of the same `libm`
 /// function.
-const UNARY: [Unary; 11] = [
+const UNARY: [Unary; 12] = [
     ("exp", math::exp),
     ("log", math::ln),
+    ("log2", math::log2),
     ("log1p", math::ln_1p),
     ("expm1", math::exp_m1),
     ("sin", math::sin),
@@ -115,7 +116,7 @@ fn thresholds(name: &str) -> &'static [u32] {
             0x3e30_0000,
             0x4086_2e42,
         ],
-        "log" => &[
+        "log" | "log2" => &[
             0x0010_0000,
             0x3ff0_0000,
             0x3fe6_a09e,
@@ -555,7 +556,7 @@ fn unary_sweeps(name: &str) -> Vec<Domain> {
             Domain::new(Either, -30, 9),
             Domain::new(Either, -1023, 1023),
         ],
-        "log" => vec![Domain::new(Plus, -1023, 1023), Domain::new(Plus, -1, 0)],
+        "log" | "log2" => vec![Domain::new(Plus, -1023, 1023), Domain::new(Plus, -1, 0)],
         "log1p" => vec![Domain::new(Minus, -60, -1), Domain::new(Plus, -60, 1023)],
         "sin" | "cos" | "tan" => vec![Domain::new(Either, -30, 20), Domain::new(Either, 20, 1023)],
         "asin" | "acos" => vec![Domain::new(Either, -60, -1)],

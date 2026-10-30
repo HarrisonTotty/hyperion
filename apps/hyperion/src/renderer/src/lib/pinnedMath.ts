@@ -1,6 +1,6 @@
 /**
- * The client's transcendental functions, pinned to the sim's: `exp`, `log`, `log1p`, `expm1`,
- * `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `cbrt` and `pow`, each ported line for line
+ * The client's transcendental functions, pinned to the sim's: `exp`, `log`, `log2`, `log1p`,
+ * `expm1`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `cbrt` and `pow`, each ported line for line
  * from the `libm` crate at 0.2.16, the version the workspace pins exactly for `hyperion_base::math`
  * (plan R08, R08.T20).
  *
@@ -51,7 +51,7 @@
  * ====================================================
  * ```
  *
- * (SunSoft's files, `log`, `asin`, `acos`, `atan2`, `k_sin`, `k_cos` and `k_rem_pio2`, carry the
+ * (SunSoft's files, `log`, `log2`, `asin`, `acos`, `atan2`, `k_sin`, `k_cos` and `k_rem_pio2`, carry the
  * first with "SunSoft" for "SunPro"; `exp`, `pow` and `k_tan`, the second.) `cbrt` is the CORE-MATH
  * project's (`core-math/src/binary64/cbrt/cbrt.c`, Copyright (c) 2021-2022 Alexei Sibidanov, MIT
  * licence; ported to Rust in 2025 by Trevor Gross). `libm` itself is under the MIT licence; see
@@ -353,6 +353,72 @@ export function log1p(x: number): number {
   const r = t2 + t1;
   const dk = k;
   return s * (hfsq + r) + (dk * LOG_LN2_LO + c) - hfsq + f + dk * LOG_LN2_HI;
+}
+
+// `src/math/log2.rs` (FreeBSD's e_log2.c).
+const LOG2_IVLN2HI = 1.44269504072144627571; /* 0x3ff71547, 0x65200000 */
+const LOG2_IVLN2LO = 1.67517131648865118353e-10; /* 0x3de705fc, 0x2eefa200 */
+
+/**
+ * The base-2 logarithm of `x`, bit for bit the sim's `hyperion_base::math::log2`.
+ *
+ * @remarks
+ * Ported line for line from `libm` 0.2.16's `src/math/log2.rs` (FreeBSD's `e_log2.c`): {@link log}'s
+ * reduction and polynomial, with log(1 + f) split into a 32-bit head and a tail before each is
+ * scaled by 1 ÷ ln 2 in two pieces and the exponent added in extra precision. Under 1 ulp.
+ */
+export function log2(x: number): number {
+  let xr = x;
+  let hx = highWord(xr);
+  let lx = lowWord(xr);
+  let k = 0;
+  if (hx < 0x00100000 || hx >>> 31 > 0) {
+    if ((hx & 0x7fffffff) === 0 && lx === 0) {
+      return -1 / (xr * xr); /* log(+-0)=-inf */
+    }
+    if (hx >>> 31 > 0) {
+      return (xr - xr) / 0; /* log(-#) = NaN */
+    }
+    /* subnormal number, scale x up */
+    k -= 54;
+    xr *= X1P54;
+    hx = highWord(xr);
+    lx = lowWord(xr);
+  } else if (hx >= 0x7ff00000) {
+    return xr;
+  } else if (hx === 0x3ff00000 && lx === 0) {
+    return 0;
+  }
+
+  /* reduce x into [sqrt(2)/2, sqrt(2)] */
+  hx += 0x3ff00000 - 0x3fe6a09e;
+  k += (hx >>> 20) - 0x3ff;
+  hx = (hx & 0x000fffff) + 0x3fe6a09e;
+  xr = fromWords(hx, lx);
+
+  const f = xr - 1;
+  const hfsq = 0.5 * f * f;
+  const s = f / (2 + f);
+  const z = s * s;
+  let w = z * z;
+  const t1 = w * (LOG_LG2 + w * (LOG_LG4 + w * LOG_LG6));
+  const t2 = z * (LOG_LG1 + w * (LOG_LG3 + w * (LOG_LG5 + w * LOG_LG7)));
+  const r = t2 + t1;
+
+  /* hi+lo = f - hfsq + s*(hfsq+R) ~ log(1+f) */
+  const hi = zeroLowWord(f - hfsq);
+  const lo = f - hi - hfsq + s * (hfsq + r);
+
+  let valHi = hi * LOG2_IVLN2HI;
+  let valLo = (lo + hi) * LOG2_IVLN2LO + lo * LOG2_IVLN2HI;
+
+  /* spadd(val_hi, val_lo, y), except for not using double_t: */
+  const y = k;
+  w = y + valHi;
+  valLo += y - w + valHi;
+  valHi = w;
+
+  return valLo + valHi;
 }
 
 // `src/math/expm1.rs` (FreeBSD's s_expm1.c).
