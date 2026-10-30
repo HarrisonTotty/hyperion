@@ -6,10 +6,14 @@ import { localFrameAt } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
 import {
   aCensus,
+  anUnknownLayer,
+  anUnknownLayerLine,
   aStellarBrief,
   aSystemsInRange,
   type BriefLayer,
   LAYERS,
+  withCensusLine,
+  withRowFields,
 } from "../../test/galaxyFixtures";
 import {
   censusHint,
@@ -579,5 +583,47 @@ describe("the substellar layers (plan 13, P13.T8.c)", () => {
     // 1/3 M⊕ is 1.001E-6 M☉ and 13 M_Jup 0.01241 M☉.
     expect(rogue?.minMsun).toBeCloseTo(1.001_2e-6, 9);
     expect(brown?.minMsun).toBeCloseTo(0.012_41, 5);
+  });
+});
+
+describe("a layer this build does not know (plan 04's reserved list)", () => {
+  /** Two layer A systems, the nearer moved to a layer this build does not know, as a newer server's. */
+  function newerChart() {
+    const response = withCensusLine(
+      aSystemsInRange({
+        centreLy: CENTRE,
+        systems: [
+          { relLy: [1, 0, 0], layer: "a" },
+          { relLy: [2, 0, 0], layer: "a" },
+        ],
+      }),
+      anUnknownLayerLine(),
+    );
+    return toChartResult(withRowFields(response, { layer: anUnknownLayer() }, 1));
+  }
+
+  it("charts an answer whose census adds a line of it to the five stellar layers", () => {
+    const result = newerChart();
+
+    expect(chartDataFault(result)).toBeNull();
+    expect(layerBands(result.layers)?.map((band) => band.layer)).toEqual(LAYERS);
+  });
+
+  it("draws none of its objects, whose size class is not known", () => {
+    const result = newerChart();
+    const scene = toScene(result, {
+      frame: FRAME,
+      driveRangeLy: 50,
+      selectedId: null,
+      destinationId: null,
+    });
+
+    expect(scene.points.map((point) => point.label)).toEqual(["H7K 4C0RFZ A-2"]);
+  });
+
+  it("reads the census's edge as Missing where it is the lightest layer included", () => {
+    const line = censusLine(newerChart().census);
+
+    expect(line).toMatchObject({ kind: "complete", aboveMsun: 1e-9, above: null });
   });
 });

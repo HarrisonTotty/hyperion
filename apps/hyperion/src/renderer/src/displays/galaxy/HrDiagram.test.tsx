@@ -6,7 +6,12 @@ import { describe, expect, it, vi } from "vitest";
 import { hrXPx, hrYPx } from "../../lib/galaxy/hrProjection";
 import { type ChartSystem, NOW_MODE, type QueryMode } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
-import { aStellarBrief, aSystemsInRange } from "../../test/galaxyFixtures";
+import {
+  anUnknownLayer,
+  aStellarBrief,
+  aSystemsInRange,
+  withRowFields,
+} from "../../test/galaxyFixtures";
 import {
   BANNED_SPATIAL_MEMBERS,
   type RecordingContext2D,
@@ -206,6 +211,20 @@ describe("HrDiagram", () => {
 
     expect(count("PLOTTED")).toBe("1");
     expect(count("PLANET")).toBe("2");
+  });
+
+  it("counts objects of a layer this build does not know under NOT PLOTTED once there are some", () => {
+    const response = aSystemsInRange({
+      systems: [
+        { relLy: [1, 0, 0], layer: "c" },
+        { relLy: [2, 0, 0], layer: "c" },
+      ],
+    });
+    const { systems } = toChartResult(withRowFields(response, { layer: anUnknownLayer() }, 1));
+
+    renderDiagram({ systems });
+
+    expect([count("PLOTTED"), count("UNLISTED LAYER")]).toEqual(["1", "1"]);
   });
 
   it("counts a plotted kind whose values fail its checks as DATA INVALID", () => {

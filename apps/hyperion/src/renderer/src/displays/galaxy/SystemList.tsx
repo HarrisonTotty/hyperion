@@ -62,14 +62,16 @@ const PLANET_WORDS = "PLANET";
 
 /**
  * What a row's primary is, for its accessible name: the kind in words and the class, a
- * free-floating planet's kind, or that the system is not yet formed at the chart's time.
+ * free-floating planet's kind, or that the system is not yet formed at the chart's time; `null`,
+ * which leaves it out, for a row with no brief of a layer this build does not know.
  */
-function starName(system: ChartSystem): string {
+function starName(system: ChartSystem): string | null {
   if (isFormedPlanet(system)) {
     return PLANET_WORDS;
   }
   if (system.star === null) {
-    return "NOT YET FORMED";
+    // Without its layer, an object with no brief is not known to be a system not yet formed.
+    return system.kind === "unknown" ? null : "NOT YET FORMED";
   }
   return `${objectKindLabel(system.star.kind)} ${system.star.spectralClass}`;
 }
@@ -289,8 +291,13 @@ export function SystemList({
             // The present distance of a system read as observed is Estimated, as the readout's is
             // (plan 12, P12.T11; § Data states: each state looks the same everywhere).
             const distance = `${system.observed === null ? "" : "~"}${formatLengthLy(system.distanceLy, distanceDecimals)}`;
-            const mass = formatSubstellarMass(system.initialMassMsun, system.layer);
-            const massName = mass.unit === "mearth" ? "Earth masses" : "solar masses";
+            // The unit a mass is read in is its layer's, so an object of a layer this build does not
+            // know has its mass Missing.
+            const mass =
+              system.layer === "unknown"
+                ? null
+                : formatSubstellarMass(system.initialMassMsun, system.layer);
+            const massName = mass?.unit === "mearth" ? "Earth masses" : "solar masses";
             return (
               <div
                 key={system.id}
@@ -306,7 +313,7 @@ export function SystemList({
                   starName(system),
                   starCountName(system),
                   `${distance} ly`,
-                  `${mass.value} ${massName}`,
+                  mass === null ? null : `${mass.value} ${massName}`,
                   rangeName(inRange),
                   // The name hides the row's content, its `S` and that mark's word with it.
                   stale ? "stale" : null,
@@ -333,9 +340,13 @@ export function SystemList({
                   <span className="system-list__number">{system.star.starCount}</span>
                 )}
                 <span className="system-list__number">{distance}</span>
-                <span className="system-list__number">
-                  {mass.value} {mass.unit === "mearth" ? <EarthMassUnit /> : <SolarMassUnit />}
-                </span>
+                {mass === null ? (
+                  <span className="system-list__number readout__missing">—</span>
+                ) : (
+                  <span className="system-list__number">
+                    {mass.value} {mass.unit === "mearth" ? <EarthMassUnit /> : <SolarMassUnit />}
+                  </span>
+                )}
                 <span className="system-list__range">
                   {rangeWords(inRange)}
                   <StaleSlot stale={stale} />

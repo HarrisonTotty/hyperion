@@ -95,6 +95,11 @@ export interface StarShapeLegendProps {
    * instead. None when absent.
    */
   readonly planets?: boolean;
+  /**
+   * Whether the picture's systems hold an object of a mass layer this build does not know, which
+   * is listed and not drawn, so named before `LIST ONLY`. None when absent.
+   */
+  readonly unlistedLayer?: boolean;
 }
 
 /**
@@ -108,7 +113,11 @@ export interface StarShapeLegendProps {
  * is not read as an empty sky. A picture that draws free-floating planets names the inverted
  * triangle after the star shapes (plan 13, P13.T8.d).
  */
-export function StarShapeLegend({ compactRemnants, planets = false }: StarShapeLegendProps) {
+export function StarShapeLegend({
+  compactRemnants,
+  planets = false,
+  unlistedLayer = false,
+}: StarShapeLegendProps) {
   const stars = compactRemnants
     ? STAR_SHAPES
     : STAR_SHAPES.filter((entry) => !COMPACT_REMNANT_SHAPES.has(entry.shape));
@@ -122,7 +131,11 @@ export function StarShapeLegend({ compactRemnants, planets = false }: StarShapeL
           {kindsOf(meaning)}
         </p>
       ))}
-      <p className="symbol-legend__item">NO REMNANT, NOT YET FORMED: LIST ONLY</p>
+      <p className="symbol-legend__item">
+        {unlistedLayer
+          ? "NO REMNANT, NOT YET FORMED, UNLISTED LAYER: LIST ONLY"
+          : "NO REMNANT, NOT YET FORMED: LIST ONLY"}
+      </p>
     </>
   );
 }

@@ -79,6 +79,14 @@ describe("SymbolLegend", () => {
     expect(within(legend()).getByText("NO REMNANT, NOT YET FORMED: LIST ONLY")).toBeInTheDocument();
   });
 
+  it("names a layer this build does not know among those listed and not drawn, while the answer holds one", () => {
+    render(<SymbolLegend bands={null} unlistedLayer />);
+
+    expect(
+      within(legend()).getByText("NO REMNANT, NOT YET FORMED, UNLISTED LAYER: LIST ONLY"),
+    ).toBeInTheDocument();
+  });
+
   it("keeps each of an entry's kinds whole wherever the entry wraps, as the HR diagram's does", () => {
     // jsdom lays nothing out, so the stylesheet's rule is what is held (P06.T24.c): without it the
     // HR diagram's legend broke `STRIPPED HELIUM STAR` across two lines at 1280 x 720.

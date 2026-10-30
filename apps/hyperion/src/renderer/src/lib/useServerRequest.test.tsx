@@ -1,4 +1,5 @@
 import {
+  type ErrorCode,
   type PendingRequest,
   RequestClient,
   type RequestOf,
@@ -187,6 +188,24 @@ describe("useServerRequest", () => {
       expect(result.current).toEqual({ kind: "rejected", code, reason: message });
     },
   );
+
+  it("reports a code this build does not know as a rejection with the server's reason", async () => {
+    const { result, socket } = renderRequest(parametersOf(FIRST));
+    // `ErrorCode` grows without a protocol bump (galaxy plan 04's reserved list), and the decoder
+    // trusts the generated types, as the test does where it plays a newer server.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const code = "universe_archived" as ErrorCode;
+
+    await server(() => {
+      socket.serverRejects(1, { code, message: "the universe is archived", field: "universe" });
+    });
+
+    expect(result.current).toEqual({
+      kind: "rejected",
+      code: "unknown",
+      reason: "the universe is archived",
+    });
+  });
 
   it("rejects a response of the wrong kind as a protocol violation", async () => {
     const { result, socket } = renderRequest(parametersOf(FIRST));

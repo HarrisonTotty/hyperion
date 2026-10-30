@@ -1,3 +1,4 @@
+import type { SystemRecord } from "@hyperion/protocol";
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
@@ -7,7 +8,13 @@ import { toChartResult } from "../../lib/galaxy/wire";
 import { localFrameAt } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
 import { formatSigned } from "../../lib/format";
-import { aSystemsInRange, ROGUE_PLANET_FE_H_DEX } from "../../test/galaxyFixtures";
+import {
+  anUnknownLayer,
+  anUnknownPopulation,
+  aSystemsInRange,
+  ROGUE_PLANET_FE_H_DEX,
+  withRowFields,
+} from "../../test/galaxyFixtures";
 import { SystemReadout } from "./SystemReadout";
 import type { LineExtinction } from "./useExtinction";
 
@@ -437,5 +444,32 @@ describe("SystemReadout's stale marks (plan 05, P05.T14)", () => {
     expect(state?.querySelector(".stale-slot")).toBeEmptyDOMElement();
     // Muted with the answer it is read from, as a value is, though it takes no mark.
     expect(state?.querySelector(".stale")).not.toBeNull();
+  });
+});
+
+describe("SystemReadout's growing enums (plan 04's reserved list)", () => {
+  /** {@link aSystem}'s row as a newer server sends it, with `fields` in strings this build lacks. */
+  function aNewerSystem(fields: Partial<Pick<SystemRecord, "layer" | "population">>): ChartSystem {
+    const response = aSystemsInRange({
+      centreLy: CENTRE,
+      systems: [{ relLy: [1, 0, 0], layer: "c" }],
+    });
+    const [system] = toChartResult(withRowFields(response, fields)).systems;
+    if (system === undefined) {
+      throw new Error("the fixture built no system");
+    }
+    return system;
+  }
+
+  it("reads a population this build does not know as Missing", () => {
+    const readout = renderReadout(aNewerSystem({ population: anUnknownPopulation() }));
+
+    expect(valueOf(readout, "POPULATION")).toBe("—");
+  });
+
+  it("reads the initial mass of a layer this build does not know as Missing, with no unit", () => {
+    const readout = renderReadout(aNewerSystem({ layer: anUnknownLayer() }));
+
+    expect(valueOf(readout, "INIT MASS")).toBe("—");
   });
 });

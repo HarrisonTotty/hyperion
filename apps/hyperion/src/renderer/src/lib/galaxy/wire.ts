@@ -11,6 +11,8 @@ import {
   type GalacticPosition,
   galacticDeltaLy,
   galacticPositionFromLy,
+  type LayerCensus,
+  type LayerStatus,
   type MassLayer,
   type ObservedDto,
   type Population,
@@ -28,6 +30,10 @@ import type { Vec3 } from "../../geometry/vec3";
 import {
   type CentreLy,
   type ChartKind,
+  type ChartLayer,
+  type ChartLayerLine,
+  type ChartLayerStatus,
+  type ChartPopulation,
   CHART_SYSTEM_LIMIT,
   type ChartCensus,
   type ChartResult,
@@ -41,6 +47,55 @@ import {
 
 /** The origin of the `GALACTIC` frame, from which absolute positions are measured. */
 const ORIGIN: GalacticPosition = { cell_ly: [0, 0, 0], offset_m: [0, 0, 0] };
+
+/** Every mass layer this build knows; one added to the protocol without an entry is a type error. */
+const MASS_LAYERS: Readonly<Record<MassLayer, true>> = {
+  a: true,
+  b: true,
+  c: true,
+  d: true,
+  e: true,
+  brown_dwarf: true,
+  rogue_planet: true,
+};
+
+/** Every stellar population this build knows, likewise. */
+const POPULATIONS: Readonly<Record<Population, true>> = {
+  young_thin_disc: true,
+  old_thin_disc: true,
+  thick_disc: true,
+  bulge: true,
+  long_bar: true,
+  nuclear_disc: true,
+  halo: true,
+};
+
+/** Every layer status this build knows, likewise. */
+const LAYER_STATUSES: Readonly<Record<LayerStatus, true>> = {
+  included: true,
+  over_limit: true,
+  below_mass_floor: true,
+  over_cell_budget: true,
+};
+
+// The three enums grow without a protocol bump (galaxy plan 04's reserved list), and the decoder
+// trusts the generated types, so a newer server's string arrives typed as one this build knows.
+
+function toChartLayer(layer: MassLayer): ChartLayer {
+  return Object.hasOwn(MASS_LAYERS, layer) ? layer : "unknown";
+}
+
+function toChartPopulation(population: Population): ChartPopulation {
+  return Object.hasOwn(POPULATIONS, population) ? population : "unknown";
+}
+
+function toChartLayerStatus(status: LayerStatus): ChartLayerStatus {
+  return Object.hasOwn(LAYER_STATUSES, status) ? status : "unknown";
+}
+
+function toChartLayerLine(line: LayerCensus): ChartLayerLine {
+  return { ...line, layer: toChartLayer(line.layer), status: toChartLayerStatus(line.status) };
+}
 
 function toVec3([x, y, z]: readonly [number, number, number]): Vec3 {
   return { x, y, z };
@@ -73,15 +128,16 @@ function toObservation(centre: GalacticPosition, observed: ObservedDto): Observa
 
 function toChartSystem(centre: GalacticPosition, record: SystemRecord): ChartSystem {
   const relLy = toVec3(galacticDeltaLy(centre, record.position));
+  const layer = toChartLayer(record.layer);
   return {
     id: record.id,
     designation: record.designation,
     relLy,
     distanceLy: Math.hypot(relLy.x, relLy.y, relLy.z),
     positionLy: toVec3(galacticDeltaLy(ORIGIN, record.position)),
-    layer: record.layer,
-    kind: chartKindOf(record.layer),
-    population: record.population,
+    layer,
+    kind: chartKindOf(layer),
+    population: toChartPopulation(record.population),
     initialMassMsun: record.initial_mass_msun,
     ageMyr: record.age_myr,
     // Every chart query asks for the briefs, so a row without one is a system not yet formed, or
@@ -89,7 +145,7 @@ function toChartSystem(centre: GalacticPosition, record: SystemRecord): ChartSys
     star: record.stellar === undefined ? null : toStarBrief(record.stellar),
     // Only a free-floating planet's row carries its metallicity (plan 13, P13.T5.d); any other
     // system's is its summary's.
-    feHDex: record.layer === "rogue_planet" ? (record.fe_h_dex ?? null) : null,
+    feHDex: layer === "rogue_planet" ? (record.fe_h_dex ?? null) : null,
     velocityKmS: toVec3(record.velocity_km_s),
     // Only a row answered in observed mode carries it: one from a server that ignored the mode is
     // the present's, whatever was asked (the port ruling, §6.2).
@@ -112,16 +168,31 @@ function byDistanceThenId(a: ChartSystem, b: ChartSystem): number {
 /**
  * The census the chart reads: complete above the edge the server sent, named with the lightest
  * layer it included, or nothing fitting.
+ *
+ * @remarks
+ * A layer this build does not know has no rank, so it is the lightest only where its band starts
+ * below that of every known layer included.
  */
-function toChartCensus(census: SystemsInRange["census"]): ChartCensus {
-  const aboveMsun = census.complete_above_msun;
+function toChartCensus(
+  aboveMsun: number | null,
+  layers: ReadonlyArray<ChartLayerLine>,
+): ChartCensus {
   if (aboveMsun === null) {
     return { kind: "nothing_fits" };
   }
-  const lightest = census.layers
-    .filter((line) => line.status === "included")
+  const included = layers.filter((line) => line.status === "included");
+  const lightest = included
+    .filter((line) => line.layer !== "unknown")
     .toSorted((a, b) => layerRank(a.layer) - layerRank(b.layer))[0];
-  return { kind: "complete", aboveMsun, layer: lightest?.layer ?? "a" };
+  const lighterUnknown = included.some(
+    (line) =>
+      line.layer === "unknown" && line.mass_min_msun < (lightest?.mass_min_msun ?? Infinity),
+  );
+  return {
+    kind: "complete",
+    aboveMsun,
+    layer: lighterUnknown ? "unknown" : (lightest?.layer ?? "a"),
+  };
 }
 
 /**
@@ -137,13 +208,14 @@ function toChartCensus(census: SystemsInRange["census"]): ChartCensus {
  */
 export function toChartResult(response: SystemsInRange, mode: QueryMode = NOW_MODE): ChartResult {
   const [x, y, z] = galacticDeltaLy(ORIGIN, response.centre);
+  const layers = response.census.layers.map(toChartLayerLine);
   return {
     centreLy: [x, y, z],
     radiusLy: response.radius_ly,
     timeYr: universeTimeToYears(response.time),
     mode,
-    census: toChartCensus(response.census),
-    layers: response.census.layers,
+    census: toChartCensus(response.census.complete_above_msun, layers),
+    layers,
     systems: response.systems
       .map((record) => toChartSystem(response.centre, record))
       .toSorted(byDistanceThenId),
@@ -270,9 +342,10 @@ export function layerIndex(layer: MassLayer): LayerIndex {
 
 /**
  * A mass layer's place from the lightest of all seven: the free-floating planets 0, the brown
- * dwarfs 1, then A to E 2 to 6, the order the census reads from the lightest.
+ * dwarfs 1, then A to E 2 to 6, the order the census reads from the lightest; and 7, after them,
+ * for a layer this build does not know, whose place only its band can say.
  */
-export function layerRank(layer: MassLayer): number {
+export function layerRank(layer: ChartLayer): number {
   let rank: number;
   switch (layer) {
     case "rogue_planet":
@@ -288,12 +361,18 @@ export function layerRank(layer: MassLayer): number {
     case "e":
       rank = 2 + layerIndex(layer);
       break;
+    case "unknown":
+      rank = 7;
+      break;
   }
   return rank;
 }
 
-/** What a layer's objects are: star systems, free-floating brown dwarfs or free-floating planets. */
-export function chartKindOf(layer: MassLayer): ChartKind {
+/**
+ * What a layer's objects are: star systems, free-floating brown dwarfs or free-floating planets, or
+ * not known for a layer this build does not know.
+ */
+export function chartKindOf(layer: ChartLayer): ChartKind {
   let kind: ChartKind;
   switch (layer) {
     case "a":
@@ -309,6 +388,9 @@ export function chartKindOf(layer: MassLayer): ChartKind {
     case "rogue_planet":
       kind = "rogue_planet";
       break;
+    case "unknown":
+      kind = "unknown";
+      break;
   }
   return kind;
 }
@@ -316,10 +398,10 @@ export function chartKindOf(layer: MassLayer): ChartKind {
 /**
  * The letter a layer is named by in the census: `A` to `E` for the stellar layers, and `F` and `G`
  * for the brown dwarfs and the free-floating planets, the letters their designations carry (plan
- * 01's layer letters).
+ * 01's layer letters); `null`, which reads Missing, for a layer this build does not know.
  */
-export function layerLetter(layer: MassLayer): string {
-  let letter: string;
+export function layerLetter(layer: ChartLayer): string | null {
+  let letter: string | null;
   switch (layer) {
     case "a":
     case "b":
@@ -333,6 +415,9 @@ export function layerLetter(layer: MassLayer): string {
       break;
     case "rogue_planet":
       letter = "G";
+      break;
+    case "unknown":
+      letter = null;
       break;
   }
   return letter;

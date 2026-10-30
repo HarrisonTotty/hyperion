@@ -24,9 +24,11 @@ import { toSystemModel } from "../../lib/system/wire";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   anOpenedUniverse,
+  anUnknownLayer,
   aSystemsInRange,
   aUniverse,
   aUniverseList,
+  withRowFields,
 } from "../../test/galaxyFixtures";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import {
@@ -67,8 +69,11 @@ async function server(play: () => void): Promise<void> {
   });
 }
 
-/** Renders the console, opens SURVEY 1 and charts two systems, 10 and 20 ly from the centre. */
-async function renderCharted() {
+/**
+ * Renders the console, opens SURVEY 1 and charts `answer`: by default two systems, 10 and 20 ly
+ * from the centre.
+ */
+async function renderCharted(answer: () => ResponseFor<"systems_in_range"> = aChartAnswer) {
   const user = userEvent.setup();
   stubCanvas();
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
@@ -91,7 +96,7 @@ async function renderCharted() {
   await user.type(screen.getByRole("textbox", { name: "X" }), "26000");
   await user.click(screen.getByRole("button", { name: "C CENTRE CHART" }));
   await server(() => {
-    socket.serverAnswers("systems_in_range", aChartAnswer);
+    socket.serverAnswers("systems_in_range", answer);
   });
   return { user, socket };
 }
@@ -670,5 +675,18 @@ describe("the GALAXY readout's free-floating objects (plan 13, P13.T8.d)", () =>
     expect(valueOf("MASS")).toBe("0.050 M");
     const open = within(systemsPanel()).getByRole("button", { name: "OPEN SYSTEM" });
     expect(open).toHaveAccessibleDescription("BODIES NOT YET MODELLED");
+  });
+});
+
+describe("the GALAXY readout's objects of a layer this build does not know (plan 04's reserved list)", () => {
+  it("offers OPEN SYSTEM for one, leaving the server to answer for what it has", async () => {
+    const { user } = await renderCharted(() =>
+      withRowFields(aChartAnswer(), { layer: anUnknownLayer() }, 1),
+    );
+
+    await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/u }));
+
+    const open = within(systemsPanel()).getByRole("button", { name: "OPEN SYSTEM" });
+    expect(open).not.toHaveAttribute("aria-disabled", "true");
   });
 });

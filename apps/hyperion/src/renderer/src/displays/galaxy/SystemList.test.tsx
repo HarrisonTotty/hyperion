@@ -5,7 +5,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ChartSystem } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
-import { aStellarBrief, aSystemsInRange } from "../../test/galaxyFixtures";
+import {
+  anUnknownLayer,
+  aStellarBrief,
+  aSystemsInRange,
+  withRowFields,
+} from "../../test/galaxyFixtures";
 import { stylesheetRule } from "../../test/stylesheet";
 import { SystemList } from "./SystemList";
 
@@ -410,5 +415,36 @@ describe("SystemList's free-floating objects (plan 13, P13.T8.d)", () => {
     expect(within(row).getByText("PLANET")).toBeInTheDocument();
     expect(within(row).getByText("—")).toBeInTheDocument();
     expect(within(row).getByRole("img", { name: "Earth masses" })).toBeInTheDocument();
+  });
+});
+
+describe("SystemList's layers this build does not know (plan 04's reserved list)", () => {
+  it("lists an object of one with its mass Missing, and leaves the mass out of its name", () => {
+    stubViewport();
+    const response = aSystemsInRange({
+      centreLy: CENTRE,
+      systems: [{ relLy: [1, 0, 0], layer: "a" }],
+    });
+    const { systems } = toChartResult(withRowFields(response, { layer: anUnknownLayer() }));
+
+    renderList(systems);
+
+    const row = screen.getByRole("option", { name: /^H7K 4C0RFZ A-1, .+, 1\.00 ly, IN RANGE$/u });
+    expect(within(row).getByText("—")).toHaveClass("readout__missing");
+  });
+
+  it("names one with no brief by its designation and distance alone, not as not yet formed", () => {
+    stubViewport();
+    const response = aSystemsInRange({
+      centreLy: CENTRE,
+      systems: [{ relLy: [1, 0, 0], layer: "a", stellar: null }],
+    });
+    const { systems } = toChartResult(withRowFields(response, { layer: anUnknownLayer() }));
+
+    renderList(systems);
+
+    expect(
+      screen.getByRole("option", { name: "H7K 4C0RFZ A-1, 1.00 ly, IN RANGE" }),
+    ).toBeInTheDocument();
   });
 });

@@ -8,6 +8,7 @@ import type { ServerMessage } from "./generated/ServerMessage";
 import type { SubscriptionTopic } from "./generated/SubscriptionTopic";
 import type { UniverseIdHex } from "./generated/UniverseIdHex";
 import {
+  isErrorCode,
   type StateOf,
   type Subscription,
   SubscriptionTable,
@@ -33,14 +34,37 @@ export type ResponseFor<K extends RequestKind> = Extract<ResponseBody, { kind: K
  * and `protocol_violation` when the server answered with a response of another kind. A request
  * answered in bulk that the client could not take also fails as `internal`, which the client
  * decides then, in the server's error's shape and marked as its own ({@link BulkAssemblyFailure}).
+ * A server's error with a code this build does not know is `unknown` ({@link UnknownRequestError}).
  */
 export type RequestFailure =
   | RequestError
   | BulkAssemblyFailure
+  | UnknownRequestError
   | {
       readonly code: "link_lost" | "aborted" | "superseded" | "protocol_violation";
       readonly message: string;
     };
+
+/**
+ * A server's request error whose code this build does not know, as a newer server may send:
+ * `ErrorCode` grows without a protocol bump (galaxy plan 04's reserved list). The server's message
+ * and field are kept, and the code it sent apart from them.
+ */
+export interface UnknownRequestError {
+  readonly code: "unknown";
+  /** The code as the server sent it, which this build cannot act on. */
+  readonly serverCode: string;
+  readonly message: string;
+  readonly field: string | null;
+}
+
+/** A server's request error as the client reads it: `unknown` for a code this build does not know. */
+function serverFailure(error: RequestError): RequestError | UnknownRequestError {
+  // The decoder trusts the generated types, so a newer server's code arrives typed as a known one.
+  return isErrorCode(error.code)
+    ? error
+    : { code: "unknown", serverCode: error.code, message: error.message, field: error.field };
+}
 
 /**
  * A request answered in bulk that the client could not take, in the server's error's shape
@@ -522,7 +546,7 @@ export class RequestClient {
         break;
       case "request_error":
         this.#bulk.discard(message.id);
-        this.#take(message.id)?.fail(message.error);
+        this.#take(message.id)?.fail(serverFailure(message.error));
         break;
       case "notification":
         this.#subscriptions.route(message);

@@ -367,12 +367,14 @@ export function SystemReadout({
   );
   const formed = stars !== null && stars.formed ? stars : null;
   const primary = formed?.hosts[0] ?? null;
+  // A mass is read in its layer's unit, so both are Missing for a layer this build does not know.
+  const layer = system === null || system.layer === "unknown" ? null : system.layer;
   const initialMass =
-    system === null ? null : formatSubstellarMass(system.initialMassMsun, system.layer);
+    system === null || layer === null ? null : formatSubstellarMass(system.initialMassMsun, layer);
   const mass =
-    system === null || primary === null || primary.kind === "no_remnant"
+    layer === null || primary === null || primary.kind === "no_remnant"
       ? null
-      : formatSubstellarMass(primary.massMsun, system.layer);
+      : formatSubstellarMass(primary.massMsun, layer);
   // A free-floating planet's bulk properties are plan 14's (plan 13, design note 12).
   // `BULK` for a formed planet, `STATE` for one not yet formed (the orchestrator's ruling 134.2).
   let planetRow: { readonly label: string; readonly value: string } | null = null;
@@ -523,7 +525,11 @@ export function SystemReadout({
             />
             <Reading
               label="POPULATION"
-              value={system === null ? null : populationLabel(system.population)}
+              value={
+                system === null || system.population === "unknown"
+                  ? null
+                  : populationLabel(system.population)
+              }
               wide
               stale={stale}
             />

@@ -7,7 +7,7 @@
  * offsets from the chart centre along the galactic axes, and its labels the text the view draws
  * beside each curve.
  */
-import type { LayerCensus, LayerStatus, MassLayer, ObjectKindDto } from "@hyperion/protocol";
+import type { MassLayer, ObjectKindDto } from "@hyperion/protocol";
 
 import {
   formatNumber,
@@ -17,6 +17,9 @@ import {
 } from "../../lib/format";
 import {
   type ChartCensus,
+  type ChartLayer,
+  type ChartLayerLine,
+  type ChartLayerStatus,
   type ChartResult,
   type ChartSystem,
   type LayerIndex,
@@ -388,7 +391,9 @@ export function toScene(result: ChartResult, options: ChartSceneOptions): Spatia
     label: `QUERY EDGE ${formatChartLengthLy(result.radiusLy)} ly`,
   });
   const drawn = filterSystems(result.systems, starFilter).flatMap((system) => {
-    const mark = toMark(system, driveRangeLy, layerIndex(system.layer));
+    // An object of a layer this build does not know has no size class: listed, and not drawn.
+    const mark =
+      system.layer === "unknown" ? null : toMark(system, driveRangeLy, layerIndex(system.layer));
     return mark === null ? [] : [{ system, mark }];
   });
   const mode = answeredMode(result);
@@ -442,8 +447,11 @@ export type CensusLine =
       readonly kind: "complete";
       readonly text: string;
       readonly aboveMsun: number;
-      /** The edge as it is written, in the unit of the lightest layer included. */
-      readonly above: ReturnType<typeof formatSubstellarMass>;
+      /**
+       * The edge as it is written, in the unit of the lightest layer included; `null`, which reads
+       * Missing, where that layer is one this build does not know.
+       */
+      readonly above: ReturnType<typeof formatSubstellarMass> | null;
     }
   | { readonly kind: "nothing_fits"; readonly text: string };
 
@@ -464,7 +472,8 @@ export function censusLine(census: ChartCensus): CensusLine {
         kind: "complete",
         text: "COMPLETE ABOVE",
         aboveMsun: census.aboveMsun,
-        above: formatSubstellarMass(census.aboveMsun, census.layer),
+        above:
+          census.layer === "unknown" ? null : formatSubstellarMass(census.aboveMsun, census.layer),
       };
       break;
     case "nothing_fits":
@@ -481,11 +490,11 @@ export function censusLine(census: ChartCensus): CensusLine {
  * A layer over the census limit is a dense region, where the brainstorm's range query prefers a
  * smaller radius to a higher mass floor; a layer over the server's cell budget is a large volume.
  */
-export function censusHint(layers: ReadonlyArray<LayerCensus>): string | null {
+export function censusHint(layers: ReadonlyArray<ChartLayerLine>): string | null {
   let dense = false;
   let large = false;
   for (const layer of layers) {
-    const status: LayerStatus = layer.status;
+    const status: ChartLayerStatus = layer.status;
     switch (status) {
       case "over_limit":
         dense = true;
@@ -493,8 +502,10 @@ export function censusHint(layers: ReadonlyArray<LayerCensus>): string | null {
       case "over_cell_budget":
         large = true;
         break;
+      // A status this build does not know says nothing it could act on.
       case "included":
       case "below_mass_floor":
+      case "unknown":
         break;
     }
   }
@@ -519,7 +530,7 @@ export interface LayerBand {
 const STELLAR_LAYER_COUNT = 5;
 
 /** Whether a layer is one of the two substellar ones plan 13 adds. */
-function isSubstellar(layer: MassLayer): boolean {
+function isSubstellar(layer: ChartLayer): boolean {
   return layer === "brown_dwarf" || layer === "rogue_planet";
 }
 
@@ -527,7 +538,7 @@ function isSubstellar(layer: MassLayer): boolean {
  * Whether a census lists the substellar layers as a query can ask for them: none, the brown dwarfs,
  * or the brown dwarfs and the free-floating planets, each once (plan 13, P13.T7).
  */
-function substellarLinesUsable(layers: ReadonlyArray<LayerCensus>): boolean {
+function substellarLinesUsable(layers: ReadonlyArray<ChartLayerLine>): boolean {
   const brown = layers.filter((line) => line.layer === "brown_dwarf").length;
   const rogue = layers.filter((line) => line.layer === "rogue_planet").length;
   return brown <= 1 && rogue <= 1 && (rogue === 0 || brown === 1);
@@ -543,20 +554,25 @@ function substellarLinesUsable(layers: ReadonlyArray<LayerCensus>): boolean {
  * the band table. A census that does not list every layer is an unusable answer, not a bug in the
  * client, so it is reported rather than thrown: see {@link chartDataFault}. The substellar lines,
  * which a query lowered to them adds after E, are not size bands: their objects are drawn at layer
- * A's size (plan 13, design note 15), and their floors are {@link SUBSTELLAR_FLOORS}.
+ * A's size (plan 13, design note 15), and their floors are {@link SUBSTELLAR_FLOORS}. Nor is a
+ * line of a layer this build does not know, which a newer server may send beside the five.
  */
-export function layerBands(layers: ReadonlyArray<LayerCensus>): ReadonlyArray<LayerBand> | null {
+export function layerBands(layers: ReadonlyArray<ChartLayerLine>): ReadonlyArray<LayerBand> | null {
   if (!substellarLinesUsable(layers)) {
     return null;
   }
-  const bands = layers
-    .filter((layer) => !isSubstellar(layer.layer))
-    .map((layer): LayerBand => ({
-      layer: layer.layer,
-      index: layerIndex(layer.layer),
-      minMsun: layer.mass_min_msun,
-      maxMsun: layer.mass_max_msun,
-    }));
+  const bands = layers.flatMap((line): ReadonlyArray<LayerBand> =>
+    line.layer === "unknown" || isSubstellar(line.layer)
+      ? []
+      : [
+          {
+            layer: line.layer,
+            index: layerIndex(line.layer),
+            minMsun: line.mass_min_msun,
+            maxMsun: line.mass_max_msun,
+          },
+        ],
+  );
   const seen = new Set(bands.map((band) => band.index));
   if (bands.length !== STELLAR_LAYER_COUNT || seen.size !== STELLAR_LAYER_COUNT) {
     return null;
@@ -587,11 +603,26 @@ export const SUBSTELLAR_FLOORS: ReadonlyArray<SubstellarFloor> = [
   { layer: "brown_dwarf", minMsun: 13 / MJUP_PER_MSUN },
 ];
 
-/** The census lines of a chart, lightest layer first, as the census table lists them. */
+/**
+ * The census lines of a chart, lightest layer first, as the census table lists them.
+ *
+ * @remarks
+ * A layer this build does not know has no rank, so its line stands by its band: before the first
+ * line whose band starts above its own.
+ */
 export function censusLinesLightestFirst(
-  layers: ReadonlyArray<LayerCensus>,
-): ReadonlyArray<LayerCensus> {
-  return layers.toSorted((a, b) => layerRank(a.layer) - layerRank(b.layer));
+  layers: ReadonlyArray<ChartLayerLine>,
+): ReadonlyArray<ChartLayerLine> {
+  const lines = layers
+    .filter((line) => line.layer !== "unknown")
+    .toSorted((a, b) => layerRank(a.layer) - layerRank(b.layer));
+  for (const line of layers) {
+    if (line.layer === "unknown") {
+      const above = lines.findIndex((each) => each.mass_min_msun > line.mass_min_msun);
+      lines.splice(above === -1 ? lines.length : above, 0, line);
+    }
+  }
+  return lines;
 }
 
 /**

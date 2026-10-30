@@ -1,4 +1,3 @@
-import type { LayerCensus, LayerStatus } from "@hyperion/protocol";
 import { type ReactNode, useId, useRef } from "react";
 
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
@@ -14,7 +13,12 @@ import {
   formatSci,
   formatSubstellarMass,
 } from "../../lib/format";
-import type { ChartResult, ChartSystem } from "../../lib/galaxy/model";
+import type {
+  ChartLayerLine,
+  ChartLayerStatus,
+  ChartResult,
+  ChartSystem,
+} from "../../lib/galaxy/model";
 import { layerLetter } from "../../lib/galaxy/wire";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import type { RequestState } from "../../lib/useServerRequest";
@@ -30,9 +34,12 @@ import {
 } from "./chartModel";
 import { usePageTabFocus } from "./pageTabFocus";
 
+/** A value of the census table that is Missing: a layer, band or status this build does not know. */
+const MISSING = <span className="readout__missing">—</span>;
+
 /** What a layer's line in the census table says about the layer, in words. */
-function statusWords(status: LayerStatus): string {
-  let words: string;
+function statusWords(status: ChartLayerStatus): ReactNode {
+  let words: ReactNode;
   switch (status) {
     case "included":
       words = "INCLUDED";
@@ -45,6 +52,9 @@ function statusWords(status: LayerStatus): string {
       break;
     case "over_cell_budget":
       words = "OVER CELL BUDGET";
+      break;
+    case "unknown":
+      words = MISSING;
       break;
   }
   return words;
@@ -86,14 +96,15 @@ const SPAN = " – ";
 
 /** Props of {@link Band}. */
 interface BandProps {
-  readonly line: LayerCensus;
+  readonly line: ChartLayerLine;
 }
 
 /**
  * A layer's band as the table writes it, one span with one unit, the header's `M☉` but for the
  * free-floating planets': the stellar layers' exact edges (`0.08 – 0.5`), the brown dwarfs' 13
  * Jupiter masses to three decimals up to the stars' `0.08` (`0.012 – 0.08`), and the planets' in
- * Earth masses with their drawn `M⊕` (`0.33 – 4132 M⊕`; plan 13, design note 14).
+ * Earth masses with their drawn `M⊕` (`0.33 – 4132 M⊕`; plan 13, design note 14). The band of a
+ * layer this build does not know is Missing, since its unit and precision are not known.
  */
 function Band({ line }: BandProps) {
   let band: ReactNode;
@@ -118,12 +129,23 @@ function Band({ line }: BandProps) {
         </>
       );
       break;
+    case "unknown":
+      band = MISSING;
+      break;
   }
   return band;
 }
 
+/**
+ * A key for a census line: its layer, or for a layer this build does not know, which every such
+ * line shares, its band's lower edge as well, since no two layers' bands share one.
+ */
+function lineKey(line: ChartLayerLine): string {
+  return line.layer === "unknown" ? `unknown ${line.mass_min_msun}` : line.layer;
+}
+
 interface CensusTableProps {
-  readonly layers: ReadonlyArray<LayerCensus>;
+  readonly layers: ReadonlyArray<ChartLayerLine>;
 }
 
 /**
@@ -147,8 +169,8 @@ function CensusTable({ layers }: CensusTableProps) {
       </thead>
       <tbody>
         {censusLinesLightestFirst(layers).map((layer) => (
-          <tr key={layer.layer}>
-            <th scope="row">{layerLetter(layer.layer)}</th>
+          <tr key={lineKey(layer)}>
+            <th scope="row">{layerLetter(layer.layer) ?? MISSING}</th>
             <td className="census-table__band">
               <Band line={layer} />
             </td>
@@ -163,7 +185,7 @@ function CensusTable({ layers }: CensusTableProps) {
 }
 
 interface CensusByLayerProps {
-  readonly layers: ReadonlyArray<LayerCensus>;
+  readonly layers: ReadonlyArray<ChartLayerLine>;
   readonly id: string;
   readonly hidden: boolean;
 }
@@ -325,8 +347,9 @@ export function CensusReadout({
             >
               {line.kind === "complete" ? (
                 <>
-                  {line.text} <MassWithUnit mass={line.above} />
-                  {stale ? <StaleMark /> : null}
+                  {line.text} {line.above === null ? MISSING : <MassWithUnit mass={line.above} />}
+                  {/* The em dash has no last value, so it takes no mark. */}
+                  {stale && line.above !== null ? <StaleMark /> : null}
                 </>
               ) : (
                 <StatusText text={line.text} />

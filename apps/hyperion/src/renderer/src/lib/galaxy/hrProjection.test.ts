@@ -2,7 +2,12 @@ import type { MassLayer, ObjectKindDto, StellarBriefDto } from "@hyperion/protoc
 import { describe, expect, it } from "vitest";
 
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
-import { aStellarBrief, aSystemsInRange } from "../../test/galaxyFixtures";
+import {
+  anUnknownLayer,
+  aStellarBrief,
+  aSystemsInRange,
+  withRowFields,
+} from "../../test/galaxyFixtures";
 import {
   HR_SPECTRAL_BANDS,
   hrDrawList,
@@ -153,7 +158,21 @@ describe("projectHr", () => {
       notYetFormed: 1,
       planet: 0,
       dataInvalid: 0,
+      unlistedLayer: 0,
     });
+  });
+
+  it("counts an object of a layer this build does not know apart, without plotting it", () => {
+    const response = aSystemsInRange({
+      systems: [
+        { relLy: [1, 0, 0], layer: "c" },
+        { relLy: [2, 0, 0], layer: "c" },
+      ],
+    });
+    const { systems } = toChartResult(withRowFields(response, { layer: anUnknownLayer() }, 1));
+    const projection = projectHr(systems, AREA, 50);
+
+    expect([projection.points.length, projection.counts.unlistedLayer]).toEqual([1, 1]);
   });
 
   it("counts a star whose temperature or luminosity is missing as invalid rather than hide it", () => {

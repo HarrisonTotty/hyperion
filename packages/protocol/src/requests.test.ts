@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ClientMessage } from "./generated/ClientMessage";
+import type { ErrorCode } from "./generated/ErrorCode";
 import type { ResponseBody } from "./generated/ResponseBody";
 import type { UniverseInfo } from "./generated/UniverseInfo";
 import {
@@ -96,6 +97,31 @@ describe("RequestClient", () => {
     expect(await pending.outcome).toEqual({
       ok: false,
       error: { code: "unknown_universe", message: "no such universe", field: null },
+    });
+  });
+
+  it("fails as unknown a server error whose code this build does not know, keeping the server's word", async () => {
+    const { client } = recordingClient();
+    // `ErrorCode` grows without a protocol bump (galaxy plan 04's reserved list), and the decoder
+    // trusts the generated types, as the test does where it plays a newer server.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const newer = "universe_archived" as ErrorCode;
+
+    const pending = client.request({ kind: "open_universe", universe: UNIVERSE });
+    client.handleServerMessage({
+      type: "request_error",
+      id: 1,
+      error: { code: newer, message: "the universe is archived", field: "universe" },
+    });
+
+    expect(await pending.outcome).toEqual({
+      ok: false,
+      error: {
+        code: "unknown",
+        serverCode: "universe_archived",
+        message: "the universe is archived",
+        field: "universe",
+      },
     });
   });
 

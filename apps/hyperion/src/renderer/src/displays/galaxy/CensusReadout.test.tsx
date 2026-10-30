@@ -6,7 +6,12 @@ import { useState } from "react";
 import type { ChartResult } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
 import { PENDING, type RequestState } from "../../lib/useServerRequest";
-import { aSystemsInRange } from "../../test/galaxyFixtures";
+import {
+  anUnknownLayerLine,
+  anUnknownLayerStatus,
+  aSystemsInRange,
+  withCensusLine,
+} from "../../test/galaxyFixtures";
 import { announcements } from "../../test/liveRegions";
 import { CensusReadout } from "./CensusReadout";
 import { filterSystems, type StarFilter } from "./chartModel";
@@ -488,5 +493,68 @@ describe("CensusReadout's substellar layers (plan 13, P13.T8.c)", () => {
     expect(
       planets && within(planets).getByRole("img", { name: "Earth masses" }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("CensusReadout's growing enums (plan 04's reserved list)", () => {
+  /** The census table's rows, below its head, once opened. */
+  async function tableRows(result: ChartResult): Promise<ReadonlyArray<HTMLElement>> {
+    const user = userEvent.setup();
+    renderReadout(result);
+    await user.click(screen.getByRole("button", { name: "CENSUS BY LAYER" }));
+    return within(screen.getByRole("table")).getAllByRole("row").slice(1);
+  }
+
+  it("reads a layer this build does not know as Missing, placed by its band", async () => {
+    // Its band, 1.0E-9 to 1.0E-6 M☉, starts below layer A's, so it is listed first.
+    const rows = await tableRows(
+      toChartResult(withCensusLine(aSystemsInRange({ centreLy: CENTRE }), anUnknownLayerLine())),
+    );
+
+    expect(rows).toHaveLength(6);
+    expect(rowText(rows, 0)).toEqual(["—", "—", "2.4", "2", "INCLUDED"]);
+    expect(rowText(rows, 1)[0]).toBe("A");
+    const [letter, band] = rows[0] === undefined ? [] : within(rows[0]).getAllByText("—");
+    expect(letter).toHaveClass("readout__missing");
+    expect(band).toHaveClass("readout__missing");
+  });
+
+  it("lists a layer this build does not know after a lighter known one", async () => {
+    const heavy = { ...anUnknownLayerLine(), mass_min_msun: 150, mass_max_msun: 300 };
+    const rows = await tableRows(
+      toChartResult(withCensusLine(aSystemsInRange({ centreLy: CENTRE }), heavy)),
+    );
+
+    expect(rows.map((_, index) => rowText(rows, index)[0])).toEqual(["A", "B", "C", "D", "E", "—"]);
+  });
+
+  it("reads a status this build does not know as Missing", async () => {
+    const line = anUnknownLayerLine(anUnknownLayerStatus());
+    const rows = await tableRows(
+      toChartResult(withCensusLine(aSystemsInRange({ centreLy: CENTRE }), line)),
+    );
+    const [status] = rows[0] === undefined ? [] : within(rows[0]).getAllByRole("cell").slice(-1);
+
+    expect(rowText(rows, 0)[4]).toBe("—");
+    expect(status && within(status).getByText("—")).toHaveClass("readout__missing");
+  });
+
+  it("reads the census's edge as Missing where such a layer is the lightest included", () => {
+    renderReadout(
+      toChartResult(withCensusLine(aSystemsInRange({ centreLy: CENTRE }), anUnknownLayerLine())),
+    );
+
+    expect(summary()).toHaveTextContent("COMPLETE ABOVE —");
+    expect(within(summary()).getByText("—")).toHaveClass("readout__missing");
+  });
+
+  it("puts no S after a Missing edge, which has no last value", () => {
+    renderReadout(
+      toChartResult(withCensusLine(aSystemsInRange({ centreLy: CENTRE }), anUnknownLayerLine())),
+      undefined,
+      { stale: true },
+    );
+
+    expect(screen.getByText(/COMPLETE ABOVE/u)).toHaveTextContent(/^COMPLETE ABOVE —$/u);
   });
 });

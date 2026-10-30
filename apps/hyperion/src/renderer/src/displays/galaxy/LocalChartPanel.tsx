@@ -174,6 +174,8 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
             ?.mass_min_msun ?? null
         }
         observed={answered?.kind === "observed"}
+        // Of the systems the `STARS` filter shows, as the list and the HR diagram read them.
+        unlistedLayer={chart.systems.some((system) => system.kind === "unknown")}
       />
     </div>
   );

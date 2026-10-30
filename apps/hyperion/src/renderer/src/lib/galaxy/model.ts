@@ -4,10 +4,17 @@
  * @remarks
  * Wire shapes stop at `wire.ts`, which builds these types from plan 04's responses (plan 05,
  * design note D8), so that the rest of the client never reads a wire field name. The census's
- * layers are the one wire type passed through, since they are already a table.
+ * layers are the one wire type passed through, since they are already a table, with only their
+ * layer and status read into the model's own.
+ *
+ * A mass layer, a population and a layer's status are of enums plan 04 names as growing, which a
+ * newer server may send a new string of without a protocol bump. Each therefore has an `unknown`
+ * arm here, which `wire.ts` gives a string this build does not know and every reader shows as
+ * Missing, so that the switches over them stay exhaustive.
  */
 import type {
   LayerCensus,
+  LayerStatus,
   MassLayer,
   ObjectKindDto,
   Population,
@@ -114,11 +121,27 @@ export interface Observation {
  */
 export type LayerIndex = 0 | 1 | 2 | 3 | 4;
 
+/** A mass layer as the chart reads it: plan 04's, or `unknown` for one this build does not know. */
+export type ChartLayer = MassLayer | "unknown";
+
+/** A stellar population as the chart reads it: plan 04's, or `unknown` for one this build does not know. */
+export type ChartPopulation = Population | "unknown";
+
+/** A layer's status as the chart reads it: plan 04's, or `unknown` for one this build does not know. */
+export type ChartLayerStatus = LayerStatus | "unknown";
+
+/** One layer's line of a chart's census: the wire's, with its layer and status read. */
+export interface ChartLayerLine extends Readonly<Omit<LayerCensus, "layer" | "status">> {
+  readonly layer: ChartLayer;
+  readonly status: ChartLayerStatus;
+}
+
 /**
  * What a chart's object is, as its layer says (plan 13, design note 10): a star system, a
- * free-floating brown dwarf, or a free-floating planet, which has no stellar state (P13.T5.d).
+ * free-floating brown dwarf, or a free-floating planet, which has no stellar state (P13.T5.d); or
+ * `unknown`, for an object of a layer this build does not know, which is listed and not drawn.
  */
-export type ChartKind = "stellar" | "brown_dwarf" | "rogue_planet";
+export type ChartKind = "stellar" | "brown_dwarf" | "rogue_planet" | "unknown";
 
 /**
  * What a chart knows of a system's primary at the chart's time, from the range query's brief (plan
@@ -158,10 +181,10 @@ export interface ChartSystem {
   readonly distanceLy: number;
   /** Position in the `GALACTIC` frame, for the readout's cylindrical coordinates. */
   readonly positionLy: Vec3;
-  readonly layer: MassLayer;
+  readonly layer: ChartLayer;
   /** What it is, from its layer. */
   readonly kind: ChartKind;
-  readonly population: Population;
+  readonly population: ChartPopulation;
   /** Initial mass of the primary star, or a free-floating object's mass, in M☉. */
   readonly initialMassMsun: number;
   /** Its age at the chart's time; zero or less for one not yet formed. */
@@ -221,11 +244,13 @@ export function isFormedPlanet(system: ChartSystem): boolean {
  *
  * @remarks
  * `complete` above the lower mass edge of the lightest layer returned, which is also named, since a
- * free-floating planet's edge is written in Earth masses (plan 13, design note 14); `nothing_fits`
- * when no layer fits the census limit, which is an answer with no systems, not an error.
+ * free-floating planet's edge is written in Earth masses (plan 13, design note 14), or `unknown`
+ * when a layer this build does not know is the lightest included, so that no unit is known for the
+ * edge; `nothing_fits` when no layer fits the census limit, which is an answer with no systems, not
+ * an error.
  */
 export type ChartCensus =
-  | { readonly kind: "complete"; readonly aboveMsun: number; readonly layer: MassLayer }
+  | { readonly kind: "complete"; readonly aboveMsun: number; readonly layer: ChartLayer }
   | { readonly kind: "nothing_fits" };
 
 /** A range query's answer, ready to chart. */
@@ -247,7 +272,7 @@ export interface ChartResult {
    * The census of the five stellar layers, A to E, then the substellar layers the query asked for,
    * for the legend and the census table.
    */
-  readonly layers: ReadonlyArray<LayerCensus>;
+  readonly layers: ReadonlyArray<ChartLayerLine>;
   /** Every system returned, nearest first, ties by ID. */
   readonly systems: ReadonlyArray<ChartSystem>;
 }

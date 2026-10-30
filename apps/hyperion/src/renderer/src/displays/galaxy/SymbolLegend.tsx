@@ -26,6 +26,11 @@ interface SymbolLegendProps {
    * apparent positions (plan 12, P12.T11); `false` when absent.
    */
   readonly observed?: boolean;
+  /**
+   * Whether the systems shown, those the `STARS` filter passes, hold an object of a mass layer this
+   * build does not know, listed and not drawn; `false` when absent.
+   */
+  readonly unlistedLayer?: boolean;
 }
 
 /** The observer's eye as the chart draws it, open, at its 1 rem width. */
@@ -102,6 +107,7 @@ export function SymbolLegend({
   bands,
   brownDwarfFloorMsun = null,
   observed = false,
+  unlistedLayer = false,
 }: SymbolLegendProps) {
   const lightest = bands?.[0];
   const heaviest = bands?.at(-1);
@@ -112,7 +118,7 @@ export function SymbolLegend({
     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
     <div className="symbol-legend" role="group" aria-label="Chart legend">
       <p className="symbol-legend__item">SYMBOLS NOT TO SCALE</p>
-      <StarShapeLegend compactRemnants planets />
+      <StarShapeLegend compactRemnants planets unlistedLayer={unlistedLayer} />
       {lightest === undefined || heaviest === undefined ? null : (
         <p className="symbol-legend__item">
           INIT MASS <SolarMassUnit />{" "}

@@ -45,6 +45,42 @@ export function anUnknownUnit(name = "furlongs"): Unit {
   return name as Unit;
 }
 
+/** A mass layer this build does not know, typed as the decoder types it, as {@link anUnknownUnit} is. */
+export function anUnknownLayer(name = "planetesimal"): MassLayer {
+  // The decoder's own trust at the wire, made where the test plays a newer server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as MassLayer;
+}
+
+/** A stellar population this build does not know, typed as the decoder types it. */
+export function anUnknownPopulation(name = "outer_halo"): Population {
+  // The decoder's own trust at the wire, made where the test plays a newer server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as Population;
+}
+
+/** A layer status this build does not know, typed as the decoder types it. */
+export function anUnknownLayerStatus(name = "over_time_budget"): LayerStatus {
+  // The decoder's own trust at the wire, made where the test plays a newer server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as LayerStatus;
+}
+
+/**
+ * A census line of a layer this build does not know ({@link anUnknownLayer}), lighter than every
+ * layer it knows: 1.0E-9 to 1.0E-6 M☉, 2 of 2.4 expected returned.
+ */
+export function anUnknownLayerLine(status: LayerStatus = "included"): LayerCensus {
+  return {
+    layer: anUnknownLayer(),
+    mass_min_msun: 1e-9,
+    mass_max_msun: 1e-6,
+    expected: 2.4,
+    returned: status === "included" ? 2 : 0,
+    status,
+  };
+}
+
 /** The stellar layers from the lightest, as the census lists them. */
 export const LAYERS: ReadonlyArray<MassLayer> = ["a", "b", "c", "d", "e"];
 
@@ -971,5 +1007,43 @@ export function aSystemsInRange({
     time: universeTimeFromYears(timeYr),
     census: aCensus({ minLayer, overLimit, overCellBudget, returned, limit }),
     systems: records,
+  };
+}
+
+/**
+ * `response` as a newer server might send it, with `fields` on its first `count` rows, every row
+ * when absent: strings this build does not know, such as {@link anUnknownLayer}'s.
+ */
+export function withRowFields(
+  response: ResponseFor<"systems_in_range">,
+  fields: Partial<Pick<SystemRecord, "layer" | "population">>,
+  count = response.systems.length,
+): ResponseFor<"systems_in_range"> {
+  const systems: SystemRecord[] = [];
+  for (const [index, row] of response.systems.entries()) {
+    systems.push(index < count ? { ...row, ...fields } : row);
+  }
+  return { ...response, systems };
+}
+
+/**
+ * `response` as a newer server might send it, with `line` after its census's own lines and, where
+ * `line` is included and lighter than every layer before it, the census complete above `line`'s
+ * lower edge.
+ */
+export function withCensusLine(
+  response: ResponseFor<"systems_in_range">,
+  line: LayerCensus,
+): ResponseFor<"systems_in_range"> {
+  const { census } = response;
+  const lighter =
+    line.status === "included" && line.mass_min_msun < (census.complete_above_msun ?? Infinity);
+  return {
+    ...response,
+    census: {
+      ...census,
+      complete_above_msun: lighter ? line.mass_min_msun : census.complete_above_msun,
+      layers: [...census.layers, line],
+    },
   };
 }

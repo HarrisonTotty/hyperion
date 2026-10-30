@@ -72,8 +72,10 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
   const { result, fault, stale } = chart;
   const selected = chart.selected;
   const bands = chart.bands;
-  // A free-floating object has no system to open until plan 14 gives it bodies (P14.T27).
-  const freeFloating = selected !== null && selected.kind !== "stellar";
+  // A free-floating object has no system to open until plan 14 gives it bodies (P14.T27). An object
+  // of a layer this build does not know is offered, and the server answers for what it has.
+  const freeFloating =
+    selected !== null && (selected.kind === "brown_dwarf" || selected.kind === "rogue_planet");
   const target =
     open === null || result === null || selected === null || bands === null || freeFloating
       ? null

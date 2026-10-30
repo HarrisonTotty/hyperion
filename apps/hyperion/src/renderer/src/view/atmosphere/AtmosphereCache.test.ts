@@ -6,7 +6,7 @@
  * the optics pool's place, a fake tables factory and fake timers; the last test runs the real pool
  * on in-process workers.
  */
-import type { BodyIdHex } from "@hyperion/protocol";
+import type { BodyIdHex, ErrorCode } from "@hyperion/protocol";
 import {
   afterEach,
   beforeEach,
@@ -814,6 +814,24 @@ describe("a body_detail the cache cannot draw", () => {
       ]);
     },
   );
+
+  it("refused with a code this build does not know gives the rejected problem as a fault, with no log", async () => {
+    const h = harness();
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    note(h, [lit(A)]);
+    // `ErrorCode` grows without a protocol bump (galaxy plan 04's reserved list), and the decoder
+    // trusts the generated types, as the test does where it plays a newer server.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const code = "body_archived" as ErrorCode;
+    h.seam.refuse(h.seam.latestFor(A).id, code, "the body is archived");
+    await microtasks();
+    const report = note(h, [lit(A)]);
+    expect([h.cache.entryOf(A), report.problems.get(A), errors.mock.calls.length]).toEqual([
+      null,
+      { kind: "rejected", code: "unknown", message: "the body is archived", refusal: false },
+      0,
+    ]);
+  });
 
   it("drops what was drawn when a re-request is refused, disposing its tables", async () => {
     const h = harness();

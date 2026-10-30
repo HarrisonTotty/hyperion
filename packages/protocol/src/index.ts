@@ -573,6 +573,7 @@ export {
   type RequestOutcome,
   type ResponseFor,
   type SubscribeOutcome,
+  type UnknownRequestError,
 } from "./requests";
 export type {
   NotificationOf,

@@ -120,6 +120,8 @@ function settledState<K extends RequestKind>(
     case "cancelled":
     case "storage_failed":
     case "internal":
+    // A code this build does not know reads as a failed system, as `isRefusal` reads it.
+    case "unknown":
       state = { kind: "rejected", code: error.code, reason: error.message };
       break;
   }

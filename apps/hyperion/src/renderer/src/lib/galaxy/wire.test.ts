@@ -2,10 +2,16 @@ import { type Population, universeTimeFromYears } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import {
+  anUnknownLayer,
+  anUnknownLayerLine,
+  anUnknownLayerStatus,
+  anUnknownPopulation,
   aRangeRequest,
   aStellarBrief,
   aSystemsInRange,
   UNIVERSE_ID,
+  withCensusLine,
+  withRowFields,
 } from "../../test/galaxyFixtures";
 import { CHART_SYSTEM_LIMIT } from "./model";
 import {
@@ -262,5 +268,48 @@ describe("the substellar layers (plan 13, P13.T7)", () => {
     expect(toRangeRequest(UNIVERSE_ID, [26_000, 0, 0], 10, 0, "rogue_planet").min_layer).toBe(
       "rogue_planet",
     );
+  });
+});
+
+describe("toChartResult's growing enums (plan 04's reserved list)", () => {
+  it("reads a row's layer and population this build does not know as unknown, and the rest as before", () => {
+    const response = aSystemsInRange({ systems: [{ relLy: [3, 4, 0], layer: "a" }] });
+    const newer = withRowFields(response, {
+      layer: anUnknownLayer(),
+      population: anUnknownPopulation(),
+    });
+    const [known] = toChartResult(response).systems;
+
+    expect(toChartResult(newer).systems).toEqual([
+      { ...known, layer: "unknown", kind: "unknown", population: "unknown" },
+    ]);
+  });
+
+  it("reads a census line's layer and status this build does not know as unknown", () => {
+    const result = toChartResult(
+      withCensusLine(aSystemsInRange(), anUnknownLayerLine(anUnknownLayerStatus())),
+    );
+
+    expect(result.layers.at(-1)).toEqual({
+      layer: "unknown",
+      mass_min_msun: 1e-9,
+      mass_max_msun: 1e-6,
+      expected: 2.4,
+      returned: 0,
+      status: "unknown",
+    });
+  });
+
+  it("names the census's edge unknown where a layer this build does not know is the lightest included", () => {
+    const result = toChartResult(withCensusLine(aSystemsInRange(), anUnknownLayerLine()));
+
+    expect(result.census).toEqual({ kind: "complete", aboveMsun: 1e-9, layer: "unknown" });
+  });
+
+  it("keeps the census's edge in a known layer where one this build does not know is heavier", () => {
+    const heavy = { ...anUnknownLayerLine(), mass_min_msun: 150, mass_max_msun: 300 };
+    const result = toChartResult(withCensusLine(aSystemsInRange(), heavy));
+
+    expect(result.census).toEqual({ kind: "complete", aboveMsun: 0.08, layer: "a" });
   });
 });

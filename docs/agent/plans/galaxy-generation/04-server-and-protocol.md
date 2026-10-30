@@ -1972,3 +1972,20 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
       `SHUTDOWN_WITH_WORK_QUEUED`, unchanged;
     - T17.c's 10 s in the launch contract is the launcher's wait before `kill()`, which no server
       test asserts.
+- **Amended 2026-10-30: the client reads the growing enums' unknown strings as Missing** (the
+  client pass the gg-port d0 ruling deferred; no task ID).
+  - `RequestFailure` gains `UnknownRequestError` (`code: "unknown"`, with the server's
+    `serverCode`, `message` and `field`): every exhaustive switch over a failure's code needs its
+    arm. It reads `REJECTED: <message>` as a fault (`isRefusal`). A subscription's end with an
+    unknown code was already read as `internal`.
+  - `lib/galaxy/model.ts` adds `ChartLayer`, `ChartPopulation`, `ChartLayerStatus` (each with
+    `unknown`), `ChartLayerLine` for `ChartResult.layers`, and `ChartKind`'s `unknown`;
+    `wire.ts` narrows each through an `Object.hasOwn` table. `layerLetter` returns `null` for
+    `unknown`. P09.T41.c's origin and catalogue class can follow the same pattern.
+  - (lean, 2026-10-30) An object of an unknown layer is listed and selectable, its masses
+    Missing, and `OPEN SYSTEM` is offered for it. It is drawn neither on the chart nor on the HR
+    diagram: the HR diagram counts it as `UNLISTED LAYER` under `NOT PLOTTED`, and the chart's
+    legend names it before `LIST ONLY` (a guide row drafted on `UNLISTED MATERIAL`'s). Its census
+    line reads its letter and band Missing and stands by its band. `layerBands` ignores it, so the
+    answer still charts, and where it is the lightest included, `COMPLETE ABOVE` reads its edge
+    Missing.

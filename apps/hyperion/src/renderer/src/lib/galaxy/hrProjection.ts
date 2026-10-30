@@ -139,6 +139,12 @@ export interface HrCounts {
    * counted as `DATA INVALID` rather than hidden (ruling 115.3).
    */
   readonly dataInvalid: number;
+  /**
+   * Objects of a mass layer this build does not know, which a newer server may send (plan 04 names
+   * `MassLayer` growing): counted, not plotted, since neither what they are nor their size class
+   * is known.
+   */
+  readonly unlistedLayer: number;
 }
 
 /** A chart's systems placed on the diagram. */
@@ -229,7 +235,14 @@ export function projectHr(
   let notYetFormed = 0;
   let planet = 0;
   let dataInvalid = 0;
+  let unlistedLayer = 0;
   for (const system of systems) {
+    // An object of a layer this build does not know is not drawn, as on the chart: neither what it
+    // is nor its size class is known.
+    if (system.layer === "unknown") {
+      unlistedLayer += 1;
+      continue;
+    }
     const star = system.star;
     if (isFormedPlanet(system)) {
       planet += 1;
@@ -303,6 +316,7 @@ export function projectHr(
       notYetFormed,
       planet,
       dataInvalid,
+      unlistedLayer,
     },
   };
 }

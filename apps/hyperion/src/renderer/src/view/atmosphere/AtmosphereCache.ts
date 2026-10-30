@@ -675,6 +675,9 @@ function detailAnswerOf(
     case "name_taken":
     case "universe_limit_reached":
     case "storage_failed":
+    // A code this build does not know, which a newer server may send: the server's word, read as a
+    // failed system.
+    case "unknown":
       answer = rejected;
       break;
   }

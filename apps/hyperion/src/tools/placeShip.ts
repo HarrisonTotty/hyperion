@@ -487,7 +487,7 @@ export function askThrough(client: RequestClient): Ask {
       const field = "field" in outcome.error && outcome.error.field !== null;
       throw new Error(
         `${body.kind} failed: ${outcome.error.code}: ${outcome.error.message}` +
-          (field ? ` (field ${String(outcome.error.field)})` : ""),
+          (field ? ` (field ${outcome.error.field})` : ""),
       );
     }
     return outcome.response;

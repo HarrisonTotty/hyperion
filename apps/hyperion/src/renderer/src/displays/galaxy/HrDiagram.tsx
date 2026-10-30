@@ -279,6 +279,11 @@ export function HrDiagram({
     ...(counts.dataInvalid === 0
       ? []
       : [{ label: "DATA INVALID", text: formatNumber(counts.dataInvalid, 0) }]),
+    // Objects of a layer this build does not know, which a newer server may send; only when there
+    // are any.
+    ...(counts.unlistedLayer === 0
+      ? []
+      : [{ label: "UNLISTED LAYER", text: formatNumber(counts.unlistedLayer, 0) }]),
   ];
 
   return (
@@ -360,7 +365,7 @@ export function HrDiagram({
       <div className="symbol-legend" role="group" aria-label="Hertzsprung-Russell diagram legend">
         <p className="symbol-legend__item">SYMBOLS NOT TO SCALE</p>
         {/* Neutron stars and black holes are counted, not plotted, so their shapes are not here. */}
-        <StarShapeLegend compactRemnants={false} />
+        <StarShapeLegend compactRemnants={false} unlistedLayer={counts.unlistedLayer > 0} />
         <p className="symbol-legend__item">
           <LegendSymbol shape="circle" diameterRem={SIZE_CLASS_REM[4]} filled available />
           IN DRIVE RANGE
