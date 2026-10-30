@@ -26,7 +26,8 @@
 //! The terms are summed in their published order, each power through the crate's deterministic
 //! `math` (sim-determinism): an integer power of δ by [`math::powi`], a real power by
 //! [`math::powf`], each exponential by [`math::exp`]; a density solved at a pressure takes a fixed
-//! number of Newton steps, and nothing is cached.
+//! number of Newton steps along an [`Isotherm`], which takes τ's powers once for all of them, and
+//! nothing is cached between calls.
 
 use crate::math;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
@@ -257,14 +258,14 @@ impl HelmholtzIdeal {
 /// four, as a test holds.
 const NEWTON_STEPS: usize = 4;
 
-/// The Newton steps [`HelmholtzResidual::compressed_density`] takes from the saturated liquid, a
+/// The Newton steps [`Isotherm::compressed_density`] takes from the saturated liquid, a
 /// fixed count (P14.T49.n), which a test holds to meet the pressure to rounding over every row's
 /// liquid range up to [`COMPRESSION_CEILING`]: the most any of its cases needs is 10, a part in a
 /// thousand below a critical point under the ceiling, where the liquid is about three times its
 /// saturated density.
 pub(crate) const COMPRESSION_STEPS: usize = 16;
 
-/// The largest step [`HelmholtzResidual::compressed_density`] takes, relative to the density it
+/// The largest step [`Isotherm::compressed_density`] takes, relative to the density it
 /// steps from.
 pub(crate) const COMPRESSION_STEP_LIMIT: f64 = 0.25;
 
@@ -336,20 +337,66 @@ impl HelmholtzResidual {
         density: KilogramsPerCubicMetre,
         temperature: Kelvin,
     ) -> DensityDerivatives {
-        let delta = density.value() / self.reducing_density.value();
         let tau = self.reducing_temperature.value() / temperature.value();
+        self.density_derivatives_with(density, tau, |_, t| math::powf(tau, t))
+    }
+
+    /// The equation along the isotherm at `temperature`, its τ-powers taken once
+    /// ([`Isotherm`]).
+    #[must_use]
+    pub(crate) fn isotherm(&self, temperature: Kelvin) -> Isotherm<'_> {
+        let tau = self.reducing_temperature.value() / temperature.value();
+        let base = math::PowBase::new(tau);
+        let tau_t = self
+            .power
+            .iter()
+            .map(|term| term.t)
+            .chain(self.gaussian.iter().map(|term| term.t))
+            .chain(self.associating.iter().map(|term| term.t))
+            .map(|t| base.powf(t))
+            .collect();
+        Isotherm {
+            equation: self,
+            temperature,
+            tau,
+            tau_t,
+        }
+    }
+
+    /// [`density_derivatives`](Self::density_derivatives) at `density` and the inverse reduced
+    /// temperature `tau`, with `tau_t(k, t)` giving τ^t of the `k`-th term counted over the power,
+    /// Gaussian and associating terms in that order, `t` its exponent.
+    #[must_use]
+    fn density_derivatives_with(
+        &self,
+        density: KilogramsPerCubicMetre,
+        tau: f64,
+        tau_t: impl Fn(usize, f64) -> f64,
+    ) -> DensityDerivatives {
+        let delta = density.value() / self.reducing_density.value();
         let mut first = 0.0;
         let mut second = 0.0;
-        for term in self.power {
+        // δ^c and exp(−δ^c) of the last exponential term, which the next term with the same c
+        // reads again: the published equations list their terms by c (IAPWS-95's 44 exponential
+        // terms take five values of it).
+        let mut shared: Option<(i32, f64, f64)> = None;
+        for (k, term) in self.power.iter().enumerate() {
             let d = f64::from(term.d);
-            let tau_t = math::powf(tau, term.t);
+            let tau_t = tau_t(k, term.t);
             if term.c == 0 {
                 first += term.n * d * math::powi(delta, term.d - 1) * tau_t;
                 second += term.n * d * (d - 1.0) * math::powi(delta, term.d - 2) * tau_t;
             } else {
                 let c = f64::from(term.c);
-                let delta_c = math::powi(delta, term.c);
-                let e = math::exp(-delta_c);
+                let (delta_c, e) = match shared {
+                    Some((at, delta_c, e)) if at == term.c => (delta_c, e),
+                    _ => {
+                        let delta_c = math::powi(delta, term.c);
+                        let e = math::exp(-delta_c);
+                        shared = Some((term.c, delta_c, e));
+                        (delta_c, e)
+                    }
+                };
                 let g = d - c * delta_c;
                 first += term.n * e * math::powi(delta, term.d - 1) * tau_t * g;
                 second += term.n
@@ -359,12 +406,13 @@ impl HelmholtzResidual {
                     * (g * (d - 1.0 - c * delta_c) - c * c * delta_c);
             }
         }
-        for term in self.gaussian {
+        let gaussian_from = self.power.len();
+        for (k, term) in self.gaussian.iter().enumerate() {
             let d = f64::from(term.d);
             let dd = delta - term.epsilon;
             let tt = tau - term.gamma;
             let e = math::exp(-term.alpha * dd * dd - term.beta * tt * tt);
-            let tau_t = math::powf(tau, term.t);
+            let tau_t = tau_t(gaussian_from + k, term.t);
             let delta_d = math::powi(delta, term.d);
             first += term.n * delta_d * tau_t * e * (d / delta - 2.0 * term.alpha * dd);
             second += term.n
@@ -379,12 +427,13 @@ impl HelmholtzResidual {
             first += first_term;
             second += second_term;
         }
-        for term in self.associating {
+        let associating_from = gaussian_from + self.gaussian.len();
+        for (k, term) in self.associating.iter().enumerate() {
             let d = f64::from(term.d);
             let dd = delta - term.epsilon;
             let tt = tau - term.gamma;
             let e = math::exp(-term.eta * dd * dd + 1.0 / (term.beta * tt * tt + term.b));
-            let tau_t = math::powf(tau, term.t);
+            let tau_t = tau_t(associating_from + k, term.t);
             let delta_d = math::powi(delta, term.d);
             first += term.n * delta_d * tau_t * e * (d / delta - 2.0 * term.eta * dd);
             second += term.n
@@ -586,22 +635,104 @@ impl HelmholtzResidual {
         pressure: Pascals,
         temperature: Kelvin,
     ) -> KilogramsPerCubicMetre {
-        let mut density = start;
-        for _ in 0..NEWTON_STEPS {
-            let miss = pressure.value() - self.pressure(density, temperature).value();
-            let step = miss
-                * density.value()
-                * self.isothermal_compressibility_per_pa(density, temperature);
-            density = KilogramsPerCubicMetre::new(density.value() + step);
-        }
-        density
+        self.isotherm(temperature)
+            .density_at_pressure(start, pressure)
     }
 
-    /// The compressed liquid's density at `pressure` and `temperature`, from `saturated`, the
-    /// equation's own saturated liquid at `temperature` (the liquids' compression, P14.T49.n), for
-    /// a `pressure` above the saturated liquid's: [`COMPRESSION_STEPS`] Newton steps along the
+    /// [`Isotherm::compressed_density`] at `temperature`, for the tests.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn compressed_density(
+        &self,
+        saturated: KilogramsPerCubicMetre,
+        pressure: Pascals,
+        temperature: Kelvin,
+    ) -> KilogramsPerCubicMetre {
+        self.compressed_density_in(saturated, pressure, temperature, COMPRESSION_STEPS)
+    }
+
+    /// [`Isotherm::compressed_density`] at `temperature` in `steps` steps, for the tests that
+    /// compare the count with more.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn compressed_density_in(
+        &self,
+        saturated: KilogramsPerCubicMetre,
+        pressure: Pascals,
+        temperature: Kelvin,
+        steps: usize,
+    ) -> KilogramsPerCubicMetre {
+        self.isotherm(temperature)
+            .compressed_density_in(saturated, pressure, steps)
+    }
+}
+
+/// One equation along one isotherm: τ^t of each of its terms, which every evaluation of `φʳ_δ`
+/// and `φʳ_δδ` at that temperature reads, taken once.
+///
+/// A density solved at a pressure evaluates the equation at one temperature once a Newton step: a
+/// liquid's compression (P14.T49.n) takes [`NEWTON_STEPS`] to the equation's saturated liquid and
+/// [`COMPRESSION_STEPS`] more, and the partition's sweeps ask for one at every sweep of every
+/// greenhouse step. Each power is [`math::PowBase`]'s, bit for bit [`math::powf`]'s, so every
+/// evaluation is [`HelmholtzResidual::density_derivatives`]' to the bit.
+///
+/// At version 24 the compression was 54% of `generate` and `snapshot_at` over the first 20 sample
+/// systems, most of it `powf` in τ. With the isotherm, one evaluation a step for
+/// [`density_at_pressure`](Self::density_at_pressure), exp(−δ^c) shared by the terms of one c
+/// and the steps ending where the density repeats ([`iterate`]), `generate` over them fell from
+/// 1,998 to 630 ms and `snapshot_at` from 3,208 to 2,125 ms (pod, 8 vCPU, P14.T54.b.l's probe).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Isotherm<'a> {
+    equation: &'a HelmholtzResidual,
+    temperature: Kelvin,
+    /// τ = `T_r` ÷ T.
+    tau: f64,
+    /// τ^t of every power term, then every Gaussian term, then every associating term, each in
+    /// its published order.
+    tau_t: Vec<f64>,
+}
+
+impl Isotherm<'_> {
+    /// [`HelmholtzResidual::density_derivatives`] at `density` on this isotherm, to the bit.
+    #[must_use]
+    pub(crate) fn density_derivatives(
+        &self,
+        density: KilogramsPerCubicMetre,
+    ) -> DensityDerivatives {
+        self.equation
+            .density_derivatives_with(density, self.tau, |k, _| self.tau_t[k])
+    }
+
+    /// [`HelmholtzResidual::density_at_pressure`] on this isotherm: each step's pressure and
+    /// `κ_T` read one evaluation of the equation, as [`HelmholtzResidual::pressure`] and
+    /// [`HelmholtzResidual::isothermal_compressibility_per_pa`] would each take it, to the bit.
+    #[must_use]
+    pub(crate) fn density_at_pressure(
+        &self,
+        start: KilogramsPerCubicMetre,
+        pressure: Pascals,
+    ) -> KilogramsPerCubicMetre {
+        let equation = self.equation;
+        let temperature = self.temperature.value();
+        let step = |density: f64| {
+            let delta = density / equation.reducing_density.value();
+            let derivatives = self.density_derivatives(KilogramsPerCubicMetre::new(density));
+            let at = density * equation.gas_constant_j_per_kg_k * temperature;
+            let here = at * (1.0 + delta * derivatives.first);
+            let compressibility = 1.0
+                / (at
+                    * (1.0 + 2.0 * delta * derivatives.first + delta * delta * derivatives.second));
+            let miss = pressure.value() - here;
+            Some(density + miss * density * compressibility)
+        };
+        KilogramsPerCubicMetre::new(iterate(start.value(), NEWTON_STEPS, step))
+    }
+
+    /// The compressed liquid's density at `pressure` on this isotherm, from `saturated`, the
+    /// equation's own saturated liquid there (the liquids' compression, P14.T49.n), for a
+    /// `pressure` above the saturated liquid's: [`COMPRESSION_STEPS`] Newton steps along the
     /// isotherm, ρ ← ρ + (p − p(ρ, T)) ρ `κ_T`(ρ, T) as in
-    /// [`density_at_pressure`](Self::density_at_pressure), each held to at most
+    /// [`HelmholtzResidual::density_at_pressure`], each held to at most
     /// [`COMPRESSION_STEP_LIMIT`] of ρ.
     ///
     /// Above the saturated liquid p(ρ) rises along the isotherm and is convex, so a step from below
@@ -616,27 +747,23 @@ impl HelmholtzResidual {
         &self,
         saturated: KilogramsPerCubicMetre,
         pressure: Pascals,
-        temperature: Kelvin,
     ) -> KilogramsPerCubicMetre {
-        self.compressed_density_in(saturated, pressure, temperature, COMPRESSION_STEPS)
+        self.compressed_density_in(saturated, pressure, COMPRESSION_STEPS)
     }
 
-    /// [`compressed_density`](Self::compressed_density) in `steps` steps, for the tests that
-    /// compare the count with more.
+    /// [`compressed_density`](Self::compressed_density) in `steps` steps.
     #[must_use]
     pub(crate) fn compressed_density_in(
         &self,
         saturated: KilogramsPerCubicMetre,
         pressure: Pascals,
-        temperature: Kelvin,
         steps: usize,
     ) -> KilogramsPerCubicMetre {
-        let mut density = saturated.value();
-        let rt = self.gas_constant_j_per_kg_k * temperature.value();
-        for _ in 0..steps {
-            let delta = density / self.reducing_density.value();
-            let derivatives =
-                self.density_derivatives(KilogramsPerCubicMetre::new(density), temperature);
+        let equation = self.equation;
+        let rt = equation.gas_constant_j_per_kg_k * self.temperature.value();
+        let step = |density: f64| {
+            let delta = density / equation.reducing_density.value();
+            let derivatives = self.density_derivatives(KilogramsPerCubicMetre::new(density));
             let here = density * rt * (1.0 + delta * derivatives.first);
             let stiffness =
                 rt * (1.0 + 2.0 * delta * derivatives.first + delta * delta * derivatives.second);
@@ -645,19 +772,53 @@ impl HelmholtzResidual {
             let step = (pressure.value() - here) / stiffness;
             // Zero or not-a-number stiffness near a spinodal: keep the last finite density.
             if !step.is_finite() {
-                break;
+                return None;
             }
             let limit = COMPRESSION_STEP_LIMIT * density;
-            density += if step > limit {
-                limit
-            } else if step < -limit {
-                -limit
+            Some(
+                density
+                    + if step > limit {
+                        limit
+                    } else if step < -limit {
+                        -limit
+                    } else {
+                        step
+                    },
+            )
+        };
+        KilogramsPerCubicMetre::new(iterate(saturated.value(), steps, step))
+    }
+}
+
+/// The density after `steps` Newton steps `step` from `start`, or where a step gives `None`, the
+/// density it would step from: what a loop of `steps` calls gives, to the bit.
+///
+/// A step reads the density alone, so once a density repeats, bit for bit, the rest of the steps
+/// are known and are not taken: a fixed point stays, and a 2-cycle alternates, the steps left
+/// giving which of its two the loop ends on.
+#[must_use]
+fn iterate(start: f64, steps: usize, step: impl Fn(f64) -> Option<f64>) -> f64 {
+    let mut density = start;
+    let mut before: Option<f64> = None;
+    for taken in 0..steps {
+        let Some(next) = step(density) else {
+            break;
+        };
+        if next.total_cmp(&density).is_eq() {
+            break;
+        }
+        if before.is_some_and(|before| next.total_cmp(&before).is_eq()) {
+            let left = steps - taken - 1;
+            return if left.is_multiple_of(2) {
+                next
             } else {
-                step
+                density
             };
         }
-        KilogramsPerCubicMetre::new(density)
+        before = Some(density);
+        density = next;
     }
+    density
 }
 
 impl NonAnalyticTerm {
@@ -671,33 +832,37 @@ impl NonAnalyticTerm {
         let dm = delta - 1.0;
         let tm = tau - 1.0;
         let dm2 = dm * dm;
+        // Each base's powers share its logarithm, bit for bit `math::powf`'s.
+        let dm2_base = math::PowBase::new(dm2);
         let half_inverse_beta = 1.0 / (2.0 * self.beta);
-        let theta = (1.0 - tau) + self.big_a * math::powf(dm2, half_inverse_beta);
-        let distance = theta * theta + self.big_b * math::powf(dm2, self.a);
+        let theta = (1.0 - tau) + self.big_a * dm2_base.powf(half_inverse_beta);
+        let distance = theta * theta + self.big_b * dm2_base.powf(self.a);
         let psi = math::exp(-self.big_c * dm2 - self.big_d * tm * tm);
         let psi_d = -2.0 * self.big_c * dm * psi;
         let psi_dd = (2.0 * self.big_c * dm2 - 1.0) * 2.0 * self.big_c * psi;
         let (distance_d, distance_dd) = if dm2 > 0.0 {
+            let inner = dm2_base.powf(half_inverse_beta - 1.0);
             let d1 = dm
-                * (self.big_a * theta * 2.0 / self.beta * math::powf(dm2, half_inverse_beta - 1.0)
-                    + 2.0 * self.big_b * self.a * math::powf(dm2, self.a - 1.0));
-            let inner = math::powf(dm2, half_inverse_beta - 1.0);
+                * (self.big_a * theta * 2.0 / self.beta * inner
+                    + 2.0 * self.big_b * self.a * dm2_base.powf(self.a - 1.0));
             let d2 = d1 / dm
                 + dm2
-                    * (4.0 * self.big_b * self.a * (self.a - 1.0) * math::powf(dm2, self.a - 2.0)
+                    * (4.0 * self.big_b * self.a * (self.a - 1.0) * dm2_base.powf(self.a - 2.0)
                         + 2.0 * self.big_a * self.big_a / (self.beta * self.beta) * inner * inner
                         + self.big_a * theta * 4.0 / self.beta
                             * (half_inverse_beta - 1.0)
-                            * math::powf(dm2, half_inverse_beta - 2.0));
+                            * dm2_base.powf(half_inverse_beta - 2.0));
             (d1, d2)
         } else {
             (0.0, 0.0)
         };
-        let power = math::powf(distance, self.b);
-        let power_d = self.b * math::powf(distance, self.b - 1.0) * distance_d;
+        let distance_base = math::PowBase::new(distance);
+        let power = distance_base.powf(self.b);
+        let below = distance_base.powf(self.b - 1.0);
+        let power_d = self.b * below * distance_d;
         let power_dd = self.b
-            * (math::powf(distance, self.b - 1.0) * distance_dd
-                + (self.b - 1.0) * math::powf(distance, self.b - 2.0) * distance_d * distance_d);
+            * (below * distance_dd
+                + (self.b - 1.0) * distance_base.powf(self.b - 2.0) * distance_d * distance_d);
         let first = self.n * (power * (psi + delta * psi_d) + power_d * delta * psi);
         let second = self.n
             * (power * (2.0 * psi_d + delta * psi_dd)

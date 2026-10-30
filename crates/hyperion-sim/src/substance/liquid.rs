@@ -1653,7 +1653,7 @@ impl Substance {
     /// saturated liquid as [`LiquidSpecificHeat`] takes it
     /// ([`HelmholtzResidual::density_at_pressure`]); at p′,
     /// [`COMPRESSION_STEPS`](super::helmholtz::COMPRESSION_STEPS) more from there
-    /// ([`HelmholtzResidual::compressed_density`]). The equation's compression is carried onto the
+    /// ([`Isotherm::compressed_density`](super::helmholtz::Isotherm::compressed_density)). The equation's compression is carried onto the
     /// registry's saturated density, so the law is the registry's own at saturation to the bit, and
     /// it never expands a liquid: a pressure at or below `p_sat`(T) gives `ρ_reg`(T) itself, as
     /// does a pressure that is not a number, and any pressure at the critical temperature, where
@@ -1743,8 +1743,9 @@ fn compressed(
     } else {
         COMPRESSION_CEILING
     };
-    let at_vapour = equation.density_at_pressure(saturated, vapour, temperature);
-    let at_pressure = equation.compressed_density(at_vapour, held, temperature);
+    let isotherm = equation.isotherm(temperature);
+    let at_vapour = isotherm.density_at_pressure(saturated, vapour);
+    let at_pressure = isotherm.compressed_density(at_vapour, held);
     KilogramsPerCubicMetre::new(saturated.value() * (at_pressure.value() / at_vapour.value()))
 }
 
