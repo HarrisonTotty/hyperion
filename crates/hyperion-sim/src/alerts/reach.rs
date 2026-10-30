@@ -35,12 +35,13 @@
 //! [`HYDROGEN_COLUMN_PER_MAG`], the cross-section per hydrogen atom times the solar-equivalent
 //! hydrogen column of the dust. That column follows metallicity as plan 07's dust does, and it
 //! leaves out the hot corona's ionised gas, which [`Sightline::hydrogen_column`] counts and which
-//! absorbs almost nothing (Design note 14). Hydrogen and helium, about a tenth of the cross-section
-//! at 2 keV, do not follow metallicity, so in metal-poor gas the depth reads somewhat low. `τ_X` is
-//! 1 at `A_V` = 12.43 mag. The X-ray band is one cross-section at one energy, 2 keV, the softest of
-//! the 2–10 keV band the centre's luminosities are given in, so it under-counts the band's flux
-//! behind a thick column (plan 12's Risks, "P12.T5.a as built"); a console that wants soft and
-//! hard bands replaces the constant by a function of energy (plan 12's Risks, "The X-ray band").
+//! absorbs almost nothing (Design note 14). Hydrogen and helium's share of the cross-section does
+//! not follow metallicity (MM83's figure of it was not read), so in metal-poor gas the depth reads
+//! somewhat low. `τ_X` is 1 at `A_V` = 12.43 mag. The X-ray band is one cross-section at one
+//! energy, 2 keV, the softest of the 2–10 keV band the centre's luminosities are given in, so it
+//! under-counts the band's flux behind a thick column (plan 12's Risks, "P12.T5.a as built"); a
+//! console that wants soft and hard bands replaces the constant by a function of energy (plan 12's
+//! Risks, "The X-ray band").
 
 use std::f64::consts::PI;
 
@@ -73,16 +74,18 @@ const XRAY_ENERGY_KEV: f64 = 2.0;
 
 /// `σ_X`, the photoelectric cross-section per hydrogen atom at 2 keV, cm²: 4.301 × 10⁻²³.
 ///
-/// Morrison and McCammon's (1983, ApJ 270, 119, Table 2) fit on 1.840–2.471 keV, (202.7 +
-/// 104.7 E − 17.0 E²) E⁻³ × 10⁻²⁴ cm², which is 344.1 ÷ 8 × 10⁻²⁴ at E = 2 keV: gas and grains of
-/// solar abundances (Anders and Ebihara 1982), the metals carrying nearly all of it at this energy.
-/// It is the cross-section with which Predehl and Schmitt (1995, A&A 293, 889) measured
-/// `N_H` ÷ `A_V` = 1.79 × 10²¹ cm⁻² mag⁻¹ from X-ray haloes, 4% under plan 07's
-/// [`HYDROGEN_COLUMN_PER_MAG`], which the depth uses so that the X-ray band follows the dust's
-/// metallicity as the photometric bands do; Güver and Özel (2009, MNRAS 400, 2050) give 2.21 ×
-/// 10²¹. With it `τ_X` = 1 at `N_H` = 2.325 × 10²² cm⁻², `A_V` = 12.43 mag. Wilms, Allen and McCray
-/// (2000, ApJ 542, 914), the other candidate the plan names, take lower interstellar abundances
-/// and so a smaller cross-section. Part of the generator version (Design note 14).
+/// Morrison and McCammon's (1983, ApJ 270, 119, Table 2) fit on 1.840–2.471 keV, (202.7 + 104.7 E −
+/// 17.0 E²) E⁻³ × 10⁻²⁴ cm², which is 344.1 ÷ 8 × 10⁻²⁴ at E = 2 keV: neutral atomic gas of Anders
+/// and Ebihara's (1982) abundances, with helium at 0.10 by number (their Table 1), every element in
+/// the gas phase; grains, which the fit leaves out (their §III), would lower it slightly above 1
+/// keV. It is the cross-section with which Predehl and Schmitt (1995, A&A 293, 889) measured `N_H`
+/// ÷ `A_V` = 1.79 × 10²¹ cm⁻² mag⁻¹ from X-ray haloes (their abstract; their use of it was not
+/// read, but Zhu et al. 2017's Table 3 lists Anders and Ebihara's abundances for them), 4% under
+/// plan 07's [`HYDROGEN_COLUMN_PER_MAG`], which the depth uses so that the X-ray band follows the
+/// dust's metallicity as the photometric bands do; Güver and Özel (2009, MNRAS 400, 2050) give 2.21
+/// × 10²¹. With it `τ_X` = 1 at `N_H` = 2.325 × 10²² cm⁻², `A_V` = 12.43 mag. Wilms, Allen and
+/// McCray (2000, ApJ 542, 914), the other candidate the plan names, take lower interstellar
+/// abundances and so a smaller cross-section. Part of the generator version (Design note 14).
 pub const XRAY_CROSS_SECTION_CM2: f64 =
     (MM83_C0 + MM83_C1 * XRAY_ENERGY_KEV + MM83_C2 * XRAY_ENERGY_KEV * XRAY_ENERGY_KEV)
         / (XRAY_ENERGY_KEV * XRAY_ENERGY_KEV * XRAY_ENERGY_KEV)
@@ -430,9 +433,9 @@ mod tests {
     /// visual light.
     #[test]
     fn a_pinned_novas_flux_at_three_distances() {
-        // Classical novae reach or exceed the Eddington luminosity of their white dwarf at their
-        // peak, about 10³⁸ erg/s (Della Valle and Izzo 2020, A&A Rev. 28, 3): a test value, since
-        // plan 11's nova light curves (P11.T9) are not built.
+        // Classical novae reach their white dwarf's Eddington luminosity, some exceed it
+        // ("Eddington novae", "super-Eddington novae": Della Valle and Izzo 2020, A&A Rev. 28, 3):
+        // a test value, since plan 11's nova light curves (P11.T9) are not built.
         let nova = Watts::new(eddington_luminosity_watts(SolarMasses::new(1.0)));
         let galaxy = Galaxy::new(Seed::new(42));
         let host = at([0.0, 26_000.0, 20.0]);

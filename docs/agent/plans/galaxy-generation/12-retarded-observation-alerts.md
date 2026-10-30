@@ -482,6 +482,28 @@ Files: `galaxy/query/segment.rs`, `lensing/{mod,walk,point_lens}.rs`. Acceptance
   falls and caps at the diagonal; flux of a pinned nova at three distances; the X-ray depth is unity
   at an A_V the doc comment states from σ_X, and is unchanged by adding hot coronal gas to a test
   sightline.
+- **P12.T5.a.2 The X-ray band, the held rows and the citations.** After T5.a, on main's rulings of
+  2026-10-30 on research advice for T5.a's findings and questions (Risks, "P12.T5.a as built").
+  _The X-ray band:_ `xray_optical_depth` becomes the effective depth of the 2–10 keV band,
+  −ln Σₖ wₖ e^(−(σₖ + σ_e) `N_H`), at 18 fixed nodes: a 3-point Gauss–Legendre rule in ln E on each
+  of Morrison and McCammon's (1983) intervals from 2 to 10 keV, split at their breaks (the 7.111 keV
+  iron edge among them), with their photoelectric σ(E) plus Thomson scattering at 1.2 σ_T per H,
+  for a Γ = 2 source (Design note 14). It replaces `XRAY_CROSS_SECTION_CM2`. No golden or version
+  change while nothing reads `alerts`. _The held rows:_ `GiantEruption` (P06.T28.e) is `Recurrent`
+  over `LUMINOUS_BLUE_VARIABLE`, with a photometric bound of 1.2106 × 10³⁴ W, the top of plan 06's
+  peak law, and D = 20 years. `MagnetarBurst` (P06.T28.c) is `Recurrent` over `CORE_COLLAPSE`'s
+  entries, walked by T5.c. Its X-ray bound is 5 × 10⁴⁰ W, a giant flare's spike at the top of its
+  energy law; plan 06's energies are the event's whole output, so it bounds the band. D = 3 s.
+  Each row gets a new `LightCurveSource`. Giant flares take no kind of their own, and thermal
+  pulses take none. Seven rows stay pending, all on P11.T9. _`class_reach`:_ the signature stays,
+  and a tripwire holds every walked row's bound to a constant. _The citations:_ T5.a's, checked at
+  source; the corrected ones fixed, and the sources no check reached named as unread. Files:
+  `alerts/{mod,registry,reach}.rs`. Tests: the 18 nodes recomputed from the rows, the breaks and
+  the rule; the band's transmission against a converged integral, pinned at `A_V` = 1, 12.43, 30
+  and 50 mag; the depth unity at `A_V` = 88.47 mag; the magnetar row bounds every short burst and
+  giant flare; the giant-eruption row bounds the eruption's own light; an X-ray sensor sees the
+  core collapses to the cube's diagonal; walked rows have constant bounds. Acceptance:
+  `cargo test -p hyperion-sim alerts`.
 - **P12.T5.b One-shot classes.** Core collapse, Type Ia, stellar mergers, neutron-star mergers: walk
   the class's cells in the widened reach sphere (`CatalogueClassSource::cells_in_sphere`), take each
   entry's T, compute its arrival, test the window of Design note 6, emit a `Detection` with its
@@ -2340,6 +2362,9 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     coefficients and abundances, Predehl and Schmitt 1995, Güver and Özel 2009, Wilms, Allen and
     McCray 2000, Della Valle and Izzo 2020) match the checker's knowledge but were not read at
     source, since the lane's pod could open no source: pending a re-check with the network.
+    _Checked at source on 2026-10-30_ (P12.T5.a.2; Risks, "P12.T5.a.2's citations, checked at
+    source"): the coefficients, Predehl and Schmitt's ratio, Güver and Özel's and Wilms, Allen and
+    McCray's confirmed, and MM83's abundances and Della Valle and Izzo's figure corrected.
   - _Findings, recorded and not changed._
     - **The 2 keV cross-section under-counts the 2–10 keV band.** The centre's flares and tails are
       unabsorbed 2–10 keV luminosities, and photoelectric σ falls about as E^−2.5 above 2 keV
@@ -2367,3 +2392,61 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     T9's integration test and the by-eye check need novae, so they wait on P11.T9 and T5.c. Under
     T30.b's law the fixture's 26 unending tails stay above a sensitive sensor's limit, so T5.d would
     report the centre's disruptions in progress at every time: it should land after P09.T30.c.
+- **P12.T5.a.2's citations, checked at source (2026-10-30, main's ruling of that date).** A research
+  science check read T5.a's citations at source on 2026-10-30, through the Internet Archive's copies
+  and OpenAlex, which answers T5.a's "pending a re-check with the network". Of 35 claims, 26 were
+  confirmed, 6 corrected and 3 not reached.
+  - _Corrected in `alerts`._
+    - (a) Morrison and McCammon's (1983) fit is for neutral atomic gas, not "gas and grains". Their
+      §III reads "we have not included the effects of grains in the fit whose coefficients are given
+      in Table 2". Their Fig. 1 has "all elements in the gas phase and in neutral atomic form". Their
+      Table 1's abundances are Anders and Ebihara's (1982), except helium at 0.10 by number.
+    - (b) Della Valle and Izzo (2020) speak of "Eddington novae" and "super-Eddington novae" and give
+      no 10³⁸ erg/s. The nova test's comment now cites the white dwarf's Eddington luminosity alone.
+  - _For P09.T30.c to apply in `features::centre::events::luminosity`._ Its lane holds the file
+    behind the hold at 25, so nothing under `centre/` changes here.
+    - (c) `eddington_luminosity_watts`'s doc should read "Stone and Metzger (2016, after
+      equation 24) take L_Edd ≃ 1.5 × 10⁴⁶ M₈ erg/s, some 19% higher, as for an opacity of about
+      0.33 cm² g⁻¹". It now says "a solar-composition opacity, 0.34 cm² g⁻¹, some 17% higher", but
+      the paper states no κ.
+    - (d) The module doc cites Stone and Metzger's "§3, equation 23" for the fallback rate. Their
+      equation 23 is the fallback time, t_fall = 3.5 × 10⁶ s, which `fallback_time` matches and
+      cites rightly. Cite it as the fallback time.
+    - (e) `BOLOMETRIC_CORRECTION`'s doc should read "15.8, the median bolometric correction of
+      low-luminosity active nuclei below a tenth of Eddington (Ho 2009, ApJ 699, 626, §2.1:
+      'sources with Lbol/LEdd ≲ 0.1 have a median CX = 15.8, with an interquartile range of
+      9.6')". The quoted "median CX = Lbol/LX = 15.8" is not the paper's, and the whole sample's
+      median is about 8 (Table 1). The finding that goes with it is in plan 09's Risks.
+  - _Corrected, a finding._ The Type Ia template's peak "about 15 days in" (`LightCurve::of`'s
+    doc) is earlier than observed. Firth et al. (2015, MNRAS 446, 3895) give 18.98 ± 0.54 days.
+    Scalzo et al. (2014, MNRAS 440, 1498, equation 6) give a bolometric rise of 16.5 ± 2 days,
+    Contardo et al. (2000) 16–20 days and Stritzinger et al. (2006) 19 days. It is recorded in
+    "Deferred findings", from P12.T5.a.2, and in plan 09's Risks.
+  - _Confirmed at source._
+    - Plan 07 and the X-ray depth: MM83's Table 2, every row from 1.303 to 10 keV (σ(2 keV) =
+      4.30125 × 10⁻²³ cm²); Predehl and Schmitt's 1.79 × 10²¹ (abstract); Güver and Özel's
+      (2.21 ± 0.09) × 10²¹; Wilms, Allen and McCray's metals 20–30% below solar (§2.3) and σ moved
+      by up to 30% (Fig. 2); Bohlin, Savage and Drake's 5.8 × 10²¹.
+    - The centre: the Eddington figure, 1.257065 × 10³¹ W per M☉; Stone and Metzger's η ∼ 0.1
+      (§3); Nowak et al.'s (2012) quiescence; Baganoff et al.'s (2003, §5.3) 2.4 × 10³³ erg/s;
+      Neilsen et al.'s (2013) rate (§5), slopes (Table 2), brightest flare (Table 1), test (§4.3)
+      and edges (§3); Ponti et al.'s (2015) 1.08 ± 0.10 a day (Table 3).
+    - The flare bound: `MAX_PEAK_LUMINOSITY_WATTS`, 3.5965 × 10²⁸ W, bounds the generated flares
+      exactly. It is 25% under Nowak et al.'s observed peak of 4.8 (+1.9 −1.1) × 10³⁵ erg/s,
+      which one Gaussian per flare cannot reach. Cite that peak in its doc when plan 09 next
+      touches it; nothing changes.
+    - The supernovae: Nadyozhin's (1994) equation 19 and its positron share. The IIP, IIL, Ib
+      and Ic breakouts are typical (Nakar and Sari 2010; Waxman and Katz 2017; Soderberg et al.
+      2008). The two bounds hold against the templates. The Type Ia peak luminosity is confirmed
+      (Stritzinger et al. 2006; Contardo et al. 2000), and so is Foley et al.'s (2013) Iax.
+    - Plan 06: the star flares' and the FU Orionis outbursts' figures.
+  - _Not reached, named as unread._
+    - Predehl and Schmitt's use of MM83's cross-section: their scan is image-only. Zhu et al.
+      (2017, Table 3), a secondary source, list Anders and Ebihara's abundances for them.
+    - The share of hydrogen and helium in σ at 2 keV: MM83's Fig. 1 was not read numerically. The
+      module doc no longer states it as a figure.
+    - The IIb breakout's 10⁴⁵ erg/s over 500 s (plan 09's template).
+    - Not reached in any run: Gezari et al. 2008; Schawinski et al. 2008; Lyman et al. 2016;
+      Medina et al. 2020; Yang and Liu 2019; Scholz et al. 2013; Szabó et al. 2021–2022; the
+      numbers in MM83's and Wilms et al.'s figures; the CODATA and IAU constants themselves; and
+      Haggard et al. 2019.

@@ -395,7 +395,9 @@ impl TransientRow {
 /// The bound on a core collapse's luminosity in any band, W: 10³⁸ (10⁴⁵ erg/s), the shock
 /// breakout's peak in plan 09's brightest templates (IIP, IIL and IIb; [`LightCurve::of`]) at the
 /// instant of the explosion, before the plateau and the radioactive heating begin, after which
-/// every term falls or rises far below it. Ib and Ic break out at a tenth of it. Bolometric.
+/// every term falls or rises far below it. Ib and Ic break out at a tenth of it. Bolometric. The
+/// IIP and IIL breakouts are typical (Nakar and Sari 2010, ApJ 725, 904, equation A-8 and §4.1:
+/// about 9 × 10⁴⁷ erg over some 20 minutes at 500 R☉); IIb's was not read at source.
 pub const CORE_COLLAPSE_PEAK: Watts = Watts::new(1e38);
 
 /// The bound on a Type Ia's luminosity in any band, W: 1.0730 × 10³⁶ (1.0730 × 10⁴³ erg/s), the
