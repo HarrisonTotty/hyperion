@@ -2352,6 +2352,7 @@ Records: [09-surface-generator/records/R09.T7.md](09-surface-generator/records/R
   five misses re-attributed"). It lands with T7.g's swap at 25 (decision §5), so that the record
   path's goldens move once; its lane builds it before, on a lane branch. `hyperion-fit`'s
   `rough_plains_cold_traps`, its manifest and the reader's read change:
+  Records: [09-surface-generator/records/R09.T7.l.md](09-surface-generator/records/R09.T7.l.md).
   - _Cold nodes where the tail lives:_ the cold shares at every limb node for D ÷ w ≤ 0.4 and at
     every colatitude node for e₀ ÷ w ≤ 1, at every fourth and every second beyond: 21 colatitudes
     and 15 limbs, 2,205 rows of `COLD` (about 0.3 MB). Even strides cannot do it (every limb node
