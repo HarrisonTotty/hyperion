@@ -4166,3 +4166,28 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `request_kinds_are_pinned` and the envelope's walk over every kind; the server's
     `kinds_without_a_handler_are_answered_unsupported`, now over nine kinds, and over the WebSocket
     `a_feature_kind_is_answered_unsupported_until_it_is_served`.
+- **Deferred findings (2026-10-13 rule)**, from P12.T5.a.2 (main's ruling of 2026-10-30; plan 12's
+  Risks, "P12.T5.a.2's citations, checked at source"). Recorded and deferred, not built; nothing in
+  this plan changes with them.
+  - _The Type Ia template rises too fast_ (P09.T19.b; `catalogue_classes::supernova`, τ_m = 13 d).
+    - It peaks at 15.1 days. That is earlier than all 18 of Firth et al.'s (2015, MNRAS 446, 3895)
+      supernovae, whose rise is 18.98 ± 0.54 days (15.98–24.7). It is 1.4 days under Scalzo et
+      al.'s (2014, MNRAS 440, 1498, equation 6) bolometric rise of 16.5 ± 2 days. Contardo et al.
+      (2000) give 16–20 days, and Stritzinger et al. (2006) 19 days.
+    - Its peak is 0.74 of the heating rate at that time, where Arnett's rule takes α = 1
+      (Stritzinger et al.) or 1.2 (Scalzo et al.).
+    - Retuned to a 17–19 day rise with α ≈ 1, the peak becomes 1.18–1.31 × 10⁴³ erg/s, and plan
+      12's `TYPE_IA_PEAK` must follow it: its test holds the bound to the template.
+    - Design note 18 names no source for the templates, so this is a choice of this plan, not a
+      contradiction of the brainstorm. `LightCurve::of`'s "about 15 days in" is the template's
+      figure, not an observed one.
+    - If the templates feed recorded output by then, the retune rides a bump train.
+  - _Ho's 15.8 is applied outside its range_ (P09.T30.b's tails;
+    `features::centre::events::luminosity::BOLOMETRIC_CORRECTION`).
+    - Ho (2009, ApJ 699, 626, §2.1) gives 15.8 as the median for nuclei below a tenth of
+      Eddington, but the tails apply it up to the Eddington cap.
+    - As plan 12's X-ray bound it errs high, which is safe for reach. The tails' X-ray light near
+      the cap is overstated, though, since a more luminous nucleus puts a smaller share in X-rays
+      (Vasudevan and Fabian 2007; recalled, not read at source).
+    - For P09.T30.c, whose law replaces T30.b's. The three corrections to that file's docs that
+      plan 12's record lists, (c) to (e), ride with it.

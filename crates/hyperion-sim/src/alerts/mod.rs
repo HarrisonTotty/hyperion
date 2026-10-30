@@ -43,12 +43,12 @@ pub mod reach;
 pub mod registry;
 
 pub use reach::{
-    ROOT_CUBE_DIAGONAL, XRAY_CROSS_SECTION_CM2, class_reach, flux, inverse_square_flux, kind_reach,
-    reach, transmission, xray_optical_depth,
+    ROOT_CUBE_DIAGONAL, class_reach, flux, inverse_square_flux, kind_reach, reach, transmission,
+    xray_optical_depth,
 };
 pub use registry::{
-    CORE_COLLAPSE_PEAK, LightCurveSource, LongestDuration, PeakBound, Route, TYPE_IA_PEAK,
-    TransientKind, TransientRow,
+    CORE_COLLAPSE_PEAK, GIANT_ERUPTION_PEAK, LightCurveSource, LongestDuration,
+    MAGNETAR_BURST_PEAK, PeakBound, Route, TYPE_IA_PEAK, TransientKind, TransientRow,
 };
 
 /// How many bands there are: plan 07's ten photometric bands and X-rays.
@@ -64,7 +64,7 @@ const BAND_COUNT: usize = 11;
 pub enum AlertBand {
     /// One of plan 07's photometric bands.
     Photometric(Band),
-    /// X-rays, at a few keV.
+    /// X-rays, the 2–10 keV band.
     XRay,
 }
 

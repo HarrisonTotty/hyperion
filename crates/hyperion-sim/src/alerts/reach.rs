@@ -1,5 +1,5 @@
 //! Reach and flux: how far a sensor can see a class, and how bright an event is at the observer
-//! (plan 12, P12.T5.a; Design notes 5 and 14).
+//! (plan 12, P12.T5.a and P12.T5.a.2; Design notes 5 and 14).
 //!
 //! # Reach
 //!
@@ -31,17 +31,42 @@
 //! # X-rays
 //!
 //! Photoelectric absorption at a few keV is by the metals, in gas and grains, whose column the dust
-//! traces, so the X-ray depth reads `A_V`: `τ_X` = [`XRAY_CROSS_SECTION_CM2`] × `A_V` ×
-//! [`HYDROGEN_COLUMN_PER_MAG`], the cross-section per hydrogen atom times the solar-equivalent
-//! hydrogen column of the dust. That column follows metallicity as plan 07's dust does, and it
-//! leaves out the hot corona's ionised gas, which [`Sightline::hydrogen_column`] counts and which
-//! absorbs almost nothing (Design note 14). Hydrogen and helium's share of the cross-section does
-//! not follow metallicity (MM83's figure of it was not read), so in metal-poor gas the depth reads
-//! somewhat low. `τ_X` is 1 at `A_V` = 12.43 mag. The X-ray band is one cross-section at one
-//! energy, 2 keV, the softest of the 2–10 keV band the centre's luminosities are given in, so it
-//! under-counts the band's flux behind a thick column (plan 12's Risks, "P12.T5.a as built"); a
-//! console that wants soft and hard bands replaces the constant by a function of energy (plan 12's
-//! Risks, "The X-ray band").
+//! traces, so the X-ray depth reads `A_V`: the column is `N_H` = `A_V` ×
+//! [`HYDROGEN_COLUMN_PER_MAG`], the solar-equivalent hydrogen column of the dust. That column
+//! follows metallicity as plan 07's dust does, and it leaves out the hot corona's ionised gas,
+//! which [`Sightline::hydrogen_column`] counts and which absorbs almost nothing (Design note 14).
+//!
+//! The band is 2–10 keV, the band the centre's luminosities are given in. Its transmission is the
+//! share of a source's light in the band that passes, T = ∫ `F_E` e^(−σ(E) `N_H`) dE ÷ ∫ `F_E` dE,
+//! and [`xray_optical_depth`] is the band's effective depth, −ln T. Its parts:
+//!
+//! - **The cross-section.** σ(E) is Morrison and McCammon's (1983, ApJ 270, 119, Table 2)
+//!   photoelectric cross-section per hydrogen atom, plus Thomson scattering by 1.2 electrons per
+//!   hydrogen atom, since a photon scattered out of a point source's beam is lost to it. Wilms,
+//!   Allen and McCray (2000, ApJ 542, 914, §3.3) hold that "Thomson scattering should always be
+//!   included in the modeling process when NH ≳ 10²² cm⁻²". σ falls steeply across the band:
+//!   σ(5 keV) is 0.082 of σ(2 keV) and σ(10 keV) 0.022, and the iron K edge at 7.111 keV lifts it
+//!   1.87 times.
+//! - **The source.** A power law of photon index Γ = 2, flat in ν`F_ν`, so that `F_E` ∝ E⁻¹ and the
+//!   band's weights are pure geometry in ln E. It is the centre's flares' own spectrum: "We assume
+//!   that all flares have the same Γ = 2 power law X-ray spectrum" (Neilsen et al. 2013, ApJ 774,
+//!   42, §3). The spectrum matters far less than the energy: at `A_V` = 30 mag, photoelectric
+//!   only, T is 0.715 for Γ = 1.5 and 0.595 for Γ = 2.5, against 0.657 for Γ = 2.
+//! - **The rule.** A 3-point Gauss–Legendre rule in ln E on each of MM83's six intervals from 2 to
+//!   10 keV, 18 fixed nodes, split at the table's breaks, which are absorption edges. It matches a
+//!   converged integral to 5 × 10⁻⁵ at every `A_V` from 0.1 to 200 mag; the same 18 nodes in one
+//!   rule across the band err by about 4 × 10⁻³ and converge only slowly across the iron edge. The
+//!   beam hardens as the column grows (the energy
+//!   whose depth is the band's climbs from 3.48 keV at `A_V` = 1 mag to 4.31 keV at 80), so no one
+//!   effective energy holds the band across columns.
+//!
+//! The band's depth is 1 at `A_V` = 88.47 mag (`N_H` = 1.655 × 10²³ cm⁻²); without the scattering
+//! it would be at 112.31 mag. It is 0.223 at `A_V` = 12.43 mag, where the 2 keV cross-section alone
+//! would reach 1. At low columns it is about ⟨σ⟩ `N_H`, with ⟨σ⟩ = 1.0775 × 10⁻²³ cm², of which
+//! 9.977 × 10⁻²⁴ is photoelectric. The electron scattering, 7.4% of ⟨σ⟩, and hydrogen and helium's
+//! own absorption (whose share in MM83's figures was not read) do not follow metallicity, so in
+//! metal-poor gas the depth reads somewhat low. A console that wants soft and hard bands, or a
+//! source's own spectrum, replaces the nodes (plan 12's Risks, "The X-ray band").
 
 use std::f64::consts::PI;
 
@@ -63,39 +88,244 @@ use super::AlertContext;
 /// cube lie apart and so the cap on a reach (Design note 5).
 pub const ROOT_CUBE_DIAGONAL: LightYears = LightYears::new(227_023.363_449_667_87);
 
-/// Morrison and McCammon's (1983, ApJ 270, 119, Table 2) fit of the photoelectric cross-section
-/// per hydrogen atom on 1.840–2.471 keV, σ(E) = (c₀ + c₁E + c₂E²) E⁻³ × 10⁻²⁴ cm², E in keV.
-const MM83_C0: f64 = 202.7;
-const MM83_C1: f64 = 104.7;
-const MM83_C2: f64 = -17.0;
+/// One row of Morrison and McCammon's (1983) Table 2: their fit of the photoelectric cross-section
+/// per hydrogen atom on one interval of energy.
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "MM83's rows are the stored nodes' source record, which a test recomputes to the bit"
+    )
+)]
+struct Mm83Row {
+    /// The interval's lower end, keV.
+    from_kev: f64,
+    /// The interval's upper end, keV.
+    to_kev: f64,
+    /// `c₀`, `c₁` and `c₂` of σ(E) = (`c₀` + `c₁`E + `c₂`E²) E⁻³ × 10⁻²⁴ cm², E in keV.
+    coefficients: [f64; 3],
+}
 
-/// The X-ray band's energy, keV: 2 (Design note 14).
-const XRAY_ENERGY_KEV: f64 = 2.0;
+impl Mm83Row {
+    /// σ at `kev`, cm².
+    #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "MM83's rows are the stored nodes' source record, which a test recomputes to the bit"
+        )
+    )]
+    fn cross_section_cm2(&self, kev: f64) -> f64 {
+        let [c0, c1, c2] = self.coefficients;
+        (c0 + c1 * kev + c2 * kev * kev) / (kev * kev * kev) * 1e-24
+    }
+}
 
-/// `σ_X`, the photoelectric cross-section per hydrogen atom at 2 keV, cm²: 4.301 × 10⁻²³.
+/// The X-ray band, keV: 2–10, the band the centre's flares and tails are given in (Design note
+/// 14).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "MM83's rows are the stored nodes' source record, which a test recomputes to the bit"
+    )
+)]
+const XRAY_BAND_KEV: (f64, f64) = (2.0, 10.0);
+
+/// The rows of Morrison and McCammon's (1983, ApJ 270, 119, Table 2) fit that cover the X-ray band,
+/// 1.840–10 keV, broken at the K edges of sulphur, argon, calcium, iron and nickel.
 ///
-/// Morrison and McCammon's (1983, ApJ 270, 119, Table 2) fit on 1.840–2.471 keV, (202.7 + 104.7 E −
-/// 17.0 E²) E⁻³ × 10⁻²⁴ cm², which is 344.1 ÷ 8 × 10⁻²⁴ at E = 2 keV: neutral atomic gas of Anders
-/// and Ebihara's (1982) abundances, with helium at 0.10 by number (their Table 1), every element in
-/// the gas phase; grains, which the fit leaves out (their §III), would lower it slightly above 1
-/// keV. It is the cross-section with which Predehl and Schmitt (1995, A&A 293, 889) measured `N_H`
-/// ÷ `A_V` = 1.79 × 10²¹ cm⁻² mag⁻¹ from X-ray haloes (their abstract; their use of it was not
-/// read, but Zhu et al. 2017's Table 3 lists Anders and Ebihara's abundances for them), 4% under
-/// plan 07's [`HYDROGEN_COLUMN_PER_MAG`], which the depth uses so that the X-ray band follows the
-/// dust's metallicity as the photometric bands do; Güver and Özel (2009, MNRAS 400, 2050) give 2.21
-/// × 10²¹. With it `τ_X` = 1 at `N_H` = 2.325 × 10²² cm⁻², `A_V` = 12.43 mag. Wilms, Allen and
-/// McCray (2000, ApJ 542, 914), the other candidate the plan names, take lower interstellar
-/// abundances and so a smaller cross-section. Part of the generator version (Design note 14).
-pub const XRAY_CROSS_SECTION_CM2: f64 =
-    (MM83_C0 + MM83_C1 * XRAY_ENERGY_KEV + MM83_C2 * XRAY_ENERGY_KEV * XRAY_ENERGY_KEV)
-        / (XRAY_ENERGY_KEV * XRAY_ENERGY_KEV * XRAY_ENERGY_KEV)
-        * 1e-24;
+/// The fit is for neutral atomic gas of Anders and Ebihara's (1982) abundances, with helium at
+/// 0.10 by number (their Table 1), every element in the gas phase; grains, which the fit leaves
+/// out (their §III), would lower it slightly above 1 keV. σ(2 keV) is 4.30125 × 10⁻²³ cm². Every
+/// row from 1.303 to 10 keV was read at source on 2026-10-30 (plan 12's Risks, "P12.T5.a.2's
+/// citations, checked at source"). It is the cross-section with which Predehl and Schmitt (1995,
+/// A&A 293, 889) measured `N_H` ÷ `A_V` = 1.79 × 10²¹ cm⁻² mag⁻¹ from X-ray haloes (their
+/// abstract; their use of it was not read, but Zhu et al. 2017's Table 3 lists Anders and
+/// Ebihara's abundances for them), 4% under plan 07's [`HYDROGEN_COLUMN_PER_MAG`], which the depth
+/// uses so that the X-ray band follows the dust's metallicity as the photometric bands do; Güver
+/// and Özel (2009, MNRAS 400, 2050) give 2.21 × 10²¹. Wilms, Allen and McCray (2000) take
+/// interstellar abundances 20–30% lower in metals (their §2.3), which move σ by up to 30% (their
+/// Fig. 2); their calibrations of `N_H` ÷ `A_V` differ too, so a move to them changes the
+/// cross-section and the ratio together. Part of the generator version (Design note 14).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "MM83's rows are the stored nodes' source record, which a test recomputes to the bit"
+    )
+)]
+const MM83_ROWS: [Mm83Row; 6] = [
+    Mm83Row {
+        from_kev: 1.840,
+        to_kev: 2.471,
+        coefficients: [202.7, 104.7, -17.0],
+    },
+    Mm83Row {
+        from_kev: 2.471,
+        to_kev: 3.210,
+        coefficients: [342.7, 18.7, 0.0],
+    },
+    Mm83Row {
+        from_kev: 3.210,
+        to_kev: 4.038,
+        coefficients: [352.2, 18.7, 0.0],
+    },
+    Mm83Row {
+        from_kev: 4.038,
+        to_kev: 7.111,
+        coefficients: [433.9, -2.4, 0.75],
+    },
+    Mm83Row {
+        from_kev: 7.111,
+        to_kev: 8.331,
+        coefficients: [629.0, 30.9, 0.0],
+    },
+    Mm83Row {
+        from_kev: 8.331,
+        to_kev: 10.0,
+        coefficients: [701.2, 25.2, 0.0],
+    },
+];
 
-/// The X-ray band's optical depth along `sightline`, `σ_X` × `A_V` × `N_H` ÷ `A_V` (module
-/// documentation; Design note 14): 1 at `A_V` = 12.43 mag.
+/// The Thomson cross-section, cm²: 6.652 458 732 1 × 10⁻²⁵ (CODATA 2018).
+const THOMSON_CROSS_SECTION_CM2: f64 = 6.652_458_732_1e-25;
+
+/// The cross-section per hydrogen atom for electron scattering, cm²: Thomson's for 1.2 electrons,
+/// hydrogen's one and two for each of MM83's 0.10 helium atoms (the metals' few electrons are left
+/// out), 7.983 × 10⁻²⁵, 0.84 of MM83's photoelectric σ at 10 keV. Part of the generator version
+/// (Design note 14).
+const ELECTRON_SCATTERING_CM2: f64 = 1.2 * THOMSON_CROSS_SECTION_CM2;
+
+/// One node of the X-ray band's rule (module documentation).
+#[derive(Debug, Clone, Copy)]
+struct BandNode {
+    /// The photon energy, keV.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "MM83's rows are the stored nodes' source record, which a test recomputes to the bit"
+        )
+    )]
+    energy_kev: f64,
+    /// MM83's photoelectric cross-section per hydrogen atom at it, cm².
+    photoelectric_cm2: f64,
+    /// Its share of a Γ = 2 source's light in the band: its Gauss weight times its interval's
+    /// half-width in ln E, over ln 5, the band's width in ln E.
+    weight: f64,
+}
+
+/// The X-ray band's 18 nodes, three to each of MM83's intervals between 2 and 10 keV in order:
+/// abscissae 0 and ±√(3 ÷ 5) about each interval's middle in ln E, with Gauss weights 8 ÷ 9 and
+/// 5 ÷ 9. Stored at full precision, and recomputed from [`MM83_ROWS`], the band and the rule to
+/// the bit by a test. Part of the generator version (Design note 14).
+const XRAY_BAND_NODES: [BandNode; 18] = [
+    BandNode {
+        energy_kev: 2.048_239_921_266_574,
+        photoelectric_cm2: 4.024_586_311_784_488e-23,
+        weight: 0.036_499_241_410_916_226,
+    },
+    BandNode {
+        energy_kev: 2.223_060_952_830_578_7,
+        photoelectric_cm2: 3.198_877_977_037_274_5e-23,
+        weight: 0.058_398_786_257_465_95,
+    },
+    BandNode {
+        energy_kev: 2.412_803_279_873_583_7,
+        photoelectric_cm2: 2.536_965_947_538_362_2e-23,
+        weight: 0.036_499_241_410_916_226,
+    },
+    BandNode {
+        energy_kev: 2.544_950_229_167_251_4,
+        photoelectric_cm2: 2.367_828_138_384_427_8e-23,
+        weight: 0.045_158_624_793_100_93,
+    },
+    BandNode {
+        energy_kev: 2.816_364_678_091_244_6,
+        photoelectric_cm2: 1.769_834_568_727_895_4e-23,
+        weight: 0.072_253_799_668_961_48,
+    },
+    BandNode {
+        energy_kev: 3.116_724_998_820_684_4,
+        photoelectric_cm2: 1.324_433_767_226_261_7e-23,
+        weight: 0.045_158_624_793_100_93,
+    },
+    BandNode {
+        energy_kev: 3.294_101_864_674_752_6,
+        photoelectric_cm2: 1.157_654_866_912_049_2e-23,
+        weight: 0.039_606_405_609_724_79,
+    },
+    BandNode {
+        energy_kev: 3.600_274_989_497_330_5,
+        photoelectric_cm2: 8.989_819_519_079_599e-24,
+        weight: 0.063_370_248_975_559_66,
+    },
+    BandNode {
+        energy_kev: 3.934_905_638_165_448_6,
+        photoelectric_cm2: 6.988_517_891_769_793e-24,
+        weight: 0.039_606_405_609_724_79,
+    },
+    BandNode {
+        energy_kev: 4.303_921_759_345_932,
+        photoelectric_cm2: 5.487_172_528_050_363e-24,
+        weight: 0.097_669_254_008_701_08,
+    },
+    BandNode {
+        energy_kev: 5.358_564_919_826_949,
+        photoelectric_cm2: 2.876_348_430_949_380_2e-24,
+        weight: 0.156_270_806_413_921_71,
+    },
+    BandNode {
+        energy_kev: 6.671_640_333_063_05,
+        photoelectric_cm2: 1.519_636_425_002_907_3e-24,
+        weight: 0.097_669_254_008_701_08,
+    },
+    BandNode {
+        energy_kev: 7.239_036_605_696_263,
+        photoelectric_cm2: 2.247_744_439_620_473e-24,
+        weight: 0.027_328_487_871_464_805,
+    },
+    BandNode {
+        energy_kev: 7.696_865_660_773_872,
+        photoelectric_cm2: 1.901_051_102_325_887_7e-24,
+        weight: 0.043_725_580_594_343_68,
+    },
+    BandNode {
+        energy_kev: 8.183_649_873_159_059,
+        photoelectric_cm2: 1.609_036_152_652_923_4e-24,
+        weight: 0.027_328_487_871_464_805,
+    },
+    BandNode {
+        energy_kev: 8.504_224_167_742_93,
+        photoelectric_cm2: 1.488_529_031_979_271_1e-24,
+        weight: 0.031_515_764_083_870_024,
+    },
+    BandNode {
+        energy_kev: 9.127_431_182_978_048,
+        photoelectric_cm2: 1.224_623_304_392_597e-24,
+        weight: 0.050_425_222_534_192_02,
+    },
+    BandNode {
+        energy_kev: 9.796_308_088_396_854,
+        photoelectric_cm2: 1.008_443_819_266_103_6e-24,
+        weight: 0.031_515_764_083_870_024,
+    },
+];
+
+/// The X-ray band's effective optical depth along `sightline`, −ln T, T the share of a Γ = 2
+/// source's 2–10 keV light that passes (module documentation; Design note 14).
 ///
-/// It reads the line's dust, never its hydrogen column, so the hot gas of the corona and of a
-/// superbubble adds nothing to it.
+/// T = Σₖ wₖ e^(−(σₖ + `σ_e`) `N_H`) ÷ Σₖ wₖ over the band's 18 nodes, each with MM83's
+/// photoelectric σₖ and the electron scattering `σ_e`, at the column `N_H` = `A_V` ×
+/// [`HYDROGEN_COLUMN_PER_MAG`]; dividing by the weights' own sum makes a clear line's depth 0
+/// exactly. The depth is 1 at `A_V` = 88.47 mag and 0.223 at 12.43 mag, and about ⟨σ⟩ `N_H` with
+/// ⟨σ⟩ = 1.0775 × 10⁻²³ cm² at low columns. It reads the line's dust, never its hydrogen column,
+/// so the hot gas of the corona and of a superbubble adds nothing to it: that gas's free electrons
+/// would scatter, but at a depth of 8 × 10⁻⁴ per 10²¹ cm⁻² of ionised column, which is left out. It
+/// costs 18 exponentials, summed in a fixed order.
 ///
 /// # Examples
 ///
@@ -115,7 +345,7 @@ pub const XRAY_CROSS_SECTION_CM2: f64 =
 /// let (sun, star) = (at([0.0, 26_000.0, 20.0]), at([0.0, 16_000.0, 20.0]));
 /// let line =
 ///     sightline(galaxy.gas(), &sun, &star, NoiseMode::Mean, Quality::Full, &[], &mut cache);
-/// // X-rays at 2 keV pass where visual light does not.
+/// // X-rays of 2–10 keV pass where visual light does not.
 /// assert!(xray_optical_depth(&line) < 0.1 * line.a_v().value());
 /// let visual = transmission(&line, AlertBand::Photometric(Band::V));
 /// assert!(transmission(&line, AlertBand::XRay) > visual);
@@ -125,10 +355,20 @@ pub fn xray_optical_depth(sightline: &Sightline) -> f64 {
     xray_depth_of(sightline.a_v())
 }
 
-/// `τ_X` at visual extinction `a_v`.
+/// The X-ray band's depth at visual extinction `a_v`.
 #[must_use]
 fn xray_depth_of(a_v: Magnitudes) -> f64 {
-    XRAY_CROSS_SECTION_CM2 * a_v.value() * HYDROGEN_COLUMN_PER_MAG
+    let column = a_v.value() * HYDROGEN_COLUMN_PER_MAG;
+    let (weights, passed) = XRAY_BAND_NODES
+        .iter()
+        .fold((0.0, 0.0), |(weights, passed), node| {
+            let depth = (node.photoelectric_cm2 + ELECTRON_SCATTERING_CM2) * column;
+            (
+                weights + node.weight,
+                passed + node.weight * math::exp(-depth),
+            )
+        });
+    math::ln(weights / passed)
 }
 
 /// The share of a band's light that `sightline` lets through: 10^(−0.4 `A_band`) in a photometric
@@ -218,7 +458,9 @@ pub fn kind_reach(kind: TransientKind, sensor: &SensorHorizon) -> LightYears {
 /// are not local.
 ///
 /// It is zero for a class none of whose kinds is built, which is true while no event of the class
-/// can be generated.
+/// can be generated. A walked class's bounds are constants (a test holds them), so only the
+/// centre's victims, whose bound needs the galaxy, reach the diagonal whatever the sensor's limits;
+/// a walked class reaches it only when its bound is bright enough for them.
 ///
 /// # Examples
 ///
@@ -392,10 +634,16 @@ mod tests {
             class_reach(ClassId::TIDAL_DISRUPTION_VICTIM, &both),
             ROOT_CUBE_DIAGONAL
         );
+        // The luminous blue variables' giant eruptions are built, though their class's process is
+        // not: the class reaches as far as its eruptions do.
+        assert_eq!(
+            class_reach(ClassId::LUMINOUS_BLUE_VARIABLE, &both),
+            kind_reach(TransientKind::GiantEruption, &both)
+        );
+        assert!(class_reach(ClassId::LUMINOUS_BLUE_VARIABLE, &both) > LightYears::ZERO);
         for class in [
             ClassId::STELLAR_MERGER,
             ClassId::NEUTRON_STAR_MERGER,
-            ClassId::LUMINOUS_BLUE_VARIABLE,
             ClassId::XRAY_BINARY,
             ClassId::ACCRETING_WHITE_DWARF,
             ClassId::ACCRETING_WHITE_DWARF_SLOW,
@@ -472,12 +720,165 @@ mod tests {
         assert_eq!(flux(nova, Metres::ZERO, &Sightline::ZERO, V), None);
     }
 
-    /// The X-ray depth is 1 at the `A_V` the documentation states from `σ_X`, 12.43 mag, and is the
-    /// line's `A_V` through it.
+    /// The band's nodes recomputed from MM83's rows, the band's ends and the 3-point rule.
+    fn recomputed_nodes() -> Vec<BandNode> {
+        let (low, high) = XRAY_BAND_KEV;
+        let width = math::ln(high / low);
+        let offset = (3.0_f64 / 5.0).sqrt();
+        MM83_ROWS
+            .iter()
+            .flat_map(|row| {
+                let from = math::ln(row.from_kev.max(low));
+                let to = math::ln(row.to_kev.min(high));
+                let (middle, half) = (f64::midpoint(from, to), (to - from) / 2.0);
+                [(-offset, 5.0 / 9.0), (0.0, 8.0 / 9.0), (offset, 5.0 / 9.0)].map(|(x, gauss)| {
+                    let energy_kev = math::exp(middle + half * x);
+                    BandNode {
+                        energy_kev,
+                        photoelectric_cm2: row.cross_section_cm2(energy_kev),
+                        weight: gauss * half / width,
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// The stored nodes are the rule's over MM83's rows to the bit, the rows cover the band without
+    /// a gap, the weights sum to 1, and the figures the documentation quotes hold: σ(2 keV), the
+    /// fall of σ across the band and the iron edge's step.
+    #[test]
+    fn the_band_nodes_are_the_rule_over_mm83s_rows() {
+        let nodes = recomputed_nodes();
+        assert_eq!(nodes.len(), XRAY_BAND_NODES.len());
+        for (stored, recomputed) in XRAY_BAND_NODES.iter().zip(&nodes) {
+            assert_same_bits(stored.energy_kev, recomputed.energy_kev);
+            assert_same_bits(stored.photoelectric_cm2, recomputed.photoelectric_cm2);
+            assert_same_bits(stored.weight, recomputed.weight);
+        }
+        for pair in MM83_ROWS.windows(2) {
+            assert_same_bits(pair[0].to_kev, pair[1].from_kev);
+        }
+        let (low, high) = XRAY_BAND_KEV;
+        assert!(MM83_ROWS[0].from_kev < low && MM83_ROWS[0].to_kev > low);
+        assert_same_bits(MM83_ROWS[5].to_kev, high);
+        let weights = XRAY_BAND_NODES
+            .iter()
+            .fold(0.0, |sum, node| sum + node.weight);
+        assert!((weights - 1.0).abs() < 1e-15, "{weights}");
+        // The advice's six figures of the first and last nodes.
+        let (first, last) = (XRAY_BAND_NODES[0], XRAY_BAND_NODES[17]);
+        assert!((first.energy_kev / 2.048_240 - 1.0).abs() < 1e-6);
+        assert!((first.photoelectric_cm2 / 4.024_586e-23 - 1.0).abs() < 1e-6);
+        assert!((last.energy_kev / 9.796_308 - 1.0).abs() < 1e-6);
+        assert!((last.weight / 0.031_515_764 - 1.0).abs() < 1e-8);
+
+        let sigma = |kev: f64| {
+            let row = MM83_ROWS
+                .iter()
+                .find(|row| row.from_kev <= kev && kev < row.to_kev)
+                .unwrap_or(&MM83_ROWS[5]);
+            row.cross_section_cm2(kev)
+        };
+        let at_2 = sigma(2.0);
+        assert!((at_2 / 4.301_25e-23 - 1.0).abs() < 1e-6, "{at_2:e}");
+        assert!((sigma(5.0) / at_2 - 0.082).abs() < 5e-4);
+        assert!((sigma(10.0) / at_2 - 0.022).abs() < 5e-4);
+        let edge = MM83_ROWS[4].cross_section_cm2(7.111) / MM83_ROWS[3].cross_section_cm2(7.111);
+        assert!((edge - 1.87).abs() < 5e-3, "{edge}");
+        // The scattering is 0.84 of MM83's σ at 10 keV.
+        assert!((ELECTRON_SCATTERING_CM2 / 7.983e-25 - 1.0).abs() < 1e-4);
+        let top = MM83_ROWS[5].cross_section_cm2(high);
+        assert!(
+            (ELECTRON_SCATTERING_CM2 / top - 0.84).abs() < 5e-3,
+            "{top:e}"
+        );
+    }
+
+    /// The band's transmission at `a_v` by a converged rule: Simpson's in ln E, 2,000 steps on each
+    /// of MM83's intervals in the band.
+    fn converged_transmission(a_v: f64) -> f64 {
+        let (low, high) = XRAY_BAND_KEV;
+        let column = a_v * HYDROGEN_COLUMN_PER_MAG;
+        let steps = 2_000_u32;
+        let passed = MM83_ROWS.iter().fold(0.0, |sum, row| {
+            let from = math::ln(row.from_kev.max(low));
+            let to = math::ln(row.to_kev.min(high));
+            let step = (to - from) / f64::from(steps);
+            let simpson = (0..=steps).fold(0.0, |total, i| {
+                let kev = math::exp(math::mul_add(step, f64::from(i), from));
+                let factor = if i == 0 || i == steps {
+                    1.0
+                } else if i % 2 == 1 {
+                    4.0
+                } else {
+                    2.0
+                };
+                let depth = (row.cross_section_cm2(kev) + ELECTRON_SCATTERING_CM2) * column;
+                total + factor * math::exp(-depth)
+            });
+            sum + simpson * step / 3.0
+        });
+        passed / math::ln(high / low)
+    }
+
+    /// The 18-node transmission is the converged integral's to 5 × 10⁻⁵ from 0.1 to 200 mag, and
+    /// both are pinned to six figures at 1, 12.43, 30 and 50 mag.
+    #[test]
+    fn the_band_transmission_matches_a_converged_integral() {
+        let band = |a_v| math::exp(-xray_depth_of(Magnitudes::new(a_v)));
+        for (a_v, pinned, converged) in [
+            (1.0, 0.980_239, 0.980_239),
+            (12.43, 0.800_478, 0.800_478),
+            (30.0, 0.628_037, 0.628_038),
+            (50.0, 0.506_926, 0.506_927),
+        ] {
+            let (nodes, reference) = (band(a_v), converged_transmission(a_v));
+            assert!((nodes - pinned).abs() < 5e-7, "{a_v} mag: {nodes}");
+            assert!(
+                (reference - converged).abs() < 5e-7,
+                "{a_v} mag: {reference}"
+            );
+        }
+        for a_v in [0.1, 1.0, 3.0, 10.0, 12.43, 30.0, 50.0, 80.0, 120.0, 200.0] {
+            let (nodes, reference) = (band(a_v), converged_transmission(a_v));
+            assert!(
+                (nodes - reference).abs() < 5e-5,
+                "{a_v} mag: {nodes} against {reference}"
+            );
+        }
+    }
+
+    /// The X-ray band's depth is 1 at the `A_V` its documentation states, 88.47 mag, and at 112.31
+    /// mag without the electron scattering; it is 0.223 at 12.43 mag, ⟨σ⟩ `N_H` at low columns, 0
+    /// on a clear line, and the line's `A_V` through it.
     #[test]
     fn the_xray_depth_is_unity_at_its_stated_visual_extinction() {
-        assert!((xray_depth_of(Magnitudes::new(12.43)) - 1.0).abs() < 5e-4);
-        assert!((XRAY_CROSS_SECTION_CM2 / 4.301e-23 - 1.0).abs() < 1e-4);
+        assert!((xray_depth_of(Magnitudes::new(88.47)) - 1.0).abs() < 1e-4);
+        assert!((88.47 * HYDROGEN_COLUMN_PER_MAG / 1.655e23 - 1.0).abs() < 1e-3);
+        let photoelectric = |a_v: f64| {
+            let column = a_v * HYDROGEN_COLUMN_PER_MAG;
+            let passed = XRAY_BAND_NODES.iter().fold(0.0, |sum, node| {
+                sum + node.weight * math::exp(-node.photoelectric_cm2 * column)
+            });
+            -math::ln(passed)
+        };
+        assert!((photoelectric(112.31) - 1.0).abs() < 1e-4);
+        assert!((xray_depth_of(Magnitudes::new(12.43)) - 0.223).abs() < 5e-4);
+        let thin = 1e-3;
+        let mean = xray_depth_of(Magnitudes::new(thin)) / (thin * HYDROGEN_COLUMN_PER_MAG);
+        assert!((mean / 1.0775e-23 - 1.0).abs() < 1e-4, "{mean:e}");
+        let absorbed = mean - ELECTRON_SCATTERING_CM2;
+        assert!((absorbed / 9.977e-24 - 1.0).abs() < 1e-4, "{absorbed:e}");
+        assert!((ELECTRON_SCATTERING_CM2 / mean - 0.074).abs() < 5e-4);
+        assert_same_bits(xray_depth_of(Magnitudes::ZERO), 0.0);
+        // The depth's bits, so that a rewrite of its arithmetic cannot move them unseen.
+        for (a_v, depth) in [
+            (1.0, 0.019_958_823_100_035_057),
+            (12.43, 0.222_546_314_279_996_58),
+            (88.47, 0.999_966_861_511_217_4),
+        ] {
+            assert_same_bits(xray_depth_of(Magnitudes::new(a_v)), depth);
+        }
         let galaxy = Galaxy::new(Seed::new(42));
         let mut cache = NoiseCache::with_capacity(4_096);
         let line = sightline(

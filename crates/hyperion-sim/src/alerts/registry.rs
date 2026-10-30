@@ -1,48 +1,70 @@
 //! The registry of transient kinds: one row per [`TransientKind`] with its classes, how its events
 //! are found, the bound on its peak luminosity in each band, its longest duration and its light
-//! curve (plan 12, P12.T5.a).
+//! curve (plan 12, P12.T5.a and P12.T5.a.2).
 //!
 //! The rows read their sources' own constants where the sources state them. Plan 09's supernova
-//! templates state no peak, so their two bounds are restated here and held to the templates by a
-//! test. The seven rows that are built:
+//! templates and plan 06's giant eruptions and magnetar outbursts state no peak, so their bounds
+//! are restated here and held to their sources by tests. The nine rows that are built:
 //!
-//! | Kind                | Route    | Photometric     | X-ray           | D        | Curve      |
-//! | ------------------- | -------- | --------------- | --------------- | -------- | ---------- |
-//! | `CoreCollapse`      | one-shot | 10³⁸ W          | none            | unending | supernova  |
-//! | `TypeIa`            | one-shot | 1.0730 × 10³⁶ W | none            | unending | supernova  |
-//! | `TidalDisruption`   | centre   | `L_Edd` of M•   | `L_Edd` ÷ 15.8  | unending | tail       |
-//! | `CentralFlare`      | centre   | none            | 3.5965 × 10²⁸ W | 8,175 s  | flare      |
-//! | `Flare`             | local    | per host        | none            | 1 day    | star flare |
-//! | `FuOrionisOutburst` | local    | per host        | none            | 500 yr   | outburst   |
-//! | `Glitch`            | local    | none            | none            | instant  | none       |
+//! | Kind                | Route     | Photometric     | X-ray           | D        | Curve      |
+//! | ------------------- | --------- | --------------- | --------------- | -------- | ---------- |
+//! | `CoreCollapse`      | one-shot  | 10³⁸ W          | none            | unending | supernova  |
+//! | `TypeIa`            | one-shot  | 1.0730 × 10³⁶ W | none            | unending | supernova  |
+//! | `GiantEruption`     | recurrent | 1.2106 × 10³⁴ W | none            | 20 yr    | eruption   |
+//! | `TidalDisruption`   | centre    | `L_Edd` of M•   | `L_Edd` ÷ 15.8  | unending | tail       |
+//! | `CentralFlare`      | centre    | none            | 3.5965 × 10²⁸ W | 8,175 s  | flare      |
+//! | `Flare`             | local     | per host        | none            | 1 day    | star flare |
+//! | `Glitch`            | local     | none            | none            | instant  | none       |
+//! | `MagnetarBurst`     | recurrent | none            | 5 × 10⁴⁰ W      | 3 s      | top hat    |
+//! | `FuOrionisOutburst` | local     | per host        | none            | 500 yr   | outburst   |
 //!
-//! The other nine wait on their sources (below): `LuminousRedNova` and `Kilonova` (one-shot),
-//! `Nova`, `XrayTransient` and `BeXOutburst` (recurrent) and `DwarfNova` and `XrayBurst` (local) on
-//! P11.T9, `GiantEruption` (recurrent) on P06.T28.e, and `MagnetarBurst` (local) on P06.T28.c.
+//! The other seven wait on plan 11's sources, P11.T9 (below): `LuminousRedNova` and `Kilonova`
+//! (one-shot), `Nova`, `XrayTransient` and `BeXOutburst` (recurrent) and `DwarfNova` and
+//! `XrayBurst` (local).
 //!
 //! A kind's hosts are a class's ([`TransientRow::classes`]): the supernovae are the two supernova
 //! classes', plan 11's kinds its classes' (novae and dwarf novae both accreting white dwarf
-//! classes'), the giant eruptions the luminous blue variables' and the disruptions their victims'.
-//! The centre's flares and the local kinds of ordinary stars have none.
+//! classes'), the giant eruptions the luminous blue variables', the magnetar outbursts the core
+//! collapses', whose neutron stars the magnetars are, and the disruptions their victims'. The
+//! centre's flares and the local kinds of ordinary stars have none.
 //!
 //! # Rows whose source is not built
 //!
-//! Plan 11's light curves and X-ray luminosities (P11.T9), plan 06's magnetar bursts and giant
-//! flares (P06.T28.c) and its LBV giant eruptions (P06.T28.e) do not exist yet. Their rows keep
-//! their kind, classes and route, and every other part is `None`, with
-//! [`TransientRow::pending`] naming the task whose source fills it (the galaxy plans' slice rule).
-//! Such a kind has no bound, so it adds nothing to its classes' reach, which is true while no event
-//! of it can be generated; the task that fills the row raises the reach.
+//! Plan 11's light curves and X-ray luminosities (P11.T9) do not exist yet. Their rows keep their
+//! kind, classes and route, and every other part is `None`, with [`TransientRow::pending`] naming
+//! the task whose source fills it (the galaxy plans' slice rule). Such a kind has no bound, so it
+//! adds nothing to its classes' reach, which is true while no event of it can be generated; the
+//! task that fills the row raises the reach.
+//!
+//! The giant eruptions' row is built from its source, plan 06's (P06.T28.e), though their class's
+//! process (P09.T43) is not. So the luminous blue variables have a reach, and the walk (P12.T5.c)
+//! finds no hosts in it until the process is built (plan 12's Risks, "P12.T5.a.2 as built").
+//!
+//! # Magnetars
+//!
+//! A magnetar's short bursts and giant flares are seen across the Galaxy, so their kind is walked
+//! with the core collapses that leave the neutron stars, not found locally (main's ruling of
+//! 2026-10-30; plan 12's Risks, "P12.T5.a.2 as built"). A magnetar's events are keyed by its body,
+//! so a detection is the same event whichever query finds it. Giant flares take no kind of their
+//! own; the event's series tells them from short bursts. A magnetar is active for under 227,273
+//! years after its birth, so the route is complete for observers within 34,871 ly whatever the
+//! entry's window. Beyond that an entry with a short window can leave the class while its magnetar
+//! is still active, a recorded finding. Plan 06's thermal pulses take no kind: their light rises
+//! a tenth of a dex over 0.5% of the interpulse period ([`thermal_pulse::RAPID_PEAK_DEX`] over
+//! half of [`thermal_pulse::RAPID_PEAK_SHARE`], the module's provisional figures), half a year
+//! for a 100-year period, which a sensor sees through the star's own observed state. Shorter
+//! periods, which the census has, rise faster but no higher.
 //!
 //! # The bands
 //!
 //! The photometric bound bounds a kind's luminosity in any of plan 07's bands. Where the source is
-//! bolometric (the supernova templates, the tails' bolometric light, the star flares and the FU
-//! Orionis outbursts) the bound is the bolometric one, an upper bound on every band, so a reach
-//! from it errs long and the flux decides (Design note 5). The X-ray bound is filled only where the
-//! source models the 2–10 keV band itself: the centre's flares and its tails. The supernova
-//! templates' shock breakout radiates in X-rays and the ultraviolet, which the templates do not
-//! split out (plan 12's Risks, "P12.T5.a as built").
+//! bolometric (the supernova templates, the tails' bolometric light, the giant eruptions, the star
+//! flares and the FU Orionis outbursts) the bound is the bolometric one, an upper bound on every
+//! band, so a reach from it errs long and the flux decides (Design note 5). The X-ray bound is
+//! filled where the source models the 2–10 keV band itself, the centre's flares and its tails,
+//! and for the magnetars, whose energies are the event's whole output, so that their bound bounds
+//! the band too. The supernova templates' shock breakout radiates in X-rays and the ultraviolet,
+//! which the templates do not split out (plan 12's Risks, "P12.T5.a as built").
 //!
 //! # The centre's tails
 //!
@@ -57,7 +79,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::ClassId;
 use crate::galaxy::features::centre::events::flares as centre_flares;
 use crate::galaxy::features::centre::events::luminosity::{XRAY_SHARE, eddington_luminosity_watts};
-use crate::stellar::events::{flares, fu_orionis};
+use crate::stellar::events::{flares, fu_orionis, lbv, magnetar};
 use crate::time::Span;
 use crate::units::Watts;
 
@@ -68,7 +90,13 @@ use crate::galaxy::catalogue_classes::supernova::{LightCurve, SupernovaKind};
 #[cfg(doc)]
 use crate::galaxy::features::centre::events::{CentreFlare, DisruptionTail};
 #[cfg(doc)]
-use crate::stellar::events::{flares::Flare, fu_orionis::Outburst};
+use crate::stellar::events::{
+    flares::Flare,
+    fu_orionis::Outburst,
+    lbv::Eruption,
+    magnetar::{Burst, GiantFlare},
+    thermal_pulse,
+};
 
 /// What went off: the kinds of event an alert reports (plan 12's Provides).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -103,7 +131,8 @@ pub enum TransientKind {
     Flare,
     /// A pulsar glitch (plan 06, P06.T28.b).
     Glitch,
-    /// A magnetar's burst or giant flare (plan 06, P06.T28.c).
+    /// A magnetar's short burst or giant flare, of a core collapse's neutron star (plan 06,
+    /// P06.T28.c).
     MagnetarBurst,
     /// An FU Orionis outburst of a young star (plan 06, P06.T28.d).
     FuOrionisOutburst,
@@ -181,7 +210,7 @@ pub enum Route {
     /// directly (P12.T5.b).
     OneShot,
     /// The recurrent events of a catalogue class's hosts, through plan 11's scan marks or plan
-    /// 09's class (P12.T5.c).
+    /// 09's class (P12.T5.c), plan 06's events on the core collapses' neutron stars among them.
     Recurrent,
     /// The galactic centre's: its black hole on plan 10's global list and its disruptions on the
     /// centre's feature-level list (P12.T5.d).
@@ -256,6 +285,14 @@ pub enum LightCurveSource {
     /// The outburst's own light, ([`Outburst::luminosity_factor_at`] − 1) times the star's
     /// quiescent luminosity: bolometric, above the star's (P06.T28.d).
     FuOrionisOutburst,
+    /// A giant eruption's own light, ([`Eruption::luminosity_factor_at`] − 1) times the star's
+    /// quiescent luminosity at the onset ([`Eruption::quiescent_luminosity`]): bolometric, above
+    /// the star's (P06.T28.e).
+    GiantEruption,
+    /// A magnetar's short burst or giant flare, a top hat at its mean luminosity over its duration
+    /// ([`Burst::mean_luminosity_watts`], [`GiantFlare::mean_luminosity_watts`]), since plan 06
+    /// gives no shape: the event's whole output, in no one band (P06.T28.c).
+    MagnetarBurst,
 }
 
 /// One kind's row of the registry (plan 12, P12.T5.a): its classes, how its events are found,
@@ -339,8 +376,7 @@ impl TransientRow {
     }
 
     /// The task whose source fills the row's bounds, duration and light curve, while it is not
-    /// built: `P11.T9` for plan 11's kinds, `P06.T28.c` for magnetar bursts, `P06.T28.e` for giant
-    /// eruptions.
+    /// built: `P11.T9`, for plan 11's kinds.
     #[must_use]
     pub const fn pending(&self) -> Option<&'static str> {
         match self.source {
@@ -405,6 +441,21 @@ pub const CORE_COLLAPSE_PEAK: Watts = Watts::new(1e38);
 /// 1.07291 × 10³⁶ W at 15.13 days ([`LightCurve::of`]), rounded up at the fifth figure. The Type
 /// Iax template peaks at 1.345 × 10³⁵ W. Bolometric.
 pub const TYPE_IA_PEAK: Watts = Watts::new(1.0730e36);
+
+/// The bound on a giant eruption's own light in any band, W: 1.2106 × 10³⁴, 10^7.5 L☉, the top of
+/// plan 06's law for its peak ([`lbv::LOG_PEAK_LUMINOSITY_SOLAR_LUMINOSITIES`]) with the IAU's
+/// nominal solar luminosity, 3.828 × 10²⁶ W, rounded up at the fifth figure. The eruption's own
+/// light is the drawn peak less the star's quiescent luminosity, so it stays under the bound. A
+/// constant, not a factor of the host's, since the peak law is absolute. Bolometric.
+pub const GIANT_ERUPTION_PEAK: Watts = Watts::new(1.2106e34);
+
+/// The bound on a magnetar outburst's luminosity in X-rays, W: 5 × 10⁴⁰ (5 × 10⁴⁷ erg/s), a giant
+/// flare's spike at the top of its energy law, 10⁴⁷ erg over [`magnetar::GIANT_FLARE_SPIKE`]'s 0.2
+/// s. A short burst reaches at most 2.512 × 10³⁶ W, 10⁴¹ erg over the 3.981 ms floor of its
+/// duration law. Plan 06's energies are the whole event's (main's ruling of 2026-10-30), so the
+/// bound bounds the 2–10 keV band too. The row has no photometric bound, since plan 06 models no
+/// optical light for them.
+pub const MAGNETAR_BURST_PEAK: Watts = Watts::new(5e40);
 
 /// Both classes of accreting white dwarf, the hosts of novae and dwarf novae.
 const ACCRETING_WHITE_DWARFS: ClassSet =
@@ -476,12 +527,17 @@ static ROWS: [TransientRow; 16] = [
         Route::Recurrent,
         "P11.T9",
     ),
-    TransientRow::pending_on(
-        TransientKind::GiantEruption,
-        ClassSet::of(ClassId::LUMINOUS_BLUE_VARIABLE),
-        Route::Recurrent,
-        "P06.T28.e",
-    ),
+    TransientRow {
+        kind: TransientKind::GiantEruption,
+        classes: ClassSet::of(ClassId::LUMINOUS_BLUE_VARIABLE),
+        route: Route::Recurrent,
+        source: RowSource::Built {
+            photometric: Some(PeakBound::Watts(GIANT_ERUPTION_PEAK)),
+            xray: None,
+            duration: LongestDuration::AtMost(lbv::MAX_DURATION),
+            light_curve: Some(LightCurveSource::GiantEruption),
+        },
+    },
     TransientRow {
         kind: TransientKind::TidalDisruption,
         classes: ClassSet::of(ClassId::TIDAL_DISRUPTION_VICTIM),
@@ -528,12 +584,17 @@ static ROWS: [TransientRow; 16] = [
             light_curve: None,
         },
     },
-    TransientRow::pending_on(
-        TransientKind::MagnetarBurst,
-        ClassSet::EMPTY,
-        Route::Local,
-        "P06.T28.c",
-    ),
+    TransientRow {
+        kind: TransientKind::MagnetarBurst,
+        classes: ClassSet::of(ClassId::CORE_COLLAPSE),
+        route: Route::Recurrent,
+        source: RowSource::Built {
+            photometric: None,
+            xray: Some(PeakBound::Watts(MAGNETAR_BURST_PEAK)),
+            duration: LongestDuration::AtMost(magnetar::MAX_BURST_DURATION),
+            light_curve: Some(LightCurveSource::MagnetarBurst),
+        },
+    },
     TransientRow {
         kind: TransientKind::FuOrionisOutburst,
         classes: ClassSet::EMPTY,
@@ -562,7 +623,11 @@ mod tests {
     use crate::math;
     use crate::stellar::remnant::SupernovaType;
     use crate::time::{SourceHorizon, UniverseTime};
-    use crate::units::{SolarMasses, SolarRadii, Years};
+    use crate::units::consts::SOLAR_LUMINOSITY_W;
+    use crate::units::{LightYears, SolarMasses, SolarRadii, WattsPerSquareMetre, Years};
+
+    use super::super::reach::{ROOT_CUBE_DIAGONAL, class_reach, kind_reach, reach};
+    use super::super::{BandLimits, SensorHorizon};
 
     #[test]
     fn every_kind_has_its_own_row_in_order() {
@@ -580,10 +645,7 @@ mod tests {
             let row = kind.row();
             let bounds = AlertBand::ALL.map(|band| row.peak_bound(band));
             if let Some(task) = row.pending() {
-                assert!(
-                    ["P11.T9", "P06.T28.c", "P06.T28.e"].contains(&task),
-                    "{kind:?}"
-                );
+                assert_eq!(task, "P11.T9", "{kind:?}");
                 assert!(bounds.iter().all(Option::is_none), "{kind:?}");
                 assert_eq!(row.duration(), None, "{kind:?}");
                 assert_eq!(row.light_curve(), None, "{kind:?}");
@@ -599,7 +661,7 @@ mod tests {
                 .into_iter()
                 .filter(|kind| kind.row().pending().is_some())
                 .count(),
-            9
+            7
         );
     }
 
@@ -748,6 +810,135 @@ mod tests {
             }
             assert!(tails > 10, "{tails} tails");
         }
+    }
+
+    /// The magnetar row bounds every short burst and giant flare. A burst's mean luminosity is at
+    /// most the energy law's top over the duration law's floor, 2.512 × 10³⁶ W; a giant flare's
+    /// spike at the top of its law is the bound, which its mean meets within rounding; and D
+    /// covers both.
+    #[test]
+    fn the_magnetar_row_bounds_every_burst_and_giant_flare() {
+        let row = TransientKind::MagnetarBurst.row();
+        assert_eq!(row.route(), Route::Recurrent);
+        assert_eq!(row.classes(), ClassSet::of(ClassId::CORE_COLLAPSE));
+        assert_eq!(
+            row.peak_bound(AlertBand::XRay),
+            Some(PeakBound::Watts(MAGNETAR_BURST_PEAK))
+        );
+        assert_eq!(row.peak_bound(AlertBand::Photometric(Band::V)), None);
+        let bound = MAGNETAR_BURST_PEAK.value();
+
+        // `Burst::mean_luminosity_watts` at the energy law's top and the shortest duration, which
+        // `Span::from_seconds_f64` floors to the nanosecond as a burst's is.
+        let floor = magnetar::BURST_DURATION_MEDIAN_SECONDS
+            * math::exp10(
+                -magnetar::BURST_DURATION_SIGMA_DEX * magnetar::BURST_DURATION_TRUNCATION,
+            );
+        let shortest = Span::from_seconds_f64(floor).unwrap();
+        let burst = magnetar::BURST_ENERGY_JOULES.1 / shortest.as_seconds_f64();
+        assert!((burst / 2.512e36 - 1.0).abs() < 1e-3, "{burst:e} W");
+        assert!(burst <= bound, "{burst:e} W");
+
+        // `GiantFlare::mean_luminosity_watts` at the energy law's top: `1e40 / 0.2` in f64.
+        let giant =
+            magnetar::GIANT_FLARE_ENERGY_JOULES.1 / magnetar::GIANT_FLARE_SPIKE.as_seconds_f64();
+        assert!(giant <= bound, "{giant:e} W");
+        assert!(giant / bound > 0.999_999, "{giant:e} W");
+
+        assert_eq!(
+            row.duration(),
+            Some(LongestDuration::AtMost(magnetar::MAX_BURST_DURATION))
+        );
+        assert!(magnetar::GIANT_FLARE_SPIKE <= magnetar::MAX_BURST_DURATION);
+        assert_eq!(row.light_curve(), Some(LightCurveSource::MagnetarBurst));
+    }
+
+    /// The giant-eruption row bounds the eruption's own light in every photometric band: the top of
+    /// plan 06's peak law, 10^7.5 L☉, is under the bound and within its fifth figure, and D is the
+    /// eruptions' longest.
+    #[test]
+    fn the_giant_eruption_row_bounds_its_own_light() {
+        let row = TransientKind::GiantEruption.row();
+        assert_eq!(row.route(), Route::Recurrent);
+        assert_eq!(row.classes(), ClassSet::of(ClassId::LUMINOUS_BLUE_VARIABLE));
+        let top = math::exp10(lbv::LOG_PEAK_LUMINOSITY_SOLAR_LUMINOSITIES.1) * SOLAR_LUMINOSITY_W;
+        let bound = GIANT_ERUPTION_PEAK.value();
+        assert!(top <= bound && top / bound > 0.999_9, "{top:e} W");
+        for band in Band::ALL {
+            assert_eq!(
+                row.peak_bound(AlertBand::Photometric(band)),
+                Some(PeakBound::Watts(GIANT_ERUPTION_PEAK))
+            );
+        }
+        assert_eq!(row.peak_bound(AlertBand::XRay), None);
+        assert_eq!(
+            row.duration(),
+            Some(LongestDuration::AtMost(lbv::MAX_DURATION))
+        );
+        assert_eq!(row.light_curve(), Some(LightCurveSource::GiantEruption));
+    }
+
+    /// An X-ray sensor at 10⁻¹³ W m⁻² sees the core collapses' class to the cube's diagonal through
+    /// its magnetars, even a short burst at its bound, though the supernovae themselves have no
+    /// X-ray bound; a visual sensor sees no magnetar.
+    #[test]
+    fn the_core_collapses_reach_the_diagonal_in_x_rays() {
+        let w = WattsPerSquareMetre::new;
+        let limits = BandLimits::new(w(1e-13), w(1e-13)).unwrap();
+        let xray = SensorHorizon::new([(AlertBand::XRay, limits)]).unwrap();
+        assert_eq!(
+            class_reach(ClassId::CORE_COLLAPSE, &xray),
+            ROOT_CUBE_DIAGONAL
+        );
+        assert_eq!(
+            kind_reach(TransientKind::MagnetarBurst, &xray),
+            ROOT_CUBE_DIAGONAL
+        );
+        assert_eq!(
+            kind_reach(TransientKind::CoreCollapse, &xray),
+            LightYears::ZERO
+        );
+        assert_eq!(reach(Watts::new(2.512e36), limits), ROOT_CUBE_DIAGONAL);
+        let visual = SensorHorizon::new([(AlertBand::Photometric(Band::V), limits)]).unwrap();
+        assert_eq!(
+            kind_reach(TransientKind::MagnetarBurst, &visual),
+            LightYears::ZERO
+        );
+    }
+
+    /// Every row a walk takes by reach, one-shot or recurrent, has constant bounds only, so that
+    /// `class_reach` needs no galaxy: the bounds that need the galaxy or the host are the centre's
+    /// and the local rows', which reach does not walk.
+    #[test]
+    fn walked_rows_have_constant_bounds() {
+        let mut walked = Vec::new();
+        for kind in TransientKind::ALL {
+            let row = kind.row();
+            match row.route() {
+                Route::OneShot | Route::Recurrent => {
+                    for band in AlertBand::ALL {
+                        let bound = row.peak_bound(band);
+                        assert!(
+                            matches!(bound, None | Some(PeakBound::Watts(_))),
+                            "{kind:?} in {band:?}: {bound:?}"
+                        );
+                    }
+                    if row.pending().is_none() {
+                        walked.push(kind);
+                    }
+                }
+                Route::Centre | Route::Local => {}
+            }
+        }
+        assert_eq!(
+            walked,
+            [
+                TransientKind::CoreCollapse,
+                TransientKind::TypeIa,
+                TransientKind::GiantEruption,
+                TransientKind::MagnetarBurst,
+            ]
+        );
     }
 
     /// The local kinds keep their sources' look-backs as their longest durations.

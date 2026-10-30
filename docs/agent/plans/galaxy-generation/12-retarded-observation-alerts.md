@@ -348,13 +348,15 @@ where a name has changed by the time this plan runs only the call sites here cha
 14. **X-rays are absorbed by metals, so the X-ray band reads A_V.** Plan 07's `Band` runs from U to
     radio through the Cardelli law, which stops at 0.1 µm, and plan 07 is right to leave X-rays out
     of it. X-ray transients and bursts still need a horizon. Photoelectric absorption at a few keV
-    is by the same metals that make the dust, so `xray_optical_depth` is σ_X × A_V ×
+    is by the same metals that make the dust, so `xray_optical_depth` reads the column A_V ×
     `HYDROGEN_COLUMN_PER_MAG`: the solar-equivalent hydrogen column, which follows metallicity as
     plan 07's dust does, and not `Sightline::hydrogen_column`, which counts the hot corona's ionised
-    gas that absorbs almost nothing. σ_X is one cross-section per hydrogen atom at 2 keV, a constant
-    of the generator version whose source T5.a re-checks and cites (candidates: Morrison and
-    McCammon 1983; Wilms, Allen and McCray 2000). `AlertBand::XRay` exists only in this plan;
-    nothing is added to plan 07's `Band`.
+    gas that absorbs almost nothing. The depth is the band's, −ln T, with T the transmission over
+    2–10 keV: Morrison and McCammon's (1983) photoelectric σ(E) plus Thomson scattering by 1.2
+    electrons per H, averaged for a Γ = 2 source at 18 fixed nodes, three to each of MM83's intervals
+    (P12.T5.a.2, main's ruling of 2026-10-30, which replaced T5.a's one cross-section at 2 keV). The
+    rows, the scattering and the nodes are constants of the generator version. `AlertBand::XRay`
+    exists only in this plan; nothing is added to plan 07's `Band`.
 
 ## Tasks
 
@@ -512,10 +514,12 @@ Files: `galaxy/query/segment.rs`, `lensing/{mod,walk,point_lens}.rs`. Acceptance
 - **P12.T5.c Recurrent classes.** Luminous blue variables (plan 09's class, plan 06's giant
   eruptions), X-ray binaries, and the two accreting white dwarf classes through `scan_cell` using
   plan 11's scan marks only: slow hosts test the eruption times their marks carry, fast hosts ask
-  the monotone phase for events in the emission interval of Design note 6. Dwarf novae and X-ray
-  bursts are excluded from distant scans by reach and come through T5.e. Tests: completeness as in
-  T5.b on a 2,000 ly sphere; `scan_cell` over all cells equals one call over the whole sphere; plan
-  11's `scan::engine_calls()` stays at zero. Bench `awd_scan_marks_cell`.
+  the monotone phase for events in the emission interval of Design note 6. The core collapses'
+  magnetars (P06.T28.c) are walked here too, from the entries whose death lies within 227,273
+  years before the emission interval (main's ruling of 2026-10-30; P12.T5.a.2). Dwarf novae and
+  X-ray bursts are excluded from distant scans by reach and come through T5.e. Tests: completeness
+  as in T5.b on a 2,000 ly sphere; `scan_cell` over all cells equals one call over the whole
+  sphere; plan 11's `scan::engine_calls()` stays at zero. Bench `awd_scan_marks_cell`.
 - **P12.T5.d Census, features, the global list.** `alerts_in` with Design note 7; feature-level
   lists within reach through plan 09's `FeatureCatalogue::near`; the global list's entries through
   plan 10's `GlobalList::entries_with_class_members` (the centre's tidal disruptions and flares;
@@ -523,9 +527,10 @@ Files: `galaxy/query/segment.rs`, `lensing/{mod,walk,point_lens}.rs`. Acceptance
   detections and says so; halving the reach brings it back; a window split in two gives the same
   detections as the whole; any order of classes gives the same result.
 - **P12.T5.e Local events.** `local_events`: for the systems of an observed-mode range result,
-  flares, glitches, magnetar bursts, FU Orionis outbursts, dwarf novae and bursts over each system's
-  retarded interval, through plans 06 and 11. Tests: equals direct evaluation per system; adds under
-  1 ms to a 50 ly query at the reference density (bench, a finding).
+  flares, glitches, FU Orionis outbursts, dwarf novae and bursts over each system's retarded
+  interval, through plans 06 and 11. Magnetar bursts moved to T5.c (P12.T5.a.2). Tests: equals
+  direct evaluation per system; adds under 1 ms to a 50 ly query at the reference density (bench, a
+  finding).
 
 Files: `alerts/{mod,registry,reach,oneshot,recurrent,census,local}.rs`.
 
@@ -891,8 +896,9 @@ under plan 04's convention: a defaulted `mode`, new request kinds, and the first
   about an arcminute from 26,000 ly. The model stays consistent, since an extrapolated jump still
   lands on the star, and the figure is honest; whether the Kepler regime should reach further out
   for retarded evaluation is a question for the brainstorm.
-- **The X-ray band** (Design note 14) is one cross-section at one energy. A sensor console that
-  wants soft and hard bands replaces the constant with a function of energy; nothing else changes.
+- **The X-ray band** (Design note 14) is one band, 2–10 keV, for one source spectrum, Γ = 2
+  (P12.T5.a.2). A sensor console that wants soft and hard bands, or each source's own spectrum,
+  replaces the nodes; nothing else changes.
 - **FU Orionis outbursts** are treated as local events. The research notes route them through
   star-forming-region features; if plan 09 lists them at feature level they join T5.d instead.
 - **The alert service's appends on macOS (P12.T8; plan 04, P04.T17.b).** Each Knowledge change is
@@ -2320,7 +2326,7 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     P11.T9 for `LuminousRedNova`, `Kilonova`, `Nova`, `DwarfNova`, `XrayTransient`, `XrayBurst` and
     `BeXOutburst`; P06.T28.e for `GiantEruption`, whose class process is P09.T43; P06.T28.c for
     `MagnetarBurst`. Until then their classes reach nothing (lean, 2026-10-30), which is true while
-    no event of theirs can be generated.
+    no event of theirs can be generated. _Seven since P12.T5.a.2_, all on P11.T9.
   - _The tails, provisional on P09.T30.c._ The bound is the Eddington cap and the curve the tail's
     own, so the row reads T30.b's law now and T30.c's arm once its hold is in force, provided that
     arm keeps `min(…, L_Edd)` and `XRAY_SHARE`. The test
@@ -2373,7 +2379,8 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
       `A_V` = 30, towards the centre (science check, not re-checked at source). Design note 14 fixes
       2 keV and this plan's Risks name one energy; it errs towards saying less. A band-averaged
       transmission as a function of the column, or an effective energy, would replace the constant:
-      for main's ruling.
+      for main's ruling. _Ruled on 2026-10-30_ (P12.T5.a.2): the band's transmission over 2–10 keV
+      replaces the constant (Design note 14).
     - **Bolometric curves in a band.** The supernova templates, the tails' bolometric light, star
       flares and FU Orionis outbursts are bolometric, so a band's flux from them errs bright by the
       bolometric correction: a core collapse's 10⁵–10⁶ K breakout puts a small share of its light in
@@ -2384,7 +2391,8 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
       the brainstorm names only flares, dwarf novae and glitches as local. Both are seen across the
       Galaxy (an X-ray burst near a neutron star's Eddington luminosity, a magnetar's giant flare
       far above it), so no distant sensor sees them while they are local: for main's ruling before
-      P11.T9 and P06.T28.c fill the rows.
+      P11.T9 and P06.T28.c fill the rows. _Ruled on 2026-10-30 for the magnetars_ (P12.T5.a.2):
+      `Recurrent` over `CORE_COLLAPSE`, walked by T5.c. X-ray bursts stay `Local` until P11.T9.
     - Star flares have no X-ray bound: P06.T28.a models white light only.
   - _For T5.b–T5.e, T9 and T13._ T5.b adds `Detection`'s crate-private constructor and T5.d
     `AlertResult`'s and `ClassCensus`'s. A glitch has no light or band, so T5.e decides what its
@@ -2415,8 +2423,11 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     - (e) `BOLOMETRIC_CORRECTION`'s doc should read "15.8, the median bolometric correction of
       low-luminosity active nuclei below a tenth of Eddington (Ho 2009, ApJ 699, 626, §2.1:
       'sources with Lbol/LEdd ≲ 0.1 have a median CX = 15.8, with an interquartile range of
-      9.6')". The quoted "median CX = Lbol/LX = 15.8" is not the paper's, and the whole sample's
-      median is about 8 (Table 1). The finding that goes with it is in plan 09's Risks.
+      9.6')". The quoted "median CX = Lbol/LX = 15.8" is not the paper's. _Corrected by
+      P12.T5.a.2's science check:_ the median of about 8 is that of Ho's small sample of nuclei
+      with broadband SEDs (Table 1), not of the whole sample, and 15.8 comes from Ho's more
+      extensive data set (in preparation), which Ho 2009 adopts. The finding that goes with it is
+      in plan 09's Risks.
   - _Corrected, a finding._ The Type Ia template's peak "about 15 days in" (`LightCurve::of`'s
     doc) is earlier than observed. Firth et al. (2015, MNRAS 446, 3895) give 18.98 ± 0.54 days.
     Scalzo et al. (2014, MNRAS 440, 1498, equation 6) give a bolometric rise of 16.5 ± 2 days,
@@ -2450,3 +2461,170 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
       Medina et al. 2020; Yang and Liu 2019; Scholz et al. 2013; Szabó et al. 2021–2022; the
       numbers in MM83's and Wilms et al.'s figures; the CODATA and IAU constants themselves; and
       Haggard et al. 2019.
+- **P12.T5.a.2 as built (2026-10-30, main's rulings of that date, at `GENERATOR_VERSION` 23).** No
+  generated output moves, no golden changes and no draw or tag is added. Nothing on the record reads
+  the depth or the rows: outside `alerts`, only the server's Knowledge
+  (`knowledge::{record, store, persist}`) names `AlertBand`, whose variants are unchanged, and no
+  golden or integration test reads `alerts`. From the first task that reads it, a change to the
+  rows, the scattering or the nodes is a bless. Files `alerts/{mod,registry,reach}.rs`.
+  - _The rulings._ Main adopted the research advice's items 1 (the band), 2 (the magnetars'
+    route), 3 (`class_reach`'s tripwire), 4 (the citations) and 6 (the held rows) as written. It
+    also adopted the advice's answers to its three questions:
+    - giant flares take no kind of their own;
+    - plan 06's magnetar energies are the event's whole output;
+    - the magnetars' completeness gap beyond 34,871 ly is accepted for now and recorded as a
+      finding (below), since its fix changes membership and needs a bump.
+
+    Item 5, the bolometric curves in a band, is T5.b's first commit. T5.a's findings on the 2 keV
+    cross-section and on the magnetars' `Local` route are answered by these. X-ray bursts stay
+    `Local` until P11.T9 fills their row; the advice leans to `Recurrent` over `XRAY_BINARY` by
+    the same reasoning, which is not ruled.
+
+  - _The X-ray band._
+    - `XRAY_CROSS_SECTION_CM2` and its re-export from `alerts` are gone; no plan consumes them.
+      Private to `reach` in their place: `MM83_ROWS` (six `Mm83Row`s, 1.840–10 keV),
+      `XRAY_BAND_KEV` (2, 10), `THOMSON_CROSS_SECTION_CM2` (CODATA 2018),
+      `ELECTRON_SCATTERING_CM2` (1.2 σ_T, 7.983 × 10⁻²⁵ cm²) and `XRAY_BAND_NODES`, 18 `BandNode`s
+      (energy, photoelectric σ, weight) stored at full precision. The rows, the band's ends and
+      the nodes' energies are read only by the test that recomputes the nodes, so they carry
+      `expect(dead_code)` outside tests.
+    - `xray_optical_depth` keeps its signature. The depth is ln(Σₖ wₖ ÷ Σₖ wₖ e^(−(σₖ + σ_e)
+      `N_H`)): the entry's form divided by the weights' own sum, which is 1 within 10⁻¹⁵, so that
+      a clear line's depth is exactly 0. `transmission`'s X-ray arm stays e^(−τ).
+    - One figure of the advice is corrected: the scattering is 0.84 of MM83's σ at 10 keV (9.532
+      × 10⁻²⁵ cm²), not equal to it. Nothing else moves.
+    - τ = 1 at `A_V` = 88.47 mag (`N_H` = 1.655 × 10²³ cm⁻²), and at 112.31 mag without the
+      scattering. τ = 0.223 at 12.43 mag. ⟨σ⟩ = 1.0775 × 10⁻²³ cm², of which 9.977 × 10⁻²⁴ is
+      photoelectric and 7.4% the scattering. With the scattering, the band's T is 0.980239 at 1
+      mag, 0.800478 at 12.43, 0.628037 at 30 and 0.506926 at 50.
+    - The band against T5.a's 2 keV, photoelectric only, Γ = 2, at plan 07's 1.871 × 10²¹ cm⁻²
+      mag⁻¹ (the advice's figures, recomputed). With the scattering, the band's T falls a further
+      2% at 12.43 mag, 4% at 30, 7% at 50 and 11% at 80.
+
+      | `A_V` (mag) | `N_H` (cm⁻²) | e^(−τ) at 2 keV | band T | band ÷ 2 keV |
+      | ----------- | ------------ | --------------- | ------ | ------------ |
+      | 1           | 1.87 × 10²¹  | 0.923           | 0.982  | 1.06         |
+      | 5           | 9.36 × 10²¹  | 0.669           | 0.915  | 1.37         |
+      | 12.43       | 2.33 × 10²²  | 0.368           | 0.815  | 2.22         |
+      | 30          | 5.61 × 10²²  | 0.0894          | 0.657  | 7.34         |
+      | 50          | 9.36 × 10²²  | 0.0179          | 0.546  | 30.5         |
+      | 80          | 1.50 × 10²³  | 0.0016          | 0.442  | 276          |
+
+    - The abundances stay MM83's, which with Predehl and Schmitt's ratio are the consistent
+      pair. A move to Wilms, Allen and McCray's changes the cross-section and the ratio together
+      (Foight et al. 2016's 2.87 × 10²¹ or Zhu et al. 2017's 2.47 × 10²¹, as the advice quotes
+      them).
+  - _The held rows._
+    - `GiantEruption` is `Recurrent` over `LUMINOUS_BLUE_VARIABLE`, with a photometric bound of
+      `GIANT_ERUPTION_PEAK` (1.2106 × 10³⁴ W, 10^7.5 L☉ rounded up at the fifth figure), no X-ray
+      bound, `AtMost(lbv::MAX_DURATION)` (20 yr) and `LightCurveSource::GiantEruption`.
+    - `MagnetarBurst` is `Recurrent` over `CORE_COLLAPSE`; T5.a had it `Local` with no class. Its
+      X-ray bound is `MAGNETAR_BURST_PEAK` (5 × 10⁴⁰ W), it has no photometric bound, and it takes
+      `AtMost(magnetar::MAX_BURST_DURATION)` (3 s, which covers the 0.2 s spike) and
+      `LightCurveSource::MagnetarBurst`, a top hat at the event's mean luminosity.
+    - Both constants are public and re-exported from `alerts`, beside `CORE_COLLAPSE_PEAK` and
+      `TYPE_IA_PEAK`. Seven rows stay pending, all on P11.T9, and `pending`'s doc names only it.
+      Thermal pulses take no kind.
+    - The magnetar test restates `Burst::mean_luminosity_watts` and
+      `GiantFlare::mean_luminosity_watts` as energy ÷ duration at the laws' ends, because plan 06
+      builds those events only from their series. The giant flare's `1e40 / 0.2` is held under
+      the bound with `<=` and within 10⁻⁶ of it; the burst is held at 2.512 × 10³⁶ W. A drift in
+      plan 06's methods is caught only once T5.c walks real events.
+    - Consumed beyond the plan's list:
+      - from `stellar::events::lbv`: `MAX_DURATION`, `LOG_PEAK_LUMINOSITY_SOLAR_LUMINOSITIES` and
+        `Eruption`;
+      - from `stellar::events::magnetar`: `MAX_BURST_DURATION`, `GIANT_FLARE_SPIKE`,
+        `BURST_ENERGY_JOULES`, `GIANT_FLARE_ENERGY_JOULES`, `BURST_DURATION_MEDIAN_SECONDS`,
+        `BURST_DURATION_SIGMA_DEX`, `BURST_DURATION_TRUNCATION`, `Burst` and `GiantFlare`;
+      - `units::consts::SOLAR_LUMINOSITY_W`.
+
+      Plan 06's P06.T28.c record names P12.T5.e as the magnetars' reader; it is now T5.c.
+  - _Reach._ `class_reach` keeps its signature, and its doc says that a walked class's bounds are
+    constants, which `walked_rows_have_constant_bounds` holds. Through the magnetars,
+    `class_reach(CORE_COLLAPSE)` is the diagonal for any X-ray sensor whose detection limit is
+    under 8.6 × 10⁻⁴ W m⁻², while `kind_reach(CoreCollapse)` stays zero in X-rays.
+    `class_reach(LUMINOUS_BLUE_VARIABLE)` is 3,281 ly at a V limit of 10⁻⁶ W m⁻².
+  - _The citations._ Two of the five corrections are made, in `reach.rs`. The other three are in
+    `features::centre::events::luminosity` and wait for P09.T30.c, whose lane holds that file
+    ("P12.T5.a.2's citations, checked at source", (c) to (e)). So the entry's "the corrected ones
+    fixed" holds for `alerts` only. `reach.rs`'s `THOMSON_CROSS_SECTION_CM2` repeats
+    `luminosity.rs`'s private `THOMSON_CROSS_SECTION_M2`; one shared constant can replace both
+    when that file is free (Rust review).
+  - _Science check_ (2026-10-30, at source through the Internet Archive's copies and OpenAlex).
+    - Confirmed:
+      - MM83's six rows as typed, and their breaks within 4 eV of the K edges of S, Ar, Ca, Fe
+        and Ni;
+      - CODATA 2018's σ_T;
+      - Wilms, Allen and McCray's §3.3 and Neilsen et al.'s §3, verbatim;
+      - every computed figure of the band, recomputed;
+      - the two bounds, against IAU 2015 B3's nominal L☉;
+      - Nakar and Sari's equation A-8 and §4.1.
+    - Thomson rather than Klein–Nishina scattering is at most 4% high at 10 keV, which moves the
+      depth by at most 0.3%. The metals' electrons, about 0.013 per H, are left out.
+    - Two texts were corrected. The thermal pulses' rate holds only for interpulse periods of 100
+      years or more, so the registry now states it as a share of the period. Ho's median of
+      about 8 is his small SED sample's, not the whole sample's: the citations record's (e) is
+      corrected.
+  - _Tests_ (pod, 8 vCPU, debug: the 26 unit tests in 1.3 s, the 7 doctests in 1.1 s).
+    - New in `reach`:
+      - `the_band_nodes_are_the_rule_over_mm83s_rows`: the 18 nodes to the bit, and the first and
+        last against the advice's six figures.
+      - `the_band_transmission_matches_a_converged_integral`: its reference is Simpson's rule in
+        ln E, 2,000 steps an interval, not the advice's 200-point Gauss–Legendre. The reference
+        meets the advice's converged values to 5 × 10⁻⁷, and the nodes meet the reference to 5 ×
+        10⁻⁵ from 0.1 to 200 mag.
+    - Moved in `reach`:
+      - `the_xray_depth_is_unity_at_its_stated_visual_extinction`, now at 88.47 mag, with 112.31,
+        0.223 and ⟨σ⟩. It also pins the depth's bits at 1, 12.43 and 88.47 mag, so a rewrite of
+        its arithmetic cannot move them unseen (determinism audit).
+      - `the_best_band_sets_the_reach` takes `LUMINOUS_BLUE_VARIABLE` off its zero list.
+    - New in `registry`: `the_magnetar_row_bounds_every_burst_and_giant_flare`,
+      `the_giant_eruption_row_bounds_its_own_light`,
+      `the_core_collapses_reach_the_diagonal_in_x_rays` and `walked_rows_have_constant_bounds`.
+      `a_row_without_its_source_names_the_task_that_fills_it` counts 7 rows, all on P11.T9.
+    - Acceptance: `cargo test -p hyperion-sim alerts`.
+  - _For T5.b–T5.e._
+    - T5.c walks the magnetars: the class's cells within `kind_reach(MagnetarBurst)`; entries
+      prefiltered by their death T ∈ [t₁ − s − 227,273 yr, t₂ − s] before any `StarModel` is
+      built; then `MagnetarModel::of`, and `bursts_in` and `giant_flares_in` over the interval.
+      The 227,273 years are 10¹⁹ G yr ÷ 4.4 × 10¹³ G from plan 06's constants: derive them there,
+      do not restate them. A detection's sub-kind, if T9 wants one, comes from the event's series
+      (`star.ev.magnetar_burst` or `star.ev.magnetar_giant`).
+    - T5.b walks the supernovae by their own `kind_reach` and T5.c the magnetars by theirs; the
+      census reads `class_reach`, which the magnetars lift to the diagonal for any X-ray sensor.
+      `the_core_collapses_reach_the_diagonal_in_x_rays` pins `kind_reach(CoreCollapse)` at zero
+      in X-rays, which T5.b's X-ray bound for the breakout will change.
+    - A magnetar's 2–10 keV flux needs a band share through T5.b's mechanism: about 0.1 for short
+      bursts and at most about 0.004 for giant-flare spikes, over the event's whole output (the
+      advice's figures).
+    - T5.e no longer lists magnetar bursts, so a magnetar's event is reported once.
+- **Deferred findings (2026-10-13 rule)**, from P12.T5.a.2 (main's ruling of 2026-10-30). Recorded
+  and deferred, not built.
+  - _The Type Ia template rises too fast_ (plan 09, P09.T19.b). It peaks at 15.1 days, against
+    Firth et al.'s (2015) 18.98 ± 0.54 days and Scalzo et al.'s (2014) bolometric 16.5 ± 2 days.
+    A retune moves `TYPE_IA_PEAK` with it, since its test holds the bound to the template. The
+    detail is in plan 09's Risks.
+  - _Ho's 15.8 is applied at the Eddington cap_, outside Ho's (2009, §2.1) range below a tenth of
+    Eddington (plan 09's tails; P09.T30.c). As the tails' X-ray bound it errs high, which is safe
+    for reach. The detail is in plan 09's Risks.
+  - _The magnetars' completeness gap._
+    - A magnetar goes quiet within 10¹⁹ G yr ÷ `B_c` − τ < 227,273 years of its birth. A core
+      collapse is an entry if −(`W_eff` + L + H) < T ≤ +H, with L = 262,144 years. So every
+      magnetar active at an emission time seen from closer than L − 227,273 yr × c = 34,871 ly is
+      an entry, whatever its window.
+    - Beyond that distance, an entry whose `W_eff` is under 192,152 years (hot gas, and shells
+      ended at a superbubble's wall) can leave the class while its magnetar is still active at
+      the emission time. Seen from d, activity at ages above L + `W_eff` − d is lost: past 162,144
+      years (B < 6.2 × 10¹³ G) at 100,000 ly, and past 35,121 years at the diagonal.
+    - Accepted for now, under "finding it from afar lapses" ("Events in time"). T5.c's
+      completeness test compares against the same class, so it does not see the gap.
+    - The fix widens the core-collapse test to −(max(`W_eff`, 192,152 yr) + L + H) for deaths
+      that leave a neutron star. That changes membership and so IDs, and needs a bump: defer it to
+      a bump train if a census shows the gap matters.
+  - _`LUMINOUS_BLUE_VARIABLE` reaches beyond zero_, though P09.T43's process is not built.
+    - Its reach is 3,281 ly at a V limit of 10⁻⁶ W m⁻² from the bolometric bound, and about 1,000
+      ly once T5.b's band share at 5,000 K (0.094) applies.
+    - T5.c's walk finds no hosts until P09.T43 lands, and T5.d's census should report the class
+      as one with no hosts, not as a missing class.
+    - This departs from T5.a's lean that an unbuilt class reaches nothing: the row's source is
+      built, though the class's is not.
