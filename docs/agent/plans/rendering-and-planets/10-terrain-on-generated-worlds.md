@@ -913,8 +913,9 @@ targets at header 21 (below).
    for a hand-over that changes geometry only, since the laws differ at other phases and the pattern
    differs everywhere (an Iapetus, a Mars albedo map). So R07's disc samples a per-body coarse
    class-weights map, through the `class-map` case of its `DiscSurface` (R07.T8.b; filled by T10.d),
-   T2's weights at level 4 or shallower, a few hundred kilobytes, through the same law, and disc and
-   terrain agree at every phase by construction. The map covers surveyed cells only; unsurveyed
+   a texel a cell of quadtree level 6 (64 × 64 a face) with T2's weights at band level 0 at its
+   centre (a texel of band level n is a cell of quadtree level n + 6), a few hundred kilobytes,
+   through the same law, and disc and terrain agree at every phase by construction. The map covers surveyed cells only; unsurveyed
    texels take R07's uniform `lawFor(p, q, template)`, so the disc shows no pattern the ship has not
    seen. Plan 14's phase integral q then becomes a result of the classes, reported with its residual
    as the albedo's is. A_N is the normal albedo, the radiance factor at i = e = α = 0 (Hapke 2012,
@@ -980,6 +981,10 @@ targets at header 21 (below).
    near the limb, where the terrain draws its facet hidden or black); what the disc still leaves
    out is the sub-cell relief's shading and its cast shadows (Risks, "Deviations in T10.g, as
    built")._
+   _As built by R10.T10.d (main's ruling on R10.T2's question, 2026-10-29): `CLASS_MAP_LEVEL` 6
+   and `CLASS_MAP_BAND` 0, 104,544 B at four classes or fewer and 418,176 B at sixteen with R07's
+   gutter. The text's earlier "level 4 or shallower", read as a band level, would have been a map
+   at quadtree level 10, about 100 MB._
 9. **No textures in this plan.** The Materials section lists triplanar projection of rock and detail
    textures and two-scale repetition hiding. Anything a texture adds below the band limit is detail
    the simulation did not compute, which the brainstorm defines as decoration, and R11 owns it,
@@ -1554,9 +1559,9 @@ since R09's crater octaves cost about a millisecond to build and the per-cell fo
 `crates/hyperion-sim/tests/surface_weights_worlds.rs`. Tests:
 at the finest level the largest weight is `material_at`'s class at every sampled point, ties
 included; weights sum to 255; on `sample_worlds()` the weights at levels n − 1 to n − 6 from the
-finest, and at the class map's level (level 4, Design note 8), agree with brute-force class
+finest, and at band level 4 (a texel a cell of quadtree level 10), agree with brute-force class
 fractions over each texel's footprint (sixty-four finest points a texel at n − 1 to n − 6, 4,096
-sampled points a texel at the class map's level) to within ten percentage points in the mean over
+sampled points a texel at band level 4) to within ten percentage points in the mean over
 a thousand texels a level (slow); a patch never needs more than eight classes on `sample_worlds()`,
 and if one does the test names it. The same agreement is first held on `synthetic_worlds()`, whose
 full belts put about a third of their area above 40° at 2 m and plain styles none (R09's
@@ -1566,6 +1571,9 @@ and the slow case under `just test-slow -E 'binary(surface_weights_worlds)'`.
 
 _Built 2026-10-14_ (`e20efe8e`; the `sample_worlds()` follow-up, with T5's, in `df007c0d`,
 `c9be6e77` and `818e5136`, 2026-10-26).
+
+_The disc's class map reads band level 0, not band level 4 (R10.T10.d; Design note 8). Band level
+4's case stands as built; band level 0's agreement is unmeasured (T10.d's deferred finding)._
 
 ### R10.T3 The authoritative ground on real terrain
 
