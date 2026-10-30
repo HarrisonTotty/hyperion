@@ -18,7 +18,7 @@
 //!   class and the depleted slope's `d(m)` of the living stars below 0.8 M☉. So a living star of
 //!   initial mass `m` below the turn-off weighs `φ(m) (1 − K d(m))` and a white dwarf of a
 //!   progenitor of `m` up to 8 M☉ weighs `φ(m) (1 − K)`: the stream is bottom-heavy and holds white
-//!   dwarfs. A living globular's `K` and slope are its model's ([`ClusterStars::kept`]). An orphan
+//!   dwarfs. A living globular's `K` and slope are its model's ([`ClusterStars::kept`](super::ClusterStars::kept)). An orphan
 //!   keeps nothing at the end of its life, `K = 0`, so its stream is the evolved canonical
 //!   population and the end-of-life slope the plan names changes nothing (lean, 2026-10-30).
 //! - **A dwarf's** takes its core's classes (P10.T7.a): its history from its stellar mass at

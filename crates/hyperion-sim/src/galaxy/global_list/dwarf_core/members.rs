@@ -119,7 +119,8 @@ impl DwarfCoreModel {
     /// # Panics
     ///
     /// If `cell` is not an owned cell of the core's 16-cell, 8-level grid or `index` is 8,192 or
-    /// more, which [`NestedGrid`]'s cells and the clamp rule out.
+    /// more, which [`NestedGrid`](crate::galaxy::features::nested::NestedGrid)'s cells and the
+    /// clamp rule out.
     #[must_use]
     pub fn member_id(&self, band: MassBand, cell: NestedCell, index: u16) -> DwarfCoreMemberId {
         DwarfCoreMemberId::new(
@@ -267,7 +268,7 @@ impl DwarfCoreModel {
     }
 
     /// A bound on the speed of every member in its grid, km/s, galactic: |bulk| plus
-    /// [`INTERNAL_SPEED_SIGMAS`] dispersions, the most a member's internal velocity can draw,
+    /// 8.58 √2 dispersions, the most a member's internal velocity can draw,
     /// rounded up by 1 + 10⁻⁹ (plan 09's `FeatureInterior::member_speed_bound`).
     #[must_use]
     pub fn member_speed_bound(&self) -> KilometresPerSecond {
