@@ -171,8 +171,11 @@ pub(super) fn inputs() -> Inputs {
         // moved σ_e to about 117.3 km/s, and the offset is set again to −0.3800 (−0.3876 before).
         // The joint revision's inner part of the nuclear disc (plan 02, R26) deepens the bulge's
         // potential a little and raised the black hole to 4.340 × 10⁶ M☉ at −0.3800; −0.3840
-        // puts it back at 4.30 × 10⁶.
-        bh_scatter: -0.3840,
+        // put it back at 4.30 × 10⁶. Plan 15's P15.T3.c put the bulge's own boxy body into the
+        // potential and the tracer, which moved σ_e from 117.5 to 118.65 km/s and the black hole
+        // to 4.54 × 10⁶ M☉ at −0.3840; −0.4076 puts it back at 4.30 × 10⁶, 0.008 dex beyond plan
+        // 02's ±0.40, a finding (plan 15's T3.c record).
+        bh_scatter: -0.4076,
         // "About −0.05 dex per kpc in the Milky Way disc" (brainstorm, "Fields").
         metallicity_gradient: -0.05,
         // The halo's components and the accretion history at the middle of their ranges but for

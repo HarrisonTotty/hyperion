@@ -32,8 +32,8 @@ pub(crate) use draw::{WORDS_PER_ATTEMPT as VELOCITY_WORDS_PER_ATTEMPT, draw_on, 
 use self::discs::{ArmStreaming, DiscKinematics, DiscLaw, RadialRatio};
 use self::halo::HaloKinematics;
 use self::spheroid::{
-    BAR_SATOH_K, BULGE_BETA_Z, BULGE_SATOH_K, JeansTable, NUCLEAR_RADIAL_LAW, NUCLEAR_SATOH_K,
-    bar_streaming, bulge_tracer_axes, projected_sigma_from_table,
+    BAR_SATOH_K, BULGE_BETA_Z, BULGE_SATOH_K, BulgeTracer, JeansTable, NUCLEAR_RADIAL_LAW,
+    NUCLEAR_SATOH_K, bar_streaming, projected_sigma_from_table,
 };
 use crate::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
 use crate::galaxy::fields::arms::SharpArm;
@@ -184,7 +184,8 @@ pub struct KinematicTables {
     nuclear: Vec<JeansTable>,
     bulge_streaming: Streaming,
     bar_streaming: Streaming,
-    bulge_axes: (f64, f64),
+    /// The bulge's tracer, which `σ_e` reads off its table.
+    bulge_tracer: BulgeTracer,
     /// `Ω_p`, km/s per ly.
     pattern_speed: f64,
 }
@@ -225,10 +226,9 @@ impl KinematicTables {
             .map(|component| build.law(component))
             .collect();
         let Build { discs, nuclear, .. } = build;
-        let bulge_axes = bulge_tracer_axes(params);
-        let (a_r, a_z) = bulge_axes;
+        let bulge_tracer = BulgeTracer::of(params);
         let bulge = JeansTable::new(
-            |r, z| -math::hypot(r / a_r, z / a_z),
+            |r, z| bulge_tracer.ln_density(r, z),
             BULGE_BETA_Z,
             BULGE_SATOH_K,
             potential,
@@ -263,7 +263,7 @@ impl KinematicTables {
             bar_streaming: Streaming {
                 axes: (half_length, bar_params.width().value()),
             },
-            bulge_axes,
+            bulge_tracer,
             pattern_speed,
         }
     }
@@ -384,7 +384,7 @@ impl KinematicTables {
     /// the tests that compare the two.
     #[must_use]
     pub fn bulge_projected_sigma(&self) -> KilometresPerSecond {
-        KilometresPerSecond::new(projected_sigma_from_table(&self.bulge, self.bulge_axes))
+        KilometresPerSecond::new(projected_sigma_from_table(&self.bulge, &self.bulge_tracer))
     }
 
     /// The bytes the tables own on the heap.

@@ -10,9 +10,9 @@ mean luminosity at u = 1 - 2^-53 (W) = 0x45cf199d078236c4  # 1.9249999999999969e
 duration at u = 1 - 2^-53 (s) = 0x40bfeefffffffffa  # 8174.9999999999945
 
 # the disruption rate (per s)
-the fixture's black-hole mass (solar masses) = 0x4150676ee8905008  # 4300219.633808143
+the fixture's black-hole mass (solar masses) = 0x415066dcde34161b  # 4299635.4719290985
 at 1e5 solar masses = 0x3db076619a9dabd9  # 1.497248996962759e-11
-at the fixture's mass = 0x3d8cd13c0c0581af  # 3.2761502659333913e-12
+at the fixture's mass = 0x3d8cd1a3b43b097e  # 3.2763300822806387e-12
 at 1e8 solar masses = 0x3d702a9a7562d437  # 9.189545466068395e-13
 
 # flares over three days from the epoch

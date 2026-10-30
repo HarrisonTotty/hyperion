@@ -14,8 +14,8 @@
 //!
 //! They hold for prolate Gaussians too (`ε < 0`), which the nuclear disc's tall, narrow terms
 //! produce. The profiles of the mass model are expanded into such Gaussians with the fitted
-//! tables [`MGE_EXP`], [`MGE_HOLED_EXP`] and [`MGE_BAR`] by [`double_exponential`],
-//! [`holed_double_exponential`], [`spheroidal_exponential`] and [`bar_disc`].
+//! tables [`MGE_EXP`], [`MGE_HOLED_EXP`], [`MGE_BAR`] and [`MGE_BOXY`] by [`double_exponential`],
+//! [`holed_double_exponential`], [`spheroidal_exponential`], [`bar_disc`] and [`boxy_bulge`].
 //!
 //! Every formula is linear in M, so a Gaussian of negative mass is the same Gaussian's potential
 //! with its sign turned. The holed thin disc needs them: a sum of centred Gaussians of positive
@@ -48,7 +48,7 @@ use super::BuildComponentError;
 use crate::galaxy::consts::G;
 use crate::math;
 use crate::tables::gauss_legendre::{GL32_NODES, GL32_WEIGHTS};
-use crate::tables::mge::{MGE_BAR, MGE_EXP, MGE_HOLED_EXP};
+use crate::tables::mge::{MGE_BAR, MGE_BOXY, MGE_EXP, MGE_HOLED_EXP};
 use crate::units::{LightYears, SolarMasses};
 
 /// Where the integrands are cut, in standard deviations of their Gaussian factor: `e^(−9²÷2)`
@@ -705,6 +705,102 @@ pub fn spheroidal_exponential(
     normalised(mass, terms)
 }
 
+/// One term of [`MGE_BOXY`], `weight × exp(−(R² + z² ÷ q²) ÷ 2 width²)` with `R` and `z` in the
+/// body's own scale lengths, in-plane and vertical (plan 15, P15.T3.b).
+///
+/// The fields are public because the fitted table writes each term as a literal.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BoxyTerm {
+    /// The term's central density, in units of the unit body's, which is 1.
+    pub weight: f64,
+    /// The width along R, in in-plane scale lengths.
+    pub width: f64,
+    /// The axis ratio, the width along z over the width along R, each in its own axis's scale
+    /// lengths: `q h ÷ s` in physical units, for in-plane scale `s` and vertical scale `h`.
+    pub q: f64,
+}
+
+/// The index of the upper of the two rows of [`MGE_BOXY`] that bracket `boxiness`, and that row's
+/// share `t`, linear in the boxiness. A bracket holds its upper row's boxiness, where `t` is 1, and
+/// the first bracket its lower row's too, where `t` is 0.
+fn boxy_bracket(boxiness: f64) -> Result<(usize, f64), BuildComponentError> {
+    let (first, last) = (MGE_BOXY[0].0, MGE_BOXY[MGE_BOXY.len() - 1].0);
+    if !(boxiness.is_finite() && first <= boxiness && boxiness <= last) {
+        return Err(BuildComponentError {
+            quantity: "boxiness",
+            value: boxiness,
+        });
+    }
+    let upper = MGE_BOXY[1..MGE_BOXY.len() - 1].partition_point(|row| row.0 < boxiness) + 1;
+    let (lo, hi) = (MGE_BOXY[upper - 1].0, MGE_BOXY[upper].0);
+    Ok((upper, (boxiness - lo) / (hi - lo)))
+}
+
+/// The boxy bulge made axisymmetric in the plane, `ρ ∝ exp(−((R ÷ s)^c + (|z| ÷ h)^c)^(1 ÷ c))`,
+/// as Gaussians (plan 15, P15.T3.c; decision-p15-revalidation Q8).
+///
+/// This is the bulge's own body, `exp(−m)` with `m = {[(x ÷ a)² + (y ÷ b)²]^(c ÷ 2) + (|z| ÷
+/// h)^c}^(1 ÷ c)` ([`BoxyBulge`](crate::galaxy::fields::bulge::BoxyBulge)), with its in-plane
+/// scales `a` and `b` replaced by `s = √((a² + b²) ÷ 2)`. Its unit body is the bulge's, so it has
+/// the bulge's mass, both its second moments `⟨R²⟩ = (a² + b²) ⟨ϖ²⟩ ÷ 2` and `⟨z²⟩`, and its
+/// boxiness `c` exactly, with no fit: plan 02's Design note 6 matches `⟨R²⟩`. Its central density
+/// is `2ab ÷ (a² + b²)` of the bulge's (0.90 at Milky Way values), the price of matching `⟨R²⟩`.
+///
+/// [`MGE_BOXY`] holds the unit body at three boxinesses, in units of `s` along R and `h` along z,
+/// each row sorted by width, so the k-th terms of two rows have nothing in common. Between rows
+/// the density, not each term, is interpolated linearly in `c`: both bracketing rows are taken,
+/// their weights scaled by `1 − t` and `t`, and a term of scaled weight `w`, width `σ` and axis
+/// ratio `q` is a Gaussian of width `σ s` and axis ratio `q h ÷ s`, whose mass is proportional to
+/// `w σ³ q`. A term whose scaled weight is not positive is dropped, as the one-dimensional tables'
+/// readers drop one: at a row's own boxiness, the other row's every term. The lower row's terms
+/// come first, and the masses sum to `mass`.
+///
+/// # Errors
+///
+/// [`BuildComponentError`] if the mass is negative, a length is not positive, or the boxiness is
+/// not finite or lies outside the table's, 3–4.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::potential::mge::boxy_bulge;
+/// use hyperion_sim::units::{LightYears, SolarMasses};
+///
+/// # fn main() -> Result<(), hyperion_sim::galaxy::potential::BuildComponentError> {
+/// // At a row's own boxiness only that row's sixteen terms are left; between rows, both rows'.
+/// let (s, h) = (LightYears::new(1_900.0), LightYears::new(730.0));
+/// let on_row = boxy_bulge(SolarMasses::new(1e10), s, h, 3.5)?;
+/// let between = boxy_bulge(SolarMasses::new(1e10), s, h, 3.6)?;
+/// assert_eq!((on_row.len(), between.len()), (16, 32));
+/// let mass = between.iter().fold(0.0, |sum, g| sum + g.mass().value());
+/// assert!((mass / 1e10 - 1.0).abs() < 1e-12);
+/// # Ok(())
+/// # }
+/// ```
+pub fn boxy_bulge(
+    mass: SolarMasses,
+    s: LightYears,
+    h: LightYears,
+    boxiness: f64,
+) -> Result<Vec<Gaussian>, BuildComponentError> {
+    check(mass, [("in-plane scale", s), ("vertical scale", h)])?;
+    let (upper, t) = boxy_bracket(boxiness)?;
+    let flattening = h / s;
+    let terms = [(&MGE_BOXY[upper - 1].1, 1.0 - t), (&MGE_BOXY[upper].1, t)]
+        .into_iter()
+        .flat_map(|(row, share)| row.iter().map(move |term| (share * term.weight, term)))
+        .filter(|&(w, _)| w > 0.0)
+        .map(move |(w, term)| {
+            let sigma = term.width;
+            (
+                w * sigma * sigma * sigma * term.q,
+                s * sigma,
+                term.q * flattening,
+            )
+        });
+    normalised(mass, terms)
+}
+
 /// The long bar as an axisymmetric disc: its azimuthally averaged surface density ([`MGE_BAR`],
 /// in half-lengths) times `e^(−|z| ÷ height)` ([`MGE_EXP`]). The product of the radial term
 /// `(bᵢ, βᵢ)` and the vertical term `(wⱼ, sⱼ)` is a Gaussian of width `βᵢ half_length` and axis
@@ -733,6 +829,8 @@ pub fn bar_disc(
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
     use super::*;
 
     /// Composite Simpson's rule for `∫ₐᵇ f` with `n` (even) intervals.
@@ -914,6 +1012,52 @@ mod tests {
         assert!(
             ((below - above) / above).abs() < 1e-13,
             "{below} against {above}"
+        );
+    }
+
+    /// The rows bracketing each boxiness, and the upper row's share: 1 at a row's own boxiness
+    /// but the first, where it is 0, and outside the table's 3–4 an error.
+    #[test]
+    fn the_boxy_rows_bracket_the_boxiness() {
+        for (c, row, t) in [
+            (3.0, 1, 0.0),
+            (3.2, 1, 0.4),
+            (3.5, 1, 1.0),
+            (3.7, 2, 0.4),
+            (4.0, 2, 1.0),
+        ] {
+            let (upper, share) = boxy_bracket(c).unwrap();
+            assert_eq!(upper, row, "c {c}");
+            assert!((share - t).abs() < 1e-12, "c {c}: {share}");
+        }
+        assert_same_bits(boxy_bracket(3.5).unwrap().1, 1.0);
+        for c in [2.999, 4.001, f64::NAN] {
+            let error = boxy_bracket(c).unwrap_err();
+            assert_eq!(error.quantity, "boxiness");
+        }
+    }
+
+    /// The boxy bulge's mass is the component's, each term's width and flattening are the table's
+    /// in physical units, and at a row's own boxiness only that row is read.
+    #[test]
+    fn the_boxy_bulge_scales_its_rows() {
+        let (s, h) = (LightYears::new(1_900.0), LightYears::new(730.0));
+        let on_row = boxy_bulge(SolarMasses::new(2e10), s, h, 3.5).unwrap();
+        let row = &MGE_BOXY[1].1;
+        assert_eq!(on_row.len(), row.len());
+        for (g, term) in on_row.iter().zip(row) {
+            assert_same_bits(g.sigma().value(), 1_900.0 * term.width);
+            assert_same_bits(g.flattening(), term.q * (730.0 / 1_900.0));
+        }
+        let between = boxy_bulge(SolarMasses::new(2e10), s, h, 3.75).unwrap();
+        assert_eq!(between.len(), 2 * row.len());
+        let total = between.iter().fold(0.0, |sum, g| sum + g.mass().value());
+        assert!((total / 2e10 - 1.0).abs() < 1e-12, "{total}");
+        assert_eq!(
+            boxy_bulge(SolarMasses::new(1.0), s, LightYears::new(0.0), 3.5)
+                .unwrap_err()
+                .quantity,
+            "vertical scale"
         );
     }
 

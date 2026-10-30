@@ -1,7 +1,7 @@
 //! The boxy bulge's two-dimensional expansion `MGE_BOXY` (plan 15, P15.T3.b), run from
-//! `manifests/mge.refit.toml` with the one-dimensional refit ([`super::refit`]).
+//! `manifests/mge.toml` with the one-dimensional refit ([`super::refit`]).
 //!
-//! P15.T3.c puts into plan 02's potential the bulge's own body made axisymmetric in the plane,
+//! P15.T3.c put into plan 02's potential the bulge's own body made axisymmetric in the plane,
 //! `exp(−((R ÷ s)^c + (|z| ÷ h)^c)^(1 ÷ c))`, with `c` its boxiness, `h` its vertical scale and
 //! `s = √((a² + b²) ÷ 2)` of its in-plane scales (ruled 2026-10-23, decision-p15-revalidation Q8).
 //! It is the sim's boxy bulge (`galaxy::fields::bulge::BoxyBulge`), whose density falls

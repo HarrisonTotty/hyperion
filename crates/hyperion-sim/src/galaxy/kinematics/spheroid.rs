@@ -12,11 +12,11 @@
 //! - Satoh's split, `v̄_φ² = k² (⟨v_φ²⟩ − σ_R²)` and `σ_φ² = ⟨v_φ²⟩ − v̄_φ²`.
 //!
 //! The tracer `ν` is the component's own density, axisymmetrised as plan 02's potential
-//! axisymmetrises it: the bulge as the spheroidal exponential of its second moments, the bar as the
-//! azimuthal average of its surface density times its exponential height, the nuclear disc as it
-//! is. The table lies on the potential's 64 × 64 grid, log-spaced from 2⁻⁴ to 2¹⁸ ly in R and |z|;
-//! the z integral is an 8-point Gauss–Legendre rule on every panel between grid heights, the
-//! radial derivative a central difference in `ln R`. `β_z` is 0.3 for bulge and bar, which stands
+//! axisymmetrises it: the bulge as its own boxy body with both in-plane scales `√((a² + b²) ÷ 2)`
+//! (plan 15's P15.T3.c), the bar as the azimuthal average of its surface density times its
+//! exponential height, the nuclear disc as it is. The table lies on the potential's 64 × 64 grid,
+//! log-spaced from 2⁻⁴ to 2¹⁸ ly in R and |z|; the z integral is an 8-point Gauss–Legendre rule on
+//! every panel between grid heights, the radial derivative a central difference in `ln R`. `β_z` is 0.3 for bulge and bar, which stands
 //! for the bar's orbits and brings the projected profile onto GIBS's, and 0 for the nuclear disc;
 //! Satoh's `k` is 0.6, 0.8 and 0.9 (Design note 10). They belong to the generator version.
 //!
@@ -26,9 +26,10 @@
 //! at Milky Way values).
 
 use super::{gl4, gl8};
+use crate::galaxy::fields::bulge::BoxyBulge;
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::potential::sigma::EFFECTIVE_RADIUS_IN_SCALES;
-use crate::galaxy::potential::{MassModel, PotentialTables, bulge_spheroid};
+use crate::galaxy::potential::sigma::effective_radius_in_scales;
+use crate::galaxy::potential::{MassModel, PotentialTables, axisymmetric_bulge_scales};
 use crate::math;
 use crate::tables::gauss_legendre::{GL4_NODES, GL4_WEIGHTS};
 use crate::units::{KilometresPerSecond, LightYears};
@@ -384,11 +385,11 @@ pub fn bar_streaming(
     ]
 }
 
-/// The radii of the reduced solution's midplane profile, in units of the tracer's radial scale
-/// `a_r` (P08.T4.d, ruling 105.1).
+/// The radii of the reduced solution's midplane profile, in units of the tracer's in-plane scale
+/// `s` (P08.T4.d, ruling 105.1).
 const PROFILE_RADII: [f64; 9] = [0.03, 0.1, 0.25, 0.5, 0.9, 1.5, 2.5, 4.0, 7.0];
 
-/// The reduced solution's vertical panels, in units of the tracer's vertical scale `a_z`, each a
+/// The reduced solution's vertical panels, in units of the tracer's vertical scale `h`, each a
 /// 4-point rule.
 const PROFILE_COLUMN: [f64; 4] = [0.0, 1.0, 3.0, 10.0];
 
@@ -396,30 +397,78 @@ const PROFILE_COLUMN: [f64; 4] = [0.0, 1.0, 3.0, 10.0];
 /// rule.
 const SLIT_PANELS: [f64; 4] = [0.0, 0.25, 0.5, 1.0];
 
-/// The panels of a line of sight edge-on, in units of `a_r`, and of a column face-on, in units of
-/// `a_z`, each a 4-point rule.
+/// The panels of a line of sight edge-on, in units of `s`, and of a column face-on, in units of
+/// `h`, each a 4-point rule.
 const SIGHT_PANELS: [f64; 6] = [0.0, 0.25, 1.0, 3.0, 8.0, 20.0];
 
 /// The inclination average of M–σ's `σ_e²`: `⟨cos² i⟩ = 1 ÷ 3` of the face-on second moment and `2
 /// ÷ 3` of the edge-on one, for a galaxy seen from a random direction (ruling 105.1).
 const FACE_ON_WEIGHT: f64 = 1.0 / 3.0;
 
-/// The luminosity-weighted line-of-sight second moment `⟨V² + σ²⟩` of the spheroidal exponential
-/// `ν = exp(−√(R² ÷ a_r² + z² ÷ a_z²))` along its major axis inside `R_e = 2.027 a_r`, averaged
-/// over inclination: the `σ_e` of the M–σ relation, squared (McConnell and Ma 2013, ApJ 764, 184,
+/// The bulge's tracer, `ν = exp(−((R ÷ s)^c + (|z| ÷ h)^c)^(1 ÷ c))`: its own body made
+/// axisymmetric in the plane, the body plan 02's potential expands (plan 08, Design note 10;
+/// plan 15, P15.T3.c; decision-p15-revalidation Q8).
+///
+/// `c` is the bulge's boxiness, `h` its vertical scale and `s = √((a² + b²) ÷ 2)` of its in-plane
+/// scales ([`bulge_tracer_axes`]), so the tracer has the bulge's unit body, and with it its second
+/// moments and boxiness. Its ln-density is that body's closed form, the bulge field's own `m`
+/// ([`BoxyBulge::radius`]) with both in-plane scales `s`, not [`MGE_BOXY`]'s Gaussians, which
+/// serve only the potential. In the plane it is `e^(−R ÷ s)`. Its effective radius is its
+/// projected half-mass radius face-on, [`effective_radius_in_scales`] of `s`.
+///
+/// [`MGE_BOXY`]: crate::tables::mge::MGE_BOXY
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct BulgeTracer {
+    /// The body `exp(−m)` with `a = b = s`, of one system over all space; only its `m`
+    /// ([`BoxyBulge::radius`]) is read.
+    body: BoxyBulge,
+    /// The effective radius.
+    effective_radius: LightYears,
+}
+
+impl BulgeTracer {
+    /// The tracer of the bulge of `params`.
+    #[must_use]
+    pub(crate) fn of(params: &GalaxyParams) -> Self {
+        let ((s, h), boxiness) = bulge_tracer_axes(params);
+        Self {
+            body: BoxyBulge::new(1.0, s, s, h, boxiness)
+                .expect("built parameters give positive scales and a boxiness of at least 1"),
+            effective_radius: s * effective_radius_in_scales(boxiness),
+        }
+    }
+
+    /// `ln ν` at cylindrical radius `r` and height `z` (ly): `−m`, 0 at the centre.
+    #[must_use]
+    pub(crate) fn ln_density(&self, r: f64, z: f64) -> f64 {
+        -self.body.radius(r, 0.0, z)
+    }
+
+    /// The in-plane and vertical scales `(s, h)`, ly.
+    #[must_use]
+    fn scales_ly(&self) -> (f64, f64) {
+        (self.body.scale_x().value(), self.body.scale_z().value())
+    }
+}
+
+/// The luminosity-weighted line-of-sight second moment `⟨V² + σ²⟩` of the bulge's tracer `ν`
+/// ([`BulgeTracer`]) along its major axis inside its effective radius `R_e`, averaged over
+/// inclination: the `σ_e` of the M–σ relation, squared (McConnell and Ma 2013, ApJ 764, 184,
 /// eq. 1; Gültekin et al. 2009; the Nuker practice of `I(r) dr` weighting, Kormendy and Ho 2013),
 /// as ruling 105.1 has it.
 ///
-/// `column(R)` is `∫₀^∞ ν σ_z² dz` at radius `R` with `ν(R, 0) = e^(−R ÷ a_r)`, the face-on column
+/// `column(R)` is `∫₀^∞ ν σ_z² dz` at radius `R`, with `ν(R, 0) = e^(−R ÷ s)`, the face-on column
 /// of the second moment, which carries no mean motion; `midplane(R)` is `(σ_R², ⟨v_φ²⟩)` in the
 /// plane, whose line-of-sight mix is the edge-on moment `σ_R² sin²φ + ⟨v_φ²⟩ cos²φ` at azimuth φ
 /// from the line of sight's normal; the edge-on slit is taken in the plane.
 fn sigma_e_sq(
-    (a_r, a_z): (f64, f64),
+    tracer: &BulgeTracer,
     mut column: impl FnMut(f64) -> f64,
     mut midplane: impl FnMut(f64) -> (f64, f64),
 ) -> f64 {
-    let r_e = EFFECTIVE_RADIUS_IN_SCALES * a_r;
+    let (s, h) = tracer.scales_ly();
+    let r_e = tracer.effective_radius.value();
+    let nu = |r: f64, z: f64| math::exp(tracer.ln_density(r, z));
     let panels = |f: &mut dyn FnMut(f64) -> f64, edges: &[f64], scale: f64| {
         edges
             .windows(2)
@@ -428,10 +477,7 @@ fn sigma_e_sq(
     // Face-on: I(R) dR along the major axis.
     let face_moment = panels(&mut |r| column(r), &SLIT_PANELS, r_e);
     let face_light = panels(
-        &mut |r| {
-            let rho = r / a_r;
-            a_z * panels(&mut |t| math::exp(-math::hypot(rho, t)), &SIGHT_PANELS, 1.0)
-        },
+        &mut |r| h * panels(&mut |t| nu(r, h * t), &SIGHT_PANELS, 1.0),
         &SLIT_PANELS,
         r_e,
     );
@@ -443,7 +489,7 @@ fn sigma_e_sq(
                 panels(
                     &mut |y| {
                         let r = math::hypot(x, y);
-                        let nu = math::exp(-r / a_r);
+                        let nu = nu(r, 0.0);
                         let (radial_sq, azimuthal_sq) = midplane(r);
                         if r > 0.0 {
                             nu * (radial_sq * (y / r) * (y / r) + azimuthal_sq * (x / r) * (x / r))
@@ -452,20 +498,14 @@ fn sigma_e_sq(
                         }
                     },
                     &SIGHT_PANELS,
-                    a_r,
+                    s,
                 )
             },
             w[0] * r_e,
             w[1] * r_e,
         );
         edge_light += gl4(
-            |x| {
-                panels(
-                    &mut |y| math::exp(-math::hypot(x, y) / a_r),
-                    &SIGHT_PANELS,
-                    a_r,
-                )
-            },
+            |x| panels(&mut |y| nu(math::hypot(x, y), 0.0), &SIGHT_PANELS, s),
             w[0] * r_e,
             w[1] * r_e,
         );
@@ -484,7 +524,8 @@ struct ReducedProfile {
 }
 
 impl ReducedProfile {
-    fn new(model: &MassModel, (a_r, a_z): (f64, f64)) -> Self {
+    fn new(model: &MassModel, tracer: &BulgeTracer) -> Self {
+        let (in_plane, vertical) = tracer.scales_ly();
         let mut profile = Self {
             ln_r: [0.0; PROFILE_RADII.len()],
             ln_column: [0.0; PROFILE_RADII.len()],
@@ -492,7 +533,7 @@ impl ReducedProfile {
             v_circ_sq: [0.0; PROFILE_RADII.len()],
         };
         for (k, &rho) in PROFILE_RADII.iter().enumerate() {
-            let r = rho * a_r;
+            let r = rho * in_plane;
             let (mut column, mut midplane) = (0.0, 0.0);
             // One force per node serves both integrals: the 4-point rule on each panel in t.
             for w in PROFILE_COLUMN.windows(2) {
@@ -500,10 +541,10 @@ impl ReducedProfile {
                 let mid = w[0] + half;
                 for (&x, &weight) in GL4_NODES.iter().zip(&GL4_WEIGHTS) {
                     let t = mid + half * x;
-                    let z = a_z * t;
-                    let f = math::exp(-math::hypot(rho, t)) * model.forces_at(r, z).vertical;
-                    column += weight * half * a_z * z * f;
-                    midplane += weight * half * a_z * f;
+                    let z = vertical * t;
+                    let f = math::exp(tracer.ln_density(r, z)) * model.forces_at(r, z).vertical;
+                    column += weight * half * vertical * z * f;
+                    midplane += weight * half * vertical * f;
                 }
             }
             profile.ln_r[k] = math::ln(r);
@@ -532,14 +573,15 @@ impl ReducedProfile {
         math::exp(Self::lerp(&self.ln_column, self.at(r)))
     }
 
-    /// `(σ_R², ⟨v_φ²⟩)` in the plane at `r`, for the anisotropy `beta_z`.
-    fn midplane(&self, r: f64, rho: f64, beta_z: f64) -> (f64, f64) {
+    /// `(σ_R², ⟨v_φ²⟩)` in the plane at `r`, where the tracer's ln-density is `ln_nu`, for the
+    /// anisotropy `beta_z`.
+    fn midplane(&self, r: f64, ln_nu: f64, beta_z: f64) -> (f64, f64) {
         let (k, t) = self.at(r);
         let ln_mid = Self::lerp(&self.ln_midplane, (k, t));
         let slope =
             (self.ln_midplane[k + 1] - self.ln_midplane[k]) / (self.ln_r[k + 1] - self.ln_r[k]);
-        // ν σ_R² = ∫ ν K_z dz ÷ (1 − β_z), with ν(R, 0) = e^(−ρ).
-        let radial_sq = math::exp(ln_mid + rho) / (1.0 - beta_z);
+        // ν σ_R² = ∫ ν K_z dz ÷ (1 − β_z).
+        let radial_sq = math::exp(ln_mid - ln_nu) / (1.0 - beta_z);
         let azimuthal_sq = radial_sq * (1.0 + slope) + Self::lerp(&self.v_circ_sq, (k, t));
         (radial_sq, azimuthal_sq.max(AZIMUTHAL_FLOOR * radial_sq))
     }
@@ -557,7 +599,8 @@ impl ReducedProfile {
 /// R) + v_c²`, which holds the rotation and the azimuthal dispersion together, whatever Satoh's
 /// `k` splits them into. `model` is the black-hole-free model of plan 02's two-phase build, since
 /// the black hole's mass is what this sets; `params` gives the bulge, axisymmetrised as the
-/// potential holds it, whose effective radius is 2.027 of its radial scale. The reduced solution
+/// potential holds it, whose effective radius is its projected half-mass radius face-on
+/// ([`effective_radius_in_scales`]). The reduced solution
 /// evaluates `K_z` at 108 points (nine radii, twelve heights) and `v_c²` at nine, some 100 ms of a
 /// parameter build; it agrees with the final table's
 /// ([`KinematicTables::bulge_projected_sigma`](super::KinematicTables::bulge_projected_sigma)) to
@@ -577,27 +620,30 @@ impl ReducedProfile {
 /// ```
 #[must_use]
 pub fn bulge_projected_sigma(model: &MassModel, params: &GalaxyParams) -> KilometresPerSecond {
-    let axes = bulge_tracer_axes(params);
-    let profile = ReducedProfile::new(model, axes);
+    let tracer = BulgeTracer::of(params);
+    let profile = ReducedProfile::new(model, &tracer);
     KilometresPerSecond::new(
         sigma_e_sq(
-            axes,
+            &tracer,
             |r| profile.column(r),
-            |r| profile.midplane(r, r / axes.0, BULGE_BETA_Z),
+            |r| profile.midplane(r, tracer.ln_density(r, 0.0), BULGE_BETA_Z),
         )
         .sqrt(),
     )
 }
 
 /// The same `σ_e` from a table, whose lookups cost nothing against a force: for the final tables.
-pub(crate) fn projected_sigma_from_table(table: &JeansTable, (a_r, a_z): (f64, f64)) -> f64 {
+pub(crate) fn projected_sigma_from_table(table: &JeansTable, tracer: &BulgeTracer) -> f64 {
+    let (_, h) = tracer.scales_ly();
     sigma_e_sq(
-        (a_r, a_z),
+        tracer,
         |r| {
-            let rho = r / a_r;
             SIGHT_PANELS.windows(2).fold(0.0, |sum, w| {
                 sum + gl4(
-                    |t| math::exp(-math::hypot(rho, t)) * table.moments(r, a_z * t)[2] * a_z,
+                    |t| {
+                        let z = h * t;
+                        math::exp(tracer.ln_density(r, z)) * table.moments(r, z)[2] * h
+                    },
                     w[0],
                     w[1],
                 )
@@ -611,11 +657,13 @@ pub(crate) fn projected_sigma_from_table(table: &JeansTable, (a_r, a_z): (f64, f
     .sqrt()
 }
 
-/// The axes `(a_r, a_z)` of the bulge's axisymmetrised tracer, ly.
+/// The scales `(s, h)` of the bulge's axisymmetrised tracer ([`BulgeTracer`]), with `s =
+/// √((a² + b²) ÷ 2)` of the bulge's in-plane scales and `h` its vertical one, and its boxiness
+/// (decision-p15-revalidation Q8): the potential's body.
 #[must_use]
-pub(crate) fn bulge_tracer_axes(params: &GalaxyParams) -> (f64, f64) {
-    let (a_r, a_z) = bulge_spheroid(params.bulge());
-    (a_r.value(), a_z.value())
+pub(crate) fn bulge_tracer_axes(params: &GalaxyParams) -> ((LightYears, LightYears), f64) {
+    let bulge = params.bulge();
+    (axisymmetric_bulge_scales(bulge), bulge.boxiness())
 }
 
 #[cfg(test)]

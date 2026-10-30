@@ -707,6 +707,20 @@ mod tests {
 
     const SEEDS: u64 = 10_000;
 
+    /// The bulge's drawn boxiness lies within `MGE_BOXY`'s rows, so that the mass model's expansion
+    /// of the bulge never refuses a drawn galaxy (plan 15, P15.T3.c).
+    #[test]
+    fn the_bulge_s_boxiness_lies_within_the_boxy_table() {
+        let (lo, hi) = BULGE_BOXINESS.bounds();
+        let rows = &crate::tables::mge::MGE_BOXY;
+        assert!(
+            rows[0].0 <= lo && hi <= rows[rows.len() - 1].0,
+            "{lo}–{hi} against {}–{}",
+            rows[0].0,
+            rows[rows.len() - 1].0
+        );
+    }
+
     fn seed(n: u64) -> Seed {
         Seed::new(0x9a1a_0000_0000_0000 ^ n.wrapping_mul(0x9e37_79b9_7f4a_7c15))
     }

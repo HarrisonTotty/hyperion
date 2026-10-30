@@ -507,7 +507,7 @@ mod tests {
             "{} {want}",
             f.candidates()
         );
-        assert!((f.victims() - 27.309).abs() < 1e-3, "{}", f.victims());
+        assert!((f.victims() - 27.311).abs() < 1e-3, "{}", f.victims());
         assert_same_bits(f.entries(), f.victims() + f.recent() + f.candidates());
         assert!(f.recent() > 0.0 && f.recent() < 2e4, "{}", f.recent());
         let hosts: f64 = CLASS_SHARES

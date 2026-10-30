@@ -2035,3 +2035,11 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   - Rendering plan 06 (the sky's `PhaseEnvelope::shared`) cites `LifetimeBracket::shared` as an
     example of the lazy-value exception, which it no longer is. For main; that plan is not edited
     here.
+
+- **The bulge's tracer since P15.T3.c (held at 23 for 25).** The crate-private
+  `spheroid::BulgeTracer::of(params)` gives `ln ν = −m` of the bulge's own body with both in-plane
+  scales `s = √((a² + b²) ÷ 2)` (`BoxyBulge::radius`), not `MGE_BOXY`'s Gaussians.
+  `bulge_tracer_axes` returns `((s, h), c)` in `LightYears`, `KinematicTables` holds the tracer in
+  place of `bulge_axes`, and `projected_sigma_from_table` takes it. `R_e` is the tracer's face-on
+  projected half-mass radius, `potential::sigma::effective_radius_in_scales(c)` of `s` (lean,
+  2026-10-30; σ_e moves by under 0.1% against the old aperture of 2.027 `a_r`).

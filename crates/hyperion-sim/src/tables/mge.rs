@@ -1,86 +1,181 @@
 //! Gaussian expansions of the profiles the galaxy's potential is built from (plan 02, Design
 //! note 6).
 //!
-//! @provisional by hyperion-fit 0.1.0, task `mge` revision 1 (P02.T6.a). Do not edit.
-//! inputs-sha256: 74e52180fba4ca14be6a2ad32f71fa447ed13e8c96a830856c3068daca748140
+//! @provisional by hyperion-fit 0.1.0, task `mge` revision 2 (P15.T3.b). Do not edit.
+//! inputs-sha256: 1869f2b0b776188b5247c68248296b70bc599e59b9044b917ac1119ab1f25edc
 //! manifest: crates/hyperion-fit/manifests/mge.toml
 //! data: none
 //! sim-fingerprint: 91020ca6a195b8bd9ee8aa610a702c9a96cad856a5b5827e5a6998a639587027
-//! since-generator-version: 11
+//! since-generator-version: 23
 //! source: the profiles of plan 02's mass model (Design note 6), expanded as sums of Gaussians
-//!   after Emsellem, Monnet and Bacon (1994, A&A 285, 723)
-//! acceptance: `MGE_EXP` within 1.289% of e^(−s) over s = 0.05–10; `MGE_BAR` within 2.88% of its
-//!   central value over u = 0–2 and its mass within 0.212%
+//!   after Emsellem, Monnet and Bacon (1994, A&A 285, 723), the widths free after Cappellari
+//!   (2002, MNRAS 333, 400)
+//! acceptance: `MGE_EXP` within 0.010% of e^(−s) over s = 0.05–10 and its spherical mass within
+//!   0.0014%; `MGE_HOLED_EXP` within 0.083% of e^(−s) over 0.05–8 and its mass fraction within
+//!   2.8e-6; `MGE_BAR` within 2.96% of its central value (worst at u = 0.89), its mass within
+//!   0.295% and its cumulative mass from u = 0.05 to 2.5 within 4.93% (worst at u = 1.06); the
+//!   thin disc's speed against Freeman (1970) is held to 0.5% by `tests/mge.rs`; `MGE_BOXY` at c
+//!   = 3, 3.5 and 4: mass-weighted rms relative density error 13.3%, 17.5% and 20.7% (plan 15's
+//!   3% is out of reach of non-negative, axis-aligned centred Gaussians, which are log-convex in
+//!   (R², z²): a structural miss, ruled 2026-10-23), mass inside spheres of 0.5–4 scale lengths
+//!   within 0.136%, 0.197% and 0.249%, whole mass within 0.136%, 0.192% and 0.245% and midplane
+//!   force at 0.25–8 scale lengths within 0.19%, 0.27% and 0.34%
 //!
-//! Provisional: plan 15's P15.T3 refits them with free widths and replaces them.
+//! Each one-dimensional table is `[(weight, width); 14]`, widths ascending, and stands for the
+//! profile `Σ weight × exp(−x² ÷ 2 width²)`. The widths are free (Cappellari 2002, MNRAS 333,
+//! 400). Levenberg–Marquardt moves their logarithms, at most 300 iterations, its Jacobian by
+//! forward differences of 1.0e-7 in ln width. At each point it evaluates, the weights are the
+//! non-negative least-squares solution (Lawson and Hanson 1974) for those widths. The weights are
+//! solved once more on the sorted widths. Inputs:
 //!
-//! Each table is `[(weight, width); 14]`, widths ascending, and stands for the profile
-//! `Σ weight × exp(−x² ÷ 2 width²)`. The widths are fixed and log-spaced; the weights are the
-//! non-negative least-squares solution by projected coordinate descent on the normal equations,
-//! 50,000 sweeps from zero. Inputs:
-//!
-//! - [`MGE_EXP`]: `e^(−s)` at 300 log-spaced `s` from 0.02 to 12, each row weighted by
-//!   `1 ÷ e^(−s)` so that the relative error is what is fitted. Widths from 0.04 to 3.5.
+//! - [`MGE_EXP`]: `e^(−s)` at 400 log-spaced `s` from 0.001 to 12, each row weighted by
+//!   `1 ÷ e^(−s)` so that the relative error is what is fitted. Started from log-spaced widths
+//!   0.04 to 3.5.
 //! - [`MGE_HOLED_EXP`]: `e^(−x ÷ s − s)` with `x = 0.55`, the thin disc's central hole in scale
 //!   lengths: [`MGE_EXP`]'s weights less those of the deficit `e^(−s) (1 − e^(−x ÷ s))`, fitted
 //!   on the same widths and samples in the same weighting, so its weights are signed.
 //! - [`MGE_BAR`]: the azimuthal average of the long bar's surface density `L(|x|) exp(−y² ÷ 2w²)`,
-//!   with `w = 0.1` and `L` level to 0.85 with a Gaussian end of width 0.15, all in half-lengths.
-//!   At 321 evenly spaced `u` from 0 to 2, in absolute error, with one more row for
-//!   the total mass, weighted 5. Widths from 0.04 to 0.8.
+//!   with `w = 0.1` and `L` level to 0.85 with a Gaussian end of width 0.15, all in half-lengths: at
+//!   321 evenly spaced `u` from 0 to 2, in absolute error, with a row for the total mass
+//!   and one in relative error for the mass inside each edge from 0.05 to 2.5, every 0.02,
+//!   that mass by Simpson's rule on the profile every 0.01. In each of 6 rounds the widths
+//!   are polished, from log-spaced widths 0.04 to 0.8 in the first round and from the last round's
+//!   after it. The mass row is weighted 20 and the cumulative rows 3.0 in the first round,
+//!   and the rows by the last minimax solve's weights in the later ones. Then Lawson's algorithm
+//!   (1961), over 300 non-negative solves, makes the largest error least, the profile's scaled
+//!   by 0.03, the mass's by 0.003 and the cumulative mass's by 0.05. The round with the least such error is
+//!   kept.
+//! - [`MGE_BOXY`]: the boxy bulge's unit body `exp(−(R^c + |z|^c)^(1 ÷ c))`, `R` and `z` in its
+//!   scale lengths, for c = 3, 3.5 and 4: 16 terms each, every term with its own weight, width
+//!   and axis ratio q. On a polar grid of 48 log-spaced radii from 0.001 to 40 by 12
+//!   Gauss–Legendre latitudes, in the density's relative error weighted by each point's share of
+//!   the mass, with a row per radius to 12 for the latitude average weighted 3.0, one
+//!   per radius 0.25, 0.5, 1, 2, 4 and 8 for the midplane force weighted 10.0, and one each for the central
+//!   density and the whole mass weighted 1.0 and 3.0. Seeded from [`MGE_EXP`] at q = 1, its
+//!   weights solved by non-negative least squares and its two heaviest terms then split into q =
+//!   1.1 and 1 ÷ 1.1; then Levenberg–Marquardt on the weights, ln widths and ln q together,
+//!   at most 300 iterations, the weights held non-negative, the widths within 0.001 to 40 and
+//!   q within 0.05 to 20. Such a sum is log-convex in (R², z²) and cannot follow the body's boxiness,
+//!   so the fit is weighted towards the mass and the force, which the potential reads.
+
+use crate::galaxy::potential::mge::BoxyTerm;
 
 /// `e^(−s) ≈ Σ weight × exp(−s² ÷ 2 width²)` for `s ≥ 0`.
+#[rustfmt::skip]
 pub const MGE_EXP: [(f64, f64); 14] = [
-    (0.036_205_951_277_046_386, 0.04),
-    (0.0, 0.056_421_577_717_888_64),
-    (0.014_718_825_048_988_386, 0.079_584_860_804_393_68),
-    (0.046_705_195_409_883_375, 0.112_257_585_226_061_18),
-    (0.035_057_591_065_239_27, 0.158_343_751_731_367_97),
-    (0.052_276_071_331_381_67, 0.223_350_107_361_336),
-    (0.102_568_284_258_554_62, 0.315_044_136_019_659_8),
-    (0.084_978_612_797_855_54, 0.444_382_180_124_957_8),
-    (0.164_161_543_067_118_53, 0.626_818_592_809_127_2),
-    (0.148_867_023_901_886_28, 0.884_152_348_729_944_1),
-    (0.164_678_829_494_633_78, 1.247_131_761_458_007_7),
-    (0.100_417_378_479_465_94, 1.759_128_540_088_758_2),
-    (0.031_695_877_324_746_095, 2.481_320_191_009_347),
-    (0.002_115_157_658_180_449_3, 3.5),
+    (0.002_531_157_537_946_180_2, 0.002_355_875_692_406_657_5),
+    (0.006_390_540_161_118_564, 0.007_655_901_455_339_989),
+    (0.013_957_513_075_102_734, 0.019_913_165_050_905_533),
+    (0.027_561_126_149_721_71, 0.045_170_472_387_334_12),
+    (0.050_043_846_894_327_58, 0.092_845_493_027_925_72),
+    (0.083_603_206_541_017_33, 0.176_179_153_472_933_78),
+    (0.126_643_398_092_541_35, 0.311_319_869_457_751_36),
+    (0.168_562_553_889_653_6, 0.514_221_824_535_161_5),
+    (0.187_875_323_962_411_55, 0.796_111_317_883_686_4),
+    (0.165_319_836_687_621_24, 1.161_027_390_088_625_2),
+    (0.107_655_630_430_237_4, 1.610_122_668_581_581_7),
+    (0.047_167_061_855_529_41, 2.154_786_051_702_825),
+    (0.011_093_674_149_172_835, 2.835_583_613_644_269_4),
+    (0.000_767_297_469_147_083_5, 3.759_239_088_266_71),
 ];
 
 /// `e^(−x ÷ s − s) ≈ Σ weight × exp(−s² ÷ 2 width²)` for `s ≥ 0`, with `x` the thin disc's
 /// hole in scale lengths; the weights are signed.
+#[rustfmt::skip]
 pub const MGE_HOLED_EXP: [(f64, f64); 14] = [
-    (0.008_176_775_279_532_96, 0.04),
-    (0.0, 0.056_421_577_717_888_64),
-    (0.014_718_825_048_988_386, 0.079_584_860_804_393_68),
-    (0.046_705_195_409_883_375, 0.112_257_585_226_061_18),
-    (-0.108_515_320_392_295_01, 0.158_343_751_731_367_97),
-    (-0.086_953_863_074_323_68, 0.223_350_107_361_336),
-    (-0.098_522_479_693_988_38, 0.315_044_136_019_659_8),
-    (-0.083_414_943_553_599_66, 0.444_382_180_124_957_8),
-    (0.022_939_150_319_017_22, 0.626_818_592_809_127_2),
-    (0.056_603_028_904_271_88, 0.884_152_348_729_944_1),
-    (0.115_469_871_371_021_94, 1.247_131_761_458_007_7),
-    (0.083_459_464_165_471_22, 1.759_128_540_088_758_2),
-    (0.029_004_174_283_505_327, 2.481_320_191_009_347),
-    (0.002_021_187_339_132_636_3, 3.5),
+    (-0.000_336_577_495_218_890_86, 0.002_355_875_692_406_657_5),
+    (0.001_243_906_404_553_778, 0.007_655_901_455_339_989),
+    (-0.004_452_290_584_598_603, 0.019_913_165_050_905_533),
+    (0.012_276_148_445_084_826, 0.045_170_472_387_334_12),
+    (0.039_599_981_437_302_32, 0.092_845_493_027_925_72),
+    (-0.139_750_348_226_968_58, 0.176_179_153_472_933_78),
+    (-0.164_678_148_390_161_95, 0.311_319_869_457_751_36),
+    (-0.051_538_934_357_788_39, 0.514_221_824_535_161_5),
+    (0.061_179_496_540_059_91, 0.796_111_317_883_686_4),
+    (0.106_786_657_686_714_11, 1.161_027_390_088_625_2),
+    (0.086_647_922_636_425_39, 1.610_122_668_581_581_7),
+    (0.041_855_714_101_104_93, 2.154_786_051_702_825),
+    (0.010_357_728_288_899_044, 2.835_583_613_644_269_4),
+    (0.000_737_993_856_429_634_1, 3.759_239_088_266_71),
 ];
 
 /// The long bar's azimuthally averaged surface density, 1 at the centre: at `u`
 /// half-lengths it is `≈ Σ weight × exp(−u² ÷ 2 width²)`, the widths in half-lengths.
+#[rustfmt::skip]
 pub const MGE_BAR: [(f64, f64); 14] = [
-    (0.0, 0.04),
-    (0.0, 0.050_366_204_183_062_924),
-    (0.042_311_180_866_795_396, 0.063_418_863_095_249_58),
-    (0.003_244_497_542_679_272_4, 0.079_854_185_192_826_33),
-    (0.0, 0.100_548_804_907_350_26),
-    (0.595_030_316_479_452_9, 0.126_606_540_958_164),
-    (0.082_990_966_776_132_53, 0.159_417_272_320_255_13),
-    (0.0, 0.200_731_072_199_722_78),
-    (0.0, 0.252_751_554_207_409_5),
+    (0.0, 0.035_374_394_566_078_916),
+    (0.0, 0.050_366_204_183_072_694),
+    (0.0, 0.063_418_863_095_249_83),
+    (0.0, 0.070_431_789_905_268_42),
+    (0.0, 0.089_523_413_477_297_74),
+    (0.679_231_836_645_128_7, 0.113_019_826_346_985_21),
+    (0.007_665_954_224_046_292, 0.152_572_804_522_282_9),
+    (0.0, 0.200_731_072_199_722_83),
+    (0.0, 0.252_751_554_207_409_6),
     (0.0, 0.318_253_409_669_922_05),
-    (0.0, 0.400_730_405_334_781_55),
-    (0.274_492_137_220_343_6, 0.504_581_735_436_329),
-    (0.003_150_760_031_098_019_4, 0.635_346_667_850_759_4),
-    (0.0, 0.8),
+    (0.0, 0.429_196_945_840_694_34),
+    (0.255_097_452_773_667_3, 0.475_189_569_915_210_2),
+    (0.062_702_871_938_602_76, 0.514_649_703_528_303_6),
+    (0.0, 0.800_000_000_000_000_4),
+];
+
+/// `Σ weight × exp(−(R² + z² ÷ q²) ÷ 2 width²) ≈ exp(−(R^c + |z|^c)^(1 ÷ c))`, the boxy
+/// bulge's unit body, `R` and `z` in its scale lengths (`s` in the plane and `h` along z):
+/// rows `(c, terms)`, `c` ascending, each row's widths ascending and weights non-negative.
+#[rustfmt::skip]
+pub const MGE_BOXY: [(f64, [BoxyTerm; 16]); 3] = [
+    (3.0, [
+        BoxyTerm { weight: 0.001_030_141_354_805_172_3, width: 0.001_335_317_054_728_29, q: 0.259_968_974_430_253_8 },
+        BoxyTerm { weight: 0.001_386_078_904_410_124_5, width: 0.001_872_340_748_816_313_8, q: 1.765_134_134_614_903_4 },
+        BoxyTerm { weight: 0.006_919_962_249_344_547, width: 0.015_034_303_881_816_73, q: 0.998_638_514_047_827_8 },
+        BoxyTerm { weight: 0.006_933_585_113_575_612, width: 0.015_731_896_435_313_725, q: 0.256_619_118_129_349_5 },
+        BoxyTerm { weight: 0.083_895_382_748_326_82, width: 0.205_459_819_175_200_34, q: 0.378_377_846_306_978_57 },
+        BoxyTerm { weight: 0.052_342_384_057_019_08, width: 0.211_056_686_059_573_67, q: 0.132_364_048_811_801_7 },
+        BoxyTerm { weight: 0.107_358_343_560_203_13, width: 0.246_627_764_018_174_13, q: 1.251_890_479_335_130_4 },
+        BoxyTerm { weight: 0.185_822_072_519_267_47, width: 0.479_575_213_195_219_45, q: 1.009_215_760_305_124_6 },
+        BoxyTerm { weight: 0.195_229_115_326_267_94, width: 0.780_378_308_718_868_9, q: 1.071_263_938_681_511 },
+        BoxyTerm { weight: 0.168_550_884_879_697, width: 1.123_237_458_352_781_3, q: 1.124_677_471_716_903 },
+        BoxyTerm { weight: 0.059_785_964_291_630_814, width: 1.578_093_458_802_270_4, q: 1.098_766_912_530_775_7 },
+        BoxyTerm { weight: 0.059_971_042_406_195_97, width: 1.578_441_159_867_312_5, q: 1.098_758_176_582_657 },
+        BoxyTerm { weight: 0.026_966_009_383_948_206, width: 2.120_600_923_111_028, q: 1.098_830_381_830_226 },
+        BoxyTerm { weight: 0.027_994_362_495_333_07, width: 2.158_661_775_936_189_5, q: 1.097_792_186_076_254_7 },
+        BoxyTerm { weight: 0.013_829_564_381_583_543, width: 2.798_897_761_554_734, q: 1.071_336_418_154_671_8 },
+        BoxyTerm { weight: 0.001_984_592_527_324_939_7, width: 3.680_596_842_001_197_6, q: 1.031_136_635_357_917_7 },
+    ]),
+    (3.5, [
+        BoxyTerm { weight: 0.001_523_379_563_233_425_4, width: 0.001_000_000_000_000_000_2, q: 9.960_032_340_031_528 },
+        BoxyTerm { weight: 0.004_090_078_054_526_787, width: 0.003_909_152_609_577_602, q: 2.778_284_376_544_900_3 },
+        BoxyTerm { weight: 0.006_711_999_836_894, width: 0.012_807_616_661_105_171, q: 0.965_423_575_027_175_8 },
+        BoxyTerm { weight: 0.085_090_118_422_425_9, width: 0.210_155_713_477_097_94, q: 0.359_254_145_738_959_3 },
+        BoxyTerm { weight: 0.004_764_659_060_309_146, width: 0.210_735_959_238_880_5, q: 0.052_923_846_541_114_095 },
+        BoxyTerm { weight: 0.047_495_383_167_527_716, width: 0.215_907_728_598_091_26, q: 0.123_478_396_299_221_39 },
+        BoxyTerm { weight: 0.105_200_837_369_859_66, width: 0.242_162_801_392_195_93, q: 1.292_261_481_036_361_7 },
+        BoxyTerm { weight: 0.186_901_861_164_447_96, width: 0.477_603_709_026_932_2, q: 1.028_356_432_757_479_5 },
+        BoxyTerm { weight: 0.194_664_999_792_186_96, width: 0.781_165_311_838_830_5, q: 1.096_301_504_423_362_4 },
+        BoxyTerm { weight: 0.168_850_529_429_809_63, width: 1.119_439_803_070_507_5, q: 1.158_795_492_951_180_8 },
+        BoxyTerm { weight: 0.060_443_571_726_008_43, width: 1.573_391_393_984_354_5, q: 1.127_979_823_942_731_4 },
+        BoxyTerm { weight: 0.060_758_987_422_228_135, width: 1.573_581_898_885_062_3, q: 1.127_972_952_190_649_9 },
+        BoxyTerm { weight: 0.027_457_300_045_080_412, width: 2.116_736_416_256_273, q: 1.124_092_209_911_705_4 },
+        BoxyTerm { weight: 0.028_840_298_489_800_697, width: 2.165_382_970_490_521_4, q: 1.122_721_405_349_809_6 },
+        BoxyTerm { weight: 0.014_207_647_734_956_658, width: 2.776_126_731_213_223, q: 1.089_701_766_573_654 },
+        BoxyTerm { weight: 0.002_678_647_138_165_622_8, width: 3.647_858_534_617_841, q: 1.039_149_770_232_413_7 },
+    ]),
+    (4.0, [
+        BoxyTerm { weight: 0.001_360_752_429_681_237, width: 0.001_000_000_000_000_000_2, q: 8.593_929_017_698_887 },
+        BoxyTerm { weight: 0.003_853_415_753_300_245_3, width: 0.007_757_306_885_267_142, q: 0.362_737_424_935_150_8 },
+        BoxyTerm { weight: 0.001_285_614_147_916_126_4, width: 0.010_336_258_185_651_01, q: 0.506_244_683_410_438_2 },
+        BoxyTerm { weight: 0.082_854_506_362_310_55, width: 0.212_628_756_836_512_14, q: 0.355_375_511_116_962 },
+        BoxyTerm { weight: 0.018_709_955_255_032_606, width: 0.214_895_380_575_726_55, q: 0.051_429_300_660_893_48 },
+        BoxyTerm { weight: 0.040_224_736_773_358_75, width: 0.217_371_454_880_926_96, q: 0.135_134_520_944_663_4 },
+        BoxyTerm { weight: 0.105_296_045_161_395_97, width: 0.241_144_905_856_125_3, q: 1.309_780_071_487_693_5 },
+        BoxyTerm { weight: 0.190_945_411_110_997, width: 0.481_146_598_429_999_3, q: 1.043_977_481_627_013 },
+        BoxyTerm { weight: 0.187_430_129_223_138_54, width: 0.788_199_031_875_114, q: 1.115_433_512_732_193_5 },
+        BoxyTerm { weight: 0.161_523_500_981_319_76, width: 1.098_462_352_977_788_4, q: 1.185_218_906_243_365_3 },
+        BoxyTerm { weight: 0.065_979_295_379_598_24, width: 1.552_803_924_460_554_5, q: 1.148_779_944_554_041_4 },
+        BoxyTerm { weight: 0.066_169_387_338_125_2, width: 1.552_856_003_076_672_3, q: 1.151_546_330_034_049_2 },
+        BoxyTerm { weight: 0.028_330_976_254_831_674, width: 2.162_049_747_293_188_8, q: 1.139_736_983_564_717_5 },
+        BoxyTerm { weight: 0.029_949_625_601_299_52, width: 2.176_247_777_160_614_6, q: 1.139_144_754_406_217_4 },
+        BoxyTerm { weight: 0.011_801_749_615_521_913, width: 2.755_449_331_562_909_6, q: 1.102_842_916_596_993_7 },
+        BoxyTerm { weight: 0.003_933_596_217_663_573, width: 3.567_112_584_775_615_8, q: 1.047_356_287_101_305_6 },
+    ]),
 ];

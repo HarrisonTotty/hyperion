@@ -1,5 +1,5 @@
-//! The refit with free widths (plan 15, P15.T3.a), run from `manifests/mge.refit.toml`, with the
-//! boxy bulge's [`super::boxy`] (P15.T3.b).
+//! The refit with free widths (plan 15, P15.T3.a), run from `manifests/mge.toml` since P15.T3.c
+//! swapped it in, with the boxy bulge's [`super::boxy`] (P15.T3.b).
 //!
 //! The first cut ([`super::fit`]) fixes its widths on a logarithmic grid and fits only the
 //! weights. The refit frees the widths, as Cappellari's method does (2002, MNRAS 333, 400): the

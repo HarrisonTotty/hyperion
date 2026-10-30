@@ -194,11 +194,12 @@ fn the_nuclear_disc_rotates_and_cools_outward() {
 /// lies in 100–120 km/s, and the black hole before scatter within a factor of three of 4.3 × 10⁶
 /// M☉.
 ///
-/// The fixture reads 117.7 km/s, which ruling 111.1 accepts: it is 0.6–0.7σ from the Milky Way's
+/// The fixture read 117.7 km/s, which ruling 111.1 accepts: it is 0.6–0.7σ from the Milky Way's
 /// 103 ± 20 km/s (McConnell and Ma 2013, ApJ 764, 184, Table A1) and 105 ± 20 (Gültekin et al.
 /// 2009, ApJ 698, 198; Kormendy and Ho 2013, ARA&A 51, 511), so the window is 100–120, not the
-/// brainstorm's 105–115. The reduced solution's cost, which the plan puts under 100 ms, is
-/// printed.
+/// brainstorm's 105–115. Since plan 15's P15.T3.c, whose tracer is the bulge's own boxy body made
+/// axisymmetric, it reads 118.65 km/s (final table 118.85), 0.7σ from both. The reduced
+/// solution's cost, which the plan puts under 100 ms, is printed.
 ///
 /// Run on its one build of the fixture by
 /// [`the_bulge_bar_and_nuclear_disc_hold_at_milky_way_values`].

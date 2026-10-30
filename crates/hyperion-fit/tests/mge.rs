@@ -1,6 +1,8 @@
 //! The committed Gaussian-expansion table is exactly what `run mge --since <current>` would write
-//! (plan 02, P02.T6.a; plan 15, P15.T1 and P15.T2), and plan 15's refit with free widths
-//! (P15.T3.a), built in memory from `manifests/mge.refit.toml`, meets its figures.
+//! (plan 02, P02.T6.a; plan 15, P15.T1 and P15.T2): since P15.T3.c, plan 15's refit with free widths
+//! (P15.T3.a) and the boxy bulge (P15.T3.b) from `manifests/mge.toml`, which, built in memory,
+//! meet their figures. Plan 02's first cut, still the task's for a manifest without `method`, is
+//! checked in memory too.
 //!
 //! CI runs this, so a table that is stale, or edited by hand, fails it.
 
@@ -75,9 +77,9 @@ fn the_expansions_follow_their_profiles() {
 
 // Plan 15's refit (P15.T3.a), in memory from its manifest.
 
-/// The refit's manifest, as committed.
+/// The refit's manifest, the task's own since P15.T3.c, as committed.
 fn refit_manifest_path() -> PathBuf {
-    Workspace::repository().manifests_dir.join("mge.refit.toml")
+    Workspace::repository().manifests_dir.join("mge.toml")
 }
 
 fn refit_params() -> RefitParams {
@@ -404,7 +406,7 @@ fn the_refit_disc_s_circular_speed_follows_freeman() {
 
 // The refit's manifest end to end.
 
-/// The scratch run through the command line: `run mge --manifest manifests/mge.refit.toml --out
+/// A scratch run through the command line: `run mge --manifest manifests/mge.toml --out
 /// <scratch>`, its header and items parsed back.
 #[test]
 fn the_refit_manifest_runs_end_to_end() {
@@ -433,7 +435,7 @@ fn the_refit_manifest_runs_end_to_end() {
     assert_eq!(header.task.as_deref(), Some("mge"));
     assert_eq!(
         header.manifest.as_deref(),
-        Some("crates/hyperion-fit/manifests/mge.refit.toml")
+        Some("crates/hyperion-fit/manifests/mge.toml")
     );
     // Every figure of T3.a passes; T3.b's density figure is its ruled structural miss, so the
     // header is provisional by P15.T3.b with that figure in its acceptance line.
@@ -455,12 +457,13 @@ fn the_refit_manifest_runs_end_to_end() {
                 && a.contains("a structural miss, ruled 2026-10-23")),
         "{header:?}"
     );
-    // P15.T3.c adds `MGE_BOXY` to the task's `items()`; until then the refit's list is here.
+    // P15.T3.c added `MGE_BOXY` to the task's `items()`.
     assert_eq!(
         common::declared(&split.body),
         ["MGE_EXP", "MGE_HOLED_EXP", "MGE_BAR", "MGE_BOXY"]
     );
-    // Its rows' type is the sim's, which T3.c adds: three rows of sixteen terms.
+    assert_eq!(common::declared(&split.body), find("mge").unwrap().items());
+    // Its rows' type is the sim's, which T3.c added: three rows of sixteen terms.
     assert!(
         split
             .body
@@ -473,6 +476,43 @@ fn the_refit_manifest_runs_end_to_end() {
     assert_eq!(
         common::declared(&TableText::of_file(COMMITTED).body),
         find("mge").unwrap().items()
+    );
+}
+
+/// Plan 02's first cut's parameters (P02.T6.a), as `manifests/mge.toml` held them until P15.T3.c:
+/// the module's constants, which a manifest without `method` must hold exactly.
+const FIRST_CUT_PARAMS: &str = "\
+widths = 14
+sweeps = 50000
+exp_range = [0.02, 12.0]
+exp_samples = 300
+exp_widths = [0.04, 3.5]
+bar_width = 0.1
+bar_level = 0.85
+bar_end = 0.15
+bar_reach = 2.0
+bar_samples = 321
+bar_mass_weight = 5.0
+bar_widths = [0.04, 0.8]
+";
+
+/// The first cut still runs from a manifest of its constants, and gives the table plan 02 committed
+/// until P15.T3.c, provisional by P02.T6.a.
+#[test]
+fn the_first_cut_runs_from_a_manifest_of_its_constants() {
+    let manifest = Manifest::from_bytes(
+        Path::new("crates/hyperion-fit/manifests/mge.first_cut.toml"),
+        format!("task = \"mge\"\n\n[params]\n{FIRST_CUT_PARAMS}").into_bytes(),
+    )
+    .unwrap();
+    let output = find("mge")
+        .unwrap()
+        .run(&manifest, NonZeroUsize::MIN)
+        .unwrap();
+    assert_eq!(output.provisional, Some("P02.T6.a"));
+    assert_eq!(
+        common::declared(&output.table.body().unwrap()),
+        ["MGE_EXP", "MGE_HOLED_EXP", "MGE_BAR"]
     );
 }
 
@@ -540,14 +580,8 @@ fn a_manifest_that_is_neither_cut_nor_refit_is_refused() {
             "0.15, the bar's nominal shape, which `bar_profile` is written for"
         )
     );
-    let first_cut = fs::read_to_string(Workspace::repository().manifests_dir.join("mge.toml"))
-        .unwrap()
-        .split_once("[params]\n")
-        .unwrap()
-        .1
-        .to_owned();
     assert_eq!(
-        param(run_on(&format!("{first_cut}bar_rounds = 6\n"))),
+        param(run_on(&format!("{FIRST_CUT_PARAMS}bar_rounds = 6\n"))),
         ManifestParamError::new("bar_rounds", "absent: the task reads no such key")
     );
 }

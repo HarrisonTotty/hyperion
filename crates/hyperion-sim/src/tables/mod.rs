@@ -314,8 +314,8 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "mge",
-        revision: 1,
-        since_generator_version: 11,
+        revision: 2,
+        since_generator_version: 23,
         provisional: true,
     },
     TableInfo {

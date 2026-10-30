@@ -260,7 +260,7 @@ fn the_kepler_arm_moves_records_inside_the_radius_and_no_others_pinned() {
          record-times moved off their straight lines, the farthest by {farthest:.4} ly",
         old.len() - new.len()
     );
-    assert_eq!((inside, outside, moved), (3_286, 9_385, 13_144));
+    assert_eq!((inside, outside, moved), (3_286, 9_381, 13_144));
     assert_eq!(
         old.len(),
         new.len(),
