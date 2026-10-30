@@ -3367,7 +3367,7 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     on Mars), the kind of the reference Mars's 214 K (D6), and the absorber's weighting of the
     slab's level (T7; 141.7–144.5 K on Mars). B's build waits for P14.T49.l, which has no _Built_
     mark in plan 14. Its design ruling can start from T13.h's as-built swing and clearing figures.
-  - _Files._ `steps/climate/airless.rs` and the climate step's `tests/thin_air.rs`. No contract
+  - _Scope._ `steps/climate/airless.rs` and the climate step's `tests/thin_air.rs`. No contract
     moves (§6.1's table). Nothing joins the payload or the record: frost by month stays out (§6.2).
   - _Tests._ T13.h's tests 1–6 at their ruled forms. After B, test 4's tight window [0.20, 0.32]
     (against 0.244) and test 5 (the north pole's CO₂ clears at Ls 70–100°, Kieffer and Titus 2001;

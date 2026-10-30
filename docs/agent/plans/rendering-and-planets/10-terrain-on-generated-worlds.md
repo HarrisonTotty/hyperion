@@ -915,7 +915,8 @@ targets at header 21 (below).
    class-weights map, through the `class-map` case of its `DiscSurface` (R07.T8.b; filled by T10.d),
    a texel a cell of quadtree level 6 (64 × 64 a face) with T2's weights at band level 0 at its
    centre (a texel of band level n is a cell of quadtree level n + 6), a few hundred kilobytes,
-   through the same law, and disc and terrain agree at every phase by construction. The map covers surveyed cells only; unsurveyed
+   through the same law, and disc and terrain agree at every phase by construction. The map covers
+   surveyed cells only; unsurveyed
    texels take R07's uniform `lawFor(p, q, template)`, so the disc shows no pattern the ship has not
    seen. Plan 14's phase integral q then becomes a result of the classes, reported with its residual
    as the albedo's is. A_N is the normal albedo, the radiance factor at i = e = α = 0 (Hapke 2012,
@@ -3001,8 +3002,8 @@ src/renderer/src/view/terrain`, the console-ux checks, `just smart-ci origin/ren
     width test's give-way; labels whole on both plates and in the slots; column B's least height
     within its bound; one ask at a `BASELINE` press, the next answer carrying the new baseline; the
     console-ux checks. By arithmetic, in the record: each plate's rows against the plates at
-    1920 × 1080 at 100%, 125% and 150% and at 1280 × 720 at 100%. By hand, hidden, at landing: T12.a's
-    §9 captures, the floor-alone state and the tall narrow window.
+    1920 × 1080 at 100%, 125% and 150% and at 1280 × 720 at 100%. By hand, hidden, at landing:
+    T12.a's §9 captures, the floor-alone state and the tall narrow window.
   - _Acceptance._
     `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view src/renderer/src/view/terrain`
     and `just test-render`.
@@ -4185,8 +4186,9 @@ pass.
       (decision-r10-item30 §6; the Ceres-like world's ratio is 1.33 at 23, R10.T4.c's record).
     - _The figures at 24._ It re-records T4.a's figures and the pins of `surface_weights_worlds`
       (T2) and `surface_reading_worlds` (T5; `STYLE_GAP_Z` 1.36 at 23), with R09.T6.f's dry
-      ground's variance of z at band levels 3 and 4, after R09's follow-up on the closed forms (the
-      neighbours' trunks) if it has landed (R09.T6.f's, R10.T2's and R10.T5's records). The bump's
+      ground's variance of z at band levels 3 and 4, after R09.T6.g's (c), the closed forms
+      counting the neighbours' trunks, if it has landed (R09.T6.f's, R10.T2's and R10.T5's
+      records). The bump's
       bless re-runs those binaries by name first.
     - _Its looks also take:_ a served world dry now, if one serves, for its trunks' two straight
       chords a cell (signoff-r09-t6c-brainstorm; the reference Mars's own look is taken at 23,
