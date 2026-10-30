@@ -369,9 +369,9 @@ ambiguous, the design note that reads it is named.
   diffuse transmittance goes; and `terrain_ring_shadow(p, sun) -> vec3f`, 1 by default, which this
   plan fills for a ringed body with `ring_shadow_on_body`'s full `vec3f`, the per-channel
   transmittance that R07's `litBody.wgsl` also reads; the
-  survey mask; the collision-agrees test (R10.T15, in TypeScript over a committed bake fixture) and
-  the per-level-bound test, which this plan extends to rocks; the wireframe's depth-only terrain
-  pass.
+  survey mask; the collision-agrees test (R10.T15.a, in TypeScript over a committed bake fixture)
+  and the per-level-bound test, which this plan extends to rocks; the wireframe's depth-only
+  terrain pass.
 - **R12:** nothing is consumed. R12 folds this plan's recorded benchmarks into its runs, reads its
   ladder entries into its `SettingSnapshot`, maps its pass labels to `BudgetRow`s, counts its
   allocations by `MemoryCategory` and audits Design note 18's quality limits.
@@ -944,7 +944,7 @@ Acceptance: `cargo test -p hyperion-surface scatter`, `just ci` (both wasm targe
   function of pose, field of view, viewport, setting and bodies alone; the low setting raises the
   annunciation exactly when a finest-level patch with pixel-sized rocks is in view outside the
   region.
-- **R11.T4.c Collision agrees, with rocks.** R10's collision-agrees test (R10.T15) gains rocks. In
+- **R11.T4.c Collision agrees, with rocks.** R10's collision-agrees test (R10.T15.a) gains rocks. In
   Rust, on native and both wasm targets under R04's machinery, goldens of
   `surface_height_with_rocks` at 10⁴ sample points on four sampled worlds; in Vitest, against the
   wasm build of those same points, the drawn surface (R05's finest mesh formed in `Math.fround`

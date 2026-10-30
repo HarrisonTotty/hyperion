@@ -152,7 +152,10 @@ impl TestPlanet {
 ```rust
 // noise: 3D improved Perlin gradient noise (DN 12) with its analytic gradient
 pub fn gradient_noise(p: [f64; 3], octave: &Octave, cache: &mut LatticeCache)
-    -> (f64, [f64; 3]);             // value and gradient; `Octave` holds k, offset, rotation, seed
+    -> (f64, [f64; 3]);             // value and gradient; `Octave`: k, λ, rotation, offset, key
+// R09.T5 replaced the `Seed` an `Octave` held with a `NoiseKey`, the test planet's `Seed` or a
+// body's `DetailSeed`: `Octave::new(index, spacing, rotation, offset, key)`, and R05's rotation
+// formula is `noise::rotation`
 pub const NOISE_BOUND: f64;          // B, the certified maximum, pinned (DN 15)
 pub const NOISE_RMS: f64;            // σ_noise, measured and pinned (DN 15)
 // num (src/num.rs): signed-zero-exact min and max (DN 13)
@@ -3749,8 +3752,10 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   `noise_rms_measured` under `just test-slow`. The gradient index is the corner word's top four
   bits; the object word packs i and j as 32-bit two's complements and the draw number is
   (octave << 32) | k; the octave offsets read words 2⁴⁰ + 4n + axis of object 0. `Octave` holds
-  the index, spacing, rotation, offset and seed; `LatticeCache::cover(octave, centre, radius)`
-  sets an octave's dense box (capped at 2²² corners). `num::max` and `min` refuse NaN.
+  the index, spacing, rotation, offset and seed (since R09.T5 a `NoiseKey` in place of the seed,
+  and R05's rotation formula is `noise::rotation`: R09's "Deviations in T5, as built"; corrected
+  2026-10-30); `LatticeCache::cover(octave, centre, radius)` sets an octave's dense box (capped at
+  2²² corners). `num::max` and `min` refuse NaN.
 - **Deviations in T3.b, as built.** `Spheroid` lives in `hyperion_surface::spheroid` (P14.T46.e's
   module), with R05's `point`, `normal`, `surface_point`, `curvature_radii_m`,
   `section_radius_m` and `WGS84`; `test_planet` re-exports it. σ_h is Earth2014's TBI layer,
