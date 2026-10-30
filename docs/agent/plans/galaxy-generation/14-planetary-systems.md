@@ -6351,6 +6351,72 @@ rows' values.
   - _Files:_ the rows P14.T49.n read (`substance/rows/condensed.rs`, `rows/diagrams.rs`);
     `tests/golden/substance/registry.golden`; `packages/protocol/fixtures/substances.json`.
   - _Accept:_ `cargo test -p hyperion-sim substance`.
+- **P14.T49.p The molten refractories' optics and the molten salts' densities** (a registry
+  rider after 24: the first planetary train it is ready for, 25, else 26, behind its hold
+  `MOLTEN_DECKS_VERSION` and the train's `with_every_N_hold`; a precondition of rendering plan
+  R08's R08.T16.a; from P14.T54.b.i's count (x), brief-notes-24 "From B3 i-2", and
+  decision-galaxy-25-train §6, 2026-10-27).
+  - **The gap at 24.** 108 deep-deck modes on 34 envelopes, with tops above 10 bar, carry no τ:
+    - 96 are liquid refractories (MgSiO₃, Mg₂SiO₄, Al₂O₃, CaTiO₃, Fe) with no index file for
+      the liquid phase (`ResolveAerosolError::NoFile`);
+    - 12 are liquid KCl or Na₂S at 1,070–1,780 K, with no liquid grain density (`NoDensity`).
+
+    The highest top is a KCl mode at 0.044 bar. hot_jupiter 0100's MgSiO₃, Mg₂SiO₄ and Fe reach
+    0.072, 0.103 and 0.161 bar. Undrawn, a hot Jupiter's visible silicate and iron clouds would
+    be missing, a visibly wrong picture once R08.T16.a draws envelopes.
+
+  - **The optics.** Each liquid phase is served by an index file in R08's format and rules
+    (R08.T5.b–d's grid, provenance, stand-in fields, licences and the reduction tool; R08.T5.k's
+    pattern).
+    - **A measured liquid file** where open visible constants of the melt exist, with the search
+      recorded:
+      - liquid Fe: leads are the liquid-metal optics literature, Miller 1969 [S], and
+        levitation emissometry [S];
+      - liquid Al₂O₃: Krishnan et al. 1991's molten-alumina emittance, giving a `derived` k [S].
+    - **Otherwise a labelled `standIn` of an existing file**, with its reason:
+      - `enstatite-glass.json` for MgSiO₃ and `forsterite-amorphous.json` for Mg₂SiO₄, each the
+        quenched melt's glass, measured at 295 K;
+      - `aluminium-oxide.json` for Al₂O₃;
+      - `calcium-titanate.json` for CaTiO₃ (already an upper-bound stand-in);
+      - `iron.json` for Fe.
+    - **A stand-in** reads the condensate-extinction entry that already exists for its file, so
+      no table moves.
+    - **A new file** enters a new `condensate_extinction_8` table (no committed table's body
+      moves), restamped `--since` the train.
+  - **The densities.**
+    - KCl(l) from Janz 1988 (J. Phys. Chem. Ref. Data 17, Suppl. 2), linear in T over its measured
+      range [S], with the deck's 1,070–1,780 K stated against that range.
+    - Na₂S(l) from a measured source if one is found. Otherwise a labelled stand-in, with no
+      further ruling: the solid's density at its 1,449 K melting point divided by 1.2, the alkali
+      halides' 17–25% volume rise on melting [S].
+  - **The hold.** Under the held arm every mode is as at 24, to the bit, with a tripwire.
+  - **Tests:**
+    - each of the 108 modes gains a size and τ, or is listed by name with its reason;
+    - every other mode is unchanged to the bit;
+    - the stand-in label and reason reach the wire;
+    - `NoFile` for (each of the five, `Liquid`) and `NoDensity` for (KCl, Na₂S, `Liquid`) are
+      gone;
+    - each new file parses with its provenance;
+    - the parity check covers the new keys.
+  - **Census** (count (x) re-run, every 25 hold of both kinds):
+    - the 108 modes' τ by substance, with each top;
+    - τ above 1 bar;
+    - the fixture hot Jupiter's τ above its 0.207-bar photosphere.
+
+    These go to T52.d's owner's f_sed review, B3 i's other R08.T16.a precondition, which this
+    task doesn't settle.
+
+  - **Files:**
+    - `substance/aerosol.rs`'s file table;
+    - `substance/rows/condensed.rs`;
+    - `tests/golden/substance/registry.golden`;
+    - `packages/protocol/fixtures/substances.json`;
+    - if a measured file is added: R08's `materials/`, `materials.test.ts`, the tool and the
+      manifest.
+  - **Accept:**
+    - `cargo test -p hyperion-sim substance`;
+    - `cargo run -p hyperion-fit -- check`;
+    - with a new file, `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere/materials`.
 
 #### P14.T50 Elements and redox
 
