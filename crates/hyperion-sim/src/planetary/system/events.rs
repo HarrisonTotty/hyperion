@@ -17,7 +17,7 @@ use crate::id::event_tags::{BODY_DUSTSTORM, BODY_ERUPTION, BODY_IMPACT, BODY_STO
 use crate::id::{EventId, EventSubject, SystemId};
 use crate::orbit::KeplerElements;
 use crate::planetary::context::SystemContext;
-use crate::planetary::events::dust_storms::{self, has_dust_storms};
+use crate::planetary::events::dust_storms::{self, has_dust_storms, year_holds_dust_storms};
 use crate::planetary::events::storms::{self, has_great_storms};
 use crate::planetary::events::{
     BodyEvent, CometInputs, CometModel, DustStorm, DustStormInputs, DustStormModel, Eruption,
@@ -126,9 +126,11 @@ pub(crate) fn with_storm_events<R>(rules: StormEventsRules, run: impl FnOnce() -
 ///   [`STORM_PERIOD_FLOOR`](crate::planetary::events::STORM_PERIOD_FLOOR) ([`storm_period`]) from
 ///   a perihelion passage (decision-galaxy-25-train §5.2, points 1 and 2).
 /// - **Global dust storms** (`body.duststorm`): a body with a surface section whose aerosols hold
-///   dust ([`has_dust_storms`] of the `mars_dust` mode's τ(550)), on a clock of the orbital period
-///   from a perihelion passage with the orbit's eccentricity. A moon's seasons are its planet's, so
-///   a moon's clock is its planet's orbit about its host.
+///   dust ([`has_dust_storms`] of the `mars_dust` mode's τ(550)) on an orbital period of at least
+///   [`LEAST_PERIOD`](dust_storms::LEAST_PERIOD), 301 days ([`year_holds_dust_storms`]), on a
+///   clock of that period from a perihelion passage with the orbit's eccentricity. A moon's seasons
+///   are its planet's, so a moon's clock and its period's gate are its planet's orbit about its
+///   host.
 /// - **Comets** (`system.comet`): the cometary halo present at the epoch, at its record's comet
 ///   rate, about its host's stars then: their summed luminosity and mass, and the largest one's
 ///   radius, into which a comet plunges.
@@ -667,8 +669,10 @@ impl PlanetarySystem {
     }
 
     /// The global dust storms of the present `body` of record `record`, whose seasons follow the
-    /// orbit `orbit`: a body's with dust in its air, on its orbital period from a perihelion
-    /// passage.
+    /// orbit `orbit`: a body's with dust in its air, on an orbital period of at least
+    /// [`LEAST_PERIOD`](dust_storms::LEAST_PERIOD), from a perihelion passage. The period is gated
+    /// before the model is built, since [`kept`] holds that the generator's inputs are never
+    /// refused.
     #[must_use]
     fn dust_storm_model(
         &self,
@@ -681,6 +685,9 @@ impl PlanetarySystem {
         }
         let orbit = orbit?;
         let (period, perihelion) = clock_of(orbit)?;
+        if !year_holds_dust_storms(period) {
+            return None;
+        }
         kept(
             body.index,
             DustStormModel::new(

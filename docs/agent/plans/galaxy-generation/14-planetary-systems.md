@@ -32611,13 +32611,23 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - _Census_ (the 400, run by name with `--ignored`:
     `cargo test -p hyperion-sim --lib under_every_25_hold_the_storm_census_is_stated`): of 144 giants present at the epoch, 99 keep great storms (57 of them on
     the floor). 45 lose them: 44 have an `Ok` envelope with no H₂O deck (T_eq 47–1,308 K), and 1 is
-    `NotModelled`. 5 of 22 dusty bodies have P < 0.2 yr, with storms of 1.7–11.2 days.
+    `NotModelled`. Of 22 dusty bodies, 15 keep storms (205 a century, 110.1–157.9 d); 7, at P
+    10.6–143 d, have none (the fix below).
   - _Accept, as built:_ `cargo test -p hyperion-sim --lib planetary::system::events` and
     `planetary::testing`, and `cargo test -p hyperion-sim --doc planetary::events`.
   - _For P14.T36.b and T43.c:_ keep one `SystemEvents` per cached system, since each
     `events_between` reads a whole epoch snapshot. A young system lists up to about 2 × 10⁵ events
     a century (the golden `subgiant`: 176,697).
   - _Not here:_ lava and cryovolcanism are not told apart (T31.a's R7, for T43).
+  - _The dust storms' fix (2026-10-30, research-leans-2), same hold._ `dust_storms::DURATION_YEAR`
+    (one Mars year): a storm lasts word 0's share of it, 109.9–158.0 d on every planet; the clock,
+    onsets, IDs and anomalies stand. Supersedes T31.b's design point (e) for the dust storms.
+  - `LEAST_PERIOD` (301 d), `year_holds_dust_storms`: `DustStormModel::new` refuses a shorter
+    period (`PeriodTooShort`); `dust_storm_model` gates it beside `has_dust_storms`, a moon on its
+    planet's period. Closes §5.2's dust-storm question (main's brief).
+  - `planetary/system_events` re-blessed by name: its 14 durations and 3 system digests moved.
+  - _Plan text (D15):_ "global dust storms" gains "lasting Mars's 110–158 days, on a year of at
+    least 301 days" (research-leans-2).
 - **P14.T53.c's exposed share through a lag, as built (2026-10-30).** Held at 25:
   `EXPOSED_ICE_VERSION`, `ExposedIceRules`, the tests' `with_exposed_ice` (the third switch of
   `with_every_25_hold`) and the tripwire `the_exposed_ice_is_held_only_until_the_25_bump`; nothing

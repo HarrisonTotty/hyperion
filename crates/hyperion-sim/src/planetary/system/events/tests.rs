@@ -12,6 +12,7 @@ use hyperion_testkit::order::assert_order_independent;
 use super::*;
 use crate::Seed;
 use crate::events::testing::assert_partition_independent;
+use crate::orbit::Eccentricity;
 use crate::planetary::events::STORM_PERIOD_FLOOR;
 use crate::planetary::events::storms::MIN_DURATION_SHARE;
 use crate::planetary::events::{dust_storms as dust, storms as storm_kind};
@@ -23,6 +24,7 @@ use crate::planetary::system::tests::{
 };
 use crate::planetary::testing::with_every_25_hold;
 use crate::time::ClockWindow;
+use crate::units::Seconds;
 
 /// The instant `years` Julian years from the epoch.
 fn year(years: i64) -> UniverseTime {
@@ -629,10 +631,10 @@ fn an_orbit_s_clock_starts_at_its_last_perihelion_passage() {
     assert!(checked > 100, "{checked}");
 }
 
-/// A body has dust storms exactly where its air holds dust, each on its orbital period from a
-/// perihelion passage with the orbit's eccentricity, and every kind's model is the record's: no
-/// eruptions without a surface, and impacts on every present planet, member and moon with figures,
-/// and every giant.
+/// A body has dust storms exactly where its air holds dust on a year of at least 301 days, each on
+/// its orbital period from a perihelion passage with the orbit's eccentricity, and every kind's
+/// model is the record's: no eruptions without a surface, and impacts on every present planet,
+/// member and moon with figures, and every giant.
 #[test]
 fn under_every_25_hold_each_kind_reads_its_record() {
     let systems = golden_at_25();
@@ -643,7 +645,6 @@ fn under_every_25_hold_each_kind_reads_its_record() {
             let record = snapshot.body(body.index).unwrap();
             let label = format!("{name} {:04x}", body.index.get());
             let tau = dust_optical_depth_of(record);
-            assert_eq!(body.dust_storms.is_some(), tau > 0.0, "{label}");
             assert_eq!(
                 body.eruptions.is_some(),
                 record.surface().ok().is_some(),
@@ -656,17 +657,17 @@ fn under_every_25_hold_each_kind_reads_its_record() {
             if record.surface().ok().is_some() || giant {
                 assert!(body.impacts.is_some(), "{label}");
             }
-            let Some(model) = &body.dust_storms else {
+            if !has_dust_storms(tau) {
+                assert!(body.dust_storms.is_none(), "{label}");
                 continue;
-            };
-            dusty += 1;
-            // A moon's seasons are its planet's.
+            }
+            // A moon's seasons, and its year's gate, are its planet's.
+            let moon = matches!(record.identity().kind(), BodyKind::Moon(_));
             let primary = match record.identity().kind() {
                 BodyKind::Moon(_) => {
                     let Some(OrbitHost::Body(planet)) = record.identity().parent() else {
                         panic!("{label}: a moon's parent is a body");
                     };
-                    moons += 1;
                     snapshot.body(planet).unwrap()
                 }
                 BodyKind::Planet
@@ -680,6 +681,16 @@ fn under_every_25_hold_each_kind_reads_its_record() {
             };
             let elements = primary.orbit().ok().unwrap().elements();
             let (period, perihelion) = clock_of(elements).unwrap();
+            assert_eq!(
+                body.dust_storms.is_some(),
+                year_holds_dust_storms(period),
+                "{label}"
+            );
+            let Some(model) = &body.dust_storms else {
+                continue;
+            };
+            dusty += 1;
+            moons += usize::from(moon);
             assert_eq!(model.clock().period(), period, "{label}");
             assert_eq!(model.inputs().perihelion, perihelion, "{label}");
             assert_eq!(
@@ -708,6 +719,47 @@ fn under_every_25_hold_each_kind_reads_its_record() {
         dusty > moons && moons > 0,
         "{dusty} dusty bodies, {moons} moons among them"
     );
+}
+
+/// A dusty body has no dust storms on a year under 301 days, the census's short years among them,
+/// and takes the least year itself: `filler_c`'s 0400 on its own orbit with its period changed, the
+/// gate read before the model is built, so that no refusal reaches `kept`.
+#[test]
+fn under_every_25_hold_a_dusty_body_on_a_year_under_301_days_has_no_dust_storms() {
+    let systems = golden_at_25();
+    let (_, ctx, system, models) = named(&systems, "filler_c");
+    assert!(models_of(models, 0x0400).dust_storms.is_some());
+    let snapshot = with_every_25_hold(|| system.snapshot_at(ctx, UniverseTime::EPOCH));
+    let body = system
+        .bodies
+        .iter()
+        .find(|body| body.index.get() == 0x0400)
+        .unwrap();
+    let record = snapshot.body(body.index).unwrap();
+    assert!(has_dust_storms(dust_optical_depth_of(record)));
+    let own = *record.orbit().ok().unwrap().elements();
+    let on = |days: f64| {
+        KeplerElements::from_period(
+            Seconds::new(days * 86_400.0),
+            own.gravitational_parameter(),
+            own.eccentricity(),
+            *own.orientation(),
+            own.mean_anomaly_at_epoch(),
+        )
+        .unwrap()
+    };
+    for days in [10.6, 26.1, 79.4, 143.0, 300.0] {
+        assert_eq!(
+            system.dust_storm_model(body, record, Some(&on(days))),
+            None,
+            "{days} d"
+        );
+    }
+    let least = system
+        .dust_storm_model(body, record, Some(&on(301.0)))
+        .unwrap();
+    assert_eq!(least.clock().period(), dust::LEAST_PERIOD);
+    assert_eq!(least.inputs().eccentricity, own.eccentricity());
 }
 
 /// The golden systems' events of the century about the epoch, under every 25 hold (P14.T31.c;
@@ -877,17 +929,16 @@ fn digest<'a>(events: impl Iterator<Item = &'a BodyEvent>) -> u64 {
 
 /// Decision-galaxy-25-train §5.2's census, under every 25 hold over the 400 systems nearest the
 /// solar-circle point: the giants present at the epoch that keep great storms and those the water
-/// deck's gate removes, by why and by their equilibrium temperatures; and the dusty bodies with an
-/// orbital period under 0.2 years, with their dust storms' durations.
+/// deck's gate removes, by why and by their equilibrium temperatures; and the dusty bodies by
+/// their clock's period against the least year, 301 days, with the century's dust storms of those
+/// kept, every one of which lasts Mars's 109.9–158.0 days (P14.T31.c's fix).
 #[test]
 #[ignore = "a measurement for decision-galaxy-25-train §5.2, run by name"]
 fn under_every_25_hold_the_storm_census_is_stated() {
     let year_s = 31_557_600.0;
     // (label, T_eq, P in years, envelope state, water deck)
     let mut giants: Vec<Giant> = Vec::new();
-    // (label, its kind and class, T_eq, P in days, τ, the century's storms' durations in days)
-    let mut dusty: Vec<(String, String, f64, f64, f64, Vec<f64>)> = Vec::new();
-    let mut all_dusty = 0;
+    let mut dusty: Vec<Dusty> = Vec::new();
     with_every_25_hold(|| {
         for ctx in sample() {
             let system = generate(SEED, ctx);
@@ -910,43 +961,133 @@ fn under_every_25_hold_the_storm_census_is_stated() {
                         has_water_deck(record.envelope()),
                     ));
                 }
-                let Some(model) = &body.dust_storms else {
+                let tau = dust_optical_depth_of(record);
+                if !has_dust_storms(tau) {
                     continue;
-                };
-                all_dusty += 1;
-                let clock = model.clock().period().as_seconds_f64();
-                if clock < 0.2 * year_s {
-                    let mut listed = Vec::new();
-                    dust::dust_storms(model, century(), &mut listed);
-                    dusty.push((
-                        label,
-                        format!("{:?} {:?}", record.identity().kind(), bulk.class()),
-                        bulk.equilibrium_temperature().value(),
-                        clock / 86_400.0,
-                        dust_optical_depth_of(record),
-                        listed
-                            .iter()
-                            .map(|storm| storm.duration().as_seconds_f64() / 86_400.0)
-                            .collect(),
-                    ));
                 }
+                // A moon's seasons, and its year's gate, are its planet's.
+                let primary = match record.identity().kind() {
+                    BodyKind::Moon(_) => {
+                        let Some(OrbitHost::Body(planet)) = record.identity().parent() else {
+                            panic!("{label}: a moon's parent is a body");
+                        };
+                        snapshot.body(planet).unwrap()
+                    }
+                    BodyKind::Planet
+                    | BodyKind::DwarfPlanet
+                    | BodyKind::Ring
+                    | BodyKind::Belt(_)
+                    | BodyKind::CometaryHalo
+                    | BodyKind::ProtoplanetaryDisc
+                    | BodyKind::DebrisDisc
+                    | BodyKind::Unresolved => record,
+                };
+                let elements = primary.orbit().ok().unwrap().elements();
+                let (period, _) = clock_of(elements).unwrap();
+                assert_eq!(
+                    body.dust_storms.is_some(),
+                    year_holds_dust_storms(period),
+                    "{label}"
+                );
+                let mut listed = Vec::new();
+                if let Some(model) = &body.dust_storms {
+                    dust::dust_storms(model, century(), &mut listed);
+                }
+                dusty.push(Dusty {
+                    label,
+                    kind: format!("{:?} {:?}", record.identity().kind(), bulk.class()),
+                    spin: record.rotation().ok().map_or_else(
+                        || "no rotation".to_owned(),
+                        |frame| format!("{:?}", frame.state_at(UniverseTime::EPOCH)),
+                    ),
+                    t_eq: bulk.equilibrium_temperature().value(),
+                    period_days: period.as_seconds_f64() / 86_400.0,
+                    eccentricity: elements.eccentricity(),
+                    tau,
+                    kept: body.dust_storms.is_some(),
+                    durations: listed
+                        .iter()
+                        .map(|storm| storm.duration().as_seconds_f64() / 86_400.0)
+                        .collect(),
+                });
             }
         }
     });
     report_giants(&giants);
-    eprintln!(
-        "dusty bodies: {all_dusty}, of which P under 0.2 yr: {}",
-        dusty.len()
+    report_dusty(&mut dusty);
+}
+
+/// A dusty body of the census: its label, its kind and class, its spin at the epoch, `T_eq` (K),
+/// its clock's period (days), that orbit's eccentricity, its background τ(550), whether it keeps
+/// its dust storms and the durations (days) of the century's.
+struct Dusty {
+    label: String,
+    kind: String,
+    spin: String,
+    t_eq: f64,
+    period_days: f64,
+    eccentricity: Eccentricity,
+    tau: f64,
+    kept: bool,
+    durations: Vec<f64>,
+}
+
+/// Prints the census's dusty bodies by their clock's period, kept at or above the least year and
+/// removed below it, and checks that every kept storm lasts Mars's 109.9–158.0 days.
+fn report_dusty(dusty: &mut [Dusty]) {
+    let year_days = dust::DURATION_YEAR.as_seconds_f64() / 86_400.0;
+    let least_days = dust::LEAST_PERIOD.as_seconds_f64() / 86_400.0;
+    let (shortest, longest) = (
+        dust::MIN_DURATION_SHARE * year_days,
+        dust::MAX_DURATION_SHARE * year_days,
     );
-    for (label, kind, t_eq, period, tau, durations) in &dusty {
-        let lo = durations.iter().copied().fold(f64::INFINITY, f64::min);
-        let hi = durations.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    dusty.sort_by(|a, b| a.period_days.total_cmp(&b.period_days));
+    let kept = dusty.iter().filter(|body| body.kept).count();
+    eprintln!(
+        "dusty bodies: {}; with dust storms (P at least {least_days:.0} d): {kept}; without (P \
+         under it): {}",
+        dusty.len(),
+        dusty.len() - kept
+    );
+    let (mut lo, mut hi, mut storms) = (f64::INFINITY, f64::NEG_INFINITY, 0);
+    for body in dusty.iter() {
+        let at =
+            |pick: fn(f64, f64) -> f64, from: f64| body.durations.iter().copied().fold(from, pick);
+        let (body_lo, body_hi) = (at(f64::min, f64::INFINITY), at(f64::max, f64::NEG_INFINITY));
+        for &duration in &body.durations {
+            assert!(
+                shortest - 1e-9 <= duration && duration < longest,
+                "{}: a storm of {duration} d",
+                body.label
+            );
+        }
+        lo = lo.min(body_lo);
+        hi = hi.max(body_hi);
+        storms += body.durations.len();
         eprintln!(
-            "| {label} | {kind} | T_eq {t_eq:.0} K | P {period:.1} d | τ {tau:.3} | {} storms a \
-             century | {lo:.1}–{hi:.1} d |",
-            durations.len()
+            "| {} | {} | {} | T_eq {:.0} K | P {:.1} d | e {:.3} (contrast {:.0}%) | τ {:.3} | {} | \
+             {} storms a century | {} |",
+            body.label,
+            body.kind,
+            body.spin,
+            body.t_eq,
+            body.period_days,
+            body.eccentricity.value(),
+            100.0 * dust::perihelion_contrast(body.eccentricity),
+            body.tau,
+            if body.kept { "kept" } else { "removed" },
+            body.durations.len(),
+            if body.durations.is_empty() {
+                "–".to_owned()
+            } else {
+                format!("{body_lo:.1}–{body_hi:.1} d")
+            }
         );
     }
+    eprintln!(
+        "kept bodies' storms a century: {storms}, lasting {lo:.1}–{hi:.1} d, within \
+         [{shortest:.1}, {longest:.1}] d"
+    );
 }
 
 /// A giant of the census: its label, `T_eq` (K), orbital period (years), envelope section's state and

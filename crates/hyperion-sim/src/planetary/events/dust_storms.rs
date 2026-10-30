@@ -52,12 +52,20 @@
 //! to lift dust. A storm then raises a column that exists (plan 14, P14.T24.c); the raise is not
 //! built here. P14.T31.c applies the rule to the record.
 //!
+//! Beside it, [`year_holds_dust_storms`]: the clock's period is at least [`LEAST_PERIOD`], 301
+//! days, the least whole-day year in which the longest storm ends before the next onset can come,
+//! so that one storm runs at a time: a bound of the model, not one observed. A year shorter than
+//! about two storms' lives cannot hold seasonal storms, and a dusty body on one keeps its
+//! background τ alone; the census's under 80 days are all synchronously locked, with a perihelion
+//! contrast of 7–38%. A moon reads its planet's period, as its clock does.
+//!
 //! # Marks
 //!
 //! From each storm's own stream, [`CycleEvent::marks`], at word 0:
 //!
-//! - **word 0**, its duration as a share of the period, uniform in [[`MIN_DURATION_SHARE`],
-//!   [`MAX_DURATION_SHARE`]), so that no storm outlasts its cycle.
+//! - **word 0**, its duration as a share of one Mars year, [`DURATION_YEAR`], uniform in
+//!   [[`MIN_DURATION_SHARE`], [`MAX_DURATION_SHARE`]): 109.9–158.0 days on every planet, so that,
+//!   on a year of at least [`LEAST_PERIOD`], no storm outlasts its cycle.
 //!
 //! Words 1–7 are reserved, for its peak optical depth and its place of onset, in that order. A
 //! phase kind opens no other event stream of a cycle: the cycle's own stream holds its skip, and
@@ -110,7 +118,15 @@ pub const NOISE_OCTAVES: u32 = 2;
 /// version.
 pub const NOISE_LATTICE_CYCLES: u32 = 1;
 
-/// The shortest global dust storm, as a share of the period: 0.16, 110 days at Mars. Part of the
+/// The year a storm's duration is a share of: one Mars year, 686.980 days, 59,355,072 s (NASA's
+/// Mars fact sheet), on every planet. Part of the generator version.
+///
+/// The days are Mars's, carried to every planet as they are: a model choice, taking a storm's
+/// growth and decay to be its air's, not its year's, with Mars's the only global storms observed.
+/// The year sets only when a storm breaks out and how often.
+pub const DURATION_YEAR: Span = Span::from_seconds(59_355_072);
+
+/// The shortest global dust storm, as a share of [`DURATION_YEAR`]: 0.16, 109.9 days. Part of the
 /// generator version.
 ///
 /// The three global storms seen from orbit lasted from 110 to over 154 days, onset to decay, 0.16
@@ -122,18 +138,37 @@ pub const NOISE_LATTICE_CYCLES: u32 = 1;
 /// background conditions about the southern summer solstice, about 136 days (Kass et al. 2020,
 /// read from its abstract), or more than 150 sols, about 154 days, of dust over the planet
 /// (Montabone et al. 2020, J. Geophys. Res. Planets 125, e2019JE006111). The days are the Ls
-/// converted by Allison and McEwen's (2000) Mars24 algorithm. The shares are carried to other
-/// periods as they are.
+/// converted by Allison and McEwen's (2000) Mars24 algorithm. These days are every planet's
+/// storms' (see [`DURATION_YEAR`]).
 pub const MIN_DURATION_SHARE: f64 = 0.16;
 
-/// The longest global dust storm, as a share of the period: 0.23, 158 days at Mars, the longest
+/// The longest global dust storm, as a share of [`DURATION_YEAR`]: 0.23, 158.0 days, the longest
 /// seen (about 154 days) rounded up (see [`MIN_DURATION_SHARE`]). Part of the generator version.
 pub const MAX_DURATION_SHARE: f64 = 0.23;
 
-// Every storm lasts a positive share of the period under the least interval between two, so that
-// no two run at once and `events_about` holds every storm running at an instant.
+/// The least orbital period, the year, that has global dust storms: 301 days, 26,006,400 s, the
+/// least whole-day year in which the longest storm, 158.0 days, ends before the next onset can
+/// come, the phase's least interval between two (1 ÷ 1.9 of the year) later, 158.4 days at 301.
+/// Part of the generator version.
+///
+/// A shorter year is under about two storms' lives, so it cannot hold seasonal storms
+/// ([`year_holds_dust_storms`]).
+pub const LEAST_PERIOD: Span = Span::from_seconds(26_006_400);
+
+// Every storm lasts a positive share of the year, and on the least year the longest ends before
+// the least interval between two onsets, so that no two run at once and `events_about` holds
+// every storm running at an instant: 158.0 days under 158.4.
 const _: () = assert!(0.0 < MIN_DURATION_SHARE && MIN_DURATION_SHARE < MAX_DURATION_SHARE);
-const _: () = assert!(MAX_DURATION_SHARE < LEAST_INTERVAL_SHARE);
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "whole seconds under 2^53, exact in f64"
+)]
+const _: () = assert!(
+    MAX_DURATION_SHARE * (DURATION_YEAR.seconds() as f64)
+        < LEAST_INTERVAL_SHARE * (LEAST_PERIOD.seconds() as f64)
+);
+// The least year passes the clock's own check.
+const _: () = assert!(LinearClock::MIN_PERIOD.seconds() < LEAST_PERIOD.seconds());
 
 /// The noise's bound over its finest octave's amplitude for [`NOISE_OCTAVES`] octaves:
 /// 2⁰ + 2^(1/2) = 1 + √2.
@@ -181,11 +216,11 @@ pub fn perihelion_contrast(e: Eccentricity) -> f64 {
     ratio * ratio - 1.0
 }
 
-/// Whether a planet whose background dust has τ(550) `background_optical_depth` has global dust
-/// storms: exactly where P14.T24.c's
-/// [`dust_optical_depth`](crate::planetary::hooks::aerosols::dust_optical_depth) is above 0 (the
-/// rule P14.T31.c applies to a body's record; see the [module documentation](self)). A NaN has
-/// none.
+/// Whether a planet whose background dust has τ(550) `background_optical_depth` has the dust for
+/// global dust storms: exactly where P14.T24.c's
+/// [`dust_optical_depth`](crate::planetary::hooks::aerosols::dust_optical_depth) is above 0. It is
+/// the dust half of the rule P14.T31.c applies to a body's record, [`year_holds_dust_storms`] the
+/// year's (see the [module documentation](self)). A NaN has none.
 ///
 /// # Examples
 ///
@@ -201,13 +236,36 @@ pub fn has_dust_storms(background_optical_depth: f64) -> bool {
     background_optical_depth > 0.0
 }
 
+/// Whether a dusty planet whose seasons run on `orbital_period` has global dust storms: where the
+/// period is at least [`LEAST_PERIOD`], 301 days, the periods [`DustStormModel::new`] takes (the
+/// rule P14.T31.c applies to a body's record beside [`has_dust_storms`], before it builds a model;
+/// see the [module documentation](self)).
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::planetary::events::dust_storms::year_holds_dust_storms;
+/// use hyperion_sim::time::Span;
+///
+/// let day = |days: i64| Span::from_seconds(days * 86_400);
+/// // Mars's 687 days hold its storms; a synchronous rotator's 30 have only the background dust.
+/// assert!(year_holds_dust_storms(day(687)));
+/// assert!(year_holds_dust_storms(day(301)));
+/// assert!(!year_holds_dust_storms(day(300)));
+/// assert!(!year_holds_dust_storms(day(30)));
+/// ```
+#[must_use]
+pub fn year_holds_dust_storms(orbital_period: Span) -> bool {
+    orbital_period >= LEAST_PERIOD
+}
+
 /// What a [`DustStormModel`] reads of a planet: its orbital period, a perihelion passage and its
 /// orbit's eccentricity.
 ///
 /// Plain data with public fields: [`DustStormModel::new`] validates them.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct DustStormInputs {
-    /// Its orbital period, P: the clock's period, at least [`LinearClock::MIN_PERIOD`].
+    /// Its orbital period, P: the clock's period, at least [`LEAST_PERIOD`].
     pub orbital_period: Span,
     /// A perihelion passage: the instant of the clock's phase 0.
     pub perihelion: UniverseTime,
@@ -218,7 +276,7 @@ pub struct DustStormInputs {
 /// A [`DustStormModel`] could not be built, with the value refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuildDustStormModelError {
-    /// The orbital period is shorter than [`LinearClock::MIN_PERIOD`].
+    /// The orbital period is shorter than [`LEAST_PERIOD`].
     PeriodTooShort(Span),
 }
 
@@ -227,8 +285,7 @@ impl fmt::Display for BuildDustStormModelError {
         match self {
             Self::PeriodTooShort(period) => write!(
                 f,
-                "a dust storm period of {period} is shorter than the {} minimum",
-                LinearClock::MIN_PERIOD
+                "a dust storm period of {period} is shorter than the {LEAST_PERIOD} least year"
             ),
         }
     }
@@ -288,20 +345,25 @@ impl DustStormModel {
     ///
     /// # Errors
     ///
-    /// [`BuildDustStormModelError::PeriodTooShort`] for an orbital period under
-    /// [`LinearClock::MIN_PERIOD`].
+    /// [`BuildDustStormModelError::PeriodTooShort`] for an orbital period under [`LEAST_PERIOD`]
+    /// ([`year_holds_dust_storms`]).
     ///
     /// # Panics
     ///
-    /// Only on a broken invariant: an amplitude in [0, [`MAX_NOISE_AMPLITUDE_CYCLES`]] passes the
-    /// noise's checks.
+    /// Only on a broken invariant: a period of at least [`LEAST_PERIOD`] passes the clock's check,
+    /// and an amplitude in [0, [`MAX_NOISE_AMPLITUDE_CYCLES`]] the noise's.
     pub fn new(
         seed: Seed,
         body: BodyId,
         inputs: &DustStormInputs,
     ) -> Result<Self, BuildDustStormModelError> {
+        if !year_holds_dust_storms(inputs.orbital_period) {
+            return Err(BuildDustStormModelError::PeriodTooShort(
+                inputs.orbital_period,
+            ));
+        }
         let clock = LinearClock::new(inputs.orbital_period, inputs.perihelion)
-            .map_err(|_| BuildDustStormModelError::PeriodTooShort(inputs.orbital_period))?;
+            .expect("a period of at least 301 days is over the clock's 16 s minimum");
         let noise = MonotonePhase::new(
             noise_amplitude_cycles(inputs.eccentricity),
             NOISE_LATTICE_CYCLES,
@@ -365,14 +427,14 @@ impl DustStormModel {
     }
 
     /// The storm of `event`, a cycle of this model's series that is not skipped: its duration from
-    /// word 0 of its marks.
+    /// word 0 of its marks, a share of [`DURATION_YEAR`].
     #[must_use]
     fn dust_storm_of(&self, event: CycleEvent) -> DustStorm {
         let (id, cycle, onset) = (event.id(), event.cycle(), event.time());
         let share = event
             .into_marks()
             .uniform_in(MIN_DURATION_SHARE, MAX_DURATION_SHARE);
-        let duration = share_of(self.clock.period(), share);
+        let duration = share_of(DURATION_YEAR, share);
         DustStorm {
             id,
             cycle,
@@ -428,7 +490,8 @@ impl DustStorm {
         self.onset
     }
 
-    /// How long it lasts: [`MIN_DURATION_SHARE`] to [`MAX_DURATION_SHARE`] of the period.
+    /// How long it lasts: [`MIN_DURATION_SHARE`] to [`MAX_DURATION_SHARE`] of [`DURATION_YEAR`],
+    /// 109.9–158.0 days.
     #[must_use]
     pub const fn duration(&self) -> Span {
         self.duration
@@ -468,7 +531,8 @@ pub fn dust_storms(model: &DustStormModel, window: TimeWindow, out: &mut Vec<Dus
 }
 
 /// Appends to `out` the planet's global dust storms running at `t`: at most one, since a storm
-/// lasts at most [`MAX_DURATION_SHARE`] of the period, under the least interval between two.
+/// lasts at most 158.0 days, under the least interval between two on a year of at least
+/// [`LEAST_PERIOD`].
 ///
 /// It is found among the cycles about the one the phase is in at `t`. The result depends on the
 /// model and `t` alone.

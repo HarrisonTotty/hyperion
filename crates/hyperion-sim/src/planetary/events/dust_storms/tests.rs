@@ -1,7 +1,8 @@
-//! Tests of `body.duststorm` (P14.T31.b): the refusal, the season and the noise against it, the
-//! count over 10⁴ years against the skip's binomial (test (a, b)), the season of every onset at
-//! three eccentricities (test (b)), the marks, the storms running at an instant, and test (c),
-//! the listings' independence of partition and order.
+//! Tests of `body.duststorm` (P14.T31.b): the refusal and the least year, the season and the noise
+//! against it, the count over 10⁴ years against the skip's binomial (test (a, b)), the season of
+//! every onset at three eccentricities (test (b)), the marks and Mars's days on every year
+//! (P14.T31.c's fix), the storms running at an instant, and test (c), the listings' independence
+//! of partition and order.
 
 use core::f64::consts::PI;
 
@@ -20,6 +21,20 @@ fn model(e: f64) -> DustStormModel {
     DustStormModel::new(SEED, body(0x0104), &mars_dust_storms(e)).unwrap()
 }
 
+/// A model at Mars's eccentricity on the orbital period `period`.
+fn model_on(period: Span) -> DustStormModel {
+    let inputs = DustStormInputs {
+        orbital_period: period,
+        ..mars_dust_storms(MARS_ECCENTRICITY)
+    };
+    DustStormModel::new(SEED, body(0x0104), &inputs).unwrap()
+}
+
+/// `days` whole days.
+fn days(days: i64) -> Span {
+    Span::from_seconds(days * 86_400)
+}
+
 fn list(model: &DustStormModel, window: TimeWindow) -> Vec<DustStorm> {
     let mut out = Vec::new();
     dust_storms(model, window, &mut out);
@@ -30,10 +45,20 @@ fn e(value: f64) -> Eccentricity {
     Eccentricity::new(value).unwrap()
 }
 
+/// A model refuses a year under the least, 301 days, the clock's 16 s minimum among them, and
+/// takes the least year itself; the gate the record applies is the same bound.
 #[test]
-fn a_model_refuses_a_period_under_the_clock_s_minimum() {
-    for seconds in [-1, 0, 1, 15] {
-        let period = Span::from_seconds(seconds);
+fn a_model_refuses_a_period_under_the_least_year() {
+    let under = Span::new(26_006_399, 999_999_999).unwrap();
+    for period in [
+        Span::from_seconds(-1),
+        Span::ZERO,
+        Span::from_seconds(15),
+        LinearClock::MIN_PERIOD,
+        days(80),
+        days(300),
+        under,
+    ] {
         let inputs = DustStormInputs {
             orbital_period: period,
             ..mars_dust_storms(MARS_ECCENTRICITY)
@@ -41,18 +66,41 @@ fn a_model_refuses_a_period_under_the_clock_s_minimum() {
         assert_eq!(
             DustStormModel::new(SEED, body(0x0104), &inputs),
             Err(BuildDustStormModelError::PeriodTooShort(period)),
-            "{seconds} s"
+            "{period}"
         );
+        assert!(!year_holds_dust_storms(period), "{period}");
     }
-    let shortest = DustStormInputs {
-        orbital_period: LinearClock::MIN_PERIOD,
-        ..mars_dust_storms(MARS_ECCENTRICITY)
-    };
-    assert!(DustStormModel::new(SEED, body(0x0104), &shortest).is_ok());
+    assert_eq!(LEAST_PERIOD, days(301));
+    for period in [
+        LEAST_PERIOD,
+        MARS_PERIOD,
+        Span::from_julian_years(40).unwrap(),
+    ] {
+        assert!(year_holds_dust_storms(period), "{period}");
+        assert_eq!(model_on(period).clock().period(), period);
+    }
     assert_eq!(
         BuildDustStormModelError::PeriodTooShort(Span::from_seconds(15)).to_string(),
-        "a dust storm period of +15.000000000 s is shorter than the +16.000000000 s minimum"
+        "a dust storm period of +15.000000000 s is shorter than the +26006400.000000000 s least \
+         year"
     );
+}
+
+/// On the least year the longest storm, 158.0 days, ends before the least interval between two
+/// onsets, 158.4 days; one day less and it would not. The days are one Mars year's shares, and the
+/// year is Mars's sidereal period.
+#[test]
+fn the_least_year_holds_the_longest_storm_and_one_day_less_would_not() {
+    let day = 86_400.0;
+    let year = DURATION_YEAR.as_seconds_f64();
+    assert_eq!(DURATION_YEAR, MARS_PERIOD);
+    assert!((MIN_DURATION_SHARE * year / day - 109.9).abs() < 0.05);
+    assert!((MAX_DURATION_SHARE * year / day - 158.0).abs() < 0.05);
+    let longest = MAX_DURATION_SHARE * year;
+    let interval = |period: Span| LEAST_INTERVAL_SHARE * period.as_seconds_f64();
+    assert!((interval(LEAST_PERIOD) / day - 158.4).abs() < 0.05);
+    assert!(longest < interval(LEAST_PERIOD));
+    assert!(longest >= interval(days(300)));
 }
 
 /// The planets whose background dust is above 0 have dust storms: Mars's τ of 0.5, and any trace;
@@ -215,11 +263,12 @@ fn the_onsets_spread_about_perihelion() {
     assert!((28.0..=36.0).contains(&sd), "onsets spread by {sd}°");
 }
 
-/// Each storm's duration share is uniform between its bounds, and its end is its onset plus it.
+/// Each storm's duration share of a Mars year is uniform between its bounds, and its end is its
+/// onset plus it.
 #[test]
-fn the_durations_are_uniform_shares_of_the_period() {
+fn the_durations_are_uniform_shares_of_a_mars_year() {
     let listed = list(&model(MARS_ECCENTRICITY), years(0, 10_000));
-    let period = MARS_PERIOD.as_seconds_f64();
+    let period = DURATION_YEAR.as_seconds_f64();
     let mut shares: Vec<f64> = listed
         .iter()
         .map(|storm| {
@@ -241,43 +290,95 @@ fn the_durations_are_uniform_shares_of_the_period() {
     );
 }
 
-/// `dust_storms_active_at` gives the storms a scan of the listing finds running, at instants about
-/// every onset and end and on a grid of a fiftieth of a period, the same in any order of asking.
+/// On every year a storm lasts Mars's 109.9–158.0 days, whatever the period: the least year's,
+/// Mars's and a 40-year orbit's. Its share is word 0's, so the same storm of the same cycle on
+/// another period has the same duration.
 #[test]
-fn the_storms_running_at_an_instant_match_a_scan() {
-    let mars = model(MARS_ECCENTRICITY);
-    let listed = list(&mars, years(-10, 110));
-    let nanosecond = Span::new(0, 1).unwrap();
-    let mut instants = Vec::new();
-    for storm in list(&mars, years(0, 100)) {
-        for t in [storm.onset(), storm.end()] {
-            instants.extend([t.checked_sub(nanosecond).unwrap(), t]);
+fn every_storm_lasts_mars_s_days_on_any_year() {
+    let shortest = share_of(DURATION_YEAR, MIN_DURATION_SHARE);
+    let longest = share_of(DURATION_YEAR, MAX_DURATION_SHARE);
+    assert_eq!(
+        (shortest.seconds(), longest.seconds()),
+        (9_496_811, 13_651_666)
+    );
+    let mut durations = Vec::new();
+    for period in [
+        LEAST_PERIOD,
+        MARS_PERIOD,
+        Span::from_julian_years(40).unwrap(),
+    ] {
+        let listed = list(&model_on(period), years(0, 2_000));
+        assert!(listed.len() > 10, "{} storms on {period}", listed.len());
+        for storm in &listed {
+            let d = storm.duration();
+            assert!(
+                shortest <= d && d <= longest,
+                "{} lasts {d} on {period}",
+                storm.id()
+            );
+        }
+        durations.push(
+            listed
+                .iter()
+                .map(|storm| (storm.cycle(), storm.duration()))
+                .collect::<Vec<_>>(),
+        );
+    }
+    // The same cycle's storm lasts the same on the least year and Mars's.
+    let mut common = 0;
+    for (cycle, duration) in &durations[1] {
+        if let Some((_, other)) = durations[0].iter().find(|(at, _)| at == cycle) {
+            assert_eq!(other, duration, "cycle {cycle}");
+            common += 1;
         }
     }
-    let step = MARS_PERIOD.as_seconds_f64() / 50.0;
-    for k in 0..2_500_i32 {
-        let span = Span::from_seconds_f64(f64::from(k) * step).unwrap();
-        instants.push(year(0).checked_add(span).unwrap());
+    assert!(common > 100, "{common} cycles in common");
+}
+
+/// `dust_storms_active_at` gives the storms a scan of the listing finds running, at instants about
+/// every onset and end and on a grid of a fiftieth of a period, the same in any order of asking:
+/// on Mars's year, and on the least year, where the longest storm only just ends before the next
+/// can break out.
+#[test]
+fn the_storms_running_at_an_instant_match_a_scan() {
+    for period in [MARS_PERIOD, LEAST_PERIOD] {
+        let mars = model_on(period);
+        let listed = list(&mars, years(-10, 110));
+        let nanosecond = Span::new(0, 1).unwrap();
+        let mut instants = Vec::new();
+        for storm in list(&mars, years(0, 100)) {
+            for t in [storm.onset(), storm.end()] {
+                instants.extend([t.checked_sub(nanosecond).unwrap(), t]);
+            }
+        }
+        let step = period.as_seconds_f64() / 50.0;
+        for k in 0..2_500_i32 {
+            let span = Span::from_seconds_f64(f64::from(k) * step).unwrap();
+            instants.push(year(0).checked_add(span).unwrap());
+        }
+        let mut running = 0;
+        assert_order_independent(&instants, |t| {
+            let mut active = Vec::new();
+            dust_storms_active_at(&mars, *t, &mut active);
+            active
+        });
+        for t in instants {
+            let mut active = Vec::new();
+            dust_storms_active_at(&mars, t, &mut active);
+            let scanned: Vec<DustStorm> = listed
+                .iter()
+                .copied()
+                .filter(|storm| storm.is_active_at(t))
+                .collect();
+            assert_eq!(active, scanned, "at {t} on {period}");
+            assert!(active.len() <= 1);
+            running += active.len();
+        }
+        assert!(
+            running > 100,
+            "{running} instants with a storm running on {period}"
+        );
     }
-    let mut running = 0;
-    assert_order_independent(&instants, |t| {
-        let mut active = Vec::new();
-        dust_storms_active_at(&mars, *t, &mut active);
-        active
-    });
-    for t in instants {
-        let mut active = Vec::new();
-        dust_storms_active_at(&mars, t, &mut active);
-        let scanned: Vec<DustStorm> = listed
-            .iter()
-            .copied()
-            .filter(|storm| storm.is_active_at(t))
-            .collect();
-        assert_eq!(active, scanned, "at {t}");
-        assert!(active.len() <= 1);
-        running += active.len();
-    }
-    assert!(running > 100, "{running} instants with a storm running");
 }
 
 /// Test (c): a window's listing is its pieces' in turn, whatever the cuts, and the same in any
