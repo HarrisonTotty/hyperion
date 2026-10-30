@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { vec3 } from "../../geometry/vec3";
+import { norm, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { ProjectionCamera, Viewport } from "../camera/projection";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { cosineWindows, sampleCurve } from "./curve";
@@ -33,6 +33,11 @@ describe("cosineWindows", () => {
     expect(windows.length).toBe(2);
   });
 });
+
+/** Whether a chord's point stands within 0.01 m of the curve's. */
+function withinACentimetre(curveM: Vec3, chordM: Vec3): boolean {
+  return norm(sub(curveM, chordM)) <= 0.01;
+}
 
 describe("sampleCurve", () => {
   it("finds a drawn window however short against the first spans", () => {
@@ -70,6 +75,31 @@ describe("sampleCurve", () => {
       VIEWPORT,
     );
     expect(off.flat().length).toBe(2);
+  });
+
+  /**
+   * The near half of a circle 10 m in radius whose centre stands 100 m ahead, in a plane through
+   * the view's axis: it projects to a straight line, so its chords leave no lateral sagitta, while
+   * they sag behind it along the line of sight.
+   */
+  const EDGE_ON = {
+    point: (u: number) => vec3(0, 10 * Math.sin(u), -100 + 10 * Math.cos(u)),
+    windows: [[-1, 1]] as const,
+    initialSpans: 2,
+  };
+
+  it("halves a span that projects straight until its chords' depth sag is within what its spec allows (R02.T19.b)", () => {
+    // A chord over Δ sags 10 (1 − cos(Δ ÷ 2)) m, under 0.01 m from Δ = 0.0894: 1 rad in 16.
+    expect([
+      sampleCurve(EDGE_ON, CAMERA, VIEWPORT).flat().length,
+      sampleCurve({ ...EDGE_ON, depthSagWithin: withinACentimetre }, CAMERA, VIEWPORT).flat()
+        .length,
+    ]).toEqual([3, 33]);
+  });
+
+  it("stops halving a span for its depth sag alone after 8 halvings (R02.T19.b)", () => {
+    const runs = sampleCurve({ ...EDGE_ON, depthSagWithin: () => false }, CAMERA, VIEWPORT);
+    expect(runs.flat().length).toBe(2 * 2 ** 8 + 1);
   });
 
   it("refines a curve on the view until its chords leave under 0.25 px", () => {

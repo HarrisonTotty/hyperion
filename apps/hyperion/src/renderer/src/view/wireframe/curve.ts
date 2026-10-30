@@ -1,5 +1,5 @@
-import type { Vec3 } from "../../geometry/vec3";
-import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
+import { add, dot, scale, sub, type Vec3 } from "../../geometry/vec3";
+import { type ProjectionCamera, projector, type Viewport } from "../camera/projection";
 
 /**
  * A run of points the wireframe strokes as one polyline: `f64` vectors from the camera, m along the
@@ -16,11 +16,33 @@ export const SAGITTA_TOLERANCE_PX = 0.25;
 /** How deep a curve's chords are halved before the subdivision gives up on a span. */
 const MAX_DEPTH = 24;
 
+/**
+ * How deep a curve's chords are halved for their depth sag alone
+ * ({@link CurveSpec.depthSagWithin}): 8, a 256th of a first span (R02.T19.b).
+ *
+ * @remarks
+ * A graticule's chord over an arc Δ of a sphere of radius r sags r Δ² ÷ 8 inside it, and where the
+ * occluder's slope gives it nothing, at the sub-camera point, its tolerance is half the occluder's
+ * 4 × 10⁻⁶ d margin (`DATUM_DEPTH_SAG_PER_MARGIN`), so a span needs Δ under √(1.6 × 10⁻⁵ d ÷ r),
+ * 0.23° even at the surface (d = r). Its widest first span, 15° (a meridian's 180° in 12, or a
+ * parallel's 360° in 24), takes 7 halvings to reach that at the surface, 5 on `TEST SATURN` at
+ * 340 Mm. The cap holds one more in hand and bounds the cost wherever the sag cannot fall, as
+ * {@link MAX_DEPTH} does the lateral rule's.
+ */
+const DEPTH_SAG_MAX_DEPTH = 8;
+
 /** How many bisections locate a curve's visibility boundary. */
 const BOUNDARY_ITERATIONS = 48;
 
 /** How far outside the viewport a span may lie before it is no longer refined, px. */
 const OFF_SCREEN_MARGIN_PX = 64;
+
+/**
+ * Whether a chord `halfChordM` long each side of its middle, whose point nearest the curve's point
+ * `curveM` is `chordM`, sags little enough behind the curve there, and so all along it
+ * (camera-relative, m; R02.T19.b).
+ */
+export type DepthSagWithin = (curveM: Vec3, chordM: Vec3, halfChordM: number) => boolean;
 
 /** A closed interval of a curve's parameter. */
 export type ParameterWindow = readonly [number, number];
@@ -36,6 +58,12 @@ export interface CurveSpec {
   readonly windows: ReadonlyArray<ParameterWindow>;
   /** How many even spans each window is first cut into, before refinement. */
   readonly initialSpans: number;
+  /**
+   * How far a chord may sag behind the curve: a body's graticule, drawn over its own occluder, asks
+   * its depth inside the surface (`graticule`). Absent for a curve that no occluder stands just
+   * behind, which is subdivided for its lateral sagitta alone.
+   */
+  readonly depthSagWithin?: DepthSagWithin;
 }
 
 interface Sample {
@@ -56,6 +84,18 @@ function distanceToSegment(s: Sample, a: Sample, b: Sample): number {
       ? Math.min(1, Math.max(0, ((s.xPx - a.xPx) * dx + (s.yPx - a.yPx) * dy) / lengthSquared))
       : 0;
   return Math.hypot(s.xPx - (a.xPx + t * dx), s.yPx - (a.yPx + t * dy));
+}
+
+/**
+ * Whether the chord from `a` to `b` sags behind its midpoint `m` as `within` allows: from `m` to
+ * the chord's point nearest it, the chord half its length each side.
+ */
+function depthSagAllowed(within: DepthSagWithin, m: Sample, a: Sample, b: Sample): boolean {
+  const chord = sub(b.p, a.p);
+  const lengthSquared = dot(chord, chord);
+  const t =
+    lengthSquared > 0 ? Math.min(1, Math.max(0, dot(sub(m.p, a.p), chord) / lengthSquared)) : 0;
+  return within(m.p, add(a.p, scale(chord, t)), Math.sqrt(lengthSquared) / 2);
 }
 
 /** Whether samples all lie beyond one edge of the viewport, by the margin. */
@@ -107,25 +147,32 @@ export function cosineWindows(
 
 /**
  * A curve cut into polylines whose chords each leave a screen-space sagitta under
- * {@link SAGITTA_TOLERANCE_PX} (plan R02, Design note 13).
+ * {@link SAGITTA_TOLERANCE_PX} (plan R02, Design note 13), and a depth sag its spec allows
+ * ({@link CurveSpec.depthSagWithin}; R02.T19.b).
  *
  * @remarks
  * Each window is cut into even spans, and each span is halved while the projection of its midpoint
  * or of its quarter points lies farther than the tolerance from the projection of its chord (a
  * straight line in space projects to a straight line on screen, so this is the drawn error), all in
- * `f64`. A span wholly beyond one edge of the viewport is not refined, so an enormous body costs
- * little off screen. Where the curve passes behind the near plane its boundary is found by
- * bisection and the polyline ends there, and starts again where it returns, so no chord crosses
- * the hidden stretch.
+ * `f64`. A curve with a depth sag is also halved, to {@link DEPTH_SAG_MAX_DEPTH} halvings, while
+ * its chord sags behind its midpoint more than its spec allows for the whole chord, the midpoint
+ * alone since a body's graticule is convex, its chords sagging most about their middles: a line
+ * that projects straight, through the sub-camera point, leaves no lateral sagitta at all, while its
+ * chords sag inside the body, square to the view there, where its occluder stands only its margin
+ * inside (R02.T19.b's finding). A span wholly beyond one edge of the viewport is not refined, so an
+ * enormous body costs little off screen. Where the curve passes behind the near plane its boundary
+ * is found by bisection and the polyline ends there, and starts again where it returns, so no
+ * chord crosses the hidden stretch.
  */
 export function sampleCurve(
   spec: CurveSpec,
   camera: ProjectionCamera,
   viewport: Viewport,
 ): Polyline[] {
+  const project = projector(camera, viewport);
   const sample = (u: number): Sample => {
     const p = spec.point(u);
-    const projected = project(p, camera, viewport);
+    const projected = project(p);
     return { u, p, xPx: projected.xPx, yPx: projected.yPx, inFront: projected.inFront };
   };
   const boundary = (inside: Sample, outside: Sample): Sample => {
@@ -174,12 +221,14 @@ export function sampleCurve(
     }
     const q1 = sample((3 * a.u + b.u) / 4);
     const q3 = sample((a.u + 3 * b.u) / 4);
+    const within = depth < DEPTH_SAG_MAX_DEPTH ? spec.depthSagWithin : undefined;
     const flat =
       q1.inFront &&
       q3.inFront &&
       distanceToSegment(m, a, b) < SAGITTA_TOLERANCE_PX &&
       distanceToSegment(q1, a, b) < SAGITTA_TOLERANCE_PX &&
-      distanceToSegment(q3, a, b) < SAGITTA_TOLERANCE_PX;
+      distanceToSegment(q3, a, b) < SAGITTA_TOLERANCE_PX &&
+      (within === undefined || depthSagAllowed(within, m, a, b));
     if (flat) {
       run?.push(b.p);
       return;

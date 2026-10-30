@@ -143,17 +143,30 @@ export function toViewAxes(v: Vec3, orientation: Quaternion): Vec3 {
  * `relativeToCamera`).
  */
 export function project(v: Vec3, camera: ProjectionCamera, viewport: Viewport): Projected {
-  const view = toViewAxes(v, camera.orientation);
+  return projector(camera, viewport)(v);
+}
+
+/**
+ * {@link project} for one camera and view, its rotation and scales taken once, for the many points
+ * of a curve (R02.T19.b): the same sums, so the same values.
+ */
+export function projector(camera: ProjectionCamera, viewport: Viewport): (v: Vec3) => Projected {
+  const [r0, r1, r2] = rotationRows(camera.orientation);
   const s = 1 / Math.tan(camera.fovXRad / 2);
   const aspect = viewport.widthPx / viewport.heightPx;
-  const w = -view.z;
-  const ndcX = (s * view.x) / w;
-  const ndcY = (s * aspect * view.y) / w;
-  return {
-    xPx: ((ndcX + 1) / 2) * viewport.widthPx,
-    yPx: ((1 - ndcY) / 2) * viewport.heightPx,
-    depth: NEAR_PLANE_M / w,
-    inFront: w >= NEAR_PLANE_M,
+  return (v) => {
+    // Rᵀ · v, as `toViewAxes` takes it.
+    const x = r0.x * v.x + r1.x * v.y + r2.x * v.z;
+    const y = r0.y * v.x + r1.y * v.y + r2.y * v.z;
+    const w = -(r0.z * v.x + r1.z * v.y + r2.z * v.z);
+    const ndcX = (s * x) / w;
+    const ndcY = (s * aspect * y) / w;
+    return {
+      xPx: ((ndcX + 1) / 2) * viewport.widthPx,
+      yPx: ((1 - ndcY) / 2) * viewport.heightPx,
+      depth: NEAR_PLANE_M / w,
+      inFront: w >= NEAR_PLANE_M,
+    };
   };
 }
 

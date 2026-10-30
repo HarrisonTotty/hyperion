@@ -9,7 +9,14 @@ import {
 } from "../coords/rotation";
 import type { BodyFigure } from "../terrain/planet";
 import { figurePole } from "../bodies/oblate";
-import { cosineWindows, type ParameterWindow, type Polyline, sampleCurve } from "./curve";
+import { occluderRadius } from "../depth/depth";
+import {
+  cosineWindows,
+  type DepthSagWithin,
+  type ParameterWindow,
+  type Polyline,
+  sampleCurve,
+} from "./curve";
 import {
   angularDistortion,
   type DatumSpheroid,
@@ -47,6 +54,73 @@ export const GRATICULE_FROM_PX = 8;
  * the line scale as {@link GRATICULE_FROM_PX} is (128 device px up to a ratio of 2).
  */
 export const FINE_GRATICULE_FROM_PX = 64;
+
+/**
+ * How deep inside the surface a graticule's chord may sag where its occluder's slope gives it
+ * nothing, at the sub-camera point, as a fraction of the occluder's margin: 1/2 (R02.T19.b), so
+ * that it stands at least 2 × 10⁻⁶ of the distance, twice the ordering bound, in front of the
+ * occluder (plan R02, Design note 5).
+ */
+export const DATUM_DEPTH_SAG_PER_MARGIN = 1 / 2;
+
+/**
+ * How many pixels of the occluder's depth slope a graticule's chord may sag by beyond
+ * {@link DATUM_DEPTH_SAG_PER_MARGIN} of its margin: 1/2 (R02.T19.b).
+ *
+ * @remarks
+ * The occluder's slope term, `occluderSlopePxAt` the line scale (Design note 5), pushes its depth
+ * away by w_max ÷ 2 + 1 rounded up, 0.75 px more than the heavy line's cased reach at a scale of 1,
+ * 1 px at 2 and 1.25 px at 3 (`datumInsideAt`); half a pixel of it leaves a quarter in hand, while
+ * away from the sub-camera point it lets the depth rule give way to the lateral one.
+ */
+export const DATUM_DEPTH_SAG_SLOPE_PX = 1 / 2;
+
+/**
+ * Whether a graticule chord's point `chordM`, nearest the line's point `curveM` at its middle,
+ * stands close enough inside the surface there for the whole chord, `halfChordM` each side
+ * (R02.T19.b): its depth along the surface's outward normal at most
+ * {@link DATUM_DEPTH_SAG_PER_MARGIN} of the occluder's margin, plus
+ * {@link DATUM_DEPTH_SAG_SLOPE_PX} of the least depth slope the occluder has along the chord.
+ *
+ * @remarks
+ * The margin is `occluderRadius`'s inside the least radius, its polar on a spheroid, 4 × 10⁻⁶ d
+ * (never above half the radius), by which the draw list insets the occluder. On the occluder's
+ * tangent plane at H, of normal N, the depth along the view's axis is w = (N · H) ÷ (N · u) on
+ * the ray u = (a, b, −1) of the image plane's tangent coordinates, in which a pixel is 1 ÷ f, so
+ * the slope term's k px move it k w² |N⊥| ÷ (f |N · H|) = k w |N⊥| ÷ (f |N · u|) away, N⊥ the
+ * normal's part across the view's axis, as `occluderSphereHit.wgsl` takes the slope; and a point s
+ * inside the surface along N lies s ÷ |N · u| deeper along the ray. So k px of the slope stand for
+ * k w |N⊥| ÷ f inside the surface, at every incidence, and nothing where the normal lies along the
+ * view's axis, the sub-camera point of a body on it. Along the chord the normal turns from the
+ * middle's by at most its half-length over the surface's least radius of curvature, r on a sphere
+ * and c² ÷ a on a spheroid (its meridian's at the equator), and |N⊥|, the sine of the normal's
+ * angle off the axis, falls by no more than that turn; so the middle's |N⊥| less the turn is the
+ * least anywhere along it, and the chord's sag, greatest at its middle, is within the allowance all
+ * along it, even where the sub-camera point lies inside it. A spheroid's normal is its quadric's
+ * gradient, L² (p − c).
+ */
+function datumDepthSag(
+  body: Pick<GraticuleBody, "centreM" | "radiusM" | "spheroid">,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): DepthSagWithin {
+  const spheroid = body.spheroid;
+  const leastM = spheroid === null ? body.radiusM : body.radiusM / spheroid.stretch;
+  const allowedM =
+    DATUM_DEPTH_SAG_PER_MARGIN * (leastM - occluderRadius(leastM, norm(body.centreM)));
+  const curvatureRadiusM = spheroid === null ? body.radiusM : leastM / spheroid.stretch;
+  // k ÷ f: the depth inside the surface the slope allows, m, for each m of w at |N⊥| = 1.
+  const insideMPerDepthM = DATUM_DEPTH_SAG_SLOPE_PX / focalPx(camera, viewport);
+  // The view's axis along the camera frame's, so that w and |N⊥| are a dot product each.
+  const forward = rotate(camera.orientation, vec3(0, 0, -1));
+  return (curveM, chordM, halfChordM) => {
+    const normal = normalise(stretched(stretched(sub(curveM, body.centreM), spheroid), spheroid));
+    const along = dot(normal, forward);
+    const across = Math.sqrt(Math.max(0, 1 - along * along)) - halfChordM / curvatureRadiusM;
+    const insideM = dot(sub(curveM, chordM), normal);
+    return insideM <= allowedM + insideMPerDepthM * dot(curveM, forward) * Math.max(0, across);
+  };
+}
 
 /** The graticule's step, degrees, on a large body and on a small one (and at the low setting). */
 export const GRATICULE_STEP_DEG = { fine: 15, coarse: 30 } as const;
@@ -843,6 +917,7 @@ export function graticule(
   };
   const stepDeg = graticuleStepDeg(diameterPx, strokeScale, lowSetting);
   const stepRad = (stepDeg * Math.PI) / 180;
+  const depthSagWithin = datumDepthSag(body, camera, viewport);
   const count = Math.round(360 / stepDeg);
   for (let k = 0; k < count; k += 1) {
     const lonRad = k * stepRad;
@@ -866,6 +941,7 @@ export function graticule(
             point,
           ),
           initialSpans: 12,
+          depthSagWithin,
         },
         camera,
         viewport,
@@ -898,6 +974,7 @@ export function graticule(
             point,
           ),
           initialSpans: 24,
+          depthSagWithin,
         },
         camera,
         viewport,

@@ -28,7 +28,8 @@ import {
   SYMBOL_BELOW_PX,
 } from "./bodies";
 import { cosineWindows, type Polyline } from "./curve";
-import { CASING_PX, STROKE_PX } from "./drawList";
+import { occluderRadius } from "../depth/depth";
+import { CASING_PX, occluderSlopePxAt, STROKE_PX } from "./drawList";
 import { datumSpheroidOf } from "./spheroid";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
@@ -1722,6 +1723,125 @@ describe("a window with no safe cut keeps its far stretch, on every body (R10.T1
       const checked = counts.reduce((sum, count) => sum + count.checked, 0);
       const undrawn = counts.reduce((sum, count) => sum + count.undrawn, 0);
       expect([checked > 10_000, undrawn]).toEqual([true, 0]);
+    },
+  );
+});
+
+describe("a line through the sub-camera point, drawn to the centre (R02.T19.b)", () => {
+  /** The datum captures' view (`captureDatum`): 1280 × 720 at a 60° field. */
+  const CAPTURE_VIEW: Viewport = { widthPx: 1280, heightPx: 720 };
+  const CAPTURE_CAMERA: ProjectionCamera = {
+    orientation: IDENTITY_QUATERNION,
+    fovXRad: Math.PI / 3,
+  };
+  const STROKE_SCALE = 2;
+
+  /**
+   * The reversed depth (its near plane 1 m) at which `body`'s occluder stands on the line of sight
+   * through `p`, as `occluderSphereHit.wgsl` and `sphere_depth` draw it in `f64`: the figure with
+   * both radii inset by `occluderRadius`'s margin, as the draw list builds it, its depth pushed
+   * away by `slopePx` pixels of its slope across the screen from its tangent plane; `null` where
+   * the line of sight misses it.
+   */
+  function occluderDepth(body: GraticuleBody, p: Vec3, slopePx: number): number | null {
+    const distanceM = norm(body.centreM);
+    const pole = body.spheroid?.pole ?? vec3(0, 0, 1);
+    const a = occluderRadius(body.radiusM, distanceM);
+    const c = occluderRadius(body.radiusM / (body.spheroid?.stretch ?? 1), distanceM);
+    // Its quadric S = (I − ppᵀ) ÷ a² + ppᵀ ÷ c²: the line of sight t û meets it where
+    // (t û − k)ᵀ S (t û − k) = 1, k its centre.
+    const quadric = (v: Vec3): Vec3 => {
+      const z = dot(v, pole);
+      return add(scale(sub(v, scale(pole, z)), 1 / (a * a)), scale(pole, z / (c * c)));
+    };
+    const ray = normalise(p);
+    const fromCentre = scale(body.centreM, -1);
+    const qa = dot(ray, quadric(ray));
+    const qb = dot(fromCentre, quadric(ray));
+    const qc = dot(fromCentre, quadric(fromCentre)) - 1;
+    const rootSquared = qb * qb - qa * qc;
+    if (rootSquared < 0) {
+      return null;
+    }
+    const t = qc / (-qb + Math.sqrt(rootSquared));
+    const hit = scale(ray, t);
+    const normal = normalise(quadric(sub(hit, body.centreM)));
+    const facing = Math.abs(dot(normal, hit));
+    const s = 1 / Math.tan(CAPTURE_CAMERA.fovXRad / 2);
+    const aspect = CAPTURE_VIEW.widthPx / CAPTURE_VIEW.heightPx;
+    const slopeX = (Math.abs(normal.x) * 2) / (CAPTURE_VIEW.widthPx * s * facing);
+    const slopeY = (Math.abs(normal.y) * 2) / (CAPTURE_VIEW.heightPx * s * aspect * facing);
+    return 1 / (t * -ray.z) - slopePx * Math.hypot(slopeX, slopeY);
+  }
+
+  const RANGES = [
+    ["340 Mm, the captures' range", 340e6],
+    ["1.2 radii", 1.2 * SATURN.equatorialRadiusM],
+  ] as const;
+  const FRAMINGS = [
+    ["equator-on", vec3(0, 1, 0)],
+    ["pole-on", vec3(0, 0, 1)],
+  ] as const;
+  const cases = RANGES.flatMap(([range, rangeM]) =>
+    FRAMINGS.flatMap(([framing, pole]) =>
+      (["TEST SATURN's spheroid", "a sphere"] as const).flatMap((figure) =>
+        (["in the wireframe", "over the image"] as const).map(
+          (style) => [figure, framing, range, style, rangeM, pole] as const,
+        ),
+      ),
+    ),
+  );
+
+  it.each(cases)(
+    "keeps every point of %s's meridians and parallels, seen %s from %s, %s, in front of its occluder by its slope term less the heavy line's cased reach, out to the disc's centre",
+    (figure, _framing, _range, style, rangeM, pole) => {
+      const body: GraticuleBody = {
+        centreM: vec3(0, 0, -rangeM),
+        radiusM: SATURN.equatorialRadiusM,
+        rotation: null,
+        unmodelledPole: pole,
+        spheroid: figure === "a sphere" ? null : datumSpheroidOf(SATURN, pole),
+      };
+      const inside = style === "in the wireframe" ? null : reachesAt(STROKE_SCALE);
+      // The occluder's push that is left once a heavy line's coverage, its reach from its
+      // centreline, has taken its share: the whole cased stroke stays in front.
+      const slopePx = occluderSlopePxAt(STROKE_SCALE) - reachesAt(STROKE_SCALE).reachPx.heavy;
+      const lines = graticule(
+        body,
+        CAPTURE_CAMERA,
+        CAPTURE_VIEW,
+        STROKE_SCALE,
+        false,
+        inside,
+      ).lines;
+      const centrePx = project(body.centreM, CAPTURE_CAMERA, CAPTURE_VIEW);
+      let onView = 0;
+      let nearCentre = 0;
+      let behind = 0;
+      for (const run of lines.filter((line) => line.kind !== "limb").flatMap((line) => line.runs)) {
+        run.forEach((from, i) => {
+          const to = run[i + 1] ?? from;
+          for (let k = 0; k < 8; k += 1) {
+            const p = add(from, scale(sub(to, from), k / 8));
+            const at = project(p, CAPTURE_CAMERA, CAPTURE_VIEW);
+            if (
+              !(at.xPx >= 0 && at.xPx <= CAPTURE_VIEW.widthPx) ||
+              !(at.yPx >= 0 && at.yPx <= CAPTURE_VIEW.heightPx)
+            ) {
+              continue;
+            }
+            onView += 1;
+            nearCentre += Math.hypot(at.xPx - centrePx.xPx, at.yPx - centrePx.yPx) < 2 ? 1 : 0;
+            const occluder = occluderDepth(body, p, slopePx);
+            behind += occluder !== null && 1 / -p.z < occluder ? 1 : 0;
+          }
+        });
+      }
+      expect({ points: onView > 400, nearCentre: nearCentre > 0, behind }).toEqual({
+        points: true,
+        nearCentre: true,
+        behind: 0,
+      });
     },
   );
 });

@@ -38,6 +38,12 @@
  *   the figure at the pole. Pole-on the spheroid's outline lies some 0.3 px inside the sphere's, so
  *   no control is asked there.
  *
+ * And `TEST SATURN` centred on the view, its disc's centre, the sub-camera point, at the view's
+ * (plan R02, R02.T19.b), seen equator-on and pole-on, in both styles: its datum drawn with its
+ * occluder holds the same bytes as with none at every pixel, so that each line through the
+ * sub-camera point is drawn to the centre (the facing cut leaves its own occluder nothing of it to
+ * hide), and the datum is drawn there, its frames differing from the bare ones.
+ *
  * {@link captureDatum} saves `TEST SATURN`'s datum as `VIEW` draws it, for a person's look (plan
  * R02, R02.T19.b): the spheroid centred in a 1280 × 720 view at a 60° field from
  * {@link CAPTURE_RANGE_M}, seen equator-on and pole-on, lit from behind the camera and to its
@@ -474,6 +480,75 @@ async function checkSaturnView(
   }
 }
 
+/**
+ * `TEST SATURN` centred on the view from {@link SATURN_RANGE_M}, about `pole`: the view's
+ * 64 × 48 px about its disc's centre (R02.T19.b).
+ */
+function centredOn(name: string, pole: Vec3, across: boolean): SaturnView {
+  return { name, centreM: vec3(0, 0, -SATURN_RANGE_M), figure: { ...SATURN, pole }, across };
+}
+
+/** A datum's list with no occluder sphere: its lines alone, nothing of them hidden. */
+function unoccluded(list: WireframeDrawList): WireframeDrawList {
+  return { ...list, occluderSpheres: [] };
+}
+
+/** How many pixels of two read-backs differ in a channel. */
+function pixelsDiffering(a: Float32Array | Uint8Array, b: Float32Array | Uint8Array): number {
+  let differing = 0;
+  for (let p = 0; p < VIEWPORT.widthPx * VIEWPORT.heightPx; p += 1) {
+    differing += samePixel(a, b, p) ? 0 : 1;
+  }
+  return differing;
+}
+
+/**
+ * R02.T19.b's checks of `TEST SATURN` seen `view`'s way about its disc's centre, over the image
+ * and in the wireframe: each style's frames with its datum, with its datum and no occluder, and
+ * with none, each read back before the next.
+ */
+async function checkSaturnCentre(
+  view: SaturnView,
+  draw: (frame: FrameOf) => Promise<Float32Array | Uint8Array>,
+  drawWireframe: (
+    list: WireframeDrawList,
+    camera: DrawCamera,
+  ) => Promise<Float32Array | Uint8Array>,
+  tokens: ColourTokens,
+  checks: Checks,
+): Promise<void> {
+  const camera = drawCameraFor(view.centreM);
+  const saturn = { tokens, centreM: view.centreM, figure: view.figure, camera, air: false };
+  const scene = saturnScene(view, true);
+  const image = datumList(true, tokens, scene, camera);
+  const wire = datumList(false, tokens, scene, camera);
+  const styles = [
+    {
+      style: "over the image",
+      datum: image,
+      drawn: await draw({ ...saturn, datum: image }),
+      bare: await draw({ ...saturn, datum: unoccluded(image) }),
+      none: await draw({ ...saturn, datum: null }),
+    },
+    {
+      style: "in the wireframe",
+      datum: wire,
+      drawn: await drawWireframe(wire, camera),
+      bare: await drawWireframe(unoccluded(wire), camera),
+      none: await drawWireframe({ ...unoccluded(wire), lines: [] }, camera),
+    },
+  ];
+  for (const { style, datum, drawn, bare, none } of styles) {
+    const hidden = pixelsDiffering(drawn, bare);
+    const lines = pixelsDiffering(drawn, none);
+    checks.check(
+      `R02.T19.b TEST SATURN's datum about its disc's centre, seen ${view.name} ${style}, is drawn as with no occluder: its lines through the sub-camera point drawn to the centre`,
+      datum.occluderSpheres.length === 1 && hidden === 0 && lines > 0,
+      `${String(datum.occluderSpheres.length)} occluder; ${String(hidden)} of the ${String(VIEWPORT.widthPx * VIEWPORT.heightPx)} pixels differ from the datum with no occluder, ${String(lines)} from the frame with no datum`,
+    );
+  }
+}
+
 /** R10.T16.g's datum over the image, and R02.T19's on `TEST SATURN`: see the module's remarks. */
 export async function checkDatumFrame(engine: RenderEngine, checks: Checks): Promise<void> {
   const tokens: ColourTokens = readTokens(document.documentElement);
@@ -493,6 +568,14 @@ export async function checkDatumFrame(engine: RenderEngine, checks: Checks): Pro
     await renderer.prepare(VIEWPORT, "high", "eye", CAMERA);
     const draw = (frame: FrameOf): Promise<Float32Array | Uint8Array> =>
       drawFrame(renderer, wireframe, canvas, tables, frame);
+    // A wireframe frame, read back in the task that drew it.
+    const drawWireframe = (
+      list: WireframeDrawList,
+      camera: DrawCamera,
+    ): Promise<Float32Array | Uint8Array> => {
+      wireframe.render(canvas, list, camera, VIEWPORT);
+      return canvas.readBack();
+    };
     const earth = { tokens, centreM: CENTRE_M, figure: EARTH_FIGURE, camera: DRAW_CAMERA };
     const inside = datumList(true, tokens);
     const centred = datumList(false, tokens);
@@ -562,6 +645,21 @@ export async function checkDatumFrame(engine: RenderEngine, checks: Checks): Pro
     // R02.T19: `TEST SATURN`'s datum on its spheroid, airless, equator-on and then pole-on.
     await checkSaturnView(equatorOn(), draw, tokens, checks);
     await checkSaturnView(poleOn(), draw, tokens, checks);
+    // R02.T19.b: about its disc's centre, its pole up the view and then towards the camera.
+    await checkSaturnCentre(
+      centredOn("equator-on", vec3(0, 1, 0), true),
+      draw,
+      drawWireframe,
+      tokens,
+      checks,
+    );
+    await checkSaturnCentre(
+      centredOn("pole-on", vec3(0, 0, 1), false),
+      draw,
+      drawWireframe,
+      tokens,
+      checks,
+    );
   } finally {
     for (const each of made.toReversed()) {
       each.dispose();

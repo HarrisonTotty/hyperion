@@ -9,6 +9,7 @@ import {
   pixelSolidAngle,
   project,
   type ProjectionCamera,
+  projector,
   toViewAxes,
   viewRotation,
   viewRotation4,
@@ -156,6 +157,20 @@ describe("project", () => {
   it("says a point behind the camera is not in front", () => {
     expect(project(vec3(0, 0, 5), LOOKING_DOWN_MINUS_Z, FULL_HD).inFront).toBe(false);
     expect(project(vec3(0, 0, -5), LOOKING_DOWN_MINUS_Z, FULL_HD).inFront).toBe(true);
+  });
+});
+
+describe("projector", () => {
+  it("gives project's values bit for bit, for a turned camera, near and far, ahead and behind", () => {
+    const camera: ProjectionCamera = {
+      orientation: quaternionFromAxisAngle(vec3(0.6, 0.48, 0.64), 0.7),
+      fovXRad: SIXTY,
+    };
+    const points = [vec3(1, 2, -30), vec3(-4e8, 3e7, -2e9), vec3(3, -1, 5), vec3(0, 0, -AU_M)];
+    const projectOne = projector(camera, FULL_HD);
+    expect(points.map((p) => projectOne(p))).toEqual(
+      points.map((p) => project(p, camera, FULL_HD)),
+    );
   });
 });
 

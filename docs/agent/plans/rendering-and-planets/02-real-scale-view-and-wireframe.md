@@ -2178,3 +2178,7 @@ highest step`, naming the key held back as the field of view's ends name theirs;
     4 × 10⁻⁶ d margin where the depth slope is near zero. At 340 Mm, equator-on in both styles, the
     equator is gone ±17 px about the disc's centre and the central meridian ±38 px; pole-on, in
     the wireframe, every meridian within 17 px of the pole. Not fixed here.
+  - _Fixed_ (2026-10-30): `CurveSpec.depthSagWithin` (`DepthSagWithin`), set by `graticule` on its
+    meridians and parallels, halves a span up to 8 times more until its chord sags within half the
+    occluder's margin plus half a pixel of its least depth slope (lean, 2026-10-30: the margin alone
+    cost 13 times the time). `projection.ts` gains `projector`.
