@@ -3469,6 +3469,66 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     method) and run by name; `just smart-ci <base> --hook-checks`; the record filed with every
     figure.
 
+- **R09.T13.m The monsoon: each column's budget in the tropics** (after R09.T13.l; a plain bump,
+  built on a lane branch and picked just before the bump commit: 25's if it is ready by then, else
+  26's; decision-r09-t13m, whose specification and tests bind; R09.T13.l's B1 and R09.T13.e's
+  E-P9, E-L6 and E-L7). R09.T13.e's zonal budget gives every longitude of a band its convergence;
+  this gives each column of the geographic model its own, where the Hadley cell reaches, and the
+  orographic model the exit that column winds need.
+  Records: [09-surface-generator/records/R09.T13.m.md](09-surface-generator/records/R09.T13.m.md).
+  - _The column budget_ (`hydrology.rs`, `partition::hadley_part_kg_m2_s`). Each month, each of the
+    geographic grid's 72 columns of 5°: `Bands::of` on its own points, `partition::budget` under
+    the body's circulation (its centre its own energy-flux equator held at the as-built Φ₁), ψ_c,
+    its E − P and its Hadley part H_c, the divergence of −ψ_c L q over L. The model's flux, −Λ∇h,
+    is a gradient flow, so each column's zero of it is the zonally varying energy-flux equator of
+    Adam, Bischoff and Schneider 2016 (J. Climate 29, 7281). Observed monsoon rain falls near and
+    slightly equatorward of the subcloud MSE maximum (Privé and Plumb 2007, J. Atmos. Sci. 64,
+    1417; Nie, Boos and Kuang 2010, J. Climate 23, 4416); over South Asia the cap holds the
+    column's centre 5–15° equatorward of the model's maximum, which its plateau misplaces
+    poleward: a heuristic that agrees with them in direction, not a closed form of theirs.
+  - _The blend._ At band k of column c, E − P = b_k (E − P)_c + (1 − b_k)[(E − P)_z − H_z + H_c],
+    b_k = clamp((1.5 φ_H − |φ_k|) ÷ (0.5 φ_H), 0, 1), φ_H the Hadley edge: the column's whole
+    budget within the edge, the zonal eddies with its own Hadley part beyond 1.5 edges, linear
+    between. Each column's sea rate and land source follow `SeaBands`' rule on its blended C, with
+    the band's `e_b` and `s_b`; the balance factor k is unchanged.
+  - _The read._ Every per-column field a cell reads (the sea's rate, the land's source, ψ in the
+    winds) is v₁ + t(v₂ − v₁) between the two columns whose centres bracket its longitude, each by
+    the band stencil in latitude (`grid::ColumnRead`): two column weights a cell, no grid stencil.
+  - _The winds._ Each climate cell's Hadley lower branch reads its columns' ψ; the Ferrel and polar
+    template keeps the zonal budget's centre and edge. A locked world, and a grid of one column,
+    keep the zonal budget.
+  - _The convergence exit_ (`lfpm.rs`; decision-r09-t13m §2). Mass continuity of the along-band
+    stream, with no constant of its own: each field cell's stream share s = u_out⁺ ÷ max(u_in,
+    u_out) of the drag balance's along-band wind at its two edges (1 where they are equal, 0 where
+    it reverses), at the cell's own latitude, from the record's wind before quantisation; each
+    giver's pull at its share, the sea's air included; nothing carried along the band into calm
+    land; and the water that leaves, X, rained once over its unit's land by area before the
+    balance, a unit a grid point merged toward the pole to at least half a band's height. The
+    land's budget closes as inflow + source = runoff + outflow + exit. With every share 1 and no
+    calm land the solve is as built to the bit.
+  - _Tests_ (decision-r09-t13m §3): the column budgets against the zonal budget where every column
+    is alike, and each column's closure; the flat continent's monsoon (10° S–40° N, 30–120° E,
+    300 m); R09.T13.l's floors raised (India's JJA, the Ganges's plain, the monthly r, the deserts'
+    arid shares, the wettest climate cell-month); the ruled Earth test and T13.i's bounds
+    unchanged; `field_rates` reading the column rates, the shares and the spread, exact to the bit,
+    and its closure counting the exit; at most 20 restarts a month with the deep comparison within
+    1% on the coarse pass's Earth and locked Earth; the exit's unit tests (the share, calm land,
+    two streams meeting head-on, the spread and its units).
+  - _The temperature table_ (advice Q3 of research-r09-climate): `ncep_air_boxes.rs` regenerated
+    from NOAA PSL's 2 m files, the same data as `ncep_air.rs`, in place of NOAA ARL's σ = 0.995
+    field; test data, no assertion moves.
+  - _Contract:_ the reference Earth's precipitation, winds and runoff move, and the locked Earth's
+    (its bands carry the exit): `planetary/surface/earth_like` and `locked_earth_like`, re-blessed
+    by name; `mars_like`, `moon_like`, `ceres_like` and `europa_like` do not move.
+    `PROTOCOL_VERSION` does not change.
+  - _Acceptance:_ the ruling's tests; `cargo test -p hyperion-sim planetary::surface::steps::climate`
+    and `planetary::surface::coarse_golden`; the climate step's slow tests by name, among them
+    R09.T13.l's, `the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp` and the three new
+    ones (`where_every_column_is_alike_…`, `the_flat_continent_s_monsoon_…`,
+    `the_coarse_pass_s_locked_earth_s_water_cycle_…`); `just smart-ci <base> --hook-checks`.
+  - _Built 2026-10-30_ on a lane branch, for 25's train or 26's; its goldens re-blessed in the bump
+    commit.
+
 The climate step's acceptance: `cargo test -p hyperion-sim planetary::surface::steps::climate`.
 
 ### R09.T14 Erosion
