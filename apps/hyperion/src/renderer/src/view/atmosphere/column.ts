@@ -11,7 +11,9 @@
  * The `radiativeConvective` profile's single β stands for the hand fixtures, and the `isothermal`
  * profile at T_s for a record that does not model the structure, which is about 3× wrong in scale
  * height at Venus's cloud tops (Design note 3). The skin is itself provisional, with no ozone or
- * haze heating.
+ * haze heating. A gas envelope's profile is P14.T24.d's, Guillot's grey T(p) above its join and its
+ * adiabat's nodes below (the `envelope` profile, R08.T16.a), and its column runs to a top of its
+ * own ({@link ColumnInput.topPa}) with levels at its modes' ends ({@link ColumnInput.levelsPa}).
  *
  * The column is the reference medium of Design note 17: it is built at g_ref = √(g_e g_p)
  * (`oblate.ts`'s `referenceGravity`) on a sphere of R_ref (R05's `tableRadiusM`), and its heights
@@ -26,7 +28,7 @@
  */
 
 import { ATOMIC_MASS_CONSTANT_KG } from "../../lib/system/constants";
-import type { ProfileNode } from "../../lib/system/model";
+import type { GuillotProfile, ProfileNode } from "../../lib/system/model";
 import { ABSORBER_PRESSURE_REFERENCE_PA, type TabulatedDensity, tabulatedDensity } from "./medium";
 import {
   BOLTZMANN_J_PER_K,
@@ -54,6 +56,12 @@ import { exp, expm1, log, pow } from "../../lib/pinnedMath";
  *   leaves the air isothermal at T_skin. The sim's own guarantees, every node at least T_skin and
  *   the last at it, are taken and not checked: the column's ∫ T d ln p leaves out the max with
  *   T_skin, which they confine to a rounding.
+ * - `envelope`: P14.T24.d's gas envelope (R08.T16.a): above its join, the first node, Guillot's
+ *   grey T(p) ({@link greyTemperatureK}); from the join down the power law between the two nodes
+ *   about p, and past the last node the last segment's: the sim's
+ *   `planetary::hooks::structure::envelope::EnvelopeProfile::temperature_at`, operation for
+ *   operation. The nodes run from the join down, the pressures strictly ascending, two at least;
+ *   the grey profile reads the wire's parameters at the bulk section's gravity, as the sim's does.
  */
 export type TemperatureProfile =
   | { readonly kind: "isothermal"; readonly temperatureK: number }
@@ -68,7 +76,19 @@ export type TemperatureProfile =
       readonly kind: "nodes";
       readonly nodes: ReadonlyArray<ProfileNode>;
       readonly skinK: number;
+    }
+  | {
+      readonly kind: "envelope";
+      readonly grey: GuillotProfile;
+      readonly internalK: number;
+      readonly irradiationK: number;
+      /** g, m s⁻², at which the grey profile's thermal optical depth is read. */
+      readonly gravityMS2: number;
+      readonly nodes: ReadonlyArray<ProfileNode>;
     };
+
+/** A gas envelope's profile, {@link TemperatureProfile}'s `envelope` (R08.T16.a). */
+export type EnvelopeProfile = Extract<TemperatureProfile, { readonly kind: "envelope" }>;
 
 /** A finite, positive number. */
 function isPositive(value: number): boolean {
@@ -114,6 +134,31 @@ function checkedProfile(profile: TemperatureProfile): TemperatureProfile {
         );
       }
       break;
+    case "envelope": {
+      const { grey } = profile;
+      const n = grey.opticalDepthExponent;
+      if (!(
+        nodesUsable(profile.nodes, "ascending") &&
+        profile.nodes.length >= 2 &&
+        isPositive(grey.thermalOpacityM2PerKg) &&
+        n >= 1 &&
+        n <= 2 &&
+        isPositive(grey.opacityRatio) &&
+        grey.opacityRatio <= 1 &&
+        isPositive(grey.redistributionFactor) &&
+        grey.redistributionFactor <= 1 &&
+        Number.isFinite(profile.internalK) &&
+        profile.internalK >= 0 &&
+        Number.isFinite(profile.irradiationK) &&
+        profile.irradiationK >= 0 &&
+        isPositive(profile.gravityMS2)
+      )) {
+        throw new RangeError(
+          `an envelope's profile needs two nodes or more, each p and T > 0 with the pressures ascending, κ₁ > 0, n in [1, 2], γ and f in (0, 1], T_int and T_irr ≥ 0 and g > 0, got ${profile.nodes.length} nodes, κ₁ ${grey.thermalOpacityM2PerKg}, n ${n}, γ ${grey.opacityRatio}, f ${grey.redistributionFactor}, ${profile.internalK} K, ${profile.irradiationK} K and ${profile.gravityMS2} m/s²`,
+        );
+      }
+      break;
+    }
     case "radiativeConvective":
       if (!(
         isPositive(profile.surfaceK) &&
@@ -143,7 +188,9 @@ function checkedProfile(profile: TemperatureProfile): TemperatureProfile {
  * @param pressurePa - Finite and positive, Pa.
  * @throws RangeError for a pressure that is not finite and positive, or a profile with a
  *   temperature or pressure that is not finite and positive, a β that is negative or not finite,
- *   or nodes that are none or whose pressures do not descend.
+ *   `nodes` that are none or whose pressures do not descend, or an `envelope` of fewer than two
+ *   nodes or nodes whose pressures do not ascend, a κ₁ or g not above 0, an n outside [1, 2], a γ
+ *   or f outside (0, 1], or a T_int or T_irr negative or not finite.
  */
 export function temperatureAt(profile: TemperatureProfile, pressurePa: number): number {
   if (!isPositive(pressurePa)) {
@@ -177,8 +224,53 @@ function profileTemperatureK(profile: TemperatureProfile, pressurePa: number): n
       temperatureK = lawK < skinK ? skinK : lawK;
       break;
     }
+    case "envelope": {
+      const { nodes } = profile;
+      temperatureK =
+        pressurePa < nodeAt(nodes, 0).pressurePa
+          ? greyTemperatureK(profile, pressurePa)
+          : nodeLawK(nodes, nodesReached(nodes, pressurePa), pressurePa);
+      break;
+    }
   }
   return temperatureK;
+}
+
+/**
+ * Guillot's p₁, the pressure his thermal opacity κ₁ is given at, Pa: 1 bar, the sim's
+ * `REFERENCE_PRESSURE`.
+ */
+const GREY_REFERENCE_PA = 1e5;
+
+/** √3, as the sim writes it (`envelope.rs`'s `SQRT_3`). */
+const SQRT_3 = 1.732_050_807_568_877_2;
+
+/** x⁴ as the sim's `math::powi(x, 4)` forms it, by squaring: (x²)². */
+function fourthPower(x: number): number {
+  const square = x * x;
+  return square * square;
+}
+
+/**
+ * An envelope's grey temperature at a pressure above its join, K: Guillot 2010's (A&A 520, A27)
+ * eq. 29 at the thermal optical depth τ = κ₁ p₁ (p ÷ p₁)ⁿ ÷ (n g),
+ * T⁴ = ¾ T_int⁴ (⅔ + τ) + ¾ f T_irr⁴ (⅔ + 1 ÷ (γ√3) + (γ ÷ √3 − 1 ÷ (γ√3)) e^(−γτ√3)), in the
+ * sim's operations (`GreyProfile::optical_depth` and `temperature`).
+ */
+function greyTemperatureK(profile: EnvelopeProfile, pressurePa: number): number {
+  const { grey } = profile;
+  const n = grey.opticalDepthExponent;
+  const tau =
+    (grey.thermalOpacityM2PerKg * GREY_REFERENCE_PA * pow(pressurePa / GREY_REFERENCE_PA, n)) /
+    (n * profile.gravityMS2);
+  const gamma = grey.opacityRatio;
+  const int4 = fourthPower(profile.internalK);
+  const irr4 = grey.redistributionFactor * fourthPower(profile.irradiationK);
+  const inverse = 1 / (gamma * SQRT_3);
+  const t4 =
+    0.75 * int4 * (2 / 3 + tau) +
+    0.75 * irr4 * (2 / 3 + inverse + (gamma / SQRT_3 - inverse) * exp(-gamma * tau * SQRT_3));
+  return pow(t4, 0.25);
 }
 
 /** Node `i` of `nodes`, which the caller has bounded. */
@@ -435,11 +527,21 @@ export interface ColumnInput {
   readonly referenceGravityMS2: number;
   /** R_ref, m: the datum's radius on the column's sphere, R05's `tableRadiusM(figure)`. */
   readonly referenceRadiusM: number;
+  /**
+   * p at the column's top, Pa, below the datum's: a gas envelope's, above every term it carries
+   * (R08.T16.a). Absent, p_s × {@link COLUMN_TOP_PRESSURE_RATIO}.
+   */
+  readonly topPa?: number;
+  /**
+   * Pressures, Pa, each between the top's and the datum's, at which the column lays a level beside
+   * its even ones: a gas envelope's floor and its modes' ends (R08.T16.a).
+   */
+  readonly levelsPa?: ReadonlyArray<number>;
 }
 
 /**
  * An atmosphere's column at its levels, from the datum up to p_s × {@link COLUMN_TOP_PRESSURE_RATIO}
- * (Design note 3): the reference medium every term's density is laid on.
+ * or the top it is given (Design note 3): the reference medium every term's density is laid on.
  *
  * @remarks
  * Level i is at gravity-scaled height `altitudesM[i]` with `pressuresPa[i]`, `temperaturesK[i]`
@@ -499,8 +601,8 @@ function expm1OverX(x: number): number {
 /**
  * ln p of the tropopause, Pa, where the adiabat meets the skin: ln p_s + ln(T_skin ÷ T_s) ÷ β, or
  * a `nodes` profile's last node's. `null` for a profile with none: an isothermal one, a
- * `radiativeConvective` one with β = 0, which is isothermal at max(T_s, T_skin), or a `nodes` one
- * of the ground alone, isothermal at T_skin.
+ * `radiativeConvective` one with β = 0, which is isothermal at max(T_s, T_skin), a `nodes` one
+ * of the ground alone, isothermal at T_skin, or an `envelope`, whose grey profile has no skin.
  */
 function lnTropopausePa(profile: TemperatureProfile): number | null {
   let lnPa: number | null;
@@ -519,6 +621,9 @@ function lnTropopausePa(profile: TemperatureProfile): number | null {
       lnPa = nodes.length < 2 ? null : log(nodeAt(nodes, nodes.length - 1).pressurePa);
       break;
     }
+    case "envelope":
+      lnPa = null;
+      break;
   }
   return lnPa;
 }
@@ -665,31 +770,111 @@ function temperatureIntegralK(
       integral = (lnLowPa, lnHighPa) => piecesIntegralK(pieces, lnLowPa, lnHighPa);
       break;
     }
+    case "envelope": {
+      // Below the join, the node law's segments and its extension past the last node; above it,
+      // the grey profile in place of the law's piece before the first node.
+      const below = nodeLawPieces(profile.nodes).slice(1);
+      const grey = greyIntegralK(profile);
+      integral = (lnLowPa, lnHighPa) =>
+        grey(lnLowPa, lnHighPa) + piecesIntegralK(below, lnLowPa, lnHighPa);
+      break;
+    }
   }
   return integral;
 }
 
 /**
+ * Gauss–Legendre's five nodes on [−1, 1] and their weights (Abramowitz and Stegun 1964, table
+ * 25.4).
+ */
+const GAUSS_LEGENDRE_5: ReadonlyArray<readonly [number, number]> = [
+  [-0.906_179_845_938_664, 0.236_926_885_056_189_1],
+  [-0.538_469_310_105_683_1, 0.478_628_670_499_366_5],
+  [0, 0.568_888_888_888_888_9],
+  [0.538_469_310_105_683_1, 0.478_628_670_499_366_5],
+  [0.906_179_845_938_664, 0.236_926_885_056_189_1],
+];
+
+/**
+ * The span in ln p of each of the grey integral's panels: 0.25, over which five-point
+ * Gauss–Legendre holds Guillot's T, smooth in ln p, far inside the column's 10⁻⁶.
+ */
+const GREY_PANEL_LN_P = 0.25;
+
+/**
+ * An envelope's ∫ T d ln p over the part of [ln p_low, ln p_high] above its join, K, as a function
+ * of the two ends: Guillot's T has no closed form in it, so it is taken by five-point
+ * Gauss–Legendre on panels of {@link GREY_PANEL_LN_P} counted up from the join, their sums kept as
+ * they are first reached, and the panel a end falls in taken from that end.
+ */
+function greyIntegralK(profile: EnvelopeProfile): (lnLowPa: number, lnHighPa: number) => number {
+  const lnJoinPa = log(nodeAt(profile.nodes, 0).pressurePa);
+  const panel = (lnLowPa: number, lnHighPa: number): number => {
+    const middle = 0.5 * (lnLowPa + lnHighPa);
+    const half = 0.5 * (lnHighPa - lnLowPa);
+    let sum = 0;
+    for (const [x, w] of GAUSS_LEGENDRE_5) {
+      sum += w * greyTemperatureK(profile, exp(middle + half * x));
+    }
+    return sum * half;
+  };
+  // fromJoin[k], ∫ T d ln p from the join up to k panels above it.
+  const fromJoin: number[] = [0];
+  const upTo = (lnPa: number): number => {
+    const panels = Math.floor((lnJoinPa - lnPa) / GREY_PANEL_LN_P);
+    while (fromJoin.length <= panels) {
+      const k = fromJoin.length;
+      fromJoin.push(
+        (fromJoin[k - 1] ?? Number.NaN) +
+          panel(lnJoinPa - k * GREY_PANEL_LN_P, lnJoinPa - (k - 1) * GREY_PANEL_LN_P),
+      );
+    }
+    const at = lnJoinPa - panels * GREY_PANEL_LN_P;
+    return (fromJoin[panels] ?? Number.NaN) + (lnPa < at ? panel(lnPa, at) : 0);
+  };
+  return (lnLowPa, lnHighPa) => {
+    const high = Math.min(lnHighPa, lnJoinPa);
+    return high > lnLowPa ? upTo(lnLowPa) - upTo(high) : 0;
+  };
+}
+
+/**
  * ln p of the levels, Pa, from the datum's down to the top's, descending: even in ln p, with the
  * tropopause added between two of them.
+ *
+ * @remarks
+ * A column to a top of its own (`lnTopPa`) takes as many intervals as keep them no wider than
+ * {@link COLUMN_INTERVALS}' over a span of 10⁷, and its last level is the top's.
  */
-function levelLogPressures(lnSurfacePa: number, tropopause: number | null): Float64Array {
-  const span = log(COLUMN_TOP_PRESSURE_RATIO);
-  const step = span / COLUMN_INTERVALS;
-  const even = new Float64Array(COLUMN_INTERVALS + 1);
-  for (let i = 0; i <= COLUMN_INTERVALS; i += 1) {
-    even[i] = lnSurfacePa + (span * i) / COLUMN_INTERVALS;
+function levelLogPressures(
+  lnSurfacePa: number,
+  lnTopPa: number | null,
+  tropopause: number | null,
+): Float64Array {
+  const ratioSpan = log(COLUMN_TOP_PRESSURE_RATIO);
+  const span = lnTopPa === null ? ratioSpan : lnTopPa - lnSurfacePa;
+  const intervals =
+    lnTopPa === null
+      ? COLUMN_INTERVALS
+      : Math.max(COLUMN_INTERVALS, Math.ceil((COLUMN_INTERVALS * span) / ratioSpan));
+  const step = span / intervals;
+  const even = new Float64Array(intervals + 1);
+  for (let i = 0; i <= intervals; i += 1) {
+    even[i] = lnSurfacePa + (span * i) / intervals;
+  }
+  if (lnTopPa !== null) {
+    even[intervals] = lnTopPa;
   }
   if (tropopause === null) {
     return even;
   }
   const at = (tropopause - lnSurfacePa) / step;
   const nearest = Math.round(at);
-  if (at <= 0 || at >= COLUMN_INTERVALS || Math.abs(at - nearest) < TROPOPAUSE_MERGE_FRACTION) {
+  if (at <= 0 || at >= intervals || Math.abs(at - nearest) < TROPOPAUSE_MERGE_FRACTION) {
     return even;
   }
   const below = Math.floor(at);
-  const levels = new Float64Array(COLUMN_INTERVALS + 2);
+  const levels = new Float64Array(intervals + 2);
   levels.set(even.subarray(0, below + 1), 0);
   levels[below + 1] = tropopause;
   levels.set(even.subarray(below + 1), below + 2);
@@ -697,8 +882,53 @@ function levelLogPressures(lnSurfacePa: number, tropopause: number | null): Floa
 }
 
 /**
+ * An added level within this of another, in ln p, takes that one's place, or is not added where
+ * that one is the datum's or the top's: so that the levels' heights stay strictly ascending.
+ */
+const ADDED_LEVEL_MERGE_LN_P = 1e-9;
+
+/** A column's levels: ln p, and the pressure asked for at an added level (NaN at the others). */
+interface ColumnLevels {
+  readonly lnPa: Float64Array;
+  readonly askedPa: Float64Array;
+}
+
+/**
+ * `lnLevels` with a level at each of `addedPa`, descending in ln p (the module's
+ * {@link ADDED_LEVEL_MERGE_LN_P}).
+ */
+function withAddedLevels(lnLevels: Float64Array, addedPa: ReadonlyArray<number>): ColumnLevels {
+  if (addedPa.length === 0) {
+    return { lnPa: lnLevels, askedPa: new Float64Array(lnLevels.length).fill(Number.NaN) };
+  }
+  const ends = [lnLevels[0] ?? Number.NaN, lnLevels.at(-1) ?? Number.NaN];
+  const levels: Array<readonly [number, number]> = [...lnLevels].map((ln) => [ln, Number.NaN]);
+  for (const pa of addedPa) {
+    const ln = log(pa);
+    const close = (at: number): boolean => Math.abs(at - ln) < ADDED_LEVEL_MERGE_LN_P;
+    if (ends.some(close)) {
+      continue;
+    }
+    const near = levels.findIndex(([at]) => close(at));
+    if (near >= 0 && !Number.isNaN(levels[near]?.[1] ?? Number.NaN)) {
+      continue;
+    }
+    if (near >= 0) {
+      levels.splice(near, 1);
+    }
+    levels.push([ln, pa]);
+  }
+  levels.sort((a, b) => b[0] - a[0]);
+  return {
+    lnPa: Float64Array.from(levels, ([ln]) => ln),
+    askedPa: Float64Array.from(levels, ([, pa]) => pa),
+  };
+}
+
+/**
  * An atmosphere's hydrostatic column, in `f64`, from the datum up to p_s ×
- * {@link COLUMN_TOP_PRESSURE_RATIO} (Design note 3), at g_ref on a sphere of R_ref (Design note 17).
+ * {@link COLUMN_TOP_PRESSURE_RATIO} or the top it is given (Design note 3), at g_ref on a sphere of
+ * R_ref (Design note 17).
  *
  * @remarks
  * dp ÷ dr = −n μ m_u g with n = p ÷ kT and g = g_ref (R_ref ÷ r)², integrated in closed form rather
@@ -710,7 +940,8 @@ function levelLogPressures(lnSurfacePa: number, tropopause: number | null): Floa
  * the datum exceeds p_s ÷ g_ref by about 2H ÷ R_ref, the spherical excess, for an isothermal
  * column of scale height H.
  *
- * The levels are evenly spaced in ln p ({@link COLUMN_INTERVALS}), with the tropopause added. The
+ * The levels are evenly spaced in ln p ({@link COLUMN_INTERVALS}, or as many more as keep a longer
+ * span's no wider), with the tropopause and the levels asked for added. The
  * monopole's (R_ref ÷ r)² stands for the level spheroid's free-air gradient, which varies with
  * latitude on a spinning body, ∂γ ÷ ∂h = −(2γ ÷ a)(1 + f + m − 2f sin²φ) (Heiskanen and Moritz
  * 1967, §2-10, eq. 2-121; exactly, eq. 2-120): on Saturn the monopole moves the column above the
@@ -718,9 +949,10 @@ function levelLogPressures(lnSurfacePa: number, tropopause: number | null): Floa
  * (0.13 at the pole).
  *
  * @throws RangeError for inputs that are not finite and positive, a profile as
- *   {@link temperatureAt}, or a column whose geopotential height reaches R_ref below its top, which
- *   no hydrostatic atmosphere under inverse-square gravity holds (its pressure at infinity is above
- *   the top's).
+ *   {@link temperatureAt}, a top not above 0 and below the datum's pressure or a level asked for
+ *   outside them, or a column whose geopotential height reaches R_ref below its top, which no
+ *   hydrostatic atmosphere under inverse-square gravity holds (its pressure at infinity is above the
+ *   top's).
  */
 export function hydrostaticColumn(input: ColumnInput): AtmosphereColumn {
   const { surfacePa, referenceGravityMS2, referenceRadiusM } = input;
@@ -737,7 +969,19 @@ export function hydrostaticColumn(input: ColumnInput): AtmosphereColumn {
   }
   const profile = checkedProfile(input.temperature);
   const lnSurfacePa = log(surfacePa);
-  const lnTopPa = lnSurfacePa + log(COLUMN_TOP_PRESSURE_RATIO);
+  const topPa = input.topPa ?? surfacePa * COLUMN_TOP_PRESSURE_RATIO;
+  const addedPa = input.levelsPa ?? [];
+  if (!(
+    isPositive(topPa) &&
+    topPa < surfacePa &&
+    addedPa.every((p) => p > topPa && p < surfacePa)
+  )) {
+    throw new RangeError(
+      `a column's top lies above its datum, ${surfacePa} Pa, and each added level between them, got a top of ${topPa} Pa and levels at ${addedPa.join(", ")} Pa`,
+    );
+  }
+  const lnTopPa =
+    input.topPa === undefined ? lnSurfacePa + log(COLUMN_TOP_PRESSURE_RATIO) : log(input.topPa);
   const tropopause = lnTropopausePa(profile);
   const integralK = temperatureIntegralK(profile, tropopause);
   const metresPerKelvin =
@@ -746,10 +990,14 @@ export function hydrostaticColumn(input: ColumnInput): AtmosphereColumn {
   const topPhiM = metresPerKelvin * integralK(lnTopPa, lnSurfacePa);
   if (!(topPhiM < referenceRadiusM)) {
     throw new RangeError(
-      `the column is not bound: its geopotential height reaches R_ref = ${referenceRadiusM} m below p = ${surfacePa * COLUMN_TOP_PRESSURE_RATIO} Pa`,
+      `the column is not bound: its geopotential height reaches R_ref = ${referenceRadiusM} m below p = ${topPa} Pa`,
     );
   }
-  const lnLevels = levelLogPressures(lnSurfacePa, tropopause);
+  const levels = withAddedLevels(
+    levelLogPressures(lnSurfacePa, input.topPa === undefined ? null : lnTopPa, tropopause),
+    addedPa,
+  );
+  const lnLevels = levels.lnPa;
   const last = lnLevels.length - 1;
   const altitudesM = new Float64Array(lnLevels.length);
   const pressuresPa = new Float64Array(lnLevels.length);
@@ -757,8 +1005,9 @@ export function hydrostaticColumn(input: ColumnInput): AtmosphereColumn {
   const relative = new Float64Array(lnLevels.length);
   const surfaceK = profileTemperatureK(profile, surfacePa);
   for (const [i, lnPa] of lnLevels.entries()) {
+    const askedPa = levels.askedPa[i] ?? Number.NaN;
     const pressurePa =
-      i === 0 ? surfacePa : i === last ? surfacePa * COLUMN_TOP_PRESSURE_RATIO : exp(lnPa);
+      i === 0 ? surfacePa : i === last ? topPa : Number.isNaN(askedPa) ? exp(lnPa) : askedPa;
     const temperatureK = profileTemperatureK(profile, pressurePa);
     altitudesM[i] = heightM(metresPerKelvin * integralK(lnPa, lnSurfacePa));
     pressuresPa[i] = pressurePa;

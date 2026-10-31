@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { GOLDEN_ENVELOPES, goldenEnvelope } from "../../test/envelopeProfileGolden";
 import {
   GOLDEN_STRUCTURES,
   type GoldenStructure,
@@ -577,6 +578,146 @@ describe("a column on P14.T24.e's published nodes (R08.T3.e)", () => {
       structure.surfaceK,
       structure.surfacePa / (K_B * structure.surfaceK),
     ]);
+  });
+});
+
+/**
+ * A golden envelope's column, a gas giant's from 10⁴ bar up to 10⁻² Pa at its own gravity on
+ * Jupiter's 1-bar radius, with levels added at `levelsPa`: H₂ with the golden's He ÷ H₂ of 0.15.
+ */
+function envelopeColumn(
+  name: "jupiter" | "hot_jupiter",
+  levelsPa: ReadonlyArray<number> = [],
+): ColumnInput {
+  const { profile } = goldenEnvelope(name);
+  return {
+    surfacePa: 1e9,
+    topPa: 1e-2,
+    levelsPa,
+    temperature: profile,
+    meanMolarMassGPerMol: 0.87 * 2.016 + 0.13 * 4.003,
+    referenceGravityMS2: profile.gravityMS2,
+    referenceRadiusM: 71_492e3,
+  };
+}
+
+describe("temperatureAt over P14.T24.d's envelopes (R08.T16.a)", () => {
+  it("reads the sim's golden: six envelopes, their nodes and levels", () => {
+    expect(
+      GOLDEN_ENVELOPES.map(({ name, profile, levels }) => [
+        name,
+        profile.nodes.length,
+        levels.length,
+      ]),
+    ).toEqual([
+      ["jupiter", 17, 15],
+      ["saturn", 19, 15],
+      ["uranus", 17, 15],
+      ["neptune", 18, 15],
+      ["sub_neptune", 17, 15],
+      ["hot_jupiter", 17, 15],
+    ]);
+  });
+
+  it.each(GOLDEN_ENVELOPES.map((e) => [e.name, e] as const))(
+    "gives the sim's temperature at every level of the golden's %s above 0 Pa, bit for bit",
+    (_, { profile, levels }) => {
+      // temperatureAt refuses 0 Pa, where the sim's grey profile gives its skin.
+      const above = levels.filter(({ pressurePa }) => pressurePa > 0);
+      expect(above.map(({ pressurePa }) => temperatureAt(profile, pressurePa))).toEqual(
+        above.map(({ temperatureK }) => temperatureK),
+      );
+    },
+  );
+
+  it.each(GOLDEN_ENVELOPES.map((e) => [e.name, e] as const))(
+    "is continuous at the golden %s's join and nodes",
+    (_, { profile }) => {
+      let worst = 0;
+      for (const { pressurePa, temperatureK } of profile.nodes) {
+        for (const side of [1 - 1e-12, 1 + 1e-12]) {
+          worst = Math.max(
+            worst,
+            relative(temperatureAt(profile, pressurePa * side), temperatureK),
+          );
+        }
+      }
+      expect(worst).toBeLessThan(1e-9);
+    },
+  );
+
+  it.each<[string, ColumnInput]>([
+    ["the golden Jupiter's envelope", envelopeColumn("jupiter")],
+    ["the golden hot Jupiter's envelope", envelopeColumn("hot_jupiter")],
+  ])("integrates the hydrostatic equation as steps in ln p do, to 1e-9, for %s", (_, input) => {
+    expect(worstAgainstSteps(input)).toBeLessThan(1e-9);
+  });
+
+  const JUPITER = goldenEnvelope("jupiter").profile;
+  it.each<[string, TemperatureProfile]>([
+    ["its nodes in descending order", { ...JUPITER, nodes: JUPITER.nodes.toReversed() }],
+    ["one node", { ...JUPITER, nodes: JUPITER.nodes.slice(0, 1) }],
+    ["an n of 0.5", { ...JUPITER, grey: { ...JUPITER.grey, opticalDepthExponent: 0.5 } }],
+    ["a γ of 1.5", { ...JUPITER, grey: { ...JUPITER.grey, opacityRatio: 1.5 } }],
+    ["an f of 0", { ...JUPITER, grey: { ...JUPITER.grey, redistributionFactor: 0 } }],
+    ["a negative T_int", { ...JUPITER, internalK: -1 }],
+    ["a g of 0", { ...JUPITER, gravityMS2: 0 }],
+  ])("refuses the golden Jupiter's envelope with %s", (_, profile) => {
+    expect(() => temperatureAt(profile, 1e5)).toThrow(RangeError);
+  });
+});
+
+describe("a column to a top of its own, with added levels (R08.T16.a)", () => {
+  const asked = [6.414_977_329_982_213e4, 6.414_977_329_982_213e4 * (1 + 1e-7), 1.080_774e4];
+
+  it("ends at its top and lays a level at each pressure asked, exactly", () => {
+    const column = hydrostaticColumn(envelopeColumn("jupiter", asked));
+    expect([column.pressuresPa[0], column.pressuresPa.at(-1)]).toEqual([1e9, 1e-2]);
+    expect(asked.map((p) => column.pressuresPa.includes(p))).toEqual([true, true, true]);
+  });
+
+  it("keeps its levels no wider than COLUMN_INTERVALS' over a span of 10⁷", () => {
+    const column = hydrostaticColumn(envelopeColumn("jupiter"));
+    const widest = Math.log(1 / COLUMN_TOP_PRESSURE_RATIO) / COLUMN_INTERVALS;
+    let worst = 0;
+    for (let i = 1; i < column.pressuresPa.length; i += 1) {
+      worst = Math.max(
+        worst,
+        Math.log((column.pressuresPa[i - 1] ?? Number.NaN) / (column.pressuresPa[i] ?? Number.NaN)),
+      );
+    }
+    expect(worst).toBeLessThanOrEqual(widest * (1 + 1e-12));
+    expect(column.altitudesM.every((h, i) => i === 0 || h > (column.altitudesM[i - 1] ?? 0))).toBe(
+      true,
+    );
+  });
+
+  it("lays an asked level in place of an even one within 10⁻⁹ of it in ln p, exactly", () => {
+    const even = hydrostaticColumn(envelopeColumn("jupiter"));
+    const at = even.pressuresPa[700] ?? Number.NaN;
+    const column = hydrostaticColumn(envelopeColumn("jupiter", [at * (1 + 1e-10)]));
+    expect(column.pressuresPa).toHaveLength(even.pressuresPa.length);
+    expect(column.pressuresPa[700]).toBe(at * (1 + 1e-10));
+    expect(column.altitudesM.every((h, i) => i === 0 || h > (column.altitudesM[i - 1] ?? 0))).toBe(
+      true,
+    );
+  });
+
+  it("lays no asked level within 10⁻⁹ in ln p of its top or its datum, nor one asked twice", () => {
+    const even = hydrostaticColumn(envelopeColumn("jupiter"));
+    const column = hydrostaticColumn(
+      envelopeColumn("jupiter", [1e-2 * (1 + 1e-10), 1e9 * (1 - 1e-10), 5e4, 5e4]),
+    );
+    expect(column.pressuresPa).toHaveLength(even.pressuresPa.length + 1);
+    expect([column.pressuresPa[0], column.pressuresPa.at(-1)]).toEqual([1e9, 1e-2]);
+  });
+
+  it.each<[string, ColumnInput]>([
+    ["a top below its datum", { ...envelopeColumn("jupiter"), topPa: 2e9 }],
+    ["a level below its datum", envelopeColumn("jupiter", [2e9])],
+    ["a level above its top", envelopeColumn("jupiter", [1e-3])],
+  ])("refuses %s", (_, input) => {
+    expect(() => hydrostaticColumn(input)).toThrow(RangeError);
   });
 });
 

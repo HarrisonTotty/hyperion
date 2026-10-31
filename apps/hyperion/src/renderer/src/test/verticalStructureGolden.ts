@@ -32,7 +32,10 @@ function fromBits(hex: string): number {
 }
 
 /** A body's nodes or levels, by index, as the golden lists them. */
-function indexed(entries: ReadonlyMap<string, number>, list: string): ReadonlyArray<ProfileNode> {
+export function indexed(
+  entries: ReadonlyMap<string, number>,
+  list: string,
+): ReadonlyArray<ProfileNode> {
   const nodes: ProfileNode[] = [];
   for (let i = 0; ; i += 1) {
     const at = `${list}[${String(i).padStart(2, "0")}]`;
@@ -45,10 +48,19 @@ function indexed(entries: ReadonlyMap<string, number>, list: string): ReadonlyAr
   }
 }
 
-/** The golden's bodies, in its order, each with its declared segment count checked. */
-function parsed(text: string): ReadonlyArray<GoldenStructure> {
+/** A golden body's values by key, its `0x` bits read as doubles and its counts as numbers. */
+export interface GoldenBody {
+  readonly name: string;
+  readonly entries: ReadonlyMap<string, number>;
+  /** A value the body must have. */
+  readonly scalar: (key: string) => number;
+  /** Its nodes, checked against its `segments`. */
+  readonly nodes: ReadonlyArray<ProfileNode>;
+}
+
+/** A profile golden's bodies, in its order, each with its declared segment count checked. */
+export function goldenBodies(text: string): ReadonlyArray<GoldenBody> {
   const bodies = new Map<string, Map<string, number>>();
-  const segments = new Map<string, number>();
   for (const line of text.split("\n")) {
     const match = /^(\w+)\.(\S+) = (\S+)/u.exec(line);
     if (match === null) {
@@ -57,11 +69,7 @@ function parsed(text: string): ReadonlyArray<GoldenStructure> {
     const [, name = "", key = "", value = ""] = match;
     const entries = bodies.get(name) ?? new Map<string, number>();
     bodies.set(name, entries);
-    if (value.startsWith("0x")) {
-      entries.set(key, fromBits(value));
-    } else if (key === "segments") {
-      segments.set(name, Number(value));
-    }
+    entries.set(key, value.startsWith("0x") ? fromBits(value) : Number(value));
   }
   return [...bodies].map(([name, entries]) => {
     const scalar = (key: string): number => {
@@ -72,9 +80,16 @@ function parsed(text: string): ReadonlyArray<GoldenStructure> {
       return value;
     };
     const nodes = indexed(entries, "node");
-    if (nodes.length !== (segments.get(name) ?? Number.NaN) + 1) {
+    if (nodes.length !== scalar("segments") + 1) {
       throw new Error(`the golden's ${name} lists ${nodes.length} nodes against its segments`);
     }
+    return { name, entries, scalar, nodes };
+  });
+}
+
+/** The golden's bodies, in its order. */
+function parsed(text: string): ReadonlyArray<GoldenStructure> {
+  return goldenBodies(text).map(({ name, entries, scalar, nodes }) => {
     return {
       name,
       surfacePa: scalar("surface_pressure_pa"),
