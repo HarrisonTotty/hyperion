@@ -436,11 +436,7 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///   `with_molten_decks`: the molten refractories' and salts' stand-in index files and the molten
 ///   salts' densities;
 /// - the passes' superlinear root, `SECANT_ROOT_VERSION` (P14.T51.l), at `PassRoot::Secant`
-///   through `with_pass_root`: a bracketed body's secant steps, a detected 2-cycle its own bracket;
-/// - the member lag, `MEMBER_LAG_VERSION` (P14.T56.g's rule for a rocky belt's member), at
-///   `MemberLagRules::Members` through `with_member_lag`: a belt member with no given bulk
-///   lagged where its solved bulk is ice and its zero-albedo temperature lies above the melting
-///   point.
+///   through `with_pass_root`: a bracketed body's secant steps, a detected 2-cycle its own bracket.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 24's) is not
@@ -450,10 +446,8 @@ pub fn admit_free_floating_hosts_in_this_process() {
 pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::passes::{PassRoot, with_pass_root};
     use crate::planetary::hooks::cold_traps::with_rough_plains;
-    use crate::planetary::system::member_lag::{MemberLagRules, with_member_lag};
     use crate::substance::aerosol::{MoltenDecksRules, with_molten_decks};
     use hyperion_surface::cold_trap::PlainsModel;
-    let run = move || with_member_lag(MemberLagRules::Members, run);
     let run = move || with_rough_plains(PlainsModel::RayTraced, run);
     let run = move || with_molten_decks(MoltenDecksRules::Molten, run);
     with_pass_root(PassRoot::Secant, run)
@@ -814,23 +808,6 @@ mod tests {
         assert_eq!(PassRoot::in_force(), PassRoot::Halvings);
     }
 
-    /// The member lag's switch (P14.T56.g's rule for a rocky belt's member): in force inside 25's
-    /// helper, held outside it and where a test sets it back.
-    #[test]
-    fn the_member_lag_s_hold_is_in_force_inside_25_s_helper_alone() {
-        use crate::planetary::system::member_lag::{MemberLagRules, with_member_lag};
-        assert_eq!(MemberLagRules::in_force(), MemberLagRules::Held);
-        assert_eq!(
-            with_every_25_hold(MemberLagRules::in_force),
-            MemberLagRules::Members
-        );
-        assert_eq!(
-            with_every_25_hold(|| with_member_lag(MemberLagRules::Held, MemberLagRules::in_force)),
-            MemberLagRules::Held
-        );
-        assert_eq!(MemberLagRules::in_force(), MemberLagRules::Held);
-    }
-
     /// 26's deck profile's switch (P14.T52.g): in force inside 26's helper, held outside it, inside
     /// 25's and where a test sets it back.
     #[test]
@@ -877,20 +854,15 @@ mod tests {
         assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
     }
 
-    /// 26's switch, the zonal search's Z₀ (R09.T13.i): in force inside 26's helper, with 25's
-    /// holds, held outside it and where a test sets it back.
+    /// 26's switch, the zonal search's Z₀ (R09.T13.i): in force inside 26's helper, not inside
+    /// 25's, and held outside them and where a test sets it back.
     #[test]
     fn the_z0_branch_is_in_force_inside_26_s_helper_alone() {
         use crate::planetary::surface::steps::climate::{Z0BranchRules, with_z0_branch};
-        use crate::planetary::system::member_lag::MemberLagRules;
         assert_eq!(Z0BranchRules::in_force(), Z0BranchRules::Held);
         assert_eq!(
             with_every_26_hold(Z0BranchRules::in_force),
             Z0BranchRules::Kept
-        );
-        assert_eq!(
-            with_every_26_hold(MemberLagRules::in_force),
-            MemberLagRules::Members
         );
         assert_eq!(
             with_every_25_hold(Z0BranchRules::in_force),

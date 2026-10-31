@@ -560,8 +560,8 @@ pub(crate) enum GivenLag {
 
 /// Whether a body with no [`GivenBulk`] takes [`GivenLag::AboveMelting`]'s verdict over the ice
 /// bulk its composition solve gives it: P14.T56.g's rule for a rocky belt's member whose solved
-/// bulk is ice, held at generator version 25
-/// ([`MEMBER_LAG_VERSION`](crate::planetary::system::member_lag::MEMBER_LAG_VERSION)).
+/// bulk is ice, from generator version 25
+/// ([`member_solved_lag`](crate::planetary::system::member_lag::member_solved_lag)).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum SolvedLag {
     /// No lag: a planet's, and to version 24 every body's with no given bulk.

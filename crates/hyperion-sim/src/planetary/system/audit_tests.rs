@@ -64,7 +64,6 @@ use crate::planetary::hooks::structure::VerticalStructure;
 use crate::planetary::hooks::surface::night_floor;
 use crate::planetary::moons::regular::WATER_DENSITY;
 use crate::planetary::record::{BulkProperties, Modelled};
-use crate::planetary::system::member_lag::member_lag_in_force;
 use crate::planetary::system::moon_ice::HOT_ICE_LIMIT;
 use crate::planetary::system::planet_lag::planet_lag_in_force;
 use crate::substance::Element;
@@ -624,8 +623,7 @@ impl AuditBody {
         // An icy belt's member is asked the lag; from 25 any other member whose solved bulk is ice
         // (`member_lag`).
         let asked = icy_member_ice(case.body).is_some()
-            || (member_lag_in_force()
-                && SurfaceMaterial::of(&case.derived.fractions()) == SurfaceMaterial::Ice);
+            || SurfaceMaterial::of(&case.derived.fractions()) == SurfaceMaterial::Ice;
         // From 26 an airless planet over a hot ice bulk takes the lag (`planet_lag`): its lagged
         // derivation is airless, its bulk ice and its T0 hot, as its bare one was.
         let airless_ice_planet = planet_lag_in_force()
