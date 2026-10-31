@@ -491,7 +491,7 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 ///
 /// - the substellar deck of a world locked 1:1, `LOCKED_CLIMATE_VERSION` (P14.T24.j), at
 ///   `LockedClimateRules::Deck` through `with_locked_climate`: its column's deck albedo and locked
-///   greenhouse over open water, which its record and its passes' steps read.
+///   greenhouse over open water, which its record and its passes' steps read;
 /// - a molten body's surface on its published air, `MELT_OXYGEN_VERSION` (P14.T53.g), at
 ///   `MeltOxygenRules::Published` through `with_melt_oxygen`.
 /// - a free-floating brown dwarf's planets, `SUBSTELLAR_HOSTS_VERSION` (P14.T27.a), at
@@ -526,6 +526,9 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - the passes' Aitken step, `AITKEN_STEP_VERSION` (P14.T54.b.l's cost lever), at
 ///   `PassStep::Aitken` through `with_pass_step`: a pass reading Aitken's Δ² extrapolation once
 ///   three plain passes in a row show linear convergence, under the own residual's stop.
+/// - a solid body's supercritical envelope's, `SUPERCRITICAL_ENVELOPE_VERSION` (P14.T53.f), at
+///   `SupercriticalEnvelopeRules::Modelled` through `with_supercritical_envelope`: its envelope
+///   section's model, which nothing else reads.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
@@ -544,6 +547,9 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hosts::substellar::{
         RoguePlanetRules, SubstellarHostRules, with_rogue_planets, with_substellar_hosts,
     };
+    use crate::planetary::system::envelope::{
+        SupercriticalEnvelopeRules, with_supercritical_envelope,
+    };
     use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
     use crate::substance::helmholtz::{CompressionRules, with_compression};
     let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
@@ -559,6 +565,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_pass_stop(PassStop::OwnResidual, run);
     let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
     let run = move || with_pass_step(PassStep::Aitken, run);
+    let run = move || with_supercritical_envelope(SupercriticalEnvelopeRules::Modelled, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 

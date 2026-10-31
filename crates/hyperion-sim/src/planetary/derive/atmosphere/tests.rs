@@ -6823,6 +6823,92 @@ fn under_every_25_hold_a_quarter_water_world_inside_the_runaway_limit_is_a_steam
     assert_same_bits(air.partial_pressures().of(Gas::Water).value(), 0.0);
 }
 
+/// P14.T53.f on part 3's steam worlds, under every 26 hold: an Earth inside the runaway limit with
+/// a hundredth of its mass in water, and the plan's quarter-water Earth, each take their steam
+/// envelope's model (`system::envelope::supercritical_envelope_of`) on their published air, H₂O,
+/// its profile meeting the published surface, monotone in pressure, and every figure finite. The
+/// hundredth's 11.6 kbar of water lies inside Turbet et al. 2020's grid, so its transit radius's
+/// inflation is modelled; the quarter's, some 380 kbar, beyond it, so its is not. A temperate
+/// Earth's air, which no reservoir hides, is refused.
+#[test]
+fn under_every_26_hold_part_three_s_steam_worlds_take_their_envelope_s_model() {
+    use crate::planetary::hooks::envelope_atmosphere::supercritical::tests::assert_monotone;
+    use crate::planetary::record::Modelled;
+    use crate::planetary::system::envelope::{
+        DeriveEnvelopeError, SupercriticalOf, supercritical_envelope_of,
+    };
+    use crate::planetary::testing::with_every_26_hold;
+    for (share, inside_the_grid) in [(0.01, true), (0.25, false)] {
+        let inputs = wet_runaway_earth(share * EARTH_MASS_KG, 0.3, 300.0);
+        let (air, envelope) = with_every_26_hold(|| {
+            let air = atmosphere(&inputs);
+            let g = MetresPerSecondSquared::new(
+                GRAVITATIONAL_CONSTANT * inputs.mass.value() / math::powi(inputs.radius.value(), 2),
+            );
+            let envelope = supercritical_envelope_of(&SupercriticalOf {
+                air: &air,
+                radius: inputs.radius,
+                gravity: g,
+                equilibrium_temperature: inputs.equilibrium,
+                stellar_flux: WattsPerSquareMetre::from(inputs.flux),
+            });
+            (air, envelope)
+        });
+        let envelope = envelope.expect("a steam envelope's model");
+        let atmosphere = envelope.atmosphere();
+        let profile = atmosphere.profile();
+        let surface = air.surface_pressure().unwrap();
+        eprintln!(
+            "{share} of its mass in water: {:?} at {:.1} K under {:.1} bar; T_int {:.2} K, join \
+             {:.3} bar, the adiabat's last node {:.1} bar at {:.1} K, {} decks, not formed {:?}, \
+             inflation {:?}",
+            air.published_state(),
+            air.surface_temperature().value(),
+            surface.value() / PASCALS_PER_BAR,
+            atmosphere.internal_temperature().value(),
+            profile.join_pressure().value() / PASCALS_PER_BAR,
+            profile.nodes().last().unwrap().pressure().value() / PASCALS_PER_BAR,
+            profile.nodes().last().unwrap().temperature().value(),
+            atmosphere.decks().len(),
+            atmosphere.not_formed(),
+            envelope.transit_radius_inflation(),
+        );
+        assert_eq!(air.published_state(), SurfaceState::SteamEnvelope);
+        assert_eq!(envelope.supercritical(), Some(Gas::Water.substance()));
+        assert_eq!(envelope.abundances(), None);
+        assert_monotone(profile, surface);
+        let at_surface = profile.temperature_at(surface).value();
+        assert!(
+            (at_surface / air.surface_temperature().value() - 1.0).abs() < 1e-9,
+            "{at_surface}"
+        );
+        match envelope.transit_radius_inflation() {
+            Some(Modelled::Ok(z)) => {
+                assert!(inside_the_grid, "{share}: {z:?}");
+                assert!(z.value().is_finite() && z.value() > 0.0, "{z:?}");
+            }
+            Some(Modelled::NotModelled) => assert!(!inside_the_grid, "{share}"),
+            None => panic!("a supercritical envelope states its inflation"),
+        }
+    }
+    // A temperate Earth's air hides no surface: its model is refused, never invented.
+    let earth = earth_inputs(255.0, Insolation::Habitable);
+    let refused = with_every_26_hold(|| {
+        let air = atmosphere(&earth);
+        supercritical_envelope_of(&SupercriticalOf {
+            air: &air,
+            radius: earth.radius,
+            gravity: MetresPerSecondSquared::new(9.82),
+            equilibrium_temperature: earth.equilibrium,
+            stellar_flux: WattsPerSquareMetre::from(earth.flux),
+        })
+    });
+    assert!(
+        matches!(refused, Err(DeriveEnvelopeError::NoSupercriticalReservoir)),
+        "{refused:?}"
+    );
+}
+
 /// The plan's test: an Earth with Earth's water inside the runaway limit about the Sun loses its
 /// oceans as today, its escape's capacity some ten oceans over its history: its atmosphere is the
 /// same to the bit with part 3 and without.

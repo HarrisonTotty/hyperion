@@ -8204,6 +8204,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
     (P14.T53.b parts 2 and 3).
   - _Files:_ `planetary/record.rs`, `planetary/system.rs`, the protocol's `BodyEnvelopeDto`, the
     client's envelope rows.
+  - _Built_ 2026-10-31, held at 26 (`SUPERCRITICAL_ENVELOPE_VERSION`): Risks, "Deviations in
+    P14.T53.f, as built".
 - **P14.T53.g A molten body's surface on its published air** (behind `MELT_OXYGEN_VERSION` = 26
   with a tripwire; decision-p14-t53a-thick-co2 §11.2's ruled follow-up, after 24, behind its own
   hold; it missed 25's list, so it rides 26).
@@ -33388,3 +33390,23 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - For 26's bump: no golden moves (the census's golden systems hold no crossing); restate
     `hooks/aerosols/tests.rs`'s `under_every_24_hold_t53c_s_thin_airs_are_stated` (item 33's
     world at 0.034 Pa, no record ×10 over its ice), which the tripwire names.
+- **Deviations in P14.T53.f, as built (lane p14-t53f, 2026-10-31).** Held at 26, not 25's train,
+  which it missed (`system::envelope::SUPERCRITICAL_ENVELOPE_VERSION`; `with_supercritical_envelope`).
+  - _Profile (lean, 2026-10-31):_ `ADOPTED`'s n, γ, f, κ₁ from the published air's grey depth
+    above min(p_s, 100 bar); `T_int` bisected so the profile meets the published `T_s` at p_s.
+  - _Adiabat (lean, 2026-10-31):_ the published air's whole mixture's, not H₂O's alone, to 100 bar
+    or one segment past the join; T(p_s) extends its last segment, as the wire states.
+  - _Decks and gas (lean, 2026-10-31):_ P14.T52.c's loop from min(p_s, 10 kbar); the published
+    air's mole fractions, no quench; no hazes.
+  - _Inflation (lean, 2026-10-31):_ Turbet 2020 Eqs. 2–3 on the bulk's R and g, the water of the air
+    and `SupercriticalReservoir::beneath_the_air`; not modelled off their grid; sim record only.
+  - _Its check:_ against Turbet 2019's post-runaway Earths (0.1, 1, 100 oceans) within the fit's
+    10%, and Eqs. 2–3 to 10⁻¹²; not at the 2020 runs' own points, which the paper does not table.
+  - _Scope (lean, 2026-10-31):_ every condensable's envelope, moons' too; the client reads another
+    key as `SUPERCRITICAL <formula>` (`envelopeLabel`), its wording to the UX sign-off.
+  - _API:_ `Envelope::of_condensable`, `transit_radius_inflation()`, `abundances()` now `Option`;
+    `EnvelopeAtmosphere::supercritical`; `DeriveEnvelopeError::{NoSupercriticalReservoir, Supercritical}`.
+  - _26's movers_ (`under_every_26_hold_only_the_supercritical_envelopes_move_over_the_400`, by name):
+    of 6,742 bodies, the 21 under a supercritical envelope (8 H₂O, 7 O₂, 6 CH₄), envelopes alone.
+  - _No golden moves at 26:_ no golden system and no server golden holds one. The 8 steam envelopes
+    (part 3's 25 census had none) lie at 0.018–0.13 S⊕, off Turbet's grid: no inflation at 26.

@@ -791,6 +791,91 @@ fn the_39_under(rules: MeltOxygenRules) {
     assert!(seen.values().all(|&n| n == 3), "{seen:?}");
 }
 
+/// P14.T53.f over the guard's six of decision-p14-t53a-thick-co2 §11.1's nine water worlds
+/// ([`CLOSURE_JUMPS`]; the systems' three are `system::supercritical_envelope_tests`'), at all
+/// three times, under every 26 hold: each derived as the guard derives it, labelled a steam
+/// envelope by P14.T53.b part 3, takes its supercritical envelope's model on its derivation's own
+/// air, flux, radius, gravity and equilibrium temperature
+/// (`system::envelope::supercritical_envelope_of`): H₂O, every figure finite, its profile
+/// monotone in pressure and meeting its published surface, and no deck based at or above water's
+/// critical point. Each is stated.
+#[test]
+fn under_every_26_hold_the_guard_s_six_water_worlds_take_their_steam_envelope() {
+    use crate::planetary::hooks::envelope_atmosphere::supercritical::tests::{
+        assert_monotone, assert_no_deck_at_or_above_the_critical_point,
+    };
+    use crate::planetary::system::envelope::{SupercriticalOf, supercritical_envelope_of};
+    use crate::planetary::testing::with_every_26_hold;
+    use crate::units::WattsPerSquareMetre;
+    let six: std::collections::BTreeSet<&str> = CLOSURE_JUMPS
+        .iter()
+        .map(|&(id, _)| id)
+        .filter(|id| id.starts_with("42002cb2"))
+        .collect();
+    assert_eq!(six.len(), 6, "the guard's six");
+    let mut seen = std::collections::BTreeMap::<String, u32>::new();
+    with_every_26_hold(|| {
+        guard_walk(&mut |sample| {
+            let id = sample.id();
+            if !six.contains(id.as_str()) {
+                return;
+            }
+            let (body, hottest) = sample.derive().expect("each of the six is derived");
+            let air = body.atmosphere();
+            let envelope = supercritical_envelope_of(&SupercriticalOf {
+                air,
+                radius: Metres::from(body.radius()),
+                gravity: body.surface_gravity(),
+                equilibrium_temperature: body.equilibrium_temperature(),
+                stellar_flux: WattsPerSquareMetre::from(body.flux()),
+            });
+            eprintln!(
+                "{id} at {:+} yr: {}",
+                sample.years,
+                body_line(&body, hottest)
+            );
+            assert_eq!(air.published_state(), SurfaceState::SteamEnvelope, "{id}");
+            let envelope = envelope.unwrap_or_else(|error| panic!("{id}: {error}"));
+            eprintln!(
+                "  its envelope: T_int {:.2} K, join {:.3e} Pa, {} decks, not formed {:?}, \
+                 inflation {:?}",
+                envelope.atmosphere().internal_temperature().value(),
+                envelope.atmosphere().profile().join_pressure().value(),
+                envelope.atmosphere().decks().len(),
+                envelope.atmosphere().not_formed(),
+                envelope.transit_radius_inflation()
+            );
+            assert_eq!(
+                envelope.supercritical(),
+                Some(Gas::Water.substance()),
+                "{id}"
+            );
+            let atmosphere = envelope.atmosphere();
+            let surface = air.surface_pressure().expect("an air");
+            assert_monotone(atmosphere.profile(), surface);
+            assert_no_deck_at_or_above_the_critical_point(atmosphere);
+            let at_surface = atmosphere.profile().temperature_at(surface).value();
+            let t_s = air.surface_temperature().value();
+            assert!(
+                (at_surface / t_s - 1.0).abs() < 1e-9,
+                "{id}: {at_surface} K against {t_s} K"
+            );
+            for value in [
+                atmosphere.internal_temperature().value(),
+                atmosphere.irradiation_temperature().value(),
+                atmosphere.profile().join_pressure().value(),
+                atmosphere.mean_molar_mass_g_per_mol(),
+                atmosphere.heat_capacity_over_r(),
+            ] {
+                assert!(value.is_finite(), "{id}: {value}");
+            }
+            *seen.entry(id).or_default() += 1;
+        });
+    });
+    assert_eq!(seen.len(), 6, "{seen:?}");
+    assert!(seen.values().all(|&n| n == 3), "{seen:?}");
+}
+
 /// The census of the guard's samples that P14.T53.a's thick-air closure moves, with every 24
 /// hold in force (decision-p14-t53a-thick-co2 §7.5, the guard's 30,063 samples): each sample
 /// derived with the closure and with it lifted ([`without_thick_air`]), every one that differs

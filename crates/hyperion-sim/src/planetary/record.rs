@@ -29,7 +29,8 @@
 //! envelope (P14.T53.b part 2), the other way round (decision-p14-t35e-wire): a sub-Neptune's or a
 //! giant's envelope [`Section::Ok`] from generator version 24 where the generator models it
 //! ([`Envelope`], P14.T54.b.i), and [`Section::NotModelled`] below 24 and otherwise; a solid
-//! body's under a supercritical envelope not modelled until P14.T53.f. The hooks section,
+//! body's under a supercritical envelope not modelled until generator version 26, and from it its
+//! supercritical envelope's model (P14.T53.f). The hooks section,
 //! [`Hooks`], holds the body's detail seed
 //! (R09.T1.b): [`Section::Ok`] for a planet, moon or dwarf planet present at the record's time,
 //! and [`Section::NotApplicable`] for a ring, a belt, the halo and a body not present.
@@ -988,34 +989,48 @@ pub enum Biosphere {}
 /// The contents of an envelope section: a gas-envelope body's visible atmosphere (P14.T24.d's
 /// profile and internal heat, P14.T52.d's chemistry, decks, hazes and absorbers, on P14.T50.b's
 /// element abundances; wired by P14.T54.b.i), the section of the bodies whose surface section is
-/// [`Section::NotApplicable`] (P14.T48.e's gas-envelope split, decision-p14-t35e-wire §2.5).
+/// [`Section::NotApplicable`] (P14.T48.e's gas-envelope split, decision-p14-t35e-wire §2.5); or a
+/// solid body's supercritical envelope (P14.T53.f), its condensable's fluid over its ground.
 ///
 /// A gas-envelope body's envelope is [`Section::Ok`] from generator version 24 (to 23, not
 /// modelled) where the generator models it, and [`Section::NotModelled`] for an envelope that is
 /// not hydrogen-dominated (decision-p14-t24d-profile §4), one whose 1-bar or 10-mbar level is
 /// hotter than the chemistry's records, a host with no \[α/Fe\] of its own or no disc, and inputs a
 /// step refuses; a solid body's under a supercritical envelope (P14.T53.b part 2) is not
-/// modelled until P14.T53.f; every other body's is not applicable. Every value is the record's:
-/// the wire converts and computes none.
+/// modelled to generator version 25, and from 26 is its supercritical envelope (P14.T53.f) where
+/// the generator models it; every other body's is not applicable. Every value is the record's: the wire converts and computes none.
 ///
 /// Its atmosphere's modes are its decks' (each naming its deck's condensate, one of
 /// [`EnvelopeAtmosphere::decks`]), then its hazes' (each of its own material, which no deck
 /// condenses: the S₈ haze, soot, the ice giants' haze and the chromophore have no law aloft).
 ///
-/// Its abundances and atmosphere are held behind one box, so that every record's envelope section
-/// stays small whether or not it holds an envelope (552 bytes inline and 16 boxed, measured with
-/// `size_of` on x86-64; a record 2,920 bytes and 2,384).
+/// Its model is held behind one box, so that every record's envelope section stays small whether
+/// or not it holds an envelope (an H₂/He model measured 552 bytes inline against 16 boxed with
+/// `size_of` on x86-64, P14.T54.b.i; the section is now the box alone).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Envelope {
-    supercritical: Option<SubstanceId>,
     model: Box<EnvelopeModel>,
 }
 
-/// What an [`Envelope`] holds behind its box: its element abundances and its visible atmosphere.
+/// What an [`Envelope`] holds behind its box.
 #[derive(Debug, Clone, PartialEq)]
-struct EnvelopeModel {
-    abundances: EnvelopeAbundances,
-    atmosphere: EnvelopeAtmosphere,
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the model is boxed whole in its `Envelope`; the smaller variant, a supercritical \
+              envelope's, is the rarer"
+)]
+enum EnvelopeModel {
+    /// An H₂/He envelope's element abundances and visible atmosphere.
+    HydrogenHelium {
+        abundances: EnvelopeAbundances,
+        atmosphere: EnvelopeAtmosphere,
+    },
+    /// A supercritical envelope's condensable, visible atmosphere and transit radius's inflation.
+    Supercritical {
+        condensable: SubstanceId,
+        atmosphere: EnvelopeAtmosphere,
+        inflation: Modelled<Metres>,
+    },
 }
 
 impl Envelope {
@@ -1027,38 +1042,83 @@ impl Envelope {
         atmosphere: EnvelopeAtmosphere,
     ) -> Self {
         Self {
-            supercritical: None,
-            model: Box::new(EnvelopeModel {
+            model: Box::new(EnvelopeModel::HydrogenHelium {
                 abundances,
                 atmosphere,
             }),
         }
     }
 
-    /// The condensable whose supercritical envelope this is: `None` for an H₂/He envelope, every
-    /// envelope this generator models; P14.T53.f gives a steam envelope its condensable.
+    /// A solid body's supercritical envelope (P14.T53.f), the fluid of the condensable
+    /// `condensable` above its critical point over its ground, of visible atmosphere `atmosphere`
+    /// (`EnvelopeAtmosphere::supercritical`) and transit radius's inflation `inflation` (Turbet et
+    /// al. 2020's, for water alone).
     #[must_use]
-    pub const fn supercritical(&self) -> Option<SubstanceId> {
-        self.supercritical
+    pub(crate) fn of_condensable(
+        condensable: SubstanceId,
+        atmosphere: EnvelopeAtmosphere,
+        inflation: Modelled<Metres>,
+    ) -> Self {
+        Self {
+            model: Box::new(EnvelopeModel::Supercritical {
+                condensable,
+                atmosphere,
+                inflation,
+            }),
+        }
+    }
+
+    /// The condensable whose supercritical envelope this is: `None` for an H₂/He envelope, and from
+    /// generator version 26 a solid body's supercritical envelope's condensable (P14.T53.f), H₂O
+    /// for a steam envelope's.
+    #[must_use]
+    pub fn supercritical(&self) -> Option<SubstanceId> {
+        match &*self.model {
+            EnvelopeModel::HydrogenHelium { .. } => None,
+            EnvelopeModel::Supercritical { condensable, .. } => Some(*condensable),
+        }
     }
 
     /// Its element abundances by number relative to hydrogen (P14.T50.b), from the host's
     /// \[Fe/H\], \[α/Fe\], C/O and Mg/Si, its formation zone, its mass and bulk, its effective
     /// temperature (`T_eq`⁴ + `T_int`⁴)^¼ with its atmosphere's `T_int`, and its primordial He/H: the
     /// host star's own, fractionated by its escape (P14.T53.a), as its derivation carries it.
+    /// `None` for a supercritical envelope, whose gas is its published air's, not an H₂/He
+    /// envelope's elements.
     #[must_use]
-    pub fn abundances(&self) -> &EnvelopeAbundances {
-        &self.model.abundances
+    pub fn abundances(&self) -> Option<&EnvelopeAbundances> {
+        match &*self.model {
+            EnvelopeModel::HydrogenHelium { abundances, .. } => Some(abundances),
+            EnvelopeModel::Supercritical { .. } => None,
+        }
     }
 
-    /// Its visible atmosphere (P14.T52.d): its profile (P14.T24.d's Guillot profile joined to its
-    /// dry adiabat, whose [`grey`](crate::planetary::hooks::EnvelopeProfile::grey) parameters
-    /// give κ₁, n, γ and f), its internal and irradiation temperatures, its composition at 1 bar,
-    /// its decks with their modes, its hazes, its absorbers at 10 mbar and its condensables not
-    /// formed.
+    /// Its visible atmosphere: an H₂/He envelope's (P14.T52.d), its profile (P14.T24.d's Guillot
+    /// profile joined to its dry adiabat, whose
+    /// [`grey`](crate::planetary::hooks::EnvelopeProfile::grey) parameters give κ₁, n, γ and f),
+    /// its internal and irradiation temperatures, its composition at 1 bar, its decks with their
+    /// modes, its hazes, its absorbers at 10 mbar and its condensables not formed; or a
+    /// supercritical envelope's, the same members on its published air (P14.T53.f).
     #[must_use]
     pub fn atmosphere(&self) -> &EnvelopeAtmosphere {
-        &self.model.atmosphere
+        match &*self.model {
+            EnvelopeModel::HydrogenHelium { atmosphere, .. }
+            | EnvelopeModel::Supercritical { atmosphere, .. } => atmosphere,
+        }
+    }
+
+    /// The inflation of its transit radius above the bulk section's radius, by Turbet et al.'s
+    /// fitted steam atmosphere's thickness (2020, A&A 638, A41, Eqs. 2–3; P14.T53.f), for a
+    /// supercritical envelope: [`Modelled::Ok`] for a water envelope inside the fit's grid, finite
+    /// and positive, and [`Modelled::NotModelled`] outside it and for any other condensable's.
+    /// `None` for an H₂/He envelope, whose radius is the bulk section's own. The bulk section's
+    /// radius stays the bulk's, so that nothing that reads the radius moves.
+    #[must_use]
+    pub fn transit_radius_inflation(&self) -> Option<Modelled<Metres>> {
+        match &*self.model {
+            EnvelopeModel::HydrogenHelium { .. } => None,
+            EnvelopeModel::Supercritical { inflation, .. } => Some(*inflation),
+        }
     }
 }
 
@@ -1490,8 +1550,9 @@ impl BodyRecord {
     /// The envelope (P14.T48.e's gas-envelope split): for a present sub-Neptune or giant,
     /// [`Section::Ok`] from generator version 24 where the generator models it ([`Envelope`],
     /// P14.T54.b.i) and [`Section::NotModelled`] below 24 and where it does not; for a solid body
-    /// under a supercritical envelope (from 24, P14.T53.b part 2) [`Section::NotModelled`] until
-    /// P14.T53.f; and [`Section::NotApplicable`] for every other body.
+    /// under a supercritical envelope (from 24, P14.T53.b part 2) [`Section::NotModelled`] to
+    /// generator version 25, and from 26 its supercritical envelope (P14.T53.f) where the generator
+    /// models it; and [`Section::NotApplicable`] for every other body.
     ///
     /// Exactly one of it and the [`surface`](Self::surface) applies to a present body with a bulk
     /// section.

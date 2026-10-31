@@ -225,7 +225,10 @@ use crate::units::{
     SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, WattsPerSquareMetre, Years,
 };
 use air::{AirSurface, record_aerosols, record_structure};
-use envelope::{DeriveEnvelopeError, EnvelopeOf, record_envelope};
+use envelope::{
+    DeriveEnvelopeError, EnvelopeOf, SupercriticalOf, record_envelope,
+    record_supercritical_envelope,
+};
 use modifiers::{
     ModifierCase, ModifierStar, ModifierSurface, PlanetField, RecordPrimary, planet_field,
     record_modifiers, weathering_case,
@@ -703,6 +706,26 @@ impl Body {
             Part::Planet(_) | Part::Moon(_) | Part::Member(_) => 0,
         }
     }
+}
+
+/// The envelope section of a present solid body under a supercritical envelope (P14.T53.b part 2), a
+/// planet's, a member's or a moon's, whose derivation's published air and flux are `air` and
+/// `flux` and whose published bulk is `bulk`: its supercritical envelope from generator version 26
+/// (`envelope::record_supercritical_envelope`, P14.T53.f), on that air and flux and its bulk's
+/// radius, gravity and equilibrium temperature, and not modelled until then.
+#[must_use]
+fn supercritical_section(
+    air: &Atmosphere,
+    flux: EarthFluxes,
+    bulk: &BulkProperties,
+) -> Section<Envelope> {
+    record_supercritical_envelope(&SupercriticalOf {
+        air,
+        radius: Metres::from(bulk.radius()),
+        gravity: bulk.surface_gravity(),
+        equilibrium_temperature: bulk.equilibrium_temperature(),
+        stellar_flux: WattsPerSquareMetre::from(flux),
+    })
 }
 
 /// The photometry of a present body whose bulk is `bulk`, whose last atmosphere pass is
@@ -2555,7 +2578,9 @@ impl PlanetarySystem {
     /// air is `air`: where its class has a solid surface and, from generator version 24, no
     /// supercritical envelope hides it ([`has_surface_section`]; P14.T53.b part 2), its surface
     /// ([`surface_section`](Self::surface_section)) and the envelope not applicable; otherwise
-    /// the envelope's section, not modelled, and no surface (P14.T48.e).
+    /// no surface (P14.T48.e) and the envelope's section: a solid body's under a supercritical
+    /// envelope its model from generator version 26 ([`supercritical_section`], P14.T53.f), and
+    /// not modelled until then and for every other class.
     fn surface_or_envelope(
         &self,
         body: &Body,
@@ -2565,6 +2590,9 @@ impl PlanetarySystem {
     ) -> (Section<Surface>, Section<Envelope>) {
         if has_surface_section(bulk.class(), air, bulk.surface_gravity()) {
             (self.surface_section(body, of, spun), Section::NotApplicable)
+        } else if bulk.class().has_solid_surface() {
+            let section = supercritical_section(air, of.flux(), bulk);
+            (Section::NotApplicable, section)
         } else {
             (Section::NotApplicable, Section::NotModelled)
         }
@@ -2575,8 +2603,9 @@ impl PlanetarySystem {
     /// [`surface_or_envelope`](Self::surface_or_envelope) gave it, `envelope` (P14.T54.b.i): a
     /// sub-Neptune's or a giant's, which the tag leaves not modelled, is its visible atmosphere
     /// (`envelope::record_envelope`); every other tag stands, so that a solid body's under a
-    /// supercritical envelope stays not modelled (P14.T53.b part 2, until P14.T53.f). The query's
-    /// network is built at the first envelope it records ([`Epoch::network`]).
+    /// supercritical envelope is the tag's own (P14.T53.b part 2; from generator version 26 its
+    /// model, P14.T53.f). The query's network is built at the first envelope it records
+    /// ([`Epoch::network`]).
     #[must_use]
     fn envelope_section(
         &self,
@@ -5727,6 +5756,18 @@ enum SurfaceOf<'a> {
     },
 }
 
+impl SurfaceOf<'_> {
+    /// The flux the body receives from its hosts at the time, averaged over its orbit, its
+    /// derivation's.
+    #[must_use]
+    const fn flux(&self) -> EarthFluxes {
+        match self {
+            Self::Body { derived, .. } => derived.flux(),
+            Self::Moon { derived, .. } => derived.flux(),
+        }
+    }
+}
+
 /// What a body's surface conditions and global figures read of the body ([`published_surface`]):
 /// its sky, its bulk section, its interior, and what its crater contract reads with its host's
 /// impactor sources (`None` where this version does not compute them).
@@ -6830,5 +6871,7 @@ pub(crate) mod planet_lag;
 mod present_state_tests;
 mod rogue;
 pub(crate) mod small_bodies;
+#[cfg(test)]
+mod supercritical_envelope_tests;
 #[cfg(test)]
 pub(crate) mod tests;

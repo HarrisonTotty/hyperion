@@ -217,6 +217,12 @@
 //!   depleted in a window of roughly 1,750–1,930 K of `T_eq` where they should stay (Pelletier et
 //!   al. 2023, Nature 619, 491, find V and VO near protosolar on WASP-76b with its Ti depleted).
 //!
+//! # A solid body's supercritical envelope
+//!
+//! [`supercritical`] reuses this chain's profile, decks and assembly on a solid body's published
+//! air above its condensable's critical point, with no network (P14.T53.f, from generator version
+//! 26), and states a water envelope's transit radius.
+//!
 //! # On the record from 24
 //!
 //! This module is pure. The record calls it (`system::envelope`, P14.T54.b.i); to generator
@@ -269,6 +275,7 @@ use crate::units::{
     Watts, Years,
 };
 
+pub mod supercritical;
 #[cfg(test)]
 mod tests;
 
@@ -993,7 +1000,7 @@ impl EnvelopeAtmosphere {
     }
 
     /// The atmosphere's parts from its profile, its gas at 1 bar (`deep`) and at 10 mbar (`upper`),
-    /// and its decks (`clouds`).
+    /// and its decks (`clouds`), with a starlit envelope's photochemistry.
     fn assemble(
         inputs: &EnvelopeAtmosphereInputs<'_>,
         metallicity: f64,
@@ -1001,6 +1008,46 @@ impl EnvelopeAtmosphere {
         deep: &[(SubstanceId, f64)],
         upper: &[(SubstanceId, f64)],
         clouds: &Condensation,
+    ) -> Result<Self, DeriveEnvelopeAtmosphereError> {
+        let hazes = |profile: &EnvelopeProfile,
+                     upper_gas: &[(SubstanceId, f64)],
+                     upper_molar_mass_g_per_mol: f64,
+                     decks: &[AerosolDeck]| {
+            if inputs.starlit {
+                let air = UpperAtmosphere {
+                    equilibrium_temperature: inputs.equilibrium_temperature,
+                    stratosphere_temperature: profile.skin_temperature(),
+                    metallicity,
+                    gravity: inputs.gravity,
+                    molar_mass_g_per_mol: upper_molar_mass_g_per_mol,
+                };
+                photochemistry(&air, profile, upper_gas, decks)
+            } else {
+                Ok((Vec::new(), None))
+            }
+        };
+        Self::assembled(profile, deep, upper, clouds, inputs.gravity, hazes)
+    }
+
+    /// The atmosphere's parts from its profile, its gas at 1 bar and at 10 mbar (`deep` and
+    /// `upper`), its decks (`clouds`) and its gravity, with its hazes' modes and its photochemical
+    /// SO₂ from `hazes`, of its profile, its trimmed 10-mbar gas with that gas's mean molar mass (g
+    /// mol⁻¹) and its decks.
+    fn assembled(
+        profile: EnvelopeProfile,
+        deep: &[(SubstanceId, f64)],
+        upper: &[(SubstanceId, f64)],
+        clouds: &Condensation,
+        gravity: MetresPerSecondSquared,
+        hazes: impl FnOnce(
+            &EnvelopeProfile,
+            &[(SubstanceId, f64)],
+            f64,
+            &[AerosolDeck],
+        ) -> Result<
+            (Vec<AerosolMode>, Option<Absorber>),
+            DeriveEnvelopeAtmosphereError,
+        >,
     ) -> Result<Self, DeriveEnvelopeAtmosphereError> {
         let drawn = drawn_vapours(clouds);
         let mut composition = composition_of(deep, clouds)?;
@@ -1024,18 +1071,8 @@ impl EnvelopeAtmosphere {
                 modes.push(AerosolMode::of_settling(mode, deck.base_temperature())?);
             }
         }
-        let (hazes, sulphur_dioxide) = if inputs.starlit {
-            let air = UpperAtmosphere {
-                equilibrium_temperature: inputs.equilibrium_temperature,
-                stratosphere_temperature: profile.skin_temperature(),
-                metallicity,
-                gravity: inputs.gravity,
-                molar_mass_g_per_mol: upper_molar_mass_g_per_mol,
-            };
-            photochemistry(&air, &profile, &upper_gas, &decks)?
-        } else {
-            (Vec::new(), None)
-        };
+        let (hazes, sulphur_dioxide) =
+            hazes(&profile, &upper_gas, upper_molar_mass_g_per_mol, &decks)?;
         let mut haze_optical_depth = 0.0;
         for haze in &hazes {
             // A haze whose optics are not modelled (none of the rules' materials, today) carries its
@@ -1048,7 +1085,7 @@ impl EnvelopeAtmosphere {
         let absorbers = absorbers(
             &upper_gas,
             upper_molar_mass_g_per_mol,
-            inputs.gravity,
+            gravity,
             sulphur_dioxide,
         )?;
         Ok(Self {

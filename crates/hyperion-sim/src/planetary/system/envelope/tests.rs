@@ -183,6 +183,8 @@ fn reason(error: &DeriveEnvelopeError) -> &'static str {
             | E::Absorber(_)
             | E::Mixture,
         ) => "a step's refusal",
+        DeriveEnvelopeError::NoSupercriticalReservoir => "no supercritical reservoir",
+        DeriveEnvelopeError::Supercritical(_) => "the supercritical model's refusal",
     }
 }
 
@@ -274,7 +276,9 @@ fn check_envelope(at: &str, envelope: &Envelope, of: &EnvelopeOf) {
     }
     assert!(split >= decks.len(), "{at}: every deck has a mode");
     assert_same_bits(atmosphere.haze_optical_depth(), haze_tau);
-    let abundances = envelope.abundances();
+    let abundances = envelope
+        .abundances()
+        .expect("an H₂/He envelope's abundances");
     assert_same_bits(
         abundances.per_hydrogen(Element::He),
         of.primordial_helium_per_hydrogen * abundances.helium_depletion(),
@@ -668,7 +672,10 @@ fn the_table_s_jupiter_on_the_record_follows_the_probe() {
         profile.join_pressure().value() / 1e5,
         profile.photosphere_pressure().value() / 1e5,
         of.primordial_helium_per_hydrogen,
-        jupiter.abundances().helium_depletion(),
+        jupiter
+            .abundances()
+            .expect("an H₂/He envelope's abundances")
+            .helium_depletion(),
         jupiter.atmosphere().decks().len(),
         jupiter.atmosphere().modes().len(),
         jupiter.atmosphere().haze_optical_depth(),
@@ -931,7 +938,9 @@ fn the_envelopes_are_stated() {
             // T24.d's blend reaches the giants below 0.414 M_J (`giant_share`): the bless
             // note's 0.15–0.3 M_J and the blended 0.3–0.414 M_J alike.
             if (0.15..0.414).contains(&m_j) {
-                let abundances = envelope.abundances();
+                let abundances = envelope
+                    .abundances()
+                    .expect("a giant's H₂/He envelope's abundances");
                 let bulk_t_eff = bulk
                     .effective_temperature()
                     .unwrap_or(of.equilibrium_temperature);
@@ -1450,4 +1459,32 @@ fn under_every_25_hold_the_molten_decks_envelope_is_the_same_twice() {
             .any(|m| m.material() == row("Fe") && m.optical_depth().is_ok()),
         "its Fe deck takes a τ"
     );
+}
+
+/// P14.T53.f is held until the 25 → 26 bump: the rules in force are version 25's, a solid body's
+/// envelope under a supercritical envelope not modelled, and the tests' switch reaches the model.
+#[test]
+fn the_supercritical_envelope_is_held_only_until_the_26_bump() {
+    assert!(
+        crate::GENERATOR_VERSION < SUPERCRITICAL_ENVELOPE_VERSION,
+        "the 25 → 26 bump puts P14.T53.f's supercritical envelope on the record (decision-p14-t53b-\
+         part3 §7; main, 2026-10-30): delete `SUPERCRITICAL_ENVELOPE_VERSION`, \
+         `SupercriticalEnvelopeRules` with its `Held` arm and `supercritical_envelope_in_force`'s \
+         guard in `record_supercritical_envelope`, the tests' `with_supercritical_envelope`, its \
+         switch in `with_every_26_hold` (and the helper, if no other 26 hold is left), and this \
+         test"
+    );
+    assert_eq!(
+        SupercriticalEnvelopeRules::in_force(),
+        SupercriticalEnvelopeRules::Held
+    );
+    assert!(!supercritical_envelope_in_force());
+    assert!(with_supercritical_envelope(
+        SupercriticalEnvelopeRules::Modelled,
+        supercritical_envelope_in_force
+    ));
+    assert!(!supercritical_envelope_in_force());
+    assert!(crate::planetary::testing::with_every_26_hold(
+        supercritical_envelope_in_force
+    ));
 }

@@ -48,8 +48,9 @@
 //!   [`SurfaceState::SteamEnvelope`], water above its critical point with no interface
 //!   (decision-bump-plan-after-22 R1.1; Turbet et al. 2020, A&A 638, A41). Its photometry is a
 //!   runaway's under Venus's deck, stated, and its figure's datum the liquid-like fluid's top
-//!   (`Datum::SolidSurface`); its record's envelope section stays not modelled until P14.T53.f
-//!   models it. Another condensable's envelope keeps its state, under part 2's tags.
+//!   (`Datum::SolidSurface`); its record's envelope section stays not modelled until generator
+//!   version 26, where P14.T53.f models it. Another condensable's envelope keeps its state, under
+//!   part 2's tags.
 //! - **The steam** a runaway keeps: its water lost to space only up to its escape's capacity over
 //!   its history ([`runaway_oxygen_timed`]'s loss; Luger and Barnes 2015, Astrobiology 15, 119),
 //!   the rest airborne.
@@ -159,6 +160,7 @@ pub(crate) struct SupercriticalReservoir {
     isochore_pressure: Pascals,
     melting_pressure: Option<Pascals>,
     share: f64,
+    beneath_the_air: Pascals,
 }
 
 impl SupercriticalReservoir {
@@ -197,6 +199,7 @@ impl SupercriticalReservoir {
             isochore_pressure: isochore,
             melting_pressure: melting,
             share,
+            beneath_the_air: Pascals::ZERO,
         })
     }
 
@@ -234,6 +237,7 @@ impl SupercriticalReservoir {
             isochore_pressure: column.isochore_pressure(),
             melting_pressure: column.melting_pressure(),
             share,
+            beneath_the_air: column.fluid(),
         })
     }
 
@@ -277,6 +281,16 @@ impl SupercriticalReservoir {
     #[must_use]
     pub(crate) const fn share(&self) -> f64 {
         self.share
+    }
+
+    /// The liquid-like fluid's weight beneath the air, M g ÷ 4πR², which the air's partial pressures
+    /// do not hold: a partition's reservoir's below its surface pressure (P14.T53.b part 3,
+    /// [`of_column`](Self::of_column)); 0 under part 2 alone ([`of`](Self::of)), whose column is
+    /// the air's own partial pressure. A supercritical envelope's fluid is the air's own partial
+    /// pressure and this (P14.T53.f).
+    #[must_use]
+    pub(crate) const fn beneath_the_air(&self) -> Pascals {
+        self.beneath_the_air
     }
 
     /// Whether the reservoir hides the body's surface: its share at least

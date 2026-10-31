@@ -35,6 +35,7 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::time::Instant;
 
+use super::envelope::supercritical_envelope_in_force;
 use super::tests::{
     CLOSURE_HOTHOUSE_BODY, EnvelopeBody, GOLDEN_SYSTEMS_SEED, HOTHOUSE_BODY, LOOK72_OCEANS, SEED,
     envelope_tag_faults, golden_contexts, limit_now, look72_audit_contexts, look72_galaxy,
@@ -1049,7 +1050,8 @@ impl AuditBody {
             let composition = atmosphere.composition();
             let total: f64 = composition.iter().map(|&(_, x)| x).sum();
             let nodes = profile.nodes();
-            if envelope.supercritical().is_some()
+            // A solid body's supercritical envelope is modelled from 26 alone (P14.T53.f).
+            if (envelope.supercritical().is_some() && !supercritical_envelope_in_force())
                 || !positive(atmosphere.internal_temperature().value())
                 || !positive(atmosphere.irradiation_temperature().value())
                 || !positive(join)
@@ -1064,7 +1066,9 @@ impl AuditBody {
                 || (total - 1.0).abs() >= 1e-9
                 || composition.iter().any(|&(_, x)| x.is_nan() || x < 0.0)
                 || !non_negative(atmosphere.haze_optical_depth())
-                || !non_negative(envelope.abundances().per_hydrogen(Element::He))
+                || envelope
+                    .abundances()
+                    .is_some_and(|abundances| !non_negative(abundances.per_hydrogen(Element::He)))
             {
                 faults.push(format!(
                     "an envelope out of range: T_int {:?}, T_irr {:?}, join {join} Pa, \

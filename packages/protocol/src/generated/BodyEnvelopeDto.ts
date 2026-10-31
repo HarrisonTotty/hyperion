@@ -11,16 +11,21 @@ import type { ProfileNodeDto } from "./ProfileNodeDto";
  * A gas-envelope body's visible atmosphere (plan 14, P14.T24.d with P14.T52.d on P14.T50.b's
  * abundances; the simulation's `record::Envelope`): its internal heat and irradiation, its grey
  * profile joined to its dry adiabat, its composition at 1 bar, its condensate decks with their
- * modes, its photochemical hazes, its absorbers at 10 mbar and its condensables not formed.
+ * modes, its photochemical hazes, its absorbers at 10 mbar and its condensables not formed. Or,
+ * from generator version 26, a solid body's supercritical envelope (P14.T53.f), its
+ * condensable's fluid above its critical point over its ground (`supercritical`), the same
+ * members on its published air.
  *
  * Sent `ok` from P14.T54.b's bump at generator version 24 where the generator models it, and
  * `not_modelled` otherwise: below 24; for an envelope that is not hydrogen-dominated, or whose
  * 1-bar or 10-mbar level is hotter than the chemistry's records (6,000 K); for a body whose host
  * has no \[α/Fe\] of its own or no disc to place its formation, or whose inputs a step of the
- * chain refuses; and, from 24, for a solid body under a supercritical envelope (P14.T53.b part 2,
- * and from 25 part 3's steam envelope) until P14.T53.f. `not_applicable` for every other body,
- * whose surface section is the applicable one. Its shape is P14.T54.b.i's, fixed from 24's first
- * send.
+ * chain refuses; for a solid body under a supercritical envelope (P14.T53.b part 2, and from 25
+ * part 3's steam envelope) from 24 to 25; and from 26 for such a body whose inputs the model
+ * refuses, its published surface one its profile cannot state among them. `not_applicable` for every other body, whose surface section is the
+ * applicable one. Its shape is P14.T54.b.i's, fixed from 24's first send; a supercritical
+ * envelope's transit radius's inflation (Turbet et al. 2020) is the simulation's record's, not
+ * sent.
  */
 export type BodyEnvelopeDto = { 
 /**
@@ -28,9 +33,10 @@ export type BodyEnvelopeDto = {
  * an H₂/He envelope, a giant's or a sub-Neptune's (decision-absurd-states-24 R2.3).
  *
  * A solid body under a supercritical envelope (P14.T53.b parts 2 and 3, a steam envelope among
- * them) is sent its envelope `not_modelled`, so no build sends this member other than `null`
- * before P14.T53.f gives that envelope its model and this its value. Always present on an `ok`
- * envelope, as `null` where none.
+ * them) is sent its envelope `not_modelled` to generator version 25, so no build sends this
+ * member other than `null` before 26; from 26 P14.T53.f gives that envelope its model and this
+ * its value, `H2O` for a steam envelope's and the hiding reservoir's condensable for any
+ * other's. Always present on an `ok` envelope, as `null` where none.
  */
 supercritical: string | null, 
 /**
@@ -39,6 +45,9 @@ supercritical: string | null,
  * law, which alone gives it below 0.3 Jupiter masses. Below 0.414 Jupiter masses it is
  * therefore not the bulk section's (`T_eff`⁴ − `T_eq`⁴)^¼, whose `effective_temperature_k` is
  * the record's own.
+ * On a supercritical envelope (P14.T53.f) it is the one at which the profile meets the
+ * published mean surface temperature at the surface pressure: the net flux the published
+ * surface implies through the deep fluid.
  */
 internal_temperature_k: number, 
 /**
@@ -48,7 +57,9 @@ internal_temperature_k: number,
  */
 irradiation_temperature_k: number, 
 /**
- * The grey profile's parameters.
+ * The grey profile's parameters. On a supercritical envelope (P14.T53.f) n, γ and f are an
+ * H₂/He envelope's, and `κ_th` the one at which the profile's optical depth equals the
+ * published air's grey depth above 100 bar, or above its surface where it is thinner.
  */
 profile: GuillotProfileDto, 
 /**
@@ -72,6 +83,8 @@ adiabat: Array<ProfileNodeDto>,
  * speciates the envelope at 1 bar and at its absorbers' 10 mbar only, and states no profile
  * between or below them; above a deck its condensate's vapour is that deck's
  * `vapour_mole_fraction_above`, by its law.
+ * On a supercritical envelope (P14.T53.f) it is the published air's gas, with no chemistry,
+ * trimmed by its decks in the same way.
  */
 composition: Array<GasShareDto>, 
 /**
@@ -101,6 +114,8 @@ decks: Array<AerosolModeDto>,
  * list is empty for an envelope no star lights. No other haze is modelled: a cool giant's
  * stratospheric haze beyond these rules is not computed, so a lit envelope's list is these
  * four rules' output, not a clear upper air.
+ * The rules are H₂/He envelopes': a supercritical envelope's list is empty (P14.T53.f), its
+ * hazes not modelled.
  */
 hazes: Array<AerosolModeDto>, 
 /**

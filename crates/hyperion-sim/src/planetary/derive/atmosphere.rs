@@ -2267,7 +2267,8 @@ pub enum SurfaceState {
     /// a runaway's (Venus's deck, 0.76, near Pluriel, Marcq and Turbet 2019's ~0.80 under full
     /// cloud to some 1,300 K and 0.75 at 1,500 K, for 200 bar of H₂O and 100 bar of CO₂), and
     /// refuses it where a gas envelope is refused. Its record
-    /// has no surface section: its envelope's applies, not modelled until P14.T53.f, and the
+    /// has no surface section: its envelope's applies, not modelled until generator version 26
+    /// (P14.T53.f), and the
     /// record's surface never holds this state. Its figure's datum is the liquid-like fluid's top.
     /// Another condensable's supercritical envelope keeps its state.
     SteamEnvelope,

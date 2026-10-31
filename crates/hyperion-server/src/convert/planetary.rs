@@ -1856,7 +1856,8 @@ mod tests {
     /// `not_applicable`; a giant's and a sub-Neptune's surface is not applicable and its envelope
     /// `ok` or not modelled, the record's (P14.T54.b.i's envelope, from generator version 24); a
     /// solid planet's under a supercritical envelope (P14.T53.b part 2) its surface not applicable
-    /// and its envelope not modelled; and every record carries the envelope.
+    /// and its envelope not modelled, or from generator version 26 its supercritical envelope `ok`
+    /// with its condensable (P14.T53.f); and every record carries the envelope.
     #[test]
     fn every_present_planet_has_exactly_one_of_a_surface_and_an_envelope() {
         let (mut solid, mut sub_neptunes, mut giants) = (0, 0, 0);
@@ -1876,13 +1877,19 @@ mod tests {
                 wire.id
             );
             // A solid class under a supercritical envelope (P14.T53.b part 2) has its surface not
-            // applicable and its envelope not modelled: the test that decides it is the
-            // simulation's own, so the tag pair alone stands for it here.
-            let hidden = class.has_solid_surface()
-                && wire.surface == SectionDto::NotApplicable
-                && *envelope == SectionDto::NotModelled;
+            // applicable and its envelope not modelled, or from 26 its supercritical envelope
+            // (P14.T53.f): the test that decides it is the simulation's own, so the tag pair alone
+            // stands for it here.
+            let hidden = class.has_solid_surface() && wire.surface == SectionDto::NotApplicable;
             if hidden {
-                assert_eq!(sim.envelope(), &Section::NotModelled, "{}", wire.id);
+                match (sim.envelope(), envelope) {
+                    (Section::NotModelled, SectionDto::NotModelled) => {}
+                    (Section::Ok(sim), SectionDto::Ok(dto)) => {
+                        assert!(sim.supercritical().is_some(), "{}", wire.id);
+                        assert!(dto.supercritical.is_some(), "{}", wire.id);
+                    }
+                    (sim, dto) => panic!("{}: {sim:?} sent as {dto:?}", wire.id),
+                }
             } else if class.has_solid_surface() {
                 assert!(matches!(wire.surface, SectionDto::Ok(_)), "{}", wire.id);
                 solid += 1;
