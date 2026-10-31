@@ -169,8 +169,20 @@ impl ShareFigures {
 
     /// The globular tubes' share of the halo, inside [`INSIDE_LY`].
     #[must_use]
-    fn globular_share(&self) -> f64 {
+    pub(crate) fn globular_share(&self) -> f64 {
         self.globular_solar_masses / self.budget_solar_masses
+    }
+
+    /// The globular term, the dwarfs' cold mass before any scaling, and the halo's budget, all M☉,
+    /// for P10.T12's budget test (`statistics`).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn parts_solar_masses(&self) -> [f64; 3] {
+        [
+            self.globular_solar_masses,
+            self.dwarfs_solar_masses,
+            self.budget_solar_masses,
+        ]
     }
 
     /// The physical share: the globular tubes and the dwarfs over the budget.

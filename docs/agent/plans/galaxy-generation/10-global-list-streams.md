@@ -802,6 +802,9 @@ re-validation, issue #123, 2026-10-27, point 3).
 
 ### P10.T12 Statistical tests and cost figures
 
+_Built but for the budget's second half (lane `p10-t9`, step 4, 2026-10-31, at `GENERATOR_VERSION`
+24); see "P10.T12 as built" in Risks._
+
 Slow tests. **Tubes over time:** for the three test streams, 10⁴ members each at t = ±1,000 yr lie
 within 4 widths plus 0.01 ly of the centre line, have moved 0.3–0.8 ly along it, and the error from
 neglected curvature is under 10⁻⁴ ly. **Budgets:** expected members inside 65,000 ly of every
@@ -2272,3 +2275,17 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
   - _Tests._ `hyperion-server`'s `tests/global_list.rs`, and slow:
     `convert::global_answers::tests::global_features_lists_every_entry_and_the_accreted_progenitors`
     and `a_stream_s_track_is_its_tube_s_knots_thinned_to_128_an_arm`.
+- **P10.T12 as built (lane `p10-t9`, step 4, 2026-10-31, at `GENERATOR_VERSION` 24).** Test-only;
+  no output moved. The slow tests are `global_list::statistics`' four, by name, the millennium's on
+  three threads and the others on eight (`.config/nextest.toml`'s slow profile). Every figure is
+  pinned as measured; the misses are findings (the lane's outbox).
+  - _Still to do._ The budget's second half, the sampled halo field plus the discrete members in
+    eight volumes, waits for T3.d.b's call, T10.b's registration and P09.T2.c's `field_factor`.
+  - _The tripwire (research-leans-10)._ `option_a_drops_a_bounded_share_over_the_sweep` stands in
+    for the shells' containment over a sample of seeds; the widening is not raised (option C,
+    rejected). Over the first 8 sweep galaxies (a tube's spray costs some 340 CPU-seconds a
+    galaxy), it bounds the members outside their shells (`DROPPED_BOUNDS`), of a galaxy's and of
+    one tube's members placed. It enumerates only the along cells whose cut can reach past the
+    shell, by the triangle inequality about each segment's chord (`dropped_of`).
+  - _For the bump._ Nothing reads these tests' figures; a change to the spray, the tubes or the
+    share re-pins them by name.

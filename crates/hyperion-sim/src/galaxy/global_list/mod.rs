@@ -101,6 +101,8 @@ pub mod share;
 pub mod source;
 pub mod spec;
 pub mod spray;
+#[cfg(test)]
+mod statistics;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod tube;

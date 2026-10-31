@@ -227,6 +227,18 @@ threads-required = 4
 filter = "package(hyperion-sim) & test(=sky::census::cell::tests::the_star_bound_holds_for_realised_systems)"
 threads-required = 4
 
+# P10.T12's budget sweep, its drawn galaxy's tubes and option A's tripwire build galaxies and spray
+# their streams on eight threads of their own (`global_list::statistics`'s `THREADS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(/^galaxy::global_list::statistics::(the_discrete_share_s_budgets_hold_over_the_sweep|a_drawn_galaxy_s_tubes_and_contrast_keep_their_measured_figures|option_a_drops_a_bounded_share_over_the_sweep)$/)"
+threads-required = 8
+
+# P10.T12's millennium test sprays its three test streams on three threads of their own
+# (`global_list::statistics`'s `SPRAY_THREADS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=galaxy::global_list::statistics::the_test_streams_members_keep_to_their_tubes_over_a_millennium)"
+threads-required = 3
+
 # P11.T17.c's verdicts against the engine check their pairs on eight threads of their own.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & test(=stellar::binary::light::tests::the_pair_verdicts_hold_against_the_engine)"
