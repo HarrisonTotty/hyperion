@@ -26,6 +26,7 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, Population};
 use crate::id::Layer;
 use crate::rng::Seed;
+use crate::stellar::brief::BriefModel;
 use crate::stellar::events::{STAR_EVENTS_VERSION, StarEventRules};
 use crate::stellar::system::{StarSummary, SystemStars};
 use crate::time::UniverseTime;
@@ -220,7 +221,7 @@ fn the_composed_arm_gives_the_same_output_twice_and_cold() {
 /// 10⁻¹² mag, the composed L and R keep the track's `T_eff`, and so does the summary's state; a
 /// flare brightens the dwarf's by its own light. The summary's own `M_V` is the track's to the bit
 /// with an event in progress or none, and with none the summary carries no event light; and the
-/// system's brief is the primary's track values to the bit.
+/// system's brief is the primary's track values to the bit, and the range brief the held arm's.
 #[test]
 fn the_composed_m_v_follows_the_event_light_and_the_brief_keeps_the_track_s() {
     use crate::events::{EventSeries, tags};
@@ -231,6 +232,12 @@ fn the_composed_m_v_follows_the_event_light_and_the_brief_keeps_the_track_s() {
     let bits = |m: Option<crate::units::Magnitudes>| m.map(|m| float_bits(m.value()));
     let check_brief = |stars: &SystemStars, summary: &StarSummary, t: UniverseTime| {
         let brief = stars.brief_at(t).expect("formed");
+        // The range brief is the held galaxy's, as the system's is.
+        let record = stars.record();
+        assert_eq!(
+            BriefModel::new(composed(), record).brief_at(t),
+            BriefModel::new(held(), record).brief_at(t)
+        );
         let luminosity = summary.state().luminosity().value();
         assert_eq!(
             brief.log_luminosity().map(|l| float_bits(l.value())),

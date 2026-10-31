@@ -1067,15 +1067,16 @@ mod tests {
             Some(sim.state().effective_temperature().value().to_bits())
         );
         // M_V follows the flare's light at the track's bolometric correction.
-        assert_eq!(
-            wire.absolute_v_mag.map(f64::to_bits),
-            effects.absolute_magnitude_v().map(|m| m.value().to_bits())
-        );
+        let sent = wire.absolute_v_mag.expect("a dwarf's M_V is sent");
+        let composed = effects
+            .absolute_magnitude_v()
+            .expect("the flare's M_V")
+            .value();
+        let track = sim.absolute_magnitude_v().expect("a dwarf's M_V").value();
+        assert_eq!(sent.to_bits(), composed.to_bits());
         assert!(
-            wire.absolute_v_mag
-                < sim
-                    .absolute_magnitude_v()
-                    .map(hyperion_sim::units::Magnitudes::value)
+            sent < track,
+            "the flare's M_V {sent} against the track's {track}"
         );
         let quiet = (0..24 * 30)
             .map(at)
@@ -1084,10 +1085,15 @@ mod tests {
         let answer = answer_at(quiet);
         let summary = stars.summary_at(quiet);
         assert_eq!(
-            answer.stars[0].absolute_v_mag.map(f64::to_bits),
+            answer.stars[0]
+                .absolute_v_mag
+                .expect("a dwarf's M_V is sent")
+                .to_bits(),
             summary.stars()[0]
                 .absolute_magnitude_v()
-                .map(|m| m.value().to_bits()),
+                .expect("a dwarf's M_V")
+                .value()
+                .to_bits(),
             "with no event in progress M_V is the track's"
         );
         let wire = serde_json::to_value(&answer.stars[0]).expect("a summary serialises");
@@ -1133,9 +1139,19 @@ mod tests {
             wire.teff_k.map(f64::to_bits),
             Some(sim.state().effective_temperature().value().to_bits())
         );
-        assert_eq!(
-            wire.absolute_v_mag.map(f64::to_bits),
-            effects.absolute_magnitude_v().map(|m| m.value().to_bits())
+        let sent = wire.absolute_v_mag.expect("a giant's M_V is sent");
+        let composed = effects
+            .absolute_magnitude_v()
+            .expect("the pulse's M_V")
+            .value();
+        assert_eq!(sent.to_bits(), composed.to_bits());
+        assert_ne!(
+            sent.to_bits(),
+            sim.absolute_magnitude_v()
+                .expect("a giant's M_V")
+                .value()
+                .to_bits(),
+            "the pulse moves M_V"
         );
         let events = wire.active_events.as_ref().expect("sent from 26");
         assert!(

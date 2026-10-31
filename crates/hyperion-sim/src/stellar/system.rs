@@ -1254,6 +1254,7 @@ impl StarSummary {
 
     /// The light and spin the star's active events make at the time summarised
     /// ([`EventEffects`], P06.T28.g), or `None` where none changes them or they are not composed.
+    ///
     /// [`state`](Self::state) stays the track's (design note 14), as does the brief.
     #[must_use]
     pub const fn event_effects(&self) -> Option<EventEffects> {
@@ -1799,8 +1800,7 @@ impl SystemStars {
 
     /// The stars of a catalogue entry of a binary class (plan 11, P11.T8.a) in the universe of
     /// `seed`: `record`'s system of the two stars of `hierarchy`, as `stars` model them on their
-    /// own, and the pair's
-    /// `timeline`, which the class builds from its marks
+    /// own, and the pair's `timeline`, which the class builds from its marks
     /// ([`BinaryTimeline::from_marks`](crate::stellar::binary::BinaryTimeline::from_marks)). The
     /// timeline gives both stars' states wherever the system reads them, as an evolved timeline
     /// does a grid pair's; the entry's history is its models'.

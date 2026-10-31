@@ -37,8 +37,9 @@
 //!   (P06.T28.e);
 //! - a thermal pulse scales the radius by √F, so that `T_eff` holds (P06.T28.f's lean);
 //! - `M_V` follows L at the track's bolometric correction, `M_V`(t) − 2.5 log₁₀(L ÷ L(t))
-//!   (research-leans-12 §3): exact for a thermal pulse, whose `T_eff` holds, and first-order for
-//!   a flare's, an outburst's or an eruption's light, which is not at the star's `T_eff`;
+//!   (research-leans-12 §3): exact for a thermal pulse, whose `T_eff` holds; for a flare's, an
+//!   outburst's or an eruption's light, which is not at the photosphere's colour, the bolometric
+//!   change alone ([`EventEffects::absolute_magnitude_v`] gives its error's sign and size);
 //! - a magnetar's bursts and giant flares carry their own mean luminosities, which are listed and
 //!   never added (P06.T28.c);
 //! - a pulsar's spin frequency is offset by its Crab-like glitches still recovering and its
@@ -324,11 +325,16 @@ impl EventEffects {
     }
 
     /// The absolute visual magnitude, mag, of the star with this [`luminosity`](Self::luminosity):
-    /// the track's `M_V` less 2.5 log₁₀(L ÷ L(t)), at the track's bolometric correction
-    /// (research-leans-12 §3), or `None` where the track's state has none. It is exact for a
-    /// thermal pulse, whose `T_eff` holds, and first-order for a flare's, an FU Orionis outburst's
-    /// or a giant eruption's light, which is not at the star's `T_eff`. A magnetar's listed
-    /// luminosities do not move it.
+    /// the track's `M_V` less 2.5 log₁₀(L ÷ L(t)), or `None` where the track's state has none.
+    ///
+    /// It is the bolometric change at the track's bolometric correction (research-leans-12 §3),
+    /// which takes the event light at the photosphere's colour. That is exact for a thermal pulse,
+    /// whose `T_eff` holds. The V change of light at another colour, x = ΔL ÷ L(t) at a correction
+    /// `BC_ev`, is −2.5 log₁₀[1 + x 10^(0.4 (`BC_ev` − `BC_*`))], so this understates the
+    /// brightening of a hot flare on a K or M dwarf (by up to an order of magnitude in V flux at
+    /// M5), of an FU Orionis outburst's F–G disc light and of an eruption's cooler
+    /// pseudo-photosphere on a hotter star, and slightly overstates a flare's on an F or G dwarf.
+    /// A magnetar's listed luminosities do not move it.
     #[must_use]
     pub const fn absolute_magnitude_v(&self) -> Option<Magnitudes> {
         self.absolute_magnitude_v
@@ -1397,16 +1403,18 @@ mod tests {
 
     /// The digest (`f64_digest`) of the assembly's output for the representative stars: each one's
     /// listing on body 1 over its span (kind, onset since the epoch and duration, s), and the light
-    /// its first event makes a third of the way through (L, R and the spin offset). Blessed natively
-    /// on x86-64; nothing on the record reads it before 26, so it pins the composition's form and
-    /// its sum's order until the bump.
-    const ASSEMBLY_DIGEST: u64 = 0xca86_9a57_b5bc_0867;
+    /// its first event makes a third of the way through, and the first two of its events that run
+    /// together a second into the later's (L, R, `M_V`, or −99 for none, and the spin offset).
+    /// Blessed natively on x86-64; nothing on the record reads it before 26, so it pins the
+    /// composition's form and its sum's order until the bump turns it into goldens.
+    const ASSEMBLY_DIGEST: u64 = 0xb36f_5e94_68a7_a8e7;
 
     /// The assembly's listing order and composed light are pinned by their bits
     /// ([`ASSEMBLY_DIGEST`]): a rewrite of the sum's order or form changes them.
     #[test]
     fn the_assembly_s_output_is_pinned() {
         let mut values = Vec::new();
+        let mut overlaps = Vec::new();
         for (name, star) in kinds() {
             let events = StarEvents::of(&star, SEED, body(1));
             let mut listed = Vec::new();
@@ -1416,17 +1424,32 @@ mod tests {
                 values.push(event.onset().since_epoch().as_seconds_f64());
                 values.push(event.duration().as_seconds_f64());
             }
-            if let Some(first) = listed.first() {
-                let t = into(first, 1.0 / 3.0);
+            let together = listed.windows(2).find_map(|pair| {
+                let t = pair[1].onset().checked_add(Span::from_seconds(1))?;
+                (pair[0].is_active_at(t) && pair[1].is_active_at(t)).then_some(t)
+            });
+            if together.is_some() {
+                overlaps.push(name);
+            }
+            let times = listed.first().map(|first| into(first, 1.0 / 3.0));
+            for t in times.into_iter().chain(together) {
                 if let Some(effects) = events.at(t, &star.state_at(t).unwrap()).1 {
                     values.extend([
                         effects.luminosity().value(),
                         effects.radius().value(),
+                        effects
+                            .absolute_magnitude_v()
+                            .map_or(-99.0, Magnitudes::value),
                         effects.spin_frequency_offset_hz(),
                     ]);
                 }
             }
         }
+        // Two flares, and two recovering glitches, run together.
+        assert!(
+            overlaps.contains(&"flaring dwarf") && overlaps.contains(&"young pulsar"),
+            "{overlaps:?}"
+        );
         let digest = hyperion_testkit::golden::f64_digest(&values);
         assert_eq!(
             digest,

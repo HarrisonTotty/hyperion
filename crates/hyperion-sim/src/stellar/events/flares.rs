@@ -629,7 +629,12 @@ impl FlareModel<'_> {
     /// # Panics
     ///
     /// In debug builds, if `series` is not of [`tags::STAR_FLARE`].
-    pub fn flares_active_at(&self, series: &EventSeries, t: UniverseTime, out: &mut Vec<Flare>) {
+    pub(crate) fn flares_active_at(
+        &self,
+        series: &EventSeries,
+        t: UniverseTime,
+        out: &mut Vec<Flare>,
+    ) {
         debug_assert_eq!(
             series.tag(),
             tags::STAR_FLARE,
