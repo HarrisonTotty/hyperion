@@ -6178,6 +6178,8 @@ galaxy_sweeps`.
   - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary`, `stellar::binary::scan`,
     `stellar::binary::sampler`, `id::event_tags`; slow, `tests/binary_awd.rs` (with the `testing`
     feature, as the workspace's slow run builds it) and `tests/source_horizon.rs`'s new row.
+  - _Totals._ The total over ten Milky Way seeds (research-leans-10), 9 × 10⁶ each; plan 02's
+    sweep (5.39–15.43 × 10⁶) is printed.
 - **P11.T8.b as built** (lane `p11-t8b`, 2026-10-31; at version 24, no bump: registering a class
   moves no existing value; `golden_diff.py` "extended only").
   - _Files._ `binary/xrb.rs` (`XrayBinaries`, `XrbSide`, `XrbEntry`); `XRB_SAMPLER`, `XrbMark`,

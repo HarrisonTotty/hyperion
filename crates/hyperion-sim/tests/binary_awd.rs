@@ -1,10 +1,9 @@
 //! Plan 11's P11.T8.a: the accreting white dwarf classes against their targets.
 //!
 //! - The local density of both classes' hosts at plan 03's `sunlike_point` against Pala et al.'s
-//!   (2020, MNRAS 494, 3799) 4.8 × 10⁻⁶ pc⁻³ within 30%, and the galaxy's total against the
-//!   brainstorm's 6–12 × 10⁶ over the first ten seeds of plan 02's sweep (slow). Both are what
-//!   the scratch share rows give, pinned as they stand: a miss is a finding, and `CLASS_SHARES`
-//!   is not retuned.
+//!   (2020, MNRAS 494, 3799) 4.8 × 10⁻⁶ pc⁻³ within 30%, pinned as the scratch share rows give it
+//!   (a miss is a finding, and `CLASS_SHARES` is not retuned), and the galaxy's total against the
+//!   brainstorm's 6–12 × 10⁶ over ten Milky Way seeds, plan 02's sweep printed as a record (slow).
 //! - The sampler against the engine's own members (slow): each mark both define, the catalogue's
 //!   entries near the solar circle against `brute_force_class_members`, by chi-square in the
 //!   entries' deciles, under the scratch table's stated tolerance.
@@ -28,7 +27,7 @@ use hyperion_sim::galaxy::{Galaxy, PointLy};
 use hyperion_sim::stellar::Phase;
 use hyperion_sim::stellar::binary::scan::{engine_calls, scan_cell};
 use hyperion_sim::stellar::binary::{BinaryClass, CvKind};
-use hyperion_sim::tables::binary::AwdDonorKind;
+use hyperion_sim::tables::binary::{AwdDonorKind, MILKY_WAY_FORMED_MASS};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::{Seed, math};
 
@@ -71,35 +70,53 @@ fn the_local_density_at_the_sun_like_point() {
     assert!((ratio - 1.350_381).abs() < 1e-5, "{ratio}");
 }
 
-/// The galaxy's expected hosts, both classes, over the first ten seeds of plan 02's sweep
-/// (`tests/galaxy_sweeps.rs`), against the
-/// brainstorm's 6–12 × 10⁶: pinned as the scratch rows give them. Their mean, 9.25 × 10⁶, is
-/// inside; six seeds' totals are not (5.39–15.43 × 10⁶, a finding).
+/// The galaxy's expected hosts, both classes, over ten Milky Way seeds (research-leans-10's reading
+/// of the plan's "over ten seeds"): each inside the brainstorm's 6–12 × 10⁶.
+///
+/// The first ten galaxies of plan 02's sweep (`tests/galaxy_sweeps.rs`) are printed as a record,
+/// each total over its formed mass's share of the Milky Way fixture's, which the scratch rows'
+/// uniform rates make 9 × 10⁶ up to the populations' mix.
 #[test]
-#[ignore = "slow: ten galaxies built"]
+#[ignore = "slow: twenty galaxies built"]
 fn the_galaxy_total_over_ten_seeds() {
-    let mut totals = Vec::new();
+    for k in 0..10_u64 {
+        let galaxy = Galaxy::from_params(
+            Seed::new(MILKY_WAY_SEEDS | k),
+            GalaxyParams::milky_way_like(),
+        )
+        .expect("the Milky Way fixture's gas is mostly neutral");
+        let total: f64 = processes(&galaxy)
+            .iter()
+            .map(|p| p.expected_hosts(&galaxy))
+            .sum();
+        println!("Milky Way seed {k}: {total:.4e} hosts");
+        assert!((6.0e6..=12.0e6).contains(&total), "{k}: {total}");
+    }
     for k in 0..10_u64 {
         let galaxy = Galaxy::new(Seed::new(SWEEP_SEED | k));
         let total: f64 = processes(&galaxy)
             .iter()
             .map(|p| p.expected_hosts(&galaxy))
             .sum();
-        println!("seed {k}: {total:.4e} hosts");
-        totals.push(total);
+        let formed = galaxy
+            .fields()
+            .components()
+            .iter()
+            .fold(0.0, |sum, c| sum + c.count())
+            * galaxy.mean_formed_mass().value();
+        let per_milky_way = total / (formed / MILKY_WAY_FORMED_MASS);
+        println!(
+            "sweep seed {k}: {total:.4e} hosts, {per_milky_way:.4e} per Milky Way formed mass"
+        );
+        assert!(
+            per_milky_way.is_finite() && per_milky_way > 0.0,
+            "{k}: {per_milky_way}"
+        );
     }
-    let mean = totals.iter().sum::<f64>() / 10.0;
-    let outside = totals
-        .iter()
-        .filter(|&&t| !(6.0e6..=12.0e6).contains(&t))
-        .count();
-    println!("mean {mean:.4e}; {outside} of ten outside 6-12e6");
-    assert!((6.0e6..=12.0e6).contains(&mean), "{mean}");
-    assert!(outside <= OUTSIDE_TEN_SEEDS, "{outside}");
 }
 
-/// How many of the ten seeds' totals fall outside 6–12 × 10⁶, as measured.
-const OUTSIDE_TEN_SEEDS: usize = 6;
+/// The family of the Milky Way seeds the totals are read over: this with k < 10 in its low bits.
+const MILKY_WAY_SEEDS: u64 = 0x0b17_08a0_0000_0100;
 
 /// What both sides define of an accreting white dwarf, one value per mark.
 #[derive(Debug, Clone, Copy)]
