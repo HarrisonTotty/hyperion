@@ -40,6 +40,7 @@ import type {
   HeightSourceSetting,
   HeightWorkerReply,
   HeightWorkerRequest,
+  HorizonLayerSetting,
   SigmaSurveySetting,
   SurfaceGroundReadout,
   SurfaceLineOfSight,
@@ -74,12 +75,12 @@ export const WASM_WEIGHTS_LAYER = { baked: 0, skipped: 1 } as const satisfies Re
 >;
 
 /**
- * The module's `HorizonLayer` enum values (`src/wasm.rs`'s `JsHorizonLayer`), by the body's weights
- * setting: the lit style bakes the horizon map with its weights, and the wireframe skips both
- * (R10.T8.b).
+ * The module's `HorizonLayer` enum values (`src/wasm.rs`'s `JsHorizonLayer`), by the body's horizon
+ * setting, else its weights setting: the lit style bakes the horizon map with its weights, and the
+ * wireframe skips both (R10.T8.b); the descent spike's A/B skips the map alone (R10.T15.b).
  */
 export const WASM_HORIZON_LAYER = { baked: 0, skipped: 1 } as const satisfies Record<
-  WeightsLayerSetting,
+  HorizonLayerSetting & WeightsLayerSetting,
   number
 >;
 
@@ -627,10 +628,10 @@ export class WorkerFields {
 
   /**
    * Bakes `key` of `source`'s body over its field (no extra skirt margin), with R10's layers, the
-   * horizon map with the weights ({@link WASM_HORIZON_LAYER}), and, where the bake made a maturity
-   * layer, its codes with the palette's nodes at the key's level (`TerrainLayers.maturity`,
-   * R10.T1.c's client half); `null` where the field cannot make it yet: none is held, or a
-   * surveyed vertex reads a cell still to come.
+   * horizon map with the weights unless the source skips it ({@link WASM_HORIZON_LAYER}), and,
+   * where the bake made a maturity layer, its codes with the palette's nodes at the key's level
+   * (`TerrainLayers.maturity`, R10.T1.c's client half); `null` where the field cannot make it yet:
+   * none is held, or a surveyed vertex reads a cell still to come.
    *
    * @throws Whatever the module throws for a key out of range.
    */
@@ -650,7 +651,7 @@ export class WorkerFields {
       WASM_VERTEX_PATH[settings.vertexPath],
       WASM_NORMAL_SCALE[settings.normals],
       WASM_WEIGHTS_LAYER[source.weights],
-      WASM_HORIZON_LAYER[source.weights],
+      WASM_HORIZON_LAYER[source.horizon ?? source.weights],
       0,
     );
     if (baked === undefined) {

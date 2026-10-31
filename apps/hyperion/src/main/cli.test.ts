@@ -240,6 +240,21 @@ describe("the descent spike's options", () => {
     },
   );
 
+  it("skips the horizon map with --horizon off, the A/B's (R10.T15.b)", () => {
+    expect(
+      parse(["--descent-spike", "--world", "terrain-test", "--horizon", "off"]).spike,
+    ).toMatchObject({ world: "terrain-test", style: "photorealistic", horizon: "off" });
+  });
+
+  it.each([[[]], [["--horizon", "on"]]] as const)(
+    "holds no horizon in the launch with %j, so that it is as before the option",
+    (horizon) => {
+      expect(
+        parse(["--descent-spike", "--world", "terrain-test", ...horizon]).spike,
+      ).not.toHaveProperty("horizon");
+    },
+  );
+
   it("takes --sizes off over the test planet, which measures nothing", () => {
     const { spike } = parse(["--descent-spike", "--sizes", "off"]);
     expect(spike).toMatchObject({ world: "test-planet" });
@@ -314,6 +329,11 @@ describe("the descent spike's options", () => {
       "--normals does not fit --world served",
     ],
     [["--world", "test-planet", "--sizes", "on"], "the terrain session's caches"],
+    [["--horizon", "off"], "the test planet's bakes make no horizon map"],
+    [
+      ["--world", "terrain-test", "--style", "wireframe", "--horizon", "off"],
+      "the wireframe's bakes skip the horizon map already",
+    ],
   ])("refuses %j on its world", (args, reason) => {
     const error = refusal(["--descent-spike", ...args]);
     expect(error.exitCode).toBe(1);
@@ -335,6 +355,7 @@ describe("the descent spike's options", () => {
     ["--world", "earth"],
     ["--style", "lit"],
     ["--sizes", "yes"],
+    ["--horizon", "skipped"],
     ["--universe", "Dev Fixture"],
     ["--universe", "00000000000004D2"],
     ["--body", "61ffd967fe000023"],
@@ -368,6 +389,7 @@ describe("the descent spike's options", () => {
     ["--world", "terrain-test"],
     ["--style", "wireframe"],
     ["--sizes", "on"],
+    ["--horizon", "off"],
     ["--universe", "3504954ff4feabf4"],
     ["--body", "61ffd967fe000023.0100"],
   ])("refuses %s without --descent-spike", (...option) => {
@@ -583,6 +605,7 @@ describe("the several-views check's options", () => {
     ["--world", "terrain-test"],
     ["--style", "wireframe"],
     ["--sizes", "on"],
+    ["--horizon", "off"],
   ])("refuses the spike's %s", (...option) => {
     const error = refusal(["--views-check", ...option]);
     expect(error.exitCode).toBe(1);

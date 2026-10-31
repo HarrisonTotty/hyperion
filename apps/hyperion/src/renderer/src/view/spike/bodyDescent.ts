@@ -52,6 +52,7 @@ import type {
 import { scale, vec3 } from "../../geometry/vec3";
 import type { ViewId } from "../camera/state";
 import { keptTime } from "../scenes/kept";
+import type { FieldFailure } from "../terrain/coarseFieldStore";
 import { type CoverageView, fieldCellAt, fieldCellCount } from "../terrain/coverage";
 import { PATCH_QUADS, vertexDir, type Xyz } from "../terrain/cube";
 import {
@@ -236,7 +237,7 @@ export class NoLandingSite extends Error {
 /**
  * The server serves no surface for a served world's body (plan R10, R10.T15.b): its field is
  * answered `not_modelled`, naming the record section the coarse pass needs, as every generated
- * body's is behind the serve gate (`GENERATED_SURFACES_FROM`, generator version 24). Thrown, as the
+ * body's is behind the serve gate (`GENERATED_SURFACES_FROM`, generator version 25). Thrown, as the
  * measurement's other refusals are ({@link NoLandingSite}, `DescentRefused`), out of its poll of
  * the session, and the spike says so and stops.
  */
@@ -247,6 +248,24 @@ export class FieldNotServed extends Error {
     super(`the server serves no surface for ${body}: its field is not modelled (${section})`);
     this.name = "FieldNotServed";
     this.section = section;
+  }
+}
+
+/**
+ * The body's field failed (plan R10, R10.T15.b): the server refused it or failed, or its answer
+ * failed a check of the console's own (`FieldFailure`, decision-r10-t16-leans §12(b)). Thrown out of
+ * the measurement's poll of the session, and the spike over a served world says so in the survey
+ * line's words (`surveyFailureStatus`).
+ */
+export class FieldFailed extends Error {
+  readonly failure: FieldFailure;
+
+  constructor(body: BodyIdHex, failure: FieldFailure) {
+    super(
+      `the field of ${body} failed: ${failure.kind === "rejected" ? failure.message : failure.check}`,
+    );
+    this.name = "FieldFailed";
+    this.failure = failure;
   }
 }
 
@@ -387,9 +406,7 @@ function heldFieldOf(
   }
   const failure = survey?.status.failure ?? null;
   if (failure !== null) {
-    throw new Error(
-      `the field of ${body} failed: ${failure.kind === "rejected" ? failure.message : failure.check}`,
-    );
+    throw new FieldFailed(body, failure);
   }
   const coverage = survey?.coverage ?? null;
   const header = survey?.header ?? null;
@@ -422,9 +439,10 @@ function heldFieldOf(
  * seed and a settled level table, noting the measuring view's report for `options.viewId` first
  * and stepping the session between looks.
  *
- * @throws {@link FieldNotServed} where the server answers the field `not_modelled`, and Error (a
- *   rejection) where the field fails, or is not held within `options.timeoutMs`, naming what it
- *   lacked, or with the abort's reason once `options.signal` aborts.
+ * @throws {@link FieldNotServed} where the server answers the field `not_modelled`,
+ *   {@link FieldFailed} where the field fails, and Error (a rejection) where it is not held within
+ *   `options.timeoutMs`, naming what it lacked, or with the abort's reason once `options.signal`
+ *   aborts.
  */
 export async function holdBodyField(
   session: BodyDescentSession,

@@ -39,6 +39,12 @@
  * measurement is the terrain session's. Off, the launch holds no `sizes` at all, so that the run's
  * options and its results file are as they were before the option.
  *
+ * `--horizon on|off` bakes the horizon map with the lit style's patches, on by default (plan R10,
+ * R10.T15.b): `--horizon off` skips it, the A/B whose run beside an ordinary one gives the map's
+ * share of the height workers' bake time, since the module bakes the map in the patch's one call.
+ * It is refused with the test planet, whose bakes make no horizon map, and with `--style wireframe`,
+ * whose bakes skip it already. On, the launch holds no `horizon`, as `--sizes off` holds no `sizes`.
+ *
  * `--views-check` runs the several-views check in the consoles' `VIEW` (plan R07, T20), with the
  * spike's `--setting`, `--smoke` and `--out`; the spike's other options are refused with it, and
  * so is `--descent-spike`. With `--terrain` (plan R10, R10.T16.d; decision-r10-t16-contracts §6)
@@ -125,6 +131,7 @@ const SPIKE_OPTIONS = [
   "world",
   "style",
   "sizes",
+  "horizon",
   "universe",
   "body",
 ] as const;
@@ -332,6 +339,12 @@ export function buildCommand(version: string): Command {
         "off",
       ]),
     )
+    .addOption(
+      new Option(
+        "--horizon <ON>",
+        "bake the horizon map with a generated world's lit patches (default on)",
+      ).choices(["on", "off"]),
+    )
     .exitOverride();
 }
 
@@ -415,9 +428,9 @@ function settingOf(options: Readonly<Record<string, unknown>>): QualitySettingNa
 
 /**
  * Why the spike's options cannot fly together on their world (R10.T14.c, R10.T14.b, R10.T15.b), or
- * `null` where they can: `--style` or `--sizes on` with the test planet, `--ridged on` with a
- * generated world, or the terrain variants with it; `--universe` and `--body` with any world but
- * the served one, which needs both.
+ * `null` where they can: `--style`, `--sizes on` or `--horizon off` with the test planet, `--ridged
+ * on` with a generated world, or the terrain variants with it, or `--horizon off` with its
+ * wireframe; `--universe` and `--body` with any world but the served one, which needs both.
  */
 function worldRefusal(
   options: Readonly<Record<string, unknown>>,
@@ -436,7 +449,9 @@ function worldRefusal(
           ? "--style is an option of a generated world, --world terrain-test or served: the test planet's main view is the spike's own lit view, SPIKE LIT"
           : spike.sizes === "on"
             ? "--sizes on is an option of a generated world, --world terrain-test or served: the measured sizes are the terrain session's caches"
-            : null;
+            : spike.horizon === "off"
+              ? "--horizon off is an option of a generated world, --world terrain-test or served: the test planet's bakes make no horizon map"
+              : null;
       break;
     case "terrain-test":
     case "served": {
@@ -446,9 +461,11 @@ function worldRefusal(
           ? "--world served needs --universe and --body: the universe and the body the server serves"
           : spike.ridged === "on"
             ? `--ridged on does not fit --world ${spike.world}: the ridges are the test planet's`
-            : spike.vertexPath === null && spike.normals === null
-              ? null
-              : `${variant} does not fit --world ${spike.world} yet: its terrain session's passes take the setting's own terrain`;
+            : spike.horizon === "off" && spike.style === "wireframe"
+              ? "--horizon off does not fit --style wireframe: the wireframe's bakes skip the horizon map already"
+              : spike.vertexPath === null && spike.normals === null
+                ? null
+                : `${variant} does not fit --world ${spike.world} yet: its terrain session's passes take the setting's own terrain`;
       break;
     }
   }
@@ -551,6 +568,8 @@ function spikeLaunchOf(options: Readonly<Record<string, unknown>>): SpikeLaunch 
           : "photorealistic",
     // Absent when off, so that an unmeasured launch's options, and its results file's, are as before.
     ...(text("sizes") === "on" ? { sizes: "on" as const } : {}),
+    // Absent when on, the default, so that an ordinary launch's options are as before the option.
+    ...(text("horizon") === "off" ? { horizon: "off" as const } : {}),
     // The served world's, which `worldRefusal` holds to `--world served`.
     ...servedOf(options),
   };

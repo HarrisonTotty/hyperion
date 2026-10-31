@@ -7,7 +7,9 @@
  * - **The body** is the scene's at its latest push (`serverSceneAtPush`), read from its record at
  *   its own grant: its designation, kind, Hill radius at pericentre, appearance (its figure, with
  *   its pole, and its photometry) and rotation. A body drawn as a contact, one without a figure, a
- *   giant's envelope (`surfaceless`), or one whose rotation is not given, is no served world.
+ *   giant's envelope (`surfaceless`), or one whose rotation is not given, is no served world; a
+ *   section it lacks that the scene withholds or does not model is named in its state's words
+ *   (`ROTATION not resolved`), as the guide's `MEASURING TERRAIN` row reads it.
  * - **The star** is the body's host, up its record's parents: the star it orbits; for a body that
  *   orbits a pair, the pair's first star, the lowest body index under the hierarchy's pair node
  *   that its host names; or the system's first star for a body that orbits the barycentre. A world
@@ -35,7 +37,7 @@ import {
 import { norm, sub, type Vec3 } from "../../geometry/vec3";
 import type { SceneModel, SceneSystem } from "../../lib/scene/model";
 import { layoutHierarchy } from "../../lib/system/hierarchy";
-import type { SystemBody } from "../../lib/system/model";
+import type { Section, SystemBody } from "../../lib/system/model";
 import type { WireAppearance } from "../appearance/fromWire";
 import { galacticTranslated } from "../coords/position";
 import type { Rotation3 } from "../coords/rotation";
@@ -73,19 +75,38 @@ export interface ServedBody {
   readonly position: GalacticPosition;
 }
 
+/**
+ * A record section a served world needs, by the name the body's record reads it under: `KIND` for
+ * what it is, `BULK` for its radius, `MASS` for its Hill radius (its mass and orbit come at one
+ * grant, `mass_and_orbit`), `ROTATION` for its turning.
+ */
+export type ServedSectionName = "KIND" | "BULK" | "MASS" | "ROTATION";
+
+/**
+ * A section's state in the guide's words, lower case after its name: withheld at the granted detail
+ * level, or not computed at this generator version.
+ */
+export type ServedSectionStateWords = "not resolved" | "not yet modelled";
+
 /** Why a body is no served world. */
 export type ServedBodyGap =
   /** The scene holds no system to draw, or none that names this body. */
   | "not in the scene"
-  /** It is a star, a contact or a body of unresolved kind. */
+  /** It is a star, or the scene draws it with no state or record to read. */
   | "not a world"
   /** A giant's envelope, which has no solid surface (P14.T35.e). */
   | "no solid surface"
-  /** Its radius is not granted, so it has no figure to fly over. */
+  /**
+   * A section it needs the scene withholds or does not model, named in its state's words
+   * (`ROTATION not resolved`; plan R10, R10.T15.b): a contact's kind, its radius's, its Hill
+   * radius's or its rotation's.
+   */
+  | `${ServedSectionName} ${ServedSectionStateWords}`
+  /** Its sections are given and hold no figure to fly over: a radius not above 0. */
   | "no figure"
-  /** Its Hill radius at pericentre is not known (its mass or orbit withheld). */
+  /** Its mass and orbit are given and give no Hill radius at pericentre: an orbit not bound. */
   | "no hill radius"
-  /** Its rotation section is not given, which a turning world needs. */
+  /** Its rotation section does not apply to it. */
   | "no rotation"
   /** The scene draws no star it could be lit by. */
   | "no star"
@@ -96,6 +117,32 @@ export type ServedBodyGap =
 export type ServedBodyRead =
   | { readonly kind: "served"; readonly served: ServedBody }
   | { readonly kind: "gap"; readonly gap: ServedBodyGap; readonly body: BodyIdHex };
+
+/**
+ * The gap of the section `name`, which is not `ok`: its state's words where the scene withholds it
+ * or does not model it, else `otherwise` (a section that does not apply, or one given whose values
+ * still give nothing).
+ */
+function sectionGap(
+  name: ServedSectionName,
+  section: Section<unknown>,
+  otherwise: ServedBodyGap,
+): ServedBodyGap {
+  let gap: ServedBodyGap;
+  switch (section.state) {
+    case "not_resolved":
+      gap = `${name} not resolved`;
+      break;
+    case "not_modelled":
+      gap = `${name} not yet modelled`;
+      break;
+    case "ok":
+    case "not_applicable":
+      gap = otherwise;
+      break;
+  }
+  return gap;
+}
 
 /** The kind of a body that may be a served world, or `null` for any other. */
 function servedKind(body: ViewBody): ServedBodyKind | null {
@@ -172,6 +219,10 @@ export function servedBodyOf(
   if (scene === null || drawn === undefined) {
     return gap("not in the scene");
   }
+  if (drawn.kind === "unresolved") {
+    // A contact: the granted detail withholds what it is, which is no "none".
+    return gap("KIND not resolved");
+  }
   const kind = servedKind(drawn);
   const record = system.bodies.bodies.find((each) => each.id === body);
   if (kind === null || drawn.retarded === null || record === undefined) {
@@ -183,14 +234,17 @@ export function servedBodyOf(
   const appearance = drawn.appearance;
   const figure = appearance?.figure ?? null;
   if (appearance === null || figure === null) {
-    return gap("no figure");
+    // A figure is its figure section's, else a sphere of its bulk radius: the radius's section names it.
+    return gap(
+      record.figure.state === "ok" ? "no figure" : sectionGap("BULK", record.bulk, "no figure"),
+    );
   }
   if (drawn.hillRadiusM === null) {
-    return gap("no hill radius");
+    return gap(sectionGap("MASS", record.massMearth, "no hill radius"));
   }
   const section = record.rotation;
   if (section.state !== "ok") {
-    return gap("no rotation");
+    return gap(sectionGap("ROTATION", section, "no rotation"));
   }
   const star = hostStar(scene, system, record);
   if (star === null) {
@@ -247,10 +301,13 @@ export interface HostDiscRequests {
   ): PendingBulkRequest<"sky">;
 }
 
-/** A served body's host discs, or why the server's sky gave none: its failure's code and words. */
+/**
+ * A served body's host discs, or why the server's sky gave none: its failure's code and words
+ * (`reason`, `queue_full: the pool is full`), and the sentence for a log that names the body.
+ */
 export type HostDiscsRead =
   | { readonly ok: true; readonly discs: ReadonlyArray<HostDiscDto> }
-  | { readonly ok: false; readonly message: string };
+  | { readonly ok: false; readonly reason: string; readonly message: string };
 
 /**
  * The discs of `served`'s system's stars, as the server's `sky` answers them at the body at its
@@ -278,12 +335,15 @@ export async function servedHostDiscs(
     (response) => response.bulk,
   );
   const outcome = await cancelledOn(signal, pending);
-  return outcome.ok
-    ? { ok: true, discs: outcome.response.hosts }
-    : {
-        ok: false,
-        message: `the sky's host discs at ${served.body.id} failed: ${outcome.error.code}: ${outcome.error.message}`,
-      };
+  if (outcome.ok) {
+    return { ok: true, discs: outcome.response.hosts };
+  }
+  const reason = `${outcome.error.code}: ${outcome.error.message}`;
+  return {
+    ok: false,
+    reason,
+    message: `the sky's host discs at ${served.body.id} failed: ${reason}`,
+  };
 }
 
 /**

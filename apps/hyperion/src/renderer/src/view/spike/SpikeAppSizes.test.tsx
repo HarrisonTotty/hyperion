@@ -9,6 +9,7 @@ import { ScriptedHeightWorker } from "../../test/scriptedHeightWorker";
 import { TEST_GRAPHICS, TEST_SERVER_URL, TEST_SPIKE_LAUNCH } from "../../test/stubHyperionApi";
 import { goldenLevelTable } from "../../test/terrainFixtures";
 import { planetGeometry } from "../terrain/planet";
+import type { HeightSourceSetting } from "../terrain/workers/messages";
 import type { MeasureDescent } from "./bodyDescent";
 import { DescentProfile, landingSiteOf, trackStretches } from "./descentProfile";
 import { SMOKE_S } from "./spikeController";
@@ -38,6 +39,9 @@ const MOON_DESCENT: PreparedDescent = {
 /** The descent measured at once: the terrain world's own measurement needs a field served. */
 const MEASURE: MeasureDescent = () => Promise.resolve(MOON_DESCENT);
 
+/** The scripted height workers the spikes started, in order. */
+const HEIGHT_WORKERS: ScriptedHeightWorker[] = [];
+
 /** The browser's workers as fakes: the queries never answer, the height workers are scripted. */
 const WORKERS: SpikeWorkers = {
   query: () => ({
@@ -50,7 +54,11 @@ const WORKERS: SpikeWorkers = {
     onBaked: () => () => undefined,
     terminate: () => undefined,
   }),
-  height: () => new ScriptedHeightWorker(),
+  height: () => {
+    const worker = new ScriptedHeightWorker();
+    HEIGHT_WORKERS.push(worker);
+    return worker;
+  },
 };
 
 /** The adapter's storage-binding limit, B. */
@@ -140,6 +148,7 @@ async function flySmoke(launch: SpikeLaunch): Promise<ReadonlyArray<DescentSpike
 
 afterEach(() => {
   vi.useRealTimers();
+  HEIGHT_WORKERS.length = 0;
 });
 
 // A smoke's 650 frames through the whole spike took about 6 s here (2026-10-21), CPU-bound work:
@@ -164,6 +173,47 @@ describe("SpikeApp with the measured sizes (R10.T14.b)", () => {
     async () => {
       const [report] = await flySmoke(SMOKE);
       expect(report === undefined ? null : "sizes" in report).toBe(false);
+    },
+    SMOKE_TIMEOUT_MS,
+  );
+});
+
+describe("SpikeApp with the horizon map's A/B (R10.T15.b)", () => {
+  /** The body sources of the lit bakes the height workers were asked, the weights baked. */
+  function litSources(): Array<Extract<HeightSourceSetting, { kind: "body" }>> {
+    return HEIGHT_WORKERS.flatMap((worker) =>
+      worker.received.flatMap((request) =>
+        request.kind === "bake" &&
+        request.settings.source.kind === "body" &&
+        request.settings.source.weights === "baked"
+          ? [request.settings.source]
+          : [],
+      ),
+    );
+  }
+
+  it(
+    "bakes the photorealistic patches without the horizon map with --horizon off",
+    async () => {
+      await flySmoke({ ...SMOKE, style: "photorealistic", horizon: "off" });
+      const sources = litSources();
+      expect([sources.length > 0, sources.every((each) => each.horizon === "skipped")]).toEqual([
+        true,
+        true,
+      ]);
+    },
+    SMOKE_TIMEOUT_MS,
+  );
+
+  it(
+    "bakes them with the horizon map otherwise, their source as before",
+    async () => {
+      await flySmoke({ ...SMOKE, style: "photorealistic" });
+      const sources = litSources();
+      expect([sources.length > 0, sources.some((each) => "horizon" in each)]).toEqual([
+        true,
+        false,
+      ]);
     },
     SMOKE_TIMEOUT_MS,
   );

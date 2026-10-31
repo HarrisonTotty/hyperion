@@ -128,6 +128,32 @@ export function stateNearEarth(seconds = 3_000): SceneStateDto {
   };
 }
 
+/**
+ * {@link stateNearEarth} with the slice's Earth's summary changed by `change`: a section withheld,
+ * say, for a served world's gaps (plan R10, R10.T15.b).
+ */
+export function stateNearEarthWith(
+  change: (earth: BodySummaryDto) => BodySummaryDto,
+): SceneStateDto {
+  const state = stateNearEarth();
+  const system = state.system;
+  if (system === null) {
+    throw new Error("the slice's scene holds its system");
+  }
+  return {
+    ...state,
+    system: {
+      ...system,
+      system: {
+        ...system.system,
+        bodies: system.system.bodies.map((body) =>
+          body.id === FIXTURE_EARTH ? change(body) : body,
+        ),
+      },
+    },
+  };
+}
+
 /** The ship 1 au out in the slice's system ({@link shipInSystem}), inside no body's Hill sphere. */
 export function stateInSystem(seconds = 3_000): SceneStateDto {
   return { ...stateNearEarth(seconds), ship: shipInSystem(seconds) };

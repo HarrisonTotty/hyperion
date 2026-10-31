@@ -26,6 +26,7 @@ import {
   offSurveyCeilingM,
   bodySiteOf,
   CEILING_SLACK_M,
+  FieldFailed,
   FieldNotServed,
   floorsOf,
   holdBodyField,
@@ -785,9 +786,15 @@ describe("the measurement's failures over a stand-in session", () => {
     const error = await rejectionOf(
       holdBodyField(session, world, { viewId: VIEW, revision: 2, timeoutMs: 100, ...fakeClock() }),
     );
-    expect([error.name, error.message, session.steps]).toEqual([
-      "Error",
+    expect([
+      error.name,
+      error.message,
+      error instanceof FieldFailed ? error.failure : null,
+      session.steps,
+    ]).toEqual([
+      "FieldFailed",
       `the field of ${golden.body} failed: no such body`,
+      session.failure,
       1,
     ]);
   });
@@ -796,9 +803,15 @@ describe("the measurement's failures over a stand-in session", () => {
     const session = new StubSession();
     session.failure = { kind: "invalid", check: "header unusable" };
     const error = await rejectionOf(measure(session));
-    expect([error.name, error.message, session.lanes]).toEqual([
-      "Error",
+    expect([
+      error.name,
+      error.message,
+      error instanceof FieldFailed ? error.failure : null,
+      session.lanes,
+    ]).toEqual([
+      "FieldFailed",
       `the field of ${golden.body} failed: header unusable`,
+      { kind: "invalid", check: "header unusable" },
       [],
     ]);
   });

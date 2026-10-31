@@ -16,6 +16,11 @@
  *   both frames assign to it, every cell with one such pixel or more listed. Means, not sums, so
  *   that the camera's closing between the frames moves no figure; a cell's shared pixels remove the
  *   closing altogether. The judging is the main process's.
+ * - **The μ floor** (plan R10, R10.T15.b; decision-r10-t16-leans, "R10.T10.g terminator
+ *   cross-fade"): each surveyed cell a frame's pixels meet is flagged where the disc's floor on the
+ *   law's μ binds at the cell's centre, seen from that frame's eye ({@link muFloorBinds}), and a cell
+ *   flagged in either frame is marked in the comparison (`HandoverTexelRecord.muFloored`), for the
+ *   main process to leave out of its per-cell bound and count. The means take every pixel as before.
  */
 
 import type {
@@ -23,13 +28,17 @@ import type {
   HandoverSharedMeans,
   HandoverTexelRecord,
 } from "../../../../../preload/api";
-import { add, scale, sub, type Vec3, vec3 } from "../../../geometry/vec3";
+import { add, dot, normalise, scale, sub, type Vec3, vec3 } from "../../../geometry/vec3";
+import { type NormalMapTexels, normalMapNormalAt } from "../../../view/bodies/discNormals";
 import type { Quaternion } from "../../../view/camera/pose";
 import { rotate } from "../../../view/camera/quaternion";
 import { rotateToBodyFixed } from "../../../view/coords/rotation";
 import { METER_LUMA } from "../../../view/post/histogram";
 import { METER_CLASS } from "../../../view/post/meter";
 import {
+  cellCentreDirection,
+  datumNormal,
+  datumPointM,
   type HandoverFigure,
   type LookGeometry,
   rayDatumHitM,
@@ -41,6 +50,42 @@ export const OFF_BODY = -2;
 
 /** A pixel's cell where the body is drawn and its ray meets no surveyed cell. */
 export const UNSURVEYED = -1;
+
+/**
+ * The share of the datum's μ_ν below which the disc floors the law's μ on its shading normal n′:
+ * μ = max(n′ · v, ½ μ_ν) (plan R10, R10.T10.g; `bodyDisc.wgsl`'s `shade` and its twin
+ * `discShading.ts`), so that a cell whose slope faces away near the limb never draws black.
+ */
+export const MU_FLOOR_SHARE = 0.5;
+
+/**
+ * Whether the disc's μ floor binds at the centre of the cell `texel` at `level`, seen from `eyeM`
+ * (plan R10, R10.T15.b): n′ · v < ½ μ_ν, with ν the datum's normal at the cell's centre on the
+ * datum, v the unit vector from there to the eye, μ_ν = ν · v, and n′ the normal map's shading normal
+ * there by the disc's own reconstruction (`normalMapNormalAt`), ν where `normals` is `null` or holds
+ * none there. With n′ = ν it binds only where μ_ν < 0: a cell whose centre lies past the limb.
+ *
+ * @param eyeM - The eye, body-fixed, m from the body's centre.
+ * @returns `false` for a texel outside the level's six faces.
+ */
+export function muFloorBinds(
+  texel: number,
+  level: number,
+  eyeM: Vec3,
+  figure: HandoverFigure,
+  normals: NormalMapTexels | null,
+): boolean {
+  const centre = cellCentreDirection(texel, level);
+  if (centre === null) {
+    return false;
+  }
+  const pointM = datumPointM(centre, figure);
+  const datum = datumNormal(pointM, figure);
+  const towardEye = normalise(sub(eyeM, pointM));
+  const shading =
+    normals === null ? null : normalMapNormalAt(normals, [centre.x, centre.y, centre.z]);
+  return dot(shading ?? datum, towardEye) < MU_FLOOR_SHARE * dot(datum, towardEye);
+}
 
 /** A region of the scene target, px from its top left. */
 export interface PixelRect {
@@ -156,6 +201,11 @@ export interface FrameReading {
   readonly bodyPixels: number;
   readonly bodyMisses: number;
   readonly surveyPixels: number;
+  /**
+   * The surveyed cells its pixels meet where the disc's μ floor binds at the cell's centre, seen
+   * from this frame's eye ({@link muFloorBinds}).
+   */
+  readonly floored: ReadonlySet<number>;
 }
 
 /** What {@link readFrame} reads. */
@@ -171,6 +221,12 @@ export interface FrameReadInput {
   readonly level: number;
   /** The surveyed cells, as coverage-mask texels at `level`. */
   readonly surveyed: ReadonlySet<number>;
+  /**
+   * The disc's normal map as the frame was drawn with it (the class map's, R10.T10.g), at `level`,
+   * whose shading normals flag the μ floor ({@link FrameReading.floored}); `null` for none, where
+   * the disc shades on the datum's normal.
+   */
+  readonly normals: NormalMapTexels | null;
 }
 
 /**
@@ -201,6 +257,8 @@ export function readFrame(input: FrameReadInput): FrameReading {
   let bodyPixels = 0;
   let bodyMisses = 0;
   let surveyPixels = 0;
+  // Each surveyed cell met, flagged once: whether its μ floor binds from this frame's eye.
+  const flags = new Map<number, boolean>();
   for (let row = 0; row < rect.height; row += 1) {
     const y = rect.y + row;
     const viewY = (1 - ((y + 0.5) / heightPx) * 2) / (s * aspect);
@@ -229,6 +287,9 @@ export function readFrame(input: FrameReadInput): FrameReading {
       if (surveyed.has(texel)) {
         cells[p] = texel;
         surveyPixels += 1;
+        if (!flags.has(texel)) {
+          flags.set(texel, muFloorBinds(texel, level, camera.eyeM, figure, input.normals));
+        }
       }
     }
   }
@@ -241,6 +302,7 @@ export function readFrame(input: FrameReadInput): FrameReading {
     bodyPixels,
     bodyMisses,
     surveyPixels,
+    floored: new Set([...flags].flatMap(([texel, binds]) => (binds ? [texel] : []))),
   };
 }
 
@@ -248,7 +310,10 @@ export function readFrame(input: FrameReadInput): FrameReading {
 export interface ReadingComparison {
   readonly body: { readonly own: HandoverOwnMeans; readonly shared: HandoverSharedMeans };
   readonly survey: { readonly own: HandoverOwnMeans; readonly shared: HandoverSharedMeans };
-  /** Every surveyed cell with a pixel both frames assign to it, in texel order. */
+  /**
+   * Every surveyed cell with a pixel both frames assign to it, in texel order, each marked where its
+   * μ floor binds in either frame.
+   */
   readonly texels: ReadonlyArray<HandoverTexelRecord>;
 }
 
@@ -368,6 +433,7 @@ export function compareReadings(before: FrameReading, after: FrameReading): Read
         sharedPixels: tally.n,
         meanBefore: tally.b / tally.n,
         meanAfter: tally.a / tally.n,
+        muFloored: before.floored.has(texel) || after.floored.has(texel),
       })),
   };
 }

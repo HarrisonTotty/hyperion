@@ -7,7 +7,7 @@ import {
   recordAtmosphereCheck,
   runAtmosphereCheck,
 } from "./atmosphereCheckRun";
-import { HANDOVER_CHECK_TIMING, recordHandoverCheck, runHandoverCheck } from "./handoverCheckRun";
+import { handoverCheckTimingFor, recordHandoverCheck, runHandoverCheck } from "./handoverCheckRun";
 import type { HandoverScenes } from "./handoverScenes";
 import {
   atmosphereCheckTimingOf,
@@ -171,7 +171,10 @@ export function ViewsCheckRunner({ api, probe, run, launchMode }: ViewsCheckRunn
               terrain,
               scenes,
               setting: api.launch.setting,
-              timing: handoverCheckTimingOf(HANDOVER_CHECK_TIMING, launchMode),
+              timing: handoverCheckTimingOf(
+                handoverCheckTimingFor(api.launch.served !== undefined),
+                launchMode,
+              ),
             }),
           controller.signal,
         );

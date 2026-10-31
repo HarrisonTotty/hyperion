@@ -100,7 +100,71 @@ describe("the hand-over check's results", () => {
       [19_200, true],
       [19_201, true],
       [19_265, false],
+      [19_330, false],
     ]);
+  });
+
+  it("leave out of the bound and count a cell whose μ floor binds, however it changed", () => {
+    // The fixture's fourth cell, at the limb, changes by +1.14 stop over 4 pixels.
+    const comparison = buildHandoverCheckResults(input()).looks[1]?.comparisons[0];
+    expect([
+      comparison?.texels[3]?.over,
+      comparison?.flooredTexels,
+      comparison?.judgedTexels,
+      comparison?.texelsOver,
+      comparison?.verdict,
+    ]).toEqual([false, 1, 2, 0, "pass"]);
+  });
+
+  it("count no floored cell of a single shared pixel, which the bound would not judge", () => {
+    const comparison = buildHandoverCheckResults(
+      withComparison(
+        1,
+        withTexel({
+          texel: 20_000,
+          sharedPixels: 1,
+          meanBefore: 0.05,
+          meanAfter: 0.11,
+          muFloored: true,
+        }),
+      ),
+    ).looks[1]?.comparisons[0];
+    expect([comparison?.texels.length, comparison?.flooredTexels]).toEqual([5, 1]);
+  });
+
+  it("judge a cell clear of the μ floor by the bound", () => {
+    const comparison = buildHandoverCheckResults(
+      withComparison(
+        1,
+        withTexel({
+          texel: 20_000,
+          sharedPixels: 4,
+          meanBefore: 0.05,
+          meanAfter: 0.11,
+          muFloored: false,
+        }),
+      ),
+    ).looks[1]?.comparisons[0];
+    expect([comparison?.flooredTexels, comparison?.texelsOver, comparison?.verdict]).toEqual([
+      1,
+      1,
+      "fail",
+    ]);
+  });
+
+  it("judge the body's and the survey's means over every pixel, the μ floor's cells' among them", () => {
+    // A body brighter after by more than the bound, its change wholly in floored cells' pixels.
+    const given = withComparison(0, (comparison) => ({
+      ...comparison,
+      texels: comparison.texels.map((texel) => ({ ...texel, muFloored: true })),
+      survey: {
+        ...comparison.survey,
+        own: { ...comparison.survey.own, meanAfter: comparison.survey.own.meanBefore * 1.3 },
+      },
+    }));
+    expect(failuresOf(given)).toMatch(
+      /the survey over its own pixels changed by \+0\.379 stop; .*no cell of 2 shared pixels or more clear of the μ floor to judge/u,
+    );
   });
 
   it("judge no cell of a single shared pixel, however it changed", () => {
@@ -113,7 +177,13 @@ describe("the hand-over check's results", () => {
     const results = buildHandoverCheckResults(
       withComparison(
         1,
-        withTexel({ texel: 20_000, sharedPixels: 2, meanBefore: 0.2, meanAfter: 0.27 }),
+        withTexel({
+          texel: 20_000,
+          sharedPixels: 2,
+          meanBefore: 0.2,
+          meanAfter: 0.27,
+          muFloored: false,
+        }),
       ),
     );
     expect([results.overall, results.looks[1]?.comparisons[0]?.texelsOver]).toEqual(["fail", 1]);
@@ -123,7 +193,13 @@ describe("the hand-over check's results", () => {
     const comparison = buildHandoverCheckResults(
       withComparison(
         0,
-        withTexel({ texel: 20_000, sharedPixels: 3, meanBefore: 0.2, meanAfter: 0 }),
+        withTexel({
+          texel: 20_000,
+          sharedPixels: 3,
+          meanBefore: 0.2,
+          meanAfter: 0,
+          muFloored: false,
+        }),
       ),
     ).looks[0]?.comparisons[0];
     expect([comparison?.darkTexels, comparison?.texelsOver, comparison?.worst?.dark]).toEqual([
@@ -137,7 +213,13 @@ describe("the hand-over check's results", () => {
     const results = buildHandoverCheckResults(
       withComparison(
         2,
-        withTexel({ texel: 20_000, sharedPixels: 4, meanBefore: 0.01, meanAfter: 0.02 }),
+        withTexel({
+          texel: 20_000,
+          sharedPixels: 4,
+          meanBefore: 0.01,
+          meanAfter: 0.02,
+          muFloored: false,
+        }),
       ),
     );
     const comparison = results.looks[2]?.comparisons[0];
@@ -156,7 +238,13 @@ describe("the hand-over check's results", () => {
         judged: true,
         comparisons: look.comparisons.map((each, i) =>
           i === 0
-            ? withTexel({ texel: 20_000, sharedPixels: 4, meanBefore: 0.01, meanAfter: 0.02 })(each)
+            ? withTexel({
+                texel: 20_000,
+                sharedPixels: 4,
+                meanBefore: 0.01,
+                meanAfter: 0.02,
+                muFloored: false,
+              })(each)
             : each,
         ),
       })),
@@ -196,7 +284,9 @@ describe("the hand-over check's results", () => {
       ...comparison,
       texels: comparison.texels.map((texel) => ({ ...texel, sharedPixels: 1 })),
     }));
-    expect(failuresOf(given)).toMatch(/no cell of 2 shared pixels or more to judge/u);
+    expect(failuresOf(given)).toMatch(
+      /no cell of 2 shared pixels or more clear of the μ floor to judge/u,
+    );
   });
 
   it("fail a look whose exposure was not locked", () => {
@@ -285,13 +375,31 @@ describe("the hand-over check's results", () => {
   });
 
   it("read a cell dark on both sides as unchanged", () => {
-    const both = texelFigures({ texel: 1, sharedPixels: 2, meanBefore: 0, meanAfter: 0 });
+    const both = texelFigures({
+      texel: 1,
+      sharedPixels: 2,
+      meanBefore: 0,
+      meanAfter: 0,
+      muFloored: false,
+    });
     expect([both.dark, both.log2, both.over]).toEqual(["both", null, false]);
   });
 
   it("hold a cell to a third of a stop either way", () => {
-    const within = texelFigures({ texel: 1, sharedPixels: 2, meanBefore: 1, meanAfter: 1.25 });
-    const beyond = texelFigures({ texel: 2, sharedPixels: 2, meanBefore: 1.27, meanAfter: 1 });
+    const within = texelFigures({
+      texel: 1,
+      sharedPixels: 2,
+      meanBefore: 1,
+      meanAfter: 1.25,
+      muFloored: false,
+    });
+    const beyond = texelFigures({
+      texel: 2,
+      sharedPixels: 2,
+      meanBefore: 1.27,
+      meanAfter: 1,
+      muFloored: false,
+    });
     expect([HANDOVER_BOUND_STOPS, within.over, beyond.over]).toEqual([1 / 3, false, true]);
   });
 });
@@ -303,7 +411,13 @@ describe("the hand-over check's summary", () => {
       buildHandoverCheckResults(
         withComparison(
           1,
-          withTexel({ texel: 20_000, sharedPixels: 2, meanBefore: 0.2, meanAfter: 0.3 }),
+          withTexel({
+            texel: 20_000,
+            sharedPixels: 2,
+            meanBefore: 0.2,
+            meanAfter: 0.3,
+            muFloored: false,
+          }),
         ),
       ),
     );
@@ -321,6 +435,12 @@ describe("the hand-over check's summary", () => {
 
   it("states the hand-over range", () => {
     expect(summary()).toContain("the hand-over range 15419 km");
+  });
+
+  it("counts each switch's cells left out at the μ floor", () => {
+    expect(summary()).toMatch(
+      /\| handover-90 \| disc-to-figure \| .* \| 3 of 5 \| 1 \| 1 \| 0 \|/u,
+    );
   });
 });
 
@@ -363,7 +483,7 @@ describe("the hand-over check's files", () => {
     const { json } = await writeHandoverResults("/out", buildHandoverCheckResults(input()), files);
     expect(JSON.parse(written.get(json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.handover-results",
-      version: 1,
+      version: 2,
       overall: "pass",
       rangeM: 1.5419e7,
     });

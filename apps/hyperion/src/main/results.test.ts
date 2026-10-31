@@ -1408,6 +1408,11 @@ describe("a results file's world and style (R10.T14.c)", () => {
   });
 });
 
+/** A summary's `Launch:` line, or `undefined` where it has none. */
+function launchLineOf(summary: string): string | undefined {
+  return summary.split("\n").find((line) => line.startsWith("- **Launch:**"));
+}
+
 describe("a results file's measured sizes (R10.T14.b)", () => {
   /** A `--sizes on` run's results over the terrain world, `sizes` its report's block. */
   function sizedResults(
@@ -1509,6 +1514,17 @@ describe("a results file's measured sizes (R10.T14.b)", () => {
     const { options, summary } = launchedWith(["--sizes", "on"]);
     const launchLine = summary.split("\n").find((line) => line.startsWith("- **Launch:**"));
     expect([options["sizes"], launchLine?.includes(", sizes on, ")]).toEqual(["on", true]);
+  });
+
+  it("records the horizon map's A/B in its options and its launch line (R10.T15.b)", () => {
+    const off = launchedWith(["--horizon", "off"]);
+    const on = launchedWith(["--horizon", "on"]);
+    expect([
+      off.options["horizon"],
+      launchLineOf(off.summary)?.includes(", horizon map off (the A/B's), "),
+      "horizon" in on.options,
+      launchLineOf(on.summary)?.includes("horizon"),
+    ]).toEqual(["off", true, false, false]);
   });
 
   /** The bytes `sizes` adds to a 1,230-second run's results file once Prettier formats it. */

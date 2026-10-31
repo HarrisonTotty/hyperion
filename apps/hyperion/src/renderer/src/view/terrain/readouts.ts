@@ -761,34 +761,46 @@ export function formatCoverage(
 
 // --- The lines ----------------------------------------------------------------------------------
 
+/** A field's failure as a status line states it: its words, and how it stands. */
+export interface SurveyFailureStatus {
+  readonly text: string;
+  /** A refusal of what was asked, in plain text, or a fault, in `--status-caution`. */
+  readonly standing: "refused" | "fault";
+}
+
+/**
+ * A field's failure in the survey line's words, ending with `remedy`, and how it stands
+ * (decision-r10-t16-leans §12): `SURVEY COVERAGE REJECTED: <the server's message>`, a refusal of
+ * what was asked in plain text and the server's own failure a fault, or `SURVEY DATA INVALID:
+ * <check>`, a fault. The descent spike over a served world reads its field's failure in them too
+ * (plan R10, R10.T15.b).
+ */
+export function surveyFailureStatus(failure: FieldFailure, remedy: string): SurveyFailureStatus {
+  let shown: SurveyFailureStatus;
+  switch (failure.kind) {
+    case "rejected": {
+      const reason = failure.message.trim();
+      const words = reason.length > 0 ? `${reason}, ${remedy}` : remedy;
+      shown = {
+        text: `SURVEY COVERAGE REJECTED: ${words}`,
+        standing: failure.refusal ? "refused" : "fault",
+      };
+      break;
+    }
+    case "invalid":
+      shown = { text: `SURVEY DATA INVALID: ${failure.check}, ${remedy}`, standing: "fault" };
+      break;
+  }
+  return shown;
+}
+
 /**
  * The survey line's state for a failure (decision-r10-t16-leans §12), in its colour, ending with
  * `remedy`.
  */
 function failureLine(failure: FieldFailure, remedy: string): ReadoutLine {
-  let line: ReadoutLine;
-  switch (failure.kind) {
-    case "rejected": {
-      const reason = failure.message.trim();
-      const words = reason.length > 0 ? `${reason}, ${remedy}` : remedy;
-      line = status(
-        "survey-state",
-        `SURVEY COVERAGE REJECTED: ${words}`,
-        failure.refusal ? "text" : "status-caution",
-        failure.refusal ? "refused" : "fault",
-      );
-      break;
-    }
-    case "invalid":
-      line = status(
-        "survey-state",
-        `SURVEY DATA INVALID: ${failure.check}, ${remedy}`,
-        "status-caution",
-        "fault",
-      );
-      break;
-  }
-  return line;
+  const { text, standing } = surveyFailureStatus(failure, remedy);
+  return status("survey-state", text, standing === "refused" ? "text" : "status-caution", standing);
 }
 
 /** The survey line and the units it kept. */

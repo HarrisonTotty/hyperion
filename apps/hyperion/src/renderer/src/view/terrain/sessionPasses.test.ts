@@ -84,7 +84,7 @@ import type {
   TerrainViewFrame,
   TerrainViewFrameInput,
 } from "./terrainPass";
-import { PALETTE_NONE, type TerrainLayers } from "./workers/messages";
+import { type HorizonLayerSetting, PALETTE_NONE, type TerrainLayers } from "./workers/messages";
 import { MAX_CONSECUTIVE_WORKER_FAILURES } from "./workers/pool";
 
 const UNIVERSE: UniverseIdHex = "000000000000002a";
@@ -156,7 +156,10 @@ interface Harness {
   readonly tally: ReturnType<typeof allocationTally>;
 }
 
-async function harness(setting: QualitySetting = "high"): Promise<Harness> {
+async function harness(
+  setting: QualitySetting = "high",
+  horizonMap?: HorizonLayerSetting,
+): Promise<Harness> {
   const hook = renderHook(() => useServerLink(), { wrapper: ServerLinkHarness });
   act(() => {
     FakeWebSocket.latest().serverWelcomes();
@@ -176,6 +179,7 @@ async function harness(setting: QualitySetting = "high"): Promise<Harness> {
       return worker;
     },
     workers: 2,
+    ...(horizonMap === undefined ? {} : { horizonMap }),
   });
   return {
     socket: () => FakeWebSocket.latest(),
@@ -482,6 +486,23 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
       )[0],
     ).toEqual([MOON, "baked"]);
     expect(h.workers.length).toBe(2);
+  });
+
+  it.each([
+    ["with the horizon map, its source as before, by default", undefined, false],
+    ["without the horizon map for the A/B (R10.T15.b)", "skipped", true],
+  ] as const)("bakes the lit pass's patches %s", async (_name, horizonMap, skipped) => {
+    const h = await harness("high", horizonMap);
+    await handedOver(h);
+    const sources = h.workers.flatMap((w) => w.pendingBakes).map((b) => b.settings.source);
+    expect(sources.length).toBeGreaterThan(0);
+    expect(
+      sources.every((source) =>
+        source.kind === "body" && source.weights === "baked" && skipped
+          ? source.horizon === "skipped"
+          : !("horizon" in source),
+      ),
+    ).toBe(true);
   });
 
   it("keeps a pass handed back, and disposes of it with its handles at its field's release", async () => {

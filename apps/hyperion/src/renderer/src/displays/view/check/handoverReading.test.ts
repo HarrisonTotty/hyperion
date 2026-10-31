@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { normalise, scale, sub, type Vec3, vec3 } from "../../../geometry/vec3";
+import { add, cross, dot, normalise, scale, sub, type Vec3, vec3 } from "../../../geometry/vec3";
+import { constantNormalMap, perpendicularTo, tilted } from "../../../test/normalMapFixtures";
 import { project } from "../../../view/camera/projection";
 import { IDENTITY_QUATERNION } from "../../../view/camera/quaternion";
 import { METER_CLASS } from "../../../view/post/meter";
 import { toHalfBits } from "../../../view/sky/half";
-import { texelOfDirection } from "./handoverGeometry";
+import { cellCentreDirection, texelOfDirection } from "./handoverGeometry";
 import {
   bodyRect,
   compareReadings,
   type FrameCamera,
   type FrameReading,
+  muFloorBinds,
   OFF_BODY,
   type PixelRect,
   readFrame,
@@ -88,6 +90,7 @@ describe("a frame's reading", () => {
       figure: SPHERE,
       level,
       surveyed: new Set([cell]),
+      normals: null,
     });
     expect([reading.cells[py * WIDTH + px], reading.bodyPixels, reading.surveyPixels]).toEqual([
       cell,
@@ -113,6 +116,7 @@ describe("a frame's reading", () => {
       figure: SPHERE,
       level: 1,
       surveyed: new Set(),
+      normals: null,
     });
     const luminance = 0.2126 * 1 + 0.7152 * 0.5 + 0.0722 * 0.25;
     expect([
@@ -142,6 +146,7 @@ describe("a frame's reading", () => {
       surveyed: new Set([
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
       ]),
+      normals: null,
     });
     expect([reading.bodyMisses, reading.cells[0]]).toEqual([1, UNSURVEYED]);
   });
@@ -159,6 +164,7 @@ describe("a frame's reading", () => {
         figure: SPHERE,
         level: 1,
         surveyed,
+        normals: null,
       });
     const whole = read(WHOLE);
     const part = read(rect);
@@ -181,6 +187,7 @@ describe("a frame's reading", () => {
         figure: SPHERE,
         level: 1,
         surveyed: new Set(),
+        normals: null,
       }),
     ).toThrow(/does not fill/);
   });
@@ -198,11 +205,12 @@ describe("the region about the body", () => {
   });
 });
 
-/** A reading of a strip 1 px high, its pixels' cells and luminances given. */
+/** A reading of a strip 1 px high, its pixels' cells and luminances given, and its floored cells. */
 function strip(
   cells: ReadonlyArray<number>,
   luminance: ReadonlyArray<number>,
   x = 0,
+  floored: ReadonlyArray<number> = [],
 ): FrameReading {
   return {
     widthPx: 8,
@@ -213,6 +221,7 @@ function strip(
     bodyPixels: cells.filter((cell) => cell !== OFF_BODY).length,
     bodyMisses: 0,
     surveyPixels: cells.filter((cell) => cell >= 0).length,
+    floored: new Set(floored),
   };
 }
 
@@ -224,8 +233,21 @@ describe("the comparison of two frames", () => {
 
   it("takes each cell's mean over the pixels both frames assign to it", () => {
     expect(compareReadings(before, after).texels).toEqual([
-      { texel: 7, sharedPixels: 2, meanBefore: 1, meanAfter: 2 },
-      { texel: 11, sharedPixels: 1, meanBefore: 0.5, meanAfter: 0 },
+      { texel: 7, sharedPixels: 2, meanBefore: 1, meanAfter: 2, muFloored: false },
+      { texel: 11, sharedPixels: 1, meanBefore: 0.5, meanAfter: 0, muFloored: false },
+    ]);
+  });
+
+  it("marks a cell whose μ floor binds in either frame, its means taken as any cell's", () => {
+    const flooredBefore = strip([7, 7, 9, OFF_BODY, UNSURVEYED, 11], [1, 1, 2, 0, 3, 0.5], 0, [11]);
+    const flooredAfter = strip([7, 7, 8, 9, UNSURVEYED, 11], [2, 2, 3, 5, 3, 0], 0, [7]);
+    const comparison = compareReadings(flooredBefore, flooredAfter);
+    expect([comparison.texels, comparison.survey]).toEqual([
+      [
+        { texel: 7, sharedPixels: 2, meanBefore: 1, meanAfter: 2, muFloored: true },
+        { texel: 11, sharedPixels: 1, meanBefore: 0.5, meanAfter: 0, muFloored: true },
+      ],
+      compareReadings(before, after).survey,
     ]);
   });
 
@@ -247,11 +269,81 @@ describe("the comparison of two frames", () => {
     const left = strip([7, 7, 7], [1, 1, 1], 0);
     const right = strip([7, 7, 7], [2, 2, 2], 1);
     expect(compareReadings(left, right).texels).toEqual([
-      { texel: 7, sharedPixels: 2, meanBefore: 1, meanAfter: 2 },
+      { texel: 7, sharedPixels: 2, meanBefore: 1, meanAfter: 2, muFloored: false },
     ]);
   });
 
   it("refuses frames of targets of different sizes", () => {
     expect(() => compareReadings(before, { ...after, widthPx: 9 })).toThrow(/scene target/);
+  });
+});
+
+describe("the μ floor at a cell's centre", () => {
+  /** A cell of level 5 on the sphere of 1 km, its centre's direction and outward normal ν. */
+  const LEVEL = 5;
+  const TEXEL = texelOfDirection(normalise(vec3(0.3, 0.2, 1)), LEVEL);
+  const CENTRE = cellCentreDirection(TEXEL, LEVEL) ?? vec3(0, 0, 1);
+  /** A tangent at the centre: the eye leans towards it, the shading normal away from it. */
+  const ALONG = perpendicularTo(CENTRE, 0.4);
+  /** The eye 5 km from the cell's centre, 60° from its normal: μ_ν = ½. */
+  const EYE_M = add(
+    scale(CENTRE, 1000),
+    scale(add(scale(CENTRE, Math.cos(Math.PI / 3)), scale(ALONG, Math.sin(Math.PI / 3))), 5000),
+  );
+  /**
+   * The tilt away from the eye at which n′ · v = ½ μ_ν: with μ_ν = cos e, n′ · v = cos(t + e), so
+   * t = acos(½ cos e) − e, 15.52° at e = 60°.
+   */
+  const CRITICAL_RAD = Math.acos(0.5 * Math.cos(Math.PI / 3)) - Math.PI / 3;
+
+  /** A normal map holding ν tilted away from the eye by `tiltRad` at the cell alone. */
+  function tiltedAway(tiltRad: number) {
+    return constantNormalMap(LEVEL, tilted(CENTRE, scale(ALONG, -1), tiltRad), CENTRE, 0.01);
+  }
+
+  it("binds where the shading normal faces away past half the datum's μ", () => {
+    expect(muFloorBinds(TEXEL, LEVEL, EYE_M, SPHERE, tiltedAway(CRITICAL_RAD + 0.01))).toBe(true);
+  });
+
+  it("does not bind just above the floor", () => {
+    expect(muFloorBinds(TEXEL, LEVEL, EYE_M, SPHERE, tiltedAway(CRITICAL_RAD - 0.01))).toBe(false);
+  });
+
+  it("does not bind on the datum's normal, with no normal map or none at the cell", () => {
+    const elsewhere = constantNormalMap(LEVEL, vec3(1, 0, 0), vec3(-1, 0, 0), 0.01);
+    expect([
+      muFloorBinds(TEXEL, LEVEL, EYE_M, SPHERE, null),
+      muFloorBinds(TEXEL, LEVEL, EYE_M, SPHERE, elsewhere),
+    ]).toEqual([false, false]);
+  });
+
+  it("binds at a cell whose centre lies past the limb", () => {
+    const behind = add(scale(CENTRE, -1000), scale(cross(CENTRE, ALONG), 3000));
+    if (dot(CENTRE, sub(behind, scale(CENTRE, 1000))) >= 0) {
+      throw new Error("the eye stands behind the cell's tangent plane");
+    }
+    expect(muFloorBinds(TEXEL, LEVEL, behind, SPHERE, null)).toBe(true);
+  });
+
+  it("flags the frame's cells whose floor binds, from the frame's eye", () => {
+    const point = scale(normalise(vec3(0.3, 0.3, 1)), 1000);
+    const [px, py] = pixelOf(point);
+    const cell = texelOfDirection(point, LEVEL);
+    const centre = cellCentreDirection(cell, LEVEL) ?? vec3(0, 0, 1);
+    // Tilted 80° from the eye's side: n′ · v is far below half of μ_ν.
+    const away = normalise(sub(scale(centre, dot(CAMERA.eyeM, centre)), CAMERA.eyeM));
+    const read = (tiltRad: number): FrameReading =>
+      readFrame({
+        halfBits: hdr(WHOLE, (x, y) => (x === px && y === py ? LIT : OTHER)),
+        widthPx: WIDTH,
+        heightPx: HEIGHT,
+        rect: WHOLE,
+        camera: CAMERA,
+        figure: SPHERE,
+        level: LEVEL,
+        surveyed: new Set([cell]),
+        normals: constantNormalMap(LEVEL, tilted(centre, away, tiltRad), centre, 0.01),
+      });
+    expect([[...read((80 * Math.PI) / 180).floored], [...read(0).floored]]).toEqual([[cell], []]);
   });
 });

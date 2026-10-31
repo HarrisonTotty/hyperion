@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { BodyIdHex } from "@hyperion/protocol";
+
 import type { TerrainCheckViewRecord } from "../../../../../preload/api";
 import { fakeViewEngineSource } from "../../../test/fakeViewEngine";
 import { FakeRenderEngine } from "../../../test/fakeRenderEngine";
@@ -46,6 +48,9 @@ import {
   type WorkerTraffic,
 } from "./terrainProbe";
 import { ViewsProbe } from "./viewsProbe";
+
+/** A body the probe does not watch. */
+const OTHER_BODY: BodyIdHex = "0200080020000000.0300";
 
 /** Counts with nothing counted. */
 function noTraffic(): { -readonly [K in keyof WorkerTraffic]: number } {
@@ -119,6 +124,7 @@ function watchedSession(
     wirePass: () => null,
     coverageMask: () => null,
     survey: () => null,
+    normalMap: () => null,
     memory: () => ({
       workerFieldBytes: 1_000,
       keptFieldBytes: 200,
@@ -930,6 +936,20 @@ describe("the terrain probe's read-backs (R10.T16.d; the batch review's D-C)", (
     const reading = await probe.readMask();
     stop();
     expect([...(reading?.cells ?? [])]).toEqual([3, 7]);
+  });
+
+  it("gives the held session's normal map of a body for the hand-over check's μ floor (R10.T15.b)", async () => {
+    const normals = { faceTexels: 32, data: new Float16Array(0) };
+    const { probe, stop } = await probed(() => Promise.resolve(new ArrayBuffer(0)));
+    const before = probe.normalMap(probe.moon);
+    const release = probe.watchTerrain({
+      ...watchedSession(new Set(), { count: 0 }),
+      normalMap: (body) => (body === probe.moon ? normals : null),
+    });
+    const held = [probe.normalMap(probe.moon), probe.normalMap(OTHER_BODY)];
+    release();
+    stop();
+    expect([before, ...held, probe.normalMap(probe.moon)]).toEqual([null, normals, null, null]);
   });
 });
 

@@ -359,6 +359,16 @@ export class ClassMapStore implements ClassMapSource {
     this.#reported.delete(body);
   }
 
+  /**
+   * The normal map `body`'s disc shades with, its texels as the class map's surface carries them
+   * (R10.T10.g); `null` where the body has no map, its map no normal, or its textures are not made
+   * (the device lost). The hand-over check reads it for its μ floor (plan R10, R10.T15.b).
+   */
+  normalMapOf(body: BodyIdHex): NormalMapTexels | null {
+    const map = this.#bodies.get(body)?.map ?? null;
+    return map === null || map.texture === null || map.normalTexture === null ? null : map.normals;
+  }
+
   classMapOf(body: BodyIdHex, elsewhere: PhotometricLaw): ClassMapDiscSurface | null {
     const map = this.#bodies.get(body)?.map ?? null;
     if (map === null || map.texture === null) {

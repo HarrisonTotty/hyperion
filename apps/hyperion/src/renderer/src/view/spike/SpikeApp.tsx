@@ -9,9 +9,10 @@ import type { TerrainVariant } from "../quality/qualitySetting";
 import type { MeasureDescent } from "./bodyDescent";
 import { GpuCapture } from "./capture";
 import { DescentSpike, MAIN_CANVAS_SELECTOR } from "./DescentSpike";
-import { SERVED_WORLD_NOT_READ, ServedDescentSpike } from "./ServedDescentSpike";
+import { ServedDescentSpike } from "./ServedDescentSpike";
 import { SpikeHeader } from "./SpikeHeader";
 import { SpikeController, variantOf } from "./spikeController";
+import { SPIKE_RETRY } from "./spikeFaults";
 import { SPIKE_PASS_ROWS, spikeGpu } from "./spikeHarness";
 import {
   defaultSpikeWorkers,
@@ -21,6 +22,12 @@ import {
   type SpikeWorkers,
 } from "./spikeRun";
 import { SpikeSizes } from "./spikeSizes";
+
+/**
+ * The status of a served launch that names no world, the launch type's case `readSpikeLaunch`
+ * refuses, which no run reaches.
+ */
+const SERVED_WORLD_NOT_READ = `TERRAIN NOT MEASURED: served world not read, ${SPIKE_RETRY}`;
 
 /** Props of {@link SpikeApp}. */
 export interface SpikeAppProps {
@@ -196,6 +203,8 @@ export function SpikeApp({
     measure,
     listeners: harness.listeners,
     sizes: harness.sizes ?? undefined,
+    // The A/B's lit bakes skip the horizon map (`--horizon off`, R10.T15.b).
+    horizonMap: launch.horizon === "off" ? ("skipped" as const) : undefined,
   };
   return (
     <GraphicsStatusProvider graphics={graphics} gpu={navigatorGpu()}>

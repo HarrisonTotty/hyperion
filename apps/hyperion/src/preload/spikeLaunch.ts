@@ -70,9 +70,11 @@ export function readServedWorldNames(value: unknown): ServedWorldNames | null {
  * `value` as spike options, or `null` if it is not one: every field present and of its type, the
  * seed a u64, the worker count a whole number from 1 to 64, the world among `--world`'s choices,
  * and the style among `--style`'s over a generated world and `null` over the test planet, which
- * takes none; `sizes` (R10.T14.b) absent, or `on` over a generated world alone; and `served` a
- * universe's and a body's IDs over the served world (R10.T15.b), absent over every other. An `off`
- * is read as absent, which is off, so that an unmeasured launch is as it was before the option.
+ * takes none; `sizes` (R10.T14.b) absent, or `on` over a generated world alone; `horizon`
+ * (R10.T15.b) absent, or `off` over a generated world in the photorealistic style alone; and
+ * `served` a universe's and a body's IDs over the served world (R10.T15.b), absent over every other.
+ * A `sizes` of `off` is read as absent, which is off, and a `horizon` of `on` as absent, which is
+ * on, so that a launch without either is as it was before the option.
  */
 export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
   if (!isRecord(value)) {
@@ -93,6 +95,7 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     world,
     style,
     sizes,
+    horizon,
     served,
   } = value;
   if (
@@ -121,6 +124,8 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     worldStyle === undefined ||
     !(sizes === undefined || oneOf(sizes, ["on", "off"] as const)) ||
     (sizes === "on" && world === "test-planet") ||
+    !(horizon === undefined || oneOf(horizon, ["on", "off"] as const)) ||
+    (horizon === "off" && worldStyle !== "photorealistic") ||
     (world === "served" ? names === null : served !== undefined)
   ) {
     return null;
@@ -140,6 +145,7 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     world,
     style: worldStyle,
     ...(sizes === "on" ? { sizes } : {}),
+    ...(horizon === "off" ? { horizon } : {}),
     ...(names === null ? {} : { served: names }),
   };
 }

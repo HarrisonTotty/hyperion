@@ -14,7 +14,7 @@
 # transfer mode (`out/main/smoke.js --smoke-transfer`) on the place-ship's universe and body,
 # headless on SwiftShader with no display, as `testRender.sh` runs the harness: Electron's one
 # request beside the page's own files is that server's socket. Behind the serve gate
-# (`GENERATED_SURFACES_FROM`, generator version 24) the server answers the field `not_modelled`,
+# (`GENERATED_SURFACES_FROM`, generator version 25) the server answers the field `not_modelled`,
 # and the check fails, saying so.
 #
 # The server and Electron run in process groups of their own under `timeout`, each killed when the

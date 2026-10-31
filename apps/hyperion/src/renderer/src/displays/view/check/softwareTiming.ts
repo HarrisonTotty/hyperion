@@ -71,8 +71,8 @@ export function terrainCheckTimingOf(
 }
 
 /**
- * The hand-over check's timing for a launch: its wait and a look's overrun stretched in the
- * software mode.
+ * The hand-over check's timing for a launch: its waits, the survey's among them, and a look's
+ * overrun stretched in the software mode.
  */
 export function handoverCheckTimingOf(
   timing: HandoverCheckTiming,
@@ -82,6 +82,7 @@ export function handoverCheckTimingOf(
     ? {
         ...timing,
         waitMs: stretched(timing.waitMs),
+        surveyWaitMs: stretched(timing.surveyWaitMs),
         overrunMs: stretched(timing.overrunMs),
       }
     : timing;

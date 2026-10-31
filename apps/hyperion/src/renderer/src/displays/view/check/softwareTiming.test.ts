@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ATMOSPHERE_CHECK_TIMING } from "./atmosphereCheckRun";
-import { HANDOVER_CHECK_TIMING } from "./handoverCheckRun";
+import { HANDOVER_CHECK_TIMING, SERVED_HANDOVER_CHECK_TIMING } from "./handoverCheckRun";
 import {
   atmosphereCheckTimingOf,
   handoverCheckTimingOf,
@@ -49,12 +49,20 @@ describe("the software mode's timings (R01.T16)", () => {
     }
   });
 
-  it("stretch the hand-over check's wait and a look's overrun", () => {
+  it("stretch the hand-over check's waits and a look's overrun", () => {
     expect(handoverCheckTimingOf(HANDOVER_CHECK_TIMING, "software")).toEqual({
       ...HANDOVER_CHECK_TIMING,
       waitMs: 300_000,
+      surveyWaitMs: 300_000,
       overrunMs: 300_000,
     });
+  });
+
+  it("stretch a served world's survey wait of 5 minutes to 25 (R10.T15.b)", () => {
+    expect([
+      SERVED_HANDOVER_CHECK_TIMING.surveyWaitMs,
+      handoverCheckTimingOf(SERVED_HANDOVER_CHECK_TIMING, "software").surveyWaitMs,
+    ]).toEqual([300_000, 1_500_000]);
   });
 
   it("leave every other mode's timings as they are", () => {

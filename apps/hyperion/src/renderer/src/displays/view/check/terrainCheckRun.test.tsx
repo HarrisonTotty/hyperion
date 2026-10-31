@@ -211,6 +211,7 @@ function fakeProbe(
     wirePass: () => null,
     coverageMask: () => null,
     survey: () => null,
+    normalMap: () => null,
     memory: () => ({ workerFieldBytes: 0, keptFieldBytes: 0, gpuBytes: new Map() }),
     workerCount: 3,
     terrainFaults: new Map(),

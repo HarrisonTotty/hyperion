@@ -167,9 +167,18 @@ export type TestPlanetRidges = "off" | "on";
 export type WeightsLayerSetting = "baked" | "skipped";
 
 /**
+ * Whether a body's bake makes its horizon map where its weights would have it (plan R10,
+ * R10.T15.b): `skipped` with the weights baked is the descent spike's A/B (`--horizon off`), whose
+ * run beside an ordinary one gives the map's share of the workers' bake time, since the module bakes
+ * the map in the patch's one call.
+ */
+export type HorizonLayerSetting = "baked" | "skipped";
+
+/**
  * What a patch's heights come from (R10.T6.b): R05's provisional test planet, with or without its
  * ridges, which the descent spike keeps; or a body, over the field the workers hold of it, with
- * its detail seed (`BodyHooksDto.detail_seed`, R09.T1.b) and whether its weights are baked.
+ * its detail seed (`BodyHooksDto.detail_seed`, R09.T1.b), whether its weights are baked, and,
+ * where given, whether its horizon map is (as its weights are where absent).
  */
 export type HeightSourceSetting =
   | { readonly kind: "test-planet"; readonly ridges: TestPlanetRidges }
@@ -178,6 +187,7 @@ export type HeightSourceSetting =
       readonly body: BodyIdHex;
       readonly detailSeed: DetailSeedHex;
       readonly weights: WeightsLayerSetting;
+      readonly horizon?: HorizonLayerSetting;
     };
 
 /** How a patch is baked: the setting's vertex path and normal resolution, and its height source. */

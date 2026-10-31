@@ -12,8 +12,10 @@
 # --ridged on|off, --dawn-safety on|off, --capture <dir>, --trace-profile on|off (V8's CPU profiler
 # and `gpu` in the trace, off by default: a profiled run is a diagnostic, never judged; R05.T14.e),
 # --world test-planet|terrain-test|served and --style photorealistic|wireframe (R10.T14.c,
-# R10.T15.b), and --sizes on|off (R10.T14.b: a generated world's cache sizes measured, off by
-# default; refused on the test planet).
+# R10.T15.b), --sizes on|off (R10.T14.b: a generated world's cache sizes measured, off by
+# default; refused on the test planet), and --horizon on|off (R10.T15.b: the lit patches' horizon
+# map, on by default; off is the A/B whose run beside an ordinary --sizes on run gives the map's
+# share of the height workers' bake time; refused on the test planet and with --style wireframe).
 #
 # --world test-planet, the default, flies R05's test planet. --world terrain-test flies TERRAIN
 # TEST's moon over a generated world's terrain: its field is served in the page by TERRAIN TEST's
@@ -34,7 +36,7 @@
 # body as its own --universe and --body. Its run is given 21 minutes more: the field's 10-minute
 # hold, since the server computes the body's coarse field before its first answer, one site's 10
 # minutes of bakes, and a minute. Behind the serve gate (`GENERATED_SURFACES_FROM`, generator
-# version 24) the server answers every generated body's field not modelled, and the spike says so
+# version 25) the server answers every generated body's field not modelled, and the spike says so
 # and ends failed.
 #
 # --companion-load <threads> runs that many busy threads beside the run, standing in for the

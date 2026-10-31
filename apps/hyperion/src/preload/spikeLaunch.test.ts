@@ -139,6 +139,23 @@ describe("readSpikeLaunch", () => {
     expect(readSpikeLaunch({ ...LAUNCH, sizes: "off" })).not.toHaveProperty("sizes");
   });
 
+  it("reads the horizon map off in the photorealistic style, the A/B's (R10.T15.b)", () => {
+    const lit = { ...LAUNCH, style: "photorealistic" } as const;
+    expect(readSpikeLaunch({ ...lit, horizon: "off" })).toEqual({ ...lit, horizon: "off" });
+  });
+
+  it("reads the horizon map on as absent, the launch as it was before the option", () => {
+    expect(readSpikeLaunch({ ...LAUNCH, horizon: "on" })).toEqual(LAUNCH);
+  });
+
+  it.each([
+    ["over the test planet, whose bakes make none", { world: "test-planet", style: null }],
+    ["in the wireframe, whose bakes skip it already", { style: "wireframe" }],
+    ["of another word", { style: "photorealistic", horizon: "skipped" }],
+  ] as const)("refuses the horizon map off %s", (_why, change) => {
+    expect(readSpikeLaunch({ ...LAUNCH, horizon: "off", ...change })).toBeNull();
+  });
+
   it("refuses the measured sizes over the test planet, whose terrain is no session's", () => {
     expect(
       readSpikeLaunch({ ...LAUNCH, world: "test-planet", style: null, sizes: "on" }),

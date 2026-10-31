@@ -37,17 +37,24 @@ import { styleName } from "../photoreal/style";
 import type { QualitySetting, TerrainVariant } from "../quality/qualitySetting";
 import { cameraSceneOf, type ViewScene } from "../scene/model";
 import { TERRAIN_TEST_SCRIPT, terrainSceneFixture } from "../scenes/terrainScene";
+import type { FieldFailure } from "../terrain/coarseFieldStore";
 import type { PatchKey } from "../terrain/patchKey";
 import {
   formatElevationReading,
   NO_BREAK_SPACE,
   NO_GROUND,
   NOT_SURVEYED,
+  surveyFailureStatus,
 } from "../terrain/readouts";
 import type { Selection, SelectionInput } from "../terrain/select";
-import type { TestPlanetRidges } from "../terrain/workers/messages";
+import type { HorizonLayerSetting, TestPlanetRidges } from "../terrain/workers/messages";
 import { type DrawnSurveyEdge, viewStrokesAt } from "../wireframe/drawList";
-import { FieldNotServed, type MeasureDescent, measureWorldDescent } from "./bodyDescent";
+import {
+  FieldFailed,
+  FieldNotServed,
+  type MeasureDescent,
+  measureWorldDescent,
+} from "./bodyDescent";
 import { spikeExposure } from "./litView";
 import {
   DEFAULT_SPIKE_WORKERS,
@@ -163,6 +170,12 @@ export interface DescentSpikeProps {
    * 4 Hz, its answers not shown. Absent, the spike is T14.c's.
    */
   readonly sizes?: SpikeSizes | undefined;
+  /**
+   * Whether a generated world's lit patches bake the horizon map (`--horizon`, plan R10, R10.T15.b):
+   * baked unless given; `skipped` for the A/B whose run beside an ordinary one gives the map's
+   * share of the height workers' bake time (`--sizes on` times their bakes).
+   */
+  readonly horizonMap?: HorizonLayerSetting | undefined;
 }
 
 type Preparation =
@@ -172,7 +185,12 @@ type Preparation =
   /** The terrain was measured, but the script cannot clear it (`DescentRefused`). */
   | { readonly kind: "refused" }
   /** The server serves no surface for the served world's body (`FieldNotServed`, R10.T15.b). */
-  | { readonly kind: "not served" };
+  | { readonly kind: "not served" }
+  /**
+   * The served world's field failed, refused by the server or failing the console's checks
+   * (`FieldFailed`, R10.T15.b), which its status states in the survey line's words.
+   */
+  | { readonly kind: "field failed"; readonly failure: FieldFailure };
 
 /** What the run's loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
 interface Published {
@@ -457,7 +475,10 @@ function Instrument({ title, canvasRef, stageRef, run, listId, cameraLabel }: In
  * the server for the body's field over the link, its header shows the link's state, and the descent
  * is measured once the field holds its survey, as over `TERRAIN TEST`; where the server serves no
  * surface for it (behind the serve gate, its field `not_modelled`) the spike says so in plain text
- * ({@link surfaceNotServed}), a data state and not a fault, and the run ends failed.
+ * ({@link surfaceNotServed}), a data state and not a fault, and the run ends failed; a field the
+ * server refuses, or one that fails the console's checks, reads in the survey line's words
+ * (`SURVEY COVERAGE REJECTED: <the server's reason>, relaunch to retry`, `SURVEY DATA INVALID:
+ * <the check that failed>, relaunch to retry`; `surveyFailureStatus`), and the run ends failed.
  *
  * With `sizes` over the terrain world (`--sizes on`, plan R10, R10.T14.b) the craft instrument's
  * canvas is the run's second session view, named and labelled in the style it drew in, the
@@ -479,6 +500,7 @@ export function DescentSpike({
   measure = measureWorldDescent,
   listeners,
   sizes: measured,
+  horizonMap,
 }: DescentSpikeProps) {
   const id = useId();
   // The variant by its fields, so that a new object of the same variant does not restart the run.
@@ -504,6 +526,7 @@ export function DescentSpike({
     workers,
     // The session compiles its passes' materials at this setting as it is made (R10.T14.d).
     setting,
+    horizonMap,
   });
   const terrainFaults = useTerrainFaults(session);
   const [preparation, setPreparation] = useState<Preparation>({ kind: "measuring" });
@@ -620,6 +643,13 @@ export function DescentSpike({
             console.error("the descent spike's served world has no served surface:", error);
             inputsRef.current.listeners?.onFailed?.(surfaceNotServed(spikeWorld.bodyDesignation));
             setPreparation({ kind: "not served" });
+          } else if (error instanceof FieldFailed && worldName === "served") {
+            // The guide's row: a served field refused or failing a check reads as the survey line.
+            console.error("the descent spike's served world's field failed:", error);
+            inputsRef.current.listeners?.onFailed?.(
+              surveyFailureStatus(error.failure, SPIKE_RETRY).text,
+            );
+            setPreparation({ kind: "field failed", failure: error.failure });
           } else {
             console.error("the descent spike's terrain could not be measured:", error);
             inputsRef.current.listeners?.onFailed?.(NOT_MEASURED);
@@ -850,15 +880,17 @@ export function DescentSpike({
       ? { text: NOT_MEASURED, standing: "fault" }
       : preparation.kind === "not served"
         ? { text: surfaceNotServed(spikeWorld.bodyDesignation), standing: "refused" }
-        : preparation.kind === "refused"
-          ? { text: DESCENT_REFUSED, standing: "fault" }
-          : measuring
-            ? { text: MEASURING, standing: "waiting" }
-            : engineState.kind === "unavailable"
-              ? { text: NO_ADAPTER, standing: "fault" }
-              : engineState.kind === "pending"
-                ? { text: "GRAPHICS ACQUIRING ADAPTER", standing: "waiting" }
-                : null;
+        : preparation.kind === "field failed"
+          ? surveyFailureStatus(preparation.failure, SPIKE_RETRY)
+          : preparation.kind === "refused"
+            ? { text: DESCENT_REFUSED, standing: "fault" }
+            : measuring
+              ? { text: MEASURING, standing: "waiting" }
+              : engineState.kind === "unavailable"
+                ? { text: NO_ADAPTER, standing: "fault" }
+                : engineState.kind === "pending"
+                  ? { text: "GRAPHICS ACQUIRING ADAPTER", standing: "waiting" }
+                  : null;
 
   const pose = shownFrame?.pose ?? null;
   // The height's unit switches with hysteresis from the one last shown, adjusted during render.

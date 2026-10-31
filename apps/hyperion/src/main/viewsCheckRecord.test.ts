@@ -256,6 +256,8 @@ describe("the hand-over check's record (R10.T10.g)", () => {
     [["looks", 0, "comparisons", 0, "texels", 0, "sharedPixels"], 0],
     [["looks", 0, "comparisons", 0, "texels", 1, "texel"], 19_200],
     [["looks", 0, "comparisons", 0, "texels", 2, "meanAfter"], Number.POSITIVE_INFINITY],
+    [["looks", 0, "comparisons", 0, "texels", 3, "muFloored"], "yes"],
+    [["looks", 0, "comparisons", 0, "texels", 0, "muFloored"], undefined],
     [["faults", 0], { atMs: 1 }],
   ])("refuses a record whose %j is %j", (path, value) => {
     const record =

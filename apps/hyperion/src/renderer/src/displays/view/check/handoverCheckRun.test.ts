@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { HandoverCheckRecord, ViewsCheckApi } from "../../../../../preload/api";
 import {
+  HANDOVER_CHECK_TIMING,
   type HandoverCheckEnding,
+  handoverCheckTimingFor,
   parseExposureReading,
   recordHandoverCheck,
   regimeOf,
+  SERVED_HANDOVER_CHECK_TIMING,
 } from "./handoverCheckRun";
 
 describe("a frame's regime", () => {
@@ -38,6 +41,20 @@ describe("EXPOSURE's reading", () => {
 
   it("reads nothing where there is no reading", () => {
     expect(parseExposureReading(null)).toBeNull();
+  });
+});
+
+describe("the hand-over check's timing (R10.T15.b)", () => {
+  it("waits 5 minutes for a served world's survey, and as before for a fixture's", () => {
+    expect([
+      handoverCheckTimingFor(true),
+      handoverCheckTimingFor(false),
+      SERVED_HANDOVER_CHECK_TIMING,
+    ]).toEqual([
+      SERVED_HANDOVER_CHECK_TIMING,
+      HANDOVER_CHECK_TIMING,
+      { ...HANDOVER_CHECK_TIMING, surveyWaitMs: 300_000 },
+    ]);
   });
 });
 

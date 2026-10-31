@@ -31,11 +31,15 @@ function frame(
   };
 }
 
-/** Three cells: two of several shared pixels a little apart, and one of a single pixel. */
+/**
+ * Four cells: two of several shared pixels a little apart, one of a single pixel, and one at the
+ * limb whose μ floor binds (R10.T15.b), far over the bound and left out.
+ */
 const TEXELS: ReadonlyArray<HandoverTexelRecord> = [
-  { texel: 19_200, sharedPixels: 6, meanBefore: 0.2, meanAfter: 0.21 },
-  { texel: 19_201, sharedPixels: 5, meanBefore: 0.18, meanAfter: 0.175 },
-  { texel: 19_265, sharedPixels: 1, meanBefore: 0.2, meanAfter: 0.4 },
+  { texel: 19_200, sharedPixels: 6, meanBefore: 0.2, meanAfter: 0.21, muFloored: false },
+  { texel: 19_201, sharedPixels: 5, meanBefore: 0.18, meanAfter: 0.175, muFloored: false },
+  { texel: 19_265, sharedPixels: 1, meanBefore: 0.2, meanAfter: 0.4, muFloored: false },
+  { texel: 19_330, sharedPixels: 4, meanBefore: 0.05, meanAfter: 0.11, muFloored: true },
 ];
 
 /** A switch within the bound everywhere. */

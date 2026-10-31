@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import { norm, sub } from "../../geometry/vec3";
 import { FIXTURE_EARTH, FIXTURE_JUPITER, FIXTURE_SYSTEM } from "../../test/planetaryFixture";
-import { sceneModelOf, stateNearEarth } from "../../test/sceneFixture";
+import { sceneModelOf, stateNearEarth, stateNearEarthWith } from "../../test/sceneFixture";
 import { skyResponse } from "../../test/skyFixtures";
 import { aClosePairOrbit, aWidePairOrbit } from "../../test/systemFixtures";
 import { AU_M } from "../scenes/kept";
@@ -202,6 +202,54 @@ describe("a served body, from the server's scene (R10.T15.b)", () => {
     });
   });
 
+  it.each([
+    [
+      "its rotation withheld",
+      (body: BodySummaryDto): BodySummaryDto => ({ ...body, rotation: { state: "not_resolved" } }),
+      "ROTATION not resolved",
+    ],
+    [
+      "its rotation not modelled",
+      (body: BodySummaryDto): BodySummaryDto => ({ ...body, rotation: { state: "not_modelled" } }),
+      "ROTATION not yet modelled",
+    ],
+    [
+      "its rotation not applying",
+      (body: BodySummaryDto): BodySummaryDto => ({
+        ...body,
+        rotation: { state: "not_applicable" },
+      }),
+      "no rotation",
+    ],
+    [
+      "its mass withheld",
+      (body: BodySummaryDto): BodySummaryDto => ({ ...body, mass_kg: { state: "not_resolved" } }),
+      "MASS not resolved",
+    ],
+    [
+      "its kind withheld, a contact",
+      (body: BodySummaryDto): BodySummaryDto => ({ ...body, kind: { type: "unresolved" } }),
+      "KIND not resolved",
+    ],
+    [
+      "its figure and bulk withheld",
+      (body: BodySummaryDto): BodySummaryDto => ({
+        ...body,
+        figure: { state: "not_resolved" },
+        bulk: { state: "not_resolved" },
+      }),
+      "BULK not resolved",
+    ],
+  ] as const)("is none with %s, the section named in its state's words", (_name, change, gap) => {
+    expect(servedBodyOf(sceneModelOf(stateNearEarthWith(change)), UNIVERSE, FIXTURE_EARTH)).toEqual(
+      {
+        kind: "gap",
+        gap,
+        body: FIXTURE_EARTH,
+      },
+    );
+  });
+
   it("is none where the scene holds no system", () => {
     const { system: _system, ...state } = stateNearEarth();
     const read = servedBodyOf(
@@ -279,6 +327,7 @@ describe("a served body's host discs", () => {
     );
     expect(read).toEqual({
       ok: false,
+      reason: "queue_full: the pool is full",
       message: `the sky's host discs at ${FIXTURE_EARTH} failed: queue_full: the pool is full`,
     });
   });

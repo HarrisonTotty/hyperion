@@ -2,7 +2,7 @@
  * A served world's answers over R03's fake socket (plan R10, R10.T15.b): the slice's Earth's scene,
  * its sky's discs and its field, as the hand-over check's served world reads them.
  */
-import type { BodyIdHex } from "@hyperion/protocol";
+import type { BodyIdHex, SceneStateDto } from "@hyperion/protocol";
 
 import { TERRAIN_HOST_DISCS } from "../view/scenes/terrainScene";
 import {
@@ -18,12 +18,18 @@ import type { FakeWebSocket } from "./FakeWebSocket";
 import { stateNearEarth } from "./sceneFixture";
 import { skyResponse } from "./skyFixtures";
 
-/** Opens the latest `subscribe` on the ship's scene in the slice's Earth's frame. */
-export function answerServedScene(socket: FakeWebSocket): void {
+/**
+ * Opens the latest `subscribe` on `state`: the ship's scene in the slice's Earth's frame unless
+ * given.
+ */
+export function answerServedScene(
+  socket: FakeWebSocket,
+  state: SceneStateDto = stateNearEarth(),
+): void {
   socket.serverAnswers("subscribe", () => ({
     kind: "subscribe",
     subscription: 1,
-    state: { topic: "scene", ...stateNearEarth() },
+    state: { topic: "scene", ...state },
   }));
 }
 

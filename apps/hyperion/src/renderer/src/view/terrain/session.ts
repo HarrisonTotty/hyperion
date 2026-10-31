@@ -111,6 +111,7 @@ import {
   toBodyDetailRequest,
 } from "../../lib/system/bodiesWire";
 import { stepClassMapPoints } from "../bodies/classMapPoint";
+import type { NormalMapTexels } from "../bodies/discNormals";
 import type { LitRegime } from "../bodies/regime";
 import type { ViewBudget } from "../budget/viewBudget";
 import type { CameraPose } from "../camera/pose";
@@ -178,7 +179,7 @@ import {
   HeightWorkerPool,
   type WorkerLike,
 } from "./workers/pool";
-import type { WeightsLayerSetting } from "./workers/messages";
+import type { HorizonLayerSetting, WeightsLayerSetting } from "./workers/messages";
 
 /**
  * What a session asks of its server: R09's `surface_field` for the fields and `body_detail` for
@@ -219,6 +220,12 @@ export interface TerrainSessionOptions {
    * ({@link defaultHeightWorkers} of `navigator.hardwareConcurrency`) where absent.
    */
   readonly workers?: number;
+  /**
+   * Whether its lit passes' bakes make the horizon map: `baked` where absent; `skipped` for the
+   * descent spike's A/B (`--horizon off`, plan R10, R10.T15.b), whose run beside an ordinary one
+   * gives the map's share of the workers' bake time. The wireframe's bakes skip it either way.
+   */
+  readonly horizonMap?: HorizonLayerSetting;
 }
 
 /**
@@ -806,6 +813,7 @@ export class TerrainSession {
   readonly #faultListeners = new Set<() => void>();
   readonly #unsubscribe: ReadonlyArray<() => void>;
   readonly #workerCount: number;
+  readonly #horizonMap: HorizonLayerSetting;
   #faults: ReadonlyMap<ViewId, TerrainFault> = NO_FAULTS;
   /** The terrain's fault by its first cause raised, which stands for the session; `null` before. */
   #cause: TerrainFault | null = null;
@@ -823,6 +831,7 @@ export class TerrainSession {
     this.#textures = new SessionTextures(options.engine);
     this.#workerCount =
       options.workers ?? defaultHeightWorkers(globalThis.navigator.hardwareConcurrency);
+    this.#horizonMap = options.horizonMap ?? "baked";
     const pool = new HeightWorkerPool({
       workers: this.#workerCount,
       createWorker: options.createWorker,
@@ -884,6 +893,14 @@ export class TerrainSession {
    */
   get classMaps(): ClassMapSource {
     return this.#classMaps;
+  }
+
+  /**
+   * The normal map a wanted body's disc shades with (R10.T10.g; `ClassMapStore.normalMapOf`), or
+   * `null` for none: the hand-over check's μ floor reads it (plan R10, R10.T15.b).
+   */
+  normalMap(body: BodyIdHex): NormalMapTexels | null {
+    return this.#classMaps.normalMapOf(body);
   }
 
   /**
@@ -1641,7 +1658,14 @@ export class TerrainSession {
         setting: first.report.setting,
         ...(terrain === null ? {} : { terrain }),
         planet: planetGeometry(figure, bounds?.table ?? null, bounds?.sigmaM ?? null),
-        source: { kind: "body", body, detailSeed, weights },
+        source: {
+          kind: "body",
+          body,
+          detailSeed,
+          weights,
+          // The A/B's lit bakes skip the map alone (R10.T15.b); the wireframe's skip it with the weights.
+          ...(shading === "lit" && this.#horizonMap === "skipped" ? { horizon: "skipped" } : {}),
+        },
         createPool: (bake) => this.#pool.lane(bake),
         survey: held.survey,
         // Compiled when the session was made, so that the hand-over compiles none (R10.T14.d).

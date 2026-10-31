@@ -4175,7 +4175,9 @@ pass.
     n′ · v < ½ μ_ν, those cells counted in the record) and an instrument for the horizon map's
     share of the workers' bake time.
     Records: [10-terrain-on-generated-worlds/records/R10.T15.b.md](10-terrain-on-generated-worlds/records/R10.T15.b.md).
-    _T15.b.1 built 2026-10-29 (`2206d2d`, `500aba6`, `2700d8b`, `35c69d5`)._
+    _T15.b.1 built 2026-10-29 (`2206d2d`, `500aba6`, `2700d8b`, `35c69d5`). T15.b.2's code built
+    2026-10-31 (the μ-floor exclusion, the horizon map's A/B, row 1426's strings); its runs wait on
+    the serve gate, which opens at 25 (the record)._
   - _From earlier tasks' records_ (gathered at RM5's close-out, 2026-10-29: item 30's step as
     decision-r10-item30 §6 rules it, the rest the records' hand-offs, each source's text binding;
     the gathering is a lean, main's to adopt):

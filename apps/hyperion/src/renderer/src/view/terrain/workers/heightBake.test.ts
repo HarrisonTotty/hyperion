@@ -14,7 +14,7 @@ import {
   WASM_SIGMA_SURVEY,
   WorkerFields,
 } from "./heightBake";
-import type { ClassMapAnswer, GroundReadoutRequest } from "./messages";
+import type { ClassMapAnswer, GroundReadoutRequest, HeightSourceSetting } from "./messages";
 
 const MOON = keptBody(1);
 const PLANET = keptBody(2);
@@ -116,6 +116,8 @@ interface FakeBake {
   readonly codes: Uint16Array;
   /** The levels and palettes `maturityNodes` was asked at, in order. */
   readonly nodesAsked: Array<{ readonly level: number; readonly palette: Uint8Array }>;
+  /** The weights and horizon layers each bake was asked with, as the module's enum values. */
+  readonly layersAsked: Array<{ readonly weights: number; readonly horizon: number }>;
 }
 
 /** A body's bake of the fake module: zeros of a patch's sizes, a palette of one slot, `codes`. */
@@ -196,8 +198,10 @@ function fakeModule(
     get heldBytes() {
       return [...held.values()].reduce((a, b) => a + b, 0);
     },
-    bake: (system, body) =>
-      bake !== undefined && held.has(key(system, body)) ? fakeBaked(bake.codes) : undefined,
+    bake: (system, body, _seed, _face, _level, _i, _j, _vertexPath, _normals, weights, horizon) => {
+      bake?.layersAsked.push({ weights, horizon });
+      return bake !== undefined && held.has(key(system, body)) ? fakeBaked(bake.codes) : undefined;
+    },
     reading: () => undefined,
     slantRange: () => {
       throw new Error("a field test drew a line of sight");
@@ -761,13 +765,20 @@ describe("a height worker's fields", () => {
     expect(answer.transfer).toEqual([]);
   });
 
-  describe("a bake's maturity layer (R10.T1.c's client half)", () => {
-    /** A held body's bake at level 13 by {@link fakeModule} baking `codes`, and what it asked. */
-    function bakedWith(codes: Uint16Array): {
+  describe("a bake's maturity layer (R10.T1.c's client half) and horizon map (R10.T15.b)", () => {
+    /**
+     * A held body's bake at level 13 by {@link fakeModule} baking `codes`, from the body's source
+     * changed by `source`, and what it asked.
+     */
+    function bakedWith(
+      codes: Uint16Array,
+      source: Partial<Extract<HeightSourceSetting, { kind: "body" }>> = {},
+    ): {
       readonly answer: ReturnType<typeof answerRequest>;
       readonly asked: FakeBake["nodesAsked"];
+      readonly layers: FakeBake["layersAsked"];
     } {
-      const bake: FakeBake = { codes, nodesAsked: [] };
+      const bake: FakeBake = { codes, nodesAsked: [], layersAsked: [] };
       const { module } = fakeModule(bake);
       const fields = new WorkerFields(module);
       answerRequest(
@@ -792,12 +803,18 @@ describe("a height worker's fields", () => {
           settings: {
             vertexPath: "face-differences",
             normals: "mesh",
-            source: { kind: "body", body: MOON, detailSeed: "617373656d626c79", weights: "baked" },
+            source: {
+              kind: "body",
+              body: MOON,
+              detailSeed: "617373656d626c79",
+              weights: "baked",
+              ...source,
+            },
           },
         },
         fields,
       );
-      return { answer, asked: bake.nodesAsked };
+      return { answer, asked: bake.nodesAsked, layers: bake.layersAsked };
     }
 
     it("posts the bake's codes with its palette's nodes at the patch's level, both transferred", () => {
@@ -815,6 +832,18 @@ describe("a height worker's fields", () => {
       expect(answer.transfer).toEqual(
         expect.arrayContaining([maturity?.codes.buffer, maturity?.nodes.buffer]),
       );
+    });
+
+    it.each([
+      ["the lit style's, the horizon map with the weights", {}, { weights: 0, horizon: 0 }],
+      [
+        "the A/B's, the weights alone (R10.T15.b)",
+        { horizon: "skipped" } as const,
+        { weights: 0, horizon: 1 },
+      ],
+      ["the wireframe's, neither", { weights: "skipped" } as const, { weights: 1, horizon: 1 }],
+    ])("bakes %s", (_name, source, layers) => {
+      expect(bakedWith(new Uint16Array(), source).layers).toEqual([layers]);
     });
 
     it("posts no maturity, and asks for no nodes, where the bake made no layer", () => {

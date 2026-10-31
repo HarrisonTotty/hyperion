@@ -601,6 +601,15 @@ describe("the class-map store", () => {
     store.dispose();
   });
 
+  it("gives the normal map's texels the disc shades with, and none for a body it does not hold (R10.T15.b)", async () => {
+    const { store } = await holdingNormals();
+    const held = store.normalMapOf(MOON);
+    const shaded = store.classMapOf(MOON, ELSEWHERE)?.normals?.texels;
+    store.release(MOON);
+    expect([held !== null && held === shaded, store.normalMapOf(MOON)]).toEqual([true, null]);
+    store.dispose();
+  });
+
   it("asks again while the normals are incomplete, at a block that brings cells", async () => {
     const { pool, store } = await holdingNormals(false);
     pool.change(MOON, 4, [], [90]);

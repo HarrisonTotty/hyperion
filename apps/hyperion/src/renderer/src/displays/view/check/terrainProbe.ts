@@ -50,6 +50,7 @@ import type {
   TerrainCheckViewRecord,
   ViewsCheckTerrainFixture,
 } from "../../../../../preload/api";
+import type { NormalMapTexels } from "../../../view/bodies/discNormals";
 import type { ViewId } from "../../../view/camera/state";
 import type { AllocationEvent, MemoryCategory } from "../../../view/engine/memory";
 import type {
@@ -124,6 +125,8 @@ export interface WatchedSession {
   wirePass(body: BodyIdHex): WatchedPass | null;
   coverageMask(body: BodyIdHex): TextureHandle | null;
   survey(body: BodyIdHex): { readonly coverage: { maskTexels(): Uint8Array } | null } | null;
+  /** The normal map a body's disc shades with, or `null` (`TerrainSession.normalMap`, R10.T15.b). */
+  normalMap(body: BodyIdHex): NormalMapTexels | null;
   memory(): TerrainSessionMemory;
   readonly workerCount: number;
   /** The views that show the terrain's fault, each with its text (`TerrainSession.terrainFaults`). */
@@ -666,6 +669,15 @@ export class TerrainProbe {
   coverageCells(body: BodyIdHex = this.#moon): ReadonlySet<number> {
     const coverage = this.#session?.survey(body)?.coverage ?? null;
     return coverage === null ? new Set() : surveyedCells(coverage.maskTexels());
+  }
+
+  /**
+   * The normal map a body's disc shades with in the session `VIEW` holds, the hand-over check's
+   * world's (plan R10, R10.T15.b: its μ floor), as the class map's surface carries it; `null` with
+   * no session or none.
+   */
+  normalMap(body: BodyIdHex): NormalMapTexels | null {
+    return this.#session?.normalMap(body) ?? null;
   }
 
   /**

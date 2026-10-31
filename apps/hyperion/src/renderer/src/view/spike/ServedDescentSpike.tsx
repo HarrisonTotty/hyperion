@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { StatusLine, type StatusStanding } from "../../components/StatusLine";
 import type { SurfaceEvents } from "../../displays/view/useTerrainSession";
 import { type ConnectionStatus, useServerConnection } from "../../lib/connection";
+import { isRefusal } from "../../lib/refusal";
 import type { SceneModel } from "../../lib/scene/model";
 import { type SceneStatus, type SceneSurfaceEvent, useScene } from "../../lib/scene/useScene";
 import {
@@ -26,11 +27,17 @@ import { type ServedSpikeWorld, servedSpikeWorld } from "./spikeWorld";
 /** The status while the served world is read from the server (plan R10, R10.T15.b). */
 export const READING_SERVED = "MEASURING TERRAIN: reading the served world";
 
+/** The status of a server of another protocol version, with its remedy (the guide's row). */
+export const SERVED_LINK_INCOMPATIBLE = `${LINK_STATUS_LABEL.incompatible}: server of another protocol version, relaunch with a matching server`;
+
 /**
- * The status where the served world's host discs could not be had of the server's sky: a request
- * that a relaunch may answer; its cause goes to the log.
+ * The status where the served world's host discs could not be had of the server's sky, a request
+ * that a relaunch may answer, with the failure's own code and words (`reason`, as
+ * `servedHostDiscs` gives it).
  */
-export const SERVED_WORLD_NOT_READ = `TERRAIN NOT MEASURED: served world not read, ${SPIKE_RETRY}`;
+export function starDiscsNotReceived(reason: string): string {
+  return `TERRAIN NOT MEASURED: star discs not received (${reason}), ${SPIKE_RETRY}`;
+}
 
 /** The scene's detail asked for every body, as `VIEW` asks it: the server grants each its own. */
 const SCENE_DETAIL = "full";
@@ -71,11 +78,15 @@ export interface ServedStatus {
 }
 
 /**
- * Where the served world's reading stands, in the guide's words, before the world flies: the link's
- * state while it is not up (`ESTABLISHING LINK`, `NO CARRIER`, waiting for it; `LINK INCOMPATIBLE`,
- * which ends the run), the scene's refusal with its reason or its silence (`SCENE REJECTED`,
- * `SCENE TIMED OUT`), a body that is no served world there with its gap, which another body would
- * mend, the sky's discs not had, else the reading's own line.
+ * Where the served world's reading stands, in the guide's words (its `MEASURING TERRAIN`,
+ * `TERRAIN NOT MEASURED` row), before the world flies: the link's state while it is not up before
+ * the scene's first answer (`MEASURING TERRAIN: ESTABLISHING LINK` or `MEASURING TERRAIN: NO
+ * CARRIER`, steady in plain text while it waits; `LINK INCOMPATIBLE` with its remedy, which ends the
+ * run), the scene's refusal with its reason, in plain text for a refusal of what was asked and as a
+ * fault for the server's own failure (`isRefusal`, as `VIEW`'s `serverScene.ts` sets it), or its
+ * silence (`SCENE TIMED OUT`), a body that is no served world there with its gap, which another
+ * body would mend, the sky's discs not had with the failure's code and words, in plain text, else
+ * the reading's own line.
  */
 export function servedStatus(
   link: ConnectionStatus,
@@ -84,12 +95,12 @@ export function servedStatus(
   discs: HostDiscsRead | null,
 ): ServedStatus {
   if (link === "incompatible") {
-    return { text: LINK_STATUS_LABEL.incompatible, standing: "fault", ends: true };
+    return { text: SERVED_LINK_INCOMPATIBLE, standing: "fault", ends: true };
   }
   if (scene.kind === "rejected") {
     return {
       text: `SCENE REJECTED: ${scene.reason}, ${SPIKE_RETRY}`,
-      standing: "refused",
+      standing: isRefusal(scene.code) ? "refused" : "fault",
       ends: true,
     };
   }
@@ -104,12 +115,14 @@ export function servedStatus(
     };
   }
   if (discs?.ok === false) {
-    return { text: SERVED_WORLD_NOT_READ, standing: "fault", ends: true };
+    // In plain text: the reason is the request's, a refusal or a lost link alike (the UX lean).
+    return { text: starDiscsNotReceived(discs.reason), standing: "refused", ends: true };
   }
   if (read === null && link !== "connected") {
+    // Steady and plain: the spike waits for the link, as `VIEW` reads `NO CARRIER` as waiting.
     return {
-      text: LINK_STATUS_LABEL[link],
-      standing: link === "disconnected" ? "fault" : "waiting",
+      text: `MEASURING TERRAIN: ${LINK_STATUS_LABEL[link]}`,
+      standing: "waiting",
       ends: false,
     };
   }

@@ -760,13 +760,14 @@ function handoverTexel(value: unknown): HandoverTexelRecord | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { texel, sharedPixels, meanBefore, meanAfter } = value;
+  const { texel, sharedPixels, meanBefore, meanAfter, muFloored } = value;
   return isCount(texel) &&
     isCount(sharedPixels) &&
     sharedPixels >= 1 &&
     isNonNegative(meanBefore) &&
-    isNonNegative(meanAfter)
-    ? { texel, sharedPixels, meanBefore, meanAfter }
+    isNonNegative(meanAfter) &&
+    typeof muFloored === "boolean"
+    ? { texel, sharedPixels, meanBefore, meanAfter, muFloored }
     : null;
 }
 

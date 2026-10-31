@@ -22,6 +22,7 @@ import type { QualitySetting } from "../../view/quality/qualitySetting";
 import type { TerrainFault } from "../../view/terrain/annunciation";
 import type { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import { TerrainSession, type TerrainRequests } from "../../view/terrain/session";
+import type { HorizonLayerSetting } from "../../view/terrain/workers/messages";
 import type { WorkerLike } from "../../view/terrain/workers/pool";
 import type { ViewEngineState } from "./useViewEngine";
 import type { SceneOption } from "./viewRun";
@@ -141,6 +142,11 @@ export interface TerrainSessionInput {
    * materials as it is made (`TerrainSessionOptions.setting`, R10.T14.d): a change makes it anew.
    */
   readonly setting: QualitySetting;
+  /**
+   * Whether the lit passes' bakes make the horizon map (`TerrainSessionOptions.horizonMap`): baked
+   * where absent; skipped for the descent spike's A/B (plan R10, R10.T15.b). A change makes it anew.
+   */
+  readonly horizonMap?: HorizonLayerSetting | undefined;
 }
 
 /** The session the hook holds, outside React, so that its making is an effect's and renders it. */
@@ -187,7 +193,7 @@ function takeSurface(session: TerrainSession, event: SceneSurfaceEvent): void {
  * caller unmounts.
  */
 export function useTerrainSession(input: TerrainSessionInput): TerrainSession | null {
-  const { engineState, source, createWorker, workers, setting } = input;
+  const { engineState, source, createWorker, workers, setting, horizonMap } = input;
   const engine = engineState.kind === "ready" ? engineState.engine : null;
   const universe = source?.kind === "server" ? source.universe : null;
   const requests = source?.kind === "server" ? source.requests : null;
@@ -207,7 +213,10 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
     if (engine === null) {
       return undefined;
     }
-    const counted = workers === undefined ? {} : { workers };
+    const counted = {
+      ...(workers === undefined ? {} : { workers }),
+      ...(horizonMap === undefined ? {} : { horizonMap }),
+    };
     if (universe !== null && requests !== null) {
       const made = new TerrainSession({
         engine,
@@ -247,7 +256,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
       made.dispose();
       link.close();
     };
-  }, [engine, universe, requests, fixture, createWorker, workers, setting, holder]);
+  }, [engine, universe, requests, fixture, createWorker, workers, setting, horizonMap, holder]);
 
   useEffect(() => {
     if (session !== null && fixture === null) {

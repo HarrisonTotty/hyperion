@@ -31,7 +31,10 @@
  *    (`disc-to-terrain`), and the hand-back (`terrain-to-disc`). A frame's regime is that of its
  *    scene target's draws' materials ({@link regimeOf}), and every primary frame's is kept, so that a
  *    comparison states how many frames apart its two are and whether each was its regime's last or
- *    first (`pairAdjacency`).
+ *    first (`pairAdjacency`). Each frame's reading flags the cells where the disc's μ floor binds
+ *    at the cell's centre (plan R10, R10.T15.b; `muFloorBinds`), on the normal map the session's
+ *    disc shaded that frame with ({@link TerrainProbe.normalMap}), which the main process leaves
+ *    out of its per-cell bound and counts.
  * 4. Three looks of the page are captured: the disc on the way in, the terrain at the hold and the
  *    disc after the hand-back.
  *
@@ -51,6 +54,7 @@ import type {
   ViewsCheckApi,
 } from "../../../../../preload/api";
 import { norm, type Vec3 } from "../../../geometry/vec3";
+import type { NormalMapTexels } from "../../../view/bodies/discNormals";
 import { DEFAULT_FOV_DEG } from "../../../view/camera/projection";
 import { PHASE_SCENE_NAME } from "../../../view/scenes/phaseScene";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
@@ -107,8 +111,10 @@ const SWITCHES: ReadonlyArray<HandoverSwitchName> = [
 
 /** How long the hand-over check waits, and how often it looks. */
 export interface HandoverCheckTiming {
-  /** The longest wait for a control to take effect, a session to compile or a survey, ms. */
+  /** The longest wait for a control to take effect or a session to compile, ms. */
   readonly waitMs: number;
+  /** The longest wait for a look's session to hold the world's survey whole, ms. */
+  readonly surveyWaitMs: number;
   /** How often a wait looks again, ms. */
   readonly pollMs: number;
   /** How long `AUTO`'s EV100 must stand unchanged before it is locked, ms. */
@@ -119,14 +125,38 @@ export interface HandoverCheckTiming {
   readonly overrunMs: number;
 }
 
-/** The check's timing, a full run's and a smoke's alike (the smoke's line is the faster). */
+/**
+ * The check's timing on a fixture's world, a full run's and a smoke's alike (the smoke's line is
+ * the faster): `TERRAIN TEST`'s field is about 2 MB.
+ */
 export const HANDOVER_CHECK_TIMING: HandoverCheckTiming = {
   waitMs: 60_000,
+  surveyWaitMs: 60_000,
   pollMs: 100,
   settleMs: 3_000,
   readBacksInFlight: 3,
   overrunMs: 60_000,
 };
+
+/**
+ * The check's timing on a served world (plan R10, R10.T15.b): a look's survey waited for 5 minutes,
+ * since each look's session asks the field again, and a served level-8 field is about 15 MB
+ * (15,140,689 B in 58 chunks at 23, T15.b.1's record), about 7.5 times `TERRAIN TEST`'s, for the
+ * workers to decode; three looks' waits then fill the 15 minutes the main process's watchdog gains
+ * for a served world (`viewsCheckWatchdogMs`).
+ */
+export const SERVED_HANDOVER_CHECK_TIMING: HandoverCheckTiming = {
+  ...HANDOVER_CHECK_TIMING,
+  surveyWaitMs: 300_000,
+};
+
+/**
+ * The check's timing for a launch, before the software mode's stretch: a served world's where the
+ * launch names one (`ViewsCheckLaunch.served`), else a fixture's.
+ */
+export function handoverCheckTimingFor(served: boolean): HandoverCheckTiming {
+  return served ? SERVED_HANDOVER_CHECK_TIMING : HANDOVER_CHECK_TIMING;
+}
 
 /** What the hand-over check drives and reads. */
 export interface HandoverCheckDeps {
@@ -134,7 +164,13 @@ export interface HandoverCheckDeps {
   readonly views: Pick<ViewsProbe, "watch" | "canvasOf">;
   readonly terrain: Pick<
     TerrainProbe,
-    "session" | "compiled" | "sessions" | "coverageCells" | "readSceneTarget" | "faults"
+    | "session"
+    | "compiled"
+    | "sessions"
+    | "coverageCells"
+    | "normalMap"
+    | "readSceneTarget"
+    | "faults"
   >;
   /** The looks' scenes, which `VIEW` offers, and the world they are made on. */
   readonly scenes: HandoverScenes;
@@ -198,6 +234,8 @@ interface HeldFrame extends PairedFrame {
   readonly heightPx: number;
   readonly rect: PixelRect;
   readonly halfBits: Uint16Array;
+  /** The normal map the frame's disc was shaded with, for its μ floor; `null` for none. */
+  readonly normals: NormalMapTexels | null;
   reading: FrameReading | null;
 }
 
@@ -226,6 +264,8 @@ export async function runHandoverCheck(deps: HandoverCheckDeps): Promise<Handove
   const { world, approach } = scenes;
   const driver = viewDriver(deps);
   const { until, wait, stopped } = driver;
+  // The survey's own wait, a served world's field being the larger (R10.T15.b).
+  const surveyDriver = viewDriver({ ...deps, timing: { ...timing, waitMs: timing.surveyWaitMs } });
   const fovXRad = (DEFAULT_FOV_DEG * Math.PI) / 180;
   let current: LookState | null = null;
 
@@ -254,6 +294,7 @@ export async function runHandoverCheck(deps: HandoverCheckDeps): Promise<Handove
         figure: world.figure,
         level: world.cellLevel,
         surveyed: look.surveyed,
+        normals: held.normals,
       });
     }
     return held.reading;
@@ -320,6 +361,8 @@ export async function runHandoverCheck(deps: HandoverCheckDeps): Promise<Handove
       RECT_MARGIN_PX,
     );
     look.inFlight += 1;
+    // The map the disc drew this frame with: a later answer replaces it, never this one's texels.
+    const normals = terrain.normalMap(world.body);
     // Asked now, in the frame's own submission, so that the copy follows its draws; settled into
     // an outcome at once, so that no refusal goes unheard while the chain is behind.
     const read = terrain.readSceneTarget(SCENE_TARGET, rect).then(
@@ -344,6 +387,7 @@ export async function runHandoverCheck(deps: HandoverCheckDeps): Promise<Handove
             heightPx: size.heightPx,
             rect,
             halfBits: new Uint16Array(outcome.bytes),
+            normals,
             reading: null,
           });
         }
@@ -428,7 +472,7 @@ export async function runHandoverCheck(deps: HandoverCheckDeps): Promise<Handove
       failures.push(`the exposure was not locked: ${messageOf(error)}`);
       exposure = { lockedEv100: null, lockedReading: null, endReading: null, held: false };
     }
-    await until(
+    await surveyDriver.until(
       `${look.scene}'s survey did not arrive whole`,
       () => terrain.coverageCells(world.body).size >= world.surveyedCells,
     );

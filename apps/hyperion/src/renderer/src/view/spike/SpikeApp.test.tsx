@@ -90,7 +90,7 @@ describe("SpikeApp", () => {
     expect(FakeWebSocket.latest().url).toBe("ws://127.0.0.1:7879/ws");
     // The link is not up yet: the spike's frame stands, its line the link's state.
     expect(screen.getByRole("heading", { level: 1, name: "DESCENT SPIKE" })).toBeDefined();
-    expect(screen.getByText(statusLine("ESTABLISHING LINK"))).toBeDefined();
+    expect(screen.getByText(statusLine("MEASURING TERRAIN: ESTABLISHING LINK"))).toBeDefined();
     FakeWebSocket.instances = [];
   });
 

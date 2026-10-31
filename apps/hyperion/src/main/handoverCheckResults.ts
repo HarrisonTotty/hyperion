@@ -17,7 +17,10 @@
  *   {@link HANDOVER_MIN_SHARED_PIXELS} pixels both frames assign to it within it too, its mean over
  *   those pixels, with no floor (decision-r10-t16-leans §1). A cell dark on one side and not the
  *   other is over the bound, counted and listed, never dropped; one of a single shared pixel is
- *   listed and not judged.
+ *   listed and not judged. A cell where the disc's μ floor binds at its centre in either frame
+ *   (n′ · v < ½ μ_ν; plan R10, R10.T15.b, as decision-r10-t16-leans rules for "R10.T10.g terminator
+ *   cross-fade") is listed, left out of the per-cell bound and counted, the means still taken over
+ *   every pixel.
  * - **No engine fault** over the run, and no exit of the GPU process; the page's console errors
  *   are recorded, not judged, as the terrain run's are.
  * - **Which looks are judged** is the look's name's ({@link HANDOVER_LOOK_RULES}), not the
@@ -60,8 +63,11 @@ import { fixtureNaming, fixtureRecord, type TerrainCheckRunInput } from "./terra
 /** The file's schema name. */
 export const HANDOVER_CHECK_SCHEMA = "hyperion.views-check.handover-results";
 
-/** The schema's version; bumped with any change to the file's shape. */
-export const HANDOVER_CHECK_VERSION = 1;
+/**
+ * The schema's version; bumped with any change to the file's shape: 2 from R10.T15.b's μ floor,
+ * each cell's `muFloored` and each switch's `flooredTexels`.
+ */
+export const HANDOVER_CHECK_VERSION = 2;
 
 /**
  * The bound on a change across a switch, stops (log₂ of the ratio): plan 10's T10.e and T10.g, a
@@ -159,7 +165,7 @@ export interface HandoverTexelFigures extends HandoverTexelRecord {
   readonly log2: number | null;
   /** Which side's mean is 0, if either. */
   readonly dark: "before" | "after" | "both" | null;
-  /** At least {@link HANDOVER_MIN_SHARED_PIXELS} shared pixels. */
+  /** At least {@link HANDOVER_MIN_SHARED_PIXELS} shared pixels, and its μ floor clear. */
   readonly judged: boolean;
   /** Judged and changed by more than the bound (dark on one side among them). */
   readonly over: boolean;
@@ -184,6 +190,11 @@ export interface HandoverComparisonFigures {
   /** Every cell with a shared pixel, in texel order. */
   readonly texels: ReadonlyArray<HandoverTexelFigures>;
   readonly judgedTexels: number;
+  /**
+   * Cells of {@link HANDOVER_MIN_SHARED_PIXELS} shared pixels or more left out of the bound where
+   * the disc's μ floor binds at their centre (R10.T15.b): those it would otherwise judge.
+   */
+  readonly flooredTexels: number;
   /** Judged cells over the bound, the dark ones among them. */
   readonly texelsOver: number;
   /** Judged cells dark on one side. */
@@ -281,7 +292,7 @@ export function texelFigures(texel: HandoverTexelRecord): HandoverTexelFigures {
           ? "after"
           : null;
   const log2 = stopsBetween(texel.meanBefore, texel.meanAfter);
-  const judged = texel.sharedPixels >= HANDOVER_MIN_SHARED_PIXELS;
+  const judged = texel.sharedPixels >= HANDOVER_MIN_SHARED_PIXELS && !texel.muFloored;
   const over =
     judged &&
     (dark === "before" ||
@@ -336,6 +347,9 @@ function comparisonFigures(
 ): HandoverComparisonFigures {
   const texels = comparison.texels.map(texelFigures);
   const judgedTexels = texels.filter((texel) => texel.judged);
+  const floored = texels.filter(
+    (texel) => texel.muFloored && texel.sharedPixels >= HANDOVER_MIN_SHARED_PIXELS,
+  );
   const over = judgedTexels.filter((texel) => texel.over);
   const dark = judgedTexels.filter((texel) => texel.dark === "before" || texel.dark === "after");
   const body = {
@@ -361,7 +375,9 @@ function comparisonFigures(
           Math.min(survey.own.pixelsBefore, survey.own.pixelsAfter),
         ),
         meanReason("the survey over its shared pixels", survey.shared.log2, survey.shared.pixels),
-        ...(judgedTexels.length === 0 ? ["no cell of 2 shared pixels or more to judge"] : []),
+        ...(judgedTexels.length === 0
+          ? ["no cell of 2 shared pixels or more clear of the μ floor to judge"]
+          : []),
         ...(over.length === 0
           ? []
           : [
@@ -383,6 +399,7 @@ function comparisonFigures(
     survey,
     texels,
     judgedTexels: judgedTexels.length,
+    flooredTexels: floored.length,
     texelsOver: over.length,
     darkTexels: dark.length,
     worst: judgedTexels.reduce<HandoverTexelFigures | null>(
@@ -556,7 +573,7 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
         each.worst === null
           ? "—"
           : `${stopsText(each.worst.log2)} (cell ${String(each.worst.texel)}, ${String(each.worst.sharedPixels)} px)`;
-      return `| ${look.name} | ${each.name} | ${frameText(each.before)} → ${frameText(each.after)} | ${String(each.framesApart)}${each.beforeWasLast && each.afterWasFirst ? "" : " (not adjacent in regime)"} | ${pairText(each.body)} | ${pairText(each.survey)} | ${String(each.judgedTexels)} of ${String(each.texels.length)} | ${String(each.texelsOver)} | ${String(each.darkTexels)} | ${worst} | ${each.verdict} |`;
+      return `| ${look.name} | ${each.name} | ${frameText(each.before)} → ${frameText(each.after)} | ${String(each.framesApart)}${each.beforeWasLast && each.afterWasFirst ? "" : " (not adjacent in regime)"} | ${pairText(each.body)} | ${pairText(each.survey)} | ${String(each.judgedTexels)} of ${String(each.texels.length)} | ${String(each.flooredTexels)} | ${String(each.texelsOver)} | ${String(each.darkTexels)} | ${worst} | ${each.verdict} |`;
     }),
   );
   const overRows = looks.flatMap((look) =>
@@ -589,7 +606,7 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
         ]),
     `- **World:** ${results.world}; the primary ${String(results.canvas.widthPx)} × ${String(results.canvas.heightPx)} px presented, its scene target ${String(results.target.widthPx)} × ${String(results.target.heightPx)} px; the hand-over range ${(results.rangeM / 1000).toFixed(0)} km (relief ${results.reliefM.toFixed(0)} m at τ ${String(results.tauPx)} px, ${results.radPerPx.toExponential(4)} rad a pixel); cells of level ${String(results.cellLevel)}`,
     `- **The line:** ${(results.approach.ratePerS * 100).toFixed(0)}% of the limb distance a second, from ${String(results.approach.startRatio)} to ${String(results.approach.closestRatio)} of the range, a ${String(results.approach.holdS)} s hold, out to ${String(results.approach.endRatio)}`,
-    `- **Bounds:** ${results.bounds.stops.toFixed(3)} stop at every switch, cells of ${String(results.bounds.minSharedPixels)} shared pixels or more judged, no floor; at most ${String(results.bounds.missLimit * 100)}% of a frame's body pixels off the datum`,
+    `- **Bounds:** ${results.bounds.stops.toFixed(3)} stop at every switch, cells of ${String(results.bounds.minSharedPixels)} shared pixels or more judged, no floor, but cells where the disc's μ floor binds at their centre (n′ · v < ½ μ_ν) left out and counted; at most ${String(results.bounds.missLimit * 100)}% of a frame's body pixels off the datum`,
     `- **Captures (not committed):** ${textOf(run.captures, (dir) => `\`${dir}\``)}`,
     `- **Faults:** ${String(results.findings.faults.record.length)} engine faults, ${String(results.findings.faults.gpuProcessExits)} GPU-process exits; console errors ${String(results.findings.consoleErrors.count)}${results.findings.consoleErrors.first.length === 0 ? "" : ` (${results.findings.consoleErrors.first.join(" | ")})`}`,
     "",
@@ -606,8 +623,8 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
     "",
     "Changes are log₂(after ÷ before), stops, over each frame's own pixels / over the pixels both share.",
     "",
-    "| Look | Switch | Frames (script s, regime, limb distance ÷ range) | Frames apart | Body | Survey | Cells judged | Over 1/3 stop | Dark on one side | Worst cell | Verdict |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Look | Switch | Frames (script s, regime, limb distance ÷ range) | Frames apart | Body | Survey | Cells judged | Left out at the μ floor | Over 1/3 stop | Dark on one side | Worst cell | Verdict |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...comparisonRows,
     "",
     "## Cells over 1/3 stop",

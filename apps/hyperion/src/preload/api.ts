@@ -98,6 +98,14 @@ export interface SpikeLaunch {
    */
   readonly sizes?: "on";
   /**
+   * `off` where a generated world's lit patches skip the horizon map (`--horizon off`, plan R10,
+   * R10.T15.b): the A/B whose run beside an ordinary one gives the map's share of the height
+   * workers' bake time. Refused over the test planet, whose bakes make none, and with the
+   * wireframe's style, whose bakes skip it already; absent on every other launch, which bakes it,
+   * so that its options and results file are as before the option.
+   */
+  readonly horizon?: "off";
+  /**
    * The served world's universe and body (`--universe`, `--body`; plan R10, R10.T15.b): present
    * exactly where `world` is `served`, and absent on every other launch, whose options and results
    * file are as before.
@@ -1527,7 +1535,7 @@ export interface HandoverSharedMeans {
 /**
  * One surveyed cell across a switch: the mean over the pixels both frames assign to it, which the
  * main process judges (decision-r10-t16-leans §1: at least 2 such pixels, no floor; a cell dark on
- * one side counted, never dropped).
+ * one side counted, never dropped), unless the disc's μ floor binds at its centre (R10.T15.b).
  */
 export interface HandoverTexelRecord {
   /** The cell as its coverage-mask texel: face × N² + row j × N + column i, N = 2^level. */
@@ -1536,6 +1544,12 @@ export interface HandoverTexelRecord {
   readonly sharedPixels: number;
   readonly meanBefore: number;
   readonly meanAfter: number;
+  /**
+   * Whether the disc's floor on the law's μ binds at the cell's centre seen from either frame's
+   * eye, n′ · v < ½ μ_ν (plan R10, R10.T15.b; decision-r10-t16-leans, "R10.T10.g terminator
+   * cross-fade"): the per-cell bound leaves such a cell out and counts it.
+   */
+  readonly muFloored: boolean;
 }
 
 /** The frames either side of a switch, and what changed between them. */
