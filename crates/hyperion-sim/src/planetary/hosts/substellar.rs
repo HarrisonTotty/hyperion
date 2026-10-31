@@ -44,10 +44,11 @@
 //! - **The context** ([`SystemContext::for_system`], [`HostKind::RoguePlanet`]) holds no star: no
 //!   stars, zones or hierarchy, and the object's mass, age and composition in their place.
 //! - **The object** is body `0x0000`, derived by P14.T16 with no star on the orbit it was born on
-//!   ([`BirthOrbit`]), drawn on its own `planet.origin`: the term of its equilibrium temperature is
-//!   zero, and it radiates its own heat, plan 13's giant cooling from 0.3 Jupiter masses and
-//!   P14.T24.b's radiogenic and residual heat below it. What needs a star is `NotModelled`
-//!   (`planetary::system`'s `rogue` module).
+//!   ([`BirthOrbit`]), drawn on its own `planet.origin`: its equilibrium temperature is the cosmic
+//!   background's, 2.725 48 K, and it radiates its own heat, plan 13's giant cooling from 0.3
+//!   Jupiter masses and P14.T24.b's radiogenic and residual heat below it. From [`EJECTED_BELOW`]
+//!   it formed alone, and its metals are its cloud's, its composition's Z. What needs a star is
+//!   `NotModelled` (`planetary::system`'s `rogue` module).
 //! - **Its satellites** are P14.T17–T20's about it on its birth orbit, with design note 13's
 //!   ejection cut: under [`EJECTED_BELOW`], one Jupiter mass, it was ejected and keeps only the
 //!   moons inside [`EJECTED_MOON_HILL_SHARE`] of its birth Hill radius; heavier, it formed alone
@@ -349,8 +350,10 @@ pub fn brown_dwarf_class_weights(mass: SolarMasses, fe_h: Dex) -> ClassWeights {
 
 /// The mass from which a rogue planet formed alone, rather than being ejected from the system it
 /// formed in: one Jupiter mass (design note 13). Below it a rogue planet keeps only the moons
-/// inside [`EJECTED_MOON_HILL_SHARE`] of its birth orbit's Hill radius; from it, every moon its
-/// generators give it ([`BirthOrbit::moon_bound`]).
+/// inside [`EJECTED_MOON_HILL_SHARE`] of its birth orbit's Hill radius, and its heavy elements are
+/// a disc-formed planet's; from it, every moon its generators give it
+/// ([`BirthOrbit::moon_bound`]), and a bulk metal fraction of its own composition's Z, a cloud
+/// fragment's.
 pub const EJECTED_BELOW: JupiterMasses = JupiterMasses::new(1.0);
 
 /// The share of its birth orbit's Hill radius inside which an ejected planet keeps its moons: a

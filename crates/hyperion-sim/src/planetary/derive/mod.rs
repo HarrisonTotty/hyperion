@@ -3377,12 +3377,13 @@ impl DerivedAlone {
 
     /// Its effective temperature, at which it radiates its own luminosity (its giant cooling's,
     /// its solids' radiogenic and residual heat, or both blended: [`derive_alone`]) from its
-    /// radius, with no light to add to it: `None` for a body that radiates none.
+    /// radius, at its equilibrium temperature in the cosmic background's light, T⁴ = `T_CMB`⁴ +
+    /// `L_int` ÷ 4πR²σ: `None` for a body that radiates none.
     #[must_use]
     pub(crate) fn effective_temperature(&self) -> Option<Kelvin> {
         (self.internal_luminosity > Watts::ZERO).then(|| {
             with_internal_heat(
-                Kelvin::new(0.0),
+                COSMIC_BACKGROUND_TEMPERATURE,
                 self.internal_luminosity,
                 Metres::from(self.radius),
             )
@@ -3396,8 +3397,9 @@ impl DerivedAlone {
         self.maximum_moon_mass
     }
 
-    /// Its bulk section: its radius, density, surface gravity, class and fractions, an
-    /// equilibrium temperature of zero, since no light reaches it, and its effective temperature.
+    /// Its bulk section: its radius, density, surface gravity, class and fractions, its
+    /// equilibrium temperature the cosmic background's, the only light that reaches it, and its
+    /// effective temperature.
     #[must_use]
     pub(crate) fn bulk(&self) -> crate::planetary::record::BulkProperties {
         let bulk = crate::planetary::record::BulkProperties::new(
@@ -3406,7 +3408,7 @@ impl DerivedAlone {
             self.surface_gravity,
             self.class,
             self.fractions,
-            Kelvin::new(0.0),
+            COSMIC_BACKGROUND_TEMPERATURE,
         );
         match self.effective_temperature() {
             Some(t) => bulk.with_effective_temperature(t),
@@ -3415,15 +3417,31 @@ impl DerivedAlone {
     }
 }
 
+/// Where the heavy elements of a body [`derive_alone`] derives come from (P14.T27.b, design note
+/// 13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum AloneMetals {
+    /// As about any host: P14.T11's formation solve, and a giant's Thorngren et al. (2016) heavy
+    /// elements, fitted to planets that formed in discs. An ejected rogue planet's.
+    DiscFormed,
+    /// Its cloud's own: a bulk metal fraction of its composition's Z, Z☉ × 10^\[Fe/H\]
+    /// ([`Composition::z`]), with no core of a disc's. A rogue planet that formed alone, from one
+    /// Jupiter mass: a giant with no formation solve, its metals its cloud fragment's.
+    Cloud,
+}
+
 /// [`derive_body`] with no star (P14.T27.b, design note 13): the body `placed`, formed on its
 /// primordial orbit about the host `born_about`, in a system of composition `composition`, at the
-/// age `age`, lit by nothing.
+/// age `age`, its heavy elements from `metals`, lit by the cosmic background alone.
 ///
 /// - **Radius and composition** (T11): fixed at formation as about any host ([`formation`]), and
 ///   taken at the age under no flux. No escape strips it: its birth host's X-rays before it was
 ///   freed are not modelled, and none reach it after, so a hydrogen envelope survives whole (lean,
-///   2026-10-31).
-/// - **Its own heat**, the term of its equilibrium temperature being zero: from 0.3 Jupiter masses
+///   2026-10-31). Its metals are its cloud's own where `metals` says so ([`AloneMetals::Cloud`]),
+///   in the mix of iron, rock and water its formation gives its core.
+/// - **Its own heat**, its equilibrium temperature the cosmic background's,
+///   [`COSMIC_BACKGROUND_TEMPERATURE`] (an isotropic blackbody field brings a grey body to its own
+///   temperature, whatever its albedo): from 0.3 Jupiter masses
 ///   plan 13's giant cooling at the age ([`GiantRadius::internal_luminosity`], blended in by
 ///   [`giant_share`]); below it, and for the rest of the blend, P14.T24.b's radiogenic and
 ///   residual heat of its solids ([`non_tidal_heat_flow`](crate::planetary::hooks::figures)) as an
@@ -3441,6 +3459,7 @@ pub(crate) fn derive_alone(
     born_about: &FormationHost,
     composition: &Composition,
     age: Years,
+    metals: AloneMetals,
 ) -> Result<DerivedAlone, DeriveBodyError> {
     use crate::planetary::hooks::figures::{HeatInputs, Subsurface, non_tidal_heat_flow};
     if age.value().is_nan() || age.value() <= 0.0 {
@@ -3451,6 +3470,10 @@ pub(crate) fn derive_alone(
     let mass = placed.mass;
     let (radius, fractions, core, giant) =
         at_the_time(mass, formed, solved.as_ref(), None, dark, age, composition)?;
+    let fractions = match metals {
+        AloneMetals::DiscFormed => fractions,
+        AloneMetals::Cloud => MassFractions::of(core, 1.0 - composition.z().value()),
+    };
     let class = PlanetClass::of(mass, &fractions);
     let mass_kg = Kilograms::from(mass);
     let r = Metres::from(radius).value();

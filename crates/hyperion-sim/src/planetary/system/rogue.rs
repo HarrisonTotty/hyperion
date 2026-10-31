@@ -11,12 +11,14 @@
 //! [`RoguePlanet`]: plan 13's mass, the radius rank on its own `planet.radius` stream (body
 //! `0x0000`), and its [`BirthOrbit`], drawn on its own `planet.origin`. Its record at a time is
 //! P14.T16's derivation with no star (`derive_alone`): its radius and composition fixed at formation
-//! on the birth orbit, the term of its equilibrium temperature zero, and its own heat, plan 13's
-//! giant cooling from 0.3 Jupiter masses and P14.T24.b's radiogenic and residual heat below, the
-//! two blended between 0.3 and 0.414. Its record holds:
+//! on the birth orbit, its metals its cloud's own from one Jupiter mass (it formed alone), its
+//! equilibrium temperature the cosmic background's, and its own heat, plan 13's giant cooling from
+//! 0.3 Jupiter masses and P14.T24.b's radiogenic and residual heat below, the two blended between
+//! 0.3 and 0.414. Its record holds:
 //!
 //! - its mass, its moons and its rings, and its position, the system's origin;
-//! - its bulk, at an equilibrium temperature of 0 K and the effective temperature of its own heat;
+//! - its bulk, at the cosmic background's equilibrium temperature, 2.725 48 K, and the effective
+//!   temperature of its own heat;
 //! - its hooks' detail seed, which reads its body ID alone;
 //! - its orbit `NotApplicable`: it is its system's root, which orbits nothing in it.
 //!
@@ -56,11 +58,13 @@ use super::{
 use crate::Seed;
 use crate::coords::{SystemPosition, SystemVelocity};
 use crate::planetary::context::SystemContext;
-use crate::planetary::derive::{DeriveBodyError, DerivedAlone, PlacedBody, derive_alone};
+use crate::planetary::derive::{
+    AloneMetals, DeriveBodyError, DerivedAlone, PlacedBody, derive_alone,
+};
 use crate::planetary::error::ResolveBodyError;
 use crate::planetary::fate::BodyState;
 use crate::planetary::hooks::{self, BodyHooks};
-use crate::planetary::hosts::substellar::{BIRTH_HOST_MASS, BirthOrbit, birth_host};
+use crate::planetary::hosts::substellar::{BIRTH_HOST_MASS, BirthOrbit, birth_host, ejected};
 use crate::planetary::index::BodyIndex;
 use crate::planetary::label::{self, BodyLabel};
 use crate::planetary::moons::{MoonParent, MoonParentParts, ParentKind};
@@ -175,11 +179,19 @@ impl RoguePlanet {
         ctx: &SystemContext,
         t: UniverseTime,
     ) -> Result<DerivedAlone, DeriveBodyError> {
+        // Design note 13: under a Jupiter mass it was ejected from the disc it formed in; from it,
+        // it formed alone, a fragment holding its cloud's metals.
+        let metals = if ejected(self.mass) {
+            AloneMetals::DiscFormed
+        } else {
+            AloneMetals::Cloud
+        };
         derive_alone(
             &self.placed(),
             &birth_host(ctx.composition()),
             ctx.composition(),
             ctx.age_at(t),
+            metals,
         )
     }
 

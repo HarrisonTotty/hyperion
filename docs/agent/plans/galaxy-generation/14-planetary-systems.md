@@ -33271,10 +33271,16 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - _The object:_ `system::RoguePlanet` (`PlanetarySystem::rogue_planet()`), body `0x0000`, not
     among `bodies()` but in `indices()`, labelled `A`. Derived by `derive::derive_alone` on a
     `hosts::substellar::BirthOrbit` (words 2–4 of its `planet.origin`): 1 M☉ host, log-uniform
-    1–30 au, isotropic plane (lean, 2026-10-31). T_eq 0 K; no escape, so an envelope survives
-    whole (lean); its heat is giant cooling × share plus (1 − share) × its solids' (or its core's,
-    under an envelope) P14.T24.b heat. A rogue of 1 M_J or more is read on the same birth orbit by
-    its moon generators, uncut (lean).
+    1–30 au, isotropic plane (lean, 2026-10-31). No escape, so an envelope survives whole (lean);
+    its heat is giant cooling × share plus (1 − share) × its solids' (or its core's, under an
+    envelope) P14.T24.b heat. A rogue of 1 M_J or more is read on the same birth orbit by its moon
+    generators, uncut (lean).
+  - _A heavy rogue's metals_ (research-leans-12 §4 (d)): from `EJECTED_BELOW` (1 M_J) it formed
+    alone, and its bulk metal fraction is its composition's Z, Z☉ × 10^\[Fe/H\], its envelope
+    1 − Z (`derive::AloneMetals::Cloud`), in its formation's core mix; under it, Thorngren's.
+  - _T_eq_ (same §4): the CMB's, `units::consts::COSMIC_BACKGROUND_TEMPERATURE_K` = 2.725 48 K
+    (Fixsen 2009), which `hooks::surface::COSMIC_BACKGROUND_TEMPERATURE` now reads; T_eff⁴ =
+    T_CMB⁴ + L ÷ 4πR²σ.
   - _`NotModelled` (each needs a star):_ the object's surface (solid) or envelope (not), its
     photometry, rotation and figure; a moon's bulk, surface, photometry, rotation and figure; the
     hooks' bulk composition. Its orbit is `NotApplicable`, as are its snapshot's belts and halo; no

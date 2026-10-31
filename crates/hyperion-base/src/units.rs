@@ -124,6 +124,12 @@ pub mod consts {
     /// exact in the 2019 SI, which fixes h, c and k, to the digits given).
     pub const STEFAN_BOLTZMANN: f64 = 5.670_374_419e-8;
 
+    /// The cosmic microwave background's temperature today, K: 2.725 48 ± 0.000 57 (Fixsen 2009,
+    /// ApJ 707, 916, from COBE/FIRAS with WMAP's calibration). An isotropic blackbody field brings
+    /// a grey body to its own temperature whatever the body's albedo, so it is the floor of a
+    /// body's temperature far from any star.
+    pub const COSMIC_BACKGROUND_TEMPERATURE_K: f64 = 2.725_48;
+
     /// The irradiance at 1 au from the nominal Sun, W m⁻²: L☉ ÷ 4π au² = 1,361.2 W m⁻², the unit
     /// [`EarthFluxes`](super::EarthFluxes) counts in.
     ///

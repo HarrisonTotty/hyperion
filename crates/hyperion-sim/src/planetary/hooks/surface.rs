@@ -157,7 +157,7 @@ use crate::substance::{
     Phase, SubstanceId, mean_molar_mass_g_per_mol, mixture_heat_capacity_over_r_at, phase_at,
 };
 use crate::time::UniverseTime;
-use crate::units::consts::{METRES_PER_AU, STEFAN_BOLTZMANN};
+use crate::units::consts::{COSMIC_BACKGROUND_TEMPERATURE_K, METRES_PER_AU, STEFAN_BOLTZMANN};
 use crate::units::{
     Kelvin, Metres, MetresPerSecondSquared, Pascals, Radians, Seconds, SolarMasses,
     WattsPerSquareMetre,
@@ -752,10 +752,11 @@ fn ground_inertia(
 pub const REGOLITH_REDISTRIBUTION_FIT: (f64, f64) = (0.635, 0.905);
 
 /// The cosmic microwave background's temperature, the floor of a night with no internal heat:
-/// 2.725 48 K (Fixsen 2009, ApJ 707, 916: 2.725 48 ± 0.000 57 K).
+/// 2.725 48 K ([`COSMIC_BACKGROUND_TEMPERATURE_K`], Fixsen 2009, ApJ 707, 916: 2.725 48 ± 0.000 57
+/// K).
 ///
 /// P14.T24.b's heat flow F raises the floor to (`T_CMB`⁴ + F ÷ `ε_r` σ)^¼ ([`night_floor`]).
-pub const COSMIC_BACKGROUND_TEMPERATURE: Kelvin = Kelvin::new(2.725_48);
+pub const COSMIC_BACKGROUND_TEMPERATURE: Kelvin = Kelvin::new(COSMIC_BACKGROUND_TEMPERATURE_K);
 
 /// The floor of a night on a body of internal heat flow `heat_flow`: (`T_CMB`⁴ + F ÷ `ε_r` σ)^¼,
 /// at which its regolith radiates its internal heat and the cosmic background's

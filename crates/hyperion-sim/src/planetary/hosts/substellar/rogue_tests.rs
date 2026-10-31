@@ -32,7 +32,8 @@ use crate::planetary::testing::{
 use crate::stellar::substellar::giant_cooling;
 use crate::stellar::system::draw_metallicity;
 use crate::time::{ClockWindow, UniverseTime};
-use crate::units::{Years, consts::GRAVITATIONAL_CONSTANT};
+use crate::units::Years;
+use crate::units::consts::{COSMIC_BACKGROUND_TEMPERATURE_K, GRAVITATIONAL_CONSTANT};
 
 const SEED: u64 = 0x0e14_0027_b000_0001;
 
@@ -234,6 +235,9 @@ struct Census {
     irregulars: usize,
     rings: usize,
     ejected_with_cut: usize,
+    /// The largest move of an effective temperature against the lane's of eaeb2d7f, which took
+    /// `T_eq` as 0 K: T − (T⁴ − `T_CMB`⁴)^¼, K, and its body.
+    largest_t_eff_move: (f64, String),
 }
 
 /// The plan's test (b), under the 26 arm: 10⁴ rogue planets of 0.3 M⊕–13 `M_J` derive without a
@@ -268,6 +272,14 @@ fn ten_thousand_rogue_planets_derive_without_a_star() {
         }
     }
     println!("{census:?}");
+    println!(
+        "the largest effective temperature's move against T_eq = 0 K: {:.3e} K, {}; T_s is not \
+         modelled",
+        census.largest_t_eff_move.0, census.largest_t_eff_move.1
+    );
+    // Pinned as it stands: 0.095 K, on a 5.3 K body, a small, old and metal-poor rock whose own
+    // heat, 734 K⁴, is far below the 10⁶ K⁴ research expected (a finding).
+    assert!(census.largest_t_eff_move.0 < 0.1, "{census:?}");
     assert_eq!(census.objects, 30_000);
     assert!(census.born > 29_000, "{census:?}");
     assert!(census.giants > 3_000 && census.solids > 3_000, "{census:?}");
@@ -338,7 +350,11 @@ fn check_object(
     ];
     assert!(parts.iter().all(|f| (0.0..=1.0).contains(f)), "{id:?}");
     assert!((parts.iter().sum::<f64>() - 1.0).abs() < 1e-9, "{id:?}");
-    assert_same_bits(bulk.equilibrium_temperature().value(), 0.0);
+    // The cosmic background's light alone reaches it.
+    assert_same_bits(
+        bulk.equilibrium_temperature().value(),
+        COSMIC_BACKGROUND_TEMPERATURE_K,
+    );
     let t_eff = bulk
         .effective_temperature()
         .expect("a rogue planet radiates its own heat")
@@ -347,6 +363,12 @@ fn check_object(
         t_eff.is_finite() && (1.0..3_000.0).contains(&t_eff),
         "{id:?}: {t_eff} K"
     );
+    let cmb4 = math::powi(COSMIC_BACKGROUND_TEMPERATURE_K, 4);
+    let moved = t_eff - (math::powi(t_eff, 4) - cmb4).sqrt().sqrt();
+    assert!(moved.is_finite() && moved >= 0.0, "{id:?}: {moved} K");
+    if moved > census.largest_t_eff_move.0 {
+        census.largest_t_eff_move = (moved, format!("{:?} of {t_eff} K", record.identity().id()));
+    }
     let solid = bulk.class().has_solid_surface();
     let (surface, envelope) = if solid {
         (SectionState::NotModelled, SectionState::NotApplicable)
@@ -611,6 +633,50 @@ fn a_jupiter_mass_rogue_of_a_gigayear_glows_at_its_cooling_temperature() {
             "{m_earth}: {young} {old}"
         );
     }
+}
+
+/// Research-leans-12 §4 (d): a rogue of a Jupiter mass or more formed alone, and its heavy
+/// elements are its cloud's, its record's Z (Z☉ × 10^[Fe/H]) times its mass, its envelope 1 − Z;
+/// an ejected rogue under a Jupiter mass keeps Thorngren et al.'s disc-formed heavy elements.
+#[test]
+fn a_heavy_rogue_holds_its_cloud_s_own_metals() {
+    use crate::planetary::derive::composition::giant_heavy_elements;
+    let mut checked = 0;
+    for template in rogue_planets(12) {
+        for m_jup in [1.0, 2.0, 5.0, 12.0, 0.9] {
+            let record = with_mass_and_age(
+                &template,
+                SolarMasses::from(JupiterMasses::new(m_jup)),
+                Years::new(1.0e9),
+            );
+            let (ctx, system) = whole(&record);
+            let mass = system.rogue_planet().unwrap().mass();
+            let bulk = *system
+                .body_at(&ctx, BodyIndex::PRIMARY, UniverseTime::EPOCH)
+                .unwrap()
+                .bulk()
+                .ok()
+                .expect("a born rogue planet derives");
+            let f = bulk.fractions();
+            let heavy = (f.iron() + f.rock() + f.water()) * mass.value();
+            if ejected(mass) {
+                let disc = giant_heavy_elements(mass).value();
+                assert!((heavy / disc - 1.0).abs() < 1e-9, "{m_jup}: {heavy} M⊕");
+                assert!(f.envelope() < 0.9, "{m_jup}: {}", f.envelope());
+            } else {
+                let z = ctx.composition().z().value();
+                assert!(
+                    (heavy - z * mass.value()).abs() <= 1e-12 * mass.value(),
+                    "{m_jup} M_J: {heavy} M⊕ against Z M = {} M⊕",
+                    z * mass.value()
+                );
+                assert!((f.envelope() - (1.0 - z)).abs() <= 1e-12, "{m_jup}");
+                assert_eq!(bulk.class(), PlanetClass::GasGiant);
+                checked += 1;
+            }
+        }
+    }
+    assert_eq!(checked, 48);
 }
 
 /// Design note 13's cut: an ejected planet keeps exactly the moons its generators give it whose
