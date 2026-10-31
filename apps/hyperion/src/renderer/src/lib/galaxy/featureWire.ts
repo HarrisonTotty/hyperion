@@ -231,6 +231,8 @@ const KNOWN_ORIGINS: Readonly<Record<SystemOriginWire["type"], true>> = {
   feature_member: true,
   centre_member: true,
   catalogue_system: true,
+  stream: true,
+  dwarf_core: true,
 };
 
 /** Every catalogue class this build knows: the registry's nine, which grow as its origins do. */
@@ -281,6 +283,12 @@ export function toSystemOrigin(origin: SystemOriginWire | undefined): SystemOrig
       break;
     case "catalogue_system":
       model = { kind: "catalogue_system", catalogueClass: toCatalogueClass(origin.class) };
+      break;
+    // Plan 10's members, which no server sends before P10.T10.b registers the global list's
+    // source; the readout names their stream or core from P10.T11, and reads Missing until then.
+    case "stream":
+    case "dwarf_core":
+      model = { kind: "unknown" };
       break;
   }
   return model;

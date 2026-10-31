@@ -35,6 +35,7 @@ pub struct ServerStats {
     feature_cells: LruCounters,
     cluster_models: LruCounters,
     galaxy_features: LruCounters,
+    global_lists: LruCounters,
 }
 
 impl ServerStats {
@@ -60,6 +61,7 @@ impl ServerStats {
             feature_cells: state.feature_cells.counters(),
             cluster_models: state.cluster_models.counters(),
             galaxy_features: state.galaxy_features.counters(),
+            global_lists: state.global_lists.counters(),
         }
     }
 
@@ -187,6 +189,13 @@ impl ServerStats {
     #[must_use]
     pub fn galaxy_features(&self) -> LruCounters {
         self.galaxy_features
+    }
+
+    /// The global lists' contents and use, including their byte budget: a galaxy's list is built
+    /// once and kept (plan 10, P10.T10.a).
+    #[must_use]
+    pub fn global_lists(&self) -> LruCounters {
+        self.global_lists
     }
 }
 

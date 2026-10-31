@@ -724,6 +724,9 @@ centre's part waits on P09.T29's `CentreMemberSource`, which P09.T28.b.a must pr
 
 ### P10.T10 Protocol and server
 
+_T10.a built (lane `p10-t9`, step 3, 2026-10-31, at `GENERATOR_VERSION` 24); see "P10.T10.a as built"
+in Risks. T10.b is not._
+
 - **P10.T10.a Protocol.** New kinds of plan 04's `RequestBody` and `ResponseBody`, added to
   `REQUEST_KINDS`: `GlobalFeatures { universe }` → `GlobalEntryWire` list (kind, number, mass,
   bounding radii, the living progenitor's feature ID as plan 09's `FeatureIdHex`,
@@ -2238,3 +2241,24 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     fallback; the frame test allows the arms' junction cos 0.9985 (measured 0.99865, 3.0°); P10.T9's
     order test centres its spheres on members, as the centre line moved. Slow:
     `source::tests::over_eight_seeds_the_test_tubes_lie_within_their_tracers_and_shells`.
+- **P10.T10.a as built (lane `p10-t9`, step 3, 2026-10-31, at `GENERATOR_VERSION` 24).** No
+  generated output moved; no `PROTOCOL_VERSION` bump (new kinds and a growing enum's variants).
+  - _Wire._ `global_features` answers `GlobalFeatures { universe, entries, progenitors }`:
+    `GlobalEntryWire` (`kind` is `FeatureKindWire`, `number`, `mass_msun`, the shell's radii, a
+    living globular's `progenitor`, `track: TrackStatusWire`) and `AccretedProgenitorWire` (the
+    dominant merger, then the recent ones, with the `stream` and `core` each left). `stream_track`
+    answers `StreamTrackWire { universe, stream, track }`, `TrackWire` tagged `status`: `ready`
+    (`trailing` and `leading`, at most 128 `TrackPointWire`s each, ends kept) or `pending`. A
+    stream the list lacks is `unknown_feature` naming `stream`. `SystemOriginWire` gains
+    `stream { stream }` and `dwarf_core { core }`.
+  - _Server (lean, 2026-10-31)._ `compute::GlobalListService` builds each galaxy's list once in a
+    bulk job (`GLOBAL_LIST_CACHE_BYTES`, 4 MiB). With no tube cache, every stream's `track` is
+    `pending` and `stream_track` builds its tube in the job that asks; T10.b's cache and warm-up
+    make them `ready`. `convert::system_origin` still has no arm for `GlobalListMember`, whose
+    number is in its ID: T10.b's.
+  - _Parameters._ `halo.discrete_share` is sent drawn in the `halo` group; both keys are out of
+    `EXCLUDED_PARAMETERS`, and `PARAMETERS_ACCOUNTED_FOR` is 115, since the progenitors now go in
+    `global_features`. `galaxy_parameters.golden` re-blessed by name. The applied share's derived
+    key waits for T3.d.b.
+  - _For T11._ The client reads `stream` and `dwarf_core` origins as `unknown` (`featureWire.ts`),
+    and `halo.discrete_share` has no label in `parameterLabels.ts` yet.

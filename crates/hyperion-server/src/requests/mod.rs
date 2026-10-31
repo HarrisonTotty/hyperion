@@ -21,6 +21,7 @@
 
 mod features;
 mod galaxy;
+mod global_list;
 mod observe;
 mod scene;
 mod sky;
@@ -306,6 +307,13 @@ impl Handler for Handlers {
             RequestBody::BlackHoleState(request) => {
                 Box::pin(features::black_hole(state, request, token).map(answered))
             }
+            // Plan 10's kinds (P10.T10.a).
+            RequestBody::GlobalFeatures(request) => {
+                Box::pin(global_list::features(state, request, token).map(answered))
+            }
+            RequestBody::StreamTrack(request) => {
+                Box::pin(global_list::track(state, request, token).map(answered))
+            }
         }
     }
 
@@ -365,6 +373,8 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::GalaxyFeatures(_) => "galaxy_features",
         RequestBody::FeatureDetail(_) => "feature_detail",
         RequestBody::BlackHoleState(_) => "black_hole_state",
+        RequestBody::GlobalFeatures(_) => "global_features",
+        RequestBody::StreamTrack(_) => "stream_track",
     }
 }
 
@@ -382,7 +392,9 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 /// `surface_field` large as plan 04's row R09 requires, whose payload runs to some 15 MB, though
 /// its JSON is a header and a cover; its `survey_pass` answers one revision. Plan 09's
 /// `features_in_range` can, as `systems_in_range` can, and so can its `galaxy_features`, a list
-/// over the whole galaxy; one feature's detail and the black hole's state cannot.
+/// over the whole galaxy; one feature's detail and the black hole's state cannot. Plan 10's
+/// `global_features` can, a list over the whole galaxy too; one stream's track, at most 256 points,
+/// cannot.
 pub(crate) fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
@@ -390,6 +402,7 @@ pub(crate) fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::SystemsInRange(_)
         | ResponseBody::FeaturesInRange(_)
         | ResponseBody::GalaxyFeatures(_)
+        | ResponseBody::GlobalFeatures(_)
         | ResponseBody::SystemBodies(_)
         | ResponseBody::BodyEvents(_)
         | ResponseBody::Sky(_)
@@ -413,7 +426,8 @@ pub(crate) fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::FeatureDetail(_)
         | ResponseBody::BlackHoleState(_)
         | ResponseBody::AlertsObserver
-        | ResponseBody::AlertsAcknowledge => false,
+        | ResponseBody::AlertsAcknowledge
+        | ResponseBody::StreamTrack(_) => false,
     }
 }
 
@@ -1259,12 +1273,12 @@ mod tests {
         ExtinctionMapRequest, ExtinctionRequest, ExtinctionResult, ExtinctionTarget,
         FeatureDetailRequest, FeatureIdHex, FeatureKindWire, FeaturesInRangeRequest,
         FramePositionDto, GalacticPosition, GalaxyFeaturesRequest, GalaxyParametersRequest,
-        KinematicsDto, MapFeatureKindWire, MapPopulation, MapView, MassLayer, OpenUniverseRequest,
-        SceneCamerasRequest, SceneClockDto, SceneClockStateDto, SceneShipRequest, SceneShipSet,
-        SceneStateDto, SceneSubscribeRequest, SkyRequest, SubscribeRequest, Subscribed,
-        SubscriptionTopic, SurfaceFieldRequest, SurveyPassRequest, SurveySourceDto,
-        SystemBodiesRequest, SystemIdHex, SystemSummaryRequest, SystemsInRangeRequest,
-        TargetExtinction, UniverseIdHex, UniverseTime, UnsubscribeRequest,
+        GlobalFeaturesRequest, KinematicsDto, MapFeatureKindWire, MapPopulation, MapView,
+        MassLayer, OpenUniverseRequest, SceneCamerasRequest, SceneClockDto, SceneClockStateDto,
+        SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SkyRequest,
+        StreamTrackRequest, SubscribeRequest, Subscribed, SubscriptionTopic, SurfaceFieldRequest,
+        SurveyPassRequest, SurveySourceDto, SystemBodiesRequest, SystemIdHex, SystemSummaryRequest,
+        SystemsInRangeRequest, TargetExtinction, UniverseIdHex, UniverseTime, UnsubscribeRequest,
     };
 
     use tokio::time::timeout;
@@ -1424,6 +1438,13 @@ mod tests {
             RequestBody::AlertsAcknowledge(AlertsAcknowledgeRequest {
                 subscription: 1,
                 contact: 1,
+            }),
+            RequestBody::GlobalFeatures(GlobalFeaturesRequest {
+                universe: UniverseIdHex::from_u64(42),
+            }),
+            RequestBody::StreamTrack(StreamTrackRequest {
+                universe: UniverseIdHex::from_u64(42),
+                stream: 0,
             }),
         ]
     }

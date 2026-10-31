@@ -27,6 +27,9 @@ use crate::galaxy::{
     ExtinctionResult, GalaxyParameters, GalaxyParametersRequest, SystemsInRange,
     SystemsInRangeRequest,
 };
+use crate::global_list::{
+    GlobalFeatures, GlobalFeaturesRequest, StreamTrackRequest, StreamTrackWire,
+};
 use crate::observe::{ResolveSystemRequest, ResolvedSystem};
 use crate::planetary::{
     BodyDetailDto, BodyDetailRequest, BodyEventsDto, BodyEventsRequest, SystemBodiesDto,
@@ -257,8 +260,9 @@ pub enum ErrorCode {
     /// cannot be placed yet (a member of the galactic centre, as `resolve_system` answers it);
     /// `field` names the request's field.
     UnknownSystem,
-    /// A well-formed feature ID that names no feature of the universe at the request's time;
-    /// `field` names the request's field (galaxy plan 09, P09.T40.b).
+    /// A well-formed feature ID that names no feature of the universe at the request's time, or a
+    /// stream number its galaxy's global list has no stream for; `field` names the request's field
+    /// (galaxy plan 09, P09.T40.b, and plan 10, P10.T10.a).
     ///
     /// Like the other codes plan 04's reserved list names as growing, it was added without a bump.
     UnknownFeature,
@@ -343,6 +347,11 @@ pub enum RequestBody {
     AlertsObserver(AlertsObserverRequest),
     /// Acknowledge a contact on an alerts subscription (plan 12, P12.T9.a).
     AlertsAcknowledge(AlertsAcknowledgeRequest),
+    /// The galaxy's global list: its centre, streams and dwarf cores, and its accreted
+    /// progenitors (plan 10).
+    GlobalFeatures(GlobalFeaturesRequest),
+    /// One stream's track (plan 10).
+    StreamTrack(StreamTrackRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -408,6 +417,10 @@ pub enum ResponseBody {
     AlertsObserver,
     /// The contact acknowledged.
     AlertsAcknowledge,
+    /// The global list's entries and progenitors.
+    GlobalFeatures(GlobalFeatures),
+    /// The stream's track, or that it is pending.
+    StreamTrack(StreamTrackWire),
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -442,6 +455,8 @@ pub const REQUEST_KINDS: &[&str] = &[
     "black_hole_state",
     "alerts_observer",
     "alerts_acknowledge",
+    "global_features",
+    "stream_track",
 ];
 
 #[cfg(test)]
@@ -460,6 +475,7 @@ mod tests {
         Census, ExtinctionTarget, MapPopulation, MapView, MassLayer, ParameterGroup, Population,
         SystemRecord, SystemsInRange, TargetExtinction,
     };
+    use crate::global_list::{self, TrackWire};
     use crate::observe::QueryModeDto;
     use crate::orbit::HierarchyDto;
     use crate::planetary::{
@@ -750,7 +766,18 @@ mod tests {
                     contact: 1,
                 }))
             }
-            Some(RequestBody::AlertsAcknowledge(_)) => None,
+            Some(RequestBody::AlertsAcknowledge(_)) => {
+                Some(RequestBody::GlobalFeatures(GlobalFeaturesRequest {
+                    universe,
+                }))
+            }
+            Some(RequestBody::GlobalFeatures(_)) => {
+                Some(RequestBody::StreamTrack(StreamTrackRequest {
+                    universe,
+                    stream: 0,
+                }))
+            }
+            Some(RequestBody::StreamTrack(_)) => None,
         }
     }
 
@@ -965,7 +992,21 @@ mod tests {
             }
             Some(ResponseBody::BlackHoleState(_)) => Some(ResponseBody::AlertsObserver),
             Some(ResponseBody::AlertsObserver) => Some(ResponseBody::AlertsAcknowledge),
-            Some(ResponseBody::AlertsAcknowledge) => None,
+            Some(ResponseBody::AlertsAcknowledge) => {
+                Some(ResponseBody::GlobalFeatures(GlobalFeatures {
+                    universe,
+                    entries: global_list::tests::entries(),
+                    progenitors: global_list::tests::progenitors(),
+                }))
+            }
+            Some(ResponseBody::GlobalFeatures(_)) => {
+                Some(ResponseBody::StreamTrack(StreamTrackWire {
+                    universe,
+                    stream: 0,
+                    track: TrackWire::Pending,
+                }))
+            }
+            Some(ResponseBody::StreamTrack(_)) => None,
         }
     }
 
@@ -1263,6 +1304,8 @@ mod tests {
                 "black_hole_state",
                 "alerts_observer",
                 "alerts_acknowledge",
+                "global_features",
+                "stream_track",
             ]
         );
     }

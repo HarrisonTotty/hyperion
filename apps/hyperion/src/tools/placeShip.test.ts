@@ -267,6 +267,8 @@ class FakeServer {
       case "black_hole_state":
       case "alerts_observer":
       case "alerts_acknowledge":
+      case "global_features":
+      case "stream_track":
         break;
     }
     return { code: "unsupported", message: `not faked: ${body.kind}`, field: null };

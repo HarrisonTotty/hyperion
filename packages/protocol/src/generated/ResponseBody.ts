@@ -9,9 +9,11 @@ import type { FeatureDetail } from "./FeatureDetail";
 import type { FeaturesInRange } from "./FeaturesInRange";
 import type { GalaxyFeatures } from "./GalaxyFeatures";
 import type { GalaxyParameters } from "./GalaxyParameters";
+import type { GlobalFeatures } from "./GlobalFeatures";
 import type { ResolvedSystem } from "./ResolvedSystem";
 import type { SceneShipSet } from "./SceneShipSet";
 import type { SkyResponse } from "./SkyResponse";
+import type { StreamTrackWire } from "./StreamTrackWire";
 import type { Subscribed } from "./Subscribed";
 import type { SurfaceFieldDto } from "./SurfaceFieldDto";
 import type { SurveyPassDto } from "./SurveyPassDto";
@@ -24,4 +26,4 @@ import type { UniverseList } from "./UniverseList";
 /**
  * The answer to a request, with the same `kind` as the request it answers.
  */
-export type ResponseBody = { "kind": "create_universe" } & UniverseInfo | { "kind": "list_universes" } & UniverseList | { "kind": "open_universe" } & UniverseInfo | { "kind": "galaxy_parameters" } & GalaxyParameters | { "kind": "density_map" } & DensityMap | { "kind": "systems_in_range" } & SystemsInRange | { "kind": "system_summary" } & SystemSummaryDto | { "kind": "system_bodies" } & SystemBodiesDto | { "kind": "body_detail" } & BodyDetailDto | { "kind": "body_events" } & BodyEventsDto | { "kind": "subscribe" } & Subscribed | { "kind": "unsubscribe" } | { "kind": "scene_ship" } & SceneShipSet | { "kind": "scene_cameras" } | { "kind": "sky" } & SkyResponse | { "kind": "surface_field" } & SurfaceFieldDto | { "kind": "survey_pass" } & SurveyPassDto | { "kind": "extinction_map" } & ExtinctionMap | { "kind": "extinction" } & ExtinctionResult | { "kind": "resolve_system" } & ResolvedSystem | { "kind": "features_in_range" } & FeaturesInRange | { "kind": "galaxy_features" } & GalaxyFeatures | { "kind": "feature_detail" } & FeatureDetail | { "kind": "black_hole_state" } & BlackHoleState | { "kind": "alerts_observer" } | { "kind": "alerts_acknowledge" };
+export type ResponseBody = { "kind": "create_universe" } & UniverseInfo | { "kind": "list_universes" } & UniverseList | { "kind": "open_universe" } & UniverseInfo | { "kind": "galaxy_parameters" } & GalaxyParameters | { "kind": "density_map" } & DensityMap | { "kind": "systems_in_range" } & SystemsInRange | { "kind": "system_summary" } & SystemSummaryDto | { "kind": "system_bodies" } & SystemBodiesDto | { "kind": "body_detail" } & BodyDetailDto | { "kind": "body_events" } & BodyEventsDto | { "kind": "subscribe" } & Subscribed | { "kind": "unsubscribe" } | { "kind": "scene_ship" } & SceneShipSet | { "kind": "scene_cameras" } | { "kind": "sky" } & SkyResponse | { "kind": "surface_field" } & SurfaceFieldDto | { "kind": "survey_pass" } & SurveyPassDto | { "kind": "extinction_map" } & ExtinctionMap | { "kind": "extinction" } & ExtinctionResult | { "kind": "resolve_system" } & ResolvedSystem | { "kind": "features_in_range" } & FeaturesInRange | { "kind": "galaxy_features" } & GalaxyFeatures | { "kind": "feature_detail" } & FeatureDetail | { "kind": "black_hole_state" } & BlackHoleState | { "kind": "alerts_observer" } | { "kind": "alerts_acknowledge" } | { "kind": "global_features" } & GlobalFeatures | { "kind": "stream_track" } & StreamTrackWire;

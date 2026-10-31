@@ -178,6 +178,17 @@ pub const MAX_FEATURE_CELLS: u64 = 512;
 /// ([`GALAXY_CACHE_ENTRIES`]) with room.
 pub const GALAXY_FEATURES_CACHE_BYTES: usize = 1 << 20;
 
+/// The byte budget of plan 10's global lists, kept per galaxy (P10.T10.a): some 310 streams and
+/// cores of about 200 bytes each and as many entries of 40, under 100 kB a galaxy, so this holds
+/// every galaxy the server keeps ([`GALAXY_CACHE_ENTRIES`]) with room for the 1,500 streams of the
+/// largest.
+pub const GLOBAL_LIST_CACHE_BYTES: usize = 4 << 20;
+
+/// The byte budget of the galaxies' spray tables, which the global lists' shell orbits and every
+/// tube's spray step in (P10.T5.b's `SharedSprayForces`): some 160 kB a galaxy, so this holds
+/// every galaxy the server keeps ([`GALAXY_CACHE_ENTRIES`]) with room.
+pub const SPRAY_FORCE_CACHE_BYTES: usize = 1 << 20;
+
 /// Most targets one `extinction` request may name (plan 07, P07.T10.c).
 ///
 /// A position target is some 130 bytes of JSON, so 64 of them, with the origin and the envelope,

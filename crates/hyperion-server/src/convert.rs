@@ -17,6 +17,7 @@ mod events;
 mod extinction;
 mod feature_answers;
 mod features;
+mod global_answers;
 mod motion;
 mod observe;
 mod planetary;
@@ -75,6 +76,7 @@ pub(crate) use self::feature_answers::{
     FeatureRangeQuery, black_hole_state, black_hole_time, centre_not_built, detail_of,
     feature_detail_target, features_in_range, galaxy_features, galaxy_features_time,
 };
+pub(crate) use self::global_answers::{global_features, stream_track, stream_track_number};
 #[cfg(test)]
 pub(crate) use self::motion::origins;
 pub(crate) use self::motion::system_motion;
@@ -837,8 +839,10 @@ const ROTATION_RADIUS: LightYears = LightYears::new(26_000.0);
 /// The galaxy parameters M1 does not send, each with the reason (plan 04, P04.T14.b).
 ///
 /// Every quantity `GalaxyParams` and the potential tables expose is accounted for: it appears once
-/// in [`galaxy_parameters`], or here. Whoever adds a getter to plan 02's parameters sends it or adds
-/// it to this list, and raises [`PARAMETERS_ACCOUNTED_FOR`]; a test holds the two to each other.
+/// in [`galaxy_parameters`], or here, but for the accreted progenitors' list, which
+/// `global_features` sends beside the global list (plan 10, P10.T10.a). Whoever adds a getter to
+/// plan 02's parameters sends it or adds it to this list, and raises
+/// [`PARAMETERS_ACCOUNTED_FOR`]; a test holds the two to each other.
 ///
 /// Compiled for the tests alone, because the test is what enforces it: nothing on the wire depends
 /// on the list.
@@ -863,17 +867,8 @@ const EXCLUDED_PARAMETERS: &[(&str, &str)] = &[
          gives is sent",
     ),
     (
-        "accretion.progenitors",
-        "the per-progenitor list is plan 10's to display; the lesser progenitors' combined halo \
-         share is sent",
-    ),
-    (
         "halo.<component>.ages",
         "the components' age distributions; the `history` group stands for them in M1",
-    ),
-    (
-        "halo.discrete_share",
-        "held at zero until plan 10, which places the streams and dwarf cores it counts",
     ),
     (
         "dark_halo.scale_radius",
@@ -911,7 +906,7 @@ const EXCLUDED_PARAMETERS: &[(&str, &str)] = &[
 ///
 /// Raised by whoever adds a parameter, which is what makes them decide whether it is sent.
 #[cfg(test)]
-const PARAMETERS_ACCOUNTED_FOR: usize = 116;
+const PARAMETERS_ACCOUNTED_FOR: usize = 115;
 
 /// The galaxy's parameters as the wire carries them: grouped, keyed, and in display units.
 ///
@@ -1123,6 +1118,7 @@ fn halo(halo: &HaloParams) -> Vec<Parameter> {
         derived("halo.dominant_merger.share", Unit::None, dominant.share()),
         derived("halo.lesser.share", Unit::None, lesser),
         derived("halo.globular_debris.share", Unit::None, debris.share()),
+        drawn("halo.discrete_share", Unit::None, halo.discrete_share()),
         drawn("halo.in_situ.slope", Unit::None, in_situ.slope()),
         drawn("halo.dominant_merger.slope", Unit::None, dominant.slope()),
         drawn("halo.globular_debris.slope", Unit::None, debris.slope()),
@@ -1800,6 +1796,7 @@ mod tests {
                 "halo.dominant_merger.share",
                 "halo.lesser.share",
                 "halo.globular_debris.share",
+                "halo.discrete_share",
                 "halo.in_situ.slope",
                 "halo.dominant_merger.slope",
                 "halo.globular_debris.slope",

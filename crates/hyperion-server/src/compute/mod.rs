@@ -68,6 +68,7 @@ pub use global_list::{
     BuildTubeOnPoolError, SharedSprayForces, Shares, TRACERS_PER_SHARE, global_list_on,
     tube_table_on,
 };
+pub use global_list::{GlobalListService, HeldGlobalList};
 pub use key::GalaxyKey;
 pub use pool::{
     BulkGate, CpuPool, JobError, JobReceiver, PoolCounters, Priority, ShutDownPoolError,

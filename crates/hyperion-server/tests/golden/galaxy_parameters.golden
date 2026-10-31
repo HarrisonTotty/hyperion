@@ -581,6 +581,15 @@
             }
           },
           {
+            "key": "halo.discrete_share",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.12104441017006494,
+              "unit": "none"
+            }
+          },
+          {
             "key": "halo.in_situ.slope",
             "origin": "drawn",
             "value": {

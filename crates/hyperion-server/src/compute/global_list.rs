@@ -35,6 +35,11 @@
 //! No kind of unit is dealt into more shares than the pool has workers, so a build holds at most
 //! its workers' count and three more jobs in the queue at once.
 //!
+//! **Kept** ([`GlobalListService`], P10.T10.a). A galaxy's list is built once, on its first
+//! `global_features` or `stream_track`, and kept within a byte budget; a stream's tube is built for
+//! the `stream_track` that asks, at interactive priority, and not kept (P10.T10.b's cache will). A
+//! list is a pure function of its galaxy, so eviction never changes an answer.
+//!
 //! [`served_range_query`]: super::served_range_query
 //! [`DebrisPlan::orphan`]: hyperion_sim::galaxy::global_list::DebrisPlan::orphan
 
@@ -49,8 +54,11 @@ use hyperion_sim::galaxy::global_list::tube::BuildTubeTableError;
 use hyperion_sim::galaxy::global_list::{Debris, GlobalList, ListPlan, StreamSpec, TubeTable};
 use hyperion_sim::galaxy::{Galaxy, Population};
 
-use super::{CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver, Priority};
-use crate::cache::{HeapBytes, SharedByteLru};
+use super::{
+    CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyCache, GalaxyKey, JobError,
+    JobReceiver, Priority, SingleFlight,
+};
+use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
 
 /// The tracers of one share of a tube's spray: 250, eight shares of a stream's 2,000 on eight
 /// workers, about 0.25 s each (perf-spray's recorded design, 2026-10-30).
@@ -495,6 +503,155 @@ pub(crate) async fn tracers_on(
         .into_iter()
         .map(|tracer| tracer.expect("every index is dealt to a share"))
         .collect())
+}
+
+/// A galaxy's global list, as the [`GlobalListService`] keeps it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HeldGlobalList(GlobalList);
+
+impl HeldGlobalList {
+    /// The list.
+    #[must_use]
+    pub fn list(&self) -> &GlobalList {
+        &self.0
+    }
+}
+
+impl HeapBytes for HeldGlobalList {
+    /// The list's entries and its debris' specifications, by their counts: none of them owns
+    /// anything on the heap itself, and the vectors' capacities are the sim's to keep.
+    fn heap_bytes(&self) -> usize {
+        let list = &self.0;
+        size_of_val(list.entries())
+            + size_of_val(list.debris().streams())
+            + size_of_val(list.debris().cores())
+    }
+}
+
+/// The global list of every galaxy the server holds, built on the pool's workers and kept per
+/// galaxy, and the streams' tubes built for their requests (module documentation, "Kept").
+///
+/// [`GlobalListService::get`] hands back a galaxy's list, building it with [`global_list_on`] at
+/// [`Priority::Bulk`] if no one has yet, the galaxy taken from the [`GalaxyCache`], which builds
+/// every galaxy with the kinematic tables the list needs. Callers that ask for one galaxy at once
+/// share one build through a [`SingleFlight`], and if every one of them gives up, its jobs still
+/// queued are skipped. [`GlobalListService::tube`] builds a stream's tube with [`tube_table_on`].
+/// Both keep each galaxy's spray table in the service's [`SharedSprayForces`].
+pub struct GlobalListService {
+    pool: Arc<CpuPool>,
+    galaxies: Arc<GalaxyCache>,
+    forces: Arc<SharedSprayForces>,
+    held: Arc<SharedByteLru<GalaxyKey, HeldGlobalList>>,
+    flights: SingleFlight<GalaxyKey, HeldGlobalList, ComputeError>,
+}
+
+impl GlobalListService {
+    /// A service that builds its lists and tubes on `pool` from the galaxies of `galaxies`,
+    /// keeping at most `budget_bytes` of lists and their spray tables in `forces`.
+    ///
+    /// A budget of zero keeps no list.
+    #[must_use]
+    pub fn new(
+        pool: Arc<CpuPool>,
+        galaxies: Arc<GalaxyCache>,
+        forces: Arc<SharedSprayForces>,
+        budget_bytes: usize,
+    ) -> Self {
+        Self {
+            pool,
+            galaxies,
+            forces,
+            held: Arc::new(SharedByteLru::new(budget_bytes)),
+            flights: SingleFlight::new(),
+        }
+    }
+
+    /// The global list of the galaxy `key` names, built if it is not held already.
+    ///
+    /// # Errors
+    ///
+    /// [`ComputeError`] as [`GalaxyCache::get`] gives it for the galaxy, and as
+    /// [`global_list_on`] gives it for the build.
+    pub async fn get(&self, key: GalaxyKey) -> Result<Arc<HeldGlobalList>, ComputeError> {
+        if let Some(list) = self.held.get(&key) {
+            return Ok(list);
+        }
+        let (pool, galaxies, forces, held) = (
+            Arc::clone(&self.pool),
+            Arc::clone(&self.galaxies),
+            Arc::clone(&self.forces),
+            Arc::clone(&self.held),
+        );
+        self.flights
+            .run(key, move || async move {
+                // As the feature lists' service: a caller can arrive just after another flight has
+                // finished, and the list it built is worth more than a second build.
+                if let Some(list) = held.get(&key) {
+                    return Ok(list);
+                }
+                let galaxy = galaxies.get(key).await?;
+                let token = CancelToken::new();
+                // Cancels the jobs still queued once every waiter on this flight has gone.
+                let _cancel_on_drop = CancelOnDrop::new(token.clone());
+                let shares = Shares::for_workers(pool.workers());
+                let list = global_list_on(
+                    &pool,
+                    &forces,
+                    (&galaxy, key),
+                    (Priority::Bulk, shares),
+                    &token,
+                )
+                .await?;
+                let list = Arc::new(HeldGlobalList(list));
+                // A list larger than the whole budget is handed back and not stored.
+                drop(held.insert(key, Arc::clone(&list)));
+                Ok(list)
+            })
+            .await
+    }
+
+    /// The tube of `spec`'s stream in `galaxy`, the galaxy `key` names, its tracers sprayed on the
+    /// pool's workers at [`Priority::Interactive`] behind `token`, the request's: not kept.
+    ///
+    /// # Errors
+    ///
+    /// As [`tube_table_on`].
+    ///
+    /// # Panics
+    ///
+    /// If `key` is not of `galaxy`'s seed.
+    pub async fn tube(
+        &self,
+        (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
+        spec: &StreamSpec,
+        token: &CancelToken,
+    ) -> Result<TubeTable, BuildTubeOnPoolError> {
+        let shares = Shares::for_workers(self.pool.workers());
+        tube_table_on(
+            &self.pool,
+            &self.forces,
+            (galaxy, key),
+            spec,
+            (Priority::Interactive, shares),
+            token,
+        )
+        .await
+    }
+
+    /// The lists held, the bytes they are charged, and the hits, misses, evictions and refusals
+    /// so far.
+    #[must_use]
+    pub fn counters(&self) -> LruCounters {
+        self.held.counters()
+    }
+}
+
+impl std::fmt::Debug for GlobalListService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GlobalListService")
+            .field("counters", &self.counters())
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(test)]

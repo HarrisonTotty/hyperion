@@ -43,12 +43,15 @@ use axum::{Router, routing::get};
 
 use crate::compute::{
     BulkGate, CpuPool, DensityMapService, ExtinctionMapService, GalaxyCache, GalaxyFeaturesService,
-    SharedBodyCache, SharedBriefCache, SharedCellCache, SharedClusterModelCache,
-    SharedFeatureCellCache, SharedSightlineCache, SharedSkyCellCache, SharedSystemCache,
-    ShutDownPoolError, SkyCaps, SkyTablesService, StartPoolError,
+    GlobalListService, SharedBodyCache, SharedBriefCache, SharedCellCache, SharedClusterModelCache,
+    SharedFeatureCellCache, SharedSightlineCache, SharedSkyCellCache, SharedSprayForces,
+    SharedSystemCache, ShutDownPoolError, SkyCaps, SkyTablesService, StartPoolError,
 };
 use crate::connections::Connections;
-use crate::limits::{BULK_QUEUE_CAPACITY, GALAXY_FEATURES_CACHE_BYTES, INTERACTIVE_QUEUE_CAPACITY};
+use crate::limits::{
+    BULK_QUEUE_CAPACITY, GALAXY_FEATURES_CACHE_BYTES, GLOBAL_LIST_CACHE_BYTES,
+    INTERACTIVE_QUEUE_CAPACITY, SPRAY_FORCE_CACHE_BYTES,
+};
 use crate::requests::{Handler, Handlers};
 use crate::scene::SceneService;
 use crate::stats::{OutboundStats, RequestStats};
@@ -128,6 +131,9 @@ pub(crate) struct AppState {
     /// The galaxy map's globulars of every galaxy asked for, found once each in a bulk job and kept
     /// (P09.T40.b).
     pub(crate) galaxy_features: GalaxyFeaturesService,
+    /// Plan 10's global list of every galaxy asked for, built once each in a bulk job and kept
+    /// (P10.T10.a).
+    pub(crate) global_lists: GlobalListService,
     /// Whether the range query serves plan 09's feature members, each row its origin, and the sky
     /// the features' gas: P09.T40.a's serve gate, held until
     /// [`FEATURE_MEMBERS_FROM`](config::FEATURE_MEMBERS_FROM).
@@ -221,7 +227,7 @@ impl Server {
         );
         let sightlines = SharedSightlineCache::new(config.sightline_cache_bytes());
         let cells = Arc::new(SharedCellCache::new(config.cell_cache_bytes()));
-        let (feature_cells, cluster_models, map_lists) =
+        let (feature_cells, cluster_models, map_lists, global_lists) =
             feature_caches(&config, Arc::clone(&pool), Arc::clone(&galaxies));
         let (systems, briefs) = system_caches(&config, &cluster_models);
         let bodies = SharedBodyCache::new(Arc::clone(&pool), config.body_cache_bytes());
@@ -269,6 +275,7 @@ impl Server {
                 feature_cells,
                 cluster_models,
                 galaxy_features: map_lists,
+                global_lists,
                 feature_members: config.feature_members(),
                 handler,
                 connections: Connections::new(),
@@ -415,8 +422,8 @@ fn start_pool(workers: NonZeroUsize, gate: Option<BulkGate>) -> Result<CpuPool, 
 }
 
 /// The caches of plan 09's feature cells and interiors, in the budgets `config` gives (P09.T40.a),
-/// and the galaxy map's feature lists, found on `pool` from the galaxies of `galaxies`
-/// (P09.T40.b).
+/// the galaxy map's feature lists (P09.T40.b) and plan 10's global lists (P10.T10.a), each list
+/// found on `pool` from the galaxies of `galaxies`.
 #[must_use]
 fn feature_caches(
     config: &ServerConfig,
@@ -426,13 +433,24 @@ fn feature_caches(
     Arc<SharedFeatureCellCache>,
     Arc<SharedClusterModelCache>,
     GalaxyFeaturesService,
+    GlobalListService,
 ) {
     (
         Arc::new(SharedFeatureCellCache::new(config.feature_cache_bytes())),
         Arc::new(SharedClusterModelCache::new(
             config.cluster_model_cache_bytes(),
         )),
-        GalaxyFeaturesService::new(pool, galaxies, GALAXY_FEATURES_CACHE_BYTES),
+        GalaxyFeaturesService::new(
+            Arc::clone(&pool),
+            Arc::clone(&galaxies),
+            GALAXY_FEATURES_CACHE_BYTES,
+        ),
+        GlobalListService::new(
+            pool,
+            galaxies,
+            Arc::new(SharedSprayForces::new(SPRAY_FORCE_CACHE_BYTES)),
+            GLOBAL_LIST_CACHE_BYTES,
+        ),
     )
 }
 
@@ -589,6 +607,43 @@ mod tests {
         assert!(!data_dir.exists());
     }
 
+    /// Asserts that every cache of `fresh` holds nothing and has done nothing yet, its budget the
+    /// configuration's.
+    fn every_cache_is_empty(fresh: &ServerStats) {
+        let defaults = ServerConfig::builder().build();
+        for (cache, budget) in [
+            (fresh.maps(), defaults.map_cache_bytes()),
+            (fresh.cells(), defaults.cell_cache_bytes()),
+            (fresh.systems(), defaults.system_cache_bytes()),
+            (fresh.briefs(), defaults.brief_cache_bytes()),
+            (fresh.sky_cells().cache(), defaults.sky_cache_bytes()),
+            (fresh.sky_tables().cache(), defaults.sky_tables_bytes()),
+            (fresh.surface().cache(), defaults.surface_cache_bytes()),
+            (
+                fresh.extinction_maps(),
+                defaults.extinction_map_cache_bytes(),
+            ),
+            (fresh.sightlines(), defaults.sightline_cache_bytes()),
+            (fresh.feature_cells(), defaults.feature_cache_bytes()),
+            (fresh.cluster_models(), defaults.cluster_model_cache_bytes()),
+            (fresh.galaxy_features(), GALAXY_FEATURES_CACHE_BYTES),
+            (fresh.global_lists(), GLOBAL_LIST_CACHE_BYTES),
+        ] {
+            assert_eq!(
+                (
+                    cache.entries(),
+                    cache.bytes(),
+                    cache.hits(),
+                    cache.misses(),
+                    cache.evictions(),
+                    cache.refused(),
+                    cache.budget()
+                ),
+                (0, 0, 0, 0, 0, 0, budget)
+            );
+        }
+    }
+
     #[tokio::test]
     async fn counters_move_as_requests_are_accepted_run_and_finish() {
         use hyperion_protocol::ErrorCode;
@@ -618,37 +673,7 @@ mod tests {
                 crate::compute::GalaxyCounters::default(),
             )
         );
-        let defaults = ServerConfig::builder().build();
-        for (cache, budget) in [
-            (fresh.maps(), defaults.map_cache_bytes()),
-            (fresh.cells(), defaults.cell_cache_bytes()),
-            (fresh.systems(), defaults.system_cache_bytes()),
-            (fresh.briefs(), defaults.brief_cache_bytes()),
-            (fresh.sky_cells().cache(), defaults.sky_cache_bytes()),
-            (fresh.sky_tables().cache(), defaults.sky_tables_bytes()),
-            (fresh.surface().cache(), defaults.surface_cache_bytes()),
-            (
-                fresh.extinction_maps(),
-                defaults.extinction_map_cache_bytes(),
-            ),
-            (fresh.sightlines(), defaults.sightline_cache_bytes()),
-            (fresh.feature_cells(), defaults.feature_cache_bytes()),
-            (fresh.cluster_models(), defaults.cluster_model_cache_bytes()),
-            (fresh.galaxy_features(), GALAXY_FEATURES_CACHE_BYTES),
-        ] {
-            assert_eq!(
-                (
-                    cache.entries(),
-                    cache.bytes(),
-                    cache.hits(),
-                    cache.misses(),
-                    cache.evictions(),
-                    cache.refused(),
-                    cache.budget()
-                ),
-                (0, 0, 0, 0, 0, 0, budget)
-            );
-        }
+        every_cache_is_empty(&fresh);
         assert_eq!(fresh.sky_cells().rebuilt(), 0);
         assert_eq!(fresh.sky_tables().builds(), 0);
         assert_eq!(fresh.surface().computed(), 0);

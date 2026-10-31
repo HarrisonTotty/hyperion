@@ -524,11 +524,13 @@ pub enum CatalogueClassWire {
     AccretingWhiteDwarfSlow,
 }
 
-/// What placed a system, tagged by `type` (plan 03's `SystemOrigin`, as plan 09 extends it).
+/// What placed a system, tagged by `type` (plan 03's `SystemOrigin`, as plans 09 and 10 extend
+/// it).
 ///
-/// Plan 10's members of streams and dwarf cores have no value here yet: P10.T10.a adds them. The
-/// enum grows (plan 04's reserved list), so they, and pinned content's, take new strings without a
-/// bump, and a client that does not know one reads the origin as Missing.
+/// The enum grows (plan 04's reserved list), so a new origin, as pinned content's will be, takes a
+/// new string without a bump, and a client that does not know one reads the origin as Missing.
+/// Plan 10's `stream` and `dwarf_core` were added so (P10.T10.a); no row carries either until
+/// P10.T10.b registers the global list's source with the range query.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
@@ -546,6 +548,16 @@ pub enum SystemOriginWire {
     CatalogueSystem {
         /// The class.
         class: CatalogueClassWire,
+    },
+    /// A stream of the global list, as one of its members (plan 10).
+    Stream {
+        /// The stream's number on the list.
+        stream: u16,
+    },
+    /// A dwarf core of the global list, as one of its members (plan 10).
+    DwarfCore {
+        /// The core's number on the list.
+        core: u16,
     },
 }
 
@@ -1352,6 +1364,14 @@ pub(crate) mod tests {
                 class: CatalogueClassWire::TypeIa,
             },
             json!({ "type": "catalogue_system", "class": "type_ia" }),
+        );
+        assert_wire_form(
+            &SystemOriginWire::Stream { stream: 3 },
+            json!({ "type": "stream", "stream": 3 }),
+        );
+        assert_wire_form(
+            &SystemOriginWire::DwarfCore { core: 0 },
+            json!({ "type": "dwarf_core", "core": 0 }),
         );
     }
 

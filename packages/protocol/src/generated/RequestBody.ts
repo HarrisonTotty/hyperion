@@ -12,11 +12,13 @@ import type { FeatureDetailRequest } from "./FeatureDetailRequest";
 import type { FeaturesInRangeRequest } from "./FeaturesInRangeRequest";
 import type { GalaxyFeaturesRequest } from "./GalaxyFeaturesRequest";
 import type { GalaxyParametersRequest } from "./GalaxyParametersRequest";
+import type { GlobalFeaturesRequest } from "./GlobalFeaturesRequest";
 import type { OpenUniverseRequest } from "./OpenUniverseRequest";
 import type { ResolveSystemRequest } from "./ResolveSystemRequest";
 import type { SceneCamerasRequest } from "./SceneCamerasRequest";
 import type { SceneShipRequest } from "./SceneShipRequest";
 import type { SkyRequest } from "./SkyRequest";
+import type { StreamTrackRequest } from "./StreamTrackRequest";
 import type { SubscribeRequest } from "./SubscribeRequest";
 import type { SurfaceFieldRequest } from "./SurfaceFieldRequest";
 import type { SurveyPassRequest } from "./SurveyPassRequest";
@@ -28,4 +30,4 @@ import type { UnsubscribeRequest } from "./UnsubscribeRequest";
 /**
  * What a request asks for, discriminated by `kind`.
  */
-export type RequestBody = { "kind": "create_universe" } & CreateUniverseRequest | { "kind": "list_universes" } | { "kind": "open_universe" } & OpenUniverseRequest | { "kind": "galaxy_parameters" } & GalaxyParametersRequest | { "kind": "density_map" } & DensityMapRequest | { "kind": "systems_in_range" } & SystemsInRangeRequest | { "kind": "system_summary" } & SystemSummaryRequest | { "kind": "system_bodies" } & SystemBodiesRequest | { "kind": "body_detail" } & BodyDetailRequest | { "kind": "body_events" } & BodyEventsRequest | { "kind": "subscribe" } & SubscribeRequest | { "kind": "unsubscribe" } & UnsubscribeRequest | { "kind": "scene_ship" } & SceneShipRequest | { "kind": "scene_cameras" } & SceneCamerasRequest | { "kind": "sky" } & SkyRequest | { "kind": "surface_field" } & SurfaceFieldRequest | { "kind": "survey_pass" } & SurveyPassRequest | { "kind": "extinction_map" } & ExtinctionMapRequest | { "kind": "extinction" } & ExtinctionRequest | { "kind": "resolve_system" } & ResolveSystemRequest | { "kind": "features_in_range" } & FeaturesInRangeRequest | { "kind": "galaxy_features" } & GalaxyFeaturesRequest | { "kind": "feature_detail" } & FeatureDetailRequest | { "kind": "black_hole_state" } & BlackHoleStateRequest | { "kind": "alerts_observer" } & AlertsObserverRequest | { "kind": "alerts_acknowledge" } & AlertsAcknowledgeRequest;
+export type RequestBody = { "kind": "create_universe" } & CreateUniverseRequest | { "kind": "list_universes" } | { "kind": "open_universe" } & OpenUniverseRequest | { "kind": "galaxy_parameters" } & GalaxyParametersRequest | { "kind": "density_map" } & DensityMapRequest | { "kind": "systems_in_range" } & SystemsInRangeRequest | { "kind": "system_summary" } & SystemSummaryRequest | { "kind": "system_bodies" } & SystemBodiesRequest | { "kind": "body_detail" } & BodyDetailRequest | { "kind": "body_events" } & BodyEventsRequest | { "kind": "subscribe" } & SubscribeRequest | { "kind": "unsubscribe" } & UnsubscribeRequest | { "kind": "scene_ship" } & SceneShipRequest | { "kind": "scene_cameras" } & SceneCamerasRequest | { "kind": "sky" } & SkyRequest | { "kind": "surface_field" } & SurfaceFieldRequest | { "kind": "survey_pass" } & SurveyPassRequest | { "kind": "extinction_map" } & ExtinctionMapRequest | { "kind": "extinction" } & ExtinctionRequest | { "kind": "resolve_system" } & ResolveSystemRequest | { "kind": "features_in_range" } & FeaturesInRangeRequest | { "kind": "galaxy_features" } & GalaxyFeaturesRequest | { "kind": "feature_detail" } & FeatureDetailRequest | { "kind": "black_hole_state" } & BlackHoleStateRequest | { "kind": "alerts_observer" } & AlertsObserverRequest | { "kind": "alerts_acknowledge" } & AlertsAcknowledgeRequest | { "kind": "global_features" } & GlobalFeaturesRequest | { "kind": "stream_track" } & StreamTrackRequest;

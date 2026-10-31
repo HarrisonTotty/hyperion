@@ -41,6 +41,7 @@ mod bulk;
 mod envelope;
 mod features;
 mod galaxy;
+mod global_list;
 mod modelled;
 mod observe;
 mod orbit;
@@ -83,6 +84,11 @@ pub use galaxy::{
     LayerStatus, MapPopulation, MapView, MassLayer, Parameter, ParameterGroup, ParameterOrigin,
     ParameterValue, Population, SystemRecord, SystemsInRange, SystemsInRangeRequest,
     TargetExtinction, Unit,
+};
+pub use global_list::{
+    AccretedProgenitorWire, GlobalEntryWire, GlobalFeatures, GlobalFeaturesRequest,
+    ProgenitorKindWire, StreamTrackRequest, StreamTrackWire, TrackPointWire, TrackStatusWire,
+    TrackWire,
 };
 pub use modelled::Modelled;
 pub use observe::{ObservedDto, QueryModeDto, ResolveSystemRequest, ResolvedSystem};

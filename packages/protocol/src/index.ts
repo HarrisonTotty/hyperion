@@ -274,6 +274,17 @@ import type { ShellSummary } from "./generated/ShellSummary";
 import type { SupernovaStateWire } from "./generated/SupernovaStateWire";
 import type { SystemOriginWire } from "./generated/SystemOriginWire";
 import type { TidalDisruptionWire } from "./generated/TidalDisruptionWire";
+// Plan 10's global list: its entries and progenitors, and a stream's track (P10.T10.a).
+import type { AccretedProgenitorWire } from "./generated/AccretedProgenitorWire";
+import type { GlobalEntryWire } from "./generated/GlobalEntryWire";
+import type { GlobalFeatures } from "./generated/GlobalFeatures";
+import type { GlobalFeaturesRequest } from "./generated/GlobalFeaturesRequest";
+import type { ProgenitorKindWire } from "./generated/ProgenitorKindWire";
+import type { StreamTrackRequest } from "./generated/StreamTrackRequest";
+import type { StreamTrackWire } from "./generated/StreamTrackWire";
+import type { TrackPointWire } from "./generated/TrackPointWire";
+import type { TrackStatusWire } from "./generated/TrackStatusWire";
+import type { TrackWire } from "./generated/TrackWire";
 import type { Unit } from "./generated/Unit";
 import type { UniverseIdHex } from "./generated/UniverseIdHex";
 import type { UniverseInfo } from "./generated/UniverseInfo";
@@ -326,6 +337,16 @@ export type {
   SupernovaStateWire,
   SystemOriginWire,
   TidalDisruptionWire,
+  AccretedProgenitorWire,
+  GlobalEntryWire,
+  GlobalFeatures,
+  GlobalFeaturesRequest,
+  ProgenitorKindWire,
+  StreamTrackRequest,
+  StreamTrackWire,
+  TrackPointWire,
+  TrackStatusWire,
+  TrackWire,
   BeltComponentDto,
   BeltCompositionDto,
   BeltDto,
