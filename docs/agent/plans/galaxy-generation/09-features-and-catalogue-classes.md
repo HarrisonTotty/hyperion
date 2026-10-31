@@ -5192,42 +5192,25 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     0.46", 0.47 at 12 Gyr; with them the halo's would be 0.552.)
   - The 26 bump deletes `BOUND_SHARE_VERSION`, `BoundShareRules` with its `Bm03` arm, the field,
     the `match` in `bound_share` and the tripwire `the_bound_share_is_held_only_until_the_26_bump`.
-- **P09.T43 as built, the field half (lane `p09-t43`, 2026-10-31, at `GENERATOR_VERSION` 24, no
-  output moves).** In `catalogue_classes::lbv`: `LbvProcess`, `LbvEntry`, `LbvComponent`,
-  `LbvMassNode`, `may_host`, `horizon_window` and `lbv_claims` (`pub(crate)`); the process is
-  registered in `ProductionClasses`. Scratch `tables::lbv::{LBV_SAMPLER, LbvSampler, LbvNode}`;
-  five `class.lbv.*` tags.
-  - _The sampler's shape (for P15.T10.a)._ Five mass intervals, 32, 36, 43, 55 and 97 M☉ to 150,
-    each holding the first and last age of every LBV window of its masses over [Fe/H] −2.4 to
-    +0.3 (plan 06's tracks, median draws, 0.25 M☉ and 0.025 dex), widened 2% and rounded out to
-    the kyr; a slow test rebuilds it. The conditional mass density is the galaxy's mass function
-    over each interval × its span of ages, which `LbvProcess::new` computes. A table change moves
-    the class's candidates and its golden.
-  - _No redraw (lean, 2026-10-31)._ No draw moves a window (`no_draw_moves_a_window`, [Fe/H] −2.4
-    to +0.2), so a redraw could never make one overlap: the class thins on attempt 0, and
-    `SystemOrigin::CatalogueSystem` gains no attempt (T33.a's deferred finding (7) is moot). The
-    sampler is a proposal and the test reads the star's own window, so the class stays exact.
-  - _Prefilter (lean, 2026-10-31)._ `may_host`: the mass in an interval and the age within its
-    [first − H, last + H + L], rather than the lowest node and the longest end; both sides read
-    it, and the 10⁶-star test finds every host inside it.
-  - _Sites at the epoch (lean, 2026-10-31)._ A host has no explosion to place, so its site is its
-    epoch position drawn from the young field's density, as the grid places it, and its [Fe/H]
-    (read at its age) and velocity read their laws there: T33.a's pattern shift does not arise.
-    Entries move straight; a host dead by +H drifts as a grid record does.
-  - _The test._ `may_host`, then `horizon_window` (start ≤ +H and end ≥ −(H + L); a track can be
-    built past +H), then not claimed by the core collapses (`death_in_interval`, site = epoch
-    position + v T, `DeathMarks::of`, `claims` in the field).
-  - _Resolution._ A class-4 `111` ID now resolves through the class (its record or
-    `NoSuchSystem`) where it answered `KindNotGenerated`; no golden pinned one, and nothing in
-    production walks the class.
-  - _For P09.T35:_ ask `lbv_claims(galaxy, record)` of every layer-E record under the `Claimed`
-    arm, after `recent_death_claims`, with or without an explosion site: `claims_with`'s site gate
-    must not hold it, since most hosts do not die in the interval. Until then nothing calls it.
-  - _Tests' reach._ The 10⁶-star sample is the young disc's (the nuclear disc's claim is checked
-    on 300 records about the centre); complementarity is sampled candidates' windows plus the
-    census against the sample, as P09.T38's helper is not built; the core-collapse half of it
-    waits for P09.T35.
-  - _Waiting:_ the band-E runaways' sites (after P08.T12, with P09.T33.b); the feature-level list
-    entry after `TYPE_IA` (after P09.T36.a).
-  - _Goldens._ `catalogue_classes/lbv` new (the hosts per galaxy at its end); `rng/tags.golden`
-    extended only (+5); `GENERATOR_VERSION` 24 → 24.
+- **P09.T43 as built, the field half (lane `p09-t43`, 2026-10-31, at 24, no output moves).**
+  `catalogue_classes::lbv::{LbvProcess, LbvEntry, may_host, horizon_window}` and a `pub(crate)`
+  `lbv_claims`; the process in `ProductionClasses`; scratch `tables::lbv::LBV_SAMPLER`; five tags.
+  - _The sampler (for P15.T10.a)._ Nodes 32, 36, 43, 55 and 97 M☉ (to 150), each the first and
+    last age of every window of its masses over [Fe/H] −2.4 to +0.3, widened 2% and rounded out to
+    the kyr; a slow test rebuilds it. `LbvProcess::new` weights the nodes by the mass function.
+  - _No redraw (lean, 2026-10-31)._ No draw moves a window (`no_draw_moves_a_window`), so the class
+    thins on attempt 0 as the grid reads it; the origin gains no attempt (T33.a's finding (7) moot).
+  - _Prefilter (lean, 2026-10-31)._ `may_host`: the mass in a node and the age within its
+    [first − H, last + H + L], tighter than the lowest node and longest end; both sides read it.
+  - _Sites at the epoch (lean, 2026-10-31)._ A host's site is its epoch position on the young
+    field's density, its [Fe/H] and velocity read there, as the grid's; entries move straight.
+  - _Resolution._ A class-4 `111` ID resolves through the class where it answered
+    `KindNotGenerated`; the server's serving test pins one host.
+  - _For P09.T35:_ ask `lbv_claims(galaxy, record)` of every layer-E record under `Claimed`, after
+    `recent_death_claims`, with or without an explosion site (`claims_with`'s site gate must not
+    hold it). The class's core-collapse claim is the grid's (`the_class_s_core_collapse_claim_…`).
+  - _Waiting:_ the band-E runaways' sites (after P08.T12, with P09.T33.b); the nurseries' and young
+    open clusters' lists after `TYPE_IA` (after P09.T36.a), and the centre's from N + 1 (lean,
+    2026-10-31: P09.T30.b's record). Companions are not carved (T33.a's finding (3)). A track change
+    reruns the scan.
+  - _Goldens._ `catalogue_classes/lbv` new (hosts per galaxy at its end); `rng/tags.golden` +5.

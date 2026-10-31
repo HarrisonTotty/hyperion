@@ -3,11 +3,14 @@
 //! (plan 09, P09.T43).
 //!
 //! A star is a luminous blue variable while it lies beyond the Humphreys–Davidson limit and is
-//! hotter than 8,000 K, inside plan 06's window ([`SystemStars::lbv_window`], P06.T24.a). A system
-//! whose window overlaps the source horizon, −(H + L) to +H, is one that some observer in the root
-//! cube can see as one during play, and the host of plan 06's giant eruptions, which plan 12's
-//! P12.T5.c finds by walking this class. Such systems are a few hundred in a galaxy of 10¹¹, so
-//! they are a catalogue class, as the recent core collapses are (P09.T33.a): a Poisson process of
+//! hotter than 8,000 K (plan 06's [`is_luminous_blue_variable`], after Hurley, Pols and Tout 2000,
+//! section 7.1, and Humphreys and Davidson 1994), and its window ([`SystemStars::lbv_window`],
+//! P06.T24.a) runs from the first to the last age at which it is one. A system whose window
+//! overlaps the source horizon, −(H + L) to +H, is one that some observer in the root cube can see
+//! as one during play, and the host of plan 06's giant eruptions, which plan 12's P12.T5.c finds
+//! by walking this class. Such systems are a few hundred in a galaxy of 10¹¹ (471 at the Milky Way
+//! fixture, the class's golden), so they are a catalogue class, as the recent core collapses are
+//! (P09.T33.a): a Poisson process of
 //! their own, which this module places by thinning on the class grid of P09.T32
 //! ([`ClassProcess`]). The grid side's carve-out, which drops the same systems from the cells, is
 //! P09.T35's, through `lbv_claims`.
@@ -22,9 +25,11 @@
 //! The scratch sampler, [`tables::lbv`] (P15.T10.a replaces it), holds five mass nodes from 32 M☉,
 //! below which no star has a window, and for each the ages within which every window of its masses
 //! lies at any metallicity. The class's candidates are the grid's intensity over the nodes' masses
-//! and ages so widened, and its test keeps those whose own window overlaps. Only the young field has
-//! stars of those ages, the components whose age density is positive there: the young thin disc and
-//! the nuclear disc's two components, whose last gigayear holds a twentieth of their stars.
+//! and ages so widened, and its test keeps those whose own window overlaps. Only the young field
+//! has stars of those ages, the components whose age density is positive there: the young thin
+//! disc, all of whose stars are young, and the nuclear disc's two components, a twentieth of whose
+//! stars formed in the last gigayear (`AgeDistribution::nuclear_disc`, after Nogueras-Lara et al.
+//! 2020, Nature Astronomy 4, 377).
 //!
 //! # The envelope and a candidate
 //!
@@ -80,6 +85,7 @@
 //! Its record is a catalogue system's ([`SystemOrigin::CatalogueSystem`]), its stars plan 06's at
 //! its composition with the model's own multiplicity, its window the one the test read.
 //!
+//! [`is_luminous_blue_variable`]: crate::stellar::classify::is_luminous_blue_variable
 //! [`tables::lbv`]: crate::tables::lbv
 
 use super::core_collapse::class_site_velocity;
@@ -373,8 +379,9 @@ impl LbvEntry {
         &self.motion
     }
 
-    /// The clock interval in which the primary is a luminous blue variable, as its track is built
-    /// for its age, which overlaps the source horizon: plan 06's [`SystemStars::lbv_window`]. Plan
+    /// The clock interval from the first to the last time at which the primary is a luminous blue
+    /// variable, as its track is built for its age, which overlaps the source horizon: plan 06's
+    /// [`SystemStars::lbv_window`]. Plan
     /// 06's giant eruptions (`stellar::events::lbv`) fall in it.
     #[must_use]
     pub const fn window(&self) -> (UniverseTime, UniverseTime) {

@@ -558,8 +558,8 @@ fn site_velocity(
     )
 }
 
-/// A class candidate's velocity at its site, galactic: the core collapses' and the Type Ia's one
-/// velocity (rule 6).
+/// A class candidate's velocity at its site, galactic: the core collapses', the Type Ia's and the
+/// luminous blue variables' one velocity (rule 6).
 ///
 /// It is plan 08's draw of its `component`'s law at `site` on its class's velocity `tag` keyed by
 /// `key`, or zero in a galaxy built without its kinematic tables, as plan 08's `epoch_velocity`

@@ -611,6 +611,48 @@ fn no_host_is_both_a_core_collapse_and_a_luminous_blue_variable() {
     assert!(claimed > 20, "{claimed}");
 }
 
+/// The class's core-collapse claim is the grid's: on grid records of the young disc about the
+/// solar circle whose primaries may die in the supernova test's interval (8–40 M☉, 3–45 Myr),
+/// `core_collapse_claims` at the record's own metallicity draw and epoch velocity answers as plan
+/// 08's `explosion_site` and the claim P09.T35 asks of it, so the class leaves to the core
+/// collapses what the grid's carve-out gives them.
+#[test]
+fn the_class_s_core_collapse_claim_is_the_grid_s() {
+    let galaxy = galaxy();
+    let young_disc = LbvProcess::new(galaxy).components()[0].id();
+    let mut lcg = Lcg::new(0x0943_0006);
+    let (mut dying, mut claimed) = (0, 0);
+    for index in 0..400 {
+        let position = GalacticPosition::from_light_years([
+            4_000.0 * lcg.next_f64() - 2_000.0,
+            20_000.0 + 12_000.0 * lcg.next_f64(),
+            400.0 * lcg.next_f64() - 200.0,
+        ])
+        .unwrap();
+        let mass = 8.0 + 32.0 * lcg.next_f64();
+        let age = 3.0e6 + 4.2e7 * lcg.next_f64();
+        let record = grid_record(galaxy, young_disc, position, index, mass, age);
+        let composition = draw_metallicity(galaxy, &record);
+        let stars = SystemStars::generate_with(
+            galaxy,
+            &record,
+            &composition,
+            MultiplicityContext::ForcedSingle,
+        );
+        let velocity = epoch_velocity(galaxy, &record);
+        let class = core_collapse_claims(galaxy, &record, &composition, &stars, velocity);
+        assert_eq!(
+            class,
+            grid_core_collapse_claims(galaxy, &record),
+            "{record:?}"
+        );
+        dying += u32::from(explosion_site(galaxy, &record).is_some());
+        claimed += u32::from(class);
+    }
+    eprintln!("{dying} of 400 records die in the interval, {claimed} of them claimed");
+    assert!(claimed > 5, "{dying} {claimed}");
+}
+
 // 3. Resolution, the rest of the sim, order.
 
 /// Every entry resolves to itself through the process, through `system_of` and through plan 03's

@@ -29,7 +29,8 @@
 //! node's in steps of [`SCAN_MASS_STEP`], both ends included, at \[Fe/H\] from [`SCAN_FE_H`]'s
 //! first to its last in steps of its third, with no helium excess. The scan's \[Fe/H\] reaches
 //! past both ends of the metal fractions the tracks' formulae see (`Composition::z_fit`, held to
-//! 10⁻⁴–0.03, about −2.3 to +0.2), so every metallicity a young star draws is one the scan holds.
+//! 10⁻⁴–0.03, Hurley, Pols and Tout 2000's fitted range, about −2.3 to +0.2 at Z☉ = 0.02), so
+//! every metallicity a young star draws is one the scan holds.
 //! No draw moves a window: Reimers η, the only draw the living track reads above the stripped
 //! window, moves none of 30–150 M☉ at −1 to +0.5 over ±3σ (P09.T43's measurement), and a test of
 //! plan 09's class holds that bit for bit at points from \[Fe/H\] −2.4 to +0.2. A slow test of this
@@ -38,8 +39,15 @@
 //! The lightest windows are short ones, a few hundred years near \[Fe/H\] −0.6 from 34.1 M☉ (none
 //! from 32 to 34 M☉ at 0.1 M☉ and 0.025 dex); from about 36.3 M☉ the metal-poorest stars have
 //! windows of 10⁴–10⁵ years. Those edges are where `Track::window_where`'s 257 samples a segment
-//! find windows, which a window of a few hundred years in a long segment can fall between. The lowest node sits at 32 M☉, below both. The nodes were placed to
-//! minimise the sampler's proposed span of ages per layer-E system, about 0.23 Myr.
+//! find windows, which a window of a few hundred years in a long segment can fall between. The
+//! lowest node sits at 32 M☉, below both. The nodes were placed to minimise the sampler's proposed
+//! span of ages per layer-E system, about 0.23 Myr.
+//!
+//! The floor is plan 06's: no star below about 34 M☉ reaches the limit's 6 × 10⁵ L☉ (Hurley, Pols
+//! and Tout 2000, section 7.1), while observed luminous blue variables reach initial masses of
+//! about 25 M☉ (Smith 2014, ARA&A 52, 487, section 4.1). Plan 06's tracks are Hurley, Pols and
+//! Tout's formulae, fitted to models of 0.5–50 M☉ (their section 3), so the windows above 50 M☉
+//! are extrapolated.
 //!
 //! [`Track::window_where`]: crate::stellar::sse::Track::window_where
 //! [`Track::full`]: crate::stellar::sse::Track::full
@@ -132,8 +140,9 @@ impl LbvSampler {
     /// If `k` is not a node's index.
     #[must_use]
     pub fn masses(&self, k: usize) -> (SolarMasses, SolarMasses) {
+        let lower = self.nodes[k].mass;
         let upper = self.nodes.get(k + 1).map_or(self.top, |next| next.mass);
-        (self.nodes[k].mass, upper)
+        (lower, upper)
     }
 }
 
@@ -214,9 +223,8 @@ mod tests {
         found
     }
 
-    /// The nodes cover band E's top in ascending order, and each node's ages are whole kiloyears,
-    /// ordered, and before the lifetime of a star of the node's mass at solar metallicity ends
-    /// by much.
+    /// The nodes cover band E's top in ascending order, each node covering its own mass and its
+    /// masses' midpoint, and each node's ages are whole kiloyears and ordered.
     #[test]
     fn the_nodes_are_ordered_and_whole() {
         let sampler = LBV_SAMPLER;
