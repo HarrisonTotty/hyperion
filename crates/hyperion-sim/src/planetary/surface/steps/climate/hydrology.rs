@@ -13,8 +13,8 @@
 //!    monthly record, its meridional flux in the model's flux form, the energy-flux equator, the
 //!    centre held at the ascending branch's cap (rotating worlds) or the substellar convergence
 //!    (locked ones), Siler et al.'s partition and each band's E − P. The partition's air, its h and
-//!    L q, is the own record's to version 25 and from 26 the climate the world shows, the climate
-//!    cells' at their sea-level month temperatures ([`ShownAir`]; R09.T13.n,
+//!    L q, is the own record's to version 25 and from 26 the climate the world shows, the field the
+//!    climate cells are interpolated from at each grid point ([`shown_months_k`]; R09.T13.n,
 //!    [`PartitionThermodynamics`]), each column's at its points.
 //! 2. **Evaporation** ([`evaporation`](super::evaporation)) over each field cell under the climate
 //!    condensable's own liquid (its `liquid_entry` the palette's `Liquid` entry of the condensable),
@@ -109,7 +109,7 @@ use super::partition::{
 };
 use super::seas;
 use super::wind::{self, LOWER_BRANCH_DEPTH_SHARE};
-use super::{Normalised, month_shares};
+use super::{Normalised, finite_k, month_shares};
 use crate::math;
 use crate::planetary::surface::grid::parent_index;
 use crate::planetary::surface::steps::{Pass, WindSample, Working};
@@ -233,7 +233,9 @@ pub(super) fn calm(working: &mut Working) {
 /// The water cycle of `model` (an energy-balance model's normalised answer with its own records)
 /// on `working` (the [module documentation](self)): each month's precipitation and wind written to
 /// every climate cell, and what it did. `None`, with every record zero and calm, for a model that
-/// keeps no records of its own (the radiative and isothermal models).
+/// keeps no records of its own (the radiative and isothermal models). From version 26 the
+/// partition's air reads the model's mean constant c ([`shown_months_k`]), so `model` is the one
+/// [`finish`](super::finish) left, not a clone made before it, whose c is zero.
 ///
 /// # Panics
 ///
@@ -292,7 +294,9 @@ pub(super) enum Columns {
     Zonal,
 }
 
-/// [`run`] at the orographic model's `parameters`, its columns' budgets as `columns` says.
+/// [`run`] at the orographic model's `parameters`, its columns' budgets as `columns` says, and the
+/// partition's air as [`PartitionThermodynamics::in_force`] says: the own record's, or the shown
+/// field's ([`shown_months_k`]).
 fn run_at(
     pass: &Pass<'_>,
     working: &mut Working,
@@ -304,15 +308,68 @@ fn run_at(
         calm(working);
         return None;
     };
+    let shown_k;
+    let air_k = match PartitionThermodynamics::in_force() {
+        PartitionThermodynamics::OwnRecord => &own.months_k,
+        PartitionThermodynamics::Shown => {
+            shown_k = shown_months_k(model, working.months);
+            &shown_k
+        }
+    };
     Some(water_cycle(
         pass,
         working,
-        &model.grid,
-        model.coordinates,
-        own,
+        (&model.grid, model.coordinates),
+        (own, air_k),
         parameters,
         columns,
     ))
+}
+
+/// Each month's sea-level temperature at each grid point of `model` as the world shows it, K, one
+/// a month of a year of `months` months, band-major (R09.T13.n).
+///
+/// It is the field the climate cells are interpolated from
+/// ([`write_climate`](super::write_climate)): the normalised record's month where the year has
+/// twelve months and the record holds twelve, and its annual mean otherwise, plus the mean's
+/// constant c as [`finish`](super::finish) leaves it, held at the model's lower bound as
+/// [`floor_climate`](super::floor_climate) holds the cells. The partition's air reads it from
+/// version 26 ([`PartitionThermodynamics::Shown`]).
+///
+/// It is a modelling choice, not Siler, Roe and Armour's: their partition splits a model's energy
+/// flux, which here stays the model's own record's, balancing its radiation, while the air that
+/// flux moves, with its moisture, is the climate the world shows and evaporates from, as R09.T13.j
+/// made the sea rain its own evaporation plus its band's convergence. On the reference locked Earth
+/// the own record runs 7–14 K above the shown field on its day side (343.0 K against 333.1 K at the
+/// substellar point), so that with its L q and gross moist stability `h_T` − h the partition's
+/// convergence, summed over the sphere, came to 1.48 times the planet's evaporation (4.1 against
+/// 2.78 mm/day as global means; research-r09-t13m-landing). It is read on the grid, not as means
+/// over the climate cells, whose sampling of each point's 2.5° of latitude E − P's second difference
+/// amplifies (research-r09-t13n).
+///
+/// # Panics
+///
+/// If a temperature is not finite (a fault of the model).
+#[must_use]
+pub(super) fn shown_months_k(model: &Normalised, months: u8) -> Vec<Vec<f64>> {
+    let twelve = months == 12 && model.climate.months_k.len() == 12;
+    let (mean_k, lower_bound_k) = (model.correction.mean_k, model.lower_bound_k);
+    (0..usize::from(months))
+        .map(|m| {
+            let record = if twelve {
+                &model.climate.months_k[m]
+            } else {
+                &model.climate.annual_k
+            };
+            record
+                .iter()
+                .map(|&r| {
+                    let t = finite_k(r + mean_k);
+                    if t < lower_bound_k { lower_bound_k } else { t }
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// Each field cell's band of `grid` in `coordinates`, by its centre's sine latitude in the model's
@@ -435,229 +492,6 @@ impl SeaBands {
     }
 }
 
-/// Where each climate cell lies on the model's grid, for the means of the climate the world shows
-/// (R09.T13.n): the band and the point its centre lies in, in the model's coordinates, the same
-/// every month.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct ClimatePlaces {
-    bands: Vec<u8>,
-    points: Vec<u32>,
-    /// The grid's points, which number `points`.
-    grid_points: usize,
-}
-
-impl ClimatePlaces {
-    /// The places of `pass`'s climate cells on `grid` in `coordinates`.
-    ///
-    /// # Panics
-    ///
-    /// Never for a model grid: its bands fit a `u8` and its points a `u32`.
-    #[must_use]
-    pub(super) fn of(pass: &Pass<'_>, grid: &ModelGrid, coordinates: Coordinates) -> Self {
-        let (bands, points) = pass
-            .climate_grid()
-            .centres()
-            .iter()
-            .map(|&up| {
-                let p = coordinates.to_model(up);
-                (
-                    u8::try_from(ModelGrid::band_of(p[2])).expect("a band index is under 72"),
-                    u32::try_from(grid.point_of(p)).expect("a grid's points fit a u32"),
-                )
-            })
-            .unzip();
-        Self {
-            bands,
-            points,
-            grid_points: grid.points(),
-        }
-    }
-
-    /// The places of cells in the bands `bands` and the points `points` of `grid`, one each a
-    /// cell: the tests' synthetic sets.
-    #[cfg(test)]
-    #[must_use]
-    pub(super) fn of_parts(grid: &ModelGrid, bands: Vec<u8>, points: Vec<u32>) -> Self {
-        Self {
-            bands,
-            points,
-            grid_points: grid.points(),
-        }
-    }
-}
-
-/// A month's air as the world shows it (R09.T13.n): the solid-angle means of h and L q over the
-/// climate cells at their sea-level month temperatures, the field the evaporation reads at the sea
-/// level, each band's and, for the column budgets, each grid point's ([`ShownAir::of`]).
-///
-/// It is a modelling choice, not Siler, Roe and Armour's: their partition splits a model's energy
-/// flux, which here stays the model's own record's, balancing its radiation, while the air that flux
-/// moves, with its moisture, is the climate the world shows and evaporates from, as R09.T13.j made
-/// the sea rain its own evaporation plus its band's convergence. On the reference locked Earth the
-/// own record runs 7–14 K above the shown field on its day side (343.0 K against 333.1 K at the
-/// substellar point), so that with its L q and gross moist stability `h_T` − h the partition's
-/// convergence, summed over the sphere, came to 1.48 times the planet's evaporation (4.1 against
-/// 2.78 mm/day as global means; research-r09-t13m-landing).
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct ShownAir {
-    /// Each band's mean h and L q, J kg⁻¹, from the south: a band with no climate cell takes the
-    /// nearest band's that has one, equatorward first ([`Means::band_means`]).
-    pub(super) bands: Bands,
-    /// Each grid point's mean h and L q, J kg⁻¹, band-major, a point with no climate cell taking its
-    /// band's; `None` where no column reads them.
-    points: Option<Bands>,
-}
-
-impl ShownAir {
-    /// The air of the climate cells at `places` on `grid`, of solid angles `omegas_sr`, at the
-    /// sea-level month temperatures `temperatures_k`, K, one a cell in cell-index order, under
-    /// `model`: each cell's h ([`EnergyBalance::energy`]) and L q (the condensable's specific
-    /// humidity, [`Moisture::specific_humidity`], times its latent heat; zero on a dry world), and
-    /// over its band's cells and, with [`Columns::Own`], its point's, the solid-angle mean
-    /// ([`Means`]).
-    ///
-    /// # Panics
-    ///
-    /// If `places` were made on another grid than `grid`; if `places`, `omegas_sr` and
-    /// `temperatures_k` do not hold one value each a cell; or if a cell's h or L q is not finite.
-    #[must_use]
-    pub(super) fn of(
-        (model, grid): (&EnergyBalance, &ModelGrid),
-        places: &ClimatePlaces,
-        omegas_sr: &[f64],
-        temperatures_k: impl IntoIterator<Item = f64>,
-        columns: Columns,
-    ) -> Self {
-        let points = grid.points();
-        assert_eq!(places.grid_points, points, "the places are on this grid");
-        assert_eq!(
-            places.bands.len(),
-            omegas_sr.len(),
-            "one solid angle a cell"
-        );
-        let mut temperatures_k = temperatures_k.into_iter();
-        let mut bands = [Means::new(LATITUDE_BANDS), Means::new(LATITUDE_BANDS)];
-        let mut cells = (columns == Columns::Own).then(|| [Means::new(points), Means::new(points)]);
-        let mut read = 0_usize;
-        for (((&band, &point), &omega), t) in places
-            .bands
-            .iter()
-            .zip(&places.points)
-            .zip(omegas_sr)
-            .zip(temperatures_k.by_ref())
-        {
-            let energy = model.energy(t);
-            let latent = model.moisture.as_ref().map_or(0.0, |moisture| {
-                moisture.latent_heat_j_per_kg * moisture.specific_humidity(t)
-            });
-            // A NaN's sign is not portable, so none reaches the means (sim-determinism).
-            assert!(
-                energy.is_finite() && latent.is_finite(),
-                "a climate cell's h and L q must be finite, got {energy} and {latent} J/kg at {t} K"
-            );
-            read += 1;
-            let b = usize::from(band);
-            bands[0].add(b, omega, energy);
-            bands[1].add(b, omega, latent);
-            if let Some(cells) = &mut cells {
-                let p = slot(point);
-                cells[0].add(p, omega, energy);
-                cells[1].add(p, omega, latent);
-            }
-        }
-        assert!(
-            read == omegas_sr.len() && temperatures_k.next().is_none(),
-            "one temperature a cell"
-        );
-        let air = Bands {
-            energy_j_per_kg: bands[0].band_means(),
-            latent_j_per_kg: bands[1].band_means(),
-        };
-        let points = cells.map(|[energy, latent]| Bands {
-            energy_j_per_kg: energy.point_means(grid, &air.energy_j_per_kg),
-            latent_j_per_kg: latent.point_means(grid, &air.latent_j_per_kg),
-        });
-        Self { bands: air, points }
-    }
-
-    /// The columns' air: each grid point's, band-major, where it was made with [`Columns::Own`];
-    /// `None` where it was made for the zonal budget alone.
-    #[must_use]
-    pub(super) fn columns(&self) -> Option<ColumnAir<'_>> {
-        self.points.as_ref().map(ColumnAir::Shown)
-    }
-}
-
-/// Whose thermodynamics each column's partition reads ([`ColumnBudgets::of`]).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum ColumnAir<'a> {
-    /// Each column's own points' records', the energy-balance model's: R09.T13.m's.
-    Own,
-    /// The climate the world shows, each grid point's mean over its climate cells, band-major
-    /// ([`ShownAir::columns`]; R09.T13.n).
-    Shown(&'a Bands),
-}
-
-/// Solid-angle means over sets of cells, each set's taken about its first value: v₀ + Σ Ω (v − v₀)
-/// ÷ Σ Ω, v₀ the first cell's value in cell-index order and the sums in that order, so that cells
-/// all at one value give it to the bit.
-#[derive(Debug, Clone, PartialEq)]
-struct Means {
-    /// Each set's first value, `None` while it has no cell.
-    first: Vec<Option<f64>>,
-    /// Each set's Σ Ω (v − v₀).
-    departures: Vec<f64>,
-    /// Each set's Σ Ω, sr.
-    areas_sr: Vec<f64>,
-}
-
-impl Means {
-    /// The means of `sets` sets, each empty.
-    #[must_use]
-    fn new(sets: usize) -> Self {
-        Self {
-            first: vec![None; sets],
-            departures: vec![0.0; sets],
-            areas_sr: vec![0.0; sets],
-        }
-    }
-
-    /// Adds to set `set` a cell of solid angle `omega_sr` and value `value`.
-    fn add(&mut self, set: usize, omega_sr: f64, value: f64) {
-        let first = *self.first[set].get_or_insert(value);
-        self.departures[set] += omega_sr * (value - first);
-        self.areas_sr[set] += omega_sr;
-    }
-
-    /// The mean of set `set`, `None` where it has no cell.
-    #[must_use]
-    fn mean(&self, set: usize) -> Option<f64> {
-        self.first[set].map(|first| first + self.departures[set] / self.areas_sr[set])
-    }
-
-    /// Each band's mean, the sets the model's bands from the south: a band with no cell takes the
-    /// nearest band's that has one, equatorward first ([`nearest_band`]); zero where none has.
-    #[must_use]
-    fn band_means(&self) -> Vec<f64> {
-        (0..LATITUDE_BANDS)
-            .map(|band| {
-                nearest_band(band, |b| self.first[b].is_some())
-                    .and_then(|b| self.mean(b))
-                    .unwrap_or(0.0)
-            })
-            .collect()
-    }
-
-    /// Each point's mean, the sets `grid`'s points: a point with no cell takes its band's of
-    /// `bands`.
-    #[must_use]
-    fn point_means(&self, grid: &ModelGrid, bands: &[f64]) -> Vec<f64> {
-        (0..grid.points())
-            .map(|p| self.mean(p).unwrap_or(bands[p / grid.columns()]))
-            .collect()
-    }
-}
-
 /// A month's column budgets on a rotating world's geographic grid (R09.T13.m; decision-r09-t13m
 /// §1), one each a column of 5° from −180°: each column's own partition, on its own points, of
 /// its own h and L q ([`Bands::of`] on one column), under the body's circulation, its cap the
@@ -682,18 +516,21 @@ pub(super) struct ColumnBudgets {
 
 impl ColumnBudgets {
     /// The month's columns of `grid` (its points' own-record sea-level temperatures `t_k`, K, one
-    /// a point, whose h gives each column's energy flux) under `model` and `circulation`, about the
-    /// month's zonal budget `zonal` of the air `zonal_air`, its sea `sea` and each band's blend
-    /// `blend` ([`blend_share`]); each column's air its own points' h and L q, or the shown climate's
-    /// at its points, as `air` says.
+    /// a point, whose h gives each column's energy flux, and its air's `air_k`, whose h and L q
+    /// each column's partition reads, the own record's or the shown field's, [`shown_months_k`])
+    /// under `model` and `circulation`, about the month's zonal budget `zonal` of the air
+    /// `zonal_air`, its sea `sea` and each band's blend `blend` ([`blend_share`]).
+    ///
+    /// # Panics
+    ///
+    /// If `t_k` or `air_k` holds fewer values than `grid` has points.
     #[must_use]
     pub(super) fn of(
         (grid, model, circulation): (&ModelGrid, &EnergyBalance, &Circulation),
-        t_k: &[f64],
+        (t_k, air_k): (&[f64], &[f64]),
         (zonal, zonal_air): (&Budget, &Bands),
         sea: &SeaBands,
         blend: &[f64],
-        air: ColumnAir<'_>,
     ) -> Self {
         let one = ModelGrid::zonal();
         let zonal_hadley = partition::hadley_part_kg_m2_s(grid, model, zonal, zonal_air);
@@ -704,30 +541,17 @@ impl ColumnBudgets {
             rates_kg_m2_s: Vec::with_capacity(columns),
             convergence_kg_m2_s: Vec::with_capacity(columns),
         };
-        let mut column_k = vec![0.0; LATITUDE_BANDS];
-        // A shown column's air, refilled for each column.
-        let mut shown = Bands {
-            energy_j_per_kg: vec![0.0; LATITUDE_BANDS],
-            latent_j_per_kg: vec![0.0; LATITUDE_BANDS],
-        };
+        let (mut column_k, mut column_air_k) =
+            (vec![0.0; LATITUDE_BANDS], vec![0.0; LATITUDE_BANDS]);
         for c in 0..columns {
-            for (k, t) in column_k.iter_mut().enumerate() {
-                *t = t_k[grid.point(k, c)];
+            for (k, (t, air)) in column_k.iter_mut().zip(&mut column_air_k).enumerate() {
+                let p = grid.point(k, c);
+                (*t, *air) = (t_k[p], air_k[p]);
             }
             let bands = Bands::of(model, &one, &column_k);
-            let column_air = match air {
-                ColumnAir::Own => &bands,
-                ColumnAir::Shown(points) => {
-                    for k in 0..LATITUDE_BANDS {
-                        let p = grid.point(k, c);
-                        shown.energy_j_per_kg[k] = points.energy_j_per_kg[p];
-                        shown.latent_j_per_kg[k] = points.latent_j_per_kg[p];
-                    }
-                    &shown
-                }
-            };
-            let budget = partition::budget_in_air(&one, model, circulation, &bands, column_air);
-            let hadley = partition::hadley_part_kg_m2_s(&one, model, &budget, column_air);
+            let column_air = Bands::of(model, &one, &column_air_k);
+            let budget = partition::budget_in_air(&one, model, circulation, &bands, &column_air);
+            let hadley = partition::hadley_part_kg_m2_s(&one, model, &budget, &column_air);
             let (mut emps, mut rates, mut convergence) = (
                 Vec::with_capacity(LATITUDE_BANDS),
                 Vec::with_capacity(LATITUDE_BANDS),
@@ -1632,9 +1456,15 @@ pub(crate) fn assert_the_sea_rates_share_their_month_terms(
 }
 
 /// The precipitation heuristic's water cycle on `grid` in `coordinates` over the model's own
-/// records `own`, its circulation a rotating world's in geographic coordinates and a locked
-/// world's in tidally locked ones, the orographic model at `parameters`, each column's budget
-/// read as `columns` says (the [module documentation](self)).
+/// records `own`, the partition's air at each month's temperatures `air_k` (one a grid point; the
+/// own record's, or the shown field's, [`shown_months_k`]), its circulation a rotating world's in
+/// geographic coordinates and a locked world's in tidally locked ones, the orographic model at
+/// `parameters`, each column's budget read as `columns` says (the [module documentation](self)).
+///
+/// # Panics
+///
+/// If the model's months, or the air's, are not the working state's; if the air's h or L q is not
+/// finite; or if a precipitation rate comes out not finite (a fault of the model).
 #[expect(
     clippy::too_many_lines,
     reason = "one month's pipeline of seven stages in order, each a few lines over the same cells; \
@@ -1643,9 +1473,8 @@ pub(crate) fn assert_the_sea_rates_share_their_month_terms(
 fn water_cycle(
     pass: &Pass<'_>,
     working: &mut Working,
-    grid: &ModelGrid,
-    coordinates: Coordinates,
-    own: &OwnRecords,
+    (grid, coordinates): (&ModelGrid, Coordinates),
+    (own, air_k): (&OwnRecords, &[Vec<f64>]),
     parameters: &Parameters,
     columns: Columns,
 ) -> Diagnostics {
@@ -1663,6 +1492,7 @@ fn water_cycle(
         "the model's {months} months are the working state's {}",
         working.months
     );
+    assert_eq!(air_k.len(), months, "the air's months are the model's");
     let shares = month_shares(pass, months);
 
     // 1. The zonal budgets: the energy flux the model's own record's, its air's thermodynamics the
@@ -1673,37 +1503,20 @@ fn water_cycle(
         .iter()
         .map(|t_k| Bands::of(&model, grid, t_k))
         .collect();
-    let shown: Option<Vec<ShownAir>> = match PartitionThermodynamics::in_force() {
-        PartitionThermodynamics::OwnRecord => None,
-        PartitionThermodynamics::Shown => {
-            let places = ClimatePlaces::of(pass, grid, coordinates);
-            let omegas = pass.climate_grid().solid_angles_sr();
-            let twelve = working.months == 12;
-            Some(
-                (0..months)
-                    .map(|m| {
-                        let temperatures = working.climate.iter().map(|state| {
-                            let anomaly = if twelve {
-                                state.month_anomaly_k[m]
-                            } else {
-                                0.0
-                            };
-                            state.sea_level_temperature.value() + anomaly
-                        });
-                        let reads = if per_column {
-                            Columns::Own
-                        } else {
-                            Columns::Zonal
-                        };
-                        ShownAir::of((&model, grid), &places, omegas, temperatures, reads)
-                    })
-                    .collect(),
-            )
-        }
-    };
-    let air = |m: usize| -> &Bands { shown.as_ref().map_or(&bands[m], |shown| &shown[m].bands) };
+    let air: Vec<Bands> = air_k
+        .iter()
+        .map(|t_k| Bands::of(&model, grid, t_k))
+        .collect();
+    // A NaN's sign is not portable, and `budget_in_air`'s greatest h would pass over one
+    // (sim-determinism).
+    assert!(
+        air.iter()
+            .flat_map(|a| a.energy_j_per_kg.iter().chain(&a.latent_j_per_kg))
+            .all(|v| v.is_finite()),
+        "the partition's air must be finite"
+    );
     let budgets: Vec<Budget> = (0..months)
-        .map(|m| partition::budget_in_air(grid, &model, &circulation, &bands[m], air(m)))
+        .map(|m| partition::budget_in_air(grid, &model, &circulation, &bands[m], &air[m]))
         .collect();
     let annual = Bands::mean(&bands, &shares);
     let annual_flux =
@@ -1820,15 +1633,10 @@ fn water_cycle(
         let column_budgets = per_column.then(|| {
             ColumnBudgets::of(
                 (grid, &model, &circulation),
-                &own.months_k[m],
-                (&budget, air(m)),
+                (&own.months_k[m], &air_k[m]),
+                (&budget, &air[m]),
                 &sea,
                 &blend,
-                shown.as_ref().map_or(ColumnAir::Own, |shown| {
-                    shown[m]
-                        .columns()
-                        .expect("a rotating world's shown air holds its points' for its columns")
-                }),
             )
         });
 

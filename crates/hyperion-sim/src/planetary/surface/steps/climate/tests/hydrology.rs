@@ -11,7 +11,7 @@ use hyperion_surface::spheroid::Spheroid;
 
 use super::super::coordinates::Coordinates;
 use super::super::ebm::{EnergyBalance, Freezing, ICE_FREE_ALBEDO};
-use super::super::grid::{LATITUDE_BANDS, ModelGrid};
+use super::super::grid::{GridClimate, LATITUDE_BANDS, ModelGrid};
 use super::super::hydrology::{self, BandWinds, Evaporation, MonthCycle, SeaBands};
 use super::super::lfpm::{
     self, CellWind, Cover, DOWNWIND_TOLERANCE, EARTH_DEEP_TOLERANCE, GroundState, Mesh, Month,
@@ -20,8 +20,8 @@ use super::super::lfpm::{
 use super::super::partition::{self, Circulation};
 use super::super::wind;
 use super::super::{
-    Diagnostics, annual_runoff_kg_m2_s, energy_balance, finish, month_shares, normalised,
-    run_diagnosed, seas,
+    Diagnostics, Normalised, annual_runoff_kg_m2_s, arithmetic, energy_balance, finish,
+    month_shares, normalised, run_diagnosed, seas,
 };
 use super::normalisation::titan_with_basins;
 use super::other_regimes::venus_like;
@@ -2468,10 +2468,18 @@ fn the_annual_runoff_is_none_over_liquid_the_unrecycled_share_on_thawed_ground_a
 /// pole, the substellar point, and its centre that equator; its Hadley share at every inner band
 /// edge is the as-built one to the bit, no edge lying beyond its centre (decision-r09-t13i §3.5,
 /// 1); every moving wind on the day side blows towards the substellar point; and the rain is
-/// heaviest near it.
+/// heaviest near it. Its world takes the reference locked Earth's equator–pole and day–night
+/// contrasts, so that the field it shows is a locked world's, not a flat one warmer at night
+/// (R09.T13.n; research-r09-t13n).
 #[test]
 fn a_locked_aquaplanet_s_winds_converge_on_its_substellar_point() {
-    let run = run_world(locked_earth(0.0, 0.0), 5, Grid::Own, flood_all);
+    let locked = reference::locked_earth_like();
+    let inputs = builder_of(&locked_earth(0.0, 0.0))
+        .equator_pole_contrast_k(locked.equator_pole_contrast_k())
+        .day_night_contrast_k(locked.day_night_contrast_k())
+        .build()
+        .expect("the locked Earth with its own contrasts is valid");
+    let run = run_world(inputs, 5, Grid::Own, flood_all);
     let water = run.water();
     assert_eq!(water.circulation.cap_deg(), None);
     let cycle = &water.months[0];
@@ -2864,8 +2872,8 @@ fn the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp() {
         steps::craters::run(&pass, &mut working);
         steps::relief::run_after_craters(&pass, &mut working);
         let model = normalised(&pass, &working);
-        let kept = model.clone();
         let diagnostics = finish(&pass, &mut working, model);
+        let kept = finished_model(&working);
         let again = hydrology::run(&pass, &mut working, &kept);
         assert_eq!(again.as_ref(), diagnostics.water.as_ref());
         let mut deep_working = working.clone();
@@ -2928,8 +2936,8 @@ fn run_with_zonal(
         let mut working = Working::initial(&pass);
         set(&pass, &mut working);
         let model = normalised(&pass, &working);
-        let kept = model.clone();
         let diagnostics = finish(&pass, &mut working, model);
+        let kept = finished_model(&working);
         let mut zonal = working.clone();
         let water = hydrology::run_zonal(&pass, &mut zonal, &kept)
             .expect("an energy-balance world has a water cycle");
@@ -2969,6 +2977,19 @@ fn largest_off(values: &[f64], reference: &[f64]) -> f64 {
         .zip(reference)
         .fold(0.0_f64, |worst, (&a, &b)| worst.max((a - b).abs()));
     if scale > 0.0 { off / scale } else { off }
+}
+
+/// The model as the climate step's `finish` left it on `working`, its mean's constant set, for a
+/// test that runs the water cycle again: R09.T13.n's shown air reads the constant, which a model
+/// cloned before `finish` lacks (research-r09-t13n). Read it before the re-application after the
+/// erosion, which sets a constant of its own.
+pub(super) fn finished_model(working: &Working) -> Normalised {
+    working
+        .climate_records
+        .as_ref()
+        .expect("the climate step ran")
+        .model
+        .clone()
 }
 
 /// How near each column's budget lies to the zonal one where every column is alike, relative to
@@ -3235,12 +3256,28 @@ const CONTINENT_AS_BUILT_JJA_MM_PER_DAY: f64 = 3.08;
 /// column budget at least: 1.75 (decision-r09-t13m §3.3; its pilot 1.96).
 const CONTINENT_JJA_RISE: f64 = 1.75;
 
-/// The most of the flat continent's all-land climate cells within 12.5° N that may be arid: 12,
-/// as built under each column's budget (decision-r09-t13m §3.3 as main ruled it, 2026-10-30, on
-/// research-r09-t13m-landing's Q1). The ruling's target stays none: these are the monsoon's
-/// northern edge falling short at the coast, semi-arid (BS), 0.76–0.999 of the bound, at
-/// 11.0–12.3° N, all but one at 31–43° E (as built before it, 130).
-const CONTINENT_LOW_ARID_CELLS: usize = 12;
+/// The most of the flat continent's all-land climate cells within 12.5° N that may be arid: 25,
+/// under the partition's shown air (R09.T13.n; main's ruling of 2026-10-31 on research-r09-t13n),
+/// the same semi-arid (BS) strip at 10.3–12.3° N, 0.68–0.99 of the bound, the effect of the
+/// world's mean constant c = −1.99 K; 12 under the own record's (decision-r09-t13m §3.3 as main
+/// ruled it, 2026-10-30, on research-r09-t13m-landing's Q1; 0.76–0.999 of the bound, at
+/// 11.0–12.3° N; as built before it, 130). The target stays none: the monsoon's northern edge
+/// falling short at the coast. Under the held rule the test keeps 12
+/// ([`CONTINENT_LOW_ARID_CELLS_OWN_AIR`]).
+const CONTINENT_LOW_ARID_CELLS: usize = 25;
+
+/// The flat continent's [`CONTINENT_LOW_ARID_CELLS`] under the own record's air, the rule to
+/// version 25: 12. 26's bump deletes it with the hold.
+const CONTINENT_LOW_ARID_CELLS_OWN_AIR: usize = 12;
+
+/// The flat continent's most arid cells within 12.5° N under the rule in force
+/// ([`partition::PartitionThermodynamics::in_force`]).
+fn continent_low_arid_cells() -> usize {
+    match partition::PartitionThermodynamics::in_force() {
+        partition::PartitionThermodynamics::OwnRecord => CONTINENT_LOW_ARID_CELLS_OWN_AIR,
+        partition::PartitionThermodynamics::Shown => CONTINENT_LOW_ARID_CELLS,
+    }
+}
 
 /// Decision-r09-t13m §3.3: on the reference Earth's inputs with one flat continent, 10° S–40° N by
 /// 30–120° E at 300 m ([`flat_continent`]), at level 7, the continent's own energy-flux equator in
@@ -3249,7 +3286,8 @@ const CONTINENT_LOW_ARID_CELLS: usize = 12;
 /// [`CONTINENT_JJA_RISE`] times its as-built [`CONTINENT_AS_BUILT_JJA_MM_PER_DAY`]; and of its
 /// all-land climate cells within 12.5° of the equator in the summer hemisphere of its monsoon, the
 /// north, none is a desert (BW, [`Run::desert`]) and at most [`CONTINENT_LOW_ARID_CELLS`] are arid
-/// by Köppen–Geiger's bound at their own temperature ([`Run::arid`]), as main ruled (2026-10-30).
+/// by Köppen–Geiger's bound at their own temperature ([`Run::arid`]), as main ruled (2026-10-30
+/// and 2026-10-31), [`CONTINENT_LOW_ARID_CELLS_OWN_AIR`] under the held rule.
 /// Prints its JJA, DJF and annual rates by 5° band, and its arid cells by band.
 #[test]
 #[ignore = "slow: the reference Earth's step at level 7 with a flat continent, about 60 s"]
@@ -3349,7 +3387,7 @@ fn the_flat_continent_s_monsoon_is_wet_and_its_low_latitudes_are_not_desert() {
         "desert within 12.5° N: {desert_low:?}"
     );
     assert!(
-        arid_low.len() <= CONTINENT_LOW_ARID_CELLS,
+        arid_low.len() <= continent_low_arid_cells(),
         "arid within 12.5° N: {arid_low:?}"
     );
 }
@@ -3376,8 +3414,8 @@ fn the_coarse_pass_s_locked_earth_s_water_cycle_converges_against_its_deep_solve
         steps::craters::run(&pass, &mut working);
         steps::relief::run_after_craters(&pass, &mut working);
         let model = normalised(&pass, &working);
-        let kept = model.clone();
         let diagnostics = finish(&pass, &mut working, model);
+        let kept = finished_model(&working);
         let mut deep_working = working.clone();
         let deep = hydrology::run_with(
             &pass,
@@ -3532,11 +3570,10 @@ fn identical_columns_have_one_budget_to_the_bit_and_it_is_the_zonal_one() {
         .collect();
     let columns = hydrology::ColumnBudgets::of(
         (&grid, &model, &circulation),
-        &t_k,
+        (&t_k, &t_k),
         (&zonal, &bands),
         &sea,
         &blend,
-        hydrology::ColumnAir::Own,
     );
     let first = &columns.budgets[0];
     for c in 1..grid.columns() {
@@ -3703,14 +3740,6 @@ fn a_stream_keeps_its_air_under_a_uniform_zonal_wind_and_sheds_it_where_the_wind
     assert!(checked > 0);
 }
 
-/// The columns' air of `air`, made with [`hydrology::Columns::Own`].
-fn shown_points(air: &hydrology::ShownAir) -> &partition::Bands {
-    match air.columns() {
-        Some(hydrology::ColumnAir::Shown(points)) => points,
-        other => panic!("the columns' points, got {other:?}"),
-    }
-}
-
 /// R09.T13.n's split of the partition ([`partition::budget_in_air`]): its energy flux, its
 /// energy-flux equator and its centre are its bands', to the bit, whatever its air; its air's h
 /// sets ψ's gross moist stability (ψ (`h_T` − h) the same w F, to 10⁻¹², for an air 5 K colder),
@@ -3795,14 +3824,14 @@ fn the_partition_s_flux_and_equators_are_its_bands_and_its_stability_and_moistur
     }
 }
 
-/// R09.T13.n's column budgets ([`hydrology::ColumnBudgets::of`]): with the shown air at each
-/// point the h and L q of its own temperature, every column's budget, rates and convergence are
-/// the own air's to the bit, on a field that varies in longitude.
+/// R09.T13.n's column budgets ([`hydrology::ColumnBudgets::of`]): on a field that varies in
+/// longitude, each column's budget in the own record's air is its own partition, to the bit
+/// ([`partition::budget`] on its points as one column); and in an air 2 K colder its energy flux
+/// and energy-flux equator stay the own record's while its ψ moves.
 #[test]
-fn shown_air_at_the_columns_own_temperatures_gives_their_own_budgets_to_the_bit() {
+fn a_column_s_air_moves_its_mass_flux_but_not_its_energy_flux_or_its_equator() {
     let inputs = reference::earth_like();
     let model = EnergyBalance::for_inputs(&inputs);
-    let moisture = model.moisture.expect("the reference Earth is wet");
     let circulation = Circulation::for_inputs(&inputs, partition::Turning::Rotating);
     let grid = ModelGrid::geographic();
     let t_k: Vec<f64> = (0..grid.points())
@@ -3829,25 +3858,14 @@ fn shown_air_at_the_columns_own_temperatures_gives_their_own_budgets_to_the_bit(
     let blend: Vec<f64> = (0..LATITUDE_BANDS)
         .map(|k| hydrology::blend_share(&circulation, &grid, k))
         .collect();
-    let points = partition::Bands {
-        energy_j_per_kg: t_k.iter().map(|&t| model.energy(t)).collect(),
-        latent_j_per_kg: t_k
-            .iter()
-            .map(|&t| moisture.latent_heat_j_per_kg * moisture.specific_humidity(t))
-            .collect(),
-    };
-    let [own, shown] = [
-        hydrology::ColumnAir::Own,
-        hydrology::ColumnAir::Shown(&points),
-    ]
-    .map(|air| {
+    let colder: Vec<f64> = t_k.iter().map(|&t| t - 2.0).collect();
+    let [own, cold] = [&t_k, &colder].map(|air_k| {
         hydrology::ColumnBudgets::of(
             (&grid, &model, &circulation),
-            &t_k,
+            (&t_k, air_k),
             (&zonal, &bands),
             &sea,
             &blend,
-            air,
         )
     });
     assert!(
@@ -3856,108 +3874,94 @@ fn shown_air_at_the_columns_own_temperatures_gives_their_own_budgets_to_the_bit(
             &own.budgets[36].mass_flux_kg_m2_s
         ) > 0.0
     );
+    let one = ModelGrid::zonal();
     for c in 0..grid.columns() {
+        let column: Vec<f64> = (0..LATITUDE_BANDS).map(|k| t_k[grid.point(k, c)]).collect();
+        let alone = partition::budget(
+            &one,
+            &model,
+            &circulation,
+            &partition::Bands::of(&model, &one, &column),
+        );
+        let ours = &own.budgets[c];
+        assert_same_bits(ours.efe_sine, alone.efe_sine);
+        assert_same_bits(ours.centre_sine, alone.centre_sine);
         for (a, b) in [
+            (&ours.mass_flux_kg_m2_s, &alone.mass_flux_kg_m2_s),
             (
-                &shown.budgets[c].mass_flux_kg_m2_s,
-                &own.budgets[c].mass_flux_kg_m2_s,
+                &ours.evaporation_less_precipitation_kg_m2_s,
+                &alone.evaporation_less_precipitation_kg_m2_s,
             ),
-            (
-                &shown.budgets[c].evaporation_less_precipitation_kg_m2_s,
-                &own.budgets[c].evaporation_less_precipitation_kg_m2_s,
-            ),
-            (
-                &shown.evaporation_less_precipitation_kg_m2_s[c],
-                &own.evaporation_less_precipitation_kg_m2_s[c],
-            ),
-            (&shown.rates_kg_m2_s[c], &own.rates_kg_m2_s[c]),
-            (&shown.convergence_kg_m2_s[c], &own.convergence_kg_m2_s[c]),
+            (&ours.flux_w_m2, &alone.flux_w_m2),
         ] {
             for (&x, &y) in a.iter().zip(b) {
                 assert_same_bits(x, y);
             }
         }
+        for (&x, &y) in cold.budgets[c].flux_w_m2.iter().zip(&alone.flux_w_m2) {
+            assert_same_bits(x, y);
+        }
+        assert_same_bits(cold.budgets[c].efe_sine, alone.efe_sine);
+        assert!(
+            largest_off(&cold.budgets[c].mass_flux_kg_m2_s, &alone.mass_flux_kg_m2_s) > 0.0,
+            "column {c}"
+        );
     }
 }
 
-/// R09.T13.n, the shown climate's means ([`hydrology::ShownAir`]): climate cells all at one
-/// temperature give every band and every point that temperature's h and L q to the bit; two cells in
-/// a band give their solid-angle mean to 10⁻¹², and the bands and points with no cell take it
-/// (the nearest band's, and a point's band's); a dry world's L q is zero.
+/// R09.T13.n's shown field ([`hydrology::shown_months_k`]): each grid point's air temperature is
+/// the normalised record, its month in a twelve-month year and its annual mean in a one-month
+/// one, plus the mean's constant, held at the model's lower bound, to the bit; and a dry world's
+/// air holds no L q.
 #[test]
-fn the_shown_air_is_the_climate_cells_solid_angle_mean() {
+fn the_shown_air_is_the_normalised_record_plus_the_mean_s_constant_held_at_the_lower_bound() {
     let inputs = reference::earth_like();
     let (field, climate) = grids(5);
     let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
     let grid = ModelGrid::geographic();
-    let model = EnergyBalance::for_inputs(&inputs);
-    let moisture = model.moisture.expect("the reference Earth is wet");
-    let latent = |t: f64| moisture.latent_heat_j_per_kg * moisture.specific_humidity(t);
-    let places = hydrology::ClimatePlaces::of(&pass, &grid, Coordinates::Geographic);
-    let omegas = climate.solid_angles_sr();
-    let t = 291.25;
-    let air = hydrology::ShownAir::of(
-        (&model, &grid),
-        &places,
-        omegas,
-        omegas.iter().map(|_| t),
-        hydrology::Columns::Own,
-    );
-    let points = shown_points(&air);
-    for (values, expected) in [
-        (&air.bands.energy_j_per_kg, model.energy(t)),
-        (&air.bands.latent_j_per_kg, latent(t)),
-        (&points.energy_j_per_kg, model.energy(t)),
-        (&points.latent_j_per_kg, latent(t)),
-    ] {
-        for &v in values {
-            assert_same_bits(v, expected);
+    let profile = |m: u32| -> Vec<f64> {
+        let bands: Vec<f64> = (0..LATITUDE_BANDS)
+            .map(|k| {
+                let x = grid.centre_sine(k);
+                300.0 - 40.0 * x * x + f64::from(m)
+            })
+            .collect();
+        grid.broadcast(&bands)
+    };
+    let records = GridClimate {
+        annual_k: profile(0),
+        months_k: (0..12).map(profile).collect(),
+        orbits: 0,
+        converged: true,
+    };
+    let mut model = arithmetic(&pass, grid.clone(), Coordinates::Geographic, records);
+    model.correction.mean_k = -1.99;
+    let low = grid.point(3, 7);
+    model.climate.months_k[4][low] = model.lower_bound_k + 1.0;
+    for months in [12_u8, 1] {
+        let shown = hydrology::shown_months_k(&model, months);
+        assert_eq!(shown.len(), usize::from(months));
+        for (m, month) in shown.iter().enumerate() {
+            assert_eq!(month.len(), grid.points());
+            let record = if months == 12 {
+                &model.climate.months_k[m]
+            } else {
+                &model.climate.annual_k
+            };
+            for (p, (&t, &r)) in month.iter().zip(record).enumerate() {
+                let held = months == 12 && m == 4 && p == low;
+                let expected = if held {
+                    model.lower_bound_k
+                } else {
+                    r + model.correction.mean_k
+                };
+                assert_same_bits(t, expected);
+            }
         }
-    }
-    let at = u32::try_from(grid.point(40, 3)).unwrap();
-    let pair = hydrology::ClimatePlaces::of_parts(&grid, vec![40, 40], vec![at, at]);
-    let air = hydrology::ShownAir::of(
-        (&model, &grid),
-        &pair,
-        &[1.0e-3, 3.0e-3],
-        [280.0, 300.0],
-        hydrology::Columns::Own,
-    );
-    let points = shown_points(&air);
-    for (bands, cells, of) in [
-        (
-            &air.bands.energy_j_per_kg,
-            &points.energy_j_per_kg,
-            (|m: &EnergyBalance, t: f64| m.energy(t)) as fn(&EnergyBalance, f64) -> f64,
-        ),
-        (
-            &air.bands.latent_j_per_kg,
-            &points.latent_j_per_kg,
-            |m, t| {
-                let moisture = m.moisture.expect("wet");
-                moisture.latent_heat_j_per_kg * moisture.specific_humidity(t)
-            },
-        ),
-    ] {
-        let expected = (1.0 * of(&model, 280.0) + 3.0 * of(&model, 300.0)) / 4.0;
-        for &v in bands.iter().chain(cells) {
-            assert!(
-                (v / expected - 1.0).abs() <= 1e-12,
-                "{v} against {expected}"
-            );
+        let dry = EnergyBalance::for_inputs(&dry_earth());
+        for &lq in &partition::Bands::of(&dry, &grid, &shown[0]).latent_j_per_kg {
+            assert_same_bits(lq, 0.0);
         }
-    }
-    let dry = EnergyBalance::for_inputs(&dry_earth());
-    let air = hydrology::ShownAir::of(
-        (&dry, &grid),
-        &places,
-        omegas,
-        omegas.iter().map(|_| t),
-        hydrology::Columns::Zonal,
-    );
-    assert!(air.columns().is_none());
-    for &v in &air.bands.latent_j_per_kg {
-        assert_same_bits(v, 0.0);
     }
 }
 
@@ -3991,8 +3995,8 @@ fn shown_locked_run(
             steps::craters::run(&pass, &mut working);
             steps::relief::run_after_craters(&pass, &mut working);
             let model = normalised(&pass, &working);
-            let kept = model.clone();
             let diagnostics = finish(&pass, &mut working, model);
+            let kept = finished_model(&working);
             let deep = deep.then(|| {
                 let mut deep_working = working.clone();
                 let water = hydrology::run_with(

@@ -597,7 +597,8 @@ pub(super) fn hadley_part_kg_m2_s(
 ///
 /// Below it [`PartitionThermodynamics::in_force`] is [`PartitionThermodynamics::OwnRecord`], so
 /// that every water cycle is R09.T13.m's bit for bit. 26's bump deletes this hold, the enum and
-/// its `OwnRecord` arm, the tests' switch [`with_partition_thermodynamics`], and its tripwire
+/// its `OwnRecord` arm, the tests' switch [`with_partition_thermodynamics`], the flat continent's
+/// held pin (`CONTINENT_LOW_ARID_CELLS_OWN_AIR`, `continent_low_arid_cells`), and its tripwire
 /// (`the_shown_thermodynamics_are_held_only_until_the_26_bump`).
 pub(crate) const SHOWN_THERMODYNAMICS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
 
@@ -609,8 +610,11 @@ pub(crate) enum PartitionThermodynamics {
     /// The model's own records', before R09.T13.d's correction (decision-r09-t13ge §2.11), as
     /// R09.T13.e built it: to version 25.
     OwnRecord,
-    /// The climate the world shows, its climate cells' at their sea-level month temperatures
-    /// (R09.T13.n): from version 26.
+    /// The climate the world shows, the field its climate cells are interpolated from, the
+    /// normalised record plus the mean's constant ([`hydrology::shown_months_k`]; R09.T13.n): from
+    /// version 26.
+    ///
+    /// [`hydrology::shown_months_k`]: super::hydrology::shown_months_k
     Shown,
 }
 
@@ -837,10 +841,11 @@ mod tests {
             "the 25 → 26 bump puts R09.T13.n's partition thermodynamics on the generator: every \
              water cycle reads its air's h and L q from the climate the world shows. Delete \
              `SHOWN_THERMODYNAMICS_VERSION`, `PartitionThermodynamics` and its `OwnRecord` arm \
-             (`water_cycle`'s `air` then always the shown climate's, and `budget` its \
+             (`hydrology::run_at`'s `air_k` then always `shown_months_k`'s, and `budget` its \
              `budget_in_air`), the tests' switch `with_partition_thermodynamics` and its thread's \
-             rule, and this test; re-bless `planetary/surface/earth_like` and \
-             `locked_earth_like` by name in the bump commit."
+             rule, the flat continent's held pin (`CONTINENT_LOW_ARID_CELLS_OWN_AIR` and \
+             `continent_low_arid_cells`'s `OwnRecord` arm), and this test; re-bless \
+             `planetary/surface/earth_like` and `locked_earth_like` by name in the bump commit."
         );
         assert_eq!(
             PartitionThermodynamics::in_force(),
