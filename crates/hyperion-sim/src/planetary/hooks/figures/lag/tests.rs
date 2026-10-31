@@ -1,27 +1,6 @@
 use super::*;
 use hyperion_testkit::float::assert_same_bits;
 
-/// The exposed share is held until the 24 → 25 bump: the rules in force are version 24's, the
-/// cover's whole ice area under a dark lid, and the belt test reads the cover as given.
-#[test]
-fn the_exposed_ice_is_held_only_until_the_25_bump() {
-    assert!(
-        GENERATOR_VERSION < EXPOSED_ICE_VERSION,
-        "the 24 → 25 bump puts P14.T53.c's exposed share through a lag on the record \
-         (decision-bump-plan-after-22 V3.9, W3 (a)): delete `EXPOSED_ICE_VERSION`, \
-         `ExposedIceRules` with its `Held` arm, `exposed_ice_in_force` and the held arms of \
-         `shown` and `covers_part`, the tests' `with_exposed_ice`, its switch in \
-         `with_every_25_hold` and this test"
-    );
-    assert_eq!(ExposedIceRules::in_force(), ExposedIceRules::Held);
-    assert!(!exposed_ice_in_force());
-    assert!(with_exposed_ice(
-        ExposedIceRules::Exposed,
-        exposed_ice_in_force
-    ));
-    assert!(!exposed_ice_in_force());
-}
-
 /// A lag lies only over an ice bulk whose lid is known and not `H2O`, exactly where
 /// `CrustWater::of_record` leaves the crust's water unlisted on an ice bulk, and its class is the
 /// lid's: `cometary` a comet's, `chondrite_ci` and `chondrite_cm` carbonaceous, every other rock
@@ -108,11 +87,10 @@ fn each_lag_s_exposed_share_lies_in_its_sources_range() {
     assert!(sources_range(DarkLag::Cometary).1 <= sources_range(DarkLag::Carbonaceous).0);
 }
 
-/// Under its hold the item is the cover's ice area, to the bit, lag or none; with the exposed
-/// share in force it is the lag's share held to that area, and with no lag it is the area still. A
-/// NaN area stays a NaN and a negative zero keeps its sign.
+/// The item is the lag's share held to the cover's ice area, and with no lag the area to the bit.
+/// A NaN area stays a NaN and a negative zero keeps its sign.
 #[test]
-fn the_shown_ice_is_the_lag_s_share_only_with_the_rule_in_force() {
+fn the_shown_ice_is_the_lag_s_share() {
     for ice in [0.0, 5e-6, 0.05, 0.25, 0.731, 1.0] {
         for lag in [
             None,
@@ -120,8 +98,7 @@ fn the_shown_ice_is_the_lag_s_share_only_with_the_rule_in_force() {
             Some(DarkLag::Carbonaceous),
             Some(DarkLag::Rock),
         ] {
-            assert_same_bits(shown(lag, ice), ice);
-            let exposed = with_exposed_ice(ExposedIceRules::Exposed, || shown(lag, ice));
+            let exposed = shown(lag, ice);
             match lag {
                 None => assert_same_bits(exposed, ice),
                 Some(lag) => {
@@ -132,29 +109,22 @@ fn the_shown_ice_is_the_lag_s_share_only_with_the_rule_in_force() {
         }
     }
     // A NaN stays a NaN, as `f64::min` would not keep it, and a negative zero its sign.
-    with_exposed_ice(ExposedIceRules::Exposed, || {
-        for lag in [DarkLag::Cometary, DarkLag::Carbonaceous, DarkLag::Rock] {
-            assert!(shown(Some(lag), f64::NAN).is_nan(), "{lag:?}");
-            assert_same_bits(shown(Some(lag), -0.0), -0.0);
-        }
-    });
+    for lag in [DarkLag::Cometary, DarkLag::Carbonaceous, DarkLag::Rock] {
+        assert!(shown(Some(lag), f64::NAN).is_nan(), "{lag:?}");
+        assert_same_bits(shown(Some(lag), -0.0), -0.0);
+    }
 }
 
-/// The belt test asks for part of the surface: under the hold below 1 alone, so that a cover an ulp
-/// under 1, a list the surface scaled, reads as part of it; with the rule in force within
-/// [`WHOLE_COVER_ROUNDING`] of 1 it is whole. No cover and a whole one are never part.
+/// The belt test asks for part of the surface: a cover within [`WHOLE_COVER_ROUNDING`] of 1, such
+/// as one an ulp under 1, a list the surface scaled, is whole. No cover and a whole one are never
+/// part.
 #[test]
-fn a_cover_the_surface_scaled_is_whole_only_with_the_rule_in_force() {
+fn a_cover_the_surface_scaled_is_whole() {
     let ulp_under = 1.0 - f64::EPSILON / 2.0;
     assert!(ulp_under < 1.0);
-    assert!(covers_part(ulp_under));
-    assert!(covers_part(0.5));
+    assert!(!covers_part(ulp_under));
+    assert!(!covers_part(1.0 - WHOLE_COVER_ROUNDING));
+    assert!(covers_part(1.0 - 2.0 * WHOLE_COVER_ROUNDING));
+    assert!(covers_part(0.5) && covers_part(COMETARY_EXPOSED_SHARE));
     assert!(!covers_part(0.0) && !covers_part(1.0));
-    with_exposed_ice(ExposedIceRules::Exposed, || {
-        assert!(!covers_part(ulp_under));
-        assert!(!covers_part(1.0 - WHOLE_COVER_ROUNDING));
-        assert!(covers_part(1.0 - 2.0 * WHOLE_COVER_ROUNDING));
-        assert!(covers_part(0.5) && covers_part(COMETARY_EXPOSED_SHARE));
-        assert!(!covers_part(0.0) && !covers_part(1.0));
-    });
 }

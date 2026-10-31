@@ -1,6 +1,6 @@
 //! The water ice an ice bulk shows through a dark lag (plan 14, P14.T53.c's exposed share;
-//! decision-p14-t54a-ganymede §C3.1 and §C3.4), behind its hold at generator version 25
-//! ([`EXPOSED_ICE_VERSION`]).
+//! decision-p14-t54a-ganymede §C3.1 and §C3.4), in force from generator version 25
+//! (decision-bump-plan-after-22 V3.9, W3 (a)).
 //!
 //! On a body whose bulk is ice under a lid that is not `H2O` (`cometary`, a chondrite,
 //! `phyllosilicate`, a silicate), the lid's row is the surface its albedo reads, and the crust's
@@ -42,9 +42,9 @@
 //! the area mix does not weigh the exposed ice.
 //!
 //! **The belt test with it.** P14.T48.d's equatorial ice belt asks for ice over part of the
-//! surface, not all of it ([`regime`]'s forcing). Under this hold it reads an ice cover within
-//! [`WHOLE_COVER_ROUNDING`] of 1 as whole, so that a list the surface scales, which sums back to 1
-//! only to rounding (0.999 999 999 999 999 9), is not taken for part of the surface
+//! surface, not all of it ([`regime`]'s forcing). From generator version 25 it reads an ice cover
+//! within [`WHOLE_COVER_ROUNDING`] of 1 as whole, so that a list the surface scales, which sums
+//! back to 1 only to rounding (0.999 999 999 999 999 9), is not taken for part of the surface
 //! (decision-p14-t54a-ganymede, "§C3.1 The count is 34").
 //!
 //! [`CrustWater::Unlisted`]: crate::planetary::chem::partition::CrustWater::Unlisted
@@ -55,79 +55,9 @@
 
 use crate::planetary::derive::atmosphere::SurfaceMaterial;
 use crate::planetary::hooks::crust::CrustLithology;
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
 mod tests;
-
-/// The generator version from which the record's water ice under a dark lid is its lag's exposed
-/// share: 25, the first planetary bump after 24's, which raised the serve gate to it for this item
-/// (decision-bump-plan-after-22 V3.9, W3 (a)).
-///
-/// It is this rule's one hold. Below it [`ExposedIceRules::in_force`] is
-/// [`ExposedIceRules::Held`]: the item is the cover's whole ice area, the belt test reads the
-/// cover as given, and every figure on the record is version 24's bit for bit. 25's bump deletes
-/// this hold, [`ExposedIceRules`] with its `Held` arm, the tests' switch and its tripwire
-/// (`the_exposed_ice_is_held_only_until_the_25_bump`).
-pub(crate) const EXPOSED_ICE_VERSION: GeneratorVersion = GeneratorVersion::new(25);
-
-/// Whether the exposed share through a lag is in force (its hold, [`EXPOSED_ICE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum ExposedIceRules {
-    /// Version 24's and before: under a dark lid the item is the cover's whole ice area.
-    Held,
-    /// Version 25's: the item is the lag's exposed share, held to it, and the belt test reads a
-    /// cover within rounding of 1 as whole.
-    Exposed,
-}
-
-impl ExposedIceRules {
-    /// The rules this generator version gives: the exposed share from [`EXPOSED_ICE_VERSION`],
-    /// none below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_exposed_ice`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= EXPOSED_ICE_VERSION {
-            Self::Exposed
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The exposed share's rules a test sets on its thread, `None` for the version's.
-    static RULES: core::cell::Cell<Option<ExposedIceRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the exposed share's rules `rules` on this thread, for the tests to reach
-/// version 25's ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. 25's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_exposed_ice<R>(rules: ExposedIceRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<ExposedIceRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
-/// Whether the exposed share through a lag is in force ([`ExposedIceRules::Exposed`]); never
-/// under its hold.
-#[must_use]
-pub(crate) fn exposed_ice_in_force() -> bool {
-    ExposedIceRules::in_force() == ExposedIceRules::Exposed
-}
 
 /// The exposed share of a comet's dust mantle, [`DarkLag::Cometary`]: 10⁻³ of the surface.
 ///
@@ -163,9 +93,9 @@ pub(crate) const CARBONACEOUS_EXPOSED_SHARE: f64 = 0.1;
 /// other rock lid over an ice bulk.
 pub(crate) const ROCK_EXPOSED_SHARE: f64 = 1e-5;
 
-/// The rounding within which the belt test reads an ice cover as whole under this hold: 10⁻¹², the
-/// sim's tests' bound on a list the surface scales, whose shares sum back to 1 only to rounding
-/// ([`GlobalFigures::ice_fraction`](super::GlobalFigures::ice_fraction)).
+/// The rounding within which the belt test reads an ice cover as whole from generator version 25
+/// (P14.T53.c): 10⁻¹², the sim's tests' bound on a list the surface scales, whose shares sum back
+/// to 1 only to rounding ([`GlobalFigures::ice_fraction`](super::GlobalFigures::ice_fraction)).
 pub(crate) const WHOLE_COVER_ROUNDING: f64 = 1e-12;
 
 /// The dark lag over an ice bulk's ice, by the lid's class: what sets the share of its ice
@@ -242,28 +172,22 @@ impl DarkLag {
 
 /// The water ice the record lists for T24.b's cover of ice area `ice`, 0 to 1, over a body under
 /// the lag `lag` ([`DarkLag::of`]), where the condensates list no `H2O` solid (W3 (a)'s item): the
-/// lag's exposed share, held to `ice`, where the exposed share is in force, and `ice` as given
-/// under its hold or with no lag.
+/// lag's exposed share, held to `ice`, and `ice` as given with no lag.
 #[must_use]
 pub(crate) fn shown(lag: Option<DarkLag>, ice: f64) -> f64 {
     match lag {
-        Some(lag) if exposed_ice_in_force() => {
+        Some(lag) => {
             let share = lag.exposed_share();
             if ice > share { share } else { ice }
         }
-        _ => ice,
+        None => ice,
     }
 }
 
 /// Whether the ice cover `ice`, 0 to 1, covers part of the surface but not all of it, as the belt
-/// test asks ([`regime`](crate::planetary::hooks::surface::regime)): above 0, and below 1, or
-/// under the exposed share's rules below 1 by more than [`WHOLE_COVER_ROUNDING`].
+/// test asks ([`regime`](crate::planetary::hooks::surface::regime)): above 0, and below 1 by more
+/// than [`WHOLE_COVER_ROUNDING`].
 #[must_use]
 pub(crate) fn covers_part(ice: f64) -> bool {
-    let whole = if exposed_ice_in_force() {
-        1.0 - WHOLE_COVER_ROUNDING
-    } else {
-        1.0
-    };
-    ice > 0.0 && ice < whole
+    ice > 0.0 && ice < 1.0 - WHOLE_COVER_ROUNDING
 }

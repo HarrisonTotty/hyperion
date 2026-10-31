@@ -429,10 +429,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///
 /// The holds, each with its switch:
 ///
-/// - the exposed ice through a lag, `EXPOSED_ICE_VERSION` (P14.T53.c), at
-///   `ExposedIceRules::Exposed` through `with_exposed_ice`: an ice bulk's water ice under a dark
-///   lid at its lag's exposed share, held to the cover's ice area, and the belt test reading a
-///   cover within rounding of 1 as whole;
 /// - the rough plains', `ROUGH_PLAINS_VERSION` (R09.T7.g), at `PlainsModel::RayTraced` through
 ///   `with_rough_plains`: the plains' cold traps from the ray-traced table, which a system reads
 ///   once as it is generated and carries to its passes, its record and R09's cold traps;
@@ -454,15 +450,13 @@ pub fn admit_free_floating_hosts_in_this_process() {
 pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::passes::{PassRoot, with_pass_root};
     use crate::planetary::hooks::cold_traps::with_rough_plains;
-    use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
     use crate::planetary::system::member_lag::{MemberLagRules, with_member_lag};
     use crate::substance::aerosol::{MoltenDecksRules, with_molten_decks};
     use hyperion_surface::cold_trap::PlainsModel;
     let run = move || with_member_lag(MemberLagRules::Members, run);
     let run = move || with_rough_plains(PlainsModel::RayTraced, run);
     let run = move || with_molten_decks(MoltenDecksRules::Molten, run);
-    let run = move || with_pass_root(PassRoot::Secant, run);
-    with_exposed_ice(ExposedIceRules::Exposed, run)
+    with_pass_root(PassRoot::Secant, run)
 }
 
 /// `run`'s result with every landed hold at generator version 26 in force on this thread, for a
@@ -761,25 +755,6 @@ mod tests {
             synthetic_star(id, SolarMasses::new(-1.0), fe_h, age),
             Err(BuildSystemContextError::MassOutsideRange { star: 0, .. })
         ));
-    }
-
-    /// 25's fourth switch, the exposed ice through a lag (P14.T53.c): in force inside 25's helper,
-    /// held outside it and where a test sets it back.
-    #[test]
-    fn the_exposed_ice_s_hold_is_in_force_inside_25_s_helper_alone() {
-        use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
-        assert_eq!(ExposedIceRules::in_force(), ExposedIceRules::Held);
-        assert_eq!(
-            with_every_25_hold(ExposedIceRules::in_force),
-            ExposedIceRules::Exposed
-        );
-        assert_eq!(
-            with_every_25_hold(|| {
-                with_exposed_ice(ExposedIceRules::Held, ExposedIceRules::in_force)
-            }),
-            ExposedIceRules::Held
-        );
-        assert_eq!(ExposedIceRules::in_force(), ExposedIceRules::Held);
     }
 
     /// 25's rough plains' switch (R09.T7.g): in force inside 25's helper, held outside it and
