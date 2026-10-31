@@ -12,13 +12,13 @@
 //! G to early K, but not for M giants. At Straižys and Kuriliene's (1981, Ap&SS 80, 353) class III
 //! temperatures and gravities (their Tables III and VII), Worthey and Lee's (2011) giants lie 0.27,
 //! 0.95 and 1.59 mag below their own dwarfs at M3 III, M5 III and M6 III, so a late M giant's
-//! M<sub>V</sub> read from this table is up to that much too bright. [`giant_bolometric_correction_v`]
-//! lies 0.16, 0.77 and 1.34 mag below this table there. Straižys and Kuriliene's own bolometric
-//! corrections (zero point BC<sub>V</sub>☉ = −0.07; Torres 2010, AJ 140, 1158) give 0.1–0.5, 1.1 and
-//! 1.7 mag, as P06.T23 read them from the paper's scan; the table that holds them was not re-read
-//! (plan 06's Risks). To version 25 every star but a white dwarf reads this table so; from 26
-//! (`V_MAGNITUDE_VERSION`) an evolved star reads the giants' correction instead, and that
-//! difference ends.
+//! M<sub>V</sub> read from this table is up to that much too bright.
+//! [`giant_bolometric_correction_v`] lies 0.16, 0.77 and 1.34 mag below this table there. Straižys
+//! and Kuriliene's own bolometric corrections (zero point BC<sub>V</sub>☉ = −0.07; Torres 2010, AJ
+//! 140, 1158) give 0.1–0.5, 1.1 and 1.7 mag, as P06.T23 read them from the paper's scan; the table
+//! that holds them was not re-read (plan 06's Risks). To version 25 every star but a white dwarf
+//! reads this table so; from 26 (`V_MAGNITUDE_VERSION`) an evolved star reads the giants'
+//! correction instead, and that difference ends.
 //!
 //! - Above the table's hottest row (O3V, 44,900 K), BC<sub>V</sub> falls by 7.5 mag per dex of
 //!   temperature from O3V's −4.01, the Rayleigh–Jeans limit, where the flux in V grows as
@@ -90,7 +90,7 @@
 //! When plan 06 answers A3, [`absolute_v_of_state`] switches to its photometry. These functions
 //! sat in the sky's own `photometry` module until the crate split (CS.T1) moved them here, beside
 //! the photometry they stand in for; the sky re-exports them, and the census restates the bounds
-//! that rest on A4's interim under the A4 arm (`sky::census`'s `StarBounds`).
+//! that rest on A4's interim under the A4 arm (`sky::census`'s `BoundStar::brightest`).
 //!
 //! Extinction and apparent magnitudes belong to plan 07.
 
@@ -150,15 +150,15 @@ impl VMagnitudeRules {
 /// white dwarf until the 26 bump refits its tables with white-dwarf rows.
 ///
 /// A white dwarf is brightest in V as it forms: at its progenitor's last luminosity, hot, and not
-/// yet shrunk to its degenerate radius. Beyond the Montreal grid's 150,000 K its correction falls at
-/// the Rayleigh–Jeans 7.5 mag per dex while its bolometric magnitude falls at 10 per dex at a fixed
-/// radius, so its V brightens only 2.5 mag per dex of temperature. The slow test
+/// yet shrunk to its degenerate radius. Beyond the Montreal grid's 150,000 K its correction falls
+/// at the Rayleigh–Jeans 7.5 mag per dex while its bolometric magnitude falls at 10 per dex at a
+/// fixed radius, so its V brightens only 2.5 mag per dex of temperature. The slow test
 /// `no_white_dwarf_is_brighter_than_the_census_bound` read 1.2 million white-dwarf states of single
 /// tracks of 0.7–12 M☉ over the phase envelope's \[Fe/H\] and η nodes, from a thousandth of a year
 /// after each death, and 4.4 million of the binary engine's pairs (two samples of every pair-light
 /// cell). The brightest was M<sub>V</sub> 4.639, a 0.51 M☉ carbon–oxygen dwarf at its birth (1,160
-/// L☉, 0.074 R☉, 124,000 K) from a 0.77 M☉ star of \[Fe/H\] +0.18 with no Reimers wind, which outlives
-/// the Galaxy. This is that, less 0.64 mag, rounded to a whole magnitude.
+/// L☉, 0.074 R☉, 124,000 K) from a 0.77 M☉ star of \[Fe/H\] +0.18 with no Reimers wind, which
+/// outlives the Galaxy. The ceiling is the whole magnitude below it, 0.64 mag brighter.
 pub(crate) const WHITE_DWARF_BRIGHTEST_V: Magnitudes = Magnitudes::new(4.0);
 
 /// The Sun's absolute bolometric magnitude, 4.74 mag: IAU 2015 Resolution B2's zero point

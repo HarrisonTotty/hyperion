@@ -832,7 +832,7 @@ pub enum StarLight {
     OwnOr(Magnitudes),
     /// Nothing: a star of a [`PairLight::Remnants`] pair, none of whose stars or products lives in
     /// the window, while white dwarfs are dark in V (A4's interim, to version 25). Under A4's arm
-    /// such a star is bounded by the white dwarfs' brightest ([`StarBounds::brightest`]).
+    /// such a star is bounded by the white dwarfs' brightest ([`BoundStar::brightest`]).
     Dark,
 }
 
@@ -875,6 +875,9 @@ pub struct BoundStar {
     mass: SolarMasses,
     eta: StandardNormal,
     light: StarLight,
+    /// The brightest absolute V a white dwarf has under its galaxy's stellar rules, margin
+    /// included, or `None` where white dwarfs are dark (A4's interim, to version 25).
+    white_dwarfs: Option<Magnitudes>,
 }
 
 impl BoundStar {
@@ -915,6 +918,16 @@ impl BoundStar {
     /// ([`PhaseEnvelope::brightest`]), the brighter of that and its pair's, or `None` where it can
     /// shine at none of them. A star of a [`StarLight::OwnOr`] pair takes the pair's magnitude
     /// even where its own model is dark: a departing star can outlive its own model.
+    ///
+    /// Where its galaxy's rules give white dwarfs a V (A4's arm, from version 26,
+    /// `V_MAGNITUDE_VERSION`), which the phase envelope past a star's lifetime and plan 11's pair
+    /// light do not hold until the bump refits them, a star that may be a white dwarf at an age
+    /// within `ages` takes the brighter of that and the white dwarfs' brightest: a star of a pair
+    /// that is not its own model at some attempt (a [`StarLight::OwnOr`] or [`StarLight::Dark`]
+    /// star), whose products may be white dwarfs at any age, or one whose oldest age reaches
+    /// [`FINE_START`] of the lifetime the phase envelope reads it against, from which on its own
+    /// death can lie within the envelope's spread. Under the interim, as to 25, it takes its own
+    /// bound alone.
     #[must_use]
     pub fn brightest(
         &self,
@@ -923,16 +936,22 @@ impl BoundStar {
         ages: (Years, Years),
     ) -> Option<Magnitudes> {
         let own = || phase.brightest(self.mass, composition, self.eta, ages);
-        match self.light {
+        let light = match self.light {
             StarLight::Own => own(),
             StarLight::OwnOr(m) => Some(own().map_or(m, |own| brighter(own, m))),
             StarLight::Dark => None,
+        };
+        match self.white_dwarfs {
+            Some(dwarfs) if self.may_be_a_white_dwarf(phase, composition, ages) => {
+                Some(light.map_or(dwarfs, |light| brighter(light, dwarfs)))
+            }
+            Some(_) | None => light,
         }
     }
 
     /// Whether the star may be a white dwarf at an age within `ages` (years, inclusive), of
     /// `composition`: a star its pair may change, or one whose oldest age is at least
-    /// [`FINE_START`] of its lifetime in `phase` (see [`StarBounds::brightest`]).
+    /// [`FINE_START`] of its lifetime in `phase` (see [`brightest`](Self::brightest)).
     #[must_use]
     fn may_be_a_white_dwarf(
         &self,
@@ -1076,7 +1095,7 @@ impl RecordLight {
 /// has a V magnitude, which the tables that bound the stars (the phase envelope, past a star's
 /// lifetime, and plan 11's pair light) do not hold until the bump refits them. So under that arm
 /// a star that may be a white dwarf at the ages read is bounded by the brighter of its own bound
-/// and the brightest any white dwarf can be ([`brightest`](Self::brightest)).
+/// and the brightest any white dwarf can be ([`BoundStar::brightest`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct StarBounds {
     composition: Composition,
@@ -1085,9 +1104,6 @@ pub struct StarBounds {
     primary: BoundStar,
     companions: Vec<BoundStar>,
     pairs: PairTally,
-    /// The brightest absolute V a white dwarf has under the galaxy's stellar rules, margin
-    /// included, or `None` where white dwarfs are dark (A4's interim, to version 25).
-    white_dwarfs: Option<Magnitudes>,
 }
 
 impl StarBounds {
@@ -1183,6 +1199,11 @@ impl StarBounds {
             "another record's hierarchy"
         );
         let seed = galaxy.seed();
+        let white_dwarfs = galaxy
+            .rules()
+            .stellar
+            .v_magnitude
+            .white_dwarfs_brightest_v();
         let mut pairs = PairTally::default();
         // The generator keeps the primary alone after a last attempt that carves.
         let mut primary_light = if hierarchy.fallback().is_some() {
@@ -1230,6 +1251,7 @@ impl StarBounds {
                     mass: slot.initial_mass(),
                     eta: StarDraws::eta_for_attempt(seed, slot.body(), u32::from(attempt.get())),
                     light,
+                    white_dwarfs,
                 }
             }));
         }
@@ -1242,14 +1264,10 @@ impl StarBounds {
                 mass: hierarchy.primary().initial_mass(),
                 eta: primary_eta(galaxy, record),
                 light: primary_light,
+                white_dwarfs,
             },
             companions,
             pairs,
-            white_dwarfs: galaxy
-                .rules()
-                .stellar
-                .v_magnitude
-                .white_dwarfs_brightest_v(),
         }
     }
 
@@ -1301,14 +1319,6 @@ impl StarBounds {
     /// order, each star's [`BoundStar::brightest`] read from `phase` and the brightest kept. It
     /// allocates nothing.
     ///
-    /// Where the galaxy's rules give white dwarfs a V (A4's arm, from version 26), a star that may
-    /// be one at an age within `ages` takes the brighter of that and the white dwarfs' brightest:
-    /// a star of a pair that is not its own model at some attempt (a [`StarLight::OwnOr`] or
-    /// [`StarLight::Dark`] star), whose products may be white dwarfs at any age, or one whose
-    /// oldest age reaches [`FINE_START`] of the lifetime the phase envelope reads it against, from
-    /// which on its own death can lie within the envelope's spread. Under the interim, as to 25,
-    /// every star takes its own bound alone.
-    ///
     /// The pairs' verdicts hold within [`ages`](Self::ages) only, so `ages` must lie within it;
     /// debug builds check it.
     #[must_use]
@@ -1323,15 +1333,7 @@ impl StarBounds {
         }
         core::iter::once(&self.primary)
             .chain(&self.companions)
-            .filter_map(|star| {
-                let own = star.brightest(phase, &self.composition, ages);
-                match self.white_dwarfs {
-                    Some(dwarfs) if star.may_be_a_white_dwarf(phase, &self.composition, ages) => {
-                        Some(own.map_or(dwarfs, |own| brighter(own, dwarfs)))
-                    }
-                    Some(_) | None => own,
-                }
-            })
+            .filter_map(|star| star.brightest(phase, &self.composition, ages))
             .reduce(brighter)
             .map_or(RecordLight::Dark, RecordLight::Brightest)
     }

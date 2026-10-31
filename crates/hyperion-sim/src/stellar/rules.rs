@@ -53,15 +53,15 @@
 //!   from the tracks keep the version's rules until the bump refits them, and with them the
 //!   galaxy's mean masses and so its parameters (`stellar/rules/hd_limit_hold.rs` lists them).
 //! - [`v_magnitude`](StellarRules::v_magnitude), the V magnitudes of white dwarfs and evolved
-//!   stars, at [`V_MAGNITUDE_VERSION`] (plan 06, P06.T43.b's swap, rendering plan R06's ask A4): A4's
-//!   interim below it, white dwarfs dark and every living star on the dwarf table's correction;
-//!   from it the Montreal grid's V for white dwarfs and the giants' correction for every living
-//!   state past the hydrogen main sequence, chosen at one choke point,
-//!   [`absolute_magnitude_v_under`]. Its readers on the record are those of the dwarf sequence's
-//!   V: a star's summary and its range brief, the sky census's stars and the host stars' discs. The
-//!   census restates the bounds that rest on dark white dwarfs under the new arm (its
-//!   `StarBounds`). The sky's fitted tables, its luminosity tables, the pair-light tables, the
-//!   server's converters and `hyperion-fit` take the version's rules, as for the dwarf sequence
+//!   stars, at [`V_MAGNITUDE_VERSION`] (plan 06, P06.T43.b's swap, rendering plan R06's ask A4):
+//!   A4's interim below it, white dwarfs dark and every living star on the dwarf table's
+//!   correction; from it the Montreal grid's V for white dwarfs and the giants' correction for
+//!   every living state past the hydrogen main sequence, chosen at one choke point,
+//!   [`absolute_magnitude_v_under`]. Its readers on the record are a star's summary, the sky
+//!   census's stars and the host stars' discs; the range brief reads no V. The census restates the
+//!   bounds that rest on dark white dwarfs under the new arm (its `BoundStar::brightest`). The
+//!   sky's fitted tables, its luminosity tables, the pair-light tables, the server's converters
+//!   and `hyperion-fit` take the version's rules, as for the dwarf sequence
 //!   (`stellar/rules/v_magnitude_hold.rs` lists them).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules

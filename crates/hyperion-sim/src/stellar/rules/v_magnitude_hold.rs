@@ -137,15 +137,21 @@ fn the_a4_magnitudes_are_held_only_until_the_26_bump() {
          V from the Montreal grid, and every living star past the hydrogen main sequence reads the \
          giants' bolometric correction): delete `V_MAGNITUDE_VERSION`, `VMagnitudeRules` with its \
          `Interim` arm, `StellarRules::v_magnitude`, the `match` in \
-         `photometry::absolute_magnitude_v_under`, the census's `StarBounds::white_dwarfs` once \
-         the refits give the phase envelope white-dwarf rows (or keep `WHITE_DWARF_BRIGHTEST_V` \
-         for `Remnants` pairs, whose products the tables do not hold), the disc's dwarf-table \
-         stand-in for white dwarfs and this module; restate on the new photometry \
-         `photometry::tests::protostars_and_white_dwarfs_are_dark_and_main_sequence_stars_are_not` \
-         and `nothing_without_a_calibration_has_a_magnitude`, and the doctests of \
-         `white_dwarf_absolute_magnitude_v` and `is_dark_in_v`; refit the tables `just fit-check` \
-         flags (sky_envelope, sky_phase_envelope, sky_binary_light_c/d/e, \
-         binary_pair_light_c/d/e) and re-bless the goldens the lane's movers list names"
+         `photometry::absolute_magnitude_v_under`, the disc's dwarf-table stand-in for white \
+         dwarfs and this module; keep the census's `BoundStar::white_dwarfs` ceiling for the \
+         stars a pair changes, whose white dwarfs the refitted tables do not hold, and for the \
+         rest take the refitted phase envelope's white-dwarf rows; restate on the new \
+         photometry `photometry::tests::protostars_and_white_dwarfs_are_dark_and_main_sequence_\
+         stars_are_not` and `nothing_without_a_calibration_has_a_magnitude`, the doctest of \
+         `white_dwarf_absolute_magnitude_v`, and the census tests that rest on dark white dwarfs \
+         (`a_white_dwarf_primary_beside_a_bright_companion_lists_the_companion`, \
+         `each_verdict_leaves_the_stars_the_light_the_ruling_gives`, \
+         `the_primary_is_bounded_once_by_the_least_light_that_bounds_it_at_every_attempt`, \
+         `the_observers_own_system_is_absent`); refit the tables `just fit-check` flags \
+         (sky_envelope, sky_phase_envelope, sky_binary_light_c/d/e, binary_pair_light_c/d/e); \
+         then re-bless by test name the goldens that move (stellar/classify, \
+         stellar_system's summaries, sky's real_boundary, census_near_sun, eye_cut and \
+         near_sun) and luminosity's `SERIAL_FINGERPRINT`"
     );
     assert_eq!(VERSION.v_magnitude, VMagnitudeRules::Interim);
     assert_eq!(VERSION.v_magnitude.white_dwarfs_brightest_v(), None);

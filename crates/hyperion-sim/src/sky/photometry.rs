@@ -12,7 +12,7 @@
 //! ([`PhaseEnvelope`](super::phase::PhaseEnvelope), R06.T8.m), and a pair that plan 11 answers
 //! `Remnants` gives the census nothing ([`StarBounds`](super::census::StarBounds), R06.T8.g).
 //! Under the arm both are restated: a star that may be a white dwarf takes the white dwarfs'
-//! brightest V as well ([`StarBounds::brightest`](super::census::StarBounds::brightest)), until the
+//! brightest V as well ([`BoundStar::brightest`](super::census::BoundStar::brightest)), until the
 //! bump's refit gives the tables white-dwarf rows.
 
 use super::colour::{StarColour, star_colour, surface_gravity};
