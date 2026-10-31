@@ -69,6 +69,8 @@ async fn a_ship_beside_a_brown_dwarf_or_a_rogue_planet_arrives_is_served_its_bod
         let departure = loop {
             let notification = match seen.pop() {
                 Some((_, NotificationBody::Scene(notification))) => notification,
+                // No alerts subscription is open, so none is sent; skip one all the same.
+                Some((_, NotificationBody::Alerts(_))) => continue,
                 None => next_scene(&mut client).await.1,
             };
             if notification.arrival.is_some() {
