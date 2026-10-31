@@ -264,8 +264,15 @@ fn alerts_schedule_pushes_a_core_collapse_at_its_crossings() {
         })
         .unwrap();
     let tracked = Tracked::of(onset, &sensor).unwrap();
-    let (detect, _) = tracked.crossing(Crossing::Detect).unwrap();
-    let (resolve, _) = tracked.crossing(Crossing::Resolve).unwrap();
+    let earliest = |track: &Tracked, crossing| {
+        track
+            .crossings()
+            .iter()
+            .find(|&&(_, which, _)| which == crossing)
+            .map(|&(at, ..)| at)
+    };
+    let detect = earliest(&tracked, Crossing::Detect).unwrap();
+    let resolve = earliest(&tracked, Crossing::Resolve).unwrap();
     assert!(arrival <= detect && detect <= resolve && resolve <= peak);
     subscription.merge(&first, [tracked]).unwrap();
 
@@ -294,10 +301,7 @@ fn alerts_schedule_pushes_a_core_collapse_at_its_crossings() {
         "the same light"
     );
     let in_progress = Tracked::of(again[0].clone(), &sensor).unwrap();
-    assert_eq!(
-        in_progress.crossing(Crossing::Detect).map(|(at, _)| at),
-        Some(detect)
-    );
+    assert_eq!(earliest(&in_progress, Crossing::Detect), Some(detect));
     subscription.merge(&renewal, [in_progress]).unwrap();
     let later = subscription.advance(Observer::new(at, renewal.window().end()).unwrap());
     assert!(

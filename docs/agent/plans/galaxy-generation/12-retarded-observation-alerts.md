@@ -2791,19 +2791,23 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     `Rescan::{Renew, Restart}` each hold a `ScanRequest`. `SubscriptionId`, `ScanKey`,
     `AlertService` and `SubscribeError` wait for T8.b and T9.
   - _The crossing rule._ `Tracked::of_light(detection, sensor, knots, light)` takes the flux at
-    the observer as a function of its time, monotone between `knots`, and finds
-    `Crossing::{Detect, Resolve, Clear}` by bisection. `Clear` is the last fall under `detect`, so
-    a light that dips and rises again stays listed (lean, 2026-10-31). `Tracked::of_unlit` serves
-    a row with no light: `Detect` at arrival, `Clear` 3.1 days later.
-  - _For T8.b._ A `Detection` carries no light curve, so the scan must give each one's light and
-    knots: a sim function per `LightCurveSource`, not built. A first or restarted scan must walk
-    back by the classes' longest rise to peak, a registry bound not built. Scans merge in the order
-    asked, each once, empty if one failed; one asked for before a jump or a backwards clock is
-    `MergeScanError::Stale`.
+    the observer as a function of its time, monotone between `knots`, and lists every crossing in
+    time order, `Tracked::crossings()`: a `Detect` at each rise to `detect`, a `Resolve` at each
+    rise to `resolve`, and a `Clear` at each fall under `detect` (research's ruling of 2026-10-31,
+    which overturned the last-fall lean). Each is the first point of the clock's 1 ms grid past its
+    limit, so it does not depend on the knots. `Tracked::of_unlit` serves a row with no light:
+    `Detect` at arrival, `Clear` 3.1 days later.
+  - _For T8.b._ A merged scan schedules the crossings in its own window, and the first scan after
+    a start or a restart also the state at the start (`Detect`, and `Resolve` if that high).
+    A scan must list every event whose light may reach `detect` in its window, those under it at
+    the window's start among them, and give each the same light whichever scan lists it.
+    `Tracked::of` takes P12.T8.b.1's lights. Scans merge in the order asked, each once, empty if one
+    failed; one asked for before a jump or a backwards clock is `MergeScanError::Stale`.
   - _For T8.c._ `Crossing::level()` is the sighting's `KnowledgeLevel`, and `Clear` is no
-    sighting. `Push::flux` is the light at the crossing; a crossing before the schedule's start is
-    pushed at the start. The detection's `retardation()` is for its light first counted, not for
-    `Push::at`.
+    sighting. `Push::flux` is the light at the crossing; the state at the schedule's start is
+    pushed then, with the flux of the crossing that made it. The detection's `retardation()` is the
+    onset's light (T5.b's constructor) and its `bearing()` the light first counted's. Neither is
+    `Push::at`'s: a sighting takes the emitted time and bearing of its own light then.
 - **P12.T5.c as built, its magnetar half (lane `p12-t5b`, 2026-10-31, at `GENERATOR_VERSION` 23;
   main's ruling to build it ahead of plan 11).** No generated output moves. One line of
   `alerts/registry.golden` moves (the magnetar row's X-ray bound), a bless by name, and
@@ -2859,7 +2863,10 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     2026-10-31). T5.d adds the centre's, and P11.T9.b plan 11's `BinaryLightCurve` with its rows.
   - _For T8.b._ `Tracked::of(detection, sensor)` tracks a walk's detection on its own light. A
     supernova's knots are its peak grid's 21,945 ages, so its track costs as many template
-    evaluations. `TransientRow::longest_rise() -> Option<LongestRise>` (`AtMost(Span)`, or
+    evaluations. A local event's light holds its detection's emission, so an onset's and a later
+    in-progress detection's differ by the host's motion over the event: tens of ms over a flare's
+    day, hours over an outburst's centuries. Track a local event on the light first listed, or a
+    crossing that near a window's edge can be pushed twice or not at all. `TransientRow::longest_rise() -> Option<LongestRise>` (`AtMost(Span)`, or
     `PerEvent` for the tails) and `class_longest_rise(class)`: core collapses 78 days, Type Ia 16,
     flares 4,115 s, outbursts 25 years, eruptions 5 years, the centre's flares 4,088 s, magnetars
     and glitches none.

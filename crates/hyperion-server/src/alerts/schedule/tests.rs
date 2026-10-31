@@ -2,6 +2,8 @@
 //! whose light at the observer is known, and a walk over them that lists each as the sim's would.
 //! The walks' own detections feed `tests/alerts_schedule.rs`.
 
+use std::collections::BTreeSet;
+
 use hyperion_sim::alerts::testing::detection;
 use hyperion_sim::alerts::{
     AlertBand, BandLimits, DEFAULT_HOST_LIMIT, DetectionPhase, TransientKind,
@@ -93,6 +95,16 @@ enum Source {
         fall: f64,
         peak: f64,
     },
+    /// An outburst whose light rises as a ramp's to `peak`, falls to `low` over `fall` days, rises
+    /// to `peak` again over `rise` and falls to nothing over `fall`: a light that dips.
+    Dip {
+        number: u8,
+        arrival: UniverseTime,
+        rise: f64,
+        fall: f64,
+        peak: f64,
+        low: f64,
+    },
     /// A glitch, timed in the radio with no flux at its arrival.
     Glitch { number: u8, arrival: UniverseTime },
 }
@@ -110,63 +122,74 @@ impl Source {
 
     fn arrival(self) -> UniverseTime {
         match self {
-            Self::Ramp { arrival, .. } | Self::Glitch { arrival, .. } => arrival,
+            Self::Ramp { arrival, .. }
+            | Self::Dip { arrival, .. }
+            | Self::Glitch { arrival, .. } => arrival,
         }
     }
 
     fn event(self) -> EventId {
         match self {
-            Self::Ramp { number, .. } | Self::Glitch { number, .. } => event(number),
+            Self::Ramp { number, .. } | Self::Dip { number, .. } | Self::Glitch { number, .. } => {
+                event(number)
+            }
+        }
+    }
+
+    /// The light's corners, days after its arrival and W m⁻², between which it is linear.
+    fn corners(self) -> Vec<(f64, f64)> {
+        match self {
+            Self::Ramp {
+                rise, fall, peak, ..
+            } => vec![(0.0, 0.0), (rise, peak), (rise + fall, 0.0)],
+            Self::Dip {
+                rise,
+                fall,
+                peak,
+                low,
+                ..
+            } => vec![
+                (0.0, 0.0),
+                (rise, peak),
+                (rise + fall, low),
+                (2.0 * rise + fall, peak),
+                (2.0 * rise + 2.0 * fall, 0.0),
+            ],
+            Self::Glitch { .. } => vec![(0.0, 0.0)],
         }
     }
 
     /// The light at the observer at `t`.
     fn flux_at(self, t: UniverseTime) -> WattsPerSquareMetre {
-        match self {
-            Self::Ramp {
-                arrival,
-                rise,
-                fall,
-                peak,
-                ..
-            } => {
-                let since = t.checked_since(arrival).unwrap().as_seconds_f64() / SECONDS_PER_DAY;
-                let share = if since <= 0.0 {
-                    0.0
-                } else if since <= rise {
-                    since / rise
-                } else if since <= rise + fall {
-                    1.0 - (since - rise) / fall
-                } else {
-                    0.0
-                };
-                w(peak * share)
-            }
-            Self::Glitch { .. } => w(0.0),
-        }
+        let since = t.checked_since(self.arrival()).unwrap().as_seconds_f64() / SECONDS_PER_DAY;
+        let corners = self.corners();
+        let flux = corners
+            .windows(2)
+            .find(|pair| since > pair[0].0 && since <= pair[1].0)
+            .map_or(0.0, |pair| {
+                let share = (since - pair[0].0) / (pair[1].0 - pair[0].0);
+                pair[0].1 + (pair[1].1 - pair[0].1) * share
+            });
+        w(flux)
     }
 
-    /// The light's knots: the arrival, the peak and the end.
+    /// The light's knots: its corners.
     fn knots(self) -> Vec<UniverseTime> {
-        match self {
-            Self::Ramp {
-                arrival,
-                rise,
-                fall,
-                ..
-            } => vec![
-                arrival,
-                arrival.checked_add(days(rise)).unwrap(),
-                arrival.checked_add(days(rise + fall)).unwrap(),
-            ],
-            Self::Glitch { arrival, .. } => vec![arrival],
-        }
+        self.corners()
+            .into_iter()
+            .map(|(after, _)| self.arrival().checked_add(days(after)).unwrap())
+            .collect()
+    }
+
+    /// When the light ends.
+    fn end(self) -> UniverseTime {
+        *self.knots().last().unwrap()
     }
 
     /// The detection by an observer at `at` of the source in `phase` with `flux`.
     fn detection(self, at: &GalacticPosition, phase: DetectionPhase, flux: f64) -> Detection {
         let (kind, band) = match self {
-            Self::Ramp { .. } => (
+            Self::Ramp { .. } | Self::Dip { .. } => (
                 TransientKind::FuOrionisOutburst,
                 AlertBand::Photometric(Band::V),
             ),
@@ -181,35 +204,53 @@ impl Source {
             phase,
             band,
             w(flux),
-            matches!(self, Self::Ramp { .. }) && flux >= RESOLVE,
+            !matches!(self, Self::Glitch { .. }) && flux >= RESOLVE,
             site(),
             self.arrival().checked_sub(light).unwrap(),
             at,
         )
     }
 
-    /// What a walk over `window` at `at` lists of the source, tracked: an onset whose light
-    /// arrives in the window, seen by its peak; an earlier one in progress if its light at the
-    /// window's start is at the limit; and nothing else. A glitch is listed only at its onset.
+    /// What a walk over `window` at `at` lists of the source, tracked, as P12.T8.b's scans must:
+    /// an onset whose light arrives in the window, seen by its peak if that reaches the limit; an
+    /// earlier one still lit at the window's start, in progress, whatever its light then; and
+    /// nothing else. A glitch is listed only at its onset.
     fn walked(self, window: TimeWindow, at: &GalacticPosition) -> Option<Tracked> {
-        match self {
-            Self::Ramp { peak, .. } => {
-                let found = if window.contains(self.arrival()) {
-                    (peak >= DETECT).then(|| self.detection(at, DetectionPhase::Onset, peak))
-                } else if self.arrival() < window.start() {
-                    let flux = self.flux_at(window.start()).value();
-                    (flux >= DETECT).then(|| self.detection(at, DetectionPhase::InProgress, flux))
-                } else {
-                    None
-                };
-                Tracked::of_light(found?, &sensor(), &self.knots(), |t| self.flux_at(t))
-            }
-            Self::Glitch { .. } => window
+        if let Self::Glitch { .. } = self {
+            return window
                 .contains(self.arrival())
                 .then(|| Tracked::of_unlit(self.detection(at, DetectionPhase::Onset, 0.0)))
-                .flatten(),
+                .flatten();
         }
+        let peak = self
+            .corners()
+            .iter()
+            .map(|&(_, flux)| flux)
+            .fold(0.0, f64::max);
+        let found = if window.contains(self.arrival()) {
+            (peak >= DETECT).then(|| self.detection(at, DetectionPhase::Onset, peak))
+        } else if self.arrival() < window.start() && window.start() < self.end() {
+            let flux = self.flux_at(window.start()).value();
+            Some(self.detection(at, DetectionPhase::InProgress, flux))
+        } else {
+            None
+        };
+        Tracked::of_light(found?, &sensor(), &self.knots(), |t| self.flux_at(t))
     }
+}
+
+/// The crossing of `crossing` in `track`, the `nth` of it.
+fn nth(
+    track: &Tracked,
+    crossing: Crossing,
+    nth: usize,
+) -> Option<(UniverseTime, WattsPerSquareMetre)> {
+    track
+        .crossings()
+        .iter()
+        .filter(|&&(_, which, _)| which == crossing)
+        .nth(nth)
+        .map(|&(at, _, flux)| (at, flux))
 }
 
 /// The walk over `sources` that `scan` asks for. A schedule's first scan walks from
@@ -408,9 +449,6 @@ fn a_riser_arriving_before_the_subscription_and_crossing_after_it_is_pushed_once
     assert_eq!(detects.len(), 1, "{pushes:?}");
     let off = seconds_between(day(100.0).min(detects[0].0), day(100.0).max(detects[0].0));
     assert!(off <= 1e-3 + 1e-6, "{off} s");
-    // A walk from the epoch alone would not list it: its light there is under the limit.
-    let window = TimeWindow::new(UniverseTime::EPOCH, day(365.25)).unwrap();
-    assert!(riser.walked(window, &sun()).is_none());
 }
 
 /// An event in progress when the schedule starts is pushed then, at both levels it has reached; one
@@ -511,7 +549,7 @@ fn an_event_a_later_scan_finds_in_progress_is_not_pushed_again() {
         .unwrap();
     let knots = &lasting.knots()[..2];
     let short = Tracked::of_light(found, &sensor(), knots, |t| lasting.flux_at(t)).unwrap();
-    assert_eq!(short.crossing(Crossing::Clear), None);
+    assert_eq!(nth(&short, Crossing::Clear, 0), None);
     subscription.merge(&first, [short]).unwrap();
     let advance = subscription.advance(observer(sun(), day(305.0)));
     let crossings: Vec<_> = advance.due().iter().map(Push::crossing).collect();
@@ -523,7 +561,7 @@ fn an_event_a_later_scan_finds_in_progress_is_not_pushed_again() {
     let again = lasting.walked(renewal.window(), &sun()).unwrap();
     assert_eq!(again.detection().phase(), DetectionPhase::InProgress);
     assert_eq!(
-        again.crossing(Crossing::Detect),
+        nth(&again, Crossing::Detect, 0),
         advance.due().first().map(|push| (push.at(), push.flux())),
         "the renewal finds the same bearing"
     );
@@ -722,11 +760,11 @@ fn a_glitch_is_pushed_at_its_arrival_and_cleared_after_its_recovery_time() {
     assert_eq!(Tracked::of_unlit(flare), None);
 }
 
-/// The crossings on a light that rises, spikes past the resolve limit, dips under the detection
-/// limit and rises again: the bearing at the first rise, the host in the spike, and the clearing
-/// after the last fall. A light already at the limit is seen at its first knot, one still at it at
-/// its last never clears, one that never reaches it is not tracked, and nor is a band the sensor
-/// lacks.
+/// Every crossing on a light that rises, spikes past the resolve limit, dips under the detection
+/// limit, rises again and fades: a bearing at each rise, the host in the spike, and a clearing at
+/// each fall, in time order, each within a millisecond and on the clock's millisecond grid. A light
+/// already at the limit is seen at its first knot, one still at it at its last never clears, one
+/// that never reaches it is not tracked, and nor is a band the sensor lacks.
 #[test]
 fn the_crossings_are_found_on_any_light_monotone_between_its_knots() {
     let source = Source::ramp(1, 10.0, 1.0, 1.0, 1e-9);
@@ -743,23 +781,44 @@ fn the_crossings_are_found_on_any_light_monotone_between_its_knots() {
         w(values[i] + (values[i + 1] - values[i]) * share.clamp(0.0, 1.0))
     };
     let track = Tracked::of_light(found.clone(), &sensor(), &knots, light).unwrap();
-    let near = |crossing, want: UniverseTime| {
-        let (at, _) = track.crossing(crossing).unwrap();
-        let off = seconds_between(want.min(at), want.max(at));
-        assert!(off <= 1e-3 + 1e-6, "{crossing:?} {off} s from {want}");
-    };
-    near(Crossing::Detect, day(10.0 + DETECT / 1e-9));
-    near(Crossing::Resolve, day(10.0 + RESOLVE / 1e-9));
-    near(Crossing::Clear, day(13.0 + 2.0 * (1.0 - DETECT / 1e-11)));
+    let crossed_at =
+        |rate: f64, from: f64, to: f64, limit: f64| from + (limit - rate) / (to - rate);
+    let want = [
+        (Crossing::Detect, day(10.0 + DETECT / 1e-9)),
+        (Crossing::Resolve, day(10.0 + RESOLVE / 1e-9)),
+        (
+            Crossing::Clear,
+            day(11.0 + crossed_at(1e-9, 0.0, 1e-13, DETECT) * 1.0),
+        ),
+        (
+            Crossing::Detect,
+            day(12.0 + crossed_at(1e-13, 0.0, 1e-11, DETECT)),
+        ),
+        (Crossing::Clear, day(13.0 + 2.0 * (1.0 - DETECT / 1e-11))),
+    ];
+    assert_eq!(
+        track.crossings().len(),
+        want.len(),
+        "{:?}",
+        track.crossings()
+    );
+    for (&(at, crossing, flux), (wanted, near)) in track.crossings().iter().zip(want) {
+        assert_eq!(crossing, wanted);
+        let off = seconds_between(near.min(at), near.max(at));
+        assert!(off <= 1e-3 + 1e-6, "{crossing:?} {off} s from {near}");
+        assert_eq!(at.subsec_nanos() % 1_000_000, 0, "on the grid: {at}");
+        assert_eq!(flux, light(at));
+    }
 
     let bright = |_| w(1e-9);
     let track = Tracked::of_light(found.clone(), &sensor(), &knots, bright).unwrap();
-    assert_eq!(track.crossing(Crossing::Detect), Some((day(10.0), w(1e-9))));
     assert_eq!(
-        track.crossing(Crossing::Resolve),
-        Some((day(10.0), w(1e-9)))
+        track.crossings(),
+        [
+            (day(10.0), Crossing::Detect, w(1e-9)),
+            (day(10.0), Crossing::Resolve, w(1e-9)),
+        ]
     );
-    assert_eq!(track.crossing(Crossing::Clear), None);
     assert_eq!(
         Tracked::of_light(found.clone(), &sensor(), &knots, |_| w(1e-13)),
         None
@@ -784,19 +843,109 @@ fn a_lights_knots_must_increase() {
     let _ = Tracked::of_light(found, &sensor(), &[day(2.0), day(1.0)], |_| w(1.0));
 }
 
-/// The crossings of an event that clears before the merged scans end are forgotten, since no
-/// later scan can list it, and those of one still lit are kept.
+/// A light that dips under the detection limit and rises again: rises over the limit 2 days in,
+/// falls under it near day 18.2, rises again near day 21.8 and fades by day 38.
+fn dip() -> Source {
+    Source::Dip {
+        number: 12,
+        arrival: day(10.0),
+        rise: 20.0,
+        fall: 20.0,
+        peak: 1e-11,
+        low: 1e-13,
+    }
+}
+
+/// A dip pushes a bearing, a clearing, a bearing again and a clearing, in one advance or in ten.
 #[test]
-fn the_crossings_kept_are_of_the_events_a_later_scan_could_list() {
-    let quick = Source::ramp(1, 10.0, 1.0, 5.0, 1e-11);
-    let lasting = Source::ramp(7, 300.0, 10.0, 200.0, 1e-9);
-    let (mut schedule, first) = AlertSchedule::new(&observer(sun(), UniverseTime::EPOCH));
-    schedule
-        .merge(&first, scan(&[quick, lasting], &first, true))
-        .unwrap();
-    let kept: BTreeSet<_> = schedule.scheduled.iter().map(|&(event, _)| event).collect();
-    assert_eq!(kept, BTreeSet::from([lasting.event()]));
-    assert_eq!(schedule.pending(), 5, "both events' pushes stay");
+fn a_dip_under_the_limit_clears_and_a_re_rise_pushes_again() {
+    let one = run(&[dip()], sun(), UniverseTime::EPOCH, &[day(120.0)]);
+    let tenths: Vec<_> = (1..=10).map(|k| day(12.0 * f64::from(k))).collect();
+    let ten = run(&[dip()], sun(), UniverseTime::EPOCH, &tenths);
+    assert_eq!(one, ten);
+    let crossings: Vec<_> = one.iter().map(|push| push.2).collect();
+    assert_eq!(
+        crossings,
+        [
+            Crossing::Detect,
+            Crossing::Clear,
+            Crossing::Detect,
+            Crossing::Clear
+        ]
+    );
+}
+
+/// The dip split between two scans gives the same pushes wherever the first scan's window ends:
+/// in the rise, in the dip, at the dip's bottom, and within a millisecond of each crossing, before,
+/// on and after it.
+#[test]
+fn a_dip_split_between_two_scans_gives_the_same_pushes_wherever_the_split_falls() {
+    let end = day(120.0);
+    let whole = run(&[dip()], sun(), UniverseTime::EPOCH, &[end]);
+    assert_eq!(whole.len(), 4);
+    let half_ms = Span::new(0, 500_000).unwrap();
+    let mut splits = vec![day(25.0), day(40.0), day(50.0), day(55.0)];
+    for &(at, ..) in &whole {
+        splits.extend([
+            at.checked_sub(half_ms).unwrap(),
+            at,
+            at.checked_add(half_ms).unwrap(),
+        ]);
+    }
+    for split in splits {
+        // The first scan's window, a look-ahead long, ends at the split.
+        let start = split.checked_sub(ALERT_LOOKAHEAD).unwrap();
+        let mut pushes = run(&[dip()], sun(), start, &[day(30.0), end]);
+        pushes.sort_unstable();
+        assert_eq!(pushes, whole, "split at {split}");
+    }
+}
+
+/// A crossing is the first point of the clock's millisecond grid past the limit, whatever knots
+/// bracket it: a scan whose knots add its window's ends, anywhere in the light, finds the same
+/// crossings as one on the light's own.
+#[test]
+fn a_crossing_is_the_same_whatever_knots_bracket_it() {
+    let source = dip();
+    let found = source.detection(&sun(), DetectionPhase::Onset, 1e-11);
+    let own = Tracked::of_light(found.clone(), &sensor(), &source.knots(), |t| {
+        source.flux_at(t)
+    })
+    .unwrap();
+    for extra in [11.0, 12.0, 18.2, 21.81, 25.0, 37.999] {
+        let mut knots = source.knots();
+        knots.push(day(extra));
+        knots.sort_unstable();
+        knots.dedup();
+        let split =
+            Tracked::of_light(found.clone(), &sensor(), &knots, |t| source.flux_at(t)).unwrap();
+        assert_eq!(split.crossings(), own.crossings(), "a knot at day {extra}");
+    }
+}
+
+/// A resolved light that dips under the resolve limit, not the detection limit, and rises over it
+/// again pushes the host resolved again, and clears once.
+#[test]
+fn a_resolved_light_that_dips_and_rises_over_resolve_again_is_resolved_again() {
+    let resolving = Source::Dip {
+        number: 13,
+        arrival: day(10.0),
+        rise: 20.0,
+        fall: 20.0,
+        peak: 1e-9,
+        low: 1e-11,
+    };
+    let pushes = run(&[resolving], sun(), UniverseTime::EPOCH, &[day(120.0)]);
+    let crossings: Vec<_> = pushes.iter().map(|push| push.2).collect();
+    assert_eq!(
+        crossings,
+        [
+            Crossing::Detect,
+            Crossing::Resolve,
+            Crossing::Resolve,
+            Crossing::Clear
+        ]
+    );
 }
 
 /// A subscription's query is its scan's place and window with its sensor, classes and host limit,
