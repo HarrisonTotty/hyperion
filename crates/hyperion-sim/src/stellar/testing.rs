@@ -1040,11 +1040,12 @@ mod tests {
 
     /// What the counts of P06.T24.b's classes read of one star of `inputs`, of a component whose
     /// ages are `ages`, its tracks built under `rules`: the weight under `ages` of the ages at which
-    /// the star is a classical or weak-lined T Tauri star, a Herbig Ae/Be star (from its
-    /// formation to its arrival on the main sequence, split at its disc's lifetime), an S star of
-    /// any kind or a carbon star (over its full track's thermally pulsing AGB, on the track's own
-    /// pulse count, ⌊φ⌋, which the series' n follows within its noise's bound); and the
-    /// protostars, as [`observe_counts`] weighs them.
+    /// the star is a classical or weak-lined T Tauri star, a Herbig Ae/Be star (from the
+    /// protostar's end to its arrival on the main sequence, split at its disc's lifetime), an S
+    /// star of any kind or a carbon star (over its full track's thermally pulsing AGB, on the
+    /// track's own pulse count, ⌊φ⌋, which the series' n follows within its noise's bound); the
+    /// protostars, as [`observe_counts`] weighs them; and, of its summaries early and late in its
+    /// accretion, how many are of a protostar and how many of those carry a young class.
     fn observe_young_and_chemical(
         inputs: &SampleInputs,
         ages: &AgeDistribution,
@@ -1063,16 +1064,46 @@ mod tests {
                 .value()
                 .max(PROTOSTAR_YEARS);
         t.add("protostars", weight(ages, 0.0, PROTOSTAR_YEARS));
-        // A protostar is classical whatever its disc's lifetime (`young_class`).
-        let disc = (1e6 * disc_lifetime(m0, draws.disc_lifetime()).value()).max(PROTOSTAR_YEARS);
+        // The young classes are the contraction's, from the protostar's end to the arrival
+        // (`young_class`), split at the disc's end.
         if m0 < T_TAURI_MAX_MASS {
+            let disc = 1e6 * disc_lifetime(m0, draws.disc_lifetime()).value();
+            let split = disc.clamp(PROTOSTAR_YEARS, arrival);
             t.add(
                 "classical T Tauri stars",
-                weight(ages, 0.0, disc.min(arrival)),
+                weight(ages, PROTOSTAR_YEARS, split),
             );
-            t.add("weak-lined T Tauri stars", weight(ages, disc, arrival));
+            t.add("weak-lined T Tauri stars", weight(ages, split, arrival));
         } else if m0 < HERBIG_AE_BE_MAX_MASS {
-            t.add("Herbig Ae/Be stars", weight(ages, 0.0, arrival));
+            t.add("Herbig Ae/Be stars", weight(ages, PROTOSTAR_YEARS, arrival));
+        }
+        // No protostar carries a young class: the star's summary early and late in its accretion,
+        // a Class 0 and a Class I protostar.
+        for age in [0.1 * PROTOSTAR_YEARS, 0.9 * PROTOSTAR_YEARS] {
+            let model =
+                StarModel::new_under(m0, *composition, draws.clone(), Years::new(age), rules)
+                    .expect("a sampled star is a star at a finite age");
+            let summary = star_summary(
+                &model,
+                StarStreams::new(Seed::new(SEED), inputs.body),
+                UniverseTime::EPOCH,
+            )
+            .expect("formed");
+            if summary.kind() == ObjectKind::Protostar {
+                t.add("protostars summarised", 1.0);
+                if summary
+                    .classification()
+                    .peculiar_class()
+                    .is_some_and(|class| {
+                        matches!(
+                            class,
+                            PeculiarClass::TTauri { .. } | PeculiarClass::HerbigAeBe
+                        )
+                    })
+                {
+                    t.add("protostars with a young class", 1.0);
+                }
+            }
         }
         if !carbon_star_window(composition).contains(&m0) {
             return;
@@ -1117,11 +1148,12 @@ mod tests {
     ///   recalled) brackets above;
     /// - S stars 0.05–0.5 of the carbon stars: Stephenson's catalogues list some 1,300 S stars to
     ///   some 6,000 carbon stars (recalled), extrinsic S stars among them;
-    /// - classical T Tauri stars 2–8 per protostar, the mean disc of 2.5 Myr (P06.T15.c) over the
-    ///   protostar's 0.5 Myr, weak-lined ones 10–200 per classical one, the contraction of
-    ///   100–400 Myr below a solar mass over the disc, and Herbig Ae/Be stars 0.05–0.5 per
-    ///   protostar, a few per cent of stars spending 1–8 Myr before the main sequence: the model's
-    ///   own ratios, there being no Galactic census of young stars.
+    /// - classical T Tauri stars 2–8 per protostar, the mean disc of 2.5 Myr (P06.T15.c) less the
+    ///   protostar's 0.5 Myr over that 0.5 Myr, weak-lined ones 10–200 per classical one, the
+    ///   contraction of 100–400 Myr below a solar mass over the disc, and Herbig Ae/Be stars
+    ///   0.05–0.5 per protostar, a few per cent of stars spending 1–8 Myr before the main sequence:
+    ///   the model's own ratios, there being no Galactic census of young stars;
+    /// - no protostar, of the kind `Protostar`, with a young class (research-leans-12 §3).
     #[test]
     #[ignore = "slow: 1.5 × 10⁶ stars across every component and band, the window's with full tracks"]
     fn young_s_and_carbon_stars_galaxy_wide_at_milky_way_values() {
@@ -1154,6 +1186,15 @@ mod tests {
             "Herbig Ae/Be stars per protostar",
             t.get("Herbig Ae/Be stars") / protostars,
             (0.05, 0.5),
+        );
+        checks.within(
+            "protostars with a young class",
+            t.get("protostars with a young class"),
+            (0.0, 0.0),
+        );
+        assert!(
+            t.get("protostars summarised") > 0.0,
+            "no protostar was summarised"
         );
         checks.finish();
     }

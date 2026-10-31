@@ -1532,7 +1532,8 @@ massive and stripped stars, T24.b the rest, and T24.c corrects T24.a's hot subdw
     while the disc of T15.c lasts), `HerbigAeBe` for 2–8 M☉.
   - Tests: carbon stars appear only inside the mass range and only after n_min pulses; the C/O of a
     fixed star is non-decreasing in time; a 1 M☉ star at 2 Myr is a T Tauri star, classical or not
-    by its disc draw, and a 4 M☉ one at 0.3 Myr is `HerbigAeBe`; count checks in T31.
+    by its disc draw, and a 4 M☉ one at 0.8 Myr is `HerbigAeBe`, while at 0.3 Myr it is a Class I
+    protostar with no young class (research-leans-12 §3, 2026-10-31); count checks in T31.
 - **P06.T24.c The stripped helium stars** (a technical correction to T24.a,
   `decision-stripped-star-class.md` of 2026-10-21; the brainstorm sets no edge for subdwarfs).
   Records: [06-stellar-stage/records/P06.T24.c.md](06-stellar-stage/records/P06.T24.c.md).

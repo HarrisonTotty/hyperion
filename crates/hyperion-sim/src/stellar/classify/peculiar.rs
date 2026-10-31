@@ -532,15 +532,16 @@ pub const T_TAURI_MAX_MASS: SolarMasses = SolarMasses::new(2.0);
 pub const HERBIG_AE_BE_MAX_MASS: SolarMasses = SolarMasses::new(8.0);
 
 /// The young star's class of a star of initial mass `initial_mass` and `draws` in `phase` at
-/// `age` (P06.T24.b), or `None`: before the main sequence (a protostar or a pre-main-sequence
-/// star), a T Tauri star under [`T_TAURI_MAX_MASS`], classical while it accretes, as a protostar
-/// or while its age is under its disc's lifetime ([`disc_lifetime`] of its own disc rank), and a
-/// Herbig Ae/Be star up to [`HERBIG_AE_BE_MAX_MASS`].
+/// `age` (P06.T24.b), or `None`: on its contraction to the main sequence, after the protostar's
+/// accretion, a T Tauri star under [`T_TAURI_MAX_MASS`], classical while its age is under its
+/// disc's lifetime ([`disc_lifetime`] of its own disc rank), and a Herbig Ae/Be star up to
+/// [`HERBIG_AE_BE_MAX_MASS`].
 ///
-/// The protostar counts: the plan's 4 M☉ star at 0.3 Myr, which is a Herbig Ae/Be star, is still
-/// a protostar on P06.T15's 0.5 Myr of accretion (the lane's lean, 2026-10-31). A protostar is a
-/// classical T Tauri star even where its disc's lifetime, from 0.3 Myr, ends before its accretion
-/// does.
+/// A Class 0 or I protostar takes none: the brainstorm's row "Before the main sequence" has the
+/// T Tauri and Herbig Ae/Be stars contracting after the protostar phase, as [`ObjectKind`] has a
+/// pre-main-sequence star, and a classical T Tauri star is Class II (research-leans-12 §3).
+///
+/// [`ObjectKind`]: crate::stellar::ObjectKind
 #[must_use]
 pub(crate) fn young_class(
     phase: Phase,
@@ -548,13 +549,13 @@ pub(crate) fn young_class(
     age: Years,
     draws: &StarDraws,
 ) -> Option<PeculiarClass> {
-    if !matches!(phase, Phase::Protostar | Phase::PreMainSequence) {
+    if phase != Phase::PreMainSequence {
         return None;
     }
     if initial_mass < T_TAURI_MAX_MASS {
         let disc = Years::new(disc_lifetime(initial_mass, draws.disc_lifetime()).value() * 1e6);
         Some(PeculiarClass::TTauri {
-            classical: phase == Phase::Protostar || age < disc,
+            classical: age < disc,
         })
     } else {
         (initial_mass < HERBIG_AE_BE_MAX_MASS).then_some(PeculiarClass::HerbigAeBe)
@@ -1219,9 +1220,10 @@ mod tests {
         }
     }
 
-    /// The plan's test (P06.T24.b): a 1 M☉ star at 2 Myr is a T Tauri star, classical while its
-    /// disc lasts by its disc draw, a 4 M☉ one at 0.3 Myr a Herbig Ae/Be star; a 9 M☉ star at
-    /// 0.3 Myr, the Sun, and every star under the version's rules take neither.
+    /// The plan's test (P06.T24.b, amended by research-leans-12 §3): a 1 M☉ star at 2 Myr is a
+    /// T Tauri star, classical while its disc lasts by its disc draw, a 4 M☉ one at 0.8 Myr, on its
+    /// contraction, a Herbig Ae/Be star; the protostars of 4 M☉ at 0.3 Myr and 1 M☉ at 0.1 Myr, a
+    /// 9 M☉ star at 0.8 Myr, the Sun, and every star under the version's rules take neither.
     #[test]
     fn young_stars_are_t_tauri_or_herbig_ae_be_stars_by_mass() {
         let young = |m: f64, age: f64, rank: f64, rules: StellarRules| {
@@ -1239,6 +1241,18 @@ mod tests {
             .expect("in range");
             class_of(&star, UniverseTime::EPOCH)
         };
+        let phase = |m: f64, age: f64| {
+            StarModel::new(
+                SolarMasses::new(m),
+                Composition::SOLAR,
+                StarDraws::median(),
+                Years::new(age),
+            )
+            .expect("in range")
+            .state_at(UniverseTime::EPOCH)
+            .expect("formed")
+            .phase()
+        };
         let full = StellarRules::every_26_hold();
         for rank in [0.05, 0.5, 0.95] {
             let disc = disc_lifetime(SolarMasses::new(1.0), UnitUniform::new(rank).unwrap());
@@ -1251,14 +1265,22 @@ mod tests {
                 "{class}, disc {disc:?}"
             );
         }
+        // 0.8 Myr is inside the 4 M☉ star's contraction, after its 0.5 Myr of accretion and
+        // before its arrival on the main sequence.
+        assert_eq!(phase(4.0, 8e5), Phase::PreMainSequence);
         assert_eq!(
-            young(4.0, 3e5, 0.5, full).peculiar_class(),
+            young(4.0, 8e5, 0.5, full).peculiar_class(),
             Some(PeculiarClass::HerbigAeBe)
         );
-        assert_eq!(young(9.0, 3e5, 0.5, full).peculiar_class(), None);
+        // A Class I protostar, still accreting, and a Class 0 one take no young class.
+        for (m, age) in [(4.0, 3e5), (1.0, 1e5)] {
+            assert_eq!(phase(m, age), Phase::Protostar, "{m} M☉ at {age} years");
+            assert_eq!(young(m, age, 0.5, full).peculiar_class(), None);
+        }
+        assert_eq!(young(9.0, 8e5, 0.5, full).peculiar_class(), None);
         assert_eq!(young(1.0, 4.57e9, 0.5, full).peculiar_class(), None);
         let held = StellarRules::of_version(crate::GENERATOR_VERSION);
-        for (m, age) in [(1.0, 2e6), (4.0, 3e5)] {
+        for (m, age) in [(1.0, 2e6), (4.0, 8e5)] {
             assert_eq!(young(m, age, 0.95, held).peculiar_class(), None);
         }
     }
