@@ -617,14 +617,15 @@ pub(crate) fn chemical_class(c_to_o: f64) -> Option<PeculiarClass> {
     }
 }
 
-/// The initial masses, M☉, where third dredge-up works and hot bottom burning does not, at
-/// Z = 0.02: 1.5–4 (plan 06, P06.T24.b).
+/// The initial masses where third dredge-up works and hot bottom burning does not, at
+/// Z = 0.02: 1.5–4 M☉ (plan 06, P06.T24.b).
 ///
 /// Below 1.5 M☉ dredge-up is too weak to make a carbon star of a solar-metallicity star, and from
 /// 4 M☉ hot bottom burning turns the dredged carbon to nitrogen (Karakas and Lattanzio 2014, PASA
 /// 31, e030, sections 3.4 and 3.5; Marigo et al. 2013, MNRAS 434, 488, recalled, not read at
 /// source in this build).
-const CARBON_STAR_WINDOW_SOLAR: (f64, f64) = (1.5, 4.0);
+const CARBON_STAR_WINDOW_SOLAR: (SolarMasses, SolarMasses) =
+    (SolarMasses::new(1.5), SolarMasses::new(4.0));
 
 /// How the window's edges move with Z: both as (Z ÷ 0.02)^0.1, 1.2–3.2 M☉ at Z = 0.002 and
 /// 0.95–2.5 M☉ at 0.0002, lower at low Z as dredge-up's onset and hot bottom burning's both are
@@ -641,7 +642,7 @@ pub fn carbon_star_window(composition: &Composition) -> Range<SolarMasses> {
         CARBON_STAR_WINDOW_Z_SLOPE,
     );
     let (low, high) = CARBON_STAR_WINDOW_SOLAR;
-    SolarMasses::new(low * scale)..SolarMasses::new(high * scale)
+    SolarMasses::new(low.value() * scale)..SolarMasses::new(high.value() * scale)
 }
 
 /// `n_min`, the last pulse number with no third dredge-up: 5, so that the first six pulses
