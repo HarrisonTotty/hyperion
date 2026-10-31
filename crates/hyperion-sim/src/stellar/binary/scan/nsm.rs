@@ -19,8 +19,10 @@
 //! What it leaves (the remnant) follows from the total mass by plan 11's rule for two compact
 //! stars (P11.T4.d, the engine's `mix`): a neutron star's mass in a black hole above plan 06's
 //! heaviest neutron star, [`MAX_NEUTRON_STAR_MASS`] (Mandel and Müller 2020's 2.0 M☉), so every
-//! merger of two neutron stars leaves a black hole. Its ejecta are GW170817's
-//! ([`GW170817_EJECTA_MASS`]): the class has no ejecta model of its own.
+//! merger of two neutron stars leaves a black hole. The ejecta of two neutron stars are GW170817's
+//! ([`GW170817_EJECTA_MASS`]), since the class has no model of its own for them. A black hole
+//! ejects what its tides leave outside it and unbind ([`NsbhOutflow`]): nothing at the class's
+//! usual pair, a hole of some 7 M☉ and q ≈ 5, which swallows its neutron star whole.
 //!
 //! A candidate is kept exactly when both progenitors have died by T: their lifetimes (plan 06's
 //! [`lifetime`]) are both under the system's age at T, which refuses only a system of a young
@@ -39,7 +41,9 @@ use crate::math;
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::binary::light_curves::GW170817_EJECTA_MASS;
 use crate::stellar::draws::StarDraws;
+use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::collapse::MAX_NEUTRON_STAR_MASS;
+use crate::stellar::remnant::structure::neutron_star_radius;
 use crate::stellar::system::track_mass_of;
 use crate::stellar::{Composition, Phase, lifetime};
 use crate::tables::binary::{
@@ -47,6 +51,7 @@ use crate::tables::binary::{
     NsmPick,
 };
 use crate::time::UniverseTime;
+use crate::units::consts::{GM_SUN, SOLAR_RADIUS_M, SPEED_OF_LIGHT};
 use crate::units::{Dex, HeliumExcess, PerCubicLightYear, SolarMasses, Years};
 
 use super::super::sampler::ClassSampler;
@@ -58,7 +63,8 @@ use super::horizon_time;
 /// # Examples
 ///
 /// The neutron-star mergers of a galaxy are rare, about ten in the source horizon at Milky Way
-/// parameters: the whole galaxy's, with their kilonovae's ejecta, as an alert scan reads them.
+/// parameters: the whole galaxy's, with their kilonovae's ejecta, as an alert scan reads them. A
+/// black hole's merger may eject nothing.
 ///
 /// ```
 /// use hyperion_sim::Seed;
@@ -81,7 +87,7 @@ use super::horizon_time;
 /// }
 /// assert!(mergers.len() < 100);
 /// for merger in &mergers {
-///     assert!(merger.ejecta_mass().value() > 0.0);
+///     assert!(merger.ejecta_mass().value() >= 0.0);
 ///     assert_eq!(merger.remnant_phase(), Phase::BlackHole);
 /// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -212,11 +218,17 @@ impl NsmScanMarks {
         self.collapse_ages
     }
 
-    /// The mass the merger ejects, the kilonova's, M☉: [`GW170817_EJECTA_MASS`], since the class
-    /// has no ejecta model of its own.
+    /// The mass the merger ejects, the kilonova's, M☉: [`GW170817_EJECTA_MASS`] for two neutron
+    /// stars, since the class has no model of its own for them, and for a black hole and a neutron
+    /// star the [`NsbhOutflow`]'s ejecta, zero where the hole swallows the star whole.
     #[must_use]
-    pub const fn ejecta_mass(&self) -> SolarMasses {
-        GW170817_EJECTA_MASS
+    pub fn ejecta_mass(&self) -> SolarMasses {
+        match self.kind {
+            NsmPairKind::DoubleNeutronStar => GW170817_EJECTA_MASS,
+            NsmPairKind::NeutronStarBlackHole => {
+                NsbhOutflow::of(self.masses[0], self.masses[1]).ejecta()
+            }
+        }
     }
 
     /// What the merger leaves, by the total mass (P11.T4.d's rule): a black hole above plan 06's
@@ -237,6 +249,149 @@ impl NsmScanMarks {
     #[must_use]
     pub fn remnant_mass(&self) -> SolarMasses {
         self.total_mass()
+    }
+}
+
+#[cfg(test)]
+impl NsmScanMarks {
+    /// The marks with their pair replaced by a black hole of `black_hole` and a neutron star of
+    /// `neutron_star`, for the tests of what reads the pair.
+    #[must_use]
+    pub(crate) const fn with_black_hole_pair(
+        mut self,
+        black_hole: SolarMasses,
+        neutron_star: SolarMasses,
+    ) -> Self {
+        self.kind = NsmPairKind::NeutronStarBlackHole;
+        self.masses = [black_hole, neutron_star];
+        self
+    }
+}
+
+/// The share of a neutron star's baryonic mass left outside a black hole that disrupts it, by
+/// Foucart, Hinderer and Nissanke's (2018, Phys. Rev. D 98, 081501(R), equation 4) fit to
+/// numerical relativity: `[max(α (1 − 2C) ÷ η^⅓ − β R̂ C ÷ η + γ, 0)]^δ`, with C the neutron star's
+/// compactness, η = Q ÷ (1 + Q)² the pair's symmetric mass ratio at Q = `M_BH` ÷ `M_NS`, and R̂ the
+/// hole's innermost stable circular orbit over its gravitational radius. (α, β, γ, δ) = (0.406,
+/// 0.139, 0.255, 1.761), fitted over Q of 1–7, hole spins of −0.5 to 0.9 and C of 0.13–0.182. The
+/// paper could not be reached in this build: the constants and range are recalled, and the
+/// constants are those of `PyCBC`'s `foucart18` (`pycbc/neutron_stars/eos_utils.py`) and, to the
+/// third figure, of NMMA's `remnant_disk_mass_fitting` (`nmma/core/conversion.py`), both read at
+/// source.
+const FOUCART_2018_REMNANT: (f64, f64, f64, f64) = (0.406, 0.139, 0.255, 1.761);
+
+/// The dynamical ejecta of a black hole's merger with a neutron star, as a share of the neutron
+/// star's baryonic mass, by Krüger and Foucart's (2020, Phys. Rev. D 101, 103002, equation 9) fit:
+/// `a₁ Q^n₁ (1 − 2C) ÷ C − a₂ Q^n₂ R̂ + a₄`, none where it is negative. (a₁, a₂, a₄, n₁, n₂) =
+/// (7.115 951 54 × 10⁻³, 1.436 368 03 × 10⁻³, −2.762 029 90 × 10⁻², 0.863 604 211, 1.683 995 07).
+/// The paper could not be reached in this build: the constants are those that gwemlightcurves'
+/// `KrFo2019.FoucartEjecta` (Coughlin et al.'s kilonova code) and NMMA's `dynamic_mass_fitting`
+/// carry, read at source, which agree.
+const KRUGER_FOUCART_2020_DYNAMICAL: (f64, f64, f64, f64, f64) = (
+    7.115_951_54e-3,
+    1.436_368_03e-3,
+    -2.762_029_90e-2,
+    0.863_604_211,
+    1.683_995_07,
+);
+
+/// The innermost stable circular orbit of a black hole that does not spin, in its gravitational
+/// radius `GM ÷ c²`: 6 (Bardeen, Press and Teukolsky 1972, ApJ 178, 347).
+///
+/// The class's holes are taken not to spin, χ = 0 (lean, 2026-10-31): the spins of the first two
+/// neutron star–black hole mergers, GW200105 and GW200115, are consistent with zero (Abbott et al.
+/// 2021, ApJL 915, L5; recalled, not read at source).
+const NON_SPINNING_ISCO: f64 = 6.0;
+
+/// The share of the disc about a black hole that its outflows unbind, ejecta of the kilonova: 0.15
+/// (lean, 2026-10-31), the share gwemlightcurves' `KrFo2019.calc_meje` takes of Krüger and
+/// Foucart's disc (read at source). Simulations of such discs unbind some 15–40% (as Krüger and
+/// Foucart 2020 survey them; recalled, not read at source), so the ejecta may err low.
+const DISC_WIND_SHARE: f64 = 0.15;
+
+/// What a black hole leaves outside itself when it merges with a neutron star (P11.T9.b), at the
+/// hole's spin χ = 0 ([`NON_SPINNING_ISCO`]), M☉: the remnant outside the hole
+/// ([`FOUCART_2018_REMNANT`]), its dynamical ejecta ([`KRUGER_FOUCART_2020_DYNAMICAL`], at most the
+/// remnant), the bound disc they leave, and the kilonova's ejecta, the dynamical ejecta and the
+/// disc's outflows ([`DISC_WIND_SHARE`]).
+///
+/// The neutron star's radius is plan 06's, 12.2 km, at every mass, its compactness C = `GM_NS` ÷
+/// (R c²), and both fits scale with its baryonic mass, `M_NS` (1 + 0.6 C ÷ (1 − 0.5 C)) (Krüger and
+/// Foucart 2020, equation 7, after Lattimer and Prakash 2001, ApJ 550, 426). A hole heavier than
+/// some four times its neutron star, as most of the class's are, leaves nothing.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::stellar::binary::scan::NsbhOutflow;
+/// use hyperion_sim::units::SolarMasses;
+///
+/// let m = SolarMasses::new;
+/// // The class's usual pair, a 7 M☉ hole and a 1.33 M☉ neutron star, ejects nothing.
+/// assert_eq!(NsbhOutflow::of(m(7.0), m(1.33)).ejecta(), m(0.0));
+/// // A light hole tears its neutron star apart and ejects a share of it.
+/// let light = NsbhOutflow::of(m(3.0), m(1.2));
+/// assert!(light.ejecta().value() > 0.01 && light.ejecta() < light.remnant());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NsbhOutflow {
+    remnant: SolarMasses,
+    dynamical: SolarMasses,
+    disc: SolarMasses,
+    ejecta: SolarMasses,
+}
+
+impl NsbhOutflow {
+    /// The outflow of a black hole of `black_hole` merging with a neutron star of `neutron_star`.
+    #[must_use]
+    pub fn of(black_hole: SolarMasses, neutron_star: SolarMasses) -> Self {
+        let radius = neutron_star_radius(RemnantRecipe::default()).value() * SOLAR_RADIUS_M;
+        let c = GM_SUN * neutron_star.value() / (radius * SPEED_OF_LIGHT * SPEED_OF_LIGHT);
+        let baryonic = neutron_star.value() * (1.0 + 0.6 * c / (1.0 - 0.5 * c));
+        let q = black_hole.value() / neutron_star.value();
+        let eta = q / ((1.0 + q) * (1.0 + q));
+        let (alpha, beta, gamma, delta) = FOUCART_2018_REMNANT;
+        let fit =
+            alpha * (1.0 - 2.0 * c) / math::cbrt(eta) - beta * NON_SPINNING_ISCO * c / eta + gamma;
+        let remnant = baryonic * math::powf(fit.max(0.0), delta);
+        let (a1, a2, a4, n1, n2) = KRUGER_FOUCART_2020_DYNAMICAL;
+        let dynamical = baryonic
+            * (a1 * math::powf(q, n1) * (1.0 - 2.0 * c) / c
+                - a2 * math::powf(q, n2) * NON_SPINNING_ISCO
+                + a4);
+        let dynamical = dynamical.clamp(0.0, remnant);
+        let disc = remnant - dynamical;
+        Self {
+            remnant: SolarMasses::new(remnant),
+            dynamical: SolarMasses::new(dynamical),
+            disc: SolarMasses::new(disc),
+            ejecta: SolarMasses::new(dynamical + DISC_WIND_SHARE * disc),
+        }
+    }
+
+    /// The mass left outside the hole: its dynamical ejecta and its disc, M☉.
+    #[must_use]
+    pub const fn remnant(&self) -> SolarMasses {
+        self.remnant
+    }
+
+    /// The tidal tail the merger unbinds at once, M☉.
+    #[must_use]
+    pub const fn dynamical(&self) -> SolarMasses {
+        self.dynamical
+    }
+
+    /// The disc bound to the hole, M☉.
+    #[must_use]
+    pub const fn disc(&self) -> SolarMasses {
+        self.disc
+    }
+
+    /// The kilonova's ejecta, the dynamical ejecta and [`DISC_WIND_SHARE`] of the disc, M☉: zero
+    /// where nothing is left outside the hole.
+    #[must_use]
+    pub const fn ejecta(&self) -> SolarMasses {
+        self.ejecta
     }
 }
 

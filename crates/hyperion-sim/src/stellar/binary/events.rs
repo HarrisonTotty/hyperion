@@ -31,9 +31,12 @@
 //! - **Luminous red novae and kilonovae** (`0x0305`, `0x0306`): one-shot at a merger's time T
 //!   ([`MergerScanMarks::merger_time`], [`NsmScanMarks::merger_time`]), bin 0 and number 0 of
 //!   their tags on the system, as plan 09's `SUPERNOVA` is. A red nova's curve is of the pair's
-//!   total mass ([`LuminousRedNovaCurve`]), a kilonova's of its ejecta, GW170817's
-//!   ([`KilonovaCurve`]). The remnant sets nothing in the kilonova: T9.a's curve has no term for
-//!   it, and every merger P11.T8.d draws leaves a black hole of the pair's mass.
+//!   total mass ([`LuminousRedNovaCurve`]), a kilonova's of its ejecta
+//!   ([`NsmScanMarks::ejecta_mass`], [`KilonovaCurve`]): GW170817's for two neutron stars, and for
+//!   a black hole what its tides leave outside it and unbind, so that a hole that swallows its
+//!   neutron star whole, as most of the class's do, lists no kilonova. The remnant sets nothing in
+//!   the kilonova: T9.a's curve has no term for it, and every merger P11.T8.d draws leaves a black
+//!   hole of the pair's mass.
 //!
 //! The monotone phases other than the novae take the novae's noise (`scan::nova_phase`: 0.08
 //! cycles on a one-cycle lattice, with octaves to the source horizon's cycles), and their clocks'
@@ -318,7 +321,7 @@ impl<'a> BinarySystem<'a> {
             ],
             Host::XrayBinary(scan) => [xray_source(self.seed, scan), None],
             Host::StellarMerger(scan) => [Some(red_nova_source(self.seed, scan)), None],
-            Host::NeutronStarMerger(scan) => [Some(kilonova_source(self.seed, scan)), None],
+            Host::NeutronStarMerger(scan) => [kilonova_source(self.seed, scan), None],
         }
     }
 }
@@ -599,22 +602,26 @@ fn red_nova_source(seed: Seed, scan: &MergerScanMarks) -> Source {
     )
 }
 
-/// The kilonova of a neutron-star merger's scan marks: one-shot at its merger, of its ejecta.
+/// The kilonova of a neutron-star merger's scan marks: one-shot at its merger, of its ejecta, or
+/// `None` for a merger that ejects nothing.
 ///
 /// # Panics
 ///
-/// Never: a merger's ejecta are GW170817's, 0.05 M☉, in the curve's range.
+/// Never: a merger ejects at most GW170817's 0.05 M☉, in the curve's range.
 #[must_use]
-fn kilonova_source(seed: Seed, scan: &NsmScanMarks) -> Source {
-    let curve = KilonovaCurve::of(scan.ejecta_mass())
-        .expect("a merger's ejecta are GW170817's, in the curve's range");
-    one_shot_source(
-        seed,
-        BinaryEventKind::Kilonova,
-        SystemId::from(scan.id()),
-        scan.merger_time(),
-        curve.into(),
-    )
+fn kilonova_source(seed: Seed, scan: &NsmScanMarks) -> Option<Source> {
+    let ejecta = scan.ejecta_mass();
+    (ejecta.value() > 0.0).then(|| {
+        let curve = KilonovaCurve::of(ejecta)
+            .expect("a merger ejects at most GW170817's 0.05 M☉, in the curve's range");
+        one_shot_source(
+            seed,
+            BinaryEventKind::Kilonova,
+            SystemId::from(scan.id()),
+            scan.merger_time(),
+            curve.into(),
+        )
+    })
 }
 
 /// A one-shot source of `kind` of `system` at `at`: bin 0, number 0 of its tag on the system.

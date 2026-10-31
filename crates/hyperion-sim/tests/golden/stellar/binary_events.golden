@@ -209,7 +209,7 @@ luminous red nova LuminousRedNova peak = 0x462c1140ae293540  # 1.111863994635370
 luminous red nova LuminousRedNova V = 0x45f1f83b122fa7dc  # 8.898140360520211e28
 luminous red nova LuminousRedNova K = 0x45e1d788837aa681  # 4.417447108306439e28
 luminous red nova LuminousRedNova xrays = 0x0000000000000000  # 0.0
-kilonova Kilonova subject System(SystemId(0xfc33860800000000)) bin 0 number 0 onset -6744331468991 + 496337890 ns
+kilonova Kilonova subject System(SystemId(0xfc34068780000000)) bin 0 number 0 onset -4076489992464 + 469238281 ns
 kilonova Kilonova peak at 86400 + 0 ns, duration 2985212 + 702527676 ns
 kilonova Kilonova peak = 0x472325cf0c668668  # 4.971024676745128e34
 kilonova Kilonova V = 0x46ecda29c73164cd  # 4.6815371042020206e33

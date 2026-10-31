@@ -99,3 +99,108 @@ fn the_horizon_eruptions_are_the_phase_s_listing() {
     // Most slow hosts' novae miss the horizon; some erupt in it once, a few twice.
     assert!(seen.iter().all(|&n| n > 0), "{seen:?}");
 }
+
+/// A black hole five times its neutron star's mass, about the class's usual pair, swallows it
+/// whole and ejects nothing, from 1.15 M☉ to the heaviest neutron star: Foucart et al.'s remnant
+/// vanishes above a compactness of 0.137, 1.134 M☉ at 12.2 km.
+#[test]
+fn a_black_hole_at_q_5_swallows_its_neutron_star_whole() {
+    for k in 0..=17 {
+        let ns = 1.15 + 0.05 * f64::from(k);
+        let outflow = NsbhOutflow::of(SolarMasses::new(5.0 * ns), SolarMasses::new(ns));
+        assert_eq!(outflow.remnant().value(), 0.0, "{ns}");
+        assert_eq!(outflow.ejecta().value(), 0.0, "{ns}");
+    }
+    let usual = NsbhOutflow::of(SolarMasses::new(7.0), SolarMasses::new(1.33));
+    assert_eq!(usual.ejecta().value(), 0.0);
+}
+
+/// A light hole tears its neutron star apart: a 3 M☉ hole and a 1.2 M☉ neutron star (q 2.5, C
+/// 0.145, χ 0, inside Foucart et al.'s fit's Q of 1–7 and C of 0.13–0.182) leave 0.0469 M☉ outside
+/// the hole, of which a quarter is dynamical, and eject 1.40% of the neutron star, as measured.
+#[test]
+fn a_light_hole_ejects_a_stated_share_of_its_neutron_star() {
+    let (bh, ns) = (3.0, 1.2);
+    let compactness =
+        crate::units::consts::GM_SUN * ns / (12_200.0 * SPEED_OF_LIGHT * SPEED_OF_LIGHT);
+    assert!((0.13..=0.182).contains(&compactness), "{compactness}");
+    assert!((1.0..=7.0).contains(&(bh / ns)));
+    let outflow = NsbhOutflow::of(SolarMasses::new(bh), SolarMasses::new(ns));
+    eprintln!(
+        "{outflow:?}, ejecta share {}",
+        outflow.ejecta().value() / ns
+    );
+    let near = |got: SolarMasses, want: f64| (got.value() / want - 1.0).abs() < 1e-3;
+    assert!(near(outflow.remnant(), REMNANT_AT_Q_2_5), "{outflow:?}");
+    assert!(near(outflow.dynamical(), DYNAMICAL_AT_Q_2_5), "{outflow:?}");
+    assert!(near(outflow.ejecta(), EJECTA_AT_Q_2_5), "{outflow:?}");
+    let sum = outflow.dynamical().value() + outflow.disc().value();
+    assert!((sum - outflow.remnant().value()).abs() <= 1e-15);
+    // At q 3 a little is still left; nothing is dynamical there.
+    let three = NsbhOutflow::of(SolarMasses::new(3.6), SolarMasses::new(1.2));
+    assert!(
+        three.ejecta().value() > 0.0 && three.ejecta() < outflow.ejecta(),
+        "{three:?}"
+    );
+}
+
+/// The outflow at q 2.5 and χ 0 of a 1.2 M☉ neutron star, M☉, as measured: what is left outside
+/// the hole, its dynamical part and the kilonova's ejecta.
+const REMNANT_AT_Q_2_5: f64 = 0.046_88;
+const DYNAMICAL_AT_Q_2_5: f64 = 0.011_49;
+const EJECTA_AT_Q_2_5: f64 = 0.016_80;
+
+/// No pair of the class's black holes (3–20 M☉) and neutron stars (1.13–2.0 M☉) ejects more than
+/// two neutron stars do, GW170817's 0.05 M☉: the kilonovae's bound at the top of their ejecta
+/// (P12.T5.b's row).
+#[test]
+fn no_black_hole_ejects_more_than_two_neutron_stars() {
+    let mut most = 0.0_f64;
+    for i in 0..=200 {
+        let bh = 3.0 * math::powf(20.0 / 3.0, f64::from(i) / 200.0);
+        for j in 0..=200 {
+            let ns = 1.13 + 0.87 * f64::from(j) / 200.0;
+            let outflow = NsbhOutflow::of(SolarMasses::new(bh), SolarMasses::new(ns));
+            assert!(outflow.ejecta().value().is_finite() && outflow.ejecta().value() >= 0.0);
+            assert!(outflow.dynamical() <= outflow.remnant());
+            most = most.max(outflow.ejecta().value());
+        }
+    }
+    eprintln!("the most a black hole ejects: {most} M☉");
+    assert!(
+        most < 0.6 * super::super::light_curves::GW170817_EJECTA_MASS.value(),
+        "{most}"
+    );
+}
+
+/// The share of the class's black-hole pairs that eject anything, over its sampler's ranks of the
+/// hole's and the neutron star's masses (a grid of 1,000 × 1,000 midpoints): 8.9%, as measured,
+/// most of them with the lightest neutron stars. Each made a 0.05 M☉ kilonova before P11.T9.b's
+/// fix.
+#[test]
+fn few_of_the_class_s_black_holes_eject_anything() {
+    use crate::tables::binary::{NSM_SAMPLER, NsmMark};
+    let sampler = ClassSampler::new(&NSM_SAMPLER);
+    let n = 1_000;
+    let rank = |k: u32| (f64::from(k) + 0.5) / f64::from(n);
+    let holes: Vec<f64> = (0..n)
+        .map(|k| math::exp10(sampler.value_at(NsmMark::LogBlackHoleMass, 0.0, rank(k))))
+        .collect();
+    let stars: Vec<f64> = (0..n)
+        .map(|k| sampler.value_at(NsmMark::NeutronStarMass, 0.0, rank(k)))
+        .collect();
+    let ejecting: u32 = holes
+        .iter()
+        .flat_map(|&bh| stars.iter().map(move |&ns| (bh, ns)))
+        .map(|(bh, ns)| {
+            let outflow = NsbhOutflow::of(SolarMasses::new(bh), SolarMasses::new(ns));
+            u32::from(outflow.ejecta().value() > 0.0)
+        })
+        .sum();
+    let share = f64::from(ejecting) / f64::from(n * n);
+    eprintln!("{share} of the black holes eject");
+    assert!((share - EJECTING_SHARE).abs() < 1e-4, "{share}");
+}
+
+/// The share of the class's black-hole pairs that eject, as measured.
+const EJECTING_SHARE: f64 = 0.0893;

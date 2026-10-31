@@ -6309,3 +6309,10 @@ galaxy_sweeps`.
   `StrippingNode::of_fitted_helium`) through `tabulated_node`, which `stripped_share_under` and
   `stripping_node_under` read; at no helium excess it is `StrippingTable::at`, bit for bit.
   `stripped_share_on` (the kick bins) is unchanged. The bump refits both tables under 26's rules.
+- **P11.T9.b's black-hole ejecta (fix, lane `p12-t5b-classes`, 2026-10-31, at 24, no bump: nothing
+  in generation reads the ejecta).** `NsmScanMarks::ejecta_mass()` is no longer `const`: GW170817's
+  for two neutron stars; for a black hole `scan::NsbhOutflow::of(hole, star).ejecta()` (Foucart et
+  al. 2018's remnant, Krüger and Foucart 2020's dynamical part, 0.15 of the disc; χ = 0, lean). A
+  merger that ejects nothing lists no kilonova: 8.9% of the class's black holes eject, at most
+  0.026 M☉. `stellar/binary_events.golden`'s kilonova fixture is now the first double neutron
+  star (one line, its subject and onset). `remnant_mass()` is still the total.

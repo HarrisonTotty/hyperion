@@ -273,10 +273,16 @@ fn the_inspiral_is_peters_s_and_the_remnant_follows_the_total_mass() {
         assert_eq!(product.phase(), Phase::BlackHole);
         assert_eq!(product.mass(), scan.total_mass());
         assert_eq!(scan.remnant_mass(), scan.total_mass());
-        assert_eq!(
-            scan.ejecta_mass(),
-            crate::stellar::binary::light_curves::GW170817_EJECTA_MASS
-        );
+        let [bh, ns] = scan.masses();
+        let ejecta = match scan.kind() {
+            NsmPairKind::DoubleNeutronStar => {
+                crate::stellar::binary::light_curves::GW170817_EJECTA_MASS
+            }
+            NsmPairKind::NeutronStarBlackHole => {
+                crate::stellar::binary::scan::NsbhOutflow::of(bh, ns).ejecta()
+            }
+        };
+        assert_eq!(scan.ejecta_mass(), ejecta);
         for (star, phase) in value.pair().stars().iter().zip(scan.phases()) {
             assert_eq!(star.phase(), phase);
             assert!(star.luminosity().value().is_finite() && star.luminosity().value() >= 0.0);
@@ -466,3 +472,64 @@ fn neutron_star_merger_golden() {
     }
     golden!("catalogue_classes/neutron_star_mergers", w.as_str());
 }
+
+/// The fixture's kilonovae a year (P11.T9.b): the class's expected mergers in the source horizon
+/// over its length, of which the double neutron stars' all make one and the black holes' only
+/// where they eject anything, against every merger's before the fix. Pinned as measured.
+///
+/// Per Milky Way-equivalent galaxy, at 0.0116 of them per Mpc³ (Kopparapu et al. 2008, ApJ 675,
+/// 1459; recalled, not read at source), GWTC-3's 10–1,700 Gpc⁻³ yr⁻¹ of two neutron stars and
+/// 8–140 of a black hole and a neutron star (Abbott et al. 2023, PRX 13, 011048, as
+/// `NSM_SAMPLER` cites them) are 0.9–147 and 0.7–12 a million years.
+#[test]
+fn the_kilonova_rate_of_the_milky_way_class() {
+    use crate::stellar::binary::sampler::ClassSampler;
+    use crate::stellar::binary::scan::NsbhOutflow;
+    use crate::tables::binary::{NSM_SAMPLER, NsmMark};
+    use crate::time::SourceHorizon;
+    use crate::units::SolarMasses;
+    let galaxy = galaxy();
+    let mergers = NeutronStarMergers::new(galaxy)
+        .hosts()
+        .expected_hosts(galaxy);
+    let horizon = SourceHorizon::END
+        .checked_since(SourceHorizon::START)
+        .unwrap()
+        .as_julian_years_f64();
+    let sampler = ClassSampler::new(&NSM_SAMPLER);
+    let weights = NSM_SAMPLER.picks()[0].weights();
+    let (pairs, holes) = (weights[0], weights[1]);
+    let n = 400;
+    let rank = |k: u32| (f64::from(k) + 0.5) / f64::from(n);
+    let mut ejecting = 0_u32;
+    for i in 0..n {
+        let bh = math::exp10(sampler.value_at(NsmMark::LogBlackHoleMass, 0.0, rank(i)));
+        for j in 0..n {
+            let ns = sampler.value_at(NsmMark::NeutronStarMass, 0.0, rank(j));
+            let outflow = NsbhOutflow::of(SolarMasses::new(bh), SolarMasses::new(ns));
+            ejecting += u32::from(outflow.ejecta().value() > 0.0);
+        }
+    }
+    let share = f64::from(ejecting) / f64::from(n * n);
+    let per_myr = |share_of_mergers: f64| mergers * share_of_mergers / horizon * 1e6;
+    let (with, without, before) = (
+        per_myr(pairs + holes * share),
+        per_myr(pairs),
+        per_myr(pairs + holes),
+    );
+    eprintln!(
+        "{mergers:.3} mergers over {horizon:.0} yr: kilonovae {with:.4} a Myr with the black \
+         holes' {share:.4}, {without:.4} without them, {before:.4} before the fix"
+    );
+    assert!((with / KILONOVAE_PER_MYR - 1.0).abs() < 1e-3, "{with}");
+    assert!(
+        (without / PAIRS_KILONOVAE_PER_MYR - 1.0).abs() < 1e-3,
+        "{without}"
+    );
+    assert!(with < before);
+}
+
+/// The fixture's kilonovae a million years, with the black holes' and with the neutron-star
+/// pairs' alone, as measured.
+const KILONOVAE_PER_MYR: f64 = 30.96;
+const PAIRS_KILONOVAE_PER_MYR: f64 = 30.29;

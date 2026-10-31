@@ -50,7 +50,7 @@ mod merger;
 mod nsm;
 
 pub use merger::{MergerScanMarks, horizon_time, merger_scan_marks, scan_merger_cell};
-pub use nsm::{NsmScanMarks, nsm_scan_marks, scan_nsm_cell};
+pub use nsm::{NsbhOutflow, NsmScanMarks, nsm_scan_marks, scan_nsm_cell};
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::events::{

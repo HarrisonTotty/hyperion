@@ -21,6 +21,7 @@ use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, Cla
 use crate::galaxy::params::GalaxyParams;
 use crate::stellar::binary::light_curves::GW170817_EJECTA_MASS;
 use crate::stellar::binary::scan::{engine_calls, scan_cell, scan_merger_cell, scan_nsm_cell};
+use crate::tables::binary::NsmPairKind;
 use crate::time::SourceHorizon;
 
 /// The seed of the Milky Way fixture the tests share.
@@ -95,8 +96,9 @@ fn stellar_mergers() -> &'static [MergerScanMarks] {
     })
 }
 
-/// The first neutron-star merger of the galaxy's 4,096 ly cells in and just below the plane, in
-/// x, y, z order: the galaxy holds about ten.
+/// The first merger of two neutron stars of the galaxy's 4,096 ly cells in and just below the
+/// plane, in x, y, z order: the galaxy holds about ten mergers, and most of its black holes' make no
+/// kilonova (P11.T9.b).
 fn neutron_star_merger() -> &'static NsmScanMarks {
     static HOST: OnceLock<NsmScanMarks> = OnceLock::new();
     HOST.get_or_init(|| {
@@ -109,9 +111,12 @@ fn neutron_star_merger() -> &'static NsmScanMarks {
             .find_map(|cell| {
                 let key = CatalogueCellKey::new(ClassId::NEUTRON_STAR_MERGER, cell).unwrap();
                 scan_nsm_cell(galaxy, &process, key, &mut hosts);
-                hosts.first().copied()
+                hosts
+                    .iter()
+                    .find(|host| host.kind() == NsmPairKind::DoubleNeutronStar)
+                    .copied()
             })
-            .expect("the galaxy has a neutron-star merger in the disc")
+            .expect("the galaxy has a merger of two neutron stars in the disc")
     })
 }
 
@@ -509,10 +514,10 @@ fn a_steady_host_lists_no_event() {
 }
 
 /// A merger's one-shot is bin 0, number 0 of its tag on its system, at its merger time, with its
-/// curve from its marks: a red nova of the pair's total mass, a kilonova of GW170817's ejecta. A
-/// window lists it exactly when it holds the merger, and it is active from the merger. The remnant
-/// sets nothing: every merger the class draws leaves a black hole of the pair's mass, which its own
-/// tests pin (`catalogue_classes::binary::nsm`).
+/// curve from its marks: a red nova of the pair's total mass, and two neutron stars' kilonova of
+/// GW170817's ejecta. A window lists it exactly when it holds the merger, and it is active from the
+/// merger. The remnant sets nothing: every merger the class draws leaves a black hole of the pair's
+/// mass, which its own tests pin (`catalogue_classes::binary::nsm`).
 #[test]
 fn a_merger_s_one_shot_is_bin_0_number_0_at_its_merger() {
     let seed = galaxy().seed();
@@ -562,6 +567,32 @@ fn a_merger_s_one_shot_is_bin_0_number_0_at_its_merger() {
 }
 
 /// Listing events runs no engine.
+/// A black hole that swallows its neutron star whole lists no kilonova, at its merger or ever, and
+/// one that tears it apart lists one of its ejecta (P11.T9.b): the fixture's merger with the
+/// class's usual pair, a 6.65 M☉ hole at q 5, and with a 3 M☉ hole and a 1.2 M☉ neutron star.
+#[test]
+fn a_black_hole_that_swallows_its_neutron_star_lists_no_kilonova() {
+    let seed = galaxy().seed();
+    let horizon = TimeWindow::new(SourceHorizon::START, SourceHorizon::END).unwrap();
+    let m = SolarMasses::new;
+    let whole = neutron_star_merger().with_black_hole_pair(m(6.65), m(1.33));
+    assert_eq!(whole.ejecta_mass().value(), 0.0);
+    let system = BinarySystem::neutron_star_merger(seed, &whole);
+    assert_eq!(listing(&system, horizon), []);
+    let mut active = Vec::new();
+    active_at(&system, whole.merger_time(), &mut active);
+    assert_eq!(active, []);
+    let torn = neutron_star_merger().with_black_hole_pair(m(3.0), m(1.2));
+    let events = listing(&BinarySystem::neutron_star_merger(seed, &torn), horizon);
+    let [kilonova] = events.as_slice() else {
+        panic!("one kilonova: {events:?}");
+    };
+    assert_eq!(kilonova.kind(), BinaryEventKind::Kilonova);
+    assert_eq!(kilonova.onset(), torn.merger_time());
+    let curve = KilonovaCurve::of(torn.ejecta_mass()).unwrap();
+    assert_eq!(kilonova.curve(), &BinaryLightCurve::from(curve));
+}
+
 #[test]
 fn listing_events_runs_no_engine() {
     let before = engine_calls();
