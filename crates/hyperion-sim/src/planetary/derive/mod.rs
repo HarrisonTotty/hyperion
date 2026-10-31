@@ -857,9 +857,22 @@ pub struct DerivedBody {
     prograde_limit: Metres,
     retrograde_limit: Metres,
     maximum_moon_mass: EarthMasses,
+    /// Its own sky's sums now, at the peak and at the maximum-greenhouse limit
+    /// ([`sky_ratios`](Self::sky_ratios)).
+    #[cfg(test)]
+    sky_ratios: [f64; 3],
 }
 
 impl DerivedBody {
+    /// Σ Fᵢ ÷ `S_eff,i` over its own sky's hosts at the runaway limit now, at the runaway limit at
+    /// the hosts' largest past luminosities, and at the maximum-greenhouse limit now: the sums its
+    /// insolation and its ceiling read, a moon's planet's glow among its hosts. For the audit.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn sky_ratios(&self) -> [f64; 3] {
+        self.sky_ratios
+    }
+
     /// The body's mass at the time: its placed mass less the envelope escape has taken
     /// ([`envelope_lost`](Self::envelope_lost)).
     #[must_use]
@@ -1558,9 +1571,7 @@ pub(crate) fn derive_body_driven(
     .passes(driver, record);
 
     // T15.
-    let hill = hill_radius(a, 0.0, mass_kg, hosts.primary_mass);
-    let prograde_limit = satellite_stability_limit(hill, e, 0.0, OrbitSense::Prograde);
-    let retrograde_limit = satellite_stability_limit(hill, e, 0.0, OrbitSense::Retrograde);
+    let (hill, prograde_limit, retrograde_limit) = satellite_limits(a, e, mass_kg, hosts);
     let moon = moon_limit(placed, hosts, class, (mass, radius, &fractions), age_now);
 
     Ok(DerivedBody {
@@ -1599,7 +1610,26 @@ pub(crate) fn derive_body_driven(
         prograde_limit,
         retrograde_limit,
         maximum_moon_mass: moon,
+        #[cfg(test)]
+        sky_ratios: sky.ratios,
     })
+}
+
+/// T15's limits of a body of mass `mass` on an orbit of semi-major axis `a` and eccentricity `e`
+/// about `hosts`: its Hill radius and its prograde and retrograde satellites' stability limits.
+#[must_use]
+fn satellite_limits(
+    a: Metres,
+    e: f64,
+    mass: Kilograms,
+    hosts: &BodyHosts<'_>,
+) -> (Metres, Metres, Metres) {
+    let hill = hill_radius(a, 0.0, mass, hosts.primary_mass);
+    (
+        hill,
+        satellite_stability_limit(hill, e, 0.0, OrbitSense::Prograde),
+        satellite_stability_limit(hill, e, 0.0, OrbitSense::Retrograde),
+    )
 }
 
 /// What [`derive_body_driven`] derives of a body before its passes, none of which a pass reads
@@ -2717,6 +2747,11 @@ struct Sky {
     /// Σ Fᵢ ÷ `S_eff,max`(`T_eff,i`) now, the sum the insolation's maximum-greenhouse limit reads:
     /// beyond it below 1 ([`AtmosphereInputs::maximum_greenhouse_flux_ratio`]).
     maximum_greenhouse_flux_ratio: f64,
+    /// Σ Fᵢ ÷ `S_eff,i` at the runaway limit now, at the runaway limit at the hosts' largest past
+    /// luminosities and at the maximum-greenhouse limit now: the sums its insolation's classes and
+    /// its ceiling read, for the audit's tests ([`DerivedBody::sky_ratios`]).
+    #[cfg(test)]
+    ratios: [f64; 3],
     /// The hottest effective temperature among the luminous hosts; zero if none shines.
     hottest: Kelvin,
     /// The hosts' light by band as the area mix reads it (P14.T51.b).
@@ -2831,6 +2866,8 @@ impl Sky {
             insolation,
             present_insolation,
             maximum_greenhouse_flux_ratio: maximum,
+            #[cfg(test)]
+            ratios: [runaway_now, runaway, maximum],
             hottest: sums.hottest,
             shade: sums.shade.finish_from(book),
         }

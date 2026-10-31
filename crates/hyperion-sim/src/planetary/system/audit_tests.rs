@@ -121,8 +121,9 @@ pub(super) struct AuditCase<'a> {
     /// Its primary's state at the epoch (a moon's planet's).
     pub(super) now: &'a ParentNow,
     /// Σ Fᵢ ÷ `S_eff` at the runaway limit now ([`runaway_now`]), at the runaway limit at the hosts'
-    /// peak ([`runaway_at_peak`]) and at the maximum-greenhouse limit now ([`limit_now`]): a moon's
-    /// its planet's.
+    /// peak ([`runaway_at_peak`]) and at the maximum-greenhouse limit now ([`limit_now`]): a
+    /// planet's and a member's along its orbit, and a moon's its own sky's, its planet's glow among
+    /// its hosts ([`DerivedBody::sky_ratios`]; research-census-25 §2), as its derivation reads them.
     ratios: [f64; 3],
     /// Its derivation again, its passes driven by a driver (M1's first solve).
     pub(super) again: &'a dyn Fn(PassDriver) -> DerivedBody,
@@ -232,7 +233,7 @@ pub(super) fn audit_walk_system(
                 record: &moon_record,
                 derived: moon.body(),
                 now: &now,
-                ratios,
+                ratios: moon.body().sky_ratios(),
                 again: &again,
             });
         }
