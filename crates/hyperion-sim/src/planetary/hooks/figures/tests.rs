@@ -3097,9 +3097,10 @@ fn under_every_24_hold_a_past_only_runaway_s_lid_and_ice_follow_its_water() {
 mod population;
 
 /// A source precomputed for its primary ([`ImpactorSources::with_primary`]) is the one computed
-/// afresh, to the bit, for that orbiter, and any other orbiter computes its own: the Earth's and a
-/// belt member's under the Sun's sources, each with the other's precomputed. The sources' equality
-/// and `Debug` ignore it.
+/// afresh, to the bit, for that orbiter, and any other orbiter computes its own: the Earth's, a
+/// main-belt member's at 3 au and a planet's on that member's orbit, under the Sun's sources, each
+/// with another's precomputed, the last two differing in their membership alone. The sources'
+/// equality and `Debug` ignore it.
 #[test]
 fn a_precomputed_primary_source_is_its_own_to_the_bit() {
     let sun = solar_sources();
@@ -3109,19 +3110,38 @@ fn a_precomputed_primary_source_is_its_own_to_the_bit() {
             semi_major_axis: au(3.0),
             ..earth.orbit
         },
-        belt: None,
+        belt: Some(BeltMembership {
+            part: BeltPart::Main,
+            composition: BeltComposition::Rocky,
+        }),
         ..earth
     };
-    for (orbiter, other) in [(earth, member), (member, earth)] {
+    let outside = HostOrbiter {
+        belt: None,
+        ..member
+    };
+    for (orbiter, other) in [
+        (earth, member),
+        (member, earth),
+        (member, outside),
+        (outside, member),
+    ] {
         let fresh = ImpactorSource::with_abundance(&orbiter, sun);
         let precomputed = sun.clone().with_primary(&orbiter);
         let held = ImpactorSource::with_abundance(&orbiter, &precomputed);
         assert_same_bits(held.0.excitation(), fresh.0.excitation());
-        assert_eq!(held.0.projectile_density(), fresh.0.projectile_density());
+        assert_same_bits(
+            held.0.projectile_density().value(),
+            fresh.0.projectile_density().value(),
+        );
         assert_same_bits(held.1, fresh.1);
         let theirs = ImpactorSource::with_abundance(&other, &precomputed);
         let fresh_theirs = ImpactorSource::with_abundance(&other, sun);
         assert_same_bits(theirs.0.excitation(), fresh_theirs.0.excitation());
+        assert_same_bits(
+            theirs.0.projectile_density().value(),
+            fresh_theirs.0.projectile_density().value(),
+        );
         assert_same_bits(theirs.1, fresh_theirs.1);
         assert_eq!(&precomputed, sun);
         assert_eq!(format!("{precomputed:?}"), format!("{sun:?}"));

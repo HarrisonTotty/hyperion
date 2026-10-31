@@ -187,14 +187,14 @@ pub const TOP_FRACTION: f64 = 1e-6;
 /// The bisections that find each level's `r_w`, in ln r over [`RADIUS_RANGE_M`].
 const RADIUS_BISECTIONS: u32 = 48;
 
-/// The generator version from which each level's `r_w` is found by the false position on ln `v_f`
-/// in ln r, [`FallRadiusRoot::FalsePosition`]: 26, a planetary bump after 25 (P14.T54.b.l's cost
-/// lever; perf-24's handoff, the envelope's decks).
+/// The generator version from which each level's `r_w` is found by the false position, 26.
 ///
-/// Below it [`FallRadiusRoot::in_force`] is [`FallRadiusRoot::Bisections`], and every deck is
-/// version 24's bit for bit. 26's bump deletes this hold and the tests' switch
-/// ([`with_fall_radius`]), keeps the bisections as the tests' oracle of the false position, and
-/// deletes the tripwire (`the_fall_radius_root_is_held_only_until_the_26_bump`).
+/// From it, [`FallRadiusRoot::FalsePosition`] finds `r_w` on ln `v_f` in ln r: a planetary bump
+/// after 25 (P14.T54.b.l's cost lever; perf-24's handoff, the envelope's decks). Below it
+/// [`FallRadiusRoot::in_force`] is [`FallRadiusRoot::Bisections`], and every deck is version 24's
+/// bit for bit. 26's bump deletes this hold and the tests' switch (`with_fall_radius`), keeps the
+/// bisections as the tests' oracle of the false position, and deletes the tripwire
+/// (`the_fall_radius_root_is_held_only_until_the_26_bump`).
 pub(crate) const FALL_RADIUS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
 
 /// The most steps of the false position for `r_w` ([`FallRadiusRoot::FalsePosition`]): 48, the
@@ -222,7 +222,7 @@ pub(crate) enum FallRadiusRoot {
 impl FallRadiusRoot {
     /// The root this generator version gives: the false position from [`FALL_RADIUS_VERSION`],
     /// the bisections below it; in the tests, the root a test's switch sets on its thread
-    /// ([`with_fall_radius`]).
+    /// (`with_fall_radius`).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
@@ -253,14 +253,24 @@ thread_local! {
 }
 
 /// `run`'s result with the false position's calls for `r_w` on this thread, its steps over them
-/// and the most one took, beyond the range's two ends. The thread's tally is set back after.
+/// and the most one took, beyond the range's two ends.
+///
+/// The thread's tally is set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_fall_radius_steps<R>(run: impl FnOnce() -> R) -> (R, (u64, u64, u32)) {
-    let before = FALL_RADIUS_STEPS.with(|cell| cell.replace(Some((0, 0, 0))));
+    /// Sets the thread's tally back as it drops, a panic in `run` included.
+    struct Restore(Option<(u64, u64, u32)>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            FALL_RADIUS_STEPS.with(|cell| cell.set(self.0));
+        }
+    }
+    let restore = Restore(FALL_RADIUS_STEPS.with(|cell| cell.replace(Some((0, 0, 0)))));
     let result = run();
     let tally = FALL_RADIUS_STEPS
-        .with(|cell| cell.replace(before))
+        .with(core::cell::Cell::get)
         .unwrap_or_default();
+    drop(restore);
     (result, tally)
 }
 
@@ -2023,7 +2033,7 @@ fn size(
     let ln_sigma_squared = math::ln(sigma) * math::ln(sigma);
     let efficiency = sedimentation.efficiency();
     // The deck's own figures, which each level read again (P14.T54.b.l).
-    let ln_range = (math::ln(RADIUS_RANGE_M.0), math::ln(RADIUS_RANGE_M.1));
+    let ln_range_m = (math::ln(RADIUS_RANGE_M.0), math::ln(RADIUS_RANGE_M.1));
     let fit = sigma.max(ALPHA_FIT_WIDTH);
     let ln_fit = math::ln(fit);
     let effective = math::exp(2.5 * ln_sigma_squared);
@@ -2039,7 +2049,7 @@ fn size(
         let pressure = math::exp(context.grid.u(level));
         let air = Air::at(temperature, pressure, context.column, constants);
         let w_star = context.column.eddy_diffusion.square_metres_per_second() / air.scale_height_m;
-        let r_w = air.radius_falling_at(w_star, density, ln_range);
+        let r_w = air.radius_falling_at(w_star, density, ln_range_m);
         let alpha =
             math::ln(air.fall_speed(fit * r_w, density) / air.fall_speed(r_w, density)) / ln_fit;
         let r_g = r_w
@@ -2113,18 +2123,23 @@ impl Air {
         stokes * math::powf(1.0 + math::powf(inertia, 0.4), -1.25)
     }
 
-    /// The radius whose fall speed is `speed`, in ln r over [`RADIUS_RANGE_M`], whose logarithms
-    /// are `ln_range`, by the root in force ([`FallRadiusRoot::in_force`]).
+    /// The radius, m, whose fall speed is `speed_m_s`, m s⁻¹, by the root in force
+    /// ([`FallRadiusRoot::in_force`]).
+    ///
+    /// The root is sought in ln r over [`RADIUS_RANGE_M`], whose logarithms (of metres) are
+    /// `ln_range_m`.
     #[must_use]
     fn radius_falling_at(
         &self,
-        speed: f64,
+        speed_m_s: f64,
         density: KilogramsPerCubicMetre,
-        ln_range: (f64, f64),
+        ln_range_m: (f64, f64),
     ) -> f64 {
         match FallRadiusRoot::in_force() {
-            FallRadiusRoot::Bisections => self.bisected_radius(speed, density, ln_range),
-            FallRadiusRoot::FalsePosition => self.false_position_radius(speed, density, ln_range),
+            FallRadiusRoot::Bisections => self.bisected_radius(speed_m_s, density, ln_range_m),
+            FallRadiusRoot::FalsePosition => {
+                self.false_position_radius(speed_m_s, density, ln_range_m)
+            }
         }
     }
 
@@ -2133,13 +2148,13 @@ impl Air {
     #[must_use]
     fn bisected_radius(
         &self,
-        speed: f64,
+        speed_m_s: f64,
         density: KilogramsPerCubicMetre,
         (mut small, mut large): (f64, f64),
     ) -> f64 {
         for _ in 0..RADIUS_BISECTIONS {
             let middle = f64::midpoint(small, large);
-            if self.fall_speed(math::exp(middle), density) < speed {
+            if self.fall_speed(math::exp(middle), density) < speed_m_s {
                 small = middle;
             } else {
                 large = middle;
@@ -2148,27 +2163,30 @@ impl Air {
         math::exp(f64::midpoint(small, large))
     }
 
-    /// [`radius_falling_at`](Self::radius_falling_at) by the Illinois false position (Dowell and
-    /// Jarratt 1971, BIT 11, 168, from memory) on g = ln `v_f`(r) − ln `speed` in ln r, from 26
-    /// ([`FallRadiusRoot::FalsePosition`]): each step the false position a − g′(a) (b − a) ÷
+    /// [`radius_falling_at`](Self::radius_falling_at) by the Illinois false position, from 26
+    /// ([`FallRadiusRoot::FalsePosition`]).
+    ///
+    /// The false position (Dowell and Jarratt 1971, BIT 11, 168, from memory) is on g =
+    /// ln `v_f`(r) − ln `speed_m_s` in ln r: each step the false position a − g′(a) (b − a) ÷
     /// (g′(b) − g′(a)), where g′ is an end's g, halved each time the other end is replaced twice in
     /// a row, held at least half the stop inside either end; the midpoint where it is not a
-    /// number. The bracket keeps the bisections' sides, `v_f` < `speed` at its lower end, and the
-    /// steps stop at their width, the range's 2⁻⁴⁸ ([`RADIUS_STOP_SHARE`]), at a step where g = 0,
-    /// or after [`RADIUS_STEPS`]; the radius is the bracket's midpoint, or that step's. A `speed`
-    /// that no radius in the range falls below, or that every one does, is held at that end.
+    /// number. The bracket keeps the bisections' sides, `v_f` < `speed_m_s` at its lower end, and
+    /// the steps stop at their width, the range's 2⁻⁴⁸ ([`RADIUS_STOP_SHARE`]), at a step where g
+    /// is exactly 0, or after [`RADIUS_STEPS`]; the radius is the bracket's midpoint, or that
+    /// step's. A speed that no radius in the range falls below, or that every one does, is held at
+    /// that end.
     #[must_use]
     fn false_position_radius(
         &self,
-        speed: f64,
+        speed_m_s: f64,
         density: KilogramsPerCubicMetre,
         (small, large): (f64, f64),
     ) -> f64 {
-        let ln_speed = math::ln(speed);
-        // Whether the radius e^x falls slower than `speed`, the bisections' test, and its g.
+        let ln_speed = math::ln(speed_m_s);
+        // Whether the radius e^x falls slower than `speed_m_s`, the bisections' test, and its g.
         let at = |x: f64| {
             let falling = self.fall_speed(math::exp(x), density);
-            (falling < speed, math::ln(falling) - ln_speed)
+            (falling < speed_m_s, math::ln(falling) - ln_speed)
         };
         let ((small_slower, g_small), (large_slower, g_large)) = (at(small), at(large));
         if !small_slower {
@@ -2220,7 +2238,8 @@ impl Air {
             {
                 taken += 1;
             }
-            // By comparison, so that a g that is not a number steps on.
+            // An exact root, g = 0 to the bit, is the radius itself; a g that is not a number fails
+            // the comparison and steps on.
             if g.abs() <= 0.0 {
                 #[cfg(test)]
                 tally(taken);

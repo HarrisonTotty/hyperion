@@ -267,21 +267,23 @@ const NEWTON_STEPS: usize = 4;
 /// saturated density.
 pub(crate) const COMPRESSION_STEPS: usize = 16;
 
-/// The generator version from which a liquid's compression settles,
-/// [`CompressionRules::Settled`]: 26, a planetary bump after 25 (P14.T54.b.l's cost lever;
-/// perf-24's handoff, the compression's Newton).
+/// The generator version from which a liquid's compression settles, 26.
 ///
-/// Below it [`CompressionRules::in_force`] is [`CompressionRules::Fixed`], and every compression is
-/// version 24's bit for bit. 26's bump deletes this hold and the tests' switch
-/// ([`with_compression`]), keeps the fixed count as the tests' oracle of the settled one, and
-/// deletes the tripwire (`the_settled_compression_is_held_only_until_the_26_bump`).
+/// From it the compression is [`CompressionRules::Settled`]'s: a planetary bump after 25
+/// (P14.T54.b.l's cost lever; perf-24's handoff, the compression's Newton). Below it
+/// [`CompressionRules::in_force`] is [`CompressionRules::Fixed`], and every compression is version
+/// 24's bit for bit. 26's bump deletes this hold and the tests' switch (`with_compression`), keeps
+/// the fixed count as the tests' oracle of the settled one, and deletes the tripwire
+/// (`the_settled_compression_is_held_only_until_the_26_bump`).
 pub(crate) const SETTLED_COMPRESSION_VERSION: GeneratorVersion = GeneratorVersion::new(26);
 
-/// The share of its density at or under which a step of the settled compression ends it
-/// ([`CompressionRules::Settled`]): 2⁻⁴⁰, 9.1 × 10⁻¹³. Newton's convergence is quadratic along the
-/// isotherm, so the step after one this small would move the density by about its square, under
-/// rounding: the stop ends the steps where [`iterate`]'s rounding cycles begin.
-pub(crate) const COMPRESSION_TOLERANCE: f64 = 1.0 / 1_099_511_627_776.0;
+/// The share of its density at or under which a step of the settled compression ends it: 2⁻⁴⁰,
+/// 9.1 × 10⁻¹³ ([`CompressionRules::Settled`]).
+///
+/// Newton's convergence is quadratic along the isotherm, so the step after one this small would
+/// move the density by about its square, under rounding: the stop ends the steps where
+/// [`iterate`]'s rounding cycles begin.
+const COMPRESSION_TOLERANCE: f64 = 1.0 / 1_099_511_627_776.0;
 
 /// How a liquid's compression steps ([`SETTLED_COMPRESSION_VERSION`]'s hold).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -297,7 +299,7 @@ pub(crate) enum CompressionRules {
 impl CompressionRules {
     /// The rules this generator version gives: the settled compression from
     /// [`SETTLED_COMPRESSION_VERSION`], the fixed count below it; in the tests, the rules a test's
-    /// switch sets on its thread ([`with_compression`]).
+    /// switch sets on its thread (`with_compression`).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
@@ -339,15 +341,24 @@ pub(crate) fn with_compression<R>(rules: CompressionRules, run: impl FnOnce() ->
     run()
 }
 
-/// `run`'s result with the settled compressions on this thread and their steps. The thread's
-/// count is set back after.
+/// `run`'s result with the settled compressions on this thread and their steps.
+///
+/// The thread's count is set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_compression_steps<R>(run: impl FnOnce() -> R) -> (R, (u64, u64)) {
-    let before = COMPRESSION_COUNT.with(|cell| cell.replace(Some((0, 0))));
+    /// Sets the thread's count back as it drops.
+    struct Restore(Option<(u64, u64)>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            COMPRESSION_COUNT.with(|cell| cell.set(self.0));
+        }
+    }
+    let restore = Restore(COMPRESSION_COUNT.with(|cell| cell.replace(Some((0, 0)))));
     let result = run();
     let count = COMPRESSION_COUNT
-        .with(|cell| cell.replace(before))
+        .with(core::cell::Cell::get)
         .unwrap_or_default();
+    drop(restore);
     (result, count)
 }
 

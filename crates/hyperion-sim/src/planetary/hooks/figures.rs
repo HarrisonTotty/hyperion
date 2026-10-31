@@ -624,12 +624,21 @@ impl HostOrbiter {
     #[must_use]
     fn same_bits(&self, other: &Self) -> bool {
         let same = |a: f64, b: f64| a.total_cmp(&b).is_eq();
-        let (Self { orbit, mass, belt }, theirs) = (self, &other.orbit);
-        same(
-            orbit.semi_major_axis.value(),
-            theirs.semi_major_axis.value(),
-        ) && same(orbit.eccentricity, theirs.eccentricity)
-            && same(orbit.inclination.value(), theirs.inclination.value())
+        // Every field by name, so that one added to either struct must be compared here.
+        let Self {
+            orbit:
+                HostOrbit {
+                    semi_major_axis,
+                    eccentricity,
+                    inclination,
+                },
+            mass,
+            belt,
+        } = self;
+        let theirs = &other.orbit;
+        same(semi_major_axis.value(), theirs.semi_major_axis.value())
+            && same(*eccentricity, theirs.eccentricity)
+            && same(inclination.value(), theirs.inclination.value())
             && same(mass.value(), other.mass.value())
             && *belt == other.belt
     }
