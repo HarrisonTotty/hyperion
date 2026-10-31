@@ -25,6 +25,7 @@ import {
   crustLidLabel,
   destructionCauseLabel,
   detailLevelLabel,
+  envelopeLabel,
   moonOriginLabel,
   planetClassLabel,
   redoxClassLabel,
@@ -233,8 +234,8 @@ function pressureShown(pressurePa: number): Shown {
  *
  * @remarks
  * A crust not modelled, as every server before P14.T54.a sends it, adds no melt, and an ice lid's
- * melt area is 0, since its liquid is a condensate, not a melt of the crust. P14.T53.b decides
- * `steam_envelope`, which is not read here.
+ * melt area is 0, since its liquid is a condensate, not a melt of the crust. No surface is ever
+ * `steam_envelope`: such a body's air is its envelope section (P14.T53.b part 3, P14.T53.f).
  */
 function holdsMelt(surface: BodySurface): boolean {
   return (
@@ -538,26 +539,24 @@ function surfaceRows(surface: BodySurface): ReactNode {
 }
 
 /**
- * The rows of a gas-envelope body's `envelope` section, the air of a giant or a sub-Neptune, whose
- * surface section does not apply. It reads as `ATMOSPHERE`, as the view's notes name the same air
- * (`ATMOSPHERE: NOT YET MODELLED`), since the `BULK` section's `ENVELOPE` is the structure model's
- * layer, which is modelled: `ATMOSPHERE GAS ENVELOPE`, under the section's own name as `SURFACE`'s
- * state is, then its composition by mole fraction, as a surface's gases read.
+ * The rows of a body's `envelope` section, the air of a giant or a sub-Neptune, or of a solid body
+ * under a supercritical envelope, whose surface section does not apply. It reads as `ATMOSPHERE`,
+ * as the view's notes name the same air (`ATMOSPHERE: NOT YET MODELLED`), since the `BULK`
+ * section's `ENVELOPE` is the structure model's layer, which is modelled: its lead row under the
+ * section's own name as `SURFACE`'s state is ({@link envelopeLabel}), then its composition by mole
+ * fraction, as a surface's gases read.
  *
  * @remarks
  * Its other figures (the Guillot profile's temperatures and parameters, the adiabat, the decks,
  * the hazes, the absorbers and the condensables not formed) are on the wire and not yet read here.
- * Every server sends the section `not_modelled` until generator version 24 (P14.T54.b.i), and
- * {@link sectionRows} reads it so. `GAS ENVELOPE` holds while every `ok` envelope is an H₂/He one,
- * its `supercritical` `null`: a solid body under a supercritical envelope (P14.T53.b part 2, from
- * generator version 24) is sent its envelope `not_modelled`, which reads `ATMOSPHERE NOT YET
- * MODELLED` with no `SURFACE` section, and once P14.T53.f sends one `ok` the lead row is to read
- * its condensable instead (`SUPERCRITICAL H2O`, decision-absurd-states-24 R2.4).
+ * Every server sends the section `not_modelled` until generator version 24 (P14.T54.b.i), and a
+ * solid body's under a supercritical envelope until 26 (P14.T53.f), which {@link sectionRows}
+ * reads as `ATMOSPHERE NOT YET MODELLED` with no `SURFACE` section.
  */
 function envelopeRows(envelope: BodyEnvelope): ReactNode {
   return (
     <>
-      <ReadoutRow label="ATMOSPHERE" shown={value("GAS ENVELOPE")} wide />
+      <ReadoutRow label="ATMOSPHERE" shown={value(envelopeLabel(envelope.supercritical))} wide />
       <ReadoutRow label="MOLE FRACTION" shown={gasesShown(envelope.composition)} wide />
     </>
   );
@@ -774,7 +773,8 @@ export interface BodyRecordReadingsProps {
  * substance and, beside them, an airless body's cold traps' state and the ocean under a body's ice,
  * `NONE` where the generator computes that it holds none, or its state where the generator does
  * not compute it, which on an airless moon follows the cold traps' state), a gas-envelope body's
- * envelope in the surface's place, read as its `ATMOSPHERE` (its gases), and its hooks, whose
+ * envelope, or a solid body's supercritical envelope, in the surface's place, read as its
+ * `ATMOSPHERE` (what it is and its gases), and its hooks, whose
  * detail seed is the one hook the wire carries, the em dash until the server derives it. A section
  * withheld or not modelled reads so, once, in place of its rows; one that does not apply is left
  * out. A server since P14.T35.e sends one of `surface` and `envelope` as not applicable for every

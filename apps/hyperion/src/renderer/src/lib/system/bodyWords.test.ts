@@ -9,9 +9,24 @@ import { describe, expect, it } from "vitest";
 import {
   crustLidLabel,
   destructionCauseLabel,
+  envelopeLabel,
   redoxClassLabel,
   surfaceStateLabel,
 } from "./bodyWords";
+
+describe("envelopeLabel", () => {
+  // An H₂/He envelope's null, the steam envelope's water, other condensables' formulas and a name
+  // the list does not hold, whose key never reaches the screen.
+  it.each<readonly [string | null, string]>([
+    [null, "GAS ENVELOPE"],
+    ["H2O", "SUPERCRITICAL H2O"],
+    ["CH4", "SUPERCRITICAL CH4"],
+    ["O2", "SUPERCRITICAL O2"],
+    ["future_fluid", "SUPERCRITICAL UNLISTED MATERIAL"],
+  ])("names a supercritical key of %s as %s", (supercritical, word) => {
+    expect(envelopeLabel(supercritical)).toBe(word);
+  });
+});
 
 describe("surfaceStateLabel", () => {
   // Every surface state the wire carries, the two no rule produces yet included.

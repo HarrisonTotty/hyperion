@@ -510,6 +510,31 @@ function partsReading(...parts: readonly string[]): string {
   return parts.map((part) => part.replaceAll(" ", "\u00A0")).join(" · ");
 }
 
+/**
+ * The fixture's Earth as a server from generator version 26 sends a solid planet under a
+ * supercritical envelope (P14.T53.f): its surface not applicable and its envelope `ok`, the
+ * fixture's Jupiter's members for its shape, with `supercritical` its condensable's key and its air
+ * that fluid's with a hundredth of carbon dioxide.
+ */
+function earthUnderASupercriticalEnvelopeOf(supercritical: string): ResponseFor<"body_detail"> {
+  const detail = earthUnderASupercriticalEnvelope();
+  const giant = jupiterDetail().record.envelope;
+  if (giant?.state !== "ok") {
+    throw new Error("the fixture's Jupiter has its envelope");
+  }
+  const envelope: BodyEnvelopeDto = {
+    ...giant.value,
+    supercritical,
+    composition: [
+      { species: supercritical, mole_fraction: 0.99 },
+      { species: "CO2", mole_fraction: 0.01 },
+    ],
+    hazes: [],
+    haze_tau_550: 0,
+  };
+  return { ...detail, record: { ...detail.record, envelope: { state: "ok", value: envelope } } };
+}
+
 /** The fixture's Jupiter with its envelope section `envelope`. */
 function jupiterWithEnvelope(envelope: SectionDto<BodyEnvelopeDto>): ResponseFor<"body_detail"> {
   const detail = jupiterDetail();
@@ -1772,7 +1797,7 @@ describe("SystemView's body readout", () => {
     await answer(socket);
     await selectRow(user, /\/768/);
     // Decision-absurd-states-24 R2.3: from generator version 24 such a planet's surface does not
-    // apply, and its envelope is not modelled until P14.T53.f.
+    // apply, and its envelope is not modelled until generator version 26 (P14.T53.f).
     await answerDetail(socket, earthUnderASupercriticalEnvelope());
 
     expect(reading("CLASS")).toBe("ROCKY");
@@ -1782,6 +1807,27 @@ describe("SystemView's body readout", () => {
     expect(reading("ATMOSPHERE")).toBe("NOT YET MODELLED");
     expect(terms("MOLE FRACTION")).toHaveLength(0);
   });
+
+  // Signoff-11 item 21: from generator version 26 a supercritical envelope's section is its model
+  // (P14.T53.f), led by its condensable, never "steam"; another condensable's by the same pattern.
+  it.each([
+    ["H2O", "SUPERCRITICAL H2O"],
+    ["CH4", "SUPERCRITICAL CH4"],
+    ["O2", "SUPERCRITICAL O2"],
+  ])(
+    "reads a rocky planet under a supercritical envelope of %s as ATMOSPHERE %s, with no SURFACE",
+    async (supercritical, lead) => {
+      const { user, socket } = renderView();
+      await answer(socket);
+      await selectRow(user, /\/768/);
+      await answerDetail(socket, earthUnderASupercriticalEnvelopeOf(supercritical));
+
+      expect(terms("SURFACE")).toHaveLength(0);
+      expect(terms("ATMOSPHERE")).toHaveLength(1);
+      expect(reading("ATMOSPHERE")).toBe(lead);
+      expect(terms("MOLE FRACTION")).toHaveLength(1);
+    },
+  );
 
   it("selects a planet from the map's list by the keyboard, and the map with it", async () => {
     const { user, socket } = renderView();

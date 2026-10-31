@@ -23,6 +23,7 @@ import type {
   SurfaceStateDto,
 } from "@hyperion/protocol";
 
+import { substanceName } from "../substances";
 import type { BodyKind, BodyState, Section } from "./model";
 
 /** A section that stands in place of its values: withheld, or not computed. */
@@ -146,6 +147,24 @@ export function planetClassLabel(planetClass: PlanetClassDto): string {
       break;
   }
   return label;
+}
+
+/**
+ * What a body's envelope is, the lead row of its `ATMOSPHERE`, from the envelope's `supercritical`
+ * key: `GAS ENVELOPE` for an H₂/He envelope, whose key is `null`, and a solid body's supercritical
+ * envelope by its condensable, `SUPERCRITICAL H2O` for a steam envelope's (signoff-11, item 21;
+ * P14.T53.f).
+ *
+ * @remarks
+ * `SUPERCRITICAL H2O` is the `SURFACE` state `steam_envelope`'s word, a phase word beside a
+ * formula, never "steam". Another condensable's reads by the same pattern, named by
+ * {@link substanceName} (`SUPERCRITICAL CH4`, and `SUPERCRITICAL UNLISTED MATERIAL` for a name the
+ * list does not hold), its wording to the UX sign-off.
+ */
+export function envelopeLabel(supercritical: string | null): string {
+  return supercritical === null
+    ? "GAS ENVELOPE"
+    : `SUPERCRITICAL ${substanceName(supercritical, "upper")}`;
 }
 
 /**
