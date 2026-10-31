@@ -430,7 +430,7 @@ fn grid_may_touch(
 /// `bound` ([`FeatureInterior::member_speed_bound`]). Where the bound is the lower, the reach is
 /// the layer's, bit for bit.
 #[must_use]
-fn band_reach(
+pub(crate) fn band_reach(
     radius: LightYears,
     t: UniverseTime,
     layer: Layer,
@@ -449,7 +449,11 @@ fn band_reach(
 /// feature's 4,096 ly reach; the margins are far above it, and above the rounding of the drift, so
 /// that no member [`hit_at`] keeps is left undrawn.
 #[must_use]
-fn member_reach(radius: LightYears, t: UniverseTime, bound: KilometresPerSecond) -> LightYears {
+pub(crate) fn member_reach(
+    radius: LightYears,
+    t: UniverseTime,
+    bound: KilometresPerSecond,
+) -> LightYears {
     /// The relative margin on the drift.
     const DRIFT_MARGIN: f64 = 1e-9;
     /// The absolute margin, ly.
@@ -462,7 +466,7 @@ fn member_reach(radius: LightYears, t: UniverseTime, bound: KilometresPerSecond)
 /// The hit a member makes in `sphere`, drifting at `velocity` for `elapsed` since the epoch, or
 /// `None` if it is outside the unpadded radius then or not yet born.
 #[must_use]
-fn hit_at(
+pub(crate) fn hit_at(
     record: &SystemRecord,
     velocity: GalacticVelocity,
     sphere: &QuerySphere,

@@ -53,6 +53,18 @@ pub struct Debris {
 }
 
 impl Debris {
+    /// The debris of `streams` and `cores`, numbered as given, for
+    /// [`GlobalList::of_parts`](super::GlobalList::of_parts).
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub(crate) const fn of_parts(streams: Vec<StreamSpec>, cores: Vec<DwarfCoreSpec>) -> Self {
+        Self {
+            streams,
+            cores,
+            cores_beyond_limit: 0,
+        }
+    }
+
     /// The debris of `galaxy` (module documentation).
     ///
     /// It walks every globular of the feature catalogue and draws every orphan's orbit: 0.16 s

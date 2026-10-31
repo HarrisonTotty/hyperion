@@ -63,7 +63,23 @@
 //! ([`DwarfCoreModel::extent`](dwarf_core::DwarfCoreModel::extent)), within which its members
 //! lie about its centre; the centre's shell is its reach. Members drift
 //! from their epoch positions, which the query's padded radius covers, as it does for the grid's
-//! cells. P10.T9 checks that every member of its test tubes lies inside its entry's shell.
+//! cells.
+//!
+//! **A stream's shell bounds its members from version 26** ([`STREAM_SHELL_VERSION`], P10.T9).
+//! The shell holds the tracers, but not every point of the tube's cut. At a tip, where its few
+//! oldest tracers lie sparse, a knot's kernel spans a long arc of the orbit, so the centre line
+//! there is a chord inside the arc and the widths run to some ten times the median: `pal5_like`'s
+//! trailing tip's 48 tracers span some 70° of ψ, and its knot 3 lies at 28,648 ly, below every
+//! tracer (the least at 30,316) and the shell's inner radius (28,689). So a member could lie
+//! where no tracer does, far outside the shell. Of `pal5_like`'s some 67,000 members under each of
+//! eight seeds, the farthest lay 2,000–11,000 ly inside the shell's inner radius, which a widening
+//! of up to 27 `η r` in place of [`SHELL_WIDENING`]'s 4 would have taken in; capping the cut at
+//! the tracers' reach left them where they were. So from 26 a stream's member outside its shell
+//! is no member, as one outside the root cube is not (main's ruling of 2026-10-31, reversible
+//! behind its hold, the tips' own fix left open): the range query and
+//! [`resolve_with`](crate::galaxy::placement::resolve_with) keep only those inside, and a query
+//! whose sphere misses a shell can pass its stream by. Below 26 nothing reads a stream's shell
+//! for its members, and a query visits every stream.
 //!
 //! [`CentreModel::as_global_entry`]: crate::galaxy::features::centre::CentreModel::as_global_entry
 //!
@@ -81,6 +97,7 @@ pub mod members;
 pub mod orbit;
 pub mod orphans;
 pub mod share;
+pub mod source;
 pub mod spec;
 pub mod spray;
 #[cfg(any(test, feature = "testing"))]
@@ -92,10 +109,12 @@ use std::fmt;
 
 pub use debris::Debris;
 pub use share::discrete_share;
+pub use source::GlobalListSource;
 pub use spec::{ClusterStars, DwarfCoreSpec, MassLoss, SphericalOrbit, StreamSpec};
 pub use tube::{TubeLookup, TubeTable};
 
-use crate::coords::{GalacticDisplacement, ROOT_HALF_WIDTH_LY};
+use crate::GeneratorVersion;
+use crate::coords::{GalacticDisplacement, GalacticPosition, ROOT_HALF_WIDTH_LY};
 use crate::galaxy::features::{FeatureId, FeatureKind};
 use crate::galaxy::potential::PotentialTables;
 use crate::galaxy::query::QuerySphere;
@@ -121,6 +140,43 @@ pub const CUT_WIDTHS: f64 = 4.0;
 /// of its progenitor's orbit's radii (the median stream's within 1), so 4 holds them with a
 /// quarter to spare, for those streams' eccentricities.
 pub const SHELL_WIDENING: f64 = 4.0;
+
+/// The generator version from which a stream's bounding shell bounds its members (module
+/// documentation, "Bounding shells"; the hold of [`StreamShellRules`]).
+///
+/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
+/// [`StreamShellRules::Unbounded`], which reads no shell for a stream's members, so every generated
+/// value keeps its bits; the tests reach the new arm through a galaxy built under
+/// `GalaxyRules::every_26_hold()`. The bump to 26 deletes this hold, [`StreamShellRules`] with its
+/// `Unbounded` arm, the galaxy's `stream_shell` field and its tripwire
+/// (`the_stream_shell_is_held_only_until_the_26_bump`).
+pub(crate) const STREAM_SHELL_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether a stream's bounding shell bounds its members (the hold of [`STREAM_SHELL_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum StreamShellRules {
+    /// Version 25's and before: a member is every point of the tube's cut in the root cube.
+    Unbounded,
+    /// Version 26's: a member outside its stream's shell is none.
+    Shell,
+}
+
+/// Whether a stream member at `position` is one in `galaxy`, whose stream's shell is `shell`
+/// (module documentation, "Bounding shells"): every point under [`StreamShellRules::Unbounded`],
+/// and those inside the shell under [`StreamShellRules::Shell`].
+#[must_use]
+pub(crate) fn in_stream_shell(
+    galaxy: &Galaxy,
+    shell: &BoundingShell,
+    position: &GalacticPosition,
+) -> bool {
+    match galaxy.rules().stream_shell {
+        StreamShellRules::Unbounded => true,
+        StreamShellRules::Shell => {
+            shell.contains(&GalacticPosition::ORIGIN.displacement_to(position))
+        }
+    }
+}
 
 /// A stream's number on the global list, below 2¹² = 4,096 (plan 01's 12-bit field of a
 /// [`StreamMemberId`]).
@@ -596,6 +652,66 @@ impl GlobalList {
     #[must_use]
     pub fn core(&self, number: DwarfCoreNumber) -> Option<&DwarfCoreSpec> {
         self.debris.cores().get(usize::from(number.get()))
+    }
+
+    /// Stream `number`'s entry, if the list has it.
+    #[must_use]
+    pub fn stream_entry(&self, number: StreamNumber) -> Option<&GlobalEntry> {
+        self.entries
+            .iter()
+            .find(|e| e.kind == GlobalEntryKind::Stream(number))
+    }
+
+    /// A list of `streams` and `cores` of `galaxy`, in the potential `tables`, the galaxy's full
+    /// tables, without the centre: each entry's shell as [`build`](Self::build) gives it, for
+    /// tests of the query path on streams and cores no drawn galaxy has, such as
+    /// [`testing`]'s. A galaxy without the full potential serves, since its tables are given.
+    ///
+    /// # Panics
+    ///
+    /// If stream `k` or core `k` is not numbered `k`, or `tables` have no (R, z) grid.
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn of_parts(
+        galaxy: &Galaxy,
+        tables: &PotentialTables,
+        streams: Vec<StreamSpec>,
+        cores: Vec<DwarfCoreSpec>,
+    ) -> Self {
+        for (k, s) in streams.iter().enumerate() {
+            assert_eq!(usize::from(s.number().get()), k, "stream {k}'s number");
+        }
+        for (k, c) in cores.iter().enumerate() {
+            assert_eq!(usize::from(c.number().get()), k, "core {k}'s number");
+        }
+        let force = SprayForce::new(tables).expect("the full tables have the (R, z) grid");
+        let shells: Vec<ShellLegs> = (streams.iter().map(stream_legs))
+            .chain(cores.iter().map(core_legs))
+            .collect();
+        let reached = reaches_ly(&force, &shells);
+        let (at_streams, at_cores) = reached.split_at(streams.len());
+        let mut entries: Vec<GlobalEntry> = streams
+            .iter()
+            .zip(at_streams)
+            .map(|(s, &reach)| {
+                GlobalEntry::new(
+                    GlobalEntryKind::Stream(s.number()),
+                    s.mass(),
+                    widened_stream_shell(tables, s, reach),
+                )
+            })
+            .collect();
+        entries.extend(cores.iter().zip(at_cores).map(|(c, &reach)| {
+            GlobalEntry::new(
+                GlobalEntryKind::DwarfCore(c.number()),
+                c.mass(),
+                widened_core_shell(galaxy, c, reach),
+            )
+        }));
+        Self {
+            entries,
+            debris: Debris::of_parts(streams, cores),
+        }
     }
 
     /// The entries whose shells `sphere`, out to its padded radius, may meet

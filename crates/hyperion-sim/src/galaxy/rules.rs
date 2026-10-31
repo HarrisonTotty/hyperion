@@ -26,6 +26,9 @@
 //!   not reset them for it.
 //! - [`bound_share`](GalaxyRules::bound_share), at [`BOUND_SHARE_VERSION`] (plan 09, P09.T13 after
 //!   ruling 145.5): a globular's history takes its own population's μ in place of BM03's 0.70.
+//! - [`stream_shell`](GalaxyRules::stream_shell), at [`STREAM_SHELL_VERSION`] (plan 10, P10.T9):
+//!   a stream's member outside its bounding shell is none, so the range query may pass by a stream
+//!   whose shell its sphere misses.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -38,6 +41,7 @@ use crate::galaxy::features::centre::events::luminosity::{
     CENTRE_QUIESCENCE_VERSION, CentreQuiescenceRules,
 };
 use crate::galaxy::features::kinds::globular::{BOUND_SHARE_VERSION, BoundShareRules};
+use crate::galaxy::global_list::{STREAM_SHELL_VERSION, StreamShellRules};
 use crate::galaxy::motion::{
     KEPLER_REGIME_VERSION, KEPLER_SECULAR_VERSION, KeplerRegimeRules, KeplerSecularRules,
 };
@@ -58,6 +62,8 @@ pub(crate) struct GalaxyRules {
     /// The share of its birth mass a globular's history says stellar evolution left it (P09.T13,
     /// ruling 145.5).
     pub(crate) bound_share: BoundShareRules,
+    /// Whether a stream's bounding shell bounds its members (P10.T9).
+    pub(crate) stream_shell: StreamShellRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -88,6 +94,11 @@ impl GalaxyRules {
             } else {
                 BoundShareRules::Bm03
             },
+            stream_shell: if version.get() >= STREAM_SHELL_VERSION.get() {
+                StreamShellRules::Shell
+            } else {
+                StreamShellRules::Unbounded
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -103,8 +114,9 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: 25's
-    /// holds and those that turn on at 26 (the stellar rules' `dwarf_sequence`, P06.T23.a,
-    /// `helium`, P15.T7.b, and `hd_limit`, P06.T42.b; [`StellarRules::every_26_hold`]).
+    /// holds and those that turn on at 26 (the galaxy's `bound_share`, P09.T13, and
+    /// `stream_shell`, P10.T9; the stellar rules' `dwarf_sequence`, P06.T23.a, `helium`, P15.T7.b,
+    /// and `hd_limit`, P06.T42.b; [`StellarRules::every_26_hold`]).
     ///
     /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is
     /// struct-update syntax over it.
@@ -237,6 +249,19 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_26_hold().bound_share,
             BoundShareRules::OwnMu
+        );
+        let shell = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).stream_shell;
+        for v in [23, 24, 25] {
+            assert_eq!(shell(v), StreamShellRules::Unbounded, "{v}");
+        }
+        assert_eq!(shell(26), StreamShellRules::Shell);
+        assert_eq!(
+            GalaxyRules::every_25_hold().stream_shell,
+            StreamShellRules::Unbounded
+        );
+        assert_eq!(
+            GalaxyRules::every_26_hold().stream_shell,
+            StreamShellRules::Shell
         );
         for v in [23, 24, 25, 26] {
             assert_eq!(

@@ -165,7 +165,7 @@ use crate::id::StreamMemberId;
 use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
-use crate::units::{LightYears, MetresPerSecond, Radians, SolarMasses};
+use crate::units::{KilometresPerSecond, LightYears, MetresPerSecond, Radians, SolarMasses};
 
 use super::orbit::{BuildLeapfrogError, cross, dot};
 use super::spec::StreamSpec;
@@ -229,6 +229,23 @@ pub const GAP_NOISE_AMPLITUDE: f64 = 0.3;
 /// of the generator version: 4 (brainstorm, "Streams and accreted structure": "the tube is cut at
 /// four widths"; plan 10, Design note 7).
 pub const CUT_WIDTHS: f64 = 4.0;
+
+/// The largest internal speed a stream member's velocity draw can reach, in units of its tube's
+/// greatest velocity dispersion: 8.58 (1 + √2) = 20.71 (P10.T9).
+///
+/// The draw is a Box–Muller pair and the first normal of a second, each times its own dispersion
+/// along one of the local frame's three vectors ([`members`](super::members), P10.T8.c). A pair's
+/// norm is at most 8.58 (plan 09's internal speed bound, 8.58 √2, over √2), so the pair's two
+/// normals sum in magnitude to at most 8.58 √2 and the third is at most 8.58. The frame's vectors
+/// are unit vectors, but between knots each is interpolated and made a unit vector again apart,
+/// so they need not be orthogonal: the triangle inequality bounds the internal speed by the
+/// dispersion times the three magnitudes' sum, not by their root sum of squares, 8.58 √2.
+pub const MEMBER_SPEED_SIGMAS: f64 = 8.58 * (1.0 + std::f64::consts::SQRT_2);
+
+/// The relative margin [`TubeTable::member_speed_bound`] is rounded up by, as plan 09's features'
+/// bound is: a member's speed is the norm of a sum, which can pass the bound's by a few units in
+/// the last place.
+const SPEED_BOUND_MARGIN: f64 = 1e-9;
 
 /// The cells across the tube along each across axis, spanning ±[`CUT_WIDTHS`]: 64 (plan 10,
 /// Design note 7), which the 6 bits of each across field of a stream member's ID hold (plan 01's
@@ -795,6 +812,28 @@ impl TubeTable {
                 (from, to, (target - low) / (high - low))
             }
         }
+    }
+
+    /// A bound on the speed of every member placed in the tube, km/s, galactic (P10.T9): the
+    /// knots' greatest mean speed plus [`MEMBER_SPEED_SIGMAS`] times their greatest velocity
+    /// dispersion, rounded up by 1 + 10⁻⁹. A member's velocity is the mean at its along coordinate
+    /// plus its three normals times the dispersions there along the local frame
+    /// ([`members`](super::members)), each of the mean and the dispersions linear between knots, so
+    /// at most their knots' greatest; what the range query pads a stream's cells by (P09.T23.b's
+    /// rule).
+    #[must_use]
+    pub fn member_speed_bound(&self) -> KilometresPerSecond {
+        let greater = |a: f64, b: f64| if b > a { b } else { a };
+        let (speed, sigma) = self.knots().fold((0.0, 0.0), |(speed, sigma), k| {
+            let v = k.velocity.metres_per_second();
+            let s = k
+                .dispersions
+                .iter()
+                .fold(sigma, |most, d| greater(most, d.value()));
+            (greater(speed, dot(v, v).sqrt()), s)
+        });
+        let bound = speed + MEMBER_SPEED_SIGMAS * sigma;
+        KilometresPerSecond::from(MetresPerSecond::new(bound * (1.0 + SPEED_BOUND_MARGIN)))
     }
 
     /// The bytes the table holds, its knots' and its segments' reaches included: what a caller's

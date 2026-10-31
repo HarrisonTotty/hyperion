@@ -701,6 +701,8 @@ _T8.a–c built (lane `p10-t6c`, 2026-10-30, at `GENERATOR_VERSION` 24); see "P1
 
 ### P10.T9 The query path
 
+_Built (lane `p10-t9`, 2026-10-31, at `GENERATOR_VERSION` 24); see "P10.T9 as built" in Risks._
+
 `GlobalListSource`: bounding shells → for a stream, `TubeLookup::tube`, the knot hash, then the tube
 cells touching the sphere padded by plan 03's speed × |t| → members, distances tested at the query's
 time; for a core, plan 09's nested-grid walk; for the centre, `CentreMemberSource`. The expected
@@ -2190,3 +2192,28 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     `no_cell_of_a_core_under_the_headroom_expects_the_index` (restated, with the tripwire),
     `the_fullest_cell_of_a_massive_core_resolves_past_8191` (every 97th member) and
     `the_massive_core_s_members_past_8191_are_pinned`.
+- **P10.T9 as built (lane `p10-t9`, 2026-10-31, at `GENERATOR_VERSION` 24).** No output moved:
+  nothing calls the source or `resolve_with` for a stream member outside the tests (T10.b
+  registers it). No golden moved; the tube cut's cap was tried and dropped, as it put no member
+  back in its shell.
+  - _Items._ `global_list::GlobalListSource`, a `SystemSource`, and its
+    `new(&Galaxy, &dyn TubeLookup, &dyn CentreOrbitCache) -> Result<_, BuildCentreError>`;
+    `GlobalList::stream_entry(StreamNumber)`, `GlobalList::of_parts` (testing);
+    `TubeTable::member_speed_bound()` and `tube::MEMBER_SPEED_SIGMAS` (8.58 (1 + √2)).
+    Crate-visible: `features::members::source::{band_reach, member_reach, hit_at}`.
+  - _The shell hold, at 26._ The tips' members are not inside the shells (`pal5_like`: 147 of
+    67,476; measures in the lane's outbox). Main's ruling (2026-10-31, option A, reversible): from
+    `STREAM_SHELL_VERSION` = 26 (`GalaxyRules::stream_shell`) a stream's member outside its
+    entry's shell is none, in the source and in `resolve_with`; below 26 the source visits every
+    stream. Tripwire `source::tests::the_stream_shell_is_held_only_until_the_26_bump`. Options B
+    (the tips fixed in T6.a) and C (`SHELL_WIDENING` near 30) wait on research.
+  - _For T10.b._ Register the source in place of `CentreMemberSource`, never beside it: their IDs
+    would repeat. Below 26 every query reads every stream's table.
+  - _For T12._ The containment check over seeds holds by construction from 26; test the members
+    the source keeps, or count those dropped.
+  - _Tests._ Fast: `global_list::source::tests` (six). Slow, by name:
+    `a_query_on_a_test_stream_s_axis_equals_every_member_of_its_tube` (the brute force),
+    `a_query_on_a_globular_stream_s_axis_generates_its_cells_members` and
+    `resolve_with_refuses_a_stream_member_outside_its_shell_from_26`, with
+    `cargo test -p hyperion-sim --profile slow-test --lib -- --ignored global_list::source`.
+    Bench: `global_list`'s `query` group.

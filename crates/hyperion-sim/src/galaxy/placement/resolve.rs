@@ -21,7 +21,9 @@ use crate::galaxy::features::centre::members::resolve_centre_member;
 use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
 use crate::galaxy::global_list::dwarf_core::{DwarfCoreModel, resolve_dwarf_core_member};
 use crate::galaxy::global_list::members::{StreamBandShares, resolve_stream_member};
-use crate::galaxy::global_list::{Debris, StreamNumber, TubeLookup};
+use crate::galaxy::global_list::{
+    Debris, StreamNumber, StreamShellRules, TubeLookup, in_stream_shell,
+};
 use crate::id::{DwarfCoreMemberId, StreamMemberId, SystemId, SystemIdKind};
 
 /// The system `id` names in `galaxy`.
@@ -109,7 +111,9 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
 /// [`Debris`] until the list holds them (P10.T4). Either is [`ResolveSystemError::NoSuchSystem`]
 /// in a galaxy without its kinematic tables, whose debris is not defined, for a stream or a core
 /// the galaxy does not have, which reads no tube, or for a core whose fullest cell can pass its
-/// index ([`DwarfCoreModel::check_index_headroom`]).
+/// index ([`DwarfCoreModel::check_index_headroom`]). From version 26 a stream's member outside its
+/// stream's bounding shell, its entry's in `lookup`'s list, is none, as the range query's
+/// [`GlobalListSource`](crate::galaxy::global_list::GlobalListSource) leaves it out (P10.T9).
 ///
 /// # Examples
 ///
@@ -176,7 +180,21 @@ fn resolve_listed_stream_member(
         .ok_or(ResolveSystemError::NoSuchSystem)?;
     let tube = lookup.tube(spec.number());
     let shares = StreamBandShares::of(galaxy, spec);
-    resolve_stream_member(galaxy, &tube, &shares, id).map(|member| *member.record())
+    let record = *resolve_stream_member(galaxy, &tube, &shares, id)?.record();
+    // From version 26 a member outside its stream's shell, which the list holds, is none
+    // (P10.T9; `global_list`'s "Bounding shells").
+    let admitted = match galaxy.rules().stream_shell {
+        StreamShellRules::Unbounded => true,
+        StreamShellRules::Shell => lookup
+            .global_list()
+            .stream_entry(spec.number())
+            .is_some_and(|entry| in_stream_shell(galaxy, &entry.shell(), record.epoch_position())),
+    };
+    if admitted {
+        Ok(record)
+    } else {
+        Err(ResolveSystemError::NoSuchSystem)
+    }
 }
 
 /// A dwarf core's member, its core's model built from the galaxy's debris ([`resolve_with`]).

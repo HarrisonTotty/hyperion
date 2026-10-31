@@ -12,19 +12,32 @@
 //! - `TubeTable::cells_touching`, the cells a 50 ly sphere about `pal5_like`'s axis touches, which
 //!   P10.T9's query walks: 10.5 µs (pod, 16 vCPU), the scan for the segments included (module
 //!   documentation of `global_list::tube`, "Finding the segments").
+//! - `GlobalListSource`'s hits and census for a 50 ly sphere on `pal5_like`'s axis, its table
+//!   kept by the caller (P10.T9), against the plan's "about 160 [members generated] to find two",
+//!   which the setup prints for the sphere it times. Measured (pod, 16 vCPU, 2026-10-31, the
+//!   release profile): 9 generated and 3 returned; the hits 1.05 ms, the census 49 µs.
 
 use std::env::VarError;
 use std::hint::black_box;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use hyperion_sim::Seed;
+use hyperion_sim::galaxy::features::centre::NoCentreOrbitCache;
+use hyperion_sim::galaxy::global_list::members::{StreamBandShares, stream_cell_members};
 use hyperion_sim::galaxy::global_list::spray::{Spray, SprayForce, SprayParams, Tracer};
 use hyperion_sim::galaxy::global_list::testing::pal5_like;
-use hyperion_sim::galaxy::global_list::{StreamSpec, TubeTable};
+use hyperion_sim::galaxy::global_list::{
+    GlobalList, GlobalListSource, StreamNumber, StreamSpec, TubeLookup, TubeTable,
+};
+use hyperion_sim::galaxy::imf::MassBand;
 use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::galaxy::query::{LayerSet, QuerySphere, SystemSource};
 use hyperion_sim::galaxy::{Galaxy, Population};
+use hyperion_sim::id::Layer;
+use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::LightYears;
 
 /// The pool's width: `HYPERION_WORKERS` where it is set, the server's own variable for its pool's
@@ -143,5 +156,81 @@ fn tube(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(global_list, tube);
+/// A caller's cache that holds one stream's table: `pal5_like`'s, stream 0.
+struct One {
+    list: GlobalList,
+    table: Arc<TubeTable>,
+}
+
+impl TubeLookup for One {
+    fn global_list(&self) -> &GlobalList {
+        &self.list
+    }
+
+    fn tube(&self, _: StreamNumber) -> Arc<TubeTable> {
+        Arc::clone(&self.table)
+    }
+}
+
+/// The global list's source for a 50 ly sphere on `pal5_like`'s axis, at the epoch, its table
+/// kept (P10.T9).
+fn query(c: &mut Criterion) {
+    let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())
+        .expect("the fixture builds")
+        .with_full_potential();
+    let spec = pal5_like(galaxy.potential());
+    let table = Arc::new(TubeTable::build(&galaxy, &spec).expect("the full potential"));
+    let list = GlobalList::of_parts(&galaxy, galaxy.potential(), vec![spec.clone()], Vec::new());
+    let lookup = One { list, table };
+    let source = GlobalListSource::new(&galaxy, &lookup, &NoCentreOrbitCache)
+        .expect("a list without the centre");
+    let centre = lookup.table.locate(0.3, 0.0, 0.0);
+    let radius = LightYears::new(50.0);
+    let sphere = QuerySphere::new(centre, radius, UniverseTime::EPOCH, LightYears::ZERO)
+        .expect("a positive radius");
+    let layers = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E]
+        .into_iter()
+        .fold(LayerSet::EMPTY, LayerSet::with);
+    let mut hits = Vec::new();
+    source.systems_in_sphere(&galaxy, &sphere, layers, &mut hits);
+    let shares = StreamBandShares::of(&galaxy, &spec);
+    let mut members = Vec::new();
+    let mut generated = 0;
+    for cell in lookup.table.cells_touching(&centre, radius) {
+        for band in [
+            MassBand::E,
+            MassBand::D,
+            MassBand::C,
+            MassBand::B,
+            MassBand::A,
+        ] {
+            stream_cell_members(&galaxy, &lookup.table, &shares, cell, band, &mut members);
+            generated += members.len();
+        }
+    }
+    println!(
+        "pal5_like, 50 ly on its axis: {generated} members generated, {} returned",
+        hits.len()
+    );
+    let mut group = c.benchmark_group("query");
+    group.bench_function(
+        "GlobalListSource::systems_in_sphere (pal5_like, 50 ly)",
+        |b| {
+            b.iter(|| {
+                let mut out = Vec::new();
+                source.systems_in_sphere(&galaxy, black_box(&sphere), layers, &mut out);
+                out.len()
+            });
+        },
+    );
+    group.bench_function(
+        "GlobalListSource::expected_in_sphere (pal5_like, 50 ly)",
+        |b| {
+            b.iter(|| source.expected_in_sphere(&galaxy, black_box(&sphere)));
+        },
+    );
+    group.finish();
+}
+
+criterion_group!(global_list, tube, query);
 criterion_main!(global_list);
