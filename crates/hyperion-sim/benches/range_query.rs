@@ -111,6 +111,11 @@
 //! brief at the emitted time is 44%, the stated curvature error 27% and the retarded step 18%.
 //! `range_observed_50ly_cold` builds every system's stars as well: 240 ms against
 //! `range_50ly_cold`'s 9.45 ms. Plan 12's Risks record the figures for ruling 143.4.
+//!
+//! `local_events_50ly_day` and `local_events_50ly_year` are plan 12's local events (P12.T5.e) over
+//! the same observed rows, warm, for a sensor with V, K and radio bands, over a day and a year from
+//! the query's time: what they add to the observed query, against the plan's under 1 ms, a miss
+//! being a finding. Plan 12's Risks ("P12.T5.e as built") name the lever.
 use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::num::NonZeroU32;
@@ -118,8 +123,15 @@ use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use hyperion_sim::Seed;
+use hyperion_sim::alerts::{
+    AlertBand, AlertContext, AlertQuery, BandLimits, SensorHorizon, local_events,
+};
 use hyperion_sim::coords::GalacticPosition;
+use hyperion_sim::events::TimeWindow;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::gas::ccm::Band;
+use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellCache, CellKey, NoCache, SystemRecord, generate_cell};
 use hyperion_sim::galaxy::query::{
@@ -129,7 +141,8 @@ use hyperion_sim::galaxy::query::{
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::observe::{NoStarsCache, StarsCache};
 use hyperion_sim::stellar::system::SystemStars;
-use hyperion_sim::units::LightYears;
+use hyperion_sim::time::{Span, UniverseTime};
+use hyperion_sim::units::{LightYears, WattsPerSquareMetre};
 
 /// The seed every query here runs in.
 const SEED: u64 = 0x0311_1000_0000_0000;
@@ -328,5 +341,77 @@ fn observed(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(query, expected, local, long_range, observed);
+/// Plan 12's local events (P12.T5.e) over the observed 50 ly query's rows, with their stars and the
+/// noise warm, for a sensor with V and K limits of 10⁻¹⁵ W m⁻² and a radio band, over a day and a
+/// year from the query's time: what they add to the observed query.
+fn local_events_50ly(c: &mut Criterion) {
+    let galaxy = galaxy();
+    let query = RangeQuery::builder(sunlike_point(), LightYears::new(50.0))
+        .mode(QueryMode::ObservedFrom(sunlike_point()))
+        .build()
+        .expect("50 ly at the Sun-like point is a query");
+    let mut stars = WarmStars::default();
+    let found = range_query_observed(&galaxy, &mut Warm::default(), &mut stars, &[], &query)
+        .expect("the Sun-like point holds no centre member");
+    let w = WattsPerSquareMetre::new;
+    let limits = |detect| BandLimits::new(w(detect), w(detect * 100.0)).expect("positive limits");
+    let sensor = SensorHorizon::new([
+        (AlertBand::Photometric(Band::V), limits(1e-15)),
+        (AlertBand::Photometric(Band::K), limits(1e-15)),
+        (AlertBand::Photometric(Band::Radio), limits(1e-28)),
+    ])
+    .expect("three bands");
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let mut group = c.benchmark_group("alerts");
+    for (name, days) in [
+        ("local_events_50ly_day", 1),
+        ("local_events_50ly_year", 365),
+    ] {
+        let end = UniverseTime::EPOCH
+            .checked_add(Span::from_seconds(days * 86_400))
+            .expect("a year after the epoch is on the clock");
+        let window = TimeWindow::new(UniverseTime::EPOCH, end).expect("a window");
+        let alerts = AlertQuery::builder(sunlike_point(), window, sensor.clone())
+            .build()
+            .expect("the window lies in the clock window");
+        let mut seen = Vec::new();
+        let mut ctx = AlertContext::new(&mut noise, &NoModifiers);
+        local_events(
+            &galaxy,
+            &mut ctx,
+            &alerts,
+            found.observed(),
+            &mut stars,
+            &mut seen,
+        );
+        eprintln!(
+            "{name}: {} detections from {} systems",
+            seen.len(),
+            found.observed().len()
+        );
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                seen.clear();
+                local_events(
+                    black_box(&galaxy),
+                    &mut ctx,
+                    black_box(&alerts),
+                    found.observed(),
+                    &mut stars,
+                    &mut seen,
+                );
+            });
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    query,
+    expected,
+    local,
+    long_range,
+    observed,
+    local_events_50ly
+);
 criterion_main!(query);

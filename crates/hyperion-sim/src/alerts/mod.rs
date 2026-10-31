@@ -42,11 +42,13 @@ use crate::time::{ClockWindow, UniverseTime};
 use crate::units::{LightYears, WattsPerSquareMetre};
 
 pub mod light;
+pub mod local;
 pub mod oneshot;
 pub mod reach;
 pub mod registry;
 
 pub use light::{band_share, supernova_luminosity, supernova_peak};
+pub use local::local_events;
 pub use oneshot::{NoOneShotCells, OneShotCells, OneShotClass, OneShotEvent, one_shot_detections};
 pub use reach::{
     ROOT_CUBE_DIAGONAL, class_reach, flux, inverse_square_flux, kind_reach, reach, transmission,

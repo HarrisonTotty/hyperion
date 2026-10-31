@@ -2700,3 +2700,46 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
       gives them a share.
     - An X-ray sensor fainter than 1.4 × 10⁻⁷ W m⁻² takes the core collapses' reach to the
       diagonal, and their walk to every class cell of the cube: the census must count that cost.
+- **P12.T5.e as built (lane `p12-t5e`, 2026-10-30, at `GENERATOR_VERSION` 24).** No generated
+  output moves and nothing is blessed: `local_events` is new and only reads. File
+  `alerts/local.rs` (`pub mod local`, `local_events` re-exported from `alerts`).
+  - _Signature._ The arguments are
+    `(galaxy, ctx, query: &AlertQuery, observed, stars: &mut impl StarsCache, out)`. The query
+    gives the observer's position, which Provides' list lacks, with the window and the sensor; the
+    stars come through T3's `StarsCache`, since a rogue planet's row has none. The query's classes
+    and host limit are not read.
+  - _Kinds._ Flares, FU Orionis outbursts and glitches, Crab-like and Vela-like. Waiting, with no
+    stand-in, on P11.T9 (the registry's pending task): `DwarfNova`, and `XrayBurst` while its row
+    is local.
+  - _Consumed beyond the plan's list._ Plan 06's `flares::flares_in`, `fu_orionis::outbursts_in`
+    and `glitches::{glitches_in, large_glitches_in}` (no `events_in` or `active_at` exists),
+    `StarModel::{state_at, pulsar_at, neutron_star}`, `PulsarState::{is_radio_alive, beam}` and
+    `PulsarBeam::sweeps`; `Drift::new`, `retarded`, `bearing` and `AlertContext::sightline`.
+  - _Band light (lean, 2026-10-30)._ Blackbody shares through T5.b's top hats (plan 07's centres,
+    Bessell's and Tokunaga's widths), crate-private: flares at 10,000 K, outbursts at 6,500 K for
+    U–I and 4,000 K for J to the mid infrared, none in radio or X-rays. Recompute them with T5.b's
+    `band_share` once it lands, and drop the test's own integral.
+  - _Detections (lean, 2026-10-30)._ One per event, in the sensor's band where it stands highest
+    over the limit. An onset is seen by its peak flux at its distance then, so that a split window
+    finds every onset as the whole does (Design note 6); an event in progress by its light at t₁.
+    `retardation` is `retarded`'s for the light first counted (an onset's arrival, or t₁), `class`
+    is `None`, and a host at the observer, which has no bearing, is dropped. `Detection` is built
+    as a struct literal: switch to T5.b's constructor when it lands. An onset's flux and
+    resolvability are its peak's, whose light arrives after `arrival()` (minutes for a flare, up to
+    25 years for an outburst): T8 takes its sighting's flux and level at the peak's arrival.
+  - _Glitches (lean, 2026-10-30)._ In `Band::Radio` with zero flux, never resolvable, when the
+    sensor has a radio band, the pulsar is radio-alive at the glitch and its beam sweeps the
+    observer. No flux limit applies, since plan 06 gives a pulsar no radio luminosity. Under Design
+    note 11 a flux of zero clears at once, so T8 must clear a glitch otherwise.
+  - _Lines and sightlines._ Each host moves on its record's epoch position at its velocity then,
+    `Drift::of_record`'s line, and takes one sightline, from that epoch position to the observer, so
+    that a row read at any time gives the same bits, and so does any split of the window to each
+    onset. Design note 6's ε
+    is β (W + s) ÷ (1 − β) + 1 s here, W the window's furthest end from the row's time; the light
+    at t₁ is the light-cone step iterated to 1 ns.
+  - _Tests._ The direct evaluation (each row on `Drift::of_record`, plan 06's listings over a wider
+    span, t₁'s light by bisection) matches in events, phases, bands and arrivals exactly, onsets'
+    fluxes to the bit and in-progress fluxes within 10⁻⁹.
+  - _For P09.T28 and T8._ A row on a followed orbit trips a debug assertion: its events need the
+    orbit. `alerts/local_events_50ly_day` misses 1 ms (a finding); nearly half of it is plan 06's
+    `FlareModel`, built for each star on each call inside `flares_in`.
