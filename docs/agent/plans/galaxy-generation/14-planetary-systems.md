@@ -31475,8 +31475,9 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         pass before T51.b's test. A settled solve takes 3.42 passes against 4.42 over the first 20;
         the bracket is unchanged. 14 of the 415 systems move, by at most 3.7 × 10⁻¹⁰ of a figure,
         and 347 snapshots, by at most 1.5 × 10⁻⁴ (a trace frost's 8.5 × 10⁻¹⁰ kg m⁻²), with no text
-        moved (`under_the_own_residual_stop_the_movers_and_passes_are_stated`). The locked climate's
-        `deck_alone` holds it back.
+        moved (`under_the_own_residual_stop_the_movers_and_passes_are_stated`).
+      - The locked climate's census (`deck_alone`) holds all three back: their moves, though tiny,
+        moved bodies outside the deck's domain.
       - For 26's bump: delete each hold, its switch and its tripwire, keeping
         `FallRadiusRoot::Bisections`, `CompressionRules::Fixed` and `PassStop::Consecutive` as the
         tests' oracles; 25's bump drops `with_every_25_hold` from `with_every_26_hold`.
