@@ -698,6 +698,11 @@ impl PlanetarySystem {
             StormEventsRules::Held => return SystemEvents::none(self.system),
             StormEventsRules::Wired => {}
         }
+        // A rogue planet's bodies have no events (P14.T27.b): impacts are a host's belts', storms
+        // a host's light.
+        if self.rogue_planet().is_some() {
+            return SystemEvents::none(self.system);
+        }
         let snapshot = self.snapshot_at(ctx, UniverseTime::EPOCH);
         let system_age = Gigayears::new(ctx.age_at_epoch().value() / YEARS_PER_GIGAYEAR);
         let mut bodies = Vec::new();

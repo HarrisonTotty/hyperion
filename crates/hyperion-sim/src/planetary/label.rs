@@ -104,6 +104,14 @@ impl BodyLabel {
         Self("HALO".to_owned())
     }
 
+    /// The label of a rogue planet, its system's one object at body `0x0000` (P14.T27.b): `A`,
+    /// the letter of the stellar level's first component, as a planet's host is named by its
+    /// components' letters, so that its moons are `A I` onwards and its rings `A RING 1`.
+    #[must_use]
+    pub fn rogue_planet() -> Self {
+        Self(host_letters([0]))
+    }
+
     /// The label's text.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -245,6 +253,9 @@ pub fn labels(system: &PlanetarySystem) -> Vec<(BodyIndex, BodyLabel)> {
     }
     if let Some(halo) = system.halo() {
         labelled.push((halo.index(), BodyLabel::halo()));
+    }
+    if system.rogue_planet().is_some() {
+        labelled.push((BodyIndex::PRIMARY, BodyLabel::rogue_planet()));
     }
     // Satellites, parent by parent, once their parents are labelled.
     labelled.sort_by_key(|(index, _)| *index);

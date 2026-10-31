@@ -277,7 +277,7 @@ fn under_the_hold_every_context_is_version_24_s() {
     for record in &records {
         let ctx = SystemContext::from_record(galaxy, record);
         let plan_02 = galaxy.potential().tidal_radius(
-            ctx.hierarchy().system_mass(),
+            ctx.hierarchy().unwrap().system_mass(),
             &PointLy::from(record.epoch_position()),
         );
         assert_same_bits(ctx.tidal_radius().value(), plan_02.value());
@@ -573,7 +573,7 @@ fn a_free_floating_brown_dwarf_takes_the_field_rule_at_its_own_mass() {
             let ctx = SystemContext::from_record(galaxy, record);
             assert_eq!(ctx.host_kind(), crate::planetary::HostKind::BrownDwarf);
             let plan_02 = galaxy.potential().tidal_radius(
-                ctx.hierarchy().system_mass(),
+                ctx.hierarchy().unwrap().system_mass(),
                 &PointLy::from(record.epoch_position()),
             );
             assert_same_bits(ctx.tidal_radius().value(), plan_02.value());

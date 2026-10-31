@@ -149,6 +149,7 @@ async fn system_bodies_and_body_records_are_the_sims_and_cached() {
     mass_and_orbit_gives_no_bulk_section(&server).await;
     no_system_has_events_before_the_25_bump(&server).await;
     a_brown_dwarf_s_bodies_are_refused_until_the_26_bump(&server).await;
+    a_rogue_planet_s_bodies_are_refused_until_the_26_bump(&server).await;
     server.stop().await;
 }
 
@@ -231,6 +232,68 @@ async fn a_brown_dwarf_s_bodies_are_refused_until_the_26_bump(server: &TestServe
         "{raw:#018x}: {error:?}"
     );
     assert_eq!(error.field.as_deref(), Some("body"), "{error:?}");
+    assert_eq!(
+        server.stats().bodies().generated(),
+        generated,
+        "nothing generated"
+    );
+    client.close().await;
+}
+
+/// P14.T27.b at generator version 24: a rogue planet's bodies are refused as the sim's
+/// `SystemContext::for_system` refuses it, `unknown_system` naming the field, its object's and its
+/// first moon's records too, and nothing is generated for it; the system cache, which holds no
+/// stars for it, stores nothing either. 26's bump gives it bodies: this property then becomes a
+/// test of them.
+async fn a_rogue_planet_s_bodies_are_refused_until_the_26_bump(server: &TestServer) {
+    use hyperion_sim::galaxy::placement::{ResolveSystemError, generate_cell};
+    use hyperion_sim::id::Layer;
+    let (mut client, universe) = joined(server, "Kepler Reach rogue planets").await;
+    let mut records = Vec::new();
+    // Cells of layer G along the solar circle until one holds a rogue planet.
+    let rogue = (0..64)
+        .find_map(|x| {
+            let cell = CellKey::new(Layer::RoguePlanet, [x, 6_500, 0]).expect("in the cube");
+            generate_cell(galaxy(), cell, &mut records);
+            records.first().copied()
+        })
+        .expect("the solar circle holds rogue planets");
+    assert_eq!(
+        SystemContext::for_system(galaxy(), rogue.id()),
+        Err(ResolveSystemError::LayerNotGenerated(Layer::RoguePlanet)),
+        "26's bump gives the rogue planets their bodies (P14.T27.b): test them here instead"
+    );
+    let generated = server.stats().bodies().generated();
+    let raw = rogue.id().raw();
+    let error = refused(
+        &mut client,
+        bodies_request(&universe, raw, at_years(0), DetailLevelDto::Full),
+    )
+    .await;
+    assert_eq!(
+        error.code,
+        ErrorCode::UnknownSystem,
+        "{raw:#018x}: {error:?}"
+    );
+    assert_eq!(error.field.as_deref(), Some("system"), "{error:?}");
+    for index in [0x0000, 0x0100] {
+        let error = refused(
+            &mut client,
+            detail_request(
+                &universe,
+                BodyIdHex::from_parts(raw, index),
+                at_years(0),
+                DetailLevelDto::Full,
+            ),
+        )
+        .await;
+        assert_eq!(
+            error.code,
+            ErrorCode::UnknownSystem,
+            "{raw:#018x}/{index:#06x}: {error:?}"
+        );
+        assert_eq!(error.field.as_deref(), Some("body"), "{error:?}");
+    }
     assert_eq!(
         server.stats().bodies().generated(),
         generated,

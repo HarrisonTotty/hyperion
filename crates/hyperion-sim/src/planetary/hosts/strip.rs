@@ -165,11 +165,7 @@ pub(crate) fn strip_radius(ctx: &SystemContext) -> Metres {
         StripRules::Stripped => ctx
             .encounter_environment()
             .and_then(|environment| {
-                encounter_radius(
-                    environment,
-                    ctx.hierarchy().system_mass(),
-                    ctx.age_at_epoch(),
-                )
+                encounter_radius(environment, ctx.system_mass(), ctx.age_at_epoch())
             })
             .map_or(
                 tidal,

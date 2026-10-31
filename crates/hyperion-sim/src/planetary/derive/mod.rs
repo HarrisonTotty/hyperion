@@ -161,7 +161,7 @@ use crate::units::consts::{GM_EARTH, GRAVITATIONAL_CONSTANT};
 use crate::units::{
     EarthFluxes, EarthMasses, EarthRadii, Gigayears, JoulesPerSquareMetre, JupiterMasses, Kelvin,
     Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecond, MetresPerSecondSquared, Pascals,
-    Seconds, SolarMasses, Watts, WattsPerSquareMetre, Years,
+    Seconds, SolarLuminosities, SolarMasses, Watts, WattsPerSquareMetre, Years,
 };
 
 /// A body as the derivation reads it: its mass and orbit, where it formed, and its one drawn
@@ -3126,19 +3126,47 @@ fn formation(
     placed: &PlacedBody,
     disc: &DiscProfile,
 ) -> Result<(SnowLineSide, UnitUniform, Option<SolvedComposition>), DeriveBodyError> {
+    formation_about(
+        placed,
+        &FormationHost {
+            mass: disc.host_mass(),
+            luminosity: disc.host_luminosity(),
+            snow_line: disc.snow_line(),
+        },
+    )
+}
+
+/// The host a body formed about, as its formation (T11) reads it: its mass, its zero-age
+/// luminosity and its disc's snow line, a [`DiscProfile`]'s, or for a rogue planet its birth
+/// host's ([`derive_alone`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct FormationHost {
+    /// The host's mass.
+    pub(crate) mass: SolarMasses,
+    /// The host's zero-age luminosity, which sets the flux of formation.
+    pub(crate) luminosity: SolarLuminosities,
+    /// The snow line of the host's disc.
+    pub(crate) snow_line: Metres,
+}
+
+/// [`formation`] about the host `host`.
+fn formation_about(
+    placed: &PlacedBody,
+    host: &FormationHost,
+) -> Result<(SnowLineSide, UnitUniform, Option<SolvedComposition>), DeriveBodyError> {
     let mass = placed.mass;
-    let formed = if placed.formation_distance.value() < disc.snow_line().value() {
+    let formed = if placed.formation_distance.value() < host.snow_line.value() {
         SnowLineSide::Inside
     } else {
         SnowLineSide::Beyond
     };
     let primordial = &placed.orbit;
     let formation_flux = luminosity_flux(
-        disc.host_luminosity(),
+        host.luminosity,
         primordial.semi_major_axis(),
         primordial.eccentricity().value(),
     );
-    let host = disc.host_mass();
+    let host = host.mass;
     match radius_window(mass, formed, formation_flux) {
         Ok(window) if formed == SnowLineSide::Inside && m_dwarfs::rocky_host_share(host) > 0.0 => {
             let (rank, solved) = rocky_branch(placed.radius_rank, &window, host, formation_flux)?;
@@ -3311,6 +3339,183 @@ fn at_the_time(
             Some(giant),
         ),
         None => (giant.radius(), heavy.fractions(), heavy.core(), Some(giant)),
+    })
+}
+
+/// A body derived with no star (P14.T27.b, design note 13): a rogue planet's bulk and its own heat
+/// at a time, [`derive_alone`]'s.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DerivedAlone {
+    mass: EarthMasses,
+    radius: EarthRadii,
+    density: KilogramsPerCubicMetre,
+    surface_gravity: MetresPerSecondSquared,
+    class: PlanetClass,
+    fractions: MassFractions,
+    internal_luminosity: Watts,
+    maximum_moon_mass: EarthMasses,
+}
+
+impl DerivedAlone {
+    /// Its mass, which no escape moves.
+    #[must_use]
+    pub(crate) const fn mass(&self) -> EarthMasses {
+        self.mass
+    }
+
+    /// Its radius at the time.
+    #[must_use]
+    pub(crate) const fn radius(&self) -> EarthRadii {
+        self.radius
+    }
+
+    /// Its class by composition.
+    #[must_use]
+    pub(crate) const fn class(&self) -> PlanetClass {
+        self.class
+    }
+
+    /// Its effective temperature, at which it radiates its own luminosity (its giant cooling's,
+    /// its solids' radiogenic and residual heat, or both blended: [`derive_alone`]) from its
+    /// radius, with no light to add to it: `None` for a body that radiates none.
+    #[must_use]
+    pub(crate) fn effective_temperature(&self) -> Option<Kelvin> {
+        (self.internal_luminosity > Watts::ZERO).then(|| {
+            with_internal_heat(
+                Kelvin::new(0.0),
+                self.internal_luminosity,
+                Metres::from(self.radius),
+            )
+        })
+    }
+
+    /// The heaviest moon tides let survive about it on its birth orbit (P14.T15), which its moon
+    /// generators read.
+    #[must_use]
+    pub(crate) const fn maximum_moon_mass(&self) -> EarthMasses {
+        self.maximum_moon_mass
+    }
+
+    /// Its bulk section: its radius, density, surface gravity, class and fractions, an
+    /// equilibrium temperature of zero, since no light reaches it, and its effective temperature.
+    #[must_use]
+    pub(crate) fn bulk(&self) -> crate::planetary::record::BulkProperties {
+        let bulk = crate::planetary::record::BulkProperties::new(
+            self.radius,
+            self.density,
+            self.surface_gravity,
+            self.class,
+            self.fractions,
+            Kelvin::new(0.0),
+        );
+        match self.effective_temperature() {
+            Some(t) => bulk.with_effective_temperature(t),
+            None => bulk,
+        }
+    }
+}
+
+/// [`derive_body`] with no star (P14.T27.b, design note 13): the body `placed`, formed on its
+/// primordial orbit about the host `born_about`, in a system of composition `composition`, at the
+/// age `age`, lit by nothing.
+///
+/// - **Radius and composition** (T11): fixed at formation as about any host ([`formation`]), and
+///   taken at the age under no flux. No escape strips it: its birth host's X-rays before it was
+///   freed are not modelled, and none reach it after, so a hydrogen envelope survives whole (lean,
+///   2026-10-31).
+/// - **Its own heat**, the term of its equilibrium temperature being zero: from 0.3 Jupiter masses
+///   plan 13's giant cooling at the age ([`GiantRadius::internal_luminosity`], blended in by
+///   [`giant_share`]); below it, and for the rest of the blend, P14.T24.b's radiogenic and
+///   residual heat of its solids ([`non_tidal_heat_flow`](crate::planetary::hooks::figures)) as an
+///   airless body's, and under a hydrogen envelope its core's, which the envelope holds in and
+///   radiates from its top (lean, 2026-10-31: the envelope's own contraction is not modelled).
+/// - **Its moon limit** (T15) on the birth orbit, about the birth host's mass, as its moon
+///   generators read it.
+///
+/// # Errors
+///
+/// [`DeriveBodyError::NotYetFormed`] for an age that is not positive, and as [`derive_body`] for
+/// what is fixed at formation and for a giant's cooling.
+pub(crate) fn derive_alone(
+    placed: &PlacedBody,
+    born_about: &FormationHost,
+    composition: &Composition,
+    age: Years,
+) -> Result<DerivedAlone, DeriveBodyError> {
+    use crate::planetary::hooks::figures::{HeatInputs, Subsurface, non_tidal_heat_flow};
+    if age.value().is_nan() || age.value() <= 0.0 {
+        return Err(DeriveBodyError::NotYetFormed { age });
+    }
+    let (formed, _, solved) = formation_about(placed, born_about)?;
+    let dark = EarthFluxes::new(0.0);
+    let mass = placed.mass;
+    let (radius, fractions, core, giant) =
+        at_the_time(mass, formed, solved.as_ref(), None, dark, age, composition)?;
+    let class = PlanetClass::of(mass, &fractions);
+    let mass_kg = Kilograms::from(mass);
+    let r = Metres::from(radius).value();
+    let volume = 4.0 / 3.0 * core::f64::consts::PI * (r * r * r);
+    let density = KilogramsPerCubicMetre::new(mass_kg.value() / volume);
+    let surface_gravity = MetresPerSecondSquared::new(GM_EARTH * mass.value() / (r * r));
+    // The solids' heat, radiated from the radius `outer`: the whole body's where it is solid, its
+    // core's under an envelope. A solid with no rock, or a core of no mass, makes none.
+    let solids_heat = || {
+        let (solid_mass, solid_fractions, solid_radius) = if class.has_solid_surface() {
+            (mass, fractions, Metres::new(r))
+        } else {
+            let core_mass = EarthMasses::new(mass.value() * (1.0 - fractions.envelope()));
+            if !(core_mass.value().is_finite() && core_mass.value() > 0.0) {
+                return Watts::ZERO;
+            }
+            (
+                core_mass,
+                MassFractions::of(core, 0.0),
+                Metres::from(radius_zeng(core_mass, core)),
+            )
+        };
+        let rs = solid_radius.value();
+        let heat = HeatInputs {
+            mass: solid_mass,
+            radius: solid_radius,
+            surface_gravity: MetresPerSecondSquared::new(GM_EARTH * solid_mass.value() / (rs * rs)),
+            class: PlanetClass::of(solid_mass, &solid_fractions),
+            fractions: solid_fractions,
+            inventory_water: Kilograms::new(0.0),
+            fe_h: composition.fe_h(),
+            tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+            subsurface_ocean: Subsurface::NotComputed,
+        };
+        non_tidal_heat_flow(&heat, age, SurfaceState::Airless).map_or(Watts::ZERO, |flow| {
+            Watts::new(flow.value() * 4.0 * core::f64::consts::PI * rs * rs)
+        })
+    };
+    let internal_luminosity = match &giant {
+        Some(giant) if giant.share() >= 1.0 => Watts::from(giant.internal_luminosity()),
+        Some(giant) => Watts::new(
+            Watts::from(giant.internal_luminosity()).value()
+                + (1.0 - giant.share()) * solids_heat().value(),
+        ),
+        None => solids_heat(),
+    };
+    let a = placed.orbit.semi_major_axis();
+    let e = placed.orbit.eccentricity().value();
+    let tidal = tidal_planet(class, mass_kg, Metres::new(r), &fractions);
+    let maximum_moon_mass = EarthMasses::from(maximum_surviving_moon_mass(
+        &tidal,
+        Kilograms::from(born_about.mass),
+        a,
+        e,
+        Seconds::from(age),
+    ));
+    Ok(DerivedAlone {
+        mass,
+        radius,
+        density,
+        surface_gravity,
+        class,
+        fractions,
+        internal_luminosity,
+        maximum_moon_mass,
     })
 }
 

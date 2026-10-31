@@ -11,7 +11,7 @@
 //!
 //! - [`SystemContext::for_system`] resolves a system ID through plan 03 and builds the rest from
 //!   the system's record: its stars through [`SystemStars`], its \[Fe/H\] through
-//!   [`draw_metallicity`](crate::stellar::system::draw_metallicity), and its sphere of influence
+//!   [`draw_metallicity`], and its sphere of influence
 //!   from plan 02's potential at its epoch position.
 //! - [`SystemContext::builder`] makes synthetic hosts for tests and tools: a star or a binary of
 //!   chosen masses, \[Fe/H\] and age, under a caller-supplied [`SystemId`] so that the stage's
@@ -40,7 +40,20 @@
 //! - **Every host is [`HostKind::Stellar`]** below generator version 26: plan 13 places the
 //!   free-floating brown dwarfs and rogue planets, and P14.T27.a gives a brown dwarf its context
 //!   from 26 ([`hosts::substellar`](super::hosts::substellar), behind its hold), as
-//!   [`HostKind::BrownDwarf`]. A rogue planet has none until P14.T27.b.
+//!   [`HostKind::BrownDwarf`], and P14.T27.b a rogue planet its own from 26, behind a hold of its
+//!   own, as [`HostKind::RoguePlanet`].
+//!
+//! # A rogue planet's context
+//!
+//! A rogue planet has no star (plan 13, P13.T5.d), so its context holds none (P14.T27.b, lean,
+//! 2026-10-31): its [`stars`](SystemContext::stars), [`zones`](SystemContext::zones),
+//! [`zone_stars`](SystemContext::zone_stars) and
+//! [`xuv_histories`](SystemContext::xuv_histories) are empty, its
+//! [`hierarchy`](SystemContext::hierarchy) is `None`, and in their place it holds the object's own
+//! plan 13 record: its mass ([`rogue_planet_mass`](SystemContext::rogue_planet_mass)), its age at
+//! the epoch, and its composition, at the \[Fe/H\] plan 13 draws for it
+//! ([`draw_metallicity`]). Its \[α/Fe\], sphere of
+//! influence and encounter environment are a grid system's, at its own mass.
 
 use std::error::Error;
 use std::fmt;
@@ -55,7 +68,7 @@ use crate::galaxy::features::members::{
 };
 use crate::galaxy::imf::MASS_LIMIT_LO;
 use crate::galaxy::placement::{
-    Existence, ResolveSystemError, SystemOrigin, SystemRecord, resolve,
+    Existence, ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve,
 };
 use crate::galaxy::{Galaxy, Population};
 use crate::id::{SystemId, SystemIdKind};
@@ -68,7 +81,7 @@ use crate::stellar::multiplicity::{
     MultiplicityModel, SlotKind, SystemHierarchy, TIDAL_CUT_SHARE,
 };
 use crate::stellar::sse::{self, ZCoeffs, zams};
-use crate::stellar::system::{MAX_STAR_MASS, StarModel, SystemStars};
+use crate::stellar::system::{MAX_STAR_MASS, StarModel, SystemStars, draw_metallicity};
 use crate::stellar::{Composition, substellar};
 use crate::time::{CLOCK_WINDOW_H, UniverseTime};
 use crate::units::consts::{GM_SUN, METRES_PER_KILOPARSEC, SECONDS_PER_JULIAN_YEAR};
@@ -583,7 +596,8 @@ impl Error for BuildEncounterEnvironmentError {}
 ///
 /// let context = SystemContext::for_system(&galaxy, id)?;
 /// assert_eq!(context.host_kind(), HostKind::Stellar);
-/// assert_eq!(context.stars().len(), usize::from(context.hierarchy().star_count()));
+/// let hierarchy = context.hierarchy().ok_or("a star system has a hierarchy")?;
+/// assert_eq!(context.stars().len(), usize::from(hierarchy.star_count()));
 /// // Nothing is generated beyond 0.49 of the sphere of influence (design note 14).
 /// assert!(context.strip_radius() < context.tidal_radius());
 /// // [α/Fe] is the closed form of its [Fe/H] and population (P14.T1.a).
@@ -595,7 +609,10 @@ pub struct SystemContext {
     id: SystemId,
     host_kind: HostKind,
     stars: Vec<StarModel>,
-    hierarchy: SystemHierarchy,
+    /// The stars' hierarchy; `None` for a rogue planet, which has no star.
+    hierarchy: Option<SystemHierarchy>,
+    /// A rogue planet's mass, its plan 13 record's; `None` for every other host.
+    rogue_planet_mass: Option<SolarMasses>,
     composition: Composition,
     alpha_fe: Option<Dex>,
     age_at_epoch: Years,
@@ -627,10 +644,11 @@ impl SystemContext {
     ///
     /// Whatever [`resolve`] refuses: [`ResolveSystemError::NoSuchSystem`] for an ID that names no
     /// system and [`KindNotGenerated`](ResolveSystemError::KindNotGenerated) for the kinds plans
-    /// 09 and 10 add. Plan 13 places the brown dwarfs and rogue planets: a rogue planet, which has
-    /// no stars (P13.T5.d), returns [`LayerNotGenerated`](ResolveSystemError::LayerNotGenerated)
-    /// here, and so does a free-floating brown dwarf below generator version 26, from which
-    /// P14.T27.a gives it a [`HostKind::BrownDwarf`] context.
+    /// 09 and 10 add. Plan 13 places the brown dwarfs and rogue planets: each returns
+    /// [`LayerNotGenerated`](ResolveSystemError::LayerNotGenerated) here below generator version
+    /// 26, from which P14.T27.a gives a free-floating brown dwarf a [`HostKind::BrownDwarf`]
+    /// context and P14.T27.b a rogue planet, which has no stars (P13.T5.d), its
+    /// [`HostKind::RoguePlanet`] one (the [module documentation](self)).
     pub fn for_system(galaxy: &Galaxy, id: SystemId) -> Result<Self, ResolveSystemError> {
         // A feature member is resolved once, here, rather than through `resolve` and again for
         // its stars: its interior is the costly part, and is kept for its surroundings too. So
@@ -653,6 +671,9 @@ impl SystemContext {
             Resolved::Placed(record) => *record,
         };
         refuse_ungenerated(&record)?;
+        if record.kind() == SystemKind::RoguePlanet {
+            return Ok(Self::of_rogue_planet(galaxy, &record));
+        }
         let stars = match resolved {
             Resolved::Member(member) => member.stars(galaxy),
             Resolved::Catalogue(system) => system
@@ -684,7 +705,7 @@ impl SystemContext {
     ///
     /// - The stars are [`stars_of`]'s, primary first, and the composition theirs: for a grid
     ///   system [`SystemStars::generate`]'s, at
-    ///   [`draw_metallicity`](crate::stellar::system::draw_metallicity) of the record, and for a
+    ///   [`draw_metallicity`] of the record, and for a
     ///   catalogue feature's member its
     ///   [`MemberRecord::stars`](crate::galaxy::features::members::MemberRecord::stars), at its
     ///   cluster's composition (its feature's interior is built again, once for its stars and
@@ -708,12 +729,17 @@ impl SystemContext {
     ///
     /// # Panics
     ///
-    /// As [`stars_of`] does: for a record of another galaxy, a rogue planet, and a member of the
-    /// galactic centre, whose system stage is not generated yet; and where `stars_of` refuses, for
-    /// a catalogue system whose class does not model its stars (a Type Ia's, plan 09, P09.T34.a),
-    /// which [`for_system`](Self::for_system) answers with `KindNotGenerated`.
+    /// As [`stars_of`] does: for a record of another galaxy, and a member of the galactic
+    /// centre, whose system stage is not generated yet; and where `stars_of` refuses, for a
+    /// catalogue system whose class does not model its stars (a Type Ia's, plan 09, P09.T34.a),
+    /// which [`for_system`](Self::for_system) answers with `KindNotGenerated`. A rogue planet,
+    /// which has no stars, takes its own context (P14.T27.b; the [module documentation](self)),
+    /// under every generator version's rules, as `from_record` refuses nothing.
     #[must_use]
     pub fn from_record(galaxy: &Galaxy, record: &SystemRecord) -> Self {
+        if record.kind() == SystemKind::RoguePlanet {
+            return Self::of_rogue_planet(galaxy, record);
+        }
         // A feature member's interior is built once, for its stars and its surroundings both.
         let interiors = KeepInteriors::new(galaxy);
         let stars = stars_of(galaxy, &interiors, record).unwrap_or_else(|error| {
@@ -765,11 +791,35 @@ impl SystemContext {
             // `SystemStars` lends its models; the copy keeps their built tracks, so nothing is
             // evolved twice.
             stars: stars.stars().to_vec(),
-            hierarchy,
+            hierarchy: Some(hierarchy),
+            rogue_planet_mass: None,
             alpha_fe: Some(alpha_fe(
                 stars.primary().composition().fe_h(),
                 record.population(),
             )),
+            age_at_epoch: record.age_at_epoch(),
+            tidal_radius: surroundings.sphere_of_influence,
+            encounter_environment: surroundings.encounter_environment,
+        }
+    }
+
+    /// The context of the rogue planet `record` of `galaxy` (P14.T27.b; the
+    /// [module documentation](self)): no stars, and the object's mass, age and composition, its
+    /// \[Fe/H\] plan 13's draw ([`draw_metallicity`]),
+    /// with the surroundings of a grid record at its own mass.
+    #[must_use]
+    fn of_rogue_planet(galaxy: &Galaxy, record: &SystemRecord) -> Self {
+        let mass = record.primary_initial_mass();
+        let composition = draw_metallicity(galaxy, record);
+        let surroundings = Surroundings::of_record(galaxy, &NoInteriorCache, record, mass);
+        Self {
+            id: record.id(),
+            host_kind: HostKind::RoguePlanet,
+            stars: Vec::new(),
+            hierarchy: None,
+            rogue_planet_mass: Some(mass),
+            composition,
+            alpha_fe: Some(alpha_fe(composition.fe_h(), record.population())),
             age_at_epoch: record.age_at_epoch(),
             tidal_radius: surroundings.sphere_of_influence,
             encounter_environment: surroundings.encounter_environment,
@@ -789,33 +839,59 @@ impl SystemContext {
     }
 
     /// What the host is: [`HostKind::Stellar`] for a star system and a synthetic host, and from
-    /// generator version 26 [`HostKind::BrownDwarf`] for a free-floating brown dwarf (P14.T27.a).
+    /// generator version 26 [`HostKind::BrownDwarf`] for a free-floating brown dwarf (P14.T27.a)
+    /// and [`HostKind::RoguePlanet`] for a rogue planet (P14.T27.b).
     #[must_use]
     pub const fn host_kind(&self) -> HostKind {
         self.host_kind
     }
 
     /// The stars, by body index, the primary first: one for each of the hierarchy's
-    /// [`stars`](SystemHierarchy::stars), with the same initial mass.
+    /// [`stars`](SystemHierarchy::stars), with the same initial mass; none for a rogue planet.
     #[must_use]
     pub fn stars(&self) -> &[StarModel] {
         &self.stars
     }
 
-    /// Plan 11's hierarchy of the stars, which bounds the stable zones.
+    /// Plan 11's hierarchy of the stars, which bounds the stable zones; `None` for a rogue
+    /// planet, which has no star (P14.T27.b).
     #[must_use]
-    pub const fn hierarchy(&self) -> &SystemHierarchy {
-        &self.hierarchy
+    pub const fn hierarchy(&self) -> Option<&SystemHierarchy> {
+        self.hierarchy.as_ref()
+    }
+
+    /// A rogue planet's mass, M☉, its plan 13 record's (P14.T27.b); `None` for every other host.
+    #[must_use]
+    pub const fn rogue_planet_mass(&self) -> Option<SolarMasses> {
+        self.rogue_planet_mass
+    }
+
+    /// The system's initial mass, M☉: its hierarchy's
+    /// [`system_mass`](SystemHierarchy::system_mass), or a rogue planet's own.
+    ///
+    /// # Panics
+    ///
+    /// Never for a context this module builds, which holds one or the other.
+    #[must_use]
+    pub fn system_mass(&self) -> SolarMasses {
+        match (&self.hierarchy, self.rogue_planet_mass) {
+            (Some(hierarchy), _) => hierarchy.system_mass(),
+            (None, Some(mass)) => mass,
+            (None, None) => unreachable!("a context holds stars or a rogue planet"),
+        }
     }
 
     /// The stable zones, each an orbit host with its limits (design note 10): P14.T9's
-    /// [`stable_zones`] of [`ZoneHierarchy::from`] the hierarchy, recomputed on each call.
+    /// [`stable_zones`] of [`ZoneHierarchy::from`] the hierarchy, recomputed on each call; none
+    /// for a rogue planet, which has no star.
     ///
     /// They are the zones at birth, all the slice has: design note 10 intersects them with the
     /// zones of the evaluated state once plan 11 evolves binaries (P11.T4).
     #[must_use]
     pub fn zones(&self) -> Vec<OrbitZone> {
-        stable_zones(&ZoneHierarchy::from(&self.hierarchy))
+        self.hierarchy.as_ref().map_or_else(Vec::new, |hierarchy| {
+            stable_zones(&ZoneHierarchy::from(hierarchy))
+        })
     }
 
     /// What each component's disc reads (P14.T9.c), by body index: its zero-age luminosity and
@@ -831,6 +907,8 @@ impl SystemContext {
     ///   ([`HostKind::BrownDwarf`], P14.T27.a), take their cooling fit's luminosity and radius at
     ///   10 Myr, the substellar rule of design note 6.
     ///
+    /// None for a rogue planet, which has no star.
+    ///
     /// # Panics
     ///
     /// Never for a context this module builds: a brown-dwarf slot's mass and a star's below
@@ -844,8 +922,8 @@ impl SystemContext {
             (state.luminosity(), state.radius())
         };
         self.hierarchy
-            .stars()
             .iter()
+            .flat_map(SystemHierarchy::stars)
             .zip(&self.stars)
             .map(|(slot, star)| {
                 let mass = slot.initial_mass();
@@ -908,14 +986,14 @@ impl SystemContext {
     }
 
     /// The X-ray and ultraviolet history of every component, in body order: [`xuv_history`]
-    /// of each.
+    /// of each; none for a rogue planet.
     ///
     /// [`xuv_history`]: Self::xuv_history
     #[must_use]
     pub fn xuv_histories(&self) -> Vec<XuvHistory> {
         self.hierarchy
-            .stars()
             .iter()
+            .flat_map(SystemHierarchy::stars)
             .zip(self.zone_stars())
             .map(|(slot, zone_star)| {
                 XuvHistory::new(slot.initial_mass(), zone_star.zams_luminosity)
@@ -984,7 +1062,11 @@ impl SystemContext {
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.stars.iter().fold(
-            self.stars.capacity() * size_of::<StarModel>() + self.hierarchy.heap_bytes(),
+            self.stars.capacity() * size_of::<StarModel>()
+                + self
+                    .hierarchy
+                    .as_ref()
+                    .map_or(0, SystemHierarchy::heap_bytes),
             |bytes, star| bytes + star.heap_bytes(),
         )
     }
@@ -999,8 +1081,8 @@ impl SystemContext {
 ///   resolve since plan 09's P09.T27, but their stars take the centre's own composition and its
 ///   black hole is no star.
 /// - [`ResolveSystemError::LayerNotGenerated`] for a system of a kind the stage does not generate
-///   under the rules in force ([`substellar_hosts::generates`]): a rogue planet, and a
-///   free-floating brown dwarf below generator version 26.
+///   under the rules in force ([`substellar_hosts::generates`]): a free-floating brown dwarf and a
+///   rogue planet below generator version 26.
 fn refuse_ungenerated(record: &SystemRecord) -> Result<(), ResolveSystemError> {
     if matches!(record.origin(), SystemOrigin::CentreMember { .. }) {
         return Err(ResolveSystemError::KindNotGenerated);
@@ -1264,7 +1346,8 @@ impl SystemContextBuilder {
             id,
             host_kind: HostKind::Stellar,
             stars: models,
-            hierarchy,
+            hierarchy: Some(hierarchy),
+            rogue_planet_mass: None,
             composition,
             alpha_fe: Some(alpha_fe(
                 self.fe_h,
@@ -1689,13 +1772,19 @@ mod tests {
                 MultiplicityContext::Free,
                 RedrawAttempt::FIRST,
             );
-            assert_eq!(context.hierarchy(), &drawn);
-            assert_eq!(context.hierarchy(), stars.hierarchy());
+            assert_eq!(context.hierarchy(), Some(&drawn));
+            assert_eq!(context.hierarchy(), Some(stars.hierarchy()));
             assert_eq!(
-                usize::from(context.hierarchy().star_count()),
+                usize::from(context.hierarchy().unwrap().star_count()),
                 context.stars().len()
             );
-            for (slot, star) in context.hierarchy().stars().iter().zip(context.stars()) {
+            for (slot, star) in context
+                .hierarchy()
+                .unwrap()
+                .stars()
+                .iter()
+                .zip(context.stars())
+            {
                 assert_eq!(slot.body().system(), record.id());
                 assert_same_bits(slot.initial_mass().value(), star.initial_mass().value());
             }
@@ -1940,9 +2029,16 @@ mod tests {
         assert_eq!(a.host_kind(), HostKind::Stellar);
         assert_eq!(
             a.hierarchy(),
-            &SystemHierarchy::single(id(3), SolarMasses::new(1.0), SlotKind::Star)
+            Some(&SystemHierarchy::single(
+                id(3),
+                SolarMasses::new(1.0),
+                SlotKind::Star
+            ))
         );
-        assert_eq!(a.hierarchy().stars()[0].body(), BodyId::new(id(3), 0));
+        assert_eq!(
+            a.hierarchy().unwrap().stars()[0].body(),
+            BodyId::new(id(3), 0)
+        );
         assert_same_bits(
             a.tidal_radius().value(),
             solar_neighbourhood_tidal_radius(SolarMasses::new(1.0)).value(),
@@ -1973,7 +2069,10 @@ mod tests {
             for (n, star) in (0_u16..).zip(context.stars()) {
                 let body = BodyId::new(context.id(), n);
                 assert_eq!(star.draws(), &StarDraws::for_star(seed, body));
-                assert_eq!(context.hierarchy().stars()[usize::from(n)].body(), body);
+                assert_eq!(
+                    context.hierarchy().unwrap().stars()[usize::from(n)].body(),
+                    body
+                );
             }
         }
         assert_ne!(a.stars()[0].draws(), b.stars()[0].draws());
@@ -1983,7 +2082,7 @@ mod tests {
     #[test]
     fn a_synthetic_binary_is_a_hierarchy_the_zones_read() {
         let context = binary(1.1, 0.9, 20.0, 0.3).build().unwrap();
-        let h = context.hierarchy();
+        let h = context.hierarchy().unwrap();
         assert_eq!(h.star_count(), 2);
         assert_eq!(context.stars().len(), 2);
         let (node, orbit) = h.pairs().next().unwrap();
@@ -2029,11 +2128,14 @@ mod tests {
     #[test]
     fn a_companion_below_the_stellar_floor_is_a_brown_dwarf() {
         let dwarf = binary(0.9, 0.05, 5.0, 0.1).build().unwrap();
-        assert_eq!(dwarf.hierarchy().stars()[1].kind(), SlotKind::BrownDwarf);
+        assert_eq!(
+            dwarf.hierarchy().unwrap().stars()[1].kind(),
+            SlotKind::BrownDwarf
+        );
         let floor = binary(0.9, MIN_COMPANION_MASS.value(), 5.0, 0.1)
             .build()
             .unwrap();
-        assert_eq!(floor.hierarchy().stars()[1].kind(), SlotKind::Star);
+        assert_eq!(floor.hierarchy().unwrap().stars()[1].kind(), SlotKind::Star);
         assert!(
             binary(0.9, MIN_SUBSTELLAR_COMPANION_MASS.value(), 5.0, 0.1)
                 .build()

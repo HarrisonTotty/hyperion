@@ -47,12 +47,13 @@
 //! Then every planet's and member's rotation law, from it its satellites' frame on its Laplace
 //! surface, on which they are found again (P14.T56.a), and each moon's law on its plane.
 //!
-//! Second-generation planets (P14.T28.e) and the rogue planets of P14.T27.b are not built: their
-//! stages do not exist yet, and their streams (`planet.secondgen`) and slots (`0xC0`–`0xCF`, the
-//! stellar level of a free-floating system) stay reserved for them. Nor is P14.T28.a's
-//! protoplanetary disc (belt slot `0xE0`) or P14.T28.d's debris disc (`0xEE`). A free-floating
-//! brown dwarf runs the steps above from generator version 26 (P14.T27.a), its planets from slot
-//! `0x01`.
+//! Second-generation planets (P14.T28.e) are not built: their stage does not exist yet, and their
+//! streams (`planet.secondgen`) and slots (`0xC0`–`0xCF`) stay reserved for them. Nor is
+//! P14.T28.a's protoplanetary disc (belt slot `0xE0`) or P14.T28.d's debris disc (`0xEE`). A
+//! free-floating brown dwarf runs the steps above from generator version 26 (P14.T27.a), its
+//! planets from slot `0x01`. A rogue planet ([`HostKind::RoguePlanet`], from 26, P14.T27.b) runs
+//! none of them but step 7: it is body `0x0000`, derived with no star, with its satellites about it
+//! ([`RoguePlanet`], the `rogue` module), and every query of its system takes that module's path.
 //!
 //! [`PlanetarySystem`] holds only that primordial state, which is what the server may cache ("state
 //! at the epoch, never positions at some time").
@@ -233,6 +234,7 @@ use moon_ice::{HotHistory, MoonIce, kept_water, shell_lag};
 use small_bodies::SmallBodyTypes;
 
 pub use events::{ListedEvents, SystemEvents, events_on_the_record};
+pub use rogue::RoguePlanet;
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then
 /// seven reserved.
@@ -1030,6 +1032,9 @@ pub struct PlanetarySystem {
     halo: Option<SystemHalo>,
     /// The rules its records' cold traps follow, read once as it is generated.
     record: RecordRules,
+    /// A rogue planet's object, body `0x0000` (P14.T27.b, [`rogue`]); `None` for every other
+    /// system.
+    rogue: Option<RoguePlanet>,
 }
 
 /// The rules a system's records follow that a version hold switches: the generator version's,
@@ -1087,6 +1092,9 @@ struct SystemHalo {
 /// As [`generate_planets`].
 #[must_use]
 pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
+    if ctx.host_kind() == HostKind::RoguePlanet {
+        return rogue::generate(seed, ctx);
+    }
     let mut system = generate_planets(seed, ctx);
     let id = ctx.id();
 
@@ -1266,8 +1274,11 @@ impl SatelliteSite {
 /// Never for a context [`SystemContext`] builds, whose components all have valid zero-age states.
 #[must_use]
 pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
+    if ctx.host_kind() == HostKind::RoguePlanet {
+        return rogue::generate_planets(seed, ctx);
+    }
     let id = ctx.id();
-    let hierarchy = ctx.hierarchy();
+    let hierarchy = stellar_hierarchy(ctx);
     let under = members_under(hierarchy);
     let stars = ctx.zone_stars();
     let strip = ctx.strip_radius();
@@ -1342,6 +1353,7 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         belts: Vec::new(),
         halo: None,
         record: RecordRules::in_force(),
+        rogue: None,
     }
 }
 
@@ -1533,7 +1545,7 @@ fn system_halo(
         }
     }
     let (zone, host) = best?;
-    let h = ctx.hierarchy();
+    let h = stellar_hierarchy(ctx);
     let under = members_under(h);
     let members = members_of(zone);
     let companion = h
@@ -1648,6 +1660,18 @@ fn within(limits: Truncation, strip: Metres) -> Truncation {
         Some(outer) if outer <= strip => limits,
         Some(_) | None => limits.with_outer(strip),
     }
+}
+
+/// The hierarchy of the stars of `ctx`, which every system with zones has.
+///
+/// # Panics
+///
+/// For a rogue planet's context, which has no star: its system takes its own path
+/// ([`rogue`]) before anything reads a hierarchy.
+#[must_use]
+fn stellar_hierarchy(ctx: &SystemContext) -> &SystemHierarchy {
+    ctx.hierarchy()
+        .expect("a system with stars has a hierarchy; a rogue planet's takes its own path")
 }
 
 /// The components under each node of `h`, a bit per body index, by node index.
@@ -1767,7 +1791,8 @@ impl PlanetarySystem {
     }
 
     /// Every body but the populations, sorted by index: the planets, their moons and rings, and
-    /// the belts' members with their moons.
+    /// the belts' members with their moons; in a rogue planet's system its moons and rings, its
+    /// object being [`rogue_planet`](Self::rogue_planet).
     #[must_use]
     pub fn bodies(&self) -> &[Body] {
         &self.bodies
@@ -1835,9 +1860,10 @@ impl PlanetarySystem {
     #[must_use]
     pub fn indices(&self) -> Vec<BodyIndex> {
         let mut indices: Vec<BodyIndex> = self
-            .bodies
-            .iter()
-            .map(Body::index)
+            .rogue
+            .map(|_| BodyIndex::PRIMARY)
+            .into_iter()
+            .chain(self.bodies.iter().map(Body::index))
             .chain(self.belts.iter().map(Belt::index))
             .chain(self.halo().map(CometaryHalo::index))
             .collect();
@@ -1874,6 +1900,22 @@ impl PlanetarySystem {
         self.bodies
             .iter()
             .filter(move |body| body.parent() == OrbitHost::Body(index))
+    }
+
+    /// The rogue planet's object of a rogue planet's system, which its queries read in place of
+    /// stars ([`rogue`]), queried with `ctx`; `None` for every other system.
+    ///
+    /// # Panics
+    ///
+    /// If `ctx` is not the context the system was generated from, as every query does.
+    #[must_use]
+    fn queried_rogue(&self, ctx: &SystemContext) -> Option<&RoguePlanet> {
+        assert_eq!(
+            ctx.id(),
+            self.system,
+            "a system is queried with the context it was generated from"
+        );
+        self.rogue.as_ref()
     }
 
     /// The planets of the orbit host `host`, as the belts read them.
@@ -1942,6 +1984,9 @@ impl PlanetarySystem {
     /// ([`StarModel::state_at`](crate::stellar::system::StarModel::state_at)).
     #[must_use]
     pub fn snapshot_at(&self, ctx: &SystemContext, t: UniverseTime) -> SystemSnapshot {
+        if let Some(object) = self.queried_rogue(ctx) {
+            return self.rogue_snapshot(ctx, object, t);
+        }
         let epoch = Epoch::new(self, ctx, t).with_shades().with_small_bodies();
         // Once for the whole snapshot, every body's zonal profiles reading them (lever (h)).
         let cosines = HourCosines::new();
@@ -2193,7 +2238,8 @@ impl PlanetarySystem {
     /// # Errors
     ///
     /// [`ResolveBodyError::NoSuchBody`] if the system holds no body `index`: an unused slot or a
-    /// star, whose records are plan 06's.
+    /// star, whose records are plan 06's. A rogue planet's object, body `0x0000`, has its record
+    /// here (P14.T27.b).
     ///
     /// # Panics
     ///
@@ -2204,6 +2250,9 @@ impl PlanetarySystem {
         index: BodyIndex,
         t: UniverseTime,
     ) -> Result<BodyRecord, ResolveBodyError> {
+        if let Some(object) = self.queried_rogue(ctx) {
+            return self.rogue_record(ctx, object, index, t);
+        }
         let epoch = Epoch::new(self, ctx, t);
         let label = label::label(self, index).ok_or(ResolveBodyError::NoSuchBody)?;
         if let Some(belt) = self.belt(index) {
@@ -2255,6 +2304,11 @@ impl PlanetarySystem {
         index: BodyIndex,
         t: UniverseTime,
     ) -> Result<Option<SystemPosition>, ResolveBodyError> {
+        if self.queried_rogue(ctx).is_some() {
+            return Ok(self
+                .rogue_state(ctx, index, t)?
+                .map(|(position, _)| position));
+        }
         if self.belt(index).is_some() || self.halo().is_some_and(|halo| halo.index() == index) {
             return Ok(None);
         }
@@ -2318,6 +2372,9 @@ impl PlanetarySystem {
         index: BodyIndex,
         t: UniverseTime,
     ) -> Result<Option<(SystemPosition, SystemVelocity)>, ResolveBodyError> {
+        if self.queried_rogue(ctx).is_some() {
+            return self.rogue_state(ctx, index, t);
+        }
         let Some(position) = self.position_at(ctx, index, t)? else {
             return Ok(None);
         };
@@ -2381,6 +2438,13 @@ impl PlanetarySystem {
         if self.belt(index).is_some() || self.halo().is_some_and(|halo| halo.index() == index) {
             return Ok(None);
         }
+        // A rogue planet's object is its system's body `0x0000`, not one of its bodies.
+        if self.rogue.is_some() && index == BodyIndex::PRIMARY {
+            return Ok(Some(hooks::surface_seed(
+                self.seed,
+                index.body_id(self.system),
+            )));
+        }
         let body = self.body(index).ok_or(ResolveBodyError::NoSuchBody)?;
         Ok(match body.part {
             Part::Planet(_) | Part::Moon(_) | Part::Member(_) => {
@@ -2410,6 +2474,9 @@ impl PlanetarySystem {
         index: BodyIndex,
         t: UniverseTime,
     ) -> Result<Option<BodyHooks>, ResolveBodyError> {
+        if let Some(object) = self.queried_rogue(ctx) {
+            return self.rogue_hooks(ctx, object, index, t);
+        }
         let Some(seed) = self.surface_seed(index)? else {
             return Ok(None);
         };
@@ -5718,7 +5785,7 @@ impl<'a> PastSky<'a> {
         fate: &'a BodyFate<'a>,
         t: UniverseTime,
     ) -> Self {
-        let h = ctx.hierarchy();
+        let h = stellar_hierarchy(ctx);
         let under = members_under(h);
         let members = members_of(zone);
         let stars = (0..ctx.stars().len())
@@ -6494,7 +6561,7 @@ impl<'c> Epoch<'c> {
         Self {
             ctx,
             t,
-            under: members_under(ctx.hierarchy()),
+            under: ctx.hierarchy().map_or_else(Vec::new, members_under),
             states: ctx.stars().iter().map(|star| star.state_at(t)).collect(),
             xuv: ctx.xuv_histories(),
             shades: None,
@@ -6604,7 +6671,7 @@ impl<'c> Epoch<'c> {
             HostKind::BrownDwarf | HostKind::RoguePlanet => return None,
         }
         let (member, state) = brightest?;
-        let slot = self.ctx.hierarchy().stars().get(usize::from(member))?;
+        let slot = self.ctx.hierarchy()?.stars().get(usize::from(member))?;
         let temperature = state.effective_temperature();
         let shines = temperature.value().is_finite()
             && temperature.value() > 0.0
@@ -6628,7 +6695,7 @@ impl<'c> Epoch<'c> {
     /// `None` before they form.
     #[must_use]
     fn companions(&self, zone: &OrbitZone) -> Option<Vec<Illumination>> {
-        let h = self.ctx.hierarchy();
+        let h = stellar_hierarchy(self.ctx);
         let members = members_of(zone);
         (0..self.states.len())
             .filter(|&star| (members & (1 << star)) == 0)
@@ -6652,7 +6719,7 @@ impl<'c> Epoch<'c> {
     /// root down, with its arithmetic: for a single component, its position bit for bit.
     #[must_use]
     fn centre(&self, members: u32) -> SystemPosition {
-        let h = self.ctx.hierarchy();
+        let h = stellar_hierarchy(self.ctx);
         let mut node = h.root();
         let mut centre = SystemPosition::ORIGIN;
         loop {
@@ -6688,7 +6755,7 @@ impl<'c> Epoch<'c> {
     /// [`star_states_at`](crate::stellar::multiplicity::star_states_at) does.
     #[must_use]
     fn centre_velocity(&self, members: u32) -> SystemVelocity {
-        let h = self.ctx.hierarchy();
+        let h = stellar_hierarchy(self.ctx);
         let mut node = h.root();
         let mut velocity = SystemVelocity::ZERO;
         loop {
@@ -6761,6 +6828,7 @@ mod ocean_tests;
 pub(crate) mod planet_lag;
 #[cfg(test)]
 mod present_state_tests;
+mod rogue;
 pub(crate) mod small_bodies;
 #[cfg(test)]
 pub(crate) mod tests;

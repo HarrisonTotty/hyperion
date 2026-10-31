@@ -3205,6 +3205,8 @@ one log-normal draw per resource of 0.3 dex for what the model leaves out.
   with no star (T_eq term zero, internal heat only: the cooling fit above 0.3 M_J, radiogenic and
   residual heat from T24 below it, and a hydrogen envelope's insulation where one survives).
   Satellites by T17–T20 with the ejection cut of D13 on `planet.origin`.
+  - _Built_ 2026-10-31, held at 26 (`ROGUE_PLANET_HOSTS_VERSION`): Risks, "Deviations in
+    P14.T27.b, as built".
   - _Tests:_ (a) 10⁴ free-floating brown dwarfs place chains that satisfy T10.a, none with a giant,
     about half with nothing; the habitable zone of a 0.05 M☉ host moves inward with age. (b) 10⁴
     rogue planets of 0.3 M⊕–13 M_J derive without a star, and their satellites from T22.a satisfy
@@ -33217,6 +33219,40 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - For P14.T27.b: `generates` refuses rogue planets under both arms, `generate_planets` puts a
     `RoguePlanet` host on `class_weights` until it has its own arm, and `for_stars` needs
     `SystemStars`, which a rogue planet does not have.
+- **Deviations in P14.T27.b, as built (2026-10-31).** Held at 26: `hosts::substellar`'s
+  `ROGUE_PLANET_HOSTS_VERSION`, `RoguePlanetRules::{Held, Bodies}`, the tests' `with_rogue_planets`
+  (a line in `with_every_26_hold`) and the tripwire
+  `the_rogue_planets_are_held_only_until_the_26_bump`, apart from T27.a's (lean, 2026-10-31);
+  nothing moves at 24 or 25.
+  - _The context (lean, 2026-10-31):_ no stars. `SystemContext::hierarchy()` now returns
+    `Option<&SystemHierarchy>` (`None` for a rogue planet); `stars()`, `zones()`, `zone_stars()`
+    and `xuv_histories()` are empty. New: `rogue_planet_mass()` and `system_mass()`. The
+    composition is plan 13's `draw_metallicity`, the surroundings a grid record's at its own mass.
+    `from_record` builds it under every version's rules; `for_system` refuses it below 26.
+  - _Readers settled:_ `generate_planets`' class weights (unreached: no zones);
+    `Epoch::photochemistry_temperature` (`None`); every `PlanetarySystem` query branches to
+    `system::rogue` before it reads a star; `strip_radius` reads `system_mass()`.
+  - _The object:_ `system::RoguePlanet` (`PlanetarySystem::rogue_planet()`), body `0x0000`, not
+    among `bodies()` but in `indices()`, labelled `A`. Derived by `derive::derive_alone` on a
+    `hosts::substellar::BirthOrbit` (words 2–4 of its `planet.origin`): 1 M☉ host, log-uniform
+    1–30 au, isotropic plane (lean, 2026-10-31). T_eq 0 K; no escape, so an envelope survives
+    whole (lean); its heat is giant cooling × share plus (1 − share) × its solids' (or its core's,
+    under an envelope) P14.T24.b heat. A rogue of 1 M_J or more is read on the same birth orbit by
+    its moon generators, uncut (lean).
+  - _`NotModelled` (each needs a star):_ the object's surface (solid) or envelope (not), its
+    photometry, rotation and figure; a moon's bulk, surface, photometry, rotation and figure; the
+    hooks' bulk composition. Its orbit is `NotApplicable`, as are its snapshot's belts and halo; no
+    events.
+  - _Satellites:_ `satellites::satellites_inside` (the cut, before numbering), `moon_index` (now
+    public: a free-floating object's moons in planet slots), and `candidate_key` (keys `0x0k00`).
+    The server's `ring_gap_moon` reads `moon_index`: before it, a rogue giant's ring gap panicked.
+  - _Accept, as built:_ `cargo test -p hyperion-sim --lib planetary::hosts::substellar` and
+    `cargo test -p hyperion-server --test system_bodies`.
+  - _For 26's bump:_ the tripwire's list: delete `substellar_placement.rs`'s
+    `a_free_floating_object_has_no_stellar_context_yet`; `SystemsPanel.tsx`'s `freeFloating` then
+    holds nothing; the server's `a_rogue_planet_s_bodies_are_refused_until_the_26_bump` becomes a
+    test of its bodies; and T27.a's bump item, the scene's frame search never visiting layer F,
+    holds for layer G too. No golden moves under `with_every_26_hold`: none holds a layer-G system.
 - **P14.T56.g's lag for a rocky belt's ice-bulk members, held at 25** (lane `p14-census-25`,
   2026-10-30). `system::member_lag` (`MEMBER_LAG_VERSION` 25, `MemberLagRules`, `with_member_lag`
   in `with_every_25_hold`) asks every belt member with no given bulk `SolvedLag::AboveMeltingOverIce`

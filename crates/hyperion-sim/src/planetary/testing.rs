@@ -496,6 +496,8 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   `MeltOxygenRules::Published` through `with_melt_oxygen`.
 /// - a free-floating brown dwarf's planets, `SUBSTELLAR_HOSTS_VERSION` (P14.T27.a), at
 ///   `SubstellarHostRules::BrownDwarfs` through `with_substellar_hosts`.
+/// - a rogue planet's bodies, `ROGUE_PLANET_HOSTS_VERSION` (P14.T27.b), at
+///   `RoguePlanetRules::Bodies` through `with_rogue_planets`.
 /// - the eyeball, `LOCKED_STATE_VERSION` (P14.T53.e's rule 5 on a world locked 1:1), at
 ///   `LockedStateRules::Eyeball` through `with_locked_state`: rule 5 also needs no open water
 ///   there;
@@ -536,11 +538,14 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
     use crate::planetary::hosts::strip::{StripRules, with_stripping};
-    use crate::planetary::hosts::substellar::{SubstellarHostRules, with_substellar_hosts};
+    use crate::planetary::hosts::substellar::{
+        RoguePlanetRules, SubstellarHostRules, with_rogue_planets, with_substellar_hosts,
+    };
     use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
     use crate::substance::helmholtz::{CompressionRules, with_compression};
     let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
     let run = move || with_substellar_hosts(SubstellarHostRules::BrownDwarfs, run);
+    let run = move || with_rogue_planets(RoguePlanetRules::Bodies, run);
     let run = move || with_locked_state(LockedStateRules::Eyeball, run);
     let run = move || with_sea_deck(SeaDeckRules::Dry, run);
     let run = move || with_planet_lag(PlanetLagRules::Airless, run);

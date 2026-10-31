@@ -419,7 +419,9 @@ domain_tags! {
     /// A planet's formation (P14.T28.a): the rank of a giant's formation age between 0.5 Myr and
     /// its disc's lifetime, word 0, and the rank of the host age at which a terrestrial planet's
     /// magma ocean ends, word 1, one uniform each, drawn for every planet; words 2–7 are reserved
-    /// (`planetary::hosts::young::FormationDraws`).
+    /// (`planetary::hosts::young::FormationDraws`). On a rogue planet's object, body `0x0000`,
+    /// which no planet is, words 2–4 are its birth orbit (P14.T27.b): its semi-major axis's rank,
+    /// and its plane's cos i and node, one uniform each (`planetary::hosts::substellar::BirthOrbit`).
     PLANET_ORIGIN: Body = "planet.origin";
 
     /// A planet's radius rank (P14.T30.a, design note 8): the one uniform that places it within
@@ -1467,6 +1469,12 @@ mod tests {
             assert!(tag.name().starts_with("centre."));
             assert!(ALL.contains(&tag));
         }
+    }
+
+    /// Plan 09's tags of its supernova remnants and its catalogue classes' grid and candidates,
+    /// with plan 11's accreting white dwarfs' under the same prefix.
+    #[test]
+    fn plan_09_registers_its_class_tags_with_their_scopes() {
         // P09.T17: the explosion energy, the one tag plan 09's Provides names under `snr.`.
         assert_eq!(SNR_ENERGY.name(), "snr.energy");
         assert_eq!(SNR_ENERGY.scope(), crate::rng::TagScope::System);

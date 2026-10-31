@@ -355,7 +355,7 @@ fn each_host_is_the_chain_of_its_stages() {
     for (ctx, system) in generated().iter().take(150) {
         let (seed, id) = (SEED, ctx.id());
         let stars = ctx.zone_stars();
-        let hierarchy = ctx.hierarchy();
+        let hierarchy = ctx.hierarchy().unwrap();
         let under = members_under(hierarchy);
         let mut slot = FIRST_PLANET_SLOT;
         for (zone, host) in system.zones().iter().zip(system.hosts()) {
@@ -1535,7 +1535,7 @@ fn a_body_is_at_its_host_s_position_plus_its_orbit() {
     for (ctx, system) in generated() {
         for t in window() {
             let epoch = Epoch::new(system, ctx, t);
-            star_positions_at(ctx.hierarchy(), t, &mut positions);
+            star_positions_at(ctx.hierarchy().unwrap(), t, &mut positions);
             for (n, (_, at)) in positions.iter().enumerate() {
                 let centre = epoch.centre(1 << n);
                 for (x, y) in centre.metres().into_iter().zip(at.metres()) {
@@ -1547,7 +1547,7 @@ fn a_body_is_at_its_host_s_position_plus_its_orbit() {
                 let centre = epoch.centre(members_of(zone)).metres();
                 let (mut moment, mut mass, mut reach) = ([0.0; 3], 0.0, 1.0_f64);
                 for m in zone.members() {
-                    let star = ctx.hierarchy().stars()[usize::from(m)]
+                    let star = ctx.hierarchy().unwrap().stars()[usize::from(m)]
                         .initial_mass()
                         .value();
                     let at = positions[usize::from(m)].1.metres();
@@ -1617,7 +1617,7 @@ fn a_star_s_zone_moves_with_star_states_at_bit_for_bit() {
     for (ctx, system) in generated() {
         for t in window() {
             let epoch = Epoch::new(system, ctx, t);
-            crate::stellar::multiplicity::star_states_at(ctx.hierarchy(), t, &mut states);
+            crate::stellar::multiplicity::star_states_at(ctx.hierarchy().unwrap(), t, &mut states);
             for (n, (_, _, velocity)) in states.iter().enumerate() {
                 let centre = epoch.centre_velocity(1 << n);
                 for (x, y) in centre
@@ -1668,6 +1668,7 @@ fn a_body_s_velocity_is_the_derivative_of_its_position_in(
     for (ctx, system) in systems {
         let pairs = ctx
             .hierarchy()
+            .unwrap()
             .pairs()
             .map(|(_, orbit)| orbit.apoapsis().value())
             .fold(0.0, f64::max);
@@ -2381,7 +2382,7 @@ fn the_close_binary_flag_and_the_aligned_plane_are_kraus_s_cut() {
             },
             "{au} au"
         );
-        let pair = ctx.hierarchy().pairs().next().unwrap().1;
+        let pair = ctx.hierarchy().unwrap().pairs().next().unwrap().1;
         let aligned = SystemPlane::of_orbit(pair.orientation());
         let barycentre = system.host(OrbitHost::Barycentre).unwrap();
         assert_eq!(

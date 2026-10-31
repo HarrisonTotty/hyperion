@@ -20,8 +20,9 @@ use hyperion_protocol::{
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::placement::ResolveSystemError;
 use hyperion_sim::galaxy::query::QueryMode;
-use hyperion_sim::id::SystemId;
+use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::observe::{Observer, curvature_error, summary_observed};
 use hyperion_sim::planetary::{ResolveBodyError, SystemContext};
 
@@ -253,7 +254,9 @@ pub(crate) async fn events(
 /// there first if it holds none, so that the stars are evolved once for both caches. The context
 /// is refused as [`SystemContext::for_system`] refuses the ID ([`SystemContext::for_stars`]): a
 /// free-floating brown dwarf, whose stars the system cache holds, has no bodies until generator
-/// version 26 (P14.T27.a).
+/// version 26 (P14.T27.a). A rogue planet, which has no stars for the system cache to hold, takes
+/// its context from [`SystemContext::for_system`] itself, which refuses it until 26 too
+/// (P14.T27.b).
 pub(crate) async fn bodies_of(
     state: &Arc<AppState>,
     key: GalaxyKey,
@@ -265,8 +268,13 @@ pub(crate) async fn bodies_of(
     state
         .bodies
         .get_or_generate(key, id, move || {
-            let stars = shared.systems.get_or_generate(key, &galaxy, id)?;
-            SystemContext::for_stars(&galaxy, &stars)
+            match shared.systems.get_or_generate(key, &galaxy, id) {
+                Ok(stars) => SystemContext::for_stars(&galaxy, &stars),
+                Err(ResolveSystemError::LayerNotGenerated(Layer::RoguePlanet)) => {
+                    SystemContext::for_system(&galaxy, id)
+                }
+                Err(error) => Err(error),
+            }
         })
         .await
 }

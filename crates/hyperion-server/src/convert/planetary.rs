@@ -63,9 +63,8 @@ use hyperion_sim::planetary::record::{
     TaxonomicClass,
 };
 use hyperion_sim::planetary::rings::{Ring, RingKind, RingMaterial};
-use hyperion_sim::planetary::{
-    BodyIndex, BodySub, PlanetarySystem, ResolveBodyError, SystemContext,
-};
+use hyperion_sim::planetary::satellites::moon_index;
+use hyperion_sim::planetary::{BodyIndex, PlanetarySystem, ResolveBodyError, SystemContext};
 use hyperion_sim::substance::{
     CondensedPhase, ExtinctionBasis, ResolveAerosolError, SizeDistributionKind, SubstanceId,
 };
@@ -790,14 +789,14 @@ fn population_dto(system: SystemId, population: &Population) -> PopulationDto {
 }
 
 /// The moon whose resonance clears a ring's gap: the `n`-th regular moon of the ring's planet,
-/// counted from 0 inside out, which is sub-index n + 1 (P14.T22.a numbers the regular moons
-/// first).
+/// counted from 0 inside out, which is its moon n + 1 (P14.T22.a numbers the regular moons
+/// first): sub-index n + 1 of a planet's slot, and a rogue planet's planet slot n + 1
+/// ([`moon_index`]).
 #[must_use]
 fn ring_gap_moon(system: SystemId, ring: &Ring, n: usize) -> BodyIdHex {
     let planet = ring.index().parent().expect("a ring belongs to its planet");
-    let sub = u8::try_from(n + 1).expect("a planet has at most six regular moons");
-    let moon = BodyIndex::new(planet.slot(), BodySub::Moon(sub))
-        .expect("a planet's regular moons are in its moon block");
+    let number = u8::try_from(n + 1).expect("a planet has at most six regular moons");
+    let moon = moon_index(planet, number).expect("a planet's regular moons are in its moon block");
     body_id(system, moon)
 }
 
@@ -3358,6 +3357,71 @@ mod tests {
                 "{key} is not a registry key"
             );
         }
+    }
+
+    /// P14.T27.b, ahead of 26's bump: a rogue planet's system converts, its context built from its
+    /// record, which `SystemContext::from_record` gives under every version's rules. It has no
+    /// zone and no plane; its object is sent with no parent and no orbit, its moons about it, and
+    /// its rings' gaps name its moons in the planet slots, `0x0100` upward.
+    #[test]
+    fn a_rogue_planet_s_records_convert_with_its_rings_gaps_on_its_moons() {
+        use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
+        use hyperion_sim::id::Layer;
+        use hyperion_sim::units::{JupiterMasses, SolarMasses};
+        let galaxy = &*GOLDEN_GALAXY;
+        let (mut cell, mut objects, mut rings, mut gaps) = (Vec::new(), 0, 0, 0);
+        for x in 0..120 {
+            let key = CellKey::new(Layer::RoguePlanet, [x, 6_500, 0]).expect("in the cube");
+            generate_cell(galaxy, key, &mut cell);
+            for record in &cell {
+                for m_jup in [0.3, 1.0, 3.0] {
+                    let giant = SystemRecord::from_parts(
+                        record.id(),
+                        *record.epoch_position(),
+                        record.origin(),
+                        record.population(),
+                        SolarMasses::from(JupiterMasses::new(m_jup)),
+                        record.age_at_epoch(),
+                    );
+                    let ctx = SystemContext::from_record(galaxy, &giant);
+                    let planets = hyperion_sim::planetary::generate(galaxy.seed(), &ctx);
+                    assert_eq!(
+                        zones(&ctx, &planets, galaxy.seed(), UniverseTime::EPOCH),
+                        []
+                    );
+                    assert!(system_plane(&planets).is_none());
+                    let snapshot = planets.snapshot_at(&ctx, UniverseTime::EPOCH);
+                    for record in snapshot.bodies() {
+                        let wire = body_record(record);
+                        if record.index() == BodyIndex::PRIMARY {
+                            assert_eq!(wire.parent, None);
+                            assert_eq!(wire.orbit, SectionDto::NotApplicable);
+                            objects += 1;
+                        }
+                        let SectionDto::Ok(PopulationDto::Ring(ring)) = &wire.population else {
+                            continue;
+                        };
+                        rings += 1;
+                        for gap in &ring.gaps {
+                            let (system, index) = gap.moon.to_parts();
+                            assert_eq!(system, giant.id().raw());
+                            assert_eq!(index & 0x00ff, 0, "{}", gap.moon);
+                            let moon = BodyIndex::try_from(index).expect("a body index");
+                            assert!(
+                                snapshot.body(moon).is_some(),
+                                "{} names a moon of the object",
+                                gap.moon
+                            );
+                            gaps += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            objects > 300 && gaps > 0,
+            "{objects} objects, {rings} rings, {gaps} gaps"
+        );
     }
 
     /// P14.T56.a: every golden ring carries its plane's normal on the wire, the sim's

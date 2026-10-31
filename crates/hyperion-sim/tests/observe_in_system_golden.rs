@@ -196,8 +196,9 @@ fn write_system(
             }
         }
     }
-    for slot in ctx.hierarchy().stars() {
-        let track = StarTrack::new(ctx.hierarchy(), slot.body()).expect("a star of the hierarchy");
+    for slot in ctx.hierarchy().unwrap().stars() {
+        let track =
+            StarTrack::new(ctx.hierarchy().unwrap(), slot.body()).expect("a star of the hierarchy");
         w.line(&format!("star {}", slot.body().body_index()));
         if let Some(velocity) = track.velocity_at(t) {
             write_velocity(w, "velocity_now", velocity);

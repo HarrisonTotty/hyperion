@@ -239,7 +239,7 @@ mod tests {
         let mut stars = 0;
         let mut positions = Vec::new();
         for (ctx, _) in whole().iter().take(100) {
-            let h = ctx.hierarchy();
+            let h = ctx.hierarchy().unwrap();
             for t in random_times(10, 0x0003_0004) {
                 star_positions_at(h, t, &mut positions);
                 for (body, at) in &positions {
@@ -265,7 +265,7 @@ mod tests {
             .iter()
             .find(|(other, _)| other.id() != ctx.id())
             .unwrap();
-        let foreign = other.hierarchy().stars()[0].body();
-        assert!(StarTrack::new(ctx.hierarchy(), foreign).is_none());
+        let foreign = other.hierarchy().unwrap().stars()[0].body();
+        assert!(StarTrack::new(ctx.hierarchy().unwrap(), foreign).is_none());
     }
 }

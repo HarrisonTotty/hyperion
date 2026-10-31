@@ -38,7 +38,9 @@
 //!
 //! A planet's moons take the sub-indices `0x01` upward in the order above (regular moons inside
 //! out, the giant-impact moon, then the captures kept in their ordinals), densely, and its rings
-//! `0x80` upward, the dusty ring first ([`generate_rings`]). A moon's own draws, its radius rank
+//! `0x80` upward, the dusty ring first ([`generate_rings`]). A rogue planet's, body `0x0000`, take
+//! the planet slots `0x0100` upward in the same order, and its rings the stellar level's `0x0080`
+//! upward (design note 3, P14.T27.b; [`moon_index`]). A moon's own draws, its radius rank
 //! and its volatile ranks (P14.T56.c), are keyed by its candidate's identity rather than its
 //! sub-index (ruling 112.5), so that pruning one moon moves no other's draw: `candidate_key` gives
 //! the layout. A belt's member (P14.T21.c) numbers its one possible moon, a giant-impact moon,
@@ -407,6 +409,34 @@ pub(crate) fn satellites_of(
     age_at_epoch: Years,
     frame: SatelliteFrame<'_>,
 ) -> Satellites {
+    satellites_inside(
+        seed,
+        parent_index,
+        parent,
+        ring_parent,
+        (belt, age_at_epoch),
+        frame,
+        None,
+    )
+}
+
+/// [`satellites_of`], keeping only the moons whose apocentre lies inside `bound` where one is
+/// given: an ejected rogue planet's cut (design note 13, P14.T27.b), applied to the moons the four
+/// steps keep before they are numbered, so that the moons kept are numbered densely, and their own
+/// draws, keyed by their candidates, do not move. A giant-impact moon is held to it at the end of
+/// the clock window, its widest. No regular moon is cut, since the regular moons lie inside a
+/// twentieth of the parent's Hill radius, and so the rings, whose gaps their resonances cut, are
+/// the same with or without it.
+#[must_use]
+pub(crate) fn satellites_inside(
+    seed: Seed,
+    parent_index: BodyIndex,
+    parent: &MoonParent,
+    ring_parent: Option<&RingParent>,
+    (belt, age_at_epoch): (Option<NearestBelt>, Years),
+    frame: SatelliteFrame<'_>,
+    bound: Option<Metres>,
+) -> Satellites {
     let frame = match frame {
         SatelliteFrame::Laplace(frame) => Some(frame),
         SatelliteFrame::OrbitalPlane => None,
@@ -478,7 +508,17 @@ pub(crate) fn satellites_of(
         .iter()
         .map(|&moon| SatelliteMoon::Regular(moon))
         .chain(impact.map(SatelliteMoon::GiantImpact))
-        .chain(kept_captures.map(|&moon| SatelliteMoon::Captured(moon)));
+        .chain(kept_captures.map(|&moon| SatelliteMoon::Captured(moon)))
+        .filter(|moon| {
+            bound.is_none_or(|bound| {
+                let widest = match moon {
+                    SatelliteMoon::Regular(moon) => moon.orbit().apoapsis(),
+                    SatelliteMoon::GiantImpact(moon) => moon.orbit_at(parent, end_age).apoapsis(),
+                    SatelliteMoon::Captured(moon) => moon.orbit().apoapsis(),
+                };
+                widest < bound
+            })
+        });
     let system = parent.id().system();
     let moons = numbered(seed, parent_index, parent, frame, generated);
 
@@ -689,12 +729,21 @@ const SMALL_CAPTURE_CANDIDATE_SUB: u8 = 0x30;
 /// capture at `0x20`, a giant's irregular k at `0x20 + k` (k of 1–4) and a rocky planet's small
 /// capture k at `0x30 + k`. So a regular moon keeps the key it had while nothing before it is
 /// pruned, and no two moons of a planet share a key. A belt member's one possible moon is its
-/// only candidate and keeps its own index, as does anything past the layout (`None`).
+/// only candidate and keeps its own index, as does anything past the layout (`None`). A
+/// free-floating object's moons, numbered in the planet slots (`moon_index`), are keyed by the
+/// same numbers as slots, sub-index 0: regular moon k at `0x0k00`, the giant-impact moon at
+/// `0x1000` (P14.T27.b).
 #[must_use]
 fn candidate_key(parent: BodyIndex, moon: &SatelliteMoon) -> Option<BodyIndex> {
     if parent.sub() != BodySub::Primary {
         return None;
     }
+    let key = |sub: u8| match parent.slot() {
+        BodySlot::Stellar => BodyIndex::new(BodySlot::Planet(sub), BodySub::Primary).ok(),
+        BodySlot::Planet(_) | BodySlot::SecondGeneration(_) | BodySlot::Belt(_) => {
+            BodyIndex::new(parent.slot(), BodySub::Moon(sub)).ok()
+        }
+    };
     let sub = match moon {
         SatelliteMoon::Regular(moon) => moon.ordinal(),
         SatelliteMoon::GiantImpact(_) => IMPACT_CANDIDATE_SUB,
@@ -704,14 +753,34 @@ fn candidate_key(parent: BodyIndex, moon: &SatelliteMoon) -> Option<BodyIndex> {
             CaptureKind::Small => SMALL_CAPTURE_CANDIDATE_SUB.checked_add(moon.ordinal())?,
         },
     };
-    BodyIndex::new(parent.slot(), BodySub::Moon(sub)).ok()
+    key(sub)
 }
 
 /// The index of the `n`-th moon (from 1) of the body `parent`: sub-index n of a planet's slot, or
-/// a belt member's `0x80` above its own; `None` past the layout.
+/// a belt member's `0x80` above its own; for a free-floating object, body `0x0000`, planet slot n
+/// (`0x0100` upward, design note 3; P14.T27.b); `None` past the layout.
+///
+/// A body's moons are numbered densely in P14.T22.a's order, regular moons first, so the
+/// k-th regular moon, the one whose resonance clears a ring's gap, is moon k.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::planetary::satellites::moon_index;
+/// use hyperion_sim::planetary::{BodyIndex, BodySlot, BodySub};
+///
+/// let planet = BodyIndex::new(BodySlot::Planet(3), BodySub::Primary)?;
+/// assert_eq!(moon_index(planet, 2), Some(BodyIndex::new(BodySlot::Planet(3), BodySub::Moon(2))?));
+/// // A rogue planet's moons take the planet slots.
+/// assert_eq!(moon_index(BodyIndex::PRIMARY, 2), Some(BodyIndex::try_from(0x0200)?));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[must_use]
-fn moon_index(parent: BodyIndex, n: u8) -> Option<BodyIndex> {
+pub fn moon_index(parent: BodyIndex, n: u8) -> Option<BodyIndex> {
     match parent.sub() {
+        BodySub::Primary if n <= LAST_MOON_SUB && parent.slot() == BodySlot::Stellar => {
+            BodyIndex::new(BodySlot::Planet(n), BodySub::Primary).ok()
+        }
         BodySub::Primary if n <= LAST_MOON_SUB => {
             BodyIndex::new(parent.slot(), BodySub::Moon(n)).ok()
         }

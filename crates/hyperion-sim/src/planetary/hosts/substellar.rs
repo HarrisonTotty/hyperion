@@ -32,23 +32,54 @@
 //!
 //! **Only free-floating objects come here** (design note 13). A brown dwarf bound to a star is
 //! plan 11's component, and design note 10 treats it as one: its zone keeps the stellar row's
-//! `SubstellarCompact` weight, continuous with the stars' at 0.08 M☉, under both arms. Rogue
-//! planets (P14.T27.b) are not built: their systems are refused under both.
+//! `SubstellarCompact` weight, continuous with the stars' at 0.08 M☉, under both arms.
 //!
-//! The client's `SYSTEM` view opens a brown dwarf at 26's bump, not here: until then it says that
-//! its bodies are not yet modelled, and the server refuses its bodies as
+//! # Rogue planets (P14.T27.b)
+//!
+//! A rogue planet is plan 13's object of layer G, 0.3 M⊕ to 13 Jupiter masses, with its record and
+//! its metallicity and no star. From its own hold's version, `ROGUE_PLANET_HOSTS_VERSION` (26,
+//! apart from the brown dwarfs' so that the two delete independently), it runs the satellite path
+//! only, as a planet without a star (design note 13):
+//!
+//! - **The context** ([`SystemContext::for_system`], [`HostKind::RoguePlanet`]) holds no star: no
+//!   stars, zones or hierarchy, and the object's mass, age and composition in their place.
+//! - **The object** is body `0x0000`, derived by P14.T16 with no star on the orbit it was born on
+//!   ([`BirthOrbit`]), drawn on its own `planet.origin`: the term of its equilibrium temperature is
+//!   zero, and it radiates its own heat, plan 13's giant cooling from 0.3 Jupiter masses and
+//!   P14.T24.b's radiogenic and residual heat below it. What needs a star is `NotModelled`
+//!   (`planetary::system`'s `rogue` module).
+//! - **Its satellites** are P14.T17–T20's about it on its birth orbit, with design note 13's
+//!   ejection cut: under [`EJECTED_BELOW`], one Jupiter mass, it was ejected and keeps only the
+//!   moons inside [`EJECTED_MOON_HILL_SHARE`] of its birth Hill radius; heavier, it formed alone
+//!   and keeps them all. Its moons are `0x0100` upward, its rings `0x0080` upward.
+//!
+//! The client's `SYSTEM` view opens a brown dwarf and a rogue planet at 26's bump, not here: until
+//! then it says that their bodies are not yet modelled, and the server refuses their bodies as
 //! [`SystemContext::for_system`] does.
+
+use core::f64::consts::TAU;
 
 use crate::galaxy::placement::SystemKind;
 use crate::galaxy::substellar::BROWN_DWARF_MIN_MSUN;
+use crate::id::BodyId;
+use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::planetary::HostKind;
 use crate::planetary::architecture::{
     ArchitectureClass, CLASS_COUNT, ClassWeights, small_planet_metallicity_scaling,
 };
 #[cfg(doc)]
 use crate::planetary::context::SystemContext;
-use crate::units::{Dex, SolarMasses};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
+use crate::planetary::derive::{FormationHost, hill_radius};
+use crate::planetary::disc::snow_line;
+use crate::planetary::placement::classes::orbits::SystemPlane;
+use crate::rng::{ObjectKey, Stream, tags};
+use crate::stellar::Composition;
+use crate::stellar::sse::{ZCoeffs, zams};
+use crate::units::{
+    AstronomicalUnits, Dex, EarthMasses, GravitationalParameter, JupiterMasses, Kilograms, Metres,
+    Radians, SolarMasses,
+};
+use crate::{GENERATOR_VERSION, GeneratorVersion, Seed, math};
 
 /// The generator version from which a free-floating brown dwarf has planets (P14.T27.a): 26, the
 /// first galaxy train after the task lands (the bump plan).
@@ -111,9 +142,71 @@ pub(crate) fn with_substellar_hosts<R>(rules: SubstellarHostRules, run: impl FnO
     run()
 }
 
+/// The generator version from which a rogue planet has bodies (P14.T27.b): 26, as for the brown
+/// dwarfs' ([`SUBSTELLAR_HOSTS_VERSION`]).
+///
+/// It is T27.b's one hold, apart from T27.a's so that the two delete independently (lean,
+/// 2026-10-31). Below it [`RoguePlanetRules::in_force`] is [`RoguePlanetRules::Held`]: a rogue
+/// planet's system is refused, and every generated value is version 25's bit for bit, since no
+/// other system reads a rogue planet. 26's bump deletes this hold, [`RoguePlanetRules`] with its
+/// `Held` arm, the tests' switch and its tripwire
+/// (`the_rogue_planets_are_held_only_until_the_26_bump`).
+pub(crate) const ROGUE_PLANET_HOSTS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether P14.T27.b's rogue planets are in force (its hold, [`ROGUE_PLANET_HOSTS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum RoguePlanetRules {
+    /// Version 25's and before: a rogue planet has no planetary system.
+    Held,
+    /// Version 26's: a rogue planet is body `0x0000` of a system of its own, with its moons and
+    /// rings.
+    Bodies,
+}
+
+impl RoguePlanetRules {
+    /// The rules this generator version gives: the rogue planets' bodies from
+    /// [`ROGUE_PLANET_HOSTS_VERSION`], none below it; in the tests, the rules a test's switch sets
+    /// on its thread ([`with_rogue_planets`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = ROGUE_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= ROGUE_PLANET_HOSTS_VERSION {
+            Self::Bodies
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The rogue planets' rules a test sets on its thread, `None` for the version's.
+    static ROGUE_RULES: core::cell::Cell<Option<RoguePlanetRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the rogue planets' rules `rules` on this thread, for the tests to reach
+/// their bodies ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. 26's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_rogue_planets<R>(rules: RoguePlanetRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<RoguePlanetRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            ROGUE_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(ROGUE_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
 /// Whether the planetary stage generates the systems of kind `kind` under the rules in force:
-/// every star system, and from [`SUBSTELLAR_HOSTS_VERSION`] the free-floating brown dwarfs; a
-/// rogue planet never, until P14.T27.b.
+/// every star system, from [`SUBSTELLAR_HOSTS_VERSION`] the free-floating brown dwarfs, and from
+/// [`ROGUE_PLANET_HOSTS_VERSION`] the rogue planets.
 #[must_use]
 pub(crate) fn generates(kind: SystemKind) -> bool {
     match kind {
@@ -121,7 +214,7 @@ pub(crate) fn generates(kind: SystemKind) -> bool {
         SystemKind::BrownDwarf => {
             SubstellarHostRules::in_force() == SubstellarHostRules::BrownDwarfs
         }
-        SystemKind::RoguePlanet => false,
+        SystemKind::RoguePlanet => RoguePlanetRules::in_force() == RoguePlanetRules::Bodies,
     }
 }
 
@@ -254,6 +347,172 @@ pub fn brown_dwarf_class_weights(mass: SolarMasses, fe_h: Dex) -> ClassWeights {
     ClassWeights::from_array(weights)
 }
 
+/// The mass from which a rogue planet formed alone, rather than being ejected from the system it
+/// formed in: one Jupiter mass (design note 13). Below it a rogue planet keeps only the moons
+/// inside [`EJECTED_MOON_HILL_SHARE`] of its birth orbit's Hill radius; from it, every moon its
+/// generators give it ([`BirthOrbit::moon_bound`]).
+pub const EJECTED_BELOW: JupiterMasses = JupiterMasses::new(1.0);
+
+/// The share of its birth orbit's Hill radius inside which an ejected planet keeps its moons: a
+/// tenth (design note 13, after Hong et al. 2018, ApJ 852, 85, whose N-body runs of planet–planet
+/// scattering find the moons of ejected planets kept close in; cited from memory and not
+/// re-checked at source, which this lane cannot reach).
+pub const EJECTED_MOON_HILL_SHARE: f64 = 0.1;
+
+/// The mass of a rogue planet's birth host: 1 M☉ (lean, 2026-10-31). Plan 13 draws none; the
+/// scattering that ejects a planet is a giant planets', and Hong et al.'s (2018) systems scatter
+/// about a Sun-like star.
+pub const BIRTH_HOST_MASS: SolarMasses = SolarMasses::new(1.0);
+
+/// The bounds of a rogue planet's birth semi-major axis, au, between which it is drawn log-uniform:
+/// 1 to 30 (lean, 2026-10-31), the Solar System's planets from Earth's orbit to Neptune's, across
+/// the snow line of [`BIRTH_HOST_MASS`]'s disc at about 2.3 au, so that about a quarter of rogue
+/// planets formed inside it.
+pub const BIRTH_AXIS_AU: (f64, f64) = (1.0, 30.0);
+
+/// The first word of `planet.origin` a rogue planet's birth orbit reads, on its object's key (body
+/// `0x0000`, which no planet has): its semi-major axis's rank at word 2, and its plane's cos i and
+/// node at words 3 and 4, words that a planet's formation reserves
+/// ([`FormationDraws`](crate::planetary::hosts::young::FormationDraws)).
+pub const BIRTH_ORBIT_WORD: u64 = 2;
+
+/// Whether a rogue planet of mass `mass` was ejected from the system it formed in: under
+/// [`EJECTED_BELOW`] (design note 13).
+#[must_use]
+pub fn ejected(mass: EarthMasses) -> bool {
+    mass < EarthMasses::from(EJECTED_BELOW)
+}
+
+/// A rogue planet's birth orbit (P14.T27.b, design note 13): circular, about a host of
+/// [`BIRTH_HOST_MASS`] at its zero-age main sequence, at a drawn semi-major axis, in an isotropic
+/// plane.
+///
+/// It is the orbit the planet formed on, which its formation (P14.T11, as about any host) and its
+/// moon generators (P14.T17–T20, its Hill sphere bounding its moons) read. Design note 13 draws it
+/// for an ejected planet; one that formed alone is read on it too (lean, 2026-10-31), since the
+/// generators read a parent on an orbit, but keeps every moon they give it.
+///
+/// # Examples
+///
+/// An ejected Neptune keeps its moons inside a tenth of its birth Hill radius; a Jupiter all:
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::placement::CellKey;
+/// use hyperion_sim::id::{BodyId, Layer};
+/// use hyperion_sim::planetary::hosts::substellar::BirthOrbit;
+/// use hyperion_sim::units::{EarthMasses, JupiterMasses};
+///
+/// let cell = CellKey::new(Layer::RoguePlanet, [0, 6_500, 0])?;
+/// let system = cell.candidate_id(0).ok_or("inside the cell's index field")?;
+/// let birth = BirthOrbit::draw(Seed::new(7), BodyId::new(system, 0x0000));
+/// let neptune = EarthMasses::new(17.1);
+/// let bound = birth.moon_bound(neptune).ok_or("a Neptune is ejected")?;
+/// assert!((bound.value() / birth.hill_radius(neptune).value() - 0.1).abs() < 1e-15);
+/// assert!(birth.moon_bound(EarthMasses::from(JupiterMasses::new(2.0))).is_none());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BirthOrbit {
+    semi_major_axis: Metres,
+    plane: SystemPlane,
+}
+
+impl BirthOrbit {
+    /// The birth orbit of the rogue planet whose object is `object`, body `0x0000` of its system,
+    /// in the universe of `seed`: words [`BIRTH_ORBIT_WORD`] to 4 of its `planet.origin` stream.
+    ///
+    /// # Panics
+    ///
+    /// Never: an open uniform gives a finite axis inside [`BIRTH_AXIS_AU`] and a valid plane.
+    #[must_use]
+    pub fn draw(seed: Seed, object: BodyId) -> Self {
+        let mut stream = Stream::open(seed, tags::PLANET_ORIGIN, ObjectKey::from(object));
+        stream.seek(BIRTH_ORBIT_WORD);
+        let (lo, hi) = BIRTH_AXIS_AU;
+        let au = lo * math::powf(hi / lo, stream.uniform_open());
+        let cos_i = 1.0 - 2.0 * stream.uniform_open();
+        let node = TAU * stream.uniform_open();
+        Self {
+            semi_major_axis: Metres::from(AstronomicalUnits::new(au)),
+            plane: SystemPlane::new(Radians::new(math::acos(cos_i)), Radians::new(node))
+                .expect("an inclination in [0, π] and a finite node make a plane"),
+        }
+    }
+
+    /// The orbit's semi-major axis.
+    #[must_use]
+    pub const fn semi_major_axis(&self) -> Metres {
+        self.semi_major_axis
+    }
+
+    /// The orbit's plane.
+    #[must_use]
+    pub const fn plane(&self) -> SystemPlane {
+        self.plane
+    }
+
+    /// The orbit's elements for a planet of mass `mass`: circular, in its plane, with μ = G (M +
+    /// m) about [`BIRTH_HOST_MASS`], at periapsis at the epoch.
+    ///
+    /// # Panics
+    ///
+    /// Never for a positive, finite mass.
+    #[must_use]
+    pub fn elements(&self, mass: EarthMasses) -> KeplerElements {
+        let mu = GravitationalParameter::from_solar_masses(SolarMasses::new(
+            BIRTH_HOST_MASS.value() + SolarMasses::from(mass).value(),
+        ));
+        let orientation =
+            Orientation::new(self.plane.inclination(), self.plane.node(), Radians::ZERO)
+                .expect("a plane's inclination and node make an orientation");
+        KeplerElements::from_semi_major_axis(
+            self.semi_major_axis,
+            mu,
+            Eccentricity::new(0.0).expect("a circle is an ellipse"),
+            orientation,
+            Radians::ZERO,
+        )
+        .expect("a birth orbit's axis and parameter are positive")
+    }
+
+    /// The orbit's circular Hill radius for a planet of mass `mass`, a (m ÷ 3M)^⅓ about
+    /// [`BIRTH_HOST_MASS`] (P14.T15's [`hill_radius`]).
+    #[must_use]
+    pub fn hill_radius(&self, mass: EarthMasses) -> Metres {
+        hill_radius(
+            self.semi_major_axis,
+            0.0,
+            Kilograms::from(mass),
+            Kilograms::from(BIRTH_HOST_MASS),
+        )
+    }
+
+    /// The apocentre inside which a rogue planet of mass `mass` keeps its moons: for an ejected
+    /// one ([`ejected`]) [`EJECTED_MOON_HILL_SHARE`] of its [`hill_radius`](Self::hill_radius),
+    /// and none for one that formed alone, which keeps them all.
+    #[must_use]
+    pub fn moon_bound(&self, mass: EarthMasses) -> Option<Metres> {
+        ejected(mass).then(|| self.hill_radius(mass) * EJECTED_MOON_HILL_SHARE)
+    }
+}
+
+/// A rogue planet's birth host as its formation reads it (P14.T27.b): [`BIRTH_HOST_MASS`] at its
+/// zero-age main sequence (plan 06's [`zams::luminosity`]) in the composition `composition`, the
+/// planet's own, with its disc's snow line (P14.T3.b's [`snow_line`]).
+#[must_use]
+pub(crate) fn birth_host(composition: &Composition) -> FormationHost {
+    let luminosity = zams::luminosity(BIRTH_HOST_MASS, &ZCoeffs::new(composition.z_fit()));
+    FormationHost {
+        mass: BIRTH_HOST_MASS,
+        luminosity,
+        snow_line: snow_line(luminosity),
+    }
+}
+
+#[cfg(test)]
+mod rogue_tests;
+
 #[cfg(test)]
 mod tests {
     use hyperion_testkit::float::assert_same_bits;
@@ -350,9 +609,10 @@ mod tests {
              delete `SUBSTELLAR_HOSTS_VERSION`, `SubstellarHostRules` with its `Held` arm and the \
              held arms of `generates` and `host_kind`, the tests' `with_substellar_hosts`, its \
              switch in `with_every_26_hold` and this test; open the client's `SYSTEM` view to \
-             brown dwarfs (`SystemsPanel.tsx`'s `freeFloating`, which keeps rogue planets); \
-             keep only the rogue planets in `tests/substellar_placement.rs`'s \
-             `a_free_floating_object_has_no_stellar_context_yet`; and turn the server's \
+             brown dwarfs (`SystemsPanel.tsx`'s `freeFloating`, which keeps rogue planets until \
+             P14.T27.b's hold lifts with this one); keep only the rogue planets in \
+             `tests/substellar_placement.rs`'s `a_free_floating_object_has_no_stellar_context_yet` \
+             (or delete it, with P14.T27.b's hold); and turn the server's \
              `a_brown_dwarf_s_bodies_are_refused_until_the_26_bump` into a test of its bodies"
         );
         assert_eq!(SubstellarHostRules::in_force(), SubstellarHostRules::Held);
@@ -458,8 +718,11 @@ mod tests {
                 assert_eq!(SystemContext::from_stars(galaxy(), &stars), context);
                 assert_eq!(SystemContext::from_record(galaxy(), &record), context);
                 assert_eq!(context.stars().len(), 1);
-                assert_eq!(context.hierarchy().stars()[0].kind(), SlotKind::Star);
-                assert!(context.hierarchy().stars()[0].initial_mass() < SUBSTELLAR_LIMIT);
+                assert_eq!(
+                    context.hierarchy().unwrap().stars()[0].kind(),
+                    SlotKind::Star
+                );
+                assert!(context.hierarchy().unwrap().stars()[0].initial_mass() < SUBSTELLAR_LIMIT);
             });
         }
     }
@@ -764,6 +1027,7 @@ mod tests {
             assert_eq!(new.host_kind(), HostKind::Stellar);
             let bound = new
                 .hierarchy()
+                .unwrap()
                 .stars()
                 .iter()
                 .any(|s| s.kind() == SlotKind::BrownDwarf);

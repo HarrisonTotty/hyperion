@@ -595,7 +595,7 @@ fn g_dwarf(c: &Candidate<'_>) -> bool {
 
 /// Whether slot `n` of `c`'s hierarchy is a star, not a bound brown dwarf (P11.T2.d).
 fn is_star(c: &Candidate<'_>, n: usize) -> bool {
-    c.context().hierarchy().stars()[n].kind() == SlotKind::Star
+    c.context().hierarchy().unwrap().stars()[n].kind() == SlotKind::Star
 }
 
 /// The number of stars in `c`'s system: its hierarchy's slots less any bound brown dwarf, which
@@ -616,7 +616,7 @@ fn all_dwarfs(c: &Candidate<'_>) -> bool {
 /// The pairs of `c`'s hierarchy whose outer member is a star, by semi-major axis in au: a bound
 /// brown dwarf's orbit about the system is no stellar pair (P11.T2.d).
 fn pair_separations_au(c: &Candidate<'_>) -> Vec<f64> {
-    let hierarchy = c.context().hierarchy();
+    let hierarchy = c.context().hierarchy().unwrap();
     hierarchy
         .pairs()
         .filter(|&(node, _)| {
@@ -1376,7 +1376,7 @@ fn golden_systems_are_pinned() {
                 w.f64("teff_k", state.effective_temperature().value());
             }
         }
-        for (node, orbit) in context.hierarchy().pairs() {
+        for (node, orbit) in context.hierarchy().unwrap().pairs() {
             w.line(&format!("pair {}:", node.get()));
             w.f64("a_au", orbit.semi_major_axis().value() / METRES_PER_AU);
             w.f64("e", orbit.eccentricity().value());
