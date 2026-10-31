@@ -4,7 +4,7 @@
 //!
 //! - **D3.** The version's rules read P06.T17's identity, and a track built without rules takes
 //!   them: a default track's options are the version's, value for value and in `Debug`.
-//! - **D2.** Under every 26 hold these readers show a mover: a track's builders (the track, its
+//! - **D2.** Under the fitted table these readers show a mover: a track's builders (the track, its
 //!   fate and remnant without segments, and the brief's knot-free main sequence), a star's model
 //!   and its death's companion-stripped mark, the engine's own members and its pinned death, the
 //!   stripping seam's exact path, the members' conditional draws, and a second-population
@@ -12,7 +12,10 @@
 //!   rebuilt in the middle of a timeline (after a common envelope, a supernova's companion) and
 //!   the hierarchy's marked orbit take the same `Context::track_options` and galaxy rules with no
 //!   mover of their own; the census reaches them through the members' stars.
-//! - **D4.** The same seed twice under every 26 hold gives the same output.
+//! - **D4.** The same seed twice under the fitted table gives the same output.
+//!
+//! Each test turns this hold's arm on alone ([`fitted_rules`]), so that the other 26 holds move
+//! nothing it holds equal.
 //! - **D1** is the goldens as they stand: no version takes the fitted table, so nothing on the
 //!   record moves by it.
 //! - **C1** is [`census_of_the_fitted_helium_table`], slow.
@@ -81,10 +84,10 @@ fn held() -> &'static Galaxy {
     })
 }
 
-/// [`held`]'s galaxy under every 26 hold.
+/// [`held`]'s galaxy with the fitted table ([`fitted_galaxy_rules`]).
 fn fitted() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| held().clone().with_rules(GalaxyRules::every_26_hold()))
+    GALAXY.get_or_init(|| held().clone().with_rules(fitted_galaxy_rules()))
 }
 
 /// The version's stellar rules.
@@ -92,14 +95,31 @@ fn version() -> StellarRules {
     StellarRules::of_version(GENERATOR_VERSION)
 }
 
+/// The version's stellar rules with this hold's arm alone turned on, the fitted table, so that
+/// the other 26 holds (the dwarf sequence's, the Humphreys–Davidson limit's) move nothing here.
+fn fitted_rules() -> StellarRules {
+    StellarRules {
+        helium: HeliumRules::Fitted,
+        ..version()
+    }
+}
+
+/// The version's galaxy rules with [`fitted_rules`] for the stellar stage's.
+fn fitted_galaxy_rules() -> GalaxyRules {
+    GalaxyRules {
+        stellar: fitted_rules(),
+        ..GalaxyRules::of_version(GENERATOR_VERSION)
+    }
+}
+
 /// A star of \[Fe/H\] −1.5 with a helium excess of `delta_y`.
 fn composition(delta_y: f64) -> Composition {
     Composition::from_fe_h(Dex::new(-1.5), HeliumExcess::new(delta_y))
 }
 
-/// Track options under every 26 hold.
+/// Track options under the fitted table ([`fitted_rules`]).
 fn fitted_options() -> TrackOptions {
-    TrackOptions::default().with_rules(StellarRules::every_26_hold())
+    TrackOptions::default().with_rules(fitted_rules())
 }
 
 /// The state of `track` at each of `ages_yr`, compared by bits: phase, mass, luminosity, radius.
@@ -160,7 +180,7 @@ fn the_fitted_table_turns_on_at_26() {
         GalaxyRules::every_26_hold().stellar,
         StellarRules::every_26_hold()
     );
-    assert_eq!(fitted().rules(), GalaxyRules::every_26_hold());
+    assert_eq!(fitted().rules(), fitted_galaxy_rules());
 }
 
 /// D3: the version's rules read the identity; a default track's options carry them, name no
@@ -223,7 +243,7 @@ fn a_track_takes_its_options_helium_table() {
 }
 
 /// D2, a star's model: its track is built under its rules, so a helium-rich model ends its main
-/// sequence and dies sooner under every 26 hold, and one of ΔY = 0 is the same model's.
+/// sequence and dies sooner under the fitted table, and one of ΔY = 0 is the same model's.
 #[test]
 fn a_star_s_model_takes_its_rules_helium_table() {
     let (mass, age) = (SolarMasses::new(0.8), Years::new(1.0e10));
@@ -233,10 +253,7 @@ fn a_star_s_model_takes_its_rules_helium_table() {
     };
     let life = |s: &StarModel| s.lifetime().expect("a star dies").value();
     let now = |s: &StarModel| s.state_at(UniverseTime::EPOCH).expect("formed");
-    let (held, fitted) = (
-        model(0.1, version()),
-        model(0.1, StellarRules::every_26_hold()),
-    );
+    let (held, fitted) = (model(0.1, version()), model(0.1, fitted_rules()));
     assert!(
         life(&fitted) < 0.6 * life(&held),
         "{} against {}",
@@ -245,10 +262,7 @@ fn a_star_s_model_takes_its_rules_helium_table() {
     );
     assert_eq!(now(&held).phase(), Phase::MainSequence);
     assert_ne!(now(&fitted).phase(), Phase::MainSequence);
-    let (plain, plain_fitted) = (
-        model(0.0, version()),
-        model(0.0, StellarRules::every_26_hold()),
-    );
+    let (plain, plain_fitted) = (model(0.0, version()), model(0.0, fitted_rules()));
     assert_same_bits(life(&plain), life(&plain_fitted));
     assert_eq!(now(&plain), now(&plain_fitted));
 }
@@ -285,10 +299,7 @@ fn a_pair_s_tracks_take_its_input_s_helium_table() {
     let until = Years::new(1.2e10);
     let run = |input: &BinaryInput| {
         let a = crate::stellar::binary::evolve(input, until);
-        let b = crate::stellar::binary::evolve(
-            &input.clone().with_rules(StellarRules::every_26_hold()),
-            until,
-        );
+        let b = crate::stellar::binary::evolve(&input.clone().with_rules(fitted_rules()), until);
         let at = |t: &crate::stellar::binary::BinaryTimeline, age: f64| {
             t.state_at(Years::new(age)).stars()[0]
         };
@@ -314,18 +325,15 @@ fn the_stripping_seam_s_exact_path_takes_its_rules() {
     let rich = composition(0.15);
     let (a, b) = (
         stripping_node_under(m, &rich, version()),
-        stripping_node_under(m, &rich, StellarRules::every_26_hold()),
+        stripping_node_under(m, &rich, fitted_rules()),
     );
     assert_ne!(a, b);
     assert_same_bits(a.share(), stripped_share_under(m, &rich, version()));
-    assert_same_bits(
-        b.share(),
-        stripped_share_under(m, &rich, StellarRules::every_26_hold()),
-    );
+    assert_same_bits(b.share(), stripped_share_under(m, &rich, fitted_rules()));
     let plain = composition(0.0);
     assert_eq!(
         stripping_node_under(m, &plain, version()),
-        stripping_node_under(m, &plain, StellarRules::every_26_hold())
+        stripping_node_under(m, &plain, fitted_rules())
     );
 }
 
@@ -340,7 +348,7 @@ fn a_star_s_stripped_mark_takes_its_rules() {
     let (m, rich, age) = (SolarMasses::new(10.0), composition(0.15), Years::new(5.0e7));
     let shares = (
         stripped_share_under(m, &rich, version()),
-        stripped_share_under(m, &rich, StellarRules::every_26_hold()),
+        stripped_share_under(m, &rich, fitted_rules()),
     );
     assert!(shares.0.total_cmp(&shares.1).is_ne(), "{shares:?}");
     let system = SystemId::from_raw(0x8200_b2e0_0000_0000).expect("a well-formed ID");
@@ -353,7 +361,7 @@ fn a_star_s_stripped_mark_takes_its_rules() {
         star.death().expect("a star dies").progenitor().stripping() == Stripping::Companion
     };
     assert_eq!(
-        (stripped(version()), stripped(StellarRules::every_26_hold())),
+        (stripped(version()), stripped(fitted_rules())),
         (
             is_stripped_at(draws.stripped(), shares.0),
             is_stripped_at(draws.stripped(), shares.1)
@@ -404,7 +412,7 @@ fn a_pair_s_pinned_death_takes_its_input_s_rules() {
             .age()
             .value()
     };
-    let (held, fitted) = (version(), StellarRules::every_26_hold());
+    let (held, fitted) = (version(), fitted_rules());
     assert_same_bits(primary_death(held), model_death(held));
     assert_same_bits(primary_death(fitted), model_death(fitted));
     assert!(primary_death(fitted) < primary_death(held));
@@ -446,8 +454,7 @@ fn the_members_draws_read_their_galaxy_s_helium_table() {
                 )
             };
             for v_eff in [speed, speed * (1.0 + 1e-12)] {
-                flipped +=
-                    u32::from(fits(v_eff, version()) != fits(v_eff, StellarRules::every_26_hold()));
+                flipped += u32::from(fits(v_eff, version()) != fits(v_eff, fitted_rules()));
             }
         }
     }
@@ -536,8 +543,8 @@ fn draw(
 }
 
 /// D2 and D4, a member in a galaxy: a second-population member's stars and its brief, both built
-/// under the galaxy's rules, move under every 26 hold, a first-population member's do not, and
-/// the same galaxy built twice under every 26 hold gives the same stars.
+/// under the galaxy's rules, move under the fitted table, a first-population member's do not, and
+/// the same galaxy built twice under the fitted table gives the same stars.
 #[test]
 fn a_second_population_member_s_stars_and_brief_take_their_galaxy_s_table() {
     let (feature, model, table) = cluster(held());
@@ -561,7 +568,7 @@ fn a_second_population_member_s_stars_and_brief_take_their_galaxy_s_table() {
     let again = Galaxy::from_params_with_rules(
         Seed::new(SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_26_hold(),
+        fitted_galaxy_rules(),
     )
     .expect("the Milky Way fixture builds");
     let (mut stars_moved, mut briefs_moved) = (0, 0);
@@ -730,7 +737,7 @@ fn primary_is(stars: &SystemStars, kind: ClassKind) -> bool {
 fn census_of_the_fitted_helium_table() {
     for seed in [SEED, 0x0910_0000_0000_0001, 0x0910_0000_0000_0002] {
         let held = Galaxy::new(Seed::new(seed));
-        let fitted = held.clone().with_rules(GalaxyRules::every_26_hold());
+        let fitted = held.clone().with_rules(fitted_galaxy_rules());
         let mut globulars: Vec<FeatureRecord> =
             FeatureCatalogue::walk_process(&held, FeatureProcess::Globular).collect();
         globulars.sort_by(|a, b| globular_mass(b).total_cmp(&globular_mass(a)));
