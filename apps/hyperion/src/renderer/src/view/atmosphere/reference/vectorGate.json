@@ -1,6 +1,6 @@
 {
-  "description": "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
-  "format": 3,
+  "description": "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; the ground's irradiance under every aggregate's sun on both paths, its sky's irradiance built over the thick table as the kernels' is (groundIrradiance, R08.T14.d.4); each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
+  "format": 4,
   "cases": {
     "earth": {
       "regime": "thickScattering",
@@ -392,13 +392,13 @@
         ["ground-s80", 0.9731788, "ground-s80-v85-a135/r", 1.065693, "ground-s80-v85-a180/r"],
         ["ground-s90", 0.9581609, "ground-s90-v85-a0/g", 1.139218, "ground-s90-v85-a180/b"],
         ["ground-s95", 0.6544189, "ground-s95-v85-a90/b", 1.418783, "ground-s95-v85-a180/r"],
-        ["disc-p0", 0.9400463, "disc-p0/r", 1.024577, "disc-p0/b"],
-        ["disc-p30", 0.939768, "disc-p30/r", 1.031038, "disc-p30/b"],
-        ["disc-p60", 0.9401759, "disc-p60/r", 1.029372, "disc-p60/b"],
-        ["disc-p75", 0.9410734, "disc-p75/r", 1.029243, "disc-p75/b"],
-        ["disc-p85", 0.9717734, "disc-p85/r", 1.038565, "disc-p85/b"],
-        ["limb", 0.994959, "limb-10H/b", 1.020158, "limb-10H/g"],
-        ["aerial", 0.9595715, "aerial-32km/r", 0.9734163, "aerial-1km/b"]
+        ["disc-p0", 0.9379575, "disc-p0/r", 1.023501, "disc-p0/b"],
+        ["disc-p30", 0.938342, "disc-p30/r", 1.031457, "disc-p30/b"],
+        ["disc-p60", 0.9424884, "disc-p60/r", 1.036257, "disc-p60/b"],
+        ["disc-p75", 0.9495655, "disc-p75/r", 1.042586, "disc-p75/b"],
+        ["disc-p85", 0.9888383, "disc-p85/r", 1.054118, "disc-p85/b"],
+        ["limb", 0.9949703, "limb-10H/b", 1.020169, "limb-10H/g"],
+        ["aerial", 0.9604765, "aerial-32km/r", 0.983612, "aerial-1km/b"]
       ],
       "diagnosticRatios": [
         ["ground-s0", 0.9288731, "ground-s0-v85-a0/b", 1.061151, "ground-s0-v60-a0/r"],
@@ -407,11 +407,11 @@
         ["ground-s80", 0.7498896, "ground-s80-v85-a45/b", 1.012886, "ground-s80-v0-a0/r"],
         ["ground-s90", 0.7814218, "ground-s90-v85-a0/b", 1.048858, "ground-s90-v0-a0/b"],
         ["ground-s95", 1.068711, "ground-s95-v85-a0/r", 4.605043, "ground-s95-v85-a180/r"],
-        ["disc-p0", 0.9420299, "disc-p0/r", 1.069176, "disc-p0/b"],
-        ["disc-p30", 0.9418812, "disc-p30/r", 1.074997, "disc-p30/b"],
-        ["disc-p60", 0.9442441, "disc-p60/r", 1.067628, "disc-p60/b"],
-        ["disc-p75", 0.9435012, "disc-p75/r", 1.053352, "disc-p75/b"],
-        ["disc-p85", 0.9740646, "disc-p85/r", 1.056335, "disc-p85/b"],
+        ["disc-p0", 0.9420427, "disc-p0/r", 1.069251, "disc-p0/b"],
+        ["disc-p30", 0.9418901, "disc-p30/r", 1.07505, "disc-p30/b"],
+        ["disc-p60", 0.9442397, "disc-p60/r", 1.067594, "disc-p60/b"],
+        ["disc-p75", 0.9434812, "disc-p75/r", 1.053247, "disc-p75/b"],
+        ["disc-p85", 0.9740164, "disc-p85/r", 1.056162, "disc-p85/b"],
         ["limb", 0.9779729, "limb-1H/r", 1.010626, "limb-10H/r"],
         ["aerial", 0.832864, "aerial-32km/b", 0.9503567, "aerial-1km/r"]
       ]
