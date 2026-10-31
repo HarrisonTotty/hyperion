@@ -191,6 +191,7 @@ pub(crate) fn living_globulars(galaxy: &Galaxy) -> Vec<StreamSpec> {
                 galaxy,
                 feature.position(),
                 Some(velocity),
+                marks.origin().population(),
                 marks.mass(),
                 marks.half_mass_radius(),
                 marks.age(),

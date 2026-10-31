@@ -289,6 +289,7 @@ impl ClusterParameters {
                     galaxy,
                     feature.position(),
                     velocity,
+                    m.origin().population(),
                     m.mass(),
                     m.half_mass_radius(),
                     m.age(),

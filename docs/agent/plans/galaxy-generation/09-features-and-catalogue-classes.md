@@ -1629,6 +1629,11 @@ and the hypervelocity class's weight). T28.b, T28.d and T30.c ride version 25 (S
 `GalaxyRules` hold until the bump, and T35 and T2.c (with rendering plan R06's R06.T16.a) ride 26
 (S2); each boards a later train if not ready (decision-bump-plan-after-22, 2026-10-14; updated
 2026-10-15). It reserves, so that later
+rates, away from the epoch only), P09.T35 (the supernova and luminous-blue-variable carve-outs,
+layer D's ancient share and the hypervelocity class's weight), and P09.T13's bound share (ruling
+145.5). T28.b and T28.d ride version 25 (S1), and T35, T2.c (with rendering plan R06's R06.T16.a)
+and the bound share ride 26 (S2); each boards a later train if
+not ready (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). It reserves, so that later
 plans move nothing: the `ClassId` values 2, 3, 5, 6 and 8 for plan 11 and the rule that
 feature-level lists append classes in the list order of design note 16; event tags 0x0203–0x02FF of
 this plan's block; the `10` sub-kinds `01` and `10` for plan 10 (`11` stays rejected);
@@ -2454,7 +2459,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   the history's dynamical survival carried over (ruling 145.1), the interior's lost living mass is
   L05's `M_esc` for a young cluster with no remnants kept, and the nursery's tail carries it within
   3% (below, "Ruling 145 as built").
-- **`BOUND_SHARE` against the galaxy's own μ (ruling 145.5; queued, wired, its own bump).**
+- **`BOUND_SHARE` against the galaxy's own μ (ruling 145.5; built behind `BOUND_SHARE_VERSION` = 26, below).**
   `kinds::globular`'s history `M = 0.70 M₀ (1 − t ÷ t_dis)` takes BM03's 0.70, a Kroupa function
   to 15 M☉, while the galaxy's function and fates leave about 0.46 of the mass formed at 12 Gyr.
   Generated globulars' birth masses are then about 1.5 times low, which feeds
@@ -5170,3 +5175,16 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   `phase_four_golden` is unchanged. A retune of a template (the Type Ia's rise among them) moves
   plan 12's band tables and bounds in `alerts::light` and `alerts::registry`; their recompute tests
   and `alerts/registry.golden` catch it.
+- **Ruling 145.5 as built (P09.T13; lane `p09-bound-share`, 2026-10-31, at `GENERATOR_VERSION` 24,
+  behind `BOUND_SHARE_VERSION` = 26).**
+  - `kinds::globular::history` and `history_on_orbit` take the cluster's `population` before its
+    mass, and `bound_share(galaxy, population, age)` is the μ of the history's law and of its mass
+    loss `μ M₀ ÷ t_dis`. `GalaxyRules::bound_share` is `BoundShareRules::{Bm03, OwnMu}`; this is
+    the first galaxy 26 hold, so it adds `GalaxyRules::every_26_hold()` (test-only).
+  - `OwnMu`: `fates::present_share_of_formed_with` under the galaxy's function and
+    `fates_for(population)`, counting the stars and white dwarfs (`CensusFates`,
+    `StarsAndWhiteDwarfs`), on `Galaxy::companions()`, a lazy cell built once a galaxy. (Lean,
+    2026-10-31: neutron stars and black holes are not counted. That gives the ruling's "about
+    0.46", 0.47 at 12 Gyr; with them the halo's would be 0.552.)
+  - The 26 bump deletes `BOUND_SHARE_VERSION`, `BoundShareRules` with its `Bm03` arm, the field,
+    the `match` in `bound_share` and the tripwire `the_bound_share_is_held_only_until_the_26_bump`.

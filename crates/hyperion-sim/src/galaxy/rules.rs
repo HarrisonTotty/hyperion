@@ -24,6 +24,8 @@
 //!   their fallback rate. It is read where a galaxy's victims are drawn (`CentreVictims::new` and
 //!   `one`), into each tail, and reaches none of the galaxy's memos, so `Galaxy::with_rules` need
 //!   not reset them for it.
+//! - [`bound_share`](GalaxyRules::bound_share), at [`BOUND_SHARE_VERSION`] (plan 09, P09.T13 after
+//!   ruling 145.5): a globular's history takes its own population's μ in place of BM03's 0.70.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -35,6 +37,7 @@ use crate::GeneratorVersion;
 use crate::galaxy::features::centre::events::luminosity::{
     CENTRE_QUIESCENCE_VERSION, CentreQuiescenceRules,
 };
+use crate::galaxy::features::kinds::globular::{BOUND_SHARE_VERSION, BoundShareRules};
 use crate::galaxy::motion::{
     KEPLER_REGIME_VERSION, KEPLER_SECULAR_VERSION, KeplerRegimeRules, KeplerSecularRules,
 };
@@ -52,6 +55,9 @@ pub(crate) struct GalaxyRules {
     pub(crate) kepler_secular: KeplerSecularRules,
     /// The efficiency the black hole's disruption tails radiate at (P09.T30.c).
     pub(crate) centre_quiescence: CentreQuiescenceRules,
+    /// The share of its birth mass a globular's history says stellar evolution left it (P09.T13,
+    /// ruling 145.5).
+    pub(crate) bound_share: BoundShareRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -76,6 +82,11 @@ impl GalaxyRules {
                 CentreQuiescenceRules::HotFlow
             } else {
                 CentreQuiescenceRules::ConstantEfficiency
+            },
+            bound_share: if version.get() >= BOUND_SHARE_VERSION.get() {
+                BoundShareRules::OwnMu
+            } else {
+                BoundShareRules::Bm03
             },
             stellar: StellarRules::of_version(version),
         }
@@ -213,6 +224,19 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_26_hold().kepler_regime,
             KeplerRegimeRules::Kepler
+        );
+        let bound = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).bound_share;
+        for v in [23, 24, 25] {
+            assert_eq!(bound(v), BoundShareRules::Bm03, "{v}");
+        }
+        assert_eq!(bound(26), BoundShareRules::OwnMu);
+        assert_eq!(
+            GalaxyRules::every_25_hold().bound_share,
+            BoundShareRules::Bm03
+        );
+        assert_eq!(
+            GalaxyRules::every_26_hold().bound_share,
+            BoundShareRules::OwnMu
         );
         for v in [23, 24, 25, 26] {
             assert_eq!(

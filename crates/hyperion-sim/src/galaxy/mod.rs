@@ -48,6 +48,7 @@ use std::error::Error;
 use std::fmt;
 use std::sync::OnceLock;
 
+use self::fates::{CompanionMasses, fates_for};
 use self::features::centre::{BuildCentreError, CentreModel};
 use self::features::shares::FeatureShares;
 use self::fields::Fields;
@@ -220,6 +221,7 @@ pub struct Galaxy {
     centre_motion: CentreMotionCell,
     centre: CentreModelCell,
     centre_potential: CentrePotentialCell,
+    companions: CompanionsCell,
     rules: GalaxyRules,
 }
 
@@ -372,6 +374,7 @@ impl Galaxy {
             centre_motion: CentreMotionCell::default(),
             centre: CentreModelCell::default(),
             centre_potential: CentrePotentialCell::default(),
+            companions: CompanionsCell::default(),
             rules,
         })
     }
@@ -476,6 +479,24 @@ impl Galaxy {
                 "the parameters' nuclear cluster and black hole have finite, positive masses, and \
                  the mass inside 1e-3 to 1e4 ly brackets the black hole's at every seed of \
                  P09.T28.b.a's sweep",
+            )
+        })
+    }
+
+    /// The stellar companions of systems drawn from the galaxy's mass function
+    /// ([`CompanionMasses::new`] under [`fates_for`]'s, which every population's fates share).
+    ///
+    /// A quadrature of the mass of systems born at one age reads them, as a globular's own μ does
+    /// under every 26 hold (plan 09, ruling 145.5). They are built when first read, in about 14 ms
+    /// (a test build on a pod's core), and kept, as [`centre_motion`](Self::centre_motion) is:
+    /// they are a pure function of the mass function, so the galaxy's equality and its `Debug`
+    /// text do not depend on whether they have been read.
+    #[must_use]
+    pub(crate) fn companions(&self) -> &CompanionMasses {
+        self.companions.0.get_or_init(|| {
+            CompanionMasses::new(
+                self.mass_function.as_dyn(),
+                fates_for(Population::OldThinDisc),
             )
         })
     }
@@ -660,8 +681,8 @@ impl Galaxy {
     /// about 0.7 MiB (plan 08). The gas field is held inline and adds nothing. The centre's
     /// motion, once read, adds its tables, about 20 KiB (plan 09, P09.T28.b.a), and the centre's
     /// model, once built, its distribution functions' tables, about 0.5 MiB (P09.T29), and the
-    /// centre's potential, once read, its table and basis, about 15 kB (P09.T28.d.b), so the
-    /// figure depends on what has been read.
+    /// centre's potential, once read, its table and basis, about 15 kB (P09.T28.d.b), and the
+    /// companions, once read, 3.8 KiB, so the figure depends on what has been read.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.params.heap_bytes()
@@ -692,6 +713,11 @@ impl Galaxy {
                 .kinematics
                 .as_ref()
                 .map_or(0, |k| size_of::<KinematicTables>() + k.heap_bytes())
+            + self
+                .companions
+                .0
+                .get()
+                .map_or(0, CompanionMasses::heap_bytes)
     }
 }
 
@@ -777,6 +803,25 @@ struct CentrePotentialCell(OnceLock<motion::spherical::CentrePotential>);
 impl PartialEq for CentrePotentialCell {
     fn eq(&self, _: &Self) -> bool {
         true
+    }
+}
+
+/// [`Galaxy::companions`]' value, built when first read, as [`CentreMotionCell`] is.
+#[derive(Clone, Default)]
+struct CompanionsCell(OnceLock<CompanionMasses>);
+
+/// Equal always, as [`CentreMotionCell`]: the companions are a pure function of the mass
+/// function, which the galaxy's equality compares.
+impl PartialEq for CompanionsCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been built, as [`CentreMotionCell`]'s.
+impl fmt::Debug for CompanionsCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CompanionsCell")
     }
 }
 

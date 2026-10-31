@@ -455,6 +455,12 @@ impl CompanionMasses {
         Self { ln_masses, below }
     }
 
+    /// The bytes it owns on the heap: its grid's masses and counts.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        (self.ln_masses.capacity() + self.below.capacity()) * size_of::<f64>()
+    }
+
     /// `∫ g dH` for the `g` whose running integral is `running`.
     #[must_use]
     fn integral(&self, running: &Running) -> f64 {
@@ -702,6 +708,62 @@ pub fn mean_formed_mass_with(
     companions: &CompanionMasses,
 ) -> SolarMasses {
     SolarMasses::new(per_system_mean(f, fates, companions, |m| m, &[]))
+}
+
+/// The present mass of systems all born `age` ago, per mass they formed.
+///
+/// Living stars count at their initial mass and dead ones as the remnants `fates` gives,
+/// companions included, over [`mean_formed_mass`]. It is 1 until the most massive star dies and
+/// falls as the turn-off falls. This is a cluster's own μ, the share of its birth mass that
+/// stellar evolution leaves at its age (plan 09's ruling 145.5, for the globulars' history, which
+/// counts the stars and white dwarfs with [`CensusFates`]). The numerator is
+/// [`mean_present_mass`]'s quadrature for a single age, with a panel edge at the mass whose
+/// lifetime is `age`, where a star's present mass drops from its own to its remnant's.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::fates::{ProvisionalFates, present_share_of_formed};
+/// use hyperion_sim::galaxy::imf::Kroupa;
+/// use hyperion_sim::units::Years;
+///
+/// let young = present_share_of_formed(&Kroupa, &ProvisionalFates, Years::new(1e6));
+/// let old = present_share_of_formed(&Kroupa, &ProvisionalFates, Years::new(12e9));
+/// assert!((young - 1.0).abs() < 1e-12);
+/// assert!(old < 0.7);
+/// ```
+#[must_use]
+pub fn present_share_of_formed(
+    f: &(impl MassFunction + ?Sized),
+    fates: &(impl StellarFates + ?Sized),
+    age: Years,
+) -> f64 {
+    present_share_of_formed_with(f, fates, &CompanionMasses::new(f, fates), age)
+}
+
+/// [`present_share_of_formed`] with the companions already integrated (see
+/// [`mean_present_mass_with`]).
+///
+/// The companions' integral is nearly all of the cost, about 14 ms against 0.5 ms for the rest (a
+/// test build on a pod's core), which a galaxy pays once (`Galaxy::companions`).
+#[must_use]
+pub fn present_share_of_formed_with(
+    f: &(impl MassFunction + ?Sized),
+    fates: &(impl StellarFates + ?Sized),
+    companions: &CompanionMasses,
+    age: Years,
+) -> f64 {
+    let t = age.value();
+    let turn_off = mass_with_lifetime(fates, t);
+    let present = |m: f64| {
+        if fates.lifetime(m).value() > t {
+            m
+        } else {
+            fates.remnant_mass(m)
+        }
+    };
+    per_system_mean(f, fates, companions, present, turn_off.as_slice())
+        / per_system_mean(f, fates, companions, |m| m, &[])
 }
 
 /// The mean number of stars per system: 1 plus the mean number of stellar companions.
@@ -1189,6 +1251,56 @@ mod tests {
             let fresh = MultiplicityFates::new(TrackFates::at(reference_fe_h(p)));
             assert_eq!(fates_for(p), &fresh, "{p:?}");
             assert_eq!(CompanionMasses::new(&f, fates_for(p)), shared, "{p:?}");
+        }
+    }
+
+    /// A galaxy's companions are a fresh build of its mass function's under every population's
+    /// fates, and the integral every population's census of stars and white dwarfs would build,
+    /// bit for bit (ruling 145.5's μ reads them).
+    #[test]
+    fn a_galaxy_s_companions_are_fresh_builds() {
+        use crate::Seed;
+        use crate::galaxy::imf::MassFunctionKind;
+        use crate::galaxy::{Galaxy, POPULATIONS};
+        for kind in [MassFunctionKind::Kroupa, MassFunctionKind::Chabrier] {
+            let galaxy = Galaxy::with_mass_function(Seed::new(0x0913_0000_0000_0146), kind);
+            let f = kind.to_mass_function();
+            let unread = galaxy.heap_bytes();
+            let built = galaxy.companions();
+            assert_eq!(built.heap_bytes(), 2 * 241 * size_of::<f64>());
+            assert_eq!(galaxy.heap_bytes(), unread + built.heap_bytes());
+            for p in POPULATIONS {
+                let census = CensusFates::new(fates_for(p), Counted::StarsAndWhiteDwarfs);
+                assert_eq!(
+                    &CompanionMasses::new(f.as_ref(), &census),
+                    built,
+                    "{kind:?}, {p:?}"
+                );
+            }
+        }
+    }
+
+    /// The present share of systems born at once is 1 before the first death, falls with age, and
+    /// is the mean present mass over the formed mass of systems born within a million years of
+    /// that age.
+    #[test]
+    fn a_single_age_s_present_share_is_that_of_a_narrow_spread() {
+        let young = present_share_of_formed(&Kroupa, &ProvisionalFates, Years::new(1e6));
+        assert_same_bits(young, 1.0);
+        let mut previous = young;
+        for t in [0.01, 0.1, 1.0, 5.0, 10.5, 12.0, 13.0] {
+            let share = present_share_of_formed(&Kroupa, &ProvisionalFates, gyr(t));
+            assert!(share < previous, "{t} Gyr: {share} after {previous}");
+            previous = share;
+            let narrow =
+                AgeDistribution::uniform(gyr(t) - Years::new(5e5), gyr(t) + Years::new(5e5))
+                    .unwrap();
+            let spread =
+                present(&Kroupa, &narrow) / mean_formed_mass(&Kroupa, &ProvisionalFates).value();
+            assert!(
+                (share / spread - 1.0).abs() < 1e-4,
+                "{t} Gyr: {share} against {spread}"
+            );
         }
     }
 
