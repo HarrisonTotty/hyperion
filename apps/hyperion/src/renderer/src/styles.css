@@ -4920,10 +4920,10 @@ body {
 }
 
 /*
- * The style panel's BASELINE row (plan R10, R10.T12.a; decision-r10-t12a-scope §3.1): one 2rem row
- * in the instruments panel's row form, 0.5rem under the style's buttons or their reason, its
- * buttons the presets', 0.25rem apart, which may wrap under the legend with no gap between rows,
- * as the instruments panel's rows do.
+ * The style panel's BASELINE row (plan R10, R10.T12.a; decision-r10-t12a-scope §3.1), and its GRID
+ * row in the same form (the owner's request, 2026-10-31): one 2rem row in the instruments panel's
+ * row form, 0.5rem under the row above, its buttons the presets', 0.25rem apart, which may wrap
+ * under the legend with no gap between rows, as the instruments panel's rows do.
  */
 .view-style__baseline {
   flex-wrap: wrap;
@@ -4934,7 +4934,8 @@ body {
 
 /*
  * Floated, so that the legend sits on the left of its buttons, as a form's choice does, 0.5rem
- * before the first; at its own width, since no other row of the panel lines up with it.
+ * before the first; at its own width, so that GRID's buttons and BASELINE's do not line up, as
+ * no two rows of the panel do.
  */
 .view-style__baseline-label {
   float: left;

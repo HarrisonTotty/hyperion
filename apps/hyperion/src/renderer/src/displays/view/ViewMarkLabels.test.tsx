@@ -36,11 +36,12 @@ const ANCHOR: DrawAnchor = {
   label: { kind: "target", rangeM: 5_000, closureMPerS: null },
   labelOffsetPx: 24,
   labelRisePx: null,
+  setRisePx: null,
   markReachPx: 12,
 };
 
 /** {@link ANCHOR} as the destination: its label stands 20 device px above or below its chevrons. */
-const DESTINATION: DrawAnchor = { ...ANCHOR, labelRisePx: 20 };
+const DESTINATION: DrawAnchor = { ...ANCHOR, labelRisePx: 20, setRisePx: 20 };
 
 /** The destination's label's key. */
 const KEY = targetKey(DESTINATION.target);
@@ -55,6 +56,7 @@ function aCraftAt(craft: string, xPx: number, yPx: number, labelled = true): Dra
     label: labelled ? { kind: "target", rangeM: 5_000, closureMPerS: null } : null,
     labelOffsetPx: 24,
     labelRisePx: null,
+    setRisePx: null,
     markReachPx: 12,
   };
 }

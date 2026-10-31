@@ -24,7 +24,7 @@ export interface StyleBaseline {
  * reference grid, each body's limb and graticule, is drawn over its photorealistic image.
  */
 export interface StyleGrid {
-  /** Whether it is drawn, `ON`, as a view starts. */
+  /** Whether the view draws its grid over the image, `ON`; `true` as a view starts. */
   readonly on: boolean;
   /** Called with the setting chosen; a display control, so it acts at once. */
   readonly onGrid: (on: boolean) => void;

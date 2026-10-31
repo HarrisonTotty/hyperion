@@ -1,5 +1,5 @@
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import { type ProjectionCamera, toViewAxes, type Viewport } from "../camera/projection";
+import { type ProjectionCamera, projector, toViewAxes, type Viewport } from "../camera/projection";
 import { rotate } from "../camera/quaternion";
 import {
   IDENTITY_ROTATION,
@@ -158,6 +158,82 @@ export function graticuleStepDeg(
   return lowSetting || diameterPx < FINE_GRATICULE_FROM_PX * strokeScale
     ? GRATICULE_STEP_DEG.coarse
     : GRATICULE_STEP_DEG.fine;
+}
+
+/** How many points of a disc's outline {@link discExtentPx} projects: 1/48 of a turn apart. */
+const DISC_OUTLINE_SAMPLES = 48;
+
+/**
+ * The extent of a body's drawn disc about its mark (the owner's request, 2026-10-31), px: its
+ * half-size, the most its outline stands from the mark along either of the view's axes, and its
+ * least radius, the least it stands from the mark in any direction.
+ */
+export interface DiscExtentPx {
+  /** The half-size of the least square about the mark that holds the disc, px; infinite where unbounded. */
+  readonly halfPx: number;
+  /** The radius of the largest circle about the mark the disc covers, px; infinite from inside it. */
+  readonly leastPx: number;
+}
+
+/**
+ * A body's drawn disc's extent about `at`, its centre's projection (the owner's request,
+ * 2026-10-31): the outline of the cone of lines of sight that graze a sphere, projected at
+ * {@link DISC_OUTLINE_SAMPLES} points, which near a body stands wider than its angular diameter
+ * ({@link angularDiameterPx}) says, by tan α ÷ α on the view's axis and more off it. The half-size
+ * is the sphere of `majorRadiusM`'s, the least radius `minorRadiusM`'s, so that a flattened body's
+ * square holds it and its least radius covers no more than it does.
+ *
+ * @param centreM - The body's centre from the camera, m.
+ * @returns Each measure infinite where its sphere holds the camera or its outline reaches behind
+ *   the camera, where its drawn disc is unbounded.
+ */
+export function discExtentPx(
+  centreM: Vec3,
+  majorRadiusM: number,
+  minorRadiusM: number,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+  at: { readonly xPx: number; readonly yPx: number },
+): DiscExtentPx {
+  const project = projector(camera, viewport);
+  const distanceM = norm(centreM);
+  const towards = scale(centreM, 1 / distanceM);
+  // Any axis across the line of sight, and the one across both.
+  const other = Math.abs(towards.x) < 0.9 ? vec3(1, 0, 0) : vec3(0, 1, 0);
+  const across = normalise(cross(towards, other));
+  const up = cross(towards, across);
+  const outline = (radiusM: number): ReadonlyArray<{ dxPx: number; dyPx: number }> | null => {
+    if (!(distanceM > radiusM)) {
+      return null;
+    }
+    const sin = radiusM / distanceM;
+    const cos = Math.sqrt(1 - sin * sin);
+    const points: { dxPx: number; dyPx: number }[] = [];
+    for (let n = 0; n < DISC_OUTLINE_SAMPLES; n += 1) {
+      const turn = (2 * Math.PI * n) / DISC_OUTLINE_SAMPLES;
+      const side = add(scale(across, Math.cos(turn)), scale(up, Math.sin(turn)));
+      // A grazing point, at the tangent's length from the camera.
+      const point = scale(add(scale(towards, cos), scale(side, sin)), distanceM * cos);
+      const projected = project(point);
+      if (!projected.inFront) {
+        return null;
+      }
+      points.push({ dxPx: projected.xPx - at.xPx, dyPx: projected.yPx - at.yPx });
+    }
+    return points;
+  };
+  const major = outline(majorRadiusM);
+  const minor = outline(minorRadiusM);
+  return {
+    halfPx:
+      major === null
+        ? Number.POSITIVE_INFINITY
+        : Math.max(...major.map(({ dxPx, dyPx }) => Math.max(Math.abs(dxPx), Math.abs(dyPx)))),
+    leastPx:
+      minor === null
+        ? Number.POSITIVE_INFINITY
+        : Math.min(...minor.map(({ dxPx, dyPx }) => Math.hypot(dxPx, dyPx))),
+  };
 }
 
 /**

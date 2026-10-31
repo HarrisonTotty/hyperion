@@ -1556,9 +1556,25 @@ describe("a view's GRID over its photorealistic image (the owner's request, 2026
     await view.user.click(within(gridRow("PRIMARY")).getByRole("button", { name: "OFF" }));
     await controlInstrument(view);
     await photorealistic(view, () => screen.getByRole("region", { name: "INSTRUMENT 1" }));
+    const instrument = gridsOver(view, 600, instrumentViewId(1));
+    const primary = gridsOver(view, 600, PRIMARY_VIEW_ID);
     expect([
-      gridsOver(view, 600, instrumentViewId(1)).every((grid) => grid === true),
-      gridsOver(view, 600, PRIMARY_VIEW_ID).every((grid) => grid === false),
+      instrument.length > 0 && instrument.every((grid) => grid === true),
+      primary.length > 0 && primary.every((grid) => grid === false),
     ]).toEqual([true, true]);
+  });
+
+  it("draws an instrument's frames without its grid, and states GRID OFF, once its OFF is pressed", async () => {
+    const view = await terrainTestShown();
+    await controlInstrument(view);
+    await photorealistic(view, () => screen.getByRole("region", { name: "INSTRUMENT 1" }));
+    await view.user.click(within(gridRow("INSTRUMENT 1")).getByRole("button", { name: "OFF" }));
+    const instrument = gridsOver(view, 600, instrumentViewId(1));
+    const primary = gridsOver(view, 600, PRIMARY_VIEW_ID);
+    expect([
+      instrument.length > 0 && instrument.every((grid) => grid === false),
+      primary.every((grid) => grid === true),
+      readingIn(screen.getByRole("region", { name: "INSTRUMENT 1" }), "GRID"),
+    ]).toEqual([true, true, "OFF"]);
   });
 });

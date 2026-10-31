@@ -15,7 +15,7 @@ import {
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import type { CameraTarget } from "../camera/state";
 import type { BodyMarkSymbol } from "../scene/model";
-import { isSymbolSized } from "./bodies";
+import { type DiscExtentPx, isSymbolSized } from "./bodies";
 
 /** A point on the view, px from the top left. */
 export interface ScreenPx {
@@ -78,27 +78,42 @@ export const LABEL_CLEARANCE_REM = 0.125;
 export const FLIGHT_PATH_MARKER_REM = { radius: 0.375, wing: 0.5, fin: 0.3125 } as const;
 
 /**
- * Four corner brackets of the square of half-width `halfPx` about `at`, each corner held within
- * `bounds` where given: the view, inset by `insetPx`, so that a corner past its edge stands on the
- * edge and still marks the target (the owner's request, 2026-10-31).
+ * Four corner brackets of the square of half-width `halfPx` about `at`. Where `bounds` is given and
+ * the square overlaps the view, each corner is held within the view, inset by `insetPx`, so that a
+ * corner past its edge stands on the edge and still marks the target, and each arm is a third of
+ * its held side, so that the sides' middles stay open (the owner's request, 2026-10-31); a square
+ * wholly off the view stands where it falls, unseen.
  */
 function corners(
   at: ScreenPx,
   halfPx: number,
   bounds: { readonly viewport: Viewport; readonly insetPx: number } | null = null,
 ): ScreenSegment[] {
-  const arm = bracketArmPx(halfPx);
   const held = (value: number, extentPx: number): number =>
     bounds === null ? value : Math.min(Math.max(value, bounds.insetPx), extentPx - bounds.insetPx);
+  const overlaps =
+    bounds !== null &&
+    at.xPx + halfPx >= 0 &&
+    at.xPx - halfPx <= bounds.viewport.widthPx &&
+    at.yPx + halfPx >= 0 &&
+    at.yPx - halfPx <= bounds.viewport.heightPx;
+  const along = (value: number, extentPx: number): number =>
+    overlaps ? held(value, extentPx) : value;
+  const widthPx = bounds?.viewport.widthPx ?? 0;
+  const heightPx = bounds?.viewport.heightPx ?? 0;
+  const left = along(at.xPx - halfPx, widthPx);
+  const right = along(at.xPx + halfPx, widthPx);
+  const top = along(at.yPx - halfPx, heightPx);
+  const bottom = along(at.yPx + halfPx, heightPx);
+  // Each arm a third of its side as held: an unheld side's is the bracket's own share.
+  const armX = bracketArmPx((right - left) / 2);
+  const armY = bracketArmPx((bottom - top) / 2);
   const segments: ScreenSegment[] = [];
   for (const sx of [-1, 1] as const) {
     for (const sy of [-1, 1] as const) {
-      const corner = {
-        xPx: held(at.xPx + sx * halfPx, bounds?.viewport.widthPx ?? 0),
-        yPx: held(at.yPx + sy * halfPx, bounds?.viewport.heightPx ?? 0),
-      };
-      segments.push([corner, { xPx: corner.xPx - sx * arm, yPx: corner.yPx }]);
-      segments.push([corner, { xPx: corner.xPx, yPx: corner.yPx - sy * arm }]);
+      const corner = { xPx: sx < 0 ? left : right, yPx: sy < 0 ? top : bottom };
+      segments.push([corner, { xPx: corner.xPx - sx * armX, yPx: corner.yPx }]);
+      segments.push([corner, { xPx: corner.xPx, yPx: corner.yPx - sy * armY }]);
     }
   }
   return segments;
@@ -492,8 +507,15 @@ export interface SymbologyAnchor {
   readonly target: CameraTarget;
   /** Where it falls on the view. */
   readonly at: ScreenPx;
-  /** A body's symbol and apparent diameter, px; `null` for a craft. */
-  readonly body: { readonly symbol: BodyMarkSymbol; readonly diameterPx: number } | null;
+  /**
+   * A body's symbol and apparent diameter, px, and, where its disc is drawn, the disc's extent
+   * about the mark (`discExtentPx`, the owner's request, 2026-10-31); `null` for a craft.
+   */
+  readonly body: {
+    readonly symbol: BodyMarkSymbol;
+    readonly diameterPx: number;
+    readonly extentPx?: DiscExtentPx;
+  } | null;
   /**
    * A craft's place and motion for its target brackets: from the own ship where there is one, else
    * from the camera (the range is then `FROM CAMERA`, Design note 17); `null` for a body.
@@ -520,12 +542,33 @@ export function anchorRadiusPx(anchor: Pick<SymbologyAnchor, "body">, remPx: num
 /**
  * The radius the selection's bracket and the destination's chevrons stand about, and the marks'
  * labels and reach are placed from, px (the owner's request, 2026-10-31): a body's symbol's or its
- * drawn disc's, the larger (`SymbologyAnchor.body.diameterPx`, its larger axis), so that the
- * bracket's corners stand just outside the disc at any range; a craft's contact's.
+ * drawn disc's half-size about the mark, the larger (`DiscExtentPx.halfPx`, or half its angular
+ * diameter without one), so that the bracket's corners stand just outside the disc at any range; a
+ * craft's contact's. Its symbol's where the disc is unbounded.
  */
 export function reticleRadiusPx(anchor: Pick<SymbologyAnchor, "body">, remPx: number): number {
   const markPx = anchorRadiusPx(anchor, remPx);
-  return anchor.body === null ? markPx : Math.max(markPx, anchor.body.diameterPx / 2);
+  if (anchor.body === null) {
+    return markPx;
+  }
+  const discPx = anchor.body.extentPx?.halfPx ?? anchor.body.diameterPx / 2;
+  // An unbounded disc, the camera in or by the body, fills the view: no reticle stands about it.
+  return Number.isFinite(discPx) ? Math.max(markPx, discPx) : markPx;
+}
+
+/**
+ * Whether a body's drawn disc fills the view about its mark (the owner's request, 2026-10-31): its
+ * least radius (`DiscExtentPx.leastPx`, a flattened body's polar), or half its angular diameter,
+ * covers every corner of the view.
+ */
+export function anchorFillsView(
+  anchor: Pick<SymbologyAnchor, "at" | "body">,
+  viewport: Viewport,
+): boolean {
+  return (
+    anchor.body !== null &&
+    discFillsView(anchor.at, anchor.body.extentPx?.leastPx ?? anchor.body.diameterPx / 2, viewport)
+  );
 }
 
 /**
@@ -589,8 +632,8 @@ export function symbologyMarks(
     const markRadiusPx = anchorRadiusPx(anchor, input.remPx);
     // The bracket and the chevrons grow with a body's drawn disc (the owner's request).
     const reticlePx = reticleRadiusPx(anchor, input.remPx);
-    const fills =
-      anchor.body !== null && discFillsView(anchor.at, anchor.body.diameterPx / 2, viewport);
+    // Once the disc fills the view neither reticle is drawn: the view's list marks the target.
+    const fills = anchorFillsView(anchor, viewport);
     if (anchor.craft !== null) {
       marks.push(
         targetMark(
@@ -628,7 +671,7 @@ export function symbologyMarks(
         ),
       );
     }
-    if (sameTarget(input.destination, anchor.target)) {
+    if (sameTarget(input.destination, anchor.target) && !fills) {
       marks.push(
         destinationReticle(
           anchor.target,

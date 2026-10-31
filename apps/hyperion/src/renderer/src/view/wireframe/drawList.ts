@@ -31,6 +31,7 @@ import {
   angularDiameterPx,
   type DatumInside,
   datumSpheroidOfFigure,
+  discExtentPx,
   graticule,
   isSymbolSized,
   ringEllipse,
@@ -42,6 +43,7 @@ import { orbitPath } from "./orbits";
 import { surveyEdgeMark, type SurveyEdgeView } from "../terrain/surveyEdge";
 import { type DatumSpheroid, stretched } from "./spheroid";
 import {
+  anchorRadiusPx,
   bracketHalfSizePx,
   lineOfSightGivesWay,
   lineOfSightTripod,
@@ -338,6 +340,13 @@ export interface DrawAnchor {
    */
   readonly labelRisePx: number | null;
   /**
+   * While the mark is the destination, the reach of its chevron set that other marks' labels keep
+   * clear of, device px, as {@link DrawAnchor.labelRisePx} is reckoned but about the mark's own
+   * symbol, so that a set grown about a large disc (the owner's request, 2026-10-31) keeps no
+   * label off the disc; `null` while it is not.
+   */
+  readonly setRisePx: number | null;
+  /**
    * How far about the anchor the mark stands, device px, the half-size of a square that holds it:
    * the outer edge of its selection's bracket's place, whether or not it is drawn, which holds its
    * symbol and its reticles, or a body's drawn disc where that is larger. A destination's label
@@ -601,6 +610,31 @@ function packScreen(segments: ReadonlyArray<readonly [ScreenPx, ScreenPx]>): Flo
     out.set([a.xPx, a.yPx, 0, b.xPx, b.yPx, 0], i * 6);
   });
   return out;
+}
+
+/**
+ * A body's part of its symbology anchor: its symbol, its angular diameter, and, where its disc is
+ * drawn rather than its symbol, its disc's extent about the mark (`discExtentPx`; the owner's
+ * request, 2026-10-31), a flattened body's least radius its polar.
+ */
+function bodyAnchorOf(
+  body: ViewBody,
+  pointM: Vec3,
+  at: ScreenPx,
+  projection: ProjectionCamera,
+  viewport: Viewport,
+): NonNullable<SymbologyAnchor["body"]> {
+  const diameterPx = angularDiameterPx(pointM, body.radiusM, projection, viewport);
+  if (isSymbolSized(diameterPx)) {
+    return { symbol: body.symbol, diameterPx };
+  }
+  const spheroid = datumSpheroidOfFigure(body.appearance?.figure ?? null);
+  const polarRadiusM = spheroid === null ? body.radiusM : body.radiusM / spheroid.stretch;
+  return {
+    symbol: body.symbol,
+    diameterPx,
+    extentPx: discExtentPx(pointM, body.radiusM, polarRadiusM, projection, viewport, at),
+  };
 }
 
 /**
@@ -938,13 +972,7 @@ export function buildWireframeDrawList(
                   ? null
                   : sub(craft.velocityMPerS, own.velocityMPerS),
             },
-      body:
-        body === undefined
-          ? null
-          : {
-              symbol: body.symbol,
-              diameterPx: angularDiameterPx(pointM, body.radiusM, projection, viewport),
-            },
+      body: body === undefined ? null : bodyAnchorOf(body, pointM, at, projection, viewport),
     };
     symbologyAnchors.push(anchor);
     let label: AnchorLabel | null = null;
@@ -984,6 +1012,15 @@ export function buildWireframeDrawList(
           options.remPx,
           options.markShiftPx,
         ),
+        setRisePx: sameTarget(options.destination, target)
+          ? markLabelRisePx(
+              anchorRadiusPx(anchor, options.remPx),
+              options.remPx,
+              options.markShiftPx,
+              options.minReticleGapPx,
+              markStrokePx,
+            )
+          : null,
         labelRisePx: sameTarget(options.destination, target)
           ? markLabelRisePx(
               reticleRadiusPx(anchor, options.remPx),

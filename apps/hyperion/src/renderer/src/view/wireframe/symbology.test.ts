@@ -14,6 +14,7 @@ import {
   bracketReticle,
   contactRadiusPx,
   destinationHalfSizePx,
+  anchorFillsView,
   destinationReticle,
   discFillsView,
   flightPathMarker,
@@ -877,16 +878,6 @@ describe("the selection's bracket about a body's drawn disc (the owner's request
     ).toBe(true);
   });
 
-  it("places the label beyond the grown bracket, as it is placed from the bracket's place", () => {
-    const radiusPx = reticleRadiusPx(
-      { body: { symbol: bodyKindSymbol("planet"), diameterPx: 300 } },
-      REM_PX,
-    );
-    expect(markLabelOffsetPx(radiusPx, REM_PX, 0)).toBeGreaterThan(
-      bracketHalfSizePx(radiusPx, REM_PX, 0),
-    );
-  });
-
   it("holds each corner within the view, a margin in, where the bracket would leave it", () => {
     const bracket = markOf(discMarks(900, { xPx: 100, yPx: 540 }), "selection");
     const box = bracket === null ? null : bounds(bracket);
@@ -899,6 +890,52 @@ describe("the selection's bracket about a body's drawn disc (the owner's request
   it("draws no bracket once the disc fills the view, the view's list marking the selection", () => {
     // 2,300 px across about the view's centre covers its corners, 1,101 px from it.
     expect(markOf(discMarks(2_300), "selection")).toBeNull();
+  });
+
+  it("keeps each held arm a third of its held side, the sides' middles open", () => {
+    // 2,000 px across about the view's centre leaves its corners out: every corner held.
+    const bracket = markOf(discMarks(2_000), "selection");
+    const lengths = (bracket?.segments ?? []).map(([a, b]) =>
+      Math.hypot(b.xPx - a.xPx, b.yPx - a.yPx),
+    );
+    const sideX = VIEWPORT.widthPx - 2 * marginPx;
+    const sideY = VIEWPORT.heightPx - 2 * marginPx;
+    expect([
+      lengths.length,
+      lengths.every((length) => length <= Math.max(sideX, sideY) / 3 + 1e-9),
+    ]).toEqual([8, true]);
+  });
+
+  it("leaves a bracket wholly off the view where it falls, unseen, rather than on the edge", () => {
+    const bracket = markOf(discMarks(4, { xPx: -5_000, yPx: 540 }), "selection");
+    expect(bracket === null ? null : bounds(bracket).right < 0).toBe(true);
+  });
+
+  it("judges a flattened disc's filling by its least radius", () => {
+    const at = { xPx: 960, yPx: 540 };
+    const flattened = {
+      at,
+      body: { ...body(2_400), extentPx: { halfPx: 1_200, leastPx: 1_000 } },
+    };
+    expect([
+      anchorFillsView(flattened, VIEWPORT),
+      anchorFillsView({ at, body: body(2_400) }, VIEWPORT),
+    ]).toEqual([false, true]);
+  });
+
+  it("draws no bracket and no chevrons about an unbounded disc, its reticles' radius kept finite", () => {
+    const inside = { body: { ...body(Number.POSITIVE_INFINITY) } };
+    const marks = discMarks(Number.POSITIVE_INFINITY);
+    expect([
+      markOf(marks, "selection"),
+      markOf(marks, "destination"),
+      reticleRadiusPx(inside, REM_PX),
+    ]).toEqual([null, null, symbolPx]);
+  });
+
+  it("sizes the bracket by the disc's extent where it is given, wider than its angular diameter", () => {
+    const anchor = { body: { ...body(600), extentPx: { halfPx: 330, leastPx: 300 } } };
+    expect(reticleRadiusPx(anchor, REM_PX)).toBe(330);
   });
 
   it("tells a disc that covers every corner of the view from one that leaves a corner out", () => {

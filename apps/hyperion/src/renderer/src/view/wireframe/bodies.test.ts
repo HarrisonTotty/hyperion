@@ -16,6 +16,7 @@ import {
   DATUM_OVER_IMAGE_RADIUS_PER_REACH,
   type DatumInside,
   datumSpheroidOfFigure,
+  discExtentPx,
   type GraticuleBody,
   type GraticuleLine,
   graticule,
@@ -1844,4 +1845,33 @@ describe("a line through the sub-camera point, drawn to the centre (R02.T19.b)",
       });
     },
   );
+});
+
+describe("a body's drawn disc's extent about its mark (the owner's request, 2026-10-31)", () => {
+  /** A camera looking along −z, 60° across, and a view 1,000 px square. */
+  const AHEAD: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+  const SQUARE: Viewport = { widthPx: 1_000, heightPx: 1_000 };
+  const focalPx = 500 / Math.tan(Math.PI / 6);
+  const centre = { xPx: 500, yPx: 500 };
+
+  it("is tan α at the focal length on the view's axis, wider than the angular radius", () => {
+    // A body 1,000 km across 2,000 km away: α = asin(0.5) = 30°.
+    const extent = discExtentPx(vec3(0, 0, -2e6), 1e6, 1e6, AHEAD, SQUARE, centre);
+    expect([
+      extent.halfPx,
+      extent.halfPx > angularDiameterPx(vec3(0, 0, -2e6), 1e6, AHEAD, SQUARE) / 2,
+    ]).toEqual([expect.closeTo(focalPx * Math.tan(Math.PI / 6), 6), true]);
+  });
+
+  it("takes its least radius from the minor radius, a flattened body's polar", () => {
+    const extent = discExtentPx(vec3(0, 0, -2e6), 1e6, 0.8e6, AHEAD, SQUARE, centre);
+    expect(extent.leastPx).toBeCloseTo(focalPx * Math.tan(Math.asin(0.4)), 6);
+  });
+
+  it("is unbounded from inside the body", () => {
+    expect(discExtentPx(vec3(0, 0, -1e5), 1e6, 1e6, AHEAD, SQUARE, centre)).toEqual({
+      halfPx: Number.POSITIVE_INFINITY,
+      leastPx: Number.POSITIVE_INFINITY,
+    });
+  });
 });

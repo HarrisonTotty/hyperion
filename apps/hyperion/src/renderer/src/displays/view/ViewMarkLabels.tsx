@@ -414,14 +414,15 @@ export function markLabelPlaces(
   const frame: LabelFrame = {
     stage,
     chrome,
-    // The destination's chevron sets, drawn whether or not its label is shown.
+    // The destination's chevron sets, drawn whether or not its label is shown, each about the
+    // mark's own symbol, so that a set grown about a large disc keeps no label off the disc.
     sets: anchors.flatMap((anchor) =>
-      anchor.labelRisePx === null
+      anchor.setRisePx === null
         ? []
         : [
             squareBoxPx(
               centreCssPx(anchor, stage),
-              destinationSetReachCssPx(anchor.labelRisePx, stage),
+              destinationSetReachCssPx(anchor.setRisePx, stage),
             ),
           ],
     ),

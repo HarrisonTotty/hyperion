@@ -1106,6 +1106,38 @@ describe("a destination's label above its chevron set (R07.T16.h's follow-up; de
   });
 });
 
+describe("a large destination's label beyond its grown reticles (the owner's request, 2026-10-31)", () => {
+  /** The planet's anchor, selected and the destination, at `radiusM`, with a class-0 symbol. */
+  const planetAnchor = (radiusM: number): WireframeDrawList["anchors"][number] | undefined => {
+    const target = labelTarget(0);
+    const base = labelScene(0);
+    const sized = {
+      ...base,
+      bodies: base.bodies.map((body) =>
+        body.id === FIXTURE_PLANET ? Object.assign({}, body, { radiusM }) : body,
+      ),
+    };
+    return build(
+      { ...viewStrokesAt(1), remPx: 16, selection: target, destination: target },
+      sized,
+    ).anchors.find(
+      (anchor) => anchor.target.kind === "body" && anchor.target.body === FIXTURE_PLANET,
+    );
+  };
+
+  it("places the label from the disc's edge, its chevron set's keep-out kept about the symbol", () => {
+    const small = planetAnchor(1);
+    // A tenth of its range across: a disc some 300 px across, far over its symbol.
+    const large = planetAnchor(0.1 * (small?.distanceM ?? Number.NaN));
+    expect([
+      large?.setRisePx === small?.setRisePx,
+      (large?.labelRisePx ?? 0) > (small?.labelRisePx ?? Number.POSITIVE_INFINITY) + 100,
+      (large?.labelOffsetPx ?? 0) > (small?.labelOffsetPx ?? Number.POSITIVE_INFINITY) + 100,
+      (large?.markReachPx ?? 0) > (small?.markReachPx ?? Number.POSITIVE_INFINITY) + 100,
+    ]).toEqual([true, true, true, true]);
+  });
+});
+
 describe("the destination's least gap (R07.T16.g)", () => {
   it("is lib/strokes.ts's outline and casing at each ratio: 4, 4, 5 and 7.5 px", () => {
     expect([0.78125, 1, 2, 3].map((ratio) => viewStrokesAt(ratio).minReticleGapPx)).toEqual([
