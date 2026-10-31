@@ -1194,6 +1194,11 @@ impl EnvelopeAtmosphere {
     /// Each published gas, trimmed by the decks and renormalised, is finished by `hold` at its level
     /// and the profile's temperature there before anything reads it: an H₂/He envelope's as
     /// trimmed, a supercritical envelope's each condensable at most its saturation.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the two envelopes' parts, each a different input: P14.T52.h's dayside cut and \
+                  P14.T53.f's saturation hold each add one, and a struct would only rename them"
+    )]
     fn assembled(
         profile: EnvelopeProfile,
         deep: &[(SubstanceId, f64)],
