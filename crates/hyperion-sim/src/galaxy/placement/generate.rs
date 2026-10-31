@@ -2,7 +2,7 @@
 //! 03, P03.T6).
 
 use super::candidate::candidate_id;
-use super::cell::{candidate_count_from_bound, layer_bound};
+use super::cell::{CellBound, candidate_count_from_bound};
 use super::record::candidate_mass;
 use super::{CandidateOutcome, CellKey, SystemRecord, evaluate_candidate_from_bound};
 use crate::galaxy::Galaxy;
@@ -47,8 +47,8 @@ use crate::units::SolarMasses;
 /// ```
 pub fn generate_cell(galaxy: &Galaxy, key: CellKey, out: &mut Vec<SystemRecord>) {
     out.clear();
-    let bound = layer_bound(galaxy, key);
-    let candidates = candidate_count_from_bound(galaxy.seed(), key, bound);
+    let bound = CellBound::of(galaxy, key);
+    let candidates = candidate_count_from_bound(galaxy.seed(), key, bound.total());
     // Most candidates are accepted, so the count is the right order for the reservation; a cache
     // that keeps the buffer should shrink it, since `cell_heap_bytes` counts records and not spare
     // capacity.
@@ -57,7 +57,7 @@ pub fn generate_cell(galaxy: &Galaxy, key: CellKey, out: &mut Vec<SystemRecord>)
     );
     for index in 0..candidates {
         if let CandidateOutcome::Accepted(system) =
-            evaluate_candidate_from_bound(galaxy, key, index, bound)
+            evaluate_candidate_from_bound(galaxy, key, index, &bound)
         {
             out.push(system);
         }
@@ -110,8 +110,8 @@ pub fn generate_cell_where(
     out: &mut Vec<SystemRecord>,
 ) {
     out.clear();
-    let bound = layer_bound(galaxy, key);
-    let candidates = candidate_count_from_bound(galaxy.seed(), key, bound);
+    let bound = CellBound::of(galaxy, key);
+    let candidates = candidate_count_from_bound(galaxy.seed(), key, bound.total());
     out.reserve(
         usize::try_from(candidates).expect("usize is at least 32 bits, so a u32 count fits"),
     );
@@ -120,7 +120,7 @@ pub fn generate_cell_where(
             continue;
         }
         if let CandidateOutcome::Accepted(system) =
-            evaluate_candidate_from_bound(galaxy, key, index, bound)
+            evaluate_candidate_from_bound(galaxy, key, index, &bound)
         {
             out.push(system);
         }

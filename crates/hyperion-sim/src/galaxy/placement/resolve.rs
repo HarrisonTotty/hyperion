@@ -13,7 +13,7 @@
 //! has been generated before.
 
 use super::candidate::{catalogue_claims, evaluate_with_hook};
-use super::cell::{candidate_count_from_bound, layer_bound};
+use super::cell::{CellBound, candidate_count_from_bound};
 use super::{CandidateOutcome, CellKey, ResolveSystemError, SystemRecord};
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::system_of;
@@ -242,11 +242,11 @@ fn resolve_candidate_with(
     index: u32,
     claims: impl Fn(&Galaxy, &SystemRecord) -> bool,
 ) -> Result<SystemRecord, ResolveSystemError> {
-    let bound = layer_bound(galaxy, key);
-    if index >= candidate_count_from_bound(galaxy.seed(), key, bound) {
+    let bound = CellBound::of(galaxy, key);
+    if index >= candidate_count_from_bound(galaxy.seed(), key, bound.total()) {
         return Err(ResolveSystemError::NoSuchSystem);
     }
-    match evaluate_with_hook(galaxy, key, index, bound, claims) {
+    match evaluate_with_hook(galaxy, key, index, &bound, claims) {
         CandidateOutcome::Accepted(record) => Ok(record),
         CandidateOutcome::Thinned
         | CandidateOutcome::ClaimedByCatalogue
@@ -433,9 +433,9 @@ mod tests {
             resolve_candidate_with(&galaxy, key, index(&record), always),
             Err(ResolveSystemError::NoSuchSystem)
         );
-        let bound = layer_bound(&galaxy, key);
+        let bound = CellBound::of(&galaxy, key);
         assert_eq!(
-            evaluate_with_hook(&galaxy, key, index(&record), bound, always),
+            evaluate_with_hook(&galaxy, key, index(&record), &bound, always),
             CandidateOutcome::ClaimedByCatalogue
         );
         assert_eq!(resolve(&galaxy, record.id()), Ok(record));

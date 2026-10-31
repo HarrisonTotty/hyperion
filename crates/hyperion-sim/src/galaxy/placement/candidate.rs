@@ -15,10 +15,12 @@
 //! anything a caller has cached: a candidate is a pure function of the galaxy, its cell and its
 //! index.
 
+use super::cell::CellBound;
 use super::record::{SystemKind, SystemRecord};
-use super::{CellKey, layer_bound, rogue_planet_saturation_density};
+use super::{CellKey, rogue_planet_saturation_density};
 use crate::coords::GalacticPosition;
 use crate::galaxy::catalogue_classes::lbv::lbv_claims;
+use crate::galaxy::displaced::DisplacedClassId;
 use crate::galaxy::displaced::site::{ExplosionSite, explosion_site, recent_death_claim};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
@@ -96,7 +98,7 @@ pub enum CandidateOutcome {
 /// ```
 #[must_use]
 pub fn evaluate_candidate(galaxy: &Galaxy, key: CellKey, index: u32) -> CandidateOutcome {
-    evaluate_candidate_from_bound(galaxy, key, index, layer_bound(galaxy, key))
+    evaluate_candidate_from_bound(galaxy, key, index, &CellBound::of(galaxy, key))
 }
 
 /// [`evaluate_candidate`] with the cell's bound already evaluated, for the whole-cell walk.
@@ -105,9 +107,19 @@ pub(super) fn evaluate_candidate_from_bound(
     galaxy: &Galaxy,
     key: CellKey,
     index: u32,
-    bound: f64,
+    bound: &CellBound,
 ) -> CandidateOutcome {
     evaluate_with_hook(galaxy, key, index, bound, catalogue_claims)
+}
+
+/// What the thinning picked for a candidate: a field component, or, in layers D and E of a galaxy
+/// that holds them, one of plan 08's displaced classes (P08.T12.b).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Picked {
+    /// A field component, with the mark's slice of it.
+    Field(Pick),
+    /// A displaced class.
+    Displaced(DisplacedClassId),
 }
 
 /// [`evaluate_candidate_from_bound`] with the carve-out hook given, so that a test can claim
@@ -118,17 +130,26 @@ pub(super) fn evaluate_with_hook(
     galaxy: &Galaxy,
     key: CellKey,
     index: u32,
-    bound: f64,
+    bound: &CellBound,
     claims: impl Fn(&Galaxy, &SystemRecord) -> bool,
 ) -> CandidateOutcome {
     let id = candidate_id(key, index);
     let position = candidate_position(galaxy.seed(), key, id);
     let mark = acceptance_mark(galaxy.seed(), id);
-    let Some(pick) = pick_component(galaxy, key, bound, &position, mark) else {
+    let Some(picked) = pick_component(galaxy, key, bound, &position, mark) else {
         return CandidateOutcome::Thinned;
     };
-    let record = SystemRecord::of_candidate(galaxy, key, id, position, pick.component);
-    if !in_the_field(galaxy, key, bound, mark, &pick, &record) {
+    let component = match picked {
+        Picked::Field(pick) => pick.component,
+        Picked::Displaced(class) => displaced_birth(galaxy, key, class),
+    };
+    let record = SystemRecord::of_candidate(galaxy, key, id, position, component);
+    // The field's share φ and layer D's carve-out thin a field pick inside its slice (P09.T2.c,
+    // P09.T35); a displaced class's weight is its budget's, the features' members included, and
+    // no field factor thins it.
+    if let Picked::Field(pick) = picked
+        && !in_the_field(galaxy, key, bound.total(), mark, &pick, &record)
+    {
         return CandidateOutcome::Thinned;
     }
     // Catalogue classes claim stellar hosts only: the hook is not called for the substellar
@@ -145,8 +166,8 @@ pub(super) fn evaluate_with_hook(
 /// The component a candidate's mark picked, and where the mark's slice of it lies: the running
 /// sum of the weights before it, and its own weight, systems per cubic light-year.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Pick {
-    component: ComponentId,
+pub(super) struct Pick {
+    pub(super) component: ComponentId,
     below: f64,
     weight: f64,
 }
@@ -199,6 +220,26 @@ fn in_the_field(
         pick.below + keeps * pick.weight,
         padded_bound,
     ))
+}
+
+/// The field component a candidate the thinning picked for displaced class `class` is placed as,
+/// until P08.T12.c draws a displaced record's own marks (Design note 17): the class's birth
+/// component of the largest weight in the cell's band ([`DisplacedClass::birth`]), whose record,
+/// with plan 03's mass and age draws, the candidate then takes.
+///
+/// [`DisplacedClass::birth`]: crate::galaxy::displaced::DisplacedClass::birth
+///
+/// # Panics
+///
+/// Never: a class is picked only in a galaxy that holds it and only in a band where it has weight,
+/// where it has a birth component.
+#[must_use]
+fn displaced_birth(galaxy: &Galaxy, key: CellKey, class: DisplacedClassId) -> ComponentId {
+    galaxy
+        .fields()
+        .displaced()
+        .and_then(|displaced| displaced.class(class).birth(key.band()))
+        .expect("a class is picked only in a band where it has weight, so a birth component")
 }
 
 /// Whether a catalogue class claims this candidate (plan 03, Design note 5; plan 09, P09.T35).
@@ -281,10 +322,13 @@ fn acceptance_mark(seed: Seed, id: SystemId) -> Mark {
 }
 
 /// The component a candidate at `position` belongs to, or `None` if the thinning rejects it (plan
-/// 03, Design note 3).
+/// 03, Design note 3); in layers D and E of a galaxy that holds plan 08's displaced classes, the
+/// component or the class (P08.T12.b).
 ///
 /// The weights are [`ShareMatrix::component_share`] times the component's density at the position,
-/// in component index order — the same products, in the same order, that
+/// in component index order, then, where the layer holds displaced classes,
+/// [`ShareMatrix::displaced_share`] times each class's density in the band's order — the same
+/// products, in the same order, that
 /// [`Fields::layer_density`](crate::galaxy::fields::Fields::layer_density) and plan 02's bound take
 /// — and [`Mark::pick_weighted`] turns their running sums over the bound into 53-bit thresholds.
 ///
@@ -302,18 +346,19 @@ fn acceptance_mark(seed: Seed, id: SystemId) -> Mark {
 /// of P03.T8.c exercises. Also in debug builds, if the lazy pick of a band but the rogue planets'
 /// is not [`Mark::pick_weighted`]'s over every weight ([`pick_unsaturated`]).
 #[must_use]
-fn pick_component(
+pub(super) fn pick_component(
     galaxy: &Galaxy,
     key: CellKey,
-    bound: f64,
+    cell_bound: &CellBound,
     position: &GalacticPosition,
     mark: Mark,
-) -> Option<Pick> {
+) -> Option<Picked> {
+    let bound = cell_bound.total();
     if bound.is_nan() || bound <= 0.0 {
         return None;
     }
     if key.band() != MassBand::RoguePlanet {
-        return pick_unsaturated(galaxy, key, bound, position, mark);
+        return pick_unsaturated(galaxy, key, cell_bound, position, mark);
     }
     let fields = galaxy.fields();
     let shares = galaxy.shares();
@@ -351,13 +396,15 @@ fn pick_component(
         key.size_ly(),
         key.gen_cell().to_array(),
     );
-    mark.pick_weighted(weights, padded_bound).map(|index| Pick {
-        component: fields
-            .component_id(index)
-            .expect("the weights are one per component, so a picked index is one of them"),
-        // The running sum `pick_weighted` reached before the picked weight, in its order.
-        below: weighted_density(&weights[..index]),
-        weight: weights[index],
+    mark.pick_weighted(weights, padded_bound).map(|index| {
+        Picked::Field(Pick {
+            component: fields
+                .component_id(index)
+                .expect("the weights are one per component, so a picked index is one of them"),
+            // The running sum `pick_weighted` reached before the picked weight, in its order.
+            below: weighted_density(&weights[..index]),
+            weight: weights[index],
+        })
     })
 }
 
@@ -369,19 +416,23 @@ fn pick_component(
 /// The sums and thresholds are the pick's own, in its order, so the pick is its pick bit for bit.
 /// A cold 50 ly query at the Sun-like point accepts 99% of its candidates, nearly all in the first
 /// seven components, the discs, and so skips most of the other twelve's densities, some 2 ms of
-/// its grid's 10 (measured 2026-10-30). Debug builds evaluate the rest too, and check that the
-/// whole total is under the bound and that `pick_weighted` over every weight picks the same.
+/// its grid's 10 (measured 2026-10-30). Where the layer holds plan 08's displaced classes and no
+/// component is picked, the sum runs on over them, with the early exits of Design note 16
+/// ([`pick_displaced`], P08.T12.b). Debug builds evaluate the rest too, and check that the whole
+/// total is under the bound, each class under its own, and that `pick_weighted` over every weight
+/// picks the same ([`check_the_lazy_pick`]).
 #[must_use]
 fn pick_unsaturated(
     galaxy: &Galaxy,
     key: CellKey,
-    bound: f64,
+    cell_bound: &CellBound,
     position: &GalacticPosition,
     mark: Mark,
-) -> Option<Pick> {
+) -> Option<Picked> {
     let fields = galaxy.fields();
     let shares = galaxy.shares();
     let band = key.band();
+    let bound = cell_bound.total();
     let padded_bound = bound * (1.0 + BOUND_PADDING);
     let mut densities = fields.densities_lazily(&PointLy::from(position));
     let mut weights = [0.0; MAX_COMPONENTS];
@@ -399,35 +450,208 @@ fn pick_unsaturated(
             break;
         }
     }
-    if cfg!(debug_assertions) {
-        let count = fields.components().len();
-        let rest = picked.map_or(count, |i| i + 1);
-        for (slot, (component, density)) in weights[rest..count].iter_mut().zip(densities) {
-            *slot = shares.component_share(band, component) * density;
-        }
-        let weights = &weights[..count];
-        debug_assert!(
-            weighted_density(weights) <= padded_bound,
-            "the density of layer {} is {} at {:?}, above its bound {bound} over the {} ly cell {:?}",
-            key.layer().letter(),
-            weighted_density(weights),
-            position.to_light_years_f64(),
-            key.size_ly(),
-            key.gen_cell().to_array(),
-        );
-        debug_assert_eq!(
-            mark.pick_weighted(weights, padded_bound),
-            picked,
-            "the lazy pick at {:?} is not the pick over every weight",
-            position.to_light_years_f64()
+    let mut picked = picked.map(|index| {
+        Picked::Field(Pick {
+            component: fields
+                .component_id(index)
+                .expect("the weights are one per component, so a picked index is one of them"),
+            below,
+            weight: weights[index],
+        })
+    });
+    let displaced = fields.displaced().map(|d| (d, d.order(band)));
+    if picked.is_none()
+        && let Some((displaced, order)) = displaced
+    {
+        picked = pick_displaced(
+            &DisplacedPick {
+                galaxy,
+                key,
+                cell_bound,
+                padded_bound,
+                position,
+                mark,
+            },
+            displaced,
+            order,
+            sum,
         );
     }
-    picked.map(|index| Pick {
-        component: fields
-            .component_id(index)
-            .expect("the weights are one per component, so a picked index is one of them"),
-        below,
-        weight: weights[index],
+    if cfg!(debug_assertions) {
+        check_the_lazy_pick(
+            &DisplacedPick {
+                galaxy,
+                key,
+                cell_bound,
+                padded_bound,
+                position,
+                mark,
+            },
+            &mut weights,
+            densities,
+            picked,
+        );
+    }
+    picked
+}
+
+/// What the thinning picks for candidate `index` of `key`: [`pick_component`] at its position and
+/// with its mark, for the tests that sort a cell's records by their pick.
+#[cfg(test)]
+#[must_use]
+pub(super) fn pick_of(galaxy: &Galaxy, key: CellKey, index: u32) -> Option<Picked> {
+    let id = candidate_id(key, index);
+    let position = candidate_position(galaxy.seed(), key, id);
+    let mark = acceptance_mark(galaxy.seed(), id);
+    pick_component(galaxy, key, &CellBound::of(galaxy, key), &position, mark)
+}
+
+/// What a candidate's pick reads of its cell beyond the field: the galaxy, the cell and its bound,
+/// the padded bound the thresholds divide by, the position and the acceptance mark.
+struct DisplacedPick<'a> {
+    galaxy: &'a Galaxy,
+    key: CellKey,
+    cell_bound: &'a CellBound,
+    padded_bound: f64,
+    position: &'a GalacticPosition,
+    mark: Mark,
+}
+
+/// The pick's run over the band's displaced classes after the field components, from the field's
+/// running sum `sum` (plan 08, Design note 16; P08.T12.b).
+///
+/// The one acceptance mark is compared against one cumulative sum that runs on over the classes in
+/// their order ([`DisplacedFields::order`](crate::galaxy::displaced::DisplacedFields::order)), each
+/// `count × density`, with two early exits, each of which gives exactly the answer of the full sum
+/// ([`Mark::pick_weighted`] over every weight):
+///
+/// - **accept**: the first class whose running sum passes the mark is picked, and no later class's
+///   density is evaluated, as the full sum's threshold would pick it;
+/// - **reject**: before a class is evaluated, if the sum so far plus the bounds of it and every
+///   class after it ([`CellBound::rest`]) cannot reach the mark, the candidate is thinned. Each
+///   density is under its class's bound, and the running sums only rise, so no later threshold
+///   could have passed the mark either. The bounds' sum is padded by [`BOUND_PADDING`] of the cell's
+///   bound, so that the rounding of two sums taken in different orders cannot make the exit fire
+///   where the full sum would still accept.
+///
+/// The order is part of the generator version; the exits are not, since they change no answer.
+fn pick_displaced(
+    at: &DisplacedPick<'_>,
+    displaced: &crate::galaxy::displaced::DisplacedFields,
+    order: &[DisplacedClassId],
+    mut sum: f64,
+) -> Option<Picked> {
+    let band = at.key.band();
+    let shares = at.galaxy.shares();
+    let point = PointLy::from(at.position);
+    let margin = BOUND_PADDING * at.cell_bound.total();
+    for (i, &id) in order.iter().enumerate() {
+        let reach = sum + (at.cell_bound.rest(i) + margin);
+        if !at
+            .mark
+            .is_below(Threshold::from_ratio(reach, at.padded_bound))
+        {
+            return None;
+        }
+        sum += shares.displaced_share(band, id) * displaced.density(id, &point);
+        if at
+            .mark
+            .is_below(Threshold::from_ratio(sum, at.padded_bound))
+        {
+            return Some(Picked::Displaced(id));
+        }
+    }
+    None
+}
+
+/// In debug builds, the lazy pick's checks over every weight: the whole layer's weighted density is
+/// under the padded bound, each displaced class's under its own bound over the cell (plan 08,
+/// P08.T11's assertion), and [`Mark::pick_weighted`] over the field's weights and then the classes'
+/// picks what the lazy pick and its early exits did. `weights` holds the field weights the lazy
+/// pick read, and `densities` the components it did not reach.
+fn check_the_lazy_pick<'a>(
+    at: &DisplacedPick<'_>,
+    weights: &mut [f64; MAX_COMPONENTS],
+    densities: impl Iterator<Item = (&'a crate::galaxy::fields::Component, f64)>,
+    picked: Option<Picked>,
+) {
+    let (galaxy, key) = (at.galaxy, at.key);
+    let fields = galaxy.fields();
+    let shares = galaxy.shares();
+    let band = key.band();
+    let count = fields.components().len();
+    let field_picked = match picked {
+        Some(Picked::Field(pick)) => Some(pick.component.index()),
+        Some(Picked::Displaced(_)) | None => None,
+    };
+    // The lazy pick read the weights up to the picked component, or every one.
+    let read = field_picked.map_or(count, |i| i + 1);
+    for (slot, (component, density)) in weights[read..count].iter_mut().zip(densities) {
+        *slot = shares.component_share(band, component) * density;
+    }
+    let mut all: Vec<f64> = weights[..count].to_vec();
+    let point = PointLy::from(at.position);
+    if let Some(displaced) = fields.displaced() {
+        for (i, &id) in displaced.order(band).iter().enumerate() {
+            let weight = shares.displaced_share(band, id) * displaced.density(id, &point);
+            let class_bound = at.cell_bound.class(i);
+            debug_assert!(
+                weight <= class_bound,
+                "displaced class {id:?}'s weighted density is {weight} at {:?}, above its bound \
+                 {class_bound} over the {} ly cell {:?}",
+                at.position.to_light_years_f64(),
+                key.size_ly(),
+                key.gen_cell().to_array(),
+            );
+            all.push(weight);
+        }
+    }
+    let bound = at.cell_bound.total();
+    debug_assert!(
+        weighted_density(&all) <= at.padded_bound,
+        "the density of layer {} is {} at {:?}, above its bound {bound} over the {} ly cell {:?}",
+        key.layer().letter(),
+        weighted_density(&all),
+        at.position.to_light_years_f64(),
+        key.size_ly(),
+        key.gen_cell().to_array(),
+    );
+    let full = full_pick(galaxy, &all, at.padded_bound, at.mark, band);
+    debug_assert_eq!(
+        full,
+        picked,
+        "the lazy pick at {:?} is not the pick over every weight",
+        at.position.to_light_years_f64()
+    );
+}
+
+/// [`Mark::pick_weighted`] over `weights`, the field components' then the band's displaced
+/// classes' in their order: the full sum's answer, which the lazy pick and its exits must give.
+fn full_pick(
+    galaxy: &Galaxy,
+    weights: &[f64],
+    padded_bound: f64,
+    mark: Mark,
+    band: MassBand,
+) -> Option<Picked> {
+    let fields = galaxy.fields();
+    let count = fields.components().len();
+    mark.pick_weighted(weights, padded_bound).map(|index| {
+        if index < count {
+            Picked::Field(Pick {
+                component: fields
+                    .component_id(index)
+                    .expect("an index below the component count is a component"),
+                below: weighted_density(&weights[..index]),
+                weight: weights[index],
+            })
+        } else {
+            let order = fields
+                .displaced()
+                .expect("weights past the components are the displaced classes'")
+                .order(band);
+            Picked::Displaced(order[index - count])
+        }
     })
 }
 
@@ -608,7 +832,8 @@ mod tests {
         let galaxy = galaxy();
         let (fields, shares) = (galaxy.fields(), galaxy.shares());
         let key = CellKey::containing(Layer::A, &sunlike()).unwrap();
-        let bound = layer_bound(&galaxy, key);
+        let cell_bound = CellBound::of(&galaxy, key);
+        let bound = cell_bound.total();
         let draws = 20_000;
         // A candidate at position p is accepted with probability density(p) ÷ bound, so the number
         // accepted is a sum of Bernoulli trials whose probabilities the positions decide.
@@ -623,7 +848,7 @@ mod tests {
             mean += p;
             variance += p * (1.0 - p);
             let mark = acceptance_mark(galaxy.seed(), candidate_id(key, index));
-            if pick_component(&galaxy, key, bound, &position, mark).is_some() {
+            if pick_component(&galaxy, key, &cell_bound, &position, mark).is_some() {
                 accepted += 1.0;
             }
         }
@@ -640,7 +865,8 @@ mod tests {
         let galaxy = galaxy();
         let (fields, shares) = (galaxy.fields(), galaxy.shares());
         let key = CellKey::containing(Layer::A, &sunlike()).unwrap();
-        let bound = layer_bound(&galaxy, key);
+        let cell_bound = CellBound::of(&galaxy, key);
+        let bound = cell_bound.total();
         let position = sunlike();
         // The odds at this one position: share × density per component, and the rest is rejection.
         let mut densities = [0.0; MAX_COMPONENTS];
@@ -658,8 +884,12 @@ mod tests {
         let mut counts = vec![0_u64; weights.len() + 1];
         for (cell, index) in candidates(Layer::A, draws) {
             let mark = acceptance_mark(galaxy.seed(), candidate_id(cell, index));
-            let picked = pick_component(&galaxy, key, bound, &position, mark);
-            counts[picked.map_or(weights.len(), |pick| pick.component.index())] += 1;
+            let picked = pick_component(&galaxy, key, &cell_bound, &position, mark);
+            let index = picked.map(|picked| match picked {
+                Picked::Field(pick) => pick.component.index(),
+                Picked::Displaced(_) => unreachable!("the field galaxy holds no displaced class"),
+            });
+            counts[index.unwrap_or(weights.len())] += 1;
         }
         let kept = weights.iter().fold(0.0, |sum, w| sum + w) / padded_bound;
         let mut expected: Vec<f64> = weights.iter().map(|w| n * w / padded_bound).collect();
@@ -677,7 +907,10 @@ mod tests {
         for index in 0..16 {
             let mark = acceptance_mark(galaxy.seed(), candidate_id(key, index));
             for bound in [0.0, -0.0, f64::NAN] {
-                assert_eq!(pick_component(&galaxy, key, bound, &position, mark), None);
+                assert_eq!(
+                    pick_component(&galaxy, key, &CellBound::with_total(bound), &position, mark),
+                    None
+                );
             }
         }
     }
@@ -716,7 +949,7 @@ mod tests {
                     fields.layer_density(shares, key.band(), &point),
                 );
                 assert!(
-                    weighted_density(&weights) <= layer_bound(&galaxy, key),
+                    weighted_density(&weights) <= CellBound::of(&galaxy, key).total(),
                     "layer {} at {ly:?}",
                     spec.layer().letter()
                 );
@@ -775,7 +1008,7 @@ mod tests {
     fn outcome_is_claimed_by_the_catalogue_for_exactly_what_the_hook_claims() {
         let galaxy = galaxy();
         let key = CellKey::containing(Layer::C, &sunlike()).unwrap();
-        let bound = layer_bound(&galaxy, key);
+        let bound = CellBound::of(&galaxy, key);
         let claims_even = |_: &Galaxy, record: &SystemRecord| {
             let SystemIdKind::Grid(grid) = record.id().kind() else {
                 unreachable!("a grid record has a grid ID")
@@ -785,8 +1018,8 @@ mod tests {
         let mut claimed = 0;
         let mut accepted = 0;
         for index in 0..candidate_count(&galaxy, key) {
-            let plain = evaluate_candidate_from_bound(&galaxy, key, index, bound);
-            let hooked = evaluate_with_hook(&galaxy, key, index, bound, claims_even);
+            let plain = evaluate_candidate_from_bound(&galaxy, key, index, &bound);
+            let hooked = evaluate_with_hook(&galaxy, key, index, &bound, claims_even);
             match plain {
                 CandidateOutcome::Accepted(record) if index % 2 == 0 => {
                     assert_eq!(hooked, CandidateOutcome::ClaimedByCatalogue);
@@ -847,11 +1080,11 @@ mod tests {
             for dx in 0..count {
                 let key = CellKey::new(layer, [x + dx, y, z]).unwrap();
                 cells.push(key);
-                let bound = layer_bound(galaxy, key);
+                let bound = CellBound::of(galaxy, key);
                 let asked_before = asked.get();
                 for index in 0..candidate_count(galaxy, key) {
                     let before = asked.get();
-                    let outcome = evaluate_with_hook(galaxy, key, index, bound, hook);
+                    let outcome = evaluate_with_hook(galaxy, key, index, &bound, hook);
                     let asks = asked.get() - before;
                     match outcome {
                         CandidateOutcome::Accepted(_) if layer == Layer::E => {
@@ -1078,5 +1311,120 @@ mod tests {
         let galaxy = galaxy();
         let key = CellKey::containing(Layer::A, &sunlike()).unwrap();
         let _ = evaluate_candidate(&galaxy, key, key.index_capacity());
+    }
+
+    // --- P08.T12.b: the displaced classes in the pick, and its early exits ---
+
+    /// The cells of the exits test: layers D and E at the Sun-like point, in the outer bulge, on a
+    /// young arm ridge outside the bar, 3,000 ly above the plane at the solar circle, in the halo
+    /// 15,000 ly up and 500 ly from the centre.
+    fn exit_cells(galaxy: &Galaxy) -> Vec<CellKey> {
+        let arms = galaxy.fields().arms();
+        let r = 1.15 * arms.bar_half_length().value();
+        let (sin, cos) = crate::math::sin_cos(arms.ridge_azimuth(r, 0));
+        let half = 0.5_f64.sqrt();
+        let places = [
+            [0.0, 26_000.0, 0.0],
+            [3_200.0 * half, 3_200.0 * half, 0.0],
+            [r * cos, r * sin, 0.0],
+            [0.0, 26_000.0, 3_000.0],
+            [0.0, 20_000.0, 15_000.0],
+            [400.0, 300.0, 0.0],
+        ];
+        places
+            .into_iter()
+            .flat_map(|at| {
+                let position = GalacticPosition::from_light_years(at).expect("in the cube");
+                [Layer::D, Layer::E]
+                    .map(|layer| CellKey::containing(layer, &position).expect("in the cube"))
+            })
+            .collect()
+    }
+
+    /// How a lazy pick ended, as the exits test tallies it.
+    #[derive(Debug, Default)]
+    struct ExitCounts {
+        field: u64,
+        displaced: u64,
+        /// Thinned before any class's density was evaluated: the field's sum and every class's
+        /// bound could not reach the mark.
+        rejected_at_once: u64,
+        /// Thinned later.
+        rejected: u64,
+    }
+
+    /// `n` candidates of each of `cells` in `galaxy`, by index from 0 (an index past a cell's
+    /// count evaluates like a candidate): the lazy pick with its two early exits against
+    /// `pick_weighted` over every weight, field components' then the classes' in their order.
+    fn exits_agree_with_the_full_sum(galaxy: &Galaxy, cells: &[CellKey], n: u32) -> ExitCounts {
+        let (fields, shares) = (galaxy.fields(), galaxy.shares());
+        let displaced = fields.displaced().expect("a galaxy under every 26 hold");
+        let mut counts = ExitCounts::default();
+        let mut densities = [0.0; MAX_COMPONENTS];
+        for &key in cells {
+            let band = key.band();
+            let bound = CellBound::of(galaxy, key);
+            let padded = bound.total() * (1.0 + BOUND_PADDING);
+            let order = displaced.order(band);
+            for index in 0..n {
+                let id = candidate_id(key, index);
+                let position = candidate_position(galaxy.seed(), key, id);
+                let mark = acceptance_mark(galaxy.seed(), id);
+                let lazy = pick_component(galaxy, key, &bound, &position, mark);
+                let point = PointLy::from(&position);
+                fields.densities(&point, &mut densities);
+                let mut weights: Vec<f64> = fields
+                    .components()
+                    .iter()
+                    .zip(densities)
+                    .map(|(c, d)| shares.component_share(band, c) * d)
+                    .collect();
+                let field_sum = weighted_density(&weights);
+                weights.extend(order.iter().map(|&class| {
+                    shares.displaced_share(band, class) * displaced.density(class, &point)
+                }));
+                let full = full_pick(galaxy, &weights, padded, mark, band);
+                assert_eq!(lazy, full, "{key:?} candidate {index}");
+                match lazy {
+                    Some(Picked::Field(_)) => counts.field += 1,
+                    Some(Picked::Displaced(_)) => counts.displaced += 1,
+                    None => {
+                        let reach = field_sum + (bound.rest(0) + BOUND_PADDING * bound.total());
+                        if mark.is_below(Threshold::from_ratio(reach, padded)) {
+                            counts.rejected += 1;
+                        } else {
+                            counts.rejected_at_once += 1;
+                        }
+                    }
+                }
+            }
+        }
+        counts
+    }
+
+    /// P08.T12.b: the two early exits give the full sum's answer, on 10⁴ candidates for the fast
+    /// suite (the plan's 10⁶ are the slow test below), and a displaced class is picked.
+    #[test]
+    fn the_early_exits_give_the_full_sum_s_answer() {
+        let galaxy = crate::galaxy::displaced::hold::displaced();
+        let cells = exit_cells(galaxy);
+        let counts = exits_agree_with_the_full_sum(galaxy, &cells, 834);
+        println!("{counts:?}");
+        assert!(counts.displaced > 0 && counts.field > 0, "{counts:?}");
+    }
+
+    /// P08.T12.b: the two early exits give the full sum's answer on 10⁶ candidates.
+    #[test]
+    #[ignore = "slow: 10⁶ candidates, each with every class's density evaluated twice"]
+    fn the_early_exits_give_the_full_sum_s_answer_on_a_million_candidates() {
+        let galaxy = crate::galaxy::displaced::hold::displaced();
+        let cells = exit_cells(galaxy);
+        let counts = exits_agree_with_the_full_sum(galaxy, &cells, 83_334);
+        println!("{counts:?}");
+        assert!(
+            counts.field + counts.displaced + counts.rejected + counts.rejected_at_once
+                >= 1_000_000
+        );
+        assert!(counts.displaced > 0 && counts.rejected > 0 && counts.rejected_at_once > 0);
     }
 }

@@ -224,7 +224,7 @@ pub enum PlacementClass {
 }
 
 #[cfg(test)]
-mod hold;
+pub(crate) mod hold;
 
 #[cfg(test)]
 mod tests {

@@ -26,6 +26,8 @@ mod candidate;
 #[cfg(test)]
 mod carve_out_hold;
 mod cell;
+#[cfg(test)]
+mod displaced_hold;
 mod generate;
 mod headroom;
 mod layers;
@@ -50,7 +52,6 @@ pub use record::{Existence, SystemKind, SystemOrigin, SystemRecord};
 pub use resolve::{resolve, resolve_with};
 
 use candidate::evaluate_candidate_from_bound;
-use cell::layer_bound;
 
 use crate::coords::{BuildGenCellError, GenCell};
 use crate::id::Layer;

@@ -1212,8 +1212,9 @@ form_bound}` bound one class's normalised form over a cell: the layer's radial e
 
 ### P08.T12 Displaced classes in placement
 
-**P08.T12.a built** (2026-10-31, behind `DISPLACED_VERSION` = 26; no output moves at 24): see
-"P08.T12.a as built" under [Risks](#risks-and-open-points).
+**P08.T12.a–b built** (2026-10-31, behind `DISPLACED_VERSION` = 26; no output moves at 24): see
+"P08.T12.a as built" and "P08.T12.b as built" under [Risks](#risks-and-open-points). T12.c–d
+remain, and the bump.
 
 - **P08.T12.a Shares and components.** `DisplacedFields::new` from the class table and forms,
   classes ordered per Design note 16, zero-weight classes left out (about a hundred remain in layer
@@ -2080,3 +2081,22 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   - The new arm reads the provisional `displaced_forms`; the lane that commits P15.T6.c–f's
     production table re-pins the 26-arm figures by name (`DISPLACED_DENSITIES_DIGEST` and the
     tests' printed counts).
+
+- **P08.T12.b as built (2026-10-31, at `GENERATOR_VERSION` 24, behind `DISPLACED_VERSION` = 26;
+  no output moves at 24).**
+  - `placement/cell.rs`: `CellBound` (the layer's bound, each class's `share × bound` and their
+    suffix sums), evaluated once per cell; `evaluate_candidate_from_bound` and `evaluate_with_hook`
+    take `&CellBound`.
+  - `placement/candidate.rs`: `Picked::{Field, Displaced}`; `pick_component` returns
+    `Option<Picked>`, and `pick_displaced` runs the sum on over `DisplacedFields::order(band)`
+    with Design note 16's two exits. The reject exit adds `BOUND_PADDING` of the cell's bound to
+    the rest's bound, which can only make it fire later. Debug builds check each class's weighted
+    density against its own bound (P08.T11's deferred assertion) and `pick_weighted` over every
+    weight (`check_the_lazy_pick`).
+  - Deviation (lean, 2026-10-31): until P08.T12.c draws a displaced record's marks, a candidate
+    picked for a class is the record of the class's modal birth component in the band
+    (`DisplacedClass::birth`, crate-private), with plan 03's mass and age draws. `SystemRecord` is
+    unchanged and stores no placement class: T12.c adds it within the record's 80 bytes.
+  - P08.T13's inheritance 4 holds under every 26 hold. Tests: `placement/displaced_hold.rs` (the
+    whole task's that T12.a–b reach, and C1) and `candidate.rs`'s exits tests (10⁴ fast, 10⁶
+    slow).
