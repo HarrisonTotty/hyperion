@@ -920,13 +920,30 @@ impl<'a> Spray<'a> {
         self.tracers_in(0..self.tracer_count())
     }
 
-    /// The tracers of `indices`, in index order: [`tracer`](Self::tracer)'s, bit for bit, stepped
-    /// side by side in lanes. A caller's pool sprays a tube's tracers in shares of indices on its
-    /// workers and gathers them in index order (P10.T5.b), for [`tracers`](Self::tracers)'s.
+    /// The tracers of the run `indices`, in index order: [`tracers_at`](Self::tracers_at)'s.
     ///
     /// # Panics
     ///
-    /// If `indices` reach [`tracer_count`](Self::tracer_count), or as [`tracers`](Self::tracers).
+    /// If `indices` reach [`tracer_count`](Self::tracer_count), or as
+    /// [`tracers`](Self::tracers).
+    #[must_use]
+    pub fn tracers_in(&self, indices: core::ops::Range<u32>) -> Vec<Tracer> {
+        self.tracers_at(&indices.collect::<Vec<_>>())
+    }
+
+    /// The tracers of `indices`, increasing, in their order, each [`tracer`](Self::tracer)'s, bit
+    /// for bit, stepped side by side in lanes.
+    ///
+    /// A caller's pool sprays a tube's tracers in shares of indices on its workers and gathers
+    /// them by index (P10.T5.b), for [`tracers`](Self::tracers)'s. A tracer's steps fall with its
+    /// index, the schedule's releases being in time order, so shares that deal the indices out in
+    /// turn take about the same time, where shares of runs of indices do not: the first of eight
+    /// runs holds some 1.9 times the mean.
+    ///
+    /// # Panics
+    ///
+    /// If `indices` are not increasing or reach [`tracer_count`](Self::tracer_count), or as
+    /// [`tracers`](Self::tracers).
     ///
     /// # Examples
     ///
@@ -943,35 +960,42 @@ impl<'a> Spray<'a> {
     /// let spec = pal5_like(galaxy.potential());
     /// let params = SprayParams::default();
     /// let spray = Spray::new(galaxy.seed(), &force, galaxy.potential(), &spec, &params)?;
-    /// // Shares of 250, as a pool's workers spray them, gathered in index order.
+    /// // Eight shares, each index dealt out in turn so that each holds early and late releases
+    /// // alike, as a pool's workers spray them, gathered by index.
     /// let count = spray.tracer_count();
-    /// let gathered: Vec<_> = (0..count)
-    ///     .step_by(250)
-    ///     .flat_map(|first| spray.tracers_in(first..count.min(first + 250)))
-    ///     .collect();
+    /// let mut gathered = vec![None; usize::try_from(count)?];
+    /// for share in 0..8 {
+    ///     let indices: Vec<u32> = (share..count).step_by(8).collect();
+    ///     for (&i, tracer) in indices.iter().zip(spray.tracers_at(&indices)) {
+    ///         gathered[usize::try_from(i)?] = Some(tracer);
+    ///     }
+    /// }
+    /// let gathered: Vec<_> = gathered.into_iter().flatten().collect();
     /// assert_eq!(gathered, spray.tracers());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
-    pub fn tracers_in(&self, indices: core::ops::Range<u32>) -> Vec<Tracer> {
+    pub fn tracers_at(&self, indices: &[u32]) -> Vec<Tracer> {
         assert!(
-            indices.end <= self.tracer_count(),
-            "tracers {indices:?} of a spray of {}",
+            indices.windows(2).all(|pair| pair[0] < pair[1])
+                && indices
+                    .last()
+                    .is_none_or(|&last| last < self.tracer_count()),
+            "tracers {indices:?} of a spray of {}, asked for in increasing order",
             self.tracer_count()
         );
-        let first = indices.start;
-        let count = indices.end.saturating_sub(first);
-        let slot = |index: u32| {
-            usize::try_from(index - first)
-                .expect("a u32 fits a usize on every target the sim builds for, of 32 bits or more")
-        };
-        let mut tracers = vec![None; slot(first + count)];
+        let mut tracers = vec![None; indices.len()];
         // In index order, the earliest releases, which have the most steps to take, come first:
         // the schedule's releases are in time order.
         step_in_lanes(
             self.force,
-            indices.map(|index| self.launch(index)),
-            |lane: TracerLane| tracers[slot(lane.index)] = Some(self.finish(&lane)),
+            indices.iter().map(|&index| self.launch(index)),
+            |lane: TracerLane| {
+                let slot = indices
+                    .binary_search(&lane.index)
+                    .expect("each lane is of an index asked for");
+                tracers[slot] = Some(self.finish(&lane));
+            },
         );
         tracers
             .into_iter()
@@ -1201,7 +1225,7 @@ const LANES: usize = 8;
 /// crossing a turning point lies within about `r̈ h² ÷ 8 ≈ r_p ÷ 32,768` of the nearer boundary's
 /// distance (`r̈` near `v_p² ÷ r_p`), under 10⁻⁴ of itself, which the shells' widening dwarfs.
 ///
-/// The legs are stepped side by side, longest first ([`step_in_lanes`]); a leg's radii are the
+/// The legs are stepped side by side, longest first, in lanes; a leg's radii are the
 /// same bits however the legs are grouped, so a caller's pool may step a list's legs in any
 /// shares and gather their radii by index ([`GlobalList::plan`](super::GlobalList::plan), whose
 /// example does; P10.T5.b).

@@ -529,10 +529,11 @@ mod milky_way {
         }
     }
 
-    /// Split at every tracer boundary, each test stream's spray of six tracers an arm, its two
-    /// parts stepped apart ([`Spray::tracers_in`]) and gathered in index order, is its whole
-    /// spray, bit for bit; and so, split at every leg boundary, are shell orbits' radii
-    /// ([`radii_over_ly`]): what a caller's pool may do with either (P10.T5.b).
+    /// Split at every tracer boundary, or dealt out in turn among three shares, each test stream's
+    /// spray of six tracers an arm, its parts stepped apart ([`Spray::tracers_in`],
+    /// [`Spray::tracers_at`]) and gathered by index, is its whole spray, bit for bit; and so,
+    /// split at every leg boundary, are shell orbits' radii ([`radii_over_ly`]): what a caller's
+    /// pool may do with either (P10.T5.b).
     fn a_spray_and_shell_orbits_split_at_every_unit_boundary_are_the_whole_s() {
         let bits = |t: &Tracer| {
             let mut v = t.position().metres().to_vec();
@@ -551,6 +552,16 @@ mod milky_way {
                 let parts: Vec<_> = parts.iter().map(bits).collect();
                 assert_eq!(parts, whole, "{name}: split at tracer {split}");
             }
+            // Dealt out in turn among three shares, and gathered by index.
+            let mut dealt = vec![None; whole.len()];
+            for share in 0..3 {
+                let indices: Vec<u32> = (share..count).step_by(3).collect();
+                for (&i, t) in indices.iter().zip(sprayed.tracers_at(&indices)) {
+                    dealt[usize::try_from(i).expect("a few tracers")] = Some(bits(&t));
+                }
+            }
+            let dealt: Vec<_> = dealt.into_iter().flatten().collect();
+            assert_eq!(dealt, whole, "{name}: dealt out in turn");
         }
         let force = &fixture().force;
         let legs: Vec<Leg> = test_streams()

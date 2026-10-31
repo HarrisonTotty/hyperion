@@ -14,9 +14,12 @@
 //!   by their steps, the longest first, to the share with the fewest. The legs are stepped in
 //!   those shares ([`radii_over_ly`]), and once the centre is built a last job finishes the list
 //!   ([`ListPlan::finish`]).
-//! - **A tube** ([`tube_table_on`]). Its tracers are sprayed in shares of 250 indices
-//!   ([`Spray::tracers_in`]), each job making its own [`Spray`] (the progenitor's two passes, some
-//!   0.15 % of the spray), and a last job reduces them ([`TubeTable::from_tracers`]).
+//! - **A tube** ([`tube_table_on`]). Its tracers are sprayed in shares of 250 indices dealt out in
+//!   turn ([`Spray::tracers_at`]), so that each share holds early releases, which have the most
+//!   steps to take, and late ones alike. Each job makes its own [`Spray`] (the progenitor's two
+//!   passes, some 0.15 % of the spray), and a last job reduces them ([`TubeTable::from_tracers`]).
+//!   Shares of runs of 250 indices took stream 0 of the Milky Way fixture 0.47 s on eight workers,
+//!   the first run holding some 1.9 times the mean's steps (pod, 16 vCPU, 2026-10-31).
 //!
 //! **Bit for bit.** Each unit is a pure function of the galaxy and its index: an orphan of `k`,
 //! every one of its draws keyed by `k`; a leg's radii and a tracer whatever they are stepped
@@ -435,8 +438,9 @@ pub async fn tube_table_on(
 }
 
 /// The tracers of `spec`'s stream in `galaxy`, the galaxy `key` names, at `params`, in index order,
-/// sprayed on `pool`'s workers at `priority` in shares of `shares`' tracers a share, or as many as
-/// keep the shares to the workers' count: [`Spray::tracers`]'s, bit for bit.
+/// sprayed on `pool`'s workers at `priority` in shares of at most `shares`' tracers a share, or as
+/// many as keep the shares to the workers' count, the indices dealt out in turn and gathered by
+/// index: [`Spray::tracers`]'s, bit for bit.
 ///
 /// # Errors
 ///
@@ -460,25 +464,37 @@ pub(crate) async fn tracers_on(
         .ready()
         .await??;
     let count = params.tracers();
-    let workers = u32::try_from(pool.workers().get()).unwrap_or(u32::MAX);
-    let per_share = shares.tracers_per_share.get().max(count.div_ceil(workers));
-    let mut spraying = Vec::with_capacity(
-        usize::try_from(count.div_ceil(per_share)).expect("a u32 fits a usize on every target"),
-    );
-    for first in (0..count).step_by(usize::try_from(per_share).expect("a u32 fits a usize")) {
-        let indices = first..count.min(first.saturating_add(per_share));
+    let workers = u64::try_from(pool.workers().get()).unwrap_or(u64::MAX);
+    let wanted = u64::from(count.div_ceil(shares.tracers_per_share.get()));
+    let share_count = NonZeroUsize::new(
+        usize::try_from(wanted.min(workers)).expect("at most the workers, a usize"),
+    )
+    .unwrap_or(NonZeroUsize::MIN);
+    let dealt = dealt(u64::from(count), share_count);
+    let mut spraying = Vec::with_capacity(dealt.len());
+    for share in dealt {
+        let indices: Vec<u32> = share
+            .into_iter()
+            .map(|i| u32::try_from(i).expect("an index below the tracers' u32 count"))
+            .collect();
         let (galaxy, force, spec) = (Arc::clone(galaxy), Arc::clone(&force), spec.clone());
         let job = move |_: &CancelToken| {
             Spray::new(galaxy.seed(), &force, galaxy.potential(), &spec, &params)
-                .map(|spray| spray.tracers_in(indices))
+                .map(|spray| indices.iter().copied().zip(spray.tracers_at(&indices)))
+                .map(Iterator::collect::<Vec<_>>)
         };
         spraying.push(queue(pool, priority, token, job).await?);
     }
-    let mut tracers = Vec::with_capacity(usize::try_from(count).expect("a u32 fits a usize"));
+    let mut tracers = vec![None; usize::try_from(count).expect("a u32 fits a usize")];
     for receiver in spraying {
-        tracers.extend(reply(receiver).await??);
+        for (i, tracer) in reply(receiver).await?? {
+            tracers[usize::try_from(i).expect("a u32 fits a usize")] = Some(tracer);
+        }
     }
-    Ok(tracers)
+    Ok(tracers
+        .into_iter()
+        .map(|tracer| tracer.expect("every index is dealt to a share"))
+        .collect())
 }
 
 #[cfg(test)]
