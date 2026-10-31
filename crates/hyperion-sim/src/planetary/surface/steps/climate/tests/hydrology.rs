@@ -2610,19 +2610,22 @@ fn report_patch(run: &Run, rates: &[Vec<f64>]) {
     );
 }
 
-/// The coarse Earth's d with G1 converged at the climate's stop, K: −0.335, against which
-/// decision-r09-t13i's §2.4 follow-up 8 §1 holds its probe's d. Re-measured at version 23's air
-/// (P14.T54.a, the second to land re-measuring by decision-r09-t13i's row 8: T49.b's `c_p`(T),
-/// the greenhouse's batch arm and `reference::earth_air`'s water at 0.77 of `p_sat` move the
-/// climate) by the follow-up 7 build's procedure, G1 under the climate's stop alone and d from its
-/// mean alone: G1 287.665 K in 8 orbits against Z₃'s 287.999 K. At 22's air it was −0.438 (plan
-/// 09's R09.T13.i as-built record: G1 287.561 K in 7 orbits against Z₃'s 287.998 K).
-const CONVERGED_G1_DEFECT_K: f64 = -0.335;
+/// The coarse Earth's d with G1 converged at the climate's stop, K: −0.396, against which
+/// decision-r09-t13i's §2.4 follow-up 8 §1 holds its probe's d. Re-measured on 2026-10-31 at
+/// version 24's air (P14.T54.b.l's bump put P14.T53.a's greenhouse constants in force, its
+/// broadened carbon dioxide term and water 4.17 per √bar with a 0.19 cloud term, against
+/// P14.T57.a's fits at 23) by the follow-up 7 build's procedure, G1 under the climate's stop alone
+/// and d from its mean alone, as this test reports them: G1 287.599 K in 7 orbits against Z₃'s
+/// 287.996 K. At 23's air it was −0.335 (P14.T54.a: G1 287.665 K in 8 orbits against Z₃'s 287.999
+/// K), and at 22's −0.438 (plan 09's R09.T13.i as-built record: G1 287.561 K in 7 orbits against
+/// Z₃'s 287.998 K).
+const CONVERGED_G1_DEFECT_K: f64 = -0.396;
 
-/// The coarse Earth's kept G2 from a converged G1, K: 287.976, against which follow-up 8 §1 holds
-/// G2 from the probe. Re-measured at 23's air with [`CONVERGED_G1_DEFECT_K`] (the same run: G2
-/// predicted, from 287.599 K in 3 orbits, 0.024 K from plan 14's mean); 287.969 at 22's air.
-const CONVERGED_G1_G2_MEAN_K: f64 = 287.976;
+/// The coarse Earth's kept G2 from a converged G1, K: 287.967, against which follow-up 8 §1 holds
+/// G2 from the probe. Re-measured at 24's air with [`CONVERGED_G1_DEFECT_K`] (the same run: G2
+/// predicted, from 287.588 K in 3 orbits, 0.033 K from plan 14's mean); 287.976 at 23's air and
+/// 287.969 at 22's.
+const CONVERGED_G1_G2_MEAN_K: f64 = 287.967;
 
 /// How near G1's probe stop must leave d to the converged G1's, K: 0.05, the probe's own precision
 /// (decision-r09-t13i's §2.4 follow-up 8 §1 tests, kept by its follow-up 9 §2).
