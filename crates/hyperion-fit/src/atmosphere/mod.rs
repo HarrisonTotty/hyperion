@@ -16,9 +16,12 @@
 //! - [`case`]: the case format and its validation;
 //! - `transport`: the estimator (absorption as a weight, delta tracking, a forced first
 //!   collision, next-event estimation to every sun, a Lambertian ground, Russian roulette, Buras
-//!   and Mayer 2011's VROOM where a medium is forward-peaked (R08.T12.f), the absorbers' curves of
+//!   and Mayer 2011's VROOM where a medium is forward-peaked (R08.T12.f), the deep estimator's
+//!   weight windows and roulettes where its column is thick (R08.T12.h), the absorbers' curves of
 //!   growth on each path's whole column (R08.T12.b.1) and the Stokes mode, which scores the scalar
 //!   radiance of the same paths beside the vector one);
+//! - `importance`: the deep estimator's importance, a δ-Eddington solve of the case's column
+//!   (R08.T12.h);
 //! - `absorber`: a curve of growth read by the client's rule (R08.T12.b.1);
 //! - `optics`: profiles, phase functions (closed forms, tables on u = √(Θ ÷ π) and Legendre
 //!   series) and the block-diagonal scattering matrices;
@@ -58,6 +61,7 @@ mod absorber;
 mod benchmarks;
 pub mod case;
 mod geometry;
+mod importance;
 pub(crate) mod metric;
 mod optics;
 pub mod reference;
@@ -68,6 +72,8 @@ mod transport;
 mod venus_uv_absorber;
 
 use std::num::{NonZeroU64, NonZeroUsize};
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -131,6 +137,46 @@ pub enum TraceReferenceError {
     /// The thread pool could not be built.
     #[error(transparent)]
     ThreadPool(#[from] BuildThreadPoolError),
+    /// A resumable trace's work directory, or a checkpoint in it, could not be read or written.
+    #[error("cannot use the trace's work directory at {}", path.display())]
+    Work {
+        /// The directory or the checkpoint.
+        path: PathBuf,
+        /// Why it could not.
+        #[source]
+        source: std::io::Error,
+    },
+    /// A checkpoint in a resumable trace's work directory is not a checkpoint this tracer writes.
+    #[error("the checkpoint {} cannot be read", path.display())]
+    CorruptCheckpoint {
+        /// The checkpoint.
+        path: PathBuf,
+        /// Why it could not be read.
+        #[source]
+        source: serde_json::Error,
+    },
+    /// A checkpoint in a resumable trace's work directory was written by another build of the
+    /// tracer, which the work does not read.
+    #[error(
+        "the checkpoint {} was written by another build of the tracer: read it only for a \
+         rebuild of the same tree (`--resume-other-build`), or empty the work directory",
+        path.display()
+    )]
+    OtherBuildCheckpoint {
+        /// The checkpoint.
+        path: PathBuf,
+    },
+    /// A checkpoint in a resumable trace's work directory is another trace's: another case, mode,
+    /// count or source.
+    #[error(
+        "the checkpoint {} is another trace's (another case, mode or count): empty the work \
+         directory, or give the trace another",
+        path.display()
+    )]
+    StaleCheckpoint {
+        /// The checkpoint.
+        path: PathBuf,
+    },
 }
 
 /// The case's shells: split at every kink of a term's profile and every scale height of an
@@ -214,8 +260,323 @@ pub(crate) fn trace_reference_with(
     estimator: Estimator,
     orders: Orders,
 ) -> Result<ReferenceRadiances, TraceReferenceError> {
-    trace_counted_with(case, polarisation, samples, threads, estimator, orders)
-        .map(|counted| counted.reference)
+    trace_counted_with(
+        case,
+        polarisation,
+        samples,
+        threads,
+        estimator,
+        orders,
+        None,
+    )
+    .map(|(counted, _)| counted.reference)
+}
+
+/// A resumable trace's work directory (R08.T12.h): each geometry's and aggregate flux's moments
+/// at each wavelength are kept in it as a checkpoint as soon as they are traced, and a rerun of the
+/// same trace reads them back, so that a run cut short loses at most the jobs it was tracing. The
+/// reference is the same, bit for bit, traced whole or resumed any number of times: each job's
+/// moments are merged from its blocks in index order either way, and a checkpoint holds them as
+/// JSON that reads back to the bit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TraceWork<'a> {
+    dir: &'a Path,
+    case_sha256: &'a str,
+    build_sha256: &'a str,
+    other_builds: OtherBuilds,
+}
+
+impl<'a> TraceWork<'a> {
+    /// The work directory `dir`, made if it is missing, of the trace of the case whose file has
+    /// the SHA-256 `case_sha256`, by the running binary of SHA-256 `build_sha256`.
+    ///
+    /// The case's SHA-256 keys every checkpoint with the mode and the default count, so that
+    /// another trace's checkpoint is refused, not overwritten. The binary's is recorded in each
+    /// checkpoint, and one of another build is refused unless `other_builds` reads it: a rebuild of
+    /// the same tree may differ in its bytes alone, which the caller must vouch for.
+    #[must_use]
+    pub fn new(
+        dir: &'a Path,
+        case_sha256: &'a str,
+        build_sha256: &'a str,
+        other_builds: OtherBuilds,
+    ) -> Self {
+        Self {
+            dir,
+            case_sha256,
+            build_sha256,
+            other_builds,
+        }
+    }
+}
+
+/// Whether a resumable trace reads a checkpoint written by another build of the tracer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum OtherBuilds {
+    /// Refused ([`TraceReferenceError::OtherBuildCheckpoint`]): a tracer changed since would mix
+    /// two estimators in one reference.
+    #[default]
+    Refused,
+    /// Read and counted, for a rebuild of the same tree.
+    Read,
+}
+
+/// What a resumable trace read from its work directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct Resumed {
+    jobs: usize,
+    read: usize,
+    other_build: usize,
+}
+
+impl Resumed {
+    /// The trace's jobs: each geometry's and each aggregate flux's samples at one wavelength.
+    #[must_use]
+    pub fn jobs(&self) -> usize {
+        self.jobs
+    }
+
+    /// Those of them read from checkpoints.
+    #[must_use]
+    pub fn read(&self) -> usize {
+        self.read
+    }
+
+    /// Those read from checkpoints written by another build, where [`OtherBuilds::Read`] lets
+    /// them be.
+    #[must_use]
+    pub fn other_build(&self) -> usize {
+        self.other_build
+    }
+}
+
+/// [`trace_reference`], resumably, in `work` (R08.T12.h): the reference is the same, bit for bit,
+/// whether it is traced whole or resumed.
+///
+/// # Errors
+///
+/// As [`trace_reference`]; [`TraceReferenceError::Work`] if the work directory or a checkpoint
+/// cannot be read or written, [`TraceReferenceError::CorruptCheckpoint`] for a file there that is
+/// not a checkpoint, [`TraceReferenceError::StaleCheckpoint`] for another trace's and
+/// [`TraceReferenceError::OtherBuildCheckpoint`] for another build's unless the work reads them.
+///
+/// # Panics
+///
+/// As [`trace_reference`].
+pub fn trace_reference_resumably(
+    case: &AtmosphereCase,
+    polarisation: Polarisation,
+    samples: NonZeroU64,
+    threads: NonZeroUsize,
+    work: &TraceWork<'_>,
+) -> Result<(ReferenceRadiances, Resumed), TraceReferenceError> {
+    trace_counted_with(
+        case,
+        polarisation,
+        samples,
+        threads,
+        Estimator::ByMedium,
+        Orders::Every,
+        Some(work),
+    )
+    .map(|(counted, resumed)| (counted.reference, resumed))
+}
+
+/// The format of a resumable trace's checkpoints.
+const CHECKPOINT_FORMAT: u32 = 1;
+
+/// What keys a resumable trace's checkpoints: its case, mode and default count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CheckpointKey<'a> {
+    case_sha256: &'a str,
+    polarisation: Polarisation,
+    default_samples: u64,
+}
+
+/// One job's checkpoint: its key, the job, and its moments, vertices and threads' seconds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Checkpoint {
+    format: u32,
+    case_sha256: String,
+    polarisation: Polarisation,
+    default_samples: u64,
+    /// The source's key ([`trace_counted_with`]'s: its kind above its index).
+    source: u64,
+    wavelength: u64,
+    /// The job's samples.
+    samples: u64,
+    build_sha256: String,
+    /// Each of the [`MOMENTS`] over the job's samples and over their first quarter.
+    whole: Vec<Moments>,
+    quarter: Vec<Moments>,
+    vertices: u64,
+    /// The seconds the threads spent on the job's blocks: recorded, never read by the trace.
+    thread_seconds: f64,
+}
+
+impl Checkpoint {
+    /// Whether it is the checkpoint of `job` of the trace keyed `key`.
+    #[must_use]
+    fn is_of(&self, key: &CheckpointKey<'_>, source: u64, job: &Job) -> bool {
+        self.format == CHECKPOINT_FORMAT
+            && self.case_sha256 == key.case_sha256
+            && self.polarisation == key.polarisation
+            && self.default_samples == key.default_samples
+            && self.source == source
+            && self.wavelength == wide(job.wavelength)
+            && self.samples == job.end
+            && self.whole.len() == MOMENTS
+            && self.quarter.len() == MOMENTS
+            && self.whole[I].samples() == job.end - job.start
+    }
+}
+
+/// The checkpoint's file of the job of source key `source` at wavelength `wavelength`, in `dir`:
+/// `geometry-0012-w1.json`, `ground-0003-w0.json` or `top-0003-w2.json`.
+#[must_use]
+fn checkpoint_path(dir: &Path, source: u64, wavelength: usize) -> PathBuf {
+    let kind = match source >> 32 {
+        0 => "geometry",
+        1 => "ground",
+        _ => "top",
+    };
+    dir.join(format!(
+        "{kind}-{:04}-w{wavelength}.json",
+        source & 0xffff_ffff
+    ))
+}
+
+/// A trace's whole runs, before they are traced: what [`trace_moments`] takes.
+struct Whole<'a> {
+    seed: u64,
+    media: &'a [Medium<'a>],
+    sources: &'a [(u64, Source)],
+    jobs: &'a [Job],
+    polarisation: Polarisation,
+    threads: NonZeroUsize,
+}
+
+impl Whole<'_> {
+    /// [`trace_moments`] of the runs, each finished job given to `done`.
+    fn trace(
+        &self,
+        done: &mut dyn FnMut(usize, JobDone<'_>) -> Result<(), TraceReferenceError>,
+    ) -> Result<Traced, TraceReferenceError> {
+        trace_moments(
+            self.seed,
+            self.media,
+            self.sources,
+            self.jobs,
+            self.polarisation,
+            self.threads,
+            done,
+        )
+    }
+
+    /// The runs traced in the work directory `work`, of the trace keyed `key`: each job read
+    /// from its checkpoint there if it has one, and the others traced, each kept as it finishes;
+    /// with what was read.
+    fn resume(
+        &self,
+        work: &TraceWork<'_>,
+        key: &CheckpointKey<'_>,
+    ) -> Result<(Traced, Resumed), TraceReferenceError> {
+        std::fs::create_dir_all(work.dir).map_err(|source| TraceReferenceError::Work {
+            path: work.dir.to_path_buf(),
+            source,
+        })?;
+        let jobs = self.jobs;
+        let mut traced = Traced {
+            whole: jobs.iter().map(|job| job.prior).collect(),
+            quarters: vec![[Moments::default(); MOMENTS]; jobs.len()],
+            vertices: vec![0; jobs.len()],
+        };
+        let mut resumed = Resumed {
+            jobs: jobs.len(),
+            ..Resumed::default()
+        };
+        let mut left = Vec::new();
+        for (k, job) in jobs.iter().enumerate() {
+            let source = self.sources[job.source].0;
+            let path = checkpoint_path(work.dir, source, job.wavelength);
+            let text = match std::fs::read_to_string(&path) {
+                Ok(text) => text,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    left.push(k);
+                    continue;
+                }
+                Err(source) => return Err(TraceReferenceError::Work { path, source }),
+            };
+            let checkpoint: Checkpoint = serde_json::from_str(&text).map_err(|source| {
+                TraceReferenceError::CorruptCheckpoint {
+                    path: path.clone(),
+                    source,
+                }
+            })?;
+            if !checkpoint.is_of(key, source, job) {
+                return Err(TraceReferenceError::StaleCheckpoint { path });
+            }
+            let other_build = checkpoint.build_sha256 != work.build_sha256;
+            if other_build && work.other_builds == OtherBuilds::Refused {
+                return Err(TraceReferenceError::OtherBuildCheckpoint { path });
+            }
+            traced.whole[k].copy_from_slice(&checkpoint.whole);
+            traced.quarters[k].copy_from_slice(&checkpoint.quarter);
+            traced.vertices[k] = checkpoint.vertices;
+            resumed.read += 1;
+            if other_build {
+                resumed.other_build += 1;
+            }
+        }
+        let remaining: Vec<Job> = left.iter().map(|&k| jobs[k]).collect();
+        let fresh = Whole {
+            jobs: &remaining,
+            ..*self
+        }
+        .trace(&mut |index, done| {
+            let job = &remaining[index];
+            let source = self.sources[job.source].0;
+            let path = checkpoint_path(work.dir, source, job.wavelength);
+            // A value that is not finite is the tracer's bug, which `finite` names once the trace
+            // is done; JSON would write it as `null`, so it is not kept.
+            if done
+                .whole
+                .iter()
+                .chain(done.quarter)
+                .any(|m| !(m.mean().is_finite() && m.standard_error().is_finite()))
+            {
+                return Ok(());
+            }
+            let checkpoint = Checkpoint {
+                format: CHECKPOINT_FORMAT,
+                case_sha256: key.case_sha256.to_owned(),
+                polarisation: key.polarisation,
+                default_samples: key.default_samples,
+                source,
+                wavelength: wide(job.wavelength),
+                samples: job.end,
+                build_sha256: work.build_sha256.to_owned(),
+                whole: done.whole.to_vec(),
+                quarter: done.quarter.to_vec(),
+                vertices: done.vertices,
+                thread_seconds: done.seconds,
+            };
+            let text = serde_json::to_string(&checkpoint)
+                .expect("a checkpoint of numbers and strings serialises into a String");
+            // Written whole beside it, then renamed, so that a run cut short leaves no part.
+            let partial = path.with_extension("json.partial");
+            std::fs::write(&partial, text)
+                .and_then(|()| std::fs::rename(&partial, &path))
+                .map_err(|source| TraceReferenceError::Work { path, source })
+        })?;
+        for (index, &k) in left.iter().enumerate() {
+            traced.whole[k] = fresh.whole[index];
+            traced.quarters[k] = fresh.quarters[index];
+            traced.vertices[k] = fresh.vertices[index];
+        }
+        Ok((traced, resumed))
+    }
 }
 
 /// A traced reference with the vertices its samples reached (R08.T13.a's cost, main's reading 2):
@@ -280,7 +641,9 @@ pub(crate) struct SpanTrace {
     pub(crate) vertices: u64,
 }
 
-/// [`trace_reference`] with each geometry's and aggregate's vertices counted.
+/// [`trace_reference`] with each geometry's and aggregate's vertices counted, under R08.T13's
+/// sweep's estimator, which never runs the deep one (the `transport` module's `Shallow`;
+/// R08.T12.h), so that the sweep's points keep the paths they were traced on.
 ///
 /// # Errors
 ///
@@ -300,9 +663,11 @@ pub(crate) fn trace_counted(
         polarisation,
         samples,
         threads,
-        Estimator::ByMedium,
+        Estimator::Shallow,
         Orders::Every,
+        None,
     )
+    .map(|(counted, _)| counted)
 }
 
 /// Traces each span of `case`'s geometries, each carried on from its prior.
@@ -344,7 +709,7 @@ pub(crate) fn trace_spans(
     }
     let grid = shell_grid(case);
     let media: Vec<Medium<'_>> = (0..case.wavelengths_nm().len())
-        .map(|w| Medium::new(case, &grid, w, Estimator::ByMedium, Orders::Every))
+        .map(|w| Medium::new(case, &grid, w, Estimator::Shallow, Orders::Every))
         .collect();
     // Only the geometries the spans name, each keyed by its index in the case as
     // `trace_counted_with` keys it, so that its stream is its own whatever else is traced.
@@ -385,6 +750,7 @@ pub(crate) fn trace_spans(
         &jobs,
         Polarisation::Scalar,
         threads,
+        &mut |_, _| Ok(()),
     )?;
     Ok(traced
         .whole
@@ -399,14 +765,56 @@ pub(crate) fn trace_spans(
 }
 
 /// Whether the medium of `case` runs VROOM at wavelength index `wavelength` under the estimator
-/// every reference runs (the `transport` module): where a scattering term is forward-peaked.
+/// every reference runs (the `transport` module): where a scattering term is forward-peaked. It
+/// builds no deep estimator, which the sweep that reads it never runs.
 #[must_use]
 pub(crate) fn runs_vroom(case: &AtmosphereCase, wavelength: usize) -> bool {
     let grid = shell_grid(case);
-    Medium::new(case, &grid, wavelength, Estimator::ByMedium, Orders::Every).runs_vroom()
+    Medium::new(case, &grid, wavelength, Estimator::Shallow, Orders::Every).runs_vroom()
 }
 
-/// [`trace_counted`] with the estimator and orders of [`trace_reference_with`].
+/// Each of `case`'s sources over `grid`, the geometries' detectors and then each aggregate's
+/// ground and top, with its key: its kind (0 a geometry, 1 an aggregate's ground, 2 its top) above
+/// its index within the kind, which the case keeps below 2³².
+#[must_use]
+fn sources_of(case: &AtmosphereCase, grid: &ShellGrid) -> Vec<(u64, Source)> {
+    let mut sources: Vec<(u64, Source)> = case
+        .geometries()
+        .iter()
+        .enumerate()
+        .map(|(g, geometry)| (wide(g), Source::detector(case, grid, geometry)))
+        .collect();
+    for (a, aggregate) in case.aggregates().iter().enumerate() {
+        sources.push((
+            (1 << 32) | wide(a),
+            Source::flux(grid, aggregate, Level::Ground),
+        ));
+        sources.push((
+            (2 << 32) | wide(a),
+            Source::flux(grid, aggregate, Level::Top),
+        ));
+    }
+    sources
+}
+
+/// Each of `case`'s sources' samples, in [`sources_of`]'s order, `default` where the case gives
+/// none: an aggregate's two fluxes share its count.
+#[must_use]
+fn counts_of(case: &AtmosphereCase, default: u64) -> Vec<u64> {
+    case.geometries()
+        .iter()
+        .map(|g| g.samples.unwrap_or(default))
+        .chain(
+            case.aggregates()
+                .iter()
+                .flat_map(|a| [a.samples.unwrap_or(default); 2]),
+        )
+        .collect()
+}
+
+/// [`trace_counted`] with the estimator and orders of [`trace_reference_with`], keeping each
+/// job's moments in `work` as it finishes and reading back those there, if it is given: with what
+/// it read.
 fn trace_counted_with(
     case: &AtmosphereCase,
     polarisation: Polarisation,
@@ -414,7 +822,8 @@ fn trace_counted_with(
     threads: NonZeroUsize,
     estimator: Estimator,
     orders: Orders,
-) -> Result<CountedTrace, TraceReferenceError> {
+    work: Option<&TraceWork<'_>>,
+) -> Result<(CountedTrace, Resumed), TraceReferenceError> {
     if polarisation == Polarisation::Stokes
         && let Some(term) = case
             .terms()
@@ -434,38 +843,34 @@ fn trace_counted_with(
     let media: Vec<Medium<'_>> = (0..case.wavelengths_nm().len())
         .map(|w| Medium::new(case, &grid, w, estimator, orders))
         .collect();
-    // Each source with its key: its kind (0 a geometry, 1 an aggregate's ground, 2 its top) above
-    // its index within the kind, which the case keeps below 2³².
-    let mut sources: Vec<(u64, Source)> = case
-        .geometries()
-        .iter()
-        .enumerate()
-        .map(|(g, geometry)| (wide(g), Source::detector(case, &grid, geometry)))
-        .collect();
-    for (a, aggregate) in case.aggregates().iter().enumerate() {
-        sources.push((
-            (1 << 32) | wide(a),
-            Source::flux(&grid, aggregate, Level::Ground),
-        ));
-        sources.push((
-            (2 << 32) | wide(a),
-            Source::flux(&grid, aggregate, Level::Top),
-        ));
-    }
-    // Each source's samples, in the sources' order: an aggregate's two fluxes share its count.
-    let default = samples.get();
-    let counts: Vec<u64> = case
-        .geometries()
-        .iter()
-        .map(|g| g.samples.unwrap_or(default))
-        .chain(
-            case.aggregates()
-                .iter()
-                .flat_map(|a| [a.samples.unwrap_or(default); 2]),
-        )
-        .collect();
+    let sources = sources_of(case, &grid);
+    let counts = counts_of(case, samples.get());
     let jobs = Job::whole_runs(media.len(), &counts);
-    let traced = trace_moments(case.seed(), &media, &sources, &jobs, polarisation, threads)?;
+    let run = Whole {
+        seed: case.seed(),
+        media: &media,
+        sources: &sources,
+        jobs: &jobs,
+        polarisation,
+        threads,
+    };
+    let (traced, resumed) = match work {
+        None => (
+            run.trace(&mut |_, _| Ok(()))?,
+            Resumed {
+                jobs: jobs.len(),
+                ..Resumed::default()
+            },
+        ),
+        Some(work) => run.resume(
+            work,
+            &CheckpointKey {
+                case_sha256: work.case_sha256,
+                polarisation,
+                default_samples: samples.get(),
+            },
+        )?,
+    };
     // Each source's vertices over the wavelengths: an aggregate's two fluxes are its own.
     let per_wavelength = sources.len();
     let source_vertices: Vec<u64> = (0..per_wavelength)
@@ -501,12 +906,15 @@ fn trace_counted_with(
             .map(|a| run.aggregate(a, polarisation))
             .collect(),
     };
-    Ok(CountedTrace {
-        reference,
-        geometry_vertices,
-        aggregate_vertices,
-        geometry_moments,
-    })
+    Ok((
+        CountedTrace {
+            reference,
+            geometry_vertices,
+            aggregate_vertices,
+            geometry_moments,
+        },
+        resumed,
+    ))
 }
 
 /// The moments a task keeps: those of each of a sample's [`COMPONENTS`], and of its radiance less
@@ -604,11 +1012,22 @@ impl Job {
     }
 }
 
+/// A job just traced, as [`trace_moments`] gives it to its `done`.
+struct JobDone<'a> {
+    whole: &'a [Moments; MOMENTS],
+    quarter: &'a [Moments; MOMENTS],
+    vertices: u64,
+    /// The seconds the threads spent on its blocks.
+    seconds: f64,
+}
+
 /// Traces each job.
 ///
 /// It gives the moments of (I, Q, U, V), of the scalar radiance and of the radiance less it, per
 /// job, over its samples merged onto its prior, and over those below its `quarter`. The scalar
-/// mode fills the first alone.
+/// mode fills the first alone. Each job of at least one sample is given to `done` by its index as
+/// soon as its last block is merged, the jobs in their order; the first error `done` returns is
+/// returned once the trace is finished, and no job after it is given.
 fn trace_moments(
     seed: u64,
     media: &[Medium<'_>],
@@ -616,6 +1035,7 @@ fn trace_moments(
     jobs: &[Job],
     polarisation: Polarisation,
     threads: NonZeroUsize,
+    done: &mut dyn FnMut(usize, JobDone<'_>) -> Result<(), TraceReferenceError>,
 ) -> Result<Traced, TraceReferenceError> {
     // Each job's first item, its blocks laid out job after job, each block `start + 1,024 b` on:
     // for whole runs, the item `task × blocks + block` as before.
@@ -635,6 +1055,8 @@ fn trace_moments(
     let mut whole: Vec<[Moments; MOMENTS]> = jobs.iter().map(|job| job.prior).collect();
     let mut quarters = vec![[Moments::default(); MOMENTS]; jobs.len()];
     let mut vertices = vec![0_u64; jobs.len()];
+    let mut seconds = vec![0.0; jobs.len()];
+    let mut failed = None;
     map_reduce_chunks(
         items,
         1,
@@ -653,6 +1075,8 @@ fn trace_moments(
                     let stream = (wide(job.wavelength) << 34) | key;
                     let mut block_moments = [Moments::default(); MOMENTS];
                     let mut quarter_moments = [Moments::default(); MOMENTS];
+                    // Recorded beside the moments, never read by the trace.
+                    let clock = Instant::now();
                     // Below 2⁵³ + 2¹⁰: no sum here overflows.
                     let first = job.start + block * BLOCK_SAMPLES;
                     let end = (first + BLOCK_SAMPLES).min(job.end);
@@ -671,25 +1095,45 @@ fn trace_moments(
                     }
                     (
                         index,
+                        item + 1 == starts[index + 1],
                         block_moments,
                         quarter_moments,
                         scratch.take_vertices(),
+                        clock.elapsed().as_secs_f64(),
                     )
                 })
                 .collect::<Vec<_>>()
         },
         |results| {
-            for (index, block_moments, quarter_moments, block_vertices) in results {
+            for (index, last, block_moments, quarter_moments, block_vertices, block_seconds) in
+                results
+            {
                 vertices[index] += block_vertices;
+                seconds[index] += block_seconds;
                 for (total, part) in whole[index].iter_mut().zip(&block_moments) {
                     total.merge(part);
                 }
                 for (total, part) in quarters[index].iter_mut().zip(&quarter_moments) {
                     total.merge(part);
                 }
+                if last && failed.is_none() {
+                    failed = done(
+                        index,
+                        JobDone {
+                            whole: &whole[index],
+                            quarter: &quarters[index],
+                            vertices: vertices[index],
+                            seconds: seconds[index],
+                        },
+                    )
+                    .err();
+                }
             }
         },
     )?;
+    if let Some(error) = failed {
+        return Err(error);
+    }
     Ok(Traced {
         whole,
         quarters,
@@ -1058,6 +1502,114 @@ mod tests {
         let one = trace(&rows, Polarisation::Stokes, 300, 1).to_json();
         let four = trace(&rows, Polarisation::Stokes, 300, 4).to_json();
         assert_eq!(one, four);
+        // And R08.T12.h's deep estimator: its windows' copies, the estimates' roulettes and the
+        // rays tracked past τ 4, in the thick peaked slab with it forced on, and in the sample case
+        // thickened, which takes it at 440 nm alone.
+        let one = trace_with(&thick, Polarisation::Stokes, 64, 1, Estimator::Deep).to_json();
+        let four = trace_with(&thick, Polarisation::Stokes, 64, 4, Estimator::Deep).to_json();
+        assert_eq!(one, four);
+        let thickened = case::tests::thickened_sample_case();
+        let one = trace(&thickened, Polarisation::Scalar, 300, 1).to_json();
+        let four = trace(&thickened, Polarisation::Scalar, 300, 4).to_json();
+        assert_eq!(one, four);
+    }
+
+    #[test]
+    fn atmosphere_resumed_stokes_traces_are_the_whole_ones_to_the_bit() {
+        // R08.T12.h's checkpoints in the Stokes mode, where every component's moments go through
+        // them: the sample case thickened, its aerosol isotropic so that the Stokes mode traces it,
+        // which takes the deep estimator at 440 nm. Traced whole, from its checkpoints, and with
+        // three of its eight lost: the same reference to the bit. Another build's checkpoints are
+        // refused unless they are read; another mode's or count's are another trace's.
+        let mut value = case::tests::thickened_sample_case();
+        value["terms"][1]["phase"] = json!({ "kind": "isotropic" });
+        let case = case_of(&value);
+        let dir = tempfile::tempdir().unwrap();
+        let (samples, threads) = (
+            NonZeroU64::new(1100).unwrap(),
+            NonZeroUsize::new(3).unwrap(),
+        );
+        let traced = |build: &str, other: OtherBuilds, polarisation, samples| {
+            let work = TraceWork::new(dir.path(), "the case's", build, other);
+            trace_reference_resumably(&case, polarisation, samples, threads, &work)
+        };
+        let whole = trace_reference(&case, Polarisation::Stokes, samples, threads)
+            .unwrap()
+            .to_json();
+        for read in [0, 8] {
+            let (reference, resumed) =
+                traced("a", OtherBuilds::Refused, Polarisation::Stokes, samples).unwrap();
+            assert_eq!(reference.to_json(), whole);
+            assert_eq!((resumed.jobs(), resumed.read()), (8, read));
+        }
+        for lost in [
+            "geometry-0000-w1.json",
+            "geometry-0001-w0.json",
+            "top-0000-w1.json",
+        ] {
+            std::fs::remove_file(dir.path().join(lost)).unwrap();
+        }
+        let (reference, resumed) =
+            traced("a", OtherBuilds::Refused, Polarisation::Stokes, samples).unwrap();
+        assert_eq!(reference.to_json(), whole);
+        assert_eq!(resumed.read(), 5);
+        assert!(matches!(
+            traced("b", OtherBuilds::Refused, Polarisation::Stokes, samples),
+            Err(TraceReferenceError::OtherBuildCheckpoint { .. })
+        ));
+        let (reference, resumed) =
+            traced("b", OtherBuilds::Read, Polarisation::Stokes, samples).unwrap();
+        assert_eq!(reference.to_json(), whole);
+        assert_eq!((resumed.read(), resumed.other_build()), (8, 8));
+        assert!(matches!(
+            traced("a", OtherBuilds::Refused, Polarisation::Scalar, samples),
+            Err(TraceReferenceError::StaleCheckpoint { .. })
+        ));
+        assert!(matches!(
+            traced(
+                "a",
+                OtherBuilds::Refused,
+                Polarisation::Stokes,
+                NonZeroU64::new(1200).unwrap()
+            ),
+            Err(TraceReferenceError::StaleCheckpoint { .. })
+        ));
+    }
+
+    #[test]
+    fn atmosphere_counted_traces_and_spans_never_run_the_deep_estimator() {
+        // R08.T13's sweep traces through `trace_counted` and `trace_spans`, whose points reach τ 8:
+        // their paths are those they were traced on before R08.T12.h, its `Shallow` estimator's,
+        // where `trace_reference` takes the deep estimator (here at 440 nm).
+        let thickened = case::tests::thickened_sample_case();
+        let counted = counted(&thickened, 300, 2);
+        let shallow = trace_with(&thickened, Polarisation::Scalar, 300, 2, Estimator::Shallow);
+        assert_eq!(counted.reference.to_json(), shallow.to_json());
+        let deep = trace(&thickened, Polarisation::Scalar, 300, 2);
+        assert_ne!(
+            deep.geometries()[0].radiance()[1],
+            shallow.geometries()[0].radiance()[1]
+        );
+        assert_eq!(
+            deep.geometries()[0].radiance()[0],
+            shallow.geometries()[0].radiance()[0],
+            "550 nm, under τ 6, is the same"
+        );
+        let spans = trace_spans(
+            &case_of(&thickened),
+            &[Span {
+                wavelength: 1,
+                geometry: 0,
+                prior: Moments::default(),
+                end: 300,
+            }],
+            NonZeroUsize::MIN,
+        )
+        .unwrap();
+        assert_eq!(
+            spans[0].moments.mean(),
+            shallow.geometries()[0].radiance()[1]
+        );
     }
 
     /// `value` traced with its vertices counted, `samples` a source, on `threads` threads.
@@ -1294,6 +1846,19 @@ mod tests {
         case["aggregates"] =
             json!([{ "name": "sun", "sunDirections": [{ "zenithDeg": 30.0, "azimuthDeg": 0.0 }] }]);
         case
+    }
+
+    #[test]
+    fn atmosphere_the_benchmarks_tau_5_clouds_keep_vroom_as_built() {
+        // R08.T12.h's trigger stands clear of the τ 5 clouds of R08.T12.e's and T12.f's benchmarks
+        // (Kokhanovsky et al.'s cloud, IPRT A5, A5's energy slab), as of this slab at 550 nm: they
+        // run VROOM as built and never the deep estimator, whatever the quadrature's rounding.
+        let case = case_of(&thick_peaked_slab());
+        let grid = shell_grid(&case);
+        for w in 0..2 {
+            let medium = Medium::new(&case, &grid, w, Estimator::ByMedium, Orders::Every);
+            assert!(medium.runs_vroom() && !medium.runs_deep(), "{w}");
+        }
     }
 
     #[test]
@@ -1666,6 +2231,36 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn atmosphere_deep_reference_bits_are_pinned() {
+        // R08.T12.h's counterpart of `atmosphere_reference_bits_are_pinned`: the thickened sample
+        // case's two values at 440 nm, where it runs the deep estimator, so that a change to its
+        // importance, windows or roulettes shows here before it moves a committed reference; and
+        // its 550 nm, under τ 6, as the shallow estimator traces it.
+        let reference = trace(
+            &case::tests::thickened_sample_case(),
+            Polarisation::Scalar,
+            64,
+            1,
+        );
+        let pinned = [
+            format!("{:?}", reference.geometries()[0].radiance()[1]),
+            format!("{:?}", reference.aggregates()[0].upwelling_top()[1]),
+        ];
+        assert_eq!(pinned, ["0.10455281616696023", "1.1866795022246794"]);
+        let shallow = trace_with(
+            &case::tests::thickened_sample_case(),
+            Polarisation::Scalar,
+            64,
+            1,
+            Estimator::Shallow,
+        );
+        assert_eq!(
+            reference.geometries()[0].radiance()[0],
+            shallow.geometries()[0].radiance()[0]
+        );
     }
 
     #[test]
@@ -3176,6 +3771,41 @@ mod tests {
         // (R08.T12.g).
         let [reference, quarter] = trace_and_quarter(&case, Polarisation::Scalar, 20_000, 4);
         let mut agreement = Agreement::new("a conservative layer's energy", 4);
+        for (aggregate, first) in reference.aggregates().iter().zip(quarter.aggregates()) {
+            assert_balances(&mut agreement, aggregate, first, 0.01);
+        }
+        agreement.finish();
+    }
+
+    #[test]
+    fn atmosphere_conservative_layer_conserves_energy_under_the_deep_estimator() {
+        // R08.T12.h: `atmosphere_conservative_layer_conserves_energy` with the deep estimator
+        // forced on, in a Rayleigh layer of τ 6 over a black ground (550 nm) and a white one
+        // (440 nm), where its windows split and roulette at every vertex.
+        let terms = json!([{
+            "name": "gas", "density": uniform(),
+            "scattering": [6e-3, 6e-3], "absorption": [0.0, 0.0],
+            "phase": { "kind": "rayleigh", "depolarisation": [0.0, 0.0] }
+        }]);
+        let mut case = slab(&terms, &json!([0.0, 1.0]), &json!([]));
+        case["aggregates"] = json!([
+            { "name": "zenith", "sunDirections": [{ "zenithDeg": 0.0, "azimuthDeg": 0.0 }] },
+            { "name": "low", "sunDirections": [{ "zenithDeg": 60.0, "azimuthDeg": 0.0 }] }
+        ]);
+        // The count from a pilot at seed 1 (the case's is 0): at 8,000 samples its σ ratios lay
+        // within 0.964–1.052, so that at twice that the check's own scatter is under 5%.
+        let samples = 16_000;
+        let [reference, quarter] = [samples, samples / 4].map(|n| {
+            trace_by(
+                &case,
+                Polarisation::Scalar,
+                n,
+                4,
+                Estimator::Deep,
+                Orders::Every,
+            )
+        });
+        let mut agreement = Agreement::new("a deep conservative layer's energy", 4);
         for (aggregate, first) in reference.aggregates().iter().zip(quarter.aggregates()) {
             assert_balances(&mut agreement, aggregate, first, 0.01);
         }

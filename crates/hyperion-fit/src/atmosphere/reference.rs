@@ -451,8 +451,10 @@ impl FluxAggregate {
 }
 
 /// A running count, mean and sum of squared deviations (Welford 1962), merged by Chan, Golub and
-/// LeVeque 1979's update.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+/// LeVeque 1979's update. A resumable trace's checkpoints keep it as JSON, which the workspace's
+/// `serde_json` reads back to the bit (`float_roundtrip`; R08.T12.h).
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Moments {
     n: u64,
     mean: f64,

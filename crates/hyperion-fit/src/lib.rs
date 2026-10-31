@@ -145,7 +145,13 @@ impl RunFitError {
             | Self::Emit(_)
             | Self::Check(_)
             | Self::AtmosphereCase(_)
-            | Self::AtmosphereReference(atmosphere::TraceReferenceError::ThreadPool(_))
+            | Self::AtmosphereReference(
+                atmosphere::TraceReferenceError::ThreadPool(_)
+                | atmosphere::TraceReferenceError::Work { .. }
+                | atmosphere::TraceReferenceError::CorruptCheckpoint { .. }
+                | atmosphere::TraceReferenceError::StaleCheckpoint { .. }
+                | atmosphere::TraceReferenceError::OtherBuildCheckpoint { .. },
+            )
             | Self::WriteReference { .. }
             | Self::SweepCase(_)
             | Self::Sweep(

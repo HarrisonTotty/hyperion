@@ -283,6 +283,10 @@ impl PhaseFunction {
 /// 1 ÷ (4π), sr⁻¹.
 const ONE_OVER_FOUR_PI: f64 = 0.25 / PI;
 
+/// The panels even in u of [`Phase::mean_cosine`]'s quadrature: the first spans Θ ≤ π ÷ 64²,
+/// 0.044°, inside any forward peak a case holds (a water cloud's is about 1° wide).
+const MEAN_COSINE_PANELS: u32 = 64;
+
 /// 1 − cos Θ at u = √(Θ ÷ π), as 2 sin²(πu² ÷ 2), which keeps its digits near the forward
 /// direction.
 fn one_minus_cos_at(u: f64) -> f64 {
@@ -675,6 +679,39 @@ impl Phase {
         }
     }
 
+    /// The mean cosine of the scattering angle, g = ∫ p cos Θ dΩ ÷ ∫ p dΩ, by quadrature of the
+    /// function (R08.T12.h's importance reads it): a table's own 16-point rule over its entries,
+    /// and every other kind's in u = √(Θ ÷ π), [`MEAN_COSINE_PANELS`] panels of the 16-point rule
+    /// with dΩ = 4π² u sin(πu²) du, which resolves a forward peak to a few hundredths of a degree.
+    /// 0 for `None`, which never scatters.
+    #[must_use]
+    pub(crate) fn mean_cosine(&self) -> f64 {
+        match self {
+            Self::Tabulated(table) => table.mean_cosine(),
+            Self::None => 0.0,
+            Self::Rayleigh { .. }
+            | Self::CornetteShanks { .. }
+            | Self::Isotropic
+            | Self::Legendre(_) => {
+                let (mut total, mut first_moment) = (0.0, 0.0);
+                for k in 0..MEAN_COSINE_PANELS {
+                    let (a, b) = (
+                        f64::from(k) / f64::from(MEAN_COSINE_PANELS),
+                        f64::from(k + 1) / f64::from(MEAN_COSINE_PANELS),
+                    );
+                    let weighted = |x: f64, moment: bool| {
+                        let cos_theta = 1.0 - one_minus_cos_at(x);
+                        let p = self.value(cos_theta) * 4.0 * PI * PI * x * math::sin(PI * x * x);
+                        if moment { p * cos_theta } else { p }
+                    };
+                    total += gl16(|x| weighted(x, false), a, b);
+                    first_moment += gl16(|x| weighted(x, true), a, b);
+                }
+                first_moment / total
+            }
+        }
+    }
+
     /// The density, sr⁻¹, that [`sample`](Self::sample)'s draws have at cos Θ: the phase function,
     /// but for a Legendre series, whose draws come from its proposal table.
     #[must_use]
@@ -948,6 +985,45 @@ pub(crate) mod tests {
             );
         }
         agreement.finish();
+    }
+
+    #[test]
+    fn atmosphere_mean_cosines_by_quadrature_are_the_functions_own() {
+        // Rayleigh's and the isotropic are 0; Cornette and Shanks's the closed form above; a
+        // Legendre series' β₁ ÷ 3β₀ (P₁ = cos Θ, the others orthogonal to it); a table's its own.
+        let near = |phase: &Phase, expected: f64, tolerance: f64| {
+            let g = phase.mean_cosine();
+            assert!(
+                (g - expected).abs() <= tolerance,
+                "{phase:?}: {g} against {expected}"
+            );
+        };
+        near(
+            &Phase::Rayleigh {
+                depolarisation: 0.03,
+            },
+            0.0,
+            1e-14,
+        );
+        near(&Phase::Isotropic, 0.0, 1e-14);
+        near(&Phase::None, 0.0, 0.0);
+        for g in [0.5, 0.8, -0.3] {
+            near(
+                &Phase::CornetteShanks { asymmetry: g },
+                3.0 * g * (4.0 + g * g) / (5.0 * (2.0 + g * g)),
+                1e-12,
+            );
+        }
+        let series = LegendreSeries::new(&[1.0, 1.2, 0.5]).unwrap();
+        near(&Phase::Legendre(Box::new(series)), 0.4, 1e-12);
+        let u = even_u(512);
+        let a1: Vec<f64> = u
+            .iter()
+            .map(|&x| henyey_greenstein(0.9, math::cos(PI * x * x)))
+            .collect();
+        let table = TabulatedPhase::new(u, &a1, None);
+        let own = table.mean_cosine();
+        near(&Phase::Tabulated(Box::new(table)), own, 0.0);
     }
 
     /// Henyey and Greenstein's phase function of asymmetry g, sr⁻¹.

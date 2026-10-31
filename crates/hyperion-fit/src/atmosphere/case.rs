@@ -1333,6 +1333,15 @@ pub(crate) mod tests {
         })
     }
 
+    /// The sample case with its Rayleigh scattering 30 times as strong: a column of τ 2.8 at
+    /// 550 nm and 6.9 at 440 nm, so that `trace_reference` runs R08.T12.h's deep estimator at
+    /// 440 nm alone.
+    pub(crate) fn thickened_sample_case() -> Value {
+        let mut value = sample_case();
+        value["terms"][0]["scattering"] = json!([1.15e-5 * 30.0, 2.87e-5 * 30.0]);
+        value
+    }
+
     /// A small valid case over a Saturn-class level spheroid (the spheroid module's `SATURN`):
     /// H₂–He Rayleigh of a 47 km scale height, a haze and a methane-like absorber over a
     /// Lambertian 1-bar boundary, two wavelengths, one sun; ground views at the equator looking

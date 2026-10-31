@@ -120,6 +120,45 @@
 //!   followed in a fixed order from its own stream. Elsewhere (a medium whose every term is at
 //!   most [`FORWARD_PEAK_PER_SR`] forward, Rayleigh's sky among them) the paths are R08.T12.c's,
 //!   bit for bit.
+//! - **The deep estimator** (R08.T12.h) at every wavelength whose column's vertical extinction
+//!   optical depth reaches [`DEEP_OPTICAL_DEPTH`], beside VROOM or R08.T12.c's estimator. Under a
+//!   thick deck the score comes from the top few optical depths, where the suns are seen, which a
+//!   backward path from the ground reaches rarely, so the estimate is heavy-tailed and reads low;
+//!   and the suns' estimates from deep vertices, each a march through every shell above for a
+//!   transmittance under e^(−5), take most of the time. Four parts, each unbiased by construction:
+//!   - _An importance_ Ψ(h, μ₀) (the [`importance`](super::importance) module): the δ-Eddington
+//!     mean intensity of the forward field per unit irradiance, built in [`Medium::new`] from the
+//!     case's own shells, a path's summed over the suns at unit irradiance, so that the draws do
+//!     not depend on the irradiance.
+//!   - _Weight windows_, splitting and Russian roulette by importance (Spanier and Gelbard 1969,
+//!     _Monte Carlo Principles and Neutron Transport Problems_, Addison-Wesley; with a deterministic
+//!     importance,
+//!     Wagner and Haghighat 1998, Nucl. Sci. Eng. 128, 186), at every vertex of every branch, on
+//!     r = (w ÷ base) Ψ(x) ÷ Ψ(x₀), x₀ the sample's first vertex and base the roulette's
+//!     threshold over [`ROULETTE_FRACTION`], which carries the sunward draws' importance weights.
+//!     Below [`WINDOW_LOW`] the path survives with probability r ÷ [`WINDOW_LOW`], its weight
+//!     divided by it, before VROOM's clone and the estimate; above [`WINDOW_HIGH`] it is split into
+//!     ⌊r⌋ copies, at most [`WINDOW_MOST`], after the clone (which takes the whole weight) and
+//!     before the estimate, which the original makes for all of them. Each copy draws its own
+//!     direction from the vertex, its weight divided and its roulette's threshold not. The fixed
+//!     roulette is off, and VROOM's relative weight is multiplied by Ψ(x) ÷ Ψ(x₀), so that its own
+//!     splitting and roulette agree with the windows.
+//!   - _A roulette on each estimate before its ray is traced_: it survives with probability
+//!     q = min(1, (w ÷ base) 4π p(Θ) e^(−τᵥ) ÷ ([`ESTIMATE_CRITICAL`] 4π Ψ(x₀))), 4 A cos θₛ in
+//!     4π p(Θ)'s place at the ground, and is divided by it. τᵥ is the vertical extinction from the
+//!     vertex's shell's ceiling to the top, below any ray's to space from inside the shell on a
+//!     sphere (each radius above is crossed at least once, and no faster than radially), and
+//!     [`SPHEROID_BOUND_MARGIN`] times the least of the verticals' every 5° of latitude on a
+//!     spheroid.
+//!   - _The ray's transmittance sampled past_ [`ESTIMATE_TRACK_DEPTH`]: beyond it each shell's piece
+//!     is crossed with probability e^(−Δτ), not weighted by it (Russian roulette, Arvo and Kirk
+//!     1990, Computer Graphics 24(4), 63), and a ray that does not cross scores 0. Its absorbers'
+//!     curves are read only for a ray that reaches space.
+//!
+//!   Every draw comes from the sample's own stream, its copies followed in a fixed order, as
+//!   VROOM's are. Neither roulette reads an irradiance's value, but a sun unlit at a wavelength
+//!   takes no estimate there, and so none of the roulettes' draws, as before. Every thinner medium
+//!   traces as before, bit for bit.
 //!
 //! The quadrature is 8-point Gauss–Legendre on each shell's piece of a ray, where the integrand is
 //! smooth: the profiles' kinks are shell boundaries, and an exponential profile changes by at most
@@ -159,6 +198,7 @@ use super::Polarisation;
 use super::absorber::{AbsorberAmount, AbsorberDensity, Curve, MAX_ABSORBERS};
 use super::case::{Aggregate, AtmosphereCase, Geometry, LocalDirection};
 use super::geometry::{LocalFrame, Next, ShellGrid, Vec3, basis, cosine_weighted, in_cone, turned};
+use super::importance::{Importance, Interval};
 use super::optics::{Phase, ProfileLookup, ScatteringMatrix};
 use crate::tasks::displaced_forms::births::Draws;
 
@@ -227,6 +267,59 @@ pub(crate) const LEAST_SURVIVAL: f64 = 0.2;
 /// over the sphere).
 const PAPER_PHASE_SCALE: f64 = 4.0 * PI;
 
+/// A wavelength runs the deep estimator (module documentation) where its column's vertical
+/// extinction optical depth, from the ground to the top at the equator, reaches this: below every
+/// channel of the thick references (6.9 in Titan-class's red, 20 in the giant's deck, 40–77 in
+/// Venus's clouds), above every thin one's (0.84 at most), and clear of the τ 5
+/// clouds of the benchmarks, which VROOM as built passed and keeps (R08.T12.h; lean, 2026-10-30,
+/// where the brief's lean was 5, the benchmarks' own depth).
+pub(crate) const DEEP_OPTICAL_DEPTH: f64 = 6.0;
+
+/// Below this a weight window's r plays roulette, surviving with probability r ÷ this: the fixed
+/// roulette's fraction, which the windows replace.
+pub(crate) const WINDOW_LOW: f64 = ROULETTE_FRACTION;
+
+/// Above this a weight window's r splits the path into ⌊r⌋ copies (R08.T12.h's pilot of the
+/// method on the Titan-class case: a bound of 4 gained 0.91 times as much).
+pub(crate) const WINDOW_HIGH: f64 = 2.0;
+
+/// The most copies a weight window makes at one vertex, the pilot's: a path whose importance
+/// leaps further splits again at its next vertices, so the bound spreads a split over several
+/// vertices rather than losing it, and keeps one vertex's copies within a block's memory.
+pub(crate) const WINDOW_MOST: u32 = 64;
+
+/// The estimate's roulette's critical level, over 4π Ψ(x₀), the scale of an isotropic scatterer's
+/// estimate at the sample's first vertex per unit irradiance (R08.T12.h's pilot: absolute, not
+/// scaled by Ψ(x₀), it cost twilight blue 1.4 times; 0.3 gained 1.06 times as much).
+pub(crate) const ESTIMATE_CRITICAL: f64 = 0.1;
+
+/// Past this optical depth along an estimate's ray, each shell's piece is crossed by roulette
+/// rather than weighted by its transmittance: the pilot's, where the transmittance left, e^(−4) =
+/// 0.018, is a small part of the estimates' score, and most rays from deep vertices end within a
+/// few shells more.
+pub(crate) const ESTIMATE_TRACK_DEPTH: f64 = 4.0;
+
+/// On a spheroid the bound τᵥ of the estimate's roulette is taken at this fraction of the least
+/// of the verticals' depths at [`SPHEROID_BOUND_LATITUDES`] latitudes from the equator to the pole,
+/// for the quadric shells' departure from constant h\* between them (up to 1.7% of a height on
+/// Saturn), which high in a thin column moves the depth above a shell by more than the margin: it
+/// only steers.
+pub(crate) const SPHEROID_BOUND_MARGIN: f64 = 0.9;
+
+/// The latitudes past the equator whose verticals bound τᵥ on a spheroid, every 5° to the pole.
+const SPHEROID_BOUND_LATITUDES: u32 = 18;
+
+/// The importance's nodes are at most this vertical extinction optical depth apart, the pilot's:
+/// a twentieth of the depth over which the beam falls by e, so that the solve's trapezoid rule
+/// takes the beam's source to some 2 × 10⁻⁴ (the [`importance`](super::importance) module's
+/// tests). Ψ only steers, so a coarser node costs efficiency, never bias.
+const IMPORTANCE_NODE_DEPTH: f64 = 0.05;
+
+/// The importance's nodes are at most this far apart in height, m, the pilot's: in the clear air
+/// above a deck, where the depth sets no node, Ψ's beam still varies with the sphere's slant paths,
+/// and is read at heights a few kilometres apart.
+const IMPORTANCE_NODE_SPACING_M: f64 = 4000.0;
+
 /// A sun's transmittance is taken as zero once its optical depth passes this: e^(−50) is
 /// 2 × 10⁻²², below any radiance a case compares.
 const NEGLIGIBLE_OPTICAL_DEPTH: f64 = 50.0;
@@ -265,6 +358,47 @@ pub(crate) struct Medium<'a> {
     /// The case's pressure over 1 bar by height, where an absorber reads a pressure
     /// (R08.T12.b.2).
     pressure: Option<ProfileLookup<'a>>,
+    /// The deep estimator's importance and bounds, where the medium runs it (R08.T12.h).
+    deep: Option<Deep>,
+}
+
+/// The deep estimator's importance's column over the ground at the equator (R08.T12.h).
+#[derive(Debug)]
+struct Column {
+    /// The intervals between the nodes, from the top down.
+    intervals: Vec<Interval>,
+    /// The nodes, from the top down, m.
+    nodes_m: Vec<Vec3>,
+    /// Their heights, gravity-scaled on a spheroid, m.
+    heights_m: Vec<f64>,
+    /// Each shell's δ-scaling forward fraction, f = g².
+    forward: Vec<f64>,
+}
+
+/// One part of the importance's column, from the ground up: where it starts, its vertical
+/// optical depths and its shell's asymmetry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Part {
+    start_m: Vec3,
+    scattering_depth: f64,
+    absorption_depth: f64,
+    asymmetry: f64,
+}
+
+/// The unit vector towards a sun at local cosine `mu0` over the ground at the equator, in the
+/// meridian plane: the importance's suns.
+#[must_use]
+fn equator_sun(mu0: f64) -> Vec3 {
+    LocalFrame::at_latitude(0.0).direction(math::acos(mu0), 0.0)
+}
+
+/// What the deep estimator reads (module documentation; R08.T12.h).
+#[derive(Debug)]
+struct Deep {
+    importance: Importance,
+    /// Per shell, the vertical extinction optical depth from its ceiling to the top that bounds
+    /// any ray's from inside it to space, its margin taken on a spheroid.
+    depth_above: Vec<f64>,
 }
 
 /// Each absorber's amounts along a path, in the case's order of the absorber terms, each in its
@@ -317,17 +451,69 @@ impl AbsorberRead<'_> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) enum Estimator {
     /// VROOM at a wavelength where some term that scatters is forward-peaked (its phase function
-    /// forward passes [`FORWARD_PEAK_PER_SR`]), R08.T12.c's estimator elsewhere: what every
-    /// reference runs.
+    /// forward passes [`FORWARD_PEAK_PER_SR`]), R08.T12.c's estimator elsewhere, and the deep
+    /// estimator beside either where the column's vertical extinction optical depth reaches
+    /// [`DEEP_OPTICAL_DEPTH`] (R08.T12.h): what every reference runs.
     #[default]
     ByMedium,
+    /// [`ByMedium`](Self::ByMedium)'s choice of VROOM and never the deep estimator: R08.T13's
+    /// sweep, whose points reach τ 8, so that its work directories and its boundary keep the
+    /// paths they were traced on (R08.T12.h; lean, 2026-10-30).
+    Shallow,
     /// R08.T12.c's estimator everywhere: an estimate at every vertex, sunward draws at every
-    /// forward-peaked one, no clones, splitting or prediction-based roulette.
+    /// forward-peaked one, no clones, splitting or prediction-based roulette, nor the deep
+    /// estimator.
     #[cfg(test)]
     SunwardDraws,
-    /// VROOM everywhere.
+    /// VROOM everywhere, without the deep estimator.
     #[cfg(test)]
     Vroom,
+    /// [`ByMedium`](Self::ByMedium)'s choice of VROOM, and the deep estimator everywhere.
+    #[cfg(test)]
+    Deep,
+}
+
+impl Estimator {
+    /// Whether the samples run VROOM, where some term that scatters is `peaked`.
+    #[must_use]
+    const fn runs_vroom(self, peaked: bool) -> bool {
+        match self {
+            Self::ByMedium | Self::Shallow => peaked,
+            #[cfg(test)]
+            Self::Deep => peaked,
+            #[cfg(test)]
+            Self::SunwardDraws => false,
+            #[cfg(test)]
+            Self::Vroom => true,
+        }
+    }
+
+    /// Whether the samples may run the deep estimator, so that the column's depth is taken.
+    #[must_use]
+    const fn may_run_deep(self) -> bool {
+        match self {
+            Self::ByMedium => true,
+            Self::Shallow => false,
+            #[cfg(test)]
+            Self::SunwardDraws | Self::Vroom => false,
+            #[cfg(test)]
+            Self::Deep => true,
+        }
+    }
+
+    /// Whether the samples run the deep estimator, the column's vertical extinction optical depth
+    /// `depth`.
+    #[must_use]
+    fn runs_deep(self, depth: f64) -> bool {
+        match self {
+            Self::ByMedium => depth >= DEEP_OPTICAL_DEPTH,
+            Self::Shallow => false,
+            #[cfg(test)]
+            Self::SunwardDraws | Self::Vroom => false,
+            #[cfg(test)]
+            Self::Deep => true,
+        }
+    }
 }
 
 /// Which orders of scattering a medium's samples follow (R08.T12.g; `decision-r08-t12f.md` §5).
@@ -452,6 +638,85 @@ fn split_count(predicted: f64) -> u32 {
         "{predicted} is not above SPLIT_ABOVE"
     );
     predicted.clamp(SPLIT_ABOVE, f64::from(MOST_COPIES)).floor() as u32
+}
+
+/// The copies a weight window makes of a path whose r is `r`, which passes [`WINDOW_HIGH`]:
+/// ⌊r⌋, at most [`WINDOW_MOST`].
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a whole number from 2 to WINDOW_MOST after the clamp, exact in a u32: the callers \
+              pass only an r above WINDOW_HIGH, never NaN"
+)]
+#[must_use]
+fn window_copies(r: f64) -> u32 {
+    debug_assert!(r > WINDOW_HIGH, "{r} is not above WINDOW_HIGH");
+    r.floor().clamp(WINDOW_HIGH, f64::from(WINDOW_MOST)) as u32
+}
+
+/// The deep estimator's roulette of an estimate before its ray is traced (module
+/// documentation): the probability q it survives with, which divides it, or `None` if it is not
+/// traced. `scale` is the estimate at unit transmittance and irradiance over the path's weight, in
+/// units of an isotropic scatterer's (4π p(Θ), or 4 A cos θₛ at the ground), and `shell` the
+/// vertex's shell.
+#[must_use]
+fn estimate_kept(
+    deep: &Deep,
+    walker: &Walker,
+    scale: f64,
+    shell: usize,
+    draws: &mut Draws,
+) -> Option<f64> {
+    // A path of no weight (the ground seen through so much air that its transmittance underflows,
+    // as a flux's grazing directions see it) estimates nothing, and its threshold is 0 too.
+    if walker.weight <= 0.0 {
+        return None;
+    }
+    let base = walker.roulette / ROULETTE_FRACTION;
+    let bound = walker.weight / base * scale * math::exp(-deep.depth_above[shell]);
+    let q = bound / (ESTIMATE_CRITICAL * PAPER_PHASE_SCALE * walker.importance0);
+    debug_assert!(!q.is_nan(), "the estimate's roulette's q is NaN");
+    if q >= 1.0 {
+        return Some(1.0);
+    }
+    // A zero bound is an estimate of nothing, never traced.
+    (draws.uniform() < q).then_some(q)
+}
+
+/// The most parts [`Medium::importance_column`] cuts one shell's piece into: a bound against a
+/// runaway count alone, far past what a case's shell needs (40 a unit of its optical depth).
+const MOST_PARTS: u32 = 1 << 20;
+
+/// The least whole number of parts, from 1 to [`MOST_PARTS`], not below `x`.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a whole number from 1 to MOST_PARTS after the clamp, exact in a u32; a NaN, which \
+              the clamp keeps, casts to 0, which the max lifts to 1"
+)]
+#[must_use]
+fn whole_parts(x: f64) -> u32 {
+    (x.ceil().clamp(1.0, f64::from(MOST_PARTS)) as u32).max(1)
+}
+
+/// An interval whose asymmetry and forward fraction hold Σ τₛ g and Σ τₛ g² over its parts, with
+/// those taken as their means over its scattering.
+#[must_use]
+fn closed(sums: Interval) -> Interval {
+    let s = sums.scattering_depth;
+    if s > 0.0 {
+        Interval {
+            asymmetry: sums.asymmetry / s,
+            forward_fraction: sums.forward_fraction / s,
+            ..sums
+        }
+    } else {
+        Interval {
+            asymmetry: 0.0,
+            forward_fraction: 0.0,
+            ..sums
+        }
+    }
 }
 
 /// An index drawn uniformly from `0..n`, `n` positive; no draw for `n` = 1.
@@ -635,12 +900,23 @@ struct Walker {
     /// flight's included: Buras and Mayer 2011's `w_redspl` (§2.4), which damps the splitting of a
     /// path that has pointed at a sun from the start. Infinite where VROOM is off.
     least_prediction: f64,
+    /// The importance Ψ(x₀) at the sample's first vertex, which its clones and copies inherit:
+    /// the deep estimator's (R08.T12.h), and 1 where it does not run.
+    importance0: f64,
     /// Each absorber's amounts from the detector to where the path is, which its clones and copies
     /// inherit.
     amounts: Amounts,
 }
 
 impl Walker {
+    /// The deep estimator's weight window's r at a vertex where the importance has grown by
+    /// `gained` = Ψ(x) ÷ Ψ(x₀) (module documentation): the weight over its losses' base, the
+    /// roulette's threshold over its fraction, which carries the directional importance weights.
+    #[must_use]
+    fn window(&self, gained: f64) -> f64 {
+        self.weight * ROULETTE_FRACTION / self.roulette * gained
+    }
+
     /// A branch starting at `position_m` along `dir` in `shell` with `weight`, its first
     /// direction's prediction `prediction` (infinite where VROOM is off), having crossed the
     /// absorbers' `amounts` from the detector.
@@ -664,6 +940,7 @@ impl Walker {
             order: 1,
             unit: weight,
             least_prediction: prediction,
+            importance0: 1.0,
             amounts,
         }
     }
@@ -760,6 +1037,10 @@ enum Stage {
     At(Vertex),
     /// Having scattered or reflected at its vertex, and split there: a split's copy flies on.
     Leaving,
+    /// A weight window's copy at the vertex where its original split (R08.T12.h): it scatters or
+    /// reflects there, drawing its own direction, but neither estimates, since its original's
+    /// estimate there is made for all its copies, nor makes a clone or meets the window again.
+    Copy(Vertex),
 }
 
 impl<'a> Medium<'a> {
@@ -802,16 +1083,12 @@ impl<'a> Medium<'a> {
             .map(|t| Phase::of(&t.phase, wavelength))
             .collect();
         let forward_per_sr: Vec<f64> = phases.iter().map(|p| p.value(1.0)).collect();
-        let vroom = match estimator {
-            Estimator::ByMedium => forward_per_sr
+        let vroom = estimator.runs_vroom(
+            forward_per_sr
                 .iter()
                 .zip(&scattering_per_m)
                 .any(|(&forward, &s)| s > 0.0 && forward > FORWARD_PEAK_PER_SR),
-            #[cfg(test)]
-            Estimator::SunwardDraws => false,
-            #[cfg(test)]
-            Estimator::Vroom => true,
-        };
+        );
         let absorbers: Vec<AbsorberRead<'a>> = terms
             .iter()
             .filter_map(|t| {
@@ -833,7 +1110,7 @@ impl<'a> Medium<'a> {
             .any(|a| a.reads_pressure)
             .then(|| case.pressure_bar().map(ProfileLookup::new))
             .flatten();
-        Self {
+        let mut medium = Self {
             grid,
             forward_per_sr,
             vroom,
@@ -852,7 +1129,19 @@ impl<'a> Medium<'a> {
                 .iter()
                 .map(|s| s.irradiance[wavelength])
                 .collect(),
+            deep: None,
+        };
+        if estimator.may_run_deep() {
+            let equator = medium.vertical_pieces(0.0);
+            let depth: f64 = equator
+                .iter()
+                .map(|p| p.scattering_depth + p.absorption_depth)
+                .sum();
+            if estimator.runs_deep(depth) {
+                medium.deep = Some(medium.deep_reads(&equator));
+            }
         }
+        medium
     }
 
     /// Whether the medium's samples run VROOM (module documentation), which R08.T13's sweep reads
@@ -860,6 +1149,230 @@ impl<'a> Medium<'a> {
     #[must_use]
     pub(crate) fn runs_vroom(&self) -> bool {
         self.vroom
+    }
+
+    /// Whether the medium's samples run the deep estimator (module documentation; R08.T12.h).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn runs_deep(&self) -> bool {
+        self.deep.is_some()
+    }
+
+    /// The pieces of the vertical from the ground at latitude `latitude_rad` to the top, from the
+    /// ground up, with their optical depths, as the first flight cuts a ray.
+    #[must_use]
+    fn vertical_pieces(&self, latitude_rad: f64) -> Vec<Piece> {
+        let frame = LocalFrame::at_latitude(latitude_rad);
+        let ground = self.grid.point(&frame, 0.0);
+        // A point on the ground looking up is in the lowest shell.
+        let shell = self.grid.locate(ground, frame.up).unwrap_or(0);
+        let mut pieces = Vec::new();
+        self.first_flight(ground, frame.up, shell, f64::INFINITY, &mut pieces);
+        pieces
+    }
+
+    /// Per shell, the vertical extinction optical depth from its ceiling to the top along
+    /// `pieces`, the vertical's from the ground up: 0 for a shell the vertical does not cross,
+    /// which bounds nothing.
+    #[must_use]
+    fn depths_above(&self, pieces: &[Piece]) -> Vec<f64> {
+        let mut above = vec![f64::INFINITY; self.grid.len()];
+        let mut depth = 0.0;
+        for piece in pieces.iter().rev() {
+            above[piece.shell] = above[piece.shell].min(depth);
+            depth += piece.scattering_depth + piece.absorption_depth;
+        }
+        above
+            .into_iter()
+            .map(|d| if d.is_finite() { d } else { 0.0 })
+            .collect()
+    }
+
+    /// The deep estimator's reads (module documentation): the importance of the column over the
+    /// ground at the equator, whose vertical's pieces are `equator`, and each shell's bound.
+    #[must_use]
+    fn deep_reads(&self, equator: &[Piece]) -> Deep {
+        let depth_above = match self.grid {
+            ShellGrid::Sphere(_) => self.depths_above(equator),
+            ShellGrid::Spheroid(_) => {
+                let mut least = self.depths_above(equator);
+                for k in 1..=SPHEROID_BOUND_LATITUDES {
+                    let latitude = 0.5 * PI * f64::from(k) / f64::from(SPHEROID_BOUND_LATITUDES);
+                    for (bound, depth) in least
+                        .iter_mut()
+                        .zip(self.depths_above(&self.vertical_pieces(latitude)))
+                    {
+                        *bound = bound.min(depth);
+                    }
+                }
+                least.iter().map(|d| SPHEROID_BOUND_MARGIN * d).collect()
+            }
+        };
+        let column = self.importance_column(equator);
+        let importance = Importance::new(
+            &column.intervals,
+            &column.heights_m,
+            self.ground_albedo,
+            |j, mu0| self.scaled_beam(column.nodes_m[j], equator_sun(mu0), &column.forward),
+        );
+        Deep {
+            importance,
+            depth_above,
+        }
+    }
+
+    /// The importance's column over the ground at the equator, whose vertical's pieces are
+    /// `equator`: its nodes at most [`IMPORTANCE_NODE_DEPTH`] and [`IMPORTANCE_NODE_SPACING_M`]
+    /// apart.
+    #[must_use]
+    fn importance_column(&self, equator: &[Piece]) -> Column {
+        // Each shell's asymmetry: its terms' mean cosines, weighted by their scattering at its
+        // middle; and its δ-scaling's forward fraction f = g².
+        let mean_cosines: Vec<f64> = self.phases.iter().map(Phase::mean_cosine).collect();
+        let asymmetry: Vec<f64> = (0..self.grid.len())
+            .map(|shell| {
+                let (low_m, high_m) = self.grid.scaled_height_bounds_m(shell);
+                let middle = f64::midpoint(low_m, high_m);
+                let (mut scattering, mut weighted) = (0.0, 0.0);
+                for ((profile, &s), &g) in self
+                    .profiles
+                    .iter()
+                    .zip(&self.scattering_per_m)
+                    .zip(&mean_cosines)
+                {
+                    let x = s * profile.at(middle);
+                    scattering += x;
+                    weighted += x * g;
+                }
+                if scattering > 0.0 {
+                    weighted / scattering
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        // The column's parts, from the ground up: each shell's piece cut evenly, so that a part
+        // holds at most half the nodes' depth on average and a quarter of their height (a profile
+        // within a shell, exponential, a tent's or a table's line, is within a factor 2 of its
+        // mean), with its depths and its shell's asymmetry.
+        let up = LocalFrame::at_latitude(0.0).up;
+        let mut parts: Vec<Part> = Vec::new();
+        for piece in equator {
+            let end = piece.start_m + up * piece.length_m;
+            let rise = self.height_m(end) - self.height_m(piece.start_m);
+            let depth = piece.scattering_depth + piece.absorption_depth;
+            let count = whole_parts(2.0 * depth / IMPORTANCE_NODE_DEPTH)
+                .max(whole_parts(4.0 * rise / IMPORTANCE_NODE_SPACING_M));
+            let length_m = piece.length_m / f64::from(count);
+            for k in 0..count {
+                let start = piece.start_m + up * (length_m * f64::from(k));
+                let (s, a) = self.depths(start, up, length_m);
+                parts.push(Part {
+                    start_m: start,
+                    scattering_depth: s,
+                    absorption_depth: a,
+                    asymmetry: asymmetry[piece.shell],
+                });
+            }
+        }
+        // The nodes from the top down, each interval the parts between two, closed before a part
+        // would take it past either limit.
+        let top = equator.last().map_or_else(
+            || self.grid.point(&LocalFrame::at_latitude(0.0), 0.0),
+            |p| p.start_m + up * p.length_m,
+        );
+        let mut nodes_m = vec![top];
+        let mut intervals = Vec::new();
+        let mut open = Interval::default();
+        let mut open_rise = 0.0;
+        let mut ceiling = top;
+        for part in parts.iter().rev() {
+            let rise = self.height_m(ceiling) - self.height_m(part.start_m);
+            let depth = open.scattering_depth + open.absorption_depth;
+            let past = depth + part.scattering_depth + part.absorption_depth
+                > IMPORTANCE_NODE_DEPTH
+                || open_rise + rise > IMPORTANCE_NODE_SPACING_M;
+            if past && (depth > 0.0 || open_rise > 0.0) {
+                nodes_m.push(ceiling);
+                intervals.push(closed(open));
+                open = Interval::default();
+                open_rise = 0.0;
+            }
+            let (s, g) = (part.scattering_depth, part.asymmetry);
+            open.scattering_depth += s;
+            open.absorption_depth += part.absorption_depth;
+            open.asymmetry += s * g;
+            open.forward_fraction += s * g * g;
+            open_rise += rise;
+            ceiling = part.start_m;
+        }
+        nodes_m.push(ceiling);
+        intervals.push(closed(open));
+        Column {
+            heights_m: nodes_m.iter().map(|&x| self.height_m(x)).collect(),
+            nodes_m,
+            intervals,
+            forward: asymmetry.iter().map(|g| g * g).collect(),
+        }
+    }
+
+    /// The importance's δ-Eddington downward flux at the ground at the equator per unit
+    /// irradiance, under a sun at local cosine `mu0`: what R08.T12.h's test holds to the tracer's.
+    #[cfg(test)]
+    #[must_use]
+    fn importance_ground_flux(&self, mu0: f64) -> f64 {
+        let column = self.importance_column(&self.vertical_pieces(0.0));
+        let beam: Vec<f64> = column
+            .nodes_m
+            .iter()
+            .map(|&x| self.scaled_beam(x, equator_sun(mu0), &column.forward))
+            .collect();
+        super::importance::solve(&column.intervals, &beam, self.ground_albedo, mu0)
+            .ground_downward_flux(mu0)
+    }
+
+    /// The direct beam's transmittance from `from_m` along the unit vector `dir` to space under
+    /// the δ-scaled extinction, each shell's scattering less its forward fraction
+    /// `forward[shell]`: 0 if the ground is in the way or past [`NEGLIGIBLE_OPTICAL_DEPTH`].
+    #[must_use]
+    fn scaled_beam(&self, from_m: Vec3, dir: Vec3, forward: &[f64]) -> f64 {
+        let Some(mut shell) = self.grid.locate(from_m, dir) else {
+            return 1.0;
+        };
+        let mut point = from_m;
+        let mut depth = 0.0;
+        loop {
+            let exit = self.grid.exit(point, dir, shell);
+            let (scattering, absorption) = self.depths(point, dir, exit.distance_m);
+            depth += scattering * (1.0 - forward[shell]) + absorption;
+            if depth > NEGLIGIBLE_OPTICAL_DEPTH {
+                return 0.0;
+            }
+            match exit.next {
+                Next::Shell(j) => {
+                    point = self
+                        .grid
+                        .cross(point, dir, exit.distance_m, shell, exit.next);
+                    shell = j;
+                }
+                Next::Ground => return 0.0,
+                Next::Space => return math::exp(-depth),
+            }
+        }
+    }
+
+    /// A path's importance at `x` (R08.T12.h): Ψ summed over the suns `suns` at unit irradiance,
+    /// each at its cosine with the local vertical; 1 where the deep estimator does not run.
+    #[must_use]
+    fn importance_at(&self, x: Vec3, suns: &[Vec3]) -> f64 {
+        let Some(deep) = &self.deep else {
+            return 1.0;
+        };
+        let h = self.height_m(x);
+        let vertical = self.grid.vertical(x);
+        suns.iter()
+            .map(|&sun| deep.importance.at(h, sun.dot(vertical)))
+            .sum()
     }
 
     /// The height the profiles are read at, at `x`: above the ground on a sphere, gravity-scaled
@@ -1107,6 +1620,60 @@ impl<'a> Medium<'a> {
         }
     }
 
+    /// An unbiased estimate of [`sun_transmittance`](Self::sun_transmittance)'s transmittance,
+    /// for the deep estimator: computed as there to [`ESTIMATE_TRACK_DEPTH`], and past it each
+    /// shell's piece crossed with probability e^(−Δτ), the ray scoring 0 if it is not, so that the
+    /// many rays from deep vertices end soon (module documentation). Its absorbers' curves are read
+    /// only where it reaches space.
+    #[must_use]
+    fn tracked_sun_transmittance(
+        &self,
+        start_m: Vec3,
+        dir: Vec3,
+        mut shell: usize,
+        path: &Amounts,
+        sun: usize,
+        draws: &mut Draws,
+    ) -> f64 {
+        let absorbs = !self.absorbers.is_empty();
+        let mut leg = Amounts::default();
+        let mut point = start_m;
+        let mut depth = 0.0;
+        loop {
+            let exit = self.grid.exit(point, dir, shell);
+            let (scattering, absorption) = self.depths(point, dir, exit.distance_m);
+            if depth >= ESTIMATE_TRACK_DEPTH {
+                if draws.uniform() >= math::exp(-(scattering + absorption)) {
+                    return 0.0;
+                }
+            } else {
+                depth += scattering + absorption;
+                if depth > NEGLIGIBLE_OPTICAL_DEPTH {
+                    return 0.0;
+                }
+            }
+            if absorbs {
+                self.add_absorber_amounts(point, dir, exit.distance_m, &mut leg);
+            }
+            match exit.next {
+                Next::Shell(j) => {
+                    point = self
+                        .grid
+                        .cross(point, dir, exit.distance_m, shell, exit.next);
+                    shell = j;
+                }
+                Next::Ground => return 0.0,
+                Next::Space => break,
+            }
+        }
+        let transmittance = math::exp(-depth);
+        if absorbs {
+            transmittance * self.absorber_transmittance(sun, path, &leg)
+        } else {
+            transmittance
+        }
+    }
+
     /// The direct beam's optical depth from `origin_m`, anywhere, along the unit vector `dir`
     /// towards sun `sun`: [`optical_depth_to_space`](Self::optical_depth_to_space)'s extinction
     /// and, with absorbers, each one's −ln T of the beam's own column; `None` if the ground is in
@@ -1193,7 +1760,10 @@ impl<'a> Medium<'a> {
             let (at_m, shell, absorbed, amounts) =
                 self.forced_collision(&scratch.pieces, look, target);
             let weight = collided * math::exp(-absorbed);
-            let walker = Walker::new(at_m, look, shell, weight, stokes, prediction, amounts);
+            let mut walker = Walker::new(at_m, look, shell, weight, stokes, prediction, amounts);
+            if self.deep.is_some() {
+                walker.importance0 = self.importance_at(at_m, &source.suns);
+            }
             self.follow(
                 Vertex::Scatter,
                 &walker,
@@ -1209,7 +1779,10 @@ impl<'a> Medium<'a> {
             for piece in &scratch.pieces {
                 amounts.add(&piece.amounts);
             }
-            let walker = Walker::new(at_m, look, 0, weight, stokes, prediction, amounts);
+            let mut walker = Walker::new(at_m, look, 0, weight, stokes, prediction, amounts);
+            if self.deep.is_some() {
+                walker.importance0 = self.importance_at(at_m, &source.suns);
+            }
             self.follow(
                 Vertex::Ground,
                 &walker,
@@ -1503,7 +2076,8 @@ impl<'a> Medium<'a> {
                 return;
             }
             let walker = &mut branch.walker;
-            if walker.weight < walker.roulette {
+            // The weight windows replace the fixed roulette where the deep estimator runs.
+            if self.deep.is_none() && walker.weight < walker.roulette {
                 if draws.uniform() * walker.roulette < walker.weight {
                     walker.weight = walker.roulette;
                 } else {
@@ -1522,10 +2096,15 @@ impl<'a> Medium<'a> {
         }
     }
 
-    /// The branch's work at its vertex, if it waits at one (a split's copy does not): under VROOM
-    /// the mother's clone made there, then the scattering or reflection with its estimate, then
-    /// VROOM's splitting, whose copies wait in `pending` to fly on, or its roulette. `false` if the
-    /// branch ends there.
+    /// The branch's work at its vertex, if it waits at one (a VROOM split's copy does not): the
+    /// deep estimator's window roulette, then under VROOM the mother's clone made there, then the
+    /// window's split, whose copies wait in `pending` to scatter there, then the scattering or
+    /// reflection with its estimate, then VROOM's splitting, whose copies wait in `pending` to
+    /// fly on, or its roulette. `false` if the branch ends there.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one vertex's steps in the order the estimators' unbiasedness needs, each short"
+    )]
     fn visit(
         &self,
         branch: &mut Branch,
@@ -1535,13 +2114,34 @@ impl<'a> Medium<'a> {
         pending: &mut Vec<(Branch, u32)>,
         out: &mut [f64; COMPONENTS],
     ) -> bool {
-        let Stage::At(vertex) = branch.stage else {
-            return true;
+        let (vertex, copy) = match branch.stage {
+            Stage::At(vertex) => (vertex, false),
+            Stage::Copy(vertex) => (vertex, true),
+            Stage::Leaving => return true,
         };
         scratch.vertices += 1;
         let order = branch.walker.order;
-        let duty = if self.vroom {
-            if branch.role == Role::Mother
+        // The deep estimator's importance gained since the first vertex, Ψ(x) ÷ Ψ(x₀), and its
+        // window's roulette, before the clone and the estimate.
+        let gained = if self.deep.is_some() {
+            let walker = &mut branch.walker;
+            let gained = self.importance_at(walker.position_m, suns) / walker.importance0;
+            let r = walker.window(gained);
+            if !copy && r < WINDOW_LOW {
+                let survival = r / WINDOW_LOW;
+                if draws.uniform() < survival {
+                    walker.weight /= survival;
+                } else {
+                    return false;
+                }
+            }
+            Some(gained)
+        } else {
+            None
+        };
+        let mut duty = if self.vroom {
+            if !copy
+                && branch.role == Role::Mother
                 && !self.orders.first_alone()
                 && let Some(clone) = Role::clone_made_at(order)
             {
@@ -1558,6 +2158,23 @@ impl<'a> Medium<'a> {
         } else {
             Duty::EVERYWHERE
         };
+        // The window's split, after the clone, which takes the whole weight, and before the
+        // estimate, which the original makes for all its copies: each waits to draw its own
+        // direction here, its weight divided and its roulette's threshold not.
+        let mut share = 1.0;
+        if let Some(gained) = gained {
+            let r = branch.walker.window(gained);
+            if copy {
+                duty.estimates = false;
+            } else if r > WINDOW_HIGH {
+                let copies = window_copies(r);
+                share = 1.0 / f64::from(copies);
+                let mut waiting = *branch;
+                waiting.stage = Stage::Copy(vertex);
+                waiting.walker.weight *= share;
+                pending.push((waiting, copies - 1));
+            }
+        }
         let walker = &mut branch.walker;
         match vertex {
             Vertex::Scatter => {
@@ -1566,6 +2183,9 @@ impl<'a> Medium<'a> {
                 }
             }
             Vertex::Ground => self.reflect(walker, suns, duty, draws, out),
+        }
+        if gained.is_some() {
+            walker.weight *= share;
         }
         if walker.weight <= 0.0 || self.orders.first_alone() {
             return false;
@@ -1579,7 +2199,12 @@ impl<'a> Medium<'a> {
             return true;
         }
         let prediction = self.prediction(walker.dir, suns);
-        let relative = walker.weight / walker.unit;
+        // Under the deep estimator, relative to the importance too, so that VROOM's splitting and
+        // roulette agree with the windows.
+        let relative = match gained {
+            None => walker.weight / walker.unit,
+            Some(gained) => walker.weight / walker.unit * gained,
+        };
         let predicted = relative * prediction / walker.least_prediction.max(1.0);
         walker.least_prediction = walker.least_prediction.min(prediction);
         if duty.guided && predicted > SPLIT_ABOVE {
@@ -1638,7 +2263,7 @@ impl<'a> Medium<'a> {
             return false;
         }
         if duty.estimates {
-            self.scattering_estimates(walker, suns, &scratch.terms_per_m, total_per_m, out);
+            self.scattering_estimates(walker, suns, &scratch.terms_per_m, total_per_m, draws, out);
         }
         // The scattering term, in proportion to its coefficient here: the last that scatters if
         // rounding leaves the pick past the total.
@@ -1721,27 +2346,57 @@ impl<'a> Medium<'a> {
     }
 
     /// Adds each sun's next-event estimate at a scattering vertex to `out`, the terms' scattering
-    /// coefficients there `terms_per_m`, totalling `total_per_m`.
+    /// coefficients there `terms_per_m`, totalling `total_per_m`; under the deep estimator each
+    /// after its roulette, and with its ray's transmittance tracked past [`ESTIMATE_TRACK_DEPTH`].
     fn scattering_estimates(
         &self,
         walker: &Walker,
         suns: &[Vec3],
         terms_per_m: &[f64],
         total_per_m: f64,
+        draws: &mut Draws,
         out: &mut [f64; COMPONENTS],
     ) {
         for (s, (&sun, &irradiance)) in suns.iter().zip(&self.irradiance).enumerate() {
             if irradiance <= 0.0 {
                 continue;
             }
-            let transmittance =
-                self.sun_transmittance(walker.position_m, sun, walker.shell, &walker.amounts, s);
+            let cos_theta = sun.dot(walker.dir);
+            let (transmittance, phase) = match &self.deep {
+                None => (
+                    self.sun_transmittance(
+                        walker.position_m,
+                        sun,
+                        walker.shell,
+                        &walker.amounts,
+                        s,
+                    ),
+                    None,
+                ),
+                Some(deep) => {
+                    let phase = self.phase_value(terms_per_m, total_per_m, cos_theta);
+                    let Some(kept) =
+                        estimate_kept(deep, walker, PAPER_PHASE_SCALE * phase, walker.shell, draws)
+                    else {
+                        continue;
+                    };
+                    let tracked = self.tracked_sun_transmittance(
+                        walker.position_m,
+                        sun,
+                        walker.shell,
+                        &walker.amounts,
+                        s,
+                        draws,
+                    );
+                    (tracked / kept, Some(phase))
+                }
+            };
             if transmittance <= 0.0 {
                 continue;
             }
             let scale = walker.weight * irradiance * transmittance;
-            let cos_theta = sun.dot(walker.dir);
-            let scalar = scale * self.phase_value(terms_per_m, total_per_m, cos_theta);
+            let scalar = scale
+                * phase.unwrap_or_else(|| self.phase_value(terms_per_m, total_per_m, cos_theta));
             match &walker.stokes {
                 None => out[I] += scalar,
                 Some(stokes) => {
@@ -1756,8 +2411,9 @@ impl<'a> Medium<'a> {
     }
 
     /// At the ground: adds each sun's next-event estimate to `out` if the path's `duty` is to
-    /// estimate there, and reflects the walker into a cosine-weighted direction, its weight times
-    /// the albedo.
+    /// estimate there (under the deep estimator, each after its roulette and with its ray
+    /// tracked), and reflects the walker into a cosine-weighted direction, its weight times the
+    /// albedo.
     fn reflect(
         &self,
         walker: &mut Walker,
@@ -1772,8 +2428,23 @@ impl<'a> Medium<'a> {
             if !duty.estimates || irradiance <= 0.0 || cos_sun <= 0.0 || self.ground_albedo <= 0.0 {
                 continue;
             }
-            let transmittance =
-                self.sun_transmittance(walker.position_m, sun, 0, &walker.amounts, s);
+            let transmittance = match &self.deep {
+                None => self.sun_transmittance(walker.position_m, sun, 0, &walker.amounts, s),
+                Some(deep) => {
+                    let scale = 4.0 * self.ground_albedo * cos_sun;
+                    let Some(kept) = estimate_kept(deep, walker, scale, 0, draws) else {
+                        continue;
+                    };
+                    self.tracked_sun_transmittance(
+                        walker.position_m,
+                        sun,
+                        0,
+                        &walker.amounts,
+                        s,
+                        draws,
+                    ) / kept
+                }
+            };
             let scale =
                 walker.weight * self.ground_albedo / PI * cos_sun * irradiance * transmittance;
             match &walker.stokes {
@@ -2365,5 +3036,225 @@ pub(crate) mod tests {
             }
         }
         assert!(tightest < 1.01, "{tightest}");
+    }
+
+    /// The committed client file `name` of R08.T12.b's cases and references.
+    pub(crate) fn committed_file(name: &str) -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../apps/hyperion/src/renderer/src/view/atmosphere/reference")
+                .join(name),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn atmosphere_deep_estimator_runs_where_the_column_reaches_its_depth() {
+        // `ByMedium` runs it at a wavelength whose column reaches τ 6, and nowhere else; `Shallow`,
+        // the sunward draws alone and VROOM alone never do; `Deep` always does.
+        let deep = |value: &serde_json::Value, w: usize, estimator: Estimator| {
+            let case = super::super::tests::case_of(value);
+            let grid = super::super::shell_grid(&case);
+            Medium::new(&case, &grid, w, estimator, Orders::Every).runs_deep()
+        };
+        let (thin, thick) = (
+            super::super::case::tests::sample_case(),
+            super::super::case::tests::thickened_sample_case(),
+        );
+        for w in 0..2 {
+            assert!(!deep(&thin, w, Estimator::ByMedium), "{w}");
+            assert!(deep(&thin, w, Estimator::Deep), "{w}");
+            for estimator in [
+                Estimator::Shallow,
+                Estimator::SunwardDraws,
+                Estimator::Vroom,
+            ] {
+                assert!(!deep(&thick, w, estimator), "{w}, {estimator:?}");
+            }
+        }
+        assert!(!deep(&thick, 0, Estimator::ByMedium), "τ 2.8 at 550 nm");
+        assert!(deep(&thick, 1, Estimator::ByMedium), "τ 6.9 at 440 nm");
+    }
+
+    #[test]
+    fn atmosphere_committed_cases_go_deep_where_thick_and_nowhere_else() {
+        // R08.T12.h's pins: every channel of every thin case's column is under
+        // `DEEP_OPTICAL_DEPTH`, so that its references trace as before, bit for bit; and every
+        // channel of the thick ones is past it. (R08.T13's sweep runs `Shallow`, whose points reach
+        // τ 8.)
+        let cases = [
+            ("earth", false),
+            ("earth-ozone-slab", false),
+            ("earth-high-limb", false),
+            ("earth-ozone-slab-high-limb", false),
+            ("mars", false),
+            ("saturn-oblate", false),
+            ("titan-class", true),
+            ("giant-deck", true),
+            ("venus-92bar", true),
+            ("venus-58bar", true),
+            ("venus-92bar-albedo", true),
+        ];
+        let mut least_thick = f64::INFINITY;
+        let mut most_thin = 0.0_f64;
+        for (name, thick) in cases {
+            let case =
+                AtmosphereCase::from_json(&committed_file(&format!("{name}.case.json"))).unwrap();
+            let grid = super::super::shell_grid(&case);
+            for w in 0..case.wavelengths_nm().len() {
+                let medium = Medium::new(&case, &grid, w, Estimator::Shallow, Orders::Every);
+                let depth: f64 = medium
+                    .vertical_pieces(0.0)
+                    .iter()
+                    .map(|p| p.scattering_depth + p.absorption_depth)
+                    .sum();
+                assert_eq!(
+                    depth >= DEEP_OPTICAL_DEPTH,
+                    thick,
+                    "{name} at {w}: τ {depth}"
+                );
+                if thick {
+                    least_thick = least_thick.min(depth);
+                } else {
+                    most_thin = most_thin.max(depth);
+                }
+            }
+        }
+        eprintln!(
+            "the thin cases' columns reach τ {most_thin:.3}, the thick ones' {least_thick:.2}"
+        );
+    }
+
+    /// Asserts that `medium`'s Ψ is finite and positive over its whole table and past it, its
+    /// top at `top_m`: a Ψ that were NaN would roulette away every estimate unseen.
+    fn assert_importance_positive(medium: &Medium<'_>, top_m: f64, what: &str) {
+        let deep = medium.deep.as_ref().unwrap();
+        for i in -2..=202 {
+            for k in -10..=50 {
+                let (h, mu0) = (top_m * f64::from(i) / 200.0, f64::from(k) / 40.0 - 0.25);
+                let psi = deep.importance.at(h, mu0);
+                assert!(
+                    psi.is_finite() && psi > 0.0,
+                    "{what}: Ψ({h}, {mu0}) = {psi}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "slow: the importance of every channel of the four other thick cases, about 100 s \
+                on one thread, most of it Venus's slant beams"]
+    fn atmosphere_importance_is_finite_and_positive_in_every_thick_case() {
+        // Titan-class's is held by the fast test of its ground flux.
+        for name in [
+            "giant-deck",
+            "venus-92bar",
+            "venus-58bar",
+            "venus-92bar-albedo",
+        ] {
+            let case =
+                AtmosphereCase::from_json(&committed_file(&format!("{name}.case.json"))).unwrap();
+            let grid = super::super::shell_grid(&case);
+            for w in 0..case.wavelengths_nm().len() {
+                let medium = Medium::new(&case, &grid, w, Estimator::ByMedium, Orders::Every);
+                assert_importance_positive(&medium, case.top_height_m(), &format!("{name} at {w}"));
+            }
+        }
+    }
+
+    #[test]
+    fn atmosphere_importance_is_positive_and_lights_titans_ground_within_3_times_the_tracer() {
+        // Over the whole table and past it, Ψ is finite and positive in every channel of the
+        // Titan-class case; and its δ-Eddington downward flux at the ground, direct and diffuse, is
+        // within a factor 3 of
+        // the committed reference's at each aggregate's sun (R08.T12.h's pilot of the method read
+        // its own solve 1.35–2.5 times below it). It only steers, so a factor is all it needs. The
+        // committed reference is R08.T12.b.2's until the case is traced again, and its fluxes read
+        // low from their heavy tails.
+        let case = AtmosphereCase::from_json(&committed_file("titan-class.case.json")).unwrap();
+        let reference: super::super::ReferenceRadiances =
+            serde_json::from_str(&committed_file("titan-class.reference.json")).unwrap();
+        let grid = super::super::shell_grid(&case);
+        let mut ratios = (f64::INFINITY, 0.0_f64);
+        for w in 0..case.wavelengths_nm().len() {
+            let medium = Medium::new(&case, &grid, w, Estimator::ByMedium, Orders::Every);
+            assert_importance_positive(&medium, case.top_height_m(), &format!("Titan at {w}"));
+            for (aggregate, flux) in case.aggregates().iter().zip(reference.aggregates()) {
+                let mu0 = math::cos(aggregate.sun_directions[0].zenith_deg.to_radians());
+                let traced = flux.direct_ground()[w] + flux.diffuse_ground()[w];
+                let solved = medium.importance_ground_flux(mu0) * case.suns()[0].irradiance[w];
+                let ratio = solved / traced;
+                assert!(
+                    (1.0 / 3.0..=3.0).contains(&ratio),
+                    "{} at {w}: {solved} against {traced}",
+                    aggregate.name
+                );
+                ratios = (ratios.0.min(ratio), ratios.1.max(ratio));
+            }
+        }
+        eprintln!(
+            "Titan's ground flux, δ-Eddington over the tracer: {:.2} to {:.2}",
+            ratios.0, ratios.1
+        );
+    }
+
+    #[test]
+    fn atmosphere_deep_bound_is_below_every_rays_depth_to_space() {
+        // τᵥ of a ray's shell is at most the extinction depth to space of every ray from inside
+        // it that reaches space: on a sphere exactly, to the quadrature's rounding, and on Saturn's
+        // spheroid with `SPHEROID_BOUND_MARGIN`.
+        for (value, spheroid) in [
+            (super::super::case::tests::thickened_sample_case(), false),
+            (super::super::case::tests::saturn_case(), true),
+        ] {
+            let case = super::super::tests::case_of(&value);
+            let grid = super::super::shell_grid(&case);
+            for w in 0..2 {
+                let medium = Medium::new(&case, &grid, w, Estimator::Deep, Orders::Every);
+                let deep = medium.deep.as_ref().unwrap();
+                let mut tightest = f64::INFINITY;
+                // Every 15°, on the bound's own verticals, and between them.
+                let latitudes = (-6..=6)
+                    .map(|k| f64::from(15 * k))
+                    .chain([7.5, -37.5, 52.5, 87.5]);
+                for latitude in latitudes {
+                    let frame = LocalFrame::at_latitude(latitude.to_radians());
+                    for i in 0..=48 {
+                        let x = grid.point(&frame, case.top_height_m() * f64::from(i) / 48.0);
+                        for zenith in 0..=17 {
+                            for azimuth in [0.0, 1.6, 3.5] {
+                                let dir =
+                                    frame.direction(f64::from(10 * zenith).to_radians(), azimuth);
+                                let Some(shell) = grid.locate(x, dir) else {
+                                    continue;
+                                };
+                                let Some(depth) =
+                                    medium.depth_to_space_from(x, dir, shell, f64::INFINITY)
+                                else {
+                                    continue;
+                                };
+                                let bound = deep.depth_above[shell];
+                                assert!(
+                                    depth >= bound * (1.0 - 1e-12),
+                                    "{}, {w}, {latitude}, {i}, {zenith}: {depth} under {bound}",
+                                    case.name()
+                                );
+                                if bound > 1e-6 {
+                                    tightest = tightest.min(depth / bound);
+                                }
+                            }
+                        }
+                    }
+                }
+                // Some ray comes near the bound on a sphere: the vertical from low in a shell.
+                if !spheroid {
+                    assert!(tightest < 1.05, "{w}: {tightest}");
+                }
+                eprintln!(
+                    "{} at {w}: the bound's tightest ray {tightest:.4}",
+                    case.name()
+                );
+            }
+        }
     }
 }

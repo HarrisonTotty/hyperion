@@ -2157,7 +2157,9 @@ The order:
   (`decision-r08-t12b-scope.md`): T12.b.1, its cloud-free cases, needs T12.c, T12.d and T12.e;
   T12.b.2, its cloudy and hazy cases (the Venus-class and Titan-class cases and the decks), needs
   T12.f and T5.b's files, and holds R08.T5.e, after its Venus cases are written and before their
-  references are traced. Each part builds its own media, which T10.a's kept scenes read.
+  references are traced. Each part builds its own media, which T10.a's kept scenes read. T12.h
+  (the deep-transmission estimator) follows T12.b.2, and its re-traced thick references precede
+  T14.d's thick gates and T15's gates on them.
 - T13 needs T6 (T6.e for `saturn-oblate`) and T12. T14.a, T14.b and T14.c follow in turn and read
   nothing of T13, so they need not wait for it (`decision-r08-t14a-scope.md`, §1 and ruling 1);
   T14.e (the polarisation correction) follows T14.a and T14.b; T14.f (its read path and the vector
@@ -5609,6 +5611,60 @@ Acceptance: the record is here, and `pnpm test` passes.
 
   Acceptance: `pnpm test` passes and `just fit-check` is unaffected (the subcommand is not a
   `FitTask`, so its outputs are outside `tables.lock`).
+
+- **R08.T12.h The deep-transmission estimator, and the thick references traced afresh**
+  (main, 2026-10-30, after a research pilot of the method). It needs R08.T12.b.2. Under a thick deck the
+  score comes from the top few optical depths, which backward paths from the ground reach rarely,
+  so the thick references read low and refuse nearly everything for σ. The estimator, in the
+  tracer, each part unbiased by construction:
+  - _The importance_ Ψ(h, μ₀) per wavelength, built in `Medium::new` where the medium runs it: a
+    δ-Eddington diffusion solve (Joseph, Wiscombe and Weinman 1976, J. Atmos. Sci. 33, 2452) of
+    the case's own shells, its nodes at most τ 0.05 or 4 km apart, each shell's g its terms'
+    scattering-weighted mean cosines by quadrature and f = g², the pseudo-spherical beam (Dahlback
+    and Stamnes 1991, Planet. Space Sci. 39, 671) from the tracer's own march with δ-scaled
+    extinction, Marshak at the top and a Lambertian ground. A table on μ₀ ∈ [−0.5, 1] in steps of
+    0.05, Ψ = I₀ + beam ÷ 4π, ln Ψ bilinear; a path's Ψ summed over the suns at unit irradiance.
+    It steers and never enters an estimate; no directional Ψ (piloted, it gained nothing).
+  - _The trigger:_ `Estimator::ByMedium` runs it at a wavelength whose column's vertical
+    extinction τ reaches `DEEP_OPTICAL_DEPTH` (lean, 6), every channel of Titan's, the giant's and
+    Venus's. Every thinner case traces bit for bit as before, pinned, and `sweepBoundary.json` and
+    the sweep's smoke output are unchanged.
+  - _The windows_ at every vertex of every branch, on r = w × `ROULETTE_FRACTION` ÷ roulette ×
+    Ψ(x) ÷ Ψ(x₀): a roulette below `WINDOW_LOW` (= `ROULETTE_FRACTION`) before VROOM's clone and
+    the estimate; a split above `WINDOW_HIGH` = 2 into ⌊r⌋ copies, at most `WINDOW_MOST` = 64,
+    after the clone and before the estimate, which the original makes for all of them, each copy
+    drawing its own direction from the vertex, its weight divided and its threshold not. The fixed
+    roulette is off there, and VROOM's relative weight is multiplied by Ψ(x) ÷ Ψ(x₀).
+  - _The estimate's roulette_ before its ray is traced:
+    q = min(1, (w ÷ base) 4π p(Θ) e^(−τᵥ) ÷ (`ESTIMATE_CRITICAL` · 4π Ψ(x₀))), 0.1, with 4 A cos θₛ
+    at the ground; τᵥ the vertical extinction above the vertex's shell, a bound of any ray's on a
+    sphere and taken with a margin of 0.9 on a spheroid; the estimate divided by q.
+  - _The ray's roulette_ past `ESTIMATE_TRACK_DEPTH` = 4: each piece crossed with probability
+    e^(−Δτ), a ray lost or not traced scoring 0; its absorbers' curves read only at space.
+  - _Resumable_ (main, 2026-10-30: pods are lost): the trace keeps per-geometry checkpoints that
+    give the same bits whole and resumed.
+  - _Optional, raised with main before it is built:_ per-wavelength counts (1.24 times on Titan),
+    which change the reference format, `gate.ts`'s reader and the N^(−1/2) check.
+
+  Tests (`atmosphere`; the slow ones under `atmosphere::benchmarks`): with it forced on and off,
+  Design note 10's agreement test on a plane-parallel Henyey–Greenstein slab where VROOM as built
+  converges (τ 6, g 0.7, ω 0.99, ground 0.3, sun 30°) at transmitted and reflected views set from a
+  pilot at seeds the test does not use, σ ≤ 0.3% of I; energy in a conservative layer at τ ≥ 5 with
+  it forced on; one and four threads the same bits; Ψ finite and positive, and on Titan's column
+  its ground flux within 3 times the tracer's; τᵥ at most the slant τ of every ray from its shell,
+  on a sphere and on Saturn's spheroid with the margin; the thin cases bit for bit.
+
+  _The re-trace_ (main, 2026-10-30: split, to land sooner). This task pilots `titan-class`,
+  `giant-deck`, `venus-92bar` and `venus-58bar` (seeds ≥ 1000, at most an hour each) and stops;
+  main launches the re-traces as lanes, one pod a case. Each is ruling 8's procedure
+  (`decision-r08-t12b-scope.md`), traced afresh at the case's seed, `--stokes`, capped at 24 h wall
+  on one 16-vCPU pod: a geometry that cannot reach σ ≤ T ÷ 8 inside it is committed at its cap with
+  its σ and the count it would need. Venus-class is traced with its twilight image and aggregates
+  capped, then routed by the depth range that passes. Each commits its counts, times and load, and
+  `refusals.json`, `sampleCounts.json` and `sanityRanges.json`'s rows. Near a sun each view's
+  N^(−1/2) scaling is recorded, and §2.5 stays unbuilt unless they still fail. Fit and client files
+  only: no generated output moves, and there is no version bump. Acceptance:
+  `cargo test -p hyperion-fit atmosphere` and `just test-slow atmosphere::benchmarks`.
 
 ### R08.T13 Where the analytic term drifts
 

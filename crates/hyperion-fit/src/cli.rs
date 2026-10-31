@@ -10,9 +10,11 @@
 //!                                        # the displaced form table's orbit run (P15.T6.b),
 //!                                        # resumable from DIR/parts (ruling 120.4)
 //! hyperion-fit atmosphere-reference <case.json> --out <reference.json> [--samples N]
-//!                                   [--threads N] [--stokes]
+//!                                   [--threads N] [--stokes] [--work DIR]
+//!                                   [--resume-other-build]
 //!                                        # an atmosphere case's reference radiances (plan R08,
-//!                                        # R08.T12.a), not a fit: outside `tables.lock`
+//!                                        # R08.T12.a), not a fit: outside `tables.lock`;
+//!                                        # resumable from DIR (R08.T12.h)
 //! hyperion-fit atmosphere-sweep <sweep.case.json> --out <sweep.json> --work <dir>
 //!                               --cpu-per-vertex-us X --vroom-cpu-per-vertex-us Y
 //!                               [--point-cap-cpu-h 24] [--threads N] [--max-points N]
@@ -38,7 +40,10 @@ use hyperion_sim::GENERATOR_VERSION;
 
 use crate::RunFitError;
 use crate::atmosphere::sweep::{POINT_CAP_CPU_H, PositiveFigure};
-use crate::atmosphere::{AtmosphereCase, Polarisation, trace_reference};
+use crate::atmosphere::{
+    AtmosphereCase, OtherBuilds, Polarisation, ReadCaseError, TraceWork, trace_reference,
+    trace_reference_resumably,
+};
 use crate::check::{CheckInputs, REPOSITORY_MANIFESTS, Rerun, check};
 use crate::emit::{Destination, Workspace, write_table};
 use crate::manifest::Manifest;
@@ -189,6 +194,15 @@ pub struct AtmosphereReferenceArgs {
     /// scattering term needs its scattering matrix, or the case's `depolarising` mark.
     #[arg(long)]
     pub stokes: bool,
+    /// Keep each geometry's and aggregate's moments at each wavelength in this directory as they
+    /// finish, and read back those there on a rerun of the same trace, which then traces only
+    /// the rest: the reference is the same, bit for bit (R08.T12.h).
+    #[arg(long)]
+    pub work: Option<PathBuf>,
+    /// Read `--work`'s checkpoints written by another build of the tracer, which are refused
+    /// otherwise: only for a rebuild of the same tree, whose binary may differ in its bytes alone.
+    #[arg(long, requires = "work")]
+    pub resume_other_build: bool,
 }
 
 /// `atmosphere-reference`'s samples per geometry, aggregate and wavelength unless `--samples`
@@ -395,7 +409,12 @@ fn atmosphere_reference(
     args: &AtmosphereReferenceArgs,
     out: &mut dyn Write,
 ) -> Result<(), RunFitError> {
-    let case = AtmosphereCase::read(&args.case)?;
+    // Read once, so that a resumable trace keys its checkpoints by the text it parsed.
+    let text = std::fs::read_to_string(&args.case).map_err(|source| ReadCaseError::Read {
+        path: args.case.clone(),
+        source,
+    })?;
+    let case = AtmosphereCase::from_json(&text)?;
     let polarisation = if args.stokes {
         Polarisation::Stokes
     } else {
@@ -403,7 +422,38 @@ fn atmosphere_reference(
     };
     let (samples, threads) = (args.samples, threads_or_all(args.threads));
     let start = Instant::now();
-    let reference = trace_reference(&case, polarisation, samples, threads)?;
+    let reference = match &args.work {
+        None => trace_reference(&case, polarisation, samples, threads)?,
+        Some(dir) => {
+            // Its line ends taken as LF, as the sweep's case is hashed.
+            let case_sha256 = crate::emit::sha256_hex(text.replace("\r\n", "\n").as_bytes());
+            let build_sha256 = binary_sha256()?;
+            let other_builds = if args.resume_other_build {
+                OtherBuilds::Read
+            } else {
+                OtherBuilds::Refused
+            };
+            let work = TraceWork::new(dir, &case_sha256, &build_sha256, other_builds);
+            let (reference, resumed) =
+                trace_reference_resumably(&case, polarisation, samples, threads, &work)?;
+            writeln!(
+                out,
+                "read {} of {} jobs from {}{}",
+                resumed.read(),
+                resumed.jobs(),
+                dir.display(),
+                if resumed.other_build() > 0 {
+                    format!(
+                        ", {} of them written by another build of the tracer",
+                        resumed.other_build()
+                    )
+                } else {
+                    String::new()
+                }
+            )?;
+            reference
+        }
+    };
     let seconds = start.elapsed().as_secs_f64();
     std::fs::write(&args.out, reference.to_json()).map_err(|source| {
         RunFitError::WriteReference {
@@ -664,6 +714,8 @@ mod tests {
                 samples: NonZeroU64::new(500).unwrap(),
                 threads: NonZeroUsize::new(2),
                 stokes: true,
+                work: None,
+                resume_other_build: false,
             })
         );
         assert_eq!(
@@ -684,6 +736,87 @@ mod tests {
             .unwrap_err()
             .kind(),
             clap::error::ErrorKind::ValueValidation
+        );
+    }
+
+    #[test]
+    fn atmosphere_reference_resumes_from_its_work_directory_to_the_bit() {
+        // R08.T12.h: the sample case thickened, which runs the deep estimator at 440 nm, traced
+        // with `--work`, again from its checkpoints alone, again with three of its eight jobs'
+        // checkpoints lost as a run cut short loses them, and without `--work`: the same reference
+        // to the bit each time. Another case's checkpoints, and a file that is not one, are
+        // refused.
+        let dir = tempfile::tempdir().unwrap();
+        let (case_path, work) = (dir.path().join("thick.case.json"), dir.path().join("work"));
+        let case = crate::atmosphere::case::tests::thickened_sample_case();
+        std::fs::write(&case_path, case.to_string()).unwrap();
+        let trace = |work: Option<&std::path::Path>, out: &str| {
+            let out_path = dir.path().join(out);
+            let mut args = vec![
+                "hyperion-fit".to_owned(),
+                "atmosphere-reference".to_owned(),
+                case_path.to_str().unwrap().to_owned(),
+                "--out".to_owned(),
+                out_path.to_str().unwrap().to_owned(),
+                "--samples".to_owned(),
+                "1100".to_owned(),
+                "--threads".to_owned(),
+                "3".to_owned(),
+            ];
+            if let Some(work) = work {
+                args.extend(["--work".to_owned(), work.to_str().unwrap().to_owned()]);
+            }
+            let mut printed = Vec::new();
+            let result = run(&Cli::try_parse_from(args).unwrap(), &mut printed);
+            result.map(|()| {
+                (
+                    std::fs::read_to_string(&out_path).unwrap(),
+                    String::from_utf8(printed).unwrap(),
+                )
+            })
+        };
+        let (whole, printed) = trace(Some(&work), "whole.json").unwrap();
+        assert!(printed.contains("read 0 of 8 jobs"), "{printed}");
+        let (again, printed) = trace(Some(&work), "again.json").unwrap();
+        assert!(printed.contains("read 8 of 8 jobs"), "{printed}");
+        assert_eq!(again, whole);
+        for lost in [
+            "geometry-0001-w1.json",
+            "ground-0000-w1.json",
+            "top-0000-w0.json",
+        ] {
+            std::fs::remove_file(work.join(lost)).unwrap();
+        }
+        let (resumed, printed) = trace(Some(&work), "resumed.json").unwrap();
+        assert!(printed.contains("read 5 of 8 jobs"), "{printed}");
+        assert_eq!(resumed, whole);
+        assert_eq!(trace(None, "plain.json").unwrap().0, whole);
+        let mut other = case;
+        other["seed"] = serde_json::json!(9);
+        std::fs::write(&case_path, other.to_string()).unwrap();
+        let error = trace(Some(&work), "other.json").unwrap_err();
+        assert_eq!(error.exit_code(), 1);
+        assert!(
+            matches!(
+                error,
+                RunFitError::AtmosphereReference(
+                    crate::atmosphere::TraceReferenceError::StaleCheckpoint { .. }
+                )
+            ),
+            "{error:?}"
+        );
+        let fresh = dir.path().join("fresh");
+        std::fs::create_dir(&fresh).unwrap();
+        std::fs::write(fresh.join("geometry-0000-w0.json"), "{}").unwrap();
+        let error = trace(Some(&fresh), "corrupt.json").unwrap_err();
+        assert!(
+            matches!(
+                error,
+                RunFitError::AtmosphereReference(
+                    crate::atmosphere::TraceReferenceError::CorruptCheckpoint { .. }
+                )
+            ),
+            "{error:?}"
         );
     }
 
