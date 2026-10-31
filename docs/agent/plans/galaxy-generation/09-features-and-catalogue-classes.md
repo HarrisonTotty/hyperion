@@ -5362,3 +5362,9 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Bump._ 26 deletes `CARVE_OUT_VERSION`, `CarveOutRules`' `Unclaimed` arm, the field, the
     `match`es in `recent_death_claim` and `Galaxy::build`, the refusal and the tripwire
     `the_carve_out_is_held_only_until_the_26_bump`; the claim is again the one item.
+- **P09.T10 perf, a slow pair's neutron stars at 26 (lane `galaxy-centre-core`, 2026-10-31, at 24,
+  under `TABULATED_REMNANTS_VERSION`).** `ClusterModel::remnant_table(rules)` (a
+  `remnants::RemnantTable`: `white_dwarf_ceiling` and `capture_window_top`) replaces
+  `white_dwarf_ceiling(rules)`; `tabulated_fit` takes `(kind, mass)` and the composition. A
+  neutron-star attempt on a pair below `v_eff` is refused when it is unstripped (its mark read
+  against the share) and above the cluster's highest `m_cc` plus `CAPTURE_MARGIN` (0.5 M☉).

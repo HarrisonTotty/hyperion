@@ -66,7 +66,7 @@ use super::kinds::globular::history;
 use super::kinds::nursery::NurseryStage;
 use super::kinds::open_cluster::DISRUPTION_GAMMA as DISRUPTION_GAMMA_FOR_RATE;
 use super::kinds::open_cluster::{dissolution_time, evolution_survival, present_mass};
-use super::members::remnants::{self, CeilingCell};
+use super::members::remnants::{self, RemnantTableCell};
 use crate::rng::{ObjectKey, tags};
 
 /// The mean member mass in the relaxation time, M☉ (P09.T7).
@@ -345,8 +345,8 @@ pub struct ClusterModel {
     central_density: f64,
     retention: Retention,
     black_hole_fraction: f64,
-    /// [`ClusterModel::white_dwarf_ceiling`], found when first asked.
-    white_dwarf_ceiling: CeilingCell,
+    /// [`ClusterModel::remnant_table`], found when first asked.
+    remnant_table: RemnantTableCell,
 }
 
 impl ClusterModel {
@@ -410,7 +410,7 @@ impl ClusterModel {
             central_density,
             retention: kept,
             black_hole_fraction,
-            white_dwarf_ceiling: CeilingCell::default(),
+            remnant_table: RemnantTableCell::default(),
         }
     }
 
@@ -685,13 +685,13 @@ impl ClusterModel {
         &self.parameters.marks
     }
 
-    /// The initial mass below which every member leaves a white dwarf, under the stellar `rules`,
-    /// that version 26's member draws read ([`remnants::white_dwarf_ceiling`]), found the first
-    /// time it is asked, some 5–20 ms, and kept with the model.
+    /// The members' tabulated remnants under the stellar `rules`, that version 26's member draws
+    /// read ([`RemnantTable`](remnants::RemnantTable): the white-dwarf ceiling and the capture
+    /// window's top), found the first time they are asked, some 5–20 ms, and kept with the model.
     #[must_use]
-    pub(crate) fn white_dwarf_ceiling(&self, rules: StellarRules) -> SolarMasses {
-        self.white_dwarf_ceiling
-            .get(rules, || remnants::white_dwarf_ceiling(self, rules))
+    pub(crate) fn remnant_table(&self, rules: StellarRules) -> remnants::RemnantTable {
+        self.remnant_table
+            .get(rules, || remnants::RemnantTable::of(self, rules))
     }
 }
 
