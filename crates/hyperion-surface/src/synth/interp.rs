@@ -810,21 +810,26 @@ fn fresh_ghost<const N: usize, V: CellRecords<N> + ?Sized>(
     Ok(bilinear([c00, c10, c01, c11], fx, fy))
 }
 
-/// The slots of a [`ControlMemo`]: a power of two, about ten times the control points a patch's
-/// queries read when it lies within one coarse cell (25 a face, at most three faces), so that few
-/// of them share a slot. At the fused pass's four values a slot is about 176 bytes, the memo about
-/// 176 KiB.
-const MEMO_SLOTS: usize = 1 << 10;
+/// The control points' indices a [`ControlMemo`] tells apart along each axis of a face: 16, so
+/// that a window of up to 16 × 16 control points of one face takes as many slots, one each.
+/// Queries over a span of w cells along an axis read w + 4 control points along it: a patch within
+/// one coarse cell reads about 5 × 5 a face (at most three faces), and one 12 coarse cells wide
+/// still fits.
+const MEMO_SPAN: usize = 16;
+
+/// The slots of a [`ControlMemo`]: [`MEMO_SPAN`]² for each face. At the fused pass's four values a
+/// slot is about 176 bytes, the memo about 264 KiB.
+const MEMO_SLOTS: usize = 6 * MEMO_SPAN * MEMO_SPAN;
 
 /// The control points a patch bake's queries have read, kept by face and indices so that its
 /// vertices share them (R09.T8's follow-up): its 5,314 queries read about the same 25 a face.
 ///
-/// It is direct-mapped and bounded, [`MEMO_SLOTS`] slots, a control point replacing the one in
-/// its slot, so a bake whose vertices lie in many coarse cells reads afresh what it no longer
-/// holds. It holds only control points every cell of which was read: a query that reads a cell
-/// not held reads it afresh, and is refused as before. What it holds is for one view of one field
-/// at one level, whose held cells only grow ([`crate::synth::SynthCache`]'s rule), and it serves
-/// that alone.
+/// It is direct-mapped and bounded, [`MEMO_SLOTS`] slots by face and indices ([`memo_slot`]), a
+/// control point replacing the one in its slot, so a bake whose vertices lie in many coarse cells
+/// reads afresh what it no longer holds. It holds only control points every cell of which was
+/// read: a query that reads a cell not held reads it afresh, and is refused as before. What it
+/// holds is for one view of one field at one level, whose held cells only grow
+/// ([`crate::synth::SynthCache`]'s rule), and it serves that alone.
 ///
 /// Measured (2026-10-14, natively, one thread, load 1–4; plan R09's Risks, the fused pass's
 /// record): the fused pass with this memo takes R09's bake of the Earth-like world's patch at
@@ -857,15 +862,21 @@ impl<const N: usize> ControlMemo<N> {
     }
 }
 
-/// The slot of control point (`i`, `j`) of `face`: a multiplicative hash of the three.
+/// The slot of control point (`i`, `j`) of `face`: the face's block of [`MEMO_SPAN`]² slots, and
+/// in it `i` and `j` modulo [`MEMO_SPAN`] (of their two's complement, for a ghost's negative
+/// index), so that control points of one face share a slot only [`MEMO_SPAN`] apart.
+///
+/// It replaced a multiplicative hash of the three, under which control points (i, j) and
+/// (−i, −j) of a face, and (256, 254) and (257, 255), shared a slot: on the Earth-like world's
+/// patch at level 19, at a cube corner, each query's ghosts evicted each other and about 8 of its
+/// 48 control points were read afresh. Read by face and indices, the whole height there took 5.80
+/// µs a point against 6.46 µs (natively, pod, 16 vCPU, 2026-10-31).
 #[must_use]
 fn memo_slot(face: Face, i: i64, j: i64) -> usize {
-    let mixed = (i.cast_unsigned().wrapping_mul(0x9e37_79b9_7f4a_7c15)
-        ^ j.cast_unsigned().wrapping_mul(0xc2b2_ae3d_27d4_eb4f)
-        ^ u64::from(face.index()).wrapping_mul(0x1656_67b1_9e37_79f9))
-    .rotate_left(32);
-    usize::try_from(mixed % u64::try_from(MEMO_SLOTS).expect("the slots fit a u64"))
-        .expect("a slot below MEMO_SLOTS fits a usize")
+    let span = u64::try_from(MEMO_SPAN).expect("the span fits a u64");
+    let along = |n: i64| n.cast_unsigned() % span;
+    let slot = (u64::from(face.index()) * span + along(i)) * span + along(j);
+    usize::try_from(slot).expect("a slot below MEMO_SLOTS fits a usize")
 }
 
 impl<const N: usize> ControlMemo<N> {
@@ -1473,6 +1484,28 @@ mod tests {
         assert_eq!(alone, ReadCellError { cell: home });
         assert_eq!(interpolate_pair(&whole, &partial, dir).unwrap_err(), alone);
         assert_eq!(interpolate_pair(&partial, &whole, dir).unwrap_err(), alone);
+    }
+
+    #[test]
+    fn a_window_of_control_points_of_a_face_takes_a_slot_each() {
+        // Any 16 × 16 window of one face's control points, ghosts' negative and past-the-edge
+        // indices included, and the windows of two faces, take distinct slots of the memo.
+        for corner in [(-3, -3), (-1, 2), (250, 245), (7, 300)] {
+            let mut seen = BTreeMap::new();
+            for face in Face::ALL {
+                for i in corner.0..corner.0 + 16 {
+                    for j in corner.1..corner.1 + 16 {
+                        let slot = memo_slot(face, i, j);
+                        assert!(slot < MEMO_SLOTS, "slot {slot} of ({face:?}, {i}, {j})");
+                        assert_eq!(
+                            seen.insert(slot, (face, i, j)),
+                            None,
+                            "({face:?}, {i}, {j}) shares slot {slot}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
