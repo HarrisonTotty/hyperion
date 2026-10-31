@@ -5246,3 +5246,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `6.32E8`), in `FeatureList` and `FeatureReadout` alike. Systems always fit.
   - _`CentreEntry`._ `MAX_DECIMALS` 5: 0.00001 ly (0.63 AU), a hundredth of the finest chart's
     radius, the finest chart's furniture step; the field is 13ch, for `-65,535.99999`.
+  - _Furniture._ `placeDecimalsFor(radius)` (`chartReadings.ts`): 1 decimal from 10 ly, one more
+    per decade below, 5 below 0.01 ly; `radiusReading`, `placeReadings` and `modeReading` take it,
+    the slots widening with it. `HrDiagram` gains `placeDecimals`. Built to a guide draft (lean,
+    2026-10-31): the guide states no furniture precision but `POSITION`'s "to one decimal".

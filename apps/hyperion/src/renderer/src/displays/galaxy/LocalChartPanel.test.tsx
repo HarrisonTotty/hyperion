@@ -418,6 +418,13 @@ describe("LocalChartPanel", { timeout: 120_000 }, () => {
     // The curve label is one span whose figures are set apart, so it is read as a whole.
     expect(within(chartPage()).getByText(/^QUERY EDGE/u)).toHaveTextContent("QUERY EDGE 63.2 AU");
     expect(within(chartPage()).getByText(/^COMPLETE ABOVE/u)).toBeInTheDocument();
+    // The furniture's place steps 0.00001 ly on this chart, a hundredth of its radius.
+    expect(within(chartPage()).getByText("RADIUS").nextElementSibling).toHaveTextContent(
+      "26,000.00000 ly",
+    );
+    expect(within(chartPage()).getByText("HEIGHT").nextElementSibling).toHaveTextContent(
+      "+0.00000 ly",
+    );
     const systems = within(screen.getByRole("region", { name: /^Systems/u }));
     expect(systems.getByText("DIST AU")).toBeInTheDocument();
     expect(options()[1]).toHaveAccessibleName(/, 31\.6 AU,/u);

@@ -143,6 +143,11 @@ export interface HrDiagramProps {
   readonly mode: QueryMode;
   /** The answer's chart time, in years from the epoch: the observer's time in observed mode. */
   readonly timeYr: number;
+  /**
+   * The decimals the chart's furniture reads a place at for the answer's radius
+   * (`placeDecimalsFor`), so that the observer is written here as there.
+   */
+  readonly placeDecimals: number;
 }
 
 /**
@@ -189,6 +194,7 @@ export function HrDiagram({
   stale,
   mode,
   timeYr,
+  placeDecimals,
 }: HrDiagramProps) {
   const { ref: stageRef, size } = useElementSize();
   const widthPx = size?.widthPx ?? 0;
@@ -355,7 +361,7 @@ export function HrDiagram({
       <dl className="hr-diagram__readings spatial-view__readings">
         {mode.kind === "observed" ? <FrameReading frameName={CHART_FRAME_NAME} /> : null}
         <Reading reading={timeReading(timeYr)} state={sourceState(stale)} />
-        <ModeReading mode={modeReading(mode)} state={sourceState(stale)} />
+        <ModeReading mode={modeReading(mode, placeDecimals)} state={sourceState(stale)} />
       </dl>
       <Counts rows={plottedRows} stale={stale} />
       <h3 className="hr-diagram__counts-heading">NOT PLOTTED</h3>

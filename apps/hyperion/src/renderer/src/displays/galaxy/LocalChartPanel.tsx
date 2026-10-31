@@ -15,6 +15,7 @@ import { answeredMode } from "./chartModel";
 import {
   CHART_FRAME_NAME,
   modeReading,
+  placeDecimalsFor,
   placeReadings,
   radiusReading,
   timeReading,
@@ -86,11 +87,15 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
       focusPageTab?.();
     }
   }, [fault, focusPageTab]);
+  // The place's step scales with the answer's radius, so that a fine chart can be placed.
+  const placeDecimals = placeDecimalsFor(result?.radiusLy ?? 0);
   const centreReadings: ReadonlyArray<SpatialReading> =
-    result === null ? [] : placeReadings(result.centreLy);
+    result === null ? [] : placeReadings(result.centreLy, placeDecimals);
   // The core arrow's distance is the centre's `RADIUS`, written the same way.
   const radiusText =
-    result === null ? null : radiusReading(cylindrical(vec3(...result.centreLy)).radiusLy);
+    result === null
+      ? null
+      : radiusReading(cylindrical(vec3(...result.centreLy)).radiusLy, placeDecimals);
   const coreDistance: SpatialQuantity = { value: radiusText ?? "", unit: "ly" };
   // The mode the answer on show was given in, which the furniture and the legend state.
   const answered = result === null ? null : answeredMode(result);
@@ -125,7 +130,7 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
           frameName={CHART_FRAME_NAME}
           centre={centreReadings}
           time={timeReading(result.timeYr)}
-          mode={modeReading(answered ?? result.mode)}
+          mode={modeReading(answered ?? result.mode, placeDecimals)}
           coreDistance={coreDistance}
           accessibleName="Local chart"
           stale={stale}

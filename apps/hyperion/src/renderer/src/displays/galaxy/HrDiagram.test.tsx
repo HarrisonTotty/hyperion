@@ -80,6 +80,7 @@ function renderDiagram({
       stale={stale}
       mode={mode}
       timeYr={timeYr}
+      placeDecimals={1}
     />
   );
   const { rerender } = render(view(selectedId));
