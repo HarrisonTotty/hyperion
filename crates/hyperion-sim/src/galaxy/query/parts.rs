@@ -18,6 +18,7 @@
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::{CellCache, CellKey, SystemRecord};
 use crate::id::Layer;
+use crate::rng::Seed;
 
 use super::{
     LayerSet, QuerySphere, QueryStats, RangePlan, RangeResult, SystemHit, SystemSource,
@@ -36,8 +37,10 @@ struct WalkedCell {
 /// The walk of some of a plan's cells, made apart from the plan's own: each cell walked, in the
 /// order walked, with the hits the walk finds in it, in record order, and the records it examined
 /// there ([`RangePlan::walk_cells`]; module documentation).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WalkedCells {
+    /// The seed of the galaxy the cells are of.
+    seed: Seed,
     /// The sphere each layer of the cells was walked with.
     spheres: Vec<(Layer, QuerySphere)>,
     cells: Vec<WalkedCell>,
@@ -63,6 +66,7 @@ impl WalkedCells {
     }
 
     /// The sphere the part's cells of `layer` were walked with, if it holds any.
+    #[must_use]
     fn sphere_of(&self, layer: Layer) -> Option<&QuerySphere> {
         self.spheres
             .iter()
@@ -70,6 +74,7 @@ impl WalkedCells {
     }
 
     /// The hits of the part's `index`th cell.
+    #[must_use]
     fn hits_of(&self, index: usize) -> &[SystemHit] {
         let start = index
             .checked_sub(1)
@@ -82,6 +87,8 @@ impl WalkedCells {
 /// from its walk ([`RangePlan::source_hits`]; module documentation).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceHits {
+    /// The seed of the galaxy the sources were asked in.
+    seed: Seed,
     /// The layers the sources were asked for.
     layers: LayerSet,
     /// The sphere they were asked about.
@@ -99,12 +106,87 @@ impl SourceHits {
 
 impl RangePlan {
     /// The walk of `cells`, of the plan's, through `cache` with `sources`, in the order given: what
-    /// the plan's own walk finds in each, to be merged by [`finish`](Self::finish). A cell of a
-    /// layer the plan does not walk is passed over (module documentation).
+    /// the plan's own walk finds in each, to be merged by [`finish`](Self::finish), whose example
+    /// shows the three together. A cell of a layer the plan does not walk is passed over (module
+    /// documentation).
     ///
     /// # Panics
     ///
     /// If `galaxy` is not of the seed the plan was made for.
+    pub fn walk_cells<C: CellCache>(
+        &self,
+        galaxy: &Galaxy,
+        cache: &mut C,
+        sources: &[&dyn SystemSource],
+        cells: impl IntoIterator<Item = CellKey>,
+    ) -> WalkedCells {
+        self.check_galaxy(galaxy);
+        let mut part = WalkedCells {
+            seed: self.seed,
+            spheres: Vec::new(),
+            cells: Vec::new(),
+            hits: Vec::new(),
+        };
+        for key in cells {
+            let layer = key.layer();
+            let Some(sphere) = self.sphere_of(layer) else {
+                continue;
+            };
+            if part.sphere_of(layer).is_none() {
+                part.spheres.push((layer, *sphere));
+            }
+            let examined = cache.with_cell(galaxy, key, |records| {
+                walk_records(galaxy, sources, sphere, records, &mut part.hits)
+            });
+            part.cells.push(WalkedCell {
+                key,
+                hits_end: part.hits.len(),
+                examined,
+            });
+        }
+        part
+    }
+
+    /// What `sources` find over the plan's widest sphere in the layers its census admits, each
+    /// source's appended in turn: the hits [`run`](Self::run) adds to the grid's, to be merged by
+    /// [`finish`](Self::finish), whose example shows the three together.
+    ///
+    /// # Panics
+    ///
+    /// - If `galaxy` is not of the seed the plan was made for.
+    /// - In debug builds, if a source removes hits instead of appending to them.
+    #[must_use]
+    pub fn source_hits(&self, galaxy: &Galaxy, sources: &[&dyn SystemSource]) -> SourceHits {
+        self.check_galaxy(galaxy);
+        let layers = self.census.layers();
+        let mut hits = Vec::new();
+        for source in sources {
+            let before = hits.len();
+            source.systems_in_sphere(galaxy, &self.widest, layers, &mut hits);
+            debug_assert!(
+                hits.len() >= before,
+                "a source removed hits from the buffer instead of appending to it"
+            );
+        }
+        SourceHits {
+            seed: self.seed,
+            layers,
+            sphere: self.widest,
+            hits,
+        }
+    }
+
+    /// The answer [`run`](Self::run) gives, bit for bit, from `walked` and `source_hits`: each
+    /// planned cell's hits taken from the part that walked it, or the cell walked through `cache`
+    /// with `sources` if none can be taken (module documentation), then the sources' hits, merged
+    /// and sorted. Hits of `source_hits` asked for another plan's layers or sphere are asked for
+    /// again.
+    ///
+    /// # Panics
+    ///
+    /// - If `galaxy` is not of the seed the plan was made for.
+    /// - In debug builds, if a source removes hits instead of appending to them, where it asks
+    ///   them again, or if a system ID appears twice among the merged hits, as [`run`](Self::run).
     ///
     /// # Examples
     ///
@@ -131,73 +213,6 @@ impl RangePlan {
     /// assert_eq!(finished, plan.run(&galaxy, &mut NoCache::new(), &[]));
     /// # Ok::<(), hyperion_sim::galaxy::query::BuildRangeQueryError>(())
     /// ```
-    pub fn walk_cells<C: CellCache>(
-        &self,
-        galaxy: &Galaxy,
-        cache: &mut C,
-        sources: &[&dyn SystemSource],
-        cells: impl IntoIterator<Item = CellKey>,
-    ) -> WalkedCells {
-        self.check_galaxy(galaxy);
-        let mut part = WalkedCells::default();
-        for key in cells {
-            let layer = key.layer();
-            let Some(sphere) = self.sphere_of(layer) else {
-                continue;
-            };
-            if part.sphere_of(layer).is_none() {
-                part.spheres.push((layer, *sphere));
-            }
-            let examined = cache.with_cell(galaxy, key, |records| {
-                walk_records(galaxy, sources, sphere, records, &mut part.hits)
-            });
-            part.cells.push(WalkedCell {
-                key,
-                hits_end: part.hits.len(),
-                examined,
-            });
-        }
-        part
-    }
-
-    /// What `sources` find over the plan's widest sphere in the layers its census admits, each
-    /// source's appended in turn: the hits [`run`](Self::run) adds to the grid's, to be merged by
-    /// [`finish`](Self::finish).
-    ///
-    /// # Panics
-    ///
-    /// - If `galaxy` is not of the seed the plan was made for.
-    /// - In debug builds, if a source removes hits instead of appending to them.
-    #[must_use]
-    pub fn source_hits(&self, galaxy: &Galaxy, sources: &[&dyn SystemSource]) -> SourceHits {
-        self.check_galaxy(galaxy);
-        let layers = self.census.layers();
-        let mut hits = Vec::new();
-        for source in sources {
-            let before = hits.len();
-            source.systems_in_sphere(galaxy, &self.widest, layers, &mut hits);
-            debug_assert!(
-                hits.len() >= before,
-                "a source removed hits from the buffer instead of appending to it"
-            );
-        }
-        SourceHits {
-            layers,
-            sphere: self.widest,
-            hits,
-        }
-    }
-
-    /// The answer [`run`](Self::run) gives, bit for bit, from `walked` and `source_hits`: each
-    /// planned cell's hits taken from the part that walked it, or the cell walked through `cache`
-    /// with `sources` if none can be taken (module documentation), then the sources' hits, merged
-    /// and sorted. Hits of `source_hits` asked for another plan's layers or sphere are asked for
-    /// again.
-    ///
-    /// # Panics
-    ///
-    /// - If `galaxy` is not of the seed the plan was made for.
-    /// - In debug builds, if a system ID appears twice among the merged hits, as [`run`](Self::run).
     #[must_use]
     pub fn finish<C: CellCache>(
         &self,
@@ -209,12 +224,14 @@ impl RangePlan {
     ) -> RangeResult {
         self.check_galaxy(galaxy);
         let census = self.census;
-        let source_hits =
-            if source_hits.layers == census.layers() && source_hits.sphere == self.widest {
-                source_hits
-            } else {
-                self.source_hits(galaxy, sources)
-            };
+        let asked_for_this_plan = source_hits.seed == self.seed
+            && source_hits.layers == census.layers()
+            && source_hits.sphere == self.widest;
+        let source_hits = if asked_for_this_plan {
+            source_hits
+        } else {
+            self.source_hits(galaxy, sources)
+        };
         let mut stats = QueryStats {
             padded_radius: self.widest.padded_radius(),
             ..QueryStats::default()
@@ -251,6 +268,7 @@ impl RangePlan {
     }
 
     /// The sphere the plan walks `layer` with, if it walks it.
+    #[must_use]
     fn sphere_of(&self, layer: Layer) -> Option<&QuerySphere> {
         self.spheres
             .iter()
@@ -304,7 +322,9 @@ struct Cursor<'a> {
 }
 
 impl<'a> Merge<'a> {
-    /// The parts of `walked` that `plan` may take cells from.
+    /// The parts of `walked` that `plan` may take cells from: of its galaxy, and of its layers
+    /// walked with its own spheres.
+    #[must_use]
     fn new(plan: &RangePlan, walked: &'a [WalkedCells]) -> Self {
         let parts = walked
             .iter()
@@ -313,7 +333,9 @@ impl<'a> Merge<'a> {
                 usable: part
                     .spheres
                     .iter()
-                    .filter(|(layer, sphere)| plan.sphere_of(*layer) == Some(sphere))
+                    .filter(|(layer, sphere)| {
+                        part.seed == plan.seed && plan.sphere_of(*layer) == Some(sphere)
+                    })
                     .map(|(layer, _)| *layer)
                     .collect(),
                 at: 0,
@@ -381,23 +403,65 @@ mod tests {
             .unwrap()
     }
 
-    /// A source that places nothing, counts `counts`, and suppresses every grid system whose ID
-    /// is odd, so that the walks' suppression is exercised.
+    /// A source that counts `counts`, suppresses every grid system whose ID is odd, so that the
+    /// walks' suppression is exercised, and places one of its own systems for each layer asked,
+    /// at half the sphere's radius and a light-year more for each, so that its hits depend on the
+    /// layers and the sphere it is asked for.
     #[derive(Debug)]
-    struct OddOut(LayerCounts);
+    struct OddOut {
+        counts: LayerCounts,
+        /// Its own systems, of a cell far from every query here.
+        own: Vec<SystemRecord>,
+    }
+
+    impl OddOut {
+        fn new(galaxy: &Galaxy, counts: LayerCounts) -> Self {
+            let far = GalacticPosition::from_light_years([0.0, 26_000.0, 2_000.0]).unwrap();
+            let sphere = QuerySphere::new(
+                far,
+                LightYears::new(5.0),
+                UniverseTime::EPOCH,
+                LightYears::ZERO,
+            )
+            .unwrap();
+            let mut own = Vec::new();
+            for layer in Layer::ALL {
+                for key in cells_in_sphere(layer, &sphere) {
+                    let mut records = Vec::new();
+                    crate::galaxy::placement::generate_cell(galaxy, key, &mut records);
+                    own.extend(records);
+                }
+            }
+            assert!(
+                own.len() >= Layer::ALL.len(),
+                "{} systems of its own",
+                own.len()
+            );
+            Self { counts, own }
+        }
+    }
 
     impl SystemSource for OddOut {
         fn expected_in_sphere(&self, _galaxy: &Galaxy, _sphere: &QuerySphere) -> LayerCounts {
-            self.0
+            self.counts
         }
 
         fn systems_in_sphere(
             &self,
             _galaxy: &Galaxy,
-            _sphere: &QuerySphere,
-            _layers: LayerSet,
-            _out: &mut Vec<SystemHit>,
+            sphere: &QuerySphere,
+            layers: LayerSet,
+            out: &mut Vec<SystemHit>,
         ) {
+            for (step, (_, record)) in layers.iter().zip(&self.own).enumerate() {
+                let distance =
+                    sphere.radius().value() / 2.0 + f64::from(u8::try_from(step).unwrap());
+                out.push(SystemHit::new(
+                    *record,
+                    *record.epoch_position(),
+                    LightYears::new(distance),
+                ));
+            }
         }
 
         fn suppresses(&self, _galaxy: &Galaxy, record: &SystemRecord, _t: UniverseTime) -> bool {
@@ -426,7 +490,7 @@ mod tests {
     #[test]
     fn a_walk_split_at_every_cell_boundary_is_the_plan_s_run() {
         let galaxy = galaxy();
-        let suppressing = OddOut(LayerCounts::ZERO);
+        let suppressing = OddOut::new(&galaxy, LayerCounts::ZERO);
         let with: [&dyn SystemSource; 1] = [&suppressing];
         for (query, sources) in [
             (query(12.0, 0), &[][..]),
@@ -470,7 +534,7 @@ mod tests {
         for layer in Layer::ALL {
             heavy.set(layer, f64::from(asked.limit().get()) / 3.0);
         }
-        let source = OddOut(heavy);
+        let source = OddOut::new(&galaxy, heavy);
         let sources: [&dyn SystemSource; 1] = [&source];
         let unsourced = RangePlan::new(&galaxy, &[], &asked);
         let plan = unsourced.with_sources(&galaxy, &sources);
@@ -504,12 +568,21 @@ mod tests {
                 "{name}"
             );
         }
-        // The sources' hits of the plan without them are of other layers, and are asked again.
-        let stale = unsourced.source_hits(&galaxy, &sources);
-        assert_eq!(
-            plan.finish(&galaxy, &mut NoCache::new(), &sources, &dealt, stale),
-            expected
-        );
+        // The sources' hits of the plan without them are of other layers, and those of the 13 ly
+        // query's plan with them of another sphere: each is asked again.
+        let fresh = plan.source_hits(&galaxy, &sources);
+        let other_sourced = RangePlan::new(&galaxy, &sources, &query(13.0, 0));
+        assert_eq!(other_sourced.census().layers(), plan.census().layers());
+        for stale in [
+            unsourced.source_hits(&galaxy, &sources),
+            other_sourced.source_hits(&galaxy, &sources),
+        ] {
+            assert_ne!(stale.hits(), fresh.hits());
+            assert_eq!(
+                plan.finish(&galaxy, &mut NoCache::new(), &sources, &dealt, stale),
+                expected
+            );
+        }
         // Every cell but those of the layers the census drops is taken from a part.
         let walked: Vec<_> = plan.cells().collect();
         assert!(walked.len() < cells.len());

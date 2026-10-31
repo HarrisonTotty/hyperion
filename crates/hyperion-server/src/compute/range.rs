@@ -28,8 +28,9 @@
 //! worker, and with every worker so held the cells would never run, so the pool would stall. So
 //! every job here is queued by the request's own task, on the runtime, which awaits their replies
 //! without holding a worker; a job only ever generates, asks, plans or walks. The sources' job is
-//! queued only once the feature cells' jobs have left the queue, so a query never holds more of
-//! the queue's places than its cells' jobs.
+//! queued only once the feature cells' jobs have ended, or beside the grid's if there are none, so
+//! a query never holds more than three of the queue's places for each worker, as its cells' jobs
+//! did before it.
 //!
 //! **Nothing here changes an answer.** The finish is [`RangePlan::finish`], which is
 //! [`range_query`](hyperion_sim::galaxy::query::range_query) bit for bit whatever parts it is
@@ -52,7 +53,7 @@ use hyperion_sim::id::FeatureCell;
 
 use super::{
     CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver, KeptInteriors, Priority,
-    SharedCellCache, SharedClusterModelCache, SharedFeatureCellCache,
+    SharedCellCache, SharedClusterModelCache, SharedFeatureCellCache, SubmitJobError,
 };
 use crate::FeatureMembers;
 
@@ -277,15 +278,17 @@ fn with_sources<R>(
     f(sources, &interiors)
 }
 
-/// `plan` with `sources`, made from it if `planned` says it was made without them.
+/// `plan` with `sources`, made from it if `planned` says it was made without them: the plan
+/// itself if it was made with them, cloned only if another job still holds it.
+#[must_use]
 fn with_its_sources(
     galaxy: &Galaxy,
-    plan: &RangePlan,
+    plan: Arc<RangePlan>,
     planned: Planned,
     sources: &[&dyn SystemSource],
 ) -> RangePlan {
     match planned {
-        Planned::WithSources => plan.clone(),
+        Planned::WithSources => Arc::unwrap_or_clone(plan),
         Planned::WithoutSources => plan.with_sources(galaxy, sources),
     }
 }
@@ -312,13 +315,21 @@ where
         };
         // With too few feature cells to generate ahead, the sources' counts are as cheap now as
         // after, so the query plans once, as a warm one did before P09.T40.a.
-        let (plan, planned) = if features.len() < AHEAD_FEATURE_CELLS {
-            (RangePlan::new(galaxy, sources, query), Planned::WithSources)
+        let planned = if features.len() < AHEAD_FEATURE_CELLS {
+            Planned::WithSources
         } else {
-            (RangePlan::new(galaxy, &[], query), Planned::WithoutSources)
+            Planned::WithoutSources
+        };
+        let plan = match planned {
+            Planned::WithSources => RangePlan::new(galaxy, sources, query),
+            Planned::WithoutSources => RangePlan::new(galaxy, &[], query),
         };
         let grid = lacking_grid_cells(&caches.cells, key, &plan);
-        if features.len() < AHEAD_FEATURE_CELLS && grid.len() < AHEAD_GRID_CELLS {
+        // Nothing worth generating ahead is lacking only where the plan was made with the
+        // sources, and so is the walk's.
+        if let Planned::WithSources = planned
+            && grid.len() < AHEAD_GRID_CELLS
+        {
             let result = plan.run(galaxy, &mut caches.cells.handle(key), sources);
             return Asked::Answered(answer(galaxy, result, interiors));
         }
@@ -348,7 +359,7 @@ where
         let (plan, hits) = match sourced {
             Sourced::Made(made) => *made,
             Sourced::Left(plan, planned) => {
-                let plan = with_its_sources(galaxy, &plan, planned, sources);
+                let plan = with_its_sources(galaxy, plan, planned, sources);
                 let hits = plan.source_hits(galaxy, sources);
                 (plan, hits)
             }
@@ -395,9 +406,15 @@ async fn queue<R: Send + 'static>(
     token: &CancelToken,
     job: impl FnOnce(&CancelToken) -> R + Send + 'static,
 ) -> Option<JobReceiver<R>> {
-    pool.submit(Priority::Interactive, token.clone(), job)
-        .await
-        .ok()
+    #[expect(
+        clippy::manual_ok_err,
+        reason = "the match names every variant, so that one added must be weighed here"
+    )]
+    match pool.submit(Priority::Interactive, token.clone(), job).await {
+        Ok(receiver) => Some(receiver),
+        // `submit` waits out a full queue, and the other two are for good.
+        Err(SubmitJobError::QueueFull | SubmitJobError::ShutDown | SubmitJobError::Faulted) => None,
+    }
 }
 
 /// The jobs ahead of a query's finish, on `pool`'s workers (module documentation): each share of
@@ -425,7 +442,7 @@ async fn ahead(
         let (caches, served, plan) = (caches.clone(), served.clone(), Arc::clone(&plan));
         move |_: &CancelToken| {
             with_sources(&caches, &served, |sources, _| {
-                let plan = with_its_sources(&served.galaxy, &plan, planned, sources);
+                let plan = with_its_sources(&served.galaxy, plan, planned, sources);
                 let hits = plan.source_hits(&served.galaxy, sources);
                 (plan, hits)
             })
@@ -502,7 +519,6 @@ mod tests {
     use hyperion_sim::{GENERATOR_VERSION, Seed};
 
     use super::*;
-    use crate::compute::SubmitJobError;
     use crate::convert::origins::{SEED, galaxy};
     use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 

@@ -146,7 +146,7 @@ impl SharedCellCache {
     ///
     /// If `galaxy`'s seed is not the seed of `key`, as a handle's lookup, or the seed `plan` was
     /// made for.
-    pub fn walk_generated(
+    pub(crate) fn walk_generated(
         &self,
         key: GalaxyKey,
         galaxy: &Galaxy,

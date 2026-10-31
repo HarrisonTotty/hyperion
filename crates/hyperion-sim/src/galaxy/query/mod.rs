@@ -291,7 +291,8 @@ impl RangePlan {
     /// # Panics
     ///
     /// - If `galaxy` is not of the seed the plan was made for.
-    /// - In debug builds, if a system ID appears twice among the merged hits, as [`range_query`].
+    /// - In debug builds, if a source removes hits instead of appending to them, or if a system ID
+    ///   appears twice among the merged hits, as [`range_query`].
     #[must_use]
     pub fn run<C: CellCache>(
         &self,
