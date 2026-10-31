@@ -1221,8 +1221,9 @@ interface PlannedMode {
 
 /**
  * The note of a mode whose particles lie outside the optics on file (`aerosol.ts`'s
- * `aerosolTermInRange`): sizes past Mie's reach, a non-spherical table's largest size or the MMF's
- * monomer, or an aggregate's fractal dimension outside the MMF's range.
+ * `aerosolTermInRange`): sizes their law refuses, wholly below Mie's smallest or past the MMF's
+ * monomer, or an aggregate's fractal dimension outside the MMF's range. No size is too large for a
+ * sphere or a phase table since R08.T16.a's large-particle limit.
  */
 function outsideOpticsReason(mode: RecordAerosolMode, particles: AerosolParticles): string {
   const name = particlesName(mode.material, mode.phase);
@@ -1237,8 +1238,8 @@ function outsideOpticsReason(mode: RecordAerosolMode, particles: AerosolParticle
  * (review-r08-shapes-b C3: legal on the wire); one wholly below the datum is hidden by the ground;
  * one wholly above the column's top is dropped and reported; one whose sizes or optical depth the
  * generator does not model is dropped and reported (P14.T54.b); and one whose modelled particles
- * lie outside its optics' range at a wavelength the term is drawn at (`aerosolTermInRange`: Mie's reach, a
- * non-spherical table's largest size, the MMF's monomer and fractal dimension), which a legal
+ * lie outside its optics' range at a wavelength the term is drawn at (`aerosolTermInRange`: its
+ * law's range, Mie's smallest size, the MMF's monomer and fractal dimension), which a legal
  * record may hold and which `aerosolTerm` would refuse, is dropped and reported under the τ rule
  * (R08.T10.b), so that only a bug raises the computation's fault (`decision-r08-t10a-leans.md`
  * item 6). {@link assembleMedium} and {@link absorberSpecsOf} both take the modes from here, before

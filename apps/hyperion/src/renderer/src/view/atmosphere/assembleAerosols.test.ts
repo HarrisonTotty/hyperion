@@ -385,10 +385,10 @@ function tholinAggregates(fractalDimension: number): AerosolModeDto {
 const IRON_REASON = "solid Fe particles: their sizes lie outside the optics on file, not drawn";
 
 describe("a mode outside its optics' range (R08.T10.b)", () => {
-  it("drops solid iron grains of r_eff 2 µm, past the iron table at the blue channel, and says so", () => {
+  it("draws solid iron grains of r_eff 2 µm, past the iron table at the blue channel, by its large-size form (R08.T16.a)", () => {
     const result = earthWith(modes(ironHaze(2e-6)));
-    expect(aerosolTerms(result)).toEqual([]);
-    expect(result.reasons).toContain(IRON_REASON);
+    expect(aerosolTerms(result)).toEqual(["aerosol:Fe"]);
+    expect(result.reasons).not.toContain(IRON_REASON);
   });
 
   it("draws solid iron grains of r_eff 1 µm, inside it, with no such reason", () => {
@@ -403,8 +403,12 @@ describe("a mode outside its optics' range (R08.T10.b)", () => {
   });
 
   it("takes its bound from the optics' own refusal at each wavelength drawn", () => {
-    const outside = particlesOfMode(ironHaze(2e-6));
-    const inside = particlesOfMode(ironHaze(1e-6));
+    // Since R08.T16.a no size is too large; a gamma's variance of 0.5 is past its law.
+    const outside = particlesOfMode({
+      ...ironHaze(1e-6),
+      size_distribution: { type: "gamma", effective_radius_m: 1e-6, effective_variance: 0.5 },
+    });
+    const inside = particlesOfMode(ironHaze(2e-6));
     for (const nm of AEROSOL_TERM_WAVELENGTHS_NM) {
       const refused = (() => {
         try {

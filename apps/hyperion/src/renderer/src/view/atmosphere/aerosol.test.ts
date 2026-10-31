@@ -4,6 +4,7 @@ import {
   aerosolModeOptics,
   aerosolPhaseTable,
   aerosolTerm,
+  aerosolTermOptics,
   deltaMTruncation,
   henyeyGreenstein,
   leastValidatedBasis,
@@ -19,7 +20,14 @@ import { gaussLegendre } from "../lighting/quadrature";
 import { hydrostaticColumn } from "./column";
 import { CHANNEL_WAVELENGTHS_NM, columnLengthM, densityAt, phaseAt } from "./medium";
 import { ICE_ANALOGUE_ASYMMETRY_BIAS, opticsOfParticles, PHASE_FILES } from "./nonSpherical";
-import { type ModeOptics, PHASE_TABLE_U } from "./sizeDistribution";
+import { indexAt } from "./materials/materials";
+import {
+  type AerosolMode,
+  type ModeOptics,
+  PHASE_TABLE_U,
+  resolveModeMaterial,
+  sphereModeOptics,
+} from "./sizeDistribution";
 import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH } from "./thick/regime";
 
 /** A Mars-like column: 610 Pa, 210 K, CO₂, Mars's surface gravity and mean radius. */
@@ -540,5 +548,34 @@ describe("the label", () => {
     expect(() =>
       phaseLabels([{ material: "TiO2", optics: [tio2()], opticalDepthAbove550: -1 }]),
     ).toThrow(RangeError);
+  });
+});
+
+describe("a deck past the large-particle limit's crossover, against Mie alone where Mie runs (R08.T16.a)", () => {
+  // The 10 µm decks R08.T16.a.1 measured, gamma of v_eff 0.1, which reach x 640 at the blue
+  // channel: Mie alone took 23 s for the droplets' term, the limit takes those past x 150.
+  const sizes = { kind: "gamma", effectiveRadiusUm: 10, effectiveVariance: 0.1 } as const;
+  const none = new Float64Array(0);
+
+  it.each<[string, AerosolMode]>([
+    ["H₂O droplets", { material: "H2O", form: { phase: "liquid" }, sizes }],
+    ["NH₃ crystals", { material: "NH3", form: { phase: "solid" }, shape: "crystal", sizes }],
+    ["NH₄SH crystals", { material: "NH4SH", form: { phase: "solid" }, shape: "crystal", sizes }],
+  ])("keeps %s' ω, extinction and a droplet's g near Mie's in each channel", (_, mode) => {
+    const optics = aerosolTermOptics({ kind: "distribution", mode });
+    const material = resolveModeMaterial(mode);
+    const lines = optics.channels.map((channel) => {
+      const nm = channel.wavelengthNm;
+      const mie = sphereModeOptics(sizes, indexAt(material, nm), nm, none, undefined, Infinity);
+      const albedo = channel.singleScatteringAlbedo - mie.singleScatteringAlbedo;
+      const extinction = channel.extinctionCrossSectionM2 / mie.extinctionCrossSectionM2 - 1;
+      // A crystal's g is the ice table's, in its range at these sizes, so Mie's is not its.
+      const asymmetry = channel.shape === "sphere" ? channel.asymmetry - mie.asymmetry : 0;
+      expect(Math.abs(albedo)).toBeLessThan(1e-6);
+      expect(Math.abs(extinction)).toBeLessThan(0.015);
+      expect(Math.abs(asymmetry)).toBeLessThan(0.006);
+      return `${nm} nm: ω ${channel.singleScatteringAlbedo.toFixed(7)} (Mie ${mie.singleScatteringAlbedo.toFixed(7)}), g ${channel.asymmetry.toFixed(4)} (Mie ${mie.asymmetry.toFixed(4)}), C_ext ${(100 * extinction).toFixed(2)}%`;
+    });
+    console.warn(`${mode.material}, gamma 10 µm, against Mie alone:\n${lines.join("\n")}`);
   });
 });

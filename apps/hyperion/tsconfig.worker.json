@@ -46,6 +46,7 @@
     "src/renderer/src/view/atmosphere/envelope.ts",
     "src/renderer/src/view/atmosphere/fittedChannels.ts",
     "src/renderer/src/view/atmosphere/forwardPeak.ts",
+    "src/renderer/src/view/atmosphere/geometricOptics.ts",
     "src/renderer/src/view/atmosphere/labels.ts",
     "src/renderer/src/view/atmosphere/medium.ts",
     "src/renderer/src/view/atmosphere/mie.ts",

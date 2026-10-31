@@ -381,13 +381,26 @@ describe("a mode's optics", () => {
     expect(optics.volumeM3).toBeCloseTo((4 / 3) * Math.PI * 1.05e-6 * meanSquareM2, 28);
   });
 
-  it("refuses a distribution past Mie's largest size parameter", () => {
-    expect(() =>
-      sphereModeOptics(
-        { kind: "gamma", effectiveRadiusUm: 2000, effectiveVariance: 0.1 },
-        { n: 1.33, k: 0 },
-        550,
-      ),
-    ).toThrow(RangeError);
+  it("takes drops of 2 mm, past Mie's reach, in the large-particle limit (R08.T16.a)", () => {
+    const optics = sphereModeOptics(
+      { kind: "gamma", effectiveRadiusUm: 2000, effectiveVariance: 0.1 },
+      { n: 1.33, k: 0 },
+      550,
+    );
+    // Its drops lie past x 4,957 but for the smallest, so all but 10⁻⁴ of its diffraction, half its
+    // scattering, is the delta.
+    expect(optics.qExt).toBe(2);
+    expect(optics.singleScatteringAlbedo).toBeCloseTo(1, 12);
+    expect(optics.matrix.forwardPeak).toBeCloseTo(0.5, 3);
+    expect(optics.asymmetry).toBeGreaterThan(0.87);
+    expect(optics.asymmetry).toBeLessThan(0.9);
+  });
+
+  it("sums a distribution wholly below the limit's crossover as Mie alone, bit for bit", () => {
+    const sizes = { kind: "gamma", effectiveRadiusUm: 2, effectiveVariance: 0.1 } as const;
+    const index = { n: 1.33, k: 1e-8 };
+    expect(sphereModeOptics(sizes, index, 550)).toEqual(
+      sphereModeOptics(sizes, index, 550, undefined, undefined, Infinity),
+    );
   });
 });

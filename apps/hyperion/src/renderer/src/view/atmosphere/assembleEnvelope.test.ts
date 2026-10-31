@@ -27,6 +27,7 @@ import {
   columnLengthM,
   type MediumTerm,
 } from "./medium";
+import { phaseTableAsymmetry } from "./aerosol";
 import { gravityRatio } from "./oblate";
 import { molecularMixture } from "./rayleigh";
 
@@ -332,6 +333,25 @@ describe("the protocol fixture's Jupiter (generator version 24's record)", () =>
     expect(decks.reduce((sum, m) => sum + skyOpticalDepth550(m), 0)).toBeLessThan(
       CLOUD_DECK_SPLIT_OPTICAL_DEPTH,
     );
+  });
+
+  it("draws its NH₃, NH₄SH and H₂O decks, past Mie's reach, conservative and forward by their sizes (R08.T16.a)", () => {
+    const { medium, result } = drawnOf("jupiter");
+    for (const material of ["NH3", "NH4SH", "H2O"]) {
+      const term = termOf(medium, `aerosol:${material}`);
+      // Above the floor whole, each draws its record's τ(550).
+      const tau = skyOpticalDepth550(modeOf("jupiter", material));
+      expect(Math.abs(drawnDepth550("jupiter", material) / tau - 1)).toBeLessThan(1e-12);
+      const scattering = term.scattering[1];
+      expect(term.absorption[1] / (scattering + term.absorption[1])).toBeLessThan(1e-5);
+      if (term.phase.kind !== "tabulated") {
+        throw new Error(`the ${material} deck's phase is tabulated`);
+      }
+      const asymmetry = phaseTableAsymmetry(term.phase.table, 1);
+      expect(asymmetry).toBeGreaterThan(0.7);
+      expect(asymmetry).toBeLessThan(0.9);
+    }
+    expect(result.reasons.filter((r) => r.includes("sizes lie outside the optics"))).toEqual([]);
   });
 
   it("puts its floor in the gas below its water deck, near decision-deep-decks-split's 41 bar", () => {

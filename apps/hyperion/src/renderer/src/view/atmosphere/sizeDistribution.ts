@@ -24,6 +24,12 @@
  * under the tolerance by chance (decision-r08-t6d-findings.md §4). Past {@link SIZE_NODES_MAX} the
  * finest level within it is taken, marked unconverged ({@link SizeConvergence}).
  *
+ * Past x = {@link GEOMETRIC_OPTICS_SIZE_PARAMETER} the spheres take the large-particle limit
+ * (`geometricOptics.ts`, R08.T16.a): there the panels are bounded in ln r alone, since the limit has
+ * no ripple, the first ends at that size, and its spheres' diffraction, past
+ * `DIFFRACTION_DELTA_SIZE_PARAMETER`, is the matrix's forward peak. A distribution that lies wholly
+ * below it is summed as before, node for node.
+ *
  * The matrix is block-diagonal (a₁, a₂, a₃, a₄, b₁, b₂; J. W. Hovenier, C. van der Mee and H.
  * Domke 2004, "Transfer of polarized light in planetary atmospheres", Kluwer), normalised so that
  * ∫ a₁ dΩ ÷ 4π = 1. From T5.a's amplitudes (S₁ perpendicular, S₂ parallel to the scattering plane,
@@ -56,12 +62,16 @@ import {
   indexAt,
 } from "./materials/materials";
 import {
-  type ComplexIndex,
-  MIE_MAX_SIZE_PARAMETER,
-  MIE_MIN_SIZE_PARAMETER,
-  mieSphere,
-  type MieResult,
-} from "./mie";
+  addGeometricSphere,
+  GEOMETRIC_OPTICS_SIZE_PARAMETER,
+  type GeometricLimit,
+  geometricLimit,
+  geometricMatrix,
+  type GeometricMatrixSums,
+  geometricMatrixSums,
+  geometricSphere,
+} from "./geometricOptics";
+import { type ComplexIndex, MIE_MIN_SIZE_PARAMETER, mieSphere, type MieResult } from "./mie";
 import { cos, exp, log, log1p, pow } from "../../lib/pinnedMath";
 
 /**
@@ -187,6 +197,11 @@ export interface SizeQuadrature {
   readonly radiiUm: Float64Array;
   /** Each node's share of the distribution's geometric cross-section, r² n(r) dr, summing to 1. */
   readonly areaWeights: Float64Array;
+  /**
+   * The first node past x = {@link GEOMETRIC_OPTICS_SIZE_PARAMETER}, which with every node after
+   * it takes the large-particle limit; the node count where none does.
+   */
+  readonly limitFrom: number;
 }
 
 /** The bulk optics of a mode at one wavelength, per particle and per unit geometric cross-section. */
@@ -363,8 +378,9 @@ export function sizesInRange(sizes: SizeDistribution): boolean {
 
 /**
  * Why {@link sphereModeOptics} refuses a distribution at a wavelength, as its `RangeError` says it,
- * or `null` where it takes it: its law refusing its sizes, its reach past Mie's x =
- * {@link MIE_MAX_SIZE_PARAMETER}, or the whole of it below {@link MIE_MIN_SIZE_PARAMETER}.
+ * or `null` where it takes it: its law refusing its sizes, or the whole of it below
+ * {@link MIE_MIN_SIZE_PARAMETER}. No size is too large: past
+ * {@link GEOMETRIC_OPTICS_SIZE_PARAMETER} the large-particle limit takes it (R08.T16.a).
  *
  * @param wavelengthNm - The vacuum wavelength, nm, finite and > 0.
  */
@@ -376,10 +392,6 @@ function sphereRangeRefusal(sizes: SizeDistribution, wavelengthNm: number): stri
   const wavelengthUm = wavelengthNm / 1000;
   const full = sizeRange(sizes);
   const smallestUm = (MIE_MIN_SIZE_PARAMETER * wavelengthUm) / (2 * Math.PI);
-  const largestUm = (MIE_MAX_SIZE_PARAMETER * wavelengthUm) / (2 * Math.PI);
-  if (full.toUm > largestUm) {
-    return `the distribution reaches ${full.toUm} µm, past Mie's x = ${MIE_MAX_SIZE_PARAMETER} at ${wavelengthNm} nm`;
-  }
   if (full.toUm <= smallestUm) {
     return `the distribution lies below Mie's x = ${MIE_MIN_SIZE_PARAMETER} at ${wavelengthNm} nm`;
   }
@@ -389,8 +401,8 @@ function sphereRangeRefusal(sizes: SizeDistribution, wavelengthNm: number): stri
 /**
  * Whether {@link sphereModeOptics} takes a distribution at a wavelength rather than throwing for its
  * sizes (plan R08, R08.T10.b): the bound its refusal takes, so that a screen on it and the throw
- * cannot drift. A geometric-optics particle, past Mie's x = {@link MIE_MAX_SIZE_PARAMETER} at the
- * wavelength, is out of range: at 380 nm that is a reach past about 1.2 mm.
+ * cannot drift. Since R08.T16.a only a law that refuses its sizes, or a distribution wholly below
+ * Mie's smallest size, is out of range.
  *
  * @param wavelengthNm - The vacuum wavelength, nm, finite and > 0.
  */
@@ -507,9 +519,49 @@ function panelEnds(low: number, high: number, wavenumberPerUm: number, level: nu
   return ends;
 }
 
+/** A range's panels' ends at one level, and the first node of the large-particle limit's. */
+interface RangePanels {
+  readonly ends: ReadonlyArray<number>;
+  readonly limitFrom: number;
+}
+
+/**
+ * A range's panels at one level: {@link panelEnds}'s below x = `limitSizeParameter`, the
+ * large-particle limit's past it, each at most {@link SIZE_PANEL_LN_RADIUS} ÷ 2^level in ln r, the
+ * first starting at that size. A range wholly below it keeps {@link panelEnds}'s alone.
+ */
+function rangePanels(
+  range: SizeRange,
+  wavenumberPerUm: number,
+  level: number,
+  limitSizeParameter: number,
+): RangePanels {
+  const low = log(range.fromUm);
+  const high = log(range.toUm);
+  const limitY = log(limitSizeParameter / wavenumberPerUm);
+  if (high <= limitY) {
+    const ends = panelEnds(low, high, wavenumberPerUm, level);
+    return { ends, limitFrom: (ends.length - 1) * SIZE_PANEL_ORDER };
+  }
+  const ends = low < limitY ? panelEnds(low, limitY, wavenumberPerUm, level) : [low];
+  const limitFrom = (ends.length - 1) * SIZE_PANEL_ORDER;
+  const dy = SIZE_PANEL_LN_RADIUS / pow(2, level);
+  let y = ends[ends.length - 1] ?? low;
+  while (y < high) {
+    y = Math.min(high, y + dy);
+    ends.push(y);
+  }
+  return { ends, limitFrom };
+}
+
 /** A level's node count from its panels alone, so that a level past a cap is never built. */
-function levelNodes(range: SizeRange, wavenumberPerUm: number, level: number): number {
-  const ends = panelEnds(log(range.fromUm), log(range.toUm), wavenumberPerUm, level);
+function levelNodes(
+  range: SizeRange,
+  wavenumberPerUm: number,
+  level: number,
+  limitSizeParameter: number,
+): number {
+  const { ends } = rangePanels(range, wavenumberPerUm, level, limitSizeParameter);
   return (ends.length - 1) * SIZE_PANEL_ORDER;
 }
 
@@ -518,9 +570,10 @@ function quadratureOn(
   range: SizeRange,
   wavenumberPerUm: number,
   level: number,
+  limitSizeParameter: number,
 ): SizeQuadrature {
   const weight = logWeight(sizes);
-  const ends = panelEnds(log(range.fromUm), log(range.toUm), wavenumberPerUm, level);
+  const { ends, limitFrom } = rangePanels(range, wavenumberPerUm, level, limitSizeParameter);
   const nodes = (ends.length - 1) * SIZE_PANEL_ORDER;
   const radiiUm = new Float64Array(nodes);
   const logArea = new Float64Array(nodes);
@@ -538,7 +591,7 @@ function quadratureOn(
   }
   const areaWeights = logArea.map((l) => exp(l - peak));
   const total = areaWeights.reduce((sum, w) => sum + w, 0);
-  return { radiiUm, areaWeights: areaWeights.map((w) => w / total) };
+  return { radiiUm, areaWeights: areaWeights.map((w) => w / total), limitFrom };
 }
 
 /**
@@ -564,7 +617,13 @@ export function sizeQuadrature(
   if (!(Number.isInteger(level) && level >= 0 && level <= SIZE_LEVEL_MAX)) {
     throw new RangeError(`level ${level} must be an integer in 0–${SIZE_LEVEL_MAX}`);
   }
-  return quadratureOn(sizes, sizeRange(sizes), (2 * Math.PI * 1000) / wavelengthNm, level);
+  return quadratureOn(
+    sizes,
+    sizeRange(sizes),
+    (2 * Math.PI * 1000) / wavelengthNm,
+    level,
+    GEOMETRIC_OPTICS_SIZE_PARAMETER,
+  );
 }
 
 /**
@@ -624,15 +683,20 @@ function accumulate(matrix: MutableMatrix, result: MieResult, weight: number): v
 
 /**
  * Normalises the sums: with F = Σ wᵢ ½(|S₁|² + |S₂|²) and the scattering sum Σ wᵢ xᵢ² Q_sca,ᵢ,
- * a₁ = 4 F ÷ Σ wᵢ xᵢ² Q_sca,ᵢ, so that ∫ a₁ dΩ ÷ 4π = 1 (since ∫₋₁¹ (|S₁|² + |S₂|²) dμ = x² Q_sca).
+ * a₁ = 4 F ÷ Σ wᵢ xᵢ² Q_sca,ᵢ, so that ∫ a₁ dΩ ÷ 4π = 1 (since ∫₋₁¹ (|S₁|² + |S₂|²) dμ = x² Q_sca),
+ * or 1 less the forward peak, whose share of the scattering sum is `forwardPeakSum`'s.
  */
-function finishMatrix(matrix: MutableMatrix, scatteringSum: number): ScatteringMatrix {
+function finishMatrix(
+  matrix: MutableMatrix,
+  scatteringSum: number,
+  forwardPeakSum = 0,
+): ScatteringMatrix {
   const scale = 4 / scatteringSum;
   const a1 = matrix.a1.map((v) => v * scale);
   const a3 = matrix.a3.map((v) => v * scale);
   return {
     mu: matrix.mu.slice(),
-    forwardPeak: 0,
+    forwardPeak: forwardPeakSum / scatteringSum,
     a1,
     a2: a1.slice(),
     a3,
@@ -649,13 +713,20 @@ interface Sums {
   readonly scaG: number;
 }
 
-/** The area-weighted efficiency sums at one node count; with `matrix`, the angular sums too. */
+/**
+ * The area-weighted efficiency sums at one node count; with `matrix`, the angular sums too. The
+ * nodes from `limitFrom` on take `limit`, and add their angular sums to `geometric`.
+ *
+ * @throws Error for a quadrature that reaches the large-particle limit's sizes with no limit.
+ */
 function sumNodes(
   quadrature: SizeQuadrature,
   index: ComplexIndex,
   wavelengthUm: number,
   mu: Float64Array,
   matrix: MutableMatrix | undefined,
+  limit: GeometricLimit | undefined,
+  geometric: GeometricMatrixSums | undefined,
 ): Sums {
   let ext = 0;
   let sca = 0;
@@ -665,6 +736,20 @@ function sumNodes(
   for (let i = 0; i < quadrature.radiiUm.length; i += 1) {
     const x = wavenumber * (quadrature.radiiUm[i] ?? 0);
     const w = quadrature.areaWeights[i] ?? 0;
+    if (i >= quadrature.limitFrom) {
+      if (limit === undefined) {
+        throw new Error("a quadrature past the large-particle limit's size needs the limit");
+      }
+      const sphere = geometricSphere(limit, x);
+      area += w;
+      ext += w * sphere.qExt;
+      sca += w * sphere.qSca;
+      scaG += w * sphere.qScaAsymmetry;
+      if (geometric !== undefined) {
+        addGeometricSphere(geometric, x, w);
+      }
+      continue;
+    }
     const result = mieSphere(x, index, matrix === undefined ? NO_ANGLES : mu);
     area += w;
     ext += w * result.qExt;
@@ -708,13 +793,18 @@ function levelChange(coarse: Sums, fine: Sums): number {
  * its last change, marked unconverged ({@link SphereModeOptics.sizeConvergence}): a mode inside
  * Mie's range never throws for want of convergence.
  *
+ * The spheres past x = {@link GEOMETRIC_OPTICS_SIZE_PARAMETER} take the large-particle limit (the
+ * module's remarks), so no size is too large.
+ *
  * @param wavelengthNm - The vacuum wavelength, nm.
  * @param mu - The cosines to give the matrix at; the phase tables' by default.
  * @param nodesMax - The node count past which no finer level is tried, {@link SIZE_NODES_MAX} by
  *   default; a positive integer. A smaller cap trades accuracy for time.
- * @throws RangeError if the distribution reaches past {@link MIE_MAX_SIZE_PARAMETER} at this
- *   wavelength (a geometric-optics particle, not modelled here), for a bad distribution, index or
- *   cap.
+ * @param limitSizeParameter - The size parameter past which the spheres take the large-particle
+ *   limit, {@link GEOMETRIC_OPTICS_SIZE_PARAMETER} by default; `Infinity` for Mie alone, which
+ *   throws past `mie.ts`'s `MIE_MAX_SIZE_PARAMETER` (a test's reference).
+ * @throws RangeError for a distribution wholly below {@link MIE_MIN_SIZE_PARAMETER} at this
+ *   wavelength, or for a bad distribution, index or cap.
  */
 export function sphereModeOptics(
   sizes: SizeDistribution,
@@ -722,12 +812,16 @@ export function sphereModeOptics(
   wavelengthNm: number,
   mu: Float64Array = PHASE_TABLE_MU,
   nodesMax: number = SIZE_NODES_MAX,
+  limitSizeParameter: number = GEOMETRIC_OPTICS_SIZE_PARAMETER,
 ): SphereModeOptics {
   if (!(wavelengthNm > 0 && Number.isFinite(wavelengthNm))) {
     throw new RangeError(`wavelength ${wavelengthNm} nm must be finite and > 0`);
   }
   if (!(Number.isInteger(nodesMax) && nodesMax > 0)) {
     throw new RangeError(`node cap ${nodesMax} must be a positive integer`);
+  }
+  if (!(limitSizeParameter > 0)) {
+    throw new RangeError(`the limit's size parameter ${limitSizeParameter} must be > 0`);
   }
   const refusal = sphereRangeRefusal(sizes, wavelengthNm);
   if (refusal !== null) {
@@ -738,17 +832,22 @@ export function sphereModeOptics(
   const smallestUm = (MIE_MIN_SIZE_PARAMETER * wavelengthUm) / (2 * Math.PI);
   const range = { fromUm: Math.max(full.fromUm, smallestUm), toUm: full.toUm };
   const wavenumberPerUm = (2 * Math.PI) / wavelengthUm;
+  // The large-particle limit's rays are traced once, for every level, where the range reaches it.
+  const limit =
+    wavenumberPerUm * range.toUm > limitSizeParameter
+      ? geometricLimit(index, mu.length > 0)
+      : undefined;
   // The coarsest level is always taken, so a cap below its node count gives it, unconverged.
-  let quadrature = quadratureOn(sizes, range, wavenumberPerUm, 0);
-  let sums = sumNodes(quadrature, index, wavelengthUm, mu, undefined);
+  let quadrature = quadratureOn(sizes, range, wavenumberPerUm, 0, limitSizeParameter);
+  let sums = sumNodes(quadrature, index, wavelengthUm, mu, undefined, limit, undefined);
   let change = Number.POSITIVE_INFINITY;
   let converged = false;
   for (let level = 1; level <= SIZE_LEVEL_MAX && !converged; level += 1) {
-    if (levelNodes(range, wavenumberPerUm, level) > nodesMax) {
+    if (levelNodes(range, wavenumberPerUm, level, limitSizeParameter) > nodesMax) {
       break;
     }
-    const finer = quadratureOn(sizes, range, wavenumberPerUm, level);
-    const finerSums = sumNodes(finer, index, wavelengthUm, mu, undefined);
+    const finer = quadratureOn(sizes, range, wavenumberPerUm, level, limitSizeParameter);
+    const finerSums = sumNodes(finer, index, wavelengthUm, mu, undefined, limit, undefined);
     const finerChange = levelChange(sums, finerSums);
     converged = finerChange < SIZE_CONVERGENCE && change < SIZE_CONVERGENCE;
     quadrature = finer;
@@ -756,14 +855,31 @@ export function sphereModeOptics(
     change = finerChange;
   }
   const matrix = emptyMatrix(mu);
+  const geometric =
+    limit !== undefined && mu.length > 0 ? geometricMatrixSums(limit, mu) : undefined;
   // With no angles to sum the matrix at, a second pass would repeat `sums`, node for node in the
   // same order, and add nothing to the matrix.
-  const final = mu.length === 0 ? sums : sumNodes(quadrature, index, wavelengthUm, mu, matrix);
-  return finish(sizes, wavelengthNm, final, matrix, {
-    converged,
-    nodes: quadrature.radiiUm.length,
-    lastChange: change,
-  });
+  const final =
+    mu.length === 0
+      ? sums
+      : sumNodes(quadrature, index, wavelengthUm, mu, matrix, limit, geometric);
+  if (geometric !== undefined) {
+    const large = geometricMatrix(geometric);
+    for (let j = 0; j < mu.length; j += 1) {
+      matrix.a1[j] = (matrix.a1[j] ?? 0) + (large.a1[j] ?? 0);
+      matrix.a3[j] = (matrix.a3[j] ?? 0) + (large.a3[j] ?? 0);
+      matrix.b1[j] = (matrix.b1[j] ?? 0) + (large.b1[j] ?? 0);
+      matrix.b2[j] = (matrix.b2[j] ?? 0) + (large.b2[j] ?? 0);
+    }
+  }
+  return finish(
+    sizes,
+    wavelengthNm,
+    final,
+    matrix,
+    { converged, nodes: quadrature.radiiUm.length, lastChange: change },
+    geometric?.forwardPeakWeight ?? 0,
+  );
 }
 
 /**
@@ -776,6 +892,7 @@ function finish(
   sums: Sums,
   matrix: MutableMatrix,
   end: SizeConvergence,
+  forwardPeakSum: number,
 ): SphereModeOptics {
   const weight = logWeight(sizes);
   const qExt = sums.ext / sums.area;
@@ -791,7 +908,7 @@ function finish(
     extinctionCrossSectionM2: qExt * geometricUm2 * 1e-12,
     scatteringCrossSectionM2: qSca * geometricUm2 * 1e-12,
     volumeM3: (4 / 3) * Math.PI * sizes.effectiveRadiusUm * weight.meanSquareRadiusUm2 * 1e-18,
-    matrix: finishMatrix(matrix, sums.sca),
+    matrix: finishMatrix(matrix, sums.sca, forwardPeakSum),
     sizeConvergence: end,
   };
 }

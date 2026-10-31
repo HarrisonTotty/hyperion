@@ -6103,7 +6103,8 @@ Acceptance: `pnpm test`.
       sim change: the drawn profile exponent (P14.T52.g) and count (xii)'s guard are lane
       p14-t52g's; the hot giants' dayside column is a plan 14 question.
 
-  _T16.a.1 built 2026-10-31_ (Risks, "Deviations in T16.a.1, as built").
+  _T16.a.1 built 2026-10-31_ (Risks, "Deviations in T16.a.1, as built"). _The volatile decks'
+  optics, T16.a.2's blocker, built 2026-10-31_ (Risks, "The volatile decks' optics, as built").
 
 - **R08.T16.b `DiscReflectanceTable`.** `discReflectance.ts` bakes it spectrally from the medium
   and tables, one layer a latitude band (Design note 17), reading R08.T14.f's thick table, the
@@ -24070,3 +24071,20 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     to τ 1,000 (the fast tests hold the column past it), the hand Jupiter's three bands baked, and
     the hot Jupiter's reflectance printed. T16.a.2's tests on the protocol Jupiter's drawn decks
     wait on the optics above.
+- **The volatile decks' optics, as built** (R08.T16.a, 2026-10-31; `geometricOptics.ts`,
+  `sizeDistribution.ts`, `nonSpherical.ts`; what T16.a.2 consumes; measurements in the lane's
+  outbox):
+  - _The large-particle limit_: a sphere past x = `GEOMETRIC_OPTICS_SIZE_PARAMETER` takes Q_ext 2,
+    Fraunhofer's diffraction (the forward delta past x 4,957) and ray optics. `sphereModeOptics`
+    gains `limitSizeParameter` (`Infinity` for Mie alone) and `SizeQuadrature` `limitFrom`; no
+    size is refused for being large, and a mode wholly below the crossover is Mie's, bit for bit.
+  - _The tables_ (TAMUdust2020's, Yang et al.'s) take sizes past their largest by its node's
+    large-size form. `tableReaches` is gone; `particlesInRange` reads the law and Mie's smallest.
+  - _The protocol Jupiter_ draws its NH₃, NH₄SH and H₂O decks and ZnS's tail (a fallback at
+    434 nm). The term limit of 8 then leaves out its H₂–H₂ and H₂–He pairs and Na₂S's tail, with
+    reasons. Its assembly takes 8.5 s (pod, 16 vCPU), ZnS's fallback 2.3 s of it.
+  - _The crossover, 150_ (lean, 2026-10-31; a question to main): at 125 and below, the Venus
+    deck's mode 3 moves `venus-92bar`'s and `venus-58bar`'s beams past their 10⁻⁶ check. At 100 a
+    10 µm water deck's term costs 0.9 s, against 2.5 s, once those two are re-traced. The three
+    Venus case files are re-blessed (values moved by at most 4 × 10⁻⁶).
+  - `aerosolTermOptics`'s `at550` is given at no angle; its matrix was unread.

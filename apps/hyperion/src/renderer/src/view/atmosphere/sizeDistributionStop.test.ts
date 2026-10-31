@@ -515,9 +515,17 @@ describe("the size quadrature's stop (R08.T5.f)", () => {
   );
 
   it.each(HELD_MODES)(
-    "leaves $name at $wavelengthNm nm as T5.b gave it, to 10⁻⁴",
+    "leaves $name at $wavelengthNm nm as T5.b gave it in Mie alone, to 10⁻⁴",
     ({ sizes, index, wavelengthNm, nodes, ...was }) => {
-      const optics = sphereModeOptics(sizes, index(wavelengthNm), wavelengthNm, NO_ANGLES);
+      // In Mie alone: R08.T16.a's large-particle limit takes the tails past x 150 of the largest.
+      const optics = sphereModeOptics(
+        sizes,
+        index(wavelengthNm),
+        wavelengthNm,
+        NO_ANGLES,
+        undefined,
+        Infinity,
+      );
       expect(optics.sizeConvergence.converged).toBe(true);
       expect(optics.sizeConvergence.nodes).toBeGreaterThanOrEqual(nodes);
       expect(bulkChange(was, optics)).toBeLessThan(SIZE_CONVERGENCE);

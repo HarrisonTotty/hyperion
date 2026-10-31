@@ -44,6 +44,15 @@
  * wavelength nodes the mode's sums are linear in λ. Below a table's smallest size, the sphere of
  * the same volume (minerals, right in the Rayleigh limit the tail lies in) or Grenfell and Warren's
  * spheres of the same volume-to-area radius (ice) by Mie.
+ *
+ * Past a table's largest size (R08.T16.a), its own large-size form: the largest node's
+ * efficiencies, g and matrix (its Q_ext 2.0 within 2%, the geometric-optics limit's) with the
+ * cross-sections in proportion to the area, but for the absorption, which grows along the
+ * particle's chords as the large-particle limit's does (`geometricOptics.ts`):
+ * Q_abs = Q_sat (1 − (1 − Q_abs,top ÷ Q_sat)^(r ÷ r_top)), Q_sat = 1 − R̄ the power that enters,
+ * R̄ the outer surface's mean reflectance, which a convex particle in random orientation shares with
+ * a sphere (van de Hulst 1957, ch. 8). The scattering lost to it leaves the matrix's shape, and the
+ * diffraction peak, narrower than the largest node's, joins the forward delta (`matrixAt`).
  */
 
 import aluminiumOxidePhase from "./materials/phase/aluminium-oxide.json" with { type: "json" };
@@ -75,6 +84,7 @@ import {
 } from "./materials/materials";
 import { substanceName } from "../../lib/substances";
 import { gaussLegendre } from "../lighting/quadrature";
+import { meanReflectance } from "./geometricOptics";
 import { type ComplexIndex, mieSphere } from "./mie";
 import {
   type AerosolMode,
@@ -672,31 +682,9 @@ function radiiOverLength(node: PhaseTableNode): Float64Array {
   );
 }
 
-/**
- * Why a node's table at a wavelength cannot take a distribution, as {@link tableModeOptics}' throw
- * says it, or `null` where it can: its reach past the node's largest size there.
- */
-function nodeReachRefusal(
-  table: PhaseFileTable,
-  node: PhaseTableNode,
-  wavelengthNm: number,
-  distribution: RadiusDistribution,
-): string | null {
-  const lengthUm = wavelengthNm / 1000 / (2 * Math.PI);
-  const rTilde = radiiOverLength(node);
-  const top = log((rTilde[rTilde.length - 1] ?? Number.NaN) * lengthUm);
-  return log(distribution.toUm) > top + 1e-9
-    ? `the distribution reaches ${distribution.toUm} µm, past the ${table.material} table's ${exp(top)} µm at ${wavelengthNm} nm`
-    : null;
-}
-
 /** Sums of a mode over one node's table at a wavelength (the module's remarks). */
 function sumsOverNode(integral: TableIntegral, distribution: RadiusDistribution): NodeSums {
   const { table, node, wavelengthNm, index } = integral;
-  const refusal = nodeReachRefusal(table, node, wavelengthNm, distribution);
-  if (refusal !== null) {
-    throw new RangeError(refusal);
-  }
   const lengthUm = wavelengthNm / 1000 / (2 * Math.PI);
   const rTilde = radiiOverLength(node);
   const lnR = rTilde.map((r) => log(r * lengthUm));
@@ -784,6 +772,15 @@ function sumsOverNode(integral: TableIntegral, distribution: RadiusDistribution)
     new Float64Array(matrixCount),
   ] as const;
   const um2 = lengthUm * lengthUm;
+  // Past the largest size, its node's large-size form (the module's remarks).
+  const top = lnR.length - 1;
+  const last = lnR[top] ?? Number.NaN;
+  const topArea = (node.areas[top] ?? Number.NaN) * um2;
+  const topExtinction = (node.extinction[top] ?? Number.NaN) * um2;
+  const topScattering = (node.scattering[top] ?? Number.NaN) * um2;
+  const topAbsorption = Math.max(0, topExtinction - topScattering) / topArea;
+  const topAsymmetry = (node.scatteringAsymmetry[top] ?? 0) / (node.scattering[top] ?? 1);
+  let saturation: number | undefined;
   for (const [q, y] of nodesY.entries()) {
     const w = exp((nodesW[q] ?? -Infinity) - peak);
     if (!(w > 0)) {
@@ -832,6 +829,37 @@ function sumsOverNode(integral: TableIntegral, distribution: RadiusDistribution)
         at(2, r1 * r2 + i1 * i2);
         at(3, 0.5 * (s2Sq - s1Sq));
         at(4, r1 * i2 - i1 * r2);
+      }
+      continue;
+    }
+    if (y > last) {
+      saturation ??= 1 - meanReflectance({ n: node.nTable, k: node.kTable });
+      const grow = exp(y - last);
+      const areaScale = grow * grow;
+      const qAbs =
+        topAbsorption < saturation
+          ? saturation * (1 - pow(1 - topAbsorption / saturation, grow))
+          : topAbsorption;
+      const cExt = topExtinction * areaScale;
+      const cSca = cExt - qAbs * topArea * areaScale;
+      area += w * topArea * areaScale;
+      volume += w * (node.volumes[top] ?? Number.NaN) * um2 * lengthUm * areaScale * grow;
+      extinction += w * cExt;
+      scattering += w * cSca;
+      scatteringAsymmetry += w * cSca * topAsymmetry;
+      for (let j = 0; j < phaseCount; j += 1) {
+        a1[j] = (a1[j] ?? 0) + w * cSca * exp(node.logA1[top * phaseCount + j] ?? Number.NaN);
+      }
+      const a1Top = a1MatrixAt(top);
+      for (let j = 0; j < matrixCount; j += 1) {
+        const a1Here = a1Top[j] ?? Number.NaN;
+        a1Matrix[j] = (a1Matrix[j] ?? 0) + w * cSca * a1Here;
+        for (const e of ELEMENT_INDICES) {
+          const element = matrix[e];
+          element[j] =
+            (element[j] ?? 0) +
+            w * cSca * a1Here * (node.ratios[e][top * matrixCount + j] ?? Number.NaN);
+        }
       }
       continue;
     }
@@ -1018,32 +1046,12 @@ function bracketOf(table: PhaseFileTable, wavelengthNm: number): Bracket {
 }
 
 /**
- * Whether {@link tableModeOptics} takes a distribution on a table at λ rather than refusing it
- * (plan R08, R08.T10.b): its reach within the largest size of each node it reads there, the bound
- * its throw takes, so that a screen on it and the throw cannot drift. The largest size is a size
- * parameter, so it is shortest at the shortest wavelength: the iron table's ends at r = 15.9 µm at
- * 380 nm.
- */
-export function tableReaches(
-  table: PhaseFileTable,
-  distribution: RadiusDistribution,
-  wavelengthNm: number,
-): boolean {
-  const { lower, upper, t } = bracketOf(table, wavelengthNm);
-  return (
-    nodeReachRefusal(table, lower, wavelengthNm, distribution) === null &&
-    (t === 0 || nodeReachRefusal(table, upper, wavelengthNm, distribution) === null)
-  );
-}
-
-/**
  * A mode's optics from a phase table at one wavelength: its sums over the two wavelength nodes
  * that bracket λ, linear in λ between them (the nearest node's beyond them), with the particles'
  * own k scaling the absorption on a floor's table and on Yang et al.'s table.
  *
  * @param index - The particles' own index at λ: the floor's scaling and the tail's Mie read it.
  * @param mu - The cosines to give the matrix at; the phase tables' by default.
- * @throws RangeError if the distribution reaches past the table's largest size.
  */
 export function tableModeOptics(
   table: PhaseFileTable,
@@ -1393,15 +1401,10 @@ export function opticsOfParticles(
 
 /**
  * Whether {@link opticsOfParticles} takes a mode's sizes at a wavelength rather than refusing them
- * (plan R08, R08.T10.b): every table its rules read there reaches the distribution
- * ({@link tableReaches}), and every Mie it calls takes it (`sphereModeInRange`), following the
- * same rules, so that a screen on it and the throws cannot drift.
- *
- * @remarks
- * A mineral whose index lies past {@link KERNEL_TRANSPARENT_N_MAX} may fall back to Mie when its
- * table's floor is exceeded, which only its optics tell; Mie's range is asked of it as well. Mie's
- * reach, x = 20,000, lies past every table's largest size (the shortwave kernel's x = 11,810), so
- * the check only adds the distribution's own law and Mie's smallest size.
+ * (plan R08, R08.T10.b): the distribution's own law, and Mie's range wherever its rules call Mie
+ * (`sphereModeInRange`), so that a screen on it and the throws cannot drift. No size is too large
+ * since R08.T16.a: past a table's largest size its own large-size form takes it (the module's
+ * remarks), and past Mie's crossover the large-particle limit.
  *
  * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
  */
@@ -1414,16 +1417,11 @@ export function particlesInRange(
     return false;
   }
   const index = particles.index(wavelengthNm);
-  const distribution = radiusDistribution(sizes);
   const water = waterIceTable();
   if (particles.shape === "crystal" && isIce(particles.material)) {
-    if (water === undefined) {
-      return sphereModeInRange(sizes, wavelengthNm);
-    }
-    const tables =
-      tableReaches(water, distribution, wavelengthNm) &&
-      (wavelengthNm === 550 || tableReaches(water, distribution, 550));
-    return tables && (particles.table === water || sphereModeInRange(sizes, wavelengthNm));
+    return (
+      (water !== undefined && particles.table === water) || sphereModeInRange(sizes, wavelengthNm)
+    );
   }
   const table = particles.table;
   if (
@@ -1433,10 +1431,7 @@ export function particlesInRange(
   ) {
     return sphereModeInRange(sizes, wavelengthNm);
   }
-  return (
-    tableReaches(table, distribution, wavelengthNm) &&
-    (index.n <= KERNEL_TRANSPARENT_N_MAX || sphereModeInRange(sizes, wavelengthNm))
-  );
+  return index.n <= KERNEL_TRANSPARENT_N_MAX || sphereModeInRange(sizes, wavelengthNm);
 }
 
 /**

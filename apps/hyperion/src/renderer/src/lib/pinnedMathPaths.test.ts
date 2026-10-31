@@ -39,6 +39,8 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/forwardLobe.ts",
     "../view/atmosphere/forwardPeak.ts",
     "../view/atmosphere/gate.ts",
+    // The large-particle limit the spheres' optics sum past their crossover (R08.T16.a).
+    "../view/atmosphere/geometricOptics.ts",
     "../view/atmosphere/irradianceQuadrature.ts",
     "../view/atmosphere/oblate.ts",
     "../view/atmosphere/opticalDepth.ts",
@@ -101,7 +103,7 @@ const MODULES = import.meta.glob<string>(
 );
 
 /** How many modules the list names: the glob drops a path that no longer exists. */
-const LISTED = 66;
+const LISTED = 67;
 
 /** Every renderer test, as its text: the scan finds among them the tests that bless a table. */
 const TESTS = import.meta.glob<string>("../**/*.test.ts", {

@@ -442,10 +442,18 @@ export interface AerosolTermOptics {
   readonly at550: ModeOptics;
 }
 
+/** No scattering angles: the optics at 550 nm set the column's scale alone. */
+const NO_ANGLES = new Float64Array(0);
+
 /**
  * A mode's particles' optics at the three channels and at 550 nm, as {@link aerosolTerm} computes
  * them: for a caller that lays one mode on several columns (plan R08, R08.T12.b.2's two Venus
  * cases), so that its Mie runs once.
+ *
+ * @remarks
+ * At 550 nm only the cross-sections and the size quadrature's end are read, so its matrix is given
+ * at no angle (R08.T16.a): Mie's matrix sum was a quarter of a term's cost, and its efficiencies are
+ * the same with or without it.
  *
  * @throws RangeError as {@link aerosolModeOptics}.
  */
@@ -456,7 +464,8 @@ export function aerosolTermOptics(particles: AerosolParticles): AerosolTermOptic
     aerosolModeOptics(particles, green),
     aerosolModeOptics(particles, blue),
   ];
-  const at550 = channels.find((c) => c.wavelengthNm === 550) ?? aerosolModeOptics(particles, 550);
+  const at550 =
+    channels.find((c) => c.wavelengthNm === 550) ?? aerosolModeOptics(particles, 550, NO_ANGLES);
   return { channels, at550 };
 }
 
