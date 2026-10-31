@@ -31,9 +31,8 @@
 //!
 //! # Part 3: the cap and the steam envelope
 //!
-//! Behind its own hold at generator version 25 ([`STEAM_ENVELOPE_VERSION`],
-//! [`steam_envelope_in_force`]): it missed 24's membership, which P14.T54.b.i closed, so it rides
-//! 25 (decision-absurd-states-24 R2.4; decision-p14-t53b-part3 §8):
+//! In force from generator version 25 (P14.T53.b part 3; decision-absurd-states-24 R2.4;
+//! decision-p14-t53b-part3 §8):
 //!
 //! - **The cap.** The condensate partition caps each condensable's own partial pressure at its
 //!   critical isochore above its critical temperature, as its saturation pressure caps it below
@@ -70,88 +69,16 @@
 
 use core::f64::consts::PI;
 
-use super::{Atmosphere, Gas, PartialPressures, SurfaceState};
+#[cfg(test)]
+use super::PartialPressures;
+use super::{Atmosphere, Gas, SurfaceState};
 use crate::planetary::chem::partition::CriticalColumn;
 use crate::planetary::derive::PlanetClass;
 use crate::planetary::params::THIN_ENVELOPE_FRACTION;
+#[cfg(test)]
+use crate::units::Kelvin;
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
-use crate::units::{Kelvin, MetresPerSecondSquared, Pascals};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
-
-/// The generator version from which P14.T53.b part 3 is on the record: 25, the planetary bump after
-/// 24's, since P14.T54.b.i closed 24's membership before part 3 landed (decision-absurd-states-24
-/// R2.4; decision-p14-t53b-part3 §8).
-///
-/// It is part 3's one hold: the partition's cap above each condensable's critical point
-/// ([`PhaseDiagram::condensation_cap`]), its supercritical reservoir as a surface condensate, the
-/// envelope's section from that reservoir, the steam a runaway keeps beyond its escape's capacity
-/// and the [`SurfaceState::SteamEnvelope`](super::SurfaceState::SteamEnvelope) state. Below it
-/// [`SteamEnvelopeRules::in_force`] is [`SteamEnvelopeRules::Held`], so that every figure on the
-/// record is version 24's bit for bit ([`steam_envelope_in_force`]). 25's bump deletes this hold,
-/// [`SteamEnvelopeRules`] with its `Held` arm, the tests' switch and its tripwire
-/// (`the_steam_envelope_is_held_only_until_the_25_bump`).
-///
-/// [`PhaseDiagram::condensation_cap`]: crate::substance::diagram::PhaseDiagram::condensation_cap
-pub(crate) const STEAM_ENVELOPE_VERSION: GeneratorVersion = GeneratorVersion::new(25);
-
-/// Whether P14.T53.b part 3 is in force (its hold, [`STEAM_ENVELOPE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum SteamEnvelopeRules {
-    /// Version 24's and before, part 2's at 24: no cap above a critical point, the section from
-    /// the air's own partial pressures, a runaway's water all lost.
-    Held,
-    /// Version 25's: the cap at the critical isochore and its reservoir, the section from it, the
-    /// steam kept beyond the escape's capacity and the steam envelope.
-    Steam,
-}
-
-impl SteamEnvelopeRules {
-    /// The rules this generator version gives: part 3's from [`STEAM_ENVELOPE_VERSION`], none
-    /// below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_steam_envelope`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= STEAM_ENVELOPE_VERSION {
-            Self::Steam
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The steam envelope's rules a test sets on its thread, `None` for the version's.
-    static RULES: core::cell::Cell<Option<SteamEnvelopeRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the steam envelope's rules `rules` on this thread, for the tests to reach
-/// part 3 ahead of the bump; the version's rules are set back after, a panic in `run` included.
-/// 25's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_steam_envelope<R>(rules: SteamEnvelopeRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<SteamEnvelopeRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
-/// Whether P14.T53.b part 3 is in force: its own rules ([`SteamEnvelopeRules::Steam`]); never
-/// under its hold.
-#[must_use]
-pub(crate) fn steam_envelope_in_force() -> bool {
-    SteamEnvelopeRules::in_force() == SteamEnvelopeRules::Steam
-}
+use crate::units::{MetresPerSecondSquared, Pascals};
 
 /// A condensable at or above its critical temperature at a body's surface, against its critical
 /// isochore: its liquid-like reservoir, if any, and that reservoir's share of the body's mass (the
@@ -169,12 +96,15 @@ pub(crate) struct SupercriticalReservoir {
 
 impl SupercriticalReservoir {
     /// The column of `gas` at the partial pressure `partial` over a surface at the mean
-    /// temperature `temperature` under the gravity `gravity`.
+    /// temperature `temperature` under the gravity `gravity`: part 2's column of the air's own
+    /// partial pressure, which a census states of its margins; from generator version 25 the
+    /// section reads the partition's reservoir instead ([`Self::of_column`]; P14.T53.b part 3).
     ///
     /// `None` for a gas with no phase diagram or no critical slope, at a temperature below its
     /// critical one or not a number, and for a partial pressure or a gravity that is not finite and
     /// positive. Its share is 0 where the partial pressure lies at or below the critical
     /// isochore, or the melting pressure at or below it.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn of(
         gas: Gas,
@@ -287,6 +217,7 @@ impl SupercriticalReservoir {
 
     /// The liquid-like reservoir's share of the body's mass, 4π G Δp ÷ g², not negative: 0 where
     /// there is none.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the census's tests read it"))]
     #[must_use]
     pub(crate) const fn share(&self) -> f64 {
         self.share
@@ -313,6 +244,7 @@ impl SupercriticalReservoir {
 /// Each condensable of `partials` at or above its critical temperature at the mean surface
 /// temperature `temperature`, under the gravity `gravity`, in [`Gas::ALL`]'s order
 /// ([`SupercriticalReservoir::of`]), whatever its share.
+#[cfg(test)]
 pub(crate) fn critical_columns(
     temperature: Kelvin,
     partials: &PartialPressures,
@@ -321,24 +253,6 @@ pub(crate) fn critical_columns(
     Gas::ALL.into_iter().filter_map(move |gas| {
         SupercriticalReservoir::of(gas, temperature, partials.of(gas), gravity)
     })
-}
-
-/// The reservoir that hides the surface ([`SupercriticalReservoir::hides_the_surface`]) with the
-/// largest share among [`critical_columns`]', the first in [`Gas::ALL`]'s order of equal shares;
-/// `None` where none does. It reads no rules: [`Atmosphere::supercritical_reservoir`] gives it to
-/// the record under part 3's hold.
-#[must_use]
-pub(crate) fn hiding_reservoir(
-    temperature: Kelvin,
-    partials: &PartialPressures,
-    gravity: MetresPerSecondSquared,
-) -> Option<SupercriticalReservoir> {
-    critical_columns(temperature, partials, gravity)
-        .filter(SupercriticalReservoir::hides_the_surface)
-        .fold(None, |largest, reservoir| match largest {
-            Some(largest) if largest.share() >= reservoir.share() => Some(largest),
-            _ => Some(reservoir),
-        })
 }
 
 /// Whether a present body of class `class` whose atmosphere is `air`, under the bulk's surface
@@ -363,41 +277,31 @@ pub(crate) fn has_surface_section(
 
 impl Atmosphere {
     /// The supercritical reservoir that hides the body's surface under the bulk's surface gravity
-    /// `gravity` (P14.T53.b part 2; the [module documentation](self)), at least
+    /// `gravity` (P14.T53.b parts 2 and 3; the [module documentation](self)), at least
     /// [`THIN_ENVELOPE_FRACTION`] of the body's mass; `None` where none does, and for a gas
-    /// envelope, whose partial pressures are all zero.
+    /// envelope, which carries no partition's column.
     ///
-    /// - Under part 2 alone: the condensable at or above its critical temperature at the mean
-    ///   surface temperature whose own column above its critical isochore holds the largest share.
-    /// - From part 3 ([`steam_envelope_in_force`]), whose partition caps each condensable at its
-    ///   isochore: its partition's reservoir with the most liquid-like fluid at its solve's last
-    ///   climate ([`SupercriticalReservoir::of_column`]), of the condensables at or above their
-    ///   critical temperatures at that climate's mean surface temperature, not at the
-    ///   temperatures their reservoirs lie at (research-leans-8 §1); the reservoir that also makes
-    ///   a water envelope [`SurfaceState::SteamEnvelope`]. A fluid's weight sets its share whatever
-    ///   the gravity, so the largest is the same reservoir under every gravity.
+    /// From generator version 25 (P14.T53.b part 3), whose partition caps each condensable at its
+    /// isochore, it is its partition's reservoir with the most liquid-like fluid at its solve's last
+    /// climate ([`SupercriticalReservoir::of_column`]), of the condensables at or above their
+    /// critical temperatures at that climate's mean surface temperature, not at the temperatures
+    /// their reservoirs lie at (research-leans-8 §1); the reservoir that also makes a water
+    /// envelope [`SurfaceState::SteamEnvelope`]. A fluid's weight sets its share whatever the
+    /// gravity, so the largest is the same reservoir under every gravity.
     #[must_use]
     pub(crate) fn supercritical_reservoir(
         &self,
         gravity: MetresPerSecondSquared,
     ) -> Option<SupercriticalReservoir> {
-        if steam_envelope_in_force() {
-            return self
-                .supercritical
-                .and_then(|column| SupercriticalReservoir::of_column(&column, gravity))
-                .filter(SupercriticalReservoir::hides_the_surface);
-        }
-        hiding_reservoir(
-            self.surface_temperature(),
-            self.partial_pressures(),
-            gravity,
-        )
+        self.supercritical
+            .and_then(|column| SupercriticalReservoir::of_column(&column, gravity))
+            .filter(SupercriticalReservoir::hides_the_surface)
     }
 
     /// Its partition's reservoir with the most liquid-like fluid at its solve's last climate under
     /// the gravity `gravity`, whatever its share (P14.T53.b part 3,
-    /// [`SupercriticalReservoir::of_column`]): `None` under part 3's hold and where the mean
-    /// surface temperature admits none (research-leans-8 §1). What a census states of its margins.
+    /// [`SupercriticalReservoir::of_column`]): `None` where the mean surface temperature admits
+    /// none (research-leans-8 §1). What a census states of its margins.
     #[cfg(test)]
     pub(crate) fn partitioned_reservoir(
         &self,
@@ -415,8 +319,8 @@ impl Atmosphere {
     }
 
     /// Each condensable of the air at or above its critical temperature at the mean surface
-    /// temperature, under the gravity `gravity`, whatever its share and the rules
-    /// ([`critical_columns`]): what a census states of its margins.
+    /// temperature, under the gravity `gravity`, whatever its share, part 2's columns of the air's
+    /// own partial pressures ([`critical_columns`]): what a census states of its margins.
     #[cfg(test)]
     pub(crate) fn critical_columns(
         &self,
@@ -453,10 +357,10 @@ mod tests {
     }
 
     /// A methane air at 200 K: just under its isochore it holds no reservoir; a column just under
-    /// a thousandth of the mass keeps the surface, and one just over it hides it; the column stops
-    /// at the melting pressure.
+    /// a thousandth of the mass does not hide the surface, and one just over it does; the column
+    /// stops at the melting pressure.
     #[test]
-    fn a_body_just_under_the_line_keeps_its_surface_and_one_just_over_it_does_not() {
+    fn a_column_just_under_the_line_does_not_hide_the_surface_and_one_just_over_it_does() {
         let t = Kelvin::new(200.0);
         let methane = Gas::Methane
             .substance()
@@ -468,18 +372,16 @@ mod tests {
         let column = critical_columns(t, &under, G).next().unwrap();
         assert_eq!(column.gas(), Gas::Methane);
         assert_same_bits(column.share(), 0.0);
-        let hidden = hiding_reservoir(t, &under, G);
-        assert!(hidden.is_none(), "{hidden:?}");
+        assert!(!column.hides_the_surface(), "{column:?}");
         let just_under = alone(Gas::Methane, at_share(Gas::Methane, t, 0.999_999e-3));
         let column = critical_columns(t, &just_under, G).next().unwrap();
         assert!(
             column.share() > 0.99e-3 && !column.hides_the_surface(),
             "{column:?}"
         );
-        let hidden = hiding_reservoir(t, &just_under, G);
-        assert!(hidden.is_none(), "{hidden:?}");
         let just_over = alone(Gas::Methane, at_share(Gas::Methane, t, 1.000_001e-3));
-        let hiding = hiding_reservoir(t, &just_over, G).unwrap();
+        let hiding = critical_columns(t, &just_over, G).next().unwrap();
+        assert!(hiding.hides_the_surface(), "{hiding:?}");
         assert_eq!(hiding.gas(), Gas::Methane);
         assert!(hiding.share() < 1.01e-3, "{hiding:?}");
         assert!((hiding.temperature_ratio() - 200.0 / 190.564).abs() < 1e-12);
@@ -488,7 +390,7 @@ mod tests {
         assert!(hiding.isochore_pressure().value() > methane.critical_pressure().value());
         // Above its melting pressure the fluid is solid, so the column stops there.
         let deep = alone(Gas::Methane, 10.0 * melting);
-        let capped = hiding_reservoir(t, &deep, G).unwrap();
+        let capped = critical_columns(t, &deep, G).next().unwrap();
         let column = melting - isochore;
         let share = 4.0 * PI * GRAVITATIONAL_CONSTANT * column / (G.value() * G.value());
         assert_same_bits(capped.share(), share);
@@ -518,10 +420,10 @@ mod tests {
         }
     }
 
-    /// Of two condensables that hide the surface, the larger share is the body's; a gravity, a
-    /// temperature or a pressure that is not finite and positive holds none.
+    /// Two condensables' columns come in [`Gas::ALL`]'s order; a gravity, a temperature or a
+    /// pressure that is not finite and positive holds none.
     #[test]
-    fn the_largest_reservoir_is_the_body_s_and_odd_inputs_hold_none() {
+    fn the_columns_come_in_gas_order_and_odd_inputs_hold_none() {
         let t = Kelvin::new(250.0);
         let nitrogen = at_share(Gas::Nitrogen, t, 2e-3);
         let methane = at_share(Gas::Methane, t, 5e-3);
@@ -534,18 +436,16 @@ mod tests {
         });
         let columns: Vec<Gas> = critical_columns(t, &air, G).map(|c| c.gas()).collect();
         assert_eq!(columns, [Gas::Methane, Gas::Nitrogen]);
-        assert_eq!(hiding_reservoir(t, &air, G).unwrap().gas(), Gas::Methane);
         for gravity in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             let gravity = MetresPerSecondSquared::new(gravity);
-            let hidden = hiding_reservoir(t, &air, gravity);
-            assert!(hidden.is_none(), "{gravity:?}: {hidden:?}");
+            assert_eq!(critical_columns(t, &air, gravity).count(), 0, "{gravity:?}");
         }
-        let hidden = hiding_reservoir(Kelvin::new(f64::NAN), &air, G);
-        assert!(hidden.is_none(), "{hidden:?}");
+        assert_eq!(critical_columns(Kelvin::new(f64::NAN), &air, G).count(), 0);
         let odd = PartialPressures::from_fn(|_| Pascals::new(f64::NAN));
-        let hidden = hiding_reservoir(t, &odd, G);
-        assert!(hidden.is_none(), "{hidden:?}");
-        let hidden = hiding_reservoir(t, &PartialPressures::default(), G);
-        assert!(hidden.is_none(), "{hidden:?}");
+        assert_eq!(critical_columns(t, &odd, G).count(), 0);
+        assert_eq!(
+            critical_columns(t, &PartialPressures::default(), G).count(),
+            0
+        );
     }
 }

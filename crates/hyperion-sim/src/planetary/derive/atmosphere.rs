@@ -41,10 +41,10 @@
 //!   constants are P14.T57.a's, fitted at Venus's and then Earth's measured states
 //!   ([`GREENHOUSE_CARBON_DIOXIDE`], [`GREENHOUSE_WATER`]). Version 22's rules, each condensable
 //!   at its saturation pressure under P14.T13.c's constants, went with the `p14-snapshot` lane's
-//!   hold (P14.T54.a). From generator version 25 (P14.T53.b part 3, behind its own hold) the
-//!   partition caps each condensable above its critical temperature at its critical isochore, the
-//!   rest a liquid-like supercritical reservoir; a runaway keeps the water its escape could not
-//!   remove as steam; and a water reservoir that hides the surface labels the published solve
+//!   hold (P14.T54.a). From generator version 25 (P14.T53.b part 3) the partition caps each
+//!   condensable above its critical temperature at its critical isochore, the rest a liquid-like
+//!   supercritical reservoir; a runaway keeps the water its escape could not remove as steam; and
+//!   a water reservoir that hides the surface labels the published solve
 //!   [`SurfaceState::SteamEnvelope`] ([`Atmosphere::published_state`]).
 //! - **Carbon speciation and oxygen** (P14.T24.f). A body formed beyond the snow line that lies
 //!   beyond the maximum-greenhouse limit carries its carbon as methane, held where a reservoir lies
@@ -96,11 +96,7 @@ pub(crate) use present::{
 pub(crate) use sea_deck::sea_deck_in_force;
 #[cfg(test)]
 pub(crate) use sea_deck::{SeaDeckRules, with_sea_deck};
-#[cfg(test)]
-pub(crate) use supercritical::{SteamEnvelopeRules, with_steam_envelope};
-pub(crate) use supercritical::{
-    SupercriticalReservoir, has_surface_section, steam_envelope_in_force,
-};
+pub(crate) use supercritical::{SupercriticalReservoir, has_surface_section};
 #[cfg(test)]
 pub(crate) use surface_mix::floor_read;
 #[cfg(test)]
@@ -2258,7 +2254,7 @@ pub enum SurfaceState {
     /// steam world's radius is its steam's (Turbet et al. 2020, A&A 638, A41), over rock or a magma
     /// ocean (P14.T53.b part 3; decision-bump-plan-after-22 R1.1).
     ///
-    /// Produced from generator version 25 alone, behind part 3's hold, as a label on the published
+    /// Produced from generator version 25 (P14.T53.b part 3) as a label on the published
     /// solve, whatever the climate's division, which its water follows
     /// ([`Atmosphere::water_state`]): [`Atmosphere::published_state`] gives it, and
     /// [`Atmosphere::state`] never does, so that every figure of the body is the labelled solve's
@@ -2573,12 +2569,11 @@ pub struct Atmosphere {
     ceiling: GreenhouseCeiling,
     /// Its partition's supercritical reservoir with the most liquid-like fluid, at its solve's last
     /// climate (P14.T53.b part 3; [`supercritical_reservoir`](Self::supercritical_reservoir)):
-    /// `None` under its hold, to generator version 23, and where none lies above its critical
-    /// point.
+    /// `None` where none lies above its critical point.
     supercritical: Option<CriticalColumn>,
     /// The water a past-only runaway keeps beyond its escape's capacity, which its present class
     /// holds (P14.T53.b part 3; [`surface_water_inventory`](Self::surface_water_inventory)):
-    /// `None` for every other body, and under part 3's hold.
+    /// `None` for every other body.
     kept_water: Option<Kilograms>,
     /// Whether its published solve is labelled a steam envelope (P14.T53.b part 3;
     /// [`published_state`](Self::published_state)), a label no figure reads.
@@ -3353,7 +3348,7 @@ fn whole_column(inventory: &ColumnInventory) -> PartialPressures {
 ///
 /// With them it gives the last step's supercritical reservoir with the most liquid-like fluid
 /// (P14.T53.b part 3, [`AirborneWeights::supercritical_column`]), over that step's climate: `None`
-/// under the version 23 rules and where none lies above its critical point.
+/// where none lies above its critical point.
 #[must_use]
 fn partitioned_greenhouse(
     inventory: &ColumnInventory,

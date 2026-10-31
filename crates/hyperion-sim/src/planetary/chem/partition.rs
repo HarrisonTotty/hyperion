@@ -26,10 +26,10 @@
 //!     humidity from h to 1, as the weight d rises from 0 to 1. Over its own sea at the mean the
 //!     pull is weakened by that sea's ocean weight c, `T_mean` − d (1 − c)(`T_mean` − `T_cold`)
 //!     ([`Partitioned::own_ocean_weight`]; decision-p14-t51a-partition §4).
-//!   - At or above its critical temperature, from generator version 25 (P14.T53.b part 3, behind
-//!     its hold; decision-p14-t51a-partition §5), `p_sat` is its critical isochore
+//!   - At or above its critical temperature, from generator version 25 (P14.T53.b part 3;
+//!     decision-p14-t51a-partition §5), `p_sat` is its critical isochore
 //!     ([`PhaseDiagram::condensation_cap`]), the saturation curve's tangent at its end continued
-//!     above it, by the same branches; to 23 nothing caps it there, and all of it is airborne.
+//!     above it, by the same branches.
 //!   - Its airborne weight is the smaller of its inventory's and the weight that meets the cap.
 //!     The species are solved in turn, in registry order, each against the others' weights, a
 //!     fixed number of times from a deterministic start (decision-composition §1.3): each
@@ -79,7 +79,6 @@ use std::fmt;
 use crate::math;
 use crate::planetary::derive::atmosphere::{
     Gas, METHANE_RELATIVE_HUMIDITY, MOLAR_GAS_CONSTANT, SurfaceMaterial, SurfaceState,
-    steam_envelope_in_force,
 };
 use crate::planetary::hooks::crust::CrustLithology;
 #[cfg(doc)]
@@ -882,7 +881,7 @@ struct Caps {
 /// share is, so that it needs no iteration of its own. A solution's first melt labels the phases
 /// after the solve and never moves the cap (decision-p14-t51a-part2 §2.2). Zero where the
 /// condensable would boil or freeze at the mean, where all of it is airborne there, where it lies
-/// above its critical point (supercritical or solid whatever `critical`, its cap there), and where
+/// above its critical point (supercritical or solid under its cap there), and where
 /// the gravity or the liquid's density is not known. The density is `compression`'s, the direct
 /// call's to the bit ([`CompressionSlot`]).
 #[must_use]
@@ -891,7 +890,6 @@ fn own_ocean_weight(
     climate: &ClimateSpan,
     ground: &Ground,
     (others, minor): (Pascals, Pascals),
-    critical: CriticalCap,
     compression: &mut CompressionSlot,
 ) -> f64 {
     let share = if species.substance == Gas::Water.substance() {
@@ -907,7 +905,7 @@ fn own_ocean_weight(
     }
     let pressure = others + minor;
     let pure = diagram.triple_temperature();
-    let phase = condensed_phase_at(diagram, pure, climate.mean, (pressure, minor), critical);
+    let phase = condensed_phase_at(diagram, pure, climate.mean, pressure);
     if phase != Some(CondensatePhase::Liquid) {
         return 0.0;
     }
@@ -952,50 +950,8 @@ fn share(weight: Pascals, molar_mass: f64, others_moles: f64) -> f64 {
 pub(crate) struct AirborneWeights {
     weights: Vec<Pascals>,
     caps: Vec<Option<Caps>>,
-    /// What caps a condensable above its critical point in the last solve, the rules' in force
-    /// when it started ([`CriticalCap::in_force`]).
-    critical: CriticalCap,
     /// The last compression its seas' layers read, a local of whoever keeps these weights.
     compression: CompressionSlot,
-}
-
-/// What caps a condensable's own partial pressure at or above its critical temperature in the
-/// partition (P14.T53.b part 3; decision-p14-t51a-partition §5).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum CriticalCap {
-    /// Nothing, as to generator version 23: its saturation pressure is infinite there, so all of
-    /// it is airborne, a supercritical fluid at the surface with no reservoir.
-    #[default]
-    Uncapped,
-    /// Its critical isochore ([`PhaseDiagram::condensation_cap`]): the column above it is a
-    /// liquid-like supercritical reservoir at the surface, as a column above the saturation curve
-    /// below `T_c` is a liquid or a solid one.
-    Isochore,
-}
-
-impl CriticalCap {
-    /// The cap the rules in force give: the isochore where P14.T53.b part 3 is in force
-    /// ([`steam_envelope_in_force`]), nothing under its hold.
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        if steam_envelope_in_force() {
-            Self::Isochore
-        } else {
-            Self::Uncapped
-        }
-    }
-
-    /// The most of its own partial pressure a condensable of `diagram` holds in the air at
-    /// `temperature`, before its humidity: its saturation pressure, or its condensation cap
-    /// ([`PhaseDiagram::condensation_cap`]), which is the same below `T_c` and the critical
-    /// isochore at or above it.
-    #[must_use]
-    fn at(self, diagram: &PhaseDiagram, temperature: Kelvin) -> Pascals {
-        match self {
-            Self::Uncapped => diagram.saturation_pressure(temperature),
-            Self::Isochore => diagram.condensation_cap(temperature),
-        }
-    }
 }
 
 impl AirborneWeights {
@@ -1068,22 +1024,15 @@ impl AirborneWeights {
     /// Each species' weight before the sweeps, and each condensable's caps: its saturation
     /// pressures at the climate `climate`'s two ends, with no dominance or own ocean yet.
     fn start(&mut self, climate: &ClimateSpan, inventory: &ColumnInventory) {
-        let critical = CriticalCap::in_force();
-        let Self {
-            weights,
-            caps,
-            critical: cap,
-            ..
-        } = self;
-        *cap = critical;
+        let Self { weights, caps, .. } = self;
         weights.clear();
         caps.clear();
         for species in &inventory.species {
             let held = species.condensable().map(|diagram| Caps {
                 minor_cap: Pascals::new(
-                    species.humidity * critical.at(diagram, climate.mean).value(),
+                    species.humidity * diagram.condensation_cap(climate.mean).value(),
                 ),
-                cold_cap: critical.at(diagram, species.cold_trap(climate)),
+                cold_cap: diagram.condensation_cap(species.cold_trap(climate)),
                 dominance: 0.0,
                 own_ocean: 0.0,
             });
@@ -1112,9 +1061,8 @@ impl AirborneWeights {
     ///
     /// Of each condensable with a reservoir where the solve's mean surface temperature is at or
     /// above its critical temperature, `T_c` itself supercritical, it is the one whose fluid weighs
-    /// most, the first in registry order of equal weights. `None` under the version 23 rules
-    /// (`CriticalCap::Uncapped`, no reservoir lies above a critical point), before a solve, and
-    /// where none is admitted.
+    /// most, the first in registry order of equal weights. `None` before a solve and where none is
+    /// admitted.
     ///
     /// The mean admits it, not the temperature its reservoir lies at (research-leans-8 §1): the
     /// passes can settle a dominant condensable's controlling temperature on `T_c` itself, either
@@ -1135,7 +1083,7 @@ impl AirborneWeights {
         climate: &ClimateSpan,
         inventory: &ColumnInventory,
     ) -> Option<CriticalColumn> {
-        if self.critical != CriticalCap::Isochore || self.weights.len() != inventory.len() {
+        if self.weights.len() != inventory.len() {
             return None;
         }
         let (mut pressure, mut moles) = (0.0, 0.0);
@@ -1206,7 +1154,6 @@ impl AirborneWeights {
         let Self {
             weights,
             caps,
-            critical,
             compression,
         } = self;
         let mut moved = false;
@@ -1239,7 +1186,6 @@ impl AirborneWeights {
                     climate,
                     ground,
                     (total, minor),
-                    *critical,
                     compression,
                 )
             } else {
@@ -1252,7 +1198,7 @@ impl AirborneWeights {
                 held.cold_cap
             } else {
                 let humidity = math::powf(species.humidity, 1.0 - d);
-                let at = critical.at(diagram, species.controlling(climate, pull));
+                let at = diagram.condensation_cap(species.controlling(climate, pull));
                 Pascals::new(humidity * at.value())
             };
             let weight = if d <= 0.0 { minor } else { at_cap(cap) };
@@ -1543,7 +1489,7 @@ pub enum CondensatePhase {
     Liquid,
     /// Supercritical: its own partial pressure and its temperature above its critical point, with
     /// no interface; from P14.T53.b part 3 also the liquid-like reservoir above its critical
-    /// isochore (`CriticalCap::Isochore`).
+    /// isochore ([`PhaseDiagram::condensation_cap`]).
     Supercritical,
 }
 
@@ -1852,19 +1798,14 @@ fn solution_liquid_at(diagram: &PhaseDiagram, first_melt: Kelvin, temperature: K
 }
 
 /// The condensate phase of a reservoir of the substance of `diagram`, whose frozen assemblage first
-/// melts at `first_melt` and whose partial pressure in the air is `partial`, at `temperature`
-/// under the surface pressure `pressure`, with what caps it above its critical point `critical`,
-/// or `None` where it cannot lie condensed there.
+/// melts at `first_melt`, at `temperature` under the surface pressure `pressure`, or `None` where
+/// it cannot lie condensed there.
 ///
-/// At or above its critical temperature:
-///
-/// - [`CriticalCap::Uncapped`], to generator version 23: supercritical where its own partial
-///   pressure is at least its critical pressure, and otherwise vapour, as [`condensate_of`]'s
-///   label is judged.
-/// - [`CriticalCap::Isochore`] (P14.T53.b part 3): the diagram's phase with its melting curve first
-///   ([`PhaseDiagram::phase_at`]; decision-absurd-states-24 R2.2): solid at or above its melting
-///   pressure at the surface pressure, and otherwise supercritical, the liquid-like fluid above its
-///   critical isochore, which lies under the surface pressure.
+/// At or above its critical temperature, from generator version 25 (P14.T53.b part 3), whose cap
+/// there is its critical isochore ([`PhaseDiagram::condensation_cap`]): the diagram's phase with
+/// its melting curve first ([`PhaseDiagram::phase_at`]; decision-absurd-states-24 R2.2): solid at
+/// or above its melting pressure at the surface pressure, and otherwise supercritical, the
+/// liquid-like fluid above its critical isochore, which lies under the surface pressure.
 ///
 /// Below it, it is the diagram's phase at the surface pressure, and none where its vapour pressure
 /// exceeds the surface pressure, so that it boils; a solution's liquid where its pure substance
@@ -1874,25 +1815,19 @@ fn condensed_phase_at(
     diagram: &PhaseDiagram,
     first_melt: Kelvin,
     temperature: Kelvin,
-    (pressure, partial): (Pascals, Pascals),
-    critical: CriticalCap,
+    pressure: Pascals,
 ) -> Option<CondensatePhase> {
     if temperature >= diagram.critical_temperature() {
-        return match critical {
-            CriticalCap::Uncapped => {
-                (partial >= diagram.critical_pressure()).then_some(CondensatePhase::Supercritical)
-            }
-            CriticalCap::Isochore => Some(
-                if diagram
-                    .melting_pressure(temperature)
-                    .is_some_and(|melting| pressure >= melting)
-                {
-                    CondensatePhase::Solid
-                } else {
-                    CondensatePhase::Supercritical
-                },
-            ),
-        };
+        return Some(
+            if diagram
+                .melting_pressure(temperature)
+                .is_some_and(|melting| pressure >= melting)
+            {
+                CondensatePhase::Solid
+            } else {
+                CondensatePhase::Supercritical
+            },
+        );
     }
     match diagram
         .phase_at(temperature, pressure)
@@ -1910,9 +1845,9 @@ fn condensed_phase_at(
 /// at the surface pressure `pressure`, so that it melts, or, held toward its cold trap (its
 /// dominance `dominance` above 0), whose vapour pressure there exceeds its own partial pressure
 /// `partial`, so that it sublimes; a liquid that is neither liquid nor solid there, so that it
-/// boils. A supercritical fluid has no reservoir to take. Its caps are `critical`'s
-/// ([`condensed_phase_at`]): from P14.T53.b part 3 a dominant solid's vapour pressure at a warmest
-/// zone above its critical point is its critical isochore's.
+/// boils. A supercritical fluid has no reservoir to take. Its caps are the partition's
+/// ([`PhaseDiagram::condensation_cap`]): from P14.T53.b part 3 a dominant solid's vapour pressure at
+/// a warmest zone above its critical point is its critical isochore's.
 ///
 /// A minor solid is held below saturation at the mean, so its frost point always lies below the
 /// warmest zone: the sublimation test is a dominant one's only, as the species' own flag reads it
@@ -1923,13 +1858,13 @@ fn taken_off(
     phase: CondensatePhase,
     warmest: Kelvin,
     (pressure, partial): (Pascals, Pascals),
-    (dominance, critical): (f64, CriticalCap),
+    dominance: f64,
 ) -> bool {
-    let there = condensed_phase_at(diagram, first_melt, warmest, (pressure, partial), critical);
+    let there = condensed_phase_at(diagram, first_melt, warmest, pressure);
     match phase {
         CondensatePhase::Solid => {
             there != Some(CondensatePhase::Solid)
-                || (dominance > 0.0 && critical.at(diagram, warmest) > partial)
+                || (dominance > 0.0 && diagram.condensation_cap(warmest) > partial)
         }
         CondensatePhase::Liquid => !matches!(
             there,
@@ -1941,11 +1876,10 @@ fn taken_off(
 
 /// The condensate of the species `species` of a body's air, its row's `diagram`, the solution its
 /// liquid lies as, if any ([`solution_of`]), and its partition `partitioned`, over `climate` under
-/// the surface pressure `pressure` at surface gravity `gravity`, with what caps it above its
-/// critical point `critical`; `None` for a species with nothing condensed that is not
-/// supercritical either.
+/// the surface pressure `pressure` at surface gravity `gravity`; `None` for a species with nothing
+/// condensed that is not supercritical either.
 ///
-/// From P14.T53.b part 3 ([`CriticalCap::Isochore`]) a reservoir lying at or above its critical
+/// From generator version 25 (P14.T53.b part 3) a reservoir lying at or above its critical
 /// temperature is the liquid-like fluid above its isochore, supercritical, or solid at or above its
 /// melting pressure ([`condensed_phase_at`]), never a liquid of the coldest zone's.
 #[must_use]
@@ -1955,7 +1889,7 @@ fn condensate_of(
     partitioned: &Partitioned,
     climate: &ClimateSpan,
     pressure: Pascals,
-    (gravity, critical): (MetresPerSecondSquared, CriticalCap),
+    gravity: MetresPerSecondSquared,
 ) -> Option<Condensate> {
     let lies_at = partitioned.lies_at;
     let condensed = partitioned.condensed().value();
@@ -1970,12 +1904,9 @@ fn condensate_of(
         // its own, or nothing; from P14.T53.b part 3 the diagram's phase there comes first, its
         // melting curve before its critical point (decision-p14-t53b-part3 §2), so that none is a
         // fluid where the surface pressure reaches that curve.
-        let melted = match critical {
-            CriticalCap::Uncapped => true,
-            CriticalCap::Isochore => !diagram
-                .melting_pressure(lies_at)
-                .is_some_and(|melting| pressure >= melting),
-        };
+        let melted = !diagram
+            .melting_pressure(lies_at)
+            .is_some_and(|melting| pressure >= melting);
         let supercritical = lies_at >= diagram.critical_temperature()
             && partitioned.partial_pressure >= diagram.critical_pressure()
             && melted;
@@ -1998,7 +1929,7 @@ fn condensate_of(
     // the surface pressure, at the coldest zone; and where it cannot lie condensed even there, by
     // its first melt.
     let partial = partitioned.partial_pressure;
-    let at = |t: Kelvin| condensed_phase_at(diagram, first_melt, t, (pressure, partial), critical);
+    let at = |t: Kelvin| condensed_phase_at(diagram, first_melt, t, pressure);
     let phase =
         at(lies_at)
             .or_else(|| at(climate.coldest))
@@ -2024,7 +1955,8 @@ fn condensate_of(
     // over its own partial pressure, not over the surface pressure, which sets only boiling.
     let melts = phases.contains(CondensatePhase::Solid) && phases.contains(CondensatePhase::Liquid);
     let leaves = at(climate.warmest) != Some(phase);
-    let sublimes = partitioned.dominance > 0.0 && critical.at(diagram, climate.warmest) > partial;
+    let sublimes =
+        partitioned.dominance > 0.0 && diagram.condensation_cap(climate.warmest) > partial;
     let seasonal = melts || leaves || sublimes;
     let mut seasonal_phases = CondensatePhases::default();
     for each in [CondensatePhase::Solid, CondensatePhase::Liquid] {
@@ -2034,7 +1966,7 @@ fn condensate_of(
                 each,
                 climate.warmest,
                 (pressure, partial),
-                (partitioned.dominance, critical),
+                partitioned.dominance,
             )
         {
             seasonal_phases = seasonal_phases.with(each);
@@ -2111,7 +2043,6 @@ pub fn partition(climate: &ClimateSpan, ground: &Ground, inventory: &ColumnInven
     let AirborneWeights {
         weights,
         caps: held,
-        critical,
         ..
     } = solved;
     let (mut pressure, mut moles) = (0.0, 0.0);
@@ -2151,7 +2082,7 @@ pub fn partition(climate: &ClimateSpan, ground: &Ground, inventory: &ColumnInven
                 &partitioned,
                 climate,
                 Pascals::new(pressure),
-                (ground.gravity, critical),
+                ground.gravity,
             )
         {
             condensates.push(condensate);
@@ -2747,7 +2678,7 @@ impl Partition {
     /// - **A supercritical fluid** with no reservoir, the air at the surface (Venus's carbon
     ///   dioxide), is listed with no reservoir and no area.
     /// - **A supercritical reservoir** (from P14.T53.b part 3, the liquid-like fluid above its
-    ///   critical isochore, `CriticalCap::Isochore`) fills the basins as a liquid does, sharing
+    ///   critical isochore, the partition's cap there) fills the basins as a liquid does, sharing
     ///   them by volume with the other liquids; its layer is its mass over its own liquid's density
     ///   at its critical temperature, its critical density `ρ_c` at any pressure, so that the layer
     ///   bounds the fluid's from above wherever the column lies above its true critical isochore. It

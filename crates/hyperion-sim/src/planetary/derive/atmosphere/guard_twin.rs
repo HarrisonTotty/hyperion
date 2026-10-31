@@ -1050,7 +1050,7 @@ const MOLTEN_BY_NAME: [(&str, [(f64, f64); 4]); 3] = [
     (
         "42002cb2000188e8.0100",
         [
-            (2_565.374_824_337_405_7, 11_022.985_850_577_84),
+            (2_018.957_958_908_867_6, 10_861.918_420_525_659),
             (2_018.957_958_908_867_6, 10_861.918_420_525_659),
             (1_832.413_503_151_926_8, 10_794.529_328_187_999),
             (1_832.413_503_151_926_8, 10_794.529_328_187_999),
@@ -1059,18 +1059,18 @@ const MOLTEN_BY_NAME: [(&str, [(f64, f64); 4]); 3] = [
     (
         "42002cb200049423.0100",
         [
-            (1_470.981_663_731_903_4, 26_836.684_627_488_543),
             (1_202.496_035_714_910_5, 17_263.683_413_307_484),
-            (1_394.0, 26_724.800_249_524_895),
+            (1_202.496_035_714_910_5, 17_263.683_413_307_484),
+            (1_202.496_035_714_910_5, 17_263.683_413_307_484),
             (1_202.496_035_714_910_5, 17_263.683_413_307_484),
         ],
     ),
     (
         "42002cb20001885b.0100",
         [
-            (1_716.973_605_052_254_5, 3_229.786_323_044_295),
             (1_428.081_981_703_512_6, 3_220.335_346_668_595_3),
-            (1_394.0, 2_977.650_050_331_51),
+            (1_428.081_981_703_512_6, 3_220.335_346_668_595_3),
+            (1_394.0, 3_166.681_417_976_950_3),
             (1_394.0, 3_166.681_417_976_950_3),
         ],
     ),
@@ -1082,10 +1082,10 @@ const MOLTEN_BY_NAME: [(&str, [(f64, f64); 4]); 3] = [
 ///
 /// - 42002cb2000188e8.0100 publishes its published air's surface, within 1% of the ruling's
 ///   1,832 K, under the new arm alone and under `with_every_26_hold`, `MagmaOcean`.
-/// - 42002cb200049423.0100, whose published air gives 1,308 K, publishes the solidus, 1,394 K, under
-///   the new arm alone, `MagmaOcean`. It is not molten under `with_every_26_hold`: P14.T53.b part
-///   3's steam (25) leaves it a solid `RunawayGreenhouse` at 1,202.5 K, which the rule does not
-///   reach, so it is the held arm's body to the bit there (recorded, for main).
+/// - 42002cb200049423.0100 is not molten under the new arm alone or under `with_every_26_hold`:
+///   P14.T53.b part 3's steam, from generator version 25, leaves it a solid `RunawayGreenhouse` at
+///   1,202.5 K, which the rule does not reach, so it is the held arm's body to the bit (recorded,
+///   for main).
 /// - 42002cb20001885b.0100, of the same class, publishes the solidus under both, `MagmaOcean`: under
 ///   `with_every_26_hold` its published air gives 1,273.7 K (count (xvii)'s largest there).
 /// - Under the hold, with the version's rules and inside 26's helper alike, each publishes today's
@@ -1143,9 +1143,9 @@ fn the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new
         let state = |(body, _): &(DerivedBody, Kelvin)| body.atmosphere().state();
         let t_s =
             |(body, _): &(DerivedBody, Kelvin)| body.atmosphere().surface_temperature().value();
-        assert_eq!(state(alone), SurfaceState::MagmaOcean, "{id}");
         match id.as_str() {
             "42002cb2000188e8.0100" => {
+                assert_eq!(state(alone), SurfaceState::MagmaOcean, "{id}");
                 assert_eq!(state(every_26), SurfaceState::MagmaOcean, "{id}");
                 for body in [alone, every_26] {
                     assert!(
@@ -1156,11 +1156,12 @@ fn the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new
                 }
             }
             "42002cb200049423.0100" => {
-                assert_same_bits(t_s(alone), SILICATE_SOLIDUS.value());
+                assert_eq!(state(alone), SurfaceState::RunawayGreenhouse, "{id}");
                 assert_eq!(state(every_26), SurfaceState::RunawayGreenhouse, "{id}");
                 assert_eq!(every_26, held_26, "{id}: the rule reaches no solid body");
             }
             _ => {
+                assert_eq!(state(alone), SurfaceState::MagmaOcean, "{id}");
                 assert_eq!(state(every_26), SurfaceState::MagmaOcean, "{id}");
                 for body in [alone, every_26] {
                     assert_same_bits(t_s(body), SILICATE_SOLIDUS.value());

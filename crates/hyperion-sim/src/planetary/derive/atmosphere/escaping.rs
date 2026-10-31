@@ -95,7 +95,7 @@ use super::{
     Insolation, PartialPressures, PassSurface, PresentClimate, PublishedState, Retention,
     RunawayDeck, SILICATE_SOLIDUS, StepClimate, SupercriticalReservoir, SurfaceState,
     TEMPERATE_AIRBORNE_CARBON, earth_xuv_fluence, exobase_temperature, mole_fraction_of,
-    partitioned_greenhouse, present_state_in_force, retained, steam_envelope_in_force, surface_mix,
+    partitioned_greenhouse, present_state_in_force, retained, surface_mix,
 };
 
 /// The melting point of ice Ih at one standard atmosphere, K: 273.15, IAPWS R10-06's 273.152 519
@@ -991,7 +991,8 @@ struct Solve<'a> {
     tau: f64,
     step: StepClimate<'a>,
     /// Its partition's supercritical reservoir with the most liquid-like fluid at its last step
-    /// (P14.T53.b part 3, [`partitioned_greenhouse`]): `None` under part 3's hold.
+    /// (P14.T53.b part 3, [`partitioned_greenhouse`]): `None` where none lies above its critical
+    /// point.
     supercritical: Option<CriticalColumn>,
     /// Whether its greenhouse's last step read the airless climate, its partial pressures under
     /// [`AIRLESS_PRESSURE`] ([`step_climate`](crate::planetary::hooks::surface::step_climate)'s
@@ -1148,8 +1149,7 @@ struct Kept {
     /// The carbon kept, as its stored carrier carbon dioxide, kg.
     carbon: f64,
     /// The free water a runaway keeps as steam beyond its escape's capacity (P14.T53.b part 3,
-    /// step 5's division, [`Body::divide`]): none before the division, for every other world, and
-    /// under part 3's hold.
+    /// step 5's division, [`Body::divide`]): none before the division and for every other world.
     steam: Kilograms,
 }
 
@@ -1445,9 +1445,9 @@ impl<'a> Body<'a> {
                 // The free water the timed route has not lost by the age: from P14.T53.b part 3 the
                 // air keeps it as steam where water is retained (decision-bump-plan-after-22 R1.4,
                 // Luger and Barnes 2015), counted airborne with the air's water; else it leaves the
-                // air by rule (a), as before, counted with the interior.
+                // air by rule (a), counted with the interior.
                 let unlost = (kept.free_water - oxygen.water_lost().value()).max(0.0);
-                if steam_envelope_in_force() && self.retention.retains(Gas::Water) {
+                if self.retention.retains(Gas::Water) {
                     kept.steam = Kilograms::new(unlost);
                     kept.air.water += unlost;
                 } else {

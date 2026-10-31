@@ -135,7 +135,9 @@ fn published_of(sets: &[AuditSet], ids: &[&str]) -> Vec<Published> {
 /// under every 25 hold.
 ///
 /// - At 24 each of the six is a `Snowball` above 273.15 K and the frozen world `Temperate`, none
-///   carrying a state.
+///   carrying a state; but 01fffb2d60000000.0600, whose water above its critical point holds a
+///   liquid-like reservoir that hides its surface from generator version 25, is published a steam
+///   envelope (P14.T53.b part 3).
 /// - Under every 25 hold none of the six is a `Snowball`: each takes its climate's state, where its
 ///   surface is `Ok` the state its figures give by rules 5–7 (or a jump of its passes); and the
 ///   frozen world is a `Snowball` by rule 5, ice over at least half its surface, its passes
@@ -188,7 +190,12 @@ fn under_every_25_hold_the_hot_snowballs_and_a_frozen_temperate_take_their_clima
             );
             assert!(!now.published.jump, "{id}");
         } else {
-            assert_eq!(before.state, SurfaceState::Snowball, "{id}");
+            let published = if id == "01fffb2d60000000.0600" {
+                SurfaceState::SteamEnvelope
+            } else {
+                SurfaceState::Snowball
+            };
+            assert_eq!(before.state, published, "{id}");
             assert!(before.t_s > 273.15, "{id}");
             assert_ne!(now.published.state, SurfaceState::Snowball, "{id}");
             if let Some(verdict) = now.verdict {

@@ -442,11 +442,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///
 /// The holds, each with its switch:
 ///
-/// - the steam envelope's, `STEAM_ENVELOPE_VERSION` (P14.T53.b part 3), at
-///   `SteamEnvelopeRules::Steam` through `with_steam_envelope`: the partition's cap at each
-///   condensable's critical isochore and its supercritical reservoir, the envelope's section from
-///   that reservoir, the steam a runaway keeps beyond its escape's capacity and the
-///   `SteamEnvelope` state;
 /// - the present climate's state, `PRESENT_STATE_VERSION` (P14.T53.e), at
 ///   `PresentStateRules::Present` through `with_present_state`: rules 5–7 of the published state
 ///   on each pass's figures, which the next pass's state-keyed branches read;
@@ -476,9 +471,7 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::derive::atmosphere::{
-        PresentStateRules, SteamEnvelopeRules, with_present_state, with_steam_envelope,
-    };
+    use crate::planetary::derive::atmosphere::{PresentStateRules, with_present_state};
     use crate::planetary::derive::passes::{PassRoot, with_pass_root};
     use crate::planetary::hooks::cold_traps::with_rough_plains;
     use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
@@ -494,10 +487,8 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_rough_plains(PlainsModel::RayTraced, run);
     let run = move || with_molten_decks(MoltenDecksRules::Molten, run);
     let run = move || with_pass_root(PassRoot::Secant, run);
-    with_steam_envelope(SteamEnvelopeRules::Steam, || {
-        with_present_state(PresentStateRules::Present, || {
-            with_exposed_ice(ExposedIceRules::Exposed, run)
-        })
+    with_present_state(PresentStateRules::Present, || {
+        with_exposed_ice(ExposedIceRules::Exposed, run)
     })
 }
 
@@ -797,25 +788,6 @@ mod tests {
             synthetic_star(id, SolarMasses::new(-1.0), fe_h, age),
             Err(BuildSystemContextError::MassOutsideRange { star: 0, .. })
         ));
-    }
-
-    /// 25's first switch, the steam envelope's (P14.T53.b part 3): in force inside 25's helper,
-    /// held outside it and where a test sets it back.
-    #[test]
-    fn the_steam_envelope_s_hold_is_in_force_inside_25_s_helper_alone() {
-        use crate::planetary::derive::atmosphere::{SteamEnvelopeRules, with_steam_envelope};
-        assert_eq!(SteamEnvelopeRules::in_force(), SteamEnvelopeRules::Held);
-        assert_eq!(
-            with_every_25_hold(SteamEnvelopeRules::in_force),
-            SteamEnvelopeRules::Steam
-        );
-        assert_eq!(
-            with_every_25_hold(|| {
-                with_steam_envelope(SteamEnvelopeRules::Held, SteamEnvelopeRules::in_force)
-            }),
-            SteamEnvelopeRules::Held
-        );
-        assert_eq!(SteamEnvelopeRules::in_force(), SteamEnvelopeRules::Held);
     }
 
     /// 25's second switch, the present climate's state (P14.T53.e): in force inside 25's helper,

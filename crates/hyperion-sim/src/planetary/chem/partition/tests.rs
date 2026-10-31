@@ -486,10 +486,14 @@ fn every_registry_condensable_partitions_hot_and_cold() {
             CondensatePhase::Liquid,
             "{key}"
         );
-        // Above the critical point: no condensed reservoir; supercritical above its pressure.
+        // Above the critical point: capped at its critical isochore, the rest a liquid-like
+        // supercritical reservoir (from generator version 25, P14.T53.b part 3).
         let hot = span(1.1 * critical, 1.2 * critical, 1.3 * critical);
         let fluid = partition(&hot, &g, &alone(lots));
-        assert_same_bits(fluid.of(substance).unwrap().condensed().value(), 0.0);
+        assert!(
+            fluid.of(substance).unwrap().condensed().value() > 0.0,
+            "{key}: {fluid:?}"
+        );
         assert_eq!(
             fluid.condensate(substance).unwrap().phase(),
             CondensatePhase::Supercritical,
@@ -617,7 +621,9 @@ fn every_species_airborne_and_condensed_masses_sum_to_its_inventory() {
 }
 
 /// Wherever a condensable is capped, its partial pressure in the air, x p, meets its cap,
-/// h^(1 − d) `p_sat`(T): a minor one's h `p_sat`(`T_mean`) (plan 14's test). Both meet it to a part
+/// h^(1 − d) `p_sat`(T): a minor one's h `p_sat`(`T_mean`) (plan 14's test), `p_sat` its
+/// condensation cap, its critical isochore above `T_c` from generator version 25 (P14.T53.b part 3,
+/// [`PhaseDiagram::condensation_cap`]). Both meet it to a part
 /// in a billion in every air with at most one condensable held toward its cold trap. In an air with
 /// two or more, the fixed sweeps leave every species within a part in a thousand
 /// ([`PARTITION_SWEEPS`]; plan 14's Risks, P14.T51.a as built).
@@ -641,13 +647,13 @@ fn a_capped_condensable_meets_its_cap() {
             }
             let h = surface_humidity(s.substance());
             let dom = s.dominance();
-            let cap = math::powf(h, 1.0 - dom) * d.saturation_pressure(s.lies_at()).value();
+            let cap = math::powf(h, 1.0 - dom) * d.condensation_cap(s.lies_at()).value();
             let miss = relative(s.partial_pressure().value(), cap);
             let tolerance = if toward_cold_trap > 1 { 1e-3 } else { 1e-9 };
             worst = worst.max(miss);
             if dom <= 0.0 {
                 minor += 1;
-                let at_mean = h * d.saturation_pressure(climate.mean()).value();
+                let at_mean = h * d.condensation_cap(climate.mean()).value();
                 assert!(
                     relative(s.partial_pressure().value(), at_mean) < tolerance,
                     "{climate:?}: {s:?} against {at_mean}"
@@ -2248,7 +2254,6 @@ fn under_compression_a_carbon_dioxide_sea_and_its_ocean_weight_read_one_density(
             &climate,
             &ground,
             (others, minor),
-            CriticalCap::Uncapped,
             &mut CompressionSlot::default(),
         )
     };
@@ -2425,10 +2430,9 @@ fn methane_column(t: f64, kilobars: f64) -> (ClimateSpan, Ground, ColumnInventor
 /// P14.T53.b part 3 (decision-p14-t51a-partition §5): with every landed 25 hold in force, a methane
 /// column above its 190.564 K critical point keeps its own critical isochore's pressure airborne,
 /// about 60 bar at 200 K, and the rest lies at the surface as a liquid-like supercritical
-/// reservoir; under part 3's hold all of it is airborne, as at version 24.
+/// reservoir.
 #[test]
 fn under_every_25_hold_a_methane_column_above_its_critical_point_is_capped_at_its_isochore() {
-    use crate::planetary::derive::atmosphere::{SteamEnvelopeRules, with_steam_envelope};
     use crate::planetary::testing::with_every_25_hold;
     let ch4 = phase_diagram("CH4");
     let (climate, ground, column) = methane_column(200.0, 1.0);
@@ -2465,21 +2469,6 @@ fn under_every_25_hold_a_methane_column_above_its_critical_point_is_capped_at_it
         let melting = reservoir.melting_pressure().unwrap().value();
         // Setzmann and Wagner 1991's melting equation: 5.94 kbar at 200 K.
         assert!((5.8e8..6.1e8).contains(&melting), "{melting}");
-        // Under part 3's hold the column is all airborne, as at version 24.
-        let held = with_steam_envelope(SteamEnvelopeRules::Held, || {
-            partition(&climate, &ground, &column)
-        });
-        assert_same_bits(of(&held, "CH4").condensed().value(), 0.0);
-        assert_same_bits(condensate(&held, "CH4").reservoir().value(), 0.0);
-        let mut held_weights = AirborneWeights::new();
-        with_steam_envelope(SteamEnvelopeRules::Held, || {
-            held_weights.solve(&climate, &ground, &column);
-        });
-        assert!(
-            held_weights
-                .supercritical_column(&climate, &column)
-                .is_none()
-        );
     });
 }
 
@@ -2487,10 +2476,9 @@ fn under_every_25_hold_a_methane_column_above_its_critical_point_is_capped_at_it
 /// surface temperature is at or above its critical temperature, `T_c` itself supercritical, not
 /// where the temperature it lies at is. A methane column whose mean is `T_c` exactly, held toward
 /// a coldest zone 10⁻¹⁰ of it below, lies there and yields its column, its ratio under 1; with its
-/// mean 10⁻¹⁰ of it below `T_c` it yields none, as under part 3's hold at any mean.
+/// mean 10⁻¹⁰ of it below `T_c` it yields none.
 #[test]
 fn under_every_25_hold_a_reservoir_counts_by_its_mean_at_the_critical_point() {
-    use crate::planetary::derive::atmosphere::{SteamEnvelopeRules, with_steam_envelope};
     use crate::planetary::testing::with_every_25_hold;
     let t_c = phase_diagram("CH4").critical_temperature();
     let below = Kelvin::new(t_c.value() * (1.0 - 1e-10));
@@ -2510,9 +2498,6 @@ fn under_every_25_hold_a_reservoir_counts_by_its_mean_at_the_critical_point() {
         assert!(reservoir.temperature_ratio() < 1.0, "{reservoir:?}");
         assert!(reservoir.reservoir().value() > 0.0, "{reservoir:?}");
         assert_eq!(solved(&under_t_c), None);
-    });
-    with_steam_envelope(SteamEnvelopeRules::Held, || {
-        assert_eq!(solved(&at_t_c), None);
     });
 }
 
@@ -2634,10 +2619,9 @@ fn under_every_25_hold_a_supercritical_reservoir_is_published_as_a_layer() {
 
 /// P14.T53.b part 3 (the determinism review): with every 25 hold in force, the partition above
 /// the critical point is the same twice, and a shared scratch, its supercritical column read
-/// with its weights, is the same in any order of cases, a version 24 solve among them.
+/// with its weights, is the same in any order of cases.
 #[test]
 fn under_every_25_hold_the_cap_and_its_column_are_the_same_twice_and_in_any_order() {
-    use crate::planetary::derive::atmosphere::{SteamEnvelopeRules, with_steam_envelope};
     use crate::planetary::testing::with_every_25_hold;
     with_every_25_hold(|| {
         let (climate, ground, _) = methane_column(200.0, 1.0);
@@ -2656,27 +2640,15 @@ fn under_every_25_hold_the_cap_and_its_column_are_the_same_twice_and_in_any_orde
             );
         }
         let shared = RefCell::new(AirborneWeights::new());
-        let solve_once = |held: bool, (climate, inv): &(ClimateSpan, ColumnInventory)| {
+        assert_order_independent(&cases, |(climate, inv)| {
             let mut weights = shared.borrow_mut();
-            if held {
-                with_steam_envelope(SteamEnvelopeRules::Held, || {
-                    weights.solve(climate, &ground, inv);
-                });
-            } else {
-                weights.solve(climate, &ground, inv);
-            }
+            weights.solve(climate, &ground, inv);
             format!(
                 "{:?} {:?}",
                 weights.weights(),
                 weights.supercritical_column(climate, inv)
             )
-        };
-        assert_order_independent(&cases, |case| solve_once(false, case));
-        // A version 24 solve between two leaves no trace in the next.
-        let first = solve_once(false, &cases[0]);
-        let between = solve_once(true, &cases[1]);
-        assert!(between.ends_with("None"), "{between}");
-        assert_eq!(solve_once(false, &cases[0]), first);
+        });
     });
 }
 

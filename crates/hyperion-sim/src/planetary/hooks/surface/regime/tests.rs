@@ -468,9 +468,10 @@ fn the_reservoirs_are_the_gases_held_at_their_caps() {
 /// Oxygen, a row the held phase columns lacked, is a reservoir by its phase diagram: P14.T51.a's
 /// partition holds an inventory of 100 bar of it at its cap over a surface at 150 K, where its
 /// saturation pressure is some 42 bar, the rest condensed, and over one at 160 K, above its
-/// critical temperature, 154.581 K, holds it all aloft.
+/// critical temperature, 154.581 K, at its critical isochore from generator version 25, the rest a
+/// liquid-like supercritical reservoir (P14.T53.b part 3).
 #[test]
-fn an_oxygen_reservoir_lies_below_its_critical_temperature_only() {
+fn an_oxygen_reservoir_lies_beyond_its_cap_on_either_side_of_its_critical_temperature() {
     use crate::planetary::chem::partition::{ClimateSpan, ColumnInventory, Ground, partition};
     let inventory = ColumnInventory::new([(Gas::Oxygen.substance(), Pascals::new(1e7))]).unwrap();
     let ground = Ground::without_basins(crate::units::MetresPerSecondSquared::new(9.82));
@@ -490,7 +491,7 @@ fn an_oxygen_reservoir_lies_below_its_critical_temperature_only() {
         .critical_temperature();
     assert_same_bits(critical.value(), 154.581);
     assert_eq!(at(150.0), [Gas::Oxygen.substance()]);
-    assert_eq!(at(160.0), []);
+    assert_eq!(at(160.0), [Gas::Oxygen.substance()]);
 }
 
 /// An air of mole fractions `gases` at `pressure` Pa over a night at `night` K, its surface holding

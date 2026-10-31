@@ -737,29 +737,20 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
         .map(|(ctx, _)| ("sample", SEED, ctx))
         .chain(core::iter::once(("sample", SEED, census_body)))
         .collect();
-    // Part 2's census body hides its surface at 24; with every 25 hold, P14.T53.b
-    // part 3's, it keeps it, and none of these bodies is hidden (decision-p14-t53b-part3 §12
-    // (0400)).
-    let count = |bodies: &[EnvelopeBody]| {
+    // With P14.T53.b part 3, from generator version 25, part 2's census body keeps its surface,
+    // and none of these bodies is hidden (decision-p14-t53b-part3 §12 (0400)).
+    let (surfaces, hidden) = crate::planetary::testing::with_every_25_hold(|| {
         let (mut surfaces, mut hidden) = (0_u32, 0_u32);
-        for body in bodies {
+        for body in &envelope_census(&sets) {
             assert_envelope_tags(body);
             surfaces += u32::from(body.surface == SectionState::Ok);
             hidden += u32::from(body.hidden.is_some());
         }
         (surfaces, hidden)
-    };
-    let part_two = count(&envelope_census(&sets));
-    let part_three =
-        crate::planetary::testing::with_every_25_hold(|| count(&envelope_census(&sets)));
-    let ((surfaces, hidden), (surfaces_three, hidden_three)) = (part_two, part_three);
-    eprintln!(
-        "{surfaces} surfaces, {hidden} hidden; with part 3 {surfaces_three} surfaces, \
-         {hidden_three} hidden"
-    );
-    assert!(surfaces > 20 && hidden >= 1);
-    assert!(surfaces_three > 20);
-    assert_eq!(hidden_three, 0);
+    });
+    eprintln!("{surfaces} surfaces, {hidden} hidden");
+    assert!(surfaces > 20);
+    assert_eq!(hidden, 0);
 }
 
 /// P14.T54.a: a record's surface section holds P14.T51.a's published condensates, the ones its
@@ -974,8 +965,9 @@ struct CoverRuleTally {
 ///   by the list's total, the appended item included, where that total exceeds 1, and otherwise to
 ///   the bit. Nothing else is listed.
 /// - **W4.** Water's sea is the share of the basins its own layer fills, to the bit, and the other
-///   liquids share the basins by volume; no entry has no mass but a supercritical one, which
-///   covers nothing; a solid's area is at most its layer spread at the sheet's thickness, but
+///   liquids share the basins by volume, a supercritical reservoir among them from generator
+///   version 25 (P14.T53.b part 3); no entry has no mass but a supercritical fluid that is the air
+///   at the surface, which covers nothing; a solid's area is at most its layer spread at the sheet's thickness, but
 ///   water on an ice-rich crust or under a `Snowball`'s cover, which T24.b does not cap, and an
 ///   entry with no layer, whose density is not read.
 /// - **W5.** Each list sums to at most 1.
@@ -1050,12 +1042,12 @@ fn check_cover_rule(
     let (mut others, mut other_area) = (0.0, 0.0);
     for e in condensates.entries() {
         match e.phase() {
-            CondensatePhase::Supercritical => {
+            CondensatePhase::Supercritical if e.reservoir().value() <= 0.0 => {
                 assert_same_bits(e.reservoir().value(), 0.0);
                 assert_same_bits(e.area_fraction(), 0.0);
                 continue;
             }
-            CondensatePhase::Liquid | CondensatePhase::Solid => {
+            CondensatePhase::Liquid | CondensatePhase::Solid | CondensatePhase::Supercritical => {
                 assert!(e.reservoir().value() > 0.0, "{id}: {e:?}");
             }
         }
@@ -1066,7 +1058,7 @@ fn check_cover_rule(
             CondensatePhase::Liquid if e.substance() == water => {
                 assert_same_bits(e.area_fraction(), basins.area_filled(layer));
             }
-            CondensatePhase::Liquid => {
+            CondensatePhase::Liquid | CondensatePhase::Supercritical => {
                 others += layer.value();
                 other_area += e.area_fraction();
             }
@@ -1082,7 +1074,6 @@ fn check_cover_rule(
                     "{id}: {e:?} over {spread}"
                 );
             }
-            CondensatePhase::Supercritical => {}
         }
     }
     let filled = basins.area_filled(crate::units::Metres::new(others));
@@ -1354,9 +1345,11 @@ fn described(e: &crate::planetary::chem::partition::CondensateEntry) -> String {
 /// are at most `MAX_CONDENSATES` entries, each substance and phase once, in `Partition::publish`'s
 /// order (by reservoir mass, largest first, ties by substance, then phase). Each area is a
 /// fraction, each reservoir and each layer, where the registry has read its density, not
-/// negative, and a supercritical fluid covers nothing. Every liquid and solid that covers an area
-/// is among the figures' liquids or ices, and every substance listed there but water, which keeps
-/// T24.b's ice and its ocean under ice where the partition holds none, has its entry.
+/// negative, and a supercritical fluid that is the air at the surface covers nothing (from
+/// generator version 25 a supercritical reservoir covers its share of the basins, P14.T53.b part
+/// 3). Every liquid and solid that covers an area is among the figures' liquids or ices, and every
+/// substance listed there but water, which keeps T24.b's ice and its ocean under ice where the
+/// partition holds none, has its entry.
 fn check_record_condensates<'a>(
     id: crate::id::BodyId,
     surface: &'a Surface,
@@ -1400,7 +1393,9 @@ fn check_record_condensates<'a>(
         }
         match e.phase() {
             CondensatePhase::Supercritical => {
-                assert_same_bits(area, 0.0);
+                if e.reservoir().value() <= 0.0 {
+                    assert_same_bits(area, 0.0);
+                }
                 tally.supercritical += 1;
             }
             CondensatePhase::Liquid if area > 0.0 => {
@@ -7012,12 +7007,24 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
     );
 }
 
+/// The pinned bodies of P14.T51.l's record ([`SECANT_OTHER_CROSSINGS`], [`SECANT_PARTIALS_ONLY`])
+/// whose passes converge under both roots from generator version 25 (P14.T53.b part 3), where with
+/// part 3 held they ended in brackets, in the walk's order.
+const SECANT_PINNED_CONVERGED: [&str; 5] = [
+    "01ffeb2c5ffe0000.0400",
+    "01ffdb2c1fff0001.0900",
+    "01ffdb2c1fff0001.0b00",
+    "01ffdb2c60020000.0100",
+    "01ffeb2d1ffc0000.0600",
+];
+
 /// P14.T51.l's pinned bodies end at crossings, not only at their pinned bits (research's condition
 /// on the record's leans): each of [`SECANT_OTHER_CROSSINGS`] and [`SECANT_PARTIALS_ONLY`], derived
 /// at the epoch under T51.h's halvings and under the 25 hold's secant steps (`with_pass_root`), is
 /// bracketed, and every bracket round whose published end is the body's albedo stopped at a
 /// crossing of the diagonal: its two ends' g on opposite sides within 2⁻³² in albedo
-/// (`Crossing::is_valid`). It moves no output.
+/// (`Crossing::is_valid`); but [`SECANT_PINNED_CONVERGED`]'s, which converge under both from
+/// generator version 25 (P14.T53.b part 3). It moves no output.
 #[test]
 fn the_secant_root_s_pinned_bodies_end_at_crossings() {
     use crate::planetary::derive::passes::{
@@ -7043,6 +7050,14 @@ fn the_secant_root_s_pinned_bodies_end_at_crossings() {
         .filter(|(name, ..)| pinned.iter().any(|label| system_of(label) == name))
         .collect();
     let check = |label: &str, root: PassRoot, derived: &DerivedBody, crossings: &[Crossing]| {
+        if SECANT_PINNED_CONVERGED.contains(&label) {
+            assert_eq!(
+                derived.convergence(),
+                Convergence::Converged,
+                "{label} under {root:?}"
+            );
+            return;
+        }
         assert!(
             matches!(derived.convergence(), Convergence::Bracketed { .. }),
             "{label} under {root:?}: {:?}",
@@ -12157,7 +12172,9 @@ pub(super) const CLOSURE_HOTHOUSE_BODY: &str = "01ffeb2c5fff0000.0100";
 /// - none keeps Venus's deck below the acid's cycling temperature, 430 K;
 /// - every runaway whose water a runaway's and which is not one publishes its present class,
 ///   `Snowball` beyond the maximum-greenhouse limit now and `Temperate` within it, a runaway at the
-///   hosts' peak alone: LOOK72's 106 K runaway ([`LOOK72_106_K_RUNAWAY`]) a `Snowball` among them;
+///   hosts' peak alone; LOOK72's 106 K runaway ([`LOOK72_106_K_RUNAWAY`]) is a `Snowball` whose
+///   water, kept beyond its escape's capacity from generator version 25, lies as its ice
+///   (P14.T53.b part 3; decision-p14-t53b-part3 §12 (0900));
 /// - decision-pre-23-review item 33's world ([`ITEM_33_WORLD`]) is not a runaway;
 /// - the census's five decked runaways ([`DECKED_FIVE`]) are solved without the deck, inside the
 ///   present limit, each stated with its present ratio, `T_s`, Bond albedo and `p_s`;
@@ -12307,7 +12324,7 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
             now.water_line()
         );
         assert_eq!(now.state, SurfaceState::Snowball);
-        assert_eq!(now.water_state, SurfaceState::RunawayGreenhouse);
+        assert_eq!(now.water_state, SurfaceState::Snowball);
     }
     let item_33: Vec<&PresentBody> = census
         .present
@@ -12605,11 +12622,9 @@ pub(super) struct EnvelopeBody {
     columns: Vec<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
     /// The reservoir that hides its surface, as the record reads it.
     pub(super) hidden: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
-    /// Under P14.T53.b part 3, its partition's reservoir with the most liquid-like fluid under its
-    /// bulk's gravity, whatever its share: the one the record reads.
+    /// Its partition's reservoir with the most liquid-like fluid under its bulk's gravity, whatever
+    /// its share: the one the record reads (P14.T53.b part 3).
     partitioned: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
-    /// Whether part 3 was in force as it was derived.
-    part_three: bool,
 }
 
 impl EnvelopeBody {
@@ -12634,7 +12649,6 @@ impl EnvelopeBody {
             columns: air.critical_columns(gravity).collect(),
             hidden: air.supercritical_reservoir(gravity),
             partitioned: air.partitioned_reservoir(gravity),
-            part_three: crate::planetary::derive::atmosphere::steam_envelope_in_force(),
         }
     }
 
@@ -12834,8 +12848,7 @@ fn assert_envelope_tags(body: &EnvelopeBody) {
 /// supercritical envelope's section stays not modelled at 24, decision-p14-t53b-part3 §5). So no
 /// `Ok` surface lies under a supercritical envelope, and exactly one of the two applies. No
 /// derivation's own state is a steam envelope; a hidden surface's reservoir hides it, and its share
-/// is, to the bit, the air's largest column's under part 2 alone and the partition's reservoir's
-/// under part 3.
+/// is, to the bit, the partition's reservoir's (P14.T53.b part 3).
 #[must_use]
 pub(super) fn envelope_tag_faults(body: &EnvelopeBody) -> Vec<String> {
     let at = || format!("{}: {}", body.label, body.line());
@@ -12874,19 +12887,12 @@ pub(super) fn envelope_tag_faults(body: &EnvelopeBody) -> Vec<String> {
                 at()
             ));
         }
-        // Under part 3 the record reads the partition's reservoir, and the air's own partial
-        // pressures lie at or under their caps; under part 2 alone, the air's largest column.
-        let largest = if body.part_three {
-            body.partitioned.as_ref().map_or(
-                f64::NAN,
-                crate::planetary::derive::atmosphere::SupercriticalReservoir::share,
-            )
-        } else {
-            body.columns
-                .iter()
-                .map(crate::planetary::derive::atmosphere::SupercriticalReservoir::share)
-                .fold(0.0, f64::max)
-        };
+        // The record reads the partition's reservoir, and the air's own partial pressures lie at
+        // or under their caps (P14.T53.b part 3).
+        let largest = body.partitioned.as_ref().map_or(
+            f64::NAN,
+            crate::planetary::derive::atmosphere::SupercriticalReservoir::share,
+        );
         let share = hidden.share();
         let same = !share.is_nan()
             && !largest.is_nan()
@@ -12899,32 +12905,6 @@ pub(super) fn envelope_tag_faults(body: &EnvelopeBody) -> Vec<String> {
         }
     }
     faults
-}
-
-/// P14.T53.b part 2 (decision-absurd-states-24 R2.1): the census's [`SUPERCRITICAL_METHANE_BODY`],
-/// a solid body under kilobars of methane 2 K above its critical point, takes the envelope section,
-/// its surface not applicable and its envelope not modelled, under methane's reservoir (to version
-/// 23 it kept its surface). Its figures are printed: `T_s`, `p_i`, p*, the melting pressure, the
-/// share and g.
-#[test]
-fn under_every_24_hold_the_census_s_methane_snowball_takes_the_envelope_section() {
-    let sets = [("sample", SEED, supercritical_methane_context())];
-    let find = |bodies: Vec<EnvelopeBody>| {
-        bodies
-            .into_iter()
-            .find(|body| body.id == SUPERCRITICAL_METHANE_BODY)
-            .expect("the census body is present at the epoch")
-    };
-    let batch = find(envelope_census(&sets));
-    eprintln!("{SUPERCRITICAL_METHANE_BODY}: {}", batch.line());
-    assert_envelope_tags(&batch);
-    assert!(batch.class.has_solid_surface(), "{}", batch.line());
-    assert_eq!(batch.surface, SectionState::NotApplicable);
-    assert_eq!(batch.envelope, SectionState::NotModelled);
-    let hidden = batch.hidden.expect("methane's reservoir hides the surface");
-    eprintln!("  hidden by {}", EnvelopeBody::column_line(&hidden));
-    assert_eq!(hidden.gas(), Gas::Methane);
-    assert!(hidden.temperature_ratio() >= 1.0);
 }
 
 /// decision-p14-t53b-part3 §12 (0400): with every 25 hold in force, P14.T53.b part 3's, the
@@ -13231,15 +13211,9 @@ struct SteamBody {
     /// Its free water beyond its escape's capacity, kg: its inventory's after the cosmic
     /// shoreline, less the timed route's loss, none below zero (P14.T53.b part 3's steam).
     beyond_the_capacity: f64,
-    /// Its air's oxygen, carbon dioxide and methane columns, as weights, Pa: its division's.
-    division: [f64; 3],
     /// Its air's column and airborne weights by gas, in [`Gas::ALL`]'s order, Pa.
     columns: [f64; 9],
     airborne: [f64; 9],
-    /// Its air's column water as a mass, kg: the weight over its record's bulk's g ÷ 4πR².
-    water_column_kg: f64,
-    /// Its record's surface material, where its surface is `Ok`.
-    material: Option<crate::planetary::derive::atmosphere::SurfaceMaterial>,
     /// Its record's surface pressure, Pa, where its surface is `Ok`: finite.
     record_p_s: Option<f64>,
     /// Whether its derivation's air has no surface pressure, a gas envelope's.
@@ -13254,15 +13228,6 @@ struct SteamBody {
     /// Its passes and how they ended.
     passes: u32,
     convergence: crate::planetary::derive::passes::Convergence,
-    /// Its derivation's and record's whole `Debug` text.
-    text: String,
-    /// Its record's `Debug` text alone.
-    record_text: String,
-    /// Its derivation's `Debug` text with its atmosphere's struck out, and its air's partial
-    /// pressures, which its surface's weathering copies (P14.T54.b.e), wherever they are printed.
-    derived_but_air: String,
-    /// Its surface's lag.
-    lag: crate::planetary::derive::SurfaceLag,
 }
 
 impl SteamBody {
@@ -13305,18 +13270,8 @@ impl SteamBody {
                 let free = derived.inventory().water().value() * escape.shoreline().kept();
                 (free - escape.oxygen().water_lost().value()).max(0.0)
             }),
-            division: [Gas::Oxygen, Gas::CarbonDioxide, Gas::Methane]
-                .map(|gas| air.inventory_weights().of(gas).value()),
             columns: Gas::ALL.map(|gas| air.inventory_weights().of(gas).value()),
             airborne: Gas::ALL.map(|gas| air.partial_pressures().of(gas).value()),
-            // Over the bulk its passes read, its record's (a moon's or a member's stated bulk, not
-            // its derivation's solved radius).
-            water_column_kg: {
-                let r = crate::units::Metres::from(bulk.radius()).value();
-                let weight = bulk.surface_gravity().value() / (4.0 * PI * r * r);
-                air.inventory_weights().of(Gas::Water).value() / weight
-            },
-            material: record.surface().ok().map(Surface::material),
             record_p_s: record
                 .surface()
                 .ok()
@@ -13328,15 +13283,6 @@ impl SteamBody {
             hidden: air.supercritical_reservoir(gravity),
             passes: derived.atmosphere_passes(),
             convergence: derived.convergence(),
-            text: format!("{record:?} {derived:?}"),
-            record_text: format!("{record:?}"),
-            derived_but_air: format!("{derived:?}")
-                .replace(&format!("{air:?}"), "<atmosphere>")
-                .replace(
-                    &format!("{:?}", air.partial_pressures()),
-                    "<partial pressures>",
-                ),
-            lag: derived.surface_lag(),
         }
     }
 
@@ -13429,19 +13375,13 @@ fn part_three_census(sets: &[(&str, Seed, &SystemContext)]) -> Vec<SteamBody> {
     bodies
 }
 
-/// Part 3's movers between the census `on` and the same with part 3 held, `off`, printed, with
-/// the boarding items B1, B4 and B5 each body fails (decision-p14-t53b-part3 §8), the count of
-/// movers and the walk's passes on and off.
-fn part_three_movers(on: &[SteamBody], off: &[SteamBody]) -> (Vec<String>, u32, (u64, u64)) {
-    use crate::planetary::derive::passes::Convergence;
+/// The boarding items B1, B4 and B5 each body of the census `on` fails (decision-p14-t53b-part3
+/// §8), and the walk's passes.
+fn part_three_boarding(on: &[SteamBody]) -> (Vec<String>, u64) {
     let mut failures = Vec::new();
-    let mut movers = 0;
-    let (mut passes_on, mut passes_off) = (0_u64, 0_u64);
-    eprintln!("MOVERS (part 3 on, then off):");
-    for (a, b) in on.iter().zip(off) {
-        assert_eq!(a.id, b.id);
-        passes_on += u64::from(a.passes);
-        passes_off += u64::from(b.passes);
+    let mut passes = 0_u64;
+    for a in on {
+        passes += u64::from(a.passes);
         // A gas envelope has no surface pressure (`None`, the census's `NaN`), which is no figure;
         // every other body's is finite, its record's too (decision-p14-t53b-part3 and main's relay of 2026-10-26).
         let p_s = if a.no_surface_pressure {
@@ -13452,13 +13392,6 @@ fn part_three_movers(on: &[SteamBody], off: &[SteamBody]) -> (Vec<String>, u32, 
         let record = a.record_p_s.is_none_or(f64::is_finite);
         if !(p_s && record && a.t_s.is_finite() && a.albedo.is_finite()) {
             failures.push(format!("B4 not finite: {}: {}", a.label, a.line()));
-        }
-        let bracketed = matches!(
-            a.convergence,
-            Convergence::Bracketed { residual, .. } if residual > 1e-6
-        ) && matches!(b.convergence, Convergence::Converged);
-        if (a.convergence.is_jump() && !b.convergence.is_jump()) || bracketed {
-            failures.push(format!("B4 newly bracketed: {}: {}", a.label, a.line()));
         }
         // B1: condensed water on a present runaway or a steam envelope that is no supercritical
         // reservoir above water's critical point (its partition's column), or any H₂O liquid or
@@ -13478,99 +13411,16 @@ fn part_three_movers(on: &[SteamBody], off: &[SteamBody]) -> (Vec<String>, u32, 
         {
             failures.push(format!("B5 steam envelope: {}: {}", a.label, a.line()));
         }
-        if a.text != b.text {
-            movers += 1;
-            eprintln!("  {}\n    on  {}\n    off {}", a.label, a.line(), b.line());
-        }
     }
-    (failures, movers, (passes_on, passes_off))
+    (failures, passes)
 }
 
-/// The airless and tenuous bodies that keep water beyond their escape's capacity as past-only
-/// runaways, their water ice on their surfaces that their state lists nowhere
-/// (decision-p14-t53b-part3 §13.2; P14.T56.g's class and count (xv)).
-const AIRLESS_KEPT_WATER: [&str; 2] = ["41ffecb200000005.0600", "42002cb1ffc00009.0203"];
-
-/// decision-p14-t53b-part3 §13.2–§13.3 over the census `on` against the same with part 3 held,
-/// `off`, each failure pushed to `failures`: the airless bodies keeping water, exactly
-/// [`AIRLESS_KEPT_WATER`], their records and figures the part-3-off run's but for their column's
-/// water; and every critical column beyond 2.5 `T_c` keeping its verdict with its line at 0.75 and
-/// 1.25 times, and none.
-fn check_part_three_rulings(on: &[SteamBody], off: &[SteamBody], failures: &mut Vec<String>) {
+/// decision-p14-t53b-part3 §13.3 over the census `on`, each failure pushed to `failures`: every
+/// critical column beyond 2.5 `T_c` keeping its verdict with its line at 0.75 and 1.25 times, and
+/// none.
+fn check_part_three_rulings(on: &[SteamBody], failures: &mut Vec<String>) {
     use crate::planetary::params::THIN_ENVELOPE_FRACTION;
     use crate::units::consts::GRAVITATIONAL_CONSTANT;
-    let water = usize::from(Gas::Water.substance().index());
-    let mut airless = Vec::new();
-    for (a, b) in on.iter().zip(off) {
-        let thin = matches!(a.state, SurfaceState::Airless | SurfaceState::Tenuous);
-        if !(thin && a.water_column > 0.0 && b.water_column <= 0.0) {
-            continue;
-        }
-        airless.push(a.id.clone());
-        let at = format!("{}: {} against {}", a.label, a.line(), b.line());
-        eprintln!(
-            "AIRLESS KEEPING WATER {}: {:.4e} bar of water, T_s {:.3} K, g {:.3}, A {:.4}, {:?}, \
-             {:?}",
-            a.label,
-            a.water_column / 1e5,
-            a.t_s,
-            a.g,
-            a.albedo,
-            a.material,
-            a.lag
-        );
-        let same_but_water = (0..9)
-            .all(|k| k == water || a.columns[k].total_cmp(&b.columns[k]).is_eq())
-            && (0..9).all(|k| k == water || a.airborne[k].total_cmp(&b.airborne[k]).is_eq());
-        let ok = (a.water_column_kg / a.beyond_the_capacity - 1.0).abs() < 1e-12
-            && a.airborne[water] <= 1e-6
-            && a.record_text == b.record_text
-            && a.derived_but_air == b.derived_but_air
-            && same_but_water
-            && a.state == b.state
-            && a.t_s.total_cmp(&b.t_s).is_eq()
-            && a.p_s.total_cmp(&b.p_s).is_eq()
-            && a.albedo.total_cmp(&b.albedo).is_eq()
-            && a.t_s < 273.15;
-        if !ok {
-            // Where the derivations differ outside their air, the first difference, for the record.
-            let first = a
-                .derived_but_air
-                .char_indices()
-                .zip(b.derived_but_air.chars())
-                .find(|((_, x), y)| x != y)
-                .map_or(0, |((i, _), _)| i);
-            let near = |text: &str| {
-                let start = text.floor_char_boundary(first.saturating_sub(200));
-                let end = text.floor_char_boundary((first + 200).min(text.len()));
-                text[start..end].to_owned()
-            };
-            eprintln!(
-                "§13.2 {}: derivations outside the air first differ at {first}:\n  on  {}\n  off {}",
-                a.label,
-                near(&a.derived_but_air),
-                near(&b.derived_but_air)
-            );
-            failures.push(format!(
-                "§13.2 airless keeping water: {at}; column {:e} kg against {:e} beyond the \
-                 capacity, airborne {:e} Pa, record the same {}, derivation but its air the same \
-                 {}, columns but water the same {same_but_water}, T_s {} p_s {} A {}",
-                a.water_column_kg,
-                a.beyond_the_capacity,
-                a.airborne[water],
-                a.record_text == b.record_text,
-                a.derived_but_air == b.derived_but_air,
-                a.t_s.total_cmp(&b.t_s).is_eq(),
-                a.p_s.total_cmp(&b.p_s).is_eq(),
-                a.albedo.total_cmp(&b.albedo).is_eq(),
-            ));
-        }
-    }
-    if airless != AIRLESS_KEPT_WATER {
-        failures.push(format!(
-            "§13.2 the airless bodies keeping water: {airless:?}"
-        ));
-    }
     let fourpi_g = 4.0 * PI * GRAVITATIONAL_CONSTANT;
     for a in on {
         let Some(c) = a.column.filter(|c| c.temperature_ratio() > 2.5) else {
@@ -13600,8 +13450,8 @@ fn check_part_three_rulings(on: &[SteamBody], off: &[SteamBody], failures: &mut 
 /// Part 3's census groups (decision-p14-t53b-part3 §9), printed: every steam envelope, the
 /// runaways keeping water, the supercritical reservoirs under an `Ok` surface, the reservoirs that
 /// water hides under another state, those beyond 2.5 `T_c` and the four Jeans-retaining ice-bulk
-/// planets, on against off.
-fn print_part_three_groups(on: &[SteamBody], off: &[SteamBody]) {
+/// planets.
+fn print_part_three_groups(on: &[SteamBody]) {
     eprintln!("STEAM ENVELOPES:");
     for a in on
         .iter()
@@ -13640,31 +13490,31 @@ fn print_part_three_groups(on: &[SteamBody], off: &[SteamBody]) {
     }
     eprintln!("THE JEANS-RETAINING ICE BULKS:");
     for id in JEANS_RETAINING_ICE_BULKS {
-        for (a, b) in on.iter().zip(off).filter(|(a, _)| a.id == id) {
-            eprintln!("  {}\n    on  {}\n    off {}", a.label, a.line(), b.line());
+        for a in on.iter().filter(|a| a.id == id) {
+            eprintln!("  {}: {}", a.label, a.line());
         }
     }
 }
 
 /// P14.T53.b part 3's census and boarding test (decision-p14-t53b-part3 §8–§9), run by name over
 /// part 1's census set (the first 60 sample systems, the golden systems and the 27 systems of
-/// LOOK72's triaged bodies), each generated afresh with every landed 25 hold in force, and again at
-/// 24 alone, part 3 held: its movers by group, every steam envelope, the supercritical reservoirs
-/// under an `Ok` surface, the four Jeans-retaining ice-bulk planets' water, and the walk's passes.
-/// It asserts the boarding items it can see by body:
+/// LOOK72's triaged bodies), each generated afresh with every landed 25 hold in force, part 3 in
+/// force from generator version 25: its groups, every steam envelope, the supercritical
+/// reservoirs under an `Ok` surface, the four Jeans-retaining ice-bulk planets' water, and the
+/// walk's passes. It asserts the boarding items it can see by body:
 ///
 /// - B1: no present runaway or steam envelope holds H₂O condensed, on its record or in its air;
-/// - B3: [`SUPERCRITICAL_METHANE_BODY`] keeps its envelope section;
-/// - B4: every figure finite, and no body bracketed or at a jump that part 3 held is not;
+/// - B3: [`SUPERCRITICAL_METHANE_BODY`] keeps its surface section;
+/// - B4: every figure finite;
 /// - B5: every steam envelope's division a runaway's and its surface not `Ok`; that it is a label
 ///   alone holds by construction (`Atmosphere::state` never gives it, so no figure reads it).
 ///
-/// B2 is `under_every_25_hold_part_three_leaves_venus_earth_mars_and_titan_to_the_bit`'s. It is
-/// the census of part 3's landing at 25 (decision-p14-t53b-part3 §8, as main relayed its riding
-/// 25 on 2026-10-27).
+/// B2 is `under_every_25_hold_venus_earth_mars_and_titan_publish_their_own_states`'. It is the
+/// census of part 3 at 25 (decision-p14-t53b-part3 §8, as main relayed its riding 25 on
+/// 2026-10-27).
 #[test]
 #[ignore = "a measurement and boarding test for P14.T53.b part 3's record, run by name"]
-fn under_every_25_hold_part_three_s_movers_are_stated() {
+fn under_every_25_hold_part_three_s_census_is_stated() {
     use crate::planetary::chem::partition::CondensatePhase;
     use crate::planetary::testing::with_every_25_hold;
     let look72 = look72_triaged_contexts();
@@ -13681,20 +13531,13 @@ fn under_every_25_hold_part_three_s_movers_are_stated() {
         .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
         .collect();
     let on = with_every_25_hold(|| part_three_s_own_25_census(&sets));
-    let off = part_three_census(&sets);
-    assert_eq!(on.len(), off.len());
-    let (mut failures, movers, passes) = part_three_movers(&on, &off);
-    print_part_three_groups(&on, &off);
-    check_part_three_rulings(&on, &off, &mut failures);
+    let (mut failures, passes) = part_three_boarding(&on);
+    print_part_three_groups(&on);
+    check_part_three_rulings(&on, &mut failures);
     // decision-p14-t53b-part3 §12 (0300): a past-only runaway keeping water beyond its escape's
-    // capacity, one of the four Jeans-retaining ice bulks, holds it as its present class's ice,
-    // its oxygen and carbon its division's to the bit.
-    for (a, b) in on
-        .iter()
-        .zip(&off)
-        .filter(|(a, _)| a.id == KEPT_WATER_ICE_BULK)
-    {
-        let at = format!("{}: {} against {}", a.label, a.line(), b.line());
+    // capacity, one of the four Jeans-retaining ice bulks, holds it as its present class's ice.
+    for a in on.iter().filter(|a| a.id == KEPT_WATER_ICE_BULK) {
+        let at = format!("{}: {}", a.label, a.line());
         assert_eq!(a.published, SurfaceState::Snowball, "{at}");
         assert_eq!(a.water_state, SurfaceState::Snowball, "{at}");
         let kept = a
@@ -13713,9 +13556,6 @@ fn under_every_25_hold_part_three_s_movers_are_stated() {
                 && !a.water_entries.is_empty(),
             "{at}"
         );
-        for (x, y) in a.division.iter().zip(&b.division) {
-            assert_same_bits(*x, *y);
-        }
     }
     // decision-p14-t53b-part3 §12 (0900): LOOK72's 106 K past runaway keeps water beyond its
     // escape's capacity, as ice alone, a `Snowball`.
@@ -13750,11 +13590,9 @@ fn under_every_25_hold_part_three_s_movers_are_stated() {
         ));
     }
     eprintln!(
-        "{} bodies of {} systems; {movers} moved; passes {} against {}",
+        "{} bodies of {} systems; {passes} passes",
         on.len(),
-        sets.len(),
-        passes.0,
-        passes.1
+        sets.len()
     );
     for failure in &failures {
         eprintln!("FAILURE {failure}");

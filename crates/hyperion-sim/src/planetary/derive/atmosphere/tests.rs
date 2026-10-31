@@ -882,7 +882,8 @@ fn a_runaway_world_carries_the_oxygen_of_the_water_it_lost_less_its_sinks() {
     // P14.T24.f: the oxygen of the water lost, less what escapes with the hydrogen (Luger and
     // Barnes 2015, eqs. 5, 11 and 12) and what the surface takes up at Earth's rate per unit area
     // (Catling 2014, through Luger and Barnes's §2.5.1), by hand over the whole age; the published
-    // air carries the oxygen the escape's timed route keeps (P14.T53.a, from generator version 24).
+    // air's column carries the oxygen the escape's timed route keeps (P14.T53.a, from generator
+    // version 24).
     let (water, age, xuv) = (1.4e22, 5e8, 1.0);
     let air = runaway_earth(water, age, xuv, 255.0);
     assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
@@ -920,6 +921,7 @@ fn a_runaway_world_carries_the_oxygen_of_the_water_it_lost_less_its_sinks() {
     );
     let weight = g / (4.0 * core::f64::consts::PI * math::powi(radius.value(), 2));
     let o2 = air.partial_pressures().of(Gas::Oxygen).value();
+    let column = air.inventory_weights().of(Gas::Oxygen).value();
     let timed = air
         .escape()
         .expect("the batch records every body's escape")
@@ -927,16 +929,20 @@ fn a_runaway_world_carries_the_oxygen_of_the_water_it_lost_less_its_sinks() {
         .kept()
         .value();
     assert!(
-        (o2 / (timed * weight) - 1.0).abs() < 1e-12,
-        "{o2} Pa against {timed} kg kept"
+        (column / (timed * weight) - 1.0).abs() < 1e-12,
+        "{column} Pa against {timed} kg kept"
     );
+    // From generator version 25 the partition caps its oxygen, at 5.3 times its critical
+    // temperature, at its critical isochore, the rest a supercritical reservoir at its surface
+    // (P14.T53.b part 3; decision-p14-t53b-part3 §13.3), so that less of it is airborne.
+    assert!(o2 < column, "{o2} Pa airborne of {column}");
     eprintln!(
         "ten oceans lost: {:.0} bar of O2 at {:.1} Gyr, η {eta:.3} (the whole age's {:.0} bar)",
         o2 / 1e5,
         age / 1e9,
         kept * weight / 1e5
     );
-    // Oxygen never condenses, and the air holds it with the carbon dioxide.
+    // The air holds its oxygen with the carbon dioxide.
     assert!(o2 > air.partial_pressures().of(Gas::CarbonDioxide).value());
     // One that lost no water carries none.
     let dry = runaway_earth(0.0, age, xuv, 255.0);
@@ -1135,7 +1141,10 @@ fn a_runaway_world_with_a_young_melt_keeps_less_oxygen() {
     // Science-p14-t24f §3, through the derivation: the wet runaway world of `derive_body`'s golden,
     // about the Sun with its history, whose young magma ocean lasted 31.6 Myr (P14.T28.a's
     // `molten_until`), keeps less O₂ than the same world with none, each the oxygen its escape's
-    // timed route keeps (P14.T53.a; to version 23 the melt's share by hand, its whole-age rule's).
+    // timed route keeps in its column (P14.T53.a; to version 23 the melt's share by hand, its
+    // whole-age rule's). From generator version 25 the partition caps both at oxygen's critical
+    // isochore, the rest a supercritical reservoir at the surface, so that their airborne oxygen is
+    // the same (P14.T53.b part 3; decision-p14-t53b-part3 §13.3).
     let disc = solar_disc();
     let melt = YOUNG_MELT;
     let none = derive(&wet_runaway(None), &disc, SOLAR_AGE);
@@ -1145,12 +1154,12 @@ fn a_runaway_world_with_a_young_melt_keeps_less_oxygen() {
     }
     let (o2, o2_molten) = (
         none.atmosphere()
-            .partial_pressures()
+            .inventory_weights()
             .of(Gas::Oxygen)
             .value(),
         molten
             .atmosphere()
-            .partial_pressures()
+            .inventory_weights()
             .of(Gas::Oxygen)
             .value(),
     );
@@ -1180,8 +1189,8 @@ fn a_runaway_world_with_a_young_melt_keeps_less_oxygen() {
         o2 / 1e5,
         o2_molten / 1e5
     );
-    // Nothing else of its air moves.
-    for gas in Gas::ALL.into_iter().filter(|&gas| gas != Gas::Oxygen) {
+    // Nothing of its air moves.
+    for gas in Gas::ALL {
         assert_eq!(
             none.atmosphere().partial_pressures().of(gas),
             molten.atmosphere().partial_pressures().of(gas),
@@ -6640,18 +6649,16 @@ fn a_pass_publishes_the_state_its_previous_pass_carried() {
 
 // P14.T53.b part 3: the steam envelope and the partition's cap (decision-p14-t53b-part3).
 
-/// `run` under P14.T53.b part 3 alone, every landed 25 hold in force but P14.T53.e's and
-/// P14.T51.l's, which hold their own movers apart, and at 24 alone, as the two results: part 3's
-/// movers against 24.
-fn with_part_three<R>(run: impl Fn() -> R) -> (R, R) {
+/// `run` under P14.T53.b part 3, in force from generator version 25, with every landed 25 hold in
+/// force but P14.T53.e's and P14.T51.l's, whose movers their own tests state.
+fn with_part_three<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::passes::{PassRoot, with_pass_root};
     use crate::planetary::testing::with_every_25_hold;
-    let part_three = || {
+    with_every_25_hold(|| {
         with_present_state(PresentStateRules::Held, || {
-            with_pass_root(PassRoot::Halvings, &run)
+            with_pass_root(PassRoot::Halvings, run)
         })
-    };
-    (with_every_25_hold(part_three), run())
+    })
 }
 
 /// An Earth of the Sun inside the runaway limit now ([`earth_inputs`] at `equilibrium`, K) holding
@@ -6689,30 +6696,6 @@ fn water_column_kg(inputs: &AtmosphereInputs, air: &Atmosphere) -> f64 {
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
     let g = GRAVITATIONAL_CONSTANT * m / (r * r);
     air.inventory_weights().of(Gas::Water).value() * 4.0 * core::f64::consts::PI * r * r / g
-}
-
-/// P14.T53.b part 3 is held until the 24 → 25 bump: the rules in force are version 24's and
-/// before, with no cap above a critical point, no steam kept and no steam envelope.
-#[test]
-fn the_steam_envelope_is_held_only_until_the_25_bump() {
-    assert!(
-        crate::GENERATOR_VERSION < supercritical::STEAM_ENVELOPE_VERSION,
-        "the 24 → 25 bump puts P14.T53.b part 3 on the record (decision-p14-t53b-part3 §8): the \
-         partition's cap at the critical isochore (`CriticalCap::Isochore`), the section from the \
-         partition's reservoir (`Atmosphere::supercritical_reservoir`), the steam a runaway keeps \
-         (`Body::divide`, `water_follows`) and the steam envelope's label \
-         (`Atmosphere::published_state`). Delete `STEAM_ENVELOPE_VERSION`, `SteamEnvelopeRules` \
-         with its `Held` arm, `CriticalCap::Uncapped` with the arms that read it, the tests' \
-         `with_steam_envelope`, its switch in `with_every_25_hold` and this test; part 2's \
-         air-based predicate (`hiding_reservoir`) then goes too, and the floor test takes \
-         820e6ee00000008d.0900's exemption (decision-p14-t53b-part3 §13.1)"
-    );
-    assert_eq!(SteamEnvelopeRules::in_force(), SteamEnvelopeRules::Held);
-    assert!(!steam_envelope_in_force());
-    assert!(with_steam_envelope(
-        SteamEnvelopeRules::Steam,
-        steam_envelope_in_force
-    ));
 }
 
 /// P14.T53.g is held until the 25 → 26 bump: the rules in force are version 25's and before, a
@@ -6774,11 +6757,11 @@ fn the_line_switch_is_held_only_until_the_26_bump() {
 /// water keeps nearly all of it beyond its escape's capacity, and its water above its critical
 /// point holds a liquid-like reservoir of far more than a thousandth of its mass: its published
 /// state is a steam envelope, its record's section the envelope's, and every figure its labelled
-/// runaway's solve's. Under part 3's hold it is the runaway that lost all its water.
+/// runaway's solve's.
 #[test]
 fn under_every_25_hold_a_quarter_water_world_inside_the_runaway_limit_is_a_steam_envelope() {
     let inputs = wet_runaway_earth(0.25 * EARTH_MASS_KG, 0.3, 300.0);
-    let (on, off) = with_part_three(|| {
+    let (air, reservoir, surface) = with_part_three(|| {
         let air = atmosphere(&inputs);
         let g = MetresPerSecondSquared::new(
             GRAVITATIONAL_CONSTANT * inputs.mass.value() / math::powi(inputs.radius.value(), 2),
@@ -6789,7 +6772,6 @@ fn under_every_25_hold_a_quarter_water_world_inside_the_runaway_limit_is_a_steam
             has_surface_section(PlanetClass::Rocky, &air, g),
         )
     });
-    let (air, reservoir, surface) = on;
     let reservoir = reservoir.expect("its steam hides its surface");
     eprintln!(
         "a quarter-water Earth inside the runaway limit: {:?} labelled {:?} at {:.1} K under \
@@ -6817,10 +6799,6 @@ fn under_every_25_hold_a_quarter_water_world_inside_the_runaway_limit_is_a_steam
     // differs.
     assert_eq!(air.runaway_deck(), RunawayDeck::Kept);
     assert_same_bits(air.cloud_fraction(), 1.0);
-    let (air, _, surface) = off;
-    assert_eq!(air.published_state(), SurfaceState::RunawayGreenhouse);
-    assert!(surface);
-    assert_same_bits(air.partial_pressures().of(Gas::Water).value(), 0.0);
 }
 
 /// P14.T53.f on part 3's steam worlds, under every 26 hold: an Earth inside the runaway limit with
@@ -6913,31 +6891,29 @@ fn under_every_26_hold_part_three_s_steam_worlds_take_their_envelope_s_model() {
 }
 
 /// The plan's test: an Earth with Earth's water inside the runaway limit about the Sun loses its
-/// oceans as today, its escape's capacity some ten oceans over its history: its atmosphere is the
-/// same to the bit with part 3 and without.
+/// oceans as today, its escape's capacity some ten oceans over its history: it keeps no steam, and
+/// its published state is the runaway's.
 #[test]
 fn under_every_25_hold_an_earth_water_world_inside_the_runaway_limit_loses_its_oceans() {
     let inputs = earth_inputs(300.0, Insolation::InsideRunaway);
-    let (on, off) = with_part_three(|| atmosphere(&inputs));
-    let lost = on.escape().unwrap().oxygen().water_lost().value();
+    let air = with_part_three(|| atmosphere(&inputs));
+    let lost = air.escape().unwrap().oxygen().water_lost().value();
     eprintln!(
         "an Earth-water runaway: {:.3e} kg of water, {lost:.3e} kg lost; {:?} at {:.2} K",
         inputs.inventory.water().value(),
-        on.state(),
-        on.surface_temperature().value()
+        air.state(),
+        air.surface_temperature().value()
     );
-    assert_same_bits(steam_beyond_the_capacity(&inputs, &on), 0.0);
-    // To the bit: the `Debug` text tells −0 from +0, which `PartialEq` does not.
-    assert_eq!(format!("{on:?}"), format!("{off:?}"));
-    assert_eq!(on.published_state(), SurfaceState::RunawayGreenhouse);
-    assert_same_bits(on.partial_pressures().of(Gas::Water).value(), 0.0);
+    assert_same_bits(steam_beyond_the_capacity(&inputs, &air), 0.0);
+    assert_eq!(air.published_state(), SurfaceState::RunawayGreenhouse);
+    assert_same_bits(air.partial_pressures().of(Gas::Water).value(), 0.0);
 }
 
 /// decision-p14-t53b-part3 §4: a runaway that keeps water beyond its escape's capacity keeps it
-/// as steam to 10⁻¹², its oxygen and carbon its division's to the bit. A present runaway's steam
-/// lies all in its air over its surface; a past-only runaway's stands as its present class holds it,
-/// a `Snowball`'s ice or a `Temperate` world's sea, over the water it kept, not its inventory's;
-/// one that keeps none is part 1's to the bit.
+/// as steam to 10⁻¹². A present runaway's steam lies all in its air over its surface; a past-only
+/// runaway's stands as its present class holds it, a `Snowball`'s ice or a `Temperate` world's sea,
+/// over the water it kept, not its inventory's; one that keeps none keeps its water a runaway's,
+/// as part 1 has it.
 #[test]
 fn under_every_25_hold_a_runaway_keeps_its_water_beyond_its_escape_s_capacity() {
     use crate::planetary::hooks::figures::cover;
@@ -6970,7 +6946,7 @@ fn under_every_25_hold_a_runaway_keeps_its_water_beyond_its_escape_s_capacity() 
         ),
     ];
     for (inputs, water_state) in cases {
-        let (on, off) = with_part_three(|| atmosphere(&inputs));
+        let on = with_part_three(|| atmosphere(&inputs));
         let kept = steam_beyond_the_capacity(&inputs, &on);
         let at = format!(
             "{water_state:?}: {:?} at {:.2} K under {:.2} bar, {kept:.4e} kg kept",
@@ -6985,14 +6961,6 @@ fn under_every_25_hold_a_runaway_keeps_its_water_beyond_its_escape_s_capacity() 
             "{at}"
         );
         assert_eq!(on.water_state(), water_state, "{at}");
-        assert_eq!(off.water_state(), SurfaceState::RunawayGreenhouse, "{at}");
-        assert_eq!(on.state(), off.state(), "{at}");
-        for gas in [Gas::Oxygen, Gas::CarbonDioxide, Gas::Nitrogen] {
-            assert_same_bits(
-                on.inventory_weights().of(gas).value(),
-                off.inventory_weights().of(gas).value(),
-            );
-        }
         let (r, g) = (
             inputs.radius,
             MetresPerSecondSquared::new(
@@ -7019,25 +6987,19 @@ fn under_every_25_hold_a_runaway_keeps_its_water_beyond_its_escape_s_capacity() 
             let whole = 1.4e21 / (4.0 * core::f64::consts::PI * r.value() * r.value());
             assert!(surface < whole, "{at}: {surface} against {whole}");
         }
-        assert_same_bits(
-            cover::surface_water(&off, inputs.inventory.water(), r, g, 1.0).value(),
-            0.0,
-        );
     }
-    // One that keeps none is part 1's to the bit.
+    // One that keeps none keeps its water a runaway's, as part 1 has it.
     for case in past_only_runaways() {
-        let (on, off) = with_part_three(|| atmosphere(&case.inputs));
+        let on = with_part_three(|| atmosphere(&case.inputs));
         assert_same_bits(steam_beyond_the_capacity(&case.inputs, &on), 0.0);
-        assert_eq!(format!("{on:?}"), format!("{off:?}"));
-        assert_eq!(format!("{on:?}"), format!("{:?}", case.air));
+        assert_eq!(on.water_state(), SurfaceState::RunawayGreenhouse, "{on:?}");
     }
 }
 
 /// The plan's test (decision-p14-t51a-partition §5; science-p14-t24f §5's 1,600–3,100 bar airs): a
 /// methane world warmed above methane's 190.564 K critical point by its nitrogen holds about its
 /// critical isochore's pressure of methane in its air at its surface temperature, its cap's
-/// h^(1 − d) of it, the rest a liquid-like reservoir that hides its surface (part 2's tags); under
-/// part 3's hold all of it is airborne.
+/// h^(1 − d) of it, the rest a liquid-like reservoir that hides its surface (part 2's tags).
 #[test]
 fn under_every_25_hold_a_nitrogen_warmed_methane_world_holds_its_isochore_of_methane() {
     // 2.5 kbar of methane, carried as its carbon, and 50 bar of nitrogen on an Earth at 185 K
@@ -7061,7 +7023,7 @@ fn under_every_25_hold_a_nitrogen_warmed_methane_world_holds_its_isochore_of_met
         ..earth_inputs(185.0, Insolation::BeyondMaximumGreenhouse)
     };
     let g = MetresPerSecondSquared::new(9.82);
-    let ((on, reservoir, surface), (off, _, _)) = with_part_three(|| {
+    let (on, reservoir, surface) = with_part_three(|| {
         let air = atmosphere(&inputs);
         (
             air,
@@ -7080,7 +7042,7 @@ fn under_every_25_hold_a_nitrogen_warmed_methane_world_holds_its_isochore_of_met
     let held = methane_in_the_air(&on);
     eprintln!(
         "a nitrogen-warmed methane world: {:?} at {:.2} K under {:.1} bar; CH4 {:.2} bar in the \
-         air against p* {:.2} bar, column {:.1} bar; {:?}; off: {:.2} K under {:.1} bar",
+         air against p* {:.2} bar, column {:.1} bar; {:?}",
         on.state(),
         t_s.value(),
         on.surface_pressure().unwrap().value() / PASCALS_PER_BAR,
@@ -7088,8 +7050,6 @@ fn under_every_25_hold_a_nitrogen_warmed_methane_world_holds_its_isochore_of_met
         isochore / PASCALS_PER_BAR,
         on.inventory_weights().of(Gas::Methane).value() / PASCALS_PER_BAR,
         (reservoir, on.supercritical_column()),
-        off.surface_temperature().value(),
-        off.surface_pressure().unwrap().value() / PASCALS_PER_BAR,
     );
     assert!(t_s.value() > 190.564, "{on:?}");
     // Its cap is the line at its humidity's h^(1 − d) (the partition's pull between its branches,
@@ -7110,30 +7070,25 @@ fn under_every_25_hold_a_nitrogen_warmed_methane_world_holds_its_isochore_of_met
         "{column:?}"
     );
     assert_eq!(on.published_state(), on.state());
-    assert_same_bits(
-        off.partial_pressures().of(Gas::Methane).value(),
-        off.inventory_weights().of(Gas::Methane).value(),
-    );
 }
 
-/// decision-p14-t53b-part3 §5, B2: with part 3 on, the table's Venus, Earth, Mars and Titan and the
-/// measured Venus are the same to the bit as without it, and each keeps its surface; Venus's carbon
-/// dioxide lies far under its isochore, all of it airborne.
+/// decision-p14-t53b-part3 §5, B2: with part 3 in force, the table's Venus, Earth, Mars and Titan
+/// each publish their own state, none a steam envelope.
 #[test]
-fn under_every_25_hold_part_three_leaves_venus_earth_mars_and_titan_to_the_bit() {
-    let ((table_on, venus_on), (table_off, venus_off)) =
-        with_part_three(|| (table(), measured_venus()));
+fn under_every_25_hold_venus_earth_mars_and_titan_publish_their_own_states() {
+    let table = with_part_three(table);
     for name in ["Venus", "Earth", "Mars", "Titan"] {
-        let (on, off) = (found(&table_on, name), found(&table_off, name));
+        let body = found(&table, name);
         eprintln!(
             "the table's {name}: {:?} at {:.3} K",
-            on.atmosphere().published_state(),
-            on.atmosphere().surface_temperature().value()
+            body.atmosphere().published_state(),
+            body.atmosphere().surface_temperature().value()
         );
-        assert_eq!(format!("{on:?}"), format!("{off:?}"), "{name}");
-        assert_eq!(on.atmosphere().published_state(), on.atmosphere().state());
+        assert_eq!(
+            body.atmosphere().published_state(),
+            body.atmosphere().state()
+        );
     }
-    assert_eq!(format!("{venus_on:?}"), format!("{venus_off:?}"));
 }
 
 /// decision-p14-t53b-part3 §5: the steam envelope's label is the section's whatever the bulk's
@@ -7143,7 +7098,7 @@ fn under_every_25_hold_part_three_leaves_venus_earth_mars_and_titan_to_the_bit()
 fn under_every_25_hold_a_steam_envelope_has_no_surface_under_any_gravity() {
     use crate::planetary::record::Surface;
     let inputs = wet_runaway_earth(0.25 * EARTH_MASS_KG, 0.3, 300.0);
-    let (air, _) = with_part_three(|| atmosphere(&inputs));
+    let air = with_part_three(|| atmosphere(&inputs));
     assert_eq!(air.published_state(), SurfaceState::SteamEnvelope);
     crate::planetary::testing::with_every_25_hold(|| {
         for g in [9.82, 1e3, 1e6] {

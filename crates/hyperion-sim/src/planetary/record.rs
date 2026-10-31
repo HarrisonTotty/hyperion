@@ -2532,18 +2532,16 @@ mod tests {
         );
     }
 
-    /// P14.T53.b part 2 through the builder (the batch review's fixes): the census's methane
-    /// snowball 02001b2ca0000000.0400, a solid body under kilobars of supercritical methane,
-    /// takes the envelope's tags from [`BodyRecordBuilder::derived`], its surface not applicable
-    /// and its envelope not modelled, as its generated record does. Its bulk's gravity is its
+    /// P14.T53.b part 2 through the builder (the batch review's fixes), with part 3 in force from
+    /// generator version 25: the census's methane snowball 02001b2ca0000000.0400, which part 2
+    /// alone put under kilobars of supercritical methane, keeps its surface, since the partition's
+    /// cap holds its nitrogen at its isochore, its air cools under methane's critical point and its
+    /// methane condenses (decision-p14-t53b-part3 §12 (0400)). Its generated record takes the
+    /// surface's tags, and [`BodyRecordBuilder::derived`] no envelope's. Its bulk's gravity is its
     /// derivation's, to the bit, so that the builder and the generator decide alike.
-    ///
-    /// With every 25 hold in force, P14.T53.b part 3's, the partition's cap holds its nitrogen at
-    /// its isochore, its air cools under methane's critical point and its methane condenses, so
-    /// that it keeps its surface (decision-p14-t53b-part3 §12 (0400)), from the generator and the
-    /// builder alike.
     #[test]
-    fn under_every_24_hold_a_supercritical_envelope_takes_the_envelope_s_tags_from_the_builder() {
+    fn under_every_25_hold_the_census_s_methane_snowball_takes_no_envelope_s_tags_from_the_builder()
+    {
         use crate::planetary::system::tests::supercritical_methane_body;
         use crate::planetary::testing::with_every_25_hold;
         let tags = |record: &BodyRecord| {
@@ -2553,8 +2551,6 @@ mod tests {
             )
         };
         let built = |derived: &DerivedBody| planet_record(4, derived, 0.1);
-        let enveloped = (SectionState::NotApplicable, SectionState::NotModelled);
-        let (batch_record, batch) = supercritical_methane_body();
         let (steam_record, steam) = with_every_25_hold(supercritical_methane_body);
         assert_eq!(
             tags(&steam_record),
@@ -2564,14 +2560,12 @@ mod tests {
             with_every_25_hold(|| tags(&built(&steam))),
             (SectionState::NotModelled, SectionState::NotApplicable)
         );
-        let bulk = batch_record.bulk().ok().expect("a present body's bulk");
+        let bulk = steam_record.bulk().ok().expect("a present body's bulk");
         hyperion_testkit::float::assert_same_bits(
             bulk.surface_gravity().value(),
-            batch.surface_gravity().value(),
+            steam.surface_gravity().value(),
         );
         assert!(bulk.class().has_solid_surface(), "{:?}", bulk.class());
-        assert_eq!(tags(&batch_record), enveloped);
-        assert_eq!(tags(&built(&batch)), enveloped);
     }
 
     #[test]
