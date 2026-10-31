@@ -91,7 +91,7 @@ use crate::units::{
 ///   layer-E record's and a runaway's or a walkaway's), at which placement drew the same
 ///   composition (Design note 19). A dead one, retained or a displaced remnant, draws none: its
 ///   composition is its birth source's reference composition
-///   ([`SystemRecord::progenitor_composition`]), at which the class table weighed its fate. Every
+///   (`SystemRecord::progenitor_composition`), at which the class table weighed its fate. Every
 ///   other record reads its epoch position and age, as before them.
 /// - The helium excess is zero for every grid system (plan 06, design note 5); only plan 09's
 ///   cluster members carry one, and they bring their own [`Composition`].
