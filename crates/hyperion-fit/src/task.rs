@@ -138,7 +138,7 @@ pub trait FitTask: Sync + std::fmt::Debug {
 }
 
 /// Every task, in name order. A new task is one more entry (see the module's documentation).
-pub static REGISTRY: [&dyn FitTask; 55] = [
+pub static REGISTRY: [&dyn FitTask; 56] = [
     &tasks::binary_cooling_floor::BinaryCoolingFloorTask,
     &tasks::binary_pair_light::C_TASK,
     &tasks::binary_pair_light::D_TASK,
@@ -165,6 +165,7 @@ pub static REGISTRY: [&dyn FitTask; 55] = [
     &tasks::helium::Helium26Task,
     &tasks::kick_defaults::KickDefaultsTask,
     &tasks::kick_rank::KickRankTask,
+    &tasks::lbv::LbvTask,
     &tasks::lifetime_bracket::LifetimeBracketTask,
     &tasks::limb_darkening::LimbDarkeningTask,
     &tasks::liquid_optics::LiquidOpticsTask,
@@ -302,6 +303,7 @@ mod tests {
                 "helium_26",
                 "kick_defaults",
                 "kick_rank",
+                "lbv",
                 "lifetime_bracket",
                 "limb_darkening",
                 "liquid_optics",

@@ -1918,8 +1918,9 @@ galaxy train after its gate. Built: T1, T2, T4, T5.a (its production run is P06.
 T6.a–g, T7.a, T7.b's first landing (the table still P06.T17's identity, its fit to scratch;
 Risks, "T7.b as built") and its swap, held for 26 (`tables::helium_26` behind `HELIUM_VERSION`;
 Risks, "T7.b's swap as built"), T8.a–c (production at their committed values by
-decision-p15-t8-blocks, adopted by T8.d; no bump), T8.d, T9.a and T11.a (`streams` registered,
-provisional; Risks, "T11.a as built").
+decision-p15-t8-blocks, adopted by T8.d; no bump), T8.d, T9.a, T10.a (fitted at P09.T43's
+scratch bits, no bump; Risks, "T10.a as built") and T11.a (`streams` registered, provisional;
+Risks, "T11.a as built").
 
 ## Verification
 
@@ -3212,3 +3213,13 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
 - **T7.b's hold tests isolated (lane `a2-p06-t42b`, 2026-10-31; nothing moved).**
   `stellar/rules/helium_hold.rs` turns on the helium arm alone (`fitted_rules`,
   `fitted_galaxy_rules`): `every_26_hold()` also moves first-population photometry.
+- **T10.a as built (lane `p15-t10a`, 2026-10-31, at 24; no output moves, no bump).**
+  - Task `lbv` (fast, revision 0; `REGISTRY` 56) writes `tables::lbv`, now `@generated`, with the
+    scratch's items and bits at 24. The manifest holds the nodes, top, grid, margin and rounding,
+    and a floor of 24 M☉: a window between it and the lowest node makes the table provisional.
+  - `LbvNode` and `LbvSampler` moved to `galaxy::catalogue_classes::lbv::sampler`, beside the
+    scan (`grid`, `window_span`, `window_envelope`, `LbvNode::widened`). The scan reads the
+    version's rules (`window_span_under`, crate-private, takes others).
+  - 26's rescan is `just fit lbv` at 26. Its checks are the sim's slow
+    `lbv::sampler::tests::the_table_is_the_scan_of_plan_06_s_tracks` (moved from `tables::lbv`)
+    and the fit's slow `lbv_table_is_reproduced`.

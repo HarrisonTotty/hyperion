@@ -18,6 +18,7 @@ pub mod giant_cooling;
 pub mod helium;
 pub mod kick_defaults;
 pub mod kick_rank;
+pub mod lbv;
 pub mod lifetime_bracket;
 pub mod limb_darkening;
 pub mod liquid_optics;

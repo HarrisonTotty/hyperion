@@ -22,16 +22,17 @@
 //! law there. Its window is a function of m, its composition and a alone: no draw of the star's
 //! moves it (Reimers η, the one the living track reads, moves none; a test holds it). A window from
 //! age `a_s` to `a_e` overlaps the horizon if and only if a lies in [`a_s` − H, `a_e` + H + L].
-//! The scratch sampler, [`tables::lbv`] (P15.T10.a replaces it), holds five mass nodes from 32 M☉,
-//! below which no star has a window, and for each the ages within which every window of its masses
-//! lies at any metallicity. The class's candidates are the grid's intensity over the nodes' masses
-//! and ages so widened, and its test keeps those whose own window overlaps. Only the young field
-//! has stars of those ages, the components whose age density is positive there: the young thin
-//! disc, all of whose stars are young, and the nuclear disc's two components, a twentieth of whose
-//! stars formed in the last gigayear (`AgeDistribution::nuclear_disc`, after Nogueras-Lara et al.
-//! 2020, Nature Astronomy 4, 377). From generator version 26 the field gives the features their
-//! share (plan 09, P09.T2.c), and the class follows the field as the grid places it: each
-//! component's layer-E share is the field's, and the young disc's ages the young field's.
+//! The sampler, [`tables::lbv`] (fitted by plan 15's P15.T10.a, its shape [`sampler`]'s), holds
+//! five mass nodes from 32 M☉, below which no star has a window, and for each the ages within which
+//! every window of its masses lies at any metallicity. The class's candidates are the grid's
+//! intensity over the nodes' masses and ages so widened, and its test keeps those whose own window
+//! overlaps. Only the young field has stars of those ages, the components whose age density is
+//! positive there: the young thin disc, all of whose stars are young, and the nuclear disc's two
+//! components, a twentieth of whose stars formed in the last gigayear
+//! (`AgeDistribution::nuclear_disc`, after Nogueras-Lara et al. 2020, Nature Astronomy 4, 377).
+//! From generator version 26 the field gives the features their share (plan 09, P09.T2.c), and the
+//! class follows the field as the grid places it: each component's layer-E share is the field's,
+//! and the young disc's ages the young field's.
 //!
 //! # The envelope and a candidate
 //!
@@ -111,6 +112,8 @@ use crate::stellar::system::{SystemStars, draw_metallicity, primary_draws, prima
 use crate::tables::lbv::LBV_SAMPLER;
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, SourceHorizon, UniverseTime};
 use crate::units::{Dex, HeliumExcess, PerCubicLightYear, Seconds, SolarMasses, Years};
+
+pub mod sampler;
 
 /// The number of the sampler's mass nodes.
 const NODES: usize = LBV_SAMPLER.nodes().len();

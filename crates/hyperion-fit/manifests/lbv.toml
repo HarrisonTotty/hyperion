@@ -1,0 +1,17 @@
+# The luminous blue variables' sampler (plan 15, P15.T10.a; read by plan 09's P09.T43 class): per
+# mass node, the earliest start and the latest end of plan 06's luminous-blue-variable windows over
+# the node's masses and every [Fe/H] of the grid, widened by the margin and rounded outward. The
+# tracks and the scan are the sim's own (`galaxy::catalogue_classes::lbv::sampler`), read through
+# its public API and pinned by the fingerprint. The nodes are P09.T43's, placed to minimise the
+# sampler's proposed span of ages per layer-E system; the floor is where the scan below the lowest
+# node starts, under the observed luminous blue variables' 25 M☉ (Smith 2014, ARA&A 52, 487).
+task = "lbv"
+
+[params]
+node_masses = [32.0, 36.0, 43.0, 55.0, 97.0]
+top = 150.0
+mass_step = 0.25
+fe_h = [-2.4, 0.3, 0.025]
+margin = 0.02
+rounding_years = 1000.0
+floor = 24.0

@@ -288,6 +288,12 @@ pub const MANIFEST: &[TableInfo] = &[
         provisional: true,
     },
     TableInfo {
+        name: "lbv",
+        revision: 0,
+        since_generator_version: 24,
+        provisional: false,
+    },
+    TableInfo {
         name: "lifetime_bracket",
         revision: 0,
         since_generator_version: 22,

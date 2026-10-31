@@ -310,6 +310,18 @@ provisional = true
 acceptance = "100000 fresh scores through the table give ln(v ÷ km/s) of mean 5.6000 and standard deviation 0.6774, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.06227"
 
 [[table]]
+name = "lbv"
+path = "lbv.rs"
+task = "lbv"
+revision = 0
+inputs_sha256 = "8776b3519710b79328e0c68d2ead3294b1e3814aa9f6a1dd31402a7841f0cfdc"
+body_sha256 = "2b7bed255d941cf7511b132849d6c1ab8670336897ddd98164ff0a1cea76a8d0"
+fingerprint = [-1.0, -1.0, 5579848.018950851, 5743636.147637185, 4655979.100824139, 4846843.53950812, 3756154.343645124, 3757909.7152576996, 2436746.353321887, 3045531.5356050567, 150.0, 150.0]
+since_generator_version = 24
+provisional = false
+acceptance = "32–36 M☉ windows 6297001–6513368 yr, held as 6171000–6644000; 36–43 M☉ windows 5052087–6297279 yr, held as 4951000–6424000; 43–55 M☉ windows 4157256–5463241 yr, held as 4074000–5573000; 55–97 M☉ windows 3492249–4630717 yr, held as 3422000–4724000; 97–150 M☉ windows 2144118–3821010 yr, held as 2101000–3898000; no track from 24 M☉ to the lowest node has a window (passes); the class's million-star sample and its masses' K–S test at 1% are the sim's slow `the_class_test_holds_every_host_of_a_million_layer_e_stars`"
+
+[[table]]
 name = "lifetime_bracket"
 path = "lifetime_bracket.rs"
 task = "lifetime_bracket"
