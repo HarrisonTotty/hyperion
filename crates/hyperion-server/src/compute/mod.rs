@@ -60,8 +60,8 @@ pub use float_mode::{FlushProbe, probe_flush_to_zero};
 pub use galaxies::{GalaxyCache, GalaxyCounters};
 pub use key::GalaxyKey;
 pub use pool::{
-    CpuPool, JobError, JobReceiver, PoolCounters, Priority, ShutDownPoolError, StartPoolError,
-    SubmitJobError,
+    BulkGate, CpuPool, JobError, JobReceiver, PoolCounters, Priority, ShutDownPoolError,
+    StartPoolError, SubmitJobError,
 };
 pub use sightlines::{LineGas, SharedSightlineCache, SightlineMarcher};
 pub use single_flight::{Flight, SingleFlight};

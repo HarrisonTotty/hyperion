@@ -44,7 +44,7 @@ use hyperion_protocol::{
     SKY_TEXEL_BYTES, ServerMessage, SkyGapDto, SkyRequest, SkyResponse, SystemIdHex,
     SystemsInRangeRequest, UniverseIdHex, UniverseTime,
 };
-use hyperion_server::compute::{SkyCaps, SkyCellCounters};
+use hyperion_server::compute::{BulkGate, SkyCaps, SkyCellCounters};
 use hyperion_server::limits::MAX_BINARY_FRAME_BYTES;
 use hyperion_server::{ServerConfigBuilder, ServerStats, SkyService};
 use hyperion_sim::Seed;
@@ -861,12 +861,20 @@ async fn expect_range_answer(client: &mut TestClient, id: RequestId) {
 /// wait: the census is bulk work, the pool's workers take interactive work first, and a census job
 /// runs for about 50 ms before it hands the rest of its cells back (R06.T11.d).
 ///
-/// The wait is counted in jobs, not timed: from the query's sending to its answer, the one worker
-/// completes the query's own jobs, as many as on an idle pool, and between them at most one bulk
-/// job each, the census job or band march it has in hand when the query's next job is queued.
+/// The wait is counted in jobs and held to an order, not to a margin of time. The server's one
+/// worker holds each bulk job it takes at the test's gate ([`BulkGate`]), and the test lets one
+/// through only while the query has a job queued: the job in hand when the query's job was queued.
+/// The worker must then take the query's job, not the census's next, so from the query's sending
+/// to its answer it completes the query's own jobs, as many as on an idle pool, and at most one
+/// bulk job before each, however loaded the machine. A census to 120 ly is one step, so the sky
+/// sends nothing until its whole census is done.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_range_query_sent_while_a_skys_jobs_run_is_answered_first() {
-    let (server, _data_dir) = sky_server(LONG_CAP_LY, 1).await;
+    let gate = BulkGate::default();
+    let caps = SkyCaps::forced(LightYears::new(LONG_CAP_LY)).expect("a small forced cap");
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let config = sky_config(data_dir.path(), caps, 1).bulk_gate(gate.clone());
+    let server = TestServer::start_with(config.build()).await;
     let (mut client, universe) = opened(&server).await;
     // The query's own jobs, on an idle pool.
     let idle = server.stats().pool().completed();
@@ -877,22 +885,52 @@ async fn a_range_query_sent_while_a_skys_jobs_run_is_answered_first() {
 
     let sky_id = client.send_request(RequestBody::Sky(sky(&universe))).await;
     census_under_way(&server).await;
-    let before = server.stats().pool().completed();
+    gate.close();
+    let before = server
+        .stats_until("the worker holds the sky's next job at the gate", |stats| {
+            gate.held() == 1 && stats.pool().queued_interactive() == 0
+        })
+        .await
+        .pool()
+        .completed();
     let query_id = client.send_request(range_query(&universe)).await;
-    expect_range_answer(&mut client, query_id).await;
+    let mut let_through = 0;
+    let answer = loop {
+        tokio::select! {
+            message = client.next_message() => break message,
+            _ = server.stats_until("the query has a job queued behind the held one", |stats| {
+                gate.held() == 1 && stats.pool().queued_interactive() > 0
+            }) => {
+                gate.admit();
+                let_through += 1;
+            }
+        }
+    };
+    match answer {
+        ServerMessage::Response {
+            id,
+            body: ResponseBody::SystemsInRange(_),
+        } => assert_eq!(id, query_id),
+        other => panic!("expected the range query's answer before the sky's, got {other:?}"),
+    }
     let pool = server.stats().pool();
     assert!(
         pool.running() + pool.queued_bulk() > 0,
         "the sky was still being censused when the query was answered: {pool:?}"
     );
-    let waited = pool.completed() - before;
     assert!(
-        waited <= 2 * own + 1,
-        "the query waited for at most a bulk job before each of its {own} jobs, and one more as \
-         it arrived: {waited} jobs completed meanwhile"
+        let_through <= own,
+        "the worker took the query's job each time it let a bulk job go: {let_through} bulk jobs \
+         let through for the query's {own}"
+    );
+    assert_eq!(
+        pool.completed() - before,
+        own + let_through,
+        "only the query's jobs and the bulk jobs let through completed meanwhile: {pool:?}"
     );
 
-    // The sky is given up rather than waited for.
+    // The sky is given up rather than waited for, its jobs let go as the cancel finds them.
+    gate.open();
     client.cancel(sky_id).await;
     expect_cancelled(&mut client, sky_id).await;
     client.close().await;

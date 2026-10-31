@@ -61,7 +61,7 @@ use clap::{ArgAction, Parser};
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
 use crate::DEFAULT_ADDR;
-use crate::compute::SkyCaps;
+use crate::compute::{BulkGate, SkyCaps};
 use crate::stop::StdinStop;
 use crate::surface::{InputsSource, RecordInputs};
 use crate::universe::{Entropy, OsEntropy};
@@ -534,6 +534,8 @@ pub struct ServerConfig {
     craft_source: Arc<dyn CraftSource>,
     sky_caps: SkyCaps,
     surface_inputs: Arc<dyn InputsSource>,
+    /// A test's hold on the pool's bulk jobs; none by default.
+    bulk_gate: Option<BulkGate>,
 }
 
 impl ServerConfig {
@@ -693,6 +695,12 @@ impl ServerConfig {
     pub fn surface_inputs(&self) -> &Arc<dyn InputsSource> {
         &self.surface_inputs
     }
+
+    /// The gate the pool's bulk jobs wait at before they run, if a test gave one.
+    #[must_use]
+    pub fn bulk_gate(&self) -> Option<&BulkGate> {
+        self.bulk_gate.as_ref()
+    }
 }
 
 /// Builds a [`ServerConfig`], starting from the defaults.
@@ -729,6 +737,7 @@ impl Default for ServerConfigBuilder {
                 craft_source: Arc::new(NoCraft),
                 sky_caps: SkyCaps::DERIVED,
                 surface_inputs: Arc::new(RecordInputs),
+                bulk_gate: None,
             },
         }
     }
@@ -933,6 +942,16 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn surface_inputs(mut self, inputs: impl InputsSource + 'static) -> Self {
         self.config.surface_inputs = Arc::new(inputs);
+        self
+    }
+
+    /// A gate every bulk job waits at, once a worker has taken it, before it runs; none by default.
+    /// A test holds the bulk work with it while it queues other work, so that it asserts the order
+    /// the workers take jobs in rather than a margin of time ([`BulkGate`]); no option or variable
+    /// sets it.
+    #[must_use]
+    pub fn bulk_gate(mut self, gate: BulkGate) -> Self {
+        self.config.bulk_gate = Some(gate);
         self
     }
 

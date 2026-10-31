@@ -19,6 +19,10 @@
 //! each job, before the reply, so that no value computed under a mode that flushes subnormals ever
 //! leaves it (plan R04, design note 15). A failed probe at start stops the pool from starting; a
 //! failed probe after a job faults the pool, which then refuses all work.
+//!
+//! A test can hold the bulk jobs at a known point with a [`BulkGate`]
+//! ([`CpuPool::with_bulk_gate`]), so that it asserts the order the workers take jobs in rather than
+//! a margin of time.
 
 use std::any::Any;
 use std::collections::VecDeque;
@@ -316,6 +320,39 @@ impl CpuPool {
         bulk_capacity: NonZeroUsize,
         probe: fn() -> FlushProbe,
     ) -> Result<Self, StartPoolError> {
+        Self::start(workers, interactive_capacity, bulk_capacity, probe, None)
+    }
+
+    /// [`CpuPool::new`] with every bulk job, once a worker has taken it, waiting at `gate` before
+    /// it runs: for a test that holds the bulk work while it queues other work ([`BulkGate`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`CpuPool::new`].
+    pub fn with_bulk_gate(
+        workers: NonZeroUsize,
+        interactive_capacity: NonZeroUsize,
+        bulk_capacity: NonZeroUsize,
+        gate: BulkGate,
+    ) -> Result<Self, StartPoolError> {
+        Self::start(
+            workers,
+            interactive_capacity,
+            bulk_capacity,
+            probe_flush_to_zero,
+            Some(gate),
+        )
+    }
+
+    /// Starts the workers, probing each with `probe`, their bulk jobs held at `gate` if there is
+    /// one.
+    fn start(
+        workers: NonZeroUsize,
+        interactive_capacity: NonZeroUsize,
+        bulk_capacity: NonZeroUsize,
+        probe: fn() -> FlushProbe,
+        gate: Option<BulkGate>,
+    ) -> Result<Self, StartPoolError> {
         for capacity in [interactive_capacity, bulk_capacity] {
             if capacity.get() > Semaphore::MAX_PERMITS {
                 return Err(StartPoolError::CapacityTooLarge {
@@ -323,7 +360,7 @@ impl CpuPool {
                 });
             }
         }
-        let shared = Arc::new(Shared::new(probe));
+        let shared = Arc::new(Shared::new(probe, gate));
         let mut handles = Vec::with_capacity(workers.get());
         // Bounded by the number of workers, each of which sends exactly one report.
         let (report, reports) = mpsc::sync_channel(workers.get());
@@ -552,6 +589,115 @@ impl Drop for CpuPool {
         state.stopping = true;
         drop(state);
         self.shared.available.notify_all();
+        self.shared.open_gate();
+    }
+}
+
+/// A test's hold on a pool's bulk jobs ([`CpuPool::with_bulk_gate`]): while it is closed, each
+/// bulk job a worker takes waits before it runs until the test admits it, one at a time.
+///
+/// It is open when made. A worker holding a job at the closed gate counts it as running, as it
+/// would be, so the pool's counters read as they do while the job runs. A pool that stops opens its
+/// gate for good, so that no worker is held past a shutdown. Clones are one gate.
+///
+/// # Examples
+///
+/// ```
+/// use std::num::NonZeroUsize;
+///
+/// use hyperion_server::compute::{BulkGate, CancelToken, CpuPool, Priority};
+///
+/// # #[tokio::main(flavor = "current_thread")]
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let one = NonZeroUsize::MIN;
+/// let gate = BulkGate::default();
+/// let pool = CpuPool::with_bulk_gate(one, one, one, gate.clone())?;
+/// gate.close();
+/// let bulk = pool.submit(Priority::Bulk, CancelToken::new(), |_| "bulk").await?;
+/// while gate.held() == 0 {
+///     tokio::task::yield_now().await;
+/// }
+/// // The worker holds the bulk job at the gate until it is let through.
+/// gate.admit();
+/// assert_eq!(bulk.await?, Ok("bulk"));
+/// pool.shutdown().await?;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct BulkGate {
+    inner: Arc<GateInner>,
+}
+
+#[derive(Debug, Default)]
+struct GateInner {
+    state: Mutex<GateState>,
+    changed: Condvar,
+}
+
+#[derive(Debug, Default)]
+struct GateState {
+    closed: bool,
+    /// Jobs waiting at the gate, admitted or not.
+    waiting: usize,
+    /// Admissions not yet taken by a waiting job.
+    admitted: usize,
+}
+
+impl BulkGate {
+    /// Holds every bulk job taken from now on until it is admitted. The jobs already running go on.
+    pub fn close(&self) {
+        self.lock().closed = true;
+    }
+
+    /// Lets every bulk job through, those waiting and those to come.
+    pub fn open(&self) {
+        let mut state = self.lock();
+        state.closed = false;
+        state.admitted = 0;
+        drop(state);
+        self.inner.changed.notify_all();
+    }
+
+    /// Lets one waiting bulk job through, or the next to arrive if none is waiting.
+    pub fn admit(&self) {
+        let mut state = self.lock();
+        state.admitted = state.admitted.saturating_add(1);
+        drop(state);
+        self.inner.changed.notify_all();
+    }
+
+    /// How many bulk jobs wait at the gate and are not yet admitted.
+    #[must_use]
+    pub fn held(&self) -> usize {
+        let state = self.lock();
+        state.waiting.saturating_sub(state.admitted)
+    }
+
+    /// Waits, on the calling worker, until the gate is open or admits this job.
+    fn pass(&self) {
+        let mut state = self.lock();
+        state.waiting += 1;
+        while state.closed && state.admitted == 0 {
+            state = self
+                .inner
+                .changed
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        if state.closed {
+            state.admitted -= 1;
+        }
+        state.waiting -= 1;
+    }
+
+    fn lock(&self) -> MutexGuard<'_, GateState> {
+        // Each critical section only sets a flag or counts, so a poisoned lock still guards
+        // consistent state.
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -562,6 +708,8 @@ struct Shared {
     available: Condvar,
     /// Checks a worker's floating-point mode: [`probe_flush_to_zero`] except in tests.
     probe: fn() -> FlushProbe,
+    /// Where a taken bulk job waits before it runs: a test's, or none.
+    gate: Option<BulkGate>,
 }
 
 #[derive(Debug, Default)]
@@ -582,11 +730,19 @@ impl State {
 }
 
 impl Shared {
-    fn new(probe: fn() -> FlushProbe) -> Self {
+    fn new(probe: fn() -> FlushProbe, gate: Option<BulkGate>) -> Self {
         Self {
             state: Mutex::default(),
             available: Condvar::new(),
             probe,
+            gate,
+        }
+    }
+
+    /// Opens the gate for good, if there is one, so that a stopping pool's workers are not held.
+    fn open_gate(&self) {
+        if let Some(gate) = &self.gate {
+            gate.open();
         }
     }
 
@@ -610,6 +766,7 @@ impl Shared {
         state.refresh_depths();
         drop(state);
         self.available.notify_all();
+        self.open_gate();
         dropped
     }
 
@@ -823,6 +980,11 @@ fn work(shared: &Shared) {
     {
         // The queue slot is free as soon as a worker holds the job.
         drop(permit);
+        if priority == Priority::Bulk
+            && let Some(gate) = &shared.gate
+        {
+            gate.pass();
+        }
         let span = tracing::debug_span!(
             "job",
             priority = priority.as_str(),
@@ -997,6 +1159,57 @@ mod tests {
             ["interactive 1", "interactive 2", "bulk 1", "bulk 2"]
         );
         pool.shutdown().await.unwrap();
+    }
+
+    /// Waits until `gate` holds one job.
+    async fn held_at(gate: &BulkGate) {
+        timeout(WAIT, async {
+            while gate.held() != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("timed out waiting for a bulk job at the gate");
+    }
+
+    #[tokio::test]
+    async fn a_closed_gate_holds_each_bulk_job_taken_until_it_is_admitted_and_a_shutdown_opens_it()
+    {
+        let n = |value| NonZeroUsize::new(value).unwrap();
+        let gate = BulkGate::default();
+        let pool = CpuPool::with_bulk_gate(n(1), n(4), n(4), gate.clone()).unwrap();
+        gate.close();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mut bulk = Vec::new();
+        for label in ["bulk 1", "bulk 2"] {
+            let job = record(&log, label);
+            bulk.push(
+                pool.submit(Priority::Bulk, CancelToken::new(), job)
+                    .await
+                    .unwrap(),
+            );
+        }
+        held_at(&gate).await;
+        // The held job counts as running, as it would.
+        assert_eq!(pool.counters().running(), 1);
+        assert_eq!(pool.counters().queued_bulk(), 1);
+        let interactive = pool
+            .try_submit(
+                Priority::Interactive,
+                CancelToken::new(),
+                record(&log, "interactive"),
+            )
+            .unwrap();
+        gate.admit();
+        assert_eq!(result(interactive).await, Ok(()));
+        // The worker took the interactive job before the second bulk job, which it now holds.
+        held_at(&gate).await;
+        assert_eq!(*log.lock().unwrap(), ["bulk 1", "interactive"]);
+        pool.shutdown().await.unwrap();
+        for receiver in bulk {
+            assert_eq!(result(receiver).await, Ok(()));
+        }
+        assert_eq!(*log.lock().unwrap(), ["bulk 1", "interactive", "bulk 2"]);
     }
 
     #[tokio::test]

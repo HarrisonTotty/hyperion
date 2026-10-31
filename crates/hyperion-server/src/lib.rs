@@ -32,6 +32,7 @@ mod ws;
 
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fmt, io};
@@ -39,7 +40,7 @@ use std::{fmt, io};
 use axum::{Router, routing::get};
 
 use crate::compute::{
-    CpuPool, DensityMapService, ExtinctionMapService, GalaxyCache, GalaxyFeaturesService,
+    BulkGate, CpuPool, DensityMapService, ExtinctionMapService, GalaxyCache, GalaxyFeaturesService,
     SharedBodyCache, SharedBriefCache, SharedCellCache, SharedClusterModelCache,
     SharedFeatureCellCache, SharedSightlineCache, SharedSkyCellCache, SharedSystemCache,
     ShutDownPoolError, SkyCaps, SkyTablesService, StartPoolError,
@@ -192,14 +193,12 @@ impl Server {
         .map_err(StartServerError::LoadRegistry)?;
         // Starting the pool waits for every worker to probe its floating-point mode, so it runs
         // off the runtime.
-        let workers = config.workers();
+        let (workers, gate) = (config.workers(), config.bulk_gate().cloned());
         let pool = Arc::new(
-            tokio::task::spawn_blocking(move || {
-                CpuPool::new(workers, INTERACTIVE_QUEUE_CAPACITY, BULK_QUEUE_CAPACITY)
-            })
-            .await
-            .map_err(|_| StartServerError::Interrupted)?
-            .map_err(StartServerError::StartPool)?,
+            tokio::task::spawn_blocking(move || start_pool(workers, gate))
+                .await
+                .map_err(|_| StartServerError::Interrupted)?
+                .map_err(StartServerError::StartPool)?,
         );
         let galaxies = Arc::new(GalaxyCache::new(Arc::clone(&pool)));
         let maps = DensityMapService::new(
@@ -384,6 +383,24 @@ pub fn tap_socket(tcp: &tokio::net::TcpStream) {
     }
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
     let _ = tcp;
+}
+
+/// The server's CPU pool of `workers`, its bulk jobs held at `gate` if a test gave one
+/// ([`ServerConfigBuilder::bulk_gate`]).
+///
+/// # Errors
+///
+/// As [`CpuPool::new`].
+fn start_pool(workers: NonZeroUsize, gate: Option<BulkGate>) -> Result<CpuPool, StartPoolError> {
+    match gate {
+        Some(gate) => CpuPool::with_bulk_gate(
+            workers,
+            INTERACTIVE_QUEUE_CAPACITY,
+            BULK_QUEUE_CAPACITY,
+            gate,
+        ),
+        None => CpuPool::new(workers, INTERACTIVE_QUEUE_CAPACITY, BULK_QUEUE_CAPACITY),
+    }
 }
 
 /// The caches of plan 09's feature cells and interiors, in the budgets `config` gives (P09.T40.a),
