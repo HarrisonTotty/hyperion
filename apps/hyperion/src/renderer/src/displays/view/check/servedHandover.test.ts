@@ -11,9 +11,13 @@ import { FIXTURE_EARTH, FIXTURE_SYSTEM } from "../../../test/planetaryFixture";
 import { moonLikeHeader } from "../../../test/coarseFieldFixtures";
 import {
   answerServedField,
+  answerServedRecord,
   answerServedScene,
   answerServedSky,
+  SERVED_DETAIL_SEED,
 } from "../../../test/servedHandoverFixtures";
+import { HANDOVER_APPROACH } from "./handoverGeometry";
+import { HandoverScenes } from "./handoverScenes";
 import { readServedHandoverWorld, type ServedHandoverRead } from "./servedHandover";
 
 const UNIVERSE = "000000000000002a";
@@ -76,6 +80,8 @@ describe("the hand-over check's served world, read from the server (R10.T15.b)",
     answerServedSky(socket);
     await settle();
     answerServedField(socket, FIXTURE_EARTH, 64);
+    await settle();
+    answerServedRecord(socket);
     const world = worldOf(await reading);
     const header = moonLikeHeader(FIXTURE_EARTH);
     expect([world.body, world.reliefM, world.cellLevel, world.surveyedCells]).toEqual([
@@ -91,6 +97,56 @@ describe("the hand-over check's served world, read from the server (R10.T15.b)",
     expect(socket.requestsOfKind("surface_field").map(({ body }) => body)).toEqual([
       { kind: "surface_field", universe: UNIVERSE, body: FIXTURE_EARTH, have_revision: null },
     ]);
+  });
+
+  /** Reads the slice's Earth's served world to its record, which `record` answers. */
+  async function readToTheRecord(
+    record: (socket: FakeWebSocket) => void,
+  ): Promise<{ readonly read: ServedHandoverRead; readonly socket: FakeWebSocket }> {
+    const { client, socket } = linked();
+    const reading = readServedHandoverWorld(
+      client,
+      UNIVERSE,
+      FIXTURE_EARTH,
+      new AbortController().signal,
+    );
+    answerServedScene(socket);
+    await settle();
+    answerServedSky(socket);
+    await settle();
+    answerServedField(socket, FIXTURE_EARTH, 64);
+    await settle();
+    record(socket);
+    return { read: await reading, socket };
+  }
+
+  it("asks the body's record once, after its field (R10.T15.b.1)", async () => {
+    const { socket } = await readToTheRecord((each) => {
+      answerServedRecord(each);
+    });
+    expect(
+      socket.requestsOfKind("body_detail").map(({ body }) => [body.universe, body.body]),
+    ).toEqual([[UNIVERSE, FIXTURE_EARTH]]);
+  });
+
+  it("gives each look's body the detail seed of its record, so that its terrain draws (R10.T15.b.1)", async () => {
+    const { read } = await readToTheRecord((socket) => {
+      answerServedRecord(socket);
+    });
+    const scenes = new HandoverScenes(worldOf(read), HANDOVER_APPROACH.full, 9.0e6).sceneOptions;
+    expect(scenes.map((option) => option.make().sceneAt(0).bodies[1]?.detailSeed)).toEqual(
+      scenes.map(() => SERVED_DETAIL_SEED),
+    );
+  });
+
+  it("fails where the body's record gives no detail seed, since no look could draw its terrain (R10.T15.b.1)", async () => {
+    const { read } = await readToTheRecord((socket) => {
+      answerServedRecord(socket, null);
+    });
+    expect(read).toEqual({
+      kind: "failed",
+      message: `the record of ${FIXTURE_EARTH} gives no detail seed, so no look could draw its terrain`,
+    });
   });
 
   it("gives the body's field not modelled, naming the section the server names", async () => {
@@ -138,6 +194,8 @@ describe("the hand-over check's served world, read from the server (R10.T15.b)",
     await settle();
     // Every cell held is a margin's, code 0.
     answerServedField(socket, FIXTURE_EARTH, 64, 0);
+    await settle();
+    answerServedRecord(socket);
     const read = await reading;
     expect(read.kind === "failed" ? read.message : read.kind).toContain("holds no surveyed cell");
   });

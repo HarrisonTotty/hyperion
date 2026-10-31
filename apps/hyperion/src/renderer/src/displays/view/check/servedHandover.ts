@@ -13,6 +13,10 @@
  *    surveyed cells and their middle), the chunks dropped, since each look's session asks for the
  *    field itself. Where the body's record leaves a gap the coarse pass reads, the server answers
  *    `not_modelled`, which the read gives as such, for the launch's end to state.
+ * 4. **Its detail seed** from its record (`body_detail` at the scene's time, `bodyDetailSeed`): a
+ *    look's scene is a kept scene, whose body draws its terrain and asks its readout only with a
+ *    seed of its own (`surfaceUnsetOf`), where a server body's session would ask the record itself
+ *    (plan R10, R10.T15.b.1). A record that gives none fails the read.
  *
  * Each outcome is the read's result ({@link ServedHandoverRead}), the server's refusals among them,
  * not an exception; an abort of its signal cancels the request in flight. `just place-ship --survey`
@@ -21,6 +25,7 @@
 import type { BodyIdHex, RecordSectionDto, RequestClient, UniverseIdHex } from "@hyperion/protocol";
 
 import { toSceneModel } from "../../../lib/scene/sceneWire";
+import { bodyDetailSeed, toBodyDetailRequest } from "../../../lib/system/bodiesWire";
 import {
   cancelledOn,
   type HostDiscRequests,
@@ -108,11 +113,23 @@ export async function readServedHandoverWorld(
   if (!merged.ok) {
     return failed(`the coverage of ${body} is unusable: ${merged.message}`);
   }
+  const detail = await cancelledOn(
+    signal,
+    requests.request(toBodyDetailRequest(universe, body, served.epoch)),
+  );
+  if (!detail.ok) {
+    return failed(`the record of ${body} was refused: ${detail.error.message}`);
+  }
+  const detailSeed = bodyDetailSeed(detail.response.record);
+  if (detailSeed === null) {
+    return failed(`the record of ${body} gives no detail seed, so no look could draw its terrain`);
+  }
   const world = servedHandoverWorld({
     served,
     hostDiscs: discs.discs,
     header: response.header,
     coverage: merged.coverage,
+    detailSeed,
     link: { requests, onSurface: NO_SURFACE_EVENTS },
   });
   return world.surveyedCells === 0

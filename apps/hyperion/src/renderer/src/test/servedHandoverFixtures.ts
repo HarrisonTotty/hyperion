@@ -1,8 +1,8 @@
 /**
  * A served world's answers over R03's fake socket (plan R10, R10.T15.b): the slice's Earth's scene,
- * its sky's discs and its field, as the hand-over check's served world reads them.
+ * its sky's discs, its field and its record, as the hand-over check's served world reads them.
  */
-import type { BodyIdHex, SceneStateDto } from "@hyperion/protocol";
+import type { BodyIdHex, DetailSeedHex, SceneStateDto } from "@hyperion/protocol";
 
 import { TERRAIN_HOST_DISCS } from "../view/scenes/terrainScene";
 import {
@@ -15,6 +15,7 @@ import {
   sendFieldFrames,
 } from "./coarseFieldFixtures";
 import type { FakeWebSocket } from "./FakeWebSocket";
+import { earthDetail } from "./planetaryFixture";
 import { stateNearEarth } from "./sceneFixture";
 import { skyResponse } from "./skyFixtures";
 
@@ -59,4 +60,28 @@ export function answerServedField(
     id,
     readyField(moonLikeHeader(body), 1, fieldCover([0, cells, code]), bulk),
   );
+}
+
+/** The detail seed {@link answerServedRecord} gives unless told otherwise, of its wire form. */
+export const SERVED_DETAIL_SEED: DetailSeedHex = "a37587e7ad5c6a57";
+
+/**
+ * Answers the latest `body_detail` with the slice's Earth's record, its hooks `ok` and carrying
+ * `detailSeed` ({@link SERVED_DETAIL_SEED} unless given), or not modelled for `null`.
+ */
+export function answerServedRecord(
+  socket: FakeWebSocket,
+  detailSeed: DetailSeedHex | null = SERVED_DETAIL_SEED,
+): void {
+  const detail = earthDetail();
+  socket.serverAnswers("body_detail", () => ({
+    ...detail,
+    record: {
+      ...detail.record,
+      hooks:
+        detailSeed === null
+          ? { state: "not_modelled" }
+          : { state: "ok", value: { detail_seed: { state: "ok", value: detailSeed } } },
+    },
+  }));
 }

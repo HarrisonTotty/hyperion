@@ -393,6 +393,11 @@ export interface ServedHandoverInput {
   /** Its field's header and coverage, as the server answers them: the survey the looks judge. */
   readonly header: SurfaceHeaderDto;
   readonly coverage: CoverageView;
+  /**
+   * Its detail seed, from its record (`bodyDetailSeed`): each look's scene is a kept scene, whose
+   * body draws its terrain and asks its readout only with a seed of its own (`surfaceUnsetOf`).
+   */
+  readonly detailSeed: DetailSeedHex;
   /** The link every look's terrain session asks through, for the world's life. */
   readonly link: ServedLink;
 }
@@ -401,8 +406,9 @@ export interface ServedHandoverInput {
  * A served world's hand-over world (plan R10, R10.T15.b): the body the server serves, named by its
  * designation, its figure, relief and level its field header's, its surveyed cells and their middle
  * ({@link surveyMiddleOf}) its coverage's, its star where the server's scene draws it, and each look's
- * scene its star and body ({@link LookBodies}), lit by its sky's discs, with no detail seed, which
- * the session asks the server for; each look's fixture is the server's link, which no look closes.
+ * scene its star and body ({@link LookBodies}), lit by its sky's discs, with the detail seed its
+ * record gives, without which a kept scene's body draws no terrain (R10.T15.b.1); each look's
+ * fixture is the server's link, which no look closes.
  */
 export function servedHandoverWorld(input: ServedHandoverInput): HandoverWorld {
   const { served, header, coverage, link } = input;
@@ -424,6 +430,7 @@ export function servedHandoverWorld(input: ServedHandoverInput): HandoverWorld {
       figure,
       hillRadiusM: served.hillRadiusM,
       photometry: served.appearance.photometry,
+      detailSeed: input.detailSeed,
     },
     bodyCentreM: scale(served.towardStarM, -1),
     hostDiscs: input.hostDiscs,

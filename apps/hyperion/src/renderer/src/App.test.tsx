@@ -20,6 +20,7 @@ import { statusLine } from "./test/statusLine";
 import { FIXTURE_EARTH } from "./test/planetaryFixture";
 import {
   answerServedField,
+  answerServedRecord,
   answerServedScene,
   answerServedSky,
 } from "./test/servedHandoverFixtures";
@@ -258,6 +259,9 @@ describe("App", () => {
       });
       await served(() => {
         answerServedField(socket, FIXTURE_EARTH, 64);
+      });
+      await served(() => {
+        answerServedRecord(socket);
       });
       for (const name of LOOK_SCENES) {
         screen.getByRole("button", { name });

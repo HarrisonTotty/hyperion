@@ -21,6 +21,7 @@ import {
 } from "./handoverScenes";
 import { moonLikeHeader } from "../../../test/coarseFieldFixtures";
 import { FIXTURE_EARTH } from "../../../test/planetaryFixture";
+import { SERVED_DETAIL_SEED } from "../../../test/servedHandoverFixtures";
 import { sceneModelOf, stateNearEarth } from "../../../test/sceneFixture";
 import { TEST_HULL } from "../../../view/scene/hull";
 import { type ServedBody, servedBodyOf } from "../../../view/scene/servedBody";
@@ -131,6 +132,7 @@ describe("a served world's hand-over world (R10.T15.b)", () => {
     hostDiscs: TERRAIN_HOST_DISCS,
     header,
     coverage,
+    detailSeed: SERVED_DETAIL_SEED,
     link: LINK,
   });
 
@@ -169,9 +171,15 @@ describe("a served world's hand-over world (R10.T15.b)", () => {
     ]);
     expect(body?.centreM).toEqual(scale(served.towardStarM, -1));
     expect(body?.appearance?.photometry).toBe(served.appearance.photometry);
-    // Its session asks the server for the seed.
-    expect(body !== undefined && "detailSeed" in body).toBe(false);
     expect(scene?.hostDiscs).toBe(TERRAIN_HOST_DISCS);
+  });
+
+  it("gives each look's kept scene's body its record's detail seed, so that its terrain draws (R10.T15.b.1)", () => {
+    const made = new HandoverScenes(world, HANDOVER_APPROACH.full, PROVISIONAL_M);
+    const looks = made.sceneOptions.map((option) => option.make().sceneAt(0));
+    expect(looks.map((scene) => [scene.provenance.kind, scene.bodies[1]?.detailSeed])).toEqual(
+      looks.map(() => ["kept", SERVED_DETAIL_SEED]),
+    );
   });
 
   it("serves each look's terrain through the server's link, which no look closes", () => {
