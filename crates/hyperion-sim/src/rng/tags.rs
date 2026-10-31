@@ -1514,7 +1514,11 @@ mod tests {
         }
         assert_eq!(BINARY_EV_NOVA.scope(), crate::rng::TagScope::Event);
         assert_eq!(BINARY_EV_NOVA.name(), "binary.ev.nova");
-        // P09.T43: the luminous blue variables' candidates, one `System` tag per property group.
+    }
+
+    /// P09.T43: the luminous blue variables' candidates, one `System` tag per property group.
+    #[test]
+    fn plan_09_registers_the_luminous_blue_variables_tags() {
         for tag in [
             CLASS_LBV_SITE,
             CLASS_LBV_MASS,
