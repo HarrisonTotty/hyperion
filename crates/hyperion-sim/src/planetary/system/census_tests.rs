@@ -27,7 +27,9 @@
 //! registry has not read, the envelopes' modes with no τ, the cold-trapped condensates, the reached
 //! rows whose condensed optics are stand-ins, and the solid surfaces' ages by tectonic regime. None
 //! of those is asserted at 24: they are the census's findings, printed for review. Under every 25
-//! hold the findings a hold at 25 fixes are asserted absent ([`FIXED_UNDER_25`]).
+//! hold the findings a hold at 25 fixes are asserted absent ([`FIXED_UNDER_25`]), and under every
+//! 26 hold those a hold at 25 or 26 fixes ([`FIXED_UNDER_26`]), but the bodies [`LEFT_UNDER_26`]
+//! lists.
 //!
 //! The tests are native only: on WebAssembly, which has no threads, the shares would run one after
 //! another, thousands of systems on one thread, and the records' bit-for-bit agreement there is
@@ -46,14 +48,20 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemRecord;
 use crate::planetary::chem::condense::NotFormed;
-use crate::planetary::chem::partition::CondensateEntry;
+use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
 use crate::planetary::derive::atmosphere::{
     AIRLESS_PRESSURE, Gas, SurfaceState, WATER_MELTING_POINT,
 };
+use crate::planetary::derive::atmosphere::{
+    SNOWBALL_ICE_COVER, locked_state_in_force, present_state_in_force,
+};
 use crate::planetary::hooks::aerosols::{AerosolDeck, AerosolMode};
 use crate::planetary::hooks::figures::Subsurface;
+use crate::planetary::hooks::surface::Forcing;
 use crate::planetary::record::{Modelled, RecordSection, SectionState};
-use crate::planetary::testing::{SampleFilter, sample_records, with_every_25_hold};
+use crate::planetary::testing::{
+    SampleFilter, sample_records, with_every_25_hold, with_every_26_hold,
+};
 use crate::substance::{self, CondensedOptics, SubstanceId};
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
@@ -252,6 +260,9 @@ struct Census {
     hot_snowballs: Vec<String>,
     /// The gas envelopes (and supercritical ones) watched over the clock window.
     envelopes_watched: usize,
+    /// The bodies near a section's edge ([`near_a_section_edge`]), watched at [`WATCH_TIMES`]
+    /// times.
+    envelopes_near_an_edge: usize,
     /// Those of them with a recorded change inside the clock window.
     envelopes_with_a_change: usize,
     /// Every watched envelope whose section changes inside the clock window.
@@ -299,6 +310,7 @@ impl Census {
         }
         self.hot_snowballs.extend(other.hot_snowballs);
         self.envelopes_watched += other.envelopes_watched;
+        self.envelopes_near_an_edge += other.envelopes_near_an_edge;
         self.envelopes_with_a_change += other.envelopes_with_a_change;
         self.envelope_changes.extend(other.envelope_changes);
         add(&mut self.densities_not_read, other.densities_not_read);
@@ -389,6 +401,17 @@ impl Census {
             conditions.surface_pressure().value(),
         );
         let airless = AIRLESS_PRESSURE.value();
+        if surface.state() == SurfaceState::Snowball && !rule_5_holds(surface) {
+            self.found(
+                "a Snowball its own figures do not make (rule 5)",
+                format!(
+                    "{label}: T_s {t_s:.2} K, ice {:.4}, liquid water {}, {:?}",
+                    surface.figures().ice_fraction(),
+                    lists_liquid_water(surface),
+                    surface.climate_regime().forcing()
+                ),
+            );
+        }
         let line = format!(
             "{label}: {:?} {:?}, T_s {t_s:.2} K, p_s {:.4e} bar, {}",
             surface.state(),
@@ -524,21 +547,37 @@ impl Census {
             .ok()
             .is_some_and(|bulk| !bulk.class().has_solid_surface());
         let epoch = record.section_state(RecordSection::Envelope);
-        if case.kind == "moons" || !(gas_envelope || epoch != SectionState::NotApplicable) {
+        let watched =
+            case.kind != "moons" && (gas_envelope || epoch != SectionState::NotApplicable);
+        let near = near_a_section_edge(case);
+        if !(watched || near) {
             return;
         }
-        self.envelopes_watched += 1;
+        self.envelopes_watched += usize::from(watched);
+        self.envelopes_near_an_edge += usize::from(near);
         let section = |t: UniverseTime| {
             system
                 .body_at(ctx, case.body.index, t)
                 .expect("a walked body is in its system")
                 .section_state(RecordSection::Envelope)
         };
+        let times: Vec<(String, UniverseTime)> = if near {
+            (0..WATCH_TIMES)
+                .map(|k| {
+                    (
+                        format!("{k}/{} of the window", WATCH_TIMES - 1),
+                        watch_time(k),
+                    )
+                })
+                .collect()
+        } else {
+            vec![
+                ("the window's start".to_owned(), ClockWindow::START),
+                ("its end".to_owned(), ClockWindow::END),
+            ]
+        };
         let mut changes = Vec::new();
-        for (name, t) in [
-            ("the window's start", ClockWindow::START),
-            ("its end", ClockWindow::END),
-        ] {
+        for (name, t) in times {
             let then = section(t);
             if then != epoch {
                 changes.push(format!("{then:?} at {name}"));
@@ -769,10 +808,12 @@ impl Census {
         writeln!(
             w,
             "\n### Gas envelopes changing section inside the clock window: {} of {} watched ({} \
-             with a recorded change inside it)",
+             with a recorded change inside it, {} near a section's edge watched at {} times)",
             self.envelope_changes.len(),
             self.envelopes_watched,
-            self.envelopes_with_a_change
+            self.envelopes_with_a_change,
+            self.envelopes_near_an_edge,
+            WATCH_TIMES
         )
         .expect(line);
         for change in &self.envelope_changes {
@@ -834,6 +875,28 @@ impl Census {
         assert_eq!(shown, Vec::new(), "findings 25's holds fix");
     }
 
+    /// Asserts that no body shows a finding of [`FIXED_UNDER_25`] or [`FIXED_UNDER_26`] but those
+    /// [`LEFT_UNDER_26`] lists, naming the first ones that do.
+    fn assert_fixed_under_26(&self) {
+        self.assert_fixed_under_25();
+        let shown: Vec<(&str, usize, Vec<&String>)> = FIXED_UNDER_26
+            .iter()
+            .filter_map(|&kind| {
+                let found = self.findings.get(kind)?;
+                let left = |line: &&String| {
+                    LEFT_UNDER_26
+                        .iter()
+                        .any(|&(of, body)| of == kind && line.starts_with(body))
+                };
+                let (left, bodies): (Vec<&String>, Vec<&String>) =
+                    found.bodies.iter().partition(left);
+                let count = found.count - left.len();
+                (count > 0).then_some((kind, count, bodies))
+            })
+            .collect();
+        assert_eq!(shown, Vec::new(), "findings 26's holds fix");
+    }
+
     /// Asserts that every registry row is reached or listed in [`UNREACHED`], each listed key a
     /// row; and for [`Listing::Exact`], also that no listed row is reached.
     fn assert_reached(&self, listing: Listing) {
@@ -869,6 +932,98 @@ impl Census {
 /// every 25 hold ([`Census::assert_fixed_under_25`]): the audit's M6 on a rocky belt's hot
 /// ice-bulk members, P14.T56.g's lag asked of them (`member_lag`).
 const FIXED_UNDER_25: [&str; 1] = ["the audit's M6 fails on members"];
+
+/// The findings a hold at 26 fixes, each held at none under every 26 hold
+/// ([`Census::assert_fixed_under_26`]), with 25's ([`FIXED_UNDER_25`]): no `Snowball` above
+/// 273.15 K and none its own figures do not make (`LOCKED_STATE_VERSION`), no runaway over a sea
+/// (`SEA_DECK_VERSION`); and of the audit's, none of M3 and M6 on any kind of body (the moon's own
+/// sky; `PLANET_LAG_VERSION`). The envelope watch's count is printed, not asserted: no rule yet
+/// keeps a body whose passes settle on a critical point on one side of it.
+const FIXED_UNDER_26: [&str; 9] = [
+    "a Snowball above 273.15 K",
+    "a Snowball its own figures do not make (rule 5)",
+    "a runaway with liquid water at its surface",
+    "the audit's M3 fails on planets",
+    "the audit's M3 fails on members",
+    "the audit's M3 fails on moons",
+    "the audit's M6 fails on planets",
+    "the audit's M6 fails on members",
+    "the audit's M6 fails on moons",
+];
+
+/// The bodies that still show a finding of [`FIXED_UNDER_26`] under every 26 hold, by the finding
+/// and the start of the body's line, its system's rank and its ID; each a finding, not a fix's.
+///
+/// #17937 is locked 1:1: P14.T24.j's substellar deck (`LOCKED_CLIMATE_VERSION`) takes it from 25's
+/// open sea at a mean of 291.24 K to ice on 55% of its surface at 273.72 K, listing no liquid
+/// water, so that rule 5 makes it a `Snowball` under the eyeball's rule too, as its figures stand.
+/// It is no `Snowball` of 25's: under every 26 hold but the deck it is 25's `Temperate`.
+const LEFT_UNDER_26: [(&str, &str); 1] =
+    [("a Snowball above 273.15 K", "#17937 0200fb2d1ffb0000.0400 ")];
+
+/// How many times across the clock window, both ends included, the census reads the envelope
+/// section of a body near a section's edge ([`near_a_section_edge`]).
+const WATCH_TIMES: i64 = 41;
+
+/// How near its critical temperature a column lies, as `T` ÷ `T_c` − 1, for the census to read
+/// its body's section at [`WATCH_TIMES`] times: a census bound.
+const NEAR_CRITICAL: f64 = 1e-6;
+
+/// How near [`THIN_ENVELOPE_FRACTION`] a column's share lies, as a part of it, for the census to
+/// read its body's section at [`WATCH_TIMES`] times: a census bound.
+///
+/// [`THIN_ENVELOPE_FRACTION`]: crate::planetary::params::THIN_ENVELOPE_FRACTION
+const NEAR_THRESHOLD: f64 = 0.1;
+
+/// Whether a column of the body `case`'s air, at its mean surface temperature or its partition's,
+/// lies within [`NEAR_CRITICAL`] of its critical temperature, or holds a share within
+/// [`NEAR_THRESHOLD`] of the thin envelope's: a body whose envelope section could change with no
+/// input changing.
+fn near_a_section_edge(case: &AuditCase<'_>) -> bool {
+    let Some(bulk) = case.record.bulk().ok() else {
+        return false;
+    };
+    let gravity = bulk.surface_gravity();
+    let air = case.derived.atmosphere();
+    let threshold = crate::planetary::params::THIN_ENVELOPE_FRACTION;
+    air.critical_columns(gravity)
+        .chain(air.partitioned_reservoir(gravity))
+        .any(|column| {
+            (column.temperature_ratio() - 1.0).abs() <= NEAR_CRITICAL
+                || (column.share() / threshold - 1.0).abs() <= NEAR_THRESHOLD
+        })
+}
+
+/// The `k`th of [`WATCH_TIMES`] times evenly across the clock window, its start the 0th and its
+/// end the last.
+fn watch_time(k: i64) -> UniverseTime {
+    let width = 2 * crate::time::CLOCK_WINDOW_H.seconds();
+    ClockWindow::START
+        .checked_add(Span::from_seconds(width * k / (WATCH_TIMES - 1)))
+        .expect("a time across the window is a time")
+}
+
+/// Whether the published condensates of `surface` list liquid water: open water, a sea under ice
+/// being its ice.
+fn lists_liquid_water(surface: &Surface) -> bool {
+    surface
+        .condensates()
+        .entry(Gas::Water.substance(), CondensatePhase::Liquid)
+        .is_some()
+}
+
+/// Whether the published figures of the `Snowball` `surface` make it one by P14.T53.e's rule 5
+/// under the rules in force: its ices on at least [`SNOWBALL_ICE_COVER`] of its surface, and from
+/// 26 on a world locked 1:1 no open water (`LOCKED_STATE_VERSION`). Before 25 the state is its
+/// insolation class's, which no figure decides, so it holds.
+fn rule_5_holds(surface: &Surface) -> bool {
+    if !present_state_in_force() {
+        return true;
+    }
+    let locked = surface.climate_regime().forcing() == Forcing::Locked;
+    surface.figures().ice_fraction() >= SNOWBALL_ICE_COVER
+        && !(locked_state_in_force() && locked && lists_liquid_water(surface))
+}
 
 /// How a census holds [`UNREACHED`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1171,6 +1326,9 @@ enum Rules {
     /// Every hold of version 25 in force ([`with_every_25_hold`]), set on each share's own thread,
     /// since the holds' switches are each thread's.
     Every25Hold,
+    /// Every hold of version 26 in force ([`with_every_26_hold`]), those of 25 among them, set on
+    /// each share's own thread.
+    Every26Hold,
 }
 
 /// The census of `records` (of `galaxy`) under `rules`: each system generated whole at [`SEED`]
@@ -1192,6 +1350,7 @@ fn census_of(galaxy: &Galaxy, records: &[SystemRecord], first: usize, rules: Rul
     match rules {
         Rules::At24 => walk(),
         Rules::Every25Hold => with_every_25_hold(walk),
+        Rules::Every26Hold => with_every_26_hold(walk),
     }
     census
 }
@@ -1284,4 +1443,38 @@ fn composition_census_under_every_25_hold_over_a_million_bodies_reaches_every_ro
     assert!(census.bodies >= 1_000_000, "{} bodies", census.bodies);
     census.assert_reached(Listing::Covering);
     census.assert_fixed_under_25();
+}
+
+/// The ordinary census under every hold of version 26 ([`Rules::Every26Hold`]): at least 10⁵
+/// bodies, every registry row reached or listed with its reason, and none of the findings 25's
+/// and 26's holds fix ([`FIXED_UNDER_26`]).
+#[test]
+#[ignore = "slow: 10⁵ bodies of 6,800 systems under every 26 hold, on eight threads"]
+fn composition_census_under_every_26_hold_reaches_every_row_or_lists_why() {
+    let census = run(
+        "the ordinary census under every 26 hold",
+        ORDINARY_SYSTEMS,
+        ORDINARY_THREADS,
+        Rules::Every26Hold,
+    );
+    assert!(census.bodies >= 100_000, "{} bodies", census.bodies);
+    census.assert_reached(Listing::Covering);
+    census.assert_fixed_under_26();
+}
+
+/// The slow census under every hold of version 26 ([`Rules::Every26Hold`]): at least 10⁶ bodies,
+/// every registry row reached or listed with its reason, and none of the findings 25's and 26's
+/// holds fix ([`FIXED_UNDER_26`]) but the bodies [`LEFT_UNDER_26`] lists.
+#[test]
+#[ignore = "slow: 10⁶ bodies of 68,000 systems under every 26 hold, on eight threads"]
+fn composition_census_under_every_26_hold_over_a_million_bodies_reaches_every_row_or_lists_why() {
+    let census = run(
+        "the slow census under every 26 hold",
+        SLOW_SYSTEMS,
+        SLOW_THREADS,
+        Rules::Every26Hold,
+    );
+    assert!(census.bodies >= 1_000_000, "{} bodies", census.bodies);
+    census.assert_reached(Listing::Covering);
+    census.assert_fixed_under_26();
 }
