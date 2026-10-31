@@ -65,7 +65,7 @@ pub(crate) use features::{counted_members, expected_members_of};
 pub use float_mode::{FlushProbe, probe_flush_to_zero};
 pub use galaxies::{GalaxyCache, GalaxyCounters};
 pub use global_list::{
-    BuildTubeOnPoolError, SharedSprayForces, Shares, TRACERS_PER_SHARE, global_list_on, tracers_on,
+    BuildTubeOnPoolError, SharedSprayForces, Shares, TRACERS_PER_SHARE, global_list_on,
     tube_table_on,
 };
 pub use key::GalaxyKey;

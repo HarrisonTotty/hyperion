@@ -2118,7 +2118,7 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
   - Sim: `Debris::plan` gives a `DebrisPlan` (`orphan_count`, `orphan_room`, `orphan(galaxy, k)`
     pure in `k`, `finish`). `GlobalList::plan` gives a `ListPlan` (`of_debris`, `legs`, `finish`).
     `spray::Leg` (with `steps`) and `spray::radii_over_ly` are public; `Spray::tracers_in(range)`.
-  - Server: `compute::{global_list_on, tube_table_on, tracers_on}` with `SharedSprayForces` (a
+  - Server: `compute::{global_list_on, tube_table_on}` with `SharedSprayForces` (a
     galaxy's spray table) and `Shares`. They are not yet called from a request; P10.T10.b keeps the
     list per universe and caches the tables, and calls them.
 - **P10.T6.a's arms by energy, as built (lane `p10-spray-arms`, 2026-10-30, at

@@ -172,7 +172,7 @@ impl OrphanDraw {
     ///
     /// # Panics
     ///
-    /// If `galaxy` is not the one the draw was made in, if `k` is not below
+    /// If `galaxy`'s seed is not that of the galaxy the draw was made in, if `k` is not below
     /// [`count`](Self::count), or if `galaxy` holds no kinematic tables
     /// ([`Galaxy::with_full_potential`]).
     #[must_use]

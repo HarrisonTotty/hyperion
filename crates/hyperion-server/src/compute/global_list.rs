@@ -21,21 +21,21 @@
 //! **Bit for bit.** Each unit is a pure function of the galaxy and its index: an orphan of `k`,
 //! every one of its draws keyed by `k`; a leg's radii and a tracer whatever they are stepped
 //! beside. The gather is in index order, so the list and the tables are the serial builds', at any
-//! number of workers and in any shares. A share whose job failed or was cancelled is drawn,
-//! stepped or sprayed by the next job, so that no result depends on one. Each worker checks its
-//! floating-point mode before every reply ([`CpuPool`]), and the galaxy and the force are shared
-//! read-only.
+//! number of workers and in any shares. Each worker checks its floating-point mode before every
+//! reply ([`CpuPool`]), so a spray table is kept only once its job's reply has passed, and the
+//! galaxy and the table are shared read-only.
 //!
 //! **No job waits on another.** As for a range query ([`served_range_query`]): the pool's queues
 //! are first-in, first-out and a worker runs one job to its end, so a job that blocked on jobs it
 //! had queued could stall every worker. Every job here is queued by the caller's own task, which
 //! awaits their replies on the runtime, and a job only plans, draws, steps, sprays or assembles.
-//! A build holds at most its shares' jobs and three more in the queue at once.
+//! No kind of unit is dealt into more shares than the pool has workers, so a build holds at most
+//! its workers' count and three more jobs in the queue at once.
 //!
 //! [`served_range_query`]: super::served_range_query
 //! [`DebrisPlan::orphan`]: hyperion_sim::galaxy::global_list::DebrisPlan::orphan
 
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::global_list::orbit::BuildLeapfrogError;
@@ -51,11 +51,12 @@ use crate::cache::{HeapBytes, SharedByteLru};
 
 /// The tracers of one share of a tube's spray: 250, eight shares of a stream's 2,000 on eight
 /// workers, about 0.25 s each (perf-spray's recorded design, 2026-10-30).
-pub const TRACERS_PER_SHARE: u32 = 250;
+pub const TRACERS_PER_SHARE: NonZeroU32 = NonZeroU32::new(250).expect("250 is not zero");
 
-/// The spray tables of the galaxies the server holds, one per galaxy, each some 160 kB and
-/// 12 ms to build ([`SprayForce::new`]): what the list's shell orbits and every tube's spray step
-/// in.
+/// The spray tables of the galaxies the server holds, one per galaxy, by its key.
+///
+/// A table is some 160 kB and 12 ms to build ([`SprayForce::new`]): what the list's shell orbits
+/// and every tube's spray step in.
 #[derive(Debug)]
 pub struct SharedSprayForces {
     forces: SharedByteLru<GalaxyKey, SprayForce>,
@@ -68,8 +69,9 @@ impl HeapBytes for SprayForce {
 }
 
 impl SharedSprayForces {
-    /// An empty cache that holds at most `budget_bytes` of charged tables. Zero keeps none: each
-    /// build then makes its own.
+    /// An empty cache that holds at most `budget_bytes` of charged tables.
+    ///
+    /// Zero keeps none: each build then makes its own.
     #[must_use]
     pub fn new(budget_bytes: usize) -> Self {
         Self {
@@ -85,11 +87,13 @@ impl SharedSprayForces {
 }
 
 /// How many shares each kind of unit is dealt into: the orphans, the legs and a tube's tracers.
+///
+/// A build deals no kind into more shares than its pool has workers, whatever these ask.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Shares {
     orphans: NonZeroUsize,
     legs: NonZeroUsize,
-    tracers_per_share: u32,
+    tracers_per_share: NonZeroU32,
 }
 
 impl Shares {
@@ -105,13 +109,12 @@ impl Shares {
     }
 
     /// `orphans` shares of orphans and `legs` of legs, and `tracers_per_share` tracers a share.
-    ///
-    /// # Panics
-    ///
-    /// If `tracers_per_share` is zero.
     #[must_use]
-    pub const fn new(orphans: NonZeroUsize, legs: NonZeroUsize, tracers_per_share: u32) -> Self {
-        assert!(tracers_per_share > 0, "a share holds at least one tracer");
+    pub const fn new(
+        orphans: NonZeroUsize,
+        legs: NonZeroUsize,
+        tracers_per_share: NonZeroU32,
+    ) -> Self {
         Self {
             orphans,
             legs,
@@ -132,8 +135,8 @@ pub enum BuildTubeOnPoolError {
 impl std::fmt::Display for BuildTubeOnPoolError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Compute(error) => write!(f, "the tube's jobs could not run: {error}"),
-            Self::Table(error) => write!(f, "the tube's table could not be made: {error}"),
+            Self::Compute(_) => f.write_str("the tube's jobs could not run"),
+            Self::Table(_) => f.write_str("the tube's table could not be made"),
         }
     }
 }
@@ -151,6 +154,21 @@ impl From<ComputeError> for BuildTubeOnPoolError {
     fn from(error: ComputeError) -> Self {
         Self::Compute(error)
     }
+}
+
+impl From<BuildLeapfrogError> for BuildTubeOnPoolError {
+    fn from(error: BuildLeapfrogError) -> Self {
+        Self::Table(BuildTubeTableError::Spray(error))
+    }
+}
+
+/// Panics unless `key` names `galaxy`: its spray table is kept under the key.
+fn check_key(galaxy: &Galaxy, key: GalaxyKey) {
+    assert_eq!(
+        galaxy.seed().get(),
+        key.seed(),
+        "a galaxy's spray table is kept under its own key, and this is another's"
+    );
 }
 
 /// `job` queued on `pool` at `priority` behind `token`, waiting for room in its queue.
@@ -177,8 +195,8 @@ async fn reply<R>(receiver: JobReceiver<R>) -> Result<R, ComputeError> {
         .map_err(ComputeError::Job)
 }
 
-/// The spray table of `galaxy`, the galaxy `key` names: `forces`' if it holds it, or built on a
-/// job queued now and stored, its receiver given back to be awaited.
+/// The spray table of `galaxy`, the galaxy `key` names: `forces`' if it holds it, or one built on
+/// a job queued now, kept in `forces` once ready.
 async fn force_of(
     pool: &CpuPool,
     forces: &Arc<SharedSprayForces>,
@@ -189,29 +207,46 @@ async fn force_of(
     if let Some(force) = forces.get(key) {
         return Ok(Force::Held(force));
     }
-    let (forces, galaxy) = (Arc::clone(forces), Arc::clone(galaxy));
+    let galaxy = Arc::clone(galaxy);
     let receiver = queue(pool, priority, token, move |_: &CancelToken| {
-        let force = Arc::new(SprayForce::new(galaxy.potential())?);
-        // A table the cache refuses is this build's alone.
-        drop(forces.forces.insert(key, Arc::clone(&force)));
-        Ok(force)
+        SprayForce::new(galaxy.potential()).map(Arc::new)
     })
     .await?;
-    Ok(Force::Building(receiver))
+    Ok(Force::Building {
+        receiver,
+        forces: Arc::clone(forces),
+        key,
+    })
 }
 
 /// A galaxy's spray table, held or being built.
 enum Force {
     Held(Arc<SprayForce>),
-    Building(JobReceiver<Result<Arc<SprayForce>, BuildLeapfrogError>>),
+    Building {
+        receiver: JobReceiver<Result<Arc<SprayForce>, BuildLeapfrogError>>,
+        /// Where it is kept once its job's reply has passed the pool's floating-point check.
+        forces: Arc<SharedSprayForces>,
+        key: GalaxyKey,
+    },
 }
 
 impl Force {
-    /// The table, once built.
+    /// The table, once built and kept.
     async fn ready(self) -> Result<Result<Arc<SprayForce>, BuildLeapfrogError>, ComputeError> {
         match self {
             Self::Held(force) => Ok(Ok(force)),
-            Self::Building(receiver) => reply(receiver).await,
+            Self::Building {
+                receiver,
+                forces,
+                key,
+            } => {
+                let built = reply(receiver).await?;
+                if let Ok(force) = &built {
+                    // A table the cache refuses is this build's alone.
+                    drop(forces.forces.insert(key, Arc::clone(force)));
+                }
+                Ok(built)
+            }
         }
     }
 }
@@ -220,17 +255,10 @@ impl Force {
 /// share `j` holds `j`, `j + n`, `j + 2n` and so on, each in order.
 #[must_use]
 fn dealt(count: u64, shares: NonZeroUsize) -> Vec<Vec<u64>> {
-    let n = u64::try_from(shares.get())
-        .unwrap_or(u64::MAX)
-        .min(count)
-        .max(1);
+    let n = u64::try_from(shares.get()).unwrap_or(u64::MAX).min(count);
+    let stride = usize::try_from(n).expect("at most the shares, a usize");
     (0..n)
-        .map(|first| {
-            (first..count)
-                .step_by(usize::try_from(n).expect("at most the shares, a usize"))
-                .collect()
-        })
-        .filter(|share: &Vec<u64>| !share.is_empty())
+        .map(|first| (first..count).step_by(stride).collect())
         .collect()
 }
 
@@ -253,22 +281,23 @@ fn by_steps(legs: &[Leg], shares: NonZeroUsize) -> Vec<Vec<usize>> {
 }
 
 /// The global list of `galaxy`, the galaxy `key` names, made on `pool`'s workers at `priority` in
-/// `shares` (module documentation): [`GlobalList::build`]'s, bit for bit. The galaxy's centre is
-/// built and kept in it, and its spray table kept in `forces`.
+/// `shares`, but never more shares than workers (module documentation).
 ///
-/// Each job waits for room in its queue, as a galaxy's build is no request of its own.
+/// It is [`GlobalList::build`]'s, bit for bit. The galaxy's centre is built and kept in it, and
+/// its spray table kept in `forces`. Each job waits for room in its queue, as a galaxy's build is
+/// no request of its own.
 ///
 /// # Errors
 ///
 /// [`ComputeError::Submit`] if the pool is shutting down or faulted, and [`ComputeError::Job`] if
-/// one of the build's jobs that no later job redoes is cancelled, panics, is lost with the pool or
-/// leaves its worker's floating-point mode flushing subnormals: a panic where
-/// [`GlobalList::build`] panics, for a galaxy without its full potential among them.
+/// one of the build's jobs is cancelled, panics, is lost with the pool or leaves its worker's
+/// floating-point mode flushing subnormals: a panic where [`GlobalList::build`] panics, for a
+/// galaxy without its full potential among them.
 ///
 /// # Panics
 ///
-/// If the galaxy's spray table cannot be built though its debris could be planned, which a galaxy
-/// with the kinematic tables the debris needs never gives.
+/// If `key` is not of `galaxy`'s seed, or if the galaxy's spray table cannot be built though its
+/// debris could be planned, which a galaxy with the kinematic tables the debris needs never gives.
 pub async fn global_list_on(
     pool: &CpuPool,
     forces: &Arc<SharedSprayForces>,
@@ -276,10 +305,12 @@ pub async fn global_list_on(
     (priority, shares): (Priority, Shares),
     token: &CancelToken,
 ) -> Result<GlobalList, ComputeError> {
+    check_key(galaxy, key);
+    let workers = pool.workers();
     let at = |galaxy: &Arc<Galaxy>| Arc::clone(galaxy);
     let centre = {
         let galaxy = at(galaxy);
-        // Its model is kept in the galaxy, whatever the job sends back.
+        // Its model is kept in the galaxy; the finish reads it, and fails as it does if it fails.
         queue(pool, priority, token, move |_: &CancelToken| {
             galaxy.centre().is_ok()
         })
@@ -294,8 +325,9 @@ pub async fn global_list_on(
     };
     let force = force_of(pool, forces, (galaxy, key), priority, token).await?;
     let plan = reply(planned).await?;
-    let mut drawing = Vec::new();
-    for share in dealt(plan.orphan_count(), shares.orphans) {
+    let orphan_shares = dealt(plan.orphan_count(), shares.orphans.min(workers));
+    let mut drawing = Vec::with_capacity(orphan_shares.len());
+    for share in orphan_shares {
         let (galaxy, plan) = (at(galaxy), Arc::clone(&plan));
         let job = move |_: &CancelToken| {
             share
@@ -305,32 +337,22 @@ pub async fn global_list_on(
         };
         drawing.push(queue(pool, priority, token, job).await?);
     }
-    let mut orphans: Vec<Option<Option<StreamSpec>>> =
-        vec![
-            None;
-            usize::try_from(plan.orphan_count())
-                .expect("a galaxy's orphans number far fewer than a usize holds")
-        ];
+    let mut orphans: Vec<Option<StreamSpec>> = vec![
+        None;
+        usize::try_from(plan.orphan_count()).expect(
+            "a galaxy's orphans number far fewer than a usize holds"
+        )
+    ];
     for receiver in drawing {
-        // A share lost is drawn by the job after it, as the module documentation says.
-        if let Ok(drawn) = reply(receiver).await {
-            for (k, orphan) in drawn {
-                orphans[usize::try_from(k).expect("an index of the vector above")] = Some(orphan);
-            }
+        for (k, orphan) in reply(receiver).await? {
+            orphans[usize::try_from(k).expect("an index of the vector above")] = orphan;
         }
     }
     let assembled = {
-        let galaxy = at(galaxy);
-        let legs_shares = shares.legs;
+        let legs = shares.legs.min(workers);
         queue(pool, priority, token, move |_: &CancelToken| {
-            let plan = Arc::unwrap_or_clone(plan);
-            let drawn = (0_u64..)
-                .zip(orphans)
-                .map(|(k, orphan)| orphan.unwrap_or_else(|| plan.orphan(&galaxy, k)));
-            // A lost share's orphans are drawn here, before the plan is given up to its finish.
-            let drawn: Vec<_> = drawn.collect();
-            let list = ListPlan::of_debris(plan.finish(drawn));
-            let dealt = by_steps(list.legs(), legs_shares);
+            let list = ListPlan::of_debris(Arc::unwrap_or_clone(plan).finish(orphans));
+            let dealt = by_steps(list.legs(), legs);
             (Arc::new(list), dealt)
         })
         .await?
@@ -352,27 +374,17 @@ pub async fn global_list_on(
         };
         stepping.push(queue(pool, priority, token, job).await?);
     }
-    let mut radii: Vec<Option<[f64; 2]>> = vec![None; list.legs().len()];
+    let mut radii = vec![[f64::NAN; 2]; list.legs().len()];
     for receiver in stepping {
-        // A share lost is stepped by the job after it, as the module documentation says.
-        if let Ok(stepped) = reply(receiver).await {
-            for (n, r) in stepped {
-                radii[n] = Some(r);
-            }
+        for (n, r) in reply(receiver).await? {
+            radii[n] = r;
         }
     }
-    // The finish reads the centre, which its job has built, or which the finish builds itself, and
-    // fails as that job did, if that job failed: either way no job waits on another's, and what
-    // the job sent back is not needed.
-    let _ = reply(centre).await;
+    // The centre is built before the finish reads it, so that no job waits on another's; what its
+    // job sent back is the finish's to find again.
+    let _ = reply(centre).await?;
     let galaxy = at(galaxy);
     let finished = queue(pool, priority, token, move |_: &CancelToken| {
-        let legs = list.legs();
-        let radii: Vec<[f64; 2]> = radii
-            .into_iter()
-            .zip(legs)
-            .map(|(r, leg)| r.unwrap_or_else(|| radii_over_ly(&force, &[*leg])[0]))
-            .collect();
         Arc::unwrap_or_clone(list).finish(&galaxy, &radii)
     })
     .await?;
@@ -380,13 +392,18 @@ pub async fn global_list_on(
 }
 
 /// The tube table of `spec`'s stream in `galaxy`, the galaxy `key` names, its tracers sprayed on
-/// `pool`'s workers at `priority` in `shares`' shares of tracers (module documentation):
-/// [`TubeTable::build`]'s, bit for bit. The galaxy's spray table is kept in `forces`.
+/// `pool`'s workers at `priority` in `shares`' shares of tracers (module documentation).
+///
+/// It is [`TubeTable::build`]'s, bit for bit. The galaxy's spray table is kept in `forces`.
 ///
 /// # Errors
 ///
 /// [`BuildTubeOnPoolError::Table`] as [`TubeTable::build`]'s error, and
 /// [`BuildTubeOnPoolError::Compute`] as [`global_list_on`]'s.
+///
+/// # Panics
+///
+/// If `key` is not of `galaxy`'s seed.
 pub async fn tube_table_on(
     pool: &CpuPool,
     forces: &Arc<SharedSprayForces>,
@@ -395,12 +412,11 @@ pub async fn tube_table_on(
     (priority, shares): (Priority, Shares),
     token: &CancelToken,
 ) -> Result<TubeTable, BuildTubeOnPoolError> {
-    let params = SprayParams::default();
     let tracers = tracers_on(
         pool,
         forces,
         (galaxy, key),
-        (spec, params),
+        (spec, SprayParams::default()),
         (priority, shares),
         token,
     )
@@ -419,8 +435,8 @@ pub async fn tube_table_on(
 }
 
 /// The tracers of `spec`'s stream in `galaxy`, the galaxy `key` names, at `params`, in index order,
-/// sprayed on `pool`'s workers at `priority` in shares of `shares`' tracers a share, the last share
-/// gathering any whose job failed: [`Spray::tracers`]'s, bit for bit.
+/// sprayed on `pool`'s workers at `priority` in shares of `shares`' tracers a share, or as many as
+/// keep the shares to the workers' count: [`Spray::tracers`]'s, bit for bit.
 ///
 /// # Errors
 ///
@@ -429,8 +445,8 @@ pub async fn tube_table_on(
 ///
 /// # Panics
 ///
-/// Never on the targets the server builds for, whose `usize` holds a `u32`.
-pub async fn tracers_on(
+/// If `key` is not of `galaxy`'s seed.
+pub(crate) async fn tracers_on(
     pool: &CpuPool,
     forces: &Arc<SharedSprayForces>,
     (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
@@ -438,63 +454,31 @@ pub async fn tracers_on(
     (priority, shares): (Priority, Shares),
     token: &CancelToken,
 ) -> Result<Vec<Tracer>, BuildTubeOnPoolError> {
+    check_key(galaxy, key);
     let force = force_of(pool, forces, (galaxy, key), priority, token)
         .await?
         .ready()
-        .await?
-        .map_err(|error| BuildTubeOnPoolError::Table(BuildTubeTableError::Spray(error)))?;
+        .await??;
     let count = params.tracers();
-    let spray_in = {
+    let workers = u32::try_from(pool.workers().get()).unwrap_or(u32::MAX);
+    let per_share = shares.tracers_per_share.get().max(count.div_ceil(workers));
+    let mut spraying = Vec::with_capacity(
+        usize::try_from(count.div_ceil(per_share)).expect("a u32 fits a usize on every target"),
+    );
+    for first in (0..count).step_by(usize::try_from(per_share).expect("a u32 fits a usize")) {
+        let indices = first..count.min(first.saturating_add(per_share));
         let (galaxy, force, spec) = (Arc::clone(galaxy), Arc::clone(&force), spec.clone());
-        move |indices: core::ops::Range<u32>| {
+        let job = move |_: &CancelToken| {
             Spray::new(galaxy.seed(), &force, galaxy.potential(), &spec, &params)
                 .map(|spray| spray.tracers_in(indices))
-        }
-    };
-    let spray_in = Arc::new(spray_in);
-    let mut spraying = Vec::new();
-    for first in (0..count).step_by(
-        usize::try_from(shares.tracers_per_share).expect("a u32 fits a usize on every target"),
-    ) {
-        let indices = first..count.min(first.saturating_add(shares.tracers_per_share));
-        let spray_in = Arc::clone(&spray_in);
-        let job = move |_: &CancelToken| spray_in(indices);
-        spraying.push((first, queue(pool, priority, token, job).await?));
+        };
+        spraying.push(queue(pool, priority, token, job).await?);
     }
-    let mut parts: Vec<(core::ops::Range<u32>, Option<Vec<Tracer>>)> = Vec::new();
-    for (first, receiver) in spraying {
-        let end = count.min(first.saturating_add(shares.tracers_per_share));
-        match reply(receiver).await {
-            Ok(Ok(tracers)) => parts.push((first..end, Some(tracers))),
-            Ok(Err(error)) => {
-                return Err(BuildTubeOnPoolError::Table(BuildTubeTableError::Spray(
-                    error,
-                )));
-            }
-            // A share lost is sprayed by the job after it, as the module documentation says.
-            Err(_) => parts.push((first..end, None)),
-        }
+    let mut tracers = Vec::with_capacity(usize::try_from(count).expect("a u32 fits a usize"));
+    for receiver in spraying {
+        tracers.extend(reply(receiver).await??);
     }
-    if parts.iter().all(|(_, tracers)| tracers.is_some()) {
-        return Ok(parts
-            .into_iter()
-            .flat_map(|(_, t)| t.into_iter().flatten())
-            .collect());
-    }
-    let gathered = queue(pool, priority, token, move |_: &CancelToken| {
-        let mut tracers = Vec::new();
-        for (indices, sprayed) in parts {
-            match sprayed {
-                Some(sprayed) => tracers.extend(sprayed),
-                None => tracers.extend(spray_in(indices)?),
-            }
-        }
-        Ok(tracers)
-    })
-    .await?;
-    reply(gathered)
-        .await?
-        .map_err(|error| BuildTubeOnPoolError::Table(BuildTubeTableError::Spray(error)))
+    Ok(tracers)
 }
 
 #[cfg(test)]
@@ -504,8 +488,12 @@ mod tests {
     use hyperion_sim::GENERATOR_VERSION;
     use hyperion_sim::galaxy::global_list::testing::pal5_like;
 
+    use std::sync::OnceLock;
+
+    use hyperion_sim::Seed;
+
     use super::*;
-    use crate::convert::origins::{SEED, galaxy};
+    use crate::convert::origins::SEED;
     use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 
     fn key() -> GalaxyKey {
@@ -529,14 +517,23 @@ mod tests {
             .expect("the pool does not stall")
     }
 
-    /// The server tests' galaxy as a fresh copy, its centre not yet read.
+    /// A fresh copy of the server tests' galaxy, its centre not yet read: of a galaxy of this
+    /// module's own, whose centre nothing reads, so that no other test's reading it can warm it.
     fn cold() -> Arc<Galaxy> {
-        Arc::new(galaxy().clone())
+        static COLD: OnceLock<Galaxy> = OnceLock::new();
+        Arc::new(
+            COLD.get_or_init(|| Galaxy::new(Seed::new(SEED)).with_full_potential())
+                .clone(),
+        )
+    }
+
+    fn tracers(n: u32) -> NonZeroU32 {
+        NonZeroU32::new(n).expect("at least one")
     }
 
     /// On one worker, four and eight, in the design's shares, in one share of each kind and in
-    /// more shares than units, the list made on the pool is the serial build's, bit for bit,
-    /// whether the galaxy's centre and its spray table were held or not (P10.T5.b).
+    /// more shares than units or workers, the list made on the pool is the serial build's, bit for
+    /// bit, whether the galaxy's centre and its spray table were held or not (P10.T5.b).
     #[tokio::test]
     async fn the_list_made_on_the_pool_is_the_built_one() {
         let fresh = cold();
@@ -576,7 +573,7 @@ mod tests {
 
     /// A spray of six tracers an arm made on one worker, four and eight in shares of one, five and
     /// twelve tracers, and on eight in shares of every size, is the spray's own, bit for bit
-    /// (P10.T5.b).
+    /// (P10.T5.b); the shares are widened as far as keeps them to the workers' count.
     #[tokio::test]
     async fn tracers_sprayed_on_the_pool_in_any_shares_are_the_spray_s() {
         let galaxy = cold();
@@ -595,7 +592,7 @@ mod tests {
         let forces = Arc::new(SharedSprayForces::new(0));
         for (n, per) in cases {
             let pool = pool(n);
-            let shares = Shares::new(workers(n), workers(n), per);
+            let shares = Shares::new(workers(n), workers(n), tracers(per));
             let tracers = within(tracers_on(
                 &pool,
                 &forces,

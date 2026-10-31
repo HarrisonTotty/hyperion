@@ -217,8 +217,10 @@ impl DebrisPlan {
     ///
     /// # Panics
     ///
-    /// If `galaxy` is not the one the plan was made for, or `k` is not below
-    /// [`orphan_count`](Self::orphan_count).
+    /// If `galaxy`'s seed is not that of the galaxy the plan was made for, if `k` is not below
+    /// [`orphan_count`](Self::orphan_count), or if `galaxy` holds no kinematic tables
+    /// ([`Galaxy::with_full_potential`]). The plan was made for a galaxy with them, so a galaxy
+    /// of its seed without them is another galaxy.
     #[must_use]
     pub fn orphan(&self, galaxy: &Galaxy, k: u64) -> Option<StreamSpec> {
         self.orphans.orphan(galaxy, k)

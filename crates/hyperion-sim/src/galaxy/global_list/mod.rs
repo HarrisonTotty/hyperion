@@ -753,6 +753,26 @@ pub struct ListPlan {
 
 impl ListPlan {
     /// The plan of the list of `debris`: its streams' and cores' shells' legs.
+    ///
+    /// A caller's pool generates the debris itself, its orphans drawn apart ([`Debris::plan`]),
+    /// and plans from it.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::global_list::{Debris, GlobalList, ListPlan};
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    ///
+    /// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?
+    ///     .with_full_potential();
+    /// let plan = Debris::plan(&galaxy);
+    /// let orphans: Vec<_> = (0..plan.orphan_count()).map(|k| plan.orphan(&galaxy, k)).collect();
+    /// let planned = ListPlan::of_debris(plan.finish(orphans));
+    /// assert_eq!(planned, GlobalList::plan(&galaxy));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     #[must_use]
     pub fn of_debris(debris: Debris) -> Self {
         let shells: Vec<ShellLegs> = (debris.streams().iter().map(stream_legs))
@@ -1393,7 +1413,12 @@ mod tests {
         fn the_list_planned_and_made_in_shares_is_the_build() {
             let Fixture { galaxy, list } = fixture();
             let plan = Debris::plan(galaxy);
-            assert!(plan.orphan_count() > 100 && plan.orphan_room() > 1_000);
+            assert!(
+                plan.orphan_count() > 100 && plan.orphan_room() > 1_000,
+                "{} orphans drawn and room for {}",
+                plan.orphan_count(),
+                plan.orphan_room()
+            );
             let mut drawn: Vec<_> = (0..plan.orphan_count())
                 .rev()
                 .map(|k| (k, plan.clone().orphan(galaxy, k)))
