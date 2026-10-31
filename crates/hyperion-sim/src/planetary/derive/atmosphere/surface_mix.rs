@@ -64,7 +64,7 @@ use crate::planetary::chem::partition::{
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{OpenWater, PassContext, RecordSpin, WaterGate};
 use crate::planetary::derive::photometry::area_mix::{
-    self, HostShade, IcyResurfacing, LidWeathering, Regolith,
+    self, HostShade, IcyResurfacing, LidWeathering, Regolith, VolatileFrost,
 };
 use crate::planetary::hooks::cold_traps::{
     self, ColdTrapBody, ColdTrapSky, FieldInputs, FieldSlot, NoColdTraps, PassColdTraps, PassTraps,
@@ -1138,7 +1138,12 @@ pub(crate) fn pass_resurfacing(air: &Atmosphere, context: Option<&PassContext>) 
     let tidal = context
         .and_then(PassContext::figures)
         .map(PassFigures::tidal_heat_flow);
-    IcyResurfacing::new(tidal, air.ice_holds_a_volatile())
+    let frost = if air.ice_holds_a_volatile() {
+        VolatileFrost::Held
+    } else {
+        VolatileFrost::None
+    };
+    IcyResurfacing::new(tidal, frost)
 }
 
 /// The maturity of the pass of the atmosphere `air` under its body's own climate `spun`, whose lid

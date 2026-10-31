@@ -1648,9 +1648,18 @@ pub(crate) struct IcyResurfacing {
     /// where it is not known: the passes' stand-in, a pass with no figures in its context (the
     /// first, C₀), and a body with no mass or radius.
     tidal: Option<WattsPerSquareMetre>,
-    /// Whether its ice holds a volatile air, nitrogen, methane or argon (P14.T53.c; the pass's
-    /// air's `ice_holds_a_volatile`).
-    volatile_frost: bool,
+    /// Whether its ice holds a volatile air (the pass's air's `ice_holds_a_volatile`).
+    frost: VolatileFrost,
+}
+
+/// Whether a body's ice holds a volatile air, nitrogen, methane or argon (P14.T53.c), whose frost
+/// cycles over its ground ([`IcyResurfacing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum VolatileFrost {
+    /// Its ice holds none.
+    None,
+    /// Its ice holds one.
+    Held,
 }
 
 impl IcyResurfacing {
@@ -1658,17 +1667,14 @@ impl IcyResurfacing {
     /// surface's.
     pub(crate) const NOT_KNOWN: Self = Self {
         tidal: None,
-        volatile_frost: false,
+        frost: VolatileFrost::None,
     };
 
     /// A body whose tidal heat flux is `tidal`, `None` where it is not known, and whose ice holds
-    /// a volatile air where `volatile_frost`.
+    /// a volatile air or none, as `frost` says.
     #[must_use]
-    pub(crate) const fn new(tidal: Option<WattsPerSquareMetre>, volatile_frost: bool) -> Self {
-        Self {
-            tidal,
-            volatile_frost,
-        }
+    pub(crate) const fn new(tidal: Option<WattsPerSquareMetre>, frost: VolatileFrost) -> Self {
+        Self { tidal, frost }
     }
 
     /// Whether the body is resurfaced faster than its lag forms, so that its `H2O` regolith keeps
@@ -1682,7 +1688,11 @@ impl IcyResurfacing {
     ///   enough to lose its nitrogen to Jeans's test, Ganymede's and Callisto's, holds none.
     #[must_use]
     pub(crate) fn resurfaced(self) -> bool {
-        self.volatile_frost
+        let frost = match self.frost {
+            VolatileFrost::Held => true,
+            VolatileFrost::None => false,
+        };
+        frost
             || self
                 .tidal
                 .is_some_and(|flux| flux >= RESURFACING_TIDAL_FLUX)
@@ -1702,7 +1712,6 @@ impl IcyResurfacing {
 ///   297; Moore et al. 2004), a budget not built; the Uranian moons, 0.10–0.23 in the visible
 ///   (Karkoschka 2001), darker by radiolysis, not modelled; Saturn's mid-sized moons, 0.43–0.68
 ///   (Buratti et al. 2022), brighter under Enceladus's E-ring frost. Each is a deferred finding.
-/// - **By mass** it is some 19% of the lag at `chondrite_ci`'s grains and ice Ih's.
 pub(crate) const ICY_LAG_NON_ICE_SHARE: f64 = 0.08;
 
 /// The rock of an `H2O` regolith's lag ([`icy_lag_bins`]): `chondrite_ci`, the class the crust's

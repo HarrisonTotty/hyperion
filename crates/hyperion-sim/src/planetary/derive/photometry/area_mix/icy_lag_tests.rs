@@ -42,7 +42,7 @@ fn h2o_regoliths() -> [Regolith; 5] {
 
 /// A body's resurfacing by its tide `flux` alone, its ice holding no volatile.
 fn tide(flux: WattsPerSquareMetre) -> IcyResurfacing {
-    IcyResurfacing::new(Some(flux), false)
+    IcyResurfacing::new(Some(flux), VolatileFrost::None)
 }
 
 /// The tidal heat flux of the measured Enceladus over its sphere, W m⁻²: its south polar terrain's
@@ -93,8 +93,8 @@ fn under_the_frost_every_h2o_regolith_is_t49i_s_frost_to_the_bit() {
             for regolith in h2o_regoliths() {
                 for resurfacing in [
                     IcyResurfacing::NOT_KNOWN,
-                    IcyResurfacing::new(Some(WattsPerSquareMetre::new(0.0)), false),
-                    IcyResurfacing::new(Some(RESURFACING_TIDAL_FLUX), false),
+                    IcyResurfacing::new(Some(WattsPerSquareMetre::new(0.0)), VolatileFrost::None),
+                    IcyResurfacing::new(Some(RESURFACING_TIDAL_FLUX), VolatileFrost::None),
                 ] {
                     let regolith = regolith.with_resurfacing(resurfacing);
                     for state in [SurfaceState::Airless, SurfaceState::Tenuous] {
@@ -241,7 +241,7 @@ fn resurfacing_is_a_tide_of_at_least_10_mw_m2_or_a_volatile_frost() {
     assert!(tide(RESURFACING_TIDAL_FLUX).resurfaced());
     assert!(tide(enceladus_tidal_flux()).resurfaced());
     for tidal in [None, Some(flux(0.0)), Some(flux(f64::NAN))] {
-        assert!(IcyResurfacing::new(tidal, true).resurfaced());
+        assert!(IcyResurfacing::new(tidal, VolatileFrost::Held).resurfaced());
     }
 }
 
@@ -277,7 +277,7 @@ fn under_the_mixture_the_measured_moons_take_their_windows() {
         let enceladus = at(tide(enceladus_tidal_flux())).bond;
         let triton = at(IcyResurfacing::new(
             Some(WattsPerSquareMetre::new(0.0)),
-            true,
+            VolatileFrost::Held,
         ))
         .bond;
         assert_same_bits(triton, frost);

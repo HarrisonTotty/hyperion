@@ -6367,6 +6367,8 @@ rows' values.
   - _Files:_ the `H2O` lid's regolith row (`planetary/derive/photometry/area_mix.rs`'s
     `Regolith`) and its tests.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
+  - _Built_ 2026-10-31, held at 26 (`ICY_REGOLITH_VERSION`): Risks, "Deviations in P14.T49.m, as
+    built".
 - **P14.T49.n The registry's unread densities** (23 → 24, before the serve gate; lane
   `p14-gate-24`, after T24.h.a's rows; rides 24 if ready, else the next planetary bump;
   decision-p14-t54a-water-consistency §6 and its Batch B follow-up, 2026-10-20;
@@ -33645,3 +33647,31 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   (the two slow censuses near the black hole fail; P09.T28.d.c's); the secant root's bracket
   reuse differs from re-evaluation in the last bit (`PassContext::rank` omits the crater
   contract); B5 fails on 01fffb2d60000000.0600, a `SteamEnvelope` over a `Temperate` division.
+- **Deviations in P14.T49.m, as built (lane p14-t49m, 2026-10-31).** Held at 26:
+  `area_mix::ICY_REGOLITH_VERSION`, `IcyRegolithRules::{Frost, Mixture}`, `with_icy_regolith` (a
+  line in `with_every_26_hold`); under `Frost` nothing moves (`golden_diff.py`: no golden changed).
+  - _The row:_ an airless or tenuous body's `H2O` regolith (a lid's row, or the stand-in's row for
+    ice) not resurfaced is `icy_lag_bins`: T49.i's two-size mixture of the frost (100 µm) and
+    `chondrite_ci` (70 µm) at `ICY_LAG_NON_ICE_SHARE` 0.08 by volume, w and ξ weighted by
+    cross-section, read through the similarity relation on `space_weathering`'s form tables. Under
+    an air nothing moves.
+  - _The fraction (lean, 2026-10-31):_ calibrated on the measured Ganymede (0.3500 about a Sun).
+    The body's own ice-to-rock ratio is not read; `chondrite_cm`'s lag is 0.0025 brighter.
+  - _Resurfacing (lean, 2026-10-31):_ `IcyResurfacing` keeps the frost at a tidal heat flux of at
+    least `RESURFACING_TIDAL_FLUX` 0.01 W m⁻² (`PassFigures::tidal_heat_flow`; not known on the
+    stand-in or at C₀), or where the air's ice holds N₂, CH₄ or Ar
+    (`Atmosphere::ice_holds_a_volatile`, `VolatileFrost`; Triton's class).
+  - _API:_ `Regolith::with_resurfacing`; `surface_mix::pass_resurfacing(air, context)`, read by
+    the area mix and by `PassBody::passes`' bare regolith. Photometry's `AirlessIce` reference is
+    `Regolith::of_material(Ice)`'s: 0.3500 under the lag, a ratio of 0.983.
+  - _Windows:_ Ganymede 0.3500 (T_eq 109.6 K at every rank) and Enceladus 0.832 at its measured
+    tide meet theirs; Callisto 0.350 and Europa 0.832 miss (findings). Triton and Titan don't move.
+  - _26's movers_ (by name): `under_every_26_hold_the_icy_lids_movers_are_stated` (slow; 467 of 893
+    bodies, 300 in their bare regolith, 16 cold icy members `Tenuous` → `Airless`, no exobase);
+    `under_every_26_hold_the_icy_moons_take_their_rock_s_lag`; the table's Ganymede in
+    `the_table_s_climate_ranges_are_the_ruling_s` ([17.95, 142.75] K) and
+    `an_airless_body_s_edge_is_110_k` (0.397 under 110 K); count (vii)'s two → `Snowball`
+    (`under_every_26_hold_the_icy_regolith_moves_count_vii_s_two_off_the_line`).
+  - _For 26's bump:_ P14.T53.i's census and `named` set this hold back. Under the lag its movers
+    are 02000b2ca0000001.1100 and two airless trace-N₂ bodies (…0600, …0800), not count (vii):
+    restate them. Goldens holding airless icy bodies move.
