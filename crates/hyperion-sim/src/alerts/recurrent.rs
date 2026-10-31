@@ -91,7 +91,8 @@ use crate::time::{Span, UniverseTime};
 use crate::units::consts::{SECONDS_PER_JULIAN_YEAR, SPEED_OF_LIGHT};
 use crate::units::{Gauss, LightYears, Metres, SolarMasses, Watts, Years};
 
-use super::reach::{flux, inverse_square_flux, kind_reach};
+use super::arriving::{ArrivingLight, DetectionLight};
+use super::reach::{flux, inverse_square_flux, kind_reach, transmission};
 use super::registry::TransientKind;
 use super::{AlertBand, AlertContext, AlertQuery, Detection, DetectionPhase};
 
@@ -801,6 +802,13 @@ fn host_detections(
             motion.velocity_at(outburst.onset),
             &motion.position_at(arrival),
         );
+        // A top hat at the detection's distance and line of sight (research's ruling of
+        // 2026-10-31): its flux at any time of its light is `seen`.
+        let light = ArrivingLight::magnetar(
+            (outburst.xray, outburst.onset, outburst.end),
+            distance,
+            transmission(sightline, AlertBand::XRay),
+        );
         out.push(Detection::new(
             outburst.id,
             host.host(),
@@ -812,6 +820,7 @@ fn host_detections(
             towards,
             retardation,
             seen >= limits.resolve(),
+            DetectionLight::Lit(light),
         ));
     }
 }

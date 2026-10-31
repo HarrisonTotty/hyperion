@@ -2840,3 +2840,18 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     keep judging "in progress" at a window's start.
   - _For T5.d._ A sensitive X-ray sensor takes the magnetars' reach to the diagonal, as the core
     collapses': the census must count the cells it would walk.
+- **P12.T8.b.1 as built (lane `p12-t8a`, 2026-10-31, at `GENERATOR_VERSION` 24).** No generated
+  output moves. New file `alerts/arriving.rs`.
+  - _Lights._ `Detection::light() -> &DetectionLight`: `Lit(ArrivingLight)`, with `flux_at(t)`,
+    `knots()` and `band()`, or `Unlit` for a glitch; `Detection::new` takes it last. The light holds
+    the detection's distance, line of sight and light time, so it is the walk's flux at the
+    detection's own time (an onset's flare peak to 10⁻⁹, the knot being floored to the nanosecond).
+    Built for the one-shot walk's supernovae, the local walk's flares and outbursts, and T5.c's
+    magnetar bursts and giant flares: a top hat in X-rays from onset to end (research's ruling of
+    2026-10-31). T5.d adds the centre's, and P11.T9.b plan 11's `BinaryLightCurve` with its rows.
+  - _For T8.b._ `Tracked::of(detection, sensor)` tracks a walk's detection on its own light. A
+    supernova's knots are its peak grid's 21,945 ages, so its track costs as many template
+    evaluations. `TransientRow::longest_rise() -> Option<LongestRise>` (`AtMost(Span)`, or
+    `PerEvent` for the tails) and `class_longest_rise(class)`: core collapses 78 days, Type Ia 16,
+    flares 4,115 s, outbursts 25 years, eruptions 5 years, the centre's flares 4,088 s, magnetars
+    and glitches none.

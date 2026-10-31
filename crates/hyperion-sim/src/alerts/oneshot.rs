@@ -45,8 +45,9 @@
 //! The entry's explosion event ([`SupernovaEntry::explosion_event`], the same from any distance),
 //! its member 0 as the host, its class and kind, T and `t_a`; the band and flux above; the bearing
 //! of its site from the observer; the onset's light ([`Retardation`]: observed at `t_a`, emitted
-//! at T from the site, the host then moving at its velocity from T, its remnant's); and whether the
-//! flux reaches the band's resolve limit.
+//! at T from the site, the host then moving at its velocity from T, its remnant's); whether the
+//! flux reaches the band's resolve limit; and the template's light in the band at every time
+//! ([`DetectionLight`], P12.T8.b.1), through the same line of sight from the site.
 //!
 //! [`Onset`]: DetectionPhase::Onset
 //! [`InProgress`]: DetectionPhase::InProgress
@@ -65,8 +66,9 @@ use crate::observe::{Retardation, bearing, light_time};
 use crate::time::UniverseTime;
 use crate::units::{LightYears, Metres, Watts, WattsPerSquareMetre, Years};
 
+use super::arriving::{ArrivingLight, DetectionLight};
 use super::light::{supernova_luminosities, supernova_peak};
-use super::reach::{flux, inverse_square_flux, kind_reach};
+use super::reach::{flux, inverse_square_flux, kind_reach, transmission};
 use super::registry::TransientKind;
 use super::{AlertBand, AlertContext, AlertQuery, BAND_COUNT, Detection, DetectionPhase};
 
@@ -431,6 +433,17 @@ fn detect<P: OneShotClass>(
         &present,
     );
     debug_assert_eq!(retardation.observed(), candidate.arrival);
+    let light = ArrivingLight::supernova(
+        event.supernova,
+        event.emitted,
+        band,
+        candidate.distance,
+        transmission(&line, band),
+    );
+    debug_assert_eq!(
+        event.emitted.checked_add(light_time(candidate.distance)),
+        Some(candidate.arrival)
+    );
     Some(Detection::new(
         event.event,
         event.host,
@@ -442,5 +455,6 @@ fn detect<P: OneShotClass>(
         bearing(observer, &site)?,
         retardation,
         seen >= limits.resolve(),
+        DetectionLight::Lit(light),
     ))
 }

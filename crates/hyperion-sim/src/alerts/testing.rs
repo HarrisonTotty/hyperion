@@ -11,14 +11,15 @@ use crate::observe::{Retardation, bearing};
 use crate::time::UniverseTime;
 use crate::units::WattsPerSquareMetre;
 
-use super::{AlertBand, Detection, DetectionPhase, TransientKind};
+use super::{AlertBand, Detection, DetectionLight, DetectionPhase, TransientKind};
 
 /// The detection of `event` of `host`, of `class` and `kind`, in `phase`, seen in `band` at
 /// `flux`, and whether it is `resolvable`: its light left a host at rest at `site` at `emitted`,
 /// and reaches an observer at rest at `observer` one light time later.
 ///
 /// Nothing checks that the parts agree with each other, or with any walk: a test sets the arrival
-/// through `emitted` and the distance, and the flux it wants.
+/// through `emitted` and the distance, and the flux it wants. Its light is
+/// [`DetectionLight::Unlit`] whatever its kind: a test of what reads lights gives its own.
 ///
 /// # Panics
 ///
@@ -56,6 +57,7 @@ pub fn detection(
         bearing(observer, &site).expect("a site apart from the observer has a bearing"),
         retardation,
         resolvable,
+        DetectionLight::Unlit,
     )
 }
 

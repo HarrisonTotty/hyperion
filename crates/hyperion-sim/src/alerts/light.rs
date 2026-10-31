@@ -724,8 +724,10 @@ const TEMPLATE_PEAKS_W: [BandShares; 6] = [
 ];
 
 /// The ages of the grid a template's peak is taken on (module documentation): the explosion,
-/// every hour of the first day, and every twentieth of a day from the first to 1,096 days.
-#[cfg(test)]
+/// every hour of the first day, and every twentieth of a day from the first to 1,096 days: the
+/// knots of a supernova's arriving light too ([`ArrivingLight::knots`]).
+///
+/// [`ArrivingLight::knots`]: super::ArrivingLight::knots
 pub(super) fn peak_grid() -> impl Iterator<Item = Years> {
     let days = (0..24)
         .map(|hour| f64::from(hour) / 24.0)

@@ -269,6 +269,20 @@ pub enum LongestDuration {
     Unending,
 }
 
+/// The longest a kind's light takes from its onset to its peak (plan 12, P12.T8.b.1; research's
+/// lean of 2026-10-30, adopted): a scan that starts afresh walks back by it, since a riser whose
+/// onset arrived before the scan's window can cross a limit in it, under the limit at the window's
+/// start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum LongestRise {
+    /// No event's light peaks later after its onset.
+    AtMost(Span),
+    /// Each event's own, with no bound across events: a tidal disruption's tail peaks at its
+    /// fallback time, which grows with its victim's radius (P09.T30.b). The centre's walk lists
+    /// the tails over their own look-back, and walks back by nothing more.
+    PerEvent,
+}
+
 /// The function that gives a kind's luminosity at a time: the light curve of its row.
 ///
 /// Each source's events carry what their curves read, so a walk calls the named function on the
@@ -314,6 +328,10 @@ pub struct TransientRow {
 
 /// What a row knows of its kind's source.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the rows are one static table of 16, read in place and never moved"
+)]
 enum RowSource {
     /// The source is built.
     Built {
@@ -321,6 +339,8 @@ enum RowSource {
         bounds: [Option<PeakBound>; BAND_COUNT],
         /// The longest an event lasts.
         duration: LongestDuration,
+        /// The longest its light takes to peak.
+        rise: LongestRise,
         /// The light curve, if the kind gives light.
         light_curve: Option<LightCurveSource>,
     },
@@ -364,6 +384,16 @@ impl TransientRow {
     pub const fn duration(&self) -> Option<LongestDuration> {
         match self.source {
             RowSource::Built { duration, .. } => Some(duration),
+            RowSource::Pending(_) => None,
+        }
+    }
+
+    /// The longest an event of the kind takes from its onset to its peak; `None` while the source
+    /// is not built.
+    #[must_use]
+    pub const fn longest_rise(&self) -> Option<LongestRise> {
+        match self.source {
+            RowSource::Built { rise, .. } => Some(rise),
             RowSource::Pending(_) => None,
         }
     }
@@ -425,6 +455,7 @@ impl TransientRow {
             source: RowSource::Built {
                 bounds: bands_alike(Some(PeakBound::Watts(photometric)), None),
                 duration: LongestDuration::AtMost(Span::ZERO),
+                rise: LongestRise::AtMost(Span::ZERO),
                 light_curve: None,
             },
         }
@@ -570,6 +601,70 @@ const fn band_by_band(peaks: [Watts; BAND_COUNT]) -> [Option<PeakBound>; BAND_CO
     bounds
 }
 
+/// The latest a core collapse's light in any band peaks after its explosion: 78 days, the IIP
+/// template's plateau, which peaks 77.4 days in on the grid its peaks are taken on
+/// ([`light`](super::light)), rounded up to the day past the grid's twentieth of a day. The IIb's
+/// peaks at 17.7 days, the Ib's and Ic's at 14.55 and the IIL's at 9.3.
+const CORE_COLLAPSE_RISE: Span = Span::from_seconds(78 * 86_400);
+
+/// The latest a Type Ia's light in any band peaks after its explosion: 16 days, the normal
+/// template's, which peaks 15.15 days in on the grid ([`light`](super::light)), rounded up as
+/// [`CORE_COLLAPSE_RISE`] is. The Type Iax's peaks at 10.45 days.
+const TYPE_IA_RISE: Span = Span::from_seconds(16 * 86_400);
+
+/// The longest a giant eruption's light rises: a quarter of its duration ([`lbv::RISE_SHARE`]),
+/// which is at most [`lbv::MAX_DURATION`], 20 Julian years, so five years.
+const GIANT_ERUPTION_RISE: Span = Span::from_seconds(lbv::MAX_DURATION.seconds() / 4);
+
+/// The longest the central black hole's flare rises: to the middle of its Gaussian (P09.T30.a,
+/// after Neilsen et al. 2013, section 3), half its duration, which is at most
+/// [`centre_flares::MAX_DURATION`], 8,175 s, so 4,087.5 s, rounded up to 4,088 s.
+const CENTRE_FLARE_RISE: Span = Span::from_seconds(4_088);
+
+/// The longest a star's flare rises: Davenport et al.'s (2014, equation 1) template peaks one
+/// half width after its onset, and a flare lasts 21 half widths within [`flares::MAX_DURATION`],
+/// one day (P06.T28.a), so at most 86,400 ÷ 21 = 4,114.3 s, rounded up to 4,115 s.
+const STAR_FLARE_RISE: Span = Span::from_seconds(4_115);
+
+/// The longest an FU Orionis outburst rises: 25 Julian years, the top of the FU Ori class's rises
+/// ([`fu_orionis::FU_ORI_RISE_YEARS`]), above the V1647 Ori class's 10
+/// ([`fu_orionis::V1647_ORI_RISE_YEARS`]).
+const FU_ORIONIS_RISE: Span = Span::from_seconds(25 * 31_557_600);
+
+/// The longest a class's built kinds take from their onsets to their peaks, by which a scan of the
+/// class that starts afresh walks back (P12.T8.b.1); `None` while none of its kinds is built.
+///
+/// A class whose kinds include one with no bound across events ([`LongestRise::PerEvent`]) has
+/// none.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::alerts::{LongestRise, class_longest_rise};
+/// use hyperion_sim::galaxy::catalogue_classes::ClassId;
+/// use hyperion_sim::time::Span;
+///
+/// // A luminous blue variable's giant eruption rises for up to five years.
+/// let five_years = Span::from_julian_years(5).ok_or("in range")?;
+/// assert_eq!(
+///     class_longest_rise(ClassId::LUMINOUS_BLUE_VARIABLE),
+///     Some(LongestRise::AtMost(five_years))
+/// );
+/// // Plan 11's novae are not built yet.
+/// assert_eq!(class_longest_rise(ClassId::ACCRETING_WHITE_DWARF), None);
+/// # Ok::<(), &str>(())
+/// ```
+#[must_use]
+pub fn class_longest_rise(class: ClassId) -> Option<LongestRise> {
+    ROWS.iter()
+        .filter(|row| row.classes.contains(class))
+        .filter_map(TransientRow::longest_rise)
+        .reduce(|a, b| match (a, b) {
+            (LongestRise::AtMost(a), LongestRise::AtMost(b)) => LongestRise::AtMost(a.max(b)),
+            (LongestRise::PerEvent, _) | (_, LongestRise::PerEvent) => LongestRise::PerEvent,
+        })
+}
+
 /// Both classes of accreting white dwarf, the hosts of novae and dwarf novae.
 const ACCRETING_WHITE_DWARFS: ClassSet =
     ClassSet::of(ClassId::ACCRETING_WHITE_DWARF).with(ClassId::ACCRETING_WHITE_DWARF_SLOW);
@@ -583,6 +678,7 @@ static ROWS: [TransientRow; 16] = [
         source: RowSource::Built {
             bounds: band_by_band(CORE_COLLAPSE_BAND_PEAKS),
             duration: LongestDuration::Unending,
+            rise: LongestRise::AtMost(CORE_COLLAPSE_RISE),
             light_curve: Some(LightCurveSource::SupernovaTemplate),
         },
     },
@@ -593,6 +689,7 @@ static ROWS: [TransientRow; 16] = [
         source: RowSource::Built {
             bounds: band_by_band(TYPE_IA_BAND_PEAKS),
             duration: LongestDuration::Unending,
+            rise: LongestRise::AtMost(TYPE_IA_RISE),
             light_curve: Some(LightCurveSource::SupernovaTemplate),
         },
     },
@@ -645,6 +742,7 @@ static ROWS: [TransientRow; 16] = [
         source: RowSource::Built {
             bounds: bands_alike(Some(PeakBound::Watts(GIANT_ERUPTION_PEAK)), None),
             duration: LongestDuration::AtMost(lbv::MAX_DURATION),
+            rise: LongestRise::AtMost(GIANT_ERUPTION_RISE),
             light_curve: Some(LightCurveSource::GiantEruption),
         },
     },
@@ -658,6 +756,7 @@ static ROWS: [TransientRow; 16] = [
                 Some(PeakBound::EddingtonShare(XRAY_SHARE)),
             ),
             duration: LongestDuration::Unending,
+            rise: LongestRise::PerEvent,
             light_curve: Some(LightCurveSource::DisruptionTail),
         },
     },
@@ -673,6 +772,7 @@ static ROWS: [TransientRow; 16] = [
                 ))),
             ),
             duration: LongestDuration::AtMost(centre_flares::MAX_DURATION),
+            rise: LongestRise::AtMost(CENTRE_FLARE_RISE),
             light_curve: Some(LightCurveSource::CentreFlare),
         },
     },
@@ -683,6 +783,7 @@ static ROWS: [TransientRow; 16] = [
         source: RowSource::Built {
             bounds: bands_alike(Some(PeakBound::PerHost), None),
             duration: LongestDuration::AtMost(flares::MAX_DURATION),
+            rise: LongestRise::AtMost(STAR_FLARE_RISE),
             light_curve: Some(LightCurveSource::StarFlare),
         },
     },
@@ -693,6 +794,7 @@ static ROWS: [TransientRow; 16] = [
         source: RowSource::Built {
             bounds: bands_alike(None, None),
             duration: LongestDuration::AtMost(Span::ZERO),
+            rise: LongestRise::AtMost(Span::ZERO),
             light_curve: None,
         },
     },
@@ -703,6 +805,7 @@ static ROWS: [TransientRow; 16] = [
         source: RowSource::Built {
             bounds: bands_alike(None, Some(PeakBound::Watts(MAGNETAR_BURST_XRAY_PEAK))),
             duration: LongestDuration::AtMost(magnetar::MAX_BURST_DURATION),
+            rise: LongestRise::AtMost(Span::ZERO),
             light_curve: Some(LightCurveSource::MagnetarBurst),
         },
     },
@@ -713,6 +816,7 @@ static ROWS: [TransientRow; 16] = [
         source: RowSource::Built {
             bounds: bands_alike(Some(PeakBound::PerHost), None),
             duration: LongestDuration::AtMost(fu_orionis::MAX_DURATION),
+            rise: LongestRise::AtMost(FU_ORIONIS_RISE),
             light_curve: Some(LightCurveSource::FuOrionisOutburst),
         },
     },
@@ -1233,5 +1337,98 @@ mod tests {
             TransientKind::FuOrionisOutburst.row().duration(),
             Some(LongestDuration::AtMost(fu_orionis::MAX_DURATION))
         );
+    }
+
+    /// The day of the grid ([`light::peak_grid`]) on which each of `kinds`' templates peaks latest
+    /// in a band it lights, over every band.
+    fn latest_peak_day(kinds: &[SupernovaKind]) -> f64 {
+        kinds
+            .iter()
+            .flat_map(|&kind| AlertBand::ALL.map(move |band| (kind, band)))
+            .filter_map(|(kind, band)| {
+                let (age, peak) = light::peak_grid()
+                    .map(|age| (age, light::supernova_luminosity(kind, age, band).value()))
+                    .fold((Years::ZERO, 0.0), |best, here| {
+                        if here.1 > best.1 { here } else { best }
+                    });
+                (peak > 0.0).then_some(age.value() * 365.25)
+            })
+            .fold(0.0, f64::max)
+    }
+
+    /// No built kind's light peaks later after its onset than its row's rise bound (P12.T8.b.1),
+    /// and each class's bound is its kinds' longest.
+    #[test]
+    fn no_kinds_light_peaks_later_after_its_onset_than_its_rise_bound() {
+        let at_most = |kind: TransientKind| match kind.row().longest_rise() {
+            Some(LongestRise::AtMost(span)) => span.as_seconds_f64(),
+            other => panic!("{kind:?} rises {other:?}"),
+        };
+        let day = 86_400.0;
+        let core_collapses = [
+            SupernovaType::IIP,
+            SupernovaType::IIL,
+            SupernovaType::IIb,
+            SupernovaType::Ib,
+            SupernovaType::Ic,
+        ]
+        .map(SupernovaKind::CoreCollapse);
+        let type_ia = IaChannel::ALL.map(SupernovaKind::TypeIa);
+        // The grid's peak, and a twentieth of a day on for the true peak beside it.
+        let latest = [latest_peak_day(&core_collapses), latest_peak_day(&type_ia)];
+        for (kind, latest) in [TransientKind::CoreCollapse, TransientKind::TypeIa]
+            .into_iter()
+            .zip(latest)
+        {
+            assert!(
+                (latest + 0.05) * day <= at_most(kind),
+                "{kind:?}: {latest} d"
+            );
+        }
+        // A flare rises one of its 21 half widths, all within a day.
+        assert!(flares::MAX_DURATION.as_seconds_f64() / 21.0 <= at_most(TransientKind::Flare));
+        // The centre's flare peaks half-way through.
+        assert!(centre_flares::MAX_DURATION_SECONDS / 2.0 <= at_most(TransientKind::CentralFlare));
+        let year = 31_557_600.0;
+        let rises = [
+            fu_orionis::FU_ORI_RISE_YEARS.1,
+            fu_orionis::V1647_ORI_RISE_YEARS.1,
+        ];
+        for rise in rises {
+            assert!(
+                rise * year <= at_most(TransientKind::FuOrionisOutburst),
+                "{rise} yr"
+            );
+        }
+        let eruption = lbv::MAX_DURATION.as_seconds_f64() * lbv::RISE_SHARE;
+        assert!(eruption <= at_most(TransientKind::GiantEruption));
+        // A top hat and a glitch are at their light at once.
+        assert_eq!(at_most(TransientKind::MagnetarBurst), 0.0);
+        assert_eq!(at_most(TransientKind::Glitch), 0.0);
+        assert_eq!(
+            TransientKind::TidalDisruption.row().longest_rise(),
+            Some(LongestRise::PerEvent)
+        );
+        for kind in TransientKind::ALL {
+            assert_eq!(
+                kind.row().longest_rise().is_none(),
+                kind.row().pending().is_some(),
+                "{kind:?}"
+            );
+        }
+        let rise = |kind: TransientKind| kind.row().longest_rise();
+        assert_eq!(
+            class_longest_rise(ClassId::CORE_COLLAPSE),
+            rise(TransientKind::CoreCollapse)
+        );
+        assert_eq!(
+            class_longest_rise(ClassId::TYPE_IA),
+            rise(TransientKind::TypeIa)
+        );
+        assert_eq!(
+            class_longest_rise(ClassId::TIDAL_DISRUPTION_VICTIM),
+            Some(LongestRise::PerEvent)
+        );
+        assert_eq!(class_longest_rise(ClassId::XRAY_BINARY), None);
     }
 }

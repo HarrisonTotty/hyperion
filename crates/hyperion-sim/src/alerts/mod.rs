@@ -43,6 +43,7 @@ use crate::observe::{Bearing, Retardation};
 use crate::time::{ClockWindow, UniverseTime};
 use crate::units::{LightYears, WattsPerSquareMetre};
 
+pub mod arriving;
 pub mod light;
 pub mod local;
 pub mod oneshot;
@@ -52,6 +53,7 @@ pub mod registry;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
+pub use arriving::{ArrivingLight, DetectionLight};
 pub use light::{band_share, supernova_luminosity, supernova_peak};
 pub use local::{LocalEventsCache, local_events};
 pub use oneshot::{NoOneShotCells, OneShotCells, OneShotClass, OneShotEvent, one_shot_detections};
@@ -66,8 +68,8 @@ pub use recurrent::{
 };
 pub use registry::{
     CORE_COLLAPSE_BAND_PEAKS, CORE_COLLAPSE_PEAK, GIANT_ERUPTION_PEAK, LightCurveSource,
-    LongestDuration, MAGNETAR_BURST_PEAK, MAGNETAR_BURST_XRAY_PEAK, PeakBound, Route,
-    TYPE_IA_BAND_PEAKS, TYPE_IA_PEAK, TransientKind, TransientRow,
+    LongestDuration, LongestRise, MAGNETAR_BURST_PEAK, MAGNETAR_BURST_XRAY_PEAK, PeakBound, Route,
+    TYPE_IA_BAND_PEAKS, TYPE_IA_PEAK, TransientKind, TransientRow, class_longest_rise,
 };
 
 /// How many bands there are: plan 07's ten photometric bands and X-rays.
@@ -578,11 +580,13 @@ pub struct Detection {
     bearing: Bearing,
     retardation: Retardation,
     resolvable: bool,
+    light: DetectionLight,
 }
 
 impl Detection {
     /// The detection of `event` of `host`, of its `class` and `kind`, in `phase`, seen in `band`
-    /// at `flux` from `bearing`, its light read by `retardation`, and whether it is `resolvable`.
+    /// at `flux` from `bearing`, its light read by `retardation`, whether it is `resolvable`, and
+    /// its `light` over the observer's time.
     ///
     /// The emitted and arrival times are the retardation's, so that they cannot disagree with it.
     #[expect(
@@ -602,6 +606,7 @@ impl Detection {
         bearing: Bearing,
         retardation: Retardation,
         resolvable: bool,
+        light: DetectionLight,
     ) -> Self {
         Self {
             event,
@@ -616,6 +621,7 @@ impl Detection {
             bearing,
             retardation,
             resolvable,
+            light,
         }
     }
 
@@ -691,6 +697,13 @@ impl Detection {
     #[must_use]
     pub const fn is_resolvable(&self) -> bool {
         self.resolvable
+    }
+
+    /// The event's flux in [`band`](Self::band) at every time of the observer's clock, which is
+    /// [`flux`](Self::flux) at the detection's own time (P12.T8.b.1), or that it gives none.
+    #[must_use]
+    pub const fn light(&self) -> &DetectionLight {
+        &self.light
     }
 }
 

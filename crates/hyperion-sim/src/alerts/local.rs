@@ -97,6 +97,7 @@ use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::{SOLAR_LUMINOSITY_W, SPEED_OF_LIGHT};
 use crate::units::{Metres, Watts, WattsPerSquareMetre};
 
+use super::arriving::{ArrivingLight, DetectionLight};
 use super::reach::{flux, transmission};
 use super::{
     AlertBand, AlertContext, AlertQuery, BAND_COUNT, BandLimits, Detection, DetectionPhase,
@@ -585,6 +586,35 @@ impl LitEvent {
         }
     }
 
+    /// The event's light arriving `delay` after it leaves `distance` away, through a line of
+    /// sight of `transmission` in `band`, in which the kind has `share` of it (P12.T8.b.1).
+    #[must_use]
+    const fn arriving(
+        &self,
+        band: AlertBand,
+        share: f64,
+        delay: Span,
+        distance: Metres,
+        transmission: f64,
+    ) -> ArrivingLight {
+        match *self {
+            Self::Flare(flare, quiescent) => ArrivingLight::flare(
+                (flare, quiescent, share),
+                band,
+                delay,
+                distance,
+                transmission,
+            ),
+            Self::Outburst(outburst, quiescent) => ArrivingLight::outburst(
+                (outburst, quiescent, share),
+                band,
+                delay,
+                distance,
+                transmission,
+            ),
+        }
+    }
+
     /// The event's own light at `t`.
     #[must_use]
     fn light_at(&self, t: UniverseTime) -> Watts {
@@ -607,6 +637,7 @@ struct Seen {
     band: AlertBand,
     flux: WattsPerSquareMetre,
     resolvable: bool,
+    light: DetectionLight,
 }
 
 /// Each lit kind's best band through a host's sightline, in [`Lit::index`]'s order: `None` for a
@@ -856,13 +887,17 @@ impl Walk<'_, '_> {
         let Some((band, limits)) = best[kind.index()] else {
             return;
         };
-        let in_band = Watts::new(watts.value() * light.shares[band.index()]);
+        let share = light.shares[band.index()];
+        let in_band = Watts::new(watts.value() * share);
         let Some(flux) = flux(in_band, distance, &sightline, band) else {
             return;
         };
         if flux < limits.detect() {
             return;
         }
+        // The light held at the detection's own: its emission, distance and line of sight.
+        let delay = light_delay(phase, window, emitted, distance);
+        let arriving = event.arriving(band, share, delay, distance, transmission(&sightline, band));
         let seen = Seen {
             event: event.id(),
             kind: event.kind(),
@@ -872,8 +907,9 @@ impl Walk<'_, '_> {
             band,
             flux,
             resolvable: flux >= limits.resolve(),
+            light: DetectionLight::Lit(arriving),
         };
-        self.push(host, seen, counted);
+        self.push(host, &seen, counted);
     }
 
     /// Reports the glitch `id` of `star` at `onset` if a radio sensor times it in the window
@@ -907,8 +943,9 @@ impl Walk<'_, '_> {
             band: AlertBand::Photometric(Band::Radio),
             flux: WattsPerSquareMetre::new(0.0),
             resolvable: false,
+            light: DetectionLight::Unlit,
         };
-        self.push(host, seen, arrival);
+        self.push(host, &seen, arrival);
     }
 
     /// Appends the detection of `seen`, whose light is first counted at `at`: an onset's arrival,
@@ -919,7 +956,7 @@ impl Walk<'_, '_> {
     /// it arrives at [`Detection::arrival`] to the bit. Its bearing is the light's first counted,
     /// [`retarded`]'s at `at`: for an event in progress, where the host appears as the window
     /// opens. A host at the observer has no bearing and is not reported.
-    fn push(&mut self, host: &Host<'_>, seen: Seen, at: UniverseTime) {
+    fn push(&mut self, host: &Host<'_>, seen: &Seen, at: UniverseTime) {
         let position = self.query.observer_position();
         let observer = Observer::new(*position, at)
             .expect("an alert query's observer is in the cube and its window in the clock window");
@@ -946,7 +983,27 @@ impl Walk<'_, '_> {
             bearing,
             retardation,
             seen.resolvable,
+            seen.light,
         ));
+    }
+}
+
+/// How long the light the walk read takes to the observer: from `emitted`, `distance` away, to
+/// the onset's peak arriving, or, for an event in progress, to the window's start, which the light
+/// that left at `emitted` reaches by the light-cone step.
+#[must_use]
+fn light_delay(
+    phase: DetectionPhase,
+    window: TimeWindow,
+    emitted: UniverseTime,
+    distance: Metres,
+) -> Span {
+    match phase {
+        DetectionPhase::Onset => light_time(distance),
+        DetectionPhase::InProgress => window
+            .start()
+            .checked_since(emitted)
+            .expect("two clock times are a span apart"),
     }
 }
 
@@ -1783,10 +1840,66 @@ mod tests {
     /// directly, and do not depend on the order of asking or on how the window is split: the
     /// neighbours' flares over ten days, starting and in progress, and a young pulsar's glitches
     /// and a protostar's outbursts, starting and in progress, over 150 years.
+    /// Each of `seen`'s lights, the walk's over `query`'s window (P12.T8.b.1): a glitch's unlit, and
+    /// a flare's or an outburst's in the detection's band, zero before its first knot, finite and
+    /// non-negative, with no jump after its onset, and the walk's flux at the detection's own time:
+    /// an onset's peak, the second knot, and the window's start for an event in progress.
+    fn lights_agree(query: &AlertQuery, seen: &[Detection]) {
+        let nanosecond = Span::new(0, 1).unwrap();
+        for d in seen {
+            let light = match (d.kind(), d.light()) {
+                (TransientKind::Glitch, DetectionLight::Unlit) => continue,
+                (
+                    TransientKind::Flare | TransientKind::FuOrionisOutburst,
+                    DetectionLight::Lit(l),
+                ) => l,
+                (kind, light) => panic!("{kind:?} has the light {light:?}"),
+            };
+            assert_eq!(light.band(), d.band());
+            let knots = light.knots();
+            assert_eq!(knots.len(), 3, "{d:?}");
+            assert!(knots.windows(2).all(|pair| pair[0] < pair[1]));
+            let before = knots[0].checked_sub(nanosecond).unwrap();
+            assert_same_bits(light.flux_at(before).value(), 0.0);
+            let own = match d.phase() {
+                DetectionPhase::Onset => {
+                    // The walk's is the template's peak; the knot is floored to the nanosecond
+                    // before it, a few 10⁻¹¹ of a minute-long flare's rise down.
+                    let peak = light.flux_at(knots[1]).value();
+                    let off = (peak - d.flux().value()).abs() / d.flux().value();
+                    assert!(off < 1e-9, "{d:?}: its peak {peak}, {off} off");
+                    peak
+                }
+                DetectionPhase::InProgress => {
+                    let opening = light.flux_at(query.window().start()).value();
+                    assert_same_bits(opening, d.flux().value());
+                    opening
+                }
+            };
+            let peak = light.flux_at(knots[1]).value().max(own);
+            for pair in knots.windows(2) {
+                let gap = pair[1].checked_since(pair[0]).unwrap().as_seconds_f64();
+                for share in [0.0, 0.25, 0.5, 0.999] {
+                    let t = pair[0]
+                        .checked_add(Span::from_seconds_f64(gap * share).unwrap())
+                        .unwrap();
+                    let here = light.flux_at(t).value();
+                    let next = light.flux_at(t.checked_add(nanosecond).unwrap()).value();
+                    assert!(here.is_finite() && here >= 0.0, "{d:?} at {t}: {here}");
+                    assert!(
+                        (next - here).abs() <= 1e-6 * peak,
+                        "{d:?} jumps at {t}: {here} to {next}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn local_events_are_each_systems_own_in_any_order() {
         let near = neighbours();
         let flares = equals_direct_evaluation(&near);
+        lights_agree(&near.query, &flares);
         order_independent(&near, &flares);
         let middle = near
             .query
@@ -1806,6 +1919,7 @@ mod tests {
 
         let young = young_and_dead();
         let seen = equals_direct_evaluation(&young);
+        lights_agree(&young.query, &seen);
         order_independent(&young, &seen);
         let middle = young
             .query

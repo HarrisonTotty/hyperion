@@ -1,0 +1,349 @@
+//! A detection's light as it arrives at the observer (plan 12, P12.T8.b.1): the flux the server's
+//! alert schedule bisects for the times it crosses a sensor's limits.
+//!
+//! A walk's [`Detection`](super::Detection) reports its flux at one time: an onset's at its peak,
+//! and an event in progress at the window's start. Its [`DetectionLight`] gives the flux at every
+//! time of the observer's clock, from the source the walk read and through the line of sight it
+//! read it through: the detection's own distance, transmission and light time, held over the
+//! event's light. So the light at the detection's own time is the walk's flux, and the host's
+//! motion over the event's light is neglected, as the walk neglects it over its window.
+//!
+//! - A supernova's light is its template's in the band ([`supernova_luminosity`]) at its age since
+//!   its onset arrived, as the one-shot walk reads it ([`oneshot`](super::oneshot)).
+//! - A star's flare or FU Orionis outburst is its own light, (factor − 1) times the star's
+//!   quiescent luminosity, times the kind's share of it in the band, emitted one light time before
+//!   ([`local`](super::local)).
+//! - A magnetar's short burst or giant flare is a top hat in X-rays, its 2–10 keV light from its
+//!   onset to its end, as the recurrent walk reads it ([`recurrent`](super::recurrent); research's
+//!   ruling of 2026-10-31).
+//! - A pulsar glitch gives no light a sensor counts as flux, which its light says
+//!   ([`DetectionLight::Unlit`]).
+//!
+//! Each light names knots on the observer's clock between which it is monotone
+//! ([`ArrivingLight::knots`]); it is zero before the first and constant after the last.
+//!
+//! Nothing here draws a random number or changes generated output: lights only read.
+
+use crate::galaxy::catalogue_classes::supernova::SupernovaKind;
+use crate::observe::light_time;
+use crate::stellar::events::flares::Flare;
+use crate::stellar::events::fu_orionis::Outburst;
+use crate::time::{Span, UniverseTime};
+use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
+use crate::units::{Metres, Watts, WattsPerSquareMetre, Years};
+
+use super::AlertBand;
+use super::light::{peak_grid, supernova_luminosity};
+use super::reach::inverse_square_flux;
+
+/// How long after its explosion a supernova's template is followed: 228 Julian years, after which
+/// no template gives light, every term's exponential being below the smallest `f64`
+/// ([`oneshot`](super::oneshot)).
+const SUPERNOVA_LIGHT_YEARS: f64 = 228.0;
+
+/// What a detection's light does at the observer over the observer's time (module
+/// documentation).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DetectionLight {
+    /// The event's flux in the detection's band at each time.
+    Lit(ArrivingLight),
+    /// The event gives no light a sensor counts as flux: a pulsar glitch, which a radio sensor
+    /// times (P12.T5.e).
+    Unlit,
+}
+
+/// A lit detection's flux in its band at each time of the observer's clock (module documentation).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArrivingLight {
+    source: Source,
+    band: AlertBand,
+    /// How long the light takes to the observer, held at the detection's own.
+    delay: Span,
+    /// The distance it crosses, held at the detection's own.
+    distance: Metres,
+    /// The share of it the line of sight lets through in the band ([`transmission`]).
+    ///
+    /// [`transmission`]: super::transmission
+    transmission: f64,
+}
+
+/// What an [`ArrivingLight`] is the light of.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Source {
+    /// A supernova of this kind, which went off at this time.
+    Supernova(SupernovaKind, UniverseTime),
+    /// A star's flare, the star's quiescent luminosity, and the flare's share of its light in the
+    /// band.
+    Flare(Flare, Watts, f64),
+    /// An FU Orionis outburst, the star's quiescent luminosity at its onset, and the outburst's
+    /// share of its light in the band.
+    Outburst(Outburst, Watts, f64),
+    /// A magnetar's outburst: its light in the band from its onset, inclusive, to its end,
+    /// exclusive, both as emitted.
+    TopHat(Watts, UniverseTime, UniverseTime),
+}
+
+impl ArrivingLight {
+    /// The light in `band` of a supernova of `kind` that went off at `onset`, `distance` away
+    /// through a line of sight of `transmission` in the band: its light arrives one
+    /// [`light_time`] after it left.
+    #[must_use]
+    pub(super) fn supernova(
+        kind: SupernovaKind,
+        onset: UniverseTime,
+        band: AlertBand,
+        distance: Metres,
+        transmission: f64,
+    ) -> Self {
+        Self {
+            source: Source::Supernova(kind, onset),
+            band,
+            delay: light_time(distance),
+            distance,
+            transmission,
+        }
+    }
+
+    /// The light in `band`, of `share` of its own light, of `flare` of a star of `quiescent`
+    /// luminosity, emitted `delay` before it arrives `distance` away through a line of sight of
+    /// `transmission`.
+    #[must_use]
+    pub(super) const fn flare(
+        (flare, quiescent, share): (Flare, Watts, f64),
+        band: AlertBand,
+        delay: Span,
+        distance: Metres,
+        transmission: f64,
+    ) -> Self {
+        Self {
+            source: Source::Flare(flare, quiescent, share),
+            band,
+            delay,
+            distance,
+            transmission,
+        }
+    }
+
+    /// The light of an FU Orionis outburst, as [`flare`](Self::flare)'s.
+    #[must_use]
+    pub(super) const fn outburst(
+        (outburst, quiescent, share): (Outburst, Watts, f64),
+        band: AlertBand,
+        delay: Span,
+        distance: Metres,
+        transmission: f64,
+    ) -> Self {
+        Self {
+            source: Source::Outburst(outburst, quiescent, share),
+            band,
+            delay,
+            distance,
+            transmission,
+        }
+    }
+
+    /// The light in X-rays of a magnetar's short burst or giant flare of `xray` in 2–10 keV from
+    /// `onset` to `end`, `distance` away through a line of sight of `transmission` in X-rays: it
+    /// arrives one [`light_time`] after it left.
+    #[must_use]
+    pub(super) fn magnetar(
+        (xray, onset, end): (Watts, UniverseTime, UniverseTime),
+        distance: Metres,
+        transmission: f64,
+    ) -> Self {
+        Self {
+            source: Source::TopHat(xray, onset, end),
+            band: AlertBand::XRay,
+            delay: light_time(distance),
+            distance,
+            transmission,
+        }
+    }
+
+    /// The band the flux is in: the detection's.
+    #[must_use]
+    pub const fn band(&self) -> AlertBand {
+        self.band
+    }
+
+    /// The flux in the band at the observer at `t`, W m⁻², after extinction: zero before the
+    /// event's light arrives, finite and non-negative throughout, and continuous after the onset.
+    ///
+    /// # Panics
+    ///
+    /// If `t` and the event's light are further apart than the clock holds, which no time on it
+    /// is.
+    #[must_use]
+    pub fn flux_at(&self, t: UniverseTime) -> WattsPerSquareMetre {
+        let luminosity = match self.source {
+            Source::Supernova(kind, onset) => {
+                let arrival = onset
+                    .checked_add(self.delay)
+                    .expect("a light time across the cube keeps a time on the clock");
+                let age = t
+                    .checked_since(arrival)
+                    .expect("two clock times are a span apart")
+                    .as_julian_years_f64();
+                supernova_luminosity(kind, Years::new(age), self.band)
+            }
+            Source::Flare(flare, quiescent, share) => {
+                let factor = flare.luminosity_factor_at(self.emitted(t));
+                Watts::new((factor - 1.0) * quiescent.value() * share)
+            }
+            Source::Outburst(outburst, quiescent, share) => {
+                let factor = outburst.luminosity_factor_at(self.emitted(t));
+                Watts::new((factor - 1.0) * quiescent.value() * share)
+            }
+            Source::TopHat(level, onset, end) => {
+                let emitted = self.emitted(t);
+                if onset <= emitted && emitted < end {
+                    level
+                } else {
+                    Watts::ZERO
+                }
+            }
+        };
+        inverse_square_flux(luminosity, self.distance)
+            .map_or(WattsPerSquareMetre::new(0.0), |bare| {
+                bare * self.transmission
+            })
+    }
+
+    /// The times on the observer's clock, strictly increasing, between which the light is
+    /// monotone: zero before the first, and constant from the last.
+    ///
+    /// A flare's and an outburst's are their onset, peak and end, arriving one light time later, and
+    /// a magnetar's top hat its onset and end, the light constant between and gone at the end. A
+    /// supernova's are its arrival and the ages of the grid its peak is taken on (the explosion,
+    /// every hour of the first day, and every twentieth of a day to 1,096 days;
+    /// [`light`](super::light)), then 228 years, when no template gives light. Every template
+    /// term falls after its peak, so the light is monotone between them where no term turns
+    /// between two neighbours of the grid, and within one of their spacings, an hour or 72
+    /// minutes, where one does.
+    ///
+    /// # Panics
+    ///
+    /// If a knot falls off the clock, which a light arriving within centuries of a time on it
+    /// cannot.
+    #[must_use]
+    pub fn knots(&self) -> Vec<UniverseTime> {
+        let arrive = |emitted: UniverseTime| {
+            emitted
+                .checked_add(self.delay)
+                .expect("a light time across the cube keeps a time on the clock")
+        };
+        match self.source {
+            Source::Supernova(_, onset) => {
+                let arrival = arrive(onset);
+                let after = |seconds: f64| {
+                    Span::from_seconds_f64(seconds)
+                        .and_then(|age| arrival.checked_add(age))
+                        .expect("a supernova's light ends within centuries of a clock time")
+                };
+                let mut knots: Vec<_> = peak_grid()
+                    .map(|age| after(age.value() * SECONDS_PER_JULIAN_YEAR))
+                    .collect();
+                knots.push(after(SUPERNOVA_LIGHT_YEARS * SECONDS_PER_JULIAN_YEAR));
+                knots.dedup();
+                knots
+            }
+            Source::Flare(flare, ..) => {
+                let peak = Span::from_seconds_f64(flare.half_width_seconds())
+                    .and_then(|half_width| flare.onset().checked_add(half_width))
+                    .expect("a flare peaks minutes after an onset the clock holds");
+                increasing([flare.onset(), peak, flare.end()].map(arrive))
+            }
+            Source::Outburst(outburst, ..) => {
+                increasing([outburst.onset(), outburst.peak(), outburst.end()].map(arrive))
+            }
+            Source::TopHat(_, onset, end) => increasing([onset, end].map(arrive)),
+        }
+    }
+
+    /// When the light arriving at `t` left the host.
+    #[must_use]
+    fn emitted(&self, t: UniverseTime) -> UniverseTime {
+        t.checked_sub(self.delay)
+            .expect("a light time across the cube keeps a time on the clock")
+    }
+}
+
+/// `knots` without the repeats a span floored to nothing leaves.
+#[must_use]
+fn increasing<const N: usize>(knots: [UniverseTime; N]) -> Vec<UniverseTime> {
+    let mut knots = knots.to_vec();
+    knots.dedup();
+    knots
+}
+
+#[cfg(test)]
+mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
+    use super::*;
+    use crate::galaxy::catalogue_classes::type_ia::IaChannel;
+    use crate::galaxy::gas::ccm::Band;
+    use crate::stellar::remnant::SupernovaType;
+
+    const V: AlertBand = AlertBand::Photometric(Band::V);
+
+    /// Every supernova template's light, seen 100 ly away through half its light.
+    fn supernovae() -> Vec<ArrivingLight> {
+        let kinds = [
+            SupernovaKind::CoreCollapse(SupernovaType::IIP),
+            SupernovaKind::CoreCollapse(SupernovaType::IIL),
+            SupernovaKind::CoreCollapse(SupernovaType::IIb),
+            SupernovaKind::CoreCollapse(SupernovaType::Ib),
+            SupernovaKind::CoreCollapse(SupernovaType::Ic),
+            SupernovaKind::TypeIa(IaChannel::Merger),
+            SupernovaKind::TypeIa(IaChannel::Iax),
+        ];
+        let distance = Metres::new(100.0 * crate::units::consts::METRES_PER_LIGHT_YEAR);
+        kinds
+            .into_iter()
+            .flat_map(|kind| {
+                [V, AlertBand::Photometric(Band::K), AlertBand::XRay].map(|band| {
+                    ArrivingLight::supernova(kind, UniverseTime::EPOCH, band, distance, 0.5)
+                })
+            })
+            .collect()
+    }
+
+    /// Each light is zero before its first knot, finite and non-negative at and between its
+    /// knots, and moves by a sliver of its peak over a nanosecond anywhere after its onset.
+    #[test]
+    fn a_supernovas_light_is_finite_non_negative_and_continuous_after_its_onset() {
+        let millisecond = Span::new(0, 1_000_000).unwrap();
+        let nanosecond = Span::new(0, 1).unwrap();
+        for light in supernovae() {
+            let knots = light.knots();
+            assert!(knots.windows(2).all(|pair| pair[0] < pair[1]));
+            let before = knots[0].checked_sub(millisecond).unwrap();
+            assert_same_bits(light.flux_at(before).value(), 0.0);
+            let peak = knots
+                .iter()
+                .map(|&t| light.flux_at(t).value())
+                .fold(0.0, f64::max);
+            // No jump: a nanosecond's step changes the flux by a sliver of its peak.
+            for pair in knots.windows(2).step_by(97) {
+                let middle = pair[0]
+                    .checked_add(
+                        Span::from_seconds_f64(
+                            pair[1].checked_since(pair[0]).unwrap().as_seconds_f64() / 2.0,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+                for t in [pair[0], middle] {
+                    let here = light.flux_at(t).value();
+                    let next = light.flux_at(t.checked_add(nanosecond).unwrap()).value();
+                    assert!(here.is_finite() && here >= 0.0, "{light:?} at {t}: {here}");
+                    assert!(
+                        (next - here).abs() <= 1e-6 * peak,
+                        "{light:?} jumps at {t}: {here} to {next}"
+                    );
+                }
+            }
+        }
+    }
+}

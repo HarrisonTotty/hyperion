@@ -1,21 +1,17 @@
-//! The alert schedule on the alert walks' own detections (plan 12, P12.T8.a): the local events of
-//! a range query's systems (P12.T5.e), and a production core collapse (P12.T5.b).
-//!
-//! The walks' detections carry no light curve, so each test gives the schedule a light of its own
-//! for them: a local event's flux held from when its light is first counted, and the supernova's
-//! template scaled to the detection's peak.
+//! The alert schedule on the alert walks' own detections and their lights (plan 12, P12.T8.a and
+//! P12.T8.b.1): the local events of a range query's systems (P12.T5.e), and a production core
+//! collapse (P12.T5.b).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use hyperion_server::alerts::{Crossing, Push, Rescan, ScanRequest, Subscription, Tracked};
 use hyperion_sim::Seed;
 use hyperion_sim::alerts::{
-    AlertBand, AlertContext, BandLimits, ClassSet, DEFAULT_HOST_LIMIT, Detection, DetectionPhase,
-    LocalEventsCache, OneShotCells, OneShotClass, OneShotEvent, SensorHorizon, local_events,
-    one_shot_detections, supernova_luminosity, supernova_peak,
+    AlertBand, AlertContext, BandLimits, ClassSet, DEFAULT_HOST_LIMIT, DetectionLight,
+    DetectionPhase, LocalEventsCache, OneShotCells, OneShotClass, OneShotEvent, SensorHorizon,
+    local_events, one_shot_detections,
 };
 use hyperion_sim::coords::GalacticPosition;
-use hyperion_sim::events::TimeWindow;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use hyperion_sim::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId};
@@ -25,11 +21,10 @@ use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::placement::NoCache;
 use hyperion_sim::galaxy::query::{QueryMode, RangeQuery, range_query_observed};
 use hyperion_sim::id::EventId;
-use hyperion_sim::math::powf;
 use hyperion_sim::observe::{NoStarsCache, Observer, light_time};
 use hyperion_sim::time::{Span, UniverseTime};
 use hyperion_sim::units::consts::SECONDS_PER_DAY;
-use hyperion_sim::units::{LightYears, WattsPerSquareMetre, Years};
+use hyperion_sim::units::{LightYears, WattsPerSquareMetre};
 
 fn w(value: f64) -> WattsPerSquareMetre {
     WattsPerSquareMetre::new(value)
@@ -74,27 +69,10 @@ fn run(
     pushes
 }
 
-/// `detection`'s track for a light held at its flux from when it is first counted in the scan over
-/// `window`, or its glitch's track.
-///
-/// The light never fades, so no event is forgotten: a later scan that lists one in progress, by
-/// the event's own light, is always one whose crossings the schedule still holds.
-fn held(detection: Detection, window: TimeWindow, sensor: &SensorHorizon) -> Tracked {
-    if detection.kind().row().light_curve().is_none() {
-        return Tracked::of_unlit(detection).unwrap();
-    }
-    let from = match detection.phase() {
-        DetectionPhase::Onset => detection.arrival(),
-        DetectionPhase::InProgress => window.start(),
-    };
-    let flux = detection.flux();
-    Tracked::of_light(detection, sensor, &[from], |_| flux)
-        .expect("a detection's flux reaches its band's limit")
-}
-
 /// The local events of the systems within 10 ly of the Sun, a Sun-like seed's, over the year a
-/// subscription there asks for and the next, pushed the same whether its clock steps once or
-/// daily, each crossing of each event once, every onset at its arrival.
+/// subscription there asks for and the next, on their own lights: pushed the same whether its
+/// clock steps once or daily, each crossing of each event once, and every onset's bearing between
+/// its arrival and its peak.
 #[test]
 fn alerts_schedule_pushes_a_range_querys_local_events_once_however_the_clock_steps() {
     let galaxy = Galaxy::new(Seed::new(12));
@@ -130,12 +108,14 @@ fn alerts_schedule_pushes_a_range_querys_local_events_once_however_the_clock_ste
             &mut seen,
         );
         for detection in &seen {
-            if detection.phase() == DetectionPhase::Onset {
-                onsets.insert(detection.event(), detection.arrival());
+            if let (DetectionPhase::Onset, DetectionLight::Lit(light)) =
+                (detection.phase(), detection.light())
+            {
+                onsets.insert(detection.event(), (detection.arrival(), light.knots()[1]));
             }
         }
         seen.into_iter()
-            .map(|detection| held(detection, request.window(), subscription.sensor()))
+            .filter_map(|detection| Tracked::of(detection, subscription.sensor()))
             .collect::<Vec<_>>()
     };
 
@@ -167,9 +147,16 @@ fn alerts_schedule_pushes_a_range_querys_local_events_once_however_the_clock_ste
     let events: BTreeSet<_> = detects.iter().map(|push| push.1).collect();
     assert_eq!(events.len(), detects.len(), "each event's bearing once");
     assert!(detects.len() > 10, "{} events seen", detects.len());
-    for (event, arrival) in onsets.iter().filter(|&(_, arrival)| *arrival < end) {
+    // The light's onset arrives one light time of its peak's after the flare's onset, within a
+    // fraction of a second of the detection's arrival.
+    let second = Span::from_seconds(1);
+    for (event, &(arrival, peak)) in onsets.iter().filter(|&(_, (_, peak))| *peak < end) {
         let pushed = detects.iter().find(|push| push.1 == *event);
-        assert_eq!(pushed.map(|push| push.0), Some(*arrival), "{event:?}");
+        let at = pushed.map_or_else(|| panic!("{event:?} is not pushed"), |push| push.0);
+        assert!(
+            arrival.checked_sub(second).unwrap() <= at && at <= peak,
+            "{event:?}: pushed at {at}, arrived at {arrival}, peaked at {peak}"
+        );
     }
     eprintln!(
         "{} pushes of {} events, {} onsets",
@@ -217,33 +204,10 @@ fn latest_death(galaxy: &Galaxy, process: &CoreCollapseProcess) -> OneShotEvent 
     death.expect("a death to come by the solar circle")
 }
 
-/// `death`'s light at the observer in `onset`'s band: its template scaled to the detection's
-/// peak, from the arrival, and the light's knots out to 274 years, ten a decade of age.
-fn template_light(
-    death: &OneShotEvent,
-    onset: &Detection,
-) -> (
-    impl Fn(UniverseTime) -> WattsPerSquareMetre + Copy + use<>,
-    Vec<UniverseTime>,
-) {
-    let (kind, band, arrival) = (death.supernova(), onset.band(), onset.arrival());
-    let scale = onset.flux().value() / supernova_peak(kind, band).value();
-    let light = move |t: UniverseTime| {
-        let age = t.checked_since(arrival).unwrap().as_julian_years_f64();
-        w(scale * supernova_luminosity(kind, Years::new(age), band).value())
-    };
-    let knots = [0.0]
-        .into_iter()
-        .chain((-40..=50).map(|k| powf(10.0, f64::from(k) / 10.0)))
-        .map(|age| arrival.checked_add(days(age)).unwrap())
-        .collect();
-    (light, knots)
-}
-
 /// A core collapse to come in the galaxy of seed 9, by the solar circle, seen from 50 ly: the
 /// subscription half a year before its light arrives pushes it once as a bearing and once as a
-/// host, each when its template's light crosses the limit after the arrival and before the peak,
-/// and the renewal that lists it in progress adds neither again.
+/// host, each when its own light crosses the limit after the arrival and before the peak, and the
+/// renewal that lists it in progress, with the same light, adds neither again.
 #[test]
 #[ignore = "slow: generates the core-collapse class's cells by the solar circle and about the observer"]
 fn alerts_schedule_pushes_a_core_collapse_at_its_crossings() {
@@ -286,24 +250,23 @@ fn alerts_schedule_pushes_a_core_collapse_at_its_crossings() {
     assert_eq!(onset.event(), death.event());
     assert_eq!(onset.arrival(), arrival);
     assert_eq!(onset.phase(), DetectionPhase::Onset);
-    let band = onset.band();
-    let (light, knots) = template_light(&death, &onset);
-    let peak = knots
-        .iter()
-        .copied()
-        .max_by(|a, b| light(*a).value().total_cmp(&light(*b).value()))
+    let DetectionLight::Lit(light) = *onset.light() else {
+        panic!("a supernova gives light: {onset:?}");
+    };
+    let peak = light
+        .knots()
+        .into_iter()
+        .max_by(|a, b| {
+            light
+                .flux_at(*a)
+                .value()
+                .total_cmp(&light.flux_at(*b).value())
+        })
         .unwrap();
-    let tracked = Tracked::of_light(onset, &sensor, &knots, light).unwrap();
+    let tracked = Tracked::of(onset, &sensor).unwrap();
     let (detect, _) = tracked.crossing(Crossing::Detect).unwrap();
     let (resolve, _) = tracked.crossing(Crossing::Resolve).unwrap();
     assert!(arrival <= detect && detect <= resolve && resolve <= peak);
-    eprintln!(
-        "{:?} in {band:?}: detected {} s and resolved {} s after its arrival, peak {} days after",
-        death.supernova(),
-        detect.checked_since(arrival).unwrap().as_seconds_f64(),
-        resolve.checked_since(arrival).unwrap().as_seconds_f64(),
-        peak.checked_since(arrival).unwrap().as_seconds_f64() / SECONDS_PER_DAY,
-    );
     subscription.merge(&first, [tracked]).unwrap();
 
     let end = arrival.checked_add(half).unwrap();
@@ -325,7 +288,12 @@ fn alerts_schedule_pushes_a_core_collapse_at_its_crossings() {
     let again = walk(&subscription, &renewal);
     assert_eq!(again.len(), 1, "{again:?}");
     assert_eq!(again[0].phase(), DetectionPhase::InProgress);
-    let in_progress = Tracked::of_light(again[0].clone(), &sensor, &knots, light).unwrap();
+    assert_eq!(
+        again[0].light(),
+        &DetectionLight::Lit(light),
+        "the same light"
+    );
+    let in_progress = Tracked::of(again[0].clone(), &sensor).unwrap();
     assert_eq!(
         in_progress.crossing(Crossing::Detect).map(|(at, _)| at),
         Some(detect)

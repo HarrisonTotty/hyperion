@@ -28,8 +28,8 @@ use std::collections::BTreeSet;
 use common::observe::{KeepCells, Seen, brute_force_detections, observer_at};
 use hyperion_sim::Seed;
 use hyperion_sim::alerts::{
-    AlertBand, AlertContext, AlertQuery, BandLimits, ClassSet, DetectionPhase, NoOneShotCells,
-    OneShotClass, OneShotEvent, SensorHorizon, TransientKind, inverse_square_flux,
+    AlertBand, AlertContext, AlertQuery, BandLimits, ClassSet, DetectionLight, DetectionPhase,
+    NoOneShotCells, OneShotClass, OneShotEvent, SensorHorizon, TransientKind, inverse_square_flux,
     one_shot_detections, supernova_luminosity, supernova_peak,
 };
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
@@ -53,6 +53,7 @@ use hyperion_sim::time::{Span, UniverseTime};
 use hyperion_sim::units::{
     Dex, HydrogenPerCm3, KelvinPerCm3, PerCubicLightYear, SolarMasses, WattsPerSquareMetre, Years,
 };
+use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::order::assert_order_independent;
 
 /// The toy's sites lie up to this far from their cells, ly: within the class grid's 4,096 ly.
@@ -385,6 +386,59 @@ fn one_shot_alerts_of_a_toy_class_are_the_brute_forces() {
     let mut none = Vec::new();
     one_shot_detections(&galaxy, &mut context, &other, &process, &mut none);
     assert_eq!(none, []);
+}
+
+/// Each detection's light (P12.T8.b.1) is its template's in its band through its line of sight:
+/// zero before its arrival, finite and non-negative at its knots, and the walk's flux at the
+/// detection's own time, an onset's peak and an event in progress's window start.
+#[test]
+fn one_shot_alerts_lights_are_the_walks_flux_at_their_own_times() {
+    let galaxy = Galaxy::new(Seed::new(0x0125_0b00));
+    let process = ToyTypeIa::new();
+    let sensor = sensor(&[
+        (AlertBand::Photometric(Band::V), 1.25e-4),
+        (AlertBand::Photometric(Band::B), 2.2e-4),
+        (AlertBand::Photometric(Band::K), 1.5e-5),
+    ]);
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let mut cells = KeepCells::default();
+    let mut phases = BTreeSet::new();
+    for target in TARGETS {
+        let window = window(target.years, -0.5, 1.0);
+        let query = AlertQuery::builder(observer_at(target.position), window, sensor.clone())
+            .build()
+            .unwrap();
+        let mut context =
+            AlertContext::new(&mut noise, &NoModifiers).with_one_shot_cells(&mut cells);
+        let mut out = Vec::new();
+        one_shot_detections(&galaxy, &mut context, &query, &process, &mut out);
+        for d in &out {
+            let DetectionLight::Lit(light) = d.light() else {
+                panic!("a supernova gives light: {d:?}");
+            };
+            assert_eq!(light.band(), d.band());
+            let knots = light.knots();
+            assert!(knots.windows(2).all(|pair| pair[0] < pair[1]));
+            assert_eq!(knots[0], d.arrival());
+            let before = d.arrival().checked_sub(Span::new(0, 1).unwrap()).unwrap();
+            assert!(light.flux_at(before).value().abs() < f64::MIN_POSITIVE);
+            let fluxes: Vec<f64> = knots.iter().map(|&t| light.flux_at(t).value()).collect();
+            assert!(fluxes.iter().all(|f| f.is_finite() && *f >= 0.0), "{d:?}");
+            let flux = d.flux().value();
+            match d.phase() {
+                DetectionPhase::Onset => {
+                    let peak = fluxes.iter().copied().fold(0.0, f64::max);
+                    assert!((peak - flux).abs() <= 1e-9 * flux, "{d:?}: its peak {peak}");
+                }
+                DetectionPhase::InProgress => {
+                    let opening = light.flux_at(window.start()).value();
+                    assert_same_bits(opening, flux);
+                }
+            }
+            phases.insert(d.phase());
+        }
+    }
+    assert_eq!(phases.len(), 2, "onsets and events in progress");
 }
 
 /// The walk gives each of six queries, the three observers' years and centuries, the same

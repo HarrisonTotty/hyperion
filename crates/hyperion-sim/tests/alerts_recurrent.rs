@@ -23,9 +23,10 @@ mod common;
 use std::cell::RefCell;
 
 use hyperion_sim::alerts::{
-    AlertBand, AlertContext, AlertQuery, BandLimits, DetectionPhase, MagnetarCells, MagnetarClass,
-    MagnetarHost, NoMagnetarCells, SensorHorizon, StarRecipe, TransientKind, magnetar_detections,
-    magnetar_scan_cell, magnetar_scan_plan, scan_cell, scan_plan,
+    AlertBand, AlertContext, AlertQuery, BandLimits, Detection, DetectionLight, DetectionPhase,
+    MagnetarCells, MagnetarClass, MagnetarHost, NoMagnetarCells, SensorHorizon, StarRecipe,
+    TransientKind, magnetar_detections, magnetar_scan_cell, magnetar_scan_plan, scan_cell,
+    scan_plan,
 };
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
 use hyperion_sim::events::TimeWindow;
@@ -47,6 +48,7 @@ use hyperion_sim::units::{Gauss, PerCubicLightYear, SolarMasses, WattsPerSquareM
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 
 use common::observe::{KeepMagnetarCells, Seen, brute_force_magnetar_detections, observer_at};
+use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::order::assert_order_independent;
@@ -349,6 +351,82 @@ fn toy_magnetars_are_the_brute_forces(windows: &[(f64, f64)]) -> [usize; 3] {
 fn magnetar_alerts_of_toy_magnetars_are_the_brute_forces_over_a_year() {
     let [near, _, _] = toy_magnetars_are_the_brute_forces(&[(-0.5, 1.0)]);
     assert!(near >= 100, "{near} detections near");
+}
+
+/// Each magnetar detection's light (P12.T8.b.1) is a top hat in X-rays: zero before its onset
+/// arrives and from its end's, and the walk's flux at the detection's own time, its arrival for an
+/// onset and the window's start for an event in progress, which a window opening half-way through
+/// an onset's light makes one.
+#[test]
+fn magnetar_alerts_lights_are_the_walks_flux_at_their_own_times() {
+    let galaxy = Galaxy::new(Seed::new(0x0125_0c00));
+    let process = ToyMagnetars::new();
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let mut cells = KeepMagnetarCells::default();
+    let near = &TARGETS[0];
+    let mut walk = |window: TimeWindow| {
+        let query = AlertQuery::builder(observer_at(near.position), window, xray())
+            .build()
+            .unwrap();
+        let mut context =
+            AlertContext::new(&mut noise, &NoModifiers).with_magnetar_cells(&mut cells);
+        let mut out = Vec::new();
+        magnetar_detections(&galaxy, &mut context, &query, &process, &mut out);
+        out
+    };
+    let lit = |d: &Detection| match d.light() {
+        DetectionLight::Lit(light) => *light,
+        DetectionLight::Unlit => panic!("a magnetar's outburst gives light: {d:?}"),
+    };
+    let nanosecond = Span::new(0, 1).unwrap();
+    let year = window(near.years, -0.5, 1.0);
+    let onsets = walk(year);
+    assert!(onsets.len() >= 100, "{} detections", onsets.len());
+    for d in &onsets {
+        let light = lit(d);
+        assert_eq!(light.band(), AlertBand::XRay);
+        let knots = light.knots();
+        assert_eq!(knots.len(), 2, "{d:?}");
+        assert_eq!(knots[0], d.arrival());
+        let at = |t: UniverseTime| light.flux_at(t).value();
+        assert!(at(knots[0].checked_sub(nanosecond).unwrap()).abs() < f64::MIN_POSITIVE);
+        assert!(at(knots[1]).abs() < f64::MIN_POSITIVE, "gone at its end");
+        let own = match d.phase() {
+            DetectionPhase::Onset => d.arrival(),
+            DetectionPhase::InProgress => year.start(),
+        };
+        assert_same_bits(at(own), d.flux().value());
+        assert_same_bits(
+            at(knots[1].checked_sub(nanosecond).unwrap()),
+            d.flux().value(),
+        );
+    }
+    // The longest of the year's onsets, seen from a window that opens half-way through its light.
+    let longest = onsets
+        .iter()
+        .filter(|d| d.phase() == DetectionPhase::Onset)
+        .max_by_key(|d| lit(d).knots()[1].checked_since(d.arrival()).unwrap())
+        .unwrap();
+    let knots = lit(longest).knots();
+    let half =
+        Span::from_seconds_f64(knots[1].checked_since(knots[0]).unwrap().as_seconds_f64() / 2.0)
+            .unwrap();
+    let opening = knots[0].checked_add(half).unwrap();
+    let later = TimeWindow::new(
+        opening,
+        opening.checked_add(Span::from_seconds(3_600)).unwrap(),
+    )
+    .unwrap();
+    let in_progress = walk(later)
+        .into_iter()
+        .find(|d| d.event() == longest.event())
+        .expect("the onset is in progress half-way through its light");
+    assert_eq!(in_progress.phase(), DetectionPhase::InProgress);
+    assert_eq!(in_progress.light(), longest.light(), "the same light");
+    assert_same_bits(
+        lit(&in_progress).flux_at(opening).value(),
+        in_progress.flux().value(),
+    );
 }
 
 /// As over a year, over a century about each observer's time, which holds giant flares from some

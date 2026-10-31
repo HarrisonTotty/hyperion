@@ -12,11 +12,12 @@
 //! arrival: an FU Orionis outburst's peak arrives up to 25 years after its onset, and a Type Ia's
 //! first light is days under the limit (research's lean of 2026-10-30 for T8, adopted).
 //!
-//! The walk's detections carry no light curve, so the scan that finds one gives its light at the
-//! observer ([`Tracked::of_light`]): a function of the observer's time, monotone between the knots
-//! the scan names, on which the crossings are found by bisection to [`CROSSING_RESOLUTION`]. A
-//! kind whose row has no light, a pulsar glitch timed in the radio with no flux, is pushed at its
-//! arrival and cleared [`GLITCH_CLEAR_AFTER`] later ([`Tracked::of_unlit`]).
+//! Each walk's detection carries its light at the observer (P12.T8.b.1), which [`Tracked::of`]
+//! takes: a function of the observer's time, monotone between the knots it names, on which the
+//! crossings are found by bisection to [`CROSSING_RESOLUTION`] ([`Tracked::of_light`], which
+//! takes any such light). A kind whose row has no light, a pulsar glitch timed in the radio with no
+//! flux, is pushed at its arrival and cleared [`GLITCH_CLEAR_AFTER`] later
+//! ([`Tracked::of_unlit`]).
 //!
 //! # The schedule
 //!
@@ -45,7 +46,9 @@ use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use hyperion_sim::alerts::{AlertQuery, BuildAlertQueryError, ClassSet, Detection, SensorHorizon};
+use hyperion_sim::alerts::{
+    AlertQuery, BuildAlertQueryError, ClassSet, Detection, DetectionLight, SensorHorizon,
+};
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::events::TimeWindow;
 use hyperion_sim::id::EventId;
@@ -133,6 +136,24 @@ pub struct Tracked {
 }
 
 impl Tracked {
+    /// The track of `detection` on its own light (P12.T8.b.1): [`of_light`](Self::of_light) on
+    /// its [`ArrivingLight`]'s knots and flux, or [`of_unlit`](Self::of_unlit) for a detection
+    /// that gives none.
+    ///
+    /// `None` as those give it: for a band the sensor lacks, a light that reaches no limit at its
+    /// knots, or an unlit detection of a kind whose row has light.
+    ///
+    /// [`ArrivingLight`]: hyperion_sim::alerts::ArrivingLight
+    #[must_use]
+    pub fn of(detection: Detection, sensor: &SensorHorizon) -> Option<Self> {
+        match *detection.light() {
+            DetectionLight::Lit(light) => {
+                Self::of_light(detection, sensor, &light.knots(), |t| light.flux_at(t))
+            }
+            DetectionLight::Unlit => Self::of_unlit(detection),
+        }
+    }
+
     /// The track of `detection`, whose flux at the observer in its band is `light` (W m⁻², after
     /// extinction, at each observer time), monotone between consecutive `knots`.
     ///
