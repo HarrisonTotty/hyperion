@@ -1150,9 +1150,10 @@ mod tests {
     ///   some 6,000 carbon stars (recalled), extrinsic S stars among them;
     /// - classical T Tauri stars 2–8 per protostar, the mean disc of 2.5 Myr (P06.T15.c) less the
     ///   protostar's 0.5 Myr over that 0.5 Myr, weak-lined ones 10–200 per classical one, the
-    ///   contraction of 100–400 Myr below a solar mass over the disc, and Herbig Ae/Be stars
-    ///   0.05–0.5 per protostar, a few per cent of stars spending 1–8 Myr before the main sequence:
-    ///   the model's own ratios, there being no Galactic census of young stars;
+    ///   contraction below a solar mass (to the young population's 100 Myr of ages) over the disc,
+    ///   and Herbig Ae/Be stars 0.05–0.5 per protostar, a few per cent of stars contracting for up
+    ///   to 6.5 Myr after the protostar phase: the model's own ratios, there being no Galactic
+    ///   census of young stars;
     /// - no protostar, of the kind `Protostar`, with a young class (research-leans-12 §3).
     #[test]
     #[ignore = "slow: 1.5 × 10⁶ stars across every component and band, the window's with full tracks"]

@@ -346,15 +346,16 @@ pub enum PeculiarClass {
     /// A luminous blue variable: beyond the Humphreys–Davidson limit and hotter than 8,000 K
     /// (P06.T24.a).
     LuminousBlueVariable,
-    /// A T Tauri star: a young star of under 2 M☉ before the main sequence (P06.T24.b), written
+    /// A T Tauri star: a young star of under 2 M☉ on its contraction to the main sequence, after
+    /// the protostar phase (P06.T24.b), written
     /// ` CTTS` while its protostellar disc lasts and ` WTTS` after.
     TTauri {
         /// Whether its disc still lasts ([`disc_lifetime`](crate::stellar::premain::disc_lifetime)):
         /// a classical T Tauri star, which accretes from it, and a weak-lined one without.
         classical: bool,
     },
-    /// A Herbig Ae/Be star: a young star of 2–8 M☉ before the main sequence (P06.T24.b), written
-    /// ` HAeBe`.
+    /// A Herbig Ae/Be star: a young star of 2–8 M☉ on its contraction to the main sequence, after
+    /// the protostar phase (P06.T24.b), written ` HAeBe`.
     HerbigAeBe,
     /// An S-type star of the thermally pulsing AGB, its surface C/O raised by third dredge-up to
     /// 0.95–1 (P06.T24.b): MS, S or SC as the C/O rises.

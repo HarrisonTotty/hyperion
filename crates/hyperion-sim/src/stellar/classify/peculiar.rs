@@ -32,7 +32,8 @@
 //!
 //! P06.T24.b adds two families, behind their hold ([`PECULIAR_CLASSES_VERSION`]):
 //!
-//! - **Young stars** ([`young_class`]): before the main sequence, a star of under 2 M☉
+//! - **Young stars** ([`young_class`]): on its contraction to the main sequence, after the
+//!   protostar phase, a star of under 2 M☉
 //!   ([`T_TAURI_MAX_MASS`]) is a T Tauri star, classical while its protostellar disc lasts
 //!   ([`disc_lifetime`], P06.T15.c) and weak-lined after, and one of 2–8 M☉
 //!   ([`HERBIG_AE_BE_MAX_MASS`]) a Herbig Ae/Be star (Herbig 1960, ApJS 4, 337; Waters and
@@ -516,7 +517,7 @@ pub(crate) const PECULIAR_CLASSES_VERSION: GeneratorVersion = GeneratorVersion::
 pub(crate) enum PeculiarClassRules {
     /// Version 25's and before: no young, S or carbon class.
     Held,
-    /// Version 26's: the young stars' classes before the main sequence ([`young_class`]), and the
+    /// Version 26's: the young stars' classes on their contraction ([`young_class`]), and the
     /// S and carbon stars' on the thermally pulsing AGB ([`DredgeUp`]).
     Full,
 }
@@ -529,6 +530,10 @@ pub const T_TAURI_MAX_MASS: SolarMasses = SolarMasses::new(2.0);
 /// The heaviest Herbig Ae/Be star, M☉ of initial mass, exclusive: 8 (plan 06, P06.T24.b), above
 /// which a star reaches the main sequence still embedded (Palla and Stahler 1993, ApJ 418, 414,
 /// recalled: the birthline meets the main sequence near 8 M☉).
+///
+/// In effect the class ends lower: from about 6.29 M☉ at solar Z a star arrives on the main
+/// sequence ([`t_zams`](crate::stellar::premain::t_zams)) within the protostar's 0.5 Myr, and so
+/// has no contraction to take it on.
 pub const HERBIG_AE_BE_MAX_MASS: SolarMasses = SolarMasses::new(8.0);
 
 /// The young star's class of a star of initial mass `initial_mass` and `draws` in `phase` at
