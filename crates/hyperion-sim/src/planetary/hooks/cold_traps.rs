@@ -75,11 +75,10 @@
 //! closed form, Hayne et al. 2021's template with Ingersoll et al. 1992's shadow temperature)
 //! integrated over latitude by area, ∫ f(φ) cos φ dφ from the equator to the pole, by four-point
 //! Gauss–Legendre rules on the bands [`TRAP_BAND_EDGES_DEG`], 24 nodes, within 5 × 10⁻⁴ of a fine
-//! midpoint rule (the tests' bound; −4.06 × 10⁻⁴ measured for the Moon's water under craters of
-//! distribution B, and −1.22 × 10⁻⁴ on the ray-traced plains of R09.T7.g's hold). The model is
-//! symmetric about the equator, so that is the share of the whole surface. It is taken only at
-//! latitudes whose zonal annual maximum is at least the threshold, so the traps never lie under the
-//! zonal cap. Its inputs:
+//! midpoint rule (the tests' bound; −1.22 × 10⁻⁴ measured for the Moon's water under craters of
+//! distribution B on the ray-traced plains, R09.T7.g). The model is symmetric about the equator,
+//! so that is the share of the whole surface. It is taken only at latitudes whose zonal annual
+//! maximum is at least the threshold, so the traps never lie under the zonal cap. Its inputs:
 //!
 //! - the star's greatest declination in the body's sky, min(ε, 180° − ε) of its present
 //!   obliquity to its seasonal orbit, labelled, since cold traps record the obliquity's history;
@@ -91,7 +90,8 @@
 //!   min(1, N(>100 m) ÷ its saturation), from the body's crater contract and Trask's saturation
 //!   ([`CRATER_REFERENCE_DIAMETER`]); Hayne et al.'s distribution B of d/D, the one that passes
 //!   every band test (science-r09-drainage.md §8.13.3); plains at an RMS slope of
-//!   [`PLAINS_RMS_SLOPE`] (5.7°); and the lunar share under lateral conduction's cut-off
+//!   [`PLAINS_RMS_SLOPE`] (5.7°), ray traced from generator version 25 (R09.T7.g, in place of
+//!   T7.d's bowls); and the lunar share under lateral conduction's cut-off
 //!   (`LUNAR_SHARE_UNDER_CUTOFF`, 0.05).
 //!
 //! The published area is `f_ct` × `f_x`, the exposed ice ([`exposed_fraction`]).
@@ -204,9 +204,6 @@
 //! (`FieldSlot`), a local the derivation drops when it returns, never a static or a thread's, and
 //! reused only where every input is the same bits. The field is a pure function of those inputs,
 //! so its reuse moves no bit; a moon's second round is a derivation of its own and starts empty.
-//! The plains' model (`ROUGH_PLAINS_VERSION`'s hold) is the system's, read once as it is
-//! generated and carried in each body's sky, so that the field's key holds it and no pass, record
-//! or R09 cold trap reads it from the thread.
 
 #[cfg(test)]
 mod tests;
@@ -215,11 +212,12 @@ use core::cell::Cell;
 use core::f64::consts::{FRAC_PI_2, PI};
 
 use hyperion_surface::cold_trap::{
-    self, BodyParts, DepthRatios, LUNAR_SHARE_UNDER_CUTOFF, PlainsModel, Terrain, TerrainParts,
+    self, BodyParts, DepthRatios, LUNAR_SHARE_UNDER_CUTOFF, Terrain, TerrainParts,
     flux_weighted_elevation,
 };
 use hyperion_surface::craters::{CraterParams, Screening, cumulative_density, saturation};
 
+use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
 use crate::planetary::chem::partition::{
@@ -239,7 +237,6 @@ use crate::units::{
     Degrees, Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals, Radians,
     SolarRadii, WattsPerSquareMetre,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
 /// The collision cross-section `σ_c` whose inverse bounds a collisional column's number density:
 /// 3 × 10⁻¹⁹ m², a hard-sphere cross-section of N₂ and O, *from memory* (labelled). N₂'s kinetic
@@ -285,10 +282,10 @@ pub const LCROSS_CO2_PER_WATER: f64 = 0.0217;
 /// The edges of the latitude bands the cold-trap fraction is integrated over, degrees from the
 /// equator: four-point Gauss–Legendre rules on 0–60°, 60–70°, 70–80°, 80–85°, 85–88° and 88–90°,
 /// 24 nodes, finer toward the pole where the traps lie (the research's): within 5 × 10⁻⁴ of a
-/// midpoint rule at 0.02°, the tests' bound (−4.06 × 10⁻⁴ measured with craters of distribution B,
-/// +7.26 × 10⁻⁵ with A). On the ray-traced plains (R09.T7.g's hold) it is −1.22 × 10⁻⁴ with B and
-/// +5.30 × 10⁻⁴ with A, past the bound: a finding, the table's piecewise-linear read against four
-/// nodes a band.
+/// midpoint rule at 0.02°, the tests' bound, on the ray-traced plains (R09.T7.g) with craters of
+/// distribution B, the generator's (−1.22 × 10⁻⁴ measured). With A it is +5.30 × 10⁻⁴, past the
+/// bound: a finding, the table's piecewise-linear read against four nodes a band. On T7.d's bowls,
+/// the plains to generator version 24, it was −4.06 × 10⁻⁴ with B and +7.26 × 10⁻⁵ with A.
 pub const TRAP_BAND_EDGES_DEG: [f64; 7] = [0.0, 60.0, 70.0, 80.0, 85.0, 88.0, 90.0];
 
 /// The least exposed fraction `f_x`: 0.016, Ceres's bright deposits in 10 of at least 634
@@ -342,8 +339,7 @@ pub fn exposed_fraction(seed: Seed, body: BodyId) -> f64 {
 }
 
 /// What a body's cold traps read of its sky and its draw, from the record path (P14.T51.f): the
-/// star's greatest declination, its flux and angular radius at periapsis, the exposed fraction, and
-/// the model its plains take under its system's rules (R09.T7.g).
+/// star's greatest declination, its flux and angular radius at periapsis, and the exposed fraction.
 ///
 /// Plain data with crate-visible fields.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -357,17 +353,12 @@ pub(crate) struct ColdTrapSky {
     pub(crate) star_radius: Radians,
     /// The exposed fraction `f_x` ([`exposed_fraction`]).
     pub(crate) exposed_fraction: f64,
-    /// The model the rough plains take ([`terrain_of`]), the system's record rules'
-    /// ([`rough_plains_in_force`] when it was generated), so that its passes' fields, its record
-    /// and R09's cold traps read one model.
-    pub(crate) plains_model: PlainsModel,
 }
 
 impl ColdTrapSky {
     /// The sky of a body of obliquity `obliquity` to its seasonal orbit, of semi-major axis and
     /// eccentricity `orbit`, under an orbit-mean flux `orbit_mean_flux` from a star of radius
-    /// `star_radius` (`None` for none, a point), with the exposed fraction `exposed_fraction` and
-    /// its plains of the model `plains_model`.
+    /// `star_radius` (`None` for none, a point), with the exposed fraction `exposed_fraction`.
     ///
     /// - δ = min(ε, π − ε) ([`greatest_declination`]), so that a retrograde rotator such as Venus
     ///   (177.4°) has 2.6°.
@@ -384,7 +375,6 @@ impl ColdTrapSky {
         (semi_major_axis, eccentricity): (Metres, f64),
         star_radius: Option<SolarRadii>,
         exposed_fraction: f64,
-        plains_model: PlainsModel,
     ) -> Self {
         let near = 1.0 - eccentricity;
         let ratio = star_radius.map_or(0.0, |r| {
@@ -400,7 +390,6 @@ impl ColdTrapSky {
             periapsis_flux: periapsis_flux(orbit_mean_flux, eccentricity),
             star_radius: Radians::new(angular),
             exposed_fraction,
-            plains_model,
         }
     }
 }
@@ -427,8 +416,7 @@ fn periapsis_flux(orbit_mean_flux: WattsPerSquareMetre, eccentricity: f64) -> Wa
 
 /// The Moon's sky as the plan's tests take it (science-r09-drainage.md §8; R09.T7.d's real Moon):
 /// the Sun at most 1.54° from its equator, 1,361 W m⁻² at 1 au taken to Earth's perihelion,
-/// 0.98329 au, the Sun's 0.2711° there, the exposed fraction Li et al. 2018's 0.035, and the plains
-/// as bowls, version 24's.
+/// 0.98329 au, the Sun's 0.2711° there and the exposed fraction Li et al. 2018's 0.035.
 #[cfg(test)]
 #[must_use]
 pub(crate) fn lunar_sky() -> ColdTrapSky {
@@ -437,7 +425,6 @@ pub(crate) fn lunar_sky() -> ColdTrapSky {
         periapsis_flux: WattsPerSquareMetre::new(1361.0 / (0.98329 * 0.98329)),
         star_radius: Radians::from(Degrees::new(0.2711)),
         exposed_fraction: 0.035,
-        plains_model: PlainsModel::Bowls,
     }
 }
 
@@ -887,7 +874,7 @@ impl FieldInputs {
             .collect();
         ColdTrapField::new(
             &Sunlit::new(self.sky, self.regolith_albedo, self.heat_flow),
-            terrain_of(&self.craters, self.sky.plains_model),
+            terrain_of(&self.craters),
             &points,
             &species,
         )
@@ -896,9 +883,7 @@ impl FieldInputs {
     /// Whether these inputs are `other`'s to the bit, the field's key
     /// (decision-p14-t54b-f-coldtraps §4): every float of the sky, the albedo, the heat flow, every
     /// member of the crater contract and every area point's x the same bits (`total_cmp`, never
-    /// `==` and no tolerance), and the sky's plains model, the crust, the condensables and the
-    /// number of points equal. The plains model is in the key so that no field built under one
-    /// model serves a pass under the other (`decision-r09-t7g-table` §5).
+    /// `==` and no tolerance), and the crust, the condensables and the number of points equal.
     #[must_use]
     pub(crate) fn same(&self, other: &Self) -> bool {
         let (a, b) = (&self.sky, &other.sky);
@@ -908,7 +893,6 @@ impl FieldInputs {
         ) && same_float(a.periapsis_flux.value(), b.periapsis_flux.value())
             && same_float(a.star_radius.value(), b.star_radius.value())
             && same_float(a.exposed_fraction, b.exposed_fraction)
-            && a.plains_model == b.plains_model
             && same_float(self.regolith_albedo, other.regolith_albedo)
             && same_float(self.heat_flow.value(), other.heat_flow.value())
             && same_craters(&self.craters, &other.craters)
@@ -1417,9 +1401,6 @@ pub(crate) struct ColdTrapGroundParts<'a> {
     pub(crate) heat_flow: WattsPerSquareMetre,
     /// The crater contract (P14.T48.c), from which [`terrain_of`] takes the terrain's stand-ins.
     pub(crate) craters: &'a CraterParams,
-    /// The model the rough plains take ([`terrain_of`]): R09's cold-trap inputs' (the record's
-    /// published pass's) or a test's.
-    pub(crate) plains_model: PlainsModel,
 }
 
 /// A body's cold traps as functions of latitude (P14.T51.f): its zonal annual maximum, and each
@@ -1439,7 +1420,7 @@ pub(crate) struct ColdTrapGround {
 impl ColdTrapGround {
     /// The ground of `parts`, with δ and `S_p` by the module's arithmetic
     /// ([`ColdTrapSky::at_periapsis`]'s), ε [`REGOLITH_EMISSIVITY`] and the terrain
-    /// [`terrain_of`]'s, its plains of the parts' model. `None` where
+    /// [`terrain_of`]'s. `None` where
     /// `hyperion_surface::cold_trap::Body` refuses them (a star that gives no light or fills the
     /// sky, or an albedo of 1): such a body has no cold traps.
     ///
@@ -1482,7 +1463,7 @@ impl ColdTrapGround {
             albedo: parts.bond_albedo,
             heat_flow: parts.heat_flow,
         };
-        Self::under(sunlit, terrain_of(parts.craters, parts.plains_model))
+        Self::under(sunlit, terrain_of(parts.craters))
     }
 
     /// The flat ground `sunlit` over the terrain `terrain`, or `None` where its shadows are
@@ -1636,65 +1617,16 @@ pub(crate) fn over_latitude_each(sums: &mut [f64], mut f: impl FnMut(Radians, &m
     }
 }
 
-/// The generator version from which a body's rough plains take the ray-traced table
-/// ([`PlainsModel::RayTraced`]; R09.T7.g, refitted by R09.T7.l) in place of T7.d's bowls
-/// ([`PlainsModel::Bowls`]): `decision-r09-t7g-table` §5. Below it [`rough_plains_in_force`] is
-/// the bowls, so that every cold trap on the record, the passes' fields and R09's are version
-/// 24's bit for bit. 25's bump deletes this hold, the bowls' arm with `hyperion_surface`'s
-/// `PLAINS_DEPTH_SCALE` and `PLAINS_SURROUNDINGS`, the tests' switch and its tripwire
-/// (`the_rough_plains_are_held_only_until_the_25_bump`).
-pub(crate) const ROUGH_PLAINS_VERSION: GeneratorVersion = GeneratorVersion::new(25);
-
-/// The model the rough plains take at this generator version: the ray-traced table from
-/// [`ROUGH_PLAINS_VERSION`], the bowls below it; in the tests, the model a test's switch sets on
-/// its thread ([`with_rough_plains`]). A system reads it once, as it is generated (its record
-/// rules), and carries it in each body's sky ([`ColdTrapSky::plains_model`]): nothing reads it
-/// inside [`terrain_of`].
-#[must_use]
-pub(crate) fn rough_plains_in_force() -> PlainsModel {
-    #[cfg(test)]
-    if let Some(model) = PLAINS.with(Cell::get) {
-        return model;
-    }
-    if GENERATOR_VERSION >= ROUGH_PLAINS_VERSION {
-        PlainsModel::RayTraced
-    } else {
-        PlainsModel::Bowls
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The rough plains' model a test sets on its thread, `None` for the version's.
-    static PLAINS: Cell<Option<PlainsModel>> = const { Cell::new(None) };
-}
-
-/// `run`'s result with the rough plains' model `model` on this thread, for the tests to reach the
-/// ray-traced plains ahead of the bump; the version's model is set back after, a panic in `run`
-/// included. A system generated inside it reads `model`. 25's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_rough_plains<R>(model: PlainsModel, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's model back as it drops.
-    struct Restore(Option<PlainsModel>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            PLAINS.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(PLAINS.with(|cell| cell.replace(Some(model))));
-    run()
-}
-
-/// The terrain of a body of crater contract `craters` ([the module](self)'s stand-ins), its plains
-/// of the model `plains_model`: a crater fraction of [`SATURATED_CRATER_FRACTION`] × min(1,
-/// N(>[`CRATER_REFERENCE_DIAMETER`]) ÷ its saturation), Hayne et al.'s distribution B, plains at
-/// atan [`PLAINS_RMS_SLOPE`] and the lunar share under the conduction cut-off.
+/// The terrain of a body of crater contract `craters` ([the module](self)'s stand-ins): a crater
+/// fraction of [`SATURATED_CRATER_FRACTION`] × min(1, N(>[`CRATER_REFERENCE_DIAMETER`]) ÷ its
+/// saturation), Hayne et al.'s distribution B, ray-traced plains at atan [`PLAINS_RMS_SLOPE`]
+/// (R09.T7.g) and the lunar share under the conduction cut-off.
 ///
 /// # Panics
 ///
 /// Never: every part is in its range.
 #[must_use]
-pub(crate) fn terrain_of(craters: &CraterParams, plains_model: PlainsModel) -> Terrain {
+pub(crate) fn terrain_of(craters: &CraterParams) -> Terrain {
     let d = CRATER_REFERENCE_DIAMETER;
     let filled = cumulative_density(craters, d).value() / saturation(d).value();
     let share = if filled.is_nan() || filled <= 0.0 {
@@ -1708,7 +1640,6 @@ pub(crate) fn terrain_of(craters: &CraterParams, plains_model: PlainsModel) -> T
         crater_fraction: SATURATED_CRATER_FRACTION * share,
         crater_depths: DepthRatios::HAYNE_B,
         plains_slope: Radians::new(math::atan(PLAINS_RMS_SLOPE)),
-        plains_model,
         share_under_cutoff: LUNAR_SHARE_UNDER_CUTOFF,
     })
     .expect("a crater fraction in [0, 0.2], a slope of 5.7° and a share of 0.05 are in range")

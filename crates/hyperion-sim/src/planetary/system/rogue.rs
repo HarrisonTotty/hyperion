@@ -52,8 +52,7 @@
 use core::slice;
 
 use super::{
-    Body, Part, PlanetarySystem, RecordRules, moon_state, moon_trajectory, parent_time,
-    satellite_bodies,
+    Body, Part, PlanetarySystem, moon_state, moon_trajectory, parent_time, satellite_bodies,
 };
 use crate::Seed;
 use crate::coords::{SystemPosition, SystemVelocity};
@@ -243,7 +242,6 @@ pub(super) fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySyst
         belts: Vec::new(),
         halo: None,
         discs: super::SystemDiscs::NONE,
-        record: RecordRules::in_force(),
         rogue: Some(RoguePlanet::of(seed, ctx)),
     }
 }

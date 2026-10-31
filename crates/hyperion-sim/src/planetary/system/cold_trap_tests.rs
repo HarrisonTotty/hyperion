@@ -18,7 +18,6 @@ use crate::planetary::derive::{PassDriver, Under};
 use crate::planetary::hooks::cold_traps::field_log::{self, FieldEvent};
 use crate::planetary::hooks::cold_traps::{
     FieldInputs, NoColdTraps, PassTraps, is_collisional, same_craters, with_fields_rebuilt,
-    with_rough_plains,
 };
 use crate::planetary::hooks::surface::HourCosines;
 use crate::planetary::label;
@@ -307,137 +306,16 @@ fn under_the_batch_every_record_s_condensates_are_its_published_pass_s() {
     assert!(checked > 500 && qualifying > 20, "{checked} {qualifying}");
 }
 
-/// R09.T7.g's swap under its 25 hold (`ROUGH_PLAINS_VERSION`), over the sample's first 60
-/// systems generated and derived afresh inside its switch, never through the shared fixtures
-/// (version 24's), against the same bodies at 24 ([`trap_bodies`]):
-/// - every published pass that read a field read it under the ray-traced plains, which its record's
-///   basis and R09's cold-trap inputs (`CoarseInputs::for_body`) carry;
-/// - every record's condensates are its published pass's to the bit, as at 24;
-/// - a body none of whose passes read a field keeps its whole record of 24 to the bit;
-/// - and the swap moves cold traps: some qualifying body's trapped entries are not 24's.
-///
-/// The movers' water and carbon dioxide `f_ct`, 24's and 25's, are printed for the bless note.
-#[test]
-fn under_the_ray_traced_plains_the_record_and_r09_read_the_table() {
-    use crate::planetary::surface::CoarseInputs;
-    let at_24: BTreeMap<String, &TrapBody> =
-        trap_bodies().iter().map(|body| (body.id(), body)).collect();
-    let bodies: Vec<TrapBody> = with_rough_plains(PlainsModel::RayTraced, || {
-        sample()
-            .iter()
-            .take(TRAP_SAMPLE)
-            .flat_map(|ctx| bodies_of(ctx, &generate(SEED, ctx)))
-            .collect()
-    });
-    let (mut qualifying, mut moved, mut kept, mut r09) = (0_u32, 0_u32, 0_u32, 0_u32);
-    let mut mismatches = Vec::new();
-    for body in &bodies {
-        let record = body.surface().condensates();
-        if let Some(again) = &body.again {
-            let ice_bulk = body.surface().material() == SurfaceMaterial::Ice;
-            if !same_condensates(record, &again.condensates, ice_bulk)
-                || trapped(record) != trapped(&again.condensates)
-            {
-                mismatches.push(format!("{}: record {record:?}", body.id()));
-            }
-        }
-        let before = at_24.get(&body.id());
-        let read_a_field = body
-            .events
-            .iter()
-            .any(|event| matches!(event, FieldEvent::Built(_) | FieldEvent::Reused(_)));
-        if !read_a_field {
-            let before = before.unwrap_or_else(|| panic!("{}: not a body at 24", body.id()));
-            assert_eq!(
-                format!("{:?}", body.record),
-                format!("{:?}", before.record),
-                "{}: read no field, yet moved",
-                body.id()
-            );
-            kept += 1;
-        }
-        for event in &body.events {
-            if let FieldEvent::Built(inputs) | FieldEvent::Reused(inputs) = event {
-                assert_eq!(
-                    inputs.sky().plains_model,
-                    PlainsModel::RayTraced,
-                    "{}",
-                    body.id()
-                );
-            }
-        }
-        let Ok(traps) = body.traps() else {
-            continue;
-        };
-        qualifying += 1;
-        let basis = body
-            .surface()
-            .basis()
-            .and_then(|basis| basis.cold_traps)
-            .unwrap_or_else(|| panic!("{}: a field and no basis", body.id()));
-        assert_eq!(basis.plains_model, PlainsModel::RayTraced, "{}", body.id());
-        assert_eq!(
-            traps.inputs().sky().plains_model,
-            PlainsModel::RayTraced,
-            "{}",
-            body.id()
-        );
-        if let Ok(inputs) = CoarseInputs::for_body(&body.record, body.planet.as_ref(), body.ctx)
-            && let Some(group) = inputs.cold_trap_inputs()
-        {
-            assert_eq!(group.plains_model, PlainsModel::RayTraced, "{}", body.id());
-            r09 += 1;
-        }
-        if let Some(before) = before
-            && trapped(record) != trapped(before.surface().condensates())
-        {
-            moved += 1;
-            eprintln!(
-                "{} ({:?}): water f_ct {:.4e} → {:.4e}, CO2 {:.4e} → {:.4e}",
-                body.id(),
-                body.kind,
-                f_ct(before, Gas::Water),
-                f_ct(body, Gas::Water),
-                f_ct(before, Gas::CarbonDioxide),
-                f_ct(body, Gas::CarbonDioxide)
-            );
-        }
-    }
-    eprintln!(
-        "{} bodies; {qualifying} read a field under the ray-traced plains, {moved} of them with \
-         trapped entries not 24's, {r09} through R09's inputs; {kept} read none and kept 24's \
-         records",
-        bodies.len()
-    );
-    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
-    assert!(
-        qualifying > 20 && moved > 0 && r09 > 0,
-        "{qualifying} {moved} {r09}"
-    );
-}
-
-/// The cold-trap fraction `f_ct` of `gas` in the field `body`'s published pass read, 0 where it
-/// read none or holds no such trap.
-fn f_ct(body: &TrapBody, gas: Gas) -> f64 {
-    body.traps()
-        .as_ref()
-        .ok()
-        .and_then(|traps| traps.field().trap(gas.substance()))
-        .map_or(0.0, |trap| trap.1)
-}
-
-/// Under the ray-traced plains (R09.T7.g's 25 hold) the sample's first two systems, generated twice
-/// inside the switch, give every record to the bit.
+/// Under the ray-traced plains (R09.T7.g) the sample's first two systems, generated twice, give
+/// every record to the bit.
 #[test]
 fn under_the_ray_traced_plains_a_system_generated_twice_is_the_same() {
     let twice = || {
-        with_rough_plains(PlainsModel::RayTraced, || {
-            sample()
-                .iter()
-                .take(2)
-                .flat_map(|ctx| bodies_of(ctx, &generate(SEED, ctx)))
-                .collect::<Vec<TrapBody>>()
-        })
+        sample()
+            .iter()
+            .take(2)
+            .flat_map(|ctx| bodies_of(ctx, &generate(SEED, ctx)))
+            .collect::<Vec<TrapBody>>()
     };
     let (first, again) = (twice(), twice());
     assert!(!first.is_empty());

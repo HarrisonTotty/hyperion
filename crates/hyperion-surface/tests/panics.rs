@@ -843,8 +843,8 @@ mod incision {
 mod cold_trap {
     use hyperion_base::units::{Kelvin, Radians, WattsPerSquareMetre};
     use hyperion_surface::cold_trap::{
-        Body, BodyParts, DepthRatios, PlainsModel, Terrain, TerrainParts, bowl_permanent_shadow,
-        fraction, fractions, permanent_shadow, shadow_temperature,
+        Body, BodyParts, DepthRatios, Terrain, TerrainParts, bowl_permanent_shadow, fraction,
+        fractions, permanent_shadow, shadow_temperature,
     };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -866,7 +866,6 @@ mod cold_trap {
             crater_fraction: 0.2,
             crater_depths: DepthRatios::HAYNE_A,
             plains_slope: Radians::new(0.1),
-            plains_model: PlainsModel::Bowls,
             share_under_cutoff: 0.0,
         })
         .unwrap()

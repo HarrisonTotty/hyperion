@@ -110,8 +110,6 @@
 use core::f64::consts::TAU;
 use std::sync::OnceLock;
 
-use hyperion_surface::cold_trap::PlainsModel;
-
 use crate::Seed;
 use crate::coords::{SystemPosition, SystemVelocity};
 use crate::id::{BodyId, SystemId};
@@ -1081,34 +1079,9 @@ pub struct PlanetarySystem {
     halo: Option<SystemHalo>,
     /// Its disc bodies (P14.T28.a), found once as it is generated.
     discs: SystemDiscs,
-    /// The rules its records' cold traps follow, read once as it is generated.
-    record: RecordRules,
     /// A rogue planet's object, body `0x0000` (P14.T27.b, [`rogue`]); `None` for every other
     /// system.
     rogue: Option<RoguePlanet>,
-}
-
-/// The rules a system's records follow that a version hold switches: the generator version's,
-/// read once as the system is generated (`RecordRules::in_force`), and for the tests the 25
-/// holds' ahead of their bump when it is generated inside their switch. Each body's passes, its
-/// record and R09's cold traps read the system's, never the thread's, so that a system keeps its
-/// rules whichever test reads it. 25's bump deletes it with its holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RecordRules {
-    /// The model its rough plains' cold traps take (R09.T7.g;
-    /// `cold_traps::ROUGH_PLAINS_VERSION`).
-    pub(crate) plains_model: PlainsModel,
-}
-
-impl RecordRules {
-    /// The rules this generator version gives; in the tests, those their switches set on the
-    /// thread.
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        Self {
-            plains_model: cold_traps::rough_plains_in_force(),
-        }
-    }
 }
 
 /// A system's cometary halo and the orbit host it surrounds.
@@ -1409,7 +1382,6 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         belts: Vec::new(),
         halo: None,
         discs: SystemDiscs::NONE,
-        record: RecordRules::in_force(),
         rogue: None,
     }
 }
@@ -2896,7 +2868,6 @@ impl PlanetarySystem {
             cold_traps: ColdTrapCase {
                 exposed_fraction: cold_traps::exposed_fraction(self.seed, id),
                 star_radius: brightest.map(|(_, state)| state.radius()),
-                plains_model: self.record.plains_model,
             },
             // The air's photochemistry and the modifiers read the star on the record, and the
             // passes' maturity (P14.T54.b.e).
@@ -4950,9 +4921,9 @@ impl SurfaceFrame<'_> {
     /// The sky a body's passes' cold traps read under its spin `spin` and its hosts' orbit-mean
     /// flux at it `flux` (P14.T51.f, P14.T54.b.f; `PassRecordOf::cold_trap_sky`): the greatest
     /// declination from its obliquity, the flux and the brightest star's angular radius at the
-    /// seasonal orbit's periapsis ([`ColdTrapSky::at_periapsis`]), its exposed fraction and its
-    /// system's plains model. The flux is the body's orbit-mean flux from every host, a moon's
-    /// planet's light and a companion's included, taken to periapsis as its seasonal host's.
+    /// seasonal orbit's periapsis ([`ColdTrapSky::at_periapsis`]) and its exposed fraction. The
+    /// flux is the body's orbit-mean flux from every host, a moon's planet's light and a
+    /// companion's included, taken to periapsis as its seasonal host's.
     ///
     /// # Errors
     ///
@@ -4970,7 +4941,6 @@ impl SurfaceFrame<'_> {
             (seasonal.semi_major_axis(), seasonal.eccentricity().value()),
             case.star_radius,
             case.exposed_fraction,
-            case.plains_model,
         ))
     }
 
@@ -5849,14 +5819,12 @@ struct SurfaceCase<'a> {
 }
 
 /// What a body's cold traps read beyond its sky and its spin (P14.T51.f): its exposed fraction,
-/// word 0 of its `body.cold_traps` stream, the radius of the brightest star its zone's bodies
-/// orbit at the time, `None` before one forms, and its system's plains model (R09.T7.g), which
-/// its record and its passes read alike (P14.T54.b.f).
+/// word 0 of its `body.cold_traps` stream, and the radius of the brightest star its zone's bodies
+/// orbit at the time, `None` before one forms.
 #[derive(Debug, Clone, Copy)]
 struct ColdTrapCase {
     exposed_fraction: f64,
     star_radius: Option<SolarRadii>,
-    plains_model: PlainsModel,
 }
 
 /// What a body's water window reads of its hosts over its past (P14.T48.b; science-p14-t24b-laws
@@ -6290,7 +6258,6 @@ fn surface_basis(
         cold_traps: sky.cold_traps.map(|traps| ColdTrapBasis {
             star_radius: traps.inputs().sky().star_radius,
             regolith_albedo: traps.inputs().regolith_albedo(),
-            plains_model: traps.inputs().sky().plains_model,
         }),
     }
 }

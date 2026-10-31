@@ -429,9 +429,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///
 /// The holds, each with its switch:
 ///
-/// - the rough plains', `ROUGH_PLAINS_VERSION` (R09.T7.g), at `PlainsModel::RayTraced` through
-///   `with_rough_plains`: the plains' cold traps from the ray-traced table, which a system reads
-///   once as it is generated and carries to its passes, its record and R09's cold traps;
 /// - the molten decks', `MOLTEN_DECKS_VERSION` (P14.T49.p), at `MoltenDecksRules::Molten` through
 ///   `with_molten_decks`: the molten refractories' and salts' stand-in index files and the molten
 ///   salts' densities;
@@ -445,10 +442,7 @@ pub fn admit_free_floating_hosts_in_this_process() {
 #[cfg(test)]
 pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::passes::{PassRoot, with_pass_root};
-    use crate::planetary::hooks::cold_traps::with_rough_plains;
     use crate::substance::aerosol::{MoltenDecksRules, with_molten_decks};
-    use hyperion_surface::cold_trap::PlainsModel;
-    let run = move || with_rough_plains(PlainsModel::RayTraced, run);
     let run = move || with_molten_decks(MoltenDecksRules::Molten, run);
     with_pass_root(PassRoot::Secant, run)
 }
@@ -749,30 +743,6 @@ mod tests {
             synthetic_star(id, SolarMasses::new(-1.0), fe_h, age),
             Err(BuildSystemContextError::MassOutsideRange { star: 0, .. })
         ));
-    }
-
-    /// 25's rough plains' switch (R09.T7.g): in force inside 25's helper, held outside it and
-    /// where a test sets it back; a system reads it once, as it is generated.
-    #[test]
-    fn the_rough_plains_hold_is_in_force_inside_25_s_helper_alone() {
-        use crate::planetary::hooks::cold_traps::{rough_plains_in_force, with_rough_plains};
-        use crate::planetary::system::RecordRules;
-        use hyperion_surface::cold_trap::PlainsModel;
-        assert_eq!(rough_plains_in_force(), PlainsModel::Bowls);
-        assert_eq!(
-            with_every_25_hold(rough_plains_in_force),
-            PlainsModel::RayTraced
-        );
-        assert_eq!(
-            with_every_25_hold(|| with_rough_plains(PlainsModel::Bowls, rough_plains_in_force)),
-            PlainsModel::Bowls
-        );
-        assert_eq!(rough_plains_in_force(), PlainsModel::Bowls);
-        assert_eq!(
-            with_every_25_hold(RecordRules::in_force).plains_model,
-            PlainsModel::RayTraced
-        );
-        assert_eq!(RecordRules::in_force().plains_model, PlainsModel::Bowls);
     }
 
     /// 25's molten decks' switch (P14.T49.p): in force inside 25's helper, held

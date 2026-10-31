@@ -13342,17 +13342,12 @@ impl SteamBody {
 }
 
 /// [`part_three_census`] with the later 25 holds set back, for a caller inside
-/// `with_every_25_hold`: part 3's landing with P14.T53.e's present state and P14.T53.c's exposed
-/// share, on the record from generator version 25. R09.T7.g's ray-traced plains' movers are its
-/// own (`cold_trap_tests`), and P14.T51.l's secant root's its own
-/// (`under_the_secant_root_the_passes_and_movers_are_stated`).
+/// `with_every_25_hold`: part 3's landing with P14.T53.e's present state, P14.T53.c's exposed
+/// share and R09.T7.g's ray-traced plains, on the record from generator version 25. P14.T51.l's
+/// secant root's movers are its own (`under_the_secant_root_the_passes_and_movers_are_stated`).
 fn part_three_s_own_25_census(sets: &[(&str, Seed, &SystemContext)]) -> Vec<SteamBody> {
     use crate::planetary::derive::passes::{PassRoot, with_pass_root};
-    use crate::planetary::hooks::cold_traps::with_rough_plains;
-    use hyperion_surface::cold_trap::PlainsModel;
-    with_rough_plains(PlainsModel::Bowls, || {
-        with_pass_root(PassRoot::Halvings, || part_three_census(sets))
-    })
+    with_pass_root(PassRoot::Halvings, || part_three_census(sets))
 }
 
 /// Every body of [`envelope_walk`] over the systems `sets`, each generated afresh at its seed

@@ -5,7 +5,6 @@
 //! level 6 is 5.12 × 10⁻⁵ of the sphere, larger than most targets here, so on the Moon-like input
 //! a trapped part's accounting is also held to [`ACCOUNTED_SHARE`] of its target.
 
-use hyperion_surface::cold_trap::PlainsModel;
 use hyperion_surface::cube::PatchKey;
 use hyperion_surface::field::{
     MaterialPalette, PaletteEntry, PaletteRole, SynthesisCell, cell_index,
@@ -75,7 +74,6 @@ fn lunar_group() -> ColdTrapInputs {
     ColdTrapInputs {
         star_angular_radius: Radians::from(Degrees::new(0.2711)),
         bond_albedo: 0.12,
-        plains_model: PlainsModel::Bowls,
     }
 }
 
@@ -135,18 +133,6 @@ fn moon_with(ices: &[(&str, f64)], traps: &[(&str, f64)]) -> CoarseInputs {
     )
 }
 
-/// `inputs` with its cold traps' rough plains of the model `model`: 25's ray-traced plains
-/// (R09.T7.g) carried in the inputs, as the record's are, never by a thread's switch.
-fn with_plains(inputs: &CoarseInputs, model: PlainsModel) -> CoarseInputs {
-    builder_of(inputs)
-        .cold_trap_inputs(ColdTrapInputs {
-            plains_model: model,
-            ..*inputs.cold_trap_inputs().unwrap()
-        })
-        .build()
-        .unwrap()
-}
-
 /// Plan 14's ground for the cold traps of `inputs`, from the same parts R09's placement reads.
 fn plan_14_ground(inputs: &CoarseInputs) -> ColdTrapGround {
     let group = inputs.cold_trap_inputs().unwrap();
@@ -158,7 +144,6 @@ fn plan_14_ground(inputs: &CoarseInputs) -> ColdTrapGround {
         bond_albedo: group.bond_albedo,
         heat_flow: inputs.heat_flow(),
         craters: inputs.craters(),
-        plains_model: group.plains_model,
     })
     .unwrap()
 }
@@ -240,20 +225,13 @@ fn assert_accounted(trap: &PlacedTrap) {
 /// Plan 09's first test, under the ruled contract: a Moon-like input whose 1.7 × 10⁻⁵ of water
 /// ice is all cold-trapped (T51.f's lunar case: α 0.2711°, A 0.12, q 0.018 W m⁻², δ 1.54°) places
 /// it only poleward of 70°, more than 90% of it poleward of 80°, no cell's share above its
-/// fraction, none of it short, its plains as bowls (version 24's) and ray traced (25's).
+/// fraction, none of it short, its plains ray traced (R09.T7.g).
 #[test]
 fn a_moon_like_input_places_its_trapped_water_poleward_of_70_degrees() {
-    for model in [PlainsModel::Bowls, PlainsModel::RayTraced] {
-        let inputs = with_plains(&moon_with(&[("H2O", 1.7e-5)], &[("H2O", 1.7e-5)]), model);
-        places_its_trapped_water_poleward_of_70_degrees(&inputs);
-    }
-}
-
-/// [`a_moon_like_input_places_its_trapped_water_poleward_of_70_degrees`] for `inputs`.
-fn places_its_trapped_water_poleward_of_70_degrees(inputs: &CoarseInputs) {
-    let (field, working, diagnostics) = run_at(inputs, 6);
+    let inputs = moon_with(&[("H2O", 1.7e-5)], &[("H2O", 1.7e-5)]);
+    let (field, working, diagnostics) = run_at(&inputs, 6);
     let water = inputs.palette().find(PaletteRole::Ice, key("H2O")).unwrap();
-    let fractions = trap_fractions(inputs, field.centres(), &[threshold("H2O")]);
+    let fractions = trap_fractions(&inputs, field.centres(), &[threshold("H2O")]);
     let (mut all, mut past_70, mut past_80) = (0.0, 0.0, 0.0);
     for (((cell, centre), &omega), &f) in working
         .cells
@@ -283,10 +261,8 @@ fn places_its_trapped_water_poleward_of_70_degrees(inputs: &CoarseInputs) {
     }
     assert!(diagnostics.ices.iter().all(|ice| ice.cells == 0));
     let trap = trap_of(&diagnostics.cold_traps, "H2O");
-    let model = inputs.cold_trap_inputs().unwrap().plains_model;
     eprintln!(
-        "Moon, {model:?}: {:.4} of the drawn water poleward of 70°, {:.4} poleward of 80°; \
-         {trap:?}",
+        "Moon: {:.4} of the drawn water poleward of 70°, {:.4} poleward of 80°; {trap:?}",
         past_70 / all,
         past_80 / all
     );
@@ -462,34 +438,32 @@ fn a_water_ice_under_its_zonal_cap_is_placed_by_t13d_s_own_rule() {
 
 /// The ruling's agreement test: on the Moon-like input, the field's mean cold-trap fraction,
 /// Σ Ω f ÷ Σ Ω over its cells at the reference Moon's level 6, lies within 5% of plan 14's `f_ct`
-/// for the same parts, for water and for carbon dioxide (decision-r09-t13f-cold-traps §7.3), with
-/// its plains as bowls (version 24's) and ray traced (25's).
+/// for the same parts, for water and for carbon dioxide (decision-r09-t13f-cold-traps §7.3), its
+/// plains ray traced (R09.T7.g).
 #[test]
 fn the_field_s_cold_traps_agree_with_plan_14_s_within_5_percent() {
-    for model in [PlainsModel::Bowls, PlainsModel::RayTraced] {
-        let inputs = with_plains(&moon_with(&[], &[]), model);
-        let ground = plan_14_ground(&inputs);
-        let (field, _) = grids(6);
-        let thresholds = [threshold("H2O"), threshold("CO2")];
-        let fractions = trap_fractions(&inputs, field.centres(), &thresholds);
-        let total: f64 = field.solid_angles_sr().iter().sum();
-        for (s, (k, t)) in ["H2O", "CO2"].into_iter().zip(thresholds).enumerate() {
-            let field_mean = fractions
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .zip(field.solid_angles_sr())
-                .fold(0.0, |sum, (row, &omega)| sum + omega * row[s])
-                / total;
-            let plan_14 = plan_14_fraction(&ground, t);
-            let ratio = field_mean / plan_14;
-            eprintln!(
-                "{model:?}, {k} at {:.3} K: the field's Σ Ω f ÷ Σ Ω {field_mean:.6e}, plan 14's \
-                 f_ct {plan_14:.6e}, ratio {ratio:.5}",
-                t.value()
-            );
-            assert!((ratio - 1.0).abs() < 0.05, "{model:?}, {k}: {ratio}");
-        }
+    let inputs = moon_with(&[], &[]);
+    let ground = plan_14_ground(&inputs);
+    let (field, _) = grids(6);
+    let thresholds = [threshold("H2O"), threshold("CO2")];
+    let fractions = trap_fractions(&inputs, field.centres(), &thresholds);
+    let total: f64 = field.solid_angles_sr().iter().sum();
+    for (s, (k, t)) in ["H2O", "CO2"].into_iter().zip(thresholds).enumerate() {
+        let field_mean = fractions
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .zip(field.solid_angles_sr())
+            .fold(0.0, |sum, (row, &omega)| sum + omega * row[s])
+            / total;
+        let plan_14 = plan_14_fraction(&ground, t);
+        let ratio = field_mean / plan_14;
+        eprintln!(
+            "{k} at {:.3} K: the field's Σ Ω f ÷ Σ Ω {field_mean:.6e}, plan 14's f_ct \
+             {plan_14:.6e}, ratio {ratio:.5}",
+            t.value()
+        );
+        assert!((ratio - 1.0).abs() < 0.05, "{k}: {ratio}");
     }
 }
 

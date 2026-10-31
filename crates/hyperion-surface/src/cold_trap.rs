@@ -16,35 +16,15 @@
 //! whose annual maximum temperature lies below the threshold (their eq. 1). Their terrain is bowl
 //! craters over a share of the ground, with a log-normal depth-to-diameter ratio d/D, and rough
 //! plains between them, a Gaussian surface of directional RMS slope `σ_s`. Here the craters are a
-//! population of spherical bowls, and the plains take one of two models ([`PlainsModel`]):
+//! population of spherical bowls, and the plains are ray traced:
 //!
 //! - **Craters** carry the body's own d/D distribution ([`DepthRatios`]).
-//! - **Ray-traced plains** ([`PlainsModel::RayTraced`]; R09.T7.g, refitted by R09.T7.l) read
-//!   [`rough_plains`]'s table of Gaussian surfaces built as Hayne et al.'s Methods D builds them:
-//!   their permanent shadow at the colatitude and D = δ + α, and the share of it cold below the
-//!   threshold, read at the irradiance the shadow may absorb ([`rough_plains::irradiance_limit`]).
-//!   That module gives the rules and the figures.
-//! - **Plains as bowls** ([`PlainsModel::Bowls`]) are T7.d's labelled stand-in for Hayne et al.'s,
-//!   which they ray-traced and give no closed form for (`science-r09-drainage.md` §8.1, §8.10,
-//!   §8.11 and §8.13), kept bit for bit until the ray-traced plains replace them in what is
-//!   generated. They are bowls whose d/D is a half-normal of scale `PLAINS_DEPTH_SCALE` × tan
-//!   `σ_s` ÷ 2: 0.6 of half the magnitude of the surface's directional slope, a normal variable of
-//!   RMS tan `σ_s`.
-//!   - A bowl is a closed hollow, whose shadow stays put as the star circles the sky, while a
-//!     Gaussian surface's shadows are cast by ridges and lit from other azimuths. So bowls of the
-//!     surface's own mean-square slope keep several times its permanent shadow, and the scale is
-//!     fitted to ray-traced surfaces built as Hayne et al.'s Methods D builds them.
-//!   - Their instantaneous shadow is then 0.38–0.92 of Smith's for a Gaussian surface (1967,
-//!     JGR 72, 4059): no population of bowls matches both shadows, and cold traps need the
-//!     permanent one.
-//!   - Their shadows also absorb `PLAINS_SURROUNDINGS` of S sin e from sunlit terrain beyond
-//!     their hollows, which a bowl's sphere omits. At `σ_s` 5.7° this matches the ray traces'
-//!     water and CO₂ cold traps; on rougher plains the form still overstates both (R09's Risks
-//!     give the figures).
-//!   - A log-normal of the same two moments would not do: its heavier tail leaves deep bowls in
-//!     shadow equatorward of 70°.
-//!   - It puts the plains' water cold-trap optimum near a `σ_s` of 16°, inside Hayne et al.'s
-//!     10–20°.
+//! - **Rough plains** (R09.T7.g, refitted by R09.T7.l) read [`rough_plains`]'s table of Gaussian
+//!   surfaces built as Hayne et al.'s Methods D builds them: their permanent shadow at the
+//!   colatitude and D = δ + α, and the share of it cold below the threshold, read at the irradiance
+//!   the shadow may absorb ([`rough_plains::irradiance_limit`]). That module gives the rules and
+//!   the figures. From generator version 25 they replace T7.d's labelled stand-in, plains as bowls
+//!   of a fitted half-normal d/D (R09.T7.g's swap).
 //!
 //! For each bowl, of depth ratio γ = d/D, at colatitude e₀ under a star whose greatest
 //! declination in the sky is δ and whose angular radius is α:
@@ -93,11 +73,10 @@
 //!     and CH₄: 24.0 K on flat lunar ground at q = 0.018 W m⁻² and ε = 0.95.
 //!   - The temperature rises with γ, so the cold bowls are those below one depth ratio, and the
 //!     shallowest bowl with a permanent shadow bounds the population from below.
-//! - **Integration over d/D.** Each population's share is a quadrature of the bowl's shadow over
-//!   its density, the trapezoid rule on 128 intervals of the population's own ±8σ: in
-//!   ln γ for the craters' log-normal and in γ for the plains' half-normal. Bowls no deeper than
-//!   tan(max(e₀ + D, 2D) ÷ 2) ÷ 2 keep no shadow. Ratios above 0.5, deeper than a hemisphere,
-//!   count as 0.5, the limit of both the table and Ingersoll's sphere.
+//! - **Integration over d/D.** The craters' share is a quadrature of the bowl's shadow over their
+//!   density, the trapezoid rule on 128 intervals of their log-normal's own ±8σ in ln γ. Bowls no
+//!   deeper than tan(max(e₀ + D, 2D) ÷ 2) ÷ 2 keep no shadow. Ratios above 0.5, deeper than a
+//!   hemisphere, count as 0.5, the limit of both the table and Ingersoll's sphere.
 //!
 //! **Lateral conduction** removes the cold traps smaller than a cut-off, about 1 cm near the lunar
 //! pole and 10 m at 60° (Hayne et al., Methods C.1). The fraction carries no scale, so the
@@ -126,10 +105,8 @@
 //!     of all bowls, has 7 × 10⁻⁴%.
 //!   - A peak-temperature form also understates the most volatile species' traps: Schorghofer et
 //!     al. find 3.5 times the CO₂ area by the time-averaged loss (2021, GRL 48, e2021GL095533).
-//! - **Rough plains.** As bowls, plains rougher than `σ_s` ≈ 6° overstate their cold traps, water
-//!   by up to about three times at 27° and CO₂ by more. The ray-traced plains do not, and their
-//!   limits are [`rough_plains`]'s: a first-order heating, so upper bounds on the cold traps, and
-//!   one star radius in the cold shares.
+//! - **Rough plains.** Their limits are [`rough_plains`]'s: a first-order heating, so upper bounds
+//!   on the cold traps, and one star radius in the cold shares.
 //! - **The flux is at periapsis**, an upper bound when periapsis and solstice differ.
 //! - **The star circles the sky each day.** A body rotating synchronously with its star has no
 //!   such geometry; there the night side is a zonal matter.
@@ -187,29 +164,6 @@ const NOON_LIMIT: f64 = 1.0;
 /// are seen at elevations (θ′ ± ψ′) ÷ 2, so the lesser of their declinations is at most
 /// θ′ ÷ 2 ≤ θr ÷ 2 (`decision-r09-t7f.md` §1, claim (ii), and R09.T7.f's science check).
 const POLAR_LIMIT: f64 = 0.5;
-
-/// The plains' bowls' depth-ratio scale, as a share of half the surface's directional slope,
-/// tan `σ_s` ÷ 2: 0.6, fitted to the permanent shadow of ray-traced Gaussian surfaces
-/// (`science-r09-drainage.md` §8.13).
-///
-/// A bowl is a closed hollow, whose shadow stays put as the star circles the sky, while a Gaussian
-/// surface's shadows are cast by ridges and lit from other azimuths. So bowls of the surface's own
-/// mean-square slope keep 3.5 times its permanent shadow over 80–90° at `σ_s` 5.7°, and 12 times
-/// over 70–80°, against surfaces built as Hayne et al.'s Methods D builds them (Hurst exponent
-/// 0.9, a point Sun 1.54° from the equator). At 0.6 they keep 0.87–1.09 of it over 80–90° at
-/// `σ_s` 5.7–26.6°, and 1.00–1.17 with the Sun 4° from the equator.
-const PLAINS_DEPTH_SCALE: f64 = 0.6;
-
-/// The light and infrared that sunlit terrain beyond a plains hollow sends into its shadow, as a
-/// share of the flux on level ground at the star's highest flux-weighted elevation, S sin e:
-/// 0.0035, fitted to ray-traced Gaussian surfaces at `σ_s` 5.7° (`science-r09-drainage.md` §8.13).
-///
-/// A bowl's shadow sees only its own walls; a rough surface's sees sunlit slopes beyond its hollow
-/// too, a median 1.3–2.7% of S sin e on the ray-traced surfaces over 80–90°. Against water's 110 K
-/// that light is negligible, but CO₂'s 55–57 K allow about 0.6 W m⁻² in all, and without it the
-/// plains trap 2.7–4.7 times the ray traces' CO₂. It is absorbed, so it enters σT⁴ divided by the
-/// emissivity.
-const PLAINS_SURROUNDINGS: f64 = 0.0035;
 
 /// The 8-point Gauss–Legendre rule on [−1, 1]: its positive nodes and their weights.
 ///
@@ -528,15 +482,11 @@ impl Body {
     }
 
     /// The largest depth ratio of the bowls whose shadows stay below `threshold` with the star at
-    /// an elevation of sine `sin_elevation`, when each shadow also absorbs `surroundings` × S sin e
-    /// from terrain beyond its bowl: 0 when none does, and 0.5 when every bowl does.
+    /// an elevation of sine `sin_elevation`: 0 when none does, and 0.5 when every bowl does.
     #[must_use]
-    fn coldest_limit(&self, sin_elevation: f64, threshold: Kelvin, surroundings: f64) -> f64 {
+    fn coldest_limit(&self, sin_elevation: f64, threshold: Kelvin) -> f64 {
         let t = threshold.value();
-        let p = &self.parts;
-        // Absorbed, so it enters σT⁴ divided by the emissivity, as the heat flow does.
-        let beyond = surroundings * p.flux.value() * sin_elevation / p.emissivity;
-        let target = STEFAN_BOLTZMANN * t * t * t * t - beyond;
+        let target = STEFAN_BOLTZMANN * t * t * t * t;
         if self.shadow_power_w_per_m2(0.0, sin_elevation) >= target {
             return 0.0;
         }
@@ -577,33 +527,19 @@ pub struct TerrainParts {
     /// the Moon's LROC-NAC shadows is 5.7°, an RMS slope of 0.1, and their comparison with
     /// Diviner's ~250 m temperatures gives 5–10°.
     pub plains_slope: Radians,
-    /// Which model the plains' shadows take (the module documentation gives both).
-    pub plains_model: PlainsModel,
     /// The share of the cold-trapping area in shadows smaller than lateral conduction's cut-off,
     /// which hold no cold trap, in [0, 1]. It scales [`fraction`] and leaves [`permanent_shadow`]
     /// alone. [`LUNAR_SHARE_UNDER_CUTOFF`] is the Moon's.
     pub share_under_cutoff: f64,
 }
 
-/// The model a [`Terrain`]'s rough plains take (R09.T7.g; `decision-r09-t7g-table` §5).
-///
-/// The surface crate reads no generator version, so its caller chooses: galaxy plan 14's record
-/// path takes the bowls until generator version 25, and the ray-traced plains from it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum PlainsModel {
-    /// T7.d's labelled stand-in: bowls whose d/D is a half-normal of scale `PLAINS_DEPTH_SCALE` ×
-    /// tan `σ_s` ÷ 2, their shadows warmed by `PLAINS_SURROUNDINGS` of S sin e from beyond their
-    /// hollows.
-    Bowls,
-    /// The ray-traced Gaussian surfaces' table, read by [`rough_plains`]: the plains' share is
-    /// [`rough_plains::shadow_at`] in [`permanent_shadow`] and [`rough_plains::fraction`] in
-    /// [`fraction`], to the bit, with [`fraction`]'s one exception, a point star on a pole's
-    /// horizon.
-    RayTraced,
-}
-
 /// The sub-cell topography that casts the permanent shadows: bowl craters over part of the ground,
 /// rough plains over the rest, and the share of their shadows too small to stay cold.
+///
+/// The plains read the ray-traced Gaussian surfaces' table ([`rough_plains`]; R09.T7.g, refitted
+/// by R09.T7.l): their share is [`rough_plains::shadow_at`] in [`permanent_shadow`] and
+/// [`rough_plains::fraction`] in [`fraction`], to the bit, with [`fraction`]'s one exception, a
+/// point star on a pole's horizon.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Terrain {
     parts: TerrainParts,
@@ -666,113 +602,53 @@ impl Terrain {
     }
 
     /// The share of the ground in permanent shadow in craters shallower than `crater_limit` and on
-    /// the plains by `plains`, the craters' share first and then the plains', in that fixed order.
+    /// the plains, whose own share of their ground, read already from [`rough_plains`], is
+    /// `plains`: the craters' share first and then the plains', in that fixed order.
     #[must_use]
-    fn shadowed(&self, sky: &Sky, crater_limit: f64, plains: PlainsLimit) -> f64 {
+    fn shadowed(&self, sky: &Sky, crater_limit: f64, plains: f64) -> f64 {
         let craters = self.parts.crater_fraction;
         let rest = 1.0 - craters;
         let mut share = 0.0;
         if craters > 0.0 {
-            let population = Population::LogNormal(self.parts.crater_depths.log_normal());
+            let population = self.parts.crater_depths.log_normal();
             share += craters * sky.band.shadowed(population, crater_limit);
         }
-        match plains {
-            PlainsLimit::Bowls(plains_limit) => {
-                if rest > 0.0
-                    && let Some(population) = Population::of_plains(self.parts.plains_slope)
-                {
-                    share += rest * sky.band.shadowed(population, plains_limit);
-                }
-            }
-            PlainsLimit::Read(read) => {
-                if rest > 0.0 {
-                    share += rest * read;
-                }
-            }
+        if rest > 0.0 {
+            share += rest * plains;
         }
         share
     }
 }
 
 impl Terrain {
-    /// [`shadowed`](Self::shadowed) at each pair of `crater_limits` and `plains_limits` in step,
-    /// written to `shares` in their order, each population of bowls' shadow one integral shared
-    /// by every pair (P14.T51.i; R09.T7.k): each equals [`shadowed`](Self::shadowed)'s to the bit.
+    /// [`shadowed`](Self::shadowed) at each pair of `crater_limits` and `plains_shares` in step,
+    /// written to `shares` in their order, the craters' shadow one integral shared by every pair
+    /// (P14.T51.i; R09.T7.k): each equals [`shadowed`](Self::shadowed)'s to the bit.
     fn shadowed_each(
         &self,
         sky: &Sky,
-        (crater_limits, plains_limits): (&[f64], PlainsLimits<'_>),
+        (crater_limits, plains_shares): (&[f64], &[f64]),
         shares: &mut [f64],
     ) {
         let n = shares.len();
-        debug_assert!(crater_limits.len() == n && plains_limits.len() == n);
+        debug_assert!(crater_limits.len() == n && plains_shares.len() == n);
         let craters = self.parts.crater_fraction;
         let rest = 1.0 - craters;
         let mut crater_shares = vec![0.0; n];
         if craters > 0.0 {
-            let population = Population::LogNormal(self.parts.crater_depths.log_normal());
+            let population = self.parts.crater_depths.log_normal();
             sky.band
                 .shadowed_each(population, crater_limits, &mut crater_shares);
         }
-        // The plains' own shares of their ground, and whether they add any: bowls on flat plains
-        // add none.
-        let mut plains_shares = vec![0.0; n];
-        let plains_add = rest > 0.0
-            && match plains_limits {
-                PlainsLimits::Bowls(limits) => {
-                    match Population::of_plains(self.parts.plains_slope) {
-                        Some(population) => {
-                            sky.band
-                                .shadowed_each(population, limits, &mut plains_shares);
-                            true
-                        }
-                        None => false,
-                    }
-                }
-                PlainsLimits::Read(reads) => {
-                    plains_shares.copy_from_slice(reads);
-                    true
-                }
-            };
         for (k, share) in shares.iter_mut().enumerate() {
             let mut sum = 0.0;
             if craters > 0.0 {
                 sum += craters * crater_shares[k];
             }
-            if plains_add {
+            if rest > 0.0 {
                 sum += rest * plains_shares[k];
             }
             *share = sum;
-        }
-    }
-}
-
-/// What the plains' share of [`Terrain::shadowed`] is taken at, by its terrain's
-/// [`PlainsModel`].
-#[derive(Debug, Clone, Copy)]
-enum PlainsLimit {
-    /// The bowls shallower than this depth ratio ([`PlainsModel::Bowls`]; 0.5 counts every bowl).
-    Bowls(f64),
-    /// The ray-traced plains' own share of their ground, already read from [`rough_plains`]
-    /// ([`PlainsModel::RayTraced`]).
-    Read(f64),
-}
-
-/// [`PlainsLimit`] at each threshold of [`Terrain::shadowed_each`], in their order.
-#[derive(Debug, Clone, Copy)]
-enum PlainsLimits<'a> {
-    /// The bowls' cold limits, each a depth ratio, which share one integral.
-    Bowls(&'a [f64]),
-    /// The ray-traced plains' own shares of their ground, each read already.
-    Read(&'a [f64]),
-}
-
-impl PlainsLimits<'_> {
-    /// How many thresholds they are for.
-    #[must_use]
-    const fn len(self) -> usize {
-        match self {
-            Self::Bowls(limits) | Self::Read(limits) => limits.len(),
         }
     }
 }
@@ -908,7 +784,7 @@ impl Band {
     /// The share of a population of bowls that lies in permanent shadow, counting only the bowls
     /// shallower than `cold_limit` (0.5 counts every bowl).
     #[must_use]
-    fn shadowed(&self, dist: Population, cold_limit: f64) -> f64 {
+    fn shadowed(&self, dist: LogNormal, cold_limit: f64) -> f64 {
         let shallowest = self.shallowest();
         if shallowest >= HEMISPHERE || cold_limit <= shallowest {
             return 0.0;
@@ -924,7 +800,7 @@ impl Band {
     /// [`shadowed`](Self::shadowed) at each cold limit of `limits`, written to `shares` in their
     /// order, one integral of the bowls' shadow shared by every limit (P14.T51.i; R09.T7.k): each
     /// equals [`shadowed`](Self::shadowed)'s to the bit.
-    fn shadowed_each(&self, dist: Population, limits: &[f64], shares: &mut [f64]) {
+    fn shadowed_each(&self, dist: LogNormal, limits: &[f64], shares: &mut [f64]) {
         debug_assert_eq!(limits.len(), shares.len());
         let shallowest = self.shallowest();
         let tops: Vec<f64> = limits
@@ -1021,88 +897,43 @@ fn cell(nodes: &[f64], x: f64) -> (usize, f64) {
     (i, (x - nodes[i]) / (nodes[i + 1] - nodes[i]))
 }
 
-/// A population of bowls, by the distribution of their depth ratios.
+/// The craters' bowls, by the log-normal distribution of their depth ratios (Hayne et al. 2021,
+/// eqs. 33–35): its log-space mean `m` and log-space standard deviation `s`.
 #[derive(Debug, Clone, Copy)]
-enum Population {
-    /// Craters, log-normal (Hayne et al. 2021, eqs. 33–35).
-    LogNormal(LogNormal),
-    /// Rough plains: 0.6 of half the magnitude of a Gaussian surface's directional slope.
-    HalfNormal(HalfNormal),
+struct LogNormal {
+    m: f64,
+    s: f64,
 }
 
-impl Population {
-    /// The bowls standing for plains of directional RMS slope `slope`, or `None` for flat plains
-    /// (`science-r09-drainage.md` §8.10 and §8.13).
-    ///
-    /// d/D = 0.6 |s| ÷ 2 for a slope s normal with RMS w = tan `σ_s`: a half-normal of scale 0.3 w,
-    /// [`PLAINS_DEPTH_SCALE`]'s fit to ray-traced surfaces (§8.13). A log-normal of the same
-    /// moments has a far heavier tail (P(d/D > 0.2) 50 times the half-normal's at `σ_s` = 5.7°
-    /// without the scale), which would leave deep bowls in shadow equatorward of 70°. A slope under
-    /// 10⁻¹⁰⁰ rad counts as flat, so that the scale's square stays a normal number.
+impl LogNormal {
+    /// The standard score of `x` ≥ 0: −∞ at 0 and +∞ at +∞, as `libm`'s logarithm gives them.
     #[must_use]
-    fn of_plains(slope: Radians) -> Option<Self> {
-        let w = math::tan(slope.value());
-        if w < 1e-100 {
-            return None;
-        }
-        Some(Self::HalfNormal(HalfNormal {
-            scale: PLAINS_DEPTH_SCALE * 0.5 * w,
-        }))
+    fn score(self, x: f64) -> f64 {
+        (math::ln(x) - self.m) / self.s
     }
 
-    /// The probability of a depth ratio in (a, b), 0 ≤ a, b ≤ ∞.
+    /// The probability of a ratio in (a, b), 0 ≤ a, b ≤ ∞.
     #[must_use]
     fn mass(self, a: f64, b: f64) -> f64 {
-        match self {
-            Self::LogNormal(dist) => dist.mass(a, b),
-            Self::HalfNormal(dist) => dist.mass(a, b),
-        }
+        normal_between(self.score(a), self.score(b))
     }
 
-    /// The population's window, in the variable in which it is normal: ln γ over ±8σ for the
-    /// log-normal, γ from 0 to 8σ for the half-normal, either at most 0.5's.
+    /// The window, in ln γ, the variable in which the distribution is normal: ±8σ about its
+    /// centre, at most 0.5's.
     #[must_use]
     fn window(self) -> (f64, f64) {
-        match self {
-            Self::LogNormal(dist) => (
-                dist.m - SPREAD_WIDTHS * dist.s,
-                num::min(math::ln(HEMISPHERE), dist.m + SPREAD_WIDTHS * dist.s),
-            ),
-            Self::HalfNormal(dist) => (0.0, num::min(HEMISPHERE, SPREAD_WIDTHS * dist.scale)),
-        }
+        (
+            self.m - SPREAD_WIDTHS * self.s,
+            num::min(math::ln(HEMISPHERE), self.m + SPREAD_WIDTHS * self.s),
+        )
     }
 
-    /// The depth ratio at `x` of the window's variable.
-    #[must_use]
-    fn ratio(self, x: f64) -> f64 {
-        match self {
-            Self::LogNormal(_) => math::exp(x),
-            Self::HalfNormal(_) => x,
-        }
-    }
-
-    /// The window's variable at the depth ratio `gamma` > 0.
-    #[must_use]
-    fn variable(self, gamma: f64) -> f64 {
-        match self {
-            Self::LogNormal(_) => math::ln(gamma),
-            Self::HalfNormal(_) => gamma,
-        }
-    }
-
-    /// The population's density in the window's variable at `x`.
+    /// The density in ln γ at `x`.
     #[must_use]
     fn density(self, x: f64) -> f64 {
         let root_two_pi = (2.0 * PI).sqrt();
-        match self {
-            Self::LogNormal(dist) => {
-                let z = (x - dist.m) / dist.s;
-                math::exp(-0.5 * z * z) / (dist.s * root_two_pi)
-            }
-            Self::HalfNormal(dist) => {
-                2.0 / (dist.scale * root_two_pi) * math::exp(-dist.exponent(x))
-            }
-        }
+        let z = (x - self.m) / self.s;
+        math::exp(-0.5 * z * z) / (self.s * root_two_pi)
     }
 
     /// ∫ g(γ) P(γ) dγ over the bowls of the window shallower than `top` ≤ 0.5, for a g ≥ 0.
@@ -1117,12 +948,12 @@ impl Population {
         if top <= 0.0 || hi <= lo {
             return 0.0;
         }
-        let end = self.variable(top);
+        let end = math::ln(top);
         if end <= lo {
             return 0.0;
         }
         let step = (hi - lo) / f64::from(INTERVALS);
-        let value = |x: f64| g(self.ratio(x)) * self.density(x);
+        let value = |x: f64| g(math::exp(x)) * self.density(x);
         let mut left = value(lo);
         let mut sum = 0.0;
         for i in 0..INTERVALS {
@@ -1144,9 +975,7 @@ impl Population {
         }
         sum
     }
-}
 
-impl Population {
     /// [`cumulative`](Self::cumulative) at each top of `tops`, each ≤ 0.5, written to `shares` in
     /// their order (P14.T51.i; R09.T7.k): the integrand g is evaluated once at each node, up to
     /// the largest top, and each top's share is read from the running sum where its own sum would
@@ -1173,7 +1002,7 @@ impl Population {
             if top <= 0.0 || hi <= lo {
                 continue;
             }
-            let end = self.variable(top);
+            let end = math::ln(top);
             if end > lo {
                 pending.push((k, end));
             }
@@ -1186,7 +1015,7 @@ impl Population {
         // A node below `zero_below`'s variable lies below that ratio, within the variable's
         // rounding, which the caller's margin covers.
         let zero_x = if zero_below > 0.0 {
-            self.variable(zero_below)
+            math::ln(zero_below)
         } else {
             f64::NEG_INFINITY
         };
@@ -1194,7 +1023,7 @@ impl Population {
             if x < zero_x {
                 0.0
             } else {
-                g(self.ratio(x)) * self.density(x)
+                g(math::exp(x)) * self.density(x)
             }
         };
         let mut left = value(lo);
@@ -1225,54 +1054,6 @@ impl Population {
         for &(k, _) in &pending {
             shares[k] = sum;
         }
-    }
-}
-
-/// A half-normal distribution: |X| for X normal with mean 0 and standard deviation q = `scale`.
-///
-/// Its density is √(2/π) ÷ q · e^(−γ² ÷ 2q²) for γ ≥ 0.
-#[derive(Debug, Clone, Copy)]
-struct HalfNormal {
-    scale: f64,
-}
-
-impl HalfNormal {
-    /// γ² ÷ 2q², the exponent of the density at γ = `gamma`.
-    #[must_use]
-    fn exponent(self, gamma: f64) -> f64 {
-        let z = gamma / self.scale;
-        0.5 * z * z
-    }
-
-    /// The probability of a ratio in (a, b): erfc(a ÷ q√2) − erfc(b ÷ q√2).
-    #[must_use]
-    fn mass(self, a: f64, b: f64) -> f64 {
-        if b <= a {
-            return 0.0;
-        }
-        let r = 1.0 / (self.scale * SQRT_2);
-        math::erfc(a * r) - math::erfc(b * r)
-    }
-}
-
-/// A log-normal distribution by its log-space mean `m` and log-space standard deviation `s`.
-#[derive(Debug, Clone, Copy)]
-struct LogNormal {
-    m: f64,
-    s: f64,
-}
-
-impl LogNormal {
-    /// The standard score of `x` ≥ 0: −∞ at 0 and +∞ at +∞, as `libm`'s logarithm gives them.
-    #[must_use]
-    fn score(self, x: f64) -> f64 {
-        (math::ln(x) - self.m) / self.s
-    }
-
-    /// The probability of a ratio in (a, b).
-    #[must_use]
-    fn mass(self, a: f64, b: f64) -> f64 {
-        normal_between(self.score(a), self.score(b))
     }
 }
 
@@ -1430,15 +1211,12 @@ pub fn bowl_permanent_shadow(depth_ratio: f64, colatitude: Radians, limb: Radian
 #[must_use]
 pub fn permanent_shadow(latitude: Radians, body: &Body, terrain: &Terrain) -> f64 {
     let sky = Sky::at(latitude, body);
-    let plains = match terrain.parts.plains_model {
-        PlainsModel::Bowls => PlainsLimit::Bowls(HEMISPHERE),
-        // `rough_plains::shadow_at`'s read, at this sky's colatitude and D.
-        PlainsModel::RayTraced => PlainsLimit::Read(rough_plains::permanent_shadow(
-            terrain.parts.plains_slope,
-            Radians::new(sky.band.colatitude),
-            Radians::new(sky.band.limb),
-        )),
-    };
+    // `rough_plains::shadow_at`'s read, at this sky's colatitude and D.
+    let plains = rough_plains::permanent_shadow(
+        terrain.parts.plains_slope,
+        Radians::new(sky.band.colatitude),
+        Radians::new(sky.band.limb),
+    );
     num::max(
         0.0,
         num::min(1.0, terrain.shadowed(&sky, HEMISPHERE, plains)),
@@ -1449,11 +1227,11 @@ pub fn permanent_shadow(latitude: Radians, body: &Body, terrain: &Terrain) -> f6
 /// `threshold` all year (the module documentation gives the model).
 ///
 /// It is the part of [`permanent_shadow`] whose temperature at the star's highest elevation lies
-/// below the threshold (on ray-traced plains, the shadow whose absorbed flux the threshold's
-/// emission covers: [`rough_plains::fraction`]), times one less the share under lateral
-/// conduction's cut-off. It does not rise with the greatest declination, the star's angular
-/// radius, the flux, the heat flow or the conduction share, and does not fall as the threshold
-/// rises, with one exception on ray-traced plains: at a pole under a point star whose greatest
+/// below the threshold (on the plains, the shadow whose absorbed flux the threshold's emission
+/// covers: [`rough_plains::fraction`]), times one less the share under lateral conduction's
+/// cut-off. It does not rise with the greatest declination, the star's angular radius, the flux,
+/// the heat flow or the conduction share, and does not fall as the threshold rises, with one
+/// exception on the plains: at a pole under a point star whose greatest
 /// declination is 0, a star on the horizon, the table's normaliser S sin e is 0 and the plains
 /// read their last fraction's share, near none of their shadow, against their full cold share at
 /// any declination it weighs (R09.T7.g's record). It is [`fractions`] at the one threshold.
@@ -1471,12 +1249,11 @@ pub fn fraction(latitude: Radians, body: &Body, terrain: &Terrain, threshold: Ke
 /// The cold-trap fraction at `latitude` of each threshold of `thresholds`, written to `fractions`
 /// in their order: each [`fraction`]'s, to the bit (P14.T51.i; R09.T7.k).
 ///
-/// The star's path is found once, and each population of bowls' shadow is one integral over its
-/// depth ratios shared by every threshold: its integrand is evaluated once at each node up to the
-/// largest cold limit, and each threshold's share is read from the running sum where its own would
-/// stop, in the same order. So a body tested for several condensables pays about one's cost: the
-/// warmest's, whose cold bowls reach deepest. Ray-traced plains are one read of their table a
-/// threshold.
+/// The star's path is found once, and the craters' shadow is one integral over their depth ratios
+/// shared by every threshold: its integrand is evaluated once at each node up to the largest cold
+/// limit, and each threshold's share is read from the running sum where its own would stop, in the
+/// same order. So a body tested for several condensables pays about one's cost: the warmest's,
+/// whose cold bowls reach deepest. The plains are one read of their table a threshold.
 ///
 /// # Panics
 ///
@@ -1491,8 +1268,8 @@ pub fn fraction(latitude: Radians, body: &Body, terrain: &Terrain, threshold: Ke
 /// ```
 /// use hyperion_base::units::{Kelvin, Radians, WattsPerSquareMetre};
 /// use hyperion_surface::cold_trap::{
-///     Body, BodyParts, DepthRatios, LUNAR_SHARE_UNDER_CUTOFF, PlainsModel, Terrain, TerrainParts,
-///     fraction, fractions,
+///     Body, BodyParts, DepthRatios, LUNAR_SHARE_UNDER_CUTOFF, Terrain, TerrainParts, fraction,
+///     fractions,
 /// };
 ///
 /// let body = Body::new(BodyParts {
@@ -1507,7 +1284,6 @@ pub fn fraction(latitude: Radians, body: &Body, terrain: &Terrain, threshold: Ke
 ///     crater_fraction: 0.2,
 ///     crater_depths: DepthRatios::HAYNE_B,
 ///     plains_slope: Radians::new(0.099_669),
-///     plains_model: PlainsModel::RayTraced,
 ///     share_under_cutoff: LUNAR_SHARE_UNDER_CUTOFF,
 /// })?;
 /// let latitude = Radians::new(1.535_89);
@@ -1541,52 +1317,27 @@ pub fn fractions(
         );
     }
     let sky = Sky::at(latitude, body);
-    let model = terrain.parts.plains_model;
     let (colatitude, limb) = (
         Radians::new(sky.band.colatitude),
         Radians::new(sky.band.limb),
     );
-    // A threshold whose bowls are all too warm takes no integral; the rest share one.
-    let mut cold = Vec::with_capacity(thresholds.len());
     let mut crater_limits = Vec::with_capacity(thresholds.len());
-    let mut plains_limits = Vec::with_capacity(thresholds.len());
-    for (k, (&threshold, fraction)) in thresholds.iter().zip(fractions.iter_mut()).enumerate() {
-        *fraction = 0.0;
-        let crater_limit = body.coldest_limit(sky.sin_highest, threshold, 0.0);
-        let plains_limit = match model {
-            PlainsModel::Bowls => {
-                if crater_limit <= 0.0 {
-                    continue;
-                }
-                // The plains' shadows also see sunlit terrain beyond their hollows, so are never
-                // colder.
-                body.coldest_limit(sky.sin_highest, threshold, PLAINS_SURROUNDINGS)
-            }
-            // `rough_plains::fraction`'s read, at this sky's colatitude and D. The craters' limit
-            // is their bowls', and gates them alone: at 0 their integral is 0.
-            PlainsModel::RayTraced => rough_plains::cold_share(
-                terrain.parts.plains_slope,
-                colatitude,
-                limb,
-                rough_plains::irradiance_limit(colatitude, body, threshold),
-            ),
-        };
-        cold.push(k);
-        crater_limits.push(crater_limit);
-        plains_limits.push(plains_limit);
+    let mut plains_shares = Vec::with_capacity(thresholds.len());
+    for &threshold in thresholds {
+        crater_limits.push(body.coldest_limit(sky.sin_highest, threshold));
+        // `rough_plains::fraction`'s read, at this sky's colatitude and D. The craters' limit is
+        // their bowls', and gates them alone: at 0 their integral is 0.
+        plains_shares.push(rough_plains::cold_share(
+            terrain.parts.plains_slope,
+            colatitude,
+            limb,
+            rough_plains::irradiance_limit(colatitude, body, threshold),
+        ));
     }
-    if cold.is_empty() {
-        return;
-    }
-    let plains = match model {
-        PlainsModel::Bowls => PlainsLimits::Bowls(&plains_limits),
-        PlainsModel::RayTraced => PlainsLimits::Read(&plains_limits),
-    };
-    let mut shadowed = vec![0.0; cold.len()];
-    terrain.shadowed_each(&sky, (&crater_limits, plains), &mut shadowed);
+    terrain.shadowed_each(&sky, (&crater_limits, &plains_shares), fractions);
     let kept = 1.0 - terrain.parts.share_under_cutoff;
-    for (&k, &shadow) in cold.iter().zip(&shadowed) {
-        fractions[k] = num::max(0.0, num::min(1.0, shadow * kept));
+    for fraction in fractions.iter_mut() {
+        *fraction = num::max(0.0, num::min(1.0, *fraction * kept));
     }
 }
 
@@ -1629,26 +1380,12 @@ mod tests {
             crater_fraction: 0.2,
             crater_depths: depths,
             plains_slope: Radians::new(math::atan(0.1)),
-            plains_model: PlainsModel::Bowls,
             share_under_cutoff: 0.0,
         }
     }
 
     fn best_fit(depths: DepthRatios) -> Terrain {
         Terrain::new(best_fit_parts(depths)).unwrap()
-    }
-
-    /// Both plains models: T7.d's bowls and the ray-traced table (R09.T7.g). The tests that hold
-    /// for either take both; the bowls go when the generator's hold is deleted at 25.
-    const MODELS: [PlainsModel; 2] = [PlainsModel::Bowls, PlainsModel::RayTraced];
-
-    /// [`best_fit`] with its plains of the model `model`.
-    fn best_fit_of(depths: DepthRatios, model: PlainsModel) -> Terrain {
-        Terrain::new(TerrainParts {
-            plains_model: model,
-            ..best_fit_parts(depths)
-        })
-        .unwrap()
     }
 
     /// The mean of `f` over latitudes `lo`..`hi` degrees, weighted by area, by the midpoint rule
@@ -1699,35 +1436,27 @@ mod tests {
         let bowl = shadow_temperature(0.2, Radians::ZERO, &body).value();
         assert!((bowl - 24.9).abs() <= 0.1, "d/D 0.2 {bowl} K");
         // A threshold below the floor traps nothing, even at a pole that never sees the Sun; one
-        // above it traps every shadow there, as bowls. Ray-traced plains there, under a point
-        // star on the horizon, read the table where its normaliser S sin e is 0: its last
-        // fraction's share, 0.0011 of their ground against their shadow's 0.73, so that only the
-        // craters' 0.2 is cold (a finding, R09.T7.g's record, pinned as built). Under the
-        // smallest declination the table weighs, 0.5° in `neither_function_rises…`, they are not.
+        // above it traps every crater's shadow there. The plains there, under a point star on the
+        // horizon, read the table where its normaliser S sin e is 0: its last fraction's share,
+        // 0.0011 of their ground against their shadow's 0.73, so that only the craters' 0.2 is
+        // cold (a finding, R09.T7.g's record, pinned as built). Under the smallest declination the
+        // table weighs, 0.5° in `neither_function_rises…`, they are not.
         let dark = Body::new(BodyParts {
             greatest_declination: Radians::ZERO,
             ..*body.parts()
         })
         .unwrap();
-        for model in MODELS {
-            let terrain = best_fit_of(DepthRatios::HAYNE_B, model);
-            assert_same_bits(
-                fraction(degrees(90.0), &dark, &terrain, Kelvin::new(20.0)),
-                0.0,
-            );
-            let cold = fraction(degrees(90.0), &dark, &terrain, Kelvin::new(40.0));
-            let shadow = permanent_shadow(degrees(90.0), &dark, &terrain);
-            match model {
-                PlainsModel::Bowls => assert!(
-                    (cold - shadow).abs() < 1e-12 && shadow > 0.99,
-                    "{cold}, {shadow}"
-                ),
-                PlainsModel::RayTraced => assert!(
-                    (cold - 0.2009).abs() < 1e-4 && (shadow - 0.784).abs() < 1e-3,
-                    "{cold}, {shadow}"
-                ),
-            }
-        }
+        let terrain = best_fit(DepthRatios::HAYNE_B);
+        assert_same_bits(
+            fraction(degrees(90.0), &dark, &terrain, Kelvin::new(20.0)),
+            0.0,
+        );
+        let cold = fraction(degrees(90.0), &dark, &terrain, Kelvin::new(40.0));
+        let shadow = permanent_shadow(degrees(90.0), &dark, &terrain);
+        assert!(
+            (cold - 0.2009).abs() < 1e-4 && (shadow - 0.784).abs() < 1e-3,
+            "{cold}, {shadow}"
+        );
     }
 
     #[test]
@@ -1791,13 +1520,11 @@ mod tests {
         assert!(below > 0.5 * alpha.value(), "{below}");
     }
 
-    /// The plains alone at a directional RMS slope of `w`, of the model `model`: no craters and no
-    /// conduction share.
-    fn plains(w: f64, model: PlainsModel) -> Terrain {
+    /// The plains alone at a directional RMS slope of `w`: no craters and no conduction share.
+    fn plains(w: f64) -> Terrain {
         Terrain::new(TerrainParts {
             crater_fraction: 0.0,
             plains_slope: Radians::new(math::atan(w)),
-            plains_model: model,
             ..best_fit_parts(DepthRatios::HAYNE_B)
         })
         .unwrap()
@@ -1818,24 +1545,20 @@ mod tests {
     #[test]
     fn haynes_best_fit_terrain_gives_table_1() {
         // Hayne et al. 2021, Table 1, the mean of both hemispheres, with a point Sun (Methods D)
-        // and no conduction share; the bounds are science-r09-drainage.md §8.13's. Both plains
-        // models hold them.
+        // and no conduction share; the bounds are science-r09-drainage.md §8.13's.
         let body = moon();
-        for (model, depths) in MODELS
-            .into_iter()
-            .flat_map(|m| [(m, DepthRatios::HAYNE_B), (m, DepthRatios::HAYNE_A)])
-        {
-            let terrain = best_fit_of(depths, model);
+        for depths in [DepthRatios::HAYNE_B, DepthRatios::HAYNE_A] {
+            let terrain = best_fit(depths);
             let cold = |lat: Radians| fraction(lat, &body, &terrain, WATER);
             let polar = band_mean(80.0, 90.0, cold);
             assert!(
                 within_two(polar, 0.067),
-                "{model:?}, {depths:?}: cold traps over 80–90° {polar}"
+                "{depths:?}: cold traps over 80–90° {polar}"
             );
             let whole = band_mean(0.0, 90.0, cold);
             assert!(
                 within_two(whole, 0.0010),
-                "{model:?}, {depths:?}: cold traps overall {whole}"
+                "{depths:?}: cold traps overall {whole}"
             );
             // From half of Landis et al. 2022's Diviner-mapped 553 km² over 60–80°, 0.032% of
             // 70–80°, to twice that taken to all scales (×2.2: Hayne et al.'s 40,000 km² against
@@ -1843,29 +1566,24 @@ mod tests {
             let sub = band_mean(70.0, 80.0, cold);
             assert!(
                 (1.6e-4..=1.4e-3).contains(&sub),
-                "{model:?}, {depths:?}: cold traps over 70–80° {sub}"
+                "{depths:?}: cold traps over 70–80° {sub}"
             );
         }
         // Permanent shadow with distribution B, whose mean d/D is nearer Table 1's d/D 0.1.
-        for model in MODELS {
-            let terrain = best_fit_of(DepthRatios::HAYNE_B, model);
-            let shadow = |lat: Radians| permanent_shadow(lat, &body, &terrain);
-            for (lo, hi, table) in [
-                (80.0, 90.0, 0.085),
-                (70.0, 80.0, 0.005),
-                (0.0, 90.0, 0.0015),
-            ] {
-                let band = band_mean(lo, hi, shadow);
-                assert!(
-                    within_two(band, table),
-                    "{model:?}: shadow over {lo}–{hi}° {band}"
-                );
-            }
-            let sixties = band_mean(60.0, 70.0, shadow);
-            assert!(sixties <= 1e-4, "{model:?}: shadow over 60–70° {sixties}");
-            let fifties = band_mean(50.0, 60.0, shadow);
-            assert!(fifties <= 1e-5, "{model:?}: shadow over 50–60° {fifties}");
+        let terrain = best_fit(DepthRatios::HAYNE_B);
+        let shadow = |lat: Radians| permanent_shadow(lat, &body, &terrain);
+        for (lo, hi, table) in [
+            (80.0, 90.0, 0.085),
+            (70.0, 80.0, 0.005),
+            (0.0, 90.0, 0.0015),
+        ] {
+            let band = band_mean(lo, hi, shadow);
+            assert!(within_two(band, table), "shadow over {lo}–{hi}° {band}");
         }
+        let sixties = band_mean(60.0, 70.0, shadow);
+        assert!(sixties <= 1e-4, "shadow over 60–70° {sixties}");
+        let fifties = band_mean(50.0, 60.0, shadow);
+        assert!(fifties <= 1e-5, "shadow over 50–60° {fifties}");
     }
 
     #[test]
@@ -1873,46 +1591,21 @@ mod tests {
         // science-r09-drainage.md §8.13: Gaussian surfaces built as Hayne et al.'s Methods D
         // builds them (Hurst exponent 0.9), ray traced under a point Sun 1.54° from the equator.
         let body = moon();
-        for model in MODELS {
-            for (w, polar, sub) in [(0.1, 0.028, 8e-4), (0.3, 0.236, 0.078), (0.5, 0.348, 0.188)] {
-                let terrain = plains(w, model);
-                let shadow = |lat: Radians| permanent_shadow(lat, &body, &terrain);
-                let p = band_mean(80.0, 90.0, shadow);
-                assert!(
-                    (p / polar - 1.0).abs() <= 0.2,
-                    "{model:?}, w {w}: 80–90° {p} against {polar}"
-                );
-                let s = band_mean(70.0, 80.0, shadow);
-                assert!(
-                    within_two(s, sub),
-                    "{model:?}, w {w}: 70–80° {s} against {sub}"
-                );
-            }
-            // The ray traces keep no measurable shadow equatorward of 70° at σ_s 5.7°.
-            let terrain = plains(0.1, model);
-            let sixties = band_mean(60.0, 70.0, |lat| permanent_shadow(lat, &body, &terrain));
-            assert!(sixties <= 1e-5, "{model:?}: 60–70° {sixties}");
+        for (w, polar, sub) in [(0.1, 0.028, 8e-4), (0.3, 0.236, 0.078), (0.5, 0.348, 0.188)] {
+            let terrain = plains(w);
+            let shadow = |lat: Radians| permanent_shadow(lat, &body, &terrain);
+            let p = band_mean(80.0, 90.0, shadow);
+            assert!(
+                (p / polar - 1.0).abs() <= 0.2,
+                "w {w}: 80–90° {p} against {polar}"
+            );
+            let s = band_mean(70.0, 80.0, shadow);
+            assert!(within_two(s, sub), "w {w}: 70–80° {s} against {sub}");
         }
-    }
-
-    #[test]
-    fn the_plains_instantaneous_shadow_falls_short_of_smiths() {
-        // The recorded cost of matching the permanent shadow (science-r09-drainage.md §8.13):
-        // 0.38–0.92 of Smith's at 1–12°, wherever his is at least 5%.
-        for w in [0.1, 0.3, 0.5] {
-            let plains = Population::of_plains(Radians::new(math::atan(w))).unwrap();
-            for half_degrees in 2..=24_u32 {
-                let e = degrees(0.5 * f64::from(half_degrees)).value();
-                let smith = smith_shadow(w, e);
-                if smith >= 0.05 {
-                    let ratio = bowls_shadow(plains, e) / smith;
-                    assert!(
-                        (0.35..=1.0).contains(&ratio),
-                        "w {w}, {half_degrees}: {ratio}"
-                    );
-                }
-            }
-        }
+        // The ray traces keep no measurable shadow equatorward of 70° at σ_s 5.7°.
+        let terrain = plains(0.1);
+        let sixties = band_mean(60.0, 70.0, |lat| permanent_shadow(lat, &body, &terrain));
+        assert!(sixties <= 1e-5, "60–70° {sixties}");
     }
 
     #[test]
@@ -1920,18 +1613,13 @@ mod tests {
         // science-r09-drainage.md §8.13: at σ_s 5.7°, under the real Sun, the ray-traced surfaces
         // put 2.16% of 80–90° below 110 K and 0.090–0.146% below 57 K.
         let body = real_moon();
-        for model in MODELS {
-            let terrain = plains(0.1, model);
-            let water = band_mean(80.0, 90.0, |lat| fraction(lat, &body, &terrain, WATER));
-            assert!(
-                (water / 0.0216 - 1.0).abs() <= 0.15,
-                "{model:?}: water {water}"
-            );
-            let co2 = band_mean(80.0, 90.0, |lat| {
-                fraction(lat, &body, &terrain, Kelvin::new(57.0))
-            });
-            assert!(within_two(co2, 0.0012), "{model:?}: CO₂ {co2}");
-        }
+        let terrain = plains(0.1);
+        let water = band_mean(80.0, 90.0, |lat| fraction(lat, &body, &terrain, WATER));
+        assert!((water / 0.0216 - 1.0).abs() <= 0.15, "water {water}");
+        let co2 = band_mean(80.0, 90.0, |lat| {
+            fraction(lat, &body, &terrain, Kelvin::new(57.0))
+        });
+        assert!(within_two(co2, 0.0012), "CO₂ {co2}");
     }
 
     #[test]
@@ -1949,23 +1637,18 @@ mod tests {
             })
             .unwrap()
         };
-        let shadow_km2 = |body: &Body, depths: DepthRatios, model: PlainsModel| {
-            let terrain = best_fit_of(depths, model);
+        let shadow_km2 = |body: &Body, depths: DepthRatios| {
+            let terrain = best_fit(depths);
             area_km2 * band_mean(0.0, 90.0, |lat| permanent_shadow(lat, body, &terrain))
         };
-        for model in MODELS {
-            let (b, a) = (
-                shadow_km2(&ceres(4.0), DepthRatios::HAYNE_B, model),
-                shadow_km2(&ceres(4.0), DepthRatios::HAYNE_A, model),
-            );
-            assert!(
-                b <= 2282.0 && 2282.0 <= a,
-                "{model:?}: B {b} km², A {a} km²"
-            );
-            for depths in [DepthRatios::HAYNE_B, DepthRatios::HAYNE_A] {
-                let tilted = shadow_km2(&ceres(20.0), depths, model);
-                assert!(tilted < 68.0, "{model:?}, {depths:?} at 20°: {tilted} km²");
-            }
+        let (b, a) = (
+            shadow_km2(&ceres(4.0), DepthRatios::HAYNE_B),
+            shadow_km2(&ceres(4.0), DepthRatios::HAYNE_A),
+        );
+        assert!(b <= 2282.0 && 2282.0 <= a, "B {b} km², A {a} km²");
+        for depths in [DepthRatios::HAYNE_B, DepthRatios::HAYNE_A] {
+            let tilted = shadow_km2(&ceres(20.0), depths);
+            assert!(tilted < 68.0, "{depths:?} at 20°: {tilted} km²");
         }
     }
 
@@ -1978,13 +1661,9 @@ mod tests {
         // e2021GL095533, Table 1).
         let moon_km2 = 4.0 * PI * 1737.4 * 1737.4;
         let body = real_moon();
-        for (model, depths) in MODELS
-            .into_iter()
-            .flat_map(|m| [(m, DepthRatios::HAYNE_B), (m, DepthRatios::HAYNE_A)])
-        {
+        for depths in [DepthRatios::HAYNE_B, DepthRatios::HAYNE_A] {
             let terrain = Terrain::new(TerrainParts {
                 share_under_cutoff: LUNAR_SHARE_UNDER_CUTOFF,
-                plains_model: model,
                 ..best_fit_parts(depths)
             })
             .unwrap();
@@ -1993,7 +1672,7 @@ mod tests {
                 let south = 0.5 * moon_km2 * band_mean(0.0, 90.0, cold);
                 assert!(
                     (30.0..=408.0).contains(&south),
-                    "{model:?}, {depths:?} at {t} K: {south} km²"
+                    "{depths:?} at {t} K: {south} km²"
                 );
             }
         }
@@ -2149,10 +1828,8 @@ mod tests {
         // here to 4 × 10⁻⁴.
         let mut worst: f64 = 0.0;
         let populations = [
-            Population::LogNormal(DepthRatios::HAYNE_A.log_normal()),
-            Population::LogNormal(DepthRatios::HAYNE_B.log_normal()),
-            Population::of_plains(Radians::new(math::atan(0.1))).unwrap(),
-            Population::of_plains(Radians::new(math::atan(0.5))).unwrap(),
+            DepthRatios::HAYNE_A.log_normal(),
+            DepthRatios::HAYNE_B.log_normal(),
         ];
         for dist in populations {
             let mut last = 0.0;
@@ -2252,29 +1929,29 @@ mod tests {
     /// interval, at and below the window's start, at and above its end, and repeated);
     /// `shadowed_each` is `shadowed` at each limit (at and below the shallowest bowl, inside, at
     /// and above a hemisphere); and `fractions` is the one-threshold arithmetic written out, the
-    /// cold limits by bisection and the terrain's shadow by `shadowed`.
+    /// craters' cold limits by bisection, the plains' `rough_plains::fraction` and the terrain's
+    /// shadow by `shadowed`.
     #[test]
     fn the_shared_integral_is_the_one_threshold_path_to_the_bit() {
         let populations = [
-            Population::LogNormal(DepthRatios::HAYNE_A.log_normal()),
-            Population::LogNormal(DepthRatios::HAYNE_B.log_normal()),
-            Population::of_plains(Radians::new(math::atan(0.1))).unwrap(),
+            DepthRatios::HAYNE_A.log_normal(),
+            DepthRatios::HAYNE_B.log_normal(),
         ];
         let g = |gamma: f64| math::sin(7.0 * gamma) + 2.0 * gamma;
         for dist in populations {
             let (lo, hi) = dist.window();
             let step = (hi - lo) / f64::from(INTERVALS);
-            let node = dist.ratio(lo + 17.0 * step);
-            let inside = dist.ratio(lo + 40.5 * step);
+            let node = math::exp(lo + 17.0 * step);
+            let inside = math::exp(lo + 40.5 * step);
             let tops = [
                 node,
                 inside,
-                dist.ratio(lo),
-                0.5 * dist.ratio(lo),
+                math::exp(lo),
+                0.5 * math::exp(lo),
                 0.0,
                 HEMISPHERE,
                 inside,
-                dist.ratio(hi),
+                math::exp(hi),
             ];
             let mut shares = [f64::NAN; 8];
             dist.cumulative_each(&tops, 0.0, g, &mut shares);
@@ -2295,13 +1972,19 @@ mod tests {
                 0.7,
                 0.9 * HEMISPHERE,
             ];
-            let population = Population::LogNormal(depths.log_normal());
+            let population = depths.log_normal();
             let mut shares = [f64::NAN; 7];
             sky.band.shadowed_each(population, &limits, &mut shares);
             for (&limit, &share) in limits.iter().zip(&shares) {
                 assert_same_bits(share, sky.band.shadowed(population, limit));
             }
-            let terrain = best_fit(depths);
+            // The plains are `rough_plains::fraction`'s read beside the craters, at every
+            // threshold, the craters' too warm included.
+            let terrain = Terrain::new(TerrainParts {
+                share_under_cutoff: LUNAR_SHARE_UNDER_CUTOFF,
+                ..best_fit_parts(depths)
+            })
+            .unwrap();
             let thresholds = [20.0, 58.18, 110.0, 200.0].map(Kelvin::new);
             let mut fractions_of = [f64::NAN; 4];
             fractions(
@@ -2312,44 +1995,15 @@ mod tests {
                 &mut fractions_of,
             );
             for (&threshold, &shared) in thresholds.iter().zip(&fractions_of) {
-                let crater_limit = body.coldest_limit(sky.sin_highest, threshold, 0.0);
-                let alone = if crater_limit <= 0.0 {
-                    0.0
-                } else {
-                    let plains_limit =
-                        body.coldest_limit(sky.sin_highest, threshold, PLAINS_SURROUNDINGS);
-                    let share =
-                        terrain.shadowed(&sky, crater_limit, PlainsLimit::Bowls(plains_limit))
-                            * (1.0 - terrain.parts.share_under_cutoff);
-                    num::max(0.0, num::min(1.0, share))
-                };
-                assert_same_bits(shared, alone);
-            }
-            // Ray-traced plains are `rough_plains::fraction`'s read beside the same craters, at
-            // every threshold, the craters' too warm included.
-            let traced = Terrain::new(TerrainParts {
-                plains_model: PlainsModel::RayTraced,
-                share_under_cutoff: LUNAR_SHARE_UNDER_CUTOFF,
-                ..best_fit_parts(depths)
-            })
-            .unwrap();
-            fractions(
-                degrees(latitude),
-                &body,
-                &traced,
-                &thresholds,
-                &mut fractions_of,
-            );
-            for (&threshold, &shared) in thresholds.iter().zip(&fractions_of) {
-                let crater_limit = body.coldest_limit(sky.sin_highest, threshold, 0.0);
+                let crater_limit = body.coldest_limit(sky.sin_highest, threshold);
                 let plains = rough_plains::fraction(
                     degrees(latitude),
                     &body,
-                    traced.parts.plains_slope,
+                    terrain.parts.plains_slope,
                     threshold,
                 );
-                let share = traced.shadowed(&sky, crater_limit, PlainsLimit::Read(plains))
-                    * (1.0 - traced.parts.share_under_cutoff);
+                let share = terrain.shadowed(&sky, crater_limit, plains)
+                    * (1.0 - terrain.parts.share_under_cutoff);
                 assert_same_bits(shared, num::max(0.0, num::min(1.0, share)));
             }
         }
@@ -2358,8 +2012,8 @@ mod tests {
     /// The bowls `shadowed_each` skips, those shallower than the shallowest that keeps a shadow,
     /// keep their bits (P14.T51.i): against `shadowed`, which evaluates every node, over a Moon, a
     /// Ceres at 4° and 20° and a Mercury under its disk, every half degree from 50° to the pole,
-    /// both crater distributions and the plains, at limits just above the shallowest bowl, between,
-    /// at a hemisphere and beyond.
+    /// both crater distributions, at limits just above the shallowest bowl, between, at a
+    /// hemisphere and beyond.
     #[test]
     fn the_skipped_bowls_keep_the_shadow_s_bits() {
         let parts = moon_parts();
@@ -2385,10 +2039,8 @@ mod tests {
             .unwrap(),
         ];
         let populations = [
-            Population::LogNormal(DepthRatios::HAYNE_A.log_normal()),
-            Population::LogNormal(DepthRatios::HAYNE_B.log_normal()),
-            Population::of_plains(Radians::new(math::atan(0.1))).unwrap(),
-            Population::of_plains(Radians::new(math::atan(0.4))).unwrap(),
+            DepthRatios::HAYNE_A.log_normal(),
+            DepthRatios::HAYNE_B.log_normal(),
         ];
         let mut compared = 0;
         for body in &bodies {
@@ -2420,8 +2072,8 @@ mod tests {
 
     /// The shared form is [`fraction`] at each threshold to the bit (P14.T51.i; R09.T7.k), over the
     /// Moon, a Mercury, a Ceres and a cold body at 30 au, each latitude from 60° to the pole, both
-    /// plains models, and thresholds of 20–200 K given in any order, repeated and with ones too
-    /// warm for any bowl.
+    /// crater distributions, and thresholds of 20–200 K given in any order, repeated and with ones
+    /// too warm for any bowl.
     #[test]
     fn the_shared_form_is_fraction_at_each_threshold_to_the_bit() {
         let bodies = [
@@ -2457,8 +2109,6 @@ mod tests {
         let terrains = [
             best_fit(DepthRatios::HAYNE_B),
             best_fit(DepthRatios::HAYNE_A),
-            best_fit_of(DepthRatios::HAYNE_B, PlainsModel::RayTraced),
-            best_fit_of(DepthRatios::HAYNE_A, PlainsModel::RayTraced),
         ];
         let thresholds: Vec<Kelvin> = [200.0, 20.0, 110.0, 58.18, 35.0, 110.0, 80.0, 150.0, 25.0]
             .into_iter()
@@ -2511,11 +2161,10 @@ mod tests {
         let mut compared = 0;
         for body in &bodies {
             for w in [0.0, 0.03, 0.1, 0.25, 0.6, 1.0] {
-                let alone = plains(w, PlainsModel::RayTraced);
+                let alone = plains(w);
                 let slope = alone.parts.plains_slope;
                 let beside = Terrain::new(TerrainParts {
                     plains_slope: slope,
-                    plains_model: PlainsModel::RayTraced,
                     share_under_cutoff: LUNAR_SHARE_UNDER_CUTOFF,
                     ..best_fit_parts(DepthRatios::HAYNE_A)
                 })
@@ -2526,7 +2175,7 @@ mod tests {
                     let read = rough_plains::shadow_at(latitude, body, slope);
                     assert_same_bits(permanent_shadow(latitude, body, &alone), read);
                     let sky = Sky::at(latitude, body);
-                    let both = beside.shadowed(&sky, HEMISPHERE, PlainsLimit::Read(read));
+                    let both = beside.shadowed(&sky, HEMISPHERE, read);
                     assert_same_bits(
                         permanent_shadow(latitude, body, &beside),
                         num::max(0.0, num::min(1.0, both)),
@@ -2554,32 +2203,9 @@ mod tests {
         assert_same_bits(bowl(0.1), 0.0);
     }
 
-    /// Smith's (1967, JGR 72, 4059) shadowed share of a Gaussian surface of directional RMS slope
-    /// `w` under a sun at elevation `e`: one less (1 − erfc(v)/2) ÷ (1 + Λ), with
-    /// v = tan e ÷ (√2 w) and Λ = (e^(−v²) ÷ (v√π) − erfc(v)) ÷ 2.
-    fn smith_shadow(w: f64, e: f64) -> f64 {
-        let v = math::tan(e) / (SQRT_2 * w);
-        let lambda = 0.5 * (math::exp(-v * v) / (v * PI.sqrt()) - math::erfc(v));
-        1.0 - (1.0 - 0.5 * math::erfc(v)) / (1.0 + lambda)
-    }
-
     /// The band of a sun at elevation `e` radians, for the instantaneous shadow alone.
     fn sky_at_elevation(e: f64) -> Band {
         Band::new(0.0, e)
-    }
-
-    /// The instantaneous shadow of a population of bowls with the sun at elevation `e`: the exact
-    /// transect form, with ratios above 0.5 counted as hemispheres.
-    fn bowls_shadow(dist: Population, e: f64) -> f64 {
-        let sky = sky_at_elevation(e);
-        let shallowest = depth_ratio_of_beta(sky.cos2 / sky.half_sin_cos);
-        dist.cumulative(HEMISPHERE, |gamma| {
-            if gamma <= shallowest {
-                0.0
-            } else {
-                sky.instantaneous(gamma)
-            }
-        }) + sky.cos2 * dist.mass(HEMISPHERE, f64::INFINITY)
     }
 
     /// The share of a spherical bowl's opening in shadow under a sun at `elevation` radians, by a
@@ -2631,27 +2257,21 @@ mod tests {
         // Hayne et al. 2021 ("Temperatures"): the greatest cold-trapping area is at σ_s ≈ 10–20°,
         // since rougher plains cast more shadow but warm it more.
         let body = moon();
-        for model in MODELS {
-            let mut best = (0.0, 0.0);
-            for deg in 1..=40_u32 {
-                let slope = f64::from(deg);
-                let terrain = Terrain::new(TerrainParts {
-                    crater_fraction: 0.0,
-                    plains_slope: degrees(slope),
-                    plains_model: model,
-                    ..best_fit_parts(DepthRatios::HAYNE_B)
-                })
-                .unwrap();
-                let polar = band_mean(80.0, 90.0, |lat| fraction(lat, &body, &terrain, WATER));
-                if polar > best.1 {
-                    best = (slope, polar);
-                }
+        let mut best = (0.0, 0.0);
+        for deg in 1..=40_u32 {
+            let slope = f64::from(deg);
+            let terrain = Terrain::new(TerrainParts {
+                crater_fraction: 0.0,
+                plains_slope: degrees(slope),
+                ..best_fit_parts(DepthRatios::HAYNE_B)
+            })
+            .unwrap();
+            let polar = band_mean(80.0, 90.0, |lat| fraction(lat, &body, &terrain, WATER));
+            if polar > best.1 {
+                best = (slope, polar);
             }
-            assert!(
-                (10.0..=20.0).contains(&best.0),
-                "{model:?}: peak at {best:?}"
-            );
         }
+        assert!((10.0..=20.0).contains(&best.0), "peak at {best:?}");
     }
 
     /// Latitudes in degrees for the bounds tests, both hemispheres.
@@ -2697,17 +2317,11 @@ mod tests {
         let radius = |p: &mut BodyParts, i: f64| p.star_radius = degrees(0.05 * i);
         let flux = |p: &mut BodyParts, i: f64| p.flux = WattsPerSquareMetre::new(100.0 * (1.0 + i));
         let heat = |p: &mut BodyParts, i: f64| p.heat_flow = WattsPerSquareMetre::new(0.01 * i);
-        for (model, depths) in MODELS
-            .into_iter()
-            .flat_map(|m| [(m, DepthRatios::HAYNE_A), (m, DepthRatios::HAYNE_B)])
-        {
-            let terrain = best_fit_of(depths, model);
+        for depths in [DepthRatios::HAYNE_A, DepthRatios::HAYNE_B] {
+            let terrain = best_fit(depths);
             let cold = |lat: Radians, body: &Body| fraction(lat, body, &terrain, WATER);
             let shadow = |lat: Radians, body: &Body| permanent_shadow(lat, body, &terrain);
-            match model {
-                PlainsModel::Bowls => assert_not_rising("declination", 60, declination, cold),
-                PlainsModel::RayTraced => assert_not_rising("declination", 59, risen, cold),
-            }
+            assert_not_rising("declination", 59, risen, cold);
             assert_not_rising("declination", 60, declination, shadow);
             assert_not_rising("radius", 40, radius, cold);
             assert_not_rising("radius", 40, radius, shadow);
@@ -2719,14 +2333,11 @@ mod tests {
     #[test]
     fn the_fraction_lies_within_the_shadow_and_follows_the_threshold() {
         let body = moon();
-        for (model, depths) in MODELS
-            .into_iter()
-            .flat_map(|m| [(m, DepthRatios::HAYNE_A), (m, DepthRatios::HAYNE_B)])
-        {
+        for depths in [DepthRatios::HAYNE_A, DepthRatios::HAYNE_B] {
             for lat_deg in LATITUDES {
                 let latitude = degrees(lat_deg);
                 // Not falling as the threshold rises, and never beyond the permanent shadow.
-                let terrain = best_fit_of(depths, model);
+                let terrain = best_fit(depths);
                 let shadow = permanent_shadow(latitude, &body, &terrain);
                 let mut last = 0.0;
                 for t in 1..=60_u32 {
@@ -2742,7 +2353,6 @@ mod tests {
                     let share = 0.1 * f64::from(i);
                     let terrain = Terrain::new(TerrainParts {
                         share_under_cutoff: share,
-                        plains_model: model,
                         ..best_fit_parts(depths)
                     })
                     .unwrap();
@@ -2759,11 +2369,8 @@ mod tests {
     fn a_moon_whose_sun_reaches_30_degrees_has_no_water_cold_traps() {
         // Ceres's permanent shadow is essentially gone at 20° obliquity (Schorghofer et al. 2024,
         // PSJ 5, 99); R09.T13.f expects no water cold trap at 25°.
-        for (model, depths) in MODELS
-            .into_iter()
-            .flat_map(|m| [(m, DepthRatios::HAYNE_A), (m, DepthRatios::HAYNE_B)])
-        {
-            let terrain = best_fit_of(depths, model);
+        for depths in [DepthRatios::HAYNE_A, DepthRatios::HAYNE_B] {
+            let terrain = best_fit(depths);
             for tilt in [25.0, 30.0] {
                 let body = Body::new(BodyParts {
                     greatest_declination: degrees(tilt),
@@ -2780,18 +2387,15 @@ mod tests {
 
     #[test]
     fn a_smooth_crater_free_body_has_no_shadow() {
-        for model in MODELS {
-            let terrain = Terrain::new(TerrainParts {
-                crater_fraction: 0.0,
-                plains_slope: Radians::ZERO,
-                plains_model: model,
-                ..best_fit_parts(DepthRatios::HAYNE_A)
-            })
-            .unwrap();
-            let body = moon();
-            assert_same_bits(permanent_shadow(degrees(89.0), &body, &terrain), 0.0);
-            assert_same_bits(fraction(degrees(89.0), &body, &terrain, WATER), 0.0);
-        }
+        let terrain = Terrain::new(TerrainParts {
+            crater_fraction: 0.0,
+            plains_slope: Radians::ZERO,
+            ..best_fit_parts(DepthRatios::HAYNE_A)
+        })
+        .unwrap();
+        let body = moon();
+        assert_same_bits(permanent_shadow(degrees(89.0), &body, &terrain), 0.0);
+        assert_same_bits(fraction(degrees(89.0), &body, &terrain, WATER), 0.0);
     }
 
     #[test]
@@ -2827,7 +2431,6 @@ mod tests {
             BuildDepthRatiosError::Mean(0.6).to_string(),
             "mean depth ratio 0.6 is not in (0, 0.5] or has no normal square"
         );
-        assert!(Population::of_plains(Radians::new(1e-160)).is_none());
         assert_eq!(
             DepthRatios::new(0.1, 0.0),
             Err(BuildDepthRatiosError::Variance(0.0))
