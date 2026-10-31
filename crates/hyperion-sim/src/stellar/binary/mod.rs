@@ -44,12 +44,14 @@ pub mod reach;
 mod recycling;
 mod rlof;
 pub(crate) use rlof::{CODE_Q, GAP_Q};
+pub mod sampler;
+pub mod scan;
 mod star;
 mod supernova;
 mod timeline;
 
-#[cfg(test)]
-mod testing;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 #[cfg(test)]
 mod tests;
 

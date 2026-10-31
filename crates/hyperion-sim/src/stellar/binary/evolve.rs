@@ -215,6 +215,8 @@ fn run_pair(
     tracks: [Option<Arc<Track>>; 2],
     pre_test: PreTest,
 ) -> BinaryTimeline {
+    #[cfg(any(test, feature = "testing"))]
+    super::scan::count_engine_call();
     let until = until_age.value().max(0.0);
     let ctx = Arc::new(Context::of(input));
     let [own_primary, own_secondary] = tracks;

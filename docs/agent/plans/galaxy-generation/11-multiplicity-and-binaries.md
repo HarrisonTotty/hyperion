@@ -1601,6 +1601,8 @@ tables must keep that under one in ten, which a test counts.
   density at `sunlike_point` for Milky Way parameters is within 30% of 4.8 × 10⁻⁶ per cubic parsec
   (Pala et al. 2020); the expected galaxy total is 6–12 × 10⁶ over ten seeds; the two classes
   partition the hosts, and no slow host has more than two eruptions in the horizon.
+  _As built (lane `p11-t8a`, 2026-10-31; at version 24, no bump): see Risks, "P11.T8.a as
+  built"._
 - **P11.T8.b X-ray binaries.** Low-mass (neutron-star and black-hole, persistent and transient),
   high-mass (Be/X, supergiant). Hosts follow the old populations for low-mass and the young disc,
   displaced by the pair's recoil, for high-mass. Test: about 10⁴ in total (0.7–1.5 × 10⁴) and 1,300
@@ -6132,3 +6134,39 @@ galaxy_sweeps`.
     Warner's 1.3–10 h; the red nova's plateau 100 (M ÷ M☉)^½ d within 100–200; one colour
     temperature per kind and a 2% reprocessed share; no optical light of a Be/X outburst's own. The
     figures were recalled, not read at source: the literature was unreachable in this build.
+- **P11.T8.a as built** (lane `p11-t8a`, 2026-10-31; at version 24, no bump: registering a class
+  moves no existing value, as P09.T33.a's record rules; `golden_diff.py` "extended only").
+  - _Files._ `galaxy/catalogue_classes/binary/{mod,awd}.rs` (`AwdProcess`, shared by the
+    newtypes `AccretingWdFast` and `AccretingWdSlow`, `AwdSide`, `AwdEntry`);
+    `stellar/binary/{sampler,scan}.rs`, `stellar/binary/testing/members.rs`; arms for classes 6
+    and 8 in `ProductionClasses`.
+  - _`ClassSampler<M, P>`_ over `ClassSamplerTable<M, P>`, keyed by each class's mark and choice
+    enums (`SamplerKey`; `AwdMark`, `AwdPick`), one word a draw; `draw_in_ranks` is the exact
+    conditional draw. A mark is one residual (17 ranks) about a median on 17 nodes of its
+    condition: narrower than a law per node, which P15.T10.b may widen (lean, 2026-10-31).
+  - _Marks (lean, 2026-10-31)._ The recurrence is drawn first, on the class's side of L by rank;
+    the white dwarf's mass given it; the rate is P11.T5's ignition-mass fit inverted
+    (`scan::transfer_rate_for`), and P_rec is recomputed by `nova_recurrence_period`
+    (re-checked against Yaron et al. 2005). Donor kind (main sequence, helium, giant), period and
+    donor mass follow; magnetism is the white dwarf's own `star.magnetism` draw, as `classify`
+    reads it. The history's age is the table's, raised to 1.05 × plan 06's lifetime, not the
+    component's age law.
+  - _Scan marks_: `scan_marks(galaxy, &AwdProcess, cell, id, bound)` and `scan_cell`, accreting
+    white dwarfs only (T8.b adds its own); `Some` exactly for an entry. Novae: `0x0300 NOVA` on
+    body 0, `nova_clock` (origin drawn in one period), `nova_phase` (0.08 cycles, one-cycle
+    lattice); a slow host carries at most two eruptions, a fast host has `eruptions_in`.
+    `engine_calls()` counts this thread's `run_pair` calls (`cfg(test)` or `testing`).
+  - _Stars._ `ClassProcess::stars` (default `None`) with `CatalogueSystem::with_class_stars`; an
+    entry's `SystemStars::of_marked_pair` holds its two models, `SystemHierarchy::binary_on` the
+    marked orbit and its `from_marks` timeline. The range brief (`BriefModel::of_record`) still
+    answers `KindNotGenerated` for class stars, until P09.T37.
+  - _Tags._ `class.awd.{site,recurrence,velocity,binary,history,metallicity}` and the Event tag
+    `binary.ev.nova`; 0x0301–0x0306 stay P11.T9's.
+  - _Not built._ Plan 09's `assert_complementary` (the class's own every-age test stands in). The
+    hosts' primaries fall 88% in layer D against `CLASS_SHARES`' C 0.75 / D 0.25, so the budgets
+    close by population, not band by band (pinned; for main's ruling). `brute_force_class_members`
+    takes each layer's share of members from `CLASS_SHARES` near the solar circle, not the prior
+    over all systems (lean, 2026-10-31).
+  - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary`, `stellar::binary::scan`,
+    `stellar::binary::sampler`, `id::event_tags`; slow, `tests/binary_awd.rs` (with the `testing`
+    feature, as the workspace's slow run builds it) and `tests/source_horizon.rs`'s new row.

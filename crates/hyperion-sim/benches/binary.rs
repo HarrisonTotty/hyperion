@@ -9,14 +9,29 @@
 //!
 //! `binary/pair_light_bound` times the census's pair bound (P11.T17) over a fixed sample of
 //! queries, against its target of at most 1 µs a call.
+//!
+//! `binary/awd_scan_marks` times an accreting white dwarf host's scan marks (P11.T8.a), fast and
+//! slow hosts apart, over the entries of a run of cells about the solar circle in the Milky Way
+//! fixture with its kinematic tables: the target is under 300 ns a host. A slow host's marks hold
+//! its eruptions in the source horizon, the monotone phase's crossings, most of its cost.
 
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use hyperion_sim::Seed;
+use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::catalogue_classes::binary::{
+    AccretingWdFast, AccretingWdSlow, AwdProcess, AwdSide,
+};
+use hyperion_sim::galaxy::catalogue_classes::{
+    CatalogueCellKey, CatalogueClassCell, CatalogueEntry,
+};
+use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::math;
 use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
 use hyperion_sim::stellar::Composition;
+use hyperion_sim::stellar::binary::scan::scan_marks;
 use hyperion_sim::stellar::binary::{
     BinaryInput, BinaryParams, PairLight, can_interact, evolve, pair_light_bound,
 };
@@ -217,5 +232,58 @@ fn distribution(_: &mut Criterion) {
     );
 }
 
-criterion_group!(binary, exp_reference, examples, distribution, light_bound);
+/// One accreting white dwarf host's scan marks, a host an element, for each class: the entries
+/// of twelve cells along the solar circle, scanned again by ID.
+fn awd_scan_marks(c: &mut Criterion) {
+    let galaxy = Galaxy::from_params(Seed::new(0x0b17_08a0), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral")
+        .with_full_potential();
+    let mut group = c.benchmark_group("binary/awd_scan_marks");
+    for side in [AwdSide::Fast, AwdSide::Slow] {
+        let process = AwdProcess::new(&galaxy, side);
+        let hosts: Vec<_> = (-6..6)
+            .flat_map(|x| {
+                let key = CatalogueCellKey::new(side.class(), [x, 50, 0]).expect("a cell");
+                let bound = process.bound(&galaxy, &key);
+                let ids: Vec<_> = match side {
+                    AwdSide::Fast => {
+                        CatalogueClassCell::generate(&galaxy, &AccretingWdFast::new(&galaxy), key)
+                            .entries()
+                            .iter()
+                            .map(CatalogueEntry::id)
+                            .collect()
+                    }
+                    AwdSide::Slow => {
+                        CatalogueClassCell::generate(&galaxy, &AccretingWdSlow::new(&galaxy), key)
+                            .entries()
+                            .iter()
+                            .map(CatalogueEntry::id)
+                            .collect()
+                    }
+                };
+                ids.into_iter().map(move |id| (key, id, bound))
+            })
+            .collect();
+        group.throughput(Throughput::Elements(
+            u64::try_from(hosts.len()).expect("a few hundred hosts"),
+        ));
+        group.bench_function(format!("{side:?}").to_lowercase(), |bench| {
+            bench.iter(|| {
+                for (key, id, bound) in &hosts {
+                    black_box(scan_marks(&galaxy, &process, key, *id, *bound));
+                }
+            });
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    binary,
+    exp_reference,
+    examples,
+    distribution,
+    light_bound,
+    awd_scan_marks
+);
 criterion_main!(binary);

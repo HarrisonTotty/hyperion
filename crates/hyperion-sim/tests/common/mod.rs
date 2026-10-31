@@ -8,9 +8,12 @@
 //! helpers plan 13's substellar tests share ([`reference_density_point`], [`WarmCellCache`],
 //! [`objects_in_block`], [`usize_as_f64`]), and, in [`sky`], the sky census's oracle (rendering
 //! plan R06, R06.T8.e), in `surface_worlds` (with the `testing` feature), R10's sample worlds
-//! (rendering plan R09, R09.T16), and, in [`observe`], the one-shot alerts' oracle (plan 12,
-//! P12.T5.b).
+//! (rendering plan R09, R09.T16), in [`observe`], the one-shot alerts' oracle (plan 12,
+//! P12.T5.b), and, in `binaries` (with the `testing` feature), the binary classes' prior members
+//! (plan 11, P11.T8.a).
 
+#[cfg(feature = "testing")]
+pub mod binaries;
 pub mod observe;
 pub mod sky;
 #[cfg(feature = "testing")]

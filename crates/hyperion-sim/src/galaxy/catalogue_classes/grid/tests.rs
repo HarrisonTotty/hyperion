@@ -978,17 +978,22 @@ const FIFTY_LY_COUNTS: [[usize; 2]; 2] = [[2_902, 20], [2_890, 20]];
 // 6. The production lookup.
 
 /// Whether the production lookup has class value `class`'s process: the core collapses
-/// (P09.T33.a) and the Type Ia (P09.T34.a).
+/// (P09.T33.a), the Type Ia (P09.T34.a) and the two accreting white dwarf classes (P11.T8.a).
 fn built(class: u8) -> bool {
-    [ClassId::CORE_COLLAPSE, ClassId::TYPE_IA]
-        .iter()
-        .any(|built| built.value() == class)
+    [
+        ClassId::CORE_COLLAPSE,
+        ClassId::TYPE_IA,
+        ClassId::ACCRETING_WHITE_DWARF,
+        ClassId::ACCRETING_WHITE_DWARF_SLOW,
+    ]
+    .iter()
+    .any(|built| built.value() == class)
 }
 
-/// P09.T33.a and P09.T34.a: the production lookup visits the core collapses and the Type Ia alone;
-/// every other class's IDs name nothing in the grid, and plan 03's resolve answers each `111` ID
-/// through `system_of`, with the record its class gives the member, or as not generated for a
-/// placed class with no process yet.
+/// P09.T33.a, P09.T34.a and P11.T8.a: the production lookup visits the core collapses, the Type
+/// Ia and the accreting white dwarfs alone; every other class's IDs name nothing in the grid, and
+/// plan 03's resolve answers each `111` ID through `system_of`, with the record its class gives
+/// the member, or as not generated for a placed class with no process yet.
 #[test]
 fn the_production_lookup_resolves_only_the_registered_classes() {
     struct Visited;

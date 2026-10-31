@@ -9,11 +9,11 @@
 //!
 //! The sources built so far are the grid's seven layers, the catalogue features' members (plan 09,
 //! P09.T21), the dwarf cores' and the streams' members (plan 10, P10.T7.b and P10.T8.b), the
-//! supernova entry of plan 09's phase 4 as a value, and the first two catalogue classes' entries,
-//! the core collapses (P09.T33.a) and the Type Ia (P09.T34.a). The displaced remnants (plan 08,
-//! P08.T12), the galactic centre's members (P09.T24–T28) and the other catalogue classes (P09.T35,
-//! P09.T43, plan 11) are not placed yet; each is added here by the task that places it (P12.T0 as
-//! built).
+//! supernova entry of plan 09's phase 4 as a value, and the catalogue classes' entries built so
+//! far, the core collapses (P09.T33.a), the Type Ia (P09.T34.a) and the accreting white dwarfs,
+//! fast and slow (P11.T8.a). The displaced remnants (plan 08, P08.T12), the galactic centre's
+//! members (P09.T24–T28) and the other catalogue classes (P09.T35, P09.T43, P11.T8.b–d) are not
+//! placed yet; each is added here by the task that places it (P12.T0 as built).
 
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
@@ -22,6 +22,7 @@ use hyperion_sim::events::{
     TimeWindow, tags,
 };
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::catalogue_classes::binary::{AccretingWdFast, AccretingWdSlow};
 use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use hyperion_sim::galaxy::catalogue_classes::supernova::{
     SupernovaEntry, SupernovaKind, SupernovaState,
@@ -492,6 +493,52 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
                 }
             }
         }
+    }
+
+    // An accreting white dwarf of each class of the class grid (plan 11, P11.T8.a): its system on
+    // its one straight line, its record's existence, its stars (its pair, from its marks) and its
+    // novae, the series its scan marks carry, for a window at the horizon's start.
+    let fast = AccretingWdFast::new(&galaxy);
+    let slow = AccretingWdSlow::new(&galaxy);
+    let first_entry = |class: ClassId| {
+        (-4..4).find_map(|x| {
+            let key = CatalogueCellKey::new(class, [x, 50, 0]).expect("a cell of the root cube");
+            let entries = if class == ClassId::ACCRETING_WHITE_DWARF {
+                CatalogueClassCell::generate(&galaxy, &fast, key).into_entries()
+            } else {
+                CatalogueClassCell::generate(&galaxy, &slow, key).into_entries()
+            };
+            entries.into_iter().next()
+        })
+    };
+    for class in [
+        ClassId::ACCRETING_WHITE_DWARF,
+        ClassId::ACCRETING_WHITE_DWARF_SLOW,
+    ] {
+        let entry = first_entry(class).expect("the solar circle has accreting white dwarfs");
+        let catalogue = system_of(&galaxy, entry.id()).expect("an entry resolves");
+        let record = catalogue.record();
+        let stars = catalogue
+            .stars(&galaxy)
+            .expect("an accreting white dwarf's stars are its pair's");
+        for t in TIMES {
+            let p = catalogue.position_at(t);
+            assert_in_padded_cube("an accreting white dwarf", &p);
+            assert_eq!(position_at(&galaxy, record, t), p);
+            assert_eq!(record.existence_at(t), Existence::Exists);
+            assert!(record.age_at(t).value().is_finite());
+            assert_eq!(stars.summary_at(t).existence(), SystemExistence::Exists);
+            assert!(stars.brief_at(t).is_some(), "{:?} at {t}", record.id());
+            assert!(stars.state_at(t).is_some_and(|s| s.pairs().len() == 1));
+        }
+        let opening = TimeWindow::new(
+            SourceHorizon::START,
+            SourceHorizon::START.checked_add(year).expect("in range"),
+        )
+        .expect("ordered");
+        let mut novae = Vec::new();
+        entry.value().scan().eruptions_in(opening, &mut novae);
+        assert!(novae.iter().all(|e| opening.contains(e.time())));
     }
 
     // Both event constructions answer for a window at the horizon's start.

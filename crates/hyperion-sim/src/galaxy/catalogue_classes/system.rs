@@ -144,7 +144,16 @@ impl CatalogueMotion {
 pub struct CatalogueSystem {
     record: SystemRecord,
     motion: CatalogueMotion,
-    stars: Option<(Composition, MultiplicityContext)>,
+    stars: Option<StarSource>,
+}
+
+/// Where a catalogue system's stars come from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum StarSource {
+    /// The stellar stage, at a composition and under a multiplicity context.
+    Stage(Composition, MultiplicityContext),
+    /// Its class, which builds them from its own marks ([`ClassProcess::stars`]).
+    Class,
 }
 
 impl CatalogueSystem {
@@ -172,7 +181,18 @@ impl CatalogueSystem {
     #[must_use]
     pub const fn with_stars(self, composition: Composition, context: MultiplicityContext) -> Self {
         Self {
-            stars: Some((composition, context)),
+            stars: Some(StarSource::Stage(composition, context)),
+            ..self
+        }
+    }
+
+    /// The same system, whose stars its class builds from its own marks
+    /// ([`ClassProcess::stars`]), as plan 11's binary classes do (P11.T8.a): a white dwarf and its
+    /// donor that the stellar stage, which evolves single stars, would not give.
+    #[must_use]
+    pub const fn with_class_stars(self) -> Self {
+        Self {
+            stars: Some(StarSource::Class),
             ..self
         }
     }
@@ -203,18 +223,35 @@ impl CatalogueSystem {
     /// under, where its class models them by the stellar stage.
     #[must_use]
     pub fn star_model(&self) -> Option<(&Composition, MultiplicityContext)> {
-        self.stars
-            .as_ref()
-            .map(|(composition, context)| (composition, *context))
+        match &self.stars {
+            Some(StarSource::Stage(composition, context)) => Some((composition, *context)),
+            Some(StarSource::Class) | None => None,
+        }
     }
 
-    /// Its stars, [`SystemStars::generate_with`] of its record at its composition and context, or
-    /// `None` for a member its class does not model by the stellar stage.
+    /// Its stars: [`SystemStars::generate_with`] of its record at its composition and context,
+    /// those its class builds ([`ClassProcess::stars`] of the member its ID resolves to), or `None`
+    /// for a member its class does not model.
     #[must_use]
     pub fn stars(&self, galaxy: &Galaxy) -> Option<SystemStars> {
-        self.stars.map(|(composition, context)| {
-            SystemStars::generate_with(galaxy, &self.record, &composition, context)
-        })
+        match self.stars? {
+            StarSource::Stage(composition, context) => Some(SystemStars::generate_with(
+                galaxy,
+                &self.record,
+                &composition,
+                context,
+            )),
+            StarSource::Class => {
+                let SystemIdKind::Catalogue(id) = self.record.id().kind() else {
+                    unreachable!("a catalogue system's record carries its 111 ID");
+                };
+                // A system its class built resolves to the same member; one that does not resolve
+                // in `galaxy`, a system of another galaxy's, has no stars here.
+                resolve(galaxy, &ProductionClasses, id, StarsOf { galaxy })
+                    .ok()
+                    .flatten()
+            }
+        }
     }
 }
 
@@ -307,6 +344,23 @@ pub fn system_of_record(galaxy: &Galaxy, record: &SystemRecord) -> CatalogueSyst
     };
     system_of(galaxy, id)
         .expect("a catalogue system's record resolves in the galaxy that placed it")
+}
+
+/// [`CatalogueSystem::stars`]'s visit of the member of class stars [`resolve`] found.
+struct StarsOf<'g> {
+    galaxy: &'g Galaxy,
+}
+
+impl MemberVisitor for StarsOf<'_> {
+    type Output = Option<SystemStars>;
+
+    fn visit<P: ClassProcess>(
+        self,
+        process: &P,
+        member: CatalogueMember<P::Entry>,
+    ) -> Option<SystemStars> {
+        process.stars(self.galaxy, &member)
+    }
 }
 
 /// [`system_of`]'s visit of the member [`resolve`] found.

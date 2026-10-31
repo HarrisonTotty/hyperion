@@ -1945,7 +1945,23 @@ impl SystemHierarchy {
             flat,
             Radians::ZERO,
         )?;
-        Ok(Self {
+        Ok(Self::binary_on(system, m0, (m1, kind), orbit))
+    }
+
+    /// Two stars of `system` on `orbit`: the primary, star 0, of initial mass `m0` M☉, and the
+    /// companion, star 1, of `m1` M☉ and kind `kind`, laid out as [`binary`](Self::binary) lays
+    /// them out. A catalogue entry of a binary class holds its marked orbit here (plan 11,
+    /// P11.T8.a): the orbit now, whose parameter is its stars' masses now, beside their initial
+    /// masses, as a grid pair's drawn orbit sits beside the stars the engine changes.
+    #[must_use]
+    pub(crate) fn binary_on(
+        system: SystemId,
+        m0: SolarMasses,
+        (m1, kind): (SolarMasses, SlotKind),
+        orbit: KeplerElements,
+    ) -> Self {
+        let mass = m0 + m1;
+        Self {
             nodes: vec![
                 HierarchyNode::Pair {
                     inner: NodeIndex(1),
@@ -1969,7 +1985,7 @@ impl SystemHierarchy {
             ],
             node_masses: vec![mass, m0, m1],
             dropped: 0,
-        })
+        }
     }
 }
 

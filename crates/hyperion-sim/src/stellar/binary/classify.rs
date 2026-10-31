@@ -306,12 +306,16 @@ pub(crate) fn xrb_critical_rate(mass: SolarMasses, r_out: Metres) -> SolarMasses
 /// fit to Yaron et al.'s (2005, ApJ 623, 398) table 2 at a core of 10⁷ K, 0.65–1.40 M☉ and
 /// 10⁻¹¹–10⁻⁷ M☉ yr⁻¹ (20 models; 0.125 dex rms, 0.251 dex at worst, confirmed by ruling 129.5),
 /// made by the research behind P11.T5, since no published closed form covers that range. The cold
-/// core is Townsley and Bildsten's (2004, ApJ 600, 390) equilibrium, 5.5 × 10⁶ K. Its recurrence
-/// times run 1.2–2.3 times Wolf et al.'s (2013, table 2).
+/// core is Townsley and Bildsten's (2004, ApJ 600, 390) equilibrium, 5.5 × 10⁶ K for 0.6 M☉ at
+/// 10⁻¹⁰·⁴ M☉ yr⁻¹, inside the 0.5–1 × 10⁷ K their equilibrium spans at cataclysmic variables'
+/// rates (Townsley and Gänsicke 2009, ApJ 693, 1007). Its recurrence times run 1.2–2.3 times
+/// Wolf et al.'s (2013, table 2).
 ///
 /// The mass is held to 0.6–1.40 M☉, so that a helium dwarf takes the lightest carbon–oxygen
 /// dwarf's ignition mass, and the rate to the fit's own 10⁻¹¹–10⁻⁷: extrapolated to 10⁻¹² it runs
-/// 0.26–0.50 dex above Yaron et al.'s rows there (ruling 129.5; P11.T8.a re-checks it).
+/// 0.26–0.50 dex above Yaron et al.'s rows there (ruling 129.5). P11.T8.a re-checked it against
+/// Yaron et al.'s table 2: a refit of the 20 rows at 10⁷ K gives the same coefficients, rms and
+/// worst case, and their table 3's recurrence periods are these ignition masses over the rate.
 #[must_use]
 pub(crate) fn nova_ignition_mass(mass: SolarMasses, rate: SolarMassesPerYear) -> SolarMasses {
     let m = mass.value().clamp(0.6, 1.40);
@@ -974,13 +978,55 @@ pub fn carved_class(timeline: &BinaryTimeline, age_at_epoch: Years) -> Option<Ca
     if xray {
         return Some(CarvedClass::XrayBinary);
     }
-    white_dwarf.map(|(recurrence, _)| {
-        if recurrence <= LIGHT_CROSSING_L.as_julian_years_f64() {
-            CarvedClass::AccretingWdFast
-        } else {
-            CarvedClass::AccretingWdSlow
+    white_dwarf.map(|(recurrence, _)| recurrence_class(recurrence))
+}
+
+/// The accreting white dwarf class of novae that recur every `recurrence_years`: the fast hosts'
+/// within L, the slow hosts' beyond it or never (design note 12). [`carved_class`] splits on it,
+/// and so does a catalogue entry's scan (P11.T8.a).
+#[must_use]
+pub(crate) fn recurrence_class(recurrence_years: f64) -> CarvedClass {
+    if recurrence_years <= LIGHT_CROSSING_L.as_julian_years_f64() {
+        CarvedClass::AccretingWdFast
+    } else {
+        CarvedClass::AccretingWdSlow
+    }
+}
+
+/// What feeds the white dwarf of an accreting pair where [`carved_class`] reads it, for a system
+/// `age_at_epoch` old at the epoch (P11.T8.a): the age, the accretor's component and its rate, at
+/// the epoch's age if it accretes then and otherwise at the first age of the horizon at which it
+/// does, by the same reading of "any age"; `None` if no age of the horizon has one. A sampler's
+/// test reads a member's marks here (`brute_force_class_members`).
+#[cfg(any(test, feature = "testing"))]
+#[must_use]
+pub(crate) fn white_dwarf_feeding(
+    timeline: &BinaryTimeline,
+    age_at_epoch: Years,
+) -> Option<(Years, Component, SolarMassesPerYear)> {
+    let (lo, hi) = horizon_years(timeline, age_at_epoch)?;
+    let now = age_at_epoch.value().clamp(lo, hi);
+    let mut found: Option<(Years, Component, SolarMassesPerYear, bool)> = None;
+    for age in horizon_sample_years(timeline, (lo, hi), now) {
+        let at = Years::new(age);
+        let state = timeline.state_at(at);
+        let reading = classified(&state, &timeline.class_context(at));
+        if reading.class.is_xray_binary() {
+            continue;
         }
-    })
+        let Some(feeding) = reading.feeding else {
+            continue;
+        };
+        if !is_white_dwarf(state.stars()[feeding.accretor].phase()) {
+            continue;
+        }
+        let at_now = age.total_cmp(&now).is_eq();
+        if found.is_none_or(|(.., earlier_now)| at_now && !earlier_now) {
+            let accretor = Component::BOTH[feeding.accretor];
+            found = Some((at, accretor, feeding.rate, at_now));
+        }
+    }
+    found.map(|(at, accretor, rate, _)| (at, accretor, rate))
 }
 
 #[cfg(test)]

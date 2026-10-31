@@ -144,6 +144,12 @@ event_tags! {
     /// hole's own ID (Poisson bins; P09.T30.a).
     0x0201 => TIDAL_DISRUPTION = tags::CENTRE_EV_TIDAL_DISRUPTION;
 
+    // Plan 11: binaries, block 0x0300–0x03FF. P11.T8.a registers 0x0300, whose series an
+    // accreting white dwarf's scan marks carry; P11.T9 registers 0x0301–0x0306.
+    /// Classical novae of accreting white dwarfs, one a cycle of the recurrence period on the
+    /// white dwarf's body, 0 (monotone phase; P11.T8.a).
+    0x0300 => NOVA = tags::BINARY_EV_NOVA;
+
     // Plan 14: bodies, block 0x0400–0x04FF (plan 14, design note 15). P14.T31.a registers 0x0400,
     // 0x0401 and 0x0404, and P14.T31.b 0x0402 and 0x0403; 0x0405–0x04FF stay free for later body
     // events.
@@ -229,6 +235,24 @@ mod tests {
             .collect();
         in_block.sort_unstable();
         assert_eq!(in_block, [0x0200, 0x0201, 0x0202]);
+    }
+
+    /// Plan 11's block holds 0x0300 alone so far, P11.T8.a's novae, backed by its domain tag;
+    /// 0x0301–0x0306 are P11.T9's, and the rest of the block stays reserved.
+    #[test]
+    fn plan_11_holds_0x0300_with_its_name() {
+        assert_eq!(NOVA.number(), 0x0300);
+        assert_eq!(NOVA.name(), "binary.ev.nova");
+        assert_eq!(EventTag::from_number(0x0300), Some(NOVA));
+        for reserved in [0x0301, 0x0306, 0x03FF] {
+            assert_eq!(EventTag::from_number(reserved), None, "{reserved:#06x}");
+        }
+        let in_block: Vec<u16> = ALL
+            .iter()
+            .map(|t| t.number())
+            .filter(|n| (0x0300..=0x03FF).contains(n))
+            .collect();
+        assert_eq!(in_block, [0x0300]);
     }
 
     /// Plan 14's block holds 0x0400–0x0404, its five event tags of Provides, each backed by its

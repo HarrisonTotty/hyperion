@@ -1,16 +1,36 @@
-//! Test helpers shared by the census bounds' tests (P11.T17.a's `light.rs` and P11.T17.b's
-//! `pair_light`): a splitmix64 stream and the generator's own star–star pairs.
+//! Test helpers: those shared by the census bounds' tests (P11.T17.a's `light.rs` and P11.T17.b's
+//! `pair_light`), a splitmix64 stream and the generator's own star–star pairs; and, with the
+//! `testing` feature for other crates' tests too, the binary classes' prior members
+//! ([`brute_force_class_members`], P11.T8.a), which plan 15's P15.T10.b fits the samplers to.
+//!
+//! The census bounds' helpers serve this crate's own tests alone, so they are built for tests
+//! only; the splitmix64 stream serves both.
 
+mod members;
+
+pub use members::{
+    AccretingMarks, ClassMember, brute_force_class_members, brute_force_class_members_in,
+};
+
+#[cfg(test)]
 use crate::Seed;
+#[cfg(test)]
 use crate::galaxy::Galaxy;
+#[cfg(test)]
 use crate::galaxy::params::GalaxyParams;
+#[cfg(test)]
 use crate::galaxy::placement::{CellKey, generate_cell};
+#[cfg(test)]
 use crate::id::Layer;
+#[cfg(test)]
 use crate::stellar::binary::BinaryInput;
+#[cfg(test)]
 use crate::stellar::draws::StarDraws;
+#[cfg(test)]
 use crate::stellar::multiplicity::{
     HierarchyNode, RedrawAttempt, SlotKind, StarIndex, draw_hierarchy_of_composition,
 };
+#[cfg(test)]
 use crate::stellar::system::{draw_metallicity, grid_multiplicity, primary_draws};
 
 /// A splitmix64 stream.
@@ -25,6 +45,7 @@ impl Mix {
         z ^ (z >> 31)
     }
 
+    #[cfg(test)]
     pub(crate) fn unit(&mut self) -> f64 {
         #[expect(
             clippy::cast_precision_loss,
@@ -42,6 +63,7 @@ impl Mix {
 }
 
 /// The Milky Way fixture under `seed`.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn milky_way(seed: u64) -> Galaxy {
     Galaxy::from_params(Seed::new(seed), GalaxyParams::milky_way_like())
@@ -53,6 +75,7 @@ pub(crate) fn milky_way(seed: u64) -> Galaxy {
 /// 4,000 ly along x and 2,000 ly along y of the point 26,000 ly out along +y, each record's
 /// hierarchy at attempt (its count mod 8), its composition, its primary's draws and its
 /// companions' at that attempt, with the record's age at the epoch, years.
+#[cfg(test)]
 pub(crate) fn generated_pairs(
     galaxy: &Galaxy,
     layer: Layer,

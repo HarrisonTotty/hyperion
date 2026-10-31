@@ -1528,6 +1528,43 @@ impl SystemStars {
         }
     }
 
+    /// The stars of a catalogue entry of a binary class (plan 11, P11.T8.a): `record`'s system of
+    /// the two stars of `hierarchy`, as `stars` model them on their own, and the pair's
+    /// `timeline`, which the class builds from its marks
+    /// ([`BinaryTimeline::from_marks`](crate::stellar::binary::BinaryTimeline::from_marks)). The
+    /// timeline gives both stars' states wherever the system reads them, as an evolved timeline
+    /// does a grid pair's; the entry's history is its models'.
+    ///
+    /// # Panics
+    ///
+    /// If `hierarchy` is not one pair of two stars, or `stars` does not hold a model for each.
+    #[must_use]
+    pub(crate) fn of_marked_pair(
+        record: SystemRecord,
+        hierarchy: SystemHierarchy,
+        stars: Vec<StarModel>,
+        timeline: BinaryTimeline,
+    ) -> Self {
+        assert_eq!(hierarchy.star_count(), 2, "a marked pair is two stars");
+        assert_eq!(stars.len(), 2, "a marked pair's stars each have a model");
+        let (node, _) = hierarchy
+            .pairs()
+            .next()
+            .expect("two stars of a hierarchy are a pair");
+        let second = StarIndex::from_body(1).expect("body 1 is a star's");
+        Self {
+            record,
+            hierarchy,
+            stars,
+            pairs: vec![PairTimeline {
+                node,
+                stars: [StarIndex::PRIMARY, second],
+                timeline,
+            }],
+            attempt: GRID_ATTEMPT,
+        }
+    }
+
     /// The first pair, depth first, whose timeline falls into a carved class at any age of the
     /// source horizon, with that class.
     #[must_use]

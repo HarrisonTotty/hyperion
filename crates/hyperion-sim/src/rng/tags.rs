@@ -1022,6 +1022,45 @@ domain_tags! {
     /// A Type Ia entry's survivor's direction of flight from the site, in the progenitor's frame:
     /// two words, an isotropic direction (P09.T34.a).
     CLASS_TYPE_IA_SURVIVOR: System = "class.type_ia.survivor";
+
+    // Plan 11, P11.T8.a: an accreting white dwarf candidate's draws, `System` tags under
+    // `class.awd.` (the plan's `class.awd`, one per property group, as P09.T33.a's are), opened
+    // with `ObjectKey::from(SystemId)` of the candidate's ID, its member 0 (Design note 23). The
+    // fast and the slow hosts share them; their IDs differ in the class field. Its two stars'
+    // own draws are plan 06's `star.*` tags, keyed by bodies 0 and 1 at attempt 0. And the event
+    // key of plan 11's `0x0300 NOVA`. Appended after P09.T34.a's `class.type_ia.survivor`, because
+    // the macro's order fixes `ALL`.
+
+    /// An accreting white dwarf candidate's site: words 0–2 its position in its 512 ly cell, x, y
+    /// and z, and word 3 the mark that thins it on the class's density and picks its density
+    /// component (P11.T8.a).
+    CLASS_AWD_SITE: System = "class.awd.site";
+
+    /// An accreting white dwarf candidate's scan marks: word 0 the rank of its nova recurrence
+    /// period on its class's side of L, word 1 the rank of its white dwarf's mass, word 2 the
+    /// place of its nova clock's origin in one period (P11.T8.a).
+    CLASS_AWD_RECURRENCE: System = "class.awd.recurrence";
+
+    /// An accreting white dwarf candidate's velocity at its site, galactic: plan 08's draw of its
+    /// component's law, four words per attempt of the escape cut (P11.T8.a).
+    CLASS_AWD_VELOCITY: System = "class.awd.velocity";
+
+    /// An accreting white dwarf candidate's binary now: word 0 its donor's kind, word 1 the rank of
+    /// its period, word 2 that of its donor's mass, words 3–5 its orbit's cosine of inclination,
+    /// ascending node and argument of periapsis, word 6 its mean anomaly at the epoch (P11.T8.a).
+    CLASS_AWD_BINARY: System = "class.awd.binary";
+
+    /// An accreting white dwarf candidate's history: the ranks of its primary's initial mass
+    /// (word 0), its donor's initial mass (word 1) and its age (word 2) (P11.T8.a).
+    CLASS_AWD_HISTORY: System = "class.awd.history";
+
+    /// An accreting white dwarf candidate's \[Fe/H\]: one normal of its component's distribution
+    /// at its site and age (P11.T8.a).
+    CLASS_AWD_METALLICITY: System = "class.awd.metallicity";
+
+    /// The event key of an accreting white dwarf's novae (plan 11's `0x0300 NOVA`, P11.T8.a): a
+    /// monotone phase at its recurrence period on its white dwarf, body 0.
+    BINARY_EV_NOVA: Event = "binary.ev.nova";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1432,6 +1471,21 @@ mod tests {
             assert!(tag.name().starts_with("class.type_ia."));
             assert!(ALL.contains(&tag));
         }
+        // P11.T8.a: the accreting white dwarfs' candidates, under plan 09's prefix `class.`.
+        for tag in [
+            CLASS_AWD_SITE,
+            CLASS_AWD_RECURRENCE,
+            CLASS_AWD_VELOCITY,
+            CLASS_AWD_BINARY,
+            CLASS_AWD_HISTORY,
+            CLASS_AWD_METALLICITY,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.awd."));
+            assert!(ALL.contains(&tag));
+        }
+        assert_eq!(BINARY_EV_NOVA.scope(), crate::rng::TagScope::Event);
+        assert_eq!(BINARY_EV_NOVA.name(), "binary.ev.nova");
     }
 
     #[test]

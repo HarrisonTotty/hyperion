@@ -20,7 +20,8 @@
 //!   draw more candidates than the 24-bit index numbers.
 //!
 //! **The production lookup**, [`ProductionClasses`], has one arm per class whose process is built:
-//! P09.T33.a's core collapses and P09.T34.a's Type Ia so far. Every other `111` ID that reaches
+//! P09.T33.a's core collapses, P09.T34.a's Type Ia and P11.T8.a's two accreting white dwarf
+//! classes so far. Every other `111` ID that reaches
 //! the grid answers [`NoSuchSystem`](ResolveSystemError::NoSuchSystem). Plan 03's
 //! [`placement::resolve`](crate::galaxy::placement::resolve) answers a `111` ID through it, with
 //! the record its class gives the member ([`ClassProcess::system`], [`system_of`]).
@@ -50,6 +51,7 @@ mod tests;
 use std::error::Error;
 use std::fmt;
 
+use super::binary::{AccretingWdFast, AccretingWdSlow};
 use super::core_collapse::CoreCollapseProcess;
 use super::ids::{CatalogueCellKey, entry_of};
 use super::registry::ClassId;
@@ -70,6 +72,7 @@ use crate::id::CatalogueSystemId;
 #[cfg(doc)]
 use crate::rng::Threshold;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
+use crate::stellar::system::SystemStars;
 use crate::units::PerCubicLightYear;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
@@ -251,6 +254,20 @@ pub trait ClassProcess {
     /// how its stars are generated where the class models them. Plan 03's resolve returns the
     /// record for the member's `111` ID ([`system_of`]).
     fn system(&self, galaxy: &Galaxy, member: &CatalogueMember<Self::Entry>) -> CatalogueSystem;
+
+    /// The stars of `member`, where its class builds them itself rather than through the stellar
+    /// stage, as plan 11's binary classes build theirs from their marks (P11.T8.a): what a
+    /// [`CatalogueSystem`] of class stars ([`CatalogueSystem::with_class_stars`]) answers. `None`,
+    /// the default, for a class whose members' stars are the stage's or not modelled. A class
+    /// whose [`system`](Self::system) gives class stars overrides it, and its tests show that its
+    /// members' systems answer with them.
+    fn stars(
+        &self,
+        _galaxy: &Galaxy,
+        _member: &CatalogueMember<Self::Entry>,
+    ) -> Option<SystemStars> {
+        None
+    }
 }
 
 /// One entry of a class cell: its candidate's ID, its number of members and what the class kept
@@ -762,7 +779,9 @@ pub trait ClassLookup {
 /// `ClassId::CORE_COLLAPSE => Some(visitor.visit(&CoreCollapseProcess::new(galaxy)))`:
 /// [`CORE_COLLAPSE`](ClassId::CORE_COLLAPSE) by P09.T33.a and [`TYPE_IA`](ClassId::TYPE_IA) by
 /// P09.T34.a (both registered), [`LUMINOUS_BLUE_VARIABLE`](ClassId::LUMINOUS_BLUE_VARIABLE) by
-/// P09.T43, and plan 11's five by P11.T8.
+/// P09.T43, and plan 11's five by P11.T8, of which
+/// [`ACCRETING_WHITE_DWARF`](ClassId::ACCRETING_WHITE_DWARF) and
+/// [`ACCRETING_WHITE_DWARF_SLOW`](ClassId::ACCRETING_WHITE_DWARF_SLOW) are registered (P11.T8.a).
 /// [`TIDAL_DISRUPTION_VICTIM`](ClassId::TIDAL_DISRUPTION_VICTIM) is never placed and gets none.
 /// Until its class's arm is added, every `111` ID of a class answers
 /// [`NoSuchSystem`](ResolveSystemError::NoSuchSystem).
@@ -779,6 +798,10 @@ impl ClassLookup for ProductionClasses {
         match class {
             ClassId::CORE_COLLAPSE => Some(visitor.visit(&CoreCollapseProcess::new(galaxy))),
             ClassId::TYPE_IA => Some(visitor.visit(&TypeIaProcess::new(galaxy))),
+            ClassId::ACCRETING_WHITE_DWARF => Some(visitor.visit(&AccretingWdFast::new(galaxy))),
+            ClassId::ACCRETING_WHITE_DWARF_SLOW => {
+                Some(visitor.visit(&AccretingWdSlow::new(galaxy)))
+            }
             _ => None,
         }
     }

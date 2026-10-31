@@ -11,9 +11,11 @@
 //! the IDs' and the grid's items are re-exported here. Of the classes' processes, phase 7's first
 //! two are built: the core collapses (P09.T33.a, [`core_collapse`]) and the Type Ia (P09.T34.a,
 //! [`type_ia::TypeIaProcess`]), the production lookup's ([`ProductionClasses`]) two arms, whose
-//! members are catalogue systems ([`system`]) that plan 03's resolve returns. The other processes
-//! and the carve-out follow in P09.T35, P09.T43 and plan 11.
+//! members are catalogue systems ([`system`]) that plan 03's resolve returns, and plan 11's
+//! accreting white dwarfs, fast and slow (P11.T8.a, [`binary`]). The other processes and the
+//! carve-out follow in P09.T35, P09.T43 and P11.T8.b–d.
 
+pub mod binary;
 pub mod core_collapse;
 pub mod grid;
 pub mod ids;
