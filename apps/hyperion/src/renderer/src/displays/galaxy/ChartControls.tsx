@@ -27,12 +27,22 @@ import {
  */
 export const STARS_KEY = "K";
 
-/** The narrowest and widest drive range the field accepts, in light-years. */
-const DRIVE_RANGE_MIN_LY = 0.01;
+/**
+ * The narrowest and widest drive range the field accepts, in light-years: the narrowest and widest
+ * query radius, so that the range a chart starts from is drawn on every chart (plan 05, design
+ * note D9; plan 09, P09.T42).
+ */
+const DRIVE_RANGE_MIN_LY = 0.001;
 const DRIVE_RANGE_MAX_LY = 500;
 
-/** Decimals a drive range keeps: the narrowest it accepts is 0.01 ly. */
-const DRIVE_RANGE_DECIMALS = 2;
+/**
+ * Decimals a drive range keeps: 0.0001 ly, about 6.3 AU, a tenth of the narrowest it accepts, as
+ * the chart's lengths are written to at most four (`formatChartLengthLy`).
+ */
+const DRIVE_RANGE_DECIMALS = 4;
+
+/** Decimals the drive range's hint and refusal write its narrowest with: `0.001`. */
+const DRIVE_RANGE_MIN_DECIMALS = 3;
 
 /** Decimals a chart time keeps, as `formatUniverseTimeYr` writes it. */
 const TIME_DECIMALS = 2;
@@ -62,11 +72,11 @@ interface NumberFieldProps {
   /** The value on show, formatted without its unit. */
   readonly text: string;
   /**
-   * The format the field expects, shown beside it: `0.01 to 500 ly`, a span written with "to", as
+   * The format the field expects, shown beside it: `0.001 to 500 ly`, a span written with "to", as
    * inside a sentence (§ Numbers).
    */
   readonly hint: string;
-  /** What the operator may enter, in words, for a refusal: `enter 0.01 to 500 ly`. */
+  /** What the operator may enter, in words, for a refusal: `enter 0.001 to 500 ly`. */
   readonly valid: string;
   /** The unit after the value, or an element such as a time system's label before it. */
   readonly unit: string;
@@ -512,8 +522,8 @@ export function ChartControls({
         label="DRIVE RANGE"
         name="DRIVE RANGE"
         text={formatChartLengthLy(driveRangeLy)}
-        hint={`${formatNumber(DRIVE_RANGE_MIN_LY, 2)} to ${formatNumber(DRIVE_RANGE_MAX_LY, 0)} ly`}
-        valid={`enter ${formatNumber(DRIVE_RANGE_MIN_LY, 2)} to ${formatNumber(DRIVE_RANGE_MAX_LY, 0)} ly`}
+        hint={`${formatNumber(DRIVE_RANGE_MIN_LY, DRIVE_RANGE_MIN_DECIMALS)} to ${formatNumber(DRIVE_RANGE_MAX_LY, 0)} ly`}
+        valid={`enter ${formatNumber(DRIVE_RANGE_MIN_LY, DRIVE_RANGE_MIN_DECIMALS)} to ${formatNumber(DRIVE_RANGE_MAX_LY, 0)} ly`}
         unit="ly"
         decimals={DRIVE_RANGE_DECIMALS}
         accepts={(value) => value >= DRIVE_RANGE_MIN_LY && value <= DRIVE_RANGE_MAX_LY}

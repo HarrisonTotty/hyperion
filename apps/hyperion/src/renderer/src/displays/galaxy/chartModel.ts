@@ -107,8 +107,10 @@ function readsInAu(queryRadiusLy: number): boolean {
  *
  * @remarks
  * For the `QUERY RADIUS` selector's steps and the `QUERY EDGE` label, so that the two write a
- * radius alike. The fine steps are 1-2-5 values in light-years, 0.005 ly to 0.001 ly, read in the
- * unit the scale bar takes below 0.01 ly ({@link formatScaleLength}).
+ * radius alike, and for the drive range's `RANGE` and `PLANE` labels, which the query radius follows
+ * (plan 05, design note D9): `RANGE 94.9 AU SET`. The fine steps are 1-2-5 values in light-years,
+ * 0.005 ly to 0.001 ly, read in the unit the scale bar takes below 0.01 ly
+ * ({@link formatScaleLength}).
  */
 export function formatQueryRadius(ly: number): string {
   return readsInAu(ly) ? formatScaleLength(ly) : `${formatChartLengthLy(ly)} ly`;
@@ -438,7 +440,7 @@ function rangeIsShown(radiusLy: number, driveRangeLy: number): boolean {
 }
 
 function rangeLabel(driveRangeLy: number): string {
-  return `RANGE ${formatChartLengthLy(driveRangeLy)} ly SET`;
+  return `RANGE ${formatQueryRadius(driveRangeLy)} SET`;
 }
 
 /**
@@ -447,7 +449,7 @@ function rangeLabel(driveRangeLy: number): string {
  * measurement (plan 05, design note D9, and the orchestrator's ruling 10).
  */
 function planeLabel(driveRangeLy: number): string {
-  return `PLANE ${formatChartLengthLy(driveRangeLy)} ly SET`;
+  return `PLANE ${formatQueryRadius(driveRangeLy)} SET`;
 }
 
 /**

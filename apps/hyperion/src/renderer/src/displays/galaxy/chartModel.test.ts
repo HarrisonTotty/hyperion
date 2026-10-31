@@ -105,6 +105,20 @@ describe("toScene", () => {
     ]);
   });
 
+  it("draws a drive range below 0.01 ly on a fine chart, labelled in AU as a setting", () => {
+    // 0.0015 ly is 94.86 AU, inside a chart of 0.002 ly (126 AU).
+    const scene = sceneOf([{ relLy: [0.001, 0, 0] }], { radiusLy: 0.002, driveRangeLy: 0.0015 });
+
+    expect(scene.spheres.map((sphere) => sphere.label)).toEqual([
+      "RANGE 94.9 AU SET",
+      "QUERY EDGE 126 AU",
+    ]);
+    expect(scene.plane.rings.find((ring) => ring.radius === 0.0015)?.label).toBe(
+      "PLANE 94.9 AU SET",
+    );
+    expect(scene.points[0]?.status).toBe("available");
+  });
+
   it("labels the query edge of a chart of the centre's finest step in AU, as its selector reads", () => {
     const scene = sceneOf([], { radiusLy: 0.001 });
 
@@ -422,6 +436,8 @@ describe("queryRadiusForDriveRange", () => {
     [50, 50],
     [80, 100],
     [0.01, 0.01],
+    [0.0015, 0.002],
+    [0.001, 0.001],
     [0.0005, 0.001],
     [600, 500],
   ])("follows a drive range of %s ly with %s ly", (driveRangeLy, radiusLy) => {

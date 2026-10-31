@@ -211,7 +211,32 @@ describe("ChartControls", () => {
     await user.type(screen.getByLabelText("DRIVE RANGE"), "900{Enter}");
 
     expect(
-      screen.getByText(statusLine("DRIVE RANGE INVALID: enter 0.01 to 500 ly")),
+      screen.getByText(statusLine("DRIVE RANGE INVALID: enter 0.001 to 500 ly")),
+    ).toBeInTheDocument();
+    expect(onDriveRange).not.toHaveBeenCalled();
+  });
+
+  it("enters a drive range below 0.01 ly, down to the narrowest chart's 0.001 ly (plan 09, P09.T42)", async () => {
+    const user = userEvent.setup();
+    const { onDriveRange } = renderControls();
+
+    await user.clear(screen.getByLabelText("DRIVE RANGE"));
+    await user.type(screen.getByLabelText("DRIVE RANGE"), "0.0015{Enter}");
+    await user.clear(screen.getByLabelText("DRIVE RANGE"));
+    await user.type(screen.getByLabelText("DRIVE RANGE"), "0.001{Enter}");
+
+    expect(onDriveRange.mock.calls).toEqual([[0.0015], [0.001]]);
+  });
+
+  it("refuses a drive range narrower than the narrowest chart", async () => {
+    const user = userEvent.setup();
+    const { onDriveRange } = renderControls();
+
+    await user.clear(screen.getByLabelText("DRIVE RANGE"));
+    await user.type(screen.getByLabelText("DRIVE RANGE"), "0.0009{Enter}");
+
+    expect(
+      screen.getByText(statusLine("DRIVE RANGE INVALID: enter 0.001 to 500 ly")),
     ).toBeInTheDocument();
     expect(onDriveRange).not.toHaveBeenCalled();
   });
@@ -252,7 +277,7 @@ describe("ChartControls", () => {
 
     expect(field).toHaveValue("50");
     expect(field).not.toHaveAttribute("aria-invalid");
-    expect(screen.queryByText(statusLine("DRIVE RANGE INVALID: enter 0.01 to 500 ly"))).toBeNull();
+    expect(screen.queryByText(statusLine("DRIVE RANGE INVALID: enter 0.001 to 500 ly"))).toBeNull();
     expect(onDriveRange).not.toHaveBeenCalled();
   });
 
@@ -431,7 +456,7 @@ describe("ChartControls", () => {
   it("writes DRIVE RANGE's hint as a span in words", () => {
     renderControls();
 
-    expect(describedText(numberField("DRIVE RANGE"))).toBe("0.01 to 500 ly");
+    expect(describedText(numberField("DRIVE RANGE"))).toBe("0.001 to 500 ly");
   });
 });
 
@@ -444,7 +469,7 @@ type NumberFieldName = (typeof NUMBER_FIELDS)[number];
 const REFUSALS: Readonly<
   Record<NumberFieldName, { readonly typed: string; readonly hint: string; readonly says: string }>
 > = {
-  "DRIVE RANGE": { typed: "900", hint: "0.01 to 500 ly", says: "enter 0.01 to 500 ly" },
+  "DRIVE RANGE": { typed: "900", hint: "0.001 to 500 ly", says: "enter 0.001 to 500 ly" },
   "CHART TIME": { typed: "1001", hint: "±1000 yr", says: "enter -1000 to 1000 yr" },
 };
 
@@ -509,7 +534,7 @@ describe("ChartControls' refusals (plan 12, P12.T11.c)", () => {
     await refuseBoth("local-chart local-chart--compact");
 
     expect(read()).toEqual(stacked);
-    expect(stacked).toContain("DRIVE RANGE INVALID: enter 0.01 to 500 ly");
+    expect(stacked).toContain("DRIVE RANGE INVALID: enter 0.001 to 500 ly");
   });
 
   it("drops the refused mark with the refusal, so that the hint comes back", async () => {

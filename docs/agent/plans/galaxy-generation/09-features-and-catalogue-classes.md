@@ -5250,3 +5250,6 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     per decade below, 5 below 0.01 ly; `radiusReading`, `placeReadings` and `modeReading` take it,
     the slots widening with it. `HrDiagram` gains `placeDecimals`. Built to a guide draft (lean,
     2026-10-31): the guide states no furniture precision but `POSITION`'s "to one decimal".
+  - _`DRIVE RANGE`._ Accepts 0.001–500 ly at four decimals (the query radii's span, D9's default
+    radius following it); `RANGE` and `PLANE` labels go through `formatQueryRadius`, so a range
+    below 0.01 ly reads in AU (`RANGE 94.9 AU SET`).
