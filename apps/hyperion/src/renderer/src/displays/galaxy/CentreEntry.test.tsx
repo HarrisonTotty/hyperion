@@ -116,7 +116,9 @@ describe("CentreEntry", () => {
 
     expect(field("X")).toHaveValue("70000");
     expect(field("X")).toHaveAttribute("aria-invalid", "true");
-    expect(describedText(field("X"))).toBe("±65,536 ly X INVALID: enter -65,536 to 65,535.9999 ly");
+    expect(describedText(field("X"))).toBe(
+      "±65,536 ly X INVALID: enter -65,536 to 65,535.99999 ly",
+    );
     expect(reading("RADIUS")).toBe("26,000.0 ly");
   });
 
@@ -128,7 +130,7 @@ describe("CentreEntry", () => {
     await user.tab();
 
     expect(
-      screen.getByText(statusLine("Z INVALID: enter -65,536 to 65,535.9999 ly")),
+      screen.getByText(statusLine("Z INVALID: enter -65,536 to 65,535.99999 ly")),
     ).toBeInTheDocument();
     expect(reading("HEIGHT")).toBe("+12.0 ly");
   });
@@ -145,7 +147,7 @@ describe("CentreEntry", () => {
     const state = screen.getByText("X, Y INVALID:");
     expect([state.className, state.nextElementSibling?.textContent]).toEqual([
       "status-text__state",
-      " enter -65,536 to 65,535.9999 ly",
+      " enter -65,536 to 65,535.99999 ly",
     ]);
   });
 
@@ -224,11 +226,21 @@ describe("CentreEntry", () => {
     expect(reading("HEIGHT")).toBe("+0.1 ly");
   });
 
-  it("refuses a value that rounds, at the four decimals an entry keeps, onto the cube's upper face", async () => {
+  it("places the cursor to 0.00001 ly, a hundredth of the finest chart's radius (plan 09, P09.T42)", async () => {
+    const { user, onCursor } = renderEntry();
+    await user.clear(field("X"));
+
+    await user.type(field("X"), "0.000014{Enter}");
+
+    expect(onCursor).toHaveBeenLastCalledWith([0.00001, 0, 12]);
+    expect(field("X")).toHaveValue("0.00001");
+  });
+
+  it("refuses a value that rounds, at the five decimals an entry keeps, onto the cube's upper face", async () => {
     const { user } = renderEntry();
     await user.clear(field("X"));
 
-    await user.type(field("X"), "65535.99996{Enter}");
+    await user.type(field("X"), "65535.999996{Enter}");
 
     expect(field("X")).toHaveAttribute("aria-invalid", "true");
     expect(reading("RADIUS")).toBe("26,000.0 ly");
@@ -238,9 +250,9 @@ describe("CentreEntry", () => {
     const { user } = renderEntry();
     await user.clear(field("Y"));
 
-    await user.type(field("Y"), "65535.9999{Enter}");
+    await user.type(field("Y"), "65535.99999{Enter}");
 
-    expect(field("Y")).toHaveValue("65,535.9999");
+    expect(field("Y")).toHaveValue("65,535.99999");
     expect(field("Y")).not.toHaveAttribute("aria-invalid");
     expect(field("Y").nextElementSibling).toHaveTextContent("ly");
   });
@@ -267,7 +279,7 @@ describe("CentreEntry", () => {
     await user.click(centre);
 
     expect(centre).toHaveAttribute("aria-disabled", "true");
-    expect(describedText(centre)).toBe("X INVALID: enter -65,536 to 65,535.9999 ly");
+    expect(describedText(centre)).toBe("X INVALID: enter -65,536 to 65,535.99999 ly");
     expect(onCentre).not.toHaveBeenCalled();
   });
 

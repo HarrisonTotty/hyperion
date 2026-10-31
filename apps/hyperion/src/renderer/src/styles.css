@@ -3026,9 +3026,9 @@ body {
   gap: 0.5rem;
 }
 
-/* Room for the longest entry, -65,535.9999, in the field's own monospaced figures. */
+/* Room for the longest entry, -65,535.99999, in the field's own monospaced figures. */
 .centre-entry__input {
-  width: calc(12ch + 1rem + 2px);
+  width: calc(13ch + 1rem + 2px);
 }
 
 .centre-entry__unit {

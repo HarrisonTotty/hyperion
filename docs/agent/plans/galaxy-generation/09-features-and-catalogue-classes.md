@@ -5244,3 +5244,5 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     keeps the chart's unit and writes a feature's distance at the chart's precision while it fits
     `DISTANCE_COLUMN_CH` (7), and past it to three figures (`formatSignificant`: `126,000`, `300`,
     `6.32E8`), in `FeatureList` and `FeatureReadout` alike. Systems always fit.
+  - _`CentreEntry`._ `MAX_DECIMALS` 5: 0.00001 ly (0.63 AU), a hundredth of the finest chart's
+    radius, the finest chart's furniture step; the field is 13ch, for `-65,535.99999`.

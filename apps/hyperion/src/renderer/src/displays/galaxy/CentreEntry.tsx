@@ -20,17 +20,18 @@ const AXES: ReadonlyArray<{ readonly axis: Axis; readonly label: string }> = [
 const COORDINATE = /^[+\-−]?(?:\d+(?:\.\d*)?|\.\d+)$/u;
 
 /**
- * The most decimals a typed coordinate keeps: 0.0001 ly, finer than the smallest chart, 0.01 ly
- * across. An entry is rounded to it before it is checked, so what is kept is what is shown.
+ * The most decimals a typed coordinate keeps: 0.00001 ly, about 0.63 AU, a hundredth of the finest
+ * chart's radius of 0.001 ly, to which that chart's furniture writes its place (plan 09, P09.T42).
+ * An entry is rounded to it before it is checked, so what is kept is what is shown.
  */
-const MAX_DECIMALS = 4;
+const MAX_DECIMALS = 5;
 
 /** Decimals a coordinate is shown with unless it was typed with more. */
 const DEFAULT_DECIMALS = 1;
 
 /**
  * The largest coordinate an entry can hold in the root cube: the cube runs from −65,536 ly up to,
- * but not including, 65,536 ly (plan 01's `in_root_cube`), and an entry keeps four decimals.
+ * but not including, 65,536 ly (plan 01's `in_root_cube`), and an entry keeps five decimals.
  */
 const LARGEST_ENTRY_LY = ROOT_CUBE_HALF_LY - 10 ** -MAX_DECIMALS;
 
@@ -175,8 +176,8 @@ interface CentreEntryProps {
  * in light-years, show the cursor. A value typed in one moves it when it is entered, as the field
  * is left or with `Enter`, so that the chart can be centred more finely than a map pixel (128 ly
  * at the finest) and the cursor never passes through the digits typed on the way; it is kept to
- * four decimals and shown with the decimals it was typed with, up to four, in a field wide enough
- * for the longest, `-65,535.9999`, with `ly` beside it.
+ * five decimals and shown with the decimals it was typed with, up to five, in a field wide enough
+ * for the longest, `-65,535.99999`, with `ly` beside it.
  * A value that is not a number, or lies outside the root cube (−65,536 ly up to 65,536 ly, that
  * face excluded), is refused with a message naming its field, and leaves the cursor where it was; a
  * move of the cursor along that axis replaces it. Each field's way out enters nothing
