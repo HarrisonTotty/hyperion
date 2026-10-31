@@ -82,6 +82,17 @@
 //! native Earth-like figures at 12 ran at the native hold's highest load (12 to 16, I/O full up
 //! to 35) and look inflated: their base elevation, whose cost does not depend on the level, took
 //! 3.18 µs against 2.73 µs at 19 in the same hold.
+//!
+//! Re-measured 2026-10-31 on a pod (16 vCPU, one thread, Electron 45.1.0's V8 15.6), not this
+//! machine, before and after the caches kept each octave's crater search, each crater's profile, a
+//! bake's control points by face and indices, and each noise cell's corners: the whole height in
+//! WebAssembly went from 7.87, 12.35, 6.99 and 11.62 µs a point to 4.74, 6.82, 3.98 and 6.44 µs
+//! on the four patches above (the Earth-like world's height sweep at 19 from 52.20 to 28.82 ms),
+//! and natively from 6.43, 10.26, 5.28 and 9.30 µs to 3.78, 5.54, 3.13 and 5.01 µs (a warm patch at
+//! 19 from 53.79 to 29.48 ms). Both meet the brainstorm's 10 µs a point at every level measured.
+//! In WebAssembly the small craters alone took 1.02, 2.10, 1.21 and 2.62 µs (from 2.78, 5.90,
+//! 3.32 and 6.85), the relief alone 4.99, 5.98, 1.80 and 2.77 µs (from 5.48, 6.80, 2.27 and
+//! 3.57), and the base elevation alone, which reads its cells afresh, 1.87 and 0.23 µs as before.
 
 /// What the benches of both targets share: the seed, the patches and their parts.
 mod shared {
