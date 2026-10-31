@@ -990,10 +990,15 @@ struct Solve<'a> {
     /// Its partition's supercritical reservoir with the most liquid-like fluid at its last step
     /// (P14.T53.b part 3, [`partitioned_greenhouse`]): `None` under part 3's hold.
     supercritical: Option<CriticalColumn>,
-    /// Under the tests' settled log ([`settled_log`]), what it logs of this solve as published:
+    /// Whether its greenhouse's last step read the airless climate, its partial pressures under
+    /// [`AIRLESS_PRESSURE`] ([`step_climate`](crate::planetary::hooks::surface::step_climate)'s
+    /// line; P14.T53.i): `None` for a climate given, which has no such line, or for steps that read
+    /// no climate.
+    last_step_airless: Option<bool>,
+    /// Under the tests' settled log ([`settled_log`]), what it logs of this solve's greenhouse:
     /// `None` with the log off.
     #[cfg(test)]
-    settled: Option<settled_log::Settled>,
+    settled: Option<settled_log::Greenhouse>,
 }
 
 impl Solve<'_> {
@@ -1539,7 +1544,12 @@ impl<'b> Solver<'_, 'b> {
         );
         // A local of this greenhouse, whose steps often fill the basins at the step before's layer.
         let fills = FillSlot::default();
-        let climate_of = |t: Kelvin, partials: &PartialPressures| step.at(t, partials, &fills);
+        // Which side of the 100 Pa line the latest step's climate read (P14.T53.i).
+        let read_airless = core::cell::Cell::new(None);
+        let climate_of = |t: Kelvin, partials: &PartialPressures| {
+            read_airless.set(step.airless_line(partials));
+            step.at(t, partials, &fills)
+        };
         #[cfg(test)]
         let evaluated = crate::planetary::chem::partition::exit_counts().evaluations;
         let (t, partials, tau, supercritical) = partitioned_greenhouse(
@@ -1550,6 +1560,7 @@ impl<'b> Solver<'_, 'b> {
             (&self.ground, self.body.ceiling),
             steps,
         );
+        let last_step_airless = read_airless.get();
         #[cfg(test)]
         let settled = settled_log::on().then(|| {
             let steps = crate::planetary::chem::partition::exit_counts().evaluations - evaluated;
@@ -1560,14 +1571,13 @@ impl<'b> Solver<'_, 'b> {
                 &self.ground,
                 &mut crate::planetary::chem::partition::AirborneWeights::new(),
             );
-            settled_log::Settled {
-                t,
-                total: partials.total().value(),
+            settled_log::Greenhouse {
                 carbon_dioxide: partials.of(Gas::CarbonDioxide).value(),
                 again: again.of(Gas::CarbonDioxide).value(),
                 steps,
                 cap: span.cap().map(|(_, cap)| cap.value()),
                 figures: step.cap_figures(Kelvin::new(t), &partials),
+                switch: None,
             }
         });
         Some(Solve {
@@ -1578,9 +1588,82 @@ impl<'b> Solver<'_, 'b> {
             tau,
             step,
             supercritical,
+            last_step_airless,
             #[cfg(test)]
             settled,
         })
+    }
+
+    /// The solve `solved` as its record publishes it under P14.T53.i's rule, from generator version
+    /// 26 (behind its hold, [`LineSwitchRules`]): where its total lies under [`AIRLESS_PRESSURE`]
+    /// while its greenhouse's last step read the bulk climate, its inventory is held once more over
+    /// the airless span its record publishes, the step climate's at the body's base and those
+    /// partial pressures, by the steps' partition ([`finish`] then publishes it `Tenuous` or
+    /// `Airless`, as before). Below the line the span does not depend on the partial pressures, so
+    /// this one evaluation is the fixed point, and it adds no greenhouse step. Every other solve,
+    /// the converse's (a total at or above the line after an airless last step) among them, is its
+    /// own, as are a molten surface's, which [`finish`] publishes a `MagmaOcean` at any total, and
+    /// one whose re-held total would not lie under the line.
+    #[must_use]
+    fn one_switch(&self, solved: &Solve<'b>) -> Solve<'b> {
+        if LineSwitchRules::in_force() == LineSwitchRules::Held
+            || solved.last_step_airless != Some(false)
+            || solved.partials.total() >= AIRLESS_PRESSURE
+            || self.state == SurfaceState::MagmaOcean
+            || solved.t >= SILICATE_SOLIDUS.value()
+        {
+            return *solved;
+        }
+        let Some(partials) = self.airless_hold(solved, &solved.partials) else {
+            return *solved;
+        };
+        if partials.total() >= AIRLESS_PRESSURE {
+            return *solved;
+        }
+        #[cfg(test)]
+        let settled = solved.settled.map(|greenhouse| settled_log::Greenhouse {
+            // Held once more, the re-held partial pressures repeat to the bit.
+            switch: Some(self.airless_hold(solved, &partials).is_some_and(|again| {
+                again
+                    .0
+                    .iter()
+                    .zip(&partials.0)
+                    .all(|(a, b)| a.value().total_cmp(&b.value()).is_eq())
+            })),
+            ..greenhouse
+        });
+        Solve {
+            partials,
+            #[cfg(test)]
+            settled,
+            ..*solved
+        }
+    }
+
+    /// The partition of the solve `solved`'s inventory over the airless span its record publishes,
+    /// the step climate's at the body's base over the partial pressures `partials` (P14.T53.i,
+    /// [`one_switch`](Self::one_switch)); `None` where its column holds a weight the partition
+    /// cannot read.
+    #[must_use]
+    fn airless_hold(
+        &self,
+        solved: &Solve<'_>,
+        partials: &PartialPressures,
+    ) -> Option<PartialPressures> {
+        let inventory = solved
+            .air
+            .column(self.weight)
+            .map(|column| self.body.held.ice.on(column))
+            .ok()?;
+        let span = solved
+            .step
+            .at(self.body.base, partials, &FillSlot::default());
+        Some(super::partitioned_partials(
+            &inventory,
+            &span,
+            &self.ground,
+            &mut crate::planetary::chem::partition::AirborneWeights::new(),
+        ))
     }
 
     /// A temperate world with water: the weathering thermostat on the air `air`, its carbonate the
@@ -1861,7 +1944,8 @@ pub(super) fn state_and_greenhouse(
     let Some(solved) = solved else {
         return body.holding_nothing(formed);
     };
-    finish(
+    let solved = greenhouse.one_switch(&solved);
+    let atmosphere = finish(
         &body,
         &solved,
         (state, water, dry, gravity),
@@ -1874,7 +1958,10 @@ pub(super) fn state_and_greenhouse(
             airborne_carbon_share: share,
             methane,
         },
-    )
+    );
+    #[cfg(test)]
+    settled_log::published(&solved, &atmosphere);
+    atmosphere
 }
 
 /// The state a body the atmosphere's inputs `inputs` describe publishes in place of the state
@@ -2083,6 +2170,69 @@ pub(crate) fn with_melt_oxygen<R>(rules: MeltOxygenRules, run: impl FnOnce() -> 
     run()
 }
 
+/// The generator version from which a solve whose total lies under [`AIRLESS_PRESSURE`] after a
+/// last step that read the bulk climate is held once more over the airless span its record
+/// publishes (P14.T53.i, P14.T53.c's seam at the line): 26, the planetary bump after 25's.
+///
+/// It is P14.T53.i's one hold. Below it [`LineSwitchRules::in_force`] is [`LineSwitchRules::Held`]:
+/// such a solve publishes its last step's partial pressures, and every figure is version 24's and
+/// 25's bit for bit. 26's bump deletes this hold, [`LineSwitchRules`] with its `Held` arm, the
+/// tests' switch and its tripwire (`the_line_switch_is_held_only_until_the_26_bump`).
+pub(crate) const LINE_SWITCH_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether P14.T53.i's one reading of the 100 Pa line is in force (its hold,
+/// [`LINE_SWITCH_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum LineSwitchRules {
+    /// Version 25's and before: a solve under the line publishes its last step's partial
+    /// pressures, whichever climate that step read.
+    Held,
+    /// Version 26's: one more hold over the airless span the record publishes, where the last
+    /// step read the bulk climate ([`Solver::one_switch`]).
+    OneSwitch,
+}
+
+impl LineSwitchRules {
+    /// The rules this generator version gives: the one switch from [`LINE_SWITCH_VERSION`], none
+    /// below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_line_switch`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = LINE_SWITCH_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= LINE_SWITCH_VERSION {
+            Self::OneSwitch
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The line's rules a test sets on its thread, `None` for the version's.
+    static LINE_SWITCH_RULES: core::cell::Cell<Option<LineSwitchRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the line's rules `rules` on this thread, for the tests to reach P14.T53.i
+/// ahead of the bump; the version's rules are set back after, a panic in `run` included. 26's bump
+/// deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_line_switch<R>(rules: LineSwitchRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<LineSwitchRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            LINE_SWITCH_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(LINE_SWITCH_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
 /// The surface temperature and optical depth of the body `body`'s published air, the partial
 /// pressures `partials` at surface gravity `gravity` (P14.T53.g): the grey surface over their τ from
 /// its base, under the thick-air closure and its ceiling as the greenhouse's steps take it
@@ -2134,8 +2284,6 @@ fn finish(
         ..
     } = *solved;
     let carrier = air.carrier;
-    #[cfg(test)]
-    settled_log::published(solved.settled);
     // The state, as before: a molten surface's melt holds the air's oxygen while it is molten.
     let molten = state == SurfaceState::MagmaOcean || t >= SILICATE_SOLIDUS.value();
     let melt_takes_oxygen = molten && air.oxygen > 0.0;
@@ -2238,24 +2386,24 @@ fn finish(
     }
 }
 
-/// P14.T53.h's settled check, test-only: each published solve's greenhouse step count, the CO₂
-/// one more partition of its inventory over the span at its final state holds, and that span's
-/// cap, logged on this thread while a test captures them ([`capture`](settled_log::capture)), so
-/// that a census can ask whether a body's steps had settled where its passes published it.
+/// P14.T53.h's settled check and P14.T53.i's line, test-only: each published solve's greenhouse
+/// step count, the CO₂ one more partition of its inventory over the span at its final state holds
+/// and that span's cap, and the side of the 100 Pa line its last step read, logged on this thread
+/// while a test captures them ([`capture`](settled_log::capture)), so that a census can ask whether
+/// a body's steps had settled where its passes published it, and which climate they read last.
 #[cfg(test)]
 pub(crate) mod settled_log {
     use std::cell::RefCell;
 
+    use super::{Atmosphere, Gas, Solve};
     use crate::planetary::hooks::surface::CapFigures;
 
-    /// One published solve ([`super::finish`]), as its greenhouse left it.
+    /// What a greenhouse solve leaves for the log ([`super::Solve`]).
     #[derive(Debug, Clone, Copy, PartialEq)]
-    pub(crate) struct Settled {
-        /// Its final temperature, K, and its total and CO₂'s partial pressures, Pa.
-        pub(crate) t: f64,
-        pub(crate) total: f64,
+    pub(crate) struct Greenhouse {
+        /// Its final CO₂ partial pressure, Pa, and the CO₂ one more partition of its inventory over
+        /// the span at its final state holds, Pa.
         pub(crate) carbon_dioxide: f64,
-        /// The CO₂ one more partition of its inventory over the span at its final state holds, Pa.
         pub(crate) again: f64,
         /// Its greenhouse's steps, the evaluations of its partition.
         pub(crate) steps: u64,
@@ -2263,6 +2411,25 @@ pub(crate) mod settled_log {
         pub(crate) cap: Option<f64>,
         /// The cap's figures at that step's column, the gates aside: `None` for a climate given.
         pub(crate) figures: Option<CapFigures>,
+        /// Where P14.T53.i's rule held it once more over the airless span
+        /// ([`one_switch`](super::Solver::one_switch)), whether a second such hold repeats its
+        /// partial pressures to the bit: `None` where the rule did not.
+        pub(crate) switch: Option<bool>,
+    }
+
+    /// One published solve ([`super::finish`]).
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub(crate) struct Settled {
+        /// What its atmosphere publishes: its surface temperature, K, its surface pressure, Pa, 0
+        /// for none, and its CO₂'s partial pressure, Pa.
+        pub(crate) t: f64,
+        pub(crate) total: f64,
+        pub(crate) carbon_dioxide: f64,
+        /// Which side of the 100 Pa line its greenhouse's last step read
+        /// ([`Solve::last_step_airless`](super::Solve)).
+        pub(crate) last_step_airless: Option<bool>,
+        /// Its greenhouse's steps.
+        pub(crate) greenhouse: Greenhouse,
     }
 
     thread_local! {
@@ -2275,14 +2442,25 @@ pub(crate) mod settled_log {
         LOG.with(|log| log.borrow().is_some())
     }
 
-    /// Logs a published solve's `settled` ([`super::Solve`]), where a capture runs.
-    pub(super) fn published(settled: Option<Settled>) {
-        let Some(settled) = settled else {
+    /// Logs the solve `solved`, published as `atmosphere`, where a capture runs.
+    pub(super) fn published(solved: &Solve<'_>, atmosphere: &Atmosphere) {
+        let Some(greenhouse) = solved.settled else {
             return;
         };
         LOG.with(|log| {
             if let Some(entries) = log.borrow_mut().as_mut() {
-                entries.push(settled);
+                entries.push(Settled {
+                    t: atmosphere.surface_temperature().value(),
+                    total: atmosphere
+                        .surface_pressure()
+                        .map_or(0.0, crate::units::Pascals::value),
+                    carbon_dioxide: atmosphere
+                        .partial_pressures()
+                        .of(Gas::CarbonDioxide)
+                        .value(),
+                    last_step_airless: solved.last_step_airless,
+                    greenhouse,
+                });
             }
         });
     }

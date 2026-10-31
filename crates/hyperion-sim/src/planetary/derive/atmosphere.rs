@@ -78,8 +78,8 @@ pub use escaping::{
 };
 #[cfg(test)]
 pub(crate) use escaping::{
-    MeltOxygenRules, Thermostat, ThermostatCounts, WaterPhase, settled_log, water_phase,
-    with_melt_oxygen, with_resolve_check, with_thermostat,
+    LineSwitchRules, MeltOxygenRules, Thermostat, ThermostatCounts, WaterPhase, settled_log,
+    water_phase, with_line_switch, with_melt_oxygen, with_resolve_check, with_thermostat,
 };
 #[cfg(test)]
 pub(crate) use present::{
@@ -3551,6 +3551,17 @@ impl<'a> StepClimate<'a> {
                 let theta = context.ocean_weight_in(water, partials.of(Gas::Water), fills);
                 step_climate(body, theta, t, partials)
             }
+        }
+    }
+
+    /// Whether a step over the partial pressures `partials` reads the airless climate, their total
+    /// under [`AIRLESS_PRESSURE`] ([`step_climate`]'s line; P14.T53.i): `None` for a climate given,
+    /// which has no such line.
+    #[must_use]
+    fn airless_line(&self, partials: &PartialPressures) -> Option<bool> {
+        match self {
+            Self::Given(_) => None,
+            Self::Spun { .. } => Some(partials.total() < AIRLESS_PRESSURE),
         }
     }
 

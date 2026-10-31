@@ -13727,6 +13727,8 @@ pub(crate) struct ThinAirBody {
     /// log is matched on.
     pub(crate) air_t: f64,
     pub(crate) co2: f64,
+    /// Its derivation's N₂, Pa: an airless body's residue too (P14.T53.i's census).
+    pub(crate) nitrogen: f64,
 }
 
 impl ThinAirBody {
@@ -13828,6 +13830,7 @@ impl ThinAirBody {
             spin: conditions.spin(),
             air_t: air.surface_temperature().value(),
             co2: air.partial_pressures().of(Gas::CarbonDioxide).value(),
+            nitrogen: air.partial_pressures().of(Gas::Nitrogen).value(),
         })
     }
 

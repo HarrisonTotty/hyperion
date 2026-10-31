@@ -6739,6 +6739,33 @@ fn the_melt_oxygen_is_held_only_until_the_26_bump() {
     assert_eq!(MeltOxygenRules::in_force(), MeltOxygenRules::Held);
 }
 
+/// P14.T53.i is held until the 25 → 26 bump: the rules in force are version 25's and before, a
+/// solve under the line publishing its last step's partial pressures, and 26's helper reaches the
+/// one switch.
+#[test]
+fn the_line_switch_is_held_only_until_the_26_bump() {
+    use crate::planetary::testing::with_every_26_hold;
+    assert!(
+        crate::GENERATOR_VERSION < escaping::LINE_SWITCH_VERSION,
+        "the 25 → 26 bump puts P14.T53.i's one reading of the 100 Pa line on the record: delete \
+         `LINE_SWITCH_VERSION`, `LineSwitchRules` with its `Held` arm and the guard that reads it \
+         in `Solver::one_switch`, the tests' `with_line_switch`, its switch in \
+         `with_every_26_hold` (and the helper, if no other 26 hold is left), \
+         `locked_climate_tests::deck_alone`'s set-back, the `Held` arms of `line_switch_tests`, \
+         and this test"
+    );
+    assert_eq!(LineSwitchRules::in_force(), LineSwitchRules::Held);
+    assert_eq!(
+        with_every_26_hold(LineSwitchRules::in_force),
+        LineSwitchRules::OneSwitch
+    );
+    assert_eq!(
+        with_every_26_hold(|| with_line_switch(LineSwitchRules::Held, LineSwitchRules::in_force)),
+        LineSwitchRules::Held
+    );
+    assert_eq!(LineSwitchRules::in_force(), LineSwitchRules::Held);
+}
+
 /// The plan's test: a world of Earth's mass inside the runaway limit with a quarter of its mass in
 /// water keeps nearly all of it beyond its escape's capacity, and its water above its critical
 /// point holds a liquid-like reservoir of far more than a thousandth of its mass: its published

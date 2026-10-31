@@ -81,7 +81,7 @@ struct Census {
 }
 
 /// Whether `a` and `b`, one body under each rule, publish the same state and figures, bit for bit.
-fn same(a: &ThinAirBody, b: &ThinAirBody) -> bool {
+pub(super) fn same(a: &ThinAirBody, b: &ThinAirBody) -> bool {
     let bits = |x: f64, y: f64| x.total_cmp(&y).is_eq();
     a.state == b.state
         && bits(a.p, b.p)
@@ -108,13 +108,13 @@ fn within_a_millionth(a: &ThinAirBody, b: &ThinAirBody) -> bool {
 }
 
 /// The ID of a census body, the last word of its label.
-fn id_of(body: &ThinAirBody) -> String {
+pub(super) fn id_of(body: &ThinAirBody) -> String {
     body.label.rsplit(' ').next().unwrap_or_default().to_owned()
 }
 
-/// The solve of `solves` that published the census body `body` under the cap: the last whose
-/// temperature, total and CO₂ are its derivation's, bit for bit.
-fn published<'a>(
+/// The solve of `solves` that published the census body `body`: the last whose temperature, total
+/// and CO₂ are its derivation's, bit for bit.
+pub(super) fn published<'a>(
     solves: &'a [settled_log::Settled],
     body: &ThinAirBody,
 ) -> &'a settled_log::Settled {
@@ -156,6 +156,7 @@ fn under_every_26_hold_the_cap_moves_the_census_s_thick_carbon_dioxide_airs() {
         let near = within_a_millionth(was, now);
         let solve = published(solves, now);
         let (step_rossby, t_c) = solve
+            .greenhouse
             .figures
             .map_or((f64::NAN, None), |f| (f.rossby, f.temperature));
         eprintln!(
@@ -171,7 +172,7 @@ fn under_every_26_hold_the_cap_moves_the_census_s_thick_carbon_dioxide_airs() {
             was.rossby,
             now.rossby,
             kelvin(t_c),
-            kelvin(solve.cap),
+            kelvin(solve.greenhouse.cap),
             kelvin(now.cap),
             now.flux_earths,
         );
@@ -214,7 +215,7 @@ fn under_every_26_hold_the_cap_s_movers_settle_or_are_listed() {
         if !(MOVERS.contains(&id.as_str()) || NUDGED.contains(&id.as_str())) {
             continue;
         }
-        let solve = published(solves, now);
+        let solve = &published(solves, now).greenhouse;
         let moved = if solve.carbon_dioxide > 0.0 {
             (solve.again - solve.carbon_dioxide).abs() / solve.carbon_dioxide
         } else {

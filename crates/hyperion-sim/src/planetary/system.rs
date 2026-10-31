@@ -6750,6 +6750,8 @@ pub(crate) mod events;
 #[cfg(test)]
 mod exposed_ice_tests;
 #[cfg(test)]
+mod line_switch_tests;
+#[cfg(test)]
 mod locked_climate_tests;
 pub(crate) mod member_lag;
 mod modifiers;

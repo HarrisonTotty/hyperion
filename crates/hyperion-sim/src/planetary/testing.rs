@@ -526,8 +526,8 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::chem::condense::{FallRadiusRoot, with_fall_radius};
     use crate::planetary::derive::atmosphere::{
-        LockedStateRules, MeltOxygenRules, SeaDeckRules, with_locked_state, with_melt_oxygen,
-        with_sea_deck,
+        LineSwitchRules, LockedStateRules, MeltOxygenRules, SeaDeckRules, with_line_switch,
+        with_locked_state, with_melt_oxygen, with_sea_deck,
     };
     use crate::planetary::derive::passes::{PassStop, with_pass_stop};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
@@ -546,6 +546,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_cap_balance(CapBalanceRules::Balanced, run);
     let run = move || with_stripping(StripRules::Stripped, run);
     let run = move || with_pass_stop(PassStop::OwnResidual, run);
+    let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 

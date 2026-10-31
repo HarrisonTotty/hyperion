@@ -8320,6 +8320,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
     name, the slow ones with `-- --ignored`.
   - _For 26's bump:_ no golden is expected to move (both bodies are sample bodies); the records
     list any that does.
+  - _Built_ 2026-10-31, held at 26 (`LINE_SWITCH_VERSION`): Risks, "Deviations in P14.T53.i, as
+    built".
 
 #### P14.T54 The composition batches on the record
 
@@ -33320,3 +33322,13 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
 - `locked_climate_tests`'s `deck_alone` is every 25 hold with the deck's rules, every other 26
   hold held (they moved bodies outside the domain), and #30404 is now a `Snowball` in
   `under_every_26_hold_a_census_eyeball_settles_at_the_edge_and_a_two_state_cycle_is_temperate`.
+- **Deviations in P14.T53.i, as built (2026-10-31).** Held at 26: `escaping`'s
+  `LINE_SWITCH_VERSION`, `LineSwitchRules`, `with_line_switch`; the rule is `Solver::one_switch`,
+  run on the solve `finish` publishes, and `Solve::last_step_airless` records the side of the line
+  the last step read (`StepClimate::airless_line`; a climate given has none).
+  - The census (`system/line_switch_tests.rs`) moves 3 records, not 2: item 33's world
+    02000b2ca0000001.1100 (`Tenuous`, 1.68 Pa, ×49) is a crossing too, read once at 0.034 Pa
+    (lean, 2026-10-31; for main). The converse counts 0 under each arm.
+  - A molten solve, and one whose re-held total would not lie under the line, keep their partials.
+  - `locked_climate_tests::deck_alone` sets the switch back to `Held`.
+  - For 26's bump: no golden moves (the census's golden systems hold no crossing).
