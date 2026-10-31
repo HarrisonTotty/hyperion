@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::num::FpCategory;
 use std::sync::OnceLock;
 
-use hyperion_testkit::float::bits;
+use hyperion_testkit::float::{assert_same_bits, bits};
 
 use super::*;
 use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase, Condensates};
@@ -676,4 +676,97 @@ pub(crate) fn fit_of(body: &TrapBody) -> Option<ContextFit> {
         Convergence::Converged => None,
         Convergence::Bracketed { fit, .. } => Some(fit),
     }
+}
+
+/// The trap bodies of the sample's first [`TRAP_SAMPLE`] systems, each system generated afresh
+/// under the rules on this thread, so that a test reads them under a hold.
+fn trap_bodies_afresh() -> Vec<TrapBody> {
+    sample()
+        .iter()
+        .take(TRAP_SAMPLE)
+        .flat_map(|ctx| bodies_of(ctx, &generate(SEED, ctx)))
+        .collect()
+}
+
+/// The trapped area of `gas`'s solid among `condensates`, 0 where it lists none.
+fn trapped_area(condensates: &Condensates, gas: Gas) -> f64 {
+    condensates
+        .entry(gas.substance(), CondensatePhase::Solid)
+        .map_or(0.0, CondensateEntry::trapped_area_fraction)
+}
+
+/// P14.T49.m's movers over the cold traps' sample (decision-p14-t54a-ganymede §1.5; T54.b.f's
+/// census, decision-p14-t54b-f-coldtraps §6, stated again at its albedos), stated: every body of
+/// the first 60 systems derived under every 26 hold and again with the icy regolith set back to
+/// the frost, each system generated afresh under each. For every body whose derivation moves, its
+/// lid's row, its state, Bond albedo, `T_eq`, bare regolith and its cold traps' CO₂, CH₄, N₂ and
+/// Ar areas, both ways; and the counts. Only a body on an `H2O` regolith (its lid's row, or none
+/// known on an ice bulk) or on an ice bulk moves, its bare regolith or only its passes' path (a
+/// pass lagged on the way to a resurfaced end, or before its lid is known), and every escape stays
+/// albedo-free: no exobase moves (ruling §1.4).
+#[test]
+#[ignore = "slow: the 60 systems generated twice under every 26 hold"]
+fn under_every_26_hold_the_icy_lids_movers_are_stated() {
+    use crate::planetary::derive::photometry::area_mix::{IcyRegolithRules, with_icy_regolith};
+    use crate::planetary::hooks::crust::CrustLid;
+    use crate::planetary::testing::with_every_26_hold;
+    let lagged = with_every_26_hold(trap_bodies_afresh);
+    let held =
+        with_every_26_hold(|| with_icy_regolith(IcyRegolithRules::Frost, trap_bodies_afresh));
+    assert_eq!(lagged.len(), held.len());
+    let (mut movers, mut flips, mut icy, mut bare) = (0_u32, 0_u32, 0_u32, 0_u32);
+    let water = Gas::Water.substance();
+    for (now, before) in lagged.iter().zip(&held) {
+        assert_eq!(now.id(), before.id());
+        let (a, b) = (&now.derived, &before.derived);
+        let row = b.crust_lid().map(CrustLid::row);
+        let ice_bulk = SurfaceMaterial::of(&b.fractions()) == SurfaceMaterial::Ice;
+        let h2o = row == Some(water) || (row.is_none() && ice_bulk);
+        icy += u32::from(h2o);
+        assert_same_bits(
+            a.atmosphere().exobase_temperature().value(),
+            b.atmosphere().exobase_temperature().value(),
+        );
+        if format!("{a:?}") == format!("{b:?}") {
+            continue;
+        }
+        movers += 1;
+        // An ice bulk under another lid reads the stand-in's `H2O` row before its lid is known.
+        assert!(
+            h2o || ice_bulk,
+            "{}: moved, on no H2O regolith and no ice bulk ({row:?})",
+            now.id()
+        );
+        bare += u32::from(bits(a.regolith_albedo()) != bits(b.regolith_albedo()));
+        let (state_now, state_before) = (
+            a.atmosphere().published_state(),
+            b.atmosphere().published_state(),
+        );
+        flips += u32::from(state_now != state_before);
+        let traps = |body: &TrapBody| {
+            [Gas::CarbonDioxide, Gas::Methane, Gas::Nitrogen, Gas::Argon]
+                .map(|gas| trapped_area(body.surface().condensates(), gas))
+        };
+        eprintln!(
+            "{} ({:?}, lid {:?}): {state_before:?} → {state_now:?}, Bond {:.4} → {:.4}, T_eq \
+             {:.1} → {:.1} K, regolith {:.4} → {:.4}, traps CO₂/CH₄/N₂/Ar {:?} → {:?}",
+            now.id(),
+            now.kind,
+            row.map(|row| row.substance().key().as_str().to_owned()),
+            b.albedo().value(),
+            a.albedo().value(),
+            b.equilibrium_temperature().value(),
+            a.equilibrium_temperature().value(),
+            b.regolith_albedo(),
+            a.regolith_albedo(),
+            traps(before).map(|area| format!("{area:.3e}")),
+            traps(now).map(|area| format!("{area:.3e}")),
+        );
+    }
+    eprintln!(
+        "{} bodies, {icy} on an H2O regolith; {movers} move under the icy regolith, {bare} of \
+         them in their bare regolith and {flips} in their state",
+        lagged.len()
+    );
+    assert!(movers > 0, "the sample holds icy lids that move");
 }

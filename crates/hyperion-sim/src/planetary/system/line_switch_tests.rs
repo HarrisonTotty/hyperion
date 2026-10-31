@@ -76,15 +76,25 @@ fn census() -> &'static Census {
     CENSUS.get_or_init(|| {
         let sets = thin_air_sets();
         let start = Instant::now();
+        // The icy regolith (P14.T49.m) is set back to the frost, as in `named`: under its lag
+        // count (vii)'s two leave the line, and two airless bodies' trace N₂ (01ffdb2ce0020000.0600
+        // and 01ffeb2d1ffc0000.0800) moves by the switch, neither a crossing; 26's bump restates
+        // this census.
+        let frost = IcyRegolithRules::Frost;
         let held = settled_log::capture(|| {
             with_every_26_hold_but_the_pore_gas(|| {
-                with_line_switch(LineSwitchRules::Held, || thin_air_census(&sets))
+                with_icy_regolith(frost, || {
+                    with_line_switch(LineSwitchRules::Held, || thin_air_census(&sets))
+                })
             })
         });
         let walk_held = start.elapsed();
         let start = Instant::now();
-        let switched =
-            settled_log::capture(|| with_every_26_hold_but_the_pore_gas(|| thin_air_census(&sets)));
+        let switched = settled_log::capture(|| {
+            with_every_26_hold_but_the_pore_gas(|| {
+                with_icy_regolith(frost, || thin_air_census(&sets))
+            })
+        });
         eprintln!(
             "the walks: the line held {walk_held:?}, read once {:?}, {} bodies",
             start.elapsed(),

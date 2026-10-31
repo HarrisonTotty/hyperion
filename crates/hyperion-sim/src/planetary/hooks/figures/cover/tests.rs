@@ -363,12 +363,13 @@ fn the_table_s_ices_are_the_ruling_s() {
 /// at their edges, and none of the Moon's ice, whose crust is silicate and holds no surface water.
 ///
 /// The table's Ganymede is airless, and its ice is its cold area under 110 K. Its band about its
-/// pole, which the edge gave at T13.c's 0.35, is stated, not asserted: under the frost's albedo
-/// (`T_eq` 78 K against 109.6 K at its measured 0.35, decision-p14-t54a-ganymede §1.5) its
-/// warmest zone lies under the edge, so the whole of it is cold. Its band returns with its icy
-/// regolith's darkening, P14.T49.m's.
+/// pole, which the edge gave at T13.c's 0.35, is stated: under the frost's albedo (`T_eq` 78 K
+/// against 109.6 K at its measured 0.35, decision-p14-t54a-ganymede §1.5) its warmest zone lies
+/// under the edge, so the whole of it is cold. Under its icy regolith's lag (P14.T49.m, at 26) its
+/// band returns: its equator lies above the edge, and its cold area is part of its surface.
 #[test]
 fn an_airless_body_s_edge_is_110_k() {
+    use crate::planetary::derive::photometry::area_mix::{IcyRegolithRules, with_icy_regolith};
     assert_same_bits(ice_temperature(SurfaceState::Airless).value(), 110.0);
     assert_same_bits(ice_temperature(SurfaceState::Temperate).value(), 263.15);
     let table = table_surfaces();
@@ -415,6 +416,19 @@ fn an_airless_body_s_edge_is_110_k() {
         conditions.zonal_temperature(0.0).value()
     );
     assert_same_bits(found(&table, "Moon").2.ice_fraction(), 0.0);
+    let lagged = with_icy_regolith(IcyRegolithRules::Mixture, table_surfaces);
+    let (_, body, ganymede, conditions) = found(&lagged, "Ganymede");
+    let cold = conditions.cold_area(AIRLESS_ICE_TEMPERATURE);
+    let equator = conditions.zonal_temperature(0.0).value();
+    eprintln!(
+        "Ganymede under its lag: Bond {:.4}, T_eq {:.1} K, its equator's zone at {equator:.2} K, \
+         {cold} of it below 110 K",
+        body.albedo().value(),
+        body.equilibrium_temperature().value()
+    );
+    assert!((ganymede.ice_fraction() - cold).abs() < 1e-15);
+    assert!(equator > AIRLESS_ICE_TEMPERATURE.value(), "{equator}");
+    assert!(cold > 0.0 && cold < 1.0, "{cold}");
 }
 
 /// A world locked 1:1 takes the eyeball's cap from its day and night means: none where its night

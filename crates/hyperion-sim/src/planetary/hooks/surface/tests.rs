@@ -2266,6 +2266,30 @@ fn no_light_gives_no_contrast() {
     assert_same_bits(weak_gradient_transport(&dark, &spin), 0.0);
 }
 
+/// Under its icy regolith's lag (P14.T49.m, at 26) the table's Ganymede takes T13.c's 0.35 again,
+/// and its range returns to the ruling's version-22 range, whose albedo that was, within 1.5 K at
+/// either end; nothing else in `table`, the table at 24, moves
+/// ([`the_table_s_climate_ranges_are_the_ruling_s`]'s mixture arm).
+fn ganymede_s_range_returns_under_its_lag(
+    table: &[(&'static str, DerivedBody, SurfaceConditions)],
+) {
+    use crate::planetary::derive::photometry::area_mix::{IcyRegolithRules, with_icy_regolith};
+    let lagged = with_icy_regolith(IcyRegolithRules::Mixture, self::table);
+    let (cold, warm) = found(&lagged, "Ganymede").2.climate_range();
+    eprintln!(
+        "Ganymede under its lag: [{:.2}, {:.2}] K, against version 22's [17.9, 142.8] K",
+        cold.value(),
+        warm.value()
+    );
+    assert!((cold.value() - 17.9).abs() < 1.5, "{cold:?}");
+    assert!((warm.value() - 142.8).abs() < 1.5, "{warm:?}");
+    for ((name, _, conditions), (_, _, held)) in lagged.iter().zip(table) {
+        if *name != "Ganymede" {
+            assert_eq!(conditions, held, "{name}");
+        }
+    }
+}
+
 #[test]
 fn the_table_s_climate_ranges_are_the_ruling_s() {
     // Science-p14-t24a-climate.md §6's ranges (item 1's zonal ends; the table's Ceres is rock,
@@ -2296,6 +2320,7 @@ fn the_table_s_climate_ranges_are_the_ruling_s() {
             warm.value()
         );
     }
+    ganymede_s_range_returns_under_its_lag(&table);
     for (name, coldest, warmest) in [
         ("Earth", 261.7, 305.1),
         ("Mercury", 21.1, 585.2),
