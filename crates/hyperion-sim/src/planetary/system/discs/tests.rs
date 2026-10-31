@@ -471,3 +471,57 @@ fn a_debris_disc_lies_inside_its_white_dwarf_s_roche_limit_from_its_birth() {
     }
     assert!(found >= 5, "{found} debris discs");
 }
+
+/// The system of `ctx` generated twice by `generate_it`: the same system, and at `t` each record
+/// of its snapshot the same as `body_at`'s, bit for bit, under the same rules.
+fn assert_the_same_twice_and_in_both_queries(
+    ctx: &SystemContext,
+    t: UniverseTime,
+    generate_it: impl Fn() -> PlanetarySystem,
+) -> PlanetarySystem {
+    let (a, b) = (generate_it(), generate_it());
+    assert_eq!(a, b, "{:?}", ctx.id());
+    let snapshot = a.snapshot_at(ctx, t);
+    for (record, index) in snapshot.bodies().iter().zip(a.indices()) {
+        let alone = a.body_at(ctx, index, t).expect("a body of the system");
+        assert_eq!(format!("{record:?}"), format!("{alone:?}"));
+    }
+    a
+}
+
+/// The disc bodies are the same twice and in both queries (the sim-determinism skill's rule): a
+/// young star's protoplanetary disc, and a young white dwarf's debris disc, each generated afresh
+/// under its rules.
+#[test]
+fn the_disc_bodies_are_the_same_twice_and_in_both_queries() {
+    let young = star(30_000, 1.0, 1.0e6);
+    let system = with_protoplanetary_disc(ProtoplanetaryDiscRules::Disc, || {
+        assert_the_same_twice_and_in_both_queries(&young, UniverseTime::EPOCH, || {
+            generate(SEED, &young)
+        })
+    });
+    let disc = system.protoplanetary_disc().expect("a young star's disc");
+    let record = system
+        .body_at(&young, disc.index(), UniverseTime::EPOCH)
+        .expect("the disc body");
+    assert_eq!(record.identity().state(), BodyState::Present);
+
+    let mut lcg = Lcg::new(0x28d1);
+    let debris = (30_001..34_000_u32).find_map(|index| {
+        let draws = WhiteDwarfDraws::for_system(SEED, id(index));
+        WhiteDwarfMarks::decide(&draws, Survivors::BeltAndPlanet)
+            .disc_until()
+            .is_some()
+            .then(|| white_dwarf(index, 1.2 + 2.8 * lcg.next_f64(), 1.0e7).0)
+            .filter(|ctx| {
+                with_white_dwarf_debris(WhiteDwarfDebrisRules::Debris, || {
+                    assert_the_same_twice_and_in_both_queries(ctx, UniverseTime::EPOCH, || {
+                        generate(SEED, ctx)
+                    })
+                })
+                .white_dwarf()
+                .is_some_and(|wd| wd.debris_disc().is_some())
+            })
+    });
+    assert!(debris.is_some(), "a debris disc in 4,000 systems");
+}

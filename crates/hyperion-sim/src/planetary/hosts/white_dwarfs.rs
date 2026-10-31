@@ -306,9 +306,8 @@ mod tests {
             "the 25 → 26 bump marks white dwarfs' systems polluted and gives some a debris disc \
              (P14.T28.d): delete `WHITE_DWARF_DEBRIS_VERSION`, `WhiteDwarfDebrisRules` with its \
              `Held` arm and the held arm of `SystemDiscs::find`, the tests' \
-             `with_white_dwarf_debris`, its switch in `with_every_26_hold` and this test; re-bless \
-             the goldens whose systems have a white dwarf, and draw the debris disc in the \
-             client's `SYSTEM` view (`populationAnnuli`)"
+             `with_white_dwarf_debris`, its switch in `with_every_26_hold` and this test, and \
+             re-bless the goldens whose systems have a white dwarf"
         );
         assert_eq!(
             WhiteDwarfDebrisRules::in_force(),

@@ -219,3 +219,35 @@ fn a_second_generation_planet_is_lit_by_its_pulsar_s_spin_down_alone() {
     }
     assert!(derived >= 4, "{derived} second-generation planets derived");
 }
+
+/// A neutron star's second-generation planets are the same twice and in both queries (the
+/// sim-determinism skill's rule), each system generated afresh under their rules.
+#[test]
+fn the_second_generation_is_the_same_twice_and_in_both_queries() {
+    let mut planets = 0;
+    for (ctx, _) in neutron_stars_with_a_mark(50_000, 3, 3.0e7) {
+        let [a, b] = [(); 2].map(|()| {
+            with_second_generation(SecondGenerationRules::Planets, || generate(SEED, &ctx))
+        });
+        assert_eq!(a, b, "{:?}", ctx.id());
+        planets += a
+            .bodies()
+            .iter()
+            .filter(|body| body.is_second_generation())
+            .count();
+        let snapshot = with_second_generation(SecondGenerationRules::Planets, || {
+            a.snapshot_at(&ctx, UniverseTime::EPOCH)
+        });
+        for (record, index) in snapshot.bodies().iter().zip(a.indices()) {
+            let alone = with_second_generation(SecondGenerationRules::Planets, || {
+                a.body_at(&ctx, index, UniverseTime::EPOCH)
+            })
+            .expect("a body of the system");
+            assert_eq!(format!("{record:?}"), format!("{alone:?}"));
+        }
+    }
+    assert!(
+        planets > 0,
+        "no second-generation planet in three marked systems"
+    );
+}

@@ -46,7 +46,6 @@ use crate::planetary::record::{
     BodyIdentity, BodyKind, BodyRecord, DebrisDiscRecord, DiscGap, DiscRecord, Population, Section,
 };
 use crate::stellar::remnant::RemnantKind;
-use crate::stellar::system::StarModel;
 use crate::time::{ClockWindow, UniverseTime};
 use crate::units::{EarthMasses, Metres, Years};
 
@@ -387,14 +386,14 @@ impl PlanetarySystem {
             .map(DiscProfile::lifetime)
             .expect("a disc body's host has a disc");
         let host = fate_host(epoch.ctx, zone);
-        let stars: Vec<&StarModel> = host.members().to_vec();
+        let stars = host.members();
         // As the fate transform reads a formation's host age (`clock_time`): the first star's age
         // at the epoch, every star's.
         let age_at_epoch = stars[0].age_at_epoch();
         let born = time_at_age(Years::new(0.0), age_at_epoch);
         let end = earliest(
             time_at_age(Years::from(lifetime), age_at_epoch),
-            first_death(&stars),
+            first_death(stars),
         );
         if born.is_none_or(|born| t < born) {
             BodyState::NotYetFormed

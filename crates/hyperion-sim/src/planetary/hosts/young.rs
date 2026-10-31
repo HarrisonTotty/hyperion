@@ -403,9 +403,8 @@ mod tests {
             "the 25 → 26 bump gives every system with a disc its protoplanetary disc body \
              (P14.T28.a): delete `PROTOPLANETARY_DISC_VERSION`, `ProtoplanetaryDiscRules` with \
              its `Held` arm and the held arm of `SystemDiscs::find`, the tests' \
-             `with_protoplanetary_disc`, its switch in `with_every_26_hold` and this test; \
-             re-bless the goldens whose systems have a disc, and draw the disc's annulus in the \
-             client's `SYSTEM` view (`populationAnnuli`)"
+             `with_protoplanetary_disc`, its switch in `with_every_26_hold` and this test, and \
+             re-bless the goldens whose systems have a disc"
         );
         assert_eq!(
             ProtoplanetaryDiscRules::in_force(),

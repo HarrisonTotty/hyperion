@@ -33550,3 +33550,7 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     labelled and selected as a belt is: the debris disc ticked, the protoplanetary disc as its two
     edges; `beltsOuterAu`, so `BELTS`, also fits a present protoplanetary disc. Both to a guide
     draft for the owner (lean, 2026-10-31); the guide is unchanged.
+  - _For 26's bump:_ `discs::tests::the_disc_bodies_are_the_same_twice_and_in_both_queries` and
+    `second_generation::tests::the_second_generation_is_the_same_twice_and_in_both_queries` call
+    the three switches; drop the switches and keep the tests. The server has no test of the two
+    disc arms' conversion (`convert/planetary.rs`); add one with the bump.

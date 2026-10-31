@@ -530,8 +530,6 @@ fn a_snapshot_is_body_at_body_by_body() {
     }
 }
 
-/// The section states (ruling 34): what is not computed says so, what does not apply to a kind
-/// is not applicable, and phase D's sections are `Ok` where modelled (P14.T34).
 /// P14.T28.a's and T28.d's disc bodies, from generator version 26: populations with no orbit
 /// and no position, their extent while present.
 fn assert_disc_record(record: &BodyRecord) {
@@ -548,6 +546,8 @@ fn assert_disc_record(record: &BodyRecord) {
     assert_eq!(record.section_state(RecordSection::Population), extent);
 }
 
+/// The section states (ruling 34): what is not computed says so, what does not apply to a kind
+/// is not applicable, and phase D's sections are `Ok` where modelled (P14.T34).
 #[test]
 fn a_record_tags_what_the_generator_does_not_compute() {
     let (mut present, mut giants, mut moons, mut rings, mut dwarfs) = (0, 0, 0, 0, 0);
