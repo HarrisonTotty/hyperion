@@ -35,7 +35,10 @@
 //! (`has_helium_excess`), the stripping table (`StrippingTable::at`) and the lifetime bracket
 //! (`helium_free`); the kick bins and the class table build at the layers' ΔY = 0; and a feature
 //! member is `not_modelled` in every sky reply. `hyperion-fit`'s tasks build no galaxy and read
-//! the version's rules by design.
+//! the version's rules by design, but for one: the stripping table's helium axis
+//! (`tables::stripping_helium`, P11.T1.d) is built under this hold's fitted arm and the version's
+//! other rules, and `binarity::tabulated_node` reads it only under that arm and the stripping
+//! hold's (`stripping_hold`).
 
 use std::sync::OnceLock;
 

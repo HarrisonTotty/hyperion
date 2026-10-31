@@ -75,7 +75,6 @@ use crate::math;
 use crate::units::{LightYears, SolarMasses, Years};
 
 use super::super::cluster::{ClusterKind, ClusterModel};
-use super::abundances::first_population_share;
 use super::profile::ProfileShape;
 use super::{ClassKind, Generation, MemberClass, Multiplicity};
 
@@ -460,10 +459,7 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
     let retention = *model.retention();
     let (ns_per_primary, _) = model.remnants_per_primary();
     let bh_count = model.black_hole_count();
-    let first_share = match model.kind() {
-        ClusterKind::Globular => first_population_share(model.initial_mass()),
-        ClusterKind::Open => 1.0,
-    };
+    let first_share = model.first_population_share();
     let core = model.profile_core_radius().value();
     let cusp = model.cusp_slope();
     let shape_for = |mass: f64, generation: Generation| {

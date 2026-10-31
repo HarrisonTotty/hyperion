@@ -51,7 +51,8 @@
 //! the exact path, some 3.5 ms a star. From version 26 (`STRIPPING_HELIUM_VERSION`) its share
 //! and radii are read from the table's helium axis instead ([`HeliumStrippingTable`],
 //! `hyperion-fit`'s `stripping_helium` task, `tables::stripping_helium`): three slices of
-//! helium excess over the same grid, interpolated linearly in ΔY from the table's own at none.
+//! helium excess over the same grid, interpolated linearly in ΔY from the table's own at none. It
+//! is the one table built under a held arm, the fitted helium table's, and is read only under it.
 //!
 //! Plan 06's companion-stripped mark is read against [`stripped_share`] (P11.T1.d, edit 4), and
 //! plan 11's hierarchy draws a marked primary's innermost orbit from its stripping band and an
@@ -390,9 +391,10 @@ pub fn stripped_share(m: SolarMasses, comp: &Composition) -> f64 {
     stripped_share_under(m, comp, StellarRules::of_version(GENERATOR_VERSION))
 }
 
-/// [`stripped_share`] with the exact path's track built under the stellar stage's `rules`, those
-/// of the star whose mark reads it: the table holds no star with a helium excess, whose track the
-/// rules' helium table moves (P15.T7.b's hold, `stellar::rules`).
+/// [`stripped_share`] under the stellar stage's `rules`, those of the star whose mark reads it:
+/// the table they choose (`tabulated_node`), and the exact path's track built under them. The
+/// stripping table holds no star with a helium excess, whose track the rules' helium table moves
+/// (P15.T7.b's hold, `stellar::rules`); from 26 its helium axis does.
 #[must_use]
 pub(crate) fn stripped_share_under(m: SolarMasses, comp: &Composition, rules: StellarRules) -> f64 {
     tabulated_node(m, comp, rules).map_or_else(
@@ -404,16 +406,22 @@ pub(crate) fn stripped_share_under(m: SolarMasses, comp: &Composition, rules: St
 /// The node of a primary of initial mass `m1` and composition `comp` that a table holds under the
 /// stellar stage's `rules`, if one does: [`StrippingTable::generator`]'s, and under
 /// [`StrippingRules::HeliumTabulated`] its helium axis's for a star with a helium excess
-/// ([`HeliumStrippingTable::generator`]). The exact path answers the rest.
+/// ([`HeliumStrippingTable::generator`]), which is read only under the fitted helium table it was
+/// built under (`HeliumRules::Fitted`, P15.T7.b's 26 arm). The exact path answers the rest.
 #[must_use]
 fn tabulated_node(
     m1: SolarMasses,
     comp: &Composition,
     rules: StellarRules,
 ) -> Option<StrippingNode> {
-    match rules.stripping {
-        StrippingRules::HeliumExact => StrippingTable::generator().at(m1, comp),
-        StrippingRules::HeliumTabulated => HeliumStrippingTable::generator().at(m1, comp),
+    match (rules.stripping, rules.helium) {
+        (StrippingRules::HeliumTabulated, HeliumRules::Fitted) => {
+            HeliumStrippingTable::generator().at(m1, comp)
+        }
+        (StrippingRules::HeliumExact, HeliumRules::Identity | HeliumRules::Fitted)
+        | (StrippingRules::HeliumTabulated, HeliumRules::Identity) => {
+            StrippingTable::generator().at(m1, comp)
+        }
     }
 }
 
@@ -421,7 +429,16 @@ fn tabulated_node(
 /// with the mark [`NEVER_STRIPPED`], standing in for the exact path's own (P08.T9's build shares
 /// it with the kick bins' unmarked fate, ruling 128.5): the same bits, and no second track outside
 /// the table's domain.
+///
+/// # Panics
+///
+/// In debug builds, for a star with a helium excess: its only readers, the kick bins, build at no
+/// helium excess, and the table's helium axis would answer such a star under 26's rules.
 pub(crate) fn stripped_share_on(m: SolarMasses, comp: &Composition, track: &Track) -> f64 {
+    debug_assert!(
+        comp.helium_excess().value() <= 0.0,
+        "the kick bins' share is read at no helium excess: {comp:?}"
+    );
     StrippingTable::generator().at(m, comp).map_or_else(
         || band_share_of(m, comp, StageRadii::of_built(track)),
         |node| node.share,
@@ -709,11 +726,12 @@ impl<'t> StrippingTable<'t> {
 }
 
 /// `m1` as the tables read it, M☉: held to their heaviest, 150 M☉, as the tracks are, or `None`
-/// below their lightest or for a mass that is not a number.
+/// below their lightest. A mass that is not a number is held to the heaviest too (`f64::min`
+/// returns the other operand), as the stripping table has always read it.
 #[must_use]
 fn table_mass(m1: SolarMasses) -> Option<f64> {
     let mass = m1.value().min(STRIPPING_MASS_RANGE.1);
-    (!mass.is_nan() && mass >= STRIPPING_MASS_RANGE.0).then_some(mass)
+    (mass >= STRIPPING_MASS_RANGE.0).then_some(mass)
 }
 
 /// The \[Fe/H\] of `comp`'s `z_fit` the tables are laid out in, log₁₀(`z_fit` ÷ 0.02).

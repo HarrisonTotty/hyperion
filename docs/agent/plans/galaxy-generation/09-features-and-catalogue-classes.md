@@ -5373,3 +5373,9 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   checks every white dwarf the table keeps below a ceiling against its track, over every fixture
   cluster whose turn-off lies below it; run it by name before the bump. A cluster's ceiling now
   takes its helium corner only if it has a second population.
+- **P09.T10, the reviews of the 26 levers (lane `galaxy-centre-core`, 2026-10-31).** The tabulated
+  arm defines 26's members: a refusal the track would keep moves the draw on to the next attempt
+  (the agreement test, now `the_tabulated_remnants_keep_only_what_the_track_keeps`, counts them
+  and allows 1%; none observed). The helium axis is read only under the fitted helium table it
+  was built under. `ClusterModel::first_population_share` is shared by the class counts and the
+  ceiling's corners.

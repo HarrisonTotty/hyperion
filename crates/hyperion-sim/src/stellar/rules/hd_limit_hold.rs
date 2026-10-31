@@ -29,7 +29,8 @@
 //! - the tables fitted offline from the tracks, which `hyperion-fit` builds under the version's
 //!   rules and the bump refits: the fates (`stellar_fates_*`, and through them the galaxy's
 //!   mean-mass quadrature `galaxy::fates::fates_for`, hence `GalaxyParams`' masses, system count
-//!   and the potential), the stripping and reach tables, the pair light, `kick_rank`'s
+//!   and the potential), the stripping and reach tables (the stripping table's helium axis under
+//!   the fitted helium table and the version's other rules), the pair light, `kick_rank`'s
 //!   fingerprint and the sky's tables. So under the enforced limit a galaxy keeps the version's
 //!   parameters and potential, and the birth populations plan 15's orbit run samples, which the
 //!   freeze holds; the class table's kick bins and lifetimes keep them too. The brief reads a

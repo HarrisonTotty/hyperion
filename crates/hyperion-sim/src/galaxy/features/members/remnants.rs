@@ -41,7 +41,7 @@ use crate::galaxy::displaced::binarity::{self, NEVER_STRIPPED};
 use crate::galaxy::features::cluster::ClusterModel;
 use crate::galaxy::features::interior::ClassKind;
 use crate::galaxy::features::interior::abundances::{
-    IRON_SPREAD_SHARE, IRON_SPREAD_SIGMA, first_population_share, helium_excess_max,
+    IRON_SPREAD_SHARE, IRON_SPREAD_SIGMA, helium_excess_max,
 };
 use crate::galaxy::features::interior::counts::WHITE_DWARF_PROGENITOR_MAX;
 use crate::id::{BodyId, SystemId};
@@ -117,7 +117,7 @@ fn corners(model: &ClusterModel) -> Vec<Composition> {
     } else {
         &[0.0]
     };
-    let heliums: &[f64] = if first_population_share(model.initial_mass()) < 1.0 {
+    let heliums: &[f64] = if model.first_population_share() < 1.0 {
         &[0.0, helium_excess_max(model.initial_mass())]
     } else {
         &[0.0]
@@ -146,7 +146,8 @@ pub(crate) const CAPTURE_MARGIN: f64 = 0.5;
 /// The initial mass above which no unstripped member of `model` collapses by electron capture,
 /// M☉: [`CAPTURE_MARGIN`] above the highest `m_cc` (`ElectronCaptureWindows::iron_core_mass`, the
 /// lowest mass that makes an iron core, whose single star's window lies below it) at the corners
-/// of its members' compositions. It costs four bisections of equation 66, some microseconds.
+/// of its members' compositions. It costs one to four bisections of Hurley, Pols and Tout's
+/// (2000, MNRAS 315, 543) equation 66, some microseconds.
 #[must_use]
 pub(crate) fn capture_window_top(model: &ClusterModel) -> SolarMasses {
     let highest = corners(model)
@@ -299,7 +300,10 @@ pub(crate) fn tabulated_fit(
         ClassKind::NeutronStar => {
             let law = StandardKickLaw::under(rules);
             let slowest = law.params().ordinary_speed_km_s(law.params().rank_clamp.0);
-            if age.value() < NEUTRON_STARS_DEAD_BY || slowest < v_eff {
+            // Neither kick can be judged surely too fast in a young cluster or a fast one, nor
+            // for an age or speed that is not a number.
+            let judged = age.value() >= NEUTRON_STARS_DEAD_BY && slowest >= v_eff;
+            if !judged {
                 return None;
             }
             if systemic >= v_eff {
@@ -378,6 +382,12 @@ mod tests {
     /// The fixture's slowest globular's, 5.7453 M☉.
     const SLOW_CEILING: f64 = f64::from_bits(0x4016_fb33_3333_3333);
 
+    /// The fixture's most massive globular's capture window's top under 26's rules, 8.1224 M☉.
+    const MASSIVE_CAPTURE_TOP: f64 = f64::from_bits(0x4020_3ea7_354d_e37b);
+
+    /// The fixture's slowest globular's, 7.5710 M☉.
+    const SLOW_CAPTURE_TOP: f64 = f64::from_bits(0x401e_48bc_43a0_ece8);
+
     /// The Milky Way fixture of the members' tests, under every 26 hold.
     fn galaxy() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
@@ -449,21 +459,32 @@ mod tests {
     }
 
     /// The fixture's most massive globular, of [Fe/H] −0.54 and a helium excess up to 0.18 in its
-    /// second population, and its slowest, of [Fe/H] −1.09 and 0.01, have white-dwarf ceilings of
-    /// 6.30 and 5.75 M☉ under 26's rules, pinned to the bit.
+    /// second population, and its slowest, of [Fe/H] −1.09 with no second population, have
+    /// white-dwarf ceilings of 6.30 and 5.75 M☉ and capture windows' tops of 8.12 and 7.57 M☉ under
+    /// 26's rules, pinned to the bit; the massive one's corners take its helium excess, the slow
+    /// one's none.
     #[test]
-    fn the_fixture_s_white_dwarf_ceilings_are_pinned() {
+    fn the_fixture_s_remnant_tables_are_pinned() {
         let galaxy = galaxy();
         let rules = galaxy.rules().stellar;
-        let [massive, slow] =
-            clusters(galaxy).map(|(_, model, _)| model.remnant_table(rules).white_dwarf_ceiling);
-        assert_same_bits(massive.value(), MASSIVE_CEILING);
-        assert_same_bits(slow.value(), SLOW_CEILING);
+        let [massive, slow] = clusters(galaxy).map(|(_, model, _)| {
+            let heliums: Vec<f64> = corners(&model)
+                .iter()
+                .map(|c| c.helium_excess().value())
+                .collect();
+            (model.remnant_table(rules), heliums)
+        });
+        assert_same_bits(massive.0.white_dwarf_ceiling.value(), MASSIVE_CEILING);
+        assert_same_bits(slow.0.white_dwarf_ceiling.value(), SLOW_CEILING);
+        assert_same_bits(massive.0.capture_window_top.value(), MASSIVE_CAPTURE_TOP);
+        assert_same_bits(slow.0.capture_window_top.value(), SLOW_CAPTURE_TOP);
+        assert!(massive.1.contains(&0.18), "{:?}", massive.1);
+        assert!(slow.1.iter().all(|&h| h <= 0.0), "{:?}", slow.1);
     }
 
-    /// A ceiling is a pure function of the model and the rules: the same whether the model is
-    /// shared, found under other rules first or built fresh, and whichever members are drawn
-    /// first.
+    /// A remnant table is a pure function of the model and the rules: the same whether the model
+    /// is shared, asked under other rules first or built fresh, and whichever members are drawn
+    /// first, white dwarfs and neutron stars, the slow globular's on slow pairs among them.
     #[test]
     fn the_ceiling_and_the_members_do_not_depend_on_what_was_asked_first() {
         let galaxy = galaxy();
@@ -482,41 +503,49 @@ mod tests {
             shared.remnant_table(version).white_dwarf_ceiling.value(),
             under_version.value(),
         );
-        let class = classes_of(&table, ClassKind::WhiteDwarf)[0];
         let [x, y, z] = feature.position().to_light_years_f64();
         let position = GalacticPosition::from_light_years([x + 1.0, y, z]).unwrap();
-        let ids: Vec<FeatureMemberId> = (0..12)
-            .map(|index| {
-                FeatureMemberId::new(
-                    feature.id().feature_ref(),
-                    MemberSlot::InCell {
-                        band: class.band.layer(),
-                        level: 0,
-                        cell: [8, 8, 8],
-                        index,
-                    },
-                )
-                .unwrap()
+        let classes =
+            [ClassKind::WhiteDwarf, ClassKind::NeutronStar].map(|k| classes_of(&table, k)[0]);
+        let ids: Vec<(MemberClass, FeatureMemberId)> = classes
+            .iter()
+            .flat_map(|class| {
+                (0..12).map(|index| {
+                    let id = FeatureMemberId::new(
+                        feature.id().feature_ref(),
+                        MemberSlot::InCell {
+                            band: class.band.layer(),
+                            level: 0,
+                            cell: [8, 8, 8],
+                            index,
+                        },
+                    )
+                    .unwrap();
+                    (*class, id)
+                })
             })
             .collect();
-        let draw = |model: &ClusterModel, id: &FeatureMemberId| {
+        let draw = |model: &ClusterModel, (class, id): &(MemberClass, FeatureMemberId)| {
             draw_member(
                 galaxy,
                 &feature,
                 model,
-                &class,
+                class,
                 &position,
                 *id,
                 GalacticVelocity::new([0.0; 3]),
             )
         };
-        assert_order_independent(&ids, |id| draw(&shared, id));
-        assert_order_independent(&ids, |id| {
+        assert_order_independent(&ids, |key| draw(&shared, key));
+        assert_order_independent(&ids, |key| {
             let fresh = ClusterModel::from_record(galaxy, &feature).expect("a globular");
-            draw(&fresh, id)
+            draw(&fresh, key)
         });
         let fresh = ClusterModel::from_record(galaxy, &feature).expect("a globular");
-        assert!(ids.iter().all(|id| draw(&fresh, id) == draw(&shared, id)));
+        assert!(
+            ids.iter()
+                .all(|key| draw(&fresh, key) == draw(&shared, key))
+        );
     }
 
     /// The lightest neutron star's progenitor, of 8 M☉, dies within 60 Myr at the corners of the
@@ -570,7 +599,7 @@ mod tests {
     /// greatest helium excess, each at four attempts' draws, on a pair half and twice the escape
     /// speed.
     #[test]
-    fn the_tabulated_remnants_decide_as_the_star_s_track_does() {
+    fn the_tabulated_remnants_keep_only_what_the_track_keeps() {
         let galaxy = galaxy();
         let rules = galaxy.rules().stellar;
         let (mut kept, mut refused, mut refused_kept) = ([0_u32; 2], [0_u32; 2], [0_u32; 2]);

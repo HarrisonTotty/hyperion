@@ -10,7 +10,8 @@
 //!
 //! The axis is fitted under the fitted helium table and the version's other rules
 //! ([`StrippingNode::of_fitted_helium`]), as the stripping table at none is under the version's,
-//! so the hard limit's arm (`hd_limit_hold`) moves neither; the bump refits both.
+//! so the hard limit's arm (`hd_limit_hold`) moves neither; the bump refits both. It is read only
+//! under the fitted helium table: the axis's arm with the identity's takes the exact path.
 
 use hyperion_testkit::float::assert_same_bits;
 
@@ -24,9 +25,11 @@ use crate::galaxy::displaced::binarity::{
 use crate::stellar::Composition;
 use crate::units::{Dex, HeliumExcess, SolarMasses};
 
-/// The version's rules with the axis's arm alone turned on.
+/// The version's rules with the axis's arm turned on, and the fitted helium table it was built
+/// under and is read under.
 const TABULATED: StellarRules = StellarRules {
     stripping: StrippingRules::HeliumTabulated,
+    helium: HeliumRules::Fitted,
     ..StellarRules::of_version(GENERATOR_VERSION)
 };
 
@@ -139,6 +142,22 @@ fn a_helium_rich_star_reads_the_axis_under_its_arm() {
             "{node:?} against {exact:?}"
         );
     }
-    let past = composition(-1.0, STRIPPING_HELIUM_MAX + 0.01);
-    assert!(axis.at(SolarMasses::new(9.0), &past).is_none());
+    let (m, past) = (
+        SolarMasses::new(9.0),
+        composition(-1.0, STRIPPING_HELIUM_MAX + 0.01),
+    );
+    assert!(axis.at(m, &past).is_none());
+    assert_same_node(
+        stripping_node_under(m, &past, TABULATED),
+        StrippingNode::of_fitted_helium(m, &past),
+    );
+    let (m, rich) = (SolarMasses::new(9.0), composition(-1.0, 0.09));
+    let identity = StellarRules {
+        helium: HeliumRules::Identity,
+        ..TABULATED
+    };
+    assert_same_node(
+        stripping_node_under(m, &rich, identity),
+        StrippingNode::of(m, &rich),
+    );
 }

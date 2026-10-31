@@ -109,7 +109,7 @@ pub struct StrippingHeliumCheck {
 ///
 /// # Panics
 ///
-/// If `table` does not hold every node.
+/// Never: a [`HeliumStrippingTable`] holds every node, and the cells' centres lie inside it.
 pub fn check(
     table: &HeliumStrippingTable<'_>,
     every: u64,
@@ -186,6 +186,7 @@ pub fn check(
 /// refuses so large a `const` array (`large_const_arrays`).
 #[must_use]
 pub fn render(nodes: &[(f64, f64, f64, f64)]) -> RustTable {
+    // Writing to a String cannot fail.
     let mut out = String::new();
     for line in [
         "The nodes, `(share, log₁₀ r_MS, log₁₀ r_HG, log₁₀ r_CHeB)` with the radii in R☉, mass",

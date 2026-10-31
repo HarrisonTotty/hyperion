@@ -61,6 +61,7 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{Dex, HeliumExcess, KilometresPerSecond, LightYears, SolarMasses, Years};
 
 use super::catalogue::{FeatureMarks, FeatureRecord};
+use super::interior::abundances::first_population_share;
 use super::interior::retention::{EFFECTIVE_ESCAPE_FACTOR, Retention, retention_tabulated};
 use super::kinds::globular::history;
 use super::kinds::nursery::NurseryStage;
@@ -438,6 +439,16 @@ impl ClusterModel {
     #[must_use]
     pub const fn kind(&self) -> ClusterKind {
         self.parameters.kind
+    }
+
+    /// The first population's share of its members: a globular's after Milone and Marino
+    /// ([`first_population_share`]), 1 for an open cluster, which has no second.
+    #[must_use]
+    pub(crate) fn first_population_share(&self) -> f64 {
+        match self.kind() {
+            ClusterKind::Globular => first_population_share(self.initial_mass()),
+            ClusterKind::Open => 1.0,
+        }
     }
 
     /// Its members' composition: the cluster's [Fe/H], no helium excess (the second population's
