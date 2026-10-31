@@ -56,7 +56,7 @@ use std::error::Error;
 use std::fmt;
 use std::ops::Range;
 
-use super::Population;
+use super::displaced::{DisplacedClassId, DisplacedFields, DisplacedForm};
 use super::fields::arms::Arm;
 use super::fields::bar::LongBar;
 use super::fields::bulge::BoxyBulge;
@@ -64,6 +64,7 @@ use super::fields::disc::{ExponentialDisc, radial_exponent};
 use super::fields::halo::HaloProfile;
 use super::fields::{Component, Fields, MAX_COMPONENTS, Shape, VerticalProfile};
 use super::quad::{gl4, gl16, gl32};
+use super::{PointLy, Population};
 use crate::math;
 
 /// The root cube's half-width in light-years: the far end of every line of sight, since no system
@@ -98,10 +99,14 @@ pub enum MapView {
 /// Which systems a map counts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MapSelection {
-    /// Every population's systems.
+    /// Every population's systems, and plan 08's displaced classes where the galaxy holds them.
     AllSystems,
     /// The young thin disc alone, which is where the arms show (brainstorm, "Visualiser").
     YoungOnly,
+    /// Layer E's displaced remnants alone, for checks by eye of plan 08's classes: a developer's
+    /// view that the protocol does not offer, and 0 everywhere for a galaxy that holds no displaced
+    /// classes (P08.T12.a).
+    LayerERemnants,
 }
 
 /// A [`MapSpec`] could not be built from what it was given.
@@ -396,26 +401,104 @@ impl MapSpec {
 /// // The young thin disc is a small part of the whole column, and the arms are its own.
 /// assert!(young > 0.0 && young < 0.2 * all);
 /// ```
+///
+/// Where the galaxy's build has installed plan 08's displaced classes (P08.T12.a), each component's
+/// column is weighted by the share of its systems its field keeps, and the classes the selection
+/// counts follow the components, in class order, each its systems inside the cube times its form's
+/// column: the layers' in closed form, times their arm factors, and the spheroids' by [`gl32`]
+/// through the cube.
 #[must_use]
 pub fn column_density_face_on(fields: &Fields, x: f64, y: f64, selection: MapSelection) -> f64 {
     let arm = fields.arms().point(x, y);
     let r_sq = x * x + y * y;
     let r = r_sq.sqrt();
-    fields
-        .components()
+    let column = |component: &Component| match component.shape() {
+        Shape::Disc(disc) => {
+            let factor = disc.arm().map_or(1.0, |arm_of| arm_of.factor(&arm));
+            2.0 * disc.height().value() * disc.envelope(r, 0.0) * factor
+        }
+        Shape::Bulge(bulge) => bulge_face_on(bulge, x, y),
+        Shape::Bar(bar) => 2.0 * bar.height().value() * bar.envelope(x.abs(), y, 0.0),
+        Shape::Halo(halo) => halo_face_on(halo, r_sq),
+    };
+    let counted_components = fields.components().iter().filter(|c| counted(c, selection));
+    match fields.displaced() {
+        None => counted_components.fold(0.0, |sum, component| sum + column(component)),
+        Some(displaced) => {
+            let field = counted_components.fold(0.0, |sum, component| {
+                sum + displaced.kept_share(component.id()) * column(component)
+            });
+            counted_classes(displaced, selection).fold(field, |sum, (weight, form)| {
+                sum + weight * form.face_on_column(x, y)
+            })
+        }
+    }
+}
+
+/// The displaced classes `selection` counts, each with a form, in class order, with the systems
+/// inside the cube it counts of each: layers D and E together for every system, layer E's
+/// remnants for [`MapSelection::LayerERemnants`], none for the young disc alone.
+fn counted_classes(
+    displaced: &DisplacedFields,
+    selection: MapSelection,
+) -> impl Iterator<Item = (f64, &DisplacedForm)> + '_ {
+    let remnants = match selection {
+        MapSelection::AllSystems => Some(false),
+        MapSelection::LayerERemnants => Some(true),
+        MapSelection::YoungOnly => None,
+    };
+    displaced
+        .classes()
         .iter()
-        .filter(|c| counted(c, selection))
-        .fold(0.0, |sum, component| {
-            sum + match component.shape() {
-                Shape::Disc(disc) => {
-                    let factor = disc.arm().map_or(1.0, |arm_of| arm_of.factor(&arm));
-                    2.0 * disc.height().value() * disc.envelope(r, 0.0) * factor
-                }
-                Shape::Bulge(bulge) => bulge_face_on(bulge, x, y),
-                Shape::Bar(bar) => 2.0 * bar.height().value() * bar.envelope(x.abs(), y, 0.0),
-                Shape::Halo(halo) => halo_face_on(halo, r_sq),
-            }
+        .enumerate()
+        .filter_map(move |(index, class)| {
+            let remnants = remnants?;
+            let form = class.form()?;
+            let id = DisplacedClassId::new(u16::try_from(index).expect("under 97 classes"));
+            Some((displaced.map_count(id, remnants), form))
         })
+}
+
+/// A displaced class's mean column over a pixel spanning the heights `z_lo` to `z_hi` at `x` (ly),
+/// looking along `+y`, at one system's weight: `∫∫ n dy dz ÷ (z_hi − z_lo)`, the line of sight by
+/// [`gl16`] on the panels the map's components take (the arm's where the class keeps one), and the
+/// height by [`gl4`] on panels of at most [`PANEL_SCALES`] of the class's least vertical scale,
+/// split at the plane (P08.T12.a).
+fn displaced_pixel(form: &DisplacedForm, x: f64, z_lo: f64, z_hi: f64) -> f64 {
+    let (panels, symmetry) = if form.has_arm() {
+        (Panels::uniform(ROOT_HALF), Symmetry::Any)
+    } else {
+        (Panels::logarithmic(ROOT_HALF), Symmetry::EvenInY)
+    };
+    let along = |z: f64| {
+        along_line(panels, symmetry, NO_KINK, |y| {
+            form.density(&PointLy::new(x, y, z))
+        })
+    };
+    let widest = PANEL_SCALES * form.vertical_scale();
+    let panelled = |lo: f64, hi: f64| {
+        let span = hi - lo;
+        let mut count = 1_u32;
+        while count < MAX_PIXEL_PANELS && f64::from(count) * widest < span {
+            count += 1;
+        }
+        let width = span / f64::from(count);
+        (0..count).fold(0.0, |sum, k| {
+            let a = lo + f64::from(k) * width;
+            let b = if k + 1 == count {
+                hi
+            } else {
+                lo + f64::from(k + 1) * width
+            };
+            sum + gl4(along, a, b)
+        })
+    };
+    let integral = if z_lo < 0.0 && z_hi > 0.0 {
+        panelled(z_lo, 0.0) + panelled(0.0, z_hi)
+    } else {
+        panelled(z_lo, z_hi)
+    };
+    integral / (z_hi - z_lo)
 }
 
 /// The column density at `x` (ly) through the pixel spanning the heights `z_lo` to `z_hi` (ly),
@@ -423,7 +506,11 @@ pub fn column_density_face_on(fields: &Fields, x: f64, y: f64, selection: MapSel
 /// P02.T10.b).
 ///
 /// Dividing by the pixel's height makes the value the mean column over the pixel, so a disc
-/// thinner than the pixel keeps its light. It is the value [`render_rows`] gives that pixel, bit
+/// thinner than the pixel keeps its light. Plan 08's displaced classes are counted only by
+/// [`MapSelection::LayerERemnants`], each class by a two-dimensional quadrature; every other
+/// selection keeps the field's picture, which the classes, some 0.5% of the systems, barely move
+/// (P08.T12.a; lean, 2026-10-31).
+/// It is the value [`render_rows`] gives that pixel, bit
 /// for bit, when given the row's own heights, [`MapSpec::pixel_span`].
 ///
 /// # Panics
@@ -582,6 +669,7 @@ fn counted(component: &Component, selection: MapSelection) -> bool {
     match selection {
         MapSelection::AllSystems => true,
         MapSelection::YoungOnly => component.population() == Population::YoungThinDisc,
+        MapSelection::LayerERemnants => false,
     }
 }
 
@@ -1092,6 +1180,9 @@ enum Part<'a> {
 struct EdgeOnPlan<'a> {
     parts: Vec<Part<'a>>,
     lines: Vec<Line>,
+    /// Layer E's displaced remnants, for [`MapSelection::LayerERemnants`] in a galaxy that holds
+    /// plan 08's classes (P08.T12.a): each class with its remnants inside the cube.
+    displaced: Option<Vec<(f64, &'a DisplacedForm)>>,
 }
 
 impl<'a> EdgeOnPlan<'a> {
@@ -1100,6 +1191,16 @@ impl<'a> EdgeOnPlan<'a> {
         let mut plan = Self {
             parts: Vec::with_capacity(fields.components().len()),
             lines: Vec::with_capacity(fields.components().len()),
+            // The edge-on view keeps the field's picture for every system and the young disc
+            // (lean, 2026-10-31): plan 08's classes are some 0.5% of the systems, and a class's
+            // pixel takes a two-dimensional quadrature, so only layer E's remnants, a developer's
+            // view, are integrated class by class.
+            displaced: match (fields.displaced(), selection) {
+                (Some(displaced), MapSelection::LayerERemnants) => {
+                    Some(counted_classes(displaced, selection).collect())
+                }
+                (None, _) | (Some(_), MapSelection::AllSystems | MapSelection::YoungOnly) => None,
+            },
         };
         for component in fields.components() {
             let part = if counted(component, selection) {
@@ -1197,6 +1298,9 @@ impl<'a> EdgeOnPlan<'a> {
                 Part::Spheroid(spheroid) => spheroid.pixel(x, z_lo, z_hi),
                 Part::Dropped => 0.0,
             };
+        }
+        for &(weight, form) in self.displaced.iter().flatten() {
+            sum += weight * displaced_pixel(form, x, z_lo, z_hi);
         }
         sum
     }

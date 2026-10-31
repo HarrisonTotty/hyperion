@@ -90,6 +90,8 @@ use std::error::Error;
 use std::fmt;
 
 use super::PointLy;
+#[cfg(doc)]
+use super::displaced::DisplacedFields;
 use super::fields::arms::Arm;
 #[cfg(doc)]
 use super::fields::arms::{ArmAcross, ArmGeometry, GentleArm, SharpArm};
@@ -541,16 +543,27 @@ impl Fields {
     /// assert!((0.5..3.0).contains(&(bound * 512.0)));
     /// # Ok::<(), hyperion_sim::galaxy::bounds::BuildCellBoxError>(())
     /// ```
+    ///
+    /// Where the galaxy's build has installed plan 08's displaced classes (P08.T12.a), the sum runs
+    /// on over the band's classes in their order, each weighted by its systems inside the cube,
+    /// as [`layer_density`](Self::layer_density) does: [`DisplacedFields::bound`] for each.
     #[must_use]
     pub fn layer_bound(&self, shares: &ShareMatrix, band: MassBand, cell: &CellBox) -> f64 {
         let mut bounds = [0.0; MAX_COMPONENTS];
         self.component_bounds(cell, &mut bounds);
-        self.components()
+        let field = self
+            .components()
             .iter()
             .zip(bounds)
             .fold(0.0, |sum, (c, bound)| {
                 sum + shares.component_share(band, c) * bound
-            })
+            });
+        match self.displaced() {
+            None => field,
+            Some(displaced) => displaced.order(band).iter().fold(field, |sum, &id| {
+                sum + shares.displaced_share(band, id) * displaced.bound(id, cell)
+            }),
+        }
     }
 }
 

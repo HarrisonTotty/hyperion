@@ -36,6 +36,10 @@
 //! 1,024. The rule is exact for the volume itself, since the area of a disc is quadratic in z and
 //! the polar integrand is linear in r.
 //!
+//! Where the galaxy's build has installed plan 08's displaced classes (P08.T12.a), each class's
+//! form is integrated at the same nodes, and layers D and E add `Σ count × Iᵏ` over their classes in
+//! their order after the components, as their densities do.
+//!
 //! Nothing is clipped to the root cube, so a sphere that pokes outside it is counted as though the
 //! galaxy went on. That errs high, which can only drop a layer from a census early — the direction
 //! the brainstorm accepts for the features' share.
@@ -130,10 +134,21 @@ pub fn expected_counts(
     let mut integrals = [0.0; MAX_COMPONENTS];
     let mut densities = [0.0; MAX_COMPONENTS];
     let mut rogue_integral = 0.0;
+    // Plan 08's displaced classes, once installed (P08.T12.a): each class with a form, integrated
+    // at the same nodes, by class index.
+    let displaced = fields.displaced();
+    let mut class_integrals = displaced.map_or_else(Vec::new, |d| vec![0.0; d.classes().len()]);
     for_each_node(&PointLy::from(centre), radius.value(), |point, weight| {
         fields.densities(point, &mut densities);
         for (integral, density) in integrals.iter_mut().zip(densities) {
             *integral += weight * density;
+        }
+        if let Some(displaced) = displaced {
+            for (integral, class) in class_integrals.iter_mut().zip(displaced.classes()) {
+                if let Some(form) = class.form() {
+                    *integral += weight * form.density(point);
+                }
+            }
         }
         if rogue {
             // `share × density` added from 0 in component order, as the thinning adds them.
@@ -152,14 +167,23 @@ pub fn expected_counts(
         }
     });
     let mut counts = LayerCounts::ZERO;
-    // From version 26 each component's share is the field's (P09.T2.c), the budget's until then.
+    // From version 26 each component's share is the field's (P09.T2.c), the budget's until then,
+    // `Σ share × Iᶜ` over the components; then, under plan 08's displaced classes (P08.T12.a),
+    // over the band's classes in their order, whose weights are the budget's: the sum the
+    // layer's density takes.
     let linear = |band: MassBand| {
-        fields
+        let field = fields
             .component_ids()
             .zip(integrals)
             .fold(0.0, |sum, (id, integral)| {
                 sum + galaxy.field_component_share(band, id) * integral
-            })
+            });
+        match displaced {
+            None => field,
+            Some(displaced) => displaced.order(band).iter().fold(field, |sum, &id| {
+                sum + shares.displaced_share(band, id) * class_integrals[id.index()]
+            }),
+        }
     };
     for spec in STELLAR_LAYERS {
         counts.set(spec.layer(), linear(spec.band()));

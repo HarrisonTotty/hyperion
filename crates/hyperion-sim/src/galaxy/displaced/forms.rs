@@ -149,6 +149,11 @@ pub struct CoredPowerLawParams {
     pub gamma: f64,
 }
 
+/// How deep in `(|z| ÷ h)^β` the cube's face must lie for a flared layer's column through the
+/// cube to take the closed form through the whole of z: 40, past which the profile's tail is under
+/// `e^−40`, some 4 × 10⁻¹⁸ of the column (the map's face-on view, P08.T12.a).
+const CLOSED_COLUMN_DEPTH: f64 = 40.0;
+
 /// The cube's half-width L, ly.
 fn half_width() -> f64 {
     f64::from(ROOT_HALF_WIDTH_LY)
@@ -346,6 +351,25 @@ impl FlaredLayer {
         self.norm
     }
 
+    /// The normalised density's column through the root cube, `|z| ≤ L`, at radius `r` (ly), ly⁻²
+    /// (the map's face-on view, P08.T12.a). Where the cube's face is past [`CLOSED_COLUMN_DEPTH`]
+    /// of the profile's `(|z| ÷ h)^β`, it is the column through the whole of z in closed form,
+    /// `norm × exp(−R ÷ h_R) × 2Γ(1 + 1 ÷ β)`, since the vertical factor's integral is `2Γ(1 + 1 ÷
+    /// β)` at every radius and what lies beyond is under `e^−40` of it. A layer that flares to
+    /// within that of the face takes [`gl32`](crate::galaxy::quad::gl32) over `[0, L]` instead,
+    /// where `(z ÷ h)^β` is then at most 40 and the integrand smooth.
+    #[must_use]
+    pub(crate) fn normalised_column(&self, r: f64) -> f64 {
+        let l = half_width();
+        let h = self.scale_height(r);
+        let vertical = if math::powf_positive(l / h, self.beta) > CLOSED_COLUMN_DEPTH {
+            2.0 * math::gamma(1.0 + 1.0 / self.beta)
+        } else {
+            2.0 * crate::galaxy::quad::gl32(|z| self.vertical(h, z), 0.0, l)
+        };
+        self.norm * self.radial(r) * vertical
+    }
+
     /// The flare factor over the heights `h(R)` of a cell's radii: [`FlareFactor`] at the cell's
     /// least `|z|`, `z_min` (ly).
     #[must_use]
@@ -415,6 +439,32 @@ impl CoredPowerLaw {
     #[must_use]
     pub fn norm(&self) -> f64 {
         self.norm
+    }
+
+    /// The scale on which the spheroid falls in z on the axis, `q a`, ly.
+    #[must_use]
+    pub(crate) fn vertical_scale(&self) -> f64 {
+        1.0 / (self.inv_a_sq * self.inv_q_sq).sqrt()
+    }
+
+    /// The normalised density's column through the root cube, `|z| ≤ L`, at radius `r` (ly), ly⁻²:
+    /// `2 ∫₀^L` by [`gl32`](crate::galaxy::quad::gl32) in `u` with `z = s u ÷ (1 − c u)`, `s = q
+    /// √(a² + R²)` and `c = 1 − s ÷ L`, the substitution plan 02's map takes for a halo
+    /// component's chord (`map.rs`, `halo_face_on`), here over the cube's height.
+    #[must_use]
+    pub(crate) fn normalised_column(&self, r: f64) -> f64 {
+        let l = half_width();
+        let scale = (self.inv_a_sq.recip() + r * r).sqrt() / self.inv_q_sq.sqrt();
+        let bend = 1.0 - scale / l;
+        let column = crate::galaxy::quad::gl32(
+            |u| {
+                let rest = 1.0 - bend * u;
+                self.shape(r, scale * u / rest) * scale / (rest * rest)
+            },
+            0.0,
+            1.0,
+        );
+        2.0 * self.norm * column
     }
 }
 
@@ -566,6 +616,14 @@ impl BallisticLayer {
     #[must_use]
     pub fn norm(&self) -> f64 {
         self.norm
+    }
+
+    /// The normalised envelope's column through the whole of z at radius `r` (ly), ly⁻², without
+    /// the arm: the young disc's own column, `2 h_young` times its envelope in the plane, since the
+    /// stretch keeps the column (the map's face-on view, P08.T12.a).
+    #[must_use]
+    pub(crate) fn normalised_column(&self, r: f64) -> f64 {
+        self.norm * (2.0 * self.disc.height().value() * self.disc.envelope(r, 0.0))
     }
 
     /// An upper bound on the normalised envelope (no arm) over radii `r_min` to `r_max` at heights

@@ -226,6 +226,17 @@ impl ConditionalMarks {
         self.kind_weight.iter().sum()
     }
 
+    /// The bytes the marks own on the heap: the birth components and each kind's densities.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.components.capacity() * size_of::<ComponentId>()
+            + self
+                .density
+                .iter()
+                .map(|rows| rows.capacity() * size_of::<[f64; MARK_MASS_NODES]>())
+                .sum::<usize>()
+    }
+
     /// The odds of each kind, in [`MARK_KINDS`] order, summing to 1; all zero for an empty class.
     #[must_use]
     pub fn kind_odds(&self) -> [f64; 4] {

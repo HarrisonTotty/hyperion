@@ -38,6 +38,11 @@
 //!   the tidal limit or an evolved donor whose common envelope merges it, and a neutron-star
 //!   merger's remnant keeps the pair's mass less its ejecta. It is read where a merger's scan
 //!   marks are drawn, and reaches none of the galaxy's memos.
+//! - [`displaced`](GalaxyRules::displaced), at [`DISPLACED_VERSION`] (plan 08, P08.T12): the
+//!   displaced classes in layers D and E. It is read when the galaxy is built, after the field share
+//!   and the carve-out, by the build's one `match` (`Galaxy::from_params`), which installs the
+//!   classes and the stay shares that every reader of the two layers then reads; so
+//!   `Galaxy::with_rules` refuses to change it as well.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -49,6 +54,7 @@ use crate::GeneratorVersion;
 use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules};
 use crate::galaxy::catalogue_classes::binary::{MERGER_CLASS_VERSION, MergerClassRules};
 use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
+use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
 use crate::galaxy::features::kinds::globular::{BOUND_SHARE_VERSION, BoundShareRules};
 use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules};
 use crate::galaxy::features::members::remnants::{MemberRemnantRules, TABULATED_REMNANTS_VERSION};
@@ -76,6 +82,9 @@ pub(crate) struct GalaxyRules {
     /// How the merger classes draw their entries: every stellar merger a contact pair, or the
     /// engine's channels and a neutron-star remnant less its ejecta (P11.T8.c–d's fix).
     pub(crate) merger_class: MergerClassRules,
+    /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
+    /// reads.
+    pub(crate) displaced: DisplacedRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -121,6 +130,11 @@ impl GalaxyRules {
             } else {
                 MergerClassRules::ContactOnly
             },
+            displaced: if version.get() >= DISPLACED_VERSION.get() {
+                DisplacedRules::Displaced
+            } else {
+                DisplacedRules::FieldOnly
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -128,10 +142,10 @@ impl GalaxyRules {
     /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: the
     /// version's rules with the holds that turn on at 26 (the galaxy's `bound_share`, P09.T13,
     /// `stream_shell`, P10.T9, `member_remnants`, P09.T10, `field_share`, P09.T2.c, `carve_out`,
-    /// P09.T35, `feature_classes`, P09.T36, and `merger_class`, P11.T8.c–d; the stellar rules'
-    /// `dwarf_sequence`, P06.T23.a, `helium`, P15.T7.b, `hd_limit`, P06.T42.b, `v_magnitude`,
-    /// P06.T43.b, `stripping`, P11.T1.d, `peculiar_classes`, P06.T24.b, `star_events`, P06.T28.g,
-    /// and `merger_mass`, P11.T4.d; [`StellarRules::every_26_hold`]).
+    /// P09.T35, `feature_classes`, P09.T36, `merger_class`, P11.T8.c–d, and `displaced`, P08.T12;
+    /// the stellar rules' `dwarf_sequence`, P06.T23.a, `helium`, P15.T7.b, `hd_limit`, P06.T42.b,
+    /// `v_magnitude`, P06.T43.b, `stripping`, P11.T1.d, `peculiar_classes`, P06.T24.b,
+    /// `star_events`, P06.T28.g, and `merger_mass`, P11.T4.d; [`StellarRules::every_26_hold`]).
     ///
     /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is
     /// struct-update syntax over it.
@@ -216,6 +230,15 @@ mod tests {
         assert_eq!(
             GalaxyRules::of_version(GENERATOR_VERSION).stellar,
             StellarRules::of_version(GENERATOR_VERSION)
+        );
+        let displaced = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).displaced;
+        assert_eq!(displaced(24), DisplacedRules::FieldOnly);
+        assert_eq!(displaced(25), DisplacedRules::FieldOnly);
+        assert_eq!(displaced(26), DisplacedRules::Displaced);
+        assert_eq!(displaced(27), DisplacedRules::Displaced);
+        assert_eq!(
+            GalaxyRules::every_26_hold().displaced,
+            DisplacedRules::Displaced
         );
         assert_eq!(
             GalaxyRules::every_26_hold().stellar,

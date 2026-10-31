@@ -82,6 +82,7 @@ use self::vertical::{Height, locate};
 use super::ages::{
     AgeDistribution, BULGE_AGES, FeatureShare, LONG_BAR_AGES, SubDisc, THICK_DISC_AGES,
 };
+use super::displaced::DisplacedFields;
 use super::imf::MassBand;
 use super::params::{GalaxyParams, HaloComponentKind, NuclearDiscParams};
 use super::potential::MassModel;
@@ -280,6 +281,7 @@ impl ComponentId {
 /// ages and metallicity.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Component {
+    id: ComponentId,
     population: Population,
     shape: Shape,
     count: f64,
@@ -290,6 +292,13 @@ pub struct Component {
 }
 
 impl Component {
+    /// The component's place in [`Fields::components`]: the share matrix's per-component factor
+    /// reads it (P08.T12.a).
+    #[must_use]
+    pub fn id(&self) -> ComponentId {
+        self.id
+    }
+
     /// The population the component belongs to: the population of every system it places.
     #[must_use]
     pub fn population(&self) -> Population {
@@ -392,6 +401,9 @@ pub struct Fields {
     components: Vec<Component>,
     arms: ArmGeometry,
     sub_discs: SubDiscHeights,
+    /// Plan 08's displaced classes, once the galaxy's build has installed them (P08.T12.a); `None`
+    /// before, and below the hold's version.
+    displaced: Option<Box<DisplacedFields>>,
 }
 
 impl Fields {
@@ -432,7 +444,28 @@ impl Fields {
             components,
             arms,
             sub_discs: summary,
+            displaced: None,
         }
+    }
+
+    /// The same fields with plan 08's displaced classes after their components (P08.T12.a): what
+    /// the galaxy's build installs under the hold's new arm
+    /// ([`DisplacedRules::Displaced`](crate::galaxy::displaced::DisplacedRules)). The components
+    /// are untouched, bit for bit.
+    #[must_use]
+    pub(crate) fn with_displaced(self, displaced: DisplacedFields) -> Self {
+        Self {
+            displaced: Some(Box::new(displaced)),
+            ..self
+        }
+    }
+
+    /// The displaced classes layers D and E hold after the field components, once the galaxy's
+    /// build has installed them (P08.T12.a); `None` for fields that hold none, every galaxy's below
+    /// generator version 26.
+    #[must_use]
+    pub fn displaced(&self) -> Option<&DisplacedFields> {
+        self.displaced.as_deref()
     }
 
     /// The components, in their fixed order (module documentation, "Order").
@@ -541,14 +574,23 @@ impl Fields {
 
     /// The density of the layer of `band` at `p`, systems per cubic light-year: `Σ share ×
     /// density` over the components in order, each weighted by its population's share of the band
-    /// (brainstorm, "Sizing the layers").
+    /// (brainstorm, "Sizing the layers"), and then, where the build has installed them, over the
+    /// displaced classes of the band in their order, each weighted by its systems inside the cube
+    /// (P08.T12.a): one running sum, which the thinning's pick and the layer's bound take in the
+    /// same order.
     #[must_use]
     pub fn layer_density(&self, shares: &ShareMatrix, band: MassBand, p: &PointLy) -> f64 {
         let site = Site::new(p);
         let arm = self.arms.point_with(site.x, site.y, site.r_sq, site.r);
-        self.components.iter().fold(0.0, |sum, c| {
+        let field = self.components.iter().fold(0.0, |sum, c| {
             sum + shares.component_share(band, c) * c.shape.density_at(&site, &arm)
-        })
+        });
+        match &self.displaced {
+            None => field,
+            Some(displaced) => displaced.order(band).iter().fold(field, |sum, &id| {
+                sum + shares.displaced_share(band, id) * displaced.density(id, p)
+            }),
+        }
     }
 
     /// The bytes the fields own on the heap: the components, the discs' vertical tables and the
@@ -561,6 +603,10 @@ impl Fields {
                 .iter()
                 .map(Component::heap_bytes)
                 .sum::<usize>()
+            + self
+                .displaced
+                .as_deref()
+                .map_or(0, |d| size_of::<DisplacedFields>() + d.heap_bytes())
     }
 }
 
@@ -578,6 +624,13 @@ impl Component {
 
 /// Why a component of built parameters cannot fail to build.
 const VALID: &str = "built parameters give valid components";
+
+/// The ID of the component pushed next onto `components`.
+fn next_id(components: &[Component]) -> ComponentId {
+    ComponentId(
+        u8::try_from(components.len()).expect("Fields::new holds at most MAX_COMPONENTS = 24"),
+    )
+}
 
 /// The young thin disc and the old thin disc's five sub-discs, youngest first.
 fn push_thin_discs(
@@ -599,6 +652,7 @@ fn push_thin_discs(
     let young_ages = AgeDistribution::young_disc(tau, FeatureShare::None).expect(VALID);
     let young = n * params.population_share(Population::YoungThinDisc);
     components.push(Component {
+        id: next_id(components),
         population: Population::YoungThinDisc,
         shape: Shape::Disc(
             ExponentialDisc::new(
@@ -622,6 +676,7 @@ fn push_thin_discs(
     for ((bin, share), profile) in SubDisc::ALL.into_iter().zip(summary.shares()).zip(profiles) {
         let count = old * share;
         components.push(Component {
+            id: next_id(components),
             population: Population::OldThinDisc,
             shape: Shape::Disc(
                 ExponentialDisc::new(count, thin.length(), holed, profile, Some(gentle))
@@ -648,6 +703,7 @@ fn push_inner_populations(
     let uniform = |[lo, hi]: [Years; 2]| AgeDistribution::uniform(lo, hi).expect(VALID);
     let mut push = |population, shape: Shape, ages: AgeDistribution, metallicity| {
         components.push(Component {
+            id: next_id(components),
             population,
             shape,
             count: n * params.population_share(population),
@@ -706,6 +762,7 @@ fn push_inner_populations(
         (inner, nuclear.inner_length(), inner_radial, inner_profile),
     ] {
         components.push(Component {
+            id: next_id(components),
             population: Population::NuclearDisc,
             shape: Shape::Disc(
                 ExponentialDisc::new(born * share, length, radial, profile, None).expect(VALID),
@@ -728,6 +785,7 @@ fn push_halo(params: &GalaxyParams, components: &mut Vec<Component>) {
     for c in params.halo().components() {
         let count = halo * c.share();
         components.push(Component {
+            id: next_id(components),
             population: Population::Halo,
             shape: Shape::Halo(HaloProfile::of(count, c).expect(VALID)),
             count,

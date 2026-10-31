@@ -1168,9 +1168,11 @@ fn members_of(galaxy: &Galaxy) -> Vec<Vec<ComponentId>> {
     members
 }
 
-/// Component `c`'s budgets in layers D and E, systems.
+/// Component `c`'s budgets in layers D and E, systems: its count times its population's whole
+/// band share, the budget's share (Design note 15), which the stay shares the build installs into
+/// the share matrix do not touch (P08.T12.a).
 fn budget_of(galaxy: &Galaxy, c: &Component) -> [f64; 2] {
-    [MassBand::D, MassBand::E].map(|band| c.count() * galaxy.shares().component_share(band, c))
+    [MassBand::D, MassBand::E].map(|band| c.count() * galaxy.shares().share(band, c.population()))
 }
 
 /// Each source's reference composition, budgets and node lifetimes, and the kick shares at band
@@ -1498,6 +1500,21 @@ impl ClassTable {
             query,
             self.model.walkaway_scale(),
         )
+    }
+
+    /// The bytes the table owns on the heap: its sources, components and classes, with each
+    /// class's conditional marks.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.sources.capacity() * size_of::<SourceEntry>()
+            + self.components.capacity() * size_of::<ComponentEntry>()
+            + self.classes.capacity() * size_of::<ClassEntry>()
+            + self
+                .classes
+                .iter()
+                .flat_map(|class| class.marks.iter())
+                .map(ConditionalMarks::heap_bytes)
+                .sum::<usize>()
     }
 
     /// The galaxy's scales the table was built at.

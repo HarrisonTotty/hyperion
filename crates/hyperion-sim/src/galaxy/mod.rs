@@ -51,7 +51,10 @@ use std::sync::{Arc, OnceLock};
 
 use self::ages::FieldShareRules;
 use self::catalogue_classes::type_ia::DelayTimeDistribution;
+use self::displaced::class_table::{ClassTable, FormTable};
+use self::displaced::forms::BuildFormError;
 use self::displaced::site::CarveOutRules;
+use self::displaced::{DisplacedFields, DisplacedRules};
 use self::fates::{CompanionMasses, fates_for};
 use self::features::centre::{BuildCentreError, CentreModel};
 use self::features::shares::FeatureShares;
@@ -338,7 +341,8 @@ impl Galaxy {
     ///
     /// It is what [`from_params_with_rules`](Self::from_params_with_rules) builds from the same
     /// seed and parameters, with the builders after it, since nothing a galaxy builds when it is
-    /// built reads its rules but the field share and the carve-out (below): each other held call
+    /// built reads its rules but the field share, the carve-out and the displaced classes' arm
+    /// (below; and, through the displaced classes' table, the stellar rules): each other held call
     /// site reads them when asked, and a test holds the two equal. It keeps the centre's motion and potential if they have been read, since the motion
     /// reads only the parameters and the mass model, and the potential only the motion. It keeps
     /// the centre's model and the field's Type Ia delay-time distribution only if the stellar rules
@@ -351,15 +355,18 @@ impl Galaxy {
     /// `CentreModel::from_parts`, since the reset alone does not route them. A galaxy-side hold
     /// whose arm reaches any of these memos must reset it here too.
     ///
-    /// The field share (`GalaxyRules::field_share`, P09.T2.c) and the carve-out
-    /// (`GalaxyRules::carve_out`, P09.T35) are the holds read when the galaxy is built, so `rules`
-    /// must keep this galaxy's: a test of either's new arm builds the galaxy through
-    /// [`from_params_with_rules`](Self::from_params_with_rules).
+    /// The field share (`GalaxyRules::field_share`, P09.T2.c), the carve-out
+    /// (`GalaxyRules::carve_out`, P09.T35) and plan 08's displaced classes
+    /// (`GalaxyRules::displaced`, P08.T12.a) are the holds read when the galaxy is built, so
+    /// `rules` must keep this galaxy's: a test of any of their new arms builds the galaxy through
+    /// [`from_params_with_rules`](Self::from_params_with_rules). A galaxy that holds the displaced
+    /// classes keeps its stellar rules too, whose kick law its class table was built with.
     ///
     /// # Panics
     ///
-    /// In debug builds, which every test profile is, if `rules` changes the field share or the
-    /// carve-out.
+    /// In debug builds, which every test profile is, if `rules` changes the field share, the
+    /// carve-out or the displaced classes' arm, or the stellar rules of a galaxy that holds the
+    /// classes.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn with_rules(self, rules: GalaxyRules) -> Self {
@@ -372,6 +379,16 @@ impl Galaxy {
             rules.carve_out, self.rules.carve_out,
             "the carve-out is read when a galaxy is built: build it under the new rules with \
              `Galaxy::from_params_with_rules`"
+        );
+        debug_assert_eq!(
+            rules.displaced, self.rules.displaced,
+            "the displaced classes' arm is read when a galaxy is built: build it under the new \
+             rules with `Galaxy::from_params_with_rules`"
+        );
+        debug_assert!(
+            self.fields.displaced().is_none() || rules.stellar == self.rules.stellar,
+            "the displaced classes' table was built under the galaxy's stellar rules, so a galaxy \
+             under others is built with `Galaxy::from_params_with_rules`"
         );
         let (centre, type_ia_delays) = if rules.stellar == self.rules.stellar {
             (self.centre, self.type_ia_delays)
@@ -387,7 +404,28 @@ impl Galaxy {
     }
 
     /// [`from_params`](Self::from_params) under `rules`.
+    ///
+    /// This is the one `match` on the displaced classes' hold (P08.T12.a;
+    /// [`DISPLACED_VERSION`](displaced::DISPLACED_VERSION), E4′ of decision-stellar-holds, lean
+    /// of 2026-10-31). The field galaxy is built first, as every version has built it. Under the
+    /// held arm that is the galaxy. Under the new arm the class table is built from it (some
+    /// 0.4–0.5 s in a release build, plan 08's P08.T9 as built, and never kept as a static), and
+    /// the classes and the share matrix's stay shares and class counts are installed, so that every
+    /// reader of layers D and E reads them through the galaxy's fields and shares.
     fn build(
+        seed: Seed,
+        params: GalaxyParams,
+        rules: GalaxyRules,
+    ) -> Result<Self, BuildGalaxyError> {
+        let field = Self::build_field(seed, params, rules)?;
+        match rules.displaced {
+            DisplacedRules::FieldOnly => Ok(field),
+            DisplacedRules::Displaced => field.with_displaced_classes(),
+        }
+    }
+
+    /// The field galaxy: version 24's build verbatim, with nothing of plan 08's displaced classes.
+    fn build_field(
         seed: Seed,
         params: GalaxyParams,
         rules: GalaxyRules,
@@ -449,6 +487,41 @@ impl Galaxy {
             CarveOutRules::Claimed => Some(field_share::layer_d_kept(&galaxy)),
         };
         Ok(galaxy)
+    }
+
+    /// This field galaxy with plan 08's displaced classes installed (P08.T12.a): the class table
+    /// from it, under plan 15's committed form table, the classes in its fields and their stay
+    /// shares and counts in its share matrix.
+    ///
+    /// The stay shares are the budget's ([`ClassTable::budget_stay_share`]): the field share's
+    /// thinning (P09.T2.c), after the pick, takes φ. Layer D's carve-out (P09.T35) keeps `1 − a`
+    /// of the budget's layer D, its ancient Type Ia `a` all among the dead, which stay; inside the
+    /// stay's slice of the pick, which has already given the runaways and walkaways to their
+    /// classes, it keeps `1 − a ÷ stay`, so that the field loses its ancient Type Ia exactly.
+    fn with_displaced_classes(self) -> Result<Self, BuildGalaxyError> {
+        let displaced = DisplacedFields::new(&self, &FormTable::committed())
+            .map_err(BuildGalaxyError::DisplacedForm)?;
+        let (stay, counts) = displaced.share_columns(&self.fields);
+        let layer_d_kept = self.layer_d_kept.as_ref().map(|kept| {
+            kept.iter()
+                .zip(&stay)
+                .map(|(&kept, &[stay_d, _])| {
+                    if stay_d > 0.0 {
+                        (1.0 - (1.0 - kept) / stay_d).max(0.0)
+                    } else {
+                        kept
+                    }
+                })
+                .collect()
+        });
+        let shares = self.shares.with_displaced(&stay, &counts);
+        let fields = self.fields.with_displaced(displaced);
+        Ok(Self {
+            fields,
+            shares,
+            layer_d_kept,
+            ..self
+        })
     }
 
     /// The same galaxy with other substellar parameters, for tests and tuning: its abundances and
@@ -705,10 +778,19 @@ impl Galaxy {
         &self.potential
     }
 
-    /// The density fields.
+    /// The density fields, with plan 08's displaced classes after their components once the build
+    /// has installed them ([`Fields::displaced`]).
     #[must_use]
     pub fn fields(&self) -> &Fields {
         &self.fields
+    }
+
+    /// The class table the displaced classes were built from (plan 08, P08.T9), held with the
+    /// galaxy once its build has installed them; `None` for a galaxy that holds none, every galaxy
+    /// below generator version 26 (P08.T12's hold).
+    #[must_use]
+    pub fn class_table(&self) -> Option<&ClassTable> {
+        self.fields.displaced().map(DisplacedFields::class_table)
     }
 
     /// The gas and dust field (plan 07).
@@ -835,12 +917,19 @@ fn substellar_shares(shares: ShareMatrix, abundance: &SubstellarAbundance) -> Sh
 pub enum BuildGalaxyError {
     /// The gas field could not be built (plan 07, ruling 22).
     Gas(BuildGasParamsError),
+    /// A displaced class's form could not be built from plan 15's form table (plan 08, P08.T12.a):
+    /// a parameter out of range, or an integral over the cube that is not positive and finite.
+    /// Only a galaxy that holds the displaced classes builds them.
+    DisplacedForm(BuildFormError),
 }
 
 impl fmt::Display for BuildGalaxyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Gas(e) => write!(f, "the galaxy's gas cannot be built: {e}"),
+            Self::DisplacedForm(e) => {
+                write!(f, "a displaced class's form cannot be built: {e}")
+            }
         }
     }
 }
@@ -849,6 +938,7 @@ impl Error for BuildGalaxyError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Gas(e) => Some(e),
+            Self::DisplacedForm(e) => Some(e),
         }
     }
 }

@@ -472,6 +472,9 @@ fn write_map(w: &mut GoldenWriter, label: &str, galaxy: &Galaxy) {
             (MapView::FaceOn, MapSelection::YoungOnly) => "face_on.young",
             (MapView::EdgeOn, MapSelection::AllSystems) => "edge_on.all",
             (MapView::EdgeOn, MapSelection::YoungOnly) => "edge_on.young",
+            (_, MapSelection::LayerERemnants) => {
+                unreachable!("the golden pins the two selections the protocol offers")
+            }
         };
         write(name, &whole_cube(view, selection, 16, 16));
     }

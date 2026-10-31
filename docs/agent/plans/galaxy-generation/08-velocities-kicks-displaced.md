@@ -1212,6 +1212,9 @@ form_bound}` bound one class's normalised form over a cell: the layer's radial e
 
 ### P08.T12 Displaced classes in placement
 
+**P08.T12.a built** (2026-10-31, behind `DISPLACED_VERSION` = 26; no output moves at 24): see
+"P08.T12.a as built" under [Risks](#risks-and-open-points).
+
 - **P08.T12.a Shares and components.** `DisplacedFields::new` from the class table and forms,
   classes ordered per Design note 16, zero-weight classes left out (about a hundred remain in layer
   E and about twenty in layer D). `ShareMatrix` for bands D and E: field columns multiplied by
@@ -2043,3 +2046,37 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   place of `bulge_axes`, and `projected_sigma_from_table` takes it. `R_e` is the tracer's face-on
   projected half-mass radius, `potential::sigma::effective_radius_in_scales(c)` of `s` (lean,
   2026-10-30; σ_e moves by under 0.1% against the old aperture of 2.027 `a_r`).
+- **P08.T12.a as built (2026-10-31, at `GENERATOR_VERSION` 24, behind `DISPLACED_VERSION` = 26;
+  no output moves at 24; decision-galaxy-25-train §1).**
+  - The hold: `displaced::{DISPLACED_VERSION, DisplacedRules::{FieldOnly, Displaced}}`, the field
+    `GalaxyRules::displaced` and `GalaxyRules::every_26_hold()`; tripwire
+    `the_displaced_classes_are_held_only_until_the_26_bump` (`displaced/hold.rs`, with D2–D4).
+  - E4′ (lean, 2026-10-31): one `match`, in `Galaxy::build`. The new arm builds the field galaxy,
+    then `DisplacedFields::new(&field, &FormTable::committed())` (the class table from it, never a
+    static) and installs it in `Fields` and the stay shares and class counts in `ShareMatrix`.
+    Every reader reads those; `Galaxy::with_rules` refuses a change of `displaced`, and of
+    `stellar` once the classes are installed (the table read the kick law).
+  - New: `displaced/fields.rs` (`DisplacedFields`, `DisplacedClass`, `DisplacedForm`),
+    `Fields::displaced()`, `Galaxy::class_table()`, `Component::id()`,
+    `ShareMatrix::{displaced_share, with_displaced}` (crate-private), `MapSelection::LayerERemnants`
+    (developer only), `BuildGalaxyError::DisplacedForm`. `DisplacedFields::register` is not built
+    (P09.T34 gives the hypervelocity class weight).
+  - Deviation: a displaced column holds the class's systems inside the cube (weight × source band
+    budget), and `DisplacedFields::density` is the form at unit integral; `classes()` keeps all 97
+    slots, so `DisplacedClassId` indexes it and the class table alike, a class with weight in
+    neither layer having no form. At the fixture 78 classes have weight in E and 16 in D.
+  - `component_share` multiplies a per-component factor (`stay_share` in rows D and E, 1
+    elsewhere; P09.T2.c's 1 − φ can multiply the same factor); `share` is unchanged, and the class
+    table's budgets now read `share` (bit-identical).
+  - The map: the field at each component's kept share of all its systems, then each class's
+    column (the flared layer's closed form, or `gl32` through the cube where it flares to the
+    cube's face; the ballistic layer's young-disc column; `gl32` for a spheroid). Edge-on (lean,
+    2026-10-31) keeps the field's picture for every system and the young disc (the classes are
+    some 0.5% of systems, and a class's pixel is a 2-D quadrature, about 50 ms a pixel for all of
+    them); `LayerERemnants` integrates class by class.
+  - Left to other lanes: the sky's `component_share` readers see the stay shares but none of the
+    classes' light (R06.T16.a's lane); P09.T33.a's `CoreCollapseProcess::new` reads
+    `component_share(E)`, so it takes the stay share under the new arm (P09.T33.b's lane decides).
+  - The new arm reads the provisional `displaced_forms`; the lane that commits P15.T6.c–f's
+    production table re-pins the 26-arm figures by name (`DISPLACED_DENSITIES_DIGEST` and the
+    tests' printed counts).
