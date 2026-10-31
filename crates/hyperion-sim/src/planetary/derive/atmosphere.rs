@@ -83,9 +83,12 @@ pub(crate) use escaping::{
 };
 #[cfg(test)]
 pub(crate) use present::{
-    LockedStateRules, PresentStateRules, SNOWBALL_ICE_COVER, locked_state_in_force,
-    present_climate_state, with_locked_state, with_present_state,
+    LockedStateRules, PresentStateRules, SNOWBALL_ICE_COVER, present_climate_state,
+    with_locked_state, with_present_state,
 };
+// Its one reader beyond `present`, the census, is native only.
+#[cfg(all(test, not(target_family = "wasm")))]
+pub(crate) use present::locked_state_in_force;
 pub(crate) use present::{
     PresentClimate, PresentFigures, Rotation, present_state_in_force, published_ice_cover,
     published_label, state_to_carry,
