@@ -7781,6 +7781,21 @@ feeding back into p_s, T_s, the albedo or the bulk.
     `planetary/record/surface.rs` docs and bindings; comments in `model.ts` and `aerosol.ts`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::chem::condense`;
     `cargo test -p hyperion-sim planetary::hooks`; `just gen-protocol` clean.
+- **P14.T52.h A hot envelope's dayside above 1 bar** (behind `DAYSIDE_DECKS_VERSION` = 26;
+  research-hot-giants, 2026-10-31). On an envelope at T_eq ≥ 950 K, each refractory, sulphide or
+  salt deck's mode stops at 1 bar (or its photosphere, if deeper) and keeps its share below; one
+  based above it covers none.
+  - It is a calibration to the observed dark daysides (Rowe et al. 2008; Brandeker et al. 2022;
+    Esteves et al. 2015; Wong et al. 2021). The high-T_int models expect cloudier ones (Thorngren
+    et al. 2019; Powell et al. 2018).
+  - Below 1 bar day and night share the global column (Iro et al. 2005). The decks' own records
+    are unchanged.
+  - _Files:_ `planetary/hooks/envelope_atmosphere.rs` and its tests; `planetary/chem/condense.rs`
+    (`Mode::below`); `planetary/testing.rs`; `planetary/system/envelope/tests.rs`; the protocol's
+    `AerosolModeDto` doc.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::envelope_atmosphere`;
+    `cargo test -p hyperion-sim planetary::chem::condense`;
+    `cargo test -p hyperion-sim planetary::system::envelope`.
 
 #### P14.T53 Escape, special states and life
 
