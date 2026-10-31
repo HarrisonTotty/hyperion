@@ -108,7 +108,7 @@ async fn check_frame(
             (body.system(), offset.to_system(&centre), Some(body))
         }
     };
-    let galaxy = Arc::clone(galaxy);
+    let (galaxy, shared) = (Arc::clone(galaxy), Arc::clone(state));
     let check = move |_: &CancelToken| {
         let what = || body.map_or_else(|| format!("system {:016x}", system.raw()), body_name);
         let record =
@@ -117,8 +117,9 @@ async fn check_frame(
         // line, and a member of the galactic centre or a catalogue system refused at every time,
         // the epoch included, so that the scene's core can place every frame this accepts at every
         // later time.
-        let (barycentre, _) = system_motion(&galaxy, &record, t)
-            .map_err(|error| untraced_frame_system(&what(), error))?;
+        let (barycentre, _) =
+            system_motion(&galaxy, &shared.cluster_models.handle(key), &record, t)
+                .map_err(|error| untraced_frame_system(&what(), error))?;
         offset
             .to_galactic(&barycentre)
             .map(|_| ())

@@ -10,10 +10,11 @@ use std::sync::Arc;
 
 use hyperion_protocol::{ObservedDto, RequestError, ResolveSystemRequest, ResponseBody};
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
 use hyperion_sim::galaxy::placement::{SystemKind, SystemOrigin, resolve};
 use hyperion_sim::galaxy::query::{QueryMode, SystemHit};
 use hyperion_sim::observe::{
-    Drift, Observer, StarsCache, TraceMotionError, curvature_error, observe_hit, retarded,
+    Drift, Observer, StarsCache, TraceMotionError, curvature_error, observe_hit_in, retarded,
 };
 use hyperion_sim::stellar::system::StellarBrief;
 use hyperion_sim::units::LightYears;
@@ -60,12 +61,14 @@ pub(crate) async fn resolve_system(
     let answer = move |_: &CancelToken| {
         let record = resolve(&galaxy, wanted.system())
             .map_err(|error| unknown_system(&request.system, error))?;
+        // A feature member's interior from the server's cache, for its line here and below.
+        let interiors = shared.cluster_models.handle(key);
         let time = wanted.time();
         // A grid system is placed as the range query places it, bit for bit; a feature member moves
         // on its own line, which plan 08's draw is not. A centre member is refused at every time,
         // as `system_summary` refuses it. A catalogue system, whose line breaks at its explosion, is
         // refused at every time too.
-        let (position, velocity) = system_motion(&galaxy, &record, time)
+        let (position, velocity) = system_motion(&galaxy, &interiors, &record, time)
             .map_err(|error| untraced_system(&request.system, error))?;
         // The system's own sphere: its hit is at its present position, no distance from the centre.
         let hit = SystemHit::new(record, position, LightYears::ZERO);
@@ -76,7 +79,7 @@ pub(crate) async fn resolve_system(
                     "the request's observer is in the root cube and its time in the clock window",
                 );
                 let mut stars = shared.systems.handle(key);
-                let (reading, _) = observe_row(&galaxy, &mut stars, &hit, &observer)
+                let (reading, _) = observe_row(&galaxy, &interiors, &mut stars, &hit, &observer)
                     .map_err(|error| untraced_system(&request.system, error))?;
                 Some(reading)
             }
@@ -101,7 +104,8 @@ pub(crate) async fn resolve_system(
 /// What `observer` receives from the system `hit`: the wire's observation, and the system's brief
 /// when the light left it, `None` if it was not yet born then or has no stars.
 ///
-/// A system with stars is read by the sim's `observe_hit` over the stars `stars` lends, which is
+/// A system with stars is read by the sim's `observe_hit_in` over the stars `stars` lends, a
+/// feature member's interior from `interiors`, which is
 /// row for row what the sim's `range_query_observed` gives it (P12.T3's `query::mode` test). A
 /// rogue planet has no stars, and a member of the galactic centre none generated yet, so each is
 /// read on its own line alone, as `range_query_observed` reads a rogue planet: its retardation and
@@ -115,6 +119,7 @@ pub(crate) async fn resolve_system(
 /// breaks at its explosion (plan 09, P09.T33.a).
 pub(super) fn observe_row(
     galaxy: &Galaxy,
+    interiors: &dyn FeatureInteriorCache,
     stars: &mut SystemStarsHandle<'_>,
     hit: &SystemHit,
     observer: &Observer,
@@ -129,14 +134,14 @@ pub(super) fn observe_row(
         );
     if has_stars {
         let seen = stars.with_stars(galaxy, record, |system| {
-            observe_hit(galaxy, hit, system, observer)
+            observe_hit_in(galaxy, interiors, hit, system, observer)
         })?;
         Ok((
             observed_dto(seen.retardation(), seen.error()),
             seen.brief_then(),
         ))
     } else {
-        let line = Drift::of_record(galaxy, record)?;
+        let line = Drift::of_record_in(galaxy, interiors, record)?;
         let retardation = retarded(observer, &line);
         let error = curvature_error(galaxy, observer.position(), &retardation);
         Ok((observed_dto(&retardation, error), None))

@@ -10,6 +10,7 @@
 
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
 use hyperion_sim::galaxy::placement::{SystemOrigin, SystemRecord};
 use hyperion_sim::galaxy::query::{epoch_velocity, position_at};
 use hyperion_sim::observe::{Drift, TraceMotionError, Trajectory};
@@ -21,7 +22,9 @@ use hyperion_sim::time::UniverseTime;
 /// - A grid record is where a range query finds it, bit for bit: [`position_at`], with plan 08's
 ///   [`epoch_velocity`] beside it, as a range row carries it.
 /// - A feature member moves on its own line, its cluster's motion and its own, which plan 08's draw
-///   is not: [`Drift::of_record`] (plan 09, P09.T10; plan 12, P12.T6).
+///   is not: [`Drift::of_record`] (plan 09, P09.T10; plan 12, P12.T6), its feature's interior
+///   from `interiors`, the server's own cache where the caller holds it, the same whatever it holds
+///   ([`Drift::of_record_in`]).
 /// - A member of the galactic centre (the black hole, a member of the centre's grid or a tidal
 ///   disruption's victim) is refused at every time, the epoch included, until plan 09's P09.T37 and
 ///   P09.T40 place them: they turn this arm on for every request together. Refused at the epoch
@@ -50,6 +53,7 @@ use hyperion_sim::time::UniverseTime;
 /// another galaxy can be ([`Drift::of_record`]).
 pub(crate) fn system_motion(
     galaxy: &Galaxy,
+    interiors: &dyn FeatureInteriorCache,
     record: &SystemRecord,
     t: UniverseTime,
 ) -> Result<(GalacticPosition, GalacticVelocity), TraceMotionError> {
@@ -64,21 +68,23 @@ pub(crate) fn system_motion(
                       feature member is named so that its line is this function's choice, not the \
                       fallback's"
         )]
-        SystemOrigin::FeatureMember { .. } => on_its_line(galaxy, record, t),
+        SystemOrigin::FeatureMember { .. } => on_its_line(galaxy, interiors, record, t),
         SystemOrigin::CentreMember { .. } => {
             Err(TraceMotionError::CentreOrbitNotBuilt(record.id()))
         }
-        _ => on_its_line(galaxy, record, t),
+        _ => on_its_line(galaxy, interiors, record, t),
     }
 }
 
-/// `record` on the line [`Drift::of_record`] gives it, at `t`.
+/// `record` on the line [`Drift::of_record`] gives it, at `t`, a feature member's interior from
+/// `interiors` ([`Drift::of_record_in`]).
 fn on_its_line(
     galaxy: &Galaxy,
+    interiors: &dyn FeatureInteriorCache,
     record: &SystemRecord,
     t: UniverseTime,
 ) -> Result<(GalacticPosition, GalacticVelocity), TraceMotionError> {
-    let line = Drift::of_record(galaxy, record)?;
+    let line = Drift::of_record_in(galaxy, interiors, record)?;
     Ok((line.position_at(t), line.velocity()))
 }
 
@@ -192,12 +198,15 @@ pub(crate) mod origins {
 
 #[cfg(test)]
 mod tests {
+    use hyperion_sim::GENERATOR_VERSION;
     use hyperion_sim::coords::LyCell;
+    use hyperion_sim::galaxy::features::members::NoInteriorCache;
 
     use super::origins::{
-        a_catalogue_system, a_feature_member, a_grid_system, galaxy, the_centre_s_members,
+        SEED, a_catalogue_system, a_feature_member, a_grid_system, galaxy, the_centre_s_members,
     };
     use super::*;
+    use crate::compute::{GalaxyKey, SharedClusterModelCache};
 
     /// The epoch, a century after it and 999 years before it.
     fn times() -> [UniverseTime; 3] {
@@ -220,7 +229,7 @@ mod tests {
         let record = a_grid_system();
         assert!(matches!(record.origin(), SystemOrigin::Grid(_)));
         for t in times() {
-            let (position, velocity) = system_motion(galaxy, &record, t).unwrap();
+            let (position, velocity) = system_motion(galaxy, &NoInteriorCache, &record, t).unwrap();
             assert_eq!(
                 bits(&position),
                 bits(&position_at(galaxy, &record, t)),
@@ -234,6 +243,32 @@ mod tests {
         }
     }
 
+    /// A feature member is placed the same, bit for bit, whether the server's interior cache
+    /// lends its feature's interior, cold or warm, or none does (P12.T6).
+    #[test]
+    fn a_feature_member_is_placed_the_same_through_the_server_s_interior_cache() {
+        let galaxy = galaxy();
+        let record = a_feature_member();
+        let cache = SharedClusterModelCache::new(64 << 20);
+        let interiors = cache.handle(GalaxyKey::new(SEED, GENERATOR_VERSION));
+        for t in times() {
+            let (position, velocity) = system_motion(galaxy, &NoInteriorCache, &record, t).unwrap();
+            for pass in ["cold", "warm"] {
+                let (kept, kept_velocity) = system_motion(galaxy, &interiors, &record, t).unwrap();
+                assert_eq!(
+                    (bits(&kept), velocity_bits(kept_velocity)),
+                    (bits(&position), velocity_bits(velocity)),
+                    "{t}, {pass}"
+                );
+            }
+        }
+        assert_eq!(
+            cache.counters().entries(),
+            1,
+            "the member's interior is kept"
+        );
+    }
+
     #[test]
     fn a_feature_member_moves_on_its_own_line() {
         let galaxy = galaxy();
@@ -244,7 +279,7 @@ mod tests {
         ));
         let line = Drift::of_record(galaxy, &record).unwrap();
         for t in times() {
-            let (position, velocity) = system_motion(galaxy, &record, t).unwrap();
+            let (position, velocity) = system_motion(galaxy, &NoInteriorCache, &record, t).unwrap();
             assert_eq!(bits(&position), bits(&line.position_at(t)), "{t}");
             assert_eq!(
                 velocity_bits(velocity),
@@ -265,7 +300,7 @@ mod tests {
             );
             for t in times() {
                 assert_eq!(
-                    system_motion(galaxy, &record, t),
+                    system_motion(galaxy, &NoInteriorCache, &record, t),
                     Err(TraceMotionError::CentreOrbitNotBuilt(record.id())),
                     "{:?} at {t}",
                     record.id()
@@ -281,7 +316,7 @@ mod tests {
         assert!(matches!(record.origin(), SystemOrigin::CatalogueSystem(_)));
         for t in times() {
             assert_eq!(
-                system_motion(galaxy, &record, t),
+                system_motion(galaxy, &NoInteriorCache, &record, t),
                 Err(TraceMotionError::CatalogueMotionNotTraced(record.id())),
                 "{t}"
             );

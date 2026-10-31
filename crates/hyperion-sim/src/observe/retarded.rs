@@ -257,9 +257,12 @@ impl Drift {
         Self::of_record_in(galaxy, &NoInteriorCache, record)
     }
 
-    /// [`of_record`](Self::of_record) with a feature member's interior from `interiors`, so that a
-    /// caller tracing many members of one feature builds its interior once (P12.T3 as built). The
-    /// line is the same whatever the cache holds.
+    /// [`of_record`](Self::of_record) with a feature member's interior from `interiors`.
+    ///
+    /// A caller tracing many members of one feature builds its interior once (P12.T3 as built),
+    /// and a server lends the cache it keeps interiors in (P12.T6), which saves a member's
+    /// interior, some 0.2 ms near the Sun, at each line. The line is the same whatever the cache
+    /// holds.
     ///
     /// # Errors
     ///
@@ -268,7 +271,29 @@ impl Drift {
     /// # Panics
     ///
     /// As [`of_record`](Self::of_record).
-    pub(crate) fn of_record_in(
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::features::members::source::{KeepInteriors, NoInteriorCache};
+    /// use hyperion_sim::galaxy::placement::resolve;
+    /// use hyperion_sim::id::SystemId;
+    /// use hyperion_sim::observe::Drift;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(0x4d2)).with_full_potential();
+    /// # let id = SystemId::from_raw(0x4200_2cb2_0000_0001)?;
+    /// let record = resolve(&galaxy, id)?;
+    /// let kept = KeepInteriors::new(&galaxy);
+    /// // The same line through a cache that keeps the member's interior as through none.
+    /// assert_eq!(
+    ///     Drift::of_record_in(&galaxy, &kept, &record)?,
+    ///     Drift::of_record_in(&galaxy, &NoInteriorCache, &record)?
+    /// );
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn of_record_in(
         galaxy: &Galaxy,
         interiors: &dyn FeatureInteriorCache,
         record: &SystemRecord,

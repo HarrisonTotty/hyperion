@@ -167,6 +167,7 @@ pub(crate) async fn extinction(
         // Once the feature members are served, the lines take the features' gas at the request's
         // time, as the sky's do (P09.T40.a's gate); held, the smooth field alone, as before.
         let cells = shared.feature_cells.handle(key);
+        let interiors = shared.cluster_models.handle(key);
         let gas = match shared.feature_members {
             FeatureMembers::Held => LineGas::Smooth,
             FeatureMembers::Served => LineGas::Features {
@@ -182,20 +183,22 @@ pub(crate) async fn extinction(
                 let end = match *end {
                     LineEnd::Position(position) => position,
                     LineEnd::System(id) => match resolve(&galaxy, id) {
-                        Ok(record) => match system_motion(&galaxy, &record, wanted.time()) {
-                            Ok((position, _)) => position,
-                            // Nor has a system the server cannot place yet: a centre member, or
-                            // a catalogue system (P09.T33.a), refused at every time so that no
-                            // answer depends on the time, or a global-list member, which
-                            // `resolve` never gives.
-                            Err(
-                                TraceMotionError::CentreOrbitNotBuilt(_)
-                                | TraceMotionError::CatalogueMotionNotTraced(_)
-                                | TraceMotionError::GlobalListMember(_),
-                            ) => {
-                                return TargetExtinction::NoSuchSystem;
+                        Ok(record) => {
+                            match system_motion(&galaxy, &interiors, &record, wanted.time()) {
+                                Ok((position, _)) => position,
+                                // Nor has a system the server cannot place yet: a centre member, or
+                                // a catalogue system (P09.T33.a), refused at every time so that no
+                                // answer depends on the time, or a global-list member, which
+                                // `resolve` never gives.
+                                Err(
+                                    TraceMotionError::CentreOrbitNotBuilt(_)
+                                    | TraceMotionError::CatalogueMotionNotTraced(_)
+                                    | TraceMotionError::GlobalListMember(_),
+                                ) => {
+                                    return TargetExtinction::NoSuchSystem;
+                                }
                             }
-                        },
+                        }
                         // A kind or layer this generator does not place yet has no position
                         // either, so to a line of sight it is no system at all.
                         Err(
@@ -283,7 +286,7 @@ pub(crate) async fn systems(
         }
         let extras = work
             .run(
-                (&shared.briefs, &shared.systems),
+                (&shared.briefs, &shared.systems, interiors),
                 key,
                 job_galaxy,
                 result.systems(),
@@ -324,7 +327,8 @@ pub(crate) async fn systems(
                     Priority::Interactive,
                     token.clone(),
                     move |_: &CancelToken| {
-                        let caches = (&shared.briefs, &shared.systems);
+                        let interiors = shared.cluster_models.handle(key);
+                        let caches = (&shared.briefs, &shared.systems, &interiors as _);
                         work.run(caches, key, &galaxy, &result.systems()[start..end])
                     },
                 )
@@ -417,15 +421,20 @@ impl RowWork {
     /// The briefs and observations of `hits`, in order, in the galaxy `key` names.
     ///
     /// In `now` the briefs are the brief cache's at the query's time; in observed mode each row is
-    /// read at its retarded time ([`observe_row`]), and its brief is the one then.
+    /// read at its retarded time ([`observe_row`]), a feature member's interior from the third
+    /// cache, and its brief is the one then.
     fn run(
         self,
-        caches: (&SharedBriefCache, &SharedSystemCache),
+        caches: (
+            &SharedBriefCache,
+            &SharedSystemCache,
+            &dyn FeatureInteriorCache,
+        ),
         key: GalaxyKey,
         galaxy: &Galaxy,
         hits: &[SystemHit],
     ) -> Result<RowExtras, TraceMotionError> {
-        let (briefs, systems) = caches;
+        let (briefs, systems, interiors) = caches;
         let Some(observer) = self.observer else {
             let briefs = self
                 .include_stellar
@@ -438,7 +447,7 @@ impl RowWork {
         let mut stars = systems.handle(key);
         let mut extras = RowExtras::with_capacity(self, hits.len());
         for hit in hits {
-            let (reading, brief_then) = observe_row(galaxy, &mut stars, hit, &observer)?;
+            let (reading, brief_then) = observe_row(galaxy, interiors, &mut stars, hit, &observer)?;
             extras.push(reading, brief_then.map(|brief| brief_dto(&brief)));
         }
         Ok(extras)
@@ -532,6 +541,7 @@ fn briefs_of(
 
 #[cfg(test)]
 mod tests {
+    use hyperion_sim::galaxy::features::members::NoInteriorCache;
     use hyperion_sim::galaxy::placement::NoCache;
     use hyperion_sim::galaxy::query::{RangeQuery, range_query};
     use hyperion_sim::id::SystemId;
@@ -595,7 +605,13 @@ mod tests {
             Observer::new(*hits[0].record().epoch_position(), time).expect("an observer");
         for hit in &hits {
             assert_eq!(
-                observe_row(&galaxy, &mut systems.handle(key), hit, &observer),
+                observe_row(
+                    &galaxy,
+                    &NoInteriorCache,
+                    &mut systems.handle(key),
+                    hit,
+                    &observer
+                ),
                 Err(TraceMotionError::CatalogueMotionNotTraced(hit.id()))
             );
         }
@@ -643,7 +659,9 @@ mod tests {
             };
             let briefs = SharedBriefCache::new(64 << 20);
             let warm = SharedSystemCache::new(64 << 20);
-            let whole = work.run((&briefs, &warm), key, &galaxy, hits).unwrap();
+            let whole = work
+                .run((&briefs, &warm, &NoInteriorCache), key, &galaxy, hits)
+                .unwrap();
             let sim =
                 range_query_observed(&galaxy, &mut NoCache::new(), &mut NoStarsCache, &[], &query)
                     .unwrap();
@@ -677,7 +695,10 @@ mod tests {
             ] {
                 let mut chunked = RowExtras::with_capacity(work, hits.len());
                 for chunk in hits.chunks(hits.len().div_ceil(4)) {
-                    chunked.append(work.run((&briefs, &systems), key, &galaxy, chunk).unwrap());
+                    chunked.append(
+                        work.run((&briefs, &systems, &NoInteriorCache), key, &galaxy, chunk)
+                            .unwrap(),
+                    );
                 }
                 assert_eq!(chunked.observed, whole.observed);
                 assert_eq!(chunked.briefs, whole.briefs);

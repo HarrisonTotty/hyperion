@@ -23,7 +23,7 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::ResolveSystemError;
 use hyperion_sim::galaxy::query::QueryMode;
 use hyperion_sim::id::{Layer, SystemId};
-use hyperion_sim::observe::{Observer, curvature_error, summary_observed};
+use hyperion_sim::observe::{Observer, curvature_error, summary_observed_in};
 use hyperion_sim::planetary::{HostKind, ResolveBodyError, SystemContext};
 
 use super::universe::openable_universe;
@@ -47,7 +47,8 @@ use crate::convert::{
 /// from it there, as the range query's job does with the cell cache. The small answer is
 /// serialised on the runtime (design note 22).
 ///
-/// In observed mode the same job reads the cached stars through the sim's [`summary_observed`], at
+/// In observed mode the same job reads the cached stars through the sim's
+/// [`summary_observed_in`], a feature member's interior from the server's cache, at
 /// the time the light the observer receives at the request's time left the system, and states the
 /// curvature error as a range row does; the emitted time is never held to the clock window, only
 /// the request's time is.
@@ -90,8 +91,10 @@ pub(crate) async fn summary(
                 );
                 // Only a member of the galactic centre has no traced motion yet, and the cache has
                 // refused it above, so this refusal waits for a system that reaches it.
+                // A feature member's interior from the server's cache, which resolved it above.
+                let interiors = shared.cluster_models.handle(key);
                 let (summary, retardation) =
-                    summary_observed(&galaxy, stars.record(), &stars, &observer)
+                    summary_observed_in(&galaxy, &interiors, stars.record(), &stars, &observer)
                         .map_err(untraced)?;
                 let error = curvature_error(&galaxy, observer.position(), &retardation);
                 system_summary_observed(request, &stars, &summary, &retardation, error)

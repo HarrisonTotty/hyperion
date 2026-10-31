@@ -2887,3 +2887,8 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     drops what it returns: T8.b runs the scans, and T8.c records the pushes and notifies.
   - _For T12._ An acknowledgement pushes its contact to its own subscription only. Other
     subscriptions of the universe are not told: T8.c's notifications will carry it.
+- **P12.T6, a member's line through the server's interiors (lane `perf-small-server`, 2026-10-31;
+  no output moves).** `Drift::of_record_in` is public, beside the new `observe_hit_in` and
+  `summary_observed_in`. The server's `system_motion` and `observe_row` take a
+  `&dyn FeatureInteriorCache`. `resolve_system`, `extinction`, `scene_ship`, the observed rows and
+  the observed summary pass the server's; the scene's core passes none.

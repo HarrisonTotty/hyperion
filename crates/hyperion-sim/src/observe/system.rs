@@ -4,6 +4,7 @@
 use super::error::{CurvatureError, curvature_error};
 use super::retarded::{Drift, Observer, Retardation, TraceMotionError, retarded};
 use crate::galaxy::Galaxy;
+use crate::galaxy::features::members::source::{FeatureInteriorCache, NoInteriorCache};
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::SystemHit;
 use crate::stellar::system::{StellarBrief, SystemExistence, SystemStars, SystemSummary};
@@ -118,7 +119,28 @@ pub fn observe_hit(
     stars: &SystemStars,
     observer: &Observer,
 ) -> Result<ObservedSystem, TraceMotionError> {
-    let line = Drift::of_record(galaxy, hit.record())?;
+    observe_hit_in(galaxy, &NoInteriorCache, hit, stars, observer)
+}
+
+/// [`observe_hit`] with a feature member's interior from `interiors`
+/// ([`Drift::of_record_in`]), the same whatever the cache holds: what a server that keeps
+/// interiors calls.
+///
+/// # Errors
+///
+/// As [`observe_hit`].
+///
+/// # Panics
+///
+/// As [`observe_hit`].
+pub fn observe_hit_in(
+    galaxy: &Galaxy,
+    interiors: &dyn FeatureInteriorCache,
+    hit: &SystemHit,
+    stars: &SystemStars,
+    observer: &Observer,
+) -> Result<ObservedSystem, TraceMotionError> {
+    let line = Drift::of_record_in(galaxy, interiors, hit.record())?;
     Ok(observe_on_line(galaxy, hit, &line, Some(stars), observer))
 }
 
@@ -170,7 +192,28 @@ pub fn summary_observed(
     stars: &SystemStars,
     observer: &Observer,
 ) -> Result<(SystemSummary, Retardation), TraceMotionError> {
-    let line = Drift::of_record(galaxy, record)?;
+    summary_observed_in(galaxy, &NoInteriorCache, record, stars, observer)
+}
+
+/// [`summary_observed`] with a feature member's interior from `interiors`
+/// ([`Drift::of_record_in`]), the same whatever the cache holds: what a server that keeps
+/// interiors calls.
+///
+/// # Errors
+///
+/// As [`summary_observed`].
+///
+/// # Panics
+///
+/// As [`summary_observed`].
+pub fn summary_observed_in(
+    galaxy: &Galaxy,
+    interiors: &dyn FeatureInteriorCache,
+    record: &SystemRecord,
+    stars: &SystemStars,
+    observer: &Observer,
+) -> Result<(SystemSummary, Retardation), TraceMotionError> {
+    let line = Drift::of_record_in(galaxy, interiors, record)?;
     debug_assert_eq!(
         stars.record().id(),
         record.id(),

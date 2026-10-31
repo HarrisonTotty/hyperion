@@ -33,6 +33,7 @@ use hyperion_sim::coords::{
     BodyPosition, GalacticPosition, LyCell, SystemPosition, SystemVelocity,
 };
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::features::members::NoInteriorCache;
 use hyperion_sim::galaxy::frame::{candidate_at, frame_at};
 use hyperion_sim::galaxy::placement::{SystemRecord, resolve};
 use hyperion_sim::galaxy::query::position_at;
@@ -649,7 +650,8 @@ fn ship_galactic(
         }
     };
     let record = resolve(world.galaxy, system).expect("scene_ship resolved the ship's frame");
-    let (barycentre, _) = system_motion(world.galaxy, &record, t).expect(
+    // The scene's core keeps no interiors of its own; a frame on a member resolves it afresh.
+    let (barycentre, _) = system_motion(world.galaxy, &NoInteriorCache, &record, t).expect(
         "scene_ship placed the ship's frame, and a system it places is placed at every time",
     );
     Ok(offset
@@ -721,7 +723,7 @@ fn observer(
 #[must_use]
 fn drift(galaxy: &Galaxy, system: SystemId, t: UniverseTime) -> SystemVelocity {
     let record = resolve(galaxy, system).expect("the scene's systems resolve");
-    let (_, velocity) = system_motion(galaxy, &record, t).expect(
+    let (_, velocity) = system_motion(galaxy, &NoInteriorCache, &record, t).expect(
         "the scene's system is a grid system frame_at names, and the ship's frame one scene_ship \
          placed, which is placed at every time",
     );

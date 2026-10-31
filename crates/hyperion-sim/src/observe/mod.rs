@@ -60,4 +60,6 @@ pub use retarded::{
 };
 pub use stars_cache::{NoStarsCache, StarsCache, stars_of};
 pub(crate) use system::observe_on_line;
-pub use system::{ObservedSystem, observe_hit, summary_observed};
+pub use system::{
+    ObservedSystem, observe_hit, observe_hit_in, summary_observed, summary_observed_in,
+};
