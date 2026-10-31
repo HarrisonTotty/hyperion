@@ -1592,6 +1592,93 @@ fn a_full_cache_starts_afresh_and_moves_no_crater() {
 }
 
 #[test]
+fn a_patch_s_vertices_from_one_cache_at_two_levels_take_a_fresh_cache_s_heights() {
+    // A patch's vertices share their octaves' searches and their craters' profiles in a cache
+    // (`Search`, `Profiles`): 9 × 9 of a level-17 patch's on the Moon-like world (5 × 5 on the
+    // browser target), each queried at level 17 and at 10 in turn from one cache, take the bits a
+    // fresh cache gives each, so that neither a cell's search nor a level's profile serves another.
+    let craters = small(SyntheticWorld::MoonLike);
+    let patch = PatchKey::containing(17, unit_dir([0.31, -0.62, 0.72])).unwrap();
+    let side = per_target(9_u8, 5);
+    let step = 64 / (side - 1);
+    let levels = [17, 10].map(|n| BandLevel::new(n).unwrap());
+    let mut shared = CraterCache::new();
+    let (mut queries, mut reached) = (0, 0);
+    for y in 0..side {
+        for x in 0..side {
+            let dir = patch.vertex_dir(x * step, y * step);
+            for level in levels {
+                let warm = craters.at(dir, level, ALL, &mut shared);
+                let fresh = craters.at(dir, level, ALL, &mut CraterCache::new());
+                assert_eq!(
+                    bits(warm.height_m),
+                    bits(fresh.height_m),
+                    "{dir:?} at {level:?}"
+                );
+                assert_eq!(warm.gradient.map(bits), fresh.gradient.map(bits));
+                queries += 1;
+                if warm.height_m.abs() > 0.0 {
+                    reached += 1;
+                }
+            }
+        }
+    }
+    // The Moon-like world is saturated, so most points lie on a crater.
+    assert!(
+        2 * reached > queries,
+        "{reached} of {queries} heights had a crater"
+    );
+}
+
+#[test]
+fn a_cache_passed_between_two_bodies_gives_each_its_own_heights() {
+    // One cache alternating between the Moon-like and Mars-like worlds at the same vertices and
+    // level, where their octaves' cells and craters' names coincide, takes the bits a fresh cache
+    // gives each body: no body's search or profile serves the other's queries.
+    let bodies = [
+        small(SyntheticWorld::MoonLike),
+        small(SyntheticWorld::MarsLike),
+    ];
+    let patch = PatchKey::containing(17, unit_dir([-0.44, 0.53, 0.72])).unwrap();
+    let level = BandLevel::new(17).unwrap();
+    let mut shared = CraterCache::new();
+    for (x, y) in [(0, 0), (32, 32), (64, 0), (5, 61)] {
+        let dir = patch.vertex_dir(x, y);
+        for craters in &bodies {
+            let warm = craters.at(dir, level, ALL, &mut shared);
+            let fresh = craters.at(dir, level, ALL, &mut CraterCache::new());
+            assert_eq!(bits(warm.height_m), bits(fresh.height_m), "{dir:?}");
+            assert_eq!(warm.gradient.map(bits), fresh.gradient.map(bits));
+        }
+    }
+}
+
+#[test]
+fn a_query_s_cell_at_each_level_is_the_one_containing_it() {
+    // `cell_at_st` from a direction's face and (s, t), against `PatchKey::containing`, at every
+    // level: at random directions, on face edges and at cube corners.
+    let mut dirs = random_dirs(0x7374_6365, 64);
+    dirs.extend([
+        unit_dir([1.0, 1.0, 0.3]),
+        unit_dir([1.0, 1.0, 1.0]),
+        unit_dir([-1.0, 0.999_999_999, -1.0]),
+        [0.0, 0.0, -1.0],
+        unit_dir([0.5, -1.0, 0.0]),
+    ]);
+    for dir in dirs {
+        let at = xyz_to_face_uv(dir);
+        let st = (uv_to_st(at.u), uv_to_st(at.v));
+        for level in 0..=MAX_LEVEL {
+            assert_eq!(
+                Ok(cell_at_st(at.face, st, level)),
+                PatchKey::containing(level, dir),
+                "{dir:?} at level {level}"
+            );
+        }
+    }
+}
+
+#[test]
 fn the_cache_moves_no_height() {
     let craters = small(SyntheticWorld::MoonLike);
     let mars = small(SyntheticWorld::MarsLike);

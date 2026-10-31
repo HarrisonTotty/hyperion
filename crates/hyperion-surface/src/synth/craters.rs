@@ -192,7 +192,8 @@ use crate::craters::{
     crater_shape, cumulative_density, lunar_chronology, saturation,
 };
 use crate::cube::{
-    Edge, Face, FaceUv, MAX_LEVEL, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir, xyz_to_face_uv,
+    Edge, Face, FaceUv, MAX_LEVEL, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir, uv_to_st,
+    xyz_to_face_uv,
 };
 use crate::field::{FieldHeader, FieldView};
 use crate::geometry::{BAND_LIMIT_M, min_rate, vertex_spacing};
@@ -1830,14 +1831,134 @@ impl SmallCrater {
 /// has grown to 16,384 cells (its kept counts, at most 4,095 an octave, only with its owner). It
 /// holds each cell's draw, the
 /// craters' places and words, and makes a crater from them only as far as a query needs it, so a
-/// cell may have only some of its craters made; and the counts its craters' diameters' bisections
+/// cell may have only some of its craters made; the counts its craters' diameters' bisections
 /// compare, by octave and node, in the top 12 levels of each octave's tree, which every crater of
-/// the octave walks.
+/// the octave walks; each octave's last searched cell with its neighbourhood, which is the cube's
+/// alone; and the band-limited profiles of the craters its queries reached, by crater and level.
 #[derive(Debug, Clone, Default)]
 pub struct CraterCache {
     owner: Option<(DetailSeed, Inputs)>,
     cells: BTreeMap<u64, CellDraw>,
     counts: BTreeMap<u64, f64>,
+    /// By octave, the search about the cell its last query lay in.
+    searches: Vec<Option<Search>>,
+    profiles: Profiles,
+}
+
+/// A drawn crater's name in its body's draw: its cell's key in a [`CraterCache`] (its octave and
+/// cell) and its place in the cell's draw order. The draw is a pure function of the body, the
+/// octave and the cell, so the name holds one crater whenever the cell is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CraterId {
+    cell: u64,
+    index: u32,
+}
+
+/// The slots of a [`CraterCache`]'s [`Profiles`]: a power of two. On the Moon-like world's patch
+/// on a crater's rim at level 10 the 20 craters its vertices reach were all held (none evicted
+/// another); at level 17 its many fine craters share slots, and a sweep of its 4,225 vertices made
+/// about 240 profiles afresh. The whole height there took 4.99–5.02 µs a point with 256 slots and
+/// 5.01–5.03 µs with 1,024 (two runs each, natively, one thread, pod, 16 vCPU, 2026-10-31).
+const PROFILE_SLOTS: usize = 256;
+
+/// The band-limited profiles ([`CraterProfile::new`]) of the craters a [`CraterCache`]'s queries
+/// reached, by crater and band level, direct-mapped and bounded, a profile replacing the one in its
+/// slot. A profile is a pure function of the crater and the level's band, so what a slot holds
+/// changes no height. Made at every query, the profiles took about 9% of the whole height on the
+/// Moon-like world at level 17, and keeping them took it from 5.19 to 5.00 µs a point (sampled and
+/// timed natively, pod, 16 vCPU, 2026-10-31).
+#[derive(Debug, Clone, Default)]
+struct Profiles {
+    slots: Vec<Option<(CraterId, BandLevel, CraterProfile)>>,
+}
+
+impl Profiles {
+    /// An empty memo, which allocates its slots at its first profile.
+    #[must_use]
+    const fn new() -> Self {
+        Self { slots: Vec::new() }
+    }
+
+    /// Forgets every profile, keeping the slots' allocation.
+    fn clear(&mut self) {
+        self.slots.fill(None);
+    }
+
+    /// The profile of crater `id` at `level`, kept or made by `make` into its slot.
+    fn get_or_make(
+        &mut self,
+        id: CraterId,
+        level: BandLevel,
+        make: impl FnOnce() -> CraterProfile,
+    ) -> &CraterProfile {
+        if self.slots.is_empty() {
+            self.slots.resize(PROFILE_SLOTS, None);
+        }
+        // SplitMix64's finaliser of the name and the level, its top bits the slot.
+        let mut z = id.cell ^ (u64::from(id.index) << 40) ^ (u64::from(level.get()) << 32);
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^= z >> 31;
+        let slot = usize::try_from(z >> (64 - PROFILE_SLOTS.trailing_zeros()))
+            .expect("a slot below PROFILE_SLOTS fits a usize");
+        let kept = &mut self.slots[slot];
+        if kept.is_some_and(|(held, at, _)| held == id && at == level) {
+            debug_assert!(
+                kept.is_some_and(|(_, _, profile)| profile == make()),
+                "a kept profile is the one its crater and level make"
+            );
+        } else {
+            *kept = Some((id, level, make()));
+        }
+        &kept.as_ref().expect("the slot was filled").2
+    }
+}
+
+/// An octave's search about one cell, as a [`CraterCache`] keeps it for the next query in the
+/// cell: its 3 × 3 [`neighbourhood`] and the edges [`CellEdges::gap_m`] measures from, each a pure
+/// function of the cell. A patch's vertices share their cells at all but the finest octaves, and
+/// building these for every octave of every query took about 40% of the whole height on the
+/// Earth-like world at level 19 (the neighbourhood 21%, the gaps 11% and the cells 7%), and keeping
+/// them took it from 10.30 to 6.46 µs a point (sampled and timed natively, one thread, pod, 16
+/// vCPU, 2026-10-31).
+#[derive(Debug, Clone, Copy)]
+struct Search {
+    cells: [PatchKey; 9],
+    count: usize,
+    edges: CellEdges,
+}
+
+impl Search {
+    /// The search about `home`.
+    #[must_use]
+    fn about(home: PatchKey) -> Self {
+        let (cells, count) = neighbourhood(home);
+        Self {
+            cells,
+            count,
+            edges: CellEdges::of(home),
+        }
+    }
+
+    /// The search about `home` from `searches`, a [`CraterCache`]'s, made into its slot for
+    /// octave `octave` unless the slot holds `home`'s.
+    fn of(searches: &mut Vec<Option<Self>>, octave: u8, home: PatchKey) -> &Self {
+        let slot = usize::from(octave);
+        if searches.len() <= slot {
+            searches.resize(slot + 1, None);
+        }
+        let kept = &mut searches[slot];
+        if !kept.is_some_and(|search| search.edges.cell == home) {
+            *kept = Some(Self::about(home));
+        }
+        kept.as_ref().expect("the slot was filled")
+    }
+
+    /// The neighbourhood's cells, sorted by key.
+    #[must_use]
+    fn cells(&self) -> &[PatchKey] {
+        &self.cells[..self.count]
+    }
 }
 
 /// The levels of an octave's tree of bisections whose counts a [`CraterCache`] keeps: 12, the
@@ -1886,6 +2007,8 @@ impl CraterCache {
             owner: None,
             cells: BTreeMap::new(),
             counts: BTreeMap::new(),
+            searches: Vec::new(),
+            profiles: Profiles::new(),
         }
     }
 
@@ -1969,6 +2092,7 @@ impl SmallCraters {
         if cache.owner != Some(owner) {
             cache.cells.clear();
             cache.counts.clear();
+            cache.profiles.clear();
             cache.owner = Some(owner);
         }
     }
@@ -1995,7 +2119,7 @@ impl SmallCraters {
             self.octaves.octaves[index].level,
             "the cell is not at the octave's level"
         );
-        let key = (u64::from(octave) << 56) | cell.to_u64();
+        let key = cell_key(octave, cell);
         if cells.len() >= CACHE_CELLS && !cells.contains_key(&key) {
             cells.clear();
         }
@@ -2149,17 +2273,19 @@ impl SmallCraters {
     /// kept from the octave's other craters. Every bound is at least the crater's own reach, so no
     /// crater that reaches `dir` is passed over, and a crater is made from its own words whenever
     /// it is made, so the craters found and their bits are those of every crater made. A cell
-    /// wholly beyond the octave's widest reach is not drawn at all ([`gap_m`]). On the Mars-like
-    /// world a texel at band level 4, 4,096 finest points from a cache of its own, took 0.88 s
-    /// against 25.6 s with every crater of every cell searched made (pod, 8 vCPU, slow-test
+    /// wholly beyond the octave's widest reach is not drawn at all ([`CellEdges::gap_m`]). On the
+    /// Mars-like world a texel at band level 4, 4,096 finest points from a cache of its own, took
+    /// 0.88 s against 25.6 s with every crater of every cell searched made (pod, 8 vCPU, slow-test
     /// profile). A crater's exterior width is checked when it is made, so a crater never made is
-    /// never checked.
+    /// never checked. Each octave's cell, its neighbourhood and its edges are the cache's for the
+    /// next query in the cell ([`Search`]), and the query's face and (s, t) are found once for
+    /// every octave ([`cell_at_st`]).
     fn each_reaching(
         &self,
         dir: [f64; 3],
         through: u8,
         cache: &mut CraterCache,
-        mut emit: impl FnMut(&SmallCrater, [f64; 3], f64),
+        mut emit: impl FnMut(&SmallCrater, CraterId, [f64; 3], f64, &mut Profiles),
     ) {
         self.own(cache);
         let last = num_octaves_through(self.octaves.octaves.len(), through);
@@ -2172,19 +2298,28 @@ impl SmallCraters {
         // The gaps' planes are through the centre, so a point's distance from them scales with
         // `dir`'s length, which a unit direction has as 1 to within its rounding.
         let length = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+        let st = (uv_to_st(at.u), uv_to_st(at.v));
+        let root = gap_root(at);
+        let radius_m = smallest_radius_m(&figure);
         for octave in 0..last {
             let band = &self.octaves.octaves[usize::from(octave)];
             let widest = band.diameters.lower().value() * (1.0 + MAX_EXTERIOR_WIDTH);
-            let home = PatchKey::containing(band.level, dir).expect("an octave's level is a level");
-            let (cells, n) = neighbourhood(home);
-            for &cell in &cells[..n] {
-                let gap = gap_m(at, home, cell, &figure) * length;
+            let home = cell_at_st(at.face, st, band.level);
+            debug_assert_eq!(
+                Ok(home),
+                PatchKey::containing(band.level, dir),
+                "a query's cell is the one containing it"
+            );
+            let search = Search::of(&mut cache.searches, octave, home);
+            for &cell in search.cells() {
+                let gap = search.edges.gap_m(at, root, cell, radius_m) * length;
                 if gap * (1.0 - GAP_MARGIN) - GAP_SLACK_M >= widest {
                     // No crater of the octave in the cell reaches `dir`: it is not drawn.
                     continue;
                 }
                 let drawn = self.cell_draw(octave, cell, &mut cache.cells);
-                for draw in &mut drawn.draws {
+                let key = cell_key(octave, cell);
+                for (index, draw) in (0_u32..).zip(&mut drawn.draws) {
                     let delta = [0, 1, 2].map(|k| p[k] - draw.point_m[k]);
                     let d2 = delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
                     if d2 >= widest * widest {
@@ -2195,7 +2330,8 @@ impl SmallCraters {
                     };
                     let reach = crater.shape.reach().value();
                     if d2 < reach * reach {
-                        emit(crater, delta, d2.sqrt());
+                        let id = CraterId { cell: key, index };
+                        emit(crater, id, delta, d2.sqrt(), &mut cache.profiles);
                     }
                 }
             }
@@ -2217,7 +2353,9 @@ impl SmallCraters {
         cache: &mut CraterCache,
     ) -> Vec<SmallCrater> {
         let mut found = Vec::new();
-        self.each_reaching(dir, through, cache, |crater, _, _| found.push(*crater));
+        self.each_reaching(dir, through, cache, |crater, _, _, _, _| {
+            found.push(*crater);
+        });
         found
     }
 
@@ -2247,18 +2385,25 @@ impl SmallCraters {
         let band = band_half_width(&figure, level);
         let mut height = 0.0;
         let mut gradient = [0.0; 3];
-        self.each_reaching(dir, through, cache, |crater, delta, distance| {
-            let profile = CraterProfile::new(crater.shape, band, crater.wear);
-            let rim_m = 0.5 * crater.shape.diameter().value();
-            let (h, slope) = profile.height_and_slope(distance / rim_m);
-            height += h;
-            if distance > 0.0 {
-                let along = slope / (rim_m * distance);
-                for (g, d) in gradient.iter_mut().zip(delta) {
-                    *g += along * d;
+        self.each_reaching(
+            dir,
+            through,
+            cache,
+            |crater, id, delta, distance, profiles| {
+                let profile = profiles.get_or_make(id, level, || {
+                    CraterProfile::new(crater.shape, band, crater.wear)
+                });
+                let rim_m = 0.5 * crater.shape.diameter().value();
+                let (h, slope) = profile.height_and_slope(distance / rim_m);
+                height += h;
+                if distance > 0.0 {
+                    let along = slope / (rim_m * distance);
+                    for (g, d) in gradient.iter_mut().zip(delta) {
+                        *g += along * d;
+                    }
                 }
-            }
-        });
+            },
+        );
         let gradient = direction_gradient(&figure, dir, gradient);
         HeightSample {
             height_m: num::assert_finite(height),
@@ -2267,62 +2412,131 @@ impl SmallCraters {
     }
 }
 
-/// The relative margin a cell's [`gap_m`] is taken short by before it puts a cell beyond an
-/// octave's reach: 10⁻⁹, far beyond the rounding of the gap and of the craters' and the point's
-/// spheroid points, a few times 2.2 × 10⁻¹⁶ of them.
+/// The relative margin a cell's [`CellEdges::gap_m`] is taken short by before it puts a cell
+/// beyond an octave's reach: 10⁻⁹, far beyond the rounding of the gap and of the craters' and the
+/// point's spheroid points, a few times 2.2 × 10⁻¹⁶ of them.
 const GAP_MARGIN: f64 = 1e-9;
 
-/// The absolute margin a cell's [`gap_m`] is taken short by, metres: 1 µm, beyond the rounding of
-/// a spheroid point's position, about 10⁻⁹ m on a Mars-sized body.
+/// The absolute margin a cell's [`CellEdges::gap_m`] is taken short by, metres: 1 µm, beyond the
+/// rounding of a spheroid point's position, about 10⁻⁹ m on a Mars-sized body.
 const GAP_SLACK_M: f64 = 1e-6;
 
-/// A bound below on the chord from the spheroid point of the unit direction whose face
-/// coordinates are `at` to any point of `cell`, metres, where `cell` is one of the 3 × 3 about
-/// `home`, the point's own cell: zero but for an edge or corner neighbour on `home`'s face, and
-/// there the chord to the plane through the centre that holds the boundary between the two, the
-/// larger such plane's at a corner.
-///
-/// On a face a boundary of constant u is a great circle, whose plane's normal n has n · xyz =
-/// u₁ − u at the face's (1, u, v) and |n| = √(1 + u₁²); the cell lies wholly across it from the
-/// point, so any chord to it crosses the plane's image under the spheroid's map M·d, whose
-/// distance from the point is |n · d| ÷ |M⁻¹n|, at least min(a, c) |u − u₁| ÷ (√(1 + u² + v²)
-/// √(1 + u₁²)). A crater's centre lies in its cell's coordinates, and [`st_to_uv`] is monotone, so
-/// a centre is no nearer than the boundary but for its rounding, which [`GAP_MARGIN`] and
-/// [`GAP_SLACK_M`] cover. On the Mars-like world at band level 4, whose points lie farther apart
-/// than the finest octaves' cells, 63% of the cells the 3 × 3s search are beyond their octave's
-/// reach (1.47 of 2.34 million over four texels).
+/// [`CellEdges::gap_m`] from the point whose face coordinates are `at`, in `home`, to `cell`, on
+/// `figure`, with the edges, the point's root and the radius made for it: the tests' reading.
+#[cfg(test)]
 #[must_use]
 fn gap_m(at: FaceUv, home: PatchKey, cell: PatchKey, figure: &Spheroid) -> f64 {
-    if cell.face() != home.face() || at.face != home.face() {
-        return 0.0;
-    }
-    let side = f64::from(1_u32 << home.level());
-    let rho = (1.0 + at.u * at.u + at.v * at.v).sqrt();
-    // The sine of the angle to the boundary along one axis, from the point's coordinate `q` and
-    // the two cells' indices along it; zero where they share it, or the point is not inside.
-    let across = |q: f64, own: u32, other: u32| -> f64 {
-        let (edge, gap) = match other.cmp(&own) {
-            core::cmp::Ordering::Greater => {
-                let edge = st_to_uv(f64::from(own + 1) / side);
-                (edge, edge - q)
-            }
-            core::cmp::Ordering::Less => {
-                let edge = st_to_uv(f64::from(own) / side);
-                (edge, q - edge)
-            }
-            core::cmp::Ordering::Equal => return 0.0,
+    CellEdges::of(home).gap_m(at, gap_root(at), cell, smallest_radius_m(figure))
+}
+
+/// The root √(1 + u² + v²) of the face coordinates `at`, which every [`CellEdges::gap_m`] from the
+/// point divides by.
+#[must_use]
+fn gap_root(at: FaceUv) -> f64 {
+    (1.0 + at.u * at.u + at.v * at.v).sqrt()
+}
+
+/// The smaller of `figure`'s two radii, metres, which every [`CellEdges::gap_m`] scales by.
+#[must_use]
+fn smallest_radius_m(figure: &Spheroid) -> f64 {
+    num::min(figure.equatorial_radius_m, figure.polar_radius_m)
+}
+
+/// A cell's four edges as [`CellEdges::gap_m`] reads them: along u, then v, the low edge's face
+/// coordinate and the root √(1 + u²) of its great circle's plane, then the high edge's.
+#[derive(Debug, Clone, Copy)]
+struct CellEdges {
+    cell: PatchKey,
+    edges: [[(f64, f64); 2]; 2],
+}
+
+impl CellEdges {
+    /// The edges of `cell`.
+    #[must_use]
+    fn of(cell: PatchKey) -> Self {
+        let side = f64::from(1_u32 << cell.level());
+        let edge = |n: u32| {
+            let edge = st_to_uv(f64::from(n) / side);
+            (edge, (1.0 + edge * edge).sqrt())
         };
-        if gap > 0.0 {
-            gap / (rho * (1.0 + edge * edge).sqrt())
-        } else {
-            0.0
+        Self {
+            cell,
+            edges: [
+                [edge(cell.i()), edge(cell.i() + 1)],
+                [edge(cell.j()), edge(cell.j() + 1)],
+            ],
         }
+    }
+
+    /// A bound below on the chord from the spheroid point of the unit direction whose face
+    /// coordinates are `at` to any point of `other`, metres, where `other` is one of the 3 × 3
+    /// about this cell, the point's own, `root` is the point's [`gap_root`] and `radius_m` the
+    /// figure's [`smallest_radius_m`]: zero but for an edge or corner neighbour on this cell's
+    /// face, and there the chord to the plane through the centre that holds the boundary between
+    /// the two, the larger such plane's at a corner.
+    ///
+    /// On a face a boundary of constant u is a great circle, whose plane's normal n has n · xyz =
+    /// u₁ − u at the face's (1, u, v) and |n| = √(1 + u₁²); the cell lies wholly across it from the
+    /// point, so any chord to it crosses the plane's image under the spheroid's map M·d, whose
+    /// distance from the point is |n · d| ÷ |M⁻¹n|, at least min(a, c) |u − u₁| ÷ (√(1 + u² + v²)
+    /// √(1 + u₁²)). A crater's centre lies in its cell's coordinates, and [`st_to_uv`] is
+    /// monotone, so a centre is no nearer than the boundary but for its rounding, which
+    /// [`GAP_MARGIN`] and [`GAP_SLACK_M`] cover. On the Mars-like world at band level 4, whose
+    /// points lie farther apart than the finest octaves' cells, 63% of the cells the 3 × 3s search
+    /// are beyond their octave's reach (1.47 of 2.34 million over four texels).
+    #[must_use]
+    fn gap_m(&self, at: FaceUv, root: f64, other: PatchKey, radius_m: f64) -> f64 {
+        let home = self.cell;
+        if other.face() != home.face() || at.face != home.face() {
+            return 0.0;
+        }
+        // The sine of the angle to the boundary along one axis, from the point's coordinate `q`,
+        // the two cells' indices along it and the home cell's edges there; zero where they share
+        // it, or the point is not inside.
+        let across = |q: f64, own: u32, other: u32, [low, high]: [(f64, f64); 2]| -> f64 {
+            let (edge_root, gap) = match other.cmp(&own) {
+                core::cmp::Ordering::Greater => (high.1, high.0 - q),
+                core::cmp::Ordering::Less => (low.1, q - low.0),
+                core::cmp::Ordering::Equal => return 0.0,
+            };
+            if gap > 0.0 {
+                gap / (root * edge_root)
+            } else {
+                0.0
+            }
+        };
+        let larger = num::max(
+            across(at.u, home.i(), other.i(), self.edges[0]),
+            across(at.v, home.j(), other.j(), self.edges[1]),
+        );
+        radius_m * larger
+    }
+}
+
+/// The cell of `level` on face `face` whose cell coordinates (s, t) are `st`: the patch
+/// [`PatchKey::containing`] finds at `level` for a direction on `face` of those coordinates, by
+/// its arithmetic, so that a query takes its face and (s, t) once for every octave's level.
+#[must_use]
+fn cell_at_st(face: Face, (s, t): (f64, f64), level: u8) -> PatchKey {
+    let cells = 1_u32 << level;
+    let index = |c: f64| {
+        let cell = (c * f64::from(cells)).floor();
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "the floor is an integer in [0, 2^level], 2^24 at most, as `containing` has it"
+        )]
+        let cell = cell as u32;
+        cell.min(cells - 1)
     };
-    let larger = num::max(
-        across(at.u, home.i(), cell.i()),
-        across(at.v, home.j(), cell.j()),
-    );
-    num::min(figure.equatorial_radius_m, figure.polar_radius_m) * larger
+    PatchKey::new(face, level, index(s), index(t)).expect("an octave's level is a level")
+}
+
+/// The key of `cell` of octave `octave`'s level in a [`CraterCache`]: the octave above the cell's
+/// own key's 56 bits.
+#[must_use]
+fn cell_key(octave: u8, cell: PatchKey) -> u64 {
+    (u64::from(octave) << 56) | cell.to_u64()
 }
 
 /// The number of octaves 0 to `through` among a body's `count`.
