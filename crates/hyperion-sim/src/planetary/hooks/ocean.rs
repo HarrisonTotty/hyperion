@@ -166,16 +166,24 @@ impl WaterColumn {
     /// [`RADIUS_HALVINGS`] halvings of the bracket, for a pressure at `below` above `pressure` and
     /// at `above` at most it: the bracket's upper end at the last, where the pressure is at most
     /// `pressure`.
+    ///
+    /// Each halving is a function of the bracket alone, so one that leaves it as it was, bit for
+    /// bit, leaves every one after it so too, and the rest are not taken (P14.T54.b.l): a column
+    /// of 10⁵ m closes to one ulp of its radii in about 50.
     #[must_use]
     pub(crate) fn radius_at(&self, pressure: Pascals, below: Metres, above: Metres) -> Metres {
         let (mut lo, mut hi) = (below.value(), above.value());
         for _ in 0..RADIUS_HALVINGS {
             let mid = f64::midpoint(lo, hi);
-            if self.pressure_at(Metres::new(mid)) > pressure {
-                lo = mid;
+            let (next_lo, next_hi) = if self.pressure_at(Metres::new(mid)) > pressure {
+                (mid, hi)
             } else {
-                hi = mid;
+                (lo, mid)
+            };
+            if next_lo.total_cmp(&lo).is_eq() && next_hi.total_cmp(&hi).is_eq() {
+                break;
             }
+            (lo, hi) = (next_lo, next_hi);
         }
         Metres::new(hi)
     }
