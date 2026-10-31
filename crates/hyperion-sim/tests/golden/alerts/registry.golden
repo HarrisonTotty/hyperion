@@ -40,11 +40,50 @@ Kilonova in Photometric(J) = 0x46eeff77a6dea7a3  # 5.0297e33
 Kilonova in Photometric(H) = 0x46e0754e5c3a54df  # 2.6705e33
 Kilonova in Photometric(K) = 0x46d36c0852ccc99e  # 1.5757e33
 Kilonova in Photometric(MidInfrared) = 0x46905f4993a635d3  # 8.3017e31
-Nova: Recurrent over ["ACCRETING_WHITE_DWARF", "ACCRETING_WHITE_DWARF_SLOW"], pending Some("P11.T9"), lasting None, curve None
-DwarfNova: Local over ["ACCRETING_WHITE_DWARF", "ACCRETING_WHITE_DWARF_SLOW"], pending Some("P11.T9"), lasting None, curve None
-XrayTransient: Recurrent over ["XRAY_BINARY"], pending Some("P11.T9"), lasting None, curve None
-XrayBurst: Recurrent over ["XRAY_BINARY"], pending Some("P11.T9"), lasting None, curve None
-BeXOutburst: Recurrent over ["XRAY_BINARY"], pending Some("P11.T9"), lasting None, curve None
+Nova: Recurrent over ["ACCRETING_WHITE_DWARF", "ACCRETING_WHITE_DWARF_SLOW"], pending None, lasting Some(AtMost(Span { seconds: 14624035, nanos: 0 })), curve Some(BinaryCurve)
+Nova in Photometric(U) = 0x467c596b5ac5e942  # 3.5937e31
+Nova in Photometric(B) = 0x4681e00cb1713c3b  # 4.5319e31
+Nova in Photometric(V) = 0x4679b9f0e22f6dd1  # 3.2612e31
+Nova in Photometric(R) = 0x46828790d688399c  # 4.6978e31
+Nova in Photometric(I) = 0x46768aace00f2aa2  # 2.8575e31
+Nova in Photometric(J) = 0x466517b2337ebdef  # 1.3369e31
+Nova in Photometric(H) = 0x46530f7a1f5e3bce  # 6.0405e30
+Nova in Photometric(K) = 0x46440e2ca2628ac8  # 3.1779e30
+Nova in Photometric(MidInfrared) = 0x45faca5c7b218aa7  # 1.3266e29
+DwarfNova: Local over ["ACCRETING_WHITE_DWARF", "ACCRETING_WHITE_DWARF_SLOW"], pending None, lasting Some(AtMost(Span { seconds: 174103279200, nanos: 0 })), curve Some(BinaryCurve)
+DwarfNova in Photometric(U) = 0x457d9e44b3b18ce9  # 5.729e26
+DwarfNova in Photometric(B) = 0x4575e45067f38127  # 4.2345e26
+DwarfNova in Photometric(V) = 0x4563a149a3ea08ce  # 1.8985e26
+DwarfNova in Photometric(R) = 0x45667a43f0714e1c  # 2.1739e26
+DwarfNova in Photometric(I) = 0x455486c7d8736f37  # 9.926e25
+DwarfNova in Photometric(J) = 0x4539c959ed1eed44  # 3.1174e25
+DwarfNova in Photometric(H) = 0x4523f17db80be14d  # 1.2055e25
+DwarfNova in Photometric(K) = 0x4512bf1e88a5643a  # 5.6658e24
+DwarfNova in Photometric(MidInfrared) = 0x44c3ac1e7cc2b47d  # 1.858e23
+XrayTransient: Recurrent over ["XRAY_BINARY"], pending None, lasting Some(AtMost(Span { seconds: 12368602, nanos: 0 })), curve Some(BinaryCurve)
+XrayTransient in Photometric(U) = 0x4604eb7a3c0637fe  # 2.0718e29
+XrayTransient in Photometric(B) = 0x45feeca2acda2a0b  # 1.5313e29
+XrayTransient in Photometric(V) = 0x45ebbac2b7f3300d  # 6.8655e28
+XrayTransient in Photometric(R) = 0x45efc099b92feaac  # 7.8615e28
+XrayTransient in Photometric(I) = 0x45dcff1e6acb53b2  # 3.5896e28
+XrayTransient in Photometric(J) = 0x45c236d12e50a66c  # 1.1274e28
+XrayTransient in Photometric(H) = 0x45ac2c3011185591  # 4.3595e27
+XrayTransient in Photometric(K) = 0x459a7b928248d8e8  # 2.049e27
+XrayTransient in Photometric(MidInfrared) = 0x454bc9e97e8276a3  # 6.7189e25
+XrayTransient in XRay = 0x469447155a54afea  # 1.0282e32
+XrayBurst: Recurrent over ["XRAY_BINARY"], pending None, lasting Some(AtMost(Span { seconds: 144, nanos: 0 })), curve Some(BinaryCurve)
+XrayBurst in Photometric(U) = 0x45e4dd1aef630ed6  # 5.1656e28
+XrayBurst in Photometric(B) = 0x45ded7a54f588a7b  # 3.8181e28
+XrayBurst in Photometric(V) = 0x45cba7d6bfb7157d  # 1.7118e28
+XrayBurst in Photometric(R) = 0x45cfab327aa063b6  # 1.9602e28
+XrayBurst in Photometric(I) = 0x45bceb2f0b2d289a  # 8.9499e27
+XrayBurst in Photometric(J) = 0x45a22a141aa468e5  # 2.8108e27
+XrayBurst in Photometric(H) = 0x458c1929a098c128  # 1.087e27
+XrayBurst in Photometric(K) = 0x457a694ee3160cfe  # 5.1087e26
+XrayBurst in Photometric(MidInfrared) = 0x452bb72be649e3bc  # 1.6753e25
+XrayBurst in XRay = 0x467ec8a1d0b2d179  # 3.9023e31
+BeXOutburst: Recurrent over ["XRAY_BINARY"], pending None, lasting Some(AtMost(Span { seconds: 8821735, nanos: 0 })), curve Some(BinaryCurve)
+BeXOutburst in XRay = 0x4642997559c4bb62  # 2.9472e30
 GiantEruption: Recurrent over ["LUMINOUS_BLUE_VARIABLE"], pending None, lasting Some(AtMost(Span { seconds: 631152000, nanos: 0 })), curve Some(GiantEruption)
 GiantEruption in Photometric(U) = 0x4702a6f99d7c891f  # 1.2106e34
 GiantEruption in Photometric(B) = 0x4702a6f99d7c891f  # 1.2106e34

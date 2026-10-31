@@ -1,11 +1,10 @@
 //! The registry of transient kinds: one row per [`TransientKind`] with its classes, how its events
 //! are found, the bound on its peak luminosity in each band, its longest duration and its light
-//! curve (plan 12, P12.T5.a, P12.T5.a.2 and P12.T5.b).
+//! curve (plan 12, P12.T5.a, P12.T5.a.2, P12.T5.b and P12.T5.c).
 //!
 //! The rows read their sources' own constants where the sources state them. Plan 09's supernova
-//! templates, plan 11's binary curves and plan 06's giant eruptions and magnetar outbursts state no
-//! peak, so their bounds are restated here and held to their sources by tests. The eleven rows that
-//! are built:
+//! templates, plan 06's giant eruptions and magnetar outbursts and plan 11's light curves state no
+//! bound, so their bounds are restated here and held to their sources by tests. Every row is built:
 //!
 //! | Kind                | Route     | Photometric     | X-ray           | D        | Curve      |
 //! | ------------------- | --------- | --------------- | --------------- | -------- | ---------- |
@@ -13,6 +12,11 @@
 //! | `TypeIa`            | one-shot  | per band        | none            | unending | supernova  |
 //! | `LuminousRedNova`   | one-shot  | per band        | none            | 280 d    | binary     |
 //! | `Kilonova`          | one-shot  | per band        | none            | 35 d     | binary     |
+//! | `Nova`              | recurrent | per band        | none            | 169.3 d  | binary     |
+//! | `DwarfNova`         | local     | per band        | none            | 5,517 yr | binary     |
+//! | `XrayTransient`     | recurrent | per band        | 1.0282 × 10³² W | 143.2 d  | binary     |
+//! | `XrayBurst`         | recurrent | per band        | 3.9023 × 10³¹ W | 144 s    | binary     |
+//! | `BeXOutburst`       | recurrent | none            | 2.9472 × 10³⁰ W | 102.1 d  | binary     |
 //! | `GiantEruption`     | recurrent | 1.2106 × 10³⁴ W | none            | 20 yr    | eruption   |
 //! | `TidalDisruption`   | centre    | `L_Edd` of M•   | `L_Edd` ÷ 15.8  | unending | tail       |
 //! | `CentralFlare`      | centre    | none            | 3.5965 × 10²⁸ W | 8,175 s  | flare      |
@@ -22,13 +26,11 @@
 //! | `FuOrionisOutburst` | local     | per host        | none            | 500 yr   | outburst   |
 //!
 //! The supernovae's bound in V is 2.1922 × 10³⁴ W for a core collapse and 1.4081 × 10³⁵ W for a
-//! Type Ia ([`CORE_COLLAPSE_BAND_PEAKS`], [`TYPE_IA_BAND_PEAKS`]), and the mergers' is
-//! 7.6311 × 10³³ W for a luminous red nova and 4.6816 × 10³³ W for a kilonova
-//! ([`LUMINOUS_RED_NOVA_BAND_PEAKS`], [`KILONOVA_BAND_PEAKS`]; P12.T5.b). The other five rows wait on
-//! plan 11's sources, P11.T9 (below): `Nova`, `XrayTransient`, `XrayBurst` and `BeXOutburst`
-//! (recurrent) and `DwarfNova` (local). X-ray bursts are seen across the Galaxy, so they are walked
-//! over the X-ray binaries, as the magnetars are over the core collapses (main's ruling of
-//! 2026-10-30; P12.T5.b).
+//! Type Ia ([`CORE_COLLAPSE_BAND_PEAKS`], [`TYPE_IA_BAND_PEAKS`]); the mergers' is 7.6311 × 10³³ W
+//! for a luminous red nova and 4.6816 × 10³³ W for a kilonova ([`LUMINOUS_RED_NOVA_BAND_PEAKS`],
+//! [`KILONOVA_BAND_PEAKS`]; P12.T5.b), and a nova's 3.2612 × 10³¹ W ([`NOVA_BAND_PEAKS`]; P12.T5.c).
+//! X-ray bursts are seen across the Galaxy, so they are walked over the X-ray binaries, as the
+//! magnetars are over the core collapses (main's ruling of 2026-10-30; P12.T5.b).
 //!
 //! A kind's hosts are a class's ([`TransientRow::classes`]): the supernovae are the two supernova
 //! classes', plan 11's kinds its classes' (novae and dwarf novae both accreting white dwarf
@@ -36,27 +38,59 @@
 //! collapses', whose neutron stars the magnetars are, and the disruptions their victims'. The
 //! centre's flares and the local kinds of ordinary stars have none.
 //!
-//! # The mergers' rows
-//!
-//! A merger's event is plan 11's curve (P11.T9.a) of its marks: a red nova's of the pair's total
-//! mass, a kilonova's of its ejecta (P11.T9.b). Each kind's bound is its curve's peak at the top of
-//! its mass range, through the curve's colour band by band ([`binary_peak`](super::binary_peak)):
-//! the heaviest merger the stellar mergers draw, two of the tracks' 150 M☉ stars, and the most a
-//! neutron-star merger ejects, two neutron stars' 0.05 M☉. Its D is the longest an event lasts,
-//! until its light stays under 1% of its peak (plan 11's `ACTIVE_SHARE`), after which the alerts
-//! count none of it ([`binary_luminosity`](super::binary_luminosity)).
-//!
 //! # Rows whose source is not built
 //!
-//! Plan 11's other light curves and X-ray luminosities wait on P11.T9's walks. Their rows keep their
-//! kind, classes and route, and every other part is `None`, with [`TransientRow::pending`] naming
-//! the task whose source fills it (the galaxy plans' slice rule). Such a kind has no bound, so it
-//! adds nothing to its classes' reach, which is true while no event of it can be generated; the
-//! task that fills the row raises the reach.
+//! A row whose source is not built keeps its kind, classes and route, and every other part is
+//! `None`, with [`TransientRow::pending`] naming the task whose source fills it (the galaxy plans'
+//! slice rule). Such a kind has no bound, so it adds nothing to its classes' reach, which is true
+//! while no event of it can be generated; the task that fills the row raises the reach. No row is
+//! pending now; the rule stands for a kind registered later.
 //!
-//! The giant eruptions' row is built from its source, plan 06's (P06.T28.e), though their class's
-//! process (P09.T43) is not. So the luminous blue variables have a reach, and the walk (P12.T5.c)
-//! finds no hosts in it until the process is built (plan 12's Risks, "P12.T5.a.2 as built").
+//! # Plan 11's binary events
+//!
+//! Plan 11's seven kinds take their light from its curves ([`light_curves`], P11.T9.a), as its
+//! events list them ([`binary::events`], P11.T9.b): the mergers' luminous red novae and kilonovae
+//! (P12.T5.b), a red nova's curve of the pair's total mass and a kilonova's of its ejecta, and the
+//! novae, dwarf novae, X-ray transients, X-ray bursts and Be/X outbursts of the accreting white
+//! dwarfs and the X-ray binaries (P12.T5.c). Every curve is a closed form of its event's masses,
+//! and each kind's light at its peak grows with them, so its bound in each band is its curve's peak
+//! at the top of its mass range, through the curve's colour ([`binary_peak`](super::binary_peak)),
+//! its X-ray bound the curve's own 2–10 keV light ([`BinaryLightCurve::xray_luminosity`]); tests
+//! hold each to the curves over the ranges and to the events of sampled hosts. Every fade is
+//! asymptotic, so an event's duration is plan 11's, from its onset until its light stays under
+//! [`ACTIVE_SHARE`] (a hundredth) of its peak ([`BinaryEvent::duration`]), after which the alerts
+//! count none of it ([`binary_luminosity`](super::binary_luminosity)), and a row's is the longest of
+//! its kind's ([`BinaryLightCurve::fades_below`] at that share):
+//!
+//! - **Luminous red novae:** the heaviest merger the stellar mergers draw, two of the tracks'
+//!   150 M☉ stars.
+//! - **Kilonovae:** the most a neutron-star merger ejects, two neutron stars' 0.05 M☉.
+//! - **Novae:** at their peak for a 1.36 M☉ white dwarf, the top of `AWD_SAMPLER`'s white dwarf
+//!   masses, and as long as a 0.55 M☉ dwarf's, its bottom, whose decline is the slowest.
+//! - **Dwarf novae:** at Warner's maximum for the 10-hour period at which the curve holds it, and
+//!   no longer than its rise, the light of the most mass a disc gathers at the faintest maximum,
+//!   and the slowest decay, each at its own extreme: a disc gathers at most
+//!   [`MAX_NOVA_TRANSFER_RATE`] over the longest cycle, 33 years, onto a 1.36 M☉ dwarf. That bound
+//!   is 5,517 years, against outbursts of days to months in sampled hosts: a recorded finding.
+//! - **X-ray transients:** at the Eddington luminosity of a 15 M☉ black hole, the top of
+//!   `XRB_SAMPLER`'s, for the donors' hydrogen, where the curve holds its peak; the shape is fixed.
+//! - **X-ray bursts:** a helium burst on a 2.2 M☉ neutron star, at its helium Eddington
+//!   luminosity, brighter than a mixed burst's half of the hydrogen-rich one, which lasts longer.
+//! - **Be/X outbursts:** a fifth of a 2.2 M☉ neutron star's Eddington luminosity, in X-rays alone.
+//!
+//! Dwarf novae are local (P12.T5.e): kept out of distant scans by their route, whatever their
+//! bound.
+//!
+//! [`light_curves`]: crate::stellar::binary::light_curves
+//! [`binary::events`]: crate::stellar::binary::events
+//! [`ACTIVE_SHARE`]: crate::stellar::binary::events::ACTIVE_SHARE
+//! [`BinaryEvent::duration`]: crate::stellar::binary::events::BinaryEvent::duration
+//! [`BinaryLightCurve::xray_luminosity`]: crate::stellar::binary::light_curves::BinaryLightCurve::xray_luminosity
+//! [`BinaryLightCurve::fades_below`]: crate::stellar::binary::light_curves::BinaryLightCurve::fades_below
+//! [`MAX_NOVA_TRANSFER_RATE`]: crate::stellar::binary::scan::MAX_NOVA_TRANSFER_RATE
+//!
+//! The giant eruptions' row is built from its source, plan 06's (P06.T28.e); their class's process
+//! is P09.T43's.
 //!
 //! # Magnetars
 //!
@@ -79,8 +113,8 @@
 //! ([`light`](super::light)), and a row has one per band ([`TransientRow::peak_bound`]). The
 //! supernovae's are their templates' light band by band, each term weighted by its spectrum's share
 //! (P12.T5.b): their shock breakouts, bright but far in the ultraviolet, give V little, and the
-//! stripped stars' gives the core collapses their X-rays. Every other row bounds the photometric
-//! bands alike. Where its source is bolometric (the tails' bolometric light, the giant eruptions,
+//! stripped stars' gives the core collapses their X-rays. Plan 11's kinds take their curves' own
+//! light band by band (above). Every other row bounds the photometric bands alike. Where its source is bolometric (the tails' bolometric light, the giant eruptions,
 //! the star flares and the FU Orionis outbursts) that is the bolometric bound, an upper bound on
 //! every band, so a reach from it errs long and the flux decides (Design note 5). The X-ray bound
 //! is also filled where the source models the 2–10 keV band itself, the centre's flares and its
@@ -101,6 +135,11 @@ use crate::galaxy::features::centre::events::luminosity::{XRAY_SHARE, eddington_
 use crate::stellar::events::{flares, fu_orionis, lbv, magnetar};
 use crate::time::Span;
 use crate::units::Watts;
+
+#[cfg(doc)]
+use crate::stellar::binary::light_curves::{
+    BeXOutburstCurve, DwarfNovaCurve, NovaCurve, XrayBurstCurve, XrayTransientCurve,
+};
 
 use super::{AlertBand, BAND_COUNT, ClassSet};
 
@@ -194,8 +233,8 @@ impl TransientKind {
     /// let bound = hyperion_sim::units::Watts::new(flares::MAX_PEAK_LUMINOSITY_WATTS);
     /// assert_eq!(row.peak_bound(AlertBand::XRay), Some(PeakBound::Watts(bound)));
     /// assert_eq!(row.duration(), Some(LongestDuration::AtMost(flares::MAX_DURATION)));
-    /// // Plan 11's novae are not built yet: the row says which task fills it.
-    /// assert_eq!(TransientKind::Nova.row().pending(), Some("P11.T9"));
+    /// // Plan 11's novae give no X-rays.
+    /// assert_eq!(TransientKind::Nova.row().peak_bound(AlertBand::XRay), None);
     /// ```
     #[must_use]
     pub fn row(self) -> &'static TransientRow {
@@ -331,10 +370,12 @@ pub enum LightCurveSource {
     /// ([`Burst::mean_luminosity_watts`], [`GiantFlare::mean_luminosity_watts`]), since plan 06
     /// gives no shape: the event's whole output, in no one band (P06.T28.c).
     MagnetarBurst,
-    /// Plan 11's curve of a merger's event (P11.T9.a), [`BinaryLightCurve::in_band`] and
-    /// [`BinaryLightCurve::xray_luminosity`] since its onset, while the event is active
-    /// ([`binary_luminosity`](super::binary_luminosity), P12.T5.b): a luminous red nova or a
-    /// kilonova.
+    /// Plan 11's curve of a binary event (P11.T9.a), which the event carries
+    /// ([`BinaryEvent::curve`](crate::stellar::binary::events::BinaryEvent::curve)):
+    /// [`BinaryLightCurve::in_band`] and [`BinaryLightCurve::xray_luminosity`] since its onset,
+    /// while the event is active ([`binary_luminosity`](super::binary_luminosity)). A merger's
+    /// luminous red nova or kilonova (P12.T5.b), and a nova, a dwarf nova, an X-ray transient's
+    /// outburst, a Type I X-ray burst or a Be/X giant outburst (P12.T5.c).
     BinaryCurve,
 }
 
@@ -367,6 +408,10 @@ enum RowSource {
         light_curve: Option<LightCurveSource>,
     },
     /// The source is not built: the task that builds it.
+    #[expect(
+        dead_code,
+        reason = "the slice rule's row of a kind registered before its source; every row is built now"
+    )]
     Pending(&'static str),
 }
 
@@ -432,7 +477,7 @@ impl TransientRow {
     }
 
     /// The task whose source fills the row's bounds, duration and light curve, while it is not
-    /// built: `P11.T9`, for plan 11's kinds.
+    /// built: `P11.T9`, for plan 11's mergers.
     #[must_use]
     pub const fn pending(&self) -> Option<&'static str> {
         match self.source {
@@ -444,6 +489,10 @@ impl TransientRow {
     /// The row of a kind whose source is not built: its classes and route, and the task that
     /// fills it.
     #[must_use]
+    #[expect(
+        dead_code,
+        reason = "the slice rule's row of a kind registered before its source; every row is built now"
+    )]
     const fn pending_on(
         kind: TransientKind,
         classes: ClassSet,
@@ -664,6 +713,104 @@ pub const MAGNETAR_BURST_PEAK: Watts = Watts::new(5e40);
 pub const MAGNETAR_BURST_XRAY_PEAK: Watts =
     Watts::new(MAGNETAR_BURST_PEAK.value() * super::recurrent::MAGNETAR_GIANT_FLARE_XRAY_SHARE);
 
+/// The bound on a classical or recurrent nova's light in each band, W, in [`AlertBand::ALL`]'s
+/// order: plan 11's curve ([`NovaCurve`], P11.T9.a) at its peak for a 1.36 M☉ white dwarf, the
+/// heaviest an accreting white dwarf host has (`AWD_SAMPLER`'s limit), rounded up at the fifth
+/// figure (P12.T5.c). A heavier dwarf peaks brighter (Livio's maximum magnitude), at 3.0662 × 10³²
+/// W in all for 1.36 M☉, an 8,000 K blackbody's light through each band; no radio or X-rays.
+pub const NOVA_BAND_PEAKS: [Watts; BAND_COUNT] = [
+    Watts::new(3.5937e31),
+    Watts::new(4.5319e31),
+    Watts::new(3.2612e31),
+    Watts::new(4.6978e31),
+    Watts::new(2.8575e31),
+    Watts::new(1.3369e31),
+    Watts::new(6.0405e30),
+    Watts::new(3.1779e30),
+    Watts::new(1.3266e29),
+    Watts::ZERO,
+    Watts::ZERO,
+];
+
+/// The bound on a dwarf nova's light in each band, W, in [`AlertBand::ALL`]'s order: plan 11's
+/// curve ([`DwarfNovaCurve`], P11.T9.a) at its peak for an orbit of 10 hours, the longest period
+/// at which Warner's maximum is read, beyond which it is held, rounded up at the fifth figure
+/// (P12.T5.c). The maximum brightens with the period and depends on nothing else: 1.2269 × 10²⁸ W
+/// in all, a 25,000 K disc's light through each band; no radio or X-rays.
+pub const DWARF_NOVA_BAND_PEAKS: [Watts; BAND_COUNT] = [
+    Watts::new(5.7290e26),
+    Watts::new(4.2345e26),
+    Watts::new(1.8985e26),
+    Watts::new(2.1739e26),
+    Watts::new(9.9260e25),
+    Watts::new(3.1174e25),
+    Watts::new(1.2055e25),
+    Watts::new(5.6658e24),
+    Watts::new(1.8580e23),
+    Watts::ZERO,
+    Watts::ZERO,
+];
+
+/// The bound on an X-ray transient's outburst's light in each band, W, in [`AlertBand::ALL`]'s
+/// order: plan 11's curve ([`XrayTransientCurve`], P11.T9.a) at its peak, held at the Eddington
+/// luminosity of a 15 M☉ black hole, the heaviest `XRB_SAMPLER` gives, for the donors' hydrogen
+/// mass fraction of 0.7, 2.2184 × 10³² W in all, rounded up at the fifth figure (P12.T5.c). Its
+/// 2–10 keV light is 98% of it at a 0.55 keV blackbody's share, 1.0282 × 10³² W, and its optical
+/// light the 2% its disc reprocesses at 25,000 K; none in radio.
+pub const XRAY_TRANSIENT_BAND_PEAKS: [Watts; BAND_COUNT] = [
+    Watts::new(2.0718e29),
+    Watts::new(1.5313e29),
+    Watts::new(6.8655e28),
+    Watts::new(7.8615e28),
+    Watts::new(3.5896e28),
+    Watts::new(1.1274e28),
+    Watts::new(4.3595e27),
+    Watts::new(2.0490e27),
+    Watts::new(6.7189e25),
+    Watts::ZERO,
+    Watts::new(1.0282e32),
+];
+
+/// The bound on a Type I X-ray burst's light in each band, W, in [`AlertBand::ALL`]'s order: plan
+/// 11's curve ([`XrayBurstCurve`], P11.T9.a) at the peak of a helium burst on a 2.2 M☉ neutron
+/// star, the heaviest `XRB_SAMPLER` gives, at its helium Eddington luminosity, 5.5311 × 10³¹ W in
+/// all, rounded up at the fifth figure (P12.T5.c). A mixed burst peaks at half the hydrogen-rich
+/// Eddington luminosity, under a third of it. Its 2–10 keV light is 98% of it at a 2 keV
+/// blackbody's share, 3.9023 × 10³¹ W, its optical light the disc's 2% at 25,000 K; none in radio.
+pub const XRAY_BURST_BAND_PEAKS: [Watts; BAND_COUNT] = [
+    Watts::new(5.1656e28),
+    Watts::new(3.8181e28),
+    Watts::new(1.7118e28),
+    Watts::new(1.9602e28),
+    Watts::new(8.9499e27),
+    Watts::new(2.8108e27),
+    Watts::new(1.0870e27),
+    Watts::new(5.1087e26),
+    Watts::new(1.6753e25),
+    Watts::ZERO,
+    Watts::new(3.9023e31),
+];
+
+/// The bound on a Be/X-ray binary's giant outburst's light in each band, W, in
+/// [`AlertBand::ALL`]'s order: plan 11's curve ([`BeXOutburstCurve`], P11.T9.a) at its peak, a
+/// fifth of the Eddington luminosity of a 2.2 M☉ neutron star, the heaviest `XRB_SAMPLER` gives,
+/// for the Be star's hydrogen mass fraction of 0.7, 6.5072 × 10³⁰ W in all; its 2–10 keV light at
+/// a 3 keV blackbody's share, rounded up at the fifth figure (P12.T5.c). Its optical light is the
+/// Be star's disc's, the system's, so none is the outburst's own.
+pub const BEX_OUTBURST_BAND_PEAKS: [Watts; BAND_COUNT] = [
+    Watts::ZERO,
+    Watts::ZERO,
+    Watts::ZERO,
+    Watts::ZERO,
+    Watts::ZERO,
+    Watts::ZERO,
+    Watts::ZERO,
+    Watts::ZERO,
+    Watts::ZERO,
+    Watts::ZERO,
+    Watts::new(2.9472e30),
+];
+
 /// The bounds of a row that bounds every photometric band alike by `photometric`, and X-rays by
 /// `xray`.
 #[must_use]
@@ -738,6 +885,47 @@ const STAR_FLARE_RISE: Span = Span::from_seconds(4_115);
 /// ([`fu_orionis::V1647_ORI_RISE_YEARS`]).
 const FU_ORIONIS_RISE: Span = Span::from_seconds(25 * 31_557_600);
 
+/// The longest a nova lasts (module documentation): a 0.55 M☉ white dwarf's, the lightest an
+/// accreting white dwarf host has, whose decline is the slowest, until its light stays under a
+/// hundredth of its peak, 14,624,034.9 s (169.26 days, t₃ = 95.8 days), rounded up to the second.
+const NOVA_DURATION: Span = Span::from_seconds(14_624_035);
+
+/// The longest a nova's light rises: the same dwarf's tenth of t₃, 827,775.6 s (9.58 days),
+/// rounded up to the second; a dwarf of 1.2 M☉ or more rises in the curve's least, a day.
+const NOVA_RISE: Span = Span::from_seconds(827_776);
+
+/// The longest a dwarf nova lasts (module documentation): its rise, a day, plus 2.6808 × 10³⁸ J,
+/// the fall of 3.3 × 10⁻⁶ M☉ onto a 1.36 M☉ white dwarf, at its faintest maximum, 1.5398 × 10²⁷
+/// W for a 1.3-hour orbit, plus the slowest decay's 3.2772 days an e-fold (a 10-hour orbit's) to a
+/// hundredth: 5,516.7 years, rounded up to the Julian year. No one outburst has all three extremes,
+/// so it bounds every one, loosely.
+const DWARF_NOVA_DURATION: Span = Span::from_seconds(5_517 * 31_557_600);
+
+/// The longest a dwarf nova's light rises: the curve's day.
+const DWARF_NOVA_RISE: Span = Span::from_seconds(86_400);
+
+/// The longest an X-ray transient's outburst lasts: the curve's fixed five-day rise and 30-day
+/// e-folding decay to a hundredth of its peak, 12,368,601.1 s (143.16 days), rounded up to the
+/// second.
+const XRAY_TRANSIENT_DURATION: Span = Span::from_seconds(12_368_602);
+
+/// The longest an X-ray transient's outburst rises: the curve's five days.
+const XRAY_TRANSIENT_RISE: Span = Span::from_seconds(5 * 86_400);
+
+/// The longest a Type I X-ray burst lasts: a mixed burst's 5 s rise and 30 s e-folding decay to a
+/// hundredth of its peak, 143.16 s, rounded up to the second; a helium burst's lasts 24.03 s.
+const XRAY_BURST_DURATION: Span = Span::from_seconds(144);
+
+/// The longest a Type I X-ray burst rises: a mixed burst's 5 s.
+const XRAY_BURST_RISE: Span = Span::from_seconds(5);
+
+/// The longest a Be/X giant outburst lasts: the curve's fixed 10-day rise and 20-day e-folding
+/// decay to a hundredth of its peak, 8,821,734.1 s (102.10 days), rounded up to the second.
+const BEX_OUTBURST_DURATION: Span = Span::from_seconds(8_821_735);
+
+/// The longest a Be/X giant outburst rises: the curve's 10 days.
+const BEX_OUTBURST_RISE: Span = Span::from_seconds(10 * 86_400);
+
 /// The longest a class's built kinds take from their onsets to their peaks, by which a scan of the
 /// class that starts afresh walks back (P12.T8.b.1); `None` while none of its kinds is built.
 ///
@@ -757,8 +945,18 @@ const FU_ORIONIS_RISE: Span = Span::from_seconds(25 * 31_557_600);
 ///     class_longest_rise(ClassId::LUMINOUS_BLUE_VARIABLE),
 ///     Some(LongestRise::AtMost(five_years))
 /// );
-/// // Plan 11's novae are not built yet.
-/// assert_eq!(class_longest_rise(ClassId::ACCRETING_WHITE_DWARF), None);
+/// // The X-ray binaries' slowest riser is a Be/X giant outburst, over ten days.
+/// let ten_days = Span::from_seconds(10 * 86_400);
+/// assert_eq!(
+///     class_longest_rise(ClassId::XRAY_BINARY),
+///     Some(LongestRise::AtMost(ten_days))
+/// );
+/// // A kilonova peaks within a day.
+/// let day = Span::from_seconds(86_400);
+/// assert_eq!(
+///     class_longest_rise(ClassId::NEUTRON_STAR_MERGER),
+///     Some(LongestRise::AtMost(day))
+/// );
 /// # Ok::<(), &str>(())
 /// ```
 #[must_use]
@@ -822,36 +1020,61 @@ static ROWS: [TransientRow; 16] = [
             light_curve: Some(LightCurveSource::BinaryCurve),
         },
     },
-    TransientRow::pending_on(
-        TransientKind::Nova,
-        ACCRETING_WHITE_DWARFS,
-        Route::Recurrent,
-        "P11.T9",
-    ),
-    TransientRow::pending_on(
-        TransientKind::DwarfNova,
-        ACCRETING_WHITE_DWARFS,
-        Route::Local,
-        "P11.T9",
-    ),
-    TransientRow::pending_on(
-        TransientKind::XrayTransient,
-        ClassSet::of(ClassId::XRAY_BINARY),
-        Route::Recurrent,
-        "P11.T9",
-    ),
-    TransientRow::pending_on(
-        TransientKind::XrayBurst,
-        ClassSet::of(ClassId::XRAY_BINARY),
-        Route::Recurrent,
-        "P11.T9",
-    ),
-    TransientRow::pending_on(
-        TransientKind::BeXOutburst,
-        ClassSet::of(ClassId::XRAY_BINARY),
-        Route::Recurrent,
-        "P11.T9",
-    ),
+    TransientRow {
+        kind: TransientKind::Nova,
+        classes: ACCRETING_WHITE_DWARFS,
+        route: Route::Recurrent,
+        source: RowSource::Built {
+            bounds: band_by_band(NOVA_BAND_PEAKS),
+            duration: LongestDuration::AtMost(NOVA_DURATION),
+            rise: LongestRise::AtMost(NOVA_RISE),
+            light_curve: Some(LightCurveSource::BinaryCurve),
+        },
+    },
+    TransientRow {
+        kind: TransientKind::DwarfNova,
+        classes: ACCRETING_WHITE_DWARFS,
+        route: Route::Local,
+        source: RowSource::Built {
+            bounds: band_by_band(DWARF_NOVA_BAND_PEAKS),
+            duration: LongestDuration::AtMost(DWARF_NOVA_DURATION),
+            rise: LongestRise::AtMost(DWARF_NOVA_RISE),
+            light_curve: Some(LightCurveSource::BinaryCurve),
+        },
+    },
+    TransientRow {
+        kind: TransientKind::XrayTransient,
+        classes: ClassSet::of(ClassId::XRAY_BINARY),
+        route: Route::Recurrent,
+        source: RowSource::Built {
+            bounds: band_by_band(XRAY_TRANSIENT_BAND_PEAKS),
+            duration: LongestDuration::AtMost(XRAY_TRANSIENT_DURATION),
+            rise: LongestRise::AtMost(XRAY_TRANSIENT_RISE),
+            light_curve: Some(LightCurveSource::BinaryCurve),
+        },
+    },
+    TransientRow {
+        kind: TransientKind::XrayBurst,
+        classes: ClassSet::of(ClassId::XRAY_BINARY),
+        route: Route::Recurrent,
+        source: RowSource::Built {
+            bounds: band_by_band(XRAY_BURST_BAND_PEAKS),
+            duration: LongestDuration::AtMost(XRAY_BURST_DURATION),
+            rise: LongestRise::AtMost(XRAY_BURST_RISE),
+            light_curve: Some(LightCurveSource::BinaryCurve),
+        },
+    },
+    TransientRow {
+        kind: TransientKind::BeXOutburst,
+        classes: ClassSet::of(ClassId::XRAY_BINARY),
+        route: Route::Recurrent,
+        source: RowSource::Built {
+            bounds: band_by_band(BEX_OUTBURST_BAND_PEAKS),
+            duration: LongestDuration::AtMost(BEX_OUTBURST_DURATION),
+            rise: LongestRise::AtMost(BEX_OUTBURST_RISE),
+            light_curve: Some(LightCurveSource::BinaryCurve),
+        },
+    },
     TransientRow {
         kind: TransientKind::GiantEruption,
         classes: ClassSet::of(ClassId::LUMINOUS_BLUE_VARIABLE),
@@ -944,26 +1167,39 @@ mod tests {
     use hyperion_testkit::float::assert_same_bits;
 
     use super::*;
+    use crate::events::TimeWindow;
+    use crate::galaxy::catalogue_classes::binary::{
+        AccretingWdFast, AwdProcess, AwdSide, XrayBinaries,
+    };
     use crate::galaxy::catalogue_classes::supernova::{LightCurve, SupernovaKind};
     use crate::galaxy::catalogue_classes::type_ia::IaChannel;
+    use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell};
     use crate::galaxy::features::centre::events::CentreVictims;
     use crate::galaxy::features::centre::events::DisruptionTail;
     use crate::galaxy::features::centre::testing::{milky_way_centre, milky_way_galaxy};
     use crate::galaxy::gas::ccm::Band;
     use crate::math;
+    use crate::stellar::binary::events::{
+        ACTIVE_SHARE, BinaryEvent, BinaryEventKind, BinarySystem, DONOR_HYDROGEN,
+        DWARF_NOVA_CYCLES_DAYS, events_in,
+    };
+    use crate::stellar::binary::light_curves::{
+        BeXOutburstCurve, BinaryLightCurve, BurstFuel, DwarfNovaCurve, GW170817_EJECTA_MASS,
+        KilonovaCurve, LuminousRedNovaCurve, NovaCurve, XrayAccretor, XrayBurstCurve,
+        XrayTransientCurve,
+    };
+    use crate::stellar::binary::scan::{MAX_NOVA_TRANSFER_RATE, scan_cell};
     use crate::stellar::remnant::SupernovaType;
+    use crate::tables::binary::{AWD_SAMPLER, AwdMark, XRB_SAMPLER, XrbHostKind, XrbMark};
     use crate::time::{SourceHorizon, UniverseTime};
     use crate::units::consts::SOLAR_LUMINOSITY_W;
-    use crate::units::{LightYears, SolarMasses, SolarRadii, WattsPerSquareMetre, Years};
+    use crate::units::{Days, LightYears, SolarMasses, SolarRadii, WattsPerSquareMetre, Years};
 
     use super::super::light;
     use super::super::reach::{ROOT_CUBE_DIAGONAL, class_reach, kind_reach, reach};
     use super::super::{
         BandLimits, SensorHorizon, binary_luminosity, binary_peak, supernova_luminosity,
         supernova_peak,
-    };
-    use crate::stellar::binary::light_curves::{
-        BinaryLightCurve, GW170817_EJECTA_MASS, KilonovaCurve, LuminousRedNovaCurve,
     };
     use crate::stellar::binary::scan::NsbhOutflow;
 
@@ -999,7 +1235,7 @@ mod tests {
                 .into_iter()
                 .filter(|kind| kind.row().pending().is_some())
                 .count(),
-            5
+            0
         );
     }
 
@@ -1301,6 +1537,304 @@ mod tests {
         assert_eq!(row.light_curve(), Some(LightCurveSource::GiantEruption));
     }
 
+    /// A binary curve's light in `band` `dt` after its onset.
+    fn binary_light(curve: &BinaryLightCurve, dt: Span, band: AlertBand) -> f64 {
+        match band {
+            AlertBand::Photometric(band) => curve.in_band(dt, band).value(),
+            AlertBand::XRay => curve.xray_luminosity(dt).value(),
+        }
+    }
+
+    /// The row of `kind` bounds every one of `curves` in every band at its peak, and its rise
+    /// and its duration to [`ACTIVE_SHARE`]; `top`, the curve at the top of the kind's range,
+    /// meets each band's bound within 10⁻⁴, and `longest` the duration within a second, and a
+    /// band `top` gives no light has no bound.
+    fn assert_row_bounds(
+        kind: TransientKind,
+        curves: &[BinaryLightCurve],
+        top: &BinaryLightCurve,
+        longest: Option<&BinaryLightCurve>,
+    ) {
+        let row = kind.row();
+        let Some(LongestDuration::AtMost(duration)) = row.duration() else {
+            panic!("{kind:?} lasts {:?}", row.duration());
+        };
+        let Some(LongestRise::AtMost(rise)) = row.longest_rise() else {
+            panic!("{kind:?} rises {:?}", row.longest_rise());
+        };
+        for band in AlertBand::ALL {
+            let at_top = binary_light(top, top.peak(), band);
+            let Some(PeakBound::Watts(bound)) = row.peak_bound(band) else {
+                assert_same_bits(at_top, 0.0);
+                continue;
+            };
+            let bound = bound.value();
+            assert!(
+                at_top <= bound && bound / at_top - 1.0 < 1e-4,
+                "{kind:?} in {band:?}"
+            );
+            for curve in curves {
+                let light = binary_light(curve, curve.peak(), band);
+                assert!(
+                    light <= bound,
+                    "{kind:?} in {band:?}: {light:e} over {bound:e}"
+                );
+            }
+        }
+        for curve in curves {
+            let fades = curve.fades_below(ACTIVE_SHARE).unwrap();
+            assert!(fades <= duration, "{kind:?}: {curve:?} lasts {fades}");
+            assert!(
+                curve.peak() <= rise,
+                "{kind:?}: {curve:?} rises {}",
+                curve.peak()
+            );
+        }
+        if let Some(longest) = longest {
+            let fades = longest.fades_below(ACTIVE_SHARE).unwrap().as_seconds_f64();
+            assert!(
+                duration.as_seconds_f64() - fades < 1.0,
+                "{kind:?}: {fades} s"
+            );
+            let rises = longest.peak().as_seconds_f64();
+            assert!(rise.as_seconds_f64() - rises < 1.0, "{kind:?}: {rises} s");
+        }
+        assert_eq!(row.light_curve(), Some(LightCurveSource::BinaryCurve));
+    }
+
+    /// Plan 11's rows bound their kinds' curves over the masses plan 11's samplers give their
+    /// hosts (P11.T8.a–b), at the top of each range: the heaviest white dwarf for a nova, a 10-hour
+    /// orbit for a dwarf nova, the heaviest black hole for a transient, a helium burst on the
+    /// heaviest neutron star and its Be/X outburst; a nova lasts longest on the lightest white
+    /// dwarf, a burst burning hydrogen too, and a dwarf nova under its sum of extremes.
+    #[test]
+    fn plan_11s_rows_bound_their_curves_over_the_samplers_ranges() {
+        let white_dwarfs = AWD_SAMPLER.mark(AwdMark::WhiteDwarfMass).limits();
+        let neutron_stars = XRB_SAMPLER.mark(XrbMark::NeutronStarMass).limits();
+        let black_holes = XRB_SAMPLER.mark(XrbMark::BlackHoleMass).limits();
+        assert_eq!(
+            (white_dwarfs, neutron_stars, black_holes),
+            ((0.55, 1.36), (1.2, 2.2), (5.0, 15.0)),
+            "the rows' documented ranges"
+        );
+        let over = |(lo, hi): (f64, f64), steps: u32| {
+            (0..=steps)
+                .map(move |i| SolarMasses::new(lo + (hi - lo) * f64::from(i) / f64::from(steps)))
+        };
+        let solar = |m: f64| SolarMasses::new(m);
+
+        let nova = |m| BinaryLightCurve::from(NovaCurve::of(m).unwrap());
+        let novae: Vec<_> = over(white_dwarfs, 81).map(nova).collect();
+        let (lightest, heaviest) = (nova(solar(0.55)), nova(solar(1.36)));
+        assert_row_bounds(TransientKind::Nova, &novae, &heaviest, Some(&lightest));
+
+        let hours = |h: f64| Days::new(h / 24.0);
+        let gathered_most = MAX_NOVA_TRANSFER_RATE.value() * DWARF_NOVA_CYCLES_DAYS.1 / 365.25;
+        assert!((gathered_most - 3.3e-6).abs() < 1e-18, "{gathered_most:e}");
+        let mut dwarf_novae = Vec::new();
+        for m in over(white_dwarfs, 9) {
+            for h in [0.5, 1.3, 2.0, 5.0, 10.0, 24.0, 8_766.0] {
+                for gathered in [1e-12, 1e-10, 1e-8, 1e-6, gathered_most] {
+                    let curve = DwarfNovaCurve::of(m, hours(h), solar(gathered)).unwrap();
+                    dwarf_novae.push(BinaryLightCurve::from(curve));
+                }
+            }
+        }
+        let dwarf = |h: f64, gathered: f64| {
+            BinaryLightCurve::from(
+                DwarfNovaCurve::of(solar(1.36), hours(h), solar(gathered)).unwrap(),
+            )
+        };
+        assert_row_bounds(
+            TransientKind::DwarfNova,
+            &dwarf_novae,
+            &dwarf(10.0, 1e-10),
+            None,
+        );
+        // The sum of extremes: the rise, the most gathered light at the faintest maximum (the curve
+        // radiates the gathered fall exactly when it has a plateau), and the slowest e-fold.
+        let faint = dwarf(1.3, gathered_most);
+        let e_fold = |curve: &BinaryLightCurve| {
+            curve
+                .fades_below(1.0 / core::f64::consts::E)
+                .unwrap()
+                .as_seconds_f64()
+                - curve.fades_below(1.0).unwrap().as_seconds_f64()
+        };
+        let slowest = e_fold(&dwarf(10.0, 1e-10));
+        let sum = 86_400.0
+            + faint.radiated_joules() / faint.peak_luminosity().value()
+            + slowest * math::ln(1.0 / ACTIVE_SHARE);
+        let duration = DWARF_NOVA_DURATION.as_seconds_f64();
+        assert!(
+            sum <= duration && duration - sum < 31_557_600.0,
+            "{} yr",
+            sum / 31_557_600.0
+        );
+
+        let transient = |accretor, m, gathered| {
+            BinaryLightCurve::from(
+                XrayTransientCurve::of(accretor, m, solar(gathered), DONOR_HYDROGEN).unwrap(),
+            )
+        };
+        let mut transients = Vec::new();
+        for (accretor, range) in [
+            (XrayAccretor::NeutronStar, neutron_stars),
+            (XrayAccretor::BlackHole, black_holes),
+        ] {
+            for m in over(range, 10) {
+                for gathered in [1e-12, 1e-10, 1e-8, 1e-6, 1e-3, 1.0] {
+                    transients.push(transient(accretor, m, gathered));
+                }
+            }
+        }
+        let held = transient(XrayAccretor::BlackHole, solar(15.0), 1.0);
+        assert_row_bounds(
+            TransientKind::XrayTransient,
+            &transients,
+            &held,
+            Some(&held),
+        );
+
+        let burst = |m, fuel| BinaryLightCurve::from(XrayBurstCurve::of(m, fuel).unwrap());
+        let bursts: Vec<_> = over(neutron_stars, 10)
+            .flat_map(|m| [BurstFuel::Helium, BurstFuel::HydrogenHelium].map(|fuel| burst(m, fuel)))
+            .collect();
+        let (helium, mixed) = (
+            burst(solar(2.2), BurstFuel::Helium),
+            burst(solar(2.2), BurstFuel::HydrogenHelium),
+        );
+        assert_row_bounds(TransientKind::XrayBurst, &bursts, &helium, Some(&mixed));
+
+        let outburst = |m| BinaryLightCurve::from(BeXOutburstCurve::of(m, DONOR_HYDROGEN).unwrap());
+        let outbursts: Vec<_> = over(neutron_stars, 10).map(outburst).collect();
+        let top = outburst(solar(2.2));
+        assert_row_bounds(TransientKind::BeXOutburst, &outbursts, &top, Some(&top));
+    }
+
+    /// Each of `events` is under its row's bounds in every band at its peak, its rise and its
+    /// duration, counted by kind into `counts`.
+    fn assert_under_their_rows(
+        galaxy: &Galaxy,
+        events: &[BinaryEvent],
+        counts: &mut std::collections::BTreeMap<TransientKind, usize>,
+    ) {
+        for event in events {
+            let kind = match event.kind() {
+                BinaryEventKind::Nova => TransientKind::Nova,
+                BinaryEventKind::DwarfNova => TransientKind::DwarfNova,
+                BinaryEventKind::XrayTransient => TransientKind::XrayTransient,
+                BinaryEventKind::XrayBurst => TransientKind::XrayBurst,
+                BinaryEventKind::BeXGiantOutburst => TransientKind::BeXOutburst,
+                BinaryEventKind::LuminousRedNova | BinaryEventKind::Kilonova => {
+                    panic!("no merger is listed here: {event:?}")
+                }
+            };
+            *counts.entry(kind).or_insert(0) += 1;
+            let row = kind.row();
+            let curve = event.curve();
+            for band in AlertBand::ALL {
+                let light = binary_light(curve, curve.peak(), band);
+                let bound = row
+                    .peak_bound(band)
+                    .and_then(|bound| bound.in_galaxy(galaxy))
+                    .map_or(0.0, Watts::value);
+                assert!(light <= bound, "{kind:?} in {band:?}: {event:?}");
+            }
+            assert!(
+                Some(LongestDuration::AtMost(event.duration())) <= row.duration(),
+                "{event:?}"
+            );
+            assert!(
+                Some(LongestRise::AtMost(curve.peak())) <= row.longest_rise(),
+                "{event:?}"
+            );
+        }
+    }
+
+    /// Plan 11's rows bound the events plan 11 lists for sampled hosts of the galaxy of seed 9
+    /// (P11.T9.b): the novae of both accreting white dwarf classes along the solar circle over the
+    /// source horizon, the dwarf novae of their entries over forty years, and the X-ray binaries'
+    /// events about the centre, each kind over a span that holds some of its events. Each event's
+    /// light at its peak in every band, its rise and its duration are under its row's.
+    #[test]
+    fn plan_11s_rows_bound_the_events_of_sampled_hosts() {
+        let galaxy = Galaxy::new(crate::Seed::new(9));
+        let window = |from: UniverseTime, years: i64| {
+            let to = Span::from_julian_years(years)
+                .and_then(|span| from.checked_add(span))
+                .unwrap();
+            TimeWindow::new(from, to).unwrap()
+        };
+        let horizon = TimeWindow::new(SourceHorizon::START, SourceHorizon::END).unwrap();
+        let mut counts = std::collections::BTreeMap::new();
+        let mut events = Vec::new();
+        for side in [AwdSide::Fast, AwdSide::Slow] {
+            let process = AwdProcess::new(&galaxy, side);
+            for x in -3..3 {
+                let key = CatalogueCellKey::new(side.class(), [x, 50, 0]).unwrap();
+                let mut hosts = Vec::new();
+                scan_cell(&galaxy, &process, key, &mut hosts);
+                for host in &hosts {
+                    events.clear();
+                    let system = BinarySystem::accreting_white_dwarf_scan(galaxy.seed(), host);
+                    events_in(&system, horizon, &mut events);
+                    assert_under_their_rows(&galaxy, &events, &mut counts);
+                }
+            }
+        }
+        let process = AccretingWdFast::new(&galaxy);
+        for x in -3..3 {
+            let key = CatalogueCellKey::new(ClassId::ACCRETING_WHITE_DWARF, [x, 50, 0]).unwrap();
+            for entry in CatalogueClassCell::generate(&galaxy, &process, key).entries() {
+                events.clear();
+                let system = BinarySystem::accreting_white_dwarf(galaxy.seed(), entry.value());
+                events_in(&system, window(UniverseTime::EPOCH, 40), &mut events);
+                events.retain(|event| event.kind() == BinaryEventKind::DwarfNova);
+                assert_under_their_rows(&galaxy, &events, &mut counts);
+            }
+        }
+        let process = XrayBinaries::new(&galaxy);
+        let day =
+            TimeWindow::new(UniverseTime::EPOCH, UniverseTime::new(86_400, 0).unwrap()).unwrap();
+        for x in -8..8 {
+            for y in [-1, 0, 11, 12] {
+                let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, [x, y, 0]).unwrap();
+                let mut hosts = Vec::new();
+                scan_cell(&galaxy, &process, key, &mut hosts);
+                for host in &hosts {
+                    let span = match host.kind() {
+                        XrbHostKind::NeutronStarPersistent => day,
+                        XrbHostKind::BeX => window(UniverseTime::EPOCH, 1_000),
+                        XrbHostKind::NeutronStarTransient
+                        | XrbHostKind::BlackHoleTransient
+                        | XrbHostKind::BlackHolePersistent
+                        | XrbHostKind::Supergiant => window(UniverseTime::EPOCH, 20_000),
+                    };
+                    events.clear();
+                    events_in(
+                        &BinarySystem::xray_binary(galaxy.seed(), host),
+                        span,
+                        &mut events,
+                    );
+                    assert_under_their_rows(&galaxy, &events, &mut counts);
+                }
+            }
+        }
+        for kind in [
+            TransientKind::Nova,
+            TransientKind::DwarfNova,
+            TransientKind::XrayTransient,
+            TransientKind::XrayBurst,
+            TransientKind::BeXOutburst,
+        ] {
+            assert!(
+                counts.get(&kind).is_some_and(|&n| n > 0),
+                "{kind:?}: {counts:?}"
+            );
+        }
+    }
+
     /// An X-ray sensor at 10⁻¹³ W m⁻² sees the core collapses' class to the cube's diagonal, through
     /// its magnetars, even a short burst at its bound, and through the stripped stars' breakout,
     /// whose bound is 8.0931 × 10³⁶ W, which at 10⁻⁶ W m⁻² still reaches 84,826 ly. A visual sensor
@@ -1367,6 +1901,10 @@ mod tests {
                 TransientKind::TypeIa,
                 TransientKind::LuminousRedNova,
                 TransientKind::Kilonova,
+                TransientKind::Nova,
+                TransientKind::XrayTransient,
+                TransientKind::XrayBurst,
+                TransientKind::BeXOutburst,
                 TransientKind::GiantEruption,
                 TransientKind::MagnetarBurst,
             ]
@@ -1374,17 +1912,36 @@ mod tests {
     }
 
     /// X-ray bursts are walked over the X-ray binaries' class, as the magnetars over the core
-    /// collapses', not found locally; their row waits on P11.T9, so they reach nothing yet.
+    /// collapses', not found locally, and the class reaches as far as its transients, its
+    /// brightest kind in X-rays; dwarf novae are local, so the accreting white dwarfs reach as far
+    /// as their novae, however faint the limit.
     #[test]
     fn x_ray_bursts_are_walked_over_the_x_ray_binaries() {
         let row = TransientKind::XrayBurst.row();
         assert_eq!(row.route(), Route::Recurrent);
         assert_eq!(row.classes(), ClassSet::of(ClassId::XRAY_BINARY));
-        assert_eq!(row.pending(), Some("P11.T9"));
+        assert_eq!(row.pending(), None);
         let w = WattsPerSquareMetre::new;
-        let limits = BandLimits::new(w(1e-13), w(1e-13)).unwrap();
+        let limits = BandLimits::new(w(1e-6), w(1e-6)).unwrap();
         let xray = SensorHorizon::new([(AlertBand::XRay, limits)]).unwrap();
-        assert_eq!(class_reach(ClassId::XRAY_BINARY, &xray), LightYears::ZERO);
+        let reached = class_reach(ClassId::XRAY_BINARY, &xray);
+        assert_eq!(reached, kind_reach(TransientKind::XrayTransient, &xray));
+        assert_eq!(reached, reach(XRAY_TRANSIENT_BAND_PEAKS[10], limits));
+        assert!(kind_reach(TransientKind::XrayBurst, &xray) < reached);
+        assert!(kind_reach(TransientKind::BeXOutburst, &xray) < reached);
+        // 1.0282 × 10³² W at a microwatt per square metre: some 300 ly.
+        assert!((290.0..310.0).contains(&reached.value()), "{reached:?}");
+        let visual = SensorHorizon::new([(AlertBand::Photometric(Band::V), limits)]).unwrap();
+        assert_eq!(TransientKind::DwarfNova.row().route(), Route::Local);
+        for class in [
+            ClassId::ACCRETING_WHITE_DWARF,
+            ClassId::ACCRETING_WHITE_DWARF_SLOW,
+        ] {
+            assert_eq!(
+                class_reach(class, &visual),
+                kind_reach(TransientKind::Nova, &visual)
+            );
+        }
     }
 
     /// Every row and the band light pinned: each row's route, classes, bounds in every band,
@@ -1675,6 +2232,19 @@ mod tests {
             class_longest_rise(ClassId::TIDAL_DISRUPTION_VICTIM),
             Some(LongestRise::PerEvent)
         );
-        assert_eq!(class_longest_rise(ClassId::XRAY_BINARY), None);
+        assert_eq!(
+            class_longest_rise(ClassId::XRAY_BINARY),
+            rise(TransientKind::BeXOutburst)
+        );
+        assert_eq!(
+            class_longest_rise(ClassId::ACCRETING_WHITE_DWARF),
+            rise(TransientKind::Nova)
+        );
+        for (class, kind) in [
+            (ClassId::STELLAR_MERGER, TransientKind::LuminousRedNova),
+            (ClassId::NEUTRON_STAR_MERGER, TransientKind::Kilonova),
+        ] {
+            assert_eq!(class_longest_rise(class), rise(kind), "{class}");
+        }
     }
 }

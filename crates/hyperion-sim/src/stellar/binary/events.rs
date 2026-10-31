@@ -117,8 +117,9 @@ pub const HELIUM_BURST_SHARES: (f64, f64) = (0.01, 0.1);
 pub const BEX_GIANT_OUTBURST_RATE_PER_YEAR: f64 = 0.1;
 
 /// The hydrogen mass fraction of the matter a low-mass or Be donor gives: 0.7, a hydrogen-rich
-/// surface (ruling 132.1's X from the transferred matter).
-const DONOR_HYDROGEN: f64 = 0.7;
+/// surface (ruling 132.1's X from the transferred matter). Plan 12's registry bounds the X-ray
+/// kinds' light at it (P12.T5.c).
+pub(crate) const DONOR_HYDROGEN: f64 = 0.7;
 
 /// The bin of a Be/X host's giant outbursts, s: one Julian year.
 const BEX_BIN_SECONDS: i64 = 31_557_600;

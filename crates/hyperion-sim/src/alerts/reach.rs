@@ -477,8 +477,9 @@ pub fn kind_reach(kind: TransientKind, sensor: &SensorHorizon) -> LightYears {
 /// assert!((11_150.0..11_250.0).contains(&ia));
 /// let collapse = class_reach(ClassId::CORE_COLLAPSE, &sensor).value();
 /// assert!((4_390.0..4_440.0).contains(&collapse));
-/// // Plan 11's classes have no light curve yet.
-/// assert_eq!(class_reach(ClassId::ACCRETING_WHITE_DWARF, &sensor).value(), 0.0);
+/// // A nova on the heaviest white dwarf peaks at 3.26 × 10³¹ W in V: some 170 ly.
+/// let novae = class_reach(ClassId::ACCRETING_WHITE_DWARF, &sensor).value();
+/// assert!((169.0..171.0).contains(&novae));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]
@@ -659,13 +660,14 @@ mod tests {
             let xray = sensor(&[(AlertBand::XRay, 1e-15)]);
             assert_eq!(class_reach(class, &xray), LightYears::ZERO, "{class}");
         }
-        for class in [
-            ClassId::XRAY_BINARY,
-            ClassId::ACCRETING_WHITE_DWARF,
-            ClassId::ACCRETING_WHITE_DWARF_SLOW,
-        ] {
-            assert_eq!(class_reach(class, &both), LightYears::ZERO, "{class}");
-        }
+        // Plan 11's X-ray binaries reach by their brightest kind in its best band, X-rays.
+        assert_eq!(
+            class_reach(ClassId::XRAY_BINARY, &both),
+            kind_reach(
+                TransientKind::XrayTransient,
+                &sensor(&[(AlertBand::XRay, 1e-15)])
+            )
+        );
     }
 
     /// A local kind adds nothing to its class's reach, however bright: the class's distant kinds
