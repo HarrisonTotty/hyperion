@@ -188,7 +188,8 @@ fn reason(error: &DeriveEnvelopeError) -> &'static str {
             | E::Rule(_)
             | E::Mode(_)
             | E::Absorber(_)
-            | E::Mixture,
+            | E::Mixture
+            | E::Saturated { .. },
         ) => "a step's refusal",
         DeriveEnvelopeError::NoSupercriticalReservoir => "no supercritical reservoir",
         DeriveEnvelopeError::Supercritical(_) => "the supercritical model's refusal",

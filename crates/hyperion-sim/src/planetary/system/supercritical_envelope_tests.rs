@@ -14,13 +14,15 @@ use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
 use crate::planetary::generate;
 use crate::planetary::hooks::envelope_atmosphere::supercritical::STEAM_FIT_EARTH_INSOLATION;
 use crate::planetary::hooks::envelope_atmosphere::supercritical::tests::{
-    assert_monotone, assert_no_deck_at_or_above_the_critical_point,
+    assert_held_at_saturation, assert_monotone, assert_no_deck_at_or_above_the_critical_point,
 };
+use crate::planetary::hooks::envelope_atmosphere::{ABSORBER_LEVEL, COMPOSITION_LEVEL};
 use crate::planetary::hooks::surface::STANDARD_GRAVITY;
+use crate::planetary::hooks::surface::atmosphere_mole_fractions;
 use crate::planetary::record::{Modelled, Section};
 use crate::planetary::testing::with_every_26_hold;
 use crate::rng::Seed;
-use crate::substance::by_key;
+use crate::substance::{SubstanceId, by_key};
 use crate::time::UniverseTime;
 use crate::units::WattsPerSquareMetre;
 
@@ -76,6 +78,11 @@ struct Figures {
     /// What Turbet et al. 2020's grid reads of a water envelope: its insolation in their Earth
     /// insolations, its gravity in Earth gravities and its water's column, Pa.
     grid: Option<(f64, f64, f64)>,
+    /// Its water's mole fraction in the published air (its deep gas, which its section's gas kept
+    /// before its condensables were held at saturation), at 1 bar and at 10 mbar.
+    water: (f64, f64, f64),
+    /// The profile's temperatures at 1 bar and at 10 mbar, K.
+    levels_k: (f64, f64),
 }
 
 impl Figures {
@@ -83,7 +90,7 @@ impl Figures {
     fn line(&self) -> String {
         format!(
             "{}: T_s {:.1} K, p_s {:.4e} Pa, T_int {:.2} K, join {:.3e} Pa, inflation {}, {} decks, \
-             not formed {}{}",
+             not formed {}; H2O {:.4e} deep, {:.4e} at 1 bar ({:.1} K), {:.4e} at 10 mbar ({:.1} K){}",
             self.condensable,
             self.surface.0,
             self.surface.1,
@@ -95,6 +102,11 @@ impl Figures {
             ),
             self.decks,
             self.not_formed,
+            self.water.0,
+            self.water.1,
+            self.levels_k.0,
+            self.water.2,
+            self.levels_k.1,
             self.grid.map_or_else(String::new, |(s, g, p)| format!(
                 "; its grid's inputs: {s:.4} S⊕ (1–30), {g:.3} g⊕ (0.2–6), water {p:.4e} Pa \
                  (2.7e5–2.7e9)"
@@ -103,9 +115,15 @@ impl Figures {
     }
 }
 
+/// The mole fraction of `id` in `gas`, 0 where it holds none.
+fn share_of(gas: &[(SubstanceId, f64)], id: SubstanceId) -> f64 {
+    gas.iter().find(|&&(s, _)| s == id).map_or(0.0, |&(_, x)| x)
+}
+
 /// The case's census body under the rules in force, its supercritical envelope checked: every
-/// figure finite, its profile monotone in pressure and meeting the published surface, and no deck
-/// based at or above its condensable's critical point.
+/// figure finite, its profile monotone in pressure and meeting the published surface, no deck
+/// based at or above its condensable's critical point, and each condensable at most its saturation
+/// at 1 bar and 10 mbar.
 fn body_of(system: &str, case: &AuditCase<'_>) -> CensusBody {
     let record = case.record;
     let air = case.derived.atmosphere();
@@ -117,6 +135,7 @@ fn body_of(system: &str, case: &AuditCase<'_>) -> CensusBody {
         .bulk()
         .ok()
         .is_some_and(|bulk| bulk.class().has_solid_surface());
+    let water = Gas::Water.substance();
     let figures = match record.envelope() {
         Section::Ok(envelope) => envelope.supercritical().map(|condensable| {
             let atmosphere = envelope.atmosphere();
@@ -127,6 +146,7 @@ fn body_of(system: &str, case: &AuditCase<'_>) -> CensusBody {
             let t_s = air.surface_temperature().value();
             assert_monotone(profile, surface);
             assert_no_deck_at_or_above_the_critical_point(atmosphere);
+            assert_held_at_saturation(atmosphere);
             let at_surface = profile.temperature_at(surface).value();
             assert!(
                 (at_surface / t_s - 1.0).abs() < 1e-9,
@@ -176,6 +196,15 @@ fn body_of(system: &str, case: &AuditCase<'_>) -> CensusBody {
                 decks: atmosphere.decks().len(),
                 not_formed: format!("{:?}", atmosphere.not_formed()),
                 grid,
+                water: (
+                    share_of(&atmosphere_mole_fractions(air.partial_pressures()), water),
+                    share_of(atmosphere.composition(), water),
+                    share_of(atmosphere.upper_gas(), water),
+                ),
+                levels_k: (
+                    profile.temperature_at(COMPOSITION_LEVEL).value(),
+                    profile.temperature_at(ABSORBER_LEVEL).value(),
+                ),
             }
         }),
         Section::NotResolved | Section::NotModelled | Section::NotApplicable => None,
@@ -297,6 +326,8 @@ fn under_every_26_hold_the_three_systems_water_worlds_take_their_steam_envelope(
         assert!(body.steam, "{id} is labelled a steam envelope");
         let figures = body.figures.as_ref().expect("its envelope is modelled");
         assert_eq!(figures.condensable, water.as_str(), "{id}");
+        // Held at ice's vapour pressure aloft, the deep gas's 9–32% of water is gone.
+        assert!(figures.water.2 < 1e-6, "{id}: {:?}", figures.water);
     }
     let moved = movers(&held, &modelled);
     eprintln!("moved: {moved:?}");
@@ -356,8 +387,9 @@ fn under_every_26_hold_a_supercritical_envelope_is_the_same_alone_and_in_any_ord
 ///   its envelope section, and that only where it is under a supercritical envelope, from not
 ///   modelled to its model, asserted ([`movers`]).
 /// - **Every modelled envelope's figures** are finite, its profile monotone in pressure and
-///   meeting its surface, and no deck based at or above its condensable's critical point, asserted
-///   ([`body_of`]); the walk under its rules gives the same bits twice (D4).
+///   meeting its surface, no deck based at or above its condensable's critical point, and each
+///   condensable at most its saturation at 1 bar and 10 mbar, asserted ([`body_of`]); the walk
+///   under its rules gives the same bits twice (D4).
 /// - Printed: the steam envelopes (part 3's census at 25 found none in 1,706 bodies), the bodies
 ///   under a supercritical envelope, the modelled ones with their figures, the largest inflation,
 ///   the golden systems' movers (26's bump re-blesses their goldens), and each walk's time.

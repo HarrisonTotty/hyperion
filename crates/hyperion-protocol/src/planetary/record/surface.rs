@@ -1302,7 +1302,8 @@ pub struct BodyEnvelopeDto {
     /// between or below them; above a deck its condensate's vapour is that deck's
     /// `vapour_mole_fraction_above`, by its law.
     /// On a supercritical envelope (P14.T53.f) it is the published air's gas, with no chemistry,
-    /// trimmed by its decks in the same way.
+    /// trimmed by its decks in the same way and each condensable at most its saturation at 1 bar,
+    /// the rest filling the level.
     pub composition: Vec<GasShareDto>,
     /// The gases' mean molar mass, g mol⁻¹, positive.
     pub mean_molar_mass_g_per_mol: f64,
@@ -1342,7 +1343,9 @@ pub struct BodyEnvelopeDto {
     /// al. 2023), a slab too. A slab is the 10-mbar level's share of its species, stated from 10
     /// mbar up: a species that `composition` also holds is one gas read at two levels, so the slab
     /// neither adds to its 1-bar share above 10 mbar nor replaces it below. `FeH`, which has no
-    /// thermochemistry, is never listed: it is not modelled.
+    /// thermochemistry, is never listed: it is not modelled. On a supercritical envelope (P14.T53.f)
+    /// the 10-mbar gas is the published air's, trimmed by its decks and each condensable at most its
+    /// saturation there.
     pub absorbers: Vec<AbsorberDto>,
     /// The condensables whose vapour its gas holds that its decks' loop labels rather than traps,
     /// each with why, in registry order.

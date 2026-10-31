@@ -33415,6 +33415,8 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     or one segment past the join; T(p_s) extends its last segment, as the wire states.
   - _Decks and gas (lean, 2026-10-31):_ P14.T52.c's loop from min(p_s, 10 kbar); the published
     air's mole fractions, no quench; no hazes.
+  - _Saturation (fix, 2026-10-31):_ each condensable of the 1-bar and 10-mbar gas at most its
+    `p_sat`(T) ÷ p, after the decks' trim (`assembled`'s `hold`); every gas saturated is `Saturated`.
   - _Inflation (lean, 2026-10-31):_ Turbet 2020 Eqs. 2–3 on the bulk's R and g, the water of the air
     and `SupercriticalReservoir::beneath_the_air`; not modelled off their grid; sim record only.
   - _Its check:_ against Turbet 2019's post-runaway Earths (0.1, 1, 100 oceans) within the fit's

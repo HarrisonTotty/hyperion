@@ -31,7 +31,14 @@
 //!   (P14.T52.f), so no deck is based at or above its condensable's critical point.
 //! - **The composition** is the published air's mole fractions, at 1 bar and at 10 mbar alike, with
 //!   no quench network (P14.T52.a speciates hydrogen-dominated gas alone), trimmed by the decks as an
-//!   H₂/He envelope's is. No haze is modelled: the four rules are H₂/He envelopes'.
+//!   H₂/He envelope's is, and each condensable at most its saturation at its level
+//!   (`held_at_saturation`). The loop labels the envelope's own condensable rather than trapping
+//!   it (decision-n2-critical-decks §3.2), so without the cap the sample's three water worlds'
+//!   1-bar and 10-mbar gas kept the deep share, 9–32% H₂O at 76–132 K: 10¹²–10²⁵ times ice Ih's
+//!   vapour pressure at 1 bar (IAPWS R14-08, Eq. 6). The trapped share forms no deck and keeps its
+//!   label. The cap is each level's own saturation, not a cold trap's below it, which would hold
+//!   less: it binds water's 10⁻¹¹ and less aloft alone, which nothing reads. No haze is modelled: the four rules are H₂/He
+//!   envelopes'.
 //!
 //! # The transit radius ([`steam_transit_inflation`])
 //!
@@ -192,8 +199,9 @@ pub enum DeriveSupercriticalAtmosphereError {
     },
     /// The profile refused its inputs.
     Profile(DeriveEnvelopeProfileError),
-    /// A step of the H₂/He envelope's chain it reuses refused: the gas's mixture, the
-    /// condensation loop or a deck's mode.
+    /// A step of the H₂/He envelope's chain it reuses refused (the gas's mixture, the condensation
+    /// loop or a deck's mode), or its gas could not be held at saturation at a level the record
+    /// reads ([`DeriveEnvelopeAtmosphereError::Saturated`]).
     Atmosphere(DeriveEnvelopeAtmosphereError),
 }
 
@@ -280,6 +288,9 @@ impl EnvelopeAtmosphere {
     /// - [`NoProfileMeetsTheSurface`](DeriveSupercriticalAtmosphereError::NoProfileMeetsTheSurface)
     ///   and [`JoinBelowTheSurface`](DeriveSupercriticalAtmosphereError::JoinBelowTheSurface) for a
     ///   published surface the profile cannot state;
+    /// - [`Atmosphere`](DeriveSupercriticalAtmosphereError::Atmosphere) holding
+    ///   [`DeriveEnvelopeAtmosphereError::Saturated`] where every gas at 1 bar or 10 mbar lies past
+    ///   its saturation (an air of condensables alone, cold aloft);
     /// - the reused steps' refusals ([`Profile`](DeriveSupercriticalAtmosphereError::Profile) and
     ///   [`Atmosphere`](DeriveSupercriticalAtmosphereError::Atmosphere)), kept as errors rather than
     ///   panics.
@@ -358,8 +369,110 @@ impl EnvelopeAtmosphere {
             // envelope keeps every mode whole, as P14.T53.f built it.
             None,
             |_, _, _, _| Ok((Vec::new(), None)),
+            held_at_saturation,
         )?)
     }
+}
+
+/// The gas `gas` (mole fractions summing to 1) at the level `pressure` and the profile's
+/// temperature there, `temperature`, with each condensable at most its saturation (P14.T53.f).
+///
+/// Each condensable takes x ≤ `p_sat`(T) ÷ p and the rest are scaled to fill the level: a
+/// condensable held at its saturation stays there, and the others, which a hold lifts, are held in
+/// turn where that takes them past theirs, in at most one round a species. A gas none of whose
+/// condensables lies past its saturation is returned as it is. At the 1-bar composition's level
+/// ([`COMPOSITION_LEVEL`]) a share under [`COMPOSITION_FLOOR`] is then dropped and the rest
+/// renormalised, which moves a held share by under 10⁻¹¹ relative; the 10-mbar gas keeps every
+/// species, in its order.
+///
+/// A condensable is a gas whose registry row has a phase diagram: its `p_sat` is the diagram's
+/// curve that [`chem::condense`](crate::planetary::chem::condense) reads for such a row, the solid
+/// branch below the triple point
+/// ([`PhaseDiagram::ln_saturation_pressure`](crate::substance::diagram::PhaseDiagram::ln_saturation_pressure)).
+/// At or above its critical temperature it has none and is not held. Where the curve does not reach
+/// the level's temperature (a solid branch with no piece) its coldest value, the liquid branch's at
+/// the triple point, is the ceiling.
+///
+/// # Errors
+///
+/// [`DeriveEnvelopeAtmosphereError::Saturated`] where every gas would be held, so that the shares
+/// at saturation sum to under 1 and nothing fills the level, or the scale that fills it is not
+/// finite; [`DeriveEnvelopeAtmosphereError::Mixture`] where the renormalised total is not finite and
+/// positive.
+fn held_at_saturation(
+    pressure: Pascals,
+    temperature: Kelvin,
+    mut gas: Vec<(SubstanceId, f64)>,
+) -> Result<Vec<(SubstanceId, f64)>, DeriveEnvelopeAtmosphereError> {
+    let caps: Vec<Option<f64>> = gas
+        .iter()
+        .map(|&(id, _)| saturation_share(id, pressure, temperature))
+        .collect();
+    // Each gas's share where it is held at its saturation, `None` while it is not.
+    let mut held: Vec<Option<f64>> = vec![None; gas.len()];
+    let mut scale = 1.0;
+    for _ in 0..=gas.len() {
+        let mut more = false;
+        for ((&(_, x), cap), held) in gas.iter().zip(&caps).zip(&mut held) {
+            if let Some(cap) = *cap
+                && held.is_none()
+                && scale * x > cap
+            {
+                *held = Some(cap);
+                more = true;
+            }
+        }
+        if !more {
+            break;
+        }
+        let (mut fixed, mut free) = (0.0, 0.0);
+        for (&(_, x), held) in gas.iter().zip(&held) {
+            match held {
+                Some(cap) => fixed += cap,
+                None => free += x,
+            }
+        }
+        scale = (1.0 - fixed) / free;
+        // By comparison, so that a gas with nothing left to fill the level is refused.
+        if !(free > 0.0 && fixed < 1.0 && scale.is_finite()) {
+            return Err(DeriveEnvelopeAtmosphereError::Saturated { pressure });
+        }
+    }
+    if held.iter().all(Option::is_none) {
+        return Ok(gas);
+    }
+    for (entry, held) in gas.iter_mut().zip(&held) {
+        entry.1 = held.unwrap_or(scale * entry.1);
+    }
+    // The 10-mbar gas (`ABSORBER_LEVEL`) keeps every species; the 1-bar composition its floor.
+    if pressure.value() < COMPOSITION_LEVEL.value() {
+        return Ok(gas);
+    }
+    gas.retain(|&(_, x)| x >= COMPOSITION_FLOOR);
+    normalise(&mut gas)?;
+    Ok(gas)
+}
+
+/// The share of the gas `id` at its saturation at the level `pressure` and the temperature
+/// `temperature`, `p_sat`(T) ÷ p ([`held_at_saturation`]'s curve).
+///
+/// Dimensionless and not negative, above 1 where the saturation pressure exceeds the level's;
+/// `None` for a gas with no phase diagram, at or above its critical temperature, and for a
+/// temperature or pressure that is not finite and positive.
+#[must_use]
+fn saturation_share(id: SubstanceId, pressure: Pascals, temperature: Kelvin) -> Option<f64> {
+    let p = pressure.value();
+    if !(p.is_finite() && p > 0.0 && temperature.value().is_finite()) {
+        return None;
+    }
+    let diagram = id.substance().phase_diagram()?;
+    let ln_p = diagram.ln_saturation_pressure(temperature)?;
+    let ln_p = if ln_p.is_nan() {
+        diagram.ln_saturation_pressure(diagram.triple_temperature())?
+    } else {
+        ln_p
+    };
+    Some(math::exp(ln_p) / p)
 }
 
 /// The inputs' checks (their doc comments' ranges), giving the equilibrium temperature, a −0 K one

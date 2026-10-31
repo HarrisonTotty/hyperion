@@ -802,7 +802,7 @@ fn the_39_under(rules: MeltOxygenRules) {
 #[test]
 fn under_every_26_hold_the_guard_s_six_water_worlds_take_their_steam_envelope() {
     use crate::planetary::hooks::envelope_atmosphere::supercritical::tests::{
-        assert_monotone, assert_no_deck_at_or_above_the_critical_point,
+        assert_held_at_saturation, assert_monotone, assert_no_deck_at_or_above_the_critical_point,
     };
     use crate::planetary::system::envelope::{SupercriticalOf, supercritical_envelope_of};
     use crate::planetary::testing::with_every_26_hold;
@@ -854,6 +854,7 @@ fn under_every_26_hold_the_guard_s_six_water_worlds_take_their_steam_envelope() 
             let surface = air.surface_pressure().expect("an air");
             assert_monotone(atmosphere.profile(), surface);
             assert_no_deck_at_or_above_the_critical_point(atmosphere);
+            assert_held_at_saturation(atmosphere);
             let at_surface = atmosphere.profile().temperature_at(surface).value();
             let t_s = air.surface_temperature().value();
             assert!(

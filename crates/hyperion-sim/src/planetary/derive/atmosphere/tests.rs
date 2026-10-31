@@ -6832,7 +6832,9 @@ fn under_every_25_hold_a_quarter_water_world_inside_the_runaway_limit_is_a_steam
 /// Earth's air, which no reservoir hides, is refused.
 #[test]
 fn under_every_26_hold_part_three_s_steam_worlds_take_their_envelope_s_model() {
-    use crate::planetary::hooks::envelope_atmosphere::supercritical::tests::assert_monotone;
+    use crate::planetary::hooks::envelope_atmosphere::supercritical::tests::{
+        assert_held_at_saturation, assert_monotone,
+    };
     use crate::planetary::record::Modelled;
     use crate::planetary::system::envelope::{
         DeriveEnvelopeError, SupercriticalOf, supercritical_envelope_of,
@@ -6877,6 +6879,7 @@ fn under_every_26_hold_part_three_s_steam_worlds_take_their_envelope_s_model() {
         assert_eq!(envelope.supercritical(), Some(Gas::Water.substance()));
         assert_eq!(envelope.abundances(), None);
         assert_monotone(profile, surface);
+        assert_held_at_saturation(atmosphere);
         let at_surface = profile.temperature_at(surface).value();
         assert!(
             (at_surface / air.surface_temperature().value() - 1.0).abs() < 1e-9,

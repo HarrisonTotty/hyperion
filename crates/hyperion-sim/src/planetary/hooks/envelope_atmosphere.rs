@@ -827,6 +827,13 @@ pub enum DeriveEnvelopeAtmosphereError {
     Absorber(BuildAbsorberError),
     /// A gas has no molar mass or no heat capacity, which the registry's gas rows always have.
     Mixture,
+    /// Every gas of a supercritical envelope's level that the record reads would lie at or past its
+    /// saturation (P14.T53.f), so that the level holds less gas than its pressure: a condensing
+    /// bulk air, which the dry profile does not state. An H₂/He envelope's chain never gives it.
+    Saturated {
+        /// The level.
+        pressure: Pascals,
+    },
 }
 
 impl DeriveEnvelopeAtmosphereError {
@@ -892,6 +899,11 @@ impl fmt::Display for DeriveEnvelopeAtmosphereError {
             Self::Mode(error) => write!(f, "a mode: {error}"),
             Self::Absorber(error) => write!(f, "an absorber: {error}"),
             Self::Mixture => write!(f, "a gas with no molar mass or heat capacity"),
+            Self::Saturated { pressure } => write!(
+                f,
+                "every gas at {} Pa lies at its saturation",
+                pressure.value()
+            ),
         }
     }
 }
@@ -915,7 +927,8 @@ impl Error for DeriveEnvelopeAtmosphereError {
             | Self::Metallicity(_)
             | Self::NotHydrogenDominated { .. }
             | Self::LevelAboveRecords { .. }
-            | Self::Mixture => None,
+            | Self::Mixture
+            | Self::Saturated { .. } => None,
         }
     }
 }
@@ -1159,7 +1172,17 @@ impl EnvelopeAtmosphere {
             }
         };
         let dayside = dayside_level(inputs, &profile);
-        Self::assembled(profile, deep, upper, clouds, inputs.gravity, dayside, hazes)
+        let as_trimmed = |_: Pascals, _: Kelvin, gas: Vec<(SubstanceId, f64)>| Ok(gas);
+        Self::assembled(
+            profile,
+            deep,
+            upper,
+            clouds,
+            inputs.gravity,
+            dayside,
+            hazes,
+            as_trimmed,
+        )
     }
 
     /// The atmosphere's parts from its profile, its gas at 1 bar and at 10 mbar (`deep` and
@@ -1167,6 +1190,10 @@ impl EnvelopeAtmosphere {
     /// at `dayside` where given (P14.T52.h, [`dayside_level`]), with its hazes' modes and its
     /// photochemical SO₂ from `hazes`, of its profile, its trimmed 10-mbar gas with that gas's mean
     /// molar mass (g mol⁻¹) and its decks.
+    ///
+    /// Each published gas, trimmed by the decks and renormalised, is finished by `hold` at its level
+    /// and the profile's temperature there before anything reads it: an H₂/He envelope's as
+    /// trimmed, a supercritical envelope's each condensable at most its saturation.
     fn assembled(
         profile: EnvelopeProfile,
         deep: &[(SubstanceId, f64)],
@@ -1183,16 +1210,26 @@ impl EnvelopeAtmosphere {
             (Vec<AerosolMode>, Option<Absorber>),
             DeriveEnvelopeAtmosphereError,
         >,
+        hold: impl Fn(
+            Pascals,
+            Kelvin,
+            Vec<(SubstanceId, f64)>,
+        ) -> Result<Vec<(SubstanceId, f64)>, DeriveEnvelopeAtmosphereError>,
     ) -> Result<Self, DeriveEnvelopeAtmosphereError> {
         let drawn = drawn_vapours(clouds);
-        let mut composition = composition_of(deep, clouds)?;
-        composition.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
         let one_bar = profile.temperature_at(COMPOSITION_LEVEL);
+        let mut composition = hold(COMPOSITION_LEVEL, one_bar, composition_of(deep, clouds)?)?;
+        composition.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
         let heat_capacity_over_r = mixture_heat_capacity_over_r_at(&composition, one_bar)
             .ok_or(DeriveEnvelopeAtmosphereError::Mixture)?;
         let mean_molar_mass_g_per_mol = molar_mass_g_per_mol(&composition)?;
         let mut upper_gas = trimmed(upper, clouds, &drawn, ABSORBER_LEVEL);
         normalise(&mut upper_gas)?;
+        let upper_gas = hold(
+            ABSORBER_LEVEL,
+            profile.temperature_at(ABSORBER_LEVEL),
+            upper_gas,
+        )?;
         let upper_molar_mass_g_per_mol = molar_mass_g_per_mol(&upper_gas)?;
         let mut decks = Vec::with_capacity(clouds.decks().len());
         let mut deck_bounds = Vec::with_capacity(clouds.decks().len());

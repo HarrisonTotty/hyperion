@@ -1,5 +1,6 @@
 use hyperion_testkit::float::assert_same_bits;
 
+use super::super::ABSORBER_LEVEL;
 use super::*;
 use crate::planetary::chem::condense::NotFormed;
 use crate::substance::by_key;
@@ -249,6 +250,7 @@ fn a_steam_envelope_s_profile_meets_its_published_surface() {
     assert!(air.mean_molar_mass_g_per_mol().is_finite());
     assert!(air.heat_capacity_over_r().is_finite() && air.heat_capacity_over_r() > 0.0);
     assert_no_deck_at_or_above_the_critical_point(&air);
+    assert_held_at_saturation(&air);
     let water = by_key("H2O").unwrap();
     assert!(
         air.not_formed()
@@ -406,4 +408,101 @@ pub(crate) fn assert_no_deck_at_or_above_the_critical_point(air: &EnvelopeAtmosp
             );
         }
     }
+}
+
+/// Each condensable of `air`'s published gas at most its saturation at its level, within 10⁻⁹
+/// relative ([`held_at_saturation`]'s rule): the 1-bar composition at [`COMPOSITION_LEVEL`] and
+/// the 10-mbar gas at [`ABSORBER_LEVEL`], each at the profile's temperature there and each summing
+/// to 1 within 10⁻⁹.
+pub(crate) fn assert_held_at_saturation(air: &EnvelopeAtmosphere) {
+    for (level, gas) in [
+        (COMPOSITION_LEVEL, air.composition()),
+        (ABSORBER_LEVEL, air.upper_gas()),
+    ] {
+        let t = air.profile().temperature_at(level);
+        let total: f64 = gas.iter().map(|&(_, x)| x).sum();
+        assert!((total - 1.0).abs() < 1e-9, "{level:?}: {total}");
+        for &(id, x) in gas {
+            if let Some(cap) = saturation_share(id, level, t) {
+                assert!(
+                    x <= cap * (1.0 + 1e-9),
+                    "{} at {level:?} and {t:?}: {x} against its saturation's {cap}",
+                    id.substance().key()
+                );
+            }
+        }
+    }
+}
+
+/// A condensable past its saturation is held there and the rest fill the level: water at 130 K is
+/// held at ice Ih's vapour pressure, 1.200 × 10⁻⁸ Pa (IAPWS R14-08, Eq. 6), over 10 mbar, and
+/// hydrogen, which has no phase diagram, takes the rest; at 1 bar the same water lies under the
+/// composition's floor and is dropped; and a gas with no condensable past its saturation keeps its
+/// shares to the bit.
+#[test]
+fn a_condensable_is_held_at_its_saturation_and_the_rest_fill_the_level() {
+    let (water, hydrogen) = (by_key("H2O").unwrap(), by_key("H2").unwrap());
+    let t = Kelvin::new(130.0);
+    let cap = saturation_share(water, COMPOSITION_LEVEL, t).unwrap();
+    assert!(
+        cap < 1e-9,
+        "ice's vapour pressure at 130 K over 1 bar: {cap}"
+    );
+    let held = held_at_saturation(ABSORBER_LEVEL, t, vec![(water, 0.3), (hydrogen, 0.7)]).unwrap();
+    let ice = saturation_share(water, ABSORBER_LEVEL, t).unwrap();
+    assert!((ice / 1.200e-11 - 1.0).abs() < 0.01, "{ice}");
+    assert_same_bits(held[0].1, ice);
+    assert!((held[1].1 - (1.0 - ice)).abs() < 1e-15, "{held:?}");
+    // Water's held share lies under the composition's floor at 1 bar: dropped, hydrogen the whole.
+    let held =
+        held_at_saturation(COMPOSITION_LEVEL, t, vec![(water, 0.3), (hydrogen, 0.7)]).unwrap();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(held[0].0, hydrogen);
+    assert_same_bits(held[0].1, 1.0);
+    // Warm enough, nothing is held.
+    let warm = held_at_saturation(
+        ABSORBER_LEVEL,
+        Kelvin::new(400.0),
+        vec![(water, 0.3), (hydrogen, 0.7)],
+    )
+    .unwrap();
+    assert_same_bits(warm[0].1, 0.3);
+    assert_same_bits(warm[1].1, 0.7);
+}
+
+/// A hold that lifts another condensable past its own saturation holds it too: at 90 K and 1 bar,
+/// water held at ice's vapour pressure doubles the rest, which lifts methane, at 0.8 of its
+/// saturation (about 0.11 bar, near its triple point), past it, and nitrogen fills the level; and
+/// where every gas would be held, the level is refused.
+#[test]
+fn a_hold_that_lifts_another_condensable_past_its_saturation_holds_it_too() {
+    let (water, methane, nitrogen) = (
+        by_key("H2O").unwrap(),
+        by_key("CH4").unwrap(),
+        by_key("N2").unwrap(),
+    );
+    let t = Kelvin::new(90.0);
+    let methane_cap = saturation_share(methane, COMPOSITION_LEVEL, t).unwrap();
+    assert!((0.05..0.2).contains(&methane_cap), "{methane_cap}");
+    let gas = vec![
+        (water, 0.5),
+        (methane, 0.8 * methane_cap),
+        (nitrogen, 0.5 - 0.8 * methane_cap),
+    ];
+    let held = held_at_saturation(COMPOSITION_LEVEL, t, gas).unwrap();
+    let share = |id: SubstanceId| held.iter().find(|&&(s, _)| s == id).map(|&(_, x)| x);
+    assert_eq!(share(water), None, "under the floor: {held:?}");
+    let methane_share = share(methane).unwrap();
+    assert!(
+        (methane_share / methane_cap - 1.0).abs() < 1e-12,
+        "{held:?}"
+    );
+    let nitrogen_share = share(nitrogen).unwrap();
+    assert!(nitrogen_share < saturation_share(nitrogen, COMPOSITION_LEVEL, t).unwrap());
+    let total: f64 = held.iter().map(|&(_, x)| x).sum();
+    assert!((total - 1.0).abs() < 1e-12, "{held:?}");
+    assert!(matches!(
+        held_at_saturation(COMPOSITION_LEVEL, t, vec![(water, 0.6), (methane, 0.4)]),
+        Err(DeriveEnvelopeAtmosphereError::Saturated { .. })
+    ));
 }
