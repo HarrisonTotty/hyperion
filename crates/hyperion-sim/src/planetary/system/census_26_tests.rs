@@ -9,6 +9,7 @@
 //! native only, as the census is: on WebAssembly their dozens of systems would run on one thread.
 
 use super::audit_tests::{AuditCase, audit_walk_system};
+use super::census_tests::{WATCH_TIMES, watch_time};
 use super::tests::SEED;
 use super::*;
 use crate::galaxy::Galaxy;
@@ -24,7 +25,7 @@ use crate::planetary::derive::passes::Convergence;
 use crate::planetary::derive::photometry::{BodyPhotometry, PhaseTemplate};
 use crate::planetary::derive::solar::historic_table;
 use crate::planetary::hooks::surface::Forcing;
-use crate::planetary::record::BodyRecord;
+use crate::planetary::record::{BodyRecord, RecordSection, SectionState};
 use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
 use crate::planetary::testing::{
     SampleFilter, sample_records, with_every_25_hold, with_every_26_hold,
@@ -95,6 +96,14 @@ const DECK_SNOWBALLS: [(usize, &str); 2] = [
     (17_937, "0200fb2d1ffb0000.0400"),
 ];
 
+/// The two N₂ envelopes the slow census found changing section inside the clock window under every
+/// 25 hold and under every 26 hold (research-leans-8 §1): `Snowball`s whose mean surface
+/// temperatures lie above N₂'s critical point and whose reservoirs the passes settle on it.
+const CRITICAL_N2_ENVELOPES: [(usize, &str); 2] = [
+    (14_276, "01ff1b2e1fff0000.0700"),
+    (23_283, "0200cb291ffc0000.0600"),
+];
+
 /// The census's sample through the rank `last`, and its galaxy.
 fn sample_through(last: usize) -> (Galaxy, Vec<SystemRecord>) {
     let galaxy = Galaxy::from_params(SEED, GalaxyParams::milky_way_like())
@@ -120,6 +129,32 @@ fn read_body<R>(
         }
     });
     found
+}
+
+/// The envelope section of the body `id` of the sample's system `rank` at each of the census's
+/// [`WATCH_TIMES`] times across the clock window ([`watch_time`]), its system generated afresh
+/// under the rules on this thread.
+fn envelope_across_the_window(
+    (galaxy, records): (&Galaxy, &[SystemRecord]),
+    (rank, id): (usize, &str),
+) -> Vec<SectionState> {
+    let ctx = SystemContext::from_record(galaxy, &records[rank]);
+    let system = generate(SEED, &ctx);
+    let mut index = None;
+    audit_walk_system("census", &ctx, &system, &mut |case| {
+        if case.record.identity().id().to_string() == id {
+            index = Some(case.body.index);
+        }
+    });
+    let index = index.expect("the census's body is in its system");
+    (0..WATCH_TIMES)
+        .map(|k| {
+            system
+                .body_at(&ctx, index, watch_time(k))
+                .expect("a walked body is in its system")
+                .section_state(RecordSection::Envelope)
+        })
+        .collect()
 }
 
 /// Whether the published condensates of `case`'s surface list liquid water.
@@ -406,6 +441,32 @@ fn under_every_26_hold_two_census_runaways_hold_no_sea() {
 #[ignore = "slow: the 29 runaways' systems, each generated under 25 and 26"]
 fn under_every_26_hold_no_census_runaway_holds_a_sea() {
     assert_no_runaway_holds_a_sea(&SEA_RUNAWAYS);
+}
+
+/// Under every 25 hold and under every 26 hold the census's two critical N₂ envelopes
+/// ([`CRITICAL_N2_ENVELOPES`]) hide their surfaces, their envelopes not modelled, at every one of
+/// the census's [`WATCH_TIMES`] times across the clock window: a reservoir counts by its solve's
+/// mean surface temperature, above N₂'s critical point, not by the temperature the passes settle
+/// it at, on that point (research-leans-8 §1).
+#[test]
+fn under_every_25_and_26_hold_the_census_s_critical_n2_envelopes_stay_hidden() {
+    let sample = sample_through(last_rank(&CRITICAL_N2_ENVELOPES));
+    let across = |body| envelope_across_the_window((&sample.0, &sample.1), body);
+    let times = usize::try_from(WATCH_TIMES).expect("the census's 41 times");
+    for &body in &CRITICAL_N2_ENVELOPES {
+        for (rules, sections) in [
+            (25, with_every_25_hold(|| across(body))),
+            (26, with_every_26_hold(|| across(body))),
+        ] {
+            assert_eq!(
+                sections,
+                vec![SectionState::NotModelled; times],
+                "#{} {} under every {rules} hold",
+                body.0,
+                body.1
+            );
+        }
+    }
 }
 
 /// The Solar System table (Venus, Earth, Mars and Titan among its bodies) is derived the same, to

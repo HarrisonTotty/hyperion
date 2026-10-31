@@ -43,7 +43,11 @@
 //! - **The section** reads that reservoir: its liquid-like fluid at the temperature it lies at,
 //!   below its melting pressure, as the partition weighs it by species
 //!   ([`SupercriticalReservoir::of_column`]), since the air's partial pressure no longer exceeds
-//!   the line.
+//!   the line. A reservoir counts where the solve's mean surface temperature is at or above its
+//!   condensable's critical temperature, `T_c` itself supercritical, as part 2 judges it, not
+//!   where the temperature it lies at is (research-leans-8 §1): the passes can settle that
+//!   temperature on `T_c` itself, either side of it from one time to the next, which would open
+//!   and hide a surface inside the clock window with no input changing.
 //! - **The steam envelope.** Where the reservoir that hides the surface is water's, the body is
 //!   [`SurfaceState::SteamEnvelope`], water above its critical point with no interface
 //!   (decision-bump-plan-after-22 R1.1; Turbet et al. 2020, A&A 638, A41). Its photometry is a
@@ -247,7 +251,9 @@ impl SupercriticalReservoir {
         self.gas
     }
 
-    /// `T_s` ÷ `T_c`, at least 1.
+    /// `T_s` ÷ `T_c`, at least 1 ([`Self::of`]); a partition's column's, the temperature its
+    /// reservoir lies at over `T_c` ([`Self::of_column`]), below 1 only where that temperature lies
+    /// below `T_c` and the mean surface temperature does not (research-leans-8 §1).
     #[cfg_attr(not(test), expect(dead_code, reason = "the census's tests read it"))]
     #[must_use]
     pub(crate) const fn temperature_ratio(&self) -> f64 {
@@ -362,9 +368,11 @@ impl Atmosphere {
     ///   surface temperature whose own column above its critical isochore holds the largest share.
     /// - From part 3 ([`steam_envelope_in_force`]), whose partition caps each condensable at its
     ///   isochore: its partition's reservoir with the most liquid-like fluid at its solve's last
-    ///   climate ([`SupercriticalReservoir::of_column`]), the reservoir that also makes a water
-    ///   envelope [`SurfaceState::SteamEnvelope`]. A fluid's weight sets its share whatever the
-    ///   gravity, so the largest is the same reservoir under every gravity.
+    ///   climate ([`SupercriticalReservoir::of_column`]), of the condensables at or above their
+    ///   critical temperatures at that climate's mean surface temperature, not at the
+    ///   temperatures their reservoirs lie at (research-leans-8 §1); the reservoir that also makes
+    ///   a water envelope [`SurfaceState::SteamEnvelope`]. A fluid's weight sets its share whatever
+    ///   the gravity, so the largest is the same reservoir under every gravity.
     #[must_use]
     pub(crate) fn supercritical_reservoir(
         &self,

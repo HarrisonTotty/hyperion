@@ -2483,6 +2483,39 @@ fn under_every_25_hold_a_methane_column_above_its_critical_point_is_capped_at_it
     });
 }
 
+/// P14.T53.b part 3, as research-leans-8 §1 amends it: a reservoir counts where its solve's mean
+/// surface temperature is at or above its critical temperature, `T_c` itself supercritical, not
+/// where the temperature it lies at is. A methane column whose mean is `T_c` exactly, held toward
+/// a coldest zone 10⁻¹⁰ of it below, lies there and yields its column, its ratio under 1; with its
+/// mean 10⁻¹⁰ of it below `T_c` it yields none, as under part 3's hold at any mean.
+#[test]
+fn under_every_25_hold_a_reservoir_counts_by_its_mean_at_the_critical_point() {
+    use crate::planetary::derive::atmosphere::{SteamEnvelopeRules, with_steam_envelope};
+    use crate::planetary::testing::with_every_25_hold;
+    let t_c = phase_diagram("CH4").critical_temperature();
+    let below = Kelvin::new(t_c.value() * (1.0 - 1e-10));
+    assert!(below < t_c);
+    let (_, ground, column) = methane_column(t_c.value(), 1.0);
+    let solved = |climate: &ClimateSpan| {
+        let mut weights = AirborneWeights::new();
+        weights.solve(climate, &ground, &column);
+        weights.supercritical_column(climate, &column)
+    };
+    let at_t_c = ClimateSpan::new(below, t_c, t_c).unwrap();
+    let under_t_c = ClimateSpan::new(below, below, t_c).unwrap();
+    with_every_25_hold(|| {
+        let reservoir = solved(&at_t_c).expect("a mean at T_c is supercritical");
+        assert_eq!(reservoir.substance(), id("CH4"));
+        assert_same_bits(reservoir.lies_at().value(), below.value());
+        assert!(reservoir.temperature_ratio() < 1.0, "{reservoir:?}");
+        assert!(reservoir.reservoir().value() > 0.0, "{reservoir:?}");
+        assert!(solved(&under_t_c).is_none());
+    });
+    with_steam_envelope(SteamEnvelopeRules::Held, || {
+        assert!(solved(&at_t_c).is_none());
+    });
+}
+
 /// P14.T53.b part 3: the reservoir's fluid ends at its melting pressure, the solid beneath it; and
 /// where the surface pressure itself reaches the melting curve, the reservoir is solid
 /// (decision-absurd-states-24 R2.2: methane at 41.8–68.3 kbar is solid above about 5.4–5.7 kbar

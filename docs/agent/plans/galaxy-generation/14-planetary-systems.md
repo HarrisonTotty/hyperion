@@ -33631,3 +33631,7 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - _For 26's bump:_ the tripwire's list; re-bless `planetary/surface/{mars_like, europa_like}`,
     `planetary/systems` and `substance/thermal` (its `[pore gas]` section then the reference); the
     line switch's census then reads the pore gas.
+- **Part 3's reservoir judged at the mean, at 25** (research-leans-8 §1; inside
+  `STEAM_ENVELOPE_VERSION`): `supercritical_column` admits a reservoir where `climate.mean` ≥ T_c,
+  `lies_at` still setting its column (its ratio may lie below 1). The 25 and 26 censuses assert no
+  envelope changes section; this closes the N₂ point above.

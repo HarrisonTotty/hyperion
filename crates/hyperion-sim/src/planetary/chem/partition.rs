@@ -1110,10 +1110,19 @@ impl AirborneWeights {
     /// The supercritical reservoir of the last solve over the climate `climate` with the most
     /// liquid-like fluid (P14.T53.b part 3), its inventory `inventory` the one solved.
     ///
-    /// Of each condensable whose reservoir lies at or above its critical temperature, as
-    /// [`partition`]'s condensates are found, it is the one whose fluid weighs most, the first in
-    /// registry order of equal weights. `None` under the version 23 rules (`CriticalCap::Uncapped`,
-    /// no reservoir lies above a critical point), before a solve, and where none lies there.
+    /// Of each condensable with a reservoir where the solve's mean surface temperature is at or
+    /// above its critical temperature, `T_c` itself supercritical, it is the one whose fluid weighs
+    /// most, the first in registry order of equal weights. `None` under the version 23 rules
+    /// (`CriticalCap::Uncapped`, no reservoir lies above a critical point), before a solve, and
+    /// where none is admitted.
+    ///
+    /// The mean admits it, not the temperature its reservoir lies at (research-leans-8 §1): the
+    /// passes can settle a dominant condensable's controlling temperature on `T_c` itself, either
+    /// side of it by 10⁻¹¹ of it from one time to the next, so a test there would open and hide a
+    /// body's surface inside the clock window with no input changing. The fluid's top is the mean
+    /// surface, and the cap is continuous across `T_c`, so the reservoir's weight does not jump
+    /// there. Its column is still taken at the temperature it lies at: its `lies_at`, ratio,
+    /// isochore and melting pressure.
     ///
     /// It reads the solve's own weights and dominances, so that it is [`partition`]'s at the same
     /// inputs to the bit, with no allocation.
@@ -1142,7 +1151,7 @@ impl AirborneWeights {
             let lies_at = species.controlling(climate, held.dominance * (1.0 - held.own_ocean));
             let reservoir = (species.weight - airborne).value();
             // By comparison, so that a NaN holds none.
-            if !(reservoir > 0.0 && lies_at >= diagram.critical_temperature()) {
+            if !(reservoir > 0.0 && climate.mean >= diagram.critical_temperature()) {
                 continue;
             }
             let x = if moles > 0.0 {
@@ -1256,10 +1265,10 @@ impl AirborneWeights {
     }
 }
 
-/// A condensable's reservoir at or above its critical temperature in a partition (P14.T53.b part 3;
-/// [`AirborneWeights::supercritical_column`]): the liquid-like fluid above its critical isochore,
-/// as column weights, M g ÷ 4πR², and where the surface pressure reaches its melting curve, the
-/// solid beneath it.
+/// A condensable's reservoir in a partition whose mean surface temperature is at or above its
+/// critical temperature (P14.T53.b part 3; [`AirborneWeights::supercritical_column`]): the
+/// liquid-like fluid above its critical isochore, as column weights, M g ÷ 4πR², and where the
+/// surface pressure reaches its melting curve, the solid beneath it.
 ///
 /// The fluid is the reservoir's part above its melting pressure at the temperature it lies at,
 /// the pressure within it rising from the surface pressure at its top by its own weight: all of it
@@ -1271,9 +1280,10 @@ impl AirborneWeights {
 pub(crate) struct CriticalColumn {
     /// The condensable.
     substance: SubstanceId,
-    /// The temperature its reservoir lies at, at or above its critical temperature.
+    /// The temperature its reservoir lies at, which may lie below its critical temperature where
+    /// the mean surface temperature does not (research-leans-8 §1).
     lies_at: Kelvin,
-    /// `lies_at` ÷ `T_c`, at least 1.
+    /// `lies_at` ÷ `T_c`, below 1 only where `lies_at` lies below `T_c` and the mean does not.
     temperature_ratio: f64,
     /// Its own partial pressure in the air, x p.
     partial_pressure: Pascals,
@@ -1297,14 +1307,15 @@ impl CriticalColumn {
         self.substance
     }
 
-    /// The temperature its reservoir lies at, at or above its critical temperature.
+    /// The temperature its reservoir lies at, which may lie below its critical temperature where
+    /// the mean surface temperature does not (research-leans-8 §1).
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn lies_at(&self) -> Kelvin {
         self.lies_at
     }
 
-    /// `lies_at` ÷ `T_c`, at least 1.
+    /// `lies_at` ÷ `T_c`, below 1 only where `lies_at` lies below `T_c` and the mean does not.
     #[must_use]
     pub(crate) const fn temperature_ratio(&self) -> f64 {
         self.temperature_ratio

@@ -862,6 +862,17 @@ impl Census {
         out
     }
 
+    /// Asserts that no watched envelope changes section inside the clock window, naming those
+    /// that do: from part 3, a reservoir counts by its solve's mean surface temperature, not by
+    /// the temperature the passes settle it at (research-leans-8 §1).
+    fn assert_no_envelope_changes(&self) {
+        assert_eq!(
+            self.envelope_changes,
+            Vec::<String>::new(),
+            "gas envelopes changing section inside the clock window"
+        );
+    }
+
     /// Asserts that no body shows a finding of [`FIXED_UNDER_25`], naming the first ones that do.
     fn assert_fixed_under_25(&self) {
         let shown: Vec<(&str, usize, &[String])> = FIXED_UNDER_25
@@ -961,7 +972,7 @@ const LEFT_UNDER_26: [(&str, &str); 0] = [];
 
 /// How many times across the clock window, both ends included, the census reads the envelope
 /// section of a body near a section's edge ([`near_a_section_edge`]).
-const WATCH_TIMES: i64 = 41;
+pub(super) const WATCH_TIMES: i64 = 41;
 
 /// How near its critical temperature a column lies, as `T` ÷ `T_c` − 1, for the census to read
 /// its body's section at [`WATCH_TIMES`] times: a census bound.
@@ -994,7 +1005,7 @@ fn near_a_section_edge(case: &AuditCase<'_>) -> bool {
 
 /// The `k`th of [`WATCH_TIMES`] times evenly across the clock window, its start the 0th and its
 /// end the last.
-fn watch_time(k: i64) -> UniverseTime {
+pub(super) fn watch_time(k: i64) -> UniverseTime {
     let width = 2 * crate::time::CLOCK_WINDOW_H.seconds();
     ClockWindow::START
         .checked_add(Span::from_seconds(width * k / (WATCH_TIMES - 1)))
@@ -1400,8 +1411,8 @@ fn composition_census_reaches_every_row_or_lists_why() {
 }
 
 /// The ordinary census under every hold of version 25 ([`Rules::Every25Hold`]): at least 10⁵
-/// bodies, every registry row reached or listed with its reason, and none of the findings 25's
-/// holds fix ([`FIXED_UNDER_25`]).
+/// bodies, every registry row reached or listed with its reason, none of the findings 25's holds
+/// fix ([`FIXED_UNDER_25`]) and no envelope changing section inside the clock window.
 #[test]
 #[ignore = "slow: 10⁵ bodies of 6,800 systems under every 25 hold, on eight threads"]
 fn composition_census_under_every_25_hold_reaches_every_row_or_lists_why() {
@@ -1414,6 +1425,7 @@ fn composition_census_under_every_25_hold_reaches_every_row_or_lists_why() {
     assert!(census.bodies >= 100_000, "{} bodies", census.bodies);
     census.assert_reached(Listing::Covering);
     census.assert_fixed_under_25();
+    census.assert_no_envelope_changes();
 }
 
 /// The slow census (P14.T33.c), over [`SLOW_SYSTEMS`] systems: at least 10⁶ bodies, every registry
@@ -1427,8 +1439,8 @@ fn composition_census_over_a_million_bodies_reaches_every_row_or_lists_why() {
 }
 
 /// The slow census under every hold of version 25 ([`Rules::Every25Hold`]): at least 10⁶ bodies,
-/// every registry row reached or listed with its reason, and none of the findings 25's holds fix
-/// ([`FIXED_UNDER_25`]).
+/// every registry row reached or listed with its reason, none of the findings 25's holds fix
+/// ([`FIXED_UNDER_25`]) and no envelope changing section inside the clock window.
 #[test]
 #[ignore = "slow: 10⁶ bodies of 68,000 systems under every 25 hold, on eight threads"]
 fn composition_census_under_every_25_hold_over_a_million_bodies_reaches_every_row_or_lists_why() {
@@ -1441,11 +1453,12 @@ fn composition_census_under_every_25_hold_over_a_million_bodies_reaches_every_ro
     assert!(census.bodies >= 1_000_000, "{} bodies", census.bodies);
     census.assert_reached(Listing::Covering);
     census.assert_fixed_under_25();
+    census.assert_no_envelope_changes();
 }
 
 /// The ordinary census under every hold of version 26 ([`Rules::Every26Hold`]): at least 10⁵
-/// bodies, every registry row reached or listed with its reason, and none of the findings 25's
-/// and 26's holds fix ([`FIXED_UNDER_26`]).
+/// bodies, every registry row reached or listed with its reason, none of the findings 25's and
+/// 26's holds fix ([`FIXED_UNDER_26`]) and no envelope changing section inside the clock window.
 #[test]
 #[ignore = "slow: 10⁵ bodies of 6,800 systems under every 26 hold, on eight threads"]
 fn composition_census_under_every_26_hold_reaches_every_row_or_lists_why() {
@@ -1458,11 +1471,13 @@ fn composition_census_under_every_26_hold_reaches_every_row_or_lists_why() {
     assert!(census.bodies >= 100_000, "{} bodies", census.bodies);
     census.assert_reached(Listing::Covering);
     census.assert_fixed_under_26();
+    census.assert_no_envelope_changes();
 }
 
 /// The slow census under every hold of version 26 ([`Rules::Every26Hold`]): at least 10⁶ bodies,
-/// every registry row reached or listed with its reason, and none of the findings 25's and 26's
-/// holds fix ([`FIXED_UNDER_26`]) but the bodies [`LEFT_UNDER_26`] lists.
+/// every registry row reached or listed with its reason, none of the findings 25's and 26's holds
+/// fix ([`FIXED_UNDER_26`]) but the bodies [`LEFT_UNDER_26`] lists, and no envelope changing
+/// section inside the clock window.
 #[test]
 #[ignore = "slow: 10⁶ bodies of 68,000 systems under every 26 hold, on eight threads"]
 fn composition_census_under_every_26_hold_over_a_million_bodies_reaches_every_row_or_lists_why() {
@@ -1475,4 +1490,5 @@ fn composition_census_under_every_26_hold_over_a_million_bodies_reaches_every_ro
     assert!(census.bodies >= 1_000_000, "{} bodies", census.bodies);
     census.assert_reached(Listing::Covering);
     census.assert_fixed_under_26();
+    census.assert_no_envelope_changes();
 }
