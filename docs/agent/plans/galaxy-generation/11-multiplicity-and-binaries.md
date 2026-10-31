@@ -1701,6 +1701,19 @@ rate at Milky Way parameters is the brainstorm's 30–50 a year (slow, from a 1%
 catalogue; a miss is a finding against the scratch sampler's transfer rates and is re-run in T15).
 Acceptance: `cargo test -p hyperion-sim binary::events`.
 
+- **P11.T9.a Light curves and the X-ray luminosity, pure.** `stellar/binary/light_curves.rs`: the
+  closed forms above, one per kind, each a value built from the event's physical parameters, with
+  its bolometric light, its light in plan 07's `Band`s and, for the X-ray kinds, its X-ray
+  luminosity. Nothing calls it, so no output moves. Tests: each curve is finite, non-negative, zero
+  before onset and continuous after it, and peaks where its form says; a heavier white dwarf
+  declines faster; a neutron star's bursts stay under its Eddington luminosity; in-band light never
+  exceeds the bolometric; each kind's peak and radiated energy against its source's ranges (a miss
+  is a finding). Acceptance: `cargo test -p hyperion-sim binary::light_curves`.
+- **P11.T9.b The event tags, `events_in` and `active_at` (after P11.T8.a).** The seven tags, the
+  two constructions and the one-shots above in `stellar/binary/events.rs`, and Provides'
+  `light_curve(event, dt, band)` and `xray_luminosity(event, dt)` over T9.a's curves, with the
+  task's tests and acceptance.
+
 ### P11.T10 Agreement with kicks, displaced objects and runaways
 
 Build the conditional multiplicity of layer-D and -E systems on plan 08's `record.placement_class()`
