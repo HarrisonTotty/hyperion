@@ -1723,6 +1723,8 @@ Acceptance: `cargo test -p hyperion-sim binary::events`.
   two constructions and the one-shots above in `stellar/binary/events.rs`, and Provides'
   `light_curve(event, dt, band)` and `xray_luminosity(event, dt)` over T9.a's curves, with the
   task's tests and acceptance.
+  _As built (lane `p11-t8b`, 2026-10-31; at version 24, no bump): see Risks, "P11.T9.b as
+  built"._
 
 ### P11.T10 Agreement with kicks, displaced objects and runaways
 
@@ -6220,9 +6222,10 @@ galaxy_sweeps`.
   - _Sampler test._ Accretor mass, period, donor mass and rate at T8.a's tolerance (0.97 of the
     members per dof); the engine gives no high-mass member near the solar circle, so the recoil's
     marks are not compared (findings).
-  - _Acceptance._ `cargo test -p hyperion-sim catalogue_classes stellar::binary rng::tags`,
-    `--test foundation_golden`, the server's `compute::systems`; slow, `tests/binary_xrb.rs`
-    (ten Milky Way seeds, research-leans-10) and `tests/source_horizon.rs`'s new rows.
+  - _Acceptance._ `cargo test -p hyperion-sim -- catalogue_classes stellar::binary rng::tags`,
+    `cargo test -p hyperion-sim --test foundation_golden`, the server's `compute::systems`; slow,
+    `just test-slow` (`tests/binary_xrb.rs`, ten Milky Way seeds, research-leans-10, and
+    `tests/source_horizon.rs`'s new rows).
 - **P11.T8.c as built** (lane `p11-t8cd`, 2026-10-31; at version 24, no bump: registering a class
   moves no existing value; `golden_diff.py` "extended only").
   - _Files._ `galaxy/catalogue_classes/binary/{hosts,merger}.rs` (`ClassHosts`, the share row's
@@ -6270,3 +6273,31 @@ galaxy_sweeps`.
   - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::nsm`; slow,
     `tests/binary_mergers.rs`'s `ten_milky_way_seeds_realise_their_neutron_star_mergers` and
     `the_nsm_sampler_against_the_engine_s_mergers` (with `testing`), and `tests/source_horizon.rs`.
+- **P11.T9.b as built** (lane `p11-t8b`, 2026-10-31; at version 24, no bump: nothing in
+  generation calls it; `golden_diff.py` "extended only").
+  - _Files._ `stellar/binary/events.rs`; tags 0x0301–0x0306 in `id/event_tags.rs` and their
+    `binary.ev.*` keys in `rng/tags.rs`; `classify::cv_line` beside `xrb_line`.
+  - _Shape (lean, 2026-10-31)._ A `BinarySystem` is a seed and a host's scan marks or entry:
+    `accreting_white_dwarf_scan`, `accreting_white_dwarf` (dwarf novae need the entry's orbit),
+    `xray_binary`, `stellar_merger` and `neutron_star_merger`. `events_in` and `active_at` append to
+    an `out` vector in time order, ties by ID.
+  - _Clocks._ Novae run on T8.a's `nova_clock` and `nova_phase`. The other phases take the novae's
+    noise and a `LinearClock` whose origin is event stream 255 of bin 0 of their own series.
+  - _Dwarf novae and transients (leans)._ A dwarf nova's cycle is 30 d × line ÷ rate on 10 d–33
+    yr, with a skip of 0.2. A transient recurs at the scan's recurrence, gathering the rate over it,
+    with X 0.7.
+  - _Bursts and Be/X (leans)._ Bursts on persistent neutron stars only: a 10⁸ g cm⁻² ignition
+    column, helium at 0.01–0.1 of Eddington, none at or above it. Be/X giant outbursts 0.1 a year
+    in yearly bins. Persistent black holes and supergiants list none.
+  - _One-shots (on T8.c–d, main's note of 2026-10-31)._ A merger host lists one event at its
+    `merger_time()`, bin 0 and number 0 of its tag on its system: a red nova of `total_mass()`, a
+    kilonova of `ejecta_mass()` (GW170817's). The free builders `luminous_red_nova` and `kilonova`
+    are gone: a caller builds the host with `BinarySystem::stellar_merger` or `neutron_star_merger`
+    (an entry by its `scan()`). _Lean (2026-10-31):_ `remnant_phase()` and `remnant_mass()` set
+    nothing, since T9.a's kilonova has no remnant term and every T8.d merger leaves a black hole of
+    the pair's mass (T8.d's own tests pin it); P12.T5.b may read them.
+  - _Active._ An event is active from its onset until its light stays under 1% of its peak.
+  - _Measured._ The galaxy's novae at Milky Way parameters, each class's novae a sampled host over
+    1,000 years times its expected hosts: 46.0 a year (52.3 by the sampled cells' share alone).
+  - _Acceptance._ `cargo test -p hyperion-sim -- binary::events id::event_tags rng::tags`; slow,
+    `just test-slow` (`tests/binary_events.rs`).

@@ -145,10 +145,29 @@ event_tags! {
     0x0201 => TIDAL_DISRUPTION = tags::CENTRE_EV_TIDAL_DISRUPTION;
 
     // Plan 11: binaries, block 0x0300–0x03FF. P11.T8.a registers 0x0300, whose series an
-    // accreting white dwarf's scan marks carry; P11.T9 registers 0x0301–0x0306.
+    // accreting white dwarf's scan marks carry, and P11.T9.b 0x0301–0x0306; 0x0307–0x03FF stay
+    // free for later binary kinds.
     /// Classical novae of accreting white dwarfs, one a cycle of the recurrence period on the
     /// white dwarf's body, 0 (monotone phase; P11.T8.a).
     0x0300 => NOVA = tags::BINARY_EV_NOVA;
+    /// Dwarf novae's outbursts, one a cycle of the disc's fill time on the white dwarf, body 0,
+    /// some cycles skipped (monotone phase with a skip mark; P11.T9.b).
+    0x0301 => DWARF_NOVA = tags::BINARY_EV_DWARF_NOVA;
+    /// Low-mass X-ray transients' outbursts, one a cycle of the recurrence on the compact star,
+    /// body 0 (monotone phase; P11.T9.b).
+    0x0302 => XRAY_TRANSIENT = tags::BINARY_EV_XRAY_TRANSIENT;
+    /// Type I X-ray bursts on an accreting neutron star, one a cycle of the ignition recurrence,
+    /// body 0 (monotone phase; P11.T9.b).
+    0x0303 => XRAY_BURST = tags::BINARY_EV_XRAY_BURST;
+    /// Be/X-ray binaries' giant (Type II) outbursts on the neutron star, body 0 (Poisson bins;
+    /// P11.T9.b).
+    0x0304 => BEX_GIANT_OUTBURST = tags::BINARY_EV_BEX_GIANT_OUTBURST;
+    /// A stellar merger's luminous red nova, once at its merger on the system: bin 0, number 0
+    /// (one-shot; P11.T9.b).
+    0x0305 => LUMINOUS_RED_NOVA = tags::BINARY_EV_LUMINOUS_RED_NOVA;
+    /// A neutron-star merger's kilonova, once at its merger on the system: bin 0, number 0
+    /// (one-shot; P11.T9.b).
+    0x0306 => KILONOVA = tags::BINARY_EV_KILONOVA;
 
     // Plan 14: bodies, block 0x0400–0x04FF (plan 14, design note 15). P14.T31.a registers 0x0400,
     // 0x0401 and 0x0404, and P14.T31.b 0x0402 and 0x0403; 0x0405–0x04FF stay free for later body
@@ -237,14 +256,27 @@ mod tests {
         assert_eq!(in_block, [0x0200, 0x0201, 0x0202]);
     }
 
-    /// Plan 11's block holds 0x0300 alone so far, P11.T8.a's novae, backed by its domain tag;
-    /// 0x0301–0x0306 are P11.T9's, and the rest of the block stays reserved.
+    /// Plan 11's block holds 0x0300–0x0306, its seven event tags of Provides, each backed by its
+    /// domain tag under `binary.ev.`: P11.T8.a's novae and P11.T9.b's six. 0x0307–0x03FF stay
+    /// reserved.
     #[test]
-    fn plan_11_holds_0x0300_with_its_name() {
-        assert_eq!(NOVA.number(), 0x0300);
-        assert_eq!(NOVA.name(), "binary.ev.nova");
-        assert_eq!(EventTag::from_number(0x0300), Some(NOVA));
-        for reserved in [0x0301, 0x0306, 0x03FF] {
+    fn plan_11_holds_0x0300_to_0x0306_in_order() {
+        let expected = [
+            (NOVA, 0x0300, "binary.ev.nova"),
+            (DWARF_NOVA, 0x0301, "binary.ev.dwarf_nova"),
+            (XRAY_TRANSIENT, 0x0302, "binary.ev.xray_transient"),
+            (XRAY_BURST, 0x0303, "binary.ev.xray_burst"),
+            (BEX_GIANT_OUTBURST, 0x0304, "binary.ev.bex_giant_outburst"),
+            (LUMINOUS_RED_NOVA, 0x0305, "binary.ev.luminous_red_nova"),
+            (KILONOVA, 0x0306, "binary.ev.kilonova"),
+        ];
+        for (tag, number, name) in expected {
+            assert_eq!(tag.number(), number);
+            assert_eq!(tag.name(), name);
+            assert_eq!(EventTag::from_number(number), Some(tag));
+            assert_eq!(tag.domain_tag().scope(), crate::rng::TagScope::Event);
+        }
+        for reserved in [0x0307, 0x03FF] {
             assert_eq!(EventTag::from_number(reserved), None, "{reserved:#06x}");
         }
         let in_block: Vec<u16> = ALL
@@ -252,7 +284,10 @@ mod tests {
             .map(|t| t.number())
             .filter(|n| (0x0300..=0x03FF).contains(n))
             .collect();
-        assert_eq!(in_block, [0x0300]);
+        assert_eq!(
+            in_block,
+            [0x0300, 0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306]
+        );
     }
 
     /// Plan 14's block holds 0x0400–0x0404, its five event tags of Provides, each backed by its

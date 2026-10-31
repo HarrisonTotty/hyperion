@@ -34,6 +34,7 @@ pub(crate) mod carve;
 mod classify;
 mod common_envelope;
 mod detached;
+pub mod events;
 mod evolve;
 mod light;
 pub mod light_curves;

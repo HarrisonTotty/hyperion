@@ -645,6 +645,19 @@ pub(crate) fn xrb_line(
     xrb_critical_rate(accretor, disc_radius_of(accretor, donor, separation))
 }
 
+/// The disc-instability line of a cataclysmic variable whose white dwarf of `accretor` M☉ a donor
+/// of `donor` M☉ feeds on an orbit of semi-major axis `separation`, M☉ yr⁻¹:
+/// [`cv_critical_rate`] at [`disc_radius`], what [`classify`] splits dwarf novae from nova-likes
+/// on, a dwarf nova below it. A dwarf nova's outbursts recur by its rate against it (P11.T9.b).
+#[must_use]
+pub(crate) fn cv_line(
+    accretor: SolarMasses,
+    donor: SolarMasses,
+    separation: Metres,
+) -> SolarMassesPerYear {
+    cv_critical_rate(accretor, disc_radius_of(accretor, donor, separation))
+}
+
 /// Whether `star`, with `draws`, is plan 06's Be star under the stellar `rules`, as [`classify`]
 /// tests a Be/X-ray binary's donor: what a catalogue entry's Be donor's draws are chosen by
 /// (P11.T8.b).

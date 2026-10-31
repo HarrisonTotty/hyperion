@@ -1216,6 +1216,34 @@ domain_tags! {
     /// An X-ray binary candidate's \[Fe/H\]: one normal of its component's distribution at its
     /// site and age (P11.T8.b).
     CLASS_XRB_METALLICITY: System = "class.xrb.metallicity";
+
+    // Plan 11, P11.T9.b: the event keys of the binary events 0x0301–0x0306, one `Event` tag each
+    // under `binary.ev.`, as P11.T8.a's `binary.ev.nova`. Appended after P11.T8.b's, because the
+    // macro's order fixes `ALL`.
+
+    /// The event key of a dwarf nova's outbursts (plan 11's `0x0301 DWARF_NOVA`, P11.T9.b): a
+    /// monotone phase with a skip mark on its white dwarf, body 0.
+    BINARY_EV_DWARF_NOVA: Event = "binary.ev.dwarf_nova";
+
+    /// The event key of an X-ray transient's outbursts (plan 11's `0x0302 XRAY_TRANSIENT`,
+    /// P11.T9.b): a monotone phase at its recurrence on its compact star, body 0.
+    BINARY_EV_XRAY_TRANSIENT: Event = "binary.ev.xray_transient";
+
+    /// The event key of a neutron star's Type I X-ray bursts (plan 11's `0x0303 XRAY_BURST`,
+    /// P11.T9.b): a monotone phase at the ignition recurrence on the neutron star, body 0.
+    BINARY_EV_XRAY_BURST: Event = "binary.ev.xray_burst";
+
+    /// The event key of a Be/X-ray binary's giant (Type II) outbursts (plan 11's
+    /// `0x0304 BEX_GIANT_OUTBURST`, P11.T9.b): Poisson bins on its neutron star, body 0.
+    BINARY_EV_BEX_GIANT_OUTBURST: Event = "binary.ev.bex_giant_outburst";
+
+    /// The event key of a stellar merger's luminous red nova (plan 11's `0x0305
+    /// LUMINOUS_RED_NOVA`, P11.T9.b): one-shot, bin 0 and number 0, on the merged system.
+    BINARY_EV_LUMINOUS_RED_NOVA: Event = "binary.ev.luminous_red_nova";
+
+    /// The event key of a neutron-star merger's kilonova (plan 11's `0x0306 KILONOVA`, P11.T9.b):
+    /// one-shot, bin 0 and number 0, on the merged system.
+    BINARY_EV_KILONOVA: Event = "binary.ev.kilonova";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1719,6 +1747,24 @@ mod tests {
         ] {
             assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
             assert!(tag.name().starts_with("class.xrb."));
+            assert!(ALL.contains(&tag));
+        }
+    }
+
+    /// P11.T9.b: the binary events' keys, `Event` tags under `binary.ev.`, after P11.T8.a's novae.
+    #[test]
+    fn plan_11_registers_the_binary_event_tags() {
+        for tag in [
+            BINARY_EV_NOVA,
+            BINARY_EV_DWARF_NOVA,
+            BINARY_EV_XRAY_TRANSIENT,
+            BINARY_EV_XRAY_BURST,
+            BINARY_EV_BEX_GIANT_OUTBURST,
+            BINARY_EV_LUMINOUS_RED_NOVA,
+            BINARY_EV_KILONOVA,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::Event, "{}", tag.name());
+            assert!(tag.name().starts_with("binary.ev."));
             assert!(ALL.contains(&tag));
         }
     }

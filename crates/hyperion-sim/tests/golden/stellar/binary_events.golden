@@ -1,0 +1,217 @@
+# generator_version = 24
+nova, from scan marks Nova subject Body(BodyId { system: SystemId(0xfc67c94800000000), body_index: 0 }) bin -3 number 0 onset -6218618272554 + 28721251 ns
+nova, from scan marks Nova peak at 94967 + 812659354 ns, duration 1677764 + 690315262 ns
+nova, from scan marks Nova peak = 0x4696f798d017277e  # 1.1645741517719157e32
+nova, from scan marks Nova V = 0x46638ac62cc5d75e  # 1.2386268782978435e31
+nova, from scan marks Nova K = 0x462e77f2c181d5aa  # 1.2069835327283871e30
+nova, from scan marks Nova xrays = 0x0000000000000000  # 0.0
+nova, from scan marks Nova subject Body(BodyId { system: SystemId(0xfc67c94800000000), body_index: 0 }) bin -2 number 0 onset -4320989956618 + 16578576 ns
+nova, from scan marks Nova peak at 94967 + 812659354 ns, duration 1677764 + 690315262 ns
+nova, from scan marks Nova peak = 0x4696f798d017277e  # 1.1645741517719157e32
+nova, from scan marks Nova V = 0x46638ac62cc5d75e  # 1.2386268782978435e31
+nova, from scan marks Nova K = 0x462e77f2c181d5aa  # 1.2069835327283871e30
+nova, from scan marks Nova xrays = 0x0000000000000000  # 0.0
+nova, from scan marks Nova subject Body(BodyId { system: SystemId(0xfc67c94800000000), body_index: 0 }) bin -1 number 0 onset -2501076260023 + 734843325 ns
+nova, from scan marks Nova peak at 94967 + 812659354 ns, duration 1677764 + 690315262 ns
+nova, from scan marks Nova peak = 0x4696f798d017277e  # 1.1645741517719157e32
+nova, from scan marks Nova V = 0x46638ac62cc5d75e  # 1.2386268782978435e31
+nova, from scan marks Nova K = 0x462e77f2c181d5aa  # 1.2069835327283871e30
+nova, from scan marks Nova xrays = 0x0000000000000000  # 0.0
+nova, from scan marks Nova subject Body(BodyId { system: SystemId(0xfc67c94800000000), body_index: 0 }) bin 0 number 0 onset -510665296625 + 920661354 ns
+nova, from scan marks Nova peak at 94967 + 812659354 ns, duration 1677764 + 690315262 ns
+nova, from scan marks Nova peak = 0x4696f798d017277e  # 1.1645741517719157e32
+nova, from scan marks Nova V = 0x46638ac62cc5d75e  # 1.2386268782978435e31
+nova, from scan marks Nova K = 0x462e77f2c181d5aa  # 1.2069835327283871e30
+nova, from scan marks Nova xrays = 0x0000000000000000  # 0.0
+dwarf nova DwarfNova subject Body(BodyId { system: SystemId(0xfc67c94800000010), body_index: 0 }) bin -392 number 0 onset -6303975645 + 923651477 ns
+dwarf nova DwarfNova peak at 86400 + 0 ns, duration 1709158 + 813450771 ns
+dwarf nova DwarfNova peak = 0x45a0f529e9e1210b  # 2.624072457143266e27
+dwarf nova DwarfNova V = 0x4540cb4aa66401e0  # 4.060566111725646e25
+dwarf nova DwarfNova K = 0x44f009d1b17c09b4  # 1.211823910674938e24
+dwarf nova DwarfNova xrays = 0x0000000000000000  # 0.0
+dwarf nova DwarfNova subject Body(BodyId { system: SystemId(0xfc67c94800000010), body_index: 0 }) bin -390 number 0 onset -6272299147 + 825490833 ns
+dwarf nova DwarfNova peak at 86400 + 0 ns, duration 1709158 + 813450771 ns
+dwarf nova DwarfNova peak = 0x45a0f529e9e1210b  # 2.624072457143266e27
+dwarf nova DwarfNova V = 0x4540cb4aa66401e0  # 4.060566111725646e25
+dwarf nova DwarfNova K = 0x44f009d1b17c09b4  # 1.211823910674938e24
+dwarf nova DwarfNova xrays = 0x0000000000000000  # 0.0
+dwarf nova DwarfNova subject Body(BodyId { system: SystemId(0xfc67c94800000010), body_index: 0 }) bin -389 number 0 onset -6255548180 + 350817156 ns
+dwarf nova DwarfNova peak at 86400 + 0 ns, duration 1709158 + 813450771 ns
+dwarf nova DwarfNova peak = 0x45a0f529e9e1210b  # 2.624072457143266e27
+dwarf nova DwarfNova V = 0x4540cb4aa66401e0  # 4.060566111725646e25
+dwarf nova DwarfNova K = 0x44f009d1b17c09b4  # 1.211823910674938e24
+dwarf nova DwarfNova xrays = 0x0000000000000000  # 0.0
+dwarf nova DwarfNova subject Body(BodyId { system: SystemId(0xfc67c94800000010), body_index: 0 }) bin -388 number 0 onset -6241688638 + 554223896 ns
+dwarf nova DwarfNova peak at 86400 + 0 ns, duration 1709158 + 813450771 ns
+dwarf nova DwarfNova peak = 0x45a0f529e9e1210b  # 2.624072457143266e27
+dwarf nova DwarfNova V = 0x4540cb4aa66401e0  # 4.060566111725646e25
+dwarf nova DwarfNova K = 0x44f009d1b17c09b4  # 1.211823910674938e24
+dwarf nova DwarfNova xrays = 0x0000000000000000  # 0.0
+dwarf nova DwarfNova subject Body(BodyId { system: SystemId(0xfc67c94800000010), body_index: 0 }) bin -387 number 0 onset -6223285143 + 416548939 ns
+dwarf nova DwarfNova peak at 86400 + 0 ns, duration 1709158 + 813450771 ns
+dwarf nova DwarfNova peak = 0x45a0f529e9e1210b  # 2.624072457143266e27
+dwarf nova DwarfNova V = 0x4540cb4aa66401e0  # 4.060566111725646e25
+dwarf nova DwarfNova K = 0x44f009d1b17c09b4  # 1.211823910674938e24
+dwarf nova DwarfNova xrays = 0x0000000000000000  # 0.0
+dwarf nova DwarfNova subject Body(BodyId { system: SystemId(0xfc67c94800000010), body_index: 0 }) bin -386 number 0 onset -6208351447 + 757291025 ns
+dwarf nova DwarfNova peak at 86400 + 0 ns, duration 1709158 + 813450771 ns
+dwarf nova DwarfNova peak = 0x45a0f529e9e1210b  # 2.624072457143266e27
+dwarf nova DwarfNova V = 0x4540cb4aa66401e0  # 4.060566111725646e25
+dwarf nova DwarfNova K = 0x44f009d1b17c09b4  # 1.211823910674938e24
+dwarf nova DwarfNova xrays = 0x0000000000000000  # 0.0
+neutron-star transient XrayTransient subject Body(BodyId { system: SystemId(0xfc57c7d800000010), body_index: 0 }) bin -47 number 0 onset -3111970600947 + 15604953 ns
+neutron-star transient XrayTransient peak at 432000 + 0 ns, duration 12368601 + 122081134 ns
+neutron-star transient XrayTransient peak = 0x46705ce553a73c98  # 2.0742407362974008e31
+neutron-star transient XrayTransient V = 0x45b4be11fa5a2753  # 6.41948100056616e27
+neutron-star transient XrayTransient K = 0x4563cf1c96bc00f2  # 1.915811824401878e26
+neutron-star transient XrayTransient xrays = 0x465e5594730a648f  # 9.613322262191626e30
+neutron-star transient XrayTransient subject Body(BodyId { system: SystemId(0xfc57c7d800000010), body_index: 0 }) bin -46 number 0 onset -3049823809364 + 523982260 ns
+neutron-star transient XrayTransient peak at 432000 + 0 ns, duration 12368601 + 122081134 ns
+neutron-star transient XrayTransient peak = 0x46705ce553a73c98  # 2.0742407362974008e31
+neutron-star transient XrayTransient V = 0x45b4be11fa5a2753  # 6.41948100056616e27
+neutron-star transient XrayTransient K = 0x4563cf1c96bc00f2  # 1.915811824401878e26
+neutron-star transient XrayTransient xrays = 0x465e5594730a648f  # 9.613322262191626e30
+neutron-star transient XrayTransient subject Body(BodyId { system: SystemId(0xfc57c7d800000010), body_index: 0 }) bin -45 number 0 onset -2980417985866 + 485280144 ns
+neutron-star transient XrayTransient peak at 432000 + 0 ns, duration 12368601 + 122081134 ns
+neutron-star transient XrayTransient peak = 0x46705ce553a73c98  # 2.0742407362974008e31
+neutron-star transient XrayTransient V = 0x45b4be11fa5a2753  # 6.41948100056616e27
+neutron-star transient XrayTransient K = 0x4563cf1c96bc00f2  # 1.915811824401878e26
+neutron-star transient XrayTransient xrays = 0x465e5594730a648f  # 9.613322262191626e30
+neutron-star transient XrayTransient subject Body(BodyId { system: SystemId(0xfc57c7d800000010), body_index: 0 }) bin -44 number 0 onset -2907836733650 + 411799787 ns
+neutron-star transient XrayTransient peak at 432000 + 0 ns, duration 12368601 + 122081134 ns
+neutron-star transient XrayTransient peak = 0x46705ce553a73c98  # 2.0742407362974008e31
+neutron-star transient XrayTransient V = 0x45b4be11fa5a2753  # 6.41948100056616e27
+neutron-star transient XrayTransient K = 0x4563cf1c96bc00f2  # 1.915811824401878e26
+neutron-star transient XrayTransient xrays = 0x465e5594730a648f  # 9.613322262191626e30
+neutron-star transient XrayTransient subject Body(BodyId { system: SystemId(0xfc57c7d800000010), body_index: 0 }) bin -43 number 0 onset -2853134729223 + 752173446 ns
+neutron-star transient XrayTransient peak at 432000 + 0 ns, duration 12368601 + 122081134 ns
+neutron-star transient XrayTransient peak = 0x46705ce553a73c98  # 2.0742407362974008e31
+neutron-star transient XrayTransient V = 0x45b4be11fa5a2753  # 6.41948100056616e27
+neutron-star transient XrayTransient K = 0x4563cf1c96bc00f2  # 1.915811824401878e26
+neutron-star transient XrayTransient xrays = 0x465e5594730a648f  # 9.613322262191626e30
+neutron-star transient XrayTransient subject Body(BodyId { system: SystemId(0xfc57c7d800000010), body_index: 0 }) bin -42 number 0 onset -2782995822588 + 896111008 ns
+neutron-star transient XrayTransient peak at 432000 + 0 ns, duration 12368601 + 122081134 ns
+neutron-star transient XrayTransient peak = 0x46705ce553a73c98  # 2.0742407362974008e31
+neutron-star transient XrayTransient V = 0x45b4be11fa5a2753  # 6.41948100056616e27
+neutron-star transient XrayTransient K = 0x4563cf1c96bc00f2  # 1.915811824401878e26
+neutron-star transient XrayTransient xrays = 0x465e5594730a648f  # 9.613322262191626e30
+black-hole transient XrayTransient subject Body(BodyId { system: SystemId(0xfc57c7e800000030), body_index: 0 }) bin -387 number 0 onset -3152245296630 + 523598512 ns
+black-hole transient XrayTransient peak at 432000 + 0 ns, duration 12368601 + 122081134 ns
+black-hole transient XrayTransient peak = 0x46987030dc8a31aa  # 1.2391662664649804e32
+black-hole transient XrayTransient V = 0x45defaaf5761fe7e  # 3.8350439102425863e28
+black-hole transient XrayTransient K = 0x458d95cbca2c41cb  # 1.1445197002211207e27
+black-hole transient XrayTransient xrays = 0x4686a7042a79742f  # 5.743067546358652e31
+black-hole transient XrayTransient subject Body(BodyId { system: SystemId(0xfc57c7e800000030), body_index: 0 }) bin -386 number 0 onset -3144670748968 + 127485094 ns
+black-hole transient XrayTransient peak at 432000 + 0 ns, duration 12368601 + 122081134 ns
+black-hole transient XrayTransient peak = 0x46987030dc8a31aa  # 1.2391662664649804e32
+black-hole transient XrayTransient V = 0x45defaaf5761fe7e  # 3.8350439102425863e28
+black-hole transient XrayTransient K = 0x458d95cbca2c41cb  # 1.1445197002211207e27
+black-hole transient XrayTransient xrays = 0x4686a7042a79742f  # 5.743067546358652e31
+black-hole transient XrayTransient subject Body(BodyId { system: SystemId(0xfc57c7e800000030), body_index: 0 }) bin -385 number 0 onset -3136239499641 + 672327069 ns
+black-hole transient XrayTransient peak at 432000 + 0 ns, duration 12368601 + 122081134 ns
+black-hole transient XrayTransient peak = 0x46987030dc8a31aa  # 1.2391662664649804e32
+black-hole transient XrayTransient V = 0x45defaaf5761fe7e  # 3.8350439102425863e28
+black-hole transient XrayTransient K = 0x458d95cbca2c41cb  # 1.1445197002211207e27
+black-hole transient XrayTransient xrays = 0x4686a7042a79742f  # 5.743067546358652e31
+black-hole transient XrayTransient subject Body(BodyId { system: SystemId(0xfc57c7e800000030), body_index: 0 }) bin -384 number 0 onset -3128719562554 + 989198226 ns
+black-hole transient XrayTransient peak at 432000 + 0 ns, duration 12368601 + 122081134 ns
+black-hole transient XrayTransient peak = 0x46987030dc8a31aa  # 1.2391662664649804e32
+black-hole transient XrayTransient V = 0x45defaaf5761fe7e  # 3.8350439102425863e28
+black-hole transient XrayTransient K = 0x458d95cbca2c41cb  # 1.1445197002211207e27
+black-hole transient XrayTransient xrays = 0x4686a7042a79742f  # 5.743067546358652e31
+black-hole transient XrayTransient subject Body(BodyId { system: SystemId(0xfc57c7e800000030), body_index: 0 }) bin -383 number 0 onset -3120651016301 + 811127560 ns
+black-hole transient XrayTransient peak at 432000 + 0 ns, duration 12368601 + 122081134 ns
+black-hole transient XrayTransient peak = 0x46987030dc8a31aa  # 1.2391662664649804e32
+black-hole transient XrayTransient V = 0x45defaaf5761fe7e  # 3.8350439102425863e28
+black-hole transient XrayTransient K = 0x458d95cbca2c41cb  # 1.1445197002211207e27
+black-hole transient XrayTransient xrays = 0x4686a7042a79742f  # 5.743067546358652e31
+black-hole transient XrayTransient subject Body(BodyId { system: SystemId(0xfc57c7e800000030), body_index: 0 }) bin -382 number 0 onset -3113476418616 + 335005247 ns
+black-hole transient XrayTransient peak at 432000 + 0 ns, duration 12368601 + 122081134 ns
+black-hole transient XrayTransient peak = 0x46987030dc8a31aa  # 1.2391662664649804e32
+black-hole transient XrayTransient V = 0x45defaaf5761fe7e  # 3.8350439102425863e28
+black-hole transient XrayTransient K = 0x458d95cbca2c41cb  # 1.1445197002211207e27
+black-hole transient XrayTransient xrays = 0x4686a7042a79742f  # 5.743067546358652e31
+persistent neutron star's bursts XrayBurst subject Body(BodyId { system: SystemId(0xfc57f80800005010), body_index: 0 }) bin 3932 number 0 onset 7547 + 123482205 ns
+persistent neutron star's bursts XrayBurst peak at 5 + 0 ns, duration 143 + 155105579 ns
+persistent neutron star's bursts XrayBurst peak = 0x465ef3f4da53a334  # 9.809382966932944e30
+persistent neutron star's bursts XrayBurst V = 0x45a39e6ad1e52be5  # 3.035864954417454e27
+persistent neutron star's bursts XrayBurst K = 0x4552bc6744846f98  # 9.06014984147048e25
+persistent neutron star's bursts XrayBurst xrays = 0x4655d67c987de7f8  # 6.920687327300859e30
+persistent neutron star's bursts XrayBurst subject Body(BodyId { system: SystemId(0xfc57f80800005010), body_index: 0 }) bin 3933 number 0 onset 14336 + 207416417 ns
+persistent neutron star's bursts XrayBurst peak at 5 + 0 ns, duration 143 + 155105579 ns
+persistent neutron star's bursts XrayBurst peak = 0x465ef3f4da53a334  # 9.809382966932944e30
+persistent neutron star's bursts XrayBurst V = 0x45a39e6ad1e52be5  # 3.035864954417454e27
+persistent neutron star's bursts XrayBurst K = 0x4552bc6744846f98  # 9.06014984147048e25
+persistent neutron star's bursts XrayBurst xrays = 0x4655d67c987de7f8  # 6.920687327300859e30
+persistent neutron star's bursts XrayBurst subject Body(BodyId { system: SystemId(0xfc57f80800005010), body_index: 0 }) bin 3934 number 0 onset 21857 + 752015854 ns
+persistent neutron star's bursts XrayBurst peak at 5 + 0 ns, duration 143 + 155105579 ns
+persistent neutron star's bursts XrayBurst peak = 0x465ef3f4da53a334  # 9.809382966932944e30
+persistent neutron star's bursts XrayBurst V = 0x45a39e6ad1e52be5  # 3.035864954417454e27
+persistent neutron star's bursts XrayBurst K = 0x4552bc6744846f98  # 9.06014984147048e25
+persistent neutron star's bursts XrayBurst xrays = 0x4655d67c987de7f8  # 6.920687327300859e30
+persistent neutron star's bursts XrayBurst subject Body(BodyId { system: SystemId(0xfc57f80800005010), body_index: 0 }) bin 3935 number 0 onset 28974 + 496979658 ns
+persistent neutron star's bursts XrayBurst peak at 5 + 0 ns, duration 143 + 155105579 ns
+persistent neutron star's bursts XrayBurst peak = 0x465ef3f4da53a334  # 9.809382966932944e30
+persistent neutron star's bursts XrayBurst V = 0x45a39e6ad1e52be5  # 3.035864954417454e27
+persistent neutron star's bursts XrayBurst K = 0x4552bc6744846f98  # 9.06014984147048e25
+persistent neutron star's bursts XrayBurst xrays = 0x4655d67c987de7f8  # 6.920687327300859e30
+persistent neutron star's bursts XrayBurst subject Body(BodyId { system: SystemId(0xfc57f80800005010), body_index: 0 }) bin 3936 number 0 onset 35839 + 511551615 ns
+persistent neutron star's bursts XrayBurst peak at 5 + 0 ns, duration 143 + 155105579 ns
+persistent neutron star's bursts XrayBurst peak = 0x465ef3f4da53a334  # 9.809382966932944e30
+persistent neutron star's bursts XrayBurst V = 0x45a39e6ad1e52be5  # 3.035864954417454e27
+persistent neutron star's bursts XrayBurst K = 0x4552bc6744846f98  # 9.06014984147048e25
+persistent neutron star's bursts XrayBurst xrays = 0x4655d67c987de7f8  # 6.920687327300859e30
+persistent neutron star's bursts XrayBurst subject Body(BodyId { system: SystemId(0xfc57f80800005010), body_index: 0 }) bin 3937 number 0 onset 42699 + 31882898 ns
+persistent neutron star's bursts XrayBurst peak at 5 + 0 ns, duration 143 + 155105579 ns
+persistent neutron star's bursts XrayBurst peak = 0x465ef3f4da53a334  # 9.809382966932944e30
+persistent neutron star's bursts XrayBurst V = 0x45a39e6ad1e52be5  # 3.035864954417454e27
+persistent neutron star's bursts XrayBurst K = 0x4552bc6744846f98  # 9.06014984147048e25
+persistent neutron star's bursts XrayBurst xrays = 0x4655d67c987de7f8  # 6.920687327300859e30
+Be/X giant outbursts BeXGiantOutburst subject Body(BodyId { system: SystemId(0xfc58383800000020), body_index: 0 }) bin -1990 number 0 onset -62774391631 + 801889797 ns
+Be/X giant outbursts BeXGiantOutburst peak at 864000 + 0 ns, duration 8821734 + 81387422 ns
+Be/X giant outbursts BeXGiantOutburst peak = 0x464d1566a8665b0f  # 4.6084800075984264e30
+Be/X giant outbursts BeXGiantOutburst V = 0x0000000000000000  # 0.0
+Be/X giant outbursts BeXGiantOutburst K = 0x0000000000000000  # 0.0
+Be/X giant outbursts BeXGiantOutburst xrays = 0x463a58256eb4aef3  # 2.0872121592838104e30
+Be/X giant outbursts BeXGiantOutburst subject Body(BodyId { system: SystemId(0xfc58383800000020), body_index: 0 }) bin -1989 number 0 onset -62766418362 + 924887360 ns
+Be/X giant outbursts BeXGiantOutburst peak at 864000 + 0 ns, duration 8821734 + 81387422 ns
+Be/X giant outbursts BeXGiantOutburst peak = 0x464d1566a8665b0f  # 4.6084800075984264e30
+Be/X giant outbursts BeXGiantOutburst V = 0x0000000000000000  # 0.0
+Be/X giant outbursts BeXGiantOutburst K = 0x0000000000000000  # 0.0
+Be/X giant outbursts BeXGiantOutburst xrays = 0x463a58256eb4aef3  # 2.0872121592838104e30
+Be/X giant outbursts BeXGiantOutburst subject Body(BodyId { system: SystemId(0xfc58383800000020), body_index: 0 }) bin -1980 number 0 onset -62472596598 + 177922823 ns
+Be/X giant outbursts BeXGiantOutburst peak at 864000 + 0 ns, duration 8821734 + 81387422 ns
+Be/X giant outbursts BeXGiantOutburst peak = 0x464d1566a8665b0f  # 4.6084800075984264e30
+Be/X giant outbursts BeXGiantOutburst V = 0x0000000000000000  # 0.0
+Be/X giant outbursts BeXGiantOutburst K = 0x0000000000000000  # 0.0
+Be/X giant outbursts BeXGiantOutburst xrays = 0x463a58256eb4aef3  # 2.0872121592838104e30
+Be/X giant outbursts BeXGiantOutburst subject Body(BodyId { system: SystemId(0xfc58383800000020), body_index: 0 }) bin -1961 number 0 onset -61864003898 + 552325779 ns
+Be/X giant outbursts BeXGiantOutburst peak at 864000 + 0 ns, duration 8821734 + 81387422 ns
+Be/X giant outbursts BeXGiantOutburst peak = 0x464d1566a8665b0f  # 4.6084800075984264e30
+Be/X giant outbursts BeXGiantOutburst V = 0x0000000000000000  # 0.0
+Be/X giant outbursts BeXGiantOutburst K = 0x0000000000000000  # 0.0
+Be/X giant outbursts BeXGiantOutburst xrays = 0x463a58256eb4aef3  # 2.0872121592838104e30
+Be/X giant outbursts BeXGiantOutburst subject Body(BodyId { system: SystemId(0xfc58383800000020), body_index: 0 }) bin -1956 number 0 onset -61705384009 + 407945142 ns
+Be/X giant outbursts BeXGiantOutburst peak at 864000 + 0 ns, duration 8821734 + 81387422 ns
+Be/X giant outbursts BeXGiantOutburst peak = 0x464d1566a8665b0f  # 4.6084800075984264e30
+Be/X giant outbursts BeXGiantOutburst V = 0x0000000000000000  # 0.0
+Be/X giant outbursts BeXGiantOutburst K = 0x0000000000000000  # 0.0
+Be/X giant outbursts BeXGiantOutburst xrays = 0x463a58256eb4aef3  # 2.0872121592838104e30
+Be/X giant outbursts BeXGiantOutburst subject Body(BodyId { system: SystemId(0xfc58383800000020), body_index: 0 }) bin -1939 number 0 onset -61162659565 + 347151688 ns
+Be/X giant outbursts BeXGiantOutburst peak at 864000 + 0 ns, duration 8821734 + 81387422 ns
+Be/X giant outbursts BeXGiantOutburst peak = 0x464d1566a8665b0f  # 4.6084800075984264e30
+Be/X giant outbursts BeXGiantOutburst V = 0x0000000000000000  # 0.0
+Be/X giant outbursts BeXGiantOutburst K = 0x0000000000000000  # 0.0
+Be/X giant outbursts BeXGiantOutburst xrays = 0x463a58256eb4aef3  # 2.0872121592838104e30
+luminous red nova LuminousRedNova subject System(SystemId(0xfc270b0800000050)) bin 0 number 0 onset -4878012200613 + 259277343 ns
+luminous red nova LuminousRedNova peak at 864000 + 0 ns, duration 15472300 + 561040567 ns
+luminous red nova LuminousRedNova peak = 0x462c1140ae293540  # 1.1118639946353706e30
+luminous red nova LuminousRedNova V = 0x45f1f83b122fa7dc  # 8.898140360520211e28
+luminous red nova LuminousRedNova K = 0x45e1d788837aa681  # 4.417447108306439e28
+luminous red nova LuminousRedNova xrays = 0x0000000000000000  # 0.0
+kilonova Kilonova subject System(SystemId(0xfc33860800000000)) bin 0 number 0 onset -6744331468991 + 496337890 ns
+kilonova Kilonova peak at 86400 + 0 ns, duration 2985212 + 702527676 ns
+kilonova Kilonova peak = 0x472325cf0c668668  # 4.971024676745128e34
+kilonova Kilonova V = 0x46ecda29c73164cd  # 4.6815371042020206e33
+kilonova Kilonova K = 0x46d36bd9f70d9589  # 1.5756426110974636e33
+kilonova Kilonova xrays = 0x0000000000000000  # 0.0
