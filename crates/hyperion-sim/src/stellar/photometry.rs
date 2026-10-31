@@ -3,7 +3,9 @@
 //!
 //! All three read the mean dwarf sequence of Pecaut and Mamajek (2013, ApJS 208, 9) in Mamajek's
 //! version 2022.04.16, the table [`classify`](crate::stellar::classify) types dwarfs on,
-//! interpolated linearly in log₁₀ T<sub>eff</sub>. The table's bolometric corrections are on the
+//! interpolated linearly in log₁₀ T<sub>eff</sub>: its rows to version 25 and its fitted grids
+//! from 26 (`classify::pm13`'s hold), which the `_under` forms take from the stellar rules of a
+//! star's galaxy and the public ones from the version's. The table's bolometric corrections are on the
 //! IAU 2015 system, with M<sub>bol</sub>☉ = 4.74 ([`SOLAR_ABSOLUTE_BOLOMETRIC_MAGNITUDE`]), so the
 //! Sun (5,772 K) reads BC<sub>V</sub> = −0.085 and M<sub>V</sub> = 4.825. They are the dwarfs'
 //! corrections, read at the star's temperature whatever its gravity: a giant's differs little from
@@ -90,8 +92,10 @@ mod levesque05;
 mod montreal_da;
 mod wl11;
 
+use crate::GENERATOR_VERSION;
 use crate::math;
-use crate::stellar::classify::pm13::{self, DwarfRow};
+use crate::stellar::classify::pm13::{Column, DwarfSequence};
+use crate::stellar::rules::StellarRules;
 use crate::stellar::{Phase, StarState};
 use crate::units::{Dex, Kelvin, Magnitudes, SolarLuminosities};
 
@@ -188,10 +192,21 @@ pub fn absolute_bolometric_magnitude(luminosity: SolarLuminosities) -> Option<Ma
 /// ```
 #[must_use]
 pub fn bolometric_correction_v(teff: Kelvin) -> Option<Magnitudes> {
+    bolometric_correction_v_under(teff, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`bolometric_correction_v`] on the dwarf sequence the stellar stage's `rules` choose
+/// ([`DwarfSequence::of`]).
+#[must_use]
+pub(crate) fn bolometric_correction_v_under(
+    teff: Kelvin,
+    rules: StellarRules,
+) -> Option<Magnitudes> {
     column_with_hot_tail(
         teff,
-        |r| r.bc_v,
-        |t| -RAYLEIGH_JEANS_BC_SLOPE * (math::log10(t) - math::log10(pm13::hottest().teff_k)),
+        DwarfSequence::of(rules),
+        Column::BcV,
+        |t, hottest_k| -RAYLEIGH_JEANS_BC_SLOPE * (math::log10(t) - math::log10(hottest_k)),
     )
 }
 
@@ -202,7 +217,14 @@ pub fn bolometric_correction_v(teff: Kelvin) -> Option<Magnitudes> {
 /// and positive.
 #[must_use]
 pub fn colour_b_v(teff: Kelvin) -> Option<Magnitudes> {
-    column_with_hot_tail(teff, |r| r.colour_b_v, |_| 0.0)
+    colour_b_v_under(teff, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`colour_b_v`] on the dwarf sequence the stellar stage's `rules` choose
+/// ([`DwarfSequence::of`]).
+#[must_use]
+pub(crate) fn colour_b_v_under(teff: Kelvin, rules: StellarRules) -> Option<Magnitudes> {
+    column_with_hot_tail(teff, DwarfSequence::of(rules), Column::ColourBV, |_, _| 0.0)
 }
 
 /// The absolute V magnitude of a star: M<sub>V</sub> = M<sub>bol</sub> − BC<sub>V</sub> at its
@@ -235,11 +257,21 @@ pub fn colour_b_v(teff: Kelvin) -> Option<Magnitudes> {
 /// ```
 #[must_use]
 pub fn absolute_magnitude_v(state: &StarState) -> Option<Magnitudes> {
+    absolute_magnitude_v_under(state, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`absolute_magnitude_v`] on the dwarf sequence the stellar stage's `rules` choose: what a star
+/// generated in a galaxy is given, from its model's rules.
+#[must_use]
+pub(crate) fn absolute_magnitude_v_under(
+    state: &StarState,
+    rules: StellarRules,
+) -> Option<Magnitudes> {
     if !state.phase().is_living() {
         return None;
     }
     let m_bol = absolute_bolometric_magnitude(state.luminosity())?;
-    let bc = bolometric_correction_v(state.effective_temperature())?;
+    let bc = bolometric_correction_v_under(state.effective_temperature(), rules)?;
     Some(m_bol - bc)
 }
 
@@ -463,6 +495,17 @@ pub fn is_dark_in_v(state: &StarState) -> bool {
 /// ```
 #[must_use]
 pub fn absolute_v_of_state(state: &StarState) -> Option<Magnitudes> {
+    absolute_v_of_state_under(state, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`absolute_v_of_state`] on the dwarf sequence the stellar stage's `rules` choose: what the sky
+/// census gives a star of its galaxy, from the galaxy's rules. The sky's fitted tables take the
+/// version's.
+#[must_use]
+pub(crate) fn absolute_v_of_state_under(
+    state: &StarState,
+    rules: StellarRules,
+) -> Option<Magnitudes> {
     match state.phase() {
         Phase::Protostar
         | Phase::HeliumWhiteDwarf
@@ -482,26 +525,32 @@ pub fn absolute_v_of_state(state: &StarState) -> Option<Magnitudes> {
         | Phase::HeliumHertzsprungGap
         | Phase::HeliumGiantBranch
         | Phase::PostAgb
-        | Phase::Substellar => absolute_magnitude_v(state),
+        | Phase::Substellar => absolute_magnitude_v_under(state, rules),
     }
 }
 
-/// A column of the dwarf sequence at `teff`, continued above the hottest row by `tail`, the
-/// change from that row's value as a function of the temperature.
+/// `column` of `dwarfs` at `teff`, continued above the hottest point by `tail`, the change from
+/// that point's value as a function of the temperature and the hottest point's, K.
 #[must_use]
 fn column_with_hot_tail(
     teff: Kelvin,
-    column: impl Fn(&DwarfRow) -> Option<f64>,
-    tail: impl Fn(f64) -> f64,
+    dwarfs: DwarfSequence,
+    column: Column,
+    tail: impl Fn(f64, f64) -> f64,
 ) -> Option<Magnitudes> {
     let t = teff.value();
     if !(t.is_finite() && t > 0.0) {
         return None;
     }
-    let value = if t > pm13::hottest().teff_k {
-        column(&pm13::hottest())? + tail(t)
+    let hottest = dwarfs.hottest();
+    let value = if t > hottest.teff_k {
+        let at_hottest = match column {
+            Column::BcV => hottest.bc_v,
+            Column::ColourBV => hottest.colour_b_v,
+        };
+        at_hottest + tail(t, hottest.teff_k)
     } else {
-        pm13::column_at(t, column)?
+        dwarfs.column_at(t, column)?
     };
     Some(Magnitudes::new(value))
 }
@@ -511,6 +560,7 @@ mod tests {
     use hyperion_testkit::float::bits;
 
     use super::*;
+    use crate::stellar::classify::pm13;
     use crate::stellar::draws::StarDraws;
     use crate::stellar::sse::Track;
     use crate::stellar::{Composition, StarStateParts};
@@ -562,7 +612,7 @@ mod tests {
     /// Continuous across the hottest row, and falling at the Rayleigh–Jeans rate beyond it.
     #[test]
     fn the_hot_tail_continues_the_table() {
-        let edge = pm13::hottest().teff_k;
+        let edge = pm13::DWARF_SEQUENCE[0].teff_k;
         let below = bolometric_correction_v(Kelvin::new(edge * (1.0 - 1e-12))).unwrap();
         let above = bolometric_correction_v(Kelvin::new(edge * (1.0 + 1e-12))).unwrap();
         assert!((below.value() - above.value()).abs() < 1e-9);

@@ -39,7 +39,7 @@ use crate::stellar::binary::{
 };
 use crate::stellar::classify::{
     ClassExtras, Classification, HeliumSurface, LuminosityClass, PeculiarClass, SpectralType,
-    classify,
+    classify_under,
 };
 use crate::stellar::draws::{StandardNormal, StarDraws, UnitUniform};
 use crate::stellar::multiplicity::{
@@ -47,7 +47,7 @@ use crate::stellar::multiplicity::{
     SystemHierarchy, draw_hierarchy_of_composition,
 };
 use crate::stellar::nebula::{self, PlanetaryNebula};
-use crate::stellar::photometry::{absolute_magnitude_v, colour_b_v};
+use crate::stellar::photometry::{absolute_magnitude_v_under, colour_b_v_under};
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::{
     BlackHole, CompactRemnant, Death, DeathKind, NatalKick, NeutronStar, PulsarState, RemnantKind,
@@ -374,6 +374,13 @@ impl StarModel {
         Ok(model)
     }
 
+    /// The stellar stage's rules the star was built under (`stellar::rules`): the version's, or
+    /// those of the galaxy it was generated in.
+    #[must_use]
+    pub(crate) const fn rules(&self) -> StellarRules {
+        self.rules
+    }
+
     /// The initial mass, M☉, as given.
     #[must_use]
     pub const fn initial_mass(&self) -> SolarMasses {
@@ -650,7 +657,13 @@ impl StarModel {
                 .map(|end| track.state_at(end)),
             Evolution::Track(_) | Evolution::Cooling => None,
         };
-        rotation::rotation(state, &self.composition, &self.draws, terminal.as_ref())
+        rotation::rotation_under(
+            state,
+            &self.composition,
+            &self.draws,
+            terminal.as_ref(),
+            self.rules,
+        )
     }
 
     /// How the star varies at `t` (P06.T26), as its summary gives it, or `None` if it does not vary
@@ -662,11 +675,12 @@ impl StarModel {
     #[must_use]
     pub fn variability_at(&self, t: UniverseTime) -> Option<Variability> {
         let state = self.state_at(t)?;
-        let classification = classify(
+        let classification = classify_under(
             &state,
             &self.composition,
             &self.draws,
-            &self.class_extras_at(&state, t),
+            self.class_extras_at(&state, t),
+            self.rules,
         );
         let spin = self.rotation_of(&state);
         let activity = rotation::activity(&state, spin.as_ref());
@@ -1048,19 +1062,19 @@ pub struct StellarBrief {
 
 impl StellarBrief {
     /// The brief of a primary in `state`, of `composition` and `draws`, with the `extras` its
-    /// history gives (a neutron star's class), in a system of `star_count` stars: its class, its
-    /// kind, log L and `T_eff`. [`SystemStars::brief_at`] and the range brief
-    /// ([`crate::stellar::brief`]) both make it here, so that a brief is the same function of the
-    /// state whichever built it.
+    /// history gives (a neutron star's class), in a system of `star_count` stars, classified under
+    /// the stellar stage's `rules`: its class, its kind, log L and `T_eff`.
+    /// [`SystemStars::brief_at`] and the range brief ([`crate::stellar::brief`]) both make it here,
+    /// so that a brief is the same function of the state whichever built it.
     #[must_use]
     pub(crate) fn of(
         state: &StarState,
         composition: &Composition,
         draws: &StarDraws,
         extras: ClassExtras,
-        star_count: u8,
+        (star_count, rules): (u8, StellarRules),
     ) -> Self {
-        let class = classify(state, composition, draws, &extras);
+        let class = classify_under(state, composition, draws, extras, rules);
         let luminosity = state.luminosity().value();
         Self {
             kind: object_kind(state, &class, composition),
@@ -1678,7 +1692,7 @@ impl SystemStars {
             primary.composition(),
             primary.draws(),
             extras,
-            self.star_count(),
+            (self.star_count(), primary.rules),
         ))
     }
 
@@ -2218,8 +2232,9 @@ fn star_summary_with(
     };
     let state = paired.state;
     let extras = paired.class_extras();
-    let classification = classify(&state, star.composition(), star.draws(), &extras);
-    let spin = rotation::rotation(&state, star.composition(), star.draws(), None);
+    let classification =
+        classify_under(&state, star.composition(), star.draws(), extras, star.rules);
+    let spin = rotation::rotation_under(&state, star.composition(), star.draws(), None, star.rules);
     let activity = rotation::activity(&state, spin.as_ref());
     let remnant = remnant_kind(state.phase()).map(|kind| {
         let mass = if kind == RemnantKind::None {
@@ -2233,8 +2248,8 @@ fn star_summary_with(
         body,
         kind: object_kind(&state, &classification, star.composition()),
         classification,
-        absolute_magnitude_v: absolute_magnitude_v(&state),
-        colour_b_v: colour_b_v(state.effective_temperature()),
+        absolute_magnitude_v: absolute_magnitude_v_under(&state, star.rules),
+        colour_b_v: colour_b_v_under(state.effective_temperature(), star.rules),
         remnant,
         remnant_detail: if state.phase() == Phase::NeutronStar {
             paired.pulsar.map(RemnantDetail::NeutronStar)
@@ -2315,11 +2330,12 @@ const fn remnant_kind(phase: Phase) -> Option<RemnantKind> {
 #[must_use]
 pub(crate) fn star_summary(star: &StarModel, body: BodyId, t: UniverseTime) -> Option<StarSummary> {
     let state = star.state_at(t)?;
-    let classification = classify(
+    let classification = classify_under(
         &state,
         star.composition(),
         star.draws(),
-        &star.class_extras_at(&state, t),
+        star.class_extras_at(&state, t),
+        star.rules,
     );
     let spin = star.rotation_of(&state);
     let activity = rotation::activity(&state, spin.as_ref());
@@ -2333,8 +2349,8 @@ pub(crate) fn star_summary(star: &StarModel, body: BodyId, t: UniverseTime) -> O
         body,
         kind: object_kind(&state, &classification, star.composition()),
         classification,
-        absolute_magnitude_v: absolute_magnitude_v(&state),
-        colour_b_v: colour_b_v(state.effective_temperature()),
+        absolute_magnitude_v: absolute_magnitude_v_under(&state, star.rules),
+        colour_b_v: colour_b_v_under(state.effective_temperature(), star.rules),
         remnant,
         remnant_detail: if state.phase() == Phase::NeutronStar {
             star.pulsar_at(t).map(RemnantDetail::NeutronStar)
@@ -2372,6 +2388,7 @@ mod tests {
     use crate::galaxy::placement::CellKey;
     use crate::id::Layer;
     use crate::rng::Seed;
+    use crate::stellar::classify::classify;
     use crate::units::SolarMasses;
 
     const SEED: u64 = 0x0600_0003_5eed_0001;
@@ -2929,7 +2946,7 @@ mod tests {
             ns.composition(),
             ns.draws(),
             ns.class_extras_at(summary.state(), t),
-            1,
+            (1, ns.rules),
         );
         assert_eq!(brief.class(), summary.classification());
         assert!((0.0..1.0).contains(&ns.pulsar_phase_at(t).unwrap()));

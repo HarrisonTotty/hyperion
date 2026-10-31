@@ -977,6 +977,16 @@ ruled 2026-10-09 and 2026-10-10).
   both, in crates/hyperion-sim/src/tables/class_boundaries.rs (galaxy plan 6, P06.T23.b). The
   tables themselves are not committed.
 
+- The mean dwarf sequence: M. J. Pecaut and E. E. Mamajek, Astrophys. J. Suppl. Ser. 208 (2013) 9,
+  Table 5, in E. Mamajek's maintained version 2022.04.16, "A Modern Mean Dwarf Stellar Color and
+  Effective Temperature Sequence",
+  https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt. Reduced to the
+  spectral type, BC_V and B - V against effective temperature, each resampled onto an even grid
+  in log T_eff from O3V to its coolest tabulated row, in
+  crates/hyperion-sim/src/tables/dwarf_sequence.rs (galaxy plan 6, P06.T23.a), which generator
+  versions from 26 read. Until then crates/hyperion-sim/src/stellar/classify/pm13.rs keeps the
+  four columns the versions before 26 read; the 26 bump deletes them.
+
 ================================================================================
 Test data (not shipped)
 

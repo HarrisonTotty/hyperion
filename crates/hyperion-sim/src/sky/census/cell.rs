@@ -85,6 +85,7 @@ use crate::stellar::multiplicity::{
     HierarchyBound, MAX_COMPANIONS, MultiplicityContext, RedrawAttempt, StarIndex, TIDAL_CUT_SHARE,
     hierarchy_bound, star_positions_at,
 };
+use crate::stellar::photometry::absolute_v_of_state_under;
 use crate::stellar::system::{SystemStars, draw_metallicity, grid_multiplicity, primary_eta};
 use crate::stellar::{Composition, Phase};
 use crate::time::{CLOCK_WINDOW_H, Span, UniverseTime};
@@ -94,7 +95,7 @@ use crate::units::{LightYears, Magnitudes, Metres, SolarMasses, Years};
 use super::super::colour::StarColour;
 use super::super::envelope::{BrightnessEnvelope, MAX_AGE_YEARS, always_single, max_star_mass};
 use super::super::phase::PhaseEnvelope;
-use super::super::photometry::{absolute_v_of_state, colour_of_state};
+use super::super::photometry::colour_of_state;
 use super::cache::{
     BlockKey, BlockParams, CACHE_APPROACH_LY, CACHE_CUT_SLACK_MAG, CellNeed, CellOutcome,
     HeldRecord, Lookup, Rebuild, serve_from_block,
@@ -1901,7 +1902,7 @@ fn record_stars(
             .and_then(StarIndex::from_body)
             .expect("a hierarchy's bodies are its stars, at most five");
         let star = &state.stars()[usize::from(index.get())];
-        let Some(m_v) = absolute_v_of_state(star) else {
+        let Some(m_v) = absolute_v_of_state_under(star, galaxy.rules().stellar) else {
             if matches!(
                 star.phase(),
                 Phase::HeliumWhiteDwarf
@@ -2214,6 +2215,7 @@ fn census_served(
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::photometry::absolute_v_of_state;
     use super::*;
     use crate::coords::UnitVector;
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
@@ -2675,6 +2677,57 @@ mod tests {
             .map(|&l| tally.layer(l).centre_members())
             .sum();
         assert_eq!(total, 2);
+    }
+
+    /// D2 of P06.T23.a's hold (`stellar::classify::pm13`'s), the sky census: a star's V is its
+    /// galaxy's, so under the reduced dwarf sequence the census lists the same stars at other
+    /// magnitudes.
+    #[test]
+    fn the_census_reads_its_galaxy_s_dwarf_sequence() {
+        use crate::galaxy::rules::GalaxyRules;
+        use crate::stellar::classify::pm13::DwarfSequenceRules;
+        use crate::stellar::rules::StellarRules;
+
+        let held = milky_way_galaxy();
+        let version = GalaxyRules::of_version(crate::GENERATOR_VERSION);
+        let reduced = held.clone().with_rules(GalaxyRules {
+            stellar: StellarRules {
+                dwarf_sequence: DwarfSequenceRules::Reduced,
+                ..version.stellar
+            },
+            ..version
+        });
+        let census = |galaxy: &Galaxy, record: &SystemRecord, query: &SkyQuery| {
+            let mut out = Vec::new();
+            census_record(
+                galaxy,
+                &mut context(),
+                record,
+                query,
+                Bound::Ignored,
+                &mut CensusTallies::default(),
+                &mut out,
+            );
+            out
+        };
+        let moved = records_near(Layer::C, SUN, 200)
+            .into_iter()
+            .find_map(|record| {
+                let [x, y, z] = record.epoch_position().to_light_years_f64();
+                let query = SkyQuery::builder(observer_at([x + 20.0, y, z]), Magnitudes::new(11.0))
+                    .build()
+                    .expect("a valid query");
+                let (was, now) = (
+                    census(held, &record, &query),
+                    census(&reduced, &record, &query),
+                );
+                assert_eq!(
+                    was.iter().map(SkyStar::star).collect::<Vec<_>>(),
+                    now.iter().map(SkyStar::star).collect::<Vec<_>>()
+                );
+                (star_bits(&was) != star_bits(&now)).then_some(was.len())
+            });
+        assert!(moved.is_some_and(|n| n > 0), "no listed star moved");
     }
 
     #[test]

@@ -39,9 +39,11 @@
 //! temperature would have, and a bright giant (II) the one halfway between a giant's and a
 //! supergiant's. Giants and supergiants are typed no later than M9.5.
 
+use super::SpectralCode;
+use super::pm13::DwarfSequence;
 use super::scales::{self, Node};
-use super::{SpectralCode, pm13};
 use crate::math;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::{Composition, Phase, StarState};
 use crate::tables::class_boundaries::{
     IAB_IA_M_BOL, IB_IAB_M_BOL, II_IB_M_BOL, III_II_M_BOL, IV_III_LOG_G, V_IV_LOG_G,
@@ -170,7 +172,8 @@ const HD_LUMINOSITY_LSUN: f64 = 6e5;
 const HD_RADIUS_FACTOR: f64 = 1e-5;
 
 /// The spectral code and luminosity class of a living star (see the [module](self)
-/// documentation).
+/// documentation), a dwarf's and a subgiant's code on the dwarf sequence the stellar stage's
+/// `rules` choose.
 ///
 /// A star without luminosity, which has no temperature, is read at the scale's cool end as a
 /// dwarf.
@@ -178,6 +181,7 @@ const HD_RADIUS_FACTOR: f64 = 1e-5;
 pub(crate) fn classify_living(
     state: &StarState,
     composition: &Composition,
+    rules: StellarRules,
 ) -> (SpectralCode, LuminosityClass) {
     let teff = state.effective_temperature().value();
     let l = state.luminosity().value();
@@ -186,7 +190,10 @@ pub(crate) fn classify_living(
     }
     let log_teff = math::log10(teff);
     let class = luminosity_class(state, log_teff, math::log10(l), composition.fe_h());
-    (subtype(class, teff, log_teff), class)
+    (
+        subtype(class, teff, log_teff, DwarfSequence::of(rules)),
+        class,
+    )
 }
 
 /// The luminosity class of a living star at log₁₀ T<sub>eff</sub> `log_teff` and log₁₀ L `log_l`.
@@ -298,10 +305,16 @@ fn boundary(log_teff: f64, nodes: &[(f64, f64)]) -> f64 {
     previous.map_or(0.0, |(_, y)| y)
 }
 
-/// The spectral code of a star of class `class` at T<sub>eff</sub> `teff_k` (log₁₀ `log_teff`).
+/// The spectral code of a star of class `class` at T<sub>eff</sub> `teff_k` (log₁₀ `log_teff`), a
+/// dwarf's and a subgiant's on `dwarfs`.
 #[must_use]
-fn subtype(class: LuminosityClass, teff_k: f64, log_teff: f64) -> SpectralCode {
-    let dwarf = || pm13::code_at(teff_k);
+fn subtype(
+    class: LuminosityClass,
+    teff_k: f64,
+    log_teff: f64,
+    dwarfs: DwarfSequence,
+) -> SpectralCode {
+    let dwarf = || dwarfs.code_at(teff_k);
     let giant = || scale_code(&scales::GIANT, teff_k, log_teff);
     let supergiant = || scale_code(&scales::SUPERGIANT, teff_k, log_teff);
     let code = match class {
@@ -344,7 +357,11 @@ fn scale_code(nodes: &[Node], teff_k: f64, log_teff: f64) -> f64 {
 mod tests {
     use super::super::tests::{star, star_g};
     use super::*;
+    use crate::GENERATOR_VERSION;
     use crate::units::HeliumExcess;
+
+    /// The generator version's stellar rules: the held arm of the dwarf sequence.
+    const VERSION: StellarRules = StellarRules::of_version(GENERATOR_VERSION);
 
     const GRAVITY_BOUNDARIES: [&[(f64, f64)]; 2] = [&V_IV_LOG_G, &IV_III_LOG_G];
 
@@ -352,7 +369,7 @@ mod tests {
         [&III_II_M_BOL, &II_IB_M_BOL, &IB_IAB_M_BOL, &IAB_IA_M_BOL];
 
     fn class_of(state: &StarState) -> LuminosityClass {
-        classify_living(state, &Composition::SOLAR).1
+        classify_living(state, &Composition::SOLAR, VERSION).1
     }
 
     /// The nodes of every boundary fall strictly in log T<sub>eff</sub>, which the interpolation
@@ -402,17 +419,21 @@ mod tests {
     }
 
     /// For every class the subtype is monotone in temperature, and within O3–M9.5 for every
-    /// class but the dwarfs'.
+    /// class but the dwarfs', on either arm of the dwarf sequence.
     #[test]
     fn the_subtype_is_monotone_in_teff_for_every_class() {
-        for class in LuminosityClass::ALL {
+        let arms = [VERSION, StellarRules::every_26_hold()].map(DwarfSequence::of);
+        for (class, dwarfs) in LuminosityClass::ALL
+            .into_iter()
+            .flat_map(|class| arms.map(|arm| (class, arm)))
+        {
             let mut previous = 0.0;
             let mut t = 60_000.0_f64;
             while t > 1_500.0 {
-                let code = subtype(class, t, math::log10(t)).value();
+                let code = subtype(class, t, math::log10(t), dwarfs).value();
                 assert!(
                     code >= previous,
-                    "{class:?} at {t} K: {code} after {previous}"
+                    "{class:?} on {dwarfs:?} at {t} K: {code} after {previous}"
                 );
                 if !matches!(
                     class,
@@ -437,6 +458,7 @@ mod tests {
                 LuminosityClass::Giant,
                 node.teff_k,
                 math::log10(node.teff_k),
+                DwarfSequence::of(VERSION),
             );
             assert!(
                 (code.value() - node.code).abs() < 1e-9,
@@ -448,6 +470,7 @@ mod tests {
                 LuminosityClass::Supergiant,
                 node.teff_k,
                 math::log10(node.teff_k),
+                DwarfSequence::of(VERSION),
             );
             assert!(
                 (code.value() - node.code).abs() < 1e-9,
@@ -519,6 +542,7 @@ mod tests {
             classify_living(
                 &dwarf,
                 &Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO),
+                VERSION,
             )
             .1
         };
@@ -528,7 +552,10 @@ mod tests {
         assert_eq!(at(-1.71), LuminosityClass::ExtremeSubdwarf);
         let pre = star(Phase::PreMainSequence, 0.5, 0.04, 3_800.0);
         let metal_poor = Composition::from_fe_h(Dex::new(-2.5), HeliumExcess::ZERO);
-        assert_eq!(classify_living(&pre, &metal_poor).1, LuminosityClass::Dwarf);
+        assert_eq!(
+            classify_living(&pre, &metal_poor, VERSION).1,
+            LuminosityClass::Dwarf
+        );
     }
 
     #[test]

@@ -31,11 +31,14 @@ mod scales;
 
 use core::fmt;
 
+use crate::GENERATOR_VERSION;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::wd_spectral::{WhiteDwarfType, white_dwarf_type};
 use crate::stellar::rotation;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::{Composition, Phase, StarState};
 use crate::units::Kelvin;
+use pm13::DwarfSequence;
 
 pub use luminosity::LuminosityClass;
 pub use peculiar::{
@@ -545,8 +548,15 @@ impl fmt::Display for Classification {
 /// ```
 #[must_use]
 pub fn subtype_from_teff(teff: Kelvin) -> Option<SpectralCode> {
+    subtype_from_teff_under(teff, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`subtype_from_teff`] on the dwarf sequence the stellar stage's `rules` choose
+/// ([`DwarfSequence::of`]): the rows to version 25, the fitted grids from 26.
+#[must_use]
+pub(crate) fn subtype_from_teff_under(teff: Kelvin, rules: StellarRules) -> Option<SpectralCode> {
     let t = teff.value();
-    (t.is_finite() && t > 0.0).then(|| SpectralCode::clamped(pm13::code_at(t)))
+    (t.is_finite() && t > 0.0).then(|| SpectralCode::clamped(DwarfSequence::of(rules).code_at(t)))
 }
 
 /// Classifies an object from its state, its composition and its draws (plan 06, P06.T23.d).
@@ -579,10 +589,30 @@ pub fn classify(
     draws: &StarDraws,
     extras: &ClassExtras,
 ) -> Classification {
+    classify_under(
+        state,
+        composition,
+        draws,
+        *extras,
+        StellarRules::of_version(GENERATOR_VERSION),
+    )
+}
+
+/// [`classify`] under the stellar stage's `rules` in place of the generator version's: what a star
+/// generated in a galaxy is classified with, from its model's, its pair's or its galaxy's rules
+/// (`stellar::rules`). The rules choose the dwarf sequence its type and its rotation read.
+#[must_use]
+pub(crate) fn classify_under(
+    state: &StarState,
+    composition: &Composition,
+    draws: &StarDraws,
+    extras: ClassExtras,
+    rules: StellarRules,
+) -> Classification {
     let ClassExtras {
         neutron_star,
         helium_surface,
-    } = *extras;
+    } = extras;
     match state.phase() {
         Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf => {
             Classification::bare(SpectralType::WhiteDwarf(white_dwarf_type(
@@ -611,19 +641,24 @@ pub fn classify(
             if let Some(wr) = peculiar::wolf_rayet(state, composition, helium_surface) {
                 return peculiar::wolf_rayet_class(wr);
             }
-            if let Some(subdwarf) = peculiar::hot_subdwarf(state, composition) {
+            if let Some(subdwarf) = peculiar::hot_subdwarf(state, composition, rules) {
                 return subdwarf;
             }
-            if let Some(stripped) = peculiar::stripped_helium_star(state, composition) {
+            if let Some(stripped) = peculiar::stripped_helium_star(state, composition, rules) {
                 return stripped;
             }
-            let (code, class) = luminosity::classify_living(state, composition);
+            let (code, class) = luminosity::classify_living(state, composition, rules);
             let mut classification = Classification::sequence(code, Some(class));
             if is_luminous_blue_variable(state) {
                 classification.peculiar = Some(PeculiarClass::LuminousBlueVariable);
             } else if state.phase() == Phase::MainSequence {
-                classification.peculiar =
-                    rotation_class(state, composition, draws, code.to_half_subtype().letter());
+                classification.peculiar = rotation_class(
+                    state,
+                    composition,
+                    draws,
+                    code.to_half_subtype().letter(),
+                    rules,
+                );
             }
             classification
         }
@@ -633,13 +668,14 @@ pub fn classify(
 /// The peculiar class a main-sequence star in `state` of spectral `letter` takes from its rotation
 /// and magnetism (P06.T25): Ap or Bp for a fossil field at 7,000–20,000 K (Bp for B and O types),
 /// else Be for a B type above 0.7 of its critical speed, else Am for an A star of 7,000–10,000 K
-/// turning under 120 km/s.
+/// turning under 120 km/s. The rotation reads the dwarf sequence `rules` choose.
 #[must_use]
 fn rotation_class(
     state: &StarState,
     composition: &Composition,
     draws: &StarDraws,
     letter: SpectralLetter,
+    rules: StellarRules,
 ) -> Option<PeculiarClass> {
     let teff = state.effective_temperature();
     let within = |(low, high): (Kelvin, Kelvin)| teff >= low && teff <= high;
@@ -660,7 +696,7 @@ fn rotation_class(
     if !is_b && !within(rotation::AM_TEMPERATURES) {
         return None;
     }
-    let spin = rotation::rotation(state, composition, draws, None)?;
+    let spin = rotation::rotation_under(state, composition, draws, None, rules)?;
     if is_b && spin.critical_fraction() > rotation::BE_CRITICAL_FRACTION {
         Some(PeculiarClass::Be)
     } else if within(rotation::AM_TEMPERATURES) && spin.equatorial_speed() < rotation::AM_MAX_SPEED

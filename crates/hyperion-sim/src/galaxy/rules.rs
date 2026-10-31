@@ -90,6 +90,14 @@ impl GalaxyRules {
     pub(crate) const fn every_25_hold() -> Self {
         Self::of_version(GeneratorVersion::new(25))
     }
+
+    /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: 25's
+    /// holds and those that turn on at 26 (the stellar rules' `dwarf_sequence`, P06.T23.a).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn every_26_hold() -> Self {
+        Self::of_version(GeneratorVersion::new(26))
+    }
 }
 
 #[cfg(test)]
@@ -193,6 +201,14 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_25_hold().stellar,
             StellarRules::every_25_hold()
+        );
+        assert_eq!(
+            GalaxyRules::every_26_hold().stellar,
+            StellarRules::every_26_hold()
+        );
+        assert_eq!(
+            GalaxyRules::every_26_hold().kepler_regime,
+            KeplerRegimeRules::Kepler
         );
         for v in [23, 24, 25, 26] {
             assert_eq!(

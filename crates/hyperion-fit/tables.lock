@@ -228,6 +228,17 @@ provisional = true
 acceptance = "on P15.T6.b's smoke histograms (211 orbits, 0 captured by the black hole and 0 unresolved): disc-born weighted mean misplaced share 0.9718 (unregularised 0.9716, λ 0.001); 54 of 56 classes with a parameter on a box edge, 18 of them over 10⁻⁴ of the weight; 85 second-difference sign changes along the rows; worst misplaced share thick disc 0.983, halo 0.986, bulge 0.996, bar 0.999, nuclear disc 0.999; own-form shares at the fixture's corotation ratio 1.24, bar 1.00, 0.00, 0.00, 0.00, bulge 0.00, 0.00, 0.00, 0.00, nuclear disc 1.00, 0.00, 1.00, 0.00; bar elongation over the control 0.79, 0.00, 1.13, -20.39, -, -, -, - and length within 0.98 of it; slowest thin class's mean rotation 0.882 `v_c`, fastest's -; the neutron stars' half-density height at 26,000 ly 102 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849 slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
 
 [[table]]
+name = "dwarf_sequence"
+path = "dwarf_sequence.rs"
+task = "dwarf_sequence"
+revision = 0
+inputs_sha256 = "0cca245865e91213bd92ae58fc8ed92aca3f5518bb3f26a2a4a615fd734642ad"
+body_sha256 = "a6f690062466937df1d93cf187c76e744b05a06e0eddd4b43bd5976121a500dd"
+since_generator_version = 24
+provisional = false
+acceptance = "the grids against the rows' interpolation over 200000 points each and every row: the code's 4510 nodes (step 0.0005000 dex) within 0.0206 of a subtype (at 1255 K); the bolometric correction's 2840 nodes (step 0.0004999 dex) within 0.0034 mag (at 1870 K); B − V's 2552 nodes (step 0.0005001 dex) within 0.0019 mag (at 3110 K); bounds 0.05 of a subtype and 0.005 and 0.005 mag"
+
+[[table]]
 name = "equipartition"
 path = "cluster_dynamics.rs"
 task = "equipartition"

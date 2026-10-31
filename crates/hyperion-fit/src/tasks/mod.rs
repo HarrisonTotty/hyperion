@@ -12,6 +12,7 @@ pub mod cluster_bh;
 pub mod cluster_retention;
 pub mod condensate_extinction;
 pub mod displaced_forms;
+pub mod dwarf_sequence;
 pub mod equipartition;
 pub mod giant_cooling;
 pub mod helium;

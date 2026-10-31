@@ -36,11 +36,13 @@
 //! are recorded with their sources on their constants; those still marked provisional are the
 //! lane's own estimates. Ruling 110 settled the fossil-field incidence and the braking law.
 
+use crate::GENERATOR_VERSION;
 use crate::coords::UnitVector;
 use crate::math;
 use crate::rng::Threshold;
 use crate::stellar::draws::{StandardNormal, StarDraws};
-use crate::stellar::photometry::colour_b_v;
+use crate::stellar::photometry::colour_b_v_under;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{ZCoeffs, zams};
 use crate::stellar::{Composition, Phase, StarState};
 use crate::units::consts::{
@@ -357,15 +359,35 @@ pub fn rotation(
     draws: &StarDraws,
     terminal_main_sequence: Option<&StarState>,
 ) -> Option<Rotation> {
+    rotation_under(
+        state,
+        composition,
+        draws,
+        terminal_main_sequence,
+        StellarRules::of_version(GENERATOR_VERSION),
+    )
+}
+
+/// [`rotation`] under the stellar stage's `rules` in place of the generator version's: a cool
+/// dwarf's braking reads its zero-age colour on the dwarf sequence they choose. It is what a star
+/// generated in a galaxy turns at, from its model's or its pair's rules.
+#[must_use]
+pub(crate) fn rotation_under(
+    state: &StarState,
+    composition: &Composition,
+    draws: &StarDraws,
+    terminal_main_sequence: Option<&StarState>,
+    rules: StellarRules,
+) -> Option<Rotation> {
     let axis = SpinAxis(draws.spin_axis());
     let (period_days, radius) = match stage(state.phase()) {
         Stage::MainSequence => (
-            main_sequence_period(state, composition, draws),
+            main_sequence_period(state, composition, draws, rules),
             state.radius().value(),
         ),
         Stage::Evolved => {
             let end = terminal_main_sequence?;
-            let at_end = main_sequence_period(end, composition, draws);
+            let at_end = main_sequence_period(end, composition, draws, rules);
             let ratio = state.radius().value() / end.radius().value();
             (at_end * ratio * ratio, state.radius().value())
         }
@@ -508,9 +530,15 @@ fn is_cool_dwarf(state: &StarState) -> bool {
 }
 
 /// The period, days, that the main-sequence law gives a star in `state`: by the fraction of
-/// critical speed above the Kraft break, by the braked birth period below it.
+/// critical speed above the Kraft break, by the braked birth period below it, whose colour reads
+/// the dwarf sequence `rules` choose.
 #[must_use]
-fn main_sequence_period(state: &StarState, composition: &Composition, draws: &StarDraws) -> f64 {
+fn main_sequence_period(
+    state: &StarState,
+    composition: &Composition,
+    draws: &StarDraws,
+    rules: StellarRules,
+) -> f64 {
     let mass = state.mass().value();
     let radius = state.radius().value();
     if state.mass() >= KRAFT_BREAK_MASS {
@@ -522,7 +550,7 @@ fn main_sequence_period(state: &StarState, composition: &Composition, draws: &St
         let speed = fraction * critical_speed(mass, radius);
         2.0 * core::f64::consts::PI * radius * SOLAR_RADIUS_M / speed / SECONDS_PER_DAY
     } else {
-        braked_period(mass, state.age().value() * 1e-6, composition, draws)
+        braked_period(mass, state.age().value() * 1e-6, composition, draws, rules)
     }
 }
 
@@ -593,14 +621,20 @@ fn interpolate_log_mass(nodes: &[(f64, f64)], mass: f64) -> f64 {
 /// with age. The colour in P(g) is the star's at the zero-age main sequence, fixed, so that the
 /// clock never runs backwards as the star evolves.
 #[must_use]
-fn braked_period(mass: f64, age_myr: f64, composition: &Composition, draws: &StarDraws) -> f64 {
+fn braked_period(
+    mass: f64,
+    age_myr: f64,
+    composition: &Composition,
+    draws: &StarDraws,
+    rules: StellarRules,
+) -> f64 {
     let birth = math::exp10(math::mul_add(
         BIRTH_PERIOD_SIGMA_DEX,
         math::normal_quantile(draws.rotation().value()),
         math::log10(birth_period_median(mass)),
     ));
     let (scale, colour_power, blue_edge, age_power) = GYRO;
-    let excess = (zams_colour(mass, composition) - blue_edge).max(0.0);
+    let excess = (zams_colour(mass, composition, rules) - blue_edge).max(0.0);
     let clock = if excess > 0.0 && age_myr > 0.0 {
         let gyro = scale * math::powf(excess, colour_power) * math::powf(age_myr, age_power);
         gyro * gyro
@@ -638,15 +672,16 @@ fn wright_turnover_days(mass: f64) -> f64 {
 
 /// The intrinsic B − V colour of a star of `mass` M☉ and `composition` at the zero-age main
 /// sequence (Tout et al. 1996's radius and luminosity, the dwarf colours of Pecaut and Mamajek
-/// 2013), with the mass held to 0.1–1.3 M☉, where the fits and the colour table both reach.
+/// 2013, on the dwarf sequence `rules` choose), with the mass held to 0.1–1.3 M☉, where the fits
+/// and the colour table both reach.
 #[must_use]
-fn zams_colour(mass: f64, composition: &Composition) -> f64 {
+fn zams_colour(mass: f64, composition: &Composition, rules: StellarRules) -> f64 {
     let coeffs = ZCoeffs::new(composition.z_fit());
     let m = SolarMasses::new(mass.clamp(0.1, KRAFT_BREAK_MASS.value()));
     let l = zams::luminosity(m, &coeffs).value();
     let r = zams::radius(m, &coeffs).value();
     let teff = SOLAR_EFFECTIVE_TEMPERATURE_K * math::powf(l, 0.25) / r.sqrt();
-    colour_b_v(Kelvin::new(teff)).map_or(2.0, Magnitudes::value)
+    colour_b_v_under(Kelvin::new(teff), rules).map_or(2.0, Magnitudes::value)
 }
 
 #[cfg(test)]
@@ -657,6 +692,9 @@ mod tests {
     use crate::stellar::StarStateParts;
     use crate::stellar::draws::{StarDrawsParts, UnitUniform};
     use crate::units::{SolarLuminosities, SolarMassesPerYear, SolarRadii, Years};
+
+    /// The generator version's stellar rules.
+    const VERSION: StellarRules = StellarRules::of_version(GENERATOR_VERSION);
 
     fn dwarf(mass: f64, luminosity: f64, radius: f64, age: f64) -> StarState {
         StarState::new(StarStateParts {
@@ -703,7 +741,7 @@ mod tests {
         for mass in [0.12, 0.2, 0.35, 0.6, 0.9, 1.1, 1.25] {
             for rank in [0.01, 0.2, 0.5, 0.8, 0.99] {
                 let draws = ranked(rank);
-                let at = |myr: f64| braked_period(mass, myr, &Composition::SOLAR, &draws);
+                let at = |myr: f64| braked_period(mass, myr, &Composition::SOLAR, &draws, VERSION);
                 let mut last = at(0.0);
                 for i in 1..=4_000 {
                     let myr = f64::from(i) * 3.5;
@@ -727,11 +765,11 @@ mod tests {
     #[test]
     fn fully_convective_stars_spin_down_late() {
         let draws = ranked(0.3);
-        let young_m = braked_period(0.2, 300.0, &Composition::SOLAR, &draws);
-        let old_m = braked_period(0.2, 8_000.0, &Composition::SOLAR, &draws);
+        let young_m = braked_period(0.2, 300.0, &Composition::SOLAR, &draws, VERSION);
+        let old_m = braked_period(0.2, 8_000.0, &Composition::SOLAR, &draws, VERSION);
         assert!(young_m < 5.0, "{young_m}");
         assert!(old_m > 30.0, "{old_m}");
-        let sun_like = braked_period(1.0, 300.0, &Composition::SOLAR, &draws);
+        let sun_like = braked_period(1.0, 300.0, &Composition::SOLAR, &draws, VERSION);
         assert!(sun_like > young_m, "{sun_like} against {young_m}");
     }
 

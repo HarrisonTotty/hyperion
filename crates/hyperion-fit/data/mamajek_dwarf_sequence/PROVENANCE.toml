@@ -1,0 +1,19 @@
+# Mamajek's maintained mean dwarf sequence, the extension of Pecaut and Mamajek's (2013) Table 5 to
+# O3 and to the L, T and Y dwarfs, on which dwarfs are typed and their photometry read (plan 06,
+# P06.T23.a). A fetched dataset: the file states no licence, so only this file is committed, and
+# the file is downloaded into `crates/hyperion-fit/data/cache/mamajek_dwarf_sequence/`, which git
+# ignores. Only the quantities the sim reads, resampled onto its own grid, are committed, in
+# `crates/hyperion-sim/src/tables/dwarf_sequence.rs` (`run dwarf_sequence`). If the author's site
+# is out of reach, the Internet Archive's capture of 2026-09-17 serves the same bytes:
+# https://web.archive.org/web/20260917203201id_/https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt
+dataset = "mamajek_dwarf_sequence"
+class = "fetched"
+citation = "Pecaut and Mamajek (2013), ApJS 208, 9, Table 5, in E. Mamajek's maintained version, \"A Modern Mean Dwarf Stellar Color and Effective Temperature Sequence\": the columns SpT, Teff, BCv and B-V"
+url = "https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt"
+retrieved = "2026-09-23"
+release = "Version 2022.04.16, as the site served it on that date (re-read 2026-10-30 from the Internet Archive's capture of 2026-09-17, the same bytes)"
+licence = "none stated; the file's header asks that Pecaut and Mamajek (2013) be cited until an updated version is published, and the author's pages state no terms. Only values resampled onto the sim's own grid are committed, with the citation (decisions-r05 item 4, decision-r08-licences)"
+
+[[files]]
+name = "EEM_dwarf_UBVIJHK_colors_Teff.txt"
+sha256 = "1de2edeec17bb3346e0e4e70b999de5ee29947df38474e64cddb7cfacc164b7f"

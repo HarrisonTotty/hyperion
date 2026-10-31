@@ -29,14 +29,22 @@
 //!
 //! - [`kick_rank`](StellarRules::kick_rank), the ordinary kick's rank table. No version holds a
 //!   second table yet, so every version takes the committed one. The tests reach a test-only
-//!   second table through it, to show that every reader goes through the choke point. The first
-//!   stellar table swap behind a hold adds its own field, its `*_VERSION` and its tripwire here.
+//!   second table through it, to show that every reader goes through the choke point.
+//! - [`dwarf_sequence`](StellarRules::dwarf_sequence), at [`DWARF_SEQUENCE_VERSION`] (plan 06,
+//!   P06.T23.a's licence fix): the dwarf sequence that classification, photometry and rotation
+//!   read, the source's rows to 25 and the fitted grids from 26, through
+//!   [`DwarfSequence::of`]. Its readers on the record are a star's classification, photometry and
+//!   rotation in its summary and its range brief, the binary engine's Be stars and the sky
+//!   census's stars; the sky's fitted tables, the server's converters and `hyperion-fit` take the
+//!   version's rules. The 25 → 26 bump deletes the field, its held arm and its tripwire.
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
+//! [`DwarfSequence::of`]: crate::stellar::classify::pm13::DwarfSequence::of
 
 use crate::GeneratorVersion;
+use crate::stellar::classify::pm13::{DWARF_SEQUENCE_VERSION, DwarfSequenceRules};
 use crate::stellar::remnant::KickRankRules;
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -47,18 +55,24 @@ pub(crate) struct StellarRules {
     ///
     /// [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
     pub(crate) kick_rank: KickRankRules,
+    /// The dwarf sequence classification, photometry and rotation read
+    /// ([`DwarfSequence::of`](crate::stellar::classify::pm13::DwarfSequence::of)).
+    pub(crate) dwarf_sequence: DwarfSequenceRules,
 }
 
 impl StellarRules {
     /// Each field's arm at `version`: the new arm from its `*_VERSION`, the held arm below it.
     ///
-    /// No field has a later arm yet, so every version takes the committed kick-rank table.
+    /// Every version takes the committed kick-rank table.
     #[must_use]
     pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
-        // No field compares the version yet; the first stellar hold's field does.
-        let _ = version;
         Self {
             kick_rank: KickRankRules::Committed,
+            dwarf_sequence: if version.get() >= DWARF_SEQUENCE_VERSION.get() {
+                DwarfSequenceRules::Reduced
+            } else {
+                DwarfSequenceRules::Rows
+            },
         }
     }
 
@@ -72,14 +86,25 @@ impl StellarRules {
         Self::of_version(GeneratorVersion::new(25))
     }
 
+    /// Every stellar hold at 26 in force, for a test that asserts a 26 figure without a galaxy.
+    ///
+    /// It is the stellar part of `GalaxyRules::every_26_hold()`, so a later hold at 26 joins both
+    /// with nothing to edit.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn every_26_hold() -> Self {
+        Self::of_version(GeneratorVersion::new(26))
+    }
+
     /// The test-only second table in place of the committed one
-    /// ([`KickRankRules::Probe`]), which no version takes: the tests' door to every reader's
-    /// choke point.
+    /// ([`KickRankRules::Probe`]), which no version takes, under the version's other rules: the
+    /// tests' door to every reader's choke point.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn probe() -> Self {
         Self {
             kick_rank: KickRankRules::Probe,
+            ..Self::of_version(crate::GENERATOR_VERSION)
         }
     }
 }

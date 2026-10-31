@@ -49,10 +49,11 @@
 use crate::math;
 use crate::orbit::{peters_merger_time, roche_lobe_radius};
 use crate::rng::Threshold;
-use crate::stellar::classify::{SpectralLetter, subtype_from_teff};
+use crate::stellar::classify::{SpectralLetter, subtype_from_teff_under};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::RemnantKind;
 use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::turn_off_mass;
 use crate::stellar::{Composition, Phase, StarState, rotation};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
@@ -340,19 +341,22 @@ pub struct ClassContext<'a> {
     params: &'a BinaryParams,
     pulsars: [Option<PulsarAt>; 2],
     merged_from: Option<[Phase; 2]>,
+    /// The pair's stellar rules, which its Be stars' type and rotation read.
+    rules: StellarRules,
 }
 
 impl<'a> ClassContext<'a> {
     /// The context of a pair of `composition`, `draws` and `params`, whose stars are the pulsars
     /// `pulsars` (`None` for a star that is not a neutron star, or one with no recorded birth),
-    /// and which, if it has merged, merged from stars of the phases `merged_from`.
+    /// and which, if it has merged, merged from stars of the phases `merged_from`, under the
+    /// stellar stage's `rules`.
     #[must_use]
     pub(crate) const fn new(
         composition: &'a Composition,
         draws: [&'a StarDraws; 2],
         params: &'a BinaryParams,
-        pulsars: [Option<PulsarAt>; 2],
-        merged_from: Option<[Phase; 2]>,
+        (pulsars, merged_from): ([Option<PulsarAt>; 2], Option<[Phase; 2]>),
+        rules: StellarRules,
     ) -> Self {
         Self {
             composition,
@@ -360,6 +364,7 @@ impl<'a> ClassContext<'a> {
             params,
             pulsars,
             merged_from,
+            rules,
         }
     }
 
@@ -367,6 +372,13 @@ impl<'a> ClassContext<'a> {
     #[must_use]
     pub const fn composition(&self) -> &Composition {
         self.composition
+    }
+
+    /// The pair's stellar rules.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn rules(&self) -> StellarRules {
+        self.rules
     }
 
     /// Component `c`'s pulsar, if it is one.
@@ -645,7 +657,7 @@ fn pair_class(state: &BinaryState, ctx: &ClassContext<'_>) -> Option<Classified>
         if is_neutron_star_or_black_hole(cp)
             && donor.mass() >= HMXB_MIN_DONOR_MASS
             && period <= BEX_MAX_PERIOD
-            && is_be_star(donor, ctx.composition, ctx.draws[d])
+            && is_be_star(donor, ctx.composition, ctx.draws[d], ctx.rules)
         {
             return Some(Classified::plain(BinaryClass::HighMassXrayBinary(
                 HmxbKind::BeX,
@@ -684,17 +696,23 @@ fn pair_class(state: &BinaryState, ctx: &ClassContext<'_>) -> Option<Classified>
 
 /// Whether `star` is plan 06's Be star: a B-type main-sequence star without a fossil field (which
 /// makes it a Bp star) spinning above [`BE_CRITICAL_FRACTION`](rotation::BE_CRITICAL_FRACTION)
-/// of its critical speed, by its own rotation draw (P06.T25's `rotation_class`).
+/// of its critical speed, by its own rotation draw (P06.T25's `rotation_class`), its type and its
+/// rotation on the dwarf sequence the stellar `rules` choose.
 #[must_use]
-fn is_be_star(star: &StarState, composition: &Composition, draws: &StarDraws) -> bool {
+fn is_be_star(
+    star: &StarState,
+    composition: &Composition,
+    draws: &StarDraws,
+    rules: StellarRules,
+) -> bool {
     if star.phase() != Phase::MainSequence {
         return false;
     }
-    let b_type = subtype_from_teff(star.effective_temperature())
+    let b_type = subtype_from_teff_under(star.effective_temperature(), rules)
         .is_some_and(|code| code.letter() == SpectralLetter::B);
     b_type
         && rotation::fossil_field(star, draws).is_none()
-        && rotation::rotation(star, composition, draws, None)
+        && rotation::rotation_under(star, composition, draws, None, rules)
             .is_some_and(|spin| spin.critical_fraction() > rotation::BE_CRITICAL_FRACTION)
 }
 
@@ -821,8 +839,8 @@ impl BinaryTimeline {
             ctx.composition(),
             [ctx.draws(0), ctx.draws(1)],
             ctx.params(),
-            pulsars,
-            merged_from,
+            (pulsars, merged_from),
+            ctx.rules(),
         )
     }
 
@@ -1261,6 +1279,7 @@ mod tests {
     /// 8 M☉ or more on an orbit of 1,000 d or less.
     #[test]
     fn a_be_x_ray_binary_needs_a_massive_be_star_on_a_short_orbit() {
+        let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
         let neutron_star = star(Phase::NeutronStar, 1.4, 1e-4, 1.7e-5, 0.0);
         let b_star = |mass: f64, luminosity: f64, radius: f64| {
             star(Phase::MainSequence, mass, luminosity, radius, 0.0)
@@ -1274,8 +1293,8 @@ mod tests {
                 })
             })
             .find(|d| {
-                is_be_star(&b_star(12.0, 1.0e4, 5.0), &Composition::SOLAR, d)
-                    && is_be_star(&b_star(6.0, 1.0e3, 3.2), &Composition::SOLAR, d)
+                is_be_star(&b_star(12.0, 1.0e4, 5.0), &Composition::SOLAR, d, rules)
+                    && is_be_star(&b_star(6.0, 1.0e3, 3.2), &Composition::SOLAR, d, rules)
             })
             .expect("some rotation rank makes both a 12 and a 6 M☉ B star a Be star");
         let class = |donor: StarState, period: f64| {

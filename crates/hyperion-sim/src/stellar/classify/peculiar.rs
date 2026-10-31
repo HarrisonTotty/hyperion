@@ -33,6 +33,7 @@
 use core::fmt;
 
 use crate::math;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::wind;
 use crate::stellar::{Composition, Phase, StarState};
 use crate::units::{Kelvin, SolarLuminosities, SolarMasses};
@@ -383,10 +384,16 @@ pub(crate) fn wolf_rayet(
 /// Wolf-Rayet floor, from 20,000 K and of up to [`HOT_SUBDWARF_MAX_MASS`], or `None`: `sd` and the
 /// dwarf scale's type, held to B0 and cooler below 40,000 K (an sdB star) and to O above it (an
 /// sdO star).
+///
+/// The type is read on the dwarf sequence the stellar stage's `rules` choose.
 #[must_use]
-pub(crate) fn hot_subdwarf(state: &StarState, composition: &Composition) -> Option<Classification> {
+pub(crate) fn hot_subdwarf(
+    state: &StarState,
+    composition: &Composition,
+    rules: StellarRules,
+) -> Option<Classification> {
     (state.mass() <= HOT_SUBDWARF_MAX_MASS)
-        .then(|| helium_subdwarf(state, composition, PeculiarClass::HotSubdwarf))
+        .then(|| helium_subdwarf(state, composition, PeculiarClass::HotSubdwarf, rules))
         .flatten()
 }
 
@@ -416,13 +423,16 @@ pub(crate) fn hot_subdwarf(state: &StarState, composition: &Composition) -> Opti
 /// 5.9–7.7 M☉ across the helium main sequence on Hurley, Pols and Tout's (2000) fits and at
 /// 6.72 M☉ in Götberg et al.'s (2018) grid, against Shenar et al.'s (2020, A&A 634, A79) 7.5 M☉
 /// and Drout et al.'s (2023) ~8 M☉.
+///
+/// The type is read on the dwarf sequence the stellar stage's `rules` choose.
 #[must_use]
 pub(crate) fn stripped_helium_star(
     state: &StarState,
     composition: &Composition,
+    rules: StellarRules,
 ) -> Option<Classification> {
     (state.mass() > HOT_SUBDWARF_MAX_MASS)
-        .then(|| helium_subdwarf(state, composition, PeculiarClass::StrippedHeliumStar))
+        .then(|| helium_subdwarf(state, composition, PeculiarClass::StrippedHeliumStar, rules))
         .flatten()
 }
 
@@ -434,6 +444,7 @@ fn helium_subdwarf(
     state: &StarState,
     composition: &Composition,
     peculiar: PeculiarClass,
+    rules: StellarRules,
 ) -> Option<Classification> {
     let teff = state.effective_temperature().value();
     let helium_star = matches!(
@@ -446,7 +457,7 @@ fn helium_subdwarf(
     {
         return None;
     }
-    let dwarf = super::subtype_from_teff(Kelvin::new(teff))?.value();
+    let dwarf = super::subtype_from_teff_under(Kelvin::new(teff), rules)?.value();
     // O ends below code 10 (B0): an sdB is held to B0 and cooler, an sdO to O9.5 and hotter.
     let code = if teff < SD_O_MIN_TEFF {
         dwarf.max(10.0)

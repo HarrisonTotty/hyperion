@@ -158,6 +158,8 @@ pub struct StatedError {
 pub struct BriefModel {
     primary: Primary,
     star_count: u8,
+    /// The galaxy's stellar rules, which the primary's class reads on every route.
+    rules: StellarRules,
 }
 
 /// A [`BriefModel`]'s primary.
@@ -409,6 +411,7 @@ impl BriefModel {
             return Self {
                 primary: Primary::Paired(Box::new(stars)),
                 star_count,
+                rules: galaxy.rules().stellar,
             };
         }
         let m0 = record.primary_initial_mass();
@@ -434,6 +437,7 @@ impl BriefModel {
             return Self {
                 primary,
                 star_count,
+                rules: galaxy.rules().stellar,
             };
         }
         // The main sequence's class reads the rotation rank and fossil mark too (P06.T25).
@@ -476,6 +480,7 @@ impl BriefModel {
         Self {
             primary,
             star_count,
+            rules: galaxy.rules().stellar,
         }
     }
 
@@ -523,7 +528,7 @@ impl BriefModel {
                         composition,
                         &eta_draws(*eta, *rotation),
                         ClassExtras::NONE,
-                        self.star_count,
+                        (self.star_count, self.rules),
                     )
                 })
             }
@@ -537,9 +542,8 @@ impl BriefModel {
                 track,
                 composition,
                 draws,
-                age_at(*age_at_epoch, t),
-                fate.death_age.value(),
-                self.star_count,
+                (age_at(*age_at_epoch, t), fate.death_age.value()),
+                (self.star_count, self.rules),
             )),
             Primary::Remnant {
                 track,
@@ -551,9 +555,8 @@ impl BriefModel {
                 track,
                 composition,
                 draws,
-                age_at(*age_at_epoch, t),
-                *birth,
-                self.star_count,
+                (age_at(*age_at_epoch, t), *birth),
+                (self.star_count, self.rules),
             )),
             Primary::Exact(model) => model.state_at(t).map(|state| {
                 StellarBrief::of(
@@ -561,7 +564,7 @@ impl BriefModel {
                     model.composition(),
                     model.draws(),
                     model.class_extras_at(&state, t),
-                    self.star_count,
+                    (self.star_count, model.rules()),
                 )
             }),
             Primary::Paired(stars) => stars
@@ -834,19 +837,19 @@ fn remnant_extras(state: &StarState, draws: &StarDraws, age: f64, birth: f64) ->
 }
 
 /// The brief at `age` of a remnant-only `track` formed at `birth`, for a star of `composition`
-/// and `draws` in a system of `star_count` stars: the remnant's state and its history's extras.
+/// and `draws` in a system of `star_count` stars under the stellar `rules`: the remnant's state
+/// and its history's extras.
 #[must_use]
 fn remnant_brief(
     track: &Track,
     composition: &Composition,
     draws: &StarDraws,
-    age: f64,
-    birth: f64,
-    star_count: u8,
+    (age, birth): (f64, f64),
+    (star_count, rules): (u8, StellarRules),
 ) -> StellarBrief {
     let state = track.state_at(Years::new(age));
     let extras = remnant_extras(&state, draws, age, birth);
-    StellarBrief::of(&state, composition, draws, extras, star_count)
+    StellarBrief::of(&state, composition, draws, extras, (star_count, rules))
 }
 
 /// The table-routed primary of `fate`, found dead through the whole clock window, of initial
@@ -993,7 +996,7 @@ mod tests {
             primary.composition(),
             primary.draws(),
             primary.class_extras_at(&state, t),
-            star_count,
+            (star_count, primary.rules()),
         ))
     }
 

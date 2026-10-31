@@ -14,13 +14,147 @@
 //! above Table 5's from F0 to K5, 0.18 mag at K9V and up to 0.23 mag apart among the M dwarfs. The
 //! one table is used whole, so that the scale has no seam between the two.
 //!
-//! Four of the file's 32 columns are kept, with its numbers as printed: the spectral type,
-//! T<sub>eff</sub>, the V-band bolometric correction BC<sub>V</sub> and B − V. The file gives
-//! BC<sub>V</sub> down to L5V (1,710 K) and B − V down to M9V (2,380 K); below those a row has
-//! none.
+//! The file gives BC<sub>V</sub> down to L5V (1,710 K) and B − V down to M9V (2,380 K); below
+//! those a star has none.
+//!
+//! **Two arms, the hold of [`DWARF_SEQUENCE_VERSION`].** Every reader takes the sequence through
+//! [`DwarfSequence::of`], with the stellar rules of its galaxy, its star or its pair, or the
+//! version's ([`StellarRules`]).
+//!
+//! - To version 25, [`DWARF_SEQUENCE`]: four of the file's 32 columns at every row, with its
+//!   numbers as printed (the spectral type, T<sub>eff</sub>, BC<sub>V</sub> and B − V), read
+//!   linearly in log₁₀ T<sub>eff</sub> between rows. A column subset of every row is still the raw
+//!   table, which the file's terms (none stated) do not let the repository carry (decisions-r05
+//!   item 4, decision-r08-licences); it stays only so that every version to 25 keeps its bits.
+//! - From version 26, the fitted table [`tables::dwarf_sequence`](crate::tables::dwarf_sequence):
+//!   the same three quantities on even grids in log₁₀ T<sub>eff</sub>, which `hyperion-fit`'s
+//!   `dwarf_sequence` task resamples from the fetched file (P06.T23.a's licence fix), read
+//!   linearly between nodes. It keeps the rows' values at the grids' ends, O3V and each quantity's
+//!   coolest row, and lies within 0.021 of a subtype, 0.0034 mag in BC<sub>V</sub> and 0.0019 mag
+//!   in B − V of the rows' interpolation everywhere between (the table's acceptance).
+//!
+//! The 25 → 26 bump deletes the rows, [`DwarfSequenceRules`] with its `Rows` arm and the
+//! `dwarf_sequence` field of [`StellarRules`] (the tripwire,
+//! `the_reduced_dwarf_sequence_is_held_only_until_the_26_bump`).
 
 use super::SpectralLetter;
+use crate::GeneratorVersion;
 use crate::math;
+use crate::stellar::rules::StellarRules;
+use crate::tables::dwarf_sequence as reduced;
+
+/// The generator version from which the stellar stage reads the fitted grids
+/// ([`DwarfSequenceRules::Reduced`]) in place of the source's rows (P06.T23.a's licence fix).
+///
+/// Below it every reader takes the held arm, [`DwarfSequenceRules::Rows`], which is the code of
+/// version 24 verbatim, so every generated value keeps its bits; the tests reach the new arm
+/// through `StellarRules::every_26_hold()`.
+pub(crate) const DWARF_SEQUENCE_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Which dwarf sequence the stellar stage reads (the stellar rules' `dwarf_sequence` field, the hold
+/// of [`DWARF_SEQUENCE_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum DwarfSequenceRules {
+    /// Version 25's and before: the source's rows, [`DWARF_SEQUENCE`].
+    Rows,
+    /// Version 26's: the fitted grids of [`tables::dwarf_sequence`](crate::tables::dwarf_sequence).
+    Reduced,
+}
+
+/// A photometric quantity of the sequence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum Column {
+    /// The V-band bolometric correction BC<sub>V</sub>, mag.
+    BcV,
+    /// The intrinsic B − V colour, mag.
+    ColourBV,
+}
+
+/// The hottest point of the sequence, O3V, from which the photometry continues it to hotter
+/// stars.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Hottest {
+    /// Its effective temperature, K.
+    pub(crate) teff_k: f64,
+    /// Its BC<sub>V</sub>, mag.
+    pub(crate) bc_v: f64,
+    /// Its B − V, mag.
+    pub(crate) colour_b_v: f64,
+}
+
+/// The dwarf sequence a reader takes: the arm its stellar rules choose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct DwarfSequence(DwarfSequenceRules);
+
+impl DwarfSequence {
+    /// The sequence the stellar stage's `rules` choose: the one reading of their
+    /// [`dwarf_sequence`](StellarRules::dwarf_sequence) field, which every reader goes through.
+    #[must_use]
+    pub(crate) const fn of(rules: StellarRules) -> Self {
+        Self(rules.dwarf_sequence)
+    }
+
+    /// The dwarf scale's continuous spectral code at `teff_k`: linear in log₁₀ T<sub>eff</sub>
+    /// between rows or nodes, held at O3 (3) above the sequence and at Y4 (94) below it.
+    ///
+    /// The caller passes a finite, positive temperature (debug-asserted); a NaN reads as cooler
+    /// than the sequence.
+    #[must_use]
+    pub(crate) fn code_at(self, teff_k: f64) -> f64 {
+        debug_assert!(
+            teff_k.is_finite() && teff_k > 0.0,
+            "an effective temperature is finite and positive: {teff_k}"
+        );
+        match self.0 {
+            DwarfSequenceRules::Rows => rows_code_at(teff_k),
+            DwarfSequenceRules::Reduced => grid_code_at(teff_k),
+        }
+    }
+
+    /// `column` at `teff_k`, linear in log₁₀ T<sub>eff</sub> between rows or nodes that both give
+    /// it; `None` where the sequence does not give it, and beyond either end.
+    #[must_use]
+    pub(crate) fn column_at(self, teff_k: f64, column: Column) -> Option<f64> {
+        match self.0 {
+            DwarfSequenceRules::Rows => rows_column_at(teff_k, column),
+            DwarfSequenceRules::Reduced => match column {
+                Column::BcV => on_grid(
+                    teff_k,
+                    reduced::BC_V_LOG_TEFF_COOL,
+                    reduced::BC_V_STEP_DEX,
+                    &reduced::BC_V,
+                ),
+                Column::ColourBV => on_grid(
+                    teff_k,
+                    reduced::COLOUR_B_V_LOG_TEFF_COOL,
+                    reduced::COLOUR_B_V_STEP_DEX,
+                    &reduced::COLOUR_B_V,
+                ),
+            },
+        }
+    }
+
+    /// The hottest point, O3V: the same values in both arms, the grids' first nodes being the
+    /// row's.
+    #[must_use]
+    pub(crate) fn hottest(self) -> Hottest {
+        match self.0 {
+            DwarfSequenceRules::Rows => {
+                let row = DWARF_SEQUENCE[0];
+                Hottest {
+                    teff_k: row.teff_k,
+                    bc_v: row.bc_v.expect("O3V gives BC_V"),
+                    colour_b_v: row.colour_b_v.expect("O3V gives B - V"),
+                }
+            }
+            DwarfSequenceRules::Reduced => Hottest {
+                teff_k: reduced::TEFF_HOT_K,
+                bc_v: reduced::BC_V[0],
+                colour_b_v: reduced::COLOUR_B_V[0],
+            },
+        }
+    }
+}
 
 /// One row of the mean dwarf sequence: a class V spectral type, its effective temperature and,
 /// where the source gives them, its V-band bolometric correction and B − V colour.
@@ -196,6 +330,9 @@ pub(crate) const DWARF_SEQUENCE: [DwarfRow; 118] = [
 /// The first row: O3V.
 const HOTTEST: DwarfRow = DWARF_SEQUENCE[0];
 
+/// The last row: Y4V.
+const COOLEST: DwarfRow = DWARF_SEQUENCE[DWARF_SEQUENCE.len() - 1];
+
 /// Where an effective temperature falls on the dwarf sequence.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Place {
@@ -251,10 +388,9 @@ pub(crate) fn place(teff_k: f64) -> Place {
     }
 }
 
-/// The dwarf scale's continuous spectral code at `teff_k`: linear in log₁₀ T<sub>eff</sub> between
-/// rows, held at O3 (3) above the table and at Y4 (94) below it.
+/// The held arm's spectral code at `teff_k` ([`DwarfSequence::code_at`]).
 #[must_use]
-pub(crate) fn code_at(teff_k: f64) -> f64 {
+fn rows_code_at(teff_k: f64) -> f64 {
     match place(teff_k) {
         Place::Hotter => HOTTEST.code(),
         Place::At(i) => DWARF_SEQUENCE[i].code(),
@@ -262,31 +398,68 @@ pub(crate) fn code_at(teff_k: f64) -> f64 {
             let (a, b) = (DWARF_SEQUENCE[hot].code(), DWARF_SEQUENCE[hot + 1].code());
             a + fraction * (b - a)
         }
-        Place::Cooler => DWARF_SEQUENCE[DWARF_SEQUENCE.len() - 1].code(),
+        Place::Cooler => COOLEST.code(),
     }
 }
 
-/// A column of the table at `teff_k`: a row's own value at its temperature, linear in log₁₀
+/// The held arm's `column` at `teff_k`: a row's own value at its temperature, linear in log₁₀
 /// T<sub>eff</sub> between two rows that both give it; `None` where either does not, and beyond
 /// either end.
 #[must_use]
-pub(crate) fn column_at(teff_k: f64, column: impl Fn(&DwarfRow) -> Option<f64>) -> Option<f64> {
+fn rows_column_at(teff_k: f64, column: Column) -> Option<f64> {
+    let value = |row: &DwarfRow| match column {
+        Column::BcV => row.bc_v,
+        Column::ColourBV => row.colour_b_v,
+    };
     match place(teff_k) {
-        Place::At(i) => column(&DWARF_SEQUENCE[i]),
+        Place::At(i) => value(&DWARF_SEQUENCE[i]),
         Place::Between { hot, fraction } => {
-            let a = column(&DWARF_SEQUENCE[hot])?;
-            let b = column(&DWARF_SEQUENCE[hot + 1])?;
+            let a = value(&DWARF_SEQUENCE[hot])?;
+            let b = value(&DWARF_SEQUENCE[hot + 1])?;
             Some(a + fraction * (b - a))
         }
         Place::Hotter | Place::Cooler => None,
     }
 }
 
-/// The hottest row, from which the photometry continues the table to hotter stars.
+/// The new arm's spectral code at `teff_k` ([`DwarfSequence::code_at`]): the code's grid, held at
+/// its first node above it and at its last below it (or for a NaN).
 #[must_use]
-pub(crate) const fn hottest() -> DwarfRow {
-    HOTTEST
+fn grid_code_at(teff_k: f64) -> f64 {
+    if teff_k > reduced::TEFF_HOT_K {
+        return reduced::CODE[0];
+    }
+    on_grid(
+        teff_k,
+        reduced::CODE_LOG_TEFF_COOL,
+        reduced::CODE_STEP_DEX,
+        &reduced::CODE,
+    )
+    .unwrap_or(reduced::CODE[reduced::CODE.len() - 1])
 }
+
+/// A grid of [`tables::dwarf_sequence`](crate::tables::dwarf_sequence) at `teff_k`: its `values`
+/// at nodes `step` dex apart in log₁₀ T<sub>eff</sub> from `LOG_TEFF_HOT` down to `cool`, linear
+/// between them, as the table's task measures it; `None` outside the ends and for a NaN.
+#[must_use]
+fn on_grid(teff_k: f64, cool: f64, step: f64, values: &[f64]) -> Option<f64> {
+    let x = math::log10(teff_k);
+    if !(x >= cool && x <= reduced::LOG_TEFF_HOT) {
+        return None;
+    }
+    let position = (reduced::LOG_TEFF_HOT - x) / step;
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a non-negative number of steps, held below the grid's few thousand cells"
+    )]
+    let i = (position.floor().clamp(0.0, 1.0e5) as usize).min(values.len() - 2);
+    let fraction = position - f64::from(u32::try_from(i).expect("a grid has a few thousand nodes"));
+    Some(values[i] + fraction * (values[i + 1] - values[i]))
+}
+
+#[cfg(test)]
+mod hold;
 
 #[cfg(test)]
 mod tests {

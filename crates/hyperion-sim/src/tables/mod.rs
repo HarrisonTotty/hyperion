@@ -80,6 +80,7 @@ pub mod condensate_extinction_7;
 )]
 pub mod condensate_extinction_8;
 pub mod displaced_forms;
+pub mod dwarf_sequence;
 pub mod gauss_legendre;
 pub mod giant_cooling;
 pub mod helium;
@@ -241,6 +242,12 @@ pub const MANIFEST: &[TableInfo] = &[
         revision: 0,
         since_generator_version: 22,
         provisional: true,
+    },
+    TableInfo {
+        name: "dwarf_sequence",
+        revision: 0,
+        since_generator_version: 24,
+        provisional: false,
     },
     TableInfo {
         name: "equipartition",
