@@ -22,7 +22,7 @@
 use std::fmt;
 
 use super::CellKey;
-use super::marks::DrawnMarks;
+use super::marks::{DrawnMarks, Vertical};
 use crate::coords::GalacticPosition;
 use crate::galaxy::catalogue_classes::ClassId;
 use crate::galaxy::displaced::class_table::CLASS_COUNT;
@@ -89,12 +89,17 @@ pub struct SystemRecord {
     /// The age, years, at which the record's metallicity is read where its conditional marks set
     /// one (plan 08, Design note 19), at single precision; 0 where they set none. Placement and
     /// the stellar stage read the same stored value, so its rounding is part of the draw.
-    metallicity_age: f32,
+    metallicity_age_years: f32,
 }
 
 /// The record's fields as `#[derive(Debug)]` writes them, with the marks of plan 08 (P08.T12.c)
 /// after them only where they are not a field record's defaults, so that a record no displaced
 /// class touched prints as it did before them (decision-galaxy-25-train §1.2, E4).
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "the marks print only where they are not a field record's, so that the held arm's \
+              Debug is the derive's; the metallicity age prints through its accessor"
+)]
 impl fmt::Debug for SystemRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut out = f.debug_struct("SystemRecord");
@@ -135,12 +140,14 @@ impl PackedPlacement {
     /// The flag that the record carries its own metallicity age.
     const OWN_METALLICITY_AGE: u16 = 1 << 15;
 
-    /// `class`, with the flag that the record carries its own metallicity age where `own_age`.
+    /// `class`, with the flag that the record carries its own metallicity age where the marks
+    /// drew one, `metallicity_age_years`.
     ///
     /// # Panics
     ///
     /// If a displaced class's index is not below 128, which the class list's 97 never reach.
-    fn new(class: PlacementClass, own_age: bool) -> Self {
+    #[must_use]
+    fn new(class: PlacementClass, metallicity_age_years: Option<f32>) -> Self {
         let bits = match class {
             PlacementClass::Alive => 0,
             PlacementClass::Retained { speed } => {
@@ -155,7 +162,7 @@ impl PackedPlacement {
                 2 | (index << 2) | (kind << 9)
             }
         };
-        let flag = if own_age {
+        let flag = if metallicity_age_years.is_some() {
             Self::OWN_METALLICITY_AGE
         } else {
             0
@@ -164,6 +171,7 @@ impl PackedPlacement {
     }
 
     /// The placement class.
+    #[must_use]
     fn class(self) -> PlacementClass {
         let bits = self.0;
         match bits & 0b11 {
@@ -180,6 +188,7 @@ impl PackedPlacement {
     }
 
     /// Whether the record carries its own metallicity age.
+    #[must_use]
     fn has_own_metallicity_age(self) -> bool {
         self.0 & Self::OWN_METALLICITY_AGE != 0
     }
@@ -411,7 +420,7 @@ impl SystemRecord {
             age_at_epoch,
             placement: PackedPlacement::FIELD,
             mark_attempt: 0,
-            metallicity_age: 0.0,
+            metallicity_age_years: 0.0,
         }
     }
 
@@ -611,7 +620,14 @@ impl SystemRecord {
     /// from the class's odds.
     #[must_use]
     pub fn kick_constraint(&self, galaxy: &Galaxy) -> Option<KickConstraint> {
-        super::marks::kick_constraint(galaxy, self)
+        super::marks::kick_constraint(galaxy, self, Vertical::Read)
+    }
+
+    /// [`kick_constraint`](Self::kick_constraint) without its vertical component, which the kick
+    /// loop does not read and which costs a ballistic remnant a lifetime.
+    #[must_use]
+    pub(crate) fn kick_range(&self, galaxy: &Galaxy) -> Option<KickConstraint> {
+        super::marks::kick_constraint(galaxy, self, Vertical::Skipped)
     }
 
     /// The composition a dead record's progenitor had, where its conditional marks fixed it (plan
@@ -631,7 +647,7 @@ impl SystemRecord {
     pub(crate) fn metallicity_age(&self) -> Option<Years> {
         self.placement
             .has_own_metallicity_age()
-            .then(|| Years::new(f64::from(self.metallicity_age)))
+            .then(|| Years::new(f64::from(self.metallicity_age_years)))
     }
 
     /// The record of an accepted candidate: its marks, drawn on their own streams, around the
@@ -656,7 +672,7 @@ impl SystemRecord {
             age_at_epoch,
             placement: PackedPlacement::FIELD,
             mark_attempt: 0,
-            metallicity_age: 0.0,
+            metallicity_age_years: 0.0,
         }
     }
 
@@ -678,9 +694,9 @@ impl SystemRecord {
             population: galaxy.fields().component(marks.component).population(),
             primary_initial_mass: marks.mass,
             age_at_epoch: marks.age,
-            placement: PackedPlacement::new(marks.placement, marks.metallicity_age.is_some()),
+            placement: PackedPlacement::new(marks.placement, marks.metallicity_age_years),
             mark_attempt: marks.attempt,
-            metallicity_age: marks.metallicity_age.unwrap_or(0.0),
+            metallicity_age_years: marks.metallicity_age_years.unwrap_or(0.0),
         }
     }
 }
@@ -816,6 +832,34 @@ mod tests {
     enum OriginOfEightBytes {
         Grid(ComponentId),
         Wide(u32),
+    }
+
+    /// P08.T12.c: every placement class packs into its sixteen bits and back, with and without its
+    /// metallicity age's flag.
+    #[test]
+    fn a_placement_class_packs_and_unpacks() {
+        use crate::galaxy::displaced::marks::MARK_KINDS;
+        let mut classes = vec![PlacementClass::Alive];
+        classes.extend(SpeedBin::all().map(|speed| PlacementClass::Retained { speed }));
+        for index in [0_u16, 1, 55, 96, 127] {
+            for kind in MARK_KINDS {
+                classes.push(PlacementClass::Displaced {
+                    class: DisplacedClassId::new(index),
+                    kind,
+                });
+            }
+        }
+        for class in classes {
+            for age in [None, Some(4.5e9_f32)] {
+                let packed = PackedPlacement::new(class, age);
+                assert_eq!(packed.class(), class);
+                assert_eq!(packed.has_own_metallicity_age(), age.is_some());
+            }
+        }
+        assert_eq!(
+            PackedPlacement::new(PlacementClass::Alive, None),
+            PackedPlacement::FIELD
+        );
     }
 
     #[test]

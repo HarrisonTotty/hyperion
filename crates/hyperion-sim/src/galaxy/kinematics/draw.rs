@@ -48,7 +48,9 @@ impl VelocityDraw {
         self.attempts
     }
 
-    /// The cut: the lesser of the local escape speed and plan 03's padding speed.
+    /// The cut: the lesser of the local escape speed and plan 03's padding speed, or, for the
+    /// exempt fastest classes of plan 08's displaced classes, their layer's
+    /// [`pad_speed`](crate::galaxy::query::pad_speed) (P08.T12.d).
     #[must_use]
     pub fn cut(&self) -> KilometresPerSecond {
         self.cut
@@ -216,14 +218,15 @@ fn attempt(stream: &mut Stream, ellipsoid: &VelocityEllipsoid, basis: &[[f64; 3]
 }
 
 /// The draw `v` (km/s, galactic components) against the cut `cut` (km/s), after `attempts`
-/// attempts: `v` itself below the cut, and otherwise `v` scaled to 0.99 of it (Design note 7).
+/// attempts: `v` itself below the cut, and otherwise `v` scaled to 0.99 of it (Design note 7),
+/// which reports [`ESCAPE_CUT_ATTEMPTS`] as every scaled draw does.
 pub(super) fn scaled_to(v: [f64; 3], cut: f64, attempts: u32) -> VelocityDraw {
     let speed = norm(v);
-    let velocity = if speed < cut {
-        v
+    let (velocity, attempts) = if speed < cut {
+        (v, attempts)
     } else {
         let scale = ESCAPE_CUT_SCALE * cut / speed;
-        v.map(|c| c * scale)
+        (v.map(|c| c * scale), ESCAPE_CUT_ATTEMPTS)
     };
     VelocityDraw {
         velocity: to_metres_per_second(velocity),

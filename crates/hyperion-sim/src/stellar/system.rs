@@ -326,6 +326,26 @@ impl RemnantStage {
     }
 }
 
+/// The speed, m/s, nearest `speed` (km/s, the range's edge or inside it) that `constraint` holds
+/// once read back in km/s: the constraint is in km/s and a kick in m/s, whose round trip is exact
+/// only to an ulp or so, so the m/s value is stepped by ulps towards the range's inside.
+#[must_use]
+fn metres_held_by(speed: KilometresPerSecond, constraint: &KickConstraint) -> f64 {
+    let lo = constraint.speed().0.value();
+    let mut metres = MetresPerSecond::from(speed).value();
+    for _ in 0..64 {
+        if constraint.holds(KilometresPerSecond::from(MetresPerSecond::new(metres))) {
+            break;
+        }
+        metres = if speed.value() <= lo {
+            metres.next_up()
+        } else {
+            metres.next_down()
+        };
+    }
+    metres
+}
+
 /// Whether `stage` has a natal kick whose speed `constraint` holds.
 fn kick_holds(stage: Option<&RemnantStage>, constraint: &KickConstraint) -> bool {
     stage
@@ -344,16 +364,17 @@ impl RemnantStage {
         };
         let (lo, hi) = constraint.speed();
         let speed = KilometresPerSecond::from(kick.speed()).value();
-        let moved = if speed < lo.value() {
+        let target = if speed < lo.value() {
             lo.value()
         } else if speed >= hi.value() {
-            hi.value() * (1.0 - f64::EPSILON)
+            hi.value()
         } else {
             speed
         };
+        let metres = metres_held_by(KilometresPerSecond::new(target), constraint);
         Self {
             natal_kick: Some(NatalKick::new(
-                MetresPerSecond::from(KilometresPerSecond::new(moved)),
+                MetresPerSecond::new(metres),
                 kick.direction(),
                 kick.mode(),
             )),
@@ -458,17 +479,23 @@ impl StarModel {
         (seed, star): (Seed, BodyId),
         first: u32,
     ) -> (Self, u32) {
-        let Evolution::Track(track) = &self.evolution else {
-            return (self, 1);
-        };
-        if self.remnant.is_none() || kick_holds(self.remnant.as_ref(), constraint) {
+        if !matches!(self.evolution, Evolution::Track(_))
+            || self.remnant.is_none()
+            || kick_holds(self.remnant.as_ref(), constraint)
+        {
             return (self, 1);
         }
-        let track = Arc::clone(track);
+        let Evolution::Track(track) = std::mem::replace(&mut self.evolution, Evolution::Cooling)
+        else {
+            unreachable!("matched above")
+        };
         let (m0, composition) = (track.initial_mass(), *track.composition());
         let (mut kept, mut attempts) = (None, KICK_LOOP_CAP);
         for k in 1..KICK_LOOP_CAP {
-            let draws = self.draws.with_remnant_draws_of(seed, star, first + k);
+            let draws = self
+                .draws
+                .clone()
+                .with_remnant_draws_of(seed, star, first + k);
             let fate = track.fate_with(RemnantDraws::of(&draws));
             let stage = fate.map(|fate| {
                 RemnantStage::new(
@@ -493,9 +520,10 @@ impl StarModel {
             stage.map(|stage| stage.with_kick_scaled_into(constraint))
         };
         self.draws = draws;
-        if let Some(fate) = fate {
-            self.evolution = Evolution::Track(Arc::new(track.with_fate(fate)));
-        }
+        self.evolution = Evolution::Track(match fate {
+            Some(fate) => Arc::new(Arc::unwrap_or_clone(track).with_fate(fate)),
+            None => track,
+        });
         (self, attempts)
     }
 
@@ -2590,9 +2618,10 @@ pub fn grid_multiplicity(record: &SystemRecord) -> MultiplicityContext {
 }
 
 /// The attempts plan 08's kick loop makes before it keeps the last, its kick scaled into the range
-/// (Design note 17): about the number of speed bins on average over displaced systems, and never
-/// reached in 10⁷ of them (P08.T12.c's test).
-pub const KICK_LOOP_CAP: u32 = 4_096;
+/// (Design note 17). The mean over displaced systems is about the number of speed bins (9.4
+/// galaxy-wide); 2,184 of 10⁷ reach the cap, against Design note 17's none, a finding pinned by
+/// P08.T12.c's test.
+pub(crate) const KICK_LOOP_CAP: u32 = 4_096;
 
 /// The primary's model of the grid system `record` in `galaxy` at `composition`, and the attempts
 /// plan 08's kick loop made for it (P08.T12.c, Design note 17): 1 where the record constrains no
@@ -2624,7 +2653,7 @@ pub(crate) fn primary_model(
         galaxy.rules().stellar,
     )
     .expect("a grid record's primary is a star or a brown dwarf, with a finite age");
-    let Some(constraint) = record.kick_constraint(galaxy) else {
+    let Some(constraint) = record.kick_range(galaxy) else {
         return (model, 1);
     };
     model.with_kick_in(
@@ -2932,6 +2961,64 @@ mod tests {
     use crate::rng::Seed;
     use crate::stellar::classify::classify;
     use crate::units::SolarMasses;
+
+    /// P08.T12.c: a kick moved to an edge of its speed bin, as the kick loop's cap moves one, is
+    /// held by the bin once read back in km/s, at every bin's edges and at speed scales over the
+    /// Milky Way's and the nuclear disc's, despite the km/s and m/s round trip's last ulp.
+    #[test]
+    fn a_kick_moved_to_its_bin_s_edge_lies_in_the_bin() {
+        use crate::galaxy::displaced::SpeedBin;
+        let mut v_ref = 100.0;
+        while v_ref < 300.0 {
+            for bin in SpeedBin::all() {
+                let constraint = KickConstraint::of_bin(bin, KilometresPerSecond::new(v_ref), None);
+                let (lo, hi) = constraint.speed();
+                for edge in [lo, hi] {
+                    if !edge.value().is_finite() {
+                        continue;
+                    }
+                    let metres = metres_held_by(edge, &constraint);
+                    assert!(
+                        constraint.holds(KilometresPerSecond::from(MetresPerSecond::new(metres))),
+                        "{v_ref} km/s, bin {}, edge {edge:?}",
+                        bin.index()
+                    );
+                }
+            }
+            v_ref += 0.37;
+        }
+    }
+
+    /// P08.T12.c: a track given its own fate is itself, bit for bit, and given the fate another
+    /// attempt's remnant draws decide on it is the track those draws build, for a star outside the
+    /// stripped window, where the stripped mark moves no track (`Track::with_fate`).
+    #[test]
+    fn a_track_with_another_attempt_s_fate_is_that_attempt_s_track() {
+        let seed = Seed::new(0x0812_c000_0000_0001);
+        let body = BodyId::new(
+            CellKey::new(Layer::E, [0, 203, 0])
+                .expect("in the cube")
+                .candidate_id(7)
+                .expect("under the capacity"),
+            0,
+        );
+        let (m, comp) = (SolarMasses::new(15.0), Composition::SOLAR);
+        let draws = StarDraws::for_star(seed, body);
+        let track = Track::full(m, &comp, &draws);
+        let own = track.fate_record().expect("a full track reaches its death");
+        assert_eq!(track.clone().with_fate(own), track);
+        let mut moved = 0;
+        for k in 1..24 {
+            let other = draws.clone().with_remnant_draws_of(seed, body, k);
+            let fate = track
+                .fate_with(RemnantDraws::of(&other))
+                .expect("the track reaches its death");
+            let built = Track::full(m, &comp, &other);
+            moved += usize::from(fate.remnant != own.remnant);
+            assert_eq!(track.clone().with_fate(fate), built, "attempt {k}");
+        }
+        assert!(moved > 0, "some attempt moves the remnant");
+    }
 
     const SEED: u64 = 0x0600_0003_5eed_0001;
 

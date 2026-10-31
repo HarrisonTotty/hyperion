@@ -6,15 +6,20 @@
 
 use std::sync::OnceLock;
 
-use hyperion_testkit::stats::{ALPHA, assert_poisson_count};
+use hyperion_testkit::stats::{
+    ALPHA, assert_p_value, assert_poisson_count, ks_one_sample, normal_cdf,
+};
 
 use super::candidate::Picked;
 use super::marks;
 use super::{CellKey, SystemRecord, ballistic_motion};
 use crate::coords::GalacticPosition;
+use crate::galaxy::Population;
 use crate::galaxy::displaced::class_table::ClassKey;
 use crate::galaxy::displaced::hold::displaced;
-use crate::galaxy::displaced::{AgeBin, DisplacedClassId, SpeedBin, explosion_site};
+use crate::galaxy::displaced::{
+    AgeBin, DisplacedClassId, DisplacedKind, PlacementClass, SpeedBin, explosion_site,
+};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::kinematics::{ESCAPE_CUT_ATTEMPTS, draw, is_exempt};
 use crate::galaxy::query::{PAD_SPEED, epoch_velocity, escape_cut_holds, pad_speed};
@@ -105,11 +110,12 @@ fn moments(values: &[f64]) -> (f64, f64) {
     (mean, var.sqrt())
 }
 
-/// Per class with weight in layer E that is neither ballistic nor exempt: 4,000 members' sampled
-/// mean rotation and dispersions at 3 `R_d` against its row times its speed scale, within five
-/// standard errors and 3% of the dispersion, where the escape cut redrew fewer than one in a
-/// hundred; the radial and vertical means are zero (the vertical RMS for the first-excursion
-/// bins, whose sign follows z).
+/// Per class with weight in layer E that is not ballistic: 4,000 members' velocities at 3 `R_d`,
+/// each axis against its row's law times its speed scale by Kolmogorov–Smirnov at α = 10⁻³
+/// (rimward and spinward a normal of the row's mean and dispersion, north a normal of zero mean,
+/// or its magnitude a half-normal in the first-excursion bins, whose sign follows z), wherever the
+/// cut redrew fewer than one in a hundred; every draw passes through `epoch_velocity`, whose debug
+/// assertion (P08.T17) holds it below its layer's pad.
 #[test]
 #[ignore = "slow: 4,000 members of each of some 60 classes, with their marks"]
 fn each_class_s_sampled_velocities_match_its_row() {
@@ -124,7 +130,7 @@ fn each_class_s_sampled_velocities_match_its_row() {
     for &class in fields.order(MassBand::E) {
         let entry = fields.class(class);
         let key = entry.key();
-        if marks::is_ballistic(key) || is_exempt(key) {
+        if marks::is_ballistic(key) {
             continue;
         }
         let row = entry.kinematics().expect("a weighted class has its row");
@@ -133,6 +139,7 @@ fn each_class_s_sampled_velocities_match_its_row() {
         let (mut r, mut phi, mut z, mut redrawn) = (Vec::new(), Vec::new(), Vec::new(), 0_u32);
         for record in &records {
             let d = draw(galaxy, record);
+            assert_eq!(epoch_velocity(galaxy, record), d.velocity());
             redrawn += u32::from(d.attempts() > 1);
             let v = local(&at, d.velocity().metres_per_second());
             r.push(v[0]);
@@ -140,34 +147,41 @@ fn each_class_s_sampled_velocities_match_its_row() {
             z.push(v[2]);
         }
         if redrawn * 100 >= 4_000 {
-            println!("{key:?}: {redrawn} of 4000 redrawn by the escape cut, not compared");
+            println!("{key:?}: {redrawn} of 4000 redrawn by the cut, not compared");
             continue;
         }
-        let ((mr, sr), (mp, sp)) = (moments(&r), moments(&phi));
-        let rms_z = (z.iter().map(|v| v * v).sum::<f64>() / 4_000.0).sqrt();
-        let se = |sigma: f64| 5.0 * sigma / 4_000.0_f64.sqrt() + 1e-9 * v_ref;
-        println!(
-            "{key:?}: rotation {:.3} against {:.3}, σ {:.3} {:.3} {:.3} against {:.3} {:.3} {:.3}",
-            mp / v_ref,
-            row.mean_phi,
-            sr / v_ref,
-            sp / v_ref,
-            rms_z / v_ref,
-            row.sigma_r,
-            row.sigma_phi,
-            row.sigma_z
-        );
-        assert!(
-            (mp - row.mean_phi * v_ref).abs() < se(sp),
-            "{key:?} rotation"
-        );
-        assert!(mr.abs() < se(sr), "{key:?} radial mean");
-        for (sample, want) in [(sr, row.sigma_r), (sp, row.sigma_phi), (rms_z, row.sigma_z)] {
-            assert!(
-                (sample - want * v_ref).abs() < 0.03 * want * v_ref + se(sample),
-                "{key:?} dispersion {sample} against {}",
-                want * v_ref
-            );
+        let excursion = matches!(key, ClassKey::Thin { age, .. } if (2..=5).contains(&age.index()));
+        let normal = |mean: f64, sigma: f64| {
+            move |x: f64| {
+                if sigma > 0.0 {
+                    normal_cdf((x - mean) / sigma)
+                } else if x < mean {
+                    0.0
+                } else {
+                    1.0
+                }
+            }
+        };
+        let sigma = [row.sigma_r, row.sigma_phi, row.sigma_z].map(|s| s * v_ref);
+        let mut fits = Vec::new();
+        if sigma[0] > 0.0 {
+            fits.push(("rimward", ks_one_sample(&mut r, normal(0.0, sigma[0]))));
+        }
+        if sigma[1] > 0.0 {
+            let spinward = normal(row.mean_phi * v_ref, sigma[1]);
+            fits.push(("spinward", ks_one_sample(&mut phi, spinward)));
+        }
+        if sigma[2] > 0.0 {
+            if excursion {
+                let mut size: Vec<f64> = z.iter().map(|v| v.abs()).collect();
+                let half = |x: f64| (2.0 * normal_cdf(x / sigma[2]) - 1.0).max(0.0);
+                fits.push(("north, its magnitude", ks_one_sample(&mut size, half)));
+            } else {
+                fits.push(("north", ks_one_sample(&mut z, normal(0.0, sigma[2]))));
+            }
+        }
+        for (axis, fit) in fits {
+            assert_p_value(&format!("{key:?} {axis}"), fit.p_value, ALPHA);
         }
         checked += 1;
     }
@@ -213,7 +227,24 @@ fn the_slowest_class_co_rotates_with_the_youngest_and_the_fastest_counter_rotate
         .find(|&age| weighted(thin(slow, age)))
         .expect("a class of the slowest speed bin has weight");
     let fast = speed_of(6, true);
-    println!("slowest thin {slow} at age 6, youngest at age {young_age}, fastest {fast}");
+    assert_eq!(
+        young_age, 0,
+        "the youngest class of the slowest bin is τ < 0.1's"
+    );
+    let row = |class: DisplacedClassId| {
+        fields
+            .class(class)
+            .kinematics()
+            .expect("a thin class has its row")
+            .mean_phi
+    };
+    println!(
+        "slowest thin {slow} at age 6 (row {:.3}), youngest at age 0 (row {:.3}, ballistic: v_c \
+         at the site plus the kick), fastest {fast} (row {:.3})",
+        row(thin(slow, 6)),
+        row(thin(slow, 0)),
+        row(thin(fast, 6))
+    );
     let (slowest, youngest, fastest) = (
         rotation(thin(slow, 6)),
         rotation(thin(slow, young_age)),
@@ -247,6 +278,13 @@ fn the_ballistic_bins_back_out_to_the_midplane() {
     let at = on_y(26_000.0);
     let heights: Vec<f64> = (0..41).map(|i| f64::from(i - 20) * 6.0).collect();
     let (mut checked, mut held, mut sites) = (0_u32, 0_u32, 0_u32);
+    let (mut remnants, mut runaways) = (0_u32, 0_u32);
+    let young = galaxy
+        .fields()
+        .components()
+        .iter()
+        .find(|c| c.population() == Population::YoungThinDisc)
+        .expect("every galaxy has a young disc");
     let fields = galaxy
         .fields()
         .displaced()
@@ -274,6 +312,7 @@ fn the_ballistic_bins_back_out_to_the_midplane() {
                 held += 1;
                 continue;
             }
+            assert_eq!(epoch_velocity(galaxy, &record), d.velocity());
             let site_z = height.value() - vz * 1_000.0 / SPEED_OF_LIGHT * since.value();
             assert!(
                 site_z.abs() < 1.0,
@@ -281,6 +320,14 @@ fn the_ballistic_bins_back_out_to_the_midplane() {
                 record.id()
             );
             checked += 1;
+            match record.placement_class() {
+                PlacementClass::Displaced {
+                    kind: DisplacedKind::Remnant,
+                    ..
+                } => remnants += 1,
+                PlacementClass::Displaced { .. } => runaways += 1,
+                PlacementClass::Alive | PlacementClass::Retained { .. } => {}
+            }
             if let Some(site) = explosion_site(galaxy, &record) {
                 let p = PointLy::from(site.position());
                 assert!(
@@ -289,7 +336,11 @@ fn the_ballistic_bins_back_out_to_the_midplane() {
                     record.id(),
                     p.z
                 );
-                assert!(math::hypot(p.x, p.y) < 65_536.0);
+                assert!(
+                    young.density(&PointLy::new(p.x, p.y, 0.0)) > 0.0,
+                    "{:?}: the explosion outside the young disc",
+                    record.id()
+                );
                 sites += 1;
             }
         }
@@ -297,12 +348,17 @@ fn the_ballistic_bins_back_out_to_the_midplane() {
     println!(
         "{checked} ballistic members back out to the midplane, {held} held or cut, {sites} sites"
     );
+    println!("{remnants} remnants and {runaways} runaways or walkaways among them");
     assert!(checked > 600, "only {checked}");
+    assert!(
+        remnants > 0 && runaways > 0,
+        "{remnants} remnants, {runaways} runaways"
+    );
 }
 
 /// In the first-excursion bins (0.3–8 `R_d ÷ v_c`) the share of members moving away from the
-/// plane, `z v_z > 0`, matches the row's `outbound`, by Poisson interval at α = 10⁻³, for members
-/// above and below the plane.
+/// plane, `z v_z > 0`, matches the row's `outbound`, and the share moving towards it the rest, by
+/// Poisson interval at α = 10⁻³, above the plane and below it apart.
 #[test]
 fn the_first_excursion_moves_outbound_by_its_share() {
     let galaxy = moving();
@@ -324,20 +380,29 @@ fn the_first_excursion_moves_outbound_by_its_share() {
             .class(class)
             .kinematics()
             .expect("a thin class has its row");
-        let records = members(galaxy, (class, MassBand::E), &at, &heights, (4_000, 0));
-        let away = records
-            .iter()
-            .filter(|r| {
-                let z = r.epoch_position().to_light_years_f64()[2];
-                z * draw(galaxy, r).velocity().metres_per_second()[2] > 0.0
-            })
-            .count();
-        let away = u64::try_from(away).expect("a count");
-        println!(
-            "speed {speed}, age {age}: {away} of 4000 outbound, the row {:.3}",
-            row.outbound
-        );
-        assert_poisson_count("outbound", away, 4_000.0 * row.outbound, ALPHA);
+        for side in [1.0, -1.0] {
+            let heights: Vec<f64> = heights.iter().map(|h: &f64| side * h.abs()).collect();
+            let records = members(galaxy, (class, MassBand::E), &at, &heights, (2_000, 0));
+            let away = records
+                .iter()
+                .filter(|r| {
+                    let z = r.epoch_position().to_light_years_f64()[2];
+                    z * draw(galaxy, r).velocity().metres_per_second()[2] > 0.0
+                })
+                .count();
+            let away = u64::try_from(away).expect("a count");
+            println!(
+                "speed {speed}, age {age}, side {side}: {away} of 2000 outbound, the row {:.3}",
+                row.outbound
+            );
+            assert_poisson_count("outbound", away, 2_000.0 * row.outbound, ALPHA);
+            assert_poisson_count(
+                "inbound",
+                2_000 - away,
+                2_000.0 * (1.0 - row.outbound),
+                ALPHA,
+            );
+        }
         classes += 1;
     }
     assert!(classes > 0);

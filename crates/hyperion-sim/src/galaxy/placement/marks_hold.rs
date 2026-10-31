@@ -4,16 +4,17 @@
 //! record alive and unconstrained; the kick loop's attempts; the count of `lifetime` calls; and
 //! layer E's living share and mass histogram at the Sun-like point against the class table.
 
-use hyperion_testkit::stats::{ALPHA, assert_p_value, assert_poisson_count, chi_square_gof};
+use hyperion_testkit::stats::{assert_p_value, chi_square_gof};
 
 use super::candidate::{Pick, Picked, pick_of};
 use super::marks::{self, LIFETIME_CALLS};
-use super::{CandidateOutcome, generate_cell};
+use super::{CandidateOutcome, generate_cell, generate_cell_where};
 use super::{CellKey, STELLAR_LAYERS, SystemRecord, candidate_count, evaluate_candidate};
 use crate::coords::GalacticPosition;
 use crate::galaxy::displaced::class_table::{ClassKey, keeps_own_form};
 use crate::galaxy::displaced::hold::{displaced, held};
 use crate::galaxy::displaced::marks::{StayCategory, age_bin_years, kind_index};
+use crate::galaxy::displaced::site::{explosion_site, explosion_site_knowing};
 use crate::galaxy::displaced::{DisplacedKind, PlacementClass, SPEED_EDGES};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::{Galaxy, PointLy};
@@ -140,6 +141,7 @@ fn a_displaced_remnant_died_its_time_since_death_ago_with_its_kick_in_its_bin() 
             constraint.speed()
         );
         assert_eq!(stars, SystemStars::generate(galaxy, &record));
+        assert_eq!(stars.star_count(), 1, "a displaced remnant travels alone");
         checked += 1;
     }
     println!("{checked} displaced remnants checked");
@@ -499,8 +501,8 @@ fn mass_bin(m: f64) -> usize {
 /// Design note 19's rescaling: at the Sun-like point, layer E's records alive at the epoch by
 /// their own lifetimes (at the composition and draws the stellar stage reads), against the class
 /// table's living share there (the field's stay marks' alive weight and the displaced classes'
-/// runaways and walkaways), by Poisson interval at α = 10⁻³, and the living records' masses
-/// against the table's densities, by chi-square at the 1% level. Some 0.1% of layer E's systems
+/// runaways and walkaways), and the living records' masses against the table's densities, each by
+/// chi-square at the 1% level. Some 0.1% of layer E's systems
 /// there are alive, so it reads 10,000 cells, a block of 100 × 100 in the plane about it, each
 /// record's expectation taken at its own position.
 #[test]
@@ -522,7 +524,9 @@ fn layer_e_s_living_share_and_masses_at_the_sun_match_the_class_table() {
             CellKey::new(Layer::E, [cell_x + dx, cell_y + dy, cell_z]).expect("in the cube")
         })
         .collect();
+    let mut sampled = 0_usize;
     for (_, record) in records(galaxy, &block) {
+        sampled += 1;
         let p = PointLy::from(record.epoch_position());
         // Each source of the record's pick, weighted as the thinning weighted it.
         let mut parts: Vec<(f64, f64, [f64; MASS_EDGES.len()])> = Vec::new();
@@ -594,7 +598,13 @@ fn layer_e_s_living_share_and_masses_at_the_sun_match_the_class_table() {
     println!(
         "{alive} alive against {expected_alive:.1}; masses {observed:?} against {expected:.1?}"
     );
-    assert_poisson_count("layer E alive at the Sun", alive, expected_alive, ALPHA);
+    let total = u64::try_from(sampled).expect("a count");
+    #[expect(clippy::cast_precision_loss, reason = "a count far below 2⁵³")]
+    let share = chi_square_gof(
+        &[alive, total - alive],
+        &[expected_alive, total as f64 - expected_alive],
+    );
+    assert_p_value("layer E's living share at the Sun", share.p_value, 0.01);
     let fit = chi_square_gof(&observed, &expected);
     assert_p_value("layer E's living masses at the Sun", fit.p_value, 0.01);
 }
@@ -626,4 +636,81 @@ fn the_version_s_records_keep_plan_03_s_marks() {
             );
         }
     }
+}
+
+/// Under every 26 hold `generate_cell_where` is `generate_cell` filtered by mass in layers D and E
+/// too, where the conditional marks draw the mass after the pick and so every candidate is
+/// evaluated whole (P08.T12.c), in the same order.
+#[test]
+fn generate_cell_where_is_generate_cell_filtered_under_every_26_hold() {
+    let galaxy = displaced();
+    let mut whole = Vec::new();
+    let mut kept = Vec::new();
+    for layer in [Layer::D, Layer::E, Layer::C] {
+        for key in row(layer, &sunlike(), 3) {
+            for floor in [0.0, 3.0, 9.0, 20.0, 200.0] {
+                generate_cell(galaxy, key, &mut whole);
+                whole.retain(|r| r.primary_initial_mass().value() >= floor);
+                generate_cell_where(galaxy, key, |m| m.value() >= floor, &mut kept);
+                assert_eq!(kept, whole, "{key:?} above {floor} M_sun");
+            }
+        }
+    }
+}
+
+/// P08.T13's inheritance 3: the lifetime a layer-E record's marks computed and pass to the
+/// carve-out hook is the one the hook's exact step would compute, so the site it gives is the
+/// one `explosion_site` gives: for the records of a row of cells at the Sun-like point, and for
+/// members of the youngest thin classes, dead under 0.1 `R_d ÷ v_c`, whose deaths fall in the
+/// interval.
+#[test]
+fn the_hook_s_site_from_the_marks_lifetime_is_the_exact_step_s() {
+    let galaxy = displaced();
+    let fields = galaxy
+        .fields()
+        .displaced()
+        .expect("the classes are installed");
+    let mut cases: Vec<(CellKey, SystemRecord, Picked)> = Vec::new();
+    for (key, record) in records(galaxy, &row(Layer::E, &sunlike(), 6)) {
+        let picked = pick_of(galaxy, key, index_of(&record)).expect("an accepted candidate");
+        cases.push((key, record, picked));
+    }
+    let key = CellKey::containing(Layer::E, &sunlike()).expect("in the cube");
+    let corner =
+        GalacticPosition::from_light_years(key.origin_ly().map(f64::from)).expect("in the cube");
+    let mut index = 2_000_000;
+    for &class in fields.order(MassBand::E) {
+        if !matches!(fields.class(class).key(), ClassKey::Thin { age, .. } if age.index() == 0) {
+            continue;
+        }
+        for _ in 0..40 {
+            let id = key.candidate_id(index).expect("under the capacity");
+            index += 1;
+            let drawn = marks::draw(galaxy, fields, key, id, &corner, Picked::Displaced(class))
+                .expect("a displaced class draws marks");
+            cases.push((
+                key,
+                SystemRecord::of_marks(galaxy, id, corner, &drawn),
+                Picked::Displaced(class),
+            ));
+        }
+    }
+    let (mut sites, mut compared) = (0, 0);
+    for (key, record, picked) in cases {
+        let drawn = marks::draw(
+            galaxy,
+            fields,
+            key,
+            record.id(),
+            record.epoch_position(),
+            picked,
+        )
+        .expect("a layer-E candidate draws marks");
+        let given = explosion_site_knowing(galaxy, &record, drawn.lifetime);
+        assert_eq!(given, explosion_site(galaxy, &record), "{:?}", record.id());
+        sites += usize::from(given.is_some());
+        compared += 1;
+    }
+    println!("{compared} records compared, {sites} with a site in the interval");
+    assert!(sites > 0, "the youngest remnants die in the interval");
 }

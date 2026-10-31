@@ -21,20 +21,23 @@
 //!   Every other layer-D component keeps plan 03's draws, at attempt 0.
 //!
 //! The age then follows without a fixed point (Design note 19), on `displaced.death`, with the
-//! record's own draws at attempt 0 and the lifetime of its source's reference composition `Z_ref`:
+//! record's own draws at attempt 0 and its source's reference composition `Z_ref`:
 //!
-//! - a dead record, retained or displaced, takes a time since death `s` from its component's ages
-//!   restricted to its age bin after that lifetime, draws its metallicity at the age
-//!   `lifetime(m, Z_ref) + s` and takes `lifetime(m, Z) + s` with the drawn `Z` as its age, so that
-//!   it died exactly `s` ago;
+//! - a dead record, retained or displaced, keeps `Z_ref` as its composition, at which the class
+//!   table weighed its class (lean of 2026-10-31: at a drawn Z its own fate could leave it no kick
+//!   in its bin). It takes its fate there ([`fate_of`], at the cost of a lifetime), a time since
+//!   death `s` from its component's ages restricted to its age bin after that lifetime, and
+//!   `lifetime + s` as its age, so that it died exactly `s` ago. Where the fate can give no kick in
+//!   its bin, it draws its mass once more (`progenitor`);
 //! - a living one takes its age under `Z_ref` from its component's ages below that lifetime (a
 //!   runaway's from those after its ejection, on `runaway.ejection`), draws its metallicity at
 //!   that age and takes the same fraction of `lifetime(m, Z)` as its age, so that it is alive.
 //!
 //! So placement calls `lifetime` at most twice per accepted layer-E record, and nothing else of
-//! the stellar stage but the metallicity draw. The metallicity age is stored with the record, at
-//! single precision, and the stellar stage's [`draw_metallicity`] reads it, so that it finds the
-//! same composition and the same death.
+//! the stellar stage but the metallicity draw. A living record's metallicity age is stored with
+//! it, at single precision, and the stellar stage's [`draw_metallicity`] reads it, so that it finds
+//! the same composition; a dead one's composition is
+//! [`progenitor_composition`](SystemRecord::progenitor_composition)'s.
 //!
 //! [`StayMarks`]: crate::galaxy::displaced::marks::StayMarks
 //! [`ConditionalMarks`]: crate::galaxy::displaced::marks::ConditionalMarks
@@ -92,7 +95,7 @@ pub(super) struct DrawnMarks {
     pub(super) attempt: u8,
     /// The age, years, the metallicity was read at, where the marks chose one, at the precision
     /// the record stores it.
-    pub(super) metallicity_age: Option<f32>,
+    pub(super) metallicity_age_years: Option<f32>,
     /// The primary's lifetime at its own composition and draws, where the marks computed it:
     /// what the carve-out hook's exact step reads instead of computing it again (P08.T13).
     pub(super) lifetime: Option<Years>,
@@ -183,8 +186,8 @@ fn pick(mark: Mark, weights: &[f64]) -> usize {
     reason = "an age of at most a few 10¹⁰ years, held to 2⁻²⁴ of itself: the stored value is the \
               one both sides read, so the rounding is part of the draw"
 )]
-fn stored_age(age: f64) -> f32 {
-    age.max(0.0) as f32
+fn stored_age_years(age_years: f64) -> f32 {
+    age_years.max(0.0) as f32
 }
 
 /// One record's star, as its conditional marks read it: the record, the component it was born
@@ -201,15 +204,16 @@ struct Star<'a> {
 }
 
 impl Star<'_> {
-    /// The star's composition, read at `age` (single precision, as the record stores it), and its
-    /// lifetime there.
-    fn at(&self, age: f32) -> Years {
+    /// The star's composition, read at `age_years` (single precision, as the record stores it),
+    /// and its lifetime there.
+    #[must_use]
+    fn at(&self, age_years: f32) -> Years {
         let composition = metallicity_of(
             self.galaxy,
             self.id,
             self.galaxy.fields().component(self.component),
             &self.site,
-            Years::new(f64::from(age)),
+            Years::new(f64::from(age_years)),
         );
         lifetime(self.galaxy, self.mass, &composition, &self.draws)
     }
@@ -220,7 +224,7 @@ impl Star<'_> {
         let ages = self.galaxy.fields().component(self.component).ages();
         let age_ref = age_between(ages, a, b, u);
         let fraction = age_ref.value() / self.life_ref.value();
-        let metallicity_age = stored_age(age_ref.value());
+        let metallicity_age = stored_age_years(age_ref.value());
         let life = self.at(metallicity_age);
         (Years::new(fraction * life.value()), metallicity_age, life)
     }
@@ -258,8 +262,42 @@ fn fate(galaxy: &Galaxy, m: SolarMasses, composition: &Composition, draws: &Star
 /// where `moving`, or into the slowest bin otherwise: any remnant reaches the slowest, but only an
 /// iron core's collapse gives the ordinary mode's kicks (a white dwarf's are about 1 km/s and an
 /// electron-capture neutron star's 5 km/s, plan 06's P06.T19).
-fn kickable(fate: &Fate, moving: bool) -> bool {
-    fate.remnant.kind() != RemnantKind::None && (!moving || fate.iron_core.is_some())
+#[must_use]
+fn kickable(fate: &Fate, reach: Reach) -> bool {
+    fate.remnant.kind() != RemnantKind::None
+        && (reach == Reach::Slowest || fate.iron_core.is_some())
+}
+
+/// The speed bin a dead record's kick must reach: the slowest, which any remnant's does, or a
+/// faster one, which only an iron core's collapse gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reach {
+    /// The slowest bin, under a quarter of the speed scale.
+    Slowest,
+    /// Any faster bin.
+    Moving,
+}
+
+impl Reach {
+    /// The reach of speed bin `bin`.
+    #[must_use]
+    fn of(bin: SpeedBin) -> Self {
+        if bin.index() == 0 {
+            Self::Slowest
+        } else {
+            Self::Moving
+        }
+    }
+}
+
+/// Whether [`kick_constraint`] reads a ballistic remnant's vertical component, which costs it a
+/// lifetime, or leaves it out, as the kick loop, which reads only the speed range, does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Vertical {
+    /// Read it.
+    Read,
+    /// Leave it out.
+    Skipped,
 }
 
 /// A dead record's progenitor: its initial mass from its kind's density, given at the mass nodes
@@ -269,7 +307,7 @@ fn kickable(fate: &Fate, moving: bool) -> bool {
 /// The class table weighed the record's class at that composition and the median star's draws,
 /// with the densities linear between its nodes. Where a node and the next straddle a change of
 /// fate, such as the end of the electron-capture window near 8.5 M☉, the line puts mass where no
-/// iron core collapses, so a record of a moving class (`moving`) whose fate gives it no such kick
+/// iron core collapses, so a record of a moving class (`reach`) whose fate gives it no such kick
 /// draws its mass once more, from the density above the node over its first mass. That costs a
 /// second fate, so no record calls more than two.
 fn progenitor(
@@ -277,14 +315,14 @@ fn progenitor(
     (z_ref, draws): (&Composition, &StarDraws),
     (masses, densities): (&[f64; MARK_MASS_NODES], &[f64; MARK_MASS_NODES]),
     born: impl Fn(SolarMasses) -> ComponentId,
-    moving: bool,
+    reach: Reach,
     stream: &mut Stream,
 ) -> Progenitor {
     let density = PiecewiseLinear::new(masses, densities)
         .expect("a picked kind or category has weight, so a mass density");
     let mass = SolarMasses::new(density.sample(stream));
     let first = fate(galaxy, mass, z_ref, draws);
-    if kickable(&first, moving) {
+    if kickable(&first, reach) {
         return Progenitor {
             mass,
             component: born(mass),
@@ -376,7 +414,7 @@ fn stay(
                 age,
                 placement: PlacementClass::Alive,
                 attempt: 0,
-                metallicity_age: Some(metallicity_age),
+                metallicity_age_years: Some(metallicity_age),
                 lifetime: Some(life),
             }
         }
@@ -386,7 +424,7 @@ fn stay(
                 (&z_ref, &draws_of(galaxy, id)),
                 (marks.masses(), marks.node_density(category)),
                 |_| c,
-                speed.index() > 0,
+                Reach::of(speed),
                 &mut masses,
             );
             let (age, life) = dead_age(galaxy, &star, (Years::ZERO, None), u);
@@ -396,7 +434,7 @@ fn stay(
                 age,
                 placement: PlacementClass::Retained { speed },
                 attempt: 0,
-                metallicity_age: None,
+                metallicity_age_years: None,
                 lifetime: Some(life),
             }
         }
@@ -435,7 +473,7 @@ fn displaced_marks(
             (&z_ref, &draws_of(galaxy, id)),
             (marks.masses(), &marks.node_density(kind)),
             |m| marks.component_at(kind, m, birth),
-            origin.index() > 0,
+            Reach::of(origin),
             &mut masses,
         );
         let (age, life) = dead_age(galaxy, &star, (lo, hi), u);
@@ -445,7 +483,7 @@ fn displaced_marks(
             age,
             placement,
             attempt: 0,
-            metallicity_age: None,
+            metallicity_age_years: None,
             lifetime: Some(life),
         };
     }
@@ -497,7 +535,7 @@ fn displaced_marks(
         age,
         placement,
         attempt: 0,
-        metallicity_age: Some(metallicity_age),
+        metallicity_age_years: Some(metallicity_age),
         lifetime: Some(life),
     }
 }
@@ -554,6 +592,7 @@ fn since_ejection(
     let weights: Vec<f64> = ejections
         .iter()
         .map(|&(t, w)| {
+            let t = t.value();
             if t >= life {
                 return 0.0;
             }
@@ -563,8 +602,8 @@ fn since_ejection(
         .collect();
     if weights.iter().any(|&w| w > 0.0) {
         let i = pick(stream(galaxy, tags::RUNAWAY_EJECTION, id).mark(), &weights);
-        let (a, b) = span(ejections[i].0);
-        (Years::new(a), Years::new(b), Years::new(ejections[i].0))
+        let (a, b) = span(ejections[i].0.value());
+        (Years::new(a), Years::new(b), ejections[i].0)
     } else {
         let below = life.min(ages.max().value());
         (
@@ -608,7 +647,7 @@ fn runaway_reduction(
             age,
             placement: PlacementClass::Alive,
             attempt,
-            metallicity_age: None,
+            metallicity_age_years: None,
             lifetime: None,
         };
         if attempt == MAX_MARK_ATTEMPT
@@ -627,7 +666,7 @@ fn runaway_reduction(
                     * table
                         .ejection_ages(source, kind, mass)
                         .iter()
-                        .filter(|&&(t, _)| t < age.value())
+                        .filter(|&&(t, _)| t.value() < age.value())
                         .map(|&(_, w)| w)
                         .sum::<f64>()
             })
@@ -711,8 +750,13 @@ pub(super) fn progenitor_composition(
     Some(table.reference_composition(source))
 }
 
-/// [`SystemRecord::kick_constraint`].
-pub(super) fn kick_constraint(galaxy: &Galaxy, record: &SystemRecord) -> Option<KickConstraint> {
+/// [`SystemRecord::kick_constraint`], with its vertical component where `vertical` says.
+#[must_use]
+pub(super) fn kick_constraint(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    vertical: Vertical,
+) -> Option<KickConstraint> {
     let displaced = galaxy.fields().displaced()?;
     let table = displaced.class_table();
     match record.placement_class() {
@@ -743,7 +787,8 @@ pub(super) fn kick_constraint(galaxy: &Galaxy, record: &SystemRecord) -> Option<
                 class,
                 record.id(),
             );
-            let vertical = is_ballistic(key).then(|| ballistic_vertical(galaxy, record));
+            let vertical = (vertical == Vertical::Read && is_ballistic(key))
+                .then(|| ballistic_vertical(galaxy, record));
             Some(KickConstraint::of_bin(
                 origin,
                 table.speed_scale(source),
@@ -825,11 +870,11 @@ pub(crate) fn ballistic_motion(
 /// age at the epoch less its primary's lifetime at its own composition and draws.
 fn ballistic_vertical(galaxy: &Galaxy, record: &SystemRecord) -> (LightYears, Years) {
     let composition = draw_metallicity(galaxy, record);
-    let life = lifetime_under(
+    let life = lifetime(
+        galaxy,
         record.primary_initial_mass(),
         &composition,
         &primary_draws(galaxy, record),
-        galaxy.rules().stellar,
     );
     let height = record.epoch_position().to_light_years_f64()[2];
     (

@@ -280,11 +280,14 @@ fn no_velocity_reaches_its_padding_speed() {
                     for record in &cell {
                         let d = draw(galaxy, record);
                         let speed = d.velocity().speed().value() / 1e3;
-                        assert!(
-                            speed < PAD_SPEED.value(),
-                            "{speed} km/s for {:?}",
-                            record.id()
-                        );
+                        // An exempt displaced class is cut at its layer's pad instead (P08.T12.d).
+                        if d.cut().value() <= PAD_SPEED.value() {
+                            assert!(
+                                speed < PAD_SPEED.value(),
+                                "{speed} km/s for {:?}",
+                                record.id()
+                            );
+                        }
                         assert!(speed < d.cut().value());
                         let pad = pad_speed(record.layer()).value();
                         assert!(

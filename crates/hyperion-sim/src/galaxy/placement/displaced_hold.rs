@@ -33,7 +33,7 @@ use crate::galaxy::{Galaxy, PointLy};
 use crate::id::Layer;
 use crate::math;
 use crate::rng::Seed;
-use crate::stellar::system::draw_metallicity;
+use crate::stellar::system::{draw_metallicity, primary_model};
 use crate::units::Years;
 
 /// The seed of plan 03's pinned drawn galaxy (`tests/placement_golden.rs`).
@@ -443,10 +443,11 @@ fn placement_code(class: PlacementClass) -> f64 {
 /// with the census's counts and the face-on map at the Sun-like point: each cell's bound and its
 /// classes' rests, its candidate count, and each record's position, mass, age, component, whether
 /// it was picked for a class, and its conditional marks (P08.T12.c: placement class, mark
-/// attempt, metallicity age and metallicity). Blessed natively on x86-64; the wasip1 suite compares it
+/// attempt, metallicity age and metallicity), with the kick loop's kept attempt, natal kick and
+/// remnant mass for the first 40 constrained records of each cell. Blessed natively on x86-64; the wasip1 suite compares it
 /// (D5). A 26-arm figure on plan 15's provisional form table, re-pinned by name when the
 /// production table lands.
-const DISPLACED_CELLS_DIGEST: u64 = 0x20fa_fa37_6b58_dabd;
+const DISPLACED_CELLS_DIGEST: u64 = 0x8f22_77f1_1c91_9546;
 
 /// The new arm's cells, census and map, pinned on every target (named `pinned` for the
 /// WebAssembly suite's filter).
@@ -465,6 +466,7 @@ fn the_new_arm_s_cells_are_pinned() {
         values.extend((0..classes).map(|i| bound.rest(i)));
         values.push(f64::from(candidate_count(galaxy, key)));
         generate_cell(galaxy, key, &mut cell);
+        let mut constrained = 0;
         for record in &cell {
             values.extend(record.epoch_position().cell().to_array().map(f64::from));
             values.extend(record.epoch_position().offset_metres());
@@ -483,6 +485,19 @@ fn the_new_arm_s_cells_are_pinned() {
             values.push(f64::from(record.mark_attempt()));
             values.push(record.metallicity_age().map_or(-1.0, Years::value));
             values.push(draw_metallicity(galaxy, record).fe_h().value());
+            // The kick loop's kept attempt, natal kick and remnant mass, for the first constrained
+            // records of each cell (a track each).
+            if constrained < 40 && record.kick_range(galaxy).is_some() {
+                constrained += 1;
+                let (model, attempts) =
+                    primary_model(galaxy, record, draw_metallicity(galaxy, record));
+                values.push(f64::from(attempts));
+                if let Some(kick) = model.natal_kick() {
+                    values.push(kick.speed().value());
+                    values.extend(kick.direction().components());
+                }
+                values.extend(model.remnant().map(|r| r.mass().value()));
+            }
         }
     }
     let counts = crate::galaxy::query::expected_counts(

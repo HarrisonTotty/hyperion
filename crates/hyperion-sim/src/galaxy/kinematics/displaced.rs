@@ -24,10 +24,10 @@
 
 use super::EllipsoidAxes;
 use super::draw::{ESCAPE_CUT_ATTEMPTS, VelocityDraw, WORDS_PER_ATTEMPT, basis, norm, scaled_to};
+use crate::galaxy::displaced::SPEED_EDGES;
 use crate::galaxy::displaced::class_table::ClassKey;
-use crate::galaxy::displaced::runaway::Ejected;
+use crate::galaxy::displaced::runaway::{Ejected, RUNAWAY_CUT_OF_V_C, WALKAWAY_CUT};
 use crate::galaxy::displaced::{DisplacedClassId, DisplacedFields, DisplacedKind, SPEED_BINS};
-use crate::galaxy::displaced::{SPEED_EDGES, SpeedBin};
 use crate::galaxy::placement::{SystemRecord, ballistic_motion};
 use crate::galaxy::query::{PAD_SPEED, pad_speed};
 use crate::galaxy::{Galaxy, PointLy};
@@ -80,6 +80,10 @@ pub(super) fn draw_displaced(
     (class, kind): (DisplacedClassId, DisplacedKind),
     stream: &mut Stream,
 ) -> VelocityDraw {
+    assert!(
+        galaxy.kinematics().is_some(),
+        "velocities need the kinematic tables, which Galaxy::with_full_potential builds"
+    );
     let entry = displaced.class(class);
     let key = entry.key();
     let table = displaced.class_table();
@@ -108,7 +112,7 @@ pub(super) fn draw_displaced(
         }
     };
     if let Some((height, since)) = ballistic_motion(galaxy, record) {
-        let (speed, azimuth) = kick(galaxy, record, (key, kind), v_ref);
+        let (speed, azimuth) = kick(galaxy, displaced, record, (key, kind), v_ref);
         let vertical = if since.value() > 0.0 {
             (height.value() / since.value() * SPEED_OF_LIGHT / 1_000.0).clamp(-speed, speed)
         } else {
@@ -185,33 +189,38 @@ fn gaussian(
 }
 
 /// A ballistic record's kick: its speed, km/s, and its azimuth, radians from the galactic +x axis.
-/// A remnant's is its natal kick, the stellar stage's (through the kick loop); a runaway's or a
-/// walkaway's its ejection speed in its class's speed bin by Design note 24's law and an azimuth,
-/// on `runaway.speed`.
+/// A remnant's is its natal kick, the stellar stage's (through the kick loop, a track built: a
+/// cost P08.T16 benches); a runaway's or a walkaway's its ejection speed in its class's speed bin
+/// by Design note 24's law and an azimuth, on `runaway.speed` (words 0 and 1).
 fn kick(
     galaxy: &Galaxy,
+    displaced: &DisplacedFields,
     record: &SystemRecord,
     (key, kind): (ClassKey, DisplacedKind),
     v_ref: f64,
 ) -> (f64, f64) {
-    if kind == DisplacedKind::Remnant {
-        let (model, _) = primary_model(galaxy, record, draw_metallicity(galaxy, record));
-        return model.natal_kick().map_or((0.0, 0.0), |kick| {
-            let d = kick.direction().components();
-            (
-                KilometresPerSecond::from(kick.speed()).value(),
-                math::atan2(d[1], d[0]),
-            )
-        });
-    }
-    let ejected = if kind == DisplacedKind::Walkaway {
-        Ejected::Walkaway
-    } else {
-        Ejected::Runaway
+    let ejected = match kind {
+        DisplacedKind::Remnant => {
+            let (model, _) = primary_model(galaxy, record, draw_metallicity(galaxy, record));
+            return model.natal_kick().map_or((0.0, 0.0), |kick| {
+                let d = kick.direction().components();
+                (
+                    KilometresPerSecond::from(kick.speed()).value(),
+                    math::atan2(d[1], d[0]),
+                )
+            });
+        }
+        DisplacedKind::Runaway => Ejected::Runaway,
+        DisplacedKind::Walkaway => Ejected::Walkaway,
+        DisplacedKind::HypervelocitySurvivor => {
+            unreachable!("the hypervelocity survivors have no weight, and no ballistic class")
+        }
     };
     let speed_bin = match key {
         ClassKey::Thin { speed, .. } | ClassKey::Old { speed, .. } => speed,
-        ClassKey::Hypervelocity => SpeedBin::new(7).expect("the fastest bin"),
+        ClassKey::Hypervelocity => {
+            unreachable!("the hypervelocity survivors have no weight, and no ballistic class")
+        }
     };
     let mut stream = Stream::open(
         galaxy.seed(),
@@ -220,12 +229,7 @@ fn kick(
     );
     let rank = stream.uniform();
     let azimuth = core::f64::consts::TAU * stream.uniform();
-    let model = galaxy
-        .fields()
-        .displaced()
-        .expect("a ballistic record's galaxy holds the classes")
-        .class_table()
-        .runaway_model();
+    let model = displaced.class_table().runaway_model();
     let scale = KilometresPerSecond::new(v_ref);
     let bin = speed_bin.index();
     let least = if bin == 0 {
@@ -233,9 +237,11 @@ fn kick(
     } else {
         SPEED_EDGES[bin - 1] * v_ref
     };
+    // The fastest bin has no upper edge: the law's own cut ends it, which its CDF reads as 1.
+    let law_top = (RUNAWAY_CUT_OF_V_C * v_ref).max(WALKAWAY_CUT.value());
     let most = SPEED_EDGES
         .get(bin)
-        .map_or(10.0 * v_ref, |edge| edge * v_ref);
+        .map_or(law_top.max(least), |edge| edge * v_ref);
     let cdf = |speed: f64| model.speed_cdf(ejected, KilometresPerSecond::new(speed), scale);
     let target = cdf(least) + rank * (cdf(most) - cdf(least));
     let (mut below, mut above) = (least, most);

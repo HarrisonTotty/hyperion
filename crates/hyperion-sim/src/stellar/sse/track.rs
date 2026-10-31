@@ -796,39 +796,43 @@ impl Track {
     /// which keeps the attempt whose kick its record's speed bin holds). For the track's own fate
     /// it is the track, bit for bit.
     #[must_use]
-    pub(crate) fn with_fate(&self, fate: Fate) -> Self {
-        let replaced = self.segments.last().and_then(|last| match last.model {
-            Model::Remnant {
+    pub(crate) fn with_fate(mut self, fate: Fate) -> Self {
+        let physics_track = &self;
+        let replaced = physics_track.segments.last().and_then(|last| {
+            let Model::Remnant {
                 birth,
                 origin,
                 knee,
                 ..
-            } => {
-                let max_before = last.max_before;
-                let mut segment = remnant_segment(RemnantModel {
-                    phase: fate.phase,
-                    mass: fate.remnant.mass(),
-                    birth,
-                    origin,
-                    knee,
-                });
-                segment.max_before = max_before;
-                let p = segment.evaluate(&self.physics(), birth).point.point;
-                segment.samples.push(Sample {
-                    age: birth,
-                    max_radius: max_before[0].max(p.radius.value()),
-                    max_luminosity: max_before[1].max(p.luminosity.value()),
-                });
-                Some(segment)
-            }
-            _ => None,
+            } = last.model
+            else {
+                return None;
+            };
+            let max_before = last.max_before;
+            let mut segment = remnant_segment(RemnantModel {
+                phase: fate.phase,
+                mass: fate.remnant.mass(),
+                birth,
+                origin,
+                knee,
+            });
+            segment.max_before = max_before;
+            let p = segment
+                .evaluate(&physics_track.physics(), birth)
+                .point
+                .point;
+            segment.samples.push(Sample {
+                age: birth,
+                max_radius: max_before[0].max(p.radius.value()),
+                max_luminosity: max_before[1].max(p.luminosity.value()),
+            });
+            Some(segment)
         });
-        let mut track = self.clone();
-        if let (Some(segment), Some(last)) = (replaced, track.segments.last_mut()) {
+        if let (Some(segment), Some(last)) = (replaced, self.segments.last_mut()) {
             *last = segment;
         }
-        track.fate = Some(fate);
-        track
+        self.fate = Some(fate);
+        self
     }
 
     /// The largest radius the star has had up to `age` since its arrival on the main sequence:

@@ -232,7 +232,9 @@ domain_tags! {
     /// An accepted system's signed age at the epoch.
     SYSTEM_AGE: System = "system.age";
 
-    /// A system's velocity at the epoch: reserved for plan 08 and opened by nothing before it.
+    /// A system's velocity at the epoch: the escape cut's attempts at words 4k (P08.T5), and for
+    /// a member of a displaced class in a first-excursion bin its outbound marks at words 64 + k
+    /// (P08.T12.d).
     SYSTEM_VELOCITY: System = "system.velocity";
 
     // Plan 06: the stars. Every `star.*` draw tag has scope `Body`, is opened with
@@ -567,10 +569,11 @@ domain_tags! {
     /// (P08.T12.c).
     DISPLACED_ORIGIN_BIN: System = "displaced.origin_bin";
 
-    /// A runaway or walkaway's ejection speed: one uniform (P08.T12.c).
+    /// A ballistic runaway or walkaway's ejection: its speed's rank in its speed bin, word 0, and
+    /// the kick's azimuth, word 1 (P08.T12.d).
     RUNAWAY_SPEED: System = "runaway.speed";
 
-    /// A runaway or walkaway's ejection channel and age: one mark and two uniforms (P08.T12.c).
+    /// A runaway or walkaway's ejection age, among the quadrature's: one mark (P08.T12.c).
     RUNAWAY_EJECTION: System = "runaway.ejection";
 
     /// A lesser halo progenitor's kinematics (P08.T3): its anisotropy β, uniform on 0.3–0.7, word

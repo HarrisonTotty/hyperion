@@ -1714,7 +1714,7 @@ impl ClassTable {
         source: BirthSource,
         kind: Ejected,
         m: SolarMasses,
-    ) -> Vec<(f64, f64)> {
+    ) -> Vec<(Years, f64)> {
         ejection_ages(
             self.model,
             kind,
@@ -1723,6 +1723,9 @@ impl ClassTable {
             self.nodes[1].masses(),
             EjectionChannel::Both,
         )
+        .into_iter()
+        .map(|(t, w)| (Years::new(t), w))
+        .collect()
     }
 
     /// Class `id`'s marks in `band` (D or E).

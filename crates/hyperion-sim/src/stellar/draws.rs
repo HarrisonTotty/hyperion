@@ -428,7 +428,7 @@ impl StarDraws {
     /// 08's kick loop, which repeats only the remnant stage on one built track (P08.T12.c, Design
     /// note 17).
     #[must_use]
-    pub(crate) fn with_remnant_draws_of(&self, seed: Seed, star: BodyId, attempt: u32) -> Self {
+    pub(crate) fn with_remnant_draws_of(self, seed: Seed, star: BodyId, attempt: u32) -> Self {
         let key = ObjectKey::from(star);
         let start = u64::from(attempt) * ATTEMPT_WORDS;
         let open = |tag: DomainTag| {
@@ -445,7 +445,7 @@ impl StarDraws {
             kick_mode: open(tags::STAR_KICK_MODE).mark(),
             kick_low: StandardNormal::draw_array(&mut open(tags::STAR_KICK_LOW)),
             kick_direction: isotropic(&mut open(tags::STAR_KICK_DIRECTION)),
-            ..self.parts.clone()
+            ..self.parts
         })
     }
 

@@ -60,7 +60,7 @@ pub const PAD_SPEED: KilometresPerSecond = KilometresPerSecond::new(1_000.0);
 /// as built). With the progenitor's motion that is about 1,300 km/s. The fastest displaced
 /// classes' Gaussian laws have no such edge, and the reserved hypervelocity survivors move at up to
 /// 2,500 km/s; 3,000 km/s covers the survivors with a fifth to spare. Plan 08's P08.T12.d, which
-/// places those classes, will cap each below its layer's [`pad_speed`] (Design note 7), and
+/// places those classes behind its hold, caps each below its layer's [`pad_speed`] (Design note 7), and
 /// [`epoch_velocity`] asserts that in debug builds (P08.T17; decided 2026-10-05,
 /// `decision-r06-pad-speed.md`). Padding chooses cells and changes no generated output.
 pub const UNBOUND_PAD_SPEED: KilometresPerSecond = KilometresPerSecond::new(3_000.0);
@@ -87,7 +87,7 @@ pub const fn pad_speed(layer: Layer) -> KilometresPerSecond {
 ///
 /// It is true exactly where [`pad_speed`] is [`PAD_SPEED`]. Plan 08's escape cut holds a grid
 /// record below the lesser of the local escape speed and [`PAD_SPEED`] (Design note 7). Only a
-/// displaced class exempt from the cut will move faster, once P08.T12.d places them, and such a
+/// displaced class exempt from the cut moves faster, behind P08.T12.d's hold, and such a
 /// class may have weight only in a layer padded at [`UNBOUND_PAD_SPEED`]. So a reader that bounds
 /// a layer's grid records more tightly than its pad, by the local escape speed, may do so exactly
 /// where this holds; plan 12's lensing walk does. It is read from [`pad_speed`], so the two cannot
@@ -247,8 +247,8 @@ pub fn kepler_pad_for(
 /// Plan 08's draw on the reserved domain tag `system.velocity`, keyed by the system's ID
 /// ([`draw_velocity`]), for a galaxy with its kinematic tables
 /// ([`Galaxy::with_full_potential`]); zero for a galaxy built without them, which has no
-/// velocities. A displaced record, once plan 08's P08.T12.d places them, has its class's law; until
-/// then every record is a field record and takes its component's.
+/// velocities. A displaced record has its class's law (plan 08's P08.T12.d, behind its hold);
+/// every other record takes its component's.
 ///
 /// Every grid velocity that the range query, R06's sky census and plan 12's lensing walk read
 /// passes through here, by [`position_at`] and
@@ -264,8 +264,8 @@ pub fn kepler_pad_for(
 /// - In a galaxy with kinematic tables, if `record` is a feature member or a centre member, as
 ///   [`draw_velocity`]; if it is a catalogue system that does not resolve in `galaxy`.
 /// - In debug builds, if the drawn speed is not below `pad_speed(record.layer())`. Plan 08's draw
-///   prevents that: its escape cut holds every grid record below [`PAD_SPEED`], and P08.T12.d will
-///   cap each exempt class below its layer's pad (Design note 7).
+///   prevents that: its escape cut holds every grid record below [`PAD_SPEED`], and P08.T12.d caps
+///   each exempt class below its layer's pad (Design note 7).
 #[must_use]
 pub fn epoch_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocity {
     // A catalogue system moves as its class says: its line's velocity at the epoch, the
@@ -319,7 +319,7 @@ pub fn epoch_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocit
 ///   cube, 65,536 ly from the centre, against the addressable range's 2³¹ ly. Plan 08's field draw
 ///   stays below [`PAD_SPEED`], and since plan 06's ruling 96.2 no natal kick exceeds 990 km/s
 ///   (about 1,300 km/s with the progenitor's motion). Only plan 08's fastest displaced classes,
-///   which P08.T12.d will cap below their layer's pad, and the hypervelocity survivors, at up to
+///   which P08.T12.d caps below their layer's pad, and the hypervelocity survivors, at up to
 ///   2,500 km/s, will move faster.
 /// - Away from the epoch, as [`epoch_velocity`]; for a catalogue system, as its class's motion
 ///   ([`CatalogueSystem::position_at`]) and if it does not resolve in `galaxy`.

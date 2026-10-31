@@ -2134,6 +2134,17 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     reads layer D's and E's masses from the records.
   - Displaced records are single (`grid_multiplicity`, lean 2026-10-31). Retained records keep
     their companions.
+  - Deviation: `formation_site` is the birth source's reference site from the class table (3 R_d
+    in the plane for the discs and the halo, the centre for the spheroids), not a drawn birth site.
+    A living runaway reads its metallicity there.
+  - The mass redraw fires wherever the first fate can give no kick in the bin: no remnant, or no
+    iron core in a moving bin. Layer D's runaway reduction keeps its 255th attempt
+    (`MAX_MARK_ATTEMPT`, a `u8`).
+  - Open point, for the bump (lean 2026-10-31): only `SystemStars::generate` reads the kick
+    loop's kept attempt. The range brief (`stellar/brief.rs`), the lensing walk's
+    `first_attempt_models` and plan 11's hierarchy (the stripped mark, `hierarchy.rs`) still read
+    a constrained record's attempt 0. Before the switch they must take the kept attempt from one
+    function, or the loop must hold `star.stripped`.
   - Tests: `placement/marks_hold.rs`. The 10⁷ kick-loop test (native only) and the living-share
     chi-square are slow, run by name. The kick loop's cap is reached by 2,184 of 9,996,081
     remnants, against none: that is pinned and logged as a finding, and those kicks are scaled
@@ -2153,6 +2164,10 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   - `DisplacedClass::kinematics()` carries plan 15's row.
   - Lean (2026-10-31): a ballistic runaway's time since ejection is rebuilt from its marks (one
     `lifetime` call in the velocity draw) and rescaled as its age was.
+  - A ballistic remnant's velocity reads its natal kick through `primary_model`, so it builds a
+    track. Once P09.T35 sets `RECENT_DEATH_CLAIM` that cost reaches placement's hook as well: a
+    case for P08.T16's bench. A scaled ballistic draw reports `ESCAPE_CUT_ATTEMPTS`, and
+    `tests/galaxy_velocity.rs` holds `PAD_SPEED` only where the cut is it.
   - Tests: `placement/velocity_hold.rs`. The per-class test and
     `no_record_reaches_its_layers_pad_speed` are slow, run by name. On the provisional table the
     slowest class rotates at 1.063 v_c against the youngest's 1.005: a finding, pinned by name
