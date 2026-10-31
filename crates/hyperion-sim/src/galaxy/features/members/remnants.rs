@@ -11,17 +11,22 @@
 //! [`MemberRemnantRules::Tabulated`] the draw asks [`tabulated_fit`] first, and only an attempt it
 //! cannot decide builds its star:
 //!
-//! - **A white dwarf** is kept below the cluster's [`white_dwarf_ceiling`], if its kick, which the
+//! - **A white dwarf** is kept below the cluster's white-dwarf ceiling, if its kick, which the
 //!   star's draws alone set ([`StandardKickLaw::white_dwarf_kick`]), is below the escape speed.
 //!   The ceiling lies [`CEILING_MARGIN`] below the lightest star that leaves anything else, found
 //!   by exact fates at the corners of the members' compositions and at the draws that keep the
-//!   most envelope, so a member kept below it is the star its record builds.
+//!   most envelope, so a member kept below it is the star its record builds. Above it the star's
+//!   companion-stripped mark, read as its track reads it, says which capture window it can open:
+//!   an unstripped star is kept below a ceiling [`UNSTRIPPED_CEILING_MARGIN`] under that lightest
+//!   star, and any star is refused [`WHITE_DWARF_TOP_MARGIN`] above the start of its window,
+//!   `m_cc` less the window's width, where no corner's exact fate is a white dwarf.
 //! - **A neutron star** is refused when the ordinary mode's slowest kick, the rank clamp's floor
 //!   (about 33 km/s), is at or above the escape speed, in a cluster old enough that its star has
 //!   surely died, and a low-mode kick, judged on its pair's systemic speed, either is too fast or
 //!   cannot be the star's: its pair is at or above the escape speed, or the star is unstripped
 //!   (its companion-stripped mark read against the share, a lookup at 26 with the stripping
-//!   table's helium axis) and above the cluster's capture window ([`capture_window_top`]), where
+//!   table's helium axis) and above the cluster's capture window (the table's
+//!   `capture_window_top`), where
 //!   only a stripped star's iron core takes the low mode.
 //!
 //! Refusing an attempt that the star's track would keep moves the draw on to the next one, so the
@@ -48,7 +53,10 @@ use crate::id::{BodyId, SystemId};
 use crate::rng::Threshold;
 use crate::stellar::Composition;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
-use crate::stellar::remnant::collapse::{COMPANION_STRIPPED_WINDOW, ElectronCaptureWindows};
+use crate::stellar::fates::STRIPPED_WINDOW;
+use crate::stellar::remnant::collapse::{
+    COMPANION_STRIPPED_WINDOW, ElectronCaptureWindows, SINGLE_STAR_WINDOW,
+};
 use crate::stellar::remnant::{DeathKind, RemnantKind, StandardKickLaw};
 use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{self, TrackOptions, ZCoeffs};
@@ -74,10 +82,25 @@ pub(crate) enum MemberRemnantRules {
 }
 
 /// How far below the lightest star that leaves anything but a white dwarf a cluster's
-/// [`white_dwarf_ceiling`] lies, M☉: the companion-stripped star's electron-capture window,
+/// [`white_dwarf_ceiling`](RemnantTable::white_dwarf_ceiling) lies, M☉: the companion-stripped
+/// star's electron-capture window,
 /// 1 M☉, which the ceiling's unmarked draws do not open, and 0.2 M☉ for the members' draws and
 /// compositions between the corners.
 pub(crate) const CEILING_MARGIN: f64 = COMPANION_STRIPPED_WINDOW.value() + 0.2;
+
+/// How far below the lightest star that leaves anything but a white dwarf a cluster's
+/// [`unstripped_white_dwarf_ceiling`](RemnantTable::unstripped_white_dwarf_ceiling) lies, M☉:
+/// [`CEILING_MARGIN`] less the stripped window an unstripped star cannot open, the 0.2 M☉ for the
+/// members' draws and compositions between the corners.
+pub(crate) const UNSTRIPPED_CEILING_MARGIN: f64 =
+    CEILING_MARGIN - COMPANION_STRIPPED_WINDOW.value();
+
+/// How far above the start of its capture window, `m_cc` less the window's width, a white dwarf
+/// attempt is refused, M☉: the heaviest white dwarf on the generator's tracks under 26's rules lies
+/// at most 0.13 M☉ above it unstripped and 0.07 M☉ stripped (\[Fe/H\] −2.3 to +0.3, with no helium
+/// excess and 0.18, Reimers η 0 to 0.92; both at +0.3 with none), the main sequence's wind having
+/// lowered the mass the window is tested in, so 0.3 M☉ leaves a margin of some 0.17.
+pub(crate) const WHITE_DWARF_TOP_MARGIN: f64 = 0.3;
 
 /// The lightest initial mass the ceiling's search starts from, M☉: every corner's star of it must
 /// leave a white dwarf, or the cluster has no ceiling.
@@ -135,7 +158,8 @@ fn corners(model: &ClusterModel) -> Vec<Composition> {
         .collect()
 }
 
-/// How far above a cluster's highest `m_cc` its [`capture_window_top`] lies, M☉: the main
+/// How far above a cluster's highest `m_cc` its
+/// [`capture_window_top`](RemnantTable::capture_window_top) lies, M☉: the main
 /// sequence's wind lowers the mass the capture window is tested in from a star's initial mass
 /// (`Builder::captures_electrons`), and an unstripped star's electron capture reaches at most
 /// 0.14 M☉ above `m_cc` on the generator's tracks under 26's rules (\[Fe/H\] −2.3 to +0.3, with
@@ -143,31 +167,41 @@ fn corners(model: &ClusterModel) -> Vec<Composition> {
 /// of some three.
 pub(crate) const CAPTURE_MARGIN: f64 = 0.5;
 
-/// The initial mass above which no unstripped member of `model` collapses by electron capture,
-/// M☉: [`CAPTURE_MARGIN`] above the highest `m_cc` (`ElectronCaptureWindows::iron_core_mass`, the
-/// lowest mass that makes an iron core, whose single star's window lies below it) at the corners
-/// of its members' compositions. It costs one to four bisections of Hurley, Pols and Tout's
-/// (2000, MNRAS 315, 543) equation 66, some microseconds.
+/// The highest `m_cc` (`ElectronCaptureWindows::iron_core_mass`, the lowest mass that makes an
+/// iron core) at the corners of `model`'s members' compositions, M☉: the top of every capture
+/// window of theirs, above which none of them leaves a white dwarf.
 #[must_use]
-pub(crate) fn capture_window_top(model: &ClusterModel) -> SolarMasses {
-    let highest = corners(model)
-        .iter()
-        .map(|comp| {
-            ElectronCaptureWindows::new(&ZCoeffs::new(comp.z_fit()))
-                .iron_core_mass()
-                .value()
-        })
-        .fold(0.0, f64::max);
-    SolarMasses::new(highest + CAPTURE_MARGIN)
+pub(crate) fn highest_iron_core_mass(model: &ClusterModel) -> SolarMasses {
+    SolarMasses::new(
+        corners(model)
+            .iter()
+            .map(|comp| {
+                ElectronCaptureWindows::new(&ZCoeffs::new(comp.z_fit()))
+                    .iron_core_mass()
+                    .value()
+            })
+            .fold(0.0, f64::max),
+    )
 }
 
 /// A cluster's tabulated remnants under one set of stellar rules: what [`tabulated_fit`] reads
 /// for its members' attempts.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct RemnantTable {
-    /// [`white_dwarf_ceiling`], M☉.
+    /// [`CEILING_MARGIN`] below the lightest star that leaves anything but a white dwarf
+    /// ([`white_dwarf_edge`]), M☉, or zero: below it every member leaves a white dwarf, the
+    /// stripped window, which may still open just under the heaviest white dwarf's progenitor,
+    /// among the margin.
     pub(crate) white_dwarf_ceiling: SolarMasses,
-    /// [`capture_window_top`], M☉.
+    /// [`UNSTRIPPED_CEILING_MARGIN`] below the lightest star that leaves anything but a white
+    /// dwarf ([`white_dwarf_edge`]), M☉: below it every unstripped member leaves one, since only a
+    /// companion-stripped star opens the wide capture window.
+    pub(crate) unstripped_white_dwarf_ceiling: SolarMasses,
+    /// [`highest_iron_core_mass`], M☉.
+    pub(crate) highest_iron_core_mass: SolarMasses,
+    /// [`CAPTURE_MARGIN`] above the [`highest_iron_core_mass`], M☉: above it no unstripped member
+    /// collapses by electron capture. It costs one to four bisections of Hurley, Pols and Tout's
+    /// (2000, MNRAS 315, 543) equation 66, some microseconds.
     pub(crate) capture_window_top: SolarMasses,
 }
 
@@ -175,26 +209,32 @@ impl RemnantTable {
     /// The table of the cluster `model` under the stellar `rules`.
     #[must_use]
     pub(crate) fn of(model: &ClusterModel, rules: StellarRules) -> Self {
+        let edge = white_dwarf_edge(model, rules).value();
+        let highest_iron_core_mass = highest_iron_core_mass(model);
         Self {
-            white_dwarf_ceiling: white_dwarf_ceiling(model, rules),
-            capture_window_top: capture_window_top(model),
+            white_dwarf_ceiling: SolarMasses::new((edge - CEILING_MARGIN).max(0.0)),
+            unstripped_white_dwarf_ceiling: SolarMasses::new(
+                (edge - UNSTRIPPED_CEILING_MARGIN).max(0.0),
+            ),
+            highest_iron_core_mass,
+            capture_window_top: SolarMasses::new(highest_iron_core_mass.value() + CAPTURE_MARGIN),
         }
     }
 }
 
-/// The initial mass below which every member of `model` leaves a white dwarf by losing its
-/// envelope, under the stellar `rules`, M☉, or zero if a star of [`CEILING_FLOOR`] at one of its
-/// corners does not: [`CEILING_MARGIN`] below the heaviest star found to leave one under the
-/// lightest that leaves anything else, or below the heaviest white dwarf's progenitor if none up
-/// to it does, since the stripped window may still open just under it.
+/// The heaviest initial mass found to leave a white dwarf below the lightest that leaves anything
+/// else, at every corner of `model`'s members' compositions and at [`corner_draws`], under the
+/// stellar `rules`, M☉: the heaviest white dwarf's progenitor if none up to it leaves anything
+/// else, or zero if a star of [`CEILING_FLOOR`] at a corner does. The ceilings lie below it
+/// ([`RemnantTable`]).
 ///
-/// The edge is found by halving between [`CEILING_FLOOR`] and that progenitor, by exact fates
+/// It is found by halving between [`CEILING_FLOOR`] and that progenitor, by exact fates
 /// (`sse::fate_of`) at the corners of the members' compositions ([`corners`]) and at
-/// [`corner_draws`]. The halving's lower end is kept, so its 0.04 M☉ step takes none of the margin.
-/// It costs some 8–30 lifetime builds, about 3–20 ms, once a cluster
+/// [`corner_draws`]. The halving's lower end is kept, so its 0.04 M☉ step takes none of the
+/// margins. It costs some 8–30 lifetime builds, about 3–20 ms, once a cluster
 /// ([`ClusterModel::remnant_table`]).
 #[must_use]
-pub(crate) fn white_dwarf_ceiling(model: &ClusterModel, rules: StellarRules) -> SolarMasses {
+pub(crate) fn white_dwarf_edge(model: &ClusterModel, rules: StellarRules) -> SolarMasses {
     let options = TrackOptions::default().with_rules(rules);
     let draws = corner_draws();
     // The heaviest mass found to leave a white dwarf at every corner so far.
@@ -222,7 +262,7 @@ pub(crate) fn white_dwarf_ceiling(model: &ClusterModel, rules: StellarRules) -> 
         }
         edge = lo;
     }
-    SolarMasses::new((edge - CEILING_MARGIN).max(0.0))
+    SolarMasses::new(edge)
 }
 
 /// Whether a remnant class's attempt is kept in `galaxy`, for a member of the cluster `model`: of
@@ -291,11 +331,31 @@ pub(crate) fn tabulated_fit(
     let draws = || StarDraws::for_attempt(universe, BodyId::new(system, 0), attempt);
     match kind {
         ClassKind::WhiteDwarf => {
-            if mass >= model.remnant_table(rules).white_dwarf_ceiling.value() {
-                return None;
+            let table = model.remnant_table(rules);
+            let draws = draws();
+            let kept = || {
+                let kick = StandardKickLaw::under(rules).white_dwarf_kick(&draws);
+                (KilometresPerSecond::from(kick.speed()).value() < v_eff).then_some(true)
+            };
+            if mass < table.white_dwarf_ceiling.value() {
+                return kept();
             }
-            let kick = StandardKickLaw::under(rules).white_dwarf_kick(&draws());
-            (KilometresPerSecond::from(kick.speed()).value() < v_eff).then_some(true)
+            // Above the ceiling the star's companion-stripped mark says which capture window it
+            // can open: a white dwarf of an unstripped star is kept below its own ceiling, and one
+            // above the window's start is refused.
+            let m0 = track_mass_of(SolarMasses::new(mass));
+            let stripped = companion_stripped(m0, composition, &draws, rules);
+            if !stripped && mass < table.unstripped_white_dwarf_ceiling.value() {
+                return kept();
+            }
+            let window = if stripped {
+                COMPANION_STRIPPED_WINDOW
+            } else {
+                SINGLE_STAR_WINDOW
+            };
+            let top =
+                table.highest_iron_core_mass.value() - window.value() + WHITE_DWARF_TOP_MARGIN;
+            (mass >= top).then_some(false)
         }
         ClassKind::NeutronStar => {
             let law = StandardKickLaw::under(rules);
@@ -320,6 +380,22 @@ pub(crate) fn tabulated_fit(
         }
         ClassKind::BlackHole | ClassKind::Living | ClassKind::Tail => None,
     }
+}
+
+/// Whether the companion-stripped mark of `draws` is set for a star of track mass `m0` and
+/// `composition` under the stellar `rules`, as its track reads it for the capture window: inside
+/// `STRIPPED_WINDOW` and below the stripped share (`sse::track`'s `is_companion_stripped_under`),
+/// a lookup at 26 with the stripping table's helium axis.
+#[must_use]
+fn companion_stripped(
+    m0: SolarMasses,
+    composition: &Composition,
+    draws: &StarDraws,
+    rules: StellarRules,
+) -> bool {
+    let (lo, hi) = STRIPPED_WINDOW;
+    (lo..=hi).contains(&m0.value())
+        && binarity::is_stripped_under(draws.stripped(), m0, composition, rules)
 }
 
 /// [`ClusterModel::remnant_table`]'s value, found when first asked, with the stellar rules it was
@@ -387,6 +463,13 @@ mod tests {
 
     /// The fixture's slowest globular's, 7.5710 M☉.
     const SLOW_CAPTURE_TOP: f64 = f64::from_bits(0x401e_48bc_43a0_ece8);
+
+    /// The fixture's most massive globular's unstripped white-dwarf ceiling under 26's rules,
+    /// 7.2958 M☉.
+    const MASSIVE_UNSTRIPPED_CEILING: f64 = f64::from_bits(0x401d_2ef3_3333_3333);
+
+    /// The fixture's slowest globular's, 6.7453 M☉.
+    const SLOW_UNSTRIPPED_CEILING: f64 = f64::from_bits(0x401a_fb33_3333_3333);
 
     /// The Milky Way fixture of the members' tests, under every 26 hold.
     fn galaxy() -> &'static Galaxy {
@@ -460,7 +543,8 @@ mod tests {
 
     /// The fixture's most massive globular, of [Fe/H] −0.54 and a helium excess up to 0.18 in its
     /// second population, and its slowest, of [Fe/H] −1.09 with no second population, have
-    /// white-dwarf ceilings of 6.30 and 5.75 M☉ and capture windows' tops of 8.12 and 7.57 M☉ under
+    /// white-dwarf ceilings of 6.30 and 5.75 M☉ (7.30 and 6.75 M☉ an unstripped star's) and capture
+    /// windows' tops of 8.12 and 7.57 M☉ under
     /// 26's rules, pinned to the bit; the massive one's corners take its helium excess, the slow
     /// one's none.
     #[test]
@@ -478,6 +562,14 @@ mod tests {
         assert_same_bits(slow.0.white_dwarf_ceiling.value(), SLOW_CEILING);
         assert_same_bits(massive.0.capture_window_top.value(), MASSIVE_CAPTURE_TOP);
         assert_same_bits(slow.0.capture_window_top.value(), SLOW_CAPTURE_TOP);
+        assert_same_bits(
+            massive.0.unstripped_white_dwarf_ceiling.value(),
+            MASSIVE_UNSTRIPPED_CEILING,
+        );
+        assert_same_bits(
+            slow.0.unstripped_white_dwarf_ceiling.value(),
+            SLOW_UNSTRIPPED_CEILING,
+        );
         assert!(massive.1.contains(&0.18), "{:?}", massive.1);
         assert!(slow.1.iter().all(|&h| h <= 0.0), "{:?}", slow.1);
     }
@@ -546,6 +638,48 @@ mod tests {
             ids.iter()
                 .all(|key| draw(&fresh, key) == draw(&shared, key))
         );
+    }
+
+    /// Every exact fate above a white dwarf's refusal, [`WHITE_DWARF_TOP_MARGIN`] above the start
+    /// of its capture window, is not a white dwarf: unstripped and companion-stripped, at \[Fe/H\]
+    /// −2.3 to +0.3 with no helium excess and 0.18, and Reimers η 0 and 0.92, under 26's rules.
+    #[test]
+    fn no_white_dwarf_lies_above_its_window_s_start_and_the_margin() {
+        let rules = galaxy().rules().stellar;
+        let options = TrackOptions::default().with_rules(rules);
+        let mut fates = 0_u32;
+        for fe_h in [-2.3, -1.0, 0.0, 0.3] {
+            for helium in [0.0, 0.18] {
+                let comp = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::new(helium));
+                let m_cc = ElectronCaptureWindows::new(&ZCoeffs::new(comp.z_fit()))
+                    .iron_core_mass()
+                    .value();
+                for (mark, window) in [
+                    (NEVER_STRIPPED, SINGLE_STAR_WINDOW),
+                    (crate::rng::Mark::from_word(0), COMPANION_STRIPPED_WINDOW),
+                ] {
+                    for z in [-8.0, 6.0] {
+                        let draws = StarDraws::from_parts(StarDrawsParts {
+                            eta: StandardNormal::new(z).unwrap(),
+                            stripped: mark,
+                            ..StarDrawsParts::MEDIAN
+                        });
+                        let top = m_cc - window.value() + WHITE_DWARF_TOP_MARGIN;
+                        for i in 0..8 {
+                            let m = top + 0.05 * f64::from(i);
+                            let fate = sse::fate_of(SolarMasses::new(m), &comp, &draws, options);
+                            fates += 1;
+                            assert_ne!(
+                                fate.remnant.kind(),
+                                RemnantKind::WhiteDwarf,
+                                "{m} M☉, {comp:?}, mark {mark:?}, η normal {z}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(fates, 256);
     }
 
     /// The lightest neutron star's progenitor, of 8 M☉, dies within 60 Myr at the corners of the
@@ -755,30 +889,35 @@ mod tests {
     }
 
     /// Before the 25 → 26 bump (the determinism audit's ask): every white-dwarf attempt the
-    /// tabulated remnants keep below a cluster's ceiling, over every cluster of the fixture whose
-    /// turn-off lies below it (its globulars, old open clusters and the nurseries' bound
+    /// tabulated remnants keep below a cluster's ceilings, over every cluster of the fixture whose
+    /// turn-off lies below them (its globulars, old open clusters and the nurseries' bound
     /// clusters), is one its star's track keeps. Each cluster's attempts are at masses even from
-    /// its turn-off to its ceiling, twelve a globular's and three another's, at the corners of
-    /// its members' compositions, and at the draws of three attempts a globular's member and one
-    /// another's, on a pair at half the escape speed.
+    /// its turn-off to its unstripped ceiling, twelve a globular's and three another's, at the
+    /// corners of its members' compositions, and at the draws of three attempts a globular's
+    /// member and two another's, the marks of which decide between the ceilings, on a pair at half
+    /// the escape speed.
     #[test]
-    #[ignore = "slow: some 51,000 clusters' ceilings and their white dwarfs' tracks"]
+    #[ignore = "slow: some 56,000 clusters' ceilings and their white dwarfs' tracks"]
     fn every_fixture_cluster_s_white_dwarfs_below_its_ceiling_are_their_tracks() {
         let galaxy = galaxy();
         let rules = galaxy.rules().stellar;
         let (mut clusters, mut kept) = (0_u32, 0_u32);
         for process in FeatureProcess::ALL {
             let globular = process == FeatureProcess::Globular;
-            let (masses, attempts) = if globular { (12_u32, 3) } else { (3, 1) };
+            let (masses, attempts) = if globular { (12_u32, 3) } else { (3, 2) };
             for feature in FeatureCatalogue::walk_process(galaxy, process) {
                 let Some(model) = ClusterModel::from_record(galaxy, &feature) else {
                     continue;
                 };
                 let lo = model.turn_off_mass().value();
-                if lo >= WHITE_DWARF_PROGENITOR_MAX - CEILING_MARGIN {
+                if lo >= WHITE_DWARF_PROGENITOR_MAX - UNSTRIPPED_CEILING_MARGIN {
                     continue;
                 }
-                let ceiling = model.remnant_table(rules).white_dwarf_ceiling.value();
+                // Up to the unstripped ceiling, under which an unstripped star is kept too.
+                let ceiling = model
+                    .remnant_table(rules)
+                    .unstripped_white_dwarf_ceiling
+                    .value();
                 if lo >= ceiling {
                     continue;
                 }

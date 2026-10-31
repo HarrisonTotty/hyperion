@@ -5443,3 +5443,9 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     the `match`es in `FeatureStars::listing`, `FeatureStars::claiming`, `CentreRecent::new`,
     `recent_member` and `centre_cells_claim`, and the tripwire
     `the_feature_classes_are_held_only_until_the_26_bump`.
+- **P09.T10 perf, white dwarfs above the ceiling at 26 (lane `galaxy-centre-core`, 2026-10-31).**
+  `RemnantTable` gains `unstripped_white_dwarf_ceiling` (the edge less 0.2 M☉) and
+  `highest_iron_core_mass`; `white_dwarf_ceiling` and `capture_window_top` are fields only (their
+  functions are gone, `white_dwarf_edge` and `highest_iron_core_mass` remain). Above the ceiling a
+  white dwarf reads its mark as its track does: unstripped, kept below its own ceiling; refused
+  `WHITE_DWARF_TOP_MARGIN` (0.3 M☉) above `m_cc` less its window's width.
