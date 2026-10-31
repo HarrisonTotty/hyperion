@@ -262,6 +262,12 @@ slow-timeout = "120s"
 filter = "package(hyperion-server) & binary(density_map) & test(=density_map_512_builds_within_budget)"
 threads-required = "num-cpus"
 
+# P09.T35's carve-out census walks the young field's layer-E cells and two classes' cells in sixteen
+# shares of its own (`in_shares`), so it reserves sixteen slots.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=galaxy::placement::carve_out_hold::census_of_the_carve_out)"
+threads-required = 16
+
 # R10.T4.a's level bounds (`level_bound_worlds`, one slow test) measure each of the six sample worlds
 # on a thread of its own, its body's σ on one more and its points and patches on four more
 # (`THREADS`): up to 36 threads at once, more than a run's pool, so the test takes every slot and

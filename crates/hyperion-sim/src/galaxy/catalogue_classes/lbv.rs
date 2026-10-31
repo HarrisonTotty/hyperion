@@ -182,20 +182,13 @@ pub fn horizon_window(stars: &SystemStars) -> Option<(UniverseTime, UniverseTime
 /// which this does not ask. It is asked of every layer-E record, with or without an explosion
 /// site: most hosts do not die in the supernova test's interval, so plan 03's site gate
 /// (`claims_with` asks its claim only of a record with a recent death) must not hold it. It is
-/// the class's test on the grid's side, and nothing calls it in production yet: P09.T35's
-/// carve-out adds it under its `Claimed` arm, at the version that carves the classes out, and
-/// until then the grid keeps every system the class places too.
+/// the class's test on the grid's side: P09.T35's carve-out asks it under its claimed arm, from
+/// generator version 26 (`placement::candidate::catalogue_claims`), and until then the grid keeps
+/// every system the class places too.
 ///
 /// # Panics
 ///
 /// As [`draw_metallicity`], for a record that is not a grid record of `galaxy`.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "P09.T35 wires it under its carve-out's `Claimed` arm; the tests read it now"
-    )
-)]
 #[must_use]
 pub(crate) fn lbv_claims(galaxy: &Galaxy, record: &SystemRecord) -> bool {
     record.layer() == Layer::E

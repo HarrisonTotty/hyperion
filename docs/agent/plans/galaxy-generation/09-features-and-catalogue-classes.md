@@ -1431,6 +1431,8 @@ layer-E cell holding a death the claim takes, so that setting the claim cannot l
 a golden: check that one does, or add one, such as the cell (200, 203, 0) that
 `resolve_refuses_a_record_whose_recent_death_is_claimed` (`galaxy/placement/resolve.rs`) finds
 (galaxy plan 08's Risks, "Deferred findings (2026-10-13 rule) (P08.T13.b)").
+_The field half built behind its hold (lane `p09-t2c`, step 2, 2026-10-31, at `GENERATOR_VERSION`
+24, no output moved): see Risks, "P09.T35 as built, the field half"._
 
 > **From P08.T13: the interval predicate is part of the one shared test** (main's ruling,
 > 2026-10-15).
@@ -5322,3 +5324,36 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     the refusal and the tripwire `the_field_share_is_held_only_until_the_26_bump`, and restates
     `tests/galaxy_class_table.rs`'s stay asserts (`stay_share(E)` = marks' total, `stay_share(A)` =
     1), which the factor breaks. D1 is `placement/young_field`, labelled by ID.
+- **P09.T35 as built, the field half (lane `p09-t2c`, step 2, 2026-10-31, at `GENERATOR_VERSION` 24,
+  behind `CARVE_OUT_VERSION` = 26; no output moved).**
+  - _Hold._ `displaced::site::{CARVE_OUT_VERSION, CarveOutRules::{Unclaimed, Claimed}}`,
+    `GalaxyRules::carve_out`. `RECENT_DEATH_CLAIM` is now `fn recent_death_claim(rules)`, each arm
+    one item; `Galaxy::with_rules` refuses a change of the carve-out (debug assert).
+  - _Claim._ `core_collapse::recent_death_claims`: the record's `ForcedSingle` stars at its own
+    metallicity, `DeathMarks::of` at its `epoch_velocity`, `claims` in the field. Under `Claimed`
+    `catalogue_claims` asks it of each layer-E record with a site, then `lbv_claims` of every
+    layer-E record it did not take, with or without a site.
+  - _Layer D (lean, 2026-10-31)._ Not in the share matrix, whose bounds would move every layer-D
+    candidate: `Galaxy::layer_d_kept`, 1 − `ancient_share` (about 0.96 for the old populations at
+    the fixture), built in a second step of `Galaxy::build`, thins inside the picked component's
+    slice as T2.c's field does, and `field_component_share` (the expected counts) takes it. Not in
+    `FeatureShares::field_factor` either (P11.T7's text): it needs the built galaxy's delays and
+    its own hold. The Type Ia class and `ClassTable::stay_share(D)` leave it out: the class's rate
+    is per budget system, and P08.T12.a reads `budget_stay_share`.
+  - _Type Ia._ The debug hook `displaced::site::keeps_a_recent_type_ia`, false until P11.T6 wires
+    it to `carved_class`, is asserted of every kept grid system in `SystemStars::generate_with`.
+    `recent_death_claims` debug-asserts a claimed progenitor under `lifetime_cap`'s edge, about
+    4,649 km/s (the `v_fast` guard of "P09.T33.a's leans, kept").
+  - _Tests._ `placement/carve_out_hold.rs`. D1 is `placement/carve_out`: cells (147, 56, 0),
+    (−68, 141, 0) and (87, 168, 0) of seed `0x0935_0000_0000_0001`, not plan 08's (200, 203, 0),
+    which is in a fixture without the field share. P09.T43's `grid_core_collapse_claims` calls
+    `recent_death_claims`. Complementarity is per mark set (each side keys its draws on its own
+    ID, so a class candidate has no grid twin); the harness with its forced reject path is T38's.
+  - _Known gap._ Carved-out hosts are missing from range queries until P09.T37 (27).
+  - _Waiting._ The runaway classes (T33.b), P09.T43's runaway test and T34.b's, after P08.T12, join
+    `CarveOutRules::Claimed`. T28.b.b's deferred findings (5), a Kepler-regime layer-E site on a
+    straight line, and (6), a cell that depends on its galaxy's kinematic tables, now read by the
+    claim under every 26 hold, go to the bump.
+  - _Bump._ 26 deletes `CARVE_OUT_VERSION`, `CarveOutRules`' `Unclaimed` arm, the field, the
+    `match`es in `recent_death_claim` and `Galaxy::build`, the refusal and the tripwire
+    `the_carve_out_is_held_only_until_the_26_bump`; the claim is again the one item.

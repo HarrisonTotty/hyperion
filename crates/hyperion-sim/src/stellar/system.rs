@@ -1586,6 +1586,14 @@ impl SystemStars {
         loop {
             let drawn = Self::at_attempt(galaxy, record, &primary, ctx, attempt);
             if !carves || drawn.carved_pair().is_none() {
+                // The carve-out takes no recent Type Ia from the grid, so a kept grid system has
+                // none at or before +H (plan 09, P09.T35's requirement of plan 11's P11.T6).
+                debug_assert!(
+                    !carves || !crate::galaxy::displaced::site::keeps_a_recent_type_ia(&drawn),
+                    "a grid system keeps a Type Ia at or before +H, which plan 11's binaries \
+                     redraw: {:?}",
+                    record.id()
+                );
                 return drawn;
             }
             let Some(next) = attempt.next() else {

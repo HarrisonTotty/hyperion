@@ -18,7 +18,8 @@
 use super::record::{SystemKind, SystemRecord};
 use super::{CellKey, layer_bound, rogue_planet_saturation_density};
 use crate::coords::GalacticPosition;
-use crate::galaxy::displaced::site::{ExplosionSite, RECENT_DEATH_CLAIM, explosion_site};
+use crate::galaxy::catalogue_classes::lbv::lbv_claims;
+use crate::galaxy::displaced::site::{ExplosionSite, explosion_site, recent_death_claim};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::motion::{KeplerRegimeRules, carved_by_the_loss_cone};
@@ -163,6 +164,11 @@ struct Pick {
 /// budget's, and a system the field keeps is the budget's record bit for bit: the field only
 /// thins (brainstorm, "Exact placement by thinning"). The threshold is the pick's, in its
 /// arithmetic, so `f` = 1 keeps every candidate the pick kept.
+///
+/// In layer D, from version 26 under P09.T35's carve-out (`displaced::site::CARVE_OUT_VERSION`),
+/// `f` is also times what the field keeps of the component's layer D, 1 less its ancient Type Ia
+/// ([`Galaxy::layer_d_kept`]), in the same slice: layer D's share less `ancient_share`, with only
+/// counts moving. Under both holds' held arms it keeps every candidate, the code of version 25.
 #[must_use]
 fn in_the_field(
     galaxy: &Galaxy,
@@ -172,10 +178,22 @@ fn in_the_field(
     pick: &Pick,
     record: &SystemRecord,
 ) -> bool {
-    let Some(field) = galaxy.field_share() else {
-        return true;
+    let field = galaxy.field_share();
+    let layer_d = match key.band() {
+        MassBand::D => galaxy.layer_d_kept(pick.component),
+        MassBand::A
+        | MassBand::B
+        | MassBand::C
+        | MassBand::E
+        | MassBand::BrownDwarf
+        | MassBand::RoguePlanet => None,
     };
-    let keeps = field.keeps(pick.component, key.band(), record.age_at_epoch());
+    if field.is_none() && layer_d.is_none() {
+        return true;
+    }
+    let keeps = field.map_or(1.0, |field| {
+        field.keeps(pick.component, key.band(), record.age_at_epoch())
+    }) * layer_d.unwrap_or(1.0);
     let padded_bound = bound * (1.0 + BOUND_PADDING);
     mark.is_below(Threshold::from_ratio(
         pick.below + keeps * pick.weight,
@@ -200,26 +218,32 @@ fn in_loss_cone(galaxy: &Galaxy, record: &SystemRecord) -> bool {
     }
 }
 
-/// Whether a catalogue class claims this candidate, which none does before plan 09 (plan 03, Design
-/// note 5).
+/// Whether a catalogue class claims this candidate (plan 03, Design note 5; plan 09, P09.T35).
 ///
 /// The hook sits after the marks are drawn because a class is a deterministic test on a candidate's
 /// own marks (brainstorm, "Rare events are found by carving out their hosts, not the events"), and
 /// the cells draw conditional on not being in the class. It is asked for stellar records only
-/// (plan 13, P13.T3.c). Once plan 09 gives the claim, [`RECENT_DEATH_CLAIM`] (P09.T35), it computes
-/// the [`explosion_site`] of every accepted layer-E record and, where the primary dies inside the
-/// interval, passes the site to the claim (plan 08, P08.T13); every other layer is answered no
-/// without a site. Before that it computes the site of no record (P08.T13.b), the field keeps every
-/// candidate it accepts, and [`CandidateOutcome::ClaimedByCatalogue`] never appears.
+/// (plan 13, P13.T3.c). Under the claim plan 09 gives, from generator version 26
+/// ([`recent_death_claim`], P09.T35), it computes the [`explosion_site`] of every accepted layer-E
+/// record and, where the primary dies inside the interval, passes the site to the core-collapse
+/// class's claim (plan 08, P08.T13); then, for a record that claim did not take, with or without a
+/// site, it asks the luminous blue variables' ([`lbv_claims`], P09.T43): most of their hosts do not
+/// die in the interval, so the site's gate must not hold that claim back, and a record both would
+/// claim is the core collapses' entry. Every other layer is answered no without a site. Under the
+/// held arm it computes the site of no record (P08.T13.b), the field keeps every candidate it
+/// accepts, and [`CandidateOutcome::ClaimedByCatalogue`] never appears.
 #[must_use]
 pub(super) fn catalogue_claims(galaxy: &Galaxy, record: &SystemRecord) -> bool {
-    RECENT_DEATH_CLAIM.is_some_and(|claim| claims_with(galaxy, record, explosion_site, claim))
+    recent_death_claim(galaxy.rules().carve_out).is_some_and(|claim| {
+        claims_with(galaxy, record, explosion_site, claim) || lbv_claims(galaxy, record)
+    })
 }
 
-/// [`catalogue_claims`] with the site and the claim given: for a layer-E record, `claim` of its
-/// `site` where it has one, and no for every other layer, which asks neither (P08.T13). Production
-/// passes [`explosion_site`] and the claim [`RECENT_DEATH_CLAIM`] holds, once it holds one
-/// (P08.T13.b); a test passes counting or always-yes closures, which needs no hidden state.
+/// The core-collapse half of [`catalogue_claims`], with the site and the claim given: for a
+/// layer-E record, `claim` of its `site` where it has one, and no for every other layer, which
+/// asks neither (P08.T13). Production passes [`explosion_site`] and the claim
+/// [`recent_death_claim`] gives (P08.T13.b, P09.T35); a test passes counting or always-yes
+/// closures, which needs no hidden state.
 #[must_use]
 pub(super) fn claims_with(
     galaxy: &Galaxy,
@@ -882,8 +906,8 @@ mod tests {
     /// P08.T13 and P08.T13.b: the seam half ([`walk_the_seam`]) reaches the exact tier; and over
     /// the same cells, through the whole-cell walk and through `resolve`, the production hook gives
     /// one verdict of the interval predicate per accepted layer-E candidate once a claim is set,
-    /// placed or claimed, and none while [`RECENT_DEATH_CLAIM`] is `None`, even in the cells where
-    /// the seam reached the exact tier.
+    /// placed or claimed, and none under the carve-out's held arm (`recent_death_claim`), even in
+    /// the cells where the seam reached the exact tier.
     #[test]
     fn hook_asks_for_a_site_once_per_accepted_layer_e_candidate() {
         let galaxy = galaxy();
@@ -914,7 +938,7 @@ mod tests {
         // claim is set, one verdict per accepted layer-E candidate, from the one site it computes,
         // and none before (P08.T13.b). A claimed candidate has its verdict and is not placed.
         let per_record = |records: u64| {
-            if RECENT_DEATH_CLAIM.is_some() {
+            if recent_death_claim(galaxy.rules().carve_out).is_some() {
                 records
             } else {
                 0
@@ -936,7 +960,7 @@ mod tests {
         }
         // The walk places every candidate the seam accepted, less any a claim takes.
         assert!(placed_e <= accepted_e);
-        if RECENT_DEATH_CLAIM.is_none() {
+        if recent_death_claim(galaxy.rules().carve_out).is_none() {
             assert_eq!(placed_e, accepted_e);
         }
         let walked = take_verdicts();
@@ -952,7 +976,7 @@ mod tests {
              layer-E records, {} over {resolved_e} resolved in the {} cells the exact tier reached",
             seam.len(),
             seam_verdicts.shares(),
-            if RECENT_DEATH_CLAIM.is_some() {
+            if recent_death_claim(galaxy.rules().carve_out).is_some() {
                 "a claim set"
             } else {
                 "no claim set"

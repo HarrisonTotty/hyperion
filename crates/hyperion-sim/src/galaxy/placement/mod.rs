@@ -23,6 +23,8 @@
 
 mod cache;
 mod candidate;
+#[cfg(test)]
+mod carve_out_hold;
 mod cell;
 mod generate;
 mod headroom;

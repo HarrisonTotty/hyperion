@@ -21,7 +21,7 @@ use hyperion_testkit::stats::{
 use super::*;
 use crate::GENERATOR_VERSION;
 use crate::Seed;
-use crate::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+use crate::galaxy::catalogue_classes::core_collapse::{CoreCollapseProcess, recent_death_claims};
 use crate::galaxy::catalogue_classes::grid::candidate_count;
 use crate::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
 use crate::galaxy::catalogue_classes::{
@@ -130,15 +130,10 @@ fn grid_record(
     )
 }
 
-/// Whether the core-collapse class claims the grid record `record`, as P09.T35's
-/// `recent_death_claims` will: its explosion site, its stars' death marks at its epoch velocity,
-/// and `claims` in the field.
+/// Whether the core-collapse class claims the grid record `record`, as the carve-out asks it
+/// (P09.T35): its explosion site, then the production claim, `recent_death_claims`.
 fn grid_core_collapse_claims(galaxy: &Galaxy, record: &SystemRecord) -> bool {
-    explosion_site(galaxy, record).is_some_and(|site| {
-        let stars = SystemStars::generate_in(galaxy, record, MultiplicityContext::ForcedSingle);
-        DeathMarks::of(galaxy, &stars, &site, epoch_velocity(galaxy, record))
-            .is_some_and(|marks| claims(galaxy, &site, &marks, Surroundings::Field))
-    })
+    explosion_site(galaxy, record).is_some_and(|site| recent_death_claims(galaxy, &site, record))
 }
 
 // 1. The young field, its bounds and the windows.

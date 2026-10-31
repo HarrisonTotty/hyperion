@@ -859,8 +859,9 @@ mod tests {
         })
     }
 
-    /// [`held`]'s galaxy under every 26 hold but the field share, which the galaxy reads when it
-    /// is built and which reaches no globular (P09.T2.c): the own-μ arm.
+    /// [`held`]'s galaxy under every 26 hold but the field share and the carve-out, which the
+    /// galaxy reads when it is built and which reach no globular (P09.T2.c, P09.T35): the own-μ
+    /// arm.
     fn own() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
         GALAXY.get_or_init(|| held().clone().with_rules(own_rules()))
@@ -870,6 +871,7 @@ mod tests {
     fn own_rules() -> GalaxyRules {
         GalaxyRules {
             field_share: held().rules().field_share,
+            carve_out: held().rules().carve_out,
             ..GalaxyRules::every_26_hold()
         }
     }

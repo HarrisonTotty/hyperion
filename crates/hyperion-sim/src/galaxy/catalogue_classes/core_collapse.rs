@@ -57,7 +57,7 @@
 //!
 //! A candidate is an entry if and only if plan 08's
 //! [`death_in_interval`] on its primary's marks is
-//! `Some` and [`claims`](super::supernova::claims) holds on [`DeathMarks::of`] its stars in the
+//! `Some` and [`claims`] holds on [`DeathMarks::of`] its stars in the
 //! field's surroundings, which is the one shared test (P08.T13's interval predicate is part of it;
 //! main's ruling, 2026-10-15). A death that makes no shell, a direct collapse to a black hole or a
 //! star that ends as a white dwarf, has no marks and is thinned like any other: the class keeps the
@@ -77,7 +77,8 @@ use super::grid::{CatalogueMember, ClassProcess};
 use super::ids::CatalogueCellKey;
 use super::registry::ClassId;
 use super::supernova::{
-    DeathMarks, SupernovaEntry, SupernovaInterval, Surroundings, claimed_window,
+    DeathMarks, SupernovaEntry, SupernovaInterval, Surroundings, claimed_window, claims,
+    lifetime_cap,
 };
 use super::system::{CatalogueMotion, CatalogueSystem};
 use crate::coords::{GalacticPosition, GalacticVelocity};
@@ -88,6 +89,7 @@ use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::kinematics::draw_on;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
+use crate::galaxy::query::epoch_velocity;
 use crate::galaxy::snr::{ShellEnvironment, ShellWindow};
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{BodyId, CatalogueSystemId, SystemId};
@@ -579,6 +581,45 @@ pub(super) fn class_site_velocity(
     }
     let mut stream = Stream::open(galaxy.seed(), tag, key);
     draw_on(galaxy, component, site, &mut stream).velocity()
+}
+
+/// Whether the core-collapse class claims the grid record `record`, whose primary dies at `site`
+/// inside the shared test's interval (plan 09, P09.T35): the record's primary, alone as the
+/// class's candidates are (`MultiplicityContext::ForcedSingle`), at its own metallicity draw, makes
+/// a shell there ([`DeathMarks::of`], at the record's epoch velocity, plan 08's `epoch_velocity`),
+/// and [`claims`] keeps it in the field's surroundings.
+///
+/// It is the class's test on the grid's side, the second half of the one shared test whose first
+/// is the site's [`death_in_interval`]: a recent death is the catalogue's or the grid's and never
+/// both (P09.T38's complementarity). The carve-out asks it of each layer-E record with a site under
+/// its claimed arm (`displaced::site::recent_death_claim`), and P09.T43's
+/// `the_class_s_core_collapse_claim_is_the_grid_s` holds the class's own claim equal to it.
+///
+/// # Panics
+///
+/// As [`SystemStars::generate_in`] and plan 08's `epoch_velocity`, for a record that is not a grid
+/// record of `galaxy`; and in debug builds, as [`DeathMarks::of`], if `site`'s death is not the
+/// primary's, and if the record moves fast enough to outrun the reach before its death
+/// ([`lifetime_cap`]'s edge, about 4,649 km/s).
+#[must_use]
+pub(crate) fn recent_death_claims(
+    galaxy: &Galaxy,
+    site: &ExplosionSite,
+    record: &SystemRecord,
+) -> bool {
+    let velocity = epoch_velocity(galaxy, record);
+    // Nothing reads an entry before the source horizon, so its progenitor's line is read for at
+    // most L + 2H before T, which only one above 4,096 ly ÷ (L + 2H), about 4,649 km/s, could
+    // outrun the reach (`lifetime_cap`'s edge; plan 09, "P09.T33.a's leans, kept", `v_fast`).
+    debug_assert!(
+        lifetime_cap(velocity.speed()).value() >= 0.0,
+        "a grid record of {:?} at {} m/s outruns the reach before its death",
+        record.id(),
+        velocity.speed().value()
+    );
+    let stars = SystemStars::generate_in(galaxy, record, MultiplicityContext::ForcedSingle);
+    DeathMarks::of(galaxy, &stars, site, velocity)
+        .is_some_and(|marks| claims(galaxy, site, &marks, Surroundings::Field))
 }
 
 #[cfg(test)]

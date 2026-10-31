@@ -50,6 +50,7 @@ use std::fmt;
 use std::sync::OnceLock;
 
 use self::ages::FieldShareRules;
+use self::displaced::site::CarveOutRules;
 use self::fates::{CompanionMasses, fates_for};
 use self::features::centre::{BuildCentreError, CentreModel};
 use self::features::shares::FeatureShares;
@@ -228,6 +229,9 @@ pub struct Galaxy {
     /// The field's share of each component's budget, from generator version 26 (P09.T2.c); none
     /// under the held arm, where the field is the budget.
     field_share: Option<Box<FieldShare>>,
+    /// What the field keeps of each component's layer D, in the fields' order, from generator
+    /// version 26 (P09.T35): 1 less its ancient Type Ia; none under the held arm.
+    layer_d_kept: Option<Box<[f64]>>,
     rules: GalaxyRules,
 }
 
@@ -311,8 +315,8 @@ impl Galaxy {
     ///
     /// It is what [`from_params_with_rules`](Self::from_params_with_rules) builds from the same
     /// seed and parameters, with the builders after it, since nothing a galaxy builds when it is
-    /// built reads its rules but the field share (below): each other held call site reads them
-    /// when asked, and a test holds the two equal. It keeps the centre's motion and potential if they have been read, since the motion
+    /// built reads its rules but the field share and the carve-out (below): each other held call
+    /// site reads them when asked, and a test holds the two equal. It keeps the centre's motion and potential if they have been read, since the motion
     /// reads only the parameters and the mass model, and the potential only the motion. It keeps
     /// the centre's model only if the stellar rules ([`GalaxyRules::stellar`]) stay as they were.
     /// The model's classes are built from the stellar law (the kick law's parameters and the
@@ -322,19 +326,26 @@ impl Galaxy {
     /// `CentreModel::from_parts`, since the reset alone does not route them. A galaxy-side hold
     /// whose arm reaches any of these memos must reset it here too.
     ///
-    /// The field share (`GalaxyRules::field_share`, P09.T2.c) is the one hold read when the galaxy
-    /// is built, so `rules` must keep this galaxy's: a test of its new arm builds the galaxy
-    /// through [`from_params_with_rules`](Self::from_params_with_rules).
+    /// The field share (`GalaxyRules::field_share`, P09.T2.c) and the carve-out
+    /// (`GalaxyRules::carve_out`, P09.T35) are the holds read when the galaxy is built, so `rules`
+    /// must keep this galaxy's: a test of either's new arm builds the galaxy through
+    /// [`from_params_with_rules`](Self::from_params_with_rules).
     ///
     /// # Panics
     ///
-    /// In debug builds, which every test profile is, if `rules` changes the field share.
+    /// In debug builds, which every test profile is, if `rules` changes the field share or the
+    /// carve-out.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn with_rules(self, rules: GalaxyRules) -> Self {
         debug_assert_eq!(
             rules.field_share, self.rules.field_share,
             "the field share is read when a galaxy is built: build it under the new rules with \
+             `Galaxy::from_params_with_rules`"
+        );
+        debug_assert_eq!(
+            rules.carve_out, self.rules.carve_out,
+            "the carve-out is read when a galaxy is built: build it under the new rules with \
              `Galaxy::from_params_with_rules`"
         );
         let centre = if rules.stellar == self.rules.stellar {
@@ -383,7 +394,7 @@ impl Galaxy {
             }
         };
         let window_caps = WindowCaps::from_gas_params(gas.params());
-        Ok(Self {
+        let mut galaxy = Self {
             seed,
             params,
             mass_function,
@@ -401,8 +412,16 @@ impl Galaxy {
             centre_potential: CentrePotentialCell::default(),
             companions: CompanionsCell::default(),
             field_share,
+            layer_d_kept: None,
             rules,
-        })
+        };
+        // A second step, once the parts it reads exist: layer D's ancient Type Ia come from the
+        // built galaxy's delay-time distribution (P09.T35).
+        galaxy.layer_d_kept = match rules.carve_out {
+            CarveOutRules::Unclaimed => None,
+            CarveOutRules::Claimed => Some(field_share::layer_d_kept(&galaxy)),
+        };
+        Ok(galaxy)
     }
 
     /// The same galaxy with other substellar parameters, for tests and tuning: its abundances and
@@ -748,6 +767,10 @@ impl Galaxy {
                 .field_share
                 .as_ref()
                 .map_or(0, |field| size_of::<FieldShare>() + field.heap_bytes())
+            + self
+                .layer_d_kept
+                .as_ref()
+                .map_or(0, |kept| size_of_val::<[f64]>(kept))
     }
 }
 

@@ -12,10 +12,10 @@
 //!   primary, and plan 09's `claims` is the second half (P09.T17).
 //! - [`explosion_site`] is that predicate on a grid record's marks, with the site the record's
 //!   epoch position moved along its velocity to the death (Design note 22's x + v T).
-//! - `RECENT_DEATH_CLAIM` is the gate: the claim plan 03's carve-out hook passes each site to,
-//!   `None` until plan 09's P09.T35 gives it, with its version bump. While it is `None` the hook
-//!   asks for no site, so placement reads no tier of the predicate, and no generated output depends
-//!   on this module yet (P08.T13.b).
+//! - `recent_death_claim` is the gate: the claim plan 03's carve-out hook passes each site to.
+//!   Plan 09's P09.T35 gives it, held until generator version 26 (`CARVE_OUT_VERSION`). Under
+//!   the held arm it is `None`, the hook asks for no site, placement reads no tier of the
+//!   predicate, and no generated output depends on this module (P08.T13.b).
 //!
 //! `W_cap` is plan 09's [`SHELL_WINDOW_CAP`] (4 Myr), the ceiling of every shell window; L is
 //! [`LIGHT_CROSSING_L`] (2¹⁸ Julian years) and H is [`CLOCK_WINDOW_H`] (1,000 Julian years). So
@@ -74,8 +74,10 @@
 
 use std::cell::LazyCell;
 
+use crate::GeneratorVersion;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::core_collapse::recent_death_claims;
 use crate::galaxy::displaced::marks::LifetimeBracket;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::epoch_velocity;
@@ -84,7 +86,6 @@ use crate::stellar::brief::{DEAD_MARGIN_FLOOR, STATED_FACTOR};
 use crate::stellar::draws::{StandardNormal, StarDraws};
 use crate::stellar::fates::{FittedFate, FittedFates, STRIPPED_WINDOW, stripped_mark_matters};
 use crate::stellar::sse::MIN_INITIAL_MASS;
-#[cfg(doc)]
 use crate::stellar::system::SystemStars;
 use crate::stellar::system::{
     clock_time_of_death, draw_metallicity, primary_draws, primary_eta, track_mass_of,
@@ -227,11 +228,11 @@ pub fn death_in_interval(
 /// already dead backs it out to where it exploded. The velocity is drawn only then, and a galaxy
 /// built without its kinematic tables has none, so its sites are the epoch positions.
 ///
-/// Once plan 09 supplies the claim (P09.T35, which sets `RECENT_DEATH_CLAIM`), plan 03's carve-out
-/// hook calls this for every accepted layer-E record and passes the site to the claim; until then
-/// the hook calls it for none, and nothing generated reads a site (P08.T13.b). It is a pure
-/// function of the galaxy and the record: `resolve`, `generate_cell` and plan 09 get the same
-/// answer in any order.
+/// Under the claim plan 09 supplies (P09.T35, `recent_death_claim`, from generator version 26),
+/// plan 03's carve-out hook calls this for every accepted layer-E record and passes the site to
+/// the claim; under the held arm the hook calls it for none, and nothing generated reads a site
+/// (P08.T13.b). It is a pure function of the galaxy and the record: `resolve`, `generate_cell` and
+/// plan 09 get the same answer in any order.
 ///
 /// # Panics
 ///
@@ -317,20 +318,64 @@ pub fn explosion_site(galaxy: &Galaxy, record: &SystemRecord) -> Option<Explosio
 /// the site inside the interval (plan 08, P08.T13.b).
 pub(crate) type RecentDeathClaim = fn(&Galaxy, &ExplosionSite, &SystemRecord) -> bool;
 
-/// The claim plan 03's carve-out hook passes each layer-E record's [`explosion_site`] to: `None`
-/// until plan 09's P09.T35 gives it (plan 08, P08.T13.b).
+/// The generator version from which the grid gives the catalogue classes their hosts (plan 09,
+/// P09.T35, the field half; the hold of [`CarveOutRules`]): a layer-E record whose primary dies
+/// in the interval and makes a shell the core-collapse class holds, or whose window overlaps the
+/// source horizon the luminous blue variables' class holds, resolves to no such system, and layer
+/// D gives up the systems that exploded as Type Ia before the interval.
 ///
-/// P09.T35 writes `recent_death_claims(galaxy, &site, &record)`: the record's [`SystemStars`],
-/// `DeathMarks::of`, then `claims(galaxy, &site, &marks, ShellEnvironment::Field)`. It sets this to
-/// `Some(recent_death_claims)` in its bump commit. While it is `None` the hook asks for no site, so
-/// placement reads no tier of the predicate: neither [`LifetimeBracket::shared`], nor the fate
-/// table, nor `lifetime`.
+/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
+/// [`CarveOutRules::Unclaimed`], the code of version 25 verbatim: the hook asks for no site and the
+/// grid keeps every candidate it accepts. The tests reach the new arm through a galaxy built under
+/// `GalaxyRules::every_26_hold()`. The bump to 26 deletes this hold, [`CarveOutRules`] with its
+/// `Unclaimed` arm, `GalaxyRules::carve_out`, the `match`es in [`recent_death_claim`] and
+/// `Galaxy::build` (so `Galaxy::layer_d_kept` loses its `Option`) and the tripwire
+/// (`the_carve_out_is_held_only_until_the_26_bump`), and makes the claim the one item
+/// `Some(recent_death_claims)` again.
+pub(crate) const CARVE_OUT_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether the grid gives the catalogue classes their hosts (the hold of [`CARVE_OUT_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum CarveOutRules {
+    /// Version 25's and before: no claim, and the grid keeps every candidate it accepts.
+    Unclaimed,
+    /// Version 26's: the core-collapse class's claim and the luminous blue variables', and layer D
+    /// less its ancient Type Ia (P09.T35).
+    Claimed,
+}
+
+/// The claim plan 03's carve-out hook passes each layer-E record's [`explosion_site`] to under
+/// `rules` (plan 08, P08.T13.b; plan 09, P09.T35): `None` under the held arm, and plan 09's
+/// `recent_death_claims` under [`CarveOutRules::Claimed`]: the record's [`SystemStars`],
+/// `DeathMarks::of`, then `claims(galaxy, &site, &marks, Surroundings::Field)`. Under `None` the
+/// hook asks for no site, so placement reads no tier of the predicate: neither
+/// [`LifetimeBracket::shared`], nor the fate table, nor `lifetime`.
 ///
 /// It is one item on purpose: giving a claim and switching the hook on are the same edit (main's
 /// ruling on P08.T13's cost, 2026-10-15). A flag beside a stub's body would be two edits, and a
 /// claim written with the flag left off would keep on the grid every recent death the catalogue
-/// claims, a silent double count.
-pub(crate) const RECENT_DEATH_CLAIM: Option<RecentDeathClaim> = None;
+/// claims, a silent double count. The hold keeps it one item: each arm gives the claim with its
+/// switch.
+#[must_use]
+pub(crate) fn recent_death_claim(rules: CarveOutRules) -> Option<RecentDeathClaim> {
+    match rules {
+        CarveOutRules::Unclaimed => None,
+        CarveOutRules::Claimed => Some(recent_death_claims),
+    }
+}
+
+/// Whether the grid system `stars` keeps a Type Ia explosion at or before +H: never, the
+/// requirement P09.T35 records of plan 11's binaries (plan 11's consumed interface; P11.T6, its
+/// Design notes 8 and 9), since the carve-out takes no recent Type Ia from the grid and plan 09's
+/// Type Ia class holds every one. `SystemStars::generate_with` asserts it of every grid system it
+/// keeps, in debug builds.
+///
+/// Until P11.T6 marks a pooled event as exploded, no binary explodes and this is false; P11.T6
+/// wires it to `carved_class`, whose redraw then keeps it false.
+#[must_use]
+pub(crate) const fn keeps_a_recent_type_ia(_stars: &SystemStars) -> bool {
+    false
+}
 
 /// The predicate's core: [`death_in_interval`] of a primary of initial mass `m0` and age at the
 /// epoch `age_at_epoch`, whose other `marks` are read only where a tier needs them, with the exact
@@ -1252,14 +1297,16 @@ mod tests {
     /// `benches/range_query.rs`'s `range_50ly_cold`, each on its bench's seed, from
     /// [`explosion_site`] called on each placed layer-E record: one verdict per record. Placing
     /// them, the production hook gives one verdict per layer-E record once a claim is set, and none
-    /// while [`RECENT_DEATH_CLAIM`] is `None` (P08.T13.b); another layer gives none either way.
+    /// under the held arm of the carve-out (P08.T13.b); another layer gives none either way.
     #[test]
     fn the_benches_centre_gives_one_verdict_per_layer_e_record_and_the_hook_needs_a_claim() {
         // One per placed record: every verdict here is the bracket's, so no record has a site a
         // claim could take, and the placed records are the accepted candidates.
         let per_record = |records: usize| {
             let records = u64::try_from(records).unwrap();
-            if RECENT_DEATH_CLAIM.is_some() {
+            // The galaxies below are built under the version's rules, the held arm until 26.
+            let rules = crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION);
+            if recent_death_claim(rules.carve_out).is_some() {
                 records
             } else {
                 0

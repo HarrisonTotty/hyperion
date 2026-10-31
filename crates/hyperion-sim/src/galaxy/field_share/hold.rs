@@ -310,8 +310,9 @@ fn compare_cell(key: CellKey, moves: &mut Moves) -> Vec<SystemRecord> {
 
 /// The digest (`f64_digest`) of the field's records of the sample cells in D2 under every 26
 /// hold: each record's ID (high, low 32 bits), mass and age, in cell and index order. Blessed
-/// natively on x86-64; the wasip1 suite compares it.
-const FIELD_RECORDS_DIGEST: u64 = 0x9e4c_c7b7_e008_30c3;
+/// natively on x86-64; the wasip1 suite compares it. Re-pinned when P09.T35's carve-out joined
+/// every 26 hold, its layer D giving up its ancient Type Ia.
+const FIELD_RECORDS_DIGEST: u64 = 0xd107_4ee6_ab56_1bb7;
 
 /// D2 under every 26 hold, and the plan's "only counts move, never the layout of an unaffected
 /// cell's survivors": in a cell of every layer at the Sun-like point and on the young arm ridge,

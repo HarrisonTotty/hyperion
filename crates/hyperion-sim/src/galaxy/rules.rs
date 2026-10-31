@@ -35,6 +35,10 @@
 //! - [`field_share`](GalaxyRules::field_share), at [`FIELD_SHARE_VERSION`] (plan 09, P09.T2.c):
 //!   the field gives up the features' share φ of its systems. It is read where the galaxy is built,
 //!   which installs the field's factors, so `Galaxy::with_rules` refuses to change it.
+//! - [`carve_out`](GalaxyRules::carve_out), at [`CARVE_OUT_VERSION`] (plan 09, P09.T35): the grid
+//!   gives the core-collapse and luminous blue variables' classes their hosts, and layer D gives
+//!   up its ancient Type Ia. It is read where the galaxy is built, which installs layer D's
+//!   factors, so `Galaxy::with_rules` refuses to change it too.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -44,6 +48,7 @@
 
 use crate::GeneratorVersion;
 use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules};
+use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
 use crate::galaxy::features::centre::events::luminosity::{
     CENTRE_QUIESCENCE_VERSION, CentreQuiescenceRules,
 };
@@ -77,6 +82,8 @@ pub(crate) struct GalaxyRules {
     pub(crate) member_remnants: MemberRemnantRules,
     /// Whether the field gives up the features' share φ of its systems (P09.T2.c).
     pub(crate) field_share: FieldShareRules,
+    /// Whether the grid gives the catalogue classes their hosts (P09.T35).
+    pub(crate) carve_out: CarveOutRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -122,6 +129,11 @@ impl GalaxyRules {
             } else {
                 FieldShareRules::None
             },
+            carve_out: if version.get() >= CARVE_OUT_VERSION.get() {
+                CarveOutRules::Claimed
+            } else {
+                CarveOutRules::Unclaimed
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -138,8 +150,8 @@ impl GalaxyRules {
 
     /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: 25's
     /// holds and those that turn on at 26 (the galaxy's `bound_share`, P09.T13, `stream_shell`,
-    /// P10.T9, `member_remnants`, P09.T10, and `field_share`, P09.T2.c; the stellar rules'
-    /// `dwarf_sequence`, P06.T23.a, `helium`, P15.T7.b, and `hd_limit`, P06.T42.b;
+    /// P10.T9, `member_remnants`, P09.T10, `field_share`, P09.T2.c, and `carve_out`, P09.T35; the
+    /// stellar rules' `dwarf_sequence`, P06.T23.a, `helium`, P15.T7.b, and `hd_limit`, P06.T42.b;
     /// [`StellarRules::every_26_hold`]).
     ///
     /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is
@@ -308,6 +320,19 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_26_hold().field_share,
             FieldShareRules::Phi
+        );
+        let carve = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).carve_out;
+        for v in [23, 24, 25] {
+            assert_eq!(carve(v), CarveOutRules::Unclaimed, "{v}");
+        }
+        assert_eq!(carve(26), CarveOutRules::Claimed);
+        assert_eq!(
+            GalaxyRules::every_25_hold().carve_out,
+            CarveOutRules::Unclaimed
+        );
+        assert_eq!(
+            GalaxyRules::every_26_hold().carve_out,
+            CarveOutRules::Claimed
         );
         for v in [23, 24, 25, 26] {
             assert_eq!(

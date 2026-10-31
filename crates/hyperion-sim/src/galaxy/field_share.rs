@@ -15,20 +15,32 @@
 //! Placement's thinning, which keeps a candidate the budget's pick gave to a component only in
 //! the lowest share of that component's slice of the mark that the field holds
 //! (`placement::candidate`); the expected counts that the census decides from; the catalogue
-//! classes of the field's recent deaths, core collapses and Type Ia; and the class table's stay
-//! shares. The bounds, and with them every candidate's count, position and marks, stay the
-//! budget's, so a survivor of the field is a survivor of the budget, bit for bit. Everything else
+//! classes of the field's recent deaths, core collapses and Type Ia, and the luminous blue
+//! variables (P09.T43); and the class table's stay shares. The bounds, and with them every
+//! candidate's count, position and marks, stay the budget's, so a survivor of the field is a
+//! survivor of the budget, bit for bit. Everything else
 //! the fields feed reads the budget: the gas, the substellar abundance, the kinematics, the feature
 //! catalogue (whose rates φ is made from), the map, the mean masses and so the system count and
 //! the potential, and plan 15's fits. The sky's closed-form light (`sky::luminosity`, `band`,
 //! `caps`) reads the budget too: rendering plan R06's R06.T16.a, which rides 26 with this, routes
 //! it through the field when it takes the features' members in.
+//!
+//! # Layer D's ancient Type Ia
+//!
+//! From the same version, under plan 09's P09.T35 hold (`displaced::site::CARVE_OUT_VERSION`),
+//! layer D also gives up the systems that exploded as a Type Ia before the supernova test's
+//! interval and left nothing ([`ancient_share`](super::catalogue_classes::type_ia::ancient_share)):
+//! each component's field keeps `1 −` its population's of its layer D
+//! ([`Galaxy::layer_d_kept`]). Placement's thinning and the expected counts read it, as they read
+//! the field's factors, in the same slice of the mark; the Type Ia class does not, since its rate
+//! is per system of the budget, the exploded included.
 
 use super::Galaxy;
 use super::Population;
 use super::ages::AgeDistribution;
 #[cfg(doc)]
 use super::ages::FIELD_SHARE_VERSION;
+use super::catalogue_classes::type_ia::DelayTimeDistribution;
 use super::features::shares::{FeatureShares, YoungFieldShare};
 use super::fields::{ComponentId, Fields};
 use super::imf::MassBand;
@@ -181,7 +193,8 @@ impl Galaxy {
 
     /// The field's share of component `id`'s systems in `band`: the share matrix's
     /// [`component_share`](super::shares::ShareMatrix::component_share), taken to the field
-    /// ([`field_part`](Self::field_part)).
+    /// ([`field_part`](Self::field_part)), and in layer D from version 26 times what the field keeps
+    /// of it ([`layer_d_kept`](Self::layer_d_kept)).
     ///
     /// # Panics
     ///
@@ -189,8 +202,53 @@ impl Galaxy {
     #[must_use]
     pub(crate) fn field_component_share(&self, band: MassBand, id: ComponentId) -> f64 {
         let share = self.shares.component_share(band, self.fields.component(id));
-        self.field_part(id, band, share)
+        let field = self.field_part(id, band, share);
+        match band {
+            MassBand::D => self.layer_d_kept(id).map_or(field, |kept| field * kept),
+            MassBand::A
+            | MassBand::B
+            | MassBand::C
+            | MassBand::E
+            | MassBand::BrownDwarf
+            | MassBand::RoguePlanet => field,
+        }
     }
+
+    /// What the field keeps of component `id`'s layer D from generator version 26: 1 less its
+    /// population's ancient Type Ia, the share of its layer D that exploded before the supernova
+    /// test's interval and left nothing (plan 09, P09.T35; module documentation). `None` under the
+    /// carve-out's held arm, where layer D is the budget's.
+    ///
+    /// # Panics
+    ///
+    /// From version 26, if `id` is not one of the galaxy's components.
+    #[must_use]
+    pub(crate) fn layer_d_kept(&self, id: ComponentId) -> Option<f64> {
+        self.layer_d_kept.as_ref().map(|kept| kept[id.index()])
+    }
+}
+
+/// What the field keeps of each component's layer D under the carve-out's new arm, in the fields'
+/// order (plan 09, P09.T35): 1 less its population's
+/// [`ancient_share`](DelayTimeDistribution::ancient_share), read from `galaxy`'s delay-time
+/// distribution, a quadrature per component and 48 stellar lifetimes when the galaxy is built.
+///
+/// # Panics
+///
+/// In debug builds, if a share it keeps falls outside [0, 1].
+#[must_use]
+pub(crate) fn layer_d_kept(galaxy: &Galaxy) -> Box<[f64]> {
+    let delays = DelayTimeDistribution::from_galaxy(galaxy);
+    galaxy
+        .fields()
+        .components()
+        .iter()
+        .map(|component| {
+            let kept = 1.0 - delays.ancient_share(component.population());
+            debug_assert!((0.0..=1.0).contains(&kept), "layer D keeps {kept}");
+            kept
+        })
+        .collect()
 }
 
 #[cfg(test)]

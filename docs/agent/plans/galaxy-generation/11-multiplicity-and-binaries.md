@@ -403,9 +403,11 @@ given; where it is not, the task that builds it is named.
   later classes after its own (its design note 16); `features::interior::{MemberClass, ClassKind}`
   with the binary classes and the recycled-object marks of P09.T9.e;
   `features::cluster::ClusterModel` (`sigma(r)`, for the hard–soft boundary);
-  `features::shares::FeatureShares::field_factor`, through which layer D already gives up
-  `type_ia::ancient_share`; the Type Ia entry (`type_ia::IaProgenitor`) and the requirement its
-  P09.T35 records, that this plan's binaries redraw any explosion before +H;
+  `features::shares::FeatureShares::field_factor`; layer D gives up `type_ia::ancient_share`
+  through `Galaxy::layer_d_kept` (P09.T35, from 26), not `field_factor`; the Type Ia entry (`type_ia::IaProgenitor`) and the requirement its
+  P09.T35 records, that this plan's binaries redraw any explosion before +H (its debug hook
+  `displaced::site::keeps_a_recent_type_ia`, asserted in `SystemStars::generate_with`, which P11.T6
+  wires to `carved_class`);
   `catalogue_classes::testing::assert_complementary`.
 - **Plan 15** (not built at `9d8e775`: `hyperion-fit` holds only plan 02's `mge` task, and neither
   `tables::type_ia_delay` nor `tables::MANIFEST` exists): `tables::type_ia_delay::DELAY_EDGES`;
