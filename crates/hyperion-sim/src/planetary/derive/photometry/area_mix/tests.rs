@@ -12,11 +12,11 @@ use crate::planetary::chem::partition::{
 use crate::substance::liquid_properties;
 use crate::units::{KilogramsPerCubicMetre, MetresPerSecondSquared};
 
-fn id(key: &str) -> SubstanceId {
+pub(super) fn id(key: &str) -> SubstanceId {
     by_key(key).unwrap_or_else(|| panic!("{key} is a row"))
 }
 
-fn kelvin(t: f64) -> Kelvin {
+pub(super) fn kelvin(t: f64) -> Kelvin {
     Kelvin::new(t)
 }
 
@@ -787,7 +787,7 @@ fn under_24_s_rows_the_airless_cap_holds_mercury_and_a_vesta_like_basalt() {
 
 /// The column weights of an air of `fractions` by mole at a surface pressure `pressure` (the
 /// partition tests' rule): each x μ ÷ μ̄ of it.
-fn weights_of(pressure: f64, fractions: &[(&str, f64)]) -> Vec<(SubstanceId, Pascals)> {
+pub(super) fn weights_of(pressure: f64, fractions: &[(&str, f64)]) -> Vec<(SubstanceId, Pascals)> {
     let molar = |key: &str| id(key).substance().molar_mass_g_per_mol().unwrap();
     let sum = fractions.iter().fold(0.0, |s, &(_, x)| s + x);
     let mean = fractions
@@ -800,7 +800,11 @@ fn weights_of(pressure: f64, fractions: &[(&str, f64)]) -> Vec<(SubstanceId, Pas
 }
 
 /// The partition of `weights` over the span `cold` to `warm` about `mean`, at the gravity `g`.
-fn partitioned(span: (f64, f64, f64), weights: Vec<(SubstanceId, Pascals)>, g: f64) -> Partition {
+pub(super) fn partitioned(
+    span: (f64, f64, f64),
+    weights: Vec<(SubstanceId, Pascals)>,
+    g: f64,
+) -> Partition {
     let climate = ClimateSpan::new(kelvin(span.0), kelvin(span.1), kelvin(span.2)).unwrap();
     let inventory = ColumnInventory::new(weights).unwrap();
     partition(

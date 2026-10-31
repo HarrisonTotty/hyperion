@@ -49,7 +49,7 @@
 //!   airless silicate lid younger than a regolith, which keeps the 0.11 at most.
 //! - **A weathering deposit** (P14.T51.j's `ferric`, from 24): its area at its row's optics, a
 //!   solid's ([`surface_bond`]'s `deposits`).
-//! - **The cloud's condensable** weighs by 1 − d, its dominance ([`cloud_availability`]).
+//! - **The cloud's condensable** weighs by 1 − d, its dominance ([`cloud_condensable`]).
 //! - **The cloud** ([`cloud_fraction`], [`cloud_albedo`]): the state's cloud fraction times the
 //!   condensable's availability, at the state's cloud albedo.
 //!
@@ -160,6 +160,8 @@ use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
 mod icy_lag_tests;
+#[cfg(test)]
+mod scattering_tests;
 #[cfg(test)]
 mod tests;
 
@@ -2075,14 +2077,15 @@ pub(crate) fn reference_cloud_column() -> KilogramsPerSquareMetre {
 /// `W_ref` the [`reference_cloud_column`], `shade`'s. A dominant condensable cold-traps at the surface
 /// (Wordsworth 2015, as P14.T48.d cites it) and forms no Earth-like cover, so a Mars with carbon
 /// dioxide caps falls near none, while Earth's minor water keeps its whole column (the lane's
-/// rule, 2026-10-16). None where the air has no such condensable, or no pressure.
+/// rule, 2026-10-16). `None` where the air has no such condensable, or no pressure, whose
+/// availability is none; the condensable with its availability otherwise.
 #[must_use]
-pub(crate) fn cloud_availability(partition: &Partition, shade: &HostShade) -> f64 {
+fn cloud_condensable(partition: &Partition, shade: &HostShade) -> Option<(SubstanceId, f64)> {
     let pressure = partition.surface_pressure();
     let p = pressure.value();
     let g = partition.ground().gravity().value();
     if !(p > 0.0 && p.is_finite() && g > 0.0 && g.is_finite()) {
-        return 0.0;
+        return None;
     }
     let gases: Vec<(SubstanceId, f64)> = partition
         .species()
@@ -2091,24 +2094,107 @@ pub(crate) fn cloud_availability(partition: &Partition, shade: &HostShade) -> f6
         .collect();
     let climate = partition.climate();
     let range = (climate.coldest(), climate.warmest());
-    let Some(condensable) = climate_condensable(&gases, pressure, range, &partition.reservoirs())
-    else {
-        return 0.0;
-    };
+    let condensable = climate_condensable(&gases, pressure, range, &partition.reservoirs())?;
     let (partial, dominance) = partition.of(condensable).map_or((0.0, 0.0), |s| {
         (s.partial_pressure().value(), s.dominance())
     });
     let available = (1.0 - dominance) * partial / g / shade.cloud_column.value();
-    if available.is_nan() {
+    let available = if available.is_nan() {
         0.0
     } else {
         available.clamp(0.0, 1.0)
+    };
+    Some((condensable, available))
+}
+
+/// The generator version from which a cloud whose condensable is not water covers its own measured
+/// share (P14.T24.h.b's first part; decision-p14-t51-batch §9.4): 26, the train after 25's.
+///
+/// It is this rule's one hold. Below it [`MinorCloudsRules::in_force`] is
+/// [`MinorCloudsRules::WaterShare`]: every temperate or snowball world's cloud takes water's 0.67
+/// before its availability, as to 25, bit for bit. 26's bump deletes this hold, [`MinorCloudsRules`]
+/// with its `WaterShare` arm, the guard in [`condensable_cloud_share`], the tests' switch and its
+/// tripwire (`the_minor_clouds_are_held_only_until_the_26_bump`).
+pub(crate) const MINOR_CLOUDS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether a cloud whose condensable is not water covers its own share (its hold,
+/// [`MINOR_CLOUDS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum MinorCloudsRules {
+    /// Version 25's and before: any condensable's cloud takes water's reference share.
+    WaterShare,
+    /// Version 26's: a condensable that is not water takes [`MINOR_CONDENSABLE_CLOUD_SHARE`].
+    OwnShare,
+}
+
+impl MinorCloudsRules {
+    /// The rules this generator version gives: a minor condensable's own share from
+    /// [`MINOR_CLOUDS_VERSION`], water's below it; in the tests, the rules a test's switch sets on
+    /// its thread ([`with_minor_clouds`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = MINOR_CLOUDS_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= MINOR_CLOUDS_VERSION {
+            Self::OwnShare
+        } else {
+            Self::WaterShare
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The minor clouds' rules a test sets on its thread, `None` for the version's.
+    static MINOR_CLOUDS_RULES: core::cell::Cell<Option<MinorCloudsRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the minor clouds' rules `rules` on this thread, for the tests to reach
+/// version 26's ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. A record derives lazily, so a test reads it inside the switch. 26's bump deletes it
+/// with the hold.
+#[cfg(test)]
+pub(crate) fn with_minor_clouds<R>(rules: MinorCloudsRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<MinorCloudsRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            MINOR_CLOUDS_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(MINOR_CLOUDS_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// The share of the globe a cloud whose condensable is not water covers, before its availability
+/// (P14.T24.h.b): 0.004, the middle of Titan's tropospheric methane clouds' 0.2–0.6% (Bouchez and
+/// Brown 2005, ApJ 618, L53, from memory, as plan 14's task text cites it), its outbursts reaching
+/// about 10% or less (Schaller et al. 2006, Icarus 182, 224, from memory), not held here. Titan's
+/// is the one measured cloud of a minor condensable that is not water: it stands for every one,
+/// labelled. Its cloud keeps the water cloud's albedo ([`cloud_albedo`]), which at this share moves
+/// a Bond albedo by under 0.002.
+pub(crate) const MINOR_CONDENSABLE_CLOUD_SHARE: f64 = 0.004;
+
+/// The share of the disc a temperate or snowball world's cloud covers before its availability, its
+/// condensable `condensable` (P14.T24.h.b's first part): a condensable that is not water's
+/// [`MINOR_CONDENSABLE_CLOUD_SHARE`] under [`MinorCloudsRules::OwnShare`], and otherwise
+/// `state`'s ([`cloud_share_of_state`]), water's 0.67, as to 25.
+#[must_use]
+fn condensable_cloud_share(state: SurfaceState, condensable: Option<SubstanceId>) -> f64 {
+    match condensable {
+        Some(id) if id != water() && MinorCloudsRules::in_force() == MinorCloudsRules::OwnShare => {
+            MINOR_CONDENSABLE_CLOUD_SHARE
+        }
+        Some(_) | None => cloud_share_of_state(state),
     }
 }
 
 /// The cloud fraction of a body in the state `state` whose runaway's deck is `deck`, whose
 /// partition is `partition`, under the light `shade`: its state's share ([`cloud_share_of_state`])
-/// times its condensable's availability ([`cloud_availability`]), the whole for a runaway
+/// times its condensable's availability ([`cloud_condensable`]), the whole for a runaway
 /// greenhouse under its deck, which keeps it with or without sulphur, and a gas envelope (the plan:
 /// "never from the Surface path's decks"). A runaway solved without its deck
 /// ([`RunawayDeck::Deckless`], P14.T53.b part 1 (b); decision-absurd-states-24 R3.2) takes a
@@ -2124,13 +2210,23 @@ pub(crate) fn cloud_fraction(
         (SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope, RunawayDeck::Kept)
         | (SurfaceState::GasEnvelope, _) => cloud_share_of_state(state),
         (SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope, RunawayDeck::Deckless) => {
-            cloud_share_of_state(SurfaceState::Temperate) * cloud_availability(partition, shade)
+            minor_cloud_fraction(SurfaceState::Temperate, partition, shade)
         }
         (SurfaceState::Temperate | SurfaceState::Snowball, _) => {
-            cloud_share_of_state(state) * cloud_availability(partition, shade)
+            minor_cloud_fraction(state, partition, shade)
         }
         (SurfaceState::Airless | SurfaceState::MagmaOcean | SurfaceState::Tenuous, _) => 0.0,
     }
+}
+
+/// The cloud fraction of a temperate or snowball world's cloud, its state `state`, of partition
+/// `partition` under the light `shade`: its condensable's share ([`condensable_cloud_share`]) times
+/// its availability ([`cloud_condensable`]), none where it has no condensable.
+#[must_use]
+fn minor_cloud_fraction(state: SurfaceState, partition: &Partition, shade: &HostShade) -> f64 {
+    let (condensable, available) = cloud_condensable(partition, shade)
+        .map_or((None, 0.0), |(id, available)| (Some(id), available));
+    condensable_cloud_share(state, condensable) * available
 }
 
 /// The Bond albedo of the cloud of a body in the state `state` whose runaway's deck is `deck`,

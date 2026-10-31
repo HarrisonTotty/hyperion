@@ -1181,7 +1181,7 @@ pub(crate) fn mole_fraction_of(partials: &PartialPressures, gas: Gas) -> f64 {
 }
 
 /// Water's cloud availability `A_w`, 0 to 1, over the partial pressures `partials` under the
-/// surface gravity `gravity`: the area mix's `cloud_availability` taken for water at a greenhouse
+/// surface gravity `gravity`: the area mix's `cloud_condensable` taken for water at a greenhouse
 /// step, min(1, (1 − d) W ÷ `W_ref`), W = `x_w` `p_s` ÷ g its airborne column, d its dominance
 /// ([`dominance`]) of its mole fraction `x_w`, which approximates the partition's d of its
 /// minor-branch share as the greenhouse gain's weight does, and `W_ref` the area mix's

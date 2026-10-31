@@ -488,6 +488,9 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// - the icy lid's regolith, `ICY_REGOLITH_VERSION` (P14.T49.m), at `IcyRegolithRules::Mixture`
 ///   through `with_icy_regolith`: an airless or tenuous body's `H2O` regolith ice with its rock's
 ///   lag where its tidal heat does not resurface it.
+/// - a minor condensable's own cloud, `MINOR_CLOUDS_VERSION` (P14.T24.h.b), at
+///   `MinorCloudsRules::OwnShare` through `with_minor_clouds`: a cloud whose condensable is not
+///   water covers Titan's measured share.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are the version's) is not
@@ -504,7 +507,9 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         with_locked_state, with_melt_oxygen, with_sea_deck,
     };
     use crate::planetary::derive::passes::{PassStep, PassStop, with_pass_step, with_pass_stop};
-    use crate::planetary::derive::photometry::area_mix::{IcyRegolithRules, with_icy_regolith};
+    use crate::planetary::derive::photometry::area_mix::{
+        IcyRegolithRules, MinorCloudsRules, with_icy_regolith, with_minor_clouds,
+    };
     use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
@@ -549,6 +554,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         with_regolith_inertia(RegolithInertiaRules::PoreGas, run)
     };
     let run = move || with_icy_regolith(IcyRegolithRules::Mixture, run);
+    let run = move || with_minor_clouds(MinorCloudsRules::OwnShare, run);
     with_locked_climate(LockedClimateRules::Deck, run)
 }
 
