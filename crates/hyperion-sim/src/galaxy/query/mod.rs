@@ -188,6 +188,31 @@ impl RangePlan {
     /// # Panics
     ///
     /// As [`new`](Self::new), and if `galaxy` is not of the seed the plan was made for.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+    /// use hyperion_sim::galaxy::features::members::source::{FeatureMemberSource, NoInteriorCache};
+    /// use hyperion_sim::galaxy::query::{RangePlan, RangeQuery, SystemSource};
+    /// use hyperion_sim::units::LightYears;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(9));
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in range");
+    /// let query = RangeQuery::builder(sun, LightYears::new(50.0)).build()?;
+    /// // The grid's cells can be generated from the plan without the features' members...
+    /// let unsourced = RangePlan::new(&galaxy, &[], &query);
+    /// let members = FeatureMemberSource::new(&NoFeatureCache, &NoInteriorCache);
+    /// let sources: [&dyn SystemSource; 1] = [&members];
+    /// // ...while their feature cells are, and the plan then made with them is the same.
+    /// let sourced = unsourced.with_sources(&galaxy, &sources);
+    /// assert_eq!(sourced, RangePlan::new(&galaxy, &sources, &query));
+    /// assert!(sourced.cells().count() <= unsourced.cells().count());
+    /// # Ok::<(), hyperion_sim::galaxy::query::BuildRangeQueryError>(())
+    /// ```
     #[must_use]
     pub fn with_sources(&self, galaxy: &Galaxy, sources: &[&dyn SystemSource]) -> Self {
         assert_eq!(
@@ -782,6 +807,48 @@ mod tests {
             );
             assert_eq!(plan.census(), result.census());
             assert_eq!(plan.query(), &query);
+        }
+    }
+
+    /// A plan made without its sources and then with them is the plan made with them, its census
+    /// bit for bit, and walks only cells the plan without them walks, whether the sources' counts
+    /// leave the census's layers as they are or drop some (P09.T40.a): what lets a server generate
+    /// the cells of the plan without the sources while the sources' own cells are generated.
+    #[test]
+    fn a_plan_made_with_its_sources_later_is_the_plan_made_with_them() {
+        let galaxy = galaxy();
+        let query = small_query();
+        let unsourced = RangePlan::new(&galaxy, &[], &query);
+        let cells: std::collections::BTreeSet<_> = unsourced.cells().collect();
+        let mut light = LayerCounts::ZERO;
+        light.set(Layer::C, 0.3);
+        light.set(Layer::E, 0.1);
+        let mut heavy = LayerCounts::ZERO;
+        for layer in Layer::ALL {
+            heavy.set(layer, f64::from(query.limit().get()) / 3.0);
+        }
+        for (counts, drops) in [(light, false), (heavy, true)] {
+            let source = Counted(counts);
+            let sources: [&dyn SystemSource; 1] = [&source];
+            let with_them = RangePlan::new(&galaxy, &sources, &query);
+            let later = unsourced.with_sources(&galaxy, &sources);
+            assert_eq!(later, with_them);
+            for (x, y) in later
+                .census()
+                .expected()
+                .to_array()
+                .into_iter()
+                .zip(with_them.census().expected().to_array())
+            {
+                assert_same_bits(x, y);
+            }
+            assert!(with_them.cells().all(|cell| cells.contains(&cell)));
+            assert_eq!(
+                with_them.census().layers() != unsourced.census().layers(),
+                drops,
+                "{:?}",
+                with_them.census()
+            );
         }
     }
 }

@@ -430,13 +430,29 @@ async fn the_reply_is_the_same_at_one_and_eight_workers() {
     }
     assert_eq!(replies[0].len(), 4);
     for (one, eight) in replies[0].iter().zip(&replies[1]) {
-        assert!(one == eight, "the replies at one and eight workers differ");
+        assert_eq!(
+            difference(one, eight),
+            None,
+            "the replies at one and eight workers differ"
+        );
     }
     // Cold and warm are the same answer too; only the request's ID differs.
     let body = |frame: &str| {
-        serde_json::from_str::<serde_json::Value>(frame).expect("a server message")["body"].clone()
+        serde_json::from_str::<serde_json::Value>(frame).expect("a server message")["body"]
+            .to_string()
     };
     for (cold, warm) in replies[0][..2].iter().zip(&replies[0][2..]) {
-        assert!(body(cold) == body(warm), "a warm answer is its cold one");
+        assert_eq!(
+            difference(&body(cold), &body(warm)),
+            None,
+            "a warm answer is its cold one"
+        );
     }
+}
+
+/// Where two texts first differ, as the byte offset and the lengths, or `None` if they are the
+/// same: what a failed comparison of two frames of megabytes prints.
+fn difference(a: &str, b: &str) -> Option<(usize, usize, usize)> {
+    let first = a.bytes().zip(b.bytes()).position(|(x, y)| x != y);
+    (a != b).then(|| (first.unwrap_or(a.len().min(b.len())), a.len(), b.len()))
 }

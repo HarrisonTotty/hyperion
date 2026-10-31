@@ -247,6 +247,32 @@ impl<'a> FeatureMemberSource<'a> {
     /// several threads before the query runs, so that the query's lookups find all of it held.
     /// What it reads and builds is each a pure function of the galaxy and the feature, so it
     /// changes no answer, and it is lost if the caches keep nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+    /// use hyperion_sim::galaxy::features::members::source::{FeatureMemberSource, KeepInteriors};
+    /// use hyperion_sim::galaxy::placement::NoCache;
+    /// use hyperion_sim::galaxy::query::{RangeQuery, range_query};
+    /// use hyperion_sim::units::LightYears;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(9));
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in range");
+    /// let query = RangeQuery::builder(sun, LightYears::new(50.0)).build()?;
+    /// let interiors = KeepInteriors::new(&galaxy);
+    /// let source = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+    /// // Each cell may be read ahead on a thread of its own; the interiors are kept for the query.
+    /// for cell in FeatureMemberSource::feature_cells(&galaxy, &query) {
+    ///     source.read_ahead(&galaxy, &query, cell);
+    /// }
+    /// let result = range_query(&galaxy, &mut NoCache::new(), &[&source], &query);
+    /// # let _ = result;
+    /// # Ok::<(), hyperion_sim::galaxy::query::BuildRangeQueryError>(())
+    /// ```
     pub fn read_ahead(
         &self,
         galaxy: &Galaxy,
@@ -503,6 +529,7 @@ mod tests {
         a_query_in_an_open_cluster_finds_every_member_a_scan_finds();
         skipping_the_grids_that_miss_the_sphere_changes_nothing();
         the_answers_do_not_depend_on_the_order_queries_are_asked_in();
+        the_feature_cells_cover_every_lookup_and_reading_them_ahead_changes_nothing();
         drawing_only_the_near_members_keeps_every_near_member();
         the_census_does_not_depend_on_what_is_cached();
         hits_count_in_their_band_s_layer_and_the_unborn_are_dropped();
@@ -782,6 +809,90 @@ mod tests {
         assert_order_independent(&spheres, |sphere| {
             answer(&KeepInteriors::new(galaxy), sphere)
         });
+    }
+
+    /// A feature-cell cache that keeps nothing and records every cell asked for, with the last
+    /// process it is asked through.
+    #[derive(Default)]
+    struct Recording(Mutex<Vec<(FeatureCell, FeatureProcess)>>);
+
+    impl FeatureCellCache for Recording {
+        fn contents(
+            &self,
+            galaxy: &Galaxy,
+            cell: FeatureCell,
+        ) -> Arc<crate::galaxy::features::catalogue::FeatureCellContents> {
+            self.0.lock().unwrap().push((cell, FeatureProcess::Cloud));
+            Arc::new(FeatureCatalogue::cell(galaxy, cell))
+        }
+
+        fn contents_through(
+            &self,
+            galaxy: &Galaxy,
+            cell: FeatureCell,
+            last: FeatureProcess,
+        ) -> Arc<crate::galaxy::features::catalogue::FeatureCellContents> {
+            self.0.lock().unwrap().push((cell, last));
+            Arc::new(FeatureCatalogue::cell_through(galaxy, cell, last))
+        }
+    }
+
+    /// Run on its one build of the fixture by
+    /// [`the_member_source_finds_and_counts_what_a_scan_finds`]: every feature cell a query's
+    /// census and hits look up is among its [`FeatureMemberSource::feature_cells`], through the
+    /// same or a later process, and reading those ahead, in either order, changes neither the
+    /// census, bit for bit, nor the hits (P09.T40.a). Away from the epoch, so that the hits' lookup
+    /// is padded past the census's.
+    fn the_feature_cells_cover_every_lookup_and_reading_them_ahead_changes_nothing() {
+        let galaxy = galaxy();
+        let [x, y, z] = open_cluster().feature().position().to_light_years_f64();
+        let centre = GalacticPosition::from_light_years([x + 1.5, y, z - 1.0]).unwrap();
+        let query = RangeQuery::builder(centre, LightYears::new(12.0))
+            .time(UniverseTime::from_julian_years(400).unwrap())
+            .build()
+            .unwrap();
+        let sphere = widest_sphere(&query);
+        let answer = |source: &FeatureMemberSource<'_>| {
+            let census = source.expected_in_sphere(galaxy, &sphere);
+            let mut hits = Vec::new();
+            source.systems_in_sphere(galaxy, &sphere, all_layers(), &mut hits);
+            let bits: Vec<u64> = Layer::ALL.iter().map(|&l| bits(census.get(l))).collect();
+            (bits, hits)
+        };
+        let expected = answer(&FeatureMemberSource::new(&NoFeatureCache, &NoInteriorCache));
+        assert!(
+            !expected.1.is_empty(),
+            "the query finds the cluster's members"
+        );
+        let cells = FeatureMemberSource::feature_cells(galaxy, &query);
+        let recording = Recording::default();
+        assert_eq!(
+            answer(&FeatureMemberSource::new(&recording, &NoInteriorCache)),
+            expected
+        );
+        let asked = recording.0.into_inner().unwrap();
+        assert_ne!(
+            asked.len(),
+            0,
+            "the census and the hits look up feature cells"
+        );
+        for (cell, last) in asked {
+            assert!(
+                cells
+                    .iter()
+                    .any(|&(c, l)| c == cell && l.index() >= last.index()),
+                "{:?} through {last} is looked up, but not read ahead",
+                cell.to_array()
+            );
+        }
+        for order in [cells.clone(), cells.iter().rev().copied().collect()] {
+            let (keep, interiors) = (Keep::default(), KeepInteriors::new(galaxy));
+            let source = FeatureMemberSource::new(&keep, &interiors);
+            for &cell in &order {
+                source.read_ahead(galaxy, &query, cell);
+            }
+            assert_eq!(answer(&source), expected);
+        }
     }
 
     /// Run on its one build of the fixture by

@@ -285,9 +285,11 @@ async fn a_universe_is_created_charted_and_reopened_over_one_socket() {
         "the restarted server starts from the save alone"
     );
     let (again, again_bytes) = ask(&mut client, query(&universe.id, centre, epoch)).await;
+    // Held none before, so every cell it holds now it generated for the re-answer: ahead of the
+    // query's walk, which then finds each of them (P09.T40.a), so its lookups are all hits.
     let cells = server.stats().cells();
     assert!(
-        cells.entries() > 0 && cells.hits() == 0,
+        cells.entries() > 0,
         "the re-answer generated its cells: {cells:?}"
     );
     assert_eq!(again, at_epoch);

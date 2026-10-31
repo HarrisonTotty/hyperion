@@ -4786,6 +4786,16 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     ceiling is under the target; `peak_candidates` is unchanged in value. A change to the width
     rule or the profiles keeps `level_ceiling` a ceiling
     (`the_width_search_is_the_whole_grids_search_bit_for_bit` and its slow twin).
+- **P09.T40.a, the served query's cells in parallel (lane `perf-range-cells`, 2026-10-31; no
+  output moves).**
+  - Sim: `range_query` is `RangePlan::new(galaxy, sources, query).run(galaxy, cache, sources)`;
+    `RangePlan::{cells, with_sources, census, query}`. `FeatureCatalogue::cells_near` lists the
+    cells `near` reads, each with its `last`. `FeatureMemberSource::{feature_cells, read_ahead}`.
+  - Server: `systems_in_range` runs through `compute::served_range_query` (`compute/range.rs`, not
+    `compute/systems.rs`), which takes a `RangeCaches` and a `ServedQuery`; `AppState.cells` is an
+    `Arc`. Its cell jobs are queued by the request's task, never by a job (the pool's FIFO would
+    stall).
+  - Left: the walk's hit tests are still serial after the cells (the outbox's findings).
 - **P09.T41.a, records (lane `p09-t41`, 2026-10-30, at 23 and 3; client only, no output moves).**
   - The guide keeps its one Greek cross for every kind, the kind named by the label (`OC GPF F207`),
     in place of the task text's "a symbol per kind"; it gains the cross's proportions, the label's

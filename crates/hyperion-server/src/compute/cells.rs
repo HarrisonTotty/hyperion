@@ -30,6 +30,12 @@ use crate::cache::{HeapBytes, Insertion, LruCounters, SharedByteLru};
 /// What names a cell in the cache: the galaxy it belongs to, and the cell itself.
 type CellEntryKey = (GalaxyKey, CellKey);
 
+/// The most cells [`SharedCellCache::generate_all`] stores under one hold of the cache's lock: 128,
+/// some 33 µs of insertions at the 0.26 µs one takes (measured 2026-10-31, pod, 16 vCPU), so that
+/// other queries' lookups wait no longer than that, while the 108 cells of a grid job of the
+/// Sun-like 50 ly query on 8 workers are stored at once.
+const GENERATED_CHUNK_CELLS: usize = 128;
+
 /// One generation cell's accepted systems, as the cache holds them.
 ///
 /// The systems are in candidate-index order, exactly as
@@ -123,11 +129,11 @@ impl SharedCellCache {
             .collect()
     }
 
-    /// Generates `cells` of `galaxy`, the galaxy `key` names, each whole, and stores them all
-    /// under one hold of the cache's lock: how a served query's jobs fill it ahead of its walk,
-    /// several at once ([`served_range_query`](super::served_range_query); P09.T40.a). A cell
-    /// held already is generated again and replaced by its equal; a cell larger than the whole
-    /// budget is dropped.
+    /// Generates `cells` of `galaxy`, the galaxy `key` names, each whole, and stores them 128 at a
+    /// time, each chunk under one hold of the cache's lock: how a served query's jobs fill it
+    /// ahead of its walk, several at once
+    /// ([`served_range_query`](super::served_range_query); P09.T40.a). A cell held already is
+    /// generated again and replaced by its equal; a cell larger than the whole budget is dropped.
     ///
     /// Eight jobs each storing their cells one at a time spent most of their time waiting on the
     /// lock and its bookkeeping, 3.6 ms each where generating their cells took 1.1 (measured
@@ -147,16 +153,17 @@ impl SharedCellCache {
             key.seed(),
             "a cell cache stores the cells of one galaxy under its key, and this is another's"
         );
-        let generated: Vec<_> = cells
-            .into_iter()
-            .map(|cell| {
+        let mut generated = Vec::with_capacity(GENERATED_CHUNK_CELLS);
+        let mut cells = cells.into_iter().peekable();
+        while cells.peek().is_some() {
+            generated.extend(cells.by_ref().take(GENERATED_CHUNK_CELLS).map(|cell| {
                 let mut systems = Vec::new();
                 generate_cell(galaxy, cell, &mut systems);
                 ((key, cell), Arc::new(CachedCell::new(systems)))
-            })
-            .collect();
-        // A refused cell is the walk's to generate again, as a handle's would be.
-        drop(self.cells.insert_all(generated));
+            }));
+            // A refused cell is the walk's to generate again, as a handle's would be.
+            drop(self.cells.insert_all(generated.drain(..)));
+        }
     }
 
     /// The bytes it may charge its cells.
