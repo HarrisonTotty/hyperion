@@ -532,7 +532,8 @@ fn pin_storms(w: &mut GoldenWriter) {
     pin_mars_dust_storms(w);
 }
 
-/// The phase kinds' constants, and the dust storms' season and noise at five eccentricities.
+/// The phase kinds' constants, the dust storms' year and least period among them, and the dust
+/// storms' season and noise at five eccentricities.
 fn pin_phase_constants(w: &mut GoldenWriter) {
     w.line("");
     w.line("# the phase kinds' constants");
@@ -575,6 +576,11 @@ fn pin_phase_constants(w: &mut GoldenWriter) {
         "dust storms: longest (share)",
         dust_storms::MAX_DURATION_SHARE,
     );
+    w.line(&format!(
+        "dust storms: duration year (s) {}, least period (s) {}",
+        dust_storms::DURATION_YEAR.seconds(),
+        dust_storms::LEAST_PERIOD.seconds()
+    ));
     for e in [0.0, 0.016_7, MARS_ECCENTRICITY, 0.3, 0.9] {
         let e = Eccentricity::new(e).unwrap();
         w.f64(

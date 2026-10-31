@@ -1,11 +1,6 @@
 //! A system's events over a real socket (plan 14, P14.T36.b): pinned systems' events against the
 //! sim's own `events_between`, the window's and the ID's refusals, and the cache of event models.
-//!
-//! P14.T31.c's events are held until generator version 25, below which `body_events` is answered
-//! `unsupported`, as `system_bodies.rs` checks. So every test of this binary first puts them on the
-//! record for the whole process ([`wire_body_events_in_this_process`]): the server answers on its
-//! pool's threads, which no thread's switch reaches. The other 25 holds stay held, so the events read version 24's
-//! records, in the server and in the sim's systems the tests hold the answers to alike.
+//! P14.T31.c's events are on the record from generator version 25, and the server serves them.
 
 mod common;
 
@@ -24,7 +19,6 @@ use hyperion_sim::id::SystemId;
 use hyperion_sim::orbit::Orbit;
 use hyperion_sim::planetary::events::{BodyEvent, StormBand};
 use hyperion_sim::planetary::placement::OrbitHost;
-use hyperion_sim::planetary::testing::wire_body_events_in_this_process;
 use hyperion_sim::planetary::{SystemContext, generate};
 use hyperion_sim::{Seed, time};
 
@@ -293,7 +287,6 @@ fn assert_listed_about_the_middle(answer: &BodyEventsDto) {
 /// one server, as `system_bodies.rs`'s do. The cache's counts come first.
 #[tokio::test]
 async fn a_systems_events_are_the_sims_and_cached() {
-    wire_body_events_in_this_process();
     let server = TestServer::start().await;
     let (mut client, universe) = joined(&server, "Kepler Reach").await;
     let (from, to) = (at_years(-50), at_years(50));
@@ -405,7 +398,6 @@ async fn a_systems_events_are_the_sims_and_cached() {
 /// names no system is `unknown_system` naming `system`.
 #[tokio::test]
 async fn a_bad_window_or_an_unknown_system_is_refused_naming_the_field() {
-    wire_body_events_in_this_process();
     let server = TestServer::start().await;
     let (mut client, universe) = joined(&server, "Kepler Reach").await;
     let pinned = PINNED[0];

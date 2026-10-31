@@ -244,7 +244,7 @@ use small_bodies::SmallBodyTypes;
 
 use discs::SystemDiscs;
 pub use discs::{PROTOPLANETARY_DISC_SLOT, ProtoplanetaryDisc, WhiteDwarfSystem};
-pub use events::{ListedEvents, SystemEvents, events_on_the_record};
+pub use events::{ListedEvents, SystemEvents};
 pub use rogue::RoguePlanet;
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then

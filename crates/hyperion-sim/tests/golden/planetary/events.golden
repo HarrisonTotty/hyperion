@@ -314,6 +314,7 @@ dust storms: largest noise amplitude (cycles) = 0x3fb645a1cac08312  # 0.087
 dust storms: noise octaves 2, lattice (cycles) 1
 dust storms: shortest (share) = 0x3fc47ae147ae147b  # 0.16
 dust storms: longest (share) = 0x3fcd70a3d70a3d71  # 0.23
+dust storms: duration year (s) 59355072, least period (s) 26006400
 dust storms: season half-width at e = 0 (cycles) = 0x3fd0000000000000  # 0.25
 dust storms: noise amplitude at e = 0 (cycles) = 0x3fb645a1cac08312  # 0.087
 dust storms: perihelion contrast at e = 0 = 0x0000000000000000  # 0.0

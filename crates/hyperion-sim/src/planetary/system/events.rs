@@ -1,8 +1,8 @@
 //! A system's events on the record (plan 14, P14.T31.c): [`PlanetarySystem::events_between`], every
 //! kind of P14.T31.a and T31.b merged into one list sorted by time and then by [`EventId`], on
 //! inputs read once from the system's records at the epoch ([`PlanetarySystem::event_models`],
-//! [`SystemEvents`], whose documentation states them), behind their hold at generator version 25
-//! ([`STORM_EVENTS_VERSION`]).
+//! [`SystemEvents`], whose documentation states them), on the record from generator version 25
+//! (decision-galaxy-25-train §5.2).
 //!
 //! No event leaves a mark (design note 15): nothing here writes to the system or its records, and
 //! no event changes any `body_at` result.
@@ -38,113 +38,6 @@ use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::{
     Gigayears, GravitationalParameter, Kilograms, Metres, SolarLuminosities, SolarMasses, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
-
-/// The generator version from which a system's events are on the record: 25, the first planetary
-/// bump after 24's, whose membership closed before P14.T31.c (decision-galaxy-25-train §5.2,
-/// "Scheduling": its goldens over generated bodies board 25).
-///
-/// It is P14.T31.c's one hold, over all five kinds. Below it [`StormEventsRules::in_force`] is
-/// [`StormEventsRules::Held`]: [`PlanetarySystem::event_models`] reads nothing and gives no model,
-/// so that [`PlanetarySystem::events_between`] lists no event, and nothing generated moves. 25's
-/// bump deletes this hold, [`StormEventsRules`] with its `Held` arm, the tests' switch and its
-/// tripwire (`the_body_events_are_held_only_until_the_25_bump`).
-pub(crate) const STORM_EVENTS_VERSION: GeneratorVersion = GeneratorVersion::new(25);
-
-/// Whether P14.T31.c's events are on the record (its hold, [`STORM_EVENTS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum StormEventsRules {
-    /// Version 24's and before: no system has events.
-    Held,
-    /// Version 25's: every kind on the record's inputs at the epoch, the storms with
-    /// decision-galaxy-25-train §5.2's floor and water deck.
-    Wired,
-}
-
-impl StormEventsRules {
-    /// The rules this generator version gives: the events from [`STORM_EVENTS_VERSION`], none
-    /// below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_storm_events`]); behind the `testing` feature, the events wherever another crate's
-    /// test binary has wired them for its whole process
-    /// ([`wire_body_events_in_this_process`](crate::planetary::testing::wire_body_events_in_this_process)).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        #[cfg(feature = "testing")]
-        if WIRED_IN_THIS_PROCESS.load(core::sync::atomic::Ordering::Relaxed) {
-            return Self::Wired;
-        }
-        if GENERATOR_VERSION >= STORM_EVENTS_VERSION {
-            Self::Wired
-        } else {
-            Self::Held
-        }
-    }
-}
-
-/// Whether another crate's test binary has put the events on the record for every thread of its
-/// process ahead of their hold
-/// ([`wire_body_events_in_this_process`](crate::planetary::testing::wire_body_events_in_this_process)):
-/// its code answers on threads of its own, such as the server's pool, which no thread's switch
-/// reaches. Never set in this crate's tests, nor outside the `testing` feature. 25's bump deletes it
-/// with the hold.
-#[cfg(feature = "testing")]
-pub(crate) static WIRED_IN_THIS_PROCESS: core::sync::atomic::AtomicBool =
-    core::sync::atomic::AtomicBool::new(false);
-
-/// Whether this generator version puts P14.T31.c's events on the record: from 25, its hold
-/// (`STORM_EVENTS_VERSION`), and in a test where its switch, or the process-wide one another
-/// crate's test binary sets, puts them there ahead of it.
-///
-/// A server answers `body_events` only where it is `true`, and otherwise as a server built before
-/// the events would, so that no client reads a held version's empty list as a quiet system. 25's
-/// bump deletes it with the hold.
-///
-/// # Examples
-///
-/// ```
-/// use hyperion_sim::planetary::system::events_on_the_record;
-///
-/// // Version 24, under the hold.
-/// assert!(!events_on_the_record());
-/// ```
-#[must_use]
-pub fn events_on_the_record() -> bool {
-    StormEventsRules::in_force() == StormEventsRules::Wired
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The events' rules a test sets on its thread, `None` for the version's.
-    static RULES: core::cell::Cell<Option<StormEventsRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the events' rules `rules` on this thread, for the tests to reach the events
-/// ahead of the bump; the version's rules are set back after, a panic in `run` included. 25's bump
-/// deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_storm_events<R>(rules: StormEventsRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<StormEventsRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
-/// Puts the events on the record for every thread of this process, ahead of their hold
-/// ([`WIRED_IN_THIS_PROCESS`]); one-way.
-#[cfg(feature = "testing")]
-pub(crate) fn wire_in_this_process() {
-    WIRED_IN_THIS_PROCESS.store(true, core::sync::atomic::Ordering::Relaxed);
-}
 
 /// A system's event models, every kind's for each of its bodies, read once from its records at
 /// the epoch ([`PlanetarySystem::event_models`]): what [`PlanetarySystem::events_between`] lists
@@ -458,7 +351,8 @@ impl BodyModels {
 }
 
 impl SystemEvents {
-    /// No models: a system's under the hold ([`STORM_EVENTS_VERSION`]).
+    /// No models: a rogue planet's system's (P14.T27.b), and a system with no bodies and no halo,
+    /// as the tests read one.
     #[must_use]
     const fn none(system: SystemId) -> Self {
         Self {
@@ -484,7 +378,7 @@ impl SystemEvents {
     }
 
     /// Whether no body of the system has an event of any kind: a system with no body present at
-    /// the epoch, or one under the hold (generator versions before 25).
+    /// the epoch.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.comets.is_none()
@@ -660,8 +554,6 @@ impl PlanetarySystem {
     /// from its records at the epoch ([`event_models`](Self::event_models), [`SystemEvents`]); none
     /// where `to` is not after `from`.
     ///
-    /// None at all before generator version 25 (its hold, `STORM_EVENTS_VERSION`).
-    ///
     /// It reads the system's records at the epoch on every call, a whole
     /// [`snapshot_at`](Self::snapshot_at): a caller asking about one system again keeps its
     /// [`SystemEvents`] instead.
@@ -687,17 +579,13 @@ impl PlanetarySystem {
     }
 
     /// The system's event models, read once from its records at the epoch ([`SystemEvents`]'
-    /// documentation): none before generator version 25 (its hold, `STORM_EVENTS_VERSION`).
+    /// documentation).
     ///
     /// # Panics
     ///
     /// As [`snapshot_at`](Self::snapshot_at).
     #[must_use]
     pub fn event_models(&self, ctx: &SystemContext) -> SystemEvents {
-        match StormEventsRules::in_force() {
-            StormEventsRules::Held => return SystemEvents::none(self.system),
-            StormEventsRules::Wired => {}
-        }
         // A rogue planet's bodies have no events (P14.T27.b): impacts are a host's belts', storms
         // a host's light.
         if self.rogue_planet().is_some() {

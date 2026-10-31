@@ -1,4 +1,4 @@
-//! Tests of a system's events on the record (P14.T31.c): the hold, the merge's order, its partition
+//! Tests of a system's events on the record (P14.T31.c): the merge's order, its partition
 //! and order independence, the IDs, each body's existence, the storms' clock and water deck, no
 //! mark on any record, and the golden systems' century of events, under every 25 hold; and the
 //! census decision-galaxy-25-train §5.2 asks for, run by name.
@@ -10,7 +10,6 @@ use hyperion_testkit::golden::{GoldenWriter, f64_digest};
 use hyperion_testkit::order::assert_order_independent;
 
 use super::*;
-use crate::Seed;
 use crate::events::testing::assert_partition_independent;
 use crate::orbit::Eccentricity;
 use crate::planetary::events::STORM_PERIOD_FLOOR;
@@ -20,11 +19,12 @@ use crate::planetary::fate::DestructionCause;
 use crate::planetary::generate;
 use crate::planetary::record::{BodyKind, SectionState};
 use crate::planetary::system::tests::{
-    GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, golden_systems, sample, sun,
+    GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, golden_systems, sample,
 };
 use crate::planetary::testing::with_every_25_hold;
 use crate::time::ClockWindow;
 use crate::units::Seconds;
+use crate::{GENERATOR_VERSION, Seed};
 
 /// The instant `years` Julian years from the epoch.
 fn year(years: i64) -> UniverseTime {
@@ -65,39 +65,6 @@ fn models_of(models: &SystemEvents, index: u16) -> &BodyModels {
         .iter()
         .find(|body| body.index.get() == index)
         .unwrap()
-}
-
-/// P14.T31.c is held until the 24 → 25 bump: no system has events below it.
-#[test]
-fn the_body_events_are_held_only_until_the_25_bump() {
-    assert!(
-        GENERATOR_VERSION < STORM_EVENTS_VERSION,
-        "the 24 → 25 bump puts P14.T31.c's events on the record (decision-galaxy-25-train §5.2): \
-         delete `STORM_EVENTS_VERSION`, `StormEventsRules` with its `Held` arm and the arm that \
-         reads it in `PlanetarySystem::event_models`, the tests' `with_storm_events`, its switch in \
-         `with_every_25_hold`, the process-wide `wire_body_events_in_this_process` with \
-         `WIRED_IN_THIS_PROCESS` and its callers in the server's tests, `events_on_the_record` \
-         with the server's held arm of `body_events`, and this test"
-    );
-    assert_eq!(StormEventsRules::in_force(), StormEventsRules::Held);
-    assert!(!events_on_the_record());
-    assert!(with_storm_events(
-        StormEventsRules::Wired,
-        events_on_the_record
-    ));
-    let ctx = sun(0);
-    let system = generate(SEED, &ctx);
-    let models = system.event_models(&ctx);
-    assert!(models.is_empty());
-    assert_eq!(models, SystemEvents::none(ctx.id()));
-    assert_eq!(
-        system.events_between(&ctx, ClockWindow::START, ClockWindow::END),
-        Vec::<BodyEvent>::new()
-    );
-    // Inside the switch the same system has events.
-    let wired = with_storm_events(StormEventsRules::Wired, || system.event_models(&ctx));
-    assert!(!wired.is_empty());
-    assert_eq!(StormEventsRules::in_force(), StormEventsRules::Held);
 }
 
 /// Test (c), the list: a system's events are its models' over the window, sorted strictly by time
@@ -242,7 +209,7 @@ fn under_every_25_hold_event_ids_round_trip_through_their_text_and_regenerate() 
 }
 
 /// No event leaves a mark (design note 15): every body's record at its events' times is the same
-/// whether asked before the events are listed or after, and with the events' hold set back.
+/// whether asked before the events are listed or after.
 #[test]
 fn under_every_25_hold_no_event_changes_any_body_at_result() {
     let systems = golden_at_25();
@@ -272,10 +239,7 @@ fn under_every_25_hold_no_event_changes_any_body_at_result() {
         let listed = with_every_25_hold(|| system.events_between(ctx, year(-50), year(50)));
         assert_eq!(listed, events);
         let after = with_every_25_hold(|| records(system));
-        let held =
-            with_every_25_hold(|| with_storm_events(StormEventsRules::Held, || records(system)));
         assert_eq!(before, after, "{name}");
-        assert_eq!(before, held, "{name}");
     }
 }
 

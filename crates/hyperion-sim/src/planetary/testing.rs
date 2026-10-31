@@ -407,28 +407,15 @@ impl Error for SampleContextsError {
     }
 }
 
-/// Puts P14.T31.c's events on the record for every thread of this process, ahead of their hold at
-/// generator version 25 (`STORM_EVENTS_VERSION`), for another crate's test binary: the server's
-/// handlers answer on its pool's threads, which a switch on the test's thread would not reach. Only
-/// the events' hold is lifted; every other 25 hold stays held, so the events read version 24's
-/// records. It is one-way and process-wide, so a binary that calls it calls it at the start of
-/// every test, and holds no test that asks for the events at 24. The `testing` feature can reach a
-/// workspace build of the server too, since `hyperion-fit` enables it as a normal dependency, so
-/// only a test binary calls this. 25's bump deletes it with the hold.
-#[cfg(feature = "testing")]
-pub fn wire_body_events_in_this_process() {
-    super::system::events::wire_in_this_process();
-}
-
 /// Gives the free-floating hosts their systems for every thread of this process, ahead of their
 /// holds at generator version 26 (P14.T27.a's `SUBSTELLAR_HOSTS_VERSION` and P14.T27.b's
 /// `ROGUE_PLANET_HOSTS_VERSION`), for another crate's test binary: the server answers on its pool's
 /// threads, which a switch on the test's thread would not reach. A brown dwarf's and a rogue
 /// planet's systems are generated, and the frame search walks their layers
 /// ([`frame_at`](crate::galaxy::frame::frame_at)); every other 26 hold stays held, so every other
-/// system reads version 24's records. It is one-way and process-wide, so a binary that calls it
+/// system reads version 25's records. It is one-way and process-wide, so a binary that calls it
 /// calls it at the start of every test, and holds no test that asks for the free-floating hosts at
-/// 24. Only a test binary calls this. 26's bump deletes it with the holds.
+/// 25. Only a test binary calls this. 26's bump deletes it with the holds.
 #[cfg(feature = "testing")]
 pub fn admit_free_floating_hosts_in_this_process() {
     super::hosts::substellar::admit_free_floating_in_this_process();
@@ -442,9 +429,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///
 /// The holds, each with its switch:
 ///
-/// - the events on the record, `STORM_EVENTS_VERSION` (P14.T31.c), at `StormEventsRules::Wired`
-///   through `with_storm_events`: a system's events from its records at the epoch, the storms
-///   floored at 10 years and gated on a water deck;
 /// - the exposed ice through a lag, `EXPOSED_ICE_VERSION` (P14.T53.c), at
 ///   `ExposedIceRules::Exposed` through `with_exposed_ice`: an ice bulk's water ice under a dark
 ///   lid at its lag's exposed share, held to the cover's ice area, and the belt test reading a
@@ -471,15 +455,10 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::passes::{PassRoot, with_pass_root};
     use crate::planetary::hooks::cold_traps::with_rough_plains;
     use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
-    use crate::planetary::system::events::{StormEventsRules, with_storm_events};
     use crate::planetary::system::member_lag::{MemberLagRules, with_member_lag};
     use crate::substance::aerosol::{MoltenDecksRules, with_molten_decks};
     use hyperion_surface::cold_trap::PlainsModel;
-    let run = || {
-        with_member_lag(MemberLagRules::Members, || {
-            with_storm_events(StormEventsRules::Wired, run)
-        })
-    };
+    let run = move || with_member_lag(MemberLagRules::Members, run);
     let run = move || with_rough_plains(PlainsModel::RayTraced, run);
     let run = move || with_molten_decks(MoltenDecksRules::Molten, run);
     let run = move || with_pass_root(PassRoot::Secant, run);
@@ -782,25 +761,6 @@ mod tests {
             synthetic_star(id, SolarMasses::new(-1.0), fe_h, age),
             Err(BuildSystemContextError::MassOutsideRange { star: 0, .. })
         ));
-    }
-
-    /// The events' switch (P14.T31.c): in force inside 25's helper, held outside it and where a
-    /// test sets it back.
-    #[test]
-    fn the_body_events_hold_is_in_force_inside_25_s_helper_alone() {
-        use crate::planetary::system::events::{StormEventsRules, with_storm_events};
-        assert_eq!(StormEventsRules::in_force(), StormEventsRules::Held);
-        assert_eq!(
-            with_every_25_hold(StormEventsRules::in_force),
-            StormEventsRules::Wired
-        );
-        assert_eq!(
-            with_every_25_hold(|| {
-                with_storm_events(StormEventsRules::Held, StormEventsRules::in_force)
-            }),
-            StormEventsRules::Held
-        );
-        assert_eq!(StormEventsRules::in_force(), StormEventsRules::Held);
     }
 
     /// 25's fourth switch, the exposed ice through a lag (P14.T53.c): in force inside 25's helper,

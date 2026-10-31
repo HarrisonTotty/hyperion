@@ -298,8 +298,8 @@ pub(crate) async fn detail(
 /// The system is the body cache's, as for [`bodies`], and its event models the same cache's, built
 /// on a miss as one interactive pool job shared by every request for them; a second interactive
 /// job lists the window's events and converts them, and the answer, which can be large, is
-/// serialised on the pool (design note 22). Before generator version 25, P14.T31.c's hold, the
-/// dispatch answers `unsupported` and never reaches here.
+/// serialised on the pool (design note 22). It is served from generator version 25, which puts
+/// P14.T31.c's events on the record.
 ///
 /// # Errors
 ///

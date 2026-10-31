@@ -212,10 +212,10 @@ fn open_topic(
 /// this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
 /// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
 /// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
-/// 15): `body_events` until generator version 25 puts plan 14's P14.T31 events on the record (its
-/// hold), and plan 09's `features_in_range`,
-/// `galaxy_features`, `feature_detail` and `black_hole_state` until its P09.T40.b. Each handler
-/// that names a universe starts from [`universe::openable_universe`].
+/// 15): plan 09's `features_in_range`, `galaxy_features`, `feature_detail` and `black_hole_state`
+/// until its P09.T40.b. Plan 14's `body_events` is served from generator version 25, which puts
+/// its P14.T31 events on the record. Each handler that names a universe starts from
+/// [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
 
@@ -253,14 +253,9 @@ impl Handler for Handlers {
             RequestBody::BodyDetail(request) => {
                 Box::pin(system::detail(state, request, token).map(answered))
             }
-            // Served from generator version 25, which puts P14.T31's events on the record; below
-            // it, answered as a server built before them would (P14.T31.c's hold).
+            // Served from generator version 25, which puts P14.T31's events on the record.
             RequestBody::BodyEvents(request) => {
-                if hyperion_sim::planetary::system::events_on_the_record() {
-                    Box::pin(system::events(state, request, token).map(answered))
-                } else {
-                    Box::pin(ready(Err(not_served_yet("body_events"))))
-                }
+                Box::pin(system::events(state, request, token).map(answered))
             }
             // The connection answers `subscribe` through `Handler::subscribe` and `unsubscribe`
             // itself (rendering plan R03, R03.T5.b), so neither reaches here; the arms keep the
@@ -332,8 +327,7 @@ fn answered(result: Result<ResponseBody, RequestError>) -> Result<Answer, Reques
 }
 
 /// The answer to a kind the protocol defines and this server does not serve yet: `unsupported`,
-/// as an older server would answer it (plan 04, design note 15). Plan 14's `body_events` takes it
-/// until P14.T31 lands.
+/// as an older server would answer it (plan 04, design note 15).
 #[must_use]
 fn not_served_yet(kind: &str) -> RequestError {
     request_error(

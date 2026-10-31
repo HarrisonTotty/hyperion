@@ -33,8 +33,8 @@
 //! key, built from the cached system under its own [`SingleFlight`] as one interactive job, and
 //! in an LRU of its own, since one [`SharedByteLru`] holds one kind of value. It takes a budget of
 //! the same size as the systems': a system's models are one entry a planet, member and moon, about
-//! what its bodies cost, and an evicted model is built again from its system. The server asks for
-//! them from generator version 25, P14.T31.c's hold; below it they are empty.
+//! what its bodies cost, and an evicted model is built again from its system. The events are on
+//! the record from generator version 25 (P14.T31.c).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -233,8 +233,7 @@ impl SharedBodyCache {
     ///
     /// On a miss one interactive pool job reads the system's records at the epoch into its models
     /// ([`PlanetarySystem::event_models`]); callers that miss one key at once share it, and if every
-    /// one of them gives up, a job still queued is skipped. Before generator version 25 the models
-    /// are empty (P14.T31.c's hold).
+    /// one of them gives up, a job still queued is skipped.
     ///
     /// # Errors
     ///
