@@ -28,7 +28,7 @@
 //! disc's masses and radii and a gap at each giant formed by then
 //! ([`PlanetarySystem::protoplanetary_disc`](crate::planetary::system::PlanetarySystem::protoplanetary_disc)).
 //! It moves every snapshot of a system with a disc, so it is held until generator version 26
-//! ([`PROTOPLANETARY_DISC_VERSION`]).
+//! (`PROTOPLANETARY_DISC_VERSION`).
 
 use std::error::Error;
 use std::fmt;
@@ -178,6 +178,8 @@ pub enum BuildFormationError {
     MassNotPositive(EarthMasses),
     /// The disc's lifetime was not finite and positive.
     LifetimeNotPositive(Megayears),
+    /// A second-generation planet's formation age was not finite and positive.
+    AgeNotPositive(Megayears),
 }
 
 impl fmt::Display for BuildFormationError {
@@ -195,6 +197,13 @@ impl fmt::Display for BuildFormationError {
                     f,
                     "disc lifetime {} Myr is not finite and positive",
                     lifetime.value()
+                )
+            }
+            Self::AgeNotPositive(age) => {
+                write!(
+                    f,
+                    "formation age {} Myr is not finite and positive",
+                    age.value()
                 )
             }
         }
@@ -301,6 +310,39 @@ impl Formation {
         Ok(Self {
             kind,
             formed_at: Megayears::new(formed_at),
+            molten_until: Megayears::new(molten_until),
+        })
+    }
+
+    /// The formation of a second-generation planet of `mass` at the host age `formed_at`, in a
+    /// fallback disc after its host's death (design note 11, P14.T28.e), from the ranks `draws`:
+    /// its magma ocean ends as [`Formation::from_draws`]'s does, at a host age uniform in log over
+    /// 10–100 Myr, and no earlier than its formation.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildFormationError::MassNotPositive`] and [`BuildFormationError::AgeNotPositive`] unless
+    /// the mass and the age are finite and positive.
+    pub fn second_generation(
+        mass: EarthMasses,
+        formed_at: Megayears,
+        draws: &FormationDraws,
+    ) -> Result<Self, BuildFormationError> {
+        if !(mass.value().is_finite() && mass.value() > 0.0) {
+            return Err(BuildFormationError::MassNotPositive(mass));
+        }
+        let age = formed_at.value();
+        if !(age.is_finite() && age > 0.0) {
+            return Err(BuildFormationError::AgeNotPositive(formed_at));
+        }
+        let (low, high) = (
+            math::log10(MAGMA_OCEAN_END_EARLIEST.value()),
+            math::log10(MAGMA_OCEAN_END_LATEST.value()),
+        );
+        let molten_until = math::exp10(low + draws.magma_ocean.value() * (high - low)).max(age);
+        Ok(Self {
+            kind: FormationKind::of(mass),
+            formed_at,
             molten_until: Megayears::new(molten_until),
         })
     }

@@ -242,3 +242,4 @@ class.nsm.metallicity (System) = 0xa238aa37017fc4de
 class.nsm.mass (System) = 0x2374a5ba2ea2a7cb
 class.nsm.velocity (System) = 0x77a89f5c833b1c00
 class.nsm.binary (System) = 0xeee0edbd03765e2a
+planet.secondgen (System) = 0x45e9aee80d1d17eb

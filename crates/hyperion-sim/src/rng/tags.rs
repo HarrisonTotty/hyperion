@@ -1161,6 +1161,16 @@ domain_tags! {
     /// inclination, ascending node and argument of periapsis, word 3 its mean anomaly at the epoch
     /// (P11.T8.d).
     CLASS_NSM_BINARY: System = "class.nsm.binary";
+
+    // Plan 14, P14.T28.e: a neutron star's second-generation planets, under the `planet.secondgen`
+    // name the "Plan 14" heading reserves. Appended after P11.T8.d's `class.nsm.binary`, because
+    // the macro's order fixes `ALL`.
+
+    /// A neutron star's second-generation system (P14.T28.e): its mark, the rank of its count,
+    /// its plane's two uniforms, and its bodies' axes' and masses' ranks, words 0–9 of orbit host
+    /// h's block from word 16h; words 10–15 are reserved
+    /// (`planetary::hosts::second_generation::SecondGenerationDraws`).
+    PLANET_SECONDGEN: System = "planet.secondgen";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1353,6 +1363,13 @@ mod tests {
                 .iter()
                 .all(|tag| ALL.contains(tag))
         );
+    }
+
+    #[test]
+    fn plan_14_registers_the_second_generation_tag_with_system_scope() {
+        assert_eq!(PLANET_SECONDGEN.name(), "planet.secondgen");
+        assert_eq!(PLANET_SECONDGEN.scope(), crate::rng::TagScope::System);
+        assert!(ALL.contains(&PLANET_SECONDGEN));
     }
 
     #[test]

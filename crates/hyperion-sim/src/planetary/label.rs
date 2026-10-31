@@ -25,7 +25,7 @@
 use std::fmt;
 use std::num::NonZeroU8;
 
-use crate::planetary::index::{BodyIndex, BodySub, STELLAR_SUB_END};
+use crate::planetary::index::{BodyIndex, BodySlot, BodySub, STELLAR_SUB_END};
 use crate::planetary::record::BodyKind;
 use crate::planetary::system::{PlanetarySystem, WhiteDwarfSystem};
 
@@ -208,7 +208,8 @@ fn roman_numeral(number: NonZeroU8) -> String {
 /// Every body of `system` with its label, in index order: its planets, moons, rings, belts,
 /// belt members, halo and discs.
 ///
-/// - Each planet is lettered among its host's planets by primordial semi-major axis
+/// - Each planet is lettered among its host's planets by primordial semi-major axis, a
+///   second-generation planet's after every primordial one (P14.T28.e)
 ///   ([`Body::orbit`](crate::planetary::system::Body::orbit)), ties broken by body index, after its host's letters ([`host_letters`] of
 ///   its zone's members).
 /// - Each moon takes its parent's label and a Roman numeral from `I` by its semi-major axis as it
@@ -238,7 +239,15 @@ pub fn labels(system: &PlanetarySystem) -> Vec<(BodyIndex, BodyLabel)> {
                 .filter(|body| body.host() == zone.host())
                 .filter_map(|body| Some((body.orbit()?.semi_major_axis().value(), body.index()))),
         );
-        order.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        // A second-generation planet is lettered after its host's primordial ones, which keep
+        // theirs (P14.T28.e): its slot is above every primordial planet's.
+        order.sort_by(|a, b| {
+            let second = |index: &BodyIndex| matches!(index.slot(), BodySlot::SecondGeneration(_));
+            second(&a.1)
+                .cmp(&second(&b.1))
+                .then(a.0.total_cmp(&b.0))
+                .then(a.1.cmp(&b.1))
+        });
         labelled.extend(
             order
                 .iter()

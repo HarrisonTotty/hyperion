@@ -202,8 +202,20 @@ pub enum ScatterDraws {
     },
 }
 
+/// Which generation of its host's bodies a body is (design note 11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Generation {
+    /// Formed in its host's primordial disc: it never forms at or after one of its host stars'
+    /// deaths, and its orbit is about the host's initial mass.
+    Primordial,
+    /// Formed after its host's death, in a fallback disc about the remnant (P14.T28.e): its orbit
+    /// is about the host's mass at its formation, and only later deaths reach it.
+    Second,
+}
+
 /// What the fate transform reads of a body: its formation, its primordial orbit, its mass, its
-/// bulk density, how its orbit circularises, and the draws of the ejections it survives.
+/// bulk density, how its orbit circularises, the draws of the ejections it survives, and its
+/// generation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FateBody {
     formation: Formation,
@@ -212,6 +224,7 @@ pub struct FateBody {
     density: KilogramsPerCubicMetre,
     circularisation: Circularisation,
     scatter: ScatterDraws,
+    generation: Generation,
 }
 
 impl FateBody {
@@ -247,7 +260,24 @@ impl FateBody {
             density,
             circularisation: Circularisation::NONE,
             scatter: ScatterDraws::Median,
+            generation: Generation::Primordial,
         })
+    }
+
+    /// The same body as a second-generation one (P14.T28.e): formed when `formation` says, after
+    /// its host's death, on `orbit` about the host's mass then, its remnant's.
+    #[must_use]
+    pub const fn second_generation(self) -> Self {
+        Self {
+            generation: Generation::Second,
+            ..self
+        }
+    }
+
+    /// Which generation of its host's bodies it is.
+    #[must_use]
+    pub const fn generation(&self) -> Generation {
+        self.generation
     }
 
     /// The same body, circularising as `circularisation` says (P14.T8.e).
@@ -277,7 +307,8 @@ impl FateBody {
         &self.formation
     }
 
-    /// The primordial orbit, about the host's initial mass.
+    /// The orbit it forms on: about the host's initial mass for a primordial body, and about the
+    /// host's mass at its formation for a second-generation one.
     #[must_use]
     pub const fn orbit(&self) -> &KeplerElements {
         &self.orbit
@@ -769,9 +800,20 @@ impl<'a> BodyFate<'a> {
     }
 
     /// The body's formation and its first segment, before any of its life is followed.
+    ///
+    /// A primordial body never forms at or after a host star's death, which ends its disc; a
+    /// second-generation one forms after its host's death, and its first segment is about the
+    /// host's mass then, without circularisation (P14.T28.e).
     fn begin(body: &'a FateBody, host: &'a FateHost<'a>, deaths: Vec<Option<StarDeath>>) -> Self {
-        let formed_at = clock_time(host.first(), Years::from(body.formation.formed_at()))
-            .filter(|formed| deaths.iter().flatten().all(|death| death.at > *formed));
+        let formed_at =
+            clock_time(host.first(), Years::from(body.formation.formed_at())).filter(|formed| {
+                match body.generation {
+                    Generation::Primordial => {
+                        deaths.iter().flatten().all(|death| death.at > *formed)
+                    }
+                    Generation::Second => true,
+                }
+            });
         let mut fate = Self {
             body,
             host,
@@ -782,11 +824,15 @@ impl<'a> BodyFate<'a> {
             recoils: 0,
         };
         if let Some(formed) = formed_at {
+            let (reference, circularises) = match body.generation {
+                Generation::Primordial => (host.initial_mass(), true),
+                Generation::Second => (fate.host_mass(formed), false),
+            };
             fate.segments.push(Segment {
                 start: formed,
                 orbit: body.orbit,
-                reference: host.initial_mass(),
-                circularises: true,
+                reference,
+                circularises,
                 mass: body.mass,
             });
         }

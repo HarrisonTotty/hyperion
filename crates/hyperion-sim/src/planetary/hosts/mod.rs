@@ -2,6 +2,8 @@
 //! substellar hosts (plan 14, phase F).
 //!
 //! - [`young`]: when each planet forms, below its disc's lifetime (design note 12, P14.T28.a).
+//! - [`second_generation`]: a neutron star's fallback-disc planets (design note 11, P14.T28.e),
+//!   behind their hold at generator version 26.
 //! - [`evolved`]: circularisation, adiabatic expansion, engulfment by an expanding giant, and what
 //!   a supernova leaves of an orbit (design note 11, P14.T28.b and c).
 //! - [`substellar`]: a free-floating brown dwarf's planets (design note 13, P14.T27.a), behind
@@ -15,6 +17,7 @@
 //! The rogue planets of P14.T27.b will join them here.
 
 pub mod evolved;
+pub mod second_generation;
 pub mod strip;
 pub mod substellar;
 pub mod white_dwarfs;

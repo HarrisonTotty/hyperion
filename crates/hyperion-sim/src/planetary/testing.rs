@@ -539,6 +539,8 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   `ProtoplanetaryDiscRules::Disc` through `with_protoplanetary_disc`.
 /// - a white dwarf's pollution and debris disc, `WHITE_DWARF_DEBRIS_VERSION` (P14.T28.d), at
 ///   `WhiteDwarfDebrisRules::Debris` through `with_white_dwarf_debris`.
+/// - a neutron star's second-generation planets, `SECOND_GENERATION_VERSION` (P14.T28.e), at
+///   `SecondGenerationRules::Planets` through `with_second_generation`.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
@@ -556,6 +558,9 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
+    use crate::planetary::hosts::second_generation::{
+        SecondGenerationRules, with_second_generation,
+    };
     use crate::planetary::hosts::strip::{StripRules, with_stripping};
     use crate::planetary::hosts::substellar::{
         RoguePlanetRules, SubstellarHostRules, with_rogue_planets, with_substellar_hosts,
@@ -585,6 +590,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_dayside_decks(DaysideDecksRules::Cleared, run);
     let run = move || with_protoplanetary_disc(ProtoplanetaryDiscRules::Disc, run);
     let run = move || with_white_dwarf_debris(WhiteDwarfDebrisRules::Debris, run);
+    let run = move || with_second_generation(SecondGenerationRules::Planets, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 

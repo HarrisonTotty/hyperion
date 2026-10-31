@@ -3264,6 +3264,8 @@ elements into elements at a time.
 - **P14.T28.e Second-generation planets** of neutron stars, on `planet.secondgen`, in slots `0xC0`
   upward, placed by T6–T8 with a fixed small template and derived by T16 with the pulsar's spin-down
   luminosity from plan 06 as the only irradiation.
+  - _Built_ 2026-10-31, held at 26 (`SECOND_GENERATION_VERSION`): Risks, "Deviations in
+    P14.T28.a's disc, T28.d and T28.e, as built".
   - _Tests, on synthetic hosts with planets placed by T8:_ (all) a body's state sequence in time is
     always a prefix of NotYetFormed → Present → Destroyed or Unbound, and elements are continuous in
     time except at a supernova. (a) No giant forms after its disc has gone; the disc body is
@@ -33487,3 +33489,21 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - New public items: `WhiteDwarfSystem`, `Population::DebrisDisc(DebrisDiscRecord)`, and on the
     wire `PopulationDto::DebrisDisc(DebrisDiscDto)`; the client decodes, lists and reads it out,
     and does not draw it yet. The pollution mark is not on the wire.
+  - _T28.e._ Held at 26: `hosts::second_generation`'s `SECOND_GENERATION_VERSION`,
+    `SecondGenerationRules::{Held, Planets}`, `with_second_generation` (a line in
+    `with_every_26_hold`) and the tripwire `the_second_generation_is_held_only_until_the_26_bump`.
+    New tag `planet.secondgen` (System, words 16h onwards), appended to `tags::ALL`; the
+    `rng/tags` golden gains its line (extended only).
+  - `generate`'s step 10 (`system/second_generation.rs`): each single-star zone with a neutron
+    star by +H and a disc profile. The fate transform gains `fate::Generation` and
+    `FateBody::second_generation()`: formed after the death, about the host's mass then; the
+    scattering walk never sees one. `Formation::second_generation`, `PlacedPlanet::second_generation`
+    (crate) and `Body::is_second_generation` are new.
+  - The template (lean, 2026-10-31): 1–3 bodies, axes log-uniform over 0.2–0.5 au, masses
+    log-uniform over 0.02–4.3 M⊕ (PSR B1257+12's span), T6's circular floor inside out, T8.d's
+    cold-chain eccentricity and inclination in a plane of their own, eccentricities held inside the
+    midpoints; no satellites; lettered after the host's primordial planets.
+  - The light (lean, 2026-10-31): in a system with such planets every `Epoch` reads the neutron
+    star's light as its spin-down luminosity at its surface temperature and radius, with no X-ray
+    history or peak; a survivor about the same host sees it too, and nothing else moves. Its
+    photochemistry still reads the star's own state.

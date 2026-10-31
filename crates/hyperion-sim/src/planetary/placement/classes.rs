@@ -450,6 +450,33 @@ impl PlacedPlanet {
     pub const fn rescaled(&self) -> bool {
         self.rescaled
     }
+
+    /// A second-generation planet (P14.T28.e) at `index`, of `mass` on `orbit` about its neutron
+    /// star, as the derivation reads it: a rocky group's body, formed where it lies inside its
+    /// host's snow line, its eccentricity drawn from `law`.
+    #[must_use]
+    pub(crate) fn second_generation(
+        index: BodyIndex,
+        mass: EarthMasses,
+        orbit: KeplerElements,
+        law: EccentricityLaw,
+    ) -> Self {
+        Self {
+            index,
+            group: 0,
+            role: GroupRole::Rocky,
+            mass,
+            orbit,
+            formation_distance: orbit.semi_major_axis(),
+            formed: SnowLineSide::Inside,
+            origin: Origin::InSitu,
+            hot: false,
+            resonance: None,
+            drawn_eccentricity: orbit.eccentricity().value(),
+            eccentricity_law: law,
+            rescaled: false,
+        }
+    }
 }
 
 /// An orbit host's planets (P14.T8): its class as drawn and as kept, and its planets in slot

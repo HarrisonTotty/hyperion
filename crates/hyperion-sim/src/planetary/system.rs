@@ -51,12 +51,13 @@
 //!    one, in belt slot `0xE0` (P14.T28.a, [`PlanetarySystem::protoplanetary_disc`]), on no
 //!    stream, and a white dwarf's pollution mark and debris disc, in `0xEE`, on `belt.population`
 //!    (P14.T28.d, [`PlanetarySystem::white_dwarf`]).
+//! 10. **Second-generation planets** (P14.T28.e): from generator version 26 a neutron star's, on
+//!     `planet.secondgen`, in slots `0xC0`–`0xCF` ([`Body::is_second_generation`]), lit by its
+//!     spin-down luminosity.
 //!
-//! Second-generation planets (P14.T28.e) are not built: their stage does not exist yet, and their
-//! streams (`planet.secondgen`) and slots (`0xC0`–`0xCF`) stay reserved for them. A free-floating
-//! brown dwarf runs the steps above from generator version 26 (P14.T27.a), its planets from slot
-//! `0x01`. A rogue planet ([`HostKind::RoguePlanet`], from 26, P14.T27.b) runs none of them but
-//! step 7: it is body `0x0000`, derived with no star, with its satellites about it
+//! A free-floating brown dwarf runs the steps above from generator version 26 (P14.T27.a), its
+//! planets from slot `0x01`. A rogue planet ([`HostKind::RoguePlanet`], from 26, P14.T27.b) runs
+//! none of them but step 7: it is body `0x0000`, derived with no star, with its satellites about it
 //! ([`RoguePlanet`], the `rogue` module), and every query of its system takes that module's path.
 //!
 //! [`PlanetarySystem`] holds only that primordial state, which is what the server may cache ("state
@@ -221,7 +222,7 @@ use crate::stellar::{Phase, StarState};
 use crate::substance::Element;
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::{
-    GM_EARTH, GRAVITATIONAL_CONSTANT, METRES_PER_AU, SECONDS_PER_JULIAN_YEAR,
+    GM_EARTH, GRAVITATIONAL_CONSTANT, METRES_PER_AU, SECONDS_PER_JULIAN_YEAR, SOLAR_LUMINOSITY_W,
 };
 use crate::units::{
     Dex, EarthFluxes, EarthMasses, EarthRadii, GravitationalParameter, Kelvin, Kilograms,
@@ -1232,6 +1233,8 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
 
     // Step 9: the disc bodies, which read no stream and move no other body.
     system.discs = SystemDiscs::find(seed, ctx, &system);
+    // Step 10: a neutron star's second-generation planets, on their own stream and slots.
+    system.add_second_generation(seed, ctx);
     system
 }
 
@@ -6610,6 +6613,10 @@ struct Epoch<'c> {
     /// reads this member, so it gives the same bits whichever envelope asks first, and the epoch is
     /// neither compared nor printed. A `OnceLock` keeps the epoch `Sync`, as the rule asks.
     network: OnceLock<Result<Network, BuildNetworkError>>,
+    /// The star whose light is its pulsar's spin-down luminosity at the time, by its index, with
+    /// that luminosity: the neutron star of a system with second-generation planets
+    /// (P14.T28.e), once born; `None` otherwise.
+    pulsar: Option<(usize, SolarLuminosities)>,
 }
 
 impl<'c> Epoch<'c> {
@@ -6625,7 +6632,17 @@ impl<'c> Epoch<'c> {
             system.system,
             "a system is queried with the context it was generated from"
         );
-        Self::of(ctx, t)
+        let pulsar = system.pulsar_host().and_then(|star| {
+            let spin_down = ctx.stars()[star].pulsar_at(t)?.spin_down_luminosity();
+            Some((
+                star,
+                SolarLuminosities::new(spin_down.value() / SOLAR_LUMINOSITY_W),
+            ))
+        });
+        Self {
+            pulsar,
+            ..Self::of(ctx, t)
+        }
     }
 
     /// The queries of the system of `ctx` at `t`, before it is generated.
@@ -6640,6 +6657,7 @@ impl<'c> Epoch<'c> {
             shades: None,
             small_bodies: None,
             network: OnceLock::new(),
+            pulsar: None,
         }
     }
 
@@ -6690,7 +6708,13 @@ impl<'c> Epoch<'c> {
     #[must_use]
     fn luminosity(&self, zone: &OrbitZone) -> Option<SolarLuminosities> {
         zone.members()
-            .map(|member| self.states[usize::from(member)].map(|state| state.luminosity().value()))
+            .map(|member| {
+                let star = usize::from(member);
+                self.states[star].map(|state| match self.pulsar {
+                    Some((pulsar, luminosity)) if pulsar == star => luminosity.value(),
+                    Some(_) | None => state.luminosity().value(),
+                })
+            })
             .sum::<Option<f64>>()
             .map(SolarLuminosities::new)
     }
@@ -6702,6 +6726,13 @@ impl<'c> Epoch<'c> {
     #[must_use]
     fn light(&self, star: usize) -> Option<HostLight> {
         let state = self.states[star]?;
+        if let Some((_, luminosity)) = self.pulsar.filter(|&(pulsar, _)| pulsar == star) {
+            // A pulsar's planets' only light (P14.T28.e): no X-ray history and no brighter past.
+            return Some(
+                HostLight::new(luminosity, state.effective_temperature(), state.radius())
+                    .expect("a neutron star's state is finite, with a surface"),
+            );
+        }
         let peak = self.ctx.stars()[star].max_luminosity_until(self.t);
         Some(
             HostLight::new(
@@ -6903,6 +6934,7 @@ pub(crate) mod planet_lag;
 #[cfg(test)]
 mod present_state_tests;
 mod rogue;
+mod second_generation;
 pub(crate) mod small_bodies;
 #[cfg(test)]
 mod supercritical_envelope_tests;
