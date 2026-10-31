@@ -302,6 +302,7 @@ mod tests {
     use crate::coords::UnitVector;
     use crate::galaxy::ages::AgeDistribution;
     use crate::galaxy::params::GalaxyParams;
+    use crate::galaxy::rules::GalaxyRules;
     use crate::math;
     use crate::stellar::StarState;
     use crate::stellar::classify::{
@@ -314,7 +315,8 @@ mod tests {
     use crate::stellar::premain::disc_lifetime;
     use crate::stellar::remnant::DeathKind;
     use crate::stellar::remnant::{NeutronStar, RemnantKind};
-    use crate::stellar::sse::{PhasePredicate, Track};
+    use crate::stellar::rules::StellarRules;
+    use crate::stellar::sse::{PhasePredicate, Track, TrackOptions};
     use crate::stellar::variability::VariableKind;
     use crate::stellar::variability::{VariabilityInputs, variability};
     use crate::stellar::{ObjectKind, Phase};
@@ -1037,22 +1039,29 @@ mod tests {
     const PULSING_SAMPLES: u32 = 400;
 
     /// What the counts of P06.T24.b's classes read of one star of `inputs`, of a component whose
-    /// ages are `ages`, under the full arm's rules: the weight under `ages` of the ages at which
+    /// ages are `ages`, its tracks built under `rules`: the weight under `ages` of the ages at which
     /// the star is a classical or weak-lined T Tauri star, a Herbig Ae/Be star (from its
     /// formation to its arrival on the main sequence, split at its disc's lifetime), an S star of
     /// any kind or a carbon star (over its full track's thermally pulsing AGB, on the track's own
     /// pulse count, ⌊φ⌋, which the series' n follows within its noise's bound); and the
     /// protostars, as [`observe_counts`] weighs them.
-    fn observe_young_and_chemical(inputs: &SampleInputs, ages: &AgeDistribution, t: &mut Tally) {
+    fn observe_young_and_chemical(
+        inputs: &SampleInputs,
+        ages: &AgeDistribution,
+        rules: StellarRules,
+        t: &mut Tally,
+    ) {
         let (m0, composition, draws) = (inputs.initial_mass, &inputs.composition, &inputs.draws);
         if m0 < crate::stellar::sse::MIN_INITIAL_MASS {
             return;
         }
-        let arrival = Track::to_age(m0, composition, draws, Years::new(PROTOSTAR_YEARS))
-            .main_sequence_arrival()
-            .expect("a hydrogen star arrives on its main sequence")
-            .value()
-            .max(PROTOSTAR_YEARS);
+        let options = TrackOptions::default().with_rules(rules);
+        let arrival =
+            Track::to_age_with(m0, composition, draws, options, Years::new(PROTOSTAR_YEARS))
+                .main_sequence_arrival()
+                .expect("a hydrogen star arrives on its main sequence")
+                .value()
+                .max(PROTOSTAR_YEARS);
         t.add("protostars", weight(ages, 0.0, PROTOSTAR_YEARS));
         // A protostar is classical whatever its disc's lifetime (`young_class`).
         let disc = (1e6 * disc_lifetime(m0, draws.disc_lifetime()).value()).max(PROTOSTAR_YEARS);
@@ -1068,7 +1077,7 @@ mod tests {
         if !carbon_star_window(composition).contains(&m0) {
             return;
         }
-        let track = Track::full(m0, composition, draws);
+        let track = Track::full_with(m0, composition, draws, options);
         let (Some(span), Some(dredge_up)) =
             (track.pulsing_agb(), DredgeUp::of(m0, composition, &track))
         else {
@@ -1097,9 +1106,10 @@ mod tests {
         );
     }
 
-    /// The galaxy-wide expected counts of P06.T24.b's classes at Milky Way parameters under the
-    /// full arm, as [`galaxy_wide_counts_at_milky_way_values`] counts its objects (T31's count
-    /// checks):
+    /// The galaxy-wide expected counts of P06.T24.b's classes at Milky Way parameters under every
+    /// 26 hold, the galaxy's and its tracks' (A2's Humphreys–Davidson limit and the helium table
+    /// with the classes), as [`galaxy_wide_counts_at_milky_way_values`] counts its objects (T31's
+    /// count checks):
     ///
     /// - carbon stars 2 × 10⁴–5 × 10⁵: the solar neighbourhood's surface density of about 100 a
     ///   kpc² (Groenewegen et al. 1992, recalled) spread over an exponential disc of scale length
@@ -1116,8 +1126,11 @@ mod tests {
     #[ignore = "slow: 1.5 × 10⁶ stars across every component and band, the window's with full tracks"]
     fn young_s_and_carbon_stars_galaxy_wide_at_milky_way_values() {
         let mut checks = Checks::default();
-        let galaxy = milky_way();
-        let t = galaxy_counts_with(&galaxy, 4_000, observe_young_and_chemical);
+        let galaxy = milky_way().with_rules(GalaxyRules::every_26_hold());
+        let rules = StellarRules::every_26_hold();
+        let t = galaxy_counts_with(&galaxy, 4_000, |inputs, ages, t| {
+            observe_young_and_chemical(inputs, ages, rules, t);
+        });
         let protostars = t.get("protostars");
         let carbon = t.get("carbon stars");
         checks.within("carbon stars", carbon, (2e4, 5e5));
@@ -1415,8 +1428,6 @@ mod tests {
     fn lbv_eruptions_galaxy_wide_under_the_enforced_limit() {
         use crate::stellar::classify::is_luminous_blue_variable;
         use crate::stellar::events::lbv::ERUPTIONS_PER_YEAR;
-        use crate::stellar::rules::StellarRules;
-        use crate::stellar::sse::TrackOptions;
         use crate::stellar::sse::wind::HdLimitRules;
         use crate::time::CLOCK_WINDOW_H;
         const N: u32 = 4_000;
