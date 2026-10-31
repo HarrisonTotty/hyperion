@@ -93,9 +93,10 @@ const ZERO_CELSIUS_K: f64 = 273.15;
 /// | Soil | everywhere else | `Soil` of the crust's entry |
 ///
 /// The last holds everywhere, so the order is total. Where the palette does not name the deciding
-/// rule's substance, as on a body whose composition is not modelled (an empty palette), the form
-/// is still classed and the entry is `None`, which a console reads as the substance Missing
-/// (`MATERIAL REGOLITH · —`; the guide, signed off in signoff-9 §17.5): never a stand-in entry.
+/// rule's substance (a field's names each crust its cells have, R09.T10.c, but perhaps no salt or
+/// deposit), the form is still classed and the entry is `None`, which a console reads as the
+/// substance Missing (`MATERIAL REGOLITH · —`; the guide, signed off in signoff-9 §17.5): never a
+/// stand-in entry.
 /// Every substance is a palette entry (decision-composition §1.8): the forms of ice are the cell's
 /// ice entry's, whatever its species; the seabed is the floor's own, the crust's, the bulk's or a
 /// `Deposit`'s, never its liquid's (signoff-9); the loose ground is the crust's, a `Deposit`'s or a

@@ -183,8 +183,10 @@ type IceEntryFn = Box<dyn Fn(&CellSite) -> u8>;
 ///
 /// [`FieldBuilder::new`] starts from a dry, airless, flat sphere with a one-month year on a
 /// circular orbit, a still climate at 250 K, no fine relief, no craters, coarse or small (a
-/// crater density of zero), and an empty palette, a composition not modelled: every other part is
-/// optional, but a world with ice or a sea names their substances in its palette.
+/// crater density of zero), and a lid of the Moon-like world's feldspathic crust, its palette's one
+/// entry, since every cell's crust names an entry (`BuildFieldError::CrustWithoutEntry`,
+/// R09.T10.c): every other part is optional, but a world with ice or a sea names their substances
+/// in its palette, and a world that names its own palette names its crusts' entries in it.
 pub struct FieldBuilder {
     body: BodyRef,
     radius: Metres,
@@ -231,17 +233,20 @@ impl std::fmt::Debug for FieldBuilder {
 impl FieldBuilder {
     /// A dry, airless, flat sphere of volumetric radius `radius`, with a one-month year on a
     /// circular orbit, a still climate at 250 K, no fine relief (a silicate crust's spectrum
-    /// anchored at zero), the reference hills on any oceanic crust ([`SeafloorSample::REFERENCE`])
-    /// and no craters: no coarse crater, and a crater density of zero, so that the synthesis draws
+    /// anchored at zero), the reference hills on any oceanic crust ([`SeafloorSample::REFERENCE`]),
+    /// a lid of feldspathic crust, its palette's one entry ([`palette`](Self::palette)), and no
+    /// craters: no coarse crater, and a crater density of zero, so that the synthesis draws
     /// no small ones either (at the Moon's gravity, `k_target` 1, on the lunar target, in a system of
     /// the Solar System's age, with no impact velocity). The radius is checked by
     /// [`build`](Self::build).
     ///
     /// # Panics
     ///
-    /// Never: its default crater contract is valid.
+    /// Never: its default crater contract is valid, and its default palette names its one
+    /// substance.
     #[must_use]
     pub fn new(radius: Metres) -> Self {
+        let (palette, crust_palette) = worlds::default_crust();
         Self {
             body: BodyRef::default(),
             radius,
@@ -265,8 +270,8 @@ impl FieldBuilder {
             season_eccentricity: 0.0,
             surface_age: Gigayears::new(4.0),
             surface_pressure: Pascals::ZERO,
-            palette: MaterialPalette::default(),
-            crust_palette: [None; 4],
+            palette,
+            crust_palette,
             main_liquid: None,
             maturity: None,
             organic_cover: None,
@@ -374,7 +379,8 @@ impl FieldBuilder {
         self
     }
 
-    /// The body's palette (empty by default): a cell with ice names its first
+    /// The body's palette, in place of the default's feldspathic crust, whose entries the crusts
+    /// name by [`crust_palette`](Self::crust_palette): a cell with ice names its first
     /// [`PaletteRole::Ice`] entry unless [`ice_entry`](Self::ice_entry) says otherwise.
     #[must_use]
     pub fn palette(mut self, palette: MaterialPalette) -> Self {
@@ -382,7 +388,8 @@ impl FieldBuilder {
         self
     }
 
-    /// The palette entry of each crust, in [`Crust`]'s code order (none by default).
+    /// The palette entry of each crust, in [`Crust`]'s code order (by default the lid's alone,
+    /// entry 0): every crust a cell has names one.
     #[must_use]
     pub fn crust_palette(mut self, entries: [Option<u8>; 4]) -> Self {
         self.crust_palette = entries;
@@ -551,9 +558,10 @@ impl FieldBuilder {
     /// - a maturity or an organic cover that is not finite or not within +0 to 1, a weathering rate
     ///   that is not finite or below +0, or a maturity without a weathering rate or a weathering
     ///   rate without a maturity;
-    /// - a crust's palette entry or a main liquid the header refuses, a cell with ice and no ice
-    ///   entry to name (none in the palette, or [`ice_entry`](Self::ice_entry)'s not an `Ice`
-    ///   entry), or a cell under water and no main liquid;
+    /// - a crust's palette entry or a main liquid the header refuses, a cell whose crust names no
+    ///   entry (R09.T10.c), a cell with ice and no ice entry to name (none in the palette, or
+    ///   [`ice_entry`](Self::ice_entry)'s not an `Ice` entry), or a cell under water and no main
+    ///   liquid;
     /// - a surface age above the crater contract's system age
     ///   ([`CraterParams::system_age`]);
     /// - an [`epoch`](Self::epoch), or a routed world's runoff, on an airless body.
@@ -1510,10 +1518,25 @@ mod tests {
                 ("Na2CO3", Deposit)
             ]
         );
+    }
+
+    /// The flat field and the single crater take the builder's default palette, its feldspathic
+    /// crust their lid's one entry, so that every cell's crust names one (R09.T10.c).
+    #[test]
+    fn the_flat_fields_name_their_lid_s_entry() {
         for world in [SyntheticWorld::Flat, SyntheticWorld::OneCrater] {
             let field = synthetic_field(world);
-            assert!(field.header().palette().is_empty(), "{world:?}");
-            assert_eq!(field.header().crust_palette(), [None; 4], "{world:?}");
+            let lid = [("feldspathic", PaletteRole::PrimaryCrust)];
+            assert_eq!(keys(&field), lid, "{world:?}");
+            assert_eq!(
+                field.header().crust_palette(),
+                [None, None, Some(0), None],
+                "{world:?}"
+            );
+            assert!(
+                field.synthesis().iter().all(|c| c.crust == Crust::Lid),
+                "{world:?}"
+            );
         }
     }
 

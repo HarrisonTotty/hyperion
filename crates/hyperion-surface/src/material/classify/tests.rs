@@ -317,10 +317,10 @@ fn material_the_cut_is_the_share_s_quantile() {
 // The synthetic worlds.
 // ---------------------------------------------------------------------------------------------
 
-/// On every synthetic world each material's entry is in its palette, a body with an empty palette
-/// has none, and every answer is the same bits from a fresh cache and a shared one, in any order;
-/// and no palette source writes the Lambert code, 3, which only a form chooses (main's ruling on
-/// R10.T1.a's follow-up: a source writes 0 to 2).
+/// On every synthetic world each material's entry is in its palette, and only a body with an empty
+/// palette, which no field has since R09.T10.c, has none, and every answer is the same bits from a
+/// fresh cache and a shared one, in any order; and no palette source writes the Lambert code, 3,
+/// which only a form chooses (main's ruling on R10.T1.a's follow-up: a source writes 0 to 2).
 #[test]
 fn material_on_the_synthetic_worlds_names_its_palette_and_is_order_independent() {
     for &w in SyntheticWorld::ALL {
@@ -1239,14 +1239,16 @@ fn material_aridity_takes_koppen_geiger_s_seasons() {
 /// Each rule's entry chain: the seabed falls back from the crust to the bulk and then to a deposit;
 /// the regolith from the crust to a deposit that is not a salt, then to a cover; sand and dust take
 /// such a deposit first, then a cover, then the crust; a salt deposit is the last resort of both;
-/// and the salt is a salt-family deposit first.
+/// and the salt is a salt-family deposit first. The chains are a header's: one whose crust
+/// palette names no lid's entry has no field (R09.T10.c), but its chains still fall back.
 #[test]
 fn material_each_rule_names_its_entry_chain() {
-    let field_of = |entries: Vec<PaletteEntry>, crust: Option<u8>| {
-        FieldBuilder::new(Metres::new(1.0e6))
-            .palette(palette(entries))
-            .crust_palette([None, None, crust, None])
-            .build()
+    let base = FieldBuilder::new(Metres::new(1.0e6)).build();
+    let header_of = |entries: Vec<PaletteEntry>, crust: Option<u8>| {
+        let mut parts = base.header().parts().clone();
+        parts.palette = palette(entries);
+        parts.crust_palette = [None, None, crust, None];
+        FieldHeader::new(parts).expect("the header's parts are valid")
     };
     let deposit = entry(
         "mars_dust",
@@ -1278,7 +1280,7 @@ fn material_each_rule_names_its_entry_chain() {
     );
     // A crust, a cover and a dust deposit: the crust for the floor and the regolith, the deposit
     // for sand and dust.
-    let f = field_of(
+    let f = header_of(
         vec![
             basalt(PaletteRole::SecondaryCrust),
             cover.clone(),
@@ -1286,22 +1288,22 @@ fn material_each_rule_names_its_entry_chain() {
         ],
         Some(0),
     );
-    let e = Entries::of(f.header(), Crust::Lid);
+    let e = Entries::of(&f, Crust::Lid);
     assert_eq!(
         (e.crust, e.floor, e.regolith, e.loose),
         (Some(0), Some(0), Some(0), Some(2))
     );
     assert_eq!((e.salt, e.organic_cover), (None, Some(1)));
     // No crust's entry: the cover, then the bulk.
-    let f = field_of(vec![cover, bulk], None);
-    let e = Entries::of(f.header(), Crust::Lid);
+    let f = header_of(vec![cover, bulk], None);
+    let e = Entries::of(&f, Crust::Lid);
     assert_eq!(
         (e.crust, e.floor, e.regolith, e.loose),
         (None, Some(1), Some(0), Some(0))
     );
     // A salt deposit and a dust deposit, the salt first by key: the salt is the salt, and sand
     // and dust the deposit that is not a salt.
-    let f = field_of(
+    let f = header_of(
         vec![
             basalt(PaletteRole::SecondaryCrust),
             salt.clone(),
@@ -1309,15 +1311,15 @@ fn material_each_rule_names_its_entry_chain() {
         ],
         Some(0),
     );
-    let e = Entries::of(f.header(), Crust::Lid);
+    let e = Entries::of(&f, Crust::Lid);
     assert_eq!((e.salt, e.loose, e.floor), (Some(1), Some(2), Some(0)));
     // A salt deposit alone: no crust's entry, so the regolith and the loose ground fall to it.
-    let f = field_of(vec![salt], None);
-    let e = Entries::of(f.header(), Crust::Lid);
+    let f = header_of(vec![salt], None);
+    let e = Entries::of(&f, Crust::Lid);
     assert_eq!((e.salt, e.regolith, e.loose), (Some(0), Some(0), Some(0)));
     // A palette with only a deposit: the floor falls to it.
-    let f = field_of(vec![deposit], None);
-    let e = Entries::of(f.header(), Crust::Lid);
+    let f = header_of(vec![deposit], None);
+    let e = Entries::of(&f, Crust::Lid);
     assert_eq!((e.floor, e.regolith, e.loose), (Some(0), Some(0), Some(0)));
 }
 

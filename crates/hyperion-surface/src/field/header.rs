@@ -187,12 +187,15 @@ pub struct FieldHeaderParts {
     /// - where the palette names no substance for the ground.
     pub albedo_scale: Option<f64>,
     /// The substances the field names, their values resolved by the server from plan 14's
-    /// registry (decision-composition §1.7); empty for a body whose composition is not modelled.
+    /// registry (decision-composition §1.7). A header's may be empty, a composition not modelled,
+    /// but a field's is not: each crust its cells have names an entry (`crust_palette`).
     pub palette: MaterialPalette,
     /// The palette entry of each [`Crust`] variant, in code order (continental, oceanic, lid,
     /// province), whose lithology it names, or `None` where the field names none: an entry of a
     /// role a [`Crust`] variant may take ([`PaletteRole::is_crust`]: a crust's, a province's or an
-    /// undifferentiated body's bulk material).
+    /// undifferentiated body's bulk material). A field has no cell of a crust that names none
+    /// ([`BuildFieldError::CrustWithoutEntry`](super::BuildFieldError::CrustWithoutEntry),
+    /// R09.T10.c).
     pub crust_palette: [Option<u8>; 4],
     /// The palette entry of the body's main liquid, its sea's, or `None`: a
     /// [`PaletteRole::Liquid`] entry.

@@ -60,8 +60,8 @@ CeresLike level 5
   clamped high = 0x0000000000000000  # 0.0
   unnamed = 0x0000000000000000  # 0.0
 Flat level 6
-  Regolith - = 0x3ff0000000000000  # 1.0
+  Regolith 0 = 0x3ff0000000000000  # 1.0
   no analogue
 OneCrater level 6
-  Regolith - = 0x3ff0000000000000  # 1.0
+  Regolith 0 = 0x3ff0000000000000  # 1.0
   no analogue

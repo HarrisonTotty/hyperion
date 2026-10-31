@@ -356,7 +356,8 @@ impl PaletteEntry {
 /// §1.7).
 ///
 /// A cell, the header's `crust_palette` and its `main_liquid` name an entry by its index here. An
-/// empty palette is a body whose composition is not modelled, which a client labels so.
+/// empty palette is a body whose composition is not modelled, which has no field, since each crust
+/// a field's cells have names an entry (R09.T10.c).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MaterialPalette {
     entries: Vec<PaletteEntry>,

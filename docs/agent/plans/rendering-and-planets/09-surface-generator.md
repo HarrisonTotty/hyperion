@@ -2709,8 +2709,8 @@ _Built 2026-10-09_ (`5af6c08a`, then `a7b6fb94` and `c1ba7c9c`).
     reference world builds a valid field.
   - _Moves:_ nothing, since no reference golden exists before T16.
   - _Accept:_ `cargo test -p hyperion-sim planetary::surface`.
-  - _Built 2026-10-12_ (`2f63eb3a`). Left: the record's refusal of a cell whose crust has no palette
-    entry, handed to T12.a and not yet built (the RM5 close-out's list).
+  - _Built 2026-10-12_ (`2f63eb3a`). The field's refusal of a cell whose crust has no palette entry
+    (`BuildFieldError::CrustWithoutEntry`), handed to T12.a, _built 2026-10-30_.
 
 - **R09.T10.d An undifferentiated body's bulk, the lid, and the highland and iron-rich rows**
   (science-composition-crusts.md §1, §2, §5 and §7; after T2's follow-up D, R09.T2.d, and T10.c,

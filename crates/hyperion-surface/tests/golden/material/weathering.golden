@@ -685,3 +685,7 @@ CeresLike 1 H2O m 0.5: 0x3feee147ae147ae1 0x3feee147ae147ae1 0x3feee147ae147ae1
 CeresLike 1 H2O m 1: 0x3feee147ae147ae1 0x3feee147ae147ae1 0x3feee147ae147ae1
 CeresLike 2 Na2CO3 m 0.5: 0x3fe4cccccccccccd 0x3fe4cccccccccccd 0x3fe4cccccccccccd
 CeresLike 2 Na2CO3 m 1: 0x3fe4cccccccccccd 0x3fe4cccccccccccd 0x3fe4cccccccccccd
+Flat 0 feldspathic m 0.5: 0x3fbb1ac66ef0a287 0x3fc031830251b285 0x3fc0ff48f3a7032b
+Flat 0 feldspathic m 1: 0x3fb3815dc75ac0ef 0x3fb837edf9558cd7 0x3fb9de1f45dd6ecc
+OneCrater 0 feldspathic m 0.5: 0x3fbb1ac66ef0a287 0x3fc031830251b285 0x3fc0ff48f3a7032b
+OneCrater 0 feldspathic m 1: 0x3fb3815dc75ac0ef 0x3fb837edf9558cd7 0x3fb9de1f45dd6ecc

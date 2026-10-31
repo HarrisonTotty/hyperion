@@ -428,6 +428,13 @@ pub enum BuildFieldError {
         /// The cell's index.
         cell: u32,
     },
+    /// A cell's [`Crust`] is a variant the header's crust palette names no entry for
+    /// ([`FieldHeaderParts::crust_palette`]), so that nothing says what its ground is made of
+    /// (R09.T10.c).
+    CrustWithoutEntry {
+        /// The cell's index.
+        cell: u32,
+    },
     /// A cell sheds runoff, or its catchment does, on an airless body, whose header's surface
     /// pressure is exactly 0 Pa (`FieldHeader::is_airless`): such a body has no wet epoch in this
     /// generator, so its coarse pass runs no fluvial step, and the level bound counts no channels
@@ -517,6 +524,9 @@ impl std::fmt::Display for BuildFieldError {
             Self::LiquidWithoutEntry { cell } => {
                 write!(f, "cell {cell} is under water but names no liquid entry")
             }
+            Self::CrustWithoutEntry { cell } => {
+                write!(f, "cell {cell}'s crust has no entry in the palette")
+            }
             Self::RunoffWithoutAir { cell } => write!(
                 f,
                 "cell {cell} or its catchment sheds runoff on an airless body, of surface pressure 0 \
@@ -575,8 +585,8 @@ impl CoarseField {
     /// (water below the ground, a boundary without a distance, a sea floor byte with no hill
     /// relief on oceanic crust or any sea floor on another crust, a month outside the year, or a
     /// one-month year with an anomaly), of the header's palette (a substance past it or of
-    /// another role, an ice share without an ice entry, water without a liquid entry) or of its
-    /// air (runoff on an airless body), a crater is
+    /// another role, an ice share without an ice entry, water without a liquid entry, a crust it
+    /// names no entry for) or of its air (runoff on an airless body), a crater is
     /// not a valid coarse crater of this field or is not after its predecessor, or the reaches are
     /// too many to index. The palette's own rules (at most 15 entries, sorted, a crust's entry of a
     /// role a [`Crust`] variant may take) are the header's ([`FieldHeader::new`],
@@ -605,6 +615,7 @@ impl CoarseField {
         for (cell, record) in (0_u32..).zip(&synthesis) {
             check_synthesis_cell(cell, record)?;
             check_substances(cell, record, header.palette())?;
+            check_crust(cell, record, &header)?;
             check_runoff(cell, record, &header)?;
         }
         for (cell, record) in (0_u32..).zip(&climate) {
@@ -786,6 +797,24 @@ pub(crate) fn check_substances(
     }
     if record.is_under_water() && liquid.is_none() {
         return Err(BuildFieldError::LiquidWithoutEntry { cell });
+    }
+    Ok(())
+}
+
+/// Checks that `header`'s crust palette names an entry for the crust of the synthesis record of
+/// cell `cell` ([`FieldHeader::crust_entry`]), the lithology a renderer gives its ground
+/// (R09.T10.c).
+///
+/// # Errors
+///
+/// [`BuildFieldError::CrustWithoutEntry`].
+pub(crate) fn check_crust(
+    cell: u32,
+    record: &SynthesisCell,
+    header: &FieldHeader,
+) -> Result<(), BuildFieldError> {
+    if header.crust_entry(record.crust).is_none() {
+        return Err(BuildFieldError::CrustWithoutEntry { cell });
     }
     Ok(())
 }
@@ -1254,8 +1283,14 @@ mod tests {
             seafloor(15, Crust::Oceanic, SynthesisCell::NO_SEAFLOOR),
             Err(BuildFieldError::Seafloor { cell: 15 })
         );
+        // A sea floor byte that keeps the rule passes it, and the cell is refused for its crust,
+        // which the flat world's palette names no entry for (R09.T10.c).
         for byte in [0x10, 0x1F, 0xF0, 0xFF] {
-            assert!(seafloor(16, Crust::Oceanic, byte).is_ok(), "{byte:#04x}");
+            assert_eq!(
+                seafloor(16, Crust::Oceanic, byte),
+                Err(BuildFieldError::CrustWithoutEntry { cell: 16 }),
+                "{byte:#04x}"
+            );
         }
         // The flat world has a one-month year: a second month is outside it.
         let mut seasons = climate.clone();
@@ -1485,6 +1520,84 @@ mod tests {
         assert_eq!(
             build(&|c| c.water_surface_mm = c.elevation_mm + 1_000),
             Err(BuildFieldError::LiquidWithoutEntry { cell })
+        );
+    }
+
+    /// A cell's crust is one the header's crust palette names an entry for (R09.T10.c): on a
+    /// mobile lid, the Earth-like world, a lid's crust or a province is refused, and on a stagnant
+    /// lid a continental or oceanic crust, or a province where the palette names none (the flat
+    /// world); every crust with an entry is accepted, and a header that names none has no field.
+    #[test]
+    fn a_field_refuses_a_crust_its_palette_names_no_entry_for() {
+        // Each world's crusts without an entry, in code order.
+        let worlds = [
+            (
+                SyntheticWorld::EarthLike,
+                &[Crust::Lid, Crust::Province][..],
+            ),
+            (
+                SyntheticWorld::MoonLike,
+                &[Crust::Continental, Crust::Oceanic],
+            ),
+            (
+                SyntheticWorld::CeresLike,
+                &[Crust::Continental, Crust::Oceanic],
+            ),
+            (
+                SyntheticWorld::Flat,
+                &[Crust::Continental, Crust::Oceanic, Crust::Province],
+            ),
+        ];
+        for (world, without) in worlds {
+            let field = synthetic_field(world);
+            let header = field.header().clone();
+            let build = |crust: Crust| {
+                let mut synthesis = field.synthesis().to_vec();
+                let cell = &mut synthesis[11];
+                cell.crust = crust;
+                // The sea floor's rule holds whichever the crust, so that the crust's is the one
+                // tested.
+                cell.seafloor = match crust {
+                    Crust::Oceanic => SynthesisCell::pack_seafloor(1, 0).unwrap(),
+                    Crust::Continental | Crust::Lid | Crust::Province => SynthesisCell::NO_SEAFLOOR,
+                };
+                CoarseField::new(
+                    header.clone(),
+                    synthesis,
+                    field.climate_layer().to_vec(),
+                    field.craters().to_vec(),
+                )
+            };
+            let mut refused = Vec::new();
+            for &crust in Crust::ALL {
+                if let Err(error) = build(crust) {
+                    assert_eq!(
+                        error,
+                        BuildFieldError::CrustWithoutEntry { cell: 11 },
+                        "{world:?}, {crust:?}"
+                    );
+                    assert_eq!(
+                        error.to_string(),
+                        "cell 11's crust has no entry in the palette"
+                    );
+                    refused.push(crust);
+                }
+            }
+            assert_eq!(refused, without, "{world:?}");
+        }
+        // A palette that names no crust's entry, a composition not modelled, has no field.
+        let flat = synthetic_field(SyntheticWorld::Flat);
+        let mut parts = flat.header().parts().clone();
+        parts.palette = MaterialPalette::default();
+        parts.crust_palette = [None; 4];
+        assert_eq!(
+            CoarseField::new(
+                FieldHeader::new(parts).unwrap(),
+                flat.synthesis().to_vec(),
+                flat.climate_layer().to_vec(),
+                vec![],
+            ),
+            Err(BuildFieldError::CrustWithoutEntry { cell: 0 })
         );
     }
 

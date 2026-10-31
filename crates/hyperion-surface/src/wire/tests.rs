@@ -1114,13 +1114,21 @@ fn a_wire_partial_field_refuses_blocks_that_are_not_its_fields() {
         refuse(&breezy),
         InsertBlockError::Record(BuildFieldError::MonthOutsideYear { cell })
     );
-    // The one-crater world's palette is empty, so no cell of it has ice.
+    // The one-crater world's palette has no ice, so no cell of it has ice.
     let mut icy = blocks[0].clone();
     icy.cells[4].ice = 9;
     let cell = icy.cover.cells().nth(4).unwrap();
     assert_eq!(
         refuse(&icy),
         InsertBlockError::Record(BuildFieldError::IceWithoutEntry { cell })
+    );
+    // Its palette names a lid's crust alone, so no cell of it is a province (R09.T10.c).
+    let mut province = blocks[0].clone();
+    province.cells[4].crust = Crust::Province;
+    let cell = province.cover.cells().nth(4).unwrap();
+    assert_eq!(
+        refuse(&province),
+        InsertBlockError::Record(BuildFieldError::CrustWithoutEntry { cell })
     );
     // The one-crater world is airless, so no cell of it sheds runoff (R09.T8.d).
     let mut wet = blocks[0].clone();

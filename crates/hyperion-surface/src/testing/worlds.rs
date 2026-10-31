@@ -20,7 +20,8 @@
 //! and impact velocities are the reference worlds' (R09.T7.e): non-porous at the rock class's
 //! 2,550 kg m⁻³ (Ceres's crust at 1,287), stony projectiles of 3,000, the Solar System's age, and
 //! P14.T48.f's velocities, so the Moon-like world sits at the diameter map's lunar reference and
-//! the others are mapped. The flat field and the single crater have an empty palette. The four
+//! the others are mapped. The flat field and the single crater have the builder's default palette,
+//! the Moon-like world's feldspathic crust as their lid and its one entry (R09.T10.c). The four
 //! bodies' structural spectra
 //! are their crust classes' anchored laws (`decision-r09-t5.md` item 3): the Earth-like world's a
 //! mobile lid's, the others a rocky stagnant lid's (Ceres-like as the reference Ceres's rock); and
@@ -1258,6 +1259,16 @@ fn ceres_like() -> CoarseField {
             20,
         );
     spiral_craters(builder, 25, (55e3, 150e3), (1.0, 4.0)).build()
+}
+
+/// The palette and the crust palette of a field whose builder names none ([`FieldBuilder::new`]):
+/// the Moon-like world's feldspathic crust, a primary one, the palette's one entry and the lid's,
+/// so that every cell of the builder's default crust names an entry (R09.T10.c).
+#[must_use]
+pub(super) fn default_crust() -> (MaterialPalette, [Option<u8>; 4]) {
+    let highlands = palette(vec![FELDSPATHIC.entry(PaletteRole::PrimaryCrust)]);
+    let lid = index(&highlands, &FELDSPATHIC, PaletteRole::PrimaryCrust);
+    (highlands, [None, None, Some(lid), None])
 }
 
 pub(super) fn flat_builder(body_index: u16) -> FieldBuilder {

@@ -1066,7 +1066,51 @@ maturity_at one_crater: <face> <u> <v> m_local
 2 0xbfe32263d49e5401 0xbfc6f611658acb34 0x3feffff58437ff06
 2 0xbfe2ac8c0af40fd8 0xbfc668a80d24dfd1 0x3feffff58437ff06
 exposed one_crater: <class> <entry> <maturity>: A_N in B, V and R
-  no palette entries
+Bedrock 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+Bedrock 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+Bedrock 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+Regolith 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+Regolith 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+Regolith 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+Soil 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+Soil 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+Soil 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+Sand 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+Sand 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+Sand 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+Sediment 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+Sediment 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+Sediment 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+VolcanicRock 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+VolcanicRock 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+VolcanicRock 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+Melt 0 m_body: 0x3fc999999999999a 0x3fc999999999999a 0x3fc999999999999a
+Melt 0 0.3: 0x3fc999999999999a 0x3fc999999999999a 0x3fc999999999999a
+Melt 0 0.7: 0x3fc999999999999a 0x3fc999999999999a 0x3fc999999999999a
+Glacier 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+Glacier 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+Glacier 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+Snow 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+Snow 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+Snow 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+SeaIce 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+SeaIce 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+SeaIce 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+Frost 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+Frost 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+Frost 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+OrganicSediment 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+OrganicSediment 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+OrganicSediment 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+Seabed 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+Seabed 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+Seabed 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+Evaporite 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+Evaporite 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+Evaporite 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
+Dust 0 m_body: 0x3fb38160dc3e8256 0x3fb837f1baa5a629 0x3fb9de23222e4fd1
+Dust 0 0.3: 0x3fc08f7fd416a5e0 0x3fc2ed48f5e75ce4 0x3fc397eef41cd810
+Dust 0 0.7: 0x3fb73357b17a81e3 0x3fbc6b4341818fa1 0x3fbe1be88a417dc1
 cover pluto_like: <class> <entry> <cover>: A_N in B, V and R
 Bedrock 0 0: 0x3fe0000000000000 0x3fe0000000000000 0x3fe0000000000000
 Bedrock 0 0.5: 0x3fe0000000000000 0x3fe0000000000000 0x3fe0000000000000

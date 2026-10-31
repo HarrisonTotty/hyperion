@@ -17,8 +17,9 @@ use hyperion_surface::cube::{Face, MAX_LEVEL, PatchKey, unit_dir, xyz_to_face_uv
 use hyperion_surface::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseField, CoarseLevel, Cover, Crust,
     FieldHeader, FieldHeaderParts, FieldView, FlowDirection, LogArea, LogIncision,
-    LogPrecipitation, LogRunoff, LogSteepness, MaterialPalette, PrecipitationSource, SurfaceClass,
-    SynthesisCell, Wind, boundary_diameter, cell_index, coarse_level, month_at, month_blend,
+    LogPrecipitation, LogRunoff, LogSteepness, MaterialPalette, MechanicsFamily, PaletteEntry,
+    PaletteRole, PrecipitationSource, SurfaceClass, SynthesisCell, Wind, boundary_diameter,
+    cell_index, coarse_level, month_at, month_blend,
 };
 use hyperion_surface::geometry::{finest_level, vertex_spacing};
 use hyperion_surface::noise::{LatticeCache, NoiseKey, Octave, gradient_noise};
@@ -26,6 +27,7 @@ use hyperion_surface::num;
 use hyperion_surface::patch::vertex::{PatchTerms, face_difference_morph_f32};
 use hyperion_surface::patch::{BakeOptions, NormalScale, VertexPath, bake_patch};
 use hyperion_surface::spheroid::Spheroid;
+use hyperion_surface::substance_key::SubstanceKey;
 use hyperion_surface::synth::channels::{
     Channels, hack_area, head_length, main_stream_length, tributary_rise,
 };
@@ -220,6 +222,23 @@ fn a_cover_past_its_level_has_no_margin() {
     let _ = Cover::from_cells([6_144]).with_margin(CoarseLevel::MIN, 5);
 }
 
+/// The palette of [`level_five_field`]'s lid, its one entry, so that every cell's crust names one
+/// (R09.T10.c): a phyllosilicate rock with illustrative values, as Ceres's crust.
+fn lid_palette() -> MaterialPalette {
+    MaterialPalette::new(vec![PaletteEntry {
+        substance: SubstanceKey::new("phyllosilicate").unwrap(),
+        role: PaletteRole::PrimaryCrust,
+        normal_albedo_bvr: [0.1; 3],
+        phase_row: 0,
+        grain_density_kg_m3: 2_500.0,
+        transition: Kelvin::new(1_400.0),
+        mechanics: MechanicsFamily::Silicate,
+        liquid: None,
+        feo_mass_fraction: None,
+    }])
+    .unwrap()
+}
+
 /// A dry, flat, airless field of a Ceres-sized body at level 5, with no crater, built from the
 /// public types alone (this binary sees no `testing` feature).
 fn level_five_field() -> CoarseField {
@@ -285,8 +304,8 @@ fn level_five_field_weathered(
             Pascals::new(610.0)
         },
         albedo_scale: None,
-        palette: MaterialPalette::default(),
-        crust_palette: [None; 4],
+        palette: lid_palette(),
+        crust_palette: [None, None, Some(0), None],
         main_liquid: None,
         maturity,
         organic_cover: None,

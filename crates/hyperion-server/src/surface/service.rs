@@ -2026,21 +2026,9 @@ mod tests {
         timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 
-    /// Whether a test field's palette names its ground.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum Ground {
-        /// Every crust a silicate of normal albedo 0.1.
-        Named,
-        /// An empty palette, a composition not modelled.
-        Unnamed,
-    }
-
-    /// A small field at surface pressure `pressure`, its ground named or not.
-    fn small_field(pressure: Pascals, ground: Ground) -> CoarseField {
+    /// A small field at surface pressure `pressure`, every crust a silicate of normal albedo 0.1.
+    fn small_field(pressure: Pascals) -> CoarseField {
         let builder = FieldBuilder::new(Metres::new(300e3)).surface_pressure(pressure);
-        if ground == Ground::Unnamed {
-            return builder.build();
-        }
         let crust = PaletteEntry {
             substance: SubstanceKey::new("basalt").unwrap(),
             role: PaletteRole::PrimaryCrust,
@@ -2088,8 +2076,9 @@ mod tests {
     /// `albedo_scale` of the field's class fractions under the body's detail seed, for the
     /// photometry's geometric albedo. It is `None` from 30 kPa up (an Earth, and a thick snowball,
     /// whose template is the ground's: recorded for plan 14), under a cloud deck's template at any
-    /// pressure (a runaway greenhouse at 1 kPa takes Venus's), where the photometry is not
-    /// modelled, withheld or not applicable, and where the palette names no substance.
+    /// pressure (a runaway greenhouse at 1 kPa takes Venus's), and where the photometry is not
+    /// modelled, withheld or not applicable. A palette that names no substance has no field, since
+    /// every cell's crust names an entry (R09.T10.c).
     #[test]
     fn a_field_s_albedo_scale_is_solved_only_where_the_ground_is_what_p_measures() {
         let detail = detail_seed(Seed::new(SEED), system().1[0]);
@@ -2132,7 +2121,7 @@ mod tests {
             let at = format!("{state:?} at {pressure} Pa");
             let photometry = photometry_in(state, Pascals::new(pressure));
             assert_eq!(photometry.template(), template, "{at}");
-            let field = small_field(Pascals::new(pressure), Ground::Named);
+            let field = small_field(Pascals::new(pressure));
             let scale = field_albedo_scale(&field, &Section::Ok(photometry), detail);
             if scaled {
                 let p = photometry.geometric_albedo();
@@ -2150,8 +2139,7 @@ mod tests {
                 );
             }
         }
-        let airless = Section::Ok(photometry_in(SurfaceState::Airless, Pascals::ZERO));
-        let field = small_field(Pascals::ZERO, Ground::Named);
+        let field = small_field(Pascals::ZERO);
         for section in [
             Section::NotModelled,
             Section::NotResolved,
@@ -2163,16 +2151,6 @@ mod tests {
                 "{section:?}"
             );
         }
-        assert_eq!(
-            field_albedo_scale(
-                &small_field(Pascals::ZERO, Ground::Unnamed),
-                &airless,
-                detail
-            )
-            .map(f64::to_bits),
-            None,
-            "a palette that names nothing"
-        );
     }
 
     /// A small airless field whose one crust is an iron-bearing basalt (`FeO_T` 0.16), at

@@ -2978,7 +2978,9 @@ fn worker_ground_readout_takes_the_month_s_temperature_on_glacier_ice() {
 }
 
 /// R10.T12: a one-month year reads its one month whatever season is given, or none: the flat
-/// world's ground, whose palette names no substance, so that neither property is computed.
+/// world's ground, its feldspathic lid's regolith (R09.T10.c), has the one month's temperature
+/// and the same material and properties at every season, its friction a soil's, on no
+/// temperature.
 #[test]
 fn worker_ground_readout_reads_a_one_month_year_s_month_with_no_season() {
     let field = world(SyntheticWorld::Flat);
@@ -3013,13 +3015,25 @@ fn worker_ground_readout_reads_a_one_month_year_s_month_with_no_season() {
             properties.temperature().map(|k| bits(k.value())),
             Some(bits(t))
         );
-        assert_eq!(ground.material().properties(), None);
+        assert_eq!(ground.material(), none.material());
+        let capacity = |p: &GroundProperties| p.bearing_capacity().map(|c| bits(c.value()));
+        assert_eq!(capacity(properties), capacity(none.properties()));
         assert_eq!(
-            (properties.bearing_capacity(), properties.friction()),
-            (None, None)
+            properties.friction().map(bits),
+            none.properties().friction().map(bits)
         );
         assert!(!properties.friction_on_temperature());
     }
+    let ground = none.material().ground();
+    assert_eq!(
+        (ground.class(), ground.entry()),
+        (MaterialClass::Regolith, Some(0))
+    );
+    assert!(
+        none.material().properties().is_some(),
+        "{:?}",
+        none.material()
+    );
 }
 
 // ---- R10.T1.c's client half: the albedo nodes and the class map's maturity

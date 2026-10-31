@@ -302,8 +302,8 @@ fn pass_with(
 mod tests {
     use super::*;
     use hyperion_surface::field::{
-        BoundaryKind, ClimateModelKind, Cover, CoverRange, CraterState, FieldView, ResolutionCode,
-        SurfaceClass, SurfaceForm, SynthesisCell,
+        BoundaryKind, ClimateModelKind, Cover, CoverRange, CraterState, Crust, FieldView,
+        ResolutionCode, SurfaceClass, SurfaceForm, SynthesisCell,
     };
     use hyperion_surface::wire::encode_payload;
     use hyperion_testkit::order::assert_order_independent;
@@ -375,6 +375,105 @@ mod tests {
         ]);
     }
 
+    /// Each cell's crust under `seed` as the pass leaves it on the body of `inputs`, from the only
+    /// steps that write one, the plates and the relief's first entry (whose provinces make their
+    /// cells `Province`), at a small part of the pass's cost: R09.T10.c's checks.
+    /// [`the_pass_yields_a_valid_field_twice_with_identical_bytes`] holds the later steps to them.
+    fn crusts_of(seed: SurfaceSeed, inputs: &CoarseInputs) -> Vec<Crust> {
+        let level = coarse_level(inputs.radius());
+        let grid = CellGraph::for_field(level);
+        let climate_grid = CellGraph::for_climate(level);
+        let pass = Pass::new(seed, inputs, &grid, &climate_grid);
+        let mut working = Working::initial(&pass);
+        steps::plates::run(&pass, &mut working);
+        steps::relief::run(&pass, &mut working);
+        working.cells.iter().map(|cell| cell.crust).collect()
+    }
+
+    /// How many cells of the body of `inputs` under `seed` have a crust ([`crusts_of`]) that the
+    /// inputs' crust palette, which the field's header carries, names no entry for.
+    fn crusts_lacking_entries(seed: SurfaceSeed, inputs: &CoarseInputs) -> usize {
+        let palette = inputs.crust_palette();
+        crusts_of(seed, inputs)
+            .into_iter()
+            .filter(|&crust| palette[usize::from(u8::from(crust))].is_none())
+            .count()
+    }
+
+    /// No cell of a reference world has a crust its palette names no entry for (R09.T10.c), before
+    /// any field is built: every one of the six sample worlds R09.T16's goldens pin, under
+    /// `reference::SEED`.
+    #[test]
+    fn no_reference_world_s_cell_lacks_its_crust_s_entry() {
+        for (name, inputs) in [
+            ("earth_like", reference::earth_like()),
+            ("mars_like", reference::mars_like()),
+            ("moon_like", reference::moon_like()),
+            ("ceres_like", reference::ceres_like()),
+            ("europa_like", reference::europa_like()),
+            ("locked_earth_like", reference::locked_earth_like()),
+        ] {
+            assert_eq!(
+                crusts_lacking_entries(reference::SEED, &inputs),
+                0,
+                "{name}"
+            );
+        }
+    }
+
+    /// No cell of a generated body's surface has a crust its palette names no entry for
+    /// (R09.T10.c), which `CoarseField::new` refuses (`BuildFieldError::CrustWithoutEntry`), so
+    /// that the pass would panic on it: on every body of the 400 sample systems
+    /// (`system::tests::whole`) that [`CoarseInputs::for_body`] reads, under its own surface seed,
+    /// each cell's crust from [`crusts_of`] names an entry of its inputs' crust palette
+    /// ([`crusts_lacking_entries`]). A body whose cells did not would be a generation bug, named
+    /// with its count.
+    #[test]
+    #[ignore = "slow: the crust steps of the 5,963 bodies the 400 sample systems' records read, \
+                about 470 s on four threads in the test profile, 1,800 s on one"]
+    fn no_generated_cell_lacks_its_crust_s_entry() {
+        let systems = crate::planetary::system::tests::whole();
+        let shares = hyperion_testkit::threads::in_shares(systems.len(), 4, |k| {
+            let (ctx, system) = &systems[k];
+            let snapshot = system.snapshot_at(ctx, RECORD_TIME);
+            let records = snapshot.bodies();
+            let (mut read, mut lacking) = (0_usize, Vec::new());
+            for record in records {
+                let planet = CoarseInputs::planet_of(record).map(|index| {
+                    records
+                        .iter()
+                        .find(|r| r.index() == index)
+                        .expect("a moon's planet is a body of its system")
+                });
+                let Ok(inputs) = CoarseInputs::for_body(record, planet, ctx) else {
+                    continue;
+                };
+                let seed = system
+                    .surface_seed(record.index())
+                    .expect("a body of its system")
+                    .expect("a body with a surface has a surface seed");
+                let count = crusts_lacking_entries(seed, &inputs);
+                read += 1;
+                if count > 0 {
+                    lacking.push((record.index().body_id(ctx.id()), count));
+                }
+            }
+            (read, lacking)
+        });
+        let read: usize = shares.iter().map(|(n, _)| n).sum();
+        let lacking: Vec<_> = shares.into_iter().flat_map(|(_, l)| l).collect();
+        eprintln!(
+            "{read} generated bodies read, {} with cells lacking their crust's entry",
+            lacking.len()
+        );
+        assert!(read > 1_000, "{read} bodies read");
+        assert_eq!(
+            lacking,
+            [],
+            "bodies, with their cells lacking their crust's entry"
+        );
+    }
+
     /// The whole field's payload, every cell surveyed at the finest code.
     fn bytes(field: &CoarseField) -> Vec<u8> {
         let count = field.header().level().cell_count();
@@ -385,10 +484,12 @@ mod tests {
     }
 
     /// Each world's pass, run twice (the second through [`coarse_pass_with_solves`]), yields the
-    /// same field and the same payload, its header carrying the inputs; and the small Earth's field keeps reaching the steps only the Earth
-    /// reaches: a sea and land, a plate boundary that is not a transform, the energy-balance model,
-    /// a main liquid and rain (decision-r09-t13-test-cost §3.2). The reference Earth's level 8
-    /// is held by `reference`'s `the_reference_worlds_are_the_bodies_they_name`.
+    /// same field and the same payload, its header carrying the inputs and its cells' crusts those
+    /// [`crusts_of`] gives (R09.T10.c); and the small Earth's field keeps
+    /// reaching the steps only the Earth reaches: a sea and land, a plate boundary that is not a
+    /// transform, the energy-balance model, a main liquid and rain (decision-r09-t13-test-cost
+    /// §3.2). The reference Earth's level 8 is held by `reference`'s
+    /// `the_reference_worlds_are_the_bodies_they_name`.
     #[test]
     fn the_pass_yields_a_valid_field_twice_with_identical_bytes() {
         let mut small_earth_field = None;
@@ -421,6 +522,13 @@ mod tests {
                 "{name}"
             );
             assert_eq!(first.header().main_liquid(), inputs.main_liquid(), "{name}");
+            // R09.T10.c: no step after the plates and the relief's first entry moves a crust.
+            let crusts: Vec<Crust> = first.synthesis().iter().map(|c| c.crust).collect();
+            assert_eq!(
+                crusts,
+                crusts_of(reference::SEED, &inputs),
+                "{name}'s crusts are its crust steps'"
+            );
             // R09.T15's classes and crater state reach every cell (decision-r09-t15-classes §5).
             assert!(
                 first.synthesis().iter().all(|cell| {
