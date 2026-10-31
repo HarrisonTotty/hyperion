@@ -429,9 +429,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///
 /// The holds, each with its switch:
 ///
-/// - the molten decks', `MOLTEN_DECKS_VERSION` (P14.T49.p), at `MoltenDecksRules::Molten` through
-///   `with_molten_decks`: the molten refractories' and salts' stand-in index files and the molten
-///   salts' densities;
 /// - the passes' superlinear root, `SECANT_ROOT_VERSION` (P14.T51.l), at `PassRoot::Secant`
 ///   through `with_pass_root`: a bracketed body's secant steps, a detected 2-cycle its own bracket.
 ///
@@ -442,8 +439,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 #[cfg(test)]
 pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::passes::{PassRoot, with_pass_root};
-    use crate::substance::aerosol::{MoltenDecksRules, with_molten_decks};
-    let run = move || with_molten_decks(MoltenDecksRules::Molten, run);
     with_pass_root(PassRoot::Secant, run)
 }
 
@@ -743,25 +738,6 @@ mod tests {
             synthetic_star(id, SolarMasses::new(-1.0), fe_h, age),
             Err(BuildSystemContextError::MassOutsideRange { star: 0, .. })
         ));
-    }
-
-    /// 25's molten decks' switch (P14.T49.p): in force inside 25's helper, held
-    /// outside it and where a test sets it back.
-    #[test]
-    fn the_molten_decks_hold_is_in_force_inside_25_s_helper_alone() {
-        use crate::substance::aerosol::{MoltenDecksRules, with_molten_decks};
-        assert_eq!(MoltenDecksRules::in_force(), MoltenDecksRules::Held);
-        assert_eq!(
-            with_every_25_hold(MoltenDecksRules::in_force),
-            MoltenDecksRules::Molten
-        );
-        assert_eq!(
-            with_every_25_hold(|| {
-                with_molten_decks(MoltenDecksRules::Held, MoltenDecksRules::in_force)
-            }),
-            MoltenDecksRules::Held
-        );
-        assert_eq!(MoltenDecksRules::in_force(), MoltenDecksRules::Held);
     }
 
     /// The passes' superlinear root's switch (P14.T51.l): in force inside 25's helper, the halvings

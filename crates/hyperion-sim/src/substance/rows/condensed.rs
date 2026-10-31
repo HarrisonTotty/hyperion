@@ -543,45 +543,27 @@ pub(in crate::substance) const SULPHUR: CondensedColumns = CondensedColumns {
     ],
 };
 
-/// Potassium chloride, sylvite.
+/// Potassium chloride, sylvite, with its melt by temperature (the `liquid grain density` source)
+/// for a hot giant's molten `KCl` deck, from generator version 25 (P14.T49.p).
 pub(in crate::substance) const POTASSIUM_CHLORIDE: CondensedColumns = CondensedColumns {
-    grain_density: solid(1_987.0, 293.0),
+    grain_density: solid_and_liquid(1_987.0, 293.0, &KCL_LIQUID_NODES),
     transition: at(TransitionKind::Melting, 1_044.0),
     mechanics: MechanicsFamily::Salt,
     sources: &[
-        POTASSIUM_CHLORIDE_GRAIN_DENSITY,
-        POTASSIUM_CHLORIDE_TRANSITION,
-        SALT_FAMILY,
-    ],
-};
-
-/// Sylvite's grain density source.
-const POTASSIUM_CHLORIDE_GRAIN_DENSITY: Source = source(
-    "grain density",
-    "sylvite's X-ray density from Wyckoff 1963 (COD 9008651: a 6.29294 Å, Z 4), 1.9869 g cm⁻³, \
-     the Handbook of Mineralogy's D(calc.) 1.987 (D(meas.) 1.993(5)), ±0.3 per cent",
-    Basis::Fact,
-);
-
-/// Potassium chloride's melting point's source.
-const POTASSIUM_CHLORIDE_TRANSITION: Source = source(
-    "transition",
-    "1,044 K (NIST-JANAF table Cl-038, Chase 1998)",
-    Basis::Fact,
-);
-
-/// Potassium chloride's columns from generator version 25 (P14.T49.p's hold,
-/// `MOLTEN_DECKS_VERSION`): [`POTASSIUM_CHLORIDE`]'s, with its melt by temperature (the `liquid
-/// grain density` source), for a hot giant's molten `KCl` deck. 25's bump folds it into the row.
-pub(in crate::substance) const MOLTEN_POTASSIUM_CHLORIDE: CondensedColumns = CondensedColumns {
-    grain_density: solid_and_liquid(1_987.0, 293.0, &KCL_LIQUID_NODES),
-    sources: &[
-        POTASSIUM_CHLORIDE_GRAIN_DENSITY,
+        source(
+            "grain density",
+            "sylvite's X-ray density from Wyckoff 1963 (COD 9008651: a 6.29294 Å, Z 4), 1.9869 g \
+             cm⁻³, the Handbook of Mineralogy's D(calc.) 1.987 (D(meas.) 1.993(5)), ±0.3 per cent",
+            Basis::Fact,
+        ),
         source("liquid grain density", KCL_LIQUID_CITATION, Basis::Reduced),
-        POTASSIUM_CHLORIDE_TRANSITION,
+        source(
+            "transition",
+            "1,044 K (NIST-JANAF table Cl-038, Chase 1998)",
+            Basis::Fact,
+        ),
         SALT_FAMILY,
     ],
-    ..POTASSIUM_CHLORIDE
 };
 
 /// Sodium chloride, halite.
@@ -635,67 +617,35 @@ pub(in crate::substance) const ZINC_SULPHIDE: CondensedColumns = CondensedColumn
     ],
 };
 
-/// Sodium sulphide, a T dwarf's sulphide cloud.
+/// Sodium sulphide, a T dwarf's sulphide cloud, with its melt by temperature (the `liquid grain
+/// density` source), which a hot giant's `Na2S` deck forms above 1,445 K, from generator version
+/// 25 (P14.T49.p).
 pub(in crate::substance) const SODIUM_SULPHIDE: CondensedColumns = CondensedColumns {
-    grain_density: solid(1_856.0, 293.0),
+    grain_density: solid_and_liquid(1_856.0, 293.0, &NA2S_LIQUID_NODES),
     transition: at(TransitionKind::Melting, 1_445.0),
     mechanics: MechanicsFamily::Salt,
     sources: &[
-        SODIUM_SULPHIDE_GRAIN_DENSITY,
-        SODIUM_SULPHIDE_TRANSITION,
-        SODIUM_SULPHIDE_FAMILY,
-    ],
-};
-
-/// Sodium sulphide's grain density source.
-const SODIUM_SULPHIDE_GRAIN_DENSITY: Source = source(
-    "grain density",
-    "the mean of two antifluorite cells' X-ray densities (Fm3̄m, Z 4): Zintl, Harder and Dauth \
-     1934, Z. Elektrochem. 40, 588 (COD 1011374: a 6.526, possibly kX), 1,865, and Bonneau, Jarvis \
-     and Kaner 1992, Inorg. Chem. 31, 2127 (COD 4344366: a 6.547 Å), 1,847 kg m⁻³; ±0.5 per cent",
-    Basis::Reduced,
-);
-
-/// Sodium sulphide's melting point's source.
-const SODIUM_SULPHIDE_TRANSITION: Source = source(
-    "transition",
-    "1,445 K (NIST-JANAF table Na-033, Chase 1998), its λ at 1,276 K being in the solid",
-    Basis::Fact,
-);
-
-/// Sodium sulphide's mechanics family's source.
-const SODIUM_SULPHIDE_FAMILY: Source = source(
-    "mechanics",
-    "`Salt`: an ionic, soluble alkali sulphide",
-    Basis::Adopted,
-);
-
-/// Sodium sulphide's columns from generator version 25 (P14.T49.p's hold,
-/// `MOLTEN_DECKS_VERSION`): [`SODIUM_SULPHIDE`]'s, with its melt by temperature (the `liquid grain
-/// density` source), which a hot giant's `Na2S` deck forms above 1,445 K. 25's bump folds it into
-/// the row.
-pub(in crate::substance) const MOLTEN_SODIUM_SULPHIDE: CondensedColumns = CondensedColumns {
-    grain_density: solid_and_liquid(1_856.0, 293.0, &NA2S_LIQUID_NODES),
-    sources: &[
-        SODIUM_SULPHIDE_GRAIN_DENSITY,
+        source(
+            "grain density",
+            "the mean of two antifluorite cells' X-ray densities (Fm3̄m, Z 4): Zintl, Harder and \
+             Dauth 1934, Z. Elektrochem. 40, 588 (COD 1011374: a 6.526, possibly kX), 1,865, and \
+             Bonneau, Jarvis and Kaner 1992, Inorg. Chem. 31, 2127 (COD 4344366: a 6.547 Å), \
+             1,847 kg m⁻³; ±0.5 per cent",
+            Basis::Reduced,
+        ),
         source("liquid grain density", NA2S_LIQUID_CITATION, Basis::Adopted),
-        SODIUM_SULPHIDE_TRANSITION,
-        SODIUM_SULPHIDE_FAMILY,
+        source(
+            "transition",
+            "1,445 K (NIST-JANAF table Na-033, Chase 1998), its λ at 1,276 K being in the solid",
+            Basis::Fact,
+        ),
+        source(
+            "mechanics",
+            "`Salt`: an ionic, soluble alkali sulphide",
+            Basis::Adopted,
+        ),
     ],
-    ..SODIUM_SULPHIDE
 };
-
-/// The molten salts' columns from generator version 25 by key, [`MOLTEN_POTASSIUM_CHLORIDE`] and
-/// [`MOLTEN_SODIUM_SULPHIDE`], which `Substance::condensed` gives in their rows' place under
-/// P14.T49.p's rules; `None` for every other row.
-#[must_use]
-pub(in crate::substance) fn molten_salt(key: &str) -> Option<&'static CondensedColumns> {
-    match key {
-        "KCl" => Some(&MOLTEN_POTASSIUM_CHLORIDE),
-        "Na2S" => Some(&MOLTEN_SODIUM_SULPHIDE),
-        _ => None,
-    }
-}
 
 /// Liquid KCl's nodes, kg m⁻³: Janz 1988's law at the row's melting point and at 1,800 K
 /// ([`KCL_LIQUID_CITATION`]).
