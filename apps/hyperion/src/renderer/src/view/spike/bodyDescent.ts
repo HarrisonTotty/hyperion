@@ -236,10 +236,11 @@ export class NoLandingSite extends Error {
 
 /**
  * The server serves no surface for a served world's body (plan R10, R10.T15.b): its field is
- * answered `not_modelled`, naming the record section the coarse pass needs, as every generated
- * body's is behind the serve gate (`GENERATED_SURFACES_FROM`, generator version 25). Thrown, as the
- * measurement's other refusals are ({@link NoLandingSite}, `DescentRefused`), out of its poll of
- * the session, and the spike says so and stops.
+ * answered `not_modelled`, naming the record section the coarse pass needs, as a generated body's
+ * is where its record leaves a gap the pass reads (every generated body's was until the server's
+ * serve gate opened at generator version 25). Thrown, as the measurement's other refusals are
+ * ({@link NoLandingSite}, `DescentRefused`), out of its poll of the session, and the spike says so
+ * and stops.
  */
 export class FieldNotServed extends Error {
   readonly section: RecordSectionDto;

@@ -7,9 +7,10 @@
 //! field the service serves from a reference world, with its albedo scale ([`served_field`],
 //! R10.T10.a).
 //!
-//! Plan 14's surface section is not inhabited yet, so the production source answers every body
-//! `NotModelled`; these tests give the service a reference world's inputs instead, through its
-//! `InputsSource` seam, so that the service and the wire are tested before plan 14's asks land.
+//! Most of these tests give the service a reference world's inputs through its `InputsSource`
+//! seam, worlds of known make from a level-5 field up. Until the serve gate opened at generator
+//! version 25 (P14.T54.a) the production source answered every solid body `NotModelled`, so every
+//! test did; from it the production source serves a generated body's field.
 
 use std::sync::{Arc, OnceLock};
 
@@ -103,7 +104,7 @@ pub fn galaxy() -> &'static Galaxy {
 pub struct SurfaceSystem {
     /// The system: its context and its bodies as they were born.
     pub system: Arc<GeneratedSystem>,
-    /// A body whose record has a surface section, not yet modelled: a rocky planet or a moon.
+    /// A body whose record's surface section applies: a rocky planet or a moon.
     pub solid: BodyId,
     /// A body whose record's surface section is not applicable: a giant.
     pub gaseous: BodyId,
@@ -158,7 +159,7 @@ pub fn surface_system() -> &'static SurfaceSystem {
 pub struct MoonSystem {
     /// The system: its context and its bodies as they were born.
     pub system: Arc<GeneratedSystem>,
-    /// A moon whose record has a surface section, not yet modelled.
+    /// A moon whose record's surface section is modelled.
     pub moon: BodyId,
     /// The planet it orbits, by its record's parent.
     pub planet: BodyId,

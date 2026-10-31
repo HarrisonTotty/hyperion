@@ -2,12 +2,12 @@
 //! R09.T19.c; the rendering brainstorm's Testing; R09's Verification, "Agreement" and
 //! "Knowledge"), over a real socket, as R03's `scene_knowledge` bounds the scene.
 //!
-//! A server takes a reference world's inputs for every solid body (`reference_inputs`), since plan
-//! 14's surface section is not inhabited yet. One orbital pass surveys a region of a generated
-//! body: a block of cells at a cube corner, across two face edges; a ragged run at a face's
-//! centre; and ragged runs about the field's widest crater and its largest drainage, where the
-//! field has them. Its payload is then asked for over the socket, decoded as a client decodes it,
-//! and checked:
+//! A server takes a reference world's inputs for every solid body (`reference_inputs`), worlds of
+//! known make that the cases choose between, as they did before the serve gate opened at generator
+//! version 25 (P14.T54.a). One orbital pass surveys a region of a generated body: a block of cells
+//! at a cube corner, across two face edges; a ragged run at a face's centre; and ragged runs about
+//! the field's widest crater and its largest drainage, where the field has them. Its payload is
+//! then asked for over the socket, decoded as a client decodes it, and checked:
 //!
 //! - no block carries a cell outside the region and its margin of `SYNTHESIS_MARGIN_CELLS`, a
 //!   climate record over another cell or a crater that reaches none of its cells, and every
@@ -31,8 +31,8 @@
 //! frames, and checks it block by block. The Ceres-like world's field has no channels, so two
 //! cases in the slow tier run the whole check on the Mars-like world, whose coarse pass drains it
 //! and whose heights carry its epoch's trunks, and on the Earth-like world, wet now, whose
-//! channels have tributaries as well (R09.T20's deferred finding, a check before
-//! `GENERATED_SURFACES_FROM` serves). The worlds take the same `reference` inputs as R10's
+//! channels have tributaries as well (R09.T20's deferred finding, a check made before the serve
+//! gate opened at generator version 25). The worlds take the same `reference` inputs as R10's
 //! `sample_worlds()`, under the body's surface seed rather than `reference::SEED`.
 //!
 //! The server's heights are the synthesis over the coarse pass of the body's surface seed on the
@@ -1125,7 +1125,7 @@ async fn a_client_holds_only_the_surveyed_field_and_synthesises_the_server_s_hei
 /// the channels' incision (R09.T6), which the Ceres-like world's have none of: the whole check of
 /// the Ceres-like world's test, the channels compared with the heights, the first pass's run about
 /// the field's largest drainage drawing trunks that cut the ground at the points compared
-/// (R09.T20's deferred finding; a check before `GENERATED_SURFACES_FROM` serves). A world dry now
+/// (R09.T20's deferred finding; a check made before the serve gate opened at 25). A world dry now
 /// has its epoch's trunks alone (R09.T6.c), so the Earth-like world's test compares tributaries.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "slow: the Mars-like world's coarse pass, and its heights at deep band levels"]

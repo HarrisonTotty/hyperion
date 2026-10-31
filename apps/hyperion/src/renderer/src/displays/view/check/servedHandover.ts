@@ -11,8 +11,8 @@
  * 2. **Its host discs** from the server's sky at the body (`servedHostDiscs`).
  * 3. **Its field** (`surface_field`, whole): its header (relief, level) and its coverage (the
  *    surveyed cells and their middle), the chunks dropped, since each look's session asks for the
- *    field itself. Behind the serve gate the server answers `not_modelled`, which the read gives
- *    as such, for the launch's end to state.
+ *    field itself. Where the body's record leaves a gap the coarse pass reads, the server answers
+ *    `not_modelled`, which the read gives as such, for the launch's end to state.
  *
  * Each outcome is the read's result ({@link ServedHandoverRead}), the server's refusals among them,
  * not an exception; an abort of its signal cancels the request in flight. `just place-ship --survey`
@@ -38,7 +38,7 @@ export type ServedHandoverRequests = TerrainRequests &
 
 /**
  * What the reading gave: the world; the body's field not modelled, naming the section the server
- * needs, as behind the serve gate; or why it failed, in words, a step's refusal or a cancel.
+ * needs; or why it failed, in words, a step's refusal or a cancel.
  */
 export type ServedHandoverRead =
   | { readonly kind: "read"; readonly world: HandoverWorld }

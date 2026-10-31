@@ -32,12 +32,14 @@
 //! [`CoarseInputs::planet_of`](hyperion_sim::planetary::surface::CoarseInputs::planet_of) names,
 //! beside the body's, so that both come from one place at one time (R09.T10.f). In production the
 //! source is [`RecordInputs`], plan 14's records read by
-//! [`CoarseInputs::for_body`](hyperion_sim::planetary::surface::CoarseInputs::for_body), behind
-//! the serve gate: it answers every body that reads
+//! [`CoarseInputs::for_body`](hyperion_sim::planetary::surface::CoarseInputs::for_body), whose
+//! answer it gives: the serve gate is open from generator version 25 (P14.T54.a), so a generated
+//! body is served its field wherever the sim reads its inputs, and is answered
 //! [`SurfaceInputsError::NotModelled`](hyperion_sim::planetary::surface::SurfaceInputsError::NotModelled)
-//! naming the surface section until the gate opens (`GENERATED_SURFACES_FROM`, 25; P14.T54.a).
-//! Until then the service and the wire are tested on the coarse pass's reference worlds, given as
-//! the source through
+//! naming the section where its record leaves a gap the pass reads. Until then it answered every
+//! body the sim read not modelled, naming the surface section, and the service and the wire were
+//! tested on the coarse pass's reference worlds alone, which most tests still give as the source
+//! through
 //! [`ServerConfigBuilder::surface_inputs`](crate::ServerConfigBuilder::surface_inputs). A source's
 //! refusal other than a section's state
 //! ([`ReadCoarseInputsError::Section`](hyperion_sim::planetary::surface::ReadCoarseInputsError::Section))

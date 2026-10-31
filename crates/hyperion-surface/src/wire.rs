@@ -111,11 +111,11 @@ mod form;
 /// computed under, which a decoder refuses unless it is its own
 /// ([`DecodeBlockError::GeneratorVersion`]).
 ///
-/// Until the serve gate opens, the first send of a generated body's payload, format 1's layout is
-/// still open: a member added before it (the sea floor's byte, the two runoff bytes, R09.T6.c's
-/// epoch incision) extends format 1 and re-blesses the payload goldens at the generator version in
-/// force, and only from the gate does a layout change take a new format (plan R09, "Generator
-/// version"; decision-bump-plan-after-22 §1.4).
+/// Format 1's layout was open until the serve gate opened at generator version 25, the first send
+/// of a generated body's payload: a member added before it (the sea floor's byte, the two runoff
+/// bytes, R09.T6.c's epoch incision) extended format 1 and re-blessed the payload goldens at the
+/// generator version in force. From the gate a layout change takes a new format (plan R09,
+/// "Generator version"; decision-bump-plan-after-22 §1.4).
 ///
 /// # Codes grow by appending
 ///

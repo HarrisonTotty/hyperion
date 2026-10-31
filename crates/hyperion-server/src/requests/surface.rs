@@ -340,7 +340,7 @@ mod tests {
     use hyperion_sim::galaxy::Galaxy;
     use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
     use hyperion_sim::id::{BodyId, Layer, SystemId};
-    use hyperion_sim::planetary::record::{BodyRecord, Section};
+    use hyperion_sim::planetary::record::{BodyRecord, RecordSection, Section};
     use hyperion_sim::planetary::surface::{
         CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, reference,
     };
@@ -380,6 +380,30 @@ mod tests {
                 Section::NotApplicable => Err(SurfaceInputsError::NoSolidSurface.into()),
                 Section::Ok(_) | Section::NotModelled | Section::NotResolved => {
                     Ok(reference::ceres_like())
+                }
+            }
+        }
+    }
+
+    /// A source that answers every body whose surface section applies as the record's own reading
+    /// answers a gap the record leaves, an unlit body's or a crust not modelled: its surface
+    /// section not modelled. It refuses a giant's as that reading would. The production source
+    /// gave every generated body that answer until the serve gate opened at generator version 25
+    /// (P14.T54.a).
+    #[derive(Debug)]
+    struct Unmodelled;
+
+    impl InputsSource for Unmodelled {
+        fn inputs(
+            &self,
+            record: &BodyRecord,
+            _: Option<&BodyRecord>,
+            _: &SystemContext,
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
+            match record.surface() {
+                Section::NotApplicable => Err(SurfaceInputsError::NoSolidSurface.into()),
+                Section::Ok(_) | Section::NotModelled | Section::NotResolved => {
+                    Err(SurfaceInputsError::NotModelled(RecordSection::Surface).into())
                 }
             }
         }
@@ -640,24 +664,12 @@ mod tests {
         harness.stop().await;
     }
 
-    /// Plan 14's surface section is not modelled yet, so the production source answers every
-    /// solid body `NotModelled`: its pass is recorded all the same, at the level its figure gives,
-    /// and starts no field.
+    /// A body whose source answers its surface section not modelled, as a gap the record leaves
+    /// does, has its pass recorded all the same, at the level its figure gives, and starts no
+    /// field.
     #[tokio::test]
     async fn a_body_not_modelled_is_surveyed_at_its_figure_s_level() {
-        let harness = Harness::start(Handlers).await;
-        let created = super::super::universe::create(
-            Arc::clone(harness.state()),
-            CreateUniverseRequest {
-                name: "Unmodelled".to_owned(),
-                seed: Some(hyperion_protocol::SeedHex::from_u64(SEED)),
-            },
-        )
-        .await
-        .unwrap();
-        let ResponseBody::CreateUniverse(info) = created else {
-            panic!("create_universe answers with the universe: {created:?}");
-        };
+        let (harness, universe) = started(Unmodelled).await;
         let Bodies {
             solid,
             figure_level,
@@ -665,13 +677,13 @@ mod tests {
         } = *bodies();
         let last = figure_level.cell_count();
         assert_eq!(
-            revision(survey(&harness, pass(&info.id, solid, &[(last - 4, last)])).await),
+            revision(survey(&harness, pass(&universe, solid, &[(last - 4, last)])).await),
             1
         );
-        let coverage = log(&harness, &info.id).await.coverage(solid).unwrap();
+        let coverage = log(&harness, &universe).await.coverage(solid).unwrap();
         assert_eq!((coverage.level(), coverage.surveyed()), (figure_level, 4));
         assert_eq!(
-            refused(survey(&harness, pass(&info.id, solid, &[(last, last + 1)])).await),
+            refused(survey(&harness, pass(&universe, solid, &[(last, last + 1)])).await),
             bad("cells"),
             "past the figure level's last cell"
         );
@@ -1121,24 +1133,12 @@ mod tests {
         harness.stop().await;
     }
 
-    /// Plan 14's surface section is not modelled yet, so under the production source a solid body
-    /// answers `not_modelled` naming it, with no bulk and no pass run, whether or not it was
-    /// surveyed.
+    /// A solid body whose source answers its surface section not modelled, as a gap the record
+    /// leaves does, answers `not_modelled` naming it, with no bulk and no pass run, whether or not
+    /// it was surveyed.
     #[tokio::test]
     async fn a_body_not_modelled_answers_not_modelled_with_no_bulk() {
-        let harness = Harness::start(Handlers).await;
-        let created = super::super::universe::create(
-            Arc::clone(harness.state()),
-            CreateUniverseRequest {
-                name: "Unmodelled".to_owned(),
-                seed: Some(hyperion_protocol::SeedHex::from_u64(SEED)),
-            },
-        )
-        .await
-        .unwrap();
-        let ResponseBody::CreateUniverse(info) = created else {
-            panic!("create_universe answers with the universe: {created:?}");
-        };
+        let (harness, universe) = started(Unmodelled).await;
         let solid = bodies().solid;
         let not_modelled = Ok(Answer {
             body: ResponseBody::SurfaceField(SurfaceFieldDto::NotModelled {
@@ -1147,12 +1147,12 @@ mod tests {
             bulk: None,
         });
         assert_eq!(
-            ask(&harness, field_request(&info.id, solid, None)).await,
+            ask(&harness, field_request(&universe, solid, None)).await,
             not_modelled
         );
-        revision(survey(&harness, pass(&info.id, solid, &[(0, 1)])).await);
+        revision(survey(&harness, pass(&universe, solid, &[(0, 1)])).await);
         assert_eq!(
-            ask(&harness, field_request(&info.id, solid, Some(1))).await,
+            ask(&harness, field_request(&universe, solid, Some(1))).await,
             not_modelled
         );
         assert_eq!(harness.state().surface.counters().cache().misses(), 0);

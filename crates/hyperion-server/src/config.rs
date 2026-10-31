@@ -346,11 +346,11 @@ pub enum SkyService {
 /// Until P09.T2.c gives up φ, each population's share in the features, the field still places the
 /// whole of every population, so a feature's members registered beside it would be counted twice
 /// (`decision-r06-t16a-scope.md`). The gate holds the registration back until then, in the pattern
-/// of the surface's serve gate (`GENERATED_SURFACES_FROM`): the range query's
-/// `FeatureMemberSource`, every row's `origin`, and the features' gas in the sky's sightlines all
-/// wait for it, so that at the version in force no reply moves. Its tripwire,
-/// `the_feature_members_gate_holds_until_its_version`, fails at the version, so that the bump that
-/// reaches it opens the gate with P09.T2.c, or raises it to the train P09.T2.c rides.
+/// of the surface's serve gate, which held generated bodies' fields back until generator version 25
+/// (P14.T54.a): the range query's `FeatureMemberSource`, every row's `origin`, and the features'
+/// gas in the sky's sightlines all wait for it, so that at the version in force no reply moves.
+/// Its tripwire, `the_feature_members_gate_holds_until_its_version`, fails at the version, so that
+/// the bump that reaches it opens the gate with P09.T2.c, or raises it to the train P09.T2.c rides.
 pub const FEATURE_MEMBERS_FROM: GeneratorVersion = GeneratorVersion::new(26);
 
 /// Whether the server serves plan 09's feature members (P09.T40.a): the serve gate,
@@ -936,9 +936,9 @@ impl ServerConfigBuilder {
 
     /// Where the surface service takes each body's coarse-pass inputs from.
     ///
-    /// [`RecordInputs`], the body's record, by default. Until the serve gate opens
-    /// (`GENERATED_SURFACES_FROM`, 25; P14.T54.a), that answers every body it reads `NotModelled`,
-    /// so tests give the coarse pass's reference worlds; no option or variable sets it.
+    /// [`RecordInputs`], the body's record, by default, which serves every generated body's field
+    /// the sim reads from generator version 25, when the serve gate opened (P14.T54.a). Tests give
+    /// the coarse pass's reference worlds, or a source of their own; no option or variable sets it.
     #[must_use]
     pub fn surface_inputs(mut self, inputs: impl InputsSource + 'static) -> Self {
         self.config.surface_inputs = Arc::new(inputs);

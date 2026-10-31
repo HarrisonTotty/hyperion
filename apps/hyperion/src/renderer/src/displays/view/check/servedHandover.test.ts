@@ -93,7 +93,7 @@ describe("the hand-over check's served world, read from the server (R10.T15.b)",
     ]);
   });
 
-  it("gives the body's field not modelled, naming its section, behind the serve gate", async () => {
+  it("gives the body's field not modelled, naming the section the server names", async () => {
     const { client, socket } = linked();
     const reading = readServedHandoverWorld(
       client,

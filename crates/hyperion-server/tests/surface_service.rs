@@ -1,7 +1,9 @@
 //! The surface service through its public API (rendering plan R09, R09.T17): the field it serves
 //! from the reference worlds' inputs is the sim's coarse pass on the same inputs, bit for bit, with
-//! R10.T10.a's albedo scale in its header, and with the production source a generated body answers
-//! that its surface is not modelled, a moon too once given its planet's record (R09.T10.f).
+//! R10.T10.a's albedo scale in its header, and with the production source, the serve gate open
+//! from generator version 25 (P14.T54.a), a generated moon is served the sim's pass of its record's
+//! inputs, bit for bit, read with its planet's record (R09.T10.f), and a giant answers that it has
+//! no solid surface.
 
 mod common;
 
@@ -16,10 +18,12 @@ use hyperion_server::compute::{CpuPool, GalaxyKey};
 use hyperion_server::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use hyperion_server::surface::{
     FieldKey, InputsSource, RECORD_TIME, RecordInputs, SurfaceJobError, SurfaceService,
+    field_albedo_scale,
 };
+use hyperion_sim::id::BodyId;
 use hyperion_sim::planetary::BodyIndex;
 use hyperion_sim::planetary::hooks::{detail_seed, surface_seed};
-use hyperion_sim::planetary::record::{RecordSection, Section};
+use hyperion_sim::planetary::record::Section;
 use hyperion_sim::planetary::surface::{
     CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, coarse_pass,
 };
@@ -53,7 +57,7 @@ fn service(pool: &Arc<CpuPool>, source: impl InputsSource + 'static) -> SurfaceS
     )
 }
 
-fn key(body: hyperion_sim::id::BodyId) -> FieldKey {
+fn key(body: BodyId) -> FieldKey {
     FieldKey::new(GalaxyKey::new(SEED, GENERATOR_VERSION), body)
 }
 
@@ -125,42 +129,30 @@ async fn the_surface_service_serves_the_coarse_pass_bit_for_bit() {
     timeout(patience(), pool.shutdown()).await.unwrap().unwrap();
 }
 
-/// With the production source, the body's record, a generated body with a solid surface answers
-/// that its surface section is not modelled, naming the section, and a giant that it has no solid
-/// surface; neither runs a pass or keeps anything. A generated moon answers as a planet does: the
-/// service fetches its planet's record, the one `CoarseInputs::planet_of` names, which `for_body`
-/// checks before its crust (R09.T10.f). The reference inputs refuse the giant alike.
+/// With the production source, the body's record, a generated moon with a solid surface is served
+/// its field: the sim's coarse pass of its surface seed on the inputs `CoarseInputs::for_body`
+/// reads from its record and its planet's, the one `CoarseInputs::planet_of` names, which the
+/// service fetches beside it (R09.T10.f), with the albedo scale its record gives, bit for bit;
+/// without its planet's record the reading refuses the moon before its crust. A giant answers that
+/// it has no solid surface and runs no pass, under the production source and the reference inputs
+/// alike.
 #[tokio::test]
-async fn a_generated_surface_is_not_modelled_naming_its_section() {
+async fn a_generated_surface_is_served_the_sim_s_pass_of_its_record() {
     let pool = pool();
     let (system, moons) = (surface_system(), moon_system());
     let production = service(&pool, RecordInputs);
-    let not_modelled = SurfaceInputsError::NotModelled(RecordSection::Surface);
-    for (body, of, refusal) in [
-        (system.solid, &system.system, not_modelled),
-        (
-            system.gaseous,
-            &system.system,
-            SurfaceInputsError::NoSolidSurface,
-        ),
-        (moons.moon, &moons.system, not_modelled),
-    ] {
-        let answer = timeout(patience(), production.field(key(body), of))
-            .await
-            .expect("timed out reading a body's inputs");
-        assert_eq!(
-            answer.unwrap_err(),
-            SurfaceJobError::Inputs(ReadCoarseInputsError::Section(refusal)),
-            "{body}"
-        );
-    }
-    // The moon's planet is the one `planet_of` names, and without its record the reading refuses
-    // the moon before its crust.
+    let served = timeout(patience(), production.field(key(moons.moon), &moons.system))
+        .await
+        .expect("timed out computing a field")
+        .expect("a generated moon the sim reads is served its field");
     let (ctx, planets) = moons.system.as_ref();
-    let index = BodyIndex::try_from(moons.moon.body_index()).expect("a body's index");
-    let moon = planets
-        .body_at(ctx, index, RECORD_TIME)
-        .expect("the moon resolves");
+    let at = |body: BodyId| {
+        let index = BodyIndex::try_from(body.body_index()).expect("a body's index");
+        planets
+            .body_at(ctx, index, RECORD_TIME)
+            .expect("a body of the system resolves")
+    };
+    let moon = at(moons.moon);
     assert_eq!(
         CoarseInputs::planet_of(&moon).map(|planet| planet.body_id(planets.system())),
         Some(moons.planet)
@@ -169,22 +161,49 @@ async fn a_generated_surface_is_not_modelled_naming_its_section() {
         RecordInputs.inputs(&moon, None, ctx),
         Err(ReadCoarseInputsError::PlanetMissing(moons.planet))
     );
+    let inputs = CoarseInputs::for_body(&moon, Some(&at(moons.planet)), ctx)
+        .expect("the sim reads the moon with its planet's record");
+    let own = coarse_pass(surface_seed(Seed::new(SEED), moons.moon), &inputs);
+    let scale = field_albedo_scale(
+        &own,
+        moon.photometry(),
+        detail_seed(Seed::new(SEED), moons.moon),
+    );
+    assert_eq!(
+        served.header().albedo_scale().map(f64::to_bits),
+        scale.map(f64::to_bits),
+        "the served field's albedo scale"
+    );
+    let own = own
+        .with_albedo_scale(scale)
+        .expect("a solved scale is finite and positive");
+    let (served, own) = (payload(&served), payload(&own));
+    assert_eq!(served.len(), own.len(), "the payloads' lengths");
+    assert_eq!(
+        served.iter().zip(&own).position(|(a, b)| a != b),
+        None,
+        "the payloads' first differing byte"
+    );
+
+    let reference = service(&pool, reference_inputs(ReferenceWorld::Ceres));
+    for (source, service) in [("production", &production), ("reference", &reference)] {
+        let answer = timeout(
+            patience(),
+            service.field(key(system.gaseous), &system.system),
+        )
+        .await
+        .expect("timed out reading a body's inputs");
+        assert_eq!(
+            answer.unwrap_err(),
+            SurfaceJobError::Inputs(SurfaceInputsError::NoSolidSurface.into()),
+            "the {source} source"
+        );
+    }
     let counters = production.counters();
     assert_eq!(
         (counters.computed(), counters.cache().entries()),
-        (0, 0),
-        "{counters:?}"
-    );
-    let reference = service(&pool, reference_inputs(ReferenceWorld::Ceres));
-    let answer = timeout(
-        patience(),
-        reference.field(key(system.gaseous), &system.system),
-    )
-    .await
-    .expect("timed out reading a body's inputs");
-    assert_eq!(
-        answer.unwrap_err(),
-        SurfaceJobError::Inputs(SurfaceInputsError::NoSolidSurface.into())
+        (1, 1),
+        "the moon's pass alone, kept: {counters:?}"
     );
     timeout(patience(), pool.shutdown()).await.unwrap().unwrap();
 }

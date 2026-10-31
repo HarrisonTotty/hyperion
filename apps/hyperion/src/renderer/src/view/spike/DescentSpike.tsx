@@ -109,9 +109,9 @@ export const MEASURING = "MEASURING TERRAIN: landing site and ground track";
 
 /**
  * The status where the server serves no surface for a served world's body, named by its
- * designation (plan R10, R10.T15.b): its field answered `not_modelled`, as every generated body's is
- * behind the serve gate, a data state rather than a failure; nothing on the client's side would
- * help, so it names no remedy. The section goes to the log.
+ * designation (plan R10, R10.T15.b): its field answered `not_modelled`, as a generated body's is
+ * where its record leaves a gap the coarse pass reads, a data state rather than a failure; nothing
+ * on the client's side would help, so it names no remedy. The section goes to the log.
  */
 export function surfaceNotServed(designation: string): string {
   return `TERRAIN NOT MEASURED: the surface of ${designation} is not yet modelled at this generator version`;
@@ -474,7 +474,7 @@ function Instrument({ title, canvasRef, stageRef, run, listId, cameraLabel }: In
  * the server serves, read from the server's scene (`ServedDescentSpike`): its terrain session asks
  * the server for the body's field over the link, its header shows the link's state, and the descent
  * is measured once the field holds its survey, as over `TERRAIN TEST`; where the server serves no
- * surface for it (behind the serve gate, its field `not_modelled`) the spike says so in plain text
+ * surface for it (its field `not_modelled`, a gap in its record) the spike says so in plain text
  * ({@link surfaceNotServed}), a data state and not a fault, and the run ends failed; a field the
  * server refuses, or one that fails the console's checks, reads in the survey line's words
  * (`SURVEY COVERAGE REJECTED: <the server's reason>, relaunch to retry`, `SURVEY DATA INVALID:
@@ -639,7 +639,7 @@ export function DescentSpike({
             inputsRef.current.listeners?.onFailed?.(DESCENT_REFUSED);
             setPreparation({ kind: "refused" });
           } else if (error instanceof FieldNotServed) {
-            // Behind the serve gate a served world's body has no surface to measure (R10.T15.b).
+            // A served body whose field is not modelled has no surface to measure (R10.T15.b).
             console.error("the descent spike's served world has no served surface:", error);
             inputsRef.current.listeners?.onFailed?.(surfaceNotServed(spikeWorld.bodyDesignation));
             setPreparation({ kind: "not served" });

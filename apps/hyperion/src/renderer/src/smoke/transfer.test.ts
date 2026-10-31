@@ -148,7 +148,7 @@ describe("R03.T15's transfer check over a socket (R10.T15.b)", () => {
     });
   });
 
-  it("says plainly that the body has no served surface behind the serve gate", async () => {
+  it("says plainly that the body has no served surface when it is not modelled", async () => {
     const checks = await transferChecks((socket) => {
       const { id } = latestFieldAsk(socket);
       socket.serverResponds(id, {

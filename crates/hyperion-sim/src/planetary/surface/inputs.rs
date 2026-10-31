@@ -25,9 +25,9 @@
 //! seasons from its planet's record, with the crust, condensates and palette given as arguments,
 //! the record's own from `for_body`.
 //! The tests and the reference worlds build their inputs with [`CoarseInputsBuilder`], each value
-//! a plain argument (Design note 3, "Until an ask lands"). The server serves no generated body's
-//! field until its serve gate opens (P14.T54.a's `GENERATED_SURFACES_FROM`, 25 since 24's bump), so
-//! that R09's and R10's changes re-bless at the version in force until then.
+//! a plain argument (Design note 3, "Until an ask lands"). The server serves a generated body's
+//! field from generator version 25, when its serve gate opened (P14.T54.a); until then it served
+//! none, so that R09's and R10's changes re-blessed at the version in force.
 //! The types here are the pass's own vocabulary for those values, each named after the plan-14
 //! task that supplies it, and wherever the pass computes a figure plan 14 also states, the result
 //! is constrained to plan 14's value.
@@ -526,8 +526,8 @@ impl Error for SurfaceInputsError {}
 /// whoever asks and whenever (R09.T17). The server's `surface::RECORD_TIME`, at which it fetches
 /// the records, is this constant re-exported. [`CoarseInputs::from_record`] reads the body's spin
 /// and its seasonal orbit at it, so the records it is given are the snapshot at it. The epoch is
-/// R09.T17's choice and decision-bump-plan-after-22's lean; P14.T54.a settles it, and from the
-/// serve gate's bump it is part of the payload's contract (ibid. §1.4).
+/// R09.T17's choice and decision-bump-plan-after-22's lean; P14.T54.a settles it, and from
+/// generator version 25, the serve gate's, it is part of the payload's contract (ibid. §1.4).
 pub const RECORD_TIME: UniverseTime = UniverseTime::EPOCH;
 
 /// Whose orbit sets the seasons of the body [`CoarseInputs::from_record`] reads, with the
