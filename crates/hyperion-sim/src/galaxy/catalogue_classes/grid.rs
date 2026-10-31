@@ -54,6 +54,7 @@ use std::fmt;
 use super::binary::{AccretingWdFast, AccretingWdSlow};
 use super::core_collapse::CoreCollapseProcess;
 use super::ids::{CatalogueCellKey, entry_of};
+use super::lbv::LbvProcess;
 use super::registry::ClassId;
 use super::supernova::LIFETIME_REACH;
 #[cfg(doc)]
@@ -777,9 +778,9 @@ pub trait ClassLookup {
 ///
 /// Each class's process is registered here by the task that builds it, as one arm,
 /// `ClassId::CORE_COLLAPSE => Some(visitor.visit(&CoreCollapseProcess::new(galaxy)))`:
-/// [`CORE_COLLAPSE`](ClassId::CORE_COLLAPSE) by P09.T33.a and [`TYPE_IA`](ClassId::TYPE_IA) by
-/// P09.T34.a (both registered), [`LUMINOUS_BLUE_VARIABLE`](ClassId::LUMINOUS_BLUE_VARIABLE) by
-/// P09.T43, and plan 11's five by P11.T8, of which
+/// [`CORE_COLLAPSE`](ClassId::CORE_COLLAPSE) by P09.T33.a, [`TYPE_IA`](ClassId::TYPE_IA) by
+/// P09.T34.a and [`LUMINOUS_BLUE_VARIABLE`](ClassId::LUMINOUS_BLUE_VARIABLE) by P09.T43 (all three
+/// registered), and plan 11's five by P11.T8, of which
 /// [`ACCRETING_WHITE_DWARF`](ClassId::ACCRETING_WHITE_DWARF) and
 /// [`ACCRETING_WHITE_DWARF_SLOW`](ClassId::ACCRETING_WHITE_DWARF_SLOW) are registered (P11.T8.a).
 /// [`TIDAL_DISRUPTION_VICTIM`](ClassId::TIDAL_DISRUPTION_VICTIM) is never placed and gets none.
@@ -798,6 +799,7 @@ impl ClassLookup for ProductionClasses {
         match class {
             ClassId::CORE_COLLAPSE => Some(visitor.visit(&CoreCollapseProcess::new(galaxy))),
             ClassId::TYPE_IA => Some(visitor.visit(&TypeIaProcess::new(galaxy))),
+            ClassId::LUMINOUS_BLUE_VARIABLE => Some(visitor.visit(&LbvProcess::new(galaxy))),
             ClassId::ACCRETING_WHITE_DWARF => Some(visitor.visit(&AccretingWdFast::new(galaxy))),
             ClassId::ACCRETING_WHITE_DWARF_SLOW => {
                 Some(visitor.visit(&AccretingWdSlow::new(galaxy)))

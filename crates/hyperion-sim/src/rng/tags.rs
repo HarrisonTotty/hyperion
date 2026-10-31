@@ -1061,6 +1061,34 @@ domain_tags! {
     /// The event key of an accreting white dwarf's novae (plan 11's `0x0300 NOVA`, P11.T8.a): a
     /// monotone phase at its recurrence period on its white dwarf, body 0.
     BINARY_EV_NOVA: Event = "binary.ev.nova";
+
+    // Plan 09, phase 7 (P09.T43): a luminous-blue-variable candidate's draws, `System` tags under
+    // `class.lbv.`, one per property group, opened with `ObjectKey::from(SystemId)` of the
+    // candidate's ID, its member 0 (Design note 23). Its primary's own draws are plan 06's `star.*`
+    // tags, keyed by its body 0 at attempt 0. Appended after P11.T8.a's `binary.ev.nova`,
+    // because the macro's order fixes `ALL`.
+
+    /// A luminous-blue-variable candidate's site, its position at the epoch: words 0–2 its
+    /// position in its 4,096 ly cell, x, y and z, and word 3 the mark that thins it on the young
+    /// field's density and picks its density component (P09.T43).
+    CLASS_LBV_SITE: System = "class.lbv.site";
+
+    /// A luminous-blue-variable candidate's primary's initial mass: word 0 the mark that picks
+    /// the sampler's node, word 1 the uniform that places the mass among the node's (P09.T43).
+    CLASS_LBV_MASS: System = "class.lbv.mass";
+
+    /// A luminous-blue-variable candidate's age at the epoch: word 0 the uniform that places it
+    /// among the node's ages, word 1 the mark that thins it on its component's age density
+    /// (P09.T43).
+    CLASS_LBV_AGE: System = "class.lbv.age";
+
+    /// A luminous-blue-variable candidate's \[Fe/H\]: one normal of its component's distribution at
+    /// its site and age (P09.T43).
+    CLASS_LBV_METALLICITY: System = "class.lbv.metallicity";
+
+    /// A luminous-blue-variable candidate's velocity at its site, galactic: plan 08's draw of its
+    /// component's law, four words per attempt of the escape cut (P09.T43).
+    CLASS_LBV_VELOCITY: System = "class.lbv.velocity";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1486,6 +1514,18 @@ mod tests {
         }
         assert_eq!(BINARY_EV_NOVA.scope(), crate::rng::TagScope::Event);
         assert_eq!(BINARY_EV_NOVA.name(), "binary.ev.nova");
+        // P09.T43: the luminous blue variables' candidates, one `System` tag per property group.
+        for tag in [
+            CLASS_LBV_SITE,
+            CLASS_LBV_MASS,
+            CLASS_LBV_AGE,
+            CLASS_LBV_METALLICITY,
+            CLASS_LBV_VELOCITY,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.lbv."));
+            assert!(ALL.contains(&tag));
+        }
     }
 
     #[test]

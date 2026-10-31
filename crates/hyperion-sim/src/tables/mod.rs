@@ -87,6 +87,7 @@ pub mod helium;
 pub mod helium_26;
 pub mod kick_defaults;
 pub mod kick_rank;
+pub mod lbv;
 pub mod lifetime_bracket;
 pub mod limb_darkening;
 pub mod liquid_optics;

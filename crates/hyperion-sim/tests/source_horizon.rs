@@ -10,10 +10,11 @@
 //! The sources built so far are the grid's seven layers, the catalogue features' members (plan 09,
 //! P09.T21), the dwarf cores' and the streams' members (plan 10, P10.T7.b and P10.T8.b), the
 //! supernova entry of plan 09's phase 4 as a value, and the catalogue classes' entries built so
-//! far, the core collapses (P09.T33.a), the Type Ia (P09.T34.a) and the accreting white dwarfs,
-//! fast and slow (P11.T8.a). The displaced remnants (plan 08, P08.T12), the galactic centre's
-//! members (P09.T24–T28) and the other catalogue classes (P09.T35, P09.T43, P11.T8.b–d) are not
-//! placed yet; each is added here by the task that places it (P12.T0 as built).
+//! far, the core collapses (P09.T33.a), the Type Ia (P09.T34.a), the luminous blue variables
+//! (P09.T43) and the accreting white dwarfs, fast and slow (P11.T8.a). The displaced remnants
+//! (plan 08, P08.T12), the galactic centre's members (P09.T24–T28) and the other catalogue classes
+//! (P09.T35, P11.T8.b–d) are not placed yet; each is added here by the task that places it (P12.T0
+//! as built).
 
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
@@ -24,6 +25,7 @@ use hyperion_sim::events::{
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::binary::{AccretingWdFast, AccretingWdSlow};
 use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+use hyperion_sim::galaxy::catalogue_classes::lbv::LbvProcess;
 use hyperion_sim::galaxy::catalogue_classes::supernova::{
     SupernovaEntry, SupernovaKind, SupernovaState,
 };
@@ -453,6 +455,45 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
                 assert!(t >= entry.value().site().death() && age.value().is_finite());
             }
         }
+    }
+
+    // A luminous-blue-variable host of the class grid (plan 09, P09.T43): its system on its
+    // straight line, its record's existence, and its stars, whose window is the entry's. Its line
+    // is a catalogue system's, so the observer's drift refuses it, as it says.
+    let process = LbvProcess::new(&galaxy);
+    let entry = (3..8)
+        .flat_map(|y| [[0, y, 0], [0, y, -1]])
+        .map(|cell| {
+            CatalogueCellKey::new(ClassId::LUMINOUS_BLUE_VARIABLE, cell)
+                .expect("a cell of the root cube")
+        })
+        .flat_map(|key| CatalogueClassCell::generate(&galaxy, &process, key).into_entries())
+        .next()
+        .expect("the disc has luminous-blue-variable hosts");
+    let catalogue = system_of(&galaxy, entry.id()).expect("an entry resolves");
+    let record = catalogue.record();
+    let stars = catalogue
+        .stars(&galaxy)
+        .expect("a host's stars are the stellar stage's");
+    assert_eq!(stars.lbv_window(), Some(entry.value().window()));
+    assert!(matches!(
+        Drift::of_record(&galaxy, record),
+        Err(TraceMotionError::CatalogueMotionNotTraced(_))
+    ));
+    for t in TIMES {
+        let p = catalogue.position_at(t);
+        assert_in_padded_cube("a luminous-blue-variable host", &p);
+        assert_eq!(position_at(&galaxy, record, t), p);
+        let exists = record.existence_at(t) == Existence::Exists;
+        assert!(record.age_at(t).value().is_finite());
+        let summary = stars.summary_at(t);
+        assert_eq!(summary.existence() == SystemExistence::Exists, exists);
+        assert_eq!(
+            stars.brief_at(t).is_some(),
+            exists,
+            "{:?} at {t}",
+            record.id()
+        );
     }
 
     // A Type Ia entry of the class grid (plan 09, P09.T34.a), one with a survivor: each member on

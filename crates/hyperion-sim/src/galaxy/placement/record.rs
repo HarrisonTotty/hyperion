@@ -117,8 +117,9 @@ pub enum SystemOrigin {
     /// ([`catalogue_classes::system_of`](crate::galaxy::catalogue_classes::system_of)): no
     /// density component's laws apply to it, so [`component`](SystemRecord::component) is `None`.
     /// It counts in the layer its primary's initial mass gives it, and its primary is read at
-    /// attempt 0: the core collapses thin their candidates on their first draws and redraw none
-    /// (a class that redraws, as P09.T43's will, adds the attempt to the variant).
+    /// attempt 0: the core collapses (P09.T33.a) and the luminous blue variables (P09.T43) thin
+    /// their candidates on their first draws and redraw none (a class that redraws adds the
+    /// attempt to the variant).
     CatalogueSystem(ClassId),
 }
 
