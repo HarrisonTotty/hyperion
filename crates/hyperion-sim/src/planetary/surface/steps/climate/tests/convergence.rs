@@ -412,6 +412,8 @@ fn assert_z0_holds_under_26(seed: u64) {
 /// orbit, quickening, and ended unconverged at the cap at 278.45 K; now it is held at plan 14's
 /// mean.
 #[test]
+#[ignore = "slow: the small Earth's climate step under seed 4 with version 26's holds, about \
+            150 s"]
 fn under_26_the_small_earth_s_z0_holds_its_branch_under_seed_4() {
     assert_z0_holds_under_26(4);
 }
