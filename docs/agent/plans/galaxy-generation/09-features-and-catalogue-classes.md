@@ -5269,3 +5269,11 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   holds the companion-stripped mark unread (`Builder::with_companion_mark`) and reads it only where
   the capture window's two widths disagree; the remnant stage, only where the kick's verdict
   depends on it. Dwarf-core, centre and global-list members share `remnant_fits`.
+- **P09.T10 perf, the tabulated remnants at 26 (lane `galaxy-centre-core`, 2026-10-31, at 24,
+  behind `TABULATED_REMNANTS_VERSION` = 26).** `GalaxyRules::member_remnants`
+  (`MemberRemnantRules::{EveryAttempt, Tabulated}`, `features/members/remnants.rs`). Under
+  `Tabulated`, `draw_member` asks `tabulated_fit` before `remnant_fits`: a white dwarf below
+  `ClusterModel::white_dwarf_ceiling` (lazy, per stellar rules) is kept on its draws-only kick
+  (`StandardKickLaw::white_dwarf_kick`); a neutron star whose systemic speed and the ordinary
+  kicks' floor both reach `v_eff` is refused. Only `draw_member` reads it; dwarf-core, centre and
+  global-list members keep `remnant_fits`. The bump deletes the hold as its tripwire says.

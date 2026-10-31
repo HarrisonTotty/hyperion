@@ -29,6 +29,9 @@
 //! - [`stream_shell`](GalaxyRules::stream_shell), at [`STREAM_SHELL_VERSION`] (plan 10, P10.T9):
 //!   a stream's member outside its bounding shell is none, so the range query may pass by a stream
 //!   whose shell its sphere misses.
+//! - [`member_remnants`](GalaxyRules::member_remnants), at [`TABULATED_REMNANTS_VERSION`] (plan 09,
+//!   P09.T10): a remnant class's member draw asks the cluster's tabulated remnants before it builds
+//!   an attempt's star.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -41,6 +44,7 @@ use crate::galaxy::features::centre::events::luminosity::{
     CENTRE_QUIESCENCE_VERSION, CentreQuiescenceRules,
 };
 use crate::galaxy::features::kinds::globular::{BOUND_SHARE_VERSION, BoundShareRules};
+use crate::galaxy::features::members::remnants::{MemberRemnantRules, TABULATED_REMNANTS_VERSION};
 use crate::galaxy::global_list::{STREAM_SHELL_VERSION, StreamShellRules};
 use crate::galaxy::motion::{
     KEPLER_REGIME_VERSION, KEPLER_SECULAR_VERSION, KeplerRegimeRules, KeplerSecularRules,
@@ -64,6 +68,9 @@ pub(crate) struct GalaxyRules {
     pub(crate) bound_share: BoundShareRules,
     /// Whether a stream's bounding shell bounds its members (P10.T9).
     pub(crate) stream_shell: StreamShellRules,
+    /// How a remnant class's member draw decides an attempt: its star built, or the cluster's
+    /// tabulated remnants first (P09.T10).
+    pub(crate) member_remnants: MemberRemnantRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -99,6 +106,11 @@ impl GalaxyRules {
             } else {
                 StreamShellRules::Unbounded
             },
+            member_remnants: if version.get() >= TABULATED_REMNANTS_VERSION.get() {
+                MemberRemnantRules::Tabulated
+            } else {
+                MemberRemnantRules::EveryAttempt
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -114,9 +126,9 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: 25's
-    /// holds and those that turn on at 26 (the galaxy's `bound_share`, P09.T13, and
-    /// `stream_shell`, P10.T9; the stellar rules' `dwarf_sequence`, P06.T23.a, `helium`, P15.T7.b,
-    /// and `hd_limit`, P06.T42.b; [`StellarRules::every_26_hold`]).
+    /// holds and those that turn on at 26 (the galaxy's `bound_share`, P09.T13, `stream_shell`,
+    /// P10.T9, and `member_remnants`, P09.T10; the stellar rules' `dwarf_sequence`, P06.T23.a,
+    /// `helium`, P15.T7.b, and `hd_limit`, P06.T42.b; [`StellarRules::every_26_hold`]).
     ///
     /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is
     /// struct-update syntax over it.
@@ -262,6 +274,15 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_26_hold().stream_shell,
             StreamShellRules::Shell
+        );
+        let remnants = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).member_remnants;
+        for v in [23, 24, 25] {
+            assert_eq!(remnants(v), MemberRemnantRules::EveryAttempt, "{v}");
+        }
+        assert_eq!(remnants(26), MemberRemnantRules::Tabulated);
+        assert_eq!(
+            GalaxyRules::every_26_hold().member_remnants,
+            MemberRemnantRules::Tabulated
         );
         for v in [23, 24, 25, 26] {
             assert_eq!(

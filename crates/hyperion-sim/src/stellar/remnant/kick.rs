@@ -614,6 +614,18 @@ impl StandardKickLaw {
         &self.table
     }
 
+    /// The natal kick of a white dwarf left by the loss of an envelope, from the star's `draws`:
+    /// what [`natal_kick`](Self::natal_kick) gives every such death, whatever its progenitor, a
+    /// Maxwellian of [`KickLawParams::wd_sigma_km_s`] (plan 09's tabulated remnants, P09.T10).
+    #[must_use]
+    pub(crate) fn white_dwarf_kick(&self, draws: &StarDraws) -> NatalKick {
+        maxwellian(
+            self.params.wd_sigma_km_s,
+            &KickDraws::of(draws),
+            KickMode::WhiteDwarf,
+        )
+    }
+
     /// The ordinary mode's speed, km/s, of a remnant of `remnant` M☉ from a core of `co_core`:
     /// the score's rank over the table mapped onto the log-normal.
     #[must_use]

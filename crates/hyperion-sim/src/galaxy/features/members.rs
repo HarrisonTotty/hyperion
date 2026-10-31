@@ -20,7 +20,8 @@
 //!   `k`'s star reads its draws at
 //!   [`StarDraws::for_attempt`] `k`, and the record's origin keeps `k` so that the star generated
 //!   later is the same. The loop is bounded at [`MAX_ATTEMPTS`] with a debug assertion; its
-//!   expected length is 1 ÷ retention.
+//!   expected length is 1 ÷ retention. From version 26 the cluster's tabulated remnants decide
+//!   the attempts they can, and only the rest build their star ([`remnants`]).
 //! - **Age and metallicity** are the cluster's, a nursery's members younger by up to its age
 //!   spread (`member.abundance`'s word 2); a second-population member draws its enrichment
 //!   (word 0) and a spread cluster's member its iron offset (words 3–4).
@@ -52,10 +53,12 @@ use super::interior::abundances::{IRON_SPREAD_SHARE, IRON_SPREAD_SIGMA};
 use super::interior::counts::{depleted_slope, depletion};
 use super::interior::retention::PAIR_SYSTEMIC_SIGMA;
 use super::interior::{ClassKind, Generation, MemberAbundances, MemberClass, Multiplicity};
+use remnants::remnant_attempt_fits;
 
 pub mod headroom;
 pub mod level_list;
 pub mod placement;
+pub(crate) mod remnants;
 pub mod source;
 
 pub use headroom::{
@@ -233,15 +236,14 @@ pub fn draw_member(
                 kept >= 1.0 || mark.is_below(Threshold::from_probability(1.0 - kept))
             }
             ClassKind::WhiteDwarf | ClassKind::NeutronStar | ClassKind::BlackHole => {
-                let address = (seed, system, attempt);
-                remnant_fits(
-                    class.kind,
-                    mass,
+                remnant_attempt_fits(
+                    galaxy,
+                    model,
+                    (class.kind, mass),
                     &composition,
-                    address,
+                    (seed, system, attempt),
                     age,
                     (v_eff, systemic),
-                    galaxy.rules().stellar,
                 )
             }
         };

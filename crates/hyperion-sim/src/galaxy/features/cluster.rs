@@ -51,6 +51,7 @@ use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::math;
 use crate::rng::{Mark, Stream};
 use crate::stellar::Composition;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::turn_off_mass;
 use crate::tables::cluster_dynamics::{
     BH_CLOCK_FACTOR, BH_LOSS_BETA, BH_LOSS_PSI_SLOPE, BH_RELAXATION_PREFACTOR,
@@ -65,6 +66,7 @@ use super::kinds::globular::history;
 use super::kinds::nursery::NurseryStage;
 use super::kinds::open_cluster::DISRUPTION_GAMMA as DISRUPTION_GAMMA_FOR_RATE;
 use super::kinds::open_cluster::{dissolution_time, evolution_survival, present_mass};
+use super::members::remnants::{self, CeilingCell};
 use crate::rng::{ObjectKey, tags};
 
 /// The mean member mass in the relaxation time, M☉ (P09.T7).
@@ -343,6 +345,8 @@ pub struct ClusterModel {
     central_density: f64,
     retention: Retention,
     black_hole_fraction: f64,
+    /// [`ClusterModel::white_dwarf_ceiling`], found when first asked.
+    white_dwarf_ceiling: CeilingCell,
 }
 
 impl ClusterModel {
@@ -406,6 +410,7 @@ impl ClusterModel {
             central_density,
             retention: kept,
             black_hole_fraction,
+            white_dwarf_ceiling: CeilingCell::default(),
         }
     }
 
@@ -678,6 +683,15 @@ impl ClusterModel {
     #[must_use]
     pub const fn marks(&self) -> &ClusterMarks {
         &self.parameters.marks
+    }
+
+    /// The initial mass below which every member leaves a white dwarf, under the stellar `rules`,
+    /// that version 26's member draws read ([`remnants::white_dwarf_ceiling`]), found the first
+    /// time it is asked, some 5–20 ms, and kept with the model.
+    #[must_use]
+    pub(crate) fn white_dwarf_ceiling(&self, rules: StellarRules) -> SolarMasses {
+        self.white_dwarf_ceiling
+            .get(rules, || remnants::white_dwarf_ceiling(self, rules))
     }
 }
 
