@@ -1008,7 +1008,14 @@ impl<'a> Builder<'a> {
     #[must_use]
     pub(super) fn wind_rate(&self, evaluated: &Evaluated, age: f64) -> f64 {
         let state = StarState::new(evaluated.parts(age));
-        wind::rate(self.options.wind(), &state, self.composition, self.eta).value()
+        wind::rate(
+            self.options.wind(),
+            &state,
+            self.composition,
+            self.eta,
+            self.options.rules(),
+        )
+        .value()
     }
 
     /// The remnant segment of `fate`, from its death on, after maxima of `max_before`, where the

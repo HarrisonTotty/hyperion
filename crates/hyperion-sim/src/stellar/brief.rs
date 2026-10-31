@@ -426,10 +426,16 @@ impl BriefModel {
         // guard passes, and no track at all: asked first, since a dead star's main sequence
         // (with its winds' knots, for a massive one) would be built for nothing.
         let first = age_at(age_at_epoch, ClockWindow::START);
-        let dead = fates.fate_fitted(m0, &composition, eta).filter(|fate| {
-            let margin = (STATED_FACTOR * fate.bounds.0).max(DEAD_MARGIN_FLOOR);
-            first > fate.death_age.value() * (1.0 + margin)
-        });
+        // The fate table is the version's tracks': under another Humphreys–Davidson arm the
+        // primary takes the exact route.
+        let fitted = rules.hd_limit.fitted_tables_hold();
+        let dead = fitted
+            .then(|| fates.fate_fitted(m0, &composition, eta))
+            .flatten()
+            .filter(|fate| {
+                let margin = (STATED_FACTOR * fate.bounds.0).max(DEAD_MARGIN_FLOOR);
+                first > fate.death_age.value() * (1.0 + margin)
+            });
         if let Some(fate) = dead {
             let draws = primary_draws(galaxy, record);
             let primary = table_primary(fate, composition, &draws, (age_at_epoch, m0), options)
@@ -674,7 +680,8 @@ struct Gate {
 ///
 /// It is conservative, not exact: a refused system takes the paired route, which is right
 /// whatever its pairs did. The tests check that every certified primary is its own model at
-/// times across the window.
+/// times across the window. The pair-light and reach tables the test reads are the version's
+/// tracks', so under another Humphreys–Davidson arm (P06.T42.b's hold) no pair is certified.
 #[must_use]
 fn gate(
     galaxy: &Galaxy,
@@ -694,6 +701,7 @@ fn gate(
         ..=Years::new(age_at(age_at_epoch, ClockWindow::END));
     let redrawn = grid_redraws(record, ctx);
     let stars = attempt.stars();
+    let tables_hold = galaxy.rules().stellar.hd_limit.fitted_tables_hold();
     let certified = attempt
         .pairs()
         .iter()
@@ -702,7 +710,7 @@ fn gate(
             let [a, b] = pair
                 .stars()
                 .map(|star| stars[usize::from(star.get())].initial_mass());
-            pair_keeps_own_models(a, b, pair.periastron(), composition, ages.clone())
+            tables_hold && pair_keeps_own_models(a, b, pair.periastron(), composition, ages.clone())
         });
     Gate {
         star_count: attempt.hierarchy().star_count(),

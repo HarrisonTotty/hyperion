@@ -2510,7 +2510,9 @@ log L 5.78–5.80, does the enforcing.
   - **Accept:** tests pass; nothing on the record calls the rate, so no golden moves.
 - **P06.T42.b The swap** (output moves; held on a lane branch, it rides version 25 (S1) if it is
   ready when that train's wiring starts, else the next galaxy train; decision-galaxy-25-train
-  §1.7). `WindRecipe::Modern` reads T42.a's rate past the limit. Its builder:
+  §1.7). `WindRecipe::Modern` reads T42.a's rate past the limit.
+  Records: [06-stellar-stage/records/P06.T42.b.md](06-stellar-stage/records/P06.T42.b.md). Its
+  builder:
   - re-checks the remnant masses, since the added term undoes part of Belczynski et al.'s
     black-hole calibration at solar metallicity;
   - checks `envelope_knots` against the term's stiffness (about 10⁴ M☉/yr deep past the line),

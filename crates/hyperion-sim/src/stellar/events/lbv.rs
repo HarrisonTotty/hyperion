@@ -6,30 +6,40 @@
 //! A star erupts inside its LBV window, the clock interval of [`StarModel::lbv_window`]
 //! (P06.T24.a): the hull from the first to the last age at which the star lies beyond the
 //! Humphreys–Davidson limit and is hotter than 8,000 K ([`is_luminous_blue_variable`]), in any
-//! living phase, within the part of its life the track is built for. Eruptions are not thinned
-//! inside the hull, so a star whose track leaves the region and comes back erupts in the gap too:
-//! at [Fe/H] = −1 the windows of 45–100 M☉ span some 2 × 10⁵ years with a red-supergiant stretch
-//! near 4,000 K inside them, and a 150 M☉ star's starts on its main sequence (both deferred
-//! findings in plan 06, P06.T28.e). The window is found once per call on the star's track. A star
-//! with no window (every star below about 40 M☉, whose track never reaches 6 × 10⁵ L☉) has no
-//! eruptions.
+//! living phase, within the part of its life the track is built for. Below version 26 eruptions
+//! are not thinned inside the hull, so a star whose track leaves the region and comes back erupts
+//! in the gap too: at [Fe/H] = −1 the windows of 45–100 M☉ span some 2 × 10⁵ years with a
+//! red-supergiant stretch near 4,000 K inside them, and a 150 M☉ star's starts on its main
+//! sequence (both deferred findings in plan 06, P06.T28.e). From version 26, behind the stellar
+//! rules' `hd_limit` hold (P06.T42.b's swap, which enforces the limit in the winds;
+//! `wind::HD_LIMIT_VERSION`), each candidate is thinned by [`is_luminous_blue_variable`] at its
+//! onset, so a star erupts only while it is one (research-p06 §8): the bound stays the constant,
+//! so the bins' words and every other eruption keep their places. The window is found once per
+//! call on the star's track. A star with no window (every star below about 40 M☉, whose track
+//! never reaches 6 × 10⁵ L☉) has no eruptions.
 //!
 //! # The rate
 //!
 //! One eruption per 12,000 years per star in the window ([`ERUPTIONS_PER_YEAR`]), a generator
 //! default and ours. The plan's provisional one per 30,000 years assumed some 500 such stars, about 30
 //! eruptions galaxy-wide in ±H; P06.T31's sampler finds 181 luminous blue variables at Milky Way
-//! values, so the rate is retuned to keep that figure: 181 × 2,000 years ÷ 12,000 years = 30.2
-//! eruptions in ±H, inside the plan's 15–60 (a slow test in `stellar::testing` measures it). The
+//! values below version 26, so the rate is retuned to keep that figure: 181 × 2,000 years ÷ 12,000
+//! years = 30.2 eruptions in ±H, inside the plan's 15–60 (a slow test in `stellar::testing`
+//! measures it). Under the enforced Humphreys–Davidson limit (the 26 hold) the same sampler finds
+//! 48.8 luminous blue variables and 7.9 eruptions in ±H once thinned, both below the plan's
+//! windows: the 26 train retunes the rate (`lbv_eruptions_galaxy_wide_under_the_enforced_limit`). The
 //! rate is a constant inside the window and zero outside it, and each bin's bound is the constant
 //! where the bin meets the window.
 //!
 //! The mean mass of the eruptions is taken to be in the track's wind (plan 06, design note 14): at
 //! the marks' mean ejecta of 2.15 M☉ the eruptions shed 1.8 × 10⁻⁴ M☉ a year on average, 1.2 times
 //! the modern recipe's luminous-blue-variable wind of 1.5 × 10⁻⁴ M☉ a year (Belczynski et al.
-//! 2010, ApJ 714, 1217, equation 8, the whole of an evolved star's wind beyond the limit), which
-//! a star of the window's main-sequence part does not blow (a deferred finding in plan 06,
-//! P06.T28.e). Nothing here changes the track.
+//! 2010, ApJ 714, 1217, equation 8, below version 26 the whole of an evolved star's wind beyond
+//! the limit), which a star of the window's main-sequence part does not blow (a deferred finding in
+//! plan 06, P06.T28.e). Under the enforced limit the wind strips tens of solar masses inside most
+//! windows and the eruptions' expected mass is a small share of it, but in the longest windows of
+//! the most massive stars, whose main-sequence part blows Vink's rate alone (up to 1.3 times the
+//! track's loss for 150 M☉ at solar metallicity). Nothing here changes the track.
 //!
 //! # Time
 //!
@@ -74,6 +84,8 @@ use crate::events::{
     from_nanos_saturating, tags,
 };
 use crate::math;
+use crate::stellar::classify::is_luminous_blue_variable;
+use crate::stellar::sse::wind::HdLimitRules;
 use crate::stellar::system::StarModel;
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
@@ -357,8 +369,18 @@ impl RateModel for LbvModel<'_> {
         }
     }
 
+    /// The constant inside the window; under the enforced Humphreys–Davidson limit only where the
+    /// star is a luminous blue variable at `t` as well (the module documentation's thinning).
     fn rate(&self, t: UniverseTime) -> EventsPerSecond {
-        if self.erupts_at(t) {
+        let erupts = self.erupts_at(t)
+            && match self.star.rules().hd_limit {
+                HdLimitRules::Belczynski => true,
+                HdLimitRules::Enforced => self
+                    .star
+                    .state_at(t)
+                    .is_some_and(|state| is_luminous_blue_variable(&state)),
+            };
+        if erupts {
             eruption_rate()
         } else {
             EventsPerSecond::ZERO

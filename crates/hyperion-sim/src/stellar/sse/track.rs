@@ -1255,7 +1255,13 @@ impl Track {
     fn star_state(&self, evaluated: &Evaluated, age: f64) -> StarState {
         let parts = evaluated.parts(age);
         let state = StarState::new(parts);
-        let rate = wind::rate(self.options.wind, &state, &self.composition, self.eta);
+        let rate = wind::rate(
+            self.options.wind,
+            &state,
+            &self.composition,
+            self.eta,
+            self.options.rules,
+        );
         StarState::new(StarStateParts {
             mass_loss_rate: rate,
             ..parts

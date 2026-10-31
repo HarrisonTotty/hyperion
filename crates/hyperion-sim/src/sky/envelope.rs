@@ -51,6 +51,7 @@
 //! magnitude over every age bin, and [`BrightnessEnvelope::mass_floor`] reads that one value a node
 //! for the question (R06.T8.f), bit for bit what a scan of the bins gives.
 
+use crate::GENERATOR_VERSION;
 use crate::galaxy::Galaxy;
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::imf::MassBand;
@@ -58,7 +59,8 @@ use crate::galaxy::placement::SystemKind;
 use crate::id::Layer;
 use crate::math;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
-use crate::stellar::sse::{MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track};
+use crate::stellar::rules::StellarRules;
+use crate::stellar::sse::{MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions};
 use crate::stellar::substellar;
 use crate::stellar::{Composition, StarState};
 use crate::tables::sky_envelope;
@@ -474,6 +476,25 @@ pub fn mass_nodes() -> Vec<f64> {
 #[doc(hidden)]
 #[must_use]
 pub fn raw_node(m: f64, fe_h: &[f64], samples_per_phase: u32) -> [f64; AGE_BINS + 1] {
+    raw_node_under(
+        m,
+        fe_h,
+        samples_per_phase,
+        StellarRules::of_version(GENERATOR_VERSION),
+    )
+}
+
+/// [`raw_node`] with the tracks built under the stellar stage's `rules`: the version's for the
+/// fitted table, another arm's for a test that re-measures the envelope under it (P06.T42.b's
+/// check of the brightness envelope and caps).
+#[must_use]
+pub(crate) fn raw_node_under(
+    m: f64,
+    fe_h: &[f64],
+    samples_per_phase: u32,
+    rules: StellarRules,
+) -> [f64; AGE_BINS + 1] {
+    let options = TrackOptions::default().with_rules(rules);
     let mut bins = [f64::INFINITY; AGE_BINS + 1];
     for &z in fe_h {
         let composition = Composition::from_fe_h(Dex::new(z), HeliumExcess::ZERO);
@@ -490,10 +511,11 @@ pub fn raw_node(m: f64, fe_h: &[f64], samples_per_phase: u32) -> [f64; AGE_BINS 
                 eta: StandardNormal::new(eta).expect("finite"),
                 ..StarDrawsParts::MEDIAN
             });
-            let track = Track::to_age(
+            let track = Track::to_age_with(
                 SolarMasses::new(m),
                 &composition,
                 &draws,
+                options,
                 Years::new(MAX_AGE_YEARS),
             );
             enter_track(&track, samples_per_phase, &mut bins);

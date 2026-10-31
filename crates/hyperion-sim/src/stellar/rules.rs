@@ -45,6 +45,13 @@
 //!   `tables::helium_26` from it. A track's rules ride its [`TrackOptions`], whose builders read
 //!   the table at one choke point, [`HeliumTable::of`]; `StarModel::new_under`, the engine's
 //!   context and the brief put the galaxy's rules on the options of every track they build.
+//! - [`hd_limit`](StellarRules::hd_limit), the Humphreys–Davidson limit in the modern winds, at
+//!   [`HD_LIMIT_VERSION`] (plan 06, P06.T42.b's swap, rendering plan R06's ask A2): Belczynski et
+//!   al.'s constant below it, the limit enforced from it, read at one choke point, the wind's
+//!   rate, through every track's options as the helium table is; and from it a luminous blue
+//!   variable's eruptions are thinned to the instants at which it is one. The fitted tables built
+//!   from the tracks keep the version's rules until the bump refits them, and with them the
+//!   galaxy's mean masses and so its parameters (`stellar/rules/hd_limit_hold.rs` lists them).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -56,6 +63,7 @@
 use crate::GeneratorVersion;
 use crate::stellar::classify::pm13::{DWARF_SEQUENCE_VERSION, DwarfSequenceRules};
 use crate::stellar::remnant::KickRankRules;
+use crate::stellar::sse::wind::{HD_LIMIT_VERSION, HdLimitRules};
 use crate::stellar::sse::{HELIUM_VERSION, HeliumRules};
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -74,6 +82,10 @@ pub(crate) struct StellarRules {
     ///
     /// [`HeliumTable::of`]: crate::stellar::sse::track::HeliumTable::of
     pub(crate) helium: HeliumRules,
+    /// How the modern winds treat an evolved star past the Humphreys–Davidson limit (the wind's
+    /// rate, `wind::rate`), and whether a luminous blue variable's eruptions are thinned to it,
+    /// the hold of [`HD_LIMIT_VERSION`].
+    pub(crate) hd_limit: HdLimitRules,
 }
 
 impl StellarRules {
@@ -93,6 +105,11 @@ impl StellarRules {
                 HeliumRules::Fitted
             } else {
                 HeliumRules::Identity
+            },
+            hd_limit: if version.get() >= HD_LIMIT_VERSION.get() {
+                HdLimitRules::Enforced
+            } else {
+                HdLimitRules::Belczynski
             },
         }
     }
@@ -130,6 +147,8 @@ impl StellarRules {
     }
 }
 
+#[cfg(test)]
+mod hd_limit_hold;
 #[cfg(test)]
 mod helium_hold;
 #[cfg(test)]
