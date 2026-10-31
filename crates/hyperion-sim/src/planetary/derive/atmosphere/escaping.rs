@@ -61,8 +61,8 @@
 //!    In the re-solve of a body whose passes judged its first solve a hothouse between the limits
 //!    ((c): a dry `Temperate` at or above water's saturation temperature at its surface pressure,
 //!    [`PublishedState::Hothouse`]), a `Temperate` publishes `RunawayGreenhouse` instead, every
-//!    step above reading the same division. From generator version 25 (P14.T53.e, behind its
-//!    hold) a pass whose previous pass's figures gave a state by rules 5–7
+//!    step above reading the same division. From generator version 25 (P14.T53.e) a pass whose
+//!    previous pass's figures gave a state by rules 5–7
 //!    ([`PassSurface::present`]) publishes that state in place of the present class, every step
 //!    above still reading the division.
 
@@ -95,7 +95,7 @@ use super::{
     Insolation, PartialPressures, PassSurface, PresentClimate, PublishedState, Retention,
     RunawayDeck, SILICATE_SOLIDUS, StepClimate, SupercriticalReservoir, SurfaceState,
     TEMPERATE_AIRBORNE_CARBON, earth_xuv_fluence, exobase_temperature, mole_fraction_of,
-    partitioned_greenhouse, present_state_in_force, retained, surface_mix,
+    partitioned_greenhouse, retained, surface_mix,
 };
 
 /// The melting point of ice Ih at one standard atmosphere, K: 273.15, IAPWS R10-06's 273.152 519
@@ -1132,8 +1132,8 @@ struct Body<'a> {
     /// climate's, or P14.T53.b part 1 (c)'s hothouse in its re-solve (`finish`).
     published: PublishedState,
     /// The state the previous pass's figures gave by P14.T53.e's rules 5–7, the pass's surface's
-    /// ([`PassSurface::present`]): `None` at the first pass, under their hold, and where rules 1–4
-    /// decided that pass's state.
+    /// ([`PassSurface::present`]): `None` at the first pass and where rules 1–4 decided that
+    /// pass's state.
     present: Option<PresentClimate>,
 }
 
@@ -1990,10 +1990,9 @@ pub(super) fn state_and_greenhouse(
 ///   `Temperate` between the limits now, `Snowball` beyond the maximum-greenhouse limit now, its
 ///   water lost and its carbon airborne all the same (the division's). The present class comes
 ///   from the hosts' luminosities alone, not from the passes' figures.
-/// - P14.T53.e, from generator version 25 (behind its hold): where the previous pass's figures
-///   gave a state by rules 5–7 (`carried`), that state replaces the present class, its division
-///   and its water's state unchanged; the first pass, and every pass under the hold, carries none
-///   and publishes the present class.
+/// - P14.T53.e, from generator version 25: where the previous pass's figures gave a state by
+///   rules 5–7 (`carried`), that state replaces the present class, its division and its water's
+///   state unchanged; the first pass carries none and publishes the present class.
 /// - (c): in the re-solve of a body whose first solve its passes judged a hothouse between the
 ///   limits ([`PublishedState::Hothouse`], [`solved_as_a_hothouse`]), a `Temperate` publishes
 ///   [`SurfaceState::RunawayGreenhouse`], its division and its water's state unchanged, and from
@@ -2025,13 +2024,11 @@ fn present_state(
     };
     match published {
         PublishedState::Hothouse => match present {
-            SurfaceState::Temperate => SurfaceState::RunawayGreenhouse,
-            SurfaceState::Snowball if present_state_in_force() => SurfaceState::RunawayGreenhouse,
+            SurfaceState::Temperate | SurfaceState::Snowball => SurfaceState::RunawayGreenhouse,
             SurfaceState::GasEnvelope
             | SurfaceState::MagmaOcean
             | SurfaceState::Airless
             | SurfaceState::RunawayGreenhouse
-            | SurfaceState::Snowball
             | SurfaceState::Tenuous
             | SurfaceState::SteamEnvelope => present,
         },

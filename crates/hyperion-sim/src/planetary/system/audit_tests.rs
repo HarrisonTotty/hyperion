@@ -7,8 +7,9 @@
 //!
 //! - **M1**, P14.T53.b part 1 (V3.9 part 1): no runaway beyond the maximum-greenhouse limit now
 //!   but one its total heating holds above the runaway limit (a tidal Venus, P14.T54.b.k), none
-//!   under Venus's deck below 430 K, and every runaway between the limits (c)'s, its hothouses
-//!   named with their decks and their sides of water's saturation temperature
+//!   under Venus's deck below 430 K, and every runaway between the limits a hothouse, (c)'s or,
+//!   from generator version 25, one its passes carry by P14.T53.e's rule 6, its hothouses named
+//!   with their decks and their sides of water's saturation temperature
 //!   (decision-p14-t54b-k-hothouses §3);
 //! - **M3**, P14.T53.a's K4 ceiling: no body beyond the maximum-greenhouse limit now lies above
 //!   max(273.15 K, `T_rest`) (decision-absurd-states-24 R4.2; decision-bump-plan-after-22 K4's
@@ -45,9 +46,9 @@ use super::*;
 use crate::planetary::chem::partition::CondensatePhase;
 use crate::planetary::derive::SurfaceLag;
 use crate::planetary::derive::atmosphere::{
-    ACID_CYCLING_TEMPERATURE, Absorber, Gas, GreenhouseCeiling, GreenhouseConstants, RunawayDeck,
-    SurfaceMaterial, SurfaceState, WATER_MELTING_POINT, grey_surface_temperature,
-    water_saturation_temperature, with_deck_counts,
+    ACID_CYCLING_TEMPERATURE, Absorber, Gas, GreenhouseCeiling, GreenhouseConstants,
+    PresentClimate, RunawayDeck, SurfaceMaterial, SurfaceState, WATER_MELTING_POINT,
+    grey_surface_temperature, water_saturation_temperature, with_deck_counts,
 };
 use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::{BondAlbedo, equilibrium_temperature};
@@ -305,6 +306,9 @@ impl Saturation {
 /// `Temperate` at 579.0 K under its 626.6 K; [`HOTHOUSE_BODY`], decked at 622.4 K, lies under
 /// water's saturation temperature, 647.096 K, its first solve 799.8 K above it; and
 /// [`CLOSURE_HOTHOUSE_BODY`], a `MagmaOcean` before it, joins (c) decked at 716.0 K above it.
+/// From generator version 25 (P14.T53.e) each is published by its first solve, its passes
+/// carrying rule 6's `RunawayGreenhouse`, with no (c) re-solve, and [`CLOSURE_HOTHOUSE_BODY`] lies
+/// decked at 683.9 K.
 const AUDIT_SET_HOTHOUSES: [(&str, RunawayDeck, Saturation); 6] = [
     (
         "02002b2ca0010000.0200",
@@ -424,11 +428,14 @@ impl AuditBody {
     /// its total heating, its record's surface heat flow and the starlight it absorbs, reaches the
     /// runaway limit ([`passes_m1_a`]), which (b) and (c) are not asked of; (b) under
     /// Venus's deck its mean surface temperature is at least the acid's cycling temperature, 430 K
-    /// ([`ACID_CYCLING_TEMPERATURE`]); (c) between the limits now ([`runaway_now`] below 1) it is
-    /// (c)'s: solved again, its passes take (c)'s branch once, a first solve `Temperate` that (c)
-    /// judges a hothouse (`solved_as_a_hothouse`, counted by [`with_deck_counts`]). Each of (c)'s
-    /// is stated by name with its solves' pass counts, and its deck and its side of water's
-    /// saturation temperature ([`Saturation::of`]) are held ([`hothouse`](AuditBody::hothouse)).
+    /// ([`ACID_CYCLING_TEMPERATURE`]); (c) between the limits now ([`runaway_now`] below 1) it is a
+    /// hothouse: solved again, its passes take (c)'s branch once, a first solve `Temperate` that
+    /// (c) judges a hothouse (`solved_as_a_hothouse`, counted by [`with_deck_counts`]), or, from
+    /// generator version 25 (P14.T53.e), its published pass carries rule 6's `RunawayGreenhouse`,
+    /// no liquid water at or above water's saturation temperature by (c)'s convention, which its
+    /// first solve's passes read. Each is stated by name with its solves' pass counts, and its
+    /// deck and its side of water's saturation temperature ([`Saturation::of`]) are held
+    /// ([`hothouse`](AuditBody::hothouse)).
     fn runaway(&mut self, case: &AuditCase<'_>) {
         let Some(surface) = case.surface() else {
             return;
@@ -481,19 +488,21 @@ impl AuditBody {
             return;
         }
         let (again, counts) = with_deck_counts(|| (case.again)(PassDriver::Solve));
+        let carried = again.atmosphere().carried_state();
         let line = format!(
-            "solved again {:?}: {} hothouse solve, {} passes Temperate, {} under the deck, {} \
-             without it; published {line}",
+            "solved again {:?} (carried {carried:?}): {} hothouse solve, {} passes Temperate, {} \
+             under the deck, {} without it; published {line}",
             again.atmosphere().state(),
             counts.hothouses,
             counts.temperate_passes,
             counts.hothouse_passes,
             counts.hothouse_deckless_passes
         );
-        if counts.hothouses != 1 || again.atmosphere().state() != SurfaceState::RunawayGreenhouse {
+        let hothouse = counts.hothouses == 1 || carried == Some(PresentClimate::RunawayGreenhouse);
+        if !hothouse || again.atmosphere().state() != SurfaceState::RunawayGreenhouse {
             self.fault(
                 Item::M1,
-                &format!("(c) a runaway between the limits not (c)'s: {line}"),
+                &format!("(c) a runaway between the limits not a hothouse: {line}"),
             );
         }
         self.hothouse = Some((deck, Saturation::of(air_t_s, p_s)));
@@ -1303,10 +1312,11 @@ fn m1_a_judges_a_runaway_beyond_the_limit_by_its_total_heating() {
 /// for the bless note.
 ///
 /// No runaway lies beyond the maximum-greenhouse limit now or under Venus's deck below 430 K,
-/// every runaway between the limits now is (c)'s (its first solve a `Temperate` that (c) judges a
-/// hothouse), and (c)'s hothouses are exactly [`AUDIT_SET_HOTHOUSES`]' six with their decks and
-/// their sides of water's saturation temperature ([`assert_hothouses`]): any seventh, a lost one,
-/// or a changed deck or side fails, by name. Its walk is the audit's ([`audit_set_census`]).
+/// every runaway between the limits now is a hothouse ((c)'s, or from generator version 25 one its
+/// passes carry by P14.T53.e's rule 6), and the hothouses are exactly [`AUDIT_SET_HOTHOUSES`]' six
+/// with their decks and their sides of water's saturation temperature ([`assert_hothouses`]): any
+/// seventh, a lost one, or a changed deck or side fails, by name. Its walk is the audit's
+/// ([`audit_set_census`]).
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
 fn under_every_24_hold_m1_s_six_hothouses_hold_over_the_audit_set() {

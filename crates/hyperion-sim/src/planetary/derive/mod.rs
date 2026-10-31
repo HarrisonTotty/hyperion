@@ -125,7 +125,7 @@ use crate::planetary::derive::atmosphere::{
     PassMaturity, PassSurface, PassWeathering, PresentClimate, PublishedState, RunawayDeck,
     SpunClimate, SpunColdTraps, SurfaceMaterial, VolatileDraws, VolatileInventory,
     atmosphere_and_lid, energy_limited_loss, formation_temperature, helium_left, nitrogen_boosted,
-    pass_regolith, present_state_in_force, solved_as_a_hothouse, solved_without_the_deck,
+    pass_regolith, solved_as_a_hothouse, solved_without_the_deck,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -1444,7 +1444,7 @@ pub fn derive_body(
 /// a single pass at a stated albedo.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum PassDriver {
-    /// [`passes::solve`], the generator's.
+    /// [`passes::solve_in_context`], the generator's.
     Solve,
     /// P14.T51.b's loop as it was built: at most 64 passes until one settles, the last published.
     #[cfg(test)]
@@ -2249,33 +2249,8 @@ impl PassBody<'_> {
     #[must_use]
     fn stand_in_passes(&self, driver: PassDriver, surface: &PassSurface<'_>) -> Passes {
         match driver {
-            PassDriver::Solve if present_state_in_force() => {
-                self.stand_in_present_passes(BondAlbedo::BEFORE_ATMOSPHERES, surface)
-            }
-            #[cfg(test)]
-            PassDriver::From(start) if present_state_in_force() => {
-                self.stand_in_present_passes(start, surface)
-            }
             PassDriver::Solve => {
-                let solved = passes::solve(
-                    BondAlbedo::BEFORE_ATMOSPHERES,
-                    |albedo| self.pass(surface, albedo),
-                    |&(_, _, air, ..): &PassOut| air.albedo(),
-                    settled,
-                );
-                let (irradiated, heated, air, crust_lid, weathered, cold_traps) = solved.pass;
-                Passes {
-                    albedo: solved.albedo,
-                    irradiated,
-                    heated,
-                    air,
-                    count: solved.count,
-                    convergence: solved.convergence,
-                    spun: None,
-                    crust_lid,
-                    weathered,
-                    cold_traps,
-                }
+                self.stand_in_present_passes(BondAlbedo::BEFORE_ATMOSPHERES, surface)
             }
             #[cfg(test)]
             PassDriver::T51b => self.t51b_passes(surface),
@@ -2313,27 +2288,7 @@ impl PassBody<'_> {
                 }
             }
             #[cfg(test)]
-            PassDriver::From(start) => {
-                let solved = passes::solve(
-                    start,
-                    |albedo| self.pass(surface, albedo),
-                    |&(_, _, air, ..): &PassOut| air.albedo(),
-                    settled,
-                );
-                let (irradiated, heated, air, crust_lid, weathered, cold_traps) = solved.pass;
-                Passes {
-                    albedo: solved.albedo,
-                    irradiated,
-                    heated,
-                    air,
-                    count: solved.count,
-                    convergence: solved.convergence,
-                    spun: None,
-                    crust_lid,
-                    weathered,
-                    cold_traps,
-                }
-            }
+            PassDriver::From(start) => self.stand_in_present_passes(start, surface),
             #[cfg(test)]
             PassDriver::Traced => unreachable!("the re-check traces a record's passes"),
         }

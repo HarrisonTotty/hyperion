@@ -7008,14 +7008,16 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
 }
 
 /// The pinned bodies of P14.T51.l's record ([`SECANT_OTHER_CROSSINGS`], [`SECANT_PARTIALS_ONLY`])
-/// whose passes converge under both roots from generator version 25 (P14.T53.b part 3), where with
-/// part 3 held they ended in brackets, in the walk's order.
-const SECANT_PINNED_CONVERGED: [&str; 5] = [
+/// whose passes converge under both roots from generator version 25, where with its holds they
+/// ended in brackets, in the walk's order: the first five by P14.T53.b part 3, and
+/// 02003b2d1ffe0001.0200, whose bracket held several jumps, by P14.T53.e's present state.
+const SECANT_PINNED_CONVERGED: [&str; 6] = [
     "01ffeb2c5ffe0000.0400",
     "01ffdb2c1fff0001.0900",
     "01ffdb2c1fff0001.0b00",
     "01ffdb2c60020000.0100",
     "01ffeb2d1ffc0000.0600",
+    "02003b2d1ffe0001.0200",
 ];
 
 /// P14.T51.l's pinned bodies end at crossings, not only at their pinned bits (research's condition
@@ -7024,7 +7026,7 @@ const SECANT_PINNED_CONVERGED: [&str; 5] = [
 /// bracketed, and every bracket round whose published end is the body's albedo stopped at a
 /// crossing of the diagonal: its two ends' g on opposite sides within 2⁻³² in albedo
 /// (`Crossing::is_valid`); but [`SECANT_PINNED_CONVERGED`]'s, which converge under both from
-/// generator version 25 (P14.T53.b part 3). It moves no output.
+/// generator version 25 (P14.T53.b part 3 and P14.T53.e). It moves no output.
 #[test]
 fn the_secant_root_s_pinned_bodies_end_at_crossings() {
     use crate::planetary::derive::passes::{
@@ -8646,30 +8648,6 @@ fn the_states_and_the_dark_thick_airs_are_recorded() {
         census_walk(name, ctx, system, &mut |case| census.visit(case));
     }
     report_states(&census);
-}
-
-/// [`the_states_and_the_dark_thick_airs_are_recorded`] under P14.T53.e's rules alone, over the same
-/// systems generated afresh under them: a measurement for 25's bless, run by name, which P14.T53.e's
-/// tests ask of it ("its bless re-runs the states census and item 26's re-check", its three second
-/// starts among them). Not under every 25 hold: the cover rule's check holds a supercritical entry
-/// massless, version 24's, where P14.T53.b part 3's reservoir carries its mass from 25, which 25's
-/// bump restates.
-#[test]
-#[ignore = "a measurement for the 25 bless, run by name"]
-fn under_the_present_state_the_states_and_the_dark_thick_airs_are_recorded() {
-    use crate::planetary::derive::atmosphere::{PresentStateRules, with_present_state};
-    with_present_state(PresentStateRules::Present, || {
-        let mut census = Census::default();
-        for ctx in sample().iter().take(60) {
-            let system = generate(SEED, ctx);
-            census_walk("sample", ctx, &system, &mut |case| census.visit(case));
-        }
-        for (name, ctx) in golden_contexts() {
-            let system = generate(Seed::new(GOLDEN_SYSTEMS_SEED), &ctx);
-            census_walk(name, &ctx, &system, &mut |case| census.visit(case));
-        }
-        report_states(&census);
-    });
 }
 
 /// The states census's lists ([`the_states_and_the_dark_thick_airs_are_recorded`]), printed, with
@@ -11233,9 +11211,11 @@ const OVERSHOT_TEMPERATES: [(&str, u64, u16); 3] = [
 ];
 
 /// The thermostat's correction (R3 Q1 (3), as K5 applies it), on its three overshot Temperates:
-/// each stays `Temperate` with part of its carbon stored, its surface at the
-/// set point, liquid at its edge or frozen just below a jump, and none above water's liquid range
-/// (each state stated). Before it, each took all its carbon airborne at 723–861 K.
+/// each keeps part of its carbon stored, its surface at the set point, liquid at its edge or frozen
+/// just below a jump, and none above water's liquid range (each state stated). From generator
+/// version 25 (P14.T53.e) the sample's two, frozen at 256.6 K and 267.4 K, are `Snowball`s by rule
+/// 5, and `close_binary`'s stays `Temperate`. Before the correction, each took all its carbon
+/// airborne at 723–861 K.
 #[test]
 fn under_the_escape_batch_the_three_overshot_temperates_stop_at_the_set_point() {
     use crate::planetary::derive::atmosphere::{WaterPhase, water_phase};
@@ -11266,7 +11246,12 @@ fn under_the_escape_batch_the_three_overshot_temperates_stop_at_the_set_point() 
             crate::planetary::chem::escape::EscapeOutcome::airborne_carbon_share,
         );
         eprintln!("{set} {id:016x}.{index:04x}: {}", named_state(&derived));
-        assert_eq!(air.state(), SurfaceState::Temperate, "{set} {index:04x}");
+        let state = if set == "sample" {
+            SurfaceState::Snowball
+        } else {
+            SurfaceState::Temperate
+        };
+        assert_eq!(air.state(), state, "{set} {index:04x}");
         assert!(share < 1.0, "{set} {index:04x}: all of its carbon airborne");
         assert_ne!(water_phase(t, p), WaterPhase::Hot, "{set} {index:04x}");
         assert!(t.value() < 330.0, "{set} {index:04x}: {} K", t.value());
@@ -11890,7 +11875,8 @@ fn present_census() -> &'static PresentCensus {
 }
 
 /// The census's five decked runaways about M dwarfs (decision-absurd-states-24 R3.1), each
-/// published under Venus's deck at 273–360 K by P14.T53.a's batch.
+/// published under Venus's deck at 273–360 K by P14.T53.a's batch; from generator version 25
+/// (P14.T53.e) all but [`DECKED_DESERTS`]' two are runaways solved without the deck.
 const DECKED_FIVE: [&str; 5] = [
     "220016587ff80000.0900",
     "02001b2c9ffe0000.0200",
@@ -11898,6 +11884,12 @@ const DECKED_FIVE: [&str; 5] = [
     "01ffeb2ce0000000.0100",
     "01ffeb2ca0000000.0100",
 ];
+
+/// The two of [`DECKED_FIVE`] that are `Temperate` from generator version 25 by P14.T53.e's rule
+/// 7, each a dry desert inside the present runaway limit: one at 351.9 K under 1.2 mbar, below
+/// water's triple-point pressure, where rule 6 is not judged, and one at 341.1 K under 1.13 bar,
+/// below water's saturation temperature there.
+const DECKED_DESERTS: [&str; 2] = ["220016587ff80000.0900", "02001b2c9ffe0000.0200"];
 
 /// P14.T53.b part 1's census, a measurement for the record (decision-absurd-states-24 R3–R4), run
 /// by name over [`present_census`]'s set: the runaways solved without the deck whose deckless
@@ -12161,23 +12153,27 @@ pub(super) const CLOSURE_HOTHOUSE_BODY: &str = "01ffeb2c5fff0000.0100";
 /// assertion):
 ///
 /// - no `RunawayGreenhouse` lies beyond the maximum-greenhouse limit now ([`limit_now`] below 1),
-///   and none between the limits now ([`runaway_now`] below 1) but (c)'s hothouses, each listed by
-///   name with its present ratios, its solves' counts, `T_s`, Bond albedo and `p_s`, and water's
-///   saturation temperature there: solved again, it takes one (c) re-solve, a first solve that (c)
-///   judges a hothouse, and at 24 they are the census's [`HOTHOUSE_BODY`] and, under the thick-air
-///   closure, [`CLOSURE_HOTHOUSE_BODY`];
+///   and none between the limits now ([`runaway_now`] below 1) but hothouses, each listed by name
+///   with its present ratios, its solves' counts, `T_s`, Bond albedo and `p_s`, and water's
+///   saturation temperature there: from generator version 25 (P14.T53.e) its first solve's passes
+///   carry rule 6's `RunawayGreenhouse`, so that, solved again, it takes no (c) re-solve, and at 24
+///   they are the census's [`HOTHOUSE_BODY`] and, under the thick-air closure,
+///   [`CLOSURE_HOTHOUSE_BODY`];
 /// - no `Temperate` lies at or above water's saturation temperature at its `p_s` by (c)'s
 ///   convention (`water_saturation_temperature`: the liquid–vapour curve, 647.096 K at or above
 ///   22.064 MPa, not judged below 611.657 Pa; R4.2's serve-gate test);
 /// - none keeps Venus's deck below the acid's cycling temperature, 430 K;
-/// - every runaway whose water a runaway's and which is not one publishes its present class,
-///   `Snowball` beyond the maximum-greenhouse limit now and `Temperate` within it, a runaway at the
-///   hosts' peak alone; LOOK72's 106 K runaway ([`LOOK72_106_K_RUNAWAY`]) is a `Snowball` whose
+/// - every body whose water is a runaway's and which is not one, a runaway at the hosts' peak,
+///   publishes a present climate's state by rules 5–7 from generator version 25 (P14.T53.e),
+///   `Snowball` or `Temperate`, whatever its insolation class, so that a dry desert inside the
+///   runaway limit now is `Temperate` by rule 7; LOOK72's 106 K runaway ([`LOOK72_106_K_RUNAWAY`])
+///   is a `Snowball` whose
 ///   water, kept beyond its escape's capacity from generator version 25, lies as its ice
 ///   (P14.T53.b part 3; decision-p14-t53b-part3 §12 (0900));
 /// - decision-pre-23-review item 33's world ([`ITEM_33_WORLD`]) is not a runaway;
-/// - the census's five decked runaways ([`DECKED_FIVE`]) are solved without the deck, inside the
-///   present limit, each stated with its present ratio, `T_s`, Bond albedo and `p_s`;
+/// - the census's five decked runaways ([`DECKED_FIVE`]) lie inside the present limit, each stated
+///   with its present ratio, `T_s`, Bond albedo and `p_s`: three solved without the deck, and
+///   [`DECKED_DESERTS`]' two `Temperate` by rule 7;
 /// - no present runaway ratio exceeds its peak's.
 ///
 /// The bodies solved without the deck whose deckless `T_s` is at or above the cycling temperature
@@ -12221,7 +12217,8 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
         "a runaway under Venus's deck below the cycling temperature"
     );
 
-    // Arm (c): every runaway between the limits now is a hothouse, its first solve (c)'s case.
+    // Arm (c): every runaway between the limits now is a hothouse, from generator version 25 its
+    // first solve's passes carrying rule 6's runaway (P14.T53.e), with no (c) re-solve.
     let hothouses: Vec<&PresentBody> = census
         .present
         .iter()
@@ -12242,8 +12239,8 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
             .unwrap_or_else(|| panic!("{}: not solved again", hothouse.label));
         assert_eq!(
             counts.hothouses,
-            1,
-            "{}: its first solve is not (c)'s: {}",
+            0,
+            "{}: solved again by (c): {}",
             hothouse.label,
             hothouse.hothouse_line()
         );
@@ -12256,7 +12253,7 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
         [HOTHOUSE_BODY, CLOSURE_HOTHOUSE_BODY]
             .map(|id| format!("sample {id} planets"))
             .to_vec(),
-        "(c)'s hothouses at 24"
+        "the hothouses at 24"
     );
     // Count (xi): a hothouse that ends deckless, or whose published `T_s` lies under water's
     // saturation temperature, is named to main.
@@ -12288,26 +12285,21 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
         Vec::<String>::new(),
         "a Temperate at or above water's saturation temperature at its p_s"
     );
-    // A runaway's water under a state that is not a runaway's: a past-only runaway, published at
-    // its present class.
-    let mut past_only = 0;
+    // A runaway's water under a state that is not a runaway's: a runaway at the hosts' peak,
+    // published at a present climate's state by rules 5–7 (P14.T53.e).
+    let mut runaway_waters = 0;
     for now in &census.present {
         if now.water_state == SurfaceState::RunawayGreenhouse
             && now.state != SurfaceState::RunawayGreenhouse
         {
+            assert!(now.runaway_peak >= 1.0, "{}: {}", now.label, now.line());
             assert!(
-                now.runaway_peak >= 1.0 && outside(now),
+                matches!(now.state, SurfaceState::Snowball | SurfaceState::Temperate),
                 "{}: {}",
                 now.label,
                 now.line()
             );
-            let class = if now.maximum_now < 1.0 {
-                SurfaceState::Snowball
-            } else {
-                SurfaceState::Temperate
-            };
-            assert_eq!(now.state, class, "{}: {}", now.label, now.line());
-            past_only += 1;
+            runaway_waters += 1;
         }
     }
     let runaway_106_k: Vec<&PresentBody> = census
@@ -12345,8 +12337,12 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
         assert_eq!(found.len(), 1, "{name}");
         for now in found {
             eprintln!("{name}: {}", now.line());
-            assert_eq!(now.state, SurfaceState::RunawayGreenhouse, "{name}");
-            assert_eq!(now.deck, RunawayDeck::Deckless, "{name}");
+            if DECKED_DESERTS.contains(&name) {
+                assert_eq!(now.state, SurfaceState::Temperate, "{name}");
+            } else {
+                assert_eq!(now.state, SurfaceState::RunawayGreenhouse, "{name}");
+                assert_eq!(now.deck, RunawayDeck::Deckless, "{name}");
+            }
             assert!(now.runaway_now >= 1.0, "{name}");
         }
     }
@@ -12362,9 +12358,9 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
         .filter(|b| b.deck == RunawayDeck::Deckless)
         .count();
     eprintln!(
-        "{past_only} past-only runaways publish their present class; {} hothouses publish a \
-         runaway; {deckless} runaways are solved without the deck ({:?} in the walk), {} of them \
-         at or above {cycling} K without it (a partial deck, for P14.T53.e):\n  {}",
+        "{runaway_waters} runaways' waters publish a present climate's state; {} hothouses \
+         publish a runaway; {deckless} runaways are solved without the deck ({:?} in the walk), \
+         {} of them at or above {cycling} K without it (a partial deck, for P14.T53.e):\n  {}",
         hothouses.len(),
         census.walked,
         partial.len(),
@@ -12391,8 +12387,9 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
 ///   the deck at or above the acid's cycling temperature, 430 K, so that none keeps it colder;
 /// - a runaway solved without the deck (`RunawayDeck::Deckless`) carries none, its sulphur case
 ///   2's dry branch, once through, as a temperate world's; the census's five decked runaways
-///   ([`DECKED_FIVE`]) are among them;
-/// - (c)'s hothouse ([`HOTHOUSE_BODY`]) keeps its deck, the cycling case.
+///   ([`DECKED_FIVE`]) but [`DECKED_DESERTS`]' two, `Temperate` from generator version 25
+///   (P14.T53.e), are among them;
+/// - the census's hothouse ([`HOTHOUSE_BODY`]) keeps its deck, the cycling case.
 ///
 /// The decked and deckless runaways are printed with their `T_s` and `p_s`, the deckless with
 /// whether they carry a sulphate layer (an `H2SO4` mode of no deck).
@@ -12469,7 +12466,10 @@ fn under_every_24_hold_no_record_keeps_venus_s_deck_below_the_cycling_temperatur
         Vec::<String>::new(),
         "Venus's deck below the cycling temperature"
     );
-    for name in DECKED_FIVE {
+    for name in DECKED_FIVE
+        .into_iter()
+        .filter(|name| !DECKED_DESERTS.contains(name))
+    {
         assert!(
             deckless
                 .iter()
@@ -12482,7 +12482,7 @@ fn under_every_24_hold_no_record_keeps_venus_s_deck_below_the_cycling_temperatur
             .iter()
             .any(|line| line.starts_with(&format!("sample {HOTHOUSE_BODY} "))
                 && !line.ends_with("no acid deck formed")),
-        "{HOTHOUSE_BODY}: (c)'s hothouse without its deck"
+        "{HOTHOUSE_BODY}: the hothouse without its deck"
     );
 }
 
@@ -12491,15 +12491,18 @@ fn under_every_24_hold_no_record_keeps_venus_s_deck_below_the_cycling_temperatur
 /// P14.T24.g's cycling case (`SulphurCycle::case_of`'s first arm), its `T_s`, A and `p_s` stated:
 /// under the thick-air closure (decision-p14-t53a-thick-co2 §6) 622.4 K, 0.76 and 414.8 bar, its
 /// `T_s` under water's saturation temperature, where T53.a's batch as built had 934.6 K above it,
-/// above water's critical pressure, so that its saturation temperature is 647.096 K. Its passes
-/// are counted as one hothouse re-solve after a first solve that (c) judges, with no third solve.
-/// Its first solve's own figures (with (c) off, a `Temperate` at about 799.8 K and A 0.30) and its
-/// comparison with P14.T53.a's batch's decked solve, to the bit, went with the escape's hold at the
-/// 23 → 24 bump.
+/// above water's critical pressure, so that its saturation temperature is 647.096 K. From
+/// generator version 25 (P14.T53.e) its first solve's passes carry rule 6's `RunawayGreenhouse`
+/// from a dry `Temperate`'s figures above water's saturation temperature, so that its first solve
+/// is published, carrying that state, and no re-solve is counted; under the insolation class's
+/// state, version 24's before P14.T53.e's hold went, its passes were counted as one hothouse
+/// re-solve after a first solve that (c) judged. Its first solve's own figures (with (c) off, a
+/// `Temperate` at about 799.8 K and A 0.30) and its comparison with P14.T53.a's batch's decked
+/// solve, to the bit, went with the escape's hold at the 23 → 24 bump.
 #[test]
 fn under_every_24_hold_the_census_s_hothouse_publishes_a_runaway_under_its_deck() {
     use crate::planetary::derive::atmosphere::{
-        RunawayDeck, water_saturation_temperature, with_deck_counts,
+        DeckCounts, PresentClimate, RunawayDeck, water_saturation_temperature, with_deck_counts,
     };
     let (system_id, _) = HOTHOUSE_BODY.split_once('.').expect("a body ID");
     let ctx = sample()
@@ -12548,15 +12551,11 @@ fn under_every_24_hold_the_census_s_hothouse_publishes_a_runaway_under_its_deck(
     assert_same_bits(saturation, 647.096);
     assert!(air.surface_temperature().value() < saturation);
     assert_eq!(
-        (
-            counts.hothouses,
-            counts.hothouse_passes,
-            counts.hothouse_deckless,
-        ),
-        (1, u64::from(derived.atmosphere_passes()), 0),
-        "{counts:?}"
+        air.carried_state(),
+        Some(PresentClimate::RunawayGreenhouse),
+        "rule 6's runaway, carried"
     );
-    assert!(counts.temperate_passes > 0, "{counts:?}");
+    assert_eq!(counts, DeckCounts::default(), "no re-solve");
 }
 
 // P14.T53.b part 2: the supercritical envelope's section (decision-absurd-states-24 R2), with every
@@ -13343,21 +13342,18 @@ impl SteamBody {
 }
 
 /// [`part_three_census`] with the later 25 holds set back, for a caller inside
-/// `with_every_25_hold`: part 3's landing alone. P14.T53.e's movers are its own census's
-/// (`present_state_tests`), P14.T53.c's exposed share's are `exposed_ice_tests`', R09.T7.g's
+/// `with_every_25_hold`: part 3's landing with P14.T53.e's present state, on the record from
+/// generator version 25. P14.T53.c's exposed share's movers are `exposed_ice_tests`', R09.T7.g's
 /// ray-traced plains' its own (`cold_trap_tests`), and P14.T51.l's secant root's its own
 /// (`under_the_secant_root_the_passes_and_movers_are_stated`).
 fn part_three_s_own_25_census(sets: &[(&str, Seed, &SystemContext)]) -> Vec<SteamBody> {
-    use crate::planetary::derive::atmosphere::{PresentStateRules, with_present_state};
     use crate::planetary::derive::passes::{PassRoot, with_pass_root};
     use crate::planetary::hooks::cold_traps::with_rough_plains;
     use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
     use hyperion_surface::cold_trap::PlainsModel;
-    with_present_state(PresentStateRules::Held, || {
-        with_exposed_ice(ExposedIceRules::Held, || {
-            with_rough_plains(PlainsModel::Bowls, || {
-                with_pass_root(PassRoot::Halvings, || part_three_census(sets))
-            })
+    with_exposed_ice(ExposedIceRules::Held, || {
+        with_rough_plains(PlainsModel::Bowls, || {
+            with_pass_root(PassRoot::Halvings, || part_three_census(sets))
         })
     })
 }

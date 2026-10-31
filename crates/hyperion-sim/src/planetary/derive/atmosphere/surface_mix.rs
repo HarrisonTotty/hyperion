@@ -142,9 +142,8 @@ pub(crate) struct PassSurface<'a> {
     /// The state the previous pass carried by P14.T53.e's rules 5–7, which this pass publishes and
     /// its state-keyed branches read in place of its climate's class (`escaping`'s
     /// `present_state`): `None` from the stand-in's constructor, the context's under the body's
-    /// own climate ([`PassContext::present`]), and `None` there too at the first pass, under the
-    /// rules' hold and after a pass whose state rules 1–4 decided or whose figures agreed with its
-    /// class.
+    /// own climate ([`PassContext::present`]), and `None` there too at the first pass and after a
+    /// pass whose state rules 1–4 decided or whose figures agreed with its class.
     pub(crate) present: Option<PresentClimate>,
 }
 

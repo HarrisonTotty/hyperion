@@ -6005,10 +6005,10 @@ fn under_every_24_hold_only_a_dry_temperate_at_water_s_saturation_temperature_is
     );
 }
 
-/// P14.T53.b part 1 (c)'s third solve through the passes
-/// (decision-t53b-arm-c §4.3): a hothouse between the limits whose re-solve as a runaway under
-/// Venus's deck ends below the acid's 430 K is solved a third time without the deck, and that
-/// solve is published.
+/// A hothouse between the limits through the passes (P14.T53.b part 1 (b) and (c);
+/// decision-t53b-arm-c §4.3): from generator version 25 (P14.T53.e) its passes carry rule 6's
+/// `RunawayGreenhouse`, so that its first solve ends a runaway under Venus's deck below the acid's
+/// 430 K, which is solved once more without the deck, and that solve is published.
 ///
 /// The body is hand-built and driven over a record with no figures (each pass reads C₀, and no
 /// crust), its spin locked 1:1 to its host: an Earth mass at the median radius rank, with Earth's
@@ -6017,24 +6017,28 @@ fn under_every_24_hold_only_a_dry_temperate_at_water_s_saturation_temperature_is
 /// fits (0.0130 L☉, 0.302 R☉, 3,549 K), whose largest past luminosity is twice that (the test's
 /// own figure), so that the body lay inside the runaway limit then and its water is lost.
 ///
-/// - Its first solve is that past runaway's dry division published `Temperate` at about 496.0 K,
-///   A 0.176 and 19.83 bar, 10.9 K above water's saturation temperature there, 485.1 K, which (c)
-///   judges a hothouse; its solve as a runaway under the deck ends at about 364.6 K and A 0.76,
-///   below 430 K (both stated to version 23 by the escape's hold's switches, gone at the 23 → 24
-///   bump).
-/// - So its third solve, without the deck, is published: a `RunawayGreenhouse`, `Deckless`, its
-///   water still a runaway's, at the first solve's 496.0 K and A 0.176, a dry world's water cloud
+/// - Its first solve's passes read that past runaway's dry division, its class `Temperate`, until
+///   one's figures, about 496.0 K, A 0.176 and 19.83 bar, 10.9 K above water's saturation
+///   temperature there, 485.1 K, give rule 6's `RunawayGreenhouse`, which it carries, so that its
+///   first solve ends a runaway under the deck below 430 K, and no first solve is published
+///   `Temperate` for (c) to judge a hothouse. Under
+///   the insolation class's state, version 24's before P14.T53.e's hold went, that first solve was
+///   published `Temperate`, and (c)'s re-solve under the deck, ending at about 364.6 K, was solved
+///   a third time without it.
+/// - So its second solve, without the deck (part 1 (b)), is published: a `RunawayGreenhouse`,
+///   `Deckless`, its water still a runaway's, at 496.0 K and A 0.176, a dry world's water cloud
 ///   being none; at or above 430 K, so a partial deck, not modelled (P14.T53.e).
 ///
-/// One hothouse is counted with its third solve, each solve's passes beside it, and the traced
-/// solve lists the third solve's passes alone: as many as it counts, each a deckless runaway's,
-/// the published air among them.
+/// One deckless re-solve is counted, no hothouse, each solve's passes beside it, and the traced
+/// solve lists the second solve's passes alone, as many as it counts, the published air among
+/// them: each that reads no carried state its class's `Temperate`, and each that reads rule 6's
+/// runaway carried a deckless runaway's.
 #[test]
 #[expect(
     clippy::too_many_lines,
-    reason = "one hand-built body's three solves, its counts and its trace, each stated"
+    reason = "one hand-built body's two solves, its counts and its trace, each stated"
 )]
-fn under_every_24_hold_a_hothouse_below_430_k_under_its_deck_is_solved_a_third_time() {
+fn under_every_24_hold_a_hothouse_below_430_k_under_its_deck_is_solved_without_it() {
     use crate::orbit::{Eccentricity, KeplerElements, Orientation};
     use crate::planetary::derive::atmosphere::{NoMaturity, WeatheringCase};
     use crate::planetary::derive::pass_record::{
@@ -6169,7 +6173,7 @@ fn under_every_24_hold_a_hothouse_below_430_k_under_its_deck_is_solved_a_third_t
     let ((published, counts), trace) = traced(|| with_deck_counts(|| derive(PassDriver::Traced)));
     let air = published.atmosphere();
     eprintln!(
-        "the hand-built hothouse's third solve: {:?} {:?} (water {:?}), T_s {:.3} K, A {:.4}, \
+        "the hand-built hothouse's deckless solve: {:?} {:?} (water {:?}), T_s {:.3} K, A {:.4}, \
          p_s {:.4} bar (water's T_sat {:.3} K), {} passes; its counts {counts:?}; {} passes \
          traced",
         air.state(),
@@ -6191,29 +6195,30 @@ fn under_every_24_hold_a_hothouse_below_430_k_under_its_deck_is_solved_a_third_t
     assert_eq!(
         counts,
         DeckCounts {
-            hothouses: 1,
-            temperate_passes: counts.temperate_passes,
-            hothouse_passes: counts.hothouse_passes,
-            hothouse_deckless: 1,
-            hothouse_deckless_passes: u64::from(published.atmosphere_passes()),
+            resolves: 1,
+            decked_passes: counts.decked_passes,
+            deckless_passes: u64::from(published.atmosphere_passes()),
             ..DeckCounts::default()
         }
     );
-    assert!(
-        counts.temperate_passes > 0 && counts.hothouse_passes > 0,
-        "{counts:?}"
-    );
+    assert!(counts.decked_passes > 0, "{counts:?}");
 
     assert_eq!(
         trace.len(),
         usize::try_from(published.atmosphere_passes()).unwrap()
     );
     for pass in &trace {
-        assert_eq!(
-            (pass.air.state(), pass.air.runaway_deck()),
-            (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless),
-            "{pass:?}"
-        );
+        match pass.context.present() {
+            None => assert_eq!(pass.air.state(), SurfaceState::Temperate, "{pass:?}"),
+            Some(carried) => {
+                assert_eq!(carried, PresentClimate::RunawayGreenhouse, "{pass:?}");
+                assert_eq!(
+                    (pass.air.state(), pass.air.runaway_deck()),
+                    (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless),
+                    "{pass:?}"
+                );
+            }
+        }
     }
     assert!(
         trace.iter().any(|pass| pass.air == *air),
@@ -6518,29 +6523,25 @@ fn under_every_24_hold_a_tenuous_record_lists_its_air_over_an_airless_climate() 
 
 // P14.T53.e: the state from the present climate (decision-p14-t54a-states §3.4).
 
-/// P14.T53.e's anchors among the planets (decision-p14-t54a-states §3.4): under every 25 hold
-/// Earth is `Temperate`, Venus a `RunawayGreenhouse` and Mars `Temperate`, as at 24, each the
-/// state its published pass's figures give by rules 5–7 (Venus's judged without its deck, which
-/// it keeps). None of the three flips, so none carries a state, and under T53.e's rules alone each
-/// takes 24's passes to the bit, its count included: the stand-in's lagged passes, whose context is
-/// that state alone, are T51.h's where it never changes.
+/// P14.T53.e's anchors among the planets (decision-p14-t54a-states §3.4): Earth is `Temperate`,
+/// Venus a `RunawayGreenhouse` and Mars `Temperate`, under the rules in force and under every 25
+/// hold, each the state its published pass's figures give by rules 5–7 (Venus's judged without
+/// its deck, which it keeps). None of the three flips, so none carries a state.
 #[test]
 fn under_every_25_hold_earth_venus_and_mars_keep_their_states() {
     use crate::planetary::derive::solar::{found, solar_system};
     use crate::planetary::testing::with_every_25_hold;
-    let at_24 = solar_system();
-    let alone = with_present_state(PresentStateRules::Present, solar_system);
+    let in_force = solar_system();
     let at_25 = with_every_25_hold(solar_system);
     for (name, state) in [
         ("Earth", SurfaceState::Temperate),
         ("Venus", SurfaceState::RunawayGreenhouse),
         ("Mars", SurfaceState::Temperate),
     ] {
-        let (before, lagged) = (found(&at_24, name), found(&alone, name));
-        assert_eq!(before.atmosphere().state(), state, "{name} at 24");
-        assert_eq!(before.atmosphere().carried_state(), None, "{name}");
+        let body = found(&in_force, name);
+        assert_eq!(body.atmosphere().state(), state, "{name}");
         assert_eq!(
-            lagged.atmosphere().carried_state(),
+            body.atmosphere().carried_state(),
             None,
             "{name}'s figures agree with its class"
         );
@@ -6549,16 +6550,6 @@ fn under_every_25_hold_earth_venus_and_mars_keep_their_states() {
             state,
             "{name} under every 25 hold"
         );
-        assert_same_bits(
-            lagged.atmosphere().surface_temperature().value(),
-            before.atmosphere().surface_temperature().value(),
-        );
-        assert_same_bits(lagged.albedo().value(), before.albedo().value());
-        assert_eq!(
-            lagged.atmosphere_passes(),
-            before.atmosphere_passes(),
-            "{name}"
-        );
     }
 }
 
@@ -6566,17 +6557,20 @@ fn under_every_25_hold_earth_venus_and_mars_keep_their_states() {
 /// previous pass carried publishes it in place of its climate's class, while its division, the
 /// insolation class's, keeps its carbon, its water's state and every step's greenhouse inputs. A
 /// hothouse's re-solve (P14.T53.b part 1 (c)) reads none, its state fixed, and carries none; from
-/// 25 it takes a `Snowball` class to a runaway too. Under the hold a pass carries no state; under
-/// the rules it carries its figures' by rules 5–7 where they differ from its class: none for an
-/// Earth at 288 K, nor for one under Venus's deck, which holds a sea, but a dry runaway under the
-/// deck keeps its own.
+/// 25 it takes a `Snowball` class to a runaway too. A pass carries its figures' state by rules 5–7
+/// where they differ from its class: none for an Earth at 288 K, nor for one under Venus's deck,
+/// which holds a sea, but a dry runaway under the deck keeps its own.
 #[test]
 fn a_pass_publishes_the_state_its_previous_pass_carried() {
     let inputs = earth_inputs(255.0, Insolation::Habitable);
     let stand_in = PassSurface::stand_in(PassLight::HottestHost);
     let climate = atmosphere_under(&inputs, &stand_in);
     assert_eq!(climate.state(), SurfaceState::Temperate);
-    assert_eq!(climate.carried_state(), None, "the hold carries none");
+    assert_eq!(
+        climate.carried_state(),
+        None,
+        "its figures agree with its class"
+    );
     let carbon = |air: &Atmosphere| air.escape().expect("from 24").airborne_carbon_share();
     for carried in [
         PresentClimate::Snowball,
@@ -6596,14 +6590,14 @@ fn a_pass_publishes_the_state_its_previous_pass_carried() {
         SurfaceState::RunawayGreenhouse
     );
     // Beyond the maximum-greenhouse limit the class is a `Snowball`, which (c)'s re-solve takes to
-    // a runaway from 25 alone: at 24 no first solve published `Temperate` holds that class.
+    // a runaway from 25, since a first solve published `Temperate` by rules 5–7 can hold it.
     let beyond_inputs = earth_inputs(255.0, Insolation::BeyondMaximumGreenhouse);
-    let re_solved = |inputs: &AtmosphereInputs| {
-        atmosphere_under(inputs, &stand_in.with_published(PublishedState::Hothouse)).state()
-    };
-    assert_eq!(re_solved(&beyond_inputs), SurfaceState::Snowball);
     assert_eq!(
-        with_present_state(PresentStateRules::Present, || re_solved(&beyond_inputs)),
+        atmosphere_under(
+            &beyond_inputs,
+            &stand_in.with_published(PublishedState::Hothouse)
+        )
+        .state(),
         SurfaceState::RunawayGreenhouse
     );
     // A dry Earth: no water, so that no sea can stand under its deck.
@@ -6617,19 +6611,17 @@ fn a_pass_publishes_the_state_its_previous_pass_carried() {
         ..inputs
     };
     let decked = stand_in.with_present(Some(PresentClimate::RunawayGreenhouse));
-    let judged = with_present_state(PresentStateRules::Present, || {
-        [
-            atmosphere_under(&inputs, &stand_in),
-            atmosphere_under(
-                &inputs,
-                &stand_in.with_present(Some(PresentClimate::Snowball)),
-            ),
-            atmosphere_under(&inputs, &decked),
-            atmosphere_under(&dry, &decked),
-            atmosphere_under(&dry, &decked.with_deck(RunawayDeck::Deckless)),
-            atmosphere_under(&inputs, &stand_in.with_published(PublishedState::Hothouse)),
-        ]
-    });
+    let judged = [
+        atmosphere_under(&inputs, &stand_in),
+        atmosphere_under(
+            &inputs,
+            &stand_in.with_present(Some(PresentClimate::Snowball)),
+        ),
+        atmosphere_under(&inputs, &decked),
+        atmosphere_under(&dry, &decked),
+        atmosphere_under(&dry, &decked.with_deck(RunawayDeck::Deckless)),
+        atmosphere_under(&inputs, &stand_in.with_published(PublishedState::Hothouse)),
+    ];
     assert_eq!(
         judged.map(|air| air.carried_state()),
         [
@@ -6650,15 +6642,11 @@ fn a_pass_publishes_the_state_its_previous_pass_carried() {
 // P14.T53.b part 3: the steam envelope and the partition's cap (decision-p14-t53b-part3).
 
 /// `run` under P14.T53.b part 3, in force from generator version 25, with every landed 25 hold in
-/// force but P14.T53.e's and P14.T51.l's, whose movers their own tests state.
+/// force but P14.T51.l's, whose movers its own tests state.
 fn with_part_three<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::passes::{PassRoot, with_pass_root};
     use crate::planetary::testing::with_every_25_hold;
-    with_every_25_hold(|| {
-        with_present_state(PresentStateRules::Held, || {
-            with_pass_root(PassRoot::Halvings, run)
-        })
-    })
+    with_every_25_hold(|| with_pass_root(PassRoot::Halvings, run))
 }
 
 /// An Earth of the Sun inside the runaway limit now ([`earth_inputs`] at `equilibrium`, K) holding

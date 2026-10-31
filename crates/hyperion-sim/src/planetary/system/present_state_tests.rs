@@ -1,7 +1,7 @@
 //! P14.T53.e's tests over the record: the state from the present climate, rules 5–7 of the
-//! published state (decision-p14-t54a-states §3.4), under every 25 hold against 24.
+//! published state (decision-p14-t54a-states §3.4), in force from generator version 25, under
+//! every 25 hold.
 
-use std::collections::BTreeMap;
 use std::time::Instant;
 
 use super::audit_tests::{AuditCase, AuditSet, audit_walk};
@@ -9,9 +9,8 @@ use super::tests::{GOLDEN_SYSTEMS_SEED, ITEM_33_WORLD, SEED, golden_contexts, sa
 use super::*;
 use crate::planetary::chem::partition::CondensatePhase;
 use crate::planetary::derive::atmosphere::{
-    PresentClimate, PresentFigures, PresentStateRules, Rotation, RunawayDeck, SILICATE_SOLIDUS,
-    SNOWBALL_ICE_COVER, SurfaceState, present_climate_state, water_saturation_temperature,
-    with_deck_counts, with_present_state,
+    PresentClimate, PresentFigures, Rotation, RunawayDeck, SILICATE_SOLIDUS, SNOWBALL_ICE_COVER,
+    SurfaceState, present_climate_state, water_saturation_temperature, with_deck_counts,
 };
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::hooks::surface::Forcing;
@@ -118,30 +117,14 @@ fn flipping_sets() -> Vec<AuditSet> {
         .collect()
 }
 
-/// The published surfaces of `sets`' bodies whose IDs are in `ids`, in walk order.
-fn published_of(sets: &[AuditSet], ids: &[&str]) -> Vec<Published> {
-    let mut found = Vec::new();
-    audit_walk(sets, &mut |case| {
-        let published = Published::of(case);
-        if ids.contains(&published.id.as_str()) {
-            found.push(published);
-        }
-    });
-    found
-}
-
 /// P14.T53.e on the record, its flips' fast test: the six `Snowball`s P14.T54.b.l's bless left
-/// above 273.15 K ([`HOT_SNOWBALLS`]) and a frozen `Temperate` ([`FROZEN_TEMPERATE`]), at 24 and
-/// under every 25 hold.
+/// above 273.15 K at 24 under the insolation class's state ([`HOT_SNOWBALLS`]) and a frozen
+/// `Temperate` of 24's ([`FROZEN_TEMPERATE`]), under every 25 hold.
 ///
-/// - At 24 each of the six is a `Snowball` above 273.15 K and the frozen world `Temperate`, none
-///   carrying a state; but 01fffb2d60000000.0600, whose water above its critical point holds a
-///   liquid-like reservoir that hides its surface from generator version 25, is published a steam
-///   envelope (P14.T53.b part 3).
-/// - Under every 25 hold none of the six is a `Snowball`: each takes its climate's state, where its
-///   surface is `Ok` the state its figures give by rules 5–7 (or a jump of its passes); and the
-///   frozen world is a `Snowball` by rule 5, ice over at least half its surface, its passes
-///   settled and carrying the state they publish.
+/// - None of the six is a `Snowball`: each takes its climate's state, where its surface is `Ok`
+///   the state its figures give by rules 5–7 (or a jump of its passes); and the frozen world is a
+///   `Snowball` by rule 5, ice over at least half its surface, its passes settled and carrying the
+///   state they publish.
 /// - Generated twice under every 25 hold, every body publishes the same figures: the lagged passes
 ///   are deterministic.
 #[test]
@@ -153,7 +136,6 @@ fn under_every_25_hold_the_hot_snowballs_and_a_frozen_temperate_take_their_clima
         .map(|(id, _)| *id)
         .chain([FROZEN_TEMPERATE])
         .collect();
-    let at_24 = published_of(&sets, &ids);
     let at_25 = with_every_25_hold(|| census_of(&sets, SecondStarts::None));
     let again = with_every_25_hold(|| census_of(&sets, SecondStarts::None));
     let lines = |bodies: &[CensusBody]| -> Vec<String> {
@@ -164,22 +146,12 @@ fn under_every_25_hold_the_hot_snowballs_and_a_frozen_temperate_take_their_clima
     };
     assert_eq!(lines(&at_25), lines(&again), "the same bits twice");
     for id in ids {
-        let before = at_24
-            .iter()
-            .find(|body| body.id == id)
-            .unwrap_or_else(|| panic!("{id} at 24"));
         let now = at_25
             .iter()
             .find(|body| body.published.id == id)
             .unwrap_or_else(|| panic!("{id} at 25"));
-        eprintln!(
-            "{id}: at 24 {}\n  at 25 {}",
-            before.line(),
-            now.published.line()
-        );
-        assert_eq!(before.carried, None, "{id}: the hold carries none");
+        eprintln!("{id}: at 25 {}", now.published.line());
         if id == FROZEN_TEMPERATE {
-            assert_eq!(before.state, SurfaceState::Temperate, "{id}");
             assert_eq!(now.published.state, SurfaceState::Snowball, "{id}");
             let (_, ice, _) = now.published.surface.expect("its surface is Ok");
             assert!(ice >= SNOWBALL_ICE_COVER, "{id}: ice {ice}");
@@ -190,13 +162,6 @@ fn under_every_25_hold_the_hot_snowballs_and_a_frozen_temperate_take_their_clima
             );
             assert!(!now.published.jump, "{id}");
         } else {
-            let published = if id == "01fffb2d60000000.0600" {
-                SurfaceState::SteamEnvelope
-            } else {
-                SurfaceState::Snowball
-            };
-            assert_eq!(before.state, published, "{id}");
-            assert!(before.t_s > 273.15, "{id}");
             assert_ne!(now.published.state, SurfaceState::Snowball, "{id}");
             if let Some(verdict) = now.verdict {
                 assert!(
@@ -354,8 +319,8 @@ fn passes_of(bodies: &[CensusBody]) -> u64 {
 }
 
 /// P14.T53.e's census over the 400 sample systems and the 15 golden systems, a measurement for
-/// the 25 bless, run by name: under every 25 hold, and under them all but T53.e's (P14.T53.b part
-/// 3's alone), every present planet, member and moon with a derivation at the epoch.
+/// the 25 bless, run by name: under every 25 hold, every present planet, member and moon with a
+/// derivation at the epoch.
 ///
 /// - **No `Snowball` lies above 273.15 K** under every 25 hold, asserted, and the six that
 ///   P14.T54.b.l's bless left there ([`HOT_SNOWBALLS`]) take their climate's state, each printed.
@@ -364,34 +329,23 @@ fn passes_of(bodies: &[CensusBody]) -> u64 {
 ///   at a jump of its passes (decision-pre-23-review item 32's discrete jumps) and where its passes
 ///   judged it a hothouse (P14.T53.b part 1 (c), whose state is fixed within its re-solve:
 ///   decision-p14-t54b-k-hothouses), asserted; each such exception listed.
-/// - **The flips:** the bodies whose published state T53.e moves (every 25 hold against part 3's
-///   alone), by their two states, with the passes' jumps under each, counted against item 32's 1%
-///   cap of the bodies with a surface (stated, not asserted: a count over goes to the findings).
+/// - **The jumps:** the passes' jumps, counted against item 32's 1% cap of the bodies with a
+///   surface (stated, not asserted: a count over goes to the findings).
 /// - **Item 26's second start** for every published runaway, from the melt's 0.10: the bistable
 ///   magma oceans, each a runaway at the generator's start that settles molten from the melt's.
 /// - **The anchors** (decision-p14-t54a-states §3.4, [`ANCHORS`]): `e101` a `MagmaOcean`, the two
 ///   frozen `Temperate`s by rule 5 and item 33's 46 K world not a runaway, asserted.
-/// - **The cost:** every body's passes summed under each rule set, and each walk's time, printed.
+/// - **The cost:** every body's passes summed, and the walk's time, printed.
 #[test]
 #[ignore = "a measurement for the 25 bless, run by name"]
 fn under_every_25_hold_the_present_climate_sets_the_state_over_the_400() {
     let sets = the_400_and_the_goldens();
     let start = Instant::now();
-    let without = with_every_25_hold(|| {
-        with_present_state(PresentStateRules::Held, || {
-            census_of(&sets, SecondStarts::None)
-        })
-    });
-    let walk_without = start.elapsed();
-    let start = Instant::now();
     let at_25 = with_every_25_hold(|| census_of(&sets, SecondStarts::None));
     let walk_25 = start.elapsed();
     let second = with_every_25_hold(|| census_of(&sets, SecondStarts::FromTheMelt));
-    assert_eq!(at_25.len(), without.len(), "one walk's bodies, both rules");
     eprintln!(
-        "the walks (pod): part 3's alone {walk_without:?}, {} passes; every 25 hold {walk_25:?}, \
-         {} passes",
-        passes_of(&without),
+        "the walk (pod): every 25 hold {walk_25:?}, {} passes",
         passes_of(&at_25)
     );
     // The anchors.
@@ -449,7 +403,11 @@ fn under_every_25_hold_the_present_climate_sets_the_state_over_the_400() {
         hot.join("\n  ")
     );
     let faults = report_agreement(&at_25);
-    report_flips(&at_25, &without, with_surface);
+    let jumps = at_25.iter().filter(|body| body.published.jump).count();
+    eprintln!(
+        "jumps {jumps} under every 25 hold ({:.2}% of the bodies with a surface, item 32's cap 1%)",
+        percent(jumps, with_surface)
+    );
     report_second_starts(&second);
     assert!(hot.is_empty(), "{hot:?}");
     assert!(
@@ -492,55 +450,6 @@ fn report_agreement(at_25: &[CensusBody]) -> Vec<String> {
         exceptions.join("\n  ")
     );
     faults
-}
-
-/// T53.e's flips, `at_25` against part 3's alone (`without`), by their two states, with the jumps
-/// under each and their share of the `with_surface` bodies with a surface, printed.
-fn report_flips(at_25: &[CensusBody], without: &[CensusBody], with_surface: usize) {
-    let mut flips: BTreeMap<(SurfaceState, SurfaceState), Vec<String>> = BTreeMap::new();
-    let (mut jumps, mut jumps_without, mut new_jumps) = (0, 0, Vec::new());
-    for (now, before) in at_25.iter().zip(without) {
-        assert_eq!(now.published.id, before.published.id, "one walk's order");
-        jumps += usize::from(now.published.jump);
-        jumps_without += usize::from(before.published.jump);
-        if now.published.jump && !before.published.jump {
-            new_jumps.push(format!("{} {}", now.label, now.published.line()));
-        }
-        if now.published.state != before.published.state {
-            flips
-                .entry((before.published.state, now.published.state))
-                .or_default()
-                .push(format!(
-                    "{} {} (part 3 alone: {:.1} K, {} passes{})",
-                    now.label,
-                    now.published.line(),
-                    before.published.t_s,
-                    before.published.passes,
-                    if before.published.jump {
-                        ", a jump"
-                    } else {
-                        ""
-                    }
-                ));
-        }
-    }
-    let flipped: usize = flips.values().map(Vec::len).sum();
-    for ((from, to), list) in &flips {
-        eprintln!(
-            "flips {from:?} → {to:?}: {}:\n  {}",
-            list.len(),
-            list.join("\n  ")
-        );
-    }
-    let share = |n: usize| percent(n, with_surface);
-    eprintln!(
-        "T53.e's flips {flipped} ({:.2}% of the bodies with a surface); jumps {jumps} under every \
-         25 hold ({:.2}%, item 32's cap 1%), {jumps_without} under part 3's alone; new jumps {}:\n  {}",
-        share(flipped),
-        share(jumps),
-        new_jumps.len(),
-        new_jumps.join("\n  ")
-    );
 }
 
 /// Item 26's second start of every published runaway in `second`, from the melt's 0.10: the

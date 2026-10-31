@@ -1,6 +1,6 @@
 //! The state from the present climate (plan 14, P14.T53.e; decision-p14-t54a-states §3.4): rules
-//! 5–7 of the published state, judged on a pass's published figures, behind their hold at
-//! generator version 25 ([`PRESENT_STATE_VERSION`]).
+//! 5–7 of the published state, judged on a pass's published figures, in force from generator
+//! version 25 (decision-bump-plan-after-22, "Rulings before T53.a lands", R1.5).
 //!
 //! Rules 1–4 stand as built, the first match winning: [`SurfaceState::GasEnvelope`], P14.T53.b
 //! part 3's [`SurfaceState::SteamEnvelope`] (a label, [`Atmosphere::published_state`]),
@@ -46,73 +46,6 @@ use crate::planetary::chem::partition::{CondensatePhase, Condensates};
 use crate::planetary::hooks::figures::published_ice_cover_of;
 use crate::units::{Kelvin, Pascals};
 use crate::{GENERATOR_VERSION, GeneratorVersion};
-
-/// The generator version from which P14.T53.e's rules 5–7 publish the state: 25, the first
-/// planetary bump after 24's (decision-bump-plan-after-22, "Rulings before T53.a lands", R1.5).
-///
-/// It is T53.e's one hold. Below it [`PresentStateRules::in_force`] is
-/// [`PresentStateRules::Held`]: no pass carries a present state, and every figure on the record is
-/// version 24's bit for bit. 25's bump deletes this hold, [`PresentStateRules`] with its `Held`
-/// arm, the tests' switch and its tripwire (`the_present_state_is_held_only_until_the_25_bump`).
-pub(crate) const PRESENT_STATE_VERSION: GeneratorVersion = GeneratorVersion::new(25);
-
-/// Whether P14.T53.e's rules 5–7 are in force (its hold, [`PRESENT_STATE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum PresentStateRules {
-    /// Version 24's and before: the state is the insolation class's, its runaway arm the present
-    /// insolation's (P14.T53.b part 1 (a)), and no pass reads another's state.
-    Held,
-    /// Version 25's: rules 5–7 on the previous pass's figures.
-    Present,
-}
-
-impl PresentStateRules {
-    /// The rules this generator version gives: rules 5–7 from [`PRESENT_STATE_VERSION`], none
-    /// below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_present_state`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= PRESENT_STATE_VERSION {
-            Self::Present
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The present state's rules a test sets on its thread, `None` for the version's.
-    static RULES: core::cell::Cell<Option<PresentStateRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the present state's rules `rules` on this thread, for the tests to reach
-/// rules 5–7 ahead of the bump; the version's rules are set back after, a panic in `run` included.
-/// 25's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_present_state<R>(rules: PresentStateRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<PresentStateRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
-/// Whether P14.T53.e's rules 5–7 are in force ([`PresentStateRules::Present`]); never under
-/// their hold.
-#[must_use]
-pub(crate) fn present_state_in_force() -> bool {
-    PresentStateRules::in_force() == PresentStateRules::Present
-}
 
 /// The generator version from which rule 5 also needs no open water on a world locked 1:1: 26, the
 /// planetary bump after 25's (research-census-25 §1, ruled 2026-10-31).
@@ -298,9 +231,6 @@ pub(crate) fn published_label(
     state: SurfaceState,
     figures: impl FnOnce() -> PresentFigures,
 ) -> SurfaceState {
-    if !present_state_in_force() {
-        return state;
-    }
     match state {
         SurfaceState::Snowball if locked_state_in_force() => {
             present_climate_state(&figures()).state()
@@ -343,8 +273,8 @@ pub(crate) fn published_ice_cover(condensates: &Condensates, water_ice: f64) -> 
 /// cloud `deck`, carries to the next pass (P14.T53.e).
 ///
 /// It is rules 5–7's on its published figures, which `figures` gives, where they differ from its
-/// class; `None` where they agree, where rules 1–4 decided its state and under the hold (where
-/// `figures` is not called), the next pass then reading its class.
+/// class; `None` where they agree and where rules 1–4 decided its state (where `figures` is not
+/// called), the next pass then reading its class.
 ///
 /// A runaway under Venus's deck is judged by rule 6's first test alone, liquid water at its
 /// surface. Rule 6's temperature test reads a runaway's climate as it would be without the deck,
@@ -363,9 +293,6 @@ pub(crate) fn state_to_carry(
     (class, deck): (SurfaceState, RunawayDeck),
     figures: impl FnOnce() -> PresentFigures,
 ) -> Option<PresentClimate> {
-    if !present_state_in_force() {
-        return None;
-    }
     let state = match (air.state(), deck) {
         (SurfaceState::RunawayGreenhouse, RunawayDeck::Kept) => {
             let figures = figures();
@@ -459,9 +386,9 @@ mod tests {
         assert_eq!(state_of(&eyeball), SurfaceState::Snowball);
     }
 
-    /// The published label keeps a solved `Snowball` under every hold and under 25's rules; under
-    /// the eyeball's it labels a locked one with an open sea and no ice (a two-state cycle's last
-    /// pass) by its own figures, and keeps a frozen one and every other state.
+    /// The published label keeps a solved `Snowball` under 25's rules; under the eyeball's it
+    /// labels a locked one with an open sea and no ice (a two-state cycle's last pass) by its own
+    /// figures, and keeps a frozen one and every other state.
     #[test]
     fn a_two_state_cycle_s_snowball_is_labelled_by_its_figures_only_under_26() {
         let locked = |f: PresentFigures| PresentFigures {
@@ -471,15 +398,9 @@ mod tests {
         let cycle = locked(figures(0.0, true, 314.3, 9.9e5));
         let frozen = locked(figures(0.7, false, 250.0, 2.1e5));
         let label = |state, f: PresentFigures| published_label(state, || f);
-        let at_25 = |state, f| with_present_state(PresentStateRules::Present, || label(state, f));
-        let at_26 = |state, f| with_locked_state(LockedStateRules::Eyeball, || at_25(state, f));
+        let at_26 = |state, f| with_locked_state(LockedStateRules::Eyeball, || label(state, f));
         assert_eq!(
             label(SurfaceState::Snowball, cycle),
-            SurfaceState::Snowball,
-            "under every hold"
-        );
-        assert_eq!(
-            at_25(SurfaceState::Snowball, cycle),
             SurfaceState::Snowball,
             "under 25's rules"
         );
@@ -504,9 +425,9 @@ mod tests {
         }
     }
 
-    /// The published label keeps a solved `RunawayGreenhouse` under every hold and under 25's
-    /// rules; under the dry deck's it labels one that lists liquid water by its own figures, and
-    /// keeps a dry one and every other state.
+    /// The published label keeps a solved `RunawayGreenhouse` under 25's rules; under the dry
+    /// deck's it labels one that lists liquid water by its own figures, and keeps a dry one and
+    /// every other state.
     #[test]
     fn a_runaway_over_a_sea_is_labelled_by_its_figures_only_under_26() {
         use super::super::{SeaDeckRules, with_sea_deck};
@@ -516,15 +437,9 @@ mod tests {
         };
         let dry = figures(0.0, false, 737.0, 9.2e6);
         let label = |state, f: PresentFigures| published_label(state, || f);
-        let at_25 = |state, f| with_present_state(PresentStateRules::Present, || label(state, f));
-        let at_26 = |state, f| with_sea_deck(SeaDeckRules::Dry, || at_25(state, f));
+        let at_26 = |state, f| with_sea_deck(SeaDeckRules::Dry, || label(state, f));
         assert_eq!(
             label(SurfaceState::RunawayGreenhouse, sea),
-            SurfaceState::RunawayGreenhouse,
-            "under every hold"
-        );
-        assert_eq!(
-            at_25(SurfaceState::RunawayGreenhouse, sea),
             SurfaceState::RunawayGreenhouse,
             "under 25's rules"
         );
@@ -547,28 +462,6 @@ mod tests {
         ] {
             assert_eq!(at_26(state, sea), state, "{state:?}");
         }
-    }
-
-    /// P14.T53.e is held until the 24 → 25 bump: the rules in force are version 24's, the
-    /// insolation class's state, and no pass carries a present state.
-    #[test]
-    fn the_present_state_is_held_only_until_the_25_bump() {
-        assert!(
-            GENERATOR_VERSION < PRESENT_STATE_VERSION,
-            "the 24 → 25 bump puts P14.T53.e's rules 5–7 on the record \
-             (decision-bump-plan-after-22 R1.5): delete `PRESENT_STATE_VERSION`, \
-             `PresentStateRules` with its `Held` arm, `present_state_in_force` and the arms that \
-             read it (`state_to_carry`, the stand-in's `passes::solve` arm in \
-             `PassBody::stand_in_passes` and `escaping::present_state`'s hothouse guard), the \
-             tests' `with_present_state`, its switch in `with_every_25_hold` and this test"
-        );
-        assert_eq!(PresentStateRules::in_force(), PresentStateRules::Held);
-        assert!(!present_state_in_force());
-        assert!(with_present_state(
-            PresentStateRules::Present,
-            present_state_in_force
-        ));
-        assert!(!present_state_in_force());
     }
 
     /// Rule 5: ice on at least half the surface is a `Snowball`, whatever else holds; just under

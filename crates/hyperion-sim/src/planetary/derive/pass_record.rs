@@ -318,7 +318,7 @@ pub(crate) enum OpenWater {
 /// | tide | a moon's branch and ocean flag, and its tidal heat | key; float |
 /// | inertia lid | the pass's own lid ([`InertiaLid`]), whose row the next pass's ground reads | key |
 /// | `lid_of`'s unresurfaced test | the surface age against the time since the magma ocean, which the next pass's lid takes ([`Resurfacing`]) | key |
-/// | carried state | the state the pass carries by P14.T53.e's rules 5–7 ([`Atmosphere::carried_state`]), which the next pass's state-keyed branches read; `None` under their hold and where the rules agree with its climate's class | key |
+/// | carried state | the state the pass carries by P14.T53.e's rules 5–7 ([`Atmosphere::carried_state`]), which the next pass's state-keyed branches read; `None` where the rules agree with its climate's class | key |
 /// | open water | whether the pass's published condensates list liquid water, or its warmest zone melts its water under the deck, where the next pass's substellar deck reads it ([`OpenWater`], P14.T24.j); dry under its hold and where no deck reads it | key |
 ///
 /// Every member a pass reads is ranked: the lid a pass takes reads the surface age (a float), the
@@ -401,8 +401,8 @@ pub(crate) struct PassContextKey {
     /// `lid_of`'s unresurfaced test on its surface age, where the body has a crust's basis and
     /// the context a surface age.
     pub(crate) unresurfaced: Option<Resurfacing>,
-    /// The state the pass carries by P14.T53.e's rules 5–7, `None` under their hold and where
-    /// they agree with its climate's class.
+    /// The state the pass carries by P14.T53.e's rules 5–7, `None` where they agree with its
+    /// climate's class.
     pub(crate) present: Option<PresentClimate>,
     /// Whether the pass's published condensates list liquid water, or its warmest zone melts its
     /// water under the deck, where a locked world's deck reads it (P14.T24.j); dry under its hold
@@ -488,8 +488,8 @@ impl PassContext {
     }
 
     /// The state the previous pass carried by P14.T53.e's rules 5–7, which the pass reading this
-    /// context publishes in place of its climate's class: `None` at C₀, under the rules' hold,
-    /// where rules 1–4 decided that pass's state and where the rules agreed with its class.
+    /// context publishes in place of its climate's class: `None` at C₀, where rules 1–4 decided
+    /// that pass's state and where the rules agreed with its class.
     #[must_use]
     pub(crate) const fn present(&self) -> Option<PresentClimate> {
         self.present
@@ -751,8 +751,7 @@ impl Context for PassContext {
 /// It is the state the previous pass carried by rules 5–7 ([`Atmosphere::carried_state`]): `None`
 /// at the first pass, where rules 1–4 decided that pass's state and where the rules agreed with
 /// its climate's class. Its key is itself, and two contexts agree only where they are the same
-/// state. Under the rules' hold the stand-in takes no context
-/// ([`passes::solve`](super::passes::solve)).
+/// state.
 impl Context for Option<PresentClimate> {
     type Key = Self;
 

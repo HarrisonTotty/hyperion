@@ -83,15 +83,13 @@ pub(crate) use escaping::{
 };
 #[cfg(test)]
 pub(crate) use present::{
-    LockedStateRules, PresentStateRules, SNOWBALL_ICE_COVER, present_climate_state,
-    with_locked_state, with_present_state,
+    LockedStateRules, SNOWBALL_ICE_COVER, present_climate_state, with_locked_state,
 };
 // Its one reader beyond `present`, the census, is native only.
 #[cfg(all(test, not(target_family = "wasm")))]
 pub(crate) use present::locked_state_in_force;
 pub(crate) use present::{
-    PresentClimate, PresentFigures, Rotation, present_state_in_force, published_ice_cover,
-    published_label, state_to_carry,
+    PresentClimate, PresentFigures, Rotation, published_ice_cover, published_label, state_to_carry,
 };
 pub(crate) use sea_deck::sea_deck_in_force;
 #[cfg(test)]
@@ -2177,8 +2175,8 @@ pub const GREENHOUSE_STEPS: u32 = 32;
 /// luminosity: a world inside the runaway limit at its hosts' peak alone keeps its water lost
 /// under `Temperate` or `Snowball` (its atmosphere's `water_state` gates its surface water), and a
 /// dry world between the limits whose surface would, without Venus's deck, be too hot for liquid
-/// water at its surface pressure is `RunawayGreenhouse`. From generator version 25 (P14.T53.e,
-/// behind its hold) the three are the present climate's, by rules 5–7 on the published figures:
+/// water at its surface pressure is `RunawayGreenhouse`. From generator version 25 (P14.T53.e)
+/// the three are the present climate's, by rules 5–7 on the published figures:
 /// `Snowball` under ice on at least half the surface, `RunawayGreenhouse` with no surface liquid
 /// water at or above water's saturation temperature at the surface pressure, `Temperate` the rest;
 /// the insolation class keeps driving the inventory.
@@ -2579,8 +2577,8 @@ pub struct Atmosphere {
     /// [`published_state`](Self::published_state)), a label no figure reads.
     steam_envelope: bool,
     /// The state its pass carries to the next by P14.T53.e's rules 5–7
-    /// ([`carried_state`](Self::carried_state)): `None` under their hold, before the area mix,
-    /// where rules 1–4 decide its state and where the rules agree with its climate's class.
+    /// ([`carried_state`](Self::carried_state)): `None` before the area mix, where rules 1–4
+    /// decide its state and where the rules agree with its climate's class.
     present: Option<PresentClimate>,
 }
 
@@ -2620,7 +2618,7 @@ impl Atmosphere {
     /// (c)); the water the body holds follows its [`water_state`](Self::water_state), the
     /// division's. It is never [`SurfaceState::SteamEnvelope`], which labels a solve for its
     /// sections alone ([`published_state`](Self::published_state)), so that no branch of the
-    /// state reads that label (P14.T53.b part 3). From 25 (P14.T53.e, behind its hold) a pass whose
+    /// state reads that label (P14.T53.b part 3). From 25 (P14.T53.e) a pass whose
     /// previous pass's figures gave another state by rules 5–7 publishes that state here (the
     /// state that pass carried), and at a settled pass it is the one its own figures give.
     #[must_use]
@@ -2654,7 +2652,7 @@ impl Atmosphere {
     /// branches read in its place. A dry runaway under Venus's deck carries its own state, judged on
     /// its climate without the deck, which its passes do not solve.
     ///
-    /// `None` under the hold, where rules 1–4 decide its state (a gas envelope, a magma ocean, an
+    /// `None` where rules 1–4 decide its state (a gas envelope, a magma ocean, an
     /// airless or tenuous surface), in a hothouse's re-solve (P14.T53.b part 1 (c)), whose state is
     /// fixed, and where the rules agree with its class: so at a settled pass, its own
     /// [`state`](Self::state) is the one its figures give.

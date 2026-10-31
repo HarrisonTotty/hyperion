@@ -442,9 +442,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///
 /// The holds, each with its switch:
 ///
-/// - the present climate's state, `PRESENT_STATE_VERSION` (P14.T53.e), at
-///   `PresentStateRules::Present` through `with_present_state`: rules 5–7 of the published state
-///   on each pass's figures, which the next pass's state-keyed branches read;
 /// - the events on the record, `STORM_EVENTS_VERSION` (P14.T31.c), at `StormEventsRules::Wired`
 ///   through `with_storm_events`: a system's events from its records at the epoch, the storms
 ///   floored at 10 years and gated on a water deck;
@@ -471,7 +468,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::derive::atmosphere::{PresentStateRules, with_present_state};
     use crate::planetary::derive::passes::{PassRoot, with_pass_root};
     use crate::planetary::hooks::cold_traps::with_rough_plains;
     use crate::planetary::hooks::figures::lag::{ExposedIceRules, with_exposed_ice};
@@ -487,9 +483,7 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_rough_plains(PlainsModel::RayTraced, run);
     let run = move || with_molten_decks(MoltenDecksRules::Molten, run);
     let run = move || with_pass_root(PassRoot::Secant, run);
-    with_present_state(PresentStateRules::Present, || {
-        with_exposed_ice(ExposedIceRules::Exposed, run)
-    })
+    with_exposed_ice(ExposedIceRules::Exposed, run)
 }
 
 /// `run`'s result with every landed hold at generator version 26 in force on this thread, for a
@@ -790,25 +784,6 @@ mod tests {
         ));
     }
 
-    /// 25's second switch, the present climate's state (P14.T53.e): in force inside 25's helper,
-    /// held outside it and where a test sets it back.
-    #[test]
-    fn the_present_state_s_hold_is_in_force_inside_25_s_helper_alone() {
-        use crate::planetary::derive::atmosphere::{PresentStateRules, with_present_state};
-        assert_eq!(PresentStateRules::in_force(), PresentStateRules::Held);
-        assert_eq!(
-            with_every_25_hold(PresentStateRules::in_force),
-            PresentStateRules::Present
-        );
-        assert_eq!(
-            with_every_25_hold(|| {
-                with_present_state(PresentStateRules::Held, PresentStateRules::in_force)
-            }),
-            PresentStateRules::Held
-        );
-        assert_eq!(PresentStateRules::in_force(), PresentStateRules::Held);
-    }
-
     /// The events' switch (P14.T31.c): in force inside 25's helper, held outside it and where a
     /// test sets it back.
     #[test]
@@ -971,16 +946,16 @@ mod tests {
     /// holds, held outside it and where a test sets it back.
     #[test]
     fn the_z0_branch_is_in_force_inside_26_s_helper_alone() {
-        use crate::planetary::derive::atmosphere::PresentStateRules;
         use crate::planetary::surface::steps::climate::{Z0BranchRules, with_z0_branch};
+        use crate::planetary::system::member_lag::MemberLagRules;
         assert_eq!(Z0BranchRules::in_force(), Z0BranchRules::Held);
         assert_eq!(
             with_every_26_hold(Z0BranchRules::in_force),
             Z0BranchRules::Kept
         );
         assert_eq!(
-            with_every_26_hold(PresentStateRules::in_force),
-            PresentStateRules::Present
+            with_every_26_hold(MemberLagRules::in_force),
+            MemberLagRules::Members
         );
         assert_eq!(
             with_every_25_hold(Z0BranchRules::in_force),

@@ -52,9 +52,7 @@ use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
 use crate::planetary::derive::atmosphere::{
     AIRLESS_PRESSURE, Gas, SurfaceState, WATER_MELTING_POINT,
 };
-use crate::planetary::derive::atmosphere::{
-    SNOWBALL_ICE_COVER, locked_state_in_force, present_state_in_force,
-};
+use crate::planetary::derive::atmosphere::{SNOWBALL_ICE_COVER, locked_state_in_force};
 use crate::planetary::hooks::aerosols::{AerosolDeck, AerosolMode};
 use crate::planetary::hooks::figures::Subsurface;
 use crate::planetary::hooks::surface::Forcing;
@@ -1023,12 +1021,8 @@ fn lists_liquid_water(surface: &Surface) -> bool {
 
 /// Whether the published figures of the `Snowball` `surface` make it one by P14.T53.e's rule 5
 /// under the rules in force: its ices on at least [`SNOWBALL_ICE_COVER`] of its surface, and from
-/// 26 on a world locked 1:1 no open water (`LOCKED_STATE_VERSION`). Before 25 the state is its
-/// insolation class's, which no figure decides, so it holds.
+/// 26 on a world locked 1:1 no open water (`LOCKED_STATE_VERSION`).
 fn rule_5_holds(surface: &Surface) -> bool {
-    if !present_state_in_force() {
-        return true;
-    }
     let locked = surface.climate_regime().forcing() == Forcing::Locked;
     surface.figures().ice_fraction() >= SNOWBALL_ICE_COVER
         && !(locked_state_in_force() && locked && lists_liquid_water(surface))

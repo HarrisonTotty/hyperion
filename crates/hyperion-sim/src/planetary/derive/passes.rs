@@ -804,7 +804,12 @@ impl<P: Copy, C: Copy> End<P, C> {
 ///
 /// It is [`solve_in_context`] at C = (), to the bit, its count included: every end then read the
 /// frozen context and is reused, and every published pass fits its context
-/// ([`ContextFit::FirstRound`]).
+/// ([`ContextFit::FirstRound`]). The generator's passes all read a context from generator version
+/// 25 (P14.T53.e), so only T51.h's tests drive it.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "T51.h's tests drive their stubs through it")
+)]
 #[must_use]
 pub(crate) fn solve<P: Copy>(
     start: BondAlbedo,
