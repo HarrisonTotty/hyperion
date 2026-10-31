@@ -5243,7 +5243,8 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
 /// member and moon of the first 60 whole systems at the epoch, the photometry states the
 /// derivation's albedo, and the passes' re-check is tallied by kind.
 ///
-/// - **Every body:** at most `MOST_PASSES` (94) passes; its equilibrium temperature at its
+/// - **Every body:** at most `MOST_SECANT_PASSES` (112) passes, the secant steps' bound from
+///   generator version 25 (P14.T51.l); its equilibrium temperature at its
 ///   published albedo; derived over its record (its law's), never the stand-in.
 /// - **Every converged body:** its published context ≡ K(published) (§1.2), and the record's
 ///   figures, its own air's K(P*), agree with the context its published pass read: the basins,
@@ -5309,7 +5310,7 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     use crate::planetary::derive::atmosphere::LARGEST_BOND_ALBEDO;
     use crate::planetary::derive::atmosphere::spun_read::{self, SpunRead};
     use crate::planetary::derive::passes::{
-        Context, ContextFit, Convergence, JUMP_RESIDUAL, MOST_PASSES, floats_agree,
+        Context, ContextFit, Convergence, JUMP_RESIDUAL, MOST_SECANT_PASSES, floats_agree,
     };
     use crate::planetary::derive::photometry::area_mix::OPTICS_BANDS;
     use crate::planetary::derive::{
@@ -5544,7 +5545,7 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
             tally.bodies += 1;
             let passes = derived.atmosphere_passes();
             *tally.passes.entry(passes).or_default() += 1;
-            assert!(passes <= MOST_PASSES, "{what}: {passes}");
+            assert!(passes <= MOST_SECANT_PASSES, "{what}: {passes}");
             assert_same_bits(
                 derived.equilibrium_temperature().value(),
                 equilibrium_temperature(derived.flux(), derived.albedo()).value(),
@@ -6738,7 +6739,8 @@ const SECANT_OTHER_CROSSINGS: [&str; 3] = [
 
 /// P14.T51.l, a measurement for its record, run by name: every present planet, member and moon of
 /// the 400 sample systems and the golden systems at the epoch, each system generated and derived
-/// afresh under T51.h's halvings and under the secant steps (`with_pass_root`), compared body by
+/// afresh under T51.h's halvings, their oracle (`with_halvings`), and under the secant steps in
+/// force from generator version 25, compared body by
 /// body as the plan's test asks: the state, the deck, the carbon carrier, the lid, the capped set
 /// (each gas held below its inventory's weight), the dominant gas and its condensing peer, whether
 /// it jumps, and the surface temperature's branch equal; `T_eq` within 10⁻⁹ of itself; every
@@ -6756,7 +6758,7 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
     use std::time::Instant;
 
     use crate::planetary::derive::passes::{
-        Convergence, PassRoot, SECANT_STEPS, with_pass_root, with_secant_rounds,
+        Convergence, PassRoot, SECANT_STEPS, with_halvings, with_secant_rounds,
     };
 
     /// A kind's bodies, then for each root its bracketed, its jumping, and its passes over the
@@ -6824,7 +6826,7 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
         }))
         .collect();
     let walk = |root: PassRoot| {
-        with_pass_root(root, || {
+        let lines = || {
             let mut lines = Vec::new();
             for (name, seed, ctx) in &sets {
                 if ctx.age_at_epoch().value() <= 0.0 {
@@ -6857,7 +6859,11 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
                 }
             }
             lines
-        })
+        };
+        match root {
+            PassRoot::Halvings => with_halvings(lines),
+            PassRoot::Secant => lines(),
+        }
     };
     let start = Instant::now();
     let halvings = walk(PassRoot::Halvings);
@@ -7022,15 +7028,20 @@ const SECANT_PINNED_CONVERGED: [&str; 6] = [
 
 /// P14.T51.l's pinned bodies end at crossings, not only at their pinned bits (research's condition
 /// on the record's leans): each of [`SECANT_OTHER_CROSSINGS`] and [`SECANT_PARTIALS_ONLY`], derived
-/// at the epoch under T51.h's halvings and under the 25 hold's secant steps (`with_pass_root`), is
+/// at the epoch under T51.h's halvings, their oracle (`with_halvings`), and under the secant steps,
+/// is
 /// bracketed, and every bracket round whose published end is the body's albedo stopped at a
 /// crossing of the diagonal: its two ends' g on opposite sides within 2⁻³² in albedo
 /// (`Crossing::is_valid`); but [`SECANT_PINNED_CONVERGED`]'s, which converge under both from
 /// generator version 25 (P14.T53.b part 3 and P14.T53.e). It moves no output.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the pinned bodies under each root, the oracle's and the root in force"
+)]
 fn the_secant_root_s_pinned_bodies_end_at_crossings() {
     use crate::planetary::derive::passes::{
-        Convergence, Crossing, PassRoot, with_crossings, with_pass_root,
+        Convergence, Crossing, PassRoot, with_crossings, with_halvings,
     };
 
     let pinned: Vec<&str> = SECANT_OTHER_CROSSINGS
@@ -7084,7 +7095,7 @@ fn the_secant_root_s_pinned_bodies_end_at_crossings() {
     };
     let t = UniverseTime::EPOCH;
     for root in [PassRoot::Halvings, PassRoot::Secant] {
-        let found = with_pass_root(root, || {
+        let found = || {
             let mut found = 0_usize;
             for (name, seed, ctx) in &sets {
                 if ctx.age_at_epoch().value() <= 0.0 {
@@ -7126,7 +7137,11 @@ fn the_secant_root_s_pinned_bodies_end_at_crossings() {
                 }
             }
             found
-        });
+        };
+        let found = match root {
+            PassRoot::Halvings => with_halvings(found),
+            PassRoot::Secant => found(),
+        };
         assert_eq!(found, pinned.len(), "under {root:?}");
     }
 }
@@ -13343,11 +13358,12 @@ impl SteamBody {
 
 /// [`part_three_census`] with the later 25 holds set back, for a caller inside
 /// `with_every_25_hold`: part 3's landing with P14.T53.e's present state, P14.T53.c's exposed
-/// share and R09.T7.g's ray-traced plains, on the record from generator version 25. P14.T51.l's
-/// secant root's movers are its own (`under_the_secant_root_the_passes_and_movers_are_stated`).
+/// share and R09.T7.g's ray-traced plains, on the record from generator version 25, under T51.h's
+/// halvings, the oracle of P14.T51.l's secant steps, whose movers are its own
+/// (`under_the_secant_root_the_passes_and_movers_are_stated`).
 fn part_three_s_own_25_census(sets: &[(&str, Seed, &SystemContext)]) -> Vec<SteamBody> {
-    use crate::planetary::derive::passes::{PassRoot, with_pass_root};
-    with_pass_root(PassRoot::Halvings, || part_three_census(sets))
+    use crate::planetary::derive::passes::with_halvings;
+    with_halvings(|| part_three_census(sets))
 }
 
 /// Every body of [`envelope_walk`] over the systems `sets`, each generated afresh at its seed

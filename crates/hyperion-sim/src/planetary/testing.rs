@@ -429,8 +429,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///
 /// The holds, each with its switch:
 ///
-/// - the passes' superlinear root, `SECANT_ROOT_VERSION` (P14.T51.l), at `PassRoot::Secant`
-///   through `with_pass_root`: a bracketed body's secant steps, a detected 2-cycle its own bracket.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 24's) is not
@@ -438,8 +436,7 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::derive::passes::{PassRoot, with_pass_root};
-    with_pass_root(PassRoot::Secant, run)
+    run()
 }
 
 /// `run`'s result with every landed hold at generator version 26 in force on this thread, for a
@@ -738,20 +735,6 @@ mod tests {
             synthetic_star(id, SolarMasses::new(-1.0), fe_h, age),
             Err(BuildSystemContextError::MassOutsideRange { star: 0, .. })
         ));
-    }
-
-    /// The passes' superlinear root's switch (P14.T51.l): in force inside 25's helper, the halvings
-    /// outside it and where a test sets it back.
-    #[test]
-    fn the_pass_root_s_hold_is_in_force_inside_25_s_helper_alone() {
-        use crate::planetary::derive::passes::{PassRoot, with_pass_root};
-        assert_eq!(PassRoot::in_force(), PassRoot::Halvings);
-        assert_eq!(with_every_25_hold(PassRoot::in_force), PassRoot::Secant);
-        assert_eq!(
-            with_every_25_hold(|| with_pass_root(PassRoot::Halvings, PassRoot::in_force)),
-            PassRoot::Halvings
-        );
-        assert_eq!(PassRoot::in_force(), PassRoot::Halvings);
     }
 
     /// 26's deck profile's switch (P14.T52.g): in force inside 26's helper, held outside it, inside

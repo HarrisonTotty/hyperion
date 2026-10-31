@@ -977,10 +977,11 @@ impl DerivedBody {
     }
 
     /// How many passes of P14.T12 and T13 the derivation took: as many as converge, at most
-    /// `PLAIN_PASSES` (P14.T51.b), and for a body they do not settle its bisection's too: at most
-    /// `MOST_PASSES`, 24 + 2 × (2 + 32 + 1) = 94 in all, under a lagged context (P14.T54.a;
-    /// decision-p14-t54a-passes §1.5), and T51.h's 57 over the stand-in, whose bracket takes one
-    /// round with its ends reused.
+    /// `PLAIN_PASSES` (P14.T51.b), and for a body they do not settle its bracket's too, under the
+    /// secant steps from generator version 25 (P14.T51.l): at most `MOST_SECANT_PASSES`, 24 + 2 ×
+    /// (2 + 2 + 40) = 112 in all, under a lagged context (P14.T54.a; decision-p14-t54a-passes
+    /// §1.5), and 24 + 2 + 40 = 66 over the stand-in, whose bracket takes one round with its ends
+    /// reused.
     #[cfg_attr(
         not(test),
         expect(

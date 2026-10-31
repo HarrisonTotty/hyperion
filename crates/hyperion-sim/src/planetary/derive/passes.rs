@@ -61,12 +61,14 @@
 //!   self-consistent context among the two, and the lower albedo of the two rounds' passes is
 //!   published, labelled a context jump ([`ContextFit::Jump`]).
 //!
-//! So at most [`MOST_PASSES`] passes are taken, 24 + 2 × (2 + 32 + 1) = 94. [`solve`] is
-//! [`solve_in_context`] at C = (), every context the same, which takes T51.h's passes to the bit.
+//! So at most [`MOST_PASSES`] passes are taken under the halvings, 24 + 2 × (2 + 32 + 1) = 94, and
+//! [`MOST_SECANT_PASSES`], 24 + 2 × (2 + 2 + 40) = 112, under the secant steps in force from
+//! generator version 25 (below). [`solve`] is [`solve_in_context`] at C = (), every context the
+//! same, which takes T51.h's passes to the bit.
 //!
 //! # The superlinear root (P14.T51.l, from generator version 25)
 //!
-//! From [`SECANT_ROOT_VERSION`] the bracket's [`HALVINGS`] become at most [`SECANT_STEPS`] steps
+//! From generator version 25 the bracket's [`HALVINGS`] become at most [`SECANT_STEPS`] steps
 //! of the Illinois form of the false position (Dowell and Jarratt 1971, BIT 11, 168) on the same
 //! bracket ([`PassRoot::Secant`]; decision-24-cost D4):
 //!
@@ -82,6 +84,8 @@
 //!   cycle's midpoint, exact where F is linear;
 //! - the published pass is the bracket's end with the smaller |g|, ties to the lower albedo, as
 //!   the halvings' is.
+//!
+//! T51.h's halvings stay the tests' oracle of the secant steps ([`PassRoot::Halvings`]).
 //!
 //! # The own residual (P14.T54.b.l, from generator version 26)
 //!
@@ -124,16 +128,6 @@ pub(crate) const PLAIN_PASSES: u32 = 24;
 /// albedo up to 0.94, since d`T_eq` ÷ `T_eq` = dA ÷ 4(1 − A).
 pub(crate) const HALVINGS: u32 = 32;
 
-/// The generator version from which a bracketed body's root is P14.T51.l's superlinear one: 25,
-/// the first planetary bump after 24 (decision-24-cost D4; the [module](self)'s "The superlinear
-/// root").
-///
-/// It is P14.T51.l's one hold. Below it [`PassRoot::in_force`] is [`PassRoot::Halvings`], T51.h's
-/// [`HALVINGS`], and every pass is version 24's bit for bit. 25's bump deletes this hold and the
-/// tests' switch, keeps [`PassRoot::Halvings`] as the tests' oracle of the secant steps, and
-/// deletes the tripwire (`the_secant_root_is_held_only_until_the_25_bump`).
-pub(crate) const SECANT_ROOT_VERSION: GeneratorVersion = GeneratorVersion::new(25);
-
 /// The most secant steps a bracket takes under [`PassRoot::Secant`] (P14.T51.l), each a full pass:
 /// 40, above the 33 the slowest of the 269 rounds over the 400 sample systems and the golden
 /// systems took (measured 2026-10-30, P14.T51.l's lane; the system tests'
@@ -147,11 +141,16 @@ pub(crate) const SECANT_STEPS: u32 = 40;
 /// 0.94.
 pub(crate) const SECANT_STOP_WIDTH: f64 = 1.0 / 4_294_967_296.0;
 
-/// How a bracketed body's root is found ([`SECANT_ROOT_VERSION`]'s hold).
+/// How a bracketed body's root is found (P14.T51.l): the secant steps, from generator version 25,
+/// and in the tests T51.h's halvings, their oracle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum PassRoot {
     /// Version 24's and before: T51.h's [`HALVINGS`] from the plain passes' least and greatest
-    /// albedo.
+    /// albedo, the tests' oracle of the secant steps ([`with_halvings`]).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the tests' oracle of the secant steps")
+    )]
     Halvings,
     /// Version 25's: at most [`SECANT_STEPS`] Illinois steps, a detected 2-cycle its own bracket
     /// (the [module](self)'s "The superlinear root").
@@ -159,26 +158,21 @@ pub(crate) enum PassRoot {
 }
 
 impl PassRoot {
-    /// The root this generator version gives: the secant steps from [`SECANT_ROOT_VERSION`], the
-    /// halvings below it; in the tests, the root a test's switch sets on its thread
-    /// ([`with_pass_root`]).
+    /// The root in force: the secant steps; in the tests, the halvings where a test sets them on
+    /// its thread ([`with_halvings`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(root) = ROOT.with(core::cell::Cell::get) {
             return root;
         }
-        if GENERATOR_VERSION >= SECANT_ROOT_VERSION {
-            Self::Secant
-        } else {
-            Self::Halvings
-        }
+        Self::Secant
     }
 }
 
 #[cfg(test)]
 thread_local! {
-    /// The root a test sets on its thread, `None` for the version's.
+    /// The root a test sets on its thread ([`with_halvings`]), `None` for the secant steps.
     static ROOT: core::cell::Cell<Option<PassRoot>> = const { core::cell::Cell::new(None) };
 }
 
@@ -273,11 +267,10 @@ pub(crate) fn with_crossings<R>(run: impl FnOnce() -> R) -> (R, Vec<Crossing>) {
     (result, crossings)
 }
 
-/// `run`'s result with the bracketed root `root` on this thread, for the tests to reach 25's
-/// secant steps ahead of the bump; the version's root is set back after, a panic in `run`
-/// included. 25's bump deletes it with the hold.
+/// `run`'s result with T51.h's halvings as the bracketed root on this thread, the tests' oracle of
+/// the secant steps (P14.T51.l); the secant steps are set back after, a panic in `run` included.
 #[cfg(test)]
-pub(crate) fn with_pass_root<R>(root: PassRoot, run: impl FnOnce() -> R) -> R {
+pub(crate) fn with_halvings<R>(run: impl FnOnce() -> R) -> R {
     /// Sets the thread's root back as it drops.
     struct Restore(Option<PassRoot>);
     impl Drop for Restore {
@@ -285,7 +278,7 @@ pub(crate) fn with_pass_root<R>(root: PassRoot, run: impl FnOnce() -> R) -> R {
             ROOT.with(|cell| cell.set(self.0));
         }
     }
-    let _restore = Restore(ROOT.with(|cell| cell.replace(Some(root))));
+    let _restore = Restore(ROOT.with(|cell| cell.replace(Some(PassRoot::Halvings))));
     run()
 }
 
@@ -798,9 +791,10 @@ impl<P: Copy, C: Copy> End<P, C> {
 /// extrapolation ([`PassStep::Aitken`]). One that does not, or that repeats a 2-cycle to the bit
 /// first, is bracketed and bisected ([`HALVINGS`]), as the module's
 /// documentation says, and publishes the bracket's end with the smaller |F(A) − A|, ties to the
-/// lower albedo, [`Convergence::Bracketed`]. At most [`PLAIN_PASSES`] + [`HALVINGS`] + 1 passes are
-/// taken: the one more where a bound of [0, 1⁻] is still an end and needs its pass. Under the
-/// secant steps from 25 ([`PassRoot::Secant`]), at most [`PLAIN_PASSES`] + 2 + [`SECANT_STEPS`].
+/// lower albedo, [`Convergence::Bracketed`]. Under the secant steps, in force from generator
+/// version 25 ([`PassRoot::Secant`]), at most [`PLAIN_PASSES`] + 2 + [`SECANT_STEPS`] passes are
+/// taken; under the halvings, [`PLAIN_PASSES`] + [`HALVINGS`] + 1: the one more where a bound of
+/// [0, 1⁻] is still an end and needs its pass.
 ///
 /// It is [`solve_in_context`] at C = (), to the bit, its count included: every end then read the
 /// frozen context and is reused, and every published pass fits its context
@@ -840,8 +834,9 @@ pub(crate) fn solve<P: Copy>(
 /// Aₙ where the moves show linear convergence ([`PassStep::Aitken`]). The plain passes stop early
 /// on (A, C) two passes back, bit for bit. A body that does not settle is
 /// bracketed under its frozen context, and once more under K of the published pass where their
-/// keys differ, as the module's documentation says. At most [`MOST_PASSES`] passes are taken,
-/// [`MOST_SECANT_PASSES`] under the secant steps from 25 ([`PassRoot::Secant`]).
+/// keys differ, as the module's documentation says. At most [`MOST_SECANT_PASSES`] passes are
+/// taken under the secant steps in force from generator version 25 ([`PassRoot::Secant`]), and
+/// [`MOST_PASSES`] under the halvings.
 ///
 /// Each pass must be a function of the albedo and the context it reads alone, which the early stop
 /// and the bisection both need, so `pass` is a `Fn`.
@@ -1426,10 +1421,11 @@ mod tests {
 
     /// Where g keeps one sign over every albedo the passes read, the bracket is [0, 1⁻]: F(A) =
     /// A + 10⁻³ (1 − A) creeps up without settling, g > 0 at every albedo read, and the bracket's
-    /// upper bound is the clamp's fixed point, F(1⁻) = 1⁻, which takes the one pass more.
+    /// upper bound is the clamp's fixed point, F(1⁻) = 1⁻, which takes the one pass more, under
+    /// T51.h's halvings, the secant steps' oracle.
     #[test]
     fn without_a_sign_change_the_bracket_is_the_whole_range() {
-        let creeping = solved(|a| a + 1e-3 * (1.0 - a));
+        let creeping = halvings_solved(|a| a + 1e-3 * (1.0 - a));
         let Convergence::Bracketed { residual, .. } = creeping.convergence else {
             panic!("{:?}", creeping.convergence);
         };
@@ -1440,21 +1436,24 @@ mod tests {
 
     /// A map whose only fixed point is 0, F(A) = 0.999 A, falls too slowly to settle with g < 0 at
     /// every albedo read: the bracket is [0, 1⁻], its lower bound is kept through every halving
-    /// and taken at the end, the one pass more, and the published albedo is 0 exactly.
+    /// (T51.h's, the secant steps' oracle) and taken at the end, the one pass more, and the
+    /// published albedo is 0 exactly.
     #[test]
     fn a_kept_lower_bound_is_taken_and_published() {
-        let falling = solved(|a| 0.999 * a);
+        let falling = halvings_solved(|a| 0.999 * a);
         assert_same_bits(falling.albedo.value(), 0.0);
         assert_same_bits(residual_of(falling.convergence), 0.0);
         assert_eq!(falling.count, PLAIN_PASSES + HALVINGS + 1);
     }
 
     /// Ties in |g| go to the lower albedo: from 0.25, F(A) = A + 0.25 below 0.5 and A − 0.25 from
-    /// it 2-cycles over {0.25, 0.5}, and the bracket's ends both hold |g| = 0.25 exactly.
+    /// it 2-cycles over {0.25, 0.5}, and the bracket's ends both hold |g| = 0.25 exactly, under
+    /// T51.h's halvings, the secant steps' oracle.
     #[test]
     fn ties_go_to_the_lower_albedo() {
         let f = |a: f64| if a < 0.5 { a + 0.25 } else { a - 0.25 };
-        let solved = solve(BondAlbedo::from_fraction(0.25), stub(f), gives, settled);
+        let solved =
+            with_halvings(|| solve(BondAlbedo::from_fraction(0.25), stub(f), gives, settled));
         assert_same_bits(solved.albedo.value(), 0.5 - 1.0 / 17_179_869_184.0);
         assert_same_bits(residual_of(solved.convergence), 0.25);
     }
@@ -1640,10 +1639,10 @@ mod tests {
     /// A stub map of the albedo read to the albedo given, boxed.
     type Map = Box<dyn Fn(f64) -> f64>;
 
-    /// At C = (), the solver is P14.T51.h's to the bit (decision-p14-t54a-passes §1.9, test 1): on
-    /// its 361 stubs and on every map of the other stub tests, from their starts, with the early
-    /// stop and run on, the same albedo, pass, count and residual, every bracketed pass fitting its
-    /// context's first round.
+    /// At C = (), the solver under T51.h's halvings, the secant steps' oracle, is P14.T51.h's to
+    /// the bit (decision-p14-t54a-passes §1.9, test 1): on its 361 stubs and on every map of the
+    /// other stub tests, from their starts, with the early stop and run on, the same albedo, pass,
+    /// count and residual, every bracketed pass fitting its context's first round.
     #[test]
     fn at_no_context_the_solver_is_t51h_s_to_the_bit() {
         let mut maps: Vec<(f64, Map)> = t51h_stubs()
@@ -1676,15 +1675,17 @@ mod tests {
         for (start, f) in &maps {
             let start = BondAlbedo::from_fraction(*start);
             for cycles in [TwoCycles::Stop, TwoCycles::Run] {
-                let now = solve_with(
-                    plain(cycles, PLAIN_PASSES),
-                    start,
-                    (),
-                    |read: BondAlbedo, (): &()| stub(f)(read),
-                    gives,
-                    |_: &(f64, f64)| {},
-                    settled,
-                );
+                let now = with_halvings(|| {
+                    solve_with(
+                        plain(cycles, PLAIN_PASSES),
+                        start,
+                        (),
+                        |read: BondAlbedo, (): &()| stub(f)(read),
+                        gives,
+                        |_: &(f64, f64)| {},
+                        settled,
+                    )
+                });
                 let (albedo, pass, count, residual) = t51h_solve(cycles, start, stub(f), settled);
                 assert_same_bits(now.albedo.value(), albedo.value());
                 assert_same_bits(now.pass.0, pass.0);
@@ -1704,7 +1705,7 @@ mod tests {
         // `solve` is the same: the early stop's rule at the plain passes' cap.
         for (start, f) in &maps {
             let start = BondAlbedo::from_fraction(*start);
-            let now = solve(start, stub(f), gives, settled);
+            let now = with_halvings(|| solve(start, stub(f), gives, settled));
             let (albedo, pass, count, _) = t51h_solve(TwoCycles::Stop, start, stub(f), settled);
             assert_same_bits(now.albedo.value(), albedo.value());
             assert_same_bits(now.pass.1, pass.1);
@@ -1883,19 +1884,22 @@ mod tests {
 
     /// Where the albedo 2-cycles to the bit but the context does not repeat, the plain passes do
     /// not stop early: a context that moves every pass (its level the one read plus 1) under the
-    /// jump at 0.4 runs all [`PLAIN_PASSES`], where at C = () the same map stops at its 2-cycle.
+    /// jump at 0.4 runs all [`PLAIN_PASSES`], where at C = () the same map stops at its 2-cycle,
+    /// under T51.h's halvings, the secant steps' oracle.
     #[test]
     fn an_albedo_2_cycle_under_a_moving_context_does_not_stop_early() {
         let jump = |a: f64, _: Lid| if a < 0.4 { 0.6 } else { 0.2 };
-        let moving = lid_solve_from(Plain::SOLVE, jump, |pass: &LidPass| Lid {
-            level: pass.2.level + 1.0,
-            branch: 0,
+        let moving = with_halvings(|| {
+            lid_solve_from(Plain::SOLVE, jump, |pass: &LidPass| Lid {
+                level: pass.2.level + 1.0,
+                branch: 0,
+            })
         });
         // 24 plain passes, both ends re-evaluated under the frozen context, 32 halvings.
         assert_eq!(moving.count, PLAIN_PASSES + 2 + HALVINGS);
         assert_eq!(fit_of(moving.convergence), ContextFit::FirstRound);
         assert!(moving.convergence.is_jump());
-        let plain = solved(|a| if a < 0.4 { 0.6 } else { 0.2 });
+        let plain = halvings_solved(|a| if a < 0.4 { 0.6 } else { 0.2 });
         assert!(plain.count < moving.count - 2, "{}", plain.count);
         assert_same_bits(plain.albedo.value(), moving.albedo.value());
     }
@@ -1907,14 +1911,17 @@ mod tests {
     /// 0.3 under C₀ = 0 and 0.8 under 1, bracket under their own contexts (g = ±0.5). The frozen
     /// context is the lower-albedo pass's, 0, under which both rise; so the bracket is [0, 1⁻], and
     /// the published pass is its upper bound, F's clamp under C = 0, residual 0. The lower end read
-    /// C = 0 and is reused, the upper is re-evaluated: 4 + 1 + 32 + 1 passes.
+    /// C = 0 and is reused, the upper is re-evaluated: 4 + 1 + 32 + 1 passes under T51.h's
+    /// halvings, the secant steps' oracle.
     #[test]
     fn the_ends_are_re_evaluated_under_the_frozen_context() {
-        let solved = lid_solve(
-            Plain::SOLVE,
-            |a, lid| if lid.branch == 0 { a + 0.5 } else { a - 0.5 },
-            |read| Lid::branch(u8::from(read < 0.5)),
-        );
+        let solved = with_halvings(|| {
+            lid_solve(
+                Plain::SOLVE,
+                |a, lid| if lid.branch == 0 { a + 0.5 } else { a - 0.5 },
+                |read| Lid::branch(u8::from(read < 0.5)),
+            )
+        });
         assert_same_bits(solved.albedo.value(), LARGEST_BOND_ALBEDO);
         assert_same_bits(residual_of(solved.convergence), 0.0);
         assert_eq!(solved.context, Lid::branch(0));
@@ -1935,10 +1942,11 @@ mod tests {
     }
 
     /// With the edge at 0.26, both roots lie below it: C = 0's is not self-consistent, and C = 1's
-    /// is, which the second round finds and publishes, its context fitting.
+    /// is, which the second round finds and publishes, its context fitting, under T51.h's
+    /// halvings, the secant steps' oracle.
     #[test]
     fn a_consistent_pair_only_at_the_other_context_is_found_by_the_second_round() {
-        let solved = second_round(0.26);
+        let solved = with_halvings(|| second_round(0.26));
         assert_eq!(fit_of(solved.convergence), ContextFit::SecondRound);
         assert!(!solved.convergence.is_jump());
         assert_eq!(solved.context, Lid::branch(1));
@@ -1973,27 +1981,30 @@ mod tests {
         assert!(solved.count <= MOST_PASSES, "{}", solved.count);
     }
 
-    /// The passes are at most [`MOST_PASSES`], 94, and a body can take them all: F(A) = A + 0.01
-    /// creeps up without settling under a context whose level moves every pass, so the plain passes
-    /// run to 24 and neither end read the frozen context; g > 0 everywhere, so each round's bracket
-    /// is [0, 1⁻] and takes its upper bound's pass; and the bound's own air gives another branch
-    /// (K's branch is 1 above 0.9), so a second round runs, which fits.
+    /// Under T51.h's halvings, the secant steps' oracle, the passes are at most [`MOST_PASSES`],
+    /// 94, and a body can take them all: F(A) = A + 0.01 creeps up without settling under a context
+    /// whose level moves every pass, so the plain passes run to 24 and neither end read the frozen
+    /// context; g > 0 everywhere, so each round's bracket is [0, 1⁻] and takes its upper bound's
+    /// pass; and the bound's own air gives another branch (K's branch is 1 above 0.9), so a second
+    /// round runs, which fits.
     #[test]
     fn the_passes_take_at_most_94() {
         assert_eq!(MOST_PASSES, 94);
-        let solved = lid_solve_from(
-            Plain::SOLVE,
-            |a, _| a + 0.01,
-            |pass: &LidPass| Lid {
-                level: pass.2.level + 1.0,
-                branch: u8::from(pass.0 > 0.9),
-            },
-        );
+        let solved = with_halvings(|| {
+            lid_solve_from(
+                Plain::SOLVE,
+                |a, _| a + 0.01,
+                |pass: &LidPass| Lid {
+                    level: pass.2.level + 1.0,
+                    branch: u8::from(pass.0 > 0.9),
+                },
+            )
+        });
         assert_eq!(solved.count, MOST_PASSES);
         assert_eq!(fit_of(solved.convergence), ContextFit::SecondRound);
         assert_same_bits(solved.albedo.value(), LARGEST_BOND_ALBEDO);
         for edge in [0.26, 0.250_4] {
-            assert!(second_round(edge).count <= MOST_PASSES);
+            assert!(with_halvings(|| second_round(edge)).count <= MOST_PASSES);
         }
     }
 
@@ -2004,10 +2015,7 @@ mod tests {
     #[test]
     fn under_the_secant_root_the_lagged_contexts_keep_their_outcomes() {
         assert_eq!(MOST_SECANT_PASSES, 112);
-        let (pair, halving_pair) = (
-            with_pass_root(PassRoot::Secant, || second_round(0.26)),
-            second_round(0.26),
-        );
+        let (pair, halving_pair) = (second_round(0.26), with_halvings(|| second_round(0.26)));
         assert_eq!(fit_of(pair.convergence), ContextFit::SecondRound);
         assert_eq!(pair.context, Lid::branch(1));
         let off = (pair.albedo.value() - 0.652 / 2.6).abs();
@@ -2018,21 +2026,19 @@ mod tests {
             pair.count,
             halving_pair.count
         );
-        let flip_flop = with_pass_root(PassRoot::Secant, || second_round(0.250_4));
+        let flip_flop = second_round(0.250_4);
         assert_eq!(fit_of(flip_flop.convergence), ContextFit::Jump);
         assert_eq!(flip_flop.context, Lid::branch(0));
         let off = (flip_flop.albedo.value() - 0.25).abs();
         assert!(off < 1e-12, "{off:e}");
-        let creeping = with_pass_root(PassRoot::Secant, || {
-            lid_solve_from(
-                Plain::SOLVE,
-                |a, _| a + 0.01,
-                |pass: &LidPass| Lid {
-                    level: pass.2.level + 1.0,
-                    branch: u8::from(pass.0 > 0.9),
-                },
-            )
-        });
+        let creeping = lid_solve_from(
+            Plain::SOLVE,
+            |a, _| a + 0.01,
+            |pass: &LidPass| Lid {
+                level: pass.2.level + 1.0,
+                branch: u8::from(pass.0 > 0.9),
+            },
+        );
         assert!(creeping.count <= MOST_SECANT_PASSES, "{}", creeping.count);
         assert_same_bits(creeping.albedo.value(), LARGEST_BOND_ALBEDO);
         eprintln!(
@@ -2064,31 +2070,11 @@ mod tests {
         assert!(!floats_agree(0.0, 1e-300));
     }
 
-    // P14.T51.l: the superlinear root, behind its hold at 25.
+    // P14.T51.l: the superlinear root, on the record from generator version 25.
 
-    /// [`solved`] under the secant steps.
-    fn secant_solved(f: impl Fn(f64) -> f64) -> Solved<(f64, f64)> {
-        with_pass_root(PassRoot::Secant, || solved(f))
-    }
-
-    /// P14.T51.l is held until the 24 → 25 bump: the root in force is T51.h's halvings.
-    #[test]
-    fn the_secant_root_is_held_only_until_the_25_bump() {
-        assert!(
-            GENERATOR_VERSION < SECANT_ROOT_VERSION,
-            "the 24 → 25 bump puts P14.T51.l's secant steps on the record (decision-24-cost D4): \
-             delete `SECANT_ROOT_VERSION`, `PassRoot::in_force`'s version test, the tests' \
-             `with_pass_root` and its switch in `with_every_25_hold`, and this test, keeping \
-             `PassRoot::Halvings` as the tests' oracle of the secant steps; and read \
-             `MOST_SECANT_PASSES`, 112, where `MOST_PASSES`, 94, bounds a body's passes \
-             (`DerivedBody::atmosphere_passes`' docs, the system tests' whole-sample check)"
-        );
-        assert_eq!(PassRoot::in_force(), PassRoot::Halvings);
-        assert_eq!(
-            with_pass_root(PassRoot::Secant, PassRoot::in_force),
-            PassRoot::Secant
-        );
-        assert_eq!(PassRoot::in_force(), PassRoot::Halvings);
+    /// [`solved`] under T51.h's halvings, the oracle of the secant steps.
+    fn halvings_solved(f: impl Fn(f64) -> f64) -> Solved<(f64, f64)> {
+        with_halvings(|| solved(f))
     }
 
     /// T51.h's stubs under the secant steps reach the halvings' fixed points: slope −2 held into its
@@ -2111,8 +2097,8 @@ mod tests {
             ),
         ];
         for (what, fixed, f) in &cases {
-            let halvings = solved(f);
-            let secant = secant_solved(f);
+            let halvings = halvings_solved(f);
+            let secant = solved(f);
             let off = (secant.albedo.value() - fixed).abs();
             assert!(off < 1e-12, "{what}: {off:e}");
             assert!(residual_of(secant.convergence) < JUMP_RESIDUAL, "{what}");
@@ -2128,7 +2114,7 @@ mod tests {
             );
         }
         let jump = |a: f64| if a < 0.4 { 0.6 } else { 0.2 };
-        let (halvings, secant) = (solved(jump), secant_solved(jump));
+        let (halvings, secant) = (halvings_solved(jump), solved(jump));
         assert!(
             (secant.albedo.value() - 0.4).abs() <= SECANT_STOP_WIDTH,
             "{:?}",
@@ -2160,8 +2146,8 @@ mod tests {
                 Box::new(move |a: f64| 2.0 * fixed - a - 3.0 * (a - fixed) * (a - fixed)),
             ),
         ] {
-            let halvings = solved(&f);
-            let secant = secant_solved(&f);
+            let halvings = halvings_solved(&f);
+            let secant = solved(&f);
             let off = (secant.albedo.value() - fixed).abs();
             assert!(off < 1e-12, "{what}: {off:e}");
             assert!(
@@ -2190,16 +2176,14 @@ mod tests {
     /// 0.25 exactly.
     #[test]
     fn under_the_secant_root_the_bounds_and_ties_keep_their_outcomes() {
-        let creeping = secant_solved(|a| a + 1e-3 * (1.0 - a));
+        let creeping = solved(|a| a + 1e-3 * (1.0 - a));
         assert_same_bits(creeping.albedo.value(), LARGEST_BOND_ALBEDO);
         assert_same_bits(residual_of(creeping.convergence), 0.0);
-        let falling = secant_solved(|a| 0.999 * a);
+        let falling = solved(|a| 0.999 * a);
         assert_same_bits(falling.albedo.value(), 0.0);
         assert_same_bits(residual_of(falling.convergence), 0.0);
         let f = |a: f64| if a < 0.5 { a + 0.25 } else { a - 0.25 };
-        let tie = with_pass_root(PassRoot::Secant, || {
-            solve(BondAlbedo::from_fraction(0.25), stub(f), gives, settled)
-        });
+        let tie = solve(BondAlbedo::from_fraction(0.25), stub(f), gives, settled);
         assert_same_bits(tie.albedo.value(), 0.5 - SECANT_STOP_WIDTH);
         assert_same_bits(residual_of(tie.convergence), 0.25);
         assert!(tie.convergence.is_jump(), "{:?}", tie.convergence);
@@ -2219,7 +2203,7 @@ mod tests {
             t51h_stubs().chain((0..19).map(|k| (0.05 + 0.05 * f64::from(k), -1.0)))
         {
             let f = move |a: f64| fixed + slope * (a - fixed);
-            let (halvings, secant) = (solved(f), secant_solved(f));
+            let (halvings, secant) = (halvings_solved(f), solved(f));
             match halvings.convergence {
                 Convergence::Converged => {
                     assert_eq!(
@@ -2250,7 +2234,7 @@ mod tests {
     #[test]
     fn the_secant_root_is_deterministic() {
         let f = |a: f64| (0.21 - 2.5 * (a - 0.21)).clamp(0.15, 0.278);
-        let (one, two) = (secant_solved(f), secant_solved(f));
+        let (one, two) = (solved(f), solved(f));
         assert_same_bits(one.albedo.value(), two.albedo.value());
         assert_same_bits(one.pass.1, two.pass.1);
         assert_eq!(one.count, two.count);
@@ -2266,7 +2250,10 @@ mod tests {
         let steep = |a: f64| (0.21 - 2.5 * (a - 0.21)).clamp(0.15, 0.278);
         for root in [PassRoot::Halvings, PassRoot::Secant] {
             for (what, f) in [("jump", &jump as &dyn Fn(f64) -> f64), ("steep", &steep)] {
-                let (solved, crossings) = with_crossings(|| with_pass_root(root, || solved(f)));
+                let (solved, crossings) = with_crossings(|| match root {
+                    PassRoot::Halvings => halvings_solved(f),
+                    PassRoot::Secant => solved(f),
+                });
                 let [crossing] = crossings[..] else {
                     panic!("{what} under {root:?}: {crossings:?}");
                 };

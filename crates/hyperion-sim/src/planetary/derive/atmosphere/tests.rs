@@ -6642,11 +6642,12 @@ fn a_pass_publishes_the_state_its_previous_pass_carried() {
 // P14.T53.b part 3: the steam envelope and the partition's cap (decision-p14-t53b-part3).
 
 /// `run` under P14.T53.b part 3, in force from generator version 25, with every landed 25 hold in
-/// force but P14.T51.l's, whose movers its own tests state.
+/// force, under T51.h's halvings, the oracle of P14.T51.l's secant steps, whose movers their own
+/// tests state.
 fn with_part_three<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::derive::passes::{PassRoot, with_pass_root};
+    use crate::planetary::derive::passes::with_halvings;
     use crate::planetary::testing::with_every_25_hold;
-    with_every_25_hold(|| with_pass_root(PassRoot::Halvings, run))
+    with_every_25_hold(|| with_halvings(run))
 }
 
 /// An Earth of the Sun inside the runaway limit now ([`earth_inputs`] at `equilibrium`, K) holding
