@@ -105,12 +105,18 @@ pub(crate) enum SubstellarHostRules {
 impl SubstellarHostRules {
     /// The rules this generator version gives: the brown dwarfs' from
     /// [`SUBSTELLAR_HOSTS_VERSION`], none below it; in the tests, the rules a test's switch sets on
-    /// its thread ([`with_substellar_hosts`]).
+    /// its thread ([`with_substellar_hosts`]); behind the `testing` feature, the brown dwarfs'
+    /// wherever another crate's test binary has admitted the free-floating hosts for its whole
+    /// process ([`admit_free_floating_in_this_process`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(rules) = RULES.with(core::cell::Cell::get) {
             return rules;
+        }
+        #[cfg(feature = "testing")]
+        if FREE_FLOATING_IN_THIS_PROCESS.load(core::sync::atomic::Ordering::Relaxed) {
+            return Self::BrownDwarfs;
         }
         if GENERATOR_VERSION >= SUBSTELLAR_HOSTS_VERSION {
             Self::BrownDwarfs
@@ -167,12 +173,18 @@ pub(crate) enum RoguePlanetRules {
 impl RoguePlanetRules {
     /// The rules this generator version gives: the rogue planets' bodies from
     /// [`ROGUE_PLANET_HOSTS_VERSION`], none below it; in the tests, the rules a test's switch sets
-    /// on its thread ([`with_rogue_planets`]).
+    /// on its thread ([`with_rogue_planets`]); behind the `testing` feature, the bodies wherever
+    /// another crate's test binary has admitted the free-floating hosts for its whole process
+    /// ([`admit_free_floating_in_this_process`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(rules) = ROGUE_RULES.with(core::cell::Cell::get) {
             return rules;
+        }
+        #[cfg(feature = "testing")]
+        if FREE_FLOATING_IN_THIS_PROCESS.load(core::sync::atomic::Ordering::Relaxed) {
+            return Self::Bodies;
         }
         if GENERATOR_VERSION >= ROGUE_PLANET_HOSTS_VERSION {
             Self::Bodies
@@ -203,6 +215,22 @@ pub(crate) fn with_rogue_planets<R>(rules: RoguePlanetRules, run: impl FnOnce() 
     }
     let _restore = Restore(ROGUE_RULES.with(|cell| cell.replace(Some(rules))));
     run()
+}
+
+/// Whether another crate's test binary has admitted the free-floating hosts, brown dwarfs and rogue
+/// planets alike, for every thread of its process, ahead of both their holds
+/// ([`admit_free_floating_in_this_process`]): its code answers on threads of its own, such as the
+/// server's pool, which no thread's switch reaches. Never set in this crate's tests, nor outside the
+/// `testing` feature. 26's bump deletes it with the holds.
+#[cfg(feature = "testing")]
+static FREE_FLOATING_IN_THIS_PROCESS: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+/// Puts both holds' arms, [`SubstellarHostRules::BrownDwarfs`] and [`RoguePlanetRules::Bodies`], in
+/// force for every thread of this process ([`FREE_FLOATING_IN_THIS_PROCESS`]); one-way.
+#[cfg(feature = "testing")]
+pub(crate) fn admit_free_floating_in_this_process() {
+    FREE_FLOATING_IN_THIS_PROCESS.store(true, core::sync::atomic::Ordering::Relaxed);
 }
 
 /// Whether the planetary stage generates the systems of kind `kind` under the rules in force:

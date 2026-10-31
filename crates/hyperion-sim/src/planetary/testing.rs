@@ -415,6 +415,20 @@ pub fn wire_body_events_in_this_process() {
     super::system::events::wire_in_this_process();
 }
 
+/// Gives the free-floating hosts their systems for every thread of this process, ahead of their
+/// holds at generator version 26 (P14.T27.a's `SUBSTELLAR_HOSTS_VERSION` and P14.T27.b's
+/// `ROGUE_PLANET_HOSTS_VERSION`), for another crate's test binary: the server answers on its pool's
+/// threads, which a switch on the test's thread would not reach. A brown dwarf's and a rogue
+/// planet's systems are generated, and the frame search walks their layers
+/// ([`frame_at`](crate::galaxy::frame::frame_at)); every other 26 hold stays held, so every other
+/// system reads version 24's records. It is one-way and process-wide, so a binary that calls it
+/// calls it at the start of every test, and holds no test that asks for the free-floating hosts at
+/// 24. Only a test binary calls this. 26's bump deletes it with the holds.
+#[cfg(feature = "testing")]
+pub fn admit_free_floating_hosts_in_this_process() {
+    super::hosts::substellar::admit_free_floating_in_this_process();
+}
+
 /// `run`'s result with every landed hold at generator version 25 in force on this thread, for a
 /// test that asserts a 25 figure: a hold that missed 24's membership, which P14.T54.b.i closed
 /// (decision-p14-t53b-part3 §8), rides 25 behind its own version and switch, so that every 24 test

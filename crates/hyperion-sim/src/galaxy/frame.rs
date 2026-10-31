@@ -12,18 +12,27 @@
 //! of influence and merging whatever the query's sources hold there. Both are pure functions of the
 //! galaxy, the ship's position and the time: neither depends on the caller's cache, nor on the
 //! order a walk happens to visit systems in.
+//!
+//! The substellar layers (plan 13) are walked too, each from the generator version at which plan
+//! 14 gives its objects their bodies (P14.T27): layer F, the free-floating brown dwarfs, under
+//! P14.T27.a's hold, and layer G, the rogue planets, under P14.T27.b's, so that a ship can reach a
+//! free-floating object's frame exactly when the object has bodies to be in it with (lean,
+//! 2026-10-31). Below 26 the walk is the stellar layers' alone, bit for bit.
 
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
 
 use crate::coords::GalacticPosition;
-use crate::galaxy::placement::{CellCache, Existence, LayerSpec, STELLAR_LAYERS, SystemRecord};
+use crate::galaxy::placement::{
+    CellCache, Existence, LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS, SystemKind, SystemRecord,
+};
 use crate::galaxy::query::{
     LayerSet, QuerySphere, SystemHit, SystemSource, cells_in_sphere, hit_at, position_at, walk_pad,
 };
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{Layer, SystemId};
+use crate::planetary::hosts::substellar::generates;
 use crate::time::{ClockWindow, UniverseTime};
 use crate::units::{LightYears, Metres, SolarMasses};
 
@@ -217,6 +226,19 @@ pub fn select_frame(candidates: &[FrameCandidate], current: Option<SystemId>) ->
 /// of light-years, which the rotation curve does nowhere the grid places a system.
 const SEARCH_MARGIN: f64 = 1.25;
 
+/// The layers [`frame_at`] walks under the rules in force: every stellar layer, and each substellar
+/// layer whose objects the planetary stage generates (P14.T27): layer F from P14.T27.a's hold
+/// (`SubstellarHostRules::BrownDwarfs`) and layer G from P14.T27.b's
+/// (`RoguePlanetRules::Bodies`), both at generator version 26. A frame and its bodies flip
+/// together, so 26's bump deletes no hold of its own here.
+fn frame_layers() -> impl Iterator<Item = LayerSpec> {
+    STELLAR_LAYERS.into_iter().chain(
+        SUBSTELLAR_LAYERS
+            .into_iter()
+            .filter(|spec| generates(SystemKind::of_layer(spec.layer()))),
+    )
+}
+
 /// The frame a ship at `ship` is in at time `t`, having been in `current`: a system's ID, or `None`
 /// for the galactic frame (plan 03, Design note 16).
 ///
@@ -224,7 +246,10 @@ const SEARCH_MARGIN: f64 = 1.25;
 /// separately, over a sphere of 1.25 times the tidal radius of the layer's heaviest primary at the
 /// ship's position, so a layer of small stars costs a handful of cells rather than
 /// the reach of layer E's giants; there is no census and no limit, because the answer is one ID and
-/// the spheres are a few light-years across. Systems are placed at `t` by
+/// the spheres are a few light-years across. From generator version 26 the substellar layers of
+/// the free-floating objects plan 14 gives bodies are walked the same way, each over 1.25 times the
+/// tidal radius of its heaviest object, 0.08 M☉ for layer F and 13 Jupiter masses for layer G
+/// (P14.T27, behind its holds; the [module documentation](self)). Systems are placed at `t` by
 /// [`position_at`], tested there by
 /// [`hit_at`] — a system not yet born holds nothing — and each one's tidal
 /// radius is read at its own position from its primary's initial mass
@@ -233,7 +258,7 @@ const SEARCH_MARGIN: f64 = 1.25;
 ///
 /// `cache` is the caller's, as everywhere else in this plan, and the answer is the same whatever it
 /// holds. `sources` are the query's non-grid sources, asked over the widest of the layers' spheres
-/// and for every stellar layer, and honoured in both directions: their systems can take the ship,
+/// and for every layer walked, and honoured in both directions: their systems can take the ship,
 /// and a source that suppresses a grid system — a pinned volume holding its own content — also
 /// keeps that system from taking it.
 ///
@@ -294,7 +319,7 @@ pub fn frame_at<C: CellCache>(
     }
     let mut candidates = Vec::new();
     let mut widest: Option<QuerySphere> = None;
-    for spec in STELLAR_LAYERS {
+    for spec in frame_layers() {
         let layer = spec.layer();
         let Some(sphere) =
             search_sphere(galaxy, ship, t, layer, SolarMasses::new(spec.band().hi()))
@@ -326,14 +351,14 @@ pub fn frame_at<C: CellCache>(
     }
 
     // The sources are asked once, over the widest sphere any layer was walked with and for every
-    // stellar layer, because a source reports its members by the layer they would fall in and this
+    // layer walked, because a source reports its members by the layer they would fall in and this
     // rule has no census to admit layers by. A member farther away than its own layer's search
     // radius can only fail to hold the ship, never win. From version 25 (P09.T28.b.b's hold) the
     // widest is chosen by the walk's Kepler pad near the black hole, where `range_query` asks its
     // sources about the straight lines' sphere; a source reads only its centre, radius and time,
     // and pads for its own members.
     if let Some(sphere) = widest {
-        let layers: LayerSet = STELLAR_LAYERS.iter().map(LayerSpec::layer).collect();
+        let layers: LayerSet = frame_layers().map(|spec| spec.layer()).collect();
         let mut hits = Vec::new();
         for source in sources {
             source.systems_in_sphere(galaxy, &sphere, layers, &mut hits);
@@ -741,3 +766,6 @@ mod tests {
         assert!(FrameCandidate::new(id(1), Metres::ZERO, ly(4.0)).is_ok());
     }
 }
+
+#[cfg(test)]
+mod free_floating_tests;
