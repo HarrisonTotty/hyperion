@@ -33095,3 +33095,25 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - For P14.T27.b: `generates` refuses rogue planets under both arms, `generate_planets` puts a
     `RoguePlanet` host on `class_weights` until it has its own arm, and `for_stars` needs
     `SystemStars`, which a rogue planet does not have.
+- **P14.T56.g's lag for a rocky belt's ice-bulk members, held at 25** (lane `p14-census-25`,
+  2026-10-30). `system::member_lag` (`MEMBER_LAG_VERSION` 25, `MemberLagRules`, `with_member_lag`
+  in `with_every_25_hold`) asks every belt member with no given bulk `SolvedLag::AboveMeltingOverIce`
+  (`PlacedBody::with_solved_lag`): lagged where its solved bulk is ice and T0 > 273.15 K. The
+  audit's M6 reads it, and the 25 censuses assert no member fails M6. 25's bump deletes the hold.
+- **P14.T53.e's rule 5 on a locked world, held at 26** (lane `p14-census-26`, 2026-10-31): there
+  it also needs no open water, and a two-state cycle's last pass (01ff6b2c200e0000.0300) takes its
+  figures' label (`present::LOCKED_STATE_VERSION`, `with_locked_state`; research-census-25 §1).
+- **No acid deck over a sea, held at 26** (same lane): (c) reads the published label, (b) re-solves
+  a wet decked runaway without the deck, and one still wet takes rules 6–7's label
+  (`atmosphere::sea_deck`, `SEA_DECK_VERSION`, `with_sea_deck`; §4).
+- **P14.T56.g's lag for an airless planet over a hot ice bulk, held at 26** (same lane): derived
+  once more under `SolvedLag::AboveMeltingOverIce` at its record's and its rings' parent's sites;
+  M6 reads it (`system::planet_lag`, `PLANET_LAG_VERSION`, `with_planet_lag`; §3).
+- **The audit's moons by their own sky** (same lane; tests only, no hold): M1 and M3 read
+  `DerivedBody::sky_ratios`, the planet's glow among the hosts (§2).
+- **Not built: the N₂ envelope at its critical point** (§5): a tolerance on T/T_c moves the passes'
+  fixed point with it. The census watches 41 times near an edge: 2 change under 25 and 26 alike
+  (01ff1b2e1fff0000.0700, 0200cb291ffc0000.0600). Main's.
+- **The census under every 26 hold** (10⁶ bodies), before → after: hot `Snowball`s 77 → 1
+  (0200fb2d1ffb0000.0400, 273.72 K, P14.T24.j's deck's, `LEFT_UNDER_26`), rule 5's 48 → 0, sea
+  runaways 29 → 0, M3 3 → 0, M6 3 → 0; M1 on 54 moons and 1,216 planets, as under 25.
