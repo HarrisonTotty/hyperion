@@ -1337,11 +1337,12 @@ fn surface_and_cloud(
                 (partition, lid, deposits, regolith, cold_traps)
             }
         };
-    let ground = area_mix::surface_bond(
+    let ground = area_mix::sedimented_surface_bond(
         &published,
         &solved,
         (regolith.bond(air.state, shade.bands()).bond, &deposits),
         shade,
+        area_mix::snapshot_haze_optical_depth(&air.partials, gravity, inputs.hottest_host),
     );
     let deck = surface.deck;
     let cloud = area_mix::cloud_fraction((air.state, deck), &solved, shade);

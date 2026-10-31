@@ -1990,6 +1990,25 @@ pub(crate) fn surface_bond(
     (regolith, deposits): (f64, &[(SubstanceId, f64)]),
     shade: &HostShade,
 ) -> f64 {
+    surface_bond_with(
+        condensates,
+        partition,
+        (regolith, deposits),
+        shade,
+        &|row| solid_bond(row, &shade.bands).bond,
+    )
+}
+
+/// [`surface_bond`] with each solid entry's Bond albedo `solid` of its row: [`solid_bond`]'s under
+/// the light of `shade` there, a sediment's cover over it under [`sedimented_surface_bond`].
+#[must_use]
+fn surface_bond_with(
+    condensates: &Condensates,
+    partition: &Partition,
+    (regolith, deposits): (f64, &[(SubstanceId, f64)]),
+    shade: &HostShade,
+    solid: &dyn Fn(SubstanceId) -> f64,
+) -> f64 {
     let entries = condensates.entries().iter().fold(0.0, |sum, entry| {
         sum + match entry.phase() {
             CondensatePhase::Solid | CondensatePhase::Liquid => entry.area_fraction(),
@@ -2005,9 +2024,7 @@ pub(crate) fn surface_bond(
         .iter()
         .fold(rest * regolith, |sum, entry| match entry.phase() {
             CondensatePhase::Solid => {
-                sum + entry.area_fraction()
-                    * scale
-                    * solid_bond(entry.substance(), &shade.bands).bond
+                sum + entry.area_fraction() * scale * solid(entry.substance())
             }
             CondensatePhase::Liquid => {
                 let bond = liquid_entry_bond(entry, partition, &shade.bins).bond;
@@ -2018,6 +2035,170 @@ pub(crate) fn surface_bond(
     deposits.iter().fold(ground, |sum, &(row, area)| {
         sum + area * scale * solid_bond(row, &shade.bands).bond
     })
+}
+
+/// The generator version from which the organic sediment a hazy air's fallout lays covers its
+/// solid ground (P14.T24.h.b's second part; decision-p14-t51-batch §9.4): 26, the train after 25's.
+///
+/// It is this rule's one hold. Below it [`OrganicSedimentRules::in_force`] is
+/// [`OrganicSedimentRules::Bare`]: the ground is its rows' and its regolith's, as to 25, bit for
+/// bit. 26's bump deletes this hold, [`OrganicSedimentRules`] with its `Bare` arm, the guard in
+/// [`sediment_share`], the tests' switch and its tripwire
+/// (`the_organic_sediment_is_held_only_until_the_26_bump`).
+pub(crate) const ORGANIC_SEDIMENT_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether a hazy air's fallout covers its solid ground (its hold, [`ORGANIC_SEDIMENT_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum OrganicSedimentRules {
+    /// Version 25's and before: no sediment.
+    Bare,
+    /// Version 26's: the sediment covers its share of the solid ground ([`sediment_share`]).
+    Sediment,
+}
+
+impl OrganicSedimentRules {
+    /// The rules this generator version gives: the sediment from [`ORGANIC_SEDIMENT_VERSION`], none
+    /// below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_organic_sediment`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = ORGANIC_SEDIMENT_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= ORGANIC_SEDIMENT_VERSION {
+            Self::Sediment
+        } else {
+            Self::Bare
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The sediment's rules a test sets on its thread, `None` for the version's.
+    static ORGANIC_SEDIMENT_RULES: core::cell::Cell<Option<OrganicSedimentRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the sediment's rules `rules` on this thread, for the tests to reach version
+/// 26's ahead of the bump; the version's rules are set back after, a panic in `run` included. A
+/// record derives lazily, so a test reads it inside the switch. 26's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_organic_sediment<R>(rules: OrganicSedimentRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<OrganicSedimentRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            ORGANIC_SEDIMENT_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(ORGANIC_SEDIMENT_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// Titan's surface pressure, Pa: 146,700, Huygens's 1,467 ± 1 hPa at the ground (Fulchignoni et al.
+/// 2005, Nature 438, 785, from memory), at which T24.c's haze is calibrated ([`TITAN_GRAVITY`]).
+pub(crate) const TITAN_SURFACE_PRESSURE: Pascals = Pascals::new(1.467e5);
+
+/// Titan's surface gravity, m s⁻²: 1.352 (NASA's Saturnian satellite fact sheet, from memory).
+pub(crate) const TITAN_GRAVITY: MetresPerSecondSquared = MetresPerSecondSquared::new(1.352);
+
+/// The methane haze's τ(550) on the snapshot path of an air of partial pressures `partials` under
+/// the gravity `gravity` (P14.T24.h.b): T24.c's at the air's index
+/// ([`haze_optical_depth`](crate::planetary::hooks::aerosols::haze_optical_depth) of its CH₄ and
+/// CO₂ mole fractions), which is Titan's column's, times the air's column `p_s` ÷ g over Titan's, at
+/// most 1 (the lane's lean, 2026-10-31): a thin air holds a thin haze, so that Triton's and Pluto's
+/// 1 Pa airs hold some 10⁻⁵ of Titan's, as their measured hazes, τ of order 10⁻² (from memory), are
+/// thin. None with no luminous host, whose ultraviolet makes it (`hottest_host` 0), and none for an
+/// air of no pressure or a ground of no gravity.
+#[must_use]
+pub(crate) fn snapshot_haze_optical_depth(
+    partials: &PartialPressures,
+    gravity: MetresPerSecondSquared,
+    hottest_host: Kelvin,
+) -> f64 {
+    use crate::planetary::hooks::aerosols::{haze_index, haze_optical_depth};
+    let pressure = partials.total().value();
+    let g = gravity.value();
+    if !(pressure > 0.0 && pressure.is_finite() && g > 0.0 && hottest_host.value() > 0.0) {
+        return 0.0;
+    }
+    let methane = partials.of(Gas::Methane).value() / pressure;
+    let carbon_dioxide = partials.of(Gas::CarbonDioxide).value() / pressure;
+    let titan = TITAN_SURFACE_PRESSURE.value() / TITAN_GRAVITY.value();
+    let column = pressure / g / titan;
+    let column = if column < 1.0 { column } else { 1.0 };
+    haze_optical_depth(haze_index(methane, carbon_dioxide)) * column
+}
+
+/// The share of a body's solid ground the organic sediment covers under an air whose snapshot haze
+/// is `haze` ([`snapshot_haze_optical_depth`]; P14.T24.h.b's second part): its τ over Titan's
+/// ([`TITAN_HAZE_OPTICAL_DEPTH`](crate::planetary::hooks::aerosols::TITAN_HAZE_OPTICAL_DEPTH)), 0
+/// to 1, under [`OrganicSedimentRules::Sediment`], and none below it.
+///
+/// - **What it stands for.** The haze's fallout settles on the ground: Titan's is dark organic
+///   sediment, its plains and its dunes, not frost (Tomasko et al. 2005, Nature 438, 765, from
+///   memory), over its whole solid surface at Titan's haze. A thinner haze's fallout covers its
+///   share in proportion to its column (the lane's lean, 2026-10-31), continuous from none at the
+///   haze's index of 1, so that the passes see no step.
+/// - **What it covers.** The regolith and the `H2O` ice the condensates list, T49.m's icy row: the
+///   fallout settles on the solid ground that is not the air's own seasonal frost. A volatile's
+///   frost (N₂, CH₄, CO₂) condenses over it, and a liquid takes it in.
+#[must_use]
+pub(crate) fn sediment_share(haze: f64) -> f64 {
+    use crate::planetary::hooks::aerosols::TITAN_HAZE_OPTICAL_DEPTH;
+    if OrganicSedimentRules::in_force() == OrganicSedimentRules::Bare
+        || haze.is_nan()
+        || haze <= 0.0
+    {
+        return 0.0;
+    }
+    let share = haze / TITAN_HAZE_OPTICAL_DEPTH;
+    if share < 1.0 { share } else { 1.0 }
+}
+
+/// The organic sediment's row: `tholin`, Khare et al. 1984's Titan tholin (the haze's own row,
+/// P14.T24.c's), whose condensed optics stand for Titan's sediment, labelled: its sands and plains
+/// are organic grains of its haze's fallout, whose own index is not measured (from memory).
+const SEDIMENT_ROW: &str = "tholin";
+
+/// The surface's Bond albedo beneath any cloud ([`surface_bond`]) under an air whose snapshot haze
+/// is `haze` ([`snapshot_haze_optical_depth`]), its organic sediment over its share s of its solid
+/// ground ([`sediment_share`]; P14.T24.h.b's second part): the regolith's albedo `regolith` and
+/// each `H2O` solid entry's are (1 − s) A + s `A_sed`, `A_sed` the sediment row's
+/// ([`SEDIMENT_ROW`]) under the light of `shade`, and every other entry and deposit as it is. At no
+/// sediment it is [`surface_bond`] to the bit.
+///
+/// # Panics
+///
+/// Never: the registry holds `tholin`.
+#[must_use]
+pub(crate) fn sedimented_surface_bond(
+    condensates: &Condensates,
+    partition: &Partition,
+    (regolith, deposits): (f64, &[(SubstanceId, f64)]),
+    shade: &HostShade,
+    haze: f64,
+) -> f64 {
+    let sediment = sediment_share(haze);
+    if sediment <= 0.0 {
+        return surface_bond(condensates, partition, (regolith, deposits), shade);
+    }
+    let row = by_key(SEDIMENT_ROW).expect("the registry holds tholin");
+    let covered = solid_bond(row, &shade.bands).bond;
+    let under = |albedo: f64| (1.0 - sediment) * albedo + sediment * covered;
+    let water = water();
+    surface_bond_with(
+        condensates,
+        partition,
+        (under(regolith), deposits),
+        shade,
+        &|id| {
+            let own = solid_bond(id, &shade.bands).bond;
+            if id == water { under(own) } else { own }
+        },
+    )
 }
 
 /// The share of the disc under cloud of a body in the state `state` before its condensable's
