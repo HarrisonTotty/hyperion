@@ -1790,12 +1790,15 @@ fn dayside_tau_above(envelope: &Envelope, level: f64) -> f64 {
 }
 
 /// The fixture's hot Jupiter under every 26 hold with the dayside decks' rules `rules`, derived
-/// inside the switches.
+/// inside the switches, and P14.T52.g's deck profile, which also moves an envelope's modes, set
+/// back to `Held`: so that `Held` against every 25 hold is the dayside's difference alone.
 fn fixture_at_26(rules: DaysideDecksRules) -> Envelope {
     let hot = fixture_hot_jupiter();
     with_every_26_hold(|| {
-        with_dayside_decks(rules, || {
-            envelope_by_hand(&hot).expect("the fixture's hot Jupiter")
+        with_deck_profile(DeckProfileRules::Held, || {
+            with_dayside_decks(rules, || {
+                envelope_by_hand(&hot).expect("the fixture's hot Jupiter")
+            })
         })
     })
 }
