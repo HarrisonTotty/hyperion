@@ -141,7 +141,7 @@ use crate::planetary::derive::rotation::{
 use crate::planetary::derive::{
     BodyHosts, DerivedBody, DerivedBulk, FormationZone, GivenBulk, GivenFractions, GivenLag,
     HabitableZone, HostLight, Illumination, MassFractions, PassDriver, PlacedBody, PlanetClass,
-    SnowLineSide, SpunPasses, SurfaceLag, derive_body, derive_body_driven, derive_bulk,
+    SnowLineSide, SolvedLag, SpunPasses, SurfaceLag, derive_body, derive_body_driven, derive_bulk,
     habitable_zone_of, radius_chen_kipping, surface_material,
 };
 use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
@@ -1397,6 +1397,14 @@ fn parent_at_epoch(
         // A planet's rings read its effective or equilibrium temperature, which its passes give.
         ParentKind::Planet => {
             let derived = derive_body(&placed, &hosts, profile, age, t).ok()?;
+            // From 26 an airless planet over a hot ice bulk is read under the rock lag here too,
+            // by the record's own test (`planet_lag`).
+            let derived = if planet_lag::planet_takes_the_lag(&derived) {
+                let lagged = placed.with_solved_lag(SolvedLag::AboveMeltingOverIce);
+                derive_body(&lagged, &hosts, profile, age, t).ok()?
+            } else {
+                derived
+            };
             let bulk = DerivedBulk::from(&derived);
             let parent = moon_parent(body, (id, kind), &bulk, &placed, host_mass)?;
             let rings = RingParent::new(
@@ -3816,7 +3824,8 @@ impl PlanetarySystem {
     /// history `fate` puts it `at`, its passes driven by `driver`, with its moons' sky
     /// ([`primary_now`](Self::primary_now)): over its record under the spin `spun` where it holds
     /// a law, its spin, table and frame built once by its caller, and over the passes' stand-in
-    /// where it holds none.
+    /// where it holds none. From 26 an airless planet over a hot ice bulk is derived once more
+    /// under the rock lag ([`planet_lag::planet_takes_the_lag`]).
     #[must_use]
     fn primary_derived_under(
         &self,
@@ -3830,35 +3839,46 @@ impl PlanetarySystem {
         let orbit = at.orbit().expect("a present body has an orbit");
         let placed = Self::placed_now(body, orbit, at.mass());
         let host_mass = fate.host_mass(epoch.t);
-        let SpunBody { spin, table, frame } = match spun {
-            BodySpin::Spun(spun) => spun,
-            BodySpin::StandIn => {
-                return self.derive(
-                    epoch,
-                    body,
-                    zone,
-                    &placed,
-                    host_mass,
-                    (PassRecord::StandIn, driver),
-                );
+        let derive = |placed: &PlacedBody| {
+            let SpunBody { spin, table, frame } = match spun {
+                BodySpin::Spun(spun) => spun,
+                BodySpin::StandIn => {
+                    return self.derive(
+                        epoch,
+                        body,
+                        zone,
+                        placed,
+                        host_mass,
+                        (PassRecord::StandIn, driver),
+                    );
+                }
+            };
+            let passes = PrimaryPasses {
+                frame,
+                spin,
+                table,
+                body,
+                craters: self.body_craters(body),
+                crust: self.primary_crust(epoch.ctx, body),
+            };
+            self.derive(
+                epoch,
+                body,
+                zone,
+                placed,
+                host_mass,
+                (PassRecord::Record(&passes), driver),
+            )
+        };
+        let bare = derive(&placed);
+        // From 26 an airless planet over a hot ice bulk is derived once more under the rock lag,
+        // the one verdict every site reading its derivation takes (`planet_lag`).
+        match body.part {
+            Part::Planet(_) if planet_lag::planet_takes_the_lag(&bare.0) => {
+                derive(&placed.with_solved_lag(SolvedLag::AboveMeltingOverIce))
             }
-        };
-        let passes = PrimaryPasses {
-            frame,
-            spin,
-            table,
-            body,
-            craters: self.body_craters(body),
-            crust: self.primary_crust(epoch.ctx, body),
-        };
-        self.derive(
-            epoch,
-            body,
-            zone,
-            &placed,
-            host_mass,
-            (PassRecord::Record(&passes), driver),
-        )
+            Part::Planet(_) | Part::Member(_) | Part::Moon(_) | Part::Ring(_) => bare,
+        }
     }
 
     /// [`primary_derived_under`](Self::primary_derived_under) of the present `body` with its spin,
@@ -6715,6 +6735,7 @@ mod modifiers;
 pub(crate) mod moon_ice;
 #[cfg(test)]
 mod ocean_tests;
+pub(crate) mod planet_lag;
 #[cfg(test)]
 mod present_state_tests;
 pub(crate) mod small_bodies;

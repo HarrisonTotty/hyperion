@@ -63,6 +63,7 @@ use crate::planetary::moons::regular::WATER_DENSITY;
 use crate::planetary::record::{BulkProperties, Modelled};
 use crate::planetary::system::member_lag::member_lag_in_force;
 use crate::planetary::system::moon_ice::HOT_ICE_LIMIT;
+use crate::planetary::system::planet_lag::planet_lag_in_force;
 use crate::substance::Element;
 use crate::substance::phase::{high_pressure_melting, ice_ih_melting_temperature};
 use crate::units::{Kelvin, Kilograms, Metres, Pascals};
@@ -549,8 +550,9 @@ impl AuditBody {
     /// A lagged record's surface is rock, `Mercury`'s template where airless, under a lid that is
     /// not `H2O`; no airless record has an `Ice` surface above the melting point at T0
     /// ([`HOT_ICE_LIMIT`]), a planet's above all; an icy belt member is lagged exactly above it,
-    /// and from 25 any other member whose solved bulk is ice (`member_lag`), and a planet never
-    /// (the code's own rule). Count (ix), every other `Ice` surface above it, is stated.
+    /// and from 25 any other member whose solved bulk is ice (`member_lag`), and a planet only
+    /// from 26, and only an airless one over a hot ice bulk (`planet_lag`; the code's own rules).
+    /// Count (ix), every other `Ice` surface above it, is stated.
     fn lag(&mut self, case: &AuditCase<'_>) {
         let Some(surface) = case.surface() else {
             return;
@@ -564,9 +566,21 @@ impl AuditBody {
         let asked = icy_member_ice(case.body).is_some()
             || (member_lag_in_force()
                 && SurfaceMaterial::of(&case.derived.fractions()) == SurfaceMaterial::Ice);
+        // From 26 an airless planet over a hot ice bulk takes the lag (`planet_lag`): its lagged
+        // derivation is airless, its bulk ice and its T0 hot, as its bare one was.
+        let airless_ice_planet = planet_lag_in_force()
+            && matches!(
+                case.derived.atmosphere().published_state(),
+                SurfaceState::Airless | SurfaceState::Tenuous
+            )
+            && SurfaceMaterial::of(&case.derived.fractions()) == SurfaceMaterial::Ice
+            && hot;
         match &case.body.part {
-            Part::Planet(_) if lagged => {
-                self.fault(Item::M6, "a lagged planet");
+            Part::Planet(_) if lagged && !airless_ice_planet => {
+                self.fault(
+                    Item::M6,
+                    "a lagged planet not under the airless planets' rule",
+                );
             }
             Part::Member(_) if lagged != (asked && hot) => {
                 self.fault(
