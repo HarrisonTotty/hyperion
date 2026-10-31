@@ -15,6 +15,7 @@ import {
   contactRadiusPx,
   destinationHalfSizePx,
   destinationReticle,
+  discFillsView,
   flightPathMarker,
   type HullOnView,
   lineOfSightClearancePx,
@@ -24,6 +25,7 @@ import {
   markBoxPx,
   markLabelOffsetPx,
   markLabelRisePx,
+  reticleRadiusPx,
   type ScreenMark,
   type ScreenSegment,
   segmentDistancePx,
@@ -798,5 +800,113 @@ describe("the line-of-sight mark's give-way (R10.T12; the guide's tripod, beside
       heldInTheBand: [givesWay(0.6, false), givesWay(0.6, true)],
       returnsAt: givesWay(0.8, true),
     }).toEqual({ leavesWithin: true, heldInTheBand: [false, true], returnsAt: false });
+  });
+});
+
+/** A planet's mark with its disc `diameterPx` across. */
+function body(diameterPx: number): {
+  symbol: ReturnType<typeof bodyKindSymbol>;
+  diameterPx: number;
+} {
+  return { symbol: bodyKindSymbol("planet"), diameterPx };
+}
+
+/** The symbology of the planet, selected and the destination, its disc `diameterPx` across at `at`. */
+function discMarks(
+  diameterPx: number,
+  at: { xPx: number; yPx: number } = { xPx: 960, yPx: 540 },
+): ScreenMark[] {
+  return symbologyMarks(
+    {
+      anchors: [
+        {
+          target: PLANET,
+          at,
+          body: { symbol: bodyKindSymbol("planet"), diameterPx },
+          craft: null,
+        },
+      ],
+      selection: PLANET,
+      destination: PLANET,
+      ownVelocityMPerS: null,
+      remPx: REM_PX,
+      markShiftPx: 0,
+      minReticleGapPx: 4,
+    },
+    CAMERA,
+    VIEWPORT,
+  );
+}
+
+/** The mark of `kind` among `marks`, or `null`. */
+function markOf(marks: ReadonlyArray<ScreenMark>, kind: ScreenMark["kind"]): ScreenMark | null {
+  return marks.find((mark) => mark.kind === kind) ?? null;
+}
+
+describe("the selection's bracket about a body's drawn disc (the owner's request, 2026-10-31)", () => {
+  const symbolPx = symbolRadiusPx(bodyKindSymbol("planet"), REM_PX);
+  const marginPx = 0.25 * REM_PX;
+
+  it.each<readonly [string, number, number]>([
+    ["a disc smaller than its symbol, about the symbol", 4, symbolPx],
+    ["a mid-sized disc, about the disc", 300, 150],
+  ])("stands its corners a margin outside %s", (_, diameterPx, radiusPx) => {
+    const bracket = markOf(discMarks(diameterPx), "selection");
+    expect(bracket === null ? null : bounds(bracket).right - 960).toBeCloseTo(
+      radiusPx + marginPx,
+      9,
+    );
+  });
+
+  it("takes the larger of the symbol's radius and the disc's (reticleRadiusPx)", () => {
+    expect([
+      reticleRadiusPx({ body: body(4) }, REM_PX),
+      reticleRadiusPx({ body: body(300) }, REM_PX),
+      reticleRadiusPx({ body: null }, REM_PX),
+    ]).toEqual([symbolPx, 150, contactRadiusPx(REM_PX)]);
+  });
+
+  it("stands the destination's chevrons outside the grown bracket", () => {
+    const marks = discMarks(300);
+    const bracket = markOf(marks, "selection");
+    const destination = markOf(marks, "destination");
+    expect(
+      bracket !== null &&
+        destination !== null &&
+        bounds(destination).right - 960 > bounds(bracket).right - 960,
+    ).toBe(true);
+  });
+
+  it("places the label beyond the grown bracket, as it is placed from the bracket's place", () => {
+    const radiusPx = reticleRadiusPx(
+      { body: { symbol: bodyKindSymbol("planet"), diameterPx: 300 } },
+      REM_PX,
+    );
+    expect(markLabelOffsetPx(radiusPx, REM_PX, 0)).toBeGreaterThan(
+      bracketHalfSizePx(radiusPx, REM_PX, 0),
+    );
+  });
+
+  it("holds each corner within the view, a margin in, where the bracket would leave it", () => {
+    const bracket = markOf(discMarks(900, { xPx: 100, yPx: 540 }), "selection");
+    const box = bracket === null ? null : bounds(bracket);
+    expect(box === null ? null : [box.left, box.right <= VIEWPORT.widthPx - marginPx]).toEqual([
+      marginPx,
+      true,
+    ]);
+  });
+
+  it("draws no bracket once the disc fills the view, the view's list marking the selection", () => {
+    // 2,300 px across about the view's centre covers its corners, 1,101 px from it.
+    expect(markOf(discMarks(2_300), "selection")).toBeNull();
+  });
+
+  it("tells a disc that covers every corner of the view from one that leaves a corner out", () => {
+    const centre = { xPx: 960, yPx: 540 };
+    expect([
+      discFillsView(centre, 1_150, VIEWPORT),
+      discFillsView(centre, 1_000, VIEWPORT),
+      discFillsView({ xPx: 0, yPx: 0 }, 1_150, VIEWPORT),
+    ]).toEqual([true, false, false]);
   });
 });

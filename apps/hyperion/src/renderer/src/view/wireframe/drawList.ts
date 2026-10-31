@@ -42,13 +42,13 @@ import { orbitPath } from "./orbits";
 import { surveyEdgeMark, type SurveyEdgeView } from "../terrain/surveyEdge";
 import { type DatumSpheroid, stretched } from "./spheroid";
 import {
-  anchorRadiusPx,
   bracketHalfSizePx,
   lineOfSightGivesWay,
   lineOfSightTripod,
   markBoxPx,
   markLabelOffsetPx,
   markLabelRisePx,
+  reticleRadiusPx,
   type HullOnView,
   type ScreenMark,
   type ScreenPx,
@@ -977,14 +977,16 @@ export function buildWireframeDrawList(
         yPx: at.yPx,
         distanceM: norm(pointM),
         label,
+        // Placed from the bracket's place, which grows with a body's drawn disc (the owner's
+        // request, 2026-10-31).
         labelOffsetPx: markLabelOffsetPx(
-          anchorRadiusPx(anchor, options.remPx),
+          reticleRadiusPx(anchor, options.remPx),
           options.remPx,
           options.markShiftPx,
         ),
         labelRisePx: sameTarget(options.destination, target)
           ? markLabelRisePx(
-              anchorRadiusPx(anchor, options.remPx),
+              reticleRadiusPx(anchor, options.remPx),
               options.remPx,
               options.markShiftPx,
               options.minReticleGapPx,
@@ -993,7 +995,7 @@ export function buildWireframeDrawList(
           : null,
         markReachPx: Math.max(
           bracketHalfSizePx(
-            anchorRadiusPx(anchor, options.remPx),
+            reticleRadiusPx(anchor, options.remPx),
             options.remPx,
             options.markShiftPx,
           ) +

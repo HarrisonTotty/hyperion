@@ -77,13 +77,26 @@ export const LABEL_CLEARANCE_REM = 0.125;
  */
 export const FLIGHT_PATH_MARKER_REM = { radius: 0.375, wing: 0.5, fin: 0.3125 } as const;
 
-/** Four corner brackets of the square of half-width `halfPx` about `at`. */
-function corners(at: ScreenPx, halfPx: number): ScreenSegment[] {
+/**
+ * Four corner brackets of the square of half-width `halfPx` about `at`, each corner held within
+ * `bounds` where given: the view, inset by `insetPx`, so that a corner past its edge stands on the
+ * edge and still marks the target (the owner's request, 2026-10-31).
+ */
+function corners(
+  at: ScreenPx,
+  halfPx: number,
+  bounds: { readonly viewport: Viewport; readonly insetPx: number } | null = null,
+): ScreenSegment[] {
   const arm = bracketArmPx(halfPx);
+  const held = (value: number, extentPx: number): number =>
+    bounds === null ? value : Math.min(Math.max(value, bounds.insetPx), extentPx - bounds.insetPx);
   const segments: ScreenSegment[] = [];
   for (const sx of [-1, 1] as const) {
     for (const sy of [-1, 1] as const) {
-      const corner = { xPx: at.xPx + sx * halfPx, yPx: at.yPx + sy * halfPx };
+      const corner = {
+        xPx: held(at.xPx + sx * halfPx, bounds?.viewport.widthPx ?? 0),
+        yPx: held(at.yPx + sy * halfPx, bounds?.viewport.heightPx ?? 0),
+      };
       segments.push([corner, { xPx: corner.xPx - sx * arm, yPx: corner.yPx }]);
       segments.push([corner, { xPx: corner.xPx, yPx: corner.yPx - sy * arm }]);
     }
@@ -230,11 +243,14 @@ export function markLabelRisePx(
 
 /**
  * The bracket reticle about the selection, in `--accent`, as the spatial view's: its half-size the
- * marked symbol's radius and a margin, moved out by four times the outlines' shift
- * ({@link bracketHalfSizePx}).
+ * mark's radius and a margin, moved out by four times the outlines' shift
+ * ({@link bracketHalfSizePx}), the mark's radius a body's drawn disc's where that is the larger
+ * ({@link reticleRadiusPx}); each corner held within the view, inset by the margin, where it is
+ * given.
  *
  * @param markRadiusPx - The radius of the mark it encloses, px.
  * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
+ * @param viewport - The view its corners are held within, or none to leave them where they fall.
  */
 export function bracketReticle(
   target: CameraTarget,
@@ -242,12 +258,17 @@ export function bracketReticle(
   markRadiusPx: number,
   remPx: number,
   shiftPx: number,
+  viewport: Viewport | null = null,
 ): ScreenMark {
   return {
     kind: "selection",
     target,
     token: "accent",
-    segments: corners(at, bracketHalfSizePx(markRadiusPx, remPx, shiftPx)),
+    segments: corners(
+      at,
+      bracketHalfSizePx(markRadiusPx, remPx, shiftPx),
+      viewport === null ? null : { viewport, insetPx: BRACKET_MARGIN_REM * remPx },
+    ),
     anchor: at,
   };
 }
@@ -496,6 +517,28 @@ export function anchorRadiusPx(anchor: Pick<SymbologyAnchor, "body">, remPx: num
   return anchor.body === null ? contactRadiusPx(remPx) : symbolRadiusPx(anchor.body.symbol, remPx);
 }
 
+/**
+ * The radius the selection's bracket and the destination's chevrons stand about, and the marks'
+ * labels and reach are placed from, px (the owner's request, 2026-10-31): a body's symbol's or its
+ * drawn disc's, the larger (`SymbologyAnchor.body.diameterPx`, its larger axis), so that the
+ * bracket's corners stand just outside the disc at any range; a craft's contact's.
+ */
+export function reticleRadiusPx(anchor: Pick<SymbologyAnchor, "body">, remPx: number): number {
+  const markPx = anchorRadiusPx(anchor, remPx);
+  return anchor.body === null ? markPx : Math.max(markPx, anchor.body.diameterPx / 2);
+}
+
+/**
+ * Whether a body's drawn disc of `radiusPx` about `at` covers the whole view, each of its corners
+ * within it: no bracket is drawn about it then, the view's list marking the selection (the owner's
+ * request, 2026-10-31).
+ */
+export function discFillsView(at: ScreenPx, radiusPx: number, viewport: Viewport): boolean {
+  const xs = [0, viewport.widthPx];
+  const ys = [0, viewport.heightPx];
+  return xs.every((xPx) => ys.every((yPx) => Math.hypot(xPx - at.xPx, yPx - at.yPx) <= radiusPx));
+}
+
 /** What the symbology marks beyond the anchors themselves. */
 export interface SymbologyInput {
   /** The marks in sight, each once. */
@@ -544,6 +587,10 @@ export function symbologyMarks(
   const marks: ScreenMark[] = [];
   for (const anchor of input.anchors) {
     const markRadiusPx = anchorRadiusPx(anchor, input.remPx);
+    // The bracket and the chevrons grow with a body's drawn disc (the owner's request).
+    const reticlePx = reticleRadiusPx(anchor, input.remPx);
+    const fills =
+      anchor.body !== null && discFillsView(anchor.at, anchor.body.diameterPx / 2, viewport);
     if (anchor.craft !== null) {
       marks.push(
         targetMark(
@@ -569,9 +616,16 @@ export function symbologyMarks(
         marks.push(symbol);
       }
     }
-    if (sameTarget(input.selection, anchor.target)) {
+    if (sameTarget(input.selection, anchor.target) && !fills) {
       marks.push(
-        bracketReticle(anchor.target, anchor.at, markRadiusPx, input.remPx, input.markShiftPx),
+        bracketReticle(
+          anchor.target,
+          anchor.at,
+          reticlePx,
+          input.remPx,
+          input.markShiftPx,
+          viewport,
+        ),
       );
     }
     if (sameTarget(input.destination, anchor.target)) {
@@ -579,7 +633,7 @@ export function symbologyMarks(
         destinationReticle(
           anchor.target,
           anchor.at,
-          markRadiusPx,
+          reticlePx,
           input.remPx,
           input.markShiftPx,
           input.minReticleGapPx,

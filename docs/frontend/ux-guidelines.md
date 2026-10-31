@@ -613,7 +613,11 @@ Four classes, shared by the whole ship:
     filter: `412 OF 1630 SHOWN: LIVING`. The legend is on show whenever the view is. It is never a
     disclosure, and nothing opened takes its place.
   - `--accent` marks what is available, such as a reachable system. A bracket reticle, the four
-    corners of a square about the mark, marks the selection. Four chevrons in `--target` mark a
+    corners of a square about the mark, marks the selection. About a body whose drawn disc is
+    larger than its symbol the square grows with the disc, its corners just outside it at any
+    range; a corner that would leave the view stands on its edge, `0.25rem` in, so that it still
+    marks the target, and once the disc fills the view no bracket is drawn, the view's list
+    marking the selection. Four chevrons in `--target` mark a
     commanded destination: one on each screen axis of the mark, each pointing at it, outside the
     place of the selection's bracket whether or not it is drawn. So the two differ by shape.
     Where the destination is also the selection both stand, the chevrons' apices over the open

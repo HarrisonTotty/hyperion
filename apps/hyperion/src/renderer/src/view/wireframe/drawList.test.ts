@@ -1587,9 +1587,9 @@ describe("the line-of-sight mark, the tripod (R10.T12)", () => {
     }).toEqual({ drawn: true, tripod: undefined, yielded: true });
   });
 
-  it("stands beneath the selection's bracket and the destination's chevrons about the body it marks, which do not make it give way", () => {
-    // The camera looks at the planet's centre, drawn as a sphere: its reticles stand round the
-    // tripod, within 0.5 rem of its ticks.
+  it("stands beneath the selection's bracket and the destination's chevrons about the body it marks, which stand clear of it outside the disc and do not make it give way", () => {
+    // The camera looks at the planet's centre, drawn as a sphere: its reticles stand about its
+    // drawn disc, beyond 0.5 rem of the tripod's ticks (the owner's request, 2026-10-31).
     const planet = { kind: "body", body: FIXTURE_PLANET } as const;
     const list = build({ lineOfSight: AT_POINT, selection: planet, destination: planet });
     const ids = list.lines.map((line) => line.id);
@@ -1599,13 +1599,16 @@ describe("the line-of-sight mark, the tripod (R10.T12)", () => {
     );
     expect({
       yielded: list.lineOfSight?.yielded,
-      within: reticles.map((segments) => segments.some((segment) => nearestTripodPx(segment) < 8)),
+      clear: reticles.map(
+        (segments) =>
+          segments.length > 0 && segments.every((segment) => nearestTripodPx(segment) >= 8),
+      ),
       beneath: [
         at >= 0,
         at < ids.findIndex((id) => id.startsWith("mark:selection:")),
         at < ids.findIndex((id) => id.startsWith("mark:destination:")),
       ],
-    }).toEqual({ yielded: false, within: [true, true], beneath: [true, true, true] });
+    }).toEqual({ yielded: false, clear: [true, true], beneath: [true, true, true] });
   });
 
   it("leaves out the survey edge's ticks within 0.5 rem of its ticks, and keeps every other", () => {
