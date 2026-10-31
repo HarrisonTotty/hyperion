@@ -954,12 +954,10 @@ const FIXED_UNDER_26: [&str; 9] = [
 /// The bodies that still show a finding of [`FIXED_UNDER_26`] under every 26 hold, by the finding
 /// and the start of the body's line, its system's rank and its ID; each a finding, not a fix's.
 ///
-/// #17937 is locked 1:1: P14.T24.j's substellar deck (`LOCKED_CLIMATE_VERSION`) takes it from 25's
-/// open sea at a mean of 291.24 K to ice on 55% of its surface at 273.72 K, listing no liquid
-/// water, so that rule 5 makes it a `Snowball` under the eyeball's rule too, as its figures stand.
-/// It is no `Snowball` of 25's: under every 26 hold but the deck it is 25's `Temperate`.
-const LEFT_UNDER_26: [(&str, &str); 1] =
-    [("a Snowball above 273.15 K", "#17937 0200fb2d1ffb0000.0400 ")];
+/// None: #17937 and #2488, the `Snowball`s above 273.15 K that P14.T24.j's deck set off while its
+/// gate read only the listed liquid, keep their deck now that it reads the open water its ramp
+/// reads (`census_26_tests`).
+const LEFT_UNDER_26: [(&str, &str); 0] = [];
 
 /// How many times across the clock window, both ends included, the census reads the envelope
 /// section of a body near a section's edge ([`near_a_section_edge`]).

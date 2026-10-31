@@ -33275,3 +33275,11 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     task could not. At 26 every member's and every Kepler-regime grid system's strip radius moves,
     and some 5% of the latter's bodies move. The sim's golden systems, from a galaxy with no
     kinematic tables, are neither. The server's goldens were not run under the 26 arm.
+- **P14.T24.j's open-water gate, fixed under its 26 hold** (lane `fix-locked-deck-gate`,
+  2026-10-31; research-leans-8 §3): a pass also gives the next deck open water where it was solved
+  under the deck and its water's condensate takes the liquid (`Atmosphere::melts_water_under_deck`,
+  crate-private), so `LEFT_UNDER_26` is empty; the record, rule 5 and the eyeball's rule still read
+  the listing.
+- `locked_climate_tests`'s `deck_alone` is every 25 hold with the deck's rules, every other 26
+  hold held (they moved bodies outside the domain), and #30404 is now a `Snowball` in
+  `under_every_26_hold_a_census_eyeball_settles_at_the_edge_and_a_two_state_cycle_is_temperate`.

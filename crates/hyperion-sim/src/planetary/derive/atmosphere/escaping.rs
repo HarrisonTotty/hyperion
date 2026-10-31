@@ -75,6 +75,7 @@ use crate::planetary::chem::escape::{
 };
 use crate::planetary::chem::partition::{CriticalColumn, Ground};
 use crate::planetary::chem::tenuous::holds_tenuous_air;
+use crate::planetary::derive::pass_record::OpenWater;
 use crate::planetary::hooks::figures::cover::FillSlot;
 use crate::planetary::params::THIN_ENVELOPE_FRACTION;
 use crate::substance::{Element, MOLAR_GAS_CONSTANT, heat_capacity_over_r_at};
@@ -1188,6 +1189,7 @@ impl<'a> Body<'a> {
             runaway_deck: RunawayDeck::Kept,
             dry_division: false,
             liquid_water: false,
+            deck_water: OpenWater::Dry,
             surface_temperature: self.saturate(t),
             surface_pressure: Some(partials.total()),
             partials,
@@ -2184,6 +2186,7 @@ fn finish(
         runaway_deck: RunawayDeck::Kept,
         dry_division: dry,
         liquid_water: false,
+        deck_water: OpenWater::Dry,
         surface_temperature: body.saturate(t),
         surface_pressure: Some(total),
         partials,

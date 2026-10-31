@@ -839,7 +839,8 @@ pub struct SurfaceInputs<'a> {
     /// Its ocean's weight θ in the contrasts, P14.T24.b's from its potential ocean
     /// (science-p14-t24b-laws §4.4; [`GlobalFigures::ocean_weight`]).
     pub ocean_weight: OceanWeight,
-    /// Whether its surface holds liquid water, as its published condensates list it (P14.T24.j).
+    /// Whether its surface holds open water (P14.T24.j): liquid water its published condensates
+    /// list, or, at a pass solved under the deck, water its warmest zone melts.
     ///
     /// A world locked 1:1 takes its substellar deck only over open water, from generator version
     /// 26; no other body reads it. On the record it is the flag its published pass read, at a pass
@@ -2151,8 +2152,9 @@ pub(crate) struct ClimateBody {
     /// The flux of its hosts' light at it, orbit-averaged, which a locked world's deck reads
     /// ([`deck`], P14.T24.j).
     pub(crate) stellar_flux: WattsPerSquareMetre,
-    /// Whether its surface holds liquid water as the previous pass published it, the context's
-    /// (P14.T24.j): a locked world's deck needs open water under it ([`deck`]).
+    /// Whether its surface holds open water as the previous pass gave it, the context's
+    /// (P14.T24.j): liquid water listed, or melted in its warmest zone under the deck; a locked
+    /// world's deck needs open water under it ([`deck`]).
     pub(crate) holds_liquid_water: bool,
     /// Its crust: a molten one, T13.c's young magma ocean, holds no CO₂ cap
     /// ([`carbon_dioxide_cap`], P14.T53.h).

@@ -188,8 +188,10 @@ pub(crate) struct DeckBody {
     pub(crate) spin: SeasonalSpin,
     /// The flux of its hosts' light at it, orbit-averaged, S.
     pub(crate) stellar_flux: WattsPerSquareMetre,
-    /// Whether its surface holds liquid water, as published: its published pass's condensates on
-    /// the record, the previous pass's at a pass (main's lean, 2026-10-30).
+    /// Whether its surface holds open water, as published: its published pass's context on the
+    /// record, the previous pass's at a pass (main's lean, 2026-10-30), which gives open water
+    /// where its condensates list liquid water or, solved under the deck, its warmest zone melts
+    /// its water.
     pub(crate) liquid_water: bool,
 }
 
@@ -326,7 +328,7 @@ pub(crate) fn domain_weight(column: &Column, body: &DeckBody) -> f64 {
 
 /// Whether the deck reads the open water of a world of spin `spin` and radius `radius` under
 /// the flux `stellar_flux` at the surface pressure `pressure`: where its domain's weight is
-/// positive ([`domain_of`]). A pass's context carries its published liquid water to the next only
+/// positive ([`domain_of`]). A pass's context carries its open water to the next only
 /// where it does (`PassContext::with_open_water`), so that no other body's passes read it.
 #[must_use]
 pub(crate) fn reads_open_water(

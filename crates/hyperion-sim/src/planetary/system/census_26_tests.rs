@@ -1,8 +1,9 @@
 //! The wrong classes P14.T33.c's census found under every 25 hold, stated by name under every 26
 //! hold (research-census-25): the 13 locked `Snowball`s above 273.15 K (`LOCKED_STATE_VERSION`),
-//! the three airless planets over a hot ice bulk (`PLANET_LAG_VERSION`) and the 29 runaways over a
-//! sea (`SEA_DECK_VERSION`), each body generated afresh in its system, as the census walks it; and
-//! the Solar System table, unchanged to the bit by each of the three rules.
+//! the three airless planets over a hot ice bulk (`PLANET_LAG_VERSION`), the 29 runaways over a
+//! sea (`SEA_DECK_VERSION`) and the two hot `Snowball`s a locked world's deck set off
+//! (`LOCKED_CLIMATE_VERSION`), each body generated afresh in its system, as the census walks it;
+//! and the Solar System table, unchanged to the bit by the eyeball's rule and the dry deck.
 //!
 //! The bodies are named by their system's rank in the census's sample and their ID. The tests are
 //! native only, as the census is: on WebAssembly their dozens of systems would run on one thread.
@@ -19,6 +20,7 @@ use crate::planetary::derive::atmosphere::{
     WATER_MELTING_POINT, with_locked_state, with_sea_deck,
 };
 use crate::planetary::derive::irradiation::{BondAlbedo, equilibrium_temperature};
+use crate::planetary::derive::passes::Convergence;
 use crate::planetary::derive::photometry::{BodyPhotometry, PhaseTemplate};
 use crate::planetary::derive::solar::historic_table;
 use crate::planetary::hooks::surface::Forcing;
@@ -83,6 +85,14 @@ const SEA_RUNAWAYS: [(usize, &str); 29] = [
     (66_447, "41feaca20000000d.0800"),
     (67_168, "01ff0b279ff70000.0a00"),
     (67_833, "02005b261ffa0000.0200"),
+];
+
+/// The two `Snowball`s above 273.15 K that P14.T24.j's deck set off under every 26 hold while its
+/// gate read only the listed liquid (research-leans-8 §3): #17937, at the open water's edge, and
+/// #2488, under 14.9 bar of nitrogen.
+const DECK_SNOWBALLS: [(usize, &str); 2] = [
+    (2_488, "02000b2de0060000.0300"),
+    (17_937, "0200fb2d1ffb0000.0400"),
 ];
 
 /// The census's sample through the rank `last`, and its galaxy.
@@ -281,15 +291,85 @@ fn assert_no_runaway_holds_a_sea(bodies: &[(usize, &str)]) {
     );
 }
 
-/// Under every 26 hold an eyeball of the census (#30404, its sea open at 0.56 ice) is `Temperate`,
-/// and so is its two-state cycle (#19542, open and ice-free), each a `Snowball` above 273.15 K
-/// under every 25 hold.
+/// Under every 26 hold an eyeball of the census (#30404) settles under its deck at the open water's
+/// edge (P14.T24.j), a `Snowball` its own figures make below 273.15 K, and a two-state cycle of the
+/// census (#19542, open and ice-free) is `Temperate`; each a `Snowball` above 273.15 K under every
+/// 25 hold.
 #[test]
-fn under_every_26_hold_a_census_eyeball_and_a_two_state_cycle_are_temperate() {
+fn under_every_26_hold_a_census_eyeball_settles_at_the_edge_and_a_two_state_cycle_is_temperate() {
     assert_eq!(
         assert_eyeballs_temperate_or_frozen_over(&[EYEBALLS[6], EYEBALLS[4]]),
-        [SurfaceState::Temperate; 2]
+        [SurfaceState::Snowball, SurfaceState::Temperate]
     );
+}
+
+/// Under every 26 hold the deck's gate reads the open water its ramp reads (P14.T24.j): #17937,
+/// whose decked pass lists only ice but melts its water in its warmest zone, keeps its deck and
+/// settles as a `Snowball` at the open water's edge, below 273.15 K, its warmest above water's
+/// melting point, with no two-state cycle; and #2488 is no `Snowball` above 273.15 K. While the
+/// gate read only the listing each was a `Snowball` above it (273.72 K and 274.80 K): the decked
+/// pass's ice held the deckless passes on a cold branch.
+#[test]
+fn under_every_26_hold_the_deck_s_edge_worlds_are_no_hot_snowballs() {
+    let sample = sample_through(last_rank(&DECK_SNOWBALLS));
+    let read = |case: &AuditCase<'_>| {
+        let surface = case.surface().expect("a locked world has a surface");
+        let conditions = surface.conditions();
+        let (coldest, warmest) = conditions.climate_range();
+        (
+            surface.state(),
+            conditions.mean_surface_temperature().value(),
+            (coldest.value(), warmest.value()),
+            surface.figures().ice_fraction(),
+            lists_liquid_water(case),
+            case.derived.atmosphere_passes(),
+            case.derived.convergence(),
+            case.derived.atmosphere().melts_water_under_deck(),
+        )
+    };
+    let bodies = DECK_SNOWBALLS.map(|body| {
+        with_every_26_hold(|| read_body((&sample.0, &sample.1), body, &read))
+            .expect("the census's body is in its system")
+    });
+    let lines: Vec<String> = DECK_SNOWBALLS
+        .iter()
+        .zip(&bodies)
+        .map(
+            |(body, (state, t_s, range, ice, liquid, passes, convergence, melts))| {
+                format!(
+                    "{} {}: {state:?}, T_s {t_s:.2} K over [{:.1}, {:.1}] K, ice {ice:.3}, liquid \
+                 {liquid}, melts under the deck {melts}, {passes} passes, {convergence:?}",
+                    body.0, body.1, range.0, range.1
+                )
+            },
+        )
+        .collect();
+    eprintln!(
+        "the deck's edge worlds under every 26 hold:\n  {}",
+        lines.join("\n  ")
+    );
+    let melting = WATER_MELTING_POINT.value();
+    for (body, &(state, t_s, ..)) in DECK_SNOWBALLS.iter().zip(&bodies) {
+        assert!(
+            !(state == SurfaceState::Snowball && t_s > melting),
+            "{}: a Snowball above 273.15 K, {lines:#?}",
+            body.1
+        );
+    }
+    let [
+        _,
+        (state, t_s, (_, warmest), ice, liquid, _, convergence, melts),
+    ] = bodies;
+    assert_eq!(state, SurfaceState::Snowball, "#17937, {lines:#?}");
+    assert!(
+        t_s < melting && warmest > melting,
+        "#17937 at the open water's edge, {lines:#?}"
+    );
+    assert!(
+        ice >= SNOWBALL_ICE_COVER && !liquid && melts,
+        "#17937, {lines:#?}"
+    );
+    assert_eq!(convergence, Convergence::Converged, "#17937, {lines:#?}");
 }
 
 /// [`assert_eyeballs_temperate_or_frozen_over`] over all 13 of the census's.

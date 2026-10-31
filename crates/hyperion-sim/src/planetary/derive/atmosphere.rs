@@ -121,7 +121,7 @@ use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::composition::{MassFractions, SnowLineSide};
 use crate::planetary::derive::irradiation::BondAlbedo;
-use crate::planetary::derive::pass_record::{PassContext, WaterGate};
+use crate::planetary::derive::pass_record::{OpenWater, PassContext, WaterGate};
 use crate::planetary::derive::photometry::area_mix::reference_cloud_column;
 use crate::planetary::hooks::crust::CrustLid;
 use crate::planetary::hooks::figures::cover::FillSlot;
@@ -2546,6 +2546,11 @@ pub struct Atmosphere {
     /// reads ([`solved_as_a_hothouse`]): the area mix's (`surface_mix::area_mixed`), `false`
     /// before it, and for a gas envelope and a magma ocean, which publish none.
     liquid_water: bool,
+    /// The open water its pass, solved under a locked world's substellar deck over open water,
+    /// holds where its warmest zone melts its water (P14.T24.j;
+    /// [`melts_water_under_deck`](Self::melts_water_under_deck)): the area mix's, [`OpenWater::Dry`]
+    /// before it, under the deck's hold and where no deck read open water.
+    deck_water: OpenWater,
     surface_temperature: Kelvin,
     surface_pressure: Option<Pascals>,
     partials: PartialPressures,
@@ -2667,6 +2672,19 @@ impl Atmosphere {
     #[must_use]
     pub const fn lists_liquid_water(&self) -> bool {
         self.liquid_water
+    }
+
+    /// Whether its pass was solved under a locked world's substellar deck over open water (its
+    /// context's, P14.T24.j) and its partition's water takes the liquid in its warmest zone
+    /// ([`CondensatePhases`](crate::planetary::chem::partition::CondensatePhases)): the deck's
+    /// ramp's own open water, which the next pass's deck reads beside the listed liquid, where the
+    /// listing shows only ice.
+    ///
+    /// It is its area mix's, `false` before it, under the deck's hold, and where the pass's
+    /// context gave no open water, so that no other body's passes read it.
+    #[must_use]
+    pub(crate) const fn melts_water_under_deck(&self) -> bool {
+        matches!(self.deck_water, OpenWater::Open)
     }
 
     /// The state its water follows (P14.T53.b part 1 (a)): the state of the climate's division,

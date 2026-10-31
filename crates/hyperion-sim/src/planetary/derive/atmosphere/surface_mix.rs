@@ -62,7 +62,7 @@ use crate::planetary::chem::partition::{
     WaterCover, partition,
 };
 use crate::planetary::derive::irradiation::BondAlbedo;
-use crate::planetary::derive::pass_record::{PassContext, RecordSpin, WaterGate};
+use crate::planetary::derive::pass_record::{OpenWater, PassContext, RecordSpin, WaterGate};
 use crate::planetary::derive::photometry::area_mix::{self, HostShade, LidWeathering, Regolith};
 use crate::planetary::hooks::cold_traps::{
     self, ColdTrapBody, ColdTrapSky, FieldInputs, FieldSlot, NoColdTraps, PassColdTraps, PassTraps,
@@ -884,7 +884,9 @@ fn bond_albedo(value: f64, state: SurfaceState, material: SurfaceMaterial) -> Bo
 ///
 /// The atmosphere also carries whether the condensates the pass published list liquid water,
 /// which P14.T53.b part 1 (c)'s test reads ([`solved_as_a_hothouse`]): none for a gas envelope
-/// and a magma ocean, which publish none. Beside the atmosphere and the lid it gives its
+/// and a magma ocean, which publish none; and whether a pass under a locked world's deck melts its
+/// water in its warmest zone, which the next pass's deck reads (P14.T24.j;
+/// [`Atmosphere::melts_water_under_deck`]). Beside the atmosphere and the lid it gives its
 /// maturity's outcome (P14.T54.b.e; [`PassMaturity`]) and its cold traps' (P14.T54.b.f;
 /// `cold_traps::PassTraps`).
 ///
@@ -907,6 +909,7 @@ pub(super) fn area_mixed(
         cloud_fraction,
         lid,
         liquid_water,
+        deck_water,
         maturity,
         cold_traps,
         present,
@@ -916,6 +919,7 @@ pub(super) fn area_mixed(
             cloud_fraction: area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
             lid: None,
             liquid_water: false,
+            deck_water: OpenWater::Dry,
             maturity: Err(NoMaturity::NoRegolith),
             cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
             present: None,
@@ -930,6 +934,7 @@ pub(super) fn area_mixed(
                 cloud_fraction: 0.0,
                 lid,
                 liquid_water: false,
+                deck_water: OpenWater::Dry,
                 maturity: Err(NoMaturity::NoRegolith),
                 cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
                 present: None,
@@ -963,6 +968,7 @@ pub(super) fn area_mixed(
         cloud_fraction,
         runaway_deck,
         liquid_water,
+        deck_water,
         present,
         ..*air
     };
@@ -970,14 +976,16 @@ pub(super) fn area_mixed(
 }
 
 /// What a pass's area mix gives ([`area_mixed`]): its Bond albedo before its floor, its cloud
-/// fraction, the lid it took, whether its condensates list liquid water, its maturity's outcome,
-/// its cold traps' and the state it carries to the next pass by P14.T53.e's rules 5–7
+/// fraction, the lid it took, whether its condensates list liquid water, whether it melts its
+/// water under a locked world's deck ([`Atmosphere::melts_water_under_deck`]), its maturity's
+/// outcome, its cold traps' and the state it carries to the next pass by P14.T53.e's rules 5–7
 /// ([`state_to_carry`]).
 struct SurfaceMix {
     albedo: f64,
     cloud_fraction: f64,
     lid: Option<CrustLid>,
     liquid_water: bool,
+    deck_water: OpenWater,
     maturity: PassMaturity,
     cold_traps: PassTraps,
     present: Option<PresentClimate>,
@@ -1242,7 +1250,8 @@ fn pass_deposits(
 /// the body `inputs` describe on the surface `surface` under the light `shade` ([`area_mixed`]),
 /// its cloud a runaway's by the surface's deck, the lid its pass takes under the body's own
 /// climate, whose row its regolith is, whether the condensates it publishes list liquid water
-/// (P14.T53.b part 1 (c)), and its maturity's outcome (P14.T54.b.e).
+/// (P14.T53.b part 1 (c)) and whether it melts its water under a locked world's deck (P14.T24.j),
+/// and its maturity's outcome (P14.T54.b.e).
 ///
 /// Under the body's own climate a pass partitions and takes its conditions, its lid, its maturity
 /// ([`pass_maturity`]), its regolith ([`pass_regolith`]) and its cold traps' field
@@ -1264,6 +1273,7 @@ fn surface_and_cloud(
             cloud_fraction: 0.0,
             lid: None,
             liquid_water: false,
+            deck_water: OpenWater::Dry,
             maturity: Err(NoMaturity::NoRegolith),
             cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
             present: None,
@@ -1324,6 +1334,7 @@ fn surface_and_cloud(
     let liquid_water = published
         .entry(Gas::Water.substance(), CondensatePhase::Liquid)
         .is_some();
+    let deck_water = deck_water(surface.climate, &solved);
     // P14.T53.e: the state the next pass reads, by rules 5–7 on what this pass publishes; none in
     // a hothouse's re-solve, whose state is fixed (P14.T53.b part 1 (c)).
     let present = match surface.published {
@@ -1357,9 +1368,31 @@ fn surface_and_cloud(
         cloud_fraction: cloud,
         lid,
         liquid_water,
+        deck_water,
         maturity,
         cold_traps,
         present,
+    }
+}
+
+/// The open water a pass under the climate `climate`, its partition `solved`, holds under a locked
+/// world's substellar deck (P14.T24.j; [`Atmosphere::melts_water_under_deck`]).
+///
+/// It is open where the pass was solved under the deck over the open water its context read and
+/// its water's condensate takes the liquid in its warmest zone, the deck's ramp's own open water,
+/// though its listing, the main phase near the mean, may show only ice. It is dry under the
+/// stand-in's given climate and where the context read no open water: under the deck's hold, and
+/// where no deck read the previous pass.
+#[must_use]
+fn deck_water(climate: PassClimate<'_>, solved: &Partition) -> OpenWater {
+    let melts = || {
+        solved
+            .condensate(Gas::Water.substance())
+            .is_some_and(|water| water.phases().contains(CondensatePhase::Liquid))
+    };
+    match climate {
+        PassClimate::Spun(spun) if spun.context.holds_liquid_water() && melts() => OpenWater::Open,
+        PassClimate::Spun(_) | PassClimate::Given(_) => OpenWater::Dry,
     }
 }
 

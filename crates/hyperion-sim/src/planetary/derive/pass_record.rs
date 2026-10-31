@@ -285,16 +285,18 @@ impl Resurfacing {
     }
 }
 
-/// Whether a pass gives the next pass's substellar deck open water (P14.T24.j): its published
-/// condensates list liquid water ([`Atmosphere::lists_liquid_water`]) and a deck reads it
-/// (`deck::reads_open_water`). A key member of a pass's context, which only a locked world's
-/// passes over open water can change, so that no other body's passes see it.
+/// Whether a pass gives the next pass's substellar deck open water (P14.T24.j): a deck reads it
+/// (`deck::reads_open_water`), and its published condensates list liquid water
+/// ([`Atmosphere::lists_liquid_water`]) or, solved under the deck, its warmest zone melts its water
+/// ([`Atmosphere::melts_water_under_deck`]), the open water the deck's ramp reads. A key member of
+/// a pass's context, which only a locked world's passes over open water can change, so that no
+/// other body's passes see it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum OpenWater {
-    /// No open water under a deck: no liquid water listed, or no deck reads it (at C₀, under the
-    /// deck's hold, off its domain).
+    /// No open water under a deck: no liquid water listed or melted under it, or no deck reads it
+    /// (at C₀, under the deck's hold, off its domain).
     Dry,
-    /// Liquid water listed under a deck that reads it.
+    /// Liquid water listed, or melted in the warmest zone under the deck, where a deck reads it.
     Open,
 }
 
@@ -317,7 +319,7 @@ pub(crate) enum OpenWater {
 /// | inertia lid | the pass's own lid ([`InertiaLid`]), whose row the next pass's ground reads | key |
 /// | `lid_of`'s unresurfaced test | the surface age against the time since the magma ocean, which the next pass's lid takes ([`Resurfacing`]) | key |
 /// | carried state | the state the pass carries by P14.T53.e's rules 5–7 ([`Atmosphere::carried_state`]), which the next pass's state-keyed branches read; `None` under their hold and where the rules agree with its climate's class | key |
-/// | open water | whether the pass's published condensates list liquid water where the next pass's substellar deck reads it ([`OpenWater`], P14.T24.j); dry under its hold and where no deck reads it | key |
+/// | open water | whether the pass's published condensates list liquid water, or its warmest zone melts its water under the deck, where the next pass's substellar deck reads it ([`OpenWater`], P14.T24.j); dry under its hold and where no deck reads it | key |
 ///
 /// Every member a pass reads is ranked: the lid a pass takes reads the surface age (a float), the
 /// tide's branch, the unresurfaced test and the basis, which no pass moves; its ground reads the
@@ -402,8 +404,9 @@ pub(crate) struct PassContextKey {
     /// The state the pass carries by P14.T53.e's rules 5–7, `None` under their hold and where
     /// they agree with its climate's class.
     pub(crate) present: Option<PresentClimate>,
-    /// Whether the pass's published condensates list liquid water, where a locked world's deck
-    /// reads it (P14.T24.j); dry under its hold and elsewhere.
+    /// Whether the pass's published condensates list liquid water, or its warmest zone melts its
+    /// water under the deck, where a locked world's deck reads it (P14.T24.j); dry under its hold
+    /// and elsewhere.
     pub(crate) open_water: OpenWater,
 }
 
@@ -499,9 +502,10 @@ impl PassContext {
         Self { open_water, ..self }
     }
 
-    /// Whether the previous pass's published condensates listed liquid water, as a locked world's
-    /// substellar deck reads it (P14.T24.j): false at C₀, under the deck's hold and where no deck
-    /// reads it.
+    /// Whether the previous pass gave open water, as a locked world's substellar deck reads it
+    /// (P14.T24.j): its published condensates listed liquid water, or under the deck its warmest
+    /// zone melted its water ([`OpenWater::Open`]); false at C₀, under the deck's hold and where
+    /// no deck reads it.
     #[must_use]
     pub(crate) fn holds_liquid_water(&self) -> bool {
         self.open_water == OpenWater::Open

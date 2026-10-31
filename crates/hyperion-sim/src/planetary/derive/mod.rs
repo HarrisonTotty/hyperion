@@ -2456,7 +2456,8 @@ impl PassBody<'_> {
                 .zip(context.surface_age())
                 .map(|(basis, age)| Resurfacing::of(basis.unresurfaced(age)));
             // A locked world's deck reads the pass's open water at the next (P14.T24.j), at its
-            // column's pressure, none in the airless and tenuous states.
+            // column's pressure, none in the airless and tenuous states: the liquid it lists, or,
+            // solved under the deck, the liquid its warmest zone holds, which its ramp reads.
             let pressure = match air.state() {
                 SurfaceState::Airless | SurfaceState::Tenuous => Pascals::ZERO,
                 SurfaceState::GasEnvelope
@@ -2467,7 +2468,8 @@ impl PassBody<'_> {
                 | SurfaceState::Snowball => air.surface_pressure().unwrap_or(Pascals::ZERO),
             };
             let reads = deck::reads_open_water(&record.spin, record.radius, stellar_flux, pressure);
-            let open_water = if reads && air.lists_liquid_water() {
+            let open_water = if reads && (air.lists_liquid_water() || air.melts_water_under_deck())
+            {
                 OpenWater::Open
             } else {
                 OpenWater::Dry
