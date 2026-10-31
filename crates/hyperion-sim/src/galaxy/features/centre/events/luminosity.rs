@@ -15,8 +15,8 @@
 //!   `Ṁ = (M★ ÷ 3 t_fb) (Δt ÷ t_fb)^(−5⁄3)` (Stone, Sari and Loeb 2013, MNRAS 435, 1809,
 //!   equations 49–50),
 //!   and radiates `ε Ṁ c²`, at most the black hole's Eddington luminosity, of which
-//!   [`XRAY_SHARE`], one part in 15.8, is in the band. The efficiency ε is η = 0.1 at every rate
-//!   until version 25; from it, it falls with the fallback rate (below).
+//!   [`XRAY_SHARE`], one part in 15.8, is in the band. The efficiency ε falls with the fallback
+//!   rate, from generator version 25 (P09.T30.c, below).
 //!
 //! A tail falls as t^(−5⁄3) for ever: no source gives it an end. The light echoes around Sgr A*
 //! measure no tail. They record short outbursts of about 10³⁹ erg/s a century or two ago, "a
@@ -24,16 +24,17 @@
 //! 2010, ApJ 714, 732: "an upper limit of 10³⁶ erg s⁻¹ to the mean luminosity of Sgr A* in the
 //! last 60–90 years"; Clavel et al. 2013, A&A 558, A32: outbursts "of a few-year time scale").
 //! That limit is what the tails are tested against, at the epoch over seeds. A Sun-like star's
-//! tail is the module's closed-form check: under η = 0.1 it gives 4.5 × 10³⁸ erg/s a thousand
-//! years on, and 2.1 × 10³⁵ erg/s 10⁵ years on, so the horizon's tails keep the centre far above
-//! its quiescence in every galaxy (plan 09's Risks, "Findings of P09.T30.b", 2).
+//! tail is the module's closed-form check. Under P09.T30.b's η = 0.1 at every rate it gave
+//! 4.5 × 10³⁸ erg/s a thousand years on, and 2.1 × 10³⁵ erg/s 10⁵ years on, so the horizon's tails
+//! kept the centre far above its quiescence in every galaxy (plan 09's Risks, "Findings of
+//! P09.T30.b", 2).
 //!
-//! # The efficiency (P09.T30.c, held until version 25)
+//! # The efficiency (P09.T30.c, from generator version 25)
 //!
 //! η = 0.1 is the efficiency of super-Eddington accretion (Stone and Metzger 2016, §3), and a
 //! tail is below a tenth of Eddington's rate from about five years on. Below about `α² Ṁ_Edd` the
 //! flow is hot and radiates inefficiently (Narayan and Yi 1995, ApJ 452, 710; Yuan and Narayan
-//! 2014, ARA&A 52, 529, §2). From `CENTRE_QUIESCENCE_VERSION` a tail radiates at
+//! 2014, ARA&A 52, 529, §2). From generator version 25 a tail radiates at
 //! `radiative_efficiency` of its fallback rate, Xie and Yuan's (2012, MNRAS 427, 1580) fit for a
 //! hot flow at δ = 0.5, rising to η at 0.6% of Eddington's rate, where it meets Xie and Yuan's
 //! two-phase flow (about 8%, near a thin disc's). A Sun-like tail is unchanged for its first 25 years, gives 9.6 × 10³⁷ erg/s a thousand years on,
@@ -62,12 +63,10 @@
 
 use crate::galaxy::Galaxy;
 use crate::galaxy::features::centre::CentreModel;
-use crate::galaxy::rules::GalaxyRules;
 use crate::math;
 use crate::time::UniverseTime;
 use crate::units::consts::{GM_SUN, SOLAR_MASS_KG, SOLAR_RADIUS_M, SPEED_OF_LIGHT};
 use crate::units::{Seconds, SolarMasses, SolarRadii};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 use super::disruptions::BuildTidalDisruptionModelError;
 use super::flares::{CentreFlareModel, flares_active_at};
@@ -83,36 +82,10 @@ pub const QUIESCENT_LUMINOSITY_WATTS: f64 = 3.6e26;
 /// η, the share of the infalling rest mass a tail's accretion radiates: 0.1, which simulations
 /// "suggest … is typical" (Stone and Metzger 2016, §3). Part of the generator version.
 ///
-/// Stone and Metzger defend it for super-Eddington accretion. Until version 25 a tail radiates
-/// at it whatever its rate; from `CENTRE_QUIESCENCE_VERSION` only from 6.2265 × 10⁻³ of
-/// Eddington's rate up (`radiative_efficiency`).
+/// Stone and Metzger defend it for super-Eddington accretion. From generator version 25
+/// (P09.T30.c) a tail radiates at it only from 6.2265 × 10⁻³ of Eddington's rate up
+/// (`radiative_efficiency`).
 pub const RADIATIVE_EFFICIENCY: f64 = 0.1;
-
-/// The generator version from which a tail's radiative efficiency falls with its fallback rate
-/// (plan 09, P09.T30.c; the research lane `research-p09-t30b`'s advice, §2, as main ruled it on
-/// 2026-10-29): 25, a galaxy-side hold (decision-galaxy-25-train §1).
-///
-/// It is the hold of one call site, a `match` on [`CentreQuiescenceRules`] read from the galaxy's
-/// rules, in the light a tail radiates at a fallback rate, which
-/// [`DisruptionTail::bolometric_watts_at`] and [`DisruptionTail::peak_luminosity_watts`] share.
-/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
-/// [`CentreQuiescenceRules::ConstantEfficiency`], which is the code of version 23 verbatim, so
-/// every generated value keeps its bits; the tests reach the new arm through a galaxy built under
-/// `GalaxyRules::every_25_hold()`. The bump to 25 deletes this hold, [`CentreQuiescenceRules`]
-/// with its `ConstantEfficiency` arm, the galaxy's `centre_quiescence` field and its tripwire
-/// (`the_centre_s_quiescence_is_held_only_until_the_25_bump`).
-pub(crate) const CENTRE_QUIESCENCE_VERSION: GeneratorVersion = GeneratorVersion::new(25);
-
-/// The efficiency a tail radiates at (the hold of [`CENTRE_QUIESCENCE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum CentreQuiescenceRules {
-    /// Version 24's and before: [`RADIATIVE_EFFICIENCY`] at every rate, so a tail's light falls
-    /// as its fallback rate, t^(−5⁄3).
-    ConstantEfficiency,
-    /// Version 25's: [`radiative_efficiency`] of the fallback rate, Xie and Yuan's hot flow below
-    /// 6.2265 × 10⁻³ of Eddington's rate and [`RADIATIVE_EFFICIENCY`] above.
-    HotFlow,
-}
 
 /// Xie and Yuan's (2012, MNRAS 427, 1580, Table 1, equation 11) fit to a hot accretion flow's
 /// radiative efficiency, `ε = ε₀ (Ṁ_net ÷ Ṁ_c)^a`, as `(ε₀, a)` for its three ranges of rate, from
@@ -139,8 +112,9 @@ pub(crate) const HOT_FLOW_RATE_SCALE: f64 = 1e-2;
 const EDDINGTON_RATE_PER_WATT: f64 = 10.0 / (SPEED_OF_LIGHT * SPEED_OF_LIGHT);
 
 /// The radiative efficiency of a tail's accretion at `eddington_ratio`, its rate in Eddington
-/// rates (`Ṁ ÷ Ṁ_Edd`, with Xie and Yuan's `Ṁ_Edd = 10 L_Edd ÷ c²`), from version 25
-/// ([`CENTRE_QUIESCENCE_VERSION`]).
+/// rates (`Ṁ ÷ Ṁ_Edd`, with Xie and Yuan's `Ṁ_Edd = 10 L_Edd ÷ c²`), from generator version 25
+/// (plan 09, P09.T30.c; the research lane `research-p09-t30b`'s advice, §2, as main ruled it on
+/// 2026-10-29).
 ///
 /// It is `min(η, max(min(ε₁, ε₂), ε₃))` over the three ranges of [`HOT_FLOW_EFFICIENCY`], each
 /// `εᵢ = ε₀ (ṁ ÷ 10⁻²)^a`: ε₁ below ṁ = 2.8802 × 10⁻⁵, where it meets ε₂; ε₂ up to 3.3929 × 10⁻³,
@@ -245,14 +219,11 @@ pub struct DisruptionTail {
     peak_rate_kg_per_s: f64,
     /// The black hole's Eddington luminosity, W.
     eddington_watts: f64,
-    /// The efficiency it radiates at, its galaxy's (P09.T30.c's hold).
-    rules: CentreQuiescenceRules,
 }
 
 impl DisruptionTail {
     /// The tail of a disruption at `disruption` of a star of present mass `star_mass` and radius
-    /// `star_radius` by a black hole of `black_hole_mass`, radiating as the generator version's
-    /// galaxies' tails do.
+    /// `star_radius` by a black hole of `black_hole_mass`.
     #[must_use]
     pub fn new(
         disruption: UniverseTime,
@@ -260,31 +231,12 @@ impl DisruptionTail {
         star_mass: SolarMasses,
         star_radius: SolarRadii,
     ) -> Self {
-        Self::new_with_rules(
-            disruption,
-            black_hole_mass,
-            star_mass,
-            star_radius,
-            GalaxyRules::of_version(GENERATOR_VERSION).centre_quiescence,
-        )
-    }
-
-    /// [`new`](Self::new), radiating under `rules`, a galaxy's (P09.T30.c's hold).
-    #[must_use]
-    pub(crate) fn new_with_rules(
-        disruption: UniverseTime,
-        black_hole_mass: SolarMasses,
-        star_mass: SolarMasses,
-        star_radius: SolarRadii,
-        rules: CentreQuiescenceRules,
-    ) -> Self {
         let fallback = fallback_time(black_hole_mass, star_mass, star_radius);
         Self {
             disruption,
             fallback,
             peak_rate_kg_per_s: star_mass.value() * SOLAR_MASS_KG / (3.0 * fallback.value()),
             eddington_watts: eddington_luminosity_watts(black_hole_mass),
-            rules,
         }
     }
 
@@ -317,8 +269,7 @@ impl DisruptionTail {
     }
 
     /// Its luminosity at `t` over every band, W: `ε Ṁ c²`, at most the black hole's Eddington
-    /// luminosity, with ε = η = 0.1 until version 25 and `radiative_efficiency` of the rate
-    /// from it (module documentation).
+    /// luminosity, with ε `radiative_efficiency` of the rate (module documentation).
     #[must_use]
     pub fn bolometric_watts_at(&self, t: UniverseTime) -> f64 {
         let accreted = self.accreted_watts(self.fallback_rate_kg_per_s_at(t));
@@ -335,12 +286,11 @@ impl DisruptionTail {
     /// The most it ever gives in the band, W: [`XRAY_SHARE`] of its light at `t_fb`, which is the
     /// Eddington luminosity when the fallback is above Eddington's rate there.
     ///
-    /// The light falls monotonically from `t_fb` under either efficiency, since
-    /// `radiative_efficiency` does not decrease with the rate. At the Milky Way's black hole every
-    /// victim peaks above the hot flow's switch to η (the least about 0.61 Eddington rates), so its
-    /// peak is the same under either. At a black hole near 10⁸ M☉ a star of several solar radii
-    /// can peak below the switch (a 1 M☉, 10 R☉ star from 7.7 × 10⁷ M☉), where the falling
-    /// efficiency lowers it.
+    /// The light falls monotonically from `t_fb`, since `radiative_efficiency` does not decrease
+    /// with the rate. At the Milky Way's black hole every victim peaks above the hot flow's switch
+    /// to η (the least about 0.61 Eddington rates), so its peak is η's. At a black hole near
+    /// 10⁸ M☉ a star of several solar radii can peak below the switch (a 1 M☉, 10 R☉ star from
+    /// 7.7 × 10⁷ M☉), where the falling efficiency lowers it.
     #[must_use]
     pub fn peak_luminosity_watts(&self) -> f64 {
         XRAY_SHARE * self.peak_bolometric_watts()
@@ -354,22 +304,15 @@ impl DisruptionTail {
             .min(self.accreted_watts(self.peak_rate_kg_per_s))
     }
 
-    /// The light of accretion at `rate_kg_per_s` before Eddington's cap, W: `ε Ṁ c²` with the
-    /// efficiency of the tail's rules (P09.T30.c's hold, its one call site).
+    /// The light of accretion at `rate_kg_per_s` before Eddington's cap, W: `ε Ṁ c²`, with ε
+    /// [`radiative_efficiency`] of the rate (P09.T30.c).
     #[must_use]
     fn accreted_watts(&self, rate_kg_per_s: f64) -> f64 {
-        match self.rules {
-            CentreQuiescenceRules::ConstantEfficiency => {
-                RADIATIVE_EFFICIENCY * rate_kg_per_s * SPEED_OF_LIGHT * SPEED_OF_LIGHT
-            }
-            CentreQuiescenceRules::HotFlow => {
-                let eddington_rate_kg_per_s = EDDINGTON_RATE_PER_WATT * self.eddington_watts;
-                radiative_efficiency(rate_kg_per_s / eddington_rate_kg_per_s)
-                    * rate_kg_per_s
-                    * SPEED_OF_LIGHT
-                    * SPEED_OF_LIGHT
-            }
-        }
+        let eddington_rate_kg_per_s = EDDINGTON_RATE_PER_WATT * self.eddington_watts;
+        radiative_efficiency(rate_kg_per_s / eddington_rate_kg_per_s)
+            * rate_kg_per_s
+            * SPEED_OF_LIGHT
+            * SPEED_OF_LIGHT
     }
 }
 
@@ -566,34 +509,46 @@ mod tests {
         assert!((t(1e6, 1.0, 4.0) / sun - 8.0).abs() < 1e-12);
     }
 
-    /// The held efficiency, η at every rate, and the hot flow's (P09.T30.c's hold).
-    const HELD: CentreQuiescenceRules = CentreQuiescenceRules::ConstantEfficiency;
-    const HOT_FLOW: CentreQuiescenceRules = CentreQuiescenceRules::HotFlow;
-
-    /// A Sun-like star's tail at the fixture's black hole, disrupted at the epoch, under `rules`.
-    fn sun_like_tail(rules: CentreQuiescenceRules) -> DisruptionTail {
-        DisruptionTail::new_with_rules(
+    /// A Sun-like star's tail at the fixture's black hole, disrupted at the epoch.
+    fn sun_like_tail() -> DisruptionTail {
+        DisruptionTail::new(
             UniverseTime::EPOCH,
             milky_way_galaxy().params().black_hole().mass(),
             SolarMasses::new(1.0),
             SolarRadii::new(1.0),
-            rules,
         )
     }
 
+    /// `tail`'s light at `t` in the band were it to radiate at η whatever its rate, P09.T30.b's
+    /// law, W: `XRAY_SHARE × min(η Ṁ c², L_Edd)`, the oracle the hot flow is compared with,
+    /// computed directly.
+    pub(super) fn eta_luminosity_watts_at(tail: &DisruptionTail, t: UniverseTime) -> f64 {
+        let accreted = RADIATIVE_EFFICIENCY
+            * tail.fallback_rate_kg_per_s_at(t)
+            * SPEED_OF_LIGHT
+            * SPEED_OF_LIGHT;
+        XRAY_SHARE * accreted.min(tail.eddington_watts)
+    }
+
+    /// The most `tail` would give in the band under η whatever its rate, W: its light at `t_fb`
+    /// under [`eta_luminosity_watts_at`]'s law.
+    pub(super) fn eta_peak_luminosity_watts(tail: &DisruptionTail) -> f64 {
+        XRAY_SHARE
+            * tail.eddington_watts.min(
+                RADIATIVE_EFFICIENCY * tail.peak_rate_kg_per_s * SPEED_OF_LIGHT * SPEED_OF_LIGHT,
+            )
+    }
+
     /// The victims of P09.T30.b's 200-seed sweep, universes `0x0930_b000_0000_0000 | i`, about
-    /// the fixture's black hole, centre and mass function, with tails under `rules`.
-    pub(super) fn swept_victims(
-        rules: CentreQuiescenceRules,
-    ) -> impl Iterator<Item = (Seed, CentreVictims)> {
-        (0..200_u64).map(move |i| {
+    /// the fixture's black hole, centre and mass function.
+    pub(super) fn swept_victims() -> impl Iterator<Item = (Seed, CentreVictims)> {
+        (0..200_u64).map(|i| {
             let seed = Seed::new(0x0930_b000_0000_0000 | i);
-            let victims = CentreVictims::from_parts_with_rules(
+            let victims = CentreVictims::from_parts(
                 seed,
                 milky_way_galaxy().params().black_hole().mass(),
                 milky_way_centre(),
                 milky_way_galaxy().mass_function(),
-                rules,
             )
             .unwrap();
             (seed, victims)
@@ -603,104 +558,82 @@ mod tests {
     /// P09.T30.b's closed forms, without Ponti's bracket (P09.T30.c: the light echoes measure
     /// short outbursts, not a tail a thousand years on). A Sun-like star's tail at the Milky Way's
     /// black hole is dark before its fallback time and its share of Eddington's at it; its debris
-    /// falls back as t^(−5⁄3) and carries half the star back; under η its light falls as the rate,
-    /// and under the hot flow as `Ṁ^(1 + a)`, on the lowest range from about 600 years on. Its
-    /// figures are the research lane's.
+    /// falls back as t^(−5⁄3) and carries half the star back; and its light falls as `Ṁ^(1 + a)`, on
+    /// the hot flow's lowest range from about 600 years on. Its figures are the research lane's.
     #[test]
     fn a_sun_like_tail_follows_its_closed_forms() {
         let bh = milky_way_galaxy().params().black_hole().mass();
         let eddington_rate =
             10.0 * eddington_luminosity_watts(bh) / (SPEED_OF_LIGHT * SPEED_OF_LIGHT);
-        for rules in [HELD, HOT_FLOW] {
-            let sun = sun_like_tail(rules);
-            let at = |years: i64| sun.luminosity_watts_at(years_after(UniverseTime::EPOCH, years));
-            let rate =
-                |years: i64| sun.fallback_rate_kg_per_s_at(years_after(UniverseTime::EPOCH, years));
-            let erg_s = |years: i64| at(years) / WATTS_PER_ERG_S;
-            eprintln!(
-                "{rules:?}: a Sun-like victim's tail: {:.4e} erg/s at 1 yr, {:.4e} at 10, {:.4e} at \
-                 100, {:.4e} at 1,000, {:.4e} at 10,000, {:.4e} at 100,000; fallback time {:.2} d",
-                erg_s(1),
-                erg_s(10),
-                erg_s(100),
-                erg_s(1_000),
-                erg_s(10_000),
-                erg_s(100_000),
-                sun.fallback_time().value() / 86_400.0
+        let sun = sun_like_tail();
+        let at = |years: i64| sun.luminosity_watts_at(years_after(UniverseTime::EPOCH, years));
+        let rate =
+            |years: i64| sun.fallback_rate_kg_per_s_at(years_after(UniverseTime::EPOCH, years));
+        let erg_s = |years: i64| at(years) / WATTS_PER_ERG_S;
+        eprintln!(
+            "a Sun-like victim's tail: {:.4e} erg/s at 1 yr, {:.4e} at 10, {:.4e} at 100, {:.4e} \
+             at 1,000, {:.4e} at 10,000, {:.4e} at 100,000; fallback time {:.2} d",
+            erg_s(1),
+            erg_s(10),
+            erg_s(100),
+            erg_s(1_000),
+            erg_s(10_000),
+            erg_s(100_000),
+            sun.fallback_time().value() / 86_400.0
+        );
+        // The rate falls as t^(−5⁄3): ten times later, 10^(−5⁄3) of it.
+        assert!((rate(10_000) / rate(1_000) / math::powf(10.0, -5.0 / 3.0) - 1.0).abs() < 1e-9);
+        let before = UniverseTime::EPOCH
+            .checked_add(Span::from_seconds_f64(0.99 * sun.fallback_time().value()).unwrap())
+            .unwrap();
+        assert_eq!(sun.luminosity_watts_at(before), 0.0);
+        assert_eq!(
+            sun.luminosity_watts_at(years_after(UniverseTime::EPOCH, -1)),
+            0.0
+        );
+        let first = UniverseTime::EPOCH
+            .checked_add(Span::from_seconds_f64(sun.fallback_time().value()).unwrap())
+            .unwrap();
+        let peak = sun.luminosity_watts_at(first);
+        assert!(peak <= sun.peak_luminosity_watts() * (1.0 + 1e-12));
+        assert!((peak / (XRAY_SHARE * eddington_luminosity_watts(bh)) - 1.0).abs() < 1e-12);
+        // The debris falling back from t_fb on is half the star: ∫ (x)^(−5⁄3) dx from 1 is 3⁄2.
+        let returned = sun.fallback_rate_kg_per_s_at(first) * sun.fallback_time().value() * 1.5
+            / SOLAR_MASS_KG;
+        assert!((returned - 0.5).abs() < 1e-9, "{returned}");
+        // The research lane's figures (its advice's §2 table), to their three digits.
+        for (years, figure) in [
+            (1, 3.42e43),
+            (10, 9.73e41),
+            (100, 9.33e39),
+            (1_000, 9.59e37),
+            (10_000, 1.71e35),
+            (100_000, 3.03e32),
+        ] {
+            let l = erg_s(years);
+            assert!(
+                (l / figure - 1.0).abs() < 5e-3,
+                "at {years} yr: {l:e} erg/s"
             );
-            // The rate falls as t^(−5⁄3): ten times later, 10^(−5⁄3) of it.
-            assert!((rate(10_000) / rate(1_000) / math::powf(10.0, -5.0 / 3.0) - 1.0).abs() < 1e-9);
-            let before = UniverseTime::EPOCH
-                .checked_add(Span::from_seconds_f64(0.99 * sun.fallback_time().value()).unwrap())
-                .unwrap();
-            assert_eq!(sun.luminosity_watts_at(before), 0.0);
-            assert_eq!(
-                sun.luminosity_watts_at(years_after(UniverseTime::EPOCH, -1)),
-                0.0
-            );
-            let first = UniverseTime::EPOCH
-                .checked_add(Span::from_seconds_f64(sun.fallback_time().value()).unwrap())
-                .unwrap();
-            let peak = sun.luminosity_watts_at(first);
-            assert!(peak <= sun.peak_luminosity_watts() * (1.0 + 1e-12));
-            assert!((peak / (XRAY_SHARE * eddington_luminosity_watts(bh)) - 1.0).abs() < 1e-12);
-            // The debris falling back from t_fb on is half the star: ∫ (x)^(−5⁄3) dx from 1 is 3⁄2.
-            let returned = sun.fallback_rate_kg_per_s_at(first) * sun.fallback_time().value() * 1.5
-                / SOLAR_MASS_KG;
-            assert!((returned - 0.5).abs() < 1e-9, "{returned}");
-            // The research lane's figures (its advice's §2 table), to their three digits.
-            let figures: [(i64, f64); 6] = match rules {
-                CentreQuiescenceRules::ConstantEfficiency => [
-                    (1, 3.42e43),
-                    (10, 9.73e41),
-                    (100, 2.10e40),
-                    (1_000, 4.52e38),
-                    (10_000, 9.73e36),
-                    (100_000, 2.10e35),
-                ],
-                CentreQuiescenceRules::HotFlow => [
-                    (1, 3.42e43),
-                    (10, 9.73e41),
-                    (100, 9.33e39),
-                    (1_000, 9.59e37),
-                    (10_000, 1.71e35),
-                    (100_000, 3.03e32),
-                ],
-            };
-            for (years, figure) in figures {
-                let l = erg_s(years);
-                assert!(
-                    (l / figure - 1.0).abs() < 5e-3,
-                    "{rules:?} at {years} yr: {l:e} erg/s"
-                );
-            }
-            let fall = at(10_000) / at(1_000);
-            match rules {
-                // η at every rate: the light is the rate's.
-                CentreQuiescenceRules::ConstantEfficiency => {
-                    assert!((fall / math::powf(10.0, -5.0 / 3.0) - 1.0).abs() < 1e-9);
-                }
-                // On the lowest range, 1.32 × 10⁻⁵ Eddington rates at 1,000 yr: ε ∝ Ṁ^0.65.
-                CentreQuiescenceRules::HotFlow => {
-                    let ratio = rate(1_000) / eddington_rate;
-                    assert!((ratio / 1.32e-5 - 1.0).abs() < 5e-3, "{ratio:e}");
-                    let (e0, a) = HOT_FLOW_EFFICIENCY[0];
-                    let expected = XRAY_SHARE
-                        * e0
-                        * math::powf(ratio / HOT_FLOW_RATE_SCALE, a)
-                        * rate(1_000)
-                        * SPEED_OF_LIGHT
-                        * SPEED_OF_LIGHT;
-                    assert!((at(1_000) / expected - 1.0).abs() < 1e-12);
-                    assert!((fall / math::powf(10.0, -5.0 / 3.0 * (1.0 + a)) - 1.0).abs() < 1e-9);
-                }
-            }
         }
+        // On the lowest range, 1.32 × 10⁻⁵ Eddington rates at 1,000 yr: ε ∝ Ṁ^0.65.
+        let fall = at(10_000) / at(1_000);
+        let ratio = rate(1_000) / eddington_rate;
+        assert!((ratio / 1.32e-5 - 1.0).abs() < 5e-3, "{ratio:e}");
+        let (e0, a) = HOT_FLOW_EFFICIENCY[0];
+        let expected = XRAY_SHARE
+            * e0
+            * math::powf(ratio / HOT_FLOW_RATE_SCALE, a)
+            * rate(1_000)
+            * SPEED_OF_LIGHT
+            * SPEED_OF_LIGHT;
+        assert!((at(1_000) / expected - 1.0).abs() < 1e-12);
+        assert!((fall / math::powf(10.0, -5.0 / 3.0 * (1.0 + a)) - 1.0).abs() < 1e-9);
     }
 
-    /// The drawn victims' tails a thousand years on, mostly M dwarfs', whose tails scale as
-    /// `M★^⅓ R★` under η: the fixture's printed, and the 200 seeds' pinned as they stand under either
-    /// efficiency (plan 09's Risks, "P09.T30.b as built" and "P09.T30.c as built").
+    /// The drawn victims' tails a thousand years on, mostly M dwarfs': the fixture's printed, and
+    /// the 200 seeds' pinned as they stand (plan 09's Risks, "P09.T30.b as built" and "P09.T30.c as
+    /// built").
     #[test]
     fn the_drawn_tails_a_thousand_years_on_are_pinned_as_they_stand() {
         let report = |label: &str, victims: &[&TidalDisruptionVictim]| -> (usize, f64, usize) {
@@ -726,24 +659,22 @@ mod tests {
         };
         let model = fixture();
         report(
-            "the fixture, under the version's efficiency",
+            "the fixture",
             &model.victims().victims().iter().collect::<Vec<_>>(),
         );
-        // As measured: medians of 8.20 × 10³⁷ and 5.74 × 10³⁶ erg/s, and 538 and 35 of 5,524
-        // tails in the old bracket (the research lane's figures).
-        for (rules, median, bracket) in [(HELD, 8.20e37, 538), (HOT_FLOW, 5.74e36, 35)] {
-            let swept: Vec<CentreVictims> = swept_victims(rules).map(|(_, v)| v).collect();
-            let (count, m, inside) = report(
-                &format!("200 seeds, {rules:?}"),
-                &swept
-                    .iter()
-                    .flat_map(CentreVictims::victims)
-                    .collect::<Vec<_>>(),
-            );
-            assert_eq!(count, 5_524);
-            assert!((m / median - 1.0).abs() < 5e-3, "{rules:?}: {m:e} erg/s");
-            assert_eq!(inside, bracket, "{rules:?}");
-        }
+        // As measured: a median of 5.74 × 10³⁶ erg/s, and 35 of 5,524 tails in the old bracket
+        // (the research lane's figures).
+        let swept: Vec<CentreVictims> = swept_victims().map(|(_, v)| v).collect();
+        let (count, median, inside) = report(
+            "200 seeds",
+            &swept
+                .iter()
+                .flat_map(CentreVictims::victims)
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(count, 5_524);
+        assert!((median / 5.74e36 - 1.0).abs() < 5e-3, "{median:e} erg/s");
+        assert_eq!(inside, 35);
     }
 
     /// P09.T30.c: the hot flow's efficiency is each of Xie and Yuan's three ranges between where it
@@ -839,89 +770,72 @@ mod tests {
         }
     }
 
-    /// P09.T30.c: under either efficiency a tail's light falls monotonically from its fallback
-    /// time, and [`DisruptionTail::peak_luminosity_watts`] is its light there: for a Sun-like star
-    /// at the Milky Way's black hole, whose peak is 15 Eddington rates, the same under both; and for
-    /// a 10 R☉ star at 10⁸ M☉, whose peak, 4.2 × 10⁻³ Eddington rates, is below the hot flow's
-    /// switch to η, where the falling efficiency lowers it. Under the hot flow a Sun-like tail is
-    /// η's while its rate is above the switch, for 24.9 years, and falls to the quiescence
-    /// 4.07 × 10⁴ years on, where η takes 1.15 × 10⁶.
+    /// P09.T30.c: a tail's light falls monotonically from its fallback time, and
+    /// [`DisruptionTail::peak_luminosity_watts`] is its light there: for a Sun-like star at the
+    /// Milky Way's black hole, whose peak is 15 Eddington rates, η's; and for a 10 R☉ star at
+    /// 10⁸ M☉, whose peak, 4.2 × 10⁻³ Eddington rates, is below the hot flow's switch to η, where
+    /// the falling efficiency lowers it. A Sun-like tail is η's while its rate is above the switch,
+    /// for 24.9 years, and falls to the quiescence 4.07 × 10⁴ years on. η's light is computed
+    /// directly ([`eta_luminosity_watts_at`]).
     #[test]
-    fn a_tail_s_light_falls_from_its_peak_under_either_efficiency() {
-        let low_peak = |rules| {
-            DisruptionTail::new_with_rules(
-                UniverseTime::EPOCH,
-                SolarMasses::new(1e8),
-                SolarMasses::new(1.0),
-                SolarRadii::new(10.0),
-                rules,
-            )
-        };
+    fn a_tail_s_light_falls_from_its_peak() {
+        let low_peak = DisruptionTail::new(
+            UniverseTime::EPOCH,
+            SolarMasses::new(1e8),
+            SolarMasses::new(1.0),
+            SolarRadii::new(10.0),
+        );
         let after = |seconds: f64| {
             UniverseTime::EPOCH
                 .checked_add(Span::from_seconds_f64(seconds).unwrap())
                 .unwrap()
         };
-        for rules in [HELD, HOT_FLOW] {
-            for tail in [sun_like_tail(rules), low_peak(rules)] {
-                // Just after t_fb, past the nanosecond the instant is floored to.
-                let first = tail.fallback_time().value() * (1.0 + 1e-12);
-                let peak = tail.luminosity_watts_at(after(first));
-                let bound = tail.peak_luminosity_watts();
-                assert!(
-                    peak <= bound && peak / bound > 1.0 - 1e-9,
-                    "{rules:?}: {peak:e} W"
-                );
-                let mut last = peak;
-                // From t_fb to 10⁶ t_fb, 2.3 × 10⁵ yr for the Sun-like star.
-                for k in 1..=600_u32 {
-                    let l = tail
-                        .luminosity_watts_at(after(first * math::powf(10.0, f64::from(k) / 100.0)));
-                    assert!(l <= last && l > 0.0, "{rules:?} at {k}");
-                    last = l;
-                }
+        let sun = sun_like_tail();
+        for tail in [sun, low_peak] {
+            // Just after t_fb, past the nanosecond the instant is floored to.
+            let first = tail.fallback_time().value() * (1.0 + 1e-12);
+            let peak = tail.luminosity_watts_at(after(first));
+            let bound = tail.peak_luminosity_watts();
+            assert!(
+                peak <= bound && peak / bound > 1.0 - 1e-9,
+                "{tail:?}: {peak:e} W"
+            );
+            let mut last = peak;
+            // From t_fb to 10⁶ t_fb, 2.3 × 10⁵ yr for the Sun-like star.
+            for k in 1..=600_u32 {
+                let l =
+                    tail.luminosity_watts_at(after(first * math::powf(10.0, f64::from(k) / 100.0)));
+                assert!(l <= last && l > 0.0, "{tail:?} at {k}");
+                last = l;
             }
         }
-        let (sun_held, sun_hot) = (sun_like_tail(HELD), sun_like_tail(HOT_FLOW));
-        assert_same_bits(
-            sun_hot.peak_luminosity_watts(),
-            sun_held.peak_luminosity_watts(),
-        );
-        let (low_held, low_hot) = (low_peak(HELD), low_peak(HOT_FLOW));
-        let lowered = low_hot.peak_luminosity_watts() / low_held.peak_luminosity_watts();
+        assert_same_bits(sun.peak_luminosity_watts(), eta_peak_luminosity_watts(&sun));
+        let lowered = low_peak.peak_luminosity_watts() / eta_peak_luminosity_watts(&low_peak);
         eprintln!("a 10 R_sun star's peak at 1e8 M_sun under the hot flow: {lowered:.4} of eta's");
         assert!((0.6..0.7).contains(&lowered), "{lowered}");
 
         let years = |y: i64| years_after(UniverseTime::EPOCH, y);
         for y in [1, 10, 24] {
             assert_same_bits(
-                sun_hot.luminosity_watts_at(years(y)),
-                sun_held.luminosity_watts_at(years(y)),
+                sun.luminosity_watts_at(years(y)),
+                eta_luminosity_watts_at(&sun, years(y)),
             );
         }
-        assert!(sun_hot.luminosity_watts_at(years(25)) < sun_held.luminosity_watts_at(years(25)));
-        let quiet = |tail: &DisruptionTail| {
-            let (mut low, mut high) = (1.0_f64, 1e8_f64);
-            for _ in 0..100 {
-                let mid = (low * high).sqrt();
-                let t = UniverseTime::EPOCH
-                    .checked_add(Span::from_seconds_f64(mid * SECONDS_PER_JULIAN_YEAR).unwrap())
-                    .unwrap();
-                if tail.luminosity_watts_at(t) > QUIESCENT_LUMINOSITY_WATTS {
-                    low = mid;
-                } else {
-                    high = mid;
-                }
+        assert!(sun.luminosity_watts_at(years(25)) < eta_luminosity_watts_at(&sun, years(25)));
+        let (mut low, mut high) = (1.0_f64, 1e8_f64);
+        for _ in 0..100 {
+            let mid = (low * high).sqrt();
+            let t = UniverseTime::EPOCH
+                .checked_add(Span::from_seconds_f64(mid * SECONDS_PER_JULIAN_YEAR).unwrap())
+                .unwrap();
+            if sun.luminosity_watts_at(t) > QUIESCENT_LUMINOSITY_WATTS {
+                low = mid;
+            } else {
+                high = mid;
             }
-            high
-        };
-        let (held_quiet, hot_quiet) = (quiet(&sun_held), quiet(&sun_hot));
-        eprintln!(
-            "a Sun-like tail falls to the quiescence {held_quiet:.4e} yr on under eta, \
-             {hot_quiet:.4e} under the hot flow"
-        );
-        assert!((held_quiet / 1.146e6 - 1.0).abs() < 1e-3);
-        assert!((hot_quiet / 4.068e4 - 1.0).abs() < 1e-3);
+        }
+        eprintln!("a Sun-like tail falls to the quiescence {high:.4e} yr on");
+        assert!((high / 4.068e4 - 1.0).abs() < 1e-3);
     }
 
     /// The luminosity is the quiescence, the flares running and the tails of the victims disrupted
@@ -1028,10 +942,15 @@ mod tests {
         Value(String, f64),
     }
 
-    /// The `centre_luminosity` golden's entries for `galaxy`, the fixture under its rules: the
-    /// constants' closed forms, a Sun-like tail at five times, and the luminosity by part at
-    /// instants across the clock window and after its victims.
-    pub(super) fn centre_luminosity_entries(galaxy: &Galaxy) -> Vec<Entry> {
+    /// The `centre_luminosity` golden's entries for `galaxy`, the fixture, with each tail's light
+    /// at an instant `light`'s: the constants' closed forms, a Sun-like tail at five times, and the
+    /// luminosity by part at instants across the clock window and after its victims. The golden
+    /// takes the version's light ([`DisruptionTail::luminosity_watts_at`]) and D2's census of what
+    /// moves η's at every rate ([`eta_luminosity_watts_at`]).
+    pub(super) fn centre_luminosity_entries(
+        galaxy: &Galaxy,
+        light: fn(&DisruptionTail, UniverseTime) -> f64,
+    ) -> Vec<Entry> {
         let value = |label: &str, value: f64| Entry::Value(label.to_owned(), value);
         let bh = galaxy.params().black_hole().mass();
         let mut entries = vec![
@@ -1044,17 +963,16 @@ mod tests {
                 fallback_time(bh, SolarMasses::new(1.0), SolarRadii::new(1.0)).value(),
             ),
         ];
-        let sun = DisruptionTail::new_with_rules(
+        let sun = DisruptionTail::new(
             UniverseTime::EPOCH,
             bh,
             SolarMasses::new(1.0),
             SolarRadii::new(1.0),
-            galaxy.rules().centre_quiescence,
         );
         for years in [1, 10, 100, 1_000, 100_000] {
             entries.push(value(
                 &format!("a Sun-like tail at {years} yr (W)"),
-                sun.luminosity_watts_at(years_after(UniverseTime::EPOCH, years)),
+                light(&sun, years_after(UniverseTime::EPOCH, years)),
             ));
         }
         let model = CentreLuminosityModel::new(galaxy, milky_way_centre()).unwrap();
@@ -1070,7 +988,18 @@ mod tests {
                 .map(|v| years_after(v.time(), 1_000)),
         );
         for t in times {
-            let l = luminosity_at(&model, t);
+            // The tails summed as `luminosity_at` sums them, in list order up to `t`.
+            let tails = model
+                .victims()
+                .victims()
+                .iter()
+                .take_while(|v| v.time() <= t)
+                .filter_map(|v| v.tail())
+                .fold(0.0, |sum, tail| sum + light(tail, t));
+            let l = CentreLuminosity {
+                tails,
+                ..luminosity_at(&model, t)
+            };
             entries.extend([
                 Entry::Line(format!("at {t}")),
                 value("  flares (W)", l.flares_watts()),
@@ -1081,12 +1010,14 @@ mod tests {
         entries
     }
 
-    /// Pinned: [`centre_luminosity_entries`] of the fixture under the version's rules.
+    /// Pinned: [`centre_luminosity_entries`] of the fixture, with the version's light.
     #[test]
     fn centre_luminosity_is_pinned() {
         let mut w = GoldenWriter::new();
         w.header(GENERATOR_VERSION.get());
-        for entry in centre_luminosity_entries(milky_way_galaxy()) {
+        for entry in
+            centre_luminosity_entries(milky_way_galaxy(), DisruptionTail::luminosity_watts_at)
+        {
             match entry {
                 Entry::Line(line) => w.line(&line),
                 Entry::Value(label, value) => w.f64(&label, value),

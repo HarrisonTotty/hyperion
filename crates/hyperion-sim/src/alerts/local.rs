@@ -1976,7 +1976,7 @@ mod tests {
             .unwrap();
         let first = Galaxy::new(Seed::new(31));
         let second = Galaxy::new(Seed::new(32));
-        let ruled = first.clone().with_rules(GalaxyRules::every_25_hold());
+        let ruled = first.clone().with_rules(GalaxyRules::every_26_hold());
         let seen = |galaxy: &Galaxy, rows: &[ObservedSystem], cache: &mut LocalEventsCache| {
             let mut noise = NoiseCache::with_capacity(64);
             let mut ctx = AlertContext::new(&mut noise, &NoModifiers);

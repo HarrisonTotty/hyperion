@@ -74,12 +74,10 @@
 //!
 //! # The centre's tails
 //!
-//! P09.T30.b's tails radiate `min(η Ṁ c², L_Edd)`, with η fixed at 0.1, which keeps the Milky
-//! Way's centre far above its observed quiescence. P09.T30.c replaces the law, behind a hold at
-//! generator version 25, with an efficiency that falls with the fallback rate. The bound here is
-//! the Eddington cap, which holds under either law, and the light curve is the tail's own, so the
-//! row reads whichever law the galaxy's rules hold. The black hole's quiescence is no transient and
-//! has no row.
+//! P09.T30.b's tails radiate `min(ε Ṁ c², L_Edd)`, with an efficiency ε that falls with the
+//! fallback rate from generator version 25 (P09.T30.c), where it was η = 0.1 at every rate. The
+//! bound here is the Eddington cap, and the light curve is the tail's own. The black hole's
+//! quiescence is no transient and has no row.
 
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::ClassId;
@@ -833,7 +831,6 @@ mod tests {
     use crate::galaxy::features::centre::events::DisruptionTail;
     use crate::galaxy::features::centre::testing::{milky_way_centre, milky_way_galaxy};
     use crate::galaxy::gas::ccm::Band;
-    use crate::galaxy::rules::GalaxyRules;
     use crate::math;
     use crate::stellar::remnant::SupernovaType;
     use crate::time::{SourceHorizon, UniverseTime};
@@ -1056,46 +1053,42 @@ mod tests {
         assert_eq!(PeakBound::PerHost.in_galaxy(galaxy), None);
     }
 
-    /// The galaxy's own tails stay under the row's bounds through the source horizon, under the
-    /// rules of the generator version in force and under every hold at 25, where P09.T30.c's law
-    /// joins: the tripwire on the row's reading whichever law the galaxy's rules hold. Each tail is
-    /// sampled from its fallback time at quarter-octave steps to the horizon's end.
+    /// The galaxy's own tails stay under the row's bounds through the source horizon, their
+    /// efficiency P09.T30.c's from generator version 25. Each tail is sampled from its fallback
+    /// time at quarter-octave steps to the horizon's end.
     #[test]
-    fn the_galaxys_own_tails_stay_under_the_rows_bounds_under_each_rule_set() {
+    fn the_galaxys_own_tails_stay_under_the_rows_bounds() {
         let row = TransientKind::TidalDisruption.row();
-        let now = milky_way_galaxy().clone();
-        let next = now.clone().with_rules(GalaxyRules::every_25_hold());
-        for galaxy in [now, next] {
-            let bound = |band| {
-                row.peak_bound(band)
-                    .unwrap()
-                    .in_galaxy(&galaxy)
-                    .unwrap()
-                    .value()
-            };
-            let (xray, light) = (
-                bound(AlertBand::XRay),
-                bound(AlertBand::Photometric(Band::V)),
-            );
-            let victims = CentreVictims::new(&galaxy, milky_way_centre()).unwrap();
-            let mut tails = 0;
-            for tail in victims.victims().iter().filter_map(|victim| victim.tail()) {
-                tails += 1;
-                assert!(tail.peak_luminosity_watts() <= xray, "{tail:?}");
-                for step in 0..=120 {
-                    let after = tail.fallback_time().value() * math::exp2(f64::from(step) / 4.0);
-                    let Some(t) = Span::from_seconds_f64(after)
-                        .and_then(|span| tail.disruption().checked_add(span))
-                        .filter(|&t| t <= SourceHorizon::END)
-                    else {
-                        break;
-                    };
-                    assert!(tail.luminosity_watts_at(t) <= xray, "{tail:?} at {t}");
-                    assert!(tail.bolometric_watts_at(t) <= light, "{tail:?} at {t}");
-                }
+        let galaxy = milky_way_galaxy();
+        let bound = |band| {
+            row.peak_bound(band)
+                .unwrap()
+                .in_galaxy(galaxy)
+                .unwrap()
+                .value()
+        };
+        let (xray, light) = (
+            bound(AlertBand::XRay),
+            bound(AlertBand::Photometric(Band::V)),
+        );
+        let victims = CentreVictims::new(galaxy, milky_way_centre()).unwrap();
+        let mut tails = 0;
+        for tail in victims.victims().iter().filter_map(|victim| victim.tail()) {
+            tails += 1;
+            assert!(tail.peak_luminosity_watts() <= xray, "{tail:?}");
+            for step in 0..=120 {
+                let after = tail.fallback_time().value() * math::exp2(f64::from(step) / 4.0);
+                let Some(t) = Span::from_seconds_f64(after)
+                    .and_then(|span| tail.disruption().checked_add(span))
+                    .filter(|&t| t <= SourceHorizon::END)
+                else {
+                    break;
+                };
+                assert!(tail.luminosity_watts_at(t) <= xray, "{tail:?} at {t}");
+                assert!(tail.bolometric_watts_at(t) <= light, "{tail:?} at {t}");
             }
-            assert!(tails > 10, "{tails} tails");
         }
+        assert!(tails > 10, "{tails} tails");
     }
 
     /// The magnetar row bounds every short burst and giant flare, whole and in 2–10 keV. A burst's

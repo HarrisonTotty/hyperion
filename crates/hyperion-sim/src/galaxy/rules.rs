@@ -14,11 +14,6 @@
 //!
 //! The holds, each a field:
 //!
-//! - [`centre_quiescence`](GalaxyRules::centre_quiescence), at [`CENTRE_QUIESCENCE_VERSION`] (plan
-//!   09, P09.T30.c): the radiative efficiency of the black hole's disruption tails, falling with
-//!   their fallback rate. It is read where a galaxy's victims are drawn (`CentreVictims::new` and
-//!   `one`), into each tail, and reaches none of the galaxy's memos, so `Galaxy::with_rules` need
-//!   not reset them for it.
 //! - [`bound_share`](GalaxyRules::bound_share), at [`BOUND_SHARE_VERSION`] (plan 09, P09.T13 after
 //!   ruling 145.5): a globular's history takes its own population's μ in place of BM03's 0.70.
 //! - [`stream_shell`](GalaxyRules::stream_shell), at [`STREAM_SHELL_VERSION`] (plan 10, P10.T9):
@@ -48,9 +43,6 @@
 use crate::GeneratorVersion;
 use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules};
 use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
-use crate::galaxy::features::centre::events::luminosity::{
-    CENTRE_QUIESCENCE_VERSION, CentreQuiescenceRules,
-};
 use crate::galaxy::features::kinds::globular::{BOUND_SHARE_VERSION, BoundShareRules};
 use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules};
 use crate::galaxy::features::members::remnants::{MemberRemnantRules, TABULATED_REMNANTS_VERSION};
@@ -61,8 +53,6 @@ use crate::stellar::rules::StellarRules;
 /// (decision-galaxy-25-train §1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct GalaxyRules {
-    /// The efficiency the black hole's disruption tails radiate at (P09.T30.c).
-    pub(crate) centre_quiescence: CentreQuiescenceRules,
     /// The share of its birth mass a globular's history says stellar evolution left it (P09.T13,
     /// ruling 145.5).
     pub(crate) bound_share: BoundShareRules,
@@ -87,11 +77,6 @@ impl GalaxyRules {
     #[must_use]
     pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
         Self {
-            centre_quiescence: if version.get() >= CENTRE_QUIESCENCE_VERSION.get() {
-                CentreQuiescenceRules::HotFlow
-            } else {
-                CentreQuiescenceRules::ConstantEfficiency
-            },
             bound_share: if version.get() >= BOUND_SHARE_VERSION.get() {
                 BoundShareRules::OwnMu
             } else {
@@ -180,7 +165,8 @@ mod tests {
     use crate::rng::Seed;
 
     /// D3: a galaxy built the usual way carries the version's rules, and equals one built under
-    /// them explicitly; one built under every 25 hold does not.
+    /// them explicitly; one built under every 26 hold does not. No galaxy-side hold at 25 remains,
+    /// so one built under every 25 hold is the version's.
     #[test]
     fn a_galaxy_carries_the_version_s_rules() {
         let seed = Seed::new(0x0928_bb00_0000_0001);
@@ -195,18 +181,19 @@ mod tests {
         .expect("the Milky Way fixture builds");
         assert_eq!(built, explicit);
         assert_eq!(format!("{built:?}"), format!("{explicit:?}"));
-        let at_25 = Galaxy::from_params_with_rules(
+        assert_eq!(GalaxyRules::every_25_hold(), built.rules());
+        let at_26 = Galaxy::from_params_with_rules(
             seed,
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_25_hold(),
+            GalaxyRules::every_26_hold(),
         )
         .expect("the Milky Way fixture builds");
-        assert_ne!(built, at_25);
-        assert_eq!(at_25.rules(), GalaxyRules::every_25_hold());
+        assert_ne!(built, at_26);
+        assert_eq!(at_26.rules(), GalaxyRules::every_26_hold());
         // The rules ride the builders that return the same galaxy with something added or
         // changed; `with_full_potential`'s is held by the exact orbit's D4 test, which builds one.
-        let substellar = at_25.with_substellar_params(SubstellarParams::generator_default());
-        assert_eq!(substellar.rules(), GalaxyRules::every_25_hold());
+        let substellar = at_26.with_substellar_params(SubstellarParams::generator_default());
+        assert_eq!(substellar.rules(), GalaxyRules::every_26_hold());
     }
 
     /// `Galaxy::with_rules` keeps the centre's model while the stellar rules stay as they were, and
@@ -241,15 +228,6 @@ mod tests {
     /// Each hold's arm follows its version: held below it, new from it on.
     #[test]
     fn each_hold_turns_on_at_its_version() {
-        let quiescence = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).centre_quiescence;
-        assert_eq!(quiescence(23), CentreQuiescenceRules::ConstantEfficiency);
-        assert_eq!(quiescence(24), CentreQuiescenceRules::ConstantEfficiency);
-        assert_eq!(quiescence(25), CentreQuiescenceRules::HotFlow);
-        assert_eq!(quiescence(26), CentreQuiescenceRules::HotFlow);
-        assert_eq!(
-            GalaxyRules::every_25_hold().centre_quiescence,
-            CentreQuiescenceRules::HotFlow
-        );
         assert_eq!(
             GalaxyRules::every_25_hold().stellar,
             StellarRules::every_25_hold()
