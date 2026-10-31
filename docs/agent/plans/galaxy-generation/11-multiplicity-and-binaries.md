@@ -7047,3 +7047,13 @@ galaxy_sweeps`.
   MacLeod, De and Loeb's (2022) compilation of eight red novae, which it meets within 4.1× (0.29
   dex high on average). Above, M^⅔ (lean, Matsumoto and Metzger 2022): 300 M☉ peaks at 2.5 × 10⁸
   L☉, 21× its Eddington luminosity, not 1,464×. The plateau's length is unchanged.
+- **P11.T4.d's merger mass, held at 26** (lane `p11-t8cd`, step 2, 2026-10-31; at version 24 no
+  golden moves). P11.T8.c's finding: `Engine::merge_dynamically` (BSE §2.6.4–2.6.5) gave a
+  main-sequence accretor only √(`τ_KH` `τ_dyn`) ÷ `τ_KH,2` of a fully convective donor, so the
+  product was the accretor's mass (0.454 + 0.138 → 0.1375 M☉; 719 of 803 main-sequence mergers
+  among 3,000 engine mergers under 99% of the pair). From `MERGER_MASS_VERSION` = 26
+  (`stellar/binary/merger_mass.rs`, `StellarRules::merger_mass`) it takes the collision rule, T4.d's
+  table 2: M_d + M_a at eq. 80's age of both stars, no mass lost (lean, 2026-10-31). A
+  Hertzsprung-gap accretor's branch is unchanged. The brief's gate refuses the pair-light and reach
+  tables under the new arm. Movers: `stellar/binary_timelines`, `sky/census_near_sun`,
+  `sky/band_face_row`; the bump re-blesses them and refits those tables.

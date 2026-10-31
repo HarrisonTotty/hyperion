@@ -43,6 +43,7 @@ use crate::stellar::sse::{self, NewStar, Remains, Structure, Track};
 use crate::units::{Megayears, SolarMasses, Years};
 
 use super::evolve::{Engine, clock_resolution_years, roche_lobe, track_mass};
+use super::merger_mass::MergerMassRules;
 use super::rlof::{dynamical, kelvin_helmholtz};
 use super::star::{G, Kind, Member, Path, cooling_origin, moment_of_inertia, positive};
 use super::timeline::{IaPoolChannel, PooledIaEvent, SegmentKind};
@@ -949,7 +950,16 @@ impl Engine {
             let kept = (timescale / kelvin_helmholtz(&so, ko) * md).min(md);
             let total = mo + kept;
             let product = if ko.is_main_sequence() {
-                self.main_sequence_merger(false, total, [(mo, &so), (0.0, &so)])
+                match self.ctx.rules().merger_mass {
+                    MergerMassRules::ThermalLimit => {
+                        self.main_sequence_merger(false, total, [(mo, &so), (0.0, &so)])
+                    }
+                    // P11.T4.d's rule, the collision of two main-sequence stars (BSE section
+                    // 2.7.3): both stars' masses, at both stars' fractional age.
+                    MergerMassRules::Pair => {
+                        self.main_sequence_merger(false, md + mo, [(md, &sd), (mo, &so)])
+                    }
+                }
             } else {
                 self.new_star(
                     Kind::HertzsprungGap,

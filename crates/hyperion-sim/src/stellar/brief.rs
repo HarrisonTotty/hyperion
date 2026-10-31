@@ -701,7 +701,9 @@ fn gate(
         ..=Years::new(age_at(age_at_epoch, ClockWindow::END));
     let redrawn = grid_redraws(record, ctx);
     let stars = attempt.stars();
-    let tables_hold = galaxy.rules().stellar.hd_limit.fitted_tables_hold();
+    let stellar = galaxy.rules().stellar;
+    let tables_hold =
+        stellar.hd_limit.fitted_tables_hold() && stellar.merger_mass.fitted_tables_hold();
     let certified = attempt
         .pairs()
         .iter()

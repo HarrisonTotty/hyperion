@@ -78,6 +78,13 @@
 //! - [`star_events`](StellarRules::star_events), at [`STAR_EVENTS_VERSION`] (P06.T28.g): a star's
 //!   active events and the light they make in its summary, and so on the wire, chosen in one
 //!   `match` in `system::star_summary`. Its tests are in `rules/events_hold.rs`.
+//! - [`merger_mass`](StellarRules::merger_mass), at [`MERGER_MASS_VERSION`] (plan 11, P11.T4.d's
+//!   fix): what the binary engine's dynamical main-sequence merger keeps, the accretor's mass and
+//!   what its thermal timescale allows below it, both stars' masses from it, read at one choke
+//!   point, `Engine::merge_dynamically`, through the engine's input's rules. The pair-light and
+//!   reach tables fitted from the engine's runs keep the version's rules until the bump refits
+//!   them, and the range brief's gate refuses them under another arm
+//!   (`stellar/rules/merger_mass_hold.rs` lists the movers).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -90,6 +97,7 @@
 
 use crate::GeneratorVersion;
 use crate::galaxy::displaced::binarity::{STRIPPING_HELIUM_VERSION, StrippingRules};
+use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
 use crate::stellar::classify::pm13::{DWARF_SEQUENCE_VERSION, DwarfSequenceRules};
 use crate::stellar::classify::{PECULIAR_CLASSES_VERSION, PeculiarClassRules};
 use crate::stellar::events::{STAR_EVENTS_VERSION, StarEventRules};
@@ -128,6 +136,9 @@ pub(crate) struct StellarRules {
     pub(crate) peculiar_classes: PeculiarClassRules,
     /// Whether P06.T28.g's events are composed into a star's summary (`system::star_summary`).
     pub(crate) star_events: StarEventRules,
+    /// What a dynamically transferring main-sequence pair's merger keeps in the binary engine,
+    /// the hold of [`MERGER_MASS_VERSION`].
+    pub(crate) merger_mass: MergerMassRules,
 }
 
 impl StellarRules {
@@ -173,6 +184,11 @@ impl StellarRules {
             } else {
                 StarEventRules::Held
             },
+            merger_mass: if version.get() >= MERGER_MASS_VERSION.get() {
+                MergerMassRules::Pair
+            } else {
+                MergerMassRules::ThermalLimit
+            },
         }
     }
 
@@ -207,6 +223,8 @@ mod events_hold;
 mod hd_limit_hold;
 #[cfg(test)]
 mod helium_hold;
+#[cfg(test)]
+mod merger_mass_hold;
 #[cfg(test)]
 mod stripping_hold;
 #[cfg(test)]
