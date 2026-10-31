@@ -505,12 +505,16 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - the planets' lag, `PLANET_LAG_VERSION` (P14.T56.g's rule for an airless planet), at
 ///   `PlanetLagRules::Airless` through `with_planet_lag`: an airless or tenuous planet over a hot
 ///   ice bulk derived once more under the rock lag.
+/// - the decks' fall radius, `FALL_RADIUS_VERSION` (P14.T54.b.l's cost lever), at
+///   `FallRadiusRoot::FalsePosition` through `with_fall_radius`: each level's `r_w` by the Illinois
+///   false position on ln `v_f` in ln r, to the bisections' width.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
 /// here; 26's bump deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::chem::condense::{FallRadiusRoot, with_fall_radius};
     use crate::planetary::derive::atmosphere::{
         LockedStateRules, MeltOxygenRules, SeaDeckRules, with_locked_state, with_melt_oxygen,
         with_sea_deck,
@@ -523,6 +527,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_locked_state(LockedStateRules::Eyeball, run);
     let run = move || with_sea_deck(SeaDeckRules::Dry, run);
     let run = move || with_planet_lag(PlanetLagRules::Airless, run);
+    let run = move || with_fall_radius(FallRadiusRoot::FalsePosition, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 

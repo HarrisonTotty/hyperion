@@ -160,6 +160,7 @@ use crate::substance::aloft::{LawAloft, SaturationLaw, Vapour, laws_aloft};
 use crate::substance::{CondensedPhase, MOLAR_GAS_CONSTANT, SubstanceId, SubstanceKey};
 use crate::units::consts::BOLTZMANN_CONSTANT;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres, Pascals};
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// The scan's step in ln p: the column is evaluated at levels this far apart, from its bottom to
 /// its top, where each base is bracketed and each deck's vapour is kept.
@@ -185,6 +186,99 @@ pub const TOP_FRACTION: f64 = 1e-6;
 
 /// The bisections that find each level's `r_w`, in ln r over [`RADIUS_RANGE_M`].
 const RADIUS_BISECTIONS: u32 = 48;
+
+/// The generator version from which each level's `r_w` is found by the false position on ln `v_f`
+/// in ln r, [`FallRadiusRoot::FalsePosition`]: 26, a planetary bump after 25 (P14.T54.b.l's cost
+/// lever; perf-24's handoff, the envelope's decks).
+///
+/// Below it [`FallRadiusRoot::in_force`] is [`FallRadiusRoot::Bisections`], and every deck is
+/// version 24's bit for bit. 26's bump deletes this hold and the tests' switch
+/// ([`with_fall_radius`]), keeps the bisections as the tests' oracle of the false position, and
+/// deletes the tripwire (`the_fall_radius_root_is_held_only_until_the_26_bump`).
+pub(crate) const FALL_RADIUS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// The most steps of the false position for `r_w` ([`FallRadiusRoot::FalsePosition`]): 48, the
+/// bisections' own [`RADIUS_BISECTIONS`], so that it never evaluates the fall speed more often
+/// beyond the range's two ends. ln `v_f` is nearly linear in ln r, its slope 1 in the free
+/// molecular regime, 2 in Stokes's and ½ past it, and the condensation tests' airs take 7.6 steps
+/// a call, at most 12 (stated by `under_the_false_position_r_w_is_the_bisections_within_their_width`).
+const RADIUS_STEPS: u32 = 48;
+
+/// The width at which the false position for `r_w` stops, as a share of [`RADIUS_RANGE_M`]'s in
+/// ln r: 2⁻⁴⁸, the width [`RADIUS_BISECTIONS`] leave, 6.5 × 10⁻¹⁴ in ln r.
+const RADIUS_STOP_SHARE: f64 = 1.0 / 281_474_976_710_656.0;
+
+/// How a deck's level finds `r_w`, the radius whose fall speed is w* ([`FALL_RADIUS_VERSION`]'s
+/// hold).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum FallRadiusRoot {
+    /// Version 25's and before: [`RADIUS_BISECTIONS`] bisections in ln r, the bracket's midpoint.
+    Bisections,
+    /// Version 26's: the Illinois false position on ln `v_f` − ln w* in ln r, to the bisections'
+    /// width, the bracket's midpoint.
+    FalsePosition,
+}
+
+impl FallRadiusRoot {
+    /// The root this generator version gives: the false position from [`FALL_RADIUS_VERSION`],
+    /// the bisections below it; in the tests, the root a test's switch sets on its thread
+    /// ([`with_fall_radius`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(root) = FALL_RADIUS.with(core::cell::Cell::get) {
+            return root;
+        }
+        if GENERATOR_VERSION >= FALL_RADIUS_VERSION {
+            Self::FalsePosition
+        } else {
+            Self::Bisections
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The root a test sets on its thread, `None` for the version's.
+    static FALL_RADIUS: core::cell::Cell<Option<FallRadiusRoot>> =
+        const { core::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The false position's calls on this thread, its steps over them and the most one took, while
+    /// a test counts them ([`with_fall_radius_steps`]).
+    static FALL_RADIUS_STEPS: core::cell::Cell<Option<(u64, u64, u32)>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the false position's calls for `r_w` on this thread, its steps over them
+/// and the most one took, beyond the range's two ends. The thread's tally is set back after.
+#[cfg(test)]
+pub(crate) fn with_fall_radius_steps<R>(run: impl FnOnce() -> R) -> (R, (u64, u64, u32)) {
+    let before = FALL_RADIUS_STEPS.with(|cell| cell.replace(Some((0, 0, 0))));
+    let result = run();
+    let tally = FALL_RADIUS_STEPS
+        .with(|cell| cell.replace(before))
+        .unwrap_or_default();
+    (result, tally)
+}
+
+/// `run`'s result with `r_w` found by `root` on this thread, for the tests to reach 26's false
+/// position ahead of the bump; the version's root is set back after, a panic in `run` included.
+/// 26's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_fall_radius<R>(root: FallRadiusRoot, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's root back as it drops.
+    struct Restore(Option<FallRadiusRoot>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            FALL_RADIUS.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(FALL_RADIUS.with(|cell| cell.replace(Some(root))));
+    run()
+}
 
 /// The radii `r_w` is sought between, m: a nanometre to ten centimetres.
 const RADIUS_RANGE_M: (f64, f64) = (1e-9, 0.1);
@@ -2019,10 +2113,25 @@ impl Air {
         stokes * math::powf(1.0 + math::powf(inertia, 0.4), -1.25)
     }
 
-    /// The radius whose fall speed is `speed`, by bisection in ln r over [`RADIUS_RANGE_M`], held
-    /// at its ends, whose logarithms are `ln_range`.
+    /// The radius whose fall speed is `speed`, in ln r over [`RADIUS_RANGE_M`], whose logarithms
+    /// are `ln_range`, by the root in force ([`FallRadiusRoot::in_force`]).
     #[must_use]
     fn radius_falling_at(
+        &self,
+        speed: f64,
+        density: KilogramsPerCubicMetre,
+        ln_range: (f64, f64),
+    ) -> f64 {
+        match FallRadiusRoot::in_force() {
+            FallRadiusRoot::Bisections => self.bisected_radius(speed, density, ln_range),
+            FallRadiusRoot::FalsePosition => self.false_position_radius(speed, density, ln_range),
+        }
+    }
+
+    /// [`radius_falling_at`](Self::radius_falling_at) by [`RADIUS_BISECTIONS`] bisections, held at
+    /// the range's ends: version 25's and before.
+    #[must_use]
+    fn bisected_radius(
         &self,
         speed: f64,
         density: KilogramsPerCubicMetre,
@@ -2037,6 +2146,102 @@ impl Air {
             }
         }
         math::exp(f64::midpoint(small, large))
+    }
+
+    /// [`radius_falling_at`](Self::radius_falling_at) by the Illinois false position (Dowell and
+    /// Jarratt 1971, BIT 11, 168, from memory) on g = ln `v_f`(r) − ln `speed` in ln r, from 26
+    /// ([`FallRadiusRoot::FalsePosition`]): each step the false position a − g′(a) (b − a) ÷
+    /// (g′(b) − g′(a)), where g′ is an end's g, halved each time the other end is replaced twice in
+    /// a row, held at least half the stop inside either end; the midpoint where it is not a
+    /// number. The bracket keeps the bisections' sides, `v_f` < `speed` at its lower end, and the
+    /// steps stop at their width, the range's 2⁻⁴⁸ ([`RADIUS_STOP_SHARE`]), at a step where g = 0,
+    /// or after [`RADIUS_STEPS`]; the radius is the bracket's midpoint, or that step's. A `speed`
+    /// that no radius in the range falls below, or that every one does, is held at that end.
+    #[must_use]
+    fn false_position_radius(
+        &self,
+        speed: f64,
+        density: KilogramsPerCubicMetre,
+        (small, large): (f64, f64),
+    ) -> f64 {
+        let ln_speed = math::ln(speed);
+        // Whether the radius e^x falls slower than `speed`, the bisections' test, and its g.
+        let at = |x: f64| {
+            let falling = self.fall_speed(math::exp(x), density);
+            (falling < speed, math::ln(falling) - ln_speed)
+        };
+        let ((small_slower, g_small), (large_slower, g_large)) = (at(small), at(large));
+        if !small_slower {
+            return math::exp(small);
+        }
+        if large_slower {
+            return math::exp(large);
+        }
+        let stop = (large - small) * RADIUS_STOP_SHARE;
+        let (mut a, mut b) = (small, large);
+        // The ends' weighed g, and which end the last step replaced (the lower where true).
+        let (mut g_a, mut g_b) = (g_small, g_large);
+        let mut replaced: Option<bool> = None;
+        #[cfg(test)]
+        let mut taken = 0_u32;
+        #[cfg(test)]
+        let tally = |taken: u32| {
+            FALL_RADIUS_STEPS.with(|cell| {
+                if let Some((calls, steps, most)) = cell.get() {
+                    cell.set(Some((calls + 1, steps + u64::from(taken), most.max(taken))));
+                }
+            });
+        };
+        for _ in 0..RADIUS_STEPS {
+            let width = b - a;
+            if width.is_nan() || width <= stop {
+                break;
+            }
+            let false_position = a - g_a * (b - a) / (g_b - g_a);
+            // At least half the stop inside either end (Brent 1973's tolerance step, from memory):
+            // once an end holds the root to rounding, its false position is that end itself, and
+            // a step half the stop past it closes the bracket.
+            let (inner_a, inner_b) = (a + 0.5 * stop, b - 0.5 * stop);
+            // By comparison, so that a false position that is not a number is a halving.
+            let x = if !(a <= false_position && false_position <= b) {
+                f64::midpoint(a, b)
+            } else if false_position < inner_a {
+                inner_a
+            } else if false_position > inner_b {
+                inner_b
+            } else {
+                false_position
+            };
+            if !(a < x && x < b) {
+                break;
+            }
+            let (slower, g) = at(x);
+            #[cfg(test)]
+            {
+                taken += 1;
+            }
+            // By comparison, so that a g that is not a number steps on.
+            if g.abs() <= 0.0 {
+                #[cfg(test)]
+                tally(taken);
+                return math::exp(x);
+            }
+            if slower {
+                (a, g_a) = (x, g);
+                if replaced == Some(true) {
+                    g_b *= 0.5;
+                }
+            } else {
+                (b, g_b) = (x, g);
+                if replaced == Some(false) {
+                    g_a *= 0.5;
+                }
+            }
+            replaced = Some(slower);
+        }
+        #[cfg(test)]
+        tally(taken);
+        math::exp(f64::midpoint(a, b))
     }
 }
 

@@ -7096,6 +7096,126 @@ fn the_secant_root_s_pinned_bodies_end_at_crossings() {
     }
 }
 
+/// A Debug text's numbers in order, and its text with each number as `#`: what
+/// [`debug_moves`] compares.
+fn debug_numbers(text: &str) -> (String, Vec<f64>) {
+    let (mut skeleton, mut numbers) = (String::with_capacity(text.len()), Vec::new());
+    let mut word = String::new();
+    let mut flush = |word: &mut String, skeleton: &mut String| {
+        match word.parse::<f64>() {
+            Ok(number) => {
+                numbers.push(number);
+                skeleton.push('#');
+            }
+            Err(_) => skeleton.push_str(word),
+        }
+        word.clear();
+    };
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_') {
+            word.push(c);
+        } else {
+            flush(&mut word, &mut skeleton);
+            skeleton.push(c);
+        }
+    }
+    flush(&mut word, &mut skeleton);
+    (skeleton, numbers)
+}
+
+/// How two Debug texts differ: `None` where they are the same; the largest relative move of a
+/// number, |a − b| ÷ max(|a|, |b|), where only their numbers differ; infinite where their text
+/// does.
+fn debug_moves(one: &str, two: &str) -> Option<f64> {
+    if one == two {
+        return None;
+    }
+    let ((a_text, a), (b_text, b)) = (debug_numbers(one), debug_numbers(two));
+    if a_text != b_text {
+        return Some(f64::INFINITY);
+    }
+    Some(a.iter().zip(&b).fold(0.0, |worst: f64, (x, y)| {
+        if x.total_cmp(y).is_eq() {
+            worst
+        } else {
+            worst.max((x - y).abs() / x.abs().max(y.abs()))
+        }
+    }))
+}
+
+/// P14.T54.b.l's fall radius under 26's hold, a measurement for its record, run by name: each of
+/// the 400 sample systems and the golden systems generated and snapshotted at the epoch under the
+/// bisections for `r_w` and under the false position (`with_fall_radius`), their Debug texts
+/// compared: how many systems and snapshots move, the largest relative move of a number in each
+/// where only numbers move, and every one whose text moves.
+#[test]
+#[ignore = "a measurement for P14.T54.b.l's record, run by name"]
+fn under_the_fall_radius_false_position_the_movers_are_stated() {
+    use crate::planetary::chem::condense::{FallRadiusRoot, with_fall_radius};
+    let sets: Vec<(String, Seed, SystemContext)> = sample()
+        .iter()
+        .map(|ctx| (format!("{:016x}", ctx.id().raw()), SEED, ctx.clone()))
+        .chain(golden_systems().iter().map(|(name, ctx, _)| {
+            (
+                (*name).to_owned(),
+                Seed::new(GOLDEN_SYSTEMS_SEED),
+                ctx.clone(),
+            )
+        }))
+        .collect();
+    let texts = |root: FallRadiusRoot, seed: Seed, ctx: &SystemContext| {
+        with_fall_radius(root, || {
+            let system = generate(seed, ctx);
+            let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+            (format!("{system:?}"), format!("{snapshot:?}"))
+        })
+    };
+    let (mut systems_moved, mut snapshots_moved) = (0_u32, 0_u32);
+    let (mut worst_system, mut worst_snapshot) =
+        ((0.0_f64, String::new()), (0.0_f64, String::new()));
+    let mut texts_moved = Vec::new();
+    for (name, seed, ctx) in &sets {
+        let (b_system, b_snapshot) = texts(FallRadiusRoot::Bisections, *seed, ctx);
+        let (f_system, f_snapshot) = texts(FallRadiusRoot::FalsePosition, *seed, ctx);
+        for (what, moved, worst, one, two) in [
+            (
+                "system",
+                &mut systems_moved,
+                &mut worst_system,
+                &b_system,
+                &f_system,
+            ),
+            (
+                "snapshot",
+                &mut snapshots_moved,
+                &mut worst_snapshot,
+                &b_snapshot,
+                &f_snapshot,
+            ),
+        ] {
+            let Some(by) = debug_moves(one, two) else {
+                continue;
+            };
+            *moved += 1;
+            if by.is_infinite() {
+                texts_moved.push(format!("{name} {what}"));
+            } else if by > worst.0 {
+                *worst = (by, name.clone());
+            }
+        }
+    }
+    eprintln!(
+        "{} systems: {systems_moved} systems move (the largest number's move {:.3e}, {}), \
+         {snapshots_moved} snapshots ({:.3e}, {}); text moves in {}: {texts_moved:?}",
+        sets.len(),
+        worst_system.0,
+        worst_system.1,
+        worst_snapshot.0,
+        worst_snapshot.1,
+        texts_moved.len(),
+    );
+}
+
 /// A measurement for the bless note, run by name (decision-pre-23-review items 7, 16 and 17;
 /// P14.T54.a's C3): over every present planet, member and moon of the first 60 whole systems at
 /// the epoch, each record derived with its lid and without it (`without_crust`, the derivation

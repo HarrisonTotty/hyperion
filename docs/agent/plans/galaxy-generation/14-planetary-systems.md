@@ -31400,6 +31400,18 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       `cover::water_under`, `StepClimate::at` and `own_ocean_weight` take their slot, and
       `CrustRecord` the body's insolation table. The `planetary` bench's `cost_20_generate` and
       `cost_20_snapshot_at` are D5's probe. D5 is still missed in `snapshot_at` (the lane's report).
+    - _The per-pass levers_ (lane `perf-24-passes`, 2026-10-31). Bit-identical at 24: the
+      primary's impactor source taken once (`ImpactorSources::with_primary`), the decks' per-grid
+      and per-level figures once (`condense::Grid`'s ln T), and the shell's radius halvings ending
+      at their fixed point. Held at 26:
+      - the decks' `r_w` by the Illinois false position, `FALL_RADIUS_VERSION` (`FallRadiusRoot`,
+        the tests' `with_fall_radius` in the new `with_every_26_hold`, and the tripwire
+        `the_fall_radius_root_is_held_only_until_the_26_bump`). It takes 7.6 steps a call against
+        48 bisections. Generation does not move; 262 of the 415 snapshots move, by at most 5.0 ×
+        10⁻¹⁴ of a figure (`under_the_fall_radius_false_position_the_movers_are_stated`).
+      - For 26's bump: delete the hold, the switch and the tripwire, keeping
+        `FallRadiusRoot::Bisections` as the tests' oracle; 25's bump drops `with_every_25_hold`
+        from `with_every_26_hold`.
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

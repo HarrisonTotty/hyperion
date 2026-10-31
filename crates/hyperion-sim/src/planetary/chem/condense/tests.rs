@@ -1078,3 +1078,115 @@ fn the_exact_step_moves_the_baseline_s_columns_under_a_percent() {
         );
     }
 }
+
+/// P14.T54.b.l's false position for `r_w` is held until the 25 → 26 bump: the root in force is the
+/// bisections'.
+#[test]
+fn the_fall_radius_root_is_held_only_until_the_26_bump() {
+    assert!(
+        GENERATOR_VERSION < FALL_RADIUS_VERSION,
+        "the 25 → 26 bump puts P14.T54.b.l's false position for `r_w` on the record: delete \
+         `FALL_RADIUS_VERSION`, `FallRadiusRoot::in_force`'s version test, the tests' \
+         `with_fall_radius` and its switch in `with_every_26_hold`, and this test, keeping \
+         `FallRadiusRoot::Bisections` as the tests' oracle of the false position"
+    );
+    assert_eq!(FallRadiusRoot::in_force(), FallRadiusRoot::Bisections);
+    assert_eq!(
+        with_fall_radius(FallRadiusRoot::FalsePosition, FallRadiusRoot::in_force),
+        FallRadiusRoot::FalsePosition
+    );
+    assert_eq!(FallRadiusRoot::in_force(), FallRadiusRoot::Bisections);
+}
+
+/// Under 26's false position each level's `r_w` is the bisections' within their width: over airs
+/// of H₂, N₂ and CO₂ from 1 mPa to 100 bar and 50 to 2,500 K, grains of 900 to 5,000 kg m⁻³ and w*
+/// from 10⁻⁶ to 10 m s⁻¹, the two radii lie within 2⁻⁴⁸ of the range's 18.4 in ln r, those held
+/// at the range's ends included, and the steps are stated.
+#[test]
+fn under_the_false_position_r_w_is_the_bisections_within_their_width() {
+    let ln_range = (math::ln(RADIUS_RANGE_M.0), math::ln(RADIUS_RANGE_M.1));
+    let width = (ln_range.1 - ln_range.0) * RADIUS_STOP_SHARE;
+    let mut cases = 0_u32;
+    let (worst, (calls, steps, most)) = with_fall_radius_steps(|| {
+        let mut worst = (0.0_f64, String::new());
+        for (key, mu) in [("H2", 2.016), ("N2", 28.013), ("CO2", 44.01)] {
+            let constants = COLLISION_CONSTANTS
+                .iter()
+                .find(|c| c.key == key)
+                .expect("a background's constants");
+            let column = column(9.8, mu, 1e2, 1.0, 1e-3, 1.0);
+            for t in [50.0, 150.0, 400.0, 1_000.0, 2_500.0] {
+                for p in [1e-3, 1.0, 1e2, 1e4, 1e5, 1e7] {
+                    let air = Air::at(t, p, &column, constants);
+                    for grain in [900.0, 2_500.0, 5_000.0] {
+                        let density = KilogramsPerCubicMetre::new(grain);
+                        for speed in [1e-6, 1e-4, 1e-2, 1.0, 10.0] {
+                            let bisected = air.bisected_radius(speed, density, ln_range);
+                            let found = air.false_position_radius(speed, density, ln_range);
+                            let apart = (math::ln(found) - math::ln(bisected)).abs();
+                            if apart.is_nan() || apart > worst.0 {
+                                worst = (
+                                    apart,
+                                    format!(
+                                        "{key} {t} K {p} Pa, {grain} kg/m³, {speed} m/s: \
+                                         {bisected:e} against {found:e} m"
+                                    ),
+                                );
+                            }
+                            cases += 1;
+                        }
+                    }
+                }
+            }
+        }
+        worst
+    });
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a count of a few thousand steps, exact in f64"
+    )]
+    let mean = steps as f64 / calls as f64;
+    eprintln!(
+        "{cases} cases, {calls} stepped: {mean:.2} steps a call, at most {most}; the widest \
+         apart {:.3e} in ln r ({})",
+        worst.0, worst.1
+    );
+    assert!(
+        worst.0 <= width,
+        "{:e} against {width:e}: {}",
+        worst.0,
+        worst.1
+    );
+    assert!(most < RADIUS_STEPS, "{most}");
+}
+
+/// Under every 26 hold Jupiter's clouds keep their decks and their columns to the bit, the false
+/// position for `r_w` reaching their modes' sizes alone: each mode's effective radius within 10⁻¹²
+/// of itself at 24 and its optical depth within 10⁻¹² of its own, every other figure the same.
+#[test]
+fn under_every_26_hold_jupiter_s_decks_keep_their_sizes_within_1e_12() {
+    use crate::planetary::testing::with_every_26_hold;
+    let at_24 = jupiter_clouds();
+    let at_26 = with_every_26_hold(jupiter_clouds);
+    assert_eq!(at_24.decks().len(), at_26.decks().len());
+    let mut worst: f64 = 0.0;
+    for (before, after) in at_24.decks().iter().zip(at_26.decks()) {
+        let id = before.condensate().substance().key();
+        assert_eq!(before.condensate(), after.condensate());
+        assert_same_bits(before.base().value(), after.base().value());
+        assert_same_bits(before.top().value(), after.top().value());
+        assert_same_bits(before.column_mass().value(), after.column_mass().value());
+        for (b, a) in before.modes().iter().zip(after.modes()) {
+            let (b_size, a_size) = (b.size().expect("a size"), a.size().expect("a size"));
+            let radius =
+                a_size.effective_radius().value() / b_size.effective_radius().value() - 1.0;
+            let depth = a.optical_depth().expect("a depth").value()
+                / b.optical_depth().expect("a depth").value()
+                - 1.0;
+            assert!(radius.abs() <= 1e-12, "{id:?}: r_eff moves {radius:e}");
+            assert!(depth.abs() <= 1e-12, "{id:?}: τ moves {depth:e}");
+            worst = worst.max(radius.abs()).max(depth.abs());
+        }
+    }
+    eprintln!("Jupiter's decks under every 26 hold: the largest move {worst:e}");
+}
