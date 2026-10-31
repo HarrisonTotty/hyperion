@@ -8233,6 +8233,55 @@ feeding back into p_s, T_s, the albedo or the bulk.
     body (the records list them).
   - _Built_ 2026-10-30, held at 26 (`MELT_OXYGEN_VERSION`): Risks, "Deviations in P14.T53.g, as
     built".
+- **P14.T53.h The CO₂ cap's energy balance** (behind `CAP_BALANCE_VERSION` = 26 with a tripwire;
+  decision-p14-t53c-collapse §4 (b), deferred to one owner after 24; it rides 26).
+  - _Why:_ the table's Mars keeps 21,999 Pa of CO₂ at 243.9 K, against 3–10 mbar at about 214 K
+    (`under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide`, held as
+    P14.T53.c's miss): over 0.22 bar T24.a's coldest zone lies above CO₂'s frost point, so the
+    steps keep the warm branch. A permanent CO₂ cap lies at one temperature all year, kept there by
+    its latent heat, and holds the air at its saturation pressure (Leighton and Murray 1966).
+  - _The rule:_ over the year the cap radiates what it absorbs (Ward, Murray and Malin 1974, JGR 79,
+    3387, eq. 3 and (B1)), ε_c σ T_c⁴ = (1 − A_c) ⟨I_p⟩ + F_geo + δ R_air² p (T_a − T_c)² ÷ (g Ω R²):
+    - ⟨I_p⟩ = `annual_insolation(β).1` × F⋆ ÷ 4, the pole's annual mean (Ward eq. 1), F⋆
+      `ClimateBody::stellar_flux`; F_geo the heat flow;
+    - A_c = 0.73 and ε_c = 0.85: Ward's A ≈ 0.70 and E ≈ 0.85, his frost about 0.75; 0.73 is fitted
+      between them so that the table's Mars sits near 6 mbar on the registry's curve;
+    - the air's heat into the cap, Ward's eq. 22 with H = R_air T_a ÷ g (after Gierasch and Toon
+      1973): δ = 0.01, fitted to Soto et al. 2015's (Icarus 250, 553) MarsWRF collapse range at 25°;
+      T_a = max(the step's T, its column's grey T_eq (1 + ¾τ)^¼); Ω the sidereal rate, R the
+      radius, g the gravity, p the step's surface pressure;
+    - T_c by 64 halvings on [0, T_a] (decision-composition §1.3), with `crate::math`; no cap where
+      ε_c σ T_a⁴ does not exceed the light and heat absorbed;
+    - only where the step's largest gas by partial pressure is CO₂, on a rotator (`rotates`), and
+      never on a molten surface (T13.c);
+    - the cap is CO₂'s cold trap where it has no ice of its own, min(coldest zone, T_c): it can only
+      add a cold trap. The steps, which read the column of the step before, descend from the whole
+      column to the largest stable root; nothing else about them changes.
+  - _Where:_ `ClimateSpan` carries the cap, `(SubstanceId, Kelvin)`, set by `with_cap`, which
+    `Species::cold_trap` reads. One function beside `step_climate` computes it; `step_climate`
+    attaches it, and so does the record's `partition_over` from the record's conditions, so that the
+    record's CO₂ ice is the passes' last step's to the bit (decision-p14-t51a-partition §6,
+    condition 1).
+  - _The hold:_ `CapBalanceRules::{Held, Balanced}` with `in_force()`, the tests' `with_cap_balance`
+    (in `planetary::testing::with_every_26_hold`) and the tripwire
+    `the_cap_balance_is_held_only_until_the_26_bump`. Under `Held` no golden changes.
+  - _Tests:_
+    - the Mars test under `Balanced`, its `ignore` and `should_panic` dropped, with a `Held` twin
+      asserting the miss as it stands;
+    - the cap at the table's settled Mars: T_c within 1 K of 146.2 K, the air's heat under 5% of the
+      cap's emission;
+    - the table's Mars at ×0.3 of its carbon: collapsed at 0° of obliquity, 3–10 mbar at 25.19°, and
+      all of its CO₂ airborne at 45° (Soto et al. 2015);
+    - the thin-air census under `with_every_26_hold`, both arms (slow, by name): its movers by name,
+      none of them `MagmaOcean`, `Tenuous` or `Airless`;
+    - Venus, Earth and Titan at their own spins, and every locked world, unchanged to the bit;
+    - the same seed twice under `Balanced` gives identical output.
+  - _Files:_ `planetary/chem/partition.rs`, `planetary/hooks/surface.rs`,
+    `planetary/hooks/figures.rs`, `planetary/derive/atmosphere.rs`,
+    `planetary/derive/atmosphere/tests.rs`, `planetary/testing.rs`.
+  - _Accept:_ `cargo test -p hyperion-sim --lib planetary::derive::atmosphere`; the new tests by
+    name, the slow ones with `-- --ignored`.
+  - _For 26's bump:_ re-bless `planetary/systems` (the records list the goldens).
 
 #### P14.T54 The composition batches on the record
 
