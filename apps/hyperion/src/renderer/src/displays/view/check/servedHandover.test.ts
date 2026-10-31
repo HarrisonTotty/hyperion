@@ -100,9 +100,12 @@ describe("the hand-over check's served world, read from the server (R10.T15.b)",
   });
 
   /** Reads the slice's Earth's served world to its record, which `record` answers. */
-  async function readToTheRecord(
-    record: (socket: FakeWebSocket) => void,
-  ): Promise<{ readonly read: ServedHandoverRead; readonly socket: FakeWebSocket }> {
+  async function readToTheRecord(record: (socket: FakeWebSocket) => void): Promise<{
+    readonly read: ServedHandoverRead;
+    readonly socket: FakeWebSocket;
+    /** The records asked before the field was answered. */
+    readonly recordsBeforeField: number;
+  }> {
     const { client, socket } = linked();
     const reading = readServedHandoverWorld(
       client,
@@ -114,19 +117,28 @@ describe("the hand-over check's served world, read from the server (R10.T15.b)",
     await settle();
     answerServedSky(socket);
     await settle();
+    const recordsBeforeField = socket.requestsOfKind("body_detail").length;
     answerServedField(socket, FIXTURE_EARTH, 64);
     await settle();
     record(socket);
-    return { read: await reading, socket };
+    return { read: await reading, socket, recordsBeforeField };
   }
 
-  it("asks the body's record once, after its field (R10.T15.b.1)", async () => {
+  it("asks the body's record only once its field has come (R10.T15.b.1)", async () => {
+    const { socket, recordsBeforeField } = await readToTheRecord((each) => {
+      answerServedRecord(each);
+    });
+    expect([recordsBeforeField, socket.requestsOfKind("body_detail").length]).toEqual([0, 1]);
+  });
+
+  it("asks the record of the body, in its universe, at the scene's time as the sky (R10.T15.b.1)", async () => {
     const { socket } = await readToTheRecord((each) => {
       answerServedRecord(each);
     });
+    const [sky] = socket.requestsOfKind("sky");
     expect(
-      socket.requestsOfKind("body_detail").map(({ body }) => [body.universe, body.body]),
-    ).toEqual([[UNIVERSE, FIXTURE_EARTH]]);
+      socket.requestsOfKind("body_detail").map(({ body }) => [body.universe, body.body, body.time]),
+    ).toEqual([[UNIVERSE, FIXTURE_EARTH, sky?.body.time]]);
   });
 
   it("gives each look's body the detail seed of its record, so that its terrain draws (R10.T15.b.1)", async () => {
