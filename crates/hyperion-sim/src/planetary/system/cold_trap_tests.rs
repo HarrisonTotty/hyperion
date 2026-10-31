@@ -771,3 +771,103 @@ fn under_every_26_hold_the_icy_lids_movers_are_stated() {
     );
     assert!(movers > 0, "the sample holds icy lids that move");
 }
+
+/// P14.T24.h.b's movers over the cold traps' sample (decision-p14-t51-batch §9.4), stated: every
+/// body of the first 60 systems derived under every 26 hold and again with P14.T24.h.b's holds set
+/// back (`with_scattering_held`), each system generated afresh under each. For every body whose
+/// derivation moves, its state, Bond albedo, `T_eq`, cloud fraction and surface pressure both
+/// ways, and its kind of move: a cloud whose condensable is not water (the minor clouds), a hazy
+/// air (the sediment), or its air's Rayleigh layer added; and the counts. An airless body in both
+/// reads no layer, cloud or haze, and moves only by its passes' path (its largest move stated);
+/// no exobase moves.
+#[test]
+#[ignore = "slow: the 60 systems generated twice under every 26 hold"]
+fn under_every_26_hold_the_scattering_movers_are_stated() {
+    use crate::planetary::derive::photometry::area_mix::with_scattering_held;
+    use crate::planetary::testing::with_every_26_hold;
+    let now = with_every_26_hold(trap_bodies_afresh);
+    let held = with_every_26_hold(|| with_scattering_held(trap_bodies_afresh));
+    assert_eq!(now.len(), held.len());
+    let mut counts: BTreeMap<&'static str, u32> = BTreeMap::new();
+    let mut flips = 0_u32;
+    let mut largest_airless = (0.0_f64, String::new());
+    for (after, before) in now.iter().zip(&held) {
+        assert_eq!(after.id(), before.id());
+        let (a, b) = (&after.derived, &before.derived);
+        assert_same_bits(
+            a.atmosphere().exobase_temperature().value(),
+            b.atmosphere().exobase_temperature().value(),
+        );
+        let airless = |body: &DerivedBody| {
+            matches!(
+                body.atmosphere().published_state(),
+                SurfaceState::Airless | SurfaceState::Tenuous
+            )
+        };
+        // An airless body's published Bond albedo reads no layer, cloud or haze; its passes'
+        // path may read an air on the way, which moves it within their settling or bracket.
+        if airless(a) && airless(b) {
+            let moved = (a.albedo().value() - b.albedo().value()).abs();
+            if moved > largest_airless.0 {
+                largest_airless = (moved, after.id());
+            }
+        }
+        if format!("{a:?}") == format!("{b:?}") {
+            continue;
+        }
+        let pressure = |body: &DerivedBody| {
+            body.atmosphere()
+                .surface_pressure()
+                .map_or(0.0, crate::units::Pascals::value)
+        };
+        let methane = |body: &DerivedBody| {
+            let p = pressure(body);
+            if p > 0.0 {
+                body.atmosphere()
+                    .partial_pressures()
+                    .of(Gas::Methane)
+                    .value()
+                    / p
+            } else {
+                0.0
+            }
+        };
+        let kind = if bits(a.atmosphere().cloud_fraction()) != bits(b.atmosphere().cloud_fraction())
+            && a.atmosphere().cloud_fraction() < b.atmosphere().cloud_fraction()
+        {
+            "a minor condensable's cloud"
+        } else if methane(b) > 1e-5 {
+            "a methane air (its haze and sediment)"
+        } else {
+            "its air's Rayleigh layer"
+        };
+        *counts.entry(kind).or_default() += 1;
+        let (state_now, state_before) = (
+            a.atmosphere().published_state(),
+            b.atmosphere().published_state(),
+        );
+        flips += u32::from(state_now != state_before);
+        eprintln!(
+            "{} ({:?}, {kind}): {state_before:?} → {state_now:?}, Bond {:.4} → {:.4}, T_eq {:.1} → \
+             {:.1} K, cloud {:.4} → {:.4}, p_s {:.4e} → {:.4e} Pa",
+            after.id(),
+            after.kind,
+            b.albedo().value(),
+            a.albedo().value(),
+            b.equilibrium_temperature().value(),
+            a.equilibrium_temperature().value(),
+            b.atmosphere().cloud_fraction(),
+            a.atmosphere().cloud_fraction(),
+            pressure(b),
+            pressure(a),
+        );
+    }
+    eprintln!(
+        "{} bodies; the movers by kind {counts:?}, {flips} of them change state; an airless \
+         body's largest move by its passes' path {:.3e} ({})",
+        now.len(),
+        largest_airless.0,
+        largest_airless.1
+    );
+    assert!(counts.values().sum::<u32>() > 0, "the sample's airs move");
+}

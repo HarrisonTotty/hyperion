@@ -3589,6 +3589,68 @@ mod tests {
         }
     }
 
+    /// P14.T24.h.b's Titan under every 26 hold (decision-p14-t51-batch §9.4), at every radius rank:
+    /// its methane cloud covers Titan's 0.2–0.6% (Bouchez and Brown 2005), its haze's sediment its
+    /// solid ground (Tomasko et al. 2005), 0.89 of it at the rank that keeps its measured radius,
+    /// whose air holds 0.89 of Titan's column, a `Snowball`. Its Bond albedo, 0.32–0.33, misses Li
+    /// et al. 2011's 0.265 ± 0.03 by up to 0.04, and its surface temperature, 98–100 K, Huygens's 94
+    /// ± 3 K: the haze's absorption and its anti-greenhouse are a part left (pinned as they stand,
+    /// deferred findings). With P14.T24.h.b's holds set back it is 24's Titan under its 0.67 cloud.
+    #[test]
+    fn under_every_26_hold_titan_takes_its_methane_cloud_and_its_sediment() {
+        use crate::planetary::derive::atmosphere::SurfaceState;
+        use crate::planetary::derive::photometry::area_mix::{
+            sediment_share, snapshot_haze_optical_depth, with_scattering_held,
+        };
+        use crate::planetary::testing::with_every_26_hold;
+        let saturn = table_giant("Saturn", 6, None);
+        let ((kg, keep), orbit) = table_moon(TITAN, &saturn);
+        for rank in every_rank(keep) {
+            let derive = || {
+                own_moon(
+                    (kg, rank),
+                    &orbit,
+                    &saturn,
+                    &MoonVolatiles::SHARED,
+                    MoonBulk::Derived,
+                )
+            };
+            let at_26 = with_every_26_hold(derive);
+            let held = with_every_26_hold(|| with_scattering_held(derive));
+            let air = at_26.atmosphere();
+            let (cloud, bond) = (air.cloud_fraction(), at_26.albedo().value());
+            let (haze, sediment) = with_every_26_hold(|| {
+                let haze = snapshot_haze_optical_depth(
+                    air.partial_pressures(),
+                    at_26.body().surface_gravity(),
+                    crate::units::Kelvin::new(5_772.0),
+                );
+                (haze, sediment_share(haze))
+            });
+            eprintln!(
+                "Titan at {rank:?}: cloud {cloud:.4} ({:.4} held), haze {haze:.3}, sediment \
+                 {sediment:.3}, Bond {bond:.4} ({:.4} held), T_eq {:.1} K, T_s {:.1} K ({:.1} K \
+                 held), {:?}",
+                held.atmosphere().cloud_fraction(),
+                held.albedo().value(),
+                at_26.equilibrium_temperature().value(),
+                air.surface_temperature().value(),
+                held.atmosphere().surface_temperature().value(),
+                air.published_state(),
+            );
+            assert!((0.002..=0.006).contains(&cloud), "{cloud}");
+            if rank == keep {
+                assert!(sediment > 0.85, "{sediment}");
+            }
+            assert!(sediment > 0.3, "{sediment}");
+            // Li et al. 2011's 0.265 ± 0.03 is missed by up to 0.04 without the haze's absorption
+            // (a part left): pinned as it stands, a deferred finding.
+            assert!((0.31..=0.34).contains(&bond), "{bond}");
+            assert_eq!(air.published_state(), SurfaceState::Snowball);
+            assert!(held.atmosphere().cloud_fraction() > 0.5);
+        }
+    }
+
     /// The condensate partition of the moon `derived`'s air over the passes' stand-in surface: an
     /// isothermal climate at its surface temperature, on basins not known, its condensed water all
     /// at the surface.
