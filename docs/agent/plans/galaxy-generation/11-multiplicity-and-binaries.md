@@ -6109,3 +6109,26 @@ galaxy_sweeps`.
       should take the width from the feature in one place, or assert it.
     - Plan 09's "Phase 5 as built" keeps `with_classes`'s five arguments, as records keep their
       text; this record names the sixth.
+- **P11.T9.a as built** (2026-10-31, at version 24; nothing generated moves, no bump, no tag):
+  `stellar::binary::light_curves`, public, which nothing calls yet.
+  - _The shape (lean, 2026-10-31)._ Each kind is a value checked by its `of`
+    (`BuildLightCurveError`), each `Into` the enum `BinaryLightCurve`: `NovaCurve::of(wd)`,
+    `DwarfNovaCurve::of(wd, period, accreted)`,
+    `XrayTransientCurve::of(XrayAccretor, mass, accreted, hydrogen)`,
+    `XrayBurstCurve::of(ns, BurstFuel)`, `BeXOutburstCurve::of(ns, hydrogen)`,
+    `LuminousRedNovaCurve::of(merger)` and `KilonovaCurve::of(ejecta)`.
+  - `BinaryLightCurve::{bolometric(dt), in_band(dt, Band), xray_luminosity(dt)}` return `Watts`,
+    with dt a `Span` since the onset; `xray_luminosity` is 2–10 keV, zero for the non-X-ray kinds.
+    Also `peak`, `peak_luminosity`, `radiated_joules`, `fades_below(share)` and
+    `eddington_luminosity(mass, hydrogen)`. T9.b wraps Provides' `light_curve(event, dt, band)` and
+    `xray_luminosity(event, dt)` around them.
+  - _T9.b supplies:_ masses in each kind's range (a white dwarf under 1.44 M☉, a neutron star to
+    3.2, a black hole or merger to 300, at most 1 M☉ gathered or ejected); the gathered mass at the
+    accreted rate times the cycle, and the accreted matter's X (ruling 132.1); the burst fuel; the
+    merger's total mass; and the ejecta, `GW170817_EJECTA_MASS` when it has none.
+  - _For P12.T5.c:_ every fade is asymptotic, so a row's `LongestDuration` takes `fades_below` at a
+    share it chooses, and its `PeakBound` the peak at the top of the kind's mass range.
+  - _Leans (2026-10-31):_ a linear rise; t₃ held at U Sco's 2.6 d; the dwarf nova's period held to
+    Warner's 1.3–10 h; the red nova's plateau 100 (M ÷ M☉)^½ d within 100–200; one colour
+    temperature per kind and a 2% reprocessed share; no optical light of a Be/X outburst's own. The
+    figures were recalled, not read at source: the literature was unreachable in this build.

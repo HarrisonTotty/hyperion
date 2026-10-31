@@ -36,6 +36,7 @@ mod common_envelope;
 mod detached;
 mod evolve;
 mod light;
+pub mod light_curves;
 mod marks;
 pub mod pair_light;
 mod params;
