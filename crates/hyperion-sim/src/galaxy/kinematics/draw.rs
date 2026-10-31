@@ -1,7 +1,9 @@
 //! The velocity draw and the escape cut (plan 08, P08.T5 and Design notes 6 and 7).
 
+use super::displaced::draw_displaced;
 use super::{EllipsoidAxes, VelocityEllipsoid};
 use crate::coords::{GalacticPosition, GalacticVelocity};
+use crate::galaxy::displaced::PlacementClass;
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::PAD_SPEED;
@@ -89,6 +91,11 @@ pub fn draw_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocity
 
 /// [`draw_velocity`] with its attempt count and cut, for the tests of the cut.
 ///
+/// A member of one of plan 08's displaced classes, in a galaxy that holds them, moves by its
+/// class's law instead (P08.T12.d; the `displaced` module): its class's mean rotation and
+/// dispersions, or in the ballistic bins its birth site's rotation plus its kick, cut at the
+/// escape speed but for the fastest classes, which are cut at their layer's pad speed.
+///
 /// Attempt `k` seeks the `system.velocity` stream, keyed by the system's ID, to word `4k` and
 /// takes a `standard_normal_pair` and a `standard_normal`: the three components along the
 /// ellipsoid's axes, which are rotated to the galactic axes through plan 01's named directions at
@@ -111,6 +118,11 @@ pub fn draw(galaxy: &Galaxy, record: &SystemRecord) -> VelocityDraw {
         tags::SYSTEM_VELOCITY,
         ObjectKey::from(record.id()),
     );
+    if let PlacementClass::Displaced { class, kind } = record.placement_class()
+        && let Some(displaced) = galaxy.fields().displaced()
+    {
+        return draw_displaced(galaxy, displaced, record, (class, kind), &mut stream);
+    }
     draw_on(galaxy, component, record.epoch_position(), &mut stream)
 }
 
@@ -203,9 +215,30 @@ fn attempt(stream: &mut Stream, ellipsoid: &VelocityEllipsoid, basis: &[[f64; 3]
     v
 }
 
+/// The draw `v` (km/s, galactic components) against the cut `cut` (km/s), after `attempts`
+/// attempts: `v` itself below the cut, and otherwise `v` scaled to 0.99 of it (Design note 7).
+pub(super) fn scaled_to(v: [f64; 3], cut: f64, attempts: u32) -> VelocityDraw {
+    let speed = norm(v);
+    let velocity = if speed < cut {
+        v
+    } else {
+        let scale = ESCAPE_CUT_SCALE * cut / speed;
+        v.map(|c| c * scale)
+    };
+    VelocityDraw {
+        velocity: to_metres_per_second(velocity),
+        attempts,
+        cut: KilometresPerSecond::new(cut),
+    }
+}
+
 /// The ellipsoid's three unit vectors in galactic components: rimward, spinward and north for
 /// cylindrical axes; outward, +θ and spinward for spherical ones.
-fn basis(position: &GalacticPosition, p: &PointLy, axes: EllipsoidAxes) -> [[f64; 3]; 3] {
+pub(super) fn basis(
+    position: &GalacticPosition,
+    p: &PointLy,
+    axes: EllipsoidAxes,
+) -> [[f64; 3]; 3] {
     let (rimward, spinward) = match position.directions() {
         Some(d) => (d.rimward().components(), d.spinward().components()),
         None => ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
@@ -228,7 +261,7 @@ fn basis(position: &GalacticPosition, p: &PointLy, axes: EllipsoidAxes) -> [[f64
 }
 
 /// `|v|`.
-fn norm(v: [f64; 3]) -> f64 {
+pub(super) fn norm(v: [f64; 3]) -> f64 {
     (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
 }
 

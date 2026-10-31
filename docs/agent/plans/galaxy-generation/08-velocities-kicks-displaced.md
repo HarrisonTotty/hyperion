@@ -1212,9 +1212,9 @@ form_bound}` bound one class's normalised form over a cell: the layer's radial e
 
 ### P08.T12 Displaced classes in placement
 
-**P08.T12.a–c built** (2026-10-31, behind `DISPLACED_VERSION` = 26; no output moves at 24): see
-"P08.T12.a as built", "P08.T12.b as built" and "P08.T12.c as built" under
-[Risks](#risks-and-open-points). T12.d remains, and the bump.
+**P08.T12.a–d built** (2026-10-31, behind `DISPLACED_VERSION` = 26; no output moves at 24): see
+"P08.T12.a as built" to "P08.T12.d as built" under [Risks](#risks-and-open-points). The bump
+remains, with P15.T6.c–f's production table.
 
 - **P08.T12.a Shares and components.** `DisplacedFields::new` from the class table and forms,
   classes ordered per Design note 16, zero-weight classes left out (about a hundred remain in layer
@@ -1249,7 +1249,8 @@ form_bound}` bound one class's normalised form over a cell: the layer's radial e
   exact step; the call count includes it.)
 - **P08.T12.d Class velocities and the unbound.** `draw_velocity` for displaced records per Design
   notes 22 and 23. Tests: per class, sampled mean rotation and dispersions match the table × v_c;
-  the slowest class co-rotates (above 0.95 v_c) and the fastest has a negative mean; in ballistic
+  the slowest class co-rotates (within 0.01 v_c of the τ < 0.1 class's mean rotation; restated
+  2026-10-31, research-p15-t6-forms) and the fastest has a negative mean; in ballistic
   classes x − v s lies within 1 ly of the midplane; among first-excursion classes the share with z
   v_z > 0 matches `outbound`; an exempt class's draw at or above its record's layer's `pad_speed`
   is redrawn and then scaled to 0.99 of it (Design note 7). `no_record_reaches_its_layers_pad_speed`
@@ -2138,3 +2139,21 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     remnants, against none: that is pinned and logged as a finding, and those kicks are scaled
     into their bin. The death test allows a second or 16 ulps of the age, since an age of 10¹⁰
     years rounds to a minute. `DISPLACED_CELLS_DIGEST` now pins the marks too.
+
+- **P08.T12.d as built (2026-10-31, behind `DISPLACED_VERSION` = 26; no output moves at 24).**
+  - `kinematics/displaced.rs`: `draw` gives a displaced record its class's law. The ballistic
+    bins (the thin disc's age bins 0–1) take v_c at the epoch radius plus the kick, with the
+    vertical z ÷ s held to the kick's speed (`placement::ballistic_motion`). Every other bin draws
+    its row's Gaussian on `system.velocity`, and the first-excursion bins (2–5) take the sign of z
+    with `outbound` on words 64 onwards. A runaway's kick is its ejection speed in its bin by
+    Design note 24's law, with an azimuth, on `runaway.speed`.
+  - `kinematics::is_exempt` marks the exempt classes: speed bin 7 and the hypervelocity
+    survivors. They are cut at their layer's `pad_speed`, every other class at
+    min(v_esc, `PAD_SPEED`). A ballistic velocity at its cut is scaled, not redrawn.
+  - `DisplacedClass::kinematics()` carries plan 15's row.
+  - Lean (2026-10-31): a ballistic runaway's time since ejection is rebuilt from its marks (one
+    `lifetime` call in the velocity draw) and rescaled as its age was.
+  - Tests: `placement/velocity_hold.rs`. The per-class test and
+    `no_record_reaches_its_layers_pad_speed` are slow, run by name. On the provisional table the
+    slowest class rotates at 1.063 v_c against the youngest's 1.005: a finding, pinned by name
+    (`SLOWEST_ROTATION`, `YOUNGEST_ROTATION`) for P15.T6.c–f's lane to re-pin.

@@ -760,6 +760,67 @@ pub(crate) fn is_ballistic(key: ClassKey) -> bool {
     matches!(key, ClassKey::Thin { age, .. } if age.index() < 2)
 }
 
+/// A ballistic record's height above the midplane at the epoch and its time since its kick
+/// (Design note 22): a remnant's since its death, [`ballistic_vertical`]'s; a runaway's or a
+/// walkaway's since its ejection, the ejection its marks drew on `runaway.ejection` with the
+/// time between it and the age it then drew, the age rescaled from its source's reference
+/// composition to its own as its age was (Design note 19); `None` for a record of no ballistic
+/// class.
+pub(crate) fn ballistic_motion(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+) -> Option<(LightYears, Years)> {
+    let displaced = galaxy.fields().displaced()?;
+    let PlacementClass::Displaced { class, kind } = record.placement_class() else {
+        return None;
+    };
+    let key = displaced.class(class).key();
+    if !is_ballistic(key) {
+        return None;
+    }
+    let ejected = match kind {
+        DisplacedKind::Remnant => return Some(ballistic_vertical(galaxy, record)),
+        DisplacedKind::Runaway => Ejected::Runaway,
+        DisplacedKind::Walkaway => Ejected::Walkaway,
+        DisplacedKind::HypervelocitySurvivor => return None,
+    };
+    let table = displaced.class_table();
+    let source = key.source()?;
+    let id = record.id();
+    let mass = record.primary_initial_mass();
+    let life_ref = lifetime(
+        galaxy,
+        mass,
+        &table.reference_composition(source),
+        &draws_of(galaxy, id),
+    );
+    let ages = galaxy.fields().component(record.component()?).ages();
+    let (a, b, t) = since_ejection(
+        galaxy,
+        table,
+        (source, ejected),
+        (ages, mass, life_ref),
+        class_ages(table, key),
+        id,
+    );
+    let age_ref = age_between(
+        ages,
+        a,
+        b,
+        stream(galaxy, tags::DISPLACED_DEATH, id).uniform(),
+    );
+    let rescale = if age_ref.value() > 0.0 {
+        record.age_at_epoch().value() / age_ref.value()
+    } else {
+        1.0
+    };
+    let height = record.epoch_position().to_light_years_f64()[2];
+    Some((
+        LightYears::new(height),
+        Years::new(((age_ref.value() - t.value()) * rescale).max(0.0)),
+    ))
+}
+
 /// A ballistic remnant's height above the midplane at the epoch and its time since death: its
 /// age at the epoch less its primary's lifetime at its own composition and draws.
 fn ballistic_vertical(galaxy: &Galaxy, record: &SystemRecord) -> (LightYears, Years) {

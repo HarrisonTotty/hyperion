@@ -25,7 +25,7 @@
 
 use super::bound::{form_bound, spheroid_bound};
 use super::class_table::{CLASS_COUNT, ClassKey, ClassTable, FormTable};
-use super::forms::{BuildFormError, CoredPowerLaw, DiscBornForm, young_disc};
+use super::forms::{BuildFormError, ClassKinematics, CoredPowerLaw, DiscBornForm, young_disc};
 use super::marks::kind_index;
 use super::{DisplacedClassId, DisplacedKind};
 use crate::galaxy::bounds::CellBox;
@@ -143,9 +143,20 @@ pub struct DisplacedClass {
     count: [f64; 2],
     /// Layer E's systems of the class that are remnants, inside the root cube.
     remnants_e: f64,
+    /// Its members' velocities in units of its speed scale, plan 15's row's; `None` for the
+    /// hypervelocity survivors, whose row gives none.
+    kinematics: Option<ClassKinematics>,
 }
 
 impl DisplacedClass {
+    /// Its members' mean rotation, dispersions and outbound share, in units of its source's speed
+    /// scale (`v_c`, the nuclear disc's own for its classes): plan 15's row's (Design note 22,
+    /// P08.T12.d); `None` for the hypervelocity survivors.
+    #[must_use]
+    pub fn kinematics(&self) -> Option<&ClassKinematics> {
+        self.kinematics.as_ref()
+    }
+
     /// What the class is.
     #[must_use]
     pub fn key(&self) -> ClassKey {
@@ -236,11 +247,21 @@ impl DisplacedFields {
             };
             let remnants_e =
                 count[1] * entry.marks(MassBand::E).kind_odds()[kind_index(DisplacedKind::Remnant)];
+            let kinematics = match entry.key() {
+                ClassKey::Thin { speed, age } => {
+                    Some(rows.disc_born[speed.index()][age.index()].kinematics)
+                }
+                ClassKey::Old { source, speed } => rows
+                    .old(source.source())
+                    .map(|old| old[speed.index()].kinematics),
+                ClassKey::Hypervelocity => None,
+            };
             classes.push(DisplacedClass {
                 key: entry.key(),
                 form,
                 count,
                 remnants_e,
+                kinematics,
             });
         }
         let order = [0, 1].map(|b| {

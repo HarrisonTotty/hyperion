@@ -36,6 +36,8 @@ mod marks;
 mod marks_hold;
 mod record;
 mod resolve;
+#[cfg(test)]
+mod velocity_hold;
 
 use std::error::Error;
 use std::fmt;
@@ -51,6 +53,7 @@ pub(crate) use headroom::{partition, saturated};
 pub use layers::{
     LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS, layer_for_initial_mass, layer_spec,
 };
+pub(crate) use marks::ballistic_motion;
 pub use record::{Existence, KickConstraint, SystemKind, SystemOrigin, SystemRecord};
 pub use resolve::{resolve, resolve_with};
 
