@@ -48,6 +48,19 @@ fn galaxy() -> &'static Galaxy {
     })
 }
 
+/// The fixture built under every 26 hold, with its kinematic tables: built so, since the field
+/// share and the carve-out are read when a galaxy is built; built once.
+fn galaxy_26() -> &'static Galaxy {
+    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+    GALAXY.get_or_init(|| {
+        use crate::galaxy::rules::GalaxyRules;
+        let params = GalaxyParams::milky_way_like();
+        Galaxy::from_params_with_rules(Seed::new(SEED), params, GalaxyRules::every_26_hold())
+            .expect("the Milky Way fixture's gas is mostly neutral")
+            .with_full_potential()
+    })
+}
+
 /// Every cell of the class, in x, y, z order.
 fn every_cell() -> impl Iterator<Item = CatalogueCellKey> {
     (-PER_AXIS..PER_AXIS).flat_map(|x| {
@@ -533,3 +546,68 @@ fn swallowing_black_holes_lower_the_class_s_kilonova_rate() {
 /// pairs' alone, as measured.
 const KILONOVAE_PER_MYR: f64 = 30.96;
 const PAIRS_KILONOVAE_PER_MYR: f64 = 30.29;
+
+// 5. P11.T8.d's rider, at `MERGER_CLASS_VERSION`.
+
+/// The rider's arithmetic: under the held arm the remnant keeps the pair's mass, from 26 the pair's
+/// mass less the merger's own ejecta: GW170817's 2.74 M☉ leaves 2.69, and a black hole of 7 M☉ that
+/// swallows its 1.33 M☉ neutron star whole (`NsbhOutflow`) keeps all 8.33, while a 3 M☉ hole that
+/// tears a 1.2 M☉ star keeps the pair less what its outflow ejects.
+#[test]
+fn from_26_the_remnant_keeps_the_pair_less_its_ejecta() {
+    use crate::galaxy::catalogue_classes::binary::MergerClassRules;
+    use crate::stellar::binary::light_curves::GW170817_EJECTA_MASS;
+    use crate::stellar::binary::scan::{NsbhOutflow, remnant_mass_under};
+    let (held, arm) = (MergerClassRules::ContactOnly, MergerClassRules::Channels);
+    let gw170817 = SolarMasses::new(2.74);
+    assert_eq!(
+        remnant_mass_under(gw170817, GW170817_EJECTA_MASS, held),
+        gw170817
+    );
+    let kept = remnant_mass_under(gw170817, GW170817_EJECTA_MASS, arm).value();
+    assert!((kept - 2.69).abs() < 1e-12, "{kept}");
+    let m = SolarMasses::new;
+    let whole = NsbhOutflow::of(m(7.0), m(1.33)).ejecta();
+    assert_eq!(whole, m(0.0));
+    assert_eq!(remnant_mass_under(m(8.33), whole, arm), m(8.33));
+    let torn = NsbhOutflow::of(m(3.0), m(1.2)).ejecta();
+    assert!(torn.value() > 0.0);
+    let kept = remnant_mass_under(m(4.2), torn, arm).value();
+    assert!((kept - (4.2 - torn.value())).abs() < 1e-12, "{kept}");
+}
+
+/// Under every 26 hold every neutron-star merger of the fixture leaves a black hole of the pair's
+/// mass less its own ejecta, GW170817's for two neutron stars and the outflow's for a black hole
+/// and a neutron star; its kind is still the engine's rule on the total; and under the version's
+/// rules every remnant keeps the pair's mass.
+#[test]
+fn under_every_26_hold_every_remnant_keeps_the_pair_less_its_ejecta() {
+    use crate::stellar::binary::light_curves::GW170817_EJECTA_MASS;
+    use crate::stellar::binary::scan::NsbhOutflow;
+    use crate::tables::binary::NsmPairKind;
+    for (_, value) in all_entries() {
+        assert_eq!(value.scan().remnant_mass(), value.scan().total_mass());
+    }
+    let galaxy = galaxy_26();
+    let process = NeutronStarMergers::new(galaxy);
+    let mut seen = 0;
+    for key in every_cell() {
+        for entry in CatalogueClassCell::generate(galaxy, &process, key).into_entries() {
+            let value = entry.value();
+            let scan = value.scan();
+            let [first, second] = scan.masses();
+            let own = match scan.kind() {
+                NsmPairKind::DoubleNeutronStar => GW170817_EJECTA_MASS,
+                NsmPairKind::NeutronStarBlackHole => NsbhOutflow::of(first, second).ejecta(),
+            };
+            assert_eq!(scan.ejecta_mass(), own);
+            let kept = scan.total_mass().value() - own.value();
+            assert!((scan.remnant_mass().value() - kept).abs() < 1e-12);
+            assert_eq!(scan.remnant_phase(), Phase::BlackHole);
+            assert_eq!(value.product().mass(), scan.remnant_mass());
+            assert_eq!(value.product().phase(), Phase::BlackHole);
+            seen += 1;
+        }
+    }
+    assert!(seen >= 3, "{seen}");
+}

@@ -23,6 +23,8 @@
 //! ([`GW170817_EJECTA_MASS`]), since the class has no model of its own for them. A black hole
 //! ejects what its tides leave outside it and unbind ([`NsbhOutflow`]): nothing at the class's
 //! usual pair, a hole of some 7 M☉ and q ≈ 5, which swallows its neutron star whole.
+//! From `MERGER_CLASS_VERSION` (26) the remnant keeps the total less its own ejecta
+//! ([`remnant_mass_under`]); its kind stays the engine's rule on the total.
 //!
 //! A candidate is kept exactly when both progenitors have died by T: their lifetimes (plan 06's
 //! [`lifetime`]) are both under the system's age at T, which refuses only a system of a young
@@ -33,7 +35,7 @@
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::CatalogueCellKey;
-use crate::galaxy::catalogue_classes::binary::{ClassHosts, NeutronStarMergers};
+use crate::galaxy::catalogue_classes::binary::{ClassHosts, MergerClassRules, NeutronStarMergers};
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::{PointLy, Population};
 use crate::id::{BodyId, CatalogueSystemId, SystemId};
@@ -106,6 +108,7 @@ pub struct NsmScanMarks {
     masses: [SolarMasses; 2],
     progenitor_masses: [SolarMasses; 2],
     collapse_ages: [Years; 2],
+    merger_class: MergerClassRules,
 }
 
 impl NsmScanMarks {
@@ -245,10 +248,31 @@ impl NsmScanMarks {
     }
 
     /// The remnant's mass, M☉: the pair's total, as the engine's merger of two compact stars keeps
-    /// it.
+    /// it, under the version's rules; from 26 the total less its own ejecta,
+    /// [`ejecta_mass`](Self::ejecta_mass) (P11.T8.d's rider).
     #[must_use]
     pub fn remnant_mass(&self) -> SolarMasses {
-        self.total_mass()
+        remnant_mass_under(self.total_mass(), self.ejecta_mass(), self.merger_class)
+    }
+}
+
+/// The mass a neutron-star merger of `total` M☉ that ejects `ejecta` M☉ leaves in its remnant
+/// under `rules` (P11.T8.d's rider, at `MERGER_CLASS_VERSION`; research-leans-13 §2(b)): the
+/// total, as the engine's merger of two compact stars keeps it, under the held arm; from 26 the
+/// total less the merger's own ejecta, the class's published [`NsmScanMarks::ejecta_mass`], so that
+/// the class conserves its mass: GW170817's 2.74 M☉ leaves 2.69 for two neutron stars, and a black
+/// hole that swallows its neutron star whole ([`NsbhOutflow`]) keeps the pair's mass. The energy
+/// the inspiral radiates in gravitational waves is not taken off: its source was not read in this
+/// build (a finding).
+#[must_use]
+pub(crate) fn remnant_mass_under(
+    total: SolarMasses,
+    ejecta: SolarMasses,
+    rules: MergerClassRules,
+) -> SolarMasses {
+    match rules {
+        MergerClassRules::ContactOnly => total,
+        MergerClassRules::Channels => SolarMasses::new(total.value() - ejecta.value()),
     }
 }
 
@@ -518,6 +542,7 @@ pub fn nsm_scan_marks(
         masses: [first, second],
         progenitor_masses,
         collapse_ages,
+        merger_class: galaxy.rules().merger_class,
     })
 }
 

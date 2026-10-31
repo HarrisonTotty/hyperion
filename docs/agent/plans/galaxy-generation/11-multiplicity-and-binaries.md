@@ -7071,3 +7071,8 @@ galaxy_sweeps`.
     the engine's own `envelope_outcome`, `coalesced_product` and `Engine::product_member`
     (extracted from `resolve_common_envelope` and `coalesce`, moving nothing); a pair the envelope
     leaves apart is refused. `ContactPair` is now `MergerPair`.
+- **P11.T8.d's rider, held at 26** (lane `p11-t8cd`, step 3, 2026-10-31; research-leans-13 §2(b)).
+  Under `MERGER_CLASS_VERSION` `NsmScanMarks::remnant_mass` is the pair's mass less the published
+  ejecta (`scan::remnant_mass_under`; GW170817's 2.74 → 2.69 M☉), and the remnant's state takes it;
+  `remnant_phase` stays the engine's rule on the total. The energy radiated in gravitational waves
+  is not taken off (its source was not read).

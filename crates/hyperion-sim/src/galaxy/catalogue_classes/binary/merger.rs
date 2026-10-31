@@ -82,13 +82,15 @@ use crate::units::{
 /// The generator version whose stellar merger class draws the engine's channels (P11.T8.c's fix,
 /// research-leans-13 §2(c)): a contact pair of main-sequence stars at the tidal limit, or an
 /// evolved donor past its main sequence whose common envelope merges it with its companion, by
-/// the weights of `MERGER_SAMPLER`'s channel.
+/// the weights of `MERGER_SAMPLER`'s channel; and whose neutron-star mergers' remnants keep the
+/// pair's mass less the published ejecta (P11.T8.d's rider, research-leans-13 §2(b)).
 ///
 /// Below it the class takes the held arm, [`MergerClassRules::ContactOnly`], the code of version
 /// 24 verbatim, so every generated value keeps its bits; the tests reach the new arm through
 /// `GalaxyRules::every_26_hold()`. The bump to 26 deletes this hold: [`MergerClassRules`] with its
-/// `ContactOnly` arm, the galaxy rules' `merger_class` field, the scan's match on it,
-/// `MergerMark::MassRatio`, and the tripwire (`the_merger_class_is_held_only_until_the_26_bump`).
+/// `ContactOnly` arm, the galaxy rules' `merger_class` field, the scan's and the neutron-star
+/// remnant's matches on it, `MergerMark::MassRatio`, and the tripwire
+/// (`the_merger_class_is_held_only_until_the_26_bump`).
 pub(crate) const MERGER_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
 
 /// How the merger classes draw their entries (the galaxy rules' `merger_class` field, the hold of
@@ -96,9 +98,10 @@ pub(crate) const MERGER_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum MergerClassRules {
     /// Version 25's and before: every stellar merger a contact pair of main-sequence stars, its
-    /// mass ratio `MergerMark::MassRatio`'s.
+    /// mass ratio `MergerMark::MassRatio`'s; a neutron-star merger's remnant the pair's mass.
     ContactOnly,
-    /// Version 26's: the engine's channels, contact or evolved donor.
+    /// Version 26's: the engine's channels, contact or evolved donor; a neutron-star merger's
+    /// remnant the pair's mass less its ejecta.
     Channels,
 }
 
