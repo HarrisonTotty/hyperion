@@ -52,9 +52,10 @@ const FINEST_PLACE_DECIMALS = 5;
  * One decimal from a radius of 10 ly, as before, and one more for each decade narrower, to five
  * below 0.01 ly, so that a step of the place is at most a hundredth of the chart's radius: on the
  * finest chart, 0.001 ly or 63.2 AU in radius, 0.00001 ly or 0.63 AU, the step the `CURSOR`
- * panel's coordinates keep, which places it against the central black hole (plan 09, P09.T42). The angle takes the same
- * decimals, which near the axis resolve the place finer still. The radius is the answer's, and its
- * steps are exact 1-2-5 values; a tolerance keeps a computed 0.01 ly from falling a decade.
+ * panel's coordinates keep, which places it against the central black hole (plan 09, P09.T42).
+ * The angle takes the same decimals, whose step along the arc is no coarser than the place's
+ * within 180/π ≈ 57.3 ly of the axis. The radius is the answer's, and its steps are exact 1-2-5
+ * values; a tolerance keeps a computed 0.01 ly from falling a decade.
  */
 export function placeDecimalsFor(queryRadiusLy: number): number {
   let decimals = CENTRE_DECIMALS;
@@ -70,7 +71,7 @@ export function placeDecimalsFor(queryRadiusLy: number): number {
  * A galactocentric radius as the chart's furniture writes it, without its unit: a place's
  * `RADIUS`, and the core arrow's distance.
  *
- * @param decimals - The chart's place decimals, {@link placeDecimalsFor}: 0.1 ly from a 10 ly chart.
+ * @param decimals - The chart's place decimals ({@link placeDecimalsFor}), 1 from a 10 ly chart.
  */
 export function radiusReading(radiusLy: number, decimals: number): string {
   return formatLengthLy(radiusLy, decimals);
@@ -82,7 +83,7 @@ export function radiusReading(radiusLy: number, decimals: number): string {
  * decimals, as the chart's centre and its observer are both written. Each slot holds its reading's
  * longest value at those decimals (`-65,536.00000` at five), so it is fixed for the chart.
  *
- * @param decimals - The chart's place decimals, {@link placeDecimalsFor}: 0.1 ly from a 10 ly chart.
+ * @param decimals - The chart's place decimals ({@link placeDecimalsFor}), 1 from a 10 ly chart.
  */
 export function placeReadings(
   positionLy: CentreLy,

@@ -107,8 +107,8 @@ function readsInAu(queryRadiusLy: number): boolean {
  *
  * @remarks
  * For the `QUERY RADIUS` selector's steps and the `QUERY EDGE` label, so that the two write a
- * radius alike, and for the drive range's `RANGE` and `PLANE` labels, which the query radius follows
- * (plan 05, design note D9): `RANGE 94.9 AU SET`. The fine steps are 1-2-5 values in light-years,
+ * radius alike, and for the drive range's `RANGE` and `PLANE` labels, which the query radius
+ * follows (plan 05, design note D9): `RANGE 94.9 AU SET`. The fine steps are 1-2-5 values in light-years,
  * 0.005 ly to 0.001 ly, read in the unit the scale bar takes below 0.01 ly
  * ({@link formatScaleLength}).
  */
