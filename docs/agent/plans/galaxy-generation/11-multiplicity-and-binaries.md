@@ -1612,6 +1612,8 @@ tables must keep that under one in ten, which a test counts.
   both sides of T. Test: an expected 0.2–0.5 a year (Kochanek et al. 2014); evaluated before T the
   entry is a contact or inspiralling pair whose `merger_age` is T, and after T a single merged star
   under the same ID.
+  _As built (lane `p11-t8cd`, 2026-10-31; at version 24, no bump): see Risks, "P11.T8.c as
+  built"._
 - **P11.T8.d Neutron-star mergers.** As T8.c with Peters's inspiral before T and a kilonova after;
   the remnant by total mass. Test: the expected count at Milky Way parameters is 8–12, the
   brainstorm's "about 10", and the realised counts of ten seeds pass
@@ -6170,3 +6172,29 @@ galaxy_sweeps`.
   - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary`, `stellar::binary::scan`,
     `stellar::binary::sampler`, `id::event_tags`; slow, `tests/binary_awd.rs` (with the `testing`
     feature, as the workspace's slow run builds it) and `tests/source_horizon.rs`'s new row.
+- **P11.T8.c as built** (lane `p11-t8cd`, 2026-10-31; at version 24, no bump: registering a class
+  moves no existing value; `golden_diff.py` "extended only").
+  - _Files._ `galaxy/catalogue_classes/binary/{hosts,merger}.rs` (`ClassHosts`, the share row's
+    intensity both merger classes thin on; `StellarMergers`, `ContactPair`, `MergerEntry`);
+    `stellar/binary/scan/merger.rs` (`MergerScanMarks`, `merger_scan_marks`, `scan_merger_cell`,
+    `horizon_time`); `stellar/binary/testing/mergers.rs`; `tables::binary::MERGER_SAMPLER`
+    (`MergerMark`, `MergerPick`); the arm for class 2 in `ProductionClasses`; tags
+    `class.merger.{site,time,metallicity,mass,velocity,binary}`.
+  - _What T9.b and P12.T5.b read_ (`MergerScanMarks`): `merger_time()` (T, uniform over the source
+    horizon; bin 0 and number 0 of `0x0305`), `total_mass()` (the red nova's merger mass, the pair's
+    initial masses' sum), `position_at(T)`, `velocity()`, `id()`. No event tag is registered.
+  - _The merged star (lean, 2026-10-31; main's lean)._ P11.T4.d's rule for two main-sequence stars
+    (BSE eq. 80): a main-sequence star of the pair's mass at τ = 0.1 Σ Mᵢτᵢ ÷ M on its own track
+    (`main_sequence_product`), held from T.
+  - _The pair (lean, 2026-10-31)._ Every entry is two main-sequence stars in contact before T,
+    each at its own track's state at T, radius its Roche lobe, the period from the primary filling
+    its lobe. The age at the epoch is drawn first, from the component's own law; the layer by the
+    share row's weights restricted to layers with main-sequence stars at T; the primary from the
+    galaxy's mass function below the turn-off then; q from the table. So old components give no
+    D or E primary, and the realised layers do not follow the row (pinned).
+  - _The sampler's test_ is against `brute_force_merger_members`: the engine's first-attempt pairs
+    that merged at any age, kept by `carved_class(timeline, T)` and weighted by the component's age
+    hazard f(T) ÷ (1 − F(T)), since about one grid system in 10⁶ merges inside the horizon.
+  - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::merger`, `rng::tags`,
+    `tables::binary`; slow, `tests/binary_mergers.rs` (with `testing`) and
+    `tests/source_horizon.rs`'s new row.

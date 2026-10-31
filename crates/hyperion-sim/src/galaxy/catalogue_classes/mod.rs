@@ -11,9 +11,10 @@
 //! the IDs' and the grid's items are re-exported here. Of the classes' processes, phase 7's first
 //! three are built: the core collapses (P09.T33.a, [`core_collapse`]), the Type Ia (P09.T34.a,
 //! [`type_ia::TypeIaProcess`]) and the luminous blue variables (P09.T43, [`lbv`]). With plan 11's
-//! accreting white dwarfs, fast and slow (P11.T8.a, [`binary`]), they are the production lookup's
-//! ([`ProductionClasses`]) arms, whose members are catalogue systems ([`system`]) that plan 03's
-//! resolve returns. The other processes and the carve-out follow in P09.T35 and P11.T8.b–d.
+//! accreting white dwarfs, fast and slow (P11.T8.a, [`binary`]), and its stellar mergers
+//! (P11.T8.c), they are the production lookup's ([`ProductionClasses`]) arms, whose members are
+//! catalogue systems ([`system`]) that plan 03's resolve returns. The other processes and the
+//! carve-out follow in P09.T35, P11.T8.b and T8.d.
 
 pub mod binary;
 pub mod core_collapse;

@@ -39,6 +39,10 @@
 #[cfg(any(test, feature = "testing"))]
 use std::cell::Cell;
 
+mod merger;
+
+pub use merger::{MergerScanMarks, horizon_time, merger_scan_marks, scan_merger_cell};
+
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::events::{
     CycleEvent, EventSeries, LinearClock, MonotonePhase, PhaseClock, TimeWindow, octaves_to_span,

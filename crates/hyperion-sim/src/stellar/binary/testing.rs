@@ -1,12 +1,16 @@
 //! Test helpers: those shared by the census bounds' tests (P11.T17.a's `light.rs` and P11.T17.b's
 //! `pair_light`), a splitmix64 stream and the generator's own star–star pairs; and, with the
 //! `testing` feature for other crates' tests too, the binary classes' prior members
-//! ([`brute_force_class_members`], P11.T8.a), which plan 15's P15.T10.b fits the samplers to.
+//! ([`brute_force_class_members`], P11.T8.a) and the engine's own mergers
+//! ([`brute_force_merger_members_in`], P11.T8.c), which plan 15's P15.T10.b fits the samplers to.
 //!
 //! The census bounds' helpers serve this crate's own tests alone, so they are built for tests
 //! only; the splitmix64 stream serves both.
 
 mod members;
+mod mergers;
+
+pub use mergers::{MergerMember, brute_force_merger_members_in};
 
 pub use members::{
     AccretingMarks, ClassMember, brute_force_class_members, brute_force_class_members_in,

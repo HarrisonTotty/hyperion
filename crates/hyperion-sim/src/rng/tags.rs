@@ -1091,6 +1091,39 @@ domain_tags! {
     /// A luminous-blue-variable candidate's velocity at its site, galactic: plan 08's draw of its
     /// component's law, four words per attempt of the escape cut (P09.T43).
     CLASS_LBV_VELOCITY: System = "class.lbv.velocity";
+
+    // Plan 11, P11.T8.c: a stellar merger candidate's draws, `System` tags under `class.merger.`
+    // (the plan's `class.merger`, one per property group, as P11.T8.a's are), opened with
+    // `ObjectKey::from(SystemId)` of the candidate's ID, its member 0 (Design note 23). Its two
+    // stars' own draws are plan 06's `star.*` tags, keyed by bodies 0 and 1 at attempt 0. Its
+    // luminous red nova's event tag is P11.T9's. Appended after P09.T43's `class.lbv.velocity`,
+    // because the macro's order fixes `ALL`.
+
+    /// A stellar merger candidate's site, its position at the epoch: words 0–2 its position in
+    /// its 4,096 ly cell, x, y and z, and word 3 the mark that thins it on the class's density and
+    /// picks its density component (P11.T8.c).
+    CLASS_MERGER_SITE: System = "class.merger.site";
+
+    /// A stellar merger candidate's time: word 0 the place of its merger time T in the source
+    /// horizon, word 1 the rank of its system's age at the epoch in its component's law
+    /// (P11.T8.c).
+    CLASS_MERGER_TIME: System = "class.merger.time";
+
+    /// A stellar merger candidate's \[Fe/H\]: one normal of its component's distribution at its
+    /// site and age (P11.T8.c).
+    CLASS_MERGER_METALLICITY: System = "class.merger.metallicity";
+
+    /// A stellar merger candidate's pair: word 0 its primary's layer, word 1 the rank of its
+    /// primary's initial mass in the layer's band, word 2 the rank of its mass ratio (P11.T8.c).
+    CLASS_MERGER_MASS: System = "class.merger.mass";
+
+    /// A stellar merger candidate's velocity at its site, galactic: plan 08's draw of its
+    /// component's law, four words per attempt of the escape cut (P11.T8.c).
+    CLASS_MERGER_VELOCITY: System = "class.merger.velocity";
+
+    /// A stellar merger candidate's orbit before the merger: words 0–2 its cosine of inclination,
+    /// ascending node and argument of periapsis, word 3 its mean anomaly at the epoch (P11.T8.c).
+    CLASS_MERGER_BINARY: System = "class.merger.binary";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1471,8 +1504,7 @@ mod tests {
         }
     }
 
-    /// Plan 09's tags of its supernova remnants and its catalogue classes' grid and candidates,
-    /// with plan 11's accreting white dwarfs' under the same prefix.
+    /// Plan 09's tags of its supernova remnants and its catalogue classes' grid and candidates.
     #[test]
     fn plan_09_registers_its_class_tags_with_their_scopes() {
         // P09.T17: the explosion energy, the one tag plan 09's Provides names under `snr.`.
@@ -1507,6 +1539,28 @@ mod tests {
             assert!(tag.name().starts_with("class.type_ia."));
             assert!(ALL.contains(&tag));
         }
+    }
+
+    /// P09.T43: the luminous blue variables' candidates, one `System` tag per property group.
+    #[test]
+    fn plan_09_registers_the_luminous_blue_variables_tags() {
+        for tag in [
+            CLASS_LBV_SITE,
+            CLASS_LBV_MASS,
+            CLASS_LBV_AGE,
+            CLASS_LBV_METALLICITY,
+            CLASS_LBV_VELOCITY,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.lbv."));
+            assert!(ALL.contains(&tag));
+        }
+    }
+
+    /// Plan 11's catalogue classes' candidates, `System` tags under plan 09's prefix `class.`
+    /// (P11.T8), and the novae's event key.
+    #[test]
+    fn plan_11_registers_its_class_tags_under_class() {
         // P11.T8.a: the accreting white dwarfs' candidates, under plan 09's prefix `class.`.
         for tag in [
             CLASS_AWD_SITE,
@@ -1522,20 +1576,17 @@ mod tests {
         }
         assert_eq!(BINARY_EV_NOVA.scope(), crate::rng::TagScope::Event);
         assert_eq!(BINARY_EV_NOVA.name(), "binary.ev.nova");
-    }
-
-    /// P09.T43: the luminous blue variables' candidates, one `System` tag per property group.
-    #[test]
-    fn plan_09_registers_the_luminous_blue_variables_tags() {
+        // P11.T8.c: the stellar mergers' candidates.
         for tag in [
-            CLASS_LBV_SITE,
-            CLASS_LBV_MASS,
-            CLASS_LBV_AGE,
-            CLASS_LBV_METALLICITY,
-            CLASS_LBV_VELOCITY,
+            CLASS_MERGER_SITE,
+            CLASS_MERGER_TIME,
+            CLASS_MERGER_METALLICITY,
+            CLASS_MERGER_MASS,
+            CLASS_MERGER_VELOCITY,
+            CLASS_MERGER_BINARY,
         ] {
             assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
-            assert!(tag.name().starts_with("class.lbv."));
+            assert!(tag.name().starts_with("class.merger."));
             assert!(ALL.contains(&tag));
         }
     }

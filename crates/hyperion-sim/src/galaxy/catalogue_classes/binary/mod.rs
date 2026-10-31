@@ -8,13 +8,18 @@
 //! [`ClassSampler`](crate::stellar::binary::sampler::ClassSampler), its scan marks before the rest
 //! (`stellar::binary::scan`), a timeline from its marks, and the test that the grid applies
 //! too. Built so far: the accreting white dwarfs, fast and slow
-//! (P11.T8.a, [`AccretingWdFast`], [`AccretingWdSlow`]). The X-ray binaries and the two merger
-//! classes follow in P11.T8.b–d.
+//! (P11.T8.a, [`AccretingWdFast`], [`AccretingWdSlow`]), and the stellar mergers (P11.T8.c,
+//! [`StellarMergers`]), which thin on [`ClassHosts`]. The X-ray binaries and the neutron-star
+//! mergers follow in P11.T8.b and T8.d.
 
 mod awd;
+mod hosts;
+mod merger;
 
 pub use awd::{
     AccretingWdFast, AccretingWdSlow, AwdBinary, AwdCandidate, AwdComponent, AwdEntry, AwdHistory,
     AwdProcess, AwdSide, GIANT_DONOR_CORE_MASS, GIANT_DONOR_TEMPERATURE_K,
     HELIUM_DONOR_TEMPERATURE_K, LIFETIME_MARGIN, OXYGEN_NEON_MIN_MASS,
 };
+pub use hosts::{ClassHosts, HostComponent};
+pub use merger::{ContactPair, MergerCandidate, MergerEntry, StellarMergers};

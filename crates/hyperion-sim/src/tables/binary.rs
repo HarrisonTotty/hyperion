@@ -31,7 +31,7 @@
 //! plan 15's `PRIMARY_MASS_CDF` gives its laws, added to a median that follows a condition on a
 //! 17-point grid. [`AWD_SAMPLER`] is the accreting white dwarfs': hand-made scratch from the
 //! observed figures each mark's doc names (Design note 13), which P15.T10.b refits against the
-//! engine's own members.
+//! engine's own members; [`MERGER_SAMPLER`] is the stellar mergers' (P11.T8.c).
 
 use std::marker::PhantomData;
 
@@ -632,6 +632,107 @@ const AWD_MARKS: [SamplerMark; 11] = [
     },
 ];
 
+/// The marks of [`MERGER_SAMPLER`], in its order (P11.T8.c): a stellar merger's age, then its
+/// pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MergerMark {
+    /// The rank, in [0, 1], of the system's age at the epoch in its density component's law
+    /// restricted to the born systems, unconditional.
+    AgeRank,
+    /// The rank, in [0, 1], of the primary's initial mass in the galaxy's mass function over its
+    /// layer's band, cut at the turn-off at the merger, unconditional.
+    PrimaryRank,
+    /// The mass ratio q = M₂ ÷ M₁ of the pair before the merger, unconditional.
+    MassRatio,
+}
+
+impl MergerMark {
+    /// Every mark, in [`MERGER_SAMPLER`]'s order.
+    pub const ALL: [Self; 3] = [Self::AgeRank, Self::PrimaryRank, Self::MassRatio];
+
+    /// The mark's place in [`MERGER_SAMPLER`]'s marks.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+}
+
+impl SamplerKey for MergerMark {
+    fn index(self) -> usize {
+        Self::index(self)
+    }
+}
+
+/// The choices of [`MERGER_SAMPLER`], in its order (P11.T8.c).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MergerPick {
+    /// The layer of the primary, A–E, in [`MassBand::ALL`]'s order.
+    Layer,
+}
+
+impl SamplerKey for MergerPick {
+    fn index(self) -> usize {
+        match self {
+            Self::Layer => 0,
+        }
+    }
+}
+
+/// The ranks k ÷ 16 themselves: a residual that leaves a rank as it is drawn.
+const IDENTITY_RANKS: [f64; 17] = [
+    0.0, 0.0625, 0.125, 0.1875, 0.25, 0.3125, 0.375, 0.4375, 0.5, 0.5625, 0.625, 0.6875, 0.75,
+    0.8125, 0.875, 0.9375, 1.0,
+];
+
+/// The scratch sampler of the stellar mergers (P11.T8.c; Design notes 10 and 13): [`MergerMark`]'s
+/// three marks and [`MergerPick`]'s one choice, the primary's layer.
+///
+/// Hand-made, the figures recalled and not read at source in this build (the literature could not
+/// be reached), and the same in every population; P15.T10.b refits it against the engine's own
+/// mergers:
+///
+/// - **The age** and **the primary's mass** are ranks that leave the density component's own age
+///   law and the galaxy's own mass function as they are: the scratch merger rate per system is the
+///   same at every age and mass within a layer, so a merger's history is a grid system's. The
+///   primary is on its main sequence at the merger, so its mass is cut at the turn-off then.
+/// - **The mass ratio** of the contact pair before the merger: 0.06–1, median 0.25. W Ursae
+///   Majoris pairs hold mass ratios from about 0.07 to 1 (Rucinski 1993, PASP 105, 1433), and the
+///   pairs that merge are the low ones, below Rasio's (1995, ApJ 444, L41) tidal limit near 0.09
+///   and just above it: V1309 Scorpii's was about 0.1 (Stępień, Pamyatnykh and Rozyczka 2011, A&A
+///   531, A18).
+/// - **The layer**: [`CLASS_SHARES`]'s row for the stellar mergers, A 0.1, B 0.2, C 0.5, D 0.15,
+///   E 0.05, restricted to the layers with stars on their main sequence at the merger.
+pub const MERGER_SAMPLER: ClassSamplerTable<MergerMark, MergerPick> = ClassSamplerTable::new(
+    &MERGER_MARKS,
+    &[SamplerPick::new("layer", &[0.1, 0.2, 0.5, 0.15, 0.05])],
+);
+
+/// [`MERGER_SAMPLER`]'s marks, in [`MergerMark`]'s order.
+#[rustfmt::skip]
+const MERGER_MARKS: [SamplerMark; 3] = [
+    SamplerMark {
+        name: "age_rank",
+        residual: IDENTITY_RANKS,
+        median: None,
+        limits: (0.0, 1.0),
+    },
+    SamplerMark {
+        name: "primary_rank",
+        residual: IDENTITY_RANKS,
+        median: None,
+        limits: (0.0, 1.0),
+    },
+    SamplerMark {
+        name: "mass_ratio",
+        residual: [
+            0.06, 0.08, 0.10, 0.12, 0.14, 0.16, 0.19, 0.22, 0.25,
+            0.29, 0.33, 0.38, 0.44, 0.52, 0.62, 0.76, 1.0,
+        ],
+        median: None,
+        limits: (0.06, 1.0),
+    },
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -683,5 +784,29 @@ mod tests {
             CLASS_SHARES.row(CarvedClass::XrayBinary).class(),
             CarvedClass::XrayBinary
         );
+    }
+
+    /// The stellar mergers' table follows its mark list, each residual is non-decreasing inside
+    /// its limits, and its layer weights are the share row's.
+    #[test]
+    fn the_merger_table_follows_its_mark_list_and_the_share_row() {
+        let names = ["age_rank", "primary_rank", "mass_ratio"];
+        assert_eq!(MERGER_SAMPLER.marks().len(), MergerMark::ALL.len());
+        for (mark, name) in MergerMark::ALL.into_iter().zip(names) {
+            let law = MERGER_SAMPLER.mark(mark);
+            assert_eq!(law.name(), name);
+            assert!(law.residual().windows(2).all(|w| w[0] <= w[1]), "{name}");
+            let (lo, hi) = law.limits();
+            assert!(
+                law.residual().iter().all(|r| (lo..=hi).contains(r)),
+                "{name}"
+            );
+        }
+        let row = CLASS_SHARES.row(CarvedClass::StellarMerger);
+        let weights = MERGER_SAMPLER.pick(MergerPick::Layer).weights();
+        assert_eq!(weights.len(), MassBand::ALL.len());
+        for (band, &weight) in MassBand::ALL.iter().zip(weights) {
+            assert!((weight - row.layer_share(*band)).abs() < 1e-15, "{band:?}");
+        }
     }
 }
