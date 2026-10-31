@@ -25,6 +25,7 @@ pub mod consts;
 pub mod displaced;
 pub mod fates;
 pub mod features;
+pub(crate) mod field_share;
 pub mod fields;
 pub mod frame;
 pub mod gas;
@@ -48,9 +49,11 @@ use std::error::Error;
 use std::fmt;
 use std::sync::OnceLock;
 
+use self::ages::FieldShareRules;
 use self::fates::{CompanionMasses, fates_for};
 use self::features::centre::{BuildCentreError, CentreModel};
 use self::features::shares::FeatureShares;
+use self::field_share::FieldShare;
 use self::fields::Fields;
 use self::gas::field::GasField;
 use self::gas::params::BuildGasParamsError;
@@ -222,6 +225,9 @@ pub struct Galaxy {
     centre: CentreModelCell,
     centre_potential: CentrePotentialCell,
     companions: CompanionsCell,
+    /// The field's share of each component's budget, from generator version 26 (P09.T2.c); none
+    /// under the held arm, where the field is the budget.
+    field_share: Option<Box<FieldShare>>,
     rules: GalaxyRules,
 }
 
@@ -305,8 +311,8 @@ impl Galaxy {
     ///
     /// It is what [`from_params_with_rules`](Self::from_params_with_rules) builds from the same
     /// seed and parameters, with the builders after it, since nothing a galaxy builds when it is
-    /// built reads its rules: each held call site reads them when asked, and a test holds the two
-    /// equal. It keeps the centre's motion and potential if they have been read, since the motion
+    /// built reads its rules but the field share (below): each other held call site reads them
+    /// when asked, and a test holds the two equal. It keeps the centre's motion and potential if they have been read, since the motion
     /// reads only the parameters and the mass model, and the potential only the motion. It keeps
     /// the centre's model only if the stellar rules ([`GalaxyRules::stellar`]) stay as they were.
     /// The model's classes are built from the stellar law (the kick law's parameters and the
@@ -315,9 +321,22 @@ impl Galaxy {
     /// hold that reaches it must also pass the galaxy's stellar rules into
     /// `CentreModel::from_parts`, since the reset alone does not route them. A galaxy-side hold
     /// whose arm reaches any of these memos must reset it here too.
+    ///
+    /// The field share (`GalaxyRules::field_share`, P09.T2.c) is the one hold read when the galaxy
+    /// is built, so `rules` must keep this galaxy's: a test of its new arm builds the galaxy
+    /// through [`from_params_with_rules`](Self::from_params_with_rules).
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, which every test profile is, if `rules` changes the field share.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn with_rules(self, rules: GalaxyRules) -> Self {
+        debug_assert_eq!(
+            rules.field_share, self.rules.field_share,
+            "the field share is read when a galaxy is built: build it under the new rules with \
+             `Galaxy::from_params_with_rules`"
+        );
         let centre = if rules.stellar == self.rules.stellar {
             self.centre
         } else {
@@ -357,6 +376,12 @@ impl Galaxy {
             params.mean_formed_mass(),
         );
         feature_shares.set_class_shares(&crate::tables::binary::CLASS_SHARES);
+        let field_share = match rules.field_share {
+            FieldShareRules::None => None,
+            FieldShareRules::Phi => {
+                Some(Box::new(FieldShare::new(&params, &fields, &feature_shares)))
+            }
+        };
         let window_caps = WindowCaps::from_gas_params(gas.params());
         Ok(Self {
             seed,
@@ -375,6 +400,7 @@ impl Galaxy {
             centre: CentreModelCell::default(),
             centre_potential: CentrePotentialCell::default(),
             companions: CompanionsCell::default(),
+            field_share,
             rules,
         })
     }
@@ -434,8 +460,8 @@ impl Galaxy {
     }
 
     /// The feature catalogue's rates and the share φ of each population in features (plan 09,
-    /// P09.T2.b), built with the galaxy (plan 09, Design note 15). Nothing reads φ into the fields
-    /// until P09.T2.c.
+    /// P09.T2.b), built with the galaxy (plan 09, Design note 15). The density fields stay the
+    /// budget; from generator version 26 the field placement thins to gives φ up (P09.T2.c).
     #[must_use]
     pub fn feature_shares(&self) -> &FeatureShares {
         &self.feature_shares
@@ -718,6 +744,10 @@ impl Galaxy {
                 .0
                 .get()
                 .map_or(0, CompanionMasses::heap_bytes)
+            + self
+                .field_share
+                .as_ref()
+                .map_or(0, |field| size_of::<FieldShare>() + field.heap_bytes())
     }
 }
 

@@ -18,7 +18,10 @@
 //! layer-D share, weighted by its Type Ia rate per layer-D system. So the explosions at x over a
 //! span of time are `Σ_c n_c(x) r_c` × the span, every population's. The rate is the epoch's over
 //! the whole interval, whose few million years move no population's ages appreciably (P09.T18.b
-//! reads the history at the delay itself).
+//! reads the history at the delay itself). From generator version 26 the class follows the field
+//! alone (plan 09, P09.T2.c): `r_c` is the field's, its layer-D field factor times the rate over
+//! the field's ages (`DelayTimeDistribution::of_field`), so the features' and globulars' hosts
+//! are theirs.
 //!
 //! # The envelope and a candidate
 //!
@@ -80,6 +83,7 @@ use crate::galaxy::catalogue_classes::supernova::{
 use crate::galaxy::catalogue_classes::system::{CatalogueMotion, CatalogueSystem};
 use crate::galaxy::displaced::ExplosionSite;
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
+use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::snr::{ShellEnvironment, ShellWindow};
 use crate::galaxy::{Galaxy, PointLy};
@@ -269,14 +273,16 @@ impl TypeIaProcess {
     /// few 10¹⁴ s.
     #[must_use]
     pub fn new(galaxy: &Galaxy) -> Self {
-        let delays = DelayTimeDistribution::from_galaxy(galaxy);
+        // The field's rates and ages: the budget's until P09.T2.c's version 26.
+        let delays = DelayTimeDistribution::of_field(galaxy);
         let interval = SupernovaInterval::of_cap(galaxy.window_caps(), ShellEnvironment::TypeIa);
         let years = interval.length().as_julian_years_f64();
         let components = galaxy
             .fields()
             .component_ids()
             .filter_map(|id| {
-                let explosions = delays.rate_per_system_per_year(id) * years;
+                let explosions =
+                    galaxy.field_part(id, MassBand::D, delays.rate_per_system_per_year(id) * years);
                 (explosions > 0.0).then_some(IaComponent {
                     id,
                     explosions_per_system: explosions,

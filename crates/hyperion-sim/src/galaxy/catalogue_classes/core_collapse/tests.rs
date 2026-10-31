@@ -2,7 +2,9 @@
 //! candidates against the field's own intensity, its entries against the one shared test, their
 //! motion and reach, resolution and order independence, its headroom, plan 03's resolve, and a
 //! golden. The galaxy-wide counts, the brainstorm's 20–160 core collapses in ±H over seeds and the
-//! entries beyond the shells, with every entry's window and reach, are a slow census.
+//! entries beyond the shells, with every entry's window and reach, are a slow census; under every
+//! 26 hold, where the field gives up φ (P09.T2.c), it is restated on the class's own rate and the
+//! budget's deaths weighed by `1 − φ`.
 
 use std::sync::OnceLock;
 #[cfg(not(target_family = "wasm"))]
@@ -13,11 +15,12 @@ use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::lcg::Lcg;
 use hyperion_testkit::order::assert_order_independent;
-use hyperion_testkit::stats::{ALPHA, assert_poisson_count};
+use hyperion_testkit::stats::{ALPHA, assert_p_value, assert_poisson_count, normal_cdf};
 
 use super::*;
 use crate::GENERATOR_VERSION;
 use crate::Seed;
+use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::catalogue_classes::grid::candidate_count;
 use crate::galaxy::catalogue_classes::supernova::{
     LIFETIME_REACH, SupernovaKind, SupernovaState, claims, lifetime_cap,
@@ -26,8 +29,11 @@ use crate::galaxy::catalogue_classes::{
     CatalogueClassCell, CatalogueEntry, check_class_headroom, resolve_entry, system_of,
 };
 use crate::galaxy::displaced::marks::LifetimeBracket;
+use crate::galaxy::field_share::FieldShare;
+use crate::galaxy::imf::MassFunctionKind;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{self, ResolveSystemError};
+use crate::galaxy::rules::GalaxyRules;
 use crate::id::Layer;
 use crate::stellar::remnant::SupernovaType;
 use crate::time::ClockWindow;
@@ -788,6 +794,12 @@ struct Census {
     /// The longest window, Julian years, and the farthest any system travels from its site, ly.
     longest: f64,
     farthest: f64,
+    /// The deaths weighted by the share of their component's systems of their age that another
+    /// galaxy's field keeps ([`census_weighed`]): the field's deaths that galaxy's class expects.
+    kept: f64,
+    /// The sum of those weights' squares: the weighed count's own sampling variance, less its
+    /// share of the deaths' Poisson variance.
+    kept_squares: f64,
 }
 
 impl Census {
@@ -799,6 +811,8 @@ impl Census {
         self.in_window += other.in_window;
         self.longest = self.longest.max(other.longest);
         self.farthest = self.farthest.max(other.farthest);
+        self.kept += other.kept;
+        self.kept_squares += other.kept_squares;
     }
 }
 
@@ -810,6 +824,12 @@ const NEGLIGIBLE_MEAN: f64 = 1e-9;
 /// column of cells at a time from the plane outwards (the bound never rises away from the plane),
 /// on four threads. Every entry's window is checked against its caps and its reach on the way.
 fn census(galaxy: &Galaxy) -> Census {
+    census_weighed(galaxy, None)
+}
+
+/// [`census`], with each death weighed by the share of its component's systems of layer E and
+/// its age that `field`'s field keeps, if a field is given (P09.T2.c).
+fn census_weighed(galaxy: &Galaxy, field: Option<&FieldShare>) -> Census {
     let process = CoreCollapseProcess::new(galaxy);
     let cap = galaxy.window_caps().cap(ShellEnvironment::Field);
     let column = |x: i32, y: i32, census: &mut Census| {
@@ -831,6 +851,12 @@ fn census(galaxy: &Galaxy) -> Census {
                         continue;
                     };
                     census.deaths += 1;
+                    if let Some(field) = field {
+                        let keeps =
+                            field.keeps(candidate.component, MassBand::E, candidate.age_at_epoch);
+                        census.kept += keeps;
+                        census.kept_squares += keeps * keeps;
+                    }
                     let Some(window) =
                         claimed_window(galaxy, &death.site, &death.marks, Surroundings::Field)
                     else {
@@ -947,6 +973,87 @@ fn core_collapses_over_seeds() {
         let beyond = census.entries - census.shells;
         assert!((3_000..=21_000).contains(&beyond), "{name}: {beyond}");
         // The deaths in ±H are a Poisson share of the deaths at the galaxy's rate.
+        assert_poisson_count(
+            &format!("{name}'s core collapses in ±H"),
+            u64::from(census.in_window),
+            rate * 2.0 * CLOCK_WINDOW_H.as_julian_years_f64(),
+            ALPHA,
+        );
+    }
+}
+
+/// P09.T33.a's census restated under every 26 hold (plan 09, P09.T2.c; research item 7 of the
+/// galaxy leans): the field keeps `1 − φ(a)` of the young disc, a tenth to a fifth of its core
+/// collapses (ruling 118.2, after Higdon and Lingenfelter 2005, ApJ 628, 738), so the galaxy-wide
+/// brackets of [`core_collapses_over_seeds`], 20–160 in ±H and 3,000–21,000 entries beyond the
+/// shells, are the whole galaxy's, every class's, and move to P09.T38's census. The class's own
+/// checks stay: the deaths in ±H a Poisson share of its deaths at its rate, every window under its
+/// caps and no system past the reach. And its deaths match the budget's deaths, each weighed by
+/// the share of its component's systems of its age that the field keeps, the closed form
+/// `s_c F_c n_c(x) p(m) f_c(a) (1 − φ(a)) ÷ (1 − φ̄)` the class follows: the difference against
+/// the variance of two independent counts, the field's Poisson and the weighed sum's own, which
+/// errs lax, since the two arms share their candidates' streams. The budget is every 26 hold but
+/// the field share. The same four galaxies, natively; the fixture alone on wasm32-wasip1.
+#[test]
+#[ignore = "slow: the class's census of four galaxies under either arm"]
+fn core_collapses_over_seeds_under_every_26_hold() {
+    let galaxies = [
+        ("the fixture", None),
+        ("seed 1", Some(0x0933_0010)),
+        ("seed 2", Some(0x0933_0011)),
+        ("seed 3", Some(0x0933_0012)),
+    ];
+    let galaxies = if cfg!(target_family = "wasm") {
+        &galaxies[..1]
+    } else {
+        &galaxies[..]
+    };
+    for &(name, drawn) in galaxies {
+        let (seed, params) = drawn.map_or_else(
+            || (SEED, GalaxyParams::milky_way_like()),
+            |seed| {
+                (
+                    seed,
+                    GalaxyParams::from_seed(Seed::new(seed), MassFunctionKind::default()),
+                )
+            },
+        );
+        let off = GalaxyRules {
+            field_share: FieldShareRules::None,
+            ..GalaxyRules::every_26_hold()
+        };
+        let budget = Galaxy::from_params_with_rules(Seed::new(seed), params.clone(), off)
+            .unwrap()
+            .with_full_potential();
+        let field =
+            Galaxy::from_params_with_rules(Seed::new(seed), params, GalaxyRules::every_26_hold())
+                .unwrap()
+                .with_full_potential();
+        let share = field
+            .field_share()
+            .expect("every 26 hold installs the field");
+        let weighed = census_weighed(&budget, Some(share));
+        let census = census(&field);
+        let years = CoreCollapseProcess::new(&field)
+            .interval()
+            .length()
+            .as_julian_years_f64();
+        let rate = f64::from(census.deaths) / years;
+        eprintln!(
+            "{name}: {census:?}; {:.2} core collapses a century, {} entries beyond the shells; \
+             the budget's {} deaths, {:.1} of them the field's",
+            rate * 100.0,
+            census.entries - census.shells,
+            weighed.deaths,
+            weighed.kept
+        );
+        let z = (f64::from(census.deaths) - weighed.kept)
+            / (weighed.kept + weighed.kept_squares).sqrt();
+        assert_p_value(
+            &format!("{name}'s field deaths against the budget's weighed by 1 − φ, z = {z:.2}"),
+            2.0 * normal_cdf(-z.abs()),
+            ALPHA,
+        );
         assert_poisson_count(
             &format!("{name}'s core collapses in ±H"),
             u64::from(census.in_window),

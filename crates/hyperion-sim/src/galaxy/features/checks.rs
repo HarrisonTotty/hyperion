@@ -203,7 +203,12 @@ fn inversion_against_the_catalogue(galaxy: &Galaxy) -> (f64, f64, f64) {
 #[test]
 fn under_every_26_hold_the_globulars_are_born_heavier_by_bm03_s_share_over_their_own() {
     let held = milky_way(0).with_full_potential();
-    let own = held.clone().with_rules(GalaxyRules::every_26_hold());
+    // Every 26 hold but the field share, which the galaxy reads when it is built and which reaches
+    // no globular (P09.T2.c).
+    let own = held.clone().with_rules(GalaxyRules {
+        field_share: held.rules().field_share,
+        ..GalaxyRules::every_26_hold()
+    });
     let (offset_held, ..) = inversion_against_the_catalogue(&held);
     let (median_offset, share, median_ratio) = inversion_against_the_catalogue(&own);
     assert!(median_offset.abs() < offset_held.abs(), "{median_offset}");

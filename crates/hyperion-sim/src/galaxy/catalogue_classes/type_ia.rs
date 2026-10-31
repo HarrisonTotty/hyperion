@@ -39,7 +39,7 @@ use crate::galaxy::ages::AgeDistribution;
 use crate::galaxy::consts::{LIGHT_YEARS_PER_YEAR_PER_KM_S, YEARS_PER_GIGAYEAR};
 use crate::galaxy::displaced::class_table::SURVIVOR_POPULATIONS;
 use crate::galaxy::features::interior::counts::white_dwarf_mass;
-use crate::galaxy::fields::ComponentId;
+use crate::galaxy::fields::{Component, ComponentId};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::quad;
 use crate::galaxy::snr::SHELL_WINDOW_CAP;
@@ -230,6 +230,30 @@ impl DelayTimeDistribution {
     /// The distribution over `galaxy`'s components.
     #[must_use]
     pub fn from_galaxy(galaxy: &Galaxy) -> Self {
+        Self::over(galaxy, |_, c| (c.count_with_unborn(), c.ages().clone()))
+    }
+
+    /// The distribution over `galaxy`'s field (plan 09, P09.T2.c): each component's systems and
+    /// ages are the field's, its budget's times its layer-D field factor and, for the young disc,
+    /// the young field's ages. Until generator version 26 it is [`from_galaxy`](Self::from_galaxy),
+    /// bit for bit. Its rates are the field's, and the field class reads it
+    /// ([`TypeIaProcess`]).
+    #[must_use]
+    pub(crate) fn of_field(galaxy: &Galaxy) -> Self {
+        Self::over(galaxy, |id, c| {
+            (
+                galaxy.field_part(id, MassBand::D, c.count_with_unborn()),
+                galaxy.field_ages(id).clone(),
+            )
+        })
+    }
+
+    /// The distribution over `galaxy`'s components, each with the systems and ages `part` gives
+    /// it.
+    fn over(
+        galaxy: &Galaxy,
+        part: impl Fn(ComponentId, &Component) -> (f64, AgeDistribution),
+    ) -> Self {
         let composition = Composition::SOLAR;
         let draws = StarDraws::median();
         let (lo, hi) = (math::ln(LIFETIME_MASSES.0), math::ln(LIFETIME_MASSES.1));
@@ -245,12 +269,12 @@ impl DelayTimeDistribution {
             })
             .collect();
         let before = before_interval();
-        let components = galaxy
-            .fields()
-            .components()
-            .iter()
-            .map(|c| {
-                let ages = c.ages().clone();
+        let fields = galaxy.fields();
+        let components = fields
+            .component_ids()
+            .map(|id| {
+                let c = fields.component(id);
+                let (systems, ages) = part(id, c);
                 let psi = |a: f64| Self::rate_per_year_per_solar_mass(Years::new(a));
                 let mean_rate = expectation(&ages, MIN_DELAY, psi);
                 let exploded = expectation(&ages, Years::new(MIN_DELAY.value() + before), |a| {
@@ -258,7 +282,7 @@ impl DelayTimeDistribution {
                 });
                 ComponentRate {
                     population: c.population(),
-                    systems: c.count_with_unborn(),
+                    systems,
                     ages,
                     mean_rate,
                     exploded,

@@ -334,6 +334,13 @@ impl Component {
         &self.ages
     }
 
+    /// The same component with the ages `ages`: for the class table's stay shares over the young
+    /// field's ages (plan 09, P09.T2.c).
+    #[must_use]
+    pub(crate) fn with_ages(self, ages: AgeDistribution) -> Self {
+        Self { ages, ..self }
+    }
+
     /// The distribution of \[Fe/H\] among the component's systems of `age` at `p`.
     #[must_use]
     pub fn metallicity(&self, p: &PointLy, age: Years) -> FehDistribution {

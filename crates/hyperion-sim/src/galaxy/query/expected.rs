@@ -42,6 +42,7 @@
 
 use super::{LayerCounts, SubstellarRequest};
 use crate::coords::GalacticPosition;
+use crate::galaxy::field_share::FieldShare;
 use crate::galaxy::fields::MAX_COMPONENTS;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{STELLAR_LAYERS, rogue_planet_saturation_density};
@@ -116,6 +117,7 @@ pub fn expected_counts(
     let fields = galaxy.fields();
     let components = fields.components();
     let shares = galaxy.shares();
+    let field = galaxy.field_share();
     let rogue = substellar.admits(Layer::RoguePlanet);
     // The rogue planets' shares per component, in component order, and their saturation density.
     let mut rogue_shares = [0.0; MAX_COMPONENTS];
@@ -140,16 +142,23 @@ pub fn expected_counts(
                 .zip(densities)
                 .take(components.len())
                 .fold(0.0, |sum, (share, density)| sum + share * density);
-            rogue_integral += weight * density.min(saturation);
+            rogue_integral += weight
+                * match field {
+                    None => density.min(saturation),
+                    Some(field) => {
+                        field_rogue_density(galaxy, field, &rogue_shares, &densities, density)
+                    }
+                };
         }
     });
     let mut counts = LayerCounts::ZERO;
+    // From version 26 each component's share is the field's (P09.T2.c), the budget's until then.
     let linear = |band: MassBand| {
-        components
-            .iter()
+        fields
+            .component_ids()
             .zip(integrals)
-            .fold(0.0, |sum, (component, integral)| {
-                sum + shares.component_share(band, component) * integral
+            .fold(0.0, |sum, (id, integral)| {
+                sum + galaxy.field_component_share(band, id) * integral
             })
     };
     for spec in STELLAR_LAYERS {
@@ -162,6 +171,32 @@ pub fn expected_counts(
         counts.set(Layer::RoguePlanet, rogue_integral);
     }
     counts
+}
+
+/// The field's rogue planets per cubic light-year at a node, from version 26 (P09.T2.c): each
+/// component's `share × density` times its field factor, in component order, scaled as the
+/// thinning scales the budget's where `budget`, their budget's sum, saturates. The field thins
+/// after the saturation, inside each component's scaled slice.
+fn field_rogue_density(
+    galaxy: &Galaxy,
+    field: &FieldShare,
+    shares: &[f64; MAX_COMPONENTS],
+    densities: &[f64; MAX_COMPONENTS],
+    budget: f64,
+) -> f64 {
+    let kept = galaxy
+        .fields()
+        .component_ids()
+        .zip(shares.iter().zip(densities))
+        .fold(0.0, |sum, (id, (share, density))| {
+            sum + share * density * field.factor(id, MassBand::RoguePlanet)
+        });
+    let saturation = rogue_planet_saturation_density();
+    if budget > saturation {
+        kept * (saturation / budget)
+    } else {
+        kept
+    }
 }
 
 /// Calls `sample(point, weight)` at every node of the sphere's quadrature, so that

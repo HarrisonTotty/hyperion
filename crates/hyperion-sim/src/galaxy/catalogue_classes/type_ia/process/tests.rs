@@ -1100,3 +1100,83 @@ fn type_ia_over_seeds() {
         assert!((0.17..=0.25).contains(&share), "{name}: {share}");
     }
 }
+
+/// P09.T34.a's census restated under every 26 hold (plan 09, P09.T2.c; research advice §3 of the
+/// holds and leans): the field gives up φ, so the class follows the field's Type Ia and the
+/// core-collapse class the field's deaths, a tenth to a fifth of the galaxy's (ruling 118.2, after
+/// Higdon and Lingenfelter 2005, ApJ 628, 738). The class's own checks stay: its Type Ia over the
+/// interval and in ±H Poisson counts at the field's rate, 8–20 in ±H, every window under its caps,
+/// member 0 of layer D and no member past the reach. The Type Ia's share of the field's distinct shells is recorded, not bracketed: the 23
+/// field's 0.17–0.25 counted every core collapse, and the brainstorm's "a third or more", over the
+/// shells in superbubbles too, belongs with P09.T38's census. The same four galaxies, natively; the
+/// fixture alone on wasm32-wasip1.
+#[test]
+#[ignore = "slow: the class's census of four galaxies under every 26 hold, beside the core \
+            collapses'"]
+fn type_ia_over_seeds_under_every_26_hold() {
+    use crate::galaxy::imf::MassFunctionKind;
+    use crate::galaxy::rules::GalaxyRules;
+    let galaxies = [
+        ("the fixture", None),
+        ("seed 1", Some(0x0934_0010)),
+        ("seed 2", Some(0x0934_0011)),
+        ("seed 3", Some(0x0934_0012)),
+    ];
+    let galaxies = if cfg!(target_family = "wasm") {
+        &galaxies[..1]
+    } else {
+        &galaxies[..]
+    };
+    for &(name, drawn) in galaxies {
+        let (seed, params) = drawn.map_or_else(
+            || (SEED, GalaxyParams::milky_way_like()),
+            |seed| {
+                (
+                    seed,
+                    GalaxyParams::from_seed(Seed::new(seed), MassFunctionKind::default()),
+                )
+            },
+        );
+        let galaxy =
+            &Galaxy::from_params_with_rules(Seed::new(seed), params, GalaxyRules::every_26_hold())
+                .unwrap()
+                .with_full_potential();
+        let census = census(galaxy);
+        let process = TypeIaProcess::new(galaxy);
+        let rate = process.delays().rate_per_year();
+        let years = process.interval().length().as_julian_years_f64();
+        let shells = core_collapse_shells(galaxy);
+        let share = f64::from(census.shells) / f64::from(census.shells + shells);
+        eprintln!(
+            "{name}: {census:?}; {:.3} field Type Ia a century; {shells} field core-collapse \
+             shells, the Type Ia's share {share:.3}",
+            rate * 100.0
+        );
+        assert_poisson_count(
+            &format!("{name}'s field Type Ia over the interval"),
+            u64::from(census.candidates),
+            rate * years,
+            ALPHA,
+        );
+        assert_poisson_count(
+            &format!("{name}'s field Type Ia in ±H"),
+            u64::from(census.in_window),
+            rate * 2.0 * CLOCK_WINDOW_H.as_julian_years_f64(),
+            ALPHA,
+        );
+        assert!(
+            (8..=20).contains(&census.in_window),
+            "{name}: {}",
+            census.in_window
+        );
+        assert!(
+            census.survivors > 0 && census.not_layer_d == 0,
+            "{census:?}"
+        );
+        assert!(
+            census.fastest < 2_500.0 + PAD_SPEED.value(),
+            "{name}: {census:?}"
+        );
+        assert!(share > 0.0 && share < 1.0, "{name}: {share}");
+    }
+}

@@ -17,8 +17,10 @@
 //! intensity is `s_c n_c(x) p(m) f_c(lifetime − T)`: the death rate per system at a mass is the age
 //! density at its lifetime. Only the components with stars young enough to die in the interval
 //! contribute, the young field: the young thin disc and the nuclear disc's last gigayear
-//! ([`RECENT_DEATH_AGES`]), each with its own age distribution, which carries the field's
-//! (1 − φ(a)) factor once plan 09's P09.T2.c gives the field up to the features.
+//! ([`RECENT_DEATH_AGES`]), each with its own age distribution. From generator version 26 the
+//! field gives the features their share (plan 09, P09.T2.c): the share is then the field's, the
+//! share matrix's times the component's field factor, and the young disc's ages the young field's,
+//! the budget's times `1 − φ(a)` renormalised, so the class follows the field's deaths alone.
 //!
 //! # The envelope and a candidate
 //!
@@ -276,16 +278,15 @@ impl CoreCollapseProcess {
     #[must_use]
     pub fn new(galaxy: &Galaxy) -> Self {
         let fields = galaxy.fields();
-        let shares = galaxy.shares();
         let interval = SupernovaInterval::of_cap(galaxy.window_caps(), ShellEnvironment::Field);
         let interval_years = interval.length().as_julian_years_f64();
         let floor = Years::new(-CLOCK_WINDOW_H.as_julian_years_f64());
         let components = fields
             .component_ids()
             .filter_map(|id| {
-                let component = fields.component(id);
-                let share = shares.component_share(MassBand::E, component);
-                let ages = component.ages();
+                // The field's share and ages: the budget's until P09.T2.c's version 26.
+                let share = galaxy.field_component_share(MassBand::E, id);
+                let ages = galaxy.field_ages(id);
                 let rate = ages.max_pdf_between(floor, RECENT_DEATH_AGES);
                 // The old thin disc's youngest sub-disc starts at the limit, which the range's
                 // closed top would reach: the limit itself is no young age.
@@ -400,7 +401,8 @@ impl ClassProcess for CoreCollapseProcess {
         let age_at_epoch = Years::new(life - death.since_epoch().as_julian_years_f64());
         // 5. Thinned on the component's death rate at that age: its age density, as deaths per
         //    system over the interval, against the component's largest.
-        let deaths = laws.ages().pdf(age_at_epoch) * self.interval.length().as_julian_years_f64();
+        let deaths = galaxy.field_ages(component).pdf(age_at_epoch)
+            * self.interval.length().as_julian_years_f64();
         if !stream.decide(Threshold::from_ratio(deaths, young.deaths_per_system)) {
             return None;
         }

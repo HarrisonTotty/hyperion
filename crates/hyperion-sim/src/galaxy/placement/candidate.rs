@@ -123,10 +123,13 @@ pub(super) fn evaluate_with_hook(
     let id = candidate_id(key, index);
     let position = candidate_position(galaxy.seed(), key, id);
     let mark = acceptance_mark(galaxy.seed(), id);
-    let Some(component) = pick_component(galaxy, key, bound, &position, mark) else {
+    let Some(pick) = pick_component(galaxy, key, bound, &position, mark) else {
         return CandidateOutcome::Thinned;
     };
-    let record = SystemRecord::of_candidate(galaxy, key, id, position, component);
+    let record = SystemRecord::of_candidate(galaxy, key, id, position, pick.component);
+    if !in_the_field(galaxy, key, bound, mark, &pick, &record) {
+        return CandidateOutcome::Thinned;
+    }
     // Catalogue classes claim stellar hosts only: the hook is not called for the substellar
     // layers (plan 13, P13.T3.c).
     if record.kind() == SystemKind::Stellar && claims(galaxy, &record) {
@@ -136,6 +139,48 @@ pub(super) fn evaluate_with_hook(
     } else {
         CandidateOutcome::Accepted(record)
     }
+}
+
+/// The component a candidate's mark picked, and where the mark's slice of it lies: the running
+/// sum of the weights before it, and its own weight, systems per cubic light-year.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Pick {
+    component: ComponentId,
+    below: f64,
+    weight: f64,
+}
+
+/// Whether the field holds the system `record` that the budget's pick placed (plan 09, P09.T2.c):
+/// always under the held arm of P09.T2.c's hold (`FIELD_SHARE_VERSION`), where the field is the
+/// budget.
+///
+/// From version 26 the field keeps a share `f` of its component's systems of the band at the
+/// record's age ([`FieldShare::keeps`](crate::galaxy::field_share::FieldShare::keeps)): the lowest
+/// `f` of the component's slice of the acceptance mark, so the mark, uniform inside the slice
+/// once it picked the component, keeps the candidate with probability `f` and nothing else. The
+/// record's age, drawn on its own stream, is independent of the mark, so the young field's ages
+/// come out as the budget's times `1 − φ(age)`. The bound, the candidates and their marks stay the
+/// budget's, and a system the field keeps is the budget's record bit for bit: the field only
+/// thins (brainstorm, "Exact placement by thinning"). The threshold is the pick's, in its
+/// arithmetic, so `f` = 1 keeps every candidate the pick kept.
+#[must_use]
+fn in_the_field(
+    galaxy: &Galaxy,
+    key: CellKey,
+    bound: f64,
+    mark: Mark,
+    pick: &Pick,
+    record: &SystemRecord,
+) -> bool {
+    let Some(field) = galaxy.field_share() else {
+        return true;
+    };
+    let keeps = field.keeps(pick.component, key.band(), record.age_at_epoch());
+    let padded_bound = bound * (1.0 + BOUND_PADDING);
+    mark.is_below(Threshold::from_ratio(
+        pick.below + keeps * pick.weight,
+        padded_bound,
+    ))
 }
 
 /// Whether the loss cone carves `record` out (plan 09, Design note 12; P09.T28.b.b).
@@ -256,7 +301,7 @@ fn pick_component(
     bound: f64,
     position: &GalacticPosition,
     mark: Mark,
-) -> Option<ComponentId> {
+) -> Option<Pick> {
     if bound.is_nan() || bound <= 0.0 {
         return None;
     }
@@ -299,10 +344,13 @@ fn pick_component(
         key.size_ly(),
         key.gen_cell().to_array(),
     );
-    mark.pick_weighted(weights, padded_bound).map(|index| {
-        fields
+    mark.pick_weighted(weights, padded_bound).map(|index| Pick {
+        component: fields
             .component_id(index)
-            .expect("the weights are one per component, so a picked index is one of them")
+            .expect("the weights are one per component, so a picked index is one of them"),
+        // The running sum `pick_weighted` reached before the picked weight, in its order.
+        below: weighted_density(&weights[..index]),
+        weight: weights[index],
     })
 }
 
@@ -323,7 +371,7 @@ fn pick_unsaturated(
     bound: f64,
     position: &GalacticPosition,
     mark: Mark,
-) -> Option<ComponentId> {
+) -> Option<Pick> {
     let fields = galaxy.fields();
     let shares = galaxy.shares();
     let band = key.band();
@@ -332,10 +380,12 @@ fn pick_unsaturated(
     let mut weights = [0.0; MAX_COMPONENTS];
     let mut sum = 0.0;
     let mut picked = None;
+    let mut below = 0.0;
     for (i, (component, density)) in densities.by_ref().enumerate() {
         // `share × density`, the product plan 02's layer density and bound take.
         let weight = shares.component_share(band, component) * density;
         weights[i] = weight;
+        below = sum;
         sum += weight;
         if mark.is_below(Threshold::from_ratio(sum, padded_bound)) {
             picked = Some(i);
@@ -365,10 +415,12 @@ fn pick_unsaturated(
             position.to_light_years_f64()
         );
     }
-    picked.map(|index| {
-        fields
+    picked.map(|index| Pick {
+        component: fields
             .component_id(index)
-            .expect("the weights are one per component, so a picked index is one of them")
+            .expect("the weights are one per component, so a picked index is one of them"),
+        below,
+        weight: weights[index],
     })
 }
 
@@ -600,7 +652,7 @@ mod tests {
         for (cell, index) in candidates(Layer::A, draws) {
             let mark = acceptance_mark(galaxy.seed(), candidate_id(cell, index));
             let picked = pick_component(&galaxy, key, bound, &position, mark);
-            counts[picked.map_or(weights.len(), ComponentId::index)] += 1;
+            counts[picked.map_or(weights.len(), |pick| pick.component.index())] += 1;
         }
         let kept = weights.iter().fold(0.0, |sum, w| sum + w) / padded_bound;
         let mut expected: Vec<f64> = weights.iter().map(|w| n * w / padded_bound).collect();

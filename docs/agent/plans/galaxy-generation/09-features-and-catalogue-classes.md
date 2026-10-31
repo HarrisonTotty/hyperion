@@ -542,6 +542,8 @@ cell; registry golden. Acceptance:
   census, caps and band read the field alone. So the field gives up φ only when the sky takes the
   members in. Otherwise the sky loses φ of each population: about nine in ten of the young disc's
   O and early-B stars, and at least a quarter of its B stars.
+  _Built behind its hold (lane `p09-t2c`, 2026-10-31, at `GENERATOR_VERSION` 24, no output moved):
+  see Risks, "P09.T2.c as built"._
 
 #### P09.T3 The feature catalogue grid
 
@@ -5281,3 +5283,41 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   `SupernovaEntry::pulsar() -> Option<NeutronStar>`, the neutron star the class's test put in the
   entry, which plan 12's magnetar walk reads to drop entries whose field is born at or below the
   critical field before it builds their stars.
+- **P09.T2.c as built (lane `p09-t2c`, 2026-10-31, at `GENERATOR_VERSION` 24, behind
+  `FIELD_SHARE_VERSION` = 26; no output moved).**
+  - _Hold._ `ages::{FIELD_SHARE_VERSION, FieldShareRules::{None, Phi}}`, `GalaxyRules::field_share`.
+    One `match`, in `Galaxy::build`, installs `galaxy::field_share::FieldShare`; readers go through
+    `Galaxy::{field_share, field_ages, field_part, field_component_share}`, the budget's verbatim
+    under `None`. `Galaxy::with_rules` refuses a change of it (debug assert).
+  - _Where φ applies (lean, 2026-10-31)._ `Fields` stays the budget. The field: placement's
+    thinning, `query::expected_counts`, `CoreCollapseProcess`, `TypeIaProcess`
+    (`DelayTimeDistribution::of_field`) and `ClassTable::stay_share`. The budget, on either arm: the
+    gas, `SubstellarAbundance`, `KinematicTables`, `FeatureShares` and the catalogue, `map`,
+    `derive`'s mean masses (the system count, the potential), `small_bodies`, `displaced_forms`'
+    fit, `DelayTimeDistribution::from_galaxy`, `bounds` and `headroom`, the record's age draw
+    (thinned after), the per-record law readers (`stellar::system`, `sky::binary_light`,
+    `guard_twin`, `period_fit`, `global_list::orphans`, `globular::origin_component`), and the sky's
+    `luminosity`, `band` and `caps`, which R06.T16.a routes through `Galaxy::field_*`.
+  - _Thinning._ Bounds and candidates stay the budget's; a candidate picked for component c is kept
+    in the lowest `f` of c's slice of the mark, so a field record is the budget's bit for bit. `f`
+    is `FeatureShares::component_field_factor` (a sub-disc takes its own φ_k, lean), and for the
+    young disc `1 − φ(age)` on `YoungFieldShare`'s 101 panels, scaled to its factor.
+  - _`FeatureShare::Phi`._ The unborn sliver keeps the born ages' mean of `1 − φ` (lean), so one
+    factor serves density and count.
+  - _Class table._ `stay_share` is the field's (the budget's × the factor, the young disc's D and E
+    over the young field's ages); class weights, stay marks and `closure` stay the budget's.
+    P08.T12.a's per-component factor must read the new `ClassTable::budget_stay_share`, or φ is
+    taken twice.
+  - _Censuses._ `core_collapses_over_seeds_under_every_26_hold` and
+    `type_ia_over_seeds_under_every_26_hold` keep the Poisson, reach and cap checks, and check the
+    field's deaths against the budget's weighed by what the field keeps. The galaxy-wide brackets
+    (20–160 in ±H, 3,000–21,000 beyond the shells, a third of shells Type Ia) move to P09.T38.
+  - _Tests._ `checks.rs`'s globular inversion, `globular.rs`'s `own_rules` and the helium census run
+    "every 26 hold but the field share" through `with_rules`; the field reaches neither globulars nor
+    members. T33.a's `max_pdf_between` test also accepts the bound reached as the right limit at the
+    range's top, where the young field's panels meet. `FIELD_RECORDS_DIGEST` (D2) is pinned by hand,
+    not a golden (E4): a later 26 hold that moves a record's mass or age re-pins it.
+  - _Bump._ 26 deletes `FIELD_SHARE_VERSION`, `FieldShareRules`' `None` arm, the field, the `match`,
+    the refusal and the tripwire `the_field_share_is_held_only_until_the_26_bump`, and restates
+    `tests/galaxy_class_table.rs`'s stay asserts (`stay_share(E)` = marks' total, `stay_share(A)` =
+    1), which the factor breaks. D1 is `placement/young_field`, labelled by ID.

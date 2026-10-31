@@ -5,8 +5,9 @@
 //! `1 − φ`, with φ computed once per galaxy from the catalogue's rates and never from individual
 //! features (brainstorm, "Large features"). [`FeatureShares`] holds φ and what the catalogue's
 //! processes need to place features: how many features a system of each component stands for.
-//! [`Galaxy`](crate::galaxy::Galaxy) builds it with itself (Design note 15). Nothing reads φ into
-//! the fields yet: P09.T2.c applies it, with a version bump, once plan 08's `stay_share` exists.
+//! [`Galaxy`](crate::galaxy::Galaxy) builds it with itself (Design note 15). The density fields
+//! stay the budget: P09.T2.c applies φ where the field is read, behind a hold until generator
+//! version 26 (`YoungFieldShare`, `FeatureShares::component_field_factor`).
 //!
 //! # The young disc (Design notes 1 and 2)
 //!
@@ -65,10 +66,10 @@ use crate::galaxy::Population;
 use crate::galaxy::ages::{SubDisc, YOUNG_AGE_LIMIT};
 use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use crate::galaxy::consts::YEARS_PER_MEGAYEAR;
-use crate::galaxy::fields::Fields;
+use crate::galaxy::fields::{Component, Fields};
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::quad::gl_panels;
+use crate::galaxy::quad::{gl_panels, gl4};
 use crate::math;
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
@@ -470,6 +471,24 @@ impl FeatureShares {
         1.0 - self.phi(population, band) - self.class_share(population, band)
     }
 
+    /// What `component`'s field keeps of its budget in `band` (plan 09, P09.T2.c): its
+    /// population's [`field_factor`](Self::field_factor), but for a sub-disc of the old thin disc
+    /// `1 − φ_k` with the sub-disc's own φ ([`phi_sub_disc`](Self::phi_sub_disc)), less the carved
+    /// classes' share, since each sub-disc's clusters are drawn from that sub-disc (Design note 3).
+    /// Weighted by their systems, the sub-discs' factors are the old thin disc's field factor.
+    #[must_use]
+    pub(crate) fn component_field_factor(&self, component: &Component, band: MassBand) -> f64 {
+        let population = component.population();
+        match component.sub_disc() {
+            Some(sub_disc) => {
+                1.0 - self.phi_sub_disc(sub_disc)
+                    - self.phi_globular(population, band)
+                    - self.class_share(population, band)
+            }
+            None => self.field_factor(population, band),
+        }
+    }
+
     /// Plan 10's setter for the halo's discrete share of streams and dwarf cores.
     ///
     /// # Panics
@@ -511,6 +530,119 @@ impl FeatureShares {
     #[must_use]
     pub const fn cloud_weights(&self) -> (f64, f64) {
         (CLOUD_NEUTRAL_SHARE, MOLECULAR_CLOUD_MULTIPLE)
+    }
+}
+
+/// The young field's share `1 − φ` of the young disc's systems, by age, on fixed panels (plan 09,
+/// P09.T2.c): what the field keeps of the young disc from generator version 26.
+///
+/// The panels run from 0 to 100 Myr, with an edge at every whole megayear and at every kink of
+/// φ (module documentation). Each holds `1 − φ` averaged over it, weighted by the young disc's age
+/// density `e^(age ÷ τ)`, by a four-point Gauss–Legendre rule on the panel, within 3 × 10⁻¹³ of
+/// a 32-point rule's, φ being smooth between its kinks: the field's systems in a panel are the
+/// budget's times its value. The field's ages ([`AgeDistribution::young_disc`] under
+/// [`FeatureShare::Phi`]) and placement's thinning read the same values, so the two agree exactly.
+/// Inside a panel the share is constant, where φ falls by at most 0.0117 across one: across the
+/// panel from 30 Myr, where associations begin to dissolve (module documentation), whose mean
+/// `1 − φ` is 0.12 (measured at the Milky Way fixture's τ).
+///
+/// Before birth, the sliver of systems born in the clock window after the epoch keeps the born
+/// ages' mean of `1 − φ` ([`born_mean`](Self::born_mean); ours, 2026-10-31), so the field's born
+/// share of its systems is the budget's, and one factor scales the field's density and its
+/// count. φ itself is 0 there ([`phi_young`]), though such a star is born in a nursery.
+///
+/// [`AgeDistribution::young_disc`]: crate::galaxy::ages::AgeDistribution::young_disc
+/// [`FeatureShare::Phi`]: crate::galaxy::ages::FeatureShare::Phi
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct YoungFieldShare {
+    /// The panels' edges, years, ascending: 0 to [`YOUNG_AGE_LIMIT`].
+    edges: Vec<f64>,
+    /// Each panel's `1 − φ`.
+    keeps: Vec<f64>,
+    /// The born ages' mean of `1 − φ`, weighted by the young disc's age density.
+    born_mean: f64,
+}
+
+impl YoungFieldShare {
+    /// The share for a young disc whose history declines with timescale `tau`.
+    ///
+    /// It evaluates φ at four ages of each of the 101 panels: about 400 evaluations, each a
+    /// quadrature of the bound clusters' surviving mass.
+    #[must_use]
+    pub(crate) fn new(tau: Years) -> Self {
+        let tau = tau.value();
+        let edges = young_field_edges();
+        let mut keeps = Vec::with_capacity(edges.len() - 1);
+        let (mut kept, mut born) = (0.0, 0.0);
+        for panel in edges.windows(2) {
+            let (lo, hi) = (panel[0], panel[1]);
+            // ∫ e^((a − lo) ÷ τ) da over the panel, and the same weighted by 1 − φ.
+            let weight = tau * math::exp_m1((hi - lo) / tau);
+            let keep = gl4(
+                |a| (1.0 - phi_young(Years::new(a))) * math::exp((a - lo) / tau),
+                lo,
+                hi,
+            ) / weight;
+            // The panel's share of the born ages, unnormalised: ∫ e^(a ÷ τ) da over it.
+            let share = math::exp(lo / tau) * weight;
+            kept += share * keep;
+            born += share;
+            keeps.push(keep);
+        }
+        Self {
+            edges,
+            keeps,
+            born_mean: kept / born,
+        }
+    }
+
+    /// The panels' edges, years, ascending, from 0 to 100 Myr.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn edges_years(&self) -> &[f64] {
+        &self.edges
+    }
+
+    /// Each panel's `1 − φ`, in age order.
+    #[must_use]
+    pub(crate) fn keeps(&self) -> &[f64] {
+        &self.keeps
+    }
+
+    /// Each panel as its lower and upper edge, years, and its `1 − φ`, in age order.
+    pub(crate) fn panels_years(&self) -> impl Iterator<Item = (f64, f64, f64)> + '_ {
+        self.edges
+            .windows(2)
+            .zip(&self.keeps)
+            .map(|(panel, &keep)| (panel[0], panel[1], keep))
+    }
+
+    /// The born ages' mean of `1 − φ`: what the unborn sliver keeps (type documentation).
+    #[must_use]
+    pub(crate) const fn born_mean(&self) -> f64 {
+        self.born_mean
+    }
+
+    /// `1 − φ` at `age`: its panel's, the lower panel's at an edge, as the field's age density
+    /// reads it there, and the born mean before birth. One binary search.
+    #[must_use]
+    pub(crate) fn at(&self, age: Years) -> f64 {
+        let a = age.value();
+        if a < 0.0 {
+            return self.born_mean;
+        }
+        // The edges below `a` count its panel from 1; at 0, the first panel.
+        let panel = self
+            .edges
+            .partition_point(|&edge| edge < a)
+            .clamp(1, self.keeps.len());
+        self.keeps[panel - 1]
+    }
+
+    /// The bytes the share owns on the heap.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        (self.edges.capacity() + self.keeps.capacity()) * size_of::<f64>()
     }
 }
 
@@ -595,6 +727,19 @@ fn young_age_edges() -> Vec<f64> {
     edges
 }
 
+/// [`YoungFieldShare`]'s panel edges: every whole megayear from 0 to 100 Myr and every kink of φ
+/// ([`young_age_edges`]), ascending, without repeats.
+fn young_field_edges() -> Vec<f64> {
+    let mut edges: Vec<f64> = (0..=100)
+        .map(|k| f64::from(k) * YEARS_PER_MEGAYEAR)
+        .chain(young_age_edges())
+        .collect();
+    edges.sort_by(f64::total_cmp);
+    edges.dedup();
+    debug_assert_eq!(edges.last(), Some(&YOUNG_AGE_LIMIT.value()));
+    edges
+}
+
 /// Eight equal panels over `[lo, hi]` with an extra edge where the heaviest cluster dissolves, the
 /// one kink of `S` and `m_b` beyond the young disc.
 fn panel_edges(lo: f64, hi: f64) -> Vec<f64> {
@@ -611,6 +756,8 @@ fn panel_edges(lo: f64, hi: f64) -> Vec<f64> {
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
     use super::*;
     use crate::Seed;
     use crate::galaxy::Galaxy;
@@ -640,6 +787,52 @@ mod tests {
             last = phi;
         }
         assert!(phi_young(myr(-1.0)).abs() < 1e-15);
+    }
+
+    /// P09.T2.c: the young field's share on its panels lies in (0, 1) and never falls with age,
+    /// as `1 − φ` does not; its born mean is the young disc's `1 − φ`; each panel's four-point
+    /// rule is its 32-point one to 10⁻¹² relative; and across a panel φ falls by at most 0.012,
+    /// over the panel from 30 Myr, where associations begin to dissolve.
+    #[test]
+    fn the_young_field_share_is_one_less_phi_on_its_panels() {
+        let galaxy = milky_way();
+        let tau = galaxy.params().sfh_timescale();
+        let share = YoungFieldShare::new(tau);
+        assert_eq!(share.edges_years().len(), share.keeps().len() + 1);
+        assert!(share.keeps().iter().all(|&k| k > 0.0 && k < 1.0));
+        assert!(share.keeps().windows(2).all(|w| w[0] <= w[1]));
+        let mean_phi = galaxy
+            .feature_shares()
+            .phi(Population::YoungThinDisc, MassBand::A);
+        assert!(
+            (share.born_mean() - (1.0 - mean_phi)).abs() < 1e-9,
+            "{} against {}",
+            share.born_mean(),
+            1.0 - mean_phi
+        );
+        let (mut worst_rule, mut widest, mut at) = (0.0_f64, 0.0_f64, 0.0);
+        for (lo, hi, keep) in share.panels_years() {
+            let t = tau.value();
+            let weight = t * math::exp_m1((hi - lo) / t);
+            let fine = gl_panels(
+                |a| (1.0 - phi_young(Years::new(a))) * math::exp((a - lo) / t),
+                &[lo, hi],
+            ) / weight;
+            worst_rule = worst_rule.max((keep / fine - 1.0).abs());
+            let spread = phi_young(Years::new(lo)) - phi_young(Years::new(hi));
+            if spread > widest {
+                (widest, at) = (spread, lo);
+            }
+        }
+        eprintln!(
+            "rule {worst_rule:e}; widest {widest} from {at} yr, 1 − φ {} there; born mean {}",
+            share.at(Years::new(at + 1.0)),
+            share.born_mean()
+        );
+        assert!(worst_rule < 1e-12, "{worst_rule:e}");
+        assert!(widest < 0.012, "{widest} from {at} yr");
+        assert_same_bits(share.at(Years::new(-1.0)), share.born_mean());
+        assert_same_bits(share.at(Years::new(3.05e7)), share.keeps()[30]);
     }
 
     #[test]

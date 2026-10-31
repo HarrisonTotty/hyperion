@@ -32,6 +32,9 @@
 //! - [`member_remnants`](GalaxyRules::member_remnants), at [`TABULATED_REMNANTS_VERSION`] (plan 09,
 //!   P09.T10): a remnant class's member draw asks the cluster's tabulated remnants before it builds
 //!   an attempt's star.
+//! - [`field_share`](GalaxyRules::field_share), at [`FIELD_SHARE_VERSION`] (plan 09, P09.T2.c):
+//!   the field gives up the features' share φ of its systems. It is read where the galaxy is built,
+//!   which installs the field's factors, so `Galaxy::with_rules` refuses to change it.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -40,6 +43,7 @@
 //! inside [`StellarRules`].
 
 use crate::GeneratorVersion;
+use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules};
 use crate::galaxy::features::centre::events::luminosity::{
     CENTRE_QUIESCENCE_VERSION, CentreQuiescenceRules,
 };
@@ -71,6 +75,8 @@ pub(crate) struct GalaxyRules {
     /// How a remnant class's member draw decides an attempt: its star built, or the cluster's
     /// tabulated remnants first (P09.T10).
     pub(crate) member_remnants: MemberRemnantRules,
+    /// Whether the field gives up the features' share φ of its systems (P09.T2.c).
+    pub(crate) field_share: FieldShareRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -111,6 +117,11 @@ impl GalaxyRules {
             } else {
                 MemberRemnantRules::EveryAttempt
             },
+            field_share: if version.get() >= FIELD_SHARE_VERSION.get() {
+                FieldShareRules::Phi
+            } else {
+                FieldShareRules::None
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -127,8 +138,9 @@ impl GalaxyRules {
 
     /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: 25's
     /// holds and those that turn on at 26 (the galaxy's `bound_share`, P09.T13, `stream_shell`,
-    /// P10.T9, and `member_remnants`, P09.T10; the stellar rules' `dwarf_sequence`, P06.T23.a,
-    /// `helium`, P15.T7.b, and `hd_limit`, P06.T42.b; [`StellarRules::every_26_hold`]).
+    /// P10.T9, `member_remnants`, P09.T10, and `field_share`, P09.T2.c; the stellar rules'
+    /// `dwarf_sequence`, P06.T23.a, `helium`, P15.T7.b, and `hd_limit`, P06.T42.b;
+    /// [`StellarRules::every_26_hold`]).
     ///
     /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is
     /// struct-update syntax over it.
@@ -283,6 +295,19 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_26_hold().member_remnants,
             MemberRemnantRules::Tabulated
+        );
+        let field = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).field_share;
+        for v in [23, 24, 25] {
+            assert_eq!(field(v), FieldShareRules::None, "{v}");
+        }
+        assert_eq!(field(26), FieldShareRules::Phi);
+        assert_eq!(
+            GalaxyRules::every_25_hold().field_share,
+            FieldShareRules::None
+        );
+        assert_eq!(
+            GalaxyRules::every_26_hold().field_share,
+            FieldShareRules::Phi
         );
         for v in [23, 24, 25, 26] {
             assert_eq!(

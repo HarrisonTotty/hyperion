@@ -859,10 +859,19 @@ mod tests {
         })
     }
 
-    /// [`held`]'s galaxy under every 26 hold: the own-μ arm.
+    /// [`held`]'s galaxy under every 26 hold but the field share, which the galaxy reads when it
+    /// is built and which reaches no globular (P09.T2.c): the own-μ arm.
     fn own() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-        GALAXY.get_or_init(|| held().clone().with_rules(GalaxyRules::every_26_hold()))
+        GALAXY.get_or_init(|| held().clone().with_rules(own_rules()))
+    }
+
+    /// [`own`]'s rules.
+    fn own_rules() -> GalaxyRules {
+        GalaxyRules {
+            field_share: held().rules().field_share,
+            ..GalaxyRules::every_26_hold()
+        }
     }
 
     /// P09.T13's bound share (ruling 145.5) is held until the 25 → 26 bump: the rules in force are
@@ -919,7 +928,7 @@ mod tests {
             .collect();
         assert_order_independent(&keys, |&(p, a)| bits(bound_share(own(), p, a)));
         // Each on a galaxy whose companions are not yet built: the held arm never reads them.
-        let cold = || held().clone().with_rules(GalaxyRules::every_26_hold());
+        let cold = || held().clone().with_rules(own_rules());
         assert_order_independent(&keys, |&(p, a)| bits(bound_share(&cold(), p, a)));
     }
 
