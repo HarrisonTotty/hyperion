@@ -5239,3 +5239,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - `BLACK HOLE`: T41.c's readout already asks at the chart's time and reads mass and the 2–10 keV
     total; T42 adds only tests (asked again at a new chart time; an absent luminosity Missing).
     Nothing is missing from the wire for it.
+- **P09.T42 fixes, records (lane `p09-t42`, step 2, 2026-10-31, at 24 and 3; client only).**
+  - _`DIST` column._ Neither switched to ly nor widened: `formatFeatureDistance` (`chartModel.ts`)
+    keeps the chart's unit and writes a feature's distance at the chart's precision while it fits
+    `DISTANCE_COLUMN_CH` (7), and past it to three figures (`formatSignificant`: `126,000`, `300`,
+    `6.32E8`), in `FeatureList` and `FeatureReadout` alike. Systems always fit.

@@ -16,7 +16,7 @@ import { featureKindAbbreviation, featureKindWords } from "../../lib/galaxy/feat
 import type { ChartFeature } from "../../lib/galaxy/model";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import { windowRange } from "../../lib/windowRange";
-import { type ChartDistanceUnit, formatChartDistance } from "./chartModel";
+import { type ChartDistanceUnit, formatFeatureDistance } from "./chartModel";
 
 /** Height of a row, in `rem`: also the guide's smallest pointer target, as the system list's. */
 const ROW_REM = 2;
@@ -48,7 +48,8 @@ export interface FeatureListProps {
  * `ArrowDown` move one row, `PageUp` and `PageDown` one window, `Home` and `End` the ends; the
  * selection follows the active row, and a selection made on the chart scrolls the list to it. A
  * row names the feature, its kind by the abbreviation beside its mark (`OC`, `CENTRE`), its
- * distance to its centre at the chart's precision, its radius at the chart's time and its present
+ * distance to its centre at the chart's precision, or to three figures where that would pass the
+ * column ({@link formatFeatureDistance}), its radius at the chart's time and its present
  * mass, each to the guide's three figures; the row's accessible name gives the kind in words, so
  * that the abbreviation is never the only signal. A stale chart's rows each trail one `S`, at the
  * end of the mass, and are named stale.
@@ -200,7 +201,7 @@ export function FeatureList({
             if (feature === undefined) {
               return null;
             }
-            const distance = formatChartDistance(feature.distanceLy, distanceUnit);
+            const distance = formatFeatureDistance(feature.distanceLy, distanceUnit);
             const extent = formatSignificant(feature.extentLy);
             const mass = formatSignificant(feature.massMsun);
             return (

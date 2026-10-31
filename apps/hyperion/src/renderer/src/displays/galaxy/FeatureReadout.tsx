@@ -19,7 +19,7 @@ import type {
 } from "../../lib/galaxy/model";
 import { useItemsInView } from "../../lib/itemsInView";
 import { formatHex64 } from "../../lib/seed";
-import { type ChartDistanceUnit, formatChartDistance } from "./chartModel";
+import { type ChartDistanceUnit, formatFeatureDistance } from "./chartModel";
 import { SystemReading as Reading } from "./SystemReading";
 
 /** The words for a count that is zero: none expected, none left. */
@@ -198,7 +198,8 @@ function StructureReadings({ structure, stale }: StructureReadingsProps) {
  * A live region read as a whole, as the system readout is ({@link SystemReadout}), so that a
  * selection made on the chart or in the list is announced once, in the same scrolling region with
  * its total under it. `KIND` names the kind in words (`OPEN CLUSTER`), the abbreviation its mark
- * and the list carry being on the guide's list; `DIST` is to its centre; `EXTENT` its radius at
+ * and the list carry being on the guide's list; `DIST` is to its centre, as the list writes it
+ * ({@link formatFeatureDistance}); `EXTENT` its radius at
  * the chart's time, the sphere the chart draws it at. `AGE` is given at the chart's time, after a
  * middle dot, as a system's is, and is the em dash for a molecular cloud, which has none, and for
  * the centre, whose six episodes have no one age. `MEMBERS` is the model's expected count over
@@ -263,7 +264,7 @@ export function FeatureReadout({
             <Reading label="KIND" value={featureKindWords(feature.kind)} wide stale={stale} />
             <Reading
               label="DIST"
-              value={formatChartDistance(feature.distanceLy, distanceUnit)}
+              value={formatFeatureDistance(feature.distanceLy, distanceUnit)}
               unit={distanceUnit.symbol}
               stale={stale}
             />

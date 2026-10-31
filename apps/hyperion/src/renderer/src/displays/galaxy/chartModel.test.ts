@@ -26,6 +26,7 @@ import {
   formatChartDistance,
   formatChartLengthLy,
   formatChartOffset,
+  formatFeatureDistance,
   formatQueryRadius,
   filterSystems,
   inRangeCount,
@@ -377,6 +378,28 @@ describe("formatChartDistance and formatChartOffset", () => {
       expect(formatChartOffset(ly, unit)).toBe(offset);
     },
   );
+});
+
+describe("formatFeatureDistance", () => {
+  it.each([
+    // Within the column's seven characters, at the chart's precision.
+    [99.9999, 0.5, "99.9999"],
+    [0.0042, 0.001, "265.6"],
+    [0.15, 0.001, "9486.2"],
+    [499.99, 50, "499.99"],
+    // Past it, to three figures in the chart's unit.
+    [300, 0.5, "300"],
+    [12_345.678, 0.01, "12,300"],
+    [1.5, 0.001, "94,900"],
+    [2, 0.001, "126,000"],
+    [10_000, 0.001, "6.32E8"],
+    [12_345.678, 50, "12,300"],
+  ])("writes a feature %s ly off on a %s ly chart as %s", (ly, radiusLy, text) => {
+    const written = formatFeatureDistance(ly, distanceUnitFor(radiusLy));
+
+    expect(written).toBe(text);
+    expect(written.length).toBeLessThanOrEqual(7);
+  });
 });
 
 describe("formatQueryRadius", () => {

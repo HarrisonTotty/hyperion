@@ -103,6 +103,21 @@ describe("FeatureList (plan 09, P09.T41.c)", () => {
     expect(row?.querySelectorAll(".system-list__number")[0]).toHaveTextContent("189.7");
   });
 
+  it("fits a feature far beyond a fine chart's edge in its DIST column, to three figures", () => {
+    const [feature] = GOLDEN;
+    if (feature === undefined) {
+      throw new Error("the golden holds no feature");
+    }
+    // 2 ly is 126,482.2 AU, nine characters at the chart's precision; the column holds seven.
+    renderList([{ ...feature, distanceLy: 2 }], { distanceUnit: distanceUnitFor(0.001) });
+
+    const [row] = within(list()).getAllByRole("option");
+    expect(row?.querySelectorAll(".system-list__number")[0]).toHaveTextContent(/^126,000$/u);
+    expect(row).toHaveAccessibleName(
+      "GPF F207, OPEN CLUSTER, 126,000 AU, radius 26.9 ly, 268 solar masses",
+    );
+  });
+
   it("shows each kind by the abbreviation its mark carries", () => {
     renderList(GOLDEN);
 

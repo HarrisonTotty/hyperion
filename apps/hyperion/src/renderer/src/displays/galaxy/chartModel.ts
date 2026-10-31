@@ -14,6 +14,7 @@ import {
   formatNumber,
   formatScaleLength,
   formatSigned,
+  formatSignificant,
   formatSubstellarMass,
   MEARTH_PER_MSUN,
   MJUP_PER_MSUN,
@@ -185,6 +186,30 @@ export function distanceUnitFor(queryRadiusLy: number): ChartDistanceUnit {
 /** Writes a distance on a chart in the chart's unit, without it: `0.0042`, `41.3`. */
 export function formatChartDistance(ly: number, unit: ChartDistanceUnit): string {
   return formatNumber(ly * unit.perLy, unit.decimals);
+}
+
+/**
+ * The most characters a distance takes in a list's `DIST` column, its own room: `~500.00`, a system
+ * read as observed on a chart from 10 ly (`styles.css`, `.system-list__row`).
+ */
+export const DISTANCE_COLUMN_CH = 7;
+
+/**
+ * Writes a feature's distance on a chart in the chart's unit, without it: at the chart's precision
+ * while that fits the `DIST` column, and past it to the guide's three significant figures, grouped
+ * and in E notation from 1,000,000 (`126,000`, `300`, `6.64E8`; plan 09, P09.T42).
+ *
+ * @remarks
+ * A feature is listed where its sphere reaches the chart, so its centre may lie far beyond the
+ * query edge: 2 ly from a chart below 0.01 ly is `126,482.2` AU, and 300 ly from a chart below 1 ly
+ * is `300.0000`, each wider than the column. The unit stays the chart's, which the column's header
+ * names for every row, and the value keeps the fixed field the guide asks for (§ Numbers, units and
+ * time). The readout writes the selected feature's distance the same way, so that one quantity
+ * reads alike in both. A system lies within the query radius, so its distance always fits.
+ */
+export function formatFeatureDistance(ly: number, unit: ChartDistanceUnit): string {
+  const text = formatChartDistance(ly, unit);
+  return text.length <= DISTANCE_COLUMN_CH ? text : formatSignificant(ly * unit.perLy);
 }
 
 /** Writes a signed offset on a chart in the chart's unit, without it: `+0.0042`, `-41.3`. */
