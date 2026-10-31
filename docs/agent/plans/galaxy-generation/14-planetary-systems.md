@@ -8777,6 +8777,7 @@ feeding back into p_s, T_s, the albedo or the bulk.
         follows §6 and D5, with the stage table measured at the blessing message.
       - P14.T33.c follows.
 - **P14.T54.c The 24 → 25 bump** (S1; decision-bump-plan-after-22 §2.2, decision-galaxy-25-train).
+  - _Built_ 2026-10-31 (lane train-25): Risks, "P14.T54.c, version 25 as built".
 
 #### P14.T55 Later composition (unscheduled)
 
@@ -33635,3 +33636,12 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   `STEAM_ENVELOPE_VERSION`): `supercritical_column` admits a reservoir where `climate.mean` ≥ T_c,
   `lies_at` still setting its column (its ratio may lie below 1). The 25 and 26 censuses assert no
   envelope changes section; this closes the N₂ point above.
+- **P14.T54.c, version 25 as built** (2026-10-31). Every 25 hold is deleted, each in its own
+  commit, with `with_every_25_hold` and `GalaxyRules`' and `StellarRules`' `every_25_hold`;
+  `with_every_26_hold` holds the 26 holds alone, and the census's 25 rule set is the version's
+  own (its `Listing::Exact` went). The serve gate is open. §13.1's 0900 exemption is not built:
+  the floored-against-held test it names went with the unlit mean's hold at 24's bump.
+- _Left after 25:_ seed 0x2's rogue planet 0xcfffe0003fff58c1 leaves its Kepler pad at −100 yr
+  (the two slow censuses near the black hole fail; P09.T28.d.c's); the secant root's bracket
+  reuse differs from re-evaluation in the last bit (`PassContext::rank` omits the crater
+  contract); B5 fails on 01fffb2d60000000.0600, a `SteamEnvelope` over a `Temperate` division.
