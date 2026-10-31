@@ -10,7 +10,7 @@
 //!
 //! The wire's `alerts` topic opens a subscription and answers `alerts_observer` and
 //! `alerts_acknowledge` (P12.T9.a), and each universe's contacts are opened once and shared
-//! ([`UniverseContacts`]). The scans on the CPU pool and their cache are P12.T8.b's, and the pushes
+//! (`UniverseContacts`). The scans on the CPU pool and their cache are P12.T8.b's, and the pushes
 //! into Knowledge and their notifications P12.T8.c's: until then a subscription's census is empty
 //! and an advance pushes nothing.
 
