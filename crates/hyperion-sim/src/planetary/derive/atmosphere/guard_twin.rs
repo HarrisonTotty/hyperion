@@ -34,6 +34,7 @@ use crate::planetary::architecture::{CLOSE_BINARY_CUTOFF_AU, class_weights, draw
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::passes::Convergence;
+use crate::planetary::derive::photometry::area_mix::with_scattering_held;
 use crate::planetary::derive::{BodyHosts, DerivedBody, HostLight, PlacedBody, derive_body};
 use crate::planetary::disc::Disc;
 use crate::planetary::placement::classes::orbits::{HostPlane, SystemPlane};
@@ -1103,11 +1104,16 @@ fn the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new
             assert_eq!(sample.derive().expect("twice"), (body, hottest), "{id}: D4");
             (body, hottest)
         };
+        // P14.T24.h.b's holds are set back inside 26's helper: its adding rule takes
+        // 42002cb20001885b.0100 to 1,231.2 K with the melt's hold set back (1,428.1 K without it).
+        let every_26 = |run: &dyn Fn() -> (DerivedBody, Kelvin)| {
+            with_every_26_hold(|| with_scattering_held(run))
+        };
         let bodies = vec![
             derive(),
-            with_every_26_hold(|| with_melt_oxygen(MeltOxygenRules::Held, derive)),
+            every_26(&|| with_melt_oxygen(MeltOxygenRules::Held, derive)),
             with_melt_oxygen(MeltOxygenRules::Published, derive),
-            with_every_26_hold(derive),
+            every_26(&derive),
         ];
         derived.push((id, bodies));
     });

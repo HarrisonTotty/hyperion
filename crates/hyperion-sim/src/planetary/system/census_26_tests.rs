@@ -112,8 +112,21 @@ fn sample_through(last: usize) -> (Galaxy, Vec<SystemRecord>) {
 }
 
 /// `read` of the body `id` of the sample's system `rank`, generated afresh under the rules on this
-/// thread and walked as the census walks it; `None` where the walk meets no such body.
+/// thread and walked as the census walks it; `None` where the walk meets no such body. P14.T24.h.b's
+/// holds are set back (`with_scattering_held`): its adding rule leaves the two-state cycle a
+/// `Snowball` in both states, where the census found it.
 fn read_body<R>(
+    (galaxy, records): (&Galaxy, &[SystemRecord]),
+    (rank, id): (usize, &str),
+    read: &dyn Fn(&AuditCase<'_>) -> R,
+) -> Option<R> {
+    crate::planetary::derive::photometry::area_mix::with_scattering_held(|| {
+        read_body_under((galaxy, records), (rank, id), read)
+    })
+}
+
+/// [`read_body`] under every rule on this thread.
+fn read_body_under<R>(
     (galaxy, records): (&Galaxy, &[SystemRecord]),
     (rank, id): (usize, &str),
     read: &dyn Fn(&AuditCase<'_>) -> R,

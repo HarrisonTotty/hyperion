@@ -245,3 +245,128 @@ fn titan_s_solid_ground_is_its_haze_s_sediment() {
     );
     assert!(sedimented < bare, "{sedimented} against {bare}");
 }
+
+/// P14.T24.h.b's fourth part is held until the 25 → 26 bump: the rules in force are version 25's
+/// and before, the floor's max, and 26's helper reaches the adding rule.
+#[test]
+fn the_rayleigh_adding_is_held_only_until_the_26_bump() {
+    use crate::planetary::testing::with_every_26_hold;
+    assert!(
+        GENERATOR_VERSION < RAYLEIGH_ADDING_VERSION,
+        "the 25 → 26 bump puts P14.T24.h.b's adding rule on the record (decision-p14-t51-batch \
+         §9.4): delete `RAYLEIGH_ADDING_VERSION`, `RayleighAddingRules` with its `Max` arm and the \
+         guards that read it in `water_cloud_albedo` and `surface_mix::floored`, the tests' \
+         `with_rayleigh_adding`, its switch in `with_every_26_hold` (and the helper, if no other 26 \
+         hold is left), the `Max` arms of `scattering_tests`, and this test"
+    );
+    assert_eq!(RayleighAddingRules::in_force(), RayleighAddingRules::Max);
+    assert_eq!(
+        with_every_26_hold(RayleighAddingRules::in_force),
+        RayleighAddingRules::Added
+    );
+    assert_eq!(
+        with_every_26_hold(|| with_rayleigh_adding(
+            RayleighAddingRules::Max,
+            RayleighAddingRules::in_force
+        )),
+        RayleighAddingRules::Max
+    );
+    assert_eq!(RayleighAddingRules::in_force(), RayleighAddingRules::Max);
+}
+
+/// The adding rule is its closed form: the ground's light passed through the layer both ways and
+/// reflected between them, summed bounce by bounce, R + (1 − R)² A Σ (A R)ⁿ, to 10⁻¹²; R over
+/// black, 1 over a white ground, the ground's own under no layer, at least either; and its inverse
+/// gives the ground back. A cloud-free 10-bar N₂ world at 1 g about a Sun, over a ground of 0.2,
+/// exceeds its ground by its layer (stated).
+#[test]
+fn the_adding_rule_takes_its_closed_form() {
+    for layer in [0.0, 0.058, 0.26, 0.57, 0.9] {
+        for ground in [0.0, 0.05, 0.3, 0.83, 1.0] {
+            let (mut series, mut bounce) = (layer, (1.0 - layer) * (1.0 - layer) * ground);
+            for _ in 0..2_000 {
+                series += bounce;
+                bounce *= ground * layer;
+            }
+            let added = rayleigh_added(layer, ground);
+            assert!(
+                (added - series).abs() < 1e-12,
+                "{layer} over {ground}: {added}"
+            );
+            assert!(
+                added >= layer && added >= ground - 1e-15,
+                "{layer} over {ground}"
+            );
+            if ground < 1.0 && layer < 1.0 {
+                let back = beneath_rayleigh(added, layer);
+                assert!(
+                    (back - ground).abs() < 1e-12,
+                    "{layer} over {ground}: {back}"
+                );
+            }
+        }
+        assert_same_bits(rayleigh_added(layer, 0.0), layer);
+        assert!((rayleigh_added(layer, 1.0) - 1.0).abs() < 1e-15);
+    }
+    assert_same_bits(rayleigh_added(0.0, 0.37), 0.37);
+    let sun = HostShade::sun();
+    let nitrogen = partials_of(1e6, &[(Gas::Nitrogen, 1.0)]);
+    let layer = rayleigh_floor(&nitrogen, MetresPerSecondSquared::new(9.82), &sun);
+    let ground = 0.2;
+    eprintln!(
+        "a cloud-free 10-bar N₂ world over a ground of {ground}: its layer {layer:.4}, its Bond \
+         {:.4} by the adding rule, {:.4} by the floor's max",
+        rayleigh_added(layer, ground),
+        if layer > ground { layer } else { ground }
+    );
+    assert!(rayleigh_added(layer, ground) > layer.max(ground));
+}
+
+/// Under the adding rule the reference Earth keeps NASA's 0.294 to 10⁻¹², its own Rayleigh layer
+/// (about 0.058) laid over its clear sky under its cloud, the cloud re-split to do so; under the
+/// max its cloud is T51.b's calibration to the bit. Both clouds are stated.
+#[test]
+fn under_the_adding_rule_the_reference_earth_keeps_0_294() {
+    let held = water_cloud_albedo();
+    let clear = reference_earth_clear_sky();
+    let cloud = SurfaceState::Temperate.cloud_fraction();
+    let earth = SurfaceState::Temperate
+        .albedo(SurfaceMaterial::Rock)
+        .value();
+    assert!((under_cloud(clear, cloud, held) - earth).abs() < 1e-12);
+    let (split, layer) = with_rayleigh_adding(RayleighAddingRules::Added, || {
+        (water_cloud_albedo(), reference_earth_rayleigh())
+    });
+    let total = under_cloud(rayleigh_added(layer, clear), cloud, split);
+    eprintln!(
+        "the reference Earth: its layer {layer:.4}, its cloud {held:.5} → {split:.5} re-split, its \
+         Bond {total:.6}"
+    );
+    assert!((0.03..0.07).contains(&layer), "{layer}");
+    assert!((total - earth).abs() < 1e-12, "{total}");
+    assert!(split < held);
+    let shade = with_rayleigh_adding(RayleighAddingRules::Added, HostShade::sun);
+    assert_same_bits(shade.water_cloud, split);
+    assert_same_bits(HostShade::sun().water_cloud, held);
+}
+
+/// Under the adding rule the Solar System table's airless Moon, Mercury and Ceres keep their Bond
+/// albedos to the bit and Venus its deck's 0.76; its Earth and its Mars move by their layers, each
+/// stated both ways. The plan's "the Moon and Mars move by under 0.005" is the measured Mars's,
+/// 6 mbar: the table's Mars at the passes' stand-ins holds some 0.22 bar, its layer about 0.056,
+/// and its move is pinned as it stands (a deferred finding).
+#[test]
+fn under_the_adding_rule_the_table_s_airless_bodies_and_venus_keep_their_bonds() {
+    use crate::planetary::derive::solar::historic_table;
+    let held = historic_table();
+    let added = with_rayleigh_adding(RayleighAddingRules::Added, historic_table);
+    for ((name, before), (_, after)) in held.iter().zip(&added) {
+        let (a, b) = (before.albedo().value(), after.albedo().value());
+        eprintln!("{name}: Bond {a:.4} → {b:.4} under the adding rule");
+        match *name {
+            "Moon" | "Mercury" | "Ceres" | "Venus" => assert_same_bits(b, a),
+            "Mars" => assert!((b - a).abs() < 0.03, "{name}: {a} → {b}"),
+            _ => {}
+        }
+    }
+}

@@ -494,6 +494,9 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// - the organic sediment, `ORGANIC_SEDIMENT_VERSION` (P14.T24.h.b), at
 ///   `OrganicSedimentRules::Sediment` through `with_organic_sediment`: a hazy air's fallout covers
 ///   its share of the regolith and the `H2O` ice.
+/// - the Rayleigh layer added, `RAYLEIGH_ADDING_VERSION` (P14.T24.h.b), at
+///   `RayleighAddingRules::Added` through `with_rayleigh_adding`: the air's layer over the area mix
+///   by the adding rule, Earth's cloud re-split.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are the version's) is not
@@ -511,8 +514,8 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     };
     use crate::planetary::derive::passes::{PassStep, PassStop, with_pass_step, with_pass_stop};
     use crate::planetary::derive::photometry::area_mix::{
-        IcyRegolithRules, MinorCloudsRules, OrganicSedimentRules, with_icy_regolith,
-        with_minor_clouds, with_organic_sediment,
+        IcyRegolithRules, MinorCloudsRules, OrganicSedimentRules, RayleighAddingRules,
+        with_icy_regolith, with_minor_clouds, with_organic_sediment, with_rayleigh_adding,
     };
     use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
@@ -560,6 +563,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_icy_regolith(IcyRegolithRules::Mixture, run);
     let run = move || with_minor_clouds(MinorCloudsRules::OwnShare, run);
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
+    let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     with_locked_climate(LockedClimateRules::Deck, run)
 }
 

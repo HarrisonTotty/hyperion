@@ -2502,13 +2502,155 @@ pub(crate) fn sun_bands() -> [f64; OPTICS_BANDS] {
 /// gives Earth's area mix NASA's 0.294 at its 0.67 of cloud, both T13.c's table's, `A_cloud` =
 /// (0.294 − (1 − 0.67) `A_clear`) ÷ 0.67, with `A_clear` the reference Earth's clear sky computed
 /// from the registry ([`reference_earth_clear_sky`]), so that it follows the registry's rows.
+///
+/// Under the adding rule ([`RayleighAddingRules::Added`], P14.T24.h.b) Earth's cloud is re-split:
+/// its 0.294 is the cloud over 0.67 above its clear sky under its own Rayleigh layer
+/// ([`reference_earth_rayleigh`], [`rayleigh_added`]), the clear sky's 0.33 taking its Rayleigh
+/// share, so that `A_cloud` = (0.294 − 0.33 `R_add`(R, `A_clear`)) ÷ 0.67. The 0.294 is NASA's,
+/// Earth's 2000s, whose anthropogenic aerosol and land-use brightening (IPCC AR6 WGI ch. 7's
+/// effective radiative forcings, from memory) the fit takes as the cloud's, stated.
 #[must_use]
 pub(crate) fn water_cloud_albedo() -> f64 {
     let earth = SurfaceState::Temperate
         .albedo(SurfaceMaterial::Rock)
         .value();
     let cloud = SurfaceState::Temperate.cloud_fraction();
-    (earth - (1.0 - cloud) * reference_earth_clear_sky()) / cloud
+    let clear = match RayleighAddingRules::in_force() {
+        RayleighAddingRules::Max => reference_earth_clear_sky(),
+        RayleighAddingRules::Added => {
+            rayleigh_added(reference_earth_rayleigh(), reference_earth_clear_sky())
+        }
+    };
+    (earth - (1.0 - cloud) * clear) / cloud
+}
+
+/// The generator version from which a body's air's Rayleigh layer is laid over its clear sky by the
+/// adding rule, not taken as its floor (P14.T24.h.b's fourth part; decision-p14-t51-batch §9.4;
+/// decision-p14-t54a-passes §G3.5): 26, the train after 25's.
+///
+/// It is this rule's one hold. Below it [`RayleighAddingRules::in_force`] is
+/// [`RayleighAddingRules::Max`]: the snapshot path's Bond albedo is the larger of the area mix and
+/// the floor, and the water cloud's calibration Earth's 0.294 without its air, as to 25, bit for
+/// bit. 26's bump deletes this hold, [`RayleighAddingRules`] with its `Max` arm, the guards in
+/// [`water_cloud_albedo`] and `surface_mix::floored`, the tests' switch and its tripwire
+/// (`the_rayleigh_adding_is_held_only_until_the_26_bump`).
+pub(crate) const RAYLEIGH_ADDING_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// How the air's Rayleigh layer joins the area mix (its hold, [`RAYLEIGH_ADDING_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum RayleighAddingRules {
+    /// Version 25's and before: the larger of the two, P14.T24.h.a's floor.
+    Max,
+    /// Version 26's: the layer over the clear sky by the adding rule ([`rayleigh_added`]), the cloud
+    /// above it, Earth's cloud re-split ([`water_cloud_albedo`]).
+    Added,
+}
+
+impl RayleighAddingRules {
+    /// The rules this generator version gives: the adding rule from [`RAYLEIGH_ADDING_VERSION`],
+    /// the max below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_rayleigh_adding`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = RAYLEIGH_ADDING_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= RAYLEIGH_ADDING_VERSION {
+            Self::Added
+        } else {
+            Self::Max
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The adding rule's rules a test sets on its thread, `None` for the version's.
+    static RAYLEIGH_ADDING_RULES: core::cell::Cell<Option<RayleighAddingRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the adding rule's rules `rules` on this thread, for the tests to reach
+/// version 26's ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. A record derives lazily, and a shade takes its water cloud when it is built, so a
+/// test reads both inside the switch. 26's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_rayleigh_adding<R>(rules: RayleighAddingRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<RayleighAddingRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            RAYLEIGH_ADDING_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(RAYLEIGH_ADDING_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// `run`'s result with P14.T24.h.b's holds at 26 set back to their held arms on this thread (the
+/// minor clouds, the sediment and the adding rule), for a test that pins another hold's figures
+/// inside `with_every_26_hold` as they stood before them; each set back after, a panic in `run`
+/// included. 26's bump deletes it with them.
+#[cfg(test)]
+pub(crate) fn with_scattering_held<R>(run: impl FnOnce() -> R) -> R {
+    with_minor_clouds(MinorCloudsRules::WaterShare, || {
+        with_organic_sediment(OrganicSedimentRules::Bare, || {
+            with_rayleigh_adding(RayleighAddingRules::Max, run)
+        })
+    })
+}
+
+/// The Bond albedo of a conservative layer of reflectance `layer` over black laid over a ground of
+/// Bond albedo `ground` (P14.T24.h.b's fourth part): the adding rule for two diffusely reflecting
+/// layers, R + T² A ÷ (1 − A R) with the conservative layer's transmission T = 1 − R, that is R +
+/// (1 − R)² A ÷ (1 − A R) (van de Hulst 1980, *Multiple Light Scattering*, the adding method,
+/// from memory; decision-p14-t51-batch §9.4's form): the light the ground returns, passed through
+/// the layer both ways and reflected between them. It is R at A = 0, 1 at A = 1, and at least
+/// either, so that the floor it replaces still holds.
+#[must_use]
+pub(crate) fn rayleigh_added(layer: f64, ground: f64) -> f64 {
+    let through = 1.0 - layer;
+    layer + through * through * ground / (1.0 - ground * layer)
+}
+
+/// The ground's Bond albedo A beneath a conservative layer of reflectance `layer` whose total is
+/// `total` ([`rayleigh_added`] inverted): A = (Rₜ − R) ÷ [(1 − R)² + R (Rₜ − R)].
+#[cfg(test)]
+#[must_use]
+pub(crate) fn beneath_rayleigh(total: f64, layer: f64) -> f64 {
+    let through = 1.0 - layer;
+    let above = total - layer;
+    above / (through * through + layer * above)
+}
+
+/// The reference Earth's air: 101,325 Pa of dry air, N₂, O₂ and Ar at their dry mole fractions with
+/// 360 ppm of CO₂ (Bodhaine et al. 1999, J. Atmos. Ocean. Tech. 16, 1854, as P14.T24.h.a's tests
+/// take it).
+#[must_use]
+pub(crate) fn reference_earth_air() -> PartialPressures {
+    const DRY: [(Gas, f64); 4] = [
+        (Gas::Nitrogen, 0.780_84),
+        (Gas::Oxygen, 0.209_46),
+        (Gas::Argon, 0.009_34),
+        (Gas::CarbonDioxide, 0.000_36),
+    ];
+    let sum = DRY.iter().fold(0.0, |sum, &(_, x)| sum + x);
+    PartialPressures::from_fn(|gas| {
+        let x = DRY
+            .iter()
+            .find(|&&(g, _)| g == gas)
+            .map_or(0.0, |&(_, x)| x);
+        Pascals::new(STANDARD_ATMOSPHERE.value() * x / sum)
+    })
+}
+
+/// The reference Earth's Rayleigh layer about a Sun: [`rayleigh_floor`] of its air
+/// ([`reference_earth_air`]) at [`EARTH_SURFACE_GRAVITY`], about 0.058, which the water cloud's
+/// re-split separates ([`water_cloud_albedo`]).
+#[must_use]
+pub(crate) fn reference_earth_rayleigh() -> f64 {
+    rayleigh_floor_in(&reference_earth_air(), EARTH_SURFACE_GRAVITY, &sun_bands())
 }
 
 /// The area mix A = `f_c` `A_cloud` + (1 − `f_c`) `A_surface` of a surface of Bond albedo `surface`
@@ -2715,6 +2857,16 @@ pub(crate) fn rayleigh_floor(
     gravity: MetresPerSecondSquared,
     shade: &HostShade,
 ) -> f64 {
+    rayleigh_floor_in(partials, gravity, shade.bands())
+}
+
+/// [`rayleigh_floor`] under the light `bands` in the optics' bins.
+#[must_use]
+fn rayleigh_floor_in(
+    partials: &PartialPressures,
+    gravity: MetresPerSecondSquared,
+    bands: &[f64; OPTICS_BANDS],
+) -> f64 {
     let tau = rayleigh_optical_depth(partials, gravity);
     if tau.is_nan() || tau <= 0.0 {
         return 0.0;
@@ -2728,5 +2880,5 @@ pub(crate) fn rayleigh_floor(
         );
         *albedo = conservative_spherical_albedo(tau * thinned);
     }
-    band_weighted(&albedos, shade.bands())
+    band_weighted(&albedos, bands)
 }
