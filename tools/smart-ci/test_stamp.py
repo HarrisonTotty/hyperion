@@ -138,6 +138,21 @@ class TheKey(Scratch):
         # Staged or not, the working tree's content is the key.
         self.assertNotIn(stamp.worktree_tree(self.repo), (clean, edited))
 
+    def test_an_edit_of_the_same_size_in_the_index_s_own_tick_gives_another_key(self) -> None:
+        # Racy git, made certain: the file is staged with an mtime, the index carries the same one as
+        # if written in that tick, and an edit of the same size keeps it, with ctime not compared.
+        # Git re-reads the entry only if the index it reads is that old, as the copy must be.
+        self.git("config", "core.trustctime", "false")
+        path = self.repo / "src/lib.rs"
+        then = os.stat(path).st_mtime_ns - 10 * 10**9
+        os.utime(path, ns=(then, then))
+        self.git("add", "src/lib.rs")
+        os.utime(self.repo / ".git" / "index", ns=(then, then))
+        clean = self.git("rev-parse", "HEAD^{tree}")
+        self.write("src/lib.rs", "pub fn g() {}\n")
+        os.utime(path, ns=(then, then))
+        self.assertNotEqual(stamp.worktree_tree(self.repo), clean)
+
     def test_an_untracked_file_is_in_the_key_and_an_ignored_one_is_not(self) -> None:
         clean = stamp.worktree_tree(self.repo)
         self.write("target/debug/out.txt", "built\n")

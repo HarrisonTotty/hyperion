@@ -157,13 +157,17 @@ def stamps_dir(root: Path) -> Path:
 def worktree_tree(root: Path) -> str:
     """The tree of the working tree as it stands, uncommitted and untracked files included, ignored ones
     not: `git add -A` into a copy of the index, then `git write-tree`, so that the index is untouched.
-    gh-collab's gate log computes the same (`ghcollab.worktree_tree`)."""
+    gh-collab's gate log computes the same (`ghcollab.worktree_tree`).
+
+    The copy keeps the index's mtime. Git re-reads an entry whose file changed in the index's own
+    timestamp tick (racy git), but only if the index is that old: a copy stamped now would let an
+    edit of the same size, made in that tick after `git add`, pass as unchanged."""
     index = _absolute(root, git(root, "rev-parse", "--git-path", "index"))
     temp = _absolute(root, git(root, "rev-parse", "--git-path", f"smart-ci-index-{os.getpid()}"))
     env = {**os.environ, "GIT_INDEX_FILE": str(temp)}
     try:
         if index.exists():
-            shutil.copyfile(index, temp)
+            shutil.copy2(index, temp)
         git(root, "add", "-A", env=env)
         return git(root, "write-tree", env=env)
     except OSError as err:

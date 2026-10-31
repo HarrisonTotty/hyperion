@@ -1012,14 +1012,16 @@ GATE_HEADER = "gh-collab gate:"
 
 def worktree_tree(git: Git, scratch: Path) -> str:
     """The tree of the working tree as it stands, untracked files included, ignored ones not,
-    built in a copy of the index so that the real one is untouched."""
+    built in a copy of the index so that the real one is untouched. The copy keeps the index's
+    mtime, so that git's check for racily clean entries still sees an edit of the same size made in
+    the index's timestamp tick (smart-ci's `stamp.worktree_tree`)."""
     index = Path(git("rev-parse", "--git-path", "index"))
     if not index.is_absolute():
         index = Path(git.cwd or ".") / index
     temp = scratch / f"gate-index-{os.getpid()}"
     try:
         if index.exists():
-            shutil.copyfile(index, temp)
+            shutil.copy2(index, temp)
         env = {"GIT_INDEX_FILE": str(temp)}
         git.run("add", "-A", env=env)
         return git("write-tree", env=env)
