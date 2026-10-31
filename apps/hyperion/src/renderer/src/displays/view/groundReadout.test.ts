@@ -704,24 +704,103 @@ describe("the primary's terrain readout at each publish (R10.T12; decision-r10-t
   });
 
   describe("at the STYLE panel's BASELINE (R10.T12.a; decision-r10-t12a-scope §3.1)", () => {
-    it("asks at the baseline each publish gives from its next ask, under the same reference pad", async () => {
+    it("asks at the baseline each publish gives, under the same reference pad", async () => {
       const fake = holdingMoon();
       const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
       const run = terrainRun();
       readouts.publish(asSession(fake), run, 0);
-      // A choice while the first is out waits for the next ask.
-      readouts.publish(asSession(fake), run, 16, 5);
       askAt(fake, 0).answer(NOT_SURVEYED);
       await settle();
-      readouts.publish(asSession(fake), run, 33, 5);
+      readouts.publish(asSession(fake), run, 16, 5);
       askAt(fake, 1).answer(NOT_SURVEYED);
       await settle();
-      readouts.publish(asSession(fake), run, 50, 100);
+      readouts.publish(asSession(fake), run, 33, 100);
       expect(fake.asks.map((ask) => ask.options)).toEqual([
         { slopeBaselineM: 2, padWidthM: 1 },
         { slopeBaselineM: 5, padWidthM: 1 },
         { slopeBaselineM: 100, padWidthM: 1 },
       ]);
+    });
+
+    describe("asked at once at a choice (R10.T12.c)", () => {
+      it("asks once at a choice while a query is out at the baseline before", () => {
+        const fake = holdingMoon();
+        const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+        const run = terrainRun();
+        readouts.publish(asSession(fake), run, 0, 2);
+        readouts.publish(asSession(fake), run, 16, 5);
+        readouts.publish(asSession(fake), run, 33, 5);
+        expect(fake.asks.map((ask) => ask.options.slopeBaselineM)).toEqual([2, 5]);
+      });
+
+      it("drops the answer of the query let go at a choice, and states the next answer", async () => {
+        const fake = holdingMoon();
+        const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+        const run = terrainRun();
+        readouts.publish(asSession(fake), run, 0, 2);
+        readouts.publish(asSession(fake), run, 16, 5);
+        askAt(fake, 0).answer(NO_GROUND);
+        await settle();
+        const beforeAnswer = readouts.publish(asSession(fake), run, 33, 5);
+        askAt(fake, 1).answer(NOT_SURVEYED);
+        await settle();
+        const afterAnswer = readouts.publish(asSession(fake), run, 50, 5);
+        expect([beforeAnswer?.readout, afterAnswer?.readout]).toEqual([null, NOT_SURVEYED]);
+      });
+
+      it("is due at a choice, then once the answer asked for it has come, and not between", async () => {
+        const fake = holdingMoon();
+        const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+        const run = terrainRun();
+        readouts.publish(asSession(fake), run, 0, 2);
+        const atChoice = readouts.due(5);
+        readouts.publish(asSession(fake), run, 16, 5);
+        const whileOut = readouts.due(5);
+        askAt(fake, 1).answer(NOT_SURVEYED);
+        await settle();
+        const answered = readouts.due(5);
+        readouts.publish(asSession(fake), run, 33, 5);
+        const taken = readouts.due(5);
+        expect({ atChoice, whileOut, answered, taken }).toEqual({
+          atChoice: true,
+          whileOut: false,
+          answered: true,
+          taken: false,
+        });
+      });
+
+      it("is not due for an answer to a query asked in the readouts' turn", async () => {
+        const fake = holdingMoon();
+        const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+        readouts.publish(asSession(fake), terrainRun(), 0, 5);
+        askAt(fake, 0).answer(NOT_SURVEYED);
+        await settle();
+        expect(readouts.due(5)).toBe(false);
+      });
+
+      it.each<readonly [string, (fake: FakeReadoutSession) => void]>([
+        ["before anything is asked", () => undefined],
+        [
+          "while no survey of the body is held",
+          (fake) => {
+            fake.surveys.clear();
+          },
+        ],
+        [
+          "under the session's terrain fault",
+          (fake) => {
+            fake.terrainFault = TERRAIN_COMPUTATION_FAILED;
+          },
+        ],
+      ])("is not due at a choice %s", (name, change) => {
+        const fake = holdingMoon();
+        const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+        change(fake);
+        if (name !== "before anything is asked") {
+          readouts.publish(asSession(fake), terrainRun(), 0, 2);
+        }
+        expect(readouts.due(100)).toBe(false);
+      });
     });
 
     it("takes an answer asked at the baseline before a choice as it came", async () => {

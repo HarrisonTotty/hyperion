@@ -154,6 +154,32 @@ describe("the view's label block", () => {
   });
 });
 
+describe("the view's label block's labels kept whole (R10.T12.c; decision-r10-t12a-scope §7 item 5)", () => {
+  /** A block's lines: the upper plate's first lines, the wireframe's interval and the sky's. */
+  const LINES: ViewLabelBlockProps["lines"] = [
+    { label: "FRAME", value: "TEST MOON BODY-FIXED" },
+    { label: "CONTOUR INTERVAL", value: "2.5 km" },
+    { label: "STARS", value: "V 9.5 mag CAM · BEYOND 1000 ly: STREAMING", dotsLead: true },
+  ];
+
+  it.each<readonly [string, ViewLabelBlockProps["scroll"]]>([
+    ["the PRIMARY view's upper plate", { from: "STARS", room: { kind: "whole" }, view: "PRIMARY" }],
+    ["an instrument's block, which never scrolls", undefined],
+  ])("sets every reading of %s on a line with the whole-label class", (_, scroll) => {
+    render(
+      <ViewLabelBlock lines={LINES} statements={[]} countLine={null} faults={[]} scroll={scroll} />,
+    );
+    const terms = screen.getAllByRole("term");
+    expect({
+      labels: terms.map((term) => term.textContent),
+      classes: [...new Set(terms.map((term) => term.parentElement?.className))],
+    }).toEqual({
+      labels: ["FRAME", "CONTOUR INTERVAL", "STARS"],
+      classes: ["field view-label__line view-label__line--whole"],
+    });
+  });
+});
+
 describe("the view's label block's line breaks (R07.T19.b)", () => {
   const LINES = [
     { label: "TIME", value: "UT +0 yr 000/00:00:01" },

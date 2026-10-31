@@ -5,7 +5,6 @@ import classSource from "../../../../../../../crates/hyperion-surface/src/materi
 import readingSource from "../../../../../../../crates/hyperion-surface/src/reading.rs?raw";
 import wasmSource from "../../../../../../../crates/hyperion-surface/src/wasm.rs?raw";
 import { add, norm, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
-import { substanceName } from "../../lib/substances";
 import { moonLikeHeader } from "../../test/coarseFieldFixtures";
 import { aBody, aViewScene, FIXTURE_PLANET } from "../../test/viewFixtures";
 import type { CameraPose } from "../camera/pose";
@@ -1577,22 +1576,24 @@ describe("the tallest forms (decision-r10-view-block-room §3)", () => {
     (longest, form) => (form.length > longest.length ? form : longest),
   );
 
-  it("takes the longest form and UNLISTED MATERIAL where the palette names none longer", () => {
-    expect(readoutLineText(lineOf(TALLEST.readout, "MATERIAL"))).toBe(
-      `MATERIAL ${LONGEST_FORM} S · UNLISTED MATERIAL S`,
-    );
+  it("takes the longest form and the longest substance name, whatever the palette names (R10.T12.c)", () => {
+    const header: SurfaceHeaderDto = { ...HEADER, palette: [entry("basalt_fe", "primary_crust")] };
+    expect(
+      [TALLEST, tallestTerrainLines(header, 1)].map((tallest) =>
+        readoutLineText(lineOf(tallest.readout, "MATERIAL")),
+      ),
+    ).toEqual([
+      `MATERIAL ${LONGEST_FORM} S · ULTRAVIOLET-ABSORBING H2SO4 S`,
+      `MATERIAL ${LONGEST_FORM} S · ULTRAVIOLET-ABSORBING H2SO4 S`,
+    ]);
   });
 
-  it("takes the longest substance the palette names where it is longer than UNLISTED MATERIAL", () => {
-    const longest = substanceName("acid_uv_absorber", "upper");
-    const header: SurfaceHeaderDto = {
-      ...HEADER,
-      palette: [entry("basalt_fe", "primary_crust"), entry("acid_uv_absorber", "deposit")],
-    };
-    expect([
-      longest.length > "UNLISTED MATERIAL".length,
-      readoutLineText(lineOf(tallestTerrainLines(header, 1).readout, "MATERIAL")),
-    ]).toEqual([true, `MATERIAL ${LONGEST_FORM} S · ${longest} S`]);
+  it("takes a palette's substance where its name is longer than any the console's list gives", () => {
+    const key = "Mg2Si2O6Ca2Al2Si2O8Fe2Si2O6K2Na2";
+    const header: SurfaceHeaderDto = { ...HEADER, palette: [entry(key, "primary_crust")] };
+    expect(readoutLineText(lineOf(tallestTerrainLines(header, 1).readout, "MATERIAL"))).toBe(
+      `MATERIAL ${LONGEST_FORM} S · ${key} S`,
+    );
   });
 
   it("marks every value of every line stale, each with its S", () => {

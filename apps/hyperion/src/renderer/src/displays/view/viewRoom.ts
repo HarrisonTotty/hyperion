@@ -25,6 +25,12 @@
  * with one label row ({@link LINE_SPARE_REM}) to spare, so that a part that gave way at the edge
  * does not come back and go again as one statement clears and returns.
  *
+ * The width test (R10.T12.c; decision-r10-t12a-scope §7 item 4): a part of the lower plate whose
+ * widest unbroken run, at its tallest, passes its plate gives way in the same order whatever the
+ * heights (the readout first, then the survey line's values and `DATUM`), so that no run stands
+ * past a plate: beside a slot in a tall, narrow window, the readout's widest runs pass a plate of
+ * about 13 rem ({@link leastStepOf}).
+ *
  * A slot is held where the stage cannot hold it whole, for the window, the interface scale or its
  * own statements: `INSTRUMENT 2` first, which while `INSTRUMENT 1` stands stands as its stub, its
  * title row with `CLOSE` and `NOT AVAILABLE: no room at this window size`; else held whole. A held
@@ -36,6 +42,27 @@ export const STAGE_INSET_REM = 0.5;
 
 /** The least space between the two plates, rem. */
 export const PLATE_GAP_REM = 0.5;
+
+/**
+ * The stage's height, rem, below which, while no slot stands, the primary's plates stand either side
+ * of the picture's centre ({@link PlateArrangement}; plan R10, R10.T12.c): stacked, the tallest
+ * states measured at the floor (`TERRAIN TEST`, the primary photorealistic in `CHASE`, its upper
+ * plate 25.1 rem, and the readout at its tallest, 13.1 rem, with the insets and the gap) take 39.7
+ * rem. The floor's stage is 33.5 rem tall; 1920 × 1080's at 125% about 42.4 and at 100% 56, and
+ * 1600 × 900's at 100% about 44.8, where the plates stand stacked as before.
+ */
+export const COLUMNS_BELOW_HEIGHT_REM = 40;
+
+/**
+ * The least width of a stage on which the plates stand in columns, rem: each column then at least
+ * 22.5 rem wide, holding the readout's widest unbroken run (`MATERIAL`'s, about 16.5 rem) and its
+ * labels whole; the floor's stage is 51 rem wide. Below it, under the floor, they stand stacked as
+ * before.
+ */
+export const COLUMNS_MIN_WIDTH_REM = 48;
+
+/** The space each plate in columns keeps from the picture's centre, rem: the tripod's ticks reach 0.44. */
+export const CENTRE_CLEAR_REM = 1;
 
 /**
  * One label row, rem, the room a part that gave way needs to spare before it returns: the label
@@ -95,7 +122,7 @@ export type LowerPlatePart<Node> =
     };
 
 /** The name a yield line gives each part it holds back, as the guide names them. */
-const HELD_NAMES: Readonly<Record<Exclude<LowerPartKind, "state">, string>> = {
+const HELD_NAMES: Readonly<Record<YieldingPart, string>> = {
   survey: "SURVEY COVERAGE",
   datum: "DATUM",
   readout: "GROUND AT LINE OF SIGHT",
@@ -109,7 +136,7 @@ const HELD_NAMES: Readonly<Record<Exclude<LowerPartKind, "state">, string>> = {
  *
  * @throws RangeError for no part, since a line holding nothing back is never stated.
  */
-export function lowerYieldLine(kinds: ReadonlyArray<Exclude<LowerPartKind, "state">>): string {
+export function lowerYieldLine(kinds: ReadonlyArray<YieldingPart>): string {
   const names = (["survey", "datum", "readout"] as const)
     .filter((kind) => kinds.includes(kind))
     .map((kind) => HELD_NAMES[kind]);
@@ -135,6 +162,9 @@ export interface UpperPlateMeasures {
   readonly positionPx: number;
 }
 
+/** A part of the lower plate that gives way. */
+export type YieldingPart = Exclude<LowerPartKind, "state">;
+
 /** The lower plate's heights at one width, CSS px, each of its groups at its tallest. */
 export interface LowerPlateMeasures {
   /** The plate with every part standing. */
@@ -143,6 +173,12 @@ export interface LowerPlateMeasures {
   readonly readoutYieldedPx: number | null;
   /** With its survey line's values and `DATUM` given way too; `null` where it holds neither. */
   readonly surveyYieldedPx: number | null;
+  /**
+   * The parts whose widest unbroken run, at its tallest, passes the plate at this width (R10.T12.c;
+   * decision-r10-t12a-scope §7 item 4), each of which gives way whatever the heights; none where
+   * every run stands within it.
+   */
+  readonly passing: ReadonlyArray<YieldingPart>;
 }
 
 /** Both plates' heights at one width. */
@@ -186,6 +222,8 @@ export interface RoomInput {
    * stage than `stage`, in the render after a resize or a change of interface scale, are stale.
    */
   readonly measuredStage: StageRoom | null;
+  /** Whether the stage fits the plates in columns while no slot stands: `columnsFit(stage)`. */
+  readonly columns: boolean;
 }
 
 /**
@@ -211,6 +249,17 @@ export type UpperRoom =
  */
 export type PlateStep = 0 | 1 | 2 | 3 | 5 | 6;
 
+/**
+ * How the primary's plates stand (plan R10, R10.T12.c): `stacked`, both at the stage's left, the
+ * upper plate at its top and the lower plate at its foot, sharing its height; or `columns`, where no
+ * slot stands on a stage under {@link COLUMNS_BELOW_HEIGHT_REM} tall and at least
+ * {@link COLUMNS_MIN_WIDTH_REM} wide, either side of the picture's centre, the upper plate at the
+ * top left and the lower plate at the bottom right, each ending {@link CENTRE_CLEAR_REM} short of
+ * the centre and each with the stage's whole height, so that neither covers the point the readout
+ * reads.
+ */
+export type PlateArrangement = "stacked" | "columns";
+
 /** The room decided: what stands, what gives way and what is held. */
 export interface ViewRoom {
   /** Each slot's standing, after step 4. */
@@ -225,6 +274,8 @@ export interface ViewRoom {
   /** Whether the survey line's values and `DATUM` stand. */
   readonly survey: "stands" | "yields";
   readonly upper: UpperRoom;
+  /** How the plates stand: stacked, beside the slots among them, or in columns (R10.T12.c). */
+  readonly arrangement: PlateArrangement;
   /**
    * The stage it was decided at, from plates measured there, or `null` where it was not (before
    * the stage is laid out, or on stale measures): only a room decided at the same stage, so
@@ -255,12 +306,28 @@ function heldForRoom(each: SlotStanding): SlotStanding {
   return each === "closed" ? "closed" : "held";
 }
 
-/** The room before anything is laid out: every open slot stands, and nothing gives way. */
-export function wholeRoom(slots: RoomInput["slots"]): ViewRoom {
+/**
+ * Whether the plates stand in columns on `stage` while no slot stands: under
+ * {@link COLUMNS_BELOW_HEIGHT_REM} tall and at least {@link COLUMNS_MIN_WIDTH_REM} wide (R10.T12.c).
+ */
+export function columnsFit(stage: StageRoom): boolean {
+  return (
+    stage.heightPx < COLUMNS_BELOW_HEIGHT_REM * stage.remPx &&
+    stage.widthPx >= COLUMNS_MIN_WIDTH_REM * stage.remPx
+  );
+}
+
+/**
+ * The room before anything is laid out: every open slot stands, and nothing gives way; the plates
+ * in columns where none is open and the stage fits them (`columnsFit`), so that they are first
+ * measured as they will stand.
+ */
+export function wholeRoom(slots: RoomInput["slots"], columnsFitting = false): ViewRoom {
   const standing: readonly [SlotStanding, SlotStanding] = [
     standingBefore(slots[0]),
     standingBefore(slots[1]),
   ];
+  const columns = columnsFitting && standing.every((each) => each === "closed");
   return {
     slots: standing,
     ownSlots: standing,
@@ -269,6 +336,7 @@ export function wholeRoom(slots: RoomInput["slots"]): ViewRoom {
     readout: "stands",
     survey: "stands",
     upper: { kind: "whole" },
+    arrangement: columns ? "columns" : "stacked",
     basis: null,
   };
 }
@@ -338,10 +406,33 @@ function lowerAt(lower: LowerPlateMeasures | null, step: PlateStep): number | nu
   return lower.wholePx;
 }
 
+/**
+ * The least step at which every part of the lower plate that stands has its widest run within the
+ * plate (the width test; R10.T12.c): 2 where the survey line's or `DATUM`'s passes it, 1 where the
+ * readout's does, else 0. A run's width does not come and go with the readings, the parts being
+ * measured at their tallest; a part it gave way returns, as every part does, once it would stand
+ * with a line to spare.
+ */
+export function leastStepOf(lower: LowerPlateMeasures | null): PlateStep {
+  if (lower === null) {
+    return 0;
+  }
+  const { passing } = lower;
+  if (lower.surveyYieldedPx !== null && (passing.includes("survey") || passing.includes("datum"))) {
+    return 2;
+  }
+  return lower.readoutYieldedPx !== null && passing.includes("readout") ? 1 : 0;
+}
+
 /** The plates' standing at one width, or `null` where none of the steps allowed holds them. */
 interface PlatesStanding {
   readonly step: PlateStep;
   readonly upper: UpperRoom;
+  /**
+   * How far the lower plate's parts give way, where it is decided apart from the upper plate's (in
+   * columns, R10.T12.c); else the step says it.
+   */
+  readonly lowerStep?: PlateStep;
 }
 
 /**
@@ -364,10 +455,12 @@ function platesAt(
   };
   const hasReadout = lower !== null && lower.readoutYieldedPx !== null;
   const hasSurvey = lower !== null && lower.surveyYieldedPx !== null;
+  // A part whose widest run passes the plate gives way however tall the plates are.
+  const least = leastStepOf(lower);
   const steps: ReadonlyArray<PlateStep> = [0, 1, 2];
   for (const step of steps) {
     const applies = step === 0 || (step === 1 && hasReadout) || (step === 2 && hasSurvey);
-    if (applies && step <= lastStep && fits(upper.wholePx, step)) {
+    if (applies && step >= least && step <= lastStep && fits(upper.wholePx, step)) {
       return { step, upper: { kind: "whole" } };
     }
   }
@@ -409,6 +502,72 @@ function bodyScrollAt(
   return { step: 6, upper: { kind: "body", heightPx } };
 }
 
+/** The lower plate's step in columns: the least that holds it in `roomPx`, a return with a line spare. */
+function lowerStepIn(
+  lower: LowerPlateMeasures | null,
+  roomPx: number,
+  sparePx: number,
+  previousStep: PlateStep,
+): PlateStep {
+  if (lower === null) {
+    return 0;
+  }
+  const steps: ReadonlyArray<PlateStep> = [0, 1, 2];
+  const applies = (step: PlateStep): boolean =>
+    step === 0 ||
+    (step === 1 && lower.readoutYieldedPx !== null) ||
+    (step === 2 && lower.surveyYieldedPx !== null);
+  const least = leastStepOf(lower);
+  const held = steps.filter((step) => applies(step) && step >= least);
+  return (
+    held.find((step) => {
+      const lowerPx = lowerAt(lower, step) ?? 0;
+      return lowerPx + (step < previousStep ? sparePx : 0) <= roomPx;
+    }) ??
+    held.at(-1) ??
+    0
+  );
+}
+
+/**
+ * The plates in columns (R10.T12.c): each in the stage's whole height, decided apart, the lower
+ * plate's parts giving way only for its own height and widths and the upper plate's lines
+ * scrolling only for its own; the step the further of the two.
+ */
+function columnsAt(
+  measures: PlateMeasures,
+  roomPx: number,
+  sparePx: number,
+  previous: ViewRoom | null,
+): PlatesStanding {
+  const { upper, lower } = measures;
+  const previousLower: PlateStep =
+    previous === null
+      ? 0
+      : previous.survey === "yields"
+        ? 2
+        : previous.readout === "yields"
+          ? 1
+          : 0;
+  const lowerStep = lowerStepIn(lower, roomPx, sparePx, previousLower);
+  const upperOnly: PlateMeasures = { upper, lower: null };
+  const previousUpper: PlateStep =
+    previous === null || previous.upper.kind === "whole"
+      ? 0
+      : previous.upper.kind === "body"
+        ? 6
+        : previous.step;
+  const upperStanding =
+    platesAt(upperOnly, roomPx, 0, sparePx, previousUpper, 5) ??
+    bodyScrollAt(upperOnly, roomPx, 0, sparePx);
+  const upperStep = upperStanding.upper.kind === "whole" ? 0 : upperStanding.step;
+  return {
+    step: upperStep > lowerStep ? upperStep : lowerStep,
+    upper: upperStanding.upper,
+    lowerStep,
+  };
+}
+
 /**
  * The room decided for the stage's present measures (decision-r10-view-block-room §3), from the
  * room decided before, whose standing sets each part's hysteresis.
@@ -416,7 +575,9 @@ function bodyScrollAt(
  * @remarks
  * First the slots by their own room ({@link SlotStanding}); then, beside those that stand, the
  * plates at the least step up to 3 that holds them; where none does, every open slot is held (step
- * 4) and the plates take the full width, at any step. Slots held for the plates return once the
+ * 4) and the plates take the full width, at any step. With no slot standing, on a stage that fits
+ * them, the plates stand in columns ({@link PlateArrangement}), each decided in the stage's whole
+ * height (R10.T12.c). Slots held for the plates return once the
  * plates beside them would stand at step 3 or less with a line to spare. Before the stage or the
  * plates are measured, nothing gives way.
  *
@@ -426,7 +587,7 @@ function bodyScrollAt(
 export function viewRoom(input: RoomInput, decidedBefore: ViewRoom | null): ViewRoom {
   const { stage, full } = input;
   if (stage === null || !(stage.remPx > 0) || full === null) {
-    return wholeRoom(input.slots);
+    return wholeRoom(input.slots, input.columns);
   }
   const fresh = sameStage(input.measuredStage, stage);
   const previous =
@@ -443,25 +604,28 @@ export function viewRoom(input: RoomInput, decidedBefore: ViewRoom | null): View
     slots: readonly [SlotStanding, SlotStanding],
     heldForPlates: boolean,
     plates: PlatesStanding,
+    arrangement: PlateArrangement,
   ): ViewRoom => {
     const lower = full.lower;
     const hasReadout = lower !== null && lower.readoutYieldedPx !== null;
     const hasSurvey = lower !== null && lower.surveyYieldedPx !== null;
+    const lowerStep = plates.lowerStep ?? plates.step;
     return {
       slots,
       ownSlots,
       heldForPlates,
       step: plates.step,
-      readout: plates.step >= 1 && hasReadout ? "yields" : "stands",
-      survey: plates.step >= 2 && hasSurvey ? "yields" : "stands",
+      readout: lowerStep >= 1 && hasReadout ? "yields" : "stands",
+      survey: lowerStep >= 2 && hasSurvey ? "yields" : "stands",
       upper: plates.upper,
+      arrangement,
       basis,
     };
   };
   if (anyStands) {
     const beside = input.beside;
     if (beside === null) {
-      return decided(ownSlots, false, { step: 0, upper: { kind: "whole" } });
+      return decided(ownSlots, false, { step: 0, upper: { kind: "whole" } }, "stacked");
     }
     // Held for the plates, the slots return only with a line to spare beside them.
     const returning = previous?.heldForPlates === true;
@@ -474,17 +638,23 @@ export function viewRoom(input: RoomInput, decidedBefore: ViewRoom | null): View
       3,
     );
     if (besideStanding !== null) {
-      return decided(ownSlots, false, besideStanding);
+      return decided(ownSlots, false, besideStanding, "stacked");
     }
   }
   const held: readonly [SlotStanding, SlotStanding] = [
     heldForRoom(ownSlots[0]),
     heldForRoom(ownSlots[1]),
   ];
+  // With no slot standing, the plates stand in columns where the stage fits them (R10.T12.c).
+  const arrangement: PlateArrangement = input.columns ? "columns" : "stacked";
   const plates =
-    platesAt(full, roomPx, gapPx, sparePx, previousStep, 5) ??
-    bodyScrollAt(full, roomPx, gapPx, sparePx);
-  return anyStands ? decided(held, true, plates) : decided(ownSlots, false, plates);
+    arrangement === "columns"
+      ? columnsAt(full, roomPx, sparePx, previous)
+      : (platesAt(full, roomPx, gapPx, sparePx, previousStep, 5) ??
+        bodyScrollAt(full, roomPx, gapPx, sparePx));
+  return anyStands
+    ? decided(held, true, plates, arrangement)
+    : decided(ownSlots, false, plates, arrangement);
 }
 
 /**
@@ -546,6 +716,7 @@ export function sameRoom(a: ViewRoom, b: ViewRoom): boolean {
     a.step === b.step &&
     a.readout === b.readout &&
     a.survey === b.survey &&
+    a.arrangement === b.arrangement &&
     (a.basis === b.basis || sameStage(a.basis, b.basis))
   );
 }

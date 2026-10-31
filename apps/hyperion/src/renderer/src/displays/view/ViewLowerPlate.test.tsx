@@ -48,6 +48,19 @@ describe("VIEW's lower plate (R10.T12.b)", () => {
     ]);
   });
 
+  it("names each part's group for the room's width test, the yield line naming none (R10.T12.c)", () => {
+    render(
+      <ViewLowerPlate parts={[STATE, SURVEY, DATUM, READOUT]} readout="yields" survey="stands" />,
+    );
+    const plate = document.querySelector(".view-label--lower");
+    expect([...(plate?.children ?? [])].map((entry) => entry.getAttribute("data-part"))).toEqual([
+      "state",
+      "survey",
+      "datum",
+      null,
+    ]);
+  });
+
   it("states the readout's yield line in its place", () => {
     render(<ViewLowerPlate parts={[SURVEY, DATUM, READOUT]} readout="yields" survey="stands" />);
     expect(entries()).toEqual(["SURVEY COVERAGE 64 %", "DATUM AREOID", READOUT_HELD]);

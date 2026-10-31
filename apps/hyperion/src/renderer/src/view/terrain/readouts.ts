@@ -50,7 +50,7 @@ import {
   type PressureUnit,
   type SurfaceRangeUnit,
 } from "../../lib/format";
-import { substanceName } from "../../lib/substances";
+import { LONGEST_SUBSTANCE_LABEL, substanceName } from "../../lib/substances";
 import type { CameraPose } from "../camera/pose";
 import { rotationRows } from "../camera/quaternion";
 import { relativeToCamera } from "../coords/relative";
@@ -1333,8 +1333,10 @@ export interface TallestTerrainLines {
  * - `SLANT RANGE` takes the longer label, `SLANT RANGE FROM CAMERA`, and both of its forms at once:
  *   its widest Estimated value and uncertainty, and the `· GRAZING` part that stands in the
  *   uncertainty's place where it grazes, so that it is as tall as either at any width.
- * - `MATERIAL` takes the longest form's name and the longest substance the header's palette names
- *   (or `UNLISTED MATERIAL` where that is longer), each stale.
+ * - `MATERIAL` takes the longest form's name and the longest substance name any world can give
+ *   (`LONGEST_SUBSTANCE_LABEL`, by construction; plan R10, R10.T12.c), or the header's palette's
+ *   where one is longer, each stale, so that the plate's widest run is not what a served world
+ *   happens to show.
  * - `SLOPE` takes the longest `BASELINE`, 100 m ({@link LONGEST_BASELINE_M}), so that the room
  *   holds whichever the `STYLE` panel's selector sets (R10.T12.a).
  *
@@ -1360,7 +1362,7 @@ export function tallestTerrainLines(
   ]);
   const substances = header.palette.map((named) => substanceName(named.substance, "upper"));
   const form = longestOf(MATERIAL_FORMS) ?? MISSING;
-  const substance = longestOf([...substances, "UNLISTED MATERIAL"]) ?? MISSING;
+  const substance = longestOf([LONGEST_SUBSTANCE_LABEL, ...substances]) ?? MISSING;
   const estimated = (value: string, uncertainty: string): FieldReading => ({
     value: `${ESTIMATED}${value}`,
     uncertainty: `±${NO_BREAK_SPACE}${uncertainty}`,

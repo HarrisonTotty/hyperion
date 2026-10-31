@@ -32,6 +32,7 @@ import {
 } from "../../view/terrain/annunciation";
 import { PALETTE_NONE, type SurfaceGroundReadout } from "../../view/terrain/workers/messages";
 import {
+  GROUND_HEADING,
   NO_BREAK_SPACE,
   NO_SIGHT_ROTATION,
   NO_SIGHT_ROTATION_NOT_RESOLVED,
@@ -1249,6 +1250,22 @@ function sliceSystemWithWithheldEarth(): SceneSystemDto {
   return sliceSystemWith((body) => withWithheldEarth(turnJupiter(body)));
 }
 
+describe("the primary's lower plate in columns (R10.T12.c)", () => {
+  it("stands the readout at the floor with no slot open, the lower plate and its sizer's forms in columns", async () => {
+    const view = await terrainTestReading();
+    // The floor's stage, 1280 × 720 at 100%: 51 × 33.5 rem.
+    view.resizeStage({ widthPx: 816, heightPx: 536 });
+    await readAtBaselinesFor(view, 2);
+    const forms = [...document.querySelectorAll("[data-sizer='lower'] [data-form] > .view-label")];
+    expect(within(plate()).getByText(GROUND_HEADING)).toBeInTheDocument();
+    expect({
+      plate: plate().classList.contains("view-label--columns"),
+      forms:
+        forms.length > 0 && forms.every((form) => form.classList.contains("view-label--columns")),
+    }).toEqual({ plate: true, forms: true });
+  });
+});
+
 describe("the primary's readout's BASELINE on the STYLE panel (R10.T12.a; decision-r10-t12a-scope §3.1)", () => {
   it("reads SLOPE over 5 m from the next answer once 5 m is chosen on the Style PRIMARY panel", async () => {
     const view = await terrainTestReading();
@@ -1267,6 +1284,37 @@ describe("the primary's readout's BASELINE on the STYLE panel (R10.T12.a; decisi
       after: [5],
       slope: `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° · BASELINE 5 m`,
       pressed: "5 m",
+    });
+  });
+
+  it("asks at a choice within two frames of it, and states the answer within two frames of its coming (R10.T12.c)", async () => {
+    const view = await terrainTestReading();
+    await readAtBaselinesFor(view, 2);
+    const pending = (): number[] =>
+      view.heightWorkers.flatMap((worker) =>
+        worker.pendingGroundReadouts.map((query) => query.slopeBaselineM),
+      );
+    // To the frame after a publish in the readouts' turn, whose query is then out at 2 m, so that
+    // the next turn is about 250 ms off.
+    for (let frame = 0; frame < 30 && pending().length === 0; frame += 1) {
+      view.advance(16);
+    }
+    const outAtTurn = pending();
+    const style = screen.getByRole("region", { name: "Style PRIMARY" });
+    await view.user.click(within(style).getByRole("button", { name: "5 m" }));
+    view.advance(32);
+    const askedAtChoice = pending();
+    answerAtAskedBaselines(view);
+    await settle();
+    view.advance(32);
+    expect({
+      outAtTurn,
+      askedAtChoice,
+      slope: readingIn(plate(), "SLOPE")?.trim(),
+    }).toEqual({
+      outAtTurn: [2],
+      askedAtChoice: [2, 5],
+      slope: `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° · BASELINE 5 m`,
     });
   });
 

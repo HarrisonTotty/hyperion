@@ -13,8 +13,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  columnsFit,
   INSTRUMENT_SLOT_REM,
+  leastStepOf,
   LINE_SPARE_REM,
+  type LowerPlateMeasures,
   lowerYieldLine,
   type PlateMeasures,
   type RoomInput,
@@ -25,9 +28,11 @@ import {
   slotWidthFits,
   type StageRoom,
   STUB_HEIGHT_REM,
+  type UpperPlateMeasures,
   type ViewRoom,
   viewRoom,
   wholeRoom,
+  type YieldingPart,
 } from "./viewRoom";
 
 /**
@@ -49,7 +54,7 @@ const FULL: PlateMeasures = {
     bodyPx: 420,
     positionPx: 18,
   },
-  lower: { wholePx: 120, readoutYieldedPx: 60, surveyYieldedPx: 40 },
+  lower: { wholePx: 120, readoutYieldedPx: 60, surveyYieldedPx: 40, passing: [] },
 };
 
 /**
@@ -65,7 +70,7 @@ const BESIDE: PlateMeasures = {
     bodyPx: 620,
     positionPx: 18,
   },
-  lower: { wholePx: 160, readoutYieldedPx: 80, surveyYieldedPx: 60 },
+  lower: { wholePx: 160, readoutYieldedPx: 80, surveyYieldedPx: 60, passing: [] },
 };
 
 /** {@link FULL} with its upper plate `wholePx` tall whole, its lines before `STARS` as they are. */
@@ -97,7 +102,7 @@ function stageOf(heightPx: number, widthPx = 1280, remPx = 16): StageRoom {
 
 /**
  * The decision's input on `stage`: both slots closed and the plates at {@link FULL}, measured at
- * `stage`, by default.
+ * `stage`, stacked, by default.
  */
 function inputOn(stage: StageRoom | null, overrides: Partial<RoomInput> = {}): RoomInput {
   return {
@@ -107,6 +112,7 @@ function inputOn(stage: StageRoom | null, overrides: Partial<RoomInput> = {}): R
     stubHeightRem: STUB_HEIGHT_REM,
     full: FULL,
     beside: null,
+    columns: false,
     ...overrides,
   };
 }
@@ -287,6 +293,232 @@ describe("VIEW's room decided afresh (R10.T12.b)", () => {
 
   it("takes no basis where the plates' stage is not measured", () => {
     expect(roomAt(600, { measuredStage: null }).basis).toBeNull();
+  });
+});
+
+/** `plates` with these lower parts' widest runs passing their plate (R10.T12.c). */
+function passing(plates: PlateMeasures, parts: ReadonlyArray<YieldingPart>): PlateMeasures {
+  const { lower } = plates;
+  if (lower === null) {
+    throw new Error("the plates hold no lower plate");
+  }
+  return { ...plates, lower: { ...lower, passing: parts } };
+}
+
+/** The room decided on a 1280 px stage `heightPx` tall, the readout's widest run passing its plate. */
+function readoutPassingAt(heightPx: number): ViewRoom {
+  return roomAt(heightPx, { full: passing(FULL, ["readout"]) });
+}
+
+describe("VIEW's room: the width test (R10.T12.c; decision-r10-t12a-scope §7 item 4)", () => {
+  it("gives the readout way where its widest run passes the plate, on a stage tall enough for it", () => {
+    const room = readoutPassingAt(600);
+    expect([room.step, room.readout, room.survey, room.upper]).toEqual([
+      1,
+      "yields",
+      "stands",
+      { kind: "whole" },
+    ]);
+  });
+
+  it.each<readonly [YieldingPart]>([["survey"], ["datum"]])(
+    "gives the survey line's values and DATUM way, the readout with them, where %s's run passes the plate",
+    (part) => {
+      const room = roomAt(600, { full: passing(FULL, [part]) });
+      expect([room.step, room.readout, room.survey]).toEqual([2, "yields", "yields"]);
+    },
+  );
+
+  it("still scrolls the upper plate where the heights call for it past the width's step", () => {
+    const room = readoutPassingAt(470);
+    expect([room.step, room.upper]).toEqual([3, { kind: "middle", heightPx: 180, lines: 8 }]);
+  });
+
+  it("gives the readout way beside a slot it passes, the slot standing, rather than holding the slot", () => {
+    const room = roomAt(700, {
+      slots: [OPEN, CLOSED],
+      beside: passing(besideWith(400), ["readout"]),
+    });
+    expect([room.slots, room.heldForPlates, room.step, room.readout]).toEqual([
+      ["stands", "closed"],
+      false,
+      1,
+      "yields",
+    ]);
+  });
+
+  it("stands the readout again once its run is within the plate, with a line to spare as ever", () => {
+    // The plates whole take 568 px: with a line to spare, 585.5 px of the room.
+    expect([
+      roomAt(600, {}, readoutPassingAt(600)).readout,
+      roomAt(602, {}, readoutPassingAt(602)).readout,
+    ]).toEqual(["yields", "stands"]);
+  });
+
+  it("is 0 with no lower plate, and ignores a run of a part the plate does not hold", () => {
+    const readoutOnly: LowerPlateMeasures = {
+      wholePx: 120,
+      readoutYieldedPx: 60,
+      surveyYieldedPx: null,
+      passing: ["survey"],
+    };
+    expect([leastStepOf(null), leastStepOf(readoutOnly)]).toEqual([0, 0]);
+  });
+});
+
+/** The floor's upper plate as measured (R10.T12.c): `wholePx` tall, ten 19 px lines before `STARS`. */
+function floorUpper(wholePx: number): UpperPlateMeasures {
+  return {
+    wholePx,
+    middleLinesPx: Array.from({ length: 10 }, () => 19),
+    pinnedLines: 5,
+    bodyPx: wholePx - 22,
+    positionPx: 18,
+  };
+}
+
+/** The floor's lower plate at its tallest (R10.T12.c), `wholePx` whole, 77 and 40 px given way. */
+function floorLower(wholePx: number): LowerPlateMeasures {
+  return {
+    wholePx,
+    readoutYieldedPx: 77,
+    surveyYieldedPx: 40,
+    passing: [],
+  };
+}
+
+describe("VIEW's room: the plates in columns (R10.T12.c)", () => {
+  /** In columns on the stage: no slot standing, the stage fitting them. */
+  const COLUMNS: Partial<RoomInput> = { columns: true };
+
+  it("stands the readout at the floor in its tallest state beside a photorealistic CHASE plate, as measured", () => {
+    // TERRAIN TEST at 1280 × 720, 100% (pod, SwiftShader): the upper plate 401 px whole stacked,
+    // 438 px capped short of the centre (its STARS line and one note on a second row); the lower
+    // plate at its tallest 210 px at the full width and, by arithmetic, 324 px in its 24 rem column
+    // (16 rows of 19 px, the heading's margin and the padding), 77 and 40 px given way.
+    const stage = stageOf(536, 816);
+    const stacked = viewRoom(
+      inputOn(stage, { full: { upper: floorUpper(401), lower: floorLower(210) } }),
+      null,
+    );
+    const columns = viewRoom(
+      inputOn(stage, {
+        full: { upper: floorUpper(438), lower: floorLower(324) },
+        columns: columnsFit(stage),
+      }),
+      null,
+    );
+    expect({
+      fits: columnsFit(stage),
+      stacked: stacked.readout,
+      columns: [columns.arrangement, columns.readout, columns.survey, columns.upper.kind],
+    }).toEqual({
+      fits: true,
+      stacked: "yields",
+      columns: ["columns", "stands", "stands", "whole"],
+    });
+  });
+
+  it("stands both plates whole in columns where stacked the readout would give way", () => {
+    const room = roomAt(530, COLUMNS);
+    expect([
+      roomAt(530).readout,
+      room.arrangement,
+      room.step,
+      room.readout,
+      room.survey,
+      room.upper,
+    ]).toEqual(["yields", "columns", 0, "stands", "stands", { kind: "whole" }]);
+  });
+
+  it("gives the lower plate's parts way only for its own height, the upper plate whole", () => {
+    const tallLower: PlateMeasures = {
+      ...FULL,
+      lower: { wholePx: 520, readoutYieldedPx: 60, surveyYieldedPx: 40, passing: [] },
+    };
+    const room = roomAt(530, { ...COLUMNS, full: tallLower });
+    expect([room.step, room.readout, room.survey, room.upper]).toEqual([
+      1,
+      "yields",
+      "stands",
+      { kind: "whole" },
+    ]);
+  });
+
+  it("scrolls the upper plate's lines only for its own height, the readout standing", () => {
+    const room = roomAt(400, COLUMNS);
+    expect([room.readout, room.survey, room.upper.kind, room.step]).toEqual([
+      "stands",
+      "stands",
+      "middle",
+      3,
+    ]);
+  });
+
+  it("scrolls the whole upper plate in the stage's room less nothing for the lower plate", () => {
+    const room = roomAt(200, COLUMNS);
+    // 200 px less the insets and the VIEW and position lines (38 px).
+    expect([room.readout, room.upper]).toEqual([
+      "stands",
+      { kind: "body", heightPx: 200 - 16 - 38 },
+    ]);
+  });
+
+  it("gives the readout way where its widest run passes the plate, in columns too", () => {
+    const room = roomAt(600, { ...COLUMNS, full: passing(FULL, ["readout"]) });
+    expect([room.arrangement, room.step, room.readout]).toEqual(["columns", 1, "yields"]);
+  });
+
+  it("returns a lower part in columns only with a line to spare", () => {
+    // The lower plate whole takes 520 px of a 514 px room at 530, and 530.5 with its spare.
+    const tall = (wholePx: number): PlateMeasures => ({
+      ...FULL,
+      lower: { wholePx, readoutYieldedPx: 60, surveyYieldedPx: 40, passing: [] },
+    });
+    const yielded = roomAt(530, { ...COLUMNS, full: tall(520) });
+    expect([
+      roomAt(530, { ...COLUMNS, full: tall(497) }, yielded).readout,
+      roomAt(530, { ...COLUMNS, full: tall(496.5) }, yielded).readout,
+    ]).toEqual(["yields", "stands"]);
+  });
+
+  it("stands the plates stacked beside a slot that stands, whatever the stage fits", () => {
+    const room = roomAt(700, { ...COLUMNS, slots: [OPEN, CLOSED], beside: besideWith(400) });
+    expect([room.slots, room.arrangement]).toEqual([["stands", "closed"], "stacked"]);
+  });
+
+  it("stands the plates in columns once the slots are held for them", () => {
+    const room = roomAt(530, { ...COLUMNS, slots: [OPEN, CLOSED], beside: BESIDE });
+    expect([room.heldForPlates, room.arrangement, room.readout]).toEqual([
+      true,
+      "columns",
+      "stands",
+    ]);
+  });
+
+  it("first lays the plates out in columns where no slot is open and the stage fits them", () => {
+    expect([
+      wholeRoom([CLOSED, CLOSED], true).arrangement,
+      wholeRoom([OPEN, CLOSED], true).arrangement,
+      wholeRoom([CLOSED, CLOSED]).arrangement,
+      viewRoom(inputOn(stageOf(530), { ...COLUMNS, full: null }), null).arrangement,
+    ]).toEqual(["columns", "stacked", "stacked", "columns"]);
+  });
+
+  it.each<readonly [string, StageRoom, boolean]>([
+    ["the floor's, 51 × 33.5 rem", stageOf(536, 816), true],
+    ["1920 × 1080's at 150%, 51 × 33.54 rem", stageOf(805, 1224, 24), true],
+    ["1920 × 1080's at 125%, 67 × 42.38 rem", stageOf(847.5, 1340, 20), false],
+    ["1600 × 900's at 100%, about 71 × 44.8 rem", stageOf(716, 1136), false],
+    ["1920 × 1080's at 100%, 70 × 56 rem", stageOf(896, 1120), false],
+    ["a tall narrow window's, 51 × 62.5 rem", stageOf(1000, 816), false],
+    ["1280 × 720's at 125%, about 35 × 24.6 rem, under the floor", stageOf(492, 708, 20), false],
+  ])("fits the plates in columns on %s: %s", (_, stage, fits) => {
+    expect(columnsFit(stage)).toBe(fits);
+  });
+
+  it("tells two rooms in other arrangements apart", () => {
+    expect(sameRoom(roomAt(600), roomAt(600, COLUMNS))).toBe(false);
   });
 });
 
@@ -595,6 +827,7 @@ describe("VIEW's room before anything is laid out (R10.T12.b)", () => {
       readout: "stands",
       survey: "stands",
       upper: { kind: "whole" },
+      arrangement: "stacked",
       basis: null,
     });
   });

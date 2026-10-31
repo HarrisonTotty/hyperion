@@ -514,7 +514,7 @@ describe("the readings' labels kept whole (R10.T12.a; decision-r10-t12a-scope §
     ]);
   });
 
-  it("leaves the shared line rule, which the upper plate and the instruments' blocks take, as it was", () => {
+  it("leaves the shared line rule unwrapped, the whole-label class carrying the wrap", () => {
     const shared = stylesheetRule(".view-label__line");
     expect([/flex-wrap/u.test(shared), /display: flex;/u.test(shared)]).toEqual([false, true]);
   });

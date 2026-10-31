@@ -132,8 +132,9 @@ import { ViewLabelBlock } from "./ViewLabelBlock";
 import { ViewLowerPlate } from "./ViewLowerPlate";
 import { InstrumentStub } from "./InstrumentStub";
 import { measureRoom, NOT_MEASURED, type RoomMeasures, sameRoomMeasures } from "./plateMeasures";
-import { BESIDE_CLASS, ViewRoomSizers } from "./ViewRoomSizers";
+import { BESIDE_CLASS, COLUMNS_CLASS, ViewRoomSizers } from "./ViewRoomSizers";
 import {
+  columnsFit,
   INSTRUMENT_SLOT_REM,
   type RoomInput,
   roomToOpen,
@@ -547,11 +548,6 @@ interface Published {
    */
   readonly contourIntervalM: number | null;
   /**
-   * What its label block's terrain lines are made from, its `FRAME` body's survey and the terrain
-   * readout's latest answer (plan R10, R10.T12; `GroundReadouts`); `null` where it states none.
-   */
-  readonly ground: GroundSnapshot | null;
-  /**
    * What its last frame said of its bodies' atmospheres (plan R08, R08.T10.b), for its label
    * block's notes and fault lines.
    */
@@ -765,10 +761,14 @@ function ViewStage({
     terrain: null,
     surveyEdges: NO_SURVEY_EDGES,
     contourIntervalM: null,
-    ground: null,
     atmosphere: NO_ATMOSPHERE_SHOWN,
   });
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
+  // What the label block's terrain lines are made from, its FRAME body's survey and the terrain
+  // readout's latest answer (R10.T12; `GroundReadouts`), or `null` where it states none: published
+  // with the readouts at 4 Hz and, for a choice of BASELINE, out of their turn, and not throttled
+  // again, so that the answer to a choice stands as it comes (R10.T12.c).
+  const [ground, setGround] = useState<GroundSnapshot | null>(null);
   // The meter as the loop last read it out (R07.T16.b): given in the same frame as the exposure the
   // controller moved to, and not throttled again (the loop reads out at the readout rate), so that
   // the exposure's reading and the meter's status stand as one snapshot.
@@ -850,16 +850,26 @@ function ViewStage({
     full: measures.full,
     beside: measures.beside,
     measuredStage: measures.stage,
+    columns: size !== null && size.remPx > 0 && columnsFit(size),
   };
-  const [shownRoom, setShownRoom] = useState<ViewRoom>(() => wholeRoom(roomInput.slots));
+  const [shownRoom, setShownRoom] = useState<ViewRoom>(() =>
+    wholeRoom(roomInput.slots, roomInput.columns),
+  );
   const decided = viewRoom(roomInput, shownRoom);
   const room = sameRoom(decided, shownRoom) ? shownRoom : decided;
   if (room !== shownRoom) {
     setShownRoom(room);
   }
   const standingOf = (slot: InstrumentSlot): SlotStanding => room.slots[slot - 1] ?? "closed";
-  // The plates take the width left of the slots that stand, whole or as a stub.
+  // The plates take the width left of the slots that stand, whole or as a stub; with none
+  // standing, on a stage that fits them, they stand in columns either side of the centre
+  // (R10.T12.c).
   const beside = room.slots.some((each) => each === "stands" || each === "stub");
+  const plateClass = beside
+    ? BESIDE_CLASS
+    : room.arrangement === "columns"
+      ? COLUMNS_CLASS
+      : undefined;
   const heldOne = standingOf(1) === "stub" || standingOf(1) === "held";
   const heldTwo = standingOf(2) === "stub" || standingOf(2) === "held";
   // A held slot draws nothing, so it is budgeted for nothing either.
@@ -930,7 +940,7 @@ function ViewStage({
   // The primary's terrain lines (R10.T12): its survey line, DATUM and readout, from the loop's
   // latest publish, on the lower plate; the tripod and the list's note only while the plate states
   // the readout (decision-r10-view-block-room §3).
-  const terrainLines = useTerrainLines(shown.ground, faults);
+  const terrainLines = useTerrainLines(ground, faults);
   const lowerParts = terrainLowerParts(terrainLines);
   const readoutAnswer = standingReadout(terrainLines, room.readout);
   const sightPoint = readoutAnswer === null ? undefined : lineOfSightPointOf(readoutAnswer);
@@ -1360,12 +1370,16 @@ function ViewStage({
           terrain: terrainAnnunciation,
           surveyEdges,
           contourIntervalM,
-          ground: grounds.publish(session, run, nowMs, inputs.slopeBaselineM),
           atmosphere:
             atmosphereReport === null
               ? NO_ATMOSPHERE_SHOWN
               : atmosphereShownOf(atmosphereReport, run.scene),
         });
+        setGround(grounds.publish(session, run, nowMs, inputs.slopeBaselineM));
+      } else if (grounds.due(inputs.slopeBaselineM)) {
+        // A choice of BASELINE is asked at once, and its answer stands as it comes, out of the
+        // readouts' turn (R10.T12.c); the other readouts keep theirs.
+        setGround(grounds.publish(session, run, nowMs, inputs.slopeBaselineM));
       }
       frame = requestAnimationFrame(tick);
     };
@@ -1840,7 +1854,7 @@ function ViewStage({
                 countLine={primaryCount}
                 faults={faults}
                 scroll={{ from: STARS_LABEL, room: room.upper, view: PRIMARY_NAME }}
-                className={beside ? BESIDE_CLASS : undefined}
+                className={plateClass}
               />
               {lowerParts.length === 0 ? null : (
                 <ViewLowerPlate
@@ -1848,7 +1862,7 @@ function ViewStage({
                   parts={lowerParts}
                   readout={room.readout}
                   survey={room.survey}
-                  className={beside ? BESIDE_CLASS : undefined}
+                  className={plateClass}
                 />
               )}
               <div className="view-instruments">
@@ -1916,7 +1930,7 @@ function ViewStage({
                     faults,
                   }}
                   lower={lowerParts}
-                  liveBeside={beside}
+                  liveClass={plateClass}
                   beside={room.heldForPlates}
                   scrollsFrom={STARS_LABEL}
                 />

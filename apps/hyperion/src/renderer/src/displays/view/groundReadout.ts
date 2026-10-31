@@ -12,9 +12,14 @@
  *   (`lineOfSightOf`) and `TerrainSession.groundReadout` at the instant the view lights the body
  *   at, the scene's time less the body's light time (§6 (c)), with the baseline the publish gives
  *   (the `STYLE` panel's `BASELINE`, 2 m as the display mounts; R10.T12.a) and the reference pad.
- *   One query is in flight at a time: a publish while one is out asks nothing, and the next asks
- *   afresh, so that the newest pose and baseline are the ones asked; an answer asked at a baseline
- *   since changed is taken as it came, its `SLOPE` stating the baseline it was read over.
+ *   One query is in flight at a time: a publish while one is out at its baseline asks nothing, and
+ *   the next asks afresh, so that the newest pose and baseline are the ones asked; an answer asked
+ *   at a baseline since changed, and come before the change, is taken as it came, its `SLOPE`
+ *   stating the baseline it was read over.
+ * - **A choice of `BASELINE`** (R10.T12.c) is asked at once, not at the next 4 Hz ask: the loop
+ *   publishes out of its turn while {@link GroundReadouts.due} says so, and that publish lets a
+ *   query still out at the baseline before go, its answer dropped, and asks at the new one; that
+ *   query's answer is due as it comes, so that the loop's next frame publishes it.
  * - **The answer** is taken at the next publish, so that its readings change with the loop's
  *   readouts, and only where it is still the session's and the body's it was asked of; one for a
  *   session let go or a body no longer framed is dropped. Nothing stands before the first answer
@@ -189,10 +194,28 @@ export class GroundReadouts {
   #sightGap: SightGap | null = null;
   #inFlight: Asked | null = null;
   #settled: Settled | null = null;
+  /** The baseline of the last query asked, `null` while none is held or out. */
+  #askedBaselineM: SlopeBaselineM | null = null;
+  /** Whether the query out was asked for a choice of baseline, so that its answer is due at once. */
+  #chosen = false;
 
   /** @param view - The view whose readout it asks: the primary's (decision-r10-t12-leans §3). */
   constructor(view: ViewId) {
     this.#view = view;
+  }
+
+  /**
+   * Whether the loop should publish the readout out of its 4 Hz turn (R10.T12.c): `slopeBaselineM`
+   * is not the baseline last asked, so that it is asked at once, or the answer to a query asked for
+   * a choice of baseline has come, so that it stands as it comes.
+   *
+   * @param slopeBaselineM - The `STYLE` panel's `BASELINE` now, m.
+   */
+  due(slopeBaselineM: SlopeBaselineM): boolean {
+    return (
+      (this.#askedBaselineM !== null && slopeBaselineM !== this.#askedBaselineM) ||
+      (this.#chosen && this.#settled !== null)
+    );
   }
 
   /**
@@ -203,8 +226,8 @@ export class GroundReadouts {
    *
    * @param nowMs - The frame's monotonic time, ms, by which the guards count a run of failures.
    * @param slopeBaselineM - The baseline the next query asks `SLOPE` over, m: the `STYLE` panel's
-   *   `BASELINE` (R10.T12.a); `GROUND_READOUT_OPTIONS`' 2 m unless given. A query already in
-   *   flight keeps its own.
+   *   `BASELINE` (R10.T12.a); `GROUND_READOUT_OPTIONS`' 2 m unless given. A query in flight at
+   *   another baseline is let go, and this one asked at once (R10.T12.c).
    */
   publish(
     session: TerrainSession | null,
@@ -253,12 +276,15 @@ export class GroundReadouts {
       // first answer of its own.
       this.#readout = null;
       this.#sightGap = null;
-      this.#settled = null;
-      this.#inFlight = null;
-    } else if (this.#inFlight === null) {
+      this.#letQueriesGo();
+    } else if (this.#inFlight === null || slopeBaselineM !== this.#askedBaselineM) {
+      // A choice of baseline is asked now: a query still out at the one before is let go, so that
+      // its answer, read over a baseline no longer chosen, never stands (R10.T12.c).
+      const chosen = this.#askedBaselineM !== null && slopeBaselineM !== this.#askedBaselineM;
+      this.#letQueriesGo();
       this.#asks.run(
         () => {
-          this.#ask(session, run, body, header, slopeBaselineM);
+          this.#ask(session, run, body, header, slopeBaselineM, chosen);
         },
         undefined,
         nowMs,
@@ -286,15 +312,26 @@ export class GroundReadouts {
     this.#body = null;
     this.#readout = null;
     this.#sightGap = null;
+    this.#letQueriesGo();
+  }
+
+  /** Lets any answer still to come go: the query out, an outcome not yet taken, and their baseline. */
+  #letQueriesGo(): void {
     this.#settled = null;
     this.#inFlight = null;
+    this.#askedBaselineM = null;
+    this.#chosen = false;
   }
 
   /** Takes the outcome that came since the last publish, where it is this session's and body's. */
   #take(session: TerrainSession, body: BodyIdHex, nowMs: number): void {
     const settled = this.#settled;
     this.#settled = null;
-    if (settled === null || settled.session !== session || settled.body !== body) {
+    if (settled === null) {
+      return;
+    }
+    this.#chosen = false;
+    if (settled.session !== session || settled.body !== body) {
       return;
     }
     switch (settled.kind) {
@@ -317,6 +354,8 @@ export class GroundReadouts {
    * Asks the readout along the view's line of sight now, its outcome held for the next publish;
    * where none can be formed, asks nothing, lets the answer held go and holds why.
    *
+   * @param chosen - Whether it is asked for a choice of baseline, so that its answer is due at once.
+   *
    * @throws Error where the camera's distance from the body is not finite (`sightGapOf`), which
    *   the publish's guard takes.
    */
@@ -326,6 +365,7 @@ export class GroundReadouts {
     body: ViewBody,
     header: NonNullable<TerrainSurvey["header"]>,
     slopeBaselineM: SlopeBaselineM,
+    chosen: boolean,
   ): void {
     const pose = runPose(run);
     const sight = lineOfSightOf(pose, run.scene, body, header);
@@ -340,6 +380,8 @@ export class GroundReadouts {
     this.#sightGap = null;
     const asked: Asked = { session, body: body.id };
     this.#inFlight = asked;
+    this.#askedBaselineM = slopeBaselineM;
+    this.#chosen = chosen;
     const options: GroundReadoutOptions = { ...GROUND_READOUT_OPTIONS, slopeBaselineM };
     void this.#query(asked, sight, litTimeOf(run, body), options).catch((error: unknown) => {
       console.error("the terrain readout's answer could not be taken:", error);

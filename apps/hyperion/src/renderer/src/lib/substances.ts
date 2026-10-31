@@ -85,6 +85,20 @@ export const SUBSTANCE_NAMES: Readonly<Record<string, string>> = {
   cometary: "cometary dust",
 };
 
+/**
+ * The longest name a substance's key gives in an upper-case label, by construction (plan R10,
+ * R10.T12.c): the longest of {@link SUBSTANCE_NAMES}' names and {@link UNLISTED_MATERIAL}, the
+ * first where two are as long, so that a readout reckoned at it holds whatever substance a world
+ * names. A formula key's name is its formula, and no key in the registry's fixture gives a longer
+ * one (its test).
+ */
+export const LONGEST_SUBSTANCE_LABEL: string = [
+  UNLISTED_MATERIAL,
+  ...Object.values(SUBSTANCE_NAMES),
+]
+  .map((words) => upperCaseWords(words))
+  .reduce((longest, name) => (name.length > longest.length ? name : longest));
+
 /** The case a name is shown in: as written, inside a sentence, or in an upper-case label. */
 export type NameCase = "sentence" | "upper";
 

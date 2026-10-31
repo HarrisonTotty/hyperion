@@ -26,7 +26,7 @@ import {
 } from "../../view/engine/status";
 import { NO_VIEW_DRAWN, PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import type { ViewEngineSource } from "./useViewEngine";
-import { STUB_REASON } from "./viewRoom";
+import { CENTRE_CLEAR_REM, STAGE_INSET_REM, STUB_REASON } from "./viewRoom";
 import { describedText, statusLine } from "../../test/statusLine";
 import STYLES from "../../styles.css?raw";
 
@@ -970,6 +970,40 @@ describe("VIEW's room for its slots and plates (R10.T12.b)", () => {
     });
   });
 
+  describe("the plates in columns (R10.T12.c)", () => {
+    /** The floor's stage, 1280 × 720 at 100%: 51 × 33.5 rem, as measured. */
+    const FLOOR_STAGE: LaidOutPx = { widthPx: 816, heightPx: 536 };
+
+    it("stands the upper plate in columns with no slot open, on the floor's stage", async () => {
+      await setup({ stagePx: FLOOR_STAGE });
+      expect([
+        upperPlate().classList.contains("view-label--columns"),
+        upperPlate().classList.contains("view-label--beside"),
+      ]).toEqual([true, false]);
+    });
+
+    it("stands it stacked beside INSTRUMENT 1 while it stands", async () => {
+      const view = await setup({ stagePx: FLOOR_STAGE });
+      await openInstrument(view, "INSTRUMENT 1");
+      expect([
+        upperPlate().classList.contains("view-label--columns"),
+        upperPlate().classList.contains("view-label--beside"),
+      ]).toEqual([false, true]);
+    });
+
+    it("stands it in columns again once INSTRUMENT 1 closes", async () => {
+      const view = await setup({ stagePx: FLOOR_STAGE });
+      await openInstrument(view, "INSTRUMENT 1");
+      await closeInstrument(view, "INSTRUMENT 1");
+      expect(upperPlate()).toHaveClass("view-label--columns");
+    });
+
+    it("stands it stacked on a stage 40 rem tall or taller, as 80 × 45 rem's", async () => {
+      await setup();
+      expect(upperPlate()).not.toHaveClass("view-label--columns");
+    });
+  });
+
   describe("CONTROLS while its instrument is held", () => {
     /** INSTRUMENT 1 opened and made the CONTROLS view, then held on a narrow stage. */
     async function heldControls(): Promise<ViewDisplayHarness> {
@@ -997,6 +1031,24 @@ describe("VIEW's room for its slots and plates (R10.T12.b)", () => {
       view.advance(100);
       expect(controlsView()).toBe("INSTRUMENT 1");
     });
+  });
+});
+
+describe("VIEW's plates in columns in the stylesheet (R10.T12.c)", () => {
+  it("ends each plate in columns CENTRE_CLEAR_REM short of the picture's centre, past its inset", () => {
+    const shortOfHalfRem = String(STAGE_INSET_REM + CENTRE_CLEAR_REM).replace(".", "\\.");
+    expect(STYLES).toMatch(
+      new RegExp(
+        `\\.view-label--columns \\{\\s*max-width: calc\\(50% - ${shortOfHalfRem}rem\\);\\s*\\}`,
+        "u",
+      ),
+    );
+  });
+
+  it("stands the lower plate in columns at the bottom right, inset 0.5 rem", () => {
+    expect(STYLES).toMatch(
+      /\.view-label--lower\.view-label--columns \{\s*right: 0\.5rem;\s*left: auto;\s*\}/u,
+    );
   });
 });
 

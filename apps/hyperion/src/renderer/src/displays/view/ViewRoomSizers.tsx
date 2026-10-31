@@ -7,14 +7,23 @@ import type { LowerPlatePart, UpperRoom } from "./viewRoom";
 /** The class of a plate beside the standing slots, which takes the width left of them. */
 export const BESIDE_CLASS = "view-label--beside";
 
+/**
+ * The class of a plate in columns (`PlateArrangement`; R10.T12.c): the upper plate ending short of
+ * the picture's centre, the lower plate standing at the bottom right from past it.
+ */
+export const COLUMNS_CLASS = "view-label--columns";
+
 /** Props of {@link ViewRoomSizers}. */
 export interface ViewRoomSizersProps {
   /** The upper plate's content, for its copy beside the slots. */
   readonly upper: Pick<ViewLabelBlockProps, "lines" | "statements" | "countLine" | "faults">;
   /** The lower plate's parts, or none while the view states no terrain lines. */
   readonly lower: ReadonlyArray<LowerPlatePart<ReactNode>>;
-  /** Whether the live plates stand beside the slots, at whose width the lower plate's forms go. */
-  readonly liveBeside: boolean;
+  /**
+   * The live plates' class, {@link BESIDE_CLASS} beside the slots or {@link COLUMNS_CLASS} in
+   * columns, with which the lower plate's forms are laid out at their width; none at the full width.
+   */
+  readonly liveClass: string | undefined;
   /** Whether to lay out both plates beside the slots too: while the slots are held for them. */
   readonly beside: boolean;
   /** The label of the upper plate's first line that never scrolls (`STARS`). */
@@ -77,7 +86,8 @@ function LowerForms({ parts, className }: LowerFormsProps) {
 /**
  * The hidden copies by which `VIEW`'s room is reckoned (plan R10, R10.T12.b;
  * decision-r10-view-block-room §3): a position line's sample; the lower plate's forms, each part
- * at its tallest, at the live plates' width; and, while the slots are held for the plates, the
+ * at its tallest, at the live plates' width, beside the slots or in columns as they stand; and,
+ * while the slots are held for the plates, the
  * upper plate whole and the lower plate's forms beside where the slots would stand, by which they
  * return.
  *
@@ -91,7 +101,7 @@ function LowerForms({ parts, className }: LowerFormsProps) {
 export function ViewRoomSizers({
   upper,
   lower,
-  liveBeside,
+  liveClass,
   beside,
   scrollsFrom,
   ref,
@@ -105,7 +115,7 @@ export function ViewRoomSizers({
       </div>
       {lower.length === 0 ? null : (
         <div data-sizer="lower">
-          <LowerForms parts={lower} className={liveBeside ? BESIDE_CLASS : undefined} />
+          <LowerForms parts={lower} className={liveClass} />
         </div>
       )}
       {beside ? (

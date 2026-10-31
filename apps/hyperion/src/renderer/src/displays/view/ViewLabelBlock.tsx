@@ -40,7 +40,10 @@ export interface ViewLabelBlockProps {
    * decision-r10-view-block-room §3); none for a block that never scrolls, an instrument's.
    */
   readonly scroll?: LabelScroll | undefined;
-  /** More class names for the plate: `view-label--beside` beside the standing slots. */
+  /**
+   * More class names for the plate: `view-label--beside` beside the standing slots, or
+   * `view-label--columns` in columns (R10.T12.c).
+   */
   readonly className?: string | undefined;
   /** Receives the plate, which the display measures for its room (R10.T12.b). */
   readonly ref?: Ref<HTMLDivElement> | undefined;
@@ -309,7 +312,10 @@ export function readingParts(
  * @remarks
  * A reading breaks at its middle dots first, then at a space, never inside a quantity, between a
  * star limit and its kind, after `UT` or inside a clock reading, and its continuation lines hang
- * under the value (decision-r07-t19-layout, item 2).
+ * under the value (decision-r07-t19-layout, item 2). Its label stands whole, as the lower plate's
+ * do (`.view-label__line--whole`; plan R10, R10.T12.c): the value stands beside it where the label
+ * and the value's widest unbroken run share a line, and otherwise under it, from the plate's left
+ * edge; the label breaks only where it alone is wider than the block. So do an instrument's.
  * Each reading is an `output`; none is announced as it changes, since they change continuously. A
  * reading of a stale server scene is muted with its trailing `S` (the guide's "Data states"); a
  * line's fields, the sky's limit and edge, are each set in a fixed width and go stale alone, and
@@ -381,8 +387,10 @@ export function ViewLabelBlock({
       body.scrollTop = body.scrollHeight;
     }
   });
+  // Each label stands whole, as the lower plate's do (R10.T12.c; decision-r10-t12a-scope §7 item
+  // 5): the value beside it where the label and the value's widest run share a line, else under it.
   const lineOf = (line: LabelLine) => (
-    <div className="field view-label__line" key={line.label}>
+    <div className="field view-label__line view-label__line--whole" key={line.label}>
       <dt className="field__label">{line.label}</dt>
       <dd>
         <output aria-live="off" className={line.stale === true ? "stale" : undefined}>

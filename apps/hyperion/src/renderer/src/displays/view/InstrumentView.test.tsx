@@ -223,6 +223,15 @@ describe("VIEW's instrument views (R07.T19)", () => {
     ]);
   });
 
+  it("keeps every label of an open instrument's block whole, as the primary's plates do (R10.T12.c)", async () => {
+    const view = await setup();
+    await openInstrument(view, "INSTRUMENT 1");
+    const terms = within(screen.getByRole("region", { name: "INSTRUMENT 1" })).getAllByRole("term");
+    expect([...new Set(terms.map((term) => term.parentElement?.className))]).toEqual([
+      "field view-label__line view-label__line--whole",
+    ]);
+  });
+
   it("reaches each open instrument's canvas by Tab from the primary's", async () => {
     const view = await setup();
     await openInstrument(view, "INSTRUMENT 1");

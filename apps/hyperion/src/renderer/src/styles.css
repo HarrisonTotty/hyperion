@@ -4820,11 +4820,12 @@ body {
 }
 
 /*
- * A lower plate's reading, its label kept whole (plan R10, R10.T12.a; decision-r10-t12a-scope §4.3):
+ * A label block's reading, its label kept whole (plan R10, R10.T12.a; decision-r10-t12a-scope §4.3):
  * the label never shrinks, and breaks only where it alone is wider than the plate; the value stands
  * beside it, taking the rest of the line and breaking at its middle dots, then its spaces, wherever
  * the label and the value's widest unbroken run share a line, and otherwise wraps under the label
- * from the plate's left edge. The upper plate's and the instruments' lines keep the shared rule.
+ * from the plate's left edge. The lower plate's readings since R10.T12.a, and the upper plate's and
+ * the instruments' since R10.T12.c (§7 item 5).
  */
 .view-label__line--whole {
   flex-wrap: wrap;
@@ -4965,6 +4966,22 @@ body {
 .view-label--lower {
   top: auto;
   bottom: 0.5rem;
+}
+
+/*
+ * The primary's plates in columns (R10.T12.c), while no slot stands on a stage under 40 rem tall
+ * and at least 48 rem wide (`viewRoom.ts`' `columnsFit`): either side of the picture's centre, each
+ * ending 1 rem short of it past its 0.5 rem inset, the upper plate at the top left and the lower
+ * plate at the bottom right, so that neither covers the point the readout reads and each has the
+ * stage's whole height.
+ */
+.view-label--columns {
+  max-width: calc(50% - 1.5rem);
+}
+
+.view-label--lower.view-label--columns {
+  right: 0.5rem;
+  left: auto;
 }
 
 /*

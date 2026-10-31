@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import registry from "../../../../../../packages/protocol/fixtures/substances.json" with { type: "json" };
-import { SUBSTANCE_NAMES, UNLISTED_MATERIAL, substanceName } from "./substances";
+import {
+  LONGEST_SUBSTANCE_LABEL,
+  SUBSTANCE_NAMES,
+  UNLISTED_MATERIAL,
+  substanceName,
+} from "./substances";
 
 /** A name key, by `SubstanceKey`'s grammar. */
 const NAME_KEY = /^[a-z][a-z0-9_]*$/u;
@@ -126,5 +131,18 @@ describe("SUBSTANCE_NAMES", () => {
         ([, name]) => name.includes("_") || FORMULA_KEY.test(name) || name === UNLISTED_MATERIAL,
       ),
     ).toEqual([]);
+  });
+});
+
+describe("the longest substance label (plan R10, R10.T12.c)", () => {
+  it("is the longest name in upper case of the console's list and UNLISTED MATERIAL", () => {
+    expect(LONGEST_SUBSTANCE_LABEL).toBe("ULTRAVIOLET-ABSORBING H2SO4");
+  });
+
+  it("is as long as any name a key of the registry's fixture gives", () => {
+    const longer = registry.substances
+      .map((row) => substanceName(row.key, "upper"))
+      .filter((name) => name.length > LONGEST_SUBSTANCE_LABEL.length);
+    expect(longer).toEqual([]);
   });
 });

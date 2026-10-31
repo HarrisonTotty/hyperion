@@ -5,8 +5,9 @@
  *
  * @remarks
  * jsdom lays nothing out, so each element of the plates built here carries the height the test
- * lays it out at (`data-px`), its width where it matters (`data-width-px`), and a scroll its box's
- * and its content's (`data-client-px`, `data-scroll-px`), which the stubs read back.
+ * lays it out at (`data-px`), its width where it matters (`data-width-px`), a scroll its box's
+ * and its content's (`data-client-px`, `data-scroll-px`), and a lower plate's group its box's and
+ * its content's widths (`data-client-width-px`, `data-scroll-width-px`), which the stubs read back.
  */
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
@@ -44,6 +45,16 @@ function layOut(): void {
     this: HTMLElement,
   ) {
     return px(this, "data-scroll-px");
+  });
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function boxWidth(
+    this: HTMLElement,
+  ) {
+    return px(this, "data-client-width-px");
+  });
+  vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function contentWidth(
+    this: HTMLElement,
+  ) {
+    return px(this, "data-scroll-width-px");
   });
 }
 
@@ -217,7 +228,57 @@ describe("the lower plate's forms (R10.T12.b)", () => {
       wholePx: 120,
       readoutYieldedPx: 60,
       surveyYieldedPx: 40,
+      passing: [],
     });
+  });
+
+  /**
+   * The whole form's plate, its survey line's group `surveyContentPx` wide and its readout's
+   * `readoutContentPx`, each in a 214 px box, with a state line whose content is wider still.
+   */
+  function wholeForm(surveyContentPx: number, readoutContentPx: number): HTMLElement {
+    return laidOutPlate(
+      <div>
+        <div data-form="whole">
+          <div className="view-label" data-px="120">
+            <div
+              className="view-label__group"
+              data-part="state"
+              data-client-width-px="214"
+              data-scroll-width-px="400"
+            />
+            <div
+              className="view-label__group"
+              data-part="survey"
+              data-client-width-px="214"
+              data-scroll-width-px={surveyContentPx}
+            />
+            <div
+              className="view-label__group"
+              data-part="datum"
+              data-client-width-px="214"
+              data-scroll-width-px="214"
+            />
+            <div
+              className="view-label__group"
+              data-part="readout"
+              data-client-width-px="214"
+              data-scroll-width-px={readoutContentPx}
+            />
+          </div>
+        </div>
+      </div>,
+    );
+  }
+
+  it.each<readonly [string, number, number, ReadonlyArray<string>]>([
+    ["no run past the plate", 200, 214, []],
+    ["the readout's run past it by a pixel", 214, 215, ["readout"]],
+    ["the survey line's and the readout's past it", 264, 270, ["survey", "readout"]],
+    ["a run past it by less than half a pixel, as sub-pixel layout gives", 214, 214.4, []],
+  ])("finds the parts whose widest run passes the plate, with %s (R10.T12.c)", (...args) => {
+    const [, surveyPx, readoutPx, passing] = args;
+    expect(measureLowerForms(wholeForm(surveyPx, readoutPx))?.passing).toEqual(passing);
   });
 
   it("states no form it has no part for", () => {
@@ -232,6 +293,7 @@ describe("the lower plate's forms (R10.T12.b)", () => {
       wholePx: 30,
       readoutYieldedPx: null,
       surveyYieldedPx: null,
+      passing: [],
     });
   });
 
@@ -335,7 +397,7 @@ describe("two measures of the room alike (R10.T12.b)", () => {
       bodyPx: 420,
       positionPx: 18,
     },
-    lower: { wholePx: 120, readoutYieldedPx: 60, surveyYieldedPx: null },
+    lower: { wholePx: 120, readoutYieldedPx: 60, surveyYieldedPx: null, passing: [] },
   };
 
   /** The stage of a 1280 × 720 window at 100%, CSS px. */
@@ -382,6 +444,20 @@ describe("two measures of the room alike (R10.T12.b)", () => {
       sameRoomMeasures(
         { full: upperOnly, beside: null, stage: STAGE },
         { full: PLATES, beside: null, stage: STAGE },
+      ),
+    ).toBe(false);
+  });
+
+  it("counts a lower plate whose readout's run comes to pass it as changed (R10.T12.c)", () => {
+    const lower = PLATES.lower;
+    const passing: PlateMeasures = {
+      ...PLATES,
+      lower: lower === null ? null : { ...lower, passing: ["readout"] },
+    };
+    expect(
+      sameRoomMeasures(
+        { full: PLATES, beside: null, stage: STAGE },
+        { full: passing, beside: null, stage: STAGE },
       ),
     ).toBe(false);
   });

@@ -11,6 +11,7 @@ import {
   sameStage,
   type StageRoom,
   type UpperPlateMeasures,
+  type YieldingPart,
 } from "./viewRoom";
 
 /** An element's laid-out height, CSS px, fractions kept. */
@@ -73,20 +74,45 @@ export function measureUpperPlate(
   };
 }
 
+/** The parts that give way, by the names their groups carry (`ViewLowerPlate`'s `data-part`). */
+const YIELDING_PARTS: ReadonlyArray<YieldingPart> = ["survey", "datum", "readout"];
+
+/**
+ * The parts of a laid-out lower plate whose widest unbroken run passes the plate (the width test;
+ * plan R10, R10.T12.c): those whose group's content runs wider than the group, which is as wide as
+ * the plate's content, by more than half a pixel. A plate stands at its widest where a run passes
+ * it, so a group's content is wider than its box exactly where a run is wider than the plate can be.
+ */
+export function passingParts(plate: Element): YieldingPart[] {
+  return YIELDING_PARTS.filter((part) =>
+    [...plate.querySelectorAll(`:scope > .view-label__group[data-part="${part}"]`)].some(
+      (group) => group.scrollWidth > group.clientWidth + 0.5,
+    ),
+  );
+}
+
 /**
  * The lower plate's heights ({@link LowerPlateMeasures}) from its forms in `root`, each a plate
  * under an element whose `data-form` names it: `whole`, `readout` (the readout given way) and
- * `survey` (the survey line's values and `DATUM` given way too); `null` without a whole form.
+ * `survey` (the survey line's values and `DATUM` given way too), and the parts whose runs pass the
+ * whole form's plate; `null` without a whole form.
  */
 export function measureLowerForms(root: Element): LowerPlateMeasures | null {
+  const plateOf = (name: string): Element | null =>
+    root.querySelector(`[data-form="${name}"] > .view-label`);
   const form = (name: string): number | null => {
-    const plate = root.querySelector(`[data-form="${name}"] > .view-label`);
+    const plate = plateOf(name);
     return plate === null ? null : heightOf(plate);
   };
-  const wholePx = form("whole");
-  return wholePx === null
+  const whole = plateOf("whole");
+  return whole === null
     ? null
-    : { wholePx, readoutYieldedPx: form("readout"), surveyYieldedPx: form("survey") };
+    : {
+        wholePx: heightOf(whole),
+        readoutYieldedPx: form("readout"),
+        surveyYieldedPx: form("survey"),
+        passing: passingParts(whole),
+      };
 }
 
 /** The plates' heights at the stage's full width and at the width beside the slots. */
@@ -168,7 +194,8 @@ function samePlates(a: PlateMeasures | null, b: PlateMeasures | null): boolean {
       ? a.lower === b.lower
       : samePx(a.lower.wholePx, b.lower.wholePx) &&
         samePx(a.lower.readoutYieldedPx, b.lower.readoutYieldedPx) &&
-        samePx(a.lower.surveyYieldedPx, b.lower.surveyYieldedPx);
+        samePx(a.lower.surveyYieldedPx, b.lower.surveyYieldedPx) &&
+        a.lower.passing.join() === b.lower.passing.join();
   return (
     sameLower &&
     samePx(a.upper.wholePx, b.upper.wholePx) &&

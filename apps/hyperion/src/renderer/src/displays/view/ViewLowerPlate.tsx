@@ -15,7 +15,10 @@ export interface ViewLowerPlateProps {
   readonly tallest?: boolean | undefined;
   /** The plate's ID, by which its view's canvas is described, or none. */
   readonly id?: string | undefined;
-  /** More class names for the plate: `view-label--beside` beside the standing slots. */
+  /**
+   * More class names for the plate: `view-label--beside` beside the standing slots, or
+   * `view-label--columns` in columns (R10.T12.c).
+   */
   readonly className?: string | undefined;
   /** Receives the plate, which the display measures. */
   readonly ref?: Ref<HTMLDivElement> | undefined;
@@ -26,7 +29,13 @@ type YieldingKind = Exclude<LowerPartKind, "state">;
 
 /** One entry of the plate as it is set: a part, or the yield line in the place of those held back. */
 type Entry =
-  | { readonly kind: "part"; readonly key: string; readonly node: ReactNode }
+  | {
+      readonly kind: "part";
+      readonly key: string;
+      /** Which part it is, which its group carries for the room's width test (R10.T12.c). */
+      readonly part: LowerPartKind;
+      readonly node: ReactNode;
+    }
   | { readonly kind: "yield"; readonly key: string; readonly text: string };
 
 /**
@@ -46,9 +55,14 @@ function entriesOf(
   let yieldSet = false;
   for (const part of parts) {
     if (part.kind === "state") {
-      entries.push({ kind: "part", key: `state ${part.key}`, node: part.node });
+      entries.push({ kind: "part", key: `state ${part.key}`, part: "state", node: part.node });
     } else if (!yielded.has(part.kind)) {
-      entries.push({ kind: "part", key: part.kind, node: tallest ? part.tallest : part.node });
+      entries.push({
+        kind: "part",
+        key: part.kind,
+        part: part.kind,
+        node: tallest ? part.tallest : part.node,
+      });
     } else if (!yieldSet) {
       yieldSet = true;
       entries.push({ kind: "yield", key: "yield", text: lowerYieldLine(heldBack) });
@@ -70,7 +84,9 @@ function entriesOf(
  * (`NOT AVAILABLE: no room for SURVEY COVERAGE, DATUM or GROUND AT LINE OF SIGHT at this window size`,
  * or `NOT AVAILABLE: no room for SURVEY COVERAGE at this window size` where the survey line stands
  * alone), set as a statement in the place of the first part held back. A state line never gives
- * way. The parts are R10.T12's own markup; the plate sets them in order.
+ * way. The parts are R10.T12's own markup; the plate sets them in order, each in a group that names
+ * its part (`data-part`), by which the room's width test finds the part whose widest unbroken run
+ * passes the plate (R10.T12.c).
  */
 export function ViewLowerPlate({
   parts,
@@ -97,7 +113,7 @@ export function ViewLowerPlate({
     >
       {entriesOf(parts, yielded, tallest).map((entry) =>
         entry.kind === "part" ? (
-          <div className="view-label__group" key={entry.key}>
+          <div className="view-label__group" data-part={entry.part} key={entry.key}>
             {entry.node}
           </div>
         ) : (
