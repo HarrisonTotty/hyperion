@@ -838,13 +838,16 @@ impl Deck {
     /// ln `q_v` at ln p `u`, through [`Grid`]'s levels, linear in ln p.
     #[must_use]
     fn ln_vapour_at(&self, u: f64) -> f64 {
-        let below = math::ln(self.vapour_below);
+        // Taken in the branches that read it alone: a deck's draw at the levels above its first
+        // reads none (P14.T54.b.l).
+        let below = || math::ln(self.vapour_below);
         if u >= self.base_ln_p || self.vapour_ln.is_empty() {
-            return below;
+            return below();
         }
         let step = self.step_ln_p;
         let first_u = self.bottom_ln_p - step * index_f64(self.first);
         if u >= first_u {
+            let below = below();
             let span = self.base_ln_p - first_u;
             let t = if span > 0.0 {
                 (self.base_ln_p - u) / span
@@ -945,6 +948,9 @@ struct Grid {
     bottom: f64,
     step: f64,
     temperatures: Vec<f64>,
+    /// ln T at each level, taken once for [`temperature`](Self::temperature), which every
+    /// substep of every deck's column reads (P14.T54.b.l).
+    ln_temperatures: Vec<f64>,
 }
 
 impl Grid {
@@ -971,8 +977,8 @@ impl Grid {
             return self.temperatures[last];
         }
         let fraction = offset - index_f64(below);
-        let deep = math::ln(self.temperatures[below]);
-        let shallow = math::ln(self.temperatures[below + 1]);
+        let deep = self.ln_temperatures[below];
+        let shallow = self.ln_temperatures[below + 1];
         math::exp(deep + fraction * (shallow - deep))
     }
 }
@@ -1370,10 +1376,12 @@ fn grid(
         }
         temperatures.push(t.value());
     }
+    let ln_temperatures = temperatures.iter().map(|&t| math::ln(t)).collect();
     Ok(Grid {
         bottom,
         step,
         temperatures,
+        ln_temperatures,
     })
 }
 
@@ -1640,6 +1648,9 @@ fn integrate(
         let to = grid.u(level);
         let step = (from - to) / f64::from(substeps);
         let mut level_mass = 0.0;
+        // The level's substeps share their step, so the efficiency's weight and decay over it are
+        // taken once, where a substep first reads them (P14.T54.b.l).
+        let (mut weight_slot, mut decay_slot) = (None, None);
         for substep in 1..=substeps {
             let end = from - step * f64::from(substep);
             let saturated_end = saturation(end);
@@ -1657,15 +1668,18 @@ fn integrate(
                 // exact solution for q_s falling exponentially at the rate `fall` (the module's
                 // documentation).
                 let fall = math::ln(saturated_from / saturated_end) / step;
+                let weight = *weight_slot.get_or_insert_with(|| decay_integral(efficiency, step));
                 // q_c = q_c0 e^(−f x) + s q_s0 (e^(−s x) − e^(−f x)) ÷ (f − s), integrated over
                 // the step exactly against p = p_start e^(−x): a base's first step's transient and
                 // the steady state alike.
                 exact_load = Some(
                     pressure_start
-                        * ((total - saturated_from) * decay_integral(efficiency, step)
-                            + fall * saturated_from * decay_difference(fall, efficiency, step)),
+                        * ((total - saturated_from) * weight
+                            + fall
+                                * saturated_from
+                                * decay_difference(fall, (efficiency, weight), step)),
                 );
-                total = total * math::exp(-efficiency * step)
+                total = total * *decay_slot.get_or_insert_with(|| math::exp(-efficiency * step))
                     + efficiency * step * saturated_end * mean_decay((efficiency - fall) * step);
             } else {
                 let mean = if finite {
@@ -1674,7 +1688,9 @@ fn integrate(
                     f64::INFINITY
                 };
                 if total > mean {
-                    total = mean + (total - mean) * math::exp(-efficiency * step);
+                    total = mean
+                        + (total - mean)
+                            * *decay_slot.get_or_insert_with(|| math::exp(-efficiency * step));
                 }
             }
             let loaded_end = (total - saturated_end).max(0.0) * math::exp(end);
@@ -1705,15 +1721,15 @@ fn decay_integral(rate: f64, step: f64) -> f64 {
 }
 
 /// The divided difference (I(s) − I(f)) ÷ (f − s) of [`decay_integral`]'s I in its rate, for the
-/// saturation's rate `fall` s and `efficiency` f over a step `step` long: the weight of a step's
-/// steady condensate. Within 10⁻⁴ of each other in (f − s) Δ it is −dI/da at their midpoint,
-/// ((1 − e^(−kΔ)) − kΔ e^(−kΔ)) ÷ k² with k = 1 + a, its limit, the two forms agreeing to about
-/// 10⁻⁸ there.
+/// saturation's rate `fall` s and `efficiency` f, with I(f) `weight`, over a step `step` long: the
+/// weight of a step's steady condensate. Within 10⁻⁴ of each other in (f − s) Δ it is −dI/da at
+/// their midpoint, ((1 − e^(−kΔ)) − kΔ e^(−kΔ)) ÷ k² with k = 1 + a, its limit, the two forms
+/// agreeing to about 10⁻⁸ there.
 #[must_use]
-fn decay_difference(fall: f64, efficiency: f64, step: f64) -> f64 {
+fn decay_difference(fall: f64, (efficiency, weight): (f64, f64), step: f64) -> f64 {
     let gap = efficiency - fall;
     if (gap * step).abs() > 1e-4 {
-        (decay_integral(fall, step) - decay_integral(efficiency, step)) / gap
+        (decay_integral(fall, step) - weight) / gap
     } else {
         let k = 1.0 + f64::midpoint(fall, efficiency);
         let decayed = math::exp(-k * step);
@@ -1912,6 +1928,11 @@ fn size(
     let sigma = sedimentation.width();
     let ln_sigma_squared = math::ln(sigma) * math::ln(sigma);
     let efficiency = sedimentation.efficiency();
+    // The deck's own figures, which each level read again (P14.T54.b.l).
+    let ln_range = (math::ln(RADIUS_RANGE_M.0), math::ln(RADIUS_RANGE_M.1));
+    let fit = sigma.max(ALPHA_FIT_WIDTH);
+    let ln_fit = math::ln(fit);
+    let effective = math::exp(2.5 * ln_sigma_squared);
     let (mut mass, mut area) = (0.0, 0.0);
     for (offset, (&condensate, &level_mass)) in
         levels.condensate.iter().zip(levels.masses).enumerate()
@@ -1924,14 +1945,13 @@ fn size(
         let pressure = math::exp(context.grid.u(level));
         let air = Air::at(temperature, pressure, context.column, constants);
         let w_star = context.column.eddy_diffusion.square_metres_per_second() / air.scale_height_m;
-        let r_w = air.radius_falling_at(w_star, density);
-        let fit = sigma.max(ALPHA_FIT_WIDTH);
-        let alpha = math::ln(air.fall_speed(fit * r_w, density) / air.fall_speed(r_w, density))
-            / math::ln(fit);
+        let r_w = air.radius_falling_at(w_star, density, ln_range);
+        let alpha =
+            math::ln(air.fall_speed(fit * r_w, density) / air.fall_speed(r_w, density)) / ln_fit;
         let r_g = r_w
             * math::powf(efficiency, 1.0 / alpha)
             * math::exp(-(alpha + 6.0) / 2.0 * ln_sigma_squared);
-        let r_eff = r_g * math::exp(2.5 * ln_sigma_squared);
+        let r_eff = r_g * effective;
         mass += level_mass;
         area += level_mass / r_eff;
     }
@@ -2000,10 +2020,14 @@ impl Air {
     }
 
     /// The radius whose fall speed is `speed`, by bisection in ln r over [`RADIUS_RANGE_M`], held
-    /// at its ends.
+    /// at its ends, whose logarithms are `ln_range`.
     #[must_use]
-    fn radius_falling_at(&self, speed: f64, density: KilogramsPerCubicMetre) -> f64 {
-        let (mut small, mut large) = (math::ln(RADIUS_RANGE_M.0), math::ln(RADIUS_RANGE_M.1));
+    fn radius_falling_at(
+        &self,
+        speed: f64,
+        density: KilogramsPerCubicMetre,
+        (mut small, mut large): (f64, f64),
+    ) -> f64 {
         for _ in 0..RADIUS_BISECTIONS {
             let middle = f64::midpoint(small, large);
             if self.fall_speed(math::exp(middle), density) < speed {
