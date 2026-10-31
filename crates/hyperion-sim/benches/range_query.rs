@@ -123,6 +123,7 @@ use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use hyperion_sim::Seed;
+use hyperion_sim::alerts::local::LocalEventsCache;
 use hyperion_sim::alerts::{
     AlertBand, AlertContext, AlertQuery, BandLimits, SensorHorizon, local_events,
 };
@@ -376,12 +377,14 @@ fn local_events_50ly(c: &mut Criterion) {
             .expect("the window lies in the clock window");
         let mut seen = Vec::new();
         let mut ctx = AlertContext::new(&mut noise, &NoModifiers);
+        let mut cache = LocalEventsCache::with_capacity(4_096);
         local_events(
             &galaxy,
             &mut ctx,
             &alerts,
             found.observed(),
             &mut stars,
+            &mut cache,
             &mut seen,
         );
         eprintln!(
@@ -398,6 +401,7 @@ fn local_events_50ly(c: &mut Criterion) {
                     black_box(&alerts),
                     found.observed(),
                     &mut stars,
+                    &mut cache,
                     &mut seen,
                 );
             });

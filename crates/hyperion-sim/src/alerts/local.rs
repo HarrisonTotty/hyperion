@@ -6,7 +6,7 @@
 //! of their stars whose light arrives in an [`AlertQuery`]'s window, through plan 06's
 //! constructions:
 //!
-//! - star flares ([`flares`], P06.T28.a), [`TransientKind::Flare`];
+//! - star flares ([`flares`](crate::stellar::events::flares), P06.T28.a), [`TransientKind::Flare`];
 //! - FU Orionis outbursts ([`fu_orionis`], P06.T28.d), [`TransientKind::FuOrionisOutburst`];
 //! - pulsar glitches, Crab-like and Vela-like ([`glitches`], P06.T28.b), [`TransientKind::Glitch`].
 //!
@@ -35,7 +35,7 @@
 //! A flare's and an outburst's light is their own, (factor − 1) times the star's quiescent
 //! luminosity (the registry's [`LightCurveSource`](super::LightCurveSource)): the star's at the
 //! epoch for a flare, as its model has it
-//! ([`FlareModel::quiescent_luminosity`](flares::FlareModel::quiescent_luminosity)), and at an
+//! ([`FlareModel::quiescent_luminosity`]), and at an
 //! outburst's onset, the state its Eddington cap reads. Both are bolometric. A band takes its
 //! share of a blackbody through a top hat at plan 07's [`Band::wavelength`] with the band's full
 //! width at half maximum (Bessell 2005, ARA&A 43, 293, Table 1, for U to I; Tokunaga 2000, Allen's
@@ -72,20 +72,24 @@
 //!
 //! Nothing here draws a random number or changes generated output: the events are plan 06's.
 
+use std::collections::HashMap;
 use std::f64::consts::PI;
 
 use crate::coords::UnitVector;
-use crate::events::{EventSeries, TimeWindow, tags};
+use crate::events::{BinEvent, EventSeries, TimeWindow, tags};
 use crate::galaxy::Galaxy;
 use crate::galaxy::gas::ccm::Band;
 use crate::galaxy::gas::extinction::Sightline;
+use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemKind;
+use crate::galaxy::rules::GalaxyRules;
 use crate::id::{BodyId, EventId};
 use crate::observe::{
     Drift, Motion, ObservedSystem, Observer, StarsCache, Trajectory, bearing, light_time, retarded,
 };
-use crate::stellar::events::flares::{self, Flare};
-use crate::stellar::events::fu_orionis::{self, Outburst};
+use crate::rng::Seed;
+use crate::stellar::events::flares::{Flare, FlareModel, FlareRates};
+use crate::stellar::events::fu_orionis::{self, FuOrionisModel, Outburst};
 use crate::stellar::events::glitches::{self, Glitch, LargeGlitch};
 use crate::stellar::system::StarModel;
 use crate::time::{ClockWindow, Span, UniverseTime};
@@ -158,8 +162,10 @@ const MAX_LIGHT_STEPS: u32 = 16;
 /// on its own line, so the result depends neither on their order, nor on when they were read, nor
 /// on what was asked before. `stars` lends each system's stars, as it does to
 /// [`range_query_observed`](crate::galaxy::query::range_query_observed); a rogue planet has none,
-/// and is not asked for. The query's classes and host limit are the catalogue's, and local events
-/// read neither. `out` is only appended to; nothing in it is read.
+/// and is not asked for. `cache` keeps what each star's events read of it once
+/// ([`LocalEventsCache`]), which changes the cost and never the result. The query's classes and
+/// host limit are the catalogue's, and local events read neither. `out` is only appended to;
+/// nothing in it is read.
 ///
 /// # Panics
 ///
@@ -175,6 +181,7 @@ const MAX_LIGHT_STEPS: u32 = 16;
 ///
 /// ```
 /// use hyperion_sim::Seed;
+/// use hyperion_sim::alerts::local::LocalEventsCache;
 /// use hyperion_sim::alerts::{
 ///     AlertBand, AlertContext, AlertQuery, BandLimits, SensorHorizon, TransientKind, local_events,
 /// };
@@ -213,8 +220,10 @@ const MAX_LIGHT_STEPS: u32 = 16;
 /// let query = AlertQuery::builder(sun, window, sensor).build()?;
 /// let mut noise = NoiseCache::with_capacity(1_024);
 /// let mut ctx = AlertContext::new(&mut noise, &NoModifiers);
+/// let mut cache = LocalEventsCache::with_capacity(1_024);
 /// let mut seen = Vec::new();
-/// local_events(&galaxy, &mut ctx, &query, found.observed(), &mut NoStarsCache, &mut seen);
+/// let rows = found.observed();
+/// local_events(&galaxy, &mut ctx, &query, rows, &mut NoStarsCache, &mut cache, &mut seen);
 /// // Every one arrives in the week or is still on at its start, in arrival order.
 /// assert!(seen.iter().all(|d| d.kind() == TransientKind::Flare && d.arrival() < week));
 /// assert!(seen.windows(2).all(|pair| pair[0].arrival() <= pair[1].arrival()));
@@ -226,6 +235,7 @@ pub fn local_events<S: StarsCache>(
     query: &AlertQuery,
     observed: &[ObservedSystem],
     stars: &mut S,
+    cache: &mut LocalEventsCache,
     out: &mut Vec<Detection>,
 ) {
     let lights = Lights::of(query);
@@ -237,12 +247,14 @@ pub fn local_events<S: StarsCache>(
         return;
     }
     let first = out.len();
+    cache.bind(galaxy);
     let mut walk = Walk {
         galaxy,
         ctx,
         query,
         lights,
         scratch: Scratch::default(),
+        cache,
         out,
     };
     for system in observed {
@@ -257,6 +269,123 @@ pub fn local_events<S: StarsCache>(
         });
     }
     out[first..].sort_by(|a, b| a.arrival.cmp(&b.arrival).then(a.event.cmp(&b.event)));
+}
+
+/// A caller-owned cache of what [`local_events`] reads of each star once: its flare rates at the
+/// epoch (plan 06's `FlareRates`) and the span in which it can have FU Orionis outbursts, keyed by
+/// the star's body, holding at most a fixed number of stars.
+///
+/// A star's flare rates cost its state, rotation and activity at the epoch, 1.6 µs a star (pod, 16
+/// vCPU), and its outbursts' model 0.12 µs more, which a walk asked again at each step of the clock
+/// pays for every star of every row: over half of a day's walk over the 50 ly query. A cache
+/// changes no result, only its cost: every detection is bit-identical with a cache of any capacity,
+/// none included, and after [`clear`](Self::clear). A full cache empties itself before it keeps
+/// another star. It serves one galaxy at a time: it remembers the galaxy its entries were read in,
+/// by its seed, parameters and rules, and empties itself when asked about another. The default is
+/// a cache that keeps no star.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::alerts::local::LocalEventsCache;
+///
+/// // Room for every star of a 50 ly query's 1,346, and more.
+/// let cache = LocalEventsCache::with_capacity(4_096);
+/// assert_eq!(cache.capacity(), 4_096);
+/// assert_eq!(LocalEventsCache::default().capacity(), 0);
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct LocalEventsCache {
+    /// The galaxy the entries were read in, by its seed, rules and parameters; `None` while the
+    /// cache is empty.
+    galaxy: Option<(Seed, GalaxyRules, GalaxyParams)>,
+    /// The most stars the cache keeps.
+    capacity: usize,
+    /// Each star kept, by its body. Only looked up, never walked, so its order reaches nothing.
+    stars: HashMap<BodyId, StarEntry>,
+}
+
+/// What [`local_events`] reads of one star once.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct StarEntry {
+    /// Its flare rates, `None` for a star that does not flare.
+    flares: Option<FlareRates>,
+    /// From its onset of collapse to its last instant with outbursts
+    /// ([`FuOrionisModel::formation`], [`FuOrionisModel::last_instant`]), `None` for an object
+    /// below 0.1 M☉, which has none.
+    outbursts: Option<(UniverseTime, UniverseTime)>,
+}
+
+impl StarEntry {
+    /// What `star`'s events read of it.
+    #[must_use]
+    fn of(star: &StarModel) -> Self {
+        Self {
+            flares: FlareRates::of(star),
+            outbursts: FuOrionisModel::of(star)
+                .map(|model| (model.formation(), model.last_instant())),
+        }
+    }
+}
+
+impl LocalEventsCache {
+    /// An empty cache that keeps up to `stars` stars. Zero is a cache that keeps nothing, whose
+    /// every lookup reads the star afresh.
+    #[must_use]
+    pub fn with_capacity(stars: usize) -> Self {
+        Self {
+            galaxy: None,
+            capacity: stars,
+            stars: HashMap::with_capacity(stars),
+        }
+    }
+
+    /// The most stars the cache keeps.
+    #[must_use]
+    pub const fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// Empties the cache, keeping its allocation.
+    pub fn clear(&mut self) {
+        self.stars.clear();
+        self.galaxy = None;
+    }
+
+    /// Makes the cache hold `galaxy`'s stars, emptying it if it held another galaxy's.
+    fn bind(&mut self, galaxy: &Galaxy) {
+        let held = self.galaxy.as_ref().is_some_and(|(seed, rules, params)| {
+            *seed == galaxy.seed() && *rules == galaxy.rules() && params == galaxy.params()
+        });
+        if !held {
+            self.clear();
+            self.galaxy = Some((galaxy.seed(), galaxy.rules(), galaxy.params().clone()));
+        }
+    }
+
+    /// What the events of `star`, whose body is `body`, read of it, kept or read afresh.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if what is kept for `body` is not `star`'s.
+    fn star(&mut self, star: &StarModel, body: BodyId) -> StarEntry {
+        if let Some(entry) = self.stars.get(&body) {
+            debug_assert_eq!(
+                *entry,
+                StarEntry::of(star),
+                "the star kept for {body:?} is another"
+            );
+            return *entry;
+        }
+        let entry = StarEntry::of(star);
+        if self.capacity > 0 {
+            if self.stars.len() >= self.capacity {
+                self.stars.clear();
+            }
+            self.stars.insert(body, entry);
+        }
+        entry
+    }
 }
 
 /// One lit kind's shares, and the most its light can stand over the sensor's detection limit in any
@@ -372,6 +501,7 @@ impl Lights {
 /// The walk's reusable buffers, one per listing.
 #[derive(Default)]
 struct Scratch {
+    bin_events: Vec<BinEvent>,
     flares: Vec<Flare>,
     outbursts: Vec<Outburst>,
     glitches: Vec<Glitch>,
@@ -569,6 +699,7 @@ struct Walk<'w, 'c> {
     query: &'w AlertQuery,
     lights: Lights,
     scratch: Scratch,
+    cache: &'w mut LocalEventsCache,
     out: &'w mut Vec<Detection>,
 }
 
@@ -629,31 +760,33 @@ impl Walk<'_, '_> {
     /// Lists the local events of `star`, whose body is `body`, of `host`.
     fn star(&mut self, host: &mut Host<'_>, star: &StarModel, body: BodyId) {
         let seed = self.galaxy.seed();
-        if self.lights.flare.best_bare_m2_per_w > 0.0 {
+        let kept = self.cache.star(star, body);
+        if self.lights.flare.best_bare_m2_per_w > 0.0
+            && let Some(rates) = kept.flares
+        {
             let series = EventSeries::new(seed, tags::STAR_FLARE, body.into());
             let mut listed = std::mem::take(&mut self.scratch.flares);
             listed.clear();
             let onsets = host.onsets(longest(TransientKind::Flare));
-            flares::flares_in(star, &series, onsets, &mut listed);
-            // The flare model's quiescent luminosity is the star's at the epoch, where a star that
-            // flares has a state: read from the state, since building the model again for it cost
-            // 1.6 µs a star (pod, 16 vCPU), a third of the walk over a day.
-            if let Some(state) = (!listed.is_empty())
-                .then(|| star.state_at(UniverseTime::EPOCH))
-                .flatten()
-            {
-                let quiescent = Watts::new(state.luminosity().value() * SOLAR_LUMINOSITY_W);
-                for &one in &listed {
-                    self.lit(host, &LitEvent::Flare(one, quiescent));
-                }
+            let model = FlareModel::with_rates(star, rates);
+            model.flares_in(&series, onsets, &mut self.scratch.bin_events, &mut listed);
+            let quiescent = rates.quiescent_luminosity().value() * SOLAR_LUMINOSITY_W;
+            for &one in &listed {
+                self.lit(host, &LitEvent::Flare(one, Watts::new(quiescent)));
             }
             self.scratch.flares = listed;
         }
-        if self.lights.outburst.best_bare_m2_per_w > 0.0 {
+        let onsets = host.onsets(longest(TransientKind::FuOrionisOutburst));
+        // The listing's own cut to the span of the star's outbursts, made first from the kept span
+        // so that a star too old for any builds no model.
+        if self.lights.outburst.best_bare_m2_per_w > 0.0
+            && kept.outbursts.is_some_and(|(formation, last)| {
+                fu_orionis::active_span(onsets, formation, last).is_some()
+            })
+        {
             let series = EventSeries::new(seed, tags::STAR_FU_ORIONIS, body.into());
             let mut listed = std::mem::take(&mut self.scratch.outbursts);
             listed.clear();
-            let onsets = host.onsets(longest(TransientKind::FuOrionisOutburst));
             fu_orionis::outbursts_in(star, &series, onsets, &mut listed);
             for &one in &listed {
                 // The quiescent light is the state the outburst's Eddington cap reads; a star with
@@ -839,11 +972,12 @@ mod tests {
     use crate::galaxy::query::{
         QueryMode, RangeQuery, SystemHit, range_query, range_query_observed,
     };
+    use crate::galaxy::rules::GalaxyRules;
     use crate::id::{Layer, SystemId};
     use crate::math;
-    use crate::observe::{observe_hit, stars_of};
+    use crate::observe::{NoStarsCache, observe_hit, stars_of};
     use crate::rng::Seed;
-    use crate::stellar::events::flares::FlareModel;
+    use crate::stellar::events::flares;
     use crate::stellar::remnant::DeathKind;
     use crate::stellar::system::{ClockDeath, SystemStars};
     use crate::substance::thermo::SECOND_RADIATION_CONSTANT_CM_K;
@@ -1016,7 +1150,10 @@ mod tests {
         let mut noise = NoiseCache::with_capacity(256);
         let mut ctx = AlertContext::new(&mut noise, &NoModifiers);
         let mut seen = Vec::new();
-        local_events(galaxy, &mut ctx, &first, &rows, &mut stars, &mut seen);
+        let mut cache = LocalEventsCache::with_capacity(256);
+        local_events(
+            galaxy, &mut ctx, &first, &rows, &mut stars, &mut cache, &mut seen,
+        );
         let over = |d: &Detection| {
             d.flux().value() / first.sensor().limits(d.band()).unwrap().detect().value()
         };
@@ -1431,13 +1568,6 @@ mod tests {
         for (star, slot) in stars.stars().iter().zip(stars.hierarchy().stars()) {
             let body = slot.body();
             if let Some(model) = FlareModel::of(star) {
-                // `local_events` reads the model's quiescent luminosity from the state at the
-                // epoch: the same bits.
-                let state = star.state_at(UniverseTime::EPOCH).unwrap();
-                assert_same_bits(
-                    model.quiescent_luminosity().value(),
-                    state.luminosity().value(),
-                );
                 let mut listed = Vec::new();
                 let series = EventSeries::new(seed, tags::STAR_FLARE, body.into());
                 let span = oracle.span(flares::MAX_DURATION);
@@ -1475,13 +1605,36 @@ mod tests {
         }
     }
 
-    /// `local_events` over `scene` asked of `query`, in a fresh context.
+    /// `local_events` over `scene` asked of `query`, in a fresh context with a fresh cache.
     fn run(scene: &Scene, query: &AlertQuery, rows: &[ObservedSystem]) -> Vec<Detection> {
+        run_with(
+            scene,
+            query,
+            rows,
+            &mut LocalEventsCache::with_capacity(4_096),
+        )
+    }
+
+    /// `local_events` over `scene` asked of `query`, in a fresh context with `cache`.
+    fn run_with(
+        scene: &Scene,
+        query: &AlertQuery,
+        rows: &[ObservedSystem],
+        cache: &mut LocalEventsCache,
+    ) -> Vec<Detection> {
         let mut noise = NoiseCache::with_capacity(256);
         let mut ctx = AlertContext::new(&mut noise, &NoModifiers);
         let mut out = Vec::new();
         let mut stars = scene.stars.borrow_mut();
-        local_events(galaxy(), &mut ctx, query, rows, &mut *stars, &mut out);
+        local_events(
+            galaxy(),
+            &mut ctx,
+            query,
+            rows,
+            &mut *stars,
+            cache,
+            &mut out,
+        );
         out
     }
 
@@ -1529,20 +1682,38 @@ mod tests {
         out
     }
 
-    /// The result does not depend on the order of the rows, or on what the context's noise cache
-    /// and the stars cache held: each row alone, in any order, gives its own detections, and the
-    /// whole in any order is their union in arrival order. What `out` held before is kept.
+    /// The result does not depend on the order of the rows, or on what the context's noise cache,
+    /// the stars cache and the local events' cache held, or on the last's size: each row alone, in
+    /// any order, gives its own detections, and the whole in any order is their union in arrival
+    /// order, through caches of any size, cold or warm. What `out` held before is kept.
     fn order_independent(scene: &Scene, whole: &[Detection]) {
         let galaxy = galaxy();
         let noise = RefCell::new(NoiseCache::with_capacity(256));
+        let cache = RefCell::new(LocalEventsCache::with_capacity(64));
         let warm = |rows: &[ObservedSystem]| {
             let mut noise = noise.borrow_mut();
             let mut ctx = AlertContext::new(&mut noise, &NoModifiers);
             let mut out = Vec::new();
             let mut stars = scene.stars.borrow_mut();
-            local_events(galaxy, &mut ctx, &scene.query, rows, &mut *stars, &mut out);
+            let mut cache = cache.borrow_mut();
+            local_events(
+                galaxy,
+                &mut ctx,
+                &scene.query,
+                rows,
+                &mut *stars,
+                &mut cache,
+                &mut out,
+            );
             out
         };
+        for entries in [0, 1, 7, 4_096] {
+            let mut cold = LocalEventsCache::with_capacity(entries);
+            assert_eq!(run_with(scene, &scene.query, &scene.rows, &mut cold), whole);
+            assert_eq!(run_with(scene, &scene.query, &scene.rows, &mut cold), whole);
+            cold.clear();
+            assert_eq!(run_with(scene, &scene.query, &scene.rows, &mut cold), whole);
+        }
         assert_order_independent(&scene.rows, |row| warm(std::slice::from_ref(row)));
         let mut each: Vec<Detection> = scene
             .rows
@@ -1562,12 +1733,14 @@ mod tests {
         let mut cold = NoiseCache::with_capacity(16);
         let mut ctx = AlertContext::new(&mut cold, &NoModifiers);
         let mut stars = scene.stars.borrow_mut();
+        let mut cache = cache.borrow_mut();
         local_events(
             galaxy,
             &mut ctx,
             &scene.query,
             &reversed,
             &mut *stars,
+            &mut cache,
             &mut kept,
         );
         assert_eq!(kept[..whole.len()], *whole);
@@ -1682,6 +1855,54 @@ mod tests {
             }
             assert_eq!(d.class(), None);
         }
+    }
+
+    /// One cache asked about galaxies in turn, of two seeds and of one seed under other rules,
+    /// gives each what a fresh cache gives it: it empties itself for another galaxy, and in debug
+    /// builds checks every star it lends.
+    #[test]
+    fn a_cache_serves_one_galaxy_at_a_time() {
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap();
+        let day = UniverseTime::EPOCH
+            .checked_add(Span::from_seconds(86_400))
+            .unwrap();
+        let window = TimeWindow::new(UniverseTime::EPOCH, day).unwrap();
+        let query = AlertQuery::builder(sun, window, sensor()).build().unwrap();
+        let range = RangeQuery::builder(sun, LightYears::new(8.0))
+            .mode(QueryMode::ObservedFrom(sun))
+            .build()
+            .unwrap();
+        let first = Galaxy::new(Seed::new(31));
+        let second = Galaxy::new(Seed::new(32));
+        let ruled = first.clone().with_rules(GalaxyRules::every_25_hold());
+        let seen = |galaxy: &Galaxy, rows: &[ObservedSystem], cache: &mut LocalEventsCache| {
+            let mut noise = NoiseCache::with_capacity(64);
+            let mut ctx = AlertContext::new(&mut noise, &NoModifiers);
+            let mut out = Vec::new();
+            local_events(
+                galaxy,
+                &mut ctx,
+                &query,
+                rows,
+                &mut NoStarsCache,
+                cache,
+                &mut out,
+            );
+            out
+        };
+        let mut shared = LocalEventsCache::with_capacity(4_096);
+        let mut found = 0;
+        for galaxy in [&first, &second, &ruled, &first] {
+            let rows =
+                range_query_observed(galaxy, &mut NoCache::new(), &mut NoStarsCache, &[], &range)
+                    .unwrap()
+                    .observed()
+                    .to_vec();
+            let fresh = seen(galaxy, &rows, &mut LocalEventsCache::with_capacity(4_096));
+            assert_eq!(seen(galaxy, &rows, &mut shared), fresh);
+            found += fresh.len();
+        }
+        assert!(found >= 10, "{found} detections in all");
     }
 
     /// The same systems read by range queries thirty years apart give the same detections, to the

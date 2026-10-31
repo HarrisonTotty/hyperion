@@ -411,6 +411,18 @@ fn bins() -> PoissonBins {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FlareModel<'a> {
     star: &'a StarModel,
+    rates: FlareRates,
+}
+
+/// What a star's flares read of it, once, at the epoch: everything of its [`FlareModel`] but the
+/// star itself, so that a caller listing one star's flares again and again can keep it and spare
+/// the star's state, rotation and activity at the epoch, about 1.6 µs a star (pod, 16 vCPU; plan
+/// 12, P12.T5.e).
+///
+/// The rates belong to the star they were read of: [`FlareModel::with_rates`] takes them back only
+/// with it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct FlareRates {
     activity: Activity,
     luminosity: SolarLuminosities,
     /// ν₀, the untruncated rate above E₀.
@@ -419,12 +431,11 @@ pub struct FlareModel<'a> {
     listed: EventsPerSecond,
 }
 
-impl<'a> FlareModel<'a> {
-    /// The flares of `star`, or `None` for a star with no activity at the epoch (see "Who flares"
-    /// in the [module documentation](self)): not formed by then, a protostar, a star from 1.3 M☉,
-    /// one past its main sequence, a remnant or an object below 0.1 M☉.
+impl FlareRates {
+    /// The rates of `star`, or `None` for a star with no activity at the epoch, as
+    /// [`FlareModel::of`].
     #[must_use]
-    pub fn of(star: &'a StarModel) -> Option<Self> {
+    pub(crate) fn of(star: &StarModel) -> Option<Self> {
         let state = star.state_at(UniverseTime::EPOCH)?;
         if !in_flaring_phase(&state) {
             return None;
@@ -434,13 +445,69 @@ impl<'a> FlareModel<'a> {
         let normalisation = saturated_rate(state.mass()).value() * relative;
         let (floor_joules, listed) = floor_and_rate(normalisation);
         Some(Self {
-            star,
             activity,
             luminosity: state.luminosity(),
             normalisation: EventsPerSecond::new(normalisation),
             floor_joules,
             listed,
         })
+    }
+
+    /// The star's quiescent bolometric luminosity at the epoch, L☉, as
+    /// [`FlareModel::quiescent_luminosity`].
+    #[must_use]
+    pub(crate) const fn quiescent_luminosity(&self) -> SolarLuminosities {
+        self.luminosity
+    }
+}
+
+impl<'a> FlareModel<'a> {
+    /// The flares of `star`, or `None` for a star with no activity at the epoch (see "Who flares"
+    /// in the [module documentation](self)): not formed by then, a protostar, a star from 1.3 M☉,
+    /// one past its main sequence, a remnant or an object below 0.1 M☉.
+    #[must_use]
+    pub fn of(star: &'a StarModel) -> Option<Self> {
+        FlareRates::of(star).map(|rates| Self { star, rates })
+    }
+
+    /// The flares of `star` from its `rates`, kept from an earlier [`FlareRates::of`] of the same
+    /// star: the same model, bit for bit, as [`FlareModel::of`].
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `rates` are not `star`'s.
+    #[must_use]
+    pub(crate) fn with_rates(star: &'a StarModel, rates: FlareRates) -> Self {
+        debug_assert_eq!(
+            FlareRates::of(star),
+            Some(rates),
+            "the rates given are not the star's"
+        );
+        Self { star, rates }
+    }
+
+    /// Appends to `out` the flares of the model's star with onsets in `window`, sorted by onset
+    /// and then by ID: [`flares_in`] with this model, and the same flares. `events` is the
+    /// listing's buffer, cleared first, which a caller listing many stars keeps.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `series` is not of [`tags::STAR_FLARE`].
+    pub(crate) fn flares_in(
+        &self,
+        series: &EventSeries,
+        window: TimeWindow,
+        events: &mut Vec<BinEvent>,
+        out: &mut Vec<Flare>,
+    ) {
+        debug_assert_eq!(
+            series.tag(),
+            tags::STAR_FLARE,
+            "a star's flares are its star.ev.flare series"
+        );
+        events.clear();
+        bins().events_in(series, window, self, events);
+        out.extend(events.drain(..).map(|event| self.flare_of(event)));
     }
 
     /// The star.
@@ -452,14 +519,14 @@ impl<'a> FlareModel<'a> {
     /// The star's activity at the epoch, which sets its rate (T25).
     #[must_use]
     pub const fn activity(&self) -> Activity {
-        self.activity
+        self.rates.activity
     }
 
     /// The star's quiescent bolometric luminosity at the epoch, L☉, which the peak factors are
     /// relative to.
     #[must_use]
     pub const fn quiescent_luminosity(&self) -> SolarLuminosities {
-        self.luminosity
+        self.rates.luminosity
     }
 
     /// β, the index of the cumulative distribution: [`FLARE_INDEX`], the same for every star.
@@ -474,14 +541,14 @@ impl<'a> FlareModel<'a> {
     /// say so.
     #[must_use]
     pub const fn floor_joules(&self) -> f64 {
-        self.floor_joules
+        self.rates.floor_joules
     }
 
     /// The rate of listed flares, those above the floor, while the star is in a flaring phase:
     /// ν(>floor), at most 64 a day.
     #[must_use]
     pub const fn listed_rate(&self) -> EventsPerSecond {
-        self.listed
+        self.rates.listed
     }
 
     /// ν(>E), the law's rate of flares of bolometric energy above `energy_joules` while the star
@@ -500,7 +567,7 @@ impl<'a> FlareModel<'a> {
             return EventsPerSecond::ZERO;
         }
         EventsPerSecond::new(
-            self.normalisation.value() * (shape(energy_joules) - shape(MAX_ENERGY_JOULES)),
+            self.rates.normalisation.value() * (shape(energy_joules) - shape(MAX_ENERGY_JOULES)),
         )
     }
 
@@ -525,8 +592,9 @@ impl<'a> FlareModel<'a> {
     #[must_use]
     pub fn energy_joules_at(&self, u: f64) -> f64 {
         debug_assert!((0.0..1.0).contains(&u), "a uniform lies in [0, 1), got {u}");
-        let kept = math::powf(MAX_ENERGY_JOULES / self.floor_joules, -FLARE_INDEX);
-        let energy = self.floor_joules * math::powf(1.0 - u * (1.0 - kept), -1.0 / FLARE_INDEX);
+        let kept = math::powf(MAX_ENERGY_JOULES / self.rates.floor_joules, -FLARE_INDEX);
+        let energy =
+            self.rates.floor_joules * math::powf(1.0 - u * (1.0 - kept), -1.0 / FLARE_INDEX);
         energy.min(MAX_ENERGY_JOULES)
     }
 
@@ -542,7 +610,7 @@ impl<'a> FlareModel<'a> {
         let duration = Span::from_seconds_f64((RISE_HALF_WIDTHS + DECAY_HALF_WIDTHS) * half_width)
             .expect("a flare lasts under a day");
         debug_assert!(duration <= MAX_DURATION, "a flare lasts {duration}");
-        let luminosity_watts = self.luminosity.value() * SOLAR_LUMINOSITY_W;
+        let luminosity_watts = self.rates.luminosity.value() * SOLAR_LUMINOSITY_W;
         Flare {
             id,
             onset,
@@ -556,12 +624,12 @@ impl<'a> FlareModel<'a> {
 
 impl RateModel for FlareModel<'_> {
     fn bound(&self, _bin: TimeWindow) -> EventsPerSecond {
-        self.listed
+        self.rates.listed
     }
 
     fn rate(&self, t: UniverseTime) -> EventsPerSecond {
         if self.flares_at(t) {
-            self.listed
+            self.rates.listed
         } else {
             EventsPerSecond::ZERO
         }
@@ -713,12 +781,9 @@ pub fn flares_in(star: &StarModel, series: &EventSeries, window: TimeWindow, out
         tags::STAR_FLARE,
         "a star's flares are its star.ev.flare series"
     );
-    let Some(model) = FlareModel::of(star) else {
-        return;
-    };
-    let mut events = Vec::new();
-    bins().events_in(series, window, &model, &mut events);
-    out.extend(events.into_iter().map(|event| model.flare_of(event)));
+    if let Some(model) = FlareModel::of(star) {
+        model.flares_in(series, window, &mut Vec::new(), out);
+    }
 }
 
 /// Appends to `out` the flares of `star` running at `t`, sorted by onset and then by ID.
@@ -1186,7 +1251,7 @@ mod tests {
         assert!((7.5..8.5).contains(&listed), "{listed} a day");
         let e64 = REFERENCE_ENERGY_JOULES
             * math::powf(
-                PoissonBins::MAX_MEAN_PER_BIN / SECONDS_PER_DAY / model.normalisation.value()
+                PoissonBins::MAX_MEAN_PER_BIN / SECONDS_PER_DAY / model.rates.normalisation.value()
                     + shape(MAX_ENERGY_JOULES),
                 -1.0 / FLARE_INDEX,
             );

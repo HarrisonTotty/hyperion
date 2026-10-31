@@ -48,7 +48,7 @@ pub mod reach;
 pub mod registry;
 
 pub use light::{band_share, supernova_luminosity, supernova_peak};
-pub use local::local_events;
+pub use local::{LocalEventsCache, local_events};
 pub use oneshot::{NoOneShotCells, OneShotCells, OneShotClass, OneShotEvent, one_shot_detections};
 pub use reach::{
     ROOT_CUBE_DIAGONAL, class_reach, flux, inverse_square_flux, kind_reach, reach, transmission,

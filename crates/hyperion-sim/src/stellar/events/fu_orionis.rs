@@ -1023,8 +1023,20 @@ fn bins() -> PoissonBins {
 /// zero, so the cut drops nothing and spares the empty bins.
 #[must_use]
 fn active_part(model: &FuOrionisModel<'_>, window: TimeWindow) -> Option<TimeWindow> {
-    let start = window.start().max(model.formation());
-    let end = window.end().min(model.last_instant());
+    active_span(window, model.formation(), model.last_instant())
+}
+
+/// `window` cut to the span from `formation` to `last_instant`, a star's span with outbursts
+/// ([`FuOrionisModel::formation`], [`FuOrionisModel::last_instant`]), or `None` where they do not
+/// meet: the cut [`outbursts_in`] makes, for a caller that keeps the span (plan 12, P12.T5.e).
+#[must_use]
+pub(crate) fn active_span(
+    window: TimeWindow,
+    formation: UniverseTime,
+    last_instant: UniverseTime,
+) -> Option<TimeWindow> {
+    let start = window.start().max(formation);
+    let end = window.end().min(last_instant);
     (start < end).then(|| TimeWindow::new(start, end).expect("start before end"))
 }
 

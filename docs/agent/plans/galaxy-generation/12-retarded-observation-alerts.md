@@ -2743,3 +2743,14 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _For P09.T28 and T8._ A row on a followed orbit trips a debug assertion: its events need the
     orbit. `alerts/local_events_50ly_day` misses 1 ms (a finding); nearly half of it is plan 06's
     `FlareModel`, built for each star on each call inside `flares_in`.
+- **P12.T5.e's cost (lane `p12-t5e-cost`, 2026-10-31, at `GENERATOR_VERSION` 24).** Nothing
+  moves: every detection is the one before, bit for bit.
+  - _Signature._ `local_events` takes `cache: &mut LocalEventsCache` before `out`
+    (`alerts::local`, re-exported from `alerts`): each star's flare rates (plan 06's `FlareRates`)
+    and the span of its FU Orionis outbursts, kept by body for one galaxy (its seed, parameters
+    and rules), at most `capacity` stars, emptied when full. T8 keeps one per subscription. Plan
+    06's `PoissonBins::events_in` no longer asks a rate outside its window (P06.T27's record).
+  - _Levers left._ Sightlines kept across calls by host and observer position would be exact only
+    while `AlertContext`'s gas source stays the same, which `local_events` cannot see, so they are
+    not kept here. The state that thinning reads for each candidate flare has no exact shortcut:
+    the phase comes from the track's model point, and the mass is interpolated, not monotone.
