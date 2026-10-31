@@ -7035,3 +7035,9 @@ galaxy_sweeps`.
     `binary_pair_light_c`, `_d` and `sky_binary_light_d` stay stale until the `--since 25` refit;
     P11.T17.b's slow `the_pair_light_tables_bound_evolved_pairs` fails on them in C and E at the
     train's base and after T4.o alike (158 bins, the same).
+- **The held floor, dropped in version 25's wiring** (2026-10-31, at header 24): `held_floor` and
+  `light.rs`'s `HeldStars` are gone; `binary::tests`'s
+  `the_last_capped_sample_ends_as_it_does_with_the_cap_raised` checks D's cell 2027 sample 11 with
+  the cap raised (test-only `evolve::evolve_with_segment_cap`). At the bump: refit
+  `binary_pair_light_c`, `_d` and `sky_binary_light_d` `--since 25`, then run the slow
+  `the_pair_light_tables_bound_evolved_pairs` and `the_pair_verdicts_hold_against_the_engine`.

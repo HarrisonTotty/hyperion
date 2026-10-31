@@ -6059,3 +6059,103 @@ fn the_steps_of_t4o_are_the_same_whatever_age_they_are_run_to() {
         assert!(after_events > 0, "{:?}", input.masses());
     }
 }
+
+// --- Version 25's wiring: the held floor's drop ------------------------------------------------
+
+/// Version 25's wiring drops P11.T17.c's held floor (`decision-galaxy-25-train.md`, "The held
+/// floor"), on the check research-leans-2 asked for: the one capped timeline that P11.T4.o's
+/// re-run of the follow-up's probes left, sample 11 of D's cell 2027 under the probe's seed (the
+/// fit's with its last byte changed; 3.68 + 2.76 M☉ at 108.2 d, e 0.90, Z 0.0142), ends as it
+/// does with the engine's cap on segments raised.
+///
+/// A common envelope at 275.38 Myr leaves a 0.61 M☉ helium star beside a 1.03 M☉ one at 0.72 R☉.
+/// The heavier fills its lobe at 290.22 Myr and, shrinking as it loses mass and as it ages, gives
+/// mass in 24 spells to 294.80 Myr, detaching after each until the orbit's decay brings its lobe
+/// back to it, a segment each. Where its helium main sequence ends, the pair's second common
+/// envelope merges it at 294.85 Myr, in the 64th segment, where the cap stops the engine. That
+/// segment holds the merger's 1.63 M☉ helium Hertzsprung-gap star on its own track, no star the
+/// binary carries on its main sequence, and the track makes it a 1.44 M☉ oxygen–neon white dwarf at
+/// 295.58 Myr. With the cap raised the run takes that birth as a 65th segment and stops there. Up
+/// to the cap the two runs are the same segment for segment, and from the birth on they hold the
+/// same states, with the same records and merger. No companion is left whose gravitational-wave
+/// merger could lie past the cap.
+///
+/// Between the cap and the birth, 0.72 Myr, both hold the star living, but the capped run's keeps
+/// its mass at the cap, 1.63 M☉, where the raised run's wind takes it to 1.44 M☉ and strips it in
+/// its last 2 × 10³ years. The raised run's star is brightest at M<sub>V</sub> −7.51, the capped
+/// run's at −7.28: 0.23 mag fainter, within the 0.3 mag by which the pair-light tables brighten
+/// what their walk reads ([`MARGIN_MAG`](pair_light::MARGIN_MAG)).
+#[test]
+fn the_last_capped_sample_ends_as_it_does_with_the_cap_raised() {
+    use super::star::Member;
+
+    let grid = pair_light::PairGrid::of(crate::id::Layer::D).expect("D's grid");
+    let (cell, index) = (2_027, 11);
+    let input = pair_light::sample_input(&grid, cell, index, pair_light::FIT_SEED ^ 0x0d);
+    let until = Years::new(pair_light::LAST_AGE_YEARS);
+    let capped = evolve(&input, until);
+    let raised = super::evolve::evolve_with_segment_cap(&input, until, 64 * MAX_SEGMENTS);
+    assert!(capped.hit_segment_cap(), "{}", describe(&capped));
+    assert!(!raised.hit_segment_cap(), "{}", describe(&raised));
+    assert_eq!(capped.segments().len(), MAX_SEGMENTS);
+    assert_eq!(
+        raised.segments().len(),
+        MAX_SEGMENTS + 1,
+        "{}",
+        describe(&raised)
+    );
+    let (last, before) = capped.segments().split_last().expect("segments");
+    assert_eq!(before, &raised.segments()[..MAX_SEGMENTS - 1]);
+    let [merged, birth] = [MAX_SEGMENTS - 1, MAX_SEGMENTS].map(|k| &raised.segments()[k]);
+    let cap = last.start();
+    assert_eq!((merged.kind(), merged.start()), (last.kind(), cap));
+    assert!((cap.value() / 294.853e6 - 1.0).abs() < 1e-5, "{cap:?}");
+    // The merger's star, on the same track at the same offset in both runs, its companion gone.
+    assert_eq!(last.members()[0].track(), merged.members()[0].track());
+    assert!(matches!(last.members()[0], Member::Shaped { .. }));
+    assert!(
+        matches!(last.members()[1], Member::Gone) && matches!(merged.members()[1], Member::Gone)
+    );
+    let born = birth.start().value();
+    assert!((born / 295.575e6 - 1.0).abs() < 1e-5, "{born}");
+    let v = |state: crate::stellar::StarState| {
+        crate::stellar::photometry::absolute_v_of_state(&state)
+            .map_or(f64::INFINITY, crate::units::Magnitudes::value)
+    };
+    let mut brightest = [f64::INFINITY; 2];
+    for k in 0..20_000 {
+        let age = Years::new(cap.value() + (born - cap.value()) * f64::from(k) / 20_000.0);
+        let (held, run) = (
+            capped.state_at(age).stars()[0],
+            raised.state_at(age).stars()[0],
+        );
+        assert!(
+            held.phase().is_living() && run.phase().is_living(),
+            "at {age:?}"
+        );
+        assert!(held.mass().value() >= run.mass().value(), "at {age:?}");
+        brightest = [brightest[0].min(v(held)), brightest[1].min(v(run))];
+    }
+    assert!(
+        brightest[0] <= brightest[1] + pair_light::MARGIN_MAG,
+        "the brightest V, capped and raised: {brightest:?}"
+    );
+    for age in [born, f64::midpoint(born, until.value()), until.value()] {
+        let age = Years::new(age);
+        assert_eq!(capped.state_at(age), raised.state_at(age), "at {age:?}");
+    }
+    assert_eq!(capped.supernovae(), raised.supernovae());
+    assert_eq!(capped.pooled_ia(), raised.pooled_ia());
+    assert_eq!(capped.merger_age(), raised.merger_age());
+    assert!(
+        raised.merger_age().is_some_and(|m| m <= cap),
+        "{:?}",
+        raised.merger_age()
+    );
+    let end = raised.state_at(until);
+    assert_eq!(end.orbit(), None);
+    assert_eq!(
+        end.stars().map(|s| s.phase()),
+        [Phase::OxygenNeonWhiteDwarf, Phase::NoRemnant]
+    );
+}

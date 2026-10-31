@@ -129,27 +129,23 @@
 //! 1 R☉, a window ending past 1.5 × 10¹⁰ years, a layer whose table is a placeholder, or masses
 //! given as intervals ([`pair_light_bound_over`] reads the tables for exact masses only).
 //!
-//! **The held floor** (P11.T17.c's follow-up, 2026-10-08, after R06.T8.g's slow test found a
-//! bulge pair of layer D whose stars shone at M<sub>V</sub> 1.3 and 2.5 at 8.7 Gyr where the
-//! tables read `Remnants`). A timeline that reaches the engine's cap on segments is left as it
-//! stands, its last segment stretched to the age asked, and a star the binary carries on its main
-//! sequence there, hydrogen or helium, is held at its last mass and fractional age for ever. The
-//! engine reaches the cap where an accretor so carried is fed at its main sequence's end, each
-//! step landing short of that end once the accretion has lowered its fractional age (plan 11's
-//! Risks: finding F15 for a helium accretor, and the same for a hydrogen one), and in P11.T4.g's
-//! swell and strip cycle (finding C2); P11.T4.m removed the rules behind F15 and C2, and P11.T4.o
-//! the hydrogen accretor's (finding F18). About 3 × 10⁻⁵ of the census's pairs did
-//! before P11.T4.m (P11.T17.c's follow-up probe; P11.T4.o's re-run found one capped timeline, at
-//! its last star's death, which holds no star), too few for the tables' 72
-//! samples a cell to hold, and a held gainer reaches M<sub>V</sub> −7.6. So where the
-//! closed form does not call the pair `Detached` at the window's end, each bin from
-//! [`pair_light::held_floor`]'s first one reads its living and changed values as no fainter than
-//! the floor: the brightest hydrogen or helium main-sequence star of at most the pair's total
-//! mass, from the engine's own models, margin included. A pair the closed form calls `Detached`
-//! there has not been stepped by then, so it holds no such star, and reads the tables as they
-//! are. `Remnants` is then answered only by such pairs, and `Unchanged` only before any star of the
-//! pair can have ended its main sequence. The floor goes in version 25's wiring if no timeline is
-//! capped then (P11.T4.o).
+//! **No held floor** (version 25's wiring; `decision-galaxy-25-train.md`, "The held floor"). A
+//! timeline that reaches the engine's cap on segments is left as it stands, its last segment
+//! stretched to the age asked, so a star the binary carries on its main sequence there, hydrogen
+//! or helium, is held at its last mass and fractional age for ever. P11.T17.c's follow-up
+//! (2026-10-08, after R06.T8.g's slow test found a bulge pair of layer D whose stars shone at
+//! M<sub>V</sub> 1.3 and 2.5 at 8.7 Gyr where the tables read `Remnants`) therefore read each bin,
+//! wherever the closed form did not call the pair `Detached`, as no fainter than a held floor: the
+//! brightest main-sequence star of at most the pair's total mass. The engine reached the cap where
+//! an accretor so carried was fed at its main sequence's end, each step landing short of that end
+//! once the accretion had lowered its fractional age (plan 11's Risks: finding F15 for a helium
+//! accretor, F18 for a hydrogen one), and in P11.T4.g's swell and strip cycle (finding C2).
+//! P11.T4.m removed the rules behind F15 and C2, and P11.T4.o the hydrogen accretor's. T4.o's
+//! re-run of the follow-up's probes left one capped timeline, which holds no such star at its cap
+//! and ends as it does with the cap raised (the engine's test
+//! `the_last_capped_sample_ends_as_it_does_with_the_cap_raised`). So the readers floor no capped
+//! main sequence: the bound reads the tables as they are, whether or not the closed form calls the
+//! pair `Detached` at the window's end.
 //!
 //! **White dwarfs are dark.** The tables hold no remnant's light, so all three verdicts hold only
 //! while white dwarfs have no V (R06's ask A4). A white dwarf the binary makes can be far younger
@@ -163,10 +159,7 @@
 //! verdict over A′ is no tighter than over A, in the census's order `Remnants` < `Detached` =
 //! `Unchanged` < `Bright(M)`, looser as M brightens, < `None`. `Remnants` over A′ holds over A,
 //! since its bins are A′'s; `Detached` reads only the window's end, and only shrinks with it; a
-//! wider window's M is the brightest over more bins, and the thin rule reads each bin alone. The
-//! held floor is read only where the closed form fails at the window's end, which it does at every
-//! later end: if it fails at A′'s end and holds at A's, A reads the tables as they are and answers
-//! `Remnants` or `Detached`, no looser than A′'s verdict, which is not `Detached`.
+//! wider window's M is the brightest over more bins, and the thin rule reads each bin alone.
 //! Asked after `Detached`, `Remnants` over A′ would follow `Detached` over A, whose stars take
 //! their own bounds, which may not be dark. A test holds the order over random nested windows.
 
@@ -263,11 +256,6 @@ pub(crate) const THIN_DEPARTING_CLASS: u8 = 2;
 ///    any bin, `None` where a bin's departing stars are too few among its cell's own samples to
 ///    bound (one to three of 72), and otherwise [`PairLight::Bright`] at the brightest departing
 ///    star or product of the bins, margin included.
-///
-/// Where the closed form fails at the window's end, the tables are read through the held floor
-/// (the `pair_light` module's): a capped timeline may hold a main-sequence star of the pair for
-/// ever, so from the first age any star of the pair can end
-/// its main sequence, every bin holds a living, departing star as bright as such a star can be.
 ///
 /// The tables cover a heavier star of 0.75–150 M☉, a periastron of at least 1 R☉ and a window
 /// ending by 1.5 × 10¹⁰ years, for exact masses; outside them a pair is `Detached` or `None`.
@@ -426,21 +414,7 @@ fn bound_with(
     let exact = ends.iter().all(|&[lo, hi]| lo.total_cmp(&hi).is_eq());
     let detached = detached(ends, reach, periastron_rsun, fe_h, until);
     let read = if exact && tables == Tables::Read {
-        // A pair that cannot have interacted by the window's end holds no capped timeline's
-        // star in it (the module's held floor).
-        let held = if detached {
-            HeldStars::Impossible
-        } else {
-            HeldStars::Possible
-        };
-        tabled(
-            ends[1][0],
-            ends[0][0],
-            fe_h,
-            periastron_rsun,
-            [start, end],
-            held,
-        )
+        tabled(ends[1][0], ends[0][0], fe_h, periastron_rsun, [start, end])
     } else {
         None
     };
@@ -452,17 +426,6 @@ fn bound_with(
         return Some(PairLight::Detached);
     }
     read
-}
-
-/// Whether a capped timeline's held star may live in a pair's window (the module's held floor).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HeldStars {
-    /// The pair may have interacted by the window's end, so the tables are read with the held
-    /// floor.
-    Possible,
-    /// The pair cannot have interacted by the window's end (T17.a's `Detached`), so the engine has
-    /// stepped none of it there, and the tables are read as they are.
-    Impossible,
 }
 
 /// Whether the pair of initial masses `ends` (M☉, each `[lo, hi]`, the lighter's `lo` first), of
@@ -503,9 +466,8 @@ fn detached(
 
 /// What P11.T17.b's tables say of the pair of initial masses `heavier_msun` and `lighter_msun`
 /// (M☉), metallicity coordinate `fe_h` and drawn periastron `periastron_rsun` (R☉) over the window
-/// `[start, end]` (years), with the held floor where `held` says a held star is possible:
-/// `Remnants`, `Unchanged`, `Bright`, or `None` outside the tables or for a thin bin (see the
-/// module's documentation).
+/// `[start, end]` (years): `Remnants`, `Unchanged`, `Bright`, or `None` outside the tables or for
+/// a thin bin (see the module's documentation).
 #[must_use]
 fn tabled(
     heavier_msun: f64,
@@ -513,7 +475,6 @@ fn tabled(
     fe_h: f64,
     periastron_rsun: f64,
     [start, end]: [f64; 2],
-    held: HeldStars,
 ) -> Option<PairLight> {
     let (table, cell) = TABLE_LAYERS.iter().find_map(|&layer| {
         let table = PairLightTable::generator(layer)?;
@@ -526,22 +487,12 @@ fn tabled(
     if first > last {
         return None;
     }
-    let fe_cell = table.grid().cell_parts(cell)[2];
-    let (held_from, floor) = match held {
-        HeldStars::Possible => {
-            let floor = pair_light::held_floor(fe_cell, heavier_msun + lighter_msun)?;
-            (floor.first_bin(), floor.cmag())
-        }
-        HeldStars::Impossible => (pair_light::AGE_BINS, DARK_CMAG),
-    };
     let mut remnants = true;
     let mut brightest = DARK_CMAG;
     let mut thin = false;
     for bin in first..=last {
-        // A capped timeline's held star may live at every bin from `held_from` (the module's).
-        let floor = if bin >= held_from { floor } else { DARK_CMAG };
-        remnants &= table.living_cmag_for(cell, bin, lighter_msun).min(floor) == DARK_CMAG;
-        let changed = table.changed_cmag_for(cell, bin, lighter_msun).min(floor);
+        remnants &= table.living_cmag_for(cell, bin, lighter_msun) == DARK_CMAG;
+        let changed = table.changed_cmag_for(cell, bin, lighter_msun);
         if changed != DARK_CMAG {
             // A departing star with no V (UNSEEN) reads the faintest V stored.
             brightest = brightest.min(changed.min(FAINTEST_CMAG));
@@ -917,16 +868,17 @@ mod tests {
                 seen[verdict_index(wide)] += 1;
             }
         }
-        // Across the age at which the closed form first fails, where the held floor starts to be
-        // read: a neutron star and a white dwarf 1,000 au apart are `Detached` at 10 Myr, before
-        // the primary may have collapsed, and `Bright` at the floor over a window to 1 Gyr.
+        // Across the age at which the closed form first fails: a neutron star and a white dwarf
+        // 1,000 au apart are `Detached` at 10 Myr, before the primary may have collapsed, and
+        // `Unchanged` over a window to 1 Gyr, read from the tables, which hold no departing star
+        // of the pair and its own stars living at the window's start.
         let years = |s: f64, e: f64| Years::new(s)..=Years::new(e);
         let (a, b) = (SolarMasses::new(10.0), SolarMasses::new(8.0));
         let p = Metres::new(1.0e3 * AU_M);
         let narrow = pair_light_bound(a, b, p, &Composition::SOLAR, years(1.0e7, 1.0e7));
         let wide = pair_light_bound(a, b, p, &Composition::SOLAR, years(1.0e7, 1.0e9));
         assert_eq!(narrow, Some(PairLight::Detached));
-        assert!(matches!(wide, Some(PairLight::Bright(_))), "{wide:?}");
+        assert_eq!(wide, Some(PairLight::Unchanged));
         assert!(looseness(wide) >= looseness(narrow));
         println!("verdicts over the outer windows: {seen:?} ({VERDICTS:?})");
         assert!(
@@ -936,11 +888,11 @@ mod tests {
     }
 
     /// The tables answer P11.T17.c's three verdicts: `Remnants` for two white dwarfs, asked before
-    /// `Detached`; `Unchanged` for a close pair too young for any star of it to have left its main
-    /// sequence; and `Bright` for an Algol, which bounds its gainer as the engine evolves it. A
-    /// pair whose star collapsed, which the closed form leaves, was `Remnants` until the held floor
-    /// (P11.T17.c's follow-up): its kick may have brought the orbit into an interaction, so a
-    /// capped timeline may hold a star of it, and it is `Bright` at the floor.
+    /// `Detached`, and for a pair whose star collapsed, which the closed form leaves; `Unchanged`
+    /// for a close pair too young for any star of it to have left its main sequence; and `Bright`
+    /// for an Algol, which bounds its gainer as the engine evolves it. The collapsed pair was
+    /// `Bright` at the held floor from P11.T17.c's follow-up until version 25's wiring dropped the
+    /// floor (the module's "No held floor").
     #[test]
     fn the_tables_answer_remnants_unchanged_and_bright() {
         // Two white dwarfs 10⁴ au apart: the closed form holds, but `Remnants` is asked first.
@@ -948,22 +900,11 @@ mod tests {
         assert_eq!(solar(3.0, 2.8, 1.0e4, 5.0e9), Some(PairLight::Remnants));
         assert_eq!(solar(3.0, 2.8, 1.0e4, 1.0e8), Some(PairLight::Detached));
         // A neutron star and a white dwarf 1,000 au apart: the primary collapsed, so the closed
-        // form cannot say, and nothing departs in the tables, but the held floor binds.
+        // form cannot say, and the tables, which sample the kicks, hold no star of it living.
         assert!(!closed(10.0, 8.0, 1.0e3, 1.0e9));
-        let table = PairLightTable::generator(Layer::E).expect("E's fitted table");
-        let p_rsun = 1.0e3 * AU_M / SOLAR_RADIUS_M;
-        let cell = table
-            .cell_of(10.0, 8.0, fe_h_of(&Composition::SOLAR), p_rsun)
-            .expect("inside E's table");
-        let floor =
-            pair_light::held_floor(table.grid().cell_parts(cell)[2], 18.0).expect("a pair's mass");
-        assert!(floor.first_bin() <= pair_light::age_bin(1.0e9).expect("a bin"));
-        assert_eq!(
-            solar(10.0, 8.0, 1.0e3, 1.0e9),
-            Some(PairLight::Bright(Magnitudes::new(from_cmag(floor.cmag()))))
-        );
+        assert_eq!(solar(10.0, 8.0, 1.0e3, 1.0e9), Some(PairLight::Remnants));
         // Two B stars 0.03 au apart at 0.24 Myr: the closed form cannot pass them over, and
-        // neither has reached its main sequence's end, the held floor's first bin.
+        // neither has reached its main sequence's end.
         assert!(!closed(4.6, 4.4, 0.03, 2.4e5));
         assert_eq!(solar(4.6, 4.4, 0.03, 2.4e5), Some(PairLight::Unchanged));
         // An Algol-like pair of Hurley, Tout and Pols's (2002, section 3.1) masses on `evolve`'s
@@ -1016,8 +957,7 @@ mod tests {
 
     /// A bin whose changed value comes from one to three of the cell's own departing samples is
     /// too thin to bound, and the tables answer `None` there; with none of its own, or four or
-    /// more, the bin is `Bright` at its changed value. The tables are read as they are, without
-    /// the held floor, which `the_held_floor_bounds_a_held_main_sequence` tests.
+    /// more, the bin is `Bright` at its changed value.
     #[test]
     fn a_thin_bin_is_not_bounded() {
         let mut found = [0_u32; 3];
@@ -1043,8 +983,7 @@ mod tests {
                     let age = (pair_light::age_edge_years(bin)
                         * pair_light::age_edge_years(bin + 1))
                     .sqrt();
-                    let verdict =
-                        tabled(heavier, lighter, fe_h, p, [age, age], HeldStars::Impossible);
+                    let verdict = tabled(heavier, lighter, fe_h, p, [age, age]);
                     if kind == 1 {
                         assert_eq!(verdict, None, "{layer:?} cell {cell} bin {bin}");
                     } else {
@@ -1214,9 +1153,8 @@ mod tests {
 
     /// The bound gives each query the same answer bit for bit, whatever was asked before it
     /// (the sim-determinism skill's order independence: the census's warm cache asks it, and its
-    /// tables and cooling and held floors are filled lazily): 150 queries over layers C, D and E,
-    /// a third with a star below 0.1 M☉, and four that answer `Remnants` and `Unchanged`,
-    /// answering every verdict.
+    /// tables are filled lazily): 150 queries over layers C, D and E, a third with a star below
+    /// 0.1 M☉, and four that answer `Remnants` and `Unchanged`, answering every verdict.
     #[test]
     fn the_bound_does_not_depend_on_what_was_asked_before() {
         use hyperion_testkit::order::assert_order_independent;
@@ -1237,7 +1175,8 @@ mod tests {
             })
             .chain([
                 // Pairs of white dwarfs on wide orbits, which only `Remnants` answers, and a young
-                // close pair, which `Unchanged` does (the held floor makes both rare at random).
+                // close pair, which `Unchanged` does, so that every verdict occurs whatever the
+                // random queries give.
                 (3.0, 2.8, 2.15e6, 5.0e9, 0.0),
                 (6.0, 5.0, 1.0e6, 2.0e9, -0.5),
                 (4.0, 3.5, 5.0e5, 9.0e9, 0.2),
@@ -1782,33 +1721,14 @@ mod tests {
             ))
         })?;
         let bins = pair_light::age_bin(w0)?..=pair_light::age_bin(w1)?;
-        if tabled(
-            heavier_msun,
-            lighter_msun,
-            fe_h,
-            periastron_rsun,
-            [w0, w1],
-            HeldStars::Possible,
-        )
-        .is_some()
-        {
+        if tabled(heavier_msun, lighter_msun, fe_h, periastron_rsun, [w0, w1]).is_some() {
             return None;
         }
-        let fe_cell = table.grid().cell_parts(cell)[2];
-        let held = pair_light::held_floor(fe_cell, heavier_msun + lighter_msun)?;
-        let (held_from, floor) = (held.first_bin(), held.cmag());
-        bins.map(|bin| {
-            let changed = table.changed_cmag_for(cell, bin, lighter_msun);
-            if bin >= held_from {
-                changed.min(floor)
-            } else {
-                changed
-            }
-        })
-        .filter(|&k| k != DARK_CMAG)
-        .map(|k| k.min(FAINTEST_CMAG))
-        .min()
-        .map(from_cmag)
+        bins.map(|bin| table.changed_cmag_for(cell, bin, lighter_msun))
+            .filter(|&k| k != DARK_CMAG)
+            .map(|k| k.min(FAINTEST_CMAG))
+            .min()
+            .map(from_cmag)
     }
 
     /// What one set of a layer's pairs came to.
@@ -2137,7 +2057,7 @@ mod tests {
     /// stretched segment then held it at M<sub>V</sub> −3.48 to 1.5 × 10¹⁰ years, is not capped
     /// since P11.T4.o: a fed member that ages over the step aimed at its main sequence's end takes
     /// that end. The helium giant feeds it on its main sequence for one segment, to 99.2367 Myr,
-    /// where it is a Hertzsprung-gap star. The held floor keeps its own tests.
+    /// where it is a Hertzsprung-gap star.
     #[test]
     fn the_follow_ups_hydrogen_gainer_is_not_capped() {
         use super::super::timeline::{Component, SegmentKind};

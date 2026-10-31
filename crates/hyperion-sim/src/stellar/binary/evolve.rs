@@ -55,6 +55,27 @@ use super::timeline::{
 /// the tests.
 pub const MAX_SEGMENTS: usize = 64;
 
+#[cfg(test)]
+thread_local! {
+    /// The cap on segments of this thread's runs, [`MAX_SEGMENTS`] unless a test raises it
+    /// ([`evolve_with_segment_cap`]); the generator's builds have no such knob.
+    static SEGMENT_CAP: core::cell::Cell<usize> = const { core::cell::Cell::new(MAX_SEGMENTS) };
+}
+
+/// The cap on a timeline's segments: [`MAX_SEGMENTS`], or in a test build the cap a test has set
+/// ([`evolve_with_segment_cap`]).
+#[must_use]
+fn segment_cap() -> usize {
+    #[cfg(test)]
+    {
+        SEGMENT_CAP.with(core::cell::Cell::get)
+    }
+    #[cfg(not(test))]
+    {
+        MAX_SEGMENTS
+    }
+}
+
 /// The most events (phases the driver runs) a timeline takes, past which the engine stops as it
 /// does at [`MAX_SEGMENTS`]: a guard against a loop of events that make no segments.
 const MAX_EVENTS: u32 = 4_096;
@@ -285,6 +306,29 @@ pub(super) fn evolve_past_the_second_pre_test(
     until_age: Years,
 ) -> BinaryTimeline {
     run_pair(input, until_age, [None, None], PreTest::PastAfterCollapse)
+}
+
+/// [`evolve`] with its cap on segments at `cap` in place of [`MAX_SEGMENTS`], on this thread
+/// alone and for this run alone, so that the tests can run a capped timeline on and compare its
+/// end (P11's held floor, dropped in version 25's wiring; `decision-galaxy-25-train.md`, "The
+/// held floor"). The generator's path is untouched: [`segment_cap`] is [`MAX_SEGMENTS`] outside
+/// test builds, and here outside this call.
+#[cfg(test)]
+#[must_use]
+pub(super) fn evolve_with_segment_cap(
+    input: &BinaryInput,
+    until_age: Years,
+    cap: usize,
+) -> BinaryTimeline {
+    /// Puts the thread's cap back when the run ends, a panicking one included.
+    struct Restore(usize);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SEGMENT_CAP.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(SEGMENT_CAP.with(|c| c.replace(cap)));
+    evolve(input, until_age)
 }
 
 /// Where the engine starts stepping for a pair of `members` run to `until`: where the first star
@@ -906,7 +950,7 @@ impl Engine {
             | SegmentKind::Disrupted { .. }
             | SegmentKind::Contact => None,
         };
-        if self.segments.len() + 1 >= MAX_SEGMENTS {
+        if self.segments.len() + 1 >= segment_cap() {
             self.capped = true;
         }
     }
