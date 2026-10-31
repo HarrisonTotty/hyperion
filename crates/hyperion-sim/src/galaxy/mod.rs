@@ -634,8 +634,9 @@ impl Galaxy {
     /// hole's, the cluster's and the rest of the galaxy's monopole, tabulated
     /// ([`CentrePotential`](motion::spherical::CentrePotential)).
     ///
-    /// Only the Kepler regime's exact orbit reads it, from version 25 (`KEPLER_SECULAR_VERSION`'s
-    /// hold), so a galaxy below that never builds it. It is held with the galaxy and built when
+    /// Only the Kepler regime's exact orbit reads it, from generator version 25 (P09.T28.d.b),
+    /// where a trajectory is prepared with the centre's motion
+    /// ([`Trajectory::new`](motion::Trajectory::new)). It is held with the galaxy and built when
     /// first read, as [`centre_motion`](Self::centre_motion) is, from that motion alone, in well
     /// under a millisecond once the motion is built: the same bits whichever caller reads it first
     /// and whenever, and the galaxy's equality and `Debug` text do not depend on whether it has

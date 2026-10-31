@@ -14,8 +14,6 @@
 //!
 //! The holds, each a field:
 //!
-//! - [`kepler_secular`](GalaxyRules::kepler_secular), at [`KEPLER_SECULAR_VERSION`] (plan 09,
-//!   P09.T28.d.b): the exact orbit in the centre's potential for a Kepler-regime orbit bound in it.
 //! - [`centre_quiescence`](GalaxyRules::centre_quiescence), at [`CENTRE_QUIESCENCE_VERSION`] (plan
 //!   09, P09.T30.c): the radiative efficiency of the black hole's disruption tails, falling with
 //!   their fallback rate. It is read where a galaxy's victims are drawn (`CentreVictims::new` and
@@ -57,16 +55,12 @@ use crate::galaxy::features::kinds::globular::{BOUND_SHARE_VERSION, BoundShareRu
 use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules};
 use crate::galaxy::features::members::remnants::{MemberRemnantRules, TABULATED_REMNANTS_VERSION};
 use crate::galaxy::global_list::{STREAM_SHELL_VERSION, StreamShellRules};
-use crate::galaxy::motion::{KEPLER_SECULAR_VERSION, KeplerSecularRules};
 use crate::stellar::rules::StellarRules;
 
 /// The galaxy-side holds of the next galaxy train, carried by the `Galaxy` value
 /// (decision-galaxy-25-train §1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct GalaxyRules {
-    /// The law a Kepler-regime orbit follows: the two-body law, or its exact orbit in the centre's
-    /// potential (P09.T28.d.b).
-    pub(crate) kepler_secular: KeplerSecularRules,
     /// The efficiency the black hole's disruption tails radiate at (P09.T30.c).
     pub(crate) centre_quiescence: CentreQuiescenceRules,
     /// The share of its birth mass a globular's history says stellar evolution left it (P09.T13,
@@ -93,11 +87,6 @@ impl GalaxyRules {
     #[must_use]
     pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
         Self {
-            kepler_secular: if version.get() >= KEPLER_SECULAR_VERSION.get() {
-                KeplerSecularRules::Spherical
-            } else {
-                KeplerSecularRules::TwoBody
-            },
             centre_quiescence: if version.get() >= CENTRE_QUIESCENCE_VERSION.get() {
                 CentreQuiescenceRules::HotFlow
             } else {
@@ -252,15 +241,6 @@ mod tests {
     /// Each hold's arm follows its version: held below it, new from it on.
     #[test]
     fn each_hold_turns_on_at_its_version() {
-        let secular = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).kepler_secular;
-        assert_eq!(secular(23), KeplerSecularRules::TwoBody);
-        assert_eq!(secular(24), KeplerSecularRules::TwoBody);
-        assert_eq!(secular(25), KeplerSecularRules::Spherical);
-        assert_eq!(secular(26), KeplerSecularRules::Spherical);
-        assert_eq!(
-            GalaxyRules::every_25_hold().kepler_secular,
-            KeplerSecularRules::Spherical
-        );
         let quiescence = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).centre_quiescence;
         assert_eq!(quiescence(23), CentreQuiescenceRules::ConstantEfficiency);
         assert_eq!(quiescence(24), CentreQuiescenceRules::ConstantEfficiency);

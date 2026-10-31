@@ -10,7 +10,7 @@
 //! [`SecularRates`] ([`KeplerOrbit::secular`]). Nothing reads the stars' rate or the step: the
 //! term in [`position_velocity_at`](super::position_velocity_at) is P09.T28.d.b's exact orbit in
 //! the centre's potential ([`spherical`](super::spherical); restated 2026-10-30 on research
-//! advice), which reads the Schwarzschild advance alone, behind `KEPLER_SECULAR_VERSION` = 25.
+//! advice), which reads the Schwarzschild advance alone, from generator version 25.
 //!
 //! # The relativistic advance
 //!

@@ -1,14 +1,14 @@
-//! The tests of P09.T28.d.b's hold, [`KEPLER_SECULAR_VERSION`] (decision-galaxy-25-train §1.5 and
-//! §1.6): its tripwire; and, with the Kepler regime on, every 25 hold against the same rules with
-//! the two-body law (`kepler_secular` held): the exact orbit moving the Kepler-regime records
-//! bound in the centre's potential and no others, each within the walk's pad and its Kepler
-//! orbit's shell (D2); the regime's edge; the same seed twice and in any order, the centre's
-//! potential built first or last (D4); the centre's source against a scan of its members on their
-//! exact orbits; and the census C1.
+//! The tests of the exact orbit in the centre's potential, from generator version 25 (plan 09,
+//! P09.T28.d.b; decision-galaxy-25-train §1.5 and §1.6), against the two-body law: the exact orbit
+//! moving the Kepler-regime records bound in the centre's potential and no others, each within the
+//! walk's pad and its Kepler orbit's shell (D2); the regime's edge; the same seed twice and in any
+//! order, the centre's potential built first or last (D4); the centre's source against a scan of
+//! its members on their exact orbits; and the census C1.
 //!
-//! The bit-identity of the version in force is held by the goldens and P09.T28.b.a's pre-pin:
-//! below 25 no galaxy builds the centre's potential, which the tripwire checks. The bump to 25
-//! deletes the tripwire and the held arm, and these become tests of the version's own galaxy.
+//! The version's positions near the centre are pinned by the goldens, P09.T28.b.a's pre-pin among
+//! them, and by D2's digest. Where a test needs the two-body law a record would follow without the
+//! exact orbit, it computes it directly ([`Trajectory::of`], the Kepler orbit about the mass inside
+//! the epoch radius, which the exact orbit's law keeps for an orbit unbound in the potential).
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -19,7 +19,6 @@ use hyperion_testkit::order::assert_order_independent;
 
 use super::kepler_regime_hold::{apart, census_galaxies, census_radius, ly, records_within, years};
 use super::*;
-use crate::GENERATOR_VERSION;
 use crate::galaxy::Population;
 use crate::galaxy::features::centre::members::CentrePlacement;
 use crate::galaxy::features::centre::{CentreMemberSource, KeepCentreOrbits};
@@ -39,30 +38,14 @@ const MILKY_WAY_SEED: u64 = 0x0928_b0a0_0000_0001;
 /// ±H.
 const TIMES: [i64; 4] = [-1_000, -100, 100, 1_000];
 
-/// Every 25 hold but this one: the Kepler regime on, with the two-body law.
-fn two_body_rules() -> GalaxyRules {
-    GalaxyRules {
-        kepler_secular: KeplerSecularRules::TwoBody,
-        ..GalaxyRules::every_25_hold()
-    }
-}
-
-/// The fixture with its kinematic tables, so that its grid systems move, under
-/// [`two_body_rules`].
-fn two_body() -> &'static Galaxy {
+/// The Milky Way fixture with its kinematic tables, so that its grid systems move.
+fn galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
         Galaxy::from_params(Seed::new(MILKY_WAY_SEED), GalaxyParams::milky_way_like())
             .expect("the Milky Way fixture's gas is mostly neutral")
             .with_full_potential()
-            .with_rules(two_body_rules())
     })
-}
-
-/// [`two_body`]'s galaxy under every 25 hold: the exact orbit.
-fn exact() -> &'static Galaxy {
-    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| two_body().clone().with_rules(GalaxyRules::every_25_hold()))
 }
 
 /// The law a trajectory takes, by name, for the tallies.
@@ -100,43 +83,6 @@ fn within_bounds(
 /// The relative margin of the shell test, P09.T29's (`SHELL_MARGIN`).
 const SHELL: f64 = 1e-6;
 
-/// P09.T28.d.b is held until the 24 → 25 bump: the rules in force are version 24's and before,
-/// under which a Kepler-regime orbit keeps the two-body law, and no galaxy builds the centre's
-/// potential, however its records move.
-#[test]
-fn the_kepler_secular_term_is_held_only_until_the_25_bump() {
-    assert!(
-        GENERATOR_VERSION < KEPLER_SECULAR_VERSION,
-        "the 24 → 25 bump puts P09.T28.d.b on the record (decision-galaxy-25-train §1): a \
-         Kepler-regime orbit bound in the centre's potential on its exact orbit there \
-         (`Trajectory::new`). Delete `KEPLER_SECULAR_VERSION`, `KeplerSecularRules` with its \
-         `TwoBody` arm, `GalaxyRules::kepler_secular`, the `match` on it and this test, in the \
-         bump's own checkpoint commit, blessed at 24 (§1.6, C2)"
-    );
-    let galaxy = Galaxy::from_params(Seed::new(MILKY_WAY_SEED), GalaxyParams::milky_way_like())
-        .expect("the Milky Way fixture builds");
-    assert_eq!(galaxy.rules().kepler_secular, KeplerSecularRules::TwoBody);
-    assert_eq!(
-        GalaxyRules::of_version(GENERATOR_VERSION).kepler_secular,
-        KeplerSecularRules::TwoBody
-    );
-    assert_eq!(
-        GalaxyRules::every_25_hold().kepler_secular,
-        KeplerSecularRules::Spherical
-    );
-    let start = member(PointLy::new(0.3, 0.1, 0.0), [-2e5, 6e5, 1e5]);
-    let t = years(1_000);
-    let under = position_velocity_at(&galaxy, &start, t);
-    assert_eq!(
-        under,
-        Trajectory::of(galaxy.centre_motion(), start).state_at(t)
-    );
-    assert!(
-        galaxy.centre_potential.0.get().is_none(),
-        "the held arm never reads the centre's potential"
-    );
-}
-
 /// A centre member at `p` ly moving at `velocity` m/s, whose velocity is its own.
 fn member(p: PointLy, velocity: [f64; 3]) -> EpochState {
     let slot = MemberSlot::InCell {
@@ -163,39 +109,32 @@ fn member(p: PointLy, velocity: [f64; 3]) -> EpochState {
 /// record-times).
 const EXACT_POSITIONS_DIGEST: u64 = 0xea8a_e8e2_d8ea_ee1e;
 
-/// D2 with the Kepler regime on: the exact orbit moves the fixture's Kepler-regime grid records
-/// bound in the centre's potential off their two-body orbits, bit for bit their trajectories'
+/// D2: the exact orbit moves the fixture's Kepler-regime grid records bound in the centre's
+/// potential off their two-body orbits ([`position_at_two_body`]), bit for bit their trajectories'
 /// states, and leaves every record outside the regime, every one unbound in Ψ (on its Kepler
-/// orbit) and every record at the epoch where the two-body law puts it; no record is made or
-/// lost, since the loss cone's verdict reads the Kepler orbit; and every moved record lies within
+/// orbit) and every record at the epoch where the two-body law puts it; no placed record is carved
+/// out, since the loss cone's verdict reads the Kepler orbit; and every moved record lies within
 /// the walk's pad and its Kepler orbit's shell. Layer B within 1.5 influence radii, at ±100 and
 /// ±1,000 yr, as P09.T28.b.b's D2. Named `pinned` for the WebAssembly suite's filter (D5): the
 /// counts and a digest of the positions are pinned, as blessed natively.
 #[test]
 fn the_exact_orbit_moves_bound_kepler_regime_records_and_no_others_pinned() {
-    let (two_body, exact) = (two_body(), exact());
-    let edge = two_body.centre_motion().influence_radius().value();
-    let records = records_within(two_body, Layer::B, 1.5 * edge);
-    assert_eq!(records, records_within(exact, Layer::B, 1.5 * edge));
+    let galaxy = galaxy();
+    let edge = galaxy.centre_motion().influence_radius().value();
+    let records = records_within(galaxy, Layer::B, 1.5 * edge);
     let mut laws: BTreeMap<&str, u32> = BTreeMap::new();
     let (mut moved, mut farthest, mut positions) = (0_u32, 0.0_f64, Vec::new());
     for record in &records {
         let epoch = *record.epoch_position();
-        assert_eq!(position_at(exact, record, UniverseTime::EPOCH), epoch);
-        let start = EpochState::of_grid_record(exact, record);
-        let trajectory = Trajectory::new(exact, start);
+        assert_eq!(position_at(galaxy, record, UniverseTime::EPOCH), epoch);
+        let start = EpochState::of_grid_record(galaxy, record);
+        let trajectory = Trajectory::new(galaxy, start);
         *laws.entry(law_of(&trajectory)).or_default() += 1;
         for y in TIMES {
             let t = years(y);
             let (a, b) = (
-                position_at(two_body, record, t),
-                position_at(exact, record, t),
-            );
-            assert_eq!(
-                a,
-                position_at_two_body(two_body, &start, t),
-                "{:?}: the held arm is the two-body law",
-                record.id()
+                position_at_two_body(galaxy, &start, t),
+                position_at(galaxy, record, t),
             );
             match &trajectory.law {
                 Law::Spherical(..) => {
@@ -205,7 +144,7 @@ fn the_exact_orbit_moves_bound_kepler_regime_records_and_no_others_pinned() {
                     assert_eq!(&b, state.position(), "{:?} at {y} yr", record.id());
                     assert!(b.offset_metres().iter().all(|m| m.is_finite()));
                     assert!(
-                        within_bounds(exact, &trajectory, &epoch, &b, t),
+                        within_bounds(galaxy, &trajectory, &epoch, &b, t),
                         "{:?} at {y} yr: beyond its pad or shell",
                         record.id()
                     );
@@ -240,7 +179,9 @@ fn the_exact_orbit_moves_bound_kepler_regime_records_and_no_others_pinned() {
     );
 }
 
-/// A grid record's position under the two-body law: [`Trajectory::of`]'s state.
+/// A grid record's position under the two-body law, the exact orbit's oracle: [`Trajectory::of`]'s
+/// state, and for a record the loss cone carves out its straight line, as
+/// [`position_at`](crate::galaxy::query::position_at) gives one made by hand.
 fn position_at_two_body(galaxy: &Galaxy, start: &EpochState, t: UniverseTime) -> GalacticPosition {
     match Trajectory::of(galaxy.centre_motion(), *start).state_at(t) {
         StateAt::Exists(state) => *state.position(),
@@ -254,12 +195,8 @@ fn position_at_two_body(galaxy: &Galaxy, start: &EpochState, t: UniverseTime) ->
 /// (`the_two_regimes_meet_at_the_influence_radius`), the mass now Ψ's, with its halo.
 #[test]
 fn the_exact_orbit_meets_the_straight_line_at_the_influence_radius() {
-    let galaxy = Galaxy::from_params_with_rules(
-        Seed::new(MILKY_WAY_SEED),
-        GalaxyParams::milky_way_like(),
-        GalaxyRules::every_25_hold(),
-    )
-    .expect("the Milky Way fixture builds");
+    let galaxy = Galaxy::from_params(Seed::new(MILKY_WAY_SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture builds");
     let motion = galaxy.centre_motion();
     let edge = motion.influence_radius().value();
     let along = [0.6, 0.64, 0.48];
@@ -314,10 +251,11 @@ fn the_exact_orbit_meets_the_straight_line_at_the_influence_radius() {
 }
 
 /// D4 under every 25 hold: a galaxy built under the rules is the same galaxy, with the same
-/// positions to the bit, as one given them after (`Galaxy::with_rules`, which the other tests
-/// use); its centre's potential is the one [`CentrePotential::new`] builds; and positions, states
-/// and pads are the same in any order, on one galaxy, warm, and on a fresh copy each time, where
-/// the first answer builds the centre's motion and potential.
+/// positions to the bit, as the version's fixture given them after (`Galaxy::with_rules`), so that
+/// `with_full_potential` carries its rules; its centre's potential is the one
+/// [`CentrePotential::new`] builds; and positions, states and pads are the same in any order, on
+/// one galaxy, warm, and on a fresh copy each time, where the first answer builds the centre's
+/// motion and potential.
 #[test]
 fn the_exact_orbit_gives_the_same_seed_the_same_answers_twice_and_in_any_order() {
     let seed = Seed::new(MILKY_WAY_SEED);
@@ -330,7 +268,8 @@ fn the_exact_orbit_gives_the_same_seed_the_same_answers_twice_and_in_any_order()
     .with_full_potential();
     // Before anything reads its memos.
     let cold = again.clone();
-    assert_eq!(&again, exact());
+    let given = galaxy().clone().with_rules(GalaxyRules::every_25_hold());
+    assert_eq!(again, given);
     let near = CellKey::containing(Layer::B, &ly(0.5, 0.5, 0.5)).expect("in the cube");
     let mut cell = Vec::new();
     generate_cell(&again, near, &mut cell);
@@ -383,22 +322,18 @@ fn the_exact_orbit_gives_the_same_seed_the_same_answers_twice_and_in_any_order()
         for y in TIMES {
             assert_eq!(
                 position_at(&again, &record, years(y)),
-                position_at(exact(), &record, years(y))
+                position_at(&given, &record, years(y))
             );
         }
     }
 }
 
-/// The heap the exact orbits own under every 25 hold: a trajectory's exact orbit, boxed; a cell's
-/// orbits, every member's with its trajectory and shell; and the galaxy's potential, once read.
+/// The heap the exact orbits own: a trajectory's exact orbit, boxed; a cell's orbits, every
+/// member's with its trajectory and shell; and the galaxy's potential, once read.
 #[test]
 fn the_exact_orbits_heap_is_counted() {
-    let galaxy = Galaxy::from_params_with_rules(
-        Seed::new(MILKY_WAY_SEED),
-        GalaxyParams::milky_way_like(),
-        GalaxyRules::every_25_hold(),
-    )
-    .expect("the Milky Way fixture builds");
+    let galaxy = Galaxy::from_params(Seed::new(MILKY_WAY_SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture builds");
     // Before anything reads the centre's memos.
     let before = galaxy.heap_bytes();
     let exact = Trajectory::new(
@@ -507,10 +442,9 @@ fn sort(hits: &mut [SystemHit]) {
 /// the two-body law.
 #[test]
 fn the_centre_s_source_finds_what_a_scan_finds_on_the_exact_orbits() {
-    let galaxy = Galaxy::from_params_with_rules(
+    let galaxy = Galaxy::from_params(
         Seed::new(0x0929_0000_0000_0001),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_25_hold(),
     )
     .expect("the Milky Way fixture builds");
     let kept = KeepCentreOrbits::new(&galaxy);
@@ -568,50 +502,50 @@ fn the_centre_s_source_finds_what_a_scan_finds_on_the_exact_orbits() {
     );
 }
 
-/// The census C1 of decision-galaxy-25-train §1.6, the exact orbit with the Kepler regime on
-/// against the two-body law: over P09.T28.b.a's pre-pin (three galaxies, every grid record within
-/// 1.5 influence radii, the substellar layers within 4 ly), at ±100 and ±1,000 yr (±H), the
-/// records by law, the movers by count, the largest move, every mover finite, no record outside
-/// the exact law moved, every record within the walk's pad and its Kepler orbit's shell, and no
-/// change of existence (the loss cone's verdict reads the Kepler orbit, so the carve-outs are
+/// The census C1 of decision-galaxy-25-train §1.6, the exact orbit against the two-body law
+/// ([`position_at_two_body`]): over P09.T28.b.a's pre-pin (three galaxies, every grid record within
+/// 1.5 influence radii, the substellar layers within 4 ly), at ±100 and ±1,000 yr (±H), the records
+/// by law, the movers by count, the largest move, every mover finite, no record outside the exact
+/// law moved, every record within the walk's pad and its Kepler orbit's shell, and no placed record
+/// carved out (the loss cone's verdict reads the Kepler orbit, so the carve-outs are
 /// P09.T28.b.b's).
 #[test]
 #[ignore = "slow: generates the grid's central cells of every layer for three galaxies, some \
             minutes"]
 fn the_exact_orbit_s_census_near_the_black_hole() {
     for (label, galaxy) in census_galaxies() {
-        let two_body = galaxy.with_rules(two_body_rules());
-        let exact = two_body.clone().with_rules(GalaxyRules::every_25_hold());
-        let edge = two_body.centre_motion().influence_radius().value();
+        let edge = galaxy.centre_motion().influence_radius().value();
         println!("{label}: edge {edge:.3} ly");
         for layer in Layer::ALL {
-            census_of_the_layer(&two_body, &exact, layer);
+            census_of_the_layer(&galaxy, layer);
         }
     }
 }
 
-/// The census C1 of one layer's records within [`census_radius`], `two_body` against `exact`.
-fn census_of_the_layer(two_body: &Galaxy, exact: &Galaxy, layer: Layer) {
-    let radius = census_radius(two_body, layer);
-    let records = records_within(two_body, layer, radius);
-    assert_eq!(
-        records,
-        records_within(exact, layer, radius),
-        "{layer:?}: the exact law made or lost a record"
-    );
+/// The census C1 of one layer's records within [`census_radius`], on their exact orbits against
+/// the two-body law.
+fn census_of_the_layer(galaxy: &Galaxy, layer: Layer) {
+    let radius = census_radius(galaxy, layer);
+    let records = records_within(galaxy, layer, radius);
     let mut laws: BTreeMap<&str, u64> = BTreeMap::new();
     let mut movers = [0_u64; 4];
     let mut largest = [0.0_f64; 4];
     for record in &records {
-        let start = EpochState::of_grid_record(exact, record);
-        let trajectory = Trajectory::new(exact, start);
+        let start = EpochState::of_grid_record(galaxy, record);
+        let trajectory = Trajectory::new(galaxy, start);
         *laws.entry(law_of(&trajectory)).or_default() += 1;
+        assert_ne!(
+            law_of(&trajectory),
+            "no such system",
+            "{:?} in the loss cone was placed",
+            record.id()
+        );
         let epoch = *record.epoch_position();
         for (k, y) in TIMES.into_iter().enumerate() {
             let t = years(y);
             let (a, b) = (
-                position_at(two_body, record, t),
-                position_at(exact, record, t),
+                position_at_two_body(galaxy, &start, t),
+                position_at(galaxy, record, t),
             );
             assert!(b.offset_metres().iter().all(|m| m.is_finite()));
             if a != b {
@@ -624,9 +558,9 @@ fn census_of_the_layer(two_body: &Galaxy, exact: &Galaxy, layer: Layer) {
                 movers[k] += 1;
                 largest[k] = largest[k].max(apart(&a, &b));
             }
-            if regime_of(exact, record) == Regime::Kepler {
+            if regime_of(galaxy, record) == Regime::Kepler {
                 assert!(
-                    within_bounds(exact, &trajectory, &epoch, &b, t),
+                    within_bounds(galaxy, &trajectory, &epoch, &b, t),
                     "{:?} at {y} yr: beyond its pad or shell",
                     record.id()
                 );

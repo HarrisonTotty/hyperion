@@ -1,5 +1,5 @@
-//! The exact orbit in the centre's spherical potential: the Kepler regime's term from version 25
-//! (plan 09, P09.T28.d.b, restated 2026-10-30 on research advice; behind `KEPLER_SECULAR_VERSION`).
+//! The exact orbit in the centre's spherical potential: the Kepler regime's term from generator
+//! version 25 (plan 09, P09.T28.d.b, restated 2026-10-30 on research advice).
 //!
 //! The two-body law about μ = G M(<r₀) holds the stars inside the epoch radius fixed along the
 //! orbit, and T28.d.a's secular step adds their orbit averages; against a direct integration both
@@ -103,7 +103,7 @@
 //! Pure: fixed knots and nodes, fixed step counts, fixed operations in a fixed order, and [`math`]
 //! functions, so the table, each orbit's coefficients and every state are the same bits on every
 //! platform. The knots, nodes, terms, step counts and the threshold, and the form of every
-//! expression here, belong to the generator version from 25, when the hold is lifted.
+//! expression here, belong to the generator version from 25 (P09.T28.d.b).
 
 use std::f64::consts::{PI, TAU};
 
@@ -863,7 +863,6 @@ mod tests {
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::{SystemOrigin, SystemRecord};
     use crate::galaxy::potential::MassModel;
-    use crate::galaxy::rules::GalaxyRules;
     use crate::galaxy::{Galaxy, PointLy, Population};
     use crate::id::{CentreMemberId, Layer, MemberSlot, SystemId};
     use crate::rng::Seed;
@@ -1233,25 +1232,23 @@ mod tests {
         (1.6, 0.3),
     ];
 
-    /// The plan's test, under the 25 arm (P09.T28.d.b; it replaces P09.T28.d.a's pinned misses):
-    /// against a direct integration in Ψ, from the profile itself, over ±1,000 yr from 0.1, 1
-    /// and 5 ly, on a circular orbit, P09.T28.d.a's four eccentric ones and two of e 0.98 and
-    /// 0.99, a centre member's position by [`position_velocity_at`] in a galaxy under every 25
-    /// hold is within a tenth of its tidal radius at pericentre for a solar mass (P09.T28.c), the
-    /// plan's bound, where the two-body law misses it on every eccentric orbit; and so do four
-    /// orbits unbound about the mass inside their epoch radius, as most of the grid's are, but one
-    /// from 0.1 ly at 1.6 times the circular speed, bound only at 1.7 × 10⁴ ly, which misses by
-    /// some 173 tenths in `MGE_BOXY`'s potential (P15.T3.c; some 22 before it), half the two-body
-    /// law's 345 (a finding, pinned as it stands: research-leans-9; P09.T28.d.c's). The reference
-    /// is Newtonian, turned by the Schwarzschild advance the law adds on top (P09.T28.d.a tested
-    /// its step Newtonian too), and held to a hundredth of the bound by its own convergence, so
-    /// the errors printed are mostly its own.
+    /// The plan's test (P09.T28.d.b; it replaces P09.T28.d.a's pinned misses): against a direct
+    /// integration in Ψ, from the profile itself, over ±1,000 yr from 0.1, 1 and 5 ly, on a
+    /// circular orbit, P09.T28.d.a's four eccentric ones and two of e 0.98 and 0.99, a centre
+    /// member's position by [`position_velocity_at`] is within a tenth of its tidal radius at
+    /// pericentre for a solar mass (P09.T28.c), the plan's bound, where the two-body law misses it
+    /// on every eccentric orbit; and so do four orbits unbound about the mass inside their epoch
+    /// radius, as most of the grid's are, but one from 0.1 ly at 1.6 times the circular speed,
+    /// bound only at 1.7 × 10⁴ ly, which misses by some 173 tenths in `MGE_BOXY`'s potential
+    /// (P15.T3.c; some 22 before it), half the two-body law's 345 (a finding, pinned as it stands:
+    /// research-leans-9; P09.T28.d.c's). The reference is Newtonian, turned by the Schwarzschild
+    /// advance the law adds on top (P09.T28.d.a tested its step Newtonian too), and held to a
+    /// hundredth of the bound by its own convergence, so the errors printed are mostly its own.
     #[test]
     fn the_exact_orbit_meets_the_plan_s_bound_against_a_direct_integration() {
-        let galaxy = Galaxy::from_params_with_rules(
+        let galaxy = Galaxy::from_params(
             Seed::new(0x0928_d0b0_0000_0002),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_25_hold(),
         )
         .expect("the Milky Way fixture builds");
         let motion = galaxy.centre_motion();

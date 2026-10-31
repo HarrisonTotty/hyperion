@@ -34,7 +34,6 @@ use crate::galaxy::query::{
     count_cells_in_sphere, decide_census, expected_counts, kepler_pad_for, pad_for, pad_speed,
     position_at, range_query, sphere_for_layer, walk_pad,
 };
-use crate::galaxy::rules::GalaxyRules;
 use crate::id::{Layer, SystemId, SystemIdKind};
 use crate::rng::Seed;
 use crate::time::{ClockWindow, Span};
@@ -55,13 +54,6 @@ fn galaxy() -> &'static Galaxy {
             .expect("the Milky Way fixture's gas is mostly neutral")
             .with_full_potential()
     })
-}
-
-/// [`galaxy`]'s fixture under every 25 hold, whose Kepler-regime orbits bound in the centre's
-/// potential are P09.T28.d.b's exact ones (`KEPLER_SECULAR_VERSION`), for D2's pinned positions.
-fn at_25() -> &'static Galaxy {
-    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| galaxy().clone().with_rules(GalaxyRules::every_25_hold()))
 }
 
 /// `galaxy` without its kinematic tables: its grid records have no velocity and so no orbit, and
@@ -160,11 +152,11 @@ const MOVED_POSITIONS_DIGEST: u64 = 0xcd72_f9db_7c8d_d35d;
 /// B within 1.5 influence radii, whose eight central cells are the stellar layers' cheapest to
 /// place, at ±100 and ±1,000 yr. Named `pinned` for the WebAssembly suite's filter (D5): the law
 /// propagates on the record's path, so the counts and a digest of the positions it gives are
-/// pinned, as blessed natively. Under every 25 hold ([`at_25`]) the orbits are P09.T28.d.b's exact
+/// pinned, as blessed natively. The orbits bound in the centre's potential are P09.T28.d.b's exact
 /// ones, which re-pinned the digest by name (decision-galaxy-25-train §1.3).
 #[test]
 fn the_kepler_regime_moves_records_inside_the_radius_and_no_others_pinned() {
-    let galaxy = at_25();
+    let galaxy = galaxy();
     let edge = galaxy.centre_motion().influence_radius().value();
     let records = records_within(galaxy, Layer::B, 1.5 * edge);
     assert_eq!(

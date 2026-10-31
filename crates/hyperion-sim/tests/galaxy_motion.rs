@@ -4,9 +4,11 @@
 //! The propagator is, with the Eddington inversion, the piece of the centre most exposed to a
 //! platform difference (plan 09, "Verification"), so its states are pinned as bits and checked on
 //! every CI target, x86-64, `AArch64` and wasm32. From generator version 25 the drift hook reads
-//! it (P09.T28.b.b), so the pre-pin's positions near the centre are its orbits'; the other goldens
-//! pin the propagator alone.
+//! it (P09.T28.b.b), and an orbit bound in the centre's potential follows its exact orbit there
+//! (P09.T28.d.b), so the pre-pin's positions near the centre and the centre motion's pinned orbit
+//! are those orbits'; the propagator's own golden pins it alone.
 
+use std::f64::consts::TAU;
 use std::sync::OnceLock;
 
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
@@ -14,9 +16,10 @@ use hyperion_sim::galaxy::consts::G;
 use hyperion_sim::galaxy::features::centre::CentreModel;
 use hyperion_sim::galaxy::features::centre::marks::{kepler_pericentre, loss_cone_radius};
 use hyperion_sim::galaxy::features::centre::members::resolve_centre_member;
+use hyperion_sim::galaxy::motion::spherical::CentrePotential;
 use hyperion_sim::galaxy::motion::{
-    CentreMotion, EpochState, KeplerOrbit, LossConeVerdict, Regime, StateAt, loss_cone_verdict,
-    position_velocity_at, regime_of,
+    CentreMotion, EpochState, KeplerOrbit, LossConeVerdict, Regime, StateAt, Trajectory,
+    loss_cone_verdict, position_velocity_at, regime_of,
 };
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellKey, SystemOrigin, SystemRecord, generate_cell};
@@ -399,11 +402,17 @@ fn the_epoch_state_comes_back_to_the_bit() {
     assert_eq!(at, GalacticPosition::ORIGIN);
 }
 
-/// An S2-like member follows P09.T28.a's propagator about the black hole and the stars inside its
-/// epoch radius, as the centre's model weighs them: a 16-year period, back where it started after
-/// each, and the same state as the propagator gives at every time across the clock window.
+/// An S2-like member follows its exact orbit in the centre's potential, from generator version 25
+/// (P09.T28.d.b): P09.T28.a's propagator about the black hole and the stars inside its epoch
+/// radius, as the centre's model weighs them, gives it a 16-year period; at every time across the
+/// clock window its state is its exact orbit's ([`Trajectory::in_potential`], in the potential
+/// built from the galaxy's centre motion), to the bit, which parts from the propagator's by no
+/// more than the arc at its apocentre of the orbit's turn a radial period (the Schwarzschild
+/// advance's 12′ less the stars' retrograde turn, `s2_advances_12_arcminutes_an_orbit`) over the
+/// radial periods elapsed, to 5%: 0.0043 ly a thousand years on, of 0.0067 ly; and a period brings
+/// it back.
 #[test]
-fn an_s2_like_member_follows_its_kepler_orbit() {
+fn an_s2_like_member_follows_its_exact_orbit() {
     let galaxy = milky_way();
     let model = CentreModel::new(galaxy).expect("the fixture's centre builds");
     // S2's elements (GRAVITY Collaboration 2020, A&A 636, L5, table E.1), started at apocentre.
@@ -432,22 +441,32 @@ fn an_s2_like_member_follows_its_kepler_orbit() {
     .expect("a valid state");
     let period = orbit.period().expect("bound").value() / SECONDS_PER_JULIAN_YEAR;
     assert!((period - 16.0).abs() < 0.1, "{period} yr");
+    let motion = galaxy.centre_motion();
+    let exact = Trajectory::in_potential(motion, &CentrePotential::new(motion), start);
+    let bound = exact
+        .exact_orbit()
+        .expect("S2 is bound in the centre's potential");
+    let turn = bound.apsidal_angle_rad() - TAU + bound.relativistic_advance_rad();
+    println!(
+        "a radial period of {} yr, turning {turn} rad",
+        bound.radial_period().value() / SECONDS_PER_JULIAN_YEAR
+    );
     for t in [-1_000, -333, -16, -1, 1, 8, 16, 333, 1_000] {
-        let (at, velocity) = state(galaxy, &start, years(t));
+        assert_eq!(
+            position_velocity_at(galaxy, &start, years(t)),
+            exact.state_at(years(t)),
+            "after {t} yr"
+        );
+        let (at, _) = state(galaxy, &start, years(t));
         let expected = orbit.propagate(Seconds::new(years(t).since_epoch().as_seconds_f64()));
         let p = expected.position();
         let off = apart(
             &at,
             &GalacticPosition::from_light_years([p.x, p.y, p.z]).expect("in range"),
         );
-        assert!(off < 1e-12 * apocentre + 1e-15, "{off} ly off after {t} yr");
-        for (x, y) in velocity
-            .metres_per_second()
-            .into_iter()
-            .zip(expected.velocity().metres_per_second())
-        {
-            assert_same_bits(x, y);
-        }
+        let orbits = years(t).since_epoch().as_seconds_f64().abs() / bound.radial_period().value();
+        let arc = apocentre * turn.abs() * orbits;
+        assert!(off < 1.05 * arc, "{off} ly off after {t} yr, against {arc}");
     }
     // The same state twice gives the same bits.
     assert_eq!(
