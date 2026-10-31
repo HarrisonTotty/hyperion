@@ -2849,15 +2849,16 @@ mod tests {
     /// twice over: by plan 11's P11.T4.h (the early AGB's core and small-envelope remnant at SSE's
     /// τ, which the single-star tracks read; no other commit of the version-21 batch reaches the
     /// build's own code), and by the `sky_binary_light_*` tables refitted at 21, which carry the
-    /// batch's pair evolution (R06's Risks, "Generator version 21").
-    const SERIAL_FINGERPRINT: u64 = 0x9d13_13d6_2725_9e79;
+    /// batch's pair evolution (R06's Risks, "Generator version 21"). Generator version 25 moved it
+    /// from `0x9d13_13d6_2725_9e79`, by the `sky_binary_light_*` tables refitted at 25 (P14.T54.c).
+    const SERIAL_FINGERPRINT: u64 = 0x8349_3e69_1055_20f5;
 
     /// [`fingerprint`] of the same halo build under [`BuildOptions::FULL`], the reference the
     /// shipped nodes are measured against: R06.T5.e's panels at 16 nodes a panel (decided
     /// 2026-10-05). It is new with T5.e's panel edges, which moved it from T5's
     /// `0x8c44_443c_67ac_13bf` to `0xa022_ae9e_49f0_c996`, and generator version 21 moved it here,
-    /// as it moved [`SERIAL_FINGERPRINT`].
-    const FULL_SERIAL_FINGERPRINT: u64 = 0xd063_b6fb_cde6_ee63;
+    /// as it moved [`SERIAL_FINGERPRINT`], and generator version 25 from `0xd063_b6fb_cde6_ee63`.
+    const FULL_SERIAL_FINGERPRINT: u64 = 0x1095_a21e_fcb9_96cf;
 
     /// [`fingerprint`] of the bulge's and the long bar's coarse build in
     /// `parallel_build_equals_serial`, under [`BuildOptions::STANDARD`]'s other options: their
@@ -2865,8 +2866,8 @@ mod tests {
     /// ends and the deaths of intermediate-mass stars (some 5 M☉ at the 10⁸-year edge, which
     /// reach the white dwarf through the post-AGB crossing), which the halo's old edges do not
     /// (R06.T5.e). It moves with [`SERIAL_FINGERPRINT`]: generator version 21 moved it from
-    /// `0x9bc9_1279_f62c_9962`.
-    const PAIR_SERIAL_FINGERPRINT: u64 = 0xc6c9_59ed_9001_fd37;
+    /// `0x9bc9_1279_f62c_9962`, and generator version 25 from `0xc6c9_59ed_9001_fd37`.
+    const PAIR_SERIAL_FINGERPRINT: u64 = 0x99c6_f2fd_f3a6_11f9;
 
     /// The shared tables' file holds every bit of a build: [`file::decode`] of [`file::encode`] is
     /// the build bit for bit, time included, and encodes again to the same bytes. A file with a

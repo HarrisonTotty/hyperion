@@ -952,15 +952,30 @@ struct CoverRuleTally {
     liquids: LiquidTally,
 }
 
+/// The lithology of the lid of the record's surface `surface`, its crust's
+/// ([`CrustComposition::lid_lithology`](crate::planetary::hooks::crust::CrustComposition::lid_lithology)),
+/// which the record's dark lag reads (P14.T53.c; [`DarkLag::of`]); `None` where its crust is not
+/// modelled, as where it reads no lid.
+///
+/// [`DarkLag::of`]: crate::planetary::hooks::figures::lag::DarkLag::of
+fn record_lid(surface: &Surface) -> Option<crate::planetary::hooks::crust::CrustLithology> {
+    let row = surface.crust().ok()?.lid_lithology();
+    crate::planetary::hooks::crust::CrustLithology::ALL
+        .into_iter()
+        .find(|lid| lid.substance() == row)
+}
+
 /// Decision-p14-t54a-water-consistency §4.2: `surface`'s liquids and ices, the record of `id`, are
 /// the cover its condensates give, exactly.
 ///
 /// - **W1–W3.** Each list is its phase's entries in their order, with at most one `H2O` item
-///   appended: in the ices T24.b's water ice where no `H2O` solid is listed (in the liquids, to
-///   version 23, a `Snowball`'s ocean under its ice at its potential ocean where no `H2O` liquid
-///   was; from 24 none, P14.T53.c); each divided
-///   by the list's total, the appended item included, where that total exceeds 1, and otherwise to
-///   the bit. Nothing else is listed.
+///   appended: in the ices T24.b's water ice where no `H2O` solid is listed, from generator
+///   version 25 its lag's exposed share, held to that ice, on an ice bulk under a dark lid
+///   ([`lag::shown`] of [`DarkLag::of`] its material and its record's crust's lid, P14.T53.c; W3
+///   (a)); in the liquids, to version 23, a `Snowball`'s ocean under its ice at its potential
+///   ocean where no `H2O` liquid was (from 24 none, P14.T53.c). Each is divided by the list's
+///   total, the appended item included, where that total exceeds 1, and otherwise to the bit.
+///   Nothing else is listed.
 /// - **W4.** Water's sea is the share of the basins its own layer fills, to the bit, and the other
 ///   liquids share the basins by volume, a supercritical reservoir among them from generator
 ///   version 25 (P14.T53.b part 3); no entry has no mass but a supercritical fluid that is the air
@@ -972,6 +987,9 @@ struct CoverRuleTally {
 ///   given the partition `partition` the condensates were published from, the published pass's
 ///   (rule (f)): every liquid entry is liquid where it lies, and every phase `condensate_of`'s
 ///   fallback set is listed ([`liquid_stability`]).
+///
+/// [`lag::shown`]: crate::planetary::hooks::figures::lag::shown
+/// [`DarkLag::of`]: crate::planetary::hooks::figures::lag::DarkLag::of
 fn check_cover_rule(
     id: crate::id::BodyId,
     surface: &Surface,
@@ -980,6 +998,7 @@ fn check_cover_rule(
 ) {
     use crate::planetary::chem::partition::{Basins, CondensatePhase};
     use crate::planetary::hooks::figures::cover;
+    use crate::planetary::hooks::figures::lag::{self, DarkLag};
     let water = Gas::Water.substance();
     let (figures, conditions) = (surface.figures(), surface.conditions());
     let condensates = surface.condensates();
@@ -1010,6 +1029,10 @@ fn check_cover_rule(
             crust,
             surface_water: ground.surface_water,
         });
+        // From 25 an ice bulk under a dark lid lists its lag's exposed share, held to the cover's
+        // ice, its lid the record's crust's (P14.T53.c): the cover's ice area there is the ice
+        // table beneath the lag, not ice at the surface.
+        let ice = lag::shown(DarkLag::of(surface.material(), record_lid(surface)), ice);
         ices.push((water, ice));
         tally.crust_ice += u32::from(ice > 0.0);
     }
@@ -6171,9 +6194,13 @@ fn moon_laws_are_held_after_at_most_two_rounds(systems: &[(SystemContext, Planet
 /// more at no area, none from 24), and nothing else of any record moves: its photometry,
 /// bulk, state, conditions (its climate regime among them) and crust to the bit, its other
 /// condensates in their order, and its figures to the bit but for the ice cover, which takes
-/// T24.b's water ice at the cover's ice area where the entry was, appended after the condensates'
-/// ices (the figures' rule where the condensates hold no `H2O` solid): the same items, a list the
-/// surface scales moving in its last bits by its total's new order (listed, with its sum).
+/// T24.b's water ice where the entry was, appended after the condensates' ices (the figures' rule
+/// where the condensates hold no `H2O` solid), from generator version 25 its lag's exposed share of
+/// the entry's area, held to it ([`lag::shown`], P14.T53.c): the same items, the others C3's
+/// condensates' own, each divided by the list's total where that exceeds 1, to the bit (listed,
+/// with its sum, and counted where the lag's share holds the water ice under the entry's area).
+///
+/// [`lag::shown`]: crate::planetary::hooks::figures::lag::shown
 #[test]
 #[expect(
     clippy::too_many_lines,
@@ -6183,6 +6210,8 @@ fn an_ice_bulk_under_a_dark_lid_lists_no_crust_water() {
     use std::collections::BTreeMap;
 
     use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::hooks::figures::lag::{self, DarkLag};
+    use crate::substance::SubstanceId;
     use hyperion_testkit::float;
 
     use crate::planetary::hooks::crust::{CrustLithology, LidCrust};
@@ -6193,7 +6222,7 @@ fn an_ice_bulk_under_a_dark_lid_lists_no_crust_water() {
     };
     let (mut surfaces, mut dark, mut delisted, mut truncated) = (0_u32, 0_u32, 0_u32, 0_u32);
     let mut at_no_area: Vec<String> = Vec::new();
-    let (mut ulp_covers, mut ulp_sums) = (0_u32, 0_u32);
+    let (mut held, mut moved_covers, mut moved_sums) = (0_u32, 0_u32, 0_u32);
     let mut by_lid: BTreeMap<String, u32> = BTreeMap::new();
     let mut covers: Vec<String> = Vec::new();
     for (ctx, system) in whole().iter().take(60) {
@@ -6294,51 +6323,86 @@ fn an_ice_bulk_under_a_dark_lid_lists_no_crust_water() {
                 |row| row.substance().key().as_str().to_owned(),
             );
             *by_lid.entry(key.clone()).or_default() += 1;
-            // The cover: the liquids as they were; the ices the same items, T24.b's water ice at
-            // the entry's area appended after the condensates' own.
+            // The cover: the liquids as they were; the ices the same items, T24.b's water ice
+            // appended after the condensates' own.
             let (figures, old_figures) = (surface.figures(), old.figures());
             assert_eq!(
                 format!("{:?}", figures.surface_liquids()),
                 format!("{:?}", old_figures.surface_liquids()),
                 "{what}"
             );
-            // The same substances, each once, each area within a few ulps of its own: a list the
-            // surface scales sums its total in the new order (`within_the_surface`).
+            // The same substances, each once, water's last: the condensates' own ices as C3 listed
+            // them, then T24.b's water ice, from 25 its lag's exposed share of the entry's area,
+            // held to it (`lag::shown`, P14.T53.c), each divided by the list's total where that
+            // exceeds 1 (`within_the_surface`), to the bit.
             let (ices, old_ices) = (figures.surface_ices(), old_figures.surface_ices());
-            assert_eq!(ices.len(), old_ices.len(), "{what}");
-            let mut moved_bits = false;
-            for &(id, area) in ices {
+            let substances = |list: &[(SubstanceId, f64)]| {
+                let mut ids: Vec<SubstanceId> = list.iter().map(|&(id, _)| id).collect();
+                ids.sort_unstable();
+                ids
+            };
+            assert_eq!(substances(ices), substances(old_ices), "{what}");
+            let area = old
+                .condensates()
+                .entry(water, CondensatePhase::Solid)
+                .map_or(
+                    0.0,
+                    crate::planetary::chem::partition::CondensateEntry::area_fraction,
+                );
+            let lag = DarkLag::of(surface.material(), record_lid(surface));
+            assert!(lag.is_some(), "{what}: no lag under a {key} lid");
+            let shown = lag::shown(lag, area);
+            let mut raw = surface.condensates().surface_ices();
+            let mut c3_others = old.condensates().surface_ices();
+            c3_others.retain(|&(id, _)| id != water);
+            assert_eq!(
+                format!("{raw:?}"),
+                format!("{c3_others:?}"),
+                "{what}: the condensates' other ices"
+            );
+            raw.push((water, shown));
+            let total = raw.iter().fold(0.0, |sum, &(_, f)| sum + f);
+            assert_eq!(ices.len(), raw.len(), "{what}");
+            let mut moved = false;
+            for (&(id, listed), &(raw_id, f)) in ices.iter().zip(&raw) {
+                assert_eq!(id, raw_id, "{what}: {ices:?} against {raw:?}");
+                let expected = if total > 1.0 { f / total } else { f };
+                assert_eq!(
+                    float::bits(listed),
+                    float::bits(expected),
+                    "{what}: {id:?} {listed:e} against {expected:e}"
+                );
                 let &(_, was) = old_ices
                     .iter()
                     .find(|(other, _)| *other == id)
                     .unwrap_or_else(|| panic!("{what}: {id:?} not in {old_ices:?}"));
-                assert!(
-                    (area - was).abs() <= 4.0 * f64::EPSILON * area.abs().max(was.abs()),
-                    "{what}: {id:?} {area:e} against {was:e}"
-                );
-                moved_bits |= float::bits(area) != float::bits(was);
+                moved |= float::bits(listed) != float::bits(was);
             }
-            assert_eq!(ices.last().map(|(id, _)| *id), Some(water), "{what}");
+            let held_by_lag = shown < area;
             let sum_moved =
                 float::bits(figures.ice_fraction()) != float::bits(old_figures.ice_fraction());
-            ulp_covers += u32::from(moved_bits);
-            ulp_sums += u32::from(sum_moved);
+            held += u32::from(held_by_lag);
+            moved_covers += u32::from(moved);
+            moved_sums += u32::from(sum_moved);
             covers.push(format!(
-                "{what}: lid {key}, ices {ices:?} (was {old_ices:?}), sum {:e} (was {:e}){}",
+                "{what}: lid {key}, {lag:?} lag, ices {ices:?} (was {old_ices:?}), sum {:e} (was \
+                 {:e}){}{}",
                 figures.ice_fraction(),
                 old_figures.ice_fraction(),
-                if moved_bits {
-                    ", areas moved in their last bits"
+                if held_by_lag {
+                    ", water ice held to the lag's share"
                 } else {
                     ""
                 },
+                if moved { ", areas moved" } else { "" },
             ));
         }
     }
     eprintln!(
         "{surfaces} surfaces, {dark} ice bulks under a non-H2O lid; {delisted} de-listed their H2O \
          solid ({truncated} with a truncated entry back, {} at no area: {at_no_area:?}), by lid \
-         {by_lid:?}; {ulp_covers} ice covers moved in their last bits, {ulp_sums} sums:\n  {}",
+         {by_lid:?}; {held} water ices held to their lag's share; {moved_covers} ice covers \
+         moved, {moved_sums} sums:\n  {}",
         at_no_area.len(),
         covers.join("\n  ")
     );
@@ -6520,13 +6584,24 @@ fn an_envelope_body_s_passes_over_its_record_are_its_stand_in_s() {
 }
 
 /// The C1 review's DD2: the bracket's reuse of an end that read its frozen context to the bit,
-/// which reads `rank`'s `Equal`, takes the same bits as evaluating it again. Over the first 20
-/// whole systems at the epoch, every planet's, member's and moon's derivation with every end
-/// re-evaluated (`with_ends_evaluated`) is the one with the reuse, but for its count of passes,
-/// at most two more a round.
+/// which reads `rank`'s `Equal`, takes the same bits as evaluating it again under T51.h's halvings
+/// (`with_halvings`, the secant root's oracle, P14.T51.l), whose steps read only the side of the
+/// diagonal each end lies on. Over the first 20 whole systems at the epoch, every planet's,
+/// member's and moon's derivation under the halvings with every end re-evaluated
+/// (`with_ends_evaluated`) is the one with the reuse, but for its count of passes, at most two more
+/// a round.
+///
+/// Under the secant root in force from generator version 25 the reuse may differ from
+/// re-evaluation in the last bits (P14.T54.c's finding): two of these derivations do, at an albedo
+/// of 0.292 661 551 075 345 1 against 0.292 661 551 075 345 2 and of 0.770 947 618 521 452 1
+/// against 0.770 947 618 521 493 6. A pass is a function of what it reads, but `rank` leaves out
+/// the context's crater contract (its screening's column mass, its target's density), which a
+/// pass's cold traps read: the end it reuses, a detected 2-cycle's, holds the g of other craters
+/// than the frozen context's, up to 2 × 10⁻¹³ from it, and the secant's false position reads g
+/// itself.
 #[test]
 fn reusing_a_bracket_s_ends_moves_no_bit_of_the_sample() {
-    use crate::planetary::derive::passes::{Convergence, with_ends_evaluated};
+    use crate::planetary::derive::passes::{Convergence, with_ends_evaluated, with_halvings};
 
     let t = UniverseTime::EPOCH;
     let (mut bodies, mut bracketed) = (0_u32, 0_u32);
@@ -6537,7 +6612,10 @@ fn reusing_a_bracket_s_ends_moves_no_bit_of_the_sample() {
         let epoch = Epoch::new(system, ctx, t).with_shades();
         let cosines = HourCosines::new();
         let mut compare = |derive: &dyn Fn() -> Option<DerivedBody>| {
-            let (Some(reused), Some(evaluated)) = (derive(), with_ends_evaluated(derive)) else {
+            let (Some(reused), Some(evaluated)) = (
+                with_halvings(derive),
+                with_halvings(|| with_ends_evaluated(derive)),
+            ) else {
                 return;
             };
             let read = |d: &DerivedBody| {
@@ -6599,7 +6677,10 @@ fn reusing_a_bracket_s_ends_moves_no_bit_of_the_sample() {
             }
         }
     }
-    eprintln!("{bodies} derivations, {bracketed} bracketed, the same with every end re-evaluated");
+    eprintln!(
+        "{bodies} derivations, {bracketed} bracketed, the same under the halvings with every end \
+         re-evaluated"
+    );
     assert!(bodies > 200 && bracketed > 0, "{bodies} {bracketed}");
 }
 

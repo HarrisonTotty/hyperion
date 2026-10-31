@@ -1590,12 +1590,12 @@ mod tests {
 
     #[tokio::test]
     async fn kinds_without_a_handler_are_answered_unsupported() {
-        // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
-        // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
-        // kinds the connection routes, `scene_cameras` until R03.T8 serves it, and plan 12's
-        // `alerts_observer` and `alerts_acknowledge`, routed the same way (P12.T9.a), R06's `sky`
-        // while its switch is off (R06.T11.c), as this test turns it: it is on by default since
-        // rendering plan R13's R13.T2. Plan 09's four kinds are served since P09.T40.b.
+        // Rendering plan R03's kinds the connection routes are answered as an older server would,
+        // `scene_cameras` until R03.T8 serves it, and so are plan 12's `alerts_observer` and
+        // `alerts_acknowledge`, routed the same way (P12.T9.a), and R06's `sky` while its switch is
+        // off (R06.T11.c), as this test turns it: it is on by default since rendering plan R13's
+        // R13.T2. Plan 09's four kinds are served since P09.T40.b, and P14.T31's `body_events`
+        // from generator version 25.
         let harness = Harness::start_configured(Handlers, ConnectionLimits::default(), |config| {
             config.sky_service(SkyService::Unsupported)
         })
@@ -1605,8 +1605,7 @@ mod tests {
             .filter(|body| {
                 matches!(
                     body,
-                    RequestBody::BodyEvents(_)
-                        | RequestBody::Subscribe(_)
+                    RequestBody::Subscribe(_)
                         | RequestBody::Unsubscribe(_)
                         | RequestBody::SceneCameras(_)
                         | RequestBody::AlertsObserver(_)
@@ -1615,7 +1614,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 7);
+        assert_eq!(events.len(), 6);
         for body in events {
             let name = kind(&body);
             let answer = Handlers

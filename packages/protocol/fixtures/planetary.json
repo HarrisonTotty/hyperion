@@ -1479,14 +1479,13 @@
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 4171.409334093871,
+                "tau_550": 9816935.925339477,
+                "tau_basis": "sphere",
                 "base_pa": 999999999.9999993,
                 "top_pa": 2376312.8389387666,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2660.640622705595,
-                "not_modelled": {
-                  "type": "optics_not_modelled"
-                }
+                "temperature_k": 2660.640622705595
               },
               {
                 "material": "CaTiO3",
@@ -1499,14 +1498,13 @@
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 308.0975030700753,
+                "tau_550": 1264684.3737880592,
+                "tau_basis": "sphere",
                 "base_pa": 970517637.3453927,
                 "top_pa": 920143.2015283837,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2637.2428026433363,
-                "not_modelled": {
-                  "type": "optics_not_modelled"
-                }
+                "temperature_k": 2637.2428026433363
               },
               {
                 "material": "Al2O3",
@@ -1519,14 +1517,13 @@
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 3474.6283994497826,
+                "tau_550": 10794378.866373368,
+                "tau_basis": "sphere",
                 "base_pa": 884280998.9052861,
                 "top_pa": 832687.2746623612,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2565.7932898160584,
-                "not_modelled": {
-                  "type": "optics_not_modelled"
-                }
+                "temperature_k": 2565.7932898160584
               },
               {
                 "material": "Mg2SiO4",
@@ -1539,14 +1536,13 @@
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 45855.94069538409,
+                "tau_550": 134908255.10253927,
+                "tau_basis": "sphere",
                 "base_pa": 728032201.368191,
                 "top_pa": 648706.4151794605,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2422.6920544564364,
-                "not_modelled": {
-                  "type": "optics_not_modelled"
-                }
+                "temperature_k": 2422.6920544564364
               },
               {
                 "material": "Cr",
@@ -1576,14 +1572,13 @@
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 22473.707038813704,
+                "tau_550": 63374524.65129237,
+                "tau_basis": "sphere",
                 "base_pa": 481602892.04240966,
                 "top_pa": 435065.0703075627,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2144.5090117377736,
-                "not_modelled": {
-                  "type": "optics_not_modelled"
-                }
+                "temperature_k": 2144.5090117377736
               },
               {
                 "material": "MnS",
@@ -2260,14 +2255,13 @@
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 43.592851550640574,
+                "tau_550": 118146.39183566406,
+                "tau_basis": "sphere",
                 "base_pa": 300988.3774151456,
                 "top_pa": 1882.343138101846,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2039.5777792063043,
-                "not_modelled": {
-                  "type": "optics_not_modelled"
-                }
+                "temperature_k": 2039.5777792063043
               },
               {
                 "material": "Mg2SiO4",
