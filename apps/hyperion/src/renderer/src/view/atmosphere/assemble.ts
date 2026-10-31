@@ -20,9 +20,10 @@
  *
  * - its gravity, R08.T3.d's `bodyGravity` of the record's figure, mass, spin at the record's time
  *   and bulk gravity, at R_ref = (2a + c) ÷ 3 ({@link mediumTableRadiusM});
- * - its column, `hydrostaticColumn` at the record's p_s and μ, isothermal at its T_s: the seam
- *   until P14.T24.e's published adiabat and R08.T3.a's follow-up, which ignores the record's
- *   `verticalStructure` even where it is sent;
+ * - its column, `hydrostaticColumn` at the record's p_s and μ on its published
+ *   `verticalStructure` (P14.T24.e's adiabat's nodes and skin, R08.T3.e's `nodes` profile), whose
+ *   first node repeats the section's p_s and T_s, or isothermal at its T_s where the structure is
+ *   not modelled (a generator before version 24);
  * - the molecular term of the record's gases, passed unconverted;
  * - every gas as an absorber layer spanning the column, x n_s ∫ρ dz from p_s up, so that the pairs
  *   and the `air` partner see the whole bulk (plan R08, T4's record "For R08.T10.a"), and each of
@@ -96,7 +97,12 @@ import {
 } from "./aerosol";
 import { aggregateShapeInRange } from "./aggregate";
 import { type BodyAtmosphereInput, type BodyLight, clampedGroundAlbedo } from "./atmosphereInput";
-import { type AtmosphereColumn, columnPressureBar, hydrostaticColumn } from "./column";
+import {
+  type AtmosphereColumn,
+  columnPressureBar,
+  hydrostaticColumn,
+  type TemperatureProfile,
+} from "./column";
 import { ATMOSPHERE_LABELS, type AtmosphereLabel } from "./labels";
 import {
   type MaterialPhase,
@@ -467,7 +473,10 @@ function bodyOf(record: BodyRecord, bulk: BulkProperties, detail: BodyDetail): A
   return { figure, gravity };
 }
 
-/** A record's column, isothermal at its T_s: the seam until P14.T24.e's nodes. */
+/**
+ * A record's column, on its published vertical structure (R08.T3.e), or isothermal at its T_s
+ * where the record does not model one.
+ */
 function columnOf(surface: BodySurface, body: AssembledBody): AtmosphereColumn {
   const meanMolarMassGPerMol = surface.meanMolarMassGPerMol;
   if (meanMolarMassGPerMol === null) {
@@ -475,11 +484,53 @@ function columnOf(surface: BodySurface, body: AssembledBody): AtmosphereColumn {
   }
   return hydrostaticColumn({
     surfacePa: surface.surfacePressurePa,
-    temperature: { kind: "isothermal", temperatureK: surface.meanSurfaceTemperatureK },
+    temperature: temperatureOf(surface),
     meanMolarMassGPerMol,
     referenceGravityMS2: body.gravity.referenceGravityMS2,
     referenceRadiusM: mediumTableRadiusM(body.figure),
   });
+}
+
+/**
+ * A surface's temperature profile: its vertical structure's nodes and skin (P14.T24.e, from
+ * generator version 24), or isothermal at T_s where the structure is not modelled.
+ *
+ * @throws RangeError for a structure whose first node is not the section's (p_s, T_s), which the
+ *   wire's contract repeats there, or whose last node's temperature is not its skin's, where the sim
+ *   puts the tropopause (and the column's integral takes it), or one that is none, which the sim
+ *   sends only for a surface with no air.
+ */
+function temperatureOf(surface: BodySurface): TemperatureProfile {
+  const structure = surface.verticalStructure;
+  let profile: TemperatureProfile;
+  switch (structure.kind) {
+    case "not_modelled":
+      profile = { kind: "isothermal", temperatureK: surface.meanSurfaceTemperatureK };
+      break;
+    case "none":
+      throw new RangeError("a surface with gases has air, whose vertical structure is not none");
+    case "value": {
+      const { adiabat, skinTemperatureK } = structure.value;
+      const ground = adiabat[0];
+      if (
+        ground?.pressurePa !== surface.surfacePressurePa ||
+        ground.temperatureK !== surface.meanSurfaceTemperatureK
+      ) {
+        throw new RangeError(
+          `a vertical structure starts at its surface's ${surface.surfacePressurePa} Pa and ${surface.meanSurfaceTemperatureK} K, not ${ground?.pressurePa} Pa and ${ground?.temperatureK} K`,
+        );
+      }
+      const tropopauseK = adiabat.at(-1)?.temperatureK;
+      if (tropopauseK !== skinTemperatureK) {
+        throw new RangeError(
+          `a vertical structure ends at its skin's ${skinTemperatureK} K, not ${tropopauseK} K`,
+        );
+      }
+      profile = { kind: "nodes", nodes: adiabat, skinK: skinTemperatureK };
+      break;
+    }
+  }
+  return profile;
 }
 
 /** A column's datum and top pressures, Pa. */
@@ -1239,8 +1290,10 @@ function namedFirst(material: string, reason: string): string {
  *   surface with gases and no mean molar mass; an absorber listed twice, with a base above its top
  *   or with a profile that does not run from its base to its top; a `rotational` figure spun past
  *   its break-up, where its equator's normal gravity is not above 0 (`oblate.ts`'s
- *   `oblateSlicing`, which the generator's `capped` law stays clear of); or a column no
- *   hydrostatic atmosphere holds under the isothermal seam, k T_s ln 10⁷ ≥ μ m_u g_ref R_ref.
+ *   `oblateSlicing`, which the generator's `capped` law stays clear of); a column no hydrostatic
+ *   atmosphere holds, whose geopotential height reaches R_ref below its top (under the isothermal
+ *   seam, k T_s ln 10⁷ ≥ μ m_u g_ref R_ref); or a vertical structure that is none, whose first
+ *   node is not the section's p_s and T_s, or whose last node is not at its skin's temperature.
  */
 export function assembleMedium(
   input: BodyAtmosphereInput,
@@ -1382,7 +1435,8 @@ export function assembleMedium(
  * @throws RangeError as {@link assembleMedium}: for more lights than {@link LIGHT_SLOT_LIMIT}, or a
  *   record that breaks the wire's rules (gases that do not sum to 1, a surface with gases and no
  *   mean molar mass, an absorber listed twice or ill-formed), a `rotational` figure spun past its
- *   break-up, or an unbound isothermal column.
+ *   break-up, an unbound column, or a vertical structure that is none, does not start at the
+ *   section's p_s and T_s or does not end at its skin.
  */
 export function absorberSpecsOf(
   input: BodyAtmosphereInput,

@@ -184,12 +184,17 @@ export type AtmosphereRegime =
 // `DensityProfile`'s `tabulated` variant: R08.T3.a. `BAKE_WAVELENGTHS_NM`: R08.T4.a.
 
 export type TemperatureProfile =
-  | { readonly kind: "isothermal"; readonly temperatureK: number } // provisional seam, removed with P14.T24.e
+  | { readonly kind: "isothermal"; readonly temperatureK: number } // a structure not modelled
   | {
-      readonly kind: "radiativeConvective";
+      readonly kind: "radiativeConvective"; // the hand fixtures, β stated
       readonly surfaceK: number;
       readonly surfacePa: number;
       readonly beta: number;
+      readonly skinK: number;
+    }
+  | {
+      readonly kind: "nodes"; // P14.T24.e's published adiabat, the ground first (R08.T3.e)
+      readonly nodes: ReadonlyArray<ProfileNode>; // lib/system/model.ts's
       readonly skinK: number;
     };
 export function temperatureAt(profile: TemperatureProfile, pressurePa: number): number; // the sim's formula, copied
@@ -306,7 +311,8 @@ The worker is `optics.worker.ts`, by the client's rule that worker files are `*.
 `tsconfig.worker.json`.
 
 ```ts
-export function assembleMedium(input: BodyAtmosphereInput): AssembledMedium;
+export function assembleMedium(input: BodyAtmosphereInput): AssembledMedium; // the column on the
+// surface's `verticalStructure` (`nodes`, R08.T3.e), isothermal at T_s where it is not modelled
 export interface AssembledMedium {
   readonly medium: AtmosphereMedium | undefined;
   readonly labels: ReadonlyArray<AtmosphereLabel>;
@@ -2495,6 +2501,16 @@ pins the strings. Acceptance:
       k_f = (4 − η²) ÷ (1 + η²) and η = (5 ÷ 2)(1 − (3 ÷ 2) C ÷ Ma²);
     - a `capped` Saturn-density giant at 1.1 break-up periods, where the true ω gives γ_e ≤ 0,
       builds without a `RangeError`, with s rising poleward, at most 10 slices and at most 7 bands.
+- **R08.T3.e The column on the published nodes** (the T3.a follow-up that R08.T10.a held for
+  P14.T24.e's nodes; its ID new, lean 2026-10-31). `column.ts`'s `TemperatureProfile` gains
+  `nodes`, the sim's `temperature_at` (the power law between two nodes, the first segment's below
+  the ground, T_skin above the last node) with ∫ T d ln p in closed form per segment, and
+  `assemble.ts`'s column takes the surface's `verticalStructure` where it is valued, its first node
+  the section's (p_s, T_s). The hand fixtures keep their β, so no table or case moves. Tests:
+  `temperatureAt` gives the sim's `planetary/vertical_structure` levels bit for bit; the column is
+  continuous at the nodes, its tropopause at the height its segments sum to, T_skin above; a
+  structure moves the medium's and the absorbers' temperatures, and a record without one keeps the
+  seam bit for bit. _Built 2026-10-31_ (Risks, "R08.T3.e, as built").
 
 Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/atmosphere/rayleigh view/atmosphere/oblate`.
 
@@ -23941,3 +23957,33 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     reads `titan-class.reference.json`.
   - The slow `the_deep_estimator_agrees_with_vroom_where_vroom_converges` holds 16 views
     (`DEEP_CHECK_VIEWS`) from a pilot at seeds 100 and 101, at seeds 0 and 1.
+- **R08.T3.e, as built** (2026-10-31; what later tasks consume; measurements in the lane's outbox):
+  - `TemperatureProfile` gains a `nodes` kind (`nodes`, `skinK`, with `lib/system/model.ts`'s
+    `ProfileNode`) beside `radiativeConvective`, in place of R08.T10.a's "`radiativeConvective`
+    takes the published nodes": the hand fixtures keep their β there, so nothing moves.
+  - The node law behind it, private in `column.ts` (`nodesReached`, `nodeLawK`, `nodeLawPieces`,
+    `piecesIntegralK`, `nodesUsable`), takes nodes in either pressure order, each end extended on
+    its end segment's law anchored at the end node, as the sim's surface and envelope
+    `temperature_at` both do. R08.T16.a's envelope (its T16.a.1) reuses it below its join in a kind
+    of its own, Guillot's piece replacing the one before the first node.
+  - Refusals (`RangeError`): `temperatureAt` and `hydrostaticColumn` refuse a `nodes` profile with
+    no node, pressures that do not strictly descend, or a p, T or T_skin not finite and positive.
+    `assemble.ts`'s `columnOf` refuses a structure whose first node is not the section's p_s and
+    T_s bit for bit, or whose last node is not at T_skin (the sim writes both so), and one sent
+    `none` under an air (lean, 2026-10-31: the sim sends `none` only for no air). A structure
+    `not_modelled` keeps the isothermal seam, bit for bit. The max with T_skin is not integrated.
+  - The column adds only the tropopause, the last node, as a level; the nodes between fall inside
+    its intervals.
+  - Not retired yet, though R08.T10.a's text retires them: `GAS_HEAT_CAPACITY`, `HeatCapacity`,
+    `ofDegrees`, `LINEAR_TRIATOMIC_CP_OVER_R`, `GasProperties.heatCapacityOverR` and
+    `dryAdiabatExponent`. Earth (`earth.ts`), `reference/thickCases.ts` and
+    `test/atmosphereFixtures.ts` state their β through them, and retiring them needs each fixture's
+    β pinned to its bits first, so that no committed table or case moves.
+  - `ATMOSPHERE_OPTICS_VERSION` raised from 4 to 5, by its own rule: a record that sends its
+    structure builds another medium from the same inputs.
+  - Closed for a record that sends its structure: T3.a's pending golden list (now held bit for bit;
+    `test/verticalStructureGolden.ts` reads the sim's golden itself, so a re-bless at 25 moves the
+    test with it) and R08.T10.a's "isothermal seam's artefacts". Both still hold for a record that
+    does not model it.
+  - The shared T3 acceptance selects `column.test.ts`; the assembly's tests (`assemble.test.ts`)
+    run under `pnpm test`.

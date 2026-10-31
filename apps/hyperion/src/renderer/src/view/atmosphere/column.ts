@@ -5,10 +5,13 @@
  *
  * @remarks
  * The profile is Robinson and Catling 2012's (ApJ 757, 104, eq. 10) scaled adiabat from the
- * surface up to an isothermal skin, T(p) = max(T_s (p ÷ p_s)^β, T_skin), β = α R ÷ c_p. Plan 14
- * publishes T_s, p_s, β and T_skin (R08.T1's P14.T24.e, unbuilt); until then the `isothermal`
- * profile at T_s stands, which is provisional and about 3× wrong in scale height at Venus's cloud
- * tops (Design note 3). The skin is itself provisional, with no ozone or haze heating.
+ * surface up to an isothermal skin, T(p) = max(T_ad(p), T_skin). Plan 14 publishes it (P14.T24.e,
+ * on the wire from generator version 24) as the adiabat's nodes from (p_s, T_s) to the tropopause,
+ * integrated on P14.T49.b's c_p(T), with T_skin above, which the `nodes` profile reads (R08.T3.e).
+ * The `radiativeConvective` profile's single β stands for the hand fixtures, and the `isothermal`
+ * profile at T_s for a record that does not model the structure, which is about 3× wrong in scale
+ * height at Venus's cloud tops (Design note 3). The skin is itself provisional, with no ozone or
+ * haze heating.
  *
  * The column is the reference medium of Design note 17: it is built at g_ref = √(g_e g_p)
  * (`oblate.ts`'s `referenceGravity`) on a sphere of R_ref (R05's `tableRadiusM`), and its heights
@@ -23,6 +26,7 @@
  */
 
 import { ATOMIC_MASS_CONSTANT_KG } from "../../lib/system/constants";
+import type { ProfileNode } from "../../lib/system/model";
 import { ABSORBER_PRESSURE_REFERENCE_PA, type TabulatedDensity, tabulatedDensity } from "./medium";
 import {
   BOLTZMANN_J_PER_K,
@@ -35,12 +39,21 @@ import { exp, expm1, log, pow } from "../../lib/pinnedMath";
 /**
  * An atmosphere's temperature against pressure (Design note 3).
  *
- * - `isothermal`: one temperature everywhere. The provisional seam until P14.T24.e lands.
+ * - `isothermal`: one temperature everywhere. The seam for a record that does not model its
+ *   vertical structure.
  * - `radiativeConvective`: T(p) = max(T_s (p ÷ p_s)^β, T_skin) (Robinson and Catling 2012, eq.
  *   10), a scaled dry adiabat from the surface up to an isothermal skin. β = α R ÷ c_p, with R ÷ c_p
  *   the mixture's ({@link dryAdiabatExponent}) and α ≤ 1 the latent heat's flattening of the lapse
  *   rate; T_skin = 2^(−1/4) T_eq, the τ → 0 limit of the grey Eddington atmosphere of P14.T13.c.
- *   Plan 14 publishes β and T_skin with P14.T24.e, and T_s and p_s with P14.T24.a.
+ *   The hand fixtures' form, with β stated.
+ * - `nodes`: P14.T24.e's published structure, max(T_ad(p), T_skin) with T_ad the power law between
+ *   the two nodes about p, below the ground the first segment's power law, and above the last node
+ *   (the tropopause) T_skin: the sim's `planetary::hooks::structure::temperature_at`, operation for
+ *   operation, so that the picture and the flight model's drag read the same air (R08.T3.e). The
+ *   nodes run from the ground (p_s, T_s) up, the pressures strictly descending; the ground alone
+ *   leaves the air isothermal at T_skin. The sim's own guarantees, every node at least T_skin and
+ *   the last at it, are taken and not checked: the column's ∫ T d ln p leaves out the max with
+ *   T_skin, which they confine to a rounding.
  */
 export type TemperatureProfile =
   | { readonly kind: "isothermal"; readonly temperatureK: number }
@@ -50,6 +63,11 @@ export type TemperatureProfile =
       readonly surfacePa: number;
       readonly beta: number;
       readonly skinK: number;
+    }
+  | {
+      readonly kind: "nodes";
+      readonly nodes: ReadonlyArray<ProfileNode>;
+      readonly skinK: number;
     };
 
 /** A finite, positive number. */
@@ -57,12 +75,43 @@ function isPositive(value: number): boolean {
   return Number.isFinite(value) && value > 0;
 }
 
-/** The profile, checked: its temperatures and p_s finite and positive, β finite and at least 0. */
+/**
+ * Whether `nodes` are at least one, each pressure and temperature finite and positive, and the
+ * pressures strictly monotonic, descending or ascending as `order` says.
+ */
+function nodesUsable(
+  nodes: ReadonlyArray<ProfileNode>,
+  order: "descending" | "ascending",
+): boolean {
+  return (
+    nodes.length > 0 &&
+    nodes.every((node, i) => {
+      const previous = nodes[i - 1];
+      return (
+        isPositive(node.pressurePa) &&
+        isPositive(node.temperatureK) &&
+        (previous === undefined ||
+          (order === "descending"
+            ? node.pressurePa < previous.pressurePa
+            : node.pressurePa > previous.pressurePa))
+      );
+    })
+  );
+}
+
+/** The profile, checked: its temperatures and pressures finite and positive, β finite and at least 0. */
 function checkedProfile(profile: TemperatureProfile): TemperatureProfile {
   switch (profile.kind) {
     case "isothermal":
       if (!isPositive(profile.temperatureK)) {
         throw new RangeError(`an isothermal profile needs T > 0, got ${profile.temperatureK} K`);
+      }
+      break;
+    case "nodes":
+      if (!(nodesUsable(profile.nodes, "descending") && isPositive(profile.skinK))) {
+        throw new RangeError(
+          `a profile of nodes needs at least one node, each p and T > 0 with the pressures descending, and T_skin > 0, got ${profile.nodes.length} nodes and ${profile.skinK} K`,
+        );
       }
       break;
     case "radiativeConvective":
@@ -83,16 +132,18 @@ function checkedProfile(profile: TemperatureProfile): TemperatureProfile {
 }
 
 /**
- * The temperature at a pressure, K (Design note 3's formula, which P14.T24.e's
- * `planetary::temperature_at` is to compute in the sim, for the flight model's drag).
+ * The temperature at a pressure, K (Design note 3's formula; for a `nodes` profile, P14.T24.e's
+ * `planetary::hooks::structure::temperature_at`, which the sim's flight model's drag reads).
  *
  * @remarks
- * Below p_s the adiabat continues, warmer. A golden list of the sim's levels is to pin the two to
- * 10⁻¹² once P14.T24.e lands (R08.T3.a).
+ * Below p_s the adiabat continues, warmer. A `nodes` profile gives the sim's own bits: at the
+ * golden `planetary/vertical_structure`'s levels its Earth's, Venus's and Titan's temperatures,
+ * bit for bit (R08.T3.e), and at a node's own pressure that node's temperature.
  *
  * @param pressurePa - Finite and positive, Pa.
  * @throws RangeError for a pressure that is not finite and positive, or a profile with a
- *   temperature or p_s that is not finite and positive, or a β that is negative or not finite.
+ *   temperature or pressure that is not finite and positive, a β that is negative or not finite,
+ *   or nodes that are none or whose pressures do not descend.
  */
 export function temperatureAt(profile: TemperatureProfile, pressurePa: number): number {
   if (!isPositive(pressurePa)) {
@@ -114,8 +165,80 @@ function profileTemperatureK(profile: TemperatureProfile, pressurePa: number): n
         profile.skinK,
       );
       break;
+    case "nodes": {
+      const { nodes, skinK } = profile;
+      const reached = nodesReached(nodes, pressurePa);
+      if (nodes.length < 2 || reached >= nodes.length) {
+        temperatureK = skinK;
+        break;
+      }
+      // The sim's max(T_ad, T_skin), which a rounding below the skin near the tropopause can reach.
+      const lawK = nodeLawK(nodes, reached, pressurePa);
+      temperatureK = lawK < skinK ? skinK : lawK;
+      break;
+    }
   }
   return temperatureK;
+}
+
+/** Node `i` of `nodes`, which the caller has bounded. */
+function nodeAt(nodes: ReadonlyArray<ProfileNode>, i: number): ProfileNode {
+  const node = nodes[i];
+  if (node === undefined) {
+    throw new Error(`a profile has no node ${i} of ${nodes.length}`);
+  }
+  return node;
+}
+
+/**
+ * How many of `nodes` p has reached, in the nodes' own order: those at or below p in height for
+ * nodes from the ground up (pressures descending), at or above it for nodes from a gas envelope's
+ * join down (ascending). It is the sim's `partition_point`, so that a node's own pressure takes the
+ * segment that node starts, whose law gives its temperature exactly.
+ */
+function nodesReached(nodes: ReadonlyArray<ProfileNode>, pressurePa: number): number {
+  const descending = (nodes[1]?.pressurePa ?? Number.NaN) < (nodes[0]?.pressurePa ?? Number.NaN);
+  let low = 0;
+  let high = nodes.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    const nodePa = nodeAt(nodes, middle).pressurePa;
+    if (descending ? nodePa >= pressurePa : nodePa <= pressurePa) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
+/**
+ * d ln T ÷ d ln p over the segment from node `a` to node `b`, as the sim computes it:
+ * ln(T_b ÷ T_a) ÷ ln(p_b ÷ p_a).
+ */
+function segmentExponent(a: ProfileNode, b: ProfileNode): number {
+  return log(b.temperatureK / a.temperatureK) / log(b.pressurePa / a.pressurePa);
+}
+
+/**
+ * The piecewise power law through two or more `nodes` at `pressurePa`, of which p has reached
+ * `reached` ({@link nodesReached}), K: between two nodes the power law through them, anchored at
+ * the first in the nodes' order, T_a e^(e ln(p ÷ p_a)); before the first node the first segment's
+ * law, and past the last the last segment's, each anchored at its end node.
+ *
+ * @remarks
+ * It is plan 14's one form of a published adiabat, in the sim's operations: a surface's air from
+ * the ground up (P14.T24.e's `RadiativeConvective::temperature_at`), which takes T_skin past its
+ * last node, and a gas envelope's below its join (P14.T24.d's `EnvelopeProfile::temperature_at`),
+ * whose nodes run from the join down and which takes Guillot's grey profile before its first.
+ */
+function nodeLawK(nodes: ReadonlyArray<ProfileNode>, reached: number, pressurePa: number): number {
+  const last = nodes.length - 1;
+  const from = Math.min(Math.max(reached - 1, 0), last - 1);
+  const a = nodeAt(nodes, from);
+  const b = nodeAt(nodes, from + 1);
+  const anchor = reached > last ? b : a;
+  return anchor.temperatureK * exp(segmentExponent(a, b) * log(pressurePa / anchor.pressurePa));
 }
 
 /**
@@ -298,8 +421,8 @@ export interface ColumnInput {
    */
   readonly surfacePa: number;
   /**
-   * T(p). A `radiativeConvective` profile's own p_s need not be the datum's: the column starts at
-   * `temperatureAt(temperature, surfacePa)`.
+   * T(p). A `radiativeConvective` or `nodes` profile's own p_s need not be the datum's: the column
+   * starts at `temperatureAt(temperature, surfacePa)`.
    */
   readonly temperature: TemperatureProfile;
   /** μ, g mol⁻¹ ({@link meanMolarMassGPerMol}). */
@@ -374,9 +497,10 @@ function expm1OverX(x: number): number {
 }
 
 /**
- * ln p of the tropopause, Pa, where the adiabat meets the skin: ln p_s + ln(T_skin ÷ T_s) ÷ β.
- * `null` for a profile with none, an isothermal one or a `radiativeConvective` one with β = 0, which
- * is isothermal at max(T_s, T_skin).
+ * ln p of the tropopause, Pa, where the adiabat meets the skin: ln p_s + ln(T_skin ÷ T_s) ÷ β, or
+ * a `nodes` profile's last node's. `null` for a profile with none: an isothermal one, a
+ * `radiativeConvective` one with β = 0, which is isothermal at max(T_s, T_skin), or a `nodes` one
+ * of the ground alone, isothermal at T_skin.
  */
 function lnTropopausePa(profile: TemperatureProfile): number | null {
   let lnPa: number | null;
@@ -390,8 +514,90 @@ function lnTropopausePa(profile: TemperatureProfile): number | null {
           ? null
           : log(profile.surfacePa) + log(profile.skinK / profile.surfaceK) / profile.beta;
       break;
+    case "nodes": {
+      const { nodes } = profile;
+      lnPa = nodes.length < 2 ? null : log(nodeAt(nodes, nodes.length - 1).pressurePa);
+      break;
+    }
   }
   return lnPa;
+}
+
+/**
+ * A piece of a profile in ln p, ℓ in [`lnLowPa`, `lnHighPa`] (either end infinite where the piece
+ * is unbounded), along which T = T_a e^(e (ℓ − ℓ_a)): a segment of a node law, anchored at a node,
+ * or a constant, e = 0.
+ */
+interface LawPiece {
+  readonly lnLowPa: number;
+  readonly lnHighPa: number;
+  /** ℓ_a and T_a, K. */
+  readonly anchorLnPa: number;
+  readonly anchorK: number;
+  /** e = d ln T ÷ d ln p. */
+  readonly exponent: number;
+}
+
+/**
+ * The pieces of the node law through two or more `nodes` ({@link nodeLawK}) over every ln p, each
+ * anchored as the law is: before the first node, each segment in the nodes' order, and past the
+ * last node.
+ */
+function nodeLawPieces(nodes: ReadonlyArray<ProfileNode>): ReadonlyArray<LawPiece> {
+  const last = nodes.length - 1;
+  const lnPa = nodes.map((node) => log(node.pressurePa));
+  const lnAt = (i: number): number => lnPa[i] ?? Number.NaN;
+  const descending = lnAt(1) < lnAt(0);
+  const segments: LawPiece[] = [];
+  for (let i = 0; i < last; i += 1) {
+    segments.push({
+      lnLowPa: Math.min(lnAt(i), lnAt(i + 1)),
+      lnHighPa: Math.max(lnAt(i), lnAt(i + 1)),
+      anchorLnPa: lnAt(i),
+      anchorK: nodeAt(nodes, i).temperatureK,
+      exponent: segmentExponent(nodeAt(nodes, i), nodeAt(nodes, i + 1)),
+    });
+  }
+  const first = segments[0];
+  const final = segments[segments.length - 1];
+  if (first === undefined || final === undefined) {
+    throw new Error(`a node law needs two nodes, not ${nodes.length}`);
+  }
+  // An end node's piece, outward from it in pressure, on its own segment's law.
+  const end = (node: number, segment: LawPiece, deeper: boolean): LawPiece => ({
+    lnLowPa: deeper ? lnAt(node) : Number.NEGATIVE_INFINITY,
+    lnHighPa: deeper ? Number.POSITIVE_INFINITY : lnAt(node),
+    anchorLnPa: lnAt(node),
+    anchorK: nodeAt(nodes, node).temperatureK,
+    exponent: segment.exponent,
+  });
+  return [end(0, first, descending), ...segments, end(last, final, !descending)];
+}
+
+/**
+ * ∫ T d ln p of `pieces` over [`lnLowPa`, `lnHighPa`], K: on each piece's part of it, from ℓ₀ to
+ * ℓ₀ + Δℓ, T_a e^(e (ℓ₀ − ℓ_a)) Δℓ (e^(e Δℓ) − 1) ÷ (e Δℓ), so (T₁ − T₀) ÷ e on a whole segment
+ * and T Δℓ on a constant.
+ */
+function piecesIntegralK(
+  pieces: ReadonlyArray<LawPiece>,
+  lnLowPa: number,
+  lnHighPa: number,
+): number {
+  let sum = 0;
+  for (const piece of pieces) {
+    const low = Math.max(lnLowPa, piece.lnLowPa);
+    const high = Math.min(lnHighPa, piece.lnHighPa);
+    if (high > low) {
+      const span = high - low;
+      sum +=
+        piece.anchorK *
+        exp(piece.exponent * (low - piece.anchorLnPa)) *
+        span *
+        expm1OverX(piece.exponent * span);
+    }
+  }
+  return sum;
 }
 
 /**
@@ -400,7 +606,10 @@ function lnTropopausePa(profile: TemperatureProfile): number | null {
  *
  * @remarks
  * In closed form on each piece: T Δ ln p where T is constant, and T_s e^(β ℓ₀) Δℓ (e^(β Δℓ) − 1)
- * ÷ (β Δℓ) along the adiabat, with ℓ = ln(p ÷ p_s) and ℓ₀ the piece's lower end.
+ * ÷ (β Δℓ) along the adiabat, with ℓ = ln(p ÷ p_s) and ℓ₀ the piece's lower end. A `nodes`
+ * profile's pieces are its segments, the first one's law below the ground and T_skin above the
+ * last node ({@link piecesIntegralK}); the max with T_skin, which binds only by a rounding, is not
+ * integrated.
  *
  * @param lnTropopause - {@link lnTropopausePa} of the profile.
  */
@@ -436,6 +645,24 @@ function temperatureIntegralK(
         }
         return sum;
       };
+      break;
+    }
+    case "nodes": {
+      const { nodes, skinK } = profile;
+      if (nodes.length < 2) {
+        integral = (lnLowPa, lnHighPa) => skinK * (lnHighPa - lnLowPa);
+        break;
+      }
+      const law = nodeLawPieces(nodes);
+      const skin: LawPiece = {
+        lnLowPa: Number.NEGATIVE_INFINITY,
+        lnHighPa: log(nodeAt(nodes, nodes.length - 1).pressurePa),
+        anchorLnPa: 0,
+        anchorK: skinK,
+        exponent: 0,
+      };
+      const pieces: ReadonlyArray<LawPiece> = [...law.slice(0, -1), skin];
+      integral = (lnLowPa, lnHighPa) => piecesIntegralK(pieces, lnLowPa, lnHighPa);
       break;
     }
   }
@@ -476,7 +703,7 @@ function levelLogPressures(lnSurfacePa: number, tropopause: number | null): Floa
  * @remarks
  * dp ÷ dr = −n μ m_u g with n = p ÷ kT and g = g_ref (R_ref ÷ r)², integrated in closed form rather
  * than by steps: the geopotential height above the datum, Φ(p) = k ÷ (μ m_u g_ref) × ∫ T d ln p
- * from p up to p_s, is exact for both profiles, and inverse-square gravity puts it at the height
+ * from p up to p_s, is exact for every profile, and inverse-square gravity puts it at the height
  * z = R_ref Φ ÷ (R_ref − Φ), the inverse of the U.S. Standard Atmosphere 1976's geopotential
  * height Φ = R_ref z ÷ (R_ref + z) (its eqs. 17–19). Near the datum the local scale height is
  * kT ÷ (μ m_u g_ref); at height z it is that times (1 + z ÷ R_ref)². The vertical column above

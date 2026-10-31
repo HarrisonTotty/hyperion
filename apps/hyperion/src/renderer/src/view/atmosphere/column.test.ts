@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  GOLDEN_STRUCTURES,
+  type GoldenStructure,
+  goldenStructure,
+} from "../../test/verticalStructureGolden";
+import {
   type AtmosphereColumn,
   COLUMN_INTERVALS,
   COLUMN_TOP_PRESSURE_RATIO,
@@ -169,6 +174,38 @@ const EARTH_ISOTHERMAL: ColumnInput = {
 const TITAN_RADIUS_M = 2_574.76e3;
 const TITAN_GRAVITY_MS2 = 8_978.137_1e9 / TITAN_RADIUS_M ** 2;
 
+/** A structure of the sim's golden as the `nodes` profile it publishes. */
+function nodesProfile(structure: GoldenStructure): TemperatureProfile {
+  return { kind: "nodes", nodes: structure.nodes, skinK: structure.skinK };
+}
+
+/**
+ * A golden structure's column at its p_s: Earth's on WGS 84's g_ref and R_ref with dry air's μ of
+ * 28.97, Venus's on the Venus-class column's CO₂, radius and gravity, and Titan's on its N₂, radius
+ * and gravity.
+ */
+function goldenColumn(name: "earth" | "venus" | "titan"): ColumnInput {
+  const structure = goldenStructure(name);
+  const body = {
+    earth: {
+      meanMolarMassGPerMol: 28.97,
+      referenceGravityMS2: EARTH_GRAVITY_MS2,
+      referenceRadiusM: EARTH_RADIUS_M,
+    },
+    venus: {
+      meanMolarMassGPerMol: gasProperties("CO2").molarMassGPerMol,
+      referenceGravityMS2: 8.87,
+      referenceRadiusM: 6_051.8e3,
+    },
+    titan: {
+      meanMolarMassGPerMol: gasProperties("N2").molarMassGPerMol,
+      referenceGravityMS2: TITAN_GRAVITY_MS2,
+      referenceRadiusM: TITAN_RADIUS_M,
+    },
+  }[name];
+  return { surfacePa: structure.surfacePa, temperature: nodesProfile(structure), ...body };
+}
+
 /** Titan-class, isothermal at 94 K and 1.4 bar of N₂ (Design note 3's T_s and p_s). */
 const TITAN_ISOTHERMAL: ColumnInput = {
   surfacePa: 1.4 * BAR_PA,
@@ -312,6 +349,14 @@ describe("hydrostaticColumn", () => {
       "a skin warmer than the datum",
       { ...SATURN_COLUMN, temperature: { ...SATURN_PROFILE, skinK: 200 } },
     ],
+    ["the golden's Earth on its nodes", goldenColumn("earth")],
+    ["the golden's Venus on its nodes", goldenColumn("venus")],
+    ["the golden's Titan on its nodes", goldenColumn("titan")],
+    // A datum below the ground, where the first segment's power law continues.
+    [
+      "a datum below the golden Earth's ground",
+      { ...goldenColumn("earth"), surfacePa: 1.5 * goldenStructure("earth").surfacePa },
+    ],
   ])("integrates the hydrostatic equation as steps in ln p do, to 1e-9, for %s", (_, input) => {
     expect(worstAgainstSteps(input)).toBeLessThan(1e-9);
   });
@@ -443,6 +488,204 @@ describe("hydrostaticColumn", () => {
     expect(() => hydrostaticColumn({ ...EARTH_ISOTHERMAL, referenceRadiusM: 100e3 })).toThrow(
       /not bound/,
     );
+  });
+});
+
+describe("a column on P14.T24.e's published nodes (R08.T3.e)", () => {
+  /** The column of a golden structure, and the index of its tropopause level, the last node's. */
+  function withTropopause(name: "earth" | "venus" | "titan"): {
+    readonly input: ColumnInput;
+    readonly column: AtmosphereColumn;
+    readonly structure: GoldenStructure;
+    readonly level: number;
+  } {
+    const input = goldenColumn(name);
+    const column = hydrostaticColumn(input);
+    const structure = goldenStructure(name);
+    const lastNodePa = structure.nodes.at(-1)?.pressurePa ?? Number.NaN;
+    const level = column.pressuresPa.findIndex((p) => relative(p, lastNodePa) < 1e-12);
+    return { input, column, structure, level };
+  }
+
+  it.each(["earth", "venus", "titan"] as const)(
+    "puts the golden %s's tropopause at the height its segments sum to",
+    (name) => {
+      const { input, column, structure, level } = withTropopause(name);
+      // Each segment's ∫ T d ln p in its own closed form, (T₀ − T₁) ln(p₀ ÷ p₁) ÷ ln(T₀ ÷ T₁): the
+      // log-mean temperature times its span.
+      let integralK = 0;
+      for (const [k, upper] of structure.nodes.slice(1).entries()) {
+        const lower = structure.nodes[k] ?? upper;
+        integralK +=
+          ((lower.temperatureK - upper.temperatureK) *
+            Math.log(lower.pressurePa / upper.pressurePa)) /
+          Math.log(lower.temperatureK / upper.temperatureK);
+      }
+      const r = input.referenceRadiusM;
+      const phiM =
+        scaleHeightM(1, input.meanMolarMassGPerMol, input.referenceGravityMS2) * integralK;
+      expect(level).toBeGreaterThan(0);
+      expect(
+        relative(column.altitudesM[level] ?? Number.NaN, (r * phiM) / (r - phiM)),
+      ).toBeLessThan(1e-12);
+    },
+  );
+
+  it.each(["earth", "venus", "titan"] as const)(
+    "holds the golden %s's skin at every level above its tropopause and none below",
+    (name) => {
+      const { column, structure, level } = withTropopause(name);
+      const above = [...column.temperaturesK.subarray(level + 1)];
+      expect(above.every((t) => t === structure.skinK)).toBe(true);
+      expect(above.length).toBeGreaterThan(0);
+      expect(column.temperaturesK[level - 1] ?? 0).toBeGreaterThan(structure.skinK);
+    },
+  );
+
+  it.each(["earth", "venus", "titan"] as const)(
+    "lays the golden %s's column continuously through its nodes",
+    (name) => {
+      // Between two levels the column's own mean temperature, its geopotential step over k ÷
+      // (μ m_u g_ref) Δ ln p, lies between theirs: a step in ∫ T d ln p at a node would leave it.
+      const { input, column } = withTropopause(name);
+      const r = input.referenceRadiusM;
+      const perKelvinM = scaleHeightM(1, input.meanMolarMassGPerMol, input.referenceGravityMS2);
+      const phiM = [...column.altitudesM].map((z) => (r * z) / (r + z));
+      let worst = 0;
+      for (let i = 1; i < phiM.length; i += 1) {
+        const meanK =
+          ((phiM[i] ?? Number.NaN) - (phiM[i - 1] ?? Number.NaN)) /
+          (perKelvinM *
+            Math.log(
+              (column.pressuresPa[i - 1] ?? Number.NaN) / (column.pressuresPa[i] ?? Number.NaN),
+            ));
+        const ends = [
+          column.temperaturesK[i - 1] ?? Number.NaN,
+          column.temperaturesK[i] ?? Number.NaN,
+        ];
+        const outside = Math.max(Math.min(...ends) - meanK, meanK - Math.max(...ends), 0);
+        worst = Math.max(worst, outside / meanK);
+      }
+      expect(worst).toBeLessThan(1e-9);
+    },
+  );
+
+  it("starts at the ground's own temperature, bit for bit", () => {
+    const structure = goldenStructure("earth");
+    const column = hydrostaticColumn(goldenColumn("earth"));
+    expect([column.temperaturesK[0], column.surfaceNumberDensityPerM3]).toEqual([
+      structure.surfaceK,
+      structure.surfacePa / (K_B * structure.surfaceK),
+    ]);
+  });
+});
+
+describe("temperatureAt over P14.T24.e's published nodes (R08.T3.e)", () => {
+  it("reads the sim's golden: Earth's, Venus's and Titan's nodes and levels", () => {
+    expect(
+      GOLDEN_STRUCTURES.map(({ name, nodes, levels }) => [name, nodes.length, levels.length]),
+    ).toEqual([
+      ["earth", 17, 28],
+      ["venus", 22, 33],
+      ["titan", 17, 28],
+    ]);
+  });
+
+  it.each(GOLDEN_STRUCTURES.map((s) => [s.name, s] as const))(
+    "gives the sim's temperature at every level of the golden's %s, bit for bit",
+    (_, structure) => {
+      const profile = nodesProfile(structure);
+      expect(structure.levels.map(({ pressurePa }) => temperatureAt(profile, pressurePa))).toEqual(
+        structure.levels.map(({ temperatureK }) => temperatureK),
+      );
+    },
+  );
+
+  it.each(GOLDEN_STRUCTURES.map((s) => [s.name, s] as const))(
+    "gives each of the golden %s's nodes its own temperature, bit for bit, and the skin at the last",
+    (_, structure) => {
+      const profile = nodesProfile(structure);
+      const below = structure.nodes.slice(0, -1);
+      expect(below.map(({ pressurePa }) => temperatureAt(profile, pressurePa))).toEqual(
+        below.map(({ temperatureK }) => temperatureK),
+      );
+      expect(temperatureAt(profile, structure.nodes.at(-1)?.pressurePa ?? Number.NaN)).toBe(
+        structure.skinK,
+      );
+    },
+  );
+
+  it.each(GOLDEN_STRUCTURES.map((s) => [s.name, s] as const))(
+    "is continuous at each of the golden %s's nodes",
+    (_, structure) => {
+      const profile = nodesProfile(structure);
+      let worst = 0;
+      for (const { pressurePa, temperatureK } of structure.nodes) {
+        for (const side of [1 - 1e-12, 1 + 1e-12]) {
+          worst = Math.max(
+            worst,
+            relative(temperatureAt(profile, pressurePa * side), temperatureK),
+          );
+        }
+      }
+      expect(worst).toBeLessThan(1e-12);
+    },
+  );
+
+  it("continues the first segment's power law below the ground", () => {
+    const { nodes } = goldenStructure("venus");
+    const [ground, next] = [nodes[0], nodes[1]];
+    if (ground === undefined || next === undefined) {
+      throw new Error("the golden's Venus has two nodes");
+    }
+    const exponent =
+      Math.log(next.temperatureK / ground.temperatureK) /
+      Math.log(next.pressurePa / ground.pressurePa);
+    const profile = nodesProfile(goldenStructure("venus"));
+    expect(
+      relative(temperatureAt(profile, 3 * ground.pressurePa), ground.temperatureK * 3 ** exponent),
+    ).toBeLessThan(1e-14);
+  });
+
+  it("holds the skin above the last node", () => {
+    const structure = goldenStructure("titan");
+    const lastNodePa = structure.nodes.at(-1)?.pressurePa ?? Number.NaN;
+    const profile = nodesProfile(structure);
+    expect([0.999 * lastNodePa, 1e3, 1, 1e-6].map((p) => temperatureAt(profile, p))).toEqual(
+      Array.from({ length: 4 }, () => structure.skinK),
+    );
+  });
+
+  it("is isothermal at the skin where the ground is the one node", () => {
+    // The sim's skin, not the node's temperature, which its structure makes equal.
+    const profile: TemperatureProfile = {
+      kind: "nodes",
+      nodes: [{ pressurePa: BAR_PA, temperatureK: 260 }],
+      skinK: 250,
+    };
+    expect([10 * BAR_PA, BAR_PA, 1].map((p) => temperatureAt(profile, p))).toEqual([250, 250, 250]);
+    expect(
+      hydrostaticColumn({ ...EARTH_ISOTHERMAL, surfacePa: BAR_PA, temperature: profile }),
+    ).toEqual(
+      hydrostaticColumn({
+        ...EARTH_ISOTHERMAL,
+        surfacePa: BAR_PA,
+        temperature: { kind: "isothermal", temperatureK: 250 },
+      }),
+    );
+  });
+
+  const EARTH_NODES = goldenStructure("earth").nodes;
+  it.each<[string, TemperatureProfile]>([
+    ["no nodes", { kind: "nodes", nodes: [], skinK: 200 }],
+    ["pressures that rise", { kind: "nodes", nodes: EARTH_NODES.toReversed(), skinK: 200 }],
+    [
+      "a node at 0 K",
+      { kind: "nodes", nodes: [...EARTH_NODES, { pressurePa: 1e3, temperatureK: 0 }], skinK: 200 },
+    ],
+    ["a skin of 0 K", { kind: "nodes", nodes: EARTH_NODES, skinK: 0 }],
+  ])("refuses a profile of nodes with %s", (_, profile) => {
+    expect(() => temperatureAt(profile, BAR_PA)).toThrow(RangeError);
   });
 });
 

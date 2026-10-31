@@ -1,6 +1,7 @@
 /**
  * The medium of a body from its record (plan R08, R08.T10.a): the labels by section, the key, the
- * gravity by figure law, the seams the cache and the tables take, and the types held to theirs.
+ * gravity by figure law, the column on the record's vertical structure (R08.T3.e), the seams the
+ * cache and the tables take, and the types held to theirs.
  * The generated Earth's medium with its line tables is `assembleEarth.test.ts`'s; aerosols are
  * `assembleAerosols.test.ts`'s; the router at the assembly is `assembleThick.test.ts`'s.
  */
@@ -28,6 +29,7 @@ import {
   jupiterDetail,
   lavaWorldDetail,
 } from "../../test/planetaryFixture";
+import { type GoldenStructure, goldenStructure } from "../../test/verticalStructureGolden";
 import { MAX_BODY_LIGHTS } from "../lighting/hostLights";
 import {
   type AssembledBody,
@@ -36,6 +38,7 @@ import {
   ATMOSPHERE_OPTICS_VERSION,
   atmosphereKey,
   type CurveSlots,
+  type DrawnMedium,
   LIGHT_SLOT_LIMIT,
   lineSpeciesOf,
   MEDIUM_TERM_LIMIT,
@@ -43,7 +46,9 @@ import {
   THICK_REASON,
   withCurves,
 } from "./assemble";
+import { type AtmosphereColumn, hydrostaticColumn, type TemperatureProfile } from "./column";
 import { type SpheroidFigure, tableRadiusM } from "./hillaire";
+import { type DensityProfile, densityAt } from "./medium";
 import type { GasFractions } from "./rayleigh";
 import { type AbsorberCurveSlots, type AtmosphereBody, MAX_TERMS } from "./tables";
 
@@ -309,8 +314,8 @@ describe("the key the cache holds a medium under", () => {
     );
   });
 
-  it("keys on the optics' version 4, raised by R08.T4.f's hot tables and then its VO and hot H₂O", () => {
-    expect(ATMOSPHERE_OPTICS_VERSION).toBe(4);
+  it("keys on the optics' version 5, raised last by R08.T3.e's column on the published nodes", () => {
+    expect(ATMOSPHERE_OPTICS_VERSION).toBe(5);
   });
 
   it.each(["unset", "airless"] as const)(
@@ -321,6 +326,146 @@ describe("the key the cache holds a medium under", () => {
       );
     },
   );
+});
+
+/**
+ * The generated Earth's answer under a structure of the sim's golden: its surface's p_s and T_s the
+ * structure's, and, unless `structure` is `"not_modelled"`, the structure on the wire.
+ */
+function withGoldenAir(structure: GoldenStructure, sent: "sent" | "not_modelled"): DetailAnswer {
+  return withSurface(earthDetail(), (surface) => ({
+    ...surface,
+    surface_pressure_pa: structure.surfacePa,
+    mean_surface_temperature_k: structure.surfaceK,
+    ...(sent === "sent"
+      ? {
+          vertical_structure: {
+            alpha: structure.alpha,
+            skin_temperature_k: structure.skinK,
+            adiabat: structure.nodes.map(({ pressurePa, temperatureK }) => ({
+              pressure_pa: pressurePa,
+              temperature_k: temperatureK,
+            })),
+          },
+        }
+      : {}),
+  }));
+}
+
+/** An assembly's drawn medium and its molecular term's density, which the fixture's air has. */
+function drawnOf(
+  result: AssembledMedium,
+): DrawnMedium & { readonly molecularDensity: DensityProfile } {
+  const molecularDensity = result.medium?.terms[0]?.density;
+  if (result.drawn === undefined || molecularDensity === undefined) {
+    throw new Error("the fixture's air draws a medium");
+  }
+  return { ...result.drawn, molecularDensity };
+}
+
+/** The column an assembly's surface should take, at the drawn body's g_ref and R_ref. */
+function expectedColumn(answer: DetailAnswer, temperature: TemperatureProfile): AtmosphereColumn {
+  const surface = detailOf(answer).record.surface;
+  if (surface.state !== "ok" || surface.value.meanMolarMassGPerMol === null) {
+    throw new Error("the fixture's surface has air");
+  }
+  const drawn = drawnOf(assembled(answer));
+  return hydrostaticColumn({
+    surfacePa: surface.value.surfacePressurePa,
+    temperature,
+    meanMolarMassGPerMol: surface.value.meanMolarMassGPerMol,
+    referenceGravityMS2: drawn.body.gravity.referenceGravityMS2,
+    referenceRadiusM: drawn.bottomRadiusM,
+  });
+}
+
+describe("a body's column on its published vertical structure (R08.T3.e)", () => {
+  const earth = goldenStructure("earth");
+  const nodes = { kind: "nodes", nodes: earth.nodes, skinK: earth.skinK } as const;
+
+  it("lays the column, its thermal temperature and the molecular term on the structure's nodes", () => {
+    const answer = withGoldenAir(earth, "sent");
+    const drawn = drawnOf(assembled(answer));
+    const column = expectedColumn(answer, nodes);
+    expect([drawn.temperature, drawn.molecularDensity]).toEqual([
+      { heightsM: column.altitudesM, temperaturesK: column.temperaturesK },
+      column.density,
+    ]);
+    expect([column.temperaturesK[0], column.temperaturesK.at(-1)]).toEqual([
+      earth.surfaceK,
+      earth.skinK,
+    ]);
+  });
+
+  it("draws the golden Earth's air 1.8 times thinner at 30 km and 4.0 at 50 km than the seam", () => {
+    // The seam's 290 K against the skin's 216 K above the tropopause near 13 km.
+    const seam = drawnOf(assembled(withGoldenAir(earth, "not_modelled")));
+    const drawn = drawnOf(assembled(withGoldenAir(earth, "sent")));
+    const ratioAt = (heightM: number): number =>
+      densityAt(seam.molecularDensity, heightM) / densityAt(drawn.molecularDensity, heightM);
+    expect([ratioAt(30e3), ratioAt(50e3)].map((r) => Math.round(r * 10) / 10)).toEqual([1.8, 4]);
+  });
+
+  it("takes the absorbers' temperatures from the structure's colder column", () => {
+    const [seam] = drawnOf(assembled(withGoldenAir(earth, "not_modelled"))).absorbers;
+    const [drawn] = drawnOf(assembled(withGoldenAir(earth, "sent"))).absorbers;
+    expect([seam?.name, drawn?.name]).toEqual(["pair:H2O+H2O,H2O+air", "pair:H2O+H2O,H2O+air"]);
+    expect(Math.abs((seam?.temperatureK ?? Number.NaN) / earth.surfaceK - 1)).toBeLessThan(1e-12);
+    expect(drawn?.temperatureK).toBeLessThan(earth.surfaceK - 1);
+    expect(drawn?.temperatureK).toBeGreaterThan(earth.skinK);
+  });
+
+  it("keeps the isothermal seam at T_s, bit for bit, where the structure is not modelled", () => {
+    const answer = earthDetail();
+    const drawn = drawnOf(assembled(answer));
+    const column = expectedColumn(answer, { kind: "isothermal", temperatureK: 287.9 });
+    expect([drawn.temperature, drawn.molecularDensity]).toEqual([
+      { heightsM: column.altitudesM, temperaturesK: column.temperaturesK },
+      column.density,
+    ]);
+    expect(column.temperaturesK.every((t) => t === 287.9)).toBe(true);
+  });
+
+  it.each<[string, DetailAnswer, RegExp]>([
+    [
+      "a structure whose first node is not the section's p_s",
+      withSurface(withGoldenAir(earth, "sent"), (surface) => ({
+        ...surface,
+        surface_pressure_pa: 101_325,
+      })),
+      /starts at its surface's/u,
+    ],
+    [
+      "a structure whose first node is not the section's T_s",
+      withSurface(withGoldenAir(earth, "sent"), (surface) => ({
+        ...surface,
+        mean_surface_temperature_k: 287.9,
+      })),
+      /starts at its surface's/u,
+    ],
+    [
+      "a structure whose last node is not at its skin's temperature",
+      withSurface(withGoldenAir(earth, "sent"), (surface) => {
+        const structure = surface.vertical_structure;
+        if (structure === undefined || structure === null) {
+          throw new Error("the answer sends its structure");
+        }
+        return {
+          ...surface,
+          vertical_structure: { ...structure, skin_temperature_k: earth.skinK - 1 },
+        };
+      }),
+      /ends at its skin's/u,
+    ],
+    [
+      "a structure that is none under an air",
+      withSurface(earthDetail(), (surface) => ({ ...surface, vertical_structure: null })),
+      /is not none/u,
+    ],
+  ])("refuses %s with a RangeError", (_, answer, message) => {
+    expect(() => assembled(answer)).toThrow(RangeError);
+    expect(() => assembled(answer)).toThrow(message);
+  });
 });
 
 describe("a body's gravity by its figure law (Design note 17)", () => {
