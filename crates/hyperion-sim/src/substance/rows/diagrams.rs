@@ -1546,10 +1546,15 @@ pub(in crate::substance) const HYDROGEN_SULPHIDE: PhaseDiagram = PhaseDiagram {
                 at: Some(Kelvin::new(80.0)),
             }),
         },
+        // Phase II's cell was not read: a labelled stand-in, linear between its neighbours'
+        // densities at its two transitions (the `ρ_s of phase II` source; P14.T49.o).
         SolidPhase {
             name: "II",
             start: Kelvin::new(103.52),
-            density: None,
+            density: Some(SolidDensity::Measured(&[
+                (Kelvin::new(103.52), KilogramsPerCubicMetre::new(1_230.0)),
+                (Kelvin::new(126.22), KilogramsPerCubicMetre::new(1_162.01)),
+            ])),
         },
         SolidPhase {
             name: "I",
@@ -1597,10 +1602,21 @@ pub(in crate::substance) const HYDROGEN_SULPHIDE: PhaseDiagram = PhaseDiagram {
                        H₂S not stated; their own film's 1,224 at 80 K agrees; phase I 1,162.01 kg \
                        m⁻³ from Vegard and Sinding-Oserød 1942's fcc cell, a = 5.797 Å, Z = 4 \
                        (COD 1539470), at M = 34.08088 g mol⁻¹, its temperature not read; phase \
-                       II's not read, its lead Cockcroft and Fitch 1990, a D₂S study, closed \
-                       (searched again by P14.T49.o, 2026-10-30). The transitions, 103.52 K and 126.22 K, are Giauque and \
-                       Blue 1936's (J. Am. Chem. Soc. 58, 831)",
+                       II's cell not read, its lead Cockcroft and Fitch 1990, a D₂S study, closed \
+                       (searched again by P14.T49.o, 2026-10-30), its density the stand-in \
+                       below. The transitions, 103.52 K and 126.22 K, are Giauque and Blue \
+                       1936's (J. Am. Chem. Soc. 58, 831)",
             basis: Basis::Reduced,
+        },
+        Source {
+            covers: "ρ_s of phase II",
+            citation: "a stand-in (P14.T49.o; main's ruling, 2026-10-30): linear in temperature \
+                       from phase III's 1,230 kg m⁻³ at the III–II transition, 103.52 K, to \
+                       phase I's 1,162.01 kg m⁻³ at the II–I transition, 126.22 K, continuous \
+                       with both; phase II's cell is unread, and its density is taken to lie \
+                       between its neighbours'. The bracket is 5.5%, and its ends are loose: \
+                       phase III's is at 80 K, phase I's at no stated temperature",
+            basis: Basis::Adopted,
         },
         Source {
             covers: "L_vap",

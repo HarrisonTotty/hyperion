@@ -33010,3 +33010,9 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     list says so). No other table moves.
   - A new golden, `substance/aerosol_molten_decks` (header 24, written under `Molten`), pins the
     seven stand-ins' optics; 25's bless restamps it.
+- **P14.T49.o's phase II stand-in, as built (2026-10-31; main's ruling of 2026-10-30,
+  research-r08-t16a answer 3).** H₂S's phase II takes a labelled stand-in, linear from phase III's
+  1,230 kg m⁻³ at 103.52 K to phase I's 1,162.01 at 126.22 K (`SolidDensity::Measured`'s two
+  nodes, and its own `ρ_s of phase II` source, `Basis::Adopted`), with no hold: it moves no
+  generated mode. `GAPS_AT_24` names β-CO alone. Re-blessed at 24: the protocol's
+  `substances.json` (H₂S's third solid piece); `substance/registry.golden` does not move.

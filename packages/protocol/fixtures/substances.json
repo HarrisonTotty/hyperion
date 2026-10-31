@@ -276,6 +276,7 @@
       "grain_density_variant": null,
       "solid_grain_density": [
         { "from_k": 0.0, "to_k": 103.52, "temperatures_k": [0.0, 103.52], "densities_kg_per_m3": [1230.0, 1230.0] },
+        { "from_k": 103.52, "to_k": 126.22, "temperatures_k": [103.52, 126.22], "densities_kg_per_m3": [1230.0, 1162.01] },
         { "from_k": 126.22, "to_k": 187.7, "temperatures_k": [126.22, 187.7], "densities_kg_per_m3": [1162.01, 1162.01] }
       ],
       "liquid_grain_density": [

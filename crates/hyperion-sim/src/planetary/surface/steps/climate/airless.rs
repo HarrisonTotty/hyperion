@@ -2414,7 +2414,7 @@ mod tests {
                         );
                         // The recorded gap: no crust. From 24 an unlit record's mean is its night
                         // floor (P14.T24.i), and the ices the registry still has no density of
-                        // (β-CO, H2S's phase II) are not on any of these records' surfaces.
+                        // (β-CO's) are not on any of these records' surfaces.
                         let gap = matches!(surface.crust(), Modelled::NotModelled);
                         assert!(gap, "{:?}: {error:?}", record.index());
                         unread += 1;

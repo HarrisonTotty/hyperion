@@ -1340,9 +1340,9 @@ fn check_pieces(row: &Substance, phase: CondensedPhase, pieces: &[Piece]) {
 /// Asserts the shapes the ruling names (decision-p14-t54a-grain-density §2.6), as P14.T49.n's read
 /// densities give them from generator version 24: O₂'s three solid pieces, α, β and γ, meeting at
 /// 23.14 and 43.78 K (two about the β gap at 23); CO's one (β-CO is not read); N₂'s, CH₄'s and
-/// C₂H₆'s two; Ar's one (fcc); H₂S's two about phase II's gap, 103.52–126.22 K (Ar, H₂S and C₂H₆
-/// had none at 23); and the acid's liquid alone, one node of 1,662.6 kg m⁻³ at 300 K held at every
-/// temperature, of its `75wt%` variant.
+/// C₂H₆'s two; Ar's one (fcc); H₂S's three, phase II's 103.52–126.22 K a stand-in linear between
+/// its neighbours' (P14.T49.o; Ar, H₂S and C₂H₆ had none at 23); and the acid's liquid alone, one
+/// node of 1,662.6 kg m⁻³ at 300 K held at every temperature, of its `75wt%` variant.
 fn check_named_shapes(mirror: &[MirrorRow]) {
     let read = |key: &str| {
         mirror
@@ -1374,14 +1374,21 @@ fn check_named_shapes(mirror: &[MirrorRow]) {
     let hydrogen_sulphide = read("H2S")
         .solid
         .as_ref()
-        .expect("H₂S's phases III and I have densities");
-    assert_eq!(hydrogen_sulphide.len(), 2, "H₂S's phase II is a gap");
-    let (Some(iii_end), Some(i_start)) = (hydrogen_sulphide[0].to_k, hydrogen_sulphide[1].from_k)
-    else {
+        .expect("H₂S's phases III, II and I have densities");
+    assert_eq!(hydrogen_sulphide.len(), 3, "H₂S's phases III, II and I");
+    let bounds = (
+        hydrogen_sulphide[0].to_k,
+        hydrogen_sulphide[1].from_k,
+        hydrogen_sulphide[1].to_k,
+        hydrogen_sulphide[2].from_k,
+    );
+    let (Some(third_to), Some(second_from), Some(second_to), Some(first_from)) = bounds else {
         panic!("H₂S's pieces are bounded: {hydrogen_sulphide:?}");
     };
-    assert_same_bits(iii_end, 103.52);
-    assert_same_bits(i_start, 126.22);
+    assert_same_bits(third_to, 103.52);
+    assert_same_bits(second_from, 103.52);
+    assert_same_bits(second_to, 126.22);
+    assert_same_bits(first_from, 126.22);
     let acid = read("H2SO4");
     assert_eq!(acid.solid, None);
     assert_eq!(acid.variant.as_deref(), Some("75wt%"));

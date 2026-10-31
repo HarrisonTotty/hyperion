@@ -250,8 +250,8 @@ pub(in crate::substance) const SULPHUR_DIOXIDE: CondensedColumns = of_diagram(
     MechanicsFamily::VolatileIce,
     VOLATILE_SOURCES,
 );
-/// Hydrogen sulphide, its phase III's and phase I's densities read and phase II's not (P14.T49.n;
-/// from generator version 24).
+/// Hydrogen sulphide, its phase III's and phase I's densities read (P14.T49.n; from generator
+/// version 24) and phase II's a labelled stand-in between them (P14.T49.o).
 pub(in crate::substance) const HYDROGEN_SULPHIDE: CondensedColumns = of_diagram(
     &diagrams::HYDROGEN_SULPHIDE,
     MechanicsFamily::VolatileIce,

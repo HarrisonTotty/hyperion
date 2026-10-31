@@ -320,25 +320,17 @@ mod tests {
     /// where, exclusive, kelvin, `f64::INFINITY` for through the triple point, and why it stays.
     type Gap = (&'static str, f64, f64, &'static str);
 
-    /// The solids the registry gives no density at 24: β-CO (61.585 K to the triple point) and
-    /// hydrogen sulphide's phase II (103.52–126.22 K), whose densities were not found in a
-    /// readable source (P14.T49.n's open gaps; searched again by P14.T49.o, 2026-10-30). Each
-    /// leaves the list as its density is read; phase II's stand-in between its neighbours' waits
-    /// on a ruling.
-    const GAPS_AT_24: [Gap; 2] = [
-        (
-            "CO",
-            61.585,
-            f64::INFINITY,
-            "β-CO's cell was not read: Krupskii et al. 1975 is closed",
-        ),
-        (
-            "H2S",
-            103.52,
-            126.22,
-            "phase II's cell was not read: Cockcroft and Fitch 1990, a D₂S study, is closed",
-        ),
-    ];
+    /// The solids the registry gives no density at 24: β-CO (61.585 K to the triple point),
+    /// whose density was not found in a readable source (P14.T49.n's open gap; searched again by
+    /// P14.T49.o, 2026-10-30). It leaves the list as its density is read. Hydrogen sulphide's
+    /// phase II left it with its stand-in between its neighbours' (P14.T49.o, main's ruling of
+    /// 2026-10-30).
+    const GAPS_AT_24: [Gap; 1] = [(
+        "CO",
+        61.585,
+        f64::INFINITY,
+        "β-CO's cell was not read: Krupskii et al. 1975 is closed",
+    )];
 
     /// The rows whose liquid by temperature P14.T49.n read, from 24.
     const READ_LIQUIDS: [&str; 6] = ["Fe", "MgSiO3", "Mg2SiO4", "Al2O3", "CaTiO3", "S8"];
