@@ -442,20 +442,14 @@ fn counted_classes(
     displaced: &DisplacedFields,
     selection: MapSelection,
 ) -> impl Iterator<Item = (f64, &DisplacedForm)> + '_ {
-    let remnants = match selection {
-        MapSelection::AllSystems => Some(false),
-        MapSelection::LayerERemnants => Some(true),
-        MapSelection::YoungOnly => None,
-    };
     displaced
         .classes()
         .iter()
         .enumerate()
         .filter_map(move |(index, class)| {
-            let remnants = remnants?;
             let form = class.form()?;
             let id = DisplacedClassId::new(u16::try_from(index).expect("under 97 classes"));
-            Some((displaced.map_count(id, remnants), form))
+            Some((displaced.map_count(id, selection)?, form))
         })
 }
 

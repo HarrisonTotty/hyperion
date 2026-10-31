@@ -322,7 +322,9 @@ impl Galaxy {
     ///
     /// # Errors
     ///
-    /// As [`from_params`](Self::from_params).
+    /// As [`from_params`](Self::from_params), and, under rules that install plan 08's displaced
+    /// classes, [`BuildGalaxyError::DisplacedForm`] if a class's form cannot be built from the
+    /// form table.
     ///
     /// # Panics
     ///

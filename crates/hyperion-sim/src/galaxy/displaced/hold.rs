@@ -576,7 +576,13 @@ fn brute_face_on(fields: &Fields, x: f64, y: f64, remnants_only: bool) -> f64 {
         for (index, class) in classes.classes().iter().enumerate() {
             if let Some(form) = class.form() {
                 let id = DisplacedClassId::new(u16::try_from(index).expect("under 97"));
-                total += dz * classes.map_count(id, remnants_only) * form.density(&p);
+                let selection = if remnants_only {
+                    MapSelection::LayerERemnants
+                } else {
+                    MapSelection::AllSystems
+                };
+                let count = classes.map_count(id, selection).expect("counted");
+                total += dz * count * form.density(&p);
             }
         }
     }
@@ -708,7 +714,10 @@ fn the_edge_on_map_counts_the_displaced_classes() {
                     integral += dy * dz * form.density(&PointLy::new(x, y, z));
                 }
             }
-            brute += classes.map_count(id, true) * integral / (z_hi - z_lo);
+            let count = classes
+                .map_count(id, MapSelection::LayerERemnants)
+                .expect("counted");
+            brute += count * integral / (z_hi - z_lo);
         }
         assert!(
             (map / brute - 1.0).abs() < 3e-3,
@@ -719,4 +728,24 @@ fn the_edge_on_map_counts_the_displaced_classes() {
             column_density_edge_on(held().fields(), x, z_lo, z_hi, MapSelection::AllSystems);
         assert_same_bits(all, field);
     }
+}
+
+/// A displaced class's form that cannot be built fails the galaxy's build with its own error,
+/// whose text names it and whose source is the form's.
+#[test]
+fn a_form_that_cannot_be_built_is_the_galaxy_s_error() {
+    use std::error::Error as _;
+    let form = forms::BuildFormError {
+        quantity: "beta",
+        value: -1.0,
+    };
+    let error = crate::galaxy::BuildGalaxyError::DisplacedForm(form);
+    assert_eq!(
+        error.to_string(),
+        format!("a displaced class's form cannot be built: {form}")
+    );
+    assert_eq!(
+        error.source().map(ToString::to_string),
+        Some(form.to_string())
+    );
 }

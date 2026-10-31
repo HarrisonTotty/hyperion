@@ -191,17 +191,26 @@ fn displaced_candidates_resolve_to_their_records() {
 
 /// The whole task's order independence: under every 26 hold a candidate's outcome is the same
 /// alone, forwards, backwards and permuted, in layers D and E at the Sun-like point and in the
-/// outer bulge.
+/// outer bulge, displaced candidates among them.
 #[test]
 fn candidates_are_order_independent_under_every_26_hold() {
     let galaxy = displaced();
+    let mut displaced_picks = 0_u32;
     for layer in [Layer::D, Layer::E] {
         for at in [sunlike(), diagonal(3_200.0)] {
             let key = CellKey::containing(layer, &at).expect("in the cube");
             let indices: Vec<u32> = (0..candidate_count(galaxy, key).min(200)).collect();
             assert_order_independent(&indices, |&index| evaluate_candidate(galaxy, key, index));
+            displaced_picks += u32::try_from(
+                indices
+                    .iter()
+                    .filter(|&&index| is_displaced(galaxy, key, index))
+                    .count(),
+            )
+            .expect("at most 200");
         }
     }
+    assert!(displaced_picks > 0, "the sample holds displaced candidates");
 }
 
 /// The expected number of layer-E systems in `cell`, by the midpoint rule in 6³ boxes of the
@@ -234,7 +243,7 @@ fn expected_in(galaxy: &Galaxy, key: CellKey) -> f64 {
 /// Sun-like radius, and the outer bulge. Each region is a block of cells, wider where the layer is
 /// thin.
 #[test]
-fn layer_e_against_its_density_in_six_regions() {
+fn layer_e_records_match_its_density_in_six_regions() {
     let galaxy = displaced();
     let r_d = galaxy.params().thin_disc().length().value();
     let regions: [(&str, [f64; 3], [i32; 3]); 6] = [
@@ -328,7 +337,7 @@ fn the_hook_is_asked_once_per_accepted_layer_e_candidate_under_every_26_hold() {
 /// under every 26 hold, the movers by count, the largest count change, and the systems of displaced
 /// classes. Layers A to C never move; every moved record is finite.
 #[test]
-fn the_census_of_the_displaced_classes() {
+fn the_census_moves_only_layers_d_and_e() {
     let (old, new) = (held(), displaced());
     let places = [
         ("sun", sunlike()),
@@ -408,4 +417,68 @@ fn the_census_of_the_displaced_classes() {
         largest.1
     );
     assert!(movers > 0);
+}
+
+/// The digest (`f64_digest`) of the new arm's placement in plan 03's pinned cells of the fixture,
+/// with the census's counts and the face-on map at the Sun-like point: each cell's bound and its
+/// classes' rests, its candidate count, and each record's position, mass, age, component and
+/// whether it was picked for a class. Blessed natively on x86-64; the wasip1 suite compares it
+/// (D5). A 26-arm figure on plan 15's provisional form table, re-pinned by name when the
+/// production table lands.
+const DISPLACED_CELLS_DIGEST: u64 = 0xbea5_b703_2dd2_5ea1;
+
+/// The new arm's cells, census and map, pinned on every target (named `pinned` for the
+/// WebAssembly suite's filter).
+#[test]
+fn the_new_arm_s_cells_are_pinned() {
+    let galaxy = displaced();
+    let mut values = Vec::new();
+    let mut cell = Vec::new();
+    for key in pinned_cells(galaxy) {
+        let bound = CellBound::of(galaxy, key);
+        values.push(bound.total());
+        let classes = galaxy
+            .fields()
+            .displaced()
+            .map_or(0, |d| d.order(key.band()).len());
+        values.extend((0..classes).map(|i| bound.rest(i)));
+        values.push(f64::from(candidate_count(galaxy, key)));
+        generate_cell(galaxy, key, &mut cell);
+        for record in &cell {
+            values.extend(record.epoch_position().cell().to_array().map(f64::from));
+            values.extend(record.epoch_position().offset_metres());
+            values.push(record.primary_initial_mass().value());
+            values.push(record.age_at_epoch().value());
+            let component = record.component().expect("a grid record");
+            values.push(f64::from(
+                u8::try_from(component.index()).expect("under 24"),
+            ));
+            values.push(if is_displaced(galaxy, key, index_of(record)) {
+                1.0
+            } else {
+                0.0
+            });
+        }
+    }
+    let counts = crate::galaxy::query::expected_counts(
+        galaxy,
+        &sunlike(),
+        crate::units::LightYears::new(50.0),
+        crate::galaxy::query::SubstellarRequest::None,
+    );
+    values.extend(counts.to_array());
+    for selection in [
+        crate::galaxy::map::MapSelection::AllSystems,
+        crate::galaxy::map::MapSelection::LayerERemnants,
+    ] {
+        values.push(crate::galaxy::map::column_density_face_on(
+            galaxy.fields(),
+            0.0,
+            26_000.0,
+            selection,
+        ));
+    }
+    let digest = hyperion_testkit::golden::f64_digest(&values);
+    println!("digest {digest:#018x} over {} values", values.len());
+    assert_eq!(digest, DISPLACED_CELLS_DIGEST, "re-pin by name");
 }

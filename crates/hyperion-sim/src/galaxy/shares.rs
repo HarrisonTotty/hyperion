@@ -13,7 +13,7 @@
 //! thinning needs nothing else (plan 13, Design notes 2 and 3).
 //!
 //! Plan 08 installs its displaced classes here (P08.T12.a), from generator version 26 (the hold of
-//! [`DISPLACED_VERSION`](crate::galaxy::displaced::DISPLACED_VERSION)). The matrix is keyed by
+//! `DISPLACED_VERSION`). The matrix is keyed by
 //! population, while the sub-discs of different ages keep different shares of their layer-E
 //! budgets in the field, so each field component gets a factor of its own: the share of its band
 //! budget its field keeps, the class table's `stay_share` in rows D and E and 1 elsewhere, which
@@ -22,7 +22,7 @@
 //! (Design note 15). The displaced columns after the populations' hold each class's systems inside
 //! the root cube in rows D and E (its class weight times its source's band budget) and 0 in the
 //! other rows, the weight its density, normalised over the cube, takes
-//! ([`displaced_share`](ShareMatrix::displaced_share)). A matrix the build has installed nothing in
+//! (`displaced_share`). A matrix the build has installed nothing in
 //! has neither, and reads as it always did.
 
 use super::displaced::DisplacedClassId;
@@ -168,7 +168,7 @@ impl ShareMatrix {
     /// class table's `stay_share` in layers D and E, P08.T12.a). A component's density already
     /// holds its share of its population, so a layer's density is the sum of this times each
     /// component's density, and then of each displaced class's
-    /// [`displaced_share`](Self::displaced_share) times its density.
+    /// `displaced_share` times its density.
     #[must_use]
     pub fn component_share(&self, band: MassBand, component: &Component) -> f64 {
         let share = self.share(band, component.population());
@@ -182,7 +182,7 @@ impl ShareMatrix {
     /// once the classes are installed (P08.T12.a), the weight its density, normalised over the
     /// cube, takes in the layer's sum; 0 in every other band, and everywhere before then.
     #[must_use]
-    pub fn displaced_share(&self, band: MassBand, id: DisplacedClassId) -> f64 {
+    pub(crate) fn displaced_share(&self, band: MassBand, id: DisplacedClassId) -> f64 {
         self.shares
             .get(band.index() * self.columns + POPULATION_COLUMNS + id.index())
             .copied()

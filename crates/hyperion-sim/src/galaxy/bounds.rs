@@ -549,6 +549,20 @@ impl Fields {
     /// as [`layer_density`](Self::layer_density) does: [`DisplacedFields::bound`] for each.
     #[must_use]
     pub fn layer_bound(&self, shares: &ShareMatrix, band: MassBand, cell: &CellBox) -> f64 {
+        self.layer_bound_each(shares, band, cell, |_| {})
+    }
+
+    /// [`layer_bound`](Self::layer_bound), bit for bit, handing each displaced class's term,
+    /// `share × bound`, to `each` in the band's order as the sum takes it: the candidate pick's
+    /// early rejection reads them (P08.T12.b).
+    #[must_use]
+    pub(crate) fn layer_bound_each(
+        &self,
+        shares: &ShareMatrix,
+        band: MassBand,
+        cell: &CellBox,
+        mut each: impl FnMut(f64),
+    ) -> f64 {
         let mut bounds = [0.0; MAX_COMPONENTS];
         self.component_bounds(cell, &mut bounds);
         let field = self
@@ -561,7 +575,9 @@ impl Fields {
         match self.displaced() {
             None => field,
             Some(displaced) => displaced.order(band).iter().fold(field, |sum, &id| {
-                sum + shares.displaced_share(band, id) * displaced.bound(id, cell)
+                let term = shares.displaced_share(band, id) * displaced.bound(id, cell);
+                each(term);
+                sum + term
             }),
         }
     }

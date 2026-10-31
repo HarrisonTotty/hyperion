@@ -5,15 +5,15 @@
 //! Plan 02 caps [`Fields`] at [`MAX_COMPONENTS`](crate::galaxy::fields::MAX_COMPONENTS) field
 //! components in fixed arrays, so the hundred displaced classes are a list of their own,
 //! [`DisplacedFields`], which a galaxy's fields carry once its build has installed them (the hold of
-//! [`DISPLACED_VERSION`](super::DISPLACED_VERSION)) and which every sum over layers D and E reads
+//! `DISPLACED_VERSION`) and which every sum over layers D and E reads
 //! after the field components:
 //!
 //! - a class's density is its form ([`forms`](super::forms)) normalised to unit integral over the
 //!   root cube, systems per cubic light-year at one system's weight;
 //! - its weight in a band is its systems inside the cube there, its class weight times its source's
-//!   band budget ([`ClassTable::class_count`]), which the share matrix's displaced columns hold
-//!   ([`ShareMatrix::displaced_share`]): a layer's density is then `Σ share × density` over the
-//!   field components and the classes alike;
+//!   band budget ([`ClassTable::class_count`], [`DisplacedClass::count`]), which the share matrix's
+//!   displaced columns hold: a layer's density is then `Σ share × density` over the field
+//!   components and the classes alike;
 //! - its bound over a cell is its form's ([`bound`](super::bound), P08.T11);
 //! - per band, the classes with weight there are summed in a fixed order, by descending weight
 //!   across the galaxy and ties by class index (Design note 16): about a hundred in layer E and
@@ -31,8 +31,7 @@ use super::{DisplacedClassId, DisplacedKind};
 use crate::galaxy::bounds::CellBox;
 use crate::galaxy::fields::{ComponentId, Fields};
 use crate::galaxy::imf::MassBand;
-#[cfg(doc)]
-use crate::galaxy::shares::ShareMatrix;
+use crate::galaxy::map::MapSelection;
 use crate::galaxy::{Galaxy, PointLy};
 
 /// The two bands the classes have weight in, in their slots' order.
@@ -214,7 +213,7 @@ impl DisplacedFields {
     ///
     /// Never: the table has 97 classes, whose indices fit a `u16`, and every old source has its
     /// rows.
-    pub fn new(galaxy: &Galaxy, forms: &FormTable) -> Result<Self, BuildFormError> {
+    pub(crate) fn new(galaxy: &Galaxy, forms: &FormTable) -> Result<Self, BuildFormError> {
         let table = ClassTable::build(galaxy, forms);
         let fields = galaxy.fields();
         let scales = table.scales();
@@ -252,7 +251,9 @@ impl DisplacedFields {
                 None
             };
             let birth = BANDS.map(|band| {
-                (table.class_weight(band, id) > 0.0).then(|| modal_birth(&table, band, id))
+                (table.class_weight(band, id) > 0.0)
+                    .then(|| modal_birth(&table, band, id))
+                    .flatten()
             });
             let remnants_e =
                 count[1] * entry.marks(MassBand::E).kind_odds()[kind_index(DisplacedKind::Remnant)];
@@ -320,6 +321,10 @@ impl DisplacedFields {
 
     /// Class `id`'s density at `p`, systems per cubic light-year at one system's weight: its form,
     /// normalised over the root cube; 0 for a class with no form.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is not below the table's 97 classes.
     #[must_use]
     pub fn density(&self, id: DisplacedClassId, p: &PointLy) -> f64 {
         self.classes[id.index()]
@@ -329,7 +334,12 @@ impl DisplacedFields {
     }
 
     /// An upper bound on class `id`'s [`density`](Self::density) over `cell`, at one system's
-    /// weight; 0 for a class with no form.
+    /// weight; 0 for a class with no form. The class's systems inside the cube multiply both
+    /// through the share matrix's displaced column.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is not below the table's 97 classes.
     #[must_use]
     pub fn bound(&self, id: DisplacedClassId, cell: &CellBox) -> f64 {
         self.classes[id.index()]
@@ -352,17 +362,16 @@ impl DisplacedFields {
         self.kept[c.index()]
     }
 
-    /// Class `id`'s systems inside the cube that the map counts: in layers D and E together for
-    /// every system, and layer E's remnants alone for [`MapSelection::LayerERemnants`].
-    ///
-    /// [`MapSelection::LayerERemnants`]: crate::galaxy::map::MapSelection::LayerERemnants
+    /// Class `id`'s systems inside the cube that `selection` counts: in layers D and E together for
+    /// every system, and layer E's remnants alone for [`MapSelection::LayerERemnants`]; `None` for
+    /// the young disc alone, which counts no class.
     #[must_use]
-    pub(crate) fn map_count(&self, id: DisplacedClassId, remnants_e: bool) -> f64 {
+    pub(crate) fn map_count(&self, id: DisplacedClassId, selection: MapSelection) -> Option<f64> {
         let class = &self.classes[id.index()];
-        if remnants_e {
-            class.remnants_e
-        } else {
-            class.count[0] + class.count[1]
+        match selection {
+            MapSelection::AllSystems => Some(class.count[0] + class.count[1]),
+            MapSelection::LayerERemnants => Some(class.remnants_e),
+            MapSelection::YoungOnly => None,
         }
     }
 
@@ -406,9 +415,13 @@ fn band_slot(band: MassBand) -> Option<usize> {
 }
 
 /// The birth component of class `id` that holds most of its weight in `band`, over every kind and
-/// mass node; the first such component on a tie.
-fn modal_birth(table: &ClassTable, band: MassBand, id: DisplacedClassId) -> ComponentId {
+/// mass node; the first such component on a tie; `None` for a class born in no component, as the
+/// hypervelocity survivors are (they come from no birth source, Design note 25).
+fn modal_birth(table: &ClassTable, band: MassBand, id: DisplacedClassId) -> Option<ComponentId> {
     let marks = table.marks(band, id);
+    if marks.components().is_empty() {
+        return None;
+    }
     let kinds = [
         DisplacedKind::Remnant,
         DisplacedKind::Runaway,
@@ -429,5 +442,5 @@ fn modal_birth(table: &ClassTable, band: MassBand, id: DisplacedClassId) -> Comp
             (best, most) = (j, w);
         }
     }
-    marks.components()[best]
+    Some(marks.components()[best])
 }

@@ -234,7 +234,8 @@ pub(super) fn layer_bound(galaxy: &Galaxy, key: CellKey) -> f64 {
 /// classes from each one in the band's order to the last, which the pick's early rejection reads.
 ///
 /// A cell evaluates it once, as it does the bound, so that a candidate's pick reads its classes'
-/// bounds without evaluating them.
+/// bounds without evaluating them; the classes' terms are the bound's own, taken as its sum takes
+/// them ([`Fields::layer_bound_each`]), so the total is [`layer_bound`]'s bit for bit.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct CellBound {
     total: f64,
@@ -249,19 +250,16 @@ impl CellBound {
     /// The bound of `key`'s cell in `galaxy`.
     #[must_use]
     pub(super) fn of(galaxy: &Galaxy, key: CellKey) -> Self {
-        let total = layer_bound(galaxy, key);
-        let classes: Vec<f64> = galaxy
-            .fields()
-            .displaced()
-            .map_or_else(Vec::new, |displaced| {
-                let band = key.band();
-                let (shares, cell) = (galaxy.shares(), key.cell_box());
-                displaced
-                    .order(band)
-                    .iter()
-                    .map(|&id| shares.displaced_share(band, id) * displaced.bound(id, &cell))
-                    .collect()
-            });
+        let band = key.band();
+        let mut classes = Vec::new();
+        let total = super::saturated(
+            band,
+            galaxy
+                .fields()
+                .layer_bound_each(galaxy.shares(), band, &key.cell_box(), |term| {
+                    classes.push(term);
+                }),
+        );
         let mut rest = vec![0.0; classes.len()];
         let mut sum = 0.0;
         for (slot, &bound) in rest.iter_mut().zip(&classes).rev() {

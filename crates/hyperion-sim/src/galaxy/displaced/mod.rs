@@ -20,10 +20,10 @@
 //! # The hold
 //!
 //! P08.T12 replaces layers D and E, so it lands behind a galaxy hold (decision-galaxy-25-train §1),
-//! [`DISPLACED_VERSION`]: its field of the galaxy's rules, [`DisplacedRules`], is matched once,
-//! where the galaxy is built. Under [`DisplacedRules::FieldOnly`], every galaxy built today, the
-//! build is version 24's verbatim and installs nothing, so every reader takes the field's path
-//! unchanged. Under [`DisplacedRules::Displaced`] the build makes the class table from the field
+//! `DISPLACED_VERSION`: its field of the galaxy's rules, `DisplacedRules`, is matched once, where
+//! the galaxy is built. Under `DisplacedRules::FieldOnly`, every galaxy built today, the build is
+//! version 24's verbatim and installs nothing, so every reader takes the field's path unchanged.
+//! Under `DisplacedRules::Displaced` the build makes the class table from the field
 //! galaxy and installs the classes ([`DisplacedFields`], in the galaxy's
 //! [`Fields`](crate::galaxy::fields::Fields)) and the stay shares and class counts (in its
 //! [`ShareMatrix`](crate::galaxy::shares::ShareMatrix)); every reader of layers D and E (the layer

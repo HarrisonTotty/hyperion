@@ -2063,9 +2063,13 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     (developer only), `BuildGalaxyError::DisplacedForm`. `DisplacedFields::register` is not built
     (P09.T34 gives the hypervelocity class weight).
   - Deviation: a displaced column holds the class's systems inside the cube (weight × source band
-    budget), and `DisplacedFields::density` is the form at unit integral; `classes()` keeps all 97
-    slots, so `DisplacedClassId` indexes it and the class table alike, a class with weight in
-    neither layer having no form. At the fixture 78 classes have weight in E and 16 in D.
+    budget), and `DisplacedFields::density` and `bound` are the form's at unit integral, not
+    weighted inside `bound` as P08.T11's deferral had it; `classes()` keeps all 97 slots, so
+    `DisplacedClassId` indexes it and the class table alike, a class with weight in neither layer
+    having no form. At the fixture 78 classes have weight in E and 16 in D.
+  - Deviation: `Galaxy::class_table()` returns `Option<&ClassTable>` (`None` below 26) and is
+    built by the build's `match`, not by `with_full_potential` (the class table needs only the
+    in-plane potential). The bump decides whether the `Option` stays.
   - `component_share` multiplies a per-component factor (`stay_share` in rows D and E, 1
     elsewhere; P09.T2.c's 1 − φ can multiply the same factor); `share` is unchanged, and the class
     table's budgets now read `share` (bit-identical).
@@ -2084,9 +2088,9 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
 
 - **P08.T12.b as built (2026-10-31, at `GENERATOR_VERSION` 24, behind `DISPLACED_VERSION` = 26;
   no output moves at 24).**
-  - `placement/cell.rs`: `CellBound` (the layer's bound, each class's `share × bound` and their
-    suffix sums), evaluated once per cell; `evaluate_candidate_from_bound` and `evaluate_with_hook`
-    take `&CellBound`.
+  - `placement/cell.rs`: `CellBound` (the layer's bound, each class's `share × bound` as
+    `Fields::layer_bound_each` sums it, and their suffix sums), evaluated once per cell;
+    `evaluate_candidate_from_bound` and `evaluate_with_hook` take `&CellBound`.
   - `placement/candidate.rs`: `Picked::{Field, Displaced}`; `pick_component` returns
     `Option<Picked>`, and `pick_displaced` runs the sum on over `DisplacedFields::order(band)`
     with Design note 16's two exits. The reject exit adds `BOUND_PADDING` of the cell's bound to

@@ -305,12 +305,23 @@ mod tests {
     /// the cube's faces along every axis and diagonal.
     #[test]
     fn the_partition_bounds_every_cell_in_every_layer() {
-        let galaxy = milky_way();
+        the_partition_bounds_every_cell_of(&milky_way());
+    }
+
+    /// [`the_partition_bounds_every_cell_in_every_layer`] with plan 08's displaced classes in
+    /// layers D and E, under every 26 hold (P08.T12.a): their bounds are monotone in the box too.
+    #[test]
+    fn the_partition_bounds_every_cell_with_the_displaced_classes() {
+        the_partition_bounds_every_cell_of(crate::galaxy::displaced::hold::displaced());
+    }
+
+    /// The partition's sweep of [`the_partition_bounds_every_cell_in_every_layer`] in `galaxy`.
+    fn the_partition_bounds_every_cell_of(galaxy: &Galaxy) {
         let octant = root_octant();
         assert_eq!((octant.min_corner(), octant.edge()), ([0, 0, 0], 65_536));
         for spec in STELLAR_LAYERS {
             let layer = spec.layer();
-            let largest_mean = largest_cell_mean(&galaxy, spec);
+            let largest_mean = largest_cell_mean(galaxy, spec);
             let edge = 65_536 / i32::try_from(layer.cell_size_ly()).unwrap();
             // 0 to 7, then doubling to the last cell before the face.
             let mut steps = vec![0, 1, 2, 3, 4, 5, 6, 7];
@@ -328,7 +339,7 @@ mod tests {
                                 |s: i32, bit: u8| if signs >> bit & 1 == 0 { s } else { -s - 1 };
                             let key = CellKey::new(layer, [side(sx, 0), side(sy, 1), side(sz, 2)])
                                 .unwrap();
-                            let mean = layer_bound(&galaxy, key) * key.volume_ly3();
+                            let mean = layer_bound(galaxy, key) * key.volume_ly3();
                             assert!(
                                 mean <= largest_mean,
                                 "layer {} cell {:?} expects {mean}, above the partition's \

@@ -431,6 +431,13 @@ impl Fields {
             "{} components exceed MAX_COMPONENTS",
             components.len()
         );
+        assert!(
+            components
+                .iter()
+                .enumerate()
+                .all(|(i, c)| c.id.index() == i),
+            "every component's ID is its place"
+        );
         let arms = ArmGeometry::of(params);
         // The bounds read one range of phase for every arm (`Fields::component_bounds`).
         assert!(

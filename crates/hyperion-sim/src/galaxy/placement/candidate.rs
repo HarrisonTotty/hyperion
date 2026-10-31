@@ -346,7 +346,7 @@ fn acceptance_mark(seed: Seed, id: SystemId) -> Mark {
 /// of P03.T8.c exercises. Also in debug builds, if the lazy pick of a band but the rogue planets'
 /// is not [`Mark::pick_weighted`]'s over every weight ([`pick_unsaturated`]).
 #[must_use]
-pub(super) fn pick_component(
+fn pick_component(
     galaxy: &Galaxy,
     key: CellKey,
     cell_bound: &CellBound,
@@ -546,10 +546,12 @@ fn pick_displaced(
     let point = PointLy::from(at.position);
     let margin = BOUND_PADDING * at.cell_bound.total();
     for (i, &id) in order.iter().enumerate() {
+        // A reach at or past the padded bound rejects nothing, and its ratio is no threshold.
         let reach = sum + (at.cell_bound.rest(i) + margin);
-        if !at
-            .mark
-            .is_below(Threshold::from_ratio(reach, at.padded_bound))
+        if reach < at.padded_bound
+            && !at
+                .mark
+                .is_below(Threshold::from_ratio(reach, at.padded_bound))
         {
             return None;
         }
@@ -589,7 +591,9 @@ fn check_the_lazy_pick<'a>(
     for (slot, (component, density)) in weights[read..count].iter_mut().zip(densities) {
         *slot = shares.component_share(band, component) * density;
     }
-    let mut all: Vec<f64> = weights[..count].to_vec();
+    let classes = fields.displaced().map_or(0, |d| d.order(band).len());
+    let mut all: Vec<f64> = Vec::with_capacity(count + classes);
+    all.extend_from_slice(&weights[..count]);
     let point = PointLy::from(at.position);
     if let Some(displaced) = fields.displaced() {
         for (i, &id) in displaced.order(band).iter().enumerate() {
@@ -1390,7 +1394,7 @@ mod tests {
                     Some(Picked::Displaced(_)) => counts.displaced += 1,
                     None => {
                         let reach = field_sum + (bound.rest(0) + BOUND_PADDING * bound.total());
-                        if mark.is_below(Threshold::from_ratio(reach, padded)) {
+                        if reach >= padded || mark.is_below(Threshold::from_ratio(reach, padded)) {
                             counts.rejected += 1;
                         } else {
                             counts.rejected_at_once += 1;
@@ -1403,14 +1407,21 @@ mod tests {
     }
 
     /// P08.T12.b: the two early exits give the full sum's answer, on 10⁴ candidates for the fast
-    /// suite (the plan's 10⁶ are the slow test below), and a displaced class is picked.
+    /// suite (the plan's 10⁶ are the slow test below), and every way out of the pick is taken: a
+    /// component, a class, and rejection before and after the first class's density.
     #[test]
     fn the_early_exits_give_the_full_sum_s_answer() {
         let galaxy = crate::galaxy::displaced::hold::displaced();
         let cells = exit_cells(galaxy);
         let counts = exits_agree_with_the_full_sum(galaxy, &cells, 834);
         println!("{counts:?}");
-        assert!(counts.displaced > 0 && counts.field > 0, "{counts:?}");
+        assert!(
+            counts.field > 0
+                && counts.displaced > 0
+                && counts.rejected > 0
+                && counts.rejected_at_once > 0,
+            "every way out is taken: {counts:?}"
+        );
     }
 
     /// P08.T12.b: the two early exits give the full sum's answer on 10⁶ candidates.
