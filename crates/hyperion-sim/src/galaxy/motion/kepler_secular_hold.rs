@@ -6,10 +6,9 @@
 //! potential built first or last (D4); the centre's source against a scan of its members on their
 //! exact orbits; and the census C1.
 //!
-//! The bit-identity of the version in force is held by the goldens and P09.T28.b.a's pre-pin, as
-//! for P09.T28.b.b's hold: below 25 no galaxy builds the centre's potential, which the tripwire
-//! checks. The bump to 25 deletes the tripwire and the held arm, and these become tests of the
-//! version's own galaxy.
+//! The bit-identity of the version in force is held by the goldens and P09.T28.b.a's pre-pin:
+//! below 25 no galaxy builds the centre's potential, which the tripwire checks. The bump to 25
+//! deletes the tripwire and the held arm, and these become tests of the version's own galaxy.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -33,7 +32,7 @@ use crate::rng::Seed;
 use crate::units::Years;
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 
-/// The Milky Way fixture's seed, P09.T28.b.a's pre-pin's and P09.T28.b.b's hold's.
+/// The Milky Way fixture's seed, P09.T28.b.a's pre-pin's and P09.T28.b.b's tests'.
 const MILKY_WAY_SEED: u64 = 0x0928_b0a0_0000_0001;
 
 /// The times the tests move records to, Julian years from the epoch: ±100 and ±1,000, which is

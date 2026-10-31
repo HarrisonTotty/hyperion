@@ -1751,7 +1751,10 @@ fn under_a_load_the_surface_stands_at_its_height_and_off_the_loads_at_the_filled
     let planed: Vec<usize> = (0..laid.lift.len())
         .filter(|&n| laid.deflection[n] < 0.0 && laid.load[n] <= 0.0)
         .collect();
-    assert_ne!(planed, []);
+    assert!(
+        !planed.is_empty(),
+        "no cell lies on a bulge and under no load"
+    );
     for n in planed {
         assert_same_bits(laid.lift[n], 0.0);
     }

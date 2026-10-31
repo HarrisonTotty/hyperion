@@ -143,9 +143,9 @@ impl CentreMotion {
 ///   is what `SystemContext` takes today.
 ///
 /// It does not read the galaxy's rules: the orbit is the one the system follows under the Kepler
-/// regime's law, which reaches the record with P09.T28.b.b's hold, and the radius is the planets'
-/// whatever the drift hook draws. Nor does it ask the loss cone (module documentation). A grid
-/// record's state is [`EpochState::of_grid_record`], a centre member's
+/// regime's law, which reaches the record from generator version 25 (P09.T28.b.b), and the radius
+/// is the planets' whatever the drift hook draws. Nor does it ask the loss cone (module
+/// documentation). A grid record's state is [`EpochState::of_grid_record`], a centre member's
 /// [`EpochState::of_centre_member`]; a feature's member takes the smaller of this and its
 /// feature's radius (`features::members::sphere_of_influence`). It reads the galaxy's
 /// [`CentreMotion`], which is built on first read (about 64 ms; P09.T28.b.a as built).

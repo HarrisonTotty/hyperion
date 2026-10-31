@@ -529,8 +529,8 @@ impl Galaxy {
     /// What the Kepler regime reads of the centre (plan 09, P09.T28.b.a).
     ///
     /// That is the mass about the black hole, the cluster's and the rest of the galaxy's, the
-    /// influence radius where it weighs the black hole, and the loss cone. Nothing on the record
-    /// reads it until version 25 (`KEPLER_REGIME_VERSION`, P09.T28.b.b's hold). It is held with the
+    /// influence radius where it weighs the black hole, and the loss cone. The record reads it from
+    /// generator version 25 (P09.T28.b.b). It is held with the
     /// galaxy (plan 09, Design note 15) and built when first read, from the parameters and the mass
     /// model alone, so it is the same bits whichever caller reads it first and whenever; the
     /// galaxy's equality and its `Debug` text do not depend on whether it has been read. Building it takes about 64 ms, nearly all of it the galaxy's spherical average

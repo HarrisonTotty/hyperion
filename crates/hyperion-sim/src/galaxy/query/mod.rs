@@ -345,7 +345,7 @@ fn ids_are_unique(systems: &[SystemHit]) -> bool {
 
 /// The sphere a layer is walked with: the query's, padded by that layer's speed ([`walk_pad`]),
 /// and from generator version 25 for the Kepler regime's orbits near the black hole (plan 09,
-/// P09.T28.b.b, held below it).
+/// P09.T28.b.b).
 #[must_use]
 pub(crate) fn sphere_for_layer(galaxy: &Galaxy, query: &RangeQuery, layer: Layer) -> QuerySphere {
     sphere_with_pad(

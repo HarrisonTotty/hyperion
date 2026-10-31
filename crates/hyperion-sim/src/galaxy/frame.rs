@@ -353,7 +353,7 @@ pub fn frame_at<C: CellCache>(
     // The sources are asked once, over the widest sphere any layer was walked with and for every
     // layer walked, because a source reports its members by the layer they would fall in and this
     // rule has no census to admit layers by. A member farther away than its own layer's search
-    // radius can only fail to hold the ship, never win. From version 25 (P09.T28.b.b's hold) the
+    // radius can only fail to hold the ship, never win. From version 25 (P09.T28.b.b) the
     // widest is chosen by the walk's Kepler pad near the black hole, where `range_query` asks its
     // sources about the straight lines' sphere; a source reads only its centre, radius and time,
     // and pads for its own members.
@@ -375,7 +375,7 @@ pub fn frame_at<C: CellCache>(
 /// The radius is [`SEARCH_MARGIN`] times the tidal radius of `largest` at the ship's position, and
 /// the pad is the layer's, as in the range query, so that cells chosen by epoch position cannot
 /// miss a system that has drifted in by `t` (plan 03, Design note 13); from generator version 25,
-/// held below it, the Kepler regime's near the black hole (plan 09, P09.T28.b.b).
+/// the Kepler regime's near the black hole (plan 09, P09.T28.b.b).
 #[must_use]
 fn search_sphere(
     galaxy: &Galaxy,
@@ -523,40 +523,33 @@ mod tests {
         FrameCandidate::new(id(index), ly(4.0 * ratio), ly(4.0)).unwrap()
     }
 
-    /// P09.T28.b.b's hold: the search pads each layer's sphere as the range query's walk does, by
-    /// the straight lines under the version's rules and, near the black hole, for the Kepler
-    /// regime's orbits under every 25 hold, which is wider but where the straight pad already
-    /// holds them.
+    /// P09.T28.b.b: the search pads each layer's sphere as the range query's walk does, near the
+    /// black hole for the Kepler regime's orbits, which is never narrower than the straight lines'
+    /// pad and nearly always wider.
     #[test]
-    fn the_search_pads_as_the_walk_does_under_either_arm() {
+    fn the_search_pads_as_the_walk_does() {
         use crate::galaxy::params::GalaxyParams;
         use crate::galaxy::query::{kepler_pad_for, pad_for, pad_speed};
-        use crate::galaxy::rules::GalaxyRules;
         use crate::rng::Seed;
 
-        let held = Galaxy::from_params(
+        let galaxy = Galaxy::from_params(
             Seed::new(0x0928_bb00_0000_0002),
             GalaxyParams::milky_way_like(),
         )
         .expect("the Milky Way fixture builds");
-        let kepler = held.clone().with_rules(GalaxyRules::every_25_hold());
         let ship = GalacticPosition::from_light_years([1.5, -0.5, 0.0]).unwrap();
         let mut wider = 0;
         for spec in STELLAR_LAYERS {
             let (layer, largest) = (spec.layer(), SolarMasses::new(spec.band().hi()));
             for years in [-1_000, -100, 100, 1_000] {
                 let t = UniverseTime::from_julian_years(years).unwrap();
-                let straight = search_sphere(&held, &ship, t, layer, largest).unwrap();
-                let curved = search_sphere(&kepler, &ship, t, layer, largest).unwrap();
-                let radius = straight.radius();
-                let pad = kepler_pad_for(&held, layer, &ship, radius, t);
-                assert_eq!(
-                    straight,
-                    QuerySphere::new(ship, radius, t, pad_for(t, pad_speed(layer))).unwrap()
-                );
+                let curved = search_sphere(&galaxy, &ship, t, layer, largest).unwrap();
+                let radius = curved.radius();
+                let pad = kepler_pad_for(&galaxy, layer, &ship, radius, t);
                 assert_eq!(curved, QuerySphere::new(ship, radius, t, pad).unwrap());
                 // Never narrower: the Kepler pad is at least the straight lines'.
-                let (a, b) = (straight.padded_radius(), curved.padded_radius());
+                let straight = QuerySphere::new(ship, radius, t, pad_for(t, pad_speed(layer)));
+                let (a, b) = (straight.unwrap().padded_radius(), curved.padded_radius());
                 assert!(b.value() >= a.value(), "{layer:?} at {years} yr");
                 if b.value() > a.value() {
                     wider += 1;

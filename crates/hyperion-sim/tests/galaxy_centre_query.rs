@@ -1,8 +1,7 @@
 //! The range query at the galactic centre (plan 09, P09.T29): the centre's members as a source of
 //! the range query, padded by the radial plunge and scanned in full near the black hole, against a
 //! brute-force scan of the inner 2 ly; the full-scan radius at a century; the source merged into
-//! the query; the galaxy's held centre; and the pad P09.T28.b.b's Kepler-regime grid records will
-//! need.
+//! the query; the galaxy's held centre; and the pad P09.T28.b.b's Kepler-regime grid records need.
 //!
 //! The members are additions that nothing generated reads (P09.T37 registers the source), so
 //! these tests pin behaviour, not output.

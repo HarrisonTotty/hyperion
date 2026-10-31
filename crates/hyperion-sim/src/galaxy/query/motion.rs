@@ -13,8 +13,8 @@
 //! kinematic tables (without [`Galaxy::with_full_potential`]) has no velocities, and its systems
 //! keep their epoch positions at every `t`, as every system did before plan 08. No position at the
 //! epoch moves either way. From generator version 25 a grid system in the Kepler regime, near the
-//! black hole, follows its orbit instead, and the walks pad for it ([`kepler_pad_for`]); plan 09's
-//! P09.T28.b.b holds that below 25, where every system takes the straight line.
+//! black hole, follows its orbit instead, and the walks pad for it ([`kepler_pad_for`]; plan 09,
+//! P09.T28.b.b).
 //!
 //! The padding rests on one premise: every grid record of a layer moves below that layer's
 //! [`pad_speed`]. The range query, R06's sky census and plan 12's lensing walk all read it.
@@ -31,7 +31,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::CatalogueSystem;
 use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::kinematics::draw_velocity;
-use crate::galaxy::motion::{KeplerRegimeRules, SpeedBound, kepler_regime_position_at};
+use crate::galaxy::motion::{EpochState, SpeedBound, StateAt, position_velocity_at};
 use crate::galaxy::placement::{Existence, SystemOrigin, SystemRecord};
 use crate::id::Layer;
 use crate::time::UniverseTime;
@@ -149,10 +149,9 @@ pub fn pad_for(t: UniverseTime, speed: KilometresPerSecond) -> LightYears {
 /// applies to grid systems in the Kepler regime"), ly: at least [`pad_for`] at the layer's
 /// [`pad_speed`], and more where the sphere comes near the black hole.
 ///
-/// **The walks read it from version 25.** Below it every grid record moves in a straight line,
-/// which [`pad_for`] covers, and the range query's walk and the frame search pad by that; under the
-/// rules of plan 09's P09.T28.b.b, whose hold swaps the Kepler law into [`position_at`], they pad
-/// by this, so that the walk's reach follows the law in force (decision-galaxy-25-train §2.2).
+/// **The walks read it from generator version 25** (plan 09, P09.T28.b.b), when the Kepler law
+/// moves the regime's grid records in [`position_at`]: the range query's walk and the frame search
+/// pad by this, so that the walk's reach follows the law in force (decision-galaxy-25-train §2.2).
 /// Padding chooses cells and moves no hit by itself, but the census counts the walk's cells
 /// against its budget, so near the centre it can admit fewer layers (P09.T28.b.b as built).
 ///
@@ -299,12 +298,18 @@ pub fn epoch_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocit
 /// coordinate arithmetic, so it is exact in whole light-years and rounds only in the offset inside a
 /// light-year. At the epoch it is the epoch position itself, and the velocity is not drawn.
 ///
-/// From generator version 25 a grid system in the Kepler regime follows its orbit about the black
-/// hole instead ([`position_velocity_at`]; plan 09, P09.T28.b.b). That is held until then
-/// (`KEPLER_REGIME_VERSION`): below it every galaxy takes the straight line above for every
-/// system, bit for bit.
-///
-/// [`position_velocity_at`]: crate::galaxy::motion::position_velocity_at
+/// From generator version 25 a grid system follows its regime's law instead
+/// ([`position_velocity_at`]; plan 09, P09.T28.b.b): the straight line above outside the Kepler
+/// regime, bit for bit, and inside it its orbit about the black hole. A grid record the loss cone
+/// carves out is no system of the galaxy, which
+/// [`generate_cell`](crate::galaxy::placement::generate_cell) and
+/// [`resolve`](crate::galaxy::placement::resolve) never give; asked about one, made by hand, this
+/// gives its straight line rather than a position on an orbit it does not have. A feature
+/// member's, a centre member's or a global list member's record keeps its straight line: its own
+/// source moves it (the feature's members by their velocities, the centre's on their
+/// trajectories), and [`epoch_velocity`] panics for it in a galaxy with kinematic tables. A
+/// catalogue system is moved by its class, on the line its class breaks at its explosion (plan 09,
+/// P09.T33.a).
 ///
 /// # Panics
 ///
@@ -323,22 +328,31 @@ pub fn position_at(galaxy: &Galaxy, record: &SystemRecord, t: UniverseTime) -> G
     if t == UniverseTime::EPOCH {
         return *record.epoch_position();
     }
-    // A catalogue system moves as its class says, on a line broken at its explosion (plan 09,
-    // P09.T33.a).
-    if let SystemOrigin::CatalogueSystem(_) = record.origin() {
-        return system_of_record(galaxy, record).position_at(t);
-    }
-    match galaxy.rules().kepler_regime {
-        KeplerRegimeRules::Straight => drifted(record, epoch_velocity(galaxy, record), t),
-        KeplerRegimeRules::Kepler => kepler_regime_position_at(galaxy, record, t),
+    match record.origin() {
+        SystemOrigin::Grid(_) => {
+            let start = EpochState::of_grid_record(galaxy, record);
+            match position_velocity_at(galaxy, &start, t) {
+                StateAt::Exists(state) => *state.position(),
+                StateAt::NoSuchSystem => drifted(record, start.velocity(), t),
+            }
+        }
+        SystemOrigin::FeatureMember { .. }
+        | SystemOrigin::CentreMember { .. }
+        | SystemOrigin::GlobalListMember { .. } => {
+            drifted(record, epoch_velocity(galaxy, record), t)
+        }
+        // A catalogue system moves as its class says, on a line broken at its explosion, not a
+        // drift at its epoch velocity, which is the remnant's once it has exploded (plan 09,
+        // P09.T33.a).
+        SystemOrigin::CatalogueSystem(_) => system_of_record(galaxy, record).position_at(t),
     }
 }
 
-/// The pad a walk of `layer`'s cells about a sphere of `radius` at `centre` at `t` takes, ly: the
-/// straight lines' [`pad_for`] at the layer's [`pad_speed`], or, from generator version 25, the
-/// Kepler regime's [`kepler_pad_for`] (plan 09, P09.T28.b.b; held below it by
-/// `KEPLER_REGIME_VERSION`), so that the cells chosen hold every record [`position_at`] puts in
-/// the sphere at `t`. The range query's walk and the frame search pad by it.
+/// The pad a walk of `layer`'s cells about a sphere of `radius` at `centre` at `t` takes, ly: from
+/// generator version 25 the Kepler regime's [`kepler_pad_for`], at least the straight lines'
+/// [`pad_for`] at the layer's [`pad_speed`] (plan 09, P09.T28.b.b), so that the cells chosen hold
+/// every record [`position_at`] puts in the sphere at `t`. The range query's walk and the frame
+/// search pad by it.
 #[must_use]
 pub(crate) fn walk_pad(
     galaxy: &Galaxy,
@@ -347,10 +361,7 @@ pub(crate) fn walk_pad(
     radius: LightYears,
     t: UniverseTime,
 ) -> LightYears {
-    match galaxy.rules().kepler_regime {
-        KeplerRegimeRules::Straight => pad_for(t, pad_speed(layer)),
-        KeplerRegimeRules::Kepler => kepler_pad_for(galaxy, layer, centre, radius, t),
-    }
+    kepler_pad_for(galaxy, layer, centre, radius, t)
 }
 
 /// [`position_at`] with the velocity given: the straight line plan 08's drift follows, which the

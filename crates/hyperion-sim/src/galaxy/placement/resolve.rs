@@ -45,7 +45,7 @@ use crate::id::{DwarfCoreMemberId, StreamMemberId, SystemId, SystemIdKind};
 /// - [`ResolveSystemError::NoSuchSystem`] if the index is at or above the cell's
 ///   [`candidate_count`](super::candidate_count), or its candidate was thinned, or a catalogue
 ///   class claimed it, or, from generator version 25, its orbit passes inside the black hole's
-///   loss cone ([`CandidateOutcome::InLossCone`]; plan 09, P09.T28.b.b, held below it); for a
+///   loss cone ([`CandidateOutcome::InLossCone`]; plan 09, P09.T28.b.b); for a
 ///   feature member, if [`resolve_member`] finds none; for a catalogue system, if the class grid
 ///   names none ([`system_of`]: a class with no process, an index past its cell's count, a
 ///   candidate thinned or failing its class's test, a member its entry lacks).

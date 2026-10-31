@@ -43,20 +43,6 @@ fn kepler_galaxy() -> &'static Galaxy {
     })
 }
 
-/// The same fixture under the version's galaxy rules (24's: the straight regime), with its
-/// kinematic tables.
-fn straight_galaxy() -> &'static Galaxy {
-    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| {
-        Galaxy::from_params(
-            Seed::new(0x0e14_0029_0000_0002),
-            GalaxyParams::milky_way_like(),
-        )
-        .expect("the Milky Way fixture builds")
-        .with_full_potential()
-    })
-}
-
 fn au(x: f64) -> Metres {
     Metres::from(AstronomicalUnits::new(x))
 }
@@ -297,40 +283,6 @@ fn under_the_hold_every_context_is_version_24_s() {
     );
 }
 
-/// Under 24's galaxy rules, the straight regime, a grid system inside the black hole's influence
-/// radius keeps plan 02's radius at its epoch position bit for bit under the stripping too: it
-/// moves in a straight line, and only feature members move.
-#[test]
-fn under_the_straight_regime_no_grid_system_moves() {
-    let galaxy = straight_galaxy();
-    let edge = galaxy.centre_motion().influence_radius();
-    let centre = GalacticPosition::from_light_years([0.0, 0.0, 0.0]).unwrap();
-    let sphere = QuerySphere::new(centre, edge, UniverseTime::EPOCH, LightYears::ZERO).unwrap();
-    let mut cell = Vec::new();
-    let mut checked = 0;
-    for spec in STELLAR_LAYERS {
-        for key in cells_in_sphere(spec.layer(), &sphere) {
-            generate_cell(galaxy, key, &mut cell);
-            for record in cell
-                .iter()
-                .filter(|r| regime_of(galaxy, r) == Regime::Kepler)
-                .take(4)
-            {
-                let held = SystemContext::from_record(galaxy, record);
-                let stripped = with_stripping(StripRules::Stripped, || {
-                    SystemContext::from_record(galaxy, record)
-                });
-                assert_eq!(stripped, held);
-                checked += 1;
-            }
-            if checked >= 24 {
-                return;
-            }
-        }
-    }
-    assert!(checked > 0, "no grid system inside the influence radius");
-}
-
 // The encounter environment.
 
 /// A member reads its cluster's environment at its place, or from inside the core at the core's
@@ -489,10 +441,7 @@ fn a_hundredth_of_a_light_year_from_the_black_hole_keeps_nothing_beyond_2_7_au()
     let galaxy = kepler_galaxy();
     let state = circular_state(galaxy, 0.01);
     let m = SolarMasses::new(1.0);
-    let plan_02 = galaxy
-        .potential()
-        .tidal_radius(m, &PointLy::new(0.01, 0.0, 0.0));
-    let sphere = galactic_radius(galaxy, plan_02, || state, m);
+    let sphere = tidal_radius(galaxy, &state, m);
     assert!((in_au(sphere) - 2.7).abs() < 0.05, "{} au", in_au(sphere));
     let mut checked = 0;
     with_every_26_hold(|| {

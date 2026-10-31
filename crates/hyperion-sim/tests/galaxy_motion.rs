@@ -3,9 +3,9 @@
 //!
 //! The propagator is, with the Eddington inversion, the piece of the centre most exposed to a
 //! platform difference (plan 09, "Verification"), so its states are pinned as bits and checked on
-//! every CI target, x86-64, `AArch64` and wasm32. Nothing generated reads it until P09.T28.b.b
-//! wires it into the drift hook: these goldens pin the propagator alone and today's positions near
-//! the centre, and move no system.
+//! every CI target, x86-64, `AArch64` and wasm32. From generator version 25 the drift hook reads
+//! it (P09.T28.b.b), so the pre-pin's positions near the centre are its orbits'; the other goldens
+//! pin the propagator alone.
 
 use std::sync::OnceLock;
 
@@ -780,19 +780,20 @@ fn pre_pin_radius(galaxy: &Galaxy, layer: Layer) -> f64 {
 /// How many records nearest the black hole each layer lists in full.
 const LISTED: usize = 4;
 
-/// The pre-pin of decision-galaxy-25-train §1.5 (D1) for P09.T28.b.b's hold: for three galaxies,
-/// every grid record within 1.5 influence radii of the black hole (the substellar layers within
-/// [`pre_pin_radius`]), its regime, and today's [`position_at`] at ±100 yr and ±1,000 yr, which is
-/// ±H. Each layer is pinned by its count, its regimes and its positions as digests over the
-/// records in walk order, and its records nearest the black hole are listed in full. It is an
-/// extension at the version in force; P09.T28.b.b's hold must leave it unchanged.
+/// The pre-pin of decision-galaxy-25-train §1.5 (D1), P09.T28.b.b's: for three galaxies, every
+/// grid record within 1.5 influence radii of the black hole (the substellar layers within
+/// [`pre_pin_radius`]), its regime, and [`position_at`] at ±100 yr and ±1,000 yr, which is ±H.
+/// Each layer is pinned by its count, its regimes and its positions as digests over the records in
+/// walk order, and its records nearest the black hole are listed in full. From generator version
+/// 25 the Kepler regime's records follow their orbits, and those the loss cone carves out are not
+/// in the cells (P09.T28.b.b).
 ///
-/// It also checks that [`position_velocity_at`] gives each straight-regime record today's
-/// [`position_at`] to the bit, and reports what the Kepler arm would move, for P09.T28.b.b's
-/// census.
+/// It also checks that [`position_at`] is [`position_velocity_at`]'s position to the bit, with the
+/// straight line's velocity outside the Kepler regime, and that no record in the cells is in the
+/// loss cone; and it reports how far the Kepler regime moves a record off its straight line.
 #[test]
 #[ignore = "slow: generates the grid's central cells of every layer for three galaxies, some \
-            minutes; P09.T28.b.b runs it by name at its hold"]
+            minutes"]
 fn regime_records_near_the_centre_are_pinned() {
     let mut writer = GoldenWriter::new();
     writer.header(GENERATOR_VERSION.get());
@@ -816,9 +817,9 @@ fn regime_records_near_the_centre_are_pinned() {
             pin_layer(&mut writer, &mut tally, galaxy, &label, layer);
         }
         println!(
-            "{label}: edge {edge:.3} ly, {} Kepler-regime records; the Kepler arm would carve out \
-             {} and move one by at most {:.4} ly",
-            tally.kepler, tally.carved, tally.largest
+            "{label}: edge {edge:.3} ly, {} Kepler-regime records; their orbits move one off its \
+             straight line by at most {:.4} ly",
+            tally.kepler, tally.largest
         );
     }
     golden!("galaxy/motion/regime", writer.as_str());
@@ -827,11 +828,11 @@ fn regime_records_near_the_centre_are_pinned() {
 /// The times of the pre-pin, Julian years from the epoch: ±100 and ±1,000, which is ±H.
 const PRE_PIN_TIMES: [i64; 4] = [-1_000, -100, 100, 1_000];
 
-/// What the Kepler arm would do to a galaxy's pre-pinned records, for P09.T28.b.b's census.
+/// How the Kepler regime moves a galaxy's pre-pinned records: how many are in it, and the farthest
+/// their orbits take one off its straight line, ly.
 #[derive(Default)]
 struct Tally {
     kepler: u64,
-    carved: u64,
     largest: f64,
 }
 
@@ -858,7 +859,7 @@ fn records_near(galaxy: &Galaxy, layer: Layer) -> (f64, Vec<SystemRecord>) {
 }
 
 /// One layer's lines of the pre-pin: its count, its regimes and its positions as digests, then
-/// its records nearest the black hole in full; and the Kepler arm's moves, into `tally`.
+/// its records nearest the black hole in full; and the Kepler regime's moves, into `tally`.
 fn pin_layer(
     writer: &mut GoldenWriter,
     tally: &mut Tally,
@@ -909,9 +910,9 @@ fn pin_layer(
     pin_nearest(writer, galaxy, label, &near);
 }
 
-/// One record's positions at the pre-pin's times, into `values`; and, for P09.T28.b.b's census,
-/// the Kepler arm's verdict and move, into `tally`, with the straight arm held to today's
-/// [`position_at`] to the bit.
+/// One record's positions at the pre-pin's times, into `values`; and the Kepler regime's move off
+/// the straight line, into `tally`, with [`position_at`] held to [`position_velocity_at`]'s state
+/// to the bit.
 fn tally_record(
     tally: &mut Tally,
     galaxy: &Galaxy,
@@ -920,30 +921,36 @@ fn tally_record(
     values: &mut [Vec<f64>; 4],
 ) {
     let start = EpochState::of_grid_record(galaxy, record);
-    let verdict = loss_cone_verdict(galaxy, &start);
-    if verdict == LossConeVerdict::Inside {
-        tally.carved += 1;
-    }
+    assert_eq!(
+        loss_cone_verdict(galaxy, &start),
+        LossConeVerdict::Clear,
+        "{record:?} in the loss cone was placed"
+    );
     for (slot, t) in values.iter_mut().zip(PRE_PIN_TIMES) {
         let at = position_at(galaxy, record, years(t));
         slot.extend(at.cell().to_array().map(f64::from));
         slot.extend(at.offset_metres());
-        match (regime, position_velocity_at(galaxy, &start, years(t))) {
-            (Regime::Straight, StateAt::Exists(state)) => assert_same_state(
-                (*state.position(), state.velocity()),
-                (at, start.velocity()),
-            ),
-            (Regime::Kepler, StateAt::Exists(state)) => {
-                tally.largest = tally.largest.max(apart(state.position(), &at));
-            }
-            (Regime::Kepler, StateAt::NoSuchSystem) => {
-                assert_eq!(verdict, LossConeVerdict::Inside);
-            }
-            (Regime::Straight, StateAt::NoSuchSystem) => {
-                panic!("{record:?} outside the regime was carved out");
+        let (position, velocity) = state(galaxy, &start, years(t));
+        match regime {
+            Regime::Straight => assert_same_state((position, velocity), (at, start.velocity())),
+            Regime::Kepler => {
+                assert_same_state((position, velocity), (at, velocity));
+                let straight = straight_line(&start, years(t));
+                tally.largest = tally.largest.max(apart(&straight, &at));
             }
         }
     }
+}
+
+/// Where `start` is at `t` on its straight line: its epoch position plus its drift at its epoch
+/// velocity, the line plan 08's drift follows outside the Kepler regime.
+fn straight_line(start: &EpochState, t: UniverseTime) -> GalacticPosition {
+    let elapsed = Seconds::new(t.since_epoch().as_seconds_f64());
+    start
+        .record()
+        .epoch_position()
+        .translated(start.velocity().displacement_over(elapsed))
+        .expect("a grid speed under 3,000 km/s moves a position by at most 10.01 ly over ±H")
 }
 
 /// The [`LISTED`] records of `near` nearest the black hole, in full.

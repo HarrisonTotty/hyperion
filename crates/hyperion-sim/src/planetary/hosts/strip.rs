@@ -21,10 +21,7 @@
 //!
 //! - **A grid system** takes [`tidal_radius`] of its epoch state
 //!   ([`EpochState::of_grid_record`]): in the central black hole's Kepler regime, the tidal radius
-//!   at its orbit's pericentre (P09.T28.c), and plan 02's at its epoch position elsewhere. Under
-//!   the galaxy's held straight regime (`KEPLER_REGIME_VERSION`'s `Straight` arm) a grid system
-//!   moves in a straight line, so it keeps plan 02's radius at its epoch position, bit for bit, and
-//!   the galaxy's centre motion is not read.
+//!   at its orbit's pericentre (P09.T28.c), and plan 02's at its epoch position elsewhere.
 //! - **A feature member** takes the smaller of that, on its cluster's orbit (the cluster's bulk
 //!   velocity; lean, 2026-10-31), and its cluster's tidal radius at its place
 //!   ([`cluster_tidal_radius`]), at the system's mass.
@@ -78,8 +75,8 @@ use crate::galaxy::features::catalogue::FeatureCatalogue;
 use crate::galaxy::features::members::{
     FeatureInterior, FeatureInteriorCache, cluster_tidal_radius, local_offset,
 };
+use crate::galaxy::motion::EpochState;
 use crate::galaxy::motion::tidal::tidal_radius;
-use crate::galaxy::motion::{EpochState, KeplerRegimeRules};
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::SystemIdKind;
@@ -291,10 +288,9 @@ impl Surroundings {
             StripRules::Held => here,
             StripRules::Stripped => match record.origin() {
                 SystemOrigin::Grid(_) => Self {
-                    sphere_of_influence: galactic_radius(
+                    sphere_of_influence: tidal_radius(
                         galaxy,
-                        here.sphere_of_influence,
-                        || EpochState::of_grid_record(galaxy, record),
+                        &EpochState::of_grid_record(galaxy, record),
                         mass,
                     ),
                     encounter_environment: None,
@@ -308,7 +304,7 @@ impl Surroundings {
                     let interior = interiors
                         .interior(galaxy, &feature)
                         .expect("a feature that placed a member has an interior");
-                    member_surroundings(galaxy, &interior, record, here, mass)
+                    member_surroundings(galaxy, &interior, record, mass)
                 }
                 SystemOrigin::CatalogueSystem(_)
                 | SystemOrigin::CentreMember { .. }
@@ -318,40 +314,20 @@ impl Surroundings {
     }
 }
 
-/// The galactic part of a sphere of influence of mass `mass`: [`tidal_radius`] of the epoch state
-/// `state` gives under the Kepler regime's rules, and `straight`, plan 02's radius at its epoch
-/// position, under the held straight regime, whose systems move in straight lines.
-#[must_use]
-fn galactic_radius(
-    galaxy: &Galaxy,
-    straight: Metres,
-    state: impl FnOnce() -> EpochState,
-    mass: SolarMasses,
-) -> Metres {
-    match galaxy.rules().kepler_regime {
-        KeplerRegimeRules::Straight => straight,
-        KeplerRegimeRules::Kepler => tidal_radius(galaxy, &state(), mass),
-    }
-}
-
 /// A feature member's surroundings, from its feature's `interior`: the smaller of its galactic
 /// radius on its cluster's orbit and its cluster's, and its cluster's encounter environment at its
-/// place, or at its core's edge from inside it (module documentation); `here` is plan 02's.
+/// place, or at its core's edge from inside it (module documentation).
 #[must_use]
 fn member_surroundings(
     galaxy: &Galaxy,
     interior: &FeatureInterior,
     record: &SystemRecord,
-    here: Surroundings,
     mass: SolarMasses,
 ) -> Surroundings {
-    let galactic = galactic_radius(
+    let galactic = tidal_radius(
         galaxy,
-        here.sphere_of_influence,
-        || {
-            EpochState::new(*record, interior.bulk_velocity())
-                .expect("a cluster's bulk velocity is finite and below light's")
-        },
+        &EpochState::new(*record, interior.bulk_velocity())
+            .expect("a cluster's bulk velocity is finite and below light's"),
         mass,
     );
     let local = local_offset(interior.feature().position(), record.epoch_position());

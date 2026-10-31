@@ -1297,8 +1297,8 @@ fn deep_decks_at_25(
 /// the molten decks' hold that are topped above 10 bar, by row, with their τ, tops and bases under
 /// 25's rules and any still without one; every deep deck's τ above 1 bar under 25's ("TO MAIN" at
 /// 1 or more); and the fixture's hot Jupiter's τ above its photosphere, by deck, both ways. The
-/// galaxy-side hold at 25 (`KEPLER_REGIME_VERSION`) moves only the central 10 ly, which no census
-/// set reaches.
+/// Kepler regime, on the record from generator version 25 (P09.T28.b.b), moves only the central
+/// 10 ly, which no census set reaches.
 #[test]
 #[ignore = "slow: count (x) over 102 systems, held and molten"]
 #[expect(
