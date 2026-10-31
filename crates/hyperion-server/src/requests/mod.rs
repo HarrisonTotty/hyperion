@@ -1422,6 +1422,15 @@ mod tests {
                 universe: UniverseIdHex::from_u64(42),
                 time: UniverseTime::default(),
             }),
+            RequestBody::AlertsObserver(AlertsObserverRequest {
+                subscription: 1,
+                observer: GalacticPosition::default(),
+                time: UniverseTime::default(),
+            }),
+            RequestBody::AlertsAcknowledge(AlertsAcknowledgeRequest {
+                subscription: 1,
+                contact: 1,
+            }),
         ]
     }
 
@@ -1589,7 +1598,8 @@ mod tests {
     async fn kinds_without_a_handler_are_answered_unsupported() {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
         // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
-        // kinds the connection routes, `scene_cameras` until R03.T8 serves it, R06's `sky`
+        // kinds the connection routes, `scene_cameras` until R03.T8 serves it, and plan 12's
+        // `alerts_observer` and `alerts_acknowledge`, routed the same way (P12.T9.a), R06's `sky`
         // while its switch is off (R06.T11.c), as this test turns it: it is on by default since
         // rendering plan R13's R13.T2. Plan 09's four kinds are served since P09.T40.b.
         let harness = Harness::start_configured(Handlers, ConnectionLimits::default(), |config| {
@@ -1605,11 +1615,13 @@ mod tests {
                         | RequestBody::Subscribe(_)
                         | RequestBody::Unsubscribe(_)
                         | RequestBody::SceneCameras(_)
+                        | RequestBody::AlertsObserver(_)
+                        | RequestBody::AlertsAcknowledge(_)
                         | RequestBody::Sky(_)
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 7);
         for body in events {
             let name = kind(&body);
             let answer = Handlers
