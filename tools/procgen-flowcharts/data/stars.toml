@@ -1037,7 +1037,7 @@ detail = [
   "  and classes V to Ia",
 ]
 cite = ["Pecaut and Mamajek 2013", "Straizys and Kuriliene 1981"]
-source = ["crates/hyperion-sim/src/stellar/classify/pm13.rs", "crates/hyperion-sim/src/stellar/classify/sk81.rs", "P06.T23.a", "P06.T23.b"]
+source = ["crates/hyperion-sim/src/stellar/classify/pm13.rs", "crates/hyperion-sim/src/tables/class_boundaries.rs", "P06.T23.a", "P06.T23.b"]
 status = "built"
 
 [[node]]
