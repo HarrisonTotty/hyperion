@@ -442,11 +442,21 @@ pub fn sphere_of_influence(
         .tidal_radius(m, &PointLy::from(position))
         .value();
     let local = local_offset(feature.position(), position);
+    Metres::new(galactic.min(cluster_tidal_radius(model, &local, m).value()))
+}
+
+/// The Hill radius of a system of mass `m` at `local` (ly from its cluster's centre) about the
+/// mass of the cluster's Plummer sphere inside it, `r (m ÷ 3M(<r))^(1/3)` =
+/// `(m (r² + a²)^(3/2) ÷ 3M)^(1/3)`, m: P09.T10's rule, the cluster's term of
+/// [`sphere_of_influence`], which plan 14's strip radius reads at the system's own mass
+/// (P14.T29).
+#[must_use]
+pub fn cluster_tidal_radius(model: &ClusterModel, local: &PointLy, m: SolarMasses) -> Metres {
     let r2 = local.x * local.x + local.y * local.y + local.z * local.z;
     let a = model.plummer_scale();
     let cluster_ly =
         math::cbrt(m.value() * math::powf(r2 + a * a, 1.5) / (3.0 * model.mass().value()));
-    Metres::new(galactic.min(cluster_ly * METRES_PER_LIGHT_YEAR))
+    Metres::new(cluster_ly * METRES_PER_LIGHT_YEAR)
 }
 
 #[cfg(test)]

@@ -3292,6 +3292,7 @@ and T21.d as the halo's bound, and is asserted again after placement.
   of a globular core of 10⁴ systems per cubic light-year keeps nothing beyond a few au; a field star
   at 26,000 ly is unaffected inside 10⁴ au.
 - _Accept:_ `cargo test -p hyperion-sim planetary::hosts::strip`.
+- _Built_ 2026-10-31, held at 26 (`STRIP_VERSION`): Risks, "Deviations in P14.T29, as built".
 
 ### Phase G: events and assembly
 
@@ -33215,3 +33216,50 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - For 26's bump: the tripwire's list; re-bless `planetary/systems` (solar_like's .0400;
     close_binary's .0700, .0800, .e401 and .e501); pin the cap's bits in
     `the_published_surface_conditions_are_pinned`.
+- **Deviations in P14.T29, as built (2026-10-31).** Held at 26: `hosts::strip::STRIP_VERSION`,
+  `StripRules::{Held, Stripped}`, the tests' `with_stripping` (a line in `with_every_26_hold`) and
+  the tripwire `the_stripping_is_held_only_until_the_26_bump`. Under `Held` every context is 24's
+  bit for bit, and no golden moves.
+  - _Names._ `hosts::strip::encounter_radius` and the crate's `strip_radius`, which
+    `SystemContext::strip_radius` calls. `Surroundings::of_record` (crate) fills `from_stars`' sphere of influence and
+    environment. New: `SystemContext::from_stars_with(galaxy, &dyn FeatureInteriorCache, stars)`
+    and `members::cluster_tidal_radius`, split from `sphere_of_influence` with its bits unchanged.
+    `generate_planets` debug-asserts every planet's apoapsis inside the strip radius.
+  - _The rate (lean, 2026-10-31)._ The plan's cross-section averaged over a Maxwellian of
+    relative speeds, `Γ = 4√π n σ a² (1 + G M ÷ (2σ² a))` (Binney and Tremaine 2008, §7.5.7),
+    where M is the system's mass plus the mean member's. It is one encounter within a (b = a).
+    Adams and Laughlin 2001 and Spurzem et al. 2009, the plan's calibration, were not read (no
+    journal access), so no calibrating factor is applied. The plan's form, with σ as the speed,
+    cuts at 0.56× this where focusing dominates and 1.5× where it does not.
+  - _Inside the core (lean, 2026-10-31)._ A member inside `ClusterModel::profile_core_radius`
+    reads n, m̄ and σ at the core's edge, on its line from the centre: a stand-in for the orbit
+    average. At its epoch place, a member 0.008 ly from the cusp of a 30 M☉ core-collapsed open
+    cluster read n = 2,400 ly⁻³ and was cut to 0.06 au.
+  - _`from_stars`' contract (lean, 2026-10-31)._ Both paths derive the surroundings from the
+    record's origin. `from_stars` builds a member's interior afresh (14–17 ms, under 26 only),
+    `from_stars_with` takes the caller's, and `from_record` builds one for the stars and the
+    surroundings both, as does `for_system`. P14.T27.a's `for_stars` goes through
+    `from_stars_with` with no cache.
+  - _Origins (lean, 2026-10-31)._
+    - A grid record takes `tidal_radius(EpochState::of_grid_record)` under the galaxy's
+      `KeplerRegimeRules::Kepler`, and plan 02's radius under `Straight`. `tidal_radius` reads no
+      rules, so this gate keeps 24's `GalaxyRules` on plan 02's radius bit for bit.
+    - A member takes the smaller of that (on its cluster's bulk velocity) and
+      `cluster_tidal_radius` at the system's mass. Its n and m̄ come from
+      `MemberClassTable::{density, mean_member_mass}` at its place, its σ from
+      `ClusterModel::sigma(r)`.
+    - P09.T33.a's catalogue systems keep plan 02's radius and no environment. So do centre and
+      global-list members, though no context reaches them yet (`stars_of` refuses them). The task
+      that gives a centre member its system stage gives it `EpochState::of_centre_member`'s
+      pericentre and the nuclear cluster's environment.
+    - A free-floating brown dwarf (P14.T27.a) is a layer-F grid record, so it takes the grid rule
+      at its own mass, with no strip radius of its own.
+  - _Left as is._ `present_halo_bounds` scales the strip radius by the cube root of the mass
+    kept, which is the tidal cut's law and not the encounter cut's.
+  - _Accept, as built:_ also `the_movers_are_counted` with `-- --ignored`.
+  - _For 26's bump:_ the tripwire's list, with the galaxy README's plan-14 relaxation row ("no
+    pericentre stripping within about 10 ly of the centre") marked removed by P09.T28.c and P14.T29.
+    Re-check King 1962 and Webb et al. 2013 at source first, as P09.T28.c's record asks; this
+    task could not. At 26 every member's and every Kepler-regime grid system's strip radius moves,
+    and some 5% of the latter's bodies move. The sim's golden systems, from a galaxy with no
+    kinematic tables, are neither. The server's goldens were not run under the 26 arm.

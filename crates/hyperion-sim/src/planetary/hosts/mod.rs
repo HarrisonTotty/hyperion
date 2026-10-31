@@ -6,10 +6,13 @@
 //!   a supernova leaves of an orbit (design note 11, P14.T28.b and c).
 //! - [`substellar`]: a free-floating brown dwarf's planets (design note 13, P14.T27.a), behind
 //!   their hold at generator version 26.
+//! - [`strip`]: the radius beyond which a system keeps nothing, its tidal and encounter cuts
+//!   (design note 14, P14.T29).
 //!
-//! [`fate`](crate::planetary::fate) strings them together into a body's state at a time. The
-//! rogue planets of P14.T27.b and the stripping of P14.T29 will join them here.
+//! [`fate`](crate::planetary::fate) strings the first two together into a body's state at a time.
+//! The rogue planets of P14.T27.b will join them here.
 
 pub mod evolved;
+pub mod strip;
 pub mod substellar;
 pub mod young;

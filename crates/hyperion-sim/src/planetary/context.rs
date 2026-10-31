@@ -31,10 +31,12 @@
 //!   ultraviolet history is P14.T1.a's closed form too ([`XuvHistory`]).
 //! - **The sphere of influence** is the galactic tidal radius alone,
 //!   [`PotentialTables::tidal_radius`](crate::galaxy::potential::PotentialTables::tidal_radius) of
-//!   the system's mass at its epoch position. Plan 09's rule, the smaller of that and a feature's,
-//!   with the pericentre rule of P09.T28.c in the central black hole's Kepler regime, changes it
-//!   only for feature members and for systems within about 10 ly of the centre.
-//! - **The encounter environment** is `None`: only plan 09's feature members have one.
+//!   the system's mass at its epoch position, until P14.T29's hold lifts at generator version 26
+//!   ([`strip`]). Under it a grid system takes the pericentre rule of P09.T28.c in the central
+//!   black hole's Kepler regime, and a feature member the smaller of that and its cluster's
+//!   radius.
+//! - **The encounter environment** is `None` until the same hold lifts; under it a feature member
+//!   takes its cluster's at its place.
 //! - **Every host is [`HostKind::Stellar`]** below generator version 26: plan 13 places the
 //!   free-floating brown dwarfs and rogue planets, and P14.T27.a gives a brown dwarf its context
 //!   from 26 ([`hosts::substellar`](super::hosts::substellar), behind its hold), as
@@ -43,17 +45,19 @@
 use std::error::Error;
 use std::fmt;
 
+use super::hosts::strip::{self, Surroundings};
 use super::hosts::substellar as substellar_hosts;
-use super::params::SATELLITE_STABILITY_FRACTION;
 use super::placement::{OrbitZone, ZoneHierarchy, ZoneStar, stable_zones};
 use crate::Seed;
 use crate::galaxy::catalogue_classes::{CatalogueSystem, system_of};
-use crate::galaxy::features::members::{MemberRecord, NoInteriorCache, resolve_member};
+use crate::galaxy::features::members::{
+    FeatureInteriorCache, KeepInteriors, MemberRecord, NoInteriorCache, resolve_member,
+};
 use crate::galaxy::imf::MASS_LIMIT_LO;
 use crate::galaxy::placement::{
     Existence, ResolveSystemError, SystemOrigin, SystemRecord, resolve,
 };
-use crate::galaxy::{Galaxy, PointLy, Population};
+use crate::galaxy::{Galaxy, Population};
 use crate::id::{SystemId, SystemIdKind};
 use crate::math;
 use crate::observe::stars_of;
@@ -464,9 +468,10 @@ pub enum HostKind {
 /// The encounter environment of a feature member: what sets the second cut of design note 14,
 /// where the time to a disrupting encounter equals the system's age (P14.T29).
 ///
-/// Plan 09 supplies it from the feature's class profiles at the member's place; until then no
-/// system has one. The three quantities are those of T29's cross-section,
-/// 1 ÷ (n π a² (1 + 2 G M ÷ (a σ²)) σ).
+/// A feature member's is its cluster's at its place, from the feature's class profiles and its
+/// cluster's dispersion, once P14.T29's hold lifts at generator version 26 ([`strip`]); until then
+/// no real system has one. The three quantities are those of T29's rate
+/// ([`encounter_radius`](super::hosts::strip::encounter_radius)).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EncounterEnvironment {
     number_density: PerCubicLightYear,
@@ -513,7 +518,8 @@ impl EncounterEnvironment {
     }
 
     /// Their one-dimensional velocity dispersion, km s⁻¹, as the feature's profiles give it; the
-    /// relative speed of an encounter is P14.T29's to form from it.
+    /// encounters' relative speeds are a Maxwellian of it
+    /// ([`encounter_radius`](super::hosts::strip::encounter_radius)).
     #[must_use]
     pub const fn velocity_dispersion(&self) -> KilometresPerSecond {
         self.velocity_dispersion
@@ -627,11 +633,12 @@ impl SystemContext {
     /// P14.T27.a gives it a [`HostKind::BrownDwarf`] context.
     pub fn for_system(galaxy: &Galaxy, id: SystemId) -> Result<Self, ResolveSystemError> {
         // A feature member is resolved once, here, rather than through `resolve` and again for
-        // its stars: its interior is the costly part. So is a catalogue class's system, whose
-        // stars are its class's (plan 09, P09.T33.a).
+        // its stars: its interior is the costly part, and is kept for its surroundings too. So
+        // is a catalogue class's system, whose stars are its class's (plan 09, P09.T33.a).
+        let interiors = KeepInteriors::new(galaxy);
         let resolved = match id.kind() {
             SystemIdKind::FeatureMember(member) => {
-                Resolved::Member(resolve_member(galaxy, &NoInteriorCache, member)?)
+                Resolved::Member(resolve_member(galaxy, &interiors, member)?)
             }
             SystemIdKind::Catalogue(system) => Resolved::Catalogue(system_of(galaxy, system)?),
             SystemIdKind::Grid(_)
@@ -653,7 +660,7 @@ impl SystemContext {
                 .ok_or(ResolveSystemError::KindNotGenerated)?,
             Resolved::Placed(record) => SystemStars::generate(galaxy, &record),
         };
-        Ok(Self::from_stars(galaxy, &stars))
+        Ok(Self::from_stars_with(galaxy, &interiors, &stars))
     }
 
     /// The context of the system whose stars `stars` are, refused as
@@ -669,7 +676,7 @@ impl SystemContext {
     /// free-floating brown dwarf below generator version 26 (P14.T27.a).
     pub fn for_stars(galaxy: &Galaxy, stars: &SystemStars) -> Result<Self, ResolveSystemError> {
         refuse_ungenerated(stars.record())?;
-        Ok(Self::from_stars(galaxy, stars))
+        Ok(Self::from_stars_with(galaxy, &NoInteriorCache, stars))
     }
 
     /// The context of the system `record` of `galaxy`, for a caller that holds the record already
@@ -680,8 +687,9 @@ impl SystemContext {
     ///   [`draw_metallicity`](crate::stellar::system::draw_metallicity) of the record, and for a
     ///   catalogue feature's member its
     ///   [`MemberRecord::stars`](crate::galaxy::features::members::MemberRecord::stars), at its
-    ///   cluster's composition (its feature's interior is built again: a caller that has the
-    ///   member's stars already passes them to [`from_stars`](Self::from_stars)).
+    ///   cluster's composition (its feature's interior is built again, once for its stars and
+    ///   its surroundings: a caller that has the member's stars already passes them to
+    ///   [`from_stars`](Self::from_stars)).
     /// - The hierarchy is [`SystemStars`]' own, the one
     ///   [`draw_hierarchy`](crate::stellar::multiplicity::draw_hierarchy) draws for a grid system
     ///   under [`MultiplicityContext::Free`](crate::stellar::multiplicity::MultiplicityContext::Free)
@@ -690,11 +698,13 @@ impl SystemContext {
     /// - The sphere of influence is plan 02's
     ///   [`tidal_radius`](crate::galaxy::potential::PotentialTables::tidal_radius) of the
     ///   hierarchy's [`system_mass`](SystemHierarchy::system_mass) at the record's epoch position,
-    ///   zero for a system at the galactic centre itself.
+    ///   zero for a system at the galactic centre itself, and the encounter environment `None`;
+    ///   from P14.T29's hold at generator version 26, plan 09's rule and a feature member's
+    ///   cluster's ([`strip`]).
     /// - The age at the epoch is the record's, [\[α/Fe\]](Self::alpha_fe) the closed form of the
-    ///   composition's \[Fe/H\] and the record's population, the encounter environment `None`, and
-    ///   the host [`HostKind::Stellar`], or from generator version 26 [`HostKind::BrownDwarf`] for
-    ///   a free-floating brown dwarf (P14.T27.a).
+    ///   composition's \[Fe/H\] and the record's population, and the host [`HostKind::Stellar`],
+    ///   or from generator version 26 [`HostKind::BrownDwarf`] for a free-floating brown dwarf
+    ///   (P14.T27.a).
     ///
     /// # Panics
     ///
@@ -704,13 +714,15 @@ impl SystemContext {
     /// which [`for_system`](Self::for_system) answers with `KindNotGenerated`.
     #[must_use]
     pub fn from_record(galaxy: &Galaxy, record: &SystemRecord) -> Self {
-        let stars = stars_of(galaxy, &NoInteriorCache, record).unwrap_or_else(|error| {
+        // A feature member's interior is built once, for its stars and its surroundings both.
+        let interiors = KeepInteriors::new(galaxy);
+        let stars = stars_of(galaxy, &interiors, record).unwrap_or_else(|error| {
             panic!(
                 "{:?} has no stars of the stellar stage's: {error}",
                 record.id()
             )
         });
-        Self::from_stars(galaxy, &stars)
+        Self::from_stars_with(galaxy, &interiors, &stars)
     }
 
     /// The context of the system whose stars `stars` are, for a caller that holds them
@@ -719,15 +731,33 @@ impl SystemContext {
     ///
     /// The models are copied with their built tracks, so nothing is evolved twice, and the
     /// context equals `from_record(galaxy, stars.record())` exactly. `stars` must be of `galaxy`,
-    /// whose potential gives the sphere of influence.
+    /// whose potential gives the sphere of influence. A feature member's surroundings read its
+    /// feature's interior, which this builds afresh from P14.T29's hold at generator version 26
+    /// (14–17 ms); a caller that keeps interiors passes them to
+    /// [`from_stars_with`](Self::from_stars_with).
     #[must_use]
     pub fn from_stars(galaxy: &Galaxy, stars: &SystemStars) -> Self {
+        Self::from_stars_with(galaxy, &NoInteriorCache, stars)
+    }
+
+    /// [`from_stars`](Self::from_stars), with a feature member's interior from `interiors`: the
+    /// same context, whichever cache lends it, since a cache lends each interior exactly as it is
+    /// built.
+    ///
+    /// # Panics
+    ///
+    /// From P14.T29's hold at generator version 26, as [`stars_of`] does, for a feature member's
+    /// stars that are not of `galaxy`.
+    #[must_use]
+    pub fn from_stars_with(
+        galaxy: &Galaxy,
+        interiors: &dyn FeatureInteriorCache,
+        stars: &SystemStars,
+    ) -> Self {
         let record = stars.record();
         let hierarchy = stars.hierarchy().clone();
-        let tidal_radius = galaxy.potential().tidal_radius(
-            hierarchy.system_mass(),
-            &PointLy::from(record.epoch_position()),
-        );
+        let surroundings =
+            Surroundings::of_record(galaxy, interiors, record, hierarchy.system_mass());
         Self {
             id: record.id(),
             host_kind: substellar_hosts::host_kind(record.kind()),
@@ -741,8 +771,8 @@ impl SystemContext {
                 record.population(),
             )),
             age_at_epoch: record.age_at_epoch(),
-            tidal_radius,
-            encounter_environment: None,
+            tidal_radius: surroundings.sphere_of_influence,
+            encounter_environment: surroundings.encounter_environment,
         }
     }
 
@@ -917,28 +947,29 @@ impl SystemContext {
         }
     }
 
-    /// The system's sphere of influence, m: the galactic tidal radius of its mass at its epoch
-    /// position for a real system, and until plan 09 for every system (module documentation).
+    /// The system's sphere of influence, m: for a real system the galactic tidal radius of its
+    /// mass at its epoch position, and from P14.T29's hold at generator version 26 plan 09's rule
+    /// (module documentation).
     #[must_use]
     pub const fn tidal_radius(&self) -> Metres {
         self.tidal_radius
     }
 
     /// The radius inside which the stage generates bodies, m: design note 14's
-    /// [`SATELLITE_STABILITY_FRACTION`] (0.4895) of the [`tidal_radius`](Self::tidal_radius).
+    /// [`SATELLITE_STABILITY_FRACTION`](super::params::SATELLITE_STABILITY_FRACTION) (0.4895) of
+    /// the [`tidal_radius`](Self::tidal_radius), and for a context with an
+    /// [`encounter_environment`](Self::encounter_environment) the smaller of that and its
+    /// encounter cut ([`strip`]).
     ///
-    /// P14.T29 adds here the encounter cut of a feature member, the smaller of this and the radius
-    /// at which a disrupting encounter is expected within the system's age, so that the stage has
-    /// one strip radius. Until then an [`encounter_environment`](Self::encounter_environment) a
-    /// synthetic host was given is carried but not applied; no real system of this generator
-    /// version has one.
+    /// The encounter cut is held until generator version 26 (P14.T29): until then an environment
+    /// a synthetic host was given is carried but not applied, and no real system has one.
     #[must_use]
     pub fn strip_radius(&self) -> Metres {
-        self.tidal_radius * SATELLITE_STABILITY_FRACTION
+        strip::strip_radius(self)
     }
 
-    /// The system's encounter environment: `None` except for a feature member, which plan 09
-    /// places, or a synthetic host given one.
+    /// The system's encounter environment: `None` except for a feature member from P14.T29's hold
+    /// at generator version 26, or a synthetic host given one.
     #[must_use]
     pub const fn encounter_environment(&self) -> Option<&EncounterEnvironment> {
         self.encounter_environment.as_ref()
@@ -1459,10 +1490,12 @@ mod tests {
 
     use super::*;
     use crate::coords::GalacticPosition;
+    use crate::galaxy::PointLy;
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::{CellKey, generate_cell};
     use crate::id::{BodyId, Layer};
     use crate::orbit::BuildOrbitError;
+    use crate::planetary::params::SATELLITE_STABILITY_FRACTION;
     use crate::planetary::placement::{OrbitHost, ZoneNode};
     use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt, draw_hierarchy};
     use crate::stellar::system::draw_metallicity;

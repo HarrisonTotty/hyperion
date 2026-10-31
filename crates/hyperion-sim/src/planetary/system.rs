@@ -1302,6 +1302,16 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         } else {
             let host = PlacementHost::new(zone.host_number(), *inputs.host(), plane);
             let placement = place(seed, id, &host, limits, &disc, drawn, slot);
+            // Design note 14, asserted again after placement: no planet's apoapsis passes the
+            // strip radius, which placement's eccentricity limit holds to its rounding.
+            debug_assert!(
+                placement
+                    .planets()
+                    .iter()
+                    .all(|planet| planet.orbit().apoapsis() <= strip * (1.0 + 1e-12)),
+                "a planet of {id:?} lies beyond its strip radius of {} m",
+                strip.value()
+            );
             slot = placement.next_slot();
             let circularisations =
                 host_circularisations(placement.planets(), zone.host_mass(), ctx.age_at_epoch());
