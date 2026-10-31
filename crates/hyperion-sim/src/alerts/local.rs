@@ -1103,10 +1103,11 @@ mod tests {
             record: &SystemRecord,
             f: impl FnOnce(&SystemStars) -> R,
         ) -> R {
-            f(self
-                .0
-                .entry(record.id())
-                .or_insert_with(|| stars_of(galaxy, &NoInteriorCache, record)))
+            f(self.0.entry(record.id()).or_insert_with(|| {
+                stars_of(galaxy, &NoInteriorCache, record).expect(
+                    "the observed query asks for no catalogue system's stars (`StarsCache`)",
+                )
+            }))
         }
     }
 
