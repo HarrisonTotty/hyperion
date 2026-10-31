@@ -46,6 +46,8 @@ pub mod local;
 pub mod oneshot;
 pub mod reach;
 pub mod registry;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub use light::{band_share, supernova_luminosity, supernova_peak};
 pub use local::{LocalEventsCache, local_events};

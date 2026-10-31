@@ -2760,3 +2760,28 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     while `AlertContext`'s gas source stays the same, which `local_events` cannot see, so they are
     not kept here. The state that thinning reads for each candidate flare has no exact shortcut:
     the phase comes from the track's model point, and the mass is interpolated, not monotone.
+- **P12.T8.a as built (lane `p12-t8a`, 2026-10-31, at `GENERATOR_VERSION` 24).** No generated
+  output moves. Files `crates/hyperion-server/src/alerts/{mod,schedule}.rs`; the sim's
+  `alerts::testing::detection` (behind `testing`) makes a `Detection` by hand for tests.
+  - _Types._ `alerts::{Subscription, AlertSchedule, Tracked, Crossing, Push, Advance, Rescan}`,
+    `ScanRequest`, `MergeScanError`, `ALERT_LOOKAHEAD`, `CROSSING_RESOLUTION` (1 ms) and
+    `GLITCH_CLEAR_AFTER`. `Subscription::new(observer, sensor, classes, host_limit)` returns the
+    first `ScanRequest`; `advance(next) -> Advance`, `query(&ScanRequest)` (the sim's
+    `AlertQuery`), `merge(&ScanRequest, tracks)`. The plan's core is
+    `AlertSchedule::advance(&previous, &next)`; `Advance::{due, rescan, into_parts}`, and
+    `Rescan::{Renew, Restart}` each hold a `ScanRequest`. `SubscriptionId`, `ScanKey`,
+    `AlertService` and `SubscribeError` wait for T8.b and T9.
+  - _The crossing rule._ `Tracked::of_light(detection, sensor, knots, light)` takes the flux at
+    the observer as a function of its time, monotone between `knots`, and finds
+    `Crossing::{Detect, Resolve, Clear}` by bisection. `Clear` is the last fall under `detect`, so
+    a light that dips and rises again stays listed (lean, 2026-10-31). `Tracked::of_unlit` serves
+    a row with no light: `Detect` at arrival, `Clear` 3.1 days later.
+  - _For T8.b._ A `Detection` carries no light curve, so the scan must give each one's light and
+    knots: a sim function per `LightCurveSource`, not built. A first or restarted scan must walk
+    back by the classes' longest rise to peak, a registry bound not built. Scans merge in the order
+    asked, each once, empty if one failed; one asked for before a jump or a backwards clock is
+    `MergeScanError::Stale`.
+  - _For T8.c._ `Crossing::level()` is the sighting's `KnowledgeLevel`, and `Clear` is no
+    sighting. `Push::flux` is the light at the crossing; a crossing before the schedule's start is
+    pushed at the start. The detection's `retardation()` is for its light first counted, not for
+    `Push::at`.

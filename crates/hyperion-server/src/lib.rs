@@ -4,12 +4,14 @@
 //! pool that runs generation off the async runtime and the caches of galaxies, maps, cells and
 //! systems ([`compute`]), the bodies' coarse surface fields ([`surface`]), the byte-bounded cache
 //! they are built on ([`cache`]), and the WebSocket clients speak `hyperion-protocol` over. What
-//! the crew has detected is in [`knowledge`]. Every limit it enforces is in [`limits`].
+//! the crew has detected is in [`knowledge`], and what a sensor is told of transients as their
+//! light arrives in [`alerts`]. Every limit it enforces is in [`limits`].
 //!
 //! [`Server::start`] builds the shared state from a [`ServerConfig`], [`Server::router`] serves
 //! it, [`Server::stats`] reports on it, and [`Server::shutdown`] is the explicit teardown once
 //! serving has stopped. What asks the process to stop, on each platform, is in [`stop`].
 
+pub mod alerts;
 pub(crate) mod bulk;
 pub mod cache;
 pub mod compute;
