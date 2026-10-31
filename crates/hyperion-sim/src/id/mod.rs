@@ -60,7 +60,7 @@
 //! | --------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 //! | `00` centre           | `[56:35]` | band `[34:32]`, level `[31:28]` (0–11), cell x `[27:23]`, y `[22:18]`, z `[17:13]` (0–31), index `[12:0]`; under band 7, zero `[31:16]` and index `[15:0]`  |
 //! | `01` stream           | `[56:54]` | number `[53:42]`, band `[41:39]` (0–6), along `[38:25]`, across a `[24:19]`, across b `[18:13]`, index `[12:0]`                                             |
-//! | `10` dwarf core       | `[56:33]` | number `[32:31]`, then band, level, cell and index exactly as a catalogue feature's, `[30:0]`                                                               |
+//! | `10` dwarf core       | `[56:44]` | index high `[43:33]`, number `[32:31]`, then band, level, cell and index as a catalogue feature's, `[30:0]`; under band 7, zero `[43:33]`                   |
 //!
 //! The centre's band 7 is its feature-level list, whose member 0 is the central black hole,
 //! `0xF000_0007_0000_0000` ([`CentreMemberId::CENTRAL_BLACK_HOLE`]). Its index is 16 bits,
@@ -181,14 +181,15 @@ pub(crate) mod testing {
             (0b1111 << 60) | (((1 << 18) - 1) << 13),
         ),
         // Prefix 10: the centre, in a cell and at feature level (a 16-bit index, `[31:16]`
-        // zero); a stream; a dwarf core, in a cell and at feature level. Padding fixed at zero.
+        // zero); a stream; a dwarf core, in a cell (a 24-bit index, `[43:33]` free) and at
+        // feature level (`[43:33]` zero). Padding fixed at zero.
         (0b111_1000 << 57, HEAD_7 | (((1 << 22) - 1) << 35)),
         (
             (0b111_1000 << 57) | (7 << 32),
             HEAD_7 | (((1 << 41) - 1) << 16),
         ),
         (0b111_1001 << 57, HEAD_7 | (0b111 << 54)),
-        (0b111_1010 << 57, HEAD_7 | (((1 << 24) - 1) << 33)),
+        (0b111_1010 << 57, HEAD_7 | (((1 << 13) - 1) << 44)),
         (
             (0b111_1010 << 57) | (7 << 28),
             HEAD_7 | (((1 << 24) - 1) << 33) | (((1 << 18) - 1) << 13),

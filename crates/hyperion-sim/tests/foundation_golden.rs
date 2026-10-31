@@ -230,6 +230,17 @@ fn member_lines(w: &mut GoldenWriter) {
             id_line(w, &format!("dwarf core {number} {slot:?}"), id.into());
         }
     }
+    // A dwarf core's index in a cell is 24 bits (P10.T7.b).
+    for index in [8_192, DwarfCoreMemberId::INDEX_LIMIT - 1] {
+        let slot = MemberSlot::InCell {
+            band: Layer::RoguePlanet,
+            level: 7,
+            cell: [15, 0, 15],
+            index,
+        };
+        let id = DwarfCoreMemberId::new(3, slot).unwrap();
+        id_line(w, &format!("dwarf core 3 {slot:?}"), id.into());
+    }
     w.line("");
     for slot in [
         MemberSlot::FeatureLevel { index: 0 },

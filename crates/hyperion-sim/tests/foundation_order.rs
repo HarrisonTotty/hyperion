@@ -28,7 +28,7 @@ fn slot(level: Option<u8>, band: Layer, cell: [u8; 3], index: u16) -> MemberSlot
             band,
             level,
             cell,
-            index,
+            index: u32::from(index),
         },
     }
 }

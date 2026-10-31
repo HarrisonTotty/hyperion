@@ -1991,11 +1991,11 @@ hyperion-sim --lib -- galaxy::global_list`, 35 passed. For P10.T4: no golden pin
     plus N(0, σ) on each axis with no escape cut (lean, 2026-10-30: a cut at the truncated
     isothermal halo's escape speed would take a quarter of the members at the extent, against the
     flat profile); multiplicity `Free`. The feature-level list is empty until P09.T33, T34 and T36.
-  - _Capacity (lean, 2026-10-30; a question for main)._ A core's fullest cell holds about 10⁻³ of
-    its systems whatever the grid's width, so cores above some 4 × 10⁶ M☉ overflow the 13-bit
-    index: 12 of the 252 cores of 64 drawn galaxies' dwarfs (as drawn, unscaled) peak at
-    8,343–55,616. `check_index_headroom` refuses them as a typed error, as the centre's check does;
-    whoever plays a core calls it first.
+  - _Capacity._ The in-cell index widened to 24 bits (research-leans-3; "P10.T7.b's core index
+    widened, as built"), in place of the lean of 2026-10-30 that refused cores past 13 bits. A
+    core's fullest cell holds about 10⁻³ of its systems whatever the grid's width;
+    `check_index_headroom` still guards the index as a typed error, and whoever plays a core calls
+    it first.
   - _For T8.a._ A dwarf's tube takes the core's history only to the tube's own stripping, not the
     stars the core forms after it (research-p10 §4).
   - _Research-p10's item 3, measured again._ Of the 252 drawn cores, 59 have their extent inside
@@ -2164,3 +2164,29 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     and `an_orphan_s_tube_holds_its_cluster_s_gap`, by `energy_arm()`, each stray's ψ found in its
     energy arm. Commands, `<file>` each of `global_list_spray` and `global_list_tube`:
     `cargo test -p hyperion-sim --features testing --profile slow-test --test <file> -- --ignored`.
+- **P10.T7.b's core index widened, as built (lane `p10-spray-arms`, 2026-10-31, at
+  `GENERATOR_VERSION` 24).** Research `research-leans-3` overturned T7.b's capacity lean (main,
+  2026-10-30): a refused core showed no members, and the refused cores are the most luminous
+  satellites. No version: nothing places core members yet (T9, T10.b), and no ID or count of a core
+  that passed moves. `dwarf_core_members.golden` is unchanged; `layouts.golden` gained two wide IDs
+  ("extended only") and `dwarf_core_index.golden` is new, both blessed by name.
+  - _Layout._ The dwarf-core sub-kind's `[43:33]` hold the in-cell index's high bits, above the
+    slot's `[12:0]`, for an index below `DwarfCoreMemberId::INDEX_LIMIT`, 2²⁴; `DWARF_PADDING` is
+    `[56:44]`. Band 7 keeps 13 bits, a high bit under it `PaddingBitsSet`. An extension, as
+    decision-p11-centre-index was: the wire and `PROTOCOL_VERSION` are unchanged.
+  - _Types._ `MemberSlot::InCell`'s `index` is `u32`; every other layout still refuses 8,192 or
+    more, and features and the centre keep `u16` counts. `DwarfCoreModel`'s `member_id`,
+    `candidate` and `candidate_count` take and give `u32`; `count_from_mean` clamps at 2²⁴ on the
+    same Poisson word. `SystemId::cell_word` zeroes a core's whole index. `parse_slot` takes named
+    limits from its caller (the `DWARF` arm 2²⁴); the formatter is unchanged.
+  - _The guard._ `check_index_headroom` stays, at 8σ against 2²⁴, and `resolve_with` still refuses
+    a core that fails it. Twice the fullest cell of plan 02's largest progenitor after the least
+    stripping (`RECENT_MASS`, `STRIPPING_FRACTION`), 1.14 × 10⁷, fits; the index overflows near
+    1.1 × 10¹⁰ M☉. Census and cost: the outbox.
+  - _Tests._ Fast: `id::global::tests::a_dwarf_core_s_index_in_a_cell_is_24_bits`,
+    `every_padding_bit_is_rejected`, `id::system::tests::cell_word_zeroes_the_index_and_equals_candidate_zero`,
+    `id::designation::tests::a_dwarf_core_s_cells_number_past_8191`, the `DwarfCoreMemberId`
+    doctest, and `dwarf_core::members::tests`'
+    `no_cell_of_a_core_under_the_headroom_expects_the_index` (restated, with the tripwire),
+    `the_fullest_cell_of_a_massive_core_resolves_past_8191` (every 97th member) and
+    `the_massive_core_s_members_past_8191_are_pinned`.

@@ -488,7 +488,7 @@ mod tests {
                 band: band.layer(),
                 level: 0,
                 cell: [8, 8, 8],
-                index,
+                index: u32::from(index),
             },
         )
         .unwrap()

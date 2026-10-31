@@ -435,7 +435,7 @@ impl<'a> CentrePlacement<'a> {
             band: band.layer(),
             level: cell.level(),
             cell: cell.cell(),
-            index,
+            index: u32::from(index),
         })
         .expect("an owned cell of the centre's grid and an index under 8,192 make an ID")
     }
@@ -816,6 +816,8 @@ pub fn resolve_centre_member_with(
                 placement.member_id(band, cell, 0),
                 proposal.expected(&local),
             );
+            // The centre's slot holds 13 bits, so a valid ID's index is a `u16`.
+            let index = u16::try_from(index).map_err(|_| ResolveSystemError::NoSuchSystem)?;
             if index >= count {
                 return Err(ResolveSystemError::NoSuchSystem);
             }

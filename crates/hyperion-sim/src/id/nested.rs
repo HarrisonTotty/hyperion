@@ -11,6 +11,10 @@
 //! | Band 7: zero         | `[27:13]`                     | `[31:16]`               |
 //! | Band 7: list index   | `[12:0]`, 8,192 entries       | `[15:0]`, 65,536        |
 //!
+//! A dwarf core's index in a cell takes 11 more bits above the slot, in its sub-kind's zero bits,
+//! `[43:33]` ([`DwarfCoreMemberId`](super::DwarfCoreMemberId), P10.T7.b): every other layout's
+//! index in a cell is the slot's 13 bits.
+//!
 //! Level j is a block of cells centred on the feature; its inner half on every axis is exactly
 //! level j − 1, which owns that volume. Mass band 7 marks a feature-level member, drawn on the
 //! feature's own stream and not in a cell. Its index counts the feature-level list from 0, and the
@@ -56,8 +60,10 @@ pub enum MemberSlot {
         /// The cell in the level, x, y, z: each 0–15, or 0–31 at the galactic centre. The
         /// feature's centre is the corner between cells `n ÷ 2 − 1` and `n ÷ 2`.
         cell: [u8; 3],
-        /// The candidate number in the cell and band, below [`MemberSlot::INDEX_LIMIT`].
-        index: u16,
+        /// The candidate number in the cell and band, below [`MemberSlot::INDEX_LIMIT`], 8,192, or
+        /// in a dwarf core below
+        /// [`DwarfCoreMemberId::INDEX_LIMIT`](super::DwarfCoreMemberId::INDEX_LIMIT), 2²⁴.
+        index: u32,
     },
     /// A member of the feature-level list (mass band 7): index 0 is member zero, such as a central
     /// black hole, and 1 upward are the feature's members of the catalogue classes.
@@ -74,7 +80,8 @@ impl MemberSlot {
     /// The exclusive bound of a slot's index: 8,192 candidates per cell and band, and 8,192
     /// members on a catalogue feature's or a dwarf core's feature-level list. The galactic
     /// centre's list has
-    /// [`CentreMemberId::LIST_INDEX_LIMIT`](super::CentreMemberId::LIST_INDEX_LIMIT).
+    /// [`CentreMemberId::LIST_INDEX_LIMIT`](super::CentreMemberId::LIST_INDEX_LIMIT), and a dwarf
+    /// core's cells [`DwarfCoreMemberId::INDEX_LIMIT`](super::DwarfCoreMemberId::INDEX_LIMIT).
     pub const INDEX_LIMIT: u16 = 1 << 13;
 }
 
@@ -202,7 +209,7 @@ impl NestedSlotLayout {
                 band,
                 level: self.level().get_u8(raw),
                 cell: [0, 1, 2].map(|axis| self.cell(axis).get_u8(raw)),
-                index: MEMBER_INDEX.get_u16(raw),
+                index: u32::from(MEMBER_INDEX.get_u16(raw)),
             },
             None => MemberSlot::FeatureLevel {
                 index: self.list_index().get_u16(raw),
@@ -236,7 +243,7 @@ impl NestedSlotLayout {
                         field: "nested cell",
                     });
                 }
-                if index >= MemberSlot::INDEX_LIMIT {
+                if index >= u32::from(MemberSlot::INDEX_LIMIT) {
                     return Err(BuildSystemIdError::IndexTooLarge);
                 }
                 let mut raw = self.band().with(raw, u64::from(band.value()));

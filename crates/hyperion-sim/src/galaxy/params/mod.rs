@@ -39,6 +39,10 @@ mod inputs;
 mod milky_way;
 mod validate;
 
+/// The dwarf cores' index tripwire reads plan 02's largest progenitor (P10.T7.b).
+#[cfg(test)]
+pub(crate) use draws::RECENT_MASS;
+
 use std::error::Error;
 use std::fmt;
 use std::sync::OnceLock;

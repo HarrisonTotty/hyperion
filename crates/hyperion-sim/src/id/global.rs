@@ -29,7 +29,10 @@ const STREAM_ALONG: Field = Field::new(38, 25);
 const STREAM_ACROSS: [Field; 2] = [Field::new(24, 19), Field::new(18, 13)];
 
 /// Zero bits under a dwarf core's sub-kind.
-const DWARF_PADDING: Field = Field::new(56, 33);
+const DWARF_PADDING: Field = Field::new(56, 44);
+/// The high bits of a dwarf core's index in a cell, above the slot's [`MEMBER_INDEX`]: zero
+/// under band 7, whose list keeps the slot's 13 bits (P10.T7.b).
+const DWARF_INDEX_HIGH: Field = Field::new(43, 33);
 /// The dwarf core's number on the global list.
 const DWARF_NUMBER: Field = Field::new(32, 31);
 
@@ -80,6 +83,7 @@ const _: () = {
         PREFIX_2,
         SUB_KIND,
         DWARF_PADDING,
+        DWARF_INDEX_HIGH,
         DWARF_NUMBER,
         FEATURE_SLOT.band(),
         FEATURE_SLOT.level(),
@@ -88,6 +92,10 @@ const _: () = {
         FEATURE_SLOT.cell(2),
         MEMBER_INDEX,
     ]);
+    // A dwarf core's index in a cell: the high bits above the slot's.
+    assert!(
+        DwarfCoreMemberId::INDEX_LIMIT == 1 << (DWARF_INDEX_HIGH.width() + MEMBER_INDEX.width())
+    );
 };
 
 /// Validates an ID with prefix `10`.
@@ -101,6 +109,12 @@ pub(super) const fn validate(raw: u64) -> Result<(), DecodeSystemIdError> {
         }
         STREAM => Ok(()),
         DWARF_CORE if !DWARF_PADDING.is_zero(raw) => Err(DecodeSystemIdError::PaddingBitsSet),
+        DWARF_CORE
+            if FEATURE_SLOT.band().get(raw) == FEATURE_LEVEL_BAND
+                && !DWARF_INDEX_HIGH.is_zero(raw) =>
+        {
+            Err(DecodeSystemIdError::PaddingBitsSet)
+        }
         DWARF_CORE => FEATURE_SLOT.validate(raw),
         _ => Err(DecodeSystemIdError::UnknownSubKind),
     }
@@ -120,9 +134,9 @@ pub(super) fn kind(raw: u64) -> SystemIdKind {
 /// The centre's nested grid has twelve levels of 32 cells per axis, from cells of 1 ÷ 256 ly up
 /// to 8 ly and a reach of 128 ly (brainstorm, "Dense features"), so a level fills four bits and
 /// levels 12–15 are rejected. In a cell the index is 13 bits, `[12:0]`, as in every nested
-/// layout. Band 7 is the centre's feature-level list, whose member 0 is the central black hole:
-/// its index is 16 bits, `[15:0]`, and `[31:16]` must be zero, so the list holds
-/// [`LIST_INDEX_LIMIT`](Self::LIST_INDEX_LIMIT) entries (ruled 2026-10-26, P11.T8.e.b).
+/// layout but a dwarf core's. Band 7 is the centre's feature-level list, whose member 0 is the
+/// central black hole: its index is 16 bits, `[15:0]`, and `[31:16]` must be zero, so the list
+/// holds [`LIST_INDEX_LIMIT`](Self::LIST_INDEX_LIMIT) entries (ruled 2026-10-26, P11.T8.e.b).
 ///
 /// # Examples
 ///
@@ -296,8 +310,25 @@ impl StreamMemberId {
 
 /// A member of a dwarf-galaxy core: prefix `10`, sub-kind `10`.
 ///
-/// The core's number takes two bits; the slot follows the catalogue-feature rules exactly, in the
-/// same bit positions `[30:0]`.
+/// The core's number takes two bits; the slot follows the catalogue-feature rules, in the same bit
+/// positions `[30:0]`, but for its index in a cell, which takes 11 more bits above them, `[43:33]`,
+/// for [`INDEX_LIMIT`](Self::INDEX_LIMIT) candidates (P10.T7.b, after the research lane
+/// `research-leans-3`). A core's fullest cell holds about 10⁻³ of its systems, past 8,192 above
+/// some 4 × 10⁶ M☉. Under band 7 those bits are zero and the list keeps 13 bits. Widening the index
+/// only accepts bit patterns that were rejected before, so every earlier ID keeps its value.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::id::{DwarfCoreMemberId, Layer, MemberSlot, SystemId};
+///
+/// // Candidate 8,192 of band A in cell (0, 0, 0) of level 0 of core 1: past a feature's index.
+/// let slot = MemberSlot::InCell { band: Layer::A, level: 0, cell: [0, 0, 0], index: 8_192 };
+/// let member = DwarfCoreMemberId::new(1, slot)?;
+/// assert_eq!(SystemId::from(member).raw(), 0xF400_0002_8000_0000);
+/// assert_eq!(member.slot(), slot);
+/// # Ok::<(), hyperion_sim::id::BuildSystemIdError>(())
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DwarfCoreMemberId(u64);
 
@@ -305,11 +336,19 @@ impl DwarfCoreMemberId {
     /// The exclusive bound of a dwarf core's number: 4.
     pub const NUMBER_LIMIT: u8 = 1 << 2;
 
+    /// The exclusive bound of a dwarf core's index in a cell: 2²⁴, 16,777,216 candidates, so that
+    /// twice the fullest cell of a core of plan 02's largest progenitor, 10⁹·⁵ M☉, after the least
+    /// stripping fits (about 1.1 × 10⁷). Its feature-level list keeps
+    /// [`MemberSlot::INDEX_LIMIT`].
+    pub const INDEX_LIMIT: u32 = 1 << 24;
+
     /// The member of dwarf core `number` in `slot`.
     ///
     /// # Errors
     ///
-    /// [`BuildSystemIdError::FieldOutOfRange`] for a number of 4 or more; otherwise as
+    /// [`BuildSystemIdError::FieldOutOfRange`] for a number of 4 or more;
+    /// [`BuildSystemIdError::IndexTooLarge`] for an index in a cell of
+    /// [`INDEX_LIMIT`](Self::INDEX_LIMIT) or more; otherwise as
     /// [`FeatureMemberId::new`](super::FeatureMemberId::new).
     pub fn new(number: u8, slot: MemberSlot) -> Result<Self, BuildSystemIdError> {
         if number >= Self::NUMBER_LIMIT {
@@ -318,6 +357,30 @@ impl DwarfCoreMemberId {
             });
         }
         let raw = DWARF_NUMBER.with(base(DWARF_CORE), u64::from(number));
+        let (raw, slot) = match slot {
+            MemberSlot::InCell {
+                band,
+                level,
+                cell,
+                index,
+            } => {
+                if index >= Self::INDEX_LIMIT {
+                    return Err(BuildSystemIdError::IndexTooLarge);
+                }
+                let raw = DWARF_INDEX_HIGH.with(raw, u64::from(index) >> MEMBER_INDEX.width());
+                let low = MEMBER_INDEX.get_u32(u64::from(index));
+                (
+                    raw,
+                    MemberSlot::InCell {
+                        band,
+                        level,
+                        cell,
+                        index: low,
+                    },
+                )
+            }
+            MemberSlot::FeatureLevel { .. } => (raw, slot),
+        };
         let raw = FEATURE_SLOT.with_slot(raw, slot)?;
         FEATURE_SLOT
             .validate(raw)
@@ -337,10 +400,30 @@ impl DwarfCoreMemberId {
         DWARF_NUMBER.get_u8(self.0)
     }
 
-    /// Where the member sits in the core.
+    /// Where the member sits in the core, its index in a cell from the high bits and the slot's.
     #[must_use]
     pub fn slot(self) -> MemberSlot {
-        FEATURE_SLOT.slot(self.0)
+        match FEATURE_SLOT.slot(self.0) {
+            MemberSlot::InCell {
+                band,
+                level,
+                cell,
+                index,
+            } => MemberSlot::InCell {
+                band,
+                level,
+                cell,
+                index: (DWARF_INDEX_HIGH.get_u32(self.0) << MEMBER_INDEX.width()) | index,
+            },
+            list @ MemberSlot::FeatureLevel { .. } => list,
+        }
+    }
+
+    /// The `ObjectKey` word of the member's cell: the ID with its index, both parts, zeroed
+    /// ([`SystemId::cell_word`](super::SystemId::cell_word)).
+    #[must_use]
+    pub(super) const fn cell_word(self) -> u64 {
+        DWARF_INDEX_HIGH.with(MEMBER_INDEX.with(self.0, 0), 0)
     }
 }
 
@@ -421,6 +504,13 @@ mod tests {
                     .raw(),
                 DWARF_PADDING,
             ),
+            // Under band 7 the index's high bits are zero bits too: the list keeps 13.
+            (
+                DwarfCoreMemberId::new(3, MemberSlot::FeatureLevel { index: 1 })
+                    .unwrap()
+                    .raw(),
+                DWARF_INDEX_HIGH,
+            ),
         ];
         for (raw, padding) in valid {
             assert!(SystemId::from_raw(raw).is_ok());
@@ -432,6 +522,57 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A dwarf core's index in a cell is 24 bits, the slot's 13 under 11 in `[43:33]` (P10.T7.b):
+    /// IDs round-trip at 8,192, 2²³ and 2²⁴ − 1 and are refused at 2²⁴, every index under 8,192
+    /// keeps its bits, and the core's list and a feature's and the centre's cells keep 13 bits.
+    #[test]
+    fn a_dwarf_core_s_index_in_a_cell_is_24_bits() {
+        let in_cell = |index| MemberSlot::InCell {
+            band: Layer::B,
+            level: 2,
+            cell: [4, 7, 12],
+            index,
+        };
+        let low = DwarfCoreMemberId::new(1, in_cell(3)).unwrap();
+        assert_eq!(low.raw(), 0xF400_0000_948F_8003, "an index under 8,192");
+        for index in [8_192, 1 << 23, DwarfCoreMemberId::INDEX_LIMIT - 1] {
+            let id = DwarfCoreMemberId::new(1, in_cell(index)).unwrap();
+            let (high, low_bits) = (u64::from(index >> 13), u64::from(index & 0x1FFF));
+            assert_eq!(
+                id.raw(),
+                0xF400_0000_948F_8000 | (high << 33) | low_bits,
+                "{index}"
+            );
+            assert_eq!(id.slot(), in_cell(index), "{index}");
+            let decoded = SystemId::from_raw(id.raw()).unwrap();
+            assert_eq!(decoded, SystemId::from(id), "{index}");
+            assert_eq!(decoded.kind(), SystemIdKind::DwarfCore(id), "{index}");
+        }
+        assert_eq!(
+            DwarfCoreMemberId::new(1, in_cell(DwarfCoreMemberId::INDEX_LIMIT)),
+            Err(BuildSystemIdError::IndexTooLarge)
+        );
+        assert_eq!(
+            DwarfCoreMemberId::new(1, MemberSlot::FeatureLevel { index: 8_192 }),
+            Err(BuildSystemIdError::IndexTooLarge)
+        );
+        let feature = FeatureRef::new(FeatureCell::new([0, 0, 0]).unwrap(), 5).unwrap();
+        assert_eq!(
+            FeatureMemberId::new(feature, in_cell(8_192)),
+            Err(BuildSystemIdError::IndexTooLarge)
+        );
+        let centre = MemberSlot::InCell {
+            band: Layer::A,
+            level: 9,
+            cell: [2, 17, 18],
+            index: 8_192,
+        };
+        assert_eq!(
+            CentreMemberId::new(centre),
+            Err(BuildSystemIdError::IndexTooLarge)
+        );
     }
 
     #[test]

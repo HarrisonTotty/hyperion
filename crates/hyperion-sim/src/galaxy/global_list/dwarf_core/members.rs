@@ -6,10 +6,11 @@
 //! As a catalogue feature's ([`FeatureInterior`](crate::galaxy::features::members::FeatureInterior)):
 //! a cell's candidates are a Poisson draw on `member.cell` of mean its bound over the cell
 //! ([`MemberClassTable::proposal`]) times its volume, keyed by `ObjectKey::cell(word)` with the
-//! word the ID of the cell's candidate 0 in its band, clamped at the 13-bit index's 8,192 with a
-//! debug assertion; candidate `i`'s three uniforms on `member.position` put it in its cell and one
-//! mark on `member.accept` picks its class or rejects it ([`MemberClassTable::pick`]). The core's
-//! classes all share its one profile (P10.T7.a), so a cell's bound is its nearest corner's.
+//! word the ID of the cell's candidate 0 in its band, clamped at the core's 24-bit index's 2²⁴
+//! ([`DwarfCoreMemberId::INDEX_LIMIT`]) with a debug assertion; candidate `i`'s three uniforms on
+//! `member.position` put it in its cell and one mark on `member.accept` picks its class or rejects
+//! it ([`MemberClassTable::pick`]). The core's classes all share its one profile (P10.T7.a), so a
+//! cell's bound is its nearest corner's.
 //!
 //! # A member
 //!
@@ -38,10 +39,12 @@
 //!
 //! Plan 01's slot gives a core 16 cells an axis on 8 levels, so a cell at radius `r` spans about
 //! `r ÷ 6` whatever the grid's width and a core's fullest cell expects about 10⁻³ of its systems:
-//! one above some 4 × 10⁶ M☉ overflows the 13-bit index. [`DwarfCoreModel::check_index_headroom`]
-//! says so as a typed error, as plan 09's centre's check does (ruling 144.5a); whoever plays a
-//! core calls it before placing members (P10.T7.b, as built: 12 of the 252 cores of 64 drawn
-//! galaxies' dwarfs, as drawn and unscaled, fail it).
+//! one above some 4 × 10⁶ M☉ would overflow a feature's 13-bit index, so a core's index in a cell
+//! takes 24 bits ([`DwarfCoreMemberId::INDEX_LIMIT`], P10.T7.b, after the research lane
+//! `research-leans-3`), room for twice the fullest cell of a core of plan 02's largest
+//! progenitor. [`DwarfCoreModel::check_index_headroom`] still guards it as a typed error, as plan
+//! 09's centre's check does (ruling 144.5a); whoever plays a core calls it before placing
+//! members, and no core a galaxy draws fails it.
 //!
 //! # The feature-level list
 //!
@@ -84,7 +87,7 @@ const HEADROOM_SIGMAS: f64 = 8.0;
 
 /// A dwarf core can draw more candidates in a cell than its index numbers
 /// ([`DwarfCoreModel::check_index_headroom`]): its fullest cell's expected candidates plus eight
-/// standard deviations reach 8,192.
+/// standard deviations reach [`DwarfCoreMemberId::INDEX_LIMIT`], 2²⁴.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExceedDwarfCoreIndexError {
     /// The core.
@@ -101,7 +104,7 @@ impl fmt::Display for ExceedDwarfCoreIndexError {
              deviations of its index's {}",
             self.number.get(),
             self.expected,
-            MemberSlot::INDEX_LIMIT
+            DwarfCoreMemberId::INDEX_LIMIT
         )
     }
 }
@@ -118,11 +121,11 @@ impl DwarfCoreModel {
     ///
     /// # Panics
     ///
-    /// If `cell` is not an owned cell of the core's 16-cell, 8-level grid or `index` is 8,192 or
-    /// more, which [`NestedGrid`](crate::galaxy::features::nested::NestedGrid)'s cells and the
-    /// clamp rule out.
+    /// If `cell` is not an owned cell of the core's 16-cell, 8-level grid or `index` is
+    /// [`DwarfCoreMemberId::INDEX_LIMIT`] or more, which
+    /// [`NestedGrid`](crate::galaxy::features::nested::NestedGrid)'s cells and the clamp rule out.
     #[must_use]
-    pub fn member_id(&self, band: MassBand, cell: NestedCell, index: u16) -> DwarfCoreMemberId {
+    pub fn member_id(&self, band: MassBand, cell: NestedCell, index: u32) -> DwarfCoreMemberId {
         DwarfCoreMemberId::new(
             self.number().get(),
             MemberSlot::InCell {
@@ -132,7 +135,7 @@ impl DwarfCoreModel {
                 index,
             },
         )
-        .expect("an owned cell of a 16-cell, 8-level grid and an index below 8,192 make an ID")
+        .expect("an owned cell of a 16-cell, 8-level grid and an index below 2²⁴ make an ID")
     }
 
     /// How `band`'s candidates are proposed in `cell`, and the cell's box.
@@ -151,13 +154,13 @@ impl DwarfCoreModel {
     }
 
     /// The candidate count of `band` in `cell`: a Poisson draw on the cell's stream, clamped at
-    /// [`MemberSlot::INDEX_LIMIT`] (module documentation).
+    /// [`DwarfCoreMemberId::INDEX_LIMIT`] (module documentation).
     ///
     /// # Panics
     ///
     /// In debug builds, if the draw exceeds the index.
     #[must_use]
-    pub fn candidate_count(&self, galaxy: &Galaxy, band: MassBand, cell: NestedCell) -> u16 {
+    pub fn candidate_count(&self, galaxy: &Galaxy, band: MassBand, cell: NestedCell) -> u32 {
         let mean = self.expected_candidates(band, cell);
         count_from_mean(galaxy, self.member_id(band, cell, 0), mean)
     }
@@ -168,14 +171,15 @@ impl DwarfCoreModel {
     ///
     /// # Panics
     ///
-    /// As [`member_id`](Self::member_id), for an index of 8,192 or more.
+    /// As [`member_id`](Self::member_id), for an index of [`DwarfCoreMemberId::INDEX_LIMIT`] or
+    /// more.
     #[must_use]
     pub fn candidate(
         &self,
         galaxy: &Galaxy,
         band: MassBand,
         cell: NestedCell,
-        index: u16,
+        index: u32,
     ) -> Option<(GlobalMemberRecord, PointLy)> {
         let (proposal, local) = self.proposal(band, cell);
         self.candidate_under(galaxy, band, cell, index, &proposal, &local)
@@ -188,7 +192,7 @@ impl DwarfCoreModel {
         galaxy: &Galaxy,
         band: MassBand,
         cell: NestedCell,
-        index: u16,
+        index: u32,
         proposal: &CellProposal,
         local: &LocalCell,
     ) -> Option<(GlobalMemberRecord, PointLy)> {
@@ -242,22 +246,24 @@ impl DwarfCoreModel {
     }
 
     /// Whether its fullest cell's expected candidates plus eight standard deviations stay under
-    /// the 13-bit index's 8,192, as plan 09's centre checks its own (P09.T27).
+    /// the core's 24-bit index's 2²⁴ ([`DwarfCoreMemberId::INDEX_LIMIT`]), as plan 09's centre
+    /// checks its own (P09.T27).
     ///
     /// Plan 01's slot gives a core 16 cells an axis on 8 levels, each cell twice the size of the
     /// last level's, so a cell at radius `r` spans about `r ÷ 6`, and its count, about
     /// `ρ(r) (r ÷ 6)³`, does not depend on the grid's width: a core's fullest cell expects about
-    /// 10⁻³ of its systems (P10.T7.b, as built), and a core above some 4 × 10⁶ M☉ overflows the
-    /// index, whose clamp would drop members. Whoever plays a core calls this first, as plan 04
-    /// calls plan 03's check.
+    /// 10⁻³ of its systems (P10.T7.b, as built), so a core of some 1.1 × 10¹⁰ M☉, past plan 02's
+    /// largest progenitor, would overflow the index, whose clamp would drop members. Whoever plays
+    /// a core calls this first, as plan 04 calls plan 03's check.
     ///
     /// # Errors
     ///
     /// [`ExceedDwarfCoreIndexError`] if the fullest cell's expected candidates plus eight standard
-    /// deviations reach 8,192.
+    /// deviations reach 2²⁴.
     pub fn check_index_headroom(&self) -> Result<(), ExceedDwarfCoreIndexError> {
         let expected = self.peak_candidates();
-        if expected + HEADROOM_SIGMAS * expected.sqrt() < f64::from(MemberSlot::INDEX_LIMIT) {
+        if expected + HEADROOM_SIGMAS * expected.sqrt() < f64::from(DwarfCoreMemberId::INDEX_LIMIT)
+        {
             Ok(())
         } else {
             Err(ExceedDwarfCoreIndexError {
@@ -414,15 +420,15 @@ fn draw_star(
 ///
 /// In debug builds, if the draw passes the index.
 #[must_use]
-fn count_from_mean(galaxy: &Galaxy, first: DwarfCoreMemberId, mean: f64) -> u16 {
+fn count_from_mean(galaxy: &Galaxy, first: DwarfCoreMemberId, mean: f64) -> u32 {
     let word = SystemId::from(first).raw();
     let drawn = Stream::open(galaxy.seed(), tags::MEMBER_CELL, ObjectKey::cell(word)).poisson(mean);
-    let limit = MemberSlot::INDEX_LIMIT;
+    let limit = DwarfCoreMemberId::INDEX_LIMIT;
     debug_assert!(
         drawn <= u64::from(limit),
         "a dwarf core's cell drew {drawn} candidates on a mean of {mean}, past its index's {limit}"
     );
-    u16::try_from(drawn.min(u64::from(limit))).expect("a count clamped at 8,192 fits in u16")
+    u32::try_from(drawn.min(u64::from(limit))).expect("a count clamped at 2²⁴ fits in u32")
 }
 
 /// The member `id` names in the core `model` of `galaxy`: a candidate in a cell, or nothing at

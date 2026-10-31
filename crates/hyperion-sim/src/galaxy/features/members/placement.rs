@@ -216,7 +216,7 @@ impl FeatureInterior {
                 band: band.layer(),
                 level: cell.level(),
                 cell: cell.cell(),
-                index,
+                index: u32::from(index),
             },
         )
         .expect("an owned cell of a 16-cell, 8-level grid and an index below 8,192 make an ID")
@@ -467,6 +467,8 @@ pub fn resolve_member(
                 .ok_or(ResolveSystemError::NoSuchSystem)?;
             let (proposal, local) = interior.proposal(band, cell);
             let mean = proposal.expected(&local);
+            // A feature's slot holds 13 bits, so a valid ID's index is a `u16`.
+            let index = u16::try_from(index).map_err(|_| ResolveSystemError::NoSuchSystem)?;
             if index >= count_from_mean(galaxy, interior.member_id(band, cell, 0), mean) {
                 return Err(ResolveSystemError::NoSuchSystem);
             }
@@ -862,6 +864,7 @@ mod tests {
         let MemberSlot::InCell { index, .. } = id.slot() else {
             panic!("a nested member is in a cell")
         };
+        let index = u16::try_from(index).unwrap();
         assert_eq!(
             interior.candidate(galaxy, band, cell, index).map(|c| c.0),
             Some(first)

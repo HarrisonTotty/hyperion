@@ -181,21 +181,21 @@ impl SystemId {
 
     /// The ID with its index zeroed: the `ObjectKey` word of the cell the system was drawn in.
     ///
-    /// For a grid ID it is the ID of the generation cell's candidate 0. For a member of a feature,
-    /// a stream or a dwarf core the 13-bit index, `[12:0]`, is zeroed, which leaves the nested cell
-    /// and band (or, in band 7, the feature-level list). For a member of the centre's list (band
-    /// 7) the list's 16-bit index, `[15:0]`, is zeroed, so that every entry shares the list's word,
-    /// the black hole's; for a member of a centre cell only `[12:0]` is, since `[15:13]` are its
-    /// cell's z. For a catalogue system the index and member are zeroed, leaving class and
-    /// catalogue cell. A pinned ID has no cell and no index, and its word is the ID itself.
+    /// For a grid ID it is the ID of the generation cell's candidate 0. For a member of a feature
+    /// or a stream the 13-bit index, `[12:0]`, is zeroed, which leaves the nested cell and band
+    /// (or, in band 7, the feature-level list); for a dwarf core's, its 24-bit index in a cell,
+    /// `[43:33]` and `[12:0]` (P10.T7.b). For a member of the centre's list (band 7) the list's
+    /// 16-bit index, `[15:0]`, is zeroed, so that every entry shares the list's word, the black
+    /// hole's; for a member of a centre cell only `[12:0]` is, since `[15:13]` are its cell's z.
+    /// For a catalogue system the index and member are zeroed, leaving class and catalogue cell. A
+    /// pinned ID has no cell and no index, and its word is the ID itself.
     #[must_use]
     pub fn cell_word(self) -> u64 {
         let index = match self.kind() {
             SystemIdKind::Grid(id) => id.index_field(),
             SystemIdKind::Centre(id) => id.index_field(),
-            SystemIdKind::FeatureMember(_)
-            | SystemIdKind::Stream(_)
-            | SystemIdKind::DwarfCore(_) => MEMBER_INDEX,
+            SystemIdKind::FeatureMember(_) | SystemIdKind::Stream(_) => MEMBER_INDEX,
+            SystemIdKind::DwarfCore(id) => return id.cell_word(),
             SystemIdKind::Pinned(_) => return self.0,
             SystemIdKind::Catalogue(_) => CatalogueSystemId::INDEX_AND_MEMBER,
         };
@@ -470,6 +470,24 @@ mod tests {
             assert_eq!(id.cell_word(), zero.raw());
             assert_eq!(zero.cell_word(), zero.raw());
         }
+        // A dwarf core's index in a cell is 24 bits, all zeroed (P10.T7.b).
+        let dwarf = |index| {
+            SystemId::from(
+                DwarfCoreMemberId::new(
+                    2,
+                    MemberSlot::InCell {
+                        band: Layer::C,
+                        level: 5,
+                        cell: [1, 14, 9],
+                        index,
+                    },
+                )
+                .unwrap(),
+            )
+        };
+        for index in [1, 8_191, 8_192, DwarfCoreMemberId::INDEX_LIMIT - 1] {
+            assert_eq!(dwarf(index).cell_word(), dwarf(0).raw(), "{index}");
+        }
         let mut lcg = Lcg::new(77);
         for _ in 0..10_000 {
             let id = random_valid_id(&mut lcg);
@@ -563,15 +581,17 @@ mod tests {
     #[test]
     fn every_raw_is_rejected_or_decodes_to_the_one_kind_that_rebuilds_it() {
         use DecodeSystemIdError as E;
-        // Zero regions of the layouts: spare bits, the three paddings, the level and cell of the
+        // Zero regions of the layouts: spare bits, the three paddings and a dwarf core's high index
+        // bits, `[43:33]`, which must be zero under its band 7, the level and cell of the
         // feature and centre slots, and the centre's band-7 zero bits `[31:16]`, above its 16-bit
         // list index. Clearing a random choice of them, and sometimes writing band 7, makes every
         // kind well-formed often and every rule fail often.
-        const ZERO_REGIONS: [u64; 7] = [
+        const ZERO_REGIONS: [u64; 8] = [
             0b111 << 58,
             ((1 << 22) - 1) << 35,
             0b111 << 54,
-            ((1 << 24) - 1) << 33,
+            ((1 << 13) - 1) << 44,
+            ((1 << 11) - 1) << 33,
             ((1 << 15) - 1) << 13,
             ((1 << 19) - 1) << 13,
             ((1 << 16) - 1) << 16,

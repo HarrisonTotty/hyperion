@@ -52,6 +52,8 @@ dwarf core 0 InCell { band: RoguePlanet, level: 7, cell: [15, 0, 15], index: 819
 dwarf core 3 FeatureLevel { index: 0 } -> 0xf4000001f0000000 -> DWARF 3 M0
 dwarf core 3 InCell { band: C, level: 3, cell: [8, 15, 2], index: 40 } -> 0xf4000001a71e4028 -> DWARF 3 C3-8F2-40
 dwarf core 3 InCell { band: RoguePlanet, level: 7, cell: [15, 0, 15], index: 8191 } -> 0xf4000001efe1ffff -> DWARF 3 G7-F0F-8191
+dwarf core 3 InCell { band: RoguePlanet, level: 7, cell: [15, 0, 15], index: 8192 } -> 0xf4000003efe1e000 -> DWARF 3 G7-F0F-8192
+dwarf core 3 InCell { band: RoguePlanet, level: 7, cell: [15, 0, 15], index: 16777215 } -> 0xf4000fffefe1ffff -> DWARF 3 G7-F0F-16777215
 
 centre FeatureLevel { index: 0 } -> 0xf000000700000000 -> CENTRE M0
 centre FeatureLevel { index: 1 } -> 0xf000000700000001 -> CENTRE M1

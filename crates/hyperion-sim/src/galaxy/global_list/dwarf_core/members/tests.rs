@@ -293,12 +293,18 @@ fn a_member_s_star_is_of_its_class() {
     );
 }
 
-/// P10.T7.b: no cell of a core that passes the headroom check expects 8,192 candidates, its peak
-/// the greatest over every owned cell; a core of 10⁷ M☉ fails the check.
+/// P10.T7.b: no cell of a core that passes the headroom check expects the core's 2²⁴ candidates,
+/// its peak the greatest over every owned cell; a core of 3 × 10⁷ M☉, past a feature's 8,192,
+/// passes, and a core of 3 × 10¹⁰ M☉ fails. The tripwire, the centre's rule: twice the fullest
+/// cell of a core of plan 02's largest progenitor (10⁹·⁵ M☉) after the least stripping (0.1)
+/// fits, eight standard deviations spared (at v24 its peak is 5.69 × 10⁶).
 #[test]
 fn no_cell_of_a_core_under_the_headroom_expects_the_index() {
+    use crate::galaxy::global_list::dwarfs::STRIPPING_FRACTION;
+    use crate::galaxy::params::RECENT_MASS;
     let galaxy = milky_way();
-    for mass in [2e3, 1e5, 1e6, 3e6] {
+    let largest = (1.0 - STRIPPING_FRACTION.0) * RECENT_MASS.1;
+    for mass in [2e3, 1e5, 1e6, 3e6, 3e7, largest] {
         let core = DwarfCoreModel::from_spec(
             galaxy,
             &spec(mass, 3.0 * mass, 3e9, [30_000.0, 20_000.0, 5_000.0], 0),
@@ -306,9 +312,22 @@ fn no_cell_of_a_core_under_the_headroom_expects_the_index() {
         assert_eq!(core.check_index_headroom(), Ok(()), "{mass:e}");
         let peak = core.peak_candidates();
         assert!(
-            peak < f64::from(MemberSlot::INDEX_LIMIT),
+            peak < f64::from(DwarfCoreMemberId::INDEX_LIMIT),
             "{mass:e}: {peak}"
         );
+        if mass >= 3e7 {
+            assert!(
+                peak > f64::from(MemberSlot::INDEX_LIMIT),
+                "{mass:e}: {peak} past a feature's index"
+            );
+        }
+        if mass >= largest {
+            let twice = 2.0 * peak;
+            assert!(
+                twice + HEADROOM_SIGMAS * twice.sqrt() < f64::from(DwarfCoreMemberId::INDEX_LIMIT),
+                "twice the largest core's peak, {twice}"
+            );
+        }
         if mass <= 1e5 {
             let fullest = core
                 .grid()
@@ -320,13 +339,156 @@ fn no_cell_of_a_core_under_the_headroom_expects_the_index() {
     }
     let big = DwarfCoreModel::from_spec(
         galaxy,
-        &spec(1e7, 3e7, 3e9, [30_000.0, 20_000.0, 5_000.0], 3),
+        &spec(3e10, 9e10, 3e9, [30_000.0, 20_000.0, 5_000.0], 3),
     );
     let error = big.check_index_headroom().unwrap_err();
     assert_eq!(error.number.get(), 3);
-    assert!(error.expected > 8_192.0, "{error:?}");
+    assert!(
+        error.expected > f64::from(DwarfCoreMemberId::INDEX_LIMIT) * 0.99,
+        "{error:?}"
+    );
     let message = error.to_string();
     assert!(!message.starts_with(char::is_uppercase) && !message.ends_with('.'));
+    assert!(message.contains("16777216"), "{message}");
+}
+
+/// A core of 3 × 10⁷ M☉, past a feature's 13-bit index: its model, its fullest cell and band,
+/// their candidate count, and every member there.
+struct Massive {
+    core: DwarfCoreModel,
+    band: MassBand,
+    cell: NestedCell,
+    count: u32,
+    members: Vec<(GlobalMemberRecord, PointLy)>,
+}
+
+fn massive() -> &'static Massive {
+    static MASSIVE: OnceLock<Massive> = OnceLock::new();
+    MASSIVE.get_or_init(|| {
+        let galaxy = milky_way();
+        let core = DwarfCoreModel::from_spec(
+            galaxy,
+            &spec(3e7, 9e7, 3e9, [30_000.0, 20_000.0, 5_000.0], 2),
+        );
+        let (band, cell) = core
+            .grid()
+            .owned_cells()
+            .flat_map(|c| MassBand::ALL.map(|b| (b, c)))
+            .max_by(|a, b| {
+                core.expected_candidates(a.0, a.1)
+                    .total_cmp(&core.expected_candidates(b.0, b.1))
+            })
+            .expect("a grid owns cells");
+        let count = core.candidate_count(galaxy, band, cell);
+        let mut members = Vec::new();
+        core.members_in_cell(galaxy, band, cell, &mut members);
+        Massive {
+            core,
+            band,
+            cell,
+            count,
+            members,
+        }
+    })
+}
+
+/// A member's index in its cell.
+fn index_of(member: &GlobalMemberRecord) -> u32 {
+    let SystemIdKind::DwarfCore(id) = member.record().id().kind() else {
+        panic!("a core member's ID decodes as one");
+    };
+    let MemberSlot::InCell { index, .. } = id.slot() else {
+        panic!("a placed member is in a cell")
+    };
+    index
+}
+
+/// P10.T7.b: a core of 3 × 10⁷ M☉ draws past 8,192 candidates in its fullest cell; every 97th
+/// member there, many at an index past a feature's 13 bits, has an ID that round-trips and
+/// resolves to it, and the index past the count resolves to nothing.
+#[test]
+fn the_fullest_cell_of_a_massive_core_resolves_past_8191() {
+    let galaxy = milky_way();
+    let Massive {
+        core,
+        band,
+        cell,
+        count,
+        members,
+    } = massive();
+    assert!(
+        *count > u32::from(MemberSlot::INDEX_LIMIT),
+        "{count} candidates"
+    );
+    let mut past = 0;
+    for (member, _) in members.iter().step_by(97) {
+        let id = member.record().id();
+        assert_eq!(SystemId::from_raw(id.raw()), Ok(id));
+        let SystemIdKind::DwarfCore(core_id) = id.kind() else {
+            panic!("a core member's ID decodes as one: {id:?}");
+        };
+        past += usize::from(index_of(member) >= u32::from(MemberSlot::INDEX_LIMIT));
+        assert_eq!(
+            resolve_dwarf_core_member(galaxy, core, core_id),
+            Ok(*member)
+        );
+    }
+    assert!(past > 0, "no member past index 8,191 was resolved");
+    let beyond = core.member_id(*band, *cell, *count);
+    assert_eq!(
+        resolve_dwarf_core_member(galaxy, core, beyond),
+        Err(ResolveSystemError::NoSuchSystem)
+    );
+}
+
+/// P10.T7.b's golden for the wide index: the massive core's fullest cell's count and members, and
+/// the first three members past index 8,191 in full, which no earlier ID could name. They move
+/// with the core's model, plan 09's placement and the star's draw, as `dwarf_core_members.golden`
+/// does.
+#[test]
+fn the_massive_core_s_members_past_8191_are_pinned() {
+    let Massive {
+        core,
+        band,
+        cell,
+        count,
+        members,
+    } = massive();
+    let mut w = GoldenWriter::new();
+    w.header(crate::GENERATOR_VERSION.get());
+    w.line(&format!(
+        "cell {band:?} level {} {:?}",
+        cell.level(),
+        cell.cell()
+    ));
+    w.f64("expected", core.expected_candidates(*band, *cell));
+    w.line(&format!("count {count}"));
+    w.line(&format!("members {}", members.len()));
+    for (k, (m, _)) in members
+        .iter()
+        .filter(|(m, _)| index_of(m) >= u32::from(MemberSlot::INDEX_LIMIT))
+        .take(3)
+        .enumerate()
+    {
+        let record = m.record();
+        w.u64_hex(&format!("{k}.id"), record.id().raw());
+        w.line(&format!(
+            "{k}.index {} class {:?} attempt {}",
+            index_of(m),
+            m.class().kind,
+            m.attempt()
+        ));
+        for (axis, c) in ["x", "y", "z"]
+            .iter()
+            .zip(record.epoch_position().to_light_years_f64())
+        {
+            w.f64(&format!("{k}.position.{axis}"), c);
+        }
+        w.f64(&format!("{k}.mass"), record.primary_initial_mass().value());
+        w.f64(&format!("{k}.age"), record.age_at_epoch().value());
+        w.f64(&format!("{k}.fe_h"), m.composition().fe_h().value());
+    }
+    golden!("galaxy/global_list/dwarf_core_index", w.as_str());
 }
 
 /// P10.T7.b: no member of the core moves faster than its speed bound, the range query's pad.
@@ -346,7 +508,7 @@ fn no_member_moves_faster_than_the_core_s_speed_bound() {
 #[test]
 fn members_are_order_independent() {
     let (galaxy, core) = (milky_way(), small());
-    let keys: Vec<(MassBand, NestedCell, u16)> = members()
+    let keys: Vec<(MassBand, NestedCell, u32)> = members()
         .iter()
         .step_by(211)
         .map(|(band, cell, m, _)| {

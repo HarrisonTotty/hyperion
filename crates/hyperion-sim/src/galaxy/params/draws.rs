@@ -253,7 +253,7 @@ pub(super) const RECENT_PROGENITOR_MEAN: f64 = 8.0;
 /// The slope of the recent progenitors' stellar mass function, M^−1.45.
 const RECENT_MASS_SLOPE: f64 = 1.45;
 /// The recent progenitors' stellar masses, M☉: 10⁵–10⁹·⁵ (the upper end is `10^9.5`).
-pub(super) const RECENT_MASS: (f64, f64) = (1e5, 3_162_277_660.168_379_5);
+pub(crate) const RECENT_MASS: (f64, f64) = (1e5, 3_162_277_660.168_379_5);
 /// The ends of a lesser progenitor's accretion time, years ago, before [`lesser_accretion`]
 /// lowers the upper end to its youngest stars' age.
 const LESSER_ACCRETED_RANGE: (f64, f64) = (6.0 * GYR, 12.0 * GYR);
