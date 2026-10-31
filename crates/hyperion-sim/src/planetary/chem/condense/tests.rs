@@ -877,6 +877,141 @@ fn a_rule_s_mode_takes_its_optics_as_the_loop_s() {
     assert_eq!(bad, Err(BuildModeError::ColumnMass { column_mass: mass }));
 }
 
+/// The share below `level` of a mode of profile `profile`: (1 − (`level` ÷ `p_b`)^(f+1)) ÷ (1 −
+/// (`p_t` ÷ `p_b`)^(f+1)), the formula of [`Mode::below`]'s documentation.
+fn share_below(profile: ModeProfile, level: f64) -> f64 {
+    let (base, top) = (profile.base().value(), profile.top().value());
+    let power = profile.exponent() + 1.0;
+    (1.0 - math::powf(level / base, power)) / (1.0 - math::powf(top / base, power))
+}
+
+/// P14.T52.h's cut: a mode straddling the level stops at it with its share S of its column, its
+/// τ(550) τ × S; a mode topped at or below it is unchanged to the bit, and one based at or above
+/// it is unchanged but for its coverage, 0. The warm giant's forsterite deck, based at 1.60 bar.
+#[test]
+fn a_mode_below_a_level_keeps_its_share_below_it() {
+    let clouds = warm_giant_clouds();
+    let forsterite = deck(&clouds, "Mg2SiO4");
+    let mode = forsterite.modes()[0];
+    let temperature = forsterite.base_temperature();
+    let profile = mode.profile();
+    let (base, top) = (profile.base().value(), profile.top().value());
+    let tau = mode.optical_depth().expect("its τ").value();
+    assert!(
+        top < bar(1.0).value() && bar(1.0).value() < base,
+        "{top} to {base} Pa"
+    );
+    for level in [bar(1.0).value(), (base * top).sqrt(), top * 1.000_001] {
+        let cut = mode.below(Pascals::new(level), temperature).expect("a cut");
+        let share = share_below(profile, level);
+        assert!(0.0 < share && share < 1.0, "{level} Pa: S {share}");
+        assert_same_bits(
+            cut.column_mass().value(),
+            mode.column_mass().value() * share,
+        );
+        assert_same_bits(cut.profile().top().value(), level);
+        let now = cut.optical_depth().expect("its τ").value();
+        assert!(
+            (now / (tau * share) - 1.0).abs() < 1e-12,
+            "{level} Pa: τ {now} against {}",
+            tau * share
+        );
+        assert_eq!(
+            format!(
+                "{:?}",
+                (
+                    mode.material(),
+                    mode.phase(),
+                    mode.deck(),
+                    mode.size(),
+                    mode.coverage(),
+                    profile.base(),
+                    profile.exponent(),
+                    mode.optical_depth().map(|d| d.basis())
+                )
+            ),
+            format!(
+                "{:?}",
+                (
+                    cut.material(),
+                    cut.phase(),
+                    cut.deck(),
+                    cut.size(),
+                    cut.coverage(),
+                    cut.profile().base(),
+                    cut.profile().exponent(),
+                    cut.optical_depth().map(|d| d.basis())
+                )
+            ),
+            "{level} Pa"
+        );
+    }
+    for level in [top, top * 0.5, 1e-3] {
+        let cut = mode
+            .below(Pascals::new(level), temperature)
+            .expect("a mode");
+        assert_eq!(format!("{cut:?}"), format!("{mode:?}"), "{level} Pa");
+    }
+    for level in [base, base * 2.0, 1e12] {
+        let cut = mode
+            .below(Pascals::new(level), temperature)
+            .expect("a mode");
+        assert_same_bits(cut.coverage(), 0.0);
+        let covered = Mode {
+            coverage: mode.coverage(),
+            ..cut
+        };
+        assert_eq!(format!("{covered:?}"), format!("{mode:?}"), "{level} Pa");
+    }
+}
+
+/// A mode with no size keeps its reason through the cut, its column its share below; a level or a
+/// temperature that is not finite and positive is refused.
+#[test]
+fn a_mode_with_no_size_keeps_its_reason_below_a_level() {
+    let gas = vec![(row("Kr"), 0.9), (row("He"), 0.0997), (row("NH3"), 3e-4)];
+    let clouds =
+        Condensation::derive(gas, jupiter, &jupiter_column(), baseline, 1.0).expect("the clouds");
+    let ammonia = deck(&clouds, "NH3");
+    let mode = ammonia.modes()[0];
+    let reason = SizeModeError::NoCollisionConstants {
+        key: SubstanceKey::new_const("Kr"),
+    };
+    assert_eq!(mode.size(), Err(reason));
+    let profile = mode.profile();
+    let level = (profile.base().value() * profile.top().value()).sqrt();
+    let cut = mode
+        .below(Pascals::new(level), ammonia.base_temperature())
+        .expect("a cut");
+    assert_eq!(cut.size(), Err(reason));
+    assert_eq!(
+        cut.optical_depth(),
+        Err(ResolveOpticalDepthError::Size(reason))
+    );
+    assert_same_bits(
+        cut.column_mass().value(),
+        mode.column_mass().value() * share_below(profile, level),
+    );
+    assert_same_bits(cut.profile().top().value(), level);
+    let t = ammonia.base_temperature();
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(
+            matches!(
+                mode.below(Pascals::new(bad), t),
+                Err(BuildModeError::Profile { .. })
+            ),
+            "level {bad}"
+        );
+        assert!(
+            matches!(
+                mode.below(Pascals::new(level), Kelvin::new(bad)),
+                Err(BuildModeError::Temperature { .. })
+            ),
+            "temperature {bad}"
+        );
+    }
+}
+
 /// Its inputs are checked.
 #[test]
 fn the_inputs_are_checked() {

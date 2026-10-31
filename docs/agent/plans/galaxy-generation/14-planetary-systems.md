@@ -7796,6 +7796,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::envelope_atmosphere`;
     `cargo test -p hyperion-sim planetary::chem::condense`;
     `cargo test -p hyperion-sim planetary::system::envelope`.
+  - _Built_ 2026-10-31, held at 26 (`DAYSIDE_DECKS_VERSION`): Risks, "Deviations in P14.T52.h, as
+    built".
 
 #### P14.T53 Escape, special states and life
 
@@ -33425,3 +33427,18 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     of 6,742 bodies, the 21 under a supercritical envelope (8 H₂O, 7 O₂, 6 CH₄), envelopes alone.
   - _No golden moves at 26:_ no golden system and no server golden holds one. The 8 steam envelopes
     (part 3's 25 census had none) lie at 0.018–0.13 S⊕, off Turbet's grid: no inflation at 26.
+- **Deviations in P14.T52.h, as built (`p14-hot-dayside`, 2026-10-31).** Built behind
+  `DAYSIDE_DECKS_VERSION` = 26 (`DaysideDecksRules`, `with_dayside_decks`, a line in
+  `with_every_26_hold`); nothing moves under `Held`, and `PROTOCOL_VERSION` stays 3.
+  - _`Mode::below(&self, level, temperature)`_: a `Mode` keeps no temperature, and `optical_depth`
+    reads one; the envelope passes its deck's base temperature, as `of_settling` takes it.
+  - _Main's leans (2026-10-30):_ the gate reads `inputs.equilibrium_temperature`, the bulk's; a mode
+    covering none keeps its τ, which `deck_optical_depth` still sums.
+  - _No volatile or haze mode forms at `T_eq` ≥ 950 K_ (soot ends at `HYDROCARBON_EDGE`, S₈ at
+    700 K), so "volatile and haze modes never move" holds by construction, asserted on the hot cases.
+  - _The golden_ `planetary/envelope_atmosphere` gains two hot Jupiters (extended only), which 26's
+    bump moves; `locked_climate_tests` holds the dayside back (`with_the_deck`).
+  - _26's bump re-blesses_ also `body_detail_hot_jupiter`'s modes in `planetary.json` and the
+    `convert/planetary.rs` tests that pin them; no golden system moves (the census).
+  - _For R08.T16.a:_ under the rule the fixture hot Jupiter's floor (τ(550) 10 from the top) lies at
+    about 1 bar, not above its photosphere inside its silicate decks as at 24–25.

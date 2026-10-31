@@ -119,7 +119,10 @@
 //! built: at a fixed `f_sed` it moves only the particles' sizes (the columns and the traps follow
 //! d`q_t` ÷ d ln p = `f_sed` `q_c`, free of K), and it would cost one more run of the loop for each
 //! such deck, ten on a cold giant. Those decks' particles are therefore `K_min`'s, smaller than
-//! eq. 5's, so their τ is high; they lie far below the photosphere.
+//! eq. 5's, so their τ is high. Most lie far below the photosphere, but not on a hot giant whose
+//! join lies near it: an inflated hot Jupiter's join at 3 bar (`T_int` about 560 K) puts its
+//! silicate and iron decks' bases at 1.3–3.9 bar under a 0.2-bar photosphere, and a τ of about
+//! 190 above it, which its dayside does not hold ([below](#the-dayside)).
 //!
 //! The column's one mean molar mass differs between the passes. The first takes the 1-bar gas's
 //! own, its condensables all vapour; the second, and the supply rule, the 1-bar gas trimmed by the
@@ -133,6 +136,48 @@
 //! The decks are published as P14.T24.c's: [`AerosolDeck::of`] each, [`AerosolMode::of_settling`]
 //! each mode at its base's temperature (a `NoDensity` mode passing through, labelled), and the
 //! loop's rows not formed.
+//!
+//! ## The dayside
+//!
+//! From generator version 26 (P14.T52.h, behind its hold `DAYSIDE_DECKS_VERSION`), on an
+//! envelope whose `T_eq` is at or above [`HOT_DAYSIDE_TEMPERATURE`] (950 K), each mode of a
+//! refractory, sulphide or salt deck ([`DeckKind::Refractory`], [`DeckKind::SulphideOrSalt`]) is
+//! published as the dayside holds it: below 1 bar ([`DAYSIDE_LEVEL`]), or below the photosphere
+//! where that is deeper, the day and the night share the global column, and above it the
+//! dayside holds none of the deep decks' condensate. Before [`AerosolMode::of_settling`], each
+//! such mode is cut at that level by `Mode::below`: one topped at or below it is unchanged; one
+//! straddling it stops there and keeps its column's share below, S = (1 − (`p_cut` ÷
+//! `p_b`)^(f+1)) ÷ (1 − (`p_t` ÷ `p_b`)^(f+1)), its τ(550) taken from that column; one based at or
+//! above it covers none (coverage 0), its column, τ and profile kept for a later limb or night.
+//! Nothing else moves: the volatiles' decks, the hazes, the absorbers, the composition, the upper
+//! gas, every [`AerosolDeck`] and [`deck_column_masses`](EnvelopeAtmosphere::deck_column_masses),
+//! and every cooler envelope.
+//!
+//! The rule is a calibration to the observed dark daysides of hot Jupiters, not derived from a
+//! cloud model:
+//!
+//! - **The observations.** HD 209458 b's geometric albedo is 0.038 ± 0.045 at 400–700 nm, which
+//!   "rules out the presence of bright reflective clouds" (Rowe et al. 2008, ApJ 689, 1345), and
+//!   0.096 ± 0.016 in the CHEOPS band, "consistent with a cloud-free atmosphere" (Brandeker et
+//!   al. 2022, A&A 659, L4). "Most planets manifest low optical geometric albedos (<0.25)"
+//!   (Esteves et al. 2015, ApJ 804, 150), and most of TESS's lie within 2σ of zero (Wong et al.
+//!   2021, AJ 162, 127).
+//! - **The models expect the contrary** for a hot interior, which leaves no deep cold trap:
+//!   Thorngren, Gao and Fortney 2019 (ApJL 884, L6), "the lack of deep cold traps could result in
+//!   cloudier dayside atmospheres"; Powell et al. 2018 (ApJ 860, 18, §6.2), below 1,500 K in their
+//!   hot-interior case, "the opaque cloud level at the substellar point is at roughly the same
+//!   location as it is at the antistellar point"; Parmentier et al. 2016 (ApJ 828, 22, §6) clear
+//!   HD 209458 b's silicates only by "the deep cold trap".
+//! - **The split level** is Iro, Bézard and Guillot 2005's (A&A 436, 719, §3.3): "Above the 1-bar
+//!   pressure level, the radiative timescale is relatively short … large horizontal variations of
+//!   temperature". Sharing the column below it is a simplification: their day–night contrast is
+//!   still 30–200 K at 1 bar, and "negligible below the ~5–bar level". One dayside profile does not
+//!   serve: the decks condensed on Guillot's profile at a dayside redistribution (f 0.4–0.67) base
+//!   at the photosphere, where the whole deep vapour condenses.
+//!
+//! Both constants are stated design choices, each with what it rests on. The dark daysides
+//! measured lie at a `T_eq` of about 1,450 K and above (HD 209458 b's); the cut is extended down
+//! to 950 K by design. A mode's column then differs from its deck's.
 //!
 //! ## The composition at 1 bar
 //!
@@ -205,11 +250,20 @@
 //! - **Sudarsky et al. 2000's high silicate clouds** (their class V) outside a window: the grey
 //!   profile's upper air at γ 0.4 lies between 0.91 and 1.12 `T_eq`, so a silicate deck reaches the
 //!   photosphere only for a `T_eff` of about 1,650–1,800 K (their class reads "above about 1,500
-//!   K"). Cooler, its base lies at its adiabat crossing, a hundred bars or more down; hotter, from
-//!   about 1,850 K, no silicate deck forms. A non-grey profile, or γ above 1, is the route.
+//!   K"). Cooler, its base lies at its adiabat crossing, a hundred bars or more down at a `T_int`
+//!   of 100 K (a hot interior's join, near its photosphere, lifts it: the K paragraph above);
+//!   hotter, from about 1,850 K, no silicate deck forms. A non-grey profile, or γ above 1, is the route.
 //! - **The convective K of the hot decks** (above), and **a deck's second crossing**: the loop
 //!   forms each condensate's deck at its deepest crossing, so a vapour that saturates again in a
 //!   cooler layer above is not condensed twice.
+//! - **The western limb's clouds** of 1,600–1,900 K giants (Parmentier et al. 2016), such as
+//!   Kepler-7b's, whose geometric albedo is 0.35 ± 0.02 (Demory et al. 2013, ApJL 776, L25): every
+//!   dayside at or above 950 K is cleared alike ([The dayside](#the-dayside)), with no partial
+//!   cover.
+//! - **The limb's clouds in transmission** (Gao et al. 2020): above 950 K the column above 1 bar
+//!   is the dayside's; a limb's or a night's column is not built.
+//! - **A cold-trapped giant's dayside `MnS` clouds, with possibly Cr** (Parmentier et al. 2016, §6,
+//!   for HD 189733 b and HD 209458 b), which the cut clears with the rest.
 //! - **Nickel's, vanadium's and calcium's own condensates**: no law aloft takes Ni, V or the Ca
 //!   aluminates, so each is held with its host deck's element ([`CO_TRAPPED`]); laws of their own
 //!   are P14.T49.b's and P14.T52.c's to add. Vanadium so tracked leaves the gas too hot: its 50%
@@ -274,6 +328,7 @@ use crate::units::{
     Dex, EarthMasses, Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals,
     Watts, Years,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 pub mod supercritical;
 #[cfg(test)]
@@ -501,6 +556,83 @@ pub const REFRACTORY_SEDIMENTATION: f64 = 2.0;
 /// 4-5" for the T dwarfs' sulphide and salt clouds (their best fits: UGPS 0722 at 5, Ross 458C at
 /// 3), its middle.
 pub const SULPHIDE_AND_SALT_SEDIMENTATION: f64 = 4.5;
+
+/// The equilibrium temperature from which an envelope's dayside holds no refractory, sulphide or
+/// salt condensate above [`DAYSIDE_LEVEL`], 950 K, a stated design choice (P14.T52.h).
+///
+/// It is where Gao et al. 2020 (Nature Astronomy 4, 951) find that "silicates dominate aerosol
+/// opacity above planetary equilibrium temperatures of 950 K", a statement about the limb in
+/// transmission, not about a clear dayside (the [module](self)'s "The dayside").
+pub const HOT_DAYSIDE_TEMPERATURE: Kelvin = Kelvin::new(950.0);
+
+/// The level above which a hot envelope's dayside parts from its global column, 1 bar (10⁵ Pa), a
+/// stated design choice (P14.T52.h).
+///
+/// It rests on Iro, Bézard and Guillot 2005 (A&A 436, 719, §3.3) on HD 209458 b: "Above the 1-bar
+/// pressure level, the radiative timescale is relatively short … large horizontal variations of
+/// temperature". The cut lies here, or at the photosphere where that is deeper.
+pub const DAYSIDE_LEVEL: Pascals = Pascals::new(1.0e5);
+
+/// The generator version from which a hot envelope's dayside is cleared above
+/// [`DAYSIDE_LEVEL`] (P14.T52.h): 26, the planetary bump after 25's (main, 2026-10-30).
+///
+/// Below it [`DaysideDecksRules::in_force`] is [`DaysideDecksRules::Held`]: no mode is cut and
+/// every envelope is version 25's bit for bit. 26's bump deletes this hold,
+/// [`DaysideDecksRules`] with its `Held` arm, the tests' switch, its line in `with_every_26_hold`
+/// and its tripwire (`the_dayside_decks_are_held_only_until_the_26_bump`).
+pub(crate) const DAYSIDE_DECKS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether a hot envelope's dayside is cleared above [`DAYSIDE_LEVEL`] (P14.T52.h's hold,
+/// [`DAYSIDE_DECKS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum DaysideDecksRules {
+    /// Version 25's and before: every mode is its deck's, the global column's.
+    Held,
+    /// Version 26's: a hot envelope's refractory, sulphide and salt modes are cut at the level
+    /// (the [module](self)'s "The dayside").
+    Cleared,
+}
+
+impl DaysideDecksRules {
+    /// The rules this generator version gives: cleared from [`DAYSIDE_DECKS_VERSION`], held below
+    /// it; in the tests, the rules a test's switch sets on its thread ([`with_dayside_decks`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = DAYSIDE_DECKS_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= DAYSIDE_DECKS_VERSION {
+            Self::Cleared
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The dayside decks' rules a test sets on its thread, `None` for the version's.
+    static DAYSIDE_DECKS_RULES: core::cell::Cell<Option<DaysideDecksRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the dayside decks' rules `rules` on this thread, for the tests to reach
+/// 26's dayside ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. An envelope reads the rules as it is derived, so a test derives it inside the switch.
+/// 26's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_dayside_decks<R>(rules: DaysideDecksRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<DaysideDecksRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            DAYSIDE_DECKS_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(DAYSIDE_DECKS_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
 
 /// The absorbers listed for R08.T4.e's lines, in registry order: every atom and first ion of
 /// P14.T52.a's metals (Na, K, Mg, Al, Si, Ca, Ti, V, Cr, Mn, Fe, Ni and Zn), with TiO, VO, SiO, H,
@@ -1026,19 +1158,22 @@ impl EnvelopeAtmosphere {
                 Ok((Vec::new(), None))
             }
         };
-        Self::assembled(profile, deep, upper, clouds, inputs.gravity, hazes)
+        let dayside = dayside_level(inputs, &profile);
+        Self::assembled(profile, deep, upper, clouds, inputs.gravity, dayside, hazes)
     }
 
     /// The atmosphere's parts from its profile, its gas at 1 bar and at 10 mbar (`deep` and
-    /// `upper`), its decks (`clouds`) and its gravity, with its hazes' modes and its photochemical
-    /// SO₂ from `hazes`, of its profile, its trimmed 10-mbar gas with that gas's mean molar mass (g
-    /// mol⁻¹) and its decks.
+    /// `upper`), its decks (`clouds`) and its gravity, its refractory, sulphide and salt modes cut
+    /// at `dayside` where given (P14.T52.h, [`dayside_level`]), with its hazes' modes and its
+    /// photochemical SO₂ from `hazes`, of its profile, its trimmed 10-mbar gas with that gas's mean
+    /// molar mass (g mol⁻¹) and its decks.
     fn assembled(
         profile: EnvelopeProfile,
         deep: &[(SubstanceId, f64)],
         upper: &[(SubstanceId, f64)],
         clouds: &Condensation,
         gravity: MetresPerSecondSquared,
+        dayside: Option<Pascals>,
         hazes: impl FnOnce(
             &EnvelopeProfile,
             &[(SubstanceId, f64)],
@@ -1067,8 +1202,16 @@ impl EnvelopeAtmosphere {
             decks.push(AerosolDeck::of(deck));
             deck_bounds.push(deck.bound());
             deck_column_masses.push(deck.column_mass());
+            let cut = match DeckKind::of(deck.condensate()) {
+                Some(DeckKind::Refractory | DeckKind::SulphideOrSalt) => dayside,
+                Some(DeckKind::Volatile) | None => None,
+            };
             for mode in deck.modes() {
-                modes.push(AerosolMode::of_settling(mode, deck.base_temperature())?);
+                let mode = match cut {
+                    Some(level) => mode.below(level, deck.base_temperature())?,
+                    None => *mode,
+                };
+                modes.push(AerosolMode::of_settling(&mode, deck.base_temperature())?);
             }
         }
         let (hazes, sulphur_dioxide) =
@@ -1170,7 +1313,10 @@ impl EnvelopeAtmosphere {
         &self.deck_bounds
     }
 
-    /// Each deck's condensate column mass, kg m⁻², in [`decks`](Self::decks)' order.
+    /// Each deck's condensate column mass, kg m⁻², in [`decks`](Self::decks)' order: the global
+    /// column's. From generator version 26 a hot envelope's refractory, sulphide or salt mode is
+    /// its dayside's (the [module](self)'s "The dayside"), so its column may be less than its
+    /// deck's here.
     #[must_use]
     pub fn deck_column_masses(&self) -> &[KilogramsPerSquareMetre] {
         &self.deck_column_masses
@@ -1184,7 +1330,9 @@ impl EnvelopeAtmosphere {
     }
 
     /// The τ(550) of the modes that name `condensate` as their deck, the sum of those modelled;
-    /// `None` where no mode names it or none of them has a τ.
+    /// `None` where no mode names it or none of them has a τ. Each mode's τ is its own, its
+    /// coverage not applied, so a mode that covers none (a hot envelope's dayside from generator
+    /// version 26, the [module](self)'s "The dayside") is counted.
     #[must_use]
     pub fn deck_optical_depth(&self, condensate: SubstanceId) -> Option<f64> {
         let mut total = None;
@@ -1222,6 +1370,28 @@ impl EnvelopeAtmosphere {
     pub fn not_modelled(&self) -> &[SubstanceId] {
         &self.not_modelled
     }
+}
+
+/// The level a hot envelope's dayside is cut at (P14.T52.h; the [module](self)'s "The dayside"):
+/// under [`DaysideDecksRules::Cleared`], on an envelope whose equilibrium temperature is at or
+/// above [`HOT_DAYSIDE_TEMPERATURE`], the deeper of [`DAYSIDE_LEVEL`] and `profile`'s photosphere;
+/// otherwise `None`, no cut.
+#[must_use]
+fn dayside_level(
+    inputs: &EnvelopeAtmosphereInputs<'_>,
+    profile: &EnvelopeProfile,
+) -> Option<Pascals> {
+    if DaysideDecksRules::in_force() == DaysideDecksRules::Held
+        || inputs.equilibrium_temperature.value() < HOT_DAYSIDE_TEMPERATURE.value()
+    {
+        return None;
+    }
+    let photosphere = profile.photosphere_pressure();
+    Some(if photosphere.value() > DAYSIDE_LEVEL.value() {
+        photosphere
+    } else {
+        DAYSIDE_LEVEL
+    })
 }
 
 /// The inputs' checks (their doc comments' ranges), giving the metallicity E × 10^\[Fe/H\] and the

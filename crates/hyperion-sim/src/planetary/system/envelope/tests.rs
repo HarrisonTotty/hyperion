@@ -20,7 +20,10 @@ use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::derive::solar::{PLANETS, SOLAR_AGE, solar_disc, solar_system};
 use crate::planetary::derive::{DerivedBody, PlanetClass};
 use crate::planetary::hooks::aerosols::AerosolMode;
-use crate::planetary::hooks::envelope_atmosphere::{DECK_COLUMN_BOTTOM, DeckKind};
+use crate::planetary::hooks::envelope_atmosphere::{
+    DAYSIDE_LEVEL, DECK_COLUMN_BOTTOM, DaysideDecksRules, DeckKind, HOT_DAYSIDE_TEMPERATURE,
+    with_dayside_decks,
+};
 use crate::planetary::hooks::structure::envelope::{
     ADIABAT_BOTTOM, MEAN_REDISTRIBUTION, OPACITY_RATIO, OPTICAL_DEPTH_EXPONENT,
     THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG,
@@ -772,27 +775,31 @@ fn deck_tau_above(envelope: &Envelope, condensate: SubstanceId, level: f64) -> O
         .iter()
         .filter(|mode| mode.deck() == condensate)
     {
-        let Ok(depth) = mode.optical_depth() else {
-            continue;
-        };
-        let profile = mode.profile();
-        let (base, top, f) = (
-            profile.base().value(),
-            profile.top().value(),
-            profile.exponent(),
-        );
-        let tau = depth.value();
-        let above = if level <= top {
-            0.0
-        } else if level >= base {
-            tau
-        } else {
-            let edge = math::powf(top / base, f + 1.0);
-            tau * (math::powf(level / base, f + 1.0) - edge) / (1.0 - edge)
-        };
-        total = Some(total.unwrap_or(0.0) + above);
+        if let Some(above) = mode_tau_above(mode, level) {
+            total = Some(total.unwrap_or(0.0) + above);
+        }
     }
     total
+}
+
+/// τ(550) of the mode `mode` above the level `level` (Pa), as [`deck_tau_above`] takes it; `None`
+/// where it has no τ.
+fn mode_tau_above(mode: &AerosolMode, level: f64) -> Option<f64> {
+    let tau = mode.optical_depth().ok()?.value();
+    let profile = mode.profile();
+    let (base, top, f) = (
+        profile.base().value(),
+        profile.top().value(),
+        profile.exponent(),
+    );
+    Some(if level <= top {
+        0.0
+    } else if level >= base {
+        tau
+    } else {
+        let edge = math::powf(top / base, f + 1.0);
+        tau * (math::powf(level / base, f + 1.0) - edge) / (1.0 - edge)
+    })
 }
 
 /// The census of the records' envelopes (P14.T54.b.i; decision-p14-t24d-profile §9's bless-note
@@ -1759,4 +1766,287 @@ fn under_every_26_hold_the_deck_profile_s_census() {
         held.len(),
         largest.join("\n  ")
     );
+}
+
+/// Whether a mode naming the deck `deck` is one the dayside cuts (P14.T52.h): a refractory's, a
+/// sulphide's or a salt's.
+fn dayside_kind(deck: SubstanceId) -> bool {
+    matches!(
+        DeckKind::of(deck),
+        Some(DeckKind::Refractory | DeckKind::SulphideOrSalt)
+    )
+}
+
+/// The τ(550) the modes of `envelope` that the dayside cuts put above `level` (Pa), each weighted
+/// by its coverage.
+fn dayside_tau_above(envelope: &Envelope, level: f64) -> f64 {
+    let mut total = 0.0;
+    for mode in envelope.atmosphere().modes() {
+        if dayside_kind(mode.deck()) {
+            total += mode.coverage() * mode_tau_above(mode, level).unwrap_or(0.0);
+        }
+    }
+    total
+}
+
+/// The fixture's hot Jupiter under every 26 hold with the dayside decks' rules `rules`, derived
+/// inside the switches.
+fn fixture_at_26(rules: DaysideDecksRules) -> Envelope {
+    let hot = fixture_hot_jupiter();
+    with_every_26_hold(|| {
+        with_dayside_decks(rules, || {
+            envelope_by_hand(&hot).expect("the fixture's hot Jupiter")
+        })
+    })
+}
+
+/// P14.T52.h on the fixture's hot Jupiter (`T_eq` 1,449 K, its photosphere at 0.207 bar), under
+/// every 26 hold: no refractory, sulphide or salt mode carries τ above 1 bar, each weighted by its
+/// coverage; its `Al₂O₃`, CaTiO₃, Fe, Mg₂SiO₄ and MgSiO₃ stop at 1 bar, and its Cr and `MnS`,
+/// based above it, cover none; each mode's coverage-weighted τ below 1 bar is its held twin's
+/// within 10⁻¹² relative; and under `Held` its envelope is 25's to the bit.
+#[test]
+fn under_every_26_hold_the_fixture_hot_jupiter_s_dayside_holds_no_deep_deck_above_one_bar() {
+    let cleared = fixture_at_26(DaysideDecksRules::Cleared);
+    let held = fixture_at_26(DaysideDecksRules::Held);
+    let at_25 = with_every_25_hold(|| {
+        envelope_by_hand(&fixture_hot_jupiter()).expect("the fixture's hot Jupiter")
+    });
+    assert_eq!(format!("{held:?}"), format!("{at_25:?}"), "held, 25's");
+    let one_bar = DAYSIDE_LEVEL.value();
+    let photosphere = cleared
+        .atmosphere()
+        .profile()
+        .photosphere_pressure()
+        .value();
+    assert!(photosphere < one_bar, "{photosphere} Pa");
+    assert_same_bits(dayside_tau_above(&cleared, one_bar), 0.0);
+    let held_above = dayside_tau_above(&held, one_bar);
+    eprintln!(
+        "the fixture's hot Jupiter: τ above 1 bar {held_above:.4} held, 0 cleared; above its \
+         photosphere {:.4} held, {:.4} cleared",
+        dayside_tau_above(&held, photosphere),
+        dayside_tau_above(&cleared, photosphere),
+    );
+    let modes = |envelope: &Envelope, key: &str| -> Vec<AerosolMode> {
+        envelope
+            .atmosphere()
+            .modes()
+            .iter()
+            .filter(|m| m.deck() == row(key))
+            .copied()
+            .collect()
+    };
+    for key in ["Al2O3", "CaTiO3", "Fe", "Mg2SiO4", "MgSiO3"] {
+        let cut = modes(&cleared, key);
+        assert!(!cut.is_empty(), "{key}: a mode");
+        for mode in cut {
+            assert_same_bits(mode.profile().top().value(), one_bar);
+            assert_same_bits(mode.coverage(), 1.0);
+        }
+    }
+    for key in ["Cr", "MnS"] {
+        let none = modes(&cleared, key);
+        assert!(!none.is_empty(), "{key}: a mode");
+        for mode in none {
+            assert!(mode.profile().base().value() <= one_bar, "{key}");
+            assert_same_bits(mode.coverage(), 0.0);
+        }
+    }
+    let below = |mode: &AerosolMode| {
+        let tau = mode.optical_depth().map_or(0.0, |d| d.value());
+        mode.coverage() * (tau - mode_tau_above(mode, one_bar).unwrap_or(0.0))
+    };
+    let (was, now) = (held.atmosphere().modes(), cleared.atmosphere().modes());
+    assert_eq!(was.len(), now.len());
+    for (x, y) in was.iter().zip(now) {
+        let (a, b) = (below(x), below(y));
+        assert!(
+            (a - b).abs() <= 1e-12 * a.abs().max(b.abs()),
+            "{}: τ below 1 bar {b} against {a}",
+            key_of(x.material())
+        );
+        if !dayside_kind(x.deck()) {
+            assert_eq!(format!("{x:?}"), format!("{y:?}"));
+        }
+    }
+}
+
+/// P14.T52.h's dayside gives the fixture's hot Jupiter the same envelope twice (the
+/// sim-determinism skill's rule), each derived afresh inside the switches.
+#[test]
+fn under_every_26_hold_the_dayside_envelope_is_the_same_twice() {
+    let twice = [
+        fixture_at_26(DaysideDecksRules::Cleared),
+        fixture_at_26(DaysideDecksRules::Cleared),
+    ];
+    assert_eq!(format!("{:?}", twice[0]), format!("{:?}", twice[1]));
+}
+
+/// One envelope the dayside moves in the census: where, its `T_eq`, its cut level, and the τ
+/// removed above it, by row.
+#[derive(Debug, Clone)]
+struct DaysideMove {
+    at: String,
+    t_eq: f64,
+    level: f64,
+    removed: f64,
+    by_row: Vec<(String, f64)>,
+}
+
+/// Every planet's, member's and moon's record of the system of `seed` and `ctx` at the epoch, with
+/// its body's index, generated afresh under every 26 hold with the dayside decks' rules `rules`.
+fn records_at_26(
+    seed: Seed,
+    ctx: &SystemContext,
+    rules: DaysideDecksRules,
+) -> Vec<(u32, BodyRecord)> {
+    with_every_26_hold(|| {
+        with_dayside_decks(rules, || {
+            let system = generate(seed, ctx);
+            let mut records = Vec::new();
+            walk(ctx, &system, UniverseTime::EPOCH, &mut |_, visit| {
+                records.push((u32::from(visit.body.index.get()), visit.record));
+            });
+            records
+        })
+    })
+}
+
+/// P14.T52.h's census over `thin_air_sets` (the sample's 400, the golden systems and LOOK72's) at
+/// the epoch: every 26 hold against every 26 hold with the dayside decks' rules set back to
+/// `Held`, printed (`--nocapture`). Only modes of refractory, sulphide or salt decks on envelopes
+/// at `T_eq` ≥ 950 K move (asserted). Printed: the envelopes moved, each with its `T_eq` and the τ
+/// removed above its cut level (each mode weighted by its coverage), and the largest τ such modes
+/// leave above a photosphere below 950 K.
+#[test]
+#[ignore = "slow: the dayside census over 442 systems, held and cleared"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census, its assertion and each printed line in turn"
+)]
+fn under_every_26_hold_the_dayside_moves_only_hot_envelopes_deep_decks() {
+    use std::fmt::Write as _;
+    let sets = thin_air_sets();
+    let (mut envelopes, mut hot) = (0usize, 0usize);
+    let mut moved: Vec<DaysideMove> = Vec::new();
+    let mut warm: Vec<(f64, String)> = Vec::new();
+    for (set, seed, ctx) in &sets {
+        let held = records_at_26(*seed, ctx, DaysideDecksRules::Held);
+        let cleared = records_at_26(*seed, ctx, DaysideDecksRules::Cleared);
+        assert_eq!(held.len(), cleared.len(), "{set} {}", ctx.id());
+        for ((index, a), (other, b)) in held.iter().zip(&cleared) {
+            assert_eq!(index, other);
+            let at = format!("{set} {} {index:04x}", ctx.id());
+            let (Section::Ok(was), Section::Ok(now)) = (a.envelope(), b.envelope()) else {
+                assert_eq!(format!("{a:?}"), format!("{b:?}"), "{at}: no envelope");
+                continue;
+            };
+            envelopes += 1;
+            let Section::Ok(bulk) = a.bulk() else {
+                panic!("{at}: an envelope with no bulk");
+            };
+            let t_eq = bulk.equilibrium_temperature().value();
+            let photosphere = was.atmosphere().profile().photosphere_pressure().value();
+            let (mut text_a, mut text_b) = (format!("{a:?}"), format!("{b:?}"));
+            let mut by_row = Vec::new();
+            let level = if photosphere > DAYSIDE_LEVEL.value() {
+                photosphere
+            } else {
+                DAYSIDE_LEVEL.value()
+            };
+            for (x, y) in was
+                .atmosphere()
+                .modes()
+                .iter()
+                .zip(now.atmosphere().modes())
+            {
+                let (dx, dy) = (format!("{x:?}"), format!("{y:?}"));
+                if dx == dy {
+                    continue;
+                }
+                assert!(
+                    t_eq >= HOT_DAYSIDE_TEMPERATURE.value() && dayside_kind(x.deck()),
+                    "{at} (T_eq {t_eq} K): a mode the dayside does not cut moves: {dx} against \
+                     {dy}"
+                );
+                let removed = x.coverage() * mode_tau_above(x, level).unwrap_or(0.0)
+                    - y.coverage() * mode_tau_above(y, level).unwrap_or(0.0);
+                by_row.push((key_of(x.material()), removed));
+                text_a = text_a.replacen(&dx, "a dayside mode", 1);
+                text_b = text_b.replacen(&dy, "a dayside mode", 1);
+            }
+            assert_eq!(
+                text_a, text_b,
+                "{at}: the record moves beyond its dayside modes"
+            );
+            if t_eq >= HOT_DAYSIDE_TEMPERATURE.value() {
+                hot += 1;
+                if !by_row.is_empty() {
+                    moved.push(DaysideMove {
+                        at,
+                        t_eq,
+                        level,
+                        removed: by_row.iter().map(|(_, tau)| tau).sum(),
+                        by_row,
+                    });
+                }
+            } else {
+                let mut keys = String::new();
+                for mode in now.atmosphere().modes() {
+                    if !dayside_kind(mode.deck()) {
+                        continue;
+                    }
+                    let tau = mode.coverage() * mode_tau_above(mode, photosphere).unwrap_or(0.0);
+                    if tau > 0.0 {
+                        write!(keys, " {} {tau:.3}", key_of(mode.material()))
+                            .expect("a string takes a line");
+                    }
+                }
+                let tau = dayside_tau_above(now, photosphere);
+                if tau > 0.0 {
+                    let bar = photosphere / 1e5;
+                    warm.push((
+                        tau,
+                        format!("{at} (T_eq {t_eq:.0} K, photosphere {bar:.4} bar):{keys}"),
+                    ));
+                }
+            }
+        }
+    }
+    warm.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut lines = String::new();
+    for m in &moved {
+        writeln!(
+            lines,
+            "  {} (T_eq {:.0} K): τ {:.4} removed above {:.4} bar, by row {:?}",
+            m.at,
+            m.t_eq,
+            m.removed,
+            m.level / 1e5,
+            m.by_row
+                .iter()
+                .map(|(key, tau)| format!("{key} {tau:.4}"))
+                .collect::<Vec<_>>()
+        )
+        .expect("a string takes a line");
+    }
+    let golden_moved: Vec<&str> = moved
+        .iter()
+        .map(|m| m.at.as_str())
+        .filter(|at| !at.starts_with("sample") && !at.starts_with("look72"))
+        .collect();
+    eprintln!(
+        "the dayside census at 26 over {} systems: {envelopes} envelopes, {hot} at T_eq ≥ 950 K, \
+         {} moved:\n{lines}golden systems moved: {golden_moved:?}\nbelow 950 K, the largest τ of \
+         refractory, sulphide or salt modes above a photosphere, the first five:\n  {}",
+        sets.len(),
+        moved.len(),
+        warm.iter()
+            .take(5)
+            .map(|(tau, line)| format!("{tau:.4}: {line}"))
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    );
+    assert!(!moved.is_empty(), "the census moves an envelope");
 }

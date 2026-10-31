@@ -531,7 +531,10 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   section's model, which nothing else reads;
 /// - a loop deck's mode drawn on its own column, `DECK_PROFILE_VERSION` (P14.T52.g), at
 ///   `DeckProfileRules::Saturation` through `with_deck_profile`: its profile's exponent the
-///   smaller of its deck's `f_sed` and its saturation's log-slope at the base.
+///   smaller of its deck's `f_sed` and its saturation's log-slope at the base;
+/// - a hot envelope's dayside above 1 bar, `DAYSIDE_DECKS_VERSION` (P14.T52.h), at
+///   `DaysideDecksRules::Cleared` through `with_dayside_decks`: each refractory, sulphide or salt
+///   mode of an envelope at `T_eq` ≥ 950 K cut at 1 bar, or its photosphere where deeper.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
@@ -546,6 +549,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         with_locked_state, with_melt_oxygen, with_sea_deck,
     };
     use crate::planetary::derive::passes::{PassStep, PassStop, with_pass_step, with_pass_stop};
+    use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
     use crate::planetary::hosts::strip::{StripRules, with_stripping};
@@ -572,6 +576,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_pass_step(PassStep::Aitken, run);
     let run = move || with_supercritical_envelope(SupercriticalEnvelopeRules::Modelled, run);
     let run = move || with_deck_profile(DeckProfileRules::Saturation, run);
+    let run = move || with_dayside_decks(DaysideDecksRules::Cleared, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 
@@ -916,6 +921,29 @@ mod tests {
             DeckProfileRules::Held
         );
         assert_eq!(DeckProfileRules::in_force(), DeckProfileRules::Held);
+    }
+
+    /// 26's dayside decks' switch (P14.T52.h): in force inside 26's helper, held outside it, inside
+    /// 25's and where a test sets it back.
+    #[test]
+    fn the_dayside_decks_hold_is_in_force_inside_26_s_helper_alone() {
+        use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
+        assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
+        assert_eq!(
+            with_every_26_hold(DaysideDecksRules::in_force),
+            DaysideDecksRules::Cleared
+        );
+        assert_eq!(
+            with_every_25_hold(DaysideDecksRules::in_force),
+            DaysideDecksRules::Held
+        );
+        assert_eq!(
+            with_every_26_hold(|| {
+                with_dayside_decks(DaysideDecksRules::Held, DaysideDecksRules::in_force)
+            }),
+            DaysideDecksRules::Held
+        );
+        assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
     }
 
     #[test]

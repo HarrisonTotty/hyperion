@@ -935,6 +935,63 @@ impl Mode {
     pub const fn coverage(&self) -> f64 {
         self.coverage
     }
+
+    /// The mode as it lies below the level `level`, for a hot envelope's dayside (P14.T52.h;
+    /// `hooks::envelope_atmosphere`'s "The dayside"), its τ(550) taken again at `temperature`, the
+    /// one it was built at (a loop mode's, its deck's base's), by its profile from `p_b` up to
+    /// `p_t` with exponent f:
+    ///
+    /// - **topped at or below the level** (`p_t` ≥ `level`): unchanged;
+    /// - **based at or above it** (`p_b` ≤ `level`, its top above it): its coverage 0, its column,
+    ///   τ and profile kept, for a later limb or night;
+    /// - **straddling it** (`p_t` < `level` < `p_b`): its top the level and its column its share
+    ///   below, S = (1 − (`level` ÷ `p_b`)^(f+1)) ÷ (1 − (`p_t` ÷ `p_b`)^(f+1)), the column of
+    ///   its mixing ratio (p ÷ `p_b`)^f below the level over its whole; its τ(550) is taken again
+    ///   from that column, so a mode with no size or no τ keeps its reason. Its size, coverage,
+    ///   base and exponent are unchanged.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildModeError::Profile`] for a level that is not finite and positive (its `top` the
+    /// level), and [`BuildModeError::Temperature`] for a temperature that is not finite and
+    /// positive.
+    pub(crate) fn below(
+        &self,
+        level: Pascals,
+        temperature: Kelvin,
+    ) -> Result<Self, BuildModeError> {
+        let profile = self.profile;
+        let (base, top, cut) = (profile.base.value(), profile.top.value(), level.value());
+        if !(cut.is_finite() && cut > 0.0) {
+            return Err(BuildModeError::Profile {
+                base: profile.base,
+                top: level,
+                exponent: profile.exponent,
+            });
+        }
+        let t = temperature.value();
+        if !(t.is_finite() && t > 0.0) {
+            return Err(BuildModeError::Temperature { temperature });
+        }
+        if top >= cut {
+            return Ok(*self);
+        }
+        if base <= cut {
+            return Ok(Self {
+                coverage: 0.0,
+                ..*self
+            });
+        }
+        let power = profile.exponent + 1.0;
+        let share = (1.0 - math::powf(cut / base, power)) / (1.0 - math::powf(top / base, power));
+        let column_mass = KilogramsPerSquareMetre::new(self.column_mass.value() * share);
+        Ok(Self {
+            column_mass,
+            optical_depth: optical_depth(self.material, self.phase, self.size, column_mass, t),
+            profile: ModeProfile::new(profile.base, level, profile.exponent)?,
+            ..*self
+        })
+    }
 }
 
 /// A condensate's deck: where it forms, its column, the vapour it leaves above, and its modes.

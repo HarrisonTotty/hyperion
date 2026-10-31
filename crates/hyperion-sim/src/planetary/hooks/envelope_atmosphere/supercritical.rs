@@ -354,6 +354,9 @@ impl EnvelopeAtmosphere {
             &deep,
             &clouds,
             inputs.gravity,
+            // P14.T52.h's dayside cut is a hot giant envelope's: a solid body's supercritical
+            // envelope keeps every mode whole, as P14.T53.f built it.
+            None,
             |_, _, _, _| Ok((Vec::new(), None)),
         )?)
     }

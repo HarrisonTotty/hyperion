@@ -11,6 +11,9 @@ import type { SubstancePhaseDto } from "./SubstancePhaseDto";
  *
  * A member the generator does not model is absent, never `null` and never 0, and
  * `not_modelled` says why ([`AerosolNotModelledDto`]).
+ *
+ * From generator version 26 a hot envelope's refractory, sulphide or salt mode stops at 1 bar
+ * (or its photosphere, if deeper), or covers none above it (P14.T52.h).
  */
 export type AerosolModeDto = { 
 /**
@@ -73,8 +76,9 @@ f_sed: number,
  * The share of the sky it covers, dimensionless, in `[0, 1]`: in a surface's inventory, a
  * deck's mode the body's cloud fraction (P14.T51.b's) and a rule's mode (the dust, a haze, a
  * sulphate layer) the whole sky; every mode of an envelope, its decks' and its hazes', the
- * whole sky, 1, at generator version 24. A reader applies it as the fraction it is, never as
- * 1 by rule.
+ * whole sky, 1, at generator version 24, but from version 26 0 for a hot envelope's
+ * refractory, sulphide or salt mode based above 1 bar (or its photosphere, if deeper;
+ * P14.T52.h). A reader applies it as the fraction it is, never as 1 by rule.
  */
 coverage: number, 
 /**

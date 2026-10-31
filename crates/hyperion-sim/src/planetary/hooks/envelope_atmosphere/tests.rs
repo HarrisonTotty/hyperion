@@ -1573,8 +1573,9 @@ fn the_deep_decks_put_little_above_one_bar() {
     assert!(read.is_finite());
 }
 
-/// The golden's envelopes, by name: the Solar System table's four giants, the KELT-9b-like dayside
-/// and the 8 M⊕ sub-Neptune.
+/// The golden's envelopes, by name: the Solar System table's four giants, the KELT-9b-like dayside,
+/// the 8 M⊕ sub-Neptune, and P14.T52.h's two hot Jupiters ([`hot_jupiter`]), whose refractory decks
+/// straddle 1 bar and, at 400 m s⁻², the photosphere below it, so that 26's dayside moves them.
 fn golden_cases() -> Vec<(&'static str, Case)> {
     vec![
         ("jupiter", table_case("Jupiter")),
@@ -1583,11 +1584,13 @@ fn golden_cases() -> Vec<(&'static str, Case)> {
         ("neptune", table_case("Neptune")),
         ("kelt_9b", kelt_9b()),
         ("sub_neptune", sub_neptune(8.0, 0.03)),
+        ("hot_jupiter", hot_jupiter(950.0, 9.19)),
+        ("dense_hot_jupiter", hot_jupiter(1_200.0, 400.0)),
     ]
 }
 
-/// The visible atmospheres of the Solar System table's four giants, a KELT-9b-like dayside and an
-/// 8 M⊕ sub-Neptune, pinned: each one's inputs, its composition at 1 bar, mean molar mass and
+/// The visible atmospheres of the Solar System table's four giants, a KELT-9b-like dayside, an
+/// 8 M⊕ sub-Neptune and two hot Jupiters, pinned: each one's inputs, its composition at 1 bar, mean molar mass and
 /// `c_p` ÷ R, every deck, every mode (its size, column, τ or their labels, profile and coverage),
 /// every absorber, its hazes' τ, and the rows not formed and not modelled. Floats are their bits
 /// with Rust's shortest round-trip decimal beside.
@@ -1800,4 +1803,241 @@ fn under_the_deck_profile_the_giants_volatile_decks_are_drawn_on_their_columns()
         }
     }
     assert_eq!(checked, 3, "Jupiter's NH₃ and the ice giants' CH₄");
+}
+
+/// The dayside decks (P14.T52.h) are held until the 25 → 26 bump: the rules in force are version
+/// 25's, and the tests' switch reaches 26's.
+#[test]
+fn the_dayside_decks_are_held_only_until_the_26_bump() {
+    assert!(
+        crate::GENERATOR_VERSION < DAYSIDE_DECKS_VERSION,
+        "the 25 → 26 bump clears a hot envelope's dayside above 1 bar (P14.T52.h): delete \
+         `DAYSIDE_DECKS_VERSION`, `DaysideDecksRules` with its `Held` arm and `dayside_level`'s \
+         check of it, the tests' `with_dayside_decks`, its line in `with_every_26_hold` with its \
+         test `the_dayside_decks_hold_is_in_force_inside_26_s_helper_alone`, this test and \
+         `a_panic_inside_the_dayside_decks_switch_sets_the_rules_back`"
+    );
+    assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
+    assert_eq!(
+        with_dayside_decks(DaysideDecksRules::Cleared, DaysideDecksRules::in_force),
+        DaysideDecksRules::Cleared
+    );
+    assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
+}
+
+/// The switch sets the version's rules back when its closure panics. Native only: on
+/// wasm32-wasip1 a panic aborts the whole test binary (panic = abort), so `catch_unwind` cannot
+/// catch it, and no rules are left to set back.
+#[test]
+#[cfg(not(target_family = "wasm"))]
+fn a_panic_inside_the_dayside_decks_switch_sets_the_rules_back() {
+    let unwound = std::panic::catch_unwind(|| {
+        with_dayside_decks(DaysideDecksRules::Cleared, || panic!("inside the switch"));
+    });
+    let payload = unwound.expect_err("the closure panics");
+    assert_eq!(payload.downcast_ref::<&str>(), Some(&"inside the switch"));
+    assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
+}
+
+/// A hot Jupiter with a hot interior at `T_eq` `t_eq` K and gravity `gravity` m s⁻² (P14.T52.h's
+/// hand envelopes): Sudarsky's giant's abundances at `T_eff` 1,500 K ([`sudarsky`]), and the
+/// fixture hot Jupiter's (an HD 209458 b's) `T_int`, 558 K, which joins its adiabat near its
+/// refractory decks, so that they straddle 1 bar.
+fn hot_jupiter(t_eq: f64, gravity: f64) -> Case {
+    Case {
+        internal: 558.0,
+        equilibrium: t_eq,
+        gravity,
+        ..sudarsky(1_500.0)
+    }
+}
+
+/// `case`'s atmosphere under the dayside decks' rules `rules`, derived inside the switch.
+fn under(rules: DaysideDecksRules, case: &Case) -> EnvelopeAtmosphere {
+    with_dayside_decks(rules, || case.atmosphere())
+}
+
+/// Whether a mode of `atmosphere` naming the deck `deck` may be cut: a refractory's, a sulphide's
+/// or a salt's deck of the atmosphere's own.
+fn cut_kind(atmosphere: &EnvelopeAtmosphere, deck: SubstanceId) -> bool {
+    matches!(
+        DeckKind::of(deck),
+        Some(DeckKind::Refractory | DeckKind::SulphideOrSalt)
+    ) && atmosphere.decks().iter().any(|d| d.condensate() == deck)
+}
+
+/// `cleared`'s modes against `held`'s, cut at `level` Pa (P14.T52.h): each volatile's and haze's
+/// mode, and each refractory, sulphide or salt mode topped at or below the level, the same to the
+/// bit; each such mode straddling it topped at it, its column and τ less, its base, exponent,
+/// coverage, size and temperature the same; each based at or above it covering none, all else
+/// the same. Everything but the modes is the same to the bit. Gives how many modes were cut and
+/// how many cover none.
+fn assert_cut_at(
+    name: &str,
+    held: &EnvelopeAtmosphere,
+    cleared: &EnvelopeAtmosphere,
+    level: f64,
+) -> (usize, usize) {
+    let whole = |a: &EnvelopeAtmosphere| {
+        format!(
+            "{:?}",
+            (
+                a.profile(),
+                a.composition(),
+                a.mean_molar_mass_g_per_mol(),
+                a.heat_capacity_over_r(),
+                a.upper_gas(),
+                a.decks(),
+                a.deck_bounds(),
+                a.deck_column_masses(),
+                a.haze_optical_depth(),
+                a.absorbers(),
+                a.not_formed(),
+                a.not_modelled(),
+            )
+        )
+    };
+    assert_eq!(whole(held), whole(cleared), "{name}: beyond the modes");
+    assert_eq!(held.modes().len(), cleared.modes().len(), "{name}");
+    let (mut cut, mut none) = (0, 0);
+    for (was, now) in held.modes().iter().zip(cleared.modes()) {
+        let key = key_of(was.material());
+        let (base, top) = (was.profile().base().value(), was.profile().top().value());
+        if !cut_kind(held, was.deck()) || top >= level {
+            assert_eq!(format!("{was:?}"), format!("{now:?}"), "{name} {key}");
+            continue;
+        }
+        if base <= level {
+            none += 1;
+            assert_same_bits(now.coverage(), 0.0);
+            let rest = |m: &AerosolMode| {
+                format!(
+                    "{:?}",
+                    (
+                        m.material(),
+                        m.size(),
+                        m.column_mass(),
+                        m.optical_depth(),
+                        m.profile(),
+                        m.temperature()
+                    )
+                )
+            };
+            assert_eq!(rest(was), rest(now), "{name} {key}");
+            continue;
+        }
+        cut += 1;
+        assert_same_bits(now.profile().top().value(), level);
+        let same = |m: &AerosolMode| {
+            format!(
+                "{:?}",
+                (
+                    m.material(),
+                    m.phase(),
+                    m.shape(),
+                    m.deck(),
+                    m.size(),
+                    m.coverage(),
+                    m.temperature(),
+                    m.profile().base(),
+                    m.profile().exponent()
+                )
+            )
+        };
+        assert_eq!(same(was), same(now), "{name} {key}");
+        let mass = |m: &AerosolMode| {
+            m.column_mass()
+                .map_or(f64::NAN, KilogramsPerSquareMetre::value)
+        };
+        assert!(
+            mass(now) < mass(was),
+            "{name} {key}: {} of {}",
+            mass(now),
+            mass(was)
+        );
+        if let (Ok(a), Ok(b)) = (was.optical_depth(), now.optical_depth()) {
+            assert!(
+                b.value() < a.value(),
+                "{name} {key}: τ {} of {}",
+                b.value(),
+                a.value()
+            );
+        }
+    }
+    (cut, none)
+}
+
+/// P14.T52.h's gate: at a `T_eq` of 949 K the dayside decks' rules move nothing; at 950 K each
+/// refractory, sulphide or salt mode is cut at 1 bar (the photosphere lying above it), and nothing
+/// else moves, the decks and their column masses included.
+#[test]
+fn a_hot_envelope_s_dayside_is_cut_at_one_bar_from_950_k() {
+    let cool = hot_jupiter(949.0, 9.19);
+    assert_eq!(
+        format!("{:?}", under(DaysideDecksRules::Held, &cool)),
+        format!("{:?}", under(DaysideDecksRules::Cleared, &cool)),
+        "949 K"
+    );
+    let hot = hot_jupiter(950.0, 9.19);
+    let (held, cleared) = (
+        under(DaysideDecksRules::Held, &hot),
+        under(DaysideDecksRules::Cleared, &hot),
+    );
+    let photosphere = held.profile().photosphere_pressure().value();
+    assert!(photosphere < DAYSIDE_LEVEL.value(), "{photosphere} Pa");
+    let (cut, none) = assert_cut_at("950 K", &held, &cleared, DAYSIDE_LEVEL.value());
+    eprintln!("950 K: {cut} modes cut at 1 bar, {none} covering none");
+    assert!(cut > 0, "a mode straddles 1 bar");
+}
+
+/// Where the photosphere lies deeper than 1 bar (a hot Jupiter at 400 m s⁻²), the dayside is cut
+/// there.
+#[test]
+fn the_dayside_level_is_the_photosphere_where_that_is_deeper() {
+    let dense = hot_jupiter(1_200.0, 400.0);
+    let (held, cleared) = (
+        under(DaysideDecksRules::Held, &dense),
+        under(DaysideDecksRules::Cleared, &dense),
+    );
+    let photosphere = held.profile().photosphere_pressure().value();
+    assert!(photosphere > DAYSIDE_LEVEL.value(), "{photosphere} Pa");
+    let (cut, none) = assert_cut_at("400 m s⁻²", &held, &cleared, photosphere);
+    eprintln!(
+        "400 m s⁻²: {cut} modes cut at the photosphere, {:.4} bar, {none} covering none",
+        photosphere / 1e5
+    );
+    assert!(cut > 0, "a mode straddles the photosphere");
+}
+
+/// The golden's envelopes ([`golden_cases`]) under both rules: the dayside decks' move no mode of
+/// an envelope under 950 K (the table's four giants, the sub-Neptune), and a hot one's (the
+/// KELT-9b-like dayside, the hot Jupiters) refractory, sulphide and salt modes are cut as
+/// [`assert_cut_at`] checks, any other mode unchanged. No volatile's or haze's mode forms on a hot
+/// one (no volatile condenses there, soot ends at 950 K and S₈ at 700 K), so that `assemble`'s
+/// selection by [`DeckKind`] keeps them by construction; the hot cases' modes are asserted to be
+/// the decks' own, so that a later rule that forms one there reopens the check.
+#[test]
+fn the_dayside_decks_move_no_cool_envelope_and_no_volatile_or_haze() {
+    for (name, case) in golden_cases() {
+        let (held, cleared) = (
+            under(DaysideDecksRules::Held, &case),
+            under(DaysideDecksRules::Cleared, &case),
+        );
+        if case.equilibrium < HOT_DAYSIDE_TEMPERATURE.value() {
+            assert_eq!(format!("{held:?}"), format!("{cleared:?}"), "{name}");
+            continue;
+        }
+        let level = DAYSIDE_LEVEL
+            .value()
+            .max(held.profile().photosphere_pressure().value());
+        assert_cut_at(name, &held, &cleared, level);
+        for mode in held.modes() {
+            assert!(
+                cut_kind(&held, mode.deck()),
+                "{name}: a volatile's or haze's mode {} forms on a hot envelope; check that the \
+                 dayside leaves it",
+                key_of(mode.material())
+            );
+        }
+    }
 }
