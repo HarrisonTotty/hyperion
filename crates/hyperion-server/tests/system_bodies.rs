@@ -148,6 +148,7 @@ async fn system_bodies_and_body_records_are_the_sims_and_cached() {
     a_body_the_system_does_not_hold_is_unknown_body(&server).await;
     mass_and_orbit_gives_no_bulk_section(&server).await;
     no_system_has_events_before_the_25_bump(&server).await;
+    a_brown_dwarf_s_bodies_are_refused_until_the_26_bump(&server).await;
     server.stop().await;
 }
 
@@ -176,6 +177,65 @@ async fn no_system_has_events_before_the_25_bump(server: &TestServer) {
     }
     // Nothing was built for the held kind.
     assert_eq!(server.stats().bodies().modelled(), 0);
+    client.close().await;
+}
+
+/// P14.T27.a at generator version 24: a free-floating brown dwarf's bodies are refused as the
+/// sim's `SystemContext::for_system` refuses it, `unknown_system` naming the field, and nothing is
+/// generated for it, although the system cache holds its stars. 26's bump gives it bodies: this
+/// property then becomes a test of them.
+async fn a_brown_dwarf_s_bodies_are_refused_until_the_26_bump(server: &TestServer) {
+    use hyperion_sim::galaxy::placement::{ResolveSystemError, generate_cell};
+    use hyperion_sim::id::Layer;
+    let (mut client, universe) = joined(server, "Kepler Reach brown dwarfs").await;
+    let mut records = Vec::new();
+    // Cells of layer F along the solar circle until one holds a brown dwarf.
+    let dwarf = (0..64)
+        .find_map(|x| {
+            let cell = CellKey::new(Layer::BrownDwarf, [x, 1_625, 0]).expect("in the cube");
+            generate_cell(galaxy(), cell, &mut records);
+            records.first().copied()
+        })
+        .expect("the solar circle holds brown dwarfs");
+    assert_eq!(
+        SystemContext::for_system(galaxy(), dwarf.id()),
+        Err(ResolveSystemError::LayerNotGenerated(Layer::BrownDwarf)),
+        "26's bump gives the brown dwarfs their bodies (P14.T27.a): test them here instead"
+    );
+    let generated = server.stats().bodies().generated();
+    let raw = dwarf.id().raw();
+    let error = refused(
+        &mut client,
+        bodies_request(&universe, raw, at_years(0), DetailLevelDto::Full),
+    )
+    .await;
+    assert_eq!(
+        error.code,
+        ErrorCode::UnknownSystem,
+        "{raw:#018x}: {error:?}"
+    );
+    assert_eq!(error.field.as_deref(), Some("system"), "{error:?}");
+    let error = refused(
+        &mut client,
+        detail_request(
+            &universe,
+            BodyIdHex::from_parts(raw, 0x0100),
+            at_years(0),
+            DetailLevelDto::Full,
+        ),
+    )
+    .await;
+    assert_eq!(
+        error.code,
+        ErrorCode::UnknownSystem,
+        "{raw:#018x}: {error:?}"
+    );
+    assert_eq!(error.field.as_deref(), Some("body"), "{error:?}");
+    assert_eq!(
+        server.stats().bodies().generated(),
+        generated,
+        "nothing generated"
+    );
     client.close().await;
 }
 

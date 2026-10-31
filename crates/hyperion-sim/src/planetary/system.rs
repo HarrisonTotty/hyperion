@@ -18,7 +18,9 @@
 //! 3. **The class** (P14.T4) of each zone, drawn at its host number under the constraints of its
 //!    disc and its reach. A close binary acts through the reach alone: design note 10's flag
 //!    ([`OrbitZone::host_multiplicity`]) moves no class weight (decision-p14-d10-bd-companions
-//!    §2).
+//!    §2). A free-floating brown dwarf ([`HostKind::BrownDwarf`], from generator version 26)
+//!    draws on its own weights, `Barren` or a chain
+//!    ([`brown_dwarf_class_weights`], P14.T27.a).
 //! 4. **Placement** (P14.T8), with D5's second fallback, in planet slots that continue from the
 //!    host before (design note 3): a host's slots are reserved by its drawn counts, so a planet's
 //!    index never depends on anything placed after it. A circumbinary zone of a pair closer than
@@ -45,10 +47,12 @@
 //! Then every planet's and member's rotation law, from it its satellites' frame on its Laplace
 //! surface, on which they are found again (P14.T56.a), and each moon's law on its plane.
 //!
-//! Second-generation planets (P14.T28.e) and the free-floating hosts of P14.T27 are not built:
-//! their stages do not exist yet, and their streams (`planet.secondgen`) and slots (`0xC0`–`0xCF`,
-//! the stellar level of a free-floating system) stay reserved for them. Nor is P14.T28.a's
-//! protoplanetary disc (belt slot `0xE0`) or P14.T28.d's debris disc (`0xEE`).
+//! Second-generation planets (P14.T28.e) and the rogue planets of P14.T27.b are not built: their
+//! stages do not exist yet, and their streams (`planet.secondgen`) and slots (`0xC0`–`0xCF`, the
+//! stellar level of a free-floating system) stay reserved for them. Nor is P14.T28.a's
+//! protoplanetary disc (belt slot `0xE0`) or P14.T28.d's debris disc (`0xEE`). A free-floating
+//! brown dwarf runs the steps above from generator version 26 (P14.T27.a), its planets from slot
+//! `0x01`.
 //!
 //! [`PlanetarySystem`] holds only that primordial state, which is what the server may cache ("state
 //! at the epoch, never positions at some time").
@@ -169,6 +173,7 @@ use crate::planetary::hooks::{
     self, BodyHooks, BulkComposition, GlobalFigures, Subsurface, SurfaceConditions, SurfaceSeed,
 };
 use crate::planetary::hosts::evolved::{Circularisation, EccentricityFloor};
+use crate::planetary::hosts::substellar::brown_dwarf_class_weights;
 use crate::planetary::hosts::young::{Formation, FormationDraws};
 use crate::planetary::index::{BodyIndex, LAST_PLANET_SLOT};
 use crate::planetary::label::{self, BodyLabel};
@@ -1279,7 +1284,14 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
             .outer()
             .map_or(ZoneLimit::Unbounded, ZoneLimit::Outer);
         let constraints = ClassConstraints::new(&disc, reach);
-        let weights = class_weights(zone.host_mass(), ctx.fe_h());
+        let weights = match ctx.host_kind() {
+            // A free-floating brown dwarf's own weights (P14.T27.a); a bound one's zone keeps the
+            // table's row (design note 10).
+            HostKind::BrownDwarf => brown_dwarf_class_weights(zone.host_mass(), ctx.fe_h()),
+            HostKind::Stellar | HostKind::RoguePlanet => {
+                class_weights(zone.host_mass(), ctx.fe_h())
+            }
+        };
         let drawn = draw_class(seed, id, zone.host_number(), &weights, &constraints);
         let plane = plane_of(hierarchy, &under, zone);
         let class = if slot > LAST_PLANET_SLOT {

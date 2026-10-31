@@ -155,7 +155,12 @@
 //!   ([`galaxy::imf::MASS_LIMIT_LO`](crate::galaxy::imf::MASS_LIMIT_LO)), the two small-planet
 //!   classes' weights at 0.08 M☉ go to it, and the giant classes are zero (design note 13: "no
 //!   giants, a compact chain or nothing"). No survey has measured how often a brown dwarf has
-//!   planets; the weight is continuous with the stars' at the limit.
+//!   planets; the weight is continuous with the stars' at the limit. That is the row of a brown
+//!   dwarf bound to a star, plan 11's component (design note 10). A free-floating brown dwarf
+//!   takes P14.T27.a's weights instead, `Barren` 0.5 against a chain of 0.5 falling to 0.2 at
+//!   13 Jupiter masses
+//!   ([`brown_dwarf_class_weights`](crate::planetary::hosts::substellar::brown_dwarf_class_weights),
+//!   from generator version 26).
 //!
 //! The ratio form keeps each giant class proportional to 10^(2 \[Fe/H\]) while giants are rare and
 //! saturates their total near four fifths at +0.5 (79% at 1 M☉, before the fallbacks). The
@@ -769,6 +774,14 @@ impl ClassWeights {
     #[must_use]
     pub const fn as_array(&self) -> &[f64; CLASS_COUNT] {
         &self.0
+    }
+
+    /// The weights `weights`, in [`ArchitectureClass::ALL`]'s order, for a host whose weights are
+    /// not [`class_weights`]': a free-floating brown dwarf's
+    /// ([`brown_dwarf_class_weights`](crate::planetary::hosts::substellar::brown_dwarf_class_weights)).
+    #[must_use]
+    pub(crate) const fn from_array(weights: [f64; CLASS_COUNT]) -> Self {
+        Self(weights)
     }
 
     /// One class's weight.

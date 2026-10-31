@@ -3199,6 +3199,8 @@ one log-normal draw per resource of 0.3 dex for what the model leaves out.
   linearly to 0.2 at 13 M_J. Luminosity, radius and temperature for T12 come from the brown dwarf's
   state at age + t (plan 06's `stellar::substellar::cooling`, as plan 13 routes it), so such planets
   cool with their host and the habitable zone sweeps inward across them.
+  - _Built_ 2026-10-31, held at 26 (`SUBSTELLAR_HOSTS_VERSION`): Risks, "Deviations in P14.T27.a,
+    as built".
 - **P14.T27.b Rogue planets.** `HostKind::RoguePlanet`: the object is body `0x0000`, derived by T16
   with no star (T_eq term zero, internal heat only: the cooling fit above 0.3 M_J, radiogenic and
   residual heat from T24 below it, and a hydrogen envelope's insulation where one survives).
@@ -33058,3 +33060,38 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   T_c and 6.75 p_c, its mode refused by F4. Held in reserve: a crossing
   base at or above 0.99 T_c takes `Supercritical` (its liquid floats in its gas; research-r08-t16a
   §2); P14.T53.b part 3 cures count (xii)'s two at 25, and the guard keeps it so.
+- **Deviations in P14.T27.a, as built (2026-10-31).** Held at 26: `hosts::substellar`'s
+  `SUBSTELLAR_HOSTS_VERSION`, `SubstellarHostRules::{Held, BrownDwarfs}`, the tests'
+  `with_substellar_hosts` (a line in `with_every_26_hold`) and the tripwire
+  `the_brown_dwarf_hosts_are_held_only_until_the_26_bump`; nothing moves at 24 or 25.
+  - New public items: `brown_dwarf_class_weights`, `brown_dwarf_chain_weight`, the constants
+    `BROWN_DWARF_BARREN_WEIGHT`, `BROWN_DWARF_CHAIN_WEIGHT`, `BROWN_DWARF_CHAIN_HELD_FROM` and
+    `DEUTERIUM_LIMIT_CHAIN_WEIGHT`, and `SystemContext::for_stars` (`from_stars`, refused as
+    `for_system` refuses), which the server's `bodies_of` now calls.
+  - Keyed on `HostKind::BrownDwarf`, which `from_stars` now gives under the new arm:
+    `generate_planets`' class weights, and `zone_stars`, which reads the cooling fit at 10 Myr
+    (design note 6's substellar rule) rather than 5 Gyr, and so the X-ray and ultraviolet history
+    too. T12 needed no change: `StarModel::state_at` already cools the host. Such planets get no
+    ozone, haze or acid (`photochemistry_temperature`, as for a companion).
+  - Reading (lean, 2026-10-31): the figures are weights, so `Barren` stays 0.5 and a host of
+    13 M_J has a chain 0.2 ÷ 0.7 = 29% of the time. The chain takes s(\[Fe/H\]), and `Barren` the
+    halo's loss, as the table's row does. Their supporting sources are cited from memory, not
+    re-checked.
+  - Lean (2026-10-31): 0.05 M☉'s weights are held up to 0.08 M☉, so the share of hosts with
+    planets steps at the limit, from 50% to the stellar row's 99.8%.
+  - Bound brown dwarfs keep the table's row and their zones under both arms.
+  - The server's `bodies_of` refuses a free-floating brown dwarf (`unknown_system`) until 26, as
+    `for_system` does; before this it served bodies drawn on the stellar row. A ship framed on such
+    a body is refused too.
+  - Test (a)'s "about half with nothing" is asserted as 0.45–0.65, and the drawn classes against
+    the weights at α = 10⁻³.
+  - _Accept, as built:_ `cargo test -p hyperion-sim --lib planetary::hosts::substellar` and
+    `cargo test -p hyperion-server --test system_bodies`.
+  - For 26's bump: the tripwire's list. It narrows the client's `freeFloating`
+    (`SystemsPanel.tsx`) to rogue planets and `tests/substellar_placement.rs`'s
+    `a_free_floating_object_has_no_stellar_context_yet` to layer G, and turns the server's
+    `a_brown_dwarf_s_bodies_are_refused_until_the_26_bump` into a test of their bodies. No
+    stellar system moves.
+  - For P14.T27.b: `generates` refuses rogue planets under both arms, `generate_planets` puts a
+    `RoguePlanet` host on `class_weights` until it has its own arm, and `for_stars` needs
+    `SystemStars`, which a rogue planet does not have.

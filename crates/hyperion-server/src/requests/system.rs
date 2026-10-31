@@ -250,8 +250,10 @@ pub(crate) async fn events(
 /// The planetary system `id` of `galaxy`: the body cache's, or generated there.
 ///
 /// A miss builds the context from the stars the system cache holds, resolving and generating them
-/// there first if it holds none, so that the stars are evolved once for both caches
-/// ([`SystemContext::from_stars`]).
+/// there first if it holds none, so that the stars are evolved once for both caches. The context
+/// is refused as [`SystemContext::for_system`] refuses the ID ([`SystemContext::for_stars`]): a
+/// free-floating brown dwarf, whose stars the system cache holds, has no bodies until generator
+/// version 26 (P14.T27.a).
 pub(crate) async fn bodies_of(
     state: &Arc<AppState>,
     key: GalaxyKey,
@@ -264,7 +266,7 @@ pub(crate) async fn bodies_of(
         .bodies
         .get_or_generate(key, id, move || {
             let stars = shared.systems.get_or_generate(key, &galaxy, id)?;
-            Ok(SystemContext::from_stars(&galaxy, &stars))
+            SystemContext::for_stars(&galaxy, &stars)
         })
         .await
 }
