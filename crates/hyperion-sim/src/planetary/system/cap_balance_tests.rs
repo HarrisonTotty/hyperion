@@ -14,23 +14,27 @@ use crate::planetary::hooks::surface::{CapBalanceRules, rotates, with_cap_balanc
 use crate::planetary::testing::with_every_26_hold;
 
 /// The records whose state or figures the cap moves over the census (the census at the tip,
-/// 2026-10-31, the cap's scope read on CO₂'s inventory), by ID in the census's order: thick CO₂
-/// airs that collapse or thin, each a fast rotator (a ÷ `L_Ro` of 4.0–23 under the cap) whose cap
-/// is frost. Ten go from `Temperate` to `Snowball`, three stay `Snowball` and one `Temperate`
-/// thins to a cold desert (`close_binary` .e401, 217 K at 6 kPa). The research's pilot, which read the
-/// cap in the passes' steps alone with neither gate, moved 16; the gates leave LOOK72's three
-/// (020e56ef20080000.0700, 020e56ef60070005.0100 and 020e66efa007000b.0400), and the cap
-/// `partition_over` reads, which the passes' area mix reads too
+/// 2026-10-31, the cap's scope read on CO₂'s inventory and a capped CO₂ held at its cap), by ID in
+/// the census's order: CO₂ airs that collapse or thin, each a fast rotator whose cap is frost.
+/// Against the gate alone, holding a capped CO₂ at its cap (d = 1) adds nine, among them LOOK72's
+/// 020e56ef20080000.0700, `Temperate` at 273.15 K under 43.7 bar → `Snowball` at 170 K, a class
+/// change; with no sea of its own (c = 0) it adds 41ffecb5ffc00001.0c00, `Temperate` at 273.15 K
+/// under 42.2 bar at 0.198 S⊕ → `Snowball` at 163.6 K, the other. The cap `partition_over` reads, which the passes' area mix reads too
 /// ([`partition_over`](crate::planetary::hooks::figures::partition_over)), takes
-/// 42002cb200000009.0700 to a 0.36 bar `Snowball` at 122 K, where that pilot thinned it to 14 bar.
-const MOVERS: [&str; 14] = [
+/// 42002cb200000009.0700 to a 0.36 bar `Snowball` at 122 K.
+const MOVERS: [&str; 24] = [
+    "01ffeb2c20000000.0600",
     "01fffb2be0000000.0500",
+    "21ffd6587ff80000.0200",
     "21ffd6587ff80000.0300",
     "41ffecb200000001.0300",
     "41ffecb200000000.e301",
+    "41ffecb600000007.0300",
     "41ffecb5ffc00000.0300",
     "02000b2b60020000.0400",
+    "2200365a7ff80000.0300",
     "2200365a7ff80000.0400",
+    "41ffecb5ffc00001.0c00",
     "42002cb1ff800003.0a00",
     "41ffecb1ffc00000.0a00",
     "42006cba00000009.0400",
@@ -38,17 +42,27 @@ const MOVERS: [&str; 14] = [
     "42002cb200000009.0800",
     "42002cb200000009.e401",
     "42002cb200000009.e501",
+    "42006c9a00000004.0504",
+    "8200b2e00000000a.0200",
+    "8200b2e00000000a.0300",
+    "020e56ef20080000.0700",
+    "820e6ee00000008d.0900",
 ];
 
 /// The records the cap moves in their last bits alone, within 10⁻⁶ ([`within_a_millionth`]), by
 /// ID in the census's order: a step or a thermostat trial on the way read a cap, and the steps
 /// settled a few ulps away.
-const NUDGED: [&str; 4] = [
-    "21ffd6587ff80000.0200",
-    "41ffecb600000007.0300",
-    "2200365a7ff80000.0300",
-    "020e56ef20080000.0700",
-];
+const NUDGED: [&str; 1] = ["820e6ee00000008d.e302"];
+
+/// The records whose airborne CO₂ stands over its cap's saturation pressure by more than 1%, each
+/// pinned at under twice it ([`OVER_THE_CAP_AT_MOST`]): 41ffecb600000007.0300, 1.6% over, whose
+/// greenhouse ends at its steps' limit, one more partition moving its CO₂ by 1.4% to its cap's
+/// saturation. Its partition at its record's span holds the cap's saturation to the bit.
+const OVER_THE_CAP: [&str; 1] = ["41ffecb600000007.0300"];
+
+/// The most an [`OVER_THE_CAP`] record's airborne CO₂ may stand over its cap's saturation, as a
+/// ratio: 2.
+const OVER_THE_CAP_AT_MOST: f64 = 2.0;
 
 /// The census under every 26 hold, the cap held and in force, walked once a process, with the
 /// solves the walk under the cap published ([`settled_log`]).
@@ -209,8 +223,9 @@ fn under_every_26_hold_the_cap_moves_the_census_s_thick_carbon_dioxide_airs() {
 /// ([`MOVERS`] and [`NUDGED`]), one more partition of its inventory over the span at its published
 /// state, its last step's, moves its CO₂ by under 5% ([`SETTLED_SHARE`]), each printed with its
 /// greenhouse's step count. With the cap's scope read on CO₂'s airborne partial pressure, ten
-/// movers cycled across that gate; read on CO₂'s inventory, every one settles. Each mover's airborne
-/// CO₂ is printed against the registry's saturation pressure at its `T_c`, not pinned.
+/// movers cycled across that gate; read on CO₂'s inventory, every one settles. Each mover's CO₂
+/// partial pressure x p is printed against the registry's saturation pressure at its column's
+/// `T_c`, the gates aside.
 #[test]
 #[ignore = "slow: the thin-air census twice under every 26 hold, about 115 s on a pod"]
 fn under_every_26_hold_the_cap_s_movers_settle() {
@@ -231,10 +246,7 @@ fn under_every_26_hold_the_cap_s_movers_settle() {
         };
         let settled = moved < SETTLED_SHARE;
         let t_c = solve.figures.and_then(|f| f.temperature);
-        let saturation = t_c.and_then(|t| {
-            crate::substance::saturation_pressure(Gas::CarbonDioxide.substance(), t)
-                .map(crate::units::Pascals::value)
-        });
+        let saturation = t_c.and_then(carbon_dioxide_saturation);
         eprintln!(
             "{} {}: CO2 {:.4e} Pa, again {:.4e} Pa ({:+.3e}), {} steps; T_c {}, its CO2 {} its \
              saturation there",
@@ -247,7 +259,7 @@ fn under_every_26_hold_the_cap_s_movers_settle() {
             kelvin(t_c.map(crate::units::Kelvin::value)),
             saturation.map_or_else(
                 || "against no".to_owned(),
-                |p_sat| format!("×{:.3e}", now.co2 / p_sat)
+                |p_sat| format!("×{:.3e}", now.co2_partial / p_sat)
             ),
         );
         if !settled {
@@ -260,6 +272,64 @@ fn under_every_26_hold_the_cap_s_movers_settle() {
 /// The share by which one more partition may move a mover's CO₂ for its steps to count as
 /// settled: 5% (P14.T53.h's amendment).
 const SETTLED_SHARE: f64 = 0.05;
+
+/// CO₂'s saturation pressure at `t` on the registry's curve, Pa.
+fn carbon_dioxide_saturation(t: crate::units::Kelvin) -> Option<f64> {
+    crate::substance::saturation_pressure(Gas::CarbonDioxide.substance(), t)
+        .map(crate::units::Pascals::value)
+}
+
+/// P14.T53.h's contract at the cap, under every 26 hold: a permanent cap holds its air at its
+/// saturation pressure (Leighton and Murray 1966). For each mover whose record holds a cap, its
+/// CO₂ partial pressure x p lies within 1% of the registry's `p_sat` at its cold trap, the colder
+/// of that cap and its coldest zone (a cap never warms a cold trap), or under it where all its CO₂
+/// is airborne; [`OVER_THE_CAP`]'s record lies over it, under [`OVER_THE_CAP_AT_MOST`]. Each is
+/// printed with its ratio.
+#[test]
+#[ignore = "slow: the thin-air census twice under every 26 hold, about 115 s on a pod"]
+fn under_every_26_hold_each_cap_holds_its_air_at_its_saturation() {
+    let Census { balanced, .. } = census();
+    let mut over = Vec::new();
+    for now in balanced {
+        let id = id_of(now);
+        let Some(cap) = now.cap.filter(|_| MOVERS.contains(&id.as_str())) else {
+            continue;
+        };
+        let trap = if cap < now.coldest { cap } else { now.coldest };
+        let p_sat = carbon_dioxide_saturation(crate::units::Kelvin::new(trap))
+            .expect("CO₂ has a vapour curve at a frost cap");
+        let ratio = now.co2_partial / p_sat;
+        let all_airborne = now.co2.total_cmp(&now.co2_inventory).is_eq();
+        eprintln!(
+            "{}: cap {cap:.3} K, coldest zone {:.3} K, CO2 weight {:.6e} Pa, x p {:.4e} Pa against p_sat {p_sat:.4e} \
+             Pa, ×{ratio:.4}{}",
+            now.label,
+            now.coldest,
+            now.co2,
+            now.co2_partial,
+            if all_airborne {
+                ", all of it airborne"
+            } else {
+                ""
+            }
+        );
+        if (ratio - 1.0).abs() <= 0.01 || (ratio < 1.0 && all_airborne) {
+            continue;
+        }
+        assert!(
+            OVER_THE_CAP.contains(&id.as_str()),
+            "{}: ×{ratio} over its cap's saturation",
+            now.label
+        );
+        assert!(
+            (1.0..OVER_THE_CAP_AT_MOST).contains(&ratio),
+            "{}: ×{ratio}",
+            now.label
+        );
+        over.push(id);
+    }
+    assert_eq!(over, OVER_THE_CAP);
+}
 
 /// P14.T53.h's D4: under every 26 hold the golden close binary, which holds movers of the cap,
 /// generates the same records twice, bit for bit.

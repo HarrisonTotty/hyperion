@@ -12,7 +12,11 @@
 //!   items 1.7 and F-g): for water in nitrogen the two differ by a factor of 1.6.
 //!   - A **minor** condensable takes the mean temperature and its surface humidity h
 //!     ([`surface_humidity`]), its vapour held locally by its background over a reservoir that
-//!     lies across the surface, as Earth's water is.
+//!     lies across the surface, as Earth's water is. From generator version 26 a condensable the
+//!     climate's permanent cap names, with no ice of its own, is never minor (P14.T53.h): its
+//!     reservoir is the cap, which lies at its cold trap, not across the surface, so it is held as
+//!     a dominant one is, d = 1, with no sea of its own at the mean, c = 0, at the cap's
+//!     saturation pressure (Leighton and Murray 1966).
 //!   - A **dominant** one takes its saturation pressure at the coldest zone, h = 1, where its
 //!     reservoir cold-traps: its pressure is set globally there, the collapse of Wordsworth (2015,
 //!     ApJ 806, 180, as P14.T48.d cites it), as Mars's carbon dioxide and Pluto's and Triton's
@@ -830,6 +834,17 @@ impl Species {
         })
     }
 
+    /// Whether the climate `climate`'s permanent cap holds this species (P14.T53.h): the cap names
+    /// its substance, and it has no ice of its own (P14.T53.c), which would stand for its cold trap
+    /// instead. Its reservoir is then the cap, at its cold trap ([`AirborneWeights::sweep`]).
+    #[must_use]
+    fn held_by_cap(&self, climate: &ClimateSpan) -> bool {
+        self.ice.is_none()
+            && climate
+                .cap
+                .is_some_and(|(substance, _)| substance == self.substance)
+    }
+
     /// The temperature that controls this species pulled toward its cold trap by `pull` over the
     /// climate `climate` (`ClimateSpan::toward`), its cold trap its own ([`Self::cold_trap`]).
     #[must_use]
@@ -1161,6 +1176,15 @@ impl AirborneWeights {
 
     /// One sweep of the condensables in registry order over the climate `climate` on the ground
     /// `ground`; whether it moved any weight, bit for bit.
+    ///
+    /// Each condensable's dominance d is its minor branch's share's ([`dominance`]), but 1 for one
+    /// the climate's permanent cap holds ([`Species::held_by_cap`], P14.T53.h): a cap is that
+    /// condensable's reservoir, and it lies at its cold trap, so its vapour is set there globally,
+    /// whatever its share of the air, and its own sea's ocean weight c is 0, since the cap holds its
+    /// air far under the vapour pressure a sea of it at the mean would need. Read on its share, the
+    /// minor branch's reservoir across the surface, a CO₂ under a collapsed N₂ air was held only
+    /// partway toward its cap and stood 10¹–10⁴ times over its saturation there; with c judged on
+    /// the minor branch's counterfactual air, two stood 1.3 and 1.6 times over.
     fn sweep(
         &mut self,
         climate: &ClimateSpan,
@@ -1188,10 +1212,16 @@ impl AirborneWeights {
                 }
             };
             let minor = at_cap(held.minor_cap);
-            let d = dominance(share(minor, species.molar_mass, moles));
+            let capped = species.held_by_cap(climate);
+            let d = if capped {
+                1.0
+            } else {
+                dominance(share(minor, species.molar_mass, moles))
+            };
             // Its own sea, where it has one at the mean, holds it there (§4); a minor
-            // condensable is held there already.
-            let c = if d > 0.0 {
+            // condensable is held there already, and one its cap holds has none: the cap holds its
+            // air far under a sea's vapour pressure at the mean.
+            let c = if d > 0.0 && !capped {
                 own_ocean_weight(
                     (species, diagram),
                     climate,
@@ -1596,7 +1626,8 @@ impl Partitioned {
     }
 
     /// Its dominance d ([`dominance`]): 0 for a minor condensable and for a species with no phase
-    /// diagram, 1 for one held toward its cold trap.
+    /// diagram, 1 for one held toward its cold trap, and 1 for one a permanent cap holds, whatever
+    /// its share (P14.T53.h; a capped CO₂, its reservoir the cap at its cold trap).
     #[must_use]
     pub const fn dominance(&self) -> f64 {
         self.dominance
@@ -1605,8 +1636,9 @@ impl Partitioned {
     /// The ocean weight c of its own liquid reservoir at the mean, 0 to 1
     /// (decision-p14-t51a-partition §4): min(1, f ÷ 0.708) of the share f of the surface that
     /// reservoir fills of its ground's basins ([`Basins::ocean_weight`]), where its phase at the
-    /// mean is liquid with more of it than its air holds there; 0 otherwise, and for a minor
-    /// condensable, which its own sea already holds at the mean.
+    /// mean is liquid with more of it than its air holds there; 0 otherwise, for a minor
+    /// condensable, which its own sea already holds at the mean, and for one a permanent cap holds
+    /// (P14.T53.h), whose air lies far under a sea's vapour pressure at the mean.
     ///
     /// It weakens the pull toward the cold trap, `T_mean` − d (1 − c)(`T_mean` − `T_cold`): a
     /// non-dilute condensable over its own ocean holds its vapour where the ocean lies, its weak

@@ -13803,6 +13803,10 @@ pub(crate) struct ThinAirBody {
     pub(crate) co2: f64,
     /// Its derivation's N₂, Pa: an airless body's residue too (P14.T53.i's census).
     pub(crate) nitrogen: f64,
+    /// Its derivation's CO₂ partial pressure x p, Pa, x its mole fraction by its weights over their
+    /// molar masses, and its CO₂ inventory as a column weight, Pa (P14.T53.h's census at the cap).
+    pub(crate) co2_partial: f64,
+    pub(crate) co2_inventory: f64,
 }
 
 impl ThinAirBody {
@@ -13905,6 +13909,11 @@ impl ThinAirBody {
             air_t: air.surface_temperature().value(),
             co2: air.partial_pressures().of(Gas::CarbonDioxide).value(),
             nitrogen: air.partial_pressures().of(Gas::Nitrogen).value(),
+            co2_partial: crate::planetary::derive::atmosphere::mole_fraction_of(
+                air.partial_pressures(),
+                Gas::CarbonDioxide,
+            ) * air.partial_pressures().total().value(),
+            co2_inventory: air.inventory_weights().of(Gas::CarbonDioxide).value(),
         })
     }
 

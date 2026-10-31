@@ -1178,7 +1178,7 @@ fn collision_variable(partials: &PartialPressures, gravity: MetresPerSecondSquar
 /// The mole fraction of `gas` among the partial pressures `partials`, column weights, each over its
 /// gas's molar mass: zero for an empty or a non-finite column.
 #[must_use]
-fn mole_fraction_of(partials: &PartialPressures, gas: Gas) -> f64 {
+pub(crate) fn mole_fraction_of(partials: &PartialPressures, gas: Gas) -> f64 {
     let moles = |gas: Gas| partials.of(gas).value().max(0.0) / gas.molar_mass_g_per_mol();
     let total = Gas::ALL.into_iter().fold(0.0, |sum, gas| sum + moles(gas));
     let x = moles(gas) / total;

@@ -33318,10 +33318,11 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     349 h (a ÷ `L_Ro` 0.35) holds none; Venus none.
   - A step is molten at `Crust::Molten` (`ClimateBody::crust`, new) or at or over
     `SILICATE_SOLIDUS`; the record, at `MagmaOcean`.
-  - The census (`system/cap_balance_tests.rs`) moves 14 records (`MOVERS`, 41ffecb5ffc00000.0300
-    the scope's own) and 4 in their last bits (`NUDGED`). The cap `partition_over` reads, which
-    the passes' area mix reads too, takes close_binary 42002cb200000009.0700 to a 0.36 bar
-    `Snowball` at 122 K (agreed by main).
+  - The census (`system/cap_balance_tests.rs`) moves 24 records (`MOVERS`) and 1 in its last
+    bits (`NUDGED`), two of them class changes beyond the gate alone: LOOK72 020e56ef20080000.0700
+    and 41ffecb5ffc00001.0c00, each `Temperate` at 273.15 K → `Snowball`. The cap
+    `partition_over` reads, which the passes' area mix reads too, takes close_binary
+    42002cb200000009.0700 to a 0.36 bar `Snowball` at 122 K (agreed by main).
   - "Settled" is the amendment's (main, 2026-10-31): one more partition over the span at the
     published state moves a mover's CO₂ by under 5%, read through the test-only
     `atmosphere::settled_log`, asserted for every mover and nudged record. Each mover's line
@@ -33330,12 +33331,20 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - The scope reads CO₂'s inventory weight (`CapBody::carbon_dioxide_inventory`) against the other
     gases' step partials, not CO₂'s airborne partial pressure, which the cap itself sets: read so,
     ten movers cycled across the gate (main, 2026-10-31). Every mover now settles.
+  - The partition holds a capped condensable with no ice of its own at its cap: d = 1
+    (`Species::held_by_cap`, main, 2026-10-31) and c = 0 (lean, 2026-10-31), since the cap is its
+    reservoir at the cold trap, not across the surface, and no sea of it stands at the mean. On
+    its share CO₂ stood 10¹–10⁴ times over p_sat(`T_c`); with c on the minor branch's
+    counterfactual, .e401 and 41ffecb600000007.0300 stood ×1.62 and ×1.33. Every capped mover now
+    lies within 1% of p_sat at its cold trap but 41ffecb600000007.0300, ×1.016 at its steps' limit.
+  - The cap-gate lane's saturation findings divided a CO₂ column weight by a pressure (×1.39–1.57
+    high): the table's Mars is at its cap.
   - Every locked world is outside the cap by `rotates` at both sites; the census asserts no mover
     is locked.
   - `locked_climate_tests::deck_alone` sets the cap back to `Held`.
   - For 26's bump: the tripwire's list; re-bless `planetary/systems` (solar_like's .0400;
-    close_binary's .0700, .0800, .e401 and .e501); pin the cap's bits in
-    `the_published_surface_conditions_are_pinned`.
+    close_binary's .0700, .0800, .e401 and .e501; subgiant's .0504; fallback_black_hole's .0200
+    and .0300); pin the cap's bits in `the_published_surface_conditions_are_pinned`.
 - **Deviations in P14.T29, as built (2026-10-31).** Held at 26: `hosts::strip::STRIP_VERSION`,
   `StripRules::{Held, Stripped}`, the tests' `with_stripping` (a line in `with_every_26_hold`) and
   the tripwire `the_stripping_is_held_only_until_the_26_bump`. Under `Held` every context is 24's

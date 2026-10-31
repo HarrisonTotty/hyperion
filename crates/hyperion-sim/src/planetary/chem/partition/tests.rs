@@ -2699,6 +2699,35 @@ fn under_every_25_hold_a_supercritical_reservoir_shares_the_basins_with_the_liqu
     });
 }
 
+/// P14.T53.h: a capped CO₂ with no ice of its own is held at its cap whatever its share. Under an
+/// N₂ air of twice its weight its share's dominance holds it only partway toward its cold trap;
+/// with a cap it takes d = 1 and no sea of its own, and its partial pressure x p is its saturation
+/// pressure at the cap.
+#[test]
+fn a_capped_carbon_dioxide_is_held_at_its_cap_whatever_its_share() {
+    let co2 = id("CO2");
+    let climate = span(170.0, 210.0, 250.0);
+    let column = inventory(&[("CO2", 2.0e4), ("N2", 4.0e4)]);
+    let open = partition(&climate, &gravity(3.71), &column);
+    let open_d = open.of(co2).unwrap().dominance();
+    assert!(open_d > 0.0 && open_d < 1.0, "{open_d}");
+    let cap = Kelvin::new(146.0);
+    let capped = partition(&climate.with_cap(co2, cap), &gravity(3.71), &column);
+    let held = capped.of(co2).unwrap();
+    assert_same_bits(held.dominance(), 1.0);
+    assert_same_bits(held.own_ocean_weight(), 0.0);
+    assert_same_bits(held.lies_at().value(), cap.value());
+    let p_sat = crate::substance::saturation_pressure(co2, cap)
+        .unwrap()
+        .value();
+    let x_p = held.partial_pressure().value();
+    assert!(
+        (x_p / p_sat - 1.0).abs() < 1e-6,
+        "{x_p} Pa against {p_sat} Pa"
+    );
+    assert!(held.airborne() < open.of(co2).unwrap().airborne());
+}
+
 /// P14.T53.h: a span's CO₂ cap is CO₂'s cold trap where it lies colder than the coldest zone, and
 /// never where it lies warmer or is another substance's; a cap `new` would refuse sets none.
 #[test]
