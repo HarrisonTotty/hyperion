@@ -67,16 +67,43 @@ function radius(): HTMLSelectElement {
 }
 
 describe("ChartControls", () => {
-  it("offers every query radius from 0.01 ly to 500 ly", () => {
+  it("offers every query radius from 0.001 ly to 500 ly, in AU below 0.01 ly", () => {
     renderControls();
 
     const options = within(radius())
       .getAllByRole("option")
       .map((option) => option.textContent);
 
-    expect(options).toHaveLength(15);
-    expect(options[0]).toBe("0.01 ly");
-    expect(options.at(-1)).toBe("500 ly");
+    expect(options).toEqual([
+      "63.2 AU",
+      "126 AU",
+      "316 AU",
+      "0.01 ly",
+      "0.02 ly",
+      "0.05 ly",
+      "0.1 ly",
+      "0.2 ly",
+      "0.5 ly",
+      "1 ly",
+      "2 ly",
+      "5 ly",
+      "10 ly",
+      "20 ly",
+      "50 ly",
+      "100 ly",
+      "200 ly",
+      "500 ly",
+    ]);
+  });
+
+  it("steps each option 1-2-5 in light-years, the fine steps among them", () => {
+    renderControls();
+
+    const values = within(radius())
+      .getAllByRole("option")
+      .map((option) => Number(option.getAttribute("value")));
+
+    expect(values.slice(0, 6)).toEqual([0.001, 0.002, 0.005, 0.01, 0.02, 0.05]);
   });
 
   it("reports the radius the operator chooses", async () => {
@@ -86,6 +113,22 @@ describe("ChartControls", () => {
     await user.selectOptions(radius(), "20");
 
     expect(onQueryRadius).toHaveBeenCalledWith(20);
+  });
+
+  it("reports the finest radius, 0.001 ly, chosen by its reading in AU", async () => {
+    const user = userEvent.setup();
+    const { onQueryRadius } = renderControls();
+
+    await user.selectOptions(radius(), "63.2 AU");
+
+    expect(onQueryRadius).toHaveBeenCalledWith(0.001);
+  });
+
+  it("shows a fine radius the operator chose", () => {
+    renderControls({ radiusChoiceLy: 0.002, queryRadiusLy: 0.002 });
+
+    expect(radius()).toHaveValue("0.002");
+    expect(within(radius()).getByRole("option", { selected: true })).toHaveTextContent("126 AU");
   });
 
   it("follows the drive range while the operator has not chosen a radius", () => {

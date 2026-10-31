@@ -16,6 +16,7 @@ import {
 } from "../../test/featureFixtures";
 import type { FeatureSummary } from "@hyperion/protocol";
 import { FeatureReadout } from "./FeatureReadout";
+import { type ChartDistanceUnit, distanceUnitFor } from "./chartModel";
 
 /** One of the golden's features as the chart holds it, from the golden's centre. */
 function aFeature(
@@ -34,17 +35,24 @@ interface RenderOptions {
   readonly blackHole?: BlackHoleModel | null;
   readonly stale?: boolean;
   readonly detailStale?: boolean;
+  readonly distanceUnit?: ChartDistanceUnit;
 }
 
 function renderReadout(
   feature: ChartFeature,
-  { detail = null, blackHole = null, stale = false, detailStale = false }: RenderOptions = {},
+  {
+    detail = null,
+    blackHole = null,
+    stale = false,
+    detailStale = false,
+    distanceUnit = distanceUnitFor(50),
+  }: RenderOptions = {},
 ) {
   render(
     <FeatureReadout
       feature={feature}
       timeYr={0}
-      distanceDecimals={2}
+      distanceUnit={distanceUnit}
       stale={stale}
       detail={detail}
       detailStale={detailStale}
@@ -150,6 +158,31 @@ describe("FeatureReadout (plan 09, P09.T41.c)", () => {
     expect(valueOf(readout, "X-RAY LUMINOSITY")).toBe("1.69E28 W");
     expect(valueOf(readout, "DISRUPTIONS")).toBe("2");
     expect(valueOf(readout, "LAST DISRUPTION")).toBe("UT -43,495.65 yr");
+  });
+
+  it("reads the centre's distance in AU on a chart of its fine steps (plan 09, P09.T42)", () => {
+    // 0.0042 ly is 265.61 AU.
+    const readout = renderReadout(
+      { ...aFeature(GALACTIC_CENTRE, [0, 0, 0]), distanceLy: 0.0042 },
+      { distanceUnit: distanceUnitFor(0.005) },
+    );
+
+    expect(valueOf(readout, "DIST")).toBe("265.6 AU");
+    // A feature's radius is a size, to three figures in light-years, not a distance on the chart.
+    expect(valueOf(readout, "EXTENT")).toMatch(/ ly$/u);
+  });
+
+  it("reads the black hole's luminosity Missing from a server that does not send it, its mass as before", () => {
+    const { luminosity: _luminosity, ...unlit } = aBlackHoleState();
+    const readout = renderReadout(aFeature(GALACTIC_CENTRE, [0, 0, 0]), {
+      detail: toFeatureDetail(aCentreDetail()),
+      blackHole: toBlackHole(unlit),
+    });
+
+    expect(within(readout).getByRole("heading", { name: "BLACK HOLE" })).toBeInTheDocument();
+    expect(valueOf(readout, "MASS", 1)).toBe("8.42E7 M");
+    expect(valueOf(readout, "X-RAY LUMINOSITY")).toBe("—");
+    expect(valueOf(readout, "DISRUPTIONS")).toBe("2");
   });
 
   it("mutes a stale structure and trails its S, the summary's values staying live", () => {

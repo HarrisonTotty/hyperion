@@ -14,6 +14,7 @@ import { stylesheetRule } from "../../test/stylesheet";
 import { aRedSupergiant, aSingleStarSummary } from "../../test/systemFixtures";
 import { TIME_WIDTH_CH } from "./chartReadings";
 import { AS_OBSERVED, CURVATURE_BOUND_LABEL, EMITTED_LABEL, SystemReadout } from "./SystemReadout";
+import { distanceUnitFor } from "./chartModel";
 
 const CENTRE = [26_000, 0, 0] as const;
 const FRAME = localFrameAt(vec3(CENTRE[0], CENTRE[1], CENTRE[2]));
@@ -63,7 +64,7 @@ function renderReadout(
       frame={FRAME}
       driveRangeLy={50}
       timeYr={timeYr}
-      distanceDecimals={2}
+      distanceUnit={distanceUnitFor(50)}
       stars={stars}
       stale={stale}
       starsStale={false}

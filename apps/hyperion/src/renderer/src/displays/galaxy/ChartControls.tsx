@@ -5,18 +5,14 @@ import { EarthMassUnit } from "../../components/EarthMassUnit";
 import { type DisplayMode, ModeControl } from "../../components/ModeControl";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StatusText } from "../../components/StatusText";
-import {
-  formatNumber,
-  formatScaleLength,
-  formatSubstellarMass,
-  formatUniverseTimeYr,
-} from "../../lib/format";
+import { formatNumber, formatSubstellarMass, formatUniverseTimeYr } from "../../lib/format";
 import { CLOCK_WINDOW_YR } from "../../lib/galaxy/model";
 import { isEmptyEntry, isTextEntry, showSelected } from "../../lib/textEntry";
 import { RADIUS_STEPS_LY } from "../../spatial/scale";
 import {
   formatBandMsun,
   formatChartLengthLy,
+  formatQueryRadius,
   type LayerBand,
   nextStarFilter,
   STAR_FILTERS,
@@ -35,7 +31,7 @@ export const STARS_KEY = "K";
 const DRIVE_RANGE_MIN_LY = 0.01;
 const DRIVE_RANGE_MAX_LY = 500;
 
-/** Decimals a drive range keeps: the narrowest chart is 0.01 ly across. */
+/** Decimals a drive range keeps: the narrowest it accepts is 0.01 ly. */
 const DRIVE_RANGE_DECIMALS = 2;
 
 /** Decimals a chart time keeps, as `formatUniverseTimeYr` writes it. */
@@ -336,8 +332,10 @@ const LOWEST_FLOOR: MassLayer = "rogue_planet";
  * its time.
  *
  * @remarks
- * The radius steps 1-2-5 from 0.01 ly to 500 ly, the scale from the galactic centre out; until the
- * operator chooses one it follows the drive range, raised to the next step. The mass floor is a
+ * The radius steps 1-2-5 from 0.001 ly to 500 ly, the scale from the stars about the central black
+ * hole out, the steps below 0.01 ly read in AU as the scale bar reads there (`316 AU` to `63.2 AU`;
+ * plan 09, P09.T42); until the operator chooses one it follows the drive range, raised to the next
+ * step. The mass floor is a
  * radio group of the layers' lower edges, which is also the declutter control: the five stellar
  * layers' and, below `0.08`, the brown dwarfs' `0.012` and the free-floating planets' `0.33 M⊕`
  * (plan 13, P13.T8.c), the lowest, which alone reads `ALL`. The group's unit, `M☉`, is drawn once
@@ -437,7 +435,7 @@ export function ChartControls({
         >
           {RADIUS_STEPS_LY.map((step) => (
             <option key={step} value={step}>
-              {formatScaleLength(step)}
+              {formatQueryRadius(step)}
             </option>
           ))}
         </select>

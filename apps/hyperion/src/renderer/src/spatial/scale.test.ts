@@ -101,6 +101,21 @@ describe("scaleBar", () => {
     expect(labels).toContain("0.01 ly");
     expect(labels[labels.indexOf("0.01 ly") + 1]).toBe("500 AU");
   });
+
+  it("steps on in AU, 1-2-5, to the finest chart's scale, 0.001 ly across a 300 px stage", () => {
+    // The finest chart fitted to a stage 300 px high, 0.002 ly across it, and zoomed in four times.
+    const finest = 300 / 0.002;
+    const labels: string[] = [];
+    for (let pxPerUnit = 11_000; pxPerUnit <= 4 * finest; pxPerUnit *= 1.25) {
+      const label = formatScaleLength(scaleBar(pxPerUnit, 100, LY_THEN_AU).length);
+      if (labels.at(-1) !== label) {
+        labels.push(label);
+      }
+    }
+
+    expect(labels).toEqual(["500 AU", "200 AU", "100 AU", "50 AU", "20 AU", "10 AU"]);
+    expect(formatScaleLength(scaleBar(finest, 100, LY_THEN_AU).length)).toBe("20 AU");
+  });
 });
 
 describe("gridSpacing", () => {
@@ -111,6 +126,9 @@ describe("gridSpacing", () => {
     [500, 200],
     [0.05, 0.02],
     [0.01, 0.002],
+    [0.005, 0.002],
+    [0.002, 0.0005],
+    [0.001, 0.0002],
     [1, 0.2],
   ])("spaces the grid for a radius of %f at %f", (radius, spacing) => {
     expect(gridSpacing(radius)).toBe(spacing);
@@ -127,9 +145,9 @@ describe("gridSpacing", () => {
 });
 
 describe("RADIUS_STEPS_LY", () => {
-  it("runs from 0.01 ly to 500 ly in 15 steps", () => {
-    expect(RADIUS_STEPS_LY).toHaveLength(15);
-    expect(RADIUS_STEPS_LY[0]).toBe(0.01);
+  it("runs from 0.001 ly to 500 ly in 18 steps", () => {
+    expect(RADIUS_STEPS_LY).toHaveLength(18);
+    expect(RADIUS_STEPS_LY[0]).toBe(0.001);
     expect(RADIUS_STEPS_LY.at(-1)).toBe(500);
   });
 
@@ -145,7 +163,7 @@ describe("RADIUS_STEPS_LY", () => {
 
   it("holds the literal values", () => {
     expect(RADIUS_STEPS_LY).toEqual([
-      0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500,
+      0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500,
     ]);
   });
 });

@@ -306,7 +306,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
           selectedId={chart.selectedId}
           onSelect={chart.select}
           driveRangeLy={chart.driveRangeLy}
-          distanceDecimals={chart.distanceDecimals}
+          distanceUnit={chart.distanceUnit}
           stale={stale}
         />
       ) : (
@@ -318,7 +318,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
           frame={chart.frame}
           driveRangeLy={chart.driveRangeLy}
           timeYr={chartTimeYr}
-          distanceDecimals={chart.distanceDecimals}
+          distanceUnit={chart.distanceUnit}
           stars={stars}
           stale={stale}
           starsStale={starsStale}
@@ -330,7 +330,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
         <FeatureReadout
           feature={selectedFeature}
           timeYr={chartTimeYr}
-          distanceDecimals={chart.distanceDecimals}
+          distanceUnit={chart.distanceUnit}
           stale={stale || chart.selectedFeatureStale}
           detail={detail.shown}
           detailStale={detailStale}
@@ -422,7 +422,7 @@ function FeatureListPart({ chart }: FeatureListPartProps) {
         features={features.features}
         selectedId={chart.selectedFeature?.id ?? null}
         onSelect={chart.selectFeature}
-        distanceDecimals={chart.distanceDecimals}
+        distanceUnit={chart.distanceUnit}
         stale={stale}
       />
       {censusWords === null ? null : (

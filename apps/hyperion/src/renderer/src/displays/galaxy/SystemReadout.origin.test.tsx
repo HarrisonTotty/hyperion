@@ -21,6 +21,7 @@ import { vec3 } from "../../geometry/vec3";
 import { aFeaturesInRange, OPEN_CLUSTER } from "../../test/featureFixtures";
 import { anUnknownLayer, anUnknownPopulation, aSystemsInRange } from "../../test/galaxyFixtures";
 import { SystemReadout } from "./SystemReadout";
+import { distanceUnitFor } from "./chartModel";
 
 const CENTRE = [26_000, 0, 0] as const;
 const FRAME = localFrameAt(vec3(...CENTRE));
@@ -75,7 +76,7 @@ function renderReadout(system: ChartSystem) {
       frame={FRAME}
       driveRangeLy={50}
       timeYr={0}
-      distanceDecimals={2}
+      distanceUnit={distanceUnitFor(50)}
       stars={null}
       stale={false}
       starsStale={false}

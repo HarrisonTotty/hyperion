@@ -1584,6 +1584,9 @@ readout gives distances in light-years to four decimals or in AU below 0.01 ly, 
 is shown at every step. A `BLACK HOLE` readout shows mass and luminosity at the chart's time. Tests:
 selector steps, unit switching, formatting under the guide's number rules.
 
+_Done (lane `p09-t42`, 2026-10-31, at `GENERATOR_VERSION` 24, client only, no output moved): see
+Risks, "P09.T42, records"._
+
 #### P09.T44 Client: a core-collapse remnant's nebula rows
 
 Added 2026-10-21 by main's decision on a young neutron star's `NEBULA RADIUS NONE`, from P12.T11's
@@ -5224,3 +5227,15 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     2026-10-31: P09.T30.b's record). Companions are not carved (T33.a's finding (3)). A track change
     reruns the scan.
   - _Goldens._ `catalogue_classes/lbv` new (hosts per galaxy at its end); `rng/tags.golden` +5.
+- **P09.T42, records (lane `p09-t42`, 2026-10-31, at 24 and 3; client only).**
+  - `RADIUS_STEPS_LY` runs 0.001–500 ly (18 steps). The selector and `QUERY EDGE` write a radius
+    through `formatQueryRadius` (`chartModel.ts`): `0.01 ly` and up as before, the fine steps in AU
+    to three figures (`316 AU`, `126 AU`, `63.2 AU`). The scale bar's ladder was already ly then AU.
+  - `LocalChartState.distanceDecimals` is now `distanceUnit: ChartDistanceUnit` (`symbol`, `perLy`,
+    `decimals`) from `distanceUnitFor(radius)`; `SystemList`, `FeatureList`, `SystemReadout` and
+    `FeatureReadout` take `distanceUnit` and write through `formatChartDistance` and
+    `formatChartOffset`. Below 0.01 ly every distance and offset is in AU to 0.1 AU (lean,
+    2026-10-31), the lists' headers `DIST AU`; other charts read as D21 had them.
+  - `BLACK HOLE`: T41.c's readout already asks at the chart's time and reads mass and the 2–10 keV
+    total; T42 adds only tests (asked again at a new chart time; an absent luminosity Missing).
+    Nothing is missing from the wire for it.

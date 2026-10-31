@@ -12,11 +12,12 @@ import {
 import { EarthMassUnit } from "../../components/EarthMassUnit";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StaleSlot } from "../../components/StaleSlot";
-import { formatLengthLy, formatListPosition, formatSubstellarMass } from "../../lib/format";
+import { formatListPosition, formatSubstellarMass } from "../../lib/format";
 import { type ChartSystem, isFormedPlanet } from "../../lib/galaxy/model";
 import { objectKindLabel } from "../../lib/system/words";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import { windowRange } from "../../lib/windowRange";
+import { type ChartDistanceUnit, formatChartDistance } from "./chartModel";
 
 /** Height of a row, in `rem`: also the guide's smallest pointer target. */
 const ROW_REM = 2;
@@ -82,8 +83,11 @@ interface SystemListProps {
   readonly onSelect: (id: SystemIdHex) => void;
   /** The range a system counts as in (plan 05, design note D9). */
   readonly driveRangeLy: number;
-  /** Decimals every distance on this chart is written with (plan 05, design note D21). */
-  readonly distanceDecimals: number;
+  /**
+   * The unit and decimals every distance on this chart is written with (plan 05, design note D21;
+   * plan 09, P09.T42).
+   */
+  readonly distanceUnit: ChartDistanceUnit;
   /**
    * Whether the chart is a snapshot the link no longer backs: each row then trails one `S` and is
    * named stale.
@@ -118,7 +122,9 @@ interface SystemListProps {
  *
  * A row the chart was answered in observed mode carries its present distance as an Estimated
  * value, `~2.00`, as the readout does (plan 12, P12.T11), and its class and stars are its brief's,
- * the primary when the light left; the `DIST ly` column is as wide as that reading with its `~`.
+ * the primary when the light left; the `DIST` column is as wide as that reading with its `~`. The
+ * column's unit is the chart's, in its header: `DIST ly`, or `DIST AU` on a chart of the centre's
+ * fine steps (plan 09, P09.T42).
  *
  * A chart the link no longer backs is muted, as its panel has it, and each row trails one `S`, at
  * the right edge of its `DRIVE RANGE` cell, which stands for each of the row's values: the
@@ -134,7 +140,7 @@ export function SystemList({
   selectedId,
   onSelect,
   driveRangeLy,
-  distanceDecimals,
+  distanceUnit,
   stale,
 }: SystemListProps) {
   const baseId = useId();
@@ -247,7 +253,7 @@ export function SystemList({
         <span>DESIG</span>
         <span>CLASS</span>
         <span>STARS</span>
-        <span>DIST ly</span>
+        <span>{`DIST ${distanceUnit.symbol}`}</span>
         {/* The unit is in every cell, since a planet's is M⊕ and a star's M☉ (plan 13). */}
         <span>INIT MASS</span>
         {/*
@@ -290,7 +296,7 @@ export function SystemList({
             const inRange = system.distanceLy <= driveRangeLy;
             // The present distance of a system read as observed is Estimated, as the readout's is
             // (plan 12, P12.T11; § Data states: each state looks the same everywhere).
-            const distance = `${system.observed === null ? "" : "~"}${formatLengthLy(system.distanceLy, distanceDecimals)}`;
+            const distance = `${system.observed === null ? "" : "~"}${formatChartDistance(system.distanceLy, distanceUnit)}`;
             // The unit a mass is read in is its layer's, so an object of a layer this build does not
             // know has its mass Missing.
             const mass =
@@ -312,7 +318,7 @@ export function SystemList({
                   system.designation,
                   starName(system),
                   starCountName(system),
-                  `${distance} ly`,
+                  `${distance} ${distanceUnit.symbol}`,
                   mass === null ? null : `${mass.value} ${massName}`,
                   rangeName(inRange),
                   // The name hides the row's content, its `S` and that mark's word with it.

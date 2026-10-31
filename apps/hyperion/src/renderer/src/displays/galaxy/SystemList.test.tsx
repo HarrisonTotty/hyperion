@@ -13,6 +13,7 @@ import {
 } from "../../test/galaxyFixtures";
 import { stylesheetRule } from "../../test/stylesheet";
 import { SystemList } from "./SystemList";
+import { type ChartDistanceUnit, distanceUnitFor } from "./chartModel";
 
 const CENTRE = [26_000, 0, 0] as const;
 
@@ -44,7 +45,13 @@ function renderList(
     selectedId = null,
     driveRangeLy = 50,
     stale = false,
-  }: { selectedId?: SystemIdHex | null; driveRangeLy?: number; stale?: boolean } = {},
+    distanceUnit = distanceUnitFor(50),
+  }: {
+    selectedId?: SystemIdHex | null;
+    driveRangeLy?: number;
+    stale?: boolean;
+    distanceUnit?: ChartDistanceUnit;
+  } = {},
 ) {
   const onSelect = vi.fn<(id: SystemIdHex) => void>();
   const view = render(
@@ -53,7 +60,7 @@ function renderList(
       selectedId={selectedId}
       onSelect={onSelect}
       driveRangeLy={driveRangeLy}
-      distanceDecimals={2}
+      distanceUnit={distanceUnit}
       stale={stale}
     />,
   );
@@ -64,7 +71,7 @@ function renderList(
         selectedId={id}
         onSelect={onSelect}
         driveRangeLy={driveRangeLy}
-        distanceDecimals={2}
+        distanceUnit={distanceUnit}
         stale={stale}
       />,
     );
@@ -207,6 +214,25 @@ describe("SystemList", () => {
     ).toBeInTheDocument();
   });
 
+  it("reads its distances in AU, under DIST AU, on a chart of the centre's fine steps (plan 09, P09.T42)", () => {
+    stubViewport();
+    const systems = toChartResult(
+      aSystemsInRange({
+        centreLy: CENTRE,
+        radiusLy: 0.001,
+        systems: [{ relLy: [0.0005, 0, 0], layer: "a" }],
+      }),
+    ).systems;
+
+    renderList(systems, { distanceUnit: distanceUnitFor(0.001) });
+
+    expect(screen.getByText("DIST AU")).toBeInTheDocument();
+    expect(firstOption()).toHaveAccessibleName(
+      "H7K 4C0RFZ A-1, DWARF M3V, 1 star, 31.6 AU, 0.29 solar masses, IN RANGE",
+    );
+    expect(firstOption()?.querySelectorAll(".system-list__number")[1]).toHaveTextContent("31.6");
+  });
+
   it("names a system beyond the drive range OUT OF RANGE, though its column shows OUT", () => {
     stubViewport();
     renderList(manySystems(3), { driveRangeLy: 2 });
@@ -307,7 +333,7 @@ describe("SystemList", () => {
         selectedId={null}
         onSelect={onSelect}
         driveRangeLy={50}
-        distanceDecimals={2}
+        distanceUnit={distanceUnitFor(50)}
         stale={false}
       />,
     );
@@ -318,7 +344,7 @@ describe("SystemList", () => {
         selectedId={null}
         onSelect={onSelect}
         driveRangeLy={50}
-        distanceDecimals={2}
+        distanceUnit={distanceUnitFor(50)}
         stale={false}
       />,
     );

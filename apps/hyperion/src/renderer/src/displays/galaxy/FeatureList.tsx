@@ -11,11 +11,12 @@ import {
 
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StaleSlot } from "../../components/StaleSlot";
-import { formatLengthLy, formatListPosition, formatSignificant } from "../../lib/format";
+import { formatListPosition, formatSignificant } from "../../lib/format";
 import { featureKindAbbreviation, featureKindWords } from "../../lib/galaxy/featureWords";
 import type { ChartFeature } from "../../lib/galaxy/model";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import { windowRange } from "../../lib/windowRange";
+import { type ChartDistanceUnit, formatChartDistance } from "./chartModel";
 
 /** Height of a row, in `rem`: also the guide's smallest pointer target, as the system list's. */
 const ROW_REM = 2;
@@ -28,8 +29,11 @@ export interface FeatureListProps {
   readonly features: ReadonlyArray<ChartFeature>;
   readonly selectedId: FeatureIdHex | null;
   readonly onSelect: (id: FeatureIdHex) => void;
-  /** Decimals every distance on this chart is written with (plan 05, design note D21). */
-  readonly distanceDecimals: number;
+  /**
+   * The unit and decimals every distance on this chart is written with (plan 05, design note D21;
+   * plan 09, P09.T42).
+   */
+  readonly distanceUnit: ChartDistanceUnit;
   /** Whether the chart is a snapshot the link no longer backs: each row then trails one `S`. */
   readonly stale: boolean;
 }
@@ -53,7 +57,7 @@ export function FeatureList({
   features,
   selectedId,
   onSelect,
-  distanceDecimals,
+  distanceUnit,
   stale,
 }: FeatureListProps) {
   const baseId = useId();
@@ -164,7 +168,7 @@ export function FeatureList({
       <div className="system-list__head">
         <span>DESIG</span>
         <span>KIND</span>
-        <span>DIST ly</span>
+        <span>{`DIST ${distanceUnit.symbol}`}</span>
         <span>EXTENT ly</span>
         <span>MASS</span>
       </div>
@@ -196,7 +200,7 @@ export function FeatureList({
             if (feature === undefined) {
               return null;
             }
-            const distance = formatLengthLy(feature.distanceLy, distanceDecimals);
+            const distance = formatChartDistance(feature.distanceLy, distanceUnit);
             const extent = formatSignificant(feature.extentLy);
             const mass = formatSignificant(feature.massMsun);
             return (
@@ -212,7 +216,7 @@ export function FeatureList({
                 aria-label={[
                   feature.designation,
                   featureKindWords(feature.kind),
-                  `${distance} ly`,
+                  `${distance} ${distanceUnit.symbol}`,
                   `radius ${extent} ly`,
                   `${mass} solar masses`,
                   stale ? "stale" : null,

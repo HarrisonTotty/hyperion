@@ -19,9 +19,10 @@ import type { SpatialScene } from "../../spatial/marks";
 import { vec3 } from "../../geometry/vec3";
 import {
   chartDataFault,
+  type ChartDistanceUnit,
   type ChartSelection,
   DEFAULT_DRIVE_RANGE_LY,
-  distanceDecimalsFor,
+  distanceUnitFor,
   featureDataFault,
   featureMarkId,
   filterSystems,
@@ -121,8 +122,8 @@ export interface LocalChartState {
    * show; `null` when it can.
    */
   readonly observerMoveHeldBack: string | null;
-  /** Decimals every distance on this chart is written with. */
-  readonly distanceDecimals: number;
+  /** The unit and decimals every distance on this chart is written with. */
+  readonly distanceUnit: ChartDistanceUnit;
   /** Why the chart's controls are held back, such as `NO CARRIER`; `null` when they act. */
   readonly heldBack: string | null;
   readonly select: (id: SystemIdHex) => void;
@@ -344,7 +345,7 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     mode,
     observedHeldBack,
     observerMoveHeldBack,
-    distanceDecimals: distanceDecimalsFor(shown?.radiusLy ?? queryRadiusLy),
+    distanceUnit: distanceUnitFor(shown?.radiusLy ?? queryRadiusLy),
     heldBack,
     select: (id) => {
       setChosen({ kind: "system", id });

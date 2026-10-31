@@ -44,6 +44,7 @@ import {
   localFrameAt,
   toLocal,
 } from "../../geometry/frame";
+import { type ChartDistanceUnit, formatChartDistance, formatChartOffset } from "./chartModel";
 import { TIME_WIDTH_CH } from "./chartReadings";
 import { OriginReadings } from "./OriginReadings";
 import { PrimaryReadings } from "./PrimaryReadings";
@@ -79,8 +80,11 @@ export interface SystemReadoutProps {
   readonly driveRangeLy: number;
   /** The chart time, in years from the epoch: the time the age is given at. */
   readonly timeYr: number;
-  /** Decimals every distance on this chart is written with (plan 05, design note D21). */
-  readonly distanceDecimals: number;
+  /**
+   * The unit and decimals every distance on this chart is written with, `DIST`'s and the offsets'
+   * (plan 05, design note D21; plan 09, P09.T42).
+   */
+  readonly distanceUnit: ChartDistanceUnit;
   /**
    * The selected system's stars as `system_summary` answered for it, or `null` before the answer,
    * without a selection, and when the answer cannot be used (plan 06, P06.T36).
@@ -337,7 +341,7 @@ export function SystemReadout({
   frame,
   driveRangeLy,
   timeYr,
-  distanceDecimals,
+  distanceUnit,
   stars,
   stale,
   starsStale,
@@ -479,9 +483,9 @@ export function SystemReadout({
               label="DIST"
               value={estimatedIf(
                 observed,
-                system === null ? null : formatLengthLy(system.distanceLy, distanceDecimals),
+                system === null ? null : formatChartDistance(system.distanceLy, distanceUnit),
               )}
-              unit="ly"
+              unit={distanceUnit.symbol}
               stale={stale}
             />
             {/*
@@ -495,27 +499,27 @@ export function SystemReadout({
               label="NORTH"
               value={estimatedIf(
                 observed,
-                local === null ? null : formatSigned(local.north, distanceDecimals),
+                local === null ? null : formatChartOffset(local.north, distanceUnit),
               )}
-              unit="ly"
+              unit={distanceUnit.symbol}
               stale={stale}
             />
             <Reading
               label="COREWARD"
               value={estimatedIf(
                 observed,
-                local === null ? null : formatSigned(local.coreward, distanceDecimals),
+                local === null ? null : formatChartOffset(local.coreward, distanceUnit),
               )}
-              unit="ly"
+              unit={distanceUnit.symbol}
               stale={stale}
             />
             <Reading
               label="SPINWARD"
               value={estimatedIf(
                 observed,
-                local === null ? null : formatSigned(local.spinward, distanceDecimals),
+                local === null ? null : formatChartOffset(local.spinward, distanceUnit),
               )}
-              unit="ly"
+              unit={distanceUnit.symbol}
               stale={stale}
             />
             <Reading

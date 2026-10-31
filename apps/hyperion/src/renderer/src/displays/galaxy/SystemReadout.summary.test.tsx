@@ -43,7 +43,7 @@ import {
   aTripleSummary,
   aWhiteDwarf,
 } from "../../test/systemFixtures";
-import { DEFAULT_DRIVE_RANGE_LY, distanceDecimalsFor } from "./chartModel";
+import { DEFAULT_DRIVE_RANGE_LY, distanceUnitFor } from "./chartModel";
 import { SystemReadout } from "./SystemReadout";
 import { statusLine } from "../../test/statusLine";
 
@@ -157,7 +157,7 @@ function renderAnswered(
       frame={localFrameAt(vec3(x, y, z))}
       driveRangeLy={DEFAULT_DRIVE_RANGE_LY}
       timeYr={chart.timeYr}
-      distanceDecimals={distanceDecimalsFor(chart.radiusLy)}
+      distanceUnit={distanceUnitFor(chart.radiusLy)}
       stars={answer.model}
       stale={stale}
       starsStale={starsStale}

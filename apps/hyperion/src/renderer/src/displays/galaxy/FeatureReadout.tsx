@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import {
   formatAge,
-  formatLengthLy,
   formatListPosition,
   formatNumber,
   formatSci,
@@ -20,6 +19,7 @@ import type {
 } from "../../lib/galaxy/model";
 import { useItemsInView } from "../../lib/itemsInView";
 import { formatHex64 } from "../../lib/seed";
+import { type ChartDistanceUnit, formatChartDistance } from "./chartModel";
 import { SystemReading as Reading } from "./SystemReading";
 
 /** The words for a count that is zero: none expected, none left. */
@@ -31,8 +31,11 @@ export interface FeatureReadoutProps {
   readonly feature: ChartFeature;
   /** The chart time, in years from the epoch: the time its age and size are given at. */
   readonly timeYr: number;
-  /** Decimals every distance on this chart is written with (plan 05, design note D21). */
-  readonly distanceDecimals: number;
+  /**
+   * The unit and decimals every distance on this chart is written with (plan 05, design note D21;
+   * plan 09, P09.T42).
+   */
+  readonly distanceUnit: ChartDistanceUnit;
   /**
    * Whether the chart's answer, which the feature is read from, is a snapshot the link no longer
    * backs: each of its values is then muted and trails its `S`, the structure's and the black
@@ -220,7 +223,7 @@ function StructureReadings({ structure, stale }: StructureReadingsProps) {
 export function FeatureReadout({
   feature,
   timeYr,
-  distanceDecimals,
+  distanceUnit,
   stale,
   detail,
   detailStale,
@@ -260,8 +263,8 @@ export function FeatureReadout({
             <Reading label="KIND" value={featureKindWords(feature.kind)} wide stale={stale} />
             <Reading
               label="DIST"
-              value={formatLengthLy(feature.distanceLy, distanceDecimals)}
-              unit="ly"
+              value={formatChartDistance(feature.distanceLy, distanceUnit)}
+              unit={distanceUnit.symbol}
               stale={stale}
             />
             <Reading

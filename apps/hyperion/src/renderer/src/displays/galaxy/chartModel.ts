@@ -10,10 +10,14 @@
 import type { FeatureIdHex, MassLayer, ObjectKindDto, SystemIdHex } from "@hyperion/protocol";
 
 import {
+  AU_PER_LY,
   formatNumber,
+  formatScaleLength,
+  formatSigned,
   formatSubstellarMass,
   MEARTH_PER_MSUN,
   MJUP_PER_MSUN,
+  SCALE_AU_BELOW_LY,
 } from "../../lib/format";
 import {
   type ChartCensus,
@@ -57,7 +61,10 @@ import { ceil125, gridSpacing, RADIUS_STEPS_LY } from "../../spatial/scale";
  */
 export const DEFAULT_DRIVE_RANGE_LY = 50;
 
-/** The most decimals a chart length is written with: 0.01 ly is the smallest query radius. */
+/**
+ * The most decimals a chart length is written with in light-years: 0.01 ly is the smallest query
+ * radius read in them.
+ */
 const MAX_LENGTH_DECIMALS = 4;
 
 /** Writes a value with as few decimals as it needs to be exact, up to `mostDecimals`. */
@@ -79,6 +86,31 @@ function fewestDecimals(value: number, mostDecimals: number): string {
  */
 export function formatChartLengthLy(ly: number): string {
   return fewestDecimals(ly, MAX_LENGTH_DECIMALS);
+}
+
+/**
+ * Whether a query radius is one of the centre's fine steps, below 0.01 ly, whose lengths the chart
+ * reads in astronomical units, as the scale bar does (`SCALE_AU_BELOW_LY`).
+ *
+ * @remarks
+ * The tolerance is `formatScaleLength`'s, so that a computed 0.01 ly does not fall to AU through
+ * rounding in the last bit and the selector, the query edge and the distances agree.
+ */
+function readsInAu(queryRadiusLy: number): boolean {
+  return queryRadiusLy < SCALE_AU_BELOW_LY * (1 - 1e-9);
+}
+
+/**
+ * Writes a query radius with its unit: `50 ly`, `0.01 ly`, and below 0.01 ly in astronomical units
+ * to three figures, `316 AU`, `63.2 AU` (plan 09, P09.T42).
+ *
+ * @remarks
+ * For the `QUERY RADIUS` selector's steps and the `QUERY EDGE` label, so that the two write a
+ * radius alike. The fine steps are 1-2-5 values in light-years, 0.005 ly to 0.001 ly, read in the
+ * unit the scale bar takes below 0.01 ly ({@link formatScaleLength}).
+ */
+export function formatQueryRadius(ly: number): string {
+  return readsInAu(ly) ? formatScaleLength(ly) : `${formatChartLengthLy(ly)} ly`;
 }
 
 /**
@@ -118,6 +150,46 @@ export function distanceDecimalsFor(queryRadiusLy: number): number {
     return 2;
   }
   return queryRadiusLy >= 1 ? 3 : 4;
+}
+
+/** The decimals a distance keeps in astronomical units, on a chart of the centre's fine steps. */
+const AU_DISTANCE_DECIMALS = 1;
+
+/** The unit and precision every distance on one chart is written in. */
+export interface ChartDistanceUnit {
+  /** The unit's symbol, beside each value and in a list's `DIST` header: `ly` or `AU`. */
+  readonly symbol: "ly" | "AU";
+  /** How many of the unit make one light-year. */
+  readonly perLy: number;
+  /** The decimals every distance is written with. */
+  readonly decimals: number;
+}
+
+/**
+ * The unit and precision every distance on a chart of this query radius is written in: the lists'
+ * `DIST` columns, and the readouts' `DIST` and offsets.
+ *
+ * @remarks
+ * In light-years at {@link distanceDecimalsFor}'s decimals, down to a radius of 0.01 ly; on a
+ * narrower chart, the centre's fine steps, in astronomical units to 0.1 AU, as the scale bar and
+ * the radius selector read there (plan 09, P09.T42). One unit and one precision per chart, so that
+ * a column of distances lines up and no value changes its unit as the selection moves; they are
+ * static, so no hysteresis is needed (plan 05, design note D21).
+ */
+export function distanceUnitFor(queryRadiusLy: number): ChartDistanceUnit {
+  return readsInAu(queryRadiusLy)
+    ? { symbol: "AU", perLy: AU_PER_LY, decimals: AU_DISTANCE_DECIMALS }
+    : { symbol: "ly", perLy: 1, decimals: distanceDecimalsFor(queryRadiusLy) };
+}
+
+/** Writes a distance on a chart in the chart's unit, without it: `0.0042`, `41.3`. */
+export function formatChartDistance(ly: number, unit: ChartDistanceUnit): string {
+  return formatNumber(ly * unit.perLy, unit.decimals);
+}
+
+/** Writes a signed offset on a chart in the chart's unit, without it: `+0.0042`, `-41.3`. */
+export function formatChartOffset(ly: number, unit: ChartDistanceUnit): string {
+  return formatSigned(ly * unit.perLy, unit.decimals);
 }
 
 /**
@@ -487,7 +559,7 @@ export function toScene(result: ChartResult, options: ChartSceneOptions): Spatia
   spheres.push({
     radius: result.radiusLy,
     role: "data_edge",
-    label: `QUERY EDGE ${formatChartLengthLy(result.radiusLy)} ly`,
+    label: `QUERY EDGE ${formatQueryRadius(result.radiusLy)}`,
   });
   const drawn = filterSystems(result.systems, starFilter).flatMap((system) => {
     // An object of a layer this build does not know has no size class: listed, and not drawn.

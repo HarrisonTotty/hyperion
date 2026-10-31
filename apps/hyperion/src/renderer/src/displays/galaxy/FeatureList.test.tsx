@@ -7,6 +7,7 @@ import { toChartFeatures } from "../../lib/galaxy/featureWire";
 import type { ChartFeature } from "../../lib/galaxy/model";
 import { aFeaturesInRange, ASSOCIATION, STAR_FORMING_REGION } from "../../test/featureFixtures";
 import { FeatureList } from "./FeatureList";
+import { type ChartDistanceUnit, distanceUnitFor } from "./chartModel";
 
 /** Twenty rows of 2rem at the test root font size, the window the list is measured at. */
 const VIEWPORT_PX = 20 * 32;
@@ -32,7 +33,15 @@ function manyFeatures(count: number): ReadonlyArray<ChartFeature> {
 
 function renderList(
   features: ReadonlyArray<ChartFeature>,
-  { selectedId = null, stale = false }: { selectedId?: FeatureIdHex | null; stale?: boolean } = {},
+  {
+    selectedId = null,
+    stale = false,
+    distanceUnit = distanceUnitFor(50),
+  }: {
+    selectedId?: FeatureIdHex | null;
+    stale?: boolean;
+    distanceUnit?: ChartDistanceUnit;
+  } = {},
 ) {
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(VIEWPORT_PX);
   const onSelect = vi.fn<(id: FeatureIdHex) => void>();
@@ -41,7 +50,7 @@ function renderList(
       features={features}
       selectedId={selectedId}
       onSelect={onSelect}
-      distanceDecimals={2}
+      distanceUnit={distanceUnit}
       stale={stale}
     />,
   );
@@ -51,7 +60,7 @@ function renderList(
         features={features}
         selectedId={id}
         onSelect={onSelect}
-        distanceDecimals={2}
+        distanceUnit={distanceUnit}
         stale={stale}
       />,
     );
@@ -76,6 +85,22 @@ describe("FeatureList (plan 09, P09.T41.c)", () => {
       `GPG F336, STAR-FORMING REGION, ${GOLDEN[1]?.distanceLy.toFixed(2) ?? ""} ly, radius 10.8 ly, 112 solar masses`,
       `GPG F530, OB ASSOCIATION, ${GOLDEN[2]?.distanceLy.toFixed(2) ?? ""} ly, radius 52.8 ly, 12,300 solar masses`,
     ]);
+  });
+
+  it("reads its distances in AU, under DIST AU, on a chart of the centre's fine steps (plan 09, P09.T42)", () => {
+    const [feature] = GOLDEN;
+    if (feature === undefined) {
+      throw new Error("the golden holds no feature");
+    }
+    // 0.003 ly is 189.72 AU.
+    renderList([{ ...feature, distanceLy: 0.003 }], { distanceUnit: distanceUnitFor(0.002) });
+
+    expect(screen.getByText("DIST AU")).toBeInTheDocument();
+    const [row] = within(list()).getAllByRole("option");
+    expect(row).toHaveAccessibleName(
+      "GPF F207, OPEN CLUSTER, 189.7 AU, radius 26.9 ly, 268 solar masses",
+    );
+    expect(row?.querySelectorAll(".system-list__number")[0]).toHaveTextContent("189.7");
   });
 
   it("shows each kind by the abbreviation its mark carries", () => {

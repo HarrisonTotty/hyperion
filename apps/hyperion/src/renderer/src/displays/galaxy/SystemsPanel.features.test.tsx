@@ -2,7 +2,7 @@
  * The `SYSTEMS` panel's second list, the chart's features, and the readout of the feature selected
  * in it (plan 09, P09.T41.c), with the chart's own hook behind it over a fake socket.
  */
-import type { FeatureSummary } from "@hyperion/protocol";
+import { type FeatureSummary, universeTimeFromYears } from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -384,5 +384,9 @@ describe("SystemsPanel's features (plan 09, P09.T41.c)", () => {
     });
 
     expect(featureReading("X-RAY LUMINOSITY")).toMatch(/^1\.69E28 W S/u);
+    // Asked again at the chart's new time, which its answer is read at (plan 09, P09.T42).
+    expect(socket.requestsOfKind("black_hole_state").at(-1)?.body.time).toEqual(
+      universeTimeFromYears(100),
+    );
   });
 });

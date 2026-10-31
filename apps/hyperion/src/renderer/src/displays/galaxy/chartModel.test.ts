@@ -1,6 +1,7 @@
 import type { ObjectKindDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
+import { AU_PER_LY } from "../../lib/format";
 import { toChartResult } from "../../lib/galaxy/wire";
 import { localFrameAt } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
@@ -20,8 +21,12 @@ import {
   censusLine,
   chartDataFault,
   distanceDecimalsFor,
+  distanceUnitFor,
   formatBandMsun,
+  formatChartDistance,
   formatChartLengthLy,
+  formatChartOffset,
+  formatQueryRadius,
   filterSystems,
   inRangeCount,
   layerBands,
@@ -97,6 +102,14 @@ describe("toScene", () => {
       "RANGE 50 ly SET",
       "QUERY EDGE 80 ly",
     ]);
+  });
+
+  it("labels the query edge of a chart of the centre's finest step in AU, as its selector reads", () => {
+    const scene = sceneOf([], { radiusLy: 0.001 });
+
+    expect(scene.spheres.map((sphere) => sphere.label)).toEqual(["QUERY EDGE 63.2 AU"]);
+    expect(scene.plane.spacing).toBe(0.0002);
+    expect(scene.plane.rings.map((ring) => ring.label)).toEqual(["", "", "", "", ""]);
   });
 
   it("rings the plane at every grid spacing out to 50 ly, the drive range labelled", () => {
@@ -319,11 +332,74 @@ describe("distanceDecimalsFor", () => {
   });
 });
 
+describe("distanceUnitFor", () => {
+  it.each([
+    [500, "ly", 2],
+    [10, "ly", 2],
+    [1, "ly", 3],
+    [0.5, "ly", 4],
+    [0.01, "ly", 4],
+    // A computed 0.01 a bit off the literal stays in light-years, as the scale bar does.
+    [0.1 * 0.1, "ly", 4],
+    [0.01 * (1 - 1e-12), "ly", 4],
+    [0.005, "AU", 1],
+    [0.002, "AU", 1],
+    [0.001, "AU", 1],
+  ])(
+    "writes every distance on a %s ly chart in %s with %s decimals",
+    (radiusLy, symbol, decimals) => {
+      const unit = distanceUnitFor(radiusLy);
+
+      expect(unit.symbol).toBe(symbol);
+      expect(unit.decimals).toBe(decimals);
+      expect(unit.perLy).toBe(symbol === "AU" ? AU_PER_LY : 1);
+    },
+  );
+});
+
+describe("formatChartDistance and formatChartOffset", () => {
+  it.each([
+    [0.0042, 0.5, "0.0042", "+0.0042"],
+    [-0.0042, 0.01, "0.0042", "-0.0042"],
+    [12.3456, 20, "12.35", "+12.35"],
+    // 0.001 ly is 63.241 AU (the IAU's 2012 au and the Julian light-year, both exact).
+    [0.001, 0.001, "63.2", "+63.2"],
+    [-0.0005, 0.001, "31.6", "-31.6"],
+    [0, 0.005, "0.0", "+0.0"],
+    // A feature's centre may lie far beyond a fine chart's edge: grouped from five digits.
+    [2, 0.001, "126,482.2", "+126,482.2"],
+  ])(
+    "writes %s ly on a %s ly chart as %s, and as an offset %s",
+    (ly, radiusLy, distance, offset) => {
+      const unit = distanceUnitFor(radiusLy);
+
+      expect(formatChartDistance(Math.abs(ly), unit)).toBe(distance);
+      expect(formatChartOffset(ly, unit)).toBe(offset);
+    },
+  );
+});
+
+describe("formatQueryRadius", () => {
+  it.each([
+    [500, "500 ly"],
+    [80, "80 ly"],
+    [37.5, "37.5 ly"],
+    [0.05, "0.05 ly"],
+    [0.01, "0.01 ly"],
+    [0.005, "316 AU"],
+    [0.002, "126 AU"],
+    [0.001, "63.2 AU"],
+  ])("writes a radius of %s ly as %s", (ly, text) => {
+    expect(formatQueryRadius(ly)).toBe(text);
+  });
+});
+
 describe("queryRadiusForDriveRange", () => {
   it.each([
     [50, 50],
     [80, 100],
-    [0.005, 0.01],
+    [0.01, 0.01],
+    [0.0005, 0.001],
     [600, 500],
   ])("follows a drive range of %s ly with %s ly", (driveRangeLy, radiusLy) => {
     expect(queryRadiusForDriveRange(driveRangeLy)).toBe(radiusLy);

@@ -17,6 +17,7 @@ import {
 } from "../../test/galaxyFixtures";
 import { SystemReadout } from "./SystemReadout";
 import type { LineExtinction } from "./useExtinction";
+import { distanceUnitFor } from "./chartModel";
 
 const CENTRE = [26_000, 0, 0] as const;
 const FRAME = localFrameAt(vec3(CENTRE[0], CENTRE[1], CENTRE[2]));
@@ -47,7 +48,7 @@ function renderReadout(
       frame={FRAME}
       driveRangeLy={driveRangeLy}
       timeYr={timeYr}
-      distanceDecimals={2}
+      distanceUnit={distanceUnitFor(50)}
       stars={stars}
       stale={stale}
       starsStale={starsStale}

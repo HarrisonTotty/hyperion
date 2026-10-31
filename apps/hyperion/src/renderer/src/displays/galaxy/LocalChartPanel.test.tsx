@@ -17,6 +17,8 @@ import {
 import { type RecordingContext2D, stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { stubMatchMedia } from "../../test/stubMatchMedia";
+import { RADIUS_STEPS_LY } from "../../spatial/scale";
+import { formatQueryRadius } from "./chartModel";
 import { GalaxyDisplay } from "./GalaxyDisplay";
 import { statusLine } from "../../test/statusLine";
 
@@ -361,6 +363,71 @@ describe("LocalChartPanel", { timeout: 120_000 }, () => {
     expect(labels).toContain("RANGE 50 ly SET");
     expect(labels).toContain("PLANE 50 ly SET");
     expect(labels).toContain("QUERY EDGE 80 ly");
+  });
+
+  it("asks at every query radius from 500 ly down to 0.001 ly, its census line shown at each", async () => {
+    const { user, socket } = await renderChart();
+
+    for (const step of RADIUS_STEPS_LY.toReversed()) {
+      // Each step is chosen and answered before the next, as an operator's are.
+      // oxlint-disable-next-line no-await-in-loop
+      await user.selectOptions(
+        within(chartPage()).getByRole("combobox", { name: "QUERY RADIUS" }),
+        String(step),
+      );
+      expect(socket.requestsOfKind("systems_in_range").at(-1)?.body.radius_ly).toBe(step);
+      // oxlint-disable-next-line no-await-in-loop
+      await answerQuery(socket, step);
+
+      const labels = within(chartPage())
+        .getAllByText(/^QUERY EDGE/u)
+        .map((element) => element.textContent);
+      expect(labels).toEqual([`QUERY EDGE ${formatQueryRadius(step)}`]);
+      expect(within(chartPage()).getByText(/^COMPLETE ABOVE/u)).toHaveTextContent(
+        "COMPLETE ABOVE 0.08",
+      );
+    }
+  });
+
+  it("reads a chart of the finest step in AU: its scale bar, query edge, list and readout", async () => {
+    const { user, socket } = await renderChart();
+
+    await user.selectOptions(
+      within(chartPage()).getByRole("combobox", { name: "QUERY RADIUS" }),
+      "63.2 AU",
+    );
+    await server(() => {
+      socket.serverAnswers("systems_in_range", (body) =>
+        aSystemsInRange({
+          centreLy: CENTRE,
+          radiusLy: body.radius_ly,
+          minLayer: body.min_layer,
+          // At the centre, then 0.0005 ly (31.6 AU) north and 0.0008 ly (50.6 AU) along x.
+          systems: [
+            { relLy: [0, 0, 0], layer: "c" },
+            { relLy: [0, 0, 0.0005], layer: "a" },
+            { relLy: [0.0008, 0, 0], layer: "e" },
+          ],
+        }),
+      );
+    });
+
+    expect(within(chartPage()).getByRole("img", { name: /^Scale bar/u })).toHaveAccessibleName(
+      /^Scale bar, \d+ AU$/u,
+    );
+    // The curve label is one span whose figures are set apart, so it is read as a whole.
+    expect(within(chartPage()).getByText(/^QUERY EDGE/u)).toHaveTextContent("QUERY EDGE 63.2 AU");
+    expect(within(chartPage()).getByText(/^COMPLETE ABOVE/u)).toBeInTheDocument();
+    const systems = within(screen.getByRole("region", { name: /^Systems/u }));
+    expect(systems.getByText("DIST AU")).toBeInTheDocument();
+    expect(options()[1]).toHaveAccessibleName(/, 31\.6 AU,/u);
+    expect(options()[2]).toHaveAccessibleName(/, 50\.6 AU,/u);
+
+    await user.click(options()[1] ?? canvas());
+
+    expect(reading("DIST")).toBe("31.6 AU");
+    expect(reading("NORTH")).toBe("+31.6 AU");
+    expect(reading("COREWARD")).toBe("+0.0 AU");
   });
 
   it("says what its symbols mean, and that they are not to scale", async () => {
