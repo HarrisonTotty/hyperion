@@ -267,15 +267,18 @@ impl SupercriticalReservoir {
         self.partial_pressure
     }
 
-    /// Its critical isochore's pressure p* at `T_s`.
+    /// Its critical isochore's pressure p* at `T_s` ([`Self::of`]); a partition's column's, its
+    /// condensation cap at the temperature its reservoir lies at ([`Self::of_column`]), the
+    /// saturation pressure where that lies below `T_c` (research-leans-8 §1).
     #[cfg_attr(not(test), expect(dead_code, reason = "the census's tests read it"))]
     #[must_use]
     pub(crate) const fn isochore_pressure(&self) -> Pascals {
         self.isochore_pressure
     }
 
-    /// Its melting pressure at `T_s` on the melting curve's rising branch, `None` where its
-    /// reference gives none there.
+    /// Its melting pressure on the melting curve's rising branch, at `T_s` ([`Self::of`]) or at the
+    /// temperature its reservoir lies at ([`Self::of_column`]), `None` where its reference gives
+    /// none there.
     #[cfg_attr(not(test), expect(dead_code, reason = "the census's tests read it"))]
     #[must_use]
     pub(crate) const fn melting_pressure(&self) -> Option<Pascals> {
@@ -393,8 +396,8 @@ impl Atmosphere {
 
     /// Its partition's reservoir with the most liquid-like fluid at its solve's last climate under
     /// the gravity `gravity`, whatever its share (P14.T53.b part 3,
-    /// [`SupercriticalReservoir::of_column`]): `None` under part 3's hold and where none lies above
-    /// its critical point. What a census states of its margins.
+    /// [`SupercriticalReservoir::of_column`]): `None` under part 3's hold and where the mean
+    /// surface temperature admits none (research-leans-8 §1). What a census states of its margins.
     #[cfg(test)]
     pub(crate) fn partitioned_reservoir(
         &self,

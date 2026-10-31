@@ -2509,10 +2509,10 @@ fn under_every_25_hold_a_reservoir_counts_by_its_mean_at_the_critical_point() {
         assert_same_bits(reservoir.lies_at().value(), below.value());
         assert!(reservoir.temperature_ratio() < 1.0, "{reservoir:?}");
         assert!(reservoir.reservoir().value() > 0.0, "{reservoir:?}");
-        assert!(solved(&under_t_c).is_none());
+        assert_eq!(solved(&under_t_c), None);
     });
     with_steam_envelope(SteamEnvelopeRules::Held, || {
-        assert!(solved(&at_t_c).is_none());
+        assert_eq!(solved(&at_t_c), None);
     });
 }
 

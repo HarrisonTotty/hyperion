@@ -1118,11 +1118,14 @@ impl AirborneWeights {
     ///
     /// The mean admits it, not the temperature its reservoir lies at (research-leans-8 §1): the
     /// passes can settle a dominant condensable's controlling temperature on `T_c` itself, either
-    /// side of it by 10⁻¹¹ of it from one time to the next, so a test there would open and hide a
-    /// body's surface inside the clock window with no input changing. The fluid's top is the mean
-    /// surface, and the cap is continuous across `T_c`, so the reservoir's weight does not jump
-    /// there. Its column is still taken at the temperature it lies at: its `lies_at`, ratio,
-    /// isochore and melting pressure.
+    /// side of it by up to 10⁻¹⁰ of it from one time to the next, so a test there would open and
+    /// hide a body's surface inside the clock window with no input changing. The fluid's top is the
+    /// mean surface and it warms with depth, so a cold trap the solve pins at `T_c` is no
+    /// interface; and the cap is continuous across `T_c`, so the reservoir's weight does not jump
+    /// there. Its column is still taken at the temperature it lies at: its `lies_at`, ratio, cap
+    /// and melting pressure. The rule has no tolerance on `lies_at`, so it also admits a reservoir
+    /// lying well below `T_c` under a mean above it, whose column is then taken at its
+    /// saturation; the partition's condensates still judge its phase at `lies_at`.
     ///
     /// It reads the solve's own weights and dominances, so that it is [`partition`]'s at the same
     /// inputs to the bit, with no allocation.
@@ -1267,7 +1270,7 @@ impl AirborneWeights {
 
 /// A condensable's reservoir in a partition whose mean surface temperature is at or above its
 /// critical temperature (P14.T53.b part 3; [`AirborneWeights::supercritical_column`]): the
-/// liquid-like fluid above its critical isochore, as column weights, M g ÷ 4πR², and where the
+/// liquid-like fluid above its condensation cap, as column weights, M g ÷ 4πR², and where the
 /// surface pressure reaches its melting curve, the solid beneath it.
 ///
 /// The fluid is the reservoir's part above its melting pressure at the temperature it lies at,
@@ -1287,7 +1290,9 @@ pub(crate) struct CriticalColumn {
     temperature_ratio: f64,
     /// Its own partial pressure in the air, x p.
     partial_pressure: Pascals,
-    /// Its condensation cap at `lies_at`, its critical isochore ([`PhaseDiagram::condensation_cap`]).
+    /// Its condensation cap at `lies_at` ([`PhaseDiagram::condensation_cap`]): its critical
+    /// isochore's pressure at or above `T_c`, its saturation pressure below it, the two meeting at
+    /// `T_c` (research-leans-8 §1).
     isochore_pressure: Pascals,
     /// Its melting pressure at `lies_at` on its rising branch, `None` where its reference gives
     /// none there.
@@ -1327,7 +1332,8 @@ impl CriticalColumn {
         self.partial_pressure
     }
 
-    /// Its condensation cap at `lies_at`, its critical isochore ([`PhaseDiagram::condensation_cap`]).
+    /// Its condensation cap at `lies_at` ([`PhaseDiagram::condensation_cap`]): its critical
+    /// isochore's pressure at or above `T_c`, its saturation pressure below it.
     #[must_use]
     pub(crate) const fn isochore_pressure(&self) -> Pascals {
         self.isochore_pressure

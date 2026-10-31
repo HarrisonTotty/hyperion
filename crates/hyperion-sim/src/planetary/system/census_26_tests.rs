@@ -138,15 +138,10 @@ fn envelope_across_the_window(
     (galaxy, records): (&Galaxy, &[SystemRecord]),
     (rank, id): (usize, &str),
 ) -> Vec<SectionState> {
+    let index = read_body((galaxy, records), (rank, id), &|case| case.body.index)
+        .expect("the census's body is in its system");
     let ctx = SystemContext::from_record(galaxy, &records[rank]);
     let system = generate(SEED, &ctx);
-    let mut index = None;
-    audit_walk_system("census", &ctx, &system, &mut |case| {
-        if case.record.identity().id().to_string() == id {
-            index = Some(case.body.index);
-        }
-    });
-    let index = index.expect("the census's body is in its system");
     (0..WATCH_TIMES)
         .map(|k| {
             system
