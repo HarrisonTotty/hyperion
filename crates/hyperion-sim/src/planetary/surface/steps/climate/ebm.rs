@@ -135,6 +135,7 @@ use crate::substance::{
 };
 use crate::units::consts::STEFAN_BOLTZMANN;
 use crate::units::{Kelvin, Pascals, Seconds};
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// Water's freezing point, the model's `T_f` for water, which R09.T13.d shifts to the climate
 /// condensable's ([`EnergyBalance::for_inputs`]), K: 273.15, ice Ih's melting point at 101,325 Pa
@@ -361,6 +362,72 @@ pub(super) const HOLD_GAIN: f64 = 0.2;
 /// arriving over the orbits after, so that cancelling the whole drift at once overshoots.
 pub(super) const HOLD_DRIFT_SHARE: f64 = 0.6;
 
+/// The generator version from which the zonal search's first run, Z₀, holds its branch: 26
+/// (R09.T13.i; the lane's lean, 2026-10-30, as main set it: version 25's list was closed).
+///
+/// It is Z₀'s branch's one hold. Below it [`Z0BranchRules::in_force`] is [`Z0BranchRules::Held`]:
+/// Z₀ marches to the search's stop or its last orbit, and every record is version 25's bit for bit.
+/// 26's bump deletes this hold, [`Z0BranchRules`] with its `Held` arm and its match in
+/// `ZonalSearch::begin`, the tests' switch [`with_z0_branch`] with its re-export in `climate`, its
+/// line in `with_every_26_hold` (and the helper where it is the last), the helper's test
+/// (`the_z0_branch_is_in_force_inside_26_s_helper_alone`), the tests that compare 26 with and
+/// without it (`the_z0_branch_leaves_the_*_unchanged_to_the_bit`), the wording "under
+/// `Z0_BRANCH_VERSION`" on the items it gates, and its tripwire
+/// (`the_z0_branch_is_held_only_until_the_26_bump`).
+pub(crate) const Z0_BRANCH_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether the zonal search's Z₀ holds its branch (its hold, [`Z0_BRANCH_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum Z0BranchRules {
+    /// Version 25's and before: Z₀ marches to the search's stop or its last orbit.
+    Held,
+    /// Version 26's: Z₀'s drift stop ends it ([`drifting`]) once its mean lies more than
+    /// [`Z0_DEPARTURE_K`] from T\* and drifts away from it, and the held run takes its place, its
+    /// u held toward T\* to the search's own precision ([`Z0_HELD_STOP`]).
+    Kept,
+}
+
+impl Z0BranchRules {
+    /// The rules this generator version gives: Z₀ holds its branch from [`Z0_BRANCH_VERSION`],
+    /// not below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_z0_branch`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = Z0_BRANCH.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= Z0_BRANCH_VERSION {
+            Self::Kept
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The zonal hold's rules a test sets on its thread, `None` for the version's.
+    static Z0_BRANCH: core::cell::Cell<Option<Z0BranchRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the zonal hold's rules `rules` on this thread, for the tests to reach
+/// version 26's Z₀ ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. 26's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_z0_branch<R>(rules: Z0BranchRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<Z0BranchRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            Z0_BRANCH.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(Z0_BRANCH.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
 /// The bound of G1's probe stop on its surface mean's remainder, K: 0.05 (`Adopted`,
 /// decision-r09-t13i's §2.4 follow-up 8 §1). G1 measures d and G2's start, not the climate, so it
 /// needs only d's precision: half the climate's bound, so that d's error (at most 0.05 K, moving
@@ -580,7 +647,8 @@ fn settled_probe(
     MeanProbe::of(orbits, (mean_k, change_k), ratios, ratio)
 }
 
-/// Whether G1's drift stop ends its run after an orbit, `fresh` orbits since its start or its last
+/// Whether a run's drift stop ends it (G1's, and under [`Z0_BRANCH_VERSION`] Z₀'s) after an
+/// orbit, `fresh` orbits since its start or its last
 /// jump that stood, over which its surface mean changed by `change_k` after the fresh changes
 /// `earlier`, K (the lane's lean, 2026-10-30): after at least [`PROBE_FRESH_ORBITS`] fresh orbits,
 /// where the mean's last two ratios are each at least [`DRIFT_RATIO`] and its change at least
@@ -598,6 +666,17 @@ fn drifting(fresh: u32, change_k: f64, earlier: [Option<f64>; 2]) -> bool {
         && change_k.abs() >= DRIFT_K
 }
 
+/// Whether a run of surface mean and change over its last orbit `(mean_k, change_k)`, K, lies more
+/// than [`Z0_DEPARTURE_K`] from T\* = `target_k`, K, and drifts away from it, as a Z₀ that has left
+/// its branch does under [`Z0_BRANCH_VERSION`] ([`Drift::Leaves`]). A mean or a change that is not
+/// a number never departs.
+#[must_use]
+fn departing((mean_k, change_k): (f64, f64), target_k: f64) -> bool {
+    let miss = mean_k - target_k;
+    // By comparison, so that a value that is not a number never departs.
+    miss.abs() > Z0_DEPARTURE_K && miss * change_k > 0.0
+}
+
 /// A seasonal run's stop (decision-r09-t13i §2.4 and its §2.4 follow-ups 4 and 8).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Stop {
@@ -610,9 +689,23 @@ struct Stop {
     /// G1's probe stop's bound on its surface mean's remainder, K ([`probe_end`]), where the run is
     /// G1; `None` for every other run.
     probe_k: Option<f64>,
-    /// Whether its drift stop ends it ([`drifting`]) on a grid of more than one column: G1's, on the
-    /// whole grid (the lane's lean, 2026-10-30).
-    drift_ends: bool,
+    /// Where its drift stop ends it ([`drifting`]; the lane's lean, 2026-10-30).
+    drift: Drift,
+}
+
+/// Where a seasonal run's drift stop ends it ([`drifting`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Drift {
+    /// Nowhere: it marches on to its stop or its last orbit.
+    Runs,
+    /// On a grid of more than one column: G1's, on the whole grid.
+    EndsOnTheWholeGrid,
+    /// On any grid, once its surface mean lies more than [`Z0_DEPARTURE_K`] from `target_k`, K,
+    /// T\*, and drifts away from it: Z₀'s, on the zonal grid, under [`Z0_BRANCH_VERSION`].
+    Leaves {
+        /// T\*, K.
+        target_k: f64,
+    },
 }
 
 /// The climate's runs' stop: [`CONVERGENCE_K`], extrapolating.
@@ -621,14 +714,14 @@ const CLIMATE_STOP: Stop = Stop {
     jumps: Jumps::Allowed,
     max_orbits: MAX_ORBITS,
     probe_k: None,
-    drift_ends: false,
+    drift: Drift::Runs,
 };
 
 /// G1's stop: the climate's, or its probe stop at [`PROBE_STOP_K`] where that comes first
 /// (decision-r09-t13i's §2.4 follow-up 8 §1), or its drift stop (the lane's lean, 2026-10-30).
 const G1_STOP: Stop = Stop {
     probe_k: Some(PROBE_STOP_K),
-    drift_ends: true,
+    drift: Drift::EndsOnTheWholeGrid,
     ..CLIMATE_STOP
 };
 
@@ -638,7 +731,42 @@ const SEARCH_STOP: Stop = Stop {
     jumps: Jumps::Allowed,
     max_orbits: MAX_ORBITS,
     probe_k: None,
-    drift_ends: false,
+    drift: Drift::Runs,
+};
+
+/// How far from T\* Z₀'s surface mean must lie for its drift stop to end it under
+/// [`Z0_BRANCH_VERSION`], K: 2 (`Adopted`, the lane's lean, 2026-10-30). On the warm branch the
+/// seasonal mean lies about 1.5 K below its steady state (decision-r09-t13i's §2.4 follow-up, row
+/// 1), the steady state at T\*, so a Z₀ farther than 2 K from T\* and still drifting away from it
+/// has left its branch. Over the small Earth's twelve seeds and the reference Earth, the Z₀ runs
+/// that settled came no farther below T\* than 1.97 K (seed 3, by then changing 0.015 K an orbit,
+/// under [`DRIFT_K`], which keeps it marching should it pass), or began above it falling toward it
+/// (seeds 1 and 0dd5, from 290.9 and 290.2 K), and those that left their branch passed it still
+/// falling 0.07–0.30 K an orbit (seeds 2, 4, 5 and 8).
+pub(super) const Z0_DEPARTURE_K: f64 = 2.0;
+
+/// A held run's stop ([`EnergyBalance::held_at`]): the bound of its stop on its moves, K
+/// ([`settled`]), and how near T\* its surface mean must lie, K.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct HeldStop {
+    /// The bound on its moves, K.
+    bound_k: f64,
+    /// The largest miss of T\* it stops at, K.
+    miss_k: f64,
+}
+
+/// G2's held stop: the climate's stop, its mean within [`PROBE_STOP_K`] of T\*, the precision
+/// G1's d is measured to.
+const G2_HELD_STOP: HeldStop = HeldStop {
+    bound_k: CONVERGENCE_K,
+    miss_k: PROBE_STOP_K,
+};
+
+/// Z₀'s held stop under [`Z0_BRANCH_VERSION`]: the search's stop, its mean within
+/// [`SEARCH_CONVERGENCE_K`] of T\*, the search's own answer, so that the search ends at it.
+const Z0_HELD_STOP: HeldStop = HeldStop {
+    bound_k: SEARCH_CONVERGENCE_K,
+    miss_k: SEARCH_CONVERGENCE_K,
 };
 
 /// Whether a run may extrapolate its slow mode.
@@ -3380,7 +3508,8 @@ impl EnergyBalance {
     ///
     /// 1. **The zonal search** Z(T\*) on `zonal`, the fit's own zonal model, each run under the
     ///    search's stop ([`SEARCH_STOP`]), recording both stops' flags: Z₀ at the fit's u₀ from its
-    ///    zonal steady state `steady_k`, then by [`search`], its first step on the zonal steady
+    ///    zonal steady state `steady_k` (under [`Z0_BRANCH_VERSION`], held where it leaves its
+    ///    branch: `ZonalSearch::begin`), then by [`search`], its first step on the zonal steady
     ///    states' two-sided slope in u at u₀ ± [`CORRECTION_STEP`] (on `fit`'s set-up), as ruled
     ///    before.
     /// 2. **On the zonal grid** (where `run` is the zonal model), the search's answer is the climate,
@@ -3445,21 +3574,8 @@ impl EnergyBalance {
             let record = CorrectionRun::of(u, run, &orbited);
             (orbited, x, radiation, record)
         };
-        let steady = || (run.grid.broadcast(steady_k), Start::Steady);
-        let first = match answer {
-            Some(i) => {
-                let (record, from) = &zonal_search.runs[i];
-                geographic(
-                    record.run.u,
-                    (
-                        run.grid.broadcast(&from.final_k),
-                        Start::Continued(from.returning.clone()),
-                    ),
-                    G1_STOP,
-                )
-            }
-            None => geographic(at.u0, steady(), G1_STOP),
-        };
+        let (g1_u, g1_begun) = zonal_search.g1_start(answer, run.grid, steady_k);
+        let first = geographic(g1_u, g1_begun, G1_STOP);
         let (g1, g1_probe) = (first.3, first.0.mean_probe);
         let g1_ice = ice_share(
             self.freezing,
@@ -3557,10 +3673,11 @@ impl EnergyBalance {
     /// mean `T̄_n` and change `δ_n` from the orbit before, u moves by ([`HOLD_GAIN`] (T\* − `T̄_n`) −
     /// [`HOLD_DRIFT_SHARE`] `δ_n`) ÷ k, k the drift's sensitivity to u on the zonal model `zonal`,
     /// K an orbit per unit of u ([`drift_sensitivity`](Self::drift_sensitivity)), so that the drift
-    /// is damped and a share of the mean's miss closed; run A as ruled where k is not positive. It ends at the climate's stop on its moves ([`settled`] at
-    /// [`CONVERGENCE_K`], at least [`MIN_ORBITS`] orbits) once its mean lies within
-    /// [`PROBE_STOP_K`] of T\*, the precision G1's d is measured to, or unconverged at
-    /// [`MAX_ORBITS`] or where its state stops being finite, with no jumps. The drift's response
+    /// is damped and a share of the mean's miss closed; run A as ruled where k is not positive. It
+    /// ends at the climate's stop on its moves ([`settled`] at [`CONVERGENCE_K`], at least
+    /// [`MIN_ORBITS`] orbits) once its mean lies within [`PROBE_STOP_K`] of T\*, the precision
+    /// G1's d is measured to ([`G2_HELD_STOP`]), or unconverged at [`MAX_ORBITS`] or where its
+    /// state stops being finite, with no jumps ([`held_at`](Self::held_at)). The drift's response
     /// to u, an orbit's forcing stored in the sea, stays finite and positive at a fold, where the
     /// slope of the steady climate in u does not, so the step stays regular where a run at a fixed
     /// u slows critically or leaves its branch: the run, its last orbit's emission factor and
@@ -3571,9 +3688,10 @@ impl EnergyBalance {
     /// the branch's fold, that is the middle branch between the warm fold and the snowball's, a
     /// state that a run at its own fixed u would leave (North 1975, J. Atmos. Sci. 32, 2033; Cahalan
     /// and North 1979, J. Atmos. Sci. 36, 1178, as the science check read them from memory). Its
-    /// convergence certifies the held run, then, not the stability of a climate at its u; the fold
-    /// guard (decision-r09-t13ge §1.4, g4) keeps only stable states, so whether such a state may be
-    /// kept awaits a ruling (plan 09's R09.T13.i records, "The G runs hold their branch").
+    /// convergence certifies the held run, then, not the stability of a climate at its u. Research
+    /// kept it, flagged by `held` (2026-10-31), on one condition, which the model keeps: no later
+    /// run marches on from a held state as if it had converged by itself (G1 after a held Z₀
+    /// begins from the fit's steady state, and no search step starts from a held run).
     ///
     /// Why: on the small Earth under the reference seed G1 at the zonal answer's u, 0.501, and run
     /// A at u₀ both slid toward the snowball, ending at the cap at 279.1 and 280.4 K after 40 orbits
@@ -3588,23 +3706,40 @@ impl EnergyBalance {
         at: &FitAt,
         steady_k: &[f64],
     ) -> (Orbited, f64, Radiation, CorrectionRun) {
+        if let Some(sensitivity) = self.drift_sensitivity(zonal, at, steady_k, at.u0) {
+            return self.held_at(run, at, steady_k, sensitivity, G2_HELD_STOP);
+        }
+        // Run A as ruled, where the drift does not rise with u, as no lit world's does.
+        let (x, radiation) = at.at(at.u0);
+        let orbited = self.orbits(
+            run.grid,
+            run.sunlight,
+            &radiation,
+            (run.grid.broadcast(steady_k), Start::Steady),
+            run.sea_share,
+            run.ground,
+            run.ocean,
+            CLIMATE_STOP,
+        );
+        let record = CorrectionRun::of(at.u0, run, &orbited);
+        (orbited, x, radiation, record)
+    }
+
+    /// The held run of `run` from the steady state `steady_k`, K (on the zonal grid), broadcast to
+    /// every column, at the drift's sensitivity `sensitivity`, positive, K an orbit per unit of u,
+    /// stopped as `until` says ([`held`](Self::held)'s, for G2 and, under [`Z0_BRANCH_VERSION`],
+    /// Z₀): the run, its last orbit's emission factor and radiation, and its record at that
+    /// orbit's u.
+    #[must_use]
+    fn held_at(
+        &self,
+        run: &Seasonal<'_>,
+        at: &FitAt,
+        steady_k: &[f64],
+        sensitivity: f64,
+        until: HeldStop,
+    ) -> (Orbited, f64, Radiation, CorrectionRun) {
         let mut begun = (run.grid.broadcast(steady_k), Start::Steady);
-        let Some(sensitivity) = self.drift_sensitivity(zonal, at, steady_k, at.u0) else {
-            // Run A as ruled, where the drift does not rise with u, as no lit world's does.
-            let (x, radiation) = at.at(at.u0);
-            let orbited = self.orbits(
-                run.grid,
-                run.sunlight,
-                &radiation,
-                begun,
-                run.sea_share,
-                run.ground,
-                run.ocean,
-                CLIMATE_STOP,
-            );
-            let record = CorrectionRun::of(at.u0, run, &orbited);
-            return (orbited, x, radiation, record);
-        };
         // One marched orbit at a time: a bound of nothing never stops a run before its last orbit.
         let one = Stop {
             bound_k: 0.0,
@@ -3614,7 +3749,8 @@ impl EnergyBalance {
         let mut u = at.u0;
         // The last orbit's surface mean and annual means.
         let mut last: Option<(f64, Vec<f64>)> = None;
-        let (mut before, mut history, mut met) = (None, Vec::new(), (false, false));
+        // Whether the last orbit met the climate's stop, the search's and the held stop's own.
+        let (mut before, mut history, mut met) = (None, Vec::new(), (false, false, false));
         #[cfg(test)]
         let mut started = None;
         let mut orbits = 0;
@@ -3650,17 +3786,18 @@ impl EnergyBalance {
                     met = (
                         enough && settled_after(moved, before, CONVERGENCE_K, None),
                         enough && settled_after(moved, before, SEARCH_CONVERGENCE_K, None),
+                        enough && settled_after(moved, before, until.bound_k, None),
                     );
                     before = Some(moved);
                     mean - last_mean
                 }
                 Some(_) | None => 0.0,
             };
-            // Its mean holds at T\* to the probe's precision, as G1's d is measured.
-            let held = met.0 && (mean - at.mean_k).abs() <= PROBE_STOP_K;
+            // Its mean holds at T\* to its stop's precision.
+            let held = met.2 && (mean - at.mean_k).abs() <= until.miss_k;
             if held || !finite || orbits >= MAX_ORBITS {
                 orbited.climate.orbits = orbits;
-                orbited.climate.converged = held;
+                orbited.climate.converged = held && met.0;
                 orbited.searched = held && met.1;
                 orbited.moves_k = history;
                 orbited.start = RunStart::Steady;
@@ -3888,8 +4025,13 @@ impl EnergyBalance {
         // ended (follow-ups 8 §1 and 9 §1).
         let mut trail = MeanTrail::default();
         let mut mean_probe = None;
-        // G1's drift where its drift stop ended it, on the whole grid (the lane's lean, 2026-10-30).
-        let drift_stop = stop.drift_ends && grid.columns() > 1;
+        // The run's drift where its drift stop ended it: G1's on the whole grid, and Z₀'s under
+        // `Z0_BRANCH_VERSION` once it lies far from T* (the lane's lean, 2026-10-30).
+        let (drift_stop, departure) = match stop.drift {
+            Drift::Runs => (false, None),
+            Drift::EndsOnTheWholeGrid => (grid.columns() > 1, None),
+            Drift::Leaves { target_k } => (true, Some(target_k)),
+        };
         let mut drift_k = None;
         while orbits < stop.max_orbits {
             annual.fill(0.0);
@@ -3971,28 +4113,33 @@ impl EnergyBalance {
                     enough && settled_after(moved, before, CONVERGENCE_K, jump_ratio),
                     enough && settled_after(moved, before, SEARCH_CONVERGENCE_K, jump_ratio),
                 );
-                // G1's probe reads the surface mean of this orbit and its change from the last
-                // (follow-ups 8 §1 and 9 §1).
-                let probed = stop
-                    .probe_k
-                    .zip(previous.as_deref())
-                    .map(|(bound_k, last)| {
+                // G1's probe and the drift stop read the surface mean of this orbit and its change
+                // from the last (follow-ups 8 §1 and 9 §1).
+                let means = (stop.probe_k.is_some() || drift_stop)
+                    .then_some(previous.as_deref())
+                    .flatten()
+                    .map(|last| {
                         let mean = surface_mean(ground, grid, &annual);
-                        (bound_k, (mean, mean - surface_mean(ground, grid, last)))
+                        (mean, mean - surface_mean(ground, grid, last))
                     });
+                let probed = stop.probe_k.zip(means);
                 let ratio = before.map(|before| stop_ratio(moved, before, jump_ratio));
                 if enough && settled_after(moved, before, stop.bound_k, jump_ratio) {
                     mean_probe =
                         probed.map(|(_, means)| settled_probe(orbits, means, trail.changes, ratio));
                     break;
                 }
-                if let Some((bound_k, means)) = probed {
-                    let fresh = (orbits, trail.fresh);
-                    if let Some(probe) = probe_end(fresh, means, trail.changes, ratio, bound_k) {
-                        mean_probe = Some(probe);
-                        break;
+                if let Some(means) = means {
+                    if let Some((bound_k, _)) = probed {
+                        let fresh = (orbits, trail.fresh);
+                        if let Some(probe) = probe_end(fresh, means, trail.changes, ratio, bound_k)
+                        {
+                            mean_probe = Some(probe);
+                            break;
+                        }
                     }
-                    if drift_stop && drifting(trail.fresh, means.1, trail.changes) {
+                    let away = departure.is_none_or(|target_k| departing(means, target_k));
+                    if drift_stop && away && drifting(trail.fresh, means.1, trail.changes) {
                         drift_k = Some(means.1);
                         break;
                     }
@@ -4147,7 +4294,7 @@ impl EnergyBalance {
                 jumps,
                 max_orbits: orbits.unwrap_or(MAX_ORBITS),
                 probe_k: None,
-                drift_ends: false,
+                drift: Drift::Runs,
             },
         )
         .climate
@@ -4754,7 +4901,9 @@ fn search<S>(
 /// - else, from the nearest run that met the climate's stop, the slope's step, (target − T̄) ÷ S
 ///   (so Z₁ may read a Z₀ that met only the climate's stop).
 ///
-/// Each continues from the nearest run that met the climate's stop.
+/// Each continues from the nearest run that met the climate's stop. A held run is never a start
+/// nor a point (research's condition on the held runs, 2026-10-31): no run marches on from a held
+/// state, which a free run would leave.
 #[must_use]
 fn next_search_step(
     runs: &[CorrectionRun],
@@ -4763,14 +4912,16 @@ fn next_search_step(
     bracket: f64,
 ) -> Option<(f64, SearchStep, usize)> {
     let miss = |i: usize| (runs[i].mean_k - target_k).abs();
+    // A held run is never a step's start or a secant's point: a free run would leave its state
+    // (research's condition on the held runs, 2026-10-31).
     let nearest = (0..runs.len())
-        .filter(|&i| runs[i].converged && runs[i].mean_k.is_finite())
+        .filter(|&i| runs[i].converged && !runs[i].held && runs[i].mean_k.is_finite())
         .fold(None, |best: Option<usize>, i| match best {
             Some(b) if miss(b) <= miss(i) => Some(b),
             _ => Some(i),
         })?;
     let searched: Vec<usize> = (0..runs.len())
-        .filter(|&i| runs[i].searched && runs[i].mean_k.is_finite())
+        .filter(|&i| runs[i].searched && !runs[i].held && runs[i].mean_k.is_finite())
         .collect();
     let latest = runs.len() - 1;
     let (u, step) = if !runs[latest].converged {
@@ -5022,7 +5173,14 @@ struct ZonalSearch<'a> {
 
 impl<'a> ZonalSearch<'a> {
     /// The search's first run, Z₀, at the fit's u₀ from its zonal steady state `steady_k`, K, under
-    /// the search's stop, and the steady states' slope on `fit`'s set-up.
+    /// the search's stop, and the steady states' slope on `fit`'s set-up. Under
+    /// [`Z0_BRANCH_VERSION`] Z₀'s drift stop ends it once its mean lies more than
+    /// [`Z0_DEPARTURE_K`] from T\* and drifts away from it ([`Drift::Leaves`]), and the held run
+    /// from the same state takes its place, to the search's precision ([`Z0_HELD_STOP`]): u₀ then
+    /// lies past the zonal model's own warm fold (the small Earth's under seeds 4 and 5, whose Z₀
+    /// ended unconverged at 278.45 K and as a snowball of 206.48 K, the search then reaching
+    /// 2,051–2,160 K, and under seeds 2 and 8, unconverged at the cap). Where the drift's
+    /// sensitivity is not positive, as no lit world's is, Z₀ runs again as version 25 ran it.
     #[must_use]
     fn begin(
         model: &'a EnergyBalance,
@@ -5031,19 +5189,46 @@ impl<'a> ZonalSearch<'a> {
         at: FitAt,
         steady_k: &[f64],
     ) -> Self {
-        let first = model.orbits(
-            zonal.grid,
-            zonal.sunlight,
-            &at.radiation,
-            (steady_k.to_vec(), Start::Steady),
-            zonal.sea_share,
-            zonal.ground,
-            zonal.ocean,
-            SEARCH_STOP,
-        );
+        let marched = |stop: Stop| {
+            model.orbits(
+                zonal.grid,
+                zonal.sunlight,
+                &at.radiation,
+                (steady_k.to_vec(), Start::Steady),
+                zonal.sea_share,
+                zonal.ground,
+                zonal.ocean,
+                stop,
+            )
+        };
+        let first = match Z0BranchRules::in_force() {
+            Z0BranchRules::Held => marched(SEARCH_STOP),
+            Z0BranchRules::Kept => marched(Stop {
+                drift: Drift::Leaves {
+                    target_k: at.mean_k,
+                },
+                ..SEARCH_STOP
+            }),
+        };
+        let sensitivity = first
+            .drift_k
+            .and_then(|_| model.drift_sensitivity(zonal, &at, steady_k, at.u0));
+        let (record, first) = match (first.drift_k, sensitivity) {
+            (None, _) => (CorrectionRun::of(at.u0, zonal, &first), first),
+            (Some(_), Some(sensitivity)) => {
+                let (orbited, _, _, record) =
+                    model.held_at(zonal, &at, steady_k, sensitivity, Z0_HELD_STOP);
+                (record, orbited)
+            }
+            // Version 25's Z₀, rather than the run the drift stop cut short.
+            (Some(_), None) => {
+                let first = marched(SEARCH_STOP);
+                (CorrectionRun::of(at.u0, zonal, &first), first)
+            }
+        };
         let runs = vec![(
             SearchRun {
-                run: CorrectionRun::of(at.u0, zonal, &first),
+                run: record,
                 target_k: at.mean_k,
                 step: SearchStep::Fit,
             },
@@ -5128,6 +5313,33 @@ impl<'a> ZonalSearch<'a> {
         )
     }
 
+    /// G1's u and start (decision-r09-t13i's §2.4 follow-up 8 §1): the answer `answer`'s u, from its
+    /// end state broadcast to every column of `grid` with its return temperatures; from the fit's
+    /// steady state `steady_k`, K, broadcast, where the answer is a held run, whose state a free run
+    /// would leave (research's condition on the held runs, 2026-10-31); at u₀ from that steady state
+    /// where the search has none.
+    #[must_use]
+    fn g1_start(
+        &self,
+        answer: Option<usize>,
+        grid: &ModelGrid,
+        steady_k: &[f64],
+    ) -> (f64, (Vec<f64>, Start)) {
+        let steady = || (grid.broadcast(steady_k), Start::Steady);
+        match answer {
+            Some(i) if self.runs[i].0.run.held => (self.runs[i].0.run.u, steady()),
+            Some(i) => {
+                let (record, from) = &self.runs[i];
+                let start = (
+                    grid.broadcast(&from.final_k),
+                    Start::Continued(from.returning.clone()),
+                );
+                (record.run.u, start)
+            }
+            None => (self.at.u0, steady()),
+        }
+    }
+
     /// The runs' records, in order.
     #[must_use]
     fn records(&self) -> Vec<SearchRun> {
@@ -5201,11 +5413,12 @@ pub(super) struct CorrectionRun {
     /// Whether its last orbit met the search's stop, [`SEARCH_CONVERGENCE_K`]: the search's secant
     /// and the defect's slope read it.
     pub(super) searched: bool,
-    /// G1's surface mean's change over its last orbit, K, where its drift stop ended it
-    /// ([`drifting`]).
+    /// Its surface mean's change over its last orbit, K, where its drift stop ended it
+    /// ([`drifting`]): G1's, never another kept record's (a held Z₀'s is its held run's, `None`).
     pub(super) drift_k: Option<f64>,
     /// Whether its u was held orbit by orbit, its last orbit's u the record's: G2 where G1 measured
-    /// no d ([`EnergyBalance::held`]).
+    /// no d ([`EnergyBalance::held`]), and under [`Z0_BRANCH_VERSION`] a Z₀ that left its branch
+    /// ([`EnergyBalance::held_at`]).
     pub(super) held: bool,
 }
 
@@ -5237,7 +5450,8 @@ pub(super) const DEFECT_PAIR_SPREAD_K: f64 = 0.1;
 /// How a run of the zonal search took its u (decision-r09-t13i's §2.4 follow-up 4 §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum SearchStep {
-    /// Z₀: at the fit's u, from its zonal steady state.
+    /// Z₀: at the fit's u, from its zonal steady state; under [`Z0_BRANCH_VERSION`], where it
+    /// left its branch, the held run from that state, at its last orbit's u.
     Fit,
     /// By the zonal steady states' slope from run `from`.
     Slope {
@@ -7094,6 +7308,80 @@ mod tests {
         assert!(!drifting(4, 0.255, falling));
         assert!(!drifting(4, f64::NAN, falling));
         assert!(!drifting(4, -0.255, [Some(f64::NAN), Some(-0.248)]));
+    }
+
+    /// The zonal search's Z₀ hold (R09.T13.i) is held until the 25 → 26 bump: the rules in force
+    /// are version 25's, Z₀ marching, and its switch sets 26's on this thread alone.
+    #[test]
+    fn the_z0_branch_is_held_only_until_the_26_bump() {
+        assert!(
+            GENERATOR_VERSION < Z0_BRANCH_VERSION,
+            "the 25 → 26 bump puts Z₀'s drift stop and its held run on the record: delete \
+             `Z0_BRANCH_VERSION`, `Z0BranchRules` with its `Held` arm and its match in \
+             `ZonalSearch::begin` (`Drift::Leaves` then always), the tests' `with_z0_branch` \
+             and its re-export in `climate`, its line in `with_every_26_hold` (and the helper \
+             where it is the last), `the_z0_branch_is_in_force_inside_26_s_helper_alone`, \
+             `the_z0_branch_leaves_the_zonal_earth_unchanged_to_the_bit` and \
+             `the_z0_branch_leaves_the_reference_earth_unchanged_to_the_bit`, the wording \
+             \"under `Z0_BRANCH_VERSION`\" on the items it gates, and this test"
+        );
+        assert_eq!(Z0BranchRules::in_force(), Z0BranchRules::Held);
+        assert_eq!(
+            with_z0_branch(Z0BranchRules::Kept, Z0BranchRules::in_force),
+            Z0BranchRules::Kept
+        );
+        assert_eq!(Z0BranchRules::in_force(), Z0BranchRules::Held);
+    }
+
+    /// Z₀'s departure under the zonal hold (R09.T13.i): more than 2 K from T\* and moving away from
+    /// it, below or above; not within the bound, nor where it moves toward T\*, nor where a value
+    /// is not a number.
+    #[test]
+    fn z0_departs_only_beyond_two_kelvin_and_away_from_the_mean() {
+        // The small Earth's seed 4: 285.75 K and falling 0.30 K an orbit.
+        assert!(departing((285.75, -0.30), 288.0));
+        assert!(departing((290.5, 0.2), 288.0));
+        // Seed 3, 1.97 K below and still falling; seed 1, 2.86 K above and falling toward T*.
+        assert!(!departing((286.03, -0.015), 288.0));
+        assert!(!departing((290.86, -0.13), 288.0));
+        assert!(!departing((285.0, 0.1), 288.0));
+        assert!(!departing((285.0, 0.0), 288.0));
+        assert!(!departing((f64::NAN, -0.3), 288.0));
+        assert!(!departing((285.0, f64::NAN), 288.0));
+    }
+
+    /// A held state is never the start of a free run (research's condition on the held runs,
+    /// 2026-10-31): the search's next step neither continues from a held run nor reads one as a
+    /// secant's point; where the only run that met the climate's stop is held, it takes no step.
+    #[test]
+    fn a_held_state_is_never_the_start_of_a_free_run() {
+        let held = |u: f64, mean_k: f64| CorrectionRun {
+            held: true,
+            ..record(u, mean_k, true)
+        };
+        assert_eq!(
+            next_search_step(&[held(0.50, 288.2)], 288.0, 390.0, 1.0),
+            None
+        );
+        let runs = [
+            held(0.50, 288.001),
+            record(0.51, 288.5, true),
+            record(0.52, 288.9, true),
+        ];
+        let (_, step, from) =
+            next_search_step(&runs, 288.0, 390.0, 1.0).expect("two plain runs make a secant");
+        assert_eq!(
+            step,
+            SearchStep::Secant {
+                points: [1, 2],
+                from: 1
+            }
+        );
+        assert_eq!(from, 1);
+        let (_, step, from) = next_search_step(&runs[..2], 288.0, 390.0, 1.0)
+            .expect("a plain run makes the slope's step");
+        assert_eq!(step, SearchStep::Slope { from: 1 });
+        assert_eq!(from, 1);
     }
 
     /// G1's probe measures d only on the fit's branch (the lane's lean, 2026-10-30): an ice share

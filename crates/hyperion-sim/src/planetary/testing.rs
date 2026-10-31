@@ -566,6 +566,8 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - a regolith's pore gas, `PORE_GAS_VERSION` (P14.T49.l), at `RegolithInertiaRules::PoreGas`
 ///   through `with_regolith_inertia`: the gas in a ground's pores at its column's pressure, and the
 ///   outer system's fluffy amorphous ice as the water-ice form.
+/// - the zonal search's Z₀, `Z0_BRANCH_VERSION` (R09.T13.i), at `Z0BranchRules::Kept` through
+///   `with_z0_branch`: Z₀'s drift stop, and the held run in its place where it drifted.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
@@ -593,11 +595,13 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     };
     use crate::planetary::hosts::white_dwarfs::{WhiteDwarfDebrisRules, with_white_dwarf_debris};
     use crate::planetary::hosts::young::{ProtoplanetaryDiscRules, with_protoplanetary_disc};
+    use crate::planetary::surface::steps::climate::{Z0BranchRules, with_z0_branch};
     use crate::planetary::system::envelope::{
         SupercriticalEnvelopeRules, with_supercritical_envelope,
     };
     use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
     use crate::substance::helmholtz::{CompressionRules, with_compression};
+    let run = move || with_z0_branch(Z0BranchRules::Kept, run);
     let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
     let run = move || with_substellar_hosts(SubstellarHostRules::BrownDwarfs, run);
     let run = move || with_rogue_planets(RoguePlanetRules::Bodies, run);
@@ -989,6 +993,32 @@ mod tests {
             DaysideDecksRules::Held
         );
         assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
+    }
+
+    /// 26's switch, the zonal search's Z₀ (R09.T13.i): in force inside 26's helper, with 25's
+    /// holds, held outside it and where a test sets it back.
+    #[test]
+    fn the_z0_branch_is_in_force_inside_26_s_helper_alone() {
+        use crate::planetary::derive::atmosphere::PresentStateRules;
+        use crate::planetary::surface::steps::climate::{Z0BranchRules, with_z0_branch};
+        assert_eq!(Z0BranchRules::in_force(), Z0BranchRules::Held);
+        assert_eq!(
+            with_every_26_hold(Z0BranchRules::in_force),
+            Z0BranchRules::Kept
+        );
+        assert_eq!(
+            with_every_26_hold(PresentStateRules::in_force),
+            PresentStateRules::Present
+        );
+        assert_eq!(
+            with_every_25_hold(Z0BranchRules::in_force),
+            Z0BranchRules::Held
+        );
+        assert_eq!(
+            with_every_26_hold(|| with_z0_branch(Z0BranchRules::Held, Z0BranchRules::in_force)),
+            Z0BranchRules::Held
+        );
+        assert_eq!(Z0BranchRules::in_force(), Z0BranchRules::Held);
     }
 
     #[test]
