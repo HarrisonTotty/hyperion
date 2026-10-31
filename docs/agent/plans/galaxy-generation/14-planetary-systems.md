@@ -8285,6 +8285,41 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - _For 26's bump:_ re-bless `planetary/systems` (the records list the goldens).
   - _Built_ 2026-10-31, held at 26 (`CAP_BALANCE_VERSION`): Risks, "Deviations in P14.T53.h, as
     built".
+- **P14.T53.i The 100 Pa line read once** (behind `LINE_SWITCH_VERSION` = 26 with a tripwire;
+  P14.T53.c's seam at `AIRLESS_PRESSURE`; it rides 26).
+  - _Why:_ the 100 Pa line switches a step's column to the airless climate (`step_climate`) and the
+    record to `Tenuous` or `Airless` (`escaping::finish`), but the two read different airs: a step
+    the partial pressures it starts from, the record the solve's final ones. Where the solve closes
+    on the line from above, its last step reads the bulk climate while its published total lies
+    just under 100 Pa: sample 01ffeb2d20000000.e101 and 02002b2d1ffe0000.e103 are `Tenuous` at
+    100.000 Pa on the airless climate's coldest zone (33.30 K and 33.81 K), their N₂ ×1,132 and
+    ×741 over its ice.
+  - _The rule:_ in `finish`'s branch under the line, where the solve's last step read the bulk
+    climate (`Solve` records which branch it read), the inventory is held once more over the airless
+    span the record publishes, `Solve::step.at(base, …)` at those sub-line partials, by the steps'
+    partition, and those partials are published, `Tenuous` or `Airless` by `holds_tenuous_air`.
+    Below the line the span does not depend on p, so the one evaluation is the fixed point; it adds
+    no steps. The converse, a total at or above the line after an airless last step, is unchanged
+    and counted.
+  - _The hold:_ `LineSwitchRules::{Held, OneSwitch}` with `in_force()`, the tests'
+    `with_line_switch` (in `planetary::testing::with_every_26_hold`) and the tripwire
+    `the_line_switch_is_held_only_until_the_26_bump`. Under `Held` no golden changes.
+  - _Tests:_
+    - e101 and e103 under `OneSwitch`: `Tenuous` or `Airless`, their dominant N₂ within 10⁻⁹ of
+      `p_sat` at the record's coldest zone, a second re-hold the same to the bit; under `Held` as
+      today;
+    - the thin-air census under `with_every_26_hold`, both arms (slow, by name): its movers exactly
+      the records whose last step read the bulk climate under a sub-line total, the converse
+      counted; no `Temperate`, `Snowball`, `RunawayGreenhouse` or `MagmaOcean` record moves; the
+      N₂ Snowballs at the line (02000b2cdfff0000.0d00, 01fffb2bdfff0001.0600,
+      41ffecb600000001.0700 and the moon 41ffecb1ffc00007.0d01) the same to the bit;
+    - the same seed twice under `OneSwitch` gives identical output.
+  - _Files:_ `planetary/derive/atmosphere/escaping.rs`, `planetary/derive/atmosphere.rs`,
+    `planetary/testing.rs`, `planetary/system/line_switch_tests.rs`.
+  - _Accept:_ `cargo test -p hyperion-sim --lib planetary::derive::atmosphere`; the new tests by
+    name, the slow ones with `-- --ignored`.
+  - _For 26's bump:_ no golden is expected to move (both bodies are sample bodies); the records
+    list any that does.
 
 #### P14.T54 The composition batches on the record
 
