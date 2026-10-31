@@ -121,6 +121,14 @@ threads-required = 4
 test-group = "@global"
 priority = 50
 
+# The crust entries' census over the 400 sample systems (R09.T10.c) reads their records on four
+# threads of its own.
+[[profile.default.overrides]]
+filter = "package(hyperion-sim) & test(=planetary::surface::tests::no_generated_cell_lacks_its_crust_s_entry)"
+threads-required = 4
+test-group = "@global"
+priority = 50
+
 # The shell plan's census tests (R06.T8.i), and the census's at a synthetic ceiling (R13.T2.a),
 # census their cells on four threads of their own too.
 [[profile.default.overrides]]
