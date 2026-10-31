@@ -283,10 +283,16 @@ pub(crate) fn present_climate_state(figures: &PresentFigures) -> PresentClimate 
 /// `figures` where they contradict it.
 ///
 /// Every figure is kept, a label as `SteamEnvelope`'s is: from 26 it is the state rules 5–7 give
-/// the figures of a `Snowball` they do not make by rule 5 ([`LOCKED_STATE_VERSION`];
-/// research-census-25 §1), the last pass of a two-state cycle the passes end on, solved under the
-/// `Snowball` its previous pass carried while its own figures, an open sea and no ice, give another
-/// state; and `state` otherwise, and under the holds.
+/// those figures for
+///
+/// - a `Snowball` its figures do not make by rule 5 ([`LOCKED_STATE_VERSION`];
+///   research-census-25 §1): the last pass of a two-state cycle the passes end on, solved under
+///   the `Snowball` its previous pass carried while its own figures, an open sea and no ice, give
+///   another state;
+/// - a `RunawayGreenhouse` whose figures list liquid water (`sea_deck`'s `SEA_DECK_VERSION`;
+///   research-census-25 §4): a sea that still stands once the deck is gone is no runaway's;
+///
+/// and `state` otherwise, and under the holds.
 #[must_use]
 pub(crate) fn published_label(
     state: SurfaceState,
@@ -298,6 +304,14 @@ pub(crate) fn published_label(
     match state {
         SurfaceState::Snowball if locked_state_in_force() => {
             present_climate_state(&figures()).state()
+        }
+        SurfaceState::RunawayGreenhouse if super::sea_deck_in_force() => {
+            let figures = figures();
+            if figures.liquid_water {
+                present_climate_state(&figures).state()
+            } else {
+                state
+            }
         }
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
@@ -487,6 +501,51 @@ mod tests {
             SurfaceState::SteamEnvelope,
         ] {
             assert_eq!(at_26(state, cycle), state, "{state:?}");
+        }
+    }
+
+    /// The published label keeps a solved `RunawayGreenhouse` under every hold and under 25's
+    /// rules; under the dry deck's it labels one that lists liquid water by its own figures, and
+    /// keeps a dry one and every other state.
+    #[test]
+    fn a_runaway_over_a_sea_is_labelled_by_its_figures_only_under_26() {
+        use super::super::{SeaDeckRules, with_sea_deck};
+        let sea = PresentFigures {
+            rotation: Rotation::Locked,
+            ..figures(0.0, true, 498.9, 8.19e7)
+        };
+        let dry = figures(0.0, false, 737.0, 9.2e6);
+        let label = |state, f: PresentFigures| published_label(state, || f);
+        let at_25 = |state, f| with_present_state(PresentStateRules::Present, || label(state, f));
+        let at_26 = |state, f| with_sea_deck(SeaDeckRules::Dry, || at_25(state, f));
+        assert_eq!(
+            label(SurfaceState::RunawayGreenhouse, sea),
+            SurfaceState::RunawayGreenhouse,
+            "under every hold"
+        );
+        assert_eq!(
+            at_25(SurfaceState::RunawayGreenhouse, sea),
+            SurfaceState::RunawayGreenhouse,
+            "under 25's rules"
+        );
+        assert_eq!(
+            at_26(SurfaceState::RunawayGreenhouse, sea),
+            SurfaceState::Temperate
+        );
+        assert_eq!(
+            at_26(SurfaceState::RunawayGreenhouse, dry),
+            SurfaceState::RunawayGreenhouse
+        );
+        for state in [
+            SurfaceState::GasEnvelope,
+            SurfaceState::MagmaOcean,
+            SurfaceState::Airless,
+            SurfaceState::Temperate,
+            SurfaceState::Snowball,
+            SurfaceState::Tenuous,
+            SurfaceState::SteamEnvelope,
+        ] {
+            assert_eq!(at_26(state, sea), state, "{state:?}");
         }
     }
 

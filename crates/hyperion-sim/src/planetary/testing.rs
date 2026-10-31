@@ -499,6 +499,9 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - the eyeball, `LOCKED_STATE_VERSION` (P14.T53.e's rule 5 on a world locked 1:1), at
 ///   `LockedStateRules::Eyeball` through `with_locked_state`: rule 5 also needs no open water
 ///   there;
+/// - the dry deck, `SEA_DECK_VERSION` (P14.T53.b part 1 (b)–(c)), at `SeaDeckRules::Dry` through
+///   `with_sea_deck`: (c) reads the published label, and a decked runaway over liquid water is
+///   solved without the deck;
 /// - the planets' lag, `PLANET_LAG_VERSION` (P14.T56.g's rule for an airless planet), at
 ///   `PlanetLagRules::Airless` through `with_planet_lag`: an airless or tenuous planet over a hot
 ///   ice bulk derived once more under the rock lag.
@@ -509,7 +512,8 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::atmosphere::{
-        LockedStateRules, MeltOxygenRules, with_locked_state, with_melt_oxygen,
+        LockedStateRules, MeltOxygenRules, SeaDeckRules, with_locked_state, with_melt_oxygen,
+        with_sea_deck,
     };
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hosts::substellar::{SubstellarHostRules, with_substellar_hosts};
@@ -517,6 +521,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
     let run = move || with_substellar_hosts(SubstellarHostRules::BrownDwarfs, run);
     let run = move || with_locked_state(LockedStateRules::Eyeball, run);
+    let run = move || with_sea_deck(SeaDeckRules::Dry, run);
     let run = move || with_planet_lag(PlanetLagRules::Airless, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }

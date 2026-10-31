@@ -5498,6 +5498,59 @@ fn under_every_24_hold_only_a_runaway_under_its_deck_below_430_k_is_solved_again
     }
 }
 
+/// P14.T53.b part 1 (b) and (c) under the dry deck (`sea_deck`), on hand-built atmospheres: a
+/// published runaway under Venus's deck that lists liquid water is solved again without it at
+/// 430 K and above, where under the hold it keeps its deck, and a dry or deckless one is judged as
+/// at 25; and (c) does not judge a hothouse a first solve labelled a steam envelope, which under
+/// the hold it does.
+#[test]
+fn under_the_dry_deck_a_runaway_over_a_sea_is_solved_without_it() {
+    let air = atmosphere(&earth_inputs(255.0, Insolation::InsideRunaway));
+    assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
+    let dry_deck = |judge: fn(&Atmosphere) -> bool, air: &Atmosphere| {
+        with_sea_deck(SeaDeckRules::Dry, || judge(air))
+    };
+    let wet = |t: f64| Atmosphere {
+        surface_temperature: Kelvin::new(t),
+        liquid_water: true,
+        runaway_deck: RunawayDeck::Kept,
+        ..air
+    };
+    for t in [430.0, 498.9, 609.75, 1_031.0] {
+        assert!(dry_deck(solved_without_the_deck, &wet(t)), "{t} K");
+        assert!(!solved_without_the_deck(&wet(t)), "{t} K under the hold");
+    }
+    let dry = Atmosphere {
+        liquid_water: false,
+        ..wet(498.9)
+    };
+    assert!(!dry_deck(solved_without_the_deck, &dry));
+    assert!(dry_deck(solved_without_the_deck, &wet(300.0)));
+    let deckless = Atmosphere {
+        runaway_deck: RunawayDeck::Deckless,
+        ..wet(498.9)
+    };
+    assert!(!dry_deck(solved_without_the_deck, &deckless));
+
+    let steam = Atmosphere {
+        state: SurfaceState::Temperate,
+        dry_division: true,
+        liquid_water: false,
+        steam_envelope: true,
+        surface_temperature: Kelvin::new(1_221.6),
+        surface_pressure: Some(Pascals::new(414.8e5)),
+        ..air
+    };
+    assert_eq!(steam.published_state(), SurfaceState::SteamEnvelope);
+    assert!(solved_as_a_hothouse(&steam), "under the hold");
+    assert!(!dry_deck(solved_as_a_hothouse, &steam));
+    let open = Atmosphere {
+        steam_envelope: false,
+        ..steam
+    };
+    assert!(dry_deck(solved_as_a_hothouse, &open));
+}
+
 /// P14.T53.b part 1 (b) through the passes: a Venus at Venus's orbit about the Sun with its
 /// history, its carbon and nitrogen drawn low (ranks 10⁻⁹ to the median), is a runaway inside the
 /// present limit. Where its passes under Venus's deck end below 430 K it is solved once more
