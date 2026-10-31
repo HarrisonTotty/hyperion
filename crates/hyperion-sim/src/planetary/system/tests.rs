@@ -532,6 +532,22 @@ fn a_snapshot_is_body_at_body_by_body() {
 
 /// The section states (ruling 34): what is not computed says so, what does not apply to a kind
 /// is not applicable, and phase D's sections are `Ok` where modelled (P14.T34).
+/// P14.T28.a's and T28.d's disc bodies, from generator version 26: populations with no orbit
+/// and no position, their extent while present.
+fn assert_disc_record(record: &BodyRecord) {
+    assert_eq!(record.position(), None);
+    assert_eq!(
+        record.section_state(RecordSection::Orbit),
+        SectionState::NotApplicable
+    );
+    let extent = if record.identity().state() == BodyState::Present {
+        SectionState::Ok
+    } else {
+        SectionState::NotApplicable
+    };
+    assert_eq!(record.section_state(RecordSection::Population), extent);
+}
+
 #[test]
 fn a_record_tags_what_the_generator_does_not_compute() {
     let (mut present, mut giants, mut moons, mut rings, mut dwarfs) = (0, 0, 0, 0, 0);
@@ -616,7 +632,8 @@ fn a_record_tags_what_the_generator_does_not_compute() {
                         assert!(assert_surface_or_envelope(record), "{:?}", record.index());
                     }
                 }
-                other => panic!("{other:?} in a snapshot"),
+                BodyKind::ProtoplanetaryDisc | BodyKind::DebrisDisc => assert_disc_record(record),
+                BodyKind::Unresolved => panic!("an unresolved contact in a full snapshot"),
             }
         }
     }

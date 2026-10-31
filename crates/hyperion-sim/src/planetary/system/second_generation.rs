@@ -19,9 +19,12 @@
 //! same host sees it too). Nothing else of the system moves.
 
 use crate::Seed;
+use crate::id::SystemId;
 use crate::planetary::SystemContext;
 use crate::planetary::derive::atmosphere::VolatileDraws;
+use crate::planetary::derive::rotation::BodyRotation;
 use crate::planetary::fate::{FateBody, Generation, ScatterDraws};
+use crate::planetary::hosts::evolved::Circularisation;
 use crate::planetary::hosts::second_generation::{
     FIRST_SECOND_GENERATION_SLOT, SECOND_GENERATION_DELAY, SECOND_GENERATION_ECCENTRICITY,
     SecondGenerationPlanet, SecondGenerationRules, place_second_generation,
@@ -37,7 +40,6 @@ use super::{
     Body, Epoch, Part, PlanetPart, PlanetarySystem, parent_time, primordial_radius, radius_rank,
     sphere_density,
 };
-use crate::planetary::hosts::evolved::Circularisation;
 
 impl Body {
     /// The second-generation planet `placed` of the host `zone` of `system`, in the universe of
@@ -46,7 +48,7 @@ impl Body {
     #[must_use]
     fn second_generation(
         seed: Seed,
-        system: crate::id::SystemId,
+        system: SystemId,
         zone: &OrbitZone,
         placed: &SecondGenerationPlanet,
         formed_at: Megayears,
@@ -150,10 +152,7 @@ impl PlanetarySystem {
         self.bodies.sort_by_key(Body::index);
         let then = Epoch::new(self, ctx, parent_time(ctx)).with_shades();
         let records = self.records_at_parent_time(&then);
-        let rotations: Vec<(
-            usize,
-            Option<crate::planetary::derive::rotation::BodyRotation>,
-        )> = self
+        let rotations: Vec<(usize, Option<BodyRotation>)> = self
             .bodies
             .iter()
             .zip(&records)

@@ -599,7 +599,7 @@ function gapRow(resonance: readonly [number, number], radiusM: number): ReactNod
  * component's apart), composition, size slope, largest body, mean eccentricity and inclination,
  * dust luminosity, gaps and members; the halo's edges, comets and comet rate; a protoplanetary
  * disc's edges, snow line, taper radius, gas and solid masses, and the gap each giant has opened,
- * named by its body ID; a debris disc's edges.
+ * numbered inside out; a debris disc's edges.
  */
 function populationRows(population: Population): ReactNode {
   let rows: ReactNode;
@@ -705,10 +705,10 @@ function populationRows(population: Population): ReactNode {
             label="SOLID MASS"
             shown={value(formatMassMearth(population.solidMassMearth), <EarthMassUnit />)}
           />
-          {population.gaps.map((gap) => {
+          {population.gaps.map((gap, k) => {
             const at = formatBodyDistance(gap.radiusM * KM_PER_M, null);
-            const label = `GAP ${formatBodyIdHex(gap.giant)}`;
-            return <ReadoutRow key={label} label={label} shown={value(at.value, at.unit)} />;
+            const label = `GAP ${k + 1}`;
+            return <ReadoutRow key={gap.giant} label={label} shown={value(at.value, at.unit)} />;
           })}
         </>
       );

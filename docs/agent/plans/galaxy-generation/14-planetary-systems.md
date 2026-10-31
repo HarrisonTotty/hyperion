@@ -33507,3 +33507,7 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     star's light as its spin-down luminosity at its surface temperature and radius, with no X-ray
     history or peak; a survivor about the same host sees it too, and nothing else moves. Its
     photochemistry still reads the star's own state.
+  - _For 26's bump:_ re-bless `planetary_golden`'s `golden_systems_are_pinned`, whose 15 systems
+    each gain their disc body `e000` and nothing else (no golden system has a white dwarf's debris
+    or a pulsar's planets); `system::tests::a_record_tags_what_the_generator_does_not_compute`
+    already reads the disc kinds. The server's goldens were not run under the arms.

@@ -58,7 +58,7 @@ pub const PROTOPLANETARY_DISC_SLOT: u8 = 0;
 
 /// A system's protoplanetary disc body (P14.T28.a): the disc of its host, as a body of the
 /// system's records in belt slot `0xE0`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ProtoplanetaryDisc {
     host: OrbitHost,
 }

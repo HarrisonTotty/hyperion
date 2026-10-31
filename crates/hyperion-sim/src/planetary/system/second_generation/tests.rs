@@ -74,7 +74,7 @@ fn a_neutron_star_s_second_generation_appears_ten_myr_after_its_death() {
         .expect("a span");
     let mut planets = 0;
     for (ctx, death) in neutron_stars_with_a_mark(30_000, 6, 3.0e7) {
-        let held = generate(SEED, &ctx);
+        let held = with_second_generation(SecondGenerationRules::Held, || generate(SEED, &ctx));
         assert!(
             held.bodies()
                 .iter()
@@ -153,7 +153,7 @@ fn a_neutron_star_s_second_generation_appears_ten_myr_after_its_death() {
 fn a_second_generation_planet_is_lit_by_its_pulsar_s_spin_down_alone() {
     let mut derived = 0;
     for (ctx, _) in neutron_stars_with_a_mark(40_000, 4, 3.0e7) {
-        let held = generate(SEED, &ctx);
+        let held = with_second_generation(SecondGenerationRules::Held, || generate(SEED, &ctx));
         let system =
             with_second_generation(SecondGenerationRules::Planets, || generate(SEED, &ctx));
         let Some(star) = system.pulsar_host() else {
