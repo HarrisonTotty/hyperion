@@ -124,6 +124,7 @@ pub mod stellar_fates_low;
 pub mod stellar_fates_mid;
 pub mod streams;
 pub mod stripping;
+pub mod stripping_helium;
 pub mod substance_albedo;
 pub mod thermo;
 pub mod type_ia_delay;
@@ -429,6 +430,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "stripping",
         revision: 0,
         since_generator_version: 16,
+        provisional: false,
+    },
+    TableInfo {
+        name: "stripping_helium",
+        revision: 0,
+        since_generator_version: 24,
         provisional: false,
     },
     TableInfo {

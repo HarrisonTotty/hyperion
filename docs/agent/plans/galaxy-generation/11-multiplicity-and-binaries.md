@@ -6301,3 +6301,11 @@ galaxy_sweeps`.
     1,000 years times its expected hosts: 46.0 a year (52.3 by the sampled cells' share alone).
   - _Acceptance._ `cargo test -p hyperion-sim -- binary::events id::event_tags rng::tags`; slow,
     `just test-slow` (`tests/binary_events.rs`).
+- **P11.T1.d's helium axis (lane `galaxy-centre-core`, 2026-10-31, at 24, behind
+  `STRIPPING_HELIUM_VERSION` = 26).** `StellarRules::stripping`, of `binarity::StrippingRules`
+  (`HeliumExact`, `HeliumTabulated`). Under `HeliumTabulated` a star with a helium excess up to
+  0.18 reads `binarity::HeliumStrippingTable` (`tables::stripping_helium`, `hyperion-fit`'s
+  `stripping_helium` task: 3 slices of ΔY over the stripping grid, each
+  `StrippingNode::of_fitted_helium`) through `tabulated_node`, which `stripped_share_under` and
+  `stripping_node_under` read; at no helium excess it is `StrippingTable::at`, bit for bit.
+  `stripped_share_on` (the kick bins) is unchanged. The bump refits both tables under 26's rules.

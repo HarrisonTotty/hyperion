@@ -618,6 +618,18 @@ provisional = false
 acceptance = "at the centres of 330 cells, the share within 0.0688 of the exact (median 6.5e-4), the core-helium-burning radius within 0.023 relative where the cell's four radii agree to 25% (62 cells spread more)"
 
 [[table]]
+name = "stripping_helium"
+path = "stripping_helium.rs"
+task = "stripping_helium"
+revision = 0
+inputs_sha256 = "40da3188a6c47a9591d32487becf41cc52a4b002e71e9f734f50543703d94ead"
+body_sha256 = "07df5750b14a3eebb76c02e6d359324ed61817257ab0c58243cc2f70faa77ed3"
+fingerprint = [0.3464733090200039, 2.4326460420632987, 0.5826806772873225, 2.899762712023834, 0.5791207631486106, 3.277018310912176]
+since_generator_version = 24
+provisional = false
+acceptance = "at the centres of 990 cells in ln m, [Fe/H] and the helium excess, the share within 0.0693 of the exact (median 6.5e-4), the core-helium-burning radius within 0.023 relative where the cell's eight radii agree to 25% (220 cells spread more)"
+
+[[table]]
 name = "substance_albedos"
 path = "substance_albedo.rs"
 task = "substance_albedos"

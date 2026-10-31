@@ -35,6 +35,7 @@ pub mod star_colour;
 pub mod stellar_fates;
 pub mod streams;
 pub mod stripping;
+pub mod stripping_helium;
 pub mod substance_albedos;
 pub mod thermo_equilibrium;
 pub mod type_ia_delay;

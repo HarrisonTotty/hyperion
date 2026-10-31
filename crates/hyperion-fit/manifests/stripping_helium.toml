@@ -1,0 +1,12 @@
+# The stripping table's helium axis (plan 11, P11.T1.d, read from version 26): the stripped share
+# and the stage radii of massive primaries with a helium excess, on the stripping table's grid at
+# three helium excesses, each node a full track under the fitted helium table and plan 11's
+# quadrature, validated at every cell's centre. The grid is the sim's; the task refuses a manifest
+# that disagrees with it.
+task = "stripping_helium"
+
+[params]
+masses = 34
+metallicities = 11
+heliums = 3
+validate_every = 1

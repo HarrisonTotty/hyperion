@@ -64,6 +64,13 @@
 //!   and `hyperion-fit` take the version's rules, as for the dwarf sequence
 //!   (`stellar/rules/v_magnitude_hold.rs` lists them).
 //!
+//! - [`stripping`](StellarRules::stripping), where a star with a helium excess reads its stripped
+//!   share and stage radii, at [`STRIPPING_HELIUM_VERSION`] (plan 11, P11.T1.d's helium axis): the
+//!   exact path below it, `binarity::HeliumStrippingTable` from it, read at one choke point,
+//!   `binarity::tabulated_node`, by the companion-stripped mark, the kick and the hierarchy draw.
+//!   Only cluster members carry a helium excess. The bump deletes the field, its held arm and its
+//!   tripwire.
+//!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
@@ -74,6 +81,7 @@
 //! [`absolute_magnitude_v_under`]: crate::stellar::photometry::absolute_magnitude_v_under
 
 use crate::GeneratorVersion;
+use crate::galaxy::displaced::binarity::{STRIPPING_HELIUM_VERSION, StrippingRules};
 use crate::stellar::classify::pm13::{DWARF_SEQUENCE_VERSION, DwarfSequenceRules};
 use crate::stellar::photometry::{V_MAGNITUDE_VERSION, VMagnitudeRules};
 use crate::stellar::remnant::KickRankRules;
@@ -103,6 +111,9 @@ pub(crate) struct StellarRules {
     /// Which V magnitudes white dwarfs and evolved stars read (`photometry`'s
     /// `absolute_magnitude_v_under`), the hold of [`V_MAGNITUDE_VERSION`].
     pub(crate) v_magnitude: VMagnitudeRules,
+    /// Where a star with a helium excess reads its stripped share and stage radii, the hold of
+    /// [`STRIPPING_HELIUM_VERSION`].
+    pub(crate) stripping: StrippingRules,
 }
 
 impl StellarRules {
@@ -132,6 +143,11 @@ impl StellarRules {
                 VMagnitudeRules::A4
             } else {
                 VMagnitudeRules::Interim
+            },
+            stripping: if version.get() >= STRIPPING_HELIUM_VERSION.get() {
+                StrippingRules::HeliumTabulated
+            } else {
+                StrippingRules::HeliumExact
             },
         }
     }
@@ -173,6 +189,8 @@ impl StellarRules {
 mod hd_limit_hold;
 #[cfg(test)]
 mod helium_hold;
+#[cfg(test)]
+mod stripping_hold;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
