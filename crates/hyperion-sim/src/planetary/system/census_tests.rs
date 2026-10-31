@@ -965,7 +965,7 @@ const FIXED_UNDER_26: [&str; 9] = [
 /// The bodies that still show a finding of [`FIXED_UNDER_26`] under every 26 hold, by the finding
 /// and the start of the body's line, its system's rank and its ID; each a finding, not a fix's.
 ///
-/// None: #17937 and #2488, the `Snowball`s above 273.15 K that P14.T24.j's deck set off while its
+/// None: #17936 and #2487, the `Snowball`s above 273.15 K that P14.T24.j's deck set off while its
 /// gate read only the listed liquid, keep their deck now that it reads the open water its ramp
 /// reads (`census_26_tests`).
 const LEFT_UNDER_26: [(&str, &str); 0] = [];

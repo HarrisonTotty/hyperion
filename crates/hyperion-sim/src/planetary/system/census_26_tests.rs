@@ -33,67 +33,67 @@ use crate::planetary::testing::{
 
 /// The census's 13 `Snowball`s above 273.15 K under every 25 hold, every one locked 1:1.
 const EYEBALLS: [(usize, &str); 13] = [
-    (1_141, "02006b2ca0020001.0600"),
-    (7_521, "01ff5b2d60060000.0500"),
-    (12_305, "01ffdb2c1ff10000.0200"),
-    (16_228, "02004b289fff0000.0700"),
-    (19_542, "01ff6b2c200e0000.0300"),
-    (24_881, "01ffeb30200b0000.0200"),
-    (30_404, "02013b2ce0040000.0100"),
-    (40_660, "02011b2fa0000001.0200"),
-    (41_398, "0200cb311fff0000.0200"),
-    (44_130, "02010b30a0020000.0200"),
-    (48_422, "02013b2f9ff90000.0100"),
-    (55_088, "2201365480280000.1600"),
-    (60_282, "02015b2de00c0000.0500"),
+    (1_140, "02006b2ca0020001.0600"),
+    (7_520, "01ff5b2d60060000.0500"),
+    (12_304, "01ffdb2c1ff10000.0200"),
+    (16_227, "02004b289fff0000.0700"),
+    (19_541, "01ff6b2c200e0000.0300"),
+    (24_880, "01ffeb30200b0000.0200"),
+    (30_403, "02013b2ce0040000.0100"),
+    (40_659, "02011b2fa0000001.0200"),
+    (41_397, "0200cb311fff0000.0200"),
+    (44_129, "02010b30a0020000.0200"),
+    (48_421, "02013b2f9ff90000.0100"),
+    (55_087, "2201365480280000.1600"),
+    (60_281, "02015b2de00c0000.0500"),
 ];
 
 /// The census's three airless `Icy` planets at a T0 above 273.15 K under every 25 hold.
 const AIRLESS_ICE_PLANETS: [(usize, &str); 3] = [
-    (39_279, "42006cc200c00007.0500"),
-    (44_920, "4200acaa01000006.0400"),
-    (58_712, "42012ca200400002.0400"),
+    (39_278, "42006cc200c00007.0500"),
+    (44_919, "4200acaa01000006.0400"),
+    (58_711, "42012ca200400002.0400"),
 ];
 
 /// The census's 29 runaways with liquid water at their surface under every 25 hold.
 const SEA_RUNAWAYS: [(usize, &str); 29] = [
     (522, "01ffeb2b60000000.0200"),
-    (1_894, "02002b2d9ff90000.0200"),
-    (4_398, "02001b2e5ff80000.0500"),
-    (7_476, "01ffeb2cdff30000.0100"),
-    (12_344, "42006cbdff400007.0300"),
-    (12_462, "41ff6ca600000006.0700"),
-    (14_596, "01ffab291ffa0001.0200"),
-    (18_656, "02000b28a0070000.0b00"),
-    (18_987, "6200597802000004.1100"),
-    (24_383, "01ff1b2aa0090001.0200"),
-    (28_421, "01ffeb299ff00000.0200"),
-    (30_446, "01ff6b28a0070000.0300"),
-    (33_411, "01fecb2b20030000.0300"),
-    (35_305, "01ff0b291ffa0001.0c00"),
-    (37_775, "02012b2e9ff90000.0300"),
-    (38_611, "01ff5b311ffa0002.0100"),
-    (39_106, "01ff1b309fff0001.0100"),
-    (42_995, "01fedb299ff90000.0200"),
-    (43_079, "0200ab2bdfec0000.0100"),
-    (44_182, "01feab2a9ffb0000.1200"),
-    (49_737, "02013b2ddff30000.0200"),
-    (52_618, "02006b26a0020000.0200"),
-    (54_359, "01ff6b271ffb0000.0100"),
-    (59_452, "01fffb329ffa0000.0200"),
-    (61_501, "01ffcb269ff70000.0100"),
-    (66_441, "02007b2a60170001.0100"),
-    (66_447, "41feaca20000000d.0800"),
-    (67_168, "01ff0b279ff70000.0a00"),
-    (67_833, "02005b261ffa0000.0200"),
+    (1_893, "02002b2d9ff90000.0200"),
+    (4_397, "02001b2e5ff80000.0500"),
+    (7_475, "01ffeb2cdff30000.0100"),
+    (12_343, "42006cbdff400007.0300"),
+    (12_461, "41ff6ca600000006.0700"),
+    (14_595, "01ffab291ffa0001.0200"),
+    (18_655, "02000b28a0070000.0b00"),
+    (18_986, "6200597802000004.1100"),
+    (24_382, "01ff1b2aa0090001.0200"),
+    (28_420, "01ffeb299ff00000.0200"),
+    (30_445, "01ff6b28a0070000.0300"),
+    (33_410, "01fecb2b20030000.0300"),
+    (35_304, "01ff0b291ffa0001.0c00"),
+    (37_774, "02012b2e9ff90000.0300"),
+    (38_610, "01ff5b311ffa0002.0100"),
+    (39_105, "01ff1b309fff0001.0100"),
+    (42_994, "01fedb299ff90000.0200"),
+    (43_078, "0200ab2bdfec0000.0100"),
+    (44_181, "01feab2a9ffb0000.1200"),
+    (49_736, "02013b2ddff30000.0200"),
+    (52_617, "02006b26a0020000.0200"),
+    (54_358, "01ff6b271ffb0000.0100"),
+    (59_451, "01fffb329ffa0000.0200"),
+    (61_500, "01ffcb269ff70000.0100"),
+    (66_440, "02007b2a60170001.0100"),
+    (66_446, "41feaca20000000d.0800"),
+    (67_167, "01ff0b279ff70000.0a00"),
+    (67_832, "02005b261ffa0000.0200"),
 ];
 
 /// The two `Snowball`s above 273.15 K that P14.T24.j's deck set off under every 26 hold while its
-/// gate read only the listed liquid (research-leans-8 §3): #17937, at the open water's edge, and
-/// #2488, under 14.9 bar of nitrogen.
+/// gate read only the listed liquid (research-leans-8 §3): #17936, at the open water's edge, and
+/// #2487, under 14.9 bar of nitrogen.
 const DECK_SNOWBALLS: [(usize, &str); 2] = [
-    (2_488, "02000b2de0060000.0300"),
-    (17_937, "0200fb2d1ffb0000.0400"),
+    (2_487, "02000b2de0060000.0300"),
+    (17_936, "0200fb2d1ffb0000.0400"),
 ];
 
 /// The two N₂ envelopes the slow census found changing section inside the clock window under every
@@ -279,7 +279,7 @@ fn assert_airless_ice_planets_take_the_rock_lag(bodies: &[(usize, &str)]) {
 
 /// Asserts that each of `bodies`, of the census's runaways over a sea, is a `RunawayGreenhouse`
 /// with liquid water at its surface under every 25 hold and none under every 26 hold, where #522
-/// and #18656, whose first solve part 3 labels a steam envelope, publish `SteamEnvelope`.
+/// and #18655, whose first solve part 3 labels a steam envelope, publish `SteamEnvelope`.
 fn assert_no_runaway_holds_a_sea(bodies: &[(usize, &str)]) {
     let sample = sample_through(last_rank(bodies));
     let read = |case: &AuditCase<'_>| {
@@ -321,9 +321,9 @@ fn assert_no_runaway_holds_a_sea(bodies: &[(usize, &str)]) {
     );
 }
 
-/// Under every 26 hold an eyeball of the census (#30404) settles under its deck at the open water's
+/// Under every 26 hold an eyeball of the census (#30403) settles under its deck at the open water's
 /// edge (P14.T24.j), a `Snowball` its own figures make below 273.15 K, and a two-state cycle of the
-/// census (#19542, open and ice-free) is `Temperate`; each a `Snowball` above 273.15 K under every
+/// census (#19541, open and ice-free) is `Temperate`; each a `Snowball` above 273.15 K under every
 /// 25 hold.
 #[test]
 fn under_every_26_hold_a_census_eyeball_settles_at_the_edge_and_a_two_state_cycle_is_temperate() {
@@ -333,10 +333,10 @@ fn under_every_26_hold_a_census_eyeball_settles_at_the_edge_and_a_two_state_cycl
     );
 }
 
-/// Under every 26 hold the deck's gate reads the open water its ramp reads (P14.T24.j): #17937,
+/// Under every 26 hold the deck's gate reads the open water its ramp reads (P14.T24.j): #17936,
 /// whose decked pass lists only ice but melts its water in its warmest zone, keeps its deck and
 /// settles as a `Snowball` at the open water's edge, below 273.15 K, its warmest above water's
-/// melting point, with no two-state cycle; and #2488 is no `Snowball` above 273.15 K. While the
+/// melting point, with no two-state cycle; and #2487 is no `Snowball` above 273.15 K. While the
 /// gate read only the listing each was a `Snowball` above it (273.72 K and 274.80 K): the decked
 /// pass's ice held the deckless passes on a cold branch.
 #[test]
@@ -390,16 +390,16 @@ fn under_every_26_hold_the_deck_s_edge_worlds_are_no_hot_snowballs() {
         _,
         (state, t_s, (_, warmest), ice, liquid, _, convergence, melts),
     ] = bodies;
-    assert_eq!(state, SurfaceState::Snowball, "#17937, {lines:#?}");
+    assert_eq!(state, SurfaceState::Snowball, "#17936, {lines:#?}");
     assert!(
         t_s < melting && warmest > melting,
-        "#17937 at the open water's edge, {lines:#?}"
+        "#17936 at the open water's edge, {lines:#?}"
     );
     assert!(
         ice >= SNOWBALL_ICE_COVER && !liquid && melts,
-        "#17937, {lines:#?}"
+        "#17936, {lines:#?}"
     );
-    assert_eq!(convergence, Convergence::Converged, "#17937, {lines:#?}");
+    assert_eq!(convergence, Convergence::Converged, "#17936, {lines:#?}");
 }
 
 /// [`assert_eyeballs_temperate_or_frozen_over`] over all 13 of the census's.
@@ -410,7 +410,7 @@ fn under_every_26_hold_the_census_s_eyeballs_are_temperate_or_frozen_over() {
     assert_eq!(states.len(), EYEBALLS.len());
 }
 
-/// Under every 26 hold an airless planet of the census over a hot ice bulk (#44920) takes the rock
+/// Under every 26 hold an airless planet of the census over a hot ice bulk (#44919) takes the rock
 /// lag, and nothing else in its system moves.
 #[test]
 fn under_every_26_hold_a_census_airless_ice_planet_takes_the_rock_lag() {
@@ -425,7 +425,7 @@ fn under_every_26_hold_the_census_s_airless_ice_planets_take_the_rock_lag() {
 }
 
 /// Under every 26 hold two runaways over a sea of the census hold none: #522, labelled a steam
-/// envelope, and #1894, solved without the deck.
+/// envelope, and #1893, solved without the deck.
 #[test]
 fn under_every_26_hold_two_census_runaways_hold_no_sea() {
     assert_no_runaway_holds_a_sea(&SEA_RUNAWAYS[..2]);

@@ -28,8 +28,9 @@ const PONTI_LIMIT_ERG_S: f64 = 1e36;
 /// The digest (`f64_digest`) of the `centre_luminosity` golden's values under every 25 hold, in
 /// the golden's order. Blessed natively on x86-64; the wasip1 suite runs the test that pins it.
 /// A later 25 member that moves the centre's luminosity re-pins it by name
-/// (decision-galaxy-25-train §1.3).
-const HOT_FLOW_DIGEST: u64 = 0xacdc_f23d_013f_d38e;
+/// (decision-galaxy-25-train §1.3): re-pinned in `MGE_BOXY`'s potential (P15.T3.c; it was
+/// `0xacdc_f23d_013f_d38e`).
+const HOT_FLOW_DIGEST: u64 = 0x178e_a6fa_bfab_be18;
 
 /// The digest of the hot flow's law where the golden does not reach it: `radiative_efficiency`
 /// inside each of its three ranges and above the switch to η, and a tail whose peak is below the

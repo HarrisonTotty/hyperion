@@ -164,8 +164,9 @@ fn the_kepler_regime_is_held_only_until_the_25_bump() {
 /// The digest (`f64_digest`) of the Kepler arm's positions in the D2 test: each Kepler-regime
 /// record's cell and offsets at −1,000, −100, +100 and +1,000 yr, in walk order. Blessed natively
 /// on x86-64; the wasip1 suite compares it. Re-pinned by name when P09.T28.d.b's exact orbit
-/// joined every 25 hold (it was `0xdc2a_4657_d88c_161e` on the two-body law).
-const MOVED_POSITIONS_DIGEST: u64 = 0xce83_b24f_e65c_7554;
+/// joined every 25 hold (it was `0xdc2a_4657_d88c_161e` on the two-body law), and again in
+/// `MGE_BOXY`'s potential (P15.T3.c; it was `0xce83_b24f_e65c_7554`).
+const MOVED_POSITIONS_DIGEST: u64 = 0xcd72_f9db_7c8d_d35d;
 
 /// D2 under every 25 hold: the Kepler arm moves the fixture's grid records inside the influence
 /// radius onto their orbits, bit for bit [`position_velocity_at`]'s, and leaves every record
