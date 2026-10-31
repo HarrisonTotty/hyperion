@@ -1496,3 +1496,197 @@ fn under_the_batch_a_snapshot_is_body_at_and_body_at_keeps_no_order() {
     }
     assert_eq!(systems, 3, "the sample holds three systems with moons");
 }
+
+/// The bodies count (xii)'s guard prints by name (research-r08-t16a §2): the two whose CH₄ decks
+/// were based within 1% of its critical temperature at 24, the sample's and LOOK72's.
+const NEAR_CRITICAL_AT_24: [&str; 2] = ["01ffeb2b5fff0001.0400", "020e56ef20080000.0900"];
+
+/// What count (xii)'s guard finds on the records it walks: the own-curve decks of the surfaces'
+/// airs it examined, and the `Crossing` bases at or above [`NEAR_CRITICAL_LIQUID_SHARE`] of their
+/// condensable's critical temperature, the surfaces' (count (xii)'s) and the envelopes', each by
+/// body and key.
+#[derive(Debug, Default)]
+struct NearCritical {
+    examined: usize,
+    surface_bases: Vec<String>,
+    envelope_bases: Vec<String>,
+}
+
+impl NearCritical {
+    /// Adds `record`'s decks of a row's own curve (`SaturationLaw::Diagram`): its surface's air's,
+    /// a deck based at the ground being its `Bottom` (the inventory's deck carries no bound, as
+    /// [`CriticalTally`] reads it), and its envelope's, by their bounds.
+    fn add(&mut self, record: &BodyRecord) {
+        use crate::planetary::chem::condense::DeckBound;
+        let id = record.identity().id().to_string();
+        let near = |deck: &AerosolDeck, bound: DeckBound| -> Option<String> {
+            let condensate = deck.condensate();
+            let diagram = condensate.substance().phase_diagram()?;
+            let share = deck.base_temperature().value() / diagram.critical_temperature().value();
+            match bound {
+                DeckBound::Bottom => None,
+                DeckBound::Crossing => (share >= NEAR_CRITICAL_LIQUID_SHARE).then(|| {
+                    format!(
+                        "{id} {}: base {:.2} bar ({:.2} p_c) at {share:.4} T_c",
+                        condensate.substance().key(),
+                        deck.base().value() / 1e5,
+                        deck.base().value() / diagram.critical_pressure().value()
+                    )
+                }),
+            }
+        };
+        if let Section::Ok(surface) = record.surface()
+            && let Modelled::Ok(inventory) = surface.aerosols()
+        {
+            let ground = surface.conditions().surface_pressure().value();
+            for deck in inventory
+                .decks()
+                .iter()
+                .filter(|d| own_curve(d.condensate()))
+            {
+                self.examined += 1;
+                let bound = if (deck.base().value() - ground).abs() <= 1e-9 * ground {
+                    DeckBound::Bottom
+                } else {
+                    DeckBound::Crossing
+                };
+                self.surface_bases.extend(near(deck, bound));
+            }
+        }
+        if let Section::Ok(envelope) = record.envelope() {
+            let atmosphere = envelope.atmosphere();
+            for (deck, &bound) in atmosphere.decks().iter().zip(atmosphere.deck_bounds()) {
+                if own_curve(deck.condensate()) {
+                    self.envelope_bases.extend(near(deck, bound));
+                }
+            }
+        }
+    }
+}
+
+/// Whether `condensate`'s law aloft is its row's own curve (`SaturationLaw::Diagram`).
+fn own_curve(condensate: SubstanceId) -> bool {
+    use crate::substance::aloft::{SaturationLaw, law_aloft};
+    law_aloft(condensate).is_some_and(|law| matches!(law.law(), SaturationLaw::Diagram))
+}
+
+/// `record`'s surface air and its decks, as count (xii)'s guard prints a named body, or `None`
+/// where its surface's inventory is not modelled.
+fn near_critical_body(record: &BodyRecord) -> Option<String> {
+    use std::fmt::Write as _;
+    let Section::Ok(surface) = record.surface() else {
+        return None;
+    };
+    let Modelled::Ok(inventory) = surface.aerosols() else {
+        return None;
+    };
+    let conditions = surface.conditions();
+    let mut out = format!(
+        "{}: {:?}, {:.2} bar, {:.3} K",
+        record.identity().id(),
+        surface.state(),
+        conditions.surface_pressure().value() / 1e5,
+        conditions.mean_surface_temperature().value()
+    );
+    for deck in inventory.decks() {
+        let condensate = deck.condensate();
+        let (t, p) = (deck.base_temperature().value(), deck.base().value());
+        let critical = condensate
+            .substance()
+            .phase_diagram()
+            .map(|d| {
+                format!(
+                    " ({:.2} T_c, {:.2} p_c)",
+                    t / d.critical_temperature().value(),
+                    p / d.critical_pressure().value()
+                )
+            })
+            .unwrap_or_default();
+        write!(
+            out,
+            "; {} based at {:.2} bar, {t:.2} K{critical}",
+            condensate.substance().key(),
+            p / 1e5
+        )
+        .expect("a string takes text");
+    }
+    Some(out)
+}
+
+/// Count (xii)'s guard (P14.T52.f; research-r08-t16a §2), every 25 hold in force, at the epoch over
+/// the 400 sample systems, the golden systems and LOOK72's audited contexts (020e56ef20080000
+/// among them): no `Crossing` base of a row's own curve in a surface's air, count (xii)'s, lies at
+/// or above [`NEAR_CRITICAL_LIQUID_SHARE`] of its condensable's critical temperature, where its
+/// liquid would float in its gas. At 24 two CH₄ decks did, both on N₂ surface airs
+/// ([`NEAR_CRITICAL_AT_24`], at 0.9939 and 0.9966 `T_c`); P14.T53.b part 3's cap at each
+/// condensable's critical isochore cures both at 25, and this keeps it so. Printed: the decks
+/// examined, those two bodies' decks at 25, and an envelope's such bases, outside count (xii)
+/// ("TO MAIN"). The rule that would cure a recurrence, such a base labelled `Supercritical` as
+/// P14.T52.f's are, is held in reserve. One thread, so that it runs as written on wasm32-wasip1.
+#[test]
+#[ignore = "slow: count (xii)'s guard over the 400, the goldens and LOOK72 under every 25 hold"]
+fn under_every_25_hold_no_crossing_base_lies_near_its_critical_point() {
+    use crate::Seed;
+    use crate::planetary::system::tests::{
+        GOLDEN_SYSTEMS_SEED, golden_contexts, look72_audit_contexts, look72_galaxy,
+    };
+    use crate::planetary::testing::with_every_25_hold;
+    let (goldens, look72) = (golden_contexts(), look72_audit_contexts());
+    let look72_seed = look72_galaxy().seed();
+    let sets: Vec<(Seed, &SystemContext)> = sample()
+        .iter()
+        .map(|ctx| (SEED, ctx))
+        .chain(
+            goldens
+                .iter()
+                .map(|(_, ctx)| (Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+        )
+        .chain(look72.iter().map(|ctx| (look72_seed, ctx)))
+        .collect();
+    for named in NEAR_CRITICAL_AT_24 {
+        let system = named.split_once('.').expect("a body ID").0;
+        assert!(
+            sets.iter().any(|(_, ctx)| ctx.id().to_string() == system),
+            "{named}'s system is walked"
+        );
+    }
+    let (found, named) = with_every_25_hold(|| {
+        let (mut found, mut named) = (NearCritical::default(), Vec::new());
+        for &(seed, ctx) in &sets {
+            let snapshot = generate(seed, ctx).snapshot_at(ctx, UniverseTime::EPOCH);
+            for record in snapshot.bodies() {
+                found.add(record);
+                let id = record.identity().id().to_string();
+                if NEAR_CRITICAL_AT_24.contains(&id.as_str()) {
+                    named.push(near_critical_body(record).unwrap_or_else(|| {
+                        panic!("{id}: its surface's inventory is modelled at 25")
+                    }));
+                }
+            }
+        }
+        (found, named)
+    });
+    eprintln!(
+        "count (xii)'s guard over {} systems at 25: {} own-curve decks of surface airs examined, \
+         {} crossing bases among them at or above {} T_c; the named bodies at 25:\n  {}\nTO MAIN, \
+         envelopes' crossing bases there, outside count (xii): {:#?}",
+        sets.len(),
+        found.examined,
+        found.surface_bases.len(),
+        NEAR_CRITICAL_LIQUID_SHARE,
+        named.join("\n  "),
+        found.envelope_bases
+    );
+    assert_eq!(
+        named.len(),
+        NEAR_CRITICAL_AT_24.len(),
+        "both named bodies are walked"
+    );
+    assert!(found.examined > 0, "the guard examines decks");
+    assert_eq!(
+        found.surface_bases,
+        Vec::<String>::new(),
+        "count (xii): a crossing base within 1% of its critical temperature (TO MAIN: \
+         P14.T52.f's reserve rule)"
+    );
+}

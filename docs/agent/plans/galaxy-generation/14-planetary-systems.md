@@ -33024,3 +33024,37 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   nodes, and its own `ρ_s of phase II` source, `Basis::Adopted`), with no hold: it moves no
   generated mode. `GAPS_AT_24` names β-CO alone. Re-blessed at 24: the protocol's
   `substances.json` (H₂S's third solid piece); `substance/registry.golden` does not move.
+- **Deviations in P14.T52.g, as built (2026-10-31).** Held at 26: `chem::condense`'s
+  `DECK_PROFILE_VERSION`, `DeckProfileRules::{Held, Saturation}`, the tests' `with_deck_profile`
+  (in `with_every_26_hold`) and the tripwire `the_deck_profile_is_held_only_until_the_26_bump`;
+  nothing moves at 24 or 25.
+  - The rule is the crate-private `profile_exponent` over `saturation_slope`, its rules read once a
+    derivation (`Context::profile`); under `Held` no slope is taken. Every loop deck takes it, a
+    `Bottom` base's too; the acid's, hazes' and dust's modes do not.
+  - Test-only: `Deck::level_masses` (a `#[cfg(test)]` field) and `Deck::column_level`,
+    `ModeProfile::level_of`, and `capturing_decks`, which keeps the decks a closure's
+    derivations place.
+  - The module doc's figures are the science check's, not the brief's: the τ = 1 level's shift
+    goes as 1 ÷ (f_sed − s), not by f_sed ÷ s, and the near-unity band's "20–46% too deep" (of the
+    drawn pressure) reads 1.25–1.9 times the column's.
+  - Files beyond the entry's: `hooks/aerosols.rs` (docs), its tests and
+    `hooks/envelope_atmosphere/tests.rs`, `system/envelope/tests.rs`, and
+    `system/locked_climate_tests.rs`, whose two 25-against-26 censuses hold the deck profile
+    (`with_the_locked_deck_alone`), so that they measure P14.T24.j's deck alone.
+  - _Accept, as built:_ also `cargo test -p hyperion-sim --lib` `planetary::system::envelope`,
+    `planetary::testing` and `planetary::system::locked_climate_tests`; by name, the ignored
+    census `under_every_26_hold_the_deck_profile_s_census`.
+  - For 26's bump: the tripwire's list (it names the tests that set the switch, to restate or
+    delete), and re-bless what pins a loop mode's exponent: `planetary/envelope_atmosphere`,
+    `planetary/aerosols` and `packages/protocol/fixtures/planetary.json` (the server's
+    `the_fixture_s_envelopes_are_the_generator_s`). Measured with the rule forced at 24: those
+    three alone fail; `planetary/condense` and the golden systems' records do not pin it.
+- **P14.T52.f's count (xii) guard, as built (2026-10-31).** The ignored
+  `under_every_25_hold_no_crossing_base_lies_near_its_critical_point` (`system/air/tests.rs`, run
+  by name) asserts, under every 25 hold over the 400, the goldens and LOOK72's audited contexts, no
+  `Crossing` base of a `SaturationLaw::Diagram` law in a surface's air (count (xii)'s) at or above
+  `NEAR_CRITICAL_LIQUID_SHARE` of its T_c, and prints the two bodies of 24 and an envelope's such
+  bases, outside count (xii) (lean, 2026-10-31): one at 25, 02002b2ca0030001.0500's H₂O at 0.9912
+  T_c and 6.75 p_c, its mode refused by F4. Held in reserve: a crossing
+  base at or above 0.99 T_c takes `Supercritical` (its liquid floats in its gas; research-r08-t16a
+  §2); P14.T53.b part 3 cures count (xii)'s two at 25, and the guard keeps it so.
