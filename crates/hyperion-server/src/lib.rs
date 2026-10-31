@@ -103,7 +103,7 @@ pub(crate) struct AppState {
     ///
     /// A query takes its own [`CellCacheHandle`](compute::CellCacheHandle) from this on the pool
     /// job that runs it, since the handle borrows the cache and cannot cross an `.await`.
-    pub(crate) cells: SharedCellCache,
+    pub(crate) cells: Arc<SharedCellCache>,
     /// The systems' stars generated so far, in the configured byte budget: what a
     /// `system_summary` reads (plan 06, P06.T34).
     pub(crate) systems: SharedSystemCache,
@@ -214,7 +214,7 @@ impl Server {
             config.extinction_map_cache_bytes(),
         );
         let sightlines = SharedSightlineCache::new(config.sightline_cache_bytes());
-        let cells = SharedCellCache::new(config.cell_cache_bytes());
+        let cells = Arc::new(SharedCellCache::new(config.cell_cache_bytes()));
         let (feature_cells, cluster_models, map_lists) =
             feature_caches(&config, Arc::clone(&pool), Arc::clone(&galaxies));
         let (systems, briefs) = system_caches(&config, &cluster_models);

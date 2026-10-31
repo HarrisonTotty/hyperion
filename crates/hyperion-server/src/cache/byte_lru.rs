@@ -364,6 +364,42 @@ where
         insertion
     }
 
+    /// The keys of `keys` the cache does not hold, in order, asked under one lock and without
+    /// counting a lookup or marking a use: what a caller deciding what to build asks of many keys
+    /// at once.
+    pub fn absent(&self, keys: impl IntoIterator<Item = K>) -> Vec<K> {
+        let cache = self.lock();
+        keys.into_iter()
+            .filter(|key| !cache.contains_key(key))
+            .collect()
+    }
+
+    /// [`SharedByteLru::insert`] of every entry of `entries`, in order, under one lock: what
+    /// threads that each store many entries at once take, so that they do not wait on each other
+    /// once for every entry. Each insertion is as [`ByteLru::insert`]'s would be in turn.
+    pub fn insert_all(&self, entries: impl IntoIterator<Item = (K, Arc<V>)>) -> Vec<Insertion<V>> {
+        let charged: Vec<(K, Arc<V>, usize)> = entries
+            .into_iter()
+            .map(|(key, value)| {
+                let charge = ByteLru::<K, V>::charge(&value);
+                (key, value, charge)
+            })
+            .collect();
+        let mut displaced = Vec::new();
+        let insertions = {
+            let mut cache = self.lock();
+            charged
+                .into_iter()
+                .map(|(key, value, charge)| {
+                    cache.insert_charged(key, value, charge, &mut displaced)
+                })
+                .collect()
+        };
+        // Dropped with the lock released, as `insert`'s are.
+        drop(displaced);
+        insertions
+    }
+
     /// See [`ByteLru::len`].
     #[must_use]
     pub fn len(&self) -> usize {
@@ -686,6 +722,28 @@ mod tests {
         let _ = cache.insert(2, probe());
         assert_eq!(*dropped_unlocked.lock().unwrap(), [true, true]);
         assert_eq!(cache.len(), 1);
+    }
+
+    /// `absent` asks for many keys at once and counts no lookup, and `insert_all` stores entries
+    /// as `insert` would one after another: a later one evicting the oldest, one larger than the
+    /// budget refused (P09.T40.a).
+    #[test]
+    fn absent_and_insert_all_are_lookups_and_inserts_under_one_lock() {
+        let cache = SharedByteLru::new(2 * EMPTY);
+        let _ = cache.insert(1, blob(0));
+        assert_eq!(cache.absent([3, 1, 2]), [3, 2]);
+        let counters = cache.counters();
+        assert_eq!((counters.hits(), counters.misses()), (0, 0));
+        let insertions = cache.insert_all([(2, blob(0)), (3, blob(0)), (4, blob(2 * EMPTY))]);
+        assert!(matches!(
+            insertions[..],
+            [
+                Insertion::Stored { evicted: 0 },
+                Insertion::Stored { evicted: 1 },
+                Insertion::Refused(_)
+            ]
+        ));
+        assert_eq!(cache.absent([1, 2, 3, 4]), [1, 4]);
     }
 
     #[test]

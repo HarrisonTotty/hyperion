@@ -51,8 +51,9 @@ pub use walk::{
 };
 
 use crate::galaxy::Galaxy;
-use crate::galaxy::placement::{CellCache, SystemRecord};
+use crate::galaxy::placement::{CellCache, CellKey, SystemRecord};
 use crate::id::Layer;
+use crate::rng::Seed;
 use crate::time::UniverseTime;
 use crate::units::LightYears;
 
@@ -117,68 +118,207 @@ pub fn range_query<C: CellCache>(
     sources: &[&dyn SystemSource],
     query: &RangeQuery,
 ) -> RangeResult {
-    let widest = widest_sphere(query);
-    let grid = expected_counts(galaxy, query.centre(), query.radius(), query.substellar());
-    let per_source: Vec<LayerCounts> = sources
-        .iter()
-        .map(|source| source.expected_in_sphere(galaxy, &widest))
-        .collect();
-    let from_sources = sum_source_counts(&per_source);
-    let census = decide_census(query, &grid, &from_sources, |layer| {
-        count_cells_in_sphere(layer, &sphere_for_layer(galaxy, query, layer))
-    });
-    let layers = census.layers();
+    RangePlan::new(galaxy, sources, query).run(galaxy, cache, sources)
+}
 
-    let mut stats = QueryStats {
-        padded_radius: widest.padded_radius(),
-        ..QueryStats::default()
-    };
-    let mut systems = Vec::with_capacity(reserve_for(&census));
-    // Coarsest first and the substellar layers last, as the brainstorm's walk goes; the result's
-    // order is the sort's, not this.
-    for layer in result::WALK_ORDER {
-        if !layers.contains(layer) {
-            continue;
+/// What [`range_query`] decides before it reads a cell: the widest sphere the sources are asked
+/// about, the census from the grid's and the sources' expected counts, and each walked layer's
+/// sphere (P09.T40.a).
+///
+/// A plan is a pure function of the galaxy, the sources' counts and the query, as the census is,
+/// so it may be made once and run later: a server makes it, generates the cells it will walk
+/// ([`cells`](Self::cells)) on several threads, and then [`run`](Self::run)s it over the warm
+/// cache, for the answer [`range_query`] gives, bit for bit. It must be run in the galaxy it was
+/// made for, with sources that count and find as the ones it was made with.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::placement::NoCache;
+/// use hyperion_sim::galaxy::query::{RangePlan, RangeQuery, range_query};
+/// use hyperion_sim::units::LightYears;
+///
+/// let galaxy = Galaxy::new(Seed::new(42));
+/// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in range");
+/// let query = RangeQuery::builder(sun, LightYears::new(20.0)).build()?;
+/// let plan = RangePlan::new(&galaxy, &[], &query);
+/// // The cells the walk will read, layer by layer from the coarsest.
+/// assert!(plan.cells().count() > 100);
+/// let planned = plan.run(&galaxy, &mut NoCache::new(), &[]);
+/// assert_eq!(planned, range_query(&galaxy, &mut NoCache::new(), &[], &query));
+/// # Ok::<(), hyperion_sim::galaxy::query::BuildRangeQueryError>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct RangePlan {
+    query: RangeQuery,
+    seed: Seed,
+    widest: QuerySphere,
+    /// The grid's expected counts over the query's sphere, which no source changes.
+    grid: LayerCounts,
+    census: Census,
+    /// Each layer the census admits with the sphere it is walked with, in the walk's order.
+    spheres: Vec<(Layer, QuerySphere)>,
+}
+
+impl RangePlan {
+    /// The plan of `query` in `galaxy` with `sources` beside the grid: their expected counts and
+    /// the census they decide, before anything is generated.
+    ///
+    /// # Panics
+    ///
+    /// As [`range_query`]: if a component's expected count is not a number, or the sources' counts
+    /// sum past the largest `f64` in some layer.
+    #[must_use]
+    pub fn new(galaxy: &Galaxy, sources: &[&dyn SystemSource], query: &RangeQuery) -> Self {
+        let grid = expected_counts(galaxy, query.centre(), query.radius(), query.substellar());
+        Self::decided(galaxy, sources, query, grid)
+    }
+
+    /// The plan of the same query with `sources` beside the grid instead, the grid's expected
+    /// counts kept: [`new`](Self::new) with `sources`, bit for bit.
+    ///
+    /// A plan with no sources walks every layer, and so every cell, that a plan with sources does,
+    /// since the sources' counts only add to the layers' and the census admits layers from the
+    /// coarsest while they fit ([`decide_census`]): a server generates the cells of the plan
+    /// without sources while the sources' own cells are generated, and then plans with them.
+    ///
+    /// # Panics
+    ///
+    /// As [`new`](Self::new), and if `galaxy` is not of the seed the plan was made for.
+    #[must_use]
+    pub fn with_sources(&self, galaxy: &Galaxy, sources: &[&dyn SystemSource]) -> Self {
+        assert_eq!(
+            galaxy.seed(),
+            self.seed,
+            "a range plan is made again in the galaxy it was made for"
+        );
+        Self::decided(galaxy, sources, &self.query, self.grid)
+    }
+
+    /// The plan of `query` with the grid's expected counts `grid` and `sources` beside it.
+    #[must_use]
+    fn decided(
+        galaxy: &Galaxy,
+        sources: &[&dyn SystemSource],
+        query: &RangeQuery,
+        grid: LayerCounts,
+    ) -> Self {
+        let widest = widest_sphere(query);
+        let per_source: Vec<LayerCounts> = sources
+            .iter()
+            .map(|source| source.expected_in_sphere(galaxy, &widest))
+            .collect();
+        let from_sources = sum_source_counts(&per_source);
+        let census = decide_census(query, &grid, &from_sources, |layer| {
+            count_cells_in_sphere(layer, &sphere_for_layer(galaxy, query, layer))
+        });
+        let layers = census.layers();
+        // Coarsest first and the substellar layers last, as the brainstorm's walk goes; the
+        // result's order is the sort's, not this. Each layer is walked with its own pad, so
+        // raising one layer's padding speed (plan 08's unbound class) moves no other layer's cells
+        // (plan 03, Design note 13).
+        let spheres = result::WALK_ORDER
+            .into_iter()
+            .filter(|&layer| layers.contains(layer))
+            .map(|layer| (layer, sphere_for_layer(galaxy, query, layer)))
+            .collect();
+        Self {
+            query: query.clone(),
+            seed: galaxy.seed(),
+            widest,
+            grid,
+            census,
+            spheres,
         }
-        // Each layer is walked with its own pad, so raising one layer's padding speed (plan 08's
-        // unbound class) moves no other layer's cells (plan 03, Design note 13).
-        let sphere = sphere_for_layer(galaxy, query, layer);
-        for key in cells_in_sphere(layer, &sphere) {
-            stats.cells_visited += 1;
-            cache.with_cell(galaxy, key, |cell| {
-                for record in cell {
-                    stats.systems_examined += 1;
-                    if let Some(hit) = hit_at(galaxy, record, &sphere)
-                        && !suppressed(sources, galaxy, record, sphere.time())
-                    {
-                        systems.push(hit);
+    }
+
+    /// The query planned.
+    #[must_use]
+    pub const fn query(&self) -> &RangeQuery {
+        &self.query
+    }
+
+    /// The census the plan walks by.
+    #[must_use]
+    pub const fn census(&self) -> &Census {
+        &self.census
+    }
+
+    /// The grid cells [`run`](Self::run) reads, in the order it reads them: each layer the census
+    /// admits, from the coarsest, and its cells that meet the layer's sphere
+    /// ([`cells_in_sphere`]).
+    pub fn cells(&self) -> impl Iterator<Item = CellKey> + '_ {
+        self.spheres
+            .iter()
+            .flat_map(|(layer, sphere)| cells_in_sphere(*layer, sphere))
+    }
+
+    /// The walk: every planned cell through `cache`, then the sources' hits, merged and sorted:
+    /// the answer [`range_query`] gives for the plan's query, bit for bit.
+    ///
+    /// # Panics
+    ///
+    /// - If `galaxy` is not of the seed the plan was made for.
+    /// - In debug builds, if a system ID appears twice among the merged hits, as [`range_query`].
+    #[must_use]
+    pub fn run<C: CellCache>(
+        &self,
+        galaxy: &Galaxy,
+        cache: &mut C,
+        sources: &[&dyn SystemSource],
+    ) -> RangeResult {
+        assert_eq!(
+            galaxy.seed(),
+            self.seed,
+            "a range plan is run in the galaxy it was made for"
+        );
+        let census = self.census;
+        let mut stats = QueryStats {
+            padded_radius: self.widest.padded_radius(),
+            ..QueryStats::default()
+        };
+        let mut systems = Vec::with_capacity(reserve_for(&census));
+        for (layer, sphere) in &self.spheres {
+            for key in cells_in_sphere(*layer, sphere) {
+                stats.cells_visited += 1;
+                cache.with_cell(galaxy, key, |cell| {
+                    for record in cell {
+                        stats.systems_examined += 1;
+                        if let Some(hit) = hit_at(galaxy, record, sphere)
+                            && !suppressed(sources, galaxy, record, sphere.time())
+                        {
+                            systems.push(hit);
+                        }
                     }
-                }
-            });
+                });
+            }
         }
-    }
 
-    let from_grid = systems.len();
-    for source in sources {
-        source.systems_in_sphere(galaxy, &widest, layers, &mut systems);
+        let from_grid = systems.len();
+        for source in sources {
+            source.systems_in_sphere(galaxy, &self.widest, census.layers(), &mut systems);
+        }
+        // A source appends, by its contract, so this is what it added; `saturating_sub` keeps a
+        // source that broke the contract from poisoning the count.
+        debug_assert!(
+            systems.len() >= from_grid,
+            "a source removed hits from the buffer instead of appending to it"
+        );
+        stats.systems_examined += u64::try_from(systems.len().saturating_sub(from_grid))
+            .expect("a hit count fits in 64 bits on every target");
+        sort_hits(&mut systems);
+        // The sort is a strict order only while no ID appears twice, which the sources' contract
+        // promises and a debug build checks.
+        debug_assert!(
+            ids_are_unique(&systems),
+            "a system ID appears twice among the merged hits: a source broke the contract that its \
+             IDs are its own"
+        );
+        RangeResult::new(systems, census, stats)
     }
-    // A source appends, by its contract, so this is what it added; `saturating_sub` keeps a source
-    // that broke the contract from poisoning the count.
-    debug_assert!(
-        systems.len() >= from_grid,
-        "a source removed hits from the buffer instead of appending to it"
-    );
-    stats.systems_examined += u64::try_from(systems.len().saturating_sub(from_grid))
-        .expect("a hit count fits in 64 bits on every target");
-    sort_hits(&mut systems);
-    // The sort is a strict order only while no ID appears twice, which the sources' contract
-    // promises and a debug build checks.
-    debug_assert!(
-        ids_are_unique(&systems),
-        "a system ID appears twice among the merged hits: a source broke the contract that its IDs \
-         are its own"
-    );
-    RangeResult::new(systems, census, stats)
 }
 
 /// The sources' expected counts summed layer by layer in value order, so that the sum depends on
@@ -236,7 +376,7 @@ pub(crate) fn sphere_for_layer(galaxy: &Galaxy, query: &RangeQuery, layer: Layer
 /// The sources pad for their own members' motion, so the grid's Kepler-regime pad, which only the
 /// grid's records need, does not widen it (plan 09, P09.T28.b.b).
 #[must_use]
-fn widest_sphere(query: &RangeQuery) -> QuerySphere {
+pub(crate) fn widest_sphere(query: &RangeQuery) -> QuerySphere {
     let pad = Layer::ALL
         .into_iter()
         .fold(LightYears::ZERO, |most, layer| {
@@ -588,6 +728,60 @@ mod tests {
             let first = message.chars().next().unwrap();
             assert!(!first.is_uppercase(), "{message}");
             assert!(!message.ends_with(['.', '!', '?']), "{message}");
+        }
+    }
+
+    /// A plan's cells are the cells its walk reads, in the order it reads them, and its walk is
+    /// the range query's answer, for queries whose census admits every stellar layer, drops the
+    /// finest and reads the substellar layers (P09.T40.a).
+    #[test]
+    fn a_plan_s_cells_are_its_walk_s_and_its_walk_the_query_s_answer() {
+        use std::num::NonZeroU32;
+
+        use crate::galaxy::placement::{CellKey, generate_cell};
+
+        /// Every cell asked for, in order, each generated afresh.
+        #[derive(Default)]
+        struct Recording(Vec<CellKey>);
+        impl CellCache for Recording {
+            fn with_cell<R>(
+                &mut self,
+                galaxy: &Galaxy,
+                key: CellKey,
+                f: impl FnOnce(&[SystemRecord]) -> R,
+            ) -> R {
+                self.0.push(key);
+                let mut systems = Vec::new();
+                generate_cell(galaxy, key, &mut systems);
+                f(&systems)
+            }
+        }
+        let galaxy = galaxy();
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap();
+        for (radius, limit, substellar) in [
+            (30.0, 20_000, SubstellarRequest::None),
+            (200.0, 2_000, SubstellarRequest::None),
+            (20.0, 20_000, SubstellarRequest::BrownDwarfs),
+        ] {
+            let query = RangeQuery::builder(sun, LightYears::new(radius))
+                .limit(NonZeroU32::new(limit).unwrap())
+                .substellar(substellar)
+                .build()
+                .unwrap();
+            let plan = RangePlan::new(&galaxy, &[], &query);
+            let mut walked = Recording::default();
+            let result = plan.run(&galaxy, &mut walked, &[]);
+            assert_eq!(plan.cells().collect::<Vec<_>>(), walked.0, "{radius} ly");
+            assert_eq!(
+                u64::try_from(walked.0.len()).unwrap(),
+                result.stats().cells_visited()
+            );
+            assert_eq!(
+                result,
+                range_query(&galaxy, &mut NoCache::new(), &[], &query)
+            );
+            assert_eq!(plan.census(), result.census());
+            assert_eq!(plan.query(), &query);
         }
     }
 }

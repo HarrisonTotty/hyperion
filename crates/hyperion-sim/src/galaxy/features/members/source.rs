@@ -36,14 +36,14 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::{
-    LayerCounts, LayerSet, QuerySphere, SystemHit, SystemSource, UNBOUND_PAD_SPEED, pad_for,
-    pad_speed,
+    LayerCounts, LayerSet, QuerySphere, RangeQuery, SystemHit, SystemSource, UNBOUND_PAD_SPEED,
+    pad_for, pad_speed, widest_sphere,
 };
-use crate::id::Layer;
+use crate::id::{FeatureCell, Layer};
 use crate::time::UniverseTime;
 use crate::units::{KilometresPerSecond, LightYears, Seconds};
 
-use super::super::FeatureId;
+use super::super::{FeatureId, FeatureProcess};
 
 use super::super::catalogue::{FeatureCatalogue, FeatureCellCache, FeatureRecord};
 use super::super::interior::LocalCell;
@@ -200,6 +200,80 @@ impl<'a> FeatureMemberSource<'a> {
         }
     }
 
+    /// The feature cells the source reads for `query` in `galaxy`, each with the last process it
+    /// reads it through (P09.T40.a).
+    ///
+    /// They are [`FeatureCatalogue::cells_near`]'s about the query's centre at the radius its hits
+    /// are looked up at, padded for its members' motion to its time, which is at least the radius
+    /// its counts are looked up at: so no lookup of the query reads another cell, or one through a
+    /// later process. A server generates them ahead of the query, on several threads; what the
+    /// source finds does not depend on it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::features::catalogue::FeatureCatalogue;
+    /// use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
+    /// use hyperion_sim::galaxy::query::RangeQuery;
+    /// use hyperion_sim::units::LightYears;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(9));
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in range");
+    /// let query = RangeQuery::builder(sun, LightYears::new(50.0)).build()?;
+    /// // At the epoch the members have not moved, so the cells are the lookup's own.
+    /// assert_eq!(
+    ///     FeatureMemberSource::feature_cells(&galaxy, &query),
+    ///     FeatureCatalogue::cells_near(&galaxy, &sun, LightYears::new(50.0)),
+    /// );
+    /// # Ok::<(), hyperion_sim::galaxy::query::BuildRangeQueryError>(())
+    /// ```
+    #[must_use]
+    pub fn feature_cells(
+        galaxy: &Galaxy,
+        query: &RangeQuery,
+    ) -> Vec<(FeatureCell, FeatureProcess)> {
+        let sphere = widest_sphere(query);
+        FeatureCatalogue::cells_near(galaxy, sphere.centre(), lookup_radius(&sphere))
+    }
+
+    /// Reads `cell` through `last` for `query` as its lookups read it, through the caches this
+    /// source was made with, and for each feature there that they find, its grid's reach bound
+    /// and, where that grid may meet the query's sphere, its interior (P09.T40.a).
+    ///
+    /// It is what a server does for each of a query's [`feature_cells`](Self::feature_cells) on
+    /// several threads before the query runs, so that the query's lookups find all of it held.
+    /// What it reads and builds is each a pure function of the galaxy and the feature, so it
+    /// changes no answer, and it is lost if the caches keep nothing.
+    pub fn read_ahead(
+        &self,
+        galaxy: &Galaxy,
+        query: &RangeQuery,
+        (cell, last): (FeatureCell, FeatureProcess),
+    ) {
+        let sphere = widest_sphere(query);
+        let (centre, radius) = (sphere.centre(), lookup_radius(&sphere));
+        let mut found = Vec::new();
+        FeatureCatalogue::found_in(
+            galaxy,
+            self.features,
+            (cell, last),
+            (centre, radius),
+            &mut found,
+        );
+        for feature in &found {
+            let touches = self
+                .interiors
+                .grid_reach(galaxy, feature)
+                .is_some_and(|reach| grid_may_touch(feature, centre, reach, radius));
+            if touches {
+                drop(self.interiors.interior(galaxy, feature));
+            }
+        }
+    }
+
     /// The interiors of the features whose nested grids may meet the sphere of `radius` about
     /// `centre`, in the catalogue's order: of the features whose reach touches it, those whose
     /// grid's reach bound does ([`FeatureInteriorCache::grid_reach`]; P09.T40.a). A grid that
@@ -262,7 +336,7 @@ impl SystemSource for FeatureMemberSource<'_> {
         // Every feature's members move below this (`FeatureInterior::of` asserts it in debug
         // builds), so a member that can reach the sphere by `t` lies in a feature whose reach
         // touches it padded so.
-        let padded = sphere.radius() + pad_for(t, UNBOUND_PAD_SPEED);
+        let padded = lookup_radius(sphere);
         let mut members = Vec::new();
         for interior in self.interiors_near(galaxy, sphere.centre(), padded) {
             let local = local_offset(interior.feature().position(), sphere.centre());
@@ -290,6 +364,14 @@ impl SystemSource for FeatureMemberSource<'_> {
     fn suppresses(&self, _galaxy: &Galaxy, _record: &SystemRecord, _t: UniverseTime) -> bool {
         false
     }
+}
+
+/// How far from `sphere`'s centre the source looks up features for its hits: its radius padded by
+/// [`UNBOUND_PAD_SPEED`] to its time, which every feature's members move below
+/// ([`FeatureInterior::of`] asserts it).
+#[must_use]
+fn lookup_radius(sphere: &QuerySphere) -> LightYears {
+    sphere.radius() + pad_for(sphere.time(), UNBOUND_PAD_SPEED)
 }
 
 /// Whether a grid of `reach` about `feature`'s centre may hold a cell that the ball of `radius`

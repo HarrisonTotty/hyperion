@@ -15,19 +15,18 @@ use hyperion_protocol::{
     SystemsInRangeRequest, TargetExtinction,
 };
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::features::members::source::{FeatureInteriorCache, FeatureMemberSource};
+use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
 use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemKind, resolve};
-use hyperion_sim::galaxy::query::{
-    QueryMode, RangeQuery, RangeResult, SystemHit, SystemSource, range_query,
-};
+use hyperion_sim::galaxy::query::{QueryMode, RangeQuery, RangeResult, SystemHit};
 use hyperion_sim::observe::{Observer, TraceMotionError};
 use hyperion_sim::time::UniverseTime;
 
 use super::observe::observe_row;
 use super::universe::openable_universe;
 use crate::compute::{
-    CancelToken, EXTINCTION_FLOOR_LOG10_MAG, GalaxyKey, JobError, LineGas, Priority,
-    SharedBriefCache, SharedSystemCache, quantise_map, quantise_map_with_floor,
+    CancelToken, EXTINCTION_FLOOR_LOG10_MAG, GalaxyKey, JobError, KeptInteriors, LineGas, Priority,
+    RangeCaches, ServedQuery, SharedBriefCache, SharedSystemCache, quantise_map,
+    quantise_map_with_floor, served_range_query,
 };
 use crate::convert::{
     ExtinctionMapQuery, ExtinctionQuery, LineEnd, MapRequest, RangeRequest, RowOrigins, brief_dto,
@@ -219,10 +218,13 @@ pub(crate) async fn extinction(
 /// row's stellar brief when the request sets `include_stellar` (plan 06, P06.T34), and in observed
 /// mode with what the request's observer receives from each (plan 12, P12.T6).
 ///
-/// The query and the conversion of its hits are one interactive pool job, which owns the state and
-/// takes its [`CellCacheHandle`](crate::compute::CellCacheHandle) from it there: the handle borrows
-/// the cache and so cannot cross an `.await`, and the conversion is cheap beside the query but too
-/// dear for the runtime, since a 20,000-record answer is megabytes of wire types. The frame that
+/// The query and the conversion of its hits are one interactive pool job, which takes its
+/// [`CellCacheHandle`](crate::compute::CellCacheHandle) there: the handle borrows the cache and so
+/// cannot cross an `.await`, and the conversion is cheap beside the query but too dear for the
+/// runtime, since a 20,000-record answer is megabytes of wire types. A cold query's cells are
+/// generated before it on the pool's workers, by jobs of their own that this request's task queues
+/// and waits for, never one job waiting on another ([`served_range_query`]; P09.T40.a), and the
+/// query then walks the warm caches. The frame that
 /// answer becomes is serialised by a second job (design note 22). A running query is never stopped
 /// (design note 5): its cell budget, [`MAX_QUERY_CELLS`](crate::limits::MAX_QUERY_CELLS), bounds
 /// how long it can take.
@@ -268,23 +270,14 @@ pub(crate) async fn systems(
     let key = universe.key();
     let work = RowWork::of(&request, &query);
     let shared = Arc::clone(&state);
-    let job_galaxy = Arc::clone(&galaxy);
-    let queried = move |_: &CancelToken| {
-        let mut cells = shared.cells.handle(key);
-        // One kept view for the whole job: its census, its hits and its rows' members read the
-        // same interiors, each built at most once whatever the shared cache's budget.
-        let (features, interiors) = (
-            shared.feature_cells.handle(key),
-            shared.cluster_models.kept(key),
-        );
-        let members = FeatureMemberSource::new(&features, &interiors);
-        // Held, no sources: the grid is the whole answer, as in plan 04 (P09.T40.a's gate).
-        // Observed mode finds the same systems (plan 12, Design note 4).
-        let sources: &[&dyn SystemSource] = match shared.feature_members {
-            FeatureMembers::Held => &[],
-            FeatureMembers::Served => &[&members],
-        };
-        let result = range_query(&job_galaxy, &mut cells, sources, &query);
+    let served = ServedQuery::new(
+        Arc::clone(&galaxy),
+        key,
+        query.clone(),
+        state.feature_members,
+    );
+    // Observed mode finds the same systems (plan 12, Design note 4).
+    let queried = move |job_galaxy: &Galaxy, result: RangeResult, interiors: &KeptInteriors<'_>| {
         if work.is_needed() && result.systems().len() > BRIEF_CHUNK_ROWS {
             return Ok(Queried::Chunked(Box::new((request, query, result))));
         }
@@ -292,21 +285,27 @@ pub(crate) async fn systems(
             .run(
                 (&shared.briefs, &shared.systems),
                 key,
-                &job_galaxy,
+                job_galaxy,
                 result.systems(),
             )
             .map_err(untraced)?;
         Ok::<_, RequestError>(Queried::Answered(systems_in_range(
-            &job_galaxy,
+            job_galaxy,
             request,
             &query,
             &result,
             extras.briefs,
             extras.observed,
-            row_origins(shared.feature_members, &interiors),
+            row_origins(shared.feature_members, interiors),
         )))
     };
-    let (request, query, result) = match run(&state, &token, queried).await?? {
+    let caches = RangeCaches::new(
+        Arc::clone(&state.cells),
+        Arc::clone(&state.feature_cells),
+        Arc::clone(&state.cluster_models),
+    );
+    let answered = served_range_query(&state.pool, &caches, &served, &token, queried).await?;
+    let (request, query, result) = match answered? {
         Queried::Answered(answer) => return Ok(ResponseBody::SystemsInRange(answer)),
         Queried::Chunked(parts) => *parts,
     };
@@ -534,7 +533,7 @@ fn briefs_of(
 #[cfg(test)]
 mod tests {
     use hyperion_sim::galaxy::placement::NoCache;
-    use hyperion_sim::galaxy::query::RangeQuery;
+    use hyperion_sim::galaxy::query::{RangeQuery, range_query};
     use hyperion_sim::id::SystemId;
     use hyperion_sim::units::LightYears;
     use hyperion_sim::{GENERATOR_VERSION, Seed};

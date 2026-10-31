@@ -11,20 +11,28 @@
 //!   about it, under 20 ms cold.
 //!
 //! Each is timed cold, over caches built fresh for the iteration, so that every cell and interior
-//! it reads is generated, and warm, over caches the group filled before measuring.
+//! it reads is generated, and warm, over caches the group filled before measuring: in one thread;
+//! as one pool job on a pool of 1, 4 and 8 workers, as the served job ran it before P09.T40.a's
+//! parallel cells; and served so (`served_range_query`), its cold cells generated across the
+//! workers ahead of its walk.
 
 use std::hint::black_box;
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroUsize};
+use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use hyperion_server::FeatureMembers;
 use hyperion_server::compute::{
-    GalaxyKey, SharedCellCache, SharedClusterModelCache, SharedFeatureCellCache,
+    CancelToken, CpuPool, GalaxyKey, Priority, RangeCaches, ServedQuery, SharedCellCache,
+    SharedClusterModelCache, SharedFeatureCellCache, served_range_query,
 };
 use hyperion_server::config::{
     DEFAULT_CELL_CACHE_MIB, DEFAULT_CLUSTER_MODEL_CACHE_MIB, DEFAULT_FEATURE_CACHE_MIB,
 };
-use hyperion_server::limits::{MAX_CENSUS_LIMIT, MAX_QUERY_CELLS};
+use hyperion_server::limits::{
+    BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY, MAX_CENSUS_LIMIT, MAX_QUERY_CELLS,
+};
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::features::FeatureProcess;
@@ -41,19 +49,22 @@ const SEED: u64 = 0x4d2;
 /// Bytes in a mebibyte, the unit of the server's cache budgets.
 const MIB: usize = 1 << 20;
 
-/// The caches a server holds for its galaxies, at its default budgets.
+/// The caches a server holds for its galaxies, at its default budgets, shared with pool jobs.
+#[derive(Clone)]
 struct Caches {
-    cells: SharedCellCache,
-    features: SharedFeatureCellCache,
-    interiors: SharedClusterModelCache,
+    cells: Arc<SharedCellCache>,
+    features: Arc<SharedFeatureCellCache>,
+    interiors: Arc<SharedClusterModelCache>,
 }
 
 impl Caches {
     fn new() -> Self {
         Self {
-            cells: SharedCellCache::new(DEFAULT_CELL_CACHE_MIB * MIB),
-            features: SharedFeatureCellCache::new(DEFAULT_FEATURE_CACHE_MIB * MIB),
-            interiors: SharedClusterModelCache::new(DEFAULT_CLUSTER_MODEL_CACHE_MIB * MIB),
+            cells: Arc::new(SharedCellCache::new(DEFAULT_CELL_CACHE_MIB * MIB)),
+            features: Arc::new(SharedFeatureCellCache::new(DEFAULT_FEATURE_CACHE_MIB * MIB)),
+            interiors: Arc::new(SharedClusterModelCache::new(
+                DEFAULT_CLUSTER_MODEL_CACHE_MIB * MIB,
+            )),
         }
     }
 
@@ -130,5 +141,106 @@ fn served(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, served);
+/// Fresh caches at the server's default budgets, as the served path shares them with its jobs.
+fn range_caches() -> RangeCaches {
+    RangeCaches::new(
+        Arc::new(SharedCellCache::new(DEFAULT_CELL_CACHE_MIB * MIB)),
+        Arc::new(SharedFeatureCellCache::new(DEFAULT_FEATURE_CACHE_MIB * MIB)),
+        Arc::new(SharedClusterModelCache::new(
+            DEFAULT_CLUSTER_MODEL_CACHE_MIB * MIB,
+        )),
+    )
+}
+
+/// The Sun-like and the globular core's 1 ly queries served on pools of 1, 4 and 8 workers, cold
+/// and warm, as `systems_in_range` serves them: the result alone, without the rows' conversion.
+fn served_on_the_pool(c: &mut Criterion) {
+    let galaxy = Arc::new(Galaxy::new(Seed::new(SEED)).with_full_potential());
+    let key = GalaxyKey::new(SEED, GENERATOR_VERSION);
+    let globular = *a_globular(&galaxy).position();
+    let queries = [
+        ("Sun-like 50 ly", query_at(sun_like(), 50.0)),
+        ("globular core 1 ly", query_at(globular, 1.0)),
+    ];
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let mut group = c.benchmark_group("served_on_the_pool");
+    group.sample_size(20);
+    group.measurement_time(Duration::from_secs(20));
+    for workers in [1, 4, 8] {
+        let pool = CpuPool::new(
+            NonZeroUsize::new(workers).expect("at least one worker"),
+            INTERACTIVE_QUEUE_CAPACITY,
+            BULK_QUEUE_CAPACITY,
+        )
+        .expect("the pool starts");
+        let token = CancelToken::new();
+        for (name, query) in &queries {
+            let served = ServedQuery::new(
+                Arc::clone(&galaxy),
+                key,
+                query.clone(),
+                FeatureMembers::Served,
+            );
+            let serve = |caches: &RangeCaches| {
+                runtime
+                    .block_on(served_range_query(
+                        &pool,
+                        caches,
+                        &served,
+                        &token,
+                        |_, result, _| result,
+                    ))
+                    .expect("the query's jobs run")
+            };
+            let one_job = |caches: &Caches| {
+                let (caches, query) = (caches.clone(), query.clone());
+                let galaxy = Arc::clone(&galaxy);
+                let receiver = pool
+                    .try_submit(
+                        Priority::Interactive,
+                        token.clone(),
+                        move |_: &CancelToken| caches.query(&galaxy, key, &query),
+                    )
+                    .expect("room for the job");
+                runtime
+                    .block_on(receiver)
+                    .expect("the job replies")
+                    .expect("the job runs")
+            };
+            group.bench_function(format!("{name}, {workers} workers, one job (cold)"), |b| {
+                b.iter_batched_ref(
+                    Caches::new,
+                    |caches| one_job(caches),
+                    BatchSize::PerIteration,
+                );
+            });
+            let warm = Caches::new();
+            drop(one_job(&warm));
+            group.bench_function(format!("{name}, {workers} workers, one job (warm)"), |b| {
+                b.iter(|| one_job(&warm));
+            });
+            group.bench_function(format!("{name}, {workers} workers (cold)"), |b| {
+                b.iter_batched_ref(
+                    range_caches,
+                    |caches| serve(caches),
+                    BatchSize::PerIteration,
+                );
+            });
+            let warm = range_caches();
+            drop(serve(&warm));
+            group.bench_function(format!("{name}, {workers} workers (warm)"), |b| {
+                b.iter(|| serve(&warm));
+            });
+        }
+        runtime
+            .block_on(pool.shutdown())
+            .expect("the pool shuts down");
+    }
+    group.finish();
+}
+
+criterion_group!(benches, served, served_on_the_pool);
 criterion_main!(benches);

@@ -368,3 +368,75 @@ async fn behind_the_gate_a_query_inside_a_globular_answers_as_the_grid() {
     client.close().await;
     server.stop().await;
 }
+
+/// The 50 ly request at the Sun-like point at the epoch, every layer, with the rows' briefs.
+fn about_the_sun(universe: &UniverseIdHex) -> RequestBody {
+    RequestBody::SystemsInRange(SystemsInRangeRequest {
+        universe: universe.clone(),
+        centre: GalacticPosition {
+            cell_ly: [0, 26_000, 0],
+            offset_m: [0.0; 3],
+        },
+        radius_ly: 50.0,
+        time: at_years(0),
+        min_layer: MassLayer::A,
+        limit: hyperion_server::limits::MAX_CENSUS_LIMIT,
+        include_stellar: true,
+        mode: hyperion_protocol::QueryModeDto::Now,
+    })
+}
+
+/// The reply's frames, byte for byte, do not depend on how many workers generate a cold query's
+/// cells ahead of its walk (P09.T40.a): a server of one worker and one of eight answer the
+/// query inside the globular and the 50 ly query at the Sun-like point, cold and then warm, with
+/// the same text.
+#[tokio::test]
+async fn the_reply_is_the_same_at_one_and_eight_workers() {
+    let mut reference = Some(std::thread::spawn(|| {
+        a_globular();
+    }));
+    let mut replies = Vec::new();
+    for workers in [1, 8] {
+        let temp_dir = tempfile::tempdir().expect("a temporary directory");
+        let server = TestServer::start_with(
+            TestServer::config(temp_dir.path())
+                .workers(std::num::NonZeroUsize::new(workers).expect("at least one"))
+                .feature_members(FeatureMembers::Served)
+                .build(),
+        )
+        .await;
+        let mut client = server.connected().await;
+        let universe = client.create_universe("Omega Reach", SEED).await.id;
+        if let Some(reference) = reference.take() {
+            reference.join().expect("the globular is found");
+        }
+        let mut frames = Vec::new();
+        for pass in ["cold", "warm"] {
+            for body in [
+                inside_the_globular(&universe, at_years(0)),
+                about_the_sun(&universe),
+            ] {
+                client.send_request(body).await;
+                let frame = client.next_text().await;
+                assert!(
+                    frame.starts_with(r#"{"type":"response""#) && frame.contains("\"systems\""),
+                    "{pass}: {frame:.200}"
+                );
+                frames.push(frame);
+            }
+        }
+        replies.push(frames);
+        server.stop().await;
+    }
+    assert_eq!(replies[0].len(), 4);
+    for (one, eight) in replies[0].iter().zip(&replies[1]) {
+        assert!(one == eight, "the replies at one and eight workers differ");
+    }
+    // Cold and warm are the same answer too; only the request's ID differs.
+    let body = |frame: &str| {
+        serde_json::from_str::<serde_json::Value>(frame).expect("a server message")["body"].clone()
+    };
+    for (cold, warm) in replies[0][..2].iter().zip(&replies[0][2..]) {
+        assert!(body(cold) == body(warm), "a warm answer is its cold one");
+    }
+}

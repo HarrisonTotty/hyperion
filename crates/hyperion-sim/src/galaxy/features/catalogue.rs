@@ -666,14 +666,78 @@ impl FeatureCatalogue {
     /// within `radius` + [`MAX_FEATURE_REACH`], through `cache`, in cell and index order.
     ///
     /// A cell is read only [`through`](FeatureCellCache::contents_through) the last process whose
-    /// farthest reach can touch the sphere from it, with a light-year to spare: no feature of the
-    /// processes after it can, so what is found is what the whole cells hold (P09.T40.a).
+    /// farthest reach can touch the sphere from it ([`cells_near`](Self::cells_near)): no feature
+    /// of the processes after it can, so what is found is what the whole cells hold (P09.T40.a).
     pub fn near(
         galaxy: &Galaxy,
         centre: &GalacticPosition,
         radius: LightYears,
         cache: &dyn FeatureCellCache,
     ) -> impl Iterator<Item = FeatureRecord> + use<> {
+        let mut found = Vec::new();
+        for (cell, last) in Self::cells_near(galaxy, centre, radius) {
+            Self::found_in(galaxy, cache, (cell, last), (centre, radius), &mut found);
+        }
+        found.into_iter()
+    }
+
+    /// The features of `cell`, read through `last` from `cache`, whose reach touches the sphere
+    /// of `radius` about `centre`, appended to `found` in index order: what [`near`](Self::near)
+    /// finds there.
+    pub(crate) fn found_in(
+        galaxy: &Galaxy,
+        cache: &dyn FeatureCellCache,
+        (cell, last): (FeatureCell, FeatureProcess),
+        (centre, radius): (&GalacticPosition, LightYears),
+        found: &mut Vec<FeatureRecord>,
+    ) {
+        let contents = if last == FeatureProcess::Cloud {
+            cache.contents(galaxy, cell)
+        } else {
+            cache.contents_through(galaxy, cell, last)
+        };
+        debug_assert!(
+            contents.holds(last),
+            "a feature cell cache lent {:?} without the {last} it was asked for",
+            cell.to_array()
+        );
+        found.extend(contents.features().iter().copied().filter(|f| {
+            f.position.distance_to(centre).value() / METRES_PER_LIGHT_YEAR
+                <= radius.value() + f.reach.value()
+        }));
+    }
+
+    /// The cells [`near`](Self::near) reads for the sphere of `radius` about `centre`, in the
+    /// order it reads them, each with the last process it reads it through (P09.T40.a).
+    ///
+    /// They are the cells within `radius` + [`MAX_FEATURE_REACH`], and a cell's last process is
+    /// the last whose farthest reach can touch the sphere from it, with a light-year to spare. A
+    /// sphere about the same centre that is no larger reads no other cell, and none through a
+    /// later process: what a server generates ahead of a lookup.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::features::FeatureProcess;
+    /// use hyperion_sim::galaxy::features::catalogue::FeatureCatalogue;
+    /// use hyperion_sim::units::LightYears;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(9));
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in range");
+    /// let cells = FeatureCatalogue::cells_near(&galaxy, &sun, LightYears::new(50.0));
+    /// // The cells that hold the sphere are read whole, the farthest through the clusters alone.
+    /// assert!(cells.iter().any(|&(_, last)| last == FeatureProcess::Cloud));
+    /// assert!(cells.iter().any(|&(_, last)| last.index() < FeatureProcess::Nursery.index()));
+    /// ```
+    #[must_use]
+    pub fn cells_near(
+        galaxy: &Galaxy,
+        centre: &GalacticPosition,
+        radius: LightYears,
+    ) -> Vec<(FeatureCell, FeatureProcess)> {
         let [cx, cy, cz] = centre.to_light_years_f64();
         let reach = radius.value() + MAX_FEATURE_REACH.value();
         let range = |c: f64| {
@@ -687,7 +751,7 @@ impl FeatureCatalogue {
         };
         let (x, y, z) = (range(cx), range(cy), range(cz));
         let farthest = FeatureProcess::ALL.map(|process| farthest_reach(galaxy, process).value());
-        let mut found = Vec::new();
+        let mut cells = Vec::new();
         for i in x.0..=x.1 {
             for j in y.0..=y.1 {
                 for k in z.0..=z.1 {
@@ -705,24 +769,11 @@ impl FeatureCatalogue {
                         .rev()
                         .find(|p| distance <= radius.value() + farthest[p.index()] + NEAR_MARGIN_LY)
                         .unwrap_or(FeatureProcess::Cloud);
-                    let contents = if last == FeatureProcess::Cloud {
-                        cache.contents(galaxy, cell)
-                    } else {
-                        cache.contents_through(galaxy, cell, last)
-                    };
-                    debug_assert!(
-                        contents.holds(last),
-                        "a feature cell cache lent {:?} without the {last} it was asked for",
-                        cell.to_array()
-                    );
-                    found.extend(contents.features().iter().copied().filter(|f| {
-                        f.position.distance_to(centre).value() / METRES_PER_LIGHT_YEAR
-                            <= radius.value() + f.reach.value()
-                    }));
+                    cells.push((cell, last));
                 }
             }
         }
-        found.into_iter()
+        cells
     }
 
     /// Every feature of `process` in the galaxy, cell by cell over all 32,768 cells in the order

@@ -16,7 +16,9 @@
 //! [`ExtinctionMapService`] into the same raw type, quantised by [`quantise_map_with_floor`]
 //! (plan 07, P07.T10.a). [`SharedSightlineCache`] holds the lines of sight the `extinction`
 //! request marches (P07.T10.c). [`SharedFeatureCellCache`] holds plan 09's feature cells and
-//! [`SharedClusterModelCache`] their interiors (P09.T40.a). A sky's caps, census, band and limit
+//! [`SharedClusterModelCache`] their interiors (P09.T40.a), and [`served_range_query`] generates a
+//! cold range query's cells into those caches on the pool's workers before it walks them. A sky's
+//! caps, census, band and limit
 //! map run as bulk jobs, as far as its [`SkyCaps`] reach, each census cell's bright subset kept in
 //! the sky's own cell cache, and each galaxy's sky tables built once on the pool and kept in a cache
 //! of their own (rendering plan R06).
@@ -32,6 +34,7 @@ mod float_mode;
 mod galaxies;
 mod key;
 mod pool;
+mod range;
 mod sightlines;
 mod single_flight;
 pub(crate) mod sky;
@@ -63,6 +66,7 @@ pub use pool::{
     BulkGate, CpuPool, JobError, JobReceiver, PoolCounters, Priority, ShutDownPoolError,
     StartPoolError, SubmitJobError,
 };
+pub use range::{RangeCaches, ServedQuery, served_range_query};
 pub use sightlines::{LineGas, SharedSightlineCache, SightlineMarcher};
 pub use single_flight::{Flight, SingleFlight};
 pub use sky::{ForceSkyCapsError, SkyCaps, SkyTablesSource};

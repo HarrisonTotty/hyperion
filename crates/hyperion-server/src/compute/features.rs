@@ -119,6 +119,17 @@ impl SharedFeatureCellCache {
         self.cells.counters()
     }
 
+    /// Whether the cache holds `cell` of the galaxy `galaxy` names through at least `last`
+    /// ([`FeatureCellContents::holds`]), without counting a lookup or marking a use: what a served
+    /// query asks before it generates its cells ahead of its lookups
+    /// ([`served_range_query`](super::served_range_query); P09.T40.a).
+    #[must_use]
+    pub fn holds(&self, galaxy: GalaxyKey, cell: FeatureCell, last: FeatureProcess) -> bool {
+        self.cells
+            .peek(&(galaxy, cell))
+            .is_some_and(|contents| contents.holds(last))
+    }
+
     /// Contents of `cell` in `galaxy`, the galaxy `key` names, that hold its processes up to
     /// `last`: the cache's if they hold them, or generated through `last` and stored
     /// ([`FeatureCatalogue::cell_through`]; the whole cell for [`FeatureProcess::Cloud`]).
