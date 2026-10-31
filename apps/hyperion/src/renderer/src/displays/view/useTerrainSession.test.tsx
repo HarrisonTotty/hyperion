@@ -263,7 +263,8 @@ describe("useTerrainSession (R10.T16.a)", () => {
       choice: { kind: "server", universe: UNIVERSE, onSurface: feed.onSurface },
       engine,
     });
-    expect([result.current === null, workers.length]).toEqual([false, 2]);
+    // Its two bake workers and its readout worker (R10.T12.c).
+    expect([result.current === null, workers.length]).toEqual([false, 3]);
   });
 
   it("asks a server session's fields of the link", async () => {
@@ -355,6 +356,7 @@ describe("useTerrainSession (R10.T16.a)", () => {
       [
         [true, 0, 0],
         [true, 0, 0],
+        [true, 0, 0],
       ],
       0,
     ]);
@@ -391,7 +393,7 @@ describe("useTerrainSession (R10.T16.a)", () => {
     rerender({ choice, engine });
     expect([result.current === first, workers.map((w) => w.terminated)]).toEqual([
       false,
-      [true, true, false, false],
+      [true, true, true, false, false, false],
     ]);
   });
 
@@ -404,7 +406,7 @@ describe("useTerrainSession (R10.T16.a)", () => {
     });
     unmount();
     expect([workers.map((w) => w.terminated), recorded.life, recorded.feed.listening]).toEqual([
-      [true, true],
+      [true, true, true],
       { opened: 1, closed: 1 },
       0,
     ]);

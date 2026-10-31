@@ -228,7 +228,8 @@ describe("the terrain session's level tables and lanes for a measurement (R10.T1
     lane?.request({ key, priority: 1, forced: false });
     const bakes = h.workers.flatMap((w) => w.pendingBakes);
     lane?.terminate();
-    expect([h.workers.length, bakes.map((b) => [b.key, b.settings])]).toEqual([2, [[key, LANE]]]);
+    // Its two bake workers and its readout worker (R10.T12.c).
+    expect([h.workers.length, bakes.map((b) => [b.key, b.settings])]).toEqual([3, [[key, LANE]]]);
   });
 
   it("gives neither once disposed", async () => {

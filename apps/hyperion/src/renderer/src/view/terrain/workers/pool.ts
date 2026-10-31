@@ -37,7 +37,10 @@
  *
  * A body's coarse class map for R07's disc (plan R10, T10.d) is asked of one worker
  * ({@link HeightWorkerPool.classMap}), after the blocks posted before it, which it reads, and so is a
- * view's terrain readout (plan R10, T12; {@link HeightWorkerPool.groundReadout}).
+ * view's terrain readout (plan R10, T12; {@link HeightWorkerPool.groundReadout}). A pool made with
+ * a readout worker ({@link HeightWorkerPoolOptions.readoutWorker}; plan R10, R10.T12.c) runs one more
+ * worker that takes every field and no bake, and asks the readouts of it, so that a readout never
+ * waits behind a worker's two bakes in flight; the class maps stay with the bake workers.
  */
 
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
@@ -125,6 +128,13 @@ export interface HeightWorkerPoolOptions {
    * {@link HeightWorkerPool.reprioritise} and {@link HeightWorkerPool.cancelStale} throw.
    */
   readonly bake?: BakeSettings;
+  /**
+   * Whether to run one more worker beside {@link HeightWorkerPoolOptions.workers}, which takes every
+   * body's field and never a bake, and of which every terrain readout is asked (plan R10,
+   * R10.T12.c): the terrain session's pool, whose readout the `BASELINE` row asks at once. False
+   * unless given; a pool without one asks its readouts of the least loaded bake worker.
+   */
+  readonly readoutWorker?: boolean;
 }
 
 /** A request given up because its bake failed, for the metrics and the console. */
@@ -234,6 +244,11 @@ type PendingQuery =
     };
 
 interface Slot {
+  /**
+   * Whether it bakes: false for the readout worker (R10.T12.c), which is given no bake and answers
+   * the readouts, and the class maps too once every bake worker is given up.
+   */
+  readonly bakes: boolean;
   worker: WorkerLike;
   readonly onMessage: (event: MessageEvent<HeightWorkerReply>) => void;
   readonly onError: () => void;
@@ -321,8 +336,8 @@ export interface HeightWorkerLane {
    */
   readonly waitingCount: number;
   /**
-   * Whether the pool can bake nothing more: every worker given up (`lostWorkers` equal to the
-   * pool's size), R10.T16.b's fault.
+   * Whether the pool can bake nothing more: every bake worker given up (`lostWorkers` equal to the
+   * pool's size, its readout worker apart), R10.T16.b's fault.
    */
   readonly unavailable: boolean;
   /** Whether the lane, or its pool, was terminated. */
@@ -413,8 +428,11 @@ export class HeightWorkerPool {
     }
     this.createWorker = opts.createWorker;
     this.own = opts.bake === undefined ? null : this.addLane(opts.bake);
-    for (let n = 0; n < opts.workers; n += 1) {
+    // The readout worker first, the bake workers after it, as they were made before it.
+    const readout = opts.readoutWorker === true ? 1 : 0;
+    for (let n = 0; n < opts.workers + readout; n += 1) {
       const slot: Slot = {
+        bakes: n >= readout,
         worker: this.createWorker(),
         onMessage: (event) => {
           this.receive(slot, event.data);
@@ -457,17 +475,25 @@ export class HeightWorkerPool {
     return n;
   }
 
-  /** How many workers the pool runs, given up or not: its size. */
+  /** How many bake workers the pool runs, given up or not: its size, its readout worker apart. */
   get workerCount(): number {
+    return this.slots.filter((s) => s.bakes).length;
+  }
+
+  /**
+   * How many workers the pool runs, given up or not, its readout worker among them: every one is
+   * posted every body's field.
+   */
+  get slotCount(): number {
     return this.slots.length;
   }
 
   /**
-   * How many workers were given up after failing {@link MAX_CONSECUTIVE_WORKER_FAILURES} times in a
-   * row; when it equals the pool's size, nothing more is baked.
+   * How many bake workers were given up after failing {@link MAX_CONSECUTIVE_WORKER_FAILURES} times
+   * in a row; when it equals the pool's size, nothing more is baked.
    */
   get lostWorkers(): number {
-    return this.slots.filter((s) => s.lost).length;
+    return this.slots.filter((s) => s.bakes && s.lost).length;
   }
 
   /**
@@ -759,8 +785,9 @@ export class HeightWorkerPool {
   /**
    * A view's terrain readout of `body` where `query`'s line of sight meets its ground (plan R10,
    * T12), answered by one worker over the field it holds of the body with the body's detail seed
-   * `detailSeed`, as {@link HeightWorkerPool.classMap} is: the least loaded running worker, posted
-   * after every block posted so far, and asked again of a failed worker's replacement.
+   * `detailSeed`, as {@link HeightWorkerPool.classMap} is: the readout worker where the pool runs one
+   * (R10.T12.c), else the least loaded running worker, posted after every block posted so far, and
+   * asked again of a failed worker's replacement.
    *
    * @returns The readout, or `null` where the pool keeps no field of `body`, no worker runs, or the
    *   pool is terminated before the answer; rejected with the module's message where it refused an
@@ -950,7 +977,7 @@ export class HeightWorkerPool {
     }
     for (let load = 0; load < MAX_IN_FLIGHT_PER_WORKER; load += 1) {
       for (const slot of this.slots) {
-        if (slot.inFlight.size !== load || slot.lost) {
+        if (!slot.bakes || slot.inFlight.size !== load || slot.lost) {
           continue;
         }
         const next = this.best();
@@ -1198,13 +1225,19 @@ export class HeightWorkerPool {
   }
 
   /**
-   * Posts a class-map or readout query to the least loaded running worker, or answers `null` with
-   * none.
+   * Posts a class-map or readout query, or answers `null` with no worker running: a readout to the
+   * running readout worker where there is one (R10.T12.c), else, as a class map always, to the
+   * least loaded running bake worker; the readout worker where it alone runs.
    */
   private postQuery(query: PendingQuery): void {
+    const running = this.slots.filter((each) => !each.lost);
+    const readout =
+      query.kind === "ground-readout" ? running.find((each) => !each.bakes) : undefined;
+    const bakers = running.filter((each) => each.bakes);
+    const choices = readout === undefined ? (bakers.length > 0 ? bakers : running) : [readout];
     let slot: Slot | null = null;
-    for (const each of this.slots) {
-      if (!each.lost && (slot === null || loadOf(each) < loadOf(slot))) {
+    for (const each of choices) {
+      if (slot === null || loadOf(each) < loadOf(slot)) {
         slot = each;
       }
     }

@@ -216,8 +216,9 @@ export interface TerrainSessionOptions {
    */
   readonly createWorker: () => WorkerLike;
   /**
-   * How many height workers its pool runs, at least one; Design note 11's default
-   * ({@link defaultHeightWorkers} of `navigator.hardwareConcurrency`) where absent.
+   * How many height workers its pool runs to bake, at least one; Design note 11's default
+   * ({@link defaultHeightWorkers} of `navigator.hardwareConcurrency`) where absent. The pool runs a
+   * readout worker beside them (`HeightWorkerPoolOptions.readoutWorker`; R10.T12.c).
    */
   readonly workers?: number;
   /**
@@ -812,7 +813,6 @@ export class TerrainSession {
   readonly #wireHanded = new Map<ViewId, ReadonlySet<BodyIdHex>>();
   readonly #faultListeners = new Set<() => void>();
   readonly #unsubscribe: ReadonlyArray<() => void>;
-  readonly #workerCount: number;
   readonly #horizonMap: HorizonLayerSetting;
   #faults: ReadonlyMap<ViewId, TerrainFault> = NO_FAULTS;
   /** The terrain's fault by its first cause raised, which stands for the session; `null` before. */
@@ -829,12 +829,15 @@ export class TerrainSession {
     this.#linkUp = options.linkUp;
     this.#engine = options.engine;
     this.#textures = new SessionTextures(options.engine);
-    this.#workerCount =
+    const workers =
       options.workers ?? defaultHeightWorkers(globalThis.navigator.hardwareConcurrency);
     this.#horizonMap = options.horizonMap ?? "baked";
+    // A readout worker beside the bake workers, so that the readout, which a choice of BASELINE
+    // asks at once, never waits behind their bakes (R10.T12.c).
     const pool = new HeightWorkerPool({
-      workers: this.#workerCount,
+      workers,
       createWorker: options.createWorker,
+      readoutWorker: true,
     });
     this.#pool = pool;
     // The store posts through the session, so that the workers' dropping a field reaches it.
@@ -916,9 +919,12 @@ export class TerrainSession {
     return this.#store.wanted;
   }
 
-  /** How many height workers its one pool runs (Design note 11's count by default). */
+  /**
+   * How many height workers its one pool runs, each posted every field: its bake workers (Design
+   * note 11's count by default) and its readout worker (R10.T12.c).
+   */
   get workerCount(): number {
-    return this.#workerCount;
+    return this.#pool.slotCount;
   }
 
   /**
@@ -954,7 +960,7 @@ export class TerrainSession {
    * first cause: every view that hands a body over, in either style, and every view whose report
    * names a body whose terrain readout it states (`TerrainViewReport.readoutBody`, R10.T12) unless
    * that body's terrain is not modelled (decision-r10-t12-commit3 §6), once
-   * every height worker is lost (`TERRAIN_NOT_AVAILABLE`) or a guarded computation has kept failing
+   * every bake worker is lost (`TERRAIN_NOT_AVAILABLE`) or a guarded computation has kept failing
    * (`TERRAIN_COMPUTATION_FAILED`, {@link TerrainSession.failComputation}); the same object until
    * it changes, for `useSyncExternalStore`.
    */

@@ -306,7 +306,9 @@ describe("the terrain session's fields (R10.T16.a)", () => {
     await holdMoon(h);
     h.session.noteView(PRIMARY, viewAt(7e7));
     h.session.step();
+    // The readout worker's copy too (R10.T12.c).
     expect(h.workers.map((w) => w.fieldMessages.at(-1)?.kind)).toEqual([
+      "field-release",
       "field-release",
       "field-release",
     ]);
@@ -342,7 +344,7 @@ describe("the terrain session's fields (R10.T16.a)", () => {
       [...h.session.wanted],
       h.socket().requestsOfKind("surface_field").length,
       h.workers.map((w) => w.fieldMessages.filter((m) => m.kind === "field-release").length),
-    ]).toEqual([[MOON], 1, [0, 0]]);
+    ]).toEqual([[MOON], 1, [0, 0, 0]]);
   });
 
   describe("a body held by one view of two", () => {
@@ -648,10 +650,11 @@ describe("the terrain session's pool, memory and teardown (R10.T16.a)", () => {
     h.session.noteView(PRIMARY, viewAt(5e6));
     h.session.noteView(INSTRUMENT, viewAt(8e6, "wireframe", { centreM: FIXTURE_PLANET_CENTRE_M }));
     h.session.step();
-    // Each view's local body, in the order the scene lists them.
+    // Each view's local body, in the order the scene lists them; three bake workers and the
+    // readout worker (R10.T12.c).
     expect([h.workers.length, h.session.workerCount, [...h.session.wanted]]).toEqual([
-      3,
-      3,
+      4,
+      4,
       [PLANET, MOON],
     ]);
   });
@@ -662,8 +665,9 @@ describe("the terrain session's pool, memory and teardown (R10.T16.a)", () => {
     for (const worker of h.workers) {
       answerBlock(worker, 0, blockChange(5, [0, 2]), 50);
     }
+    // Three copies of 50 bytes: the readout worker holds one too (R10.T12.c).
     expect(h.session.memory()).toEqual({
-      workerFieldBytes: 100,
+      workerFieldBytes: 150,
       keptFieldBytes: 50,
       // One byte a level-5 cell a face (Design note 12).
       gpuBytes: new Map([["coarse-field-gpu", 6 * 4 ** 5]]),
@@ -716,6 +720,7 @@ describe("the terrain session's pool, memory and teardown (R10.T16.a)", () => {
       [
         [true, 0, 0],
         [true, 0, 0],
+        [true, 0, 0],
       ],
       1,
       0,
@@ -753,6 +758,7 @@ describe("the terrain session's pool, memory and teardown (R10.T16.a)", () => {
     it("releases the fields before the workers stop", async () => {
       const { h } = await disposedHolding();
       expect(h.workers.map((w) => [w.fieldMessages.at(-1)?.kind, w.terminated])).toEqual([
+        ["field-release", true],
         ["field-release", true],
         ["field-release", true],
       ]);

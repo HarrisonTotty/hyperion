@@ -1212,3 +1212,130 @@ describe("the height-worker pool's ground readouts (R10.T12)", () => {
     await expect(asked).rejects.toThrow(/a ground-readout query of .* was answered class-map/u);
   });
 });
+
+/** A pool of `workers` bake workers and a readout worker, holding fields, as the session's is. */
+function withReadoutWorker(workers: number): {
+  readonly pool: HeightWorkerPool;
+  readonly created: ScriptedHeightWorker[];
+} {
+  const created: ScriptedHeightWorker[] = [];
+  const pool = new HeightWorkerPool({
+    workers,
+    readoutWorker: true,
+    createWorker: () => {
+      const worker = new ScriptedHeightWorker();
+      created.push(worker);
+      return worker;
+    },
+  });
+  return { pool, created };
+}
+
+describe("the height-worker pool's readout worker (R10.T12.c)", () => {
+  const SEED = "0123456789abcdef";
+
+  /** The moon's field held and a lane's ten requests sent, each bake worker two deep. */
+  function busy(): ReturnType<typeof withReadoutWorker> {
+    const made = withReadoutWorker(2);
+    made.pool.fieldInit(MOON, blockOf(8, 0));
+    made.pool.lane(laneSettings()).reprioritise(Array.from({ length: 10 }, (_, i) => req(i, 1)));
+    return made;
+  }
+
+  /** Fails the worker in `created`'s place `n`, and then each replacement, until it is given up. */
+  function giveUp(created: ScriptedHeightWorker[], n: number): void {
+    workerAt(created, n).fail();
+    for (let round = 1; round < MAX_CONSECUTIVE_WORKER_FAILURES; round += 1) {
+      workerAt(created, created.length - 1).fail();
+    }
+  }
+
+  it("runs one worker more than its bake workers, which its size leaves out", () => {
+    const { pool, created } = withReadoutWorker(2);
+    expect([pool.workerCount, pool.slotCount, created.length]).toEqual([2, 3, 3]);
+  });
+
+  it("posts every field to the readout worker too", () => {
+    const { pool, created } = withReadoutWorker(2);
+    pool.fieldInit(MOON, blockOf(8, 1));
+    expect(created.map((w) => w.fieldMessages.map((m) => m.kind))).toEqual([
+      ["field-init"],
+      ["field-init"],
+      ["field-init"],
+    ]);
+  });
+
+  it("bakes nothing on the readout worker, made first, each bake worker two deep", () => {
+    const { created } = busy();
+    expect(created.map((w) => w.pendingBakes.length)).toEqual([0, 2, 2]);
+  });
+
+  it("asks a readout of the readout worker at once while the bake workers hold their bakes, and answers with it", async () => {
+    const { pool, created } = busy();
+    const asked = pool.groundReadout(MOON, SEED, READOUT_QUERY);
+    expect(created.map((w) => w.pendingGroundReadouts.length)).toEqual([1, 0, 0]);
+    answerReadout(workerAt(created, 0), NOT_SURVEYED);
+    await expect(asked).resolves.toBe(NOT_SURVEYED);
+  });
+
+  it("asks a class map of the least loaded bake worker, keeping the readout worker for the readouts", async () => {
+    const { pool, created } = withReadoutWorker(2);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const map = pool.classMap(MOON, SEED);
+    expect(created.map((w) => w.pendingClassMaps.length)).toEqual([0, 1, 0]);
+    answerClassMap(workerAt(created, 1), null);
+    await expect(map).resolves.toBeNull();
+  });
+
+  it("asks a readout out of a failed readout worker's replacement again, once the fields are posted to it", async () => {
+    const { pool, created } = withReadoutWorker(2);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const asked = pool.groundReadout(MOON, SEED, READOUT_QUERY);
+    workerAt(created, 0).fail();
+    const replacement = workerAt(created, 3);
+    expect(replacement.received.map((m) => m.kind)).toEqual(["field-init", "ground-readout"]);
+    answerReadout(replacement, NOT_SURVEYED);
+    await expect(asked).resolves.toBe(NOT_SURVEYED);
+  });
+
+  it("moves a readout out to a bake worker once the readout worker's place is given up", async () => {
+    const { pool, created } = withReadoutWorker(2);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const asked = pool.groundReadout(MOON, SEED, READOUT_QUERY);
+    giveUp(created, 0);
+    expect(workerAt(created, 1).pendingGroundReadouts).toHaveLength(1);
+    answerReadout(workerAt(created, 1), NOT_SURVEYED);
+    await expect(asked).resolves.toBe(NOT_SURVEYED);
+  });
+
+  it("asks a readout of the least loaded bake worker once the readout worker's place is given up", async () => {
+    const { pool, created } = withReadoutWorker(2);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    giveUp(created, 0);
+    const map = pool.classMap(MOON, SEED);
+    const asked = pool.groundReadout(MOON, SEED, READOUT_QUERY);
+    // The class map loads the first bake worker; the readout goes to the second.
+    expect([1, 2].map((n) => workerAt(created, n).pendingGroundReadouts.length)).toEqual([0, 1]);
+    answerReadout(workerAt(created, 2), NOT_SURVEYED);
+    answerClassMap(workerAt(created, 1), null);
+    await expect(asked).resolves.toBe(NOT_SURVEYED);
+    await expect(map).resolves.toBeNull();
+  });
+
+  it("asks a class map of the readout worker once every bake worker's place is given up", async () => {
+    const { pool, created } = withReadoutWorker(1);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    giveUp(created, 1);
+    const map = pool.classMap(MOON, SEED);
+    expect(workerAt(created, 0).pendingClassMaps).toHaveLength(1);
+    answerClassMap(workerAt(created, 0), null);
+    await expect(map).resolves.toBeNull();
+  });
+
+  it("can bake nothing more once its bake workers are given up, whatever the readout worker", () => {
+    const { pool, created } = withReadoutWorker(1);
+    const lane = pool.lane(laneSettings());
+    giveUp(created, 1);
+    expect([lane.unavailable, workerAt(created, 0).terminated]).toEqual([true, false]);
+  });
+});

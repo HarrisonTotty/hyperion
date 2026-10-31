@@ -186,9 +186,10 @@ describe("DescentSpike with the measured sizes (R10.T14.b)", () => {
   it("makes its session once across its renders, the workers' wrapped factory stable", async () => {
     fakeFramesAndTimeouts();
     stubLayout();
-    // One worker: a session made anew at a render would start another.
+    // One bake worker and the readout worker (R10.T12.c): a session made anew at a render would
+    // start two more.
     const { sizes } = renderSized("low", "wireframe");
     await play(6);
-    expect(sizes.report().bakes.workersMade).toBe(1);
+    expect(sizes.report().bakes.workersMade).toBe(2);
   });
 });

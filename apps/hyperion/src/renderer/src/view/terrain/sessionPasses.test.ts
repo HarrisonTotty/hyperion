@@ -485,7 +485,8 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
           : null,
       )[0],
     ).toEqual([MOON, "baked"]);
-    expect(h.workers.length).toBe(2);
+    // Its two bake workers and its readout worker (R10.T12.c).
+    expect(h.workers.length).toBe(3);
   });
 
   it.each([
@@ -1323,10 +1324,8 @@ describe("the terrain session's wireframe pass (R10.T11; decision D10)", () => {
   it("bakes through a lane of the session's one pool, starting no worker of its own", async () => {
     const h = await harness();
     await handedOverBy(h, [[PRIMARY, wireAt(5e6)]]);
-    expect([h.workers.length, h.workers.every((w) => w.pendingBakes.length > 0)]).toEqual([
-      2,
-      true,
-    ]);
+    // The readout worker first, which bakes nothing, then the two bake workers (R10.T12.c).
+    expect(h.workers.map((w) => w.pendingBakes.length > 0)).toEqual([false, true, true]);
   });
 
   it("hands a photorealistic view's body to its lit pass alone, never the wireframe's", async () => {
@@ -1356,13 +1355,13 @@ describe("a body handed over in both styles at once (R10.T11)", () => {
     h.session.step();
   }
 
-  it("has both passes, on the one pool's two workers", async () => {
+  it("has both passes, on the one pool's two bake workers and its readout worker", async () => {
     const h = await harness();
     await handedOverBy(h, BOTH);
     expect([[...h.session.passBodies], [...h.session.wirePassBodies], h.workers.length]).toEqual([
       [MOON],
       [MOON],
-      2,
+      3,
     ]);
   });
 
