@@ -196,9 +196,18 @@ export type TemperatureProfile =
       readonly kind: "nodes"; // P14.T24.e's published adiabat, the ground first (R08.T3.e)
       readonly nodes: ReadonlyArray<ProfileNode>; // lib/system/model.ts's
       readonly skinK: number;
+    }
+  | {
+      readonly kind: "envelope"; // P14.T24.d's: Guillot above the join, the adiabat below (R08.T16.a)
+      readonly grey: GuillotProfile; // lib/system/model.ts's
+      readonly internalK: number;
+      readonly irradiationK: number;
+      readonly gravityMS2: number; // the bulk section's, at which the grey τ is read
+      readonly nodes: ReadonlyArray<ProfileNode>; // from the join down
     };
 export function temperatureAt(profile: TemperatureProfile, pressurePa: number): number; // the sim's formula, copied
-export function hydrostaticColumn(input: ColumnInput): AtmosphereColumn; // f64, DN 3, at g_ref
+export function hydrostaticColumn(input: ColumnInput): AtmosphereColumn; // f64, DN 3, at g_ref;
+// ColumnInput's optional topPa and levelsPa: a gas envelope's own top and added levels (R08.T16.a)
 export const ATMOSPHERE_OPTICS_VERSION: number; // client caches key on it, not the generator
 ```
 
@@ -312,7 +321,10 @@ The worker is `optics.worker.ts`, by the client's rule that worker files are `*.
 
 ```ts
 export function assembleMedium(input: BodyAtmosphereInput): AssembledMedium; // the column on the
-// surface's `verticalStructure` (`nodes`, R08.T3.e), isothermal at T_s where it is not modelled
+// surface's `verticalStructure` (`nodes`, R08.T3.e), isothermal at T_s where it is not modelled;
+// a gas envelope's medium under `AssembleOptions.envelopes` (R08.T16.a.1, off until T16.a.2), with
+// `DrawnMedium.envelope` its floor, column pressures and dropped modes, its cover's
+// `BodyCover.floorAltitudeM` the router's split, `RegimeThermal.albedo` its self-luminous cut's
 export interface AssembledMedium {
   readonly medium: AtmosphereMedium | undefined;
   readonly labels: ReadonlyArray<AtmosphereLabel>;
@@ -6063,6 +6075,36 @@ Acceptance: `pnpm test`.
     under
     [The scales the view spans](../../brainstorming/rendering-and-planets.md#the-scales-the-view-spans),
     is the same figure at width ÷ field.
+
+  - _The split_ (research's lean, ruled by main, 2026-10-31). T16.a is built in two parts.
+    - **T16.a.1, what to build:**
+      - the medium from an `ok` envelope, with no ground: its column the envelope's profile,
+        Guillot's grey T(p) above the join and the adiabat's nodes below; the record's 1-bar
+        composition, μ and `c_p` ÷ R; its absorbers the record's slabs; its hazes and decks'
+        modes at the pressures their input states, each laid by its published profile,
+        (p ÷ p_b)^f;
+      - the floor, the shallowest level at which τ(550) from the top, the gas's and every mode's
+        at its coverage, reaches `CLOUD_DECK_SPLIT_OPTICAL_DEPTH`, whether a deck or the gas sets
+        it, below which T15's deck bakes the medium no deeper than τ(550) 1,000 from the top;
+      - the straddling cut: a mode that straddles the floor enters with the τ its profile puts
+        above it, cut there and not rescaled; one whose top lies below the floor, or of no τ with
+        its top below it, takes no term and no label; the column's top lies above every mode it
+        reads;
+      - the hand giant fixture on Jupiter's figure and rotation (f = 0.065), its medium built the
+        same way from a hand envelope;
+      - labels: `atmosphereNotYetModelled` goes for an `ok` envelope; a mode not modelled above
+        the floor keeps its labelled reason; the stand-in labels follow `materials.ts`'s depth
+        rule, none below τ 10.
+    - **Not this lane's (T16.a.2, after R08.T15.b.2):** `classifyRegime` routing a gas envelope to
+      its floor's split, under `decision-r08-t11-frame.md`'s blocker; drawing it in the view inside
+      10⁹ m, and the limb at 2.2 × 10⁸ m; `just test-render`; the generated re-run;
+      research-r08-t16a-widths' charged-partner follow-up (e⁻ and ions unbounded, before a generated
+      ultra-hot giant reaches the client). T16.b.2 (the Jupiter disc at 10⁹ m) follows T16.a.2. Any
+      sim change: the drawn profile exponent (P14.T52.g) and count (xii)'s guard are lane
+      p14-t52g's; the hot giants' dayside column is a plan 14 question.
+
+  _T16.a.1 built 2026-10-31_ (Risks, "Deviations in T16.a.1, as built").
+
 - **R08.T16.b `DiscReflectanceTable`.** `discReflectance.ts` bakes it spectrally from the medium
   and tables, one layer a latitude band (Design note 17), reading R08.T14.f's thick table, the
   polarisation correction in it or alone, as the march does (`shaders/thickRead.wgsl`). This task
@@ -23987,3 +24029,44 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     does not model it.
   - The shared T3 acceptance selects `column.test.ts`; the assembly's tests (`assemble.test.ts`)
     run under `pnpm test`.
+- **Deviations in T16.a.1, as built** (2026-10-31; `envelope.ts`, `assemble.ts`, `column.ts`; what
+  T16.a.2 consumes; measurements in the lane's outbox):
+  - _The switch_ (lean, 2026-10-31; a question to main): `AssembleOptions.envelopes`, off by
+    default, gives an `ok` envelope its medium; off, the envelope keeps `atmosphereNotYetModelled`
+    and no medium. Drawn now, a giant would go by the thin path without its volatile decks (below)
+    and T16.b.1's disc would replace R07's far disc with it. T16.a.2 sets it, with `lineSpeciesOf`'s
+    new `options`.
+  - _The volatile decks are not drawn_ (a blocker for T16.a.2's picture): the record's σ_g 2
+    log-normals reach, by `sizeRange`'s r⁶ tail, past Mie's x = 20,000 (H₂O) and the crystal
+    tables' largest size (NH₃, NH₄SH), so `aerosolTermInRange` drops them with reasons. The hand
+    Jupiter's decks take narrow gamma sizes.
+  - _The profile_: `TemperatureProfile`'s `envelope` (`grey`, `internalK`, `irradiationK`,
+    `gravityMS2`, `nodes`), bit for bit against `planetary/envelope_profile`
+    (`test/envelopeProfileGolden.ts`); its ∫ T d ln p by Gauss–Legendre above the join. `ColumnInput`
+    gains `topPa` and `levelsPa`.
+  - _The column and datum_: the base where the molecular term's green τ reaches 1,100
+    (`ENVELOPE_BASE_OPTICAL_DEPTH`, at most 100 kbar), so that the deck reads to τ 1,000 inside it;
+    the top under every mode and slab; levels at the floor and each entering mode's ends, 10⁻⁸ in
+    ln p beyond each, and through steep profiles. The medium stands on the 1-bar figure lowered by
+    the 1-bar level's h\* (`loweredFigure`), its gravity the lowered figure's.
+  - _The floor_ is the τ rule's at 550 nm (Thomson left out), given the router by
+    `BodyCover.floorAltitudeM` (absent, `envelopeFloorM`'s green reading, for kept scenes);
+    `DrawnMedium.envelope` (`DrawnEnvelope`) carries it, the column's pressures and the dropped modes.
+  - _The gases' absorber layers run from the floor up_ (lean, 2026-10-31): the deck reads the gas's
+    scattering alone below it, and a layer's one temperature is the visible column's.
+  - _No ground_: black; `selfLuminousOf` takes an `albedo` (`RegimeThermal.albedo`, the input's for
+    an envelope) at σ T_irr⁴ (`envelopeStellarFluxWM2`); the drawn temperature is held at the
+    floor's below it. The hot Jupiter is self-luminous, so T16.a.2's routing meets round 1's finding
+    (a deck table's body drawn by the thermal forms, which read no deck).
+  - _The protocol Jupiter's deep decks_: only Cr and MnS lie below its floor and are dropped. KCl's,
+    ZnS's and Na₂S's tails enter (KCl's 0.071 of τ(550); ZnS and Na₂S are then refused by their
+    optics' size range, with reasons), and the five liquid refractories of no τ, their tops at
+    4.4–24 bar above the floor, keep their not-modelled reasons, though their profiles put some
+    10⁻⁷ of their columns above it (a question to main).
+  - _The 25 shape_: no generator-25 fixture exists, so the hot Jupiter's Fe τ is worked back from
+    the research's 188.4 − 134.7. The record's `c_p` ÷ R is not read: display-only, and the
+    adiabat's nodes carry it.
+  - _By hand_ (`HYPERION_SLOW_TESTS=1 … assembleEnvelopeDeck.test.ts`, about 80 s): the deck read
+    to τ 1,000 (the fast tests hold the column past it), the hand Jupiter's three bands baked, and
+    the hot Jupiter's reflectance printed. T16.a.2's tests on the protocol Jupiter's drawn decks
+    wait on the optics above.
