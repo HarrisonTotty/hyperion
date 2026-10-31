@@ -75,7 +75,9 @@ export interface DiscReflectanceTable {
    * The scale of the air's own light (R08.T18.b), cd m⁻² times π: a self-luminous medium's table
    * holds, past its bands' light slots, one layer a band of π L_th ÷ this in r, g and b, L_th the
    * air's thermal emission and its scattering seen at each view cosine, the same at every sun row
-   * and azimuth; absent for a medium that is not self-luminous.
+   * and azimuth; absent for a medium that is not self-luminous. It is π L_th's largest magnitude,
+   * so the layer's values lie in [−1, 1], signed as the halves hold them: a cool glow's green and
+   * blue are negative, out of Rec. 709's gamut, and are kept so.
    */
   readonly thermalScale?: number;
 }

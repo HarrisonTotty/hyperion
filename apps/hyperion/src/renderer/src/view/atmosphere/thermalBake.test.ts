@@ -2,7 +2,15 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { R06_SOLAR_BAKE_SPECTRUM } from "./earth";
 import type { AtmosphereMedium } from "./medium";
-import { blackBodyLuminance, type MediumTemperature } from "./thermalSource";
+import {
+  blackBodyLuminance,
+  type MediumTemperature,
+  packThermalSource,
+  THERMAL_SOURCE_HEIGHTS,
+  type ThermalRgb,
+  thermalScatteringInto,
+  thermalSourceOf,
+} from "./thermalSource";
 import {
   bakeMultipleScattering,
   type MsSourceTable,
@@ -82,5 +90,31 @@ describe("the thick bake's scattered thermal light (R08.T18.b)", () => {
 
   it("bakes the same sunlit J beside its thermal light as without it", () => {
     expect(baked().slots[0]?.values).toEqual(tableOf().slots[0]?.values);
+  }, 120_000);
+});
+
+describe("the thick bake's signed thermal light (R08.T18.b)", () => {
+  it("keeps a cool column's negative blue through J_th, the source's packing and its read", () => {
+    // At 1,500 K B̃'s blue is negative (Rec. 709's matching functions' negative lobe).
+    const cool: MediumTemperature = {
+      heightsM: Float64Array.of(0, 100_000),
+      temperaturesK: Float64Array.of(1_500, 1_500),
+    };
+    const thermal = baked(cool).thermal;
+    if (thermal === undefined) {
+      throw new Error("a column with a temperature bakes its thermal light");
+    }
+    const want = blackBodyLuminance(1_500)[2];
+    const ground = thermal.values[2] ?? Number.NaN;
+    expect([want < 0, Math.abs(ground / want - 1) < 1e-4]).toEqual([true, true]);
+    // As the kernels read it (`thermalSource.wgsl`): B̃ at the ground's height, then the band's J_th
+    // after its altitudes, each the same signed f32.
+    const source = thermalSourceOf(cool, HOT.topHeightM, [thermal]);
+    const packed = packThermalSource(source);
+    const firstJ = 1 + THERMAL_SOURCE_HEIGHTS + thermal.altitudesM.length;
+    expect([packed[1 * 4 + 2], packed[firstJ * 4 + 2]]).toEqual([Math.fround(want), ground]);
+    const read: ThermalRgb = [0, 0, 0];
+    thermalScatteringInto(source, [0], 1, 0, 0.3, read);
+    expect(Math.abs(read[2] / want - 1)).toBeLessThan(1e-4);
   }, 120_000);
 });

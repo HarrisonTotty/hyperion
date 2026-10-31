@@ -4,7 +4,8 @@
  * kernels' air forms against their CPU twin on SwiftShader, for a small disc through the `disc
  * cells` pass's air form, a large disc of four latitude bands, read at each pixel's latitude
  * between them, and a body drawn in the mesh regime; and their forms for emission and air together
- * (R08.T18.b), a glowing magma ocean under the air whose table holds the air's own light.
+ * (R08.T18.b), a glowing magma ocean under the air whose table holds the air's own light, its blue
+ * negative as a cool glow's is.
  *
  * @remarks
  * Each case is planned as the photorealistic frame plans it (`planLitBodies` with its body's disc
@@ -158,14 +159,18 @@ function patternedTable(bands: number, glowing = false): DiscReflectanceTable {
     return { bands, slots: 1, sunFloor: -0.18, values: discTableValuesOf(values) };
   }
   // The air's own light (R08.T18.b): a thermal layer a band past the light slots', in a pattern by
-  // view cosine, the same at every sun row and azimuth, as a bake holds it.
+  // view cosine, the same at every sun row and azimuth, as a bake holds it. Its blue is negative, as
+  // a cool glow's is out of Rec. 709's gamut, so the case checks that the table's halves and the
+  // target keep its sign: a format or an upload that clamped it would put the blue 0.4 of the glow
+  // off the twin's.
   for (let b = 0; b < bands; b += 1) {
     for (let s = 0; s < DISC_SUN_COSINES; s += 1) {
       for (let v = 0; v < DISC_VIEW_COSINES; v += 1) {
         for (let k = 0; k < DISC_AZIMUTHS; k += 1) {
           const at = discTexelIndex(bands + b, s, v, k);
           for (let c = 0; c < 3; c += 1) {
-            values[at + c] = 0.5 + 0.3 * Math.sin(0.61 * v + 1.1 * c + b);
+            const glow = 0.5 + 0.3 * Math.sin(0.61 * v + 1.1 * c + b);
+            values[at + c] = c === 2 ? -0.4 * glow : glow;
           }
         }
       }
@@ -388,7 +393,7 @@ function imageAgreement(
     for (const c of [0, 1, 2] as const) {
       const want = pixel.rgb[c];
       const got = image[at + c] ?? Number.NaN;
-      const error = Math.abs(got - want) / (TEXEL_ABSOLUTE + TEXEL_RELATIVE * want);
+      const error = Math.abs(got - want) / (TEXEL_ABSOLUTE + TEXEL_RELATIVE * Math.abs(want));
       worst = Math.max(worst, Number.isFinite(error) ? error : Number.POSITIVE_INFINITY);
     }
     classes &&= (image[at + 3] ?? Number.NaN) === (pixel.meterClass ?? METER_CLASS.other);
@@ -560,7 +565,7 @@ function casesOf(saturnLighting: SurfaceLightingTables): ReadonlyArray<AirCase> 
       mesh: true,
     },
     {
-      name: "a 96 px glowing body's air at 120°, its ground's emission and the air's own light",
+      name: "a 96 px glowing body's air at 120°, its ground's emission and the air's own light, its blue negative",
       viewport: { widthPx: 128, heightPx: 112 },
       camera: wide,
       figure: sphere(2e9 * Math.sin(48 / (128 / (2 * Math.tan(Math.PI / 6))))),

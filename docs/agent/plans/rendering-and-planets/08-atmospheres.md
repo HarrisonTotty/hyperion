@@ -23856,3 +23856,8 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     T14.d.1's "_The deck's J_ms_"; T14.d.2's rows question and `packThickTable`'s 46 rows.
   - _Pending: the owner's runs._ The UHD 620's deck bake (`deck.bench.ts`); the RTX 3080's (Q) and
     part 14's deck twins.
+  - _Signed formats_ (2026-10-31, research's review of the leans): B̃'s negative green and blue
+    stay unclamped, so every thermal table and target is signed. J_th and the source are `f32`; the
+    disc table and the kernels' targets are `rgba16float`. The disc table's thermal scale is now
+    π L_th's largest magnitude: a glow negative in every value had lost its layer. Tests pin the
+    formats and carry a negative channel through the halves, the packing and part 9's GPU case.

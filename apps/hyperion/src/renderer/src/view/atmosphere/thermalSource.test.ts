@@ -5,13 +5,20 @@ import { type CountingRenderEngine, countingRenderEngine } from "../../test/coun
 import { EARTH_REFERENCE, EARTH_REFERENCE_CURVES, R05_EARTH_REFERENCE } from "./earth";
 import {
   AERIAL_PERSPECTIVE_KERNEL,
+  AERIAL_PERSPECTIVE_THERMAL_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
   RAY_MARCH_KERNEL,
+  RAY_MARCH_SLOTS_THERMAL_KERNEL,
   RAY_MARCH_SLOTS_THICK_KERNEL,
+  RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL,
   RAY_MARCH_THERMAL_KERNEL,
+  RAY_MARCH_THICK_THERMAL_KERNEL,
   SKY_VIEW_KERNEL,
   SKY_VIEW_THERMAL_KERNEL,
+  SKY_VIEW_THICK_THERMAL_KERNEL,
   withThermalSource,
 } from "./hillaire";
+import { DISC_TABLE_FORMAT } from "./discTable";
 import { AtmosphereTables, kernelMedium } from "./tables";
 import type { MsSourceTable } from "./thick/bake";
 import { patternedThickBake } from "../../test/thickTables";
@@ -131,6 +138,30 @@ describe("the per-frame kernels' thermal forms (R08.T18.b)", () => {
       expect(thermal.reference).toContain("thermalPlanckAt(heightM) * view.marchSky.w, absorbing)");
       expect(thermal.reference).toContain("local.planck * (local.absorbing * dtM");
       expect(thermal.reference).toMatch(/let shares = thermalSharesOf\(/u);
+    },
+  );
+
+  it.each([
+    SKY_VIEW_THERMAL_KERNEL,
+    AERIAL_PERSPECTIVE_THERMAL_KERNEL,
+    RAY_MARCH_THERMAL_KERNEL,
+    RAY_MARCH_SLOTS_THERMAL_KERNEL,
+    SKY_VIEW_THICK_THERMAL_KERNEL,
+    AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
+    RAY_MARCH_THICK_THERMAL_KERNEL,
+    RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL,
+  ])(
+    "writes $name's targets and reads its source in signed formats, no unorm or ufloat",
+    (pair) => {
+      // A cool glow's green and blue are negative below about 2,000 K, so every table and target its
+      // light passes through holds signed values.
+      const targets = [...pair.reference.matchAll(/texture_storage_\w+<(\w+)/gu)].map((m) => m[1]);
+      expect(targets.length).toBeGreaterThan(0);
+      for (const format of targets) {
+        expect(format).toMatch(/^rgba(16|32)float$/u);
+      }
+      expect(pair.reference).toContain("var<storage, read> thermalSource : array<vec4f>;");
+      expect(DISC_TABLE_FORMAT).toBe("rgba16float");
     },
   );
 

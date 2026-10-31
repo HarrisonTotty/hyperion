@@ -909,9 +909,10 @@ export function bakeDiscReflectance(
       }
     }
   });
-  // The thermal layers, a band's at every sun row and azimuth, over their brightest, so that the
-  // half floats hold them whatever the glow's luminance.
-  const scale = Math.max(0, ...own);
+  // The thermal layers, a band's at every sun row and azimuth, over their largest magnitude, so that
+  // the half floats hold them in [−1, 1] whatever the glow's luminance, signed: a cool glow's green
+  // and blue below about 2,000 K are negative (Rec. 709's matching functions' negative lobes).
+  const scale = Math.max(0, ...own.map((value) => Math.abs(value)));
   if (thermal === undefined || !(scale > 0)) {
     return {
       bands: bands.length,
