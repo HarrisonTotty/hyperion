@@ -6715,6 +6715,14 @@ const SECANT_PARTIALS_ONLY: [&str; 19] = [
     "close_binary.e501",
 ];
 
+/// The three bodies whose secant root is another crossing of the diagonal than the halvings', in
+/// the walk's order (P14.T51.l's record; `under_the_secant_root_the_passes_and_movers_are_stated`).
+const SECANT_OTHER_CROSSINGS: [&str; 3] = [
+    "01ffdb2c1fff0001.0b00",
+    "41ffecb200000004.0200",
+    "02003b2d1ffe0001.0200",
+];
+
 /// P14.T51.l, a measurement for its record, run by name: every present planet, member and moon of
 /// the 400 sample systems and the golden systems at the epoch, each system generated and derived
 /// afresh under T51.h's halvings and under the secant steps (`with_pass_root`), compared body by
@@ -6977,18 +6985,115 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
     // move only their partials, at jumps or steep crossings where both roots stop within 2⁻³² of
     // the crossing.
     assert_eq!(
-        other_roots,
-        [
-            "01ffdb2c1fff0001.0b00",
-            "41ffecb200000004.0200",
-            "02003b2d1ffe0001.0200"
-        ],
+        other_roots, SECANT_OTHER_CROSSINGS,
         "the bodies whose secant root is another crossing"
     );
     assert_eq!(
         partials_only, SECANT_PARTIALS_ONLY,
         "the bodies that move their partials alone"
     );
+}
+
+/// P14.T51.l's pinned bodies end at crossings, not only at their pinned bits (research's condition
+/// on the record's leans): each of [`SECANT_OTHER_CROSSINGS`] and [`SECANT_PARTIALS_ONLY`], derived
+/// at the epoch under T51.h's halvings and under the 25 hold's secant steps (`with_pass_root`), is
+/// bracketed, and every bracket round whose published end is the body's albedo stopped at a
+/// crossing of the diagonal: its two ends' g on opposite sides within 2⁻³² in albedo
+/// (`Crossing::is_valid`). It moves no output.
+#[test]
+fn the_secant_root_s_pinned_bodies_end_at_crossings() {
+    use crate::planetary::derive::passes::{
+        Convergence, Crossing, PassRoot, with_crossings, with_pass_root,
+    };
+
+    let pinned: Vec<&str> = SECANT_OTHER_CROSSINGS
+        .into_iter()
+        .chain(SECANT_PARTIALS_ONLY)
+        .collect();
+    let is_pinned = |label: &str| pinned.contains(&label);
+    let system_of = |label: &'static str| label.split_once('.').map_or(label, |(name, _)| name);
+    let sets: Vec<(String, Seed, SystemContext)> = sample()
+        .iter()
+        .map(|ctx| (format!("{:016x}", ctx.id().raw()), SEED, ctx.clone()))
+        .chain(golden_systems().iter().map(|(name, ctx, _)| {
+            (
+                (*name).to_owned(),
+                Seed::new(GOLDEN_SYSTEMS_SEED),
+                ctx.clone(),
+            )
+        }))
+        .filter(|(name, ..)| pinned.iter().any(|label| system_of(label) == name))
+        .collect();
+    let check = |label: &str, root: PassRoot, derived: &DerivedBody, crossings: &[Crossing]| {
+        assert!(
+            matches!(derived.convergence(), Convergence::Bracketed { .. }),
+            "{label} under {root:?}: {:?}",
+            derived.convergence()
+        );
+        let albedo = derived.albedo().value();
+        let published: Vec<&Crossing> = crossings
+            .iter()
+            .filter(|crossing| crossing.published().total_cmp(&albedo).is_eq())
+            .collect();
+        assert!(
+            !published.is_empty(),
+            "{label} under {root:?}: no round published its albedo {albedo}: {crossings:?}"
+        );
+        for crossing in published {
+            assert!(
+                crossing.is_valid(),
+                "{label} under {root:?}: the round {crossing:?} stopped at no crossing"
+            );
+        }
+        eprintln!("{label} under {root:?}: albedo {albedo:.12}, {crossings:?}");
+    };
+    let t = UniverseTime::EPOCH;
+    for root in [PassRoot::Halvings, PassRoot::Secant] {
+        let found = with_pass_root(root, || {
+            let mut found = 0_usize;
+            for (name, seed, ctx) in &sets {
+                if ctx.age_at_epoch().value() <= 0.0 {
+                    continue;
+                }
+                let system = generate(*seed, ctx);
+                let epoch = Epoch::new(&system, ctx, t).with_shades();
+                let cosines = HourCosines::new();
+                for body in system.bodies() {
+                    if matches!(body.part, Part::Moon(_) | Part::Ring(_)) {
+                        continue;
+                    }
+                    let label = format!("{name}.{:04x}", body.index.get());
+                    let children: Vec<_> = system
+                        .children(body.index)
+                        .filter(|child| is_pinned(&format!("{name}.{:04x}", child.index.get())))
+                        .collect();
+                    if !is_pinned(&label) && children.is_empty() {
+                        continue;
+                    }
+                    let host = fate_host(ctx, system.zone_of(body));
+                    let fate = system.fate_of(body, &host);
+                    let at = fate.at(t);
+                    let (now, crossings) =
+                        with_crossings(|| system.primary_now(&epoch, &cosines, body, &fate, &at));
+                    if is_pinned(&label) {
+                        let derived = now.derived.as_ref().expect("a pinned body is derived");
+                        check(&label, root, derived, &crossings);
+                        found += 1;
+                    }
+                    for child in children {
+                        let label = format!("{name}.{:04x}", child.index.get());
+                        let (moon, crossings) =
+                            with_crossings(|| system.record_moon(&epoch, child, (&now, &fate)));
+                        let moon = moon.expect("a pinned moon is derived");
+                        check(&label, root, moon.body(), &crossings);
+                        found += 1;
+                    }
+                }
+            }
+            found
+        });
+        assert_eq!(found, pinned.len(), "under {root:?}");
+    }
 }
 
 /// A measurement for the bless note, run by name (decision-pre-23-review items 7, 16 and 17;

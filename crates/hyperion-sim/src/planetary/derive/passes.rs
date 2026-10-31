@@ -178,6 +178,69 @@ pub(crate) fn with_secant_rounds<R>(run: impl FnOnce() -> R) -> (R, Vec<u32>) {
     (result, rounds)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The ends each bracket round stopped at on this thread, while a test collects them
+    /// ([`with_crossings`]).
+    static CROSSINGS: core::cell::RefCell<Option<Vec<Crossing>>> =
+        const { core::cell::RefCell::new(None) };
+}
+
+/// A bracket round's two ends as it stopped, the lower albedo first, each the albedo it read and
+/// g = F(A, C) − A there: what P14.T51.l's pinned bodies are checked against (the system tests'
+/// `the_secant_root_s_pinned_bodies_end_at_crossings`).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Crossing {
+    /// The lower-albedo end's albedo read and g.
+    pub(crate) low: (f64, f64),
+    /// The higher-albedo end's albedo read and g.
+    pub(crate) high: (f64, f64),
+}
+
+#[cfg(test)]
+impl Crossing {
+    /// The albedo the round published: its end with the smaller |g|, ties to the lower, as
+    /// [`bracket`] takes it.
+    #[must_use]
+    pub(crate) fn published(&self) -> f64 {
+        if self.high.1.abs() < self.low.1.abs() {
+            self.high.0
+        } else {
+            self.low.0
+        }
+    }
+
+    /// Whether the round stopped at a crossing of the diagonal: its ends' g on opposite sides of
+    /// it (g ≥ 0 at one, g < 0 at the other), within [`SECANT_STOP_WIDTH`] of each other, or its
+    /// published end at g = 0, a root itself. By comparison, so that a g that is not a number is
+    /// no crossing.
+    #[must_use]
+    pub(crate) fn is_valid(&self) -> bool {
+        let ((a, g_a), (b, g_b)) = (self.low, self.high);
+        let sides = (g_a >= 0.0 && g_b < 0.0) || (g_a < 0.0 && g_b >= 0.0);
+        let within = a < b && b - a <= SECANT_STOP_WIDTH;
+        let g_published = if self.published().total_cmp(&a).is_eq() {
+            g_a
+        } else {
+            g_b
+        };
+        sides && (within || g_published.abs() <= 0.0)
+    }
+}
+
+/// `run`'s result with the ends each bracket round stopped at on this thread, in order. The
+/// thread's log is set back after.
+#[cfg(test)]
+pub(crate) fn with_crossings<R>(run: impl FnOnce() -> R) -> (R, Vec<Crossing>) {
+    let before = CROSSINGS.with(|cell| cell.replace(Some(Vec::new())));
+    let result = run();
+    let crossings = CROSSINGS
+        .with(|cell| cell.replace(before))
+        .unwrap_or_default();
+    (result, crossings)
+}
+
 /// `run`'s result with the bracketed root `root` on this thread, for the tests to reach 25's
 /// secant steps ahead of the bump; the version's root is set back after, a panic in `run`
 /// included. 25's bump deletes it with the hold.
@@ -698,6 +761,15 @@ fn bracket<P: Copy, C: Context>(
         }
     };
     let (lo, hi) = (taken(lo), taken(hi));
+    #[cfg(test)]
+    CROSSINGS.with(|cell| {
+        if let Some(crossings) = cell.borrow_mut().as_mut() {
+            crossings.push(Crossing {
+                low: (lo.read.value(), lo.g),
+                high: (hi.read.value(), hi.g),
+            });
+        }
+    });
     if hi.g.abs() < lo.g.abs() { hi } else { lo }
 }
 
@@ -1849,5 +1921,36 @@ mod tests {
         assert_same_bits(one.pass.1, two.pass.1);
         assert_eq!(one.count, two.count);
         assert_same_outcome(one.convergence, two.convergence);
+    }
+
+    /// Under each root, a jump across the diagonal and a steep crossing each end at a round that
+    /// stopped at a crossing, its published end the solver's; and ends on one side, too far apart
+    /// or whose g is not a number are no crossing.
+    #[test]
+    fn under_each_root_a_bracket_round_stops_at_a_crossing() {
+        let jump = |a: f64| if a < 0.4 { 0.6 } else { 0.2 };
+        let steep = |a: f64| (0.21 - 2.5 * (a - 0.21)).clamp(0.15, 0.278);
+        for root in [PassRoot::Halvings, PassRoot::Secant] {
+            for (what, f) in [("jump", &jump as &dyn Fn(f64) -> f64), ("steep", &steep)] {
+                let (solved, crossings) = with_crossings(|| with_pass_root(root, || solved(f)));
+                let [crossing] = crossings[..] else {
+                    panic!("{what} under {root:?}: {crossings:?}");
+                };
+                assert!(crossing.is_valid(), "{what} under {root:?}: {crossing:?}");
+                assert_same_bits(crossing.published(), solved.albedo.value());
+            }
+        }
+        let crossing = |low, high| Crossing { low, high }.is_valid();
+        let a = 0.3;
+        let b = a + SECANT_STOP_WIDTH;
+        assert!(crossing((a, 1e-3), (b, -1e-3)));
+        assert!(crossing((a, -1e-3), (b, 1e-3)));
+        assert!(crossing((a, 0.0), (a + 0.1, -1e-3)), "a root at the end");
+        assert!(!crossing((a, 1e-3), (b, 2e-3)), "one side");
+        assert!(
+            !crossing((a, 1e-3), (a + 2.0 * SECANT_STOP_WIDTH, -1e-3)),
+            "too wide"
+        );
+        assert!(!crossing((a, f64::NAN), (b, -1e-3)), "not a number");
     }
 }

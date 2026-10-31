@@ -32980,8 +32980,12 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     the cap is `MOST_SECANT_PASSES` 112.
   - The plan's sample equality is not met (lean, 2026-10-30): 3 bodies end at another crossing and
     19 move only their partials, each pinned by name in the system tests' ignored
-    `under_the_secant_root_the_passes_and_movers_are_stated`.
-  - _Accept, as built:_ also that test by name (`--run-ignored only`, the slow-test profile).
+    `under_the_secant_root_the_passes_and_movers_are_stated`. Adopted (2026-10-31) on research's
+    condition, that each pinned end be a crossing and not only its bits: under both roots each
+    body's published round stops with its ends' g on opposite sides within 2⁻³²
+    (`the_secant_root_s_pinned_bodies_end_at_crossings`, the rounds' ends `passes::Crossing`).
+  - _Accept, as built:_ also that test by name (`--run-ignored only`, the slow-test profile), and
+    the crossings test in the fast suite.
   - For 25's bump: delete the hold, the switch and the tripwire; keep `Halvings` as a
     `#[cfg(test)]` oracle; read `MOST_SECANT_PASSES` where `MOST_PASSES` bounds a body's passes;
     re-run the measurement.
