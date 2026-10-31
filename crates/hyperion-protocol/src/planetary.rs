@@ -16,8 +16,8 @@ use ts_rs::TS;
 
 pub use population::{
     BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto, BeltSiteDto, CometaryHaloDto,
-    DiscGapDto, PopulationDto, ProtoplanetaryDiscDto, RingDto, RingGapDto, RingKindDto,
-    RingMaterialDto,
+    DebrisDiscDto, DiscGapDto, PopulationDto, ProtoplanetaryDiscDto, RingDto, RingGapDto,
+    RingKindDto, RingMaterialDto,
 };
 pub use record::{
     AbsorberDto, AerosolInventoryDto, AerosolModeDto, AerosolNotModelledDto, AerosolShapeDto,

@@ -5,6 +5,9 @@ use hyperion_testkit::lcg::Lcg;
 use super::*;
 use crate::planetary::SystemContext;
 use crate::planetary::fate::FateHost;
+use crate::planetary::hosts::white_dwarfs::{
+    POLLUTED_SHARE, WhiteDwarfDebrisRules, with_white_dwarf_debris,
+};
 use crate::planetary::hosts::young::with_protoplanetary_disc;
 use crate::planetary::system::tests::{SEED, id};
 use crate::planetary::system::{generate, generate_planets};
@@ -28,8 +31,9 @@ fn star(index: u32, mass: f64, age: f64) -> SystemContext {
 /// both, without its later stages, which the disc does not read.
 fn planets_with_disc(ctx: &SystemContext) -> PlanetarySystem {
     let mut system = generate_planets(SEED, ctx);
-    let discs =
-        with_protoplanetary_disc(ProtoplanetaryDiscRules::Disc, || SystemDiscs::find(&system));
+    let discs = with_protoplanetary_disc(ProtoplanetaryDiscRules::Disc, || {
+        SystemDiscs::find(SEED, ctx, &system)
+    });
     system.discs = discs;
     system
 }
@@ -293,4 +297,177 @@ fn assert_the_disc_moves_no_other_record(ctx: &SystemContext, expected: Rank) {
         Ok(None)
     );
     assert_eq!(with.surface_seed(disc.index()), Ok(None));
+}
+
+/// A white dwarf of `cooling` years' cooling age, born of a star of `mass` M☉, as the system
+/// `index`, and the clock time of its birth.
+fn white_dwarf(index: u32, mass: f64, cooling: f64) -> (SystemContext, UniverseTime) {
+    let probe = star(index, mass, 1.2e10);
+    let death = probe.stars()[0]
+        .death()
+        .expect("a star of over 1.2 M☉ is dead by 12 Gyr")
+        .age()
+        .value();
+    let ctx = star(index, mass, death + cooling);
+    let birth = at_age(&ctx, death);
+    (ctx, birth)
+}
+
+/// Whether the white dwarf host of `system` keeps a belt and a planet at `t`.
+fn keeps_a_belt_and_a_planet(
+    system: &PlanetarySystem,
+    ctx: &SystemContext,
+    t: UniverseTime,
+) -> bool {
+    let host = OrbitHost::Star(0);
+    let hosts: Vec<FateHost<'_>> = system
+        .zones
+        .iter()
+        .map(|zone| fate_host(ctx, zone))
+        .collect();
+    let fates = system.fates(&hosts);
+    let planet = system.bodies.iter().zip(&fates).any(|(body, fate)| {
+        matches!(body.part, Part::Planet(_))
+            && body.host == host
+            && fate
+                .as_ref()
+                .is_some_and(|fate| fate.at(t).state() == BodyState::Present)
+    });
+    planet
+        && system.belts().iter().any(|belt| {
+            system
+                .body_at(ctx, belt.index(), t)
+                .expect("a belt's record")
+                .identity()
+                .state()
+                == BodyState::Present
+        })
+}
+
+/// P14.T28.d's test (d): 25–50% of white dwarfs of 1–3 Gyr cooling age with a belt and a planet
+/// are polluted, and none without them.
+#[test]
+fn a_quarter_to_a_half_of_white_dwarfs_with_a_belt_and_a_planet_are_polluted() {
+    let mut lcg = Lcg::new(0x28d);
+    let (mut eligible, mut polluted) = (0_u32, 0_u32);
+    for i in 0..1_000_u32 {
+        let mass = 1.2 + 2.8 * lcg.next_f64();
+        let cooling = 1.0e9 + 2.0e9 * lcg.next_f64();
+        let (ctx, _) = white_dwarf(10_000 + i, mass, cooling);
+        let system =
+            with_white_dwarf_debris(WhiteDwarfDebrisRules::Debris, || generate(SEED, &ctx));
+        let wd = system
+            .white_dwarf()
+            .expect("a single white dwarf is marked");
+        assert_eq!(wd.host(), OrbitHost::Star(0));
+        let is = system.is_polluted_at(&ctx, UniverseTime::EPOCH);
+        assert_eq!(is, wd.marks().is_polluted());
+        if keeps_a_belt_and_a_planet(&system, &ctx, UniverseTime::EPOCH) {
+            eligible += 1;
+            polluted += u32::from(is);
+        } else {
+            assert!(!is, "{:?} is polluted with nothing to pollute it", ctx.id());
+        }
+    }
+    let share = f64::from(polluted) / f64::from(eligible);
+    assert!(
+        eligible > 250,
+        "{eligible} white dwarfs with a belt and a planet"
+    );
+    assert!(
+        (0.25..=0.5).contains(&share),
+        "{polluted} of {eligible} polluted, {share}"
+    );
+    let sigma = (POLLUTED_SHARE * (1.0 - POLLUTED_SHARE) / f64::from(eligible)).sqrt();
+    assert!((share - POLLUTED_SHARE).abs() < 4.0 * sigma, "{share}");
+}
+
+/// A debris disc is a body in belt slot `0xEE`, listed as `DEBRIS DISC`: not yet formed before its
+/// white dwarf's birth, present from it, between its sublimation radius and its Roche limit of
+/// about 1 R☉, and dispersed once its span of cooling age ends; it moves no other record.
+#[test]
+fn a_debris_disc_lies_inside_its_white_dwarf_s_roche_limit_from_its_birth() {
+    let mut lcg = Lcg::new(0x28d0);
+    let solar_radius = Metres::from(crate::units::SolarRadii::new(1.0)).value();
+    let mut found = 0;
+    for i in 0..4_000_u32 {
+        let index = 20_000 + i;
+        // Only systems whose marks would give a disc are generated.
+        let draws = WhiteDwarfDraws::for_system(SEED, id(index));
+        if WhiteDwarfMarks::decide(&draws, Survivors::BeltAndPlanet)
+            .disc_until()
+            .is_none()
+        {
+            continue;
+        }
+        let mass = 1.2 + 2.8 * lcg.next_f64();
+        let (ctx, birth) = white_dwarf(index, mass, 2.0e8);
+        let system =
+            with_white_dwarf_debris(WhiteDwarfDebrisRules::Debris, || generate(SEED, &ctx));
+        let wd = *system
+            .white_dwarf()
+            .expect("a single white dwarf is marked");
+        let Some(index) = wd.debris_disc() else {
+            assert!(!keeps_a_belt_and_a_planet(&system, &ctx, birth));
+            continue;
+        };
+        found += 1;
+        assert_eq!(u16::from(index), 0xEE00);
+        assert!(system.indices().contains(&index));
+        assert!(wd.marks().is_polluted());
+        let until = wd.marks().disc_until().expect("a disc's span").value();
+        let death = ctx.stars()[0].death().expect("a death").age().value();
+        let end = at_age(&ctx, death + until);
+        let state = |t: UniverseTime| {
+            system
+                .body_at(&ctx, index, t)
+                .expect("the disc's record")
+                .identity()
+                .state()
+        };
+        let before = birth.checked_sub(Span::from_seconds(1)).expect("clock");
+        assert_eq!(state(before), BodyState::NotYetFormed);
+        assert_eq!(state(birth), BodyState::Present);
+        assert_eq!(
+            state(end),
+            BodyState::Destroyed {
+                cause: DestructionCause::Dispersed,
+                at: end
+            }
+        );
+        let epoch_state = state(UniverseTime::EPOCH);
+        let record = system
+            .body_at(&ctx, index, UniverseTime::EPOCH)
+            .expect("the disc's record");
+        assert_eq!(record.identity().kind(), BodyKind::DebrisDisc);
+        assert_eq!(record.mass(), &Section::NotModelled);
+        assert_eq!(
+            record.identity().label(),
+            &Section::Ok(BodyLabel::debris_disc())
+        );
+        match (epoch_state, record.population()) {
+            (BodyState::Present, Section::Ok(Population::DebrisDisc(disc))) => {
+                let outer = disc.outer_edge().value() / solar_radius;
+                assert!((0.6..1.3).contains(&outer), "a Roche limit of {outer} R☉");
+                assert!(disc.inner_edge() <= disc.outer_edge());
+                assert!(disc.inner_edge().value() > 0.0);
+            }
+            (BodyState::Destroyed { .. }, Section::NotApplicable) => {}
+            (state, population) => panic!("{state:?} with {population:?}"),
+        }
+        let held = with_white_dwarf_debris(WhiteDwarfDebrisRules::Held, || generate(SEED, &ctx));
+        assert_eq!(held.white_dwarf(), None);
+        let (a, b) = (
+            held.snapshot_at(&ctx, UniverseTime::EPOCH),
+            system.snapshot_at(&ctx, UniverseTime::EPOCH),
+        );
+        assert_eq!(b.body(index), Some(&record));
+        let others: Vec<&BodyRecord> = b
+            .bodies()
+            .iter()
+            .filter(|record| record.index() != index)
+            .collect();
+        assert_eq!(others, a.bodies().iter().collect::<Vec<_>>());
+    }
+    assert!(found >= 5, "{found} debris discs");
 }

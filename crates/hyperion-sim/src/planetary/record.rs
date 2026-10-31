@@ -1167,6 +1167,8 @@ pub enum Population {
     CometaryHalo(HaloRecord),
     /// A protoplanetary disc at the record's time, while it lasts (P14.T28.a).
     ProtoplanetaryDisc(DiscRecord),
+    /// A white dwarf's dusty debris disc at the record's time, while it lasts (P14.T28.d).
+    DebrisDisc(DebrisDiscRecord),
 }
 
 impl Population {
@@ -1179,7 +1181,10 @@ impl Population {
                 members: belt.members.granted(DetailLevel::Bulk, level),
                 ..belt
             }),
-            Self::Ring(_) | Self::CometaryHalo(_) | Self::ProtoplanetaryDisc(_) => self,
+            Self::Ring(_)
+            | Self::CometaryHalo(_)
+            | Self::ProtoplanetaryDisc(_)
+            | Self::DebrisDisc(_) => self,
         }
     }
 
@@ -1188,7 +1193,10 @@ impl Population {
     fn withholds(&self) -> bool {
         match self {
             Self::Belt(belt) => belt.members.state() == SectionState::NotResolved,
-            Self::Ring(_) | Self::CometaryHalo(_) | Self::ProtoplanetaryDisc(_) => false,
+            Self::Ring(_)
+            | Self::CometaryHalo(_)
+            | Self::ProtoplanetaryDisc(_)
+            | Self::DebrisDisc(_) => false,
         }
     }
 }
@@ -1472,6 +1480,48 @@ impl DiscRecord {
     #[must_use]
     pub fn gaps(&self) -> &[DiscGap] {
         &self.gaps
+    }
+}
+
+/// A white dwarf's dusty debris disc as a record holds it at a time (P14.T28.d, design note 11):
+/// its host and its edges, from the radius at which its dust sublimates to the white dwarf's Roche
+/// limit.
+///
+/// Its mass is not modelled: the record's mass section says so.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DebrisDiscRecord {
+    host: OrbitHost,
+    inner_edge: Metres,
+    outer_edge: Metres,
+}
+
+impl DebrisDiscRecord {
+    /// The record of a debris disc about `host` from `inner_edge` to `outer_edge`.
+    #[must_use]
+    pub(crate) const fn new(host: OrbitHost, inner_edge: Metres, outer_edge: Metres) -> Self {
+        Self {
+            host,
+            inner_edge,
+            outer_edge,
+        }
+    }
+
+    /// The white dwarf it goes round.
+    #[must_use]
+    pub const fn host(&self) -> OrbitHost {
+        self.host
+    }
+
+    /// Its inner edge, from its host: where its dust sublimates, held to its outer edge.
+    #[must_use]
+    pub const fn inner_edge(&self) -> Metres {
+        self.inner_edge
+    }
+
+    /// Its outer edge, from its host: the white dwarf's Roche limit for a rocky asteroid.
+    #[must_use]
+    pub const fn outer_edge(&self) -> Metres {
+        self.outer_edge
     }
 }
 

@@ -499,12 +499,23 @@ export interface ProtoplanetaryDisc {
   readonly gaps: ReadonlyArray<DiscGap>;
 }
 
+/**
+ * A white dwarf's dusty debris disc while it lasts (the protocol's `DebrisDiscDto`, plan 14's
+ * P14.T28.d), in metres from the white dwarf: from where its dust sublimates to its Roche limit.
+ */
+export interface DebrisDisc {
+  readonly host: OrbitHost;
+  readonly innerEdgeM: number;
+  readonly outerEdgeM: number;
+}
+
 /** What a population body is and where it lies (the protocol's `PopulationDto`). */
 export type Population =
   | ({ readonly kind: "ring" } & Ring)
   | ({ readonly kind: "belt" } & Belt)
   | ({ readonly kind: "cometary_halo" } & CometaryHalo)
-  | ({ readonly kind: "protoplanetary_disc" } & ProtoplanetaryDisc);
+  | ({ readonly kind: "protoplanetary_disc" } & ProtoplanetaryDisc)
+  | ({ readonly kind: "debris_disc" } & DebrisDisc);
 
 /** One body of a system as the system's list carries it (the protocol's `BodySummaryDto`). */
 export interface SystemBody {

@@ -8,6 +8,8 @@
 //!   their hold at generator version 26.
 //! - [`strip`]: the radius beyond which a system keeps nothing, its tidal and encounter cuts
 //!   (design note 14, P14.T29).
+//! - [`white_dwarfs`]: a white dwarf's pollution and dusty debris disc (design note 11,
+//!   P14.T28.d), behind their hold at generator version 26.
 //!
 //! [`fate`](crate::planetary::fate) strings the first two together into a body's state at a time.
 //! The rogue planets of P14.T27.b will join them here.
@@ -15,4 +17,5 @@
 pub mod evolved;
 pub mod strip;
 pub mod substellar;
+pub mod white_dwarfs;
 pub mod young;

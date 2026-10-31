@@ -16,18 +16,18 @@ use hyperion_protocol::{
     BodyOrbitDto, BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
     BodySurfaceDto, BulkPropertiesDto, ClimateForcingDto, ClimateRegimeDto, CometaryHaloDto,
     CondensateDeckDto, CraterContractDto, CraterScreeningDto, CraterTargetClassDto,
-    CrustCompositionDto, CrustLidDto, DestructionCauseDto, DetailLevelDto, DetailSeedHex,
-    DiscGapDto, ErrorCode, FigureDatumDto, FigureLawDto, GasShareDto, GuillotProfileDto,
-    HabitableZoneDto, MagneticFieldClassDto, MassFractionsDto, MixingRatioNodeDto, Modelled,
-    MoonOriginDto, NotFormedCondensateDto, NotFormedReasonDto, OceanFloorDto, OrbitDriftDto,
-    OrbitHostDto, PhaseTemplateDto, PlanetClassDto, PopulationDto, ProfileNodeDto,
-    ProtoplanetaryDiscDto, RadiationClassDto, RedoxClassDto, RequestError, RingDto, RingGapDto,
-    RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto, SeenPositionDto,
-    SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
-    SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto,
-    SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest,
-    TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
-    ZoneDto,
+    CrustCompositionDto, CrustLidDto, DebrisDiscDto, DestructionCauseDto, DetailLevelDto,
+    DetailSeedHex, DiscGapDto, ErrorCode, FigureDatumDto, FigureLawDto, GasShareDto,
+    GuillotProfileDto, HabitableZoneDto, MagneticFieldClassDto, MassFractionsDto,
+    MixingRatioNodeDto, Modelled, MoonOriginDto, NotFormedCondensateDto, NotFormedReasonDto,
+    OceanFloorDto, OrbitDriftDto, OrbitHostDto, PhaseTemplateDto, PlanetClassDto, PopulationDto,
+    ProfileNodeDto, ProtoplanetaryDiscDto, RadiationClassDto, RedoxClassDto, RequestError, RingDto,
+    RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto,
+    SeenPositionDto, SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto,
+    SubsurfaceOceanDto, SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto,
+    SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto,
+    SystemSummaryRequest, TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto,
+    VerticalStructureDto, WetEpochDto, ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
@@ -59,8 +59,8 @@ use hyperion_sim::planetary::hooks::{
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
 use hyperion_sim::planetary::record::{
-    BeltKind, BodyKind, BodyOrbit, BodyRecord, BulkProperties, DetailLevel, Envelope, Hooks,
-    Modelled as RecordModelled, MoonOrigin, Population, Section, Surface, SystemSnapshot,
+    BeltKind, BodyKind, BodyOrbit, BodyRecord, BulkProperties, DetailLevel, DiscRecord, Envelope,
+    Hooks, Modelled as RecordModelled, MoonOrigin, Population, Section, Surface, SystemSnapshot,
     TaxonomicClass,
 };
 use hyperion_sim::planetary::rings::{Ring, RingKind, RingMaterial};
@@ -786,26 +786,35 @@ fn population_dto(system: SystemId, population: &Population) -> PopulationDto {
             comets: halo.comets(),
             comet_rate_per_s: halo.comet_rate().value(),
         }),
-        Population::ProtoplanetaryDisc(disc) => {
-            PopulationDto::ProtoplanetaryDisc(ProtoplanetaryDiscDto {
-                host: orbit_host(system, disc.host()),
-                inner_edge_m: disc.inner_edge().value(),
-                outer_edge_m: disc.outer_edge().value(),
-                snow_line_m: disc.snow_line().value(),
-                characteristic_radius_m: disc.characteristic_radius().value(),
-                gas_mass_kg: Kilograms::from(disc.gas_mass()).value(),
-                solid_mass_kg: Kilograms::from(disc.solid_mass()).value(),
-                gaps: disc
-                    .gaps()
-                    .iter()
-                    .map(|gap| DiscGapDto {
-                        giant: body_id(system, gap.giant()),
-                        radius_m: gap.radius().value(),
-                    })
-                    .collect(),
-            })
-        }
+        Population::ProtoplanetaryDisc(disc) => protoplanetary_disc_dto(system, disc),
+        Population::DebrisDisc(disc) => PopulationDto::DebrisDisc(DebrisDiscDto {
+            host: orbit_host(system, disc.host()),
+            inner_edge_m: disc.inner_edge().value(),
+            outer_edge_m: disc.outer_edge().value(),
+        }),
     }
+}
+
+/// A protoplanetary disc's extent and masses as the wire carries them (P14.T28.a).
+#[must_use]
+fn protoplanetary_disc_dto(system: SystemId, disc: &DiscRecord) -> PopulationDto {
+    PopulationDto::ProtoplanetaryDisc(ProtoplanetaryDiscDto {
+        host: orbit_host(system, disc.host()),
+        inner_edge_m: disc.inner_edge().value(),
+        outer_edge_m: disc.outer_edge().value(),
+        snow_line_m: disc.snow_line().value(),
+        characteristic_radius_m: disc.characteristic_radius().value(),
+        gas_mass_kg: Kilograms::from(disc.gas_mass()).value(),
+        solid_mass_kg: Kilograms::from(disc.solid_mass()).value(),
+        gaps: disc
+            .gaps()
+            .iter()
+            .map(|gap| DiscGapDto {
+                giant: body_id(system, gap.giant()),
+                radius_m: gap.radius().value(),
+            })
+            .collect(),
+    })
 }
 
 /// The moon whose resonance clears a ring's gap: the `n`-th regular moon of the ring's planet,

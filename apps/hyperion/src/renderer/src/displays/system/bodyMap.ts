@@ -460,7 +460,7 @@ function hostCentreAu(
  * plane: both edges, labelled `COMETARY HALO`, when its outer edge lies inside `viewRadiusAu`, the
  * radius the view fits; its inner edge alone, labelled `COMETARY HALO INNER EDGE`, when only that
  * does; and nothing when neither does, since a ring off the map says nothing. A body not present,
- * or whose section is not `ok`, draws nothing, nor does a protoplanetary disc yet. The selected
+ * or whose section is not `ok`, draws nothing, nor does a protoplanetary or debris disc yet. The selected
  * belt, its scattered component with it,
  * or the selected halo is drawn as the selected orbit is (the guide's selection rule).
  *
@@ -478,11 +478,13 @@ export function populationAnnuli(
   const annuli: AnnulusMark[] = [];
   for (const body of bodies) {
     const population = body.population.state === "ok" ? body.population.value : null;
-    // A protoplanetary disc is listed, not drawn: its annulus is a follow-up (plan 14, P14.T28.a).
+    // A protoplanetary or debris disc is listed, not drawn: its annulus is a follow-up (plan 14,
+    // P14.T28.a and T28.d).
     if (
       population === null ||
       population.kind === "ring" ||
       population.kind === "protoplanetary_disc" ||
+      population.kind === "debris_disc" ||
       body.state.kind !== "present"
     ) {
       continue;

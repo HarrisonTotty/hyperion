@@ -1091,6 +1091,12 @@ fn write_population(w: &mut GoldenWriter, population: &BodyPopulation) {
                 );
             }
         }
+        // P14.T28.d, from generator version 26: no golden system holds one below it.
+        BodyPopulation::DebrisDisc(disc) => {
+            w.line(&format!("debris disc about {:?}", disc.host()));
+            w.f64("inner_m", disc.inner_edge().value());
+            w.f64("outer_m", disc.outer_edge().value());
+        }
     }
 }
 

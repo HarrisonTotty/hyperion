@@ -514,7 +514,9 @@ domain_tags! {
     /// its depletion factor and of its size slope, one uniform each, a Kuiper-like belt's bright
     /// mark and its bright efficiency's standard normal (words 8n + 3 and 8n + 4), and the rank of
     /// its largest member's share (word 8n + 5, ruling 100.3); words 8n + 6 and 8n + 7 are
-    /// reserved (`planetary::belts::BeltDraws`).
+    /// reserved (`planetary::belts::BeltDraws`). Belt slot 14 (`0xEE`), which no belt takes, holds
+    /// a white dwarf's marks (P14.T28.d): its pollution mark, its debris disc's mark and the rank
+    /// of the disc's span, words 112–114 (`planetary::hosts::white_dwarfs::WhiteDwarfDraws`).
     BELT_POPULATION: System = "belt.population";
 
     /// A belt's named member (P14.T21.c), keyed by the member: the rank of its component, its

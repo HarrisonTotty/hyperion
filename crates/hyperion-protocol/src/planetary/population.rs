@@ -1,6 +1,6 @@
 //! The extents of a system's populations on the wire: a planet's rings, a belt, the cometary
-//! halo (plan 14, P14.T35.b's `BeltDto` and the halo section, from P14.T20–T21) and a
-//! protoplanetary disc (P14.T28.a).
+//! halo (plan 14, P14.T35.b's `BeltDto` and the halo section, from P14.T20–T21), a
+//! protoplanetary disc (P14.T28.a) and a white dwarf's debris disc (P14.T28.d).
 //!
 //! Each is a body of its system's list (design note 3), whose record carries what it is as its
 //! `population` section, a [`PopulationDto`]; every other body's is `not_applicable`. Every
@@ -16,9 +16,9 @@ use crate::primitives::BodyIdHex;
 /// tagged by `type` (`{"type": "belt", "host": …, …}`).
 ///
 /// It grows (plan 04's growing enums): a server of a later generator version may send a `type`
-/// an older client does not know, which reads as Missing. The protoplanetary disc's arm is sent
-/// from generator version 26 (P14.T28.a), so [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) stays
-/// 3.
+/// an older client does not know, which reads as Missing. The protoplanetary disc's and the debris
+/// disc's arms are sent from generator version 26 (P14.T28.a and T28.d), so
+/// [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) stays 3.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
@@ -31,6 +31,8 @@ pub enum PopulationDto {
     CometaryHalo(CometaryHaloDto),
     /// A young host's protoplanetary disc, while it lasts (P14.T28.a).
     ProtoplanetaryDisc(ProtoplanetaryDiscDto),
+    /// A white dwarf's dusty debris disc, while it lasts (P14.T28.d).
+    DebrisDisc(DebrisDiscDto),
 }
 
 /// Which of a giant's rings a ring is.
@@ -257,6 +259,25 @@ pub struct ProtoplanetaryDiscDto {
     pub gaps: Vec<DiscGapDto>,
 }
 
+/// A white dwarf's dusty debris disc at the record's time, while it lasts (P14.T28.d, design note
+/// 11): the dust of tidally disrupted asteroids, inside the white dwarf's Roche limit.
+///
+/// It lies in its host's planetary plane. Its record's `mass_kg` is `not_modelled`; the record is
+/// `destroyed` (`dispersed`) once the disc's span of cooling age ends, with this section
+/// `not_applicable`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DebrisDiscDto {
+    /// The white dwarf it goes round, a zone's host.
+    pub host: OrbitHostDto,
+    /// The inner edge, in metres from its host: where its dust sublimates, never beyond its outer
+    /// edge.
+    pub inner_edge_m: f64,
+    /// The outer edge, in metres from its host: the white dwarf's Roche limit for a rocky
+    /// asteroid, about a solar radius.
+    pub outer_edge_m: f64,
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use serde_json::{Value, json};
@@ -455,6 +476,23 @@ pub(crate) mod tests {
                 "gas_mass_kg": 1.9e28,
                 "solid_mass_kg": 1.5e26,
                 "gaps": [{ "giant": "0200080020000000.0500", "radius_m": 7.78e11 }],
+            }),
+        );
+    }
+
+    #[test]
+    fn debris_disc_wire_form() {
+        assert_wire_form(
+            &PopulationDto::DebrisDisc(DebrisDiscDto {
+                host: OrbitHostDto::Star { body_index: 0 },
+                inner_edge_m: 7.0e7,
+                outer_edge_m: 6.0e8,
+            }),
+            json!({
+                "type": "debris_disc",
+                "host": { "type": "star", "body_index": 0 },
+                "inner_edge_m": 7.0e7,
+                "outer_edge_m": 6.0e8,
             }),
         );
     }

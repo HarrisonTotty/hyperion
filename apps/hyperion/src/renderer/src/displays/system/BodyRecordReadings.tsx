@@ -599,7 +599,7 @@ function gapRow(resonance: readonly [number, number], radiusM: number): ReactNod
  * component's apart), composition, size slope, largest body, mean eccentricity and inclination,
  * dust luminosity, gaps and members; the halo's edges, comets and comet rate; a protoplanetary
  * disc's edges, snow line, taper radius, gas and solid masses, and the gap each giant has opened,
- * named by its body ID.
+ * named by its body ID; a debris disc's edges.
  */
 function populationRows(population: Population): ReactNode {
   let rows: ReactNode;
@@ -714,6 +714,11 @@ function populationRows(population: Population): ReactNode {
       );
       break;
     }
+    case "debris_disc":
+      rows = (
+        <SpanRow label="EDGES" innerM={population.innerEdgeM} outerM={population.outerEdgeM} />
+      );
+      break;
   }
   return rows;
 }

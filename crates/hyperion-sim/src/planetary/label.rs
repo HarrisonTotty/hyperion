@@ -27,7 +27,7 @@ use std::num::NonZeroU8;
 
 use crate::planetary::index::{BodyIndex, BodySub, STELLAR_SUB_END};
 use crate::planetary::record::BodyKind;
-use crate::planetary::system::PlanetarySystem;
+use crate::planetary::system::{PlanetarySystem, WhiteDwarfSystem};
 
 /// A body's label for people: host letters, planets lettered from `b` by semi-major axis, moons in
 /// Roman numerals, belts numbered (design note 22), such as `A b` or `A d II`.
@@ -116,6 +116,12 @@ impl BodyLabel {
     #[must_use]
     pub fn protoplanetary_disc() -> Self {
         Self("DISC".to_owned())
+    }
+
+    /// The label of a white dwarf's debris disc: `DEBRIS DISC`.
+    #[must_use]
+    pub fn debris_disc() -> Self {
+        Self("DEBRIS DISC".to_owned())
     }
 
     /// The label's text.
@@ -212,8 +218,8 @@ fn roman_numeral(number: NonZeroU8) -> String {
 /// - Belts are numbered from 1 through the system in index order, host by host and inside out:
 ///   `BELT 1`. A belt's member is its belt's label and its sub-index, its rank by size from the
 ///   largest: `BELT 1-3` (this lane's form, where design note 22 names none).
-/// - The cometary halo is `HALO`, and the protoplanetary disc `DISC` (P14.T28.a; this lane's
-///   form, where design note 22 names none).
+/// - The cometary halo is `HALO`, the protoplanetary disc `DISC` (P14.T28.a) and a white dwarf's
+///   debris disc `DEBRIS DISC` (P14.T28.d; this lane's forms, where design note 22 names none).
 ///
 /// Labels are unique within a system: two hosts' letters differ, since their members do, a host's
 /// planets take distinct letters, a parent's moons distinct numerals, and the rest distinct
@@ -266,6 +272,9 @@ pub fn labels(system: &PlanetarySystem) -> Vec<(BodyIndex, BodyLabel)> {
     }
     if let Some(disc) = system.protoplanetary_disc() {
         labelled.push((disc.index(), BodyLabel::protoplanetary_disc()));
+    }
+    if let Some(index) = system.white_dwarf().and_then(WhiteDwarfSystem::debris_disc) {
+        labelled.push((index, BodyLabel::debris_disc()));
     }
     // Satellites, parent by parent, once their parents are labelled.
     labelled.sort_by_key(|(index, _)| *index);

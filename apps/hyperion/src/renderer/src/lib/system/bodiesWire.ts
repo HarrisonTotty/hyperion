@@ -711,6 +711,16 @@ function toPopulation(population: PopulationDto): Population {
         }),
       };
       break;
+    case "debris_disc":
+      check(population.host.type !== "body", "debris disc host malformed");
+      checkEdges(population.inner_edge_m, population.outer_edge_m, "debris disc");
+      result = {
+        kind: "debris_disc",
+        host: toHost(population.host),
+        innerEdgeM: population.inner_edge_m,
+        outerEdgeM: population.outer_edge_m,
+      };
+      break;
   }
   return result;
 }

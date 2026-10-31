@@ -299,6 +299,39 @@ describe("toSystemBodiesModel", () => {
     });
   });
 
+  it("reads a white dwarf's debris disc's population (P14.T28.d)", () => {
+    const disc = populatedBodiesWith((body) =>
+      body.kind.type === "debris_disc"
+        ? {
+            ...body,
+            state: { type: "present" },
+            population: {
+              state: "ok",
+              value: {
+                type: "debris_disc",
+                host: { type: "star", body_index: 0 },
+                inner_edge_m: 7.0e7,
+                outer_edge_m: 6.0e8,
+              },
+            },
+          }
+        : body,
+    );
+    const section = bodiesOf(disc).bodies.bodies.find(
+      (body) => body.kind.kind === "debris_disc",
+    )?.population;
+
+    expect(section).toEqual({
+      state: "ok",
+      value: {
+        kind: "debris_disc",
+        host: { kind: "star", bodyIndex: 0 },
+        innerEdgeM: 7.0e7,
+        outerEdgeM: 6.0e8,
+      },
+    });
+  });
+
   it("refuses a population whose edges are reversed", () => {
     const reversed = populatedBodiesWith((body) =>
       body.population.state === "ok" && body.population.value.type === "ring"

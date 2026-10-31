@@ -49,15 +49,15 @@
 //!
 //! 9. **The discs**: from generator version 26 the protoplanetary disc of the first host with
 //!    one, in belt slot `0xE0` (P14.T28.a, [`PlanetarySystem::protoplanetary_disc`]), on no
-//!    stream.
+//!    stream, and a white dwarf's pollution mark and debris disc, in `0xEE`, on `belt.population`
+//!    (P14.T28.d, [`PlanetarySystem::white_dwarf`]).
 //!
 //! Second-generation planets (P14.T28.e) are not built: their stage does not exist yet, and their
-//! streams (`planet.secondgen`) and slots (`0xC0`–`0xCF`) stay reserved for them. Nor is
-//! P14.T28.d's debris disc (`0xEE`). A free-floating brown dwarf runs the steps above from generator
-//! version 26 (P14.T27.a), its planets from slot `0x01`. A rogue planet ([`HostKind::RoguePlanet`],
-//! from 26, P14.T27.b) runs none of them but step 7: it is body `0x0000`, derived with no star, with
-//! its satellites about it ([`RoguePlanet`], the `rogue` module), and every query of its system
-//! takes that module's path.
+//! streams (`planet.secondgen`) and slots (`0xC0`–`0xCF`) stay reserved for them. A free-floating
+//! brown dwarf runs the steps above from generator version 26 (P14.T27.a), its planets from slot
+//! `0x01`. A rogue planet ([`HostKind::RoguePlanet`], from 26, P14.T27.b) runs none of them but
+//! step 7: it is body `0x0000`, derived with no star, with its satellites about it
+//! ([`RoguePlanet`], the `rogue` module), and every query of its system takes that module's path.
 //!
 //! [`PlanetarySystem`] holds only that primordial state, which is what the server may cache ("state
 //! at the epoch, never positions at some time").
@@ -241,7 +241,7 @@ use moon_ice::{HotHistory, MoonIce, kept_water, shell_lag};
 use small_bodies::SmallBodyTypes;
 
 use discs::SystemDiscs;
-pub use discs::{PROTOPLANETARY_DISC_SLOT, ProtoplanetaryDisc};
+pub use discs::{PROTOPLANETARY_DISC_SLOT, ProtoplanetaryDisc, WhiteDwarfSystem};
 pub use events::{ListedEvents, SystemEvents, events_on_the_record};
 pub use rogue::RoguePlanet;
 
@@ -1231,7 +1231,7 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
     system.place_on_laplace_surfaces(seed, &then, &records, &sites);
 
     // Step 9: the disc bodies, which read no stream and move no other body.
-    system.discs = SystemDiscs::find(&system);
+    system.discs = SystemDiscs::find(seed, ctx, &system);
     system
 }
 

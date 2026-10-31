@@ -3259,6 +3259,8 @@ elements into elements at a time.
 - **P14.T28.d White dwarfs.** The pollution mark and the dusty disc of D11 on `belt.population`, the
   disc as a `DebrisDisc` body inside the white dwarf's Roche limit of about 1 R☉, present from the
   start of the white dwarf phase with a lifetime set by the cooling age.
+  - _Built_ 2026-10-31, held at 26 (`WHITE_DWARF_DEBRIS_VERSION`): Risks, "Deviations in
+    P14.T28.a's disc, T28.d and T28.e, as built".
 - **P14.T28.e Second-generation planets** of neutron stars, on `planet.secondgen`, in slots `0xC0`
   upward, placed by T6–T8 with a fixed small template and derived by T16 with the pulsar's spin-down
   luminosity from plan 06 as the only irradiation.
@@ -33470,3 +33472,18 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     wire `PopulationDto::ProtoplanetaryDisc(ProtoplanetaryDiscDto)` with `DiscGapDto`, a growing
     arm (plan 04's list now names `PopulationDto`; `PROTOCOL_VERSION` stays 3). The client decodes
     and lists it, and reads it out; `populationAnnuli` does not draw it yet.
+  - _T28.d._ Held at 26: `hosts::white_dwarfs`' `WHITE_DWARF_DEBRIS_VERSION`,
+    `WhiteDwarfDebrisRules::{Held, Debris}`, `with_white_dwarf_debris` (a line in
+    `with_every_26_hold`) and the tripwire `the_white_dwarf_debris_is_held_only_until_the_26_bump`.
+    Draws: `belt.population` words 112–114 (slot `0xEE`'s).
+  - The pollution lean (2026-10-31): plan 06's metal lines (`wd_spectral.rs`, 8.0% of DAs and
+    15.8% of the rest, optical, of every white dwarf) stay the star's, and T28.d's mark is the
+    system's (`PlanetarySystem::white_dwarf`, `is_polluted_at`), 37.5% of those that keep a belt
+    and a planet (Koester et al. 2014's at least 27%, up to about half). Neither reads the other.
+  - Lean (2026-10-31): the first single-star zone in zone order with a white dwarf by +H; its
+    survivors are read at the white dwarf's birth. The debris disc: 4% of them at birth, 1% at
+    1 Gyr, exponential between; from the dust's sublimation radius at 1,200 K (held to the outer
+    edge) to the rigid Roche limit for a rocky asteroid; its mass `NotModelled`; label `DEBRIS DISC`.
+  - New public items: `WhiteDwarfSystem`, `Population::DebrisDisc(DebrisDiscRecord)`, and on the
+    wire `PopulationDto::DebrisDisc(DebrisDiscDto)`; the client decodes, lists and reads it out,
+    and does not draw it yet. The pollution mark is not on the wire.

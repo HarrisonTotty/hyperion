@@ -537,6 +537,8 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   mode of an envelope at `T_eq` ≥ 950 K cut at 1 bar, or its photosphere where deeper.
 /// - the protoplanetary disc body, `PROTOPLANETARY_DISC_VERSION` (P14.T28.a), at
 ///   `ProtoplanetaryDiscRules::Disc` through `with_protoplanetary_disc`.
+/// - a white dwarf's pollution and debris disc, `WHITE_DWARF_DEBRIS_VERSION` (P14.T28.d), at
+///   `WhiteDwarfDebrisRules::Debris` through `with_white_dwarf_debris`.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
@@ -561,6 +563,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::system::envelope::{
         SupercriticalEnvelopeRules, with_supercritical_envelope,
     };
+    use crate::planetary::hosts::white_dwarfs::{WhiteDwarfDebrisRules, with_white_dwarf_debris};
     use crate::planetary::hosts::young::{ProtoplanetaryDiscRules, with_protoplanetary_disc};
     use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
     use crate::substance::helmholtz::{CompressionRules, with_compression};
@@ -581,6 +584,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_deck_profile(DeckProfileRules::Saturation, run);
     let run = move || with_dayside_decks(DaysideDecksRules::Cleared, run);
     let run = move || with_protoplanetary_disc(ProtoplanetaryDiscRules::Disc, run);
+    let run = move || with_white_dwarf_debris(WhiteDwarfDebrisRules::Debris, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 
