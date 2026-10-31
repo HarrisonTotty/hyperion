@@ -36,6 +36,9 @@
 //! - the eruption's excess, (F − 1) × its quiescent luminosity, beyond that cap by design
 //!   (P06.T28.e);
 //! - a thermal pulse scales the radius by √F, so that `T_eff` holds (P06.T28.f's lean);
+//! - `M_V` follows L at the track's bolometric correction, `M_V`(t) − 2.5 log₁₀(L ÷ L(t))
+//!   (research-leans-12 §3): exact for a thermal pulse, whose `T_eff` holds, and first-order for
+//!   a flare's, an outburst's or an eruption's light, which is not at the star's `T_eff`;
 //! - a magnetar's bursts and giant flares carry their own mean luminosities, which are listed and
 //!   never added (P06.T28.c);
 //! - a pulsar's spin frequency is offset by its Crab-like glitches still recovering and its
@@ -51,12 +54,15 @@ pub mod thermal_pulse;
 use crate::GeneratorVersion;
 use crate::events::{EventId, EventSeries, TimeWindow, tags};
 use crate::id::BodyId;
+use crate::math;
 use crate::rng::Seed;
+use crate::stellar::photometry::absolute_magnitude_v_under;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::wind;
 use crate::stellar::system::StarModel;
 use crate::stellar::{Composition, StarState};
 use crate::time::{Span, UniverseTime};
-use crate::units::{SolarLuminosities, SolarRadii};
+use crate::units::{Magnitudes, SolarLuminosities, SolarRadii};
 
 use flares::{Flare, FlareModel};
 use fu_orionis::{FuOrionisModel, Outburst, OutburstClass};
@@ -291,11 +297,12 @@ impl StarEvent {
 
 /// What a star's active events make of what a console reads at one time, on top of its track's
 /// state, which they never change (P06.T28.g; design note 14): its bolometric luminosity, its
-/// radius, and a pulsar's spin frequency.
+/// radius, its absolute visual magnitude and a pulsar's spin frequency.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EventEffects {
     luminosity: SolarLuminosities,
     radius: SolarRadii,
+    absolute_magnitude_v: Option<Magnitudes>,
     spin_frequency_offset_hz: f64,
 }
 
@@ -314,6 +321,17 @@ impl EventEffects {
     #[must_use]
     pub const fn radius(&self) -> SolarRadii {
         self.radius
+    }
+
+    /// The absolute visual magnitude, mag, of the star with this [`luminosity`](Self::luminosity):
+    /// the track's `M_V` less 2.5 log₁₀(L ÷ L(t)), at the track's bolometric correction
+    /// (research-leans-12 §3), or `None` where the track's state has none. It is exact for a
+    /// thermal pulse, whose `T_eff` holds, and first-order for a flare's, an FU Orionis outburst's
+    /// or a giant eruption's light, which is not at the star's `T_eff`. A magnetar's listed
+    /// luminosities do not move it.
+    #[must_use]
+    pub const fn absolute_magnitude_v(&self) -> Option<Magnitudes> {
+        self.absolute_magnitude_v
     }
 
     /// The offset of a pulsar's spin frequency from its spin-down's, Hz: its Crab-like glitches
@@ -342,6 +360,7 @@ pub struct StarEvents<'a> {
     lbv: Option<(LbvModel<'a>, EventSeries)>,
     pulses: Option<ThermalPulseModel<'a>>,
     composition: &'a Composition,
+    rules: StellarRules,
 }
 
 impl<'a> StarEvents<'a> {
@@ -360,6 +379,7 @@ impl<'a> StarEvents<'a> {
             lbv: LbvModel::of(star).map(|m| (m, series(tags::STAR_LBV_ERUPTION))),
             pulses: ThermalPulseModel::of(star, &series(tags::STAR_THERMAL_PULSE)),
             composition: star.composition(),
+            rules: star.rules(),
         }
     }
 
@@ -525,9 +545,15 @@ impl<'a> StarEvents<'a> {
         } else {
             f64::INFINITY
         };
+        let luminosity = (quiescent + held).min(cap) + erupting;
+        // At the track's bolometric correction; where the track has an M_V, its L(t) is positive.
+        let absolute_magnitude_v = absolute_magnitude_v_under(state, self.rules).map(|track| {
+            Magnitudes::new(track.value() - 2.5 * math::log10(luminosity / quiescent))
+        });
         Some(EventEffects {
-            luminosity: SolarLuminosities::new((quiescent + held).min(cap) + erupting),
+            luminosity: SolarLuminosities::new(luminosity),
             radius: SolarRadii::new(state.radius().value() * radius_factor),
+            absolute_magnitude_v,
             spin_frequency_offset_hz: offset_hz,
         })
     }
@@ -625,6 +651,7 @@ impl<'a> StarEvents<'a> {
             lbv: self.lbv.map(|(m, _)| (m, series(tags::STAR_LBV_ERUPTION))),
             pulses: ThermalPulseModel::of(star, &series(tags::STAR_THERMAL_PULSE)),
             composition: self.composition,
+            rules: self.rules,
         }
     }
 }

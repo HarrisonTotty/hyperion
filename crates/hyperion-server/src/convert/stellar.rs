@@ -231,12 +231,22 @@ fn star_summary(model: &StarModel, star: &StarSummary) -> StarSummaryDto {
     let state = star.state();
     // An object with no light has no photosphere, and its 0 K is not a temperature (ruling 54).
     let lit = state.luminosity().value() > 0.0;
-    // From version 26 the light the star's active events make, beside the track's state.
-    let (luminosity, radius) = star
-        .event_effects()
-        .map_or((state.luminosity(), state.radius()), |effects| {
-            (effects.luminosity(), effects.radius())
-        });
+    // From version 26 the light the star's active events make, beside the track's state, and the
+    // M_V it gives at the track's bolometric correction; T_eff and B − V stay the track's.
+    let (luminosity, radius, absolute_v) = star.event_effects().map_or(
+        (
+            state.luminosity(),
+            state.radius(),
+            star.absolute_magnitude_v(),
+        ),
+        |effects| {
+            (
+                effects.luminosity(),
+                effects.radius(),
+                effects.absolute_magnitude_v(),
+            )
+        },
+    );
     StarSummaryDto {
         body_index: star.body().body_index(),
         kind: object_kind(star.kind()),
@@ -248,7 +258,7 @@ fn star_summary(model: &StarModel, star: &StarSummary) -> StarSummaryDto {
         luminosity_lsun: luminosity.value(),
         radius_rsun: radius.value(),
         teff_k: lit.then(|| state.effective_temperature().value()),
-        absolute_v_mag: star.absolute_magnitude_v().map(Magnitudes::value),
+        absolute_v_mag: absolute_v.map(Magnitudes::value),
         colour_b_v_mag: star.colour_b_v().map(Magnitudes::value),
         mass_loss_rate_msun_per_yr: state.mass_loss_rate().value(),
         remnant: star
@@ -1006,9 +1016,10 @@ mod tests {
     }
 
     /// From version 26 (P06.T28.g's hold) a star's running events are on the wire with the light
-    /// they make: a saturated dwarf's flare, by onset, with its duration, and its luminosity the
-    /// summary's composed one over the track's, its temperature the track's; at a time with none
-    /// running the list is sent empty. Below 26 the key is absent (the test above).
+    /// they make: a saturated dwarf's flare, by onset, with its duration, and its luminosity and
+    /// `M_V` the summary's composed ones over the track's, its temperature the track's; at a time
+    /// with none running the list is sent empty and `M_V` is the track's. Below 26 the key is absent
+    /// (the test above).
     #[test]
     fn from_26_the_running_events_and_their_light_are_sent() {
         let stars = system_in(galaxy_26(), 0.2, 3e8);
@@ -1055,17 +1066,37 @@ mod tests {
             wire.teff_k.map(f64::to_bits),
             Some(sim.state().effective_temperature().value().to_bits())
         );
+        // M_V follows the flare's light at the track's bolometric correction.
+        assert_eq!(
+            wire.absolute_v_mag.map(f64::to_bits),
+            effects.absolute_magnitude_v().map(|m| m.value().to_bits())
+        );
+        assert!(
+            wire.absolute_v_mag
+                < sim
+                    .absolute_magnitude_v()
+                    .map(hyperion_sim::units::Magnitudes::value)
+        );
         let quiet = (0..24 * 30)
             .map(at)
             .find(|&time| !running(time))
             .expect("a quiet hour");
-        let wire = serde_json::to_value(&answer_at(quiet).stars[0]).expect("a summary serialises");
+        let answer = answer_at(quiet);
+        let summary = stars.summary_at(quiet);
+        assert_eq!(
+            answer.stars[0].absolute_v_mag.map(f64::to_bits),
+            summary.stars()[0]
+                .absolute_magnitude_v()
+                .map(|m| m.value().to_bits()),
+            "with no event in progress M_V is the track's"
+        );
+        let wire = serde_json::to_value(&answer.stars[0]).expect("a summary serialises");
         assert_eq!(wire.get("active_events"), Some(&serde_json::json!([])));
     }
 
     /// From version 26 a thermal pulse's radius is on the wire: a 3 M☉ star on its thermally
-    /// pulsing AGB, in a pulse's transient, sends the composed radius, √F of the track's, and the
-    /// composed luminosity, with the track's temperature.
+    /// pulsing AGB, in a pulse's transient, sends the composed radius, √F of the track's, the
+    /// composed luminosity and its `M_V`, with the track's temperature.
     #[test]
     fn from_26_a_thermal_pulse_s_radius_is_sent() {
         let death = system_in(galaxy_26(), 3.0, 1e8)
@@ -1101,6 +1132,10 @@ mod tests {
         assert_eq!(
             wire.teff_k.map(f64::to_bits),
             Some(sim.state().effective_temperature().value().to_bits())
+        );
+        assert_eq!(
+            wire.absolute_v_mag.map(f64::to_bits),
+            effects.absolute_magnitude_v().map(|m| m.value().to_bits())
         );
         let events = wire.active_events.as_ref().expect("sent from 26");
         assert!(

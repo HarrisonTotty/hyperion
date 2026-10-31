@@ -214,3 +214,107 @@ fn the_composed_arm_gives_the_same_output_twice_and_cold() {
     }
     assert_eq!(cold, warm.summary_at(late));
 }
+
+/// Under the composed arm `M_V` follows the event light at the track's bolometric correction
+/// (research-leans-12 §3): in a 3 M☉ star's thermal pulse of factor F it moves by −2.5 log₁₀ F to
+/// 10⁻¹² mag, the composed L and R keep the track's `T_eff`, and so does the summary's state; a
+/// flare brightens the dwarf's by its own light. The summary's own `M_V` is the track's to the bit
+/// with an event in progress or none, and with none the summary carries no event light; and the
+/// system's brief is the primary's track values to the bit.
+#[test]
+fn the_composed_m_v_follows_the_event_light_and_the_brief_keeps_the_track_s() {
+    use crate::events::{EventSeries, tags};
+    use crate::id::BodyId;
+    use crate::math;
+    use crate::stellar::events::thermal_pulse::ThermalPulseModel;
+    use hyperion_testkit::float::bits as float_bits;
+    let bits = |m: Option<crate::units::Magnitudes>| m.map(|m| float_bits(m.value()));
+    let check_brief = |stars: &SystemStars, summary: &StarSummary, t: UniverseTime| {
+        let brief = stars.brief_at(t).expect("formed");
+        let luminosity = summary.state().luminosity().value();
+        assert_eq!(
+            brief.log_luminosity().map(|l| float_bits(l.value())),
+            Some(float_bits(math::log10(luminosity)))
+        );
+        assert_eq!(
+            float_bits(brief.effective_temperature().value()),
+            float_bits(summary.state().effective_temperature().value())
+        );
+    };
+    // The thermal pulse: the record's age steps back from the star's death, at the epoch, inside
+    // the clock window, to a time in a pulse's transient.
+    let death = SystemStars::generate(composed(), &record(5, 3.0, 1e8))
+        .primary()
+        .lifetime()
+        .expect("a 3 M☉ star dies")
+        .value();
+    let t = UniverseTime::EPOCH;
+    let (pulsing, record) = (1..200)
+        .map(|k| record(5, 3.0, death - 7_000.0 * f64::from(k)))
+        .map(|record| (SystemStars::generate(composed(), &record), record))
+        .find(|(stars, _)| {
+            let summary = primary(stars, t);
+            summary.event_effects().is_some_and(|effects| {
+                float_bits(effects.radius().value()) != float_bits(summary.state().radius().value())
+            })
+        })
+        .expect("a pulse's transient in the last 1.4 Myr");
+    let summary = primary(&pulsing, t);
+    let effects = summary.event_effects().expect("a pulse's light");
+    let series = EventSeries::new(
+        Seed::new(SEED),
+        tags::STAR_THERMAL_PULSE,
+        BodyId::new(record.id(), 0).into(),
+    );
+    let factor = ThermalPulseModel::of(pulsing.primary(), &series)
+        .expect("the star pulses")
+        .luminosity_factor_at(t);
+    let track = summary.absolute_magnitude_v().expect("a giant's M_V");
+    let composed_v = effects.absolute_magnitude_v().expect("the pulse's M_V");
+    let shift = composed_v.value() - track.value();
+    assert!(
+        (shift + 2.5 * math::log10(factor)).abs() < 1e-12,
+        "F {factor}: M_V moves by {shift}"
+    );
+    let (state, held_summary) = (
+        summary.state(),
+        primary(&SystemStars::generate(held(), &record), t),
+    );
+    let teff = |l: f64, r: f64| math::powf_positive(l / (r * r), 0.25);
+    let ratio = teff(effects.luminosity().value(), effects.radius().value())
+        / teff(state.luminosity().value(), state.radius().value());
+    assert!((ratio - 1.0).abs() < 1e-12, "T_eff moves by {ratio}");
+    assert_eq!(summary.state(), held_summary.state());
+    assert_eq!(bits(Some(track)), bits(held_summary.absolute_magnitude_v()));
+    check_brief(&pulsing, &summary, t);
+    // The flare and a quiet hour of the flaring dwarf.
+    let (dwarf, t) = flaring();
+    let stars = SystemStars::generate(composed(), dwarf);
+    let held_stars = SystemStars::generate(held(), dwarf);
+    let summary = primary(&stars, *t);
+    let effects = summary.event_effects().expect("a flare's light");
+    let track = summary.absolute_magnitude_v().expect("a dwarf's M_V");
+    let ratio = effects.luminosity().value() / summary.state().luminosity().value();
+    let flared = effects.absolute_magnitude_v().expect("the flare's M_V");
+    assert!(flared < track, "{flared:?} against {track:?}");
+    assert!((flared.value() - track.value() + 2.5 * math::log10(ratio)).abs() < 1e-12);
+    assert_eq!(
+        bits(summary.absolute_magnitude_v()),
+        bits(primary(&held_stars, *t).absolute_magnitude_v())
+    );
+    check_brief(&stars, &summary, *t);
+    let quiet = (1..24 * 30)
+        .map(|h| {
+            UniverseTime::EPOCH
+                .checked_add(crate::time::Span::from_seconds(3_600 * h))
+                .expect("inside the clock")
+        })
+        .find(|&q| primary(&stars, q).event_effects().is_none())
+        .expect("a quiet hour in a month");
+    let summary = primary(&stars, quiet);
+    assert_eq!(
+        bits(summary.absolute_magnitude_v()),
+        bits(primary(&held_stars, quiet).absolute_magnitude_v())
+    );
+    check_brief(&stars, &summary, quiet);
+}
