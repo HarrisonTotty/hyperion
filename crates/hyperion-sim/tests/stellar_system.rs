@@ -513,7 +513,7 @@ fn a_star_dying_at_a_hundred_years_is_living_at_99_and_a_remnant_at_101() {
         .expect("inside the clock")
         .as_seconds_f64();
     assert!(since.abs() < 1e3, "{since} s from +100 yr");
-    let at = |y: i64| stars.summary_at(years(y)).stars()[0];
+    let at = |y: i64| stars.summary_at(years(y)).stars()[0].clone();
     assert!(at(99).state().phase().is_living());
     assert!(at(101).state().phase().is_remnant());
     assert_eq!(at(99).death_in_window().map(|(when, _)| when), Some(t));

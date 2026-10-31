@@ -224,7 +224,7 @@ fn each_reader_takes_the_classes_from_its_galaxy_s_rules() {
         let read = |galaxy: &Galaxy| {
             let stars = SystemStars::generate(galaxy, record);
             let summary = stars.summary_at(t);
-            let primary = summary.stars()[0];
+            let primary = summary.stars()[0].clone();
             let brief = stars.brief_at(t).expect("formed");
             let model = BriefModel::new(galaxy, record);
             assert_eq!(model.route(), BriefRoute::Exact, "{class}");
@@ -304,4 +304,48 @@ fn the_full_arm_s_classes_are_the_same_in_any_order() {
         let (stars, model) = &built[i];
         (stars.summary_at(t), stars.brief_at(t), model.brief_at(t))
     });
+}
+
+/// Both 26 holds on, as version 26 will have them: the carbon star's summary reads its class from
+/// the pulses its events built (`system::Pulses::Built`), which must be the class its own series
+/// gives (`Pulses::Opened`), as the system's brief and the range brief read it, at the epoch and at
+/// times across the clock window.
+#[test]
+fn with_its_events_composed_the_carbon_star_s_class_is_its_brief_s() {
+    let both = held().clone().with_rules(GalaxyRules::every_26_hold());
+    assert_eq!(both.rules().stellar, StellarRules::every_26_hold());
+    let record = carbon_star();
+    let stars = SystemStars::generate(&both, record);
+    let model = BriefModel::new(&both, record);
+    let streams = stars.streams(crate::id::BodyId::new(record.id(), 0));
+    for years in [-1_000, -300, 0, 450, 1_000] {
+        let t = UniverseTime::from_julian_years(years).expect("inside the clock");
+        let summary = stars.summary_at(t);
+        let primary = &summary.stars()[0];
+        assert!(primary.active_events().is_some(), "composed at 26");
+        let brief = stars.brief_at(t).expect("formed");
+        assert_eq!(
+            primary.classification().to_string(),
+            brief.class().to_string()
+        );
+        assert_eq!(model.brief_at(t), Some(brief));
+        let state = stars.primary().state_at(t).expect("formed");
+        let opened = stars
+            .primary()
+            .class_extras_at(&state, t, Pulses::Opened(streams));
+        let events =
+            crate::stellar::events::StarEvents::of(stars.primary(), both.seed(), streams.body());
+        assert_eq!(
+            stars
+                .primary()
+                .class_extras_at(&state, t, Pulses::Built(events.pulses())),
+            opened
+        );
+    }
+    assert_eq!(
+        stars.summary_at(UniverseTime::EPOCH).stars()[0]
+            .classification()
+            .peculiar_class(),
+        Some(PeculiarClass::Carbon)
+    );
 }

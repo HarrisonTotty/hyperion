@@ -6,8 +6,9 @@
 //! 2026-09-22): a field this generator version does not compute is absent, one computed that the
 //! object lacks is `null`, and the rest carry their values. A pulsar's detail (plan 06's T21), a
 //! black hole's spin (T22), rotation and activity (T25), variability (T26.a–c) and the planetary
-//! nebula (T16.b) are sent where the sim computes them; the active events are absent for every star
-//! (T28).
+//! nebula (T16.b) are sent where the sim computes them. A star's active events (P06.T28.g) are sent
+//! where its summary composes them, from version 26, with the luminosity and radius they make;
+//! below it they are absent for every star, and the light is the track's.
 //! A remnant's natal kick is P06.T19's ([`StarModel::natal_kick`]), `null` where the model holds
 //! none.
 //!
@@ -19,9 +20,9 @@
 use hyperion_protocol::{
     BinaryClassDto, CataclysmicKindDto, ErrorCode, HierarchyDto, HierarchyNodeDto,
     HighMassXrayBinaryKindDto, KickModeDto, Modelled, NatalKickDto, ObjectKindDto, ObservedDto,
-    OrbitDto, PhaseDto, PlanetaryNebulaDto, PulsarDto, RemnantDto, RequestError, StarSummaryDto,
-    StellarBriefDto, SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest,
-    VariabilityDto, VariableKindDto, XrayBinaryKindDto,
+    OrbitDto, PhaseDto, PlanetaryNebulaDto, PulsarDto, RemnantDto, RequestError, StarEventDto,
+    StarEventKindDto, StarSummaryDto, StellarBriefDto, SystemExistenceDto, SystemIdHex,
+    SystemSummaryDto, SystemSummaryRequest, VariabilityDto, VariableKindDto, XrayBinaryKindDto,
 };
 use hyperion_sim::galaxy::placement::Existence;
 use hyperion_sim::galaxy::query::QueryMode;
@@ -31,6 +32,7 @@ use hyperion_sim::observe::{CurvatureError, Retardation};
 use hyperion_sim::orbit::KeplerElements;
 use hyperion_sim::planetary::SystemContext;
 use hyperion_sim::stellar::binary::{BinaryClass, CvKind, HmxbKind, XrbKind};
+use hyperion_sim::stellar::events::{StarEvent, StarEventKind};
 use hyperion_sim::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
 use hyperion_sim::stellar::nebula::PlanetaryNebula;
 use hyperion_sim::stellar::photometry::{absolute_bolometric_magnitude, bolometric_correction_v};
@@ -229,6 +231,12 @@ fn star_summary(model: &StarModel, star: &StarSummary) -> StarSummaryDto {
     let state = star.state();
     // An object with no light has no photosphere, and its 0 K is not a temperature (ruling 54).
     let lit = state.luminosity().value() > 0.0;
+    // From version 26 the light the star's active events make, beside the track's state.
+    let (luminosity, radius) = star
+        .event_effects()
+        .map_or((state.luminosity(), state.radius()), |effects| {
+            (effects.luminosity(), effects.radius())
+        });
     StarSummaryDto {
         body_index: star.body().body_index(),
         kind: object_kind(star.kind()),
@@ -237,8 +245,8 @@ fn star_summary(model: &StarModel, star: &StarSummary) -> StarSummaryDto {
         initial_mass_msun: model.initial_mass().value(),
         mass_msun: state.mass().value(),
         core_mass_msun: state.core_mass().value(),
-        luminosity_lsun: state.luminosity().value(),
-        radius_rsun: state.radius().value(),
+        luminosity_lsun: luminosity.value(),
+        radius_rsun: radius.value(),
         teff_k: lit.then(|| state.effective_temperature().value()),
         absolute_v_mag: star.absolute_magnitude_v().map(Magnitudes::value),
         colour_b_v_mag: star.colour_b_v().map(Magnitudes::value),
@@ -255,10 +263,31 @@ fn star_summary(model: &StarModel, star: &StarSummary) -> StarSummaryDto {
         planetary_nebula: star.planetary_nebula().map_or(Modelled::Null, |nebula| {
             Modelled::Value(nebula_dto(&nebula))
         }),
-        active_events: None,
+        active_events: star
+            .active_events()
+            .map(|events| events.iter().map(star_event_dto).collect()),
         // Plan 11's P11.T11 runs the binary engine for each pair of two stars and gives each of
         // them its pair's class: `null` for a star in no class.
         binary_class: binary_class_dto(star.binary_class()),
+    }
+}
+
+/// One of a star's active events as the wire carries it (plan 06, P06.T28.g): its kind, onset and
+/// duration. An FU Orionis outburst's class and a magnetar event's luminosity stay in the sim.
+#[must_use]
+fn star_event_dto(event: &StarEvent) -> StarEventDto {
+    StarEventDto {
+        kind: match event.kind() {
+            StarEventKind::Flare => StarEventKindDto::Flare,
+            StarEventKind::Glitch => StarEventKindDto::Glitch,
+            StarEventKind::MagnetarBurst => StarEventKindDto::MagnetarBurst,
+            StarEventKind::MagnetarGiantFlare => StarEventKindDto::MagnetarGiantFlare,
+            StarEventKind::FuOrionisOutburst => StarEventKindDto::FuOrionisOutburst,
+            StarEventKind::GiantEruption => StarEventKindDto::GiantEruption,
+            StarEventKind::ThermalPulse => StarEventKindDto::ThermalPulse,
+        },
+        onset: wire_time(event.onset()),
+        duration_s: event.duration().as_seconds_f64(),
     }
 }
 
@@ -952,6 +981,83 @@ mod tests {
             assert_eq!(fields.get(null), Some(&serde_json::Value::Null), "{null}");
         }
         assert_eq!(fields.get("body_index"), Some(&serde_json::json!(0)));
+    }
+
+    /// From version 26 (P06.T28.g's hold) a star's running events are on the wire with the light
+    /// they make: a saturated dwarf's flare, by onset, with its duration, and its luminosity the
+    /// summary's composed one over the track's, its temperature the track's; at a time with none
+    /// running the list is sent empty. Below 26 the key is absent (the test above).
+    #[test]
+    fn from_26_the_running_events_and_their_light_are_sent() {
+        use hyperion_sim::GeneratorVersion;
+        use hyperion_sim::galaxy::imf::MassFunctionKind;
+        use hyperion_sim::galaxy::params::GalaxyParams;
+        let seed = Seed::new(0x4d2);
+        let galaxy = Galaxy::from_params_at_version(
+            seed,
+            GalaxyParams::from_seed(seed, MassFunctionKind::default()),
+            GeneratorVersion::new(26),
+        )
+        .expect("a drawn galaxy builds");
+        let t = template();
+        let record = SystemRecord::from_parts(
+            t.id(),
+            *t.epoch_position(),
+            SystemOrigin::Grid(t.component().expect("a grid record")),
+            t.population(),
+            SolarMasses::new(0.2),
+            Years::new(3e8),
+        );
+        let stars = SystemStars::generate(&galaxy, &record);
+        let at = |hours: i64| {
+            UniverseTime::EPOCH
+                .checked_add(hyperion_sim::time::Span::from_seconds(3_600 * hours))
+                .expect("inside the clock")
+        };
+        let answer_at = |time: UniverseTime| {
+            let request = SystemSummaryRequest {
+                universe: UniverseIdHex::from_u64(7),
+                system: SystemIdHex::from_u64(stars.record().id().raw()),
+                time: wire_time(time),
+                mode: QueryModeDto::Now,
+            };
+            system_summary(request, &stars, time)
+        };
+        let running = |time| {
+            stars.summary_at(time).stars()[0]
+                .active_events()
+                .is_some_and(|events| !events.is_empty())
+        };
+        let flaring = (0..24 * 30)
+            .map(at)
+            .find(|&time| running(time))
+            .expect("a flare in a month");
+        let summary = stars.summary_at(flaring);
+        let sim = &summary.stars()[0];
+        let wire = &answer_at(flaring).stars[0];
+        let events = wire.active_events.as_ref().expect("sent from 26");
+        assert!(
+            events
+                .iter()
+                .all(|e| e.kind == StarEventKindDto::Flare && e.duration_s > 0.0)
+        );
+        assert_eq!(events.len(), sim.active_events().expect("composed").len());
+        let effects = sim.event_effects().expect("a flare's light");
+        assert_eq!(
+            wire.luminosity_lsun.to_bits(),
+            effects.luminosity().value().to_bits()
+        );
+        assert!(wire.luminosity_lsun > sim.state().luminosity().value());
+        assert_eq!(
+            wire.teff_k.map(f64::to_bits),
+            Some(sim.state().effective_temperature().value().to_bits())
+        );
+        let quiet = (0..24 * 30)
+            .map(at)
+            .find(|&time| !running(time))
+            .expect("a quiet hour");
+        let wire = serde_json::to_value(&answer_at(quiet).stars[0]).expect("a summary serialises");
+        assert_eq!(wire.get("active_events"), Some(&serde_json::json!([])));
     }
 
     /// A white dwarf just born from the AGB lights the nebula the sim gives it, field for field, and

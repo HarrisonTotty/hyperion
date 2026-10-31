@@ -227,6 +227,14 @@ pub const RECOVERY_FRACTION: f64 = 0.835;
 /// six recoveries (2.0–10.3 days) as [`RECOVERY_FRACTION`].
 pub const RECOVERY_TIME_DAYS: f64 = 3.1;
 
+/// How long a Vela-like glitch is listed as running from its onset (P06.T28.g): `τ_d` of
+/// [`RECOVERY_TIME_DAYS`], 3.1 days, 267,840 s (the lane's lean, 2026-10-31: the glitch lasts its
+/// recovery time), which is also near Vela's own intermediate recovery of about 3.3 days among its
+/// 0.5-, 3- and 19-day terms (Dodson et al. 2002, ApJ 564, L85, recalled, not read at
+/// source). Its frequency offset, a sawtooth, has no end of its own: it runs on to the next
+/// glitch's onset.
+pub const LARGE_GLITCH_DURATION: Span = Span::from_seconds(267_840);
+
 /// The lower edge of the Vela-like characteristic ages, at the reference: 10⁴ years (plan 06,
 /// P06.T28.b).
 pub const VELA_LIKE_MIN_AGE: Years = Years::new(1.0e4);
@@ -575,6 +583,29 @@ impl<'a> GlitchModel<'a> {
     }
 }
 
+impl GlitchModel<'_> {
+    /// [`glitches_in`] on this model: the star's Crab-like glitches on `series` with onsets in
+    /// `window`, in time order, appended to `out`.
+    pub fn glitches_in(&self, series: &EventSeries, window: TimeWindow, out: &mut Vec<Glitch>) {
+        let mut events = Vec::new();
+        bins().events_in(series, window, self, &mut events);
+        out.extend(events.into_iter().map(|event| self.glitch_of(event)));
+    }
+
+    /// [`glitches_active_at`] on this model: the star's Crab-like glitches on `series` still
+    /// recovering at `t`, in time order, appended to `out`.
+    pub fn glitches_active_at(&self, series: &EventSeries, t: UniverseTime, out: &mut Vec<Glitch>) {
+        let mut events = Vec::new();
+        bins().active_at(series, t, self, &mut events);
+        out.extend(
+            events
+                .into_iter()
+                .map(|event| self.glitch_of(event))
+                .filter(|glitch| glitch.is_active_at(t)),
+        );
+    }
+}
+
 impl RateModel for GlitchModel<'_> {
     fn bound(&self, _bin: TimeWindow) -> EventsPerSecond {
         self.rate
@@ -780,12 +811,9 @@ pub fn glitches_in(
         tags::STAR_GLITCH,
         "a star's Crab-like glitches are its star.ev.glitch series"
     );
-    let Some(model) = GlitchModel::of(star) else {
-        return;
-    };
-    let mut events = Vec::new();
-    bins().events_in(series, window, &model, &mut events);
-    out.extend(events.into_iter().map(|event| model.glitch_of(event)));
+    if let Some(model) = GlitchModel::of(star) {
+        model.glitches_in(series, window, out);
+    }
 }
 
 /// Appends to `out` the Crab-like glitches of `star` whose offset is not yet 0 at `t`, sorted by
@@ -810,17 +838,9 @@ pub fn glitches_active_at(
         tags::STAR_GLITCH,
         "a star's Crab-like glitches are its star.ev.glitch series"
     );
-    let Some(model) = GlitchModel::of(star) else {
-        return;
-    };
-    let mut events = Vec::new();
-    bins().active_at(series, t, &model, &mut events);
-    out.extend(
-        events
-            .into_iter()
-            .map(|event| model.glitch_of(event))
-            .filter(|glitch| glitch.is_active_at(t)),
-    );
+    if let Some(model) = GlitchModel::of(star) {
+        model.glitches_active_at(series, t, out);
+    }
 }
 
 /// The Crab-like glitch `id` names, regenerated on its own.
@@ -874,7 +894,17 @@ impl<'a> GlitchCycle<'a> {
     /// 10¹² s, which the clock holds, and the noise's constants pass its slope check.
     #[must_use]
     pub fn of(star: &'a StarModel, seed: Seed, body: BodyId) -> Option<Self> {
-        let model = GlitchModel::of(star)?;
+        Self::of_model(GlitchModel::of(star)?, seed, body)
+    }
+
+    /// [`of`](Self::of) on the star's glitch model `model`, built already: the same cycle, without
+    /// building the model again (P06.T28.g builds each kind's model once).
+    ///
+    /// # Panics
+    ///
+    /// As [`of`](Self::of).
+    #[must_use]
+    pub fn of_model(model: GlitchModel<'a>, seed: Seed, body: BodyId) -> Option<Self> {
         if !model.meets_vela_like_cuts() || !is_vela_like_marked(seed, body) {
             return None;
         }
@@ -958,6 +988,38 @@ impl<'a> GlitchCycle<'a> {
         math::mul_add(size, 1.0 - fraction, -0.5 * LARGE_MEAN_SIZE_HZ)
     }
 
+    /// [`large_glitches_in`] on this cycle: the star's Vela-like glitches with onsets in `window`,
+    /// in cycle order, appended to `out`.
+    pub fn large_glitches_in(&self, window: TimeWindow, out: &mut Vec<LargeGlitch>) {
+        let mut events = Vec::new();
+        self.noise
+            .events_in(&self.series, &self.clock, window, &mut events);
+        out.extend(
+            events
+                .into_iter()
+                .filter(|event| self.model.glitches_at(event.time()))
+                .map(|event| self.large_glitch_of(event)),
+        );
+    }
+
+    /// The Vela-like glitch that runs at `t`, if one does (P06.T28.g): the glitch of the cycle at
+    /// `t`, for [`LARGE_GLITCH_DURATION`] from its onset. Its sawtooth runs on to the next
+    /// ([`frequency_offset_hz_at`](Self::frequency_offset_hz_at)); this is how long a console
+    /// lists it.
+    #[must_use]
+    pub fn large_glitch_active_at(&self, t: UniverseTime) -> Option<LargeGlitch> {
+        let (cycle, _) = self.noise.cycle_at(&self.series, &self.clock, t);
+        self.noise
+            .event(&self.series, &self.clock, cycle)
+            .filter(|event| self.model.glitches_at(event.time()))
+            .map(|event| self.large_glitch_of(event))
+            .filter(|glitch| {
+                t.checked_since(glitch.onset).is_some_and(|elapsed| {
+                    !elapsed.is_negative() && elapsed < LARGE_GLITCH_DURATION
+                })
+            })
+    }
+
     /// The large glitch of `event`, a cycle of this star's series: its size from word 0 of its
     /// marks.
     #[must_use]
@@ -1033,19 +1095,9 @@ pub fn large_glitches_in(
     window: TimeWindow,
     out: &mut Vec<LargeGlitch>,
 ) {
-    let Some(cycles) = GlitchCycle::of(star, seed, body) else {
-        return;
-    };
-    let mut events = Vec::new();
-    cycles
-        .noise
-        .events_in(&cycles.series, &cycles.clock, window, &mut events);
-    out.extend(
-        events
-            .into_iter()
-            .filter(|event| cycles.model.glitches_at(event.time()))
-            .map(|event| cycles.large_glitch_of(event)),
-    );
+    if let Some(cycles) = GlitchCycle::of(star, seed, body) {
+        cycles.large_glitches_in(window, out);
+    }
 }
 
 /// The Vela-like glitch of cycle `cycle` of `star`, regenerated on its own.

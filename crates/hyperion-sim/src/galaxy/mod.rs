@@ -290,6 +290,27 @@ impl Galaxy {
         Self::build(seed, params, GalaxyRules::of_version(GENERATOR_VERSION))
     }
 
+    /// [`from_params`](Self::from_params) under generator version `version`'s rules, every hold
+    /// that version turns on in force: another crate's door to a later version's arms, for its
+    /// tests alone (P06.T28.g's server test of the wire's 26 arm). Nothing generated builds one.
+    ///
+    /// # Errors
+    ///
+    /// As [`from_params`](Self::from_params).
+    ///
+    /// # Panics
+    ///
+    /// As [`from_params`](Self::from_params).
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn from_params_at_version(
+        seed: Seed,
+        params: GalaxyParams,
+        version: crate::GeneratorVersion,
+    ) -> Result<Self, BuildGalaxyError> {
+        Self::build(seed, params, GalaxyRules::of_version(version))
+    }
+
     /// [`from_params`](Self::from_params) under `rules` in place of the generator version's: the
     /// tests' door to a later version's galaxy-side holds (decision-galaxy-25-train §1.3), such as
     /// `GalaxyRules::every_25_hold()`.

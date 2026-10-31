@@ -1804,7 +1804,9 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   count itself gives P06.T24.b's C/O, the census and the listings the same pulses.
   Records: [06-stellar-stage/records/P06.T28.f.md](06-stellar-stage/records/P06.T28.f.md).
 - **P06.T28.g Assembly.** `stellar::events::{events_in, active_at}` over all kinds; `StarEvent`;
-  transient factors composed in `summary_at` (design note 14).
+  transient factors composed in `summary_at` (design note 14). **Built (lane `p06-t24b-t28g`,
+  2026-10-31), held at 26 (`STAR_EVENTS_VERSION`).**
+  Records: [06-stellar-stage/records/P06.T28.g.md](06-stellar-stage/records/P06.T28.g.md).
 - **Files:** `stellar/events/`: `mod.rs`, `flares.rs`, `glitches.rs`, `magnetar.rs`,
   `fu_orionis.rs`, `lbv.rs`, `thermal_pulse.rs`.
 - **Tests:** per kind, the mean count over 10⁴ stars matches the rate integral (Poisson interval);
@@ -1819,8 +1821,7 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   new kind that moves nothing existing, as "Generator version" says of every task but T30.b and
   T19.e).** The record is under Risks ("Deviations in T28.a, as built" and "Deferred findings
   (2026-10-13 rule) (P06.T28.a)"). T28.b and T28.d are done (2026-10-15, above) and T28.c, T28.e
-  and T28.f (2026-10-28, above), and T28.g is open; T28.g composes
-  `Flare::luminosity_factor_at` into `summary_at`.
+  and T28.f (2026-10-28, above), and T28.g (2026-10-31, above, held at 26).
 
 ### Phase G: system assembly and galaxy integration
 
@@ -2609,8 +2610,8 @@ rides version 25 (S1), a held swap that lands with the train (decision-bump-plan
 2026-10-14; updated 2026-10-15). P06.T42.b (ask A2's winds) and P06.T43.b (ask A4's V) move
 stellar output too: each is a swap held on a lane branch, which rides version 25 (S1) if it is
 ready when that train's wiring starts, else the next galaxy train (decision-galaxy-25-train §1.7,
-2026-10-27). P06.T24.b's young, S and carbon classes are held at 26 behind
-`PECULIAR_CLASSES_VERSION`, a `StellarRules` field. Every other task adds output on new streams
+2026-10-27). P06.T24.b's young, S and carbon classes and P06.T28.g's events in the summaries are
+held at 26 behind `PECULIAR_CLASSES_VERSION` and `STAR_EVENTS_VERSION`, `StellarRules` fields. Every other task adds output on new streams
 and moves nothing that existed. Any later
 change to a formula,
 coefficient, recipe default, knot count or bridge time of this plan changes stellar output and is a

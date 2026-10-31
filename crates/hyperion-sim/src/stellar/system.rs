@@ -44,6 +44,7 @@ use crate::stellar::classify::{
 };
 use crate::stellar::draws::{StandardNormal, StarDraws, UnitUniform};
 use crate::stellar::events::thermal_pulse::ThermalPulseModel;
+use crate::stellar::events::{EventEffects, StarEvent, StarEventRules, StarEvents};
 use crate::stellar::multiplicity::{
     HierarchyNode, MultiplicityContext, NodeIndex, RedrawAttempt, SlotKind, StarIndex,
     SystemHierarchy, draw_hierarchy_of_composition,
@@ -706,7 +707,7 @@ impl StarModel {
         &self,
         state: &StarState,
         t: UniverseTime,
-        pulses: Pulses,
+        pulses: Pulses<'_>,
     ) -> ClassExtras {
         let extras = self.history_extras_at(state, t);
         peculiar_extras(
@@ -721,16 +722,19 @@ impl StarModel {
                 )
             },
             || {
-                let Pulses::Opened(streams) = pulses else {
-                    return None;
-                };
                 if state.phase() != Phase::ThermallyPulsingAgb {
                     return None;
                 }
                 let dredge_up = DredgeUp::of(self.initial_mass, &self.composition, self.track()?)?;
-                let pulses =
-                    ThermalPulseModel::of(self, &streams.series(event_tags::STAR_THERMAL_PULSE))?;
-                chemical_class(dredge_up.c_to_o(pulses.pulse_number_at(t)?))
+                let n = match pulses {
+                    Pulses::Opened(streams) => {
+                        let series = streams.series(event_tags::STAR_THERMAL_PULSE);
+                        ThermalPulseModel::of(self, &series)?.pulse_number_at(t)?
+                    }
+                    Pulses::Built(model) => model?.pulse_number_at(t)?,
+                    Pulses::Unopened => return None,
+                };
+                chemical_class(dredge_up.c_to_o(n))
             },
         )
     }
@@ -1003,6 +1007,12 @@ impl StarStreams {
         Self { seed, body }
     }
 
+    /// The universe's seed.
+    #[must_use]
+    pub(crate) const fn seed(self) -> Seed {
+        self.seed
+    }
+
     /// The star's body.
     #[must_use]
     pub(crate) const fn body(self) -> BodyId {
@@ -1018,10 +1028,13 @@ impl StarStreams {
 
 /// Whether a star's own thermal pulses are opened for its class (P06.T24.b): an S or carbon star's
 /// C/O reads the pulse number on the star's own series.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum Pulses {
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Pulses<'a> {
     /// Opened from these streams.
     Opened(StarStreams),
+    /// Built already, by the summary's events (P06.T28.g builds each kind's model once): the
+    /// star's pulses, or `None` for a star that does not pulse.
+    Built(Option<&'a ThermalPulseModel<'a>>),
     /// Not opened: no S or carbon class is given.
     Unopened,
 }
@@ -1092,9 +1105,10 @@ pub enum ClockDeath {
 /// A remnant's detail (a neutron star's pulsar state, P06.T21; a black hole's spin, T22), a
 /// living star's rotation, magnetism and activity (T25), its variability (T26.a–c) and the
 /// planetary nebula it lights (T16.b) are here. Plan 11's binary class (P11.T5) is the class of
-/// the pair the binary engine ran the star in (P11.T11). The active events (T28) are added by
-/// their task.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// the pair the binary engine ran the star in (P11.T11). From version 26 its active events and
+/// the light they make (P06.T28.g) are here too, beside the track's state, which they never
+/// change.
+#[derive(Debug, Clone, PartialEq)]
 pub struct StarSummary {
     body: BodyId,
     state: StarState,
@@ -1111,6 +1125,8 @@ pub struct StarSummary {
     planetary_nebula: Option<PlanetaryNebula>,
     death_in_window: Option<(UniverseTime, DeathKind)>,
     binary_class: BinaryClass,
+    active_events: Option<Vec<StarEvent>>,
+    event_effects: Option<EventEffects>,
 }
 
 /// What a remnant's summary says beyond its kind and mass: a neutron star's pulsar state
@@ -1225,6 +1241,23 @@ impl StarSummary {
     #[must_use]
     pub const fn binary_class(&self) -> BinaryClass {
         self.binary_class
+    }
+
+    /// The star's events running at the time summarised, by onset, then kind, then ID
+    /// ([`StarEvents::at`], P06.T28.g): empty where none runs, and `None` where they are not
+    /// composed, below version 26 (`STAR_EVENTS_VERSION`) and for a star its pair has changed,
+    /// whose events would be its own single-star model's (the lane's lean, 2026-10-31).
+    #[must_use]
+    pub fn active_events(&self) -> Option<&[StarEvent]> {
+        self.active_events.as_deref()
+    }
+
+    /// The light and spin the star's active events make at the time summarised
+    /// ([`EventEffects`], P06.T28.g), or `None` where none changes them or they are not composed.
+    /// [`state`](Self::state) stays the track's (design note 14), as does the brief.
+    #[must_use]
+    pub const fn event_effects(&self) -> Option<EventEffects> {
+        self.event_effects
     }
 }
 
@@ -1892,6 +1925,10 @@ impl SystemStars {
     /// A star of a pair the engine ran is summarised from its pair's state then, with the pair's
     /// class ([`StarSummary::binary_class`]); the hierarchy is the drawn one, and
     /// [`SystemStars::state_at`] gives the pairs' orbits then.
+    ///
+    /// From version 26 each star's summary holds its events running at `t` and the light they
+    /// make (P06.T28.g; [`StarSummary::active_events`]). The summary depends on the system and `t`
+    /// alone: it takes no list of past events, and is the same whatever was asked before.
     ///
     /// # Panics
     ///
@@ -2596,6 +2633,9 @@ fn star_summary_with(
             None
         },
         binary_class: paired.class,
+        // The events are the star's own single-star model's, which its pair has replaced.
+        active_events: None,
+        event_effects: None,
         state,
     })
 }
@@ -2651,13 +2691,23 @@ pub(crate) fn star_summary(
 ) -> Option<StarSummary> {
     let body = streams.body();
     let state = star.state_at(t)?;
+    let events = match star.rules.star_events {
+        StarEventRules::Held => None,
+        StarEventRules::Composed => Some(StarEvents::of(star, streams.seed(), body)),
+    };
+    let pulses = events.as_ref().map_or(Pulses::Opened(streams), |events| {
+        Pulses::Built(events.pulses())
+    });
     let classification = classify_under(
         &state,
         star.composition(),
         star.draws(),
-        star.class_extras_at(&state, t, Pulses::Opened(streams)),
+        star.class_extras_at(&state, t, pulses),
         star.rules,
     );
+    let (active_events, event_effects) = events
+        .map(|events| events.at(t, &state))
+        .map_or((None, None), |(active, effects)| (Some(active), effects));
     let spin = star.rotation_of(&state);
     let activity = rotation::activity(&state, spin.as_ref());
     let remnant = if state.phase().is_remnant() {
@@ -2694,6 +2744,8 @@ pub(crate) fn star_summary(
         planetary_nebula: star.planetary_nebula_at(t),
         death_in_window,
         binary_class: BinaryClass::None,
+        active_events,
+        event_effects,
         state,
     })
 }
@@ -2785,6 +2837,48 @@ mod tests {
         let state = agb.state_at(late).unwrap();
         assert_eq!(state.phase(), Phase::ThermallyPulsingAgb);
         assert_eq!(paired(state).class_extras_of(&agb), ClassExtras::NONE);
+    }
+
+    /// The paired path of P06.T28.g's hold: under every 26 hold a flaring dwarf its pair has
+    /// changed (its pair's state a year older than its own) takes no events and no event light,
+    /// while its own summary, at a time a flare runs, takes them.
+    #[test]
+    fn a_paired_star_takes_no_events() {
+        let dwarf = StarModel::new_under(
+            SolarMasses::new(0.2),
+            Composition::SOLAR,
+            StarDraws::median(),
+            Years::new(3e8),
+            StellarRules::every_26_hold(),
+        )
+        .unwrap();
+        let streams = streams(BodyId::new(test_system(), 0));
+        let flaring = (0..24 * 30)
+            .map(|h| {
+                UniverseTime::EPOCH
+                    .checked_add(Span::from_seconds(3_600 * h))
+                    .unwrap()
+            })
+            .find(|&t| {
+                star_summary(&dwarf, streams, t)
+                    .and_then(|s| s.active_events().map(<[StarEvent]>::len))
+                    .is_some_and(|n| n > 0)
+            })
+            .expect("a saturated dwarf flares within a month");
+        let other = dwarf
+            .state_at(UniverseTime::from_julian_years(1).unwrap())
+            .unwrap();
+        let paired = PairedStar {
+            state: other,
+            class: BinaryClass::None,
+            pulsar: None,
+            helium_entry: None,
+            own_death: false,
+        };
+        let summary = star_summary_with(&dwarf, streams, flaring, Some(paired)).unwrap();
+        assert_eq!(summary.state(), &other);
+        assert_eq!(summary.active_events(), None);
+        assert_eq!(summary.event_effects(), None);
     }
 
     #[test]

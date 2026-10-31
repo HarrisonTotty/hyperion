@@ -2007,6 +2007,101 @@ mod tests {
         assert!(found >= 10, "{found} detections in all");
     }
 
+    /// P06.T28.g's agreement: over the stars of both scenes and each scene's window, the stellar
+    /// stage's assembly (`stellar::events::events_in`) lists exactly the flares, FU Orionis
+    /// outbursts and glitches that their kinds' listings give, the ones `local_events` calls; and
+    /// every flare, outburst or glitch `local_events` detects is one the assembly lists, over the
+    /// span from its emission back by its kind's longest event.
+    #[test]
+    fn the_stellar_assembly_lists_the_local_events_kinds() {
+        use crate::events::EventSubject;
+        use crate::stellar::events::{StarEvent, StarEventKind, events_in};
+        let galaxy = galaxy();
+        let seed = galaxy.seed();
+        let local = |e: &StarEvent| {
+            matches!(
+                e.kind(),
+                StarEventKind::Flare | StarEventKind::FuOrionisOutburst | StarEventKind::Glitch
+            )
+        };
+        let mut detected = 0;
+        for scene in [neighbours(), young_and_dead()] {
+            let detections = run(&scene, &scene.query, &scene.rows);
+            let window = scene.query.window();
+            let mut stars = scene.stars.borrow_mut();
+            for row in &scene.rows {
+                if row.hit().record().kind() == SystemKind::RoguePlanet {
+                    continue;
+                }
+                stars.with_stars(galaxy, row.hit().record(), |system| {
+                    for (star, slot) in system.stars().iter().zip(system.hierarchy().stars()) {
+                        let body = slot.body();
+                        let mut listed = Vec::new();
+                        events_in(star, seed, body, window, &mut listed);
+                        let mut assembled: Vec<_> = listed
+                            .iter()
+                            .filter(|e| local(e))
+                            .map(|e| (e.id(), e.onset()))
+                            .collect();
+                        let series = |tag| EventSeries::new(seed, tag, body.into());
+                        let (mut flares, mut outbursts) = (Vec::new(), Vec::new());
+                        let (mut small, mut large) = (Vec::new(), Vec::new());
+                        flares::flares_in(star, &series(tags::STAR_FLARE), window, &mut flares);
+                        fu_orionis::outbursts_in(
+                            star,
+                            &series(tags::STAR_FU_ORIONIS),
+                            window,
+                            &mut outbursts,
+                        );
+                        glitches::glitches_in(star, &series(tags::STAR_GLITCH), window, &mut small);
+                        glitches::large_glitches_in(star, seed, body, window, &mut large);
+                        let mut own: Vec<_> = flares
+                            .iter()
+                            .map(|f| (f.id(), f.onset()))
+                            .chain(outbursts.iter().map(|o| (o.id(), o.onset())))
+                            .chain(small.iter().map(|g| (g.id(), g.onset())))
+                            .chain(large.iter().map(|g| (g.id(), g.onset())))
+                            .collect();
+                        assembled.sort();
+                        own.sort();
+                        assert_eq!(assembled, own, "{body:?}");
+                        for d in detections.iter().filter(|d| {
+                            d.event().subject() == EventSubject::from(body)
+                                && matches!(
+                                    d.kind(),
+                                    TransientKind::Flare
+                                        | TransientKind::FuOrionisOutburst
+                                        | TransientKind::Glitch
+                                )
+                        }) {
+                            // A glitch is an instant, detected at its onset.
+                            let back = if d.kind() == TransientKind::Flare {
+                                flares::MAX_DURATION
+                            } else if d.kind() == TransientKind::FuOrionisOutburst {
+                                fu_orionis::MAX_DURATION
+                            } else {
+                                Span::from_seconds(1)
+                            };
+                            let around = TimeWindow::new(
+                                d.emitted().checked_sub(back).unwrap(),
+                                d.emitted().checked_add(Span::from_seconds(1)).unwrap(),
+                            )
+                            .unwrap();
+                            let mut near = Vec::new();
+                            events_in(star, seed, body, around, &mut near);
+                            assert!(
+                                near.iter().any(|e| local(e) && e.id() == d.event()),
+                                "{d:?}"
+                            );
+                            detected += 1;
+                        }
+                    }
+                });
+            }
+        }
+        assert!(detected >= 5, "{detected}");
+    }
+
     /// The same systems read by range queries thirty years apart give the same detections, to the
     /// bit: each host's line is its record's, not the light's of the row.
     #[test]

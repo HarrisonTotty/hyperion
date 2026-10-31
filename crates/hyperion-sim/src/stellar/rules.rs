@@ -75,6 +75,9 @@
 //!   (P06.T24.b): the young stars' classes and the S and carbon stars', chosen in one `match`
 //!   (`system::peculiar_extras`), which a star's own summary and brief and a paired star's
 //!   summary read. Its tests are in `rules/classes_hold.rs`.
+//! - [`star_events`](StellarRules::star_events), at [`STAR_EVENTS_VERSION`] (P06.T28.g): a star's
+//!   active events and the light they make in its summary, and so on the wire, chosen in one
+//!   `match` in `system::star_summary`. Its tests are in `rules/events_hold.rs`.
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -90,6 +93,7 @@ use crate::galaxy::displaced::binarity::{STRIPPING_HELIUM_VERSION, StrippingRule
 use crate::stellar::classify::pm13::{DWARF_SEQUENCE_VERSION, DwarfSequenceRules};
 use crate::stellar::photometry::{V_MAGNITUDE_VERSION, VMagnitudeRules};
 use crate::stellar::classify::{PECULIAR_CLASSES_VERSION, PeculiarClassRules};
+use crate::stellar::events::{STAR_EVENTS_VERSION, StarEventRules};
 use crate::stellar::remnant::KickRankRules;
 use crate::stellar::sse::wind::{HD_LIMIT_VERSION, HdLimitRules};
 use crate::stellar::sse::{HELIUM_VERSION, HeliumRules};
@@ -122,6 +126,8 @@ pub(crate) struct StellarRules {
     pub(crate) stripping: StrippingRules,
     /// Whether P06.T24.b's young, S and carbon classes are in force (`system::peculiar_extras`).
     pub(crate) peculiar_classes: PeculiarClassRules,
+    /// Whether P06.T28.g's events are composed into a star's summary (`system::star_summary`).
+    pub(crate) star_events: StarEventRules,
 }
 
 impl StellarRules {
@@ -162,6 +168,11 @@ impl StellarRules {
             } else {
                 PeculiarClassRules::Held
             },
+            star_events: if version.get() >= STAR_EVENTS_VERSION.get() {
+                StarEventRules::Composed
+            } else {
+                StarEventRules::Held
+            },
         }
     }
 
@@ -200,6 +211,8 @@ impl StellarRules {
 
 #[cfg(test)]
 mod classes_hold;
+#[cfg(test)]
+mod events_hold;
 #[cfg(test)]
 mod hd_limit_hold;
 #[cfg(test)]

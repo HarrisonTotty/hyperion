@@ -622,6 +622,21 @@ impl<'a> FlareModel<'a> {
     }
 }
 
+impl FlareModel<'_> {
+    /// [`flares_active_at`] on this model: the star's flares on `series` running at `t`, sorted
+    /// by onset and then by ID, appended to `out`.
+    pub fn flares_active_at(&self, series: &EventSeries, t: UniverseTime, out: &mut Vec<Flare>) {
+        let mut events = Vec::new();
+        bins().active_at(series, t, self, &mut events);
+        out.extend(
+            events
+                .into_iter()
+                .map(|event| self.flare_of(event))
+                .filter(|flare| flare.is_active_at(t)),
+        );
+    }
+}
+
 impl RateModel for FlareModel<'_> {
     fn bound(&self, _bin: TimeWindow) -> EventsPerSecond {
         self.rates.listed
@@ -807,17 +822,9 @@ pub fn flares_active_at(
         tags::STAR_FLARE,
         "a star's flares are its star.ev.flare series"
     );
-    let Some(model) = FlareModel::of(star) else {
-        return;
-    };
-    let mut events = Vec::new();
-    bins().active_at(series, t, &model, &mut events);
-    out.extend(
-        events
-            .into_iter()
-            .map(|event| model.flare_of(event))
-            .filter(|flare| flare.is_active_at(t)),
-    );
+    if let Some(model) = FlareModel::of(star) {
+        model.flares_active_at(series, t, out);
+    }
 }
 
 /// The flare `id` names, regenerated on its own.

@@ -92,7 +92,7 @@ fn row_and_summary(
     (
         retardation.emitted(),
         seen.brief_then(),
-        summary.stars().first().copied(),
+        summary.stars().first().cloned(),
     )
 }
 
