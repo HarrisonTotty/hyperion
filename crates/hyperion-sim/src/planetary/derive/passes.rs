@@ -193,9 +193,9 @@ thread_local! {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Crossing {
     /// The lower-albedo end's albedo read and g.
-    pub(crate) low: (f64, f64),
+    low: (f64, f64),
     /// The higher-albedo end's albedo read and g.
-    pub(crate) high: (f64, f64),
+    high: (f64, f64),
 }
 
 #[cfg(test)]
@@ -211,10 +211,11 @@ impl Crossing {
         }
     }
 
-    /// Whether the round stopped at a crossing of the diagonal: its ends' g on opposite sides of
-    /// it (g ≥ 0 at one, g < 0 at the other), within [`SECANT_STOP_WIDTH`] of each other, or its
-    /// published end at g = 0, a root itself. By comparison, so that a g that is not a number is
-    /// no crossing.
+    /// Whether the round stopped at a crossing of the diagonal.
+    ///
+    /// Its ends' g lie on opposite sides of it (g ≥ 0 at one, g < 0 at the other), within
+    /// [`SECANT_STOP_WIDTH`] of each other, or with its published end at g = 0 to the bit, an exact
+    /// root itself. By comparison, so that a g that is not a number is no crossing.
     #[must_use]
     pub(crate) fn is_valid(&self) -> bool {
         let ((a, g_a), (b, g_b)) = (self.low, self.high);
@@ -225,19 +226,29 @@ impl Crossing {
         } else {
             g_b
         };
+        // An exact zero is meant: the secant steps stop at one.
         sides && (within || g_published.abs() <= 0.0)
     }
 }
 
-/// `run`'s result with the ends each bracket round stopped at on this thread, in order. The
-/// thread's log is set back after.
+/// `run`'s result with the ends each bracket round stopped at on this thread, in order.
+///
+/// The thread's log is set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_crossings<R>(run: impl FnOnce() -> R) -> (R, Vec<Crossing>) {
-    let before = CROSSINGS.with(|cell| cell.replace(Some(Vec::new())));
+    /// Sets the thread's log back as it drops.
+    struct Restore(Option<Vec<Crossing>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CROSSINGS.with(|cell| cell.replace(self.0.take()));
+        }
+    }
+    let restore = Restore(CROSSINGS.with(|cell| cell.replace(Some(Vec::new()))));
     let result = run();
     let crossings = CROSSINGS
-        .with(|cell| cell.replace(before))
+        .with(core::cell::RefCell::take)
         .unwrap_or_default();
+    drop(restore);
     (result, crossings)
 }
 
