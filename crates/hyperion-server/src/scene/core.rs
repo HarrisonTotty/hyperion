@@ -38,8 +38,8 @@ use hyperion_sim::galaxy::placement::{SystemRecord, resolve};
 use hyperion_sim::galaxy::query::position_at;
 use hyperion_sim::id::{BodyId, SystemId};
 use hyperion_sim::observe::{BodyTrack, SystemObserver, retarded_in_system};
-use hyperion_sim::planetary::BodyIndex;
 use hyperion_sim::planetary::record::DetailLevel;
+use hyperion_sim::planetary::{BodyIndex, HostKind, SystemContext};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Metres;
 
@@ -47,8 +47,8 @@ use super::sensing::{CraftState, SceneKnowledge};
 use super::{ClockReading, Ship, ShipPosition};
 use crate::compute::{GalaxyKey, GeneratedSystem, SharedCellCache, SharedSystemCache};
 use crate::convert::{
-    BodiesRequest, ListedBody, scene_body, scene_system, system_motion, system_place,
-    system_summary, wire_time,
+    BodiesRequest, ListedBody, scene_body, scene_system, starless_summary, system_motion,
+    system_place, system_summary, wire_time,
 };
 use crate::limits::MAX_SCENE_CAMERAS;
 
@@ -135,19 +135,29 @@ impl SceneWorld<'_> {
         .expect("the scene time is inside the clock window")
     }
 
-    /// The system's stars at `t`, as `system_summary` answers them: the hosts of its bodies.
+    /// The system's stars at `t`, as `system_summary` answers them: the hosts of its bodies; for a
+    /// rogue planet, which has none, its starless summary (P14.T27.b), which the system cache has
+    /// no stars to give.
     #[must_use]
-    fn hosts(&self, record: &SystemRecord, t: UniverseTime) -> SystemSummaryDto {
-        let stars = self
-            .stars
-            .get_or_generate(self.key, self.galaxy, record.id())
-            .expect("a system frame_at named resolves");
+    fn hosts(
+        &self,
+        record: &SystemRecord,
+        ctx: &SystemContext,
+        t: UniverseTime,
+    ) -> SystemSummaryDto {
         let request = SystemSummaryRequest {
             universe: self.universe.clone(),
             system: SystemIdHex::from_u64(record.id().raw()),
             time: wire_time(t),
             mode: QueryModeDto::Now,
         };
+        if ctx.host_kind() == HostKind::RoguePlanet {
+            return starless_summary(request, ctx, t);
+        }
+        let stars = self
+            .stars
+            .get_or_generate(self.key, self.galaxy, record.id())
+            .expect("a system frame_at named resolves");
         system_summary(request, &stars, t)
     }
 }
@@ -448,7 +458,7 @@ impl SceneCore {
         let id = record.id();
         let (mut system, listed) = scene_system(
             BodiesRequest::new(id, t, self.asked),
-            world.hosts(&record, t),
+            world.hosts(&record, ctx, t),
             ctx,
             planets,
             world.seed(),
@@ -1276,7 +1286,7 @@ mod tests {
             "the system's stars are its hosts"
         );
         let (ctx, planets) = fixture.generated();
-        let hosts = world.hosts(&fixture.record, t);
+        let hosts = world.hosts(&fixture.record, ctx, t);
         let expected: SystemBodiesDto = system_bodies(
             BodiesRequest::new(fixture.id(), t, DetailLevel::Full),
             hosts,
@@ -1408,7 +1418,7 @@ mod tests {
             assert_eq!(contacts.contains(&grant.body), odd);
             let alone = system_bodies(
                 BodiesRequest::new(fixture.id(), t, own),
-                world.hosts(&fixture.record, t),
+                world.hosts(&fixture.record, ctx, t),
                 ctx,
                 planets,
                 world.seed(),

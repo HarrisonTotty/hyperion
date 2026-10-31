@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use hyperion_protocol::{
     BodyDetailRequest, BodyEventsRequest, RequestError, ResponseBody, SystemBodiesRequest,
-    SystemSummaryRequest,
+    SystemSummaryDto, SystemSummaryRequest,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
@@ -24,7 +24,7 @@ use hyperion_sim::galaxy::placement::ResolveSystemError;
 use hyperion_sim::galaxy::query::QueryMode;
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::observe::{Observer, curvature_error, summary_observed};
-use hyperion_sim::planetary::{ResolveBodyError, SystemContext};
+use hyperion_sim::planetary::{HostKind, ResolveBodyError, SystemContext};
 
 use super::universe::openable_universe;
 use crate::AppState;
@@ -33,8 +33,8 @@ use crate::compute::{
 };
 use crate::convert::{
     BodiesRequest, DetailRequest, EventsRequest, SummaryRequest, body_detail, body_events,
-    body_refusal, hosts_request, system_bodies, system_summary, system_summary_observed,
-    unknown_system, untraced,
+    body_refusal, hosts_request, starless_summary, system_bodies, system_summary,
+    system_summary_observed, unknown_system, untraced,
 };
 
 /// Every star of one system at the request's time, and the orbits that hold them; in observed mode
@@ -137,12 +137,8 @@ pub(crate) async fn bodies(
         })?;
     let shared = Arc::clone(&state);
     let answer = move |_: &CancelToken| {
-        let stars = shared
-            .systems
-            .get_or_generate(key, &galaxy, wanted.system())
-            .map_err(|error| unknown_system(&request.system, error))?;
-        let hosts = system_summary(hosts_request(&request), &stars, wanted.time());
         let (ctx, planets) = system.as_ref();
+        let hosts = hosts_of(&shared, (key, &galaxy), ctx, &request, wanted.time())?;
         Ok::<_, RequestError>(system_bodies(
             wanted,
             hosts,
@@ -158,6 +154,31 @@ pub(crate) async fn bodies(
         .await
         .unwrap_or_else(|closed| Err(JobError::from(closed)))??;
     Ok(ResponseBody::SystemBodies(Box::new(answered)))
+}
+
+/// The hosts of the planetary system `ctx` as `system_bodies` sends them at `time`: its stars'
+/// summary from the system cache, or for a rogue planet, which has none, its starless summary
+/// (P14.T27.b), so that an empty host list is an answer and never a refusal.
+///
+/// # Errors
+///
+/// `unknown_system` naming `system` where the system cache refuses the stars of a system with them,
+/// which it never does for one `bodies_of` generated.
+fn hosts_of(
+    state: &AppState,
+    (key, galaxy): (GalaxyKey, &Galaxy),
+    ctx: &SystemContext,
+    request: &SystemBodiesRequest,
+    time: hyperion_sim::time::UniverseTime,
+) -> Result<SystemSummaryDto, RequestError> {
+    if ctx.host_kind() == HostKind::RoguePlanet {
+        return Ok(starless_summary(hosts_request(request), ctx, time));
+    }
+    let stars = state
+        .systems
+        .get_or_generate(key, galaxy, ctx.id())
+        .map_err(|error| unknown_system(&request.system, error))?;
+    Ok(system_summary(hosts_request(request), &stars, time))
 }
 
 /// One body's whole record at the request's time, degraded to the level asked for (plan 14,

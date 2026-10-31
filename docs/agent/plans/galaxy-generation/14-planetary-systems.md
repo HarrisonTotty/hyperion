@@ -33293,8 +33293,30 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - _For 26's bump:_ the tripwire's list: delete `substellar_placement.rs`'s
     `a_free_floating_object_has_no_stellar_context_yet`; `SystemsPanel.tsx`'s `freeFloating` then
     holds nothing; the server's `a_rogue_planet_s_bodies_are_refused_until_the_26_bump` becomes a
-    test of its bodies; and T27.a's bump item, the scene's frame search never visiting layer F,
-    holds for layer G too. No golden moves under `with_every_26_hold`: none holds a layer-G system.
+    test of its bodies; and the frame search's own list (the next bullet). No golden moves under
+    `with_every_26_hold`: none holds a layer-G system.
+- **Deviations in P14.T27.b's frame search, as built (2026-10-31).** `galaxy::frame::frame_at`
+  walks layers F and G (`frame_layers`) beside the stellar ones, each over 1.25 × its heaviest
+  object's tidal radius (0.08 M☉, 13 M_J), and asks its sources for them; at 24 it is today's.
+  - _The switches (lean, 2026-10-31):_ layer F under `SubstellarHostRules::BrownDwarfs`, layer G
+    under `RoguePlanetRules::Bodies`, through `hosts::substellar::generates`, so a frame and its
+    bodies flip together. Behind the `testing` feature,
+    `planetary::testing::admit_free_floating_hosts_in_this_process` lifts both holds for another
+    crate's test binary (one-way), as P14.T31.c's events switch does.
+  - _The starless scene:_ `convert::starless_summary` gives a rogue planet's hosts (no stars, no
+    hierarchy nodes, its existence, age and [Fe/H]) to the scene's arrival and to
+    `system_bodies`, which before this refused a rogue planet at 26 (its hosts read the stars
+    cache). A standalone `system_summary` of a rogue planet stays `unknown_system`.
+  - _For the client, at the bump:_ a rogue planet's `hosts.stars` and `hierarchy.nodes` are empty,
+    its `zones` empty and `system_plane` absent, its belts and halo `not_applicable`; body
+    `0x0000` is a planet with no parent and no orbit, at the origin; its moons are `0x0100`
+    upward and its rings `0x0080` upward, parented to `0x0000`; `system_summary` refuses it.
+  - _For 26's bump:_ delete `admit_free_floating_hosts_in_this_process` and its static; fold
+    `tests/scene_free_floating.rs` into `tests/scene.rs`, whose
+    `a_ship_beside_a_free_floating_object_is_not_in_its_frame_before_26` becomes the arrival's
+    test; the frame tests' held arms go with the holds.
+  - _Cost_ (pod, 16 vCPU; release, one thread, medians of 21): cold 0.25 → 0.31 ms at the solar
+    circle, 2.95 → 3.85 ms in the bulge, 0.10 → 0.14 ms beside a brown dwarf; warm under 0.21 ms.
 - **P14.T56.g's lag for a rocky belt's ice-bulk members, held at 25** (lane `p14-census-25`,
   2026-10-30). `system::member_lag` (`MEMBER_LAG_VERSION` 25, `MemberLagRules`, `with_member_lag`
   in `with_every_25_hold`) asks every belt member with no given bulk `SolvedLag::AboveMeltingOverIce`

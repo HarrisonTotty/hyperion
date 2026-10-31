@@ -8,8 +8,8 @@ mod common;
 
 use common::TestServer;
 use common::scene::{
-    SEED, TIME, TenCraft, in_system, in_the_halo, next_scene, set_ship, subscribe, systems,
-    universe_on,
+    SEED, TIME, TenCraft, free_floating, in_system, in_the_halo, next_scene, set_ship, subscribe,
+    systems, universe_on,
 };
 use hyperion_protocol::{
     CameraReportDto, DetailLevelDto, ErrorCode, FramePositionDto, KinematicsDto, MassLayer,
@@ -42,6 +42,7 @@ async fn scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_repo
     moving_the_stand_in_out_of_the_system_pushes_no_system(&server).await;
     an_unknown_subscription_and_a_camera_out_of_reach_are_refused_naming_their_fields(&server)
         .await;
+    a_ship_beside_a_free_floating_object_is_not_in_its_frame_before_26(&server).await;
     server.stop().await;
 }
 
@@ -205,6 +206,25 @@ async fn moving_the_stand_in_out_of_the_system_pushes_no_system(server: &TestSer
     };
     assert_eq!(departure.arrival, Some(SceneArrivalDto::NoSystem));
     assert_eq!(departure.ship, Some(in_the_halo()));
+}
+
+/// P14.T27 at generator version 24: a ship 1 au from a brown dwarf or a rogue planet is not in its
+/// frame, since `frame_at` walks layers F and G only under the holds that give their objects
+/// bodies; `scene_free_floating.rs` asks with both lifted. 26's bump turns this into a test of the
+/// arrival. Run by [`scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_reports`]
+/// on its shared server, in a universe of its own.
+async fn a_ship_beside_a_free_floating_object_is_not_in_its_frame_before_26(server: &TestServer) {
+    let (mut client, universe) = universe_on(server, "Scene: free-floating at 24").await;
+    for object in free_floating() {
+        set_ship(&mut client, &universe, in_system(&object), 0).await;
+        let (_, state) = subscribe(&mut client, &universe, DetailLevelDto::Full).await;
+        assert_ne!(
+            state.system.map(|scene| scene.system.hosts.system),
+            Some(object.clone()),
+            "26's bump puts a ship beside {} in its frame (P14.T27): test the arrival instead",
+            object.as_str()
+        );
+    }
 }
 
 /// Run by [`scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_reports`] on its

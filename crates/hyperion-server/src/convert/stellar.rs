@@ -23,11 +23,13 @@ use hyperion_protocol::{
     StellarBriefDto, SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest,
     VariabilityDto, VariableKindDto, XrayBinaryKindDto,
 };
+use hyperion_sim::galaxy::placement::Existence;
 use hyperion_sim::galaxy::query::QueryMode;
 use hyperion_sim::id::SystemId;
 use hyperion_sim::math;
 use hyperion_sim::observe::{CurvatureError, Retardation};
 use hyperion_sim::orbit::KeplerElements;
+use hyperion_sim::planetary::SystemContext;
 use hyperion_sim::stellar::binary::{BinaryClass, CvKind, HmxbKind, XrbKind};
 use hyperion_sim::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
 use hyperion_sim::stellar::nebula::PlanetaryNebula;
@@ -129,6 +131,32 @@ pub(crate) fn system_summary(
     time: UniverseTime,
 ) -> SystemSummaryDto {
     summary_dto(request, stars, &stars.summary_at(time), None)
+}
+
+/// The hosts of a system with no star, a rogue planet's (plan 14, P14.T27.b), as `system_bodies`
+/// and a scene's arrival send them: its existence and age at `time` and its \[Fe/H\], plan 13's,
+/// from its planetary context `ctx`, with no stars and a hierarchy of no nodes. `universe`, `system`
+/// and `time` are echoed from the request, as in [`system_summary`].
+#[must_use]
+pub(crate) fn starless_summary(
+    request: SystemSummaryRequest,
+    ctx: &SystemContext,
+    time: UniverseTime,
+) -> SystemSummaryDto {
+    SystemSummaryDto {
+        universe: request.universe,
+        system: request.system,
+        time: request.time,
+        existence: match ctx.existence_at(time) {
+            Existence::NoSystemYet => SystemExistenceDto::NotYetBorn,
+            Existence::Exists => SystemExistenceDto::Exists,
+        },
+        age_myr: Megayears::from(ctx.age_at(time)).value(),
+        fe_h_dex: ctx.fe_h().value(),
+        stars: Vec::new(),
+        hierarchy: HierarchyDto { nodes: Vec::new() },
+        observed: None,
+    }
 }
 
 /// The answer to `system_summary` in observed mode (plan 12, P12.T6.b): `summary`, the system as

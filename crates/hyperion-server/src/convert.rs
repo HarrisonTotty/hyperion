@@ -84,7 +84,8 @@ pub(crate) use self::scene::{
     ShipRequest, unknown_frame_body, unknown_frame_system, untraced_frame_system,
 };
 pub(crate) use self::stellar::{
-    SummaryRequest, brief_dto, system_summary, system_summary_observed, unknown_system, wire_time,
+    SummaryRequest, brief_dto, starless_summary, system_summary, system_summary_observed,
+    unknown_system, wire_time,
 };
 pub(crate) use self::surface::{
     FieldRequest, SurveyRequest, cover_dto, open_surveys_refusal, record_section,
@@ -603,7 +604,8 @@ enum RowStellar {
 /// sent. A brief of a system not yet formed at the query's time is `None` too, and such a row has
 /// none either: it has no star to describe. With `include_stellar`, a rogue planet's row, which
 /// never has a brief, carries its metallicity instead, the one [`draw_metallicity`] gives it and
-/// its stars would share (plan 13, P13.T5.d); `system_summary` refuses it, so no other answer does.
+/// its stars would share (plan 13, P13.T5.d); `system_summary` refuses it, and from generator
+/// version 26 only its bodies' hosts, a starless summary (P14.T27.b), state it again.
 /// In observed mode the row carries `observed` (plan 12, P12.T6), its brief, when asked for, is the
 /// one when the light left it, and it is otherwise the present's.
 ///

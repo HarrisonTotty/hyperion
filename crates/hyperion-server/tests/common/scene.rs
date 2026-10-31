@@ -37,6 +37,26 @@ pub fn systems() -> [SystemIdHex; 2] {
     [0, 1].map(|n| SystemIdHex::from_u64(cell[n].id().raw()))
 }
 
+/// The first brown dwarf and the first rogue planet born by [`TIME`] in the solar circle's cells
+/// of layers F and G, along +x from the Sun-like point, as the server generates them: the
+/// free-floating objects of plan 13, which plan 14 gives bodies from generator version 26
+/// (P14.T27).
+pub fn free_floating() -> [SystemIdHex; 2] {
+    let galaxy = Galaxy::new(Seed::new(SEED));
+    let mut cell = Vec::new();
+    [(Layer::BrownDwarf, 1_625), (Layer::RoguePlanet, 6_500)].map(|(layer, y)| {
+        (0..256)
+            .find_map(|x| {
+                let key = CellKey::new(layer, [x, y, 0]).expect("a cell of the grid");
+                generate_cell(&galaxy, key, &mut cell);
+                cell.iter()
+                    .find(|record| record.age_at_epoch().value() > 1.0e6)
+                    .map(|record| SystemIdHex::from_u64(record.id().raw()))
+            })
+            .expect("the solar circle holds free-floating objects")
+    })
+}
+
 /// A pose 1 au from `system`'s barycentre, in its frame, at rest, at [`TIME`].
 pub fn in_system(system: &SystemIdHex) -> KinematicsDto {
     KinematicsDto {
