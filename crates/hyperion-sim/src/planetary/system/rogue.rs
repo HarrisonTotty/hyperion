@@ -230,6 +230,7 @@ pub(super) fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySyst
         satellites: Vec::new(),
         belts: Vec::new(),
         halo: None,
+        discs: super::SystemDiscs::NONE,
         record: RecordRules::in_force(),
         rogue: Some(RoguePlanet::of(seed, ctx)),
     }

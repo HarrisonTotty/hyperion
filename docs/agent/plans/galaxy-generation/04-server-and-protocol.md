@@ -502,7 +502,8 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
 - Any `SystemIdHex` or body ID arriving from a client goes through the sim's `resolve` before use,
   as the brainstorm requires of IDs read from the protocol. M1 has no such inbound field.
 - `MassLayer`, `Population`, `LayerStatus`, `Unit`, `ErrorCode`, `SystemOriginWire`,
-  `CatalogueClassWire` and `MemberClassWire` will grow. TypeScript switches over them are
+  `CatalogueClassWire` and `MemberClassWire` will grow, and so will plan 14's `PopulationDto`
+  (its disc arms from generator version 26, P14.T28.a and T28.d). TypeScript switches over them are
   exhaustive with no `default`, so a new value is a compile error where it matters. The
   `PARAMETERS` page reads a unit it does not know as Missing (P07.T10.b). `SystemOriginWire`,
   `CatalogueClassWire` and `MemberClassWire` are plan 09's (P09.T39), named here before any build

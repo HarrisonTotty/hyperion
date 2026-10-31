@@ -535,6 +535,8 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - a hot envelope's dayside above 1 bar, `DAYSIDE_DECKS_VERSION` (P14.T52.h), at
 ///   `DaysideDecksRules::Cleared` through `with_dayside_decks`: each refractory, sulphide or salt
 ///   mode of an envelope at `T_eq` ≥ 950 K cut at 1 bar, or its photosphere where deeper.
+/// - the protoplanetary disc body, `PROTOPLANETARY_DISC_VERSION` (P14.T28.a), at
+///   `ProtoplanetaryDiscRules::Disc` through `with_protoplanetary_disc`.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
@@ -559,6 +561,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::system::envelope::{
         SupercriticalEnvelopeRules, with_supercritical_envelope,
     };
+    use crate::planetary::hosts::young::{ProtoplanetaryDiscRules, with_protoplanetary_disc};
     use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
     use crate::substance::helmholtz::{CompressionRules, with_compression};
     let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
@@ -577,6 +580,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_supercritical_envelope(SupercriticalEnvelopeRules::Modelled, run);
     let run = move || with_deck_profile(DeckProfileRules::Saturation, run);
     let run = move || with_dayside_decks(DaysideDecksRules::Cleared, run);
+    let run = move || with_protoplanetary_disc(ProtoplanetaryDiscRules::Disc, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 

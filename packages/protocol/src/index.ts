@@ -12,7 +12,9 @@ import type { BeltDto } from "./generated/BeltDto";
 import type { BeltGapDto } from "./generated/BeltGapDto";
 import type { BeltSiteDto } from "./generated/BeltSiteDto";
 import type { CometaryHaloDto } from "./generated/CometaryHaloDto";
+import type { DiscGapDto } from "./generated/DiscGapDto";
 import type { PopulationDto } from "./generated/PopulationDto";
+import type { ProtoplanetaryDiscDto } from "./generated/ProtoplanetaryDiscDto";
 import type { RingDto } from "./generated/RingDto";
 import type { RingGapDto } from "./generated/RingGapDto";
 import type { RingKindDto } from "./generated/RingKindDto";
@@ -311,7 +313,9 @@ export type {
   BeltGapDto,
   BeltSiteDto,
   CometaryHaloDto,
+  DiscGapDto,
   PopulationDto,
+  ProtoplanetaryDiscDto,
   RingDto,
   RingGapDto,
   RingKindDto,

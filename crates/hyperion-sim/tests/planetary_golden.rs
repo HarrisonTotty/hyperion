@@ -1072,6 +1072,25 @@ fn write_population(w: &mut GoldenWriter, population: &BodyPopulation) {
             w.f64("comets", halo.comets());
             w.f64("comet_rate_per_s", halo.comet_rate().value());
         }
+        // P14.T28.a, from generator version 26: no golden system holds one below it.
+        BodyPopulation::ProtoplanetaryDisc(disc) => {
+            w.line(&format!("protoplanetary disc about {:?}", disc.host()));
+            w.f64("inner_m", disc.inner_edge().value());
+            w.f64("outer_m", disc.outer_edge().value());
+            w.f64("snow_line_m", disc.snow_line().value());
+            w.f64(
+                "characteristic_radius_m",
+                disc.characteristic_radius().value(),
+            );
+            w.f64("gas_msun", disc.gas_mass().value());
+            w.f64("solid_mearth", disc.solid_mass().value());
+            for gap in disc.gaps() {
+                w.f64(
+                    &format!("gap_{:04x}_m", gap.giant().get()),
+                    gap.radius().value(),
+                );
+            }
+        }
     }
 }
 

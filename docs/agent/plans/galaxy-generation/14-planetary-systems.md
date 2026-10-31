@@ -3229,6 +3229,8 @@ elements into elements at a time.
   age. _Slice:_ built first without the `ProtoplanetaryDisc` body, whose belt slot `0xE0` no other
   slice task fills; it is added under this subtask, with a bump, alongside phase D's belts (T21),
   and the second half of test (a) waits with it. `BodyKindDto` has the variant from the start (T35).
+  - _Built_ 2026-10-31 (the disc body), held at 26 (`PROTOPLANETARY_DISC_VERSION`): Risks,
+    "Deviations in P14.T28.a's disc, T28.d and T28.e, as built".
 - **P14.T28.b Expansion and engulfment.** Adiabatic expansion and the engulfment test of D11, using
   the host's mass at age + t and its largest radius before that age, with the reach f = (1 + M_p ÷
   3.1 M⊕)^⅛ fitted to Mustill and Villaver (2012) (ruling 62). The clearance a(t) − f R_max(t) is
@@ -33453,3 +33455,18 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `convert/planetary.rs` tests that pin them; no golden system moves (the census).
   - _For R08.T16.a:_ under the rule the fixture hot Jupiter's floor (τ(550) 10 from the top) lies at
     about 1 bar, not above its photosphere inside its silicate decks as at 24–25.
+- **Deviations in P14.T28.a's disc, T28.d and T28.e, as built (2026-10-31).**
+  - _T28.a's disc._ Held at 26: `hosts::young`'s `PROTOPLANETARY_DISC_VERSION`,
+    `ProtoplanetaryDiscRules::{Held, Disc}`, the tests' `with_protoplanetary_disc` (a line in
+    `with_every_26_hold`) and the tripwire `the_protoplanetary_disc_is_held_only_until_the_26_bump`;
+    nothing moves at 24 or 25. The stage is `system/discs.rs` (`generate`'s step 9, no stream).
+  - One body per system, the first zone's with a disc (lean, 2026-10-31: `0xE0` is one slot, so a
+    wide binary's second disc has none). Present from the birth to the lifetime, or the host's first
+    death if earlier; `Destroyed { Dispersed }` after. Its masses and radii are the disc's at birth
+    (lean, 2026-10-31: no depletion over its life); a gap is a giant present then, at its semi-major
+    axis, with no width. Label `DISC`.
+  - New public items: `PlanetarySystem::protoplanetary_disc`, `ProtoplanetaryDisc`,
+    `PROTOPLANETARY_DISC_SLOT`, `Population::ProtoplanetaryDisc(DiscRecord)`, `DiscGap`; on the
+    wire `PopulationDto::ProtoplanetaryDisc(ProtoplanetaryDiscDto)` with `DiscGapDto`, a growing
+    arm (plan 04's list now names `PopulationDto`; `PROTOCOL_VERSION` stays 3). The client decodes
+    and lists it, and reads it out; `populationAnnuli` does not draw it yet.

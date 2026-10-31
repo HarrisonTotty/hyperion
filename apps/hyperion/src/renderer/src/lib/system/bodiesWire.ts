@@ -689,6 +689,28 @@ function toPopulation(population: PopulationDto): Population {
         cometRatePerS: population.comet_rate_per_s,
       };
       break;
+    case "protoplanetary_disc":
+      check(population.host.type !== "body", "disc host malformed");
+      checkEdges(population.inner_edge_m, population.outer_edge_m, "disc");
+      check(
+        positive(population.snow_line_m) && positive(population.characteristic_radius_m),
+        "disc radii unusable",
+      );
+      result = {
+        kind: "protoplanetary_disc",
+        host: toHost(population.host),
+        innerEdgeM: population.inner_edge_m,
+        outerEdgeM: population.outer_edge_m,
+        snowLineM: population.snow_line_m,
+        characteristicRadiusM: population.characteristic_radius_m,
+        gasMassMearth: toMassMearth(population.gas_mass_kg),
+        solidMassMearth: toMassMearth(population.solid_mass_kg),
+        gaps: population.gaps.map((gap) => {
+          check(isBodyId(gap.giant) && positive(gap.radius_m), "disc gap unusable");
+          return { giant: gap.giant, radiusM: gap.radius_m };
+        }),
+      };
+      break;
   }
   return result;
 }

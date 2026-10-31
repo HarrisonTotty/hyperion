@@ -473,11 +473,38 @@ export interface CometaryHalo {
   readonly cometRatePerS: number;
 }
 
+/** A gap a giant has opened in a protoplanetary disc. */
+export interface DiscGap {
+  readonly giant: BodyIdHex;
+  /** Its distance from the disc's host, the giant's semi-major axis. */
+  readonly radiusM: number;
+}
+
+/**
+ * A young host's protoplanetary disc while it lasts (the protocol's `ProtoplanetaryDiscDto`,
+ * plan 14's P14.T28.a): its edges lie in its host's zone's plane, in metres from the host.
+ */
+export interface ProtoplanetaryDisc {
+  readonly host: OrbitHost;
+  readonly innerEdgeM: number;
+  readonly outerEdgeM: number;
+  /** From its host's zero-age luminosity; it may lie outside the edges. */
+  readonly snowLineM: number;
+  /** The characteristic radius r_c of its taper, Σ ∝ e^(−r ÷ r_c) ÷ r. */
+  readonly characteristicRadiusM: number;
+  /** Its gas and its solids between its edges, in Earth masses. */
+  readonly gasMassMearth: number;
+  readonly solidMassMearth: number;
+  /** Inside out; none before its first giant forms. */
+  readonly gaps: ReadonlyArray<DiscGap>;
+}
+
 /** What a population body is and where it lies (the protocol's `PopulationDto`). */
 export type Population =
   | ({ readonly kind: "ring" } & Ring)
   | ({ readonly kind: "belt" } & Belt)
-  | ({ readonly kind: "cometary_halo" } & CometaryHalo);
+  | ({ readonly kind: "cometary_halo" } & CometaryHalo)
+  | ({ readonly kind: "protoplanetary_disc" } & ProtoplanetaryDisc);
 
 /** One body of a system as the system's list carries it (the protocol's `BodySummaryDto`). */
 export interface SystemBody {

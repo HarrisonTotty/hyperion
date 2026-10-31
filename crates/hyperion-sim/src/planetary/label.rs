@@ -112,6 +112,12 @@ impl BodyLabel {
         Self(host_letters([0]))
     }
 
+    /// The label of a system's protoplanetary disc: `DISC`.
+    #[must_use]
+    pub fn protoplanetary_disc() -> Self {
+        Self("DISC".to_owned())
+    }
+
     /// The label's text.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -194,7 +200,7 @@ fn roman_numeral(number: NonZeroU8) -> String {
 }
 
 /// Every body of `system` with its label, in index order: its planets, moons, rings, belts,
-/// belt members and halo.
+/// belt members, halo and discs.
 ///
 /// - Each planet is lettered among its host's planets by primordial semi-major axis
 ///   ([`Body::orbit`](crate::planetary::system::Body::orbit)), ties broken by body index, after its host's letters ([`host_letters`] of
@@ -206,7 +212,8 @@ fn roman_numeral(number: NonZeroU8) -> String {
 /// - Belts are numbered from 1 through the system in index order, host by host and inside out:
 ///   `BELT 1`. A belt's member is its belt's label and its sub-index, its rank by size from the
 ///   largest: `BELT 1-3` (this lane's form, where design note 22 names none).
-/// - The cometary halo is `HALO`.
+/// - The cometary halo is `HALO`, and the protoplanetary disc `DISC` (P14.T28.a; this lane's
+///   form, where design note 22 names none).
 ///
 /// Labels are unique within a system: two hosts' letters differ, since their members do, a host's
 /// planets take distinct letters, a parent's moons distinct numerals, and the rest distinct
@@ -256,6 +263,9 @@ pub fn labels(system: &PlanetarySystem) -> Vec<(BodyIndex, BodyLabel)> {
     }
     if system.rogue_planet().is_some() {
         labelled.push((BodyIndex::PRIMARY, BodyLabel::rogue_planet()));
+    }
+    if let Some(disc) = system.protoplanetary_disc() {
+        labelled.push((disc.index(), BodyLabel::protoplanetary_disc()));
     }
     // Satellites, parent by parent, once their parents are labelled.
     labelled.sort_by_key(|(index, _)| *index);

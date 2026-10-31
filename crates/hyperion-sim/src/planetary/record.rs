@@ -51,6 +51,7 @@ use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::figure::BodyFigure;
 use crate::planetary::derive::photometry::BodyPhotometry;
 use crate::planetary::derive::{DerivedBody, MassFractions, PlanetClass};
+use crate::planetary::disc::DiscProfile;
 use crate::planetary::drift::{DriftingOrbit, OrbitDrift};
 use crate::planetary::fate::BodyState;
 use crate::planetary::frames::BodyFixedFrame;
@@ -72,7 +73,7 @@ use crate::substance::SubstanceId;
 use crate::time::UniverseTime;
 use crate::units::{
     EarthMasses, EarthRadii, Kelvin, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared,
-    Radians, WattsPerSquareMetre,
+    Radians, SolarMasses, WattsPerSquareMetre,
 };
 
 /// How much of a body a record holds, from least to most; each level holds everything the levels
@@ -1164,6 +1165,8 @@ pub enum Population {
     Belt(BeltRecord),
     /// The cometary halo at the record's time (P14.T21.d).
     CometaryHalo(HaloRecord),
+    /// A protoplanetary disc at the record's time, while it lasts (P14.T28.a).
+    ProtoplanetaryDisc(DiscRecord),
 }
 
 impl Population {
@@ -1176,7 +1179,7 @@ impl Population {
                 members: belt.members.granted(DetailLevel::Bulk, level),
                 ..belt
             }),
-            Self::Ring(_) | Self::CometaryHalo(_) => self,
+            Self::Ring(_) | Self::CometaryHalo(_) | Self::ProtoplanetaryDisc(_) => self,
         }
     }
 
@@ -1185,7 +1188,7 @@ impl Population {
     fn withholds(&self) -> bool {
         match self {
             Self::Belt(belt) => belt.members.state() == SectionState::NotResolved,
-            Self::Ring(_) | Self::CometaryHalo(_) => false,
+            Self::Ring(_) | Self::CometaryHalo(_) | Self::ProtoplanetaryDisc(_) => false,
         }
     }
 }
@@ -1386,6 +1389,117 @@ impl HaloRecord {
     #[must_use]
     pub const fn comet_rate(&self) -> EventsPerSecond {
         self.comet_rate
+    }
+}
+
+/// A protoplanetary disc as a record holds it at a time (P14.T28.a, design note 12): its host,
+/// its edges, snow line and taper, its gas and solids, and the gap each giant formed by the time
+/// has opened in it.
+///
+/// Its edges and masses are the disc's at birth (P14.T3), cut to its zone's limits and the strip
+/// radius; the record's mass section is their sum.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiscRecord {
+    host: OrbitHost,
+    inner_edge: Metres,
+    outer_edge: Metres,
+    snow_line: Metres,
+    characteristic_radius: Metres,
+    gas_mass: SolarMasses,
+    solid_mass: EarthMasses,
+    gaps: Vec<DiscGap>,
+}
+
+impl DiscRecord {
+    /// The record of the disc `disc` about `host`, with the gaps `gaps`, inside out.
+    #[must_use]
+    pub(crate) fn new(host: OrbitHost, disc: &DiscProfile, gaps: Vec<DiscGap>) -> Self {
+        Self {
+            host,
+            inner_edge: disc.inner_edge(),
+            outer_edge: disc.outer_edge(),
+            snow_line: disc.snow_line(),
+            characteristic_radius: disc.characteristic_radius(),
+            gas_mass: disc.gas_mass(),
+            solid_mass: disc.solid_mass(),
+            gaps,
+        }
+    }
+
+    /// The orbit host it goes round.
+    #[must_use]
+    pub const fn host(&self) -> OrbitHost {
+        self.host
+    }
+
+    /// Its inner edge, from its host.
+    #[must_use]
+    pub const fn inner_edge(&self) -> Metres {
+        self.inner_edge
+    }
+
+    /// Its outer edge, from its host.
+    #[must_use]
+    pub const fn outer_edge(&self) -> Metres {
+        self.outer_edge
+    }
+
+    /// Its snow line, from its host's zero-age luminosity (design note 6).
+    #[must_use]
+    pub const fn snow_line(&self) -> Metres {
+        self.snow_line
+    }
+
+    /// The characteristic radius `r_c` of its taper (P14.T3).
+    #[must_use]
+    pub const fn characteristic_radius(&self) -> Metres {
+        self.characteristic_radius
+    }
+
+    /// Its gas mass between its edges.
+    #[must_use]
+    pub const fn gas_mass(&self) -> SolarMasses {
+        self.gas_mass
+    }
+
+    /// Its solid mass between its edges.
+    #[must_use]
+    pub const fn solid_mass(&self) -> EarthMasses {
+        self.solid_mass
+    }
+
+    /// The gaps its giants have opened by the record's time, inside out.
+    #[must_use]
+    pub fn gaps(&self) -> &[DiscGap] {
+        &self.gaps
+    }
+}
+
+/// A gap a giant has opened in a protoplanetary disc: the giant, and its semi-major axis at the
+/// record's time (P14.T28.a).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DiscGap {
+    giant: BodyIndex,
+    radius: Metres,
+}
+
+impl DiscGap {
+    /// The gap of the giant `giant` at `radius` from the disc's host.
+    #[must_use]
+    pub(crate) const fn new(giant: BodyIndex, radius: Metres) -> Self {
+        Self { giant, radius }
+    }
+
+    /// The giant that opened it.
+    #[must_use]
+    pub const fn giant(&self) -> BodyIndex {
+        self.giant
+    }
+
+    /// Its distance from the disc's host: the giant's semi-major axis.
+    #[must_use]
+    pub const fn radius(&self) -> Metres {
+        self.radius
     }
 }
 

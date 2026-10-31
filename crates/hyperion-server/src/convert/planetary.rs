@@ -17,16 +17,17 @@ use hyperion_protocol::{
     BodySurfaceDto, BulkPropertiesDto, ClimateForcingDto, ClimateRegimeDto, CometaryHaloDto,
     CondensateDeckDto, CraterContractDto, CraterScreeningDto, CraterTargetClassDto,
     CrustCompositionDto, CrustLidDto, DestructionCauseDto, DetailLevelDto, DetailSeedHex,
-    ErrorCode, FigureDatumDto, FigureLawDto, GasShareDto, GuillotProfileDto, HabitableZoneDto,
-    MagneticFieldClassDto, MassFractionsDto, MixingRatioNodeDto, Modelled, MoonOriginDto,
-    NotFormedCondensateDto, NotFormedReasonDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto,
-    PhaseTemplateDto, PlanetClassDto, PopulationDto, ProfileNodeDto, RadiationClassDto,
-    RedoxClassDto, RequestError, RingDto, RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto,
-    SceneSystemDto, SectionDto, SeenPositionDto, SizeDistributionDto, SpinResonanceDto,
-    SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto, SurfaceCondensateDto,
-    SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest,
-    SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, TaxonomicClassDto, TectonicRegimeDto,
-    ThermalRegimeDto, VerticalStructureDto, WetEpochDto, ZoneDto,
+    DiscGapDto, ErrorCode, FigureDatumDto, FigureLawDto, GasShareDto, GuillotProfileDto,
+    HabitableZoneDto, MagneticFieldClassDto, MassFractionsDto, MixingRatioNodeDto, Modelled,
+    MoonOriginDto, NotFormedCondensateDto, NotFormedReasonDto, OceanFloorDto, OrbitDriftDto,
+    OrbitHostDto, PhaseTemplateDto, PlanetClassDto, PopulationDto, ProfileNodeDto,
+    ProtoplanetaryDiscDto, RadiationClassDto, RedoxClassDto, RequestError, RingDto, RingGapDto,
+    RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto, SeenPositionDto,
+    SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
+    SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto,
+    SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest,
+    TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
+    ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
@@ -785,6 +786,25 @@ fn population_dto(system: SystemId, population: &Population) -> PopulationDto {
             comets: halo.comets(),
             comet_rate_per_s: halo.comet_rate().value(),
         }),
+        Population::ProtoplanetaryDisc(disc) => {
+            PopulationDto::ProtoplanetaryDisc(ProtoplanetaryDiscDto {
+                host: orbit_host(system, disc.host()),
+                inner_edge_m: disc.inner_edge().value(),
+                outer_edge_m: disc.outer_edge().value(),
+                snow_line_m: disc.snow_line().value(),
+                characteristic_radius_m: disc.characteristic_radius().value(),
+                gas_mass_kg: Kilograms::from(disc.gas_mass()).value(),
+                solid_mass_kg: Kilograms::from(disc.solid_mass()).value(),
+                gaps: disc
+                    .gaps()
+                    .iter()
+                    .map(|gap| DiscGapDto {
+                        giant: body_id(system, gap.giant()),
+                        radius_m: gap.radius().value(),
+                    })
+                    .collect(),
+            })
+        }
     }
 }
 

@@ -255,6 +255,50 @@ describe("toSystemBodiesModel", () => {
     expect(population(0x0100)).toEqual({ state: "not_applicable" });
   });
 
+  it("reads a protoplanetary disc's population, its masses in Earth masses (P14.T28.a)", () => {
+    const disc = populatedBodiesWith((body) =>
+      body.kind.type === "protoplanetary_disc"
+        ? {
+            ...body,
+            state: { type: "present" },
+            population: {
+              state: "ok",
+              value: {
+                type: "protoplanetary_disc",
+                host: { type: "star", body_index: 0 },
+                inner_edge_m: 1.5e9,
+                outer_edge_m: 1.346e13,
+                snow_line_m: 4.04e11,
+                characteristic_radius_m: 4.488e12,
+                gas_mass_kg: 1.9e28,
+                solid_mass_kg: 1.5e26,
+                gaps: [{ giant: `${FIXTURE_SYSTEM}.0100`, radius_m: 7.78e11 }],
+              },
+            },
+          }
+        : body,
+    );
+    const { bodies } = bodiesOf(disc);
+    const section = bodies.bodies.find(
+      (body) => body.kind.kind === "protoplanetary_disc",
+    )?.population;
+
+    expect(section).toEqual({
+      state: "ok",
+      value: {
+        kind: "protoplanetary_disc",
+        host: { kind: "star", bodyIndex: 0 },
+        innerEdgeM: 1.5e9,
+        outerEdgeM: 1.346e13,
+        snowLineM: 4.04e11,
+        characteristicRadiusM: 4.488e12,
+        gasMassMearth: 1.9e28 / EARTH_MASS_KG,
+        solidMassMearth: 1.5e26 / EARTH_MASS_KG,
+        gaps: [{ giant: `${FIXTURE_SYSTEM}.0100`, radiusM: 7.78e11 }],
+      },
+    });
+  });
+
   it("refuses a population whose edges are reversed", () => {
     const reversed = populatedBodiesWith((body) =>
       body.population.state === "ok" && body.population.value.type === "ring"

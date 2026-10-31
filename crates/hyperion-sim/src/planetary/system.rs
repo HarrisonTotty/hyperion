@@ -47,13 +47,17 @@
 //! Then every planet's and member's rotation law, from it its satellites' frame on its Laplace
 //! surface, on which they are found again (P14.T56.a), and each moon's law on its plane.
 //!
+//! 9. **The discs**: from generator version 26 the protoplanetary disc of the first host with
+//!    one, in belt slot `0xE0` (P14.T28.a, [`PlanetarySystem::protoplanetary_disc`]), on no
+//!    stream.
+//!
 //! Second-generation planets (P14.T28.e) are not built: their stage does not exist yet, and their
 //! streams (`planet.secondgen`) and slots (`0xC0`–`0xCF`) stay reserved for them. Nor is
-//! P14.T28.a's protoplanetary disc (belt slot `0xE0`) or P14.T28.d's debris disc (`0xEE`). A
-//! free-floating brown dwarf runs the steps above from generator version 26 (P14.T27.a), its
-//! planets from slot `0x01`. A rogue planet ([`HostKind::RoguePlanet`], from 26, P14.T27.b) runs
-//! none of them but step 7: it is body `0x0000`, derived with no star, with its satellites about it
-//! ([`RoguePlanet`], the `rogue` module), and every query of its system takes that module's path.
+//! P14.T28.d's debris disc (`0xEE`). A free-floating brown dwarf runs the steps above from generator
+//! version 26 (P14.T27.a), its planets from slot `0x01`. A rogue planet ([`HostKind::RoguePlanet`],
+//! from 26, P14.T27.b) runs none of them but step 7: it is body `0x0000`, derived with no star, with
+//! its satellites about it ([`RoguePlanet`], the `rogue` module), and every query of its system
+//! takes that module's path.
 //!
 //! [`PlanetarySystem`] holds only that primordial state, which is what the server may cache ("state
 //! at the epoch, never positions at some time").
@@ -236,6 +240,8 @@ use modifiers::{
 use moon_ice::{HotHistory, MoonIce, kept_water, shell_lag};
 use small_bodies::SmallBodyTypes;
 
+use discs::SystemDiscs;
+pub use discs::{PROTOPLANETARY_DISC_SLOT, ProtoplanetaryDisc};
 pub use events::{ListedEvents, SystemEvents, events_on_the_record};
 pub use rogue::RoguePlanet;
 
@@ -1053,6 +1059,8 @@ pub struct PlanetarySystem {
     satellites: Vec<Satellites>,
     belts: Vec<Belt>,
     halo: Option<SystemHalo>,
+    /// Its disc bodies (P14.T28.a), found once as it is generated.
+    discs: SystemDiscs,
     /// The rules its records' cold traps follow, read once as it is generated.
     record: RecordRules,
     /// A rogue planet's object, body `0x0000` (P14.T27.b, [`rogue`]); `None` for every other
@@ -1221,6 +1229,9 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         body.rotation = rotation;
     }
     system.place_on_laplace_surfaces(seed, &then, &records, &sites);
+
+    // Step 9: the disc bodies, which read no stream and move no other body.
+    system.discs = SystemDiscs::find(&system);
     system
 }
 
@@ -1375,6 +1386,7 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         satellites: Vec::new(),
         belts: Vec::new(),
         halo: None,
+        discs: SystemDiscs::NONE,
         record: RecordRules::in_force(),
         rogue: None,
     }
@@ -1878,8 +1890,8 @@ impl PlanetarySystem {
         self.halo.map(|halo| halo.host)
     }
 
-    /// Every index the system holds a record for: its bodies', its belts' and its halo's, in
-    /// index order.
+    /// Every index the system holds a record for: its bodies', its belts', its halo's and its
+    /// discs', in index order.
     #[must_use]
     pub fn indices(&self) -> Vec<BodyIndex> {
         let mut indices: Vec<BodyIndex> = self
@@ -1889,6 +1901,7 @@ impl PlanetarySystem {
             .chain(self.bodies.iter().map(Body::index))
             .chain(self.belts.iter().map(Belt::index))
             .chain(self.halo().map(CometaryHalo::index))
+            .chain(self.discs.indices())
             .collect();
         indices.sort_unstable();
         indices
@@ -2056,6 +2069,11 @@ impl PlanetarySystem {
         if let Some(halo) = &self.halo {
             records.push(self.halo_record(&epoch, halo, label_of(halo.halo.index())));
         }
+        records.extend(
+            self.discs
+                .indices()
+                .filter_map(|index| self.disc_record(&epoch, &fates, index, label_of(index))),
+        );
         records.sort_by_key(BodyRecord::index);
         let belts = Section::Ok(self.belts.iter().map(Belt::index).collect());
         let halo = Section::Ok(self.halo().map(CometaryHalo::index));
@@ -2284,6 +2302,14 @@ impl PlanetarySystem {
         if let Some(halo) = self.halo.as_ref().filter(|halo| halo.halo.index() == index) {
             return Ok(self.halo_record(&epoch, halo, label));
         }
+        if self.is_disc(index) {
+            let hosts: Vec<FateHost<'_>> =
+                self.zones.iter().map(|zone| fate_host(ctx, zone)).collect();
+            let fates = self.fates(&hosts);
+            return Ok(self
+                .disc_record(&epoch, &fates, index, label)
+                .expect("a disc body has a disc record"));
+        }
         // A planet's, member's or satellite's record derives its bodies: their shades' book.
         let epoch = epoch.with_shades().with_small_bodies();
         let cosines = HourCosines::new();
@@ -2332,7 +2358,10 @@ impl PlanetarySystem {
                 .rogue_state(ctx, index, t)?
                 .map(|(position, _)| position));
         }
-        if self.belt(index).is_some() || self.halo().is_some_and(|halo| halo.index() == index) {
+        if self.belt(index).is_some()
+            || self.halo().is_some_and(|halo| halo.index() == index)
+            || self.is_disc(index)
+        {
             return Ok(None);
         }
         let body = self.body(index).ok_or(ResolveBodyError::NoSuchBody)?;
@@ -2458,7 +2487,10 @@ impl PlanetarySystem {
     ///
     /// [`ResolveBodyError::NoSuchBody`] if the system holds no body `index`.
     pub fn surface_seed(&self, index: BodyIndex) -> Result<Option<SurfaceSeed>, ResolveBodyError> {
-        if self.belt(index).is_some() || self.halo().is_some_and(|halo| halo.index() == index) {
+        if self.belt(index).is_some()
+            || self.halo().is_some_and(|halo| halo.index() == index)
+            || self.is_disc(index)
+        {
             return Ok(None);
         }
         // A rogue planet's object is its system's body `0x0000`, not one of its bodies.
@@ -6853,6 +6885,7 @@ mod census_26_tests;
 mod census_tests;
 #[cfg(test)]
 pub(crate) mod cold_trap_tests;
+mod discs;
 pub(crate) mod envelope;
 pub(crate) mod events;
 #[cfg(test)]

@@ -21,11 +21,14 @@
 //! own: word 0 is the giant's formation rank and word 1 the magma ocean's, one uniform each, drawn
 //! for every planet whatever its kind; words 2–7 are reserved.
 //!
-//! # In the vertical slice
+//! # The protoplanetary disc body
 //!
-//! Plan 14's T28.a also puts a protoplanetary disc body in belt slot `0xE0` before the disc's
-//! lifetime, `Destroyed { Dispersed }` afterwards. No slice task fills the belt slots, so it is
-//! added with phase D's belts (P14.T21), with a bump, as the task's _Slice_ note says.
+//! Plan 14's T28.a also puts a protoplanetary disc body in belt slot `0xE0`, present from the
+//! system's birth until the disc's lifetime and `Destroyed { Dispersed }` from it on, carrying the
+//! disc's masses and radii and a gap at each giant formed by then
+//! ([`PlanetarySystem::protoplanetary_disc`](crate::planetary::system::PlanetarySystem::protoplanetary_disc)).
+//! It moves every snapshot of a system with a disc, so it is held until generator version 26
+//! ([`PROTOPLANETARY_DISC_VERSION`]).
 
 use std::error::Error;
 use std::fmt;
@@ -39,6 +42,69 @@ use crate::planetary::params::{
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
 use crate::units::{EarthMasses, Megayears};
+use crate::{GENERATOR_VERSION, GeneratorVersion};
+
+/// The generator version from which a system has its protoplanetary disc body in belt slot
+/// `0xE0` (P14.T28.a): 26, the first galaxy train after the task lands (the bump plan).
+///
+/// It is the disc body's one hold. Below it [`ProtoplanetaryDiscRules::in_force`] is
+/// [`ProtoplanetaryDiscRules::Held`]: no system has the body, and every generated value is version
+/// 25's bit for bit. 26's bump deletes this hold, [`ProtoplanetaryDiscRules`] with its `Held` arm,
+/// the tests' switch and its tripwire (`the_protoplanetary_disc_is_held_only_until_the_26_bump`).
+pub(crate) const PROTOPLANETARY_DISC_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether P14.T28.a's disc body is in force (its hold, [`PROTOPLANETARY_DISC_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum ProtoplanetaryDiscRules {
+    /// Version 25's and before: no protoplanetary disc body.
+    Held,
+    /// Version 26's: the disc body in belt slot `0xE0` of every system with a disc.
+    Disc,
+}
+
+impl ProtoplanetaryDiscRules {
+    /// The rules this generator version gives: the disc body's from
+    /// [`PROTOPLANETARY_DISC_VERSION`], none below it; in the tests, the rules a test's switch
+    /// sets on its thread ([`with_protoplanetary_disc`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = DISC_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= PROTOPLANETARY_DISC_VERSION {
+            Self::Disc
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The disc body's rules a test sets on its thread, `None` for the version's.
+    static DISC_RULES: core::cell::Cell<Option<ProtoplanetaryDiscRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the disc body's rules `rules` on this thread, for the tests to reach the
+/// disc ahead of the bump; the version's rules are set back after, a panic in `run` included.
+/// 26's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_protoplanetary_disc<R>(
+    rules: ProtoplanetaryDiscRules,
+    run: impl FnOnce() -> R,
+) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<ProtoplanetaryDiscRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            DISC_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(DISC_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
 
 /// Words of [`tags::PLANET_ORIGIN`] a planet reads or reserves: its two ranks, then six reserved.
 pub const ORIGIN_WORDS: u64 = 8;
@@ -281,6 +347,60 @@ mod tests {
 
     fn rank(u: f64) -> UnitUniform {
         UnitUniform::new(u).expect("a rank in (0, 1)")
+    }
+
+    /// P14.T28.a's disc body is held until the 25 → 26 bump: no system has one, inside 26's
+    /// helper alone.
+    #[test]
+    fn the_protoplanetary_disc_is_held_only_until_the_26_bump() {
+        use crate::planetary::system::generate;
+        use crate::planetary::testing::{synthetic_star, with_every_25_hold, with_every_26_hold};
+        use crate::units::{Dex, SolarMasses, Years};
+        assert!(
+            GENERATOR_VERSION < PROTOPLANETARY_DISC_VERSION,
+            "the 25 → 26 bump gives every system with a disc its protoplanetary disc body \
+             (P14.T28.a): delete `PROTOPLANETARY_DISC_VERSION`, `ProtoplanetaryDiscRules` with \
+             its `Held` arm and the held arm of `SystemDiscs::find`, the tests' \
+             `with_protoplanetary_disc`, its switch in `with_every_26_hold` and this test; \
+             re-bless the goldens whose systems have a disc, and draw the disc's annulus in the \
+             client's `SYSTEM` view (`populationAnnuli`)"
+        );
+        assert_eq!(
+            ProtoplanetaryDiscRules::in_force(),
+            ProtoplanetaryDiscRules::Held
+        );
+        assert_eq!(
+            with_every_26_hold(ProtoplanetaryDiscRules::in_force),
+            ProtoplanetaryDiscRules::Disc
+        );
+        assert_eq!(
+            with_every_25_hold(ProtoplanetaryDiscRules::in_force),
+            ProtoplanetaryDiscRules::Held
+        );
+        assert_eq!(
+            with_every_26_hold(|| {
+                with_protoplanetary_disc(
+                    ProtoplanetaryDiscRules::Held,
+                    ProtoplanetaryDiscRules::in_force,
+                )
+            }),
+            ProtoplanetaryDiscRules::Held
+        );
+        let cell = GenCell::new(CellSize::Ly8, [3, -2, 1]).expect("a cell of the grid");
+        let id = SystemId::from_parts(Layer::A, cell, 1).expect("a system of the cell");
+        let ctx = synthetic_star(id, SolarMasses::new(1.0), Dex::ZERO, Years::new(4.57e9))
+            .expect("a Sun");
+        let seed = Seed::new(0x0014_0028_a000_0d15);
+        assert_eq!(generate(seed, &ctx).protoplanetary_disc(), None);
+        assert!(
+            with_protoplanetary_disc(ProtoplanetaryDiscRules::Disc, || generate(seed, &ctx))
+                .protoplanetary_disc()
+                .is_some()
+        );
+        assert_eq!(
+            ProtoplanetaryDiscRules::in_force(),
+            ProtoplanetaryDiscRules::Held
+        );
     }
 
     #[test]
