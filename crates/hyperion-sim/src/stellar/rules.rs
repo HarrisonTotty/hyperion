@@ -91,9 +91,9 @@
 use crate::GeneratorVersion;
 use crate::galaxy::displaced::binarity::{STRIPPING_HELIUM_VERSION, StrippingRules};
 use crate::stellar::classify::pm13::{DWARF_SEQUENCE_VERSION, DwarfSequenceRules};
-use crate::stellar::photometry::{V_MAGNITUDE_VERSION, VMagnitudeRules};
 use crate::stellar::classify::{PECULIAR_CLASSES_VERSION, PeculiarClassRules};
 use crate::stellar::events::{STAR_EVENTS_VERSION, StarEventRules};
+use crate::stellar::photometry::{V_MAGNITUDE_VERSION, VMagnitudeRules};
 use crate::stellar::remnant::KickRankRules;
 use crate::stellar::sse::wind::{HD_LIMIT_VERSION, HdLimitRules};
 use crate::stellar::sse::{HELIUM_VERSION, HeliumRules};
