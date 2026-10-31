@@ -20,6 +20,7 @@ import {
 import { stylesheetRule } from "../../test/stylesheet";
 import { type StarFilter } from "./chartModel";
 import { HrDiagram } from "./HrDiagram";
+import { modeReading, type PlacePrecision, placePrecisionFor } from "./chartReadings";
 
 /** The stage, and every other element, laid out 400 × 300 at 16 px to the rem. */
 const WIDTH_PX = 400;
@@ -55,6 +56,7 @@ interface RenderSpec {
   readonly stale?: boolean;
   readonly mode?: QueryMode;
   readonly timeYr?: number;
+  readonly placePrecision?: PlacePrecision;
 }
 
 function renderDiagram({
@@ -65,6 +67,7 @@ function renderDiagram({
   stale = false,
   mode = NOW_MODE,
   timeYr = 0,
+  placePrecision = { place: 1, angle: 1 },
 }: RenderSpec = {}) {
   const recorder = stubCanvas();
   stubLayout();
@@ -80,7 +83,7 @@ function renderDiagram({
       stale={stale}
       mode={mode}
       timeYr={timeYr}
-      placeDecimals={1}
+      placePrecision={placePrecision}
     />
   );
   const { rerender } = render(view(selectedId));
@@ -477,6 +480,22 @@ describe("HrDiagram's mode line (plan 12, P12.T11.b)", () => {
     expect(lineValue("HEIGHT")).toBe("-12.3 ly");
     // The observer's coordinates are the mode's, nested in its value as the chart's furniture has them.
     expect(lineTerm("MODE").nextElementSibling).toContainElement(lineTerm("HEIGHT"));
+  });
+
+  it("reads the observer at the precision the chart's furniture reads it at (plan 09, P09.T42)", () => {
+    // A chart of 0.001 ly at the central black hole, observed from 10,000 ly out: the observer's
+    // ANGLE takes the centre's one decimal, not the five its own radius would.
+    const placePrecision = placePrecisionFor(0.001, [0.0003, 0, 0.0001]);
+    renderDiagram({ mode: OBSERVED, placePrecision });
+
+    expect(modeReading(OBSERVED, placePrecision).from.map((reading) => reading.value)).toEqual([
+      "10,000.00000",
+      "036.9°",
+      "-12.34000",
+    ]);
+    expect(lineValue("RADIUS")).toBe("10,000.00000 ly");
+    expect(lineValue("ANGLE")).toBe("036.9°");
+    expect(lineValue("HEIGHT")).toBe("-12.34000 ly");
   });
 
   it("reads an observer's ANGLE on the galactic axis as an em dash", () => {

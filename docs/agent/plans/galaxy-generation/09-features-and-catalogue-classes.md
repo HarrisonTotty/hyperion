@@ -5262,6 +5262,11 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _`DRIVE RANGE`._ Accepts 0.001–500 ly at four decimals (the query radii's span, D9's default
     radius following it); `RANGE` and `PLANE` labels go through `formatQueryRadius`, so a range
     below 0.01 ly reads in AU (`RANGE 94.9 AU SET`).
+  - _`ANGLE` (lane `p09-t42-angle`, 2026-10-31)._ `placePrecisionFor(radius, centre)` gives
+    `PlacePrecision { place, angle }`, angle = clamp(⌈d + log₁₀(πR ÷ 180) − 10⁻⁹⌉, 1, d) at the
+    answer's centre (1 on the axis); `placeReadings`, `modeReading` and `HrDiagram.placePrecision`
+    take it, the observer at the centre's. Far from the axis (R > 57.3 ly) the cap is a stated
+    limit; the core arrow stays in ly.
 - **P09.T40.b fix, the centre's served sphere of influence (lane `galaxy-centre-core`, 2026-10-31,
   at 24 and 3; served value only, no switch).** `CentreStructure::influence_radius_ly` is now
   `galaxy.centre_motion().influence_radius()`, every mass inside, not the cluster-only

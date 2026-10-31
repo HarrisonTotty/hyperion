@@ -25,7 +25,7 @@ import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from ".
 import { Reading, sourceState } from "../../spatial/Reading";
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
 import { shownCount, type StarFilter } from "./chartModel";
-import { CHART_FRAME_NAME, modeReading, timeReading } from "./chartReadings";
+import { CHART_FRAME_NAME, modeReading, type PlacePrecision, timeReading } from "./chartReadings";
 import { StarShapeLegend } from "./StarShapeLegend";
 
 /**
@@ -144,10 +144,10 @@ export interface HrDiagramProps {
   /** The answer's chart time, in years from the epoch: the observer's time in observed mode. */
   readonly timeYr: number;
   /**
-   * The decimals the chart's furniture reads a place at for the answer's radius
-   * (`placeDecimalsFor`), so that the observer is written here as there.
+   * The decimals the chart's furniture reads the answer's places at (`placePrecisionFor`), so that
+   * the observer is written here as there.
    */
-  readonly placeDecimals: number;
+  readonly placePrecision: PlacePrecision;
 }
 
 /**
@@ -194,7 +194,7 @@ export function HrDiagram({
   stale,
   mode,
   timeYr,
-  placeDecimals,
+  placePrecision,
 }: HrDiagramProps) {
   const { ref: stageRef, size } = useElementSize();
   const widthPx = size?.widthPx ?? 0;
@@ -361,7 +361,7 @@ export function HrDiagram({
       <dl className="hr-diagram__readings spatial-view__readings">
         {mode.kind === "observed" ? <FrameReading frameName={CHART_FRAME_NAME} /> : null}
         <Reading reading={timeReading(timeYr)} state={sourceState(stale)} />
-        <ModeReading mode={modeReading(mode, placeDecimals)} state={sourceState(stale)} />
+        <ModeReading mode={modeReading(mode, placePrecision)} state={sourceState(stale)} />
       </dl>
       <Counts rows={plottedRows} stale={stale} />
       <h3 className="hr-diagram__counts-heading">NOT PLOTTED</h3>

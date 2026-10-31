@@ -425,6 +425,10 @@ describe("LocalChartPanel", { timeout: 120_000 }, () => {
     expect(within(chartPage()).getByText("HEIGHT").nextElementSibling).toHaveTextContent(
       "+0.00000 ly",
     );
+    // At the Sun's radius the angle's step along the arc is capped at the place's five decimals.
+    expect(within(chartPage()).getByText("ANGLE").nextElementSibling).toHaveTextContent(
+      "000.00000°",
+    );
     const systems = within(screen.getByRole("region", { name: /^Systems/u }));
     expect(systems.getByText("DIST AU")).toBeInTheDocument();
     expect(options()[1]).toHaveAccessibleName(/, 31\.6 AU,/u);
@@ -435,6 +439,32 @@ describe("LocalChartPanel", { timeout: 120_000 }, () => {
     expect(reading("DIST")).toBe("31.6 AU");
     expect(reading("NORTH")).toBe("+31.6 AU");
     expect(reading("COREWARD")).toBe("+0.0 AU");
+  });
+
+  it("reads a finest chart at the central black hole's ANGLE to one decimal, its RADIUS to five", async () => {
+    const { user, socket } = await renderChart();
+
+    await user.selectOptions(
+      within(chartPage()).getByRole("combobox", { name: "QUERY RADIUS" }),
+      "63.2 AU",
+    );
+    // The answer's centre is the chart's, 0.0003 ly from the axis: a degree's tenth steps there
+    // 5.2E-7 ly along the arc, finer than the place's 1E-5 ly.
+    await server(() => {
+      socket.serverAnswers("systems_in_range", (body) =>
+        aSystemsInRange({
+          centreLy: [0.0003, 0, 0.0001],
+          radiusLy: body.radius_ly,
+          minLayer: body.min_layer,
+        }),
+      );
+    });
+
+    const value = (label: string): Element | null =>
+      within(chartPage()).getByText(label).nextElementSibling;
+    expect(value("RADIUS")).toHaveTextContent("0.00030 ly");
+    expect(value("ANGLE")).toHaveTextContent(/^000\.0°/u);
+    expect(value("HEIGHT")).toHaveTextContent("+0.00010 ly");
   });
 
   it("says what its symbols mean, and that they are not to scale", async () => {

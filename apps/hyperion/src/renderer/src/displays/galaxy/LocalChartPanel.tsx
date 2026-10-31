@@ -15,7 +15,7 @@ import { answeredMode } from "./chartModel";
 import {
   CHART_FRAME_NAME,
   modeReading,
-  placeDecimalsFor,
+  placePrecisionFor,
   placeReadings,
   radiusReading,
   timeReading,
@@ -87,15 +87,16 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
       focusPageTab?.();
     }
   }, [fault, focusPageTab]);
-  // The place's step scales with the answer's radius, so that a fine chart can be placed.
-  const placeDecimals = placeDecimalsFor(result?.radiusLy ?? 0);
+  // The place's step scales with the answer's radius, so that a fine chart can be placed, and the
+  // angle's with its step along the arc at the answer's centre: one precision for the answer.
+  const precision = result === null ? null : placePrecisionFor(result.radiusLy, result.centreLy);
   const centreReadings: ReadonlyArray<SpatialReading> =
-    result === null ? [] : placeReadings(result.centreLy, placeDecimals);
-  // The core arrow's distance is the centre's `RADIUS`, written the same way.
+    result === null || precision === null ? [] : placeReadings(result.centreLy, precision);
+  // The core arrow's distance is the centre's `RADIUS`, written the same way, in light-years.
   const radiusText =
-    result === null
+    result === null || precision === null
       ? null
-      : radiusReading(cylindrical(vec3(...result.centreLy)).radiusLy, placeDecimals);
+      : radiusReading(cylindrical(vec3(...result.centreLy)).radiusLy, precision.place);
   const coreDistance: SpatialQuantity = { value: radiusText ?? "", unit: "ly" };
   // The mode the answer on show was given in, which the furniture and the legend state.
   const answered = result === null ? null : answeredMode(result);
@@ -121,7 +122,7 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
           action={{ label: "RETRY", onAction: chart.retry }}
         />
       )}
-      {scene === null || result === null ? null : (
+      {scene === null || result === null || precision === null ? null : (
         <SpatialView
           scene={scene}
           fitRadius={result.radiusLy}
@@ -130,7 +131,7 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
           frameName={CHART_FRAME_NAME}
           centre={centreReadings}
           time={timeReading(result.timeYr)}
-          mode={modeReading(answered ?? result.mode, placeDecimals)}
+          mode={modeReading(answered ?? result.mode, precision)}
           coreDistance={coreDistance}
           accessibleName="Local chart"
           stale={stale}
