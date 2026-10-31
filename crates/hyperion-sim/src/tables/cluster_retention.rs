@@ -7,7 +7,7 @@
 //! manifest: crates/hyperion-fit/manifests/cluster_retention.toml
 //! data: none
 //! sim-fingerprint: 9c17754eda6195fc151357aa2bc7dd51cec18fed8a9d5ce72945511ca58cc5d7
-//! since-generator-version: 24
+//! since-generator-version: 25
 //! source: plan 06's tracks and plan 08's kick quadrature (`kick_bins`) under the default kick
 //!   law; the retention quadrature of P09.T9.b
 //! acceptance: at 64 off-node points ([Fe/H] [-1.95, -1.1, -0.43, 0.05], v [3.3, 17.0, 45.0,

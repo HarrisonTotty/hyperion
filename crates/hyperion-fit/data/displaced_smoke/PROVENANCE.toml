@@ -8,10 +8,10 @@ dataset = "displaced_smoke"
 class = "fetched"
 citation = "hyperion-fit orbits (plan 15, P15.T6.a–b and P15.T6.g): orbits in the Milky Way fixture's own potential"
 url = "generated: hyperion-fit orbits --smoke"
-retrieved = "2026-10-13"
-release = "the smoke manifest displaced_orbits.smoke.toml, manifest-sha256 460b384a8a615a064e38009be24b2e9cb0b572557cb30d5a7d1f64a0c6a5dec7, at GENERATOR_VERSION 21: rerun with P15.T6.g's time-transformed leapfrog and its drift scale, in the potential of P11.T4.h's early-AGB remnant blend with P02.T6.f's conservative far field (first run at GENERATOR_VERSION 15 and rerun in the potential of the version-15 batch, P06.T30 and P11.T1.d's mean masses and ruling 138's Chabrier scale, then in that of P06.T39's Eddington wind, and at GENERATOR_VERSION 16 in the version-16 potential, rulings 143.1 and 144's nuclear cluster and inner nuclear disc, with ruling 147.2's kick table)"
+retrieved = "2026-10-31"
+release = "the smoke manifest displaced_orbits.smoke.toml, manifest-sha256 460b384a8a615a064e38009be24b2e9cb0b572557cb30d5a7d1f64a0c6a5dec7, at GENERATOR_VERSION 25: rerun in P15.T3.c's potential (MGE_BOXY) with version 25's train (at GENERATOR_VERSION 21 rerun with P15.T6.g's time-transformed leapfrog and its drift scale, in the potential of P11.T4.h's early-AGB remnant blend with P02.T6.f's conservative far field (first run at GENERATOR_VERSION 15 and rerun in the potential of the version-15 batch, P06.T30 and P11.T1.d's mean masses and ruling 138's Chabrier scale, then in that of P06.T39's Eddington wind, and at GENERATOR_VERSION 16 in the version-16 potential, rulings 143.1 and 144's nuclear cluster and inner nuclear disc, with ruling 147.2's kick table))"
 licence = "HYPERION's own output"
 
 [[files]]
 name = "displaced_orbits.txt"
-sha256 = "88db652d0c623a5de8c4f2aae1c64cd11adee290e300272fd85da3e38ac967db"
+sha256 = "be79fb5907ff00eba3c1bc3d4cac82eeb9a5c1118b132cfc92ca1c860145d5dd"

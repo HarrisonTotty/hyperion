@@ -6,7 +6,7 @@
 //! manifest: crates/hyperion-fit/manifests/condensate_extinction_8.toml
 //! data: `materials/aluminium-oxide.json@f36e605ea5e0`, `materials/calcium-titanate.json@48ba3f9bcd9d`, `materials/enstatite-glass.json@9c86314de93f`, `materials/forsterite-amorphous.json@d65badba21ca`, `materials/iron.json@b01b03376019`, `materials/potassium-chloride.json@f73963390764`, `materials/sodium-sulphide.json@b1f773f2bdbe`
 //! sim-fingerprint: e566aad3ce8f86043744a9e4fbe6abc11c88d52c25b0bcc4692ccab09abcd9b2
-//! since-generator-version: 24
+//! since-generator-version: 25
 //! source: rendering plan R08's committed index files
 //!   (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`) of the liquid stand-ins
 //!   (P14.T49.p), each citing its own primaries; Mie spheres by Wiscombe 1980 (Appl. Opt. 19,

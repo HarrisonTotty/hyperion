@@ -147,13 +147,13 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "binary_pair_light_c",
         revision: 0,
-        since_generator_version: 21,
+        since_generator_version: 25,
         provisional: false,
     },
     TableInfo {
         name: "binary_pair_light_d",
         revision: 0,
-        since_generator_version: 21,
+        since_generator_version: 25,
         provisional: false,
     },
     TableInfo {
@@ -189,7 +189,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "cluster_retention",
         revision: 0,
-        since_generator_version: 24,
+        since_generator_version: 25,
         provisional: false,
     },
     TableInfo {
@@ -237,13 +237,13 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "condensate_extinction_8",
         revision: 0,
-        since_generator_version: 24,
+        since_generator_version: 25,
         provisional: false,
     },
     TableInfo {
         name: "displaced_forms",
-        revision: 0,
-        since_generator_version: 22,
+        revision: 1,
+        since_generator_version: 25,
         provisional: true,
     },
     TableInfo {
@@ -279,13 +279,13 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "kick_defaults",
         revision: 0,
-        since_generator_version: 24,
+        since_generator_version: 25,
         provisional: false,
     },
     TableInfo {
         name: "kick_rank",
         revision: 1,
-        since_generator_version: 24,
+        since_generator_version: 25,
         provisional: false,
     },
     TableInfo {
@@ -315,7 +315,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "mge",
         revision: 2,
-        since_generator_version: 23,
+        since_generator_version: 25,
         provisional: true,
     },
     TableInfo {
@@ -339,13 +339,13 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "sky_binary_light_c",
         revision: 0,
-        since_generator_version: 21,
+        since_generator_version: 25,
         provisional: false,
     },
     TableInfo {
         name: "sky_binary_light_d",
         revision: 0,
-        since_generator_version: 21,
+        since_generator_version: 25,
         provisional: false,
     },
     TableInfo {

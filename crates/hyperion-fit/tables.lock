@@ -19,11 +19,11 @@ path = "binary_pair_light_c.rs"
 task = "binary_pair_light_c"
 revision = 0
 inputs_sha256 = "d02f5d918253a7c16ee4667d771bf06ef92b491332dbe6e29c6657c592525d15"
-body_sha256 = "dfb18fdd89b1efab86c54eeaeb8f793a8bb84923b5ec785ed84d12a503c87bda"
-fingerprint = [6144.0, 223.63731480518544, -4.256550431273945, 2.0, 7.0, 228.14022241245084, 0.0, 0.0, 7.0, 227.91912027947748, -0.5132675566501259, 2.0, 7.0, 228.23487257007756, 5.8071959810886, 1.0, 7.0, 188.84451159042453, -2.913599846621297, 1.0, 7.0, 188.85441668592873, 92.21932843609758, 9.0, 7.0, 98.37663793496192, -6.803624047229877, 2.0, 7.0, 108.05759680135931, 4.970827036125806, 4.0, 7.0, 127.69842032632818, -6.361057027529942, 3.0, 7.0, 131.13305065101875, 61.08688762412844, 9.0, 7.0, 33.08076361745287, -4.616555841884917, 3.0, 7.0, 30.205256730509028, -2.7934757012712654, 2.0, 7.0]
-since_generator_version = 21
+body_sha256 = "372eeb1c473c21f92d469d4c6243569a3a9b66d76be946c8985d3f559c1e8c53"
+fingerprint = [6144.0, 223.63731480518544, -4.256550431273945, 2.0, 7.0, 228.14022241245084, 0.0, 0.0, 7.0, 227.9190977736319, -0.5133884146541656, 2.0, 7.0, 228.23487257007756, 5.8071959810886, 1.0, 7.0, 188.84451159042453, -2.913599846621297, 1.0, 7.0, 188.85441668592873, 92.21932843609758, 9.0, 7.0, 98.37663793496192, -6.803624047229877, 2.0, 7.0, 108.05759680135931, 4.970827036125806, 4.0, 7.0, 127.69842032632818, -6.361057027529942, 3.0, 7.0, 131.13305065101875, 61.08688762412844, 9.0, 7.0, 33.08076361745287, -4.61918949931154, 3.0, 7.0, 30.913712870444108, -2.085019561336186, 2.0, 7.0]
+since_generator_version = 25
 provisional = false
-acceptance = "6144 cells, 6144 sampled, 442368 samples (64 + 8 held out a cell), 268829 holding a changed star; held out: 3064 of 242662 changed bins beyond their own cell's samples, 0 bins not bounded by the table of the first 64, the least room -0.095 mag before the 0.3 mag margin; 5168 cells with a changed star, the brightest -8.05 mag; packed 9360 rows, 74933 segments, 280095 characters"
+acceptance = "6144 cells, 6144 sampled, 442368 samples (64 + 8 held out a cell), 272798 holding a changed star; held out: 3013 of 251606 changed bins beyond their own cell's samples, 0 bins not bounded by the table of the first 64, the least room -0.095 mag before the 0.3 mag margin; 5312 cells with a changed star, the brightest -8.05 mag; packed 9156 rows, 72573 segments, 273015 characters"
 
 [[table]]
 name = "binary_pair_light_d"
@@ -31,11 +31,11 @@ path = "binary_pair_light_d.rs"
 task = "binary_pair_light_d"
 revision = 0
 inputs_sha256 = "732c1e063876c4908687a3b97b483519bda1a292e898d485204a46ed3d438992"
-body_sha256 = "7d7c5576434b3a373cefdbac8619dab8953acc95a7b5fad77564cb15894cab51"
-fingerprint = [6528.0, 103.41133542917497, -8.822436033000525, 4.0, 7.0, 107.00560224992425, 28.903508008106897, 7.0, 7.0, 13.138291214694165, -5.802524812960613, 3.0, 7.0, 10.609603743522188, -5.120952228679788, 2.0, 7.0, 13.035128357086329, -9.917437674516325, 3.0, 7.0, 24.068308337101467, -3.5623942433426565, 1.0, 7.0, -32.86294737346111, -13.482889367978164, 5.0, 7.0, -28.93211683321798, -2.4984705477782154, 6.0, 7.0, -26.316891488315168, -12.948016830976552, 5.0, 7.0, -26.21631452901793, -10.088279829406574, 2.0, 7.0, -53.874598640121434, -19.26059759929002, 9.0, 7.0, -53.89967932825623, -7.194068003397632, 2.0, 7.0]
-since_generator_version = 21
+body_sha256 = "777a4f414035747621a79a4d19a05977dd49f5eb2ac0ffd76b34f6cdbbf36fa0"
+fingerprint = [6528.0, 103.41133542917497, -8.822436033000525, 4.0, 7.0, 107.00529282744526, 28.903198585627912, 7.0, 7.0, 13.138291214694165, -5.818161175177468, 3.0, 7.0, 10.6086550385053, -5.121900933696677, 2.0, 7.0, 13.035128357086329, -9.917437674516325, 3.0, 7.0, 24.068308337101467, -3.5623942433426565, 1.0, 7.0, -32.86380591898913, -13.483573819070717, 5.0, 7.0, -31.144449514518747, -9.801408604059018, 3.0, 7.0, -26.32013609774359, -16.971275002452373, 5.0, 7.0, -26.21631452901793, -10.088279829406574, 2.0, 7.0, -57.182853233621415, -26.804061473733903, 9.0, 7.0, -53.89967932825623, -7.194068003397632, 2.0, 7.0]
+since_generator_version = 25
 provisional = false
-acceptance = "6528 cells, 6528 sampled, 470016 samples (64 + 8 held out a cell), 347005 holding a changed star; held out: 6166 of 307398 changed bins beyond their own cell's samples, 0 bins not bounded by the table of the first 64, the least room -0.032 mag before the 0.3 mag margin; 6040 cells with a changed star, the brightest -8.86 mag; packed 13389 rows, 117756 segments, 412020 characters"
+acceptance = "6528 cells, 6528 sampled, 470016 samples (64 + 8 held out a cell), 347973 holding a changed star; held out: 6245 of 309026 changed bins beyond their own cell's samples, 2 bins not bounded by the table of the first 64, the least room -7.387 mag before the 0.3 mag margin; 6105 cells with a changed star, the brightest -8.86 mag; packed 13033 rows, 114523 segments, 402321 characters"
 
 [[table]]
 name = "binary_pair_light_e"
@@ -115,7 +115,7 @@ revision = 0
 inputs_sha256 = "b23c1c962b071a17cf39dd5aabc161d29b71e684795831b4b0f0d7d64f66f2d7"
 body_sha256 = "298043d3e70b46c84ceb0ce33d474d014bc48a2f379b36b615ffcf86ca5872f2"
 fingerprint = [7.999999999999998, 100.00000000000004, -2.3010299956639813, 0.17609125905568124, 0.1, 499.9999999999999, 0.9999999999999918, 0.0, 0.38320536780072606, 0.0, 0.0, 0.02292717566558393, 0.41763698538911553, 0.6167946321343014, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4356036781681426, 0.0, 0.0, 0.0, 0.0, 0.0017459143332028797, 0.012587744393284266, 0.12608523808861172, 0.5643963218318642, 0.2654526734144497, 0.0, 0.0, 0.0, 0.10490522456677719, 0.27668852085901047, 0.2989381591143712, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-since_generator_version = 24
+since_generator_version = 25
 provisional = false
 acceptance = "at 64 off-node points ([Fe/H] [-1.95, -1.1, -0.43, 0.05], v [3.3, 17.0, 45.0, 120.0] km/s, Chabrier and Kroupa), the tabulated neutron-star and black-hole retention within 0.00002 absolute of the exact quadrature where it is 0.05 or less and 0.0195 relative where it exceeds 0.05 (ruling 139.5: 0.005 and 3%; met); largest absolute 0.01299"
 
@@ -211,7 +211,7 @@ revision = 0
 inputs_sha256 = "b9f933fd0d454d5091e7fa5f8ba467ff7b4ffad18d164d0279e1a9d3d7a6454e"
 body_sha256 = "673af05854783974a962106b27aefd8e1f0ca86a3d8f93d1ed853d9c99b98cfd"
 fingerprint = [12.0, 14.0, 550.0]
-since_generator_version = 24
+since_generator_version = 25
 provisional = false
 acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 0, by spheres 7, by the sphere fallback 0); the half-step check: `Q̄_ext` within 5.09e-4 (calcium-titanate.json) and ω within 7.15e-4 (iron.json) of the direct values, against 1e-3; 1 − ω within 1.45e-3"
 
@@ -219,13 +219,13 @@ acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (
 name = "displaced_forms"
 path = "displaced_forms.rs"
 task = "displaced_forms"
-revision = 0
-inputs_sha256 = "d2291407c15aaf95bf5122ee2662fc74117e9593cde3d59268640ba0744ba462"
-body_sha256 = "fb8db9ceed3af24ab084dc46f589c00bdd56e0ed7464fea027e0bcdabff85b04"
-fingerprint = [7000.0, 223.9608520157194, 2.5745808582515655, 130.68947856619133, 1.24, 0.0054, 0.26, 1000.0, 1500.0, 0.04, 2000.0, 2500.0]
-since_generator_version = 22
+revision = 1
+inputs_sha256 = "7d5b7fe0f90c7e306a69c670648ae599a2e450355e044d8d7f5d36ce8289b056"
+body_sha256 = "266b0c06a017c87a096e3ae5dd5810ac4a90f423bc71f3eececce9364b4de762"
+fingerprint = [7000.0, 223.92287694638227, 2.5748643758710665, 130.78058386294995, 1.24, 0.0054, 0.26, 1000.0, 1500.0, 0.04, 2000.0, 2500.0]
+since_generator_version = 25
 provisional = true
-acceptance = "on P15.T6.b's smoke histograms (211 orbits, 0 captured by the black hole and 0 unresolved): disc-born weighted mean misplaced share 0.9718 (unregularised 0.9716, λ 0.001); 54 of 56 classes with a parameter on a box edge, 18 of them over 10⁻⁴ of the weight; 85 second-difference sign changes along the rows; worst misplaced share thick disc 0.983, halo 0.986, bulge 0.996, bar 0.999, nuclear disc 0.999; own-form shares at the fixture's corotation ratio 1.24, bar 1.00, 0.00, 0.00, 0.00, bulge 0.00, 0.00, 0.00, 0.00, nuclear disc 1.00, 0.00, 1.00, 0.00; bar elongation over the control 0.79, 0.00, 1.13, -20.39, -, -, -, - and length within 0.98 of it; slowest thin class's mean rotation 0.882 `v_c`, fastest's -; the neutron stars' half-density height at 26,000 ly 102 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849 slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
+acceptance = "on P15.T6.b's smoke histograms (211 orbits, 0 captured by the black hole and 0 unresolved): disc-born weighted mean misplaced share 0.9698 (unregularised 0.9694, λ 0.001); 54 of 56 classes with a parameter on a box edge, 18 of them over 10⁻⁴ of the weight; 83 second-difference sign changes along the rows; worst misplaced share thick disc 0.983, halo 0.984, bulge 0.999, bar 1.000, nuclear disc 0.999; own-form shares at the fixture's corotation ratio 1.24, bar 1.00, 1.00, 1.00, 0.00, bulge 0.00, 0.00, 0.00, 0.00, nuclear disc 1.00, 1.00, 1.00, 0.00; bar elongation over the control -, -, -, -, -, -, -, - and length within 0.00 of it; slowest thin class's mean rotation 0.885 `v_c`, fastest's -; the neutron stars' half-density height at 26,000 ly 327 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849 slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
 
 [[table]]
 name = "dwarf_sequence"
@@ -293,7 +293,7 @@ revision = 0
 inputs_sha256 = "7b6481cc2abe295203ef521c333320d9048f62dc43cf60de8dc49a4fbce15dd0"
 body_sha256 = "4e77d2e6c0669cc049d1d8eb6c71a660c53345473374d190ae99c939853c3c62"
 fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.972260428913055, 10.409751131825592, 11.927653994931292, 15.691973502837042, 0.45, 1.26, 46428852.83850509, 0.4194029742056137, 0.5246263558962185, 0.518193502001322, 2.0, 3.0, 0.75, 0.1, 1.0]
-since_generator_version = 24
+since_generator_version = 25
 provisional = false
 acceptance = "at the committed defaults on the committed table every observable passes, the two figures ruling 147.2 holds reported as held (sky share under 50 km/s 0.0710 against 0.03–0.07, escape share 0.1156 against 0.12–0.20); resolution: the centre on its rebuild of 100000 scores within 0.0020 in ln(v ÷ km/s) (ordinary ln v sd) and 0.0008 in a share (light black holes above 100 km/s) of the committed table; rebuilds: the low-mode ramp, 0 of 10 equal to the centre's bit for bit; the single-star window, 12 of 12 equal to the centre's bit for bit; the companion-stripped window, 8 of 8 equal to the centre's bit for bit; findings: none"
 
@@ -305,7 +305,7 @@ revision = 1
 inputs_sha256 = "0bda1fb5858dec8176782d2329ca84461be30dbc43884c2a001b84d504e8c953"
 body_sha256 = "a6f036f6fbea9d8a11d904b4cf1982f17dcfa7e2de46df791304d59b1f11dc64"
 fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.972260428913055, 10.409751131825592, 11.927653994931292, 15.691973502837042, 0.45, 1.26, 46428852.83850509, 0.4194029742056137, 0.5246263558962185, 0.518193502001322]
-since_generator_version = 24
+since_generator_version = 25
 provisional = false
 acceptance = "1000000 fresh scores through the table give ln(v ÷ km/s) of mean 5.5996 and standard deviation 0.6775, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.00092"
 
@@ -364,7 +364,7 @@ revision = 2
 inputs_sha256 = "1869f2b0b776188b5247c68248296b70bc599e59b9044b917ac1119ab1f25edc"
 body_sha256 = "b650018948a5ca7bf2144a0aa07d9a6f1173877e427a1c69565c9a4235d3a0f6"
 fingerprint = [0.55]
-since_generator_version = 23
+since_generator_version = 25
 provisional = true
 acceptance = "`MGE_EXP` within 0.010% of e^(−s) over s = 0.05–10 and its spherical mass within 0.0014%; `MGE_HOLED_EXP` within 0.083% of e^(−s) over 0.05–8 and its mass fraction within 2.8e-6; `MGE_BAR` within 2.96% of its central value (worst at u = 0.89), its mass within 0.295% and its cumulative mass from u = 0.05 to 2.5 within 4.93% (worst at u = 1.06); the thin disc's speed against Freeman (1970) is held to 0.5% by `tests/mge.rs`; `MGE_BOXY` at c = 3, 3.5 and 4: mass-weighted rms relative density error 13.3%, 17.5% and 20.7% (plan 15's 3% is out of reach of non-negative, axis-aligned centred Gaussians, which are log-convex in (R², z²): a structural miss, ruled 2026-10-23), mass inside spheres of 0.5–4 scale lengths within 0.136%, 0.197% and 0.249%, whole mass within 0.136%, 0.192% and 0.245% and midplane force at 0.25–8 scale lengths within 0.19%, 0.27% and 0.34%"
 
@@ -398,7 +398,7 @@ task = "rough_plains_cold_traps"
 revision = 1
 inputs_sha256 = "03aeb5f7aa37c0d9aa1fe1847a8cf09e00aa636b442cfc257bc35ecd5085550b"
 body_sha256 = "641be67af7d5b9318141966103bf5dca9cc803f940302e709103cb9c8cc302f2"
-since_generator_version = 23
+since_generator_version = 25
 provisional = false
 acceptance = "16 surfaces of 512² pixels, rays to 512 pixels, the facets lit 0.2711° below the star's upper limb, 28.2 pieces a sampled view azimuth; instantaneous shadow within 0.133 of Smith 1967's at 0.5–4° for w 0.1, 0.3 and 0.5 (worst at w 0.1, 4°); under a point star 1.54° from the equator, permanent shadow over 80–90° from 0.0234 to 0.0341 across the surfaces at w 0.1 and 0.2232 to 0.2586 at w 0.3; w 0.1: shadow 0.0279 over 80–90° and 0.00056 over 70–80°, under the real Sun water (110 K) 0.0211 and CO₂ (57 K) 0.001211 over 80–90°; w 0.2: shadow 0.1377 over 80–90° and 0.02305 over 70–80°, under the real Sun water (110 K) 0.0629 and CO₂ (57 K) 0.000448 over 80–90°; w 0.3: shadow 0.2378 over 80–90° and 0.07647 over 70–80°, under the real Sun water (110 K) 0.0541 and CO₂ (57 K) 0.000409 over 80–90°; w 0.5: shadow 0.3715 over 80–90° and 0.19028 over 70–80°, under the real Sun water (110 K) 0.0348 and CO₂ (57 K) 0.000585 over 80–90°; the largest shadow at the last colatitude node 2.38e-6 and at the last limb node 0.00e0; at the real Moon's D, the read against a direct trace on the same surfaces over 80–90° every 0.5°; w 0.1: shadow 0.0218 against 0.0216, water 0.0211 against 0.0213, CO₂ 0.001214 against 0.001304; w 0.2: shadow 0.1233 against 0.1226, water 0.0630 against 0.0657, CO₂ 0.000449 against 0.000405; w 0.3: shadow 0.2213 against 0.2205, water 0.0542 against 0.0572, CO₂ 0.000409 against 0.000379; w 0.5: shadow 0.3566 against 0.3551, water 0.0348 against 0.0381, CO₂ 0.000585 against 0.000497"
 
@@ -420,11 +420,11 @@ path = "sky_binary_light_c.rs"
 task = "sky_binary_light_c"
 revision = 0
 inputs_sha256 = "20f3430ceff92ef66bf400a1a4d929041ffdfbab4be4426b113742e5ddbe3861"
-body_sha256 = "4c2fceea83f120c10c624ee1304d66364eebd8eeb657bd0c8c3a79d00d2119b2"
-fingerprint = [-263.8381968096279, -284.3699014268454, -409.3114229769742, -262.53656600281005, -510.04006226429084, -11.0, -2907.1929042479674, 263.8381972014929, 13.0, -128.21299136553327, -134.24803413253488, -159.84127112409323, -130.22513352935272, -290.0825240826778, -30.0, -1578.0091273372761, 128.2129986257281, 36.0, 92.4862350621345, 92.80827297520543, 68.88078278693473, 92.3733198952227, 292.58162563700967, -9.0, 1122.0821172208116, 96.40981702437519, 14.0]
-since_generator_version = 21
+body_sha256 = "d9cd287707bd0f3f9a5f8a6e1a4cfe553127b0fbc71e83a9db167b247766053e"
+fingerprint = [-263.83819748946036, -284.36990211930043, -409.31142364712326, -262.5365667064166, -510.0400639737753, -11.0, -2907.1929123548216, 263.83819788132485, 13.0, -128.19917422672856, -134.23373584657043, -159.82585477563106, -130.21104301242596, -290.04879874538426, -30.0, -1577.843264042928, 128.19918148265702, 34.0, 92.48623768598075, 92.80827568098086, 68.88078557301421, 92.37332252350556, 292.5816325749186, -9.0, 1122.0821651246472, 96.40980679032593, 15.0]
+since_generator_version = 25
 provisional = false
-acceptance = "130 cells × 200000 systems (26000000), 257354 changed by pair evolution; the 1-mag bins from absolute V -7 to 20 held; a cell's mean total light difference -4.6309e-1 to 1.2712e-1 L☉,V a system, its standard error at most 1.3880e-1"
+acceptance = "130 cells × 200000 systems (26000000), 259312 changed by pair evolution; the 1-mag bins from absolute V -7 to 20 held; a cell's mean total light difference -4.5543e-1 to 1.2429e-1 L☉,V a system, its standard error at most 1.3880e-1"
 
 [[table]]
 name = "sky_binary_light_d"
@@ -432,11 +432,11 @@ path = "sky_binary_light_d.rs"
 task = "sky_binary_light_d"
 revision = 0
 inputs_sha256 = "8992e1da34b0fa40cd339dfd38cf30dce5572fdc36265bf7f40445342dbd6033"
-body_sha256 = "8c4b75844ffdd1531b5507138251415a7788d811ff50ffd345c005784e125260"
-fingerprint = [-120.80103229328012, -122.50653195359541, -91.91559036527667, -113.12497010587381, -434.51039927275167, -13.0, -1817.7196419567854, 280.3780427260161, 14.0, -9414.712830467608, -10144.224282040337, -15159.051332495692, -9233.889306665995, -17341.340155618043, -18.0, -71388.83284965425, 9784.137280934947, 26.0, -6703.843993301328, -7308.358247927757, -11364.07619309021, -6601.431970417155, -11785.556111691692, -4.0, -49285.34986909366, 6875.639764279245, 8.0]
-since_generator_version = 21
+body_sha256 = "f975f49a49b602407e4ce956ff4637f1c5d30a01e4847faee0ff057e3751fce8"
+fingerprint = [-120.80103229328012, -122.50653195359541, -91.91559036527667, -113.12497010587381, -434.51039927275167, -13.0, -1817.7196419567854, 280.3780427260161, 14.0, -9416.42187507465, -10145.935110319799, -15160.224931099412, -9235.570396442203, -17347.143571346456, -19.0, -71416.17756336692, 9785.846325541988, 26.0, -6698.303973514403, -7302.845413311961, -11360.48837319049, -6595.936835373835, -11766.942002683021, -4.0, -49226.73706945037, 6870.099744492321, 8.0]
+since_generator_version = 25
 provisional = false
-acceptance = "130 cells × 20000 systems (2600000), 181801 changed by pair evolution; the 1-mag bins from absolute V -8 to 20 held; a cell's mean total light difference -3.7778e1 to 1.9862e0 L☉,V a system, its standard error at most 6.4790e0"
+acceptance = "130 cells × 20000 systems (2600000), 182028 changed by pair evolution; the 1-mag bins from absolute V -8 to 20 held; a cell's mean total light difference -3.8467e1 to 2.0264e0 L☉,V a system, its standard error at most 6.4470e0"
 
 [[table]]
 name = "sky_binary_light_e"

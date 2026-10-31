@@ -7,7 +7,7 @@
 //! manifest: crates/hyperion-fit/manifests/kick_rank.toml
 //! data: none
 //! sim-fingerprint: a57a7c1851965ce5954a844309edaa7f0071ba8cf33f6802c26ecfa15e59c15b
-//! since-generator-version: 24
+//! since-generator-version: 25
 //! source: Disberg and Mandel (2025, ApJ Letters 989, L8) for the log-normal of young isolated
 //!   pulsars; Mandel and Müller (2020, MNRAS 499, 3214) for the score; Disberg, Mandel and Hirai
 //!   (2026) for its 45% scatter; plan 06's tracks

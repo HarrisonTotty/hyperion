@@ -6,7 +6,7 @@
 //! manifest: crates/hyperion-fit/manifests/rough_plains_cold_traps.toml
 //! data: none
 //! sim-fingerprint: none
-//! since-generator-version: 23
+//! since-generator-version: 25
 //! source: Hayne, Aharonson and Schörghofer (2021, Nat. Astron. 5, 169), Methods D
 //!   (arXiv:2005.05369v1); Smith (1967, JGR 72, 4059); the first-order tracer of
 //!   science-r09-drainage.md §8.13

@@ -46,7 +46,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "rough_plains_cold_traps",
         revision: 1,
-        since_generator_version: 23,
+        since_generator_version: 25,
         provisional: false,
     },
     TableInfo {

@@ -73,8 +73,9 @@ use crate::emit::{RustTable, TableItem, literal};
 use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput};
 
-/// The task's revision.
-pub const REVISION: u32 = 0;
+/// The task's revision: 1 from its re-emission at generator version 25 (P14.T54.c), on P15.T3.c's
+/// potential and P15.T6.b's joined histogram files.
+pub const REVISION: u32 = 1;
 
 /// The histograms' file within their dataset, when it is one file.
 pub const ORBITS_FILE: &str = "displaced_orbits.txt";

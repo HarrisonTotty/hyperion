@@ -6,7 +6,7 @@
 //! manifest: crates/hyperion-fit/manifests/kick_defaults.toml
 //! data: none
 //! sim-fingerprint: ff1bb6b19a401adf1d15bfcc252781a4663b64b3e2e6cee873aec7d46946454b
-//! since-generator-version: 24
+//! since-generator-version: 25
 //! source: the brainstorm's "Testing" list, through plan 06's kick-law tests (P06.T19.d,
 //!   `crates/hyperion-sim/tests/stellar_kick.rs`): Willcox et al. (2021, ApJ Letters 920, L37)
 //!   for the slow isolated pulsars; Igoshev et al. (2021, MNRAS 508, 3345) for the low mode;

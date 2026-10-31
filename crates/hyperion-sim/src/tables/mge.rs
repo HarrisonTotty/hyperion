@@ -6,7 +6,7 @@
 //! manifest: crates/hyperion-fit/manifests/mge.toml
 //! data: none
 //! sim-fingerprint: 91020ca6a195b8bd9ee8aa610a702c9a96cad856a5b5827e5a6998a639587027
-//! since-generator-version: 23
+//! since-generator-version: 25
 //! source: the profiles of plan 02's mass model (Design note 6), expanded as sums of Gaussians
 //!   after Emsellem, Monnet and Bacon (1994, A&A 285, 723), the widths free after Cappellari
 //!   (2002, MNRAS 333, 400)
