@@ -29,7 +29,8 @@
 //!   C/H of 2.754 × 10⁻⁴: 4.32 (Galileo's mass spectrometer, Wong et al. 2004), 9.08 (Cassini's
 //!   CIRS, Fletcher et al. 2009), 70.8 (Sromovsky et al. 2019) and 89.0 (Karkoschka and Tomasko
 //!   2011). The four primary papers were not read. It is fitted from 14.5 to 318 M⊕ and
-//!   extrapolated outside; it draws no scatter.
+//!   extrapolated outside; it draws no scatter, but from generator version 26 the record draws
+//!   one about it ([the formation draws](#the-formation-draws)).
 //! - **The bound** is the radius model's heavy-element mass. An envelope cannot be richer in
 //!   metals than the whole planet: its metal mass fraction is the bulk's, `Z_p`, times a visible
 //!   fraction f, with 0 ≤ f ≤ 1 (Thorngren and Fortney 2019, `ApJL` 874, L31, arXiv:1811.11859v2,
@@ -148,20 +149,53 @@
 //!   differentiation has not occurred on Uranus" (Conrath et al. 1987, JGR 92, 15003, abstract
 //!   read).
 //!
+//! # The formation draws
+//!
+//! Above, every envelope of one mass, zone and host is alike. P14.T50.d draws two ranks a body
+//! on its own [`tags::BODY_ENVELOPE_FORMATION`] stream ([`EnvelopeDraws`]), which
+//! [`EnvelopeAbundances::derive_drawn`] reads (decision-p14-t50b-envelope §1–2):
+//!
+//! - **E's scatter.** log₁₀ E is the trend's plus [`ENRICHMENT_SCATTER`] × Φ⁻¹(u), 0.26 dex,
+//!   Thorngren et al.'s ×1.82, then held to the bound and the floor as the trend is.
+//! - **The solids' share** s of the envelope's carbon, nitrogen and oxygen ([`solids_share`]),
+//!   from the gas-dominated limit above (0) to Öberg et al.'s Eq. 2 with the zone's own solids
+//!   (1; [`solids_ice_line_factor`]), the rule Espinoza et al. (2017) run on Thorngren et al.'s
+//!   metallicities, under which "the substellar C/O ratios of their accreted solid material
+//!   dominate" (as decision-p14-t50b-envelope §2 quotes them). Nitrogen keeps the protosolar N/O
+//!   to the oxygen.
+//!   - In situ, the lower half of the ranks keep the limit, which the Solar System's four giants
+//!     need for their carbon above their sulphur, and the upper half runs linearly to Eq. 2
+//!     ([`IN_SITU_GAS_LIMIT_RANKS`]). So the median envelope is the model above, bit for bit.
+//!   - A giant that migrated inward from its core's site (a hot or warm Jupiter, [`Migration`])
+//!     takes the rank itself as its share, uniform from the limit to Eq. 2: the plan's lean
+//!     towards solids for hot Jupiters, which the lane tested and adopted. Without it, the median
+//!     migrated giant would keep the gas phase's C/O, 1.57 times its host's, against JWST's
+//!     sub-stellar hot Jupiters (decision-p14-t50b-envelope §2).
+//!
+//! Over a population of drawn giants their C/O runs from below 0.2, HD 189733 b's (Fu et al.
+//! 2024), and none of the migrated ones lies above 0.9 (Fu et al. 2025 "strongly disfavours"
+//! it), both as decision-p14-t50b-envelope §2 reads them; the tests state the span. Like
+//! T50.b's, the draws are on the Surface path: nothing on the snapshot reads E or C/O.
+//!
 //! # On the record from 24
 //!
 //! This module is pure. P14.T52.a speciates its abundances and P14.T52.d publishes them in the
 //! record's envelope section, which the record builds from generator version 24 (P14.T54.b.i; at
-//! 23 nothing on the record called it; decision-bump-plan-after-22 §1.3).
+//! 23 nothing on the record called it; decision-bump-plan-after-22 §1.3). The formation draws are
+//! on it from 26, behind their hold (`FORMATION_DRAWS_VERSION`); below it the record's envelope
+//! is [`EnvelopeAbundances::derive`]'s.
 //!
 //! # Determinism
 //!
-//! Every value is a closed form of the inputs, summed in [`Element::ALL`]'s order through the
-//! crate's deterministic elementary functions. Nothing is drawn.
+//! Every value is a closed form of the inputs and, under the formation draws, of two open
+//! uniforms, words 0 and 1 of the body's [`tags::BODY_ENVELOPE_FORMATION`] stream (words 2–7
+//! reserved, [`FORMATION_DRAW_WORDS`]), summed in [`Element::ALL`]'s and [`DISC_CARRIERS`]' order
+//! through the crate's deterministic elementary functions. No other stream gains a draw.
 
 use std::error::Error;
 use std::fmt;
 
+use crate::id::BodyId;
 use crate::math;
 use crate::planetary::chem::HostAbundances;
 use crate::planetary::chem::redox::{SNOW_LINE_TEMPERATURE, SOOT_LINE_TEMPERATURE};
@@ -169,10 +203,74 @@ use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::atmosphere::formation_temperature;
 use crate::planetary::derive::composition::MassFractions;
 use crate::planetary::params::THIN_ENVELOPE_FRACTION;
+use crate::rng::{ObjectKey, Stream, tags};
+use crate::stellar::draws::UnitUniform;
 use crate::substance::Element;
 use crate::units::{
     Dex, EarthMasses, JupiterMasses, Kelvin, Metres, MetresPerSecondSquared, Years,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
+
+/// The generator version from which an envelope's formation draws are on the record (P14.T50.d):
+/// 26, the planetary bump after 25's, whose list froze without it.
+///
+/// It is P14.T50.d's one hold. Below it [`FormationDrawRules::in_force`] is
+/// [`FormationDrawRules::Trend`]: every record's envelope is [`EnvelopeAbundances::derive`]'s, as
+/// every figure on the record is version 25's bit for bit. 26's bump deletes this hold,
+/// [`FormationDrawRules`] with its `Trend` arm, the tests' switch and its tripwire
+/// (`the_formation_draws_are_held_only_until_the_26_bump`).
+pub(crate) const FORMATION_DRAWS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether a record's envelope reads its formation draws (its hold, [`FORMATION_DRAWS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum FormationDrawRules {
+    /// Version 25's and before: the trend's E and the gas phase's C/O
+    /// ([`EnvelopeAbundances::derive`]).
+    Trend,
+    /// Version 26's: the body's draws ([`EnvelopeAbundances::derive_drawn`]).
+    Drawn,
+}
+
+impl FormationDrawRules {
+    /// The rules this generator version gives: the draws from [`FORMATION_DRAWS_VERSION`], the
+    /// trend below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_formation_draws`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= FORMATION_DRAWS_VERSION {
+            Self::Drawn
+        } else {
+            Self::Trend
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The formation draws' rules a test sets on its thread, `None` for the version's.
+    static RULES: core::cell::Cell<Option<FormationDrawRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the formation draws' rules `rules` on this thread, for the tests to reach
+/// P14.T50.d ahead of the bump; the version's rules are set back after, a panic in `run` included.
+/// 26's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_formation_draws<R>(rules: FormationDrawRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<FormationDrawRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
 
 /// The envelope enrichment of a body of one Jupiter mass: 2.65 (the module's trend, fitted with
 /// [`ENRICHMENT_MASS_INDEX`]).
@@ -341,6 +439,108 @@ pub const RAINED_NEON: f64 = 0.043;
 /// generator places, and near enough that every abundance and mass fraction stays finite.
 pub const METALLICITY_BOUND: Dex = Dex::new(10.0);
 
+/// The log-normal scatter of an envelope's enrichment about its trend, σ of log₁₀ E: 0.26 dex,
+/// log₁₀ 1.82, the reference, Thorngren et al.'s (2016) ×1.82 spread of the bulk's metals about
+/// their relation, as plan 14's P14.T50.d gives it (decision-p14-t50b-envelope §7; the paper was
+/// not read again in the lane, which had no network).
+///
+/// Stated against the envelopes measured about the trend ([`mass_enrichment`]):
+///
+/// - the Solar System's four giants lie 0.086 dex rms about it, at most 0.12 (Saturn), or 0.12
+///   rms on the two degrees of freedom its fit leaves: within half a σ;
+/// - JWST's four lie +0.20 (WASP-107 b, 43 ± 8 times against 27; Sing et al. 2024), +0.23 (HD
+///   189733 b, the middle of 3–5 times stellar against 2.35; Fu et al. 2024), +0.37 (HD 149026 b,
+///   the middle of 14–20 times against 7.3; Gagnebin et al. 2024) and −0.23 dex (TOI-270 d, a
+///   metal mass fraction of 58% against the trend's 70%, as Z ÷ (1 − Z); Benneke et al. 2024)
+///   from it: 0.265 dex rms, all within 1.4σ (decision-p14-t50b-envelope §1's table, whose
+///   sources it read as abstracts).
+pub const ENRICHMENT_SCATTER: Dex = Dex::new(0.26);
+
+/// The share of an in-situ envelope's solids ranks at Öberg et al.'s gas-dominated limit: ½, so
+/// that the median envelope is P14.T50.b's model and the upper half runs linearly to their Eq. 2
+/// ([`solids_share`]). The lane's calibration (P14.T50.d):
+///
+/// - the Solar System's four giants all hold more carbon than sulphur, which only the gas-phase
+///   rule gives (decision-p14-t50b-envelope §2), so their share is the limit's; at ½ its
+///   mid-rank, ¼, lies inside the central 68%, as it does from 0.32;
+/// - the upper half reaches the stellar or sub-stellar C/O of an envelope polluted by its zone's
+///   solids (Öberg et al. 2011, abstract and §4; Espinoza et al. 2017; as the ruling quotes them).
+pub const IN_SITU_GAS_LIMIT_RANKS: f64 = 0.5;
+
+/// Words of [`tags::BODY_ENVELOPE_FORMATION`] a body reads or reserves: the enrichment's rank,
+/// word 0, and the solids' share's, word 1, then six reserved.
+pub const FORMATION_DRAW_WORDS: u64 = 8;
+
+/// Whether a body formed on its primordial orbit or farther out, which sets how its solids' rank
+/// reads ([`solids_share`]; P14.T50.d).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Migration {
+    /// It formed where it orbits: every body but a giant placed inside its core's site.
+    InSitu,
+    /// It formed farther out than its primordial orbit: a giant placed inside the site where its
+    /// core grew (its disc's snow line, or the inner edge beyond it; P14.T8), a hot or warm
+    /// Jupiter, which migrated through the disc inside it.
+    Inward,
+}
+
+/// A gas envelope's formation draws (P14.T50.d): the ranks of its enrichment's scatter about its
+/// trend and of its solids' share of its carbon, nitrogen and oxygen, as drawn from its
+/// `body.envelope_formation` stream by [`EnvelopeDraws::for_body`], or given by a test or a tool.
+///
+/// The fields are plain ranks with no invariant between them, so they are public, as the host's
+/// ([`AbundanceDraws`](crate::planetary::chem::AbundanceDraws)) are.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct EnvelopeDraws {
+    /// The rank of the enrichment's scatter about its trend ([`ENRICHMENT_SCATTER`]). Word 0.
+    pub enrichment: UnitUniform,
+    /// The rank of the solids' share ([`solids_share`]). Word 1.
+    pub solids: UnitUniform,
+}
+
+impl EnvelopeDraws {
+    /// Both ranks at their medians: in situ, P14.T50.b's envelope, the trend's E and the gas
+    /// phase's C/O.
+    pub const MEDIAN: Self = Self {
+        enrichment: UnitUniform::HALF,
+        solids: UnitUniform::HALF,
+    };
+
+    /// The draws of the body `body` in the universe of `seed`: words 0 and 1 of its
+    /// [`tags::BODY_ENVELOPE_FORMATION`] stream, keyed by the body.
+    ///
+    /// # Panics
+    ///
+    /// Never: an open uniform lies strictly between 0 and 1.
+    ///
+    /// # Examples
+    ///
+    /// The draws depend on the seed and the body's ID and nothing else:
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::id::{BodyId, SystemId};
+    /// use hyperion_sim::planetary::chem::envelope_abundances::EnvelopeDraws;
+    ///
+    /// let system = SystemId::from_raw(0x0200_0800_2000_0000)?;
+    /// let (b, c) = (BodyId::new(system, 0x0100), BodyId::new(system, 0x0200));
+    /// let seed = Seed::new(7);
+    /// assert_eq!(EnvelopeDraws::for_body(seed, b), EnvelopeDraws::for_body(seed, b));
+    /// assert_ne!(EnvelopeDraws::for_body(seed, b), EnvelopeDraws::for_body(seed, c));
+    /// # Ok::<(), hyperion_sim::id::DecodeSystemIdError>(())
+    /// ```
+    #[must_use]
+    pub fn for_body(seed: Seed, body: BodyId) -> Self {
+        let mut stream = Stream::open(seed, tags::BODY_ENVELOPE_FORMATION, ObjectKey::from(body));
+        let mut rank = || {
+            UnitUniform::new(stream.uniform_open())
+                .expect("an open uniform lies strictly between 0 and 1")
+        };
+        let enrichment = rank();
+        let solids = rank();
+        Self { enrichment, solids }
+    }
+}
+
 /// Why [`EnvelopeAbundances::derive`] could not give an envelope's abundances.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum DeriveEnvelopeAbundancesError {
@@ -465,7 +665,18 @@ pub struct EnvelopeAbundances {
     per_hydrogen: [f64; Element::ALL.len()],
     enrichment: f64,
     ice_line_factor: f64,
+    solids_share: f64,
     helium_depletion: f64,
+}
+
+/// How an envelope's E and C/O are set: the trend and the gas phase (P14.T50.b), or a body's
+/// formation draws (P14.T50.d).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Formation {
+    /// The trend's E and the gas phase's C/O.
+    Trend,
+    /// The draws, with whether the body migrated.
+    Drawn(EnvelopeDraws, Migration),
 }
 
 impl EnvelopeAbundances {
@@ -520,6 +731,81 @@ impl EnvelopeAbundances {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn derive(inputs: &EnvelopeInputs) -> Result<Self, DeriveEnvelopeAbundancesError> {
+        Self::assemble(inputs, Formation::Trend)
+    }
+
+    /// The abundances of the envelope `inputs` describe at its formation draws `draws`, migrated
+    /// or not as `migration` says (P14.T50.d; the [module](self)'s formation draws): E drawn
+    /// about the trend, and C/O at the solids' share between the gas phase's and Eq. 2's. At
+    /// [`EnvelopeDraws::MEDIAN`] in situ it is [`derive`](Self::derive)'s, bit for bit.
+    ///
+    /// # Errors
+    ///
+    /// As [`derive`](Self::derive).
+    ///
+    /// # Examples
+    ///
+    /// A hot Jupiter that migrated from its snow line holds less carbon against its oxygen the
+    /// higher its solids' rank, below its star's at the top; in situ at the median ranks it is
+    /// P14.T50.b's, richer in carbon than its star:
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::chem::envelope_abundances::{
+    ///     EnvelopeAbundances, EnvelopeInputs, EnvelopeDraws, Migration,
+    /// };
+    /// use hyperion_sim::planetary::chem::{AbundanceDraws, HostAbundances};
+    /// use hyperion_sim::planetary::derive::SnowLineSide;
+    /// use hyperion_sim::planetary::derive::composition::giant_composition;
+    /// use hyperion_sim::stellar::draws::UnitUniform;
+    /// use hyperion_sim::substance::Element;
+    /// use hyperion_sim::units::consts::METRES_PER_AU;
+    /// use hyperion_sim::units::{Dex, EarthMasses, Kelvin, Metres, MetresPerSecondSquared, Years};
+    ///
+    /// let mass = EarthMasses::new(318.0);
+    /// let giant = giant_composition(mass, SnowLineSide::Beyond)?;
+    /// let host = HostAbundances::of(Dex::ZERO, &AbundanceDraws::MEDIAN);
+    /// let inputs = EnvelopeInputs {
+    ///     mass,
+    ///     fractions: giant.fractions(),
+    ///     formation_distance: Metres::new(2.255 * METRES_PER_AU),
+    ///     snow_line: Metres::new(2.255 * METRES_PER_AU),
+    ///     fe_h: Dex::ZERO,
+    ///     alpha_fe: Dex::ZERO,
+    ///     host,
+    ///     effective_temperature: Kelvin::new(1_300.0),
+    ///     age: Years::new(4.6e9),
+    ///     surface_gravity: MetresPerSecondSquared::new(24.8),
+    ///     primordial_helium_per_hydrogen: Element::He.protosolar_abundance_per_hydrogen(),
+    /// };
+    /// let at = |solids: f64, migration| {
+    ///     let draws = EnvelopeDraws {
+    ///         solids: UnitUniform::new(solids).unwrap(),
+    ///         ..EnvelopeDraws::MEDIAN
+    ///     };
+    ///     EnvelopeAbundances::derive_drawn(&inputs, &draws, migration)
+    /// };
+    /// let (low, high) = (at(0.1, Migration::Inward)?, at(0.95, Migration::Inward)?);
+    /// assert!(high.carbon_to_oxygen() < low.carbon_to_oxygen());
+    /// assert!(high.carbon_to_oxygen() < host.carbon_to_oxygen());
+    /// let median =
+    ///     EnvelopeAbundances::derive_drawn(&inputs, &EnvelopeDraws::MEDIAN, Migration::InSitu)?;
+    /// assert_eq!(median, EnvelopeAbundances::derive(&inputs)?);
+    /// assert!(median.carbon_to_oxygen() > host.carbon_to_oxygen());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn derive_drawn(
+        inputs: &EnvelopeInputs,
+        draws: &EnvelopeDraws,
+        migration: Migration,
+    ) -> Result<Self, DeriveEnvelopeAbundancesError> {
+        Self::assemble(inputs, Formation::Drawn(*draws, migration))
+    }
+
+    /// The abundances of the envelope `inputs` describe, its E and C/O as `formation` sets them.
+    fn assemble(
+        inputs: &EnvelopeInputs,
+        formation: Formation,
+    ) -> Result<Self, DeriveEnvelopeAbundancesError> {
         let mass = inputs.mass.value();
         if !(mass.is_finite() && mass > 0.0) {
             return Err(DeriveEnvelopeAbundancesError::Mass(inputs.mass));
@@ -573,11 +859,27 @@ impl EnvelopeAbundances {
             inputs.age,
         );
         let helium = primordial * depletion;
-        let enrichment = enrichment(inputs.mass, share, helium, metal_mass_per_hydrogen(&host));
-        let factor = ice_line_factor(formation_temperature(
-            inputs.formation_distance,
-            inputs.snow_line,
-        ));
+        let host_metals = metal_mass_per_hydrogen(&host);
+        let zone = formation_temperature(inputs.formation_distance, inputs.snow_line);
+        let (enrichment, factor, solids_share) = match formation {
+            Formation::Trend => (
+                enrichment(inputs.mass, share, helium, host_metals, 1.0),
+                ice_line_factor(zone),
+                0.0,
+            ),
+            Formation::Drawn(draws, migration) => {
+                let scatter = math::exp10(
+                    ENRICHMENT_SCATTER.value() * math::normal_quantile(draws.enrichment.value()),
+                );
+                let scattered = enrichment(inputs.mass, share, helium, host_metals, scatter);
+                let solids = solids_share(draws.solids, migration);
+                (
+                    scattered,
+                    solids_ice_line_factor(zone, scattered, solids),
+                    solids,
+                )
+            }
+        };
 
         let mut per_hydrogen = host.map(|n| enrichment * n);
         per_hydrogen[index(Element::H)] = 1.0;
@@ -603,6 +905,7 @@ impl EnvelopeAbundances {
             per_hydrogen,
             enrichment,
             ice_line_factor: factor,
+            solids_share,
             helium_depletion: depletion,
         })
     }
@@ -619,7 +922,8 @@ impl EnvelopeAbundances {
     }
 
     /// The envelope's enrichment E: its metal-to-hydrogen mass ratio over its host's, before the
-    /// rain takes neon: the trend ([`mass_enrichment`]), held at most to the bulk's metal fraction
+    /// rain takes neon: the trend ([`mass_enrichment`]), or under the formation draws the trend
+    /// times its drawn scatter ([`ENRICHMENT_SCATTER`]), held at most to the bulk's metal fraction
     /// (f = 1) and at least to 1.
     #[must_use]
     pub const fn enrichment(&self) -> f64 {
@@ -633,11 +937,20 @@ impl EnvelopeAbundances {
         self.per_hydrogen(Element::C) / self.per_hydrogen(Element::O)
     }
 
-    /// The factor by which the envelope's C/O exceeds its host's
-    /// ([`ice_line_factor`](fn@ice_line_factor)).
+    /// The factor by which the envelope's C/O exceeds its host's: the gas phase's
+    /// ([`ice_line_factor`](fn@ice_line_factor)), or under the formation draws the factor at its
+    /// [`solids_share`](Self::solids_share) ([`solids_ice_line_factor`]).
     #[must_use]
     pub const fn ice_line_factor(&self) -> f64 {
         self.ice_line_factor
+    }
+
+    /// The solids' share of the envelope's carbon, nitrogen and oxygen, from 0 at the gas-dominated
+    /// limit to 1 at Öberg et al.'s Eq. 2 (P14.T50.d; [`solids_share`](fn@solids_share)): 0 but
+    /// under the formation draws.
+    #[must_use]
+    pub const fn solids_share(&self) -> f64 {
+        self.solids_share
     }
 
     /// The envelope's He/H over the protosolar value: 1 where no helium has rained out, 0.812 at
@@ -693,7 +1006,8 @@ pub fn mass_enrichment(mass: EarthMasses) -> f64 {
 /// The envelope enrichment E of a body of mass `mass` whose envelope is `envelope_share` of its
 /// mass, with `helium_per_hydrogen` of helium, about a host whose metals weigh
 /// `host_metals_per_hydrogen` atomic mass units per hydrogen atom: the trend
-/// ([`mass_enrichment`]), held at most to the bulk's metal fraction (f = 1) and at least to 1.
+/// ([`mass_enrichment`]) times `scatter` (1 for the trend itself; the formation draws' 10^(σ z)),
+/// held at most to the bulk's metal fraction (f = 1) and at least to 1.
 ///
 /// With X, Y and Z the envelope's mass fractions, Z ≤ `Z_p` = 1 − `envelope_share` is
 /// Z ÷ X ≤ `Z_p` (1 + Y ÷ X) ÷ (1 − `Z_p`).
@@ -703,6 +1017,7 @@ fn enrichment(
     envelope_share: f64,
     helium_per_hydrogen: f64,
     host_metals_per_hydrogen: f64,
+    scatter: f64,
 ) -> f64 {
     let hydrogen = Element::H.standard_atomic_weight_g_per_mol();
     let helium_over_hydrogen =
@@ -711,7 +1026,7 @@ fn enrichment(
     let most = bulk * (1.0 + helium_over_hydrogen)
         / envelope_share
         / (host_metals_per_hydrogen / hydrogen);
-    mass_enrichment(mass).min(most).max(1.0)
+    (mass_enrichment(mass) * scatter).min(most).max(1.0)
 }
 
 /// The factor by which an envelope's C/O exceeds its host's, for a body formed where its disc was
@@ -750,6 +1065,113 @@ pub fn ice_line_factor(formation_temperature: Kelvin) -> f64 {
     } else {
         1.0
     }
+}
+
+/// The solids' share s of an envelope at the rank `rank`, migrated or not as `migration` says
+/// (P14.T50.d): how far its carbon, nitrogen and oxygen lie from Öberg et al.'s gas-dominated
+/// limit, 0, towards their Eq. 2 with the zone's own solids, 1 ([`solids_ice_line_factor`]).
+///
+/// - In situ, the ranks below [`IN_SITU_GAS_LIMIT_RANKS`] keep the limit, P14.T50.b's model, and
+///   the rest run linearly to 1: s = max(0, (u − ½) ÷ ½).
+/// - Migrated inward, the rank is the share, s = u: the lane's lean towards solids for hot
+///   Jupiters (the [module](self)'s formation draws).
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::planetary::chem::envelope_abundances::{Migration, solids_share};
+/// use hyperion_sim::stellar::draws::UnitUniform;
+///
+/// let rank = |u| UnitUniform::new(u).unwrap();
+/// assert!(solids_share(rank(0.3), Migration::InSitu).abs() < 1e-15);
+/// assert!((solids_share(rank(0.75), Migration::InSitu) - 0.5).abs() < 1e-15);
+/// assert!((solids_share(rank(0.3), Migration::Inward) - 0.3).abs() < 1e-15);
+/// ```
+#[must_use]
+pub fn solids_share(rank: UnitUniform, migration: Migration) -> f64 {
+    let u = rank.value();
+    match migration {
+        Migration::InSitu => {
+            ((u - IN_SITU_GAS_LIMIT_RANKS) / (1.0 - IN_SITU_GAS_LIMIT_RANKS)).max(0.0)
+        }
+        Migration::Inward => u,
+    }
+}
+
+/// The factor by which the C/O of an envelope of enrichment `enrichment` (at least 1, as
+/// [`EnvelopeAbundances::enrichment`] is), formed where its disc was at `formation_temperature`,
+/// exceeds its host's, at the solids' share `solids_share` (0 to 1) of the way from Öberg et al.'s
+/// gas-dominated limit to their Eq. 2 with the zone's own solids (P14.T50.d): [`ice_line_factor`]
+/// at a share of 0, bit for bit.
+///
+/// Eq. 2 (Öberg, Murray-Clay and Bergin 2011, as Espinoza et al. 2017 run it on Thorngren et al.'s
+/// metallicities; decision-p14-t50b-envelope §2) adds to the zone's gas the carriers
+/// [`DISC_CARRIERS`] holds there as ice or dust, enough that its carbon and oxygen weigh E times
+/// the disc's: their solids' share of that mass is φ = 1 − `m_gas` ÷ (E `m_disc`), held to
+/// [0, 1]. The envelope takes s φ, so its carbon and oxygen per unit of their mass are (1 − s φ)
+/// times the gas's and s φ times the solids', and the factor is their ratio over the disc's 0.545.
+///
+/// - At E = 1 and s = 1 it is the disc's own, 1, and as E grows it tends to the solids' own C/O
+///   over 0.545: 0 between the soot line and 1,500 K (silicates alone), 0.786 inside the snow
+///   line, 0.478 from it to the CO₂ line and 0.569 to the CO line.
+/// - Above 1,500 K and beyond the CO line, where the zone holds no solids or no gas, it is 1.
+///
+/// Only carbon and oxygen weigh in φ, as Öberg et al.'s Table 1 has them; the envelope's nitrogen
+/// follows its oxygen.
+///
+/// # Examples
+///
+/// Jupiter's zone at its trend's E: the gas phase's 11/7 at a share of 0, about two thirds of its
+/// host's at 1:
+///
+/// ```
+/// use hyperion_sim::planetary::chem::envelope_abundances::{
+///     ice_line_factor, solids_ice_line_factor,
+/// };
+/// use hyperion_sim::units::Kelvin;
+///
+/// let zone = Kelvin::new(112.0);
+/// assert_eq!(solids_ice_line_factor(zone, 2.65, 0.0), ice_line_factor(zone));
+/// let polluted = solids_ice_line_factor(zone, 2.65, 1.0);
+/// assert!((0.6..0.7).contains(&polluted));
+/// assert!((solids_ice_line_factor(zone, 1.0, 1.0) - 1.0).abs() < 1e-12);
+/// ```
+#[must_use]
+pub fn solids_ice_line_factor(
+    formation_temperature: Kelvin,
+    enrichment: f64,
+    solids_share: f64,
+) -> f64 {
+    let gas_phase = ice_line_factor(formation_temperature);
+    if solids_share <= 0.0 {
+        return gas_phase;
+    }
+    let t = formation_temperature.value();
+    let (mut gas_carbon, mut gas_oxygen, mut solid_carbon, mut solid_oxygen) = (0.0, 0.0, 0.0, 0.0);
+    for carrier in DISC_CARRIERS {
+        if t > carrier.line.value() {
+            gas_carbon += carrier.carbon_per_hydrogen;
+            gas_oxygen += carrier.oxygen_per_hydrogen;
+        } else {
+            solid_carbon += carrier.carbon_per_hydrogen;
+            solid_oxygen += carrier.oxygen_per_hydrogen;
+        }
+    }
+    let weight = |e: Element| e.standard_atomic_weight_g_per_mol();
+    let mass = |carbon: f64, oxygen: f64| weight(Element::C) * carbon + weight(Element::O) * oxygen;
+    let (gas, solid) = (
+        mass(gas_carbon, gas_oxygen),
+        mass(solid_carbon, solid_oxygen),
+    );
+    if gas <= 0.0 || solid <= 0.0 {
+        return gas_phase;
+    }
+    let disc = gas + solid;
+    let polluted = (1.0 - gas / (enrichment * disc)).clamp(0.0, 1.0);
+    let phi = solids_share.min(1.0) * polluted;
+    let carbon = (1.0 - phi) * gas_carbon / gas + phi * solid_carbon / solid;
+    let oxygen = (1.0 - phi) * gas_oxygen / gas + phi * solid_oxygen / solid;
+    (carbon / oxygen) / ((gas_carbon + solid_carbon) / (gas_oxygen + solid_oxygen))
 }
 
 /// The temperature the helium rain reads: the `T_eff` that a planet of Jupiter's gravity would
@@ -958,5 +1380,7 @@ fn metal_mass_per_hydrogen(per_hydrogen: &[f64; Element::ALL.len()]) -> f64 {
         })
 }
 
+#[cfg(test)]
+mod formation_tests;
 #[cfg(test)]
 pub(crate) mod tests;

@@ -372,7 +372,8 @@ domain_tags! {
     // `planet.volatiles`, `planet.spin`, `planet.origin`, `planet.scatter` (ruling 80),
     // `moon.count`, `moon.mass`, `moon.orbit`, `moon.impact`, `moon.capture`, `ring.system`,
     // `belt.member`, `body.surface`, `body.resources`, `body.continents` (P14.T48.a),
-    // `body.formation` (P14.T51.c), `body.cold_traps` (P14.T51.f).
+    // `body.formation` (P14.T51.c), `body.cold_traps` (P14.T51.f), `body.envelope_formation`
+    // (P14.T50.d).
     //
     // Scope `Event`, each behind an event tag of plan 06's block 0x0400–0x04FF: `body.impact`
     // (0x0400), `body.eruption` (0x0401), `body.storm` (0x0402), `body.duststorm` (0x0403),
@@ -1244,6 +1245,16 @@ domain_tags! {
     /// The event key of a neutron-star merger's kilonova (plan 11's `0x0306 KILONOVA`, P11.T9.b):
     /// one-shot, bin 0 and number 0, on the merged system.
     BINARY_EV_KILONOVA: Event = "binary.ev.kilonova";
+
+    // Plan 14, phase L (P14.T50.d): a gas envelope's formation draws, under the name and scope the
+    // "Plan 14" heading above lists. Appended here, after P11.T9.b's `binary.ev.kilonova`, because
+    // the macro's order fixes `ALL`.
+
+    /// A gas envelope's formation draws (P14.T50.d), keyed by the body: the rank of its
+    /// enrichment's log-normal scatter about the trend, word 0, and the rank of its solids' share
+    /// of its carbon, nitrogen and oxygen, word 1, one open uniform each; words 2–7 are reserved
+    /// (`planetary::chem::envelope_abundances::EnvelopeDraws`).
+    BODY_ENVELOPE_FORMATION: Body = "body.envelope_formation";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1498,6 +1509,15 @@ mod tests {
         assert_eq!(BODY_COLD_TRAPS.scope(), crate::rng::TagScope::Body);
         let at = |tag| ALL.iter().position(|t| *t == tag);
         assert!(at(BODY_COLD_TRAPS) > at(BODY_FORMATION));
+    }
+
+    /// P14.T50.d's one new tag, keyed by the body, last in `ALL` when it was appended.
+    #[test]
+    fn plan_14_registers_the_envelope_formation_tag_with_body_scope() {
+        assert_eq!(BODY_ENVELOPE_FORMATION.name(), "body.envelope_formation");
+        assert_eq!(BODY_ENVELOPE_FORMATION.scope(), crate::rng::TagScope::Body);
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        assert!(at(BODY_ENVELOPE_FORMATION) > at(CLASS_NSM_BINARY));
     }
 
     /// P14.T31.a's three event tags, in the order the "Plan 14" heading lists them, the last three

@@ -22,6 +22,7 @@ use std::error::Error;
 use std::fmt;
 
 use super::chem::HostAbundances;
+use super::chem::envelope_abundances::{EnvelopeDraws, Migration};
 use super::chem::equilibrium::Network;
 use super::context::{BuildSystemContextError, SystemContext};
 use super::derive::atmosphere::{Gas, PartialPressures};
@@ -96,7 +97,9 @@ pub struct EnvelopeByHand {
 /// internal temperature, P14.T50.b's abundances at the envelope's (`T_eq`⁴ + `T_int`⁴)^¼ and
 /// P14.T52.d's atmosphere on the adopted grey profile), on a network built afresh: for other
 /// crates' tests of what the record holds, as the server's conversion and its fixtures' envelopes
-/// read one (a caller's values are its own to check).
+/// read one (a caller's values are its own to check). Under P14.T50.d's formation draws it reads
+/// the median ranks of a body in situ ([`EnvelopeDraws::MEDIAN`]), which are T50.b's envelope,
+/// bit for bit.
 ///
 /// # Errors
 ///
@@ -130,6 +133,8 @@ pub fn envelope_by_hand(inputs: &EnvelopeByHand) -> Result<Envelope, DeriveEnvel
         host: inputs.host,
         primordial_helium_per_hydrogen: inputs.primordial_helium_per_hydrogen,
         starlit: inputs.starlit,
+        draws: EnvelopeDraws::MEDIAN,
+        migration: Migration::InSitu,
     };
     envelope_of(&of, &network)
 }
@@ -555,6 +560,9 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   `WhiteDwarfDebrisRules::Debris` through `with_white_dwarf_debris`.
 /// - a neutron star's second-generation planets, `SECOND_GENERATION_VERSION` (P14.T28.e), at
 ///   `SecondGenerationRules::Planets` through `with_second_generation`.
+/// - an envelope's formation draws, `FORMATION_DRAWS_VERSION` (P14.T50.d), at
+///   `FormationDrawRules::Drawn` through `with_formation_draws`: its enrichment's scatter and its
+///   solids' share, on its own stream.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
@@ -564,6 +572,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::chem::condense::{
         DeckProfileRules, FallRadiusRoot, with_deck_profile, with_fall_radius,
     };
+    use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
     use crate::planetary::derive::atmosphere::{
         LineSwitchRules, LockedStateRules, MeltOxygenRules, SeaDeckRules, with_line_switch,
         with_locked_state, with_melt_oxygen, with_sea_deck,
@@ -605,6 +614,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_protoplanetary_disc(ProtoplanetaryDiscRules::Disc, run);
     let run = move || with_white_dwarf_debris(WhiteDwarfDebrisRules::Debris, run);
     let run = move || with_second_generation(SecondGenerationRules::Planets, run);
+    let run = move || with_formation_draws(FormationDrawRules::Drawn, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 

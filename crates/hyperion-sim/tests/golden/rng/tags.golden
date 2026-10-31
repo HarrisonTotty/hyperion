@@ -257,3 +257,4 @@ binary.ev.xray_burst (Event) = 0x16e6be966cc32b54
 binary.ev.bex_giant_outburst (Event) = 0xb637edd339d34c7d
 binary.ev.luminous_red_nova (Event) = 0xaec5603effe9e8ee
 binary.ev.kilonova (Event) = 0xbdf0bafb87d6aeda
+body.envelope_formation (Body) = 0x7dfb194cd468e341

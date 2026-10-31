@@ -16,6 +16,9 @@ use crate::planetary::chem::condense::{
     DeckProfileRules, FallRadiusRoot, ResolveOpticalDepthError, SizeModeError, with_deck_profile,
     with_fall_radius,
 };
+use crate::planetary::chem::envelope_abundances::{
+    EnvelopeDraws, FormationDrawRules, Migration, with_formation_draws,
+};
 use crate::planetary::chem::escape::{EnvelopeHelium, host_helium_per_hydrogen};
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::derive::solar::{PLANETS, SOLAR_AGE, solar_disc, solar_system};
@@ -32,8 +35,10 @@ use crate::planetary::hooks::structure::envelope::{
 use crate::planetary::hooks::surface::HourCosines;
 use crate::planetary::label;
 use crate::planetary::record::{BodyRecord, RecordSection, SectionState};
-use crate::planetary::system::tests::{SEED, golden_systems_afresh, sample, thin_air_sets};
-use crate::planetary::system::{Body, Epoch, Part, PlanetarySystem, fate_host};
+use crate::planetary::system::tests::{
+    GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, golden_systems_afresh, sample, thin_air_sets,
+};
+use crate::planetary::system::{Body, Epoch, Part, PlanetarySystem, fate_host, migration};
 use crate::planetary::testing::{
     EnvelopeByHand, envelope_by_hand, with_every_25_hold, with_every_26_hold,
 };
@@ -159,6 +164,8 @@ fn rebuilt(
         starlit: epoch
             .photochemistry_temperature(epoch.brightest(system.zone_of(body)))
             .is_some(),
+        draws: EnvelopeDraws::for_body(system.seed, body.index.body_id(system.system)),
+        migration: migration(body),
     }
 }
 
@@ -630,6 +637,8 @@ fn table_envelope(name: &str) -> (EnvelopeOf, Envelope) {
             EnvelopeHelium::helium_to_hydrogen,
         ),
         starlit: true,
+        draws: EnvelopeDraws::MEDIAN,
+        migration: Migration::InSitu,
     };
     let envelope = envelope_of(&of, network()).unwrap_or_else(|e| panic!("{name}: {e:?}"));
     (of, envelope)
@@ -2055,6 +2064,156 @@ fn under_every_26_hold_the_dayside_moves_only_hot_envelopes_deep_decks() {
             .map(|(tau, line)| format!("{tau:.4}: {line}"))
             .collect::<Vec<_>>()
             .join("\n  ")
+    );
+    assert!(!moved.is_empty(), "the census moves an envelope");
+}
+
+/// One record's envelope figures for P14.T50.d's movers: its E, its C/O and its modes' decks with
+/// their column masses, where its envelope section is modelled with abundances.
+fn formation_figures(record: &BodyRecord) -> Option<(f64, f64, Vec<String>)> {
+    let Section::Ok(envelope) = record.envelope() else {
+        return None;
+    };
+    let abundances = envelope.abundances()?;
+    let decks = envelope
+        .atmosphere()
+        .modes()
+        .iter()
+        .map(|mode| format!("{} {:?}", key_of(mode.deck()), mode.column_mass()))
+        .collect();
+    Some((
+        abundances.enrichment(),
+        abundances.carbon_to_oxygen(),
+        decks,
+    ))
+}
+
+/// One record of P14.T50.d's walks: its label, the record, and for a present planet's or
+/// member's envelope not modelled, its builder's reason ([`reason`]).
+type Walked = (String, BodyRecord, Option<&'static str>);
+
+/// P14.T50.d's movers over the sets `sets` at the epoch, every other 26 hold in force: each
+/// record under the trend against its twin under the draws, by `Debug`, asserted equal but for its
+/// envelope section, and every envelope not modelled refused only as the record's census allows
+/// (not hydrogen-dominated, or a level above the network's records); each mover's label with its E
+/// and C/O, trend → drawn, and how many of its modes' decks or columns move, or its envelope's
+/// change of state with its reason.
+fn formation_movers(sets: &[(String, Seed, SystemContext)]) -> Vec<String> {
+    let records = |rules: FormationDrawRules| -> Vec<Walked> {
+        with_every_26_hold(|| {
+            with_formation_draws(rules, || {
+                let mut out = Vec::new();
+                for (set, seed, ctx) in sets {
+                    let system = generate(*seed, ctx);
+                    walk(ctx, &system, UniverseTime::EPOCH, &mut |epoch, visit| {
+                        let at = format!("{set} {:04x}", visit.body.index.get());
+                        let why = match (visit.record.envelope(), &visit.derived) {
+                            (Section::NotModelled, Some(derived))
+                                if !visit
+                                    .record
+                                    .bulk()
+                                    .ok()
+                                    .is_some_and(|bulk| bulk.class().has_solid_surface()) =>
+                            {
+                                let of =
+                                    rebuilt(epoch, &system, visit.body, (&visit.record, derived));
+                                let why = envelope_of(&of, network()).err().map(|e| reason(&e));
+                                assert!(
+                                    matches!(
+                                        why,
+                                        Some("not hydrogen-dominated" | "level above records")
+                                    ),
+                                    "{at}: {why:?}"
+                                );
+                                why
+                            }
+                            _ => None,
+                        };
+                        out.push((at, visit.record, why));
+                    });
+                }
+                out
+            })
+        })
+    };
+    let trend = records(FormationDrawRules::Trend);
+    let drawn = records(FormationDrawRules::Drawn);
+    assert_eq!(trend.len(), drawn.len());
+    let mut moved = Vec::new();
+    for ((at, a, why_a), (_, b, why_b)) in trend.iter().zip(&drawn) {
+        let (envelope_a, envelope_b) =
+            (format!("{:?}", a.envelope()), format!("{:?}", b.envelope()));
+        if envelope_a == envelope_b {
+            assert_eq!(format!("{a:?}"), format!("{b:?}"), "{at}");
+            continue;
+        }
+        assert_eq!(
+            format!("{a:?}").replacen(&envelope_a, "its envelope", 1),
+            format!("{b:?}").replacen(&envelope_b, "its envelope", 1),
+            "{at}: the record moves beyond its envelope section"
+        );
+        let line = match (formation_figures(a), formation_figures(b)) {
+            (Some((e_a, co_a, decks_a)), Some((e_b, co_b, decks_b))) => {
+                let decks = decks_a.iter().zip(&decks_b).filter(|(x, y)| x != y).count()
+                    + decks_a.len().abs_diff(decks_b.len());
+                format!(
+                    "{at}: E {e_a:.3} → {e_b:.3}, C/O {co_a:.3} → {co_b:.3}, {decks} of {} \
+                     modes' decks or columns move",
+                    decks_a.len().max(decks_b.len())
+                )
+            }
+            (was, now) => {
+                let state = |figures: Option<(f64, f64, Vec<String>)>, why: Option<&str>| {
+                    figures.map_or_else(
+                        || format!("not modelled ({})", why.unwrap_or("no abundances")),
+                        |(e, co, _)| format!("E {e:.3}, C/O {co:.3}"),
+                    )
+                };
+                format!("{at}: {} → {}", state(was, *why_a), state(now, *why_b))
+            }
+        };
+        moved.push(line);
+    }
+    moved
+}
+
+/// P14.T50.d over the golden systems at the epoch, every other 26 hold in force: under the draws
+/// only envelope sections move, each record its trend's twin to the bit (by `Debug`) beyond it;
+/// the movers, printed, include the hot Jupiter's.
+#[test]
+fn under_every_26_hold_the_formation_draws_move_only_envelope_sections() {
+    let sets: Vec<(String, Seed, SystemContext)> = golden_contexts()
+        .into_iter()
+        .map(|(name, ctx)| (name.to_owned(), Seed::new(GOLDEN_SYSTEMS_SEED), ctx))
+        .collect();
+    let moved = formation_movers(&sets);
+    eprintln!(
+        "the golden systems' envelopes the formation draws move, {}:\n  {}",
+        moved.len(),
+        moved.join("\n  ")
+    );
+    assert!(
+        moved.iter().any(|line| line.starts_with("hot_jupiter")),
+        "the hot Jupiter's envelope moves: {moved:?}"
+    );
+}
+
+/// P14.T50.d's census at 26, every other 26 hold in force, over [`census_sets`] at the epoch,
+/// printed (`--nocapture`): every mover under the draws with its E and C/O, trend → drawn, and its
+/// modes that move; asserted, as the golden systems' test does, that only envelope sections move.
+#[test]
+#[ignore = "slow: P14.T50.d's census over 102 systems, trend and drawn"]
+fn under_every_26_hold_the_formation_draws_census() {
+    let sets: Vec<(String, Seed, SystemContext)> = census_sets()
+        .into_iter()
+        .map(|(set, seed, ctx)| (format!("{set} {}", ctx.id()), seed, ctx))
+        .collect();
+    let moved = formation_movers(&sets);
+    eprintln!(
+        "the census's envelopes the formation draws move, {} over {} systems:\n  {}",
+        moved.len(),
+        sets.len(),
+        moved.join("\n  ")
     );
     assert!(!moved.is_empty(), "the census moves an envelope");
 }

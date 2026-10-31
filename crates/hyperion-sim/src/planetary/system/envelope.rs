@@ -17,10 +17,11 @@
 //! The chain ([`envelope_of`]): the host's \[α/Fe\] and the body's formation zone, which no
 //! default replaces; P14.T24.d's internal temperature, the record's heat blended with its cooling
 //! law; the envelope's effective temperature (`T_eq`⁴ + `T_int`⁴)^¼ with that `T_int`
-//! (decision-p14-t24d-profile §3.5), which P14.T50.b's helium rain reads; P14.T50.b's abundances;
-//! and P14.T52.d's atmosphere on [`GreyProfile::ADOPTED`]. Any refusal leaves the section not
-//! modelled, and the record keeps no reason ([`DeriveEnvelopeError`] is the census's, and the
-//! testing helper's).
+//! (decision-p14-t24d-profile §3.5), which P14.T50.b's helium rain reads; P14.T50.b's abundances,
+//! from generator version 26 at the body's formation draws (P14.T50.d, behind
+//! `FORMATION_DRAWS_VERSION`); and P14.T52.d's atmosphere on [`GreyProfile::ADOPTED`]. Any refusal
+//! leaves the section not modelled, and the record keeps no reason ([`DeriveEnvelopeError`] is the
+//! census's, and the testing helper's).
 
 use std::error::Error;
 use std::fmt;
@@ -28,7 +29,8 @@ use std::fmt;
 use crate::math;
 use crate::planetary::chem::HostAbundances;
 use crate::planetary::chem::envelope_abundances::{
-    DeriveEnvelopeAbundancesError, EnvelopeAbundances, EnvelopeInputs,
+    DeriveEnvelopeAbundancesError, EnvelopeAbundances, EnvelopeDraws, EnvelopeInputs,
+    FormationDrawRules, Migration,
 };
 use crate::planetary::chem::equilibrium::{BuildNetworkError, Network};
 use crate::planetary::derive::atmosphere::{
@@ -160,6 +162,11 @@ pub(crate) struct EnvelopeOf {
     pub(crate) primordial_helium_per_hydrogen: f64,
     /// Whether a star's ultraviolet lights it, which drives its photochemistry.
     pub(crate) starlit: bool,
+    /// Its formation draws, read from generator version 26 (P14.T50.d,
+    /// [`FormationDrawRules`]).
+    pub(crate) draws: EnvelopeDraws,
+    /// Whether it migrated inward from where it formed, which its solids' rank reads.
+    pub(crate) migration: Migration,
 }
 
 /// Why a record's envelope is not modelled, or the testing helper's
@@ -258,7 +265,7 @@ pub(crate) fn envelope_of(
     let internal_temperature =
         envelope_internal_temperature(of.internal_luminosity, of.radius, of.mass, of.age)
             .map_err(DeriveEnvelopeError::InternalTemperature)?;
-    let abundances = EnvelopeAbundances::derive(&EnvelopeInputs {
+    let inputs = EnvelopeInputs {
         mass: of.mass,
         fractions: of.fractions,
         formation_distance: formation.distance(),
@@ -273,7 +280,13 @@ pub(crate) fn envelope_of(
         age: of.age,
         surface_gravity: of.gravity,
         primordial_helium_per_hydrogen: of.primordial_helium_per_hydrogen,
-    })
+    };
+    let abundances = match FormationDrawRules::in_force() {
+        FormationDrawRules::Trend => EnvelopeAbundances::derive(&inputs),
+        FormationDrawRules::Drawn => {
+            EnvelopeAbundances::derive_drawn(&inputs, &of.draws, of.migration)
+        }
+    }
     .map_err(DeriveEnvelopeError::Abundances)?;
     let atmosphere = EnvelopeAtmosphere::derive(&EnvelopeAtmosphereInputs {
         abundances: &abundances,

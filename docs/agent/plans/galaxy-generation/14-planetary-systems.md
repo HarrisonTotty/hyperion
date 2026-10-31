@@ -6644,6 +6644,8 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
     System's four giants inside the central 68%. The builder tests a lean towards solids for hot
     Jupiters.
   - A new Body-scope tag: `planet.volatiles` words 6–7 are reserved for phosphorus and isotopes.
+  - _Built_ 2026-10-31, held at 26 (`FORMATION_DRAWS_VERSION`): Risks, "Deviations in P14.T50.d,
+    as built".
 
 #### P14.T51 Surface composition
 
@@ -33554,3 +33556,29 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `second_generation::tests::the_second_generation_is_the_same_twice_and_in_both_queries` call
     the three switches; drop the switches and keep the tests. The server has no test of the two
     disc arms' conversion (`convert/planetary.rs`); add one with the bump.
+- **Deviations in P14.T50.d, as built (`p14-t50d`, 2026-10-31).** Held at 26
+  (`chem::envelope_abundances::FORMATION_DRAWS_VERSION`; `FormationDrawRules::{Trend, Drawn}`,
+  `with_formation_draws`, a line in `with_every_26_hold`). Nothing moves at 24 or 25, and
+  `PROTOCOL_VERSION` stays 3.
+  - _API:_ `EnvelopeDraws` (`enrichment`, `solids`; `MEDIAN`, `for_body`), `Migration` (`InSitu`,
+    `Inward`), `EnvelopeAbundances::derive_drawn(&inputs, &draws, migration)` and
+    `solids_share()`; free `solids_share` and `solids_ice_line_factor`. `derive` stays the trend.
+    `EnvelopeOf` gains `draws` and `migration`; `envelope_by_hand` reads `MEDIAN` in situ, T50.b's
+    bits.
+  - _The tag:_ `body.envelope_formation` (Body), words 0–1, 2–7 reserved; `planet.volatiles` is
+    untouched. A new golden, `planetary/envelope_formation` (header 24, the pure module's), pins
+    the drawn arm (`the_formation_draws_are_pinned`).
+  - _σ:_ `ENRICHMENT_SCATTER` 0.26 dex (log₁₀ 1.82), against the four giants' 0.086 rms and
+    JWST's four's 0.265; the bound and the floor after it.
+  - _The solids' bounds (lean, 2026-10-31):_ s = 0 the gas-phase factor as built, 1 Eq. 2 with the
+    zone's own solids (by C and O mass; N follows O). In situ the lower half of the ranks keep 0
+    (`IN_SITU_GAS_LIMIT_RANKS`), so the median is T50.b's; a giant placed inside its core's site
+    (formation distance beyond its primordial a) takes s = u: the lean, adopted.
+  - _The path (lean, 2026-10-31):_ the Surface path; nothing on the snapshot reads E or C/O.
+  - _26's movers_ (`under_every_26_hold_the_formation_draws_move_only_envelope_sections`): 20
+    golden-system envelopes, envelope sections alone with their decks; 5 sub-Neptunes near E ≈ 90
+    cross "not hydrogen-dominated" either way. 26's bump re-blesses the `planetary/systems` goldens
+    of `hot_jupiter`, `solar_like`, `eccentric_giant`, `wide_binary`, `hierarchical_triple`,
+    `subgiant`, `red_giant` and `filler_b`; the server's by-hand fixtures do not move. The census
+    (`under_every_26_hold_the_formation_draws_census`, ignored): 87 envelopes of 102 systems, 17
+    newly not modelled and 6 newly modelled.

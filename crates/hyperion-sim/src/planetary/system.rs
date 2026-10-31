@@ -123,6 +123,7 @@ use crate::planetary::architecture::{
 use crate::planetary::belts::{
     Belt, BeltComposition, BeltHost, BeltMember, FIRST_BELT_SLOT, LAST_BELT_SLOT, host_belts,
 };
+use crate::planetary::chem::envelope_abundances::{EnvelopeDraws, Migration};
 use crate::planetary::chem::equilibrium::{BuildNetworkError, Network};
 use crate::planetary::chem::escape::{EnvelopeHelium, host_helium_per_hydrogen};
 use crate::planetary::chem::inventory::{ElementInventory, Reservoir};
@@ -733,6 +734,24 @@ fn supercritical_section(
         equilibrium_temperature: bulk.equilibrium_temperature(),
         stellar_flux: WattsPerSquareMetre::from(flux),
     })
+}
+
+/// Whether the body `body` migrated inward from where it formed (P14.T50.d's [`Migration`]): a
+/// planet whose formation distance lies beyond its primordial orbit's semi-major axis, a giant
+/// placed inside its core's site (P14.T8), and every other body in situ.
+#[must_use]
+fn migration(body: &Body) -> Migration {
+    match &body.part {
+        Part::Planet(planet) => {
+            let placed = &planet.placed;
+            if placed.formation_distance() > placed.orbit().semi_major_axis() {
+                Migration::Inward
+            } else {
+                Migration::InSitu
+            }
+        }
+        Part::Moon(_) | Part::Ring(_) | Part::Member(_) => Migration::InSitu,
+    }
 }
 
 /// The photometry of a present body whose bulk is `bulk`, whose last atmosphere pass is
@@ -2674,7 +2693,10 @@ impl PlanetarySystem {
     ///   fractionation from the host star's own, [`DerivedBody::envelope_helium`]), and where it
     ///   carries none, the host's unfractionated (`host_helium_per_hydrogen`);
     /// - whether a star's ultraviolet lights it, the aerosols' photochemistry star's rule
-    ///   ([`Epoch::photochemistry_temperature`] of its zone's brightest star).
+    ///   ([`Epoch::photochemistry_temperature`] of its zone's brightest star);
+    /// - its formation draws, words 0–1 of its `body.envelope_formation` stream
+    ///   ([`EnvelopeDraws::for_body`]), and whether it migrated ([`migration`]), which its
+    ///   envelope reads from generator version 26 (P14.T50.d).
     #[must_use]
     fn envelope_inputs(
         &self,
@@ -2705,6 +2727,8 @@ impl PlanetarySystem {
             starlit: epoch
                 .photochemistry_temperature(epoch.brightest(self.zone_of(body)))
                 .is_some(),
+            draws: EnvelopeDraws::for_body(self.seed, body.index.body_id(self.system)),
+            migration: migration(body),
         }
     }
 
