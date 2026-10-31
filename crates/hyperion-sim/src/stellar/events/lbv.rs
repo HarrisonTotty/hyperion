@@ -177,8 +177,10 @@ fn saturating_add(t: UniverseTime, span: Span) -> UniverseTime {
 ///
 /// It is the [`RateModel`] of the star's `star.ev.lbv_eruption` series: the rate is
 /// [`ERUPTIONS_PER_YEAR`] inside the window, T24.a's hull of the star's LBV ages, and zero outside
-/// it, and a bin's bound is the rate if the bin meets the window and zero otherwise. Its methods
-/// list from the window found once; the free functions find it on each call.
+/// it, and a bin's bound is the rate if the bin meets the window and zero otherwise. Under the 26
+/// hold of the Humphreys–Davidson limit the rate is also zero where the star is not a luminous blue
+/// variable, the bound unchanged (the module documentation's thinning). Its methods list from the
+/// window found once; the free functions find it on each call.
 ///
 /// # Examples
 ///
@@ -1120,6 +1122,77 @@ mod tests {
                 last = factor;
             }
         }
+    }
+
+    /// Under the 26 hold of the Humphreys–Davidson limit (P06.T42.b) a 150 M☉ star at \[Fe/H\] −2,
+    /// whose window crosses states that are not luminous blue variables, erupts at exactly the
+    /// candidates of the same bins inside its window whose onset is one: each eruption is the
+    /// candidate's, its ID regenerates it and a dropped candidate's names none, and the listing is
+    /// the same over a partition of the window's edges in any order of asking.
+    #[test]
+    fn the_thinned_eruptions_are_the_windows_candidates_at_lbv_states() {
+        use crate::stellar::rules::StellarRules;
+        let rules = StellarRules {
+            hd_limit: HdLimitRules::Enforced,
+            ..StellarRules::of_version(GENERATOR_VERSION)
+        };
+        let s = StarModel::new_under(
+            SolarMasses::new(150.0),
+            Composition::from_fe_h(Dex::new(-2.0), HeliumExcess::ZERO),
+            StarDraws::median(),
+            Years::new(2.6e6),
+            rules,
+        )
+        .unwrap();
+        let model = LbvModel::of(&s).unwrap();
+        let every = EveryCandidate(&model);
+        let bins = bins();
+        let w = around(&model);
+        let first = bins.bin_of(w.start()).unwrap().get();
+        let last = bins.bin_of(shifted(w.end(), -1)).unwrap().get();
+        let (mut kept, mut thinned) = (0, 0);
+        for index in 0..100 {
+            let sr = series(index);
+            let listed = list(&model, &sr, w);
+            let mut expected = 0;
+            for bin in first..=last {
+                for j in 0..4 {
+                    let id = sr.event_id(EventBin::new(bin).unwrap(), j);
+                    let Some(candidate) = bins.event(&sr, id, &every) else {
+                        continue;
+                    };
+                    let onset = candidate.time();
+                    let inside = model.erupts_at(onset);
+                    let lbv = inside
+                        && s.state_at(onset)
+                            .is_some_and(|state| is_luminous_blue_variable(&state));
+                    let want = lbv.then(|| model.eruption_of(candidate));
+                    assert_eq!(
+                        model.eruption(&sr, id),
+                        want,
+                        "series {index}, bin {bin}, {j}"
+                    );
+                    if let Some(eruption) = want {
+                        assert!(listed.contains(&eruption), "series {index}: {eruption:?}");
+                        expected += 1;
+                        kept += 1;
+                    } else if inside {
+                        thinned += 1;
+                    }
+                }
+            }
+            assert_eq!(listed.len(), expected, "series {index}");
+        }
+        assert!(kept > 100 && thinned > 10, "{kept} kept, {thinned} thinned");
+        let listing = |w: TimeWindow| list_many(&model, 20, w);
+        let cuts = vec![
+            model.start(),
+            shifted(model.start(), 1),
+            shifted(model.end(), -1),
+            model.end(),
+        ];
+        assert_partition_independent(w, &cuts, listing);
+        assert_order_independent(&partition(w, &cuts), |w| listing(*w));
     }
 
     /// The partition rule at the window's edges: cuts at its start, a nanosecond after it, a

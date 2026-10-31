@@ -3211,6 +3211,4 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
   reads as before; `ReadOrbitsError::Missing` now means a dataset that lists none.
 - **T7.b's hold tests isolated (lane `a2-p06-t42b`, 2026-10-31; nothing moved).**
   `stellar/rules/helium_hold.rs` turns on the helium arm alone (`fitted_rules`,
-  `fitted_galaxy_rules`), not `every_26_hold()`. That also turns on P06.T23.a's dwarf sequence
-  and P06.T42.b's limit, which move first-population photometry. `track/excess.rs`'s
-  `HeliumExcess` import is now gated behind `testing`.
+  `fitted_galaxy_rules`): `every_26_hold()` also moves first-population photometry.

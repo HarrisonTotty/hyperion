@@ -59,8 +59,8 @@
 //!   smaller jump near 15,000 K at high Z (their section 5.2) is left out, as Belczynski et al.
 //!   leave it.
 //! - An evolved hydrogen-rich star beyond the Humphreys–Davidson limit loses 1.5 × 10⁻⁴ M☉ per
-//!   year, independent of metallicity, as the whole of its wind (Belczynski et al. 2010,
-//!   equation 8 with `f_lbv` = 1.5).
+//!   year, independent of metallicity, as the whole of its wind below version 26 (Belczynski et
+//!   al. 2010, equation 8 with `f_lbv` = 1.5); from 26 it is a floor (below).
 //! - Naked helium stars follow Hamann and Koesterke (1998, A&A 335, 1003) in HPT's reduced form
 //!   10⁻¹³ L^1.5, scaled as (Z ÷ Z☉)^0.86 (Vink and de Koter 2005, A&A 442, 587, for WN stars
 //!   over 10⁻³ ≲ Z ÷ Z☉ ≲ 1), which is Belczynski et al. (2010) equation 9.
@@ -374,8 +374,9 @@ const HD_RADIUS_SCALE: f64 = 1e-5;
 const HURLEY_LBV: f64 = 0.1;
 
 /// The luminous-blue-variable rate beyond the Humphreys–Davidson limit, M☉ yr⁻¹: `f_lbv` × 10⁻⁴
-/// with Belczynski et al.'s (2010, equation 8) standard `f_lbv` = 1.5, the whole of the star's
-/// wind, independent of metallicity.
+/// with Belczynski et al.'s (2010, equation 8) standard `f_lbv` = 1.5, independent of metallicity:
+/// the whole of the star's wind under [`HdLimitRules::Belczynski`], a floor under
+/// [`HdLimitRules::Enforced`].
 const MODERN_LBV: f64 = 1.5e-4;
 
 /// The power of Z ÷ Z☉ in a Wolf-Rayet star's wind: Vink and de Koter (2005, section 4) find
@@ -840,14 +841,16 @@ mod tests {
         StellarRules::of_version(crate::GENERATOR_VERSION)
     }
 
-    /// The choke point: under the version's rules the modern recipe is [`modern`] and under every
-    /// 26 hold [`modern_limited`], bit for bit, over a grid of states inside and past the limit;
-    /// HPT's recipe reads no field.
+    /// The choke point: under the version's rules the modern recipe is [`modern`] and with the
+    /// limit's arm turned on [`modern_limited`], bit for bit, over a grid of states inside and past
+    /// the limit; HPT's recipe reads no field.
     #[test]
     fn the_rules_choose_the_modern_rate_past_the_limit() {
-        let fitted = StellarRules::every_26_hold();
+        let enforced = StellarRules {
+            hd_limit: HdLimitRules::Enforced,
+            ..version()
+        };
         assert_eq!(version().hd_limit, HdLimitRules::Belczynski);
-        assert_eq!(fitted.hd_limit, HdLimitRules::Enforced);
         let mut past = 0;
         for phase in [
             Phase::MainSequence,
@@ -871,12 +874,12 @@ mod tests {
                         let eta = ReimersEta::HURLEY;
                         let rule = |rules| rate(WindRecipe::Modern, &s, &comp, eta, rules).value();
                         assert_same_bits(rule(version()), modern(regime, &surface, eta));
-                        assert_same_bits(rule(fitted), modern_limited(regime, &surface, eta));
+                        assert_same_bits(rule(enforced), modern_limited(regime, &surface, eta));
                         assert_same_bits(
-                            rate(WindRecipe::Hurley2000, &s, &comp, eta, fitted).value(),
+                            rate(WindRecipe::Hurley2000, &s, &comp, eta, enforced).value(),
                             hurley_rate(&s, 0.02),
                         );
-                        past += u32::from(rule(version()).total_cmp(&rule(fitted)).is_ne());
+                        past += u32::from(rule(version()).total_cmp(&rule(enforced)).is_ne());
                     }
                 }
             }

@@ -285,7 +285,8 @@ impl Error for BuildCaptureWindowWidthsError {}
 /// remnant recipe reads no window.
 ///
 /// The rules (`stellar::rules`) carry the stellar stage's holds down to the track: the helium
-/// table a star with a helium excess reads (P15.T7.b's swap, held until version 26). A star
+/// table a star with a helium excess reads (P15.T7.b's swap) and the modern winds' treatment of
+/// the Humphreys–Davidson limit (P06.T42.b's swap), both held until version 26. A star
 /// generated in a galaxy takes the galaxy's, which its model, its pair's engine and the brief
 /// set; every other track takes the version's.
 ///
@@ -419,7 +420,7 @@ impl TrackOptions {
     }
 
     /// The stellar stage's rules, whose holds the track's builders read: the helium table
-    /// ([`HeliumTable::of`]).
+    /// ([`HeliumTable::of`]) and the winds' Humphreys–Davidson limit (`wind::rate`).
     #[must_use]
     pub(crate) const fn rules(&self) -> StellarRules {
         self.rules
