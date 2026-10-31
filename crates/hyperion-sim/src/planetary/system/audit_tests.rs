@@ -6,7 +6,8 @@
 //! reads:
 //!
 //! - **M1**, P14.T53.b part 1 (V3.9 part 1): no runaway beyond the maximum-greenhouse limit now
-//!   or under Venus's deck below 430 K, and every runaway between the limits (c)'s, its hothouses
+//!   but one its total heating holds above the runaway limit (a tidal Venus, P14.T54.b.k), none
+//!   under Venus's deck below 430 K, and every runaway between the limits (c)'s, its hothouses
 //!   named with their decks and their sides of water's saturation temperature
 //!   (decision-p14-t54b-k-hothouses §3);
 //! - **M3**, P14.T53.a's K4 ceiling: no body beyond the maximum-greenhouse limit now lies above
@@ -66,7 +67,7 @@ use crate::planetary::system::moon_ice::HOT_ICE_LIMIT;
 use crate::planetary::system::planet_lag::planet_lag_in_force;
 use crate::substance::Element;
 use crate::substance::phase::{high_pressure_melting, ice_ih_melting_temperature};
-use crate::units::{Kelvin, Kilograms, Metres, Pascals};
+use crate::units::{Kelvin, Kilograms, Metres, Pascals, WattsPerSquareMetre};
 
 /// One system of a census: its set ("sample", the golden system's name, or "look72"), its
 /// universe's seed and its context.
@@ -333,6 +334,40 @@ const AUDIT_SET_HOTHOUSES: [(&str, RunawayDeck, Saturation); 6] = [
 /// shell, its floor at 627.11 MPa, past T51.g.a's 626.09 MPa and at its own bound.
 const DEEPEST_ICE_V_FLOOR: &str = "41ffecb600000001.0200";
 
+/// The runaway limit, W m⁻²: the most thermal radiation a planet whose air is saturated over a
+/// surface ocean can emit to space, 282 W m⁻² for an Earth (Goldblatt et al. 2013, Nat. Geosci. 6,
+/// 661).
+///
+/// A runaway heated at or above it in all ([`total_heating`]) is one whatever heats it, as Barnes
+/// et al. 2013's tidal Venuses (the tide alone) and insolation-tidal Venuses (the tide and the
+/// starlight) are (Astrobiology 13, 225), so M1 (a) passes it ([`passes_m1_a`]). A smaller body's
+/// limit is lower, its surface gravity lower, so the test is conservative at or below Earth's
+/// gravity, as on the census's tidally heated moons; a heavier body's is higher (Kopparapu et al.
+/// 2014, ApJL 787, L29), where it is lenient.
+const RUNAWAY_LIMIT_FLUX: WattsPerSquareMetre = WattsPerSquareMetre::new(282.0);
+
+/// The total heating of a surface, W m⁻²: its heat flow `heat_flow`, a tide's included, and the
+/// starlight it absorbs, (1 − A) S ÷ 4, at the Bond albedo `albedo` under the orbit-averaged flux
+/// `flux`, S.
+#[must_use]
+fn total_heating(
+    heat_flow: WattsPerSquareMetre,
+    albedo: BondAlbedo,
+    flux: WattsPerSquareMetre,
+) -> WattsPerSquareMetre {
+    WattsPerSquareMetre::new(heat_flow.value() + (1.0 - albedo.value()) * flux.value() / 4.0)
+}
+
+/// Whether a runaway at the maximum-greenhouse ratio `maximum` now (Σ F ÷ `S_eff`, [`limit_now`])
+/// and the total heating `heating` ([`total_heating`]) passes M1 (a): inside the limit (its ratio
+/// at least 1), or beyond it heated in all to at least [`RUNAWAY_LIMIT_FLUX`].
+///
+/// A ratio or heating that is not a number fails.
+#[must_use]
+fn passes_m1_a(maximum: f64, heating: WattsPerSquareMetre) -> bool {
+    maximum >= 1.0 || (!maximum.is_nan() && heating.value() >= RUNAWAY_LIMIT_FLUX.value())
+}
+
 /// What the audit holds of one body ([`AuditCase`]): each item's failures on it and each line an
 /// item states of it by name, so that a census of thousands keeps no record.
 pub(super) struct AuditBody {
@@ -384,7 +419,9 @@ impl AuditBody {
     /// M1, P14.T53.b part 1, on a record whose surface is a `RunawayGreenhouse` (V3.9 part 1;
     /// decision-t53b-arm-c §5.4–5.5; decision-p14-t54b-k-hothouses §3).
     ///
-    /// (a) It lies inside the maximum-greenhouse limit now ([`limit_now`] at least 1); (b) under
+    /// (a) It lies inside the maximum-greenhouse limit now ([`limit_now`] at least 1), or beyond it
+    /// its total heating, its record's surface heat flow and the starlight it absorbs, reaches the
+    /// runaway limit ([`passes_m1_a`]), which (b) and (c) are not asked of; (b) under
     /// Venus's deck its mean surface temperature is at least the acid's cycling temperature, 430 K
     /// ([`ACID_CYCLING_TEMPERATURE`]); (c) between the limits now ([`runaway_now`] below 1) it is
     /// (c)'s: solved again, its passes take (c)'s branch once, a first solve `Temperate` that (c)
@@ -414,10 +451,23 @@ impl AuditBody {
             saturation(p_s)
         );
         if maximum.is_nan() || maximum < 1.0 {
-            self.fault(
-                Item::M1,
-                &format!("(a) a runaway beyond the maximum-greenhouse limit now: {line}"),
+            let heat_flow = surface.figures().heat_flow();
+            let heating = total_heating(
+                heat_flow,
+                case.derived.albedo(),
+                WattsPerSquareMetre::from(case.derived.flux()),
             );
+            if !passes_m1_a(maximum, heating) {
+                self.fault(
+                    Item::M1,
+                    &format!(
+                        "(a) a runaway beyond the maximum-greenhouse limit now: {line}; heat flow \
+                         {:.4} W m⁻², total heating {:.4} W m⁻²",
+                        heat_flow.value(),
+                        heating.value()
+                    ),
+                );
+            }
             return;
         }
         if deck == RunawayDeck::Kept && (t_s.is_nan() || t_s < ACID_CYCLING_TEMPERATURE.value()) {
@@ -1209,6 +1259,40 @@ fn under_every_24_hold_no_record_shows_a_must_fix_item_over_the_audit_set() {
     let census = audit_set_census();
     assert!(census.0.len() > 6_000, "{} bodies", census.0.len());
     assert_must_fix("the audit set (the 400, the goldens, LOOK72's 30)", census);
+}
+
+/// M1 (a) judges a runaway beyond the maximum-greenhouse limit by its total heating
+/// (P14.T54.b.k; research-leans-8 §2): at a ratio of 0.05, under 40 W m⁻² of starlight at a Bond
+/// albedo of 0.3, a heat flow of 500 W m⁻² passes it, a tidal Venus's, and 0.1 W m⁻² fails it; a
+/// runaway inside the limit passes, and a ratio that is not a number fails.
+#[test]
+fn m1_a_judges_a_runaway_beyond_the_limit_by_its_total_heating() {
+    let (albedo, flux) = (
+        BondAlbedo::from_fraction(0.3),
+        WattsPerSquareMetre::new(40.0),
+    );
+    let heating = |heat_flow: f64| total_heating(WattsPerSquareMetre::new(heat_flow), albedo, flux);
+    assert!(
+        (heating(500.0).value() - 507.0).abs() < 1e-9,
+        "{:?}",
+        heating(500.0)
+    );
+    assert!(passes_m1_a(0.05, heating(500.0)), "a tidal Venus");
+    assert!(!passes_m1_a(0.05, heating(0.1)), "a starlit runaway");
+    assert!(passes_m1_a(1.0, heating(0.1)), "inside the limit");
+    assert!(
+        passes_m1_a(0.05, WattsPerSquareMetre::new(282.0)),
+        "at the limit"
+    );
+    assert!(
+        !passes_m1_a(0.05, WattsPerSquareMetre::new(281.9)),
+        "under it"
+    );
+    assert!(!passes_m1_a(f64::NAN, heating(500.0)), "no ratio");
+    assert!(
+        !passes_m1_a(0.05, WattsPerSquareMetre::new(f64::NAN)),
+        "no heating"
+    );
 }
 
 /// M1 over design-k §0's set A, as main rules it (decision-p14-t54b-k-hothouses §3), a measurement
