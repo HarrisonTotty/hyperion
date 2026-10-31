@@ -25,6 +25,9 @@ const DISPERSION: [f64; 3] = [3_000.0, 1_000.0, 500.0];
 const MASS: f64 = 2e4;
 /// 10⁻⁹ ly in metres.
 const NANO_LY: f64 = 1e-9 * METRES_PER_LIGHT_YEAR;
+/// The size of the tracers' energy offsets at release, J/kg: a stream's tracers' are of order
+/// the circular speed times a few km/s.
+const ENERGY_OFFSET: f64 = 1e9;
 /// The seed of the tables' gap noise.
 const SEED: Seed = Seed::new(0x0a10_6b00);
 /// The mean system mass the tables' along cells are cut for, M☉: a round figure near the Milky
@@ -58,8 +61,9 @@ fn numbered(number: u16) -> StreamSpec {
 /// `per_arm` tracers from each Lagrange point of a stream on a circle of [`RADIUS`] in the
 /// galactic plane, moving anticlockwise from the x axis: tracer `2k` leads at ψ from 0 to [`ARC`]
 /// and `2k + 1` trails, each at the angle ψ about the centre, with Gaussian offsets of [`SPREAD`]
-/// outward and up and velocities of [`SPEED`] along the circle with [`DISPERSION`]. `astray`
-/// leading tracers of every hundred trail instead, as a spray's few do.
+/// outward and up and velocities of [`SPEED`] along the circle with [`DISPERSION`], and an energy
+/// offset of [`ENERGY_OFFSET`] of its arm's sign. `astray` leading tracers of every hundred trail
+/// instead, with the trailing arm's energy, as a spray's few do.
 fn circle(per_arm: u32, astray: u32) -> Vec<Tracer> {
     let mut draws = Stream::open(
         Seed::new(0x0a10_6a00),
@@ -77,7 +81,11 @@ fn circle(per_arm: u32, astray: u32) -> Vec<Tracer> {
             };
             let gained = ARC * (f64::from(k) + draws.uniform()) / f64::from(per_arm);
             let behind = arm == Arm::Trailing || k % 100 < astray;
-            let psi = if behind { -gained } else { gained };
+            let (psi, energy) = if behind {
+                (-gained, ENERGY_OFFSET)
+            } else {
+                (gained, -ENERGY_OFFSET)
+            };
             let (sin, cos) = math::sin_cos(psi);
             let out = RADIUS + SPREAD[0] * draws.standard_normal();
             let up = SPREAD[1] * draws.standard_normal();
@@ -98,9 +106,24 @@ fn circle(per_arm: u32, astray: u32) -> Vec<Tracer> {
                 GalacticDisplacement::new(position),
                 GalacticVelocity::new(velocity),
                 Radians::new(psi),
+                energy,
             )
         })
         .collect()
+}
+
+/// `t` with the energy offset `energy`, J/kg, in place of its own.
+fn with_energy(t: &Tracer, energy: f64) -> Tracer {
+    Tracer::from_parts(
+        t.arm(),
+        t.release_step(),
+        t.released(),
+        t.weight(),
+        t.position(),
+        t.velocity(),
+        t.psi(),
+        energy,
+    )
 }
 
 fn table(tracers: &[Tracer]) -> TubeTable {
@@ -133,11 +156,12 @@ fn median(mut values: Vec<f64>) -> f64 {
     values[values.len() / 2]
 }
 
-/// The arms are split by ψ's sign, not by the Lagrange point (main's ruling of 2026-10-29): the
-/// strays join the arm of their sign with their weight, a ψ of zero of either sign is the
-/// leading arm's, and the arms' masses add up to the tube's.
+/// The arms are split by the energy's sign at release, not by the Lagrange point nor by ψ's sign
+/// (main's ruling of 2026-10-30): the strays join the arm of their energy with their weight, those
+/// behind the progenitor with the leading arm's energy at that arm's low end of ψ, an energy of
+/// zero of either sign is the trailing arm's, and the arms' masses add up to the tube's.
 #[test]
-fn the_arms_are_split_by_the_sign_of_psi() {
+fn the_arms_are_split_by_the_energy_s_sign() {
     let mut tracers = circle(600, 3);
     let behind = tracers.iter().filter(|t| t.psi().value() < 0.0).count();
     assert_eq!(
@@ -145,42 +169,119 @@ fn the_arms_are_split_by_the_sign_of_psi() {
         600 + 18,
         "three of every hundred leading tracers trail"
     );
-    // Two leading tracers that lead, at ψ of zero, one of each sign.
+    // Four of the strays behind keep the leading arm's energy, and two leading tracers ahead have
+    // an energy offset of zero, one of each sign.
+    for i in [0, 2, 200, 202] {
+        let psi = tracers[i].psi().value();
+        assert!(psi < 0.0, "tracer {i} at ψ {psi}");
+        assert_eq!(tracers[i].arm(), Arm::Leading, "tracer {i}");
+        tracers[i] = with_energy(&tracers[i], -ENERGY_OFFSET);
+    }
     for (i, zero) in [(6, 0.0), (8, -0.0)] {
-        let t = tracers[i];
-        tracers[i] = Tracer::from_parts(
-            t.arm(),
-            t.release_step(),
-            t.released(),
-            t.weight(),
-            t.position(),
-            t.velocity(),
-            Radians::new(zero),
-        );
+        let psi = tracers[i].psi().value();
+        assert!(psi > 0.0, "tracer {i} at ψ {psi}");
+        tracers[i] = with_energy(&tracers[i], zero);
+        assert_eq!(tracers[i].energy_arm(), Arm::Trailing, "{zero:?}");
     }
     let tube = table(&tracers);
     assert_eq!(tube.stream(), spec().number());
-    assert_eq!(tube.arm(Arm::Trailing).tracers(), 618);
-    assert_eq!(tube.arm(Arm::Leading).tracers(), 582);
+    assert_eq!(tube.arm(Arm::Trailing).tracers(), 616);
+    assert_eq!(tube.arm(Arm::Leading).tracers(), 584);
     let weight = MASS / 1_200.0;
     let trailing = tube.arm(Arm::Trailing).mass().value();
     assert!(
-        (trailing / (618.0 * weight) - 1.0).abs() < 1e-12,
+        (trailing / (616.0 * weight) - 1.0).abs() < 1e-12,
         "{trailing}"
     );
     let sum = trailing + tube.arm(Arm::Leading).mass().value();
     assert_eq!(tube.mass().value(), sum);
-    assert!((tube.mass().value() / MASS - 1.0).abs() < 1e-12);
-    // The leading arm's root is at its ψ of zero.
-    for (arm, sign) in [(Arm::Trailing, -1.0), (Arm::Leading, 1.0)] {
+    let mass = tube.mass().value();
+    assert!((mass / MASS - 1.0).abs() < 1e-12, "{mass}");
+    // Each arm's knots run in ψ: the leading arm's first lies behind the progenitor, at the strays
+    // that kept its energy, and the trailing arm's last ahead of it, at the zeros.
+    for arm in [Arm::Trailing, Arm::Leading] {
         let knots = tube.arm(arm).knots();
         assert_eq!(knots.len(), 256);
         assert!(
-            knots.iter().all(|k| k.psi().value() * sign >= 0.0)
-                && knots.iter().all(|k| k.psi().value() < 0.0) == (arm == Arm::Trailing),
+            knots
+                .windows(2)
+                .all(|w| w[0].psi().value() <= w[1].psi().value()),
             "{arm:?}"
         );
     }
+    let first = tube.arm(Arm::Leading).knots()[0].psi().value();
+    assert!(first < 0.0, "the leading arm starts at ψ {first}");
+    let last = tube.arm(Arm::Trailing).knots()[255].psi().value();
+    assert!(last > 0.0, "the trailing arm ends at ψ {last}");
+}
+
+/// [`circle`]'s 300 tracers an arm made a cloud: the ten furthest behind take the leading arm's
+/// energy and the ten furthest ahead the trailing arm's, so that each arm's ψ crosses zero and
+/// reaches past the other arm's tip.
+fn cloud() -> Vec<Tracer> {
+    let mut tracers = circle(300, 0);
+    let mut order: Vec<usize> = (0..tracers.len()).collect();
+    order.sort_by(|&a, &b| {
+        tracers[a]
+            .psi()
+            .value()
+            .total_cmp(&tracers[b].psi().value())
+    });
+    for (&behind, &ahead) in order.iter().zip(order.iter().rev()).take(10) {
+        tracers[behind] = with_energy(&tracers[behind], -ENERGY_OFFSET);
+        tracers[ahead] = with_energy(&tracers[ahead], ENERGY_OFFSET);
+    }
+    tracers
+}
+
+/// The gap noise's span of ψ runs from the least of both arms' knots' ψ to the greatest: the
+/// trailing arm's tip and the leading arm's where every tracer's ψ has its arm's sign, and where
+/// an arm's ψ crosses zero and reaches past the other arm's tip, as in a cloud, that arm's end.
+/// Every cell's middle lies in the span, and the noise still averages one.
+#[test]
+fn the_gap_noise_s_span_covers_both_arms() {
+    let ends = |tube: &TubeTable, arm| {
+        let knots = tube.arm(arm).knots();
+        [knots[0].psi().value(), knots[knots.len() - 1].psi().value()]
+    };
+    let tube = table(&circle(300, 0));
+    assert_eq!(
+        tube.psi_span().map(Radians::value),
+        [ends(&tube, Arm::Trailing)[0], ends(&tube, Arm::Leading)[1]]
+    );
+    let cloud = table(&cloud());
+    let [low, high] = cloud.psi_span().map(Radians::value);
+    let mut psis: Vec<f64> = cloud.knots().map(|k| k.psi().value()).collect();
+    psis.sort_by(f64::total_cmp);
+    assert_eq!([low, high], [psis[0], psis[psis.len() - 1]]);
+    assert_eq!(
+        [low, high],
+        [
+            ends(&cloud, Arm::Leading)[0],
+            ends(&cloud, Arm::Trailing)[1]
+        ]
+    );
+    let [inner_low, inner_high] = [
+        ends(&cloud, Arm::Trailing)[0],
+        ends(&cloud, Arm::Leading)[1],
+    ];
+    assert!(
+        low < inner_low,
+        "{low} against the trailing tip's {inner_low}"
+    );
+    assert!(
+        inner_high < high,
+        "{high} against the leading tip's {inner_high}"
+    );
+    let cells = cloud.along_cells();
+    for cell in 0..cells {
+        let psi = cloud
+            .psi((f64::from(cell) + 0.5) / f64::from(cells))
+            .value();
+        assert!(low <= psi && psi <= high, "cell {cell} at ψ {psi}");
+    }
+    let sum = noises(&cloud).iter().sum::<f64>();
+    assert!((sum / f64::from(cells) - 1.0).abs() < 1e-12, "{sum}");
 }
 
 /// The centre line follows the circle and its length is the arc's between the end knots; the
@@ -408,8 +509,9 @@ fn an_arm_of_fewer_tracers_than_a_kernel_is_an_error() {
     // Keep 47 trailing tracers.
     let mut kept = 0;
     tracers.retain(|t| {
-        let keep = t.psi().value() >= 0.0 || kept < 47;
-        if t.psi().value() < 0.0 && keep {
+        let trailing = t.energy_arm() == Arm::Trailing;
+        let keep = !trailing || kept < 47;
+        if trailing && keep {
             kept += 1;
         }
         keep
@@ -449,10 +551,10 @@ fn building_without_the_full_potential_is_the_spray_s_error() {
     );
 }
 
-/// Tracers of equal ψ keep their order in the list, the sort being stable: a spray's last
-/// release can fall on the epoch's boundary, and its two tracers then both have ψ of +0.0. With
-/// such a tie the table is unchanged when the other tracers are permuted, and changes when the
-/// tied pair is swapped.
+/// Tracers of one arm and equal ψ keep their order in the list, the sort being stable: a spray's
+/// last release can fall on the epoch's boundary, and its two tracers then both have ψ of +0.0,
+/// in one arm if their offsets gave them energies of one sign. With such a tie the table is
+/// unchanged when the other tracers are permuted, and changes when the tied pair is swapped.
 #[test]
 fn tracers_of_equal_psi_keep_their_order() {
     let mut tracers = circle(300, 0);
@@ -466,6 +568,7 @@ fn tracers_of_equal_psi_keep_their_order() {
             t.position(),
             t.velocity(),
             Radians::new(0.0),
+            t.energy_offset_j_kg(),
         );
     }
     let tube = table(&tracers);
@@ -502,6 +605,7 @@ fn the_line_density_follows_unequal_weights() {
                 t.position(),
                 t.velocity(),
                 t.psi(),
+                t.energy_offset_j_kg(),
             )
         })
         .collect();
@@ -690,11 +794,13 @@ fn a_knot_keeps_two_frame_vectors_in_168_bytes() {
     assert_eq!(size_of::<TubeKnot>(), 168);
     let tracers = circle(300, 2);
     let tube = table(&tracers);
-    // The frames as `from_tracers` builds them, from the arms by ψ's sign.
-    let mut along: Vec<&Tracer> = tracers.iter().collect();
-    along.sort_by(|a, b| a.psi().value().total_cmp(&b.psi().value()));
-    let (trailing, leading) = along.split_at(along.partition_point(|t| t.psi().value() < 0.0));
-    let built = frames(&[Reduced::new(trailing), Reduced::new(leading)]);
+    // The frames as `from_tracers` builds them, from the arms by the energy's sign.
+    let [trailing, leading] = [Arm::Trailing, Arm::Leading].map(|arm| {
+        let mut on: Vec<&Tracer> = tracers.iter().filter(|t| t.energy_arm() == arm).collect();
+        on.sort_by(|a, b| a.psi().value().total_cmp(&b.psi().value()));
+        on
+    });
+    let built = frames(&[Reduced::new(&trailing), Reduced::new(&leading)]);
     let read: Vec<[[f64; 3]; 3]> = tube.knots().map(TubeKnot::frame).collect();
     assert_eq!(read, built.concat());
 }
@@ -945,11 +1051,18 @@ mod milky_way {
     /// Tracers an arm: 64, past a kernel's 48 with room for the strays (P10.T6.a, as built).
     const TRACERS_PER_ARM: u32 = 64;
 
-    /// The streams' names, specifications and tracers, and the fixture halo's mean system mass.
+    /// The streams' names, specifications and tracers, and the fixture halo's mean system mass;
+    /// and [`EPOCH_PER_ARM`] tracers an arm of `pal5_like` stripped over 20 Myr, a few hundred
+    /// steps, so that its last release falls on the epoch's boundary (P10.T6.a).
     struct Sprayed {
         mean_mass: SolarMasses,
         streams: Vec<(&'static str, StreamSpec, Vec<Tracer>)>,
+        epoch: (StreamSpec, Vec<Tracer>),
     }
+
+    /// The epoch's stream's tracers an arm: more than twice its steps, so that its last stratum
+    /// lies within half a step of the epoch.
+    const EPOCH_PER_ARM: u32 = 1_000;
 
     fn sprayed() -> &'static Sprayed {
         static SPRAYED: OnceLock<Sprayed> = OnceLock::new();
@@ -971,15 +1084,33 @@ mod milky_way {
                 (name, spec, tracers)
             })
             .collect();
+            let epoch = StreamSpec {
+                stripping_time: Years::new(2e7),
+                ..pal5_like(&tables)
+            };
+            let per_arm = SprayParams::new(NonZeroU32::new(EPOCH_PER_ARM).expect("not zero"));
+            let sprayed = Spray::new(SEED, &force, &tables, &epoch, &per_arm)
+                .expect("a finite stripping time");
+            let steps = sprayed.schedule().step().count();
+            assert!(2 * steps < EPOCH_PER_ARM, "{steps} steps");
+            let last = sprayed.schedule().releases()[index(EPOCH_PER_ARM - 1)];
+            assert_eq!(
+                last.step(),
+                steps,
+                "the last release is on the epoch's boundary"
+            );
             Sprayed {
                 mean_mass: params.mean_system_mass(crate::galaxy::Population::Halo),
                 streams,
+                epoch: (epoch, sprayed.tracers()),
             }
         })
     }
 
     fn tube(stream: usize) -> TubeTable {
-        let Sprayed { mean_mass, streams } = sprayed();
+        let Sprayed {
+            mean_mass, streams, ..
+        } = sprayed();
         let (_, spec, tracers) = &streams[stream];
         TubeTable::from_tracers(SEED, *mean_mass, spec, tracers).expect("enough tracers an arm")
     }
@@ -1077,5 +1208,58 @@ mod milky_way {
             let touched = touched(&tube);
             (tube, noise, touched)
         });
+    }
+
+    /// P10.T6.a's golden (main's ruling of 2026-10-30): the bits of two tubes whose arms by the
+    /// energy's sign are not ψ's, which `tube.golden`'s test streams never reach. One is the
+    /// synthetic [`cloud`](super::cloud), whose arms each cross zero and reach past the other's
+    /// tip. The other is `pal5_like` stripped over 20 Myr, whose last release leaves a tracer of ψ
+    /// +0.0 at the trailing arm's root. Each gives its arms' counts and masses, the gap noise's
+    /// span, a digest of every knot's quantities, its arms' ends' ψ and four cells' noise; every
+    /// architecture the sim's tests run on must reproduce them.
+    #[test]
+    fn tubes_whose_arms_cross_zero_are_pinned() {
+        let Sprayed {
+            mean_mass, epoch, ..
+        } = sprayed();
+        let cloud = super::cloud();
+        let mut writer = GoldenWriter::new();
+        writer.header(crate::GENERATOR_VERSION.get());
+        for (name, tube) in [
+            ("cloud", super::table(&cloud)),
+            (
+                "epoch",
+                TubeTable::from_tracers(SEED, *mean_mass, &epoch.0, &epoch.1)
+                    .expect("enough tracers an arm"),
+            ),
+        ] {
+            let [trailing, leading] = [Arm::Trailing, Arm::Leading].map(|arm| tube.arm(arm));
+            writer.line(&format!(
+                "{name}.tracers {} {}",
+                trailing.tracers(),
+                leading.tracers()
+            ));
+            writer.f64(&format!("{name}.mass"), tube.mass().value());
+            writer.f64(&format!("{name}.trailing.mass"), trailing.mass().value());
+            let [low, high] = tube.psi_span();
+            writer.f64(&format!("{name}.span.low"), low.value());
+            writer.f64(&format!("{name}.span.high"), high.value());
+            let all: Vec<f64> = tube.knots().flat_map(values).collect();
+            writer.u64_hex(&format!("{name}.knots.digest"), f64_digest(&all));
+            for (arm, knots) in [("trailing", trailing), ("leading", leading)] {
+                let knots = knots.knots();
+                writer.f64(&format!("{name}.{arm}.first.psi"), knots[0].psi().value());
+                writer.f64(
+                    &format!("{name}.{arm}.last.psi"),
+                    knots[knots.len() - 1].psi().value(),
+                );
+            }
+            let cells = tube.along_cells();
+            writer.line(&format!("{name}.along_cells {cells}"));
+            for cell in [0, cells / 3, cells / 2, cells - 1] {
+                writer.f64(&format!("{name}.noise.{cell}"), tube.noise(cell));
+            }
+        }
+        golden!("galaxy/global_list/tube_arms", writer.as_str());
     }
 }

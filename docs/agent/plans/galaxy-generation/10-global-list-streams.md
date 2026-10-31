@@ -572,8 +572,9 @@ which T4 checks (Risks, "T3.a–c as built").
 ### P10.T6 The tube table
 
 _T6.a–c built (lanes `p10-t6a`, `p10-t6b` and `p10-t6c`, 2026-10-29 and 2026-10-30, at
-`GENERATOR_VERSION` 23); see "P10.T6.a as built", "P10.T6.b as built" and "P10.T6.c as built" in
-Risks._
+`GENERATOR_VERSION` 23), and the arms split by energy (lane `p10-spray-arms`, 2026-10-30, at 24);
+see "P10.T6.a as built", "P10.T6.b as built", "P10.T6.c as built" and "P10.T6.a's arms by energy,
+as built" in Risks._
 
 - **P10.T6.a Reduction.** Per arm about 256 knots per design note 6: centre line (as integer
   light-years plus offset), a local frame carried along the track by parallel transport so that it
@@ -584,7 +585,8 @@ Risks._
   km/s; an orphan shows the central gap; a dwarf shows the pile-up at apocentre; frames orthonormal
   to 10⁻¹². _Deviation from the plan's text (main's rulings of 2026-10-29, after the research
   lane `research-galaxy-leans`, items 11 and 15 and its findings for T6.a):_ each arm is the
-  tracers of one sign of ψ, not of one Lagrange point; `TubeTable::from_tracers` reduces the
+  tracers of one sign of the energy offset at release (main's ruling of 2026-10-30, in place of
+  ψ's sign), not of one Lagrange point; `TubeTable::from_tracers` reduces the
   tracers a caller's pool gathered by index, and `build` sprays them in turn; the length tests are
   restated, since the helpers' stripping times (Design note 5) make `pal5_like` about 230,000 ly
   and `gd1_like` about 117,000 ly through their tracers: each tube's knots' arc length lies within
@@ -592,10 +594,11 @@ Risks._
   recorded against the brainstorm's 30,000–160,000 ly for globular streams; the dwarf test is
   reworded: for each pulse's tracers separately the line density per unit arc length is higher
   near the centre line's apocentric points (local maxima of galactocentric radius) than near its
-  pericentric points; a test that every tracer whose Lagrange point's arm is not its ψ's lies
-  inside the other arm's tube at its ψ, within its four-width cut or within two tidal radii of the
+  pericentric points; a test that every tracer whose Lagrange point's arm is not its energy's lies
+  inside its energy arm's tube at its ψ, within its four-width cut or within two tidal radii of the
   progenitor at the epoch, where the arms' roots meet, is added; and widths and dispersions that
-  miss their brackets are recorded, not tuned (Risks, "P10.T6.a as built").
+  miss their brackets are recorded, not tuned (Risks, "P10.T6.a as built" and "P10.T6.a's arms by
+  energy, as built").
 - **P10.T6.b Gaps.** The noise of design note 8 with an amplitude of the generator version. Tests:
   the total expected count is unchanged to 10⁻¹²; the power of the density contrast along `gd1_like`
   peaks at scales of a few thousand light-years.
@@ -1633,7 +1636,8 @@ grows with the registry")]`.
     golden must be a lib unit test (the `wasm32-wasip1` run turns `testing` off), at 48 tracers an
     arm or more (`KERNEL_TRACERS`), or on the synthetic tracers of `tube::tests`; and its
     order-independence test is still to come.
-  - _The arms (item 11)._ ψ ≥ 0, either zero, is the leading arm's, ψ < 0 the trailing arm's;
+  - _The arms (item 11)._ Superseded by the energy's sign ("P10.T6.a's arms by energy, as built").
+    ψ ≥ 0, either zero, is the leading arm's, ψ < 0 the trailing arm's;
     the tracers are sorted by ψ with `total_cmp`, stably, so the table is a pure function of the
     list in index order. Each arm's knots run in increasing ψ, the along coordinate's order: the
     trailing arm's from its tip to its root.
@@ -1725,7 +1729,8 @@ grows with the registry")]`.
     knots for debris some 10⁴ ly across. None reaches the root cube (118 of the 309 tubes do), so
     no member would be placed in one, and nothing is shown before P10.T11. Not a blocker; for the
     owner and for T6.c and T11: such a tube needs another along coordinate (the tracers' orbital
-    phase or energy), or the list keeps it unreduced until it shears.
+    phase or energy), or the list keeps it unreduced until it shears. Resolved for the split by
+    main's ruling of 2026-10-30 ("P10.T6.a's arms by energy, as built"); such tubes stay blobs.
   - _Tests._ Fast, `tube::tests` on a synthetic stream on a circle (`Tracer::from_parts`,
     test-only): the split by ψ's sign with strays and zeros of both signs, the centre line, Λ and
     the length, the frames, the widths and dispersions, `locate`, `mean_velocity` and `psi`
@@ -2105,3 +2110,57 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
   them in index order through `spray::step_in_lanes`, which the shell orbits share (a `Lane` trait
   over a `Walker`). `Spray::tracer(i)` stays the scalar path a pool calls; the spray's lib test
   holds the two bit for bit.
+- **P10.T6.a's arms by energy, as built (lane `p10-spray-arms`, 2026-10-30, at
+  `GENERATOR_VERSION` 24).** Main's ruling of 2026-10-30, after the research lane
+  `research-spray-arms`: a tube's arms split by the sign of each tracer's energy offset at
+  release, ordered by ψ within each arm, with no hold, since nothing served reads a tube before
+  T10.b (27 or later). No served output moved. `tube.golden`, `stream_members.golden` and
+  `dwarf_core_members.golden` are unchanged; `spray.golden` gained one `energy_offset` label a
+  tracer ("extended only"), and `tube_arms.golden` is new, both blessed by name.
+  - _Items._ `Tracer::energy_offset_j_kg()`: the tracer's `½|v|² + Φ` less the progenitor's, both
+    at the release boundary, Φ `SprayForce::potential_j_kg`, J/kg. `Tracer::energy_arm()`:
+    `Leading` below zero, `Trailing` otherwise, a zero of either sign included. `arm()` stays the
+    Lagrange point, a diagnostic. `Tracer::from_parts` (test-only) takes the offset last. No draw,
+    tag or word added.
+  - _The split._ `from_tracers` partitions by `energy_arm()`, trailing first, then sorts each arm
+    by ψ, stably. The gap noise's span (a private `psi_span`) runs from the lesser of the arms'
+    first knots' ψ to the greater of their last knots', chosen with `<`. `cells_touching` is
+    unchanged: its bound is per segment.
+  - _What it replaces._ In a cloud an arm's ψ may cross zero, so Design note 7's `u = Λ(ψ) ÷
+Λ_total` holds within each arm and ψ may step back between the roots; T6.a's knots keep their
+    arm's order, not its sign; T6.b's noise nodes span the knots' least ψ to their greatest, not
+    tip to tip.
+  - _Unserved bits that moved._ Every tube in which a tracer's two signs disagree: the clouds, and
+    a living globular's whose last release rounds to the epoch's boundary, whose trailing tracer
+    at ψ +0.0 was the leading arm's (a chance of N ÷ 2 steps, 2.5 % at 20,000 steps).
+  - _Counts (x86-64, pod, 16 vCPU)._ Three drawn galaxies' 306, 258 and 275 streams at 2,000
+    tracers (seeds `0x0a10_3000_0000_000{0,1,2}`, a scratch probe, not committed): 1, 3 and 1
+    tracers with the other arm's energy, at most 1 a stream, where ψ's sign put 1,960, 2,733 and
+    971 on the other side, 7, 11 and 7 streams over 0.5 %. Streams 153, 183 and 244 of the first
+    go from 1,244, 424 and 161 to 0. `sagittarius_like`'s stray under the tests' seed and seed 7
+    is the same tracer by both rules; seeds 5 and 6 have one each by the energy alone, at the
+    root, inside the cut.
+  - _Limit, and for T10.a and T11._ "ψ's sign fails for eccentric orphans near apocentre" is
+    resolved for the split, but such a tube is still a blob, each arm one radial band, outside the
+    root cube. Its track and `length()`, which cross the roots, are no stream's for T10.a's
+    `StreamTrack` or T11's `StreamReadout`.
+  - _Cost._ Two potential evaluations a tracer at release. `TubeTable::build(pal5_like)` 2.123 s
+    alone and 138.2 ms on 16 threads, `from_tracers` 1.300 ms, against T6.c's bench before the
+    change: no change past 0.12 %.
+  - _Tests._ Fast: `spray::tests`' `the_energy_at_release_names_each_tracer_s_arm`, in the pinned
+    group (the test streams' 6 tracers an arm keep their Lagrange point's energy; a release on the
+    epoch's boundary leaves both its tracers at ψ +0.0, in their own arms);
+    `tube::tests::the_arms_are_split_by_the_energy_s_sign`,
+    `the_gap_noise_s_span_covers_both_arms` and `tubes_whose_arms_cross_zero_are_pinned` (the
+    synthetic cloud and `pal5_like` stripped over 20 Myr). Slow, by name, restated:
+    `a_drawn_galaxy_s_tracers_keep_their_lagrange_point_s_energy`, renamed from
+    `a_drawn_galaxy_s_streams_keep_nearly_every_tracer_on_its_arm_s_side`, which failed at the
+    base on stream 153: at most 2 of 2,000 a stream, on the step quantiles, the dwarfs and up to
+    three clouds chosen by rule (orphans, `e ≥ 0.85`, at 0.85 of apocentre or more, `T_s` of four
+    radial periods or fewer; the fewest periods first, then by number; at least one asserted);
+    `the_test_streams_arms_lead_and_trail_and_pal5_s_track_leaves_its_orbit` (energy strays at
+    most 2, `sagittarius_like`'s 1); and in `tests/global_list_tube.rs`
+    `the_strays_lie_inside_the_other_arm_s_tube`, `the_test_streams_tubes_follow_their_tracers`
+    and `an_orphan_s_tube_holds_its_cluster_s_gap`, by `energy_arm()`, each stray's ψ found in its
+    energy arm. Commands, `<file>` each of `global_list_spray` and `global_list_tube`:
+    `cargo test -p hyperion-sim --features testing --profile slow-test --test <file> -- --ignored`.

@@ -115,15 +115,23 @@
 //!
 //! # The arms
 //!
-//! A tracer's arm is the Lagrange point it left from, and nearly every tracer's ψ has its arm's
-//! sign: in this module's slow tests (`tests/global_list_spray.rs`) at v23, one of
-//! `sagittarius_like`'s 2,000 does not, and none of six sampled streams of a drawn Milky Way
-//! galaxy. The Plummer sphere this module once added sent up
-//! to 1.6 % of a drawn galaxy's tracers onto the other arm's orbits, some a radian or more along
-//! it (P10.T5.b, as built). Fardal et al. describe the same artefact in another recipe, stars
-//! thrown "backwards into the stream emerging from the opposing Lagrange point" (§5.1). So
-//! [`Arm`] is a diagnostic, and the tube table ([`tube`](super::tube), P10.T6) takes a tracer's
-//! arm from the sign of its ψ.
+//! A tracer's [`arm`](Tracer::arm) is the Lagrange point it left from, a diagnostic. The tube
+//! table ([`tube`](super::tube), P10.T6) takes its [`energy_arm`](Tracer::energy_arm), from the
+//! sign of its energy offset at release: its `½|v|² + Φ` less the progenitor's, both at the release
+//! boundary in the table's potential ([`SprayForce::potential_j_kg`]), J/kg (main's ruling of
+//! 2026-10-30). The leading arm is the debris more bound than the progenitor and the trailing arm
+//! the less: "the fan with lower E and L is the leading arm" (Gibbons, Belokurov and Evans 2014,
+//! "'Skinny Milky Way please', says Sagittarius", MNRAS 445, 3788, §3.1), and "particles with high
+//! energy lag behind in the orbit, while particles with low energy speed ahead" (Fardal et al.,
+//! §2.2). The offset is read at release, before any step, and the potential is static, so the
+//! tracer keeps that energy to the leapfrog's error, which oscillates without drifting (Hairer,
+//! Lubich and Wanner 2006, "Geometric Numerical Integration", 2nd ed., §IX.8): its sign cannot
+//! swing with the orbit's phase as ψ's does. ψ's sign fails for eccentric orphans caught near
+//! apocentre:
+//! over three drawn Milky Way galaxies' 839 streams, one stream had 1,244 of its 2,000 tracers on
+//! the other arm's side by ψ, and none more than 1 by the energy. Such a tracer's offsets gave it
+//! the other arm's energy, and with no progenitor's force (above, "The integration") it drifts with
+//! that arm.
 //!
 //! # A pool
 //!
@@ -561,14 +569,16 @@ fn spherical_pericentres(
 }
 
 /// Which Lagrange point a tracer left from (module documentation, "The release"), or which arm of
-/// a tube, which takes a tracer's from the sign of its ψ
-/// ([`TubeTable::arm`](super::TubeTable::arm)).
+/// a tube, which takes a tracer's from the sign of its energy offset at release
+/// ([`Tracer::energy_arm`], [`TubeTable::arm`](super::TubeTable::arm)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Arm {
-    /// The inner point: the tracer gains on the progenitor, so its ψ is positive, but for the few
-    /// that end on the other arm's orbits (module documentation, "The arms").
+    /// The inner point, or the debris more bound than the progenitor: it gains on the progenitor,
+    /// so its ψ is positive, but where the orbit's phase swings it (module documentation, "The
+    /// arms").
     Leading,
-    /// The outer point: the tracer falls behind, so its ψ is negative, but for the same few.
+    /// The outer point, or the debris less bound: it falls behind, so its ψ is negative, but where
+    /// the same swing turns it.
     Trailing,
 }
 
@@ -582,6 +592,7 @@ pub struct Tracer {
     position: GalacticDisplacement,
     velocity: GalacticVelocity,
     psi: Radians,
+    energy_offset_j_kg: f64,
 }
 
 impl Tracer {
@@ -628,9 +639,34 @@ impl Tracer {
         self.psi
     }
 
+    /// Its energy offset at release, J/kg, finite and of either sign: its `½|v|² + Φ` less the
+    /// progenitor's, both at its release boundary, with `v` in the galactic frame and Φ the
+    /// table's, zero at infinity ([`SprayForce::potential_j_kg`]) (module documentation, "The
+    /// arms").
+    #[must_use]
+    pub const fn energy_offset_j_kg(&self) -> f64 {
+        self.energy_offset_j_kg
+    }
+
+    /// The arm its energy offset puts it in, its tube's: [`Arm::Leading`] for a negative offset,
+    /// the debris more bound than the progenitor, and [`Arm::Trailing`] otherwise, a zero of
+    /// either sign included (module documentation, "The arms").
+    #[must_use]
+    pub const fn energy_arm(&self) -> Arm {
+        if self.energy_offset_j_kg < 0.0 {
+            Arm::Leading
+        } else {
+            Arm::Trailing
+        }
+    }
+
     /// A tracer from its parts, for the tube table's tests of synthetic streams.
     #[cfg(test)]
     #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a test-only constructor of every field, one argument each"
+    )]
     pub(crate) const fn from_parts(
         arm: Arm,
         release_step: u32,
@@ -639,6 +675,7 @@ impl Tracer {
         position: GalacticDisplacement,
         velocity: GalacticVelocity,
         psi: Radians,
+        energy_offset_j_kg: f64,
     ) -> Self {
         Self {
             arm,
@@ -648,6 +685,7 @@ impl Tracer {
             position,
             velocity,
             psi,
+            energy_offset_j_kg,
         }
     }
 }
@@ -849,8 +887,9 @@ impl<'a> Spray<'a> {
     ///
     /// # Panics
     ///
-    /// If `index` is not below [`tracer_count`](Self::tracer_count), or if the integration leaves
-    /// a value that is not finite, which no tracer of a valid specification does.
+    /// If `index` is not below [`tracer_count`](Self::tracer_count), or if the energy offset at
+    /// release or the integration leaves a value that is not finite, which no tracer of a valid
+    /// specification does.
     #[must_use]
     pub fn tracer(&self, index: u32) -> Tracer {
         let mut lane = self.launch(index);
@@ -874,8 +913,8 @@ impl<'a> Spray<'a> {
     ///
     /// # Panics
     ///
-    /// If the integration leaves a value that is not finite, which no tracer of a valid
-    /// specification does.
+    /// If the energy offset at release or the integration leaves a value that is not finite,
+    /// which no tracer of a valid specification does.
     #[must_use]
     pub fn tracers(&self) -> Vec<Tracer> {
         let count = self.tracer_count();
@@ -931,11 +970,16 @@ impl<'a> Spray<'a> {
             .expect("a u32 fits a usize on every target the sim builds for, of 32 bits or more");
         let from = self.track[start];
         let body = self.release(&from, release.bound_mass(), arm, index);
+        // Both bodies at the same instant, before the integration's error (module documentation,
+        // "The arms").
+        let energy_offset_j_kg =
+            self.energy_j_kg(body) - self.energy_j_kg((from.position_m, from.velocity_m_s));
         TracerLane {
             index,
             arm,
             release,
             from_swept_rad: from.swept_rad,
+            energy_offset_j_kg,
             walker: Walker {
                 acceleration_m_s2: self.acceleration(body.0),
                 body,
@@ -950,7 +994,7 @@ impl<'a> Spray<'a> {
     ///
     /// # Panics
     ///
-    /// If the integration left a value that is not finite.
+    /// If the energy offset at release or the integration left a value that is not finite.
     #[must_use]
     fn finish(&self, lane: &TracerLane) -> Tracer {
         let steps = self.schedule.step().count();
@@ -961,10 +1005,14 @@ impl<'a> Spray<'a> {
         let psi = lane.angle_rad - (last.swept_rad - lane.from_swept_rad);
         let (position, velocity) = lane.walker.body;
         // P10.T6 sorts the tracers by ψ, and a NaN's sign, which `total_cmp` reads, is not
-        // portable (the sim-determinism skill's "Hazards across targets").
+        // portable (the sim-determinism skill's "Hazards across targets"); a NaN offset would put
+        // its tracer in the trailing arm whatever its energy.
         assert!(
-            position.iter().chain(&velocity).all(|c| c.is_finite()) && psi.is_finite(),
-            "tracer {} left the integration with a value that is not finite",
+            position.iter().chain(&velocity).all(|c| c.is_finite())
+                && psi.is_finite()
+                && lane.energy_offset_j_kg.is_finite(),
+            "tracer {}'s energy offset at release or its integration left a value that is not \
+             finite",
             lane.index
         );
         let release = lane.release;
@@ -979,6 +1027,7 @@ impl<'a> Spray<'a> {
             position: GalacticDisplacement::new(position),
             velocity: GalacticVelocity::new(velocity),
             psi: Radians::new(psi),
+            energy_offset_j_kg: lane.energy_offset_j_kg,
         }
     }
 
@@ -1024,6 +1073,12 @@ impl<'a> Spray<'a> {
             core::array::from_fn(|i| from.position_m[i] + along * outward[i] + up * pole[i]),
             core::array::from_fn(|i| from.velocity_m_s[i] + forward * ahead[i] + lift * pole[i]),
         )
+    }
+
+    /// The energy per unit mass of `body` in the table's potential, `½|v|² + Φ`, J/kg.
+    #[must_use]
+    fn energy_j_kg(&self, (x, v): Body) -> f64 {
+        0.5 * dot(v, v) + self.force.potential_j_kg(&GalacticDisplacement::new(x))
     }
 
     /// The acceleration at `x` (m), m/s²: the table's, the host's alone, as the progenitor's
@@ -1261,6 +1316,8 @@ struct TracerLane {
     release: Release,
     /// The progenitor's swept angle at the release.
     from_swept_rad: f64,
+    /// Its energy offset at release, J/kg ([`Tracer::energy_offset_j_kg`]).
+    energy_offset_j_kg: f64,
     walker: Walker,
     /// The angle the tracer has swept since its release.
     angle_rad: f64,

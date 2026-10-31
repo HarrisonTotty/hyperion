@@ -328,8 +328,8 @@ mod milky_way {
 
     /// The spray's checks on the Milky Way fixture, each below on one build of its tables, in
     /// turn: the golden file first, so that a failing check does not keep `just bless` from
-    /// writing it, then the table against its own gradient and the leapfrog's field, and the
-    /// tracers' purity and weights. Here rather than in an integration test, so that the sim's
+    /// writing it, then the table against its own gradient and the leapfrog's field, the tracers'
+    /// purity and weights, their offsets' dispersions and their energies at release. Here rather than in an integration test, so that the sim's
     /// fast suite compares the golden on `wasm32-wasip1` too, where `global_list::testing`'s
     /// feature is off.
     #[test]
@@ -340,6 +340,7 @@ mod milky_way {
         tracers_are_pure_functions_of_their_index_and_weigh_the_tube();
         the_lanes_give_every_tracer_s_bits_alone();
         the_drawn_offsets_keep_their_dispersions_within_the_cut();
+        the_energy_at_release_names_each_tracer_s_arm();
     }
 
     /// The bits of each test stream's specification and of a spray of four tracers an arm, and of
@@ -390,6 +391,7 @@ mod milky_way {
                     writer.f64(&format!("{label}.velocity.{axis}"), u);
                 }
                 writer.f64(&format!("{label}.psi"), t.psi().value());
+                writer.f64(&format!("{label}.energy_offset"), t.energy_offset_j_kg());
             }
         }
         golden!("galaxy/global_list/spray", writer.as_str());
@@ -615,5 +617,45 @@ mod milky_way {
                 assert_eq!(pair[0].release_step(), pair[1].release_step());
             }
         }
+    }
+
+    /// P10.T6.a (main's ruling of 2026-10-30): every tracer's energy offset at release is finite,
+    /// and on the test streams it has its Lagrange point's sign, below zero for the leading arm's.
+    /// A release on the epoch's boundary leaves its two tracers at ψ of +0.0, which by ψ's sign
+    /// would put both in one arm, but the energy puts them in their own (module documentation, "The
+    /// arms"): `pal5_like` stripped over 20 Myr, a few hundred steps, whose last of 1,000 releases
+    /// lies within a step's hundredth of the epoch.
+    fn the_energy_at_release_names_each_tracer_s_arm() {
+        for (name, spec) in test_streams() {
+            for t in spray(SEED, &spec, 6).tracers() {
+                assert!(t.energy_offset_j_kg().is_finite(), "{name}: {t:?}");
+                assert_eq!(t.energy_arm(), t.arm(), "{name}: {t:?}");
+            }
+        }
+        let spec = StreamSpec {
+            stripping_time: Years::new(2e7),
+            ..pal5_like(&fixture().tables)
+        };
+        let spray = spray(SEED, &spec, 1_000);
+        let steps = spray.schedule().step().count();
+        assert!(steps < 1_000, "{steps} steps");
+        let last = spray.schedule().releases()[999];
+        assert_eq!(
+            last.step(),
+            steps,
+            "the last release is on the epoch's boundary"
+        );
+        let pair = [spray.tracer(1_998), spray.tracer(1_999)];
+        for t in pair {
+            // `total_cmp` tells +0.0 from −0.0.
+            assert_eq!(
+                t.psi().value().total_cmp(&0.0),
+                core::cmp::Ordering::Equal,
+                "{t:?}"
+            );
+            assert!(t.energy_offset_j_kg().is_finite(), "{t:?}");
+        }
+        assert_eq!(pair.map(|t| t.arm()), [Arm::Leading, Arm::Trailing]);
+        assert_eq!(pair.map(|t| t.energy_arm()), [Arm::Leading, Arm::Trailing]);
     }
 }

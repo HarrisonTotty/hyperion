@@ -174,14 +174,16 @@ fn departure(spray: &Spray<'_>, spec: &StreamSpec, tracers: &[Tracer]) -> f64 {
 }
 
 /// P10.T5.b on the three test streams at the generator's 2,000 tracers: every tracer of
-/// `pal5_like` and `gd1_like` is on its arm's side, ψ positive leading and negative trailing; ψ
-/// grows with the time since release on average, in each arm of all three; the weights sum to
-/// the tube's mass; and `pal5_like`'s mean track departs from its progenitor's orbit by more than
-/// six tidal radii within one wrap, the brainstorm's reason for measuring the track.
+/// `pal5_like` and `gd1_like` is on its arm's side, ψ positive leading and negative trailing, and
+/// has its arm's energy at release (P10.T6.a); ψ grows with the time since release on average, in
+/// each arm of all three; the weights sum to the tube's mass; and `pal5_like`'s mean track departs
+/// from its progenitor's orbit by more than six tidal radii within one wrap, the brainstorm's
+/// reason for measuring the track.
 ///
-/// One of `sagittarius_like`'s 2,000 tracers ends on the other side (v23, x86-64), pinned at 10;
-/// with the progenitor's Plummer sphere, which main's ruling of 2026-10-29 dropped, 27 did
-/// (P10.T5.b, as built). The tracks depart from the orbits by 35.3, 11.2 and 9.4 tidal radii (v23,
+/// One of `sagittarius_like`'s 2,000 tracers ends on the other side (v23, x86-64), pinned at 10,
+/// and the same tracer has the other arm's energy (v24, x86-64), pinned at 2, the ruling's bound;
+/// with the progenitor's Plummer sphere, which main's ruling of 2026-10-29 dropped, 27 were on
+/// the other side (P10.T5.b, as built). The tracks depart from the orbits by 35.3, 11.2 and 9.4 tidal radii (v23,
 /// x86-64).
 #[test]
 #[ignore = "slow: sprays three test streams of 2,000 tracers, 20,000 steps for the longest"]
@@ -195,10 +197,16 @@ fn the_test_streams_arms_lead_and_trail_and_pal5_s_track_leaves_its_orbit() {
             "{name}: weights {total}"
         );
         let astray = tracers.iter().filter(|t| !on_its_side(t)).count();
+        let strays = tracers.iter().filter(|t| !keeps_its_energy(t)).count();
         let allowed = if name == "sagittarius" { 10 } else { 0 };
         assert!(
             astray <= allowed,
             "{name}: {astray} tracers on the other arm's side"
+        );
+        // At most 2 of 2,000 a stream (main's ruling of 2026-10-30).
+        assert!(
+            strays <= allowed.min(2),
+            "{name}: {strays} tracers with the other arm's energy"
         );
         for arm in [Arm::Leading, Arm::Trailing] {
             let means = mean_gain_by_release(&tracers, arm);
@@ -209,7 +217,8 @@ fn the_test_streams_arms_lead_and_trail_and_pal5_s_track_leaves_its_orbit() {
         }
         let departs = departure(&spray, &spec, &tracers);
         eprintln!(
-            "{name}: {astray} astray; track departs by {departs:.1} tidal radii; σ {:.3}",
+            "{name}: {astray} astray by ψ, {strays} by the energy; track departs by {departs:.1} \
+             tidal radii; σ {:.3}",
             spray.in_plane_spread()
         );
         if name == "pal5" {
@@ -221,16 +230,25 @@ fn the_test_streams_arms_lead_and_trail_and_pal5_s_track_leaves_its_orbit() {
     }
 }
 
-/// A drawn Milky Way galaxy's streams at the step counts' quantiles (0, 0.1, 0.5, 0.9 and the
-/// most), and its dwarfs': few tracers end on the other arm's side, at most 0.5 % of a stream's
-/// against plan 10's "every" (v23, x86-64: none of 2,000 for the five orphans these quantiles
-/// drew and for the one dwarf). With the progenitor's Plummer sphere, which main's ruling of
-/// 2026-10-29 dropped, they had 13, 0, 24, 20, 13 and 32, and up to 2.5 % was allowed (P10.T5.b,
-/// as built).
+/// Whether `tracer`'s energy at release is its Lagrange point's arm's, the arm its tube puts it in
+/// (`spray`'s "The arms").
+fn keeps_its_energy(tracer: &Tracer) -> bool {
+    tracer.energy_arm() == tracer.arm()
+}
+
+/// P10.T6.a (main's ruling of 2026-10-30) on a drawn Milky Way galaxy's streams: those at the step
+/// counts' quantiles (0, 0.1, 0.5, 0.9 and the most), its dwarfs, and up to three of its clouds,
+/// the orphans on eccentric orbits (`e ≥ 0.85`) caught near apocentre (at 0.85 of it or more at the
+/// epoch) and stripped over four radial periods or fewer, the fewest periods first. A tracer's
+/// energy at release is its Lagrange point's arm's for all but at most 2 of a stream's 2,000
+/// (0.1 %). ψ's sign, the arms' split before the ruling, is counted and printed, not asserted: it
+/// fails on the clouds. Measured at v24, x86-64: no tracer of any sampled stream has the other
+/// arm's energy (streams 19, 55, 221, 142 and 153 at the quantiles, the dwarf 305, and the clouds
+/// 153, 183 and 244), where ψ's sign puts 0, 9, 0, 0, 1,244, 0, 424 and 161 on the other side.
 #[test]
-#[ignore = "slow: builds a Milky Way galaxy's debris and sprays six of its streams"]
-fn a_drawn_galaxy_s_streams_keep_nearly_every_tracer_on_its_arm_s_side() {
-    use hyperion_sim::galaxy::global_list::MassLoss;
+#[ignore = "slow: builds a Milky Way galaxy's debris and sprays up to nine of its streams"]
+fn a_drawn_galaxy_s_tracers_keep_their_lagrange_point_s_energy() {
+    use hyperion_sim::galaxy::global_list::{MassLoss, StreamOrigin};
     let galaxy = Galaxy::from_params(
         Seed::new(0x0a10_3000_0000_0000),
         GalaxyParams::milky_way_like(),
@@ -266,21 +284,46 @@ fn a_drawn_galaxy_s_streams_keep_nearly_every_tracer_on_its_arm_s_side() {
             .filter(|(_, s)| matches!(s.mass_loss(), MassLoss::Pulsed { .. }))
             .map(|(k, _)| k),
     );
+    let mut clouds: Vec<(f64, usize)> = debris
+        .streams()
+        .iter()
+        .enumerate()
+        .filter_map(|(k, s)| {
+            let orbit = s.orbit();
+            let [x, y, z] = s.position().metres().map(|c| c / METRES_PER_LIGHT_YEAR);
+            let radius = (x * x + y * y + z * z).sqrt();
+            let periods = s.stripping_time().value() / orbit.radial_period().value();
+            (s.origin() == StreamOrigin::Orphan
+                && orbit.eccentricity() >= 0.85
+                && radius >= 0.85 * orbit.apocentre().value()
+                && periods <= 4.0)
+                .then_some((periods, k))
+        })
+        .collect();
+    clouds.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    assert!(!clouds.is_empty(), "the fixture's galaxy holds a cloud");
+    for &(_, k) in clouds.iter().take(3) {
+        if !chosen.contains(&k) {
+            chosen.push(k);
+        }
+    }
     for k in chosen {
         let spec = &debris.streams()[k];
         let spray = Spray::new(galaxy.seed(), &force, tables, spec, &SprayParams::default())
             .expect("a finite stripping time");
         let tracers = spray.tracers();
         let astray = tracers.iter().filter(|t| !on_its_side(t)).count();
+        let strays = tracers.iter().filter(|t| !keeps_its_energy(t)).count();
         eprintln!(
-            "stream {k} ({:?}), {} steps: {astray} of {} on the other side",
+            "stream {k} ({:?}), {} steps: {strays} of {} with the other arm's energy, {astray} on \
+             the other side by ψ",
             spec.origin(),
             spray.schedule().step().count(),
             tracers.len()
         );
         assert!(
-            astray * 200 <= tracers.len(),
-            "stream {k}: {astray} of {} on the other arm's side",
+            strays * 1_000 <= tracers.len(),
+            "stream {k}: {strays} of {} with the other arm's energy",
             tracers.len()
         );
     }

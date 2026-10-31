@@ -235,7 +235,8 @@ const MASS: f64 = 3_000.0;
 
 /// `per_arm` tracers from each Lagrange point of a stream on a circle of `radius` ly in the
 /// galactic plane, one radian an arm, 100 ly wide, at 220 km/s with dispersions of 3, 1 and 0.5
-/// km/s along, outward and up, weighing [`MASS`] in all (as the tube's own tests' stream).
+/// km/s along, outward and up, weighing [`MASS`] in all, each with an energy offset of 10⁹ J/kg of
+/// its arm's sign (as the tube's own tests' stream).
 fn circle(per_arm: u32, radius: f64) -> Vec<crate::galaxy::global_list::spray::Tracer> {
     use crate::coords::GalacticDisplacement;
     use crate::galaxy::global_list::spray::{Arm, Tracer};
@@ -282,6 +283,7 @@ fn circle(per_arm: u32, radius: f64) -> Vec<crate::galaxy::global_list::spray::T
                 GalacticDisplacement::new(position),
                 GalacticVelocity::new(velocity),
                 Radians::new(psi),
+                if arm == Arm::Trailing { 1e9 } else { -1e9 },
             )
         })
         .collect()

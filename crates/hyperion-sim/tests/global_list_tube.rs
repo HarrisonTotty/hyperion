@@ -123,14 +123,14 @@ fn path(points: &[[f64; 3]]) -> f64 {
     points.windows(2).map(|w| norm(sub(w[1], w[0]))).sum()
 }
 
-/// The tracers of each arm by ψ's sign, trailing then leading, in the order of increasing ψ, as
-/// the table splits them.
-fn by_sign(tracers: &[Tracer]) -> [Vec<&Tracer>; 2] {
-    let mut along: Vec<&Tracer> = tracers.iter().collect();
-    along.sort_by(|a, b| a.psi().value().total_cmp(&b.psi().value()));
-    let split = along.partition_point(|t| t.psi().value() < 0.0);
-    let leading = along.split_off(split);
-    [along, leading]
+/// The tracers of each arm by the energy's sign at release, trailing then leading, each in the
+/// order of increasing ψ, as the table splits and orders them.
+fn by_energy(tracers: &[Tracer]) -> [Vec<&Tracer>; 2] {
+    [Arm::Trailing, Arm::Leading].map(|arm| {
+        let mut on: Vec<&Tracer> = tracers.iter().filter(|t| t.energy_arm() == arm).collect();
+        on.sort_by(|a, b| a.psi().value().total_cmp(&b.psi().value()));
+        on
+    })
 }
 
 /// The ruling's length check (main's ruling of 2026-10-29): the tracers' own path, through the
@@ -143,7 +143,7 @@ fn lengths(tracers: &[Tracer], table: &TubeTable) -> [f64; 2] {
     let mut behind = 0.0;
     let mut centroids = Vec::new();
     let mut middles = Vec::new();
-    for arm in by_sign(tracers) {
+    for arm in by_energy(tracers) {
         for bin in arm.chunks(48) {
             let mass: f64 = bin.iter().map(|t| t.weight().value()).sum();
             centroids.push(core::array::from_fn(|axis| {
@@ -172,9 +172,15 @@ fn lengths(tracers: &[Tracer], table: &TubeTable) -> [f64; 2] {
     [path(&centroids), path(&knots)]
 }
 
-/// The along coordinate whose ψ is `psi`, by bisection of the table's ψ(u), which never falls.
-fn along(table: &TubeTable, psi: f64) -> f64 {
-    let (mut low, mut high) = (0.0, 1.0);
+/// The along coordinate in `arm` whose ψ is `psi`, by bisection of the table's ψ(u), which never
+/// falls within an arm.
+fn along(table: &TubeTable, arm: Arm, psi: f64) -> f64 {
+    let root = table.arm(Arm::Trailing).mass().value() / table.mass().value();
+    let (mut low, mut high) = match arm {
+        // At `root` itself the table reads the leading arm.
+        Arm::Trailing => (0.0, root * (1.0 - 1e-12)),
+        Arm::Leading => (root, 1.0),
+    };
     for _ in 0..60 {
         let middle = f64::midpoint(low, high);
         if table.psi(middle).value() < psi {
@@ -186,10 +192,22 @@ fn along(table: &TubeTable, psi: f64) -> f64 {
     f64::midpoint(low, high)
 }
 
-/// A tracer's coordinates in the tube at its ψ: its offsets from the centre line there along the
-/// normal and the binormal, in local widths, and along the tangent, in light-years.
+/// A tracer's coordinates in the tube at its ψ in its energy arm: its offsets from the centre line
+/// there along the normal and the binormal, in local widths, and along the tangent, in
+/// light-years.
+///
+/// # Panics
+///
+/// If the arm's ψ(u) does not reach the tracer's ψ, which an arm's knots, from its least ψ to its
+/// greatest, always do.
 fn tube_coordinates(table: &TubeTable, tracer: &Tracer) -> [f64; 3] {
-    let u = along(table, tracer.psi().value());
+    let (arm, psi) = (tracer.energy_arm(), tracer.psi().value());
+    let u = along(table, arm, psi);
+    let found = table.psi(u).value();
+    assert!(
+        (found - psi).abs() <= 1e-9 * psi.abs().max(1.0),
+        "ψ {psi} found at {found} in the {arm:?} arm"
+    );
     let centre = ly(&table.locate(u, 0.0, 0.0));
     let x = tracer
         .position()
@@ -361,7 +379,7 @@ fn an_orphan_s_tube_holds_its_cluster_s_gap() {
         let knots: Vec<&TubeKnot> = table.knots().collect();
         let span = knots[511].psi().value() - knots[0].psi().value();
         let half = 0.025 * span;
-        let share = along(table, half) - along(table, -half);
+        let share = along(table, Arm::Leading, half) - along(table, Arm::Trailing, -half);
         eprintln!(
             "{name}: |ψ| < {half:.3} holds {share:.4} of the tube against 0.05 for an even one"
         );
@@ -489,15 +507,18 @@ fn a_dwarf_s_pulses_pile_up_at_apocentre() {
     );
 }
 
-/// Every tracer whose Lagrange point's arm is not its ψ's lies inside the other arm's tube at
-/// its ψ (main's ruling of 2026-10-29): within the tube's cut at four widths there, or within two
-/// of the stream's tidal radii of the progenitor at the epoch, where the arms' roots meet and
-/// Fardal et al.'s releases start, at a mean of two tidal radii out (main's ruling of
-/// 2026-10-30). The strays weigh at most 0.5 % of their tube. Checked on `sagittarius_like` under
-/// the tests' seed and eight more, and on the globular streams (they have none). Measured at v23,
-/// x86-64: two strays in the nine sprays, both at the root: under the tests' seed at ψ 0.038,
+/// Every tracer whose energy at release is not its Lagrange point's arm's lies inside its energy
+/// arm's tube at its ψ (main's rulings of 2026-10-29 and 2026-10-30, P10.T6.a): within the tube's
+/// cut at four widths there, or within two of the stream's tidal radii of the progenitor at the
+/// epoch, where the arms' roots meet and Fardal et al.'s releases start, at a mean of two tidal
+/// radii out (main's ruling of 2026-10-30). The strays weigh at most 0.5 % of their tube. Checked
+/// on `sagittarius_like` under the tests' seed and eight more, and on the globular streams (they
+/// have none); the strays by ψ's sign, the split before, are counted beside them. Measured at
+/// v24, x86-64: four strays in the nine sprays, all at the root. Under the tests' seed at ψ 0.038,
 /// 2.16 and 4.78 widths out, 0.80 tidal radii from the progenitor, and under seed 7 at ψ 0.052,
-/// 3.82 and 4.53 widths out, 0.88 tidal radii from it.
+/// 3.82 and 4.53 widths out, 0.88 tidal radii from it, each the one stray by ψ's sign too; under
+/// seeds 5 and 6 at ψ −0.043 and −0.042, within 1.7 widths, 0.66 and 0.65 tidal radii from it,
+/// which ψ's sign keeps on their Lagrange point's side.
 #[test]
 #[ignore = "slow: sprays sagittarius_like under eight seeds"]
 fn the_strays_lie_inside_the_other_arm_s_tube() {
@@ -521,19 +542,27 @@ fn the_strays_lie_inside_the_other_arm_s_tube() {
         let progenitor = spec.position().metres().map(|c| c / METRES_PER_LIGHT_YEAR);
         let tidal_radius = spec.tidal_radius().value();
         let (mut astray, mut weight) = (Vec::new(), 0.0);
+        let (mut by_psi, mut both) = (0, 0);
         for t in tracers {
-            let by_sign = if t.psi().value() >= 0.0 {
+            // ψ's sign, the arms' split before main's ruling of 2026-10-30.
+            let psi_arm = if t.psi().value() >= 0.0 {
                 Arm::Leading
             } else {
                 Arm::Trailing
             };
-            if by_sign != t.arm() {
+            by_psi += usize::from(psi_arm != t.arm());
+            if t.energy_arm() != t.arm() {
+                both += usize::from(psi_arm != t.arm());
                 let x = t.position().metres().map(|c| c / METRES_PER_LIGHT_YEAR);
                 let out = norm(sub(x, progenitor)) / tidal_radius;
                 astray.push((t.psi().value(), tube_coordinates(table, t), out));
                 weight += t.weight().value();
             }
         }
+        eprintln!(
+            "{name}: {} strays by the energy, {by_psi} by ψ's sign, {both} by both",
+            astray.len()
+        );
         for (psi, [a, b, along], out) in &astray {
             eprintln!(
                 "{name}: stray at ψ {psi:.4}, {a:.2} and {b:.2} widths out and {along:.0} ly \

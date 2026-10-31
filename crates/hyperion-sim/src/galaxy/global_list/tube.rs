@@ -9,28 +9,32 @@
 //!
 //! # The arms
 //!
-//! A tracer belongs to the arm of its ψ's sign, the angle it gained on the progenitor: the
-//! leading arm for ψ ≥ 0 (a ψ of zero, either sign, included) and the trailing arm for ψ < 0
-//! (main's ruling of 2026-10-29). A few tracers leave one Lagrange point and end on the other
-//! arm's orbits ([`spray`], "The arms"); split by their release point, a knot's
-//! kernel would average positions far apart at the arm's root. Split by sign, each falls among the
-//! other arm's tracers at its ψ and keeps its weight, so the arms' masses differ from half the
-//! tube's by those tracers' weight. Where the tracers have hardly drifted, as for an orphan on an
-//! eccentric orbit near its apocentre, ψ's swing through the orbit hides the sign of the drift and
-//! the split fails, a finding for the owner (plan 10, "P10.T6.a as built").
+//! A tracer belongs to the arm of its energy offset's sign at release
+//! ([`Tracer::energy_arm`](spray::Tracer::energy_arm)): the leading arm for an offset below zero,
+//! the debris more bound than the progenitor, and the trailing arm otherwise, a zero of either
+//! sign included (main's ruling of 2026-10-30, after ψ's sign of 2026-10-29). A few tracers leave
+//! one Lagrange point with the other arm's energy and drift with that arm ([`spray`], "The
+//! arms"); split by their release point, a knot's kernel would average positions far apart at the
+//! arm's root. Split by energy, each falls among the other arm's tracers at its ψ and keeps its
+//! weight, so the arms' masses differ from half the tube's by those tracers' weight. ψ's sign
+//! failed where the tracers have hardly drifted, as for an orphan on an eccentric orbit near its
+//! apocentre, whose ψ swings through the orbit and hides the sign of the drift; the energy's sign
+//! does not swing. Such a stream is a cloud, not a tube, whichever the split, a recorded limit
+//! (plan 10, "P10.T6.a's arms by energy, as built").
 //!
 //! # The reduction
 //!
-//! The tube is ordered along by ψ, from the trailing arm's far end through the progenitor to the
-//! leading arm's, the order of the along coordinate `u = Λ(ψ) ÷ Λ_total` (plan 10, Design note 7),
-//! so each arm's knots run in that order too: the trailing arm's from its tip to its root, the
-//! leading arm's from its root to its tip. Within an arm (Design note 6):
+//! The tube is ordered along by arm, the trailing first, and within an arm by ψ, from the trailing
+//! arm's far end through the progenitor to the leading arm's, the order of the along coordinate
+//! `u = Λ(ψ) ÷ Λ_total` (plan 10, Design note 7), so each arm's knots run in that order too: the
+//! trailing arm's from its tip to its root, the leading arm's from its root to its tip. Where every
+//! tracer's ψ has its energy arm's sign, that is the tube's order by ψ alone; in a cloud an arm's ψ
+//! may cross zero, and ψ may step back between the arms' roots. Within an arm (Design note 6):
 //!
 //! - **Knots** sit at [`KNOTS_PER_ARM`] equal steps of the arm's cumulative weight, the first and
 //!   last at its ends, each at the fractional rank where the cumulative weight, counted to each
 //!   tracer's middle, reaches its step. A knot's ψ is the tracers' own at that rank, linear between
-//!   the two about it: the inverse of the tracers' Λ(ψ), so the knots keep their order and their
-//!   arm's sign.
+//!   the two about it: the inverse of the tracers' Λ(ψ), so the knots keep their arm's order.
 //! - **Every other knot quantity is a Gaussian-kernel average** over the [`KERNEL_TRACERS`]
 //!   tracers nearest the knot's rank, each weighted by its own weight times `exp(−½ (Δ ÷ σ)²)`,
 //!   `Δ` its rank's distance from the knot's and `σ` [`KERNEL_WIDTH`] ranks.
@@ -93,8 +97,9 @@
 //!
 //! with `σ` [`GAP_NOISE_AMPLITUDE`] and `ψ` the cell's middle's, [`TubeTable::psi`] at the middle's
 //! share of the mass. `g` is one-dimensional lattice noise in ψ. Its nodes lie
-//! [`CELLS_PER_GAP_NODE`] mean cells apart in ψ, `8 (ψ_max − ψ_min) ÷ cells` from the trailing
-//! arm's tip to the leading arm's, so that no wavelength is shorter than eight mean cells. "Eight
+//! [`CELLS_PER_GAP_NODE`] mean cells apart in ψ, `8 (ψ_max − ψ_min) ÷ cells` from the least of the
+//! knots' ψ to the greatest, the trailing arm's tip and the leading arm's where every tracer's ψ
+//! has its arm's sign, so that no wavelength is shorter than eight mean cells. "Eight
 //! cells" has to be read in ψ's mean, since the cells are equal in mass, not in ψ: where the
 //! tracers lie sparse, at the tips, a cell is wider than the mean and a node spacing covers
 //! fewer. Node `k` holds one standard normal, words `2k` and `2k + 1` of the
@@ -247,8 +252,8 @@ const MAX_PIECES: u32 = 32;
 pub enum BuildTubeTableError {
     /// The spray could not be made ([`spray::spray`]).
     Spray(BuildLeapfrogError),
-    /// An arm, by ψ's sign, holds fewer tracers than a knot's kernel averages,
-    /// [`KERNEL_TRACERS`].
+    /// An arm, by the energy's sign ([`Tracer::energy_arm`](spray::Tracer::energy_arm)), holds
+    /// fewer tracers than a knot's kernel averages, [`KERNEL_TRACERS`].
     TooFewTracers {
         /// The arm.
         arm: Arm,
@@ -370,7 +375,8 @@ impl TubeArm {
         &self.knots
     }
 
-    /// The tracers it was reduced from, those of its ψ's sign.
+    /// The tracers it was reduced from, those of its energy arm
+    /// ([`Tracer::energy_arm`](spray::Tracer::energy_arm)).
     #[must_use]
     pub const fn tracers(&self) -> u32 {
         self.tracers
@@ -461,12 +467,12 @@ impl TubeTable {
     ///
     /// The tracers are [`Spray::tracer`](spray::Spray::tracer)'s, as a pool gathers them by index
     /// (main's ruling of 2026-10-29, after ruling 146.3), and the reduction is the module
-    /// documentation's. Tracers of equal ψ keep their order, so the table is a pure function of
-    /// the seed, the mass, the stream's number and the list.
+    /// documentation's. Tracers of one arm and equal ψ keep their order, so the table is a pure
+    /// function of the seed, the mass, the stream's number and the list.
     ///
     /// # Errors
     ///
-    /// [`BuildTubeTableError::TooFewTracers`] if either arm, by ψ's sign, holds fewer than
+    /// [`BuildTubeTableError::TooFewTracers`] if either arm, by the energy's sign, holds fewer than
     /// [`KERNEL_TRACERS`] tracers, which none of a drawn Milky Way galaxy's 309 streams does at
     /// the generator's settings (P10.T6.a, as built).
     ///
@@ -481,13 +487,14 @@ impl TubeTable {
         spec: &StreamSpec,
         tracers: &[Tracer],
     ) -> Result<Self, BuildTubeTableError> {
-        let mut along: Vec<&Tracer> = tracers.iter().collect();
-        // Stable, so tracers of equal ψ keep their index order. A tracer's ψ is finite
-        // (`Spray::tracer`), so `total_cmp` reads no NaN's sign.
-        along.sort_by(|a, b| a.psi().value().total_cmp(&b.psi().value()));
-        // −0.0 sorts before +0.0 and compares equal to zero: both are the leading arm's.
-        let split = along.partition_point(|t| t.psi().value() < 0.0);
-        let (trailing, leading) = along.split_at(split);
+        let (mut trailing, mut leading): (Vec<&Tracer>, Vec<&Tracer>) = tracers
+            .iter()
+            .partition(|t| t.energy_arm() == Arm::Trailing);
+        for arm in [&mut trailing, &mut leading] {
+            // Stable, so tracers of equal ψ keep their index order. A tracer's ψ is finite
+            // (`Spray::tracer`), so `total_cmp` reads no NaN's sign.
+            arm.sort_by(|a, b| a.psi().value().total_cmp(&b.psi().value()));
+        }
         assert!(
             tracers
                 .iter()
@@ -505,10 +512,10 @@ impl TubeTable {
             }
         };
         let counts = [
-            count(Arm::Trailing, trailing)?,
-            count(Arm::Leading, leading)?,
+            count(Arm::Trailing, &trailing)?,
+            count(Arm::Leading, &leading)?,
         ];
-        let reduced = [Reduced::new(trailing), Reduced::new(leading)];
+        let reduced = [Reduced::new(&trailing), Reduced::new(&leading)];
         let frames = frames(&reduced);
         // Λ from the trailing arm's tip: the leading arm's starts at the trailing arm's mass.
         let bases = [0.0, reduced[0].mass];
@@ -587,16 +594,32 @@ impl TubeTable {
         )
     }
 
+    /// The gap noise's span of ψ: the least and the greatest of the knots' ψ, each arm's knots
+    /// being in order of ψ (module documentation, "Gaps").
+    #[must_use]
+    fn psi_span(&self) -> [Radians; 2] {
+        let ends = |arm: &TubeArm| {
+            let first = arm.knots.first().expect("an arm holds KNOTS_PER_ARM knots");
+            let last = arm.knots.last().expect("an arm holds KNOTS_PER_ARM knots");
+            [first.psi.value(), last.psi.value()]
+        };
+        let ([t0, t1], [l0, l1]) = (ends(&self.arms[0]), ends(&self.arms[1]));
+        // `<` rather than `f64::min` or `max`, whose choice between zeros of either sign is not
+        // portable (the sim-determinism skill's "Hazards across targets").
+        let low = if l0 < t0 { l0 } else { t0 };
+        let high = if t1 < l1 { l1 } else { t1 };
+        [Radians::new(low), Radians::new(high)]
+    }
+
     /// `exp(σ g − σ² ÷ 2)` at along cell `cell`'s middle, before it is divided by its mean over
     /// the cells, with node normals read from `nodes` (module documentation, "Gaps").
     #[must_use]
     fn undivided_noise(&self, nodes: &mut Stream, cell: u32) -> f64 {
         let cells = f64::from(self.along_cells);
         let psi = self.psi((f64::from(cell) + 0.5) / cells).value();
-        let low = self.arms[0].knots[0].psi.value();
-        let high = self.arms[1].knots[self.arms[1].knots.len() - 1].psi.value();
-        // The trailing arm's tip lies at a negative ψ and the leading arm's at zero or more, so
-        // the span is positive.
+        // The trailing arm's tip lies at the least ψ and the leading arm's at the greatest where
+        // every tracer's ψ has its arm's sign; in any case the span is positive.
+        let [low, high] = self.psi_span().map(Radians::value);
         let spacing = f64::from(CELLS_PER_GAP_NODE) * (high - low) / cells;
         let intervals = self.along_cells / CELLS_PER_GAP_NODE;
         let t = ((psi - low) / spacing).clamp(0.0, f64::from(intervals));
@@ -617,7 +640,7 @@ impl TubeTable {
         math::exp(GAP_NOISE_AMPLITUDE * g - 0.5 * GAP_NOISE_AMPLITUDE * GAP_NOISE_AMPLITUDE)
     }
 
-    /// The arm of ψ's sign (module documentation, "The arms").
+    /// The arm of the energy's sign (module documentation, "The arms").
     #[must_use]
     pub const fn arm(&self, arm: Arm) -> &TubeArm {
         match arm {
@@ -733,7 +756,9 @@ impl TubeTable {
         })
     }
 
-    /// ψ at along coordinate `u`, the inverse of `Λ(ψ) ÷ Λ_total`, linear between knots.
+    /// ψ at along coordinate `u`, the inverse of `Λ(ψ) ÷ Λ_total` within each arm, linear between
+    /// knots: in a cloud ψ may step back between the arms' roots (module documentation, "The
+    /// reduction").
     ///
     /// `u` is clamped to `[0, 1]`.
     ///
@@ -1286,7 +1311,7 @@ impl<'a> Reduced<'a> {
                     }
                 }
                 // ψ at the rank itself, between the two tracers about it: the inverse of the
-                // tracers' own Λ(ψ), which keeps the knots in order and on their arm's side.
+                // tracers' own Λ(ψ), which keeps the knots in their arm's order of ψ.
                 let below = rank.floor();
                 #[expect(
                     clippy::cast_possible_truncation,
