@@ -227,6 +227,27 @@ impl DelayTimeDistribution {
         Self::cumulative_per_solar_mass(delay) / YIELD_PER_SOLAR_MASS
     }
 
+    /// The bytes the distribution owns on the heap: its components' and their ages', and its
+    /// tables of lifetimes.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.components.capacity() * size_of::<ComponentRate>()
+            + self
+                .components
+                .iter()
+                .map(|component| component.ages.heap_bytes())
+                .sum::<usize>()
+            + [
+                &self.ln_mass,
+                &self.ln_lifetime,
+                &self.ln_lifetime_rising,
+                &self.ln_mass_falling,
+            ]
+            .iter()
+            .map(|table| table.capacity() * size_of::<f64>())
+            .sum::<usize>()
+    }
+
     /// The distribution over `galaxy`'s components.
     #[must_use]
     pub fn from_galaxy(galaxy: &Galaxy) -> Self {
@@ -972,6 +993,30 @@ mod tests {
 
     fn milky_way() -> Galaxy {
         Galaxy::from_params(Seed::new(0x0918_0001), GalaxyParams::milky_way_like()).unwrap()
+    }
+
+    /// Once read, the galaxy keeps its field's distribution: a fresh build of
+    /// [`DelayTimeDistribution::of_field`], bit for bit, the same at every read and in every Type Ia
+    /// process, and counted in the galaxy's `heap_bytes`. The galaxy's equality does not depend on
+    /// whether it has been read.
+    #[test]
+    fn the_galaxy_keeps_its_field_s_distribution() {
+        use std::sync::Arc;
+
+        use super::process::TypeIaProcess;
+
+        let galaxy = milky_way();
+        let unread = galaxy.heap_bytes();
+        let kept = Arc::clone(galaxy.type_ia_delays());
+        assert_eq!(*kept, DelayTimeDistribution::of_field(&galaxy));
+        assert!(Arc::ptr_eq(&kept, galaxy.type_ia_delays()));
+        assert!(kept.heap_bytes() > 0);
+        assert_eq!(
+            galaxy.heap_bytes(),
+            unread + size_of::<DelayTimeDistribution>() + kept.heap_bytes()
+        );
+        assert_eq!(TypeIaProcess::new(&galaxy).delays(), &*kept);
+        assert_eq!(galaxy, milky_way());
     }
 
     fn interval() -> (UniverseTime, UniverseTime) {

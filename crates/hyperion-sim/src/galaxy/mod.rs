@@ -47,9 +47,10 @@ pub mod substellar;
 
 use std::error::Error;
 use std::fmt;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use self::ages::FieldShareRules;
+use self::catalogue_classes::type_ia::DelayTimeDistribution;
 use self::displaced::site::CarveOutRules;
 use self::fates::{CompanionMasses, fates_for};
 use self::features::centre::{BuildCentreError, CentreModel};
@@ -226,6 +227,7 @@ pub struct Galaxy {
     centre: CentreModelCell,
     centre_potential: CentrePotentialCell,
     companions: CompanionsCell,
+    type_ia_delays: TypeIaDelaysCell,
     /// The field's share of each component's budget, from generator version 26 (P09.T2.c); none
     /// under the held arm, where the field is the budget.
     field_share: Option<Box<FieldShare>>,
@@ -432,6 +434,7 @@ impl Galaxy {
             centre: CentreModelCell::default(),
             centre_potential: CentrePotentialCell::default(),
             companions: CompanionsCell::default(),
+            type_ia_delays: TypeIaDelaysCell::default(),
             field_share,
             layer_d_kept: None,
             rules,
@@ -565,6 +568,21 @@ impl Galaxy {
                 fates_for(Population::OldThinDisc),
             )
         })
+    }
+
+    /// The field's Type Ia delay-time distribution ([`DelayTimeDistribution`] over the field's
+    /// systems and ages), which the Type Ia class reads (plan 09, P09.T34.a).
+    ///
+    /// It is built when first read, in some 31 ms (release, pod, 16 vCPU, 2026-10-31), and kept,
+    /// as [`centre_motion`](Self::centre_motion) is: a class process built for every catalogue
+    /// ID resolved built it twice each time. It is a pure function of the galaxy's fields and
+    /// ages, so the galaxy's equality and its `Debug` text do not depend on whether it has been
+    /// read.
+    #[must_use]
+    pub(crate) fn type_ia_delays(&self) -> &Arc<DelayTimeDistribution> {
+        self.type_ia_delays
+            .0
+            .get_or_init(|| Arc::new(DelayTimeDistribution::of_field(self)))
     }
 
     /// The galactic centre's model: the nuclear cluster's profile, its four distribution
@@ -784,6 +802,9 @@ impl Galaxy {
                 .0
                 .get()
                 .map_or(0, CompanionMasses::heap_bytes)
+            + self.type_ia_delays.0.get().map_or(0, |delays| {
+                size_of::<DelayTimeDistribution>() + delays.heap_bytes()
+            })
             + self
                 .field_share
                 .as_ref()
@@ -877,6 +898,25 @@ struct CentrePotentialCell(OnceLock<motion::spherical::CentrePotential>);
 impl PartialEq for CentrePotentialCell {
     fn eq(&self, _: &Self) -> bool {
         true
+    }
+}
+
+/// [`Galaxy::type_ia_delays`]' value, built when first read, as [`CentreMotionCell`] is.
+#[derive(Clone, Default)]
+struct TypeIaDelaysCell(OnceLock<Arc<DelayTimeDistribution>>);
+
+/// Equal always, as [`CentreMotionCell`]: the distribution is a pure function of the galaxy's
+/// fields and ages, which its equality compares.
+impl PartialEq for TypeIaDelaysCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been built, as [`CentreMotionCell`]'s.
+impl fmt::Debug for TypeIaDelaysCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("TypeIaDelaysCell")
     }
 }
 

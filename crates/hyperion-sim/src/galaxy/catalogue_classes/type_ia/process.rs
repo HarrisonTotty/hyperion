@@ -66,6 +66,8 @@
 //! of member 0 would outlive the explosion. They answer for their stars with
 //! [`ResolveSystemError::KindNotGenerated`](crate::galaxy::placement::ResolveSystemError).
 
+use std::sync::Arc;
+
 #[cfg(doc)]
 use super::PRIMARY_MIN;
 use super::{DelayTimeDistribution, IaLeftover, IaProgenitor};
@@ -149,8 +151,9 @@ impl IaComponent {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeIaProcess {
-    /// The galaxy's delay-time distribution, which the candidates' progenitors are drawn from.
-    delays: DelayTimeDistribution,
+    /// The galaxy's delay-time distribution, which the candidates' progenitors are drawn from,
+    /// kept by the galaxy ([`Galaxy::type_ia_delays`]).
+    delays: Arc<DelayTimeDistribution>,
     /// The components with Type Ia, in component order.
     components: Vec<IaComponent>,
     /// The class's thinning interval, at the Type Ia's window cap.
@@ -274,7 +277,7 @@ impl TypeIaProcess {
     #[must_use]
     pub fn new(galaxy: &Galaxy) -> Self {
         // The field's rates and ages: the budget's until P09.T2.c's version 26.
-        let delays = DelayTimeDistribution::of_field(galaxy);
+        let delays = Arc::clone(galaxy.type_ia_delays());
         let interval = SupernovaInterval::of_cap(galaxy.window_caps(), ShellEnvironment::TypeIa);
         let years = interval.length().as_julian_years_f64();
         let components = galaxy
@@ -310,7 +313,7 @@ impl TypeIaProcess {
 
     /// The galaxy's delay-time distribution.
     #[must_use]
-    pub const fn delays(&self) -> &DelayTimeDistribution {
+    pub fn delays(&self) -> &DelayTimeDistribution {
         &self.delays
     }
 

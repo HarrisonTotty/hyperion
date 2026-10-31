@@ -5379,3 +5379,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   and allows 1%; none observed). The helium axis is read only under the fitted helium table it
   was built under. `ClusterModel::first_population_share` is shared by the class counts and the
   ceiling's corners.
+- **P09.T34.a, the delay-time distribution kept (lane `perf-small-server`, 2026-10-31; no output
+  moves).** `Galaxy::type_ia_delays` (crate-private) keeps `DelayTimeDistribution::of_field` in a
+  lazy cell, counted in `heap_bytes`, and `TypeIaProcess` holds it as an `Arc`. `from_galaxy`
+  (the carve-out's `layer_d_kept`, `ancient_share`) still builds its own.
