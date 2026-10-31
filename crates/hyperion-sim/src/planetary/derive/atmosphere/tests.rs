@@ -4494,9 +4494,15 @@ fn under_the_escape_batch_the_table_s_mars_loses_its_nitrogen() {
 /// coldest zone, the ~2 mbar a marginal fixed point of the contrasts that the empty start never
 /// reaches. The cure is the CO₂ cap's own energy balance, its polar insolation at a stated cap
 /// albedo and emissivity, which moves every Mars-like body (main, 2026-10-26: after 24, P14.T55.e
-/// or a new rider on 25's train). Run by name once that lands.
+/// or a new rider on 25's train).
+///
+/// Until that lands it is held as the miss: it must fail its first assertion, so that `just
+/// test-slow`, which runs every ignored test, passes while the miss stands and fails once a change
+/// keeps Mars's carbon dioxide within its range, and the cure drops the `should_panic` and the
+/// `ignore`.
 #[test]
 #[ignore = "P14.T53.c's recorded miss: the model's climate holds no collapsed branch at the table's Mars's 0.22 bar (its CO2 cap's own energy balance, after 24)"]
+#[should_panic(expected = "Mars's CO2 at")]
 fn under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide() {
     let (_, _, air, _) = table_mars_at_its_spin();
     let co2 = air.partial_pressures().of(Gas::CarbonDioxide).value();

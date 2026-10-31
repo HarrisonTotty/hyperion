@@ -32993,3 +32993,7 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     over the sim's, the server's and the protocol's tests changed none, and under
     `with_every_26_hold` none of the 15 golden systems' records moves. Two set-A bodies move,
     21ffd6597ff80000.0200 and 01ffeb2b60010000.0100.
+- **P14.T53.c's Mars test held as its miss (2026-10-31).**
+  `under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide` carries
+  `should_panic(expected = "Mars's CO2 at")`, so `just test-slow` passes while the miss stands
+  (0.22 bar, the same under every 25 and 26 hold); the Mars cure's task drops it.
