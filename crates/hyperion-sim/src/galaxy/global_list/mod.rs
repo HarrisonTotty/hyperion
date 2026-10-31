@@ -65,7 +65,7 @@
 //! from their epoch positions, which the query's padded radius covers, as it does for the grid's
 //! cells.
 //!
-//! **A stream's shell bounds its members from version 26** ([`STREAM_SHELL_VERSION`], P10.T9).
+//! **A stream's shell bounds its members from version 26** (`STREAM_SHELL_VERSION`, P10.T9).
 //! The shell holds the tracers, but not every point of the tube's cut. At a tip, where its few
 //! oldest tracers lie sparse, a knot's kernel spans a long arc of the orbit, so the centre line
 //! there is a chord inside the arc and the widths run to some ten times the median: `pal5_like`'s
@@ -597,31 +597,8 @@ impl GlobalList {
              documentation and tests)",
         );
         let debris = Debris::generate(galaxy);
-        let tables = galaxy.potential();
-        let force = SprayForce::new(tables)
-            .expect("the kinematic tables Debris::generate needs come with the (R, z) grid");
-        // Every shell's orbits at once, which `spray::radii_over_ly` steps side by side.
-        let shells: Vec<ShellLegs> = (debris.streams().iter().map(stream_legs))
-            .chain(debris.cores().iter().map(core_legs))
-            .collect();
-        let reached = reaches_ly(&force, &shells);
-        let (streams, cores) = reached.split_at(debris.streams().len());
-        let mut entries = Vec::with_capacity(1 + shells.len());
-        entries.push(centre.as_global_entry());
-        entries.extend(debris.streams().iter().zip(streams).map(|(s, &reach)| {
-            GlobalEntry::new(
-                GlobalEntryKind::Stream(s.number()),
-                s.mass(),
-                widened_stream_shell(tables, s, reach),
-            )
-        }));
-        entries.extend(debris.cores().iter().zip(cores).map(|(c, &reach)| {
-            GlobalEntry::new(
-                GlobalEntryKind::DwarfCore(c.number()),
-                c.mass(),
-                widened_core_shell(galaxy, c, reach),
-            )
-        }));
+        let mut entries = vec![centre.as_global_entry()];
+        entries.extend(debris_entries(galaxy, galaxy.potential(), &debris));
         Self { entries, debris }
     }
 
@@ -663,9 +640,11 @@ impl GlobalList {
     }
 
     /// A list of `streams` and `cores` of `galaxy`, in the potential `tables`, the galaxy's full
-    /// tables, without the centre: each entry's shell as [`build`](Self::build) gives it, for
-    /// tests of the query path on streams and cores no drawn galaxy has, such as
-    /// [`testing`]'s. A galaxy without the full potential serves, since its tables are given.
+    /// tables, without the centre, for tests of the query path on streams and cores no drawn
+    /// galaxy has, such as [`testing`]'s.
+    ///
+    /// Each entry's shell is as [`build`](Self::build) gives it. A galaxy without the full
+    /// potential serves, since its tables are given.
     ///
     /// # Panics
     ///
@@ -684,34 +663,9 @@ impl GlobalList {
         for (k, c) in cores.iter().enumerate() {
             assert_eq!(usize::from(c.number().get()), k, "core {k}'s number");
         }
-        let force = SprayForce::new(tables).expect("the full tables have the (R, z) grid");
-        let shells: Vec<ShellLegs> = (streams.iter().map(stream_legs))
-            .chain(cores.iter().map(core_legs))
-            .collect();
-        let reached = reaches_ly(&force, &shells);
-        let (at_streams, at_cores) = reached.split_at(streams.len());
-        let mut entries: Vec<GlobalEntry> = streams
-            .iter()
-            .zip(at_streams)
-            .map(|(s, &reach)| {
-                GlobalEntry::new(
-                    GlobalEntryKind::Stream(s.number()),
-                    s.mass(),
-                    widened_stream_shell(tables, s, reach),
-                )
-            })
-            .collect();
-        entries.extend(cores.iter().zip(at_cores).map(|(c, &reach)| {
-            GlobalEntry::new(
-                GlobalEntryKind::DwarfCore(c.number()),
-                c.mass(),
-                widened_core_shell(galaxy, c, reach),
-            )
-        }));
-        Self {
-            entries,
-            debris: Debris::of_parts(streams, cores),
-        }
+        let debris = Debris::of_parts(streams, cores);
+        let entries = debris_entries(galaxy, tables, &debris);
+        Self { entries, debris }
     }
 
     /// The entries whose shells `sphere`, out to its padded radius, may meet
@@ -731,6 +685,45 @@ impl GlobalList {
     pub fn entries_with_class_members(&self) -> impl Iterator<Item = &GlobalEntry> + '_ {
         self.entries.iter().filter(|e| e.has_class_members())
     }
+}
+
+/// The entries of `debris`' streams and then its cores, in number order, each shell widened in
+/// the potential `tables` (module documentation, "Bounding shells"): what
+/// [`GlobalList::build`] lists after the centre.
+///
+/// It integrates every stream's and core's orbits together, side by side, in the spray's table of
+/// `tables`, which it builds once.
+///
+/// # Panics
+///
+/// If `tables` have no (R, z) grid, or a shell's orbit or widening is not finite, which no
+/// specification of [`Debris`] gives.
+#[must_use]
+fn debris_entries(galaxy: &Galaxy, tables: &PotentialTables, debris: &Debris) -> Vec<GlobalEntry> {
+    let force = SprayForce::new(tables)
+        .expect("the kinematic tables Debris::generate needs come with the (R, z) grid");
+    // Every shell's orbits at once, which `spray::radii_over_ly` steps side by side.
+    let shells: Vec<ShellLegs> = (debris.streams().iter().map(stream_legs))
+        .chain(debris.cores().iter().map(core_legs))
+        .collect();
+    let reached = reaches_ly(&force, &shells);
+    let (streams, cores) = reached.split_at(debris.streams().len());
+    let mut entries = Vec::with_capacity(shells.len());
+    entries.extend(debris.streams().iter().zip(streams).map(|(s, &reach)| {
+        GlobalEntry::new(
+            GlobalEntryKind::Stream(s.number()),
+            s.mass(),
+            widened_stream_shell(tables, s, reach),
+        )
+    }));
+    entries.extend(debris.cores().iter().zip(cores).map(|(c, &reach)| {
+        GlobalEntry::new(
+            GlobalEntryKind::DwarfCore(c.number()),
+            c.mass(),
+            widened_core_shell(galaxy, c, reach),
+        )
+    }));
+    entries
 }
 
 /// The orbits a bounding shell is widened from, each from its entry's epoch state (module

@@ -814,10 +814,11 @@ impl TubeTable {
         }
     }
 
-    /// A bound on the speed of every member placed in the tube, km/s, galactic (P10.T9): the
-    /// knots' greatest mean speed plus [`MEMBER_SPEED_SIGMAS`] times their greatest velocity
-    /// dispersion, rounded up by 1 + 10⁻⁹. A member's velocity is the mean at its along coordinate
-    /// plus its three normals times the dispersions there along the local frame
+    /// A bound on the speed of every member placed in the tube, km/s, galactic (P10.T9).
+    ///
+    /// It is the knots' greatest mean speed plus [`MEMBER_SPEED_SIGMAS`] times their greatest
+    /// velocity dispersion, rounded up by 1 + 10⁻⁹. A member's velocity is the mean at its along
+    /// coordinate plus its three normals times the dispersions there along the local frame
     /// ([`members`](super::members)), each of the mean and the dispersions linear between knots, so
     /// at most their knots' greatest; what the range query pads a stream's cells by (P09.T23.b's
     /// rule).

@@ -186,7 +186,7 @@ fn hits(source: &GlobalListSource<'_>, galaxy: &Galaxy, sphere: &QuerySphere) ->
     out
 }
 
-/// Every hit of every stream, at once: by ID, the record, the position and the distance.
+/// The hits' raw IDs, in order.
 fn ids(hits: &[SystemHit]) -> Vec<u64> {
     hits.iter().map(|hit| hit.id().raw()).collect()
 }
@@ -274,6 +274,59 @@ fn the_census_is_the_cells_sum_and_independent_of_the_cache() {
     }
     assert_eq!(census, by_hand);
     assert!(census.get(Layer::A) > 1.0, "{census:?}");
+}
+
+/// P10.T9: the hits and the census of each sphere are the same whatever was asked before them,
+/// through one source whose band shares fill as the queries reach their streams, and equal a
+/// fresh source's (the sim-determinism skill's order check).
+#[test]
+fn the_source_s_answers_are_order_independent() {
+    use hyperion_testkit::order::assert_order_independent;
+    let galaxy = galaxy(true);
+    let lookup = lookup();
+    let core = GlobalListSource::new(galaxy, lookup, &NoCentreOrbitCache)
+        .expect("no centre")
+        .core(DwarfCoreNumber::new(0).expect("0"))
+        .expect("played")
+        .clone();
+    let mut members = Vec::new();
+    let in_core = core
+        .grid()
+        .owned_cells()
+        .find_map(|cell| {
+            core.members_in_cell(galaxy, MassBand::A, cell, &mut members);
+            members.first().map(|(m, _)| *m.record().epoch_position())
+        })
+        .expect("a core with members");
+    let inner = GalacticPosition::from_light_years([2_000.0, 0.0, 0.0]).expect("in range");
+    let spheres = [
+        sphere(lookup.tubes[0].locate(0.45, 0.0, 0.0), 300.0, 200),
+        sphere(lookup.tubes[1].locate(0.3, 1.0, -0.5), 200.0, 0),
+        sphere(lookup.tubes[2].locate(0.6, 0.0, 0.0), 100.0, -1_000),
+        sphere(in_core, 30.0, 1_000),
+        sphere(inner, 50.0, 0),
+    ];
+    let answer = |source: &GlobalListSource<'_>, s: &QuerySphere| {
+        (
+            hits(source, galaxy, s),
+            source.expected_in_sphere(galaxy, s),
+        )
+    };
+    let warm = GlobalListSource::new(galaxy, lookup, &NoCentreOrbitCache).expect("no centre");
+    assert_order_independent(&spheres, |s| answer(&warm, s));
+    let fresh = |s: &QuerySphere| {
+        let cold = GlobalListSource::new(galaxy, lookup, &NoCentreOrbitCache).expect("no centre");
+        answer(&cold, s)
+    };
+    assert_order_independent(&spheres, fresh);
+    for (k, s) in spheres.iter().enumerate() {
+        assert_eq!(answer(&warm, s), fresh(s), "sphere {k}");
+    }
+    let counts: Vec<usize> = spheres
+        .iter()
+        .map(|s| hits(&warm, galaxy, s).len())
+        .collect();
+    assert!(counts[..4].iter().all(|&n| n > 0), "{counts:?}");
 }
 
 /// P10.T9: the hits of a query about the small core's members are exactly the members a scan of
@@ -406,7 +459,9 @@ fn the_stream_shell_is_held_only_until_the_26_bump() {
          source's hits and census move. Delete `STREAM_SHELL_VERSION`, `StreamShellRules` with \
          its `Unbounded` arm, `GalaxyRules::stream_shell`, the `match` in `in_stream_shell` and \
          in `resolve_with`, `GlobalListSource::entries_near`'s `every_stream` and this test, in \
-         the bump's own commit"
+         the bump's own commit; `tests/global_list_tube.rs`'s \
+         `resolve_with_reaches_a_drawn_stream_s_members` then needs its galaxy's list, not \
+         `GlobalList::default()`, and to expect `NoSuchSystem` for a member outside the shell"
     );
     let built = Galaxy::from_params(SEED, GalaxyParams::milky_way_like()).expect("builds");
     assert_eq!(built.rules().stream_shell, StreamShellRules::Unbounded);
@@ -522,9 +577,11 @@ fn a_query_on_a_test_stream_s_axis_equals_every_member_of_its_tube() {
                     let got = hits(&source, galaxy, &s);
                     let mine: Vec<SystemHit> = got
                         .into_iter()
-                        .filter(|hit| match hit.id().kind() {
-                            crate::id::SystemIdKind::Stream(id) => usize::from(id.number()) == n,
-                            _ => false,
+                        .filter(|hit| {
+                            matches!(
+                                hit.id().kind(),
+                                crate::id::SystemIdKind::Stream(id) if usize::from(id.number()) == n
+                            )
                         })
                         .collect();
                     let want = brute_force(galaxy, &all, &shell, &s);
@@ -540,7 +597,7 @@ fn a_query_on_a_test_stream_s_axis_equals_every_member_of_its_tube() {
 }
 
 /// P10.T9, the bench's figure: a 50 ly query on `pal5_like`'s axis generates every member of the
-/// cells it touches and returns those in the sphere (measured at v24: 134 generated and 22
+/// cells it touches and returns those in the sphere (measured 2026-10-31: 134 generated and 22
 /// returned over the 19 queries, about 6 a hit, where the plan estimated about 160 to find two).
 #[test]
 #[ignore = "slow: sprays a test stream of 2,000 tracers"]
@@ -647,5 +704,107 @@ fn resolve_with_refuses_a_stream_member_outside_its_shell_from_26() {
             Ok(*member.record())
         };
         assert_eq!(resolve_with(&galaxy, id, &empty), want, "{at_26}");
+    }
+}
+
+/// A lookup that builds each of a drawn galaxy's tables on first use and keeps it.
+struct Kept<'g> {
+    galaxy: &'g Galaxy,
+    list: GlobalList,
+    tubes: std::sync::Mutex<std::collections::BTreeMap<StreamNumber, Arc<TubeTable>>>,
+}
+
+impl TubeLookup for Kept<'_> {
+    fn global_list(&self) -> &GlobalList {
+        &self.list
+    }
+
+    fn tube(&self, stream: StreamNumber) -> Arc<TubeTable> {
+        let spec = self.list.stream(stream).expect("a stream of the list");
+        let mut tubes = self.tubes.lock().expect("not poisoned");
+        Arc::clone(tubes.entry(stream).or_insert_with(|| {
+            Arc::new(TubeTable::build(self.galaxy, spec).expect("the full potential"))
+        }))
+    }
+}
+
+/// P10.T9, from version 26: in a drawn galaxy's list, cut to its centre and its first stream so
+/// that one tube is built, the source's members of the centre are the centre's own source's, and
+/// its census holds the centre's; and each stream member it returns about a member inside the
+/// stream's shell resolves through `resolve_with` to the record it returned.
+#[test]
+#[ignore = "slow: builds a Milky Way galaxy's kinematic tables, its list, its centre and a tube"]
+fn a_drawn_galaxy_s_source_holds_the_centre_s_and_resolves_its_members() {
+    use crate::galaxy::features::centre::CentreMemberSource;
+    use crate::galaxy::placement::resolve_with;
+    use crate::id::SystemIdKind;
+    let galaxy = Galaxy::from_params_with_rules(
+        Seed::new(0x0a10_8b01),
+        GalaxyParams::milky_way_like(),
+        GalaxyRules::every_26_hold(),
+    )
+    .expect("builds")
+    .with_full_potential();
+    let full = GlobalList::build(&galaxy);
+    let spec = full.debris().streams()[0].clone();
+    let entry = *full.stream_entry(spec.number()).expect("listed");
+    assert_eq!(full.entries()[0].kind(), GlobalEntryKind::Centre);
+    let list = GlobalList {
+        entries: vec![full.entries()[0], entry],
+        debris: full.debris().clone(),
+    };
+    let lookup = Kept {
+        galaxy: &galaxy,
+        list,
+        tubes: std::sync::Mutex::default(),
+    };
+    let source = GlobalListSource::new(&galaxy, &lookup, &NoCentreOrbitCache).expect("a centre");
+    let centre = CentreMemberSource::new(&galaxy, &NoCentreOrbitCache).expect("a centre");
+    let s = sphere(GalacticPosition::ORIGIN, 0.05, 100);
+    let mut want = Vec::new();
+    centre.systems_in_sphere(&galaxy, &s, stellar(), &mut want);
+    want.sort_by_key(|hit| hit.id().raw());
+    let got: Vec<SystemHit> = hits(&source, &galaxy, &s)
+        .into_iter()
+        .filter(|hit| matches!(hit.id().kind(), SystemIdKind::Centre(_)))
+        .collect();
+    assert!(!want.is_empty(), "no member of the centre within 0.05 ly");
+    assert_eq!(got, want);
+    let (all, own) = (
+        source.expected_in_sphere(&galaxy, &s),
+        centre.expected_in_sphere(&galaxy, &s),
+    );
+    for layer in [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E] {
+        assert!(
+            all.get(layer) >= own.get(layer),
+            "{layer:?}: {all:?} {own:?}"
+        );
+    }
+    // A member inside the shell, found as `resolve_with_refuses_…` finds one.
+    let tube = lookup.tube(spec.number());
+    let shares = StreamBandShares::of(&galaxy, &spec);
+    let shell = entry.shell();
+    let mut members = Vec::new();
+    let mut found = None;
+    for cell in tube.cells_touching(&tube.locate(0.5, 0.0, 0.0), LightYears::new(100.0)) {
+        stream_cell_members(&galaxy, &tube, &shares, cell, MassBand::A, &mut members);
+        found = members.iter().find_map(|m| {
+            let at = m.record().epoch_position();
+            shell
+                .contains(&GalacticPosition::ORIGIN.displacement_to(at))
+                .then_some(*at)
+        });
+        if found.is_some() {
+            break;
+        }
+    }
+    let near = found.expect("a member inside the shell on the axis");
+    let returned: Vec<SystemHit> = hits(&source, &galaxy, &sphere(near, 20.0, 0))
+        .into_iter()
+        .filter(|hit| matches!(hit.id().kind(), SystemIdKind::Stream(_)))
+        .collect();
+    assert!(!returned.is_empty(), "no member about one of stream 0's");
+    for hit in returned.iter().take(20) {
+        assert_eq!(resolve_with(&galaxy, hit.id(), &lookup), Ok(*hit.record()));
     }
 }

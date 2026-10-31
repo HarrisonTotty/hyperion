@@ -10,7 +10,7 @@
 //!   [`global_list`](super), "Bounding shells"). The census tests the shells against the
 //!   unpadded radius at the epoch, the hits against the radius padded at
 //!   [`UNBOUND_PAD_SPEED`], above every member's speed bound. A stream's shell bounds its members
-//!   from version 26 ([`STREAM_SHELL_VERSION`](super::STREAM_SHELL_VERSION)); below it the source
+//!   from version 26 (`STREAM_SHELL_VERSION`); below it the source
 //!   visits every stream, since a member may lie outside its shell then. A dwarf core's members
 //!   lie within its extent of its centre, which its shell holds at every version.
 //! - **A stream**: its table through the caller's [`TubeLookup`], the tube cells touching the
@@ -135,6 +135,7 @@ const BANDS_COARSEST_FIRST: [MassBand; 5] = [
 /// # let _ = result;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
+#[derive(Clone)]
 pub struct GlobalListSource<'a> {
     galaxy: &'a Galaxy,
     lookup: &'a dyn TubeLookup,
@@ -142,7 +143,9 @@ pub struct GlobalListSource<'a> {
     centre: Option<CentreMemberSource<'a>>,
     /// Each dwarf core's model in number order, `None` for one that fails its headroom check.
     cores: Vec<Option<DwarfCoreModel>>,
-    /// Each stream's band shares in number order, made when a query first reaches it.
+    /// Each stream's band shares in number order, made when a query first reaches it. Each is a
+    /// function of the galaxy and its stream alone (a dwarf's reads its core's keyed metallicity
+    /// stream), so which query makes it first moves nothing.
     shares: Vec<OnceLock<StreamBandShares>>,
 }
 
@@ -210,6 +213,7 @@ impl<'a> GlobalListSource<'a> {
     }
 
     /// The list.
+    #[must_use]
     fn list(&self) -> &GlobalList {
         self.lookup.global_list()
     }
@@ -219,6 +223,7 @@ impl<'a> GlobalListSource<'a> {
     /// # Panics
     ///
     /// If the list has no stream `number`.
+    #[must_use]
     fn shares(&self, number: StreamNumber) -> &StreamBandShares {
         let index = usize::from(number.get());
         self.shares[index].get_or_init(|| {
@@ -230,21 +235,24 @@ impl<'a> GlobalListSource<'a> {
     /// The streams and the cores whose shells `sphere`, out to its padded radius, meets, in list
     /// order, each with its shell; under [`StreamShellRules::Unbounded`] every stream (module
     /// documentation).
-    fn entries_near(&self, sphere: &QuerySphere) -> Vec<(GlobalEntryKind, BoundingShell)> {
+    fn entries_near<'s>(
+        &'s self,
+        sphere: &'s QuerySphere,
+    ) -> impl Iterator<Item = (GlobalEntryKind, BoundingShell)> + 's {
         let every_stream = self.galaxy.rules().stream_shell == StreamShellRules::Unbounded;
         self.list()
             .entries()
             .iter()
-            .filter(|e| match e.kind() {
+            .filter(move |e| match e.kind() {
                 GlobalEntryKind::Centre => false,
                 GlobalEntryKind::Stream(_) => every_stream || e.shell().touches(sphere),
                 GlobalEntryKind::DwarfCore(_) => e.shell().touches(sphere),
             })
             .map(|e| (e.kind(), e.shell()))
-            .collect()
     }
 
     /// Core `number`'s model, if it is played.
+    #[must_use]
     fn core(&self, number: super::DwarfCoreNumber) -> Option<&DwarfCoreModel> {
         self.cores
             .get(usize::from(number.get()))
@@ -271,12 +279,14 @@ impl SystemSource for GlobalListSource<'_> {
             let layer = band.layer();
             counts.set(layer, counts.get(layer) + expected);
         };
+        let (mut cells, mut core_cells) = (Vec::new(), Vec::new());
         for (kind, _) in self.entries_near(&at_epoch) {
             match kind {
                 GlobalEntryKind::Stream(number) => {
                     let tube = self.lookup.tube(number);
                     let shares = self.shares(number);
-                    let cells: Vec<_> = tube.cells_touching(sphere.centre(), radius).collect();
+                    cells.clear();
+                    cells.extend(tube.cells_touching(sphere.centre(), radius));
                     for band in BANDS_COARSEST_FIRST {
                         let expected = cells.iter().fold(0.0, |sum, &cell| {
                             sum + expected_members(&tube, shares, cell, band)
@@ -289,9 +299,10 @@ impl SystemSource for GlobalListSource<'_> {
                         continue;
                     };
                     let local = local_offset(&core_centre(core), sphere.centre());
-                    let cells: Vec<_> = core.grid().cells_touching(&local, radius).collect();
+                    core_cells.clear();
+                    core_cells.extend(core.grid().cells_touching(&local, radius));
                     for band in BANDS_COARSEST_FIRST {
-                        let expected = cells
+                        let expected = core_cells
                             .iter()
                             .fold(0.0, |sum, &cell| sum + core.expected_candidates(band, cell));
                         add(band, expected);
@@ -328,12 +339,18 @@ impl SystemSource for GlobalListSource<'_> {
                 out.push(h);
             }
         };
+        let (mut members, mut core_members) = (Vec::new(), Vec::new());
         for (kind, shell) in self.entries_near(&padded) {
             match kind {
                 GlobalEntryKind::Stream(number) => {
                     let tube = self.lookup.tube(number);
                     let shares = self.shares(number);
-                    stream_hits(galaxy, &tube, shares, &shell, sphere, layers, &mut |m| {
+                    let query = StreamQuery {
+                        shell: &shell,
+                        sphere,
+                        layers,
+                    };
+                    stream_hits(galaxy, &tube, shares, &query, &mut members, &mut |m| {
                         hit(m, out);
                     });
                 }
@@ -349,15 +366,14 @@ impl SystemSource for GlobalListSource<'_> {
                         bound.value()
                     );
                     let local = local_offset(&core_centre(core), sphere.centre());
-                    let mut members = Vec::new();
                     for band in BANDS_COARSEST_FIRST {
                         if !layers.contains(band.layer()) {
                             continue;
                         }
                         let reach = band_reach(radius, t, band.layer(), bound);
                         for cell in core.grid().cells_touching(&local, reach) {
-                            core.members_in_cell(galaxy, band, cell, &mut members);
-                            for (member, _) in &members {
+                            core.members_in_cell(galaxy, band, cell, &mut core_members);
+                            for (member, _) in &core_members {
                                 hit(member, out);
                             }
                         }
@@ -374,9 +390,17 @@ impl SystemSource for GlobalListSource<'_> {
     }
 }
 
-/// Calls `visit` with every member of `tube`'s stream, whose band shares are `shares` and shell
-/// `shell`, in `layers`' bands, in the cells the members that can reach `sphere` by its time lie
-/// in (module documentation): band by band, cell by cell, each cell's members in index order.
+/// What [`stream_hits`] asks of a stream: its shell, the query's sphere and the layers asked.
+struct StreamQuery<'q> {
+    shell: &'q BoundingShell,
+    sphere: &'q QuerySphere,
+    layers: LayerSet,
+}
+
+/// Calls `visit` with every member of `tube`'s stream, whose band shares are `shares`, inside
+/// `query`'s shell (under the galaxy's rules) and in its layers' bands, in the cells the members
+/// that can reach its sphere by its time lie in (module documentation): band by band, cell by
+/// cell, each cell's members in index order. `members` is the caller's buffer.
 ///
 /// # Panics
 ///
@@ -385,11 +409,15 @@ fn stream_hits(
     galaxy: &Galaxy,
     tube: &TubeTable,
     shares: &StreamBandShares,
-    shell: &BoundingShell,
-    sphere: &QuerySphere,
-    layers: LayerSet,
+    query: &StreamQuery<'_>,
+    members: &mut Vec<GlobalMemberRecord>,
     visit: &mut dyn FnMut(&GlobalMemberRecord),
 ) {
+    let StreamQuery {
+        shell,
+        sphere,
+        layers,
+    } = *query;
     let t = sphere.time();
     let bound = tube.member_speed_bound();
     debug_assert!(
@@ -398,7 +426,6 @@ fn stream_hits(
         tube.stream().get(),
         bound.value()
     );
-    let mut members = Vec::new();
     for band in BANDS_COARSEST_FIRST {
         let layer = band.layer();
         if !layers.contains(layer) {
@@ -406,11 +433,12 @@ fn stream_hits(
         }
         let reach = band_reach(sphere.radius(), t, layer, bound);
         for cell in tube.cells_touching(sphere.centre(), reach) {
-            stream_cell_members(galaxy, tube, shares, cell, band, &mut members);
-            for member in &members {
-                if in_stream_shell(galaxy, shell, member.record().epoch_position()) {
-                    visit(member);
-                }
+            stream_cell_members(galaxy, tube, shares, cell, band, members);
+            let inside = members
+                .iter()
+                .filter(|m| in_stream_shell(galaxy, shell, m.record().epoch_position()));
+            for member in inside {
+                visit(member);
             }
         }
     }

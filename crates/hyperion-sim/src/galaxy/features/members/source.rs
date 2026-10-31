@@ -449,11 +449,7 @@ pub(crate) fn band_reach(
 /// feature's 4,096 ly reach; the margins are far above it, and above the rounding of the drift, so
 /// that no member [`hit_at`] keeps is left undrawn.
 #[must_use]
-pub(crate) fn member_reach(
-    radius: LightYears,
-    t: UniverseTime,
-    bound: KilometresPerSecond,
-) -> LightYears {
+fn member_reach(radius: LightYears, t: UniverseTime, bound: KilometresPerSecond) -> LightYears {
     /// The relative margin on the drift.
     const DRIFT_MARGIN: f64 = 1e-9;
     /// The absolute margin, ly.

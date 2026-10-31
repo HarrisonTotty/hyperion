@@ -844,7 +844,9 @@ construction, which stores the derived discrete share, with P10.T10.b's registra
 `GlobalListSource` with the range-query handler (and with the sky census's feature sources,
 R06.T16.a's pattern). It rides with P09.T37 at 27, or the first train after both are ready, and
 no longer rides 25 (the desktop's rulings on this re-validation, issue #123, 2026-10-27, points 1
-and 2, amending `decision-galaxy-25-train` §2.2). Until then no built galaxy stores φ, and
+and 2, amending `decision-galaxy-25-train` §2.2). P10.T9's stream-shell hold rides 26
+(`STREAM_SHELL_VERSION`, Risks, "P10.T9 as built"); it moves only what `resolve_with` and the
+unregistered source give. Until then no built galaxy stores φ, and
 P09.T2.c's bump at 26, which applies `field_factor` to the fields, leaves the halo's discrete part
 at zero; the halo's field gives up φ in the train where its members are first served. Nothing of
 T3.d lands inside the potential freeze. P10.T3.d.a and the rest of P10.T4–T12 add output on new
@@ -2192,28 +2194,22 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     `no_cell_of_a_core_under_the_headroom_expects_the_index` (restated, with the tripwire),
     `the_fullest_cell_of_a_massive_core_resolves_past_8191` (every 97th member) and
     `the_massive_core_s_members_past_8191_are_pinned`.
-- **P10.T9 as built (lane `p10-t9`, 2026-10-31, at `GENERATOR_VERSION` 24).** No output moved:
-  nothing calls the source or `resolve_with` for a stream member outside the tests (T10.b
-  registers it). No golden moved; the tube cut's cap was tried and dropped, as it put no member
-  back in its shell.
-  - _Items._ `global_list::GlobalListSource`, a `SystemSource`, and its
-    `new(&Galaxy, &dyn TubeLookup, &dyn CentreOrbitCache) -> Result<_, BuildCentreError>`;
-    `GlobalList::stream_entry(StreamNumber)`, `GlobalList::of_parts` (testing);
-    `TubeTable::member_speed_bound()` and `tube::MEMBER_SPEED_SIGMAS` (8.58 (1 + √2)).
-    Crate-visible: `features::members::source::{band_reach, member_reach, hit_at}`.
-  - _The shell hold, at 26._ The tips' members are not inside the shells (`pal5_like`: 147 of
-    67,476; measures in the lane's outbox). Main's ruling (2026-10-31, option A, reversible): from
-    `STREAM_SHELL_VERSION` = 26 (`GalaxyRules::stream_shell`) a stream's member outside its
-    entry's shell is none, in the source and in `resolve_with`; below 26 the source visits every
-    stream. Tripwire `source::tests::the_stream_shell_is_held_only_until_the_26_bump`. Options B
-    (the tips fixed in T6.a) and C (`SHELL_WIDENING` near 30) wait on research.
+- **P10.T9 as built (lane `p10-t9`, 2026-10-31, at `GENERATOR_VERSION` 24).** No output or
+  golden moved: only tests call the source. The tube cut's cap was tried and dropped: it put no
+  member back in its shell.
+  - _Items._ `global_list::GlobalListSource::new(galaxy, lookup, orbits)`, a `SystemSource`;
+    `GlobalList::stream_entry`, `GlobalList::of_parts` (testing); `TubeTable::member_speed_bound`.
+    Crate-visible: `features::members::source::{band_reach, hit_at}`.
+  - _Deviation._ `tube::MEMBER_SPEED_SIGMAS` is 8.58 (1 + √2), not T8.c's 8.58 √2: the frame's
+    vectors are interpolated and normalised apart, so they need not be orthogonal.
+  - _The shell hold (main's ruling, 2026-10-31, option A, reversible)._ The tips' members lie
+    outside their shells. From `STREAM_SHELL_VERSION` = 26 (`GalaxyRules::stream_shell`) such a
+    member is none, in the source and in `resolve_with`; below 26 the source visits every stream.
+    Tripwire `the_stream_shell_is_held_only_until_the_26_bump`. Options B and C wait on research.
   - _For T10.b._ Register the source in place of `CentreMemberSource`, never beside it: their IDs
-    would repeat. Below 26 every query reads every stream's table.
-  - _For T12._ The containment check over seeds holds by construction from 26; test the members
-    the source keeps, or count those dropped.
-  - _Tests._ Fast: `global_list::source::tests` (six). Slow, by name:
-    `a_query_on_a_test_stream_s_axis_equals_every_member_of_its_tube` (the brute force),
-    `a_query_on_a_globular_stream_s_axis_generates_its_cells_members` and
-    `resolve_with_refuses_a_stream_member_outside_its_shell_from_26`, with
+    would repeat.
+  - _For T12._ From 26 containment holds by construction: test the members the source keeps.
+  - _Tests._ Fast: `global_list::source::tests` (seven) and
+    `rules::tests::each_hold_turns_on_at_its_version`. Slow: the brute force,
+    `a_query_on_a_test_stream_s_axis_equals_every_member_of_its_tube`, and three more, all by
     `cargo test -p hyperion-sim --profile slow-test --lib -- --ignored global_list::source`.
-    Bench: `global_list`'s `query` group.
