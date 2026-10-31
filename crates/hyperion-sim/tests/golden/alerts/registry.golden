@@ -65,7 +65,7 @@ Flare in Photometric(MidInfrared): per host
 Flare in Photometric(Radio): per host
 Glitch: Local over [], pending None, lasting Some(AtMost(Span { seconds: 0, nanos: 0 })), curve None
 MagnetarBurst: Recurrent over ["CORE_COLLAPSE"], pending None, lasting Some(AtMost(Span { seconds: 3, nanos: 0 })), curve Some(MagnetarBurst)
-MagnetarBurst in XRay = 0x48625dfa371a19e7  # 5e40
+MagnetarBurst in XRay = 0x47e0ed57a5e12b1f  # 1.8e38
 FuOrionisOutburst: Local over [], pending None, lasting Some(AtMost(Span { seconds: 15778800000, nanos: 0 })), curve Some(FuOrionisOutburst)
 FuOrionisOutburst in Photometric(U): per host
 FuOrionisOutburst in Photometric(B): per host

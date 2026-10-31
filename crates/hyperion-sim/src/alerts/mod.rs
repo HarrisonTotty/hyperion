@@ -16,7 +16,9 @@
 //!   the flux at the observer with plan 07's extinction, and the X-ray band's optical depth
 //!   (Design note 14);
 //! - a source's light in each band ([`light`]): the bands' top hats, a blackbody's share of its
-//!   light in a band, and plan 09's supernova templates band by band (P12.T5.b).
+//!   light in a band, and plan 09's supernova templates band by band (P12.T5.b);
+//! - the one-shot classes' walk ([`oneshot`]), the supernovae (P12.T5.b), and the recurrent
+//!   classes' ([`recurrent`]), so far the core collapses' magnetars (P12.T5.c).
 //!
 //! The walk itself belongs to the later subtasks: the one-shot classes (P12.T5.b), the recurrent
 //! ones (P12.T5.c), the census with the feature-level and global lists (P12.T5.d) and the local
@@ -45,6 +47,7 @@ pub mod light;
 pub mod local;
 pub mod oneshot;
 pub mod reach;
+pub mod recurrent;
 pub mod registry;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
@@ -56,10 +59,15 @@ pub use reach::{
     ROOT_CUBE_DIAGONAL, class_reach, flux, inverse_square_flux, kind_reach, reach, transmission,
     xray_optical_depth,
 };
+pub use recurrent::{
+    BuildMagnetarHostError, MAGNETAR_ACTIVE_SPAN, MAGNETAR_BURST_XRAY_SHARE,
+    MAGNETAR_GIANT_FLARE_XRAY_SHARE, MagnetarCells, MagnetarClass, MagnetarHost, NoMagnetarCells,
+    StarRecipe, magnetar_detections, magnetar_scan_cell, magnetar_scan_plan, scan_cell, scan_plan,
+};
 pub use registry::{
     CORE_COLLAPSE_BAND_PEAKS, CORE_COLLAPSE_PEAK, GIANT_ERUPTION_PEAK, LightCurveSource,
-    LongestDuration, MAGNETAR_BURST_PEAK, PeakBound, Route, TYPE_IA_BAND_PEAKS, TYPE_IA_PEAK,
-    TransientKind, TransientRow,
+    LongestDuration, MAGNETAR_BURST_PEAK, MAGNETAR_BURST_XRAY_PEAK, PeakBound, Route,
+    TYPE_IA_BAND_PEAKS, TYPE_IA_PEAK, TransientKind, TransientRow,
 };
 
 /// How many bands there are: plan 07's ten photometric bands and X-rays.
@@ -554,7 +562,8 @@ pub enum DetectionPhase {
 /// arrived, how bright it is and where it appears.
 ///
 /// Built by the alert walks (P12.T5.b–P12.T5.e), through its crate-private constructor: the
-/// one-shot classes' by [`one_shot_detections`] and the local events' by [`local_events`].
+/// one-shot classes' by [`one_shot_detections`], the magnetars' by [`magnetar_scan_cell`] and the
+/// local events' by [`local_events`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Detection {
     event: EventId,
@@ -766,13 +775,15 @@ impl AlertResult {
 /// [`FeatureGas`](crate::galaxy::features::gas_overlay::FeatureGas) in production (at an
 /// evaluation time the caller picks, its features at their epoch positions) or
 /// [`NoModifiers`](crate::galaxy::gas::modifiers::NoModifiers). T5.b's is the one-shot classes'
-/// cells ([`OneShotCells`], [`with_one_shot_cells`](Self::with_one_shot_cells)); without one, each
-/// cell is generated for its visit. The later walks add theirs: plan 09's `FeatureCatalogue` with
-/// its cell cache (P12.T5.c–P12.T5.d) and plan 10's `GlobalList` (P12.T5.d).
+/// cells ([`OneShotCells`], [`with_one_shot_cells`](Self::with_one_shot_cells)) and T5.c's the
+/// magnetars' ([`MagnetarCells`], [`with_magnetar_cells`](Self::with_magnetar_cells)); without
+/// them, each cell is generated for its visit. The later walks add theirs: plan 09's
+/// `FeatureCatalogue` with its cell cache (P12.T5.d) and plan 10's `GlobalList` (P12.T5.d).
 pub struct AlertContext<'a> {
     noise: &'a mut NoiseCache,
     gas: &'a dyn GasModifierSource,
     one_shot_cells: Option<&'a mut dyn OneShotCells>,
+    magnetar_cells: Option<&'a mut dyn MagnetarCells>,
     /// The modifiers of the last line of sight, kept for its allocation.
     modifiers: Vec<GasModifier>,
 }
@@ -791,6 +802,7 @@ impl<'a> AlertContext<'a> {
             noise,
             gas,
             one_shot_cells: None,
+            magnetar_cells: None,
             modifiers: Vec::new(),
         }
     }
@@ -801,6 +813,29 @@ impl<'a> AlertContext<'a> {
         Self {
             one_shot_cells: Some(cells),
             ..self
+        }
+    }
+
+    /// The same context, lending the magnetar walk its class's cells from `cells` (P12.T5.c).
+    #[must_use]
+    pub fn with_magnetar_cells(self, cells: &'a mut dyn MagnetarCells) -> Self {
+        Self {
+            magnetar_cells: Some(cells),
+            ..self
+        }
+    }
+
+    /// Calls `visit` with the magnetar hosts of the class cell `key`, from the context's cells or
+    /// from `generate`.
+    pub(crate) fn magnetar_hosts(
+        &mut self,
+        key: CatalogueCellKey,
+        generate: &mut dyn FnMut() -> Vec<MagnetarHost>,
+        visit: &mut dyn FnMut(&[MagnetarHost]),
+    ) {
+        match self.magnetar_cells.as_deref_mut() {
+            Some(cells) => cells.with_hosts(key, generate, visit),
+            None => NoMagnetarCells.with_hosts(key, generate, visit),
         }
     }
 

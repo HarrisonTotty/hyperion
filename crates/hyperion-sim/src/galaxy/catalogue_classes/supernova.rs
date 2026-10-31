@@ -228,6 +228,13 @@ impl SupernovaEntry {
         &self.window
     }
 
+    /// The neutron star the explosion left, if it left one: what plan 12's alerts read to find the
+    /// entry's magnetar (P12.T5.c) before they build its star.
+    #[must_use]
+    pub const fn pulsar(&self) -> Option<NeutronStar> {
+        self.pulsar
+    }
+
     /// The explosion as an event: tag [`SUPERNOVA`], bin 0, number 0, on member 0.
     ///
     /// # Panics

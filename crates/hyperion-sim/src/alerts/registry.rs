@@ -15,7 +15,7 @@
 //! | `CentralFlare`      | centre    | none            | 3.5965 × 10²⁸ W | 8,175 s  | flare      |
 //! | `Flare`             | local     | per host        | none            | 1 day    | star flare |
 //! | `Glitch`            | local     | none            | none            | instant  | none       |
-//! | `MagnetarBurst`     | recurrent | none            | 5 × 10⁴⁰ W      | 3 s      | top hat    |
+//! | `MagnetarBurst`     | recurrent | none            | 1.8 × 10³⁸ W    | 3 s      | top hat    |
 //! | `FuOrionisOutburst` | local     | per host        | none            | 500 yr   | outburst   |
 //!
 //! The supernovae's bound in V is 2.1922 × 10³⁴ W for a core collapse and 1.4081 × 10³⁵ W for a
@@ -525,13 +525,23 @@ pub const TYPE_IA_BAND_PEAKS: [Watts; BAND_COUNT] = [
 /// constant, not a factor of the host's, since the peak law is absolute. Bolometric.
 pub const GIANT_ERUPTION_PEAK: Watts = Watts::new(1.2106e34);
 
-/// The bound on a magnetar outburst's luminosity in X-rays, W: 5 × 10⁴⁰ (5 × 10⁴⁷ erg/s), a giant
-/// flare's spike at the top of its energy law, 10⁴⁷ erg over [`magnetar::GIANT_FLARE_SPIKE`]'s 0.2
-/// s. A short burst reaches at most 2.512 × 10³⁶ W, 10⁴¹ erg over the 3.981 ms floor of its
-/// duration law. Plan 06's energies are the whole event's (main's ruling of 2026-10-30), so the
-/// bound bounds the 2–10 keV band too. The row has no photometric bound, since plan 06 models no
-/// optical light for them.
+/// The bound on a magnetar outburst's whole output, W: 5 × 10⁴⁰ (5 × 10⁴⁷ erg/s), a giant flare's
+/// spike at the top of its energy law, 10⁴⁷ erg over [`magnetar::GIANT_FLARE_SPIKE`]'s 0.2 s. A
+/// short burst reaches at most 2.512 × 10³⁶ W, 10⁴¹ erg over the 3.981 ms floor of its duration
+/// law. Plan 06's energies are the whole event's (main's ruling of 2026-10-30), so it bounds the
+/// 2–10 keV band too; the row takes the band's own, [`MAGNETAR_BURST_XRAY_PEAK`] (P12.T5.c). The
+/// row has no photometric bound, since plan 06 models no optical light for them.
 pub const MAGNETAR_BURST_PEAK: Watts = Watts::new(5e40);
+
+/// The bound on a magnetar outburst's luminosity in the 2–10 keV band, its in-band power, W: 1.8 ×
+/// 10³⁸, [`MAGNETAR_BURST_PEAK`] × [`MAGNETAR_GIANT_FLARE_XRAY_SHARE`] (0.0036), a giant flare's
+/// spike at the top of its energy law (P12.T5.c). A short burst reaches at most 2.512 × 10³⁶ W ×
+/// [`MAGNETAR_BURST_XRAY_SHARE`], 2.7 × 10³⁵ W, in the band. The row's X-ray bound.
+///
+/// [`MAGNETAR_BURST_XRAY_SHARE`]: super::MAGNETAR_BURST_XRAY_SHARE
+/// [`MAGNETAR_GIANT_FLARE_XRAY_SHARE`]: super::MAGNETAR_GIANT_FLARE_XRAY_SHARE
+pub const MAGNETAR_BURST_XRAY_PEAK: Watts =
+    Watts::new(MAGNETAR_BURST_PEAK.value() * super::recurrent::MAGNETAR_GIANT_FLARE_XRAY_SHARE);
 
 /// The bounds of a row that bounds every photometric band alike by `photometric`, and X-rays by
 /// `xray`.
@@ -691,7 +701,7 @@ static ROWS: [TransientRow; 16] = [
         classes: ClassSet::of(ClassId::CORE_COLLAPSE),
         route: Route::Recurrent,
         source: RowSource::Built {
-            bounds: bands_alike(None, Some(PeakBound::Watts(MAGNETAR_BURST_PEAK))),
+            bounds: bands_alike(None, Some(PeakBound::Watts(MAGNETAR_BURST_XRAY_PEAK))),
             duration: LongestDuration::AtMost(magnetar::MAX_BURST_DURATION),
             light_curve: Some(LightCurveSource::MagnetarBurst),
         },
@@ -984,10 +994,11 @@ mod tests {
         }
     }
 
-    /// The magnetar row bounds every short burst and giant flare. A burst's mean luminosity is at
-    /// most the energy law's top over the duration law's floor, 2.512 × 10³⁶ W; a giant flare's
-    /// spike at the top of its law is the bound, which its mean meets within rounding; and D
-    /// covers both.
+    /// The magnetar row bounds every short burst and giant flare, whole and in 2–10 keV. A burst's
+    /// mean luminosity is at most the energy law's top over the duration law's floor, 2.512 × 10³⁶
+    /// W; a giant flare's spike at the top of its law is the whole-output bound, which its mean
+    /// meets within rounding; their 2–10 keV shares put both under the row's in-band bound, the
+    /// giant flare's at it; and D covers both.
     #[test]
     fn the_magnetar_row_bounds_every_burst_and_giant_flare() {
         let row = TransientKind::MagnetarBurst.row();
@@ -995,10 +1006,13 @@ mod tests {
         assert_eq!(row.classes(), ClassSet::of(ClassId::CORE_COLLAPSE));
         assert_eq!(
             row.peak_bound(AlertBand::XRay),
-            Some(PeakBound::Watts(MAGNETAR_BURST_PEAK))
+            Some(PeakBound::Watts(MAGNETAR_BURST_XRAY_PEAK))
         );
         assert_eq!(row.peak_bound(AlertBand::Photometric(Band::V)), None);
-        let bound = MAGNETAR_BURST_PEAK.value();
+        let (bound, in_band) = (
+            MAGNETAR_BURST_PEAK.value(),
+            MAGNETAR_BURST_XRAY_PEAK.value(),
+        );
 
         // `Burst::mean_luminosity_watts` at the energy law's top and the shortest duration, which
         // `Span::from_seconds_f64` floors to the nanosecond as a burst's is.
@@ -1016,6 +1030,20 @@ mod tests {
             magnetar::GIANT_FLARE_ENERGY_JOULES.1 / magnetar::GIANT_FLARE_SPIKE.as_seconds_f64();
         assert!(giant <= bound, "{giant:e} W");
         assert!(giant / bound > 0.999_999, "{giant:e} W");
+
+        let (burst_band, giant_band) = (
+            burst * super::super::MAGNETAR_BURST_XRAY_SHARE,
+            giant * super::super::MAGNETAR_GIANT_FLARE_XRAY_SHARE,
+        );
+        assert!(
+            burst_band <= in_band && giant_band <= in_band,
+            "{giant_band:e} W"
+        );
+        assert!(giant_band / in_band > 0.999_999, "{giant_band:e} W");
+        assert!(
+            (burst_band / 2.67e35 - 1.0).abs() < 1e-2,
+            "{burst_band:e} W"
+        );
 
         assert_eq!(
             row.duration(),

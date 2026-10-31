@@ -1,6 +1,6 @@
-//! The alerts' oracle (plan 12's Test helpers, P12.T5.b): every one-shot entry of a box of class
-//! cells about the observer, each event evaluated directly, against which the walk's detections are
-//! compared as sets.
+//! The alerts' oracle (plan 12's Test helpers, P12.T5.b and P12.T5.c): every one-shot entry, and
+//! every magnetar host, of a box of class cells about the observer, each event evaluated directly,
+//! against which the walks' detections are compared as sets.
 //!
 //! The brute force opens every cell of the box of side 2 × (reach + 4,096 ly) and a cell about the
 //! observer, with no sphere test and no reach, and evaluates each entry's event from its own
@@ -13,18 +13,22 @@
 use std::collections::BTreeMap;
 
 use hyperion_sim::alerts::{
-    AlertBand, AlertContext, AlertQuery, Detection, DetectionPhase, OneShotCells, OneShotClass,
-    OneShotEvent, TransientKind, flux, inverse_square_flux, kind_reach, supernova_luminosity,
-    supernova_peak,
+    AlertBand, AlertContext, AlertQuery, Detection, DetectionPhase, MAGNETAR_BURST_XRAY_SHARE,
+    MAGNETAR_GIANT_FLARE_XRAY_SHARE, MagnetarCells, MagnetarClass, MagnetarHost, OneShotCells,
+    OneShotClass, OneShotEvent, TransientKind, flux, inverse_square_flux, kind_reach,
+    supernova_luminosity, supernova_peak,
 };
 use hyperion_sim::coords::GalacticPosition;
+use hyperion_sim::events::TimeWindow;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
 use hyperion_sim::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId};
 use hyperion_sim::id::{EventId, SystemId};
 use hyperion_sim::observe::{Motion, bearing, light_time};
+use hyperion_sim::stellar::events::magnetar::{MAX_BURST_DURATION, MagnetarModel, MagnetarSeries};
 use hyperion_sim::time::{Span, UniverseTime};
-use hyperion_sim::units::{LightYears, Years};
+use hyperion_sim::units::consts::SPEED_OF_LIGHT;
+use hyperion_sim::units::{LightYears, Watts, Years};
 use hyperion_testkit::float::bits;
 
 /// A detection as the walk and the oracle are compared: every field it reports, floats as bits.
@@ -257,4 +261,236 @@ fn evaluated(
             .map(bits),
         motion: Motion::Drift,
     })
+}
+
+/// The test's cache of a class's magnetar hosts: every cell it is asked for, for one galaxy.
+#[derive(Debug, Default)]
+pub struct KeepMagnetarCells(BTreeMap<CatalogueCellKey, Vec<MagnetarHost>>);
+
+impl KeepMagnetarCells {
+    /// The hosts of `process`'s cell `key` in `galaxy`, generated on first asking.
+    pub fn hosts<P: MagnetarClass>(
+        &mut self,
+        galaxy: &Galaxy,
+        process: &P,
+        key: CatalogueCellKey,
+    ) -> &[MagnetarHost] {
+        self.0.entry(key).or_insert_with(|| {
+            CatalogueClassCell::generate(galaxy, process, key)
+                .entries()
+                .iter()
+                .filter_map(|entry| process.magnetar_host(galaxy, entry.value()))
+                .collect()
+        })
+    }
+}
+
+impl MagnetarCells for KeepMagnetarCells {
+    fn with_hosts(
+        &mut self,
+        key: CatalogueCellKey,
+        generate: &mut dyn FnMut() -> Vec<MagnetarHost>,
+        visit: &mut dyn FnMut(&[MagnetarHost]),
+    ) {
+        visit(self.0.entry(key).or_insert_with(generate));
+    }
+}
+
+/// Every magnetar detection of `process`'s class by `query`'s sensor, by walking the box of cells
+/// about the observer and listing each host's events over an emission interval wide enough by its
+/// speed alone, each evaluated directly (P12.T5.c), sorted.
+///
+/// The interval is the window less the light time from the host's position at the window's start,
+/// widened by β (s + window + D) ÷ (1 ∓ β) for its fastest speed, a day either side and the longest
+/// event twice over, from bounds alone: no root on the light cone. The line of sight is the walk's
+/// rule, from the remnant's position at the start of the Julian year that holds each onset, so that
+/// fluxes compare bit for bit.
+///
+/// # Panics
+///
+/// As [`brute_force_detections`].
+pub fn brute_force_magnetar_detections<P: MagnetarClass>(
+    galaxy: &Galaxy,
+    context: &mut AlertContext<'_>,
+    cells: &mut KeepMagnetarCells,
+    process: &P,
+    query: &AlertQuery,
+) -> Vec<Seen> {
+    let class = process.class();
+    if !query.classes().contains(class) {
+        return Vec::new();
+    }
+    let reach = kind_reach(TransientKind::MagnetarBurst, query.sensor()).value();
+    let observer = query.observer_position();
+    let centre = CatalogueCellKey::containing(class, observer).expect("a cell of the cube");
+    let edge = f64::from(centre.edge_ly());
+    let half = ((reach + LIFETIME_REACH.value()) / edge).ceil();
+    assert!(half < 1e3, "a box of {half} cells about the observer");
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a whole number under 1,000"
+    )]
+    let half = half as i32 + 1;
+    let [cx, cy, cz] = centre.cell();
+    let mut seen = Vec::new();
+    for x in cx - half..=cx + half {
+        for y in cy - half..=cy + half {
+            for z in cz - half..=cz + half {
+                // A cell of the box outside the root cube is no cell of the class.
+                let Ok(key) = CatalogueCellKey::new(class, [x, y, z]) else {
+                    continue;
+                };
+                for host in cells.hosts(galaxy, process, key).to_vec() {
+                    seen.extend(magnetar_seen(galaxy, context, query, class, &host));
+                }
+            }
+        }
+    }
+    seen.sort();
+    seen
+}
+
+/// `host`'s events as `query`'s sensor sees them, evaluated directly.
+fn magnetar_seen(
+    galaxy: &Galaxy,
+    context: &mut AlertContext<'_>,
+    query: &AlertQuery,
+    class: ClassId,
+    host: &MagnetarHost,
+) -> Vec<Seen> {
+    let Some(limits) = query.sensor().limits(AlertBand::XRay) else {
+        return Vec::new();
+    };
+    let observer = query.observer_position();
+    let window = query.window();
+    let motion = host.motion();
+    let interval = wide_interval(host, observer, window);
+    let star = host.star().to_star();
+    let model = MagnetarModel::of(&star).expect("a host leaves its magnetar");
+    let series = MagnetarSeries::new(galaxy.seed(), host.body());
+    let (mut bursts, mut flares) = (Vec::new(), Vec::new());
+    model.bursts_in(&series, interval, &mut bursts);
+    model.giant_flares_in(&series, interval, &mut flares);
+    let mut events: Vec<_> = bursts
+        .iter()
+        .map(|b| {
+            (
+                b.onset(),
+                b.id(),
+                b.end(),
+                b.mean_luminosity_watts() * MAGNETAR_BURST_XRAY_SHARE,
+            )
+        })
+        .chain(flares.iter().map(|f| {
+            let share = MAGNETAR_GIANT_FLARE_XRAY_SHARE;
+            (
+                f.onset(),
+                f.id(),
+                f.end(),
+                f.mean_luminosity_watts() * share,
+            )
+        }))
+        .collect();
+    events.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    let mut lines = BTreeMap::new();
+    let mut seen = Vec::new();
+    for (onset, id, end, xray) in events {
+        let site = motion.position_at(onset);
+        let distance = site.distance_to(observer);
+        let arrival = onset.checked_add(light_time(distance)).unwrap();
+        let end_arrival = end
+            .checked_add(light_time(motion.position_at(end).distance_to(observer)))
+            .unwrap();
+        let phase = if window.start() <= arrival && arrival < window.end() {
+            DetectionPhase::Onset
+        } else if arrival < window.start() && window.start() < end_arrival {
+            DetectionPhase::InProgress
+        } else {
+            continue;
+        };
+        let watts = Watts::new(xray);
+        if !inverse_square_flux(watts, distance).is_some_and(|f| f >= limits.detect()) {
+            continue;
+        }
+        // The walk's rule: the line from the remnant's position at the start of the Julian year
+        // that holds the onset.
+        let year = onset.seconds().div_euclid(31_557_600) * 31_557_600;
+        let line = lines.entry(year).or_insert_with(|| {
+            let from = motion.position_at(UniverseTime::new(year, 0).unwrap());
+            context.sightline(galaxy, &from, observer)
+        });
+        let f = flux(watts, distance, line, AlertBand::XRay).unwrap();
+        if f < limits.detect() {
+            continue;
+        }
+        let to = bearing(observer, &site).unwrap();
+        let present = motion.position_at(arrival);
+        seen.push(Seen {
+            arrival,
+            event: id,
+            host: host.host(),
+            class: Some(class),
+            kind: TransientKind::MagnetarBurst,
+            emitted: onset,
+            phase,
+            band: AlertBand::XRay,
+            flux: bits(f.value()),
+            resolvable: f >= limits.resolve(),
+            bearing: [bits(to.azimuth().value()), bits(to.elevation().value())],
+            apparent: position_bits(&site),
+            light_age: light_time(distance),
+            distance_now: bits(LightYears::from(observer.distance_to(&present)).value()),
+            velocity_then: motion.velocity_at(onset).metres_per_second().map(bits),
+            motion: Motion::Drift,
+        });
+    }
+    seen
+}
+
+/// The emission interval wide enough, by `host`'s fastest speed alone, to hold every event whose
+/// light reaches `observer` in `window` or is arriving at its start (`brute_force_magnetar_detections`).
+fn wide_interval(
+    host: &MagnetarHost,
+    observer: &GalacticPosition,
+    window: TimeWindow,
+) -> TimeWindow {
+    let motion = host.motion();
+    let speed = [
+        motion.velocity_at(motion.at()),
+        motion.velocity_at(UniverseTime::EPOCH),
+    ]
+    .iter()
+    .map(|v| v.speed().value())
+    .fold(0.0, f64::max);
+    let beta = speed / SPEED_OF_LIGHT;
+    let s0 = motion
+        .position_at(window.start())
+        .distance_to(observer)
+        .value()
+        / SPEED_OF_LIGHT;
+    let width = window
+        .end()
+        .checked_since(window.start())
+        .unwrap()
+        .as_seconds_f64();
+    let longest = 2.0 * MAX_BURST_DURATION.as_seconds_f64() + 86_400.0;
+    let reach = beta * (s0 + width + longest);
+    let (s_hi, s_lo) = (
+        (s0 + reach) / (1.0 - beta),
+        ((s0 - reach) / (1.0 + beta)).max(0.0),
+    );
+    let at = |t: UniverseTime, seconds: f64| {
+        let span = Span::from_seconds_f64(seconds.abs()).unwrap();
+        if seconds < 0.0 {
+            t.checked_sub(span)
+        } else {
+            t.checked_add(span)
+        }
+        .unwrap()
+    };
+    TimeWindow::new(
+        at(window.start(), -(longest + s_hi + 86_400.0)),
+        at(window.end(), -(s_lo - 86_400.0)),
+    )
+    .unwrap()
 }

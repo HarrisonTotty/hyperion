@@ -107,7 +107,8 @@ const SECOND_RADIATION_CONSTANT_UM_K: f64 = SECOND_RADIATION_CONSTANT_CM_K * 1e4
 const JOULES_PER_KILOELECTRONVOLT: f64 = 1.602_176_634e-16;
 
 /// `k_B` in keV per kelvin, 8.617 333 × 10⁻⁸: a blackbody of kT = 1 keV is at 1.160 45 × 10⁷ K.
-const KILOELECTRONVOLTS_PER_KELVIN: f64 = BOLTZMANN_CONSTANT / JOULES_PER_KILOELECTRONVOLT;
+pub(super) const KILOELECTRONVOLTS_PER_KELVIN: f64 =
+    BOLTZMANN_CONSTANT / JOULES_PER_KILOELECTRONVOLT;
 
 /// The 16-point Gauss–Legendre rule on [−1, 1]: each positive abscissa with its weight, the
 /// negative ones mirroring them, at full precision (Newton's iteration on P₁₆, which a test

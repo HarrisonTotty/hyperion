@@ -2785,3 +2785,47 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     sighting. `Push::flux` is the light at the crossing; a crossing before the schedule's start is
     pushed at the start. The detection's `retardation()` is for its light first counted, not for
     `Push::at`.
+- **P12.T5.c as built, its magnetar half (lane `p12-t5b`, 2026-10-31, at `GENERATOR_VERSION` 23;
+  main's ruling to build it ahead of plan 11).** No generated output moves. One line of
+  `alerts/registry.golden` moves (the magnetar row's X-ray bound), a bless by name, and
+  `alerts/recurrent.golden` is new (a toy observer's year of magnetar detections).
+  - _Not built:_ the accreting white dwarfs and their novae (P11.T8.a: their classes,
+    `AwdScanMarks`, `scan_marks`, `engine_calls`), the X-ray binaries with their transients, X-ray
+    bursts and Be/X outbursts (P11.T8.b: `XrbScanMarks`), and the luminous blue variables (P09.T43:
+    `LbvProcess`). `scan_plan` and `scan_cell` give them nothing; the bench `awd_scan_marks_cell`
+    and the `engine_calls` test wait on T8.a.
+  - _Names._ `alerts/recurrent.rs`, re-exported: `scan_plan(galaxy, class, query)` (the galaxy
+    unused by the magnetars) and `scan_cell(galaxy, ctx, class, cell, query, out)`, as Provides
+    has them; the generic `magnetar_scan_plan`, `magnetar_scan_cell` and `magnetar_detections`;
+    `MagnetarClass: ClassProcess` (`magnetar_host`), implemented for `CoreCollapseProcess`;
+    `MagnetarHost::new` and `StarRecipe::new`, both checked (`BuildMagnetarHostError`, plan 06's
+    `BuildStarModelError`), and `StarRecipe::to_star`; `MagnetarCells`, `NoMagnetarCells`,
+    `AlertContext::with_magnetar_cells`; `MAGNETAR_ACTIVE_SPAN` (227,272.7 yr, derived),
+    `MAGNETAR_BURST_XRAY_SHARE` (0.1063) and `MAGNETAR_GIANT_FLARE_XRAY_SHARE` (0.0036).
+  - _The row's X-ray bound_ is the band's own, `MAGNETAR_BURST_XRAY_PEAK` = `MAGNETAR_BURST_PEAK`
+    × 0.0036 = 1.8 × 10³⁸ W, as T5.b's bounds are. It replaces P12.T5.a.2's 5 × 10⁴⁰ W, which
+    `MAGNETAR_BURST_PEAK` keeps as the whole output, and so its "under 8.6 × 10⁻⁴ W m⁻²":
+    `class_reach(CORE_COLLAPSE)` is the diagonal for an X-ray limit under 3.1 × 10⁻⁶ W m⁻², and a
+    limit of 0.040 W m⁻² reaches 2,000 ly.
+  - _Leans (2026-10-31)._
+    - The emission interval runs between the light cone's exact roots on the remnant's straight
+      line for t₁ (less twice D and a day) and t₂ (plus a day), so Design note 6's ε is not
+      needed. It is cut to each host's own active span, 10¹⁹ G yr ÷ `B_Q` − 10¹⁹ G yr ÷ B₀, a day
+      either side, not 227,273 years for every host. The sphere is the kind's reach, not widened
+      by 1%, as T5.b's is.
+    - The line of sight is from the remnant's position at the start of the Julian year that holds
+      the onset, once per host and year, so a detection's flux does not depend on the window.
+    - An event is in progress while its light, onset to end, is arriving at t₁ (a top hat).
+    - The bursts' share is two blackbodies of kT 5 and 10 keV of equal fluence.
+  - _Tests._ `tests/alerts_recurrent.rs`, with `brute_force_magnetar_detections` and
+    `KeepMagnetarCells` in `tests/common/observe.rs`. Toy magnetars on the 2,000 ly sphere for
+    three observers over a year, and over a century (slow); `scan_cell` over the plan, in reverse
+    with fresh contexts, equals one walk; six queries in any order, and with no cache; the golden.
+    Slow: seed 9's core collapses about two points of the solar circle, and 0.1 ly from the
+    strongest of the 9 magnetars active at the epoch within some 10,000 ly. The slow tests run with
+    `cargo test -p hyperion-sim --test alerts_recurrent -- --ignored`.
+  - _For T8 (main's adoption, 2026-10-31; not built here)._ The service pushes a riser that
+    crosses the limit after a subscription starts, from the flux it follows over time; T5's walks
+    keep judging "in progress" at a window's start.
+  - _For T5.d._ A sensitive X-ray sensor takes the magnetars' reach to the diagonal, as the core
+    collapses': the census must count the cells it would walk.

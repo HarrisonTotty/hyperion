@@ -5277,3 +5277,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   (`StandardKickLaw::white_dwarf_kick`); a neutron star whose systemic speed and the ordinary
   kicks' floor both reach `v_eff` is refused. Only `draw_member` reads it; dwarf-core, centre and
   global-list members keep `remnant_fits`. The bump deletes the hold as its tripwire says.
+- **P12.T5.c's addition to `supernova.rs` (lane `p12-t5b`, 2026-10-31, at 23, no output moves).**
+  `SupernovaEntry::pulsar() -> Option<NeutronStar>`, the neutron star the class's test put in the
+  entry, which plan 12's magnetar walk reads to drop entries whose field is born at or below the
+  critical field before it builds their stars.
