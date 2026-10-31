@@ -1124,6 +1124,41 @@ domain_tags! {
     /// A stellar merger candidate's orbit before the merger: words 0–2 its cosine of inclination,
     /// ascending node and argument of periapsis, word 3 its mean anomaly at the epoch (P11.T8.c).
     CLASS_MERGER_BINARY: System = "class.merger.binary";
+
+    // Plan 11, P11.T8.d: a neutron-star merger candidate's draws, `System` tags under
+    // `class.nsm.` (the plan's `class.nsm`, one per property group), opened with
+    // `ObjectKey::from(SystemId)` of the candidate's ID, its member 0 (Design note 23). Its two
+    // progenitors' own draws are plan 06's `star.*` tags, keyed by bodies 0 and 1 at attempt 0. Its
+    // kilonova's event tag is P11.T9's. Appended after P11.T8.c's `class.merger.binary`, because
+    // the macro's order fixes `ALL`.
+
+    /// A neutron-star merger candidate's site, its position at the epoch: words 0–2 its position
+    /// in its 4,096 ly cell, x, y and z, and word 3 the mark that thins it on the class's density
+    /// and picks its density component (P11.T8.d).
+    CLASS_NSM_SITE: System = "class.nsm.site";
+
+    /// A neutron-star merger candidate's time: word 0 the place of its merger time T in the source
+    /// horizon, word 1 the rank of its system's age at the epoch in its component's law
+    /// (P11.T8.d).
+    CLASS_NSM_TIME: System = "class.nsm.time";
+
+    /// A neutron-star merger candidate's \[Fe/H\]: one normal of its component's distribution at
+    /// its site and age (P11.T8.d).
+    CLASS_NSM_METALLICITY: System = "class.nsm.metallicity";
+
+    /// A neutron-star merger candidate's pair: word 0 its kind, words 1 and 2 the ranks of its
+    /// primary's and its secondary's masses at the merger, words 3 and 4 those of their
+    /// progenitors' initial masses (P11.T8.d).
+    CLASS_NSM_MASS: System = "class.nsm.mass";
+
+    /// A neutron-star merger candidate's velocity at its site, galactic: plan 08's draw of its
+    /// component's law, four words per attempt of the escape cut (P11.T8.d).
+    CLASS_NSM_VELOCITY: System = "class.nsm.velocity";
+
+    /// A neutron-star merger candidate's orbit before the merger: words 0–2 its cosine of
+    /// inclination, ascending node and argument of periapsis, word 3 its mean anomaly at the epoch
+    /// (P11.T8.d).
+    CLASS_NSM_BINARY: System = "class.nsm.binary";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1558,7 +1593,7 @@ mod tests {
     }
 
     /// Plan 11's catalogue classes' candidates, `System` tags under plan 09's prefix `class.`
-    /// (P11.T8), and the novae's event key.
+    /// (P11.T8.a, c and d), and the novae's event key.
     #[test]
     fn plan_11_registers_its_class_tags_under_class() {
         // P11.T8.a: the accreting white dwarfs' candidates, under plan 09's prefix `class.`.
@@ -1587,6 +1622,19 @@ mod tests {
         ] {
             assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
             assert!(tag.name().starts_with("class.merger."));
+            assert!(ALL.contains(&tag));
+        }
+        // P11.T8.d: the neutron-star mergers' candidates.
+        for tag in [
+            CLASS_NSM_SITE,
+            CLASS_NSM_TIME,
+            CLASS_NSM_METALLICITY,
+            CLASS_NSM_MASS,
+            CLASS_NSM_VELOCITY,
+            CLASS_NSM_BINARY,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.nsm."));
             assert!(ALL.contains(&tag));
         }
     }

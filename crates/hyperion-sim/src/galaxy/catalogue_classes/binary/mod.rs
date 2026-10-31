@@ -9,12 +9,13 @@
 //! (`stellar::binary::scan`), a timeline from its marks, and the test that the grid applies
 //! too. Built so far: the accreting white dwarfs, fast and slow
 //! (P11.T8.a, [`AccretingWdFast`], [`AccretingWdSlow`]), and the stellar mergers (P11.T8.c,
-//! [`StellarMergers`]), which thin on [`ClassHosts`]. The X-ray binaries and the neutron-star
-//! mergers follow in P11.T8.b and T8.d.
+//! [`StellarMergers`]) and the neutron-star mergers (P11.T8.d, [`NeutronStarMergers`]), which
+//! thin on [`ClassHosts`]. The X-ray binaries follow in P11.T8.b.
 
 mod awd;
 mod hosts;
 mod merger;
+mod nsm;
 
 pub use awd::{
     AccretingWdFast, AccretingWdSlow, AwdBinary, AwdCandidate, AwdComponent, AwdEntry, AwdHistory,
@@ -23,3 +24,4 @@ pub use awd::{
 };
 pub use hosts::{ClassHosts, HostComponent};
 pub use merger::{ContactPair, MergerCandidate, MergerEntry, StellarMergers};
+pub use nsm::{Inspiral, NeutronStarMergers, NsmCandidate, NsmEntry};

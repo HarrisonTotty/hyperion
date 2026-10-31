@@ -31,7 +31,8 @@
 //! plan 15's `PRIMARY_MASS_CDF` gives its laws, added to a median that follows a condition on a
 //! 17-point grid. [`AWD_SAMPLER`] is the accreting white dwarfs': hand-made scratch from the
 //! observed figures each mark's doc names (Design note 13), which P15.T10.b refits against the
-//! engine's own members; [`MERGER_SAMPLER`] is the stellar mergers' (P11.T8.c).
+//! engine's own members; [`MERGER_SAMPLER`] is the stellar mergers' (P11.T8.c) and
+//! [`NSM_SAMPLER`] the neutron-star mergers' (P11.T8.d).
 
 use std::marker::PhantomData;
 
@@ -698,8 +699,8 @@ const IDENTITY_RANKS: [f64; 17] = [
 /// - **The mass ratio** of the contact pair before the merger: 0.06–1, median 0.25. W Ursae
 ///   Majoris pairs hold mass ratios from about 0.07 to 1 (Rucinski 1993, PASP 105, 1433), and the
 ///   pairs that merge are the low ones, below Rasio's (1995, ApJ 444, L41) tidal limit near 0.09
-///   and just above it: V1309 Scorpii's was about 0.1 (Stępień, Pamyatnykh and Rozyczka 2011, A&A
-///   531, A18).
+///   and just above it: V1309 Scorpii's progenitor, the contact pair whose merger was seen in
+///   2008, held a mass ratio near 0.1 (Tylenda et al. 2011, A&A 528, A114).
 /// - **The layer**: [`CLASS_SHARES`]'s row for the stellar mergers, A 0.1, B 0.2, C 0.5, D 0.15,
 ///   E 0.05, restricted to the layers with stars on their main sequence at the merger.
 pub const MERGER_SAMPLER: ClassSamplerTable<MergerMark, MergerPick> = ClassSamplerTable::new(
@@ -730,6 +731,157 @@ const MERGER_MARKS: [SamplerMark; 3] = [
         ],
         median: None,
         limits: (0.06, 1.0),
+    },
+];
+
+/// The marks of [`NSM_SAMPLER`], in its order (P11.T8.d): a neutron-star merger's pair, then its
+/// history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum NsmMark {
+    /// A neutron star's mass at the merger, M☉, unconditional.
+    NeutronStarMass,
+    /// log₁₀ of a black hole's mass at the merger, M☉, unconditional.
+    LogBlackHoleMass,
+    /// The rank, in [0, 1], of a neutron star's progenitor's initial mass in the galaxy's mass
+    /// function over [`NSM_NEUTRON_STAR_PROGENITORS`], unconditional.
+    NeutronStarProgenitorRank,
+    /// The rank, in [0, 1], of a black hole's progenitor's initial mass in the galaxy's mass
+    /// function over [`NSM_BLACK_HOLE_PROGENITORS`], unconditional.
+    BlackHoleProgenitorRank,
+    /// The rank, in [0, 1], of the system's age at the epoch in its density component's law
+    /// restricted to the born systems, unconditional.
+    AgeRank,
+}
+
+impl NsmMark {
+    /// Every mark, in [`NSM_SAMPLER`]'s order.
+    pub const ALL: [Self; 5] = [
+        Self::NeutronStarMass,
+        Self::LogBlackHoleMass,
+        Self::NeutronStarProgenitorRank,
+        Self::BlackHoleProgenitorRank,
+        Self::AgeRank,
+    ];
+
+    /// The mark's place in [`NSM_SAMPLER`]'s marks.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+}
+
+impl SamplerKey for NsmMark {
+    fn index(self) -> usize {
+        Self::index(self)
+    }
+}
+
+/// The choices of [`NSM_SAMPLER`], in its order (P11.T8.d).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum NsmPick {
+    /// The pair's kind ([`NsmPairKind`]).
+    PairKind,
+}
+
+impl SamplerKey for NsmPick {
+    fn index(self) -> usize {
+        match self {
+            Self::PairKind => 0,
+        }
+    }
+}
+
+/// The pair kinds of [`NSM_SAMPLER`]'s one choice, in its order (P11.T8.d): the two kinds of
+/// compact pair whose merger is a neutron-star merger (P11.T7's `merger_class`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum NsmPairKind {
+    /// Two neutron stars.
+    DoubleNeutronStar,
+    /// A black hole and a neutron star; the black hole is the primary.
+    NeutronStarBlackHole,
+}
+
+impl NsmPairKind {
+    /// Every kind, in the choice's order.
+    pub const ALL: [Self; 2] = [Self::DoubleNeutronStar, Self::NeutronStarBlackHole];
+}
+
+/// The initial masses of a neutron star's progenitor a neutron-star merger draws, M☉: 8–20, ours,
+/// provisional; about where single stars leave neutron stars rather than white dwarfs or black
+/// holes (Sukhbold et al. 2016, ApJ 821, 38, recalled, not read at source).
+pub const NSM_NEUTRON_STAR_PROGENITORS: (f64, f64) = (8.0, 20.0);
+
+/// The initial masses of a black hole's progenitor a neutron-star merger draws, M☉: 25–60, ours,
+/// provisional, as [`NSM_NEUTRON_STAR_PROGENITORS`].
+pub const NSM_BLACK_HOLE_PROGENITORS: (f64, f64) = (25.0, 60.0);
+
+/// A normal of mean `mean` and standard deviation `sigma`, truncated at ±2.5 σ, at the ranks
+/// k ÷ 16.
+const fn normal_about(mean: f64, sigma: f64) -> [f64; 17] {
+    let mut out = normal(sigma);
+    let mut k = 0;
+    while k < 17 {
+        out[k] += mean;
+        k += 1;
+    }
+    out
+}
+
+/// The scratch sampler of the neutron-star mergers (P11.T8.d; Design notes 10 and 13):
+/// [`NsmMark`]'s five marks and [`NsmPick`]'s one choice, the pair's kind ([`NsmPairKind`]).
+///
+/// Hand-made, the figures recalled and not read at source in this build (the literature could not
+/// be reached), and the same in every population; P15.T10.b refits it against the engine's own
+/// mergers:
+///
+/// - **A neutron star's mass**: 1.33 ± 0.09 M☉, the Galactic double neutron stars' (Özel and
+///   Freire 2016, ARA&A 54, 401), held to plan 06's 1.13–2.0 M☉ (Mandel and Müller 2020).
+/// - **A black hole's mass**: log-normal about 7 M☉, ±0.15 dex, on 3–20 M☉: the black holes of
+///   the first neutron star–black hole mergers, GW200105's 8.9 M☉ and GW200115's 5.7 M☉ (Abbott
+///   et al. 2021, ApJL 915, L5).
+/// - **The progenitors' masses** and **the age** are ranks that leave the galaxy's mass function
+///   over [`NSM_NEUTRON_STAR_PROGENITORS`] and [`NSM_BLACK_HOLE_PROGENITORS`] and the component's
+///   age law as they are: the scratch merger rate is the same at every age, as [`CLASS_SHARES`]'s
+///   row makes it.
+/// - **The pair's kind**: 0.8 two neutron stars, 0.2 a neutron star and a black hole, after the
+///   ratio of the two rates GWTC-3 gives, about 10–1,700 and 8–140 Gpc⁻³ yr⁻¹ (Abbott et al. 2023,
+///   PRX 13, 011048).
+pub const NSM_SAMPLER: ClassSamplerTable<NsmMark, NsmPick> =
+    ClassSamplerTable::new(&NSM_MARKS, &[SamplerPick::new("pair_kind", &[0.8, 0.2])]);
+
+/// [`NSM_SAMPLER`]'s marks, in [`NsmMark`]'s order.
+#[rustfmt::skip]
+const NSM_MARKS: [SamplerMark; 5] = [
+    SamplerMark {
+        name: "neutron_star_mass",
+        residual: normal_about(1.33, 0.09),
+        median: None,
+        limits: (1.13, 2.0),
+    },
+    SamplerMark {
+        name: "log_black_hole_mass",
+        // log₁₀ 7, ±0.15 dex, on 3–20 M☉.
+        residual: normal_about(0.845_098, 0.15),
+        median: None,
+        limits: (0.477_121, 1.301_030),
+    },
+    SamplerMark {
+        name: "neutron_star_progenitor_rank",
+        residual: IDENTITY_RANKS,
+        median: None,
+        limits: (0.0, 1.0),
+    },
+    SamplerMark {
+        name: "black_hole_progenitor_rank",
+        residual: IDENTITY_RANKS,
+        median: None,
+        limits: (0.0, 1.0),
+    },
+    SamplerMark {
+        name: "age_rank",
+        residual: IDENTITY_RANKS,
+        median: None,
+        limits: (0.0, 1.0),
     },
 ];
 
@@ -808,5 +960,38 @@ mod tests {
         for (band, &weight) in MassBand::ALL.iter().zip(weights) {
             assert!((weight - row.layer_share(*band)).abs() < 1e-15, "{band:?}");
         }
+    }
+
+    /// The neutron-star mergers' table follows its mark list, each residual is non-decreasing, its
+    /// masses are inside plan 06's neutron stars' and the black holes', and its kinds' weights sum
+    /// to 1.
+    #[test]
+    fn the_nsm_table_follows_its_mark_list() {
+        use crate::stellar::remnant::collapse::{MAX_NEUTRON_STAR_MASS, MIN_NEUTRON_STAR_MASS};
+        let names = [
+            "neutron_star_mass",
+            "log_black_hole_mass",
+            "neutron_star_progenitor_rank",
+            "black_hole_progenitor_rank",
+            "age_rank",
+        ];
+        assert_eq!(NSM_SAMPLER.marks().len(), NsmMark::ALL.len());
+        for (mark, name) in NsmMark::ALL.into_iter().zip(names) {
+            let law = NSM_SAMPLER.mark(mark);
+            assert_eq!(law.name(), name);
+            assert!(law.residual().windows(2).all(|w| w[0] <= w[1]), "{name}");
+            let (lo, hi) = law.limits();
+            assert!(lo < hi, "{name}");
+        }
+        let (lo, hi) = NSM_SAMPLER.mark(NsmMark::NeutronStarMass).limits();
+        assert_eq!(
+            (lo, hi),
+            (MIN_NEUTRON_STAR_MASS.value(), MAX_NEUTRON_STAR_MASS.value())
+        );
+        let (lo, _) = NSM_SAMPLER.mark(NsmMark::LogBlackHoleMass).limits();
+        assert!(crate::math::exp10(lo) > MAX_NEUTRON_STAR_MASS.value());
+        let kinds = NSM_SAMPLER.pick(NsmPick::PairKind).weights();
+        assert_eq!(kinds.len(), NsmPairKind::ALL.len());
+        assert!((kinds.iter().sum::<f64>() - 1.0).abs() < 1e-12);
     }
 }

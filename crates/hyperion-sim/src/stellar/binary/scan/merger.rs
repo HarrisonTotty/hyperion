@@ -212,7 +212,7 @@ pub fn horizon_time(share: f64) -> UniverseTime {
 /// The state at `age` of a star of initial mass `m0`, `composition` and `draws` under `rules`, on
 /// its own track, if it is on its main sequence then.
 #[must_use]
-pub(crate) fn main_sequence_at(
+fn main_sequence_at(
     m0: SolarMasses,
     composition: &Composition,
     draws: &StarDraws,

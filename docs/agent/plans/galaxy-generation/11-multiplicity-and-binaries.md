@@ -1618,6 +1618,8 @@ tables must keep that under one in ten, which a test counts.
   the remnant by total mass. Test: the expected count at Milky Way parameters is 8–12, the
   brainstorm's "about 10", and the realised counts of ten seeds pass
   `hyperion_testkit::stats::assert_poisson_count` against it.
+  _As built (lane `p11-t8cd`, 2026-10-31; at version 24, no bump): see Risks, "P11.T8.d as
+  built"._
 - **P11.T8.e The centre's feature-level index.** Plan 09 flags it and the arithmetic bears it out:
   the index under the spare band value is 13 bits, 8,192 members, and a nuclear cluster of 4–6 × 10⁷
   systems at the galaxy-wide share of 10⁻⁴ expects 2,400–6,000 accreting white dwarfs before any
@@ -6195,6 +6197,27 @@ galaxy_sweeps`.
   - _The sampler's test_ is against `brute_force_merger_members`: the engine's first-attempt pairs
     that merged at any age, kept by `carved_class(timeline, T)` and weighted by the component's age
     hazard f(T) ÷ (1 − F(T)), since about one grid system in 10⁶ merges inside the horizon.
+  - _Not built._ Plan 09's `assert_complementary`, as for T8.a; the classes' own every-age tests
+    stand in.
   - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::merger`, `rng::tags`,
     `tables::binary`; slow, `tests/binary_mergers.rs` (with `testing`) and
     `tests/source_horizon.rs`'s new row.
+- **P11.T8.d as built** (lane `p11-t8cd`, 2026-10-31; at version 24, no bump; `golden_diff.py`
+  "extended only").
+  - _Files._ `galaxy/catalogue_classes/binary/nsm.rs` (`NeutronStarMergers`, `Inspiral`,
+    `NsmEntry`, on T8.c's `ClassHosts`); `stellar/binary/scan/nsm.rs` (`NsmScanMarks`,
+    `nsm_scan_marks`, `scan_nsm_cell`); `tables::binary::NSM_SAMPLER` (`NsmMark`, `NsmPick`,
+    `NsmPairKind`); the arm for class 3; tags `class.nsm.{site,time,metallicity,mass,velocity,binary}`.
+  - _What T9.b and P12.T5.b read_ (`NsmScanMarks`): `merger_time()` (bin 0 and number 0 of
+    `0x0306`), `ejecta_mass()` (`GW170817_EJECTA_MASS`: no ejecta model), `total_mass()`,
+    `remnant_phase()` and `remnant_mass()`, `position_at(T)`, `velocity()`, `id()`.
+  - _The pair (lean, 2026-10-31)._ Two neutron stars (0.8) or a black hole and a neutron star
+    (0.2); the primary is the heavier progenitor (8–20 M☉ for a neutron star, 25–60 for a black
+    hole); kept only if both progenitors' plan 06 lifetimes end before T. Before T: detached, the
+    circular orbit whose Peters merger time is T − (start of the source horizon), held fixed
+    (`from_marks` holds orbits), each compact star at its state at T.
+  - _The remnant (lean, 2026-10-31)._ The engine's rule (P11.T4.d's `mix`): a black hole of the
+    total mass above `MAX_NEUTRON_STAR_MASS` (2.0 M☉), so every merger leaves a black hole.
+  - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::nsm`; slow,
+    `tests/binary_mergers.rs`'s `ten_milky_way_seeds_realise_their_neutron_star_mergers` and
+    `the_nsm_sampler_against_the_engine_s_mergers` (with `testing`), and `tests/source_horizon.rs`.

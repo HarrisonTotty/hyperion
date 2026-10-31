@@ -11,10 +11,10 @@
 //! P09.T21), the dwarf cores' and the streams' members (plan 10, P10.T7.b and P10.T8.b), the
 //! supernova entry of plan 09's phase 4 as a value, and the catalogue classes' entries built so
 //! far, the core collapses (P09.T33.a), the Type Ia (P09.T34.a), the luminous blue variables
-//! (P09.T43), the accreting white dwarfs, fast and slow (P11.T8.a), and the stellar mergers
-//! (P11.T8.c). The displaced remnants (plan 08, P08.T12), the galactic centre's members
-//! (P09.T24–T28) and the other catalogue classes (P09.T35, P11.T8.b and T8.d) are not placed yet;
-//! each is added here by the task that places it (P12.T0 as built).
+//! (P09.T43), the accreting white dwarfs, fast and slow (P11.T8.a), and the stellar and
+//! neutron-star mergers (P11.T8.c–d). The displaced remnants (plan 08, P08.T12), the galactic
+//! centre's members (P09.T24–T28) and the other catalogue classes (P09.T35, P11.T8.b) are not
+//! placed yet; each is added here by the task that places it (P12.T0 as built).
 
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
@@ -24,7 +24,7 @@ use hyperion_sim::events::{
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::binary::{
-    AccretingWdFast, AccretingWdSlow, StellarMergers,
+    AccretingWdFast, AccretingWdSlow, NeutronStarMergers, StellarMergers,
 };
 use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use hyperion_sim::galaxy::catalogue_classes::lbv::LbvProcess;
@@ -588,7 +588,7 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
     // its record's existence, and its stars, the contact pair before its merger time and the
     // merged star from it, under the one ID.
     let mergers = StellarMergers::new(&galaxy);
-    let entry = (-2..2)
+    let stellar = (-2..2)
         .find_map(|x| {
             let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, [x, 6, 0])
                 .expect("a cell of the root cube");
@@ -598,27 +598,56 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
                 .next()
         })
         .expect("the solar circle has stellar mergers");
-    let catalogue = system_of(&galaxy, entry.id()).expect("an entry resolves");
-    let record = catalogue.record();
-    let stars = catalogue
-        .stars(&galaxy)
-        .expect("a stellar merger's stars are its pair's");
-    let merger = entry.value().scan().merger_time();
-    for t in TIMES {
-        let p = catalogue.position_at(t);
-        assert_in_padded_cube("a stellar merger", &p);
-        assert_eq!(position_at(&galaxy, record, t), p);
-        assert_eq!(record.existence_at(t), Existence::Exists);
-        assert!(record.age_at(t).value().is_finite());
-        assert_eq!(stars.summary_at(t).existence(), SystemExistence::Exists);
-        assert!(stars.brief_at(t).is_some(), "{:?} at {t}", record.id());
-        let state = stars.state_at(t).expect("the system exists");
-        let living = state
-            .stars()
-            .iter()
-            .filter(|s| s.phase().is_living())
-            .count();
-        assert_eq!(living, if t < merger { 2 } else { 1 }, "at {t}");
+    // A neutron-star merger, the first of the galaxy's, walked cell by cell from the centre's.
+    let neutron_stars = NeutronStarMergers::new(&galaxy);
+    let compact = (0..16)
+        .flat_map(|r: i32| {
+            (-r..r.max(1)).flat_map(move |x| {
+                (-r..r.max(1)).flat_map(move |y| (-1..1).map(move |z| [x, y, z]))
+            })
+        })
+        .find_map(|cell| {
+            let key = CatalogueCellKey::new(ClassId::NEUTRON_STAR_MERGER, cell)
+                .expect("a cell of the root cube");
+            CatalogueClassCell::generate(&galaxy, &neutron_stars, key)
+                .into_entries()
+                .into_iter()
+                .next()
+        })
+        .expect("the galaxy has a neutron-star merger in the disc");
+    for (id, merger, what) in [
+        (
+            stellar.id(),
+            stellar.value().scan().merger_time(),
+            "a stellar merger",
+        ),
+        (
+            compact.id(),
+            compact.value().scan().merger_time(),
+            "a neutron-star merger",
+        ),
+    ] {
+        let catalogue = system_of(&galaxy, id).expect("an entry resolves");
+        let record = catalogue.record();
+        let stars = catalogue
+            .stars(&galaxy)
+            .expect("a merger's stars are its pair's");
+        for t in TIMES {
+            let p = catalogue.position_at(t);
+            assert_in_padded_cube(what, &p);
+            assert_eq!(position_at(&galaxy, record, t), p);
+            assert_eq!(record.existence_at(t), Existence::Exists);
+            assert!(record.age_at(t).value().is_finite());
+            assert_eq!(stars.summary_at(t).existence(), SystemExistence::Exists);
+            assert!(stars.brief_at(t).is_some(), "{:?} at {t}", record.id());
+            let state = stars.state_at(t).expect("the system exists");
+            let present = state
+                .stars()
+                .iter()
+                .filter(|s| s.phase() != hyperion_sim::stellar::Phase::NoRemnant)
+                .count();
+            assert_eq!(present, if t < merger { 2 } else { 1 }, "{what} at {t}");
+        }
     }
 
     // Both event constructions answer for a window at the horizon's start.

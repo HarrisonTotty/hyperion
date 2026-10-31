@@ -21,8 +21,8 @@
 //!
 //! **The production lookup**, [`ProductionClasses`], has one arm per class whose process is built:
 //! P09.T33.a's core collapses, P09.T34.a's Type Ia, P09.T43's luminous blue variables, P11.T8.a's
-//! two accreting white dwarf classes and P11.T8.c's stellar mergers so far. Every other `111` ID
-//! that reaches
+//! two accreting white dwarf classes and P11.T8.c's and T8.d's two merger classes so far. Every
+//! other `111` ID that reaches
 //! the grid answers [`NoSuchSystem`](ResolveSystemError::NoSuchSystem). Plan 03's
 //! [`placement::resolve`](crate::galaxy::placement::resolve) answers a `111` ID through it, with
 //! the record its class gives the member ([`ClassProcess::system`], [`system_of`]).
@@ -52,7 +52,7 @@ mod tests;
 use std::error::Error;
 use std::fmt;
 
-use super::binary::{AccretingWdFast, AccretingWdSlow, StellarMergers};
+use super::binary::{AccretingWdFast, AccretingWdSlow, NeutronStarMergers, StellarMergers};
 use super::core_collapse::CoreCollapseProcess;
 use super::ids::{CatalogueCellKey, entry_of};
 use super::lbv::LbvProcess;
@@ -783,8 +783,9 @@ pub trait ClassLookup {
 /// P09.T34.a and [`LUMINOUS_BLUE_VARIABLE`](ClassId::LUMINOUS_BLUE_VARIABLE) by P09.T43 (all three
 /// registered), and plan 11's five by P11.T8, of which
 /// [`ACCRETING_WHITE_DWARF`](ClassId::ACCRETING_WHITE_DWARF) and
-/// [`ACCRETING_WHITE_DWARF_SLOW`](ClassId::ACCRETING_WHITE_DWARF_SLOW) (P11.T8.a) and
-/// [`STELLAR_MERGER`](ClassId::STELLAR_MERGER) (P11.T8.c) are registered.
+/// [`ACCRETING_WHITE_DWARF_SLOW`](ClassId::ACCRETING_WHITE_DWARF_SLOW) (P11.T8.a),
+/// [`STELLAR_MERGER`](ClassId::STELLAR_MERGER) (P11.T8.c) and
+/// [`NEUTRON_STAR_MERGER`](ClassId::NEUTRON_STAR_MERGER) (P11.T8.d) are registered.
 /// [`TIDAL_DISRUPTION_VICTIM`](ClassId::TIDAL_DISRUPTION_VICTIM) is never placed and gets none.
 /// Until its class's arm is added, every `111` ID of a class answers
 /// [`NoSuchSystem`](ResolveSystemError::NoSuchSystem).
@@ -807,6 +808,7 @@ impl ClassLookup for ProductionClasses {
                 Some(visitor.visit(&AccretingWdSlow::new(galaxy)))
             }
             ClassId::STELLAR_MERGER => Some(visitor.visit(&StellarMergers::new(galaxy))),
+            ClassId::NEUTRON_STAR_MERGER => Some(visitor.visit(&NeutronStarMergers::new(galaxy))),
             _ => None,
         }
     }
@@ -833,8 +835,8 @@ impl ClassLookup for ProductionClasses {
 /// # Examples
 ///
 /// Every catalogue ID that arrives from a save or the protocol goes through the production lookup,
-/// to which plan 03's resolve hands it (P09.T33.a). A class whose process is not built yet names
-/// nothing:
+/// to which plan 03's resolve hands it (P09.T33.a). An ID whose index lies past its cell's
+/// candidates names nothing, as one of a class whose process is not built yet does:
 ///
 /// ```
 /// use hyperion_sim::Seed;

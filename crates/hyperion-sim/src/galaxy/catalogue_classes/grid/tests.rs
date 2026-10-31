@@ -988,14 +988,15 @@ fn built(class: u8) -> bool {
         ClassId::ACCRETING_WHITE_DWARF,
         ClassId::ACCRETING_WHITE_DWARF_SLOW,
         ClassId::STELLAR_MERGER,
+        ClassId::NEUTRON_STAR_MERGER,
     ]
     .iter()
     .any(|built| built.value() == class)
 }
 
-/// P09.T33.a, P09.T34.a, P09.T43, P11.T8.a and P11.T8.c: the production lookup visits the core
-/// collapses, the Type Ia, the luminous blue variables, the accreting white dwarfs and the stellar
-/// mergers alone; every other
+/// P09.T33.a, P09.T34.a, P09.T43, P11.T8.a, c and d: the production lookup visits the core
+/// collapses, the Type Ia, the luminous blue variables, the accreting white dwarfs and the two
+/// merger classes alone; every other
 /// class's IDs name nothing in the grid, and
 /// plan 03's resolve answers each `111` ID through `system_of`, with the record its class gives
 /// the member, or as not generated for a placed class with no process yet.
