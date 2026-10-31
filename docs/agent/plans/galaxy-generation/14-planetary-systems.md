@@ -33214,12 +33214,14 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     349 h (a ÷ `L_Ro` 0.35) holds none; Venus none.
   - A step is molten at `Crust::Molten` (`ClimateBody::crust`, new) or at or over
     `SILICATE_SOLIDUS`; the record, at `MagmaOcean`.
-  - The census (`system/cap_balance_tests.rs`) moves 12 records (`MOVERS`) and 3 in their last
-    bits (`NUDGED`). The cap `partition_over` reads, which the passes' area mix reads too, keeps
-    01fffb2be0000000.0500 at 35.6 bar and takes close_binary 42002cb200000009.0700 to a 0.36 bar
-    `Snowball` at 122 K. Pending main's ruling.
-  - "Settled" is read as the passes' `Convergence::Converged` (lean, 2026-10-31; the amendment's
-    brief was not reachable): the cap unsettles six movers, listed in the test's doc.
+  - The census (`system/cap_balance_tests.rs`) moves 13 records at the landed tip (`MOVERS`) and
+    2 in their last bits (`NUDGED`): 01fffb2be0000000.0500, a last-bits record at the lane's
+    base, is a 0.70 bar `Snowball` there. The cap `partition_over` reads, which the passes' area
+    mix reads too, takes close_binary 42002cb200000009.0700 to a 0.36 bar `Snowball` at 122 K.
+  - "Settled" is the amendment's (main, 2026-10-31): one more partition over the span at the
+    published state moves a mover's CO₂ by under 5%, read through the test-only
+    `atmosphere::settled_log`; its failures are listed, not pinned. Each mover's line prints its
+    last step's a ÷ `L_Ro` and `T_c`, the gates aside (`hooks::surface::step_cap_figures`).
   - Every locked world is outside the cap by `rotates` at both sites; the census asserts no mover
     is locked.
   - `locked_climate_tests::deck_alone` sets the cap back to `Held`.

@@ -990,6 +990,10 @@ struct Solve<'a> {
     /// Its partition's supercritical reservoir with the most liquid-like fluid at its last step
     /// (P14.T53.b part 3, [`partitioned_greenhouse`]): `None` under part 3's hold.
     supercritical: Option<CriticalColumn>,
+    /// Under the tests' settled log ([`settled_log`]), what it logs of this solve as published:
+    /// `None` with the log off.
+    #[cfg(test)]
+    settled: Option<settled_log::Settled>,
 }
 
 impl Solve<'_> {
@@ -1536,6 +1540,8 @@ impl<'b> Solver<'_, 'b> {
         // A local of this greenhouse, whose steps often fill the basins at the step before's layer.
         let fills = FillSlot::default();
         let climate_of = |t: Kelvin, partials: &PartialPressures| step.at(t, partials, &fills);
+        #[cfg(test)]
+        let evaluated = crate::planetary::chem::partition::exit_counts().evaluations;
         let (t, partials, tau, supercritical) = partitioned_greenhouse(
             &inventory,
             self.body.base,
@@ -1544,6 +1550,26 @@ impl<'b> Solver<'_, 'b> {
             (&self.ground, self.body.ceiling),
             steps,
         );
+        #[cfg(test)]
+        let settled = settled_log::on().then(|| {
+            let steps = crate::planetary::chem::partition::exit_counts().evaluations - evaluated;
+            let span = climate_of(Kelvin::new(t), &partials);
+            let again = super::partitioned_partials(
+                &inventory,
+                &span,
+                &self.ground,
+                &mut crate::planetary::chem::partition::AirborneWeights::new(),
+            );
+            settled_log::Settled {
+                t,
+                total: partials.total().value(),
+                carbon_dioxide: partials.of(Gas::CarbonDioxide).value(),
+                again: again.of(Gas::CarbonDioxide).value(),
+                steps,
+                cap: span.cap().map(|(_, cap)| cap.value()),
+                figures: step.cap_figures(Kelvin::new(t), &partials),
+            }
+        });
         Some(Solve {
             air: *air,
             column,
@@ -1552,6 +1578,8 @@ impl<'b> Solver<'_, 'b> {
             tau,
             step,
             supercritical,
+            #[cfg(test)]
+            settled,
         })
     }
 
@@ -2106,6 +2134,8 @@ fn finish(
         ..
     } = *solved;
     let carrier = air.carrier;
+    #[cfg(test)]
+    settled_log::published(solved.settled);
     // The state, as before: a molten surface's melt holds the air's oxygen while it is molten.
     let molten = state == SurfaceState::MagmaOcean || t >= SILICATE_SOLIDUS.value();
     let melt_takes_oxygen = molten && air.oxygen > 0.0;
@@ -2205,5 +2235,72 @@ fn finish(
         kept_water,
         steam_envelope: steam_hides_the_surface(solved.supercritical, gravity),
         present: None,
+    }
+}
+
+/// P14.T53.h's settled check, test-only: each published solve's greenhouse step count, the CO₂
+/// one more partition of its inventory over the span at its final state holds, and that span's
+/// cap, logged on this thread while a test captures them ([`capture`](settled_log::capture)), so
+/// that a census can ask whether a body's steps had settled where its passes published it.
+#[cfg(test)]
+pub(crate) mod settled_log {
+    use std::cell::RefCell;
+
+    use crate::planetary::hooks::surface::CapFigures;
+
+    /// One published solve ([`super::finish`]), as its greenhouse left it.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub(crate) struct Settled {
+        /// Its final temperature, K, and its total and CO₂'s partial pressures, Pa.
+        pub(crate) t: f64,
+        pub(crate) total: f64,
+        pub(crate) carbon_dioxide: f64,
+        /// The CO₂ one more partition of its inventory over the span at its final state holds, Pa.
+        pub(crate) again: f64,
+        /// Its greenhouse's steps, the evaluations of its partition.
+        pub(crate) steps: u64,
+        /// The CO₂ cap that span carries, K.
+        pub(crate) cap: Option<f64>,
+        /// The cap's figures at that step's column, the gates aside: `None` for a climate given.
+        pub(crate) figures: Option<CapFigures>,
+    }
+
+    thread_local! {
+        /// The solves published on this thread while a capture runs, `None` with none running.
+        static LOG: RefCell<Option<Vec<Settled>>> = const { RefCell::new(None) };
+    }
+
+    /// Whether a capture runs on this thread.
+    pub(crate) fn on() -> bool {
+        LOG.with(|log| log.borrow().is_some())
+    }
+
+    /// Logs a published solve's `settled` ([`super::Solve`]), where a capture runs.
+    pub(super) fn published(settled: Option<Settled>) {
+        let Some(settled) = settled else {
+            return;
+        };
+        LOG.with(|log| {
+            if let Some(entries) = log.borrow_mut().as_mut() {
+                entries.push(settled);
+            }
+        });
+    }
+
+    /// `run`'s result and the solves it published, in order; the log is set back after, a panic in
+    /// `run` included.
+    pub(crate) fn capture<R>(run: impl FnOnce() -> R) -> (R, Vec<Settled>) {
+        /// Sets the thread's log back as it drops.
+        struct Restore(Option<Vec<Settled>>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                LOG.with(|log| *log.borrow_mut() = self.0.take());
+            }
+        }
+        let restore = Restore(LOG.with(|log| log.borrow_mut().replace(Vec::new())));
+        let result = run();
+        let entries = LOG.with(|log| log.borrow_mut().replace(Vec::new()).unwrap_or_default());
+        drop(restore);
+        (result, entries)
     }
 }

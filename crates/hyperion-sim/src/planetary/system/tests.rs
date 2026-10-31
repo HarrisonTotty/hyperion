@@ -13721,10 +13721,12 @@ pub(crate) struct ThinAirBody {
     pub(crate) rossby: f64,
     /// Its hosts' light, S ÷ S⊕.
     pub(crate) flux_earths: f64,
-    /// How its derivation's passes settled: `Converged` within the plain passes, or bracketed.
-    pub(crate) convergence: crate::planetary::derive::passes::Convergence,
     /// The spin its record's conditions were derived under.
     pub(crate) spin: crate::planetary::hooks::surface::SeasonalSpin,
+    /// Its derivation's surface temperature, K, and airborne CO₂, Pa: what P14.T53.h's settled
+    /// log is matched on.
+    pub(crate) air_t: f64,
+    pub(crate) co2: f64,
 }
 
 impl ThinAirBody {
@@ -13823,8 +13825,9 @@ impl ThinAirBody {
             rossby: rossby_ratio(conditions, derived),
             flux_earths: conditions.stellar_flux().value()
                 / crate::units::consts::SOLAR_CONSTANT_W_PER_M2,
-            convergence: derived.convergence(),
             spin: conditions.spin(),
+            air_t: air.surface_temperature().value(),
+            co2: air.partial_pressures().of(Gas::CarbonDioxide).value(),
         })
     }
 

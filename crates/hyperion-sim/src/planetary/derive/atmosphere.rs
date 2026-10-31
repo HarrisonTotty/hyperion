@@ -78,8 +78,8 @@ pub use escaping::{
 };
 #[cfg(test)]
 pub(crate) use escaping::{
-    MeltOxygenRules, Thermostat, ThermostatCounts, WaterPhase, water_phase, with_melt_oxygen,
-    with_resolve_check, with_thermostat,
+    MeltOxygenRules, Thermostat, ThermostatCounts, WaterPhase, settled_log, water_phase,
+    with_melt_oxygen, with_resolve_check, with_thermostat,
 };
 #[cfg(test)]
 pub(crate) use present::{
@@ -3550,6 +3550,25 @@ impl<'a> StepClimate<'a> {
             } => {
                 let theta = context.ocean_weight_in(water, partials.of(Gas::Water), fills);
                 step_climate(body, theta, t, partials)
+            }
+        }
+    }
+
+    /// The CO₂ cap's figures at the column of a step at mean surface temperature `t` over the
+    /// partial pressures `partials`, whether or not the gates let a cap form there
+    /// ([`step_cap_figures`](crate::planetary::hooks::surface::step_cap_figures), P14.T53.h's
+    /// census): `None` for a climate given, which has no column.
+    #[cfg(test)]
+    #[must_use]
+    fn cap_figures(
+        &self,
+        t: Kelvin,
+        partials: &PartialPressures,
+    ) -> Option<crate::planetary::hooks::surface::CapFigures> {
+        match self {
+            Self::Given(_) => None,
+            Self::Spun { body, .. } => {
+                crate::planetary::hooks::surface::step_cap_figures(body, t, partials)
             }
         }
     }
