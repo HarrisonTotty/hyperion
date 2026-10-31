@@ -29,7 +29,9 @@
 //! has stars of those ages, the components whose age density is positive there: the young thin
 //! disc, all of whose stars are young, and the nuclear disc's two components, a twentieth of whose
 //! stars formed in the last gigayear (`AgeDistribution::nuclear_disc`, after Nogueras-Lara et al.
-//! 2020, Nature Astronomy 4, 377).
+//! 2020, Nature Astronomy 4, 377). From generator version 26 the field gives the features their
+//! share (plan 09, P09.T2.c), and the class follows the field as the grid places it: each
+//! component's layer-E share is the field's, and the young disc's ages the young field's.
 //!
 //! # The envelope and a candidate
 //!
@@ -407,7 +409,6 @@ impl LbvProcess {
     #[must_use]
     pub fn new(galaxy: &Galaxy) -> Self {
         let fields = galaxy.fields();
-        let shares = galaxy.shares();
         let mass_function = galaxy.mass_function();
         let band = mass_function.integral(MassBand::E.lo(), MassBand::E.hi());
         let nodes: [LbvMassNode; NODES] = core::array::from_fn(|k| {
@@ -435,10 +436,10 @@ impl LbvProcess {
         let components = fields
             .component_ids()
             .filter_map(|id| {
-                let component = fields.component(id);
-                let share = shares.component_share(MassBand::E, component);
-                let rate = component
-                    .ages()
+                // The field's share and ages: the budget's until P09.T2.c's version 26.
+                let share = galaxy.field_component_share(MassBand::E, id);
+                let rate = galaxy
+                    .field_ages(id)
                     .max_pdf_between(Years::new(earliest), Years::new(latest));
                 (share > 0.0 && rate > 0.0).then(|| {
                     let rate = rate * (1.0 + BOUND_MARGIN);
@@ -551,7 +552,7 @@ impl ClassProcess for LbvProcess {
         let (first, last) = (node.ages.0.value(), node.ages.1.value());
         let age_at_epoch = Years::new(first + stream.uniform() * (last - first));
         if !stream.decide(Threshold::from_ratio(
-            laws.ages().pdf(age_at_epoch),
+            galaxy.field_ages(component).pdf(age_at_epoch),
             young.rate_per_year,
         )) {
             return None;

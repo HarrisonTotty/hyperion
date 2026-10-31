@@ -21,6 +21,7 @@ use crate::GENERATOR_VERSION;
 use crate::coords::GalacticPosition;
 use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules, YOUNG_AGE_LIMIT};
 use crate::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+use crate::galaxy::catalogue_classes::lbv::LbvProcess;
 use crate::galaxy::catalogue_classes::type_ia::TypeIaProcess;
 use crate::galaxy::features::shares::phi_young;
 use crate::galaxy::map::{MapSelection, MapSpec, MapView, render_rows};
@@ -543,7 +544,9 @@ fn where_the_rogue_planets_saturate_the_field_keeps_its_share() {
 /// The catalogue classes of the field's deaths read the field: the core-collapse class's
 /// components take their field's share of layer E and the young field's largest death rate, and
 /// the Type Ia class's components their field's explosions, each the budget's times the field
-/// factor but the young disc's, over the field's ages.
+/// factor but the young disc's, over the field's ages; and the luminous blue variables' class
+/// takes the field's layer-E share and, for the young disc, the young field's ages, the fewer for
+/// its hosts' few million years, nine in ten of whose stars are in their nurseries.
 #[test]
 fn the_catalogue_classes_follow_the_field() {
     let (held, field, share) = (held(), field(), share());
@@ -576,6 +579,17 @@ fn the_catalogue_classes_follow_the_field() {
                 k.explosions_per_system(),
                 b.explosions_per_system() * factor,
             );
+        }
+    }
+    let (lbv_budget, lbv_kept) = (LbvProcess::new(held), LbvProcess::new(field));
+    assert_eq!(lbv_budget.components().len(), lbv_kept.components().len());
+    for (b, k) in lbv_budget.components().iter().zip(lbv_kept.components()) {
+        assert_eq!(b.id(), k.id());
+        assert_same_bits(k.share(), b.share() * share.factor(b.id(), MassBand::E));
+        if b.id() == young {
+            assert!(k.rate_per_year() < b.rate_per_year());
+        } else {
+            assert_same_bits(k.rate_per_year(), b.rate_per_year());
         }
     }
     let rate = |p: &TypeIaProcess| p.delays().rate_per_year();

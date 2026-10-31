@@ -5290,8 +5290,9 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `Galaxy::{field_share, field_ages, field_part, field_component_share}`, the budget's verbatim
     under `None`. `Galaxy::with_rules` refuses a change of it (debug assert).
   - _Where φ applies (lean, 2026-10-31)._ `Fields` stays the budget. The field: placement's
-    thinning, `query::expected_counts`, `CoreCollapseProcess`, `TypeIaProcess`
-    (`DelayTimeDistribution::of_field`) and `ClassTable::stay_share`. The budget, on either arm: the
+    thinning, `query::expected_counts`, `CoreCollapseProcess`, `LbvProcess` (P09.T43, since the
+    rebase onto it), `TypeIaProcess` (`DelayTimeDistribution::of_field`) and
+    `ClassTable::stay_share`. The budget, on either arm: the
     gas, `SubstellarAbundance`, `KinematicTables`, `FeatureShares` and the catalogue, `map`,
     `derive`'s mean masses (the system count, the potential), `small_bodies`, `displaced_forms`'
     fit, `DelayTimeDistribution::from_galaxy`, `bounds` and `headroom`, the record's age draw
