@@ -432,8 +432,10 @@ fn resolved_ids_are_pinned() {
 /// disc's youngest systems. Every young-disc record of each stellar layer whose epoch position
 /// lies within [`PRE_PIN_RADII_LY`] of the association's centre is pinned by its count and a
 /// digest (`f64_digest` of each record's ID, high and low 32 bits, its offsets in metres, mass and
-/// age, in walk order), and those of layers D and E in full. It is an extension at the version in
-/// force; P09.T2.c's hold leaves it unchanged, and at 26 only its counts move.
+/// age, in walk order), and those of layers D and E in full, each labelled by its ID, so that a
+/// record the field gives up takes only its own lines with it. It is an extension at the version
+/// in force; P09.T2.c's hold leaves it unchanged, and at 26 records leave it, the counts and digests
+/// move, and no record that stays changes.
 #[test]
 fn young_field_by_an_association_is_pinned() {
     let galaxy = Galaxy::from_params(Seed::new(FIXTURE_SEED), GalaxyParams::milky_way_like())
@@ -500,8 +502,12 @@ fn young_field_by_an_association_is_pinned() {
         w.line(&format!("{label}.records = {}", young.len()));
         w.u64_hex(&format!("{label}.digest"), f64_digest(&values));
         if matches!(layer, Layer::D | Layer::E) {
-            for (index, record) in young.iter().enumerate() {
-                write_record(&mut w, &format!("{label}.s{index}"), record);
+            for record in &young {
+                write_record(
+                    &mut w,
+                    &format!("{label}.{:016x}", record.id().raw()),
+                    record,
+                );
             }
         }
     }
