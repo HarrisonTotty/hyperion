@@ -23917,3 +23917,27 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     disc table and the kernels' targets are `rgba16float`. The disc table's thermal scale is now
     π L_th's largest magnitude: a glow negative in every value had lost its layer. Tests pin the
     formats and carry a negative channel through the halves, the packing and part 9's GPU case.
+- **R08.T12.h, as built** (2026-10-30; what later tasks consume; measurements in the lane's outbox):
+  - `Estimator::ByMedium` adds the deep estimator where the column's vertical τ at the equator
+    reaches `DEEP_OPTICAL_DEPTH` = 6 (lean, 2026-10-30, not the lean 5, which the benchmarks' τ 5
+    clouds sit on): every channel of the five thick cases, none of the thin ones.
+  - `Estimator::Shallow` is `ByMedium` without it, and `trace_counted`, `trace_spans` and
+    `runs_vroom` (R08.T13's sweep, whose τ reaches 8) run it, so the sweep keeps its paths (lean).
+  - `atmosphere/importance.rs` (`Importance`, `solve`) and `Phase::mean_cosine()`. The beam's
+    anisotropic term takes Meador and Weaver 1980's sign, the opposite of the method's pilot's.
+  - On a spheroid τᵥ is 0.9 × the least vertical depth at latitudes 5° apart: one vertical's
+    failed the bound high in a thin column.
+  - `atmosphere-reference … --work DIR [--resume-other-build]` (`trace_reference_resumably`,
+    `TraceWork`, `OtherBuilds`, `Resumed`, and `TraceReferenceError`'s `Work`, `CorruptCheckpoint`,
+    `StaleCheckpoint` and `OtherBuildCheckpoint`, exit code 1). A checkpoint per geometry or
+    aggregate flux and wavelength, `geometry-0012-w1.json`, keyed by the case's SHA-256, the mode
+    and `--samples`; another build's is refused unless the flag reads it.
+  - Left undone: the four re-traces (main's lanes, from the pilots' counts in the outbox), so the
+    thick references, `sampleCounts.json`, `refusals.json` and `sanityRanges.json` are unchanged,
+    and `atmosphere-reference` no longer reproduces the thick references' bits; per-wavelength
+    counts; §2.5. `venus-92bar-albedo` goes deep too and is not re-traced (QUESTION).
+  - The Titan lane re-runs
+    `atmosphere_importance_is_positive_and_lights_titans_ground_within_3_times_the_tracer`, which
+    reads `titan-class.reference.json`.
+  - The slow `the_deep_estimator_agrees_with_vroom_where_vroom_converges` holds 16 views
+    (`DEEP_CHECK_VIEWS`) from a pilot at seeds 100 and 101, at seeds 0 and 1.

@@ -2262,6 +2262,169 @@ fn vroom_agrees_with_the_sunward_draws_where_they_converge() {
 /// the sunward draws': set from the pilot (R08's Risks), so that each σ is some 0.25% of I at most.
 const VROOM_CHECK_SAMPLES: [u64; 2] = [700_000, 1_600_000];
 
+/// The sun's zenith angle in R08.T12.h's check of the deep estimator.
+const DEEP_CHECK_SUN_ZENITH_DEG: f64 = 30.0;
+
+/// The name of R08.T12.h's check of the deep estimator against VROOM.
+const DEEP_CHECK: &str = "the deep estimator against VROOM, Henyey–Greenstein g 0.7, τ 6, ω 0.99";
+
+/// The comparisons of R08.T12.h's check of the deep estimator against VROOM as built: a slab of
+/// τ 6 and ω 0.99 scattering by Henyey–Greenstein at g 0.7 (a table without polarisation, so that
+/// I alone is compared) over a Lambertian ground of albedo 0.3, the sun 30° from the zenith, seen
+/// from `views`, traced with the deep estimator forced on at `seeds[0]` and `samples[0]`, and with
+/// VROOM alone (`Estimator::Shallow`) at `seeds[1]` and `samples[1]`. Each value is the deep
+/// estimator's I against VROOM's, and its σ is taken to fall as N^(−1/2) only where both sides' do.
+fn deep_against_vroom(
+    views: &[(Level, f64, f64)],
+    seeds: [u64; 2],
+    samples: [u64; 2],
+) -> Vec<Comparison> {
+    let phase = super::case::tests::tabulated_phase_json(1024, 1, |c| {
+        [
+            super::optics::tests::henyey_greenstein(0.7, c),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ]
+    });
+    let sun = (DEEP_CHECK_SUN_ZENITH_DEG, 0.0);
+    let geometries: Vec<Value> = views
+        .iter()
+        .map(|&(level, vza, phi)| {
+            let zenith = if level == Top { 180.0 - vza } else { vza };
+            geometry(&format!("{level:?} {vza} {phi}"), level, zenith, phi, sun)
+        })
+        .collect();
+    let slab = |seed: u64| Slab {
+        name: DEEP_CHECK,
+        tau: 6.0,
+        omega: 0.99,
+        phase: &phase,
+        albedo: 0.3,
+        irradiance: 1.0,
+        seed,
+    };
+    let on = trace_with(
+        &slab(seeds[0]).case(&geometries),
+        samples[0],
+        Estimator::Deep,
+    );
+    let off = trace_with(
+        &slab(seeds[1]).case(&geometries),
+        samples[1],
+        Estimator::Shallow,
+    );
+    views
+        .iter()
+        .enumerate()
+        .map(|(g, &(level, vza, phi))| {
+            let side = |traced: &Traced| {
+                let (full, quarter) = (
+                    &traced.full.geometries()[g],
+                    &traced.quarter.geometries()[g],
+                );
+                let sigma = full.standard_error()[0];
+                (
+                    full.radiance()[0],
+                    sigma,
+                    sigma_scales(sigma, quarter.standard_error()[0]),
+                )
+            };
+            let ((i_on, sigma_on, on_scales), (i_off, sigma_off, off_scales)) =
+                (side(&on), side(&off));
+            Comparison {
+                label: format!("{level:?} VZA {vza} φ {phi}"),
+                component: Component::I,
+                traced: i_on,
+                sigma: sigma_on,
+                sigma_scales: on_scales && off_scales,
+                expected: i_off,
+                expected_sigma: sigma_off,
+                intensity: i_off,
+            }
+        })
+        .collect()
+}
+
+/// The views of R08.T12.h's check of the deep estimator against VROOM: of 124 views at view zenith
+/// 0°–85° and relative azimuth 0°–180°, every transmitted one at least [`SUN_EXCLUSION_DEG`] from
+/// the sun, the 8 transmitted and the 8 reflected where VROOM's σ was smallest in a pilot at seeds
+/// 100 and 101 (0.91%–0.92% and 0.79%–0.86% of I at 16,000 samples; every σ of both estimators
+/// fell as N^(−1/2) there, every |z| under 2.1), so that the estimator the check holds the deep one
+/// to converges there.
+const DEEP_CHECK_VIEWS: [(Level, f64, f64); 16] = [
+    (Bottom, 0.0, 0.0),
+    (Bottom, 10.0, 0.0),
+    (Bottom, 10.0, 30.0),
+    (Bottom, 10.0, 60.0),
+    (Bottom, 10.0, 90.0),
+    (Bottom, 10.0, 120.0),
+    (Bottom, 10.0, 150.0),
+    (Bottom, 20.0, 30.0),
+    (Top, 60.0, 0.0),
+    (Top, 60.0, 30.0),
+    (Top, 70.0, 0.0),
+    (Top, 70.0, 30.0),
+    (Top, 80.0, 0.0),
+    (Top, 80.0, 30.0),
+    (Top, 85.0, 0.0),
+    (Top, 85.0, 30.0),
+];
+
+/// The samples a geometry of R08.T12.h's check, the deep estimator's and VROOM's: set from the
+/// pilot, its largest σ at these views 0.92% of I at 16,000 samples on either side, so that each
+/// σ is some 0.25% of I at most.
+const DEEP_CHECK_SAMPLES: [u64; 2] = [220_000, 220_000];
+
+#[test]
+fn deep_check_views_keep_away_from_the_sun() {
+    // Every transmitted view of the check of the deep estimator is at least 15° from the sun, and
+    // none repeats.
+    for (k, &(level, vza_deg, phi_deg)) in DEEP_CHECK_VIEWS.iter().enumerate() {
+        let view = View {
+            level,
+            vza_deg,
+            phi_deg,
+        };
+        let angle = angle_from_sun_deg(view, DEEP_CHECK_SUN_ZENITH_DEG);
+        assert!(
+            level == Top || angle >= SUN_EXCLUSION_DEG,
+            "{view:?}: {angle}°"
+        );
+        assert!(
+            DEEP_CHECK_VIEWS[..k]
+                .iter()
+                .all(|&(l, z, p)| !(view.is(l, z, p))),
+            "{view:?} repeats"
+        );
+    }
+}
+
+#[test]
+#[ignore = "slow: the deep estimator on and off in a Henyey–Greenstein slab of g 0.7 and τ 6, 16 \
+            geometries at 220,000 samples each side, about 3 minutes on 4 threads"]
+fn the_deep_estimator_agrees_with_vroom_where_vroom_converges() {
+    // R08.T12.h's check that the deep estimator is unbiased (Design note 10's agreement test): the
+    // two estimators, each at its own seed so that they are independent, held to each other, each
+    // value's z = (on − off) ÷ √(σ_on² + σ_off²), with both σ at most 0.3% of I. The views are
+    // those where VROOM as built converges best (`DEEP_CHECK_VIEWS`); a value whose σ does not
+    // fall as N^(−1/2) on either side is left out and named, and the set is pinned in
+    // `EXPECTED_UNSCALED`.
+    let values = deep_against_vroom(&DEEP_CHECK_VIEWS, [0, 1], DEEP_CHECK_SAMPLES);
+    for c in values.iter().filter(|c| c.sigma_scales) {
+        assert!(
+            c.expected_sigma <= SIGMA_LIMIT * c.expected,
+            "{DEEP_CHECK}, {}: VROOM's σ {} is above 0.3% of I = {}",
+            c.label,
+            c.expected_sigma,
+            c.expected
+        );
+    }
+    assert_agreement(DEEP_CHECK, &values);
+}
+
 /// One balance of R08.T12.f's energy check: the plane albedo, the diffuse transmission and the
 /// direct beam against the incident flux, with the standard error of the two traced terms and
 /// whether both fall as N^(−1/2).
