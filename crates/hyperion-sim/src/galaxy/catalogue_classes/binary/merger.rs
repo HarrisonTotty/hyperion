@@ -26,6 +26,17 @@
 //!   the fractional age 0.1 Σ Mᵢ τᵢ ÷ M on its own track, rejuvenated as the engine's product is,
 //!   so that a pair the engine merges and an entry agree.
 //!
+//! # The engine's channels, from 26
+//!
+//! From [`MERGER_CLASS_VERSION`] (research-leans-13 §2(c): the engine merges only some contact
+//! pairs on the main sequence, and the progenitors seen are mostly evolved) the scan draws a
+//! channel first, by `MERGER_SAMPLER`'s weights: a contact pair as above, its mass ratio at the
+//! tidal limit, or an **evolved donor**, past its main sequence and living at T, beside a
+//! main-sequence companion. Before T the evolved donor fills its lobe on a circular orbit,
+//! detached, as the engine's segment before a common envelope is ([`MergerPair::before`]); from T
+//! it is the star that envelope leaves, the engine's own, through the helpers its common envelope
+//! calls (`stellar::binary::class_merger`), so that the two agree bit for bit.
+//!
 //! # The test
 //!
 //! The candidate's [`BinaryTimeline::from_marks`] is the contact pair from zero age to T and the
@@ -46,6 +57,7 @@ use super::super::ids::CatalogueCellKey;
 use super::super::registry::ClassId;
 use super::super::system::{CatalogueMotion, CatalogueSystem};
 use super::hosts::ClassHosts;
+use crate::GeneratorVersion;
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::id::{BodyId, CatalogueSystemId, SystemId};
@@ -66,6 +78,29 @@ use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
     GravitationalParameter, Metres, PerCubicLightYear, Radians, SolarMasses, SolarRadii, Years,
 };
+
+/// The generator version whose stellar merger class draws the engine's channels (P11.T8.c's fix,
+/// research-leans-13 §2(c)): a contact pair of main-sequence stars at the tidal limit, or an
+/// evolved donor past its main sequence whose common envelope merges it with its companion, by
+/// the weights of `MERGER_SAMPLER`'s channel.
+///
+/// Below it the class takes the held arm, [`MergerClassRules::ContactOnly`], the code of version
+/// 24 verbatim, so every generated value keeps its bits; the tests reach the new arm through
+/// `GalaxyRules::every_26_hold()`. The bump to 26 deletes this hold: [`MergerClassRules`] with its
+/// `ContactOnly` arm, the galaxy rules' `merger_class` field, the scan's match on it,
+/// `MergerMark::MassRatio`, and the tripwire (`the_merger_class_is_held_only_until_the_26_bump`).
+pub(crate) const MERGER_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// How the merger classes draw their entries (the galaxy rules' `merger_class` field, the hold of
+/// [`MERGER_CLASS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum MergerClassRules {
+    /// Version 25's and before: every stellar merger a contact pair of main-sequence stars, its
+    /// mass ratio `MergerMark::MassRatio`'s.
+    ContactOnly,
+    /// Version 26's: the engine's channels, contact or evolved donor.
+    Channels,
+}
 
 /// The share of the merged star's own main-sequence lifetime its track is built past the end of
 /// that main sequence: 5%, so that the main sequence on which the product is placed ends inside
@@ -148,21 +183,30 @@ impl StellarMergers {
         )
         .expect("an inclination in [0, π] and angles in [0, 2π) are an orientation");
         let mean_anomaly = Radians::new(std::f64::consts::TAU * stream.uniform());
-        let pair = ContactPair::marked(scan.stars(), (orientation, mean_anomaly));
+        let angles = (orientation, mean_anomaly);
         let draws = [0, 1].map(|body| StarDraws::for_star(seed, BodyId::new(system, body)));
-        let product = main_sequence_product(
-            scan.stars(),
-            scan.composition(),
-            &draws[0],
-            galaxy.rules().stellar,
-        );
+        let (pair, product) = match scan.evolved() {
+            None => (
+                MergerPair::contact(scan.stars(), angles),
+                main_sequence_product(
+                    scan.stars(),
+                    scan.composition(),
+                    &draws[0],
+                    galaxy.rules().stellar,
+                ),
+            ),
+            Some((separation, product)) => (
+                MergerPair::evolved(scan.stars(), separation, angles),
+                product,
+            ),
+        };
         let marks = BinaryMarks::merger(
             *scan.composition(),
             draws,
             scan.age_at_epoch(),
             MarkedMerger {
                 age: scan.merger_age(),
-                before: SegmentKind::Contact,
+                before: pair.before,
                 stars: pair.stars,
                 orbit: pair.orbit,
                 transfer_rate: None,
@@ -222,21 +266,32 @@ fn horizon_years() -> f64 {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MergerCandidate {
     scan: MergerScanMarks,
-    pair: ContactPair,
+    pair: MergerPair,
     product: StarState,
     marks: BinaryMarks,
 }
 
 /// A stellar merger's pair before T (P11.T8.c): two main-sequence stars in contact on a circular
-/// orbit, each filling its Roche lobe.
+/// orbit, each filling its Roche lobe; or, from 26, an evolved donor filling its lobe on a
+/// circular orbit about its main-sequence companion, detached, as the engine's segment before a
+/// common envelope leaves it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ContactPair {
+pub struct MergerPair {
+    before: SegmentKind,
     stars: [StarState; 2],
     orbit: KeplerElements,
 }
 
-impl ContactPair {
-    /// Each star's marked state, primary first: its own track's at T, its radius its Roche lobe's.
+impl MergerPair {
+    /// What the pair is before T: [`SegmentKind::Contact`] for a contact pair,
+    /// [`SegmentKind::Detached`] for an evolved donor.
+    #[must_use]
+    pub const fn before(&self) -> SegmentKind {
+        self.before
+    }
+
+    /// Each star's marked state, primary first: its own track's at T, a contact pair's radii its
+    /// Roche lobes'.
     #[must_use]
     pub const fn stars(&self) -> &[StarState; 2] {
         &self.stars
@@ -248,10 +303,37 @@ impl ContactPair {
         &self.orbit
     }
 
+    /// The evolved donor's pair of `stars` (their own states at T) on its circular orbit of
+    /// `separation`, the scan's, on which the donor fills its lobe, oriented and phased by
+    /// `angles`; each star at its own radius.
+    fn evolved(
+        stars: &[StarState; 2],
+        separation: Metres,
+        (orientation, mean_anomaly): (Orientation, Radians),
+    ) -> Self {
+        let [m1, m2] = stars.map(|s| s.mass().value());
+        let orbit = KeplerElements::from_semi_major_axis(
+            separation,
+            GravitationalParameter::from_solar_masses(SolarMasses::new(m1 + m2)),
+            Eccentricity::CIRCULAR,
+            orientation,
+            mean_anomaly,
+        )
+        .expect("a giant's radius about a star or two is an orbit");
+        Self {
+            before: SegmentKind::Detached,
+            stars: *stars,
+            orbit,
+        }
+    }
+
     /// The contact pair of `stars` (their own states at T), oriented and phased by `angles`: the
     /// separation a = R₁ ÷ f(M₁ ÷ M₂), with f Eggleton's lobe over the separation, and each
     /// star's radius its lobe on it.
-    fn marked(stars: &[StarState; 2], (orientation, mean_anomaly): (Orientation, Radians)) -> Self {
+    fn contact(
+        stars: &[StarState; 2],
+        (orientation, mean_anomaly): (Orientation, Radians),
+    ) -> Self {
         let [m1, m2] = stars.map(|s| s.mass().value());
         let unit = Metres::new(1.0);
         let primary_share = roche_lobe_radius(m1 / m2, unit).value();
@@ -267,6 +349,7 @@ impl ContactPair {
         let lobe =
             |q: f64| SolarRadii::new(roche_lobe_radius(q, separation).value() / SOLAR_RADIUS_M);
         Self {
+            before: SegmentKind::Contact,
             stars: [
                 with_radius(&stars[0], lobe(m1 / m2)),
                 with_radius(&stars[1], lobe(m2 / m1)),
@@ -329,7 +412,7 @@ pub struct MergerEntry {
     record: SystemRecord,
     motion: CatalogueMotion,
     scan: MergerScanMarks,
-    pair: ContactPair,
+    pair: MergerPair,
     product: StarState,
     timeline: BinaryTimeline,
 }
@@ -356,7 +439,7 @@ impl MergerEntry {
 
     /// The pair before T.
     #[must_use]
-    pub const fn pair(&self) -> &ContactPair {
+    pub const fn pair(&self) -> &MergerPair {
         &self.pair
     }
 
@@ -446,5 +529,7 @@ impl ClassProcess for StellarMergers {
     }
 }
 
+#[cfg(test)]
+mod channels_hold;
 #[cfg(test)]
 mod tests;

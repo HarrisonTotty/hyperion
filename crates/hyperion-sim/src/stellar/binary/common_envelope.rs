@@ -44,6 +44,7 @@ use crate::units::{Megayears, SolarMasses, Years};
 
 use super::evolve::{Engine, clock_resolution_years, roche_lobe, track_mass};
 use super::merger_mass::MergerMassRules;
+use super::params::BinaryParams;
 use super::rlof::{dynamical, kelvin_helmholtz};
 use super::star::{G, Kind, Member, Path, cooling_origin, moment_of_inertia, positive};
 use super::timeline::{IaPoolChannel, PooledIaEvent, SegmentKind};
@@ -83,8 +84,8 @@ pub(super) fn collision_product(k1: Kind, k2: Kind) -> Kind {
 }
 
 /// One star's side of a common envelope (BSE section 2.7.1's effective values).
-#[derive(Debug, Clone, Copy)]
-struct Side {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Side {
     kind: Kind,
     mass: f64,
     /// The effective core, M′_c: the whole star for a main-sequence or degenerate star.
@@ -103,7 +104,7 @@ struct Side {
 impl Side {
     /// The side of a star of structure `s`.
     #[must_use]
-    fn of(s: &Structure) -> Self {
+    pub(super) fn of(s: &Structure) -> Self {
         let mass = s.state.mass().value();
         let kind = Kind::of(s.state.phase(), mass);
         let mc = s.state.core_mass().value();
@@ -244,11 +245,7 @@ impl Engine {
         let a_i = self.orbit.as_ref().map_or(0.0, |orbit| orbit.a);
         let (s1, s2) = (Side::of(&sd), Side::of(&so));
         let params = *self.ctx.params();
-        let lambda = params.lambda;
-        let mut binding = s1.mass * s1.envelope / (lambda * s1.radius);
-        if s2.kind.is_giant_like() {
-            binding += s2.mass * s2.envelope / (lambda * s2.radius);
-        }
+        let binding = envelope_binding(&s1, &s2, params.lambda);
         // Nothing to eject from a held bare core (ruling 129.4c): no stripping changes it, so it
         // would touch its companion again at once, envelope after envelope. It merges instead,
         // and the merger must not hand it back to a common envelope (a giant-like bare core
@@ -257,28 +254,10 @@ impl Engine {
             self.mix_with(Envelope::Spent);
             return;
         }
-        let orbit_i = s1.core * s2.core / (2.0 * a_i);
-        let orbit_f = orbit_i + binding / params.alpha_ce;
-        let a_f = s1.core * s2.core / (2.0 * orbit_f);
-        let lobe1 = roche_lobe(s1.core, s2.core, a_f);
-        let lobe2 = roche_lobe(s2.core, s1.core, a_f);
-        let fills = s1.core_radius > lobe1 || s2.core_radius > lobe2;
-        if !fills {
-            self.survive_envelope(d, &s2, a_f);
-            return;
+        match envelope_outcome(s1, s2, binding, a_i, &params) {
+            EnvelopeOutcome::Survives { a_f } => self.survive_envelope(d, &s2, a_f),
+            EnvelopeOutcome::Coalesces(remains) => self.coalesce(Some(remains)),
         }
-        // The cores coalesce where the first of them fills its lobe (BSE equation 73).
-        let reach =
-            |side: &Side, other: &Side| side.core_radius / (roche_lobe(side.core, other.core, 1.0));
-        let a_l = reach(&s1, &s2).max(reach(&s2, &s1));
-        let orbit_l = (s1.core * s2.core / (2.0 * a_l)).max(orbit_i);
-        let binding_f = binding - params.alpha_ce * (orbit_l - orbit_i);
-        self.coalesce(Some(CommonEnvelopeRemains {
-            binding,
-            binding_f,
-            s1,
-            s2,
-        }));
     }
 
     /// The cores of a common envelope around member `d` survive on a circular orbit of `a_f`
@@ -441,66 +420,192 @@ impl Engine {
     /// The pair coalesces, with what a common envelope left, `remains`, if there was one (BSE
     /// sections 2.7.1–2.7.4), or in a collision without one.
     fn coalesce(&mut self, remains: Option<CommonEnvelopeRemains>) {
-        let Some(CommonEnvelopeRemains {
-            binding,
-            binding_f,
-            s1,
-            s2,
-        }) = remains
-        else {
+        let Some(remains) = remains else {
             self.mix();
             return;
         };
-        let product_kind = collision_product(s1.kind, s2.kind);
-        // Two degenerate helium cores ignite, and nothing is left (BSE section 2.7.2).
-        let degenerate = |s: &Side| {
-            (matches!(s.kind, Kind::HertzsprungGap | Kind::GiantBranch) && s.degenerate)
-                || s.kind == Kind::HeliumWhiteDwarf
-        };
-        let total = s1.mass + s2.mass;
-        let product = if degenerate(&s1) && degenerate(&s2) {
-            Member::Gone
-        } else if s2.kind.number() >= 13 || s1.kind.number() >= 13 {
-            // An unstable Thorne–Żytkow object keeps only its compact core (BSE section 2.7.2).
-            let compact = if s2.kind.number() >= 13 { s2 } else { s1 };
-            self.compact(compact.kind, compact.mass)
-        } else {
-            let core = if s2.kind == Kind::HeliumMainSequence && s1.kind.number() <= 6 {
-                s1.true_core + s2.mass
-            } else {
-                s1.true_core + s2.true_core
-            };
-            let x = self.ctx.giant_exponent();
-            let mut mf = if binding_f <= 0.0 {
-                core
-            } else {
-                final_mass(total, core, binding_f / binding, x)
-            };
-            if s2.true_core <= 0.0 && s2.kind != Kind::HeliumMainSequence {
-                mf = mf.max(s1.true_core + s2.mass);
-            }
-            let mf = mf.min(total).max(core);
-            let burnt = {
-                let weight = |s: &Side| {
-                    if s.kind == Kind::HeliumMainSequence {
-                        s.mass
-                    } else {
-                        s.true_core
-                    }
-                };
-                let (w1, w2) = (weight(&s1), weight(&s2));
-                if w1 + w2 > 0.0 {
-                    (s1.burnt * w1 + s2.burnt * w2) / (w1 + w2)
-                } else {
-                    0.0
-                }
-            };
-            let fraction = s1.fraction;
-            self.new_star(product_kind, mf, core, burnt, fraction)
-        };
+        let product = self.product_member(coalesced_product(&remains, self.ctx.giant_exponent()));
         self.finish_merger(product);
     }
 
+    /// The member a coalescence in a common envelope leaves, from what [`coalesced_product`]
+    /// gives: nothing, a compact star, or a star of its kind, mass and core, placed by
+    /// [`Engine::new_star`] at the engine's age.
+    #[must_use]
+    pub(super) fn product_member(&self, product: CoalescedProduct) -> Member {
+        match product {
+            CoalescedProduct::Nothing => Member::Gone,
+            CoalescedProduct::Compact { kind, mass } => self.compact(kind, mass),
+            CoalescedProduct::Star {
+                kind,
+                mass,
+                core,
+                burnt,
+                fraction,
+            } => self.new_star(kind, mass, core, burnt, fraction),
+        }
+    }
+}
+
+/// The envelope's binding energy (÷ G) in a common envelope around a giant-like donor of side `s1`
+/// and its companion `s2`, both envelopes if the companion is giant-like too (BSE section 2.7.1,
+/// equation 69), at the binding parameter `lambda`.
+#[must_use]
+pub(super) fn envelope_binding(s1: &Side, s2: &Side, lambda: f64) -> f64 {
+    let mut binding = s1.mass * s1.envelope / (lambda * s1.radius);
+    if s2.kind.is_giant_like() {
+        binding += s2.mass * s2.envelope / (lambda * s2.radius);
+    }
+    binding
+}
+
+/// How a common envelope of `binding` around the donor of side `s1` and its companion `s2` on an
+/// orbit of `a_i` R☉ ends (BSE section 2.7.1): the cores survive on the orbit of `a_f` that the
+/// α energy balance leaves, or, where either core fills its lobe there, they coalesce where the
+/// first of them fills it (equation 73).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum EnvelopeOutcome {
+    /// The cores survive on a circular orbit of `a_f` R☉.
+    Survives {
+        /// The cores' separation, R☉.
+        a_f: f64,
+    },
+    /// The cores coalesce, leaving these remains to the merger.
+    Coalesces(CommonEnvelopeRemains),
+}
+
+/// [`EnvelopeOutcome`] of a common envelope of `binding` around sides `s1` and `s2` on an orbit
+/// of `a_i` R☉ under `params`' α: the engine's own rule, which the stellar merger class's evolved
+/// donors read too (P11.T8.c's channels), so that the two agree bit for bit.
+#[must_use]
+pub(super) fn envelope_outcome(
+    s1: Side,
+    s2: Side,
+    binding: f64,
+    a_i: f64,
+    params: &BinaryParams,
+) -> EnvelopeOutcome {
+    let orbit_i = s1.core * s2.core / (2.0 * a_i);
+    let orbit_f = orbit_i + binding / params.alpha_ce;
+    let a_f = s1.core * s2.core / (2.0 * orbit_f);
+    let lobe1 = roche_lobe(s1.core, s2.core, a_f);
+    let lobe2 = roche_lobe(s2.core, s1.core, a_f);
+    let fills = s1.core_radius > lobe1 || s2.core_radius > lobe2;
+    if !fills {
+        return EnvelopeOutcome::Survives { a_f };
+    }
+    // The cores coalesce where the first of them fills its lobe (BSE equation 73).
+    let reach =
+        |side: &Side, other: &Side| side.core_radius / (roche_lobe(side.core, other.core, 1.0));
+    let a_l = reach(&s1, &s2).max(reach(&s2, &s1));
+    let orbit_l = (s1.core * s2.core / (2.0 * a_l)).max(orbit_i);
+    let binding_f = binding - params.alpha_ce * (orbit_l - orbit_i);
+    EnvelopeOutcome::Coalesces(CommonEnvelopeRemains {
+        binding,
+        binding_f,
+        s1,
+        s2,
+    })
+}
+
+/// What a coalescence in a common envelope leaves (BSE sections 2.7.1–2.7.4): nothing, a compact
+/// core, or a star of the collision matrix's kind with its mass, core, burnt share and phase
+/// fraction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum CoalescedProduct {
+    /// Two degenerate helium cores ignite and nothing is left (section 2.7.2).
+    Nothing,
+    /// An unstable Thorne–Żytkow object keeps its compact core (section 2.7.2).
+    Compact {
+        /// The core's kind.
+        kind: Kind,
+        /// Its mass, M☉.
+        mass: f64,
+    },
+    /// A star of the collision matrix's kind (their table 2).
+    Star {
+        /// Its kind.
+        kind: Kind,
+        /// Its mass, M☉ (equation 77).
+        mass: f64,
+        /// Its core's mass, M☉.
+        core: f64,
+        /// The share of its core's helium burnt.
+        burnt: f64,
+        /// The donor's fraction through its phase.
+        fraction: f64,
+    },
+}
+
+/// What a coalescence in a common envelope with `remains` leaves, at the giant-radius exponent `x`
+/// (BSE sections 2.7.1–2.7.4, table 2 and equation 77): the engine's own rule, which the stellar
+/// merger class's evolved donors read too (P11.T8.c's channels), so that the two agree bit for
+/// bit.
+#[must_use]
+pub(super) fn coalesced_product(remains: &CommonEnvelopeRemains, x: f64) -> CoalescedProduct {
+    let CommonEnvelopeRemains {
+        binding,
+        binding_f,
+        s1,
+        s2,
+    } = *remains;
+    let product_kind = collision_product(s1.kind, s2.kind);
+    // Two degenerate helium cores ignite, and nothing is left (BSE section 2.7.2).
+    let degenerate = |s: &Side| {
+        (matches!(s.kind, Kind::HertzsprungGap | Kind::GiantBranch) && s.degenerate)
+            || s.kind == Kind::HeliumWhiteDwarf
+    };
+    let total = s1.mass + s2.mass;
+    if degenerate(&s1) && degenerate(&s2) {
+        CoalescedProduct::Nothing
+    } else if s2.kind.number() >= 13 || s1.kind.number() >= 13 {
+        // An unstable Thorne–Żytkow object keeps only its compact core (BSE section 2.7.2).
+        let compact = if s2.kind.number() >= 13 { s2 } else { s1 };
+        CoalescedProduct::Compact {
+            kind: compact.kind,
+            mass: compact.mass,
+        }
+    } else {
+        let core = if s2.kind == Kind::HeliumMainSequence && s1.kind.number() <= 6 {
+            s1.true_core + s2.mass
+        } else {
+            s1.true_core + s2.true_core
+        };
+        let mut mf = if binding_f <= 0.0 {
+            core
+        } else {
+            final_mass(total, core, binding_f / binding, x)
+        };
+        if s2.true_core <= 0.0 && s2.kind != Kind::HeliumMainSequence {
+            mf = mf.max(s1.true_core + s2.mass);
+        }
+        let mf = mf.min(total).max(core);
+        let burnt = {
+            let weight = |s: &Side| {
+                if s.kind == Kind::HeliumMainSequence {
+                    s.mass
+                } else {
+                    s.true_core
+                }
+            };
+            let (w1, w2) = (weight(&s1), weight(&s2));
+            if w1 + w2 > 0.0 {
+                (s1.burnt * w1 + s2.burnt * w2) / (w1 + w2)
+            } else {
+                0.0
+            }
+        };
+        CoalescedProduct::Star {
+            kind: product_kind,
+            mass: mf,
+            core,
+            burnt,
+            fraction: s1.fraction,
+        }
+    }
+}
+
+impl Engine {
     /// A collision or coalescence without a common envelope: the two stars merge with their masses
     /// (BSE section 2.7.3), the product in the primary's place.
     pub(super) fn mix(&mut self) {
@@ -1248,8 +1353,8 @@ impl Engine {
 
 /// What a common envelope whose cores coalesce leaves to the merger: the envelope's binding
 /// energy before and after the spiral-in (÷ G) and the two sides.
-#[derive(Debug, Clone, Copy)]
-struct CommonEnvelopeRemains {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct CommonEnvelopeRemains {
     binding: f64,
     binding_f: f64,
     s1: Side,

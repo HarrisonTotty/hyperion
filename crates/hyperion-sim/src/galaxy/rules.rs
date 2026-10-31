@@ -33,6 +33,10 @@
 //!   P09.T36): catalogue features and the galactic centre list their recently dead and their
 //!   luminous blue variables, and their band-E cells give them up. It is read where a list or an
 //!   interior is built, and reaches none of the galaxy's memos.
+//! - [`merger_class`](GalaxyRules::merger_class), at [`MERGER_CLASS_VERSION`] (plan 11, P11.T8.c's
+//!   fix): the stellar merger class draws the engine's channels, a contact pair at the tidal limit
+//!   or an evolved donor whose common envelope merges it. It is read where a merger's scan marks
+//!   are drawn, and reaches none of the galaxy's memos.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -42,6 +46,7 @@
 
 use crate::GeneratorVersion;
 use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules};
+use crate::galaxy::catalogue_classes::binary::{MERGER_CLASS_VERSION, MergerClassRules};
 use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
 use crate::galaxy::features::kinds::globular::{BOUND_SHARE_VERSION, BoundShareRules};
 use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules};
@@ -67,6 +72,9 @@ pub(crate) struct GalaxyRules {
     pub(crate) carve_out: CarveOutRules,
     /// Whether features list their recently dead and their luminous blue variables (P09.T36).
     pub(crate) feature_classes: FeatureClassesRules,
+    /// How the stellar merger class draws its entries: every one a contact pair, or the engine's
+    /// channels (P11.T8.c's fix).
+    pub(crate) merger_class: MergerClassRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -107,6 +115,11 @@ impl GalaxyRules {
             } else {
                 FeatureClassesRules::Unlisted
             },
+            merger_class: if version.get() >= MERGER_CLASS_VERSION.get() {
+                MergerClassRules::Channels
+            } else {
+                MergerClassRules::ContactOnly
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -114,9 +127,10 @@ impl GalaxyRules {
     /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: the
     /// version's rules with the holds that turn on at 26 (the galaxy's `bound_share`, P09.T13,
     /// `stream_shell`, P10.T9, `member_remnants`, P09.T10, `field_share`, P09.T2.c, `carve_out`,
-    /// P09.T35, and `feature_classes`, P09.T36; the stellar rules' `dwarf_sequence`, P06.T23.a,
-    /// `helium`, P15.T7.b, `hd_limit`, P06.T42.b, `v_magnitude`, P06.T43.b, `stripping`, P11.T1.d,
-    /// `peculiar_classes`, P06.T24.b, `star_events`, P06.T28.g, and `merger_mass`, P11.T4.d;
+    /// P09.T35, `feature_classes`, P09.T36, and `merger_class`, P11.T8.c; the stellar rules'
+    /// `dwarf_sequence`, P06.T23.a, `helium`, P15.T7.b, `hd_limit`, P06.T42.b, `v_magnitude`,
+    /// P06.T43.b, `stripping`, P11.T1.d, `peculiar_classes`, P06.T24.b, `star_events`, P06.T28.g,
+    /// and `merger_mass`, P11.T4.d;
     /// [`StellarRules::every_26_hold`]).
     ///
     /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is

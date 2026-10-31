@@ -644,13 +644,30 @@ pub enum MergerMark {
     /// The rank, in [0, 1], of the primary's initial mass in the galaxy's mass function over its
     /// layer's band, cut at the turn-off at the merger, unconditional.
     PrimaryRank,
-    /// The mass ratio q = M₂ ÷ M₁ of the pair before the merger, unconditional.
+    /// The mass ratio q = M₂ ÷ M₁ of the pair before the merger, unconditional: version 25's and
+    /// before, every merger a contact pair.
     MassRatio,
+    /// The mass ratio of a contact pair before the merger, at the tidal limit, unconditional:
+    /// version 26's contact channel.
+    ContactMassRatio,
+    /// The rank, in [0, 1], of an evolved donor's initial mass in the galaxy's mass function over
+    /// the masses living past their main sequence at the merger, unconditional.
+    EvolvedPrimaryRank,
+    /// The mass ratio of an evolved donor's companion over the donor, initial masses,
+    /// unconditional.
+    EvolvedMassRatio,
 }
 
 impl MergerMark {
     /// Every mark, in [`MERGER_SAMPLER`]'s order.
-    pub const ALL: [Self; 3] = [Self::AgeRank, Self::PrimaryRank, Self::MassRatio];
+    pub const ALL: [Self; 6] = [
+        Self::AgeRank,
+        Self::PrimaryRank,
+        Self::MassRatio,
+        Self::ContactMassRatio,
+        Self::EvolvedPrimaryRank,
+        Self::EvolvedMassRatio,
+    ];
 
     /// The mark's place in [`MERGER_SAMPLER`]'s marks.
     #[must_use]
@@ -670,14 +687,33 @@ impl SamplerKey for MergerMark {
 pub enum MergerPick {
     /// The layer of the primary, A–E, in [`MassBand::ALL`]'s order.
     Layer,
+    /// The channel ([`MergerChannel`]): version 26's.
+    Channel,
 }
 
 impl SamplerKey for MergerPick {
     fn index(self) -> usize {
         match self {
             Self::Layer => 0,
+            Self::Channel => 1,
         }
     }
+}
+
+/// The channels of [`MERGER_SAMPLER`]'s second choice, in its order (P11.T8.c's fix, version 26):
+/// what a stellar merger is before its merger time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MergerChannel {
+    /// A contact pair of two main-sequence stars, at the tidal limit (Rasio 1995).
+    Contact,
+    /// An evolved donor, from the Hertzsprung gap to the asymptotic giant branch, whose common
+    /// envelope merges it with its main-sequence companion.
+    EvolvedDonor,
+}
+
+impl MergerChannel {
+    /// Every channel, in the choice's order.
+    pub const ALL: [Self; 2] = [Self::Contact, Self::EvolvedDonor];
 }
 
 /// The ranks k ÷ 16 themselves: a residual that leaves a rank as it is drawn.
@@ -704,14 +740,34 @@ const IDENTITY_RANKS: [f64; 17] = [
 ///   2008, held a mass ratio near 0.1 (Tylenda et al. 2011, A&A 528, A114).
 /// - **The layer**: [`CLASS_SHARES`]'s row for the stellar mergers, A 0.1, B 0.2, C 0.5, D 0.15,
 ///   E 0.05, restricted to the layers with stars on their main sequence at the merger.
+///
+/// Version 26's channels (P11.T8.c's fix; research-leans-13 §2(c)) add three marks and a choice:
+///
+/// - **The channel**: 0.15 contact, 0.85 evolved donor, scratch. Luminous red novae whose
+///   progenitors are resolved had evolved donors: M31-LRN-2015's a subgiant of 3–5.5 M☉ (MacLeod
+///   et al. 2017, ApJ 835, 282) and M101 OT2015-1's a yellow supergiant of about 18 M☉
+///   (Blagorodnova et al. 2017, ApJ 834, 107); and the engine's own mergers, its pre-main-sequence
+///   ones left out, are mostly evolved stars beside a main-sequence companion and a quarter or so
+///   two main-sequence stars, of which few are in contact (`stellar/rules/merger_class_hold.rs`
+///   prints its split).
+/// - **The contact pair's mass ratio**: 0.06–0.15, median 0.09, at Rasio's (1995) tidal limit,
+///   below which a contact pair is unstable and coalesces on the main sequence, as the engine's
+///   contact rule merges it; V1309 Scorpii's was about 0.1 (Tylenda et al. 2011).
+/// - **The evolved donor's companion**: q = M₂ ÷ M₁ of initial masses, 0.05–1, median 0.6, broad
+///   up to the twins, the engine's own evolved donors' (weighted median 0.63), scratch.
+/// - **The evolved donor's mass** is a rank that leaves the galaxy's mass function over the masses
+///   past their main sequence and living at the merger as it is.
 pub const MERGER_SAMPLER: ClassSamplerTable<MergerMark, MergerPick> = ClassSamplerTable::new(
     &MERGER_MARKS,
-    &[SamplerPick::new("layer", &[0.1, 0.2, 0.5, 0.15, 0.05])],
+    &[
+        SamplerPick::new("layer", &[0.1, 0.2, 0.5, 0.15, 0.05]),
+        SamplerPick::new("channel", &[0.15, 0.85]),
+    ],
 );
 
 /// [`MERGER_SAMPLER`]'s marks, in [`MergerMark`]'s order.
 #[rustfmt::skip]
-const MERGER_MARKS: [SamplerMark; 3] = [
+const MERGER_MARKS: [SamplerMark; 6] = [
     SamplerMark {
         name: "age_rank",
         residual: IDENTITY_RANKS,
@@ -732,6 +788,30 @@ const MERGER_MARKS: [SamplerMark; 3] = [
         ],
         median: None,
         limits: (0.06, 1.0),
+    },
+    SamplerMark {
+        name: "contact_mass_ratio",
+        residual: [
+            0.060, 0.066, 0.071, 0.075, 0.079, 0.082, 0.085, 0.088, 0.090,
+            0.093, 0.096, 0.099, 0.103, 0.108, 0.115, 0.125, 0.150,
+        ],
+        median: None,
+        limits: (0.06, 0.15),
+    },
+    SamplerMark {
+        name: "evolved_primary_rank",
+        residual: IDENTITY_RANKS,
+        median: None,
+        limits: (0.0, 1.0),
+    },
+    SamplerMark {
+        name: "evolved_mass_ratio",
+        residual: [
+            0.05, 0.11, 0.17, 0.25, 0.33, 0.41, 0.49, 0.55, 0.60,
+            0.68, 0.76, 0.83, 0.89, 0.93, 0.96, 0.98, 1.0,
+        ],
+        median: None,
+        limits: (0.05, 1.0),
     },
 ];
 
@@ -1292,7 +1372,14 @@ mod tests {
     /// its limits, and its layer weights are the share row's.
     #[test]
     fn the_merger_table_follows_its_mark_list_and_the_share_row() {
-        let names = ["age_rank", "primary_rank", "mass_ratio"];
+        let names = [
+            "age_rank",
+            "primary_rank",
+            "mass_ratio",
+            "contact_mass_ratio",
+            "evolved_primary_rank",
+            "evolved_mass_ratio",
+        ];
         assert_eq!(MERGER_SAMPLER.marks().len(), MergerMark::ALL.len());
         for (mark, name) in MergerMark::ALL.into_iter().zip(names) {
             let law = MERGER_SAMPLER.mark(mark);
@@ -1304,6 +1391,9 @@ mod tests {
                 "{name}"
             );
         }
+        let channels = MERGER_SAMPLER.pick(MergerPick::Channel).weights();
+        assert_eq!(channels.len(), MergerChannel::ALL.len());
+        assert!((channels.iter().sum::<f64>() - 1.0).abs() < 1e-12);
         let row = CLASS_SHARES.row(CarvedClass::StellarMerger);
         let weights = MERGER_SAMPLER.pick(MergerPick::Layer).weights();
         assert_eq!(weights.len(), MassBand::ALL.len());

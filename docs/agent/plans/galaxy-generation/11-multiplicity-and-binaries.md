@@ -7057,3 +7057,17 @@ galaxy_sweeps`.
   Hertzsprung-gap accretor's branch is unchanged. The brief's gate refuses the pair-light and reach
   tables under the new arm. Movers: `stellar/binary_timelines`, `sky/census_near_sun`,
   `sky/band_face_row`; the bump re-blesses them and refits those tables.
+- **P11.T8.c's channels, held at 26** (lane `p11-t8cd`, step 3, 2026-10-31; research-leans-13
+  §2(c) overturned the all-contact lean; at version 24 no golden moves).
+  - _The hold._ `MERGER_CLASS_VERSION` = 26, `GalaxyRules::merger_class`
+    (`MergerClassRules::{ContactOnly, Channels}`); the held arm is the class verbatim.
+  - _From 26_ the scan draws `MERGER_SAMPLER`'s new choice `Channel` first on `class.merger.mass`:
+    `MergerChannel::Contact` or `MergerChannel::EvolvedDonor`, scratch 0.15 / 0.85. The contact
+    pair's q takes `ContactMassRatio` (0.06–0.15, median 0.09). An evolved donor's mass is drawn between the
+    turn-off at T and the heaviest mass whose death (plan 06's fate at its own draws) comes after
+    T (`EvolvedPrimaryRank`), its companion by `EvolvedMassRatio` on its main sequence; it fills its
+    lobe on a circular orbit, `SegmentKind::Detached` before T (`MergerPair::before`); the product
+    is `stellar::binary::class_merger::evolved_donor_merger`, which builds the engine at T and calls
+    the engine's own `envelope_outcome`, `coalesced_product` and `Engine::product_member`
+    (extracted from `resolve_common_envelope` and `coalesce`, moving nothing); a pair the envelope
+    leaves apart is refused. `ContactPair` is now `MergerPair`.

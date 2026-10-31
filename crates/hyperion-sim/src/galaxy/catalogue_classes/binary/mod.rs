@@ -24,7 +24,8 @@ pub use awd::{
     HELIUM_DONOR_TEMPERATURE_K, LIFETIME_MARGIN, OXYGEN_NEON_MIN_MASS,
 };
 pub use hosts::{ClassHosts, HostComponent};
-pub use merger::{ContactPair, MergerCandidate, MergerEntry, StellarMergers};
+pub(crate) use merger::{MERGER_CLASS_VERSION, MergerClassRules};
+pub use merger::{MergerCandidate, MergerEntry, MergerPair, StellarMergers};
 pub use nsm::{Inspiral, NeutronStarMergers, NsmCandidate, NsmEntry};
 pub use xrb::{
     BE_DONOR_ATTEMPTS, DONOR_TURN_OFF_SHARE, EVOLVED_DONOR_LOBE_SHARE, EVOLVED_DONOR_MIN_CORE_MASS,

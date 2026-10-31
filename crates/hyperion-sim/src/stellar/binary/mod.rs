@@ -31,6 +31,7 @@
 //! may depart from its own model or a product live, and how bright it can be.
 
 pub(crate) mod carve;
+pub(crate) mod class_merger;
 mod classify;
 mod common_envelope;
 mod detached;
