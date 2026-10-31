@@ -1,4 +1,4 @@
-# generator_version = 23
+# generator_version = 24
 near the Sun (0, 26,000, 68) ly: a camera's request at V 10.06 with the eye at 8.15, lit; 16² texels a face, 12 nodes a decade
 reply 0
   A radius = 0x0000000000000000  # 0.0
@@ -43,9 +43,9 @@ face PosX, row 0
   texel 00 diffuse luminance = 0x3ee12468b5de3cce  # 8.174048783420042e-6
   texel 00 eye background = 0x3f045879d2c9a6ac  # 3.8806169276051544e-5
   texel 00 eye background S/P = 0x4002795a46ba9521  # 2.3092542195978614
-  texel 00 eye limit = 0x401c5c3d702cb732  # 7.090078118066048
-  texel 00 photopic veil = 0x3e918b784c8d2922  # 2.614379579947447e-7
-  texel 00 scotopic veil = 0x3ea521c4be39d2f8  # 6.297799441516989e-7
+  texel 00 eye limit = 0x401c5c3d71145e1a  # 7.0900781315499675
+  texel 00 photopic veil = 0x3e918b743e2d025d  # 2.614370357319527e-7
+  texel 00 scotopic veil = 0x3ea521bf002d14f2  # 6.297773328187277e-7
   texel 01 luminance = 0x3f07ef4b3a245cd4  # 4.565189671462138e-5
   texel 01 red chroma (f32) = 0x000000003f90d410
   texel 01 green chroma (f32) = 0x000000003f776f9f
@@ -53,9 +53,9 @@ face PosX, row 0
   texel 01 diffuse luminance = 0x3ee34f707030c65d  # 9.207873068547962e-6
   texel 01 eye background = 0x3f0822a6cf13e9a2  # 4.603454170566962e-5
   texel 01 eye background S/P = 0x40029fea8fb3b3b8  # 2.328084108993121
-  texel 01 eye limit = 0x401c092a8343747e  # 7.008951235763673
-  texel 01 photopic veil = 0x3e80c95cdeb3edce  # 1.2506971756158663e-7
-  texel 01 scotopic veil = 0x3e94e1877b600bbd  # 3.1115075260783974e-7
+  texel 01 eye limit = 0x401c092a840ef146  # 7.0089512476082
+  texel 01 photopic veil = 0x3e80c9544f7382a6  # 1.2506874445037943e-7
+  texel 01 scotopic veil = 0x3e94e17b5d2ccb2c  # 3.11147997300565e-7
   texel 02 luminance = 0x3f0a8cef2b1eca3a  # 5.0641106454381e-5
   texel 02 red chroma (f32) = 0x000000003f911573
   texel 02 green chroma (f32) = 0x000000003f77689d
@@ -63,9 +63,9 @@ face PosX, row 0
   texel 02 diffuse luminance = 0x3ee4200a455328db  # 9.596422538744552e-6
   texel 02 eye background = 0x3f0ac0f00c043fe0  # 5.1028562213173206e-5
   texel 02 eye background S/P = 0x400296d13e862c39  # 2.3236412892051956
-  texel 02 eye limit = 0x401bda0494da6cde  # 6.962908101874943
-  texel 02 photopic veil = 0x3e75cbf8bfc251c5  # 8.119927480600091e-8
-  texel 02 scotopic veil = 0x3e8b5c451398bfef  # 2.038510816134392e-7
+  texel 02 eye limit = 0x401bda04959983b6  # 6.9629081129978
+  texel 02 photopic veil = 0x3e75cbe6e4abe7b7  # 8.119825982067051e-8
+  texel 02 scotopic veil = 0x3e8b5c2bcc36aea0  # 2.0384820774204207e-7
   texel 03 luminance = 0x3f108b78305a23e3  # 6.311341356925143e-5
   texel 03 red chroma (f32) = 0x000000003f903088
   texel 03 green chroma (f32) = 0x000000003f7797ca
@@ -73,9 +73,9 @@ face PosX, row 0
   texel 03 diffuse luminance = 0x3eea474eb7c8f1a0  # 1.2530586667052629e-5
   texel 03 eye background = 0x3f1093a6893f812c  # 6.323532062380417e-5
   texel 03 eye background S/P = 0x4002b2899782b7e6  # 2.3371764981047702
-  texel 03 eye limit = 0x401b730fb05f5e2a  # 6.862364536114493
-  texel 03 photopic veil = 0x3e76495e59388485  # 8.30240394701969e-8
-  texel 03 scotopic veil = 0x3e8c74362ef103b0  # 2.1199846098228226e-7
+  texel 03 eye limit = 0x401b730fb0faa99e  # 6.862364545153836
+  texel 03 photopic veil = 0x3e76494c0cc277ab  # 8.30229993108752e-8
+  texel 03 scotopic veil = 0x3e8c741c470d95fc  # 2.1199551583220614e-7
   texel 04 luminance = 0x3f1429c5f527f370  # 7.691641557268174e-5
   texel 04 red chroma (f32) = 0x000000003f8ea81c
   texel 04 green chroma (f32) = 0x000000003f77e7c9
@@ -83,9 +83,9 @@ face PosX, row 0
   texel 04 diffuse luminance = 0x3ef6cf40038a7967  # 2.1752901576571443e-5
   texel 04 eye background = 0x3f1470f3f747dd03  # 7.79770760529382e-5
   texel 04 eye background S/P = 0x4002e2be8656b200  # 2.3607149596412
-  texel 04 eye limit = 0x401b0da6c133a0ce  # 6.763331431175358
-  texel 04 photopic veil = 0x3e7838856a26e43f  # 9.022945816104416e-8
-  texel 04 scotopic veil = 0x3e8f3a6a82fbeee6  # 2.3266812964455943e-7
+  texel 04 eye limit = 0x401b0da6c1aed1e2  # 6.763331438346059
+  texel 04 photopic veil = 0x3e7838731a2e4936  # 9.022841722234989e-8
+  texel 04 scotopic veil = 0x3e8f3a50962066b6  # 2.3266518228773558e-7
   texel 05 luminance = 0x3f1beff182a5378f  # 0.00010657226144880474
   texel 05 red chroma (f32) = 0x000000003f8d73a6
   texel 05 green chroma (f32) = 0x000000003f78349b
@@ -93,9 +93,9 @@ face PosX, row 0
   texel 05 diffuse luminance = 0x3f041d7172b72c3e  # 3.8366341268046976e-5
   texel 05 eye background = 0x3f1c2360f267ca28  # 0.00010733870713134557
   texel 05 eye background S/P = 0x400304d1ecf01e63  # 2.3773535261896526
-  texel 05 eye limit = 0x401a79549445b91a  # 6.618486706500585
-  texel 05 photopic veil = 0x3e7c761b976ce24e  # 1.0602682274936729e-7
-  texel 05 scotopic veil = 0x3e9263289c33df7c  # 2.7399269360251286e-7
+  texel 05 eye limit = 0x401a7954949a5baa  # 6.618486711426991
+  texel 05 photopic veil = 0x3e7c7609c6cff0e2  # 1.0602581008984243e-7
+  texel 05 scotopic veil = 0x3e92631bffecf23f  # 2.739898263164976e-7
   texel 06 luminance = 0x3f23a2cb9a1d00fa  # 0.00014981017471350067
   texel 06 red chroma (f32) = 0x000000003f8e13c6
   texel 06 green chroma (f32) = 0x000000003f78108c
@@ -103,9 +103,9 @@ face PosX, row 0
   texel 06 diffuse luminance = 0x3f0e6650a6703b03  # 5.798276543355319e-5
   texel 06 eye background = 0x3f23a5d4906656ba  # 0.00014990062500135575
   texel 06 eye background S/P = 0x4002f2681bdd3f8d  # 2.36836263436266
-  texel 06 eye limit = 0x4019e66afccf738a  # 6.4750175000780334
-  texel 06 photopic veil = 0x3e90e7fa74344c4f  # 2.519214954015764e-7
-  texel 06 scotopic veil = 0x3ea4ca1d034eadf9  # 6.195755363111426e-7
+  texel 06 eye limit = 0x4019e66afd07742a  # 6.475017503337805
+  texel 06 photopic veil = 0x3e90e7f63f70d8d0  # 2.5192053904348936e-7
+  texel 06 scotopic veil = 0x3ea4ca170ee939e3  # 6.195728284393445e-7
   texel 07 luminance = 0x3f2ab4afa465ae26  # 0.00020374912328279085
   texel 07 red chroma (f32) = 0x000000003f91298f
   texel 07 green chroma (f32) = 0x000000003f77179b
@@ -113,9 +113,9 @@ face PosX, row 0
   texel 07 diffuse luminance = 0x3f103482870d0f0e  # 6.181761433504356e-5
   texel 07 eye background = 0x3f2ad95d4c53cbbc  # 0.00020484222310520976
   texel 07 eye background S/P = 0x4002a88d6e8c7373  # 2.3323010098087535
-  texel 07 eye limit = 0x40196664fedce4f6  # 6.349994642479251
-  texel 07 photopic veil = 0x3e790aeeae265748  # 9.329134401653712e-8
-  texel 07 scotopic veil = 0x3e8fc507c978d177  # 2.3670233838399665e-7
+  texel 07 eye limit = 0x40196664ff0239b2  # 6.349994644652201
+  texel 07 photopic veil = 0x3e790adf37e38806  # 9.329046510604273e-8
+  texel 07 scotopic veil = 0x3e8fc4f1e5ae1c48  # 2.3669984980051197e-7
   texel 08 luminance = 0x3f2c669ccd1912a8  # 0.00021668113781649523
   texel 08 red chroma (f32) = 0x000000003f91f8dc
   texel 08 green chroma (f32) = 0x000000003f76d627
@@ -123,9 +123,9 @@ face PosX, row 0
   texel 08 diffuse luminance = 0x3f112027fa51f3d2  # 6.532901768881098e-5
   texel 08 eye background = 0x3f2c8b5bb03b6725  # 0.00021777624362223042
   texel 08 eye background S/P = 0x4002961936fdcfff  # 2.323290280934088
-  texel 08 eye limit = 0x40194dffa9e04c1e  # 6.326170591654799
-  texel 08 photopic veil = 0x3e740efa3f5bb459  # 7.472375770550169e-8
-  texel 08 scotopic veil = 0x3e893cb6648f4b22  # 1.8803148041246062e-7
+  texel 08 eye limit = 0x40194dffa9ffd3a2  # 6.326170593490049
+  texel 08 photopic veil = 0x3e740eec586f4073  # 7.472296746570732e-8
+  texel 08 scotopic veil = 0x3e893ca2b61e36b6  # 1.8802924289485926e-7
   texel 09 luminance = 0x3f247c2a40aeacd0  # 0.00015628829745870662
   texel 09 red chroma (f32) = 0x000000003f8ee717
   texel 09 green chroma (f32) = 0x000000003f77b7f5
@@ -133,9 +133,9 @@ face PosX, row 0
   texel 09 diffuse luminance = 0x3f0691347c4c0649  # 4.3043531638542266e-5
   texel 09 eye background = 0x3f248b651c0c8def  # 0.00015674218413962114
   texel 09 eye background S/P = 0x4002e29afb6e6db2  # 2.360647167499075
-  texel 09 eye limit = 0x4019d4cf57acc09a  # 6.457822198790518
-  texel 09 photopic veil = 0x3e77cbdc943d7c9d  # 8.864825412406467e-8
-  texel 09 scotopic veil = 0x3e8e273a9672609b  # 2.246591279439099e-7
+  texel 09 eye limit = 0x4019d4cf57d37276  # 6.45782220104285
+  texel 09 photopic veil = 0x3e77cbd05a8bc187  # 8.864755919233896e-8
+  texel 09 scotopic veil = 0x3e8e272966016a17  # 2.2465717375542707e-7
   texel 10 luminance = 0x3f1ea25b2ae16a1e  # 0.00011686021272919913
   texel 10 red chroma (f32) = 0x000000003f8e7863
   texel 10 green chroma (f32) = 0x000000003f77dbda
@@ -143,9 +143,9 @@ face PosX, row 0
   texel 10 diffuse luminance = 0x3efb3aeffbdd2bc2  # 2.5968765604827066e-5
   texel 10 eye background = 0x3f1eac16ef0f091c  # 0.0001170052526182946
   texel 10 eye background S/P = 0x4002eceadb9078bf  # 2.3656823304619077
-  texel 10 eye limit = 0x401a548b01c0ab5a  # 6.582561519035915
-  texel 10 photopic veil = 0x3e89fa5014479746  # 1.935495764902715e-7
-  texel 10 scotopic veil = 0x3ea13d750cc4f1e1  # 5.137940433451785e-7
+  texel 10 eye limit = 0x401a548b01eef89e  # 6.582561521731035
+  texel 10 photopic veil = 0x3e89fa4ab847aed9  # 1.9354896720003532e-7
+  texel 10 scotopic veil = 0x3ea13d71488907bd  # 5.137923305214442e-7
   texel 11 luminance = 0x3f16d53e4fba9af2  # 8.71009141812753e-5
   texel 11 red chroma (f32) = 0x000000003f8f038d
   texel 11 green chroma (f32) = 0x000000003f77b528
@@ -153,9 +153,9 @@ face PosX, row 0
   texel 11 diffuse luminance = 0x3ef069c9a7e4b25a  # 1.5652879022431218e-5
   texel 11 eye background = 0x3f16f2d9fcab5a4a  # 8.754210936543733e-5
   texel 11 eye background S/P = 0x4002ddbe8653f9cd  # 2.3582735533120514
-  texel 11 eye limit = 0x401ad858fd067406  # 6.711276963728784
-  texel 11 photopic veil = 0x3e90969f9adac59a  # 2.4718601819147215e-7
-  texel 11 scotopic veil = 0x3ea5803d1526ed39  # 6.407777084974548e-7
+  texel 11 eye limit = 0x401ad858fd3daa16  # 6.711276966942497
+  texel 11 photopic veil = 0x3e90969d43e28239  # 2.471854861994412e-7
+  texel 11 scotopic veil = 0x3ea58039cb811d87  # 6.407762134308058e-7
   texel 12 luminance = 0x3f119c404495080d  # 6.717817554594014e-5
   texel 12 red chroma (f32) = 0x000000003f8f7e1b
   texel 12 green chroma (f32) = 0x000000003f779685
@@ -163,9 +163,9 @@ face PosX, row 0
   texel 12 diffuse luminance = 0x3ee9caef86777666  # 1.2298926050864633e-5
   texel 12 eye background = 0x3f11ebd7a4c2935d  # 6.836417850537625e-5
   texel 12 eye background S/P = 0x4002d1176074fa9a  # 2.3520953689288264
-  texel 12 eye limit = 0x401b4be21558f64a  # 6.82410462718469
-  texel 12 photopic veil = 0x3e798c52c481619a  # 9.517423038682871e-8
-  texel 12 scotopic veil = 0x3e9055517b09f460  # 2.433847568274007e-7
+  texel 12 eye limit = 0x401b4be21597d3b2  # 6.824104630843907
+  texel 12 photopic veil = 0x3e798c4a9ad23dce  # 9.517376638373944e-8
+  texel 12 scotopic veil = 0x3e90554bbf5d4af3  # 2.4338345327061795e-7
   texel 13 luminance = 0x3f106391e1202d01  # 6.25188625066782e-5
   texel 13 red chroma (f32) = 0x000000003f8f5683
   texel 13 green chroma (f32) = 0x000000003f77af4c
@@ -173,9 +173,9 @@ face PosX, row 0
   texel 13 diffuse luminance = 0x3ee86dac5fd988c6  # 1.1648374307064365e-5
   texel 13 eye background = 0x3f10716e905870dc  # 6.272542312796579e-5
   texel 13 eye background S/P = 0x4002d124b28ad52e  # 2.352120776044692
-  texel 13 eye limit = 0x401b73fa4289ac72  # 6.863259353306704
-  texel 13 photopic veil = 0x3e726dbe15571dda  # 6.865218912028831e-8
-  texel 13 scotopic veil = 0x3e878018f4a03b8c  # 1.7509148114754174e-7
+  texel 13 eye limit = 0x401b73fa42c5c5de  # 6.863259356804944
+  texel 13 photopic veil = 0x3e726db6f5498a34  # 6.865178409915297e-8
+  texel 13 scotopic veil = 0x3e87800ef3690104  # 1.750903437392689e-7
   texel 14 luminance = 0x3f0d69c5cc76f4c8  # 5.610117801378153e-5
   texel 14 red chroma (f32) = 0x000000003f8fc452
   texel 14 green chroma (f32) = 0x000000003f77965e
@@ -183,9 +183,9 @@ face PosX, row 0
   texel 14 diffuse luminance = 0x3ee2a8642338c525  # 8.896721829551046e-6
   texel 14 eye background = 0x3f0d72acdb0ac416  # 5.616750730064888e-5
   texel 14 eye background S/P = 0x4002c4b8a68bdc66  # 2.3460553180153054
-  texel 14 eye limit = 0x401ba8ad481e212a  # 6.9147235172643295
-  texel 14 photopic veil = 0x3e71a6370ddc53f9  # 6.574868246748274e-8
-  texel 14 scotopic veil = 0x3e86820a6ec23646  # 1.6769745714679403e-7
+  texel 14 eye limit = 0x401ba8ad48594e12  # 6.914723520708792
+  texel 14 photopic veil = 0x3e71a630d2dcd953  # 6.57483283067897e-8
+  texel 14 scotopic veil = 0x3e868201b0348430  # 1.6769646302933961e-7
   texel 15 luminance = 0x3f0b7fcc6a7cbace  # 5.2450586109355915e-5
   texel 15 red chroma (f32) = 0x000000003f8f842d
   texel 15 green chroma (f32) = 0x000000003f779ed7
@@ -193,30 +193,30 @@ face PosX, row 0
   texel 15 diffuse luminance = 0x3ee1a45a5f62e2b2  # 8.412363041153173e-6
   texel 15 eye background = 0x3f0b860a26fcd1a8  # 5.249708635660387e-5
   texel 15 eye background S/P = 0x4002cd8953401f87  # 2.3503595832771143
-  texel 15 eye limit = 0x401bc767d996f716  # 6.944732093657668
-  texel 15 photopic veil = 0x3e7385e7e00bfce8  # 7.272910097429537e-8
-  texel 15 scotopic veil = 0x3e88bac28b79a1f1  # 1.842493639770414e-7
+  texel 15 eye limit = 0x401bc767d9ce7f3e  # 6.944732096890048
+  texel 15 photopic veil = 0x3e7385e26a5333ba  # 7.27287906177061e-8
+  texel 15 scotopic veil = 0x3e88babae2ddb005  # 1.8424849329166863e-7
   star 0x42002cb600800009/0 (C)
     V = 0x40115a7e8984a92e  # 4.3383733260364306
-    eye offset = 0x3fb8e2e6b73d1300  # 0.0972122380599778
+    eye offset = 0x3fb8e2e6b74e8200  # 0.09721223807583357
   star 0x4200acba00800000/0 (C)
     V = 0x4015b9fd888ed0b1  # 5.431631215779064
-    eye offset = 0x3fa0f561d32fb8a2  # 0.03312211707076186
+    eye offset = 0x3fa0f561d337e8a2  # 0.033122117074485105
   star 0x6200596800000002/3 (D)
     V = 0x40163e2f590970c3  # 5.560727492524339
-    eye offset = 0x3fb75663884ed967  # 0.09116193845588826
+    eye offset = 0x3fb7566388527967  # 0.09116193845918517
   star 0x42006cb600000005/0 (C)
     V = 0x401e46a4f768295d  # 7.568988672001379
-    eye offset = 0xbfa5a6f4ac47c8bd  # -0.0422893963149291
+    eye offset = 0xbfa5a6f4ac4710bd  # -0.04228939631460225
   star 0x42006cba00c00003/0 (C)
     V = 0x401f28cd672d6762  # 7.789846050401907
-    eye offset = 0xbf92ba4b3cecf0fd  # -0.01828877982482967
+    eye offset = 0xbf92ba4b3c6724fd  # -0.018288779794407784
   star 0x4200acba00800010/0 (C)
     V = 0x401ff676cf02d217  # 7.990687593981895
-    eye offset = 0xbfa4c7329903859a  # -0.04058225744098394
+    eye offset = 0xbfa4c7329902e99a  # -0.04058225744070683
   star 0x4200acba00800001/0 (C)
     V = 0x40202637f4bdabb9  # 8.074645660546468
-    eye offset = 0xbfac8924bd1c1987  # -0.055733821949661304
+    eye offset = 0xbfac8924bd1c0787  # -0.05573382194962933
   star 0x42006cb600800007/0 (C)
     V = 0x4020b85143767421  # 8.359994991502449
     eye offset = 0xbfc36a55b5a098ab  # -0.1516825806476779
@@ -227,5 +227,5 @@ face PosX, row 0
     V = 0x402394e5925564e7  # 9.790813992427912
     eye offset = 0xbfce4d41bdc1b59f  # -0.23673269048178455
 the whole band
-  every texel's limit and veils' digest = 0x9cfdfcec60a208d8
-  every listed star's eye offset digest = 0xec276595e059ea26
+  every texel's limit and veils' digest = 0x4d32fdfdca1fdb7b
+  every listed star's eye offset digest = 0x744bb2d90b6e5885
