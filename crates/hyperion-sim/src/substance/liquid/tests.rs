@@ -3173,9 +3173,16 @@ fn the_newton_solves_end_where_their_steps_do() {
 /// One [`CompressionSlot`] asked in turn for every liquid row, compressible or not, at
 /// temperatures inside and past its liquid range, under pressures repeated, below its vapour's,
 /// past the ceiling and not a number, each twice over and interleaved, gives
-/// [`Substance::liquid_density_at_pressure`]'s bits every time.
+/// [`Substance::liquid_density_at_pressure`]'s bits every time, under the version's rules and
+/// under every 26 hold (the settled compression's, P14.T54.b.l).
 #[test]
 fn the_compression_slot_gives_the_direct_density() {
+    the_slot_gives_the_direct_density();
+    crate::planetary::testing::with_every_26_hold(the_slot_gives_the_direct_density);
+}
+
+/// [`the_compression_slot_gives_the_direct_density`] under the rules in force.
+fn the_slot_gives_the_direct_density() {
     let rows: Vec<SubstanceId> = super::super::rows::liquids::LIQUIDS
         .iter()
         .map(|(key, _)| row(key.as_str()))
@@ -3213,4 +3220,88 @@ fn the_compression_slot_gives_the_direct_density() {
         }
     }
     assert!(asked > 500, "{asked}");
+}
+
+/// P14.T54.b.l's settled compression is held until the 25 → 26 bump: the rules in force are the
+/// fixed count's.
+#[test]
+fn the_settled_compression_is_held_only_until_the_26_bump() {
+    use super::super::helmholtz::{
+        CompressionRules, SETTLED_COMPRESSION_VERSION, with_compression,
+    };
+    assert!(
+        crate::GENERATOR_VERSION < SETTLED_COMPRESSION_VERSION,
+        "the 25 → 26 bump puts P14.T54.b.l's settled compression on the record: delete \
+         `SETTLED_COMPRESSION_VERSION`, `CompressionRules::in_force`'s version test, the tests' \
+         `with_compression` and its switch in `with_every_26_hold`, and this test, keeping \
+         `CompressionRules::Fixed` as the tests' oracle of the settled compression"
+    );
+    assert_eq!(CompressionRules::in_force(), CompressionRules::Fixed);
+    assert_eq!(
+        with_compression(CompressionRules::Settled, CompressionRules::in_force),
+        CompressionRules::Settled
+    );
+    assert_eq!(CompressionRules::in_force(), CompressionRules::Fixed);
+}
+
+/// Under 26's settled compression every compressible row's density is the fixed count's within
+/// 10⁻¹² of itself, over [`the_compression_converges_over_every_row_s_liquid_range`]'s
+/// temperatures and pressures, in fewer steps: their mean and most are stated.
+#[test]
+fn under_the_settled_compression_every_row_s_density_is_the_fixed_count_s() {
+    use super::super::helmholtz::{COMPRESSION_STEPS, with_compression_steps};
+    let (mut worst, mut cases): (f64, u32) = (0.0, 0);
+    let ((), (calls, steps)) = with_compression_steps(|| {
+        for id in compressible_rows() {
+            let substance = id.substance();
+            let key = substance.key();
+            let (equation, diagram) = equation_of_state(substance).unwrap();
+            let (triple, critical) = (
+                diagram.triple_temperature().value(),
+                diagram.critical_temperature().value(),
+            );
+            for fraction in [
+                0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.98, 0.99, 0.995,
+                0.999,
+            ] {
+                let t = Kelvin::new(triple + (critical - triple) * fraction);
+                let saturated = substance.grain_density(CondensedPhase::Liquid, t).unwrap();
+                let vapour = diagram.saturation_pressure(t);
+                let isotherm = equation.isotherm(t);
+                let at_vapour = isotherm.density_at_pressure(saturated, vapour);
+                for p in [
+                    vapour.value() * 1.01 + 1e3,
+                    vapour.value() + 1e5,
+                    vapour.value() + 1e6,
+                    vapour.value() + 1e7,
+                    22.5e6_f64.max(vapour.value() * 1.5),
+                    1e8,
+                    3e8,
+                    1e9,
+                ] {
+                    let target = Pascals::new(p);
+                    let fixed =
+                        isotherm.compressed_density_in(at_vapour, target, COMPRESSION_STEPS);
+                    let settled = isotherm.settled_density(at_vapour, target);
+                    let off = (settled.value() / fixed.value() - 1.0).abs();
+                    assert!(
+                        off <= 1e-12,
+                        "{key} at {t:?} under {p} Pa: {settled:?} against {fixed:?}"
+                    );
+                    worst = worst.max(off);
+                    cases += 1;
+                }
+            }
+        }
+    });
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "counts of a few thousand steps, exact in f64"
+    )]
+    let mean = steps as f64 / calls as f64;
+    eprintln!(
+        "{cases} compressions, {calls} settled: {mean:.2} steps a call against the fixed \
+         {COMPRESSION_STEPS}; the largest move {worst:.3e}"
+    );
+    assert!(mean < 8.0, "{mean}");
 }

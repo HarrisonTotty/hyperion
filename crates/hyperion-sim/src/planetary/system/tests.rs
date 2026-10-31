@@ -7143,15 +7143,36 @@ fn debug_moves(one: &str, two: &str) -> Option<f64> {
     }))
 }
 
-/// P14.T54.b.l's fall radius under 26's hold, a measurement for its record, run by name: each of
-/// the 400 sample systems and the golden systems generated and snapshotted at the epoch under the
-/// bisections for `r_w` and under the false position (`with_fall_radius`), their Debug texts
-/// compared: how many systems and snapshots move, the largest relative move of a number in each
-/// where only numbers move, and every one whose text moves.
+/// P14.T54.b.l's fall radius under 26's hold, a measurement for its record, run by name: the
+/// bisections for `r_w` against the false position (`with_fall_radius`), as [`stated_movers`]
+/// states them.
 #[test]
 #[ignore = "a measurement for P14.T54.b.l's record, run by name"]
 fn under_the_fall_radius_false_position_the_movers_are_stated() {
     use crate::planetary::chem::condense::{FallRadiusRoot, with_fall_radius};
+    stated_movers(&|run| with_fall_radius(FallRadiusRoot::FalsePosition, run));
+}
+
+/// P14.T54.b.l's settled compression under 26's hold, a measurement for its record, run by name:
+/// the fixed count against the settled compression (`with_compression`), as [`stated_movers`]
+/// states them.
+#[test]
+#[ignore = "a measurement for P14.T54.b.l's record, run by name"]
+fn under_the_settled_compression_the_movers_are_stated() {
+    use crate::substance::helmholtz::{CompressionRules, with_compression};
+    stated_movers(&|run| with_compression(CompressionRules::Settled, run));
+}
+
+/// The run an arm of [`stated_movers`] takes under its hold: a system generated and snapshotted
+/// at the epoch, each's Debug text.
+type Texts<'a> = &'a dyn Fn() -> (String, String);
+
+/// A hold's movers, for a cost lever's record (P14.T54.b.l): each of the 400 sample systems and
+/// the golden systems generated and snapshotted at the epoch under the version's rules and under
+/// `arm`, which runs its argument with the hold's switch set, their Debug texts compared: how many
+/// systems and snapshots move, the largest relative move of a number in each where only numbers
+/// move, and every one whose text moves.
+fn stated_movers(arm: &dyn Fn(Texts<'_>) -> (String, String)) {
     let sets: Vec<(String, Seed, SystemContext)> = sample()
         .iter()
         .map(|ctx| (format!("{:016x}", ctx.id().raw()), SEED, ctx.clone()))
@@ -7163,20 +7184,18 @@ fn under_the_fall_radius_false_position_the_movers_are_stated() {
             )
         }))
         .collect();
-    let texts = |root: FallRadiusRoot, seed: Seed, ctx: &SystemContext| {
-        with_fall_radius(root, || {
-            let system = generate(seed, ctx);
-            let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
-            (format!("{system:?}"), format!("{snapshot:?}"))
-        })
+    let texts = |seed: Seed, ctx: &SystemContext| {
+        let system = generate(seed, ctx);
+        let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+        (format!("{system:?}"), format!("{snapshot:?}"))
     };
     let (mut systems_moved, mut snapshots_moved) = (0_u32, 0_u32);
     let (mut worst_system, mut worst_snapshot) =
         ((0.0_f64, String::new()), (0.0_f64, String::new()));
     let mut texts_moved = Vec::new();
     for (name, seed, ctx) in &sets {
-        let (b_system, b_snapshot) = texts(FallRadiusRoot::Bisections, *seed, ctx);
-        let (f_system, f_snapshot) = texts(FallRadiusRoot::FalsePosition, *seed, ctx);
+        let (b_system, b_snapshot) = texts(*seed, ctx);
+        let (f_system, f_snapshot) = arm(&|| texts(*seed, ctx));
         for (what, moved, worst, one, two) in [
             (
                 "system",

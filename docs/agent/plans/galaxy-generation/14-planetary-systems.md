@@ -31409,9 +31409,16 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         `the_fall_radius_root_is_held_only_until_the_26_bump`). It takes 7.6 steps a call against
         48 bisections. Generation does not move; 262 of the 415 snapshots move, by at most 5.0 ×
         10⁻¹⁴ of a figure (`under_the_fall_radius_false_position_the_movers_are_stated`).
-      - For 26's bump: delete the hold, the switch and the tripwire, keeping
-        `FallRadiusRoot::Bisections` as the tests' oracle; 25's bump drops `with_every_25_hold`
-        from `with_every_26_hold`.
+      - the settled compression, `SETTLED_COMPRESSION_VERSION` (`CompressionRules`, the tests'
+        `with_compression`, and the tripwire
+        `the_settled_compression_is_held_only_until_the_26_bump`): the Newton steps end at the
+        first that moves the density by at most `COMPRESSION_TOLERANCE`, 2⁻⁴⁰ of itself. It takes
+        5.5 steps a call in `generate` over the first 20, against 11.1 to a repeat. Generation
+        does not move; 64 of the 415 snapshots move, by at most 2.2 × 10⁻⁷ of a figure, at a
+        bracket of jumps (`under_the_settled_compression_the_movers_are_stated`).
+      - For 26's bump: delete each hold, its switch and its tripwire, keeping
+        `FallRadiusRoot::Bisections` and `CompressionRules::Fixed` as the tests' oracles; 25's
+        bump drops `with_every_25_hold` from `with_every_26_hold`.
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

@@ -508,6 +508,9 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - the decks' fall radius, `FALL_RADIUS_VERSION` (P14.T54.b.l's cost lever), at
 ///   `FallRadiusRoot::FalsePosition` through `with_fall_radius`: each level's `r_w` by the Illinois
 ///   false position on ln `v_f` in ln r, to the bisections' width.
+/// - the settled compression, `SETTLED_COMPRESSION_VERSION` (P14.T54.b.l's cost lever), at
+///   `CompressionRules::Settled` through `with_compression`: a liquid's compression ended by the
+///   first step that moves its density by at most 2⁻⁴⁰ of itself.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
@@ -522,12 +525,14 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hosts::substellar::{SubstellarHostRules, with_substellar_hosts};
     use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
+    use crate::substance::helmholtz::{CompressionRules, with_compression};
     let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
     let run = move || with_substellar_hosts(SubstellarHostRules::BrownDwarfs, run);
     let run = move || with_locked_state(LockedStateRules::Eyeball, run);
     let run = move || with_sea_deck(SeaDeckRules::Dry, run);
     let run = move || with_planet_lag(PlanetLagRules::Airless, run);
     let run = move || with_fall_radius(FallRadiusRoot::FalsePosition, run);
+    let run = move || with_compression(CompressionRules::Settled, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 
