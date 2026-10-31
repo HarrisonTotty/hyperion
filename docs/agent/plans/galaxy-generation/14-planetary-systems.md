@@ -33508,7 +33508,7 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `PROTOPLANETARY_DISC_SLOT`, `Population::ProtoplanetaryDisc(DiscRecord)`, `DiscGap`; on the
     wire `PopulationDto::ProtoplanetaryDisc(ProtoplanetaryDiscDto)` with `DiscGapDto`, a growing
     arm (plan 04's list now names `PopulationDto`; `PROTOCOL_VERSION` stays 3). The client decodes
-    and lists it, and reads it out; `populationAnnuli` does not draw it yet.
+    and lists it, reads it out and draws it (below).
   - _T28.d._ Held at 26: `hosts::white_dwarfs`' `WHITE_DWARF_DEBRIS_VERSION`,
     `WhiteDwarfDebrisRules::{Held, Debris}`, `with_white_dwarf_debris` (a line in
     `with_every_26_hold`) and the tripwire `the_white_dwarf_debris_is_held_only_until_the_26_bump`.
@@ -33523,7 +33523,7 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     edge) to the rigid Roche limit for a rocky asteroid; its mass `NotModelled`; label `DEBRIS DISC`.
   - New public items: `WhiteDwarfSystem`, `Population::DebrisDisc(DebrisDiscRecord)`, and on the
     wire `PopulationDto::DebrisDisc(DebrisDiscDto)`; the client decodes, lists and reads it out,
-    and does not draw it yet. The pollution mark is not on the wire.
+    and draws it (below). The pollution mark is not on the wire.
   - _T28.e._ Held at 26: `hosts::second_generation`'s `SECOND_GENERATION_VERSION`,
     `SecondGenerationRules::{Held, Planets}`, `with_second_generation` (a line in
     `with_every_26_hold`) and the tripwire `the_second_generation_is_held_only_until_the_26_bump`.
@@ -33546,3 +33546,7 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     each gain their disc body `e000` and nothing else (no golden system has a white dwarf's debris
     or a pulsar's planets); `system::tests::a_record_tags_what_the_generator_does_not_compute`
     already reads the disc kinds. The server's goldens were not run under the arms.
+  - _Drawn (lane p14-t28-annuli, 2026-10-31):_ `populationAnnuli` draws both discs (`disc:<id>`),
+    labelled and selected as a belt is: the debris disc ticked, the protoplanetary disc as its two
+    edges; `beltsOuterAu`, so `BELTS`, also fits a present protoplanetary disc. Both to a guide
+    draft for the owner (lean, 2026-10-31); the guide is unchanged.

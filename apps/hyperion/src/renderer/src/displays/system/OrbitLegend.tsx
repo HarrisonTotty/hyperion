@@ -65,8 +65,8 @@ export interface OrbitLegendProps {
  * drawn at, so that a giant planet's larger mark is read as its class; what a star's size stands
  * for, the initial-mass bands of the chart's census, as on the chart (ruling 36); which side of
  * the reference plane fill marks, named for the plane the map is drawn on; the orbit's line and the
- * selected orbit's wider one, which a selected belt's, ring's or halo's edges share, since width,
- * not colour alone, carries the selection (ruling 44.2); and the reticle.
+ * selected orbit's wider one, which a selected belt's, disc's, ring's or halo's edges share, since
+ * width, not colour alone, carries the selection (ruling 44.2); and the reticle.
  */
 export function OrbitLegend({ kinds, bodies, bands, plane }: OrbitLegendProps) {
   const lightest = bands[0];

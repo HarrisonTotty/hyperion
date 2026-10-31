@@ -16,7 +16,7 @@ import { type BodyPlacement, composePosition, orbitPolyline } from "../../lib/or
 import { bodySymbol } from "../../lib/system/bodySymbols";
 import { bodyKindLabel, ringKindLabel } from "../../lib/system/bodyWords";
 import type { HierarchyLayout } from "../../lib/system/hierarchy";
-import type { BodyKind, OrbitHost, SystemBody, Zone } from "../../lib/system/model";
+import type { BodyKind, OrbitHost, Population, SystemBody, Zone } from "../../lib/system/model";
 import type { AnnulusMark, PathMark, PointMark } from "../../spatial/marks";
 import { add, norm, scale, type Vec3 } from "../../geometry/vec3";
 import { METRES_PER_AU } from "./orbitScale";
@@ -447,22 +447,25 @@ function hostCentreAu(
 }
 
 /**
- * The belts as ticked annuli on the reference plane about their hosts at the display time, and the
- * cometary halo as its two edges, or its inner edge alone, when inside the view (plan 14, P14.T42.a
- * and T38.a; ruling 113.1).
+ * The belts as ticked annuli on the reference plane about their hosts at the display time, the
+ * discs as annuli about theirs, and the cometary halo as its two edges, or its inner edge alone,
+ * when inside the view (plan 14, P14.T42.a, T38.a, T28.a and T28.d; ruling 113.1).
  *
  * @remarks
  * A belt proper is drawn as its two edges joined by radial ticks every 10°, labelled with its name;
  * a Kuiper-like belt's scattered component, which runs on beyond it, as its two edges alone,
  * labelled `SCATTERED DISC`, so that the two differ by shape. Both lie in the reference plane, which
  * is the host's zone's plane for the primary's belts and a companion's own only approximately, as
- * the zones' annuli do. The halo is a shell, drawn without ticks as the circles where it meets the
- * plane: both edges, labelled `COMETARY HALO`, when its outer edge lies inside `viewRadiusAu`, the
- * radius the view fits; its inner edge alone, labelled `COMETARY HALO INNER EDGE`, when only that
- * does; and nothing when neither does, since a ring off the map says nothing. A body not present,
- * or whose section is not `ok`, draws nothing, nor does a protoplanetary or debris disc yet. The selected
- * belt, its scattered component with it,
- * or the selected halo is drawn as the selected orbit is (the guide's selection rule).
+ * the zones' annuli do. A disc lies in the same plane and is labelled as a belt is: a white
+ * dwarf's debris disc, a ring of dust inside its Roche limit, ticked as a belt (`DEBRIS DISC`), and
+ * a young host's protoplanetary disc, which runs from near its star to beyond its planets, as its
+ * two edges alone (`PROTOPLANETARY DISC`), by a guide row drafted for the owner (lean, 2026-10-31).
+ * The halo is a shell, drawn without ticks as the circles where it meets the plane: both edges,
+ * labelled `COMETARY HALO`, when its outer edge lies inside `viewRadiusAu`, the radius the view
+ * fits; its inner edge alone, labelled `COMETARY HALO INNER EDGE`, when only that does; and nothing
+ * when neither does, since a ring off the map says nothing. A body not present, or whose section is
+ * not `ok`, draws nothing. The selected belt, its scattered component with it, the selected disc or
+ * the selected halo is drawn as the selected orbit is (the guide's selection rule).
  *
  * @param viewRadiusAu - The radius the view fits, from the barycentre.
  * @param selectedId - The selected body, or `null`.
@@ -478,15 +481,7 @@ export function populationAnnuli(
   const annuli: AnnulusMark[] = [];
   for (const body of bodies) {
     const population = body.population.state === "ok" ? body.population.value : null;
-    // A protoplanetary or debris disc is listed, not drawn: its annulus is a follow-up (plan 14,
-    // P14.T28.a and T28.d).
-    if (
-      population === null ||
-      population.kind === "ring" ||
-      population.kind === "protoplanetary_disc" ||
-      population.kind === "debris_disc" ||
-      body.state.kind !== "present"
-    ) {
+    if (population === null || population.kind === "ring" || body.state.kind !== "present") {
       continue;
     }
     const centre = hostCentreAu(population.host, system, layout, time);
@@ -521,6 +516,21 @@ export function populationAnnuli(
       }
       continue;
     }
+    if (population.kind === "protoplanetary_disc" || population.kind === "debris_disc") {
+      annuli.push({
+        id: `disc:${body.id}`,
+        centre,
+        innerRadius: population.innerEdgeM / METRES_PER_AU,
+        outerRadius: population.outerEdgeM / METRES_PER_AU,
+        // A protoplanetary disc's ticks would run from its inner rim by the star out across every
+        // orbit; a debris disc, a ring of dust inside its white dwarf's Roche limit, is narrow.
+        ticks: population.kind === "debris_disc",
+        label: name,
+        labelSpinward: true,
+        selected,
+      });
+      continue;
+    }
     const hostKey = hostKeyOf(population.host, system, layout);
     const hostReachAu = (hostKey === null ? 0 : (layout.reachM.get(hostKey) ?? 0)) / METRES_PER_AU;
     const innerAu = population.innerEdgeM / METRES_PER_AU;
@@ -544,12 +554,15 @@ export function populationAnnuli(
 }
 
 /**
- * How far the outermost belt proper reaches from the barycentre, AU: its host's reach and its outer
- * edge; `null` for a system with no belt drawn. The radius `BELTS` fits (P14.T42.b).
+ * How far the outermost belt proper or protoplanetary disc reaches from the barycentre, AU: its
+ * host's reach and its outer edge; `null` for a system with neither drawn. The radius `BELTS` fits
+ * (P14.T42.b, T28.a).
  *
  * @remarks
  * A Kuiper-like belt's scattered component is left out, since it runs on to many times the belt's
- * radius and would leave the belt proper a small ring in the middle of the view.
+ * radius and would leave the belt proper a small ring in the middle of the view. A protoplanetary
+ * disc is fitted, since it runs on beyond its planets, which `ALL` fits, further than the zoom
+ * reaches from there (a guide row drafted for the owner, lean 2026-10-31).
  */
 export function beltsOuterAu(
   bodies: ReadonlyArray<SystemBody>,
@@ -558,16 +571,40 @@ export function beltsOuterAu(
 ): number | null {
   let outerAu: number | null = null;
   for (const body of bodies) {
-    const population = body.population.state === "ok" ? body.population.value : null;
-    if (population?.kind !== "belt" || body.state.kind !== "present") {
+    const edge = body.population.state === "ok" ? fittedEdge(body.population.value) : null;
+    if (edge === null || body.state.kind !== "present") {
       continue;
     }
-    const key = hostKeyOf(population.host, system, layout);
+    const key = hostKeyOf(edge.host, system, layout);
     if (key === null) {
       continue;
     }
-    const reachAu = ((layout.reachM.get(key) ?? 0) + population.main.outerEdgeM) / METRES_PER_AU;
+    const reachAu = ((layout.reachM.get(key) ?? 0) + edge.outerEdgeM) / METRES_PER_AU;
     outerAu = Math.max(outerAu ?? 0, reachAu);
   }
   return outerAu;
+}
+
+/**
+ * The host and outer edge `BELTS` fits of a population: a belt proper's or a protoplanetary
+ * disc's; `null` for any other.
+ */
+function fittedEdge(
+  population: Population,
+): { readonly host: OrbitHost; readonly outerEdgeM: number } | null {
+  let edge: { readonly host: OrbitHost; readonly outerEdgeM: number } | null;
+  switch (population.kind) {
+    case "belt":
+      edge = { host: population.host, outerEdgeM: population.main.outerEdgeM };
+      break;
+    case "protoplanetary_disc":
+      edge = { host: population.host, outerEdgeM: population.outerEdgeM };
+      break;
+    case "ring":
+    case "cometary_halo":
+    case "debris_disc":
+      edge = null;
+      break;
+  }
+  return edge;
 }

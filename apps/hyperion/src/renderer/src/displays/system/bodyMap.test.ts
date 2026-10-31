@@ -1,4 +1,4 @@
-import type { BodySummaryDto, ResponseFor, UniverseTime } from "@hyperion/protocol";
+import type { BodySummaryDto, PopulationDto, ResponseFor, UniverseTime } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { composePosition, positionAt } from "../../lib/orbit";
@@ -8,8 +8,9 @@ import {
   CONTACT_SIZE_CLASS,
   MOON_SIZE_CLASS,
 } from "../../lib/system/bodySymbols";
-import { layoutHierarchy, orbitNormal } from "../../lib/system/hierarchy";
-import type { SizeClass, SymbolShape } from "../../spatial/marks";
+import { type HierarchyLayout, layoutHierarchy, orbitNormal } from "../../lib/system/hierarchy";
+import type { SystemBody } from "../../lib/system/model";
+import type { AnnulusMark, SizeClass, SymbolShape } from "../../spatial/marks";
 import { SIZE_CLASS_REM, SYMBOL_STROKE_PX, symbolOutline } from "../../spatial/symbols";
 import { dot, norm, scale, sub, vec3 } from "../../geometry/vec3";
 import {
@@ -302,6 +303,60 @@ function withBelt(change: (body: BodySummaryDto) => BodySummaryDto): ResponseFor
   return populatedBodiesWith((body) => (body.kind.type === "belt" ? change(body) : body));
 }
 
+/**
+ * A young star's protoplanetary disc, 0.01 AU to 90 AU, with a gap at a giant (P14.T28.a,
+ * illustrative values).
+ */
+const YOUNG_DISC: PopulationDto = {
+  type: "protoplanetary_disc",
+  host: { type: "star", body_index: 0 },
+  inner_edge_m: 1.5e9,
+  outer_edge_m: 1.346e13,
+  snow_line_m: 4.04e11,
+  characteristic_radius_m: 4.488e12,
+  gas_mass_kg: 1.9e28,
+  solid_mass_kg: 1.5e26,
+  gaps: [{ giant: FIXTURE_JUPITER, radius_m: 7.78e11 }],
+};
+
+/** A white dwarf's debris disc, from its dust's sublimation to its Roche limit (P14.T28.d). */
+const DEBRIS_DISC: PopulationDto = {
+  type: "debris_disc",
+  host: { type: "star", body_index: 0 },
+  inner_edge_m: 7.0e7,
+  outer_edge_m: 6.0e8,
+};
+
+/**
+ * The populated answer with the disc of `population`'s kind present and carrying it, and changed
+ * by `change`.
+ */
+function withDisc(
+  population: PopulationDto,
+  change: (body: BodySummaryDto) => BodySummaryDto = (body) => body,
+): ResponseFor<"system_bodies"> {
+  return populatedBodiesWith((body) =>
+    body.kind.type === population.type
+      ? change({
+          ...body,
+          state: { type: "present" },
+          population: { state: "ok", value: population },
+        })
+      : body,
+  );
+}
+
+/** The discs' annuli of `bodies`, in a view that fits 10 AU. */
+function discAnnuli(
+  bodies: ReadonlyArray<SystemBody>,
+  layout: HierarchyLayout,
+  selectedId: string | null = null,
+): ReadonlyArray<AnnulusMark> {
+  return populationAnnuli(bodies, FIXTURE_SYSTEM, layout, TIME, 10, selectedId).filter((annulus) =>
+    annulus.id.startsWith("disc:"),
+  );
+}
+
 /** The fixture's halo's inner and outer edges, AU: 2,000 AU and 100,000 AU. */
 const HALO_INNER_AU = 299_195_741_400_000 / METRES_PER_AU;
 const HALO_OUTER_AU = 1.495_978_707e16 / METRES_PER_AU;
@@ -414,6 +469,58 @@ describe("populationAnnuli", () => {
     expect(halo(200_000)).toEqual([["COMETARY HALO", HALO_INNER_AU, HALO_OUTER_AU, false]]);
   });
 
+  it("draws a protoplanetary disc about its star as its two edges, labelled as a belt is", () => {
+    const { bodies, layout } = built(withDisc(YOUNG_DISC));
+
+    expect(discAnnuli(bodies.bodies, layout)).toEqual([
+      {
+        id: `disc:${FIXTURE_SYSTEM}.e200`,
+        centre: { x: 0, y: 0, z: 0 },
+        innerRadius: 1.5e9 / METRES_PER_AU,
+        outerRadius: 1.346e13 / METRES_PER_AU,
+        ticks: false,
+        label: "PROTOPLANETARY DISC",
+        labelSpinward: true,
+        selected: false,
+      },
+    ]);
+  });
+
+  it("draws a white dwarf's debris disc about it as a ticked annulus, as a belt is drawn", () => {
+    const { bodies, layout } = built(withDisc(DEBRIS_DISC));
+
+    expect(discAnnuli(bodies.bodies, layout)).toEqual([
+      {
+        id: `disc:${FIXTURE_SYSTEM}.e300`,
+        centre: { x: 0, y: 0, z: 0 },
+        innerRadius: 7.0e7 / METRES_PER_AU,
+        outerRadius: 6.0e8 / METRES_PER_AU,
+        ticks: true,
+        label: "DEBRIS DISC",
+        labelSpinward: true,
+        selected: false,
+      },
+    ]);
+  });
+
+  it("names a disc by its label, and draws the selected disc as selected", () => {
+    const { bodies, layout } = built(
+      withDisc(YOUNG_DISC, (body) => ({ ...body, label: { state: "ok", value: "DISC" } })),
+    );
+    const annuli = discAnnuli(bodies.bodies, layout, `${FIXTURE_SYSTEM}.e200`);
+
+    expect(annuli.map((annulus) => [annulus.label, annulus.selected])).toEqual([["DISC", true]]);
+  });
+
+  it("draws no disc for a system without one, nor one dispersed or with no population", () => {
+    // The populated answer's protoplanetary disc is dispersed, and its debris disc has no section.
+    const populated = built(populatedBodies());
+    const slice = built();
+
+    expect(discAnnuli(populated.bodies.bodies, populated.layout)).toEqual([]);
+    expect(discAnnuli(slice.bodies.bodies, slice.layout)).toEqual([]);
+  });
+
   it("draws no belt that is not present", () => {
     const at = { seconds: 0, nanos: 0 };
     const { bodies, layout } = built(
@@ -440,6 +547,18 @@ describe("beltsOuterAu", () => {
     const { bodies, layout } = built();
 
     expect(beltsOuterAu(bodies.bodies, FIXTURE_SYSTEM, layout)).toBeNull();
+  });
+
+  it("reaches a young star's protoplanetary disc beyond its belt, but no debris disc", () => {
+    const young = built(withDisc(YOUNG_DISC));
+    const dead = built(withDisc(DEBRIS_DISC));
+
+    expect(beltsOuterAu(young.bodies.bodies, FIXTURE_SYSTEM, young.layout)).toBe(
+      1.346e13 / METRES_PER_AU,
+    );
+    expect(beltsOuterAu(dead.bodies.bodies, FIXTURE_SYSTEM, dead.layout)).toBe(
+      490_500_000_000 / METRES_PER_AU,
+    );
   });
 });
 

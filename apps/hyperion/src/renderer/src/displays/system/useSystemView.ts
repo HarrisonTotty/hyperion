@@ -141,7 +141,7 @@ export interface SystemViewState {
    * without a formed system.
    */
   readonly fitRadiusAu: number | null;
-  /** Whether the system has a belt for `BELTS` to fit, which is offered only then. */
+  /** Whether the system has a belt or protoplanetary disc for `BELTS` to fit, offered only then. */
   readonly hasBelts: boolean;
   /** The body the map is drawn about with `FOCUS BODY`, or `null` in the system frame. */
   readonly focused: SystemBody | null;

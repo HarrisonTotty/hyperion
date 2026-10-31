@@ -1939,6 +1939,58 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
     expect(rowNames()).toContain("H7K 4C0RFZ D-7 /57600, COMETARY HALO");
   });
 
+  it("offers BELTS for a young star's disc, which fits it and draws it, labelled", async () => {
+    // Edges of 0.01 AU and 90 AU: the disc runs on far beyond its planets, which ALL fits.
+    const young = populatedBodiesWith((body) =>
+      body.kind.type === "protoplanetary_disc"
+        ? {
+            ...body,
+            state: { type: "present" },
+            population: {
+              state: "ok",
+              value: {
+                type: "protoplanetary_disc",
+                host: { type: "star", body_index: 0 },
+                inner_edge_m: 1.5e9,
+                outer_edge_m: 1.346e13,
+                snow_line_m: 4.04e11,
+                characteristic_radius_m: 4.488e12,
+                gas_mass_kg: 1.9e28,
+                solid_mass_kg: 1.5e26,
+                gaps: [],
+              },
+            },
+          }
+        : body,
+    );
+    const { user, socket } = renderView();
+    await answer(socket, young);
+    await user.click(within(mapPanel()).getByRole("button", { name: "OPTIMISTIC" }));
+
+    await user.keyboard("b");
+
+    expect(within(mapPanel()).getByRole("button", { name: "B BELTS" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(scaleBar()).toMatch(/ AU$/);
+
+    await selectRow(user, /\/57856, PROTOPLANETARY DISC/);
+
+    expect(mapLabel("PROTOPLANETARY DISC")).toBeInTheDocument();
+  });
+
+  it("draws no annulus for the dispersed disc it lists, even selected", async () => {
+    const { user, socket } = renderView();
+    await answer(socket, populatedBodies());
+    await user.click(within(mapPanel()).getByRole("button", { name: "OPTIMISTIC" }));
+
+    await selectRow(user, /\/57856, PROTOPLANETARY DISC/);
+
+    expect(mapLabel("PROTOPLANETARY DISC")).not.toBeInTheDocument();
+    expect(reading("STATE")).toBe("DESTROYED");
+  });
+
   it("lists moons and rings under their planet and a belt's members under the belt", async () => {
     const { socket } = renderView();
     await answer(socket, populatedBodies());
