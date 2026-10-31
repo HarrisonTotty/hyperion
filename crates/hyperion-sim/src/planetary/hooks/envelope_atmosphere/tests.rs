@@ -1726,3 +1726,78 @@ fn pin_mode(w: &mut hyperion_testkit::golden::GoldenWriter, tag: &str, mode: &Ae
     w.f64(&format!("{tag}.exponent"), mode.profile().exponent());
     w.f64(&format!("{tag}.coverage"), mode.coverage());
 }
+
+/// P14.T52.g on the table's giants under the deck profile's `Saturation` (research-r08-t16a's
+/// probe, its `profiles.md`): Jupiter's NH₃ mode's exponent lies within 6.0–7.0 (6.51) and its
+/// drawn τ = 1 level within 0.62–0.66 bar (0.643), Uranus's CH₄'s within 0.34–0.38 bar (0.360) and
+/// Neptune's within 0.45–0.49 bar (0.470); and every volatile deck of τ ≥ 1 on the four is drawn
+/// with its τ = 1 level within 2% in pressure of its own column's, the loop's level masses. Each
+/// envelope is derived inside the switch.
+#[test]
+fn under_the_deck_profile_the_giants_volatile_decks_are_drawn_on_their_columns() {
+    use crate::planetary::chem::condense::{DeckProfileRules, capturing_decks, with_deck_profile};
+    let mut checked = 0;
+    for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
+        let (atmosphere, placed) = with_deck_profile(DeckProfileRules::Saturation, || {
+            capturing_decks(|| table_case(name).atmosphere())
+        });
+        for deck in atmosphere.decks() {
+            let condensate = deck.condensate();
+            if DeckKind::of(condensate) != Some(DeckKind::Volatile) {
+                continue;
+            }
+            let key = condensate.substance().key();
+            let own = placed
+                .iter()
+                .rev()
+                .find(|d| {
+                    d.condensate() == condensate
+                        && hyperion_testkit::float::bits(d.base().value())
+                            == hyperion_testkit::float::bits(deck.base().value())
+                })
+                .unwrap_or_else(|| panic!("{name}'s {key}: the loop's deck"));
+            let mode = atmosphere
+                .modes()
+                .iter()
+                .find(|m| m.deck() == condensate)
+                .unwrap_or_else(|| panic!("{name}'s {key}: its mode"));
+            let Ok(depth) = mode.optical_depth() else {
+                continue;
+            };
+            let tau = depth.value();
+            if tau < 1.0 {
+                continue;
+            }
+            let drawn = mode.profile().level_of(1.0 / tau).value() / 1e5;
+            let column = own
+                .column_level(1.0 / tau)
+                .expect("its column's τ = 1 level")
+                .value()
+                / 1e5;
+            let exponent = mode.profile().exponent();
+            eprintln!(
+                "{name}'s {key}: τ {tau:.3}, f_sed {:.4e}, exponent {exponent:.4}, τ = 1 drawn \
+                 {drawn:.4} bar, its column's {column:.4} bar",
+                deck.sedimentation()
+            );
+            assert!(
+                (drawn / column - 1.0).abs() < 0.02,
+                "{name}'s {key}: drawn {drawn} bar against its column's {column}"
+            );
+            let band = match (name, key.as_str()) {
+                ("Jupiter", "NH3") => {
+                    assert!((6.0..7.0).contains(&exponent), "{exponent}");
+                    Some((0.62, 0.66))
+                }
+                ("Uranus", "CH4") => Some((0.34, 0.38)),
+                ("Neptune", "CH4") => Some((0.45, 0.49)),
+                _ => None,
+            };
+            if let Some((low, high)) = band {
+                assert!((low..high).contains(&drawn), "{name}'s {key}: {drawn} bar");
+                checked += 1;
+            }
+        }
+    }
+    assert_eq!(checked, 3, "Jupiter's NH₃ and the ice giants' CH₄");
+}

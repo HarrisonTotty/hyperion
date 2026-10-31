@@ -52,8 +52,8 @@ vapour_mole_fraction_below: number,
  */
 vapour_mole_fraction_above: number, 
 /**
- * Its `f_sed` (Ackerman and Marley 2001), its modes' exponent, not negative: 0 for a deck of
- * well-mixed modes (P14.T24.g's acid).
+ * Its `f_sed` (Ackerman and Marley 2001), not negative: 0 for a deck of well-mixed modes
+ * (P14.T24.g's acid).
  */
 f_sed: number, 
 /**

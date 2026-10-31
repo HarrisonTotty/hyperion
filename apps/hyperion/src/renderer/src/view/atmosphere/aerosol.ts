@@ -21,9 +21,11 @@
  *   functions", J. Atmos. Sci. 34 (1977) 1408–1422): with 2M streams the fraction f = χ_2M and the
  *   moments (χ_l − f) ÷ (1 − f), l < 2M ({@link deltaMTruncation}).
  * - **The density.** Between its base and top pressures the mode's mixing ratio goes as
- *   (p ÷ p_base)^f, f its deck's f_sed or 0 for a well-mixed layer (P14.T24.c's profile), so its
- *   number density is that ratio times the column's; it is laid on the column's levels with a level
- *   at each end, and scaled so that its vertical optical depth at 550 nm is the mode's.
+ *   (p ÷ p_base)^f, f its deck's f_sed (from generator version 26 for a loop deck's mode the
+ *   smaller of that and its saturation's log-slope at the base) or 0 for a well-mixed layer
+ *   (P14.T24.c's profile), so its number density is that ratio times the column's; it is laid on
+ *   the column's levels with a level at each end, and scaled so that its vertical optical depth at
+ *   550 nm is the mode's.
  */
 
 import { substanceName } from "../../lib/substances";
@@ -385,7 +387,11 @@ export interface AerosolModeSpec {
   /** The layer's base and top pressures, Pa, base > top > 0. */
   readonly basePa: number;
   readonly topPa: number;
-  /** The mixing ratio's exponent f in (p ÷ p_base)^f: the deck's f_sed, or 0 for a well-mixed layer. */
+  /**
+   * The mixing ratio's exponent f in (p ÷ p_base)^f: the deck's f_sed (from generator version 26
+   * for a loop deck's mode the smaller of that and its saturation's log-slope at the base), or 0
+   * for a well-mixed layer.
+   */
   readonly mixingExponent: number;
 }
 

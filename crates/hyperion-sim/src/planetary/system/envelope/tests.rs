@@ -12,7 +12,9 @@ use super::*;
 use crate::Seed;
 use crate::math;
 use crate::planetary::chem::condense::DeckBound;
-use crate::planetary::chem::condense::{ResolveOpticalDepthError, SizeModeError};
+use crate::planetary::chem::condense::{
+    DeckProfileRules, ResolveOpticalDepthError, SizeModeError, with_deck_profile,
+};
 use crate::planetary::chem::escape::{EnvelopeHelium, host_helium_per_hydrogen};
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::derive::solar::{PLANETS, SOLAR_AGE, solar_disc, solar_system};
@@ -28,7 +30,9 @@ use crate::planetary::label;
 use crate::planetary::record::{BodyRecord, RecordSection, SectionState};
 use crate::planetary::system::tests::{SEED, golden_systems_afresh, sample, thin_air_sets};
 use crate::planetary::system::{Body, Epoch, Part, PlanetarySystem, fate_host};
-use crate::planetary::testing::{EnvelopeByHand, envelope_by_hand, with_every_25_hold};
+use crate::planetary::testing::{
+    EnvelopeByHand, envelope_by_hand, with_every_25_hold, with_every_26_hold,
+};
 use crate::planetary::{SystemContext, generate};
 use crate::stellar::Composition;
 use crate::substance::CondensedPhase;
@@ -1487,4 +1491,272 @@ fn the_supercritical_envelope_is_held_only_until_the_26_bump() {
     assert!(crate::planetary::testing::with_every_26_hold(
         supercritical_envelope_in_force
     ));
+}
+
+/// One record's modes, by path: its envelope's (`"envelope"`) and its surface's inventory's
+/// (`"surface"`), each with its envelope's photosphere for an envelope's.
+fn modes_of(record: &BodyRecord) -> Vec<(&'static str, Option<f64>, Vec<AerosolMode>)> {
+    use crate::planetary::record::Modelled;
+    let mut out = Vec::new();
+    if let Section::Ok(envelope) = record.envelope() {
+        let atmosphere = envelope.atmosphere();
+        out.push((
+            "envelope",
+            Some(atmosphere.profile().photosphere_pressure().value()),
+            atmosphere.modes().to_vec(),
+        ));
+    }
+    if let Section::Ok(surface) = record.surface()
+        && let Modelled::Ok(inventory) = surface.aerosols()
+    {
+        out.push(("surface", None, inventory.modes().to_vec()));
+    }
+    out
+}
+
+/// A mode's members but its profile's exponent, as text.
+fn but_its_exponent(mode: &AerosolMode) -> String {
+    let profile = mode.profile();
+    format!(
+        "{:?}",
+        (
+            mode.material(),
+            mode.phase(),
+            mode.deck(),
+            mode.shape(),
+            mode.size(),
+            mode.column_mass(),
+            mode.optical_depth(),
+            mode.coverage(),
+            mode.temperature(),
+            profile.base(),
+            profile.top()
+        )
+    )
+}
+
+/// The records of the golden systems, generated afresh, at the epoch under every 26 hold with the
+/// deck profile's rules `rules`, by system.
+fn golden_records_at_26(rules: DeckProfileRules) -> Vec<(&'static str, Vec<BodyRecord>)> {
+    with_every_26_hold(|| {
+        with_deck_profile(rules, || {
+            golden_systems_afresh()
+                .into_iter()
+                .map(|(name, ctx, system)| {
+                    let snapshot = system.snapshot_at(&ctx, UniverseTime::EPOCH);
+                    (name, snapshot.bodies().to_vec())
+                })
+                .collect()
+        })
+    })
+}
+
+/// P14.T52.g over the golden systems at the epoch, every other 26 hold in force: under the deck
+/// profile's `Saturation` each record is its `Held` twin's to the bit (by `Debug`) but for its loop
+/// modes' exponents. Each moved mode keeps its material, deck, size, column, τ, coverage,
+/// temperature, base and top, and its exponent falls below its deck's `f_sed` and stays positive;
+/// no deck moves (its `f_sed` included), and no rule's mode (a haze's, the dust's, the acid's).
+#[test]
+fn under_every_26_hold_the_deck_profile_moves_only_the_loop_modes_exponents() {
+    let held = golden_records_at_26(DeckProfileRules::Held);
+    let drawn = golden_records_at_26(DeckProfileRules::Saturation);
+    assert_eq!(held.len(), drawn.len());
+    let mut moved: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for ((name, held), (_, drawn)) in held.iter().zip(&drawn) {
+        assert_eq!(held.len(), drawn.len(), "{name}");
+        for (a, b) in held.iter().zip(drawn) {
+            let at = format!("{name} {:04x}", a.index().get());
+            let (mut text_a, mut text_b) = (format!("{a:?}"), format!("{b:?}"));
+            for ((path, _, was), (_, _, now)) in modes_of(a).iter().zip(modes_of(b)) {
+                assert_eq!(was.len(), now.len(), "{at}");
+                for (x, y) in was.iter().zip(&now) {
+                    let (dx, dy) = (format!("{x:?}"), format!("{y:?}"));
+                    if dx == dy {
+                        continue;
+                    }
+                    assert_eq!(but_its_exponent(x), but_its_exponent(y), "{at} {path}");
+                    let (f, e) = (x.profile().exponent(), y.profile().exponent());
+                    assert!(e > 0.0 && e < f, "{at} {path}: {e} against {f}");
+                    // A loop deck's mode, never a rule's: a haze's, the dust's or the acid's.
+                    assert!(
+                        DeckKind::of(x.deck()).is_some() && x.deck() != row("H2SO4"),
+                        "{at} {path}: a rule's mode moves: {dx}"
+                    );
+                    text_a = text_a.replacen(&dx, "a loop mode", 1);
+                    text_b = text_b.replacen(&dy, "a loop mode", 1);
+                    let kind = DeckKind::of(x.deck())
+                        .map_or_else(|| "none".to_owned(), |kind| format!("{kind:?}"));
+                    *moved.entry(format!("{path} {kind}")).or_default() += 1;
+                }
+            }
+            assert_eq!(
+                text_a, text_b,
+                "{at}: the record moves beyond its loop modes"
+            );
+        }
+    }
+    eprintln!("the golden systems' loop modes whose exponent moves: {moved:?}");
+    assert!(
+        moved.keys().any(|k| k.ends_with("Volatile")),
+        "a volatile deck moves: {moved:?}"
+    );
+}
+
+/// The deck profile's arm gives the same envelope twice (the sim-determinism skill's rule), over
+/// the fixture's hot Jupiter, whose chromium deck's saturation falls slower than its `f_sed`.
+#[test]
+fn under_every_26_hold_the_deck_profile_envelope_is_the_same_twice() {
+    let hot = fixture_hot_jupiter();
+    let twice: Vec<Envelope> = (0..2)
+        .map(|_| with_every_26_hold(|| envelope_by_hand(&hot).expect("the fixture's hot Jupiter")))
+        .collect();
+    assert_eq!(format!("{:?}", twice[0]), format!("{:?}", twice[1]));
+    let chromium = twice[0]
+        .atmosphere()
+        .modes()
+        .iter()
+        .find(|m| m.deck() == row("Cr"))
+        .expect("its Cr deck's mode");
+    let exponent = chromium.profile().exponent();
+    assert!(exponent > 0.0 && exponent < 4.5, "{exponent}");
+}
+
+/// The drawn τ = 1 level of `mode`, bar, where its τ is 1 or more.
+fn drawn_tau_one_bar(mode: &AerosolMode) -> Option<f64> {
+    let tau = mode.optical_depth().ok()?.value();
+    (tau >= 1.0).then(|| mode.profile().level_of(1.0 / tau).value() / 1e5)
+}
+
+/// P14.T52.g's census, every 26 hold in force, over [`census_sets`] at the epoch, printed
+/// (`--nocapture`), the deck profile `Held` against `Saturation`: the loop modes whose exponent
+/// moves, by path (envelope or surface) and deck kind; the largest move of a drawn τ = 1 level, by
+/// kind, with its body; and by name, "TO MAIN", each envelope whose refractory or salt deck newly
+/// puts τ ≥ 1 above its photosphere, and each surface air whose drawn τ = 1 level moves by more
+/// than a scale height (a factor e in pressure). Asserted, as the golden systems' test does: only
+/// the loop modes' exponents move.
+#[test]
+#[ignore = "slow: P14.T52.g's census over 102 systems, held and drawn"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census, each of the brief's lines printed in turn"
+)]
+fn under_every_26_hold_the_deck_profile_s_census() {
+    use std::collections::BTreeMap;
+    let sets = census_sets();
+    let records = |rules: DeckProfileRules| -> Vec<(String, BodyRecord)> {
+        with_every_26_hold(|| {
+            with_deck_profile(rules, || {
+                let mut out = Vec::new();
+                for (set, seed, ctx) in &sets {
+                    let system = generate(*seed, ctx);
+                    walk(ctx, &system, UniverseTime::EPOCH, &mut |_, visit| {
+                        out.push((
+                            format!("{set} {} {:04x}", ctx.id(), visit.body.index.get()),
+                            visit.record,
+                        ));
+                    });
+                }
+                out
+            })
+        })
+    };
+    let held = records(DeckProfileRules::Held);
+    let drawn = records(DeckProfileRules::Saturation);
+    assert_eq!(held.len(), drawn.len());
+    let mut moved: BTreeMap<String, usize> = BTreeMap::new();
+    let mut largest: BTreeMap<String, (f64, String)> = BTreeMap::new();
+    let mut to_main: Vec<String> = Vec::new();
+    let mut modes = 0;
+    for ((at, a), (_, b)) in held.iter().zip(&drawn) {
+        assert_eq!(a.index(), b.index(), "{at}");
+        let (mut text_a, mut text_b) = (format!("{a:?}"), format!("{b:?}"));
+        for ((path, photosphere, was), (_, _, now)) in modes_of(a).iter().zip(modes_of(b)) {
+            assert_eq!(was.len(), now.len(), "{at}");
+            let mut above: BTreeMap<String, (f64, f64)> = BTreeMap::new();
+            for (x, y) in was.iter().zip(&now) {
+                modes += 1;
+                let kind = DeckKind::of(x.deck())
+                    .map_or_else(|| "none".to_owned(), |kind| format!("{kind:?}"));
+                if let Some(level) = photosphere {
+                    let tau_above = |m: &AerosolMode| {
+                        m.optical_depth().map_or(0.0, |d| {
+                            let profile = m.profile();
+                            let (base, top, f) = (
+                                profile.base().value(),
+                                profile.top().value(),
+                                profile.exponent(),
+                            );
+                            if *level <= top {
+                                0.0
+                            } else if *level >= base {
+                                d.value()
+                            } else {
+                                let edge = math::powf(top / base, f + 1.0);
+                                d.value() * (math::powf(level / base, f + 1.0) - edge)
+                                    / (1.0 - edge)
+                            }
+                        })
+                    };
+                    let entry = above.entry(key_of(x.deck())).or_insert((0.0, 0.0));
+                    entry.0 += tau_above(x);
+                    entry.1 += tau_above(y);
+                }
+                let (dx, dy) = (format!("{x:?}"), format!("{y:?}"));
+                if dx == dy {
+                    continue;
+                }
+                assert_eq!(but_its_exponent(x), but_its_exponent(y), "{at} {path}");
+                text_a = text_a.replacen(&dx, "a loop mode", 1);
+                text_b = text_b.replacen(&dy, "a loop mode", 1);
+                *moved.entry(format!("{path} {kind}")).or_default() += 1;
+                if let (Some(old), Some(new)) = (drawn_tau_one_bar(x), drawn_tau_one_bar(y)) {
+                    let shift = math::ln(new / old);
+                    let key = format!("{path} {kind}");
+                    if largest.get(&key).is_none_or(|(s, _)| shift.abs() > s.abs()) {
+                        largest.insert(
+                            key,
+                            (
+                                shift,
+                                format!("{at} {}: {old:.4} → {new:.4} bar", key_of(x.deck())),
+                            ),
+                        );
+                    }
+                    if *path == "surface" && shift.abs() > 1.0 {
+                        to_main.push(format!(
+                            "{at} {}: the surface air's drawn τ = 1 level moves {old:.4} → \
+                             {new:.4} bar, {shift:.2} scale heights",
+                            key_of(x.deck())
+                        ));
+                    }
+                }
+            }
+            for (deck, (was, now)) in &above {
+                let kind = DeckKind::of(row(deck));
+                let deep = matches!(kind, Some(DeckKind::Refractory | DeckKind::SulphideOrSalt));
+                if deep && *was < 1.0 && *now >= 1.0 {
+                    to_main.push(format!(
+                        "{at} {deck}: τ above the photosphere {was:.3e} → {now:.3}"
+                    ));
+                }
+            }
+        }
+        assert_eq!(
+            text_a, text_b,
+            "{at}: the record moves beyond its loop modes"
+        );
+    }
+    let largest: Vec<String> = largest
+        .iter()
+        .map(|(key, (shift, what))| {
+            format!("{key}: {:+.1}% ({what})", 100.0 * math::exp_m1(*shift))
+        })
+        .collect();
+    eprintln!(
+        "P14.T52.g's census over {} systems, {} records, {modes} modes: the loop modes whose \
+         exponent moves, by path and kind: {moved:?}\nthe largest move of a drawn τ = 1 level, by \
+         path and kind:\n  {}\nTO MAIN: {to_main:#?}",
+        sets.len(),
+        held.len(),
+        largest.join("\n  ")
+    );
 }

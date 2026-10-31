@@ -50,10 +50,27 @@
 //!   under 1%, decision-bump-plan-after-22, "The decks' `f_sed`, K and humidity", G4.) The deck's
 //!   column mass is ∫ ε `q_c` dp ÷ g, ε the condensate's molar mass per limiting vapour over the
 //!   gas's; its top is the shallowest level at which `q_c` still holds [`TOP_FRACTION`] of the
-//!   vapour below, or the column's top; above it the deck's mixing ratio goes as about
-//!   (p ÷ `p_base`)^`f_sed` (P14.T24.c's vertical profile, Mollière et al. 2020's form), which the
-//!   balance reaches a few scale heights above the base. Its vapour above is `q_v` at the top, the
-//!   cold trap's.
+//!   vapour below, or the column's top. Above the base the balance's condensate, `q_b` s (e^(−s x)
+//!   − e^(−`f_sed` x)) ÷ (`f_sed` − s) with x = ln(`p_base` ÷ p) for a constant s, follows its
+//!   slower exponential: the saturation, (p ÷ `p_base`)^s, where `f_sed` exceeds s, as a volatile's
+//!   `f_sed` of hundreds and more does, and its own sedimentation, (p ÷ `p_base`)^`f_sed`, where s
+//!   exceeds `f_sed`. Its vapour above is `q_v` at the top, the cold trap's.
+//! - **The mode's profile** is P14.T24.c's vertical profile (P. Mollière et al., A&A 640, A131,
+//!   2020, eq. 3's form): its mixing ratio goes as (p ÷ `p_base`)^f between the deck's base and
+//!   top. To generator version 25 f is the deck's `f_sed`; from 26 (`DECK_PROFILE_VERSION`,
+//!   P14.T52.g) it is the smaller of `f_sed` and s, the saturated mole fraction's mean log-slope
+//!   over the scan step above the base (`saturation_slope`), so that a volatile deck is drawn over
+//!   its column's own depth rather than as a sheet at its base. That is the balance's asymptote
+//!   (Ackerman and Marley's eq. 7, whose exponent `f_sed` `q_c` ÷ `q_t` tends to s where `f_sed`
+//!   exceeds s), not its exact form: for a constant s the column's share of its τ above x is
+//!   [(`f_sed` + 1) e^(−(s+1)x) − (s + 1) e^(−(`f_sed`+1)x)] ÷ (`f_sed` − s), whose tail's
+//!   amplitude, (max(`f_sed`, s) + 1) ÷ |`f_sed` − s|, one exponent takes as 1 (research-r08-t16a
+//!   §1, its science check). So a deck's τ = 1 level is drawn too deep: by about 1 ÷ (`f_sed` − s)
+//!   in ln p where `f_sed` far exceeds s (0.25% for Jupiter's ammonia, 0.12% for Earth's water,
+//!   under 0.3% wherever `f_sed` − s exceeds about 330, every volatile deck but Venus's loop acid,
+//!   whose modes are the rule's); by 8–14% for a refractory deck (s 8–13 over `f_sed` 2), as
+//!   `f_sed` alone draws it; and at about 1.25–1.9 times its column's τ = 1 pressure where `f_sed` ÷
+//!   s lies within 0.7–1.6 (s 3–3.5 and τ 10–10⁴, more as s falls).
 //! - **The mode** of each deck is Ackerman and Marley's log-normal of geometric width `σ_g`
 //!   ([`Sedimentation`]): at each scan level of the deck, `r_w` is the radius whose fall speed is w*,
 //!   α the slope of ln `v_f` against ln r over [`r_w`, `σ_g` `r_w`] (`σ_g` at least 1.1 for the fit),
@@ -151,7 +168,6 @@ use std::error::Error;
 use std::fmt;
 
 use super::quench::MixingColumn;
-use crate::math;
 use crate::substance::aerosol::{
     BuildSizeDistributionError, ExtinctionBasis, ResolveAerosolError, SizeDistribution,
     aerosol_optics, density_variant,
@@ -160,7 +176,7 @@ use crate::substance::aloft::{LawAloft, SaturationLaw, Vapour, laws_aloft};
 use crate::substance::{CondensedPhase, MOLAR_GAS_CONSTANT, SubstanceId, SubstanceKey};
 use crate::units::consts::BOLTZMANN_CONSTANT;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres, Pascals};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
+use crate::{GENERATOR_VERSION, GeneratorVersion, math};
 
 /// The scan's step in ln p: the column is evaluated at levels this far apart, from its bottom to
 /// its top, where each base is bracketed and each deck's vapour is kept.
@@ -299,6 +315,95 @@ const ALPHA_FIT_WIDTH: f64 = 1.1;
 
 /// Grams per kilogram.
 const GRAMS_PER_KILOGRAM: f64 = 1_000.0;
+
+/// The generator version from which a loop deck's mode is drawn on its own column (P14.T52.g): 26,
+/// the planetary bump after 25's (research-r08-t16a §1, main's ruling of 2026-10-30).
+///
+/// It is P14.T52.g's one hold. Below it [`DeckProfileRules::in_force`] is
+/// [`DeckProfileRules::Held`]: every loop mode's exponent is its deck's `f_sed`, and every deck,
+/// mode and golden is version 25's bit for bit. 26's bump deletes this hold,
+/// [`DeckProfileRules`] with its `Held` arm, the tests' switch, its line in
+/// `with_every_26_hold` and its tripwire (`the_deck_profile_is_held_only_until_the_26_bump`).
+pub(crate) const DECK_PROFILE_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Which exponent a loop deck's mode takes (P14.T52.g's hold, [`DECK_PROFILE_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum DeckProfileRules {
+    /// Version 25's and before: its deck's `f_sed`.
+    Held,
+    /// Version 26's: the smaller of its deck's `f_sed` and its saturation's log-slope at the base
+    /// ([`profile_exponent`]).
+    Saturation,
+}
+
+impl DeckProfileRules {
+    /// The rules this generator version gives: the saturation's slope from
+    /// [`DECK_PROFILE_VERSION`], held below it; in the tests, the rules a test's switch sets on
+    /// its thread ([`with_deck_profile`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = DECK_PROFILE_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= DECK_PROFILE_VERSION {
+            Self::Saturation
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The deck profile's rules a test sets on its thread, `None` for the version's.
+    static DECK_PROFILE_RULES: core::cell::Cell<Option<DeckProfileRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The decks the loop places on this thread while a test captures them ([`capturing_decks`]).
+    static CAPTURED: core::cell::Cell<Option<Vec<Deck>>> = const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result, and every deck the loop placed on this thread as it ran, in placing order, each
+/// with its level masses ([`Deck::level_masses`]): for the tests that set what a record draws of a
+/// deck against its own column (P14.T52.g). A capture inside another holds its own decks alone,
+/// and the outer one is set back as it returns, a panic in `run` included.
+#[cfg(test)]
+pub(crate) fn capturing_decks<R>(run: impl FnOnce() -> R) -> (R, Vec<Deck>) {
+    /// Sets the outer capture back as it drops.
+    struct Restore(Option<Vec<Deck>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let outer = self.0.take();
+            CAPTURED.with(|captured| captured.set(outer));
+        }
+    }
+    let restore = Restore(CAPTURED.with(|captured| captured.replace(Some(Vec::new()))));
+    let result = run();
+    let decks = CAPTURED.with(core::cell::Cell::take).unwrap_or_default();
+    drop(restore);
+    (result, decks)
+}
+
+/// `run`'s result with the deck profile's rules `rules` on this thread, for the tests to reach
+/// 26's profiles ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. A record derives lazily, so a test reads it inside the switch. 26's bump deletes it
+/// with the hold.
+#[cfg(test)]
+pub(crate) fn with_deck_profile<R>(rules: DeckProfileRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<DeckProfileRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            DECK_PROFILE_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(DECK_PROFILE_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
 
 /// Ackerman and Marley's two free parameters of a deck: its sedimentation efficiency `f_sed`
 /// and the geometric width `σ_g` of its log-normal.
@@ -579,7 +684,9 @@ impl Error for ResolveOpticalDepthError {
 
 /// A mode's vertical profile (P14.T24.c): its base and its top, between which its mixing ratio
 /// goes as (p ÷ `p_base`)^f, f its exponent, 0 for a well-mixed layer (P14.T24.g's modes). The
-/// loop's modes take their deck's base and top and its `f_sed`.
+/// loop's modes take their deck's base and top, and its `f_sed`, or from generator version 26 the
+/// smaller of that and its saturation's log-slope at the base (`DECK_PROFILE_VERSION`,
+/// P14.T52.g).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct ModeProfile {
     base: Pascals,
@@ -628,6 +735,17 @@ impl ModeProfile {
     #[must_use]
     pub const fn exponent(&self) -> f64 {
         self.exponent
+    }
+
+    /// The pressure above which the share `share` of a column drawn on this profile lies: `p_base`
+    /// (share (1 − r) + r)^(1 ÷ (f + 1)), r = (`p_top` ÷ `p_base`)^(f + 1), the inverse of the
+    /// share above p that the wire's `AerosolModeDto.f_sed` states (P14.T52.g's tests).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn level_of(&self, share: f64) -> Pascals {
+        let (base, f) = (self.base.value(), self.exponent);
+        let r = math::powf(self.top.value() / base, f + 1.0);
+        Pascals::new(base * math::powf(share * (1.0 - r) + r, 1.0 / (f + 1.0)))
     }
 }
 
@@ -841,6 +959,10 @@ pub struct Deck {
     step_ln_p: f64,
     first: usize,
     vapour_ln: Vec<f64>,
+    /// Each scan level's condensate column mass from the first above the base, kg m⁻², for the
+    /// tests of what a record draws of its column ([`Deck::level_masses`]).
+    #[cfg(test)]
+    level_masses: Vec<f64>,
 }
 
 impl Deck {
@@ -896,7 +1018,9 @@ impl Deck {
         self.vapour_above
     }
 
-    /// The deck's `f_sed`, the exponent of its profile above the base.
+    /// The deck's `f_sed`, the sedimentation efficiency its column's balance takes: its mode's
+    /// profile exponent to generator version 25, and from 26 the bound on it, the smaller of it
+    /// and the saturation's log-slope at the base being the exponent (`DECK_PROFILE_VERSION`).
     #[must_use]
     pub const fn sedimentation(&self) -> f64 {
         self.sedimentation
@@ -919,6 +1043,50 @@ impl Deck {
     #[must_use]
     pub fn modes(&self) -> &[Mode] {
         &self.modes
+    }
+
+    /// Each scan level's condensate column mass, kg m⁻², from the first level above the base up to
+    /// the column's top, with the level's pressure: the mass between it and the level below it,
+    /// the base for the first (P14.T52.g's tests of the drawn profile against the column).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn level_masses(&self) -> Vec<(Pascals, KilogramsPerSquareMetre)> {
+        self.level_masses
+            .iter()
+            .enumerate()
+            .map(|(i, &mass)| {
+                let u = self.bottom_ln_p - self.step_ln_p * index_f64(self.first + i);
+                (
+                    Pascals::new(math::exp(u)),
+                    KilogramsPerSquareMetre::new(mass),
+                )
+            })
+            .collect()
+    }
+
+    /// The pressure above which the share `share` of the deck's own column lies, its level
+    /// masses' ([`Deck::level_masses`]), linear in ln p within a level; the base for a share of
+    /// 1 or more, and `None` above the column's top (P14.T52.g's tests).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn column_level(&self, share: f64) -> Option<Pascals> {
+        let total: f64 = self.level_masses.iter().sum();
+        let mut below = 0.0;
+        let mut from = self.base_ln_p;
+        for (to, mass) in self.level_masses() {
+            let (to, mass) = (math::ln(to.value()), mass.value());
+            let (above_from, above_to) = (1.0 - below / total, 1.0 - (below + mass) / total);
+            if above_to <= share {
+                if above_from <= share {
+                    return Some(Pascals::new(math::exp(from)));
+                }
+                let t = (above_from - share) / (above_from - above_to);
+                return Some(Pascals::new(math::exp(from + t * (to - from))));
+            }
+            below += mass;
+            from = to;
+        }
+        None
     }
 
     /// The deck's own vapour's mole fraction at `pressure`: the vapour below at and below the base,
@@ -1347,6 +1515,7 @@ impl Condensation {
             coverage,
             background: background(&mixture),
             substeps,
+            profile: DeckProfileRules::in_force(),
         };
         let mut placed: Vec<Placed> = Vec::new();
         loop {
@@ -1456,6 +1625,8 @@ struct Context<'a> {
     background: Option<SubstanceId>,
     /// The integration steps of a deck's column to each scan step ([`SUBSTEPS`]).
     substeps: u32,
+    /// The rules of the decks' modes' profiles, read once as the loop runs (P14.T52.g).
+    profile: DeckProfileRules,
 }
 
 /// The scan levels of `column` with `profile`'s temperatures.
@@ -1887,6 +2058,9 @@ fn place(
             excess,
         )
     };
+    let exponent = profile_exponent(context.profile, efficiency, || {
+        saturation_slope(base.u, saturation)
+    });
     let first = (0..grid.len())
         .find(|&level| grid.u(level) < base.u)
         .unwrap_or(grid.len());
@@ -1921,7 +2095,7 @@ fn place(
     };
     let size = size(candidate.id, phase, base.temperature, &levels, context);
     let optical_depth = optical_depth(candidate.id, phase, size, column_mass, base.temperature);
-    Deck {
+    let deck = Deck {
         condensate: candidate.id,
         phase,
         base: Pascals::new(math::exp(base.u)),
@@ -1943,7 +2117,7 @@ fn place(
             profile: ModeProfile {
                 base: Pascals::new(math::exp(base.u)),
                 top: Pascals::new(math::exp(top)),
-                exponent: efficiency,
+                exponent,
             },
             coverage: context.coverage,
         }],
@@ -1952,7 +2126,58 @@ fn place(
         step_ln_p: grid.step,
         first,
         vapour_ln: column.vapour_ln,
+        #[cfg(test)]
+        level_masses: column.level_masses,
+    };
+    #[cfg(test)]
+    capture(&deck);
+    deck
+}
+
+/// Keeps a clone of `deck` in this thread's capture, where a test holds one ([`capturing_decks`]).
+#[cfg(test)]
+fn capture(deck: &Deck) {
+    CAPTURED.with(|captured| {
+        let mut decks = captured.take();
+        if let Some(decks) = decks.as_mut() {
+            decks.push(deck.clone());
+        }
+        captured.set(decks);
+    });
+}
+
+/// The exponent of a loop deck's mode's profile (P14.T52.g): under [`DeckProfileRules::Saturation`]
+/// the smaller of the deck's `f_sed` `efficiency` and the saturation's log-slope `slope` at its
+/// base ([`saturation_slope`], taken only there), and the `f_sed` where that slope is not finite
+/// and positive; under [`DeckProfileRules::Held`] the `f_sed`. It is the balance's asymptote above
+/// the base, the slower of its two exponentials (the [module](self)'s documentation).
+#[must_use]
+fn profile_exponent(rules: DeckProfileRules, efficiency: f64, slope: impl FnOnce() -> f64) -> f64 {
+    match rules {
+        DeckProfileRules::Held => efficiency,
+        DeckProfileRules::Saturation => {
+            let s = slope();
+            // A comparison, not `min`, so that a slope that is not finite and positive is never
+            // taken.
+            if s.is_finite() && s > 0.0 && s < efficiency {
+                s
+            } else {
+                efficiency
+            }
+        }
     }
+}
+
+/// s: the saturated mole fraction's mean log-slope d ln `q_s` ÷ d ln p over the scan step above
+/// the base at ln p `base_ln_p`, (ln `q_s`(`u_b`) − ln `q_s`(`u_b` − Δ)) ÷ Δ with Δ =
+/// [`SCAN_STEP_LN_P`], by the deck's own `saturation` (a product law's scarcer reactant's, as the
+/// column's exact step reads it): one fixed difference, positive where the saturation falls with
+/// height, and not finite where the vapour cannot condense at either end or its saturation
+/// underflows.
+#[must_use]
+fn saturation_slope(base_ln_p: f64, saturation: impl Fn(f64) -> f64) -> f64 {
+    (math::ln(saturation(base_ln_p)) - math::ln(saturation(base_ln_p - SCAN_STEP_LN_P)))
+        / SCAN_STEP_LN_P
 }
 
 /// Whether `law` is applied at `base` in a gas of `metallicity` dex outside what it was fitted

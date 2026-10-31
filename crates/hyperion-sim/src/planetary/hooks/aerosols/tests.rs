@@ -1685,3 +1685,75 @@ fn under_every_24_hold_t53c_s_thin_airs_are_stated() {
         assert!(body.misread.is_empty(), "{}: {:?}", at(), body.misread);
     }
 }
+
+/// P14.T52.g on the table's Earth and Titan, cloud fraction 1, under the deck profile's
+/// `Saturation` (research-r08-t16a's probe, its `profiles.md`): Earth's water is drawn with its
+/// τ = 1 level within 0.49–0.53 bar (0.513), and every volatile deck of τ ≥ 1 on the two within 2%
+/// in pressure of its own column's, the loop's level masses. Each inventory is derived inside the
+/// switch.
+#[test]
+fn under_the_deck_profile_the_surface_airs_volatile_decks_are_drawn_on_their_columns() {
+    use crate::planetary::chem::condense::{DeckProfileRules, capturing_decks, with_deck_profile};
+    use crate::planetary::hooks::envelope_atmosphere::DeckKind;
+    let mut checked = Vec::new();
+    for name in ["Earth", "Titan"] {
+        let (inventory, placed) = with_deck_profile(DeckProfileRules::Saturation, || {
+            capturing_decks(|| {
+                let (body, conditions, structure) = table_air(name);
+                AerosolInventory::derive(&inputs_of(&body, &conditions, &structure, 1.0))
+                    .unwrap_or_else(|e| panic!("{name}: {e}"))
+            })
+        });
+        for deck in inventory.decks() {
+            let condensate = deck.condensate();
+            if DeckKind::of(condensate) != Some(DeckKind::Volatile) {
+                continue;
+            }
+            let key = condensate.substance().key();
+            let own = placed
+                .iter()
+                .rev()
+                .find(|d| {
+                    d.condensate() == condensate
+                        && hyperion_testkit::float::bits(d.base().value())
+                            == hyperion_testkit::float::bits(deck.base().value())
+                })
+                .unwrap_or_else(|| panic!("{name}'s {key}: the loop's deck"));
+            let Some(mode) = inventory.modes().iter().find(|m| m.deck() == condensate) else {
+                continue;
+            };
+            let Ok(depth) = mode.optical_depth() else {
+                continue;
+            };
+            let tau = depth.value();
+            if tau < 1.0 {
+                continue;
+            }
+            let drawn = mode.profile().level_of(1.0 / tau).value() / 1e5;
+            let column = own
+                .column_level(1.0 / tau)
+                .expect("its column's τ = 1 level")
+                .value()
+                / 1e5;
+            eprintln!(
+                "{name}'s {key}: τ {tau:.3}, f_sed {:.4e}, exponent {:.4}, τ = 1 drawn {drawn:.4} \
+                 bar, its column's {column:.4} bar",
+                deck.sedimentation(),
+                mode.profile().exponent()
+            );
+            assert!(
+                (drawn / column - 1.0).abs() < 0.02,
+                "{name}'s {key}: drawn {drawn} bar against its column's {column}"
+            );
+            match (name, key.as_str()) {
+                ("Earth", "H2O") => {
+                    assert!((0.49..0.53).contains(&drawn), "Earth's water: {drawn} bar");
+                    checked.push("Earth's water");
+                }
+                ("Titan", "CH4") => checked.push("Titan's methane"),
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(checked, ["Earth's water", "Titan's methane"]);
+}

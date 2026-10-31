@@ -705,8 +705,9 @@ export interface AerosolMode {
   readonly basePa: number;
   readonly topPa: number;
   /**
-   * The exponent of its mixing ratio's (p ÷ p_base) law, dimensionless; 0 when well mixed. Its
-   * optical depth is spread by the same profile.
+   * The exponent of its mixing ratio's (p ÷ p_base) law, dimensionless: its deck's f_sed, or for a
+   * loop deck's mode from generator version 26 the smaller of that and its saturation's log-slope
+   * at the base; 0 when well mixed. Its optical depth is spread by the same profile.
    */
   readonly fSed: number;
   /** The share of the sky it covers, in `[0, 1]`. */

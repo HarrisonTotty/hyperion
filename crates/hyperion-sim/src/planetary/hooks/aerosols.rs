@@ -9,8 +9,9 @@
 //!   log-normal or gamma distribution of the volume-to-area radius r = 3V ÷ 4A, or a fractal
 //!   aggregate's monomers), its column mass, its τ(550) (in-cloud, over its coverage) and its
 //!   vertical profile, a base and a top pressure between which its mixing ratio goes as
-//!   (p ÷ `p_base`)^f, f its deck's `f_sed` or 0 for a well-mixed layer, its coverage and the
-//!   temperature its optics were taken at.
+//!   (p ÷ `p_base`)^f, f its deck's `f_sed` (from generator version 26 for a loop deck's mode the
+//!   smaller of that and its saturation's log-slope at the base, P14.T52.g) or 0 for a well-mixed
+//!   layer, its coverage and the temperature its optics were taken at.
 //! - **Decks** ([`AerosolDeck`]): each condensate's deck, its base, top, vapour below and above
 //!   (the cold trap's, which R08 reads for the vapour's column there), its `f_sed` and its τ(550),
 //!   the sum of its modes'.
@@ -1177,7 +1178,8 @@ impl AerosolDeck {
         self.vapour_above
     }
 
-    /// Its `f_sed`, its loop modes' profile exponent.
+    /// Its `f_sed`: its loop modes' profile exponent to generator version 25, and from 26 the bound
+    /// on it (P14.T52.g).
     #[must_use]
     pub const fn sedimentation(&self) -> f64 {
         self.sedimentation

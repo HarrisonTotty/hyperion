@@ -528,14 +528,19 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   three plain passes in a row show linear convergence, under the own residual's stop.
 /// - a solid body's supercritical envelope's, `SUPERCRITICAL_ENVELOPE_VERSION` (P14.T53.f), at
 ///   `SupercriticalEnvelopeRules::Modelled` through `with_supercritical_envelope`: its envelope
-///   section's model, which nothing else reads.
+///   section's model, which nothing else reads;
+/// - a loop deck's mode drawn on its own column, `DECK_PROFILE_VERSION` (P14.T52.g), at
+///   `DeckProfileRules::Saturation` through `with_deck_profile`: its profile's exponent the
+///   smaller of its deck's `f_sed` and its saturation's log-slope at the base.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
 /// here; 26's bump deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::chem::condense::{FallRadiusRoot, with_fall_radius};
+    use crate::planetary::chem::condense::{
+        DeckProfileRules, FallRadiusRoot, with_deck_profile, with_fall_radius,
+    };
     use crate::planetary::derive::atmosphere::{
         LineSwitchRules, LockedStateRules, MeltOxygenRules, SeaDeckRules, with_line_switch,
         with_locked_state, with_melt_oxygen, with_sea_deck,
@@ -566,6 +571,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
     let run = move || with_pass_step(PassStep::Aitken, run);
     let run = move || with_supercritical_envelope(SupercriticalEnvelopeRules::Modelled, run);
+    let run = move || with_deck_profile(DeckProfileRules::Saturation, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 
@@ -887,6 +893,29 @@ mod tests {
             MemberLagRules::Held
         );
         assert_eq!(MemberLagRules::in_force(), MemberLagRules::Held);
+    }
+
+    /// 26's deck profile's switch (P14.T52.g): in force inside 26's helper, held outside it, inside
+    /// 25's and where a test sets it back.
+    #[test]
+    fn the_deck_profile_hold_is_in_force_inside_26_s_helper_alone() {
+        use crate::planetary::chem::condense::{DeckProfileRules, with_deck_profile};
+        assert_eq!(DeckProfileRules::in_force(), DeckProfileRules::Held);
+        assert_eq!(
+            with_every_26_hold(DeckProfileRules::in_force),
+            DeckProfileRules::Saturation
+        );
+        assert_eq!(
+            with_every_25_hold(DeckProfileRules::in_force),
+            DeckProfileRules::Held
+        );
+        assert_eq!(
+            with_every_26_hold(|| {
+                with_deck_profile(DeckProfileRules::Held, DeckProfileRules::in_force)
+            }),
+            DeckProfileRules::Held
+        );
+        assert_eq!(DeckProfileRules::in_force(), DeckProfileRules::Held);
     }
 
     #[test]

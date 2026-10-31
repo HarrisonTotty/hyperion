@@ -630,11 +630,12 @@ pub struct AerosolModeDto {
     /// The pressure of its top, Pa, positive.
     pub top_pa: f64,
     /// The exponent f of its mixing ratio, which goes as (p ÷ `p_base`)^f between its base and
-    /// top: its deck's `f_sed` (Ackerman and Marley 2001), or 0 for a well-mixed layer; not
-    /// negative. Its `tau_550` is spread by the same profile, so that the share of it above a
-    /// level p between its top and base is ((p ÷ `base_pa`)^(f+1) − (`top_pa` ÷
-    /// `base_pa`)^(f+1)) ÷ (1 − (`top_pa` ÷ `base_pa`)^(f+1)): plan 08 cuts a mode at a gas
-    /// envelope's floor by it.
+    /// top: its deck's `f_sed` (Ackerman and Marley 2001), or for a loop deck's mode from generator
+    /// version 26 the smaller of that and its saturation's log-slope at the base (P14.T52.g), or 0
+    /// for a well-mixed layer; not negative. Its `tau_550` is spread by the same profile, so that
+    /// the share of it above a level p between its top and base is ((p ÷ `base_pa`)^(f+1) −
+    /// (`top_pa` ÷ `base_pa`)^(f+1)) ÷ (1 − (`top_pa` ÷ `base_pa`)^(f+1)): plan 08 cuts a mode at a
+    /// gas envelope's floor by it.
     pub f_sed: f64,
     /// The share of the sky it covers, dimensionless, in `[0, 1]`: in a surface's inventory, a
     /// deck's mode the body's cloud fraction (P14.T51.b's) and a rule's mode (the dust, a haze, a
@@ -691,8 +692,8 @@ pub struct CondensateDeckDto {
     /// `vapour_mole_fraction_below`'s, the condensate's own gas, the scarcer reactant, or the
     /// element's atoms per molecule of gas, by its law.
     pub vapour_mole_fraction_above: f64,
-    /// Its `f_sed` (Ackerman and Marley 2001), its modes' exponent, not negative: 0 for a deck of
-    /// well-mixed modes (P14.T24.g's acid).
+    /// Its `f_sed` (Ackerman and Marley 2001), not negative: 0 for a deck of well-mixed modes
+    /// (P14.T24.g's acid).
     pub f_sed: f64,
     /// Whether the saturation law that placed its base is applied outside what it was fitted over.
     pub extrapolated: bool,
