@@ -6,8 +6,8 @@ use std::time::Instant;
 use super::audit_tests::{AuditCase, AuditSet, audit_walk};
 use super::tests::{GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, sample};
 use crate::planetary::derive::atmosphere::{MeltOxygenRules, with_melt_oxygen};
-use crate::planetary::hooks::surface::deck;
 use crate::planetary::hooks::surface::regime::Forcing;
+use crate::planetary::hooks::surface::{CapBalanceRules, deck, with_cap_balance};
 use crate::planetary::testing::{with_every_25_hold, with_every_26_hold};
 use crate::rng::Seed;
 use crate::substance::phase::ice_ih_melting_temperature;
@@ -21,10 +21,14 @@ const DOMAIN_SYSTEMS: [usize; 3] = [243, 363, 187];
 /// s59 and s102, whose published passes list no liquid water but whose earlier passes did.
 const MOVED_SYSTEMS: [usize; 5] = [59, 102, 187, 243, 363];
 
-/// `run`'s result under every 26 hold but P14.T53.g's, which this census leaves held: the deck
-/// alone against every 25 hold.
+/// `run`'s result under every 26 hold but P14.T53.g's and P14.T53.h's, which this census leaves
+/// held: the deck alone against every 25 hold.
 fn deck_alone<R>(run: impl FnOnce() -> R) -> R {
-    with_every_26_hold(|| with_melt_oxygen(MeltOxygenRules::Held, run))
+    with_every_26_hold(|| {
+        with_melt_oxygen(MeltOxygenRules::Held, || {
+            with_cap_balance(CapBalanceRules::Held, run)
+        })
+    })
 }
 
 /// FNV-1a 64 of `text`'s bytes: a record's digest, so that a census of some 6,000 bodies keeps no

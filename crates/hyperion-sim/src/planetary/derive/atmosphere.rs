@@ -3509,6 +3509,7 @@ impl<'a> StepClimate<'a> {
                     ceiling: GreenhouseCeiling::of(inputs),
                     stellar_flux: spun.stellar_flux,
                     holds_liquid_water: spun.context.holds_liquid_water(),
+                    crust: inputs.crust,
                 },
                 water: WaterGate::new(state, retained, water, spun.record.bulk()),
                 context: &spun.context,

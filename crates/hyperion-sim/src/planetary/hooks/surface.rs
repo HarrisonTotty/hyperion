@@ -141,9 +141,9 @@ use crate::orbit::KeplerElements;
 use crate::planetary::chem::partition::{ClimateSpan, CondensatePhase, Condensates, dominance};
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::atmosphere::{
-    AIRLESS_PRESSURE, Atmosphere, EARTH_REFERENCE_AGE, Gas, GreenhouseCeiling, GreenhouseConstants,
-    MOLAR_GAS_CONSTANT, PartialPressures, REFERENCE_SUN_ZAMS_LUMINOSITY, SurfaceMaterial,
-    SurfaceState,
+    AIRLESS_PRESSURE, Atmosphere, Crust, EARTH_REFERENCE_AGE, Gas, GreenhouseCeiling,
+    GreenhouseConstants, MOLAR_GAS_CONSTANT, PartialPressures, REFERENCE_SUN_ZAMS_LUMINOSITY,
+    SILICATE_SOLIDUS, SurfaceMaterial, SurfaceState, grey_surface_temperature,
 };
 use crate::planetary::derive::rotation::{SpinOrbitResonance, SpinState};
 use crate::planetary::frames::BodyFixedFrame;
@@ -162,6 +162,7 @@ use crate::units::{
     Kelvin, Metres, MetresPerSecondSquared, Pascals, Radians, Seconds, SolarMasses,
     WattsPerSquareMetre,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 pub(crate) mod deck;
 pub mod regime;
@@ -1060,6 +1061,7 @@ pub struct SurfaceConditions {
     radiation: RadiationClass,
     liquid_water: bool,
     ground: GroundInertia,
+    carbon_dioxide_cap: Option<Kelvin>,
 }
 
 impl SurfaceConditions {
@@ -1142,6 +1144,17 @@ impl SurfaceConditions {
             mean_molar_mass_g_per_mol,
             heat_capacity_over_r,
         } = Surface::of(inputs)?;
+        // The passes' cap at the record's own column, so that its CO₂ ice is theirs (P14.T53.h).
+        let carbon_dioxide_cap = carbon_dioxide_cap(
+            &CapBody {
+                spin: inputs.spin,
+                stellar_flux: inputs.stellar_flux,
+                heat_flow: inputs.heat_flow,
+                molten: inputs.atmosphere.state() == SurfaceState::MagmaOcean,
+            },
+            &column,
+            inputs.atmosphere.partial_pressures(),
+        );
         let floor = night_floor(inputs.heat_flow);
         // The ground's inertia, once: at its lid's row at the column's equilibrium temperature.
         let ground = GroundInertia::at_equilibrium(
@@ -1198,7 +1211,18 @@ impl SurfaceConditions {
             radiation: RadiationClass::of(inputs.xuv_flux),
             liquid_water: liquid_water(range, surface_pressure),
             ground,
+            carbon_dioxide_cap,
         })
+    }
+
+    /// The temperature of the body's permanent CO₂ cap at its column, in K, above 0 and below CO₂'s
+    /// triple point, which its partition reads as CO₂'s cold trap where that lies colder
+    /// than the coldest zone (P14.T53.h, from generator version 26; [`carbon_dioxide_cap`]): the
+    /// cap T13.c's passes' last step reads, to the bit. `None` where the body holds no such cap,
+    /// and under version 25's rules and before.
+    #[must_use]
+    pub(crate) const fn carbon_dioxide_cap(&self) -> Option<Kelvin> {
+        self.carbon_dioxide_cap
     }
 
     /// The ground's thermal inertia its night read (P14.T54.a): P14.T49.j's law at its lid, or
@@ -2130,6 +2154,9 @@ pub(crate) struct ClimateBody {
     /// Whether its surface holds liquid water as the previous pass published it, the context's
     /// (P14.T24.j): a locked world's deck needs open water under it ([`deck`]).
     pub(crate) holds_liquid_water: bool,
+    /// Its crust: a molten one, T13.c's young magma ocean, holds no CO₂ cap
+    /// ([`carbon_dioxide_cap`], P14.T53.h).
+    pub(crate) crust: Crust,
 }
 
 /// The span of the climate of the body `body` at a step of T13.c's passes whose mean surface
@@ -2148,8 +2175,10 @@ pub(crate) struct ClimateBody {
 /// publishes, but where the range does not hold the mean, whose ends are then widened to it
 /// ([`ClimateSpan::about`]). On a world locked 1:1 with open water, the previous pass's
 /// ([`ClimateBody::holds_liquid_water`]), the column takes its substellar deck first, as the
-/// record's does ([`deck`], P14.T24.j), while the span's mean stays the step's own. It allocates
-/// nothing.
+/// record's does ([`deck`], P14.T24.j), while the span's mean stays the step's own. From
+/// generator version 26 the span carries the body's permanent CO₂ cap at the step's column, as the
+/// record's conditions do ([`carbon_dioxide_cap`], P14.T53.h); a step at or over the
+/// [`SILICATE_SOLIDUS`], or on a molten crust, holds none. It allocates nothing.
 #[must_use]
 pub(crate) fn step_climate(
     body: &ClimateBody,
@@ -2178,6 +2207,16 @@ pub(crate) fn step_climate(
         // A partial pressure that is not finite has no climate the contrasts can give.
         return ClimateSpan::isothermal(surface_temperature);
     };
+    let cap = carbon_dioxide_cap(
+        &CapBody {
+            spin: body.spin,
+            stellar_flux: body.stellar_flux,
+            heat_flow: body.heat_flow,
+            molten: body.crust == Crust::Molten || surface_temperature >= SILICATE_SOLIDUS,
+        },
+        &column,
+        partials,
+    );
     let floor = night_floor(body.heat_flow);
     // The record's rule (P14.T24.j): a world locked 1:1 with open water under its deck.
     let climate = deck::under_deck(
@@ -2190,7 +2229,223 @@ pub(crate) fn step_climate(
         |column| climate_of(column, &body.spin, ocean_weight, body.ground, floor),
     )
     .climate;
-    ClimateSpan::about(climate.range, surface_temperature)
+    let span = ClimateSpan::about(climate.range, surface_temperature);
+    match cap {
+        Some(t) => span.with_cap(Gas::CarbonDioxide.substance(), t),
+        None => span,
+    }
+}
+
+/// The generator version from which a rotator's permanent CO₂ cap holds its air at the cap's own
+/// energy balance: 26, the planetary bump after 25's (P14.T53.h; main, 2026-10-31).
+///
+/// It is P14.T53.h's one hold. Below it [`CapBalanceRules::in_force`] is
+/// [`CapBalanceRules::Held`]: no climate carries a cap and every figure is version 24's and 25's
+/// bit for bit. 26's bump deletes this hold, [`CapBalanceRules`] with its `Held` arm, the tests'
+/// switch and its tripwire (`the_cap_balance_is_held_only_until_the_26_bump`).
+pub(crate) const CAP_BALANCE_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether P14.T53.h's CO₂ cap is in force (its hold, [`CAP_BALANCE_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum CapBalanceRules {
+    /// Version 25's and before: CO₂'s cold trap is the coldest zone.
+    Held,
+    /// Version 26's: a rotator's CO₂ air is cold-trapped by its cap's balance too
+    /// ([`carbon_dioxide_cap`]).
+    Balanced,
+}
+
+impl CapBalanceRules {
+    /// The rules this generator version gives: the cap's balance from [`CAP_BALANCE_VERSION`],
+    /// none below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_cap_balance`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = CAP_BALANCE_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= CAP_BALANCE_VERSION {
+            Self::Balanced
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The cap balance's rules a test sets on its thread, `None` for the version's.
+    static CAP_BALANCE_RULES: core::cell::Cell<Option<CapBalanceRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the cap balance's rules `rules` on this thread, for the tests to reach the
+/// cap ahead of the bump; the version's rules are set back after, a panic in `run` included. 26's
+/// bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_cap_balance<R>(rules: CapBalanceRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<CapBalanceRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CAP_BALANCE_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(CAP_BALANCE_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// The bolometric albedo `A_c` of a permanent CO₂ cap, 0 to 1: 0.73 (P14.T53.h). Ward, Murray and
+/// Malin (1974, JGR 79, 3387) take A ≈ 0.70 for the cap in their model and put pure CO₂ frost at
+/// about 0.75; 0.73 is fitted between the two, so that the table's Mars settles near 6 mbar on the
+/// registry's CO₂ curve (its lean, 2026-10-31). The Mars Climate Sounder's seasonal deposits
+/// poleward of 60° are darker, 0.39 in the north and 0.51 in the south (Gary-Bicas et al. 2020,
+/// JGR Planets 125, e2019JE006150), but they are seasonal frost, which does not survive the
+/// summer.
+pub(crate) const CAP_ALBEDO: f64 = 0.73;
+
+/// The infrared emissivity `ε_c` of a permanent CO₂ cap, 0 to 1: 0.85, Ward, Murray and Malin's
+/// (1974) model value E ≈ 0.85, between the seasonal deposits' winter 32 μm emissivities of 0.84
+/// in the north and 0.87 in the south (Gary-Bicas et al. 2020).
+pub(crate) const CAP_EMISSIVITY: f64 = 0.85;
+
+/// The efficiency δ, dimensionless, of the air's baroclinic transport of heat into a permanent cap,
+/// δ (g H² ÷ Ω R²) p (1 − `T_c` ÷ `T_a`)² (Ward, Murray and Malin 1974, eq. 22, after Gierasch and
+/// Toon 1973, J. Atmos. Sci. 30, 1502): 0.01, fitted to the collapse range of Soto et al.'s (2015,
+/// Icarus 250, 553) `MarsWRF` runs (every inventory from 6 to 3,000 mb collapsed at 15° of obliquity
+/// or less, the 60–1,200 mb ones still at 25°, none at 45°; as P14.T53.h's research read them, not
+/// re-read by its builder), P14.T53.h's lean (2026-10-31).
+pub(crate) const CAP_TRANSPORT_EFFICIENCY: f64 = 0.01;
+
+/// How many halvings solve a permanent cap's balance ([`carbon_dioxide_cap`]): 64, the fixed
+/// count of decision-composition §1.3, more than the 53 that take [0, `T_a`] to one ulp of `T_c`
+/// in `f64`, after which a halving moves nothing.
+pub(crate) const CAP_BALANCE_HALVINGS: u32 = 64;
+
+/// The least a ÷ `L_Ro`, the planetary radius over the deformation radius c ÷ 2Ω, at which a CO₂
+/// cap holds ([`carbon_dioxide_cap`]): 1. Under it the deformation radius exceeds the planet, so
+/// that the weak-gradient regime carries the day's heat to the poles and no cold pole forms (Koll
+/// 2022, §3.1; the module's [`WEAK_GRADIENT_DEFORMATION_RADII`]): P14.T53.h's amendment, the
+/// research's lean adopted by main (2026-10-31).
+pub(crate) const CAP_ROSSBY_RATIO: f64 = 1.0;
+
+/// What the CO₂ cap's balance reads of a body beyond its column ([`carbon_dioxide_cap`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CapBody {
+    /// How it turns under its seasonal host: its obliquity sets the pole's light, its sidereal
+    /// rate the air's transport, and a body that does not turn holds no cap ([`rotates`]).
+    pub(crate) spin: SeasonalSpin,
+    /// The flux of its hosts' light at it, orbit-averaged, F⋆.
+    pub(crate) stellar_flux: WattsPerSquareMetre,
+    /// Its internal heat flow at the surface, `F_geo`, whose negative part is taken as none.
+    pub(crate) heat_flow: WattsPerSquareMetre,
+    /// Whether its surface is molten, T13.c's `MagmaOcean`, on which nothing condenses.
+    pub(crate) molten: bool,
+}
+
+/// The temperature of a rotator's permanent CO₂ cap over the column `column` of partial
+/// pressures `partials`, on the body `body` (P14.T53.h, from generator version 26).
+///
+/// A permanent cap lies at one temperature all year, kept there by its latent heat, and holds its
+/// air at its saturation pressure (Leighton and Murray 1966, Science 153, 136). Over the year it
+/// radiates what it absorbs (Ward, Murray and Malin 1974, JGR 79, 3387, eq. 3 and (B1)):
+///
+/// `ε_c` σ `T_c`⁴ = (1 − `A_c`) ⟨`I_p`⟩ + `F_geo` + δ `R_air`² p (`T_a` − `T_c`)² ÷ (g Ω R²)
+///
+/// - ⟨`I_p`⟩ = (4 ÷ π) sin β F⋆ ÷ 4, the pole's annual-mean light (Ward's eq. 1;
+///   [`annual_insolation`]), F⋆ the orbit-mean flux; `A_c` [`CAP_ALBEDO`] and `ε_c`
+///   [`CAP_EMISSIVITY`].
+/// - The last term is the air's heat into the cap, Ward's eq. 22 with H = `R_air` `T_a` ÷ g (after
+///   Gierasch and Toon 1973, J. Atmos. Sci. 30, 1502), δ [`CAP_TRANSPORT_EFFICIENCY`]: `R_air` the
+///   column's specific gas
+///   constant, p its CO₂'s partial pressure (Ward's air is CO₂ alone, and δ is fitted at it), g its
+///   gravity, R its radius and Ω the sidereal rate. `T_a`
+///   is the larger of the column's mean surface temperature and its grey `T_eq` (1 + ¾τ)^¼
+///   (P14.T13.c's [`grey_surface_temperature`]):
+///   the steps' temperature alone starts at the base, at which a thick air would collapse on its
+///   first step.
+///
+/// `T_c` is found by [`CAP_BALANCE_HALVINGS`] halvings on [0, `T_a`], in K, above 0 and below
+/// `T_a`. It is `None` where `ε_c` σ `T_a`⁴ does not exceed the light and heat absorbed, so that no
+/// cap lies below the air; where `T_c` is not below CO₂'s triple point (the registry's 216.592 K,
+/// Span and Wagner 1996), since the cap is frost; on a slow rotator, a ÷ `L_Ro` = 2Ωa ÷ c under
+/// [`CAP_ROSSBY_RATIO`], c the column's gravity waves' speed (Koll 2022, §3.1); where the
+/// column's largest gas by partial pressure is not CO₂; on a body that does not turn ([`rotates`])
+/// or whose surface is molten; and under version 25's rules and before ([`CapBalanceRules`]).
+#[must_use]
+pub(crate) fn carbon_dioxide_cap(
+    body: &CapBody,
+    column: &Column,
+    partials: &PartialPressures,
+) -> Option<Kelvin> {
+    if CapBalanceRules::in_force() == CapBalanceRules::Held || body.molten || !rotates(&body.spin) {
+        return None;
+    }
+    let carbon_dioxide = partials.of(Gas::CarbonDioxide).value();
+    // A NaN partial pressure holds no cap.
+    if carbon_dioxide.is_nan()
+        || carbon_dioxide <= 0.0
+        || Gas::ALL
+            .iter()
+            .any(|&gas| partials.of(gas).value() > carbon_dioxide)
+    {
+        return None;
+    }
+    let period = body.spin.rotation_period.value();
+    if !(period.is_finite() && period > 0.0) {
+        return None;
+    }
+    let omega = core::f64::consts::TAU / period;
+    // A slow rotator's air carries the day's heat to its poles (a ÷ `L_Ro` under 1); a column
+    // with no air, whose waves have no finite speed, gives 0 or NaN and holds none.
+    let rossby = 2.0 * omega * column.radius.value() / gravity_wave_speed_m_per_s(column);
+    if rossby.is_nan() || rossby < CAP_ROSSBY_RATIO {
+        return None;
+    }
+    let grey =
+        grey_surface_temperature(column.equilibrium_temperature, column.optical_depth).value();
+    let surface = column.surface_temperature.value();
+    let air = if grey > surface { grey } else { surface };
+    let pole = annual_insolation(body.spin.obliquity).1 * body.stellar_flux.value() / 4.0;
+    let heat = body.heat_flow.value();
+    let geothermal = if heat > 0.0 { heat } else { 0.0 };
+    let (g, r) = (column.surface_gravity.value(), column.radius.value());
+    let r_air = column.gas_constant_j_per_kg_k();
+    // An airless column, whose μ is zero, carries no heat.
+    let transport = if r_air.is_finite() {
+        CAP_TRANSPORT_EFFICIENCY * r_air * r_air / (g * omega * r * r)
+    } else {
+        0.0
+    };
+    let absorbed = (1.0 - CAP_ALBEDO) * pole + geothermal;
+    let excess = |t: f64| {
+        CAP_EMISSIVITY * STEFAN_BOLTZMANN * math::powi(t, 4)
+            - absorbed
+            - transport * carbon_dioxide * (air - t) * (air - t)
+    };
+    let surplus = excess(air);
+    if surplus.is_nan() || surplus <= 0.0 {
+        return None;
+    }
+    let (mut cold, mut warm) = (0.0, air);
+    for _ in 0..CAP_BALANCE_HALVINGS {
+        let mid = f64::midpoint(cold, warm);
+        if excess(mid) > 0.0 {
+            warm = mid;
+        } else {
+            cold = mid;
+        }
+    }
+    let triple = Gas::CarbonDioxide
+        .substance()
+        .substance()
+        .phase_diagram()
+        .map(|diagram| diagram.triple_temperature().value());
+    // A frost cap only: none at or above the triple point, where CO₂ would lie as a liquid.
+    triple
+        .is_some_and(|triple| warm < triple)
+        .then(|| Kelvin::new(warm))
 }
 
 /// The greenhouse gain g of an air over a surface at `surface` under the partial pressures
@@ -2398,8 +2653,7 @@ pub(crate) fn weak_gradient_transport(column: &Column, spin: &SeasonalSpin) -> f
     if !(x > 0.0 && k > 0.0) {
         return 0.0;
     }
-    let wave = column.gas_constant_j_per_kg_k()
-        * (column.equilibrium_temperature.value() / column.specific_heat_j_per_kg_k).sqrt();
+    let wave = gravity_wave_speed_m_per_s(column);
     let period = spin.rotation_period.value();
     let omega = if period.is_finite() && period > 0.0 {
         core::f64::consts::TAU / period
@@ -2408,6 +2662,15 @@ pub(crate) fn weak_gradient_transport(column: &Column, spin: &SeasonalSpin) -> f
     };
     let ratio = WEAK_GRADIENT_DEFORMATION_RADII * 2.0 * omega * column.radius.value() / wave;
     (x / k) / (1.0 + ratio * ratio)
+}
+
+/// The speed of the column `column`'s gravity waves, c = `R_air` √(`T_eq` ÷ `c_p`), m s⁻¹ (Koll
+/// 2022, §3.1), with which the deformation radius `L_Ro` = c ÷ 2Ω is taken: infinite or not a
+/// number with no air.
+#[must_use]
+fn gravity_wave_speed_m_per_s(column: &Column) -> f64 {
+    column.gas_constant_j_per_kg_k()
+        * (column.equilibrium_temperature.value() / column.specific_heat_j_per_kg_k).sqrt()
 }
 
 /// The annual-mean equator–pole contrast of the column `column` under the spin `spin` at the ocean

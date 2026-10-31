@@ -13671,6 +13671,17 @@ pub(crate) struct ThinAirBody {
     /// Each gas its ice holds by P14.T53.c's rule, with its saturation pressure at its ice's
     /// temperature, Pa.
     pub(crate) held_ice: Vec<(Gas, f64)>,
+    /// Its record's CO₂ cap, K, where it holds one (P14.T53.h).
+    pub(crate) cap: Option<f64>,
+    /// a ÷ `L_Ro` = 2Ωa ÷ c of its record's air, c = `R_air` √(`T_eq` ÷ `c_p`) at its derivation's
+    /// equilibrium temperature: NaN with no air.
+    pub(crate) rossby: f64,
+    /// Its hosts' light, S ÷ S⊕.
+    pub(crate) flux_earths: f64,
+    /// How its derivation's passes settled: `Converged` within the plain passes, or bracketed.
+    pub(crate) convergence: crate::planetary::derive::passes::Convergence,
+    /// The spin its record's conditions were derived under.
+    pub(crate) spin: crate::planetary::hooks::surface::SeasonalSpin,
 }
 
 impl ThinAirBody {
@@ -13765,6 +13776,12 @@ impl ThinAirBody {
                     Some((gas, p.value()))
                 })
                 .collect(),
+            cap: conditions.carbon_dioxide_cap().map(Kelvin::value),
+            rossby: rossby_ratio(conditions, derived),
+            flux_earths: conditions.stellar_flux().value()
+                / crate::units::consts::SOLAR_CONSTANT_W_PER_M2,
+            convergence: derived.convergence(),
+            spin: conditions.spin(),
         })
     }
 
@@ -13803,6 +13820,23 @@ impl ThinAirBody {
             self.state, self.t_s, self.coldest, self.p, self.column
         )
     }
+}
+
+/// a ÷ `L_Ro` = 2Ωa ÷ c of the air the conditions `conditions` of the derived body `derived`
+/// publish, c = `R_air` √(`T_eq` ÷ `c_p`) at its derivation's equilibrium temperature: NaN with no
+/// air (P14.T53.h's census).
+fn rossby_ratio(
+    conditions: &crate::planetary::hooks::surface::SurfaceConditions,
+    derived: &crate::planetary::derive::DerivedBody,
+) -> f64 {
+    let r = crate::planetary::derive::atmosphere::MOLAR_GAS_CONSTANT;
+    let (mu, cp_r) = (
+        conditions.mean_molar_mass_g_per_mol().unwrap_or(f64::NAN) * 1e-3,
+        conditions.heat_capacity_over_r().unwrap_or(f64::NAN),
+    );
+    let wave = r / mu * (derived.equilibrium_temperature().value() / (cp_r * r / mu)).sqrt();
+    let omega = core::f64::consts::TAU / conditions.spin().rotation_period.value();
+    2.0 * omega * crate::units::Metres::from(derived.radius()).value() / wave
 }
 
 /// P14.T53.c's census's sets: the 400 whole systems of the sample, the golden systems and LOOK72's

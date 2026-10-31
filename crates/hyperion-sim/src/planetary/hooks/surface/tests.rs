@@ -2899,6 +2899,164 @@ fn the_passes_climate_is_the_record_s_range() {
     assert!(compared >= 8, "{compared} bodies compared");
 }
 
+/// P14.T53.h is held until the 25 → 26 bump: the rules in force are version 25's, no climate
+/// carries a cap, and the tests' switch and 26's helper reach the cap's balance.
+#[test]
+fn the_cap_balance_is_held_only_until_the_26_bump() {
+    assert!(
+        crate::GENERATOR_VERSION < CAP_BALANCE_VERSION,
+        "the 25 → 26 bump puts P14.T53.h's CO₂ cap on the record (decision-p14-t53c-collapse §4 \
+         (b)): delete `CAP_BALANCE_VERSION`, `CapBalanceRules` with its `Held` arm and the guard \
+         that reads it in `carbon_dioxide_cap`, the tests' `with_cap_balance`, its switch in \
+         `with_every_26_hold` (and the helper, if no other 26 hold is left), \
+         `locked_climate_tests::deck_alone`'s set-back, the Mars test's `Held` twin \
+         (`while_the_cap_is_held_the_table_s_mars_keeps_its_warm_branch`), and this test"
+    );
+    assert_eq!(CapBalanceRules::in_force(), CapBalanceRules::Held);
+    assert_eq!(
+        with_cap_balance(CapBalanceRules::Balanced, CapBalanceRules::in_force),
+        CapBalanceRules::Balanced
+    );
+    assert_eq!(
+        crate::planetary::testing::with_every_26_hold(CapBalanceRules::in_force),
+        CapBalanceRules::Balanced
+    );
+    assert_eq!(CapBalanceRules::in_force(), CapBalanceRules::Held);
+    // Held, the table's Mars, whose largest gas is CO₂, holds no cap on the record or in its steps.
+    let mars = historic_table()
+        .into_iter()
+        .find(|(name, _)| *name == "Mars")
+        .unwrap()
+        .1;
+    let spin = spin_of("Mars");
+    let conditions = conditions_of(&mars, spin).unwrap();
+    assert_eq!(conditions.carbon_dioxide_cap(), None);
+    let air = mars.atmosphere();
+    let passes = step_climate(
+        &climate_body(&mars, spin),
+        ocean_weight_of(&mars),
+        air.surface_temperature(),
+        air.partial_pressures(),
+    );
+    assert_eq!(passes.cap(), None);
+}
+
+/// P14.T53.h with decision-p14-t51a-partition §6, condition 1: under the cap's balance, for every
+/// body of the table, the passes' climate at the body's own surface temperature and partial
+/// pressures carries the record's conditions' CO₂ cap, bit for bit, or neither holds one: Mars
+/// holds one, and the rest none (Venus, whose largest gas is CO₂ too, is a slow rotator).
+#[test]
+fn under_the_cap_balance_the_passes_cap_is_the_record_s() {
+    with_cap_balance(CapBalanceRules::Balanced, || {
+        let mut capped = Vec::new();
+        for (name, body) in historic_table() {
+            let spin = spin_of(name);
+            let Some(conditions) = SurfaceConditions::derive(&inputs_of(&body, spin)) else {
+                continue;
+            };
+            let air = body.atmosphere();
+            let passes = step_climate(
+                &climate_body(&body, spin),
+                ocean_weight_of(&body),
+                air.surface_temperature(),
+                air.partial_pressures(),
+            );
+            match (passes.cap(), conditions.carbon_dioxide_cap()) {
+                (Some((substance, step)), Some(record)) => {
+                    assert_eq!(substance, Gas::CarbonDioxide.substance(), "{name}");
+                    assert_same_bits(step.value(), record.value());
+                    eprintln!(
+                        "{name}: its cap {:.3} K, its coldest zone {:.3} K",
+                        record.value(),
+                        passes.coldest().value()
+                    );
+                    capped.push(name);
+                }
+                (None, None) => {}
+                (step, record) => panic!("{name}: the passes' {step:?}, the record's {record:?}"),
+            }
+        }
+        assert_eq!(capped, ["Mars"]);
+    });
+}
+
+/// P14.T53.h's scope: under the cap's balance a column whose largest gas is CO₂ holds a cap on a
+/// rotator, and none on the same body locked 1:1, over a molten crust, at or over the silicate
+/// solidus, or where another gas outweighs its CO₂.
+#[test]
+fn the_cap_lies_only_under_a_rotator_s_carbon_dioxide_air() {
+    use crate::planetary::derive::atmosphere::SILICATE_SOLIDUS;
+    with_cap_balance(CapBalanceRules::Balanced, || {
+        let mars = historic_table()
+            .into_iter()
+            .find(|(name, _)| *name == "Mars")
+            .unwrap()
+            .1;
+        let spin = spin_of("Mars");
+        let body = climate_body(&mars, spin);
+        let air = mars.atmosphere();
+        let (t, partials) = (air.surface_temperature(), *air.partial_pressures());
+        let cap = |body: &ClimateBody, t: Kelvin, partials: &PartialPressures| {
+            step_climate(body, OceanWeight::NONE, t, partials).cap()
+        };
+        assert!(cap(&body, t, &partials).is_some());
+        let locked = ClimateBody {
+            spin: SeasonalSpin {
+                solar_day: None,
+                ..spin
+            },
+            ..body
+        };
+        assert_eq!(cap(&locked, t, &partials), None);
+        let molten = ClimateBody {
+            crust: Crust::Molten,
+            ..body
+        };
+        assert_eq!(cap(&molten, t, &partials), None);
+        assert_eq!(cap(&body, SILICATE_SOLIDUS, &partials), None);
+        let nitrogen_led = PartialPressures::from_fn(|gas| match gas {
+            Gas::Nitrogen => Pascals::new(2.0 * partials.of(Gas::CarbonDioxide).value()),
+            _ => partials.of(gas),
+        });
+        assert_eq!(cap(&body, t, &nitrogen_led), None);
+    });
+}
+
+/// P14.T53.h's scope on the record: under the cap's balance a `MagmaOcean`'s conditions hold no CO₂
+/// cap, though its largest gas is CO₂ and it turns (a runaway Earth that lost an ocean, at
+/// 1,400 K). Its balance would lie above CO₂'s critical point in any case.
+#[test]
+fn under_the_cap_balance_a_magma_ocean_s_record_holds_no_cap() {
+    use crate::planetary::derive::atmosphere::tests::runaway_earth;
+    with_cap_balance(CapBalanceRules::Balanced, || {
+        let air = runaway_earth(1.4e22, 5e8, 1.0, 1_400.0);
+        assert_eq!(air.state(), SurfaceState::MagmaOcean);
+        let partials = air.partial_pressures();
+        let co2 = partials.of(Gas::CarbonDioxide);
+        assert!(
+            Gas::ALL.iter().all(|&gas| partials.of(gas) <= co2),
+            "{partials:?}"
+        );
+        let spin = spin_of("Earth");
+        let inputs = SurfaceInputs {
+            atmosphere: &air,
+            equilibrium_temperature: Kelvin::new(1_400.0),
+            surface_gravity: MetresPerSecondSquared::new(9.82),
+            radius: Metres::new(6.371e6),
+            material: SurfaceMaterial::Rock,
+            lid: None,
+            stellar_flux: WattsPerSquareMetre::new(1_361.0),
+            xuv_flux: earth_xuv_flux(),
+            spin,
+            heat_flow: WattsPerSquareMetre::new(0.0925),
+            ocean_weight: OceanWeight::NONE,
+            holds_liquid_water: false,
+        };
+        let conditions = SurfaceConditions::derive(&inputs).expect("a magma ocean's surface");
+        assert_eq!(conditions.carbon_dioxide_cap(), None);
+    });
+}
+
 /// What the passes' climate reads of the table's derived body `body` under the spin `spin`, its
 /// greenhouse's inventory its atmosphere's ([`Atmosphere::inventory_weights`]).
 fn climate_body(body: &DerivedBody, spin: SeasonalSpin) -> ClimateBody {
@@ -2913,6 +3071,7 @@ fn climate_body(body: &DerivedBody, spin: SeasonalSpin) -> ClimateBody {
         ceiling: body.atmosphere().greenhouse_ceiling(),
         stellar_flux: WattsPerSquareMetre::from(body.flux()),
         holds_liquid_water: body.atmosphere().lists_liquid_water(),
+        crust: Crust::Solid,
     }
 }
 

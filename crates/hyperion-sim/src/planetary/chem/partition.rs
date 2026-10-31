@@ -143,12 +143,16 @@ pub(crate) const PARTITION_SWEEPS: u32 = 8;
 /// temperature and its warmest zone, each orbit-averaged.
 ///
 /// They are P14.T24.a's [`climate_range`](crate::planetary::hooks::surface::SurfaceConditions::climate_range),
-/// a half-day mean at each end, with its mean between.
+/// a half-day mean at each end, with its mean between. From generator version 26 a span may also
+/// carry a rotator's permanent CO₂ cap and its temperature (P14.T53.h, `with_cap`).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct ClimateSpan {
     coldest: Kelvin,
     mean: Kelvin,
     warmest: Kelvin,
+    /// A permanent cap of its dominant condensable and the temperature its latent heat holds it
+    /// at, which the condensable's cold trap reads ([`Species::cold_trap`]); `None` for none.
+    cap: Option<(SubstanceId, Kelvin)>,
 }
 
 /// Why a [`ClimateSpan`] was refused.
@@ -199,6 +203,7 @@ impl ClimateSpan {
             coldest: positive(coldest),
             mean: positive(mean),
             warmest: positive(warmest),
+            cap: None,
         })
     }
 
@@ -224,7 +229,31 @@ impl ClimateSpan {
             coldest: at,
             mean: at,
             warmest: at,
+            cap: None,
         }
+    }
+
+    /// The span with a permanent cap of `substance` at `temperature` (P14.T53.h, from generator
+    /// version 26): where `substance` has no ice of its own, its cold trap is the colder of the
+    /// coldest zone and the cap ([`Species::cold_trap`]), so that a cap adds a cold trap and never
+    /// warms one. A cap set before is replaced. A temperature that [`new`](Self::new) would refuse,
+    /// negative, infinite or not a number, sets none and leaves the span as it was; a −0 is written
+    /// +0.
+    #[must_use]
+    pub(crate) fn with_cap(mut self, substance: SubstanceId, temperature: Kelvin) -> Self {
+        let t = temperature.value();
+        if t.is_finite() && t >= 0.0 {
+            self.cap = Some((substance, Kelvin::new(t + 0.0)));
+        }
+        self
+    }
+
+    /// The permanent cap the span carries, its substance and temperature ([`with_cap`](Self::with_cap)),
+    /// `None` for none.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn cap(&self) -> Option<(SubstanceId, Kelvin)> {
+        self.cap
     }
 
     /// The span of a climate whose range is `range`, coldest then warmest (P14.T24.a's
@@ -791,10 +820,14 @@ impl Species {
     }
 
     /// The temperature that stands for the climate `climate`'s coldest zone for this species: its
-    /// ice's own where its ice holds it (P14.T53.c), the coldest zone otherwise.
+    /// ice's own where its ice holds it (P14.T53.c); otherwise the coldest zone, or the climate's
+    /// permanent cap of this species where that lies colder (P14.T53.h, [`ClimateSpan::with_cap`]).
     #[must_use]
     fn cold_trap(&self, climate: &ClimateSpan) -> Kelvin {
-        self.ice.unwrap_or(climate.coldest)
+        self.ice.unwrap_or(match climate.cap {
+            Some((substance, cap)) if substance == self.substance && cap < climate.coldest => cap,
+            Some(_) | None => climate.coldest,
+        })
     }
 
     /// The temperature that controls this species pulled toward its cold trap by `pull` over the

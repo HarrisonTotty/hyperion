@@ -841,7 +841,7 @@ fn venus_s_oxygen_is_under_a_thousandth_of_its_carbon_dioxide_by_its_sinks() {
 /// A runaway Earth that lost the water `water` (kg), at `age`, with the saturated X-ray and
 /// ultraviolet flux `xuv` (W m⁻²), in equilibrium at `equilibrium` (K), which its exobase reads as
 /// its irradiation.
-fn runaway_earth(water: f64, age: f64, xuv: f64, equilibrium: f64) -> Atmosphere {
+pub(crate) fn runaway_earth(water: f64, age: f64, xuv: f64, equilibrium: f64) -> Atmosphere {
     atmosphere(&AtmosphereInputs {
         mass: Kilograms::new(EARTH_MASS_KG),
         radius: Metres::new(crate::units::consts::EARTH_RADIUS_M),
@@ -2163,6 +2163,7 @@ fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) 
         ceiling: GreenhouseCeiling::of(inputs),
         stellar_flux: WattsPerSquareMetre::from(inputs.flux),
         holds_liquid_water: true,
+        crust: inputs.crust,
     };
     step_climate(&body, OceanWeight::NONE, t, partials)
 }
@@ -4213,6 +4214,7 @@ use crate::planetary::chem::escape::{
 };
 use crate::planetary::derive::atmosphere::escaping::melt_oxygen_capacity;
 use crate::planetary::hooks::surface::tests::{heat_flow_of, spin_of};
+use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
 use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
 
 /// The escape the batch recorded on `air`.
@@ -4324,31 +4326,51 @@ fn under_the_escape_batch_mercury_and_the_moon_are_airless_and_ganymede_tenuous(
 /// measured Bond albedo ([`MARS_BOND_ALBEDO`]), as `measured_mars` takes it; its impact speed
 /// Zahnle and Catling's eq. 41 at its circular orbital speed and its escape speed.
 fn table_mars_inputs(mars: &DerivedBody) -> AtmosphereInputs {
-    let (kg, radius) = (Kilograms::from(mars.mass()), Metres::from(mars.radius()));
-    let (a, e) = (Metres::new(1.523_679 * METRES_PER_AU), 0.093_4);
+    table_planet_inputs(
+        mars,
+        (1.523_679, 0.093_4),
+        BondAlbedo::from_fraction(MARS_BOND_ALBEDO),
+        Insolation::Habitable,
+    )
+}
+
+/// The table's planet `planet`'s inputs under the batch, as [`table_mars_inputs`] takes Mars's: at
+/// its derivation's bulk, inventory and fluence, on an orbit of `au` and eccentricity `e` about the
+/// Sun's mass, at the generator's irradiation for the Bond albedo `albedo`, in the insolation
+/// class `insolation` then and now.
+fn table_planet_inputs(
+    planet: &DerivedBody,
+    (au, e): (f64, f64),
+    albedo: BondAlbedo,
+    insolation: Insolation,
+) -> AtmosphereInputs {
+    let (kg, radius) = (
+        Kilograms::from(planet.mass()),
+        Metres::from(planet.radius()),
+    );
+    let a = Metres::new(au * METRES_PER_AU);
     let sun = historic_sun();
     let orbital = (GRAVITATIONAL_CONSTANT * SOLAR_MASS_KG / a.value()).sqrt();
     let escape = (2.0 * GRAVITATIONAL_CONSTANT * kg.value() / radius.value()).sqrt();
-    let equilibrium =
-        equilibrium_temperature(mars.flux(), BondAlbedo::from_fraction(MARS_BOND_ALBEDO));
+    let equilibrium = equilibrium_temperature(planet.flux(), albedo);
     AtmosphereInputs {
         mass: kg,
         radius,
-        material: SurfaceMaterial::of(&mars.fractions()),
-        envelope_fraction: mars.fractions().envelope(),
-        class: mars.class(),
-        inventory: *mars.inventory(),
-        formed: mars.formed(),
+        material: SurfaceMaterial::of(&planet.fractions()),
+        envelope_fraction: planet.fractions().envelope(),
+        class: planet.class(),
+        inventory: *planet.inventory(),
+        formed: planet.formed(),
         equilibrium,
         irradiation_temperature: equilibrium_temperature(
-            mars.flux(),
+            planet.flux(),
             BondAlbedo::from_fraction(0.0),
         ),
         heated: equilibrium,
-        xuv_fluence: mars.xuv_fluence(),
+        xuv_fluence: planet.xuv_fluence(),
         saturated_xuv_flux: sun.xuv().saturated_flux(a, e),
-        insolation: Insolation::Habitable,
-        present_insolation: Insolation::Habitable,
+        insolation,
+        present_insolation: insolation,
         crust: Crust::Solid,
         molten_for: Years::ZERO,
         age: SOLAR_AGE,
@@ -4360,8 +4382,8 @@ fn table_mars_inputs(mars: &DerivedBody) -> AtmosphereInputs {
         xuv_saturation_time: sun.xuv().saturation_time(),
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
-        flux: mars.flux(),
-        maximum_greenhouse_flux_ratio: sun_maximum_ratio(mars.flux()),
+        flux: planet.flux(),
+        maximum_greenhouse_flux_ratio: sun_maximum_ratio(planet.flux()),
     }
 }
 
@@ -4369,41 +4391,53 @@ fn table_mars_inputs(mars: &DerivedBody) -> AtmosphereInputs {
 /// passes at their stand-in), its inputs ([`table_mars_inputs`]), its air under P14.T24.a's
 /// climate at its own spin (25.19°, 24.62 h; `hooks::surface`'s table) and its generated heat flow
 /// at the irradiation for its measured Bond albedo, as a record derives a body under its law, and
-/// that climate's body. The climate's body reads the batch's own column of all of Mars's eroded
-/// carbon airborne (the stand-in pass's at the same albedo), the column the thermostat takes at
-/// Mars, whose share is 1.
+/// that climate's body ([`at_its_spin`]).
 fn table_mars_at_its_spin() -> (DerivedBody, AtmosphereInputs, Atmosphere, ClimateBody) {
     let batch = table();
     let mars = *found(&batch, "Mars");
     let inputs = table_mars_inputs(&mars);
-    let stand_in = atmosphere(&inputs);
     assert_eq!(
-        escape_of(&stand_in).shoreline(),
+        escape_of(&atmosphere(&inputs)).shoreline(),
         escape_of(mars.atmosphere()).shoreline(),
         "the inputs' shoreline is the derivation's"
     );
+    let (air, body) = at_its_spin(&inputs, spin_of("Mars"), heat_flow_of(&mars));
+    (mars, inputs, air, body)
+}
+
+/// The air of the body `inputs` describe under P14.T24.a's climate at the spin `spin` and the heat
+/// flow `heat_flow` (the passes' [`step_climate`] over no ocean), and that climate's body. The
+/// climate's body reads the batch's own column of all of the body's eroded carbon airborne (the
+/// stand-in pass's at the same albedo), the column the thermostat takes at Mars, whose share is 1.
+fn at_its_spin(
+    inputs: &AtmosphereInputs,
+    spin: SeasonalSpin,
+    heat_flow: WattsPerSquareMetre,
+) -> (Atmosphere, ClimateBody) {
+    let stand_in = atmosphere(inputs);
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
     let body = ClimateBody {
         equilibrium_temperature: inputs.equilibrium,
         surface_gravity: MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r)),
         radius: inputs.radius,
         ground: GroundInertia::of_material(inputs.material),
-        spin: spin_of("Mars"),
-        heat_flow: heat_flow_of(&mars),
+        spin,
+        heat_flow,
         inventory: *stand_in.inventory_weights(),
         ceiling: stand_in.greenhouse_ceiling(),
         stellar_flux: WattsPerSquareMetre::from(inputs.flux),
         holds_liquid_water: stand_in.lists_liquid_water(),
+        crust: inputs.crust,
     };
     let climate = |t: Kelvin, p: &PartialPressures| step_climate(&body, OceanWeight::NONE, t, p);
     let air = atmosphere_under(
-        &inputs,
+        inputs,
         &PassSurface {
             climate: PassClimate::Given(&climate),
             ..PassSurface::stand_in(PassLight::HottestHost)
         },
     );
-    (mars, inputs, air, body)
+    (air, body)
 }
 
 /// P14.T53.a (plan 14: "calibrated so that the table's Mars keeps 3–10 mbar of CO₂ and loses its
@@ -4473,38 +4507,17 @@ fn under_the_escape_batch_the_table_s_mars_loses_its_nitrogen() {
     assert_same_bits(escape.airborne_carbon_share(), 1.0);
 }
 
-/// P14.T53.a's Mars test as plan 14 states it, moved to P14.T53.c (main's ruling, 2026-10-22):
-/// the table's Mars at its own spin ([`table_mars_at_its_spin`]) keeps 3–10
-/// mbar of carbon dioxide by weight, lies within T13.c's 8% of 214 K, and holds the rest of its
-/// carbon as CO₂ ice. It does not hold as built (the finding
-/// [`under_the_escape_batch_the_table_s_mars_loses_its_nitrogen`] states): 0.22 bar at 243.9 K,
-/// with no ice, against 3–10 mbar at about 214 K. The cause chain: the shoreline keeps 2.18% of the
-/// air at an impact ratio of 4.90, inside Zahnle and Catling's 4–5; the weathering thermostat
-/// leaves all the carbon airborne, a frozen surface weathering none; and 2.18% of the median 10
-/// bar is 0.22 bar, over which T24.a's climate spans 230–251 K against carbon dioxide's 177.6 K
-/// frost point, so no cold trap forms and the greenhouse, starting from the whole column, takes the
-/// warm branch.
-///
-/// No collapse-first start cures it (P14.T53.c's deferred findings): the model's climate holds no
-/// collapsed branch at Mars's inventory. At 2, 6 and 10 mbar of CO₂ its coldest zone lies at
-/// 136–139, 164 and 174 K, against CO₂'s frost points of 140, 148 and 151 K there, and the
-/// shoreline's 234 Pa of N₂ alone holds a start from an empty column above the 100 Pa line, where
-/// the steps' climate stops being an airless one's, so the start climbs back to the warm branch;
-/// with no N₂, or Mars's real 16 Pa, it lands at 0.18–0.30 Pa, at the airless climate's 107.5 K
-/// coldest zone, the ~2 mbar a marginal fixed point of the contrasts that the empty start never
-/// reaches. The cure is the CO₂ cap's own energy balance, its polar insolation at a stated cap
-/// albedo and emissivity, which moves every Mars-like body (main, 2026-10-26: after 24, P14.T55.e
-/// or a new rider on 25's train).
-///
-/// Until that lands it is held as the miss: it must fail its first assertion, so that `just
-/// test-slow`, which runs every ignored test, passes while the miss stands and fails once a change
-/// keeps Mars's carbon dioxide within its range, and the cure drops the `should_panic` and the
-/// `ignore`.
+/// P14.T53.a's Mars test as plan 14 states it, moved to P14.T53.c (main's ruling, 2026-10-22) and
+/// cured by P14.T53.h's CO₂ cap: under the cap's balance (`CapBalanceRules::Balanced`, generator
+/// version 26) the table's Mars at its own spin ([`table_mars_at_its_spin`]) keeps 3–10 mbar of
+/// carbon dioxide by weight, lies within T13.c's 8% of 214 K, and holds the rest of its carbon as
+/// CO₂ ice. The steps descend from the whole column, whose 0.22 bar keeps its coldest zone above
+/// CO₂'s frost point, to the root the cap holds (P14.T53.h's pilot: 565.8 Pa of CO₂ and 234.4 Pa
+/// of N₂ at 214.73 K, the cap at 146.15 K, settled in 9 steps). Its `Held` twin
+/// ([`while_the_cap_is_held_the_table_s_mars_keeps_its_warm_branch`]) states the miss as it stands.
 #[test]
-#[ignore = "P14.T53.c's recorded miss: the model's climate holds no collapsed branch at the table's Mars's 0.22 bar (its CO2 cap's own energy balance, after 24)"]
-#[should_panic(expected = "Mars's CO2 at")]
 fn under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide() {
-    let (_, _, air, _) = table_mars_at_its_spin();
+    let (_, _, air, _) = with_cap_balance(CapBalanceRules::Balanced, table_mars_at_its_spin);
     let co2 = air.partial_pressures().of(Gas::CarbonDioxide).value();
     let column = air.inventory_weights().of(Gas::CarbonDioxide).value();
     let t = air.surface_temperature().value();
@@ -4518,6 +4531,211 @@ fn under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide(
         "{t} K"
     );
     assert!(column > co2, "Mars holds CO2 ice");
+}
+
+/// The Mars test's `Held` twin, P14.T53.c's recorded miss as it stands until 26's bump: with the
+/// CO₂ cap held (`CapBalanceRules::Held`) the table's Mars at its own spin keeps its warm branch,
+/// 21,999 Pa of carbon dioxide at 243.9 K with none of it as ice. The cause chain: the shoreline
+/// keeps 2.18% of the air at an impact ratio of 4.90, inside Zahnle and Catling's 4–5; the
+/// weathering thermostat leaves all the carbon airborne, a frozen surface weathering none; and
+/// 2.18% of the median 10 bar is 0.22 bar, over which T24.a's climate spans 230–251 K against
+/// carbon dioxide's 177.6 K frost point, so no cold trap forms and the greenhouse, starting from
+/// the whole column, takes the warm branch. No collapse-first start cured it (P14.T53.c's
+/// deferred findings); the cap's balance does
+/// ([`under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide`]).
+#[test]
+fn while_the_cap_is_held_the_table_s_mars_keeps_its_warm_branch() {
+    let (_, _, air, _) = with_cap_balance(CapBalanceRules::Held, table_mars_at_its_spin);
+    let co2 = air.partial_pressures().of(Gas::CarbonDioxide).value();
+    let column = air.inventory_weights().of(Gas::CarbonDioxide).value();
+    let t = air.surface_temperature().value();
+    eprintln!(
+        "the table's Mars, its cap held: {}; CO2 {co2:.4} Pa of its column's {column:.4}",
+        air_line("", &air)
+    );
+    assert!((co2 / 21_999.0 - 1.0).abs() < 1e-3, "{co2} Pa");
+    assert!((t - 243.9).abs() < 0.05, "{t} K");
+    assert_same_bits(co2, column);
+}
+
+/// P14.T53.h's cap at the table's Mars: at its settled column under the cap's balance its cap lies
+/// within 1 K of the pilot's 146.15 K, and the air's heat into it, its emission less the light and
+/// heat it absorbs (Ward, Murray and Malin 1974, eq. 3), is under 5% of that emission (the pilot's
+/// 0.43 of 22.0 W m⁻²): the cap is held by its own radiation, not by the air. The cap and Mars's
+/// CO₂ are pinned to their bits, which the WebAssembly suite checks.
+#[test]
+fn under_the_cap_balance_the_table_s_mars_s_cap_lies_near_146_k() {
+    use crate::planetary::hooks::surface::{CAP_ALBEDO, CAP_EMISSIVITY, annual_insolation};
+    with_cap_balance(CapBalanceRules::Balanced, || {
+        let (_, _, air, body) = table_mars_at_its_spin();
+        let span = step_climate(
+            &body,
+            OceanWeight::NONE,
+            air.surface_temperature(),
+            air.partial_pressures(),
+        );
+        let (substance, cap) = span.cap().expect("the settled Mars holds a cap");
+        assert_eq!(substance, Gas::CarbonDioxide.substance());
+        let emission = CAP_EMISSIVITY * STEFAN_BOLTZMANN * math::powi(cap.value(), 4);
+        let pole = annual_insolation(body.spin.obliquity).1 * body.stellar_flux.value() / 4.0;
+        let absorbed = (1.0 - CAP_ALBEDO) * pole + body.heat_flow.value();
+        let air_heat = emission - absorbed;
+        eprintln!(
+            "the table's Mars's cap: {:.3} K (coldest zone {:.3} K), emitting {emission:.3} W m⁻², \
+             the pole's light {pole:.3} W m⁻², the heat flow {:.4} W m⁻², the air's \
+             heat {air_heat:.4} W m⁻² ({:.2}%)",
+            cap.value(),
+            span.coldest().value(),
+            body.heat_flow.value(),
+            100.0 * air_heat / emission
+        );
+        assert!((cap.value() - 146.15).abs() < 1.0, "{cap:?}");
+        // Pinned natively (x86-64), so that the WebAssembly suite checks the halvings bit for bit.
+        assert_same_bits(cap.value(), 146.149_959_712_114_62);
+        assert_same_bits(
+            air.partial_pressures().of(Gas::CarbonDioxide).value(),
+            565.820_075_711_353_6,
+        );
+        assert!(cap < span.coldest(), "the cap is the cold trap");
+        assert!(
+            air_heat >= 0.0 && air_heat < 0.05 * emission,
+            "{air_heat} W m⁻² of {emission}"
+        );
+    });
+}
+
+/// The table's Mars at its own spin ([`table_mars_at_its_spin`]) at `carbon` times its carbon,
+/// the obliquity `degrees` and the sidereal rotation period `rotation`, under the rules in force,
+/// with its climate's body.
+fn table_mars_at(carbon: f64, degrees: f64, rotation: Seconds) -> (Atmosphere, ClimateBody) {
+    let batch = table();
+    let mars = *found(&batch, "Mars");
+    let mut inputs = table_mars_inputs(&mars);
+    let inventory = inputs.inventory;
+    inputs.inventory = VolatileInventory::new(
+        inventory.water(),
+        Kilograms::new(inventory.carbon_dioxide().value() * carbon),
+        inventory.nitrogen(),
+        inventory.argon(),
+    );
+    let spin = SeasonalSpin {
+        obliquity: Radians::from(Degrees::new(degrees)),
+        rotation_period: rotation,
+        ..spin_of("Mars")
+    };
+    at_its_spin(&inputs, spin, heat_flow_of(&mars))
+}
+
+/// P14.T53.h's sweep of the table's Mars at 0.3 of its carbon, the pilot's 66 mb air, under the
+/// cap's balance (Soto et al. 2015, Icarus 250, 553, `MarsWRF`): at 0° of obliquity, where every
+/// inventory collapsed, it collapses, under 1 mbar of CO₂ airborne with the rest as ice (the
+/// pilot's 2.2 Pa); at Mars's 25.19° it settles at 3–10 mbar; and at 45°, where none collapsed, it
+/// keeps all of its CO₂ airborne. Turning once in 349 h at 25.19°, a slow rotator (a ÷ `L_Ro`
+/// about 0.35, against 4.3 at its own 24.62 h), it holds no cap, and its air is the held one's to
+/// the bit.
+#[test]
+fn under_the_cap_balance_the_table_s_mars_collapses_by_its_obliquity() {
+    with_cap_balance(CapBalanceRules::Balanced, || {
+        for degrees in [0.0, 25.19, 45.0] {
+            let (air, _) = table_mars_at(0.3, degrees, spin_of("Mars").rotation_period);
+            let co2 = air.partial_pressures().of(Gas::CarbonDioxide).value();
+            let column = air.inventory_weights().of(Gas::CarbonDioxide).value();
+            eprintln!(
+                "the table's Mars at 0.3 of its carbon and {degrees}°: CO2 {co2:.4e} Pa of its \
+                 column's {column:.4e} ({:.4}), {}",
+                co2 / column,
+                air_line("", &air)
+            );
+            if degrees < 1.0 {
+                assert!(
+                    co2 < 100.0 && co2 < column,
+                    "{degrees}°: {co2} Pa of {column}"
+                );
+            } else if degrees < 30.0 {
+                assert!((300.0..=1_000.0).contains(&co2), "{degrees}°: {co2} Pa");
+                assert!(column > co2, "{degrees}°: CO2 ice held");
+            } else {
+                assert!(
+                    (co2 / column - 1.0).abs() < 1e-9,
+                    "{degrees}°: {co2} Pa of {column}"
+                );
+            }
+        }
+    });
+    let slow = || table_mars_at(0.3, 25.19, Seconds::new(349.0 * 3_600.0));
+    let (held, _) = with_cap_balance(CapBalanceRules::Held, slow);
+    let (slow, body) = with_cap_balance(CapBalanceRules::Balanced, slow);
+    let span = with_cap_balance(CapBalanceRules::Balanced, || {
+        step_climate(
+            &body,
+            OceanWeight::NONE,
+            slow.surface_temperature(),
+            slow.partial_pressures(),
+        )
+    });
+    eprintln!(
+        "the table's Mars at 0.3 of its carbon, 25.19° and 349 h: {}",
+        air_line("", &slow)
+    );
+    assert_eq!(span.cap(), None);
+    assert_eq!(format!("{slow:?}"), format!("{held:?}"));
+}
+
+/// P14.T53.h: the cap's balance leaves the table's Venus, Earth and Titan at their own spins
+/// ([`at_its_spin`], as the table's Mars is built) to the bit, and none of them holds a cap.
+/// Earth's and Titan's largest gas is N₂, outside its scope. Venus is a slow rotator, a ÷ `L_Ro`
+/// far under 1; its balance would lie at 601.70 K, 17.2 K under its 618.9 K air and under its
+/// coldest zone, not at the air as P14.T53.h's brief expected, and far above CO₂'s 216.59 K triple
+/// point (the registry's, Span and Wagner 1996), above which no frost cap lies.
+#[test]
+fn under_the_cap_balance_venus_earth_and_titan_at_their_spins_are_unchanged_to_the_bit() {
+    let batch = table();
+    let venus = found(&batch, "Venus");
+    let earth = found(&batch, "Earth");
+    let titan = found(&batch, "Titan");
+    let cases = [
+        (
+            "Venus",
+            table_planet_inputs(
+                venus,
+                (0.723_332, 0.006_772),
+                SurfaceState::RunawayGreenhouse.albedo(SurfaceMaterial::Rock),
+                Insolation::InsideRunaway,
+            ),
+            heat_flow_of(venus),
+        ),
+        (
+            "Earth",
+            table_earth_inputs(earth, at_measured_albedo(earth, SurfaceState::Temperate)),
+            heat_flow_of(earth),
+        ),
+        ("Titan", titan_inputs(), heat_flow_of(titan)),
+    ];
+    for (name, inputs, heat_flow) in cases {
+        let spin = spin_of(name);
+        let (held, _) = with_cap_balance(CapBalanceRules::Held, || {
+            at_its_spin(&inputs, spin, heat_flow)
+        });
+        let (balanced, body) = with_cap_balance(CapBalanceRules::Balanced, || {
+            at_its_spin(&inputs, spin, heat_flow)
+        });
+        let passes = with_cap_balance(CapBalanceRules::Balanced, || {
+            step_climate(
+                &body,
+                OceanWeight::NONE,
+                balanced.surface_temperature(),
+                balanced.partial_pressures(),
+            )
+        });
+        eprintln!(
+            "{}; its cap {:?} over its coldest zone {:.3} K",
+            air_line(name, &balanced),
+            passes.cap(),
+            passes.coldest().value()
+        );
+        assert_eq!(format!("{balanced:?}"), format!("{held:?}"), "{name}");
+        assert_eq!(passes.cap(), None, "{name}");
+    }
 }
 
 /// A rocky planet of `earths` M⊕ and `radii` R⊕ on a circular orbit of `au` and period `days`

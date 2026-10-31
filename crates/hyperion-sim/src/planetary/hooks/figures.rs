@@ -3150,7 +3150,9 @@ pub(crate) struct PartitionOver {
 /// The partition is of `inventory`, the atmosphere's own ([`Atmosphere::column_inventory`], which
 /// the caller builds once and may read beside it: the pass's area mix asks whether anything
 /// condenses first), over the conditions' climate (their range about their mean,
-/// [`ClimateSpan::about`]), on the ground. The profile is the conditions'
+/// [`ClimateSpan::about`]), on the ground, with the conditions' CO₂ cap where they hold one, the
+/// cap the passes' last step read (P14.T53.h, from generator version 26;
+/// [`SurfaceConditions::carbon_dioxide_cap`]). The profile is the conditions'
 /// ([`SurfaceConditions::cold_profile_over`]), one for every solid's cold area, and water's cover
 /// is [`water_cover_over`]'s.
 #[must_use]
@@ -3162,6 +3164,10 @@ pub(crate) fn partition_over(
 ) -> PartitionOver {
     let (coldest, warmest) = conditions.climate_range();
     let climate = ClimateSpan::about((coldest, warmest), conditions.mean_surface_temperature());
+    let climate = match conditions.carbon_dioxide_cap() {
+        Some(cap) => climate.with_cap(Gas::CarbonDioxide.substance(), cap),
+        None => climate,
+    };
     let solved = partition(&climate, &ground.ground, inventory);
     let profile = conditions.cold_profile_over(table);
     let water = water_cover_over(

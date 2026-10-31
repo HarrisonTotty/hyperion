@@ -511,6 +511,8 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - the settled compression, `SETTLED_COMPRESSION_VERSION` (P14.T54.b.l's cost lever), at
 ///   `CompressionRules::Settled` through `with_compression`: a liquid's compression ended by the
 ///   first step that moves its density by at most 2⁻⁴⁰ of itself.
+/// - the CO₂ cap's energy balance, `CAP_BALANCE_VERSION` (P14.T53.h), at
+///   `CapBalanceRules::Balanced` through `with_cap_balance`.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
@@ -523,6 +525,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         with_sea_deck,
     };
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
+    use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
     use crate::planetary::hosts::substellar::{SubstellarHostRules, with_substellar_hosts};
     use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
     use crate::substance::helmholtz::{CompressionRules, with_compression};
@@ -533,6 +536,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_planet_lag(PlanetLagRules::Airless, run);
     let run = move || with_fall_radius(FallRadiusRoot::FalsePosition, run);
     let run = move || with_compression(CompressionRules::Settled, run);
+    let run = move || with_cap_balance(CapBalanceRules::Balanced, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 

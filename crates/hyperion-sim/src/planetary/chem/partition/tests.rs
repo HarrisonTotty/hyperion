@@ -2698,3 +2698,40 @@ fn under_every_25_hold_a_supercritical_reservoir_shares_the_basins_with_the_liqu
         );
     });
 }
+
+/// P14.T53.h: a span's CO₂ cap is CO₂'s cold trap where it lies colder than the coldest zone, and
+/// never where it lies warmer or is another substance's; a cap `new` would refuse sets none.
+#[test]
+fn a_cap_colder_than_the_coldest_zone_is_its_substance_s_cold_trap() {
+    let co2 = id("CO2");
+    let climate = span(170.0, 210.0, 250.0);
+    let column = inventory(&[("CO2", 2.0e4), ("N2", 200.0)]);
+    let airborne = |climate: &ClimateSpan| {
+        partition(climate, &gravity(3.71), &column)
+            .of(co2)
+            .unwrap()
+            .airborne()
+            .value()
+    };
+    let open = airborne(&climate);
+    let capped = climate.with_cap(co2, Kelvin::new(146.0));
+    assert!(
+        airborne(&capped) < open,
+        "{} against {open}",
+        airborne(&capped)
+    );
+    for (substance, cap) in [
+        (co2, 180.0),
+        (id("H2O"), 146.0),
+        (co2, f64::NAN),
+        (co2, -1.0),
+        (co2, f64::INFINITY),
+    ] {
+        let span = climate.with_cap(substance, Kelvin::new(cap));
+        assert_same_bits(airborne(&span), open);
+    }
+    assert_eq!(climate.with_cap(co2, Kelvin::new(f64::NAN)).cap(), None);
+    assert_eq!(climate.with_cap(co2, Kelvin::new(-1.0)).cap(), None);
+    let zero = climate.with_cap(co2, Kelvin::new(-0.0)).cap().unwrap().1;
+    assert!(zero.value().is_sign_positive(), "{zero:?}");
+}

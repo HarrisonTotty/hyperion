@@ -8282,6 +8282,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - _Accept:_ `cargo test -p hyperion-sim --lib planetary::derive::atmosphere`; the new tests by
     name, the slow ones with `-- --ignored`.
   - _For 26's bump:_ re-bless `planetary/systems` (the records list the goldens).
+  - _Built_ 2026-10-31, held at 26 (`CAP_BALANCE_VERSION`): Risks, "Deviations in P14.T53.h, as
+    built".
 
 #### P14.T54 The composition batches on the record
 
@@ -33189,3 +33191,27 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
 - **The census under every 26 hold** (10⁶ bodies), before → after: hot `Snowball`s 77 → 1
   (0200fb2d1ffb0000.0400, 273.72 K, P14.T24.j's deck's, `LEFT_UNDER_26`), rule 5's 48 → 0, sea
   runaways 29 → 0, M3 3 → 0, M6 3 → 0; M1 on 54 moons and 1,216 planets, as under 25.
+- **Deviations in P14.T53.h, as built (2026-10-31).** Held at 26: `hooks::surface`'s
+  `CAP_BALANCE_VERSION`, `CapBalanceRules`, `with_cap_balance`; the rule is
+  `carbon_dioxide_cap` over a `CapBody`, and the record's cap is
+  `SurfaceConditions::carbon_dioxide_cap`, which `partition_over` attaches.
+  - p in the air's term is CO₂'s own partial pressure, not the step's surface pressure (lean,
+    2026-10-31): the pilot's, at which δ = 0.01 is fitted. With the surface pressure the table's
+    Mars took 590.3 Pa under a 146.46 K cap, and LOOK72 020e56ef60070005.0100 rose to 345 K.
+  - The amendment's gates (main, 2026-10-31): no cap where a ÷ `L_Ro` = 2Ωa ÷ c is under 1
+    (`CAP_ROSSBY_RATIO`), nor at or above CO₂'s triple point (a frost cap). The table's Mars at
+    349 h (a ÷ `L_Ro` 0.35) holds none; Venus none.
+  - A step is molten at `Crust::Molten` (`ClimateBody::crust`, new) or at or over
+    `SILICATE_SOLIDUS`; the record, at `MagmaOcean`.
+  - The census (`system/cap_balance_tests.rs`) moves 12 records (`MOVERS`) and 3 in their last
+    bits (`NUDGED`). The cap `partition_over` reads, which the passes' area mix reads too, keeps
+    01fffb2be0000000.0500 at 35.6 bar and takes close_binary 42002cb200000009.0700 to a 0.36 bar
+    `Snowball` at 122 K. Pending main's ruling.
+  - "Settled" is read as the passes' `Convergence::Converged` (lean, 2026-10-31; the amendment's
+    brief was not reachable): the cap unsettles six movers, listed in the test's doc.
+  - Every locked world is outside the cap by `rotates` at both sites; the census asserts no mover
+    is locked.
+  - `locked_climate_tests::deck_alone` sets the cap back to `Held`.
+  - For 26's bump: the tripwire's list; re-bless `planetary/systems` (solar_like's .0400;
+    close_binary's .0700, .0800, .e401 and .e501); pin the cap's bits in
+    `the_published_surface_conditions_are_pinned`.

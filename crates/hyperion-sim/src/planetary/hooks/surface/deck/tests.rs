@@ -3,7 +3,7 @@
 use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
-use crate::planetary::derive::atmosphere::SurfaceMaterial;
+use crate::planetary::derive::atmosphere::{Crust, SurfaceMaterial};
 use crate::planetary::derive::pass_record::{OpenWater, PassContext};
 use crate::planetary::derive::passes::Context;
 use crate::planetary::derive::solar::historic;
@@ -360,6 +360,7 @@ fn the_passes_steps_read_the_record_s_deck() {
         ceiling: air.greenhouse_ceiling(),
         stellar_flux: inputs.stellar_flux,
         holds_liquid_water,
+        crust: Crust::Solid,
     };
     let t = air.surface_temperature();
     let step = |holds| {
