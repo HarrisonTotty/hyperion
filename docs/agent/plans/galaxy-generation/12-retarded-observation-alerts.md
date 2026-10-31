@@ -612,6 +612,17 @@ Files: `crates/hyperion-server/src/knowledge/{mod,record,store,persist}.rs`. Acc
   Tests: advancing in one step or in ten pushes each onset once, and an event a later step finds
   in progress is not pushed again if an earlier step pushed it (Design note 6); a backwards clock
   or a moved observer requests a rescan; nothing from the old position survives a jump.
+- **P12.T8.b.1 The light the schedule needs** (split from T8.b on 2026-10-31, in the sim, ahead of
+  T5.d; the ID is a lean). Each walk's `Detection` carries its light at the observer:
+  `DetectionLight::Lit`, the flux in its band at each observer time with the knots between which
+  it is monotone, from the source the walk read (the supernova templates through
+  `supernova_luminosity`, a star's flare, an FU Orionis outburst; P11.T9.a's `BinaryLightCurve`
+  once a row names it), or `DetectionLight::Unlit` for a glitch. `Tracked::of_light` bisects it.
+  And a registry bound for each class's longest rise to peak (research's lean of 2026-10-30), by
+  which a first or restarted scan walks back. Files: `alerts/{arriving,mod,oneshot,local,registry}.rs`.
+  Tests: each light is finite, non-negative and continuous after its onset, and is the walk's
+  `Detection` flux at the detection's own time; no class's light peaks later after its onset than
+  its bound. Acceptance: `cargo test -p hyperion-sim alerts`.
 - **P12.T8.b Scans on the pool.** Interactive classes as one `Priority::Interactive` job; background
   classes as `Priority::Bulk` jobs of a few hundred catalogue cells each under a `CancelToken`,
   merged only when all have finished (Design note 7); look-ahead renewal; the `ByteLru` of schedules
