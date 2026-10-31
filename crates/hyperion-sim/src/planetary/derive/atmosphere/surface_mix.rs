@@ -54,8 +54,8 @@
 
 use super::{
     Atmosphere, AtmosphereInputs, ClimateOf, Gas, PartialPressures, PresentClimate, PresentFigures,
-    PublishedState, RunawayDeck, SurfaceMaterial, SurfaceState, climate_class, published_ice_cover,
-    state_to_carry,
+    PublishedState, Rotation, RunawayDeck, SurfaceMaterial, SurfaceState, climate_class,
+    published_ice_cover, state_to_carry,
 };
 use crate::planetary::chem::partition::{
     Basins, ClimateSpan, CondensatePhase, Condensates, Cover, CrustWater, Ground, Partition,
@@ -1343,6 +1343,11 @@ fn surface_and_cloud(
                 liquid_water,
                 surface_temperature: air.surface_temperature,
                 surface_pressure: air.surface_pressure,
+                // A world locked 1:1 has no solar day; the stand-in reads no spin.
+                rotation: match surface.climate {
+                    PassClimate::Spun(spun) if !rotates(&spun.record.spin) => Rotation::Locked,
+                    PassClimate::Spun(_) | PassClimate::Given(_) => Rotation::Turning,
+                },
             },
         ),
         PublishedState::Hothouse => None,

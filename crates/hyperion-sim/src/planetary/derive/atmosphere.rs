@@ -80,12 +80,14 @@ pub(crate) use escaping::{
     MeltOxygenRules, Thermostat, ThermostatCounts, WaterPhase, water_phase, with_melt_oxygen,
     with_resolve_check, with_thermostat,
 };
-pub(crate) use present::{
-    PresentClimate, PresentFigures, present_state_in_force, published_ice_cover, state_to_carry,
-};
 #[cfg(test)]
 pub(crate) use present::{
-    PresentStateRules, SNOWBALL_ICE_COVER, present_climate_state, with_present_state,
+    LockedStateRules, PresentStateRules, SNOWBALL_ICE_COVER, present_climate_state,
+    with_locked_state, with_present_state,
+};
+pub(crate) use present::{
+    PresentClimate, PresentFigures, Rotation, present_state_in_force, published_ice_cover,
+    published_label, state_to_carry,
 };
 #[cfg(test)]
 pub(crate) use supercritical::{SteamEnvelopeRules, with_steam_envelope};

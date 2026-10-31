@@ -496,17 +496,23 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   `MeltOxygenRules::Published` through `with_melt_oxygen`.
 /// - a free-floating brown dwarf's planets, `SUBSTELLAR_HOSTS_VERSION` (P14.T27.a), at
 ///   `SubstellarHostRules::BrownDwarfs` through `with_substellar_hosts`.
+/// - the eyeball, `LOCKED_STATE_VERSION` (P14.T53.e's rule 5 on a world locked 1:1), at
+///   `LockedStateRules::Eyeball` through `with_locked_state`: rule 5 also needs no open water
+///   there.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
 /// here; 26's bump deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::derive::atmosphere::{MeltOxygenRules, with_melt_oxygen};
+    use crate::planetary::derive::atmosphere::{
+        LockedStateRules, MeltOxygenRules, with_locked_state, with_melt_oxygen,
+    };
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hosts::substellar::{SubstellarHostRules, with_substellar_hosts};
     let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
     let run = move || with_substellar_hosts(SubstellarHostRules::BrownDwarfs, run);
+    let run = move || with_locked_state(LockedStateRules::Eyeball, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 

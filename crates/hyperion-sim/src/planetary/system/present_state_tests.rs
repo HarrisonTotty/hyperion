@@ -9,11 +9,12 @@ use super::tests::{GOLDEN_SYSTEMS_SEED, ITEM_33_WORLD, SEED, golden_contexts, sa
 use super::*;
 use crate::planetary::chem::partition::CondensatePhase;
 use crate::planetary::derive::atmosphere::{
-    PresentClimate, PresentFigures, PresentStateRules, RunawayDeck, SILICATE_SOLIDUS,
+    PresentClimate, PresentFigures, PresentStateRules, Rotation, RunawayDeck, SILICATE_SOLIDUS,
     SNOWBALL_ICE_COVER, SurfaceState, present_climate_state, water_saturation_temperature,
     with_deck_counts, with_present_state,
 };
 use crate::planetary::derive::irradiation::BondAlbedo;
+use crate::planetary::hooks::surface::Forcing;
 use crate::planetary::testing::with_every_25_hold;
 use crate::units::Pascals;
 
@@ -231,6 +232,11 @@ fn verdict_of(case: &AuditCase<'_>) -> Option<SurfaceState> {
         liquid_water,
         surface_temperature: air.surface_temperature(),
         surface_pressure: air.surface_pressure(),
+        rotation: if surface.climate_regime().forcing() == Forcing::Locked {
+            Rotation::Locked
+        } else {
+            Rotation::Turning
+        },
     };
     Some(present_climate_state(&figures).state())
 }

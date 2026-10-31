@@ -124,8 +124,8 @@ use crate::planetary::chem::partition::{CondensatePhase, Condensates, CrustWater
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::context::{HostKind, SystemContext, XuvHistory};
 use crate::planetary::derive::atmosphere::{
-    Atmosphere, Gas, NoMaturity, PassWeathered, SurfaceMaterial, SurfaceState, VolatileDraws,
-    WeatheringCase, has_surface_section,
+    Atmosphere, Gas, NoMaturity, PassWeathered, PresentFigures, Rotation, SurfaceMaterial,
+    SurfaceState, VolatileDraws, WeatheringCase, has_surface_section, published_label,
 };
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::irradiation::{BondAlbedo, luminosity_flux};
@@ -167,7 +167,7 @@ use crate::planetary::hooks::figures::{
 };
 use crate::planetary::hooks::ocean::{OceanInputs, OceanSolutes, subsurface_ocean};
 use crate::planetary::hooks::surface::{
-    ClimateInputs, HourCosines, SeasonalSpin, SeasonsFrom, SurfaceInputs, ZonalInsolation,
+    ClimateInputs, Forcing, HourCosines, SeasonalSpin, SeasonsFrom, SurfaceInputs, ZonalInsolation,
 };
 use crate::planetary::hooks::{
     self, BodyHooks, BulkComposition, GlobalFigures, Subsurface, SurfaceConditions, SurfaceSeed,
@@ -5896,7 +5896,25 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         ice_threshold: figures.ice_threshold(),
     });
     let crust = record_crust(sky.crust_lid, &figures, (&conditions, table));
-    let surface = Surface::new(air.state(), material, conditions, figures, published)
+    // From 26 a `Snowball` its own published figures do not make by rule 5 is labelled by rules
+    // 5–7 on them, label only (P14.T53.e; `LOCKED_STATE_VERSION`).
+    let state = published_label(air.state(), || PresentFigures {
+        ice_cover: figures.ice_fraction(),
+        liquid_water: published
+            .entry(Gas::Water.substance(), CondensatePhase::Liquid)
+            .is_some(),
+        surface_temperature: air.surface_temperature(),
+        surface_pressure: air.surface_pressure(),
+        rotation: if conditions
+            .climate_regime()
+            .is_some_and(|regime| regime.forcing() == Forcing::Locked)
+        {
+            Rotation::Locked
+        } else {
+            Rotation::Turning
+        },
+    });
+    let surface = Surface::new(state, material, conditions, figures, published)
         .expect(
             "conditions exist only off the gas-envelope and steam-envelope states, and \
              `with_climate` gives their regime",
