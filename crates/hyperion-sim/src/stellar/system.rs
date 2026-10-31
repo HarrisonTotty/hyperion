@@ -25,23 +25,25 @@ use std::sync::Arc;
 
 use crate::GENERATOR_VERSION;
 use crate::coords::SystemVelocity;
+use crate::events::{EventSeries, tags as event_tags};
 use crate::galaxy::fields::Component;
 use crate::galaxy::placement::{Existence, SystemKind, SystemOrigin, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::BodyId;
 use crate::math;
 use crate::orbit::KeplerElements;
-use crate::rng::{Mark, ObjectKey, Stream, tags};
+use crate::rng::{Mark, ObjectKey, Seed, Stream, tags};
 use crate::stellar::binary::Component as PairComponent;
 use crate::stellar::binary::{
     BinaryClass, BinaryInput, BinaryState, BinaryTimeline, CarvedClass, can_interact_with_tracks,
     carved_class, evolve_with_tracks,
 };
 use crate::stellar::classify::{
-    ClassExtras, Classification, HeliumSurface, LuminosityClass, PeculiarClass, SpectralType,
-    classify_under,
+    ClassExtras, Classification, DredgeUp, HeliumSurface, LuminosityClass, PeculiarClass,
+    PeculiarClassRules, SpectralType, chemical_class, classify_under, young_class,
 };
 use crate::stellar::draws::{StandardNormal, StarDraws, UnitUniform};
+use crate::stellar::events::thermal_pulse::ThermalPulseModel;
 use crate::stellar::multiplicity::{
     HierarchyNode, MultiplicityContext, NodeIndex, RedrawAttempt, SlotKind, StarIndex,
     SystemHierarchy, draw_hierarchy_of_composition,
@@ -671,11 +673,12 @@ impl StarModel {
     #[must_use]
     pub fn variability_at(&self, t: UniverseTime) -> Option<Variability> {
         let state = self.state_at(t)?;
+        // No variability reads an S or carbon star's class, so the pulses' series is not needed.
         let classification = classify_under(
             &state,
             &self.composition,
             &self.draws,
-            self.class_extras_at(&state, t),
+            self.class_extras_at(&state, t, Pulses::Unopened),
             self.rules,
         );
         let spin = self.rotation_of(&state);
@@ -691,10 +694,51 @@ impl StarModel {
     }
 
     /// What [`classify`] reads of the star's history in `state`, its state at `t`: a neutron
-    /// star's class from its pulsar state (P06.T21.c), and a naked helium star's surface from the
-    /// mass it has lost since it became one (P06.T24.a).
+    /// star's class from its pulsar state (P06.T21.c), a naked helium star's surface from the
+    /// mass it has lost since it became one (P06.T24.a), and under its rules' P06.T24.b a young
+    /// star's class and, where `pulses` are opened, an AGB star's S or carbon class
+    /// ([`peculiar_extras`]).
+    ///
+    /// With [`Pulses::Unopened`] an AGB star takes no S or carbon class: the pulses' series is the
+    /// star's own, which [`StarModel`] cannot open (it holds no seed or ID).
     #[must_use]
-    pub(crate) fn class_extras_at(&self, state: &StarState, t: UniverseTime) -> ClassExtras {
+    pub(crate) fn class_extras_at(
+        &self,
+        state: &StarState,
+        t: UniverseTime,
+        pulses: Pulses,
+    ) -> ClassExtras {
+        let extras = self.history_extras_at(state, t);
+        peculiar_extras(
+            self.rules,
+            extras,
+            || {
+                young_class(
+                    state.phase(),
+                    self.initial_mass,
+                    self.age_at(t),
+                    &self.draws,
+                )
+            },
+            || {
+                let Pulses::Opened(streams) = pulses else {
+                    return None;
+                };
+                if state.phase() != Phase::ThermallyPulsingAgb {
+                    return None;
+                }
+                let dredge_up = DredgeUp::of(self.initial_mass, &self.composition, self.track()?)?;
+                let pulses =
+                    ThermalPulseModel::of(self, &streams.series(event_tags::STAR_THERMAL_PULSE))?;
+                chemical_class(dredge_up.c_to_o(pulses.pulse_number_at(t)?))
+            },
+        )
+    }
+
+    /// [`class_extras_at`](Self::class_extras_at)'s extras of version 24: a neutron star's class
+    /// and a naked helium star's surface.
+    #[must_use]
+    fn history_extras_at(&self, state: &StarState, t: UniverseTime) -> ClassExtras {
         match state.phase() {
             Phase::NeutronStar => self.pulsar_at(t).map_or(ClassExtras::NONE, |pulsar| {
                 ClassExtras::neutron_star(pulsar.class())
@@ -940,6 +984,66 @@ impl RemnantFate {
             self.rules,
         );
         judged(&death)
+    }
+}
+
+/// Where a star's own event streams are opened: its galaxy's seed and its body (plan 06, P06.T24.b
+/// and T28.g). [`StarModel`] holds neither, so [`SystemStars`] keeps its galaxy's seed and hands
+/// each star its body's streams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct StarStreams {
+    seed: Seed,
+    body: BodyId,
+}
+
+impl StarStreams {
+    /// The streams of `body` in the universe of `seed`.
+    #[must_use]
+    pub(crate) const fn new(seed: Seed, body: BodyId) -> Self {
+        Self { seed, body }
+    }
+
+    /// The star's body.
+    #[must_use]
+    pub(crate) const fn body(self) -> BodyId {
+        self.body
+    }
+
+    /// The star's event series of `tag`, `EventSeries::new(seed, tag, body.into())`.
+    #[must_use]
+    pub(crate) fn series(self, tag: crate::events::EventTag) -> EventSeries {
+        EventSeries::new(self.seed, tag, self.body.into())
+    }
+}
+
+/// Whether a star's own thermal pulses are opened for its class (P06.T24.b): an S or carbon star's
+/// C/O reads the pulse number on the star's own series.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Pulses {
+    /// Opened from these streams.
+    Opened(StarStreams),
+    /// Not opened: no S or carbon class is given.
+    Unopened,
+}
+
+/// `extras`, version 24's, with P06.T24.b's class under `rules`: the one choke point of its hold
+/// ([`PECULIAR_CLASSES_VERSION`](crate::stellar::classify::PECULIAR_CLASSES_VERSION)), which
+/// [`StarModel::class_extras_at`] and a paired star's summary both read.
+///
+/// Under the held arm `extras` as they are, and neither class is evaluated; under the full arm the
+/// young star's class `young` gives, else the S or carbon class `chemistry` gives.
+#[must_use]
+fn peculiar_extras(
+    rules: StellarRules,
+    extras: ClassExtras,
+    young: impl FnOnce() -> Option<PeculiarClass>,
+    chemistry: impl FnOnce() -> Option<PeculiarClass>,
+) -> ClassExtras {
+    match rules.peculiar_classes {
+        PeculiarClassRules::Held => extras,
+        PeculiarClassRules::Full => young()
+            .or_else(chemistry)
+            .map_or(extras, |class| extras.with_peculiar(class)),
     }
 }
 
@@ -1512,6 +1616,10 @@ pub struct SystemStars {
     stars: Vec<StarModel>,
     pairs: Vec<PairTimeline>,
     attempt: RedrawAttempt,
+    /// The seed of the galaxy the stars were generated in, from which each star's own event
+    /// streams are opened (P06.T24.b's pulses, T28.g's events), so that the summary and the brief
+    /// need no galaxy (the lane's lean, 2026-10-31).
+    seed: Seed,
 }
 
 impl SystemStars {
@@ -1597,7 +1705,7 @@ impl SystemStars {
                 return drawn;
             }
             let Some(next) = attempt.next() else {
-                return Self::after_last_attempt(record, primary, attempt);
+                return Self::after_last_attempt(galaxy.seed(), record, primary, attempt);
             };
             attempt = next;
         }
@@ -1623,11 +1731,12 @@ impl SystemStars {
             stars,
             pairs,
             attempt,
+            seed: galaxy.seed(),
         }
     }
 
     /// What the grid keeps of a system whose [`MAX_REDRAWS`](crate::stellar::multiplicity::MAX_REDRAWS)
-    /// attempts all carve: the primary alone, at the last attempt.
+    /// attempts all carve: the primary alone, at the last attempt, in the universe of `seed`.
     ///
     /// Design note 9 keeps the last hierarchy with its innermost period moved out of the
     /// interacting range; a single star is never in a binary class, so the grid's half of the
@@ -1636,6 +1745,7 @@ impl SystemStars {
     /// 11's Risks, "Deviations in P11.T7, as built").
     #[must_use]
     fn after_last_attempt(
+        seed: Seed,
         record: &SystemRecord,
         primary: StarModel,
         attempt: RedrawAttempt,
@@ -1650,11 +1760,13 @@ impl SystemStars {
             stars: vec![primary],
             pairs: Vec::new(),
             attempt,
+            seed,
         }
     }
 
-    /// The stars of a catalogue entry of a binary class (plan 11, P11.T8.a): `record`'s system of
-    /// the two stars of `hierarchy`, as `stars` model them on their own, and the pair's
+    /// The stars of a catalogue entry of a binary class (plan 11, P11.T8.a) in the universe of
+    /// `seed`: `record`'s system of the two stars of `hierarchy`, as `stars` model them on their
+    /// own, and the pair's
     /// `timeline`, which the class builds from its marks
     /// ([`BinaryTimeline::from_marks`](crate::stellar::binary::BinaryTimeline::from_marks)). The
     /// timeline gives both stars' states wherever the system reads them, as an evolved timeline
@@ -1665,6 +1777,7 @@ impl SystemStars {
     /// If `hierarchy` is not one pair of two stars, or `stars` does not hold a model for each.
     #[must_use]
     pub(crate) fn of_marked_pair(
+        seed: Seed,
         record: SystemRecord,
         hierarchy: SystemHierarchy,
         stars: Vec<StarModel>,
@@ -1687,6 +1800,7 @@ impl SystemStars {
                 timeline,
             }],
             attempt: GRID_ATTEMPT,
+            seed,
         }
     }
 
@@ -1746,6 +1860,12 @@ impl SystemStars {
         self.hierarchy.star_count()
     }
 
+    /// The event streams of the system's star `body`.
+    #[must_use]
+    pub(crate) const fn streams(&self, body: BodyId) -> StarStreams {
+        StarStreams::new(self.seed, body)
+    }
+
     /// The bytes the system's stars own on the heap, beyond `size_of::<SystemStars>()`: each
     /// star's model and track, the hierarchy's lists and each pair's timeline, by capacity. A
     /// track the star's pair shares is counted once, with the star.
@@ -1786,7 +1906,7 @@ impl SystemStars {
                     .zip(self.stars.iter().zip(self.hierarchy.stars()))
                     .filter_map(|(index, (star, slot))| {
                         let paired = self.paired_state(index, t);
-                        star_summary_with(star, slot.body(), t, paired)
+                        star_summary_with(star, self.streams(slot.body()), t, paired)
                     })
                     .collect(),
                 Some(self.hierarchy.clone()),
@@ -1852,10 +1972,11 @@ impl SystemStars {
         let paired = self.paired_state(0, t);
         let (state, extras) = match summarised(primary, t, paired.as_ref())? {
             Summarised::Own(state) => {
-                let extras = primary.class_extras_at(&state, t);
+                let streams = self.streams(self.hierarchy.star(StarIndex::PRIMARY).body());
+                let extras = primary.class_extras_at(&state, t, Pulses::Opened(streams));
                 (state, extras)
             }
-            Summarised::Paired(paired) => (paired.state, paired.class_extras()),
+            Summarised::Paired(paired) => (paired.state, paired.class_extras_of(primary)),
         };
         Some(StellarBrief::of(
             &state,
@@ -2149,6 +2270,28 @@ struct PairedStar {
 }
 
 impl PairedStar {
+    /// The class extras its pair's history gives `star`, the model it is the pair's word on: those
+    /// of [`class_extras`](Self::class_extras), and under the star's rules a young star's class
+    /// from its own initial mass and disc ([`peculiar_extras`]). A star its pair has changed takes
+    /// no S or carbon class: its track's pulses are not the ones its pair gives it (the lane's
+    /// lean, 2026-10-31).
+    #[must_use]
+    fn class_extras_of(&self, star: &StarModel) -> ClassExtras {
+        peculiar_extras(
+            star.rules,
+            self.class_extras(),
+            || {
+                young_class(
+                    self.state.phase(),
+                    star.initial_mass(),
+                    self.state.age(),
+                    star.draws(),
+                )
+            },
+            || None,
+        )
+    }
+
     /// The class extras its pair's history gives it: a neutron star's recycled pulsar's class, and
     /// a naked helium star's surface from the mass it has lost since it became one, as a single
     /// star's track gives it ([`StarModel::class_extras_at`]; P11.T11.b), so that a helium star
@@ -2381,19 +2524,21 @@ pub(crate) fn track_mass_of(initial_mass: SolarMasses) -> SolarMasses {
     }
 }
 
-/// The summary of `star`, the system's body `body`, at `t`, or `None` if it has not formed by then:
-/// from `paired`, its pair's word on it, where the engine ran it in a pair and its pair has changed
-/// it, and otherwise [`star_summary`] with the pair's class ([`summarised`] chooses).
+/// The summary of `star`, the system's body whose streams are `streams`, at `t`, or `None` if it
+/// has not formed by then: from `paired`, its pair's word on it, where the engine ran it in a pair
+/// and its pair has changed it, and otherwise [`star_summary`] with the pair's class
+/// ([`summarised`] chooses).
 #[must_use]
 fn star_summary_with(
     star: &StarModel,
-    body: BodyId,
+    streams: StarStreams,
     t: UniverseTime,
     paired: Option<PairedStar>,
 ) -> Option<StarSummary> {
+    let body = streams.body();
     let paired = match summarised(star, t, paired.as_ref())? {
         Summarised::Own(_) => {
-            return star_summary(star, body, t).map(|summary| StarSummary {
+            return star_summary(star, streams, t).map(|summary| StarSummary {
                 binary_class: paired.map_or(BinaryClass::None, |paired| paired.class),
                 ..summary
             });
@@ -2401,7 +2546,7 @@ fn star_summary_with(
         Summarised::Paired(paired) => paired,
     };
     let state = paired.state;
-    let extras = paired.class_extras();
+    let extras = paired.class_extras_of(star);
     let classification =
         classify_under(&state, star.composition(), star.draws(), extras, star.rules);
     let spin = rotation::rotation_under(&state, star.composition(), star.draws(), None, star.rules);
@@ -2496,15 +2641,21 @@ const fn remnant_kind(phase: Phase) -> Option<RemnantKind> {
     }
 }
 
-/// The summary of `star`, the system's body `body`, at `t`, or `None` if it has not formed by then.
+/// The summary of `star`, the system's body whose streams are `streams`, at `t`, or `None` if it
+/// has not formed by then.
 #[must_use]
-pub(crate) fn star_summary(star: &StarModel, body: BodyId, t: UniverseTime) -> Option<StarSummary> {
+pub(crate) fn star_summary(
+    star: &StarModel,
+    streams: StarStreams,
+    t: UniverseTime,
+) -> Option<StarSummary> {
+    let body = streams.body();
     let state = star.state_at(t)?;
     let classification = classify_under(
         &state,
         star.composition(),
         star.draws(),
-        star.class_extras_at(&state, t),
+        star.class_extras_at(&state, t, Pulses::Opened(streams)),
         star.rules,
     );
     let spin = star.rotation_of(&state);
@@ -2563,6 +2714,11 @@ mod tests {
 
     const SEED: u64 = 0x0600_0003_5eed_0001;
 
+    /// The streams of `body` in the universe of [`SEED`].
+    fn streams(body: BodyId) -> StarStreams {
+        StarStreams::new(Seed::new(SEED), body)
+    }
+
     fn galaxy() -> Galaxy {
         Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
             .expect("the Milky Way fixture's gas is mostly neutral")
@@ -2579,6 +2735,56 @@ mod tests {
             SolarMasses::new(1.0),
             Years::new(age),
         )
+    }
+
+    /// The paired path of P06.T24.b's hold: under the full arm a pre-main-sequence star its pair
+    /// has changed takes the young class of its own initial mass and disc, and a star of the
+    /// thermally pulsing AGB no S or carbon class (its track's pulses are not its pair's); under
+    /// the version's rules neither takes a class. No grid star its pair has changed is young, so
+    /// this arm is the one no grid system can show moving (`stellar/rules/classes_hold.rs`).
+    #[test]
+    fn a_paired_star_takes_a_young_class_and_no_carbon_class() {
+        let paired = |state: StarState| PairedStar {
+            state,
+            class: BinaryClass::None,
+            pulsar: None,
+            helium_entry: None,
+            own_death: false,
+        };
+        let model = |m: f64, age: f64, rules: StellarRules| {
+            StarModel::new_under(
+                SolarMasses::new(m),
+                Composition::SOLAR,
+                StarDraws::median(),
+                Years::new(age),
+                rules,
+            )
+            .unwrap()
+        };
+        let full = StellarRules::every_26_hold();
+        let young = model(1.0, 2e6, full);
+        let state = young.state_at(UniverseTime::EPOCH).unwrap();
+        assert_eq!(
+            paired(state).class_extras_of(&young),
+            ClassExtras::NONE.with_peculiar(PeculiarClass::TTauri { classical: false })
+        );
+        let held = model(1.0, 2e6, StellarRules::of_version(GENERATOR_VERSION));
+        assert_eq!(paired(state).class_extras_of(&held), ClassExtras::NONE);
+        let agb = model(3.0, 1.2e10, full);
+        let clock = crate::stellar::events::thermal_pulse::ThermalPulseClock::of(&agb).unwrap();
+        let half = clock
+            .end()
+            .checked_since(clock.start())
+            .unwrap()
+            .as_seconds_f64()
+            / 2.0;
+        let late = clock
+            .start()
+            .checked_add(Span::from_seconds_f64(half).unwrap())
+            .unwrap();
+        let state = agb.state_at(late).unwrap();
+        assert_eq!(state.phase(), Phase::ThermallyPulsingAgb);
+        assert_eq!(paired(state).class_extras_of(&agb), ClassExtras::NONE);
     }
 
     #[test]
@@ -2858,8 +3064,12 @@ mod tests {
             shell.radius().value() > 0.0 && shell.radius() < nebula::MAX_RADIUS,
             "{shell:?}"
         );
-        let summary = star_summary(&young, BodyId::new(test_system(), 0), UniverseTime::EPOCH)
-            .expect("the white dwarf exists");
+        let summary = star_summary(
+            &young,
+            streams(BodyId::new(test_system(), 0)),
+            UniverseTime::EPOCH,
+        )
+        .expect("the white dwarf exists");
         assert_eq!(summary.planetary_nebula(), Some(shell));
         assert_eq!(
             at(died + 1.0e6, 2.0).planetary_nebula_at(UniverseTime::EPOCH),
@@ -3098,7 +3308,7 @@ mod tests {
         )
         .unwrap();
         let t = UniverseTime::EPOCH;
-        let summary = star_summary(&ns, BodyId::new(test_system(), 0), t).unwrap();
+        let summary = star_summary(&ns, streams(BodyId::new(test_system(), 0)), t).unwrap();
         assert_eq!(summary.state().phase(), Phase::NeutronStar);
         let pulsar = ns.pulsar_at(t).unwrap();
         assert_eq!(
@@ -3115,7 +3325,7 @@ mod tests {
             summary.state(),
             ns.composition(),
             ns.draws(),
-            ns.class_extras_at(summary.state(), t),
+            ns.class_extras_at(summary.state(), t, Pulses::Unopened),
             (1, ns.rules),
         );
         assert_eq!(brief.class(), summary.classification());
@@ -3175,8 +3385,8 @@ mod tests {
         )
         .unwrap();
         let body = BodyId::new(test_system(), 0);
-        let now = star_summary(&bh, body, UniverseTime::EPOCH).unwrap();
-        let later = star_summary(&bh, body, years(900)).unwrap();
+        let now = star_summary(&bh, streams(body), UniverseTime::EPOCH).unwrap();
+        let later = star_summary(&bh, streams(body), years(900)).unwrap();
         assert_eq!(now.state().phase(), Phase::BlackHole);
         let Some(RemnantDetail::BlackHole(hole)) = now.remnant_detail() else {
             panic!("{:?}", now.remnant_detail());

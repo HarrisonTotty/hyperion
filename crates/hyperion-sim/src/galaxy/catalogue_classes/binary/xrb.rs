@@ -896,6 +896,7 @@ impl XrbEntry {
             self.binary.orbit,
         );
         SystemStars::of_marked_pair(
+            galaxy.seed(),
             self.record,
             hierarchy,
             stars.collect(),

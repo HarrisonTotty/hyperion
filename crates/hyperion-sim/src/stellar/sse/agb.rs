@@ -493,6 +493,13 @@ impl ThermallyPulsingAgb {
         self.mc_du
     }
 
+    /// λ, the fraction of the core's growth that third dredge-up returns to the envelope
+    /// (equation 73), as the phase was built with: P06.T24.b's carbon reads it.
+    #[must_use]
+    pub(crate) const fn dredge_up(&self) -> f64 {
+        self.dredge_up
+    }
+
     /// L, R and core at `t` with `asymptotic` for equation 74.
     #[must_use]
     fn point(&self, t: Megayears, asymptotic: &RadiusLaw) -> PhasePoint {

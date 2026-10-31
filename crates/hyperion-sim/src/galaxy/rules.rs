@@ -151,7 +151,8 @@ impl GalaxyRules {
     /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: 25's
     /// holds and those that turn on at 26 (the galaxy's `bound_share`, P09.T13, `stream_shell`,
     /// P10.T9, `member_remnants`, P09.T10, `field_share`, P09.T2.c, and `carve_out`, P09.T35; the
-    /// stellar rules' `dwarf_sequence`, P06.T23.a, `helium`, P15.T7.b, and `hd_limit`, P06.T42.b;
+    /// stellar rules' `dwarf_sequence`, P06.T23.a, `helium`, P15.T7.b, `hd_limit`, P06.T42.b,
+    /// `v_magnitude`, P06.T43.b, `stripping`, P11.T1.d, and `peculiar_classes`, P06.T24.b;
     /// [`StellarRules::every_26_hold`]).
     ///
     /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is

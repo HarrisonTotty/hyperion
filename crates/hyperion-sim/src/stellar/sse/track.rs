@@ -1122,6 +1122,19 @@ impl Track {
         })
     }
 
+    /// λ, the fraction of the core's growth that third dredge-up returns to the envelope on the
+    /// thermally pulsing AGB (HPT equation 73), as the track's phase was built with, if the track
+    /// is built to it (for P06.T24.b's carbon).
+    #[must_use]
+    pub(crate) fn pulsing_agb_dredge_up(&self) -> Option<f64> {
+        let segment = self.pulsing_agb_segment()?;
+        if let Model::ThermallyPulsingAgb { phase, .. } = &segment.model {
+            Some(phase.dredge_up())
+        } else {
+            None
+        }
+    }
+
     /// The number of thermal pulses since the start of the thermally pulsing AGB at the age
     /// `base_years + offset_years`, the integral of 1 ÷ `τ_ip`(Mc, `M_env`) (P06.T8.b's interpulse
     /// period) over the phase, or `None` where that age lies outside the phase, its ends included

@@ -71,6 +71,11 @@
 //!   Only cluster members carry a helium excess. The bump deletes the field, its held arm and its
 //!   tripwire.
 //!
+//! - [`peculiar_classes`](StellarRules::peculiar_classes), at [`PECULIAR_CLASSES_VERSION`]
+//!   (P06.T24.b): the young stars' classes and the S and carbon stars', chosen in one `match`
+//!   (`system::peculiar_extras`), which a star's own summary and brief and a paired star's
+//!   summary read. Its tests are in `rules/classes_hold.rs`.
+//!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
@@ -84,6 +89,7 @@ use crate::GeneratorVersion;
 use crate::galaxy::displaced::binarity::{STRIPPING_HELIUM_VERSION, StrippingRules};
 use crate::stellar::classify::pm13::{DWARF_SEQUENCE_VERSION, DwarfSequenceRules};
 use crate::stellar::photometry::{V_MAGNITUDE_VERSION, VMagnitudeRules};
+use crate::stellar::classify::{PECULIAR_CLASSES_VERSION, PeculiarClassRules};
 use crate::stellar::remnant::KickRankRules;
 use crate::stellar::sse::wind::{HD_LIMIT_VERSION, HdLimitRules};
 use crate::stellar::sse::{HELIUM_VERSION, HeliumRules};
@@ -114,6 +120,8 @@ pub(crate) struct StellarRules {
     /// Where a star with a helium excess reads its stripped share and stage radii, the hold of
     /// [`STRIPPING_HELIUM_VERSION`].
     pub(crate) stripping: StrippingRules,
+    /// Whether P06.T24.b's young, S and carbon classes are in force (`system::peculiar_extras`).
+    pub(crate) peculiar_classes: PeculiarClassRules,
 }
 
 impl StellarRules {
@@ -148,6 +156,11 @@ impl StellarRules {
                 StrippingRules::HeliumTabulated
             } else {
                 StrippingRules::HeliumExact
+            },
+            peculiar_classes: if version.get() >= PECULIAR_CLASSES_VERSION.get() {
+                PeculiarClassRules::Full
+            } else {
+                PeculiarClassRules::Held
             },
         }
     }
@@ -185,6 +198,8 @@ impl StellarRules {
     }
 }
 
+#[cfg(test)]
+mod classes_hold;
 #[cfg(test)]
 mod hd_limit_hold;
 #[cfg(test)]

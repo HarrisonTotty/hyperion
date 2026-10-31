@@ -59,7 +59,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::features::members::{FeatureInteriorCache, MemberRecord, resolve_member};
 use crate::galaxy::placement::{ResolveSystemError, SystemOrigin, SystemRecord};
-use crate::id::SystemIdKind;
+use crate::id::{BodyId, SystemIdKind};
 use crate::math;
 use crate::rng::Mark;
 use crate::stellar::Composition;
@@ -77,8 +77,8 @@ use crate::stellar::sse::{
     MAX_INITIAL_MASS, MIN_INITIAL_MASS, RemnantModel, Track, TrackOptions, remnant_of,
 };
 use crate::stellar::system::{
-    GRID_ATTEMPT, StarModel, StellarBrief, SystemStars, draw_metallicity, grid_multiplicity,
-    primary_draws, primary_eta, primary_rotation_draws,
+    GRID_ATTEMPT, Pulses, StarModel, StarStreams, StellarBrief, SystemStars, draw_metallicity,
+    grid_multiplicity, primary_draws, primary_eta, primary_rotation_draws,
 };
 use crate::stellar::{Phase, StarState};
 use crate::time::{ClockWindow, UniverseTime};
@@ -193,8 +193,9 @@ enum Primary {
         /// The age at which the remnant formed, years since the onset of collapse.
         birth: f64,
     },
-    /// [`BriefRoute::Exact`].
-    Exact(Box<StarModel>),
+    /// [`BriefRoute::Exact`], with the streams of the primary's body, from which its thermal
+    /// pulses are opened for its class (P06.T24.b).
+    Exact(Box<StarModel>, StarStreams),
     /// [`BriefRoute::Paired`]: the system's stars.
     Paired(Box<SystemStars>),
 }
@@ -440,7 +441,7 @@ impl BriefModel {
             let draws = primary_draws(galaxy, record);
             let primary = table_primary(fate, composition, &draws, (age_at_epoch, m0), options)
                 .or_else(|| exact_remnant(m0, composition, &draws, age_at_epoch, options))
-                .unwrap_or_else(|| exact(m0, composition, draws, age_at_epoch, rules));
+                .unwrap_or_else(|| exact(galaxy, record, (m0, composition, draws), age_at_epoch));
             return Self {
                 primary,
                 star_count,
@@ -472,11 +473,10 @@ impl BriefModel {
             }
         } else {
             exact(
-                m0,
-                composition,
-                primary_draws(galaxy, record),
+                galaxy,
+                record,
+                (m0, composition, primary_draws(galaxy, record)),
                 age_at_epoch,
-                rules,
             )
         };
         Self {
@@ -492,7 +492,7 @@ impl BriefModel {
         match self.primary {
             Primary::MainSequence { .. } => BriefRoute::MainSequence,
             Primary::Table { .. } => BriefRoute::Table,
-            Primary::Remnant { .. } | Primary::Exact(_) => BriefRoute::Exact,
+            Primary::Remnant { .. } | Primary::Exact(..) => BriefRoute::Exact,
             Primary::Paired(_) => BriefRoute::Paired,
         }
     }
@@ -560,12 +560,12 @@ impl BriefModel {
                 (age_at(*age_at_epoch, t), *birth),
                 (self.star_count, self.rules),
             )),
-            Primary::Exact(model) => model.state_at(t).map(|state| {
+            Primary::Exact(model, streams) => model.state_at(t).map(|state| {
                 StellarBrief::of(
                     &state,
                     model.composition(),
                     model.draws(),
-                    model.class_extras_at(&state, t),
+                    model.class_extras_at(&state, t, Pulses::Opened(*streams)),
                     (self.star_count, model.rules()),
                 )
             }),
@@ -628,7 +628,7 @@ impl BriefModel {
             Primary::MainSequence { track, .. }
             | Primary::Table { track, .. }
             | Primary::Remnant { track, .. } => size_of::<Track>() + track.heap_bytes(),
-            Primary::Exact(model) => size_of::<StarModel>() + model.heap_bytes(),
+            Primary::Exact(model, _) => size_of::<StarModel>() + model.heap_bytes(),
             Primary::Paired(stars) => size_of::<SystemStars>() + stars.heap_bytes(),
         }
     }
@@ -779,19 +779,22 @@ fn pulsar_class_holds(
         })
 }
 
-/// The exact primary: its [`StarModel`], under the galaxy's stellar `rules`.
+/// The exact primary of `record` in `galaxy`, of initial mass `m0`, `composition` and `draws`:
+/// its [`StarModel`], under the galaxy's stellar rules, with its body's streams.
 #[must_use]
 fn exact(
-    m0: SolarMasses,
-    composition: Composition,
-    draws: StarDraws,
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    (m0, composition, draws): (SolarMasses, Composition, StarDraws),
     age_at_epoch: Years,
-    rules: StellarRules,
 ) -> Primary {
-    Primary::Exact(Box::new(
-        StarModel::new_under(m0, composition, draws, age_at_epoch, rules)
-            .expect("a grid record's primary is a star or a brown dwarf, with a finite age"),
-    ))
+    Primary::Exact(
+        Box::new(
+            StarModel::new_under(m0, composition, draws, age_at_epoch, galaxy.rules().stellar)
+                .expect("a grid record's primary is a star or a brown dwarf, with a finite age"),
+        ),
+        StarStreams::new(galaxy.seed(), BodyId::new(record.id(), 0)),
+    )
 }
 
 /// The exact primary of a star dead through the whole window, from its remnant alone: the
@@ -996,7 +999,11 @@ mod tests {
             &state,
             primary.composition(),
             primary.draws(),
-            primary.class_extras_at(&state, t),
+            primary.class_extras_at(
+                &state,
+                t,
+                Pulses::Opened(stars.streams(BodyId::new(stars.record().id(), 0))),
+            ),
             (star_count, primary.rules()),
         ))
     }

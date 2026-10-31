@@ -23,7 +23,7 @@ use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{BodyId, Layer, SystemId};
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
-use crate::stellar::system::{StarModel, StarSummary, star_summary};
+use crate::stellar::system::{StarModel, StarStreams, StarSummary, star_summary};
 use crate::time::UniverseTime;
 use crate::units::{Dex, HeliumExcess, SolarMasses, Years};
 
@@ -226,7 +226,11 @@ pub fn sample_star(galaxy: &Galaxy, sampling: &Sampling, seed: u64, index: u64) 
         inputs.age,
     )
     .expect("a sampled star is of 0.08–150 M☉ with a finite age");
-    let summary = star_summary(&model, inputs.body, UniverseTime::EPOCH);
+    let summary = star_summary(
+        &model,
+        StarStreams::new(Seed::new(seed), inputs.body),
+        UniverseTime::EPOCH,
+    );
     SampledStar {
         initial_mass: inputs.initial_mass,
         age: inputs.age,
@@ -300,10 +304,14 @@ mod tests {
     use crate::galaxy::params::GalaxyParams;
     use crate::math;
     use crate::stellar::StarState;
-    use crate::stellar::classify::{ClassExtras, Classification, HeliumSurface, classify};
+    use crate::stellar::classify::{
+        ClassExtras, Classification, DredgeUp, HERBIG_AE_BE_MAX_MASS, HeliumSurface, PeculiarClass,
+        T_TAURI_MAX_MASS, carbon_star_window, chemical_class, classify,
+    };
     use crate::stellar::classify::{NeutronStarClass, SpectralLetter, SpectralType};
     use crate::stellar::nebula::planetary_nebula;
     use crate::stellar::premain::PROTOSTAR_YEARS;
+    use crate::stellar::premain::disc_lifetime;
     use crate::stellar::remnant::DeathKind;
     use crate::stellar::remnant::{NeutronStar, RemnantKind};
     use crate::stellar::sse::{PhasePredicate, Track};
@@ -924,6 +932,15 @@ mod tests {
     /// sampled at their populations' reference positions: bands A–E of the young disc and C–E of
     /// the older components, whose lighter bands hold none of the counted objects.
     fn galaxy_counts(galaxy: &Galaxy, n: u64) -> Tally {
+        galaxy_counts_with(galaxy, n, observe_counts)
+    }
+
+    /// [`galaxy_counts`] with each star read by `observe` in place of [`observe_counts`].
+    fn galaxy_counts_with(
+        galaxy: &Galaxy,
+        n: u64,
+        observe: impl Fn(&SampleInputs, &AgeDistribution, &mut Tally) + Sync,
+    ) -> Tally {
         let mut total = Tally::default();
         for (i, component) in galaxy.fields().components().iter().enumerate() {
             let population = component.population();
@@ -938,7 +955,7 @@ mod tests {
                     n,
                     |k| sample_inputs(galaxy, &sampling, SEED, k),
                     |inputs, t| {
-                        observe_counts(inputs, component.ages(), t);
+                        observe(inputs, component.ages(), t);
                     },
                 );
                 #[expect(clippy::cast_precision_loss, reason = "a sample size")]
@@ -1012,6 +1029,118 @@ mod tests {
             "core collapses a century",
             100.0 * t.get("core collapses") / RATE_YEARS,
             (1.5, 3.0),
+        );
+        checks.finish();
+    }
+
+    /// Samples of a thermally pulsing AGB for the S and carbon stars' counts.
+    const PULSING_SAMPLES: u32 = 400;
+
+    /// What the counts of P06.T24.b's classes read of one star of `inputs`, of a component whose
+    /// ages are `ages`, under the full arm's rules: the weight under `ages` of the ages at which
+    /// the star is a classical or weak-lined T Tauri star, a Herbig Ae/Be star (from its
+    /// formation to its arrival on the main sequence, split at its disc's lifetime), an S star of
+    /// any kind or a carbon star (over its full track's thermally pulsing AGB, on the track's own
+    /// pulse count, ⌊φ⌋, which the series' n follows within its noise's bound); and the
+    /// protostars, as [`observe_counts`] weighs them.
+    fn observe_young_and_chemical(inputs: &SampleInputs, ages: &AgeDistribution, t: &mut Tally) {
+        let (m0, composition, draws) = (inputs.initial_mass, &inputs.composition, &inputs.draws);
+        if m0 < crate::stellar::sse::MIN_INITIAL_MASS {
+            return;
+        }
+        let arrival = Track::to_age(m0, composition, draws, Years::new(PROTOSTAR_YEARS))
+            .main_sequence_arrival()
+            .expect("a hydrogen star arrives on its main sequence")
+            .value()
+            .max(PROTOSTAR_YEARS);
+        t.add("protostars", weight(ages, 0.0, PROTOSTAR_YEARS));
+        // A protostar is classical whatever its disc's lifetime (`young_class`).
+        let disc = (1e6 * disc_lifetime(m0, draws.disc_lifetime()).value()).max(PROTOSTAR_YEARS);
+        if m0 < T_TAURI_MAX_MASS {
+            t.add(
+                "classical T Tauri stars",
+                weight(ages, 0.0, disc.min(arrival)),
+            );
+            t.add("weak-lined T Tauri stars", weight(ages, disc, arrival));
+        } else if m0 < HERBIG_AE_BE_MAX_MASS {
+            t.add("Herbig Ae/Be stars", weight(ages, 0.0, arrival));
+        }
+        if !carbon_star_window(composition).contains(&m0) {
+            return;
+        }
+        let track = Track::full(m0, composition, draws);
+        let (Some(span), Some(dredge_up)) =
+            (track.pulsing_agb(), DredgeUp::of(m0, composition, &track))
+        else {
+            return;
+        };
+        let (start, end) = (span.start().value(), span.end().value());
+        let class_at = |age: f64| {
+            let n = track.pulse_phase_at(age, 0.0).unwrap_or(0.0).floor();
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "a whole number of pulses under 10⁴"
+            )]
+            chemical_class(dredge_up.c_to_o(n as i64))
+        };
+        t.add(
+            "S stars",
+            weight_where(ages, (start, end), PULSING_SAMPLES, |age| {
+                matches!(class_at(age), Some(PeculiarClass::SType(_)))
+            }),
+        );
+        t.add(
+            "carbon stars",
+            weight_where(ages, (start, end), PULSING_SAMPLES, |age| {
+                class_at(age) == Some(PeculiarClass::Carbon)
+            }),
+        );
+    }
+
+    /// The galaxy-wide expected counts of P06.T24.b's classes at Milky Way parameters under the
+    /// full arm, as [`galaxy_wide_counts_at_milky_way_values`] counts its objects (T31's count
+    /// checks):
+    ///
+    /// - carbon stars 2 × 10⁴–5 × 10⁵: the solar neighbourhood's surface density of about 100 a
+    ///   kpc² (Groenewegen et al. 1992, recalled) spread over an exponential disc of scale length
+    ///   3 kpc gives some 9 × 10⁴, and AKARI's all-sky count (Ishihara et al. 2011, A&A 534, A79,
+    ///   recalled) brackets above;
+    /// - S stars 0.05–0.5 of the carbon stars: Stephenson's catalogues list some 1,300 S stars to
+    ///   some 6,000 carbon stars (recalled), extrinsic S stars among them;
+    /// - classical T Tauri stars 2–8 per protostar, the mean disc of 2.5 Myr (P06.T15.c) over the
+    ///   protostar's 0.5 Myr, weak-lined ones 10–200 per classical one, the contraction of
+    ///   100–400 Myr below a solar mass over the disc, and Herbig Ae/Be stars 0.05–0.5 per
+    ///   protostar, a few per cent of stars spending 1–8 Myr before the main sequence: the model's
+    ///   own ratios, there being no Galactic census of young stars.
+    #[test]
+    #[ignore = "slow: 1.5 × 10⁶ stars across every component and band, the window's with full tracks"]
+    fn young_s_and_carbon_stars_galaxy_wide_at_milky_way_values() {
+        let mut checks = Checks::default();
+        let galaxy = milky_way();
+        let t = galaxy_counts_with(&galaxy, 4_000, observe_young_and_chemical);
+        let protostars = t.get("protostars");
+        let carbon = t.get("carbon stars");
+        checks.within("carbon stars", carbon, (2e4, 5e5));
+        checks.within(
+            "S stars per carbon star",
+            t.get("S stars") / carbon,
+            (0.05, 0.5),
+        );
+        let classical = t.get("classical T Tauri stars");
+        checks.within(
+            "classical T Tauri stars per protostar",
+            classical / protostars,
+            (2.0, 8.0),
+        );
+        checks.within(
+            "weak-lined T Tauri stars per classical one",
+            t.get("weak-lined T Tauri stars") / classical,
+            (10.0, 200.0),
+        );
+        checks.within(
+            "Herbig Ae/Be stars per protostar",
+            t.get("Herbig Ae/Be stars") / protostars,
+            (0.05, 0.5),
         );
         checks.finish();
     }

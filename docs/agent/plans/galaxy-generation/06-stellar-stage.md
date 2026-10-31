@@ -1520,7 +1520,9 @@ massive and stripped stars, T24.b the rest, and T24.c corrects T24.a's hot subdw
     never becomes WC; a giant-branch star stripped of its envelope classifies as `sdB`;
     `window_where(PhasePredicate::Lbv)` brackets exactly the ages at which the state passes the
     criterion, at 1,000 sampled ages.
-- **P06.T24.b Carbon and S stars, and young stars** (needs T28.f).
+- **P06.T24.b Carbon and S stars, and young stars** (needs T28.f). **Built (lane
+  `p06-t24b-t28g`, 2026-10-31), held at 26 (`PECULIAR_CLASSES_VERSION`).**
+  Records: [06-stellar-stage/records/P06.T24.b.md](06-stellar-stage/records/P06.T24.b.md).
   - Carbon and S stars: on the thermally pulsing AGB, C/O = (C/O)₀ + δ(m, Z) × max(0, n − n_min),
     with n the thermal pulse number from T28.f's clock (a closed form in the event number), δ from
     the dredge-up efficiency λ of T8.b, zero outside the mass range where dredge-up works and hot
@@ -2607,7 +2609,9 @@ rides version 25 (S1), a held swap that lands with the train (decision-bump-plan
 2026-10-14; updated 2026-10-15). P06.T42.b (ask A2's winds) and P06.T43.b (ask A4's V) move
 stellar output too: each is a swap held on a lane branch, which rides version 25 (S1) if it is
 ready when that train's wiring starts, else the next galaxy train (decision-galaxy-25-train §1.7,
-2026-10-27). Every other task adds output on new streams and moves nothing that existed. Any later
+2026-10-27). P06.T24.b's young, S and carbon classes are held at 26 behind
+`PECULIAR_CLASSES_VERSION`, a `StellarRules` field. Every other task adds output on new streams
+and moves nothing that existed. Any later
 change to a formula,
 coefficient, recipe default, knot count or bridge time of this plan changes stellar output and is a
 version bump.

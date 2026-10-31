@@ -29,14 +29,35 @@
 //! The Wolf-Rayet temperatures are hydrostatic ones, which for helium stars run hotter than the
 //! observed T* at τ = 20 (Crowther 2007, section 3.3), so the backbone's Wolf-Rayet stars are
 //! mostly early types (a finding recorded in plan 06's Risks).
+//!
+//! P06.T24.b adds two families, behind their hold ([`PECULIAR_CLASSES_VERSION`]):
+//!
+//! - **Young stars** ([`young_class`]): before the main sequence, a star of under 2 M☉
+//!   ([`T_TAURI_MAX_MASS`]) is a T Tauri star, classical while its protostellar disc lasts
+//!   ([`disc_lifetime`], P06.T15.c) and weak-lined after, and one of 2–8 M☉
+//!   ([`HERBIG_AE_BE_MAX_MASS`]) a Herbig Ae/Be star (Herbig 1960, ApJS 4, 337; Waters and
+//!   Waelkens 1998, ARA&A 36, 233, recalled).
+//! - **S and carbon stars** ([`DredgeUp`], [`chemical_class`]): on the thermally pulsing AGB,
+//!   third dredge-up raises the surface C/O by number as C/O = (C/O)₀ + δ × max(0, n − `n_min`),
+//!   with n the star's pulse number (P06.T28.f), δ the C/O each later pulse adds and zero outside
+//!   the initial masses where dredge-up works and hot bottom burning does not
+//!   ([`carbon_star_window`]). Below C/O 0.95 the star stays an M star; MS, S and SC take
+//!   0.95–1 and a carbon star the rest.
+//!
+//! [`disc_lifetime`]: crate::stellar::premain::disc_lifetime
 
 use core::fmt;
+use core::ops::Range;
 
+use crate::GeneratorVersion;
 use crate::math;
+use crate::stellar::draws::StarDraws;
+use crate::stellar::premain::disc_lifetime;
 use crate::stellar::rules::StellarRules;
-use crate::stellar::sse::wind;
+use crate::stellar::sse::{Track, wind};
 use crate::stellar::{Composition, Phase, StarState};
-use crate::units::{Kelvin, SolarLuminosities, SolarMasses};
+use crate::substance::Element;
+use crate::units::{Kelvin, SolarLuminosities, SolarMasses, Years};
 
 use super::{Classification, LuminosityClass, PeculiarClass, SpectralCode, SpectralType};
 
@@ -478,12 +499,271 @@ pub(crate) fn wolf_rayet_class(wr: WolfRayetType) -> Classification {
     class
 }
 
+/// The generator version from which P06.T24.b's young stars and S and carbon stars are classed:
+/// 26, the stellar train after 25's (decision-bump-plan-after-22: "25 if landed when its wiring
+/// starts, else 26").
+///
+/// It is P06.T24.b's one hold, carried as [`StellarRules::peculiar_classes`]. Below it every star
+/// is classed as at 24, bit for bit: no `CTTS`, `WTTS`, `HAeBe`, `MS`, `S`, `SC` or `C-N`. 26's
+/// bump deletes this hold, [`PeculiarClassRules`] with its `Held` arm, the field and its tripwire
+/// (`the_young_and_carbon_classes_are_held_only_until_the_26_bump`).
+///
+/// [`StellarRules::peculiar_classes`]: crate::stellar::rules::StellarRules::peculiar_classes
+pub(crate) const PECULIAR_CLASSES_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether P06.T24.b's classes are in force (its hold, [`PECULIAR_CLASSES_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum PeculiarClassRules {
+    /// Version 25's and before: no young, S or carbon class.
+    Held,
+    /// Version 26's: the young stars' classes before the main sequence ([`young_class`]), and the
+    /// S and carbon stars' on the thermally pulsing AGB ([`DredgeUp`]).
+    Full,
+}
+
+/// The heaviest T Tauri star, M☉ of initial mass, exclusive: 2, where the Herbig Ae/Be stars
+/// begin (plan 06, P06.T24.b; Waters and Waelkens 1998, section 1, recalled). It is the 2 M☉ of
+/// the FU Orionis outbursts' disc phase (P06.T28.d), which is the T Tauri stars' disc.
+pub const T_TAURI_MAX_MASS: SolarMasses = SolarMasses::new(2.0);
+
+/// The heaviest Herbig Ae/Be star, M☉ of initial mass, exclusive: 8 (plan 06, P06.T24.b), above
+/// which a star reaches the main sequence still embedded (Palla and Stahler 1993, ApJ 418, 414,
+/// recalled: the birthline meets the main sequence near 8 M☉).
+pub const HERBIG_AE_BE_MAX_MASS: SolarMasses = SolarMasses::new(8.0);
+
+/// The young star's class of a star of initial mass `initial_mass` and `draws` in `phase` at
+/// `age` (P06.T24.b), or `None`: before the main sequence (a protostar or a pre-main-sequence
+/// star), a T Tauri star under [`T_TAURI_MAX_MASS`], classical while it accretes, as a protostar
+/// or while its age is under its disc's lifetime ([`disc_lifetime`] of its own disc rank), and a
+/// Herbig Ae/Be star up to [`HERBIG_AE_BE_MAX_MASS`].
+///
+/// The protostar counts: the plan's 4 M☉ star at 0.3 Myr, which is a Herbig Ae/Be star, is still
+/// a protostar on P06.T15's 0.5 Myr of accretion (the lane's lean, 2026-10-31). A protostar is a
+/// classical T Tauri star even where its disc's lifetime, from 0.3 Myr, ends before its accretion
+/// does.
+#[must_use]
+pub(crate) fn young_class(
+    phase: Phase,
+    initial_mass: SolarMasses,
+    age: Years,
+    draws: &StarDraws,
+) -> Option<PeculiarClass> {
+    if !matches!(phase, Phase::Protostar | Phase::PreMainSequence) {
+        return None;
+    }
+    if initial_mass < T_TAURI_MAX_MASS {
+        let disc = Years::new(disc_lifetime(initial_mass, draws.disc_lifetime()).value() * 1e6);
+        Some(PeculiarClass::TTauri {
+            classical: phase == Phase::Protostar || age < disc,
+        })
+    } else {
+        (initial_mass < HERBIG_AE_BE_MAX_MASS).then_some(PeculiarClass::HerbigAeBe)
+    }
+}
+
+/// An S-type star's place on the M–MS–S–SC–C sequence of rising C/O (Scalo and Ross 1976, A&A
+/// 48, 219; Keenan and Boeshaar 1980, ApJS 43, 379, recalled).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SStarType {
+    /// An MS star, an M star with the first `ZrO` bands: C/O from [`C_TO_O_MS`].
+    Ms,
+    /// An S star, with `ZrO` bands as strong as the `TiO`: C/O from [`C_TO_O_S`].
+    S,
+    /// An SC star, between the S and carbon stars: C/O from [`C_TO_O_SC`] to 1.
+    Sc,
+}
+
+impl SStarType {
+    /// The letters the type is written with: `MS`, `S`, `SC`.
+    #[must_use]
+    pub const fn letters(self) -> &'static str {
+        match self {
+            Self::Ms => "MS",
+            Self::S => "S",
+            Self::Sc => "SC",
+        }
+    }
+}
+
+/// The surface C/O by number from which an AGB star is an MS star: 0.95 (plan 06, P06.T24.b,
+/// after Scalo and Ross 1976, recalled), below which it stays an M star.
+pub const C_TO_O_MS: f64 = 0.95;
+
+/// The C/O from which an AGB star is an S star: 0.96 (the lane's split of the plan's 0.95–1,
+/// after Keenan and Boeshaar's (1980) C/O indices, recalled; provisional).
+pub const C_TO_O_S: f64 = 0.96;
+
+/// The C/O from which an AGB star is an SC star: 0.99 (the lane's split, as [`C_TO_O_S`]).
+pub const C_TO_O_SC: f64 = 0.99;
+
+/// The C/O above which an AGB star is a carbon star: 1 (plan 06, P06.T24.b), where carbon left
+/// over from CO formation makes the C₂ and CN bands of a C-N star.
+pub const CARBON_STAR_C_TO_O: f64 = 1.0;
+
+/// The class a surface C/O of `c_to_o` gives a star of the thermally pulsing AGB (P06.T24.b):
+/// `None` below [`C_TO_O_MS`], MS, S and SC up to [`CARBON_STAR_C_TO_O`], and a carbon star above.
+#[must_use]
+pub(crate) fn chemical_class(c_to_o: f64) -> Option<PeculiarClass> {
+    if c_to_o > CARBON_STAR_C_TO_O {
+        Some(PeculiarClass::Carbon)
+    } else if c_to_o >= C_TO_O_SC {
+        Some(PeculiarClass::SType(SStarType::Sc))
+    } else if c_to_o >= C_TO_O_S {
+        Some(PeculiarClass::SType(SStarType::S))
+    } else if c_to_o >= C_TO_O_MS {
+        Some(PeculiarClass::SType(SStarType::Ms))
+    } else {
+        None
+    }
+}
+
+/// The initial masses, M☉, where third dredge-up works and hot bottom burning does not, at
+/// Z = 0.02: 1.5–4 (plan 06, P06.T24.b).
+///
+/// Below 1.5 M☉ dredge-up is too weak to make a carbon star of a solar-metallicity star, and from
+/// 4 M☉ hot bottom burning turns the dredged carbon to nitrogen (Karakas and Lattanzio 2014, PASA
+/// 31, e030, sections 3.4 and 3.5; Marigo et al. 2013, MNRAS 434, 488, recalled, not read at
+/// source in this build).
+const CARBON_STAR_WINDOW_SOLAR: (f64, f64) = (1.5, 4.0);
+
+/// How the window's edges move with Z: both as (Z ÷ 0.02)^0.1, 1.2–3.2 M☉ at Z = 0.002 and
+/// 0.95–2.5 M☉ at 0.0002, lower at low Z as dredge-up's onset and hot bottom burning's both are
+/// (the same sources; the lane's power, provisional).
+const CARBON_STAR_WINDOW_Z_SLOPE: f64 = 0.1;
+
+/// The initial masses, M☉, at which a star of `composition` can become an S or carbon star by
+/// third dredge-up (P06.T24.b): 1.5–4 M☉ at Z = 0.02, both edges as (Z ÷ 0.02)^0.1 with Z the
+/// metal fraction the formulae see.
+#[must_use]
+pub fn carbon_star_window(composition: &Composition) -> Range<SolarMasses> {
+    let scale = math::powf_positive(
+        composition.z_fit().value() / 0.02,
+        CARBON_STAR_WINDOW_Z_SLOPE,
+    );
+    let (low, high) = CARBON_STAR_WINDOW_SOLAR;
+    SolarMasses::new(low * scale)..SolarMasses::new(high * scale)
+}
+
+/// `n_min`, the last pulse number with no third dredge-up: 5, so that the first six pulses
+/// (numbers 0–5) dredge nothing (the lane's, after the few pulses detailed models take to start
+/// it, Karakas, Lattanzio and Pols 2002, PASA 19, 515, recalled, who start it by a core mass;
+/// provisional).
+pub const MIN_DREDGE_UP_PULSES: i64 = 5;
+
+/// (C/O)₀, the surface C/O by number on the thermally pulsing AGB before third dredge-up: 0.7 of
+/// the protosolar 0.457 (Lodders 2010, the element registry's), first dredge-up having taken some
+/// 30% of the surface ¹²C (Karakas and Lattanzio 2014, section 3.1, recalled).
+const FIRST_DREDGE_UP_CARBON_KEPT: f64 = 0.7;
+
+/// The mass fraction of ¹²C in the intershell that third dredge-up mixes into the envelope: 0.23
+/// (Herwig 2005, ARA&A 43, 435, section 3, recalled: about a quarter carbon to three quarters
+/// helium).
+const INTERSHELL_CARBON: f64 = 0.23;
+
+/// How third dredge-up raises an AGB star's surface C/O, pulse by pulse (P06.T24.b): C/O =
+/// (C/O)₀ + δ × max(0, n − `n_min`), with n the star's pulse number since its first (P06.T28.f).
+///
+/// - **(C/O)₀** is 0.7 of the protosolar C/O ([`FIRST_DREDGE_UP_CARBON_KEPT`]), the same at every
+///   \[Fe/H\]: carbon and oxygen scale together with the iron.
+/// - **δ** is the carbon one dredge-up adds over the envelope's oxygen,
+///   δ = `X_C` ΔM ÷ `A_C` ÷ (X (O/H) `M_env` ÷ `A_H`): ΔM the mass the dredge-up of T8.b returns
+///   per pulse, λ ÷ (1 − λ) of the core's growth over the phase, λ the track's own (HPT equation
+///   73), shared over the pulses after the `n_min` + 1 that dredge nothing, so that the track's
+///   dredged mass is conserved; `X_C` the intershell's carbon ([`INTERSHELL_CARBON`]); X =
+///   0.76 − 3Z, the envelope's hydrogen as HPT write it; (O/H) the protosolar oxygen
+///   (Lodders 2010) times Z ÷ 0.02, Z as the formulae see it; and `M_env` the envelope at the
+///   phase's start. It is one number a star, so the C/O of a fixed star is non-decreasing in n,
+///   and so in time. The oxygen the intershell brings up and the α-enhancement of metal-poor
+///   stars are left out, so a metal-poor star's C/O climbs far past observed values (a finding);
+///   only its class reads it.
+/// - **The window**: only a star whose initial mass lies in [`carbon_star_window`] dredges up;
+///   any other keeps (C/O)₀ and is no S or carbon star.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DredgeUp {
+    per_pulse: f64,
+}
+
+impl DredgeUp {
+    /// The dredge-up of a star of initial mass `initial_mass` and `composition` on `track`, or
+    /// `None` outside [`carbon_star_window`] or for a track with no thermally pulsing AGB with
+    /// pulses.
+    #[must_use]
+    pub(crate) fn of(
+        initial_mass: SolarMasses,
+        composition: &Composition,
+        track: &Track,
+    ) -> Option<Self> {
+        if !carbon_star_window(composition).contains(&initial_mass) {
+            return None;
+        }
+        let span = track.pulsing_agb()?;
+        let pulses = track.pulse_phase_at(span.end().value(), 0.0)?;
+        let lambda = track.pulsing_agb_dredge_up()?;
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a pulse number of a few, exact in f64"
+        )]
+        let dredging = pulses - (MIN_DREDGE_UP_PULSES + 1) as f64;
+        if !(dredging > 0.0 && dredging.is_finite()) {
+            return None;
+        }
+        let (start, end) = (track.state_at(span.start()), track.state_at(span.end()));
+        let growth = (end.core_mass().value() - start.core_mass().value()).max(0.0);
+        // A phase that ends part-way to its first dredging pulse's next gives that one pulse the
+        // whole of the dredged mass, never more.
+        let dredged_per_pulse = lambda / (1.0 - lambda) * growth / dredging.max(1.0);
+        let envelope = start.envelope_mass().value();
+        if envelope <= 0.0 {
+            return None;
+        }
+        let z = composition.z_fit().value();
+        let hydrogen = 0.76 - 3.0 * z;
+        let oxygen = Element::O.protosolar_abundance_per_hydrogen() * z / 0.02;
+        let per_pulse = INTERSHELL_CARBON * dredged_per_pulse
+            / Element::C.standard_atomic_weight_g_per_mol()
+            / (hydrogen * oxygen * envelope / Element::H.standard_atomic_weight_g_per_mol());
+        Some(Self { per_pulse })
+    }
+
+    /// (C/O)₀, the surface C/O before third dredge-up begins.
+    #[must_use]
+    pub(crate) fn initial_c_to_o() -> f64 {
+        FIRST_DREDGE_UP_CARBON_KEPT
+            * math::exp10(
+                (Element::C.protosolar_log_abundance() - Element::O.protosolar_log_abundance())
+                    .value(),
+            )
+    }
+
+    /// The surface C/O by number after pulse `pulse_number` (0 for the first):
+    /// (C/O)₀ + δ × max(0, n − `n_min`).
+    #[must_use]
+    pub(crate) fn c_to_o(self, pulse_number: i64) -> f64 {
+        let dredged = pulse_number.saturating_sub(MIN_DREDGE_UP_PULSES).max(0);
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a pulse count under 2⁵³, exact in f64"
+        )]
+        let dredged = dredged as f64;
+        math::mul_add(self.per_pulse, dredged, Self::initial_c_to_o())
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
     use super::*;
+    use crate::Seed;
+    use crate::events::tags as event_tags;
+    use crate::id::{BodyId, SystemId};
     use crate::stellar::classify::{ClassExtras, classify};
-    use crate::stellar::draws::StarDraws;
+    use crate::stellar::draws::{StarDraws, StarDrawsParts, UnitUniform};
+    use crate::stellar::events::thermal_pulse::{ThermalPulseClock, ThermalPulseModel};
+    use crate::stellar::rules::StellarRules;
     use crate::stellar::sse::{PhasePredicate, Track};
+    use crate::stellar::system::{Pulses, StarModel, StarStreams};
+    use crate::time::{Span, UniverseTime};
     use crate::units::{Dex, HeliumExcess, Years};
 
     fn composition(z: f64) -> Composition {
@@ -804,5 +1084,223 @@ mod tests {
             None
         );
         assert_eq!(WolfRayetType::new(WolfRayetSequence::Carbon, 5, true), None);
+    }
+
+    /// The streams the tests' stars open their pulses from.
+    fn streams() -> StarStreams {
+        let system = SystemId::from_raw(0x0200_0800_2000_0000).expect("a well-formed ID");
+        StarStreams::new(Seed::new(0x0600_0024_b000_5eed), BodyId::new(system, 0))
+    }
+
+    /// A star of `m` M☉ and Z `z`, 12 Gyr old at the epoch so that every star that pulses has
+    /// pulsed, under every 26 hold.
+    fn long_dead(m: f64, z: f64) -> StarModel {
+        StarModel::new_under(
+            SolarMasses::new(m),
+            composition(z),
+            StarDraws::median(),
+            Years::new(1.2e10),
+            StellarRules::every_26_hold(),
+        )
+        .expect("in range")
+    }
+
+    /// `n` times evenly through `clock`'s thermally pulsing AGB, in order, its first instant
+    /// included.
+    fn pulsing_times(clock: &ThermalPulseClock<'_>, n: u32) -> Vec<UniverseTime> {
+        let span = clock
+            .end()
+            .checked_since(clock.start())
+            .expect("a phase the clock holds")
+            .as_seconds_f64();
+        (0..n)
+            .map(|k| {
+                let offset = Span::from_seconds_f64(span * f64::from(k) / f64::from(n))
+                    .expect("inside the phase");
+                clock.start().checked_add(offset).expect("inside the clock")
+            })
+            .collect()
+    }
+
+    /// The class of `star` at `t`, its own pulses opened.
+    fn class_of(star: &StarModel, t: UniverseTime) -> Classification {
+        let state = star.state_at(t).expect("formed");
+        let extras = star.class_extras_at(&state, t, Pulses::Opened(streams()));
+        classify(&state, star.composition(), star.draws(), &extras)
+    }
+
+    /// The plan's test (P06.T24.b): carbon and S stars appear only inside the mass window and
+    /// only after `n_min` pulses, at 200 times through the thermally pulsing AGB of each star of
+    /// 1–5 M☉ at four metallicities; and they do appear, at solar Z and below.
+    #[test]
+    fn carbon_stars_appear_only_inside_the_window_and_after_the_first_pulses() {
+        let mut carbon = 0;
+        for z in [0.03, 0.02, 0.004, 0.0005] {
+            let window = carbon_star_window(&composition(z));
+            let mut found = 0;
+            for k in 0..17 {
+                let m = 1.0 + 0.25 * f64::from(k);
+                let star = long_dead(m, z);
+                let Some(clock) = ThermalPulseClock::of(&star) else {
+                    continue;
+                };
+                let series = streams().series(event_tags::STAR_THERMAL_PULSE);
+                let pulses = ThermalPulseModel::of(&star, &series).expect("a star that pulses");
+                for t in pulsing_times(&clock, 200) {
+                    let class = class_of(&star, t);
+                    if matches!(
+                        class.peculiar_class(),
+                        Some(PeculiarClass::Carbon | PeculiarClass::SType(_))
+                    ) {
+                        assert!(
+                            window.contains(&SolarMasses::new(m)),
+                            "{class} at {m} M☉, Z {z}"
+                        );
+                        let n = pulses.pulse_number_at(t).expect("on the phase");
+                        assert!(n > MIN_DREDGE_UP_PULSES, "{class} after {n} pulses");
+                        found += u32::from(class.peculiar_class() == Some(PeculiarClass::Carbon));
+                    }
+                }
+            }
+            if z <= 0.02 {
+                assert!(found > 0, "no carbon star at Z {z}");
+            }
+            carbon += found;
+        }
+        assert!(carbon > 100, "{carbon}");
+    }
+
+    /// The plan's test (P06.T24.b): the C/O of a fixed star never falls as it pulses, and its class
+    /// climbs M, MS, S, SC, C in that order, at 500 times through the phase.
+    #[test]
+    fn a_fixed_star_s_c_to_o_never_falls() {
+        let rank = |class: Option<PeculiarClass>| match class {
+            Some(PeculiarClass::SType(SStarType::Ms)) => 1,
+            Some(PeculiarClass::SType(SStarType::S)) => 2,
+            Some(PeculiarClass::SType(SStarType::Sc)) => 3,
+            Some(PeculiarClass::Carbon) => 4,
+            None => 0,
+            Some(
+                other @ (PeculiarClass::Be
+                | PeculiarClass::Ap
+                | PeculiarClass::Bp
+                | PeculiarClass::Am
+                | PeculiarClass::WolfRayet
+                | PeculiarClass::HotSubdwarf
+                | PeculiarClass::StrippedHeliumStar
+                | PeculiarClass::LuminousBlueVariable
+                | PeculiarClass::TTauri { .. }
+                | PeculiarClass::HerbigAeBe),
+            ) => panic!("an AGB star of class {other:?}"),
+        };
+        for (m, z) in [(2.0, 0.02), (3.0, 0.02), (3.5, 0.03), (1.5, 0.004)] {
+            let star = long_dead(m, z);
+            let track = star.track().expect("a star of over 0.1 M☉");
+            let dredge_up = DredgeUp::of(SolarMasses::new(m), star.composition(), track)
+                .expect("inside the window");
+            let clock = ThermalPulseClock::of(&star).expect("a star that pulses");
+            let series = streams().series(event_tags::STAR_THERMAL_PULSE);
+            let pulses = ThermalPulseModel::of(&star, &series).expect("a star that pulses");
+            let (mut c_to_o, mut class) = (0.0, 0);
+            for t in pulsing_times(&clock, 500) {
+                let now = dredge_up.c_to_o(pulses.pulse_number_at(t).expect("on the phase"));
+                let written = rank(class_of(&star, t).peculiar_class());
+                assert!(
+                    now >= c_to_o && written >= class,
+                    "{m} M☉, Z {z}: {now} after {c_to_o}"
+                );
+                (c_to_o, class) = (now, written);
+            }
+            assert_eq!(
+                class, 4,
+                "{m} M☉, Z {z} ends a carbon star, at C/O {c_to_o}"
+            );
+        }
+    }
+
+    /// The plan's test (P06.T24.b): a 1 M☉ star at 2 Myr is a T Tauri star, classical while its
+    /// disc lasts by its disc draw, a 4 M☉ one at 0.3 Myr a Herbig Ae/Be star; a 9 M☉ star at
+    /// 0.3 Myr, the Sun, and every star under the version's rules take neither.
+    #[test]
+    fn young_stars_are_t_tauri_or_herbig_ae_be_stars_by_mass() {
+        let young = |m: f64, age: f64, rank: f64, rules: StellarRules| {
+            let draws = StarDraws::from_parts(StarDrawsParts {
+                disc_lifetime: UnitUniform::new(rank).expect("in (0, 1)"),
+                ..StarDrawsParts::MEDIAN
+            });
+            let star = StarModel::new_under(
+                SolarMasses::new(m),
+                Composition::SOLAR,
+                draws,
+                Years::new(age),
+                rules,
+            )
+            .expect("in range");
+            class_of(&star, UniverseTime::EPOCH)
+        };
+        let full = StellarRules::every_26_hold();
+        for rank in [0.05, 0.5, 0.95] {
+            let disc = disc_lifetime(SolarMasses::new(1.0), UnitUniform::new(rank).unwrap());
+            let class = young(1.0, 2e6, rank, full);
+            assert_eq!(
+                class.peculiar_class(),
+                Some(PeculiarClass::TTauri {
+                    classical: disc.value() > 2.0
+                }),
+                "{class}, disc {disc:?}"
+            );
+        }
+        assert_eq!(
+            young(4.0, 3e5, 0.5, full).peculiar_class(),
+            Some(PeculiarClass::HerbigAeBe)
+        );
+        assert_eq!(young(9.0, 3e5, 0.5, full).peculiar_class(), None);
+        assert_eq!(young(1.0, 4.57e9, 0.5, full).peculiar_class(), None);
+        let held = StellarRules::of_version(crate::GENERATOR_VERSION);
+        for (m, age) in [(1.0, 2e6), (4.0, 3e5)] {
+            assert_eq!(young(m, age, 0.95, held).peculiar_class(), None);
+        }
+    }
+
+    /// The T Tauri stars' upper mass is the FU Orionis outbursts' disc phase's (P06.T28.d), and
+    /// the classes' C/O edges climb.
+    #[test]
+    fn the_young_and_chemical_edges_agree_with_their_neighbours() {
+        assert_eq!(
+            T_TAURI_MAX_MASS,
+            crate::stellar::events::fu_orionis::DISC_PHASE_MASS_LIMIT
+        );
+        const { assert!(C_TO_O_MS < C_TO_O_S && C_TO_O_S < C_TO_O_SC && C_TO_O_SC < CARBON_STAR_C_TO_O) };
+        assert_eq!(chemical_class(0.94), None);
+        assert_eq!(
+            chemical_class(1.0),
+            Some(PeculiarClass::SType(SStarType::Sc))
+        );
+        assert_eq!(chemical_class(1.01), Some(PeculiarClass::Carbon));
+        let initial = DredgeUp::initial_c_to_o();
+        let protosolar = crate::planetary::chem::solar_carbon_to_oxygen();
+        assert!((initial - 0.7 * protosolar).abs() < 1e-12, "{initial}");
+        let window = carbon_star_window(&Composition::SOLAR);
+        assert!((window.start.value() - 1.5).abs() < 1e-12);
+        assert!((window.end.value() - 4.0).abs() < 1e-12);
+    }
+
+    /// The C/O's bits for three fixed stars, pinned before any version reads them (the arithmetic
+    /// is output): its form, δ's quotient and the fused (C/O)₀ + δ × n, may not be rewritten but
+    /// as a change of output.
+    #[test]
+    fn the_c_to_o_s_bits_are_pinned() {
+        for (m, z, n, bits) in [
+            (2.0, 0.02, 12, 0x3ff0_6772_ad24_3c0e_u64),
+            (3.0, 0.02, 30, 0x3ff9_72b7_b815_5b22),
+            (1.5, 0.004, 9, 0x4016_3ee0_cd40_75a3),
+        ] {
+            let star = long_dead(m, z);
+            let track = star.track().expect("a star of over 0.1 M☉");
+            let c_to_o = DredgeUp::of(SolarMasses::new(m), star.composition(), track)
+                .expect("inside the window")
+                .c_to_o(n);
+            assert_same_bits(c_to_o, f64::from_bits(bits));
+        }
     }
 }

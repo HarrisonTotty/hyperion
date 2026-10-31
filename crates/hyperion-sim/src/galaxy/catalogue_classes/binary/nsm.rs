@@ -364,6 +364,7 @@ impl NsmEntry {
             self.pair.orbit,
         );
         SystemStars::of_marked_pair(
+            galaxy.seed(),
             self.record,
             hierarchy,
             stars.collect(),
