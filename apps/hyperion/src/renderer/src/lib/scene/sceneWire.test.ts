@@ -67,7 +67,7 @@ function pushOf(fields: Readonly<Record<string, unknown>>): SceneNotificationDto
   const message = decodeServerMessage(
     JSON.stringify({ type: "notification", subscription: 1, body: { topic: "scene", ...fields } }),
   );
-  if (message.type !== "notification") {
+  if (message.type !== "notification" || message.body.topic !== "scene") {
     throw new Error("a scene push decodes as one");
   }
   const { topic: _topic, ...push } = message.body;

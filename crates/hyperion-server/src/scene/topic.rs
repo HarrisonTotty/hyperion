@@ -39,7 +39,9 @@ use crate::convert::surface_revision;
 use crate::knowledge::surveys::RaisedRevisions;
 use crate::limits::{CRAFT_PUSH_INTERVAL, SCENE_HEARTBEAT};
 use crate::requests::{bodies_of, openable_universe, request_error};
-use crate::subscriptions::{PendingPush, Pusher, ScenePush, SubscriptionCommand};
+use crate::subscriptions::{
+    PendingPush, Pusher, ScenePush, SubscriptionCommand, not_of_this_topic,
+};
 use crate::universe::UniverseId;
 
 /// Where a scene's computations run and what they read: the universe, its galaxy, and the
@@ -427,6 +429,12 @@ impl Topic {
                 let _ = answer.send(checked);
                 Ok(())
             }
+            other @ (SubscriptionCommand::AlertsObserver { .. }
+            | SubscriptionCommand::AlertsAcknowledge { .. }) => {
+                let refusal = not_of_this_topic(other.kind(), "scene");
+                other.refuse(refusal);
+                Ok(())
+            }
         }
     }
 
@@ -776,7 +784,9 @@ mod tests {
             panic!("expected `subscribed`, got {message:?}");
         };
         assert_eq!(answered, RequestId(id));
-        let SubscriptionState::Scene(opened) = subscribed.state;
+        let SubscriptionState::Scene(opened) = subscribed.state else {
+            panic!("a scene subscription opens with the scene's state");
+        };
         let seen: std::collections::BTreeSet<_> = opened
             .system
             .expect("the stand-in is in the system")

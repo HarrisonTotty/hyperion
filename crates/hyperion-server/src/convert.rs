@@ -12,6 +12,7 @@
 //! is in [`motion`] (P07.T10.c). Plan 09's features' wire forms are in [`features`], and its four
 //! feature requests and their answers in [`feature_answers`] (P09.T40).
 
+mod alerts;
 mod events;
 mod extinction;
 mod feature_answers;
@@ -61,6 +62,9 @@ use hyperion_sim::units::{
 };
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
+pub(crate) use self::alerts::{
+    AlertsAsked, acknowledge_refusal, contact_dto, observer, open_contacts_refusal,
+};
 pub(crate) use self::events::{EventsRequest, body_events};
 pub(crate) use self::extinction::{
     ExtinctionMapQuery, ExtinctionQuery, LineEnd, extinction_map, extinction_result,

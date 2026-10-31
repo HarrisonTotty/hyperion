@@ -4,12 +4,12 @@
 use std::fmt;
 use std::num::NonZeroU32;
 
-use hyperion_sim::alerts::AlertBand;
+use hyperion_sim::alerts::{AlertBand, Detection, DetectionPhase, TransientKind};
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::id::{EventId, SystemId};
 use hyperion_sim::observe::{Bearing, Observer, Retardation, bearing, extrapolate_to_present};
 use hyperion_sim::time::{Span, UniverseTime};
-use hyperion_sim::units::WattsPerSquareMetre;
+use hyperion_sim::units::{LightYears, WattsPerSquareMetre};
 
 /// A contact's identifier on the wire: opaque and sequential per universe, from 1, so that an
 /// unresolved contact cannot leak its host through its identifier (Design note 10).
@@ -58,10 +58,12 @@ pub enum KnowledgeLevel {
 }
 
 /// One reception of a contact's light: where and when the observer received it, when it left, the
-/// bearing it came from, and its flux in one band (Design note 10).
+/// bearing it came from, and its flux in one band (Design note 10), with what kind of event it is
+/// and where the event stood when its light was first counted (P12.T9.a).
 ///
-/// It keeps the apparent position (where the light left the host) and the position extrapolated
-/// to the observer's present, which only a resolved view shows.
+/// It keeps the apparent position (where the light left the host), the position extrapolated to
+/// the observer's present, and the stated bound on the apparent position's error, which only a
+/// resolved view shows.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Sighting {
     observer: GalacticPosition,
@@ -73,27 +75,33 @@ pub struct Sighting {
     flux: WattsPerSquareMetre,
     band: AlertBand,
     level: KnowledgeLevel,
+    kind: TransientKind,
+    phase: DetectionPhase,
+    curvature_error: LightYears,
 }
 
 impl Sighting {
-    /// The sighting of a host whose light `retardation` describes, received by `observer` with
-    /// `flux` in `band`; `level` is what this one sighting supports, [`KnowledgeLevel::Resolved`]
-    /// when the flux reaches the sensor's resolve limit.
+    /// The sighting of `detection`'s event, whose host's light `retardation` describes, received
+    /// by `observer` with `flux` in the detection's band; `level` is what this one sighting
+    /// supports, [`KnowledgeLevel::Resolved`] when the flux reaches the sensor's resolve limit, and
+    /// `curvature_error` the stated bound on the host's apparent position (Design note 3).
     ///
-    /// The present position is the observed one extrapolated to the observer's time
-    /// ([`extrapolate_to_present`]), which for a drifting host lands on the star.
+    /// The kind, the phase and the band are the detection's. The present position is the observed
+    /// one extrapolated to the observer's time ([`extrapolate_to_present`]), which for a drifting
+    /// host lands on the star.
     ///
     /// # Panics
     ///
-    /// - If `flux` is negative or not finite, which no flux the sim computes is.
+    /// - If `flux` or `curvature_error` is negative or not finite, which none the sim computes is.
     /// - In debug builds, if `retardation` is not for `observer`'s time.
     #[must_use]
     pub fn new(
         observer: &Observer,
         retardation: &Retardation,
-        band: AlertBand,
+        detection: &Detection,
         flux: WattsPerSquareMetre,
         level: KnowledgeLevel,
+        curvature_error: LightYears,
     ) -> Self {
         debug_assert_eq!(
             retardation.observed(),
@@ -107,8 +115,11 @@ impl Sighting {
             apparent_position: *retardation.apparent_position(),
             present_position: extrapolate_to_present(retardation, observer.time()),
             flux,
-            band,
+            band: detection.band(),
             level,
+            kind: detection.kind(),
+            phase: detection.phase(),
+            curvature_error,
         })
     }
 
@@ -117,13 +128,18 @@ impl Sighting {
     ///
     /// # Panics
     ///
-    /// If the flux is negative or not finite.
+    /// If the flux or the curvature error is negative or not finite.
     #[must_use]
     pub(crate) fn from_parts(parts: SightingParts) -> Self {
         assert!(
             parts.flux.value().is_finite() && parts.flux.value() >= 0.0,
             "a sighting's flux must be finite and non-negative, not {} W m⁻²",
             parts.flux.value()
+        );
+        assert!(
+            parts.curvature_error.value().is_finite() && parts.curvature_error.value() >= 0.0,
+            "a sighting's curvature error must be finite and non-negative, not {} ly",
+            parts.curvature_error.value()
         );
         Self {
             observer: parts.observer,
@@ -135,6 +151,9 @@ impl Sighting {
             flux: parts.flux,
             band: parts.band,
             level: parts.level,
+            kind: parts.kind,
+            phase: parts.phase,
+            curvature_error: parts.curvature_error,
         }
     }
 
@@ -150,6 +169,9 @@ impl Sighting {
             flux: self.flux,
             band: self.band,
             level: self.level,
+            kind: self.kind,
+            phase: self.phase,
+            curvature_error: self.curvature_error,
         }
     }
 
@@ -195,6 +217,25 @@ impl Sighting {
     pub const fn level(&self) -> KnowledgeLevel {
         self.level
     }
+
+    /// What kind of event was seen.
+    #[must_use]
+    pub const fn kind(&self) -> TransientKind {
+        self.kind
+    }
+
+    /// Where the event stood when its light was first counted.
+    #[must_use]
+    pub const fn phase(&self) -> DetectionPhase {
+        self.phase
+    }
+
+    /// The stated bound on the apparent position's error from the neglected curvature of the
+    /// host's orbit, ly at the host (Design note 3).
+    #[must_use]
+    pub const fn curvature_error(&self) -> LightYears {
+        self.curvature_error
+    }
 }
 
 /// A [`Sighting`]'s stored fields, for the store and its file.
@@ -208,6 +249,9 @@ pub(crate) struct SightingParts {
     pub(crate) flux: WattsPerSquareMetre,
     pub(crate) band: AlertBand,
     pub(crate) level: KnowledgeLevel,
+    pub(crate) kind: TransientKind,
+    pub(crate) phase: DetectionPhase,
+    pub(crate) curvature_error: LightYears,
 }
 
 /// Everything the server knows of one contact, keyed by its event inside the server: the event,
@@ -313,6 +357,8 @@ impl ContactRecord {
             bearing: latest.bearing(),
             flux: latest.flux(),
             band: latest.band(),
+            kind: latest.kind(),
+            phase: latest.phase(),
             acknowledged: self.acknowledged,
             sightings: self.sightings.len(),
         };
@@ -327,6 +373,7 @@ impl ContactRecord {
                     .expect("a light age inside the clock's range fits a span"),
                 apparent_position: latest.apparent_position,
                 present_position: latest.present_position,
+                curvature_error: latest.curvature_error,
             }),
         }
     }
@@ -372,6 +419,8 @@ pub struct BearingContact {
     bearing: Option<Bearing>,
     flux: WattsPerSquareMetre,
     band: AlertBand,
+    kind: TransientKind,
+    phase: DetectionPhase,
     acknowledged: Acknowledgement,
     sightings: usize,
 }
@@ -424,6 +473,19 @@ impl BearingContact {
     pub const fn sightings(&self) -> usize {
         self.sightings
     }
+
+    /// What kind of event the latest sighting saw, which only the server knows of a bearing: the
+    /// wire shows a bearing's only where its band alone names it (P12.T9.a).
+    #[must_use]
+    pub const fn kind(&self) -> TransientKind {
+        self.kind
+    }
+
+    /// Where the event stood when the latest sighting's light was first counted.
+    #[must_use]
+    pub const fn phase(&self) -> DetectionPhase {
+        self.phase
+    }
 }
 
 /// A resolved contact: what a bearing shows, and the host with its light's age and positions.
@@ -434,6 +496,7 @@ pub struct ResolvedContact {
     light_age: Span,
     apparent_position: GalacticPosition,
     present_position: GalacticPosition,
+    curvature_error: LightYears,
 }
 
 impl ResolvedContact {
@@ -466,5 +529,12 @@ impl ResolvedContact {
     #[must_use]
     pub const fn present_position(&self) -> &GalacticPosition {
         &self.present_position
+    }
+
+    /// The latest sighting's stated bound on the apparent position's error, ly at the host
+    /// (Design note 3).
+    #[must_use]
+    pub const fn curvature_error(&self) -> LightYears {
+        self.curvature_error
     }
 }

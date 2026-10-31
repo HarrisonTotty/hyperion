@@ -14,6 +14,10 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::alerts::{
+    AlertsAcknowledgeRequest, AlertsNotification, AlertsObserverRequest, AlertsSubscribeRequest,
+    AlertsSubscribed,
+};
 use crate::features::{
     BlackHoleState, BlackHoleStateRequest, FeatureDetail, FeatureDetailRequest, FeaturesInRange,
     FeaturesInRangeRequest, GalaxyFeatures, GalaxyFeaturesRequest,
@@ -153,13 +157,15 @@ pub enum ServerMessage {
 
 /// What a subscription watches, tagged by `topic`: the topic's own request fields.
 ///
-/// Plan 12's P12.T9 adds `alerts`.
+/// Plan 12's P12.T9.a adds `alerts`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "topic", rename_all = "snake_case")]
 #[ts(export)]
 pub enum SubscriptionTopic {
     /// A universe's scene (rendering plan R03).
     Scene(SceneSubscribeRequest),
+    /// A sensor's alerts at an observer (plan 12, P12.T9.a).
+    Alerts(AlertsSubscribeRequest),
 }
 
 /// A subscription's whole state when it opens, tagged by `topic`, the same value as its request's
@@ -167,9 +173,16 @@ pub enum SubscriptionTopic {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "topic", rename_all = "snake_case")]
 #[ts(export)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a state is made once per subscription and sent boxed in its answer \
+              (`ResponseBody::Subscribe`), so the scene's size costs the alerts nothing"
+)]
 pub enum SubscriptionState {
     /// The scene.
     Scene(SceneStateDto),
+    /// The alerts.
+    Alerts(AlertsSubscribed),
 }
 
 /// A notification's body, tagged by `topic`: what changed since the last push.
@@ -179,6 +192,8 @@ pub enum SubscriptionState {
 pub enum NotificationBody {
     /// The scene.
     Scene(SceneNotificationDto),
+    /// The alerts.
+    Alerts(AlertsNotification),
 }
 
 /// Opens a subscription (`subscribe`), answered by [`Subscribed`] with the topic's whole state;
@@ -324,6 +339,10 @@ pub enum RequestBody {
     FeatureDetail(FeatureDetailRequest),
     /// The central black hole's state at a time (plan 09).
     BlackHoleState(BlackHoleStateRequest),
+    /// Move an alerts subscription's observer (plan 12, P12.T9.a).
+    AlertsObserver(AlertsObserverRequest),
+    /// Acknowledge a contact on an alerts subscription (plan 12, P12.T9.a).
+    AlertsAcknowledge(AlertsAcknowledgeRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -385,6 +404,10 @@ pub enum ResponseBody {
     FeatureDetail(Box<FeatureDetail>),
     /// The black hole's state.
     BlackHoleState(BlackHoleState),
+    /// The observer moved.
+    AlertsObserver,
+    /// The contact acknowledged.
+    AlertsAcknowledge,
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -417,6 +440,8 @@ pub const REQUEST_KINDS: &[&str] = &[
     "galaxy_features",
     "feature_detail",
     "black_hole_state",
+    "alerts_observer",
+    "alerts_acknowledge",
 ];
 
 #[cfg(test)]
@@ -712,7 +737,20 @@ mod tests {
                     time: UniverseTime::default(),
                 }))
             }
-            Some(RequestBody::BlackHoleState(_)) => None,
+            Some(RequestBody::BlackHoleState(_)) => {
+                Some(RequestBody::AlertsObserver(AlertsObserverRequest {
+                    subscription: 2,
+                    observer: GalacticPosition::default(),
+                    time: UniverseTime::default(),
+                }))
+            }
+            Some(RequestBody::AlertsObserver(_)) => {
+                Some(RequestBody::AlertsAcknowledge(AlertsAcknowledgeRequest {
+                    subscription: 2,
+                    contact: 1,
+                }))
+            }
+            Some(RequestBody::AlertsAcknowledge(_)) => None,
         }
     }
 
@@ -925,7 +963,9 @@ mod tests {
                     disruptions: Vec::new(),
                 }))
             }
-            Some(ResponseBody::BlackHoleState(_)) => None,
+            Some(ResponseBody::BlackHoleState(_)) => Some(ResponseBody::AlertsObserver),
+            Some(ResponseBody::AlertsObserver) => Some(ResponseBody::AlertsAcknowledge),
+            Some(ResponseBody::AlertsAcknowledge) => None,
         }
     }
 
@@ -1221,6 +1261,8 @@ mod tests {
                 "galaxy_features",
                 "feature_detail",
                 "black_hole_state",
+                "alerts_observer",
+                "alerts_acknowledge",
             ]
         );
     }

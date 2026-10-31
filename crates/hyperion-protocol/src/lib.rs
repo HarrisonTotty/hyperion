@@ -36,6 +36,7 @@
 //! bytes, and the count and length checks catch the server's own bugs. The frames are not a type
 //! here, since this crate holds JSON wire types.
 
+mod alerts;
 mod bulk;
 mod envelope;
 mod features;
@@ -53,6 +54,12 @@ mod surface;
 pub(crate) mod testing;
 mod universe;
 
+pub use alerts::{
+    AlertBandDto, AlertsAcknowledgeRequest, AlertsNotification, AlertsObserverRequest,
+    AlertsSubscribeRequest, AlertsSubscribed, BandLimitsDto, BearingContactDto, BearingDto,
+    BearingFrameDto, ClassCensusDto, ClassCensusStatusDto, ContactDto, DetectionPhaseDto,
+    ResolvedContactDto, SensorDto, TransientKindDto,
+};
 pub use bulk::BulkManifestDto;
 pub use envelope::{
     ClientMessage, ErrorCode, NotificationBody, REQUEST_KINDS, RequestBody, RequestError,

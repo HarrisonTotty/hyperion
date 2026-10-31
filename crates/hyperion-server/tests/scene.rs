@@ -170,6 +170,7 @@ async fn a_new_ship_and_rate_are_pushed_at_once_to_every_subscription_of_the_uni
         let change = loop {
             let (on, notification) = match seen.pop() {
                 Some((on, NotificationBody::Scene(notification))) => (on, notification),
+                Some((_, other)) => panic!("a scene notification: {other:?}"),
                 None => next_scene(client).await,
             };
             assert_eq!(on, subscription);
@@ -198,6 +199,7 @@ async fn moving_the_stand_in_out_of_the_system_pushes_no_system(server: &TestSer
     let departure = loop {
         let notification = match seen.pop() {
             Some((_, NotificationBody::Scene(notification))) => notification,
+            Some((_, other)) => panic!("a scene notification: {other:?}"),
             None => next_scene(&mut client).await.1,
         };
         if notification.arrival.is_some() {

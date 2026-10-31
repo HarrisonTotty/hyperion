@@ -1,6 +1,6 @@
 import {
   decodeServerMessage,
-  type NotificationBody,
+  type NotificationOf,
   type SceneStateDto,
   type ServerMessage,
   type UniverseIdHex,
@@ -49,7 +49,7 @@ function stateInSystem(seconds = 3_000): SceneStateDto {
 }
 
 /** A heartbeat numbered `sequence`, at `seconds`. */
-function heartbeat(sequence: number, seconds: number): NotificationBody {
+function heartbeat(sequence: number, seconds: number): NotificationOf<"scene"> {
   return { topic: "scene", sequence, clock: sceneClock(seconds, RATE), bodies: [] };
 }
 
@@ -92,7 +92,7 @@ function ended(subscription: number): ServerMessage {
 }
 
 /** A push of the fixture's craft, numbered `push`, stating its time `push` seconds on. */
-function craftPush(push: number): NotificationBody {
+function craftPush(push: number): NotificationOf<"scene"> {
   const craft = craftFixture();
   const time = sceneClock(3_000 + push, RATE).time;
   return {
@@ -790,7 +790,7 @@ describe("useScene", () => {
     const { result, socket } = renderScene();
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await opens(socket, 1);
-    const unusable: NotificationBody = {
+    const unusable: NotificationOf<"scene"> = {
       ...heartbeat(1, 3_100),
       clock: { ...sceneClock(3_100, RATE), time_rate: 7 },
     };

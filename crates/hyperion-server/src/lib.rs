@@ -159,6 +159,9 @@ pub(crate) struct AppState {
     /// Each body's coarse surface field, computed once on the pool and kept in the configured byte
     /// budget (rendering plan R09, R09.T17; Design note 19).
     pub(crate) surface: SurfaceService,
+    /// Each universe's contacts, opened by its first alerts subscription and kept (plan 12,
+    /// P12.T9.a).
+    pub(crate) contacts: alerts::UniverseContacts,
 }
 
 impl Server {
@@ -277,6 +280,7 @@ impl Server {
                 sky_tables,
                 sky_cells,
                 surface,
+                contacts: alerts::UniverseContacts::new(),
             }),
         })
     }

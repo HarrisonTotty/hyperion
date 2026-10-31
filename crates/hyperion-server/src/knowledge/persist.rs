@@ -23,11 +23,11 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use hyperion_sim::alerts::AlertBand;
+use hyperion_sim::alerts::{AlertBand, DetectionPhase, TransientKind};
 use hyperion_sim::coords::{GalacticPosition, LyCell};
 use hyperion_sim::galaxy::gas::ccm::Band;
 use hyperion_sim::id::EventId;
-use hyperion_sim::units::WattsPerSquareMetre;
+use hyperion_sim::units::{LightYears, WattsPerSquareMetre};
 use serde::{Deserialize, Serialize};
 
 use super::jsonl::{self, KnowledgeLog, LogName, TimeLine};
@@ -219,6 +219,10 @@ enum EntryLine {
         flux_w_m2: f64,
         band: BandLine,
         level: LevelLine,
+        /// What kind of event was seen, and where it stood (P12.T9.a).
+        transient: TransientLine,
+        phase: PhaseLine,
+        curvature_error_ly: f64,
     },
     Acknowledged {
         contact: u32,
@@ -257,6 +261,36 @@ enum LevelLine {
     Resolved,
 }
 
+/// A [`TransientKind`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TransientLine {
+    CoreCollapse,
+    TypeIa,
+    LuminousRedNova,
+    Kilonova,
+    Nova,
+    DwarfNova,
+    XrayTransient,
+    XrayBurst,
+    BeXOutburst,
+    GiantEruption,
+    TidalDisruption,
+    CentralFlare,
+    Flare,
+    Glitch,
+    MagnetarBurst,
+    FuOrionisOutburst,
+}
+
+/// A [`DetectionPhase`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PhaseLine {
+    Onset,
+    InProgress,
+}
+
 impl From<&KnowledgeEntry> for EntryLine {
     fn from(entry: &KnowledgeEntry) -> Self {
         match entry {
@@ -277,6 +311,9 @@ impl From<&KnowledgeEntry> for EntryLine {
                     flux_w_m2: parts.flux.value(),
                     band: BandLine::from(parts.band),
                     level: LevelLine::from(parts.level),
+                    transient: TransientLine::from(parts.kind),
+                    phase: PhaseLine::from(parts.phase),
+                    curvature_error_ly: parts.curvature_error.value(),
                 }
             }
             KnowledgeEntry::Acknowledged { contact } => Self::Acknowledged {
@@ -304,9 +341,15 @@ impl TryFrom<EntryLine> for KnowledgeEntry {
                 flux_w_m2,
                 band,
                 level,
+                transient,
+                phase,
+                curvature_error_ly,
             } => {
                 if !(flux_w_m2.is_finite() && flux_w_m2 >= 0.0) {
                     return Err("flux_w_m2");
+                }
+                if !(curvature_error_ly.is_finite() && curvature_error_ly >= 0.0) {
+                    return Err("curvature_error_ly");
                 }
                 let sighting = Sighting::from_parts(SightingParts {
                     observer: observer.to_position().ok_or("observer")?,
@@ -319,6 +362,9 @@ impl TryFrom<EntryLine> for KnowledgeEntry {
                     flux: WattsPerSquareMetre::new(flux_w_m2),
                     band: AlertBand::from(band),
                     level: KnowledgeLevel::from(level),
+                    kind: TransientKind::from(transient),
+                    phase: DetectionPhase::from(phase),
+                    curvature_error: LightYears::new(curvature_error_ly),
                 });
                 Ok(Self::Sighting {
                     contact: contact_of(contact)?,
@@ -402,6 +448,70 @@ impl From<LevelLine> for KnowledgeLevel {
         match level {
             LevelLine::Bearing => Self::Bearing,
             LevelLine::Resolved => Self::Resolved,
+        }
+    }
+}
+
+impl From<TransientKind> for TransientLine {
+    fn from(kind: TransientKind) -> Self {
+        match kind {
+            TransientKind::CoreCollapse => Self::CoreCollapse,
+            TransientKind::TypeIa => Self::TypeIa,
+            TransientKind::LuminousRedNova => Self::LuminousRedNova,
+            TransientKind::Kilonova => Self::Kilonova,
+            TransientKind::Nova => Self::Nova,
+            TransientKind::DwarfNova => Self::DwarfNova,
+            TransientKind::XrayTransient => Self::XrayTransient,
+            TransientKind::XrayBurst => Self::XrayBurst,
+            TransientKind::BeXOutburst => Self::BeXOutburst,
+            TransientKind::GiantEruption => Self::GiantEruption,
+            TransientKind::TidalDisruption => Self::TidalDisruption,
+            TransientKind::CentralFlare => Self::CentralFlare,
+            TransientKind::Flare => Self::Flare,
+            TransientKind::Glitch => Self::Glitch,
+            TransientKind::MagnetarBurst => Self::MagnetarBurst,
+            TransientKind::FuOrionisOutburst => Self::FuOrionisOutburst,
+        }
+    }
+}
+
+impl From<TransientLine> for TransientKind {
+    fn from(kind: TransientLine) -> Self {
+        match kind {
+            TransientLine::CoreCollapse => Self::CoreCollapse,
+            TransientLine::TypeIa => Self::TypeIa,
+            TransientLine::LuminousRedNova => Self::LuminousRedNova,
+            TransientLine::Kilonova => Self::Kilonova,
+            TransientLine::Nova => Self::Nova,
+            TransientLine::DwarfNova => Self::DwarfNova,
+            TransientLine::XrayTransient => Self::XrayTransient,
+            TransientLine::XrayBurst => Self::XrayBurst,
+            TransientLine::BeXOutburst => Self::BeXOutburst,
+            TransientLine::GiantEruption => Self::GiantEruption,
+            TransientLine::TidalDisruption => Self::TidalDisruption,
+            TransientLine::CentralFlare => Self::CentralFlare,
+            TransientLine::Flare => Self::Flare,
+            TransientLine::Glitch => Self::Glitch,
+            TransientLine::MagnetarBurst => Self::MagnetarBurst,
+            TransientLine::FuOrionisOutburst => Self::FuOrionisOutburst,
+        }
+    }
+}
+
+impl From<DetectionPhase> for PhaseLine {
+    fn from(phase: DetectionPhase) -> Self {
+        match phase {
+            DetectionPhase::Onset => Self::Onset,
+            DetectionPhase::InProgress => Self::InProgress,
+        }
+    }
+}
+
+impl From<PhaseLine> for DetectionPhase {
+    fn from(phase: PhaseLine) -> Self {
+        match phase {
+            PhaseLine::Onset => Self::Onset,
+            PhaseLine::InProgress => Self::InProgress,
         }
     }
 }
@@ -530,7 +640,7 @@ mod tests {
     use hyperion_sim::time::UniverseTime;
 
     use super::*;
-    use crate::knowledge::testing::{event_of, host, other_host, third_host};
+    use crate::knowledge::testing::{event_of, flare_in, host, other_host, third_host};
     use crate::knowledge::{Acknowledgement, ContactView};
     use crate::universe::SavedUniverse;
 
@@ -578,12 +688,13 @@ mod tests {
         Sighting::new(
             &observer,
             &retarded(&observer, &star),
-            band,
+            &flare_in(band),
             // A flux with every digit in use, so that the round trip is tested to the bit.
             WattsPerSquareMetre::new(
                 1.234_567_890_123_456_7e-15 * f64::from(u32::try_from(years).unwrap() + 1),
             ),
             level,
+            LightYears::new(0.123_456_789_012_345_67),
         )
     }
 

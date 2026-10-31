@@ -250,11 +250,11 @@ mod tests {
     use hyperion_sim::galaxy::gas::ccm::Band;
     use hyperion_sim::observe::{Drift, Observer, retarded};
     use hyperion_sim::time::UniverseTime;
-    use hyperion_sim::units::WattsPerSquareMetre;
+    use hyperion_sim::units::{LightYears, WattsPerSquareMetre};
 
     use super::*;
     use crate::knowledge::record::{Acknowledgement, KnowledgeLevel};
-    use crate::knowledge::testing::{event_of, host, other_host};
+    use crate::knowledge::testing::{event_of, flare_in, host, other_host};
 
     /// A sighting of the host from `from` light-years, at `years`, with `flux` in V.
     fn sighting(from: [f64; 3], years: i64, flux: f64, level: KnowledgeLevel) -> Sighting {
@@ -270,9 +270,10 @@ mod tests {
         Sighting::new(
             &observer,
             &retarded(&observer, &star),
-            AlertBand::Photometric(Band::V),
+            &flare_in(AlertBand::Photometric(Band::V)),
             WattsPerSquareMetre::new(flux),
             level,
+            LightYears::ZERO,
         )
     }
 

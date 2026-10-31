@@ -182,6 +182,7 @@ fn pick<'a, T>(lcg: &mut Lcg, items: &'a [T]) -> &'a T {
 fn arrival_of((_, body): &Notification) -> Option<&SceneArrivalDto> {
     match body {
         NotificationBody::Scene(notification) => notification.arrival.as_ref(),
+        NotificationBody::Alerts(_) => None,
     }
 }
 

@@ -130,6 +130,9 @@ pub async fn subscribe(
     match answer {
         Ok(ResponseBody::Subscribe(subscribed)) => match subscribed.state {
             SubscriptionState::Scene(state) => (subscribed.subscription, state),
+            other @ SubscriptionState::Alerts(_) => {
+                panic!("a scene subscription's state: {other:?}")
+            }
         },
         other => panic!("expected the scene's state, got {other:?}"),
     }
@@ -139,6 +142,7 @@ pub async fn subscribe(
 pub async fn next_scene(client: &mut TestClient) -> (u32, SceneNotificationDto) {
     match client.next_notification().await {
         (subscription, NotificationBody::Scene(notification)) => (subscription, notification),
+        (_, other @ NotificationBody::Alerts(_)) => panic!("a scene notification: {other:?}"),
     }
 }
 

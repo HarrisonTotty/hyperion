@@ -8,10 +8,18 @@
 //! [`AlertSchedule::advance`] is the pure core: from one observer to the next it returns the
 //! pushes that fell due and, when the schedule needs one, the scan to run ([`Rescan`]).
 //!
-//! Only that core is built (P12.T8.a). The scans on the CPU pool and their cache are P12.T8.b's,
-//! the pushes into Knowledge and the notifications P12.T8.c's, and the wire P12.T9's.
+//! The wire's `alerts` topic opens a subscription and answers `alerts_observer` and
+//! `alerts_acknowledge` (P12.T9.a), and each universe's contacts are opened once and shared
+//! ([`UniverseContacts`]). The scans on the CPU pool and their cache are P12.T8.b's, and the pushes
+//! into Knowledge and their notifications P12.T8.c's: until then a subscription's census is empty
+//! and an advance pushes nothing.
 
+mod contacts;
 mod schedule;
+mod topic;
+
+pub(crate) use contacts::UniverseContacts;
+pub(crate) use topic::open;
 
 pub use schedule::{
     ALERT_LOOKAHEAD, Advance, AlertSchedule, CROSSING_RESOLUTION, Crossing, GLITCH_CLEAR_AFTER,

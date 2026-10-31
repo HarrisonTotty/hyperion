@@ -686,6 +686,14 @@ observer's time past an arrival and receives one contact at `bearing`, then move
 and receives the same `contact` at `resolved` with the pinned host; a JSON-level assertion that no
 `bearing` contact contains a key named `host`. Acceptance: `just ci`.
 
+- **P12.T9.a The wire** (split on 2026-10-31, a lean). Everything above but the integration test:
+  the topic, its state and notification, `alerts_observer`, `alerts_acknowledge`, `ContactDto`,
+  the refusals and the bindings. Without T8.b's scans the census is empty. Tests: the wire forms,
+  the JSON assertion, and a socket test of a subscription's contacts, its observer, an
+  acknowledgement and each refusal. Acceptance: `just ci`.
+- **P12.T9.b The integration test** (split on 2026-10-31). The pinned nova's bearing, then its host
+  resolved, as above. It waits on T8.b's scans and P11.T9.b's novae.
+
 ### P12.T10 UX guide edits
 
 Edit `docs/frontend/ux-guidelines.md`, on top of plan 05's edits (which add `yr`, E notation, the
@@ -2855,3 +2863,20 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     `PerEvent` for the tails) and `class_longest_rise(class)`: core collapses 78 days, Type Ia 16,
     flares 4,115 s, outbursts 25 years, eruptions 5 years, the centre's flares 4,088 s, magnetars
     and glitches none.
+- **P12.T9.a as built (lane `p12-t8a`, 2026-10-31, at `GENERATOR_VERSION` 24; `PROTOCOL_VERSION`
+  3, additive).** File `crates/hyperion-protocol/src/alerts.rs`; server
+  `alerts/{contacts,topic}.rs` and `convert/alerts.rs`.
+  - _Wire._ `ContactDto` is tagged by `level`: `Bearing(BearingContactDto)` has no host field,
+    and `Resolved(ResolvedContactDto)` flattens a bearing's fields beside the host's.
+    `AlertsNotification` has a `sequence`, as the scene's has. A bearing's `kind` is `unclassified`
+    unless it is a glitch, the one kind its band names (lean, 2026-10-31). `ClassCensusDto` has
+    `reach_ly` and `expected_hosts` beside `class` and `status`.
+  - _For T8.b and T8.c._ `Sighting::new` takes the `&Detection` it sighted, its flux and level,
+    and the stated curvature error: the kind, phase and band are the detection's, and the error is
+    stored for the resolved view. The contacts file's sighting line gains `transient`, `phase` and
+    `curvature_error_ly`, all required. No file was written before, since nothing recorded
+    sightings. `AppState::contacts` (`UniverseContacts::of`) holds each universe's one
+    `PersistedKnowledge`. The topic answers `alerts_observer` by `Subscription::advance` and
+    drops what it returns: T8.b runs the scans, and T8.c records the pushes and notifies.
+  - _For T12._ An acknowledgement pushes its contact to its own subscription only. Other
+    subscriptions of the universe are not told: T8.c's notifications will carry it.

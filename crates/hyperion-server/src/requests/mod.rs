@@ -40,9 +40,9 @@ use std::time::{Duration, Instant};
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use hyperion_protocol::{
-    ClientMessage, ErrorCode, REQUEST_KINDS, RequestBody, RequestError, RequestId, ResponseBody,
-    SceneCamerasRequest, ServerMessage, SubscribeRequest, Subscribed, SubscriptionState,
-    SubscriptionTopic, UnsubscribeRequest,
+    AlertsAcknowledgeRequest, AlertsObserverRequest, ClientMessage, ErrorCode, REQUEST_KINDS,
+    RequestBody, RequestError, RequestId, ResponseBody, SceneCamerasRequest, ServerMessage,
+    SubscribeRequest, Subscribed, SubscriptionState, SubscriptionTopic, UnsubscribeRequest,
 };
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
@@ -53,6 +53,7 @@ use crate::bulk::{Answer, BulkPayload};
 use crate::compute::{
     CancelToken, ComputeError, CpuPool, JobError, Priority, SubmitJobError, panic_message,
 };
+use crate::knowledge::ContactId;
 use crate::limits::MAX_IN_FLIGHT_REQUESTS;
 use crate::stats::Ending;
 use crate::subscriptions::{Pusher, SubscriptionCommand, Subscriptions};
@@ -192,6 +193,9 @@ fn open_topic(
         SubscriptionTopic::Scene(scene) => {
             Box::pin(crate::scene::open(state, universe, scene, pusher, token))
         }
+        SubscriptionTopic::Alerts(alerts) => {
+            Box::pin(crate::alerts::open(state, universe, alerts, pusher, token))
+        }
     }
 }
 
@@ -269,6 +273,13 @@ impl Handler for Handlers {
             // The connection routes `scene_cameras` to its subscription (R03.T8.a); the arm keeps
             // the match exhaustive for a caller that bypasses the connection.
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
+            // Routed to their subscriptions by the connection as `scene_cameras` is (P12.T9.a).
+            RequestBody::AlertsObserver(_) => {
+                Box::pin(ready(Err(not_served_yet("alerts_observer"))))
+            }
+            RequestBody::AlertsAcknowledge(_) => {
+                Box::pin(ready(Err(not_served_yet("alerts_acknowledge"))))
+            }
             RequestBody::Sky(request) => match state.sky_service {
                 SkyService::Served => Box::pin(sky::answer(state, request, token, replies)),
                 // The switch is off (R06.T11.c): answered as before R06.T11.a, with no job.
@@ -348,6 +359,8 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::Unsubscribe(_) => "unsubscribe",
         RequestBody::SceneShip(_) => "scene_ship",
         RequestBody::SceneCameras(_) => "scene_cameras",
+        RequestBody::AlertsObserver(_) => "alerts_observer",
+        RequestBody::AlertsAcknowledge(_) => "alerts_acknowledge",
         RequestBody::Sky(_) => "sky",
         RequestBody::SurfaceField(_) => "surface_field",
         RequestBody::SurveyPass(_) => "survey_pass",
@@ -388,7 +401,8 @@ pub(crate) fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::Sky(_)
         | ResponseBody::SurfaceField(_) => true,
         ResponseBody::Subscribe(subscribed) => match subscribed.state {
-            SubscriptionState::Scene(_) => true,
+            // An alerts state holds every contact the universe knows (plan 12, P12.T9.a).
+            SubscriptionState::Scene(_) | SubscriptionState::Alerts(_) => true,
         },
         ResponseBody::CreateUniverse(_)
         | ResponseBody::ListUniverses(_)
@@ -403,7 +417,9 @@ pub(crate) fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::Extinction(_)
         | ResponseBody::ResolveSystem(_)
         | ResponseBody::FeatureDetail(_)
-        | ResponseBody::BlackHoleState(_) => false,
+        | ResponseBody::BlackHoleState(_)
+        | ResponseBody::AlertsObserver
+        | ResponseBody::AlertsAcknowledge => false,
     }
 }
 
@@ -747,6 +763,8 @@ impl Requests {
             // The state is sequence 0, whatever the topic set: the first notification is 1.
             match &mut state {
                 SubscriptionState::Scene(scene) => scene.sequence = 0,
+                // An alerts state carries no sequence: its first notification is 1 all the same.
+                SubscriptionState::Alerts(_) => {}
             }
             Ok(ResponseBody::Subscribe(Box::new(Subscribed {
                 subscription: subscription.get(),
@@ -779,12 +797,97 @@ impl Requests {
             cameras: request.cameras,
             answer,
         };
-        if let Err(error) = subscriptions.command(request.subscription, command) {
+        self.route(
+            id,
+            (request.subscription, command, answered),
+            ResponseBody::SceneCameras,
+            subscriptions,
+        )
+    }
+
+    /// Routes an `alerts_observer` to its subscription's topic, as
+    /// [`scene_cameras`](Self::scene_cameras) is routed (plan 12, P12.T9.a), or refuses it: as that
+    /// refuses, and `bad_request` naming `observer` or `time` for an observer no subscription can
+    /// have.
+    pub(crate) fn alerts_observer(
+        &mut self,
+        id: RequestId,
+        request: &AlertsObserverRequest,
+        handshake: Handshake,
+        subscriptions: &Subscriptions,
+    ) -> Option<String> {
+        let kind = "alerts_observer";
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return Some(refusal);
+        }
+        let observer = match crate::convert::observer(&request.observer, &request.time) {
+            Ok(observer) => observer,
+            Err(error) => return Some(self.refuse(id, kind, error.into())),
+        };
+        let (answer, answered) = oneshot::channel();
+        let command = SubscriptionCommand::AlertsObserver { observer, answer };
+        self.route(
+            id,
+            (request.subscription, command, answered),
+            ResponseBody::AlertsObserver,
+            subscriptions,
+        )
+    }
+
+    /// Routes an `alerts_acknowledge` to its subscription's topic, as
+    /// [`scene_cameras`](Self::scene_cameras) is routed (plan 12, P12.T9.a), or refuses it: as that
+    /// refuses, and `bad_request` naming `contact` for contact 0, which no contact has.
+    pub(crate) fn alerts_acknowledge(
+        &mut self,
+        id: RequestId,
+        request: AlertsAcknowledgeRequest,
+        handshake: Handshake,
+        subscriptions: &Subscriptions,
+    ) -> Option<String> {
+        let kind = "alerts_acknowledge";
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return Some(refusal);
+        }
+        let Some(contact) = ContactId::new(request.contact) else {
+            let refusal = RequestError {
+                code: ErrorCode::BadRequest,
+                message: "no contact is numbered 0".to_owned(),
+                field: Some("contact".to_owned()),
+            };
+            return Some(self.refuse(id, kind, refusal));
+        };
+        let (answer, answered) = oneshot::channel();
+        let command = SubscriptionCommand::AlertsAcknowledge { contact, answer };
+        self.route(
+            id,
+            (request.subscription, command, answered),
+            ResponseBody::AlertsAcknowledge,
+            subscriptions,
+        )
+    }
+
+    /// Routes `command` to subscription `subscription`'s topic and starts the request that waits
+    /// for its answer on `answered`, `body` once the topic accepts it; or refuses it and returns
+    /// the refusal: `bad_request` naming `subscription` for a subscription the connection does not
+    /// have live, and `queue_full` for one with too many waiting.
+    fn route(
+        &mut self,
+        id: RequestId,
+        (subscription, command, answered): (
+            u32,
+            SubscriptionCommand,
+            oneshot::Receiver<Result<(), RequestError>>,
+        ),
+        body: ResponseBody,
+        subscriptions: &Subscriptions,
+    ) -> Option<String> {
+        let kind = command.kind();
+        if let Err(error) = subscriptions.command(subscription, command) {
             return Some(self.refuse(id, kind, error));
         }
         let handled: HandlerFuture = Box::pin(async move {
             match answered.await {
-                Ok(checked) => checked.map(|()| ResponseBody::SceneCameras.into()),
+                Ok(checked) => checked.map(|()| body.into()),
                 Err(_) => Err(request_error(
                     ErrorCode::Internal,
                     "the subscription ended before it answered",

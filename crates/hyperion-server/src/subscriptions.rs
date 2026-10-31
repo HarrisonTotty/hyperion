@@ -20,10 +20,13 @@ use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use hyperion_protocol::{
-    BodyIdHex, CameraReportDto, ErrorCode, KinematicsDto, NotificationBody, RequestError,
-    RequestId, SceneArrivalDto, SceneBodyDto, SceneClockDto, SceneCraftDto, SceneNotificationDto,
-    ServerMessage, SurfaceRevisionDto,
+    AlertsNotification, BodyIdHex, CameraReportDto, ClassCensusDto, ContactDto, ErrorCode,
+    KinematicsDto, NotificationBody, RequestError, RequestId, SceneArrivalDto, SceneBodyDto,
+    SceneClockDto, SceneCraftDto, SceneNotificationDto, ServerMessage, SurfaceRevisionDto,
 };
+use hyperion_sim::observe::Observer;
+
+use crate::knowledge::ContactId;
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
@@ -55,6 +58,8 @@ pub(crate) trait Merge {
 pub(crate) enum PendingPush {
     /// The scene's.
     Scene(ScenePush),
+    /// The alerts' (plan 12, P12.T9.a).
+    Alerts(AlertsPush),
 }
 
 impl PendingPush {
@@ -70,6 +75,10 @@ impl PendingPush {
                 craft: notification.craft,
                 surface_revisions: notification.surface_revisions,
             }),
+            NotificationBody::Alerts(notification) => Self::Alerts(AlertsPush {
+                contacts: notification.contacts,
+                census: notification.census,
+            }),
         }
     }
 
@@ -78,6 +87,11 @@ impl PendingPush {
     fn into_body(self, sequence: u64) -> NotificationBody {
         match self {
             Self::Scene(push) => NotificationBody::Scene(push.into_notification(sequence)),
+            Self::Alerts(push) => NotificationBody::Alerts(AlertsNotification {
+                sequence,
+                contacts: push.contacts,
+                census: push.census,
+            }),
         }
     }
 }
@@ -86,7 +100,45 @@ impl Merge for PendingPush {
     fn merge(&mut self, later: Self) {
         match (self, later) {
             (Self::Scene(earlier), Self::Scene(later)) => earlier.merge(later),
+            (Self::Alerts(earlier), Self::Alerts(later)) => earlier.merge(later),
+            (Self::Scene(_), later @ Self::Alerts(_))
+            | (Self::Alerts(_), later @ Self::Scene(_)) => {
+                unreachable!("a subscription has one topic, not a push of another: {later:?}")
+            }
         }
+    }
+}
+
+/// The alerts' changes not yet sent (plan 12, P12.T9.a): each contact's latest view, one per
+/// contact in contact order, and the latest census, if it changed.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct AlertsPush {
+    /// The contacts that changed, as each now stands.
+    pub(crate) contacts: Vec<ContactDto>,
+    /// The census, or empty while it has not changed.
+    pub(crate) census: Vec<ClassCensusDto>,
+}
+
+impl Merge for AlertsPush {
+    fn merge(&mut self, later: Self) {
+        for contact in later.contacts {
+            let number = contact_number(&contact);
+            match self.contacts.binary_search_by_key(&number, contact_number) {
+                Ok(at) => self.contacts[at] = contact,
+                Err(at) => self.contacts.insert(at, contact),
+            }
+        }
+        if !later.census.is_empty() {
+            self.census = later.census;
+        }
+    }
+}
+
+/// A contact's number on the wire.
+fn contact_number(contact: &ContactDto) -> u32 {
+    match contact {
+        ContactDto::Bearing(seen) => seen.contact,
+        ContactDto::Resolved(resolved) => resolved.seen.contact,
     }
 }
 
@@ -229,6 +281,55 @@ pub(crate) enum SubscriptionCommand {
         /// Where the topic answers: the empty answer, or why the cameras are refused.
         answer: oneshot::Sender<Result<(), RequestError>>,
     },
+    /// `alerts_observer`: move an alerts subscription's observer (plan 12, P12.T9.a).
+    AlertsObserver {
+        /// The observer, checked.
+        observer: Observer,
+        /// Where the topic answers.
+        answer: oneshot::Sender<Result<(), RequestError>>,
+    },
+    /// `alerts_acknowledge`: acknowledge a contact (plan 12, P12.T9.a).
+    AlertsAcknowledge {
+        /// The contact.
+        contact: ContactId,
+        /// Where the topic answers.
+        answer: oneshot::Sender<Result<(), RequestError>>,
+    },
+}
+
+/// The refusal of a request that names a subscription of another topic than its own: as an
+/// unknown subscription's, `bad_request` naming `subscription` (plan 12, P12.T9.a).
+#[must_use]
+pub(crate) fn not_of_this_topic(kind: &str, topic: &str) -> RequestError {
+    RequestError {
+        code: ErrorCode::BadRequest,
+        message: format!("`{kind}` names a subscription to the {topic}, which does not take it"),
+        field: Some("subscription".to_owned()),
+    }
+}
+
+impl SubscriptionCommand {
+    /// The request's kind on the wire.
+    #[must_use]
+    pub(crate) const fn kind(&self) -> &'static str {
+        match self {
+            Self::SceneCameras { .. } => "scene_cameras",
+            Self::AlertsObserver { .. } => "alerts_observer",
+            Self::AlertsAcknowledge { .. } => "alerts_acknowledge",
+        }
+    }
+
+    /// Answers the command with `refusal`, for a topic that does not serve it: the request names a
+    /// subscription of another topic.
+    pub(crate) fn refuse(self, refusal: RequestError) {
+        let answer = match self {
+            Self::SceneCameras { answer, .. }
+            | Self::AlertsObserver { answer, .. }
+            | Self::AlertsAcknowledge { answer, .. } => answer,
+        };
+        // A request cancelled meanwhile has nowhere to be answered, and needs nothing.
+        let _ = answer.send(Err(refusal));
+    }
 }
 
 /// Where a topic's task stands against its subscription's end, under one lock, so that a task
@@ -487,6 +588,8 @@ impl Unsent {
     pub(crate) fn is_large(&self) -> bool {
         match &self.body {
             NotificationBody::Scene(notification) => is_large_notification(notification),
+            // The contacts that changed since the last, a few at a time.
+            NotificationBody::Alerts(_) => false,
         }
     }
 
@@ -1037,7 +1140,9 @@ mod tests {
     fn bodies_are_merged_by_id_with_the_latest_winning() {
         let mut pending = push(1, vec![body(0x0100, 1.0), body(0x0200, 2.0)]);
         pending.merge(push(2, vec![body(0x0200, 20.0), body(0x0300, 3.0)]));
-        let PendingPush::Scene(scene) = pending;
+        let PendingPush::Scene(scene) = pending else {
+            panic!("a scene push");
+        };
         assert_eq!(scene.clock, clock(2));
         assert_eq!(
             scene.bodies,
@@ -1057,7 +1162,9 @@ mod tests {
             ..ScenePush::heartbeat(clock(2))
         }));
         pending.merge(push(3, vec![body(0x0200, 2.0)]));
-        let PendingPush::Scene(scene) = pending;
+        let PendingPush::Scene(scene) = pending else {
+            panic!("a scene push");
+        };
         assert_eq!(scene.arrival, Some(SceneArrivalDto::NoSystem));
         assert_eq!(scene.bodies, vec![body(0x0200, 2.0)]);
         assert_eq!(scene.clock, clock(3));
@@ -1073,7 +1180,9 @@ mod tests {
             ..ScenePush::heartbeat(clock(1))
         });
         pending.merge(push(2, Vec::new()));
-        let PendingPush::Scene(scene) = pending;
+        let PendingPush::Scene(scene) = pending else {
+            panic!("a scene push");
+        };
         assert_eq!(scene.ship, Some(ship()));
         assert_eq!(scene.craft, Some(Vec::new()));
     }
@@ -1096,7 +1205,9 @@ mod tests {
 
     /// The surface revisions a push names, by body index, sorted.
     fn revisions_of(pending: PendingPush) -> Vec<(u16, u32)> {
-        let PendingPush::Scene(scene) = pending;
+        let PendingPush::Scene(scene) = pending else {
+            panic!("a scene push");
+        };
         let mut revisions: Vec<(u16, u32)> = scene
             .surface_revisions
             .unwrap_or_default()
@@ -1127,7 +1238,9 @@ mod tests {
         forwards.merge(push(3, vec![body(0x0100, 1.0)]));
         forwards.merge(arrival(4));
         assert_eq!(revisions_of(forwards.clone()), expected);
-        let PendingPush::Scene(scene) = forwards;
+        let PendingPush::Scene(scene) = forwards else {
+            panic!("a scene push");
+        };
         assert!(
             scene.bodies.is_empty(),
             "the arrival still replaces the bodies"
@@ -1136,7 +1249,9 @@ mod tests {
         let mut quiet = push(1, Vec::new());
         quiet.merge(surveyed(2, &[(0x0400, 7)]));
         assert_eq!(revisions_of(quiet.clone()), [(0x0400, 7)]);
-        let PendingPush::Scene(quiet) = quiet;
+        let PendingPush::Scene(quiet) = quiet else {
+            panic!("a scene push");
+        };
         let notification = quiet.into_notification(9);
         assert_eq!(
             notification.surface_revisions.as_ref().map(Vec::len),

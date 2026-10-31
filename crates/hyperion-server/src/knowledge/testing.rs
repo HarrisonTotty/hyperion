@@ -1,7 +1,11 @@
 //! Fixtures shared by the Knowledge store's tests.
 
+use hyperion_sim::alerts::{AlertBand, Detection, DetectionPhase, TransientKind};
+use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::id::event_tags;
 use hyperion_sim::id::{EventBin, EventId, EventSubject, EventWord, SystemId};
+use hyperion_sim::time::UniverseTime;
+use hyperion_sim::units::WattsPerSquareMetre;
 
 /// A grid system, as the host of the tests' events.
 pub(crate) fn host() -> SystemId {
@@ -24,5 +28,24 @@ pub(crate) fn event_of(system: SystemId) -> EventId {
     EventId::new(
         EventSubject::System(system),
         EventWord::new(event_tags::ALL[0], bin, 0),
+    )
+}
+
+/// A flare's onset of [`host`] seen in `band`, as the sightings of the tests record it: their
+/// kind, phase and band.
+pub(crate) fn flare_in(band: AlertBand) -> Detection {
+    let at = |ly| GalacticPosition::from_light_years(ly).expect("in the cube");
+    hyperion_sim::alerts::testing::detection(
+        event_of(host()),
+        host(),
+        None,
+        TransientKind::Flare,
+        DetectionPhase::Onset,
+        band,
+        WattsPerSquareMetre::new(1e-12),
+        false,
+        at([-3_000.0, 21_000.0, 40.0]),
+        UniverseTime::EPOCH,
+        &at([0.0, 25_000.0, 0.0]),
     )
 }

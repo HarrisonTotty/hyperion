@@ -147,6 +147,24 @@ import type { Subscribed } from "./generated/Subscribed";
 import type { SubscriptionState } from "./generated/SubscriptionState";
 import type { SubscriptionTopic } from "./generated/SubscriptionTopic";
 import type { UnsubscribeRequest } from "./generated/UnsubscribeRequest";
+// The alerts (plan 12, P12.T9.a).
+import type { AlertBandDto } from "./generated/AlertBandDto";
+import type { AlertsAcknowledgeRequest } from "./generated/AlertsAcknowledgeRequest";
+import type { AlertsNotification } from "./generated/AlertsNotification";
+import type { AlertsObserverRequest } from "./generated/AlertsObserverRequest";
+import type { AlertsSubscribeRequest } from "./generated/AlertsSubscribeRequest";
+import type { AlertsSubscribed } from "./generated/AlertsSubscribed";
+import type { BandLimitsDto } from "./generated/BandLimitsDto";
+import type { BearingContactDto } from "./generated/BearingContactDto";
+import type { BearingDto } from "./generated/BearingDto";
+import type { BearingFrameDto } from "./generated/BearingFrameDto";
+import type { ClassCensusDto } from "./generated/ClassCensusDto";
+import type { ClassCensusStatusDto } from "./generated/ClassCensusStatusDto";
+import type { ContactDto } from "./generated/ContactDto";
+import type { DetectionPhaseDto } from "./generated/DetectionPhaseDto";
+import type { ResolvedContactDto } from "./generated/ResolvedContactDto";
+import type { SensorDto } from "./generated/SensorDto";
+import type { TransientKindDto } from "./generated/TransientKindDto";
 // Bulk answers (rendering plan R03, R03.T10.a).
 import type { BulkManifestDto } from "./generated/BulkManifestDto";
 // The scene (rendering plan R03, R03.T4).
@@ -452,6 +470,23 @@ export type {
   SubscriptionState,
   SubscriptionTopic,
   UnsubscribeRequest,
+  AlertBandDto,
+  AlertsAcknowledgeRequest,
+  AlertsNotification,
+  AlertsObserverRequest,
+  AlertsSubscribeRequest,
+  AlertsSubscribed,
+  BandLimitsDto,
+  BearingContactDto,
+  BearingDto,
+  BearingFrameDto,
+  ClassCensusDto,
+  ClassCensusStatusDto,
+  ContactDto,
+  DetectionPhaseDto,
+  ResolvedContactDto,
+  SensorDto,
+  TransientKindDto,
   BodyGrantDto,
   BulkManifestDto,
   CameraReportDto,

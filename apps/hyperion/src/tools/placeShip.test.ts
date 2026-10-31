@@ -265,6 +265,8 @@ class FakeServer {
       case "galaxy_features":
       case "feature_detail":
       case "black_hole_state":
+      case "alerts_observer":
+      case "alerts_acknowledge":
         break;
     }
     return { code: "unsupported", message: `not faked: ${body.kind}`, field: null };
