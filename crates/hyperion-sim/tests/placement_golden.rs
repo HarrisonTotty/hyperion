@@ -524,3 +524,38 @@ const PRE_PIN_RADII_LY: [(Layer, f64); 5] = [
     (Layer::D, 400.0),
     (Layer::E, 400.0),
 ];
+
+/// The seed of P09.T35's carve-out fixture, the Milky Way's (`placement::carve_out_hold`).
+const CARVE_OUT_SEED: u64 = 0x0935_0000_0000_0001;
+
+/// Three layer-E cells on the carve-out fixture's young arm ridges, each holding a record that the
+/// catalogue classes claim from generator version 26: the first three the hold's D2 test finds.
+const CARVE_OUT_CELLS: [[i32; 3]; 3] = [[147, 56, 0], [-68, 141, 0], [87, 168, 0]];
+
+/// P09.T35's pre-pin (decision-galaxy-25-train §1.5, D1): [`CARVE_OUT_CELLS`] whole, at the version
+/// in force, so that the carve-out cannot land without moving a golden: at 26 the records the
+/// classes claim leave these cells, and their counts and index lists move (plan 08's deferred
+/// finding on P08.T13.b). It is an extension at the version in force; P09.T35's hold leaves it
+/// unchanged.
+#[test]
+fn carve_out_cells_are_pinned() {
+    let galaxy = Galaxy::from_params(Seed::new(CARVE_OUT_SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral");
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    w.line(
+        "# P09.T35's pre-pin (decision-galaxy-25-train §1.5, D1): layer-E cells on the young arm",
+    );
+    w.line("# ridges of the carve-out's fixture, each holding a record claimed from version 26.");
+    for (n, &cell) in CARVE_OUT_CELLS.iter().enumerate() {
+        let key = CellKey::new(Layer::E, cell).expect("a cell of the cube");
+        write_cell(
+            &mut w,
+            &galaxy,
+            &format!("ridge{n}"),
+            "a young arm ridge's cell holding a claimed death",
+            key,
+        );
+    }
+    golden!("placement/carve_out", w.as_str());
+}
