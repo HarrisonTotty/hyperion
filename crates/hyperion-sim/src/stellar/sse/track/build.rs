@@ -318,7 +318,7 @@ impl<'a> Builder<'a> {
                 z: composition.z_fit(),
                 remnant: options.remnant(),
                 bridges: options.bridges(),
-                helium: HeliumHook::of(composition, &HeliumTable::COMMITTED),
+                helium: HeliumHook::of(composition, &HeliumTable::of(options.rules())),
             },
             composition,
             options,
@@ -330,8 +330,8 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// This builder with the helium-excess correction `helium` in place of the committed table's
-    /// (P06.T17).
+    /// This builder with the helium-excess correction `helium` in place of the one its options'
+    /// rules choose (P06.T17).
     #[must_use]
     pub(crate) fn with_helium(mut self, helium: Option<HeliumHook>) -> Self {
         self.phys.helium = helium;

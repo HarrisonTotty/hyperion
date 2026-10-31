@@ -647,6 +647,7 @@ const TEST_TABLE: HeliumTable = HeliumTable {
     log_z_nodes: crate::tables::helium::LOG_Z_NODES,
     lifetime_slope: [[-4.0, 0.0, 0.0]; 4],
     hb_temperature_shift: [0.5, 0.0],
+    hb_envelope_max: None,
 };
 
 fn with_helium(m: f64, comp: &Composition, table: &HeliumTable) -> Track {

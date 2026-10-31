@@ -92,7 +92,11 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: 25's
-    /// holds and those that turn on at 26 (the stellar rules' `dwarf_sequence`, P06.T23.a).
+    /// holds and those that turn on at 26 (the stellar rules' `dwarf_sequence`, P06.T23.a, and
+    /// `helium`, P15.T7.b; [`StellarRules::every_26_hold`]).
+    ///
+    /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is
+    /// struct-update syntax over it.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_26_hold() -> Self {

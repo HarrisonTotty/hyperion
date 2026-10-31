@@ -51,7 +51,7 @@ use crate::stellar::photometry::{absolute_magnitude_v_under, colour_b_v_under};
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::{
     BlackHole, CompactRemnant, Death, DeathKind, NatalKick, NeutronStar, PulsarState, RemnantKind,
-    StandardKickLaw,
+    StandardKickLaw, stripped_mark_applied_under,
 };
 use crate::stellar::rotation::{self, Activity, Magnetism, Rotation};
 use crate::stellar::rules::StellarRules;
@@ -245,8 +245,8 @@ pub struct StarModel {
     age_at_epoch: Years,
     evolution: Evolution,
     remnant: Option<RemnantStage>,
-    /// The stellar stage's rules its remnant stage reads (`stellar::rules`): the version's, or
-    /// those of the galaxy it was generated in.
+    /// The stellar stage's rules its track and its remnant stage read (`stellar::rules`): the
+    /// version's, or those of the galaxy it was generated in.
     rules: StellarRules,
 }
 
@@ -283,7 +283,7 @@ impl RemnantStage {
         rules: StellarRules,
     ) -> Self {
         let law = StandardKickLaw::under(rules);
-        let death = law.with_stripped_mark(death, draws, m0, comp);
+        let death = stripped_mark_applied_under(death, draws, (m0, comp), rules);
         Self {
             death,
             remnant,
@@ -362,10 +362,11 @@ impl StarModel {
         };
         if m0 >= sse::MIN_INITIAL_MASS {
             let end = model.age_at(ClockWindow::END).value();
-            let track = Track::to_age(
+            let track = Track::to_age_with(
                 model.track_mass(),
                 &model.composition,
                 &model.draws,
+                model.track_options(),
                 Years::new(if end > 0.0 { end } else { 0.0 }),
             );
             model.remnant = remnant_stage(&track, &model.draws, model.rules);
@@ -786,6 +787,13 @@ impl StarModel {
         track_mass_of(self.initial_mass)
     }
 
+    /// The options its track is built with: the generator's, under the model's stellar rules,
+    /// whose helium table its track reads (P15.T7.b's hold).
+    #[must_use]
+    fn track_options(&self) -> TrackOptions {
+        TrackOptions::default().with_rules(self.rules)
+    }
+
     /// The cooling fits' state at `age`, for an object below 0.1 M☉.
     #[must_use]
     fn cooling_at(&self, age: Years) -> StarState {
@@ -804,7 +812,7 @@ impl StarModel {
                     self.track_mass(),
                     &self.composition,
                     &self.draws,
-                    TrackOptions::default(),
+                    self.track_options(),
                 );
                 RemnantStage::new(
                     fate.death,

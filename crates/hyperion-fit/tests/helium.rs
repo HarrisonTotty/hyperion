@@ -1,8 +1,10 @@
-//! The helium-excess table (plan 06, P06.T17; plan 15, P15.T7.b): the committed table is exactly
-//! what `run helium --since <current>` would write, P06.T17's identity bit for bit; the reduced
-//! grid parses and is the provenance's; the fit from `helium.production.toml` is measured against
-//! every criterion of P15.T7.b's acceptance and runs end to end; and the sim's builder under a
-//! candidate table is the generator's track wherever the table cannot act.
+//! The helium-excess tables (plan 06, P06.T17; plan 15, P15.T7.b): the committed `helium` is
+//! exactly what `run helium --since <current>` would write, P06.T17's identity bit for bit, and
+//! `helium_26`, the fit the tracks read from version 26 on, what `run helium_26` would write; the
+//! reduced grid parses and is the provenance's; the fit from `helium_26.toml` is measured against
+//! every criterion of P15.T7.b's acceptance, its slope negative and its branch's shift bounded at
+//! every mass, and runs end to end; and the sim's builder under a candidate table is the
+//! generator's track wherever the table cannot act.
 //!
 //! CI runs this, so a table that is stale, or edited by hand, fails it.
 
@@ -19,25 +21,36 @@ use hyperion_fit::manifest::{Manifest, ManifestParamError};
 use hyperion_fit::pipeline::rerender;
 use hyperion_fit::task::{RunTaskError, find, registry};
 use hyperion_fit::tasks::helium::cluster::ClusterFigures;
-use hyperion_fit::tasks::helium::figures::{Figures, IDENTITY_PROBES, probe_ages_yr};
+use hyperion_fit::tasks::helium::figures::{
+    Figures, IDENTITY_PROBES, probe_ages_yr, reach_envelopes_msun, shift_reach_dex,
+};
 use hyperion_fit::tasks::helium::fit::{DATASET, Fit, FitParams, fit, slope_at};
 use hyperion_fit::tasks::helium::grid::Grid;
 use hyperion_sim::GENERATOR_VERSION;
+use hyperion_sim::galaxy::features::interior::abundances::HELIUM_EXCESS_MAX;
 use hyperion_sim::stellar::Composition;
 use hyperion_sim::stellar::draws::StarDraws;
 use hyperion_sim::stellar::sse::{CandidateHeliumTable, Track, track_with_helium_table};
 use hyperion_sim::tables::helium::{HB_TEMPERATURE_SHIFT, LIFETIME_SLOPE, LOG_Z_NODES};
+use hyperion_sim::tables::helium_26;
 use hyperion_sim::units::{Dex, HeliumExcess, SolarMasses, Years};
 use hyperion_testkit::float::assert_same_bits;
 
 /// The table the sim compiles, as committed.
 const COMMITTED: &str = include_str!("../../hyperion-sim/src/tables/helium.rs");
 
-/// The production manifest's path.
+/// The fitted table the sim compiles for version 26, as committed.
+const COMMITTED_26: &str = include_str!("../../hyperion-sim/src/tables/helium_26.rs");
+
+/// The production manifest's path: `helium_26`'s.
 fn production_path() -> std::path::PathBuf {
-    Workspace::repository()
-        .manifests_dir
-        .join("helium.production.toml")
+    Workspace::repository().manifests_dir.join("helium_26.toml")
+}
+
+/// The committed fitted table as a candidate, its bound included.
+fn committed_fit() -> CandidateHeliumTable {
+    CandidateHeliumTable::new(helium_26::LIFETIME_SLOPE, helium_26::HB_TEMPERATURE_SHIFT)
+        .with_envelope_max(SolarMasses::new(helium_26::HB_ENVELOPE_MAX))
 }
 
 /// The production manifest, loaded with the repository's data directory.
@@ -86,6 +99,62 @@ fn helium_table_is_reproduced() {
         "helium",
         COMMITTED,
         &planned.text,
+    );
+}
+
+#[test]
+fn helium_26_table_is_reproduced() {
+    let planned = rerender(
+        registry(),
+        find("helium_26").expect("helium_26 is registered"),
+        &Workspace::repository(),
+        NonZeroUsize::MIN,
+        GENERATOR_VERSION.get(),
+    )
+    .expect("the helium_26 task runs");
+    common::assert_reproduced(
+        "crates/hyperion-sim/src/tables/helium_26.rs",
+        "helium_26",
+        COMMITTED_26,
+        &planned.text,
+    );
+}
+
+/// The fitted table the sim compiles for version 26 is the production manifest's fit, bit for
+/// bit, `@generated` at the version in force: plan 06's nodes as committed, and `HB_ENVELOPE_MAX`
+/// the manifest's `hb_envelope_max`, the fit's upper envelope (decision-p15-t7b-leans §8).
+#[test]
+fn the_committed_fitted_table_is_the_fit_with_its_bound() {
+    let (fitted, params, _) = production_fit();
+    for (committed, nodes) in helium_26::LOG_Z_NODES.iter().zip(LOG_Z_NODES) {
+        assert_same_bits(*committed, nodes);
+    }
+    for (committed, fit) in helium_26::LIFETIME_SLOPE
+        .iter()
+        .zip(fitted.table.lifetime_slope())
+    {
+        for (c, f) in committed.iter().zip(fit) {
+            assert_same_bits(*c, f);
+        }
+    }
+    for (c, f) in helium_26::HB_TEMPERATURE_SHIFT
+        .iter()
+        .zip(fitted.table.hb_temperature_shift())
+    {
+        assert_same_bits(*c, f);
+    }
+    assert_same_bits(helium_26::HB_ENVELOPE_MAX, params.hb_envelope_msun.1);
+    assert_eq!(fitted.table, committed_fit());
+    let split = TableText::of_file(COMMITTED_26);
+    let header = split.header().unwrap();
+    assert_eq!(header.kind, Some(HeaderKind::Generated));
+    assert_eq!(header.task.as_deref(), Some("helium_26"));
+    // Emitted at 24, the version in force; an unchanged body keeps it through a later bump.
+    assert_eq!(header.since_generator_version, Some(24));
+    assert_eq!(header.revision, Some(1));
+    assert_eq!(
+        common::declared(&split.body),
+        find("helium_26").unwrap().items()
     );
 }
 
@@ -287,39 +356,72 @@ fn the_fit_meets_every_figure_as_ruled() {
     assert!(figures.passed(&params));
 }
 
-/// The production fit's slope is linear in log₁₀ m, every c₂ exactly 0.0, and negative at 0.1
-/// and 150 M☉ at each node, which bounds it at every mass between and, through the linear
-/// interpolation in log₁₀ Z, at every Z (ruled 2026-10-26, decision-p15-t7b-leans L2).
+/// The production fit's slope, and the committed fitted table's, is linear in log₁₀ m, every c₂
+/// exactly 0.0, and negative at 0.1 and 150 M☉ at each node, which bounds it at every mass between
+/// and, through the linear interpolation in log₁₀ Z, at every Z (ruled 2026-10-26,
+/// decision-p15-t7b-leans L2).
 #[test]
 fn the_production_slope_is_linear_and_negative_at_every_mass() {
     let (fitted, _, _) = production_fit();
-    let table = fitted.table;
-    for row in table.lifetime_slope() {
-        assert_same_bits(row[2], 0.0);
+    for table in [fitted.table, committed_fit()] {
+        for row in table.lifetime_slope() {
+            assert_same_bits(row[2], 0.0);
+        }
+        let nodes = table.log_z_nodes();
+        for &log_z in &nodes {
+            for m in [0.1, 150.0] {
+                let s = slope_at(&table.lifetime_slope(), &nodes, log_z, m);
+                assert!(s < 0.0, "s = {s} at {m} M☉ and log₁₀ Z {log_z}");
+            }
+        }
     }
-    let nodes = table.log_z_nodes();
-    for &log_z in &nodes {
-        for m in [0.1, 150.0] {
-            let s = slope_at(&table.lifetime_slope(), &nodes, log_z, m);
-            assert!(s < 0.0, "s = {s} at {m} M☉ and log₁₀ Z {log_z}");
+}
+
+/// At plan 09's largest ΔY, the committed fitted shift by the hook's rule lies in 0–0.1 dex at
+/// every envelope a track takes, to 150 M☉ (decision-p15-t7b-leans §8), and is the fitted line,
+/// (a + b `M_env`) ΔY bit for bit, inside the fit's envelopes, 0–`HB_ENVELOPE_MAX`, where the line
+/// is positive; beyond the bound it is its value at the bound.
+#[test]
+fn the_fitted_shift_is_bounded_at_every_envelope() {
+    let table = committed_fit();
+    let [a, b] = table.hb_temperature_shift();
+    let bound = helium_26::HB_ENVELOPE_MAX;
+    let dy = HELIUM_EXCESS_MAX;
+    let shift = |m: f64| table.branch_shift_dex(SolarMasses::new(m), HeliumExcess::new(dy));
+    let (least, greatest) = shift_reach_dex(&table, dy);
+    assert!(
+        least >= 0.0 && greatest <= 0.1,
+        "{least}–{greatest} dex at ΔY {dy}"
+    );
+    for m in reach_envelopes_msun() {
+        let s = shift(m);
+        assert!(
+            s.is_finite() && (0.0..=0.1).contains(&s),
+            "{s} dex at {m} M☉"
+        );
+        if m <= bound {
+            assert!(a + b * m > 0.0, "the fitted line is positive to the bound");
+            assert_same_bits(s, (a + b * m) * dy);
+        } else {
+            assert_same_bits(s, shift(bound));
         }
     }
 }
 
 /// The production manifest end to end, through the command line with `--manifest` and `--out`
 /// into a scratch directory: the header parses, names the task, the manifest and the dataset,
-/// declares the three items and is `@generated`, every figure as ruled passing.
+/// declares the four items and is `@generated`, every figure as ruled passing.
 #[test]
 fn the_production_manifest_runs_end_to_end() {
     let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("helium.rs");
+    let out = dir.path().join("helium_26.rs");
     let manifest = production_path();
     // A fixed few threads, not every core. The task ignores the count, which is named so that the
     // test stays small beside the others if the task ever uses it.
     let cli = Cli::try_parse_from([
         "hyperion-fit",
         "run",
-        "helium",
+        "helium_26",
         "--manifest",
         manifest.to_str().unwrap(),
         "--out",
@@ -333,10 +435,10 @@ fn the_production_manifest_runs_end_to_end() {
     let text = fs::read_to_string(&out).unwrap();
     let split = TableText::of_file(&text);
     let header = split.header().unwrap();
-    assert_eq!(header.task.as_deref(), Some("helium"));
+    assert_eq!(header.task.as_deref(), Some("helium_26"));
     assert_eq!(
         header.manifest.as_deref(),
-        Some("crates/hyperion-fit/manifests/helium.production.toml")
+        Some("crates/hyperion-fit/manifests/helium_26.toml")
     );
     assert_eq!(header.kind, Some(HeaderKind::Generated));
     let data = header.data.as_deref().unwrap();
@@ -357,12 +459,13 @@ fn the_production_manifest_runs_end_to_end() {
             .is_some_and(|a| a.contains("lifetime ratios")
                 && a.contains("(3% allowed; passes)")
                 && !a.contains("MISSES")
-                && a.contains("extrapolated to ΔY = 0.18")),
+                && a.contains("extrapolated to ΔY = 0.18")
+                && a.contains("floored at zero")),
         "{header:?}"
     );
     assert_eq!(
         common::declared(&split.body),
-        find("helium").unwrap().items()
+        find("helium_26").unwrap().items()
     );
     // Plan 06's nodes keep their committed text, and so their bits.
     let committed = TableText::of_file(COMMITTED);
@@ -370,25 +473,31 @@ fn the_production_manifest_runs_end_to_end() {
     assert_eq!(nodes(&split.body), nodes(&committed.body));
 }
 
-/// A run on a manifest whose method is neither the identity nor the fit is refused, naming the
-/// two.
+/// A run on a manifest whose method is not its table's is refused, naming the method: the
+/// identity's task runs only the identity, and `helium_26`'s only the fit.
 #[test]
 fn a_manifest_of_another_method_is_refused() {
-    let manifest = Manifest::from_bytes(
-        &production_path(),
-        b"task = \"helium\"\ndatasets = [\"basti_helium\"]\n[params]\nmethod = \"spline\"\n"
-            .to_vec(),
-    )
-    .unwrap();
-    let result = find("helium").unwrap().run(&manifest, NonZeroUsize::MIN);
-    match result {
-        Err(RunTaskError::Param(e)) => assert_eq!(
-            e,
-            ManifestParamError::new(
-                "method",
-                "\"identity\" (P06.T17's table) or \"basti_least_squares\" (P15.T7.b's fit)"
-            )
+    for (task, method, expected) in [
+        (
+            "helium",
+            "spline",
+            "\"identity\" (P06.T17's table; P15.T7.b's fit is `helium_26`'s)",
         ),
-        other => panic!("expected a parameter error, got {other:?}"),
+        (
+            "helium_26",
+            "spline",
+            "\"basti_least_squares\" (P15.T7.b's fit)",
+        ),
+    ] {
+        let text = format!(
+            "task = \"{task}\"\ndatasets = [\"basti_helium\"]\n[params]\nmethod = \"{method}\"\n"
+        );
+        let manifest = Manifest::from_bytes(&production_path(), text.into_bytes()).unwrap();
+        match find(task).unwrap().run(&manifest, NonZeroUsize::MIN) {
+            Err(RunTaskError::Param(e)) => {
+                assert_eq!(e, ManifestParamError::new("method", expected), "{task}");
+            }
+            other => panic!("expected a parameter error, got {other:?}"),
+        }
     }
 }

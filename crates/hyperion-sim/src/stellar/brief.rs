@@ -416,6 +416,9 @@ impl BriefModel {
         }
         let m0 = record.primary_initial_mass();
         let age_at_epoch = record.age_at_epoch();
+        // Every route's track is built under the galaxy's stellar rules, as the model's is.
+        let rules = galaxy.rules().stellar;
+        let options = TrackOptions::default().with_rules(rules);
         // The main sequence reads η alone of the primary's draws: its one stream, not all of
         // them (a quarter of a main-sequence row's instructions, P06.T38.e's measurement).
         let eta = primary_eta(galaxy, record);
@@ -429,11 +432,9 @@ impl BriefModel {
         });
         if let Some(fate) = dead {
             let draws = primary_draws(galaxy, record);
-            let primary = table_primary(fate, composition, &draws, age_at_epoch, m0)
-                .or_else(|| exact_remnant(m0, composition, &draws, age_at_epoch))
-                .unwrap_or_else(|| {
-                    exact(m0, composition, draws, age_at_epoch, galaxy.rules().stellar)
-                });
+            let primary = table_primary(fate, composition, &draws, (age_at_epoch, m0), options)
+                .or_else(|| exact_remnant(m0, composition, &draws, age_at_epoch, options))
+                .unwrap_or_else(|| exact(m0, composition, draws, age_at_epoch, rules));
             return Self {
                 primary,
                 star_count,
@@ -445,12 +446,7 @@ impl BriefModel {
         let on_main_sequence = (MIN_INITIAL_MASS..=MAX_INITIAL_MASS)
             .contains(&m0)
             .then(|| {
-                Track::knot_free_main_sequence(
-                    m0,
-                    &composition,
-                    &eta_draws(eta, rotation),
-                    TrackOptions::default(),
-                )
+                Track::knot_free_main_sequence(m0, &composition, &eta_draws(eta, rotation), options)
             })
             .flatten()
             // The main sequence must hold every age of the window: from the arrival on it
@@ -474,7 +470,7 @@ impl BriefModel {
                 composition,
                 primary_draws(galaxy, record),
                 age_at_epoch,
-                galaxy.rules().stellar,
+                rules,
             )
         };
         Self {
@@ -794,26 +790,27 @@ fn exact(
 /// remnant a build to the death that keeps no other segment gives (`remnant_of`), which is its
 /// full track's bit for bit, and so its brief is [`SystemStars::brief_at`]'s for a primary the
 /// gate certifies. `None` if the star is alive at the window's start after all, which the table's
-/// bound makes rare.
+/// bound makes rare. The build is under `options`, the galaxy's rules'.
 #[must_use]
 fn exact_remnant(
     m0: SolarMasses,
     composition: Composition,
     draws: &StarDraws,
     age_at_epoch: Years,
+    options: TrackOptions,
 ) -> Option<Primary> {
     let m = if m0 > MAX_INITIAL_MASS {
         MAX_INITIAL_MASS
     } else {
         m0
     };
-    let (remnant, _) = remnant_of(m, &composition, draws, TrackOptions::default());
+    let (remnant, _) = remnant_of(m, &composition, draws, options);
     let birth = remnant.birth;
     (age_at(age_at_epoch, ClockWindow::START) >= birth).then(|| Primary::Remnant {
         track: Box::new(Track::remnant_only(
             &composition,
             draws.eta().value(),
-            TrackOptions::default(),
+            options,
             remnant,
         )),
         composition,
@@ -853,9 +850,10 @@ fn remnant_brief(
 }
 
 /// The table-routed primary of `fate`, found dead through the whole clock window, of initial
-/// mass `m0`, `composition`, `draws` and age at the epoch `age_at_epoch`, or `None` if it is not
-/// the table's: its companion-stripped mark can move its fate, or the guard finds that its kind
-/// or class could differ somewhere in the fate's error box over the window (P06.T38.e).
+/// mass `m0`, `composition`, `draws` and age at the epoch `age_at_epoch`, its remnant's track
+/// under `options`, or `None` if it is not the table's: its companion-stripped mark can move its
+/// fate, or the guard finds that its kind or class could differ somewhere in the fate's error box
+/// over the window (P06.T38.e).
 ///
 /// - A white dwarf's class is a function of its temperature and draws alone
 ///   ([`white_dwarf_type`]). The guard takes the temperature's range over the box and the window
@@ -874,20 +872,15 @@ fn table_primary(
     fate: FittedFate,
     composition: Composition,
     draws: &StarDraws,
-    age_at_epoch: Years,
-    m0: SolarMasses,
+    (age_at_epoch, m0): (Years, SolarMasses),
+    options: TrackOptions,
 ) -> Option<Primary> {
     if stripped_mark_matters(m0, &composition, draws) {
         return None;
     }
     let remnant_draws = RemnantDraws::of(draws);
     let centre = fate.remnant(remnant_draws, (0.0, 0.0, 0.0));
-    let track = Track::remnant_only(
-        &composition,
-        draws.eta().value(),
-        TrackOptions::default(),
-        centre,
-    );
+    let track = Track::remnant_only(&composition, draws.eta().value(), options, centre);
     let passes = match fate.route {
         FateRoute::HeliumWhiteDwarf
         | FateRoute::CarbonOxygenWhiteDwarf

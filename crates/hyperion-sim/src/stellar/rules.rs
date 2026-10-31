@@ -40,15 +40,23 @@
 //!   (`sky::luminosity`): the server builds them once per seed and keeps them under a key of the
 //!   seed alone, so they follow the version, not a test's arm. The 25 → 26 bump deletes the field,
 //!   its held arm and its tripwire.
+//! - [`helium`](StellarRules::helium), the helium-excess table the tracks read, at
+//!   [`HELIUM_VERSION`] (plan 15, P15.T7.b's swap): P06.T17's identity below it, the fitted
+//!   `tables::helium_26` from it. A track's rules ride its [`TrackOptions`], whose builders read
+//!   the table at one choke point, [`HeliumTable::of`]; `StarModel::new_under`, the engine's
+//!   context and the brief put the galaxy's rules on the options of every track they build.
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
 //! [`DwarfSequence::of`]: crate::stellar::classify::pm13::DwarfSequence::of
+//! [`TrackOptions`]: crate::stellar::sse::TrackOptions
+//! [`HeliumTable::of`]: crate::stellar::sse::track::HeliumTable::of
 
 use crate::GeneratorVersion;
 use crate::stellar::classify::pm13::{DWARF_SEQUENCE_VERSION, DwarfSequenceRules};
 use crate::stellar::remnant::KickRankRules;
+use crate::stellar::sse::{HELIUM_VERSION, HeliumRules};
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
 /// (decision-galaxy-25-train §1).
@@ -61,6 +69,11 @@ pub(crate) struct StellarRules {
     /// The dwarf sequence classification, photometry and rotation read
     /// ([`DwarfSequence::of`](crate::stellar::classify::pm13::DwarfSequence::of)).
     pub(crate) dwarf_sequence: DwarfSequenceRules,
+    /// The helium-excess table the tracks read ([`HeliumTable::of`]), the hold of
+    /// [`HELIUM_VERSION`].
+    ///
+    /// [`HeliumTable::of`]: crate::stellar::sse::track::HeliumTable::of
+    pub(crate) helium: HeliumRules,
 }
 
 impl StellarRules {
@@ -75,6 +88,11 @@ impl StellarRules {
                 DwarfSequenceRules::Reduced
             } else {
                 DwarfSequenceRules::Rows
+            },
+            helium: if version.get() >= HELIUM_VERSION.get() {
+                HeliumRules::Fitted
+            } else {
+                HeliumRules::Identity
             },
         }
     }
@@ -112,5 +130,7 @@ impl StellarRules {
     }
 }
 
+#[cfg(test)]
+mod helium_hold;
 #[cfg(test)]
 mod tests;

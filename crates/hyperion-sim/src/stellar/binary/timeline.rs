@@ -20,7 +20,7 @@ use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::{CompactRemnant, NatalKick};
 use crate::stellar::rules::StellarRules;
-use crate::stellar::sse::{self, ZCoeffs};
+use crate::stellar::sse::{self, TrackOptions, ZCoeffs};
 use crate::stellar::{Composition, Phase, StarState, substellar};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
@@ -261,7 +261,7 @@ pub struct BinaryInput {
     draws: [StarDraws; 2],
     age_at_epoch: Years,
     params: BinaryParams,
-    /// The stellar stage's rules the engine's kicks read (`stellar::rules`).
+    /// The stellar stage's rules the engine's kicks and tracks read (`stellar::rules`).
     rules: StellarRules,
 }
 
@@ -385,6 +385,13 @@ impl BinaryInput {
     pub(crate) const fn rules(&self) -> StellarRules {
         self.rules
     }
+
+    /// The options the engine builds its stars' tracks with: the generator's, under the input's
+    /// stellar rules, whose helium table a star with a helium excess reads (P15.T7.b's hold).
+    #[must_use]
+    pub(crate) fn track_options(&self) -> TrackOptions {
+        TrackOptions::default().with_rules(self.rules)
+    }
 }
 
 /// What every segment of one timeline shares: the pair's composition, coefficients, draws and
@@ -396,7 +403,7 @@ pub(crate) struct Context {
     draws: [StarDraws; 2],
     params: BinaryParams,
     age_at_epoch: Years,
-    /// The stellar stage's rules the engine's kicks read.
+    /// The stellar stage's rules the engine's kicks and tracks read.
     rules: StellarRules,
     /// The lightest helium main-sequence star that burns helium, M☉.
     lightest_helium_star: f64,
@@ -467,12 +474,20 @@ impl Context {
         self.age_at_epoch
     }
 
-    /// The stellar stage's rules the engine's kicks read ([`StandardKickLaw::under`]).
+    /// The stellar stage's rules the engine's kicks read ([`StandardKickLaw::under`]), and its
+    /// tracks ([`track_options`](Self::track_options)).
     ///
     /// [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
     #[must_use]
     pub(crate) const fn rules(&self) -> StellarRules {
         self.rules
+    }
+
+    /// The options the engine builds a hydrogen star's track with in the middle of its timeline:
+    /// [`BinaryInput::track_options`]'s.
+    #[must_use]
+    pub(crate) fn track_options(&self) -> TrackOptions {
+        TrackOptions::default().with_rules(self.rules)
     }
 
     #[must_use]

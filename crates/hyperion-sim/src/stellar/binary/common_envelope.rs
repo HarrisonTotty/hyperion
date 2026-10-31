@@ -972,10 +972,11 @@ impl Engine {
         let lifetime = sse::main_sequence_lifetime(self.ctx.coeffs(), false, mass.value());
         let guess = sse::main_sequence_start(mass, self.ctx.composition()) + tau * lifetime;
         let (composition, draws) = (self.ctx.composition(), self.ctx.draws(0));
+        let options = self.ctx.track_options();
         let (track, placed) = super::evolve::track_reaching(
             guess,
             self.reach_span_years(self.age),
-            |reach| Track::to_age(mass, composition, draws, Years::new(reach)),
+            |reach| Track::to_age_with(mass, composition, draws, options, Years::new(reach)),
             |track| track.age_in_phase(Phase::MainSequence, tau),
         );
         let at = placed.unwrap_or(tau * lifetime);
@@ -1054,7 +1055,12 @@ impl Engine {
             Kind::HeliumMainSequence => return self.helium_main_sequence(m, burnt),
             Kind::HertzsprungGap => {
                 let mass = track_mass(SolarMasses::new(m));
-                let track = Track::full(mass, self.ctx.composition(), self.ctx.draws(0));
+                let track = Track::full_with(
+                    mass,
+                    self.ctx.composition(),
+                    self.ctx.draws(0),
+                    self.ctx.track_options(),
+                );
                 let at = track
                     .age_in_phase(Phase::HertzsprungGap, fraction)
                     .unwrap_or(0.0);
@@ -1107,9 +1113,12 @@ impl Engine {
             NewStar::GiantBranch
             | NewStar::CoreHeliumBurning { .. }
             | NewStar::EarlyAgb
-            | NewStar::PulsingAgb => {
-                Track::full(track_mass(m0), self.ctx.composition(), self.ctx.draws(i))
-            }
+            | NewStar::PulsingAgb => Track::full_with(
+                track_mass(m0),
+                self.ctx.composition(),
+                self.ctx.draws(i),
+                self.ctx.track_options(),
+            ),
         };
         let at = track.age_in_phase(phase, fraction)?;
         Some(Member::Shaped {

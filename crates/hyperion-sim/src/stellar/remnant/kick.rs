@@ -48,6 +48,7 @@ use std::error::Error;
 use std::fmt;
 
 use super::{CompactRemnant, Death, DeathKind, ProgenitorAtDeath, RemnantKind, Stripping};
+use crate::GENERATOR_VERSION;
 use crate::coords::UnitVector;
 use crate::galaxy::displaced::binarity;
 use crate::math;
@@ -687,6 +688,26 @@ pub(crate) fn stripped_mark_applied(
     m0: SolarMasses,
     comp: &Composition,
 ) -> Death {
+    stripped_mark_applied_under(
+        death,
+        draws,
+        (m0, comp),
+        StellarRules::of_version(GENERATOR_VERSION),
+    )
+}
+
+/// [`stripped_mark_applied`] against the stripped share under the stellar stage's `rules`, those
+/// of the star whose death it is: the share's exact path, which a star with a helium excess takes,
+/// builds its track under them, as the star's own track reads its mark
+/// (`binarity::is_stripped_under`). The model's remnant stage and the engine's pinned death read
+/// it.
+#[must_use]
+pub(crate) fn stripped_mark_applied_under(
+    death: Death,
+    draws: &StarDraws,
+    (m0, comp): (SolarMasses, &Composition),
+    rules: StellarRules,
+) -> Death {
     let collapse = matches!(
         CollapseChannel::of(death.kind()),
         Some(
@@ -695,7 +716,7 @@ pub(crate) fn stripped_mark_applied(
                 | CollapseChannel::CompleteFallback
         )
     );
-    if !collapse || !binarity::is_stripped(draws.stripped(), m0, comp) {
+    if !collapse || !binarity::is_stripped_under(draws.stripped(), m0, comp, rules) {
         return death;
     }
     let p = death.progenitor();

@@ -1,11 +1,12 @@
-# The helium-excess correction fitted to BaSTI's helium-enhanced models (plan 15, P15.T7.b): least
-# squares on the grid's ages at the end of the main sequence and its zero-age horizontal branches
-# (`data/basti_helium/`, reduced by its `reduce.py`), each helium-enhanced set against the
+# The helium-excess correction fitted to BaSTI's helium-enhanced models (plan 15, P15.T7.b's swap):
+# least squares on the grid's ages at the end of the main sequence and its zero-age horizontal
+# branches (`data/basti_helium/`, reduced by its `reduce.py`), each helium-enhanced set against the
 # canonical sequence at its own Z, with the figures measured on plan 06's tracks under the fitted
-# table, a synthetic cluster's horizontal branch among them. Run with `--manifest` and `--out` to
-# a scratch path; the swap moves these parameters and the dataset into `helium.toml`, takes the
-# task's revision 1 with its fingerprint, and is emitted with a generator-version bump.
-task = "helium"
+# table, a synthetic cluster's horizontal branch among them. It writes `tables::helium_26`, which
+# the tracks read from version 26 on (the stellar rules' hold, `HELIUM_VERSION`), at the version in
+# force; the bump to 26 moves these parameters and the dataset into `helium.toml` and deletes this
+# instance.
+task = "helium_26"
 datasets = ["basti_helium"]
 
 [params]
@@ -21,6 +22,9 @@ mass_max = 0.9
 fit_fe_h_min = -2.5
 fit_fe_h_max = -0.3
 hb_envelope_min = 0.0
+# Also the table's `HB_ENVELOPE_MAX`: the hook holds the branch's shift at this envelope mass and
+# floors it at zero (ruled 2026-10-26, decision-p15-t7b-leans §8), so the fit's range and the bound
+# cannot disagree.
 hb_envelope_max = 0.2
 # The acceptance (plan 15, P15.T7.b, as ruled on 2026-10-23 and 2026-10-26): the lifetime ratio
 # to 3% over [Fe/H] −2.2 to −0.5; ΔY = 0.1 shortening a 0.8 M☉ life by about a half, 0.42–0.55

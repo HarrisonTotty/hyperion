@@ -90,11 +90,13 @@ mod post_agb;
 use core::error::Error;
 use core::fmt;
 
+use crate::GENERATOR_VERSION;
 use crate::stellar::draws::{StarDraws, UnitUniform};
 use crate::stellar::remnant::collapse::{
     COMPANION_STRIPPED_WINDOW, RemnantDraws, SINGLE_STAR_WINDOW,
 };
 use crate::stellar::remnant::{CompactRemnant, Death, RemnantRecipe, SupernovaType};
+use crate::stellar::rules::StellarRules;
 use crate::stellar::{Composition, Phase, StarState, StarStateParts};
 use crate::units::{
     Megayears, SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Years,
@@ -113,7 +115,7 @@ pub(crate) use binary::{
 pub(crate) use binary::{early_agb_core_radius_bound, helium_zams_radius};
 use build::Builder;
 pub(crate) use build::Resolution;
-pub(crate) use excess::{HeliumHook, HeliumTable};
+pub(crate) use excess::{HELIUM_VERSION, HeliumHook, HeliumRules, HeliumTable};
 // P15.T7.b's tracks under a candidate helium table, for `hyperion-fit`'s fit of `tables::helium`.
 #[cfg(any(test, feature = "testing"))]
 pub use excess::{CandidateHeliumTable, track_with_helium_table};
@@ -274,18 +276,25 @@ impl fmt::Display for BuildCaptureWindowWidthsError {
 
 impl Error for BuildCaptureWindowWidthsError {}
 
-/// The choices a track is built with: the wind and remnant recipes, the bridges, and the widths of
-/// the electron-capture windows the remnant recipe reads.
+/// The choices a track is built with: the wind and remnant recipes, the bridges, the widths of
+/// the electron-capture windows the remnant recipe reads, and the stellar stage's rules.
 ///
 /// The default is the generator's: [`WindRecipe::Modern`], [`RemnantRecipe::MandelMuller2020`],
-/// [`Bridges::Physical`] and [`CaptureWindowWidths::DEFAULT`]. [`TrackOptions::hurley2000`] is the
-/// published SSE code's, for the validation of P06.T12.b; its remnant recipe reads no window.
+/// [`Bridges::Physical`], [`CaptureWindowWidths::DEFAULT`] and the generator version's rules.
+/// [`TrackOptions::hurley2000`] is the published SSE code's, for the validation of P06.T12.b; its
+/// remnant recipe reads no window.
+///
+/// The rules (`stellar::rules`) carry the stellar stage's holds down to the track: the helium
+/// table a star with a helium excess reads (P15.T7.b's swap, held until version 26). A star
+/// generated in a galaxy takes the galaxy's, which its model, its pair's engine and the brief
+/// set; every other track takes the version's.
 ///
 /// The options are not `Eq`, `Ord` or `Hash`, since the windows' widths are floats, which the sim
 /// never hashes (P15.T5.d). Their `Debug` names the windows only where they are not the
-/// generator's, [`CaptureWindowWidths::DEFAULT`], so that a track's `Debug`, which the binary
-/// timelines' golden digests (`stellar::binary`'s `a_thousand_timelines_are_pinned`), reads as it
-/// did before the windows became an option.
+/// generator's, [`CaptureWindowWidths::DEFAULT`], and the rules only where they are not the
+/// version's, so that a track's `Debug`, which the binary timelines' golden digests
+/// (`stellar::binary`'s `a_thousand_timelines_are_pinned`), reads as it did before the windows and
+/// the rules became options.
 ///
 /// # Examples
 ///
@@ -304,6 +313,7 @@ pub struct TrackOptions {
     remnant: RemnantRecipe,
     bridges: Bridges,
     capture_windows: CaptureWindowWidths,
+    rules: StellarRules,
 }
 
 impl fmt::Debug for TrackOptions {
@@ -316,6 +326,9 @@ impl fmt::Debug for TrackOptions {
         if self.capture_windows != CaptureWindowWidths::DEFAULT {
             options.field("capture_windows", &self.capture_windows);
         }
+        if self.rules != StellarRules::of_version(GENERATOR_VERSION) {
+            options.field("rules", &self.rules);
+        }
         options.finish()
     }
 }
@@ -327,6 +340,7 @@ impl Default for TrackOptions {
             remnant: RemnantRecipe::default(),
             bridges: Bridges::default(),
             capture_windows: CaptureWindowWidths::DEFAULT,
+            rules: StellarRules::of_version(GENERATOR_VERSION),
         }
     }
 }
@@ -341,6 +355,7 @@ impl TrackOptions {
             remnant: RemnantRecipe::Hurley2000,
             bridges: Bridges::Instant,
             capture_windows: CaptureWindowWidths::DEFAULT,
+            rules: StellarRules::of_version(GENERATOR_VERSION),
         }
     }
 
@@ -393,6 +408,21 @@ impl TrackOptions {
     #[must_use]
     pub const fn capture_windows(&self) -> CaptureWindowWidths {
         self.capture_windows
+    }
+
+    /// These options under the stellar stage's `rules` in place of the generator version's: what
+    /// a star generated in a galaxy is built with, from `galaxy.rules().stellar`
+    /// (`stellar::rules`).
+    #[must_use]
+    pub(crate) const fn with_rules(self, rules: StellarRules) -> Self {
+        Self { rules, ..self }
+    }
+
+    /// The stellar stage's rules, whose holds the track's builders read: the helium table
+    /// ([`HeliumTable::of`]).
+    #[must_use]
+    pub(crate) const fn rules(&self) -> StellarRules {
+        self.rules
     }
 }
 
@@ -645,12 +675,12 @@ impl Track {
             options,
             resolution,
             age_max,
-            HeliumHook::of(comp, &HeliumTable::COMMITTED),
+            HeliumHook::of(comp, &HeliumTable::of(options.rules())),
         )
     }
 
-    /// [`Track::build`] with the helium-excess correction `helium` in place of the committed
-    /// table's (P06.T17's tests build tracks from a table that is not the identity).
+    /// [`Track::build`] with the helium-excess correction `helium` in place of the one its
+    /// options' rules choose (P06.T17's tests build tracks from a table that is not the identity).
     #[must_use]
     pub(crate) fn build_with_helium(
         m0: SolarMasses,
@@ -674,7 +704,12 @@ impl Track {
             build::Keep::Track,
         )
         .with_helium(helium)
-        .stripped_by_companion(is_companion_stripped(m0, comp, draws))
+        .stripped_by_companion(is_companion_stripped_under(
+            m0,
+            comp,
+            draws,
+            options.rules(),
+        ))
         .run(m0.value(), age_max);
         Self {
             coeffs,
@@ -1275,7 +1310,12 @@ pub(crate) fn fate_of(
         Resolution::GENERATOR,
         build::Keep::Lifetime,
     )
-    .stripped_by_companion(is_companion_stripped(m0, comp, draws))
+    .stripped_by_companion(is_companion_stripped_under(
+        m0,
+        comp,
+        draws,
+        options.rules(),
+    ))
     .run(m0.value(), None);
     outcome
         .fate
@@ -1293,9 +1333,21 @@ pub(crate) fn is_companion_stripped(
     comp: &Composition,
     draws: &StarDraws,
 ) -> bool {
+    is_companion_stripped_under(m0, comp, draws, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`is_companion_stripped`] for a track built under the stellar stage's `rules`: the share's
+/// exact path, which a star with a helium excess takes, builds its own track under them.
+#[must_use]
+fn is_companion_stripped_under(
+    m0: SolarMasses,
+    comp: &Composition,
+    draws: &StarDraws,
+    rules: StellarRules,
+) -> bool {
     let (lo, hi) = crate::stellar::fates::STRIPPED_WINDOW;
     (lo..=hi).contains(&m0.value())
-        && crate::galaxy::displaced::binarity::is_stripped(draws.stripped(), m0, comp)
+        && crate::galaxy::displaced::binarity::is_stripped_under(draws.stripped(), m0, comp, rules)
 }
 
 /// The state at `age` of a star of initial mass `m0`, `comp` and `draws` under `options`, if its
@@ -1350,7 +1402,12 @@ impl Track {
             Resolution::GENERATOR,
             build::Keep::Track,
         )
-        .stripped_by_companion(is_companion_stripped(m0, comp, draws))
+        .stripped_by_companion(is_companion_stripped_under(
+            m0,
+            comp,
+            draws,
+            options.rules(),
+        ))
         .zero_age_main_sequence_segment(m0.value())
         .segment;
         if !segment.knots.is_empty() {
@@ -1366,7 +1423,7 @@ impl Track {
             segments: vec![segment],
             fate: None,
             built_until: end,
-            helium: HeliumHook::of(comp, &HeliumTable::COMMITTED),
+            helium: HeliumHook::of(comp, &HeliumTable::of(options.rules())),
             nebula: draws.nebula(),
         })
     }
@@ -1440,7 +1497,7 @@ impl Track {
             segments: vec![remnant_segment(remnant)],
             fate: None,
             built_until: f64::INFINITY,
-            helium: HeliumHook::of(comp, &HeliumTable::COMMITTED),
+            helium: HeliumHook::of(comp, &HeliumTable::of(options.rules())),
             nebula: UnitUniform::HALF,
         }
     }
@@ -1503,7 +1560,12 @@ pub(crate) fn remnant_of(
         Resolution::GENERATOR,
         build::Keep::Remnant,
     )
-    .stripped_by_companion(is_companion_stripped(m0, comp, draws))
+    .stripped_by_companion(is_companion_stripped_under(
+        m0,
+        comp,
+        draws,
+        options.rules(),
+    ))
     .run(m0.value(), None);
     let fate = outcome
         .fate

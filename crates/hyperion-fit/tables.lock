@@ -274,6 +274,18 @@ provisional = true
 acceptance = "the identity: every coefficient zero, so no star moves; P15.T7.b's fit to the helium-enhanced models of Pietrinferni et al. (2006) is held for the swap"
 
 [[table]]
+name = "helium_26"
+path = "helium_26.rs"
+task = "helium_26"
+revision = 1
+inputs_sha256 = "8510d36dcad2bf1746add1cd06578f2ad4ec065d8c707bc4e869b4bcf0e70fad"
+body_sha256 = "444226d4c1dd6426234da2912a93dd463ebed5a57fc15405d502af31689f05d4"
+fingerprint = [0.0001, 41267276577.84121, 14440977877.597254, 13806318311.34176, 4831351953.383062, 8880299343.875269, 3107551963.828981, 12106650666.019646, 3.5933192170241854, 11556634283.031178, 3.600679111826002, 0.7710537608237432, 0.32, 0.18]
+since_generator_version = 24
+provisional = false
+acceptance = "lifetime ratios on plan 06's tracks against the grid's, 72 points of 0.6–0.9 M☉ at [Fe/H] -2.40 to -0.42 (the rows bracketing -2.2 to -0.5), ΔY to 0.155: within 2.44% (3% allowed; passes), and the 48 inside -2.2 to -0.5 within 1.88%; ΔY = 0 tracks are `Track::full`'s bit for bit at 720 probes (passes); s at 0.1 and 150 M☉ at the four nodes from -9.09 to -5.04 (negative; passes); ΔY = 0.1 shortens a 0.8 M☉ life by 0.472 at [Fe/H] -2.2, 0.486 at [Fe/H] -1.6, 0.497 at [Fe/H] -1.0, 0.518 at [Fe/H] -0.5 (0.42–0.55; passes); the fitted shift of the zero-age horizontal branch at Y = 0.4 (ΔY 0.152 on average), over its 164 points at fixed envelope mass, 0.0367 dex on average against the grid's 0.0354, within 3.7% (10% allowed; passes); a 1e6 M☉ cluster at 12 Gyr and Z = 0.0008 ([Fe/H] -1.40), ΔY up to 0.18: its horizontal branch's blue end (0.95 quantile of log `T_eff`) at ΔY = 0.154 is 0.422 dex hotter than the first population's (84 and 249 branch stars; hotter, passes), beside the grid's branch's 0.308 dex for the same envelopes (the excess is plan 06's branch, a recorded finding); the core mass at helium ignition on plan 06's tracks 0.4975 M☉ at ΔY 0 and 0.5003 at ΔY 0.154, against the grid's zero-age 0.4917 and 0.4623; extrapolated to ΔY = 0.18 (beyond the grid's reach, not clamped): a 0.8 M☉ star's timescales at Z = 0.0008 scale by 0.293 (s = -6.812), beside the grid's ratios there of 0.694 at ΔY 0.054 (s -6.767), 0.495 at ΔY 0.104 (s -6.760), 0.346 at ΔY 0.154 (s -6.885); the branch's shift (a + b `M_env`) ΔY = 0.068 dex at `M_env` 0 and 0.034 at 0.1 M☉, held beyond `M_env` = 0.2 M☉ and floored at zero, so 0.0006–0.068 dex at every envelope to 150 M☉"
+
+[[table]]
 name = "kick_defaults"
 path = "kick_defaults.rs"
 task = "kick_defaults"

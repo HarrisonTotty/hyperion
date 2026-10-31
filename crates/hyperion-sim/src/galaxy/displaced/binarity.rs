@@ -54,6 +54,7 @@
 //!
 //! [`can_interact`]: crate::stellar::binary::can_interact
 
+use crate::GENERATOR_VERSION;
 use crate::math;
 use crate::orbit::roche_lobe_radius;
 use crate::rng::{Mark, Threshold};
@@ -63,7 +64,10 @@ use crate::stellar::draws::{StarDraws, StarDrawsParts};
 use crate::stellar::multiplicity::{
     MultiplicityModel, band_share_as_drawn, stripped_share_as_drawn as multiplicity_share,
 };
-use crate::stellar::sse::{MAX_INITIAL_MASS, MIN_INITIAL_MASS, Stage, Track, main_sequence_start};
+use crate::stellar::rules::StellarRules;
+use crate::stellar::sse::{
+    MAX_INITIAL_MASS, MIN_INITIAL_MASS, Stage, Track, TrackOptions, main_sequence_start,
+};
 use crate::tables::stripping;
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{Metres, SolarMasses, Years};
@@ -223,12 +227,20 @@ impl StageRadii {
     /// 150 M☉ above the tracks' range): a full track, about a millisecond.
     #[must_use]
     pub fn of_track(m1: SolarMasses, comp: &Composition) -> Self {
+        Self::of_track_under(m1, comp, StellarRules::of_version(GENERATOR_VERSION))
+    }
+
+    /// [`StageRadii::of_track`] with the track built under the stellar stage's `rules`, those of
+    /// the star whose mark or orbit reads it.
+    #[must_use]
+    pub(crate) fn of_track_under(m1: SolarMasses, comp: &Composition, rules: StellarRules) -> Self {
         let m0 = if m1 > MAX_INITIAL_MASS {
             MAX_INITIAL_MASS
         } else {
             m1
         };
-        Self::of_built(&Track::full(m0, comp, &unstripped_median()))
+        let options = TrackOptions::default().with_rules(rules);
+        Self::of_built(&Track::full_with(m0, comp, &unstripped_median(), options))
     }
 
     /// The radii read from a primary's full track `track`, built at [`StageRadii::of_track`]'s
@@ -324,7 +336,13 @@ pub fn stripping_band(m1: SolarMasses, q: f64, comp: &Composition) -> StrippingB
 /// If `m` is not positive and finite.
 #[must_use]
 pub fn exact_stripped_share(m: SolarMasses, comp: &Composition) -> f64 {
-    band_share_of(m, comp, StageRadii::of_track(m, comp))
+    exact_stripped_share_under(m, comp, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`exact_stripped_share`] with the primary's track built under the stellar stage's `rules`.
+#[must_use]
+fn exact_stripped_share_under(m: SolarMasses, comp: &Composition, rules: StellarRules) -> f64 {
+    band_share_of(m, comp, StageRadii::of_track_under(m, comp, rules))
 }
 
 /// [`exact_stripped_share`]'s quadrature over the bands of `radii`.
@@ -362,9 +380,18 @@ fn band_share_of(m: SolarMasses, comp: &Composition, radii: StageRadii) -> f64 {
 /// ```
 #[must_use]
 pub fn stripped_share(m: SolarMasses, comp: &Composition) -> f64 {
-    StrippingTable::generator()
-        .at(m, comp)
-        .map_or_else(|| exact_stripped_share(m, comp), |node| node.share)
+    stripped_share_under(m, comp, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`stripped_share`] with the exact path's track built under the stellar stage's `rules`, those
+/// of the star whose mark reads it: the table holds no star with a helium excess, whose track the
+/// rules' helium table moves (P15.T7.b's hold, `stellar::rules`).
+#[must_use]
+pub(crate) fn stripped_share_under(m: SolarMasses, comp: &Composition, rules: StellarRules) -> f64 {
+    StrippingTable::generator().at(m, comp).map_or_else(
+        || exact_stripped_share_under(m, comp, rules),
+        |node| node.share,
+    )
 }
 
 /// [`stripped_share`] with the primary's full track `track`, already built at the median draws
@@ -388,9 +415,20 @@ pub(crate) fn stripped_share_on(m: SolarMasses, comp: &Composition, track: &Trac
 /// If `m1` is not positive and finite.
 #[must_use]
 pub fn stripping_node(m1: SolarMasses, comp: &Composition) -> StrippingNode {
+    stripping_node_under(m1, comp, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`stripping_node`] with the exact path's track built under the stellar stage's `rules`, those
+/// of the galaxy whose hierarchy draws the primary's orbit.
+#[must_use]
+pub(crate) fn stripping_node_under(
+    m1: SolarMasses,
+    comp: &Composition,
+    rules: StellarRules,
+) -> StrippingNode {
     StrippingTable::generator()
         .at(m1, comp)
-        .unwrap_or_else(|| StrippingNode::of(m1, comp))
+        .unwrap_or_else(|| StrippingNode::of_under(m1, comp, rules))
 }
 
 /// A companion-stripped mark that no share below 1 sets: the largest mark, 2⁵³ − 1, which lies
@@ -408,7 +446,19 @@ pub const NEVER_STRIPPED: Mark = Mark::from_word(u64::MAX);
 /// If `m` is not positive and finite.
 #[must_use]
 pub fn is_stripped(mark: Mark, m: SolarMasses, comp: &Composition) -> bool {
-    mark != NEVER_STRIPPED && is_stripped_at(mark, stripped_share(m, comp))
+    is_stripped_under(mark, m, comp, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`is_stripped`] against [`stripped_share_under`] the stellar stage's `rules`: what a track
+/// built under them asks of its mark.
+#[must_use]
+pub(crate) fn is_stripped_under(
+    mark: Mark,
+    m: SolarMasses,
+    comp: &Composition,
+    rules: StellarRules,
+) -> bool {
+    mark != NEVER_STRIPPED && is_stripped_at(mark, stripped_share_under(m, comp, rules))
 }
 
 /// Whether the companion-stripped mark `mark` is set against the stripped share `share`, the
@@ -479,9 +529,15 @@ impl StrippingNode {
     /// quadrature, as `hyperion-fit`'s `stripping` task computes each node.
     #[must_use]
     pub fn of(m1: SolarMasses, comp: &Composition) -> Self {
+        Self::of_under(m1, comp, StellarRules::of_version(GENERATOR_VERSION))
+    }
+
+    /// [`StrippingNode::of`] with the track built under the stellar stage's `rules`.
+    #[must_use]
+    fn of_under(m1: SolarMasses, comp: &Composition, rules: StellarRules) -> Self {
         Self {
-            share: exact_stripped_share(m1, comp),
-            radii: StageRadii::of_track(m1, comp),
+            share: exact_stripped_share_under(m1, comp, rules),
+            radii: StageRadii::of_track_under(m1, comp, rules),
         }
     }
 

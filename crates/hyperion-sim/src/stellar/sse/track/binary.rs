@@ -146,6 +146,10 @@ impl Track {
     /// The track of a star entering its life at `entry` at age zero, whose initial mass is
     /// reported as `initial_mass`, under the generator's options. A star built so has lost its
     /// envelope to a companion, which its electron-capture window reads (plan 06, design note 11).
+    ///
+    /// Its rules are the version's, whatever the engine's: a naked helium star has no hydrogen
+    /// main sequence, gap, giant branch or horizontal branch, so no helium table reaches it
+    /// (P15.T7.b's hold, `stellar::rules`).
     #[must_use]
     fn build_from_entry(
         entry: Entry,
@@ -177,7 +181,7 @@ impl Track {
             segments: outcome.segments,
             fate: outcome.fate,
             built_until: outcome.built_until,
-            helium: HeliumHook::of(comp, &HeliumTable::COMMITTED),
+            helium: HeliumHook::of(comp, &HeliumTable::of(options.rules())),
             nebula: draws.nebula(),
         }
     }

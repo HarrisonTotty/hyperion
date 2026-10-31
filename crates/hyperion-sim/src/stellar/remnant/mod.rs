@@ -106,11 +106,11 @@ pub mod collapse;
 // The natal kick law behind one interface (P06.T19.a, T19.c), which `StarModel`'s remnant stage
 // calls (P06.T29.a).
 mod kick;
-pub(crate) use kick::KickRankRules;
 pub use kick::{
     BuildKickRankTableError, CollapseChannel, KickDraws, KickLaw, KickLawParams, KickMode,
     KickRankTable, NatalKick, StandardKickLaw, ordinary_score,
 };
+pub(crate) use kick::{KickRankRules, stripped_mark_applied_under};
 
 // The kick law's reference population and the observables its tests assert (P06.T19.b, T19.d).
 pub mod reference;

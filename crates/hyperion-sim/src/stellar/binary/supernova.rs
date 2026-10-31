@@ -537,6 +537,7 @@ impl Engine {
             };
             let guess = start + sse::main_sequence_lifetime(self.ctx.coeffs(), helium, m);
             let (composition, draws) = (self.ctx.composition(), self.ctx.draws(i));
+            let options = self.ctx.track_options();
             let build = |reach: f64| {
                 if helium {
                     sse::Track::helium_star(
@@ -546,10 +547,11 @@ impl Engine {
                         Years::new(reach),
                     )
                 } else {
-                    sse::Track::to_age(
+                    sse::Track::to_age_with(
                         super::evolve::track_mass(SolarMasses::new(m)),
                         composition,
                         draws,
+                        options,
                         Years::new(reach),
                     )
                 }

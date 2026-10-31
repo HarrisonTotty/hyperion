@@ -570,9 +570,9 @@ mod tests {
     /// The manifest's cluster draws plan 09's populations at 10⁶ M☉.
     #[test]
     fn the_production_cluster_is_plan_nines_at_its_mass() {
-        let text = include_str!("../../../manifests/helium.production.toml");
+        let text = include_str!("../../../manifests/helium_26.toml");
         let manifest = Manifest::from_bytes(
-            std::path::Path::new("helium.production.toml"),
+            std::path::Path::new("helium_26.toml"),
             text.as_bytes().to_vec(),
         )
         .unwrap();

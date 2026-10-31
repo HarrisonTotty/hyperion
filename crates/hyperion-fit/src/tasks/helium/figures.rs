@@ -18,13 +18,14 @@
 //!    0.42–0.55, about a half (L3);
 //! 5. the fitted horizontal-branch shift against the grid's zero-age shift of log₁₀ `T_eff` at
 //!    fixed envelope mass, at the grid's top Y: their means over that Y's fitted points, to 10%
-//!    of the grid's (L4);
+//!    of the grid's (L4), the fitted shift by the hook's rule, held at `HB_ENVELOPE_MAX` (§8);
 //! 6. the synthetic cluster's horizontal branch ([`cluster`]): its blue end at the grid's top ΔY
 //!    hotter than its first population's (L4), its figure stated beside the grid's amount, with
 //!    the core masses at helium ignition beside the grid's;
 //!
 //! and, reported beside them, the extrapolation to ΔY = 0.18 (`HELIUM_EXCESS_MAX`) against the
-//! trend of the grid's own ratios at its three ΔY (the ruling's point 6).
+//! trend of the grid's own ratios at its three ΔY (the ruling's point 6), with the branch's shift
+//! there over every envelope a track takes ([`shift_reach_dex`]).
 //!
 //! The probes of figure 2 ([`IDENTITY_PROBES`], [`probe_ages_yr`]), the cluster's search
 //! settings and the extrapolation's reference envelope ([`REFERENCE_ENVELOPE_MSUN`]) are fixed
@@ -33,6 +34,10 @@
 
 use std::fmt::Write as _;
 
+use hyperion_sim::galaxy::features::interior::abundances::{
+    first_population_share, helium_excess_max,
+};
+use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::math;
 use hyperion_sim::stellar::Composition;
 use hyperion_sim::stellar::draws::StarDraws;
@@ -159,7 +164,7 @@ pub struct BranchShift {
     pub points: u64,
     /// Their mean ΔY.
     pub delta_y: f64,
-    /// The mean of the fitted shift, (a + b `M_env`) ΔY, dex.
+    /// The mean of the fitted shift by the hook's rule, (a + b `M_env`) ΔY inside the bound, dex.
     pub fitted: f64,
     /// The mean of the grid's shift at the same envelope masses, dex.
     pub grid: f64,
@@ -174,13 +179,15 @@ impl BranchShift {
             .iter()
             .map(|p| p.set.y)
             .fold(f64::NEG_INFINITY, f64::max);
-        let [a, b] = table.hb_temperature_shift();
         let (mut n, mut delta_y, mut fitted, mut grid) = (0_u32, 0.0, 0.0, 0.0);
         // The points' Y are the file's, so the top Y's are matched exactly.
         for p in points.iter().filter(|p| p.set.y.total_cmp(&y).is_eq()) {
             n += 1;
             delta_y += p.delta_y;
-            fitted += (a + b * p.envelope_msun) * p.delta_y;
+            fitted += table.branch_shift_dex(
+                SolarMasses::new(p.envelope_msun),
+                HeliumExcess::new(p.delta_y),
+            );
             grid += p.shift;
         }
         if n == 0 {
@@ -351,7 +358,7 @@ impl Figures {
             "lifetime ratios on plan 06's tracks against the grid's, {} points of {}–{} M☉ at \
              [Fe/H] {:.2} to {:.2} (the rows bracketing {} to {}), ΔY to {:.3}: within {:.2}% \
              ({}% allowed; {}), and the {} inside {} to {} within {:.2}%; ΔY = 0 tracks are \
-             Track::full's bit for bit at {} probes ({}); s at {} and {} M☉ at the four nodes \
+             `Track::full`'s bit for bit at {} probes ({}); s at {} and {} M☉ at the four nodes \
              from {:.2} to {:.2} (negative; {}); ΔY = {} shortens a {} M☉ life by ",
             count(self.lifetime.len()),
             params.masses_msun.0,
@@ -445,7 +452,7 @@ impl Figures {
                 let _ = write!(
                     out,
                     "; a {:e} M☉ cluster at {} Gyr and Z = {} ([Fe/H] {:.2}), ΔY up to {}: its \
-                     horizontal branch's blue end ({} quantile of log T_eff) at ΔY = {:.3} is \
+                     horizontal branch's blue end ({} quantile of log `T_eff`) at ΔY = {:.3} is \
                      {:.3} dex hotter than the first population's ({} and {} branch stars; \
                      hotter, {}), beside the grid's branch's {:.3} dex for the same envelopes \
                      (the excess is plan 06's branch, a recorded finding); the core mass at \
@@ -509,22 +516,140 @@ fn describe_extrapolation(fit: &Fit, params: &FitParams, out: &mut String) {
             )
         })
         .collect();
-    let [a, b] = table.hb_temperature_shift();
+    let shift =
+        |envelope: f64| table.branch_shift_dex(SolarMasses::new(envelope), HeliumExcess::new(dy));
+    let (least, greatest) = shift_reach_dex(table, dy);
     // Writing into a `String` cannot fail.
     let _ = write!(
         out,
         "; extrapolated to ΔY = {dy} (beyond the grid's reach, not clamped): a {mass} M☉ \
          star's timescales at Z = {z} scale by {:.3} (s = {s:.3}), beside the grid's ratios \
-         there of {}; the branch's shift (a + b M_env) ΔY = {:.3} dex at M_env 0 and {:.3} \
-         at {} M☉",
+         there of {}; the branch's shift (a + b `M_env`) ΔY = {:.3} dex at `M_env` 0 and {:.3} \
+         at {} M☉, held beyond `M_env` = {} M☉ and floored at zero, so {:.4}–{:.3} dex at every \
+         envelope to {} M☉",
         math::exp(s * dy),
         if trend.is_empty() {
             "none".to_owned()
         } else {
             trend.join(", ")
         },
-        a * dy,
-        (a + b * REFERENCE_ENVELOPE_MSUN) * dy,
+        shift(0.0),
+        shift(REFERENCE_ENVELOPE_MSUN),
         REFERENCE_ENVELOPE_MSUN,
+        table
+            .hb_envelope_max()
+            .map_or_else(|| "none".to_owned(), |m| m.value().to_string()),
+        least,
+        greatest,
+        MAX_INITIAL_MASS.value(),
     );
+}
+
+/// The envelope masses at which [`shift_reach_dex`] evaluates the branch's shift, M☉: none, then
+/// 1,000 even in log₁₀ from 10⁻⁴ to 150, the heaviest star a track takes.
+#[must_use]
+pub fn reach_envelopes_msun() -> Vec<f64> {
+    let top = math::log10(MAX_INITIAL_MASS.value());
+    std::iter::once(0.0)
+        .chain((0..1_000).map(|i| math::exp10(-4.0 + (top + 4.0) * f64::from(i) / 999.0)))
+        .collect()
+}
+
+/// The least and the greatest of the branch's shift under `table` at ΔY `delta_y`, dex, over
+/// [`reach_envelopes_msun`]: by the hook's rule, so held and floored where the table bounds it.
+#[must_use]
+pub fn shift_reach_dex(table: &CandidateHeliumTable, delta_y: f64) -> (f64, f64) {
+    reach_envelopes_msun()
+        .into_iter()
+        .map(|m| table.branch_shift_dex(SolarMasses::new(m), HeliumExcess::new(delta_y)))
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| {
+            (lo.min(x), hi.max(x))
+        })
+}
+
+/// The fixed candidate the fingerprint's probes with a helium excess are built under: s = −7 at
+/// every mass and node and a shift of (0.4, −2) per unit ΔY held at 0.2 M☉, near the fit's, so that
+/// the probes read the hook's arithmetic and the tracks' without reading the fit.
+pub const PROBE_TABLE: CandidateHeliumTable =
+    CandidateHeliumTable::new([[-7.0, 0.0, 0.0]; 4], [0.4, -2.0])
+        .with_envelope_max(SolarMasses::new(0.2));
+
+/// The grid's lowest Z (the `z795y400` naming's 7.9 × 10⁻⁵, of the 10⁻⁴ row's Y = 0.40 set), at
+/// which `Composition::z_fit`'s clamp is probed.
+const GRID_LOWEST_Z: f64 = 7.9e-5;
+
+/// The fingerprint's Z: the synthetic cluster's, 0.0008 (\[Fe/H\] −1.40), where the probes'
+/// tracks are built.
+const PROBE_Z: f64 = 0.0008;
+
+/// The sim's values the fit reads (Design note 7, `lifetime_bracket`'s as the model; P15.T7.b's
+/// record, "For the swap" 4): the coefficients read only the grid, the sim's `LOG_Z_NODES` and
+/// `Composition::z_fit`'s clamp, and the figures read plan 06's tracks. So the probes are
+/// `z_fit` at the grid's lowest Z; the main sequence's duration at 0.6, 0.8 and 0.9 M☉ at the
+/// cluster's Z, at ΔY = 0 and at ΔY 0.15 under [`PROBE_TABLE`]; the start age and zero-age
+/// log₁₀ `T_eff` of the horizontal branch of 0.84 M☉ there at ΔY = 0 and of 0.64 M☉ at ΔY 0.154
+/// under [`PROBE_TABLE`], at the median η; the default mass function's mean mass; and plan 09's
+/// first-population share and largest ΔY at 10⁶ M☉. A probe a track does not reach is NaN.
+#[must_use]
+pub fn fingerprint_probes() -> Vec<(String, f64)> {
+    let fe_h = math::log10(PROBE_Z / SIM_Z_SOLAR);
+    let mut probes = vec![(
+        format!("z_fit at Z {GRID_LOWEST_Z}"),
+        composition(math::log10(GRID_LOWEST_Z / SIM_Z_SOLAR), 0.0)
+            .z_fit()
+            .value(),
+    )];
+    for m in [0.6, 0.8, 0.9] {
+        for (delta_y, table) in [(0.0, CandidateHeliumTable::COMMITTED), (0.15, PROBE_TABLE)] {
+            probes.push((
+                format!("main sequence of {m} M☉ at Z {PROBE_Z}, ΔY {delta_y}, years"),
+                main_sequence_duration_yr(m, &composition(fe_h, delta_y), &table)
+                    .unwrap_or(f64::NAN),
+            ));
+        }
+    }
+    for (m, delta_y, table) in [
+        (0.84, 0.0, CandidateHeliumTable::COMMITTED),
+        (0.64, 0.154, PROBE_TABLE),
+    ] {
+        let track = track_with_helium_table(
+            SolarMasses::new(m),
+            &composition(fe_h, delta_y),
+            &StarDraws::median(),
+            &table,
+        );
+        let start = cluster::horizontal_branch_years(&track).map(|(start, _)| start);
+        probes.push((
+            format!("horizontal branch of {m} M☉ at Z {PROBE_Z}, ΔY {delta_y}: start, years"),
+            start.unwrap_or(f64::NAN),
+        ));
+        probes.push((
+            format!("horizontal branch of {m} M☉ at Z {PROBE_Z}, ΔY {delta_y}: log10 T_eff"),
+            start.map_or(f64::NAN, |age| {
+                math::log10(
+                    track
+                        .state_at(Years::new(age))
+                        .effective_temperature()
+                        .value(),
+                )
+            }),
+        ));
+    }
+    let imf = MassFunctionKind::default().to_mass_function();
+    let cluster = SolarMasses::new(1e6);
+    probes.extend([
+        (
+            "mean mass of the default mass function, M☉".to_owned(),
+            cluster::mean_mass_msun(imf.as_ref()),
+        ),
+        (
+            "first_population_share(1e6 M☉)".to_owned(),
+            first_population_share(cluster),
+        ),
+        (
+            "helium_excess_max(1e6 M☉)".to_owned(),
+            helium_excess_max(cluster),
+        ),
+    ]);
+    probes
 }

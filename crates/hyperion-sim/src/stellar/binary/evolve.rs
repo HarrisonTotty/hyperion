@@ -29,7 +29,9 @@ use std::sync::Arc;
 use crate::orbit::{Orientation, roche_lobe_radius};
 use crate::stellar::multiplicity::stripped_mark_min_mass;
 use crate::stellar::remnant::collapse::RemnantDraws;
-use crate::stellar::remnant::{CompactRemnant, Death, NatalKick, StandardKickLaw};
+use crate::stellar::remnant::{
+    CompactRemnant, Death, NatalKick, StandardKickLaw, stripped_mark_applied_under,
+};
 use crate::stellar::sse::{self, Track};
 use crate::stellar::substellar;
 use crate::units::consts::SOLAR_RADIUS_M;
@@ -346,10 +348,11 @@ fn own_members_with(
             };
         }
         let build = |reach: f64| {
-            Arc::new(Track::to_age(
+            Arc::new(Track::to_age_with(
                 track_mass(m),
                 input.composition(),
                 &input.draws()[i],
+                input.track_options(),
                 Years::new(reach),
             ))
         };
@@ -485,15 +488,25 @@ fn pinned_death(input: &BinaryInput, full: Option<Arc<Track>>) -> Option<PinnedT
         return None;
     }
     let draws = &input.draws()[0];
-    let track =
-        full.unwrap_or_else(|| Arc::new(Track::full(track_mass(m1), input.composition(), draws)));
+    let track = full.unwrap_or_else(|| {
+        Arc::new(Track::full_with(
+            track_mass(m1),
+            input.composition(),
+            draws,
+            input.track_options(),
+        ))
+    });
     let fate = track.fate_with(RemnantDraws::of(draws))?;
     if !fate.death.kind().is_sudden() {
         return None;
     }
     let law = StandardKickLaw::under(input.rules());
-    let death =
-        law.with_stripped_mark(fate.death, draws, track.initial_mass(), track.composition());
+    let death = stripped_mark_applied_under(
+        fate.death,
+        draws,
+        (track.initial_mass(), track.composition()),
+        input.rules(),
+    );
     let kick = law.natal_kick(&death, &fate.remnant, draws);
     Some(PinnedTrack {
         track,

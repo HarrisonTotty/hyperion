@@ -964,8 +964,9 @@ fn innermost(
     }
     let mark = primary_draws(galaxy, record).stripped();
     // One reading of the seam for the share and the radii: `binarity::is_stripped`'s comparison
-    // on the share it would read.
-    let node = binarity::stripping_node(m1, &comp);
+    // on the share it would read, its exact path's track under the galaxy's stellar rules, as the
+    // primary's own track's mark reads it.
+    let node = binarity::stripping_node_under(m1, &comp, galaxy.rules().stellar);
     let (radii, share) = (node.radii(), node.share());
     if mark != binarity::NEVER_STRIPPED && binarity::is_stripped_at(mark, share) {
         Innermost::Stripped(radii)

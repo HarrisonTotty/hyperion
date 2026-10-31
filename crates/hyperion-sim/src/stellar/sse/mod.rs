@@ -48,6 +48,10 @@ pub(crate) use track::post_agb_ionising_years;
 pub(crate) use track::{
     Fate, RemnantModel, Stage, bridged_origin, fate_of, is_companion_stripped, remnant_of,
 };
+// The helium-excess table's hold (P15.T7.b's swap), which the stellar rules carry.
+pub(crate) use track::{HELIUM_VERSION, HeliumRules};
+#[cfg(test)]
+pub(crate) use track::{HeliumHook, HeliumTable};
 // Plan 11's hooks into the track (P11.T4, ruling 34.1): see `track/binary.rs`.
 pub use track::{
     AgeInterval, Bridges, BuildCaptureWindowWidthsError, CaptureWindowWidths, MAX_INITIAL_MASS,

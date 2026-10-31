@@ -1,6 +1,6 @@
 //! P15.T7.b's fit of the helium-excess table to `BaSTI`'s helium-enhanced grid
-//! ([`grid`](super::grid)), run from `manifests/helium.production.toml` (`method =
-//! "basti_least_squares"`), and its figures on plan 06's tracks under the fitted table.
+//! ([`grid`](super::grid)), run from `manifests/helium_26.toml` (`method = "basti_least_squares"`)
+//! into `tables::helium_26`, and its figures on plan 06's tracks under the fitted table.
 //!
 //! - **`LIFETIME_SLOPE`.** At every point of the grid, a helium-enhanced set's track of mass m
 //!   against the canonical sequence carried to the set's Z, the target is ln r, r = t(Y) ÷ t(Y₀)
@@ -18,6 +18,10 @@
 //!   are also fainter or brighter at the same envelope mass; the hook holds the luminosity, so
 //!   only the temperature is fitted.
 //! - **`LOG_Z_NODES`** are plan 06's, not fitted: the fit reads the sim's table for them.
+//! - **`HB_ENVELOPE_MAX`** is the manifest's `hb_envelope_max`, the upper envelope of the shift's
+//!   fit, at which the hook holds the shift, flooring it at zero wherever the line is negative
+//!   (decision-p15-t7b-leans §8), so that the fitted range and the bound cannot disagree; the
+//!   figures are measured under the bound.
 //!
 //! Every sum runs in the grid's file order, and every transcendental goes through
 //! [`hyperion_sim::math`], so that the fitted bits are the same on every platform.
@@ -26,7 +30,7 @@ use hyperion_sim::math;
 use hyperion_sim::stellar::Composition;
 use hyperion_sim::stellar::sse::CandidateHeliumTable;
 use hyperion_sim::tables::helium;
-use hyperion_sim::units::{Dex, HeliumExcess};
+use hyperion_sim::units::{Dex, HeliumExcess, SolarMasses};
 
 use super::cluster::ClusterParams;
 use super::grid::{Family, Grid, Set};
@@ -411,7 +415,8 @@ pub fn fit(grid: &Grid, params: &FitParams) -> Option<Fit> {
     let slope = fit_lifetime(&lifetime, &helium::LOG_Z_NODES, params.lifetime_terms)?;
     let shift = fit_branch(&branch)?;
     Some(Fit {
-        table: CandidateHeliumTable::new(slope, shift),
+        table: CandidateHeliumTable::new(slope, shift)
+            .with_envelope_max(SolarMasses::new(params.hb_envelope_msun.1)),
         lifetime,
         branch,
     })
@@ -426,8 +431,8 @@ pub fn nodes_item() -> &'static str {
         .map_or(IDENTITY_BODY, |end| &IDENTITY_BODY[..=end])
 }
 
-/// The fitted table: P06.T17's summary, `LOG_Z_NODES` as committed, and the fitted slope and
-/// shift with the fit's own doc comments.
+/// The fitted table: P06.T17's summary, `LOG_Z_NODES` as committed, the fitted slope and shift
+/// with the fit's own doc comments, and the shift's bound, `params`' upper envelope of the fit.
 #[must_use]
 pub fn render(table: &CandidateHeliumTable, params: &FitParams) -> RustTable {
     let notes: Vec<String> = [
@@ -436,11 +441,12 @@ pub fn render(table: &CandidateHeliumTable, params: &FitParams) -> RustTable {
         "Y = 0.30, 0.35 and 0.40 (`data/basti_helium/`), relative to the canonical sequence at the same",
         "Z, each set placed at its own total Z (Salaris, Chieffi and Straniero 1993, ApJ 414, 580; the",
         "equivalence holds to Z ≈ 0.002, Pietrinferni et al. 2006, §1). The grid's own shift of the",
-        "horizontal branch peaks near an envelope of 0.06 M☉ and vanishes for the thinnest and the",
-        "thickest envelopes, which the linear form only approximates.",
+        "horizontal branch peaks near an envelope of 0.06 M☉ and is near zero on average for the",
+        "thinnest and the thickest envelopes, which the linear form only approximates.",
         "The track applies the correction only where ΔY > 0, so every star the grid places (ΔY = 0) is",
         "bit-identical whatever the table holds; members of globular clusters' second populations",
-        "(ΔY > 0, plan 09) move with it.",
+        "(ΔY > 0, plan 09) move with it. The tracks read it from version 26 on, behind the stellar",
+        "rules' hold (`HELIUM_VERSION`), and `tables::helium`, P06.T17's identity, below it.",
         "",
     ]
     .iter()
@@ -479,10 +485,22 @@ pub fn render(table: &CandidateHeliumTable, params: &FitParams) -> RustTable {
         "the grid's zero-age horizontal branches at Y = 0.30–0.40 against the canonical ones at the same"
             .to_owned(),
         format!(
-            "Z and envelope mass, over envelopes of {}–{} M☉ (P15.T7.b).",
+            "Z and envelope mass, over envelopes of {}–{} M☉ (P15.T7.b). The hook holds it at",
             literal(params.hb_envelope_msun.0),
             literal(params.hb_envelope_msun.1)
         ),
+        "[`HB_ENVELOPE_MAX`] and floors it at zero: max(0, a + b min(`M_env`, `HB_ENVELOPE_MAX`)) ΔY"
+            .to_owned(),
+        "(ruled 2026-10-26, decision-p15-t7b-leans §8).".to_owned(),
+    ];
+    let bound_doc = vec![
+        "The envelope mass `M_env` (M☉) at which the hook holds [`HB_TEMPERATURE_SHIFT`]: beyond it the"
+            .to_owned(),
+        "shift is its value there, so that the fitted line, which crosses zero near it, reddens no"
+            .to_owned(),
+        "thicker envelope. It is the upper envelope of the shift's fit, the manifest's `hb_envelope_max`"
+            .to_owned(),
+        "(ruled 2026-10-26, decision-p15-t7b-leans §8).".to_owned(),
     ];
     RustTable {
         summary: SUMMARY.iter().map(|&l| l.to_owned()).collect(),
@@ -499,23 +517,26 @@ pub fn render(table: &CandidateHeliumTable, params: &FitParams) -> RustTable {
                 doc: shift_doc,
                 values: table.hb_temperature_shift().to_vec(),
             },
+            TableItem::Scalar {
+                name: "HB_ENVELOPE_MAX".to_owned(),
+                doc: bound_doc,
+                value: params.hb_envelope_msun.1,
+            },
         ],
     }
 }
 
-/// The fit's run on `manifest`: the fitted table, its figures in the acceptance line, `@generated`
-/// when every figure passes and provisional by P15.T7.b otherwise.
+/// The fit's run on `manifest` for the task `task`: the fitted table, its figures in the
+/// acceptance line, `@generated` when every figure passes and provisional by P15.T7.b otherwise.
 ///
 /// # Errors
 ///
 /// [`RunTaskError`] if a parameter is missing or wrong, the dataset cannot be read, or the fit
 /// is not determined.
-pub fn run(manifest: &Manifest) -> Result<TaskOutput, RunTaskError> {
+pub fn run(manifest: &Manifest, task: &'static str) -> Result<TaskOutput, RunTaskError> {
     let params = FitParams::from_manifest(manifest)?;
-    let input_error = |source: Box<dyn std::error::Error + Send + Sync>| RunTaskError::Input {
-        task: "helium",
-        source,
-    };
+    let input_error =
+        |source: Box<dyn std::error::Error + Send + Sync>| RunTaskError::Input { task, source };
     let dataset = manifest.load_dataset(DATASET)?;
     let text = |name: &str| -> Result<&str, RunTaskError> {
         let bytes = dataset
@@ -546,7 +567,7 @@ pub fn run(manifest: &Manifest) -> Result<TaskOutput, RunTaskError> {
     })
 }
 
-pub use super::figures::Figures;
+pub use super::figures::{Figures, fingerprint_probes};
 
 #[cfg(test)]
 mod tests {
@@ -718,11 +739,11 @@ mod tests {
     }
 
     #[test]
-    fn the_rendered_fit_keeps_the_committed_nodes_and_declares_the_three_items() {
+    fn the_rendered_fit_keeps_the_committed_nodes_and_declares_the_four_items() {
         let table = CandidateHeliumTable::new([[-6.5, 0.25, 0.0]; 4], [0.5, -2.5]);
-        let params_text = include_str!("../../../manifests/helium.production.toml");
+        let params_text = include_str!("../../../manifests/helium_26.toml");
         let manifest = Manifest::from_bytes(
-            std::path::Path::new("helium.production.toml"),
+            std::path::Path::new("helium_26.toml"),
             params_text.as_bytes().to_vec(),
         )
         .unwrap();
@@ -734,7 +755,14 @@ mod tests {
             .filter_map(|l| l.strip_prefix("pub const "))
             .filter_map(|l| l.split(':').next())
             .collect();
-        assert_eq!(declared, super::super::ITEMS);
+        assert_eq!(declared, super::super::FITTED_ITEMS);
         assert!(body.contains(&literal(-2.5)), "{body}");
+        assert!(
+            body.contains(&format!(
+                "pub const HB_ENVELOPE_MAX: f64 = {};",
+                literal(params.hb_envelope_msun.1)
+            )),
+            "{body}"
+        );
     }
 }

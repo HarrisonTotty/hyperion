@@ -1658,6 +1658,17 @@ registers it.)
     between and, through the linear interpolation in log₁₀ Z, every Z. The hook and the table's
     shape stay plan 06's as built (x is not held at the fitted range). Outside 0.6–0.9 M☉ s is
     the linear form's extrapolation, a recorded finding.
+  - _The shift's reach in envelope mass_ (ruled 2026-10-26, decision-p15-t7b-leans §8). The fitted
+    shift per unit ΔY, a + b M_env = 0.377 − 1.867 M_env, crosses zero at 0.20 M☉, and the hook
+    applies it to every core-helium-burning member, whatever its mass: unbounded, it reddens every
+    envelope past 0.2 M☉ and at ΔY 0.18 multiplies a 10 M☉ envelope's radius by 10^6.6, which the
+    wind then reads. So the swap holds the envelope at the fit's range and floors the shift:
+    shift = max(0, a + b · min(M_env, `HB_ENVELOPE_MAX`)) × ΔY, with `HB_ENVELOPE_MAX` a new item of
+    `tables::helium` (M☉) that the task emits from the manifest's `hb_envelope_max` (0.2). Inside
+    the range the shift is unchanged bit for bit; at these coefficients it is 0–0.068 dex at
+    ΔY 0.18 at every mass. A sim test bounds the hook's shift and a fit test pins the emitted bound
+    to the manifest. The linear form's +0.38 per unit ΔY at no envelope, where the grid's is about
+    0, is a recorded finding (a peaked form would need a new shape).
   - _Other fitted tables_ (ruled 2026-10-23, decision-p15-revalidation Q7). Rendering plan R06
     builds `sky_envelope` and `sky_phase_envelope` at ΔY = 0 (R06's "T6.b's fitted envelope, as
     built" and "Deviations in T8.m, as built"), and their fingerprints probe ΔY = 0 alone, so
@@ -1905,7 +1916,8 @@ T6's production run starts from 25's commit and lands with 26 (S2). T7.b's swap 
 galaxy train after its gate. Built: T1, T2, T4, T5.a (its production run is P06.T19.e's), T5.b–d
 (T5.c a guard, so its row has no milestone or class; Risks, "T5.d, T5.b and T5.c as built"),
 T6.a–g, T7.a, T7.b's first landing (the table still P06.T17's identity, its fit to scratch;
-Risks, "T7.b as built"), T8.a–c (production at their committed values by
+Risks, "T7.b as built") and its swap, held for 26 (`tables::helium_26` behind `HELIUM_VERSION`;
+Risks, "T7.b's swap as built"), T8.a–c (production at their committed values by
 decision-p15-t8-blocks, adopted by T8.d; no bump), T8.d, T9.a and T11.a (`streams` registered,
 provisional; Risks, "T11.a as built").
 
@@ -3141,3 +3153,32 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
          `equipartition` builds at ΔY 0 for its fixed [Fe/H].
     7. _The ruled gates_ (L3, L4) are in plan 15's T7.b text: the shortening window 0.42–0.55,
        and the cluster's two-part gate. `figures.rs` holds them, with the manifest's window.
+- **T7.b's swap as built (lane `p15-t7b-swap`, 2026-10-31, at `GENERATOR_VERSION` 24; nothing
+  moved).** The fit lands as a second table, `tables::helium_26`, behind a stellar hold at 26
+  (decision-stellar-holds §1.2, E1′–E4′), not in `tables::helium`, which is untouched.
+  - _The hold (sim)._ `HELIUM_VERSION` = 26 and `HeliumRules { Identity, Fitted }`, the field
+    `StellarRules::helium`, chosen at one choke point, `HeliumTable::of(rules)`.
+    `HeliumTable` gains `FITTED` and `hb_envelope_max: Option<f64>` (`None` for the identity,
+    whose branch shift is the old expression). `StellarRules::every_26_hold` and
+    `GalaxyRules::every_26_hold` are new.
+  - _The carrier._ `TrackOptions` carries the whole `StellarRules` (crate-private `with_rules` and
+    `rules`; its `Debug` names them only away from the version's), so A2's field rides it with no
+    edit. `StarModel` (`track_options`), the engine (`BinaryInput::track_options`,
+    `Context::track_options`), the brief's routes, the stripping seam's exact path
+    (`binarity::{stripped_share_under, stripping_node_under, is_stripped_under}`) and the death's
+    stripped mark (`remnant::stripped_mark_applied_under`) build under the galaxy's rules. These take the version's by design: `turn_off_mass`, naked helium stars and
+    remnant-only tracks (`stellar/rules/helium_hold.rs` says why).
+  - _§8._ `HeliumHook` holds the shift at `HB_ENVELOPE_MAX` and floors it at zero on the fitted
+    arm only. `CandidateHeliumTable` gains `with_envelope_max(SolarMasses)` and
+    `branch_shift_dex` (both `testing`); `new` keeps its two arguments.
+  - _Fit side._ `helium.production.toml` became `helium_26.toml` (`task = "helium_26"`).
+    `Helium26Task` runs at revision 1 with four items (`HB_ENVELOPE_MAX` added) and a fingerprint
+    of 14 probes ("For the swap" 4). `HeliumTask` now runs only the identity. The table is
+    emitted at `--since 24`, `@generated`; the bound moves no figure.
+  - _For the bump to 26:_ `the_helium_table_is_held_only_until_the_26_bump` lists the deletions.
+    Move `helium_26.toml` into `helium.toml` (revision 1, the fingerprint), re-emit `helium`,
+    delete the instance, its table and lock entry, `HeliumRules` and the `Option`. Re-bless the
+    movers the lane's outbox lists.
+  - (lean, 2026-10-31) `helium.toml`'s comment and `tables::helium`'s notes still name
+    `helium.production.toml`. Both are hashed into the committed identity, so they wait for the
+    bump.

@@ -84,6 +84,7 @@ pub mod dwarf_sequence;
 pub mod gauss_legendre;
 pub mod giant_cooling;
 pub mod helium;
+pub mod helium_26;
 pub mod kick_defaults;
 pub mod kick_rank;
 pub mod lifetime_bracket;
@@ -266,6 +267,12 @@ pub const MANIFEST: &[TableInfo] = &[
         revision: 0,
         since_generator_version: 23,
         provisional: true,
+    },
+    TableInfo {
+        name: "helium_26",
+        revision: 1,
+        since_generator_version: 24,
+        provisional: false,
     },
     TableInfo {
         name: "kick_defaults",

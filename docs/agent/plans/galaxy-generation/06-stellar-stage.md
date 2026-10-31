@@ -205,8 +205,9 @@ Table shapes fixed by this plan and filled by plan 15, which restates them in it
   `CLUSTER_MERGED_BINARY_FATE`, the default P15.T5.c reviewed, is not among them: it stays in
   `stellar::binary` (plan 11's design note 14).
 - `tables::helium`: `LIFETIME_SLOPE`, the coefficients of s(m, Z), a quadratic in log mass at four
-  metallicities, interpolated in log Z; and `HB_TEMPERATURE_SHIFT`, linear in envelope mass. Every
-  coefficient zero is the identity.
+  metallicities, interpolated in log Z; and `HB_TEMPERATURE_SHIFT`, linear in envelope mass, held at
+  `HB_ENVELOPE_MAX` (the fit's upper envelope mass) and floored at zero (decision-p15-t7b-leans
+  §8, applied by P15.T7.b's swap). Every coefficient zero is the identity.
 
 ### Classification and derived properties
 
