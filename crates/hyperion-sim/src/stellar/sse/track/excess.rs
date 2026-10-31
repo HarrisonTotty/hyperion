@@ -27,7 +27,9 @@ use crate::stellar::Composition;
 use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::PhasePoint;
 use crate::tables::{helium, helium_26};
-use crate::units::{HeliumExcess, SolarMasses, SolarRadii};
+#[cfg(any(test, feature = "testing"))]
+use crate::units::HeliumExcess;
+use crate::units::{SolarMasses, SolarRadii};
 
 /// The generator version whose stellar rules take the fitted helium table, `tables::helium_26`
 /// (plan 15, P15.T7.b's swap; decision-p15-t7b-leans L1–L4 and §8): every member with a helium
