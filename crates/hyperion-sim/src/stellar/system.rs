@@ -869,7 +869,7 @@ impl RemnantFate {
     /// As [`StarModel::new`].
     pub(crate) fn of(
         m0: SolarMasses,
-        composition: &Composition,
+        composition: Composition,
         draws: StarDraws,
         age_at_epoch: Years,
         rules: StellarRules,
@@ -884,7 +884,7 @@ impl RemnantFate {
         let options = TrackOptions::default().with_rules(rules);
         let reached = sse::fate_to_age(
             track_mass,
-            composition,
+            &composition,
             &draws,
             options,
             Years::new(if end > 0.0 { end } else { 0.0 }),
@@ -892,7 +892,7 @@ impl RemnantFate {
         let (fate, kicked) = match reached {
             Some(fate) => (fate, true),
             None => (
-                sse::fate_of(track_mass, composition, &draws, options),
+                sse::fate_of(track_mass, &composition, &draws, options),
                 false,
             ),
         };
@@ -901,7 +901,7 @@ impl RemnantFate {
             remnant: fate.remnant,
             kicked,
             track_mass,
-            composition: *composition,
+            composition,
             draws,
             rules,
         }))
@@ -3938,7 +3938,7 @@ mod tests {
                         let what = format!("{} M☉, {comp:?}, {age:?}, mark {mark:?}", m0.value());
                         let star =
                             StarModel::new_under(m0, comp, draws.clone(), age, rules).unwrap();
-                        let fate = RemnantFate::of(m0, &comp, draws, age, rules).unwrap();
+                        let fate = RemnantFate::of(m0, comp, draws, age, rules).unwrap();
                         assert_eq!(
                             fate.as_ref().map(RemnantFate::remnant),
                             star.remnant(),

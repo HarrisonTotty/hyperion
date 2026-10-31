@@ -1338,3 +1338,41 @@ fn a_companion_mark_read_where_the_window_asks_gives_the_fate_read_first() {
         }
     }
 }
+
+/// `fate_to_age` is the fate of `Track::to_age_with`'s track of the same arguments, bit for bit,
+/// at ages either side of the star's death and of its segments' ends: `None` where that track stops
+/// short of the death, and the track's own fate (`fate_with` its own remnant draws) where it
+/// reaches it.
+#[test]
+fn a_fate_to_an_age_is_the_track_s_to_that_age() {
+    let options = TrackOptions::default();
+    let helium = Composition::from_fe_h(Dex::new(-0.65), HeliumExcess::new(0.04));
+    for comp in [composition(0.02), helium] {
+        for m0 in [0.9, 2.5, 7.4, 8.25, 20.0].map(SolarMasses::new) {
+            let draws = StarDraws::median();
+            let full = Track::full_with(m0, &comp, &draws, options);
+            let death = full.lifetime().expect("a full track dies").value();
+            let mut ages: Vec<f64> = [0.5, 1.0 - 1e-9, 1.0, 1.0 + 1e-9, 2.0]
+                .map(|f| death * f)
+                .to_vec();
+            for stage in [
+                Stage::MainSequence,
+                Stage::HertzsprungGap,
+                Stage::CoreHeliumBurning,
+            ] {
+                if let Some(end) = full.stage_end(stage).map(Years::value) {
+                    ages.extend([end * (1.0 - 1e-12), end, end * (1.0 + 1e-12)]);
+                }
+            }
+            for age in ages.into_iter().map(Years::new) {
+                let track = Track::to_age_with(m0, &comp, &draws, options, age);
+                assert_eq!(
+                    fate_to_age(m0, &comp, &draws, options, age),
+                    track.fate_with(RemnantDraws::of(&draws)),
+                    "{} M☉, {comp:?}, {age:?}",
+                    m0.value()
+                );
+            }
+        }
+    }
+}

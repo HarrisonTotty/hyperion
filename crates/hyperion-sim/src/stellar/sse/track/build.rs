@@ -400,9 +400,13 @@ impl<'a> Builder<'a> {
     /// only reader, and a star it does not split never pays for the share, whose exact path builds
     /// a track and a quadrature of about 3.5 ms for a star with a helium excess (the second
     /// population's members, P09.T10; 0.7 ms of track and 2.8 ms of quadrature, measured on a pod).
+    #[must_use]
     pub(super) fn by_companion_mark<T: PartialEq>(&self, of: impl Fn(bool) -> T) -> T {
         match &self.companion_stripped {
             CompanionMark::Known(stripped) => of(*stripped),
+            CompanionMark::Unread { read, .. } if read.get().is_some() => {
+                of(read.get().copied().expect("the mark is read"))
+            }
             CompanionMark::Unread { mark, m0, read } => {
                 let (single, stripped) = (of(false), of(true));
                 if single == stripped

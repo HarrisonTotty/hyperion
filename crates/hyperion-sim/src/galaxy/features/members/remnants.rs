@@ -18,7 +18,8 @@
 //!   most envelope, so a member kept below it is the star its record builds.
 //! - **A neutron star** is refused when both modes' kicks are surely too fast: its pair's systemic
 //!   speed, which judges a low-mode kick, and the ordinary mode's slowest kick, the rank clamp's
-//!   floor (about 33 km/s), are both at or above the escape speed.
+//!   floor (about 33 km/s), are both at or above the escape speed, in a cluster old enough that its
+//!   star has surely died.
 //!
 //! Refusing an attempt that the star's track would keep moves the draw on to the next one, so the
 //! member is still the star its record builds; only a kept white dwarf leans on the ceiling. A
@@ -94,15 +95,16 @@ fn corner_draws() -> StarDraws {
 
 /// The initial mass below which every member of `model` leaves a white dwarf by losing its
 /// envelope, under the stellar `rules`, M☉, or zero if a star of [`CEILING_FLOOR`] at one of its
-/// corners does not: [`CEILING_MARGIN`] below the lightest star that leaves anything else, or
-/// below the heaviest white dwarf's progenitor if none up to it does, since the stripped window
-/// may still open just under it.
+/// corners does not: [`CEILING_MARGIN`] below the heaviest star found to leave one under the
+/// lightest that leaves anything else, or below the heaviest white dwarf's progenitor if none up
+/// to it does, since the stripped window may still open just under it.
 ///
-/// The lightest is found by halving between [`CEILING_FLOOR`] and that progenitor, by exact fates
+/// The edge is found by halving between [`CEILING_FLOOR`] and that progenitor, by exact fates
 /// (`sse::fate_of`) at the corners of the members' compositions, the cluster's [Fe/H] (± four
 /// iron spreads, if it has one) with no helium excess and with its greatest
-/// ([`helium_excess_max`]), and at [`corner_draws`]. It costs some 8–30 lifetime builds, about
-/// 5–20 ms, once a cluster ([`ClusterModel::white_dwarf_ceiling`]).
+/// ([`helium_excess_max`]), and at [`corner_draws`]. The halving's lower end is kept, so its
+/// 0.04 M☉ step takes none of the margin. It costs some 8–30 lifetime builds, about 5–20 ms, once
+/// a cluster ([`ClusterModel::white_dwarf_ceiling`]).
 #[must_use]
 pub(crate) fn white_dwarf_ceiling(model: &ClusterModel, rules: StellarRules) -> SolarMasses {
     let options = TrackOptions::default().with_rules(rules);
@@ -118,7 +120,8 @@ pub(crate) fn white_dwarf_ceiling(model: &ClusterModel, rules: StellarRules) -> 
         &[0.0]
     };
     let heliums = [0.0, helium_excess_max(model.initial_mass())];
-    let mut lightest = WHITE_DWARF_PROGENITOR_MAX;
+    // The heaviest mass found to leave a white dwarf at every corner so far.
+    let mut edge = WHITE_DWARF_PROGENITOR_MAX;
     for iron in irons {
         for helium in heliums {
             let comp = Composition::from_fe_h(
@@ -133,10 +136,10 @@ pub(crate) fn white_dwarf_ceiling(model: &ClusterModel, rules: StellarRules) -> 
             if !dwarf(CEILING_FLOOR) {
                 return SolarMasses::new(0.0);
             }
-            if dwarf(lightest) {
+            if dwarf(edge) {
                 continue;
             }
-            let (mut lo, mut hi) = (CEILING_FLOOR, lightest);
+            let (mut lo, mut hi) = (CEILING_FLOOR, edge);
             for _ in 0..CEILING_HALVINGS {
                 let mid = f64::midpoint(lo, hi);
                 if dwarf(mid) {
@@ -145,18 +148,22 @@ pub(crate) fn white_dwarf_ceiling(model: &ClusterModel, rules: StellarRules) -> 
                     hi = mid;
                 }
             }
-            lightest = hi;
+            edge = lo;
         }
     }
-    SolarMasses::new((lightest - CEILING_MARGIN).max(0.0))
+    SolarMasses::new((edge - CEILING_MARGIN).max(0.0))
 }
 
 /// Whether a remnant class's attempt is kept in `galaxy`, for a member of the cluster `model`: of
-/// class `kind` and initial mass `mass`, of `composition`, at `address` (the universe, system and
-/// attempt) and age at the epoch `age`, judged on the effective escape speed and its pair's
-/// systemic speed `speeds` (km/s). Under [`MemberRemnantRules::Tabulated`] it is
-/// [`tabulated_fit`]'s answer where that gives one; otherwise, and always below version 26, the
-/// star's own ([`remnant_fits`](super::remnant_fits)).
+/// class `kind` and initial mass `mass` (M☉), of `composition`, at `address` (the universe, system
+/// and attempt) and age at the epoch `age`, judged on the effective escape speed and its pair's
+/// systemic speed `speeds` (km/s), the arguments [`remnant_fits`](super::remnant_fits) takes.
+/// Under [`MemberRemnantRules::Tabulated`] it is [`tabulated_fit`]'s answer where that gives one;
+/// otherwise, and always below version 26, the star's own.
+///
+/// # Panics
+///
+/// In debug builds, if the tabulated remnants keep an attempt whose star's own answer refuses it.
 #[must_use]
 pub(crate) fn remnant_attempt_fits(
     galaxy: &Galaxy,
@@ -168,26 +175,40 @@ pub(crate) fn remnant_attempt_fits(
     speeds: (f64, f64),
 ) -> bool {
     let rules = galaxy.rules().stellar;
+    let track = || super::remnant_fits(kind, mass, composition, address, age, speeds, rules);
     let tabulated = match galaxy.rules().member_remnants {
         MemberRemnantRules::EveryAttempt => None,
-        MemberRemnantRules::Tabulated => tabulated_fit(kind, mass, address, speeds, model, rules),
+        MemberRemnantRules::Tabulated => {
+            tabulated_fit(kind, mass, address, (age, speeds), model, rules)
+        }
     };
-    tabulated.unwrap_or_else(|| {
-        super::remnant_fits(kind, mass, composition, address, age, speeds, rules)
-    })
+    debug_assert!(
+        tabulated != Some(true) || track(),
+        "the tabulated remnants keep a {kind:?} of {mass} M☉ ({composition:?}, {address:?}) that \
+         its star's track refuses"
+    );
+    tabulated.unwrap_or_else(track)
 }
 
+/// The age at the epoch, years, from which every star of a neutron-star class has died: the
+/// lightest, of 8 M☉, lives under 60 Myr on the generator's tracks at any composition a cluster
+/// has (`a_neutron_star_s_progenitor_dies_young`), so a gigayear leaves a margin of some sixteen.
+/// A younger cluster's attempt may be a star still alive at the window's end, which the track
+/// keeps, kickless.
+const NEUTRON_STARS_DEAD_BY: f64 = 1e9;
+
 /// What a cluster's tabulated remnants decide of an attempt of a remnant class of `kind`, whose
-/// star has initial mass `mass` and the draws of attempt `attempt` of `system` in `universe`, kicked
-/// against the cluster `model`'s effective escape speed `v_eff` (km/s), a low-mode neutron star on
-/// its pair's `systemic` speed (km/s), under the stellar `rules`: `Some` of whether it is kept, or
-/// `None` where its star's track decides (module documentation).
+/// star has initial mass `mass` (M☉), the draws of attempt `attempt` of `system` in `universe` and
+/// the age at the epoch `age`, kicked against the cluster `model`'s effective escape speed `v_eff`
+/// (km/s), a low-mode neutron star on its pair's `systemic` speed (km/s), under the stellar
+/// `rules`: `Some` of whether it is kept, or `None` where its star's track decides (module
+/// documentation). The arguments are [`remnant_fits`](super::remnant_fits)'s.
 #[must_use]
 pub(crate) fn tabulated_fit(
     kind: ClassKind,
     mass: f64,
     (universe, system, attempt): (crate::Seed, SystemId, u32),
-    (v_eff, systemic): (f64, f64),
+    (age, (v_eff, systemic)): (Years, (f64, f64)),
     model: &ClusterModel,
     rules: StellarRules,
 ) -> Option<bool> {
@@ -203,7 +224,8 @@ pub(crate) fn tabulated_fit(
         ClassKind::NeutronStar => {
             let law = StandardKickLaw::under(rules);
             let slowest = law.params().ordinary_speed_km_s(law.params().rank_clamp.0);
-            (systemic >= v_eff && slowest >= v_eff).then_some(false)
+            (age.value() >= NEUTRON_STARS_DEAD_BY && systemic >= v_eff && slowest >= v_eff)
+                .then_some(false)
         }
         ClassKind::BlackHole | ClassKind::Living | ClassKind::Tail => None,
     }
@@ -218,6 +240,7 @@ pub(crate) struct CeilingCell(OnceLock<(StellarRules, SolarMasses)>);
 impl CeilingCell {
     /// The ceiling under `rules`: the cell's, found by `find` the first time, or found afresh
     /// under rules other than the cell's.
+    #[must_use]
     pub(crate) fn get(&self, rules: StellarRules, find: impl Fn() -> SolarMasses) -> SolarMasses {
         let &(under, ceiling) = self.0.get_or_init(|| (rules, find()));
         if under == rules { ceiling } else { find() }
@@ -245,6 +268,9 @@ impl std::fmt::Debug for CeilingCell {
 mod tests {
     use std::sync::OnceLock;
 
+    use hyperion_testkit::float::assert_same_bits;
+    use hyperion_testkit::order::assert_order_independent;
+
     use super::*;
     use crate::coords::{GalacticPosition, GalacticVelocity};
     use crate::galaxy::features::FeatureProcess;
@@ -259,6 +285,12 @@ mod tests {
     use crate::id::{FeatureMemberId, MemberSlot};
     use crate::stellar::remnant::KickMode;
     use crate::{GENERATOR_VERSION, Seed};
+
+    /// The fixture's most massive globular's white-dwarf ceiling under 26's rules, 6.2958 M☉.
+    const MASSIVE_CEILING: f64 = f64::from_bits(0x4019_2ef3_3333_3333);
+
+    /// The fixture's slowest globular's, 5.7453 M☉.
+    const SLOW_CEILING: f64 = f64::from_bits(0x4016_fb33_3333_3333);
 
     /// The Milky Way fixture of the members' tests, under every 26 hold.
     fn galaxy() -> &'static Galaxy {
@@ -331,17 +363,114 @@ mod tests {
     }
 
     /// The fixture's most massive globular, of [Fe/H] −0.54 and a helium excess up to 0.18 in its
-    /// second population, has a white-dwarf ceiling of 6.33 M☉ under 26's rules (its lightest star
-    /// that leaves anything else is of 7.53 M☉); it is found once and kept with the model.
+    /// second population, and its slowest, of [Fe/H] −1.09 and 0.01, have white-dwarf ceilings of
+    /// 6.30 and 5.75 M☉ under 26's rules, pinned to the bit.
     #[test]
-    fn a_massive_globular_s_white_dwarf_ceiling_is_found_once_and_kept() {
+    fn the_fixture_s_white_dwarf_ceilings_are_pinned() {
         let galaxy = galaxy();
-        let [(_, model, _), _] = clusters(galaxy);
         let rules = galaxy.rules().stellar;
-        let ceiling = model.white_dwarf_ceiling(rules);
-        assert!((6.3..6.4).contains(&ceiling.value()), "{ceiling:?}");
-        assert_eq!(model.white_dwarf_ceiling(rules), ceiling);
-        assert_eq!(white_dwarf_ceiling(&model, rules), ceiling);
+        let [massive, slow] =
+            clusters(galaxy).map(|(_, model, _)| model.white_dwarf_ceiling(rules));
+        assert_same_bits(massive.value(), MASSIVE_CEILING);
+        assert_same_bits(slow.value(), SLOW_CEILING);
+    }
+
+    /// A ceiling is a pure function of the model and the rules: the same whether the model is
+    /// shared, found under other rules first or built fresh, and whichever members are drawn
+    /// first.
+    #[test]
+    fn the_ceiling_and_the_members_do_not_depend_on_what_was_asked_first() {
+        let galaxy = galaxy();
+        let [_, (feature, shared, table)] = clusters(galaxy);
+        let version = StellarRules::of_version(GENERATOR_VERSION);
+        assert_ne!(version, galaxy.rules().stellar);
+        let under_version = shared.white_dwarf_ceiling(version);
+        assert_same_bits(
+            shared.white_dwarf_ceiling(galaxy.rules().stellar).value(),
+            SLOW_CEILING,
+        );
+        assert_same_bits(
+            shared.white_dwarf_ceiling(version).value(),
+            under_version.value(),
+        );
+        let class = classes_of(&table, ClassKind::WhiteDwarf)[0];
+        let [x, y, z] = feature.position().to_light_years_f64();
+        let position = GalacticPosition::from_light_years([x + 1.0, y, z]).unwrap();
+        let ids: Vec<FeatureMemberId> = (0..12)
+            .map(|index| {
+                FeatureMemberId::new(
+                    feature.id().feature_ref(),
+                    MemberSlot::InCell {
+                        band: class.band.layer(),
+                        level: 0,
+                        cell: [8, 8, 8],
+                        index,
+                    },
+                )
+                .unwrap()
+            })
+            .collect();
+        let draw = |model: &ClusterModel, id: &FeatureMemberId| {
+            draw_member(
+                galaxy,
+                &feature,
+                model,
+                &class,
+                &position,
+                *id,
+                GalacticVelocity::new([0.0; 3]),
+            )
+        };
+        assert_order_independent(&ids, |id| draw(&shared, id));
+        assert_order_independent(&ids, |id| {
+            let fresh = ClusterModel::from_record(galaxy, &feature).expect("a globular");
+            draw(&fresh, id)
+        });
+        let fresh = ClusterModel::from_record(galaxy, &feature).expect("a globular");
+        assert!(ids.iter().all(|id| draw(&fresh, id) == draw(&shared, id)));
+    }
+
+    /// The lightest neutron star's progenitor, of 8 M☉, dies within 60 Myr at the corners of the
+    /// compositions a cluster has, so a cluster a gigayear old has no living one; a younger
+    /// cluster's neutron-star attempts are left to the track.
+    #[test]
+    fn a_neutron_star_s_progenitor_dies_young() {
+        let rules = galaxy().rules().stellar;
+        let options = TrackOptions::default().with_rules(rules);
+        for fe_h in [-2.5, 0.2] {
+            for helium in [0.0, 0.18] {
+                let comp = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::new(helium));
+                let life = sse::fate_of(SolarMasses::new(8.0), &comp, &corner_draws(), options)
+                    .death
+                    .age();
+                assert!(life.value() < 6e7, "{comp:?}: {life:?}");
+            }
+        }
+        let [_, (feature, model, _)] = clusters(galaxy());
+        let v_eff = model.escape_speed_effective().value();
+        let member = FeatureMemberId::new(
+            feature.id().feature_ref(),
+            MemberSlot::InCell {
+                band: MassBand::E.layer(),
+                level: 0,
+                cell: [8, 8, 8],
+                index: 0,
+            },
+        )
+        .unwrap();
+        let address = (galaxy().seed(), SystemId::from(member), 0);
+        let fit = |age: f64| {
+            tabulated_fit(
+                ClassKind::NeutronStar,
+                9.0,
+                address,
+                (Years::new(age), (v_eff, 2.0 * v_eff)),
+                &model,
+                rules,
+            )
+        };
+        assert_eq!(fit(1.2e10), Some(false));
+        assert_eq!(fit(3e7), None);
     }
 
     /// Wherever the tabulated remnants decide an attempt, the star's track decides it the same,
@@ -392,9 +521,14 @@ mod tests {
                         for systemic in [5.0, 30.0] {
                             let address = (galaxy.seed(), system, attempt);
                             let speeds = (v_eff, systemic);
-                            let Some(fits) =
-                                tabulated_fit(kind, mass, address, speeds, &model, rules)
-                            else {
+                            let Some(fits) = tabulated_fit(
+                                kind,
+                                mass,
+                                address,
+                                (model.age(), speeds),
+                                &model,
+                                rules,
+                            ) else {
                                 continue;
                             };
                             decided[usize::from(kind == ClassKind::NeutronStar)] += 1;

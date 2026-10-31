@@ -1172,7 +1172,10 @@ mod tests {
             "the server tests' black hole outweighs its cluster"
         );
         let centre = galaxy.centre().expect("the centre's model builds");
-        assert!(centre.influence_radius().value() > 9_999.0);
+        assert!(
+            centre.influence_radius().value() > 9_999.0,
+            "the cluster alone has no sphere of influence: its search ends at its bracket"
+        );
         let served = served_influence_radius(galaxy);
         assert_eq!(
             served.to_bits(),

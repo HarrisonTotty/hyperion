@@ -301,7 +301,7 @@ pub(crate) fn remnant_fits(
         ClassKind::Living | ClassKind::Tail => return true,
     };
     let draws = StarDraws::for_attempt(universe, BodyId::new(system, 0), attempt);
-    let Ok(Some(fate)) = RemnantFate::of(SolarMasses::new(mass), composition, draws, age, rules)
+    let Ok(Some(fate)) = RemnantFate::of(SolarMasses::new(mass), *composition, draws, age, rules)
     else {
         return false;
     };
