@@ -743,7 +743,7 @@ impl XrayAccretor {
     /// The share of the accreted mass's rest energy that its fall onto an accretor of `mass` M☉
     /// radiates.
     #[must_use]
-    fn efficiency(self, mass: f64) -> f64 {
+    pub(crate) fn efficiency(self, mass: f64) -> f64 {
         match self {
             Self::NeutronStar => {
                 let radius_m =

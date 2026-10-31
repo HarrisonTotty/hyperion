@@ -1171,6 +1171,51 @@ domain_tags! {
     /// h's block from word 16h; words 10–15 are reserved
     /// (`planetary::hosts::second_generation::SecondGenerationDraws`).
     PLANET_SECONDGEN: System = "planet.secondgen";
+
+    // Plan 11, P11.T8.b: an X-ray binary candidate's draws, `System` tags under `class.xrb.` (the
+    // plan's `class.xrb`, one per property group), opened with `ObjectKey::from(SystemId)` of the
+    // candidate's ID, its member 0 (Design note 23). Its two stars' own draws are plan 06's
+    // `star.*` tags, keyed by bodies 0 and 1. No event tag: the transients' and the Be/X
+    // outbursts' series are P11.T9's. Appended after P14.T28.e's `planet.secondgen`, because
+    // the macro's order fixes `ALL`.
+
+    /// An X-ray binary candidate's site: words 0–2 its position in its 512 ly cell, x, y and z,
+    /// and word 3 the mark that thins it on the class's density and picks its density component,
+    /// whose population gives its side, low-mass or high-mass (P11.T8.b).
+    CLASS_XRB_SITE: System = "class.xrb.site";
+
+    /// An X-ray binary candidate's kind on its side (word 0) and, for a low-mass transient, the
+    /// rank of its outbursts' recurrence (word 1) (P11.T8.b).
+    CLASS_XRB_KIND: System = "class.xrb.kind";
+
+    /// A high-mass X-ray binary candidate's recoil from its supernova: word 0 the rank of its
+    /// speed, words 1–2 its isotropic direction, word 3 the rank of the years since (P11.T8.b).
+    CLASS_XRB_RECOIL: System = "class.xrb.recoil";
+
+    /// An X-ray binary candidate's velocity at its site, galactic: plan 08's draw of its
+    /// component's law, four words per attempt of the escape cut (P11.T8.b).
+    CLASS_XRB_VELOCITY: System = "class.xrb.velocity";
+
+    /// An X-ray binary candidate's binary now, part of its scan marks: word 0 the rank of its
+    /// compact star's mass, then by kind the ranks of its period, its donor's mass and its rate
+    /// over the instability line (a low-mass host), of its period, eccentricity and Be star's mass
+    /// (a Be/X host), or of its period, its donor's mass and its transfer rate (a supergiant host)
+    /// (P11.T8.b).
+    CLASS_XRB_BINARY: System = "class.xrb.binary";
+
+    /// An X-ray binary candidate's orbit's orientation and phase: words 0–2 its cosine of
+    /// inclination, ascending node and argument of periapsis, word 3 its mean anomaly at the
+    /// epoch (P11.T8.b).
+    CLASS_XRB_ORBIT: System = "class.xrb.orbit";
+
+    /// An X-ray binary candidate's history: the rank of its compact star's progenitor's initial
+    /// mass (word 0) and, for a low-mass host, of its donor's initial mass (word 1) and its age in
+    /// its component's law (word 2) (P11.T8.b).
+    CLASS_XRB_HISTORY: System = "class.xrb.history";
+
+    /// An X-ray binary candidate's \[Fe/H\]: one normal of its component's distribution at its
+    /// site and age (P11.T8.b).
+    CLASS_XRB_METALLICITY: System = "class.xrb.metallicity";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1654,6 +1699,26 @@ mod tests {
         ] {
             assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
             assert!(tag.name().starts_with("class.nsm."));
+            assert!(ALL.contains(&tag));
+        }
+    }
+
+    /// P11.T8.b: the X-ray binaries' candidates' tags, under plan 09's prefix `class.`, with their
+    /// scope.
+    #[test]
+    fn plan_11_registers_the_xray_binaries_tags() {
+        for tag in [
+            CLASS_XRB_SITE,
+            CLASS_XRB_KIND,
+            CLASS_XRB_RECOIL,
+            CLASS_XRB_VELOCITY,
+            CLASS_XRB_BINARY,
+            CLASS_XRB_ORBIT,
+            CLASS_XRB_HISTORY,
+            CLASS_XRB_METALLICITY,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.xrb."));
             assert!(ALL.contains(&tag));
         }
     }

@@ -608,17 +608,54 @@ fn disc_radius(state: &BinaryState, a: usize) -> Metres {
         return Metres::new(0.0);
     };
     let stars = state.stars();
-    let (ma, md) = (stars[a].mass().value(), stars[1 - a].mass().value());
+    disc_radius_of(
+        stars[a].mass(),
+        stars[1 - a].mass(),
+        orbit.semi_major_axis(),
+    )
+}
+
+/// [`disc_radius`] of an accretor of `accretor` M☉ fed by a donor of `donor` M☉ on an orbit of
+/// semi-major axis `separation`: zero for a star of no mass.
+#[must_use]
+fn disc_radius_of(accretor: SolarMasses, donor: SolarMasses, separation: Metres) -> Metres {
+    let (ma, md) = (accretor.value(), donor.value());
     if !(ma > 0.0 && md > 0.0) {
         return Metres::new(0.0);
     }
-    let separation = orbit.semi_major_axis();
     let q = md / ma;
     if q < 1.0 {
         return Metres::new(0.60 * separation.value() / (1.0 + q));
     }
     let lobe = roche_lobe_radius(ma / md, separation);
     Metres::new(DISC_RADIUS_SHARE * lobe.value())
+}
+
+/// The irradiated disc's instability line of an X-ray binary whose compact accretor of
+/// `accretor` M☉ a donor of `donor` M☉ feeds on an orbit of semi-major axis `separation`, M☉
+/// yr⁻¹: [`xrb_critical_rate`] at [`disc_radius`], what [`classify`] splits low-mass X-ray
+/// binaries on, persistent at or above it. A catalogue entry draws its rate against it
+/// (P11.T8.b).
+#[must_use]
+pub(crate) fn xrb_line(
+    accretor: SolarMasses,
+    donor: SolarMasses,
+    separation: Metres,
+) -> SolarMassesPerYear {
+    xrb_critical_rate(accretor, disc_radius_of(accretor, donor, separation))
+}
+
+/// Whether `star`, with `draws`, is plan 06's Be star under the stellar `rules`, as [`classify`]
+/// tests a Be/X-ray binary's donor: what a catalogue entry's Be donor's draws are chosen by
+/// (P11.T8.b).
+#[must_use]
+pub(crate) fn is_be_donor(
+    star: &StarState,
+    composition: &Composition,
+    draws: &StarDraws,
+    rules: StellarRules,
+) -> bool {
+    is_be_star(star, composition, draws, rules)
 }
 
 /// The class of a bound pair, if it is a double degenerate or a wind-fed compact star.
@@ -1027,6 +1064,34 @@ pub(crate) fn white_dwarf_feeding(
         }
     }
     found.map(|(at, accretor, rate, _)| (at, accretor, rate))
+}
+
+/// Where [`carved_class`] reads an X-ray binary, for a system `age_at_epoch` old at the epoch
+/// (P11.T8.b): the age and the class then, at the epoch's age if the pair is one then and
+/// otherwise at the first age of the horizon at which it is, by the same reading of "any age";
+/// `None` if no age of the horizon has one. A sampler's test reads a member's marks here
+/// (`brute_force_class_members`).
+#[cfg(any(test, feature = "testing"))]
+#[must_use]
+pub(crate) fn xray_binary_reading(
+    timeline: &BinaryTimeline,
+    age_at_epoch: Years,
+) -> Option<(Years, BinaryClass)> {
+    let (lo, hi) = horizon_years(timeline, age_at_epoch)?;
+    let now = age_at_epoch.value().clamp(lo, hi);
+    let mut found: Option<(Years, BinaryClass, bool)> = None;
+    for age in horizon_sample_years(timeline, (lo, hi), now) {
+        let at = Years::new(age);
+        let class = timeline.class_at(at);
+        if !class.is_xray_binary() {
+            continue;
+        }
+        let at_now = age.total_cmp(&now).is_eq();
+        if found.is_none_or(|(.., earlier_now)| at_now && !earlier_now) {
+            found = Some((at, class, at_now));
+        }
+    }
+    found.map(|(at, class, _)| (at, class))
 }
 
 #[cfg(test)]

@@ -1609,6 +1609,8 @@ tables must keep that under one in ten, which a test counts.
   high-mass (Be/X, supergiant). Hosts follow the old populations for low-mass and the young disc,
   displaced by the pair's recoil, for high-mass. Test: about 10⁴ in total (0.7–1.5 × 10⁴) and 1,300
   ± 400 black-hole transients at Milky Way parameters (Corral-Santana et al. 2016).
+  _As built (lane `p11-t8b`, 2026-10-31; at version 24, no bump): see Risks, "P11.T8.b as
+  built"._
 - **P11.T8.c Stellar mergers.** One-shot entries with the merger time T as a mark, uniform over the
   source horizon; the pair before T, a luminous red nova from T, the merged star after. One ID on
   both sides of T. Test: an expected 0.2–0.5 a year (Kochanek et al. 2014); evaluated before T the
@@ -6176,6 +6178,49 @@ galaxy_sweeps`.
   - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary`, `stellar::binary::scan`,
     `stellar::binary::sampler`, `id::event_tags`; slow, `tests/binary_awd.rs` (with the `testing`
     feature, as the workspace's slow run builds it) and `tests/source_horizon.rs`'s new row.
+- **P11.T8.b as built** (lane `p11-t8b`, 2026-10-31; at version 24, no bump: registering a class
+  moves no existing value; `golden_diff.py` "extended only").
+  - _Files._ `binary/xrb.rs` (`XrayBinaries`, `XrbSide`, `XrbEntry`); `XRB_SAMPLER`, `XrbMark`,
+    `XrbPick`, `XrbHostKind` in `tables/binary.rs`; class 5's arm in `ProductionClasses`.
+  - _Tests moved (lean, 2026-10-31)._ On P11.T8.c–d no placed class lacks a process, so those
+    that took `XRAY_BINARY` as one change: the core collapses' and the luminous blue variables'
+    order tests resolve the first X-ray binary about the centre as their stray, its record pinned;
+    the production lookup's test asserts no placed class waits; and the server's
+    `compute/systems.rs` refuses an ID of the never-placed tidal-disruption class as naming no
+    system, unstored.
+  - _Scan marks._ `scan_marks`/`scan_cell` are generic over `scan::ScanProcess`. `XrbScanMarks`:
+    kind, site, position, velocity, `XrbRecoil`, a transient's recurrence, the compact star's mass,
+    the period and the mean transfer rate (for P11.T9.b).
+  - _Sides (lean, 2026-10-31; for main's ruling)._ The row's total, the high-mass side the table's
+    0.16 of it over the young thin disc, the low-mass side the rest; the row alone would give
+    the young disc about 25.
+  - _For P11.T8.f._ Per-component rates are `XrbComponent::hosts_per_system`: the young disc's are
+    about 65 times the row's, so a feature counted from the row alone holds too few high-mass hosts.
+  - _Recoil (lean, 2026-10-31)._ A Maxwellian systemic speed and the years since move a high-mass
+    host from its site on a straight line; no P08.T12 field. σ 12 (Be/X, plan 09's) and 33.5 km/s,
+    from van den Heuvel et al.'s (2000) tangential means; the supergiants' pass the brainstorm's
+    10–30 km/s (for main's ruling).
+  - _Low-mass marks._ Donors on M₂ ≈ 0.11 P_h to 0.8 M☉, evolved beyond 1.3 × their ZAMS radius
+    (Rappaport et al. 1995's core); the rate is `xrb_line` × 10^excess, 10⁻⁶ dex off the line,
+    held to the Eddington rate (a persistent host whose line passes it stays just above the line).
+  - _High-mass marks._ Be/X: detached, its donor plan 06's track at half its life (later if O
+    type), its draws the first of 4,096 attempts that make it a Be star (about 1 in 36).
+    Supergiant: Roche-lobe overflow, a Hertzsprung-gap donor at its own track's luminosity.
+  - _History (lean)._ Low-mass ages from the component's law, raised to 1.05 × the progenitor's
+    life; high-mass ages are life plus the years since. Donors' initial masses held under 0.95 of
+    the turn-off at that age, so their own models live; progenitors' models leave the marked
+    remnant in 100 of 112 sample hosts (not conditioned).
+  - _Figures._ The table's are recalled, not read at source in this build.
+  - _Tags._ `class.xrb.{site,kind,binary,recoil,velocity,orbit,history,metallicity}`; no Event
+    tag. `ClassMember::xray()` (`classify::xray_binary_reading`) gives an X-ray member's marks.
+  - _Not built._ Plan 09's `assert_complementary` and the per-population budget test, which the
+    sides lean fails by design (young disc 1,600 against the row's 25); P09.T38 not re-run.
+  - _Sampler test._ Accretor mass, period, donor mass and rate at T8.a's tolerance (0.97 of the
+    members per dof); the engine gives no high-mass member near the solar circle, so the recoil's
+    marks are not compared (findings).
+  - _Acceptance._ `cargo test -p hyperion-sim catalogue_classes stellar::binary rng::tags`,
+    `--test foundation_golden`, the server's `compute::systems`; slow, `tests/binary_xrb.rs`
+    (ten Milky Way seeds, research-leans-10) and `tests/source_horizon.rs`'s new rows.
 - **P11.T8.c as built** (lane `p11-t8cd`, 2026-10-31; at version 24, no bump: registering a class
   moves no existing value; `golden_diff.py` "extended only").
   - _Files._ `galaxy/catalogue_classes/binary/{hosts,merger}.rs` (`ClassHosts`, the share row's

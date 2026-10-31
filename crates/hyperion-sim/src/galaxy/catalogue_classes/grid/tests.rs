@@ -978,8 +978,9 @@ const FIFTY_LY_COUNTS: [[usize; 2]; 2] = [[2_902, 20], [2_890, 20]];
 // 6. The production lookup.
 
 /// Whether the production lookup has class value `class`'s process: the core collapses
-/// (P09.T33.a), the Type Ia (P09.T34.a), the luminous blue variables (P09.T43) and the two
-/// accreting white dwarf classes (P11.T8.a).
+/// (P09.T33.a), the Type Ia (P09.T34.a), the luminous blue variables (P09.T43), the two accreting
+/// white dwarf classes (P11.T8.a), the X-ray binaries (P11.T8.b) and the two merger classes
+/// (P11.T8.c–d).
 fn built(class: u8) -> bool {
     [
         ClassId::CORE_COLLAPSE,
@@ -987,6 +988,7 @@ fn built(class: u8) -> bool {
         ClassId::LUMINOUS_BLUE_VARIABLE,
         ClassId::ACCRETING_WHITE_DWARF,
         ClassId::ACCRETING_WHITE_DWARF_SLOW,
+        ClassId::XRAY_BINARY,
         ClassId::STELLAR_MERGER,
         ClassId::NEUTRON_STAR_MERGER,
     ]
@@ -994,12 +996,11 @@ fn built(class: u8) -> bool {
     .any(|built| built.value() == class)
 }
 
-/// P09.T33.a, P09.T34.a, P09.T43, P11.T8.a, c and d: the production lookup visits the core
-/// collapses, the Type Ia, the luminous blue variables, the accreting white dwarfs and the two
-/// merger classes alone; every other
-/// class's IDs name nothing in the grid, and
-/// plan 03's resolve answers each `111` ID through `system_of`, with the record its class gives
-/// the member, or as not generated for a placed class with no process yet.
+/// P09.T33.a, P09.T34.a, P09.T43 and P11.T8.a–d: the production lookup visits the core collapses,
+/// the Type Ia, the luminous blue variables, the accreting white dwarfs, the X-ray binaries and the
+/// two merger classes alone, every placed class's process; every other class's IDs name nothing in
+/// the grid, and plan 03's resolve answers each `111` ID through `system_of`, with the record its
+/// class gives the member.
 #[test]
 fn the_production_lookup_resolves_only_the_registered_classes() {
     struct Visited;
@@ -1037,8 +1038,9 @@ fn the_production_lookup_resolves_only_the_registered_classes() {
         if !built(class) {
             assert_eq!(found, Err(ResolveSystemError::NoSuchSystem), "{id:?}");
         }
-        // Plan 03's resolve hands every `111` ID to the grid (P09.T33.a): a placed class whose
-        // process is not built yet is not generated, every other ID that names no system is none.
+        // Plan 03's resolve hands every `111` ID to the grid (P09.T33.a): an ID that names no
+        // system is none. Since P11.T8.b no placed class waits for its process, whose IDs would be
+        // not generated.
         let record = placement::resolve(galaxy, SystemId::from(id));
         assert_eq!(
             record,
@@ -1047,9 +1049,8 @@ fn the_production_lookup_resolves_only_the_registered_classes() {
         );
         assert_eq!(record.is_ok(), found.is_ok(), "{id:?}");
         let pending = CatalogueCellKey::of(id).is_ok_and(|key| !built(key.class().value()));
-        if pending {
-            assert_eq!(record, Err(ResolveSystemError::KindNotGenerated), "{id:?}");
-        } else if record.is_err() {
+        assert!(!pending, "every placed class has its process: {id:?}");
+        if record.is_err() {
             assert_eq!(record, Err(ResolveSystemError::NoSuchSystem), "{id:?}");
         }
     }

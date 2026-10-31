@@ -11,10 +11,10 @@
 //! P09.T21), the dwarf cores' and the streams' members (plan 10, P10.T7.b and P10.T8.b), the
 //! supernova entry of plan 09's phase 4 as a value, and the catalogue classes' entries built so
 //! far, the core collapses (P09.T33.a), the Type Ia (P09.T34.a), the luminous blue variables
-//! (P09.T43), the accreting white dwarfs, fast and slow (P11.T8.a), and the stellar and
-//! neutron-star mergers (P11.T8.c–d). The displaced remnants (plan 08, P08.T12), the galactic
-//! centre's members (P09.T24–T28) and the other catalogue classes (P09.T35, P11.T8.b) are not
-//! placed yet; each is added here by the task that places it (P12.T0 as built).
+//! (P09.T43), the accreting white dwarfs, fast and slow (P11.T8.a), the X-ray binaries (P11.T8.b),
+//! and the stellar and neutron-star mergers (P11.T8.c–d). The displaced remnants (plan 08,
+//! P08.T12), the galactic centre's members (P09.T24–T28) and the other catalogue classes (P09.T35)
+//! are not placed yet; each is added here by the task that places it (P12.T0 as built).
 
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
@@ -24,7 +24,7 @@ use hyperion_sim::events::{
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::binary::{
-    AccretingWdFast, AccretingWdSlow, NeutronStarMergers, StellarMergers,
+    AccretingWdFast, AccretingWdSlow, NeutronStarMergers, StellarMergers, XrayBinaries, XrbSide,
 };
 use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use hyperion_sim::galaxy::catalogue_classes::lbv::LbvProcess;
@@ -647,6 +647,46 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
                 .filter(|s| s.phase() != hyperion_sim::stellar::Phase::NoRemnant)
                 .count();
             assert_eq!(present, if t < merger { 2 } else { 1 }, "{what} at {t}");
+        }
+    }
+
+    // An X-ray binary of the class grid (plan 11, P11.T8.b), a low-mass host from the cells about
+    // the centre and a high-mass one from the inner disc: its system on its one straight line, its
+    // record's existence and its stars (its pair, from its marks).
+    let xrb = XrayBinaries::new(&galaxy);
+    let xrb_entry = |cells: Vec<[i32; 3]>, side: XrbSide| {
+        cells.into_iter().find_map(|cell| {
+            let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, cell).expect("a cell");
+            CatalogueClassCell::generate(&galaxy, &xrb, key)
+                .into_entries()
+                .into_iter()
+                .find(|e| XrbSide::of(e.value().record().population()) == side)
+        })
+    };
+    let block = |xs: std::ops::Range<i32>, ys: std::ops::Range<i32>| -> Vec<[i32; 3]> {
+        xs.flat_map(|x| ys.clone().map(move |y| [x, y, 0]))
+            .collect()
+    };
+    let low = xrb_entry(block(-4..4, -4..4), XrbSide::LowMass)
+        .expect("the centre has low-mass X-ray binaries");
+    let high = xrb_entry(block(-12..12, 10..14), XrbSide::HighMass)
+        .expect("the inner disc has high-mass X-ray binaries");
+    for entry in [low, high] {
+        let catalogue = system_of(&galaxy, entry.id()).expect("an entry resolves");
+        let record = catalogue.record();
+        let stars = catalogue
+            .stars(&galaxy)
+            .expect("an X-ray binary's stars are its pair's");
+        for t in TIMES {
+            let p = catalogue.position_at(t);
+            assert_in_padded_cube("an X-ray binary", &p);
+            assert_eq!(position_at(&galaxy, record, t), p);
+            assert_eq!(entry.value().scan().position_at(t), p);
+            assert_eq!(record.existence_at(t), Existence::Exists);
+            assert!(record.age_at(t).value().is_finite());
+            assert_eq!(stars.summary_at(t).existence(), SystemExistence::Exists);
+            assert!(stars.brief_at(t).is_some(), "{:?} at {t}", record.id());
+            assert!(stars.state_at(t).is_some_and(|s| s.pairs().len() == 1));
         }
     }
 

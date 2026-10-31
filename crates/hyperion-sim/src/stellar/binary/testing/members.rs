@@ -1,22 +1,22 @@
-//! The binary classes' prior members (plan 11's test helpers; P11.T8.a): every first-attempt
-//! binary of the grid that [`carved_class`] puts in a class, drawn with no carve-out, against which
-//! a class's sampler is checked (P11.T8) and plan 15's P15.T10.b fits it.
+//! The binary classes' prior members (plan 11's test helpers; P11.T8.a and P11.T8.b): every
+//! first-attempt binary of the grid that [`carved_class`] puts in a class, drawn with no carve-out,
+//! against which a class's sampler is checked (P11.T8) and plan 15's P15.T10.b fits it.
 
 use crate::galaxy::Galaxy;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
 use crate::id::Layer;
-use crate::orbit::KeplerElements;
+use crate::orbit::{Eccentricity, KeplerElements};
 use crate::rng::Threshold;
 use crate::stellar::Phase;
 use crate::stellar::binary::classify::{
-    MAGNETIC_CV_SHARE, nova_recurrence_period, white_dwarf_feeding,
+    MAGNETIC_CV_SHARE, nova_recurrence_period, white_dwarf_feeding, xray_binary_reading,
 };
-use crate::stellar::binary::{BinaryTimeline, CarvedClass, carved_class};
+use crate::stellar::binary::{BinaryClass, BinaryTimeline, CarvedClass, carved_class};
 use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
 use crate::stellar::system::{StarModel, SystemStars, draw_metallicity, primary_draws};
 use crate::tables::binary::CLASS_SHARES;
-use crate::units::{Seconds, SolarMasses, SolarMassesPerYear, Years};
+use crate::units::{MetresPerSecond, Seconds, SolarMasses, SolarMassesPerYear, Years};
 
 use super::Mix;
 
@@ -42,13 +42,42 @@ pub struct AccretingMarks {
     pub magnetic: bool,
 }
 
+/// What an X-ray binary member is where [`carved_class`] reads it (P11.T8.b): the marks its class's
+/// sampler draws.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct XrayMarks {
+    /// The age read, Julian years: the epoch's, or the first of the horizon at which it is one.
+    pub age: Years,
+    /// Its class then: a low-mass X-ray binary's kind or a high-mass one's.
+    pub class: BinaryClass,
+    /// The compact star's phase: a neutron star or a black hole.
+    pub accretor_phase: Phase,
+    /// The compact star's mass, M☉.
+    pub accretor_mass: SolarMasses,
+    /// The donor's mass, M☉.
+    pub donor_mass: SolarMasses,
+    /// The donor's phase.
+    pub donor_phase: Phase,
+    /// The orbital period, or `None` for a pair with no orbit then.
+    pub period: Option<Seconds>,
+    /// The orbit's eccentricity, or `None` for a pair with no orbit then.
+    pub eccentricity: Option<Eccentricity>,
+    /// The rate of transfer in stable transfer then, M☉ yr⁻¹.
+    pub transfer_rate: Option<SolarMassesPerYear>,
+    /// The pair's speed of recoil from its supernovae, if it is still bound.
+    pub recoil_speed: Option<MetresPerSecond>,
+    /// The years from the pair's last supernova to the age read.
+    pub since_supernova: Option<Years>,
+}
+
 /// One prior member of a carved class: the grid record it came from, its pair's timeline and,
-/// for an accreting white dwarf, its marks.
+/// for an accreting white dwarf or an X-ray binary, its marks.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassMember {
     record: SystemRecord,
     timeline: BinaryTimeline,
     accreting: Option<AccretingMarks>,
+    xray: Option<XrayMarks>,
 }
 
 impl ClassMember {
@@ -68,6 +97,12 @@ impl ClassMember {
     #[must_use]
     pub const fn accreting(&self) -> Option<&AccretingMarks> {
         self.accreting.as_ref()
+    }
+
+    /// An X-ray binary's marks where its class reads them.
+    #[must_use]
+    pub const fn xray(&self) -> Option<&XrayMarks> {
+        self.xray.as_ref()
     }
 }
 
@@ -174,6 +209,9 @@ fn members_of(
             record: *record,
             timeline: timeline.clone(),
             accreting: accreting_marks(timeline, age),
+            xray: (class == CarvedClass::XrayBinary)
+                .then(|| xray_marks(timeline, age))
+                .flatten(),
         });
     }
 }
@@ -199,5 +237,34 @@ fn accreting_marks(timeline: &BinaryTimeline, age_at_epoch: Years) -> Option<Acc
         transfer_rate: rate,
         recurrence: nova_recurrence_period(white_dwarf.mass(), rate),
         magnetic,
+    })
+}
+
+/// An X-ray binary's marks where [`carved_class`] reads them, or `None` for a pair that no age of
+/// the horizon makes one.
+fn xray_marks(timeline: &BinaryTimeline, age_at_epoch: Years) -> Option<XrayMarks> {
+    let (age, class) = xray_binary_reading(timeline, age_at_epoch)?;
+    let state = timeline.state_at(age);
+    let compact = |p: Phase| matches!(p, Phase::NeutronStar | Phase::BlackHole);
+    let stars = state.stars();
+    let a = usize::from(!compact(stars[0].phase()) && compact(stars[1].phase()));
+    let [accretor, donor] = [&stars[a], &stars[1 - a]];
+    let since_supernova = timeline
+        .supernovae()
+        .iter()
+        .rfind(|s| s.age() <= age)
+        .map(|s| Years::new(age.value() - s.age().value()));
+    Some(XrayMarks {
+        age,
+        class,
+        accretor_phase: accretor.phase(),
+        accretor_mass: accretor.mass(),
+        donor_mass: donor.mass(),
+        donor_phase: donor.phase(),
+        period: state.orbit().map(KeplerElements::period),
+        eccentricity: state.orbit().map(KeplerElements::eccentricity),
+        transfer_rate: state.transfer_rate(),
+        recoil_speed: timeline.recoil().map(|v| v.speed()),
+        since_supernova,
     })
 }

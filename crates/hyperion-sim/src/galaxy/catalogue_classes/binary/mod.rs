@@ -7,15 +7,16 @@
 //! candidate drawn present first through a
 //! [`ClassSampler`](crate::stellar::binary::sampler::ClassSampler), its scan marks before the rest
 //! (`stellar::binary::scan`), a timeline from its marks, and the test that the grid applies
-//! too. Built so far: the accreting white dwarfs, fast and slow
-//! (P11.T8.a, [`AccretingWdFast`], [`AccretingWdSlow`]), and the stellar mergers (P11.T8.c,
-//! [`StellarMergers`]) and the neutron-star mergers (P11.T8.d, [`NeutronStarMergers`]), which
-//! thin on [`ClassHosts`]. The X-ray binaries follow in P11.T8.b.
+//! too. Built so far: the accreting white dwarfs, fast and slow (P11.T8.a, [`AccretingWdFast`],
+//! [`AccretingWdSlow`]), the X-ray binaries (P11.T8.b, [`XrayBinaries`]), and the stellar mergers
+//! (P11.T8.c, [`StellarMergers`]) and the neutron-star mergers (P11.T8.d, [`NeutronStarMergers`]),
+//! which thin on [`ClassHosts`].
 
 mod awd;
 mod hosts;
 mod merger;
 mod nsm;
+mod xrb;
 
 pub use awd::{
     AccretingWdFast, AccretingWdSlow, AwdBinary, AwdCandidate, AwdComponent, AwdEntry, AwdHistory,
@@ -25,3 +26,8 @@ pub use awd::{
 pub use hosts::{ClassHosts, HostComponent};
 pub use merger::{ContactPair, MergerCandidate, MergerEntry, StellarMergers};
 pub use nsm::{Inspiral, NeutronStarMergers, NsmCandidate, NsmEntry};
+pub use xrb::{
+    BE_DONOR_ATTEMPTS, DONOR_TURN_OFF_SHARE, EVOLVED_DONOR_LOBE_SHARE, EVOLVED_DONOR_MIN_CORE_MASS,
+    SUPERGIANT_DONOR_CORE_SHARE, SUPERGIANT_DONOR_LIFE_SHARE, XrayBinaries, XrbBinary,
+    XrbCandidate, XrbComponent, XrbEntry, XrbHistory, XrbSide,
+};

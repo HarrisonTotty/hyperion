@@ -1,6 +1,6 @@
-//! The scan marks of the binary catalogue classes (plan 11's Provides; P11.T8.a; design notes 10
-//! and 12): what a galaxy-wide scan needs of a host, drawn first and on draws of its own, without
-//! the rest of the system and without the binary engine.
+//! The scan marks of the binary catalogue classes (plan 11's Provides; P11.T8.a and P11.T8.b;
+//! design notes 10 and 12): what a galaxy-wide scan needs of a host, drawn first and on draws of
+//! its own, without the rest of the system and without the binary engine.
 //!
 //! Ten million accreting white dwarfs must be walked in seconds (design note 10), so a host's scan
 //! marks are its first draws: its site and the thinning that places it, its nova recurrence period
@@ -10,6 +10,13 @@
 //! [`catalogue_classes::binary`](crate::galaxy::catalogue_classes::binary) draw the same marks
 //! first and then the rest). The catalogue's own test cannot refuse a candidate the scan keeps: its
 //! one way of refusing one, its recurrence on the other side of L, is the scan's own last check.
+//!
+//! The X-ray binaries' marks ([`XrbScanMarks`], P11.T8.b) are their kind, their place and motion
+//! at the epoch and a low-mass transient's outburst recurrence. [`scan_marks`] and [`scan_cell`]
+//! take either class's process ([`ScanProcess`]). The class's test refuses an X-ray binary
+//! candidate the scan keeps only if none of its Be/X donor's first
+//! [`BE_DONOR_ATTEMPTS`](crate::galaxy::catalogue_classes::binary::BE_DONOR_ATTEMPTS) draws make
+//! it plan 06's Be star, a chance under 10⁻⁴⁹ (the class's documentation).
 //!
 //! # The recurrence
 //!
@@ -45,23 +52,31 @@ mod nsm;
 pub use merger::{MergerScanMarks, horizon_time, merger_scan_marks, scan_merger_cell};
 pub use nsm::{NsmScanMarks, nsm_scan_marks, scan_nsm_cell};
 
-use crate::coords::{GalacticPosition, GalacticVelocity};
+use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::events::{
     CycleEvent, EventSeries, LinearClock, MonotonePhase, PhaseClock, TimeWindow, octaves_to_span,
 };
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::CatalogueCellKey;
-use crate::galaxy::catalogue_classes::binary::{AwdProcess, AwdSide};
+use crate::galaxy::catalogue_classes::binary::{AwdProcess, AwdSide, XrayBinaries, XrbSide};
 use crate::galaxy::fields::ComponentId;
 use crate::id::{BodyId, CatalogueSystemId, SystemId, event_tags};
 use crate::math;
+use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::rng::{ObjectKey, Seed, Stream, tags};
-use crate::tables::binary::{AWD_SAMPLER, AwdMark};
+use crate::stellar::draws::isotropic;
+use crate::tables::binary::{AWD_SAMPLER, AwdMark, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick};
 use crate::time::{SourceHorizon, Span, UniverseTime};
-use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
-use crate::units::{PerCubicLightYear, SolarMasses, SolarMassesPerYear, Years};
+use crate::units::consts::{
+    SECONDS_PER_DAY, SECONDS_PER_JULIAN_YEAR, SOLAR_MASS_KG, SPEED_OF_LIGHT,
+};
+use crate::units::{
+    GravitationalParameter, Metres, PerCubicLightYear, Radians, Seconds, SolarMasses,
+    SolarMassesPerYear, Years,
+};
 
-use super::classify::{nova_recurrence_period, recurrence_class};
+use super::classify::{nova_recurrence_period, recurrence_class, xrb_line};
+use super::light_curves::{XrayAccretor, eddington_luminosity};
 use super::sampler::ClassSampler;
 
 /// The amplitude of a host's nova phase noise at its smallest octave, cycles: 0.08, ours,
@@ -230,10 +245,497 @@ impl AwdScanMarks {
     }
 }
 
-/// The scan marks of candidate `id` of the accreting white dwarf class cell `cell` under its
-/// `bound`, or `None` if the class keeps no entry there (P11.T8.a): the site and its thinning,
-/// the recurrence on the class's side of L, the velocity, the nova series and clock, and a slow
-/// host's eruptions in the source horizon. It never runs the binary engine.
+/// What a galaxy-wide scan reads of an X-ray binary host (plan 11's Provides; P11.T8.b): its kind,
+/// its place and motion, a high-mass host's recoil from its supernova, and a low-mass transient's
+/// outburst recurrence. The transients' and the Be/X outbursts' events are P11.T9's.
+///
+/// # Examples
+///
+/// The X-ray binaries about the centre and across the inner disc: the low-mass ones sit where they
+/// were placed, and a high-mass one has moved from its supernova at its recoil since.
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::catalogue_classes::binary::XrayBinaries;
+/// use hyperion_sim::galaxy::catalogue_classes::{CatalogueCellKey, ClassId};
+/// use hyperion_sim::stellar::binary::scan::scan_cell;
+///
+/// let galaxy = Galaxy::new(Seed::new(9));
+/// let process = XrayBinaries::new(&galaxy);
+/// let mut hosts = Vec::new();
+/// for x in -8..8 {
+///     for y in [-1, 0, 11, 12] {
+///         let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, [x, y, 0])?;
+///         scan_cell(&galaxy, &process, key, &mut hosts);
+///     }
+/// }
+/// assert!(!hosts.is_empty());
+/// for host in &hosts {
+///     assert_eq!(host.kind().is_high_mass(), host.recoil().is_some());
+///     assert_eq!(host.kind().is_transient(), host.recurrence().is_some());
+///     if host.recoil().is_none() {
+///         assert_eq!(host.position(), host.site());
+///     }
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct XrbScanMarks {
+    id: CatalogueSystemId,
+    kind: XrbHostKind,
+    component: ComponentId,
+    site: GalacticPosition,
+    position: GalacticPosition,
+    velocity: GalacticVelocity,
+    recoil: Option<XrbRecoil>,
+    recurrence: Option<Years>,
+    accretor_mass: SolarMasses,
+    shape: XrbShape,
+    transfer_rate: Option<SolarMassesPerYear>,
+}
+
+impl XrbScanMarks {
+    /// The host's ID: member 0 of its catalogue entry.
+    #[must_use]
+    pub const fn id(&self) -> CatalogueSystemId {
+        self.id
+    }
+
+    /// The host's kind.
+    #[must_use]
+    pub const fn kind(&self) -> XrbHostKind {
+        self.kind
+    }
+
+    /// The density component the host was drawn from: the young disc's for a high-mass host.
+    #[must_use]
+    pub const fn component(&self) -> ComponentId {
+        self.component
+    }
+
+    /// Where the host was placed in its cell: for a high-mass host, where its supernova was,
+    /// relative to its component's field; for a low-mass one, its position at the epoch.
+    #[must_use]
+    pub const fn site(&self) -> &GalacticPosition {
+        &self.site
+    }
+
+    /// Where the host is at the epoch: its site, moved by a high-mass host's recoil over the years
+    /// since its supernova.
+    #[must_use]
+    pub const fn position(&self) -> &GalacticPosition {
+        &self.position
+    }
+
+    /// The host's velocity, galactic, the one its entry moves at (plan 09's rule 6): its
+    /// component's draw at its site, plus a high-mass host's recoil.
+    #[must_use]
+    pub const fn velocity(&self) -> GalacticVelocity {
+        self.velocity
+    }
+
+    /// The host's position at `t`, on its straight line through its position at the epoch.
+    ///
+    /// # Panics
+    ///
+    /// As plan 09's `CatalogueMotion::position_at`, beyond any time the clock reaches.
+    #[must_use]
+    pub fn position_at(&self, t: UniverseTime) -> GalacticPosition {
+        crate::galaxy::catalogue_classes::CatalogueMotion::straight(self.position, self.velocity)
+            .position_at(t)
+    }
+
+    /// A high-mass host's recoil from its supernova; `None` for a low-mass host.
+    #[must_use]
+    pub const fn recoil(&self) -> Option<&XrbRecoil> {
+        self.recoil.as_ref()
+    }
+
+    /// A low-mass transient's outburst recurrence, Julian years; `None` for every other kind.
+    #[must_use]
+    pub const fn recurrence(&self) -> Option<Years> {
+        self.recurrence
+    }
+
+    /// The compact star's mass, M☉: a neutron star's 1.2–2.2, a black hole's 5–15.
+    #[must_use]
+    pub const fn accretor_mass(&self) -> SolarMasses {
+        self.accretor_mass
+    }
+
+    /// The orbital period.
+    #[must_use]
+    pub fn period(&self) -> Seconds {
+        match self.shape {
+            XrbShape::LowMass { period_hours, .. } => Seconds::new(period_hours * 3_600.0),
+            XrbShape::BeX { period_days, .. } | XrbShape::Supergiant { period_days, .. } => {
+                Seconds::new(period_days * SECONDS_PER_DAY)
+            }
+        }
+    }
+
+    /// The mean rate of transfer onto the compact star, M☉ yr⁻¹, held to its Eddington rate: a
+    /// low-mass host's through its disc, on its kind's side of the irradiated disc's instability
+    /// line by at least [`RATE_EXCESS_MARGIN_DEX`], or a supergiant host's; `None` for a Be/X
+    /// host, marked detached.
+    #[must_use]
+    pub const fn transfer_rate(&self) -> Option<SolarMassesPerYear> {
+        self.transfer_rate
+    }
+
+    /// What its binary is by its kind, as the scan drew it.
+    #[must_use]
+    pub(crate) const fn shape(&self) -> XrbShape {
+        self.shape
+    }
+}
+
+/// A high-mass X-ray binary's recoil (P11.T8.b): the systemic velocity its compact star's
+/// supernova gave the pair (plan 11's P11.T4.e kick, drawn here from the class's table), and the
+/// years since, over which it carried the pair from its site on a straight line, as plan 08's
+/// `explosion_site` carries a record.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct XrbRecoil {
+    velocity: GalacticVelocity,
+    since_supernova: Years,
+}
+
+impl XrbRecoil {
+    /// The recoil, galactic, against the host's component's field.
+    #[must_use]
+    pub const fn velocity(&self) -> GalacticVelocity {
+        self.velocity
+    }
+
+    /// The Julian years from the supernova to the epoch.
+    #[must_use]
+    pub const fn since_supernova(&self) -> Years {
+        self.since_supernova
+    }
+
+    /// The displacement from the site to the host at the epoch: the recoil over the years since.
+    #[must_use]
+    pub fn displacement(&self) -> GalacticDisplacement {
+        self.velocity.displacement_over(Seconds::new(
+            self.since_supernova.value() * SECONDS_PER_JULIAN_YEAR,
+        ))
+    }
+}
+
+/// The least distance of a low-mass host's transfer rate from the irradiated disc's instability
+/// line, dex: 10⁻⁶, so that the rate falls on its kind's side of the line however `classify`
+/// rounds the line (P11.T8.b).
+pub const RATE_EXCESS_MARGIN_DEX: f64 = 1.0e-6;
+
+/// What an X-ray binary host's binary is now by its kind, as its scan marks draw it (P11.T8.b):
+/// the marks after its compact star's mass on `class.xrb.binary`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum XrbShape {
+    /// A low-mass host: its period, hours, its donor's mass, and its rate over the irradiated
+    /// disc's instability line, dex, on its kind's side by at least [`RATE_EXCESS_MARGIN_DEX`].
+    LowMass {
+        period_hours: f64,
+        donor_mass: SolarMasses,
+        rate_excess_dex: f64,
+    },
+    /// A Be/X host: its period, days, eccentricity, and its Be star's initial mass on its own
+    /// track.
+    BeX {
+        period_days: f64,
+        eccentricity: Eccentricity,
+        donor_mass: SolarMasses,
+    },
+    /// A supergiant host: its period, days, its donor's mass and its transfer rate.
+    Supergiant {
+        period_days: f64,
+        donor_mass: SolarMasses,
+        rate: SolarMassesPerYear,
+    },
+}
+
+impl XrbShape {
+    /// The marks of a host of `kind` from `stream`, three words, the low-mass rate's ranks split at
+    /// `rate_split`, the line's.
+    #[must_use]
+    fn draw(
+        sampler: ClassSampler<XrbMark, XrbPick>,
+        kind: XrbHostKind,
+        rate_split: f64,
+        stream: &mut Stream,
+    ) -> Self {
+        match kind {
+            XrbHostKind::NeutronStarPersistent
+            | XrbHostKind::NeutronStarTransient
+            | XrbHostKind::BlackHolePersistent
+            | XrbHostKind::BlackHoleTransient => {
+                let log_period = sampler.draw(XrbMark::LowMassPeriod, 0.0, stream);
+                let log_donor = sampler.draw(XrbMark::LowMassDonorMass, log_period, stream);
+                let transient = kind.is_transient();
+                let ranks = if transient {
+                    (0.0, rate_split)
+                } else {
+                    (rate_split, 1.0)
+                };
+                let drawn = sampler.draw_in_ranks(XrbMark::LowMassRateExcess, 0.0, ranks, stream);
+                Self::LowMass {
+                    period_hours: math::exp10(log_period),
+                    donor_mass: SolarMasses::new(math::exp10(log_donor)),
+                    rate_excess_dex: if transient {
+                        drawn.min(-RATE_EXCESS_MARGIN_DEX)
+                    } else {
+                        drawn.max(RATE_EXCESS_MARGIN_DEX)
+                    },
+                }
+            }
+            XrbHostKind::BeX => Self::BeX {
+                period_days: math::exp10(sampler.draw(XrbMark::BexPeriod, 0.0, stream)),
+                eccentricity: Eccentricity::new(sampler.draw(
+                    XrbMark::BexEccentricity,
+                    0.0,
+                    stream,
+                ))
+                .expect("the table holds a Be/X host's eccentricity to 0–0.85"),
+                donor_mass: SolarMasses::new(sampler.draw(XrbMark::BexDonorMass, 0.0, stream)),
+            },
+            XrbHostKind::Supergiant => Self::Supergiant {
+                period_days: math::exp10(sampler.draw(XrbMark::SupergiantPeriod, 0.0, stream)),
+                donor_mass: SolarMasses::new(sampler.draw(
+                    XrbMark::SupergiantDonorMass,
+                    0.0,
+                    stream,
+                )),
+                rate: SolarMassesPerYear::new(math::exp10(sampler.draw(
+                    XrbMark::SupergiantRate,
+                    0.0,
+                    stream,
+                ))),
+            },
+        }
+    }
+
+    /// The rate onto a compact star `accretor` of `accretor_mass` of a host of this shape, M☉
+    /// yr⁻¹, held to its Eddington rate ([`eddington_rate`]): a low-mass host's line ([`xrb_line`]
+    /// at the circular orbit's separation) times its excess, a persistent host's never below the
+    /// line, so that a line above the Eddington rate leaves it just above the line; a supergiant
+    /// host's own; `None` for a Be/X host.
+    #[must_use]
+    fn transfer_rate(
+        &self,
+        accretor: XrayAccretor,
+        accretor_mass: SolarMasses,
+    ) -> Option<SolarMassesPerYear> {
+        let eddington = eddington_rate(accretor, accretor_mass).value();
+        match *self {
+            Self::LowMass {
+                period_hours,
+                donor_mass,
+                rate_excess_dex,
+            } => {
+                let separation = circular_separation(
+                    Seconds::new(period_hours * 3_600.0),
+                    accretor_mass + donor_mass,
+                );
+                let line = xrb_line(accretor_mass, donor_mass, separation).value();
+                let held = (line * math::exp10(rate_excess_dex)).min(eddington);
+                let rate = if rate_excess_dex > 0.0 {
+                    held.max(line * math::exp10(RATE_EXCESS_MARGIN_DEX))
+                } else {
+                    held
+                };
+                Some(SolarMassesPerYear::new(rate))
+            }
+            Self::Supergiant { rate, .. } => {
+                Some(SolarMassesPerYear::new(rate.value().min(eddington)))
+            }
+            Self::BeX { .. } => None,
+        }
+    }
+}
+
+/// The hydrogen mass fraction of the matter a compact star accretes, as its Eddington rate takes
+/// it: 0.7, a hydrogen-rich donor's (Tauris, Langer and Kramer 2012, equation 6, as P11.T9.a's
+/// mixed burst fuel takes it).
+const ACCRETED_HYDROGEN: f64 = 0.7;
+
+/// The Eddington rate of accretion onto `accretor` of `mass`, M☉ yr⁻¹: the Eddington luminosity
+/// of matter of [`ACCRETED_HYDROGEN`] (P11.T9.a's `eddington_luminosity`) over the accretion
+/// efficiency times c², 2.2 × 10⁻⁸ M☉ yr⁻¹ for a 1.45 M☉ neutron star of plan 06's 12.2 km.
+#[must_use]
+pub(crate) fn eddington_rate(accretor: XrayAccretor, mass: SolarMasses) -> SolarMassesPerYear {
+    let luminosity = eddington_luminosity(mass, ACCRETED_HYDROGEN).value();
+    let kg_per_s =
+        luminosity / (accretor.efficiency(mass.value()) * SPEED_OF_LIGHT * SPEED_OF_LIGHT);
+    SolarMassesPerYear::new(kg_per_s * SECONDS_PER_JULIAN_YEAR / SOLAR_MASS_KG)
+}
+
+/// The semi-major axis of an orbit of `period` about a total of `mass`: Kepler's third law, the
+/// arithmetic of [`KeplerElements::from_period`], bit for bit.
+#[must_use]
+fn circular_separation(period: Seconds, mass: SolarMasses) -> Metres {
+    KeplerElements::from_period(
+        period,
+        GravitationalParameter::from_solar_masses(mass),
+        Eccentricity::CIRCULAR,
+        Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)
+            .expect("zero angles are an orientation"),
+        Radians::ZERO,
+    )
+    .expect("a period of hours to days about a few M☉ is an orbit")
+    .semi_major_axis()
+}
+
+/// [`scan_marks`] of an X-ray binary candidate.
+#[must_use]
+fn xrb_scan_marks(
+    galaxy: &Galaxy,
+    process: &XrayBinaries,
+    cell: &CatalogueCellKey,
+    id: CatalogueSystemId,
+    bound: PerCubicLightYear,
+) -> Option<XrbScanMarks> {
+    let (site, component, host_side) = process.site(galaxy, cell, id, bound)?;
+    let seed = galaxy.seed();
+    let key = ObjectKey::from(SystemId::from(id));
+    let sampler = ClassSampler::new(&XRB_SAMPLER);
+    let mut stream = Stream::open(seed, tags::CLASS_XRB_KIND, key);
+    let kind = match host_side {
+        XrbSide::LowMass => XrbHostKind::LOW_MASS[sampler.pick(XrbPick::LowMassKind, &mut stream)],
+        XrbSide::HighMass => {
+            XrbHostKind::HIGH_MASS[sampler.pick(XrbPick::HighMassKind, &mut stream)]
+        }
+    };
+    let recurrence_mark = match kind {
+        XrbHostKind::NeutronStarTransient => Some(XrbMark::NeutronStarRecurrence),
+        XrbHostKind::BlackHoleTransient => Some(XrbMark::BlackHoleRecurrence),
+        XrbHostKind::NeutronStarPersistent
+        | XrbHostKind::BlackHolePersistent
+        | XrbHostKind::BeX
+        | XrbHostKind::Supergiant => None,
+    };
+    let recurrence =
+        recurrence_mark.map(|mark| Years::new(math::exp10(sampler.draw(mark, 0.0, &mut stream))));
+    let mut stream = Stream::open(seed, tags::CLASS_XRB_BINARY, key);
+    let accretor_mark = match kind.accretor() {
+        XrayAccretor::NeutronStar => XrbMark::NeutronStarMass,
+        XrayAccretor::BlackHole => XrbMark::BlackHoleMass,
+    };
+    let accretor_mass = SolarMasses::new(sampler.draw(accretor_mark, 0.0, &mut stream));
+    let shape = XrbShape::draw(sampler, kind, process.rate_split(), &mut stream);
+    let recoil_marks = match kind {
+        XrbHostKind::BeX => Some((XrbMark::BexRecoil, XrbMark::BexSinceSupernova)),
+        XrbHostKind::Supergiant => {
+            Some((XrbMark::SupergiantRecoil, XrbMark::SupergiantSinceSupernova))
+        }
+        XrbHostKind::NeutronStarPersistent
+        | XrbHostKind::NeutronStarTransient
+        | XrbHostKind::BlackHolePersistent
+        | XrbHostKind::BlackHoleTransient => None,
+    };
+    let recoil = recoil_marks.map(|(speed_mark, since_mark)| {
+        let mut stream = Stream::open(seed, tags::CLASS_XRB_RECOIL, key);
+        let metres_per_second = sampler.draw(speed_mark, 0.0, &mut stream) * 1.0e3;
+        let direction = isotropic(&mut stream).components();
+        let since = math::exp10(sampler.draw(since_mark, 0.0, &mut stream));
+        XrbRecoil {
+            velocity: GalacticVelocity::new(direction.map(|u| u * metres_per_second)),
+            since_supernova: Years::new(since),
+        }
+    });
+    let drawn = XrayBinaries::velocity(galaxy, component, &site, key);
+    let (position, velocity) = match &recoil {
+        Some(recoil) => (
+            site.translated(recoil.displacement()).expect(
+                "a finite recoil moving a host under 3,000 ly from its site carries its cell \
+                 nowhere near the i32 range's end",
+            ),
+            drawn + recoil.velocity,
+        ),
+        None => (site, drawn),
+    };
+    Some(XrbScanMarks {
+        id,
+        kind,
+        component,
+        site,
+        position,
+        velocity,
+        recoil,
+        recurrence,
+        accretor_mass,
+        transfer_rate: shape.transfer_rate(kind.accretor(), accretor_mass),
+        shape,
+    })
+}
+
+/// A binary catalogue class as a galaxy-wide scan walks it (P11.T8): its bound over a cell and
+/// each candidate's scan marks, which are the entry's own, bit for bit. The accreting white dwarfs'
+/// [`AwdProcess`] (P11.T8.a) and the X-ray binaries' [`XrayBinaries`] (P11.T8.b) are built.
+pub trait ScanProcess {
+    /// What a scan reads of one host.
+    type Marks;
+
+    /// The class's bound over `cell`: its [`ClassProcess`]'s.
+    ///
+    /// [`ClassProcess`]: crate::galaxy::catalogue_classes::ClassProcess
+    fn scan_bound(&self, galaxy: &Galaxy, cell: &CatalogueCellKey) -> PerCubicLightYear;
+
+    /// The scan marks of candidate `id` of `cell` under `bound`, or `None` if the class keeps no
+    /// entry there ([`scan_marks`]).
+    fn marks_of(
+        &self,
+        galaxy: &Galaxy,
+        cell: &CatalogueCellKey,
+        id: CatalogueSystemId,
+        bound: PerCubicLightYear,
+    ) -> Option<Self::Marks>;
+}
+
+impl ScanProcess for AwdProcess {
+    type Marks = AwdScanMarks;
+
+    fn scan_bound(&self, galaxy: &Galaxy, cell: &CatalogueCellKey) -> PerCubicLightYear {
+        self.bound(galaxy, cell)
+    }
+
+    fn marks_of(
+        &self,
+        galaxy: &Galaxy,
+        cell: &CatalogueCellKey,
+        id: CatalogueSystemId,
+        bound: PerCubicLightYear,
+    ) -> Option<AwdScanMarks> {
+        awd_scan_marks(galaxy, self, cell, id, bound)
+    }
+}
+
+impl ScanProcess for XrayBinaries {
+    type Marks = XrbScanMarks;
+
+    fn scan_bound(&self, galaxy: &Galaxy, cell: &CatalogueCellKey) -> PerCubicLightYear {
+        self.bound(galaxy, cell)
+    }
+
+    fn marks_of(
+        &self,
+        galaxy: &Galaxy,
+        cell: &CatalogueCellKey,
+        id: CatalogueSystemId,
+        bound: PerCubicLightYear,
+    ) -> Option<XrbScanMarks> {
+        xrb_scan_marks(galaxy, self, cell, id, bound)
+    }
+}
+
+/// The scan marks of candidate `id` of the class cell `cell` of `process`'s class under its
+/// `bound`, or `None` if the class keeps no entry there. It never runs the binary engine.
+///
+/// - An accreting white dwarf's (P11.T8.a): the site and its thinning, the recurrence on the
+///   class's side of L, the velocity, the nova series and clock, and a slow host's eruptions in
+///   the source horizon.
+/// - An X-ray binary's (P11.T8.b): the site and its thinning, the kind on the side its component
+///   gives, a high-mass host's recoil from its supernova, the place and velocity at the epoch, and
+///   a low-mass transient's outburst recurrence.
 ///
 /// The marks are the entry's own, bit for bit: the class's candidate draws them through this
 /// function first.
@@ -243,7 +745,19 @@ impl AwdScanMarks {
 /// If `cell` is not a cell of `process`'s class, as plan 09's cell; in debug builds, on a density
 /// above the bound.
 #[must_use]
-pub fn scan_marks(
+pub fn scan_marks<P: ScanProcess>(
+    galaxy: &Galaxy,
+    process: &P,
+    cell: &CatalogueCellKey,
+    id: CatalogueSystemId,
+    bound: PerCubicLightYear,
+) -> Option<P::Marks> {
+    process.marks_of(galaxy, cell, id, bound)
+}
+
+/// [`scan_marks`] of an accreting white dwarf candidate.
+#[must_use]
+fn awd_scan_marks(
     galaxy: &Galaxy,
     process: &AwdProcess,
     cell: &CatalogueCellKey,
@@ -347,20 +861,20 @@ fn horizon_eruptions(
     (eruptions, count)
 }
 
-/// Appends to `out` the scan marks of every entry of the accreting white dwarf class cell `key`,
+/// Appends to `out` the scan marks of every entry of the class cell `key` of `process`'s class,
 /// in index order: one bound, one count and [`scan_marks`] of each candidate, the cell's entries
 /// exactly, without the rest of their systems.
 ///
 /// # Panics
 ///
 /// As [`scan_marks`], and as plan 09's count on a bound past the Poisson sampler's limit.
-pub fn scan_cell(
+pub fn scan_cell<P: ScanProcess>(
     galaxy: &Galaxy,
-    process: &AwdProcess,
+    process: &P,
     key: CatalogueCellKey,
-    out: &mut Vec<AwdScanMarks>,
+    out: &mut Vec<P::Marks>,
 ) {
-    let bound = process.bound(galaxy, &key);
+    let bound = process.scan_bound(galaxy, &key);
     let candidates =
         crate::galaxy::catalogue_classes::grid::candidate_count(galaxy.seed(), &key, bound);
     out.extend((0..candidates).filter_map(|index| {

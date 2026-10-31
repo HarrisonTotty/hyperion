@@ -21,8 +21,8 @@
 //!
 //! **The production lookup**, [`ProductionClasses`], has one arm per class whose process is built:
 //! P09.T33.a's core collapses, P09.T34.a's Type Ia, P09.T43's luminous blue variables, P11.T8.a's
-//! two accreting white dwarf classes and P11.T8.c's and T8.d's two merger classes so far. Every
-//! other `111` ID that reaches
+//! two accreting white dwarf classes, P11.T8.b's X-ray binaries and P11.T8.c's and T8.d's two
+//! merger classes so far. Every other `111` ID that reaches
 //! the grid answers [`NoSuchSystem`](ResolveSystemError::NoSuchSystem). Plan 03's
 //! [`placement::resolve`](crate::galaxy::placement::resolve) answers a `111` ID through it, with
 //! the record its class gives the member ([`ClassProcess::system`], [`system_of`]).
@@ -52,7 +52,9 @@ mod tests;
 use std::error::Error;
 use std::fmt;
 
-use super::binary::{AccretingWdFast, AccretingWdSlow, NeutronStarMergers, StellarMergers};
+use super::binary::{
+    AccretingWdFast, AccretingWdSlow, NeutronStarMergers, StellarMergers, XrayBinaries,
+};
 use super::core_collapse::CoreCollapseProcess;
 use super::ids::{CatalogueCellKey, entry_of};
 use super::lbv::LbvProcess;
@@ -784,6 +786,7 @@ pub trait ClassLookup {
 /// registered), and plan 11's five by P11.T8, of which
 /// [`ACCRETING_WHITE_DWARF`](ClassId::ACCRETING_WHITE_DWARF) and
 /// [`ACCRETING_WHITE_DWARF_SLOW`](ClassId::ACCRETING_WHITE_DWARF_SLOW) (P11.T8.a),
+/// [`XRAY_BINARY`](ClassId::XRAY_BINARY) (P11.T8.b),
 /// [`STELLAR_MERGER`](ClassId::STELLAR_MERGER) (P11.T8.c) and
 /// [`NEUTRON_STAR_MERGER`](ClassId::NEUTRON_STAR_MERGER) (P11.T8.d) are registered.
 /// [`TIDAL_DISRUPTION_VICTIM`](ClassId::TIDAL_DISRUPTION_VICTIM) is never placed and gets none.
@@ -807,6 +810,7 @@ impl ClassLookup for ProductionClasses {
             ClassId::ACCRETING_WHITE_DWARF_SLOW => {
                 Some(visitor.visit(&AccretingWdSlow::new(galaxy)))
             }
+            ClassId::XRAY_BINARY => Some(visitor.visit(&XrayBinaries::new(galaxy))),
             ClassId::STELLAR_MERGER => Some(visitor.visit(&StellarMergers::new(galaxy))),
             ClassId::NEUTRON_STAR_MERGER => Some(visitor.visit(&NeutronStarMergers::new(galaxy))),
             _ => None,

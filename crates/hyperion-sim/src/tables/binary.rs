@@ -29,17 +29,18 @@
 //! it now and of its history, which plan 11's `stellar::binary::sampler::ClassSampler` draws by
 //! inverse transform. Each mark is a residual given by its quantiles at the 17 ranks k ÷ 16, as
 //! plan 15's `PRIMARY_MASS_CDF` gives its laws, added to a median that follows a condition on a
-//! 17-point grid. [`AWD_SAMPLER`] is the accreting white dwarfs': hand-made scratch from the
-//! observed figures each mark's doc names (Design note 13), which P15.T10.b refits against the
-//! engine's own members; [`MERGER_SAMPLER`] is the stellar mergers' (P11.T8.c) and
-//! [`NSM_SAMPLER`] the neutron-star mergers' (P11.T8.d).
+//! 17-point grid. [`AWD_SAMPLER`] is the accreting white dwarfs' and [`XRB_SAMPLER`] the X-ray
+//! binaries': hand-made scratch from the observed figures each mark's doc names (Design note 13),
+//! which P15.T10.b refits against the engine's own members; [`MERGER_SAMPLER`] is the stellar
+//! mergers' (P11.T8.c) and [`NSM_SAMPLER`] the neutron-star mergers' (P11.T8.d).
 
 use std::marker::PhantomData;
 
 use crate::galaxy::POPULATIONS;
 use crate::galaxy::Population;
 use crate::galaxy::imf::MassBand;
-use crate::stellar::binary::CarvedClass;
+use crate::stellar::binary::light_curves::XrayAccretor;
+use crate::stellar::binary::{BinaryClass, CarvedClass, HmxbKind, XrbKind};
 
 /// The Milky Way fixture's initial mass formed, M☉, that the scratch rates are scaled to: its
 /// components' systems (with those not yet born) times the mass formed per system.
@@ -883,6 +884,355 @@ const NSM_MARKS: [SamplerMark; 5] = [
         median: None,
         limits: (0.0, 1.0),
     },
+];
+
+/// The kinds of the X-ray binaries' class (P11.T8.b), in [`XRB_SAMPLER`]'s two choices' order:
+/// the four low-mass kinds of the old populations, then the two high-mass kinds of the young disc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum XrbHostKind {
+    /// A neutron star fed by a low-mass donor above the irradiated disc's instability line.
+    NeutronStarPersistent,
+    /// A neutron star fed by a low-mass donor below the line: outbursts between quiescence.
+    NeutronStarTransient,
+    /// A black hole fed by a low-mass donor above the line.
+    BlackHolePersistent,
+    /// A black hole fed by a low-mass donor below the line.
+    BlackHoleTransient,
+    /// A neutron star beside a Be star, plan 06's.
+    BeX,
+    /// A neutron star fed by a supergiant filling its Roche lobe.
+    Supergiant,
+}
+
+impl XrbHostKind {
+    /// Every kind, in the choices' order.
+    pub const ALL: [Self; 6] = [
+        Self::NeutronStarPersistent,
+        Self::NeutronStarTransient,
+        Self::BlackHolePersistent,
+        Self::BlackHoleTransient,
+        Self::BeX,
+        Self::Supergiant,
+    ];
+
+    /// The low-mass kinds, in [`XrbPick::LowMassKind`]'s order.
+    pub const LOW_MASS: [Self; 4] = [
+        Self::NeutronStarPersistent,
+        Self::NeutronStarTransient,
+        Self::BlackHolePersistent,
+        Self::BlackHoleTransient,
+    ];
+
+    /// The high-mass kinds, in [`XrbPick::HighMassKind`]'s order.
+    pub const HIGH_MASS: [Self; 2] = [Self::BeX, Self::Supergiant];
+
+    /// Whether the kind is a high-mass X-ray binary's, whose hosts are the young disc's.
+    #[must_use]
+    pub const fn is_high_mass(self) -> bool {
+        match self {
+            Self::BeX | Self::Supergiant => true,
+            Self::NeutronStarPersistent
+            | Self::NeutronStarTransient
+            | Self::BlackHolePersistent
+            | Self::BlackHoleTransient => false,
+        }
+    }
+
+    /// Whether the kind is a low-mass transient's, whose outbursts recur.
+    #[must_use]
+    pub const fn is_transient(self) -> bool {
+        match self {
+            Self::NeutronStarTransient | Self::BlackHoleTransient => true,
+            Self::NeutronStarPersistent
+            | Self::BlackHolePersistent
+            | Self::BeX
+            | Self::Supergiant => false,
+        }
+    }
+
+    /// What the kind's compact star is: a neutron star, or a black hole for the black-hole kinds.
+    #[must_use]
+    pub const fn accretor(self) -> XrayAccretor {
+        match self {
+            Self::BlackHolePersistent | Self::BlackHoleTransient => XrayAccretor::BlackHole,
+            Self::NeutronStarPersistent
+            | Self::NeutronStarTransient
+            | Self::BeX
+            | Self::Supergiant => XrayAccretor::NeutronStar,
+        }
+    }
+
+    /// The binary class P11.T5's `classify` gives a pair of the kind.
+    #[must_use]
+    pub const fn class(self) -> BinaryClass {
+        match self {
+            Self::NeutronStarPersistent | Self::BlackHolePersistent => {
+                BinaryClass::LowMassXrayBinary(XrbKind::Persistent)
+            }
+            Self::NeutronStarTransient | Self::BlackHoleTransient => {
+                BinaryClass::LowMassXrayBinary(XrbKind::Transient)
+            }
+            Self::BeX => BinaryClass::HighMassXrayBinary(HmxbKind::BeX),
+            Self::Supergiant => BinaryClass::HighMassXrayBinary(HmxbKind::Supergiant),
+        }
+    }
+}
+
+/// The marks of [`XRB_SAMPLER`], in its order (P11.T8.b): what an X-ray binary is now, by its
+/// kind, then its history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum XrbMark {
+    /// A neutron star accretor's mass, M☉.
+    NeutronStarMass,
+    /// A black hole accretor's mass, M☉.
+    BlackHoleMass,
+    /// log₁₀ of a low-mass X-ray binary's orbital period, hours.
+    LowMassPeriod,
+    /// log₁₀ of a low-mass donor's mass, M☉, given log₁₀ of the period, hours.
+    LowMassDonorMass,
+    /// The transfer rate over the irradiated disc's instability line, dex: below 0 a transient,
+    /// at or above it persistent.
+    LowMassRateExcess,
+    /// log₁₀ of a neutron-star transient's outburst recurrence, years.
+    NeutronStarRecurrence,
+    /// log₁₀ of a black-hole transient's outburst recurrence, years.
+    BlackHoleRecurrence,
+    /// log₁₀ of a Be/X-ray binary's orbital period, days.
+    BexPeriod,
+    /// A Be/X-ray binary's orbital eccentricity.
+    BexEccentricity,
+    /// A Be/X-ray binary's Be star's initial mass on its own track, M☉.
+    BexDonorMass,
+    /// log₁₀ of a supergiant X-ray binary's orbital period, days.
+    SupergiantPeriod,
+    /// A supergiant X-ray binary's donor's mass, M☉.
+    SupergiantDonorMass,
+    /// log₁₀ of a supergiant X-ray binary's transfer rate, M☉ yr⁻¹.
+    SupergiantRate,
+    /// A Be/X-ray binary's systemic speed from its supernova, km s⁻¹.
+    BexRecoil,
+    /// A supergiant X-ray binary's systemic speed from its supernova, km s⁻¹.
+    SupergiantRecoil,
+    /// log₁₀ of the years since a Be/X-ray binary's supernova.
+    BexSinceSupernova,
+    /// log₁₀ of the years since a supergiant X-ray binary's supernova.
+    SupergiantSinceSupernova,
+    /// log₁₀ of a neutron star's progenitor's initial mass, M☉.
+    NeutronStarProgenitor,
+    /// log₁₀ of a black hole's progenitor's initial mass, M☉.
+    BlackHoleProgenitor,
+    /// log₁₀ of a low-mass donor's initial mass over its mass now.
+    DonorInitialExcess,
+}
+
+impl XrbMark {
+    /// Every mark, in [`XRB_SAMPLER`]'s order.
+    pub const ALL: [Self; 20] = [
+        Self::NeutronStarMass,
+        Self::BlackHoleMass,
+        Self::LowMassPeriod,
+        Self::LowMassDonorMass,
+        Self::LowMassRateExcess,
+        Self::NeutronStarRecurrence,
+        Self::BlackHoleRecurrence,
+        Self::BexPeriod,
+        Self::BexEccentricity,
+        Self::BexDonorMass,
+        Self::SupergiantPeriod,
+        Self::SupergiantDonorMass,
+        Self::SupergiantRate,
+        Self::BexRecoil,
+        Self::SupergiantRecoil,
+        Self::BexSinceSupernova,
+        Self::SupergiantSinceSupernova,
+        Self::NeutronStarProgenitor,
+        Self::BlackHoleProgenitor,
+        Self::DonorInitialExcess,
+    ];
+
+    /// The mark's place in [`XRB_SAMPLER`]'s marks.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+}
+
+impl SamplerKey for XrbMark {
+    fn index(self) -> usize {
+        Self::index(self)
+    }
+}
+
+/// The choices of [`XRB_SAMPLER`], in its order (P11.T8.b): a host's kind on its side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum XrbPick {
+    /// A low-mass host's kind, among [`XrbHostKind::LOW_MASS`].
+    LowMassKind,
+    /// A high-mass host's kind, among [`XrbHostKind::HIGH_MASS`].
+    HighMassKind,
+}
+
+impl SamplerKey for XrbPick {
+    fn index(self) -> usize {
+        match self {
+            Self::LowMassKind => 0,
+            Self::HighMassKind => 1,
+        }
+    }
+}
+
+/// The scratch sampler of the X-ray binaries' class (P11.T8.b; Design notes 10 and 13):
+/// [`XrbMark`]'s twenty marks and [`XrbPick`]'s two kind choices.
+///
+/// Hand-made from observed figures, each recalled and not read at source in this build unless its
+/// line says otherwise, and the same in every population; P15.T10.b refits it against the engine's
+/// members (plan 11's `brute_force_class_members`). Each unconditional mark marked "±" is a normal
+/// of the given mean and standard deviation, truncated at 2.5 and held to its limits.
+///
+/// - **The kinds**, as shares of all hosts: a neutron star's low-mass X-ray binaries 0.01
+///   persistent and 0.699 transient, a black hole's 0.001 and 0.13, so that the black-hole
+///   transients are the brainstorm's 1,300 of 10⁴ (Corral-Santana et al. 2016, A&A 587, A61) and
+///   the persistent ones the Galaxy's hundred or so bright sources (Grimm, Gilfanov and Sunyaev
+///   2002, A&A 391, 923); Be/X-ray binaries 0.15 and supergiant ones 0.01, some hundred against
+///   the forty to fifty known, most of the high-mass systems being Be/X (Reig 2011, Ap&SS 332, 1).
+///   Each choice's weights are its side's shares; the high-mass side's sum, 0.16, is the young
+///   disc's share of the hosts.
+/// - **Accretors**: neutron stars 1.45 ± 0.15 M☉ on 1.2–2.2 (Özel and Freire 2016, ARA&A 54,
+///   401); black holes 7.8 ± 1.2 on 5–15 (Özel et al. 2010, ApJ 725, 1918).
+/// - **Low-mass systems**: periods by a hand-made law from 2 hours to 10.5 days, median 8.3
+///   hours, with a tail of evolved donors to days (the spread of Ritter and Kolb's 2003, A&A 404,
+///   301, catalogue); donors on the Roche-lobe-filling main sequence's M₂ ≈ 0.11 P (hours) M☉
+///   (Frank, King and Raine 2002, Accretion Power in Astrophysics, section 4.6) up to 0.8 M☉, at
+///   7.3 hours, and evolved donors of 0.8 M☉ beyond, ±0.08 dex, on 0.1–1.5 M☉; the rate over the
+///   irradiated disc's line from 3 dex below it to 1 above, its median on the line, so that each
+///   side takes its own kinds by rank, and the Eddington rate held (`stellar::binary::scan`);
+///   transients recurring every 10^(3.0 ± 0.5) years with a neutron star and 10^(2.5 ± 0.5)
+///   with a black hole, some 14 and 8 outbursts a year over the Galaxy, against the 130 or so
+///   black-hole outbursts of 1996–2015 (Tetarenko et al. 2016, ApJS 222, 15) that the sky
+///   monitors saw.
+/// - **Be/X-ray binaries**: periods 10^(1.8 ± 0.35) days on 12.6–355 d, eccentricities 0.35 ±
+///   0.15 on 0–0.85 (Reig 2011's 12.7–330 d and 0.03–0.9), Be stars of 14 ± 2.5 M☉ on 9–19,
+///   B0–B2 (Negueruela 1998, A&A 338, 505); 10^(6.8 ± 0.25) years after the supernova, on 0.3–20
+///   Myr, within the Be star's main sequence.
+/// - **Supergiant X-ray binaries**, marked in Roche-lobe overflow: periods 10^(0.6 ± 0.3) days on
+///   1.3–16 d, donors of 20 ± 4 M☉ on 10–35, transfer 10^(−9 ± 0.5) M☉ yr⁻¹, 10³⁶–10³⁸ erg s⁻¹,
+///   the Eddington rate held; 10^(6.2 ± 0.2) years after the supernova on 0.3–5 Myr.
+/// - **Systemic speeds**: Maxwellians whose mean projected speed is van den Heuvel et al.'s (2000,
+///   A&A 364, 563) mean tangential speed, 15 ± 6 km s⁻¹ for Be/X and 42 ± 14 for supergiant
+///   systems, σ the mean tangential speed ÷ √(π ÷ 2): 12.0 km s⁻¹ (plan 09's
+///   `PAIR_SYSTEMIC_SIGMA`, ruling 126.3) and 33.5, mean speeds of 19.1 and 53.5 km s⁻¹, held to
+///   their 99.5% points, 43 and 120.
+/// - **History**: a neutron star's progenitor of 10^(1.08 ± 0.08) M☉ on 9–17 and a black hole's
+///   of 10^(1.48 ± 0.1) on 21–60, the ranges in which plan 06's single stars leave that remnant
+///   at [Fe/H] −0.5 to +0.3 with median draws (measured for P11.T8.b); a low-mass donor's initial
+///   mass 10^(0.15 ± 0.1) times its mass now, on 1–4 times.
+pub const XRB_SAMPLER: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
+    &XRB_MARKS,
+    &[
+        SamplerPick::new("low_mass_kind", &[0.01, 0.699, 0.001, 0.13]),
+        SamplerPick::new("high_mass_kind", &[0.15, 0.01]),
+    ],
+);
+
+/// The quantiles of a Maxwellian of σ = 1 at the ranks k ÷ 16, the last its 99.5% point: speeds
+/// of three normal components (the χ distribution of three degrees of freedom).
+const MAXWELL_RANKS: [f64; 17] = [
+    0.0, 0.642_815, 0.832_080, 0.976_476, 1.101_151, 1.215_477, 1.324_379, 1.431_091, 1.538_172,
+    1.648_056, 1.763_470, 1.887_973, 2.026_905, 2.189_572, 2.395_707, 2.704_675, 3.583_037,
+];
+
+/// [`MAXWELL_RANKS`] scaled to `sigma`.
+const fn maxwell(sigma: f64) -> [f64; 17] {
+    let mut out = [0.0; 17];
+    let mut k = 0;
+    while k < 17 {
+        out[k] = MAXWELL_RANKS[k] * sigma;
+        k += 1;
+    }
+    out
+}
+
+/// The Maxwellian σ of a Be/X-ray binary's systemic speed, km s⁻¹: 12.0, van den Heuvel et al.'s
+/// mean tangential 15 ÷ √(π ÷ 2), plan 09's `PAIR_SYSTEMIC_SIGMA` (ruling 126.3).
+const BEX_RECOIL_SIGMA: f64 = 12.0;
+
+/// The Maxwellian σ of a supergiant X-ray binary's systemic speed, km s⁻¹: van den Heuvel et
+/// al.'s mean tangential 42 ÷ √(π ÷ 2).
+const SUPERGIANT_RECOIL_SIGMA: f64 = 33.511_152;
+
+/// [`XRB_SAMPLER`]'s marks, in [`XrbMark`]'s order.
+#[rustfmt::skip]
+const XRB_MARKS: [SamplerMark; 20] = [
+    SamplerMark::new("neutron_star_mass", normal_about(1.45, 0.15), None, (1.2, 2.2)),
+    SamplerMark::new("black_hole_mass", normal_about(7.8, 1.2), None, (5.0, 15.0)),
+    SamplerMark::new(
+        "log_low_mass_period_hours",
+        [
+            0.3, 0.45, 0.55, 0.62, 0.68, 0.74, 0.80, 0.86, 0.92,
+            0.99, 1.07, 1.16, 1.27, 1.40, 1.58, 1.85, 2.4,
+        ],
+        None,
+        (0.3, 2.4),
+    ),
+    SamplerMark::new(
+        "log_low_mass_donor_mass",
+        normal(0.08),
+        // log₁₀ 0.11 + p to the fifth node, then log₁₀ 0.8, on nodes 0.13125 apart in p.
+        Some(MedianCurve::new(
+            0.3,
+            2.4,
+            [
+                -0.658_607, -0.527_357, -0.396_107, -0.264_857, -0.133_607, -0.096_910,
+                -0.096_910, -0.096_910, -0.096_910, -0.096_910, -0.096_910, -0.096_910,
+                -0.096_910, -0.096_910, -0.096_910, -0.096_910, -0.096_910,
+            ],
+        )),
+        (-1.0, 0.176_091),
+    ),
+    SamplerMark::new(
+        "low_mass_rate_excess_dex",
+        [
+            -3.0, -2.4, -2.0, -1.7, -1.4, -1.1, -0.8, -0.4, 0.0,
+            0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0,
+        ],
+        None,
+        (-3.0, 1.0),
+    ),
+    SamplerMark::new("log_neutron_star_recurrence_years", normal_about(3.0, 0.5), None, (1.75, 4.25)),
+    SamplerMark::new("log_black_hole_recurrence_years", normal_about(2.5, 0.5), None, (1.25, 3.75)),
+    SamplerMark::new("log_bex_period_days", normal_about(1.8, 0.35), None, (1.1, 2.55)),
+    SamplerMark::new("bex_eccentricity", normal_about(0.35, 0.15), None, (0.0, 0.85)),
+    SamplerMark::new("bex_donor_mass", normal_about(14.0, 2.5), None, (9.0, 19.0)),
+    SamplerMark::new("log_supergiant_period_days", normal_about(0.6, 0.3), None, (0.1, 1.2)),
+    SamplerMark::new("supergiant_donor_mass", normal_about(20.0, 4.0), None, (10.0, 35.0)),
+    SamplerMark::new("log_supergiant_rate", normal_about(-9.0, 0.5), None, (-10.25, -7.75)),
+    SamplerMark::new("bex_recoil_km_s", maxwell(BEX_RECOIL_SIGMA), None, (0.0, 43.0)),
+    SamplerMark::new(
+        "supergiant_recoil_km_s",
+        maxwell(SUPERGIANT_RECOIL_SIGMA),
+        None,
+        (0.0, 120.1),
+    ),
+    SamplerMark::new("log_bex_years_since_supernova", normal_about(6.8, 0.25), None, (5.5, 7.3)),
+    SamplerMark::new(
+        "log_supergiant_years_since_supernova",
+        normal_about(6.2, 0.2),
+        None,
+        (5.5, 6.7),
+    ),
+    SamplerMark::new(
+        "log_neutron_star_progenitor_mass",
+        normal_about(1.08, 0.08),
+        None,
+        (0.954_243, 1.230_449),
+    ),
+    SamplerMark::new(
+        "log_black_hole_progenitor_mass",
+        normal_about(1.48, 0.1),
+        None,
+        (1.322_219, 1.778_151),
+    ),
+    SamplerMark::new("log_donor_initial_excess", normal_about(0.15, 0.1), None, (0.0, 0.6)),
 ];
 
 #[cfg(test)]

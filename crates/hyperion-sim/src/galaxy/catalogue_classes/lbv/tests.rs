@@ -724,13 +724,23 @@ fn cells_do_not_depend_on_order() {
     let galaxy = galaxy();
     let process = LbvProcess::new(galaxy);
     let cells: Vec<CatalogueCellKey> = (4..8).map(|y| key([0, y, 0])).collect();
+    // A stray resolve of another class's entry first, which runs that class's own process to its
+    // test: the first X-ray binary of the cells about the centre.
+    let xrb = crate::galaxy::catalogue_classes::binary::XrayBinaries::new(galaxy);
+    let stray = (-4..4)
+        .flat_map(|x| (-4..4).map(move |y| [x, y, 0]))
+        .find_map(|cell| {
+            let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, cell).unwrap();
+            CatalogueClassCell::generate(galaxy, &xrb, key)
+                .into_entries()
+                .into_iter()
+                .next()
+        })
+        .expect("the centre has X-ray binaries");
+    let stray = SystemId::from(stray.id());
+    let record = placement::resolve(galaxy, stray).unwrap();
     assert_order_independent(&cells, |key| {
-        let stray =
-            CatalogueSystemId::new(ClassId::XRAY_BINARY.value(), key.fine_cell(), 0, 0).unwrap();
-        assert_eq!(
-            placement::resolve(galaxy, SystemId::from(stray)),
-            Err(ResolveSystemError::KindNotGenerated)
-        );
+        assert_eq!(placement::resolve(galaxy, stray), Ok(record));
         CatalogueClassCell::generate(galaxy, &process, *key)
     });
     let fresh = |seed: u64| {

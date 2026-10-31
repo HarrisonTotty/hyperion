@@ -8,8 +8,9 @@
 //! limits. A draw takes one uniform word for its rank, so a mark's value is a monotone function of
 //! its word and a restricted draw ([`ClassSampler::draw_in_ranks`]) is an exact conditional one,
 //! as plan 11's design note 1 draws the stripped orbits. The four binary classes share it
-//! (P11.T8.a–d), each with its own table; the accreting white dwarfs' is
-//! [`AWD_SAMPLER`](crate::tables::binary::AWD_SAMPLER).
+//! (P11.T8.a–d), each with its own table: the accreting white dwarfs' is
+//! [`AWD_SAMPLER`](crate::tables::binary::AWD_SAMPLER) and the X-ray binaries'
+//! [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER).
 
 use crate::rng::Stream;
 use crate::tables::binary::{ClassSamplerTable, SamplerKey};
@@ -184,6 +185,7 @@ mod tests {
     use crate::rng::{ObjectKey, tags};
     use crate::tables::binary::{
         AWD_SAMPLER, AwdDonorKind, AwdMark, AwdPick, MedianCurve, SamplerMark, SamplerPick,
+        XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick,
     };
 
     fn stream(seed: u64) -> Stream {
@@ -217,6 +219,67 @@ mod tests {
         let kinds = AWD_SAMPLER.pick(AwdPick::DonorKind).weights();
         assert_eq!(kinds.len(), AwdDonorKind::ALL.len());
         assert!((kinds.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+    }
+
+    /// The X-ray binaries' marks lie in the order `XrbMark` names them, every residual is
+    /// non-decreasing and inside its limits' reach, each choice has one weight per kind of its
+    /// side, and the weights over both sides sum to 1, the high-mass side's to 0.16; the rate's
+    /// median is the line, so that a rank of ½ splits the transients from the persistent hosts.
+    #[test]
+    fn the_xrb_table_follows_its_mark_list() {
+        let names = [
+            "neutron_star_mass",
+            "black_hole_mass",
+            "log_low_mass_period_hours",
+            "log_low_mass_donor_mass",
+            "low_mass_rate_excess_dex",
+            "log_neutron_star_recurrence_years",
+            "log_black_hole_recurrence_years",
+            "log_bex_period_days",
+            "bex_eccentricity",
+            "bex_donor_mass",
+            "log_supergiant_period_days",
+            "supergiant_donor_mass",
+            "log_supergiant_rate",
+            "bex_recoil_km_s",
+            "supergiant_recoil_km_s",
+            "log_bex_years_since_supernova",
+            "log_supergiant_years_since_supernova",
+            "log_neutron_star_progenitor_mass",
+            "log_black_hole_progenitor_mass",
+            "log_donor_initial_excess",
+        ];
+        assert_eq!(XRB_SAMPLER.marks().len(), XrbMark::ALL.len());
+        for (mark, name) in XrbMark::ALL.into_iter().zip(names) {
+            let law = XRB_SAMPLER.mark(mark);
+            assert_eq!(law.name(), name);
+            assert!(law.residual().windows(2).all(|w| w[0] <= w[1]), "{name}");
+            let (lo, hi) = law.limits();
+            assert!(lo < hi, "{name}");
+        }
+        let low = XRB_SAMPLER.pick(XrbPick::LowMassKind).weights();
+        let high = XRB_SAMPLER.pick(XrbPick::HighMassKind).weights();
+        assert_eq!(low.len(), XrbHostKind::LOW_MASS.len());
+        assert_eq!(high.len(), XrbHostKind::HIGH_MASS.len());
+        let (low_sum, high_sum) = (low.iter().sum::<f64>(), high.iter().sum::<f64>());
+        assert!((low_sum + high_sum - 1.0).abs() < 1e-12);
+        assert!((high_sum - 0.16).abs() < 1e-12);
+        assert!(XrbHostKind::LOW_MASS.iter().all(|k| !k.is_high_mass()));
+        assert!(XrbHostKind::HIGH_MASS.iter().all(|k| k.is_high_mass()));
+        let sampler = ClassSampler::new(&XRB_SAMPLER);
+        let split = sampler.rank_of(XrbMark::LowMassRateExcess, 0.0, 0.0);
+        assert!((split - 0.5).abs() < 1e-15, "{split}");
+        // The donors' median follows M₂ = 0.11 P (hours) up to 0.8 M☉.
+        for p in [0.3, 0.5, 0.8] {
+            let median = sampler.median(XrbMark::LowMassDonorMass, p);
+            let line = crate::math::log10(0.11) + p;
+            assert!((median - line).abs() < 0.01, "{p}: {median} against {line}");
+        }
+        let evolved = sampler.median(XrbMark::LowMassDonorMass, 2.0);
+        assert!(
+            (evolved - crate::math::log10(0.8)).abs() < 1e-6,
+            "{evolved}"
+        );
     }
 
     /// `rank_of` inverts `value_at` inside the limits, at every rank and condition tried, and

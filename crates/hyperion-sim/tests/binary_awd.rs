@@ -31,7 +31,6 @@ use hyperion_sim::stellar::binary::{BinaryClass, CvKind};
 use hyperion_sim::tables::binary::AwdDonorKind;
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::{Seed, math};
-use hyperion_testkit::stats::chi_square_gof;
 
 /// The seed of plan 02's sweep's galaxy n is this with n in its low bits.
 const SWEEP_SEED: u64 = 0x0200_5ee9_0000_0000;
@@ -226,22 +225,6 @@ fn engine_marks(galaxy: &Galaxy, side: AwdSide, n: usize) -> Vec<Marks> {
 /// A mark's value of one member.
 type MarkOf = fn(&Marks) -> f64;
 
-/// The chi-square per degree of freedom of `observed` against `expected`'s deciles.
-fn decile_chi_square(expected: &[f64], observed: &[f64]) -> (f64, u32) {
-    let mut sorted: Vec<f64> = expected.iter().copied().filter(|v| v.is_finite()).collect();
-    sorted.sort_by(f64::total_cmp);
-    let edges: Vec<f64> = (1..10).map(|k| sorted[k * sorted.len() / 10]).collect();
-    let mut counts = [0_u64; 10];
-    for &v in observed.iter().filter(|v| v.is_finite()) {
-        counts[edges.partition_point(|&e| e <= v)] += 1;
-    }
-    let total: u64 = counts.iter().sum();
-    #[expect(clippy::cast_precision_loss, reason = "a count of a few thousand")]
-    let each = total as f64 / 10.0;
-    let fit = chi_square_gof(&counts, &[each; 10]);
-    (fit.statistic / f64::from(fit.dof), fit.dof)
-}
-
 /// The share of `marks` that `f` holds for.
 fn share(marks: &[Marks], f: impl Fn(&Marks) -> bool) -> f64 {
     #[expect(clippy::cast_precision_loss, reason = "counts of a few thousand")]
@@ -278,7 +261,8 @@ fn the_sampler_against_the_engine_s_members() {
         for (name, f) in marks {
             let expected: Vec<f64> = catalogue.iter().map(f).collect();
             let observed: Vec<f64> = engine.iter().map(f).collect();
-            let (per_dof, dof) = decile_chi_square(&expected, &observed);
+            let (per_dof, dof, _) = common::binaries::decile_chi_square(&expected, &observed)
+                .expect("hundreds of members on each side");
             let median = |v: &[f64]| {
                 let mut s: Vec<f64> = v.iter().copied().filter(|x| x.is_finite()).collect();
                 s.sort_by(f64::total_cmp);
