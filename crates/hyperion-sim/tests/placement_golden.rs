@@ -1,10 +1,12 @@
 //! The first generated stars, pinned: whole cells and single IDs (plan 03, P03.T8.d).
 //!
-//! Two galaxies, three golden files. `placement/cells` holds eight whole cells of each galaxy — the
-//! candidate count, which candidates the thinning kept, and each system's ID, light-year, offsets,
-//! primary initial mass, age and picked component — `placement/digests` a digest of every record of
-//! the same cells, and `placement/ids` ten IDs taken through `resolve`, eight of which name a system
-//! and two of which do not. Between them they pin every draw placement makes: the Poisson count on
+//! Two galaxies, three golden files, and a fourth, `placement/young_field`, which pins the young
+//! field in the cells of the association nearest the Sun-like point (plan 09, P09.T2.c's pre-pin).
+//! `placement/cells` holds eight whole cells of each galaxy — the candidate count, which candidates
+//! the thinning kept, and each system's ID, light-year, offsets, primary initial mass, age and
+//! picked component — `placement/digests` a digest of every record of the same cells, and
+//! `placement/ids` ten IDs taken through `resolve`, eight of which name a system and two of which
+//! do not. Between them they pin every draw placement makes: the Poisson count on
 //! the cell's stream, the three position words, the acceptance mark and the component it picks, and
 //! the mass and age marks.
 //!
@@ -62,7 +64,8 @@ mod common;
 
 use common::sunlike_point;
 use hyperion_sim::coords::GalacticPosition;
-use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
+use hyperion_sim::galaxy::features::ids::FeatureKind;
 use hyperion_sim::galaxy::params::GalaxyParams;
 #[cfg(doc)]
 use hyperion_sim::galaxy::placement::check_index_headroom;
@@ -70,12 +73,17 @@ use hyperion_sim::galaxy::placement::{
     CandidateOutcome, CellKey, ResolveSystemError, STELLAR_LAYERS, SystemRecord, candidate_count,
     evaluate_candidate, generate_cell, resolve,
 };
+use hyperion_sim::galaxy::query::{QuerySphere, cells_in_sphere};
+use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{Layer, SystemId, SystemIdKind};
 use hyperion_sim::math;
+use hyperion_sim::time::UniverseTime;
+use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+use hyperion_sim::units::{LightYears, Years};
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::float::bits;
 use hyperion_testkit::golden;
-use hyperion_testkit::golden::GoldenWriter;
+use hyperion_testkit::golden::{GoldenWriter, f64_digest};
 
 /// The seed of the pinned fixture galaxy.
 const FIXTURE_SEED: u64 = 0x0308_d000_0000_0000;
@@ -417,3 +425,96 @@ fn resolved_ids_are_pinned() {
     );
     golden!("placement/ids", w.as_str());
 }
+
+/// P09.T2.c's pre-pin (decision-galaxy-25-train §1.5, D1): the young field about the association
+/// nearest the Sun-like point in the Milky Way fixture, the region the field's share moves from
+/// generator version 26, where the field gives up φ to the features, nine in ten of the young
+/// disc's youngest systems. Every young-disc record of each stellar layer whose epoch position
+/// lies within [`PRE_PIN_RADII_LY`] of the association's centre is pinned by its count and a
+/// digest (`f64_digest` of each record's ID, high and low 32 bits, its offsets in metres, mass and
+/// age, in walk order), and those of layers D and E in full. It is an extension at the version in
+/// force; P09.T2.c's hold leaves it unchanged, and at 26 only its counts move.
+#[test]
+fn young_field_by_an_association_is_pinned() {
+    let galaxy = Galaxy::from_params(Seed::new(FIXTURE_SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral");
+    let sun = sunlike_point(&galaxy);
+    let ly = |a: &GalacticPosition, b: &GalacticPosition| {
+        a.distance_to(b).value() / METRES_PER_LIGHT_YEAR
+    };
+    let association =
+        FeatureCatalogue::near(&galaxy, &sun, LightYears::new(1_000.0), &NoFeatureCache)
+            .filter(|f| f.kind_at(Years::ZERO) == Some(FeatureKind::Association))
+            .min_by(|a, b| ly(a.position(), &sun).total_cmp(&ly(b.position(), &sun)))
+            .expect("an association lies within 1,000 ly of the Sun-like point");
+    let centre = *association.position();
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    w.line("# P09.T2.c's pre-pin (decision-galaxy-25-train §1.5, D1): the young disc's records");
+    w.line("# about the association nearest the Sun-like point, Milky Way fixture. Per layer, the");
+    w.line("# radius, count and digest in walk order (ids high, low; offsets; mass; age), and the");
+    w.line("# records of layers D and E in full.");
+    let [x, y, z] = centre.to_light_years_f64();
+    w.u64_hex("association.word", association.id().object_word());
+    w.line(&format!(
+        "association.at = {} {} {} ly, {} ly from the Sun-like point",
+        x.round(),
+        y.round(),
+        z.round(),
+        ly(&centre, &sun).round()
+    ));
+    for (layer, radius) in PRE_PIN_RADII_LY {
+        let sphere = QuerySphere::new(
+            centre,
+            LightYears::new(radius),
+            UniverseTime::EPOCH,
+            LightYears::ZERO,
+        )
+        .expect("a sphere about a point in the disc");
+        let mut young = Vec::new();
+        for key in cells_in_sphere(layer, &sphere) {
+            let mut cell = Vec::new();
+            generate_cell(&galaxy, key, &mut cell);
+            young.extend(cell.into_iter().filter(|r| {
+                r.population() == Population::YoungThinDisc
+                    && ly(r.epoch_position(), &centre) <= radius
+            }));
+        }
+        let mut values = Vec::with_capacity(6 * young.len());
+        for record in &young {
+            let raw = record.id().raw();
+            values.push(f64::from(u32::try_from(raw >> 32).expect("the high half")));
+            values.push(f64::from(
+                u32::try_from(raw & 0xffff_ffff).expect("the low half"),
+            ));
+            values.extend(record.epoch_position().offset_metres());
+            values.push(record.primary_initial_mass().value());
+            values.push(record.age_at_epoch().value());
+        }
+        let label = format!("young.{}", layer.letter());
+        println!(
+            "{label}: {} young-disc records within {radius} ly",
+            young.len()
+        );
+        w.line(&format!("{label}.radius_ly = {radius}"));
+        w.line(&format!("{label}.records = {}", young.len()));
+        w.u64_hex(&format!("{label}.digest"), f64_digest(&values));
+        if matches!(layer, Layer::D | Layer::E) {
+            for (index, record) in young.iter().enumerate() {
+                write_record(&mut w, &format!("{label}.s{index}"), record);
+            }
+        }
+    }
+    golden!("placement/young_field", w.as_str());
+}
+
+/// The radii of [`young_field_by_an_association_is_pinned`]'s spheres by layer, ly: wide enough
+/// for some young-disc records in the heaviest layers, narrow enough that the light layers' small
+/// cells stay quick to place.
+const PRE_PIN_RADII_LY: [(Layer, f64); 5] = [
+    (Layer::A, 100.0),
+    (Layer::B, 200.0),
+    (Layer::C, 300.0),
+    (Layer::D, 400.0),
+    (Layer::E, 400.0),
+];
