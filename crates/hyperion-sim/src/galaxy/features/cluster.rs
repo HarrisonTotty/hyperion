@@ -67,7 +67,7 @@ use super::kinds::globular::history;
 use super::kinds::nursery::NurseryStage;
 use super::kinds::open_cluster::DISRUPTION_GAMMA as DISRUPTION_GAMMA_FOR_RATE;
 use super::kinds::open_cluster::{dissolution_time, evolution_survival, present_mass};
-use super::members::remnants::{self, RemnantTableCell};
+use super::members::remnants::{self, RemnantTable, RulesCell};
 use crate::rng::{ObjectKey, tags};
 
 /// The mean member mass in the relaxation time, M☉ (P09.T7).
@@ -347,7 +347,9 @@ pub struct ClusterModel {
     retention: Retention,
     black_hole_fraction: f64,
     /// [`ClusterModel::remnant_table`], found when first asked.
-    remnant_table: RemnantTableCell,
+    remnant_table: RulesCell<RemnantTable>,
+    /// [`ClusterModel::co_core_floor`], found when first asked.
+    co_core_floor: RulesCell<SolarMasses>,
 }
 
 impl ClusterModel {
@@ -411,7 +413,8 @@ impl ClusterModel {
             central_density,
             retention: kept,
             black_hole_fraction,
-            remnant_table: RemnantTableCell::default(),
+            remnant_table: RulesCell::default(),
+            co_core_floor: RulesCell::default(),
         }
     }
 
@@ -697,12 +700,21 @@ impl ClusterModel {
     }
 
     /// The members' tabulated remnants under the stellar `rules`, that version 26's member draws
-    /// read ([`RemnantTable`](remnants::RemnantTable): the white-dwarf ceiling and the capture
-    /// window's top), found the first time they are asked, some 5–20 ms, and kept with the model.
+    /// read ([`RemnantTable`]: the white-dwarf ceilings and the capture window's top), found the
+    /// first time they are asked, some 5–20 ms, and kept with the model.
     #[must_use]
-    pub(crate) fn remnant_table(&self, rules: StellarRules) -> remnants::RemnantTable {
+    pub(crate) fn remnant_table(&self, rules: StellarRules) -> RemnantTable {
         self.remnant_table
-            .get(rules, || remnants::RemnantTable::of(self, rules))
+            .get(rules, || RemnantTable::of(self, rules))
+    }
+
+    /// The lightest initial mass from which every member dies with a carbon–oxygen core past the
+    /// low mode's ramp, under the stellar `rules` ([`remnants::co_core_floor`]), M☉, found the first
+    /// time it is asked, some 10–20 ms, and kept with the model.
+    #[must_use]
+    pub(crate) fn co_core_floor(&self, rules: StellarRules) -> SolarMasses {
+        self.co_core_floor
+            .get(rules, || remnants::co_core_floor(self, rules))
     }
 }
 

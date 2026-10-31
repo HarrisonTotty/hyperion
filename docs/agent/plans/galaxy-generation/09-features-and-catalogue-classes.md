@@ -5449,3 +5449,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   functions are gone, `white_dwarf_edge` and `highest_iron_core_mass` remain). Above the ceiling a
   white dwarf reads its mark as its track does: unstripped, kept below its own ceiling; refused
   `WHITE_DWARF_TOP_MARGIN` (0.3 M☉) above `m_cc` less its window's width.
+- **P09.T10 perf, a slow pair's stripped neutron stars at 26 (lane `galaxy-centre-core`,
+  2026-10-31).** `ClusterModel::co_core_floor(rules)` (`remnants::co_core_floor`, lazy in its own
+  `RulesCell`, which replaces `RemnantTableCell`): the lightest mass from which every corner's exact
+  CO core reaches the low mode's ramp top (3 M☉). A slow pair's stripped attempt at or above it is
+  refused. The fixture's floors are 13.10 and 12.64 M☉.

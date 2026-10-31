@@ -376,10 +376,68 @@ pub(crate) fn tabulated_fit(
             }
             let m0 = track_mass_of(SolarMasses::new(mass));
             let stripped = binarity::is_stripped_under(draws().stripped(), m0, composition, rules);
-            (!stripped).then_some(false)
+            // A stripped star keeps the low mode only below its carbon–oxygen core's floor.
+            (!stripped || mass >= model.co_core_floor(rules).value()).then_some(false)
         }
         ClassKind::BlackHole | ClassKind::Living | ClassKind::Tail => None,
     }
+}
+
+/// The highest initial mass the CO core's search reaches, M☉: past it a cluster has no floor.
+const CO_CORE_SEARCH_TOP: f64 = 40.0;
+
+/// The lightest initial mass from which every member of `model` dies with a carbon–oxygen core of
+/// at least the low mode's ramp's top (`KickLawParams::low_ramp`, 3 M☉), under the stellar
+/// `rules`, M☉, or infinity if a star of [`CO_CORE_SEARCH_TOP`] at a corner does not: from it a
+/// companion-stripped star's iron core takes the ordinary mode alone
+/// (`KickLawParams::low_mode_probability` is zero).
+///
+/// It is found by halving between the cluster's capture window's top and [`CO_CORE_SEARCH_TOP`],
+/// by exact fates (`sse::fate_of`) at the corners of the members' compositions ([`corners`]) and at
+/// Reimers η of 0 and 0.92, unstripped (the mark moves no core). The halving's upper end is kept.
+/// The core stays past the ramp above it
+/// (`a_stripped_neutron_star_s_core_is_past_the_ramp_above_its_floor`). It costs some 20–40 lifetime builds, about 10–20 ms, once a cluster, and only a
+/// cluster with a slow pair's stripped neutron star asks for it ([`ClusterModel::co_core_floor`]).
+#[must_use]
+pub(crate) fn co_core_floor(model: &ClusterModel, rules: StellarRules) -> SolarMasses {
+    let options = TrackOptions::default().with_rules(rules);
+    let ramp_top = StandardKickLaw::under(rules).params().low_ramp.1;
+    let bottom = model.remnant_table(rules).capture_window_top.value();
+    let mut floor = bottom;
+    for comp in corners(model) {
+        for eta in [-8.0, 6.0] {
+            let draws = StarDraws::from_parts(StarDrawsParts {
+                eta: StandardNormal::new(eta).expect("a finite draw"),
+                stripped: NEVER_STRIPPED,
+                ..StarDrawsParts::MEDIAN
+            });
+            let past = |m: f64| {
+                sse::fate_of(SolarMasses::new(m), &comp, &draws, options)
+                    .death
+                    .progenitor()
+                    .co_core_mass()
+                    .value()
+                    >= ramp_top
+            };
+            if !past(CO_CORE_SEARCH_TOP) {
+                return SolarMasses::new(f64::INFINITY);
+            }
+            if past(floor) {
+                continue;
+            }
+            let (mut lo, mut hi) = (floor, CO_CORE_SEARCH_TOP);
+            for _ in 0..CEILING_HALVINGS {
+                let mid = f64::midpoint(lo, hi);
+                if past(mid) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            floor = hi;
+        }
+    }
+    SolarMasses::new(floor)
 }
 
 /// Whether the companion-stripped mark of `draws` is set for a star of track mass `m0` and
@@ -398,35 +456,43 @@ fn companion_stripped(
         && binarity::is_stripped_under(draws.stripped(), m0, composition, rules)
 }
 
-/// [`ClusterModel::remnant_table`]'s value, found when first asked, with the stellar rules it was
-/// found under (the sim-determinism skill's lazy exception, as the galaxy's centre motion is held).
-#[derive(Clone, Default)]
-pub(crate) struct RemnantTableCell(OnceLock<(StellarRules, RemnantTable)>);
+/// A value of a cluster model's found when first asked under one set of stellar rules, with the
+/// rules it was found under (the sim-determinism skill's lazy exception, as the galaxy's centre
+/// motion is held): [`ClusterModel::remnant_table`]'s and [`ClusterModel::co_core_floor`]'s.
+#[derive(Clone)]
+pub(crate) struct RulesCell<T>(OnceLock<(StellarRules, T)>);
 
-impl RemnantTableCell {
-    /// The table under `rules`: the cell's, found by `find` the first time, or found afresh under
-    /// rules other than the cell's.
-    #[must_use]
-    pub(crate) fn get(&self, rules: StellarRules, find: impl Fn() -> RemnantTable) -> RemnantTable {
-        let &(under, table) = self.0.get_or_init(|| (rules, find()));
-        if under == rules { table } else { find() }
+/// An empty cell, whatever the value's type.
+impl<T> Default for RulesCell<T> {
+    fn default() -> Self {
+        Self(OnceLock::new())
     }
 }
 
-/// Equal always: the table is a pure function of the model and the rules, which a model's
+impl<T: Copy> RulesCell<T> {
+    /// The value under `rules`: the cell's, found by `find` the first time, or found afresh under
+    /// rules other than the cell's.
+    #[must_use]
+    pub(crate) fn get(&self, rules: StellarRules, find: impl Fn() -> T) -> T {
+        let &(under, value) = self.0.get_or_init(|| (rules, find()));
+        if under == rules { value } else { find() }
+    }
+}
+
+/// Equal always: the value is a pure function of the model and the rules, which a model's
 /// equality compares in the first place, so comparing it would make two equal models unequal
 /// because only one of them had been asked.
-impl PartialEq for RemnantTableCell {
+impl<T> PartialEq for RulesCell<T> {
     fn eq(&self, _: &Self) -> bool {
         true
     }
 }
 
-/// The same text whether or not the table has been found, so that a model's `Debug` text depends
+/// The same text whether or not the value has been found, so that a model's `Debug` text depends
 /// on what it is and not on its history.
-impl std::fmt::Debug for RemnantTableCell {
+impl<T> std::fmt::Debug for RulesCell<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("RemnantTableCell")
+        f.write_str("RulesCell")
     }
 }
 
@@ -470,6 +536,13 @@ mod tests {
 
     /// The fixture's slowest globular's, 6.7453 M☉.
     const SLOW_UNSTRIPPED_CEILING: f64 = f64::from_bits(0x401a_fb33_3333_3333);
+
+    /// The fixture's most massive globular's carbon–oxygen core floor under 26's rules,
+    /// 13.103 M☉.
+    const MASSIVE_CO_CORE_FLOOR: f64 = f64::from_bits(0x402a_34dd_14f9_b7f0);
+
+    /// The fixture's slowest globular's, 12.638 M☉.
+    const SLOW_CO_CORE_FLOOR: f64 = f64::from_bits(0x4029_46af_6c87_e3f2);
 
     /// The Milky Way fixture of the members' tests, under every 26 hold.
     fn galaxy() -> &'static Galaxy {
@@ -544,7 +617,7 @@ mod tests {
     /// The fixture's most massive globular, of [Fe/H] −0.54 and a helium excess up to 0.18 in its
     /// second population, and its slowest, of [Fe/H] −1.09 with no second population, have
     /// white-dwarf ceilings of 6.30 and 5.75 M☉ (7.30 and 6.75 M☉ an unstripped star's) and capture
-    /// windows' tops of 8.12 and 7.57 M☉ under
+    /// windows' tops of 8.12 and 7.57 M☉ and carbon–oxygen core floors of 13.10 and 12.64 M☉ under
     /// 26's rules, pinned to the bit; the massive one's corners take its helium excess, the slow
     /// one's none.
     #[test]
@@ -570,6 +643,10 @@ mod tests {
             slow.0.unstripped_white_dwarf_ceiling.value(),
             SLOW_UNSTRIPPED_CEILING,
         );
+        let [massive_floor, slow_floor] =
+            clusters(galaxy).map(|(_, model, _)| model.co_core_floor(rules).value());
+        assert_same_bits(massive_floor, MASSIVE_CO_CORE_FLOOR);
+        assert_same_bits(slow_floor, SLOW_CO_CORE_FLOOR);
         assert!(massive.1.contains(&0.18), "{:?}", massive.1);
         assert!(slow.1.iter().all(|&h| h <= 0.0), "{:?}", slow.1);
     }
@@ -680,6 +757,36 @@ mod tests {
             }
         }
         assert_eq!(fates, 256);
+    }
+
+    /// Above each fixture globular's carbon–oxygen core floor every star dies with a core past the
+    /// low mode's ramp, 3 M☉, at the corners of its members' compositions and at Reimers η 0, 0.5
+    /// and 0.92, over ten masses even in ln m from the floor to 150 M☉, under 26's rules.
+    #[test]
+    fn a_stripped_neutron_star_s_core_is_past_the_ramp_above_its_floor() {
+        let galaxy = galaxy();
+        let rules = galaxy.rules().stellar;
+        let options = TrackOptions::default().with_rules(rules);
+        let ramp_top = StandardKickLaw::under(rules).params().low_ramp.1;
+        for (_, model, _) in clusters(galaxy) {
+            let floor = model.co_core_floor(rules).value();
+            assert!(floor < CO_CORE_SEARCH_TOP, "{floor} M☉");
+            for comp in corners(&model) {
+                for eta in [-8.0, 0.0, 6.0] {
+                    let draws = StarDraws::from_parts(StarDrawsParts {
+                        eta: StandardNormal::new(eta).unwrap(),
+                        stripped: NEVER_STRIPPED,
+                        ..StarDrawsParts::MEDIAN
+                    });
+                    for i in 0..10 {
+                        let m = floor * crate::math::powf(150.0 / floor, f64::from(i) / 9.0);
+                        let fate = sse::fate_of(SolarMasses::new(m), &comp, &draws, options);
+                        let core = fate.death.progenitor().co_core_mass().value();
+                        assert!(core >= ramp_top, "{m} M☉, {comp:?}, η normal {eta}: {core}");
+                    }
+                }
+            }
+        }
     }
 
     /// The lightest neutron star's progenitor, of 8 M☉, dies within 60 Myr at the corners of the
