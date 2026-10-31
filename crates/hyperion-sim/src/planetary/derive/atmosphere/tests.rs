@@ -4512,8 +4512,9 @@ fn under_the_escape_batch_the_table_s_mars_loses_its_nitrogen() {
 /// version 26) the table's Mars at its own spin ([`table_mars_at_its_spin`]) keeps 3–10 mbar of
 /// carbon dioxide by weight, lies within T13.c's 8% of 214 K, and holds the rest of its carbon as
 /// CO₂ ice. The steps descend from the whole column, whose 0.22 bar keeps its coldest zone above
-/// CO₂'s frost point, to the root the cap holds (P14.T53.h's pilot: 565.8 Pa of CO₂ and 234.4 Pa
-/// of N₂ at 214.73 K, the cap at 146.15 K, settled in 9 steps). Its `Held` twin
+/// CO₂'s frost point, to the root the cap holds (590.25 Pa of CO₂ and 234.4 Pa of N₂ at 214.82 K,
+/// the cap at 146.46 K, with the cap's air term on the surface pressure; the pilot's 565.8 Pa at
+/// 214.73 K under a 146.15 K cap read CO₂'s partial pressure). Its `Held` twin
 /// ([`while_the_cap_is_held_the_table_s_mars_keeps_its_warm_branch`]) states the miss as it stands.
 #[test]
 fn under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide() {
@@ -4559,9 +4560,10 @@ fn while_the_cap_is_held_the_table_s_mars_keeps_its_warm_branch() {
 }
 
 /// P14.T53.h's cap at the table's Mars: at its settled column under the cap's balance its cap lies
-/// within 1 K of the pilot's 146.15 K, and the air's heat into it, its emission less the light and
-/// heat it absorbs (Ward, Murray and Malin 1974, eq. 3), is under 5% of that emission (the pilot's
-/// 0.43 of 22.0 W m⁻²): the cap is held by its own radiation, not by the air. The cap and Mars's
+/// within 1 K of the pilot's 146.15 K (146.46 K with the air term on the surface pressure), and the
+/// air's heat into it, its emission less the light and heat it absorbs (Ward, Murray and Malin
+/// 1974, eq. 3), is under 5% of that emission (0.62 of 22.2 W m⁻², 2.8%): the cap is held by its
+/// own radiation, not by the air. The cap and Mars's
 /// CO₂ are pinned to their bits, which the WebAssembly suite checks.
 #[test]
 fn under_the_cap_balance_the_table_s_mars_s_cap_lies_near_146_k() {
@@ -4591,10 +4593,10 @@ fn under_the_cap_balance_the_table_s_mars_s_cap_lies_near_146_k() {
         );
         assert!((cap.value() - 146.15).abs() < 1.0, "{cap:?}");
         // Pinned natively (x86-64), so that the WebAssembly suite checks the halvings bit for bit.
-        assert_same_bits(cap.value(), 146.149_959_712_114_62);
+        assert_same_bits(cap.value(), 146.464_167_951_043_5);
         assert_same_bits(
             air.partial_pressures().of(Gas::CarbonDioxide).value(),
-            565.820_075_711_353_6,
+            590.250_096_909_324_2,
         );
         assert!(cap < span.coldest(), "the cap is the cold trap");
         assert!(

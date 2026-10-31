@@ -2373,7 +2373,8 @@ pub(crate) struct CapBody {
 /// - The last term is the air's heat into the cap, Ward's eq. 22 with H = `R_air` `T_a` ÷ g (after
 ///   Gierasch and Toon 1973, J. Atmos. Sci. 30, 1502), δ [`CAP_TRANSPORT_EFFICIENCY`]: `R_air` the
 ///   column's specific gas
-///   constant, p its CO₂'s partial pressure (Ward's air is CO₂ alone, and δ is fitted at it), g its
+///   constant, p its surface pressure, `partials`' total (the whole air's column carries the heat,
+///   and H is the whole air's; δ was fitted on CO₂ airs, where the two readings agree), g its
 ///   gravity, R its radius and Ω the sidereal rate. `T_a`
 ///   is the larger of the column's mean surface temperature and its grey `T_eq` (1 + ¾τ)^¼
 ///   (P14.T13.c's [`grey_surface_temperature`]):
@@ -2413,7 +2414,7 @@ pub(crate) fn carbon_dioxide_cap(
     if rossby.is_nan() || rossby < CAP_ROSSBY_RATIO {
         return None;
     }
-    let t_c = cap_balance_temperature(body, column, carbon_dioxide, omega)?;
+    let t_c = cap_balance_temperature(body, column, partials.total().value(), omega)?;
     let triple = Gas::CarbonDioxide
         .substance()
         .substance()
@@ -2442,14 +2443,14 @@ fn cap_rossby_ratio(column: &Column, omega: f64) -> f64 {
 }
 
 /// The temperature `T_c` that balances a permanent cap of the body `body` over the column `column`
-/// whose CO₂'s partial pressure is `carbon_dioxide`, Pa, at the sidereal rate `omega`, rad s⁻¹, in
-/// K on [0, `T_a`] ([`carbon_dioxide_cap`]'s balance, before its gates of scope, rotation and frost):
+/// whose surface pressure is `pressure`, Pa, at the sidereal rate `omega`, rad s⁻¹, in K on
+/// [0, `T_a`] ([`carbon_dioxide_cap`]'s balance, before its gates of scope, rotation and frost):
 /// `None` where `ε_c` σ `T_a`⁴ does not exceed the light and heat absorbed.
 #[must_use]
 fn cap_balance_temperature(
     body: &CapBody,
     column: &Column,
-    carbon_dioxide: f64,
+    pressure: f64,
     omega: f64,
 ) -> Option<f64> {
     let grey =
@@ -2471,7 +2472,7 @@ fn cap_balance_temperature(
     let excess = |t: f64| {
         CAP_EMISSIVITY * STEFAN_BOLTZMANN * math::powi(t, 4)
             - absorbed
-            - transport * carbon_dioxide * (air - t) * (air - t)
+            - transport * pressure * (air - t) * (air - t)
     };
     let surplus = excess(air);
     if surplus.is_nan() || surplus <= 0.0 {
@@ -2522,7 +2523,7 @@ pub(crate) fn step_cap_figures(
     Some(CapFigures {
         rossby: cap_rossby_ratio(&column, omega),
         temperature: if carbon_dioxide > 0.0 {
-            cap_balance_temperature(&cap, &column, carbon_dioxide, omega)
+            cap_balance_temperature(&cap, &column, partials.total().value(), omega)
         } else {
             None
         },

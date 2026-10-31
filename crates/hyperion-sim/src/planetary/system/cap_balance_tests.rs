@@ -15,7 +15,7 @@ use crate::planetary::testing::with_every_26_hold;
 
 /// The records whose state or figures the cap moves over the census (the census at the tip,
 /// 2026-10-31), by ID in the census's order: thick CO₂ airs that collapse or thin, each a fast
-/// rotator (a ÷ `L_Ro` of 3.9–24 under the cap) whose cap is frost. Nine go from `Temperate` to
+/// rotator (a ÷ `L_Ro` of 4.0–25 under the cap) whose cap is frost. Nine go from `Temperate` to
 /// `Snowball`, three stay `Snowball` and one `Temperate` thins. The research's pilot, which read the
 /// cap in the passes' steps alone with neither gate, moved 16; the gates leave LOOK72's three
 /// (020e56ef20080000.0700, 020e56ef60070005.0100 and 020e66efa007000b.0400), and the cap
@@ -41,7 +41,7 @@ const MOVERS: [&str; 13] = [
 /// The records the cap moves in their last bits alone, within 10⁻⁶ ([`within_a_millionth`]), by
 /// ID in the census's order: a step or a thermostat trial on the way read a cap, and the steps
 /// settled a few ulps away.
-const NUDGED: [&str; 2] = ["21ffd6587ff80000.0200", "2200365a7ff80000.0300"];
+const NUDGED: [&str; 2] = ["41ffecb600000007.0300", "2200365a7ff80000.0300"];
 
 /// The census under every 26 hold, the cap held and in force, walked once a process, with the
 /// solves the walk under the cap published ([`settled_log`]).
@@ -202,7 +202,11 @@ fn under_every_26_hold_the_cap_moves_the_census_s_thick_carbon_dioxide_airs() {
 /// ([`MOVERS`] and [`NUDGED`]), one more partition of its inventory over the span at its published
 /// state, its last step's, moves its CO₂ by under 5%. It lists each failure with its greenhouse's
 /// step count and does not pin them (main's, 2026-10-31); it asserts only that each mover's
-/// published solve is found in the log.
+/// published solve is found in the log. The census of 2026-10-31, the air term on the surface
+/// pressure, lists ten, each at the steps' limit (33 evaluations): 01fffb2be0000000.0500,
+/// 41ffecb200000001.0300, 41ffecb200000000.e301, 02000b2b60020000.0400, 2200365a7ff80000.0400,
+/// 42002cb1ff800003.0a00, `solar_like`'s 42006cba00000009.0400 and `close_binary`'s
+/// 42002cb200000009.0800, .e401 and .e501.
 #[test]
 #[ignore = "slow: the thin-air census twice under every 26 hold, about 115 s on a pod"]
 fn under_every_26_hold_the_cap_s_movers_settle_or_are_listed() {

@@ -33243,18 +33243,20 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   `CAP_BALANCE_VERSION`, `CapBalanceRules`, `with_cap_balance`; the rule is
   `carbon_dioxide_cap` over a `CapBody`, and the record's cap is
   `SurfaceConditions::carbon_dioxide_cap`, which `partition_over` attaches.
-  - p in the air's term is CO₂'s own partial pressure, not the step's surface pressure (lean,
-    2026-10-31): the pilot's, at which δ = 0.01 is fitted. With the surface pressure the table's
-    Mars took 590.3 Pa under a 146.46 K cap, and LOOK72 020e56ef60070005.0100 rose to 345 K.
+  - p in the air's term is the step's surface pressure, `partials.total()` (main, 2026-10-31,
+    overturning the lane's CO₂ partial pressure): the eddy flux goes as the whole air's column,
+    with the whole air's `R_air` and H, and δ = 0.01 was fitted on CO₂ airs, where the two agree.
+    The table's Mars: 590.25 Pa of CO₂ at 214.82 K under a 146.46 K cap.
   - The amendment's gates (main, 2026-10-31): no cap where a ÷ `L_Ro` = 2Ωa ÷ c is under 1
     (`CAP_ROSSBY_RATIO`), nor at or above CO₂'s triple point (a frost cap). The table's Mars at
     349 h (a ÷ `L_Ro` 0.35) holds none; Venus none.
   - A step is molten at `Crust::Molten` (`ClimateBody::crust`, new) or at or over
     `SILICATE_SOLIDUS`; the record, at `MagmaOcean`.
-  - The census (`system/cap_balance_tests.rs`) moves 13 records at the landed tip (`MOVERS`) and
-    2 in their last bits (`NUDGED`): 01fffb2be0000000.0500, a last-bits record at the lane's
-    base, is a 0.70 bar `Snowball` there. The cap `partition_over` reads, which the passes' area
-    mix reads too, takes close_binary 42002cb200000009.0700 to a 0.36 bar `Snowball` at 122 K.
+  - The census (`system/cap_balance_tests.rs`) moves 13 records (`MOVERS`) and 2 in their last
+    bits (`NUDGED`, 41ffecb600000007.0300 and 2200365a7ff80000.0300): 01fffb2be0000000.0500, a
+    last-bits record at the lane's base, is a 1.04 bar `Snowball` at 191.5 K. The cap
+    `partition_over` reads, which the passes' area mix reads too, takes close_binary
+    42002cb200000009.0700 to a 0.36 bar `Snowball` at 122 K (agreed by main).
   - "Settled" is the amendment's (main, 2026-10-31): one more partition over the span at the
     published state moves a mover's CO₂ by under 5%, read through the test-only
     `atmosphere::settled_log`; its failures are listed, not pinned. Each mover's line prints its
