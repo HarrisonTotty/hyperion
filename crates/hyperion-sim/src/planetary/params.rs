@@ -26,6 +26,17 @@ use crate::units::{
 /// bounds moons inside Hill spheres.
 pub const SATELLITE_STABILITY_FRACTION: f64 = 0.4895;
 
+/// The share of a feature member's encounters closer than a planet's semi-major axis that remove
+/// the planet: 0.2 (lean, 2026-10-31, the orchestrator's research review of P14.T29), which scales
+/// both terms of the encounter rate ([`encounter_radius`](super::hosts::strip::encounter_radius)).
+///
+/// Counting every encounter within `b = a` as a removal is Li and Adams's (2015, MNRAS 448, 344)
+/// eq. 6 at α = 1, about five times the removal cross-sections their scattering experiments
+/// measure, so the rate is taken at a fifth of it. The paper was not read at source here (no
+/// journal access from the pod). It reaches the record only through the stripping's hold, at
+/// generator version 26.
+pub const ENCOUNTER_REMOVAL_FACTOR: f64 = 0.2;
+
 /// The floor on the spacing of two small planets on circular orbits: 10 mutual Hill radii
 /// (design note 7).
 ///

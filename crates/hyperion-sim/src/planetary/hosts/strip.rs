@@ -8,8 +8,9 @@
 //!   radius, which about a point mass is the Hill radius (design note 14, which applies the
 //!   point-mass fraction to the galaxy's and a cluster's tides too).
 //! - **The encounter cut** of a feature member ([`encounter_radius`]): the semi-major axis at which
-//!   one encounter closer than it is expected within the system's age, the rate the Maxwellian
-//!   average of the gravitationally focused cross-section gives.
+//!   one removing encounter is expected within the system's age, the rate the Maxwellian average
+//!   of the gravitationally focused cross-section gives, scaled to the measured removal
+//!   cross-sections ([`ENCOUNTER_REMOVAL_FACTOR`]).
 //!
 //! The disc is truncated at it (P14.T3.b), the cometary halo bounded by it (P14.T21.d), and
 //! placement asserts it again (P14.T30.a).
@@ -85,7 +86,7 @@ use crate::id::SystemIdKind;
 use crate::planetary::context::{
     BuildEncounterEnvironmentError, EncounterEnvironment, SystemContext,
 };
-use crate::planetary::params::SATELLITE_STABILITY_FRACTION;
+use crate::planetary::params::{ENCOUNTER_REMOVAL_FACTOR, SATELLITE_STABILITY_FRACTION};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{LightYears, Metres, PerCubicLightYear, SolarMasses, Years};
 use crate::{GENERATOR_VERSION, GeneratorVersion};
@@ -180,30 +181,32 @@ pub(crate) fn strip_radius(ctx: &SystemContext) -> Metres {
 }
 
 /// The semi-major axis at which a system of mass `mass` in `environment` expects one encounter
-/// closer than it within `age`, m, or `None` for a system no older than the epoch, which has had
-/// no time to meet its neighbours.
+/// that removes a planet there within `age`, m, or `None` for a system no older than the epoch,
+/// which has had no time to meet its neighbours.
 ///
-/// A planet is taken as disrupted by one encounter whose closest approach `b` is within its
-/// semi-major axis. The rate of such encounters for a system among neighbours of number density
-/// `n` and mean mass `m̄`, both populations Maxwellian with one-dimensional dispersion σ, is
+/// The encounters whose closest approach `b` is within a planet's semi-major axis remove it at the
+/// share [`ENCOUNTER_REMOVAL_FACTOR`] (f = 0.2). The rate of removing encounters for a system
+/// among neighbours of number density `n` and mean mass `m̄`, both populations Maxwellian with
+/// one-dimensional dispersion σ, is
 ///
-/// `Γ(b) = 4√π n σ b² (1 + G M ÷ (2 σ² b))`, M = `mass` + m̄,
+/// `Γ(b) = f 4√π n σ b² (1 + G M ÷ (2 σ² b))`, M = `mass` + m̄,
 ///
 /// the rate `n π b² (1 + 2 G M ÷ (b v²)) v` of the focused cross-section averaged over the relative
 /// speeds v, whose mean is `4σ ÷ √π` (Binney and Tremaine 2008, Galactic Dynamics, 2nd ed.,
 /// §7.5.7, eq. 7.195, there for two stars of equal mass m★ and radius r★ touching at b = 2r★). The
 /// radius solves
-/// `Γ(a) × age = 1`, a quadratic in a, `A a² + B a = 1 ÷ age` with `A = 4√π n σ` and
-/// `B = 2√π n G M ÷ σ`, taken in the form `a = (2 ÷ age) ÷ (B + √(B² + 4A ÷ age))`, which loses no
+/// `Γ(a) × age = 1`, a quadratic in a, `A a² + B a = 1 ÷ age` with `A = f 4√π n σ` and
+/// `B = f 2√π n G M ÷ σ`, taken in the form `a = (2 ÷ age) ÷ (B + √(B² + 4A ÷ age))`, which loses no
 /// digits where focusing dominates and `B²` is far above `4A ÷ age`.
 ///
-/// The plan names Adams and Laughlin (2001, Icarus 150, 151) and Spurzem et al. (2009, ApJ 697,
-/// 458) for the cross-section's calibration. Neither was read at source here, so the disrupting
-/// encounter is taken at `b = a` with no calibrating factor (lean, 2026-10-31).
+/// The calibration is Li and Adams's (2015, MNRAS 448, 344): `b = a` is their eq. 6 at α = 1,
+/// which overstates their measured removal cross-sections about fivefold
+/// ([`ENCOUNTER_REMOVAL_FACTOR`]). The plan also names Adams and Laughlin (2001, Icarus 150, 151)
+/// and Spurzem et al. (2009, ApJ 697, 458). None was read at source here.
 ///
-/// In a globular core focusing dominates and the radius is about `σ ÷ (2√π G M n age)`: some
-/// 0.02 au for 10⁴ systems per cubic light-year at 10 km/s over 12 Gyr. In an open cluster of 0.3
-/// per cubic light-year at 1 km/s it is some hundreds of au after 1 Gyr.
+/// In a globular core focusing dominates and the radius is about `σ ÷ (2√π f G M n age)`: some
+/// 0.11 au for 10⁴ systems per cubic light-year at 10 km/s over 12 Gyr. In an open cluster of 0.3
+/// per cubic light-year at 1 km/s it is some 1,400 au after 1 Gyr.
 ///
 /// # Examples
 ///
@@ -248,8 +251,9 @@ pub fn encounter_radius(
     let root_pi = core::f64::consts::PI.sqrt();
     // Per year and light-year squared (A) and per year and light-year (B): n in ly⁻³, σ in km/s,
     // turned into light-years per year.
-    let a2 = 4.0 * root_pi * n * sigma * LIGHT_YEARS_PER_YEAR_PER_KM_S;
-    let a1 = 2.0 * root_pi * n * G * m / sigma * LIGHT_YEARS_PER_YEAR_PER_KM_S;
+    let f = ENCOUNTER_REMOVAL_FACTOR;
+    let a2 = f * 4.0 * root_pi * n * sigma * LIGHT_YEARS_PER_YEAR_PER_KM_S;
+    let a1 = f * 2.0 * root_pi * n * G * m / sigma * LIGHT_YEARS_PER_YEAR_PER_KM_S;
     let radius_ly = (2.0 / t) / (a1 + (a1 * a1 + 4.0 * a2 / t).sqrt());
     Some(Metres::new(radius_ly * METRES_PER_LIGHT_YEAR))
 }

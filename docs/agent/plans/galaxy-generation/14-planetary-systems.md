@@ -33225,12 +33225,14 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     environment. New: `SystemContext::from_stars_with(galaxy, &dyn FeatureInteriorCache, stars)`
     and `members::cluster_tidal_radius`, split from `sphere_of_influence` with its bits unchanged.
     `generate_planets` debug-asserts every planet's apoapsis inside the strip radius.
-  - _The rate (lean, 2026-10-31)._ The plan's cross-section averaged over a Maxwellian of
-    relative speeds, `Γ = 4√π n σ a² (1 + G M ÷ (2σ² a))` (Binney and Tremaine 2008, §7.5.7),
-    where M is the system's mass plus the mean member's. It is one encounter within a (b = a).
-    Adams and Laughlin 2001 and Spurzem et al. 2009, the plan's calibration, were not read (no
-    journal access), so no calibrating factor is applied. The plan's form, with σ as the speed,
-    cuts at 0.56× this where focusing dominates and 1.5× where it does not.
+  - _The rate._ The plan's cross-section averaged over a Maxwellian of relative speeds,
+    `Γ = f 4√π n σ a² (1 + G M ÷ (2σ² a))` (Binney and Tremaine 2008, §7.5.7), where M is the
+    system's mass plus the mean member's. f is `params::ENCOUNTER_REMOVAL_FACTOR` = 0.2 (lean,
+    2026-10-31, from research's review) on both terms. Counting every encounter within a as a
+    removal is Li and Adams 2015's eq. 6 at α = 1, about 5× their measured removal
+    cross-sections. Their v_b is read as the relative speed at infinity, which gives 0.2 (0.4 if it
+    were one star's dispersion); the science-checker settled this from memory. No source was
+    read (no journal access from the pod). The globular core's cut is 0.108 au.
   - _Inside the core (lean, 2026-10-31)._ A member inside `ClusterModel::profile_core_radius`
     reads n, m̄ and σ at the core's edge, on its line from the centre: a stand-in for the orbit
     average. At its epoch place, a member 0.008 ly from the cusp of a 30 M☉ core-collapsed open

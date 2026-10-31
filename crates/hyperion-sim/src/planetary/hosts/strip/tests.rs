@@ -381,8 +381,9 @@ fn a_member_reads_its_environment_at_its_place_or_its_core_s_edge() {
 
 // The encounter radius.
 
-/// The radius solves one encounter in the age, Γ(a) × age = 1, to rounding, from the sparse
-/// geometric regime to the dense focused one.
+/// The radius solves one removing encounter in the age, Γ(a) × age = 1, the rate at
+/// [`ENCOUNTER_REMOVAL_FACTOR`] of every encounter within a, to rounding, from the sparse geometric
+/// regime to the dense focused one.
 #[test]
 fn the_encounter_radius_is_one_encounter_in_the_age() {
     let root_pi = core::f64::consts::PI.sqrt();
@@ -401,7 +402,8 @@ fn the_encounter_radius_is_one_encounter_in_the_age() {
         let a = encounter_radius(&environment, SolarMasses::new(mass), Years::new(age)).unwrap();
         let b = a.value() / METRES_PER_LIGHT_YEAR;
         let m = mass + mean;
-        let rate = 4.0
+        let rate = ENCOUNTER_REMOVAL_FACTOR
+            * 4.0
             * root_pi
             * n
             * sigma
@@ -418,14 +420,15 @@ fn the_encounter_radius_is_one_encounter_in_the_age() {
     }
 }
 
-/// The two limits: where focusing dominates, `σ ÷ (2√π G M n t)`; where it is negligible,
-/// `1 ÷ √(4√π n σ t)`.
+/// The two limits: where focusing dominates, `σ ÷ (2√π f G M n t)`; where it is negligible,
+/// `1 ÷ √(4√π f n σ t)`, f the [`ENCOUNTER_REMOVAL_FACTOR`].
 #[test]
 fn the_encounter_radius_takes_its_two_limits() {
     let root_pi = core::f64::consts::PI.sqrt();
     let k = LIGHT_YEARS_PER_YEAR_PER_KM_S;
-    let focused = encounter_radius(&core(1e4), SolarMasses::new(1.0), Years::new(1.2e10)).unwrap();
-    let limit = 10.0 / (2.0 * root_pi * G * 1.45 * 1e4 * 1.2e10 * k);
+    let f = ENCOUNTER_REMOVAL_FACTOR;
+    let focused = encounter_radius(&core(1e5), SolarMasses::new(1.0), Years::new(1.2e10)).unwrap();
+    let limit = 10.0 / (2.0 * root_pi * f * G * 1.45 * 1e5 * 1.2e10 * k);
     let ratio = focused.value() / METRES_PER_LIGHT_YEAR / limit;
     assert!((0.99..1.0).contains(&ratio), "{ratio}");
     let fast = EncounterEnvironment::new(
@@ -435,19 +438,19 @@ fn the_encounter_radius_takes_its_two_limits() {
     )
     .unwrap();
     let geometric = encounter_radius(&fast, SolarMasses::new(0.3), Years::new(1e10)).unwrap();
-    let limit = 1.0 / (4.0 * root_pi * 1e-2 * 300.0 * 1e10 * k).sqrt();
+    let limit = 1.0 / (4.0 * root_pi * f * 1e-2 * 300.0 * 1e10 * k).sqrt();
     let ratio = geometric.value() / METRES_PER_LIGHT_YEAR / limit;
     assert!((0.99..1.0).contains(&ratio), "{ratio}");
 }
 
-/// The figures of the module documentation: about 0.022 au in a globular core of 10⁴ systems per
-/// cubic light-year at 10 km/s after 12 Gyr, and about 490 au in an open cluster of 0.3 at 1 km/s
-/// after 1 Gyr. A system no older than the epoch has had no encounter.
+/// The figures of the module documentation: about 0.108 au in a globular core of 10⁴ systems per
+/// cubic light-year at 10 km/s after 12 Gyr, and about 1,380 au in an open cluster of 0.3 at 1
+/// km/s after 1 Gyr. A system no older than the epoch has had no encounter.
 #[test]
 fn the_encounter_radius_of_a_core_and_of_an_open_cluster() {
     let globular = encounter_radius(&core(1e4), SolarMasses::new(1.0), Years::new(1.2e10)).unwrap();
     assert!(
-        (0.0215..0.0222).contains(&in_au(globular)),
+        (0.106..0.109).contains(&in_au(globular)),
         "{} au",
         in_au(globular)
     );
@@ -459,7 +462,7 @@ fn the_encounter_radius_of_a_core_and_of_an_open_cluster() {
     .unwrap();
     let cluster = encounter_radius(&open, SolarMasses::new(1.0), Years::new(1e9)).unwrap();
     assert!(
-        (480.0..497.0).contains(&in_au(cluster)),
+        (1_370.0..1_390.0).contains(&in_au(cluster)),
         "{} au",
         in_au(cluster)
     );
@@ -512,7 +515,7 @@ fn a_hundredth_of_a_light_year_from_the_black_hole_keeps_nothing_beyond_2_7_au()
 }
 
 /// A member of a globular core of 10⁴ systems per cubic light-year keeps nothing beyond a few au:
-/// its encounter cut, about 0.02 au after 12 Gyr, is far inside its galactic sphere of influence.
+/// its encounter cut, about 0.11 au after 12 Gyr, is far inside its galactic sphere of influence.
 #[test]
 fn a_member_of_a_dense_globular_core_keeps_nothing_beyond_a_few_au() {
     with_every_26_hold(|| {
