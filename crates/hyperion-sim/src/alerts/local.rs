@@ -37,11 +37,11 @@
 //! epoch for a flare, as its model has it
 //! ([`FlareModel::quiescent_luminosity`]), and at an
 //! outburst's onset, the state its Eddington cap reads. Both are bolometric. A band takes its
-//! share of a blackbody through a top hat at plan 07's [`Band::wavelength`] with the band's full
-//! width at half maximum (Bessell 2005, ARA&A 43, 293, Table 1, for U to I; Tokunaga 2000, Allen's
-//! Astrophysical Quantities, Table 7.5, for J, H, K and the N band's 7.88–13.07 µm for the mid
-//! infrared). Radio has no thermal share, and neither kind has an X-ray one: plan 06 models white
-//! light only (`FLARE_SHARES`, `OUTBURST_SHARES`).
+//! share of a blackbody ([`band_share`](super::band_share)) through a top hat at plan 07's
+//! [`Band::wavelength`] with the band's full width at half maximum (Bessell 2005, ARA&A 43, 293,
+//! Table 1, for U to I; Tokunaga 2000, Allen's Astrophysical Quantities, Table 7.5, for J, H, K and
+//! the N band's 7.88–13.07 µm for the mid infrared). Radio has no thermal share, and neither kind
+//! has an X-ray one: plan 06 models white light only (`FLARE_SHARES`, `OUTBURST_SHARES`).
 //!
 //! A detection's band is the sensor's band in which the event stands highest over the detection
 //! limit, the first in [`AlertBand::ALL`]'s order on a tie: the shares and a host's sightline are
@@ -85,7 +85,8 @@ use crate::galaxy::placement::SystemKind;
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::{BodyId, EventId};
 use crate::observe::{
-    Drift, Motion, ObservedSystem, Observer, StarsCache, Trajectory, bearing, light_time, retarded,
+    Drift, Motion, ObservedSystem, Observer, Retardation, StarsCache, Trajectory, bearing,
+    light_time, retarded,
 };
 use crate::rng::Seed;
 use crate::stellar::events::flares::{Flare, FlareModel, FlareRates};
@@ -108,8 +109,9 @@ use super::{
 /// 10,000 K is the temperature Shibayama et al. (2013, ApJS 209, 5, section 2.3) take for the
 /// superflares that are plan 06's solar-type anchor, inside the 9,000–14,000 K that Kowalski et al.
 /// (2013, ApJS 207, 15) find for the blue continuum of M dwarfs' flares at their peaks. The shares
-/// are a test's integral, which `the_band_shares_are_blackbodies_through_the_top_hats` holds them
-/// to bit for bit.
+/// are [`band_share`](super::band_share)'s at 10,000 K to 10⁻¹², held by
+/// `the_band_shares_are_blackbodies_through_the_top_hats`, and keep the bits of the integral they
+/// were first stored from.
 pub(crate) const FLARE_SHARES: [f64; BAND_COUNT] = [
     0.132_442_267_280_078_88,
     0.140_976_411_610_259_12,
@@ -132,8 +134,10 @@ pub(crate) const FLARE_SHARES: [f64; BAND_COUNT] = [
 /// the optical and a K–M giant's or supergiant's in the near infrared (Audard et al. 2014,
 /// Protostars and Planets VI, 387, section 2.1). The two blackbodies stand for those types, the
 /// middle of 6,000–7,000 K and a late K star's 4,000 K, so that the near-infrared bands are not
-/// under-counted as a single optical blackbody would leave them (provisional). Held to the test's
-/// integral by `the_band_shares_are_blackbodies_through_the_top_hats`.
+/// under-counted as a single optical blackbody would leave them (provisional). Held to
+/// [`band_share`](super::band_share)'s to 10⁻¹² by
+/// `the_band_shares_are_blackbodies_through_the_top_hats`, with the bits of the integral they were
+/// first stored from.
 pub(crate) const OUTBURST_SHARES: [f64; BAND_COUNT] = [
     0.084_404_683_662_944_75,
     0.130_105_799_892_860_25,
@@ -910,31 +914,39 @@ impl Walk<'_, '_> {
     /// Appends the detection of `seen`, whose light is first counted at `at`: an onset's arrival,
     /// or the window's start for an event in progress.
     ///
-    /// Its retardation is [`retarded`]'s for the light that arrives then, so its emitted time lies
-    /// within the one step's residual, (v ÷ c)² of the light time (Design note 1), of the event's
-    /// own in [`Detection::emitted`] or of the light that arrives at the window's start. A host at
-    /// the observer has no bearing and is not reported.
+    /// Its retardation is the onset's light, as a one-shot detection's
+    /// ([`Retardation::of_emission`]): emitted at the onset from where the host's line passes then,
+    /// it arrives at [`Detection::arrival`] to the bit. Its bearing is the light's first counted,
+    /// [`retarded`]'s at `at`: for an event in progress, where the host appears as the window
+    /// opens. A host at the observer has no bearing and is not reported.
     fn push(&mut self, host: &Host<'_>, seen: Seen, at: UniverseTime) {
-        let observer = Observer::new(*self.query.observer_position(), at)
+        let position = self.query.observer_position();
+        let observer = Observer::new(*position, at)
             .expect("an alert query's observer is in the cube and its window in the clock window");
-        let retardation = retarded(&observer, &host.line);
-        let Some(bearing) = bearing(observer.position(), retardation.apparent_position()) else {
+        let counted = retarded(&observer, &host.line);
+        let Some(bearing) = bearing(position, counted.apparent_position()) else {
             return;
         };
-        self.out.push(Detection {
-            event: seen.event,
-            host: host.observed.hit().id(),
-            class: None,
-            kind: seen.kind,
-            emitted: seen.emitted,
-            arrival: seen.arrival,
-            phase: seen.phase,
-            band: seen.band,
-            flux: seen.flux,
+        let retardation = Retardation::of_emission(
+            position,
+            seen.emitted,
+            host.line.position_at(seen.emitted),
+            host.line.velocity(),
+            &host.line.position_at(seen.arrival),
+        );
+        debug_assert_eq!(retardation.observed(), seen.arrival);
+        self.out.push(Detection::new(
+            seen.event,
+            host.observed.hit().id(),
+            None,
+            seen.kind,
+            seen.phase,
+            seen.band,
+            seen.flux,
             bearing,
             retardation,
-            resolvable: seen.resolvable,
-        });
+            seen.resolvable,
+        ));
     }
 }
 
@@ -975,79 +987,45 @@ mod tests {
     use crate::galaxy::rules::GalaxyRules;
     use crate::id::{Layer, SystemId};
     use crate::math;
-    use crate::observe::{NoStarsCache, observe_hit, stars_of};
+    use crate::observe::{Bearing, NoStarsCache, observe_hit, stars_of};
     use crate::rng::Seed;
     use crate::stellar::events::flares;
     use crate::stellar::remnant::DeathKind;
     use crate::stellar::system::{ClockDeath, SystemStars};
-    use crate::substance::thermo::SECOND_RADIATION_CONSTANT_CM_K;
     use crate::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
-    use crate::units::{LightYears, Years};
+    use crate::units::{Kelvin, LightYears, Years};
 
-    use super::super::SensorHorizon;
+    use super::super::{SensorHorizon, band_share};
 
-    /// A band's top hat, µm: plan 07's wavelength ± half of Bessell's (2005, Table 1) or
-    /// Tokunaga's (2000, Table 7.5) full width at half maximum, or the N band's edges for the mid
-    /// infrared; none for radio.
-    fn top_hat(band: Band) -> Option<(f64, f64)> {
-        let width = match band {
-            Band::U => 0.065,
-            Band::B => 0.089,
-            Band::V => 0.084,
-            Band::R => 0.158,
-            Band::I => 0.154,
-            Band::J => 0.26,
-            Band::H => 0.29,
-            Band::K => 0.41,
-            Band::MidInfrared => return Some((7.88, 13.07)),
-            Band::Radio => return None,
-        };
-        let centre = band.wavelength()?.value();
-        Some((centre - width / 2.0, centre + width / 2.0))
-    }
-
-    /// The share of a blackbody's light at `kelvin` between `shortest` and `longest` µm:
-    /// (15 ÷ π⁴) ∫ x³ ÷ (eˣ − 1) dx over x = c₂ ÷ λT, by Simpson's rule on `intervals` (even)
-    /// intervals.
-    fn blackbody_share(kelvin: f64, (shortest, longest): (f64, f64), intervals: u32) -> f64 {
-        let c2 = SECOND_RADIATION_CONSTANT_CM_K * 1e4;
-        let (low, high) = (c2 / (longest * kelvin), c2 / (shortest * kelvin));
-        let step = (high - low) / f64::from(intervals);
-        let planck = |x: f64| x * x * x / math::exp_m1(x);
-        let inner = (1..intervals).fold(0.0, |sum, i| {
-            let weight = if i % 2 == 1 { 4.0 } else { 2.0 };
-            sum + weight * planck(low + f64::from(i) * step)
-        });
-        15.0 / (PI * PI * PI * PI) * (planck(low) + inner + planck(high)) * step / 3.0
-    }
-
-    /// The stored shares are the blackbodies' through the top hats to the bit, and the rule is
-    /// converged to 10⁻¹² of each: 10,000 K for flares, 6,500 K to I and 4,000 K from J for
-    /// outbursts, nothing in radio or X-rays, and under the whole light. A 10,000 K blackbody
-    /// holds 0.087 of it in V, as the research advice for P12.T5.b has it.
+    /// The stored shares are T5.b's blackbodies through the top hats ([`band_share`]) to 10⁻¹² of
+    /// each, and keep the bits of the integral they were first stored from: 10,000 K for flares,
+    /// 6,500 K to I and 4,000 K from J for outbursts, nothing in radio or X-rays, and under the
+    /// whole light. A 10,000 K blackbody holds 0.087 of it in V, as the research advice for
+    /// P12.T5.b has it.
     #[test]
     fn the_band_shares_are_blackbodies_through_the_top_hats() {
-        let recomputed = |kelvin: &dyn Fn(Band) -> f64, intervals| {
-            AlertBand::ALL.map(|band| match band {
-                AlertBand::Photometric(band) => top_hat(band)
-                    .map_or(0.0, |edges| blackbody_share(kelvin(band), edges, intervals)),
-                AlertBand::XRay => 0.0,
-            })
-        };
         let flare = |_| 10_000.0;
         let outburst = |band| if band < Band::J { 6_500.0 } else { 4_000.0 };
         for (name, stored, kelvin) in [
             ("flare", FLARE_SHARES, &flare as &dyn Fn(Band) -> f64),
             ("outburst", OUTBURST_SHARES, &outburst),
         ] {
-            let (rule, finer) = (recomputed(kelvin, 20_000), recomputed(kelvin, 40_000));
-            for (i, band) in AlertBand::ALL.iter().enumerate() {
-                assert_same_bits(stored[i], rule[i]);
-                assert!(
-                    (finer[i] - rule[i]).abs() <= 1e-12 * rule[i],
-                    "{name} in {band:?}: {:e} at twice the intervals",
-                    finer[i]
-                );
+            for (i, band) in AlertBand::ALL.into_iter().enumerate() {
+                let share = match band {
+                    AlertBand::Photometric(photometric) => {
+                        band_share(Kelvin::new(kelvin(photometric)), band)
+                    }
+                    AlertBand::XRay => 0.0,
+                };
+                if share > 0.0 {
+                    assert!(
+                        (stored[i] / share - 1.0).abs() <= 1e-12,
+                        "{name} in {band:?}: {:e} stored against {share:e}",
+                        stored[i]
+                    );
+                } else {
+                    assert_same_bits(stored[i], 0.0);
+                }
             }
             assert!(stored.iter().sum::<f64>() < 1.0, "{name}");
         }
@@ -1331,7 +1309,9 @@ mod tests {
         band: AlertBand,
         flux: f64,
         resolvable: bool,
-        counted_at: UniverseTime,
+        /// Where the light first counted comes from: an onset's at its arrival, an event's in
+        /// progress at the window's start.
+        bearing: Bearing,
     }
 
     impl From<&Detection> for Direct {
@@ -1345,7 +1325,7 @@ mod tests {
                 band: d.band(),
                 flux: d.flux().value(),
                 resolvable: d.is_resolvable(),
-                counted_at: d.retardation().observed(),
+                bearing: d.bearing(),
             }
         }
     }
@@ -1436,6 +1416,13 @@ mod tests {
             t.checked_add(light_time(self.distance(t))).unwrap()
         }
 
+        /// Where the light that arrives at `t` comes from.
+        fn bearing_at(&self, t: UniverseTime) -> Bearing {
+            let position = self.query.observer_position();
+            let light = retarded(&Observer::new(*position, t).unwrap(), &self.line);
+            bearing(position, light.apparent_position()).unwrap()
+        }
+
         /// The earliest emission whose light can arrive at `t`.
         fn early(&self, t: UniverseTime) -> UniverseTime {
             t.checked_sub(Span::from_seconds_f64(self.light + self.margin).unwrap())
@@ -1514,7 +1501,7 @@ mod tests {
                     band,
                     flux,
                     resolvable: flux >= limits.resolve().value(),
-                    counted_at,
+                    bearing: self.bearing_at(counted_at),
                 });
             }
         }
@@ -1546,7 +1533,7 @@ mod tests {
                     band: AlertBand::Photometric(Band::Radio),
                     flux: 0.0,
                     resolvable: false,
-                    counted_at: arrival,
+                    bearing: self.bearing_at(arrival),
                 });
             }
         }
@@ -1640,8 +1627,8 @@ mod tests {
     }
 
     /// `local_events` over the scene equals each row's direct evaluation: the same events, kinds,
-    /// phases, bands, emitted and arrival times, resolvability and onsets' fluxes to the bit, and
-    /// in-progress fluxes within 10⁻⁹, since the light at t₁ is found by bisection here.
+    /// phases, bands, emitted and arrival times, resolvability, bearings and onsets' fluxes to the
+    /// bit, and in-progress fluxes within 10⁻⁹, since the light at t₁ is found by bisection here.
     fn equals_direct_evaluation(scene: &Scene) -> Vec<Detection> {
         let galaxy = galaxy();
         let out = run(scene, &scene.query, &scene.rows);
@@ -1666,8 +1653,8 @@ mod tests {
         );
         for (d, e) in found.iter().zip(&expected) {
             assert_eq!(
-                (d.resolvable, d.counted_at),
-                (e.resolvable, e.counted_at),
+                (d.resolvable, d.bearing),
+                (e.resolvable, e.bearing),
                 "{d:?}"
             );
             match d.phase {

@@ -552,7 +552,7 @@ pub enum DetectionPhase {
 /// arrived, how bright it is and where it appears.
 ///
 /// Built by the alert walks (P12.T5.b–P12.T5.e), through its crate-private constructor: the
-/// one-shot classes' by [`one_shot_detections`].
+/// one-shot classes' by [`one_shot_detections`] and the local events' by [`local_events`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Detection {
     event: EventId,

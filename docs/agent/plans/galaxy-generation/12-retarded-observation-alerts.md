@@ -2717,14 +2717,15 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     `PulsarBeam::sweeps`; `Drift::new`, `retarded`, `bearing` and `AlertContext::sightline`.
   - _Band light (lean, 2026-10-30)._ Blackbody shares through T5.b's top hats (plan 07's centres,
     Bessell's and Tokunaga's widths), crate-private: flares at 10,000 K, outbursts at 6,500 K for
-    U–I and 4,000 K for J to the mid infrared, none in radio or X-rays. Recompute them with T5.b's
-    `band_share` once it lands, and drop the test's own integral.
+    U–I and 4,000 K for J to the mid infrared, none in radio or X-rays. They are T5.b's
+    `band_share` to 10⁻¹², which the test checks, and keep their first bits (2026-10-31).
   - _Detections (lean, 2026-10-30)._ One per event, in the sensor's band where it stands highest
     over the limit. An onset is seen by its peak flux at its distance then, so that a split window
     finds every onset as the whole does (Design note 6); an event in progress by its light at t₁.
-    `retardation` is `retarded`'s for the light first counted (an onset's arrival, or t₁), `class`
-    is `None`, and a host at the observer, which has no bearing, is dropped. `Detection` is built
-    as a struct literal: switch to T5.b's constructor when it lands. An onset's flux and
+    The bearing is `retarded`'s for the light first counted (an onset's arrival, or t₁), `class`
+    is `None`, and a host at the observer, which has no bearing, is dropped. Built by T5.b's
+    `Detection::new`, so `retardation` is the onset's light, `Retardation::of_emission` as a
+    one-shot's (lean, 2026-10-31): only it moved from the struct literal's. An onset's flux and
     resolvability are its peak's, whose light arrives after `arrival()` (minutes for a flare, up to
     25 years for an outburst): T8 takes its sighting's flux and level at the peak's arrival.
   - _Glitches (lean, 2026-10-30)._ In `Band::Radio` with zero flux, never resolvable, when the
