@@ -537,6 +537,11 @@ export type AtmosphereRegime = (
 export interface RegimeThermal {
   readonly temperature: MediumTemperature;
   readonly stellarFluxWM2: number;
+  /**
+   * The albedo its reflected light is judged by, per channel: the medium's ground's where absent;
+   * a gas envelope's own, whose medium has no ground (R08.T16.a).
+   */
+  readonly albedo?: Rgb;
 }
 
 /**
@@ -563,6 +568,13 @@ export interface BodyCover {
   readonly decks: ReadonlyArray<CoverDeck>;
   /** Whether the body is a gas envelope, which has no ground and is always split at its floor. */
   readonly envelope: boolean;
+  /**
+   * An envelope's floor where its assembly found it, m above the medium's ground: where the
+   * τ(550) of its gas and of its modes by their published profiles reaches
+   * {@link CLOUD_DECK_SPLIT_OPTICAL_DEPTH}, at which its modes are cut (`assemble.ts`, R08.T16.a).
+   * Absent, {@link envelopeFloorM}'s reading of the medium (a kept scene's).
+   */
+  readonly floorAltitudeM?: number;
 }
 
 /**
@@ -644,7 +656,7 @@ export function classifyRegime(
 ): AtmosphereRegime {
   const regime = routedRegime(medium, cover);
   return thermal !== undefined &&
-    selfLuminousOf(medium, thermal.temperature, thermal.stellarFluxWM2)
+    selfLuminousOf(medium, thermal.temperature, thermal.stellarFluxWM2, thermal.albedo)
     ? { ...regime, selfLuminous: true }
     : regime;
 }
@@ -652,7 +664,7 @@ export function classifyRegime(
 /** {@link classifyRegime}'s route alone: the deck rule, then the boundary. */
 function routedRegime(medium: AtmosphereMedium, cover: BodyCover): AtmosphereRegime {
   if (cover.envelope) {
-    return { kind: "cloudDeck", deckAltitudeM: envelopeFloorM(medium) };
+    return { kind: "cloudDeck", deckAltitudeM: cover.floorAltitudeM ?? envelopeFloorM(medium) };
   }
   if (cover.cloudFraction >= 1) {
     let shallowest: CoverDeck | undefined;

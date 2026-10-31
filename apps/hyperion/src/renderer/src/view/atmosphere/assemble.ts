@@ -7,9 +7,9 @@
  * @remarks
  * **The labels** follow the section the body's air comes from (decision-r08-giant-label;
  * decision-p14-t35e-wire): its surface section, or a gas envelope's own where the surface is
- * `not_applicable`. Withheld reads `NOT RESOLVED`, `not_modelled` or absent `NOT YET MODELLED`, and
- * a gas envelope sent `ok` keeps `NOT YET MODELLED` with no medium until R08.T16.a draws envelopes
- * (`decision-r08-t10a-leans.md` item 5). An `airless` surface draws nothing and says
+ * `not_applicable`. Withheld reads `NOT RESOLVED`, `not_modelled` or absent `NOT YET MODELLED`; a
+ * gas envelope sent `ok` is drawn (R08.T16.a), with no note of its own. An `airless` surface draws
+ * nothing and says
  * `EXOSPHERE: NOT YET MODELLED` (`signoff-2.md` item 6); a surface holding melt (`magma_ocean`, or a
  * crust whose `meltAreaFraction` is above 0) whose `silicateVapour` is `not_modelled` says
  * `SILICATE VAPOUR: NOT YET MODELLED` beside its other notes; a surface with air and no inventory
@@ -51,12 +51,36 @@
  * **The regime** is the router's, of the medium and the body's cover ({@link bodyCoverOf}),
  * computed once here and carried with the medium ({@link AssembledMedium}), so that the read path
  * routes on it (R08.T14.c).
+ *
+ * **A gas envelope's medium** (R08.T16.a; Design notes 9, 13 and 17; `decision-deep-decks-split.md`
+ * §3.3; `envelope.ts`) is built the same way from its `ok` envelope section, with no ground:
+ *
+ * - its column on the envelope's profile (`column.ts`' `envelope`: Guillot's grey T(p) above the
+ *   join, the adiabat's nodes below) at the record's 1-bar composition and μ, from a base deep
+ *   enough that T15's deck reads the medium to τ 1,000 from the top in the green channel
+ *   (`envelope.ts`' `ENVELOPE_BASE_OPTICAL_DEPTH`) up past every mode it carries; its medium stands
+ *   on the record's 1-bar figure lowered by the 1-bar level's h\* (`envelope.ts`'
+ *   `loweredFigure`), its gravity that lowered figure's, so that the 1-bar level lies on the
+ *   figure;
+ * - its floor, the shallowest level at which the τ rule's τ(550) from the top, the molecular term's
+ *   and every mode's at its coverage by its published profile, reaches
+ *   `CLOUD_DECK_SPLIT_OPTICAL_DEPTH`, which the router splits it at ({@link envelopeFloorPa});
+ * - its inventory cut there (`envelope.ts`' `cutAtFloor`): a mode that straddles the floor enters
+ *   with the τ its profile puts above it, and one whose top lies below it takes no term and no
+ *   label; the column takes a level at each mode's ends and through its steep profiles;
+ * - its gases' absorber layers from the floor up (lean, 2026-10-31), the deck below reading the
+ *   gas's scattering alone, so that a layer's one temperature is the visible column's, beside the
+ *   inventory's absorbers;
+ * - a black ground, its self-luminosity judged against the albedo the input gives instead, at the
+ *   flux σ T_irr⁴ (`envelope.ts`' `envelopeStellarFluxWM2`), and its column's temperature held
+ *   below the floor at the floor's, where nothing is drawn.
  */
 
 import type { AerosolShapeDto } from "@hyperion/protocol";
 
 import { substanceName } from "../../lib/substances";
 import { EARTH_MASS_KG } from "../../lib/system/bodiesWire";
+import { exp, log } from "../../lib/pinnedMath";
 import type {
   AerosolInventory,
   BodyDetail,
@@ -65,11 +89,13 @@ import type {
   BodySurface,
   BulkProperties,
   CondensateDeck,
+  GasShare,
   AerosolMode as RecordAerosolMode,
   SizeDistribution as RecordSizeDistribution,
   Section,
 } from "../../lib/system/model";
 import { spinRateAt } from "../../lib/system/rotation";
+import type { Rgb } from "../photometry/toneCurve";
 import {
   ABSORBER_CROSS_SECTIONS,
   ABSORBER_PAIR_CROSS_SECTIONS,
@@ -99,10 +125,26 @@ import { aggregateShapeInRange } from "./aggregate";
 import { type BodyAtmosphereInput, type BodyLight, clampedGroundAlbedo } from "./atmosphereInput";
 import {
   type AtmosphereColumn,
+  COLUMN_INTERVALS,
+  COLUMN_TOP_PRESSURE_RATIO,
   columnPressureBar,
   hydrostaticColumn,
   type TemperatureProfile,
 } from "./column";
+import {
+  cutAtFloor,
+  ENVELOPE_BASE_MAX_PA,
+  ENVELOPE_BASE_OPTICAL_DEPTH,
+  ENVELOPE_DATUM_PA,
+  envelopeProfileOf,
+  envelopeStellarFluxWM2,
+  envelopeTopPa,
+  loweredFigure,
+  MODE_EDGE_LN_P,
+  modeLevelsPa,
+  shareAbove,
+  skyOpticalDepth550,
+} from "./envelope";
 import { ATMOSPHERE_LABELS, type AtmosphereLabel } from "./labels";
 import {
   type MaterialPhase,
@@ -112,6 +154,7 @@ import {
 } from "./materials/materials";
 import {
   type AtmosphereMedium,
+  CHANNEL_WAVELENGTHS_NM,
   checkTabulatedTops,
   columnLengthM,
   type DensityProfile,
@@ -132,6 +175,7 @@ import {
   classifyRegime,
   CLOUD_DECK_SPLIT_OPTICAL_DEPTH,
   type CoverDeck,
+  ENVELOPE_FLOOR_CHANNEL,
   THICK_REASON,
 } from "./thick/regime";
 
@@ -199,9 +243,27 @@ export interface DrawnMedium {
   readonly sources: ReadonlyArray<SpectralSource>;
   /**
    * The column's temperature at its levels (R08.T18.b), which the medium's thermal source and the
-   * thick bake's thermal field read; absent for a kept medium, which emits nothing.
+   * thick bake's thermal field read; absent for a kept medium, which emits nothing. A gas
+   * envelope's holds its floor's below its floor.
    */
   readonly temperature?: MediumTemperature;
+  /** A gas envelope's floor and column (R08.T16.a); absent for a surface's air. */
+  readonly envelope?: DrawnEnvelope;
+}
+
+/**
+ * A gas envelope's floor, where the router splits it and its inventory is cut (R08.T16.a), and its
+ * column's pressures.
+ */
+export interface DrawnEnvelope {
+  /** p at the floor, Pa. */
+  readonly floorPa: number;
+  /** h\* of the floor, m above the medium's ground. */
+  readonly floorAltitudeM: number;
+  /** The column's pressure, Pa, at each of {@link DrawnMedium.temperature}'s heights. */
+  readonly pressuresPa: Float64Array;
+  /** The modes the cut drops, with no term and no label, by material, in the inventory's order. */
+  readonly dropped: ReadonlyArray<string>;
 }
 
 /** What every assembly gives, drawn or not. */
@@ -233,6 +295,12 @@ export type AssembledMedium =
 
 /** What the assembly takes beside its input. */
 export interface AssembleOptions {
+  /**
+   * Whether a gas envelope sent `ok` takes its medium (R08.T16.a): `false` if absent, so that the
+   * console draws no giant before R08.T16.a.2 routes it through its floor's split (lean,
+   * 2026-10-31), and the envelope keeps `atmosphereNotYetModelled` as before.
+   */
+  readonly envelopes?: boolean;
   /**
    * The line species' k-distribution tables, which the optics worker loads
    * (`absorbers/kDistribution.ts`'s `loadKDistributions` of {@link lineSpeciesOf}); none if absent,
@@ -350,12 +418,21 @@ interface NoAir {
   readonly labels: ReadonlyArray<AtmosphereLabel>;
 }
 
-/** A surface with air to draw, with its labels beside the reasons'. */
+/** Where a body's air comes from: its surface's section, or its gas envelope's (R08.T16.a). */
+type AirSource =
+  | { readonly kind: "surface"; readonly surface: BodySurface }
+  | { readonly kind: "envelope"; readonly envelope: BodyEnvelope };
+
+/** A body with air to draw, with its labels beside the reasons'. */
 interface Air {
   readonly kind: "air";
   readonly record: BodyRecord;
-  readonly surface: BodySurface;
   readonly bulk: BulkProperties;
+  readonly source: AirSource;
+  /** Its gases, largest first: a surface's, or an envelope's composition at 1 bar. */
+  readonly gases: ReadonlyArray<GasShare>;
+  /** Its aerosol and absorber inventory, if it has one. */
+  readonly inventory: AerosolInventory | undefined;
   readonly labels: ReadonlyArray<AtmosphereLabel>;
 }
 
@@ -377,14 +454,6 @@ function sectionLabels(section: Section<unknown>): ReadonlyArray<AtmosphereLabel
   return labels;
 }
 
-/**
- * A gas envelope's labels: its own section's state, and `NOT YET MODELLED` while `ok`, since no
- * envelope is drawn before R08.T16.a (`decision-r08-t10a-leans.md` item 5).
- */
-function envelopeLabels(envelope: Section<BodyEnvelope>): ReadonlyArray<AtmosphereLabel> {
-  return envelope.state === "ok" ? ["atmosphereNotYetModelled"] : sectionLabels(envelope);
-}
-
 /** Whether a surface holds melt (Design note 12): `magma_ocean`, or a crust with a melt area. */
 function holdsMelt(surface: BodySurface): boolean {
   return (
@@ -393,12 +462,33 @@ function holdsMelt(surface: BodySurface): boolean {
   );
 }
 
-/** Where a record's air comes from. */
-function airOf(detail: BodyDetail): NoAir | Air {
+/**
+ * Where a record's air comes from; a gas envelope's sent `ok` only under `envelopes`
+ * ({@link AssembleOptions.envelopes}), and `NOT YET MODELLED` otherwise.
+ */
+function airOf(detail: BodyDetail, envelopes: boolean): NoAir | Air {
   const { record } = detail;
   const { surface } = record;
   if (surface.state === "not_applicable") {
-    return { kind: "none", labels: envelopeLabels(record.envelope) };
+    const { envelope } = record;
+    if (envelope.state !== "ok") {
+      return { kind: "none", labels: sectionLabels(envelope) };
+    }
+    if (!envelopes) {
+      return { kind: "none", labels: ["atmosphereNotYetModelled"] };
+    }
+    if (record.bulk.state !== "ok") {
+      return { kind: "none", labels: sectionLabels(record.bulk) };
+    }
+    return {
+      kind: "air",
+      record,
+      bulk: record.bulk.value,
+      source: { kind: "envelope", envelope: envelope.value },
+      gases: envelope.value.composition,
+      inventory: envelope.value.aerosols,
+      labels: [],
+    };
   }
   if (surface.state !== "ok") {
     return { kind: "none", labels: sectionLabels(surface) };
@@ -423,8 +513,10 @@ function airOf(detail: BodyDetail): NoAir | Air {
   return {
     kind: "air",
     record,
-    surface: value,
     bulk: record.bulk.value,
+    source: { kind: "surface", surface: value },
+    gases: value.gases,
+    inventory: value.aerosols.kind === "value" ? value.aerosols.value : undefined,
     labels: [...aerosols, ...silicate],
   };
 }
@@ -448,6 +540,20 @@ function bodyOf(record: BodyRecord, bulk: BulkProperties, detail: BodyDetail): A
           polarRadiusM: figureSection.value.polarRadiusM,
         }
       : { equatorialRadiusM: bulk.radiusM, polarRadiusM: bulk.radiusM };
+  return bodyOnFigure(record, detail, figure, bulk.surfaceGravityMS2);
+}
+
+/**
+ * A record's body on `figure`, its gravity the figure's from the record's mass, spin and figure
+ * law, or `bulkGravityMS2` where those are not given.
+ */
+function bodyOnFigure(
+  record: BodyRecord,
+  detail: BodyDetail,
+  figure: SpheroidFigure,
+  bulkGravityMS2: number,
+): AssembledBody {
+  const figureSection = record.figure;
   const massKg =
     record.massMearth.state === "ok" ? record.massMearth.value * EARTH_MASS_KG : undefined;
   const angularVelocityRadS =
@@ -459,7 +565,7 @@ function bodyOf(record: BodyRecord, bulk: BulkProperties, detail: BodyDetail): A
       figure,
       massKg: massKg ?? Number.NaN,
       angularVelocityRadS,
-      bulkGravityMS2: bulk.surfaceGravityMS2,
+      bulkGravityMS2,
       figureLaw:
         figureSection.state === "ok"
           ? {
@@ -533,6 +639,198 @@ function temperatureOf(surface: BodySurface): TemperatureProfile {
   return profile;
 }
 
+// ---------------------------------------------------------------------------------------------
+// A gas envelope's column, floor and cut (R08.T16.a; the module's remarks, "A gas envelope's
+// medium").
+
+/** A gas envelope's floor: where its inventory is cut, and the modes the cut drops. */
+interface EnvelopeFloor {
+  /** p at the floor, Pa: the column's level {@link EnvelopeFloor.level}'s. */
+  readonly pressurePa: number;
+  /** The index of the floor's level in the column. */
+  readonly level: number;
+  /** The modes that take no term and no label, in the inventory's order. */
+  readonly dropped: ReadonlyArray<RecordAerosolMode>;
+}
+
+/** A gas envelope's body, column, inventory as drawn and floor. */
+interface EnvelopeColumn {
+  readonly body: AssembledBody;
+  readonly column: AtmosphereColumn;
+  readonly inventory: AerosolInventory;
+  readonly floor: EnvelopeFloor;
+}
+
+/** The base a gas envelope's column is first built to, Pa: 1 kbar, then deepened as it needs. */
+const ENVELOPE_FIRST_BASE_PA = 1e8;
+
+/**
+ * The passes {@link envelopeColumnOf} takes to lower its figure by its own gravity ratios: 6, each
+ * shrinking the 1-bar level's miss of the figure about 70-fold, on Jupiter's figure from 7.4 km to
+ * 5 µm (`envelope.test.ts`).
+ */
+const ENVELOPE_DATUM_PASSES = 6;
+
+/** The most rounds {@link envelopeColumnOf} takes to settle its base and its datum. */
+const ENVELOPE_COLUMN_ROUNDS = 16;
+
+/**
+ * How near the 1-bar level must lie to the datum's depth for {@link envelopeColumnOf}'s datum to
+ * have settled, as a fraction of the 1-bar figure's radius: 10⁻⁹, under 0.1 m on a Jupiter.
+ */
+const ENVELOPE_DATUM_TOLERANCE = 1e-9;
+
+/**
+ * A gas envelope's body, column, inventory cut at its floor, and floor (the module's remarks, "A
+ * gas envelope's medium").
+ *
+ * @remarks
+ * The base and the datum are settled together, round by round: the column is built on the record's
+ * 1-bar figure lowered by a depth d of h\*, its gravity the lowered figure's, its base deepened
+ * until the molecular term's green τ from the top reaches `ENVELOPE_BASE_OPTICAL_DEPTH` (or the
+ * base reaches `ENVELOPE_BASE_MAX_PA`), and d found by the secant on the 1-bar level's h\* less d
+ * until that lies within {@link ENVELOPE_DATUM_TOLERANCE} of the radius: four to eight rounds. The
+ * floor is found on that column ({@link envelopeFloorPa}), and the column built again with levels
+ * at the floor, at the cut modes' ends and through their steep profiles, which moves no level's
+ * height: a level's height is the closed form's at its pressure.
+ *
+ * @throws Error where the rounds do not settle, a bug.
+ */
+function envelopeColumnOf(air: Air, envelope: BodyEnvelope, detail: BodyDetail): EnvelopeColumn {
+  const { record, bulk, gases } = air;
+  const datum = bodyOf(record, bulk, detail);
+  const datumRadiusM = mediumTableRadiusM(datum.figure);
+  const profile = envelopeProfileOf(envelope, bulk.surfaceGravityMS2);
+  const topPa = envelopeTopPa(envelope.aerosols);
+  const mixture = molecularMixture(gases);
+  const greenM2 = mixture.crossSectionM2(CHANNEL_WAVELENGTHS_NM[ENVELOPE_FLOOR_CHANNEL]);
+  const columnOn = (
+    body: AssembledBody,
+    basePa: number,
+    levelsPa: ReadonlyArray<number>,
+  ): AtmosphereColumn =>
+    hydrostaticColumn({
+      surfacePa: basePa,
+      topPa,
+      levelsPa: [ENVELOPE_DATUM_PA, ...levelsPa].filter((p) => p > topPa && p < basePa),
+      temperature: profile,
+      meanMolarMassGPerMol: envelope.meanMolarMassGPerMol,
+      referenceGravityMS2: body.gravity.referenceGravityMS2,
+      referenceRadiusM: mediumTableRadiusM(body.figure),
+    });
+  // The body on the 1-bar figure lowered by `depthM` of h*, its bulk gravity carried down by the
+  // inverse square where its gravity reads it, the lowering by its own gravity ratios, as the
+  // drawn medium reads h* on it: so that the 1-bar level lies on the figure.
+  const bodyAt = (depthM: number): AssembledBody => {
+    let body = datum;
+    if (depthM === 0) {
+      return body;
+    }
+    for (let pass = 0; pass < ENVELOPE_DATUM_PASSES; pass += 1) {
+      const figure = loweredFigure(datum.figure, body.gravity, depthM);
+      const scale = datumRadiusM / mediumTableRadiusM(figure);
+      body = bodyOnFigure(record, detail, figure, bulk.surfaceGravityMS2 * scale * scale);
+    }
+    return body;
+  };
+  let basePa = ENVELOPE_FIRST_BASE_PA;
+  let depthM = 0;
+  let previous: { readonly depthM: number; readonly residualM: number } | null = null;
+  let body: AssembledBody;
+  let column: AtmosphereColumn;
+  for (let round = 1; ; round += 1) {
+    if (round > ENVELOPE_COLUMN_ROUNDS) {
+      throw new Error(`a gas envelope's column did not settle in ${ENVELOPE_COLUMN_ROUNDS} rounds`);
+    }
+    body = bodyAt(depthM);
+    column = columnOn(body, basePa, []);
+    const greenDepth =
+      greenM2 * column.surfaceNumberDensityPerM3 * columnLengthM(column.density, column.topHeightM);
+    if (greenDepth < ENVELOPE_BASE_OPTICAL_DEPTH && basePa < ENVELOPE_BASE_MAX_PA) {
+      basePa = Math.min(
+        ENVELOPE_BASE_MAX_PA,
+        basePa * 1.02 * (ENVELOPE_BASE_OPTICAL_DEPTH / greenDepth),
+      );
+      previous = null;
+      continue;
+    }
+    const level = column.pressuresPa.indexOf(ENVELOPE_DATUM_PA);
+    if (level < 0) {
+      throw new Error("a gas envelope's column lays a level at its 1-bar datum");
+    }
+    // The datum's depth is the 1-bar level's h* on the column built on it: a secant on the miss.
+    const residualM = (column.altitudesM[level] ?? Number.NaN) - depthM;
+    if (Math.abs(residualM) <= ENVELOPE_DATUM_TOLERANCE * datumRadiusM) {
+      break;
+    }
+    const secant =
+      previous === null
+        ? Number.NaN
+        : depthM - (residualM * (depthM - previous.depthM)) / (residualM - previous.residualM);
+    previous = { depthM, residualM };
+    depthM = Number.isFinite(secant) && secant > 0 ? secant : depthM + residualM;
+  }
+  const floorPa = envelopeFloorPa(
+    column,
+    mixture.crossSectionM2(TAU_WAVELENGTH_NM),
+    envelope.aerosols.modes,
+  );
+  const { inventory, dropped } = cutAtFloor(envelope.aerosols, floorPa);
+  const stepLnP = log(1 / COLUMN_TOP_PRESSURE_RATIO) / COLUMN_INTERVALS;
+  const levelsPa = [
+    floorPa * exp(MODE_EDGE_LN_P),
+    floorPa,
+    ...modeLevelsPa(inventory.modes, topPa, basePa, stepLnP),
+  ];
+  const drawn = columnOn(body, basePa, levelsPa);
+  const level = drawn.pressuresPa.indexOf(floorPa);
+  if (level < 0) {
+    throw new Error(`a gas envelope's column lays a level at its floor, ${floorPa} Pa`);
+  }
+  return { body, column: drawn, inventory, floor: { pressurePa: floorPa, level, dropped } };
+}
+
+/**
+ * A gas envelope's floor on its column, Pa (Design note 9; `decision-deep-decks-split.md` §3.3):
+ * the shallowest pressure at which the τ rule's τ(550) from the top ({@link depthAbove}), the
+ * molecular term's (cross-section `sigma550M2`) and every mode's at its coverage by its published
+ * profile (`envelope.ts`' `shareAbove`), reaches {@link CLOUD_DECK_SPLIT_OPTICAL_DEPTH}; the
+ * column's base where it never does. Thomson's τ, of the free electrons the hottest giants' slabs
+ * hold, is left out: about 10⁻⁹ on the hot Jupiter fixture.
+ */
+function envelopeFloorPa(
+  column: AtmosphereColumn,
+  sigma550M2: number,
+  modes: ReadonlyArray<RecordAerosolMode>,
+): number {
+  const { datumPa, topPa } = columnEnds(column);
+  const totalM = columnLengthM(column.density, column.topHeightM);
+  const extinctionPerM = sigma550M2 * column.surfaceNumberDensityPerM3;
+  const depth = (pressurePa: number): number => {
+    const gasM = totalM - columnLengthM(column.density, heightAtPa(column, pressurePa));
+    let tau = extinctionPerM * gasM;
+    for (const mode of modes) {
+      tau += skyOpticalDepth550(mode) * shareAbove(mode, pressurePa);
+    }
+    return tau;
+  };
+  if (depth(datumPa) < CLOUD_DECK_SPLIT_OPTICAL_DEPTH) {
+    return datumPa;
+  }
+  // τ from the top rises with pressure: the floor is the least pressure still at the split's τ.
+  let low = log(topPa);
+  let high = log(datumPa);
+  for (let step = 0; step < 128 && high - low > 1e-14; step += 1) {
+    const middle = 0.5 * (low + high);
+    if (depth(exp(middle)) >= CLOUD_DECK_SPLIT_OPTICAL_DEPTH) {
+      high = middle;
+    } else {
+      low = middle;
+    }
+  }
+  return exp(high);
+}
+
 /** A column's datum and top pressures, Pa. */
 function columnEnds(column: AtmosphereColumn): {
   readonly datumPa: number;
@@ -591,35 +889,42 @@ interface Layers {
 }
 
 /**
- * The absorber layers of a surface's gases and inventory on its column: each gas from p_s up at
+ * The absorber layers of a body's gases and inventory on its column: each gas from `basePa` up at
  * its mole fraction (to its deck's top where its vapour condenses), and each of the inventory's
  * absorbers on its own layer, which replaces a gas's of the same species. A record layer wholly
  * above the column's top is dropped with a reason, one wholly below its datum without
  * (`decision-r08-t10a-leans.md` item 11); one that straddles the column passes, `absorberSpecs`
  * laying its whole column inside.
+ *
+ * @param basePa - Where the gases' layers start, Pa: a surface's datum, or a gas envelope's floor.
  */
-function layersOf(surface: BodySurface, column: AtmosphereColumn, reasons: Reasons): Layers {
+function layersOf(
+  gases: ReadonlyArray<GasShare>,
+  inventory: AerosolInventory | undefined,
+  column: AtmosphereColumn,
+  basePa: number,
+  reasons: Reasons,
+): Layers {
   const { datumPa, topPa: columnTopPa } = columnEnds(column);
-  const inventory = surface.aerosols.kind === "value" ? surface.aerosols.value : undefined;
   const recordAbsorbers = inventory?.absorbers ?? [];
   const recorded = new Set(recordAbsorbers.map((a) => a.species));
   const numberColumnPerM2 = (topPa: number): number =>
-    column.surfaceNumberDensityPerM3 * layerMoments(column, datumPa, topPa, 1).integralM;
+    column.surfaceNumberDensityPerM3 * layerMoments(column, basePa, topPa, 1).integralM;
   const layers: AbsorberLayer[] = [];
   const topsPa = new Map<string, number>();
-  for (const gas of surface.gases) {
+  for (const gas of gases) {
     if (recorded.has(gas.species)) {
       continue;
     }
     const deck = inventory?.decks.find((d) => d.condensate === gas.species);
     const deckTop =
       inventory === undefined || deck === undefined ? undefined : deckTopPa(inventory, gas.species);
-    const cut = deckTop !== undefined && deckTop > columnTopPa && deckTop < datumPa;
+    const cut = deckTop !== undefined && deckTop > columnTopPa && deckTop < basePa;
     const topPa = cut ? deckTop : 0;
     layers.push({
       species: gas.species,
       columnPerM2: gas.moleFraction * numberColumnPerM2(topPa),
-      basePa: datumPa,
+      basePa,
       topPa,
     });
     topsPa.set(gas.species, Math.max(topPa, columnTopPa));
@@ -1022,9 +1327,27 @@ function candidateDepth(candidate: Candidate): number {
   return depth;
 }
 
+/**
+ * Where a plan's air comes from, with the inventory it draws: a surface's, or a gas envelope's cut
+ * at its floor.
+ */
+type PlanSource =
+  | {
+      readonly kind: "surface";
+      readonly surface: BodySurface;
+      readonly inventory: AerosolInventory | undefined;
+    }
+  | {
+      readonly kind: "envelope";
+      readonly envelope: BodyEnvelope;
+      readonly inventory: AerosolInventory;
+      readonly floor: EnvelopeFloor;
+    };
+
 /** A body's medium as planned, before its aerosols' optics. */
 interface Plan {
   readonly air: Air;
+  readonly source: PlanSource;
   readonly body: AssembledBody;
   readonly column: AtmosphereColumn;
   readonly spectra: ReadonlyArray<BakeSpectrum>;
@@ -1054,17 +1377,36 @@ function planOf(
   options: AssembleOptions,
 ): Plan {
   const spectra = spectraOf(lights);
-  const { record, surface, bulk } = air;
-  const body = bodyOf(record, bulk, detail);
-  const column = columnOf(surface, body);
+  const { record, bulk, gases } = air;
+  let body: AssembledBody;
+  let column: AtmosphereColumn;
+  let source: PlanSource;
+  let layersBasePa: number;
+  switch (air.source.kind) {
+    case "surface":
+      body = bodyOf(record, bulk, detail);
+      column = columnOf(air.source.surface, body);
+      source = { kind: "surface", surface: air.source.surface, inventory: air.inventory };
+      layersBasePa = columnEnds(column).datumPa;
+      break;
+    case "envelope": {
+      const { envelope } = air.source;
+      const drawn = envelopeColumnOf(air, envelope, detail);
+      ({ body, column } = drawn);
+      source = { kind: "envelope", envelope, inventory: drawn.inventory, floor: drawn.floor };
+      layersBasePa = drawn.floor.pressurePa;
+      break;
+    }
+  }
+  const { inventory } = source;
   const columnTopPa = columnEnds(column).topPa;
   const reasons = new Reasons();
-  const molecular = molecularTerm(column, surface.gases);
+  const molecular = molecularTerm(column, gases);
   rayleighReasons(molecular.approximations, columnTopPa, reasons);
-  const { layers, topsPa } = layersOf(surface, column, reasons);
+  const { layers, topsPa } = layersOf(gases, inventory, column, layersBasePa, reasons);
   const kDistributions = options.kDistributions ?? [];
   const bulkMoleFractions: ReadonlyMap<string, number> = new Map(
-    surface.gases.map((g) => [g.species, g.moleFraction]),
+    gases.map((g) => [g.species, g.moleFraction]),
   );
   // The layers are never filtered by the bound: a wholly pending species has no optics, so it
   // takes no column and no curve here already, and a species with a pending part keeps its
@@ -1094,7 +1436,6 @@ function planOf(
     reasons,
   );
   const electrons = layers.find((l) => l.species === "e-" && l.columnPerM2 > 0);
-  const inventory = surface.aerosols.kind === "value" ? surface.aerosols.value : undefined;
   const modes = modesOf(inventory, column, reasons);
 
   // The term limit: the molecular term, then the deepest of the rest, the earlier on a tie.
@@ -1146,6 +1487,7 @@ function planOf(
   }
   return {
     air,
+    source,
     body,
     column,
     spectra,
@@ -1225,6 +1567,15 @@ function deckOpticalDepth550(inventory: AerosolInventory, deck: CondensateDeck):
   return tau;
 }
 
+/** An inventory's decks on `column`, in the inventory's order ({@link bodyCoverOf}). */
+function coverDecksOf(inventory: AerosolInventory, column: AtmosphereColumn): CoverDeck[] {
+  return inventory.decks.map((deck): CoverDeck => ({
+    opticalDepth550: deckOpticalDepth550(inventory, deck),
+    baseAltitudeM: heightAtPa(column, deck.basePa),
+    topAltitudeM: heightAtPa(column, deck.topPa),
+  }));
+}
+
 /**
  * A surface air's cover, as `thick/regime.ts`'s `classifyRegime` reads it beside the medium
  * (R08.T13.d; `decision-r08-t13c2-classes.md` §5): the surface's cloud fraction (P14.T24.b), and
@@ -1236,8 +1587,7 @@ function deckOpticalDepth550(inventory: AerosolInventory, deck: CondensateDeck):
  * - A mode whose optical depth the generator does not model adds nothing to its deck: the assembly
  *   drops it and gives its reason, so a deck known only in part is not split on.
  * - A deck below the datum lies at 0, and one above the column's top at the top.
- * - The cover is never an envelope's. The assembly draws a surface's air alone: a gas envelope
- *   gets no medium until R08.T16.a, which gives it its own cover.
+ * - The cover is never an envelope's: a gas envelope's is {@link envelopeCoverOf}'s.
  * - A surface whose inventory is not modelled, or none, has no decks.
  */
 export function bodyCoverOf(surface: BodySurface, column: AtmosphereColumn): BodyCover {
@@ -1245,13 +1595,25 @@ export function bodyCoverOf(surface: BodySurface, column: AtmosphereColumn): Bod
   if (surface.aerosols.kind !== "value") {
     return { cloudFraction, decks: [], envelope: false };
   }
-  const inventory = surface.aerosols.value;
-  const decks = inventory.decks.map((deck): CoverDeck => ({
-    opticalDepth550: deckOpticalDepth550(inventory, deck),
-    baseAltitudeM: heightAtPa(column, deck.basePa),
-    topAltitudeM: heightAtPa(column, deck.topPa),
-  }));
-  return { cloudFraction, decks, envelope: false };
+  return { cloudFraction, decks: coverDecksOf(surface.aerosols.value, column), envelope: false };
+}
+
+/**
+ * A gas envelope's cover (R08.T16.a): a cloud fraction of 1, since every envelope mode covers the
+ * whole sky from generator version 24; its drawn inventory's decks on `column`; and its floor at
+ * `floorPa`, which the router splits it at.
+ */
+function envelopeCoverOf(
+  inventory: AerosolInventory,
+  column: AtmosphereColumn,
+  floorPa: number,
+): BodyCover {
+  return {
+    cloudFraction: 1,
+    decks: coverDecksOf(inventory, column),
+    envelope: true,
+    floorAltitudeM: heightAtPa(column, floorPa),
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1292,8 +1654,10 @@ function namedFirst(material: string, reason: string): string {
  *   its break-up, where its equator's normal gravity is not above 0 (`oblate.ts`'s
  *   `oblateSlicing`, which the generator's `capped` law stays clear of); a column no hydrostatic
  *   atmosphere holds, whose geopotential height reaches R_ref below its top (under the isothermal
- *   seam, k T_s ln 10⁷ ≥ μ m_u g_ref R_ref); or a vertical structure that is none, whose first
- *   node is not the section's p_s and T_s, or whose last node is not at its skin's temperature.
+ *   seam, k T_s ln 10⁷ ≥ μ m_u g_ref R_ref); a vertical structure that is none, whose first
+ *   node is not the section's p_s and T_s, or whose last node is not at its skin's temperature;
+ *   or, under {@link AssembleOptions.envelopes}, an envelope's profile that `column.ts`'s
+ *   `temperatureAt` refuses. An `Error` where a gas envelope's column does not settle is a bug.
  */
 export function assembleMedium(
   input: BodyAtmosphereInput,
@@ -1311,14 +1675,16 @@ export function assembleMedium(
     }
     return noMedium(labels);
   }
-  const groundAlbedo = clampedGroundAlbedo(input.groundAlbedo);
-  const air = airOf(input.detail);
+  const inputAlbedo = clampedGroundAlbedo(input.groundAlbedo);
+  const air = airOf(input.detail, options.envelopes ?? false);
   if (air.kind === "none") {
     spectraOf(input.lights);
     return noMedium(air.labels);
   }
   const plan = planOf(input.detail, air, input.lights, options);
-  const { column, reasons } = plan;
+  const { column, reasons, source } = plan;
+  // A gas envelope has no ground: its base lies below τ 1,000, and T15's deck reads it black.
+  const groundAlbedo: Rgb = source.kind === "surface" ? inputAlbedo : [0, 0, 0];
   const aerosols = plan.modes.map((planned) => ({
     planned,
     term: aerosolTerm(planned.spec, column),
@@ -1346,7 +1712,7 @@ export function assembleMedium(
   const sources: ReadonlyArray<SpectralSource> = [
     {
       kind: "molecular",
-      fractions: plan.air.surface.gases,
+      fractions: plan.air.gases,
       numberDensityPerM3: column.surfaceNumberDensityPerM3,
     },
     ...(electrons === undefined
@@ -1360,7 +1726,7 @@ export function assembleMedium(
     })),
   ];
 
-  const sigma550M2 = molecularMixture(plan.air.surface.gases).crossSectionM2(TAU_WAVELENGTH_NM);
+  const sigma550M2 = molecularMixture(plan.air.gases).crossSectionM2(TAU_WAVELENGTH_NM);
   const above = depthAbove(column, medium.topHeightM, [
     { density: column.density, extinctionPerM: sigma550M2 * column.surfaceNumberDensityPerM3 },
     ...(thomson === undefined
@@ -1395,14 +1761,40 @@ export function assembleMedium(
       shown.push(...sizeConvergenceReasons(material, phase, [...term.channels, term.at550]));
     }
   }
-  const temperature: MediumTemperature = {
-    heightsM: column.altitudesM,
-    temperaturesK: column.temperaturesK,
-  };
-  const regime = classifyRegime(medium, bodyCoverOf(plan.air.surface, column), {
-    temperature,
-    stellarFluxWM2: plan.air.surface.stellarFluxWM2,
-  });
+  let temperature: MediumTemperature;
+  let regime: AtmosphereRegime;
+  let envelope: DrawnEnvelope | undefined;
+  switch (source.kind) {
+    case "surface":
+      temperature = { heightsM: column.altitudesM, temperaturesK: column.temperaturesK };
+      regime = classifyRegime(medium, bodyCoverOf(source.surface, column), {
+        temperature,
+        stellarFluxWM2: source.surface.stellarFluxWM2,
+      });
+      envelope = undefined;
+      break;
+    case "envelope": {
+      // Nothing below the floor is drawn, its glow included: the deck's bake carries none.
+      const { floor } = source;
+      const floorK = column.temperaturesK[floor.level] ?? Number.NaN;
+      temperature = {
+        heightsM: column.altitudesM,
+        temperaturesK: column.temperaturesK.map((t, i) => (i < floor.level ? floorK : t)),
+      };
+      regime = classifyRegime(medium, envelopeCoverOf(source.inventory, column, floor.pressurePa), {
+        temperature,
+        stellarFluxWM2: envelopeStellarFluxWM2(source.envelope),
+        albedo: inputAlbedo,
+      });
+      envelope = {
+        floorPa: floor.pressurePa,
+        floorAltitudeM: column.altitudesM[floor.level] ?? Number.NaN,
+        pressuresPa: column.pressuresPa,
+        dropped: floor.dropped.map((mode) => mode.material),
+      };
+      break;
+    }
+  }
   if (approximateRegime(regime)) {
     shown.push(THICK_REASON);
   }
@@ -1419,6 +1811,7 @@ export function assembleMedium(
       curves: [],
       sources,
       temperature,
+      ...(envelope === undefined ? {} : { envelope }),
     },
     labels: ordered([...plan.air.labels, ...approximate]),
     reasons: reasonsShown,
@@ -1445,7 +1838,7 @@ export function absorberSpecsOf(
   if (input.kind === "kept") {
     return { specs: [], spectra: [] };
   }
-  const air = airOf(input.detail);
+  const air = airOf(input.detail, options.envelopes ?? false);
   if (air.kind === "none") {
     return { specs: [], spectra: spectraOf(input.lights) };
   }
@@ -1456,22 +1849,23 @@ export function absorberSpecsOf(
 /**
  * The line species an input's medium lists that the client holds committed k-distribution tables
  * for (`absorbers/kDistribution.ts`'s `committedLineSpecies`), ascending: what the optics worker
- * loads before {@link assembleMedium}. Empty for an input that draws no medium.
+ * loads before {@link assembleMedium} under the same `options`. Empty for an input that draws no
+ * medium.
  */
-export function lineSpeciesOf(input: BodyAtmosphereInput): ReadonlyArray<string> {
+export function lineSpeciesOf(
+  input: BodyAtmosphereInput,
+  options: AssembleOptions = {},
+): ReadonlyArray<string> {
   if (input.kind === "kept") {
     return [];
   }
-  const air = airOf(input.detail);
+  const air = airOf(input.detail, options.envelopes ?? false);
   if (air.kind === "none") {
     return [];
   }
-  const { surface } = air;
   const listed = new Set([
-    ...surface.gases.map((g) => g.species),
-    ...(surface.aerosols.kind === "value"
-      ? surface.aerosols.value.absorbers.map((a) => a.species)
-      : []),
+    ...air.gases.map((g) => g.species),
+    ...(air.inventory?.absorbers.map((a) => a.species) ?? []),
   ]);
   return committedLineSpecies().filter((species) => listed.has(species));
 }

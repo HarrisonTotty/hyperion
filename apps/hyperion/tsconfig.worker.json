@@ -43,6 +43,7 @@
     "src/renderer/src/view/atmosphere/atmosphereInput.ts",
     "src/renderer/src/view/atmosphere/column.ts",
     "src/renderer/src/view/atmosphere/earth.ts",
+    "src/renderer/src/view/atmosphere/envelope.ts",
     "src/renderer/src/view/atmosphere/fittedChannels.ts",
     "src/renderer/src/view/atmosphere/forwardPeak.ts",
     "src/renderer/src/view/atmosphere/labels.ts",

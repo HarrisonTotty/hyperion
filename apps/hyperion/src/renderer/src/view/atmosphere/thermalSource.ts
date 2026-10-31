@@ -318,11 +318,14 @@ export const STELLAR_EFFICACY_LM_PER_W = E490_ILLUMINANCE_LX / E490_SOLAR_CONSTA
  * ground's reflected light there.
  *
  * @param stellarFluxWM2 - The record's stellar flux at the body, W m⁻².
+ * @param albedo - The albedo the reflected light is judged by: the medium's ground's by default; a
+ *   gas envelope's own, whose medium has no ground (R08.T16.a).
  */
 export function selfLuminousOf(
   medium: AtmosphereMedium,
   temperature: MediumTemperature,
   stellarFluxWM2: number,
+  albedo: Rgb = medium.groundAlbedo,
 ): boolean {
   const peak = blackBodyLuminance(mediumPeakK(temperature));
   // An absorber's depth is each light's curves': it absorbs in every channel.
@@ -335,7 +338,7 @@ export function selfLuminousOf(
       medium.terms.some(
         (term) => term.absorption[c] > 0 && columnLengthM(term.density, medium.topHeightM) > 0,
       );
-    const reflected = Math.max((medium.groundAlbedo[c] * lux) / Math.PI, REFLECTED_FLOOR_CD_M2);
+    const reflected = Math.max((albedo[c] * lux) / Math.PI, REFLECTED_FLOOR_CD_M2);
     return absorbs && peak[c] > THERMAL_CUT * reflected;
   });
 }
