@@ -118,6 +118,7 @@
 //! [`RIDGE_RMS`]: crate::noise::RIDGE_RMS
 
 use core::f64::consts::{FRAC_PI_2, LN_2, PI};
+use core::num::FpCategory;
 
 use hyperion_base::math;
 use hyperion_base::rng::DetailSeed;
@@ -561,6 +562,34 @@ fn each_octave_from(
 /// points (`the_ridge_weight_rms_is_measured`, under `just test-slow`) and pinned. A weighted
 /// ridged term is divided by it to keep unit variance.
 pub const RIDGE_WEIGHT_RMS: f64 = 0.7199;
+
+/// e^x by [`math::exp`], and 1 at x = ±0 without calling it: C99's Annex F has exp(±0) return 1,
+/// and the pinned `libm` returns 1 + x for |x| below 2⁻²⁸, which is 1 at either zero, so the bits
+/// are the same (`the_zero_shortcuts_are_the_functions_bits`). Off a belt, where b is 0, each
+/// octave's `g_m`^b = e^(b ln `g_m`) is e^±0: skipping the calls there, with the mix's
+/// ([`sin_cos_at_zero`]), took the whole height on the Moon-like world at level 17 from 5.24 to
+/// 5.19 µs a point (natively, one thread, pod, 16 vCPU, 2026-10-31).
+#[must_use]
+fn exp_at_zero(x: f64) -> f64 {
+    if x.classify() == FpCategory::Zero {
+        1.0
+    } else {
+        math::exp(x)
+    }
+}
+
+/// (sin x, cos x) by [`math::sin_cos`], and (x, 1) at x = ±0 without calling it, the zero's sign
+/// kept: C99's Annex F has sin(±0) return ±0 and cos(±0) return 1, and the pinned `libm` returns
+/// (x, 1) for |x| below 2⁻²⁷ √2, so the bits are the same. Off a belt the mix's angle (π ÷ 2) b
+/// is ±0.
+#[must_use]
+fn sin_cos_at_zero(x: f64) -> (f64, f64) {
+    if x.classify() == FpCategory::Zero {
+        (x, 1.0)
+    } else {
+        math::sin_cos(x)
+    }
+}
 
 /// The ridged multifractal's weight w(r) = (max(r, 0) ÷ (1 − ε))² of the coarser octave's raw ridge
 /// r = 1 − √(n² + ε²), and its derivative dw ÷ dr: 1 on the coarser octave's crest (n = 0) and
@@ -1662,7 +1691,7 @@ impl Relief {
         let belt = style.belt;
         let theta = FRAC_PI_2 * belt.value;
         let theta_gradient = belt.gradient.map(|g| FRAC_PI_2 * g);
-        let full_mix = math::sin_cos(theta);
+        let full_mix = sin_cos_at_zero(theta);
         let shear = style.shear;
         // The three octaves above the one evaluated, nearest first: their n̂ and its gradient.
         let mut above = [Smooth::constant(0.0); 3];
@@ -1722,7 +1751,7 @@ impl Relief {
             } else if share <= 0.0 {
                 (0.0, 1.0)
             } else {
-                math::sin_cos(theta * share)
+                sin_cos_at_zero(theta * share)
             };
             let swing = cos * ridged.value - sin * plain.value;
             let mixed = Smooth {
@@ -1736,7 +1765,7 @@ impl Relief {
             let sigma = self.variance.rms_m[usize::from(m)];
             // g_m^b, exactly 1 where b is 0, and its gradient g_m^b ln g_m ∇b.
             let log_factor = self.variance.belt_log_factor[usize::from(m)];
-            let lift = math::exp(belt.value * log_factor);
+            let lift = exp_at_zero(belt.value * log_factor);
             let amplitude = style.amplitude;
             let height = Smooth {
                 value: amplitude.value * sigma * lift * mixed.value,

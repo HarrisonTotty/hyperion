@@ -356,6 +356,21 @@ impl CornerBox {
         }
         usize::try_from(flat).ok()
     }
+
+    /// The entry of the lattice cell whose lowest corner is `cell`, its first corner's, where the
+    /// box holds all eight of its corners; `None` otherwise.
+    #[must_use]
+    fn cell_slot(&self, cell: [i64; 3]) -> Option<usize> {
+        let mut flat = 0_u64;
+        for ((&c, &low), &extent) in cell.iter().zip(&self.low).zip(&self.extent) {
+            let offset = u64::try_from(c - low).ok()?;
+            if offset + 1 >= extent {
+                return None;
+            }
+            flat = flat * extent + offset;
+        }
+        usize::try_from(flat).ok()
+    }
 }
 
 /// The caller's cache of lattice-corner gradients, one per bake (see the module documentation).
@@ -443,10 +458,10 @@ impl LatticeCache {
         self.octaves = Some((key, table));
     }
 
-    /// The gradient index of `corner` of `octave`, from the cache where it covers the corner.
-    fn gradient(&mut self, octave: &Octave, corner: [i64; 3]) -> u8 {
-        let cached = self
-            .boxes
+    /// The box covered for `octave`, if any.
+    #[must_use]
+    fn box_for(&mut self, octave: &Octave) -> Option<&mut CornerBox> {
+        self.boxes
             .get_mut(usize::from(octave.index))
             .and_then(Option::as_mut)
             .filter(|b| {
@@ -457,6 +472,42 @@ impl LatticeCache {
                 );
                 b.octave.key == octave.key
             })
+    }
+
+    /// The gradient indices of the eight corners of `octave`'s lattice cell `cell`, its lowest
+    /// corner, in the order of their index ([`gradient_noise`]), from the cache where it covers
+    /// them: the box found once for the eight where it covers them all, rather than once a corner,
+    /// which took the whole height on the Earth-like world at level 19 from 5.80 to 5.58 µs a point
+    /// and the Moon-like world's at 17 from 5.41 to 5.24 µs (natively, pod, 16 vCPU, 2026-10-31).
+    fn cell_gradients(&mut self, octave: &Octave, cell: [i64; 3]) -> [u8; 8] {
+        let corner_at = |corner: usize| {
+            [0, 1, 2].map(|a| cell[a] + i64::from(u8::from((corner >> a) & 1 == 1)))
+        };
+        if let Some(b) = self.box_for(octave)
+            && let Some(first) = b.cell_slot(cell)
+        {
+            let strides = [b.extent[1] * b.extent[2], b.extent[2], 1]
+                .map(|s| usize::try_from(s).expect("a capped box's stride fits a usize"));
+            return std::array::from_fn(|corner| {
+                let slot = first
+                    + (0..3)
+                        .filter(|&a| (corner >> a) & 1 == 1)
+                        .map(|a| strides[a])
+                        .sum::<usize>();
+                let entry = &mut b.indices[slot];
+                if *entry == UNFILLED {
+                    *entry = octave.corner_gradient(corner_at(corner));
+                }
+                *entry
+            });
+        }
+        std::array::from_fn(|corner| self.gradient(octave, corner_at(corner)))
+    }
+
+    /// The gradient index of `corner` of `octave`, from the cache where it covers the corner.
+    fn gradient(&mut self, octave: &Octave, corner: [i64; 3]) -> u8 {
+        let cached = self
+            .box_for(octave)
             .and_then(|b| b.slot(corner).map(|s| &mut b.indices[s]));
         match cached {
             Some(entry) if *entry != UNFILLED => *entry,
@@ -522,13 +573,13 @@ pub fn gradient_noise(
     )]
     let frac: [f64; 3] = [0, 1, 2].map(|a| q[a] - cell[a] as f64);
     let fades = frac.map(fade);
+    let gradients = cache.cell_gradients(octave, cell);
 
     let mut value = 0.0;
     let mut grad = [0.0; 3];
-    for corner in 0..8_u8 {
+    for (corner, index) in (0..8_u8).zip(gradients) {
         let bit = [corner & 1, (corner >> 1) & 1, (corner >> 2) & 1];
-        let at = [0, 1, 2].map(|a| cell[a] + i64::from(bit[a]));
-        let g = GRADIENTS[usize::from(cache.gradient(octave, at))];
+        let g = GRADIENTS[usize::from(index)];
         let d = [0, 1, 2].map(|a| frac[a] - f64::from(bit[a]));
         let dot = g[0] * d[0] + g[1] * d[1] + g[2] * d[2];
         // The corner's weight along each axis, f(t) towards the far corner and 1 − f(t) towards
@@ -674,6 +725,33 @@ mod tests {
             assert_eq!(
                 gradient_noise(*p, &o, &mut warm.borrow_mut()),
                 gradient_noise(*p, &o, &mut LatticeCache::new())
+            );
+        }
+    }
+
+    #[test]
+    fn a_cell_partly_covered_reads_what_no_cache_gives() {
+        // Points out to beyond the covered ball, so that some lattice cells lie wholly inside the
+        // box (its eight corners found at once), some across its faces (each corner on its own)
+        // and some outside it, from one cache in two orders and from none.
+        let o = octave(7, 10.0);
+        let centre = [-2_345.0, 6_789.0, 1_234.0];
+        let mut rng = Lcg::new(0x7061_7274);
+        let points: Vec<[f64; 3]> = (0..2_000)
+            .map(|_| {
+                let d = random_point(&mut rng, 110.0);
+                [centre[0] + d[0], centre[1] + d[1], centre[2] + d[2]]
+            })
+            .collect();
+        let mut warm = LatticeCache::new();
+        warm.cover(&o, centre, 70.0);
+        let warm = RefCell::new(warm);
+        assert_order_independent(&points, |p| gradient_noise(*p, &o, &mut warm.borrow_mut()));
+        for p in &points {
+            assert_eq!(
+                gradient_noise(*p, &o, &mut warm.borrow_mut()),
+                gradient_noise(*p, &o, &mut LatticeCache::new()),
+                "{p:?}"
             );
         }
     }

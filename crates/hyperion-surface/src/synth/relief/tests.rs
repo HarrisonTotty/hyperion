@@ -540,6 +540,19 @@ fn the_multifractal_weight_runs_from_trough_to_crest() {
     }
 }
 
+/// The octaves' shortcuts at a zero argument give the bits of the functions they skip, the sine's
+/// sign of zero included, and call them elsewhere.
+#[test]
+fn the_zero_shortcuts_are_the_functions_bits() {
+    for x in [0.0, -0.0, 1e-300, -2.5e-9, 0.7, -3.0] {
+        assert_same_bits(exp_at_zero(x), math::exp(x));
+        let (sin, cos) = sin_cos_at_zero(x);
+        let (expected_sin, expected_cos) = math::sin_cos(x);
+        assert_same_bits(sin, expected_sin);
+        assert_same_bits(cos, expected_cos);
+    }
+}
+
 #[test]
 fn no_octave_on_a_synthetic_world_exceeds_its_stated_bound() {
     for &kind in SyntheticWorld::ALL {
