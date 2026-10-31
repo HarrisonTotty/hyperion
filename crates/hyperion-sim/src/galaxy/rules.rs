@@ -273,6 +273,17 @@ mod tests {
             GalaxyRules::every_26_hold().kepler_regime,
             KeplerRegimeRules::Kepler
         );
+        for v in [23, 24, 25, 26] {
+            assert_eq!(
+                GalaxyRules::of_version(GeneratorVersion::new(v)).stellar,
+                StellarRules::of_version(GeneratorVersion::new(v))
+            );
+        }
+    }
+
+    /// Each galaxy hold at 26 is held below it and new from it on, in every 26 hold.
+    #[test]
+    fn each_26_hold_turns_on_at_26() {
         let bound = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).bound_share;
         for v in [23, 24, 25] {
             assert_eq!(bound(v), BoundShareRules::Bm03, "{v}");
@@ -334,11 +345,5 @@ mod tests {
             GalaxyRules::every_26_hold().carve_out,
             CarveOutRules::Claimed
         );
-        for v in [23, 24, 25, 26] {
-            assert_eq!(
-                GalaxyRules::of_version(GeneratorVersion::new(v)).stellar,
-                StellarRules::of_version(GeneratorVersion::new(v))
-            );
-        }
     }
 }
