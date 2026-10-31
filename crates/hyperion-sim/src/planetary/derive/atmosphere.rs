@@ -3555,13 +3555,14 @@ impl<'a> StepClimate<'a> {
     }
 
     /// Whether a step over the partial pressures `partials` reads the airless climate, their total
-    /// under [`AIRLESS_PRESSURE`] ([`step_climate`]'s line; P14.T53.i): `None` for a climate given,
-    /// which has no such line.
+    /// under [`AIRLESS_PRESSURE`] ([`step_climate`]'s line,
+    /// [`below_the_line`](crate::planetary::hooks::surface::below_the_line); P14.T53.i): `None` for
+    /// a climate given, which has no such line.
     #[must_use]
     fn airless_line(&self, partials: &PartialPressures) -> Option<bool> {
         match self {
             Self::Given(_) => None,
-            Self::Spun { .. } => Some(partials.total() < AIRLESS_PRESSURE),
+            Self::Spun { .. } => Some(crate::planetary::hooks::surface::below_the_line(partials)),
         }
     }
 

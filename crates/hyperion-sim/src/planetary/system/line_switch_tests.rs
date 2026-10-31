@@ -14,6 +14,7 @@ use crate::planetary::derive::atmosphere::{
 };
 use crate::planetary::testing::with_every_26_hold;
 use crate::units::Kelvin;
+use hyperion_testkit::float::assert_same_bits;
 
 /// The records the switch moves over the census, by ID in the census's order, each `Tenuous` on the
 /// airless climate after a last step on the bulk one, and read once at its N₂'s saturation
@@ -27,10 +28,20 @@ const MOVERS: [&str; 3] = [
     "02002b2d1ffe0000.e103",
 ];
 
-/// Count (vii)'s two, the brief's movers, and their N₂ over its ice with the switch held.
-const COUNT_VII: [(&str, f64); 2] = [
-    ("01ffeb2d20000000.e101", 1_132.0),
-    ("02002b2d1ffe0000.e103", 741.0),
+/// Count (vii)'s two, the brief's movers: their record's N₂ over its ice with the switch held, and
+/// read once their record's N₂ and their derivation's total, Pa, pinned natively (x86-64) so that
+/// the WebAssembly suite checks the re-hold bit for bit.
+const COUNT_VII: [(&str, f64, (f64, f64)); 2] = [
+    (
+        "01ffeb2d20000000.e101",
+        1_132.0,
+        (0.085_466_836_579_358_72, 0.103_091_058_499_514_11),
+    ),
+    (
+        "02002b2d1ffe0000.e103",
+        741.0,
+        (0.129_739_417_588_150_6, 0.151_640_301_314_995_3),
+    ),
 ];
 
 /// The N₂ `Snowball`s at the line, which the switch leaves to the bit: the moon last.
@@ -104,7 +115,8 @@ fn converse(solve: &settled_log::Settled) -> bool {
 
 /// P14.T53.i over the census, both arms under every 26 hold: the records the switch moves are
 /// exactly those whose last step read the bulk climate under a sub-line total with the switch
-/// held, and they are [`MOVERS`], each printed both ways; none of them is `Temperate`,
+/// held, and they are [`MOVERS`], each printed both ways, a second hold over the airless span
+/// repeating its partial pressures to the bit; none of them is `Temperate`,
 /// `Snowball`, `RunawayGreenhouse` or `MagmaOcean` under either arm; the N₂ `Snowball`s at the line
 /// ([`AT_THE_LINE`]) are the same to the bit; and the converse, a total at or above the line after
 /// an airless last step, is counted under each arm and left as it is.
@@ -161,6 +173,12 @@ fn under_every_26_hold_the_line_is_read_once_by_the_steps_and_the_record() {
                 body.state
             );
         }
+        assert_eq!(
+            after.and_then(|solve| solve.greenhouse.switch),
+            Some(true),
+            "{}: held once more, its partial pressures repeat",
+            now.label
+        );
         movers.push(id);
     }
     eprintln!(
@@ -210,7 +228,7 @@ fn under_every_26_hold_count_vii_s_two_are_held_once_over_the_airless_span() {
             .expect("N₂ has a vapour curve below its critical point")
             .value()
     };
-    for (id, factor) in COUNT_VII {
+    for (id, factor, (pinned_nitrogen, pinned_total)) in COUNT_VII {
         let (was, held) = named(id, LineSwitchRules::Held);
         let (now, read_once) = named(id, LineSwitchRules::OneSwitch);
         eprintln!(
@@ -243,6 +261,8 @@ fn under_every_26_hold_count_vii_s_two_are_held_once_over_the_airless_span() {
             "{id}: N₂ {nitrogen} Pa against {p_sat} Pa"
         );
         assert!((0.05..0.2).contains(&nitrogen), "{}", now.line());
+        assert_same_bits(nitrogen, pinned_nitrogen);
+        assert_same_bits(now.air_p, pinned_total);
         assert_eq!(read_once.greenhouse.switch, Some(true), "{id}: held twice");
     }
 }

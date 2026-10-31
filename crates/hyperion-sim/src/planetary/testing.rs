@@ -518,6 +518,9 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - the passes' own residual, `PASS_STOP_VERSION` (P14.T54.b.l's cost lever), at
 ///   `PassStop::OwnResidual` through `with_pass_stop`: a body's plain passes ended at the first
 ///   pass that settles alone.
+/// - the 100 Pa line read once, `LINE_SWITCH_VERSION` (P14.T53.i), at `LineSwitchRules::OneSwitch`
+///   through `with_line_switch`: a sub-line solve whose last step read the bulk climate held once
+///   more over the airless span its record publishes.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch

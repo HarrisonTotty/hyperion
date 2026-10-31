@@ -137,8 +137,9 @@ fn kelvin(t: Option<f64>) -> String {
 /// [`MOVERS`], and those it moves in their last bits [`NUDGED`], each printed both ways with its
 /// a ÷ `L_Ro`, its `T_c` and its light; none of them is a `MagmaOcean`, `Tenuous` or `Airless`
 /// record under either arm, and none is a world locked 1:1. Its `T_c` is the balance's at its
-/// published solve's last column, the gates aside ([`settled_log::Settled::figures`]), with the
-/// cap that column's span carries and its record's.
+/// published state's column, the one a next step would read, the gates aside
+/// ([`settled_log::Greenhouse::figures`]), with the cap that column's span carries and its
+/// record's.
 #[test]
 #[ignore = "slow: the thin-air census twice under every 26 hold, about 115 s on a pod"]
 fn under_every_26_hold_the_cap_moves_the_census_s_thick_carbon_dioxide_airs() {
@@ -155,14 +156,13 @@ fn under_every_26_hold_the_cap_moves_the_census_s_thick_carbon_dioxide_airs() {
         }
         let near = within_a_millionth(was, now);
         let solve = published(solves, now);
-        let (step_rossby, t_c) = solve
-            .greenhouse
-            .figures
-            .map_or((f64::NAN, None), |f| (f.rossby, f.temperature));
+        let (step_rossby, t_c) = solve.greenhouse.figures.map_or((f64::NAN, None), |f| {
+            (f.rossby, f.temperature.map(crate::units::Kelvin::value))
+        });
         eprintln!(
             "{} {}\n  held:     {}\n  balanced: {}\n  p {:+.3e}, T_s {:+.3e} K; a ÷ L_Ro {:.3} \
-             held, {:.3} balanced, {step_rossby:.3} at its last step; T_c {} at its last step, \
-             its cap {} there and {} on its record; S ÷ S⊕ {:.4}",
+             held, {:.3} balanced, {step_rossby:.3} at its published column; T_c {} there, its \
+             cap {} there and {} on its record; S ÷ S⊕ {:.4}",
             if near { "nudged" } else { "moved" },
             now.label,
             was.line(),

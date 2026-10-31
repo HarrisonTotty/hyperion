@@ -6754,7 +6754,9 @@ fn the_line_switch_is_held_only_until_the_26_bump() {
          in `Solver::one_switch`, the tests' `with_line_switch`, its switch in \
          `with_every_26_hold` (and the helper, if no other 26 hold is left), \
          `locked_climate_tests::deck_alone`'s set-back, the `Held` arms of `line_switch_tests`, \
-         and this test"
+         and this test; restate `under_every_24_hold_t53c_s_thin_airs_are_stated` (aerosols' \
+         tests), whose item 33's world and count (vii) the switch reads at their N₂'s \
+         saturation pressure"
     );
     assert_eq!(LineSwitchRules::in_force(), LineSwitchRules::Held);
     assert_eq!(

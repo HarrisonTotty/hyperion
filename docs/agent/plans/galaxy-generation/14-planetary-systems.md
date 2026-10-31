@@ -33259,8 +33259,12 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     42002cb200000009.0700 to a 0.36 bar `Snowball` at 122 K (agreed by main).
   - "Settled" is the amendment's (main, 2026-10-31): one more partition over the span at the
     published state moves a mover's CO₂ by under 5%, read through the test-only
-    `atmosphere::settled_log`; its failures are listed, not pinned. Each mover's line prints its
-    last step's a ÷ `L_Ro` and `T_c`, the gates aside (`hooks::surface::step_cap_figures`).
+    `atmosphere::settled_log`; its failures are listed, not pinned. Each mover's line prints a ÷
+    `L_Ro` and `T_c` at its published state's column, the gates aside
+    (`hooks::surface::step_cap_figures`).
+  - The settled check fails 10 of the 13 movers, each at the steps' limit (33 evaluations), among
+    them solar_like's .0400 and close_binary's .0800, .e401 and .e501, which 26 re-blesses.
+    Pending main's ruling.
   - Every locked world is outside the cap by `rotates` at both sites; the census asserts no mover
     is locked.
   - `locked_climate_tests::deck_alone` sets the cap back to `Held`.
@@ -33333,4 +33337,8 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     (lean, 2026-10-31; for main). The converse counts 0 under each arm.
   - A molten solve, and one whose re-held total would not lie under the line, keep their partials.
   - `locked_climate_tests::deck_alone` sets the switch back to `Held`.
-  - For 26's bump: no golden moves (the census's golden systems hold no crossing).
+  - _Accept, as built:_ `cargo test -p hyperion-sim --lib planetary::system::line_switch_tests`
+    (the census with `-- --ignored`), and the tripwire by name.
+  - For 26's bump: no golden moves (the census's golden systems hold no crossing); restate
+    `hooks/aerosols/tests.rs`'s `under_every_24_hold_t53c_s_thin_airs_are_stated` (item 33's
+    world at 0.034 Pa, no record ×10 over its ice), which the tripwire names.

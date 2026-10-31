@@ -2222,8 +2222,10 @@ pub(crate) fn step_climate(
 }
 
 /// The column of the body `body` at a step of T13.c's passes whose mean surface temperature is
-/// `surface_temperature` over the partial pressures `partials` ([`step_climate`]'s): airless below
-/// [`AIRLESS_PRESSURE`] of them. `None` where a partial pressure is not finite.
+/// `surface_temperature` over the partial pressures `partials` ([`step_climate`]'s).
+///
+/// It is airless below [`AIRLESS_PRESSURE`] of them ([`below_the_line`]); `None` where a partial
+/// pressure is not finite.
 #[must_use]
 fn step_column(
     body: &ClimateBody,
@@ -2240,7 +2242,7 @@ fn step_column(
             body.equilibrium_temperature,
             body.surface_gravity,
         ),
-        airless: surface_pressure < AIRLESS_PRESSURE,
+        airless: below_the_line(partials),
         equilibrium_temperature: body.equilibrium_temperature,
         surface_gravity: body.surface_gravity,
         radius: body.radius,
@@ -2248,6 +2250,13 @@ fn step_column(
         ceiling: body.ceiling,
     };
     step.column().ok().map(|(column, _)| column)
+}
+
+/// Whether a step over the partial pressures `partials` reads the airless climate, their total
+/// under [`AIRLESS_PRESSURE`] ([`step_column`]'s line, which P14.T53.i's record reads too).
+#[must_use]
+pub(crate) fn below_the_line(partials: &PartialPressures) -> bool {
+    partials.total() < AIRLESS_PRESSURE
 }
 
 /// The generator version from which a rotator's permanent CO₂ cap holds its air at the cap's own
@@ -2374,7 +2383,8 @@ pub(crate) struct CapBody {
 ///   Gierasch and Toon 1973, J. Atmos. Sci. 30, 1502), δ [`CAP_TRANSPORT_EFFICIENCY`]: `R_air` the
 ///   column's specific gas
 ///   constant, p its surface pressure, `partials`' total (the whole air's column carries the heat,
-///   and H is the whole air's; δ was fitted on CO₂ airs, where the two readings agree), g its
+///   and H is the whole air's; δ's target, Soto et al.'s runs, are CO₂ airs, where the two
+///   readings agree, and the table's Mars meets its windows under this reading), g its
 ///   gravity, R its radius and Ω the sidereal rate. `T_a`
 ///   is the larger of the column's mean surface temperature and its grey `T_eq` (1 + ¾τ)^¼
 ///   (P14.T13.c's [`grey_surface_temperature`]):
@@ -2407,14 +2417,14 @@ pub(crate) fn carbon_dioxide_cap(
     {
         return None;
     }
-    let omega = sidereal_rate(&body.spin)?;
+    let omega_rad_per_s = sidereal_rate_rad_per_s(&body.spin)?;
     // A slow rotator's air carries the day's heat to its poles (a ÷ `L_Ro` under 1); a column
     // with no air, whose waves have no finite speed, gives 0 or NaN and holds none.
-    let rossby = cap_rossby_ratio(column, omega);
+    let rossby = cap_rossby_ratio(column, omega_rad_per_s);
     if rossby.is_nan() || rossby < CAP_ROSSBY_RATIO {
         return None;
     }
-    let t_c = cap_balance_temperature(body, column, partials.total().value(), omega)?;
+    let t_c = cap_balance_temperature(body, column, partials.total(), omega_rad_per_s)?.value();
     let triple = Gas::CarbonDioxide
         .substance()
         .substance()
@@ -2429,30 +2439,30 @@ pub(crate) fn carbon_dioxide_cap(
 /// The sidereal rate Ω of the spin `spin`, rad s⁻¹: `None` for a rotation period that is not
 /// finite and positive.
 #[must_use]
-fn sidereal_rate(spin: &SeasonalSpin) -> Option<f64> {
+fn sidereal_rate_rad_per_s(spin: &SeasonalSpin) -> Option<f64> {
     let period = spin.rotation_period.value();
     (period.is_finite() && period > 0.0).then(|| core::f64::consts::TAU / period)
 }
 
-/// a ÷ `L_Ro` = 2Ωa ÷ c of the column `column` at the sidereal rate `omega`, rad s⁻¹, c its gravity
-/// waves' speed (Koll 2022, §3.1; [`carbon_dioxide_cap`]'s gate, [`CAP_ROSSBY_RATIO`]): 0 or NaN
-/// for a column with no air.
+/// a ÷ `L_Ro` = 2Ωa ÷ c of the column `column` at the sidereal rate `omega_rad_per_s`, c its
+/// gravity waves' speed (Koll 2022, §3.1; [`carbon_dioxide_cap`]'s gate, [`CAP_ROSSBY_RATIO`]): 0 or
+/// NaN for a column with no air.
 #[must_use]
-fn cap_rossby_ratio(column: &Column, omega: f64) -> f64 {
-    2.0 * omega * column.radius.value() / gravity_wave_speed_m_per_s(column)
+fn cap_rossby_ratio(column: &Column, omega_rad_per_s: f64) -> f64 {
+    2.0 * omega_rad_per_s * column.radius.value() / gravity_wave_speed_m_per_s(column)
 }
 
 /// The temperature `T_c` that balances a permanent cap of the body `body` over the column `column`
-/// whose surface pressure is `pressure`, Pa, at the sidereal rate `omega`, rad s⁻¹, in K on
-/// [0, `T_a`] ([`carbon_dioxide_cap`]'s balance, before its gates of scope, rotation and frost):
-/// `None` where `ε_c` σ `T_a`⁴ does not exceed the light and heat absorbed.
+/// whose surface pressure is `pressure` at the sidereal rate `omega_rad_per_s`, on [0, `T_a`]
+/// ([`carbon_dioxide_cap`]'s balance, before its gates of scope, rotation and frost): `None` where
+/// `ε_c` σ `T_a`⁴ does not exceed the light and heat absorbed.
 #[must_use]
 fn cap_balance_temperature(
     body: &CapBody,
     column: &Column,
-    pressure: f64,
-    omega: f64,
-) -> Option<f64> {
+    pressure: Pascals,
+    omega_rad_per_s: f64,
+) -> Option<Kelvin> {
     let grey =
         grey_surface_temperature(column.equilibrium_temperature, column.optical_depth).value();
     let surface = column.surface_temperature.value();
@@ -2464,11 +2474,12 @@ fn cap_balance_temperature(
     let r_air = column.gas_constant_j_per_kg_k();
     // An airless column, whose μ is zero, carries no heat.
     let transport = if r_air.is_finite() {
-        CAP_TRANSPORT_EFFICIENCY * r_air * r_air / (g * omega * r * r)
+        CAP_TRANSPORT_EFFICIENCY * r_air * r_air / (g * omega_rad_per_s * r * r)
     } else {
         0.0
     };
     let absorbed = (1.0 - CAP_ALBEDO) * pole + geothermal;
+    let pressure = pressure.value();
     let excess = |t: f64| {
         CAP_EMISSIVITY * STEFAN_BOLTZMANN * math::powi(t, 4)
             - absorbed
@@ -2487,7 +2498,7 @@ fn cap_balance_temperature(
             cold = mid;
         }
     }
-    Some(warm)
+    Some(Kelvin::new(warm))
 }
 
 /// What P14.T53.h's census prints of the cap at a step's column ([`step_cap_figures`]).
@@ -2496,9 +2507,9 @@ fn cap_balance_temperature(
 pub(crate) struct CapFigures {
     /// a ÷ `L_Ro` of the step's column, which [`CAP_ROSSBY_RATIO`] gates.
     pub(crate) rossby: f64,
-    /// The balance's `T_c` at the step's column and CO₂, K, before the gates of scope, rotation and
-    /// frost ([`cap_balance_temperature`]): `None` with no CO₂, or where no cap lies below the air.
-    pub(crate) temperature: Option<f64>,
+    /// The balance's `T_c` at the step's column, before the gates of scope, rotation and frost
+    /// ([`cap_balance_temperature`]): `None` with no CO₂, or where no cap lies below the air.
+    pub(crate) temperature: Option<Kelvin>,
 }
 
 /// The cap's figures at the column of a step of the body `body` at mean surface temperature
@@ -2512,7 +2523,7 @@ pub(crate) fn step_cap_figures(
     partials: &PartialPressures,
 ) -> Option<CapFigures> {
     let column = step_column(body, surface_temperature, partials)?;
-    let omega = sidereal_rate(&body.spin)?;
+    let omega_rad_per_s = sidereal_rate_rad_per_s(&body.spin)?;
     let carbon_dioxide = partials.of(Gas::CarbonDioxide).value();
     let cap = CapBody {
         spin: body.spin,
@@ -2521,9 +2532,9 @@ pub(crate) fn step_cap_figures(
         molten: false,
     };
     Some(CapFigures {
-        rossby: cap_rossby_ratio(&column, omega),
+        rossby: cap_rossby_ratio(&column, omega_rad_per_s),
         temperature: if carbon_dioxide > 0.0 {
-            cap_balance_temperature(&cap, &column, partials.total().value(), omega)
+            cap_balance_temperature(&cap, &column, partials.total(), omega_rad_per_s)
         } else {
             None
         },

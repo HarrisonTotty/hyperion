@@ -48,7 +48,10 @@
 //!    P14.T24.i's follow-up, decision-t24i-airless-state D1.3), which the ice-held volatiles of
 //!    step 2 read too, their vapour held at their ice's own temperature (P14.T53.c). Under 100 Pa
 //!    of its partial pressures the body is airless at that base, or `Tenuous` there where its
-//!    column reaches the tenuous floor, its gases listed (P14.T53.c).
+//!    column reaches the tenuous floor, its gases listed (P14.T53.c); from generator version 26
+//!    (behind its hold, [`LineSwitchRules`]), where its last step read the bulk climate, its
+//!    inventory is held once more over that airless span first ([`Solver::one_switch`],
+//!    P14.T53.i).
 //! 8. **The outcome** ([`EscapeOutcome`]): each element's, mass-conserving (tested).
 //! 9. **The state published** (P14.T53.b part 1 (a) and (c), `present_state`): a world inside the
 //!    runaway limit at its hosts' largest past luminosity publishes its present class, a runaway
@@ -1560,7 +1563,13 @@ impl<'b> Solver<'_, 'b> {
             (&self.ground, self.body.ceiling),
             steps,
         );
-        let last_step_airless = read_airless.get();
+        // Only a column that condenses reads a climate on the generator's path; the exits' oracle,
+        // which reads one for every column, leaves no reading here.
+        let last_step_airless = if inventory.condenses() {
+            read_airless.get()
+        } else {
+            None
+        };
         #[cfg(test)]
         let settled = settled_log::on().then(|| {
             let steps = crate::planetary::chem::partition::exit_counts().evaluations - evaluated;
@@ -1595,12 +1604,15 @@ impl<'b> Solver<'_, 'b> {
     }
 
     /// The solve `solved` as its record publishes it under P14.T53.i's rule, from generator version
-    /// 26 (behind its hold, [`LineSwitchRules`]): where its total lies under [`AIRLESS_PRESSURE`]
-    /// while its greenhouse's last step read the bulk climate, its inventory is held once more over
-    /// the airless span its record publishes, the step climate's at the body's base and those
-    /// partial pressures, by the steps' partition ([`finish`] then publishes it `Tenuous` or
-    /// `Airless`, as before). Below the line the span does not depend on the partial pressures, so
-    /// this one evaluation is the fixed point, and it adds no greenhouse step. Every other solve,
+    /// 26 (behind its hold, [`LineSwitchRules`]).
+    ///
+    /// Where its total lies under [`AIRLESS_PRESSURE`] while its greenhouse's last step read the
+    /// bulk climate, its inventory is held once more over the airless span its record publishes,
+    /// the step climate's at the body's base and those partial pressures, by the steps' partition
+    /// ([`finish`] then publishes it `Tenuous` or `Airless`, as before). Below the line the span
+    /// reads the partial pressures only through the air's water vapour, so for a dry air this one
+    /// evaluation is the fixed point (the census checks that a second hold repeats it to the bit),
+    /// and it adds no greenhouse step. Every other solve,
     /// the converse's (a total at or above the line after an airless last step) among them, is its
     /// own, as are a molten surface's, which [`finish`] publishes a `MagmaOcean` at any total, and
     /// one whose re-held total would not lie under the line.
@@ -1650,6 +1662,9 @@ impl<'b> Solver<'_, 'b> {
         solved: &Solve<'_>,
         partials: &PartialPressures,
     ) -> Option<PartialPressures> {
+        // The same column `solve_in` weighed for this solve at this weight, which a weight the
+        // partition cannot read (`NotAWeight`) would have stopped there, so the error is
+        // unreachable; were it reached, the solve would keep version 25's partial pressures.
         let inventory = solved
             .air
             .column(self.weight)
@@ -2438,6 +2453,7 @@ pub(crate) mod settled_log {
     }
 
     /// Whether a capture runs on this thread.
+    #[must_use]
     pub(crate) fn on() -> bool {
         LOG.with(|log| log.borrow().is_some())
     }
@@ -2467,6 +2483,7 @@ pub(crate) mod settled_log {
 
     /// `run`'s result and the solves it published, in order; the log is set back after, a panic in
     /// `run` included.
+    #[must_use]
     pub(crate) fn capture<R>(run: impl FnOnce() -> R) -> (R, Vec<Settled>) {
         /// Sets the thread's log back as it drops.
         struct Restore(Option<Vec<Settled>>);
