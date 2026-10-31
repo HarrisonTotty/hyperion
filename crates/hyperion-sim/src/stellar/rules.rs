@@ -52,6 +52,17 @@
 //!   variable's eruptions are thinned to the instants at which it is one. The fitted tables built
 //!   from the tracks keep the version's rules until the bump refits them, and with them the
 //!   galaxy's mean masses and so its parameters (`stellar/rules/hd_limit_hold.rs` lists them).
+//! - [`v_magnitude`](StellarRules::v_magnitude), the V magnitudes of white dwarfs and evolved
+//!   stars, at [`V_MAGNITUDE_VERSION`] (plan 06, P06.T43.b's swap, rendering plan R06's ask A4): A4's
+//!   interim below it, white dwarfs dark and every living star on the dwarf table's correction;
+//!   from it the Montreal grid's V for white dwarfs and the giants' correction for every living
+//!   state past the hydrogen main sequence, chosen at one choke point,
+//!   [`absolute_magnitude_v_under`]. Its readers on the record are those of the dwarf sequence's
+//!   V: a star's summary and its range brief, the sky census's stars and the host stars' discs. The
+//!   census restates the bounds that rest on dark white dwarfs under the new arm (its
+//!   `StarBounds`). The sky's fitted tables, its luminosity tables, the pair-light tables, the
+//!   server's converters and `hyperion-fit` take the version's rules, as for the dwarf sequence
+//!   (`stellar/rules/v_magnitude_hold.rs` lists them).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -59,9 +70,12 @@
 //! [`DwarfSequence::of`]: crate::stellar::classify::pm13::DwarfSequence::of
 //! [`TrackOptions`]: crate::stellar::sse::TrackOptions
 //! [`HeliumTable::of`]: crate::stellar::sse::track::HeliumTable::of
+//! [`V_MAGNITUDE_VERSION`]: crate::stellar::photometry::V_MAGNITUDE_VERSION
+//! [`absolute_magnitude_v_under`]: crate::stellar::photometry::absolute_magnitude_v_under
 
 use crate::GeneratorVersion;
 use crate::stellar::classify::pm13::{DWARF_SEQUENCE_VERSION, DwarfSequenceRules};
+use crate::stellar::photometry::{V_MAGNITUDE_VERSION, VMagnitudeRules};
 use crate::stellar::remnant::KickRankRules;
 use crate::stellar::sse::wind::{HD_LIMIT_VERSION, HdLimitRules};
 use crate::stellar::sse::{HELIUM_VERSION, HeliumRules};
@@ -86,6 +100,9 @@ pub(crate) struct StellarRules {
     /// rate, `wind::rate`), and whether a luminous blue variable's eruptions are thinned to it,
     /// the hold of [`HD_LIMIT_VERSION`].
     pub(crate) hd_limit: HdLimitRules,
+    /// Which V magnitudes white dwarfs and evolved stars read (`photometry`'s
+    /// `absolute_magnitude_v_under`), the hold of [`V_MAGNITUDE_VERSION`].
+    pub(crate) v_magnitude: VMagnitudeRules,
 }
 
 impl StellarRules {
@@ -110,6 +127,11 @@ impl StellarRules {
                 HdLimitRules::Enforced
             } else {
                 HdLimitRules::Belczynski
+            },
+            v_magnitude: if version.get() >= V_MAGNITUDE_VERSION.get() {
+                VMagnitudeRules::A4
+            } else {
+                VMagnitudeRules::Interim
             },
         }
     }
@@ -153,3 +175,5 @@ mod hd_limit_hold;
 mod helium_hold;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod v_magnitude_hold;

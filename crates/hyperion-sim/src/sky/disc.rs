@@ -227,17 +227,20 @@ pub(crate) fn grid_of(phase: Phase) -> AtmosphereGrid {
     }
 }
 
-/// A star's absolute V magnitude for its disc: plan 06's for a living star; for a white dwarf,
-/// which plan 06 leaves without one until ask A4, the bolometric magnitude less the dwarfs'
-/// correction at its temperature (`photometry`'s own caution: up to about 0.6 mag off at 4,000 K).
-/// Both read the dwarf sequence the galaxy's stellar `rules` choose.
+/// A star's absolute V magnitude for its disc: plan 06's under the galaxy's stellar `rules`; for a
+/// white dwarf to which they give none (A4's interim, to version 25), the bolometric magnitude less
+/// the dwarfs' correction at its temperature (`photometry`'s own caution: up to about 0.6 mag off
+/// at 4,000 K). From 26 a white dwarf reads the Montreal grid's V instead, and the stand-in ends.
+/// Both read the dwarf sequence the rules choose.
 #[must_use]
 fn disc_absolute_v(state: &StarState, rules: StellarRules) -> Option<Magnitudes> {
     match grid_of(state.phase()) {
-        AtmosphereGrid::WhiteDwarf => Some(
-            absolute_bolometric_magnitude(state.luminosity())?
-                - bolometric_correction_v_under(state.effective_temperature(), rules)?,
-        ),
+        AtmosphereGrid::WhiteDwarf => absolute_magnitude_v_under(state, rules).or_else(|| {
+            Some(
+                absolute_bolometric_magnitude(state.luminosity())?
+                    - bolometric_correction_v_under(state.effective_temperature(), rules)?,
+            )
+        }),
         AtmosphereGrid::MainSequence | AtmosphereGrid::Giant => {
             absolute_magnitude_v_under(state, rules)
         }

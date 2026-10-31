@@ -2511,8 +2511,8 @@ log L 5.78–5.80, does the enforcing.
 - **P06.T42.b The swap** (output moves; held on a lane branch, it rides version 25 (S1) if it is
   ready when that train's wiring starts, else the next galaxy train; decision-galaxy-25-train
   §1.7). `WindRecipe::Modern` reads T42.a's rate past the limit.
-  Records: [06-stellar-stage/records/P06.T42.b.md](06-stellar-stage/records/P06.T42.b.md). Its
-  builder:
+  Records: [06-stellar-stage/records/P06.T42.b.md](06-stellar-stage/records/P06.T42.b.md).
+  Its builder:
   - re-checks the remnant masses, since the added term undoes part of Belczynski et al.'s
     black-hole calibration at solar metallicity;
   - checks `envelope_knots` against the term's stiffness (about 10⁴ M☉/yr deep past the line),
@@ -2550,6 +2550,7 @@ Both are wrong skies.
   §1.7). `absolute_magnitude_v` reads T43.a's V and BC_V, and `absolute_v_of_state` drops A4's
   interim, a white dwarf dark in V. R06's census and luminosity function follow with no other
   change.
+  Records: [06-stellar-stage/records/P06.T43.b.md](06-stellar-stage/records/P06.T43.b.md).
   - **What moves:** the census (white dwarfs gain a V, and late M giants dim),
     `binary_cooling_floor`'s fresh-build test, and the sky tables. Refits follow
     `just fit-check`'s flags in the train's wiring.
@@ -3039,6 +3040,8 @@ R06.
   _Accepted 2026-10-19 (`signoff-12.md`, item 29); a bump. Its task is P06.T43: V and BC_V land
   pure (T43.a), and the swap in `absolute_magnitude_v`, held on a lane branch, rides version 25
   (S1) if built, else the next galaxy train (decision-galaxy-25-train §1.7, 2026-10-27)._
+  _Switched under the 26 arm by P06.T43.b (`V_MAGNITUDE_VERSION`): an M6 III giant reads 1.339 mag
+  fainter in V; the interim stands to version 25._
 - **The envelope integrator's past-the-grid branch had no knot cap (found by P11.T4.h,
   2026-10-04; resolved 2026-10-05 by a guard that moves no output, see "Resolved, as built"
   below).** In `track/build.rs` `envelope_knots`, a knot past the clustered grid steps in age to

@@ -94,7 +94,7 @@ use crate::units::{LightYears, Magnitudes, Metres, SolarMasses, Years};
 
 use super::super::colour::StarColour;
 use super::super::envelope::{BrightnessEnvelope, MAX_AGE_YEARS, always_single, max_star_mass};
-use super::super::phase::PhaseEnvelope;
+use super::super::phase::{FINE_START, PhaseEnvelope};
 use super::super::photometry::colour_of_state;
 use super::cache::{
     BlockKey, BlockParams, CACHE_APPROACH_LY, CACHE_CUT_SLACK_MAG, CellNeed, CellOutcome,
@@ -252,7 +252,9 @@ impl LayerTally {
         self.listed
     }
 
-    /// Stars of a generated system that were white dwarfs, dark in V until ask A4.
+    /// Stars of a generated system that were white dwarfs without a V magnitude: every white dwarf
+    /// under A4's interim (to version 25), and under its arm (from 26) those cooler than the
+    /// Montreal grid's 1,500 K.
     #[must_use]
     pub const fn without_photometry(&self) -> u64 {
         self.without_photometry
@@ -829,7 +831,8 @@ pub enum StarLight {
     /// pair in its place.
     OwnOr(Magnitudes),
     /// Nothing: a star of a [`PairLight::Remnants`] pair, none of whose stars or products lives in
-    /// the window, while white dwarfs are dark in V (ask A4).
+    /// the window, while white dwarfs are dark in V (A4's interim, to version 25). Under A4's arm
+    /// such a star is bounded by the white dwarfs' brightest ([`StarBounds::brightest`]).
     Dark,
 }
 
@@ -924,6 +927,25 @@ impl BoundStar {
             StarLight::Own => own(),
             StarLight::OwnOr(m) => Some(own().map_or(m, |own| brighter(own, m))),
             StarLight::Dark => None,
+        }
+    }
+
+    /// Whether the star may be a white dwarf at an age within `ages` (years, inclusive), of
+    /// `composition`: a star its pair may change, or one whose oldest age is at least
+    /// [`FINE_START`] of its lifetime in `phase` (see [`StarBounds::brightest`]).
+    #[must_use]
+    fn may_be_a_white_dwarf(
+        &self,
+        phase: &PhaseEnvelope,
+        composition: &Composition,
+        ages: (Years, Years),
+    ) -> bool {
+        match self.light {
+            StarLight::OwnOr(_) | StarLight::Dark => true,
+            StarLight::Own => {
+                ages.1.value()
+                    >= FINE_START * phase.lifetime(self.mass, composition, self.eta).value()
+            }
         }
     }
 }
@@ -1037,7 +1059,8 @@ impl RecordLight {
 ///
 /// A star of a [`Detached`](PairLight::Detached) or [`Unchanged`](PairLight::Unchanged) pair, or
 /// of no pair the engine may run, takes its own bound; a [`Remnants`](PairLight::Remnants) pair
-/// gives nothing while white dwarfs are dark (ask A4); a [`Bright`](PairLight::Bright) pair bounds
+/// gives nothing while white dwarfs are dark (A4's interim, to version 25); a
+/// [`Bright`](PairLight::Bright) pair bounds
 /// each of its stars by the brighter of its own bound and the pair's magnitude, which also bounds
 /// the pair's products ([`StarLight`]). A pair that plan 11 cannot bound leaves the record
 /// [`Unbounded`](RecordLight::Unbounded): the widened envelope at `max_star_mass` alone bounds
@@ -1048,6 +1071,12 @@ impl RecordLight {
 /// Each η is its body's [`StarDraws`] at its attempt, and the primary's its record's own (the
 /// generator's `primary_eta`). The bound reads the generator's existing words only, through the
 /// generator's own functions, so nothing generated moves.
+///
+/// Under the galaxy's stellar rules from version 26 (A4's arm, `V_MAGNITUDE_VERSION`) a white dwarf
+/// has a V magnitude, which the tables that bound the stars (the phase envelope, past a star's
+/// lifetime, and plan 11's pair light) do not hold until the bump refits them. So under that arm
+/// a star that may be a white dwarf at the ages read is bounded by the brighter of its own bound
+/// and the brightest any white dwarf can be ([`brightest`](Self::brightest)).
 #[derive(Debug, Clone, PartialEq)]
 pub struct StarBounds {
     composition: Composition,
@@ -1056,6 +1085,9 @@ pub struct StarBounds {
     primary: BoundStar,
     companions: Vec<BoundStar>,
     pairs: PairTally,
+    /// The brightest absolute V a white dwarf has under the galaxy's stellar rules, margin
+    /// included, or `None` where white dwarfs are dark (A4's interim, to version 25).
+    white_dwarfs: Option<Magnitudes>,
 }
 
 impl StarBounds {
@@ -1213,6 +1245,11 @@ impl StarBounds {
             },
             companions,
             pairs,
+            white_dwarfs: galaxy
+                .rules()
+                .stellar
+                .v_magnitude
+                .white_dwarfs_brightest_v(),
         }
     }
 
@@ -1264,6 +1301,14 @@ impl StarBounds {
     /// order, each star's [`BoundStar::brightest`] read from `phase` and the brightest kept. It
     /// allocates nothing.
     ///
+    /// Where the galaxy's rules give white dwarfs a V (A4's arm, from version 26), a star that may
+    /// be one at an age within `ages` takes the brighter of that and the white dwarfs' brightest:
+    /// a star of a pair that is not its own model at some attempt (a [`StarLight::OwnOr`] or
+    /// [`StarLight::Dark`] star), whose products may be white dwarfs at any age, or one whose
+    /// oldest age reaches [`FINE_START`] of the lifetime the phase envelope reads it against, from
+    /// which on its own death can lie within the envelope's spread. Under the interim, as to 25,
+    /// every star takes its own bound alone.
+    ///
     /// The pairs' verdicts hold within [`ages`](Self::ages) only, so `ages` must lie within it;
     /// debug builds check it.
     #[must_use]
@@ -1278,7 +1323,15 @@ impl StarBounds {
         }
         core::iter::once(&self.primary)
             .chain(&self.companions)
-            .filter_map(|star| star.brightest(phase, &self.composition, ages))
+            .filter_map(|star| {
+                let own = star.brightest(phase, &self.composition, ages);
+                match self.white_dwarfs {
+                    Some(dwarfs) if star.may_be_a_white_dwarf(phase, &self.composition, ages) => {
+                        Some(own.map_or(dwarfs, |own| brighter(own, dwarfs)))
+                    }
+                    Some(_) | None => own,
+                }
+            })
             .reduce(brighter)
             .map_or(RecordLight::Dark, RecordLight::Brightest)
     }
@@ -2728,6 +2781,127 @@ mod tests {
                 (star_bits(&was) != star_bits(&now)).then_some(was.len())
             });
         assert!(moved.is_some_and(|n| n > 0), "no listed star moved");
+    }
+
+    /// The sky fixture's galaxy with P06.T43.b's A4 arm alone turned on (`V_MAGNITUDE_VERSION`).
+    fn a4_galaxy() -> &'static Galaxy {
+        use crate::galaxy::rules::GalaxyRules;
+        use crate::stellar::photometry::VMagnitudeRules;
+        use crate::stellar::rules::StellarRules;
+
+        static GALAXY: std::sync::OnceLock<Galaxy> = std::sync::OnceLock::new();
+        GALAXY.get_or_init(|| {
+            let version = GalaxyRules::of_version(crate::GENERATOR_VERSION);
+            milky_way_galaxy().clone().with_rules(GalaxyRules {
+                stellar: StellarRules {
+                    v_magnitude: VMagnitudeRules::A4,
+                    ..version.stellar
+                },
+                ..version
+            })
+        })
+    }
+
+    /// Under A4's arm the census reads its galaxy's white dwarfs: a white dwarf a light-year away,
+    /// dark and tallied without photometry under the version's rules, is listed at its Montreal V,
+    /// and the restated bounds, applied, keep it.
+    #[test]
+    fn the_census_lists_white_dwarfs_under_the_a4_arm() {
+        let a4 = a4_galaxy();
+        let record = find_system(Layer::D, SUN, Clone::clone, |_, state| {
+            state.stars().len() == 1
+                && state.stars().iter().any(|s| {
+                    is_white_dwarf(s.phase())
+                        && absolute_v_of_state_under(s, a4.rules().stellar)
+                            .is_some_and(|v| v.value() < 13.0)
+                })
+        });
+        let [x, y, z] = record.epoch_position().to_light_years_f64();
+        let query = SkyQuery::builder(observer_at([x + 1.0, y, z]), Magnitudes::new(11.0))
+            .build()
+            .expect("a valid query");
+        let census = |galaxy: &Galaxy, bound: Bound| {
+            let (mut out, mut tally) = (Vec::new(), CensusTallies::default());
+            census_record(
+                galaxy,
+                &mut context(),
+                &record,
+                &query,
+                bound,
+                &mut tally,
+                &mut out,
+            );
+            (out, tally.layer(Layer::D).without_photometry())
+        };
+        let (dark, untallied) = census(milky_way_galaxy(), Bound::Ignored);
+        assert_eq!(dark, []);
+        assert_eq!(untallied, 1);
+        let (lit, none) = census(a4, Bound::Ignored);
+        assert_eq!(none, 0);
+        assert_eq!(lit.len(), 1, "{lit:?}");
+        let state = SystemStars::generate(a4, &record)
+            .state_at(lit[0].emitted())
+            .expect("born");
+        let m_v = absolute_v_of_state_under(&state.stars()[0], a4.rules().stellar).expect("lit");
+        let unextinguished = unextinguished_v(m_v, lit[0].distance().value());
+        let v = lit[0].v().value();
+        assert!(
+            v >= unextinguished && v - unextinguished < 0.01,
+            "{v} at {m_v:?}, {unextinguished} unextinguished"
+        );
+        let (applied, _) = census(a4, Bound::Applied);
+        assert_eq!(star_bits(&applied), star_bits(&lit));
+    }
+
+    /// Under A4's arm the census's bounds, restated with the white dwarfs' ceiling, hold every
+    /// white dwarf of 3,000 records of each of layers C, D and E by the Sun at the epoch: its
+    /// record's star bounds and the widened envelope's are no fainter than its V. It counts the
+    /// white dwarfs the version's star bounds, which keep them dark, would have missed.
+    #[test]
+    fn the_census_bounds_hold_white_dwarfs_under_the_a4_arm() {
+        let a4 = a4_galaxy();
+        let rules = a4.rules().stellar;
+        let (mut checked, mut missed) = (0, 0);
+        for layer in [Layer::C, Layer::D, Layer::E] {
+            for record in records_near(layer, SUN, 3_000) {
+                let Some(state) = SystemStars::generate(a4, &record).state_at(UniverseTime::EPOCH)
+                else {
+                    continue;
+                };
+                let Some(m_v) = state
+                    .stars()
+                    .iter()
+                    .filter(|s| is_white_dwarf(s.phase()))
+                    .filter_map(|s| absolute_v_of_state_under(s, rules))
+                    .reduce(brighter)
+                else {
+                    continue;
+                };
+                checked += 1;
+                let age = record.age_at(UniverseTime::EPOCH);
+                let light = |galaxy: &Galaxy| {
+                    StarBounds::of(galaxy, &record, (age, age))
+                        .brightest(PhaseEnvelope::shared(), (age, age))
+                };
+                match light(a4) {
+                    RecordLight::Unbounded => {}
+                    RecordLight::Brightest(bound) => {
+                        assert!(m_v >= bound, "{:?}: {m_v:?} above {bound:?}", record.id());
+                    }
+                    RecordLight::Dark => panic!("{:?}: a white dwarf of {m_v:?} dark", record.id()),
+                }
+                missed += usize::from(!light(milky_way_galaxy()).may_list(m_v));
+                if let Some(flux) = flux_bound(milky_way_envelope(), &record, UniverseTime::EPOCH) {
+                    assert!(
+                        m_v >= flux,
+                        "{:?}: {m_v:?} above the envelope's {flux:?}",
+                        record.id()
+                    );
+                }
+            }
+        }
+        eprintln!("{checked} records with a white dwarf; the version's bounds miss {missed}");
+        assert!(checked > 20 && missed > 0, "{checked} {missed}");
     }
 
     #[test]

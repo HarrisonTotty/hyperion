@@ -604,11 +604,14 @@ holds.
   magnitude. Interim: the census and the luminosity function apply the rule themselves, in one
   function, `sky::photometry::is_dark_in_v`, which A3 replaces with plan 06's.
 - **A4, V magnitudes of white dwarfs and of M giants**: an absolute V for white dwarfs from the
-  Montreal grids (Bédard et al. 2020) and giant bolometric corrections for late M giants (up to 1.7
-  mag too bright today, `photometry.rs`'s own note); and a check of `photometry.rs`'s "Table III"
-  citation of Straižys and Kuriliene, as the roadmap's asks table records. Interim: a white dwarf
-  is left out of the census and counted in `without_photometry`, which the response reports; M
-  giants are as bright as plan 06 says.
+  Montreal grids (Bédard et al. 2020) and giant bolometric corrections for late M giants (up to
+  1.34 mag too bright at M6 III by plan 06's giants' correction, P06.T43.a; 1.7 by `photometry.rs`'s
+  note); and a check of `photometry.rs`'s "Table III" citation of Straižys and Kuriliene, as the
+  roadmap's asks table records. Interim: a white dwarf is left out of the census and counted in
+  `without_photometry`, which the response reports; M giants are as bright as plan 06 says. _Ended
+  under the 26 arm (P06.T43.b, `V_MAGNITUDE_VERSION`):_ white dwarfs take the Montreal grid's V,
+  evolved stars the giants' correction, and the census's bounds a white-dwarf ceiling; the
+  interim stands to version 25.
 
 ## Design notes
 

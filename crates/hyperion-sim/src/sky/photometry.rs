@@ -2,15 +2,18 @@
 //! note 7).
 //!
 //! The V magnitude, [`absolute_v_of_state`] and [`is_dark_in_v`], carries the interims of galaxy
-//! plan 06's asks A3 and A4 (protostars and white dwarfs dark in V). It lives in
-//! [`stellar::photometry`](crate::stellar::photometry), beside the photometry it stands in for,
-//! whose module documentation gives both interims and their sources, and is re-exported here, so
-//! every sky path to it holds. When plan 06 answers A3 and A4, those two functions switch to its
-//! photometry and nothing here changes. Two of the census's bounds rest on A4's interim, and must
-//! change with it: the phase envelope's bins beyond a star's lifetime hold only remnants, which it
-//! keeps dark ([`PhaseEnvelope`](super::phase::PhaseEnvelope), R06.T8.m), and a pair that plan 11
-//! answers `Remnants` gives the census nothing ([`StarBounds`](super::census::StarBounds),
-//! R06.T8.g). Both then take white-dwarf rows.
+//! plan 06's asks A3 and A4 (protostars and white dwarfs dark in V) under the version's rules. It
+//! lives in [`stellar::photometry`](crate::stellar::photometry), beside the photometry it stands in
+//! for, whose module documentation gives both interims and their sources, and is re-exported here,
+//! so every sky path to it holds. A4's answer, P06.T43.b, is held for version 26: under its arm the
+//! census's stars take the Montreal grid's V for white dwarfs from the galaxy's rules, and nothing
+//! here changes. Two of the census's bounds rest on A4's interim: the phase envelope's bins beyond
+//! a star's lifetime hold only remnants, which it keeps dark
+//! ([`PhaseEnvelope`](super::phase::PhaseEnvelope), R06.T8.m), and a pair that plan 11 answers
+//! `Remnants` gives the census nothing ([`StarBounds`](super::census::StarBounds), R06.T8.g).
+//! Under the arm both are restated: a star that may be a white dwarf takes the white dwarfs'
+//! brightest V as well ([`StarBounds::brightest`](super::census::StarBounds::brightest)), until the
+//! bump's refit gives the tables white-dwarf rows.
 
 use super::colour::{StarColour, star_colour, surface_gravity};
 use super::disc::grid_of;
