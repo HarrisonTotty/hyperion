@@ -298,11 +298,28 @@ fn the_source_s_answers_are_order_independent() {
             members.first().map(|(m, _)| *m.record().epoch_position())
         })
         .expect("a core with members");
+    // About a member of each stream near its axis, from `u` on, so that each sphere holds one
+    // whatever the tube's centre line; a stream's members outside the root cube are dropped.
+    let in_stream = |n: usize, u: f64| {
+        let tube = &lookup.tubes[n];
+        let shares = StreamBandShares::of(galaxy, &lookup.list.debris().streams()[n]);
+        let mut members = Vec::new();
+        (0..20)
+            .map(|k| (u + 0.05 * f64::from(k)).fract())
+            .find_map(|at| {
+                tube.cells_touching(&tube.locate(at, 0.0, 0.0), LightYears::new(100.0))
+                    .find_map(|cell| {
+                        stream_cell_members(galaxy, tube, &shares, cell, MassBand::A, &mut members);
+                        members.first().map(|m| *m.record().epoch_position())
+                    })
+            })
+            .expect("a member near the axis")
+    };
     let inner = GalacticPosition::from_light_years([2_000.0, 0.0, 0.0]).expect("in range");
     let spheres = [
-        sphere(lookup.tubes[0].locate(0.45, 0.0, 0.0), 300.0, 200),
-        sphere(lookup.tubes[1].locate(0.3, 1.0, -0.5), 200.0, 0),
-        sphere(lookup.tubes[2].locate(0.6, 0.0, 0.0), 100.0, -1_000),
+        sphere(in_stream(0, 0.45), 300.0, 200),
+        sphere(in_stream(1, 0.3), 200.0, 0),
+        sphere(in_stream(2, 0.6), 50.0, -1_000),
         sphere(in_core, 30.0, 1_000),
         sphere(inner, 50.0, 0),
     ];
@@ -596,9 +613,87 @@ fn a_query_on_a_test_stream_s_axis_equals_every_member_of_its_tube() {
     }
 }
 
+/// The most of `pal5_like`'s members that lie outside its shell under any of the eight seeds of
+/// [`over_eight_seeds_the_test_tubes_lie_within_their_tracers_and_shells`], as measured
+/// (2026-10-31, x86-64) with its tips fitted in the orbital plane (P10.T6.a): 2, of 3 over the
+/// eight, against 147 at the first seed when they were fitted in x, y and z.
+const PAL5_OUTSIDE_PINNED: usize = 2;
+
+/// P10.T6.a's tips, fitted in the orbital plane: over eight seeds of the generator's 2,000
+/// tracers, every knot of `pal5_like` and `gd1_like` lies within its arm's tracers' radial range,
+/// and of their members outside the list's shell `gd1_like` has none and `pal5_like` at most
+/// [`PAL5_OUTSIDE_PINNED`] a seed (each seed printed, with the knots that kept the Cartesian fit,
+/// none as measured).
+#[test]
+#[ignore = "slow: sprays two test streams under eight seeds and enumerates their tubes"]
+fn over_eight_seeds_the_test_tubes_lie_within_their_tracers_and_shells() {
+    use crate::galaxy::global_list::spray::Arm;
+    let held = galaxy(false);
+    let list = GlobalList::of_parts(held, tables(), streams()[..2].to_vec(), Vec::new());
+    let force = SprayForce::new(tables()).expect("the full tables");
+    let params = SprayParams::new(NonZeroU32::new(1_000).expect("not zero"));
+    let mean = held.mean_system_mass(Population::Halo);
+    let radius = |x: GalacticDisplacement| {
+        let [a, b, c] = x.metres();
+        (a * a + b * b + c * c).sqrt() / METRES_PER_LIGHT_YEAR
+    };
+    for (n, name) in [(0, "pal5"), (1, "gd1")] {
+        let spec = &list.debris().streams()[n];
+        let shell = list.entries()[n].shell();
+        let shares = StreamBandShares::of(held, spec);
+        for k in 0..8 {
+            let seed = Seed::new(SEED.get() + k);
+            let tracers = Spray::new(seed, &force, tables(), spec, &params)
+                .expect("a finite stripping time")
+                .tracers();
+            let before = crate::galaxy::global_list::tube::cartesian_knots();
+            let tube = TubeTable::from_tracers(seed, mean, spec, &tracers).expect("enough");
+            let fallbacks = crate::galaxy::global_list::tube::cartesian_knots() - before;
+            let range = |arm: Arm| {
+                tracers
+                    .iter()
+                    .filter(|t| t.energy_arm() == arm)
+                    .map(|t| radius(t.position()))
+                    .fold((f64::INFINITY, 0.0_f64), |(a, b), r| (a.min(r), b.max(r)))
+            };
+            for arm in [Arm::Trailing, Arm::Leading] {
+                let (low, high) = range(arm);
+                for (j, knot) in tube.arm(arm).knots().iter().enumerate() {
+                    let r = radius(GalacticPosition::ORIGIN.displacement_to(&knot.centre()));
+                    assert!(
+                        (low..=high).contains(&r),
+                        "{name} +{k} {arm:?} knot {j}: {r:.0} ly, its arm's tracers \
+                         {low:.0}–{high:.0}"
+                    );
+                }
+            }
+            let all = every_member(held, &tube, &shares);
+            let outside = all
+                .iter()
+                .filter(|m| {
+                    !shell.contains(
+                        &GalacticPosition::ORIGIN.displacement_to(m.record().epoch_position()),
+                    )
+                })
+                .count();
+            eprintln!(
+                "{name} +{k}: {} members, {outside} outside the shell; {fallbacks} knots kept the \
+                 Cartesian fit",
+                all.len()
+            );
+            let most = if n == 0 { PAL5_OUTSIDE_PINNED } else { 0 };
+            assert!(
+                outside <= most,
+                "{name} +{k}: {outside} outside, against {most}"
+            );
+        }
+    }
+}
+
 /// P10.T9, the bench's figure: a 50 ly query on `pal5_like`'s axis generates every member of the
-/// cells it touches and returns those in the sphere (measured 2026-10-31: 134 generated and 22
-/// returned over the 19 queries, about 6 a hit, where the plan estimated about 160 to find two).
+/// cells it touches and returns those in the sphere (measured 2026-10-31, the tips fitted in the
+/// orbital plane: 135 generated and 22 returned over the 19 queries, about 6 a hit, where the plan
+/// estimated about 160 to find two).
 #[test]
 #[ignore = "slow: sprays a test stream of 2,000 tracers"]
 fn a_query_on_a_globular_stream_s_axis_generates_its_cells_members() {

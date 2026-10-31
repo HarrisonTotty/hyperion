@@ -42,11 +42,33 @@
 //!     intercept at the knot's rank of the line fitted in rank by the kernel's weights, which is
 //!     the kernel's mean where its tracers lie evenly about the knot. At an arm's end the kernel
 //!     reaches one way only, and its mean would lie inside the end by about a dispersion in rank,
-//!     and with it the mean velocity's direction, by about the angle the track turns there; the
-//!     fit carries no such bias to first order (Fan and Gijbels 1992, "Variable bandwidth and
-//!     local linear regression smoothers", Ann. Statist. 20, 2008–2036: "the estimator does not
-//!     have boundary effects"), at the price of more noise there: an end knot's fit rests on an
-//!     effective 7 tracers, against the one-sided mean's 22 and an inner knot's 39.
+//!     and with it the mean velocity's direction, by about the angle the track turns there. The
+//!     fit removes that first-order bias (Fan and Gijbels 1992, "Variable bandwidth and local
+//!     linear regression smoothers", Ann. Statist. 20, 2008–2036), at the price of more noise
+//!     there: an end knot's fit rests on an effective 7 tracers, against the one-sided mean's 22
+//!     and an inner knot's 39. What it keeps is its second-order bias, about half the curvature
+//!     of what it fits along the kernel times the kernel's width squared, of the other sign at an
+//!     arm's end knot.
+//!   - So each quantity is fitted where the track is nearly straight: in the kernel's orbital
+//!     plane about the galactic centre, as its radius `R`, angle `φ` and height `z`, and the
+//!     velocity's radial, azimuthal and vertical components, each tracer's along its own
+//!     directions, mapped back at the fitted `φ`. An arc about the centre is constant in `R` and
+//!     `z` and linear in `φ`, so the track's turn carries no bias. Fitted in x, y and z, the line
+//!     was a chord inside the arc but at an arm's end knot, and at a tip, where the few old
+//!     tracers make a kernel span 70° of the orbit and more, that put `pal5_like`'s trailing
+//!     knots below every tracer and its shell's inner radius, with widths 6–22 times the median.
+//!     What curvature is left is `R`'s and `z`'s along `φ`, largest at the orbit's turning points.
+//!     (A stream lies near a segment of its progenitor's orbit, a straight line in angle-action
+//!     coordinates: Sanders and Binney 2013, "Stream-orbit misalignment – I. The dangers of
+//!     orbit-fitting", MNRAS 433, 1813–1825; Bovy 2014, "Dynamical modeling of tidal streams",
+//!     ApJ 795, 95.) The plane's pole is the kernel's weighted angular momentum's direction, and
+//!     its first axis the Cartesian fit's position projected on it. Where the angle is ill-posed
+//!     (a kernel tracer more than three-eighths of a turn from that axis, within an eighth of a
+//!     turn of `atan2`'s cut, or within a tenth of the kernel's mean `R` of the pole's line) the
+//!     knot keeps the Cartesian fit (main's brief for P10.T6.a's tips, after research-leans-10's
+//!     pilot). Over eight seeds `pal5_like`'s members outside its shell number 3 in all, against
+//!     147 at the first seed alone in x, y and z, and every knot of its tube and `gd1_like`'s lies
+//!     within its arm's tracers' radial range.
 //!   - The two widths (the rms offsets along the frame's normal and binormal) and the three
 //!     velocity dispersions (the rms velocity offsets along its tangent, normal and binormal) are
 //!     the kernel's means of the squared offsets, each tracer's measured about the centre line and
@@ -1307,6 +1329,8 @@ impl<'a> Reduced<'a> {
             .collect();
         let last = index_f64(tracers.len() - 1);
         let steps = f64::from(KNOTS_PER_ARM - 1);
+        // Each knot's kernel, its tracers' indices and weights, gathered once for its five passes.
+        let mut near: Vec<(usize, f64)> = Vec::with_capacity(index(KERNEL_TRACERS));
         let knots = (0..KNOTS_PER_ARM)
             .map(|j| {
                 let target = mass * (f64::from(j) / steps);
@@ -1320,9 +1344,11 @@ impl<'a> Reduced<'a> {
                     }
                 };
                 let rank = rank.clamp(0.0, last);
+                near.clear();
+                near.extend(kernel(rank, tracers));
                 // The kernel's moments in rank, for its weights corrected to first order.
                 let [mut s0, mut s1, mut s2] = [0.0; 3];
-                for (i, k) in kernel(rank, tracers) {
+                for &(i, k) in &near {
                     let d = index_f64(i) - rank;
                     s0 += k;
                     s1 += k * d;
@@ -1333,15 +1359,15 @@ impl<'a> Reduced<'a> {
                     determinant > 0.0 && determinant.is_finite(),
                     "a spray's tracers weigh their tube's positive mass: {determinant}"
                 );
+                let fit = LocalLinear {
+                    moments: [s0, s1, s2],
+                    determinant,
+                };
                 let mut position_m = [0.0; 3];
                 let mut slope_m = [0.0; 3];
                 let mut velocity_m_s = [0.0; 3];
-                for (i, k) in kernel(rank, tracers) {
-                    let d = index_f64(i) - rank;
-                    let (level, rise) = (
-                        k * (s2 - s1 * d) / determinant,
-                        k * (s0 * d - s1) / determinant,
-                    );
+                for &(i, k) in &near {
+                    let (level, rise) = fit.weights(k, index_f64(i) - rank);
                     let t = tracers[i];
                     let (x, v) = (t.position().metres(), t.velocity().metres_per_second());
                     for axis in 0..3 {
@@ -1349,6 +1375,12 @@ impl<'a> Reduced<'a> {
                         slope_m[axis] += rise * x[axis];
                         velocity_m_s[axis] += level * v[axis];
                     }
+                }
+                // The same fit in the orbital plane, where it is well posed: the Cartesian one
+                // only sets the plane's first axis there (module documentation, "The reduction").
+                match polar_fit(rank, tracers, &near, &fit, position_m) {
+                    Some(polar) => [position_m, slope_m, velocity_m_s] = polar,
+                    None => count_cartesian_knot(),
                 }
                 // ψ at the rank itself, between the two tracers about it: the inverse of the
                 // tracers' own Λ(ψ), which keeps the knots in their arm's order of ψ.
@@ -1471,6 +1503,172 @@ impl<'a> Reduced<'a> {
             mass: SolarMasses::new(self.mass),
         }
     }
+}
+
+/// The kernel's local-linear weights about a knot's rank (module documentation, "The reduction"):
+/// its moments in rank, `s0`, `s1` and `s2` of the tracers' kernel weights times 1, `d` and `d²`,
+/// and their determinant `s0 s2 − s1²`, positive.
+#[derive(Debug, Clone, Copy)]
+struct LocalLinear {
+    moments: [f64; 3],
+    determinant: f64,
+}
+
+impl LocalLinear {
+    /// The shares, of the fitted line's level at the knot and of its slope in rank, of the kernel
+    /// tracer of kernel weight `k` at `d` ranks from the knot.
+    #[must_use]
+    fn weights(&self, k: f64, d: f64) -> (f64, f64) {
+        let [s0, s1, s2] = self.moments;
+        (
+            k * (s2 - s1 * d) / self.determinant,
+            k * (s0 * d - s1) / self.determinant,
+        )
+    }
+}
+
+/// The share of the kernel's mean radius in its orbital plane under which a kernel tracer makes
+/// the plane's angle ill-posed ([`polar_fit`]): a tenth (research-leans-10's pilot, as main's
+/// brief for P10.T6.a's tips sets it).
+const POLAR_RADIUS_FLOOR: f64 = 0.1;
+
+#[cfg(test)]
+thread_local! {
+    /// The knots whose centre line kept the Cartesian fit, where [`polar_fit`] was ill-posed,
+    /// counted on this thread: a test's counter, never a process-wide one, since tests run on
+    /// threads of one process.
+    static CARTESIAN_KNOTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Counts a knot that kept the Cartesian fit on this thread's counter ([`cartesian_knots`]) in a
+/// test build, and does nothing otherwise.
+fn count_cartesian_knot() {
+    #[cfg(test)]
+    CARTESIAN_KNOTS.with(|count| count.set(count.get() + 1));
+}
+
+/// The knots this thread's reductions have kept the Cartesian fit for since it started, where the
+/// polar fit was ill-posed (module documentation, "The reduction"): a count for the tests, which
+/// no output reads.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn cartesian_knots() -> u64 {
+    CARTESIAN_KNOTS.with(std::cell::Cell::get)
+}
+
+/// A knot's centre line, its slope in rank (both m) and its mean velocity (m/s), galactic, fitted
+/// by `fit`'s weights over `near`, the kernel about `rank` ([`kernel`]'s indices into `tracers`
+/// and weights), in the kernel's orbital plane about the galactic centre (module documentation,
+/// "The reduction"); `cartesian_m` is the same fit's position in x, y and z, which sets the
+/// plane's first axis.
+///
+/// The plane's pole is the direction of the kernel's weighted angular momentum, its first axis
+/// `cartesian_m` projected on it, and its second the pole crossed with the first. Each tracer
+/// gives its radius `R`, angle `φ` and height `z` in that basis, and its velocity's components
+/// along its own radial and azimuthal directions and the pole; the fit's levels and slopes of
+/// each map back at the fitted `φ`, the slope by the chain rule.
+///
+/// `None` where the plane's angle is ill-posed, so that the Cartesian fit stands: a pole of no
+/// direction, a first axis of none, a kernel tracer more than three-eighths of a turn from that
+/// axis, within an eighth of a turn of `atan2`'s cut at ±π, or one nearer the pole's line than
+/// [`POLAR_RADIUS_FLOOR`] of the kernel's mean radius. A quarter turn from the axis, the brief's
+/// first limit, refused `pal5_like`'s trailing tips in 3 of 8 seeds, whose kernels reach 114°
+/// from it, and left 6, 54 and 11 of its members outside its shell there (lean, 2026-10-31).
+#[must_use]
+fn polar_fit(
+    rank: f64,
+    tracers: &[&Tracer],
+    near: &[(usize, f64)],
+    fit: &LocalLinear,
+    cartesian_m: [f64; 3],
+) -> Option<[[f64; 3]; 3]> {
+    let mut momentum = [0.0; 3];
+    for &(i, k) in near {
+        let tracer = tracers[i];
+        let own = cross(
+            tracer.position().metres(),
+            tracer.velocity().metres_per_second(),
+        );
+        for axis in 0..3 {
+            momentum[axis] += k * own[axis];
+        }
+    }
+    let pole = unit(momentum)?;
+    let height = dot(cartesian_m, pole);
+    let first = unit(core::array::from_fn(|axis| {
+        cartesian_m[axis] - height * pole[axis]
+    }))?;
+    let second = cross(pole, first);
+    // A vector's components along the plane's first and second axes.
+    let in_plane = |vector: [f64; 3]| (dot(vector, first), dot(vector, second));
+    // The kernel's mean radius, and each tracer within three-eighths of a turn of the first axis
+    // (|φ| ≤ 3π ÷ 4, where c₁ ≥ −|c₂|), so that no two lie across `atan2`'s cut at ±π.
+    let (mut weighed, mut total) = (0.0, 0.0);
+    for &(i, k) in near {
+        let (c1, c2) = in_plane(tracers[i].position().metres());
+        if c1 < -c2.abs() {
+            return None;
+        }
+        weighed += k * (c1 * c1 + c2 * c2).sqrt();
+        total += k;
+    }
+    let floor = POLAR_RADIUS_FLOOR * weighed / total;
+    // The fitted line's levels at the knot and slopes in rank of R, φ and z, and the levels of the
+    // velocity's radial, azimuthal and vertical components.
+    let [mut radius_level, mut angle_level, mut height_level] = [0.0; 3];
+    let [mut radius_rise, mut angle_rise, mut height_rise] = [0.0; 3];
+    let mut velocity_level = [0.0; 3];
+    for &(i, k) in near {
+        let (level, rise) = fit.weights(k, index_f64(i) - rank);
+        let tracer = tracers[i];
+        let (position, velocity) = (
+            tracer.position().metres(),
+            tracer.velocity().metres_per_second(),
+        );
+        let (c1, c2) = in_plane(position);
+        let radius = (c1 * c1 + c2 * c2).sqrt();
+        if radius < floor {
+            return None;
+        }
+        let angle = math::atan2(c2, c1);
+        let up = dot(position, pole);
+        radius_level += level * radius;
+        angle_level += level * angle;
+        height_level += level * up;
+        radius_rise += rise * radius;
+        angle_rise += rise * angle;
+        height_rise += rise * up;
+        // Along the tracer's own radial direction, (c₁, c₂) ÷ R in the plane, and its azimuthal
+        // one, (−c₂, c₁) ÷ R: no sine or cosine of its angle (the bench, P10.T6.a's tips).
+        let (v1, v2) = in_plane(velocity);
+        velocity_level[0] += level * (v1 * c1 + v2 * c2) / radius;
+        velocity_level[1] += level * (v2 * c1 - v1 * c2) / radius;
+        velocity_level[2] += level * dot(velocity, pole);
+    }
+    let [radial, around] = plane_axes(first, second, angle_level);
+    let [v_radial, v_around, v_up] = velocity_level;
+    Some([
+        core::array::from_fn(|axis| radius_level * radial[axis] + height_level * pole[axis]),
+        core::array::from_fn(|axis| {
+            radius_rise * radial[axis]
+                + radius_level * angle_rise * around[axis]
+                + height_rise * pole[axis]
+        }),
+        core::array::from_fn(|axis| {
+            v_radial * radial[axis] + v_around * around[axis] + v_up * pole[axis]
+        }),
+    ])
+}
+
+/// The radial and azimuthal unit vectors at angle `phi` (rad) in the plane of the orthonormal
+/// `first` and `second` axes.
+#[must_use]
+fn plane_axes(first: [f64; 3], second: [f64; 3], phi: f64) -> [[f64; 3]; 2] {
+    let (sin, cos) = math::sin_cos(phi);
+    [
+        core::array::from_fn(|axis| cos * first[axis] + sin * second[axis]),
+        core::array::from_fn(|axis| cos * second[axis] - sin * first[axis]),
+    ]
 }
 
 /// The kernel about fractional `rank` over an arm's `tracers`, of [`KERNEL_TRACERS`] or more:

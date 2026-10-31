@@ -67,16 +67,17 @@
 //!
 //! **A stream's shell bounds its members from version 26** (`STREAM_SHELL_VERSION`, P10.T9).
 //! The shell holds the tracers, but not every point of the tube's cut. At a tip, where its few
-//! oldest tracers lie sparse, a knot's kernel spans a long arc of the orbit, so the centre line
-//! there is a chord inside the arc and the widths run to some ten times the median: `pal5_like`'s
-//! trailing tip's 48 tracers span some 70° of ψ, and its knot 3 lies at 28,648 ly, below every
-//! tracer (the least at 30,316) and the shell's inner radius (28,689). So a member could lie
-//! where no tracer does, far outside the shell. Of `pal5_like`'s some 67,000 members under each of
-//! eight seeds, the farthest lay 2,000–11,000 ly inside the shell's inner radius, which a widening
-//! of up to 27 `η r` in place of [`SHELL_WIDENING`]'s 4 would have taken in; capping the cut at
-//! the tracers' reach left them where they were. So from 26 a stream's member outside its shell
-//! is no member, as one outside the root cube is not (main's ruling of 2026-10-31, reversible
-//! behind its hold, the tips' own fix left open): the range query and
+//! oldest tracers lie sparse, a knot's kernel spans a long arc of the orbit, and fitted in x, y
+//! and z its centre line was a chord inside the arc, with widths some ten times the median:
+//! `pal5_like`'s trailing tip's knot 3 lay at 28,648 ly, below every tracer (the least at 30,316)
+//! and the shell's inner radius (28,689), and its members up to 11,000 ly inside it. The tips are
+//! now fitted in the orbital plane ([`tube`]'s "The reduction", P10.T6.a). That leaves 3 of
+//! `pal5_like`'s members outside its shell over eight seeds, and 265 of 4.9 million in a drawn
+//! Milky Way (seed `0x0a10_3000_0000_0000`, a probe of P10.T6.a's lane); research-leans-10 found
+//! every tracer in the root cube inside its shell, so those are the cut's tail past the tracers.
+//! So from 26 a stream's member outside its shell is no member, as one outside the root cube is
+//! not (main's ruling of 2026-10-31, reversible behind its hold, kept as the guard of the tips'
+//! fix): the range query and
 //! [`resolve_with`](crate::galaxy::placement::resolve_with) keep only those inside, and a query
 //! whose sphere misses a shell can pass its stream by. Below 26 nothing reads a stream's shell
 //! for its members, and a query visits every stream.

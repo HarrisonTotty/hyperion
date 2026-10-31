@@ -2213,3 +2213,21 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     `rules::tests::each_hold_turns_on_at_its_version`. Slow: the brute force,
     `a_query_on_a_test_stream_s_axis_equals_every_member_of_its_tube`, and three more, all by
     `cargo test -p hyperion-sim --profile slow-test --lib -- --ignored global_list::source`.
+- **P10.T6.a's tips in the orbital plane, as built (lane `p10-t9`, step 2, 2026-10-31, at
+  `GENERATOR_VERSION` 24).** Main's brief after research-leans-10: option B, with P10.T9's option
+  A kept as its guard and C rejected. No version: nothing served reads a tube before T10.b.
+  - _The fit._ `Reduced::new` fits the centre line, its slope and the mean velocity in the
+    kernel's orbital plane about the galactic centre (`tube::polar_fit`: R, φ and z, and the
+    velocity's radial, azimuthal and vertical parts), with the same ranks, kernel and weights.
+    The widths and dispersions are measured as before.
+  - _The fallback (lean, 2026-10-31)._ A knot keeps the Cartesian fit where a kernel tracer lies
+    more than 3π ÷ 4 from the plane's first axis, or within a tenth of the kernel's mean R of the
+    pole's line. The brief's π ÷ 2 refused `pal5_like`'s trailing tips (tracers to 114°) in 3 of
+    8 seeds, which kept 6, 54 and 11 members outside the shell; at 3π ÷ 4, 0–2 a seed.
+  - _Goldens._ `tube.golden` (now with each test tube's fallback knots), `tube_arms.golden` and
+    `stream_members.golden` re-blessed by name at 24 (main's allowance); no other golden moved.
+  - _Cost._ `from_tracers` +25% (a finding; the outbox).
+  - _Tests._ Fast: `tube::tests`' `on_a_sparse_arc_every_knot_lies_on_the_arc` and two of the
+    fallback; the frame test allows the arms' junction cos 0.9985 (measured 0.99865, 3.0°); P10.T9's
+    order test centres its spheres on members, as the centre line moved. Slow:
+    `source::tests::over_eight_seeds_the_test_tubes_lie_within_their_tracers_and_shells`.

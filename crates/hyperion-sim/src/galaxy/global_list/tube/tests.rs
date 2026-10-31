@@ -364,11 +364,121 @@ fn the_frames_are_orthonormal_and_carried_without_a_flip() {
             "the tangent leaves the motion: {t:?}"
         );
     }
-    for pair in knots.windows(2) {
+    // Between the arms' roots each knot's tangent is its own one-sided fit's, so the normal turns
+    // most there: by 3.0° (cos 0.99865) since the fit moved into the orbital plane, against 2.6°
+    // allowed elsewhere. Not a flip, which would turn it by some 180°.
+    let junction = usize::try_from(KNOTS_PER_ARM).expect("small") - 1;
+    for (j, pair) in knots.windows(2).enumerate() {
         let [_, n0, _] = pair[0].frame();
         let [_, n1, _] = pair[1].frame();
-        assert!(dot(n0, n1) > 0.999, "the normal turns by {}", dot(n0, n1));
+        let least = if j == junction { 0.9985 } else { 0.999 };
+        assert!(
+            dot(n0, n1) > least,
+            "knots {j}–{}: the normal turns by {}",
+            j + 1,
+            dot(n0, n1)
+        );
     }
+}
+
+/// Tracers on an exact circle of [`RADIUS`] in the x–y plane, moving along it at [`SPEED`]: an
+/// arm of `per_arm` each side of the progenitor, spread evenly over `arc` (rad) of it, with
+/// [`MASS`] shared out.
+fn arc(per_arm: u32, arc: f64) -> Vec<Tracer> {
+    let weight = SolarMasses::new(MASS / f64::from(2 * per_arm));
+    (0..2 * per_arm)
+        .map(|i| {
+            let k = i / 2;
+            let (arm, side, energy) = if i.is_multiple_of(2) {
+                (Arm::Leading, 1.0, -ENERGY_OFFSET)
+            } else {
+                (Arm::Trailing, -1.0, ENERGY_OFFSET)
+            };
+            let psi = side * arc * (f64::from(k) + 0.5) / f64::from(per_arm);
+            let (sin, cos) = math::sin_cos(psi);
+            Tracer::from_parts(
+                arm,
+                0,
+                Years::new(1e9),
+                weight,
+                GalacticDisplacement::new(
+                    [RADIUS * cos, RADIUS * sin, 0.0].map(|c| c * METRES_PER_LIGHT_YEAR),
+                ),
+                GalacticVelocity::new([-SPEED * sin, SPEED * cos, 0.0]),
+                Radians::new(psi),
+                energy,
+            )
+        })
+        .collect()
+}
+
+/// `tracers` reduced, with the knots that kept the Cartesian fit while they were.
+fn counted(tracers: &[Tracer]) -> (TubeTable, u64) {
+    let before = cartesian_knots();
+    let tube = table(tracers);
+    (tube, cartesian_knots() - before)
+}
+
+/// P10.T6.a's tips: on a sparse arc, each arm's [`KERNEL_TRACERS`] over 1.2 rad (69°) of a
+/// circle, so that every knot's kernel spans its whole arm, every knot's centre lies on the
+/// circle and its mean velocity along it at the tracers' speed, the fit in the orbital plane being
+/// exact there; in x, y and z the centre line was a chord, its middle knot some 9,000 ly inside.
+#[test]
+fn on_a_sparse_arc_every_knot_lies_on_the_arc() {
+    let (tube, fallbacks) = counted(&arc(KERNEL_TRACERS, 1.2));
+    assert_eq!(fallbacks, 0);
+    for (j, knot) in tube.knots().enumerate() {
+        let [x, y, z] = ly(&knot.centre());
+        let radius = (x * x + y * y).sqrt();
+        assert!(
+            (radius / RADIUS - 1.0).abs() < 1e-9,
+            "knot {j}: {radius} ly"
+        );
+        assert!(z.abs() < 1e-6, "knot {j}: {z} ly out of the plane");
+        let velocity = knot.velocity().metres_per_second();
+        assert!(
+            (length(velocity) / SPEED - 1.0).abs() < 1e-9,
+            "knot {j}: {velocity:?}"
+        );
+        assert!(
+            dot(velocity, [x, y, 0.0]).abs() / (radius * SPEED) < 1e-9,
+            "knot {j}: {velocity:?}"
+        );
+    }
+}
+
+/// P10.T6.a's fallback: where a kernel spans so much of the orbit that a tracer lies more than
+/// three-eighths of a turn from the plane's first axis, near `atan2`'s cut, the knot keeps the
+/// Cartesian fit; on arms of 300° every knot of both does.
+#[test]
+fn a_kernel_reaching_atan2_s_cut_keeps_the_cartesian_fit() {
+    let (tube, fallbacks) = counted(&arc(KERNEL_TRACERS, 300_f64.to_radians()));
+    assert_eq!(fallbacks, 2 * u64::from(KNOTS_PER_ARM));
+    assert!(
+        tube.knots()
+            .all(|k| ly(&k.centre()).iter().all(|c| c.is_finite()))
+    );
+}
+
+/// P10.T6.a's fallback: a kernel tracer nearer the pole's line than a tenth of the kernel's mean
+/// radius leaves the angle ill-posed, so every knot of the arm it lies in keeps the Cartesian
+/// fit, and none of the other arm's.
+#[test]
+fn a_tracer_near_the_pole_s_line_keeps_the_cartesian_fit() {
+    let mut tracers = arc(KERNEL_TRACERS, 1.2);
+    let t = &tracers[0];
+    tracers[0] = Tracer::from_parts(
+        t.arm(),
+        t.release_step(),
+        t.released(),
+        t.weight(),
+        GalacticDisplacement::new(t.position().metres().map(|c| c / 20.0)),
+        t.velocity(),
+        t.psi(),
+        t.energy_offset_j_kg(),
+    );
+    let (_, fallbacks) = counted(&tracers);
+    assert_eq!(fallbacks, u64::from(KNOTS_PER_ARM));
 }
 
 /// The widths and dispersions are the tracers' offsets', measured about the centre line and the
@@ -1156,7 +1266,14 @@ mod milky_way {
         let mut writer = GoldenWriter::new();
         writer.header(crate::GENERATOR_VERSION.get());
         for (stream, (name, _, _)) in sprayed().streams.iter().enumerate() {
+            let before = cartesian_knots();
             let tube = tube(stream);
+            // The knots whose centre line kept the Cartesian fit (P10.T6.a's tips), so that a knot
+            // moving onto or off the fallback shows by name.
+            writer.line(&format!(
+                "{name}.cartesian_knots {}",
+                cartesian_knots() - before
+            ));
             let [trailing, leading] = [Arm::Trailing, Arm::Leading].map(|arm| tube.arm(arm));
             writer.line(&format!(
                 "{name}.tracers {} {}",

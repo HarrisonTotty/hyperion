@@ -8,14 +8,18 @@
 //!   the machine's threads less one. Measured (pod, 16 vCPU, 2026-10-30, the release profile):
 //!   2.12 s alone and 0.138 s on 16 threads, so the pool meets 0.2 s and ruling 146.3's fallback,
 //!   `τ_p ÷ 32`, is not applied; the table holds 90,256 bytes, its 512 knots 86,016.
-//! - `TubeTable::from_tracers`, the reduction of those tracers alone: 1.3 ms (pod, 16 vCPU).
+//! - `TubeTable::from_tracers`, the reduction of those tracers alone: 1.67 ms (pod, 16 vCPU,
+//!   2026-10-31), against 1.33 ms before its centre line was fitted in the orbital plane, one
+//!   `atan2` a kernel tracer (P10.T6.a's tips); the pool's build took 91 ms then, against 96 ms
+//!   before.
 //! - `TubeTable::cells_touching`, the cells a 50 ly sphere about `pal5_like`'s axis touches, which
 //!   P10.T9's query walks: 10.5 µs (pod, 16 vCPU), the scan for the segments included (module
 //!   documentation of `global_list::tube`, "Finding the segments").
 //! - `GlobalListSource`'s hits and census for a 50 ly sphere on `pal5_like`'s axis, its table
 //!   kept by the caller (P10.T9), against the plan's "about 160 [members generated] to find two",
 //!   which the setup prints for the sphere it times. Measured (pod, 16 vCPU, 2026-10-31, the
-//!   release profile): 9 generated and 3 returned; the hits 1.05 ms, the census 49 µs.
+//!   release profile, the tips fitted in the orbital plane): 9 generated and 3 returned; the hits
+//!   1.03 ms, the census 49 µs.
 
 use std::env::VarError;
 use std::hint::black_box;
