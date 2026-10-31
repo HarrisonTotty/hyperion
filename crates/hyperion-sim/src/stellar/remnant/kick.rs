@@ -708,17 +708,31 @@ pub(crate) fn stripped_mark_applied_under(
     (m0, comp): (SolarMasses, &Composition),
     rules: StellarRules,
 ) -> Death {
-    let collapse = matches!(
+    if !mark_can_apply(&death) || !binarity::is_stripped_under(draws.stripped(), m0, comp, rules) {
+        return death;
+    }
+    stripped_by_companion(death)
+}
+
+/// Whether `death` is one that the companion-stripped mark marks where it is set
+/// ([`stripped_mark_applied_under`]): a collapse by an iron core, electron capture or complete
+/// fallback.
+#[must_use]
+pub(crate) fn mark_can_apply(death: &Death) -> bool {
+    matches!(
         CollapseChannel::of(death.kind()),
         Some(
             CollapseChannel::IronCore
                 | CollapseChannel::ElectronCapture
                 | CollapseChannel::CompleteFallback
         )
-    );
-    if !collapse || !binarity::is_stripped_under(draws.stripped(), m0, comp, rules) {
-        return death;
-    }
+    )
+}
+
+/// `death` with its progenitor stripped by a companion, as [`stripped_mark_applied_under`] marks a
+/// collapse whose mark is set.
+#[must_use]
+pub(crate) fn stripped_by_companion(death: Death) -> Death {
     let p = death.progenitor();
     let progenitor = ProgenitorAtDeath::new(
         p.co_core_mass(),

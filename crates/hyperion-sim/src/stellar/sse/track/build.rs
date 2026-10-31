@@ -14,9 +14,14 @@
 //! segment depends only on those before it, so [`Track::to_age`](super::Track::to_age)'s segments
 //! are bit for bit [`Track::full`](super::Track::full)'s.
 
+use std::cell::OnceCell;
 use std::error::Error;
 use std::fmt;
 
+use crate::galaxy::displaced::binarity;
+use crate::rng::Mark;
+use crate::stellar::draws::StarDraws;
+use crate::stellar::fates::STRIPPED_WINDOW;
 use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::white_dwarf::{self, WhiteDwarfCore};
@@ -292,11 +297,25 @@ pub(crate) struct Builder<'a> {
     /// The star's remnant draws, which decide an iron core's collapse under
     /// [`RemnantRecipe::MandelMuller2020`](crate::stellar::remnant::RemnantRecipe).
     pub(super) remnant_draws: RemnantDraws,
-    /// Whether the star's provisional companion-stripped mark is set (plan 06, design note 11):
-    /// it widens the electron-capture window ([`Builder::stripped_by_companion`]).
-    pub(super) companion_stripped: bool,
+    /// The star's provisional companion-stripped mark (plan 06, design note 11): it widens the
+    /// electron-capture window ([`Builder::stripped_by_companion`]).
+    companion_stripped: CompanionMark,
     pub(super) resolution: Resolution,
     pub(super) keep: Keep,
+}
+
+/// A star's provisional companion-stripped mark as its track holds it.
+#[derive(Debug)]
+enum CompanionMark {
+    /// Set or not, as given.
+    Known(bool),
+    /// The mark `mark` of a star of initial mass `m0` inside [`STRIPPED_WINDOW`], not yet read
+    /// against the share: `read` holds it once read.
+    Unread {
+        mark: Mark,
+        m0: SolarMasses,
+        read: OnceCell<bool>,
+    },
 }
 
 impl<'a> Builder<'a> {
@@ -324,7 +343,7 @@ impl<'a> Builder<'a> {
             options,
             eta,
             remnant_draws,
-            companion_stripped: false,
+            companion_stripped: CompanionMark::Known(false),
             resolution,
             keep,
         }
@@ -349,8 +368,58 @@ impl<'a> Builder<'a> {
     #[must_use]
     pub(crate) fn stripped_by_companion(self, stripped: bool) -> Self {
         Self {
-            companion_stripped: stripped,
+            companion_stripped: CompanionMark::Known(stripped),
             ..self
+        }
+    }
+
+    /// This builder for a star of initial mass `m0` whose mark is that of `draws`: set if it lies
+    /// inside [`STRIPPED_WINDOW`] and its mark below plan 11's stripped share at the star
+    /// (`is_companion_stripped`), which is read only where the window asks for it
+    /// ([`Builder::by_companion_mark`]).
+    #[must_use]
+    pub(crate) fn with_companion_mark(self, m0: SolarMasses, draws: &StarDraws) -> Self {
+        let (lo, hi) = STRIPPED_WINDOW;
+        let companion_stripped = if (lo..=hi).contains(&m0.value()) {
+            CompanionMark::Unread {
+                mark: draws.stripped(),
+                m0,
+                read: OnceCell::new(),
+            }
+        } else {
+            CompanionMark::Known(false)
+        };
+        Self {
+            companion_stripped,
+            ..self
+        }
+    }
+
+    /// `of(stripped)` at the star's companion-stripped mark: at once where the mark is known, and
+    /// otherwise at both values, the mark read only where they differ. The window is the mark's
+    /// only reader, and a star it does not split never pays for the share, whose exact path builds
+    /// a track and a quadrature of about 3.5 ms for a star with a helium excess (the second
+    /// population's members, P09.T10; 0.7 ms of track and 2.8 ms of quadrature, measured on a pod).
+    pub(super) fn by_companion_mark<T: PartialEq>(&self, of: impl Fn(bool) -> T) -> T {
+        match &self.companion_stripped {
+            CompanionMark::Known(stripped) => of(*stripped),
+            CompanionMark::Unread { mark, m0, read } => {
+                let (single, stripped) = (of(false), of(true));
+                if single == stripped
+                    || !*read.get_or_init(|| {
+                        binarity::is_stripped_under(
+                            *mark,
+                            *m0,
+                            self.composition,
+                            self.options.rules(),
+                        )
+                    })
+                {
+                    single
+                } else {
+                    stripped
+                }
+            }
         }
     }
 
@@ -416,7 +485,7 @@ impl<'a> Builder<'a> {
                     entry_mass.map_or_else(String::new, |m| format!(" with {} M☉", m.value()));
                 panic!(
                     "the track of a star entering its life{with} ({:?}, {:?}, {:?}, {:?}, \
-                     companion-stripped mark {}) stalled: {error}",
+                     companion-stripped mark {:?}) stalled: {error}",
                     self.composition,
                     self.eta,
                     self.options,

@@ -705,12 +705,7 @@ impl Track {
             build::Keep::Track,
         )
         .with_helium(helium)
-        .stripped_by_companion(is_companion_stripped_under(
-            m0,
-            comp,
-            draws,
-            options.rules(),
-        ))
+        .with_companion_mark(m0, draws)
         .run(m0.value(), age_max);
         Self {
             coeffs,
@@ -1305,10 +1300,39 @@ pub(crate) fn fate_of(
     draws: &StarDraws,
     options: TrackOptions,
 ) -> Fate {
+    lifetime_build(m0, comp, draws, options, None)
+        .expect("a build with no age to stop at runs to the star's death")
+}
+
+/// The fate of [`Track::to_age_with`]'s track of the same arguments, if that build reaches the
+/// death: the build stops at the same segment, and the fate is [`Track::fate_with`] of the
+/// star's own remnant draws, bit for bit, from a build that keeps no segment (the cost of
+/// [`lifetime_of`] for a star that dies by `age_max`, less for one that does not).
+#[must_use]
+pub(crate) fn fate_to_age(
+    m0: SolarMasses,
+    comp: &Composition,
+    draws: &StarDraws,
+    options: TrackOptions,
+    age_max: Years,
+) -> Option<Fate> {
+    lifetime_build(m0, comp, draws, options, Some(age_max.value().max(0.0)))
+}
+
+/// [`Track::build`]'s build at the generator's resolution, keeping only the fate: `None` if it
+/// stops at the segment holding `age_max` before the star's death.
+#[must_use]
+fn lifetime_build(
+    m0: SolarMasses,
+    comp: &Composition,
+    draws: &StarDraws,
+    options: TrackOptions,
+    age_max: Option<f64>,
+) -> Option<Fate> {
     let coeffs = ZCoeffs::new(comp.z_fit());
     let m0 = checked_initial_mass(m0);
     let eta = reimers_eta(draws.eta().value());
-    let outcome = Builder::new(
+    Builder::new(
         &coeffs,
         comp,
         options,
@@ -1317,16 +1341,9 @@ pub(crate) fn fate_of(
         Resolution::GENERATOR,
         build::Keep::Lifetime,
     )
-    .stripped_by_companion(is_companion_stripped_under(
-        m0,
-        comp,
-        draws,
-        options.rules(),
-    ))
-    .run(m0.value(), None);
-    outcome
-        .fate
-        .expect("a build with no age to stop at runs to the star's death")
+    .with_companion_mark(m0, draws)
+    .run(m0.value(), age_max)
+    .fate
 }
 
 /// Whether the companion-stripped mark of `draws` is set for a star of initial mass `m0` and
@@ -1409,12 +1426,7 @@ impl Track {
             Resolution::GENERATOR,
             build::Keep::Track,
         )
-        .stripped_by_companion(is_companion_stripped_under(
-            m0,
-            comp,
-            draws,
-            options.rules(),
-        ))
+        .with_companion_mark(m0, draws)
         .zero_age_main_sequence_segment(m0.value())
         .segment;
         if !segment.knots.is_empty() {
@@ -1567,12 +1579,7 @@ pub(crate) fn remnant_of(
         Resolution::GENERATOR,
         build::Keep::Remnant,
     )
-    .stripped_by_companion(is_companion_stripped_under(
-        m0,
-        comp,
-        draws,
-        options.rules(),
-    ))
+    .with_companion_mark(m0, draws)
     .run(m0.value(), None);
     let fate = outcome
         .fate

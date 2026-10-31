@@ -51,7 +51,7 @@ use crate::stellar::photometry::{absolute_magnitude_v_under, colour_b_v_under};
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::{
     BlackHole, CompactRemnant, Death, DeathKind, NatalKick, NeutronStar, PulsarState, RemnantKind,
-    StandardKickLaw, stripped_mark_applied_under,
+    StandardKickLaw, mark_can_apply, stripped_by_companion, stripped_mark_applied_under,
 };
 use crate::stellar::rotation::{self, Activity, Magnetism, Rotation};
 use crate::stellar::rules::StellarRules;
@@ -345,12 +345,7 @@ impl StarModel {
         age_at_epoch: Years,
         rules: StellarRules,
     ) -> Result<Self, BuildStarModelError> {
-        if !(substellar::MIN_MASS.value()..=MAX_STAR_MASS.value()).contains(&m0.value()) {
-            return Err(BuildStarModelError::MassOutsideRange(m0));
-        }
-        if !age_at_epoch.value().is_finite() {
-            return Err(BuildStarModelError::AgeNotFinite(age_at_epoch));
-        }
+        check_star_inputs(m0, age_at_epoch)?;
         let mut model = Self {
             initial_mass: m0,
             composition,
@@ -823,6 +818,128 @@ impl StarModel {
                 )
             })),
         }
+    }
+}
+
+/// [`StarModel::new_under`]'s checks of a star's initial mass `m0` and its age at the epoch.
+///
+/// # Errors
+///
+/// As [`StarModel::new`].
+fn check_star_inputs(m0: SolarMasses, age_at_epoch: Years) -> Result<(), BuildStarModelError> {
+    if !(substellar::MIN_MASS.value()..=MAX_STAR_MASS.value()).contains(&m0.value()) {
+        return Err(BuildStarModelError::MassOutsideRange(m0));
+    }
+    if !age_at_epoch.value().is_finite() {
+        return Err(BuildStarModelError::AgeNotFinite(age_at_epoch));
+    }
+    Ok(())
+}
+
+/// A star's remnant, decided without its track: the [`remnant`](StarModel::remnant) of the star
+/// [`StarModel::new_under`] builds of the same arguments, and what its
+/// [`natal_kick`](StarModel::natal_kick) is judged to be, bit for bit, from builds that keep no
+/// segment (P09.T10's member draws, which ask it of every attempt of a remnant class).
+///
+/// The model's track reaches the death if it dies by the end of the clock window, in the segment
+/// holding it at the latest, and its remnant stage is then the death that track gives
+/// (`sse::fate_to_age`, which stops where it stops); otherwise the remnant is the rest of its
+/// life's (`sse::fate_of`) and it has no kick yet. A draw reads the kick only of an attempt whose
+/// remnant is of the kind it wants, so the kick, with the companion-stripped mark it reads, is found
+/// when asked.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RemnantFate {
+    death: Death,
+    remnant: CompactRemnant,
+    /// Whether the model's track reaches the death, which gives the remnant its kick.
+    kicked: bool,
+    track_mass: SolarMasses,
+    composition: Composition,
+    draws: StarDraws,
+    rules: StellarRules,
+}
+
+impl RemnantFate {
+    /// The remnant of the star of initial mass `m0`, `composition` and `draws` whose age at the
+    /// epoch is `age_at_epoch`, under the stellar stage's `rules`, or `None` for an object below
+    /// 0.1 M☉, which leaves none.
+    ///
+    /// # Errors
+    ///
+    /// As [`StarModel::new`].
+    pub(crate) fn of(
+        m0: SolarMasses,
+        composition: &Composition,
+        draws: StarDraws,
+        age_at_epoch: Years,
+        rules: StellarRules,
+    ) -> Result<Option<Self>, BuildStarModelError> {
+        check_star_inputs(m0, age_at_epoch)?;
+        if m0 < sse::MIN_INITIAL_MASS {
+            return Ok(None);
+        }
+        // `StarModel::new_under`'s track, to the star's age at the end of the clock window.
+        let end = age_at_epoch.value() + ClockWindow::END.since_epoch().as_julian_years_f64();
+        let track_mass = track_mass_of(m0);
+        let options = TrackOptions::default().with_rules(rules);
+        let reached = sse::fate_to_age(
+            track_mass,
+            composition,
+            &draws,
+            options,
+            Years::new(if end > 0.0 { end } else { 0.0 }),
+        );
+        let (fate, kicked) = match reached {
+            Some(fate) => (fate, true),
+            None => (
+                sse::fate_of(track_mass, composition, &draws, options),
+                false,
+            ),
+        };
+        Ok(Some(Self {
+            death: fate.death,
+            remnant: fate.remnant,
+            kicked,
+            track_mass,
+            composition: *composition,
+            draws,
+            rules,
+        }))
+    }
+
+    /// The remnant the star leaves or will leave: [`StarModel::remnant`].
+    #[must_use]
+    pub(crate) const fn remnant(&self) -> CompactRemnant {
+        self.remnant
+    }
+
+    /// Whether [`StarModel::natal_kick`] is `None` or `fits` it: `Option::is_none_or` of the kick,
+    /// which is `None` for a star alive at the end of the clock window and where it leaves nothing.
+    ///
+    /// The companion-stripped mark is read against its share only where the kicks of the death with
+    /// and without it ([`RemnantStage::new`]) are judged apart, since the share's exact path costs
+    /// about 3.5 ms for a star with a helium excess (P09.T10's members of the second population).
+    #[must_use]
+    pub(crate) fn kick_is_none_or(&self, fits: impl Fn(&NatalKick) -> bool) -> bool {
+        if !self.kicked {
+            return true;
+        }
+        let law = StandardKickLaw::under(self.rules);
+        let judged = |death: &Death| {
+            law.natal_kick(death, &self.remnant, &self.draws)
+                .is_none_or(|kick| fits(&kick))
+        };
+        let unmarked = judged(&self.death);
+        if !mark_can_apply(&self.death) || unmarked == judged(&stripped_by_companion(self.death)) {
+            return unmarked;
+        }
+        let death = stripped_mark_applied_under(
+            self.death,
+            &self.draws,
+            (self.track_mass, &self.composition),
+            self.rules,
+        );
+        judged(&death)
     }
 }
 
@@ -3776,6 +3893,81 @@ mod tests {
                 .map(|a| (a - age).abs())
                 .fold(f64::INFINITY, f64::min);
             assert!(nearest <= 4.0 * f64::EPSILON * age, "{b}: {nearest} yr off");
+        }
+    }
+
+    /// [`RemnantFate`] is the star model's remnant, and judges its kick as the model's would, bit
+    /// for bit: over 0.05–120 M☉, at the solar composition and at a metal-poor one with a helium
+    /// excess (whose stripped share takes the exact path), at ages where the star is young, has
+    /// just died and is long dead, with the companion-stripped mark never set, always set and as
+    /// drawn, for kicks judged against speeds from 0.5 to 300 km/s and a low-mode kick on a pair's
+    /// systemic speed of 2 or 30 km/s (P09.T10's member draws ask it of every remnant attempt).
+    #[test]
+    fn a_remnant_fate_is_the_star_model_s_remnant_and_kick() {
+        use crate::galaxy::displaced::binarity::NEVER_STRIPPED;
+        use crate::stellar::draws::StarDrawsParts;
+        use crate::stellar::remnant::KickMode;
+        use crate::units::KilometresPerSecond;
+
+        let rules = StellarRules::of_version(GENERATOR_VERSION);
+        let helium = Composition::from_fe_h(Dex::new(-0.65), HeliumExcess::new(0.04));
+        let masses = [0.05, 0.9, 2.5, 6.6, 7.4, 8.25, 9.0, 10.9, 15.0, 30.0, 120.0];
+        let marks = [
+            NEVER_STRIPPED,
+            Mark::from_word(0),
+            StarDrawsParts::MEDIAN.stripped,
+        ];
+        for comp in [Composition::SOLAR, helium] {
+            for m0 in masses.map(SolarMasses::new) {
+                for age in [3.0e7, 1.0e9, 1.28e10].map(Years::new) {
+                    for (i, mark) in marks.into_iter().enumerate() {
+                        let parts = StarDraws::for_attempt(
+                            Seed::new(SEED),
+                            BodyId::new(
+                                crate::id::SystemId::from_raw(0x4200_2cb2_0000_0001).unwrap(),
+                                0,
+                            ),
+                            u32::try_from(i).unwrap(),
+                        )
+                        .parts()
+                        .clone();
+                        let draws = StarDraws::from_parts(StarDrawsParts {
+                            stripped: mark,
+                            ..parts
+                        });
+                        let what = format!("{} M☉, {comp:?}, {age:?}, mark {mark:?}", m0.value());
+                        let star =
+                            StarModel::new_under(m0, comp, draws.clone(), age, rules).unwrap();
+                        let fate = RemnantFate::of(m0, &comp, draws, age, rules).unwrap();
+                        assert_eq!(
+                            fate.as_ref().map(RemnantFate::remnant),
+                            star.remnant(),
+                            "{what}"
+                        );
+                        let Some(fate) = fate else {
+                            continue;
+                        };
+                        for (v_eff, systemic) in [0.5, 3.0, 18.6, 40.0, 300.0]
+                            .into_iter()
+                            .flat_map(|v| [(v, 2.0), (v, 30.0)])
+                        {
+                            let fits = |kick: &NatalKick| {
+                                let judged = if kick.mode() == KickMode::Low {
+                                    systemic
+                                } else {
+                                    KilometresPerSecond::from(kick.speed()).value()
+                                };
+                                judged < v_eff
+                            };
+                            assert_eq!(
+                                fate.kick_is_none_or(fits),
+                                star.natal_kick().is_none_or(|kick| fits(&kick)),
+                                "{what}, {v_eff} km/s, {systemic} km/s"
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 }

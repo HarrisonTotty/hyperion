@@ -5263,3 +5263,9 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   `galaxy.centre_motion().influence_radius()`, every mass inside, not the cluster-only
   `CentreProfile::influence_radius` (10⁴ ly where the hole outweighs the cluster). The server
   tests' seed serves 111.09 ly; `features.golden` and the client's `aCentreDetail` moved with it.
+- **P09.T10 perf, the remnant attempts bit for bit (lane `galaxy-centre-core`, 2026-10-31, at 24;
+  no output moves).** `remnant_fits` reads `stellar::system::RemnantFate` (`of`, `remnant`,
+  `kick_is_none_or`), from `sse::fate_to_age` and `fate_of`, not a `StarModel`. The track builder
+  holds the companion-stripped mark unread (`Builder::with_companion_mark`) and reads it only where
+  the capture window's two widths disagree; the remnant stage, only where the kick's verdict
+  depends on it. Dwarf-core, centre and global-list members share `remnant_fits`.

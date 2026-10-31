@@ -1114,15 +1114,17 @@ impl Builder<'_> {
     /// and one whose `m_c_bagb` the window's width plus 0.1 M☉ heavier does not yet lies below it,
     /// since `m_c_bagb` grows with the mass: the root is found only between (plan 06's integrator
     /// speed; it costs about 110 `pow` calls, and every white dwarf of the AGB asked for it).
+    ///
+    /// The mark is read only where the two widths disagree ([`Builder::by_companion_mark`]).
     #[must_use]
     pub(super) fn captures_electrons(&self, m0: f64) -> bool {
         const ABOVE: f64 = 0.01;
         const MARGIN: f64 = 0.1;
         match self.options.remnant() {
             RemnantRecipe::Hurley2000 => false,
-            RemnantRecipe::MandelMuller2020 => {
+            RemnantRecipe::MandelMuller2020 => self.by_companion_mark(|stripped| {
                 let widths = self.options.capture_windows();
-                let width = if self.companion_stripped {
+                let width = if stripped {
                     widths.companion_stripped()
                 } else {
                     widths.single()
@@ -1135,7 +1137,7 @@ impl Builder<'_> {
                 ElectronCaptureWindows::new(c)
                     .window(width)
                     .contains(SolarMasses::new(m0))
-            }
+            }),
         }
     }
 

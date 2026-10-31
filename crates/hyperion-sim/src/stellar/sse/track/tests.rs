@@ -1284,3 +1284,57 @@ fn the_default_options_debug_as_they_did_before_the_windows() {
         "{text}"
     );
 }
+
+/// The fate of a star whose builder holds its companion-stripped mark as `with_companion_mark`
+/// does, read only where the electron-capture window asks, is the fate of one given the mark read
+/// first (`is_companion_stripped_under`), bit for bit: across the stripped window and the
+/// window's edges at two metallicities, one of them with a helium excess, whose share takes the
+/// exact path, and with the mark never set, set wherever the share is above zero, and as drawn.
+#[test]
+fn a_companion_mark_read_where_the_window_asks_gives_the_fate_read_first() {
+    use crate::galaxy::displaced::binarity::NEVER_STRIPPED;
+    use crate::rng::Mark;
+
+    let rules = StellarRules::of_version(GENERATOR_VERSION);
+    let options = TrackOptions::default().with_rules(rules);
+    let helium = Composition::from_fe_h(Dex::new(-0.65), HeliumExcess::new(0.04));
+    let masses = [5.4, 5.6, 6.6, 7.0, 7.4, 8.1, 8.25, 8.35, 9.0, 10.9, 11.2];
+    for comp in [composition(0.02), helium] {
+        for m0 in masses.map(SolarMasses::new) {
+            for mark in [
+                NEVER_STRIPPED,
+                Mark::from_word(0),
+                StarDrawsParts::MEDIAN.stripped,
+            ] {
+                let draws = StarDraws::from_parts(StarDrawsParts {
+                    stripped: mark,
+                    ..StarDrawsParts::MEDIAN
+                });
+                let coeffs = ZCoeffs::new(comp.z_fit());
+                let read_first = Builder::new(
+                    &coeffs,
+                    &comp,
+                    options,
+                    reimers_eta(draws.eta().value()),
+                    RemnantDraws::of(&draws),
+                    Resolution::GENERATOR,
+                    build::Keep::Lifetime,
+                )
+                .stripped_by_companion(is_companion_stripped_under(m0, &comp, &draws, rules))
+                .run(m0.value(), None)
+                .fate
+                .expect("a full build reaches the death");
+                let what = format!("{} M☉, {comp:?}, mark {mark:?}", m0.value());
+                assert_eq!(fate_of(m0, &comp, &draws, options), read_first, "{what}");
+                let track = Track::full_with(m0, &comp, &draws, options);
+                assert_eq!(track.death(), Some(read_first.death), "{what}");
+                assert_eq!(track.remnant(), Some(read_first.remnant), "{what}");
+                assert_eq!(
+                    remnant_of(m0, &comp, &draws, options).1,
+                    read_first,
+                    "{what}"
+                );
+            }
+        }
+    }
+}
