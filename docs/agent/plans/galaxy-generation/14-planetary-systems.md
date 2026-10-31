@@ -33299,19 +33299,19 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     349 h (a ÷ `L_Ro` 0.35) holds none; Venus none.
   - A step is molten at `Crust::Molten` (`ClimateBody::crust`, new) or at or over
     `SILICATE_SOLIDUS`; the record, at `MagmaOcean`.
-  - The census (`system/cap_balance_tests.rs`) moves 13 records (`MOVERS`) and 2 in their last
-    bits (`NUDGED`, 41ffecb600000007.0300 and 2200365a7ff80000.0300): 01fffb2be0000000.0500, a
-    last-bits record at the lane's base, is a 1.04 bar `Snowball` at 191.5 K. The cap
-    `partition_over` reads, which the passes' area mix reads too, takes close_binary
-    42002cb200000009.0700 to a 0.36 bar `Snowball` at 122 K (agreed by main).
+  - The census (`system/cap_balance_tests.rs`) moves 14 records (`MOVERS`, 41ffecb5ffc00000.0300
+    the scope's own) and 4 in their last bits (`NUDGED`). The cap `partition_over` reads, which
+    the passes' area mix reads too, takes close_binary 42002cb200000009.0700 to a 0.36 bar
+    `Snowball` at 122 K (agreed by main).
   - "Settled" is the amendment's (main, 2026-10-31): one more partition over the span at the
     published state moves a mover's CO₂ by under 5%, read through the test-only
     `atmosphere::settled_log`; its failures are listed, not pinned. Each mover's line prints a ÷
     `L_Ro` and `T_c` at its published state's column, the gates aside
     (`hooks::surface::step_cap_figures`).
-  - The settled check fails 10 of the 13 movers, each at the steps' limit (33 evaluations), among
-    them solar_like's .0400 and close_binary's .0800, .e401 and .e501, which 26 re-blesses.
-    Pending main's ruling.
+  - The scope reads CO₂'s inventory weight (`CapBody::carbon_dioxide_inventory`) against the other
+    gases' step partials, not CO₂'s airborne partial pressure, which the cap itself sets: read so,
+    ten movers cycled across the gate (main, 2026-10-31). Every mover now settles, and the settled
+    check asserts it.
   - Every locked world is outside the cap by `rotates` at both sites; the census asserts no mover
     is locked.
   - `locked_climate_tests::deck_alone` sets the cap back to `Held`.

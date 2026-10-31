@@ -2982,7 +2982,9 @@ fn under_the_cap_balance_the_passes_cap_is_the_record_s() {
 
 /// P14.T53.h's scope: under the cap's balance a column whose largest gas is CO₂ holds a cap on a
 /// rotator, and none on the same body locked 1:1, over a molten crust, at or over the silicate
-/// solidus, or where another gas outweighs its CO₂.
+/// solidus, or where another gas outweighs its CO₂'s inventory. A gas that outweighs its airborne
+/// CO₂ alone, as N₂ does once the cap has drawn the CO₂ down, leaves the cap in place, so that the
+/// cap cannot switch itself off.
 #[test]
 fn the_cap_lies_only_under_a_rotator_s_carbon_dioxide_air() {
     use crate::planetary::derive::atmosphere::SILICATE_SOLIDUS;
@@ -3014,8 +3016,22 @@ fn the_cap_lies_only_under_a_rotator_s_carbon_dioxide_air() {
         };
         assert_eq!(cap(&molten, t, &partials), None);
         assert_eq!(cap(&body, SILICATE_SOLIDUS, &partials), None);
+        let inventory = body.inventory.of(Gas::CarbonDioxide).value();
+        let nitrogen = partials.of(Gas::Nitrogen).value();
+        assert!(
+            nitrogen < inventory,
+            "{nitrogen} Pa of N₂, {inventory} Pa of CO₂"
+        );
+        let drawn_down = PartialPressures::from_fn(|gas| match gas {
+            Gas::CarbonDioxide => Pascals::new(0.5 * nitrogen),
+            _ => partials.of(gas),
+        });
+        assert!(
+            cap(&body, t, &drawn_down).is_some(),
+            "N₂ over the airborne CO₂ alone"
+        );
         let nitrogen_led = PartialPressures::from_fn(|gas| match gas {
-            Gas::Nitrogen => Pascals::new(2.0 * partials.of(Gas::CarbonDioxide).value()),
+            Gas::Nitrogen => Pascals::new(2.0 * inventory),
             _ => partials.of(gas),
         });
         assert_eq!(cap(&body, t, &nitrogen_led), None);

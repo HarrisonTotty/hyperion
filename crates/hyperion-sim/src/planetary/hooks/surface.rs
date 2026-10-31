@@ -1152,6 +1152,10 @@ impl SurfaceConditions {
                 stellar_flux: inputs.stellar_flux,
                 heat_flow: inputs.heat_flow,
                 molten: inputs.atmosphere.state() == SurfaceState::MagmaOcean,
+                carbon_dioxide_inventory: inputs
+                    .atmosphere
+                    .inventory_weights()
+                    .of(Gas::CarbonDioxide),
             },
             &column,
             inputs.atmosphere.partial_pressures(),
@@ -2198,6 +2202,7 @@ pub(crate) fn step_climate(
             stellar_flux: body.stellar_flux,
             heat_flow: body.heat_flow,
             molten: body.crust == Crust::Molten || surface_temperature >= SILICATE_SOLIDUS,
+            carbon_dioxide_inventory: body.inventory.of(Gas::CarbonDioxide),
         },
         &column,
         partials,
@@ -2365,6 +2370,10 @@ pub(crate) struct CapBody {
     pub(crate) heat_flow: WattsPerSquareMetre,
     /// Whether its surface is molten, T13.c's `MagmaOcean`, on which nothing condenses.
     pub(crate) molten: bool,
+    /// Its CO₂'s inventory as a column weight M g ÷ 4πR², before any of it condensed: the CO₂ a
+    /// cap could hold ([`Atmosphere::inventory_weights`], [`ClimateBody::inventory`]), which
+    /// [`carbon_dioxide_cap`]'s scope reads.
+    pub(crate) carbon_dioxide_inventory: Pascals,
 }
 
 /// The temperature of a rotator's permanent CO₂ cap over the column `column` of partial
@@ -2395,9 +2404,16 @@ pub(crate) struct CapBody {
 /// `T_a`. It is `None` where `ε_c` σ `T_a`⁴ does not exceed the light and heat absorbed, so that no
 /// cap lies below the air; where `T_c` is not below CO₂'s triple point (the registry's 216.592 K,
 /// Span and Wagner 1996), since the cap is frost; on a slow rotator, a ÷ `L_Ro` = 2Ωa ÷ c under
-/// [`CAP_ROSSBY_RATIO`], c the column's gravity waves' speed (Koll 2022, §3.1); where the
-/// column's largest gas by partial pressure is not CO₂; on a body that does not turn ([`rotates`])
-/// or whose surface is molten; and under version 25's rules and before ([`CapBalanceRules`]).
+/// [`CAP_ROSSBY_RATIO`], c the column's gravity waves' speed (Koll 2022, §3.1); where the column
+/// holds no airborne CO₂; where another gas's partial pressure exceeds CO₂'s inventory as a column
+/// weight ([`CapBody::carbon_dioxide_inventory`]), the CO₂ the cap could hold before any of it
+/// condensed; on a body that does not turn ([`rotates`]) or whose surface is molten; and under
+/// version 25's rules and before ([`CapBalanceRules`]).
+///
+/// The scope reads CO₂'s inventory, not its airborne partial pressure, because the cap sets that
+/// partial pressure: read on it, a cap that drew CO₂ under N₂ switched itself off, the CO₂ came
+/// back, and the passes' steps cycled with a period of 2 to 6 across the gate, which has no fixed
+/// point (P14.T53.h's settled check; main, 2026-10-31).
 #[must_use]
 pub(crate) fn carbon_dioxide_cap(
     body: &CapBody,
@@ -2408,12 +2424,14 @@ pub(crate) fn carbon_dioxide_cap(
         return None;
     }
     let carbon_dioxide = partials.of(Gas::CarbonDioxide).value();
-    // A NaN partial pressure holds no cap.
+    let inventory = body.carbon_dioxide_inventory.value();
+    // A NaN partial pressure or inventory holds no cap.
     if carbon_dioxide.is_nan()
         || carbon_dioxide <= 0.0
+        || inventory.is_nan()
         || Gas::ALL
             .iter()
-            .any(|&gas| partials.of(gas).value() > carbon_dioxide)
+            .any(|&gas| gas != Gas::CarbonDioxide && partials.of(gas).value() > inventory)
     {
         return None;
     }
@@ -2530,6 +2548,7 @@ pub(crate) fn step_cap_figures(
         stellar_flux: body.stellar_flux,
         heat_flow: body.heat_flow,
         molten: false,
+        carbon_dioxide_inventory: body.inventory.of(Gas::CarbonDioxide),
     };
     Some(CapFigures {
         rossby: cap_rossby_ratio(&column, omega_rad_per_s),
