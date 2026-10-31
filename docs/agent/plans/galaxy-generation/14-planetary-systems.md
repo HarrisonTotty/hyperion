@@ -7768,6 +7768,14 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - _Accept:_ `cargo test -p hyperion-sim planetary::chem::condense`;
     `cargo test -p hyperion-sim planetary::system::air`; `cargo test -p hyperion-protocol`;
     `cargo test -p hyperion-server convert`; the client's vitest; `just gen-protocol` clean.
+- **P14.T52.g A deck's mode drawn on its own column** (behind `DECK_PROFILE_VERSION` = 26;
+  research-r08-t16a §1, 2026-10-30). A loop deck's mode takes min(f_sed, s) as its profile's
+  exponent, s the saturation's log-slope at its base, since AM01's balance follows its saturation
+  where f_sed exceeds s. Its τ, column and size, and its deck's f_sed, are unchanged.
+  - _Files:_ `planetary/chem/condense.rs` and its tests; `planetary/testing.rs`; the protocol's
+    `planetary/record/surface.rs` docs and bindings; comments in `model.ts` and `aerosol.ts`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::chem::condense`;
+    `cargo test -p hyperion-sim planetary::hooks`; `just gen-protocol` clean.
 
 #### P14.T53 Escape, special states and life
 
