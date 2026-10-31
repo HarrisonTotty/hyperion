@@ -41,7 +41,7 @@ use crate::galaxy::displaced::binarity::{self, NEVER_STRIPPED};
 use crate::galaxy::features::cluster::ClusterModel;
 use crate::galaxy::features::interior::ClassKind;
 use crate::galaxy::features::interior::abundances::{
-    IRON_SPREAD_SHARE, IRON_SPREAD_SIGMA, helium_excess_max,
+    IRON_SPREAD_SHARE, IRON_SPREAD_SIGMA, first_population_share, helium_excess_max,
 };
 use crate::galaxy::features::interior::counts::WHITE_DWARF_PROGENITOR_MAX;
 use crate::id::{BodyId, SystemId};
@@ -103,7 +103,8 @@ fn corner_draws() -> StarDraws {
 }
 
 /// The corners of the compositions of `model`'s members: its \[Fe/H\] (± four iron spreads, if it
-/// has one) with no helium excess and with its greatest ([`helium_excess_max`]).
+/// has one) with no helium excess and, if it has a second population, with its greatest
+/// ([`helium_excess_max`]).
 #[must_use]
 fn corners(model: &ClusterModel) -> Vec<Composition> {
     let fe_h = model.parameters().fe_h.value();
@@ -116,14 +117,18 @@ fn corners(model: &ClusterModel) -> Vec<Composition> {
     } else {
         &[0.0]
     };
-    let heliums = [0.0, helium_excess_max(model.initial_mass())];
+    let heliums: &[f64] = if first_population_share(model.initial_mass()) < 1.0 {
+        &[0.0, helium_excess_max(model.initial_mass())]
+    } else {
+        &[0.0]
+    };
     irons
         .iter()
         .flat_map(|iron| {
-            heliums.map(|helium| {
+            heliums.iter().map(move |helium| {
                 Composition::from_fe_h(
                     Dex::new(fe_h + iron * IRON_SPREAD_SIGMA),
-                    HeliumExcess::new(helium),
+                    HeliumExcess::new(*helium),
                 )
             })
         })
@@ -183,11 +188,10 @@ impl RemnantTable {
 /// to it does, since the stripped window may still open just under it.
 ///
 /// The edge is found by halving between [`CEILING_FLOOR`] and that progenitor, by exact fates
-/// (`sse::fate_of`) at the corners of the members' compositions, the cluster's [Fe/H] (± four
-/// iron spreads, if it has one) with no helium excess and with its greatest
-/// ([`helium_excess_max`]), and at [`corner_draws`]. The halving's lower end is kept, so its
-/// 0.04 M☉ step takes none of the margin. It costs some 8–30 lifetime builds, about 5–20 ms, once
-/// a cluster ([`ClusterModel::white_dwarf_ceiling`]).
+/// (`sse::fate_of`) at the corners of the members' compositions ([`corners`]) and at
+/// [`corner_draws`]. The halving's lower end is kept, so its 0.04 M☉ step takes none of the margin.
+/// It costs some 8–30 lifetime builds, about 3–20 ms, once a cluster
+/// ([`ClusterModel::remnant_table`]).
 #[must_use]
 pub(crate) fn white_dwarf_ceiling(model: &ClusterModel, rules: StellarRules) -> SolarMasses {
     let options = TrackOptions::default().with_rules(rules);
@@ -719,5 +723,91 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Before the 25 → 26 bump (the determinism audit's ask): every white-dwarf attempt the
+    /// tabulated remnants keep below a cluster's ceiling, over every cluster of the fixture whose
+    /// turn-off lies below it (its globulars, old open clusters and the nurseries' bound
+    /// clusters), is one its star's track keeps. Each cluster's attempts are at masses even from
+    /// its turn-off to its ceiling, twelve a globular's and three another's, at the corners of
+    /// its members' compositions, and at the draws of three attempts a globular's member and one
+    /// another's, on a pair at half the escape speed.
+    #[test]
+    #[ignore = "slow: some 51,000 clusters' ceilings and their white dwarfs' tracks"]
+    fn every_fixture_cluster_s_white_dwarfs_below_its_ceiling_are_their_tracks() {
+        let galaxy = galaxy();
+        let rules = galaxy.rules().stellar;
+        let (mut clusters, mut kept) = (0_u32, 0_u32);
+        for process in FeatureProcess::ALL {
+            let globular = process == FeatureProcess::Globular;
+            let (masses, attempts) = if globular { (12_u32, 3) } else { (3, 1) };
+            for feature in FeatureCatalogue::walk_process(galaxy, process) {
+                let Some(model) = ClusterModel::from_record(galaxy, &feature) else {
+                    continue;
+                };
+                let lo = model.turn_off_mass().value();
+                if lo >= WHITE_DWARF_PROGENITOR_MAX - CEILING_MARGIN {
+                    continue;
+                }
+                let ceiling = model.remnant_table(rules).white_dwarf_ceiling.value();
+                if lo >= ceiling {
+                    continue;
+                }
+                clusters += 1;
+                let v_eff = model.escape_speed_effective().value();
+                let system = SystemId::from(
+                    FeatureMemberId::new(
+                        feature.id().feature_ref(),
+                        MemberSlot::InCell {
+                            band: MassBand::C.layer(),
+                            level: 0,
+                            cell: [8, 8, 8],
+                            index: 0,
+                        },
+                    )
+                    .expect("a member's slot of every cluster"),
+                );
+                let speeds = (v_eff, 0.5 * v_eff);
+                for comp in corners(&model) {
+                    for i in 0..masses {
+                        let mass = lo + (ceiling - lo) * (f64::from(i) + 0.5) / f64::from(masses);
+                        for attempt in 0..attempts {
+                            let address = (galaxy.seed(), system, attempt);
+                            let fit = tabulated_fit(
+                                (ClassKind::WhiteDwarf, mass),
+                                &comp,
+                                address,
+                                (model.age(), speeds),
+                                &model,
+                                rules,
+                            );
+                            if fit != Some(true) {
+                                continue;
+                            }
+                            kept += 1;
+                            assert!(
+                                remnant_fits(
+                                    ClassKind::WhiteDwarf,
+                                    mass,
+                                    &comp,
+                                    address,
+                                    model.age(),
+                                    speeds,
+                                    rules,
+                                ),
+                                "{:?}: a white dwarf of {mass} M☉ ({comp:?}, attempt {attempt}) \
+                                 below its ceiling of {ceiling} M☉ that its track refuses",
+                                feature.id()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("{kept} white dwarfs kept below the ceilings of {clusters} clusters");
+        assert!(
+            clusters > 10_000 && kept > 50_000,
+            "{clusters} clusters, {kept} kept"
+        );
     }
 }

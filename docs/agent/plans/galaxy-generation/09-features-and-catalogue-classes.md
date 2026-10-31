@@ -5368,3 +5368,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   `white_dwarf_ceiling(rules)`; `tabulated_fit` takes `(kind, mass)` and the composition. A
   neutron-star attempt on a pair below `v_eff` is refused when it is unstripped (its mark read
   against the share) and above the cluster's highest `m_cc` plus `CAPTURE_MARGIN` (0.5 M☉).
+- **P09.T10, before the 26 bump (lane `galaxy-centre-core`, 2026-10-31).** The slow
+  `every_fixture_cluster_s_white_dwarfs_below_its_ceiling_are_their_tracks` (`members/remnants.rs`)
+  checks every white dwarf the table keeps below a ceiling against its track, over every fixture
+  cluster whose turn-off lies below it; run it by name before the bump. A cluster's ceiling now
+  takes its helium corner only if it has a second population.
