@@ -40,6 +40,12 @@
  *   each band asked baked (`bakeDeck`), and where the column needs it the correction over the deck
  *   prepared once and baked a band (`bakeDeckPolarisation`), so that one job carries everything the
  *   deck's route reads.
+ * - **Bin and channel shares** (R08.T14.d's bake time; the pool's remarks, "Bins"): a
+ *   `thick-bake-bins` or `deck-bake-bins` prepares and bakes its bins alone (`thick/bake.ts`'s
+ *   `prepareBake` and `bakeBins`, `thick/deck.ts`'s `bakeDeckBins`), a `polarisation-bake-channel`
+ *   or `deck-polarisation-channel` its render channel alone, and a gather converts the shares to
+ *   the band's tables. A body's bake lights are kept with its specs, by their slots and the
+ *   column's absorber terms, so that its other shares on a worker form none again.
  * - **The answer** is a structured copy of the reply, whose every buffer is transferred: the copy
  *   is made in the worker, off the render thread, and leaves the worker's own arrays (its kept
  *   assemblies, and any table a medium references, such as a cross-section's) attached.
@@ -71,21 +77,36 @@ import {
 import type { BakeSpectrum } from "./spectralColour";
 import type { PolarisationTable } from "./thick/polarisation";
 import {
+  bakeBins,
   bakeMultipleScattering,
+  gatherBins,
   type MsSourceTable,
   prepareBake,
+  THICK_BAKE_REFERENCE_BIN,
   type ThickBakeBand,
   thickBakeBands,
   type ThickBakeLight,
   thickBakeLights,
 } from "./thick/bake";
-import { bakeDeck, bakeDeckPolarisation, prepareDeck, prepareDeckPolarisation } from "./thick/deck";
+import {
+  bakeDeck,
+  bakeDeckBins,
+  bakeDeckPolarisation,
+  deckPolarisationChannel,
+  gatherDeckBins,
+  prepareDeck,
+  prepareDeckPolarisation,
+} from "./thick/deck";
 import { discBandFor, discReflectanceFor } from "./thick/discBake";
 import {
   bakePolarisationCorrection,
+  gatherChannels,
   needsPolarisationCorrection,
+  type PolarisationChannelShare,
+  polarisationChannel,
   preparePolarisation,
 } from "./thick/polarisation";
+import { CHANNEL_WAVELENGTHS_NM } from "./medium";
 
 /** How many bodies' assemblies, or absorber specs, a worker keeps, by key, the latest asked. */
 export const OPTICS_MEDIA_KEPT = 2;
@@ -108,10 +129,14 @@ interface HeldAbsorbers {
   readonly spectra: ReadonlyArray<BakeSpectrum>;
 }
 
-/** What a worker keeps of a body: its assembly where it made one, and its absorbers. */
+/**
+ * What a worker keeps of a body: its assembly where it made one, its absorbers, and the bake lights
+ * formed of them, by their slots and the column's absorber terms.
+ */
 interface HeldBody {
   readonly assembled: AssembledMedium | null;
   readonly absorbers: HeldAbsorbers;
+  readonly lights: Map<string, ReadonlyArray<ThickBakeLight>>;
 }
 
 /** One optics worker's state and its answers (see the module's remarks). */
@@ -139,7 +164,12 @@ export class OpticsJobs {
   async answer(request: OpticsRequest): Promise<OpticsAnswer> {
     let species: ReadonlyArray<string>;
     try {
-      species = lineSpeciesOf(request.input);
+      species =
+        request.kind === "thick-gather" ||
+        request.kind === "polarisation-gather" ||
+        request.kind === "deck-gather"
+          ? []
+          : lineSpeciesOf(request.input);
     } catch (error: unknown) {
       return failed(request, error);
     }
@@ -176,6 +206,27 @@ export class OpticsJobs {
         };
         break;
       }
+      case "thick-bake-bins": {
+        const band = oneBandOf(request.bands);
+        const lights = this.#bakeLights(request, options);
+        const prepared = prepareBake(
+          request.column,
+          lights,
+          undefined,
+          undefined,
+          undefined,
+          request.bins,
+        );
+        reply = {
+          kind: "thick-bins-baked",
+          id: request.id,
+          share: bakeBins(prepared, request.body, band),
+        };
+        break;
+      }
+      case "thick-gather":
+        reply = { kind: "thick-baked", id: request.id, tables: [gatherBins(request.shares)] };
+        break;
       case "disc-bake": {
         const table = discReflectanceFor(request.air, discBandsOf(request), () =>
           this.#discJ(request, options),
@@ -202,6 +253,27 @@ export class OpticsJobs {
         };
         break;
       }
+      case "polarisation-bake-channel": {
+        const band = oneBandOf(request.bands);
+        const wavelengthNm = CHANNEL_WAVELENGTHS_NM[request.channel];
+        const lights = this.#bakeLights(request, options);
+        const prepared = preparePolarisation(request.column, lights, {
+          wavelengthsNm: [wavelengthNm],
+        });
+        reply = {
+          kind: "polarisation-channel-baked",
+          id: request.id,
+          share: polarisationChannel(prepared, request.body, band, 0),
+        };
+        break;
+      }
+      case "polarisation-gather":
+        reply = {
+          kind: "polarisation-baked",
+          id: request.id,
+          tables: [gatherChannels(request.shares)],
+        };
+        break;
       case "deck-bake": {
         const lights = this.#bakeLights(request, options);
         const prepared = prepareDeck(request.column, lights, request.split);
@@ -216,6 +288,46 @@ export class OpticsJobs {
         reply = { kind: "deck-baked", id: request.id, tables, correction };
         break;
       }
+      case "deck-bake-bins": {
+        const band = oneBandOf(request.bands);
+        const lights = this.#bakeLights(request, options);
+        const prepared = prepareDeck(request.column, lights, request.split, {
+          bins: request.bins,
+        });
+        reply = {
+          kind: "deck-bins-baked",
+          id: request.id,
+          share: bakeDeckBins(prepared, request.body, band),
+        };
+        break;
+      }
+      case "deck-polarisation-channel": {
+        const band = oneBandOf(request.bands);
+        const wavelengthNm = CHANNEL_WAVELENGTHS_NM[request.channel];
+        let share: PolarisationChannelShare | null = null;
+        if (needsPolarisationCorrection(request.column)) {
+          const lights = this.#bakeLights(request, options);
+          // The correction reads the deck's layers alone: one bin of the upper medium is prepared,
+          // the reference bin, whose optics its layers are placed by.
+          const prepared = prepareDeck(request.column, lights, request.split, {
+            bins: [THICK_BAKE_REFERENCE_BIN],
+          });
+          const polarisation = prepareDeckPolarisation(prepared, lights, {
+            wavelengthsNm: [wavelengthNm],
+          });
+          share = deckPolarisationChannel(prepared, polarisation, request.body, band, 0);
+        }
+        reply = { kind: "deck-channel-baked", id: request.id, share };
+        break;
+      }
+      case "deck-gather":
+        reply = {
+          kind: "deck-baked",
+          id: request.id,
+          tables: [gatherDeckBins(request.decks)],
+          correction: request.channels === null ? null : [gatherChannels(request.channels)],
+        };
+        break;
       case "curve-join": {
         const { specs, suns } = this.#absorbersUnder(request, options);
         const perAbsorber = specs.map((spec, k) =>
@@ -253,7 +365,7 @@ export class OpticsJobs {
       assembled.medium === undefined
         ? { specs: [], spectra: [] }
         : { specs: assembled.drawn.absorbers, spectra: assembled.drawn.spectra };
-    this.#keep(key, { assembled, absorbers });
+    this.#keep(key, { assembled, absorbers, lights: new Map() });
     return assembled;
   }
 
@@ -278,21 +390,34 @@ export class OpticsJobs {
           | "curve-sums"
           | "curve-join"
           | "thick-bake"
+          | "thick-bake-bins"
           | "polarisation-bake"
+          | "polarisation-bake-channel"
           | "disc-bake"
           | "disc-band-bake"
-          | "deck-bake";
+          | "deck-bake"
+          | "deck-bake-bins"
+          | "deck-polarisation-channel";
       }
     >,
     options: AssembleOptions,
   ): HeldAbsorbers {
+    return this.#held(request, options).absorbers;
+  }
+
+  /** The body a request asks of, its absorber specs formed and kept where none was. */
+  #held(request: Extract<OpticsRequest, { input: unknown }>, options: AssembleOptions): HeldBody {
     const key = atmosphereKey(request.input);
     let held = this.#take(key);
     if (held === undefined) {
-      held = { assembled: null, absorbers: absorberSpecsOf(request.input, options) };
+      held = {
+        assembled: null,
+        absorbers: absorberSpecsOf(request.input, options),
+        lights: new Map(),
+      };
       this.#keep(key, held);
     }
-    return held.absorbers;
+    return held;
   }
 
   /** A disc's J where its request carries none: its bands' thick bake, as a `thick-bake` bakes. */
@@ -315,16 +440,40 @@ export class OpticsJobs {
     request: Extract<
       OpticsRequest,
       {
-        kind: "thick-bake" | "polarisation-bake" | "disc-bake" | "disc-band-bake" | "deck-bake";
+        kind:
+          | "thick-bake"
+          | "thick-bake-bins"
+          | "polarisation-bake"
+          | "polarisation-bake-channel"
+          | "disc-bake"
+          | "disc-band-bake"
+          | "deck-bake"
+          | "deck-bake-bins"
+          | "deck-polarisation-channel";
       }
     >,
     options: AssembleOptions,
   ): ReadonlyArray<ThickBakeLight> {
-    const { specs, spectra } =
-      request.kept === undefined
-        ? this.#heldAbsorbers(request, options)
-        : { specs: request.kept.absorbers, spectra: request.kept.spectra };
-    return thickBakeLights(request.column, specs, spectraOf(spectra, request.slots));
+    if (request.kept !== undefined) {
+      const { absorbers, spectra } = request.kept;
+      return thickBakeLights(request.column, absorbers, spectraOf(spectra, request.slots));
+    }
+    const held = this.#held(request, options);
+    // The lights depend on the slots and the column's absorber terms alone, beside the body's specs
+    // and spectra that `held` keeps: a band's other bins' jobs on this worker take them as formed.
+    const key = [
+      request.slots.join(","),
+      ...request.column.terms.flatMap((term) =>
+        term.source.kind === "absorber" ? [term.name] : [],
+      ),
+    ].join("|");
+    let lights = held.lights.get(key);
+    if (lights === undefined) {
+      const { specs, spectra } = held.absorbers;
+      lights = thickBakeLights(request.column, specs, spectraOf(spectra, request.slots));
+      held.lights.set(key, lights);
+    }
+    return lights;
   }
 
   /** The body kept under `key`, made the most recently asked. */
@@ -378,6 +527,15 @@ export class OpticsJobs {
   }
 }
 
+/** A share's one band, or a refusal: a share is of one band. */
+function oneBandOf(bands: ReadonlyArray<number>): number {
+  const [band, ...others] = bands;
+  if (band === undefined || others.length > 0) {
+    throw new RangeError(`a share is of one band, not ${bands.length}`);
+  }
+  return band;
+}
+
 /** A disc's request's bands, `bake.ts`'s `thickBakeBands` of its body at the indices it asks. */
 function discBandsOf(
   request: Extract<OpticsRequest, { kind: "disc-bake" | "disc-band-bake" }>,
@@ -416,17 +574,30 @@ function failed(request: OpticsRequest, error: unknown): OpticsAnswer {
   let reply: OpticsReply;
   switch (request.kind) {
     case "thick-bake":
+    case "thick-bake-bins":
       reply = { kind: "thick-bake-failed", id: request.id, bands: request.bands, message };
       break;
+    case "thick-gather":
+      reply = { kind: "thick-bake-failed", id: request.id, bands: [], message };
+      break;
     case "polarisation-bake":
+    case "polarisation-bake-channel":
       reply = { kind: "polarisation-bake-failed", id: request.id, bands: request.bands, message };
+      break;
+    case "polarisation-gather":
+      reply = { kind: "polarisation-bake-failed", id: request.id, bands: [], message };
       break;
     case "disc-bake":
     case "disc-band-bake":
       reply = { kind: "disc-bake-failed", id: request.id, message };
       break;
     case "deck-bake":
+    case "deck-bake-bins":
+    case "deck-polarisation-channel":
       reply = { kind: "deck-bake-failed", id: request.id, bands: request.bands, message };
+      break;
+    case "deck-gather":
+      reply = { kind: "deck-bake-failed", id: request.id, bands: [], message };
       break;
     case "assemble":
     case "curve-sums":

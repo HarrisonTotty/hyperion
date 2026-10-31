@@ -15,12 +15,12 @@ import type { AbsorberCurve, AbsorberCurveSums, AbsorberSpec, CurveShare } from 
 import type { AssembledMedium } from "./assemble";
 import type { BodyAtmosphereInput } from "./atmosphereInput";
 import type { DiscBandValues, DiscReflectanceTable } from "./discTable";
-import type { AtmosphereMedium } from "./medium";
+import type { AtmosphereMedium, RenderChannel } from "./medium";
 import type { BakeSpectrum } from "./spectralColour";
-import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
+import type { MsBinShare, MsSourceTable, ThickBakeBody } from "./thick/bake";
 import type { DiscBakeAir } from "./thick/discBake";
-import type { DeckSplit, DeckTables } from "./thick/deck";
-import type { PolarisationTable } from "./thick/polarisation";
+import type { DeckBinShare, DeckSplit, DeckTables } from "./thick/deck";
+import type { PolarisationChannelShare, PolarisationTable } from "./thick/polarisation";
 import type { SpectralColumn } from "./thick/spectralColumn";
 
 /**
@@ -36,9 +36,19 @@ import type { SpectralColumn } from "./thick/spectralColumn";
  *   table a light in `slots`. The column's absorber terms take the input's absorber specs of their
  *   names, which the worker forms itself (`absorberSpecsOf`, as a curve share does), and the bin
  *   curves under each light.
+ * - `thick-bake-bins` (the pool's bin shares, R08.T14.d): a `thick-bake` of one band in `bins`
+ *   alone, ascending bake bins, its preparation of those bins and the reference bin, answered
+ *   before the channels (`thick/bake.ts`'s `MsBinShare`).
+ * - `thick-gather`: one band's thick table from its bin shares, which together hold every bin once
+ *   (`thick/bake.ts`'s `gatherBins`), the shares transferred.
  * - `polarisation-bake` (R08.T14.e): the polarisation correction's tables
  *   (`thick/polarisation.ts`) of `column` on `body`, laid out as `thick-bake`'s and with its
  *   absorbers formed the same way, for any world with air, thin or thick.
+ * - `polarisation-bake-channel` (the pool's channel shares, R08.T14.d): a `polarisation-bake` of
+ *   one band in one render channel, `channel`, prepared at that channel's wavelength alone and
+ *   answered before the table (`thick/polarisation.ts`'s `PolarisationChannelShare`).
+ * - `polarisation-gather`: one band's correction table from its three channels' shares
+ *   (`thick/polarisation.ts`'s `gatherChannels`), the shares transferred.
  * - `disc-bake` (R08.T16.b): the disc's reflectance table (`thick/discBake.ts`) of every band in
  *   `bands` and light in `slots`, `thick-bake`'s fields with the medium as the tables hold it and
  *   the body's bakes that have landed (`air`): J from its routed bake where given, else baked as
@@ -46,6 +56,12 @@ import type { SpectralColumn } from "./thick/spectralColumn";
  * - `disc-band-bake` (the pool's bands, R08.T14.d): one band of a `disc-bake`'s table, `part`, an
  *   index of `bands`, with every field of the whole table's request, the sun's floor and the
  *   thermal source being every band's.
+ * - `deck-bake-bins` (the pool's bin shares, R08.T14.d): a `deck-bake` of one band in `bins` alone,
+ *   answered before the channels (`thick/deck.ts`'s `DeckBinShare`).
+ * - `deck-polarisation-channel`: a `deck-bake`'s correction over the deck of one band in one render
+ *   channel, `channel`, answered before the table, or as none where the column needs none.
+ * - `deck-gather`: one band's deck tables from its bin shares and its correction from its channel
+ *   shares (`thick/deck.ts`'s `gatherDeckBins`), the shares transferred.
  * - `deck-bake` (R08.T15.a.2): a cloud-deck split's tables (`thick/deck.ts`) of `column` on `body`
  *   at `split`, laid out and lit as `thick-bake`'s: the deck prepared once, each band's
  *   `bakeDeck`, and, where the column needs it (`needsPolarisationCorrection`), each band's
@@ -83,6 +99,24 @@ export type OpticsRequest =
       readonly kept?: KeptBakeLights;
     }
   | {
+      readonly kind: "thick-bake-bins";
+      readonly id: number;
+      readonly input: BodyAtmosphereInput;
+      readonly slots: ReadonlyArray<number>;
+      readonly bands: ReadonlyArray<number>;
+      readonly column: SpectralColumn;
+      readonly body: ThickBakeBody;
+      /** A kept body's absorber specs and light spectra, in place of the input's. */
+      readonly kept?: KeptBakeLights;
+      /** The bake bins baked, ascending. */
+      readonly bins: ReadonlyArray<number>;
+    }
+  | {
+      readonly kind: "thick-gather";
+      readonly id: number;
+      readonly shares: ReadonlyArray<MsBinShare>;
+    }
+  | {
       readonly kind: "polarisation-bake";
       readonly id: number;
       readonly input: BodyAtmosphereInput;
@@ -92,6 +126,24 @@ export type OpticsRequest =
       readonly body: ThickBakeBody;
       /** A kept body's absorber specs and light spectra, in place of the input's. */
       readonly kept?: KeptBakeLights;
+    }
+  | {
+      readonly kind: "polarisation-bake-channel";
+      readonly id: number;
+      readonly input: BodyAtmosphereInput;
+      readonly slots: ReadonlyArray<number>;
+      readonly bands: ReadonlyArray<number>;
+      readonly column: SpectralColumn;
+      readonly body: ThickBakeBody;
+      /** A kept body's absorber specs and light spectra, in place of the input's. */
+      readonly kept?: KeptBakeLights;
+      /** The render channel baked. */
+      readonly channel: RenderChannel;
+    }
+  | {
+      readonly kind: "polarisation-gather";
+      readonly id: number;
+      readonly shares: ReadonlyArray<PolarisationChannelShare>;
     }
   | {
       readonly kind: "disc-bake";
@@ -131,6 +183,41 @@ export type OpticsRequest =
       readonly split: DeckSplit;
       /** A kept body's absorber specs and light spectra, in place of the input's. */
       readonly kept?: KeptBakeLights;
+    }
+  | {
+      readonly kind: "deck-bake-bins";
+      readonly id: number;
+      readonly input: BodyAtmosphereInput;
+      readonly slots: ReadonlyArray<number>;
+      readonly bands: ReadonlyArray<number>;
+      readonly column: SpectralColumn;
+      readonly body: ThickBakeBody;
+      readonly split: DeckSplit;
+      /** A kept body's absorber specs and light spectra, in place of the input's. */
+      readonly kept?: KeptBakeLights;
+      /** The bake bins baked, ascending. */
+      readonly bins: ReadonlyArray<number>;
+    }
+  | {
+      readonly kind: "deck-polarisation-channel";
+      readonly id: number;
+      readonly input: BodyAtmosphereInput;
+      readonly slots: ReadonlyArray<number>;
+      readonly bands: ReadonlyArray<number>;
+      readonly column: SpectralColumn;
+      readonly body: ThickBakeBody;
+      readonly split: DeckSplit;
+      /** A kept body's absorber specs and light spectra, in place of the input's. */
+      readonly kept?: KeptBakeLights;
+      /** The render channel baked. */
+      readonly channel: RenderChannel;
+    }
+  | {
+      readonly kind: "deck-gather";
+      readonly id: number;
+      readonly decks: ReadonlyArray<DeckBinShare>;
+      /** The correction's channel shares, none where the column needs no correction. */
+      readonly channels: ReadonlyArray<PolarisationChannelShare> | null;
     };
 
 /**
@@ -174,14 +261,16 @@ export function keptBakeLightsOf(
  * - `curves`: the light slots' channel curves, `curves[slot asked][absorber]`.
  * - `thick-baked`: a `thick-bake`'s tables, one a band asked in its order, their slots the lights
  *   asked in theirs.
- * - `thick-bake-failed`: a `thick-bake` that threw or was refused, with its message and the bands
- *   asked. Never `failed`, which the pool reads as the medium's build failing: a failed bake is
+ * - `thick-bins-baked`: a `thick-bake-bins`'s share of its band's bins.
+ * - `thick-bake-failed`: a `thick-bake`, `thick-bake-bins` or `thick-gather` that threw or was
+ *   refused, with its message and the bands asked (none for a gather). Never `failed`, which the pool reads as the medium's build failing: a failed bake is
  *   `ATMOSPHERE: APPROXIMATE`'s, never `ATMOSPHERE NOT AVAILABLE`'s (decision-r08-t10a-leans, UX
  *   review item 1).
  * - `polarisation-baked`: a `polarisation-bake`'s tables, one a band asked in its order, their
  *   slots the lights asked in theirs.
- * - `polarisation-bake-failed`: a `polarisation-bake` that threw or was refused, as
- *   `thick-bake-failed` is, never `failed`.
+ * - `polarisation-channel-baked`: a `polarisation-bake-channel`'s share of its band.
+ * - `polarisation-bake-failed`: a `polarisation-bake`, `polarisation-bake-channel` or
+ *   `polarisation-gather` that threw or was refused, as `thick-bake-failed` is, never `failed`.
  * - `disc-baked`: a `disc-bake`'s table.
  * - `disc-band-baked`: a `disc-band-bake`'s band (`discTable.ts`'s `DiscBandValues`).
  * - `disc-bake-failed`: a `disc-bake` or `disc-band-bake` that threw or was refused, as
@@ -189,8 +278,11 @@ export function keptBakeLightsOf(
  * - `deck-baked`: a `deck-bake`'s tables, one a band asked in its order, their slots the lights
  *   asked in theirs, and the correction over the deck the same way, or `null` where the column
  *   needs none.
- * - `deck-bake-failed`: a `deck-bake` that threw or was refused, as `thick-bake-failed` is, never
- *   `failed`.
+ * - `deck-bins-baked`: a `deck-bake-bins`'s share of its band's bins.
+ * - `deck-channel-baked`: a `deck-polarisation-channel`'s share, or `null` where the column needs
+ *   no correction.
+ * - `deck-bake-failed`: a `deck-bake`, `deck-bake-bins`, `deck-polarisation-channel` or
+ *   `deck-gather` that threw or was refused, as `thick-bake-failed` is, never `failed`.
  * - `failed`: the job threw, a bug (`decision-r08-t10a-leans.md` item 6), with its message.
  */
 export type OpticsReply =
@@ -210,6 +302,7 @@ export type OpticsReply =
       readonly id: number;
       readonly tables: ReadonlyArray<MsSourceTable>;
     }
+  | { readonly kind: "thick-bins-baked"; readonly id: number; readonly share: MsBinShare }
   | {
       readonly kind: "thick-bake-failed";
       readonly id: number;
@@ -220,6 +313,11 @@ export type OpticsReply =
       readonly kind: "polarisation-baked";
       readonly id: number;
       readonly tables: ReadonlyArray<PolarisationTable>;
+    }
+  | {
+      readonly kind: "polarisation-channel-baked";
+      readonly id: number;
+      readonly share: PolarisationChannelShare;
     }
   | {
       readonly kind: "polarisation-bake-failed";
@@ -235,6 +333,12 @@ export type OpticsReply =
       readonly id: number;
       readonly tables: ReadonlyArray<DeckTables>;
       readonly correction: ReadonlyArray<PolarisationTable> | null;
+    }
+  | { readonly kind: "deck-bins-baked"; readonly id: number; readonly share: DeckBinShare }
+  | {
+      readonly kind: "deck-channel-baked";
+      readonly id: number;
+      readonly share: PolarisationChannelShare | null;
     }
   | {
       readonly kind: "deck-bake-failed";

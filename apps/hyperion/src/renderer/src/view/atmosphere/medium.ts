@@ -31,6 +31,9 @@ import { acos, exp, expm1, pow } from "../../lib/pinnedMath";
  */
 export const CHANNEL_WAVELENGTHS_NM: Rgb = FITTED_CHANNEL_WAVELENGTHS_NM;
 
+/** A render channel, by its index in {@link CHANNEL_WAVELENGTHS_NM}: 0 red, 1 green, 2 blue. */
+export type RenderChannel = 0 | 1 | 2;
+
 /** The span of the bake bins, nm: 380 to 760 (R08 Design note 5). */
 export const BAKE_RANGE_NM: readonly [number, number] = [380, 760];
 

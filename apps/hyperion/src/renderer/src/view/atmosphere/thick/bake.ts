@@ -91,6 +91,11 @@
  * a bin overlap at random (the product of their sums, Lacis and Oinas 1991), one solve a product
  * term, the weakest taken as one term each past {@link THICK_BAKE_MAX_TERMS_PER_BIN}.
  *
+ * **Bin shares** (R08.T14.d's bake time): a band's bins are independent until their conversion to
+ * the channels, so a preparation of some bins alone ({@link prepareBake}'s `bins`) and its
+ * {@link bakeBins} give those bins' E as the whole band's bake does, and {@link gatherBins} of
+ * shares holding every bin once is {@link bakeMultipleScattering}'s table to the bit.
+ *
  * **The ground** is Lambertian in each solve, its albedo in a bin linear in wavelength between the
  * render channels' wavelengths and held at the nearer channel outside them.
  *
@@ -154,6 +159,7 @@ import {
   type SpectralColumn,
   spectralOptics,
   type SpectralPhase,
+  type SpectralTermOptics,
 } from "./spectralColumn";
 import { log } from "../../../lib/pinnedMath";
 
@@ -502,6 +508,11 @@ export interface PreparedBake {
   readonly pointOptics: ReadonlyArray<ReadonlyArray<PointOptics>>;
   readonly lights: ReadonlyArray<PreparedLight>;
   /**
+   * The bins prepared, ascending: every bin ({@link EVERY_BAKE_BIN}), or a share of them, whose
+   * optics, points and fits alone the arrays by bin hold (R08.T14.d's bake time).
+   */
+  readonly bins: ReadonlyArray<number>;
+  /**
    * Per bin, B_λ(λ_b, T) at each interface from the top down, W m⁻² sr⁻¹ nm⁻¹, the last the
    * ground's (R08.T18.b); absent for a column without a temperature.
    */
@@ -789,10 +800,13 @@ export function deltaMLayer(
  *
  * @param layout - The layers laid by the caller (R08.T15's deck split), in place of the whole
  *   column's on the grid; absent, the bake's own.
+ * @param bins - The bins prepared, ascending: every bin, or a share of them for a job that bakes
+ *   those alone ({@link bakeBins}), the reference bin's optics taken for the layers whatever.
  * @throws RangeError for a grid that is not whole, a light whose absorbers do not match the
  *   column's absorber terms in count and kind, a curve with pressure rows on a column with no
  *   pressure profile, a `layout` whose table does not hold the grid's layers or whose fit does not
- *   begin with them, or as the column's optics refuse.
+ *   begin with them, bins that are not ascending whole bins each once, or as the column's optics
+ *   refuse.
  */
 export function prepareBake(
   column: SpectralColumn,
@@ -800,12 +814,27 @@ export function prepareBake(
   grid: ThickBakeGrid = THICK_BAKE_GRID,
   options: ExpSumOptions = EXP_SUM_OPTIONS,
   layout?: BakeLayout,
+  bins: ReadonlyArray<number> = EVERY_BAKE_BIN,
 ): PreparedBake {
   checkBakeInputs(column, lights, grid);
   if (layout !== undefined) {
     checkBakeLayout(layout, grid);
   }
-  const optics = spectralOptics(column, BAKE_WAVELENGTHS_NM);
+  checkBakeBins(bins);
+  const whole = bins.length === BAKE_BIN_COUNT;
+  // The bins prepared, and the reference bin where the layers are placed by it.
+  const needed =
+    whole || layout !== undefined
+      ? bins
+      : [...new Set([...bins, THICK_BAKE_REFERENCE_BIN])].toSorted((p, q) => p - q);
+  const opticsOf = spectralOptics(
+    column,
+    needed.map((b) => BAKE_WAVELENGTHS_NM[b] ?? Number.NaN),
+  );
+  const optics = Array.from(
+    { length: BAKE_BIN_COUNT },
+    (_, b): ReadonlyArray<SpectralTermOptics> => opticsOf[needed.indexOf(b)] ?? [],
+  );
   const order = THICK_BAKE_STREAMS;
   const binOptics = optics.map((terms) =>
     terms.map((t): BinTermOptics => ({
@@ -818,47 +847,48 @@ export function prepareBake(
   const layering =
     layout?.layering ?? bakeLayering(column, binOptics[THICK_BAKE_REFERENCE_BIN] ?? [], grid);
   const { interfaceHeightsM, layerColumnsM, altitudesM } = layering;
-  const pointOptics = binOptics.map((terms) =>
-    Array.from(altitudesM, (h): PointOptics => {
-      let scattering = 0;
-      let delta = 0;
-      const mixed = new Float64Array(order + 1);
-      for (const [t, term] of column.terms.entries()) {
-        const o = terms[t];
-        if (o === undefined || o.scatteringPerM === 0) {
-          continue;
-        }
-        const s = o.scatteringPerM * densityAt(term.density, h);
-        scattering += s;
-        delta += s * o.forwardDelta;
-        for (let l = 0; l <= order; l += 1) {
-          mixed[l] = (mixed[l] ?? 0) + s * (o.moments[l] ?? Number.NaN);
-        }
-      }
-      if (!(scattering > 0)) {
-        return {
-          scatteringPerM: 0,
-          lobe: 0,
-          kept: 1,
-          forwardDelta: 0,
-          moments: new Float64Array(order),
-        };
-      }
-      const forwardDelta = delta / scattering;
-      const f = Math.max((mixed[order] ?? Number.NaN) / scattering, forwardDelta, 0);
-      return {
-        scatteringPerM: scattering,
-        lobe: f - forwardDelta,
-        kept: 1 - f,
-        forwardDelta,
-        moments: Float64Array.from({ length: order }, (_, l) =>
-          l === 0 ? 1 : ((mixed[l] ?? Number.NaN) / scattering - f) / (1 - f),
-        ),
-      };
-    }),
+  const pointOptics = binOptics.map((terms, b) =>
+    !bins.includes(b)
+      ? []
+      : Array.from(altitudesM, (h): PointOptics => {
+          let scattering = 0;
+          let delta = 0;
+          const mixed = new Float64Array(order + 1);
+          for (const [t, term] of column.terms.entries()) {
+            const o = terms[t];
+            if (o === undefined || o.scatteringPerM === 0) {
+              continue;
+            }
+            const s = o.scatteringPerM * densityAt(term.density, h);
+            scattering += s;
+            delta += s * o.forwardDelta;
+            for (let l = 0; l <= order; l += 1) {
+              mixed[l] = (mixed[l] ?? 0) + s * (o.moments[l] ?? Number.NaN);
+            }
+          }
+          if (!(scattering > 0)) {
+            return {
+              scatteringPerM: 0,
+              lobe: 0,
+              kept: 1,
+              forwardDelta: 0,
+              moments: new Float64Array(order),
+            };
+          }
+          const forwardDelta = delta / scattering;
+          const f = Math.max((mixed[order] ?? Number.NaN) / scattering, forwardDelta, 0);
+          return {
+            scatteringPerM: scattering,
+            lobe: f - forwardDelta,
+            kept: 1 - f,
+            forwardDelta,
+            moments: Float64Array.from({ length: order }, (_, l) =>
+              l === 0 ? 1 : ((mixed[l] ?? Number.NaN) / scattering - f) / (1 - f),
+            ),
+          };
+        }),
   );
-  const everyBin = Array.from({ length: BAKE_BIN_COUNT }, (_, b) => b);
-  const bins = bakeLightBins(column, layout?.fitLayering ?? layering, lights, everyBin, options);
+  const fitted = bakeLightBins(column, layout?.fitLayering ?? layering, lights, bins, options);
   const { temperature } = column;
   const interfacePlanck =
     temperature === undefined
@@ -881,11 +911,44 @@ export function prepareBake(
     ),
     layerColumnsM,
     pointOptics,
-    lights: lights.map((light, j): PreparedLight => ({
-      conversion: binConversion(light.spectrum),
-      bins: bins[j] ?? [],
-    })),
+    lights: lights.map((light, j): PreparedLight => {
+      const fittedBins = fitted[j] ?? [];
+      // A share's bins at their own indices, the others holes that no bake reads.
+      const byBin: BakeLightBin[] = [];
+      for (const [i, b] of bins.entries()) {
+        const bin = fittedBins[i];
+        if (bin !== undefined) {
+          byBin[b] = bin;
+        }
+      }
+      return { conversion: binConversion(light.spectrum), bins: whole ? fittedBins : byBin };
+    }),
+    bins,
   };
+}
+
+/** Every bake bin, ascending: the bins a whole band's bake prepares and solves. */
+export const EVERY_BAKE_BIN: ReadonlyArray<number> = Array.from(
+  { length: BAKE_BIN_COUNT },
+  (_, b) => b,
+);
+
+/** Refuses a share of bake bins that is not ascending whole bins, each once, at least one. */
+function checkBakeBins(bins: ReadonlyArray<number>): void {
+  if (
+    bins.length === 0 ||
+    bins.some(
+      (b, i) =>
+        !Number.isInteger(b) ||
+        b < 0 ||
+        b >= BAKE_BIN_COUNT ||
+        (i > 0 && !(b > (bins[i - 1] ?? b))),
+    )
+  ) {
+    throw new RangeError(
+      `a bake's bins are ascending, each once, of 0 to ${BAKE_BIN_COUNT - 1}, not ${bins.join(", ")}`,
+    );
+  }
 }
 
 /**
@@ -1484,14 +1547,15 @@ function thermalSourceOf(
  * The thick bake of one latitude band (Provides' `bakeMultipleScattering`; the module's remarks):
  * for every light of the preparation, every bin and every term of its gases, one solve, its E
  * (m⁻¹ sr⁻¹) summed by the terms' weights; then each bin's J, E over the bin's kernel scattering at
- * the altitude (sr⁻¹ per unit of that scattering), converted to the channels.
+ * the altitude (sr⁻¹ per unit of that scattering), converted to the channels: the band's
+ * {@link bakeBins} of every bin, gathered by {@link gatherBins}.
  *
  * @param band - The band's index in {@link thickBakeBands}' order.
  * @param options - A ground other than Lambertian, a reader of each solve and the solves' modes
  *   (R08.T15's deck); none and {@link THICK_BAKE_MODES} by default.
  * @throws RangeError for a band the body does not have, solves' modes not whole in
- *   [{@link THICK_BAKE_MODES}, {@link THICK_BAKE_STREAMS}], or as the solver refuses a layer (which
- *   delta-M's truncation is there to prevent).
+ *   [{@link THICK_BAKE_MODES}, {@link THICK_BAKE_STREAMS}], a preparation of some bins alone, or as
+ *   the solver refuses a layer (which delta-M's truncation is there to prevent).
  */
 export function bakeMultipleScattering(
   prepared: PreparedBake,
@@ -1499,6 +1563,66 @@ export function bakeMultipleScattering(
   band: number,
   options?: BakeBandOptions,
 ): MsSourceTable {
+  return gatherBins([bakeBins(prepared, body, band, options)]);
+}
+
+/** One light's E in one bin of a band, summed over the bin's terms, and its records. */
+export interface MsBinLight {
+  /** E, A × S × V × M as {@link MsSourceSlot.values} holds J, in the bin, m⁻¹ sr⁻¹. */
+  readonly values: Float64Array;
+  readonly record: MsBinRecord;
+  /** The solves the light took in the bin. */
+  readonly solves: number;
+  /** As {@link MsSourceSlot.doubleForwardShare}, over the bin alone. */
+  readonly leftOutShare: number;
+  /** As {@link MsSourceSlot.flooredSlantFactors}, over the bin alone. */
+  readonly floored: number;
+  /** As {@link MsSourceSlot.largestBeamDeficit}, over the bin alone. */
+  readonly deficit: number;
+}
+
+/** One bin of a band's bake, before the channels (the bins' share, {@link bakeBins}). */
+export interface MsBinPart {
+  readonly bin: number;
+  /** The band's vertical extinction optical depth in the bin, without the gases' curves. */
+  readonly verticalOpticalDepth: number;
+  /** 1 ÷ (σ_s (1 − f_c)) at each table altitude in the bin, 0 where it has no scattering. */
+  readonly perScattering: Float64Array;
+  /** One a light of the preparation, in its order. */
+  readonly lights: ReadonlyArray<MsBinLight>;
+  /** E_th, A × V, over the first light's terms; absent for a column without a temperature. */
+  readonly thermal?: Float64Array;
+}
+
+/**
+ * A band's bake over some of its bins (plan R08, R08.T14.d's bake time): what one optics job of a
+ * band split by bins answers, for {@link gatherBins} to take with the band's other bins.
+ */
+export interface MsBinShare {
+  readonly band: ThickBakeBand;
+  readonly altitudesM: Float64Array;
+  readonly sunCosines: Float64Array;
+  readonly travelCosines: Float64Array;
+  /** Each light's bin conversion (`binConversion.ts`'s factors), in the lights' order. */
+  readonly conversions: ReadonlyArray<BinConversion["factors"]>;
+  /** Whether the column has a temperature, its bins' E_th among the parts. */
+  readonly thermal: boolean;
+  /** The bins baked, ascending. */
+  readonly bins: ReadonlyArray<MsBinPart>;
+}
+
+/**
+ * One band's bake in the bins `prepared` holds ({@link prepareBake}'s `bins`), each bin's E summed
+ * over its terms, before the channels: {@link bakeMultipleScattering}'s solves, a bin share of them.
+ *
+ * @throws RangeError as {@link bakeMultipleScattering}.
+ */
+export function bakeBins(
+  prepared: PreparedBake,
+  body: ThickBakeBody,
+  band: number,
+  options?: BakeBandOptions,
+): MsBinShare {
   const bands = thickBakeBands(body);
   const geometry = bands[band];
   if (geometry === undefined || !Number.isInteger(band)) {
@@ -1520,31 +1644,23 @@ export function bakeMultipleScattering(
   const suns = grid.sunCosines.length;
   const views = 2 * grid.upwardCosines.length;
   const points = altitudes * suns * views * THICK_BAKE_MODES;
-  const lights = prepared.lights.map(() => ({
-    bins: Array.from({ length: BAKE_BIN_COUNT }, () => new Float64Array(points)),
-    solves: 0,
-    leftOutShare: 0,
-    floored: 0,
-    deficit: 0,
-  }));
-  const verticalOpticalDepth = new Float64Array(BAKE_BIN_COUNT);
-  // E_th per bin, A × V, over the first light's terms (the module's remarks, "Thermal emission").
-  const thermalBins =
-    prepared.interfacePlanck === undefined
-      ? null
-      : Array.from({ length: BAKE_BIN_COUNT }, () => new Float64Array(altitudes * views));
-  for (let b = 0; b < BAKE_BIN_COUNT; b += 1) {
+  const thermal = prepared.interfacePlanck !== undefined;
+  const parts = prepared.bins.map((b): MsBinPart => {
     const base = bandBinOf(prepared, b, geometry.coefficientFactor);
-    verticalOpticalDepth[b] = base.extinction.reduce((sum, tau) => sum + tau, 0);
+    // E_th, A × V, over the first light's terms (the module's remarks, "Thermal emission").
+    const thermalBin = thermal ? new Float64Array(altitudes * views) : undefined;
     // A solve shared by lights whose bin has the same terms (a column without absorbers).
     const solved = new Map<BinTerm, BinSolve>();
-    for (const [slot, light] of prepared.lights.entries()) {
-      const out = lights[slot];
-      const binValues = out?.bins[b];
+    const lights = prepared.lights.map((light, slot): MsBinLight => {
       const lightBin = light.bins[b];
-      if (out === undefined || binValues === undefined || lightBin === undefined) {
+      if (lightBin === undefined) {
         throw new Error(`light ${slot} has no bin ${b}`);
       }
+      const binValues = new Float64Array(points);
+      let solves = 0;
+      let leftOutShare = 0;
+      let floored = 0;
+      let deficit = 0;
       const leftOut = new Float64Array(altitudes * suns);
       const pointLight = new Float64Array(altitudes * suns);
       for (const term of lightBin.terms) {
@@ -1554,12 +1670,11 @@ export function bakeMultipleScattering(
           solved.set(term, solve);
           options?.onSolve?.(b, term, solve);
         }
-        out.solves += 1;
+        solves += 1;
         const w = term.weight;
         for (const [i, value] of solve.source.entries()) {
           binValues[i] = (binValues[i] ?? 0) + w * value;
         }
-        const thermalBin = thermalBins?.[b];
         if (slot === 0 && thermalBin !== undefined && solve.thermalSource !== undefined) {
           for (const [i, value] of solve.thermalSource.entries()) {
             thermalBin[i] = (thermalBin[i] ?? 0) + w * value;
@@ -1570,8 +1685,8 @@ export function bakeMultipleScattering(
           pointLight[i] = (pointLight[i] ?? 0) + w * (solve.light[i] ?? Number.NaN);
         }
         for (const beam of solve.scaledBeams) {
-          out.floored += beam.flooredLayers;
-          out.deficit = Math.max(out.deficit, beam.largestDeficit);
+          floored += beam.flooredLayers;
+          deficit = Math.max(deficit, beam.largestDeficit);
         }
       }
       const brightest = Math.max(0, ...pointLight);
@@ -1579,34 +1694,115 @@ export function bakeMultipleScattering(
         const kept = pointLight[i] ?? Number.NaN;
         if (kept >= 1e-3 * brightest && kept > 0) {
           // Of the whole: the light kept and the light left out.
-          out.leftOutShare = Math.max(out.leftOutShare, value / (kept + value));
+          leftOutShare = Math.max(leftOutShare, value / (kept + value));
         }
       }
-    }
-  }
-  // J = E ÷ (σ_s (1 − f_c)) in each bin, its own kernel scattering at the altitude; none where it
-  // has no scattering, whose E the solve leaves 0.
-  const perAltitude = suns * views * THICK_BAKE_MODES;
-  const perScattering = prepared.pointOptics.map((bin) =>
-    Float64Array.from(bin, (point) => {
+      return {
+        values: binValues,
+        record: {
+          terms: lightBin.terms.length,
+          largestFitError: lightBin.largestFitError,
+          readFitError: lightBin.readFitError,
+          crossedRows: lightBin.crossedRows,
+        },
+        solves,
+        leftOutShare,
+        floored,
+        deficit,
+      };
+    });
+    // J = E ÷ (σ_s (1 − f_c)) in each bin, its own kernel scattering at the altitude; none where it
+    // has no scattering, whose E the solve leaves 0.
+    const perScattering = Float64Array.from(prepared.pointOptics[b] ?? [], (point) => {
       const kernel = point.scatteringPerM * (1 - point.forwardDelta);
       return kernel > 0 ? 1 / kernel : 0;
-    }),
-  );
-  const slots = prepared.lights.map((light, slot): MsSourceSlot => {
-    const out = lights[slot];
-    if (out === undefined) {
-      throw new Error(`no light ${slot}`);
+    });
+    return {
+      bin: b,
+      verticalOpticalDepth: base.extinction.reduce((sum, tau) => sum + tau, 0),
+      perScattering,
+      lights,
+      ...(thermalBin === undefined ? {} : { thermal: thermalBin }),
+    };
+  });
+  const upward = grid.upwardCosines;
+  return {
+    band: geometry,
+    altitudesM: prepared.altitudesM.slice(),
+    sunCosines: grid.sunCosines.slice(),
+    travelCosines: Float64Array.from({ length: views }, (_, v) =>
+      v < upward.length
+        ? -(upward[upward.length - 1 - v] ?? Number.NaN)
+        : (upward[v - upward.length] ?? Number.NaN),
+    ),
+    conversions: prepared.lights.map((light) => light.conversion.factors),
+    thermal,
+    bins: parts,
+  };
+}
+
+/**
+ * A band's thick table from its bin shares ({@link bakeBins}), which together hold every bin once:
+ * each bin's J converted to the channels in the bins' order and the records over every bin, so that
+ * a band baked a share of its bins a job is the bits of one baked whole.
+ *
+ * @throws RangeError for shares that do not hold every bin once, or of other bands, grids, lights
+ *   or thermal fields than the first's.
+ */
+export function gatherBins(shares: ReadonlyArray<MsBinShare>): MsSourceTable {
+  const first = shares[0];
+  if (first === undefined) {
+    throw new RangeError("a band's bake gathers at least one share of its bins");
+  }
+  const byBin: MsBinPart[] = [];
+  for (const share of shares) {
+    if (
+      share.band.gravityRatio !== first.band.gravityRatio ||
+      share.altitudesM.length !== first.altitudesM.length ||
+      share.sunCosines.length !== first.sunCosines.length ||
+      share.travelCosines.length !== first.travelCosines.length ||
+      share.conversions.length !== first.conversions.length ||
+      share.thermal !== first.thermal
+    ) {
+      throw new RangeError("a band's bin shares are of other bands, grids, lights or fields");
     }
+    for (const part of share.bins) {
+      if (byBin[part.bin] !== undefined) {
+        throw new RangeError(`a band's bin shares hold bin ${part.bin} twice`);
+      }
+      byBin[part.bin] = part;
+    }
+  }
+  const parts = Array.from({ length: BAKE_BIN_COUNT }, (_, b): MsBinPart => {
+    const part = byBin[b];
+    if (part === undefined) {
+      throw new RangeError(`a band's bin shares hold no bin ${b}`);
+    }
+    return part;
+  });
+  const altitudes = first.altitudesM.length;
+  const suns = first.sunCosines.length;
+  const views = first.travelCosines.length;
+  const points = altitudes * suns * views * THICK_BAKE_MODES;
+  const perAltitude = suns * views * THICK_BAKE_MODES;
+  const perScattering = parts.map((part) => part.perScattering);
+  const slots = first.conversions.map((factors, slot): MsSourceSlot => {
+    const lights = parts.map((part) => {
+      const light = part.lights[slot];
+      if (light === undefined) {
+        throw new RangeError(`bin ${part.bin} holds no light ${slot}`);
+      }
+      return light;
+    });
     const values = new Float32Array(points * 3);
-    const [red, green, blue] = light.conversion.factors;
+    const [red, green, blue] = factors;
     for (let i = 0; i < points; i += 1) {
       const a = Math.floor(i / perAltitude);
       let r = 0;
       let g = 0;
       let bl = 0;
       for (let b = 0; b < BAKE_BIN_COUNT; b += 1) {
-        const x = (out.bins[b]?.[i] ?? Number.NaN) * (perScattering[b]?.[a] ?? Number.NaN);
+        const x = (lights[b]?.values[i] ?? Number.NaN) * (perScattering[b]?.[a] ?? Number.NaN);
         r += (red[b] ?? Number.NaN) * x;
         g += (green[b] ?? Number.NaN) * x;
         bl += (blue[b] ?? Number.NaN) * x;
@@ -1617,34 +1813,28 @@ export function bakeMultipleScattering(
     }
     return {
       values,
-      bins: light.bins.map((bin) => ({
-        terms: bin.terms.length,
-        largestFitError: bin.largestFitError,
-        readFitError: bin.readFitError,
-        crossedRows: bin.crossedRows,
-      })),
-      solves: out.solves,
-      doubleForwardShare: out.leftOutShare,
-      flooredSlantFactors: out.floored,
-      largestBeamDeficit: out.deficit,
+      bins: lights.map((light) => light.record),
+      solves: lights.reduce((sum, light) => sum + light.solves, 0),
+      doubleForwardShare: lights.reduce((most, light) => Math.max(most, light.leftOutShare), 0),
+      flooredSlantFactors: lights.reduce((sum, light) => sum + light.floored, 0),
+      largestBeamDeficit: lights.reduce((most, light) => Math.max(most, light.deficit), 0),
     };
   });
-  const upward = grid.upwardCosines;
-  const thermal =
-    thermalBins === null
-      ? undefined
-      : thermalScatteringOf(prepared, thermalBins, perScattering, views);
+  const thermal = first.thermal
+    ? thermalScatteringOf(
+        first.altitudesM,
+        parts.map((part) => part.thermal ?? new Float64Array(altitudes * views)),
+        perScattering,
+        views,
+      )
+    : undefined;
   return {
-    band: geometry,
-    altitudesM: prepared.altitudesM.slice(),
-    sunCosines: grid.sunCosines.slice(),
-    travelCosines: Float64Array.from({ length: views }, (_, v) =>
-      v < upward.length
-        ? -(upward[upward.length - 1 - v] ?? Number.NaN)
-        : (upward[v - upward.length] ?? Number.NaN),
-    ),
+    band: first.band,
+    altitudesM: first.altitudesM.slice(),
+    sunCosines: first.sunCosines.slice(),
+    travelCosines: first.travelCosines.slice(),
     modes: THICK_BAKE_MODES,
-    verticalOpticalDepth,
+    verticalOpticalDepth: Float64Array.from(parts, (part) => part.verticalOpticalDepth),
     slots,
     ...(thermal === undefined ? {} : { thermal }),
   };
@@ -1657,7 +1847,7 @@ export function bakeMultipleScattering(
  * @throws Error for a grid whose travel cosines are not the read's {@link THERMAL_TRAVEL_COSINES}.
  */
 function thermalScatteringOf(
-  prepared: PreparedBake,
+  altitudesM: Float64Array,
   thermalBins: ReadonlyArray<Float64Array>,
   perScattering: ReadonlyArray<Float64Array>,
   views: number,
@@ -1667,7 +1857,7 @@ function thermalScatteringOf(
       `the scattered thermal light is read at ${THERMAL_TRAVEL_COSINES} travel cosines, not ${views}`,
     );
   }
-  const altitudes = prepared.altitudesM.length;
+  const altitudes = altitudesM.length;
   const values = new Float32Array(altitudes * views * 3);
   for (let i = 0; i < altitudes * views; i += 1) {
     const a = Math.floor(i / views);
@@ -1684,5 +1874,5 @@ function thermalScatteringOf(
     }
     values.set(rgb, i * 3);
   }
-  return { altitudesM: prepared.altitudesM.slice(), values };
+  return { altitudesM: altitudesM.slice(), values };
 }

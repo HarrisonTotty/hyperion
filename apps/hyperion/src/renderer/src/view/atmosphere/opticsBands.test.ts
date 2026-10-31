@@ -225,9 +225,8 @@ describe("the optics pool's bands (R08.T14.d)", () => {
   it("fails a body's bake with its first band to fail, its other bands' jobs given up, and lands another body's", async () => {
     const { pool, workers } = scriptedPool(4);
     const failing = pool.bakeThick(saturnAsk());
-    const other = sphereAsk();
-    const landing = pool.bakeThick(other);
-    expect(pool.queuedCount).toBe(1);
+    const landing = pool.bakeThick(saturnAsk());
+    expect(pool.queuedCount).toBe(4);
     const asked = inFlight(workers);
     const broken = asked.get(1);
     if (broken === undefined) {
@@ -243,33 +242,30 @@ describe("the optics pool's bands (R08.T14.d)", () => {
       kind: "failed",
       message: "the solver refused a layer",
     });
-    // The other body's job went to the worker band 1 freed; the failed bake's other bands still
-    // hold theirs until their late answers, which no bake takes.
-    const next = workerOf(workers, broken).pending[0];
-    if (next === undefined) {
-      throw new Error("the other body's bake was not sent");
-    }
+    const tables = patternedThickBake(thickBakeBands(saturnAsk().body), R05_EARTH_REFERENCE, 1);
+    // The failed bake's other bands hold their workers until their late answers, which no bake
+    // takes; the other body's bands go to the workers as they free.
     for (const [band, request] of asked) {
       if (band !== 1) {
         workerOf(workers, request).reply({
           kind: "thick-baked",
           id: request.id,
-          tables: patternedThickBake(
-            thickBakeBands(saturnAsk().body),
-            R05_EARTH_REFERENCE,
-            1,
-          ).slice(band, band + 1),
+          tables: tables.slice(band, band + 1),
         });
       }
     }
-    const table = patternedThickBake(thickBakeBands(other.body), R05_EARTH_REFERENCE, 1);
-    workerOf(workers, next).reply({ kind: "thick-baked", id: next.id, tables: table });
+    for (const [band, request] of inFlight(workers)) {
+      workerOf(workers, request).reply({
+        kind: "thick-baked",
+        id: request.id,
+        tables: tables.slice(band, band + 1),
+      });
+    }
     const landed = await landing.outcome;
     expect([
-      next.kind,
-      landed.kind === "baked" && landed.tables[0] === table[0],
+      landed.kind === "baked" && landed.tables.every((table, b) => table === tables[b]),
       pool.queuedCount,
-    ]).toEqual(["thick-bake", true, 0]);
+    ]).toEqual([true, 0]);
   });
 
   it("settles a bake cancelled with its bands queued and sent, dropping the queued", async () => {
@@ -405,21 +401,24 @@ describe("the optics pool's bands (R08.T14.d)", () => {
     expect([await disc.outcome, pool.queuedCount]).toEqual([{ kind: "cancelled" }, 0]);
   });
 
-  it("asks a disc of one band in one disc-bake, as a whole table", () => {
+  it("asks a disc of one band whose routed bake has landed in one disc-bake, as a whole table", () => {
     const { pool, workers } = scriptedPool(2);
     const thick = sphereAsk();
-    pool.bakeDisc({
-      ...thick,
-      air: {
-        medium: R05_EARTH_REFERENCE,
-        kernelMedium: kernelMedium(R05_EARTH_REFERENCE),
-        curves: [],
-      },
-    });
+    const bake = patternedThickBake(thickBakeBands(thick.body), R05_EARTH_REFERENCE, 1);
+    pool.bakeDisc({ ...thick, air: { ...AIR, bake } });
     expect(workers.map((worker) => worker.received.map((request) => request.kind))).toEqual([
       ["disc-bake"],
       [],
     ]);
+  });
+
+  it("spreads the J of a disc of one band whose routed bake has not landed over its bins first", async () => {
+    const { pool, workers } = scriptedPool(2);
+    const thick = sphereAsk();
+    const disc = pool.bakeDisc({ ...thick, air: AIR });
+    expect(askedKinds(workers)).toEqual(["thick-bake-bins", "thick-bake-bins"]);
+    disc.cancel();
+    expect(await disc.outcome).toEqual({ kind: "cancelled" });
   });
 });
 

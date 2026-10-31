@@ -100,10 +100,21 @@
  * field's half-range moments: the vector's I row reads its Q through b₁. ΔJ = J_vector − J_scalar,
  * the terms' weights summed. The single scattering of the unpolarised beam, which the kernels add
  * exactly, and the aureole's, the I row of a₁′ alone, are the same in both and cancel.
+ *
+ * **Channel shares** (R08.T14.d's bake time). A band's three render channels share nothing but the
+ * layers, which the reference bin places, so a preparation at one channel's wavelength alone
+ * (`PolarisationOptions.wavelengthsNm`) and its {@link polarisationChannel} give that channel's ΔJ
+ * as the whole band's bake does, and {@link gatherChannels} of the three is
+ * {@link bakePolarisationCorrection}'s table to the bit.
  */
 
 import { gaussLegendre as gaussLegendreSymmetric } from "../../lighting/quadrature";
-import { BAKE_WAVELENGTHS_NM, CHANNEL_WAVELENGTHS_NM, densityAt } from "../medium";
+import {
+  BAKE_WAVELENGTHS_NM,
+  CHANNEL_WAVELENGTHS_NM,
+  densityAt,
+  type RenderChannel,
+} from "../medium";
 import {
   type BakeLayering,
   bakeLayering,
@@ -3005,7 +3016,8 @@ export interface PolarisationTable {
  * The polarisation correction of one latitude band (Provides' `bakePolarisationCorrection`; the
  * module's remarks): for every light, every render channel and every term of the channel's bin's
  * gases, an 8-stream vector and scalar solve, m = 0 … 2, on the thick bake's layers and
- * pseudo-spherical beam, ΔJ_pol their difference at the table's points.
+ * pseudo-spherical beam, ΔJ_pol their difference at the table's points: each channel's
+ * {@link polarisationChannel}, gathered by {@link gatherChannels}.
  *
  * @param prepared - {@link preparePolarisation} at the render channels.
  * @param band - The band's index in `bake.ts`'s `thickBakeBands` order.
@@ -3027,17 +3039,121 @@ export function bakePolarisationCorrection(
   ) {
     throw new RangeError("the correction's table is stored at the render channels' wavelengths");
   }
-  const perChannel = channels.map((_, c) =>
-    polarisationSources(prepared, body, band, c, ground === undefined ? {} : { ground }),
+  return gatherChannels(
+    channels.map((_, c) => polarisationChannel(prepared, body, band, c, ground)),
+  );
+}
+
+/** One light's correction in one render channel: `PolarisationSources`' ΔJ and its records. */
+export interface PolarisationChannelLight {
+  /** ΔJ at the table's points, as {@link PolarisationSources.correction}. */
+  readonly correction: Float64Array;
+  readonly solves: number;
+  readonly complexPairs: number;
+  readonly imaginaryShares: readonly [number, number];
+  readonly nonsymmetricLayers: number;
+}
+
+/**
+ * One render channel's share of a band's correction (plan R08, R08.T14.d's bake time): what one
+ * optics job of a band split by channels answers, for {@link gatherChannels} to take with the
+ * band's other channels.
+ */
+export interface PolarisationChannelShare {
+  readonly channel: RenderChannel;
+  readonly band: ThickBakeBand;
+  readonly altitudesM: Float64Array;
+  readonly sunCosines: Float64Array;
+  readonly travelCosines: Float64Array;
+  /** One a light of the preparation, in its order. */
+  readonly lights: ReadonlyArray<PolarisationChannelLight>;
+}
+
+/**
+ * One band's correction in one render channel, the preparation's point `point` (at that channel's
+ * wavelength): {@link bakePolarisationCorrection}'s solves, a channel's share of them.
+ *
+ * @throws RangeError for a point not at a render channel's wavelength, a band the body does not
+ *   have, or as the solvers refuse a layer.
+ */
+export function polarisationChannel(
+  prepared: PreparedPolarisation,
+  body: ThickBakeBody,
+  band: number,
+  point: number,
+  ground?: PolarisationGround,
+): PolarisationChannelShare {
+  const channel = CHANNEL_WAVELENGTHS_NM.findIndex(
+    (nm) => nm === prepared.points[point]?.wavelengthNm,
+  );
+  if (channel !== 0 && channel !== 1 && channel !== 2) {
+    throw new RangeError(`point ${point} is not at a render channel's wavelength`);
+  }
+  const sources = polarisationSources(
+    prepared,
+    body,
+    band,
+    point,
+    ground === undefined ? {} : { ground },
   );
   const { grid } = prepared;
   const geometry = thickBakeBands(body)[band];
   if (geometry === undefined) {
     throw new RangeError(`the body has no band ${band}`);
   }
-  const slots = prepared.lights.map((_, slot): PolarisationSlot => {
-    const sources = perChannel.map((each) => {
-      const source = each[slot];
+  const upward = grid.upwardCosines;
+  const views = 2 * upward.length;
+  return {
+    channel,
+    band: geometry,
+    altitudesM: prepared.layering.altitudesM.slice(),
+    sunCosines: grid.sunCosines.slice(),
+    travelCosines: Float64Array.from({ length: views }, (_, v) =>
+      v < upward.length ? -at(upward, upward.length - 1 - v) : at(upward, v - upward.length),
+    ),
+    lights: sources.map((source): PolarisationChannelLight => ({
+      correction: source.correction,
+      solves: source.solves,
+      complexPairs: source.complexPairs,
+      imaginaryShares: source.imaginaryShares,
+      nonsymmetricLayers: source.nonsymmetricLayers,
+    })),
+  };
+}
+
+/**
+ * A band's correction table from its render channels' shares ({@link polarisationChannel}), every
+ * channel once in any order: each channel's ΔJ laid in its place and the records over the channels,
+ * so that a band baked a channel a job is the bits of one baked whole.
+ *
+ * @throws RangeError for shares that are not every render channel once, or of other bands, grids or
+ *   lights than the first's.
+ */
+export function gatherChannels(shares: ReadonlyArray<PolarisationChannelShare>): PolarisationTable {
+  const byChannel = CHANNEL_WAVELENGTHS_NM.map((_, c) => {
+    const found = shares.filter((share) => share.channel === c);
+    const [share] = found;
+    if (share === undefined || found.length > 1) {
+      throw new RangeError(`a correction's channel shares hold channel ${c} ${found.length} times`);
+    }
+    return share;
+  });
+  const [first] = byChannel;
+  if (
+    first === undefined ||
+    shares.length !== byChannel.length ||
+    byChannel.some(
+      (share) =>
+        share.band.gravityRatio !== first.band.gravityRatio ||
+        share.lights.length !== first.lights.length ||
+        share.altitudesM.length !== first.altitudesM.length,
+    )
+  ) {
+    throw new RangeError("a correction's channel shares are of other bands, grids or lights");
+  }
+  const slots = first.lights.map((_, slot): PolarisationSlot => {
+    const sources = byChannel.map((share) => {
+      const source = share.lights[slot];
       if (source === undefined) {
         throw new Error(`no light ${slot}`);
       }
@@ -3061,15 +3177,11 @@ export function bakePolarisationCorrection(
       nonsymmetricLayers: sources.reduce((sum, source) => sum + source.nonsymmetricLayers, 0),
     };
   });
-  const upward = grid.upwardCosines;
-  const views = 2 * upward.length;
   return {
-    band: geometry,
-    altitudesM: prepared.layering.altitudesM.slice(),
-    sunCosines: grid.sunCosines.slice(),
-    travelCosines: Float64Array.from({ length: views }, (_, v) =>
-      v < upward.length ? -at(upward, upward.length - 1 - v) : at(upward, v - upward.length),
-    ),
+    band: first.band,
+    altitudesM: first.altitudesM.slice(),
+    sunCosines: first.sunCosines.slice(),
+    travelCosines: first.travelCosines.slice(),
     modes: POLARISATION_MODES,
     slots,
   };

@@ -55,6 +55,19 @@
  * bakes each and in whatever order they land. The first band to fail fails the bake, its other
  * bands' jobs cancelled; another body's bakes go on.
  *
+ * **Bins** (R08.T14.d's bake time): where a bake's bands do not fill the workers
+ * ({@link binSharesFor}), each band is split further. A thick bake's band is asked one
+ * `thick-bake-bins` a share of its 15 bake bins (two shares a worker, bin b in share b mod their
+ * count), each job preparing and solving its bins alone, then one `thick-gather` of the shares,
+ * asked ahead of the jobs waiting and transferring them, which converts every bin to the channels
+ * in the bins' order. A correction's band is asked one `polarisation-bake-channel` a render
+ * channel and a `polarisation-gather`; a deck's band its bins' `deck-bake-bins`, its correction's
+ * channels' `deck-polarisation-channel` and a `deck-gather`; and a disc of one band whose routed
+ * bake has not landed has its J so baked before its one `disc-bake`. Each bin's and channel's
+ * values are its own request's pure function and are gathered by the code the whole band's job
+ * runs, so the tables are the bits of one job's whatever the split. A share or gather that fails
+ * fails its band, as a band fails its bake.
+ *
  * The workers start at the first build or bake, so a session that draws no disc loads none of the
  * optics. This module takes only types of `assemble.ts` and of the thick bake's modules, whose
  * tables stay in the workers.
@@ -70,10 +83,10 @@ import {
   transferablesOf,
 } from "./opticsMessages";
 import { type DiscBandValues, discTableOfBands, type DiscReflectanceTable } from "./discTable";
-import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
+import type { MsBinShare, MsSourceTable, ThickBakeBody } from "./thick/bake";
 import type { DiscBakeAir } from "./thick/discBake";
-import type { DeckSplit, DeckTables } from "./thick/deck";
-import type { PolarisationTable } from "./thick/polarisation";
+import type { DeckBinShare, DeckSplit, DeckTables } from "./thick/deck";
+import type { PolarisationChannelShare, PolarisationTable } from "./thick/polarisation";
 import type { SpectralColumn } from "./thick/spectralColumn";
 
 /** The part of a `Worker` the pool uses, so that tests can stand in for one. */
@@ -551,10 +564,39 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
    */
   bakeThick(ask: ThickBakeAsk): ThickBake {
     this.#startBake();
+    const shares = binSharesFor(ask.bands.length, this.runningWorkers);
     return this.#byBand(
       ask,
-      (band) => this.#bakeJob(band, (id) => ({ kind: "thick-bake", id, ...band }), bakeOutcomeOf),
+      (band) =>
+        shares > 1
+          ? this.#thickByBins(band, shares)
+          : this.#bakeJob(band, (id) => ({ kind: "thick-bake", id, ...band }), bakeOutcomeOf),
       (parts) => ({ kind: "baked", tables: parts.flatMap((part) => part.tables) }),
+    );
+  }
+
+  /**
+   * One band's thick bake split by its bins (the module's remarks, "Bins"): one `thick-bake-bins`
+   * job a share of `shares`, then a `thick-gather` of their shares, asked ahead of the queue.
+   */
+  #thickByBins(ask: ThickBakeAsk, shares: number): ThickBake {
+    const parts = binShares(shares).map((bins) =>
+      this.#bakeJob(
+        ask,
+        (id) => ({ kind: "thick-bake-bins", id, ...ask, bins }),
+        binShareOutcomeOf,
+      ),
+    );
+    return then(
+      gathered(parts, (landed) => ({
+        kind: "baked" as const,
+        shares: landed.map((part) => part.share),
+      })),
+      ({ shares: landed }) =>
+        this.#bakeJob(ask, (id) => ({ kind: "thick-gather", id, shares: landed }), bakeOutcomeOf, {
+          transfer: transferablesOf(landed),
+          ahead: true,
+        }),
     );
   }
 
@@ -566,15 +608,45 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
    */
   bakePolarisation(ask: ThickBakeAsk): PolarisationBake {
     this.#startBake();
+    const split = binSharesFor(ask.bands.length, this.runningWorkers) > 1;
     return this.#byBand(
       ask,
       (band) =>
-        this.#bakeJob(
-          band,
-          (id) => ({ kind: "polarisation-bake", id, ...band }),
-          polarisationOutcomeOf,
-        ),
+        split
+          ? this.#correctionByChannels(band)
+          : this.#bakeJob(
+              band,
+              (id) => ({ kind: "polarisation-bake", id, ...band }),
+              polarisationOutcomeOf,
+            ),
       (parts) => ({ kind: "baked", tables: parts.flatMap((part) => part.tables) }),
+    );
+  }
+
+  /**
+   * One band's correction split by its render channels (the module's remarks, "Bins"): one
+   * `polarisation-bake-channel` job a channel, then a `polarisation-gather` asked ahead of the queue.
+   */
+  #correctionByChannels(ask: ThickBakeAsk): PolarisationBake {
+    const parts = RENDER_CHANNELS.map((channel) =>
+      this.#bakeJob(
+        ask,
+        (id) => ({ kind: "polarisation-bake-channel", id, ...ask, channel }),
+        channelShareOutcomeOf,
+      ),
+    );
+    return then(
+      gathered(parts, (landed) => ({
+        kind: "baked" as const,
+        shares: landed.map((part) => part.share),
+      })),
+      ({ shares }) =>
+        this.#bakeJob(
+          ask,
+          (id) => ({ kind: "polarisation-gather", id, shares }),
+          polarisationOutcomeOf,
+          { transfer: transferablesOf(shares), ahead: true },
+        ),
     );
   }
 
@@ -587,37 +659,23 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
    */
   bakeDisc(ask: DiscBakeAsk): DiscBake {
     this.#startBake();
+    const spread = ask.bands.length > 1 || binSharesFor(ask.bands.length, this.runningWorkers) > 1;
+    if (ask.air.bake === undefined && spread) {
+      // A body whose routed bake has not landed: its J spread over the workers, then its table.
+      const { air, ...thick } = ask;
+      return then(this.bakeThick(thick), (solved) =>
+        this.#discOf({ ...ask, air: { ...air, bake: solved.tables } }),
+      );
+    }
+    return this.#discOf(ask);
+  }
+
+  /** A disc's table as {@link bakeDisc} asks it once its J is given or left to the job. */
+  #discOf(ask: DiscBakeAsk): DiscBake {
     if (ask.bands.length <= 1) {
       return this.#bakeJob(ask, (id) => ({ kind: "disc-bake", id, ...ask }), discOutcomeOf);
     }
-    if (ask.air.bake !== undefined) {
-      return this.#discBands(ask, ask.air);
-    }
-    // A body whose routed bake has not landed: its J spread over the workers, then its bands.
-    const { air, ...thick } = ask;
-    const solve = this.bakeThick(thick);
-    let bands: DiscBake | null = null;
-    let cancelled = false;
-    const settled = solve.outcome
-      .then(async (solved): Promise<DiscBakeOutcome> => {
-        if (solved.kind !== "baked") {
-          return solved;
-        }
-        if (cancelled) {
-          return CANCELLED;
-        }
-        bands = this.#discBands(ask, { ...air, bake: solved.tables });
-        return bands.outcome;
-      })
-      .catch((error: unknown): DiscBakeOutcome => failedWith(error));
-    return {
-      outcome: settled.then((outcome): DiscBakeOutcome => (cancelled ? CANCELLED : outcome)),
-      cancel: () => {
-        cancelled = true;
-        solve.cancel();
-        bands?.cancel();
-      },
-    };
+    return this.#discBands(ask, ask.air);
   }
 
   /**
@@ -628,11 +686,55 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
    */
   bakeDeck(ask: DeckBakeAsk): DeckBake {
     this.#startBake();
+    const shares = binSharesFor(ask.bands.length, this.runningWorkers);
     return this.#byBand(
       ask,
-      (band) => this.#bakeJob(band, (id) => ({ kind: "deck-bake", id, ...band }), deckOutcomeOf),
+      (band) =>
+        shares > 1
+          ? this.#deckByBins(band, shares)
+          : this.#bakeJob(band, (id) => ({ kind: "deck-bake", id, ...band }), deckOutcomeOf),
       deckOfBands,
     );
+  }
+
+  /**
+   * One band's deck split by its bins and its correction by its render channels (the module's
+   * remarks, "Bins"): one `deck-bake-bins` job a share of `shares` and one
+   * `deck-polarisation-channel` a channel, then a `deck-gather` asked ahead of the queue.
+   */
+  #deckByBins(ask: DeckBakeAsk, shares: number): DeckBake {
+    const decks = gathered(
+      binShares(shares).map((bins) =>
+        this.#bakeJob(
+          ask,
+          (id) => ({ kind: "deck-bake-bins", id, ...ask, bins }),
+          deckShareOutcomeOf,
+        ),
+      ),
+      (landed) => ({ kind: "baked" as const, decks: landed.map((part) => part.share) }),
+    );
+    const channels = gathered(
+      RENDER_CHANNELS.map((channel) =>
+        this.#bakeJob(
+          ask,
+          (id) => ({ kind: "deck-polarisation-channel", id, ...ask, channel }),
+          deckChannelOutcomeOf,
+        ),
+      ),
+      (landed) => ({ kind: "baked" as const, channels: landed.map((part) => part.share) }),
+    );
+    return then(both(decks, channels), ({ first, second }) => {
+      const corrections = second.channels;
+      const corrected = corrections.filter((share) => share !== null);
+      const landed = {
+        decks: first.decks,
+        channels: corrected.length === corrections.length ? corrected : null,
+      };
+      return this.#bakeJob(ask, (id) => ({ kind: "deck-gather", id, ...landed }), deckOutcomeOf, {
+        transfer: transferablesOf(landed),
+        ahead: true,
+      });
+    });
   }
 
   /** Refuses a bake once the pool is terminated, and starts the workers at the first. */
@@ -679,13 +781,18 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
     );
   }
 
-  /** One bake's job, `make`'s request, its outcome read by `outcomeOf` against `ask`. */
+  /**
+   * One bake's job, `make`'s request, its outcome read by `outcomeOf` against `ask`: posted with
+   * `transfer` (none by default), and queued `ahead` of every job waiting where asked, as a gather
+   * that a bake waits on.
+   */
   #bakeJob<Ask, Outcome extends Settled>(
     ask: Ask,
     make: (id: number) => OpticsRequest,
     outcomeOf: (outcome: JobOutcome, ask: Ask) => Outcome,
+    posting: { readonly transfer: ArrayBuffer[]; readonly ahead: boolean } = NOT_AHEAD,
   ): Settling<Outcome | Unbaked> {
-    const job = this.#submit(make, []);
+    const job = this.#submit(make, posting.transfer, posting.ahead);
     let cancelled = false;
     const settled = job.outcome.then(
       (outcome): Outcome | Unbaked => (cancelled ? CANCELLED : outcomeOf(outcome, ask)),
@@ -743,7 +850,7 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
   }
 
   /** Queues a job, failing it at once where every worker was given up. */
-  #submit(make: (id: number) => OpticsRequest, transfer: ArrayBuffer[]): JobHandle {
+  #submit(make: (id: number) => OpticsRequest, transfer: ArrayBuffer[], ahead = false): JobHandle {
     let resolve: (outcome: JobOutcome) => void = ignore;
     const outcome = new Promise<JobOutcome>((settleWith) => {
       resolve = settleWith;
@@ -756,7 +863,11 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
     } else if (this.runningWorkers === 0) {
       settle(job, EVERY_WORKER_LOST);
     } else {
-      this.#queue.push(job);
+      if (ahead) {
+        this.#queue.unshift(job);
+      } else {
+        this.#queue.push(job);
+      }
       this.#pump();
     }
     return {
@@ -1145,6 +1256,246 @@ function gathered<
     },
   };
 }
+
+/**
+ * Two bakes as one (the module's remarks, "Bins"): baked once both have, failed with the first to
+ * fail, the other cancelled, as {@link gathered} gathers parts of one kind.
+ */
+function both<First extends { readonly kind: "baked" }, Second extends { readonly kind: "baked" }>(
+  first: Settling<First | Unbaked>,
+  second: Settling<Second | Unbaked>,
+): Settling<{ readonly kind: "baked"; readonly first: First; readonly second: Second } | Unbaked> {
+  /** One of the two, tagged with which. */
+  type Either =
+    | { readonly kind: "baked"; readonly first: First }
+    | { readonly kind: "baked"; readonly second: Second };
+  const tagged = <Part extends { readonly kind: "baked" }>(
+    part: Settling<Part | Unbaked>,
+    tag: (baked: Part) => Either,
+  ): Settling<Either | Unbaked> => ({
+    outcome: part.outcome.then((ended): Either | Unbaked =>
+      ended.kind === "baked" ? tag(ended) : ended,
+    ),
+    cancel: () => {
+      part.cancel();
+    },
+  });
+  return gathered(
+    [
+      tagged(first, (baked) => ({ kind: "baked", first: baked })),
+      tagged(second, (baked) => ({ kind: "baked", second: baked })),
+    ],
+    (parts) => {
+      const one = parts.find((part) => "first" in part);
+      const other = parts.find((part) => "second" in part);
+      if (one === undefined || !("first" in one) || other === undefined || !("second" in other)) {
+        throw new Error("two bakes as one landed without both");
+      }
+      return { kind: "baked", first: one.first, second: other.second };
+    },
+  );
+}
+
+/**
+ * A bake that waits on another (the module's remarks, "Bins"): `after` of `first`'s outcome once it
+ * has baked, `first`'s failure or cancellation otherwise; cancelling it cancels both.
+ */
+function then<First extends { readonly kind: "baked" }, Next extends Settled>(
+  first: Settling<First | Unbaked>,
+  after: (baked: First) => Settling<Next | Unbaked>,
+): Settling<Next | Unbaked> {
+  let second: Settling<Next | Unbaked> | null = null;
+  let cancelled = false;
+  const run = async (): Promise<Next | Unbaked> => {
+    const landed = await first.outcome;
+    if (landed.kind !== "baked") {
+      return landed;
+    }
+    if (cancelled) {
+      return CANCELLED;
+    }
+    second = after(landed);
+    return second.outcome;
+  };
+  const settled = run().catch((error: unknown): Unbaked => failedWith(error));
+  return {
+    outcome: settled.then((outcome): Next | Unbaked => (cancelled ? CANCELLED : outcome)),
+    cancel: () => {
+      cancelled = true;
+      first.cancel();
+      second?.cancel();
+    },
+  };
+}
+
+/** How a `polarisation-bake-channel` job ended: its band's share of one channel, or why not. */
+type ChannelShareOutcome =
+  { readonly kind: "baked"; readonly share: PolarisationChannelShare } | Unbaked;
+
+/** A `polarisation-bake-channel` job's outcome as its share's. */
+function channelShareOutcomeOf(outcome: JobOutcome): ChannelShareOutcome {
+  let baked: ChannelShareOutcome;
+  switch (outcome.kind) {
+    case "answered": {
+      const { reply } = outcome;
+      if (reply.kind === "polarisation-channel-baked") {
+        baked = { kind: "baked", share: reply.share };
+      } else if (reply.kind === "polarisation-bake-failed") {
+        baked = { kind: "failed", message: reply.message };
+      } else {
+        baked = { kind: "failed", message: `a correction's channel was answered ${reply.kind}` };
+      }
+      break;
+    }
+    case "failed":
+      baked = outcome;
+      break;
+    case "lost":
+      baked = { kind: "failed", message: "an optics worker failed with a correction's channel" };
+      break;
+    case "cancelled":
+      baked = CANCELLED;
+      break;
+  }
+  return baked;
+}
+
+/** The render channels a correction is split into, red, green and blue. */
+const RENDER_CHANNELS = [0, 1, 2] as const;
+
+/** How a `deck-bake-bins` job ended: its band's share of its bins, or why not. */
+type DeckShareOutcome = { readonly kind: "baked"; readonly share: DeckBinShare } | Unbaked;
+
+/** A `deck-bake-bins` job's outcome as its share's. */
+function deckShareOutcomeOf(outcome: JobOutcome): DeckShareOutcome {
+  let baked: DeckShareOutcome;
+  switch (outcome.kind) {
+    case "answered": {
+      const { reply } = outcome;
+      if (reply.kind === "deck-bins-baked") {
+        baked = { kind: "baked", share: reply.share };
+      } else if (reply.kind === "deck-bake-failed") {
+        baked = { kind: "failed", message: reply.message };
+      } else {
+        baked = { kind: "failed", message: `a deck's bins were answered ${reply.kind}` };
+      }
+      break;
+    }
+    case "failed":
+      baked = outcome;
+      break;
+    case "lost":
+      baked = { kind: "failed", message: "an optics worker failed with a deck's bins" };
+      break;
+    case "cancelled":
+      baked = CANCELLED;
+      break;
+  }
+  return baked;
+}
+
+/** How a `deck-polarisation-channel` job ended: its channel's share, none, or why not. */
+type DeckChannelOutcome =
+  { readonly kind: "baked"; readonly share: PolarisationChannelShare | null } | Unbaked;
+
+/** A `deck-polarisation-channel` job's outcome as its share's. */
+function deckChannelOutcomeOf(outcome: JobOutcome): DeckChannelOutcome {
+  let baked: DeckChannelOutcome;
+  switch (outcome.kind) {
+    case "answered": {
+      const { reply } = outcome;
+      if (reply.kind === "deck-channel-baked") {
+        baked = { kind: "baked", share: reply.share };
+      } else if (reply.kind === "deck-bake-failed") {
+        baked = { kind: "failed", message: reply.message };
+      } else {
+        baked = {
+          kind: "failed",
+          message: `a deck's correction's channel was answered ${reply.kind}`,
+        };
+      }
+      break;
+    }
+    case "failed":
+      baked = outcome;
+      break;
+    case "lost":
+      baked = {
+        kind: "failed",
+        message: "an optics worker failed with a deck's correction's channel",
+      };
+      break;
+    case "cancelled":
+      baked = CANCELLED;
+      break;
+  }
+  return baked;
+}
+
+/** How a `thick-bake-bins` job ended: its band's share of its bins, or why not. */
+type BinShareOutcome = { readonly kind: "baked"; readonly share: MsBinShare } | Unbaked;
+
+/** A `thick-bake-bins` job's outcome as its share's, as {@link bakeOutcomeOf} reads a band's. */
+function binShareOutcomeOf(outcome: JobOutcome): BinShareOutcome {
+  let baked: BinShareOutcome;
+  switch (outcome.kind) {
+    case "answered": {
+      const { reply } = outcome;
+      if (reply.kind === "thick-bins-baked") {
+        baked = { kind: "baked", share: reply.share };
+      } else if (reply.kind === "thick-bake-failed") {
+        baked = { kind: "failed", message: reply.message };
+      } else {
+        baked = { kind: "failed", message: `a thick bake's bins were answered ${reply.kind}` };
+      }
+      break;
+    }
+    case "failed":
+      baked = outcome;
+      break;
+    case "lost":
+      baked = { kind: "failed", message: "an optics worker failed with a thick bake's bins" };
+      break;
+    case "cancelled":
+      baked = CANCELLED;
+      break;
+  }
+  return baked;
+}
+
+/**
+ * The bin shares a band of a bake is split into (the module's remarks, "Bins"): none, 1, where the
+ * bake's bands fill the workers, and otherwise {@link SHARES_A_WORKER} a worker over its bands, no
+ * more than a share a bin.
+ */
+export function binSharesFor(bands: number, workers: number): number {
+  if (bands === 0 || bands >= workers) {
+    return 1;
+  }
+  return Math.min(BAKE_BINS, Math.ceil((SHARES_A_WORKER * workers) / bands));
+}
+
+/** The bake bins of each of `count` shares: bin b in share b mod `count`, ascending in each. */
+export function binShares(count: number): ReadonlyArray<ReadonlyArray<number>> {
+  const bins = Array.from({ length: BAKE_BINS }, (_, b) => b);
+  return Array.from({ length: count }, (_, share) => bins.filter((b) => b % count === share));
+}
+
+/** The thick bake's bins: `medium.ts`'s `BAKE_BIN_COUNT`, held equal to it by `opticsBins.test.ts`. */
+export const BAKE_BINS = 15;
+
+/**
+ * The bin shares a worker takes of a band (the module's remarks, "Bins"): two, so that a band's
+ * uneven bins (the generated Earth's 2 to 21 terms) balance over the workers as the queue hands
+ * them out.
+ */
+const SHARES_A_WORKER = 2;
+
+/** A bake job posted as any is: nothing transferred, at the queue's end. */
+const NOT_AHEAD: { readonly transfer: ArrayBuffer[]; readonly ahead: boolean } = {
+  transfer: [],
+  ahead: false,
+};
 
 /** A bake's failure from what was thrown: a bug in what it was asked, with its message. */
 function failedWith(error: unknown): { readonly kind: "failed"; readonly message: string } {

@@ -113,21 +113,35 @@
  * deck's altitudes: the field the deck's reflectance summarises from above, solved once a bin and
  * term beside the bake's two. An envelope has no view from below, and no table.
  *
+ * **Bin and channel shares** (R08.T14.d's bake time). Every table here is summed in the bake bins
+ * and converted to the channels last, as the thick bake's is, so a preparation of some bins alone
+ * ({@link DeckOptions.bins}) and its {@link bakeDeckBins} give those bins as the whole band's bake
+ * does, and {@link gatherDeckBins} of shares holding every bin once is {@link bakeDeck}'s tables to
+ * the bit. The correction over the deck splits by its channels ({@link deckPolarisationChannel}).
+ *
  * Pure: no state, no clock, no platform API.
  */
 
 import { FORWARD_PEAK_U } from "../forwardPeak";
-import { BAKE_WAVELENGTHS_NM, CHANNEL_WAVELENGTHS_NM, columnLengthM, phaseAt } from "../medium";
+import {
+  BAKE_BIN_COUNT,
+  BAKE_WAVELENGTHS_NM,
+  CHANNEL_WAVELENGTHS_NM,
+  columnLengthM,
+  phaseAt,
+} from "../medium";
 import {
   type BakeGround,
   type BakeLayering,
+  bakeBins,
   bakeLayering,
-  bakeMultipleScattering,
   binGroundAlbedo,
   type BinSolve,
   type BinTerm,
   checkBakeInputs,
   deltaMLayer,
+  gatherBins,
+  type MsBinShare,
   type MsSourceTable,
   type PreparedBake,
   prepareBake,
@@ -153,6 +167,8 @@ import {
 import { EXP_SUM_OPTIONS, type ExpSumOptions } from "./expSum";
 import {
   bakePolarisationCorrection,
+  type PolarisationChannelShare,
+  polarisationChannel,
   type PolarisationGround,
   type PolarisationOptions,
   type PolarisationTable,
@@ -230,6 +246,11 @@ export interface DeckOptions {
    * envelope's floor at 0 and 1): the ground's under `ground` and 0 under `envelope` by default.
    */
   readonly floorAlbedo?: number;
+  /**
+   * The bake bins prepared, ascending: every bin by default, or a share of them for a job that
+   * bakes those alone ({@link bakeDeckBins}; `bake.ts`'s `prepareBake`).
+   */
+  readonly bins?: ReadonlyArray<number>;
 }
 
 /** A deck band's options. */
@@ -440,10 +461,14 @@ export function prepareDeck(
     { bottomM: floorAltitudeM, topM: split.altitudeM },
   );
   const whole = stackedLayering(upperLayering, deck);
-  const upper = prepareBake(column, lights, grid, options.expSum ?? EXP_SUM_OPTIONS, {
-    layering: upperLayering,
-    fitLayering: whole,
-  });
+  const upper = prepareBake(
+    column,
+    lights,
+    grid,
+    options.expSum ?? EXP_SUM_OPTIONS,
+    { layering: upperLayering, fitLayering: whole },
+    options.bins,
+  );
   return {
     split,
     floorAltitudeM,
@@ -454,6 +479,7 @@ export function prepareDeck(
     floorAlbedo,
     floorAlbedoOverride: override,
     termPhases: upper.binPhases.map((terms, b) =>
+      // A share's other bins hold no optics, and take no phase.
       terms.map((phase, t) =>
         (upper.binOptics[b]?.[t]?.scatteringPerM ?? 0) > 0
           ? phaseOnGrid(phase)
@@ -866,11 +892,13 @@ export function deckLayersOf(
  * module's remarks): the thick bake of the upper medium with the deck as its ground, the deck's
  * reflectance solved once a bin and term of its gases at the bake's modes for that ground and once
  * more at {@link DECK_MODES} at the kernels' cosines, its single scattering, and the deck's tables
- * from those solves, summed by the terms' weights and converted to the channels.
+ * from those solves, summed by the terms' weights and converted to the channels: the band's
+ * {@link bakeDeckBins} of every bin, gathered by {@link gatherDeckBins}.
  *
  * @param band - The band's index in `bake.ts`'s `thickBakeBands` order.
  * @throws RangeError for a band the body does not have, a `diffuseModes` outside
- *   [`THICK_BAKE_MODES`, {@link DECK_MODES}], or as the solver refuses a layer.
+ *   [`THICK_BAKE_MODES`, {@link DECK_MODES}], a preparation of some bins alone, or as the solver
+ *   refuses a layer.
  */
 export function bakeDeck(
   prepared: PreparedDeck,
@@ -878,6 +906,80 @@ export function bakeDeck(
   band: number,
   options: DeckBandOptions = {},
 ): DeckTables {
+  return gatherDeckBins([bakeDeckBins(prepared, body, band, options)]);
+}
+
+/** One light's deck in one bin, summed over the bin's terms, before the channels. */
+export interface DeckBinLight {
+  readonly reflectance: Float64Array;
+  readonly diffuse: Float64Array;
+  readonly beamReflection: Float64Array;
+  readonly singleGeometry: Float64Array;
+  readonly singleBeamGeometry: Float64Array;
+  /** The bin's phase times its nadir weight, Σ_t (Σ_p W_p s_p,t) p_t(Θ), on {@link DECK_PHASE_U}. */
+  readonly weightedPhase: Float64Array;
+  /** Σ_p W_p over the bin's terms by their weights. */
+  readonly nadirWeight: number;
+}
+
+/** One bin of a deck's band, before the channels (the bins' share, {@link bakeDeckBins}). */
+export interface DeckBinPart {
+  readonly bin: number;
+  /** The deck's vertical extinction optical depth in the bin, in the band's frame. */
+  readonly deckOpticalDepth: number;
+  /** One a light of the preparation, in its order. */
+  readonly lights: ReadonlyArray<DeckBinLight>;
+  /** Below a deck over a surface, one a light; `null` for an envelope. */
+  readonly below: ReadonlyArray<BelowBinLight> | null;
+}
+
+/** One light's table below the deck in one bin, summed over its terms, before the channels. */
+export interface BelowBinLight {
+  readonly radiance: Float64Array;
+  readonly irradiance: Float64Array;
+  readonly direct: Float64Array;
+}
+
+/** The grid of the table below a deck over a surface, the same in every bin. */
+export interface BelowDeckGrid {
+  readonly altitudesM: Float64Array;
+  readonly sunCosines: Float64Array;
+  readonly travelCosines: Float64Array;
+  readonly modes: number;
+}
+
+/**
+ * A deck's band over some of its bins (plan R08, R08.T14.d's bake time): what one optics job of a
+ * deck's band split by bins answers, for {@link gatherDeckBins} to take with the band's other bins.
+ */
+export interface DeckBinShare {
+  /** The table above the deck, the same bins' share (`bake.ts`'s `MsBinShare`). */
+  readonly above: MsBinShare;
+  readonly band: ThickBakeBand;
+  readonly deckAltitudeM: number;
+  readonly floorAltitudeM: number;
+  readonly sunCosines: Float64Array;
+  readonly viewCosines: Float64Array;
+  readonly modes: number;
+  readonly diffuseModes: number;
+  /** The table below a deck over a surface's grid; `null` for an envelope. */
+  readonly below: BelowDeckGrid | null;
+  /** The bins baked, ascending. */
+  readonly bins: ReadonlyArray<DeckBinPart>;
+}
+
+/**
+ * One deck's band in the bins `prepared` holds ({@link DeckOptions.bins}), before the channels:
+ * {@link bakeDeck}'s solves, a bin share of them.
+ *
+ * @throws RangeError as {@link bakeDeck}.
+ */
+export function bakeDeckBins(
+  prepared: PreparedDeck,
+  body: ThickBakeBody,
+  band: number,
+  options: DeckBandOptions = {},
+): DeckBinShare {
   const geometry = bandOf(body, band);
   const diffuseModes = options.diffuseModes ?? THICK_BAKE_MODES;
   if (!(
@@ -993,7 +1095,7 @@ export function bakeDeck(
     }
     return { ...out, phaseWeights, nadirWeight };
   };
-  const above = bakeMultipleScattering(upper, body, band, {
+  const above = bakeBins(upper, body, band, {
     ground,
     onSolve: (bin, term, solve) => {
       let byTerm = records.get(bin);
@@ -1007,17 +1109,6 @@ export function bakeDeck(
   });
   const deckLayerCount = prepared.deck.interfaceHeightsM.length - 1;
   const none = new Float64Array(prepared.whole.interfaceHeightsM.length - 1);
-  const deckOpticalDepth = Float64Array.from(upper.binOptics, (optics) =>
-    deckOrdinateLayers(
-      optics,
-      prepared.deck.layerColumnsM,
-      deckLayerCount,
-      geometry.coefficientFactor,
-      none,
-      layers,
-      THICK_BAKE_STREAMS,
-    ).extinction.reduce((sum, tau) => sum + tau, 0),
-  );
   const points = suns * views;
   const sizes = {
     reflectance: points * modes,
@@ -1027,8 +1118,21 @@ export function bakeDeck(
     singleBeamGeometry: points,
   } as const;
   const entries = DECK_PHASE_U.length;
-  const slots = upper.lights.map((light, slot): DeckSlot => {
-    const perBin = light.bins.map((bin, b) => {
+  let belowParts: ReturnType<typeof belowDeckBins> | null;
+  switch (prepared.split.floor) {
+    case "ground":
+      belowParts = belowDeckBins(prepared, geometry);
+      break;
+    case "envelope":
+      belowParts = null;
+      break;
+  }
+  const parts = upper.bins.map((b): DeckBinPart => {
+    const lights = upper.lights.map((light, slot): DeckBinLight => {
+      const bin = light.bins[b];
+      if (bin === undefined) {
+        throw new Error(`light ${slot} has no bin ${b}`);
+      }
       const sum = {
         reflectance: new Float64Array(sizes.reflectance),
         diffuse: new Float64Array(sizes.diffuse),
@@ -1070,14 +1174,85 @@ export function bakeDeck(
           weightedPhase[i] = (weightedPhase[i] ?? 0) + share * (phase[i] ?? Number.NaN);
         }
       }
-      return { ...sum, weightedPhase, nadirWeight: Float64Array.of(nadirWeight) };
+      return { ...sum, weightedPhase, nadirWeight };
     });
-    const { factors } = light.conversion;
+    return {
+      bin: b,
+      deckOpticalDepth: deckOrdinateLayers(
+        upper.binOptics[b] ?? [],
+        prepared.deck.layerColumnsM,
+        deckLayerCount,
+        geometry.coefficientFactor,
+        none,
+        layers,
+        THICK_BAKE_STREAMS,
+      ).extinction.reduce((sum, tau) => sum + tau, 0),
+      lights,
+      below: belowParts?.parts.get(b) ?? null,
+    };
+  });
+  return {
+    above,
+    band: geometry,
+    deckAltitudeM: prepared.split.altitudeM,
+    floorAltitudeM: prepared.floorAltitudeM,
+    sunCosines: grid.sunCosines.slice(),
+    viewCosines: grid.upwardCosines.slice(),
+    modes,
+    diffuseModes,
+    below: belowParts?.grid ?? null,
+    bins: parts,
+  };
+}
+
+/**
+ * A deck's band from its bin shares ({@link bakeDeckBins}), which together hold every bin once:
+ * the table above gathered as `bake.ts`'s `gatherBins` gathers a band, and the deck's and the
+ * table below's bins converted to the channels in the bins' order, so that a deck baked a share of
+ * its bins a job is the bits of one baked whole.
+ *
+ * @throws RangeError for shares that do not hold every bin once, or as `bake.ts`'s `gatherBins`.
+ */
+export function gatherDeckBins(shares: ReadonlyArray<DeckBinShare>): DeckTables {
+  const first = shares[0];
+  if (first === undefined) {
+    throw new RangeError("a deck's band gathers at least one share of its bins");
+  }
+  const byBin: DeckBinPart[] = [];
+  for (const share of shares) {
+    if ((share.below === null) !== (first.below === null)) {
+      throw new RangeError("a deck's bin shares are over a surface and an envelope");
+    }
+    for (const part of share.bins) {
+      if (byBin[part.bin] !== undefined) {
+        throw new RangeError(`a deck's bin shares hold bin ${part.bin} twice`);
+      }
+      byBin[part.bin] = part;
+    }
+  }
+  const parts = Array.from({ length: BAKE_BIN_COUNT }, (_, b): DeckBinPart => {
+    const part = byBin[b];
+    if (part === undefined) {
+      throw new RangeError(`a deck's bin shares hold no bin ${b}`);
+    }
+    return part;
+  });
+  const above = gatherBins(shares.map((share) => share.above));
+  const { conversions } = first.above;
+  const entries = DECK_PHASE_U.length;
+  const slots = conversions.map((factors, slot): DeckSlot => {
+    const perBin = parts.map((part) => {
+      const light = part.lights[slot];
+      if (light === undefined) {
+        throw new RangeError(`bin ${part.bin} of the deck holds no light ${slot}`);
+      }
+      return light;
+    });
     const converted = (key: (typeof DECK_RECORD_KEYS)[number]): Float32Array =>
       inChannels(
         factors,
         perBin.map((bin) => bin[key]),
-        sizes[key],
+        perBin[0]?.[key].length ?? 0,
       );
     const weightedPhase = inChannels(
       factors,
@@ -1086,7 +1261,7 @@ export function bakeDeck(
     );
     const nadir = inChannels(
       factors,
-      perBin.map((bin) => bin.nadirWeight),
+      perBin.map((bin) => Float64Array.of(bin.nadirWeight)),
       1,
     );
     const phase = weightedPhase.map((value, i) => {
@@ -1103,27 +1278,18 @@ export function bakeDeck(
       solves: 2 * (above.slots[slot]?.solves ?? 0),
     };
   });
-  let below: BelowDeckTable | null;
-  switch (prepared.split.floor) {
-    case "ground":
-      below = belowDeck(prepared, geometry);
-      break;
-    case "envelope":
-      below = null;
-      break;
-  }
   return {
-    band: geometry,
-    deckAltitudeM: prepared.split.altitudeM,
-    floorAltitudeM: prepared.floorAltitudeM,
+    band: first.band,
+    deckAltitudeM: first.deckAltitudeM,
+    floorAltitudeM: first.floorAltitudeM,
     above,
-    sunCosines: grid.sunCosines.slice(),
-    viewCosines: grid.upwardCosines.slice(),
-    modes,
-    diffuseModes,
-    deckOpticalDepth,
+    sunCosines: first.sunCosines.slice(),
+    viewCosines: first.viewCosines.slice(),
+    modes: first.modes,
+    diffuseModes: first.diffuseModes,
+    deckOpticalDepth: Float64Array.from(parts, (part) => part.deckOpticalDepth),
     slots,
-    below,
+    below: first.below === null ? null : belowDeckOf(first.below, parts, conversions),
   };
 }
 
@@ -1293,10 +1459,14 @@ interface BelowRecord {
 }
 
 /**
- * The table below the deck of one band (the module's remarks): the whole column solved once a bin
- * and term, its fields read at the deck's altitudes, summed by the terms' weights and converted.
+ * The table below the deck of one band in the bins `prepared` holds (the module's remarks): the
+ * whole column solved once a bin and term, its fields read at the deck's altitudes and summed by
+ * the terms' weights, before the channels ({@link belowDeckOf}).
  */
-function belowDeck(prepared: PreparedDeck, band: ThickBakeBand): BelowDeckTable {
+function belowDeckBins(
+  prepared: PreparedDeck,
+  band: ThickBakeBand,
+): { readonly grid: BelowDeckGrid; readonly parts: Map<number, ReadonlyArray<BelowBinLight>> } {
   const { upper, deck } = prepared;
   const { grid } = upper;
   const deckLayers = deck.interfaceHeightsM.length - 1;
@@ -1338,17 +1508,22 @@ function belowDeck(prepared: PreparedDeck, band: ThickBakeBand): BelowDeckTable 
     }
     return out;
   };
-  const records = upper.binOptics.map(() => new Map<BinTerm, BelowRecord>());
-  const slots = upper.lights.map((light, slot): BelowDeckSlot => {
-    const sums = light.bins.map((bin, b) => {
+  const records = new Map<number, Map<BinTerm, BelowRecord>>();
+  const sums = upper.lights.map((light, slot) =>
+    upper.bins.map((b): BelowBinLight => {
+      const bin = light.bins[b];
+      if (bin === undefined) {
+        throw new Error(`light ${slot} has no bin ${b}`);
+      }
       const sum = {
         radiance: new Float64Array(size),
         irradiance: new Float64Array(altitudes * suns),
         direct: new Float64Array(altitudes * suns),
       };
-      const byTerm = records[b];
+      let byTerm = records.get(b);
       if (byTerm === undefined) {
-        throw new Error(`light ${slot} has no bin ${b}`);
+        byTerm = new Map();
+        records.set(b, byTerm);
       }
       for (const term of bin.terms) {
         let record = byTerm.get(term);
@@ -1366,34 +1541,71 @@ function belowDeck(prepared: PreparedDeck, band: ThickBakeBand): BelowDeckTable 
         }
       }
       return sum;
+    }),
+  );
+  const upward = grid.upwardCosines;
+  return {
+    grid: {
+      altitudesM: deck.altitudesM.slice(),
+      sunCosines,
+      travelCosines: Float64Array.from({ length: v2 }, (_, v) =>
+        v < views ? -(upward[views - 1 - v] ?? Number.NaN) : (upward[v - views] ?? Number.NaN),
+      ),
+      modes,
+    },
+    parts: new Map(
+      upper.bins.map((b, i) => [
+        b,
+        sums.map((perBin, slot) => {
+          const part = perBin[i];
+          if (part === undefined) {
+            throw new Error(`light ${slot} has no bin ${b} below the deck`);
+          }
+          return part;
+        }),
+      ]),
+    ),
+  };
+}
+
+/** The table below the deck from every bin's sums, each light's converted to the channels. */
+function belowDeckOf(
+  grid: BelowDeckGrid,
+  parts: ReadonlyArray<DeckBinPart>,
+  conversions: ReadonlyArray<BinConversion["factors"]>,
+): BelowDeckTable {
+  const slots = conversions.map((factors, slot): BelowDeckSlot => {
+    const sums = parts.map((part) => {
+      const light = part.below?.[slot];
+      if (light === undefined) {
+        throw new RangeError(`bin ${part.bin} below the deck holds no light ${slot}`);
+      }
+      return light;
     });
-    const { factors } = light.conversion;
+    const size = (key: keyof BelowBinLight): number => sums[0]?.[key].length ?? 0;
     return {
       radiance: inChannels(
         factors,
         sums.map((sum) => sum.radiance),
-        size,
+        size("radiance"),
       ),
       irradiance: inChannels(
         factors,
         sums.map((sum) => sum.irradiance),
-        altitudes * suns,
+        size("irradiance"),
       ),
       direct: inChannels(
         factors,
         sums.map((sum) => sum.direct),
-        altitudes * suns,
+        size("direct"),
       ),
     };
   });
-  const upward = grid.upwardCosines;
   return {
-    altitudesM: deck.altitudesM.slice(),
-    sunCosines,
-    travelCosines: Float64Array.from({ length: v2 }, (_, v) =>
-      v < views ? -(upward[views - 1 - v] ?? Number.NaN) : (upward[v - views] ?? Number.NaN),
-    ),
-    modes,
+    altitudesM: grid.altitudesM,
+    sunCosines: grid.sunCosines,
+    travelCosines: grid.travelCosines,
+    modes: grid.modes,
     slots,
   };
 }
@@ -1471,6 +1683,31 @@ export function deckPolarisationGround(
       maxMode,
     );
   };
+}
+
+/**
+ * One band's correction over the deck in one render channel (the optics pool's channel shares,
+ * R08.T14.d's bake time): {@link bakeDeckPolarisation}'s solves, a channel's share of them,
+ * `polarisation` prepared at that channel's wavelength alone (`polarisation.ts`'s
+ * `polarisationChannel`).
+ *
+ * @param point - The channel's index in `polarisation`'s points.
+ * @throws RangeError as `polarisation.ts`'s `polarisationChannel`.
+ */
+export function deckPolarisationChannel(
+  prepared: PreparedDeck,
+  polarisation: PreparedPolarisation,
+  body: ThickBakeBody,
+  band: number,
+  point: number,
+): PolarisationChannelShare {
+  return polarisationChannel(
+    polarisation,
+    body,
+    band,
+    point,
+    deckPolarisationGround(prepared, bandOf(body, band)),
+  );
 }
 
 /**

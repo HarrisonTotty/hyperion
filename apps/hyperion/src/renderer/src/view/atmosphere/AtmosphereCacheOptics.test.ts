@@ -434,11 +434,11 @@ describe("the optics-worker pool", () => {
     workerAt(workers, 0).fail();
     const replacement = workerAt(workers, 2);
     const asked = lastPosted(replacement);
-    expect([workerAt(workers, 0).terminated, asked.kind, asked.input]).toEqual([
-      true,
-      "assemble",
-      KEPT_UNSET,
-    ]);
+    expect([
+      workerAt(workers, 0).terminated,
+      asked.kind,
+      "input" in asked ? asked.input : undefined,
+    ]).toEqual([true, "assemble", KEPT_UNSET]);
     replacement.reply({ kind: "assembled", id: asked.id, assembled: NOT_MODELLED });
     expect((await build.outcome).kind).toBe("built");
   });
@@ -590,8 +590,8 @@ describe("the optics-worker pool's thick bake (R08.T14.c)", () => {
     };
   }
 
-  it("asks a sphere's one band in one thick-bake request and lands its table as baked", async () => {
-    const { pool, workers } = scriptedPool(2);
+  it("asks a sphere's one band of one worker in one thick-bake request and lands its table as baked", async () => {
+    const { pool, workers } = scriptedPool(1);
     const ask = bakeAsk();
     const bake = pool.bakeThick(ask);
     const worker = workerAt(workers, 0);
@@ -603,7 +603,7 @@ describe("the optics-worker pool's thick bake (R08.T14.c)", () => {
       workers.map((each) => each.received.length),
       posted,
       outcome.kind === "baked" && outcome.tables === tables,
-    ]).toEqual([[1, 0], { kind: "thick-bake", id: posted.id, ...ask }, true]);
+    ]).toEqual([[1], { kind: "thick-bake", id: posted.id, ...ask }, true]);
   });
 
   it("asks Saturn's four bands one thick-bake request a band, the first two at once", () => {
@@ -725,8 +725,8 @@ describe("the optics-worker pool's polarisation correction (R08.T14.f)", () => {
     };
   }
 
-  it("asks every band in one polarisation-bake request and lands its tables as baked", async () => {
-    const { pool, workers } = scriptedPool(2);
+  it("asks a sphere's one band of one worker in one polarisation-bake request and lands its tables as baked", async () => {
+    const { pool, workers } = scriptedPool(1);
     const ask = correctionAsk();
     const correction = pool.bakePolarisation(ask);
     const worker = workerAt(workers, 0);
@@ -738,7 +738,7 @@ describe("the optics-worker pool's polarisation correction (R08.T14.f)", () => {
       workers.map((each) => each.received.length),
       posted,
       outcome.kind === "baked" && outcome.tables === tables,
-    ]).toEqual([[1, 0], { kind: "polarisation-bake", id: posted.id, ...ask }, true]);
+    ]).toEqual([[1], { kind: "polarisation-bake", id: posted.id, ...ask }, true]);
   });
 
   it.each([
@@ -850,8 +850,8 @@ describe("the optics-worker pool's deck bake (R08.T15.a.2)", () => {
     };
   }
 
-  it("asks every band in one deck-bake request and lands its tables and correction as baked", async () => {
-    const { pool, workers } = scriptedPool(2);
+  it("asks a sphere's one band of one worker in one deck-bake request and lands its tables and correction as baked", async () => {
+    const { pool, workers } = scriptedPool(1);
     const ask = deckAsk();
     const deck = pool.bakeDeck(ask);
     const worker = workerAt(workers, 0);
@@ -864,7 +864,7 @@ describe("the optics-worker pool's deck bake (R08.T15.a.2)", () => {
       workers.map((each) => each.received.length),
       posted,
       outcome.kind === "baked" && outcome.tables === tables && outcome.correction === correction,
-    ]).toEqual([[1, 0], { kind: "deck-bake", id: posted.id, ...ask }, true]);
+    ]).toEqual([[1], { kind: "deck-bake", id: posted.id, ...ask }, true]);
   });
 
   it.each([

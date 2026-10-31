@@ -24186,3 +24186,19 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     8.7 s band on the generated Earth, 0.01 s on `saturn-oblate`), the bands nearest the camera
     baked first, and any split below a band, which one-band worlds (Earth, Venus, Titan) need to
     gain from more workers.
+- **The optics pool's bins and channels, as built** (R08.T14.d's bake time, 2026-10-31; lane
+  `r08-optics-in-band`; what R08.T15.b.2 and R08.T16.a.2 consume; times in the lane's outbox):
+  - Where a bake's bands do not fill the workers (`opticsPool.ts`'s `binSharesFor`: two shares a
+    worker over the bands), each band is split: a thick bake's into `thick-bake-bins` jobs of
+    interleaved bake bins and a `thick-gather`, a correction's into one
+    `polarisation-bake-channel` a render channel and a `polarisation-gather`, a deck's into
+    `deck-bake-bins`, `deck-polarisation-channel` and a `deck-gather`. Gathers go ahead of the
+    queue. A disc of one band with no routed bake bakes its J so first.
+  - `thick/bake.ts`: `prepareBake`'s sixth argument `bins` and `PreparedBake.bins`; `bakeBins` and
+    `gatherBins` (`bakeMultipleScattering` is their whole band). `thick/deck.ts`: `DeckOptions.bins`,
+    `bakeDeckBins`, `gatherDeckBins`, `deckPolarisationChannel`. `thick/polarisation.ts`:
+    `polarisationChannel`, `gatherChannels`. Every table keeps the one-job bake's bits.
+  - An optics worker keeps a record body's bake lights with its specs, by slots and the column's
+    absorber terms.
+  - Left undone: the bake lights formed for a share's bins alone (`absorbers.ts`; the generated
+    Earth's 1.07 s a worker), and a cost-aware share of the bins.

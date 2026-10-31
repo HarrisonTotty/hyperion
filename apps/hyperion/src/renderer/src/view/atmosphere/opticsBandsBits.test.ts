@@ -9,15 +9,18 @@
  * four bands on patterned J, whose thermal layers every band's glow scales. With
  * `HYPERION_SLOW_TESTS=1` every reference world runs too, each of one band and so asked as before:
  * the generated Earth, a Venus at 92 bar and at 58 bar, and the generated Titan (their lines on the
- * toy tables), and the Saturn-class NH₃ deck's four bands with the correction over each.
+ * toy tables), split by their bins and channels; the Venus-class deck's one band so too; and the
+ * Saturn-class NH₃ deck's four bands with the correction over each.
  */
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import { planckBakeSpectrum, saturnBody, SUN_TEFF_K } from "../../test/atmosphereFixtures";
 import { detailOf, recordInput, venus58Detail, venus92Detail } from "../../test/atmosphereRecords";
+import { venusCloudDetail } from "../../test/bakeFixtures";
 import { nh3DeckFixture, saturnBakeBody } from "../../test/deckFixtures";
 import { InProcessOpticsWorker } from "../../test/inProcessOpticsWorker";
 import { toyLoader } from "../../test/opticsFakes";
+import { bitsOf } from "../../test/bits";
 import { patternedThickBake } from "../../test/thickTables";
 import { earthDetail, titanDetail } from "../../test/planetaryFixture";
 import type { BodyAtmosphereInput } from "./atmosphereInput";
@@ -127,42 +130,6 @@ function inProcessPool(count: number): OpticsWorkerPool {
     pool.terminate();
   });
   return pool;
-}
-
-/**
- * SHA-256 of every number and typed array's bytes `value` holds, in its order, with its keys and
- * strings: the same bits give the same digest.
- */
-async function bitsOf(value: unknown): Promise<string> {
-  const chunks: Uint8Array[] = [];
-  const text = new TextEncoder();
-  const walk = (item: unknown): void => {
-    if (ArrayBuffer.isView(item)) {
-      chunks.push(text.encode(`${item.constructor.name}:`));
-      chunks.push(new Uint8Array(item.buffer, item.byteOffset, item.byteLength));
-    } else if (typeof item === "number") {
-      chunks.push(new Uint8Array(Float64Array.of(item).buffer));
-    } else if (Array.isArray(item)) {
-      chunks.push(text.encode(`[${item.length}`));
-      item.forEach(walk);
-    } else if (typeof item === "object" && item !== null) {
-      for (const [key, member] of Object.entries(item)) {
-        chunks.push(text.encode(`{${key}`));
-        walk(member);
-      }
-    } else {
-      chunks.push(text.encode(String(item)));
-    }
-  };
-  walk(value);
-  const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0));
-  let at = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, at);
-    at += chunk.byteLength;
-  }
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 /** A reply that is not the kind asked, as a test failure. */
@@ -288,6 +255,40 @@ describe("the optics pool's bands, to the bit (R08.T14.d)", () => {
       const pool = inProcessPool(SPREAD);
       const world = await recordWorld(pool, input());
       expect(await spread(world, pool)).toEqual(await whole(world));
+    },
+  );
+
+  it.skipIf(!SLOW)(
+    "bakes the Venus-class deck's one band, split at its cloud's top, spread by its bins and channels over four workers to the bytes one worker bakes it in",
+    { timeout: WORLD_TIMEOUT_MS },
+    async () => {
+      const pool = inProcessPool(SPREAD);
+      const { ask } = await recordWorld(pool, recordInput(venusCloudDetail()));
+      const cloud = ask.column.terms.find((term) => term.name === "aerosol:H2SO4");
+      if (cloud?.density.kind !== "tabulated") {
+        throw new Error("the Venus-class column has its tabulated cloud");
+      }
+      const { altitudesM, relative } = cloud.density;
+      const last = relative.findLastIndex((value) => value > 0);
+      const deck: DeckBakeAsk = {
+        ...ask,
+        split: {
+          altitudeM: altitudesM[Math.min(last + 1, altitudesM.length - 1)] ?? Number.NaN,
+          floor: "ground",
+        },
+      };
+      const asked: OpticsRequest = { kind: "deck-bake", id: 1, ...deck };
+      const one = (await new OpticsJobs(toyLoader()).answer(asked)).reply;
+      if (one.kind !== "deck-baked") {
+        throw unexpected(asked, one);
+      }
+      const many = await pool.bakeDeck(deck).outcome;
+      if (many.kind !== "baked") {
+        throw unbaked(many);
+      }
+      expect(await bitsOf([many.tables, many.correction])).toBe(
+        await bitsOf([one.tables, one.correction]),
+      );
     },
   );
 
