@@ -16,12 +16,15 @@
 //! index.
 
 use super::cell::CellBound;
+use super::marks;
 use super::record::{SystemKind, SystemRecord};
 use super::{CellKey, rogue_planet_saturation_density};
 use crate::coords::GalacticPosition;
 use crate::galaxy::catalogue_classes::lbv::lbv_claims;
 use crate::galaxy::displaced::DisplacedClassId;
-use crate::galaxy::displaced::site::{ExplosionSite, explosion_site, recent_death_claim};
+#[cfg(test)]
+use crate::galaxy::displaced::site::explosion_site;
+use crate::galaxy::displaced::site::{ExplosionSite, explosion_site_knowing, recent_death_claim};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::motion::carved_by_the_loss_cone;
@@ -30,6 +33,7 @@ use crate::galaxy::shares::ShareMatrix;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{Layer, SystemId};
 use crate::rng::{Mark, ObjectKey, Seed, Stream, Threshold, tags};
+use crate::units::Years;
 
 /// How far outside plan 02's bound the thinning pads it before drawing, relative: 10⁻¹²
 /// (P03.T4.b).
@@ -131,7 +135,7 @@ pub(super) fn evaluate_with_hook(
     key: CellKey,
     index: u32,
     bound: &CellBound,
-    claims: impl Fn(&Galaxy, &SystemRecord) -> bool,
+    claims: impl Fn(&Galaxy, &SystemRecord, Option<Years>) -> bool,
 ) -> CandidateOutcome {
     let id = candidate_id(key, index);
     let position = candidate_position(galaxy.seed(), key, id);
@@ -139,14 +143,27 @@ pub(super) fn evaluate_with_hook(
     let Some(picked) = pick_component(galaxy, key, bound, &position, mark) else {
         return CandidateOutcome::Thinned;
     };
-    let component = match picked {
-        Picked::Field(pick) => pick.component,
-        Picked::Displaced(class) => displaced_birth(galaxy, key, class),
+    let drawn = galaxy
+        .fields()
+        .displaced()
+        .and_then(|displaced| marks::draw(galaxy, displaced, key, id, &position, picked));
+    let (record, lifetime) = if let Some(marks) = drawn {
+        (
+            SystemRecord::of_marks(galaxy, id, position, &marks),
+            marks.lifetime,
+        )
+    } else {
+        let Picked::Field(pick) = picked else {
+            unreachable!("a displaced class is picked only in layers D and E, which draw marks")
+        };
+        (
+            SystemRecord::of_candidate(galaxy, key, id, position, pick.component),
+            None,
+        )
     };
-    let record = SystemRecord::of_candidate(galaxy, key, id, position, component);
     // The field's share φ and layer D's carve-out thin a field pick inside its slice (P09.T2.c,
-    // P09.T35); a displaced class's weight is its budget's, the features' members included, and
-    // no field factor thins it.
+    // P09.T35), after its marks, since φ reads the record's age; a displaced class's weight is
+    // its budget's, the features' members included, and no field factor thins it.
     if let Picked::Field(pick) = picked
         && !in_the_field(galaxy, key, bound.total(), mark, &pick, &record)
     {
@@ -154,7 +171,7 @@ pub(super) fn evaluate_with_hook(
     }
     // Catalogue classes claim stellar hosts only: the hook is not called for the substellar
     // layers (plan 13, P13.T3.c).
-    if record.kind() == SystemKind::Stellar && claims(galaxy, &record) {
+    if record.kind() == SystemKind::Stellar && claims(galaxy, &record, lifetime) {
         CandidateOutcome::ClaimedByCatalogue
     } else if carved_by_the_loss_cone(galaxy, &record) {
         CandidateOutcome::InLossCone
@@ -170,6 +187,19 @@ pub(super) struct Pick {
     pub(super) component: ComponentId,
     below: f64,
     weight: f64,
+}
+
+#[cfg(test)]
+impl Pick {
+    /// A pick of `component` with an empty slice, for a test that hands a field pick to the
+    /// conditional marks, which read only its component.
+    pub(super) const fn of(component: ComponentId) -> Self {
+        Self {
+            component,
+            below: 0.0,
+            weight: 0.0,
+        }
+    }
 }
 
 /// Whether the field holds the system `record` that the budget's pick placed (plan 09, P09.T2.c):
@@ -222,50 +252,45 @@ fn in_the_field(
     ))
 }
 
-/// The field component a candidate the thinning picked for displaced class `class` is placed as,
-/// until P08.T12.c draws a displaced record's own marks (Design note 17): the class's birth
-/// component of the largest weight in the cell's band ([`DisplacedClass::birth`]), whose record,
-/// with plan 03's mass and age draws, the candidate then takes.
-///
-/// [`DisplacedClass::birth`]: crate::galaxy::displaced::DisplacedClass::birth
-///
-/// # Panics
-///
-/// Never: a class is picked only in a galaxy that holds it and only in a band where it has weight,
-/// where it has a birth component.
-#[must_use]
-fn displaced_birth(galaxy: &Galaxy, key: CellKey, class: DisplacedClassId) -> ComponentId {
-    galaxy
-        .fields()
-        .displaced()
-        .and_then(|displaced| displaced.class(class).birth(key.band()))
-        .expect("a class is picked only in a band where it has weight, so a birth component")
-}
-
 /// Whether a catalogue class claims this candidate (plan 03, Design note 5; plan 09, P09.T35).
 ///
 /// The hook sits after the marks are drawn because a class is a deterministic test on a candidate's
 /// own marks (brainstorm, "Rare events are found by carving out their hosts, not the events"), and
 /// the cells draw conditional on not being in the class. It is asked for stellar records only
 /// (plan 13, P13.T3.c). Under the claim plan 09 gives, from generator version 26
-/// ([`recent_death_claim`], P09.T35), it computes the [`explosion_site`] of every accepted layer-E
-/// record and, where the primary dies inside the interval, passes the site to the core-collapse
-/// class's claim (plan 08, P08.T13); then, for a record that claim did not take, with or without a
-/// site, it asks the luminous blue variables' ([`lbv_claims`], P09.T43): most of their hosts do not
-/// die in the interval, so the site's gate must not hold that claim back, and a record both would
+/// ([`recent_death_claim`], P09.T35), it computes the
+/// [`explosion_site`](crate::galaxy::displaced::explosion_site) of every accepted layer-E record
+/// and, where the primary dies inside the interval, passes the site to the core-collapse class's
+/// claim (plan 08, P08.T13); then, for a record that claim did not take, with or without a site,
+/// it asks the luminous blue variables' ([`lbv_claims`], P09.T43): most of their hosts do not die
+/// in the interval, so the site's gate must not hold that claim back, and a record both would
 /// claim is the core collapses' entry. Every other layer is answered no without a site. Under the
 /// held arm it computes the site of no record (P08.T13.b), the field keeps every candidate it
 /// accepts, and [`CandidateOutcome::ClaimedByCatalogue`] never appears.
+///
+/// `lifetime` is the primary's lifetime at its own composition and draws where its marks computed
+/// one, which every layer-E record's of a galaxy holding plan 08's displaced classes did (P08.T12.c):
+/// the site's exact step reads it instead of computing it again (P08.T13 as built, inheritance 3).
 #[must_use]
-pub(super) fn catalogue_claims(galaxy: &Galaxy, record: &SystemRecord) -> bool {
+pub(super) fn catalogue_claims(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    lifetime: Option<Years>,
+) -> bool {
     recent_death_claim(galaxy.rules().carve_out).is_some_and(|claim| {
-        claims_with(galaxy, record, explosion_site, claim) || lbv_claims(galaxy, record)
+        claims_with(
+            galaxy,
+            record,
+            |g, r| explosion_site_knowing(g, r, lifetime),
+            claim,
+        ) || lbv_claims(galaxy, record)
     })
 }
 
 /// The core-collapse half of [`catalogue_claims`], with the site and the claim given: for a
 /// layer-E record, `claim` of its `site` where it has one, and no for every other layer, which
-/// asks neither (P08.T13). Production passes [`explosion_site`] and the claim
+/// asks neither (P08.T13). Production passes
+/// [`explosion_site`](crate::galaxy::displaced::explosion_site) and the claim
 /// [`recent_death_claim`] gives (P08.T13.b, P09.T35); a test passes counting or always-yes
 /// closures, which needs no hidden state.
 #[must_use]
@@ -1013,7 +1038,7 @@ mod tests {
         let galaxy = galaxy();
         let key = CellKey::containing(Layer::C, &sunlike()).unwrap();
         let bound = CellBound::of(&galaxy, key);
-        let claims_even = |_: &Galaxy, record: &SystemRecord| {
+        let claims_even = |_: &Galaxy, record: &SystemRecord, _: Option<Years>| {
             let SystemIdKind::Grid(grid) = record.id().kind() else {
                 unreachable!("a grid record has a grid ID")
             };
@@ -1068,7 +1093,7 @@ mod tests {
             claimed.set(claimed.get() + 1);
             false
         };
-        let hook = |g: &Galaxy, r: &SystemRecord| claims_with(g, r, site, claim);
+        let hook = |g: &Galaxy, r: &SystemRecord, _: Option<Years>| claims_with(g, r, site, claim);
         let (mut cells, mut layer_e) = (Vec::new(), Vec::new());
         let mut accepted_e = 0_u32;
         take_verdicts();

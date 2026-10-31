@@ -1690,6 +1690,41 @@ impl ClassTable {
         ))
     }
 
+    /// `source`'s reference site, at which its reference composition was read: 3 `R_d` in the
+    /// plane for the discs and the halo, the centre for the bulge, the bar and the nuclear disc. A
+    /// displaced record's formation site (plan 08, P08.T12.c).
+    #[must_use]
+    pub(crate) fn reference_site(&self, source: BirthSource) -> PointLy {
+        reference_site(source, &self.scales)
+    }
+
+    /// The speed scale of `source`'s kicks and ejections, against which its speed bins are cut:
+    /// `v_c`, or the nuclear disc's own circular speed for its classes (Design note 13).
+    #[must_use]
+    pub(crate) fn speed_scale(&self, source: BirthSource) -> KilometresPerSecond {
+        KilometresPerSecond::new(source_speed(source, &self.scales))
+    }
+
+    /// The ages, years, at which a star of `source` of initial mass `m` is ejected as `kind`, with
+    /// their weights, both channels': what the quadrature integrated a runaway's or a walkaway's
+    /// ages over (`ejection_ages`), for its conditional marks (plan 08, P08.T12.c).
+    #[must_use]
+    pub(crate) fn ejection_ages(
+        &self,
+        source: BirthSource,
+        kind: Ejected,
+        m: SolarMasses,
+    ) -> Vec<(f64, f64)> {
+        ejection_ages(
+            self.model,
+            kind,
+            m.value(),
+            &self.sources[source_index(source)].lifetimes[1],
+            self.nodes[1].masses(),
+            EjectionChannel::Both,
+        )
+    }
+
     /// Class `id`'s marks in `band` (D or E).
     ///
     /// # Panics

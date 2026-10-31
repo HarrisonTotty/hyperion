@@ -6,6 +6,7 @@ use super::cell::{CellBound, candidate_count_from_bound};
 use super::record::candidate_mass;
 use super::{CandidateOutcome, CellKey, SystemRecord, evaluate_candidate_from_bound};
 use crate::galaxy::Galaxy;
+use crate::galaxy::imf::MassBand;
 use crate::units::SolarMasses;
 
 /// Places every system of one generation cell into `out`, in candidate-index order.
@@ -71,13 +72,17 @@ pub fn generate_cell(galaxy: &Galaxy, key: CellKey, out: &mut Vec<SystemRecord>)
 /// It is cheaper because it draws each candidate's mass first. The mass is one word on the
 /// candidate's own mass stream, keyed by its ID and read through the layer's band, so it depends on
 /// neither the candidate's position, nor its acceptance mark, nor the component the thinning picks.
+/// That does not hold in layers D and E of a galaxy that holds plan 08's displaced classes, whose
+/// conditional marks draw the mass after the pick (P08.T12.c): there every candidate is evaluated
+/// whole and `keep` sees the masses of the accepted ones.
 /// A candidate whose mass `keep` refuses is dropped before its position is drawn or the density
 /// evaluated at it; one that `keep` accepts is evaluated whole, as [`generate_cell`] evaluates it,
 /// which draws its mass a second time from the same word. So the records kept are the very records
 /// [`generate_cell`] makes, and in the same order; nothing here opens a stream the generator does
 /// not, or draws a word it would not, so no generated output depends on it.
 ///
-/// `keep` sees the mass of every candidate of the cell, thinned or not, in index order; the sky's
+/// `keep` sees the mass of every candidate of the cell, thinned or not, in index order (but in layers
+/// D and E under the displaced classes, above); the sky's
 /// census passes a mass floor. What it returns is part of a cell, so it must never be stored where
 /// a whole cell is expected, such as a [`CellCache`](super::CellCache). `out` is cleared first and reserved as [`generate_cell`] reserves it.
 ///
@@ -115,12 +120,17 @@ pub fn generate_cell_where(
     out.reserve(
         usize::try_from(candidates).expect("usize is at least 32 bits, so a u32 count fits"),
     );
+    // Plan 08's conditional marks draw layer D's and E's masses after the pick (P08.T12.c), so
+    // there the mass is read from the record instead.
+    let mass_first =
+        !(galaxy.fields().displaced().is_some() && matches!(key.band(), MassBand::D | MassBand::E));
     for index in 0..candidates {
-        if !keep(candidate_mass(galaxy, key, candidate_id(key, index))) {
+        if mass_first && !keep(candidate_mass(galaxy, key, candidate_id(key, index))) {
             continue;
         }
         if let CandidateOutcome::Accepted(system) =
             evaluate_candidate_from_bound(galaxy, key, index, &bound)
+            && (mass_first || keep(system.primary_initial_mass()))
         {
             out.push(system);
         }

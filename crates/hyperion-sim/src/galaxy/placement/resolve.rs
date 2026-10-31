@@ -25,6 +25,7 @@ use crate::galaxy::global_list::{
     Debris, StreamNumber, StreamShellRules, TubeLookup, in_stream_shell,
 };
 use crate::id::{DwarfCoreMemberId, StreamMemberId, SystemId, SystemIdKind};
+use crate::units::Years;
 
 /// The system `id` names in `galaxy`.
 ///
@@ -240,7 +241,7 @@ fn resolve_candidate_with(
     galaxy: &Galaxy,
     key: CellKey,
     index: u32,
-    claims: impl Fn(&Galaxy, &SystemRecord) -> bool,
+    claims: impl Fn(&Galaxy, &SystemRecord, Option<Years>) -> bool,
 ) -> Result<SystemRecord, ResolveSystemError> {
     let bound = CellBound::of(galaxy, key);
     if index >= candidate_count_from_bound(galaxy.seed(), key, bound.total()) {
@@ -394,7 +395,7 @@ mod tests {
     #[test]
     fn resolve_refuses_a_record_whose_recent_death_is_claimed() {
         let galaxy = galaxy();
-        let always = |g: &Galaxy, r: &SystemRecord| {
+        let always = |g: &Galaxy, r: &SystemRecord, _: Option<Years>| {
             claims_with(
                 g,
                 r,

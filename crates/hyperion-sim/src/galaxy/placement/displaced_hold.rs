@@ -23,7 +23,9 @@ use super::{
     evaluate_candidate, generate_cell, resolve,
 };
 use crate::coords::GalacticPosition;
+use crate::galaxy::displaced::PlacementClass;
 use crate::galaxy::displaced::hold::{displaced, held};
+use crate::galaxy::displaced::marks::kind_index;
 use crate::galaxy::imf::{MassBand, MassFunctionKind};
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
@@ -31,6 +33,8 @@ use crate::galaxy::{Galaxy, PointLy};
 use crate::id::Layer;
 use crate::math;
 use crate::rng::Seed;
+use crate::stellar::system::draw_metallicity;
+use crate::units::Years;
 
 /// The seed of plan 03's pinned drawn galaxy (`tests/placement_golden.rs`).
 const DRAWN_SEED: u64 = 0x0308_d000_5eed_0001;
@@ -292,7 +296,7 @@ fn layer_e_records_match_its_density_in_six_regions() {
 fn the_hook_is_asked_once_per_accepted_layer_e_candidate_under_every_26_hold() {
     let galaxy = displaced();
     let asked = Cell::new(0_u32);
-    let hook = |g: &Galaxy, record: &SystemRecord| {
+    let hook = |g: &Galaxy, record: &SystemRecord, _: Option<Years>| {
         claims_with(
             g,
             record,
@@ -419,13 +423,30 @@ fn the_census_moves_only_layers_d_and_e() {
     assert!(movers > 0);
 }
 
+/// A placement class as a number, for a digest: 0 alive, `1 + s` retained in speed bin `s`, and
+/// `16 + 4 × class + kind` displaced.
+fn placement_code(class: PlacementClass) -> f64 {
+    match class {
+        PlacementClass::Alive => 0.0,
+        PlacementClass::Retained { speed } => {
+            f64::from(u8::try_from(speed.index()).expect("under eight")) + 1.0
+        }
+        PlacementClass::Displaced { class, kind } => {
+            let class = u16::try_from(class.index()).expect("under 128");
+            let kind = u8::try_from(kind_index(kind)).expect("under four");
+            16.0 + 4.0 * f64::from(class) + f64::from(kind)
+        }
+    }
+}
+
 /// The digest (`f64_digest`) of the new arm's placement in plan 03's pinned cells of the fixture,
 /// with the census's counts and the face-on map at the Sun-like point: each cell's bound and its
-/// classes' rests, its candidate count, and each record's position, mass, age, component and
-/// whether it was picked for a class. Blessed natively on x86-64; the wasip1 suite compares it
+/// classes' rests, its candidate count, and each record's position, mass, age, component, whether
+/// it was picked for a class, and its conditional marks (P08.T12.c: placement class, mark
+/// attempt, metallicity age and metallicity). Blessed natively on x86-64; the wasip1 suite compares it
 /// (D5). A 26-arm figure on plan 15's provisional form table, re-pinned by name when the
 /// production table lands.
-const DISPLACED_CELLS_DIGEST: u64 = 0xbea5_b703_2dd2_5ea1;
+const DISPLACED_CELLS_DIGEST: u64 = 0x20fa_fa37_6b58_dabd;
 
 /// The new arm's cells, census and map, pinned on every target (named `pinned` for the
 /// WebAssembly suite's filter).
@@ -458,6 +479,10 @@ fn the_new_arm_s_cells_are_pinned() {
             } else {
                 0.0
             });
+            values.push(placement_code(record.placement_class()));
+            values.push(f64::from(record.mark_attempt()));
+            values.push(record.metallicity_age().map_or(-1.0, Years::value));
+            values.push(draw_metallicity(galaxy, record).fe_h().value());
         }
     }
     let counts = crate::galaxy::query::expected_counts(

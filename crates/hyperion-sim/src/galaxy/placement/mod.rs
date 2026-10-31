@@ -31,6 +31,9 @@ mod displaced_hold;
 mod generate;
 mod headroom;
 mod layers;
+mod marks;
+#[cfg(test)]
+mod marks_hold;
 mod record;
 mod resolve;
 
@@ -48,7 +51,7 @@ pub(crate) use headroom::{partition, saturated};
 pub use layers::{
     LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS, layer_for_initial_mass, layer_spec,
 };
-pub use record::{Existence, SystemKind, SystemOrigin, SystemRecord};
+pub use record::{Existence, KickConstraint, SystemKind, SystemOrigin, SystemRecord};
 pub use resolve::{resolve, resolve_with};
 
 use candidate::evaluate_candidate_from_bound;

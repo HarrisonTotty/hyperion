@@ -324,6 +324,19 @@ pub(crate) fn death_in_interval_under(
 /// ```
 #[must_use]
 pub fn explosion_site(galaxy: &Galaxy, record: &SystemRecord) -> Option<ExplosionSite> {
+    explosion_site_knowing(galaxy, record, None)
+}
+
+/// [`explosion_site`] with the primary's lifetime at its own composition and draws given where the
+/// caller has it, `known`: the exact step reads it instead of computing it again. Placement passes
+/// the lifetime a layer-E record's conditional marks computed (P08.T12.c; P08.T13 as built,
+/// inheritance 3), which is the stellar stage's death age of the primary, bit for bit.
+#[must_use]
+pub(crate) fn explosion_site_knowing(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    known: Option<Years>,
+) -> Option<ExplosionSite> {
     let marks = Marks {
         composition: LazyCell::new(|| {
             let composition = draw_metallicity(galaxy, record);
@@ -344,7 +357,9 @@ pub fn explosion_site(galaxy: &Galaxy, record: &SystemRecord) -> Option<Explosio
         record.age_at_epoch(),
         &marks,
         rules,
-        |m, composition, draws| lifetime_under(m, composition, draws, rules),
+        |m, composition, draws| {
+            known.unwrap_or_else(|| lifetime_under(m, composition, draws, rules))
+        },
     )?;
     let elapsed = Seconds::new(death.since_epoch().as_seconds_f64());
     let position = record

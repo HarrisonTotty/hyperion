@@ -19,19 +19,26 @@
 //! it unchanged (plan 13, Design note 10). Its [`SystemKind`] follows from its layer and is never
 //! stored, and its mass mark is the object's mass, drawn on `substellar.mass` (Design note 11).
 
+use std::fmt;
+
 use super::CellKey;
+use super::marks::DrawnMarks;
 use crate::coords::GalacticPosition;
 use crate::galaxy::catalogue_classes::ClassId;
+use crate::galaxy::displaced::class_table::CLASS_COUNT;
+use crate::galaxy::displaced::marks::{MARK_KINDS, kind_index};
+use crate::galaxy::displaced::{DisplacedClassId, PlacementClass, SPEED_EDGES, SpeedBin};
 use crate::galaxy::features::ids::PackedFeature;
 use crate::galaxy::fields::{Component, ComponentId};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::substellar::draw_brown_dwarf_mass;
-use crate::galaxy::{Galaxy, Population};
+use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{Layer, MemberSlot, SystemId, SystemIdKind};
 use crate::planetary::HostKind;
 use crate::rng::{ObjectKey, Stream, tags};
+use crate::stellar::Composition;
 use crate::time::UniverseTime;
-use crate::units::{SolarMasses, Years};
+use crate::units::{KilometresPerSecond, LightYears, SolarMasses, Years};
 
 /// A system as placed: its state at the epoch.
 ///
@@ -65,7 +72,7 @@ use crate::units::{SolarMasses, Years};
 /// assert!(at_epoch.total_cmp(&system.age_at_epoch()).is_eq());
 /// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct SystemRecord {
     id: SystemId,
     epoch_position: GalacticPosition,
@@ -73,6 +80,162 @@ pub struct SystemRecord {
     population: Population,
     primary_initial_mass: SolarMasses,
     age_at_epoch: Years,
+    /// The placement class, and whether the record carries its own metallicity age (plan 08,
+    /// P08.T12.c), packed so that the record keeps its 80 bytes.
+    placement: PackedPlacement,
+    /// The attempt whose marks were kept: layer D's runaway reduction (plan 08, Design note 17),
+    /// 0 everywhere else.
+    mark_attempt: u8,
+    /// The age, years, at which the record's metallicity is read where its conditional marks set
+    /// one (plan 08, Design note 19), at single precision; 0 where they set none. Placement and
+    /// the stellar stage read the same stored value, so its rounding is part of the draw.
+    metallicity_age: f32,
+}
+
+/// The record's fields as `#[derive(Debug)]` writes them, with the marks of plan 08 (P08.T12.c)
+/// after them only where they are not a field record's defaults, so that a record no displaced
+/// class touched prints as it did before them (decision-galaxy-25-train §1.2, E4).
+impl fmt::Debug for SystemRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut out = f.debug_struct("SystemRecord");
+        out.field("id", &self.id)
+            .field("epoch_position", &self.epoch_position)
+            .field("origin", &self.origin)
+            .field("population", &self.population)
+            .field("primary_initial_mass", &self.primary_initial_mass)
+            .field("age_at_epoch", &self.age_at_epoch);
+        if self.placement != PackedPlacement::FIELD || self.mark_attempt != 0 {
+            out.field("placement", &self.placement_class())
+                .field("mark_attempt", &self.mark_attempt)
+                .field("metallicity_age", &self.metallicity_age());
+        }
+        out.finish()
+    }
+}
+
+/// A record's [`PlacementClass`] and the flag that it carries its own metallicity age, in sixteen
+/// bits (plan 08, P08.T12.c).
+///
+/// Bits 0–1 hold the class: 0 alive, 1 retained, 2 displaced. A retained record keeps its speed
+/// bin in bits 2–4; a displaced one its class in bits 2–8 and its kind, in [`MARK_KINDS`]'s order,
+/// in bits 9–10. Bit 15 is set where the conditional marks drew the metallicity at an age of their
+/// own ([`SystemRecord::metallicity_age`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct PackedPlacement(u16);
+
+const _: () = assert!(
+    CLASS_COUNT <= 1 << 7,
+    "a displaced class's index packs into seven bits"
+);
+
+impl PackedPlacement {
+    /// A field record's: alive, with no metallicity age of its own.
+    const FIELD: Self = Self(0);
+
+    /// The flag that the record carries its own metallicity age.
+    const OWN_METALLICITY_AGE: u16 = 1 << 15;
+
+    /// `class`, with the flag that the record carries its own metallicity age where `own_age`.
+    ///
+    /// # Panics
+    ///
+    /// If a displaced class's index is not below 128, which the class list's 97 never reach.
+    fn new(class: PlacementClass, own_age: bool) -> Self {
+        let bits = match class {
+            PlacementClass::Alive => 0,
+            PlacementClass::Retained { speed } => {
+                1 | (u16::try_from(speed.index()).expect("under eight bins") << 2)
+            }
+            PlacementClass::Displaced { class, kind } => {
+                let index = u16::try_from(class.index())
+                    .ok()
+                    .filter(|&i| i < 1 << 7)
+                    .expect("a displaced class's index is under 128");
+                let kind = u16::try_from(kind_index(kind)).expect("under four kinds");
+                2 | (index << 2) | (kind << 9)
+            }
+        };
+        let flag = if own_age {
+            Self::OWN_METALLICITY_AGE
+        } else {
+            0
+        };
+        Self(bits | flag)
+    }
+
+    /// The placement class.
+    fn class(self) -> PlacementClass {
+        let bits = self.0;
+        match bits & 0b11 {
+            0 => PlacementClass::Alive,
+            1 => PlacementClass::Retained {
+                speed: SpeedBin::new(u8::try_from((bits >> 2) & 0b111).expect("three bits"))
+                    .expect("three bits hold a bin"),
+            },
+            _ => PlacementClass::Displaced {
+                class: DisplacedClassId::new((bits >> 2) & 0x7F),
+                kind: MARK_KINDS[usize::from((bits >> 9) & 0b11)],
+            },
+        }
+    }
+
+    /// Whether the record carries its own metallicity age.
+    fn has_own_metallicity_age(self) -> bool {
+        self.0 & Self::OWN_METALLICITY_AGE != 0
+    }
+}
+
+/// The natal kick a record's remnant must have (plan 08, Design note 17): the speed range of its
+/// speed bin, and in the ballistic classes the height and time since death its velocity's vertical
+/// component is read from (Design note 22).
+///
+/// [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) repeats the remnant,
+/// stripped-mark and kick draws of a record that has one on its one built track until the kick's
+/// speed falls in the range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KickConstraint {
+    speed: (KilometresPerSecond, KilometresPerSecond),
+    vertical: Option<(LightYears, Years)>,
+}
+
+impl KickConstraint {
+    /// The kick speeds of speed bin `bin` against the speed scale `v_ref` (km/s), with `vertical`.
+    #[must_use]
+    pub(crate) fn of_bin(
+        bin: SpeedBin,
+        v_ref: KilometresPerSecond,
+        vertical: Option<(LightYears, Years)>,
+    ) -> Self {
+        let (s, v) = (bin.index(), v_ref.value());
+        let lo = if s == 0 { 0.0 } else { SPEED_EDGES[s - 1] * v };
+        let hi = SPEED_EDGES.get(s).map_or(f64::INFINITY, |edge| edge * v);
+        Self {
+            speed: (KilometresPerSecond::new(lo), KilometresPerSecond::new(hi)),
+            vertical,
+        }
+    }
+
+    /// The kick's least speed and the speed it stays below, km/s: `[lo, hi)`, `hi` infinite for the
+    /// fastest bin.
+    #[must_use]
+    pub const fn speed(&self) -> (KilometresPerSecond, KilometresPerSecond) {
+        self.speed
+    }
+
+    /// Whether a kick of `speed` (km/s) lies in the range.
+    #[must_use]
+    pub fn holds(&self, speed: KilometresPerSecond) -> bool {
+        let (lo, hi) = self.speed;
+        speed.value() >= lo.value() && speed.value() < hi.value()
+    }
+
+    /// In a ballistic class, the record's height above the midplane at the epoch and its time since
+    /// death, from which its velocity's vertical component is read (Design note 22); `None`
+    /// elsewhere.
+    #[must_use]
+    pub const fn vertical(&self) -> Option<(LightYears, Years)> {
+        self.vertical
+    }
 }
 
 /// What made a record (plan 03, Design note 18).
@@ -246,6 +409,9 @@ impl SystemRecord {
             population,
             primary_initial_mass,
             age_at_epoch,
+            placement: PackedPlacement::FIELD,
+            mark_attempt: 0,
+            metallicity_age: 0.0,
         }
     }
 
@@ -403,6 +569,71 @@ impl SystemRecord {
         }
     }
 
+    /// The system's placement class (plan 08, P08.T12.c), the derived mark plans 09 and 11 read:
+    /// alive, a remnant retained in its field component with its kick in a speed bin, or a member
+    /// of a displaced class.
+    ///
+    /// It is [`PlacementClass::Alive`] for every record but those of layers D and E that a galaxy
+    /// holding plan 08's displaced classes placed. In layer E such a record is alive, retained or
+    /// displaced; in layer D it is displaced (a runaway or a walkaway) or alive, the field's dead
+    /// white dwarfs among the alive, since the runaway reduction tells the living from the dead
+    /// only where it must (Design note 17).
+    #[must_use]
+    pub fn placement_class(&self) -> PlacementClass {
+        self.placement.class()
+    }
+
+    /// The attempt whose marks were kept (plan 08, Design note 17): the primary's draws are
+    /// [`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt) of body 0 at it.
+    /// Layer D's runaway reduction takes a living star's mass, age and draws at the next attempt
+    /// when it rejects one; every other record is at attempt 0.
+    #[must_use]
+    pub fn mark_attempt(&self) -> u16 {
+        u16::from(self.mark_attempt)
+    }
+
+    /// Where the system's primary formed, where its metallicity is read (plan 08, Design note 19):
+    /// its epoch position for a field system, and for a displaced one its birth source's reference
+    /// site, the class table's (3 `R_d` in the plane for a disc or the halo, the centre for the
+    /// bulge, the bar and the nuclear disc), at which the class table read the source's
+    /// metallicity.
+    #[must_use]
+    pub fn formation_site(&self, galaxy: &Galaxy) -> PointLy {
+        super::marks::formation_site(galaxy, self)
+    }
+
+    /// The natal kick the primary's remnant must have, if the record's class constrains it (plan
+    /// 08, Design note 17): a retained record's speed bin, or a displaced remnant's origin bin,
+    /// with the vertical component of a ballistic class's; `None` for every other record.
+    ///
+    /// The origin bin is the class's own, but for the fastest class of an age bin, which also
+    /// holds the unbound of every bin (Design note 23): it is drawn on `displaced.origin_bin`
+    /// from the class's odds.
+    #[must_use]
+    pub fn kick_constraint(&self, galaxy: &Galaxy) -> Option<KickConstraint> {
+        super::marks::kick_constraint(galaxy, self)
+    }
+
+    /// The composition a dead record's progenitor had, where its conditional marks fixed it (plan
+    /// 08, P08.T12.c): a retained record's and a displaced remnant's is its birth source's
+    /// reference composition, the class table's, at which the table weighed its class (its fate
+    /// and its kick's speed bin, Design notes 17 and 18), so that its own star dies as its class
+    /// says; `None` for every other record, whose metallicity is drawn.
+    #[must_use]
+    pub(crate) fn progenitor_composition(&self, galaxy: &Galaxy) -> Option<Composition> {
+        super::marks::progenitor_composition(galaxy, self)
+    }
+
+    /// The age at which the record's metallicity is read, where its conditional marks drew one
+    /// (plan 08, Design note 19): a living layer-E record's and a runaway's or a walkaway's; `None`
+    /// for every other record, whose metallicity is read at its age at the epoch or not drawn.
+    #[must_use]
+    pub(crate) fn metallicity_age(&self) -> Option<Years> {
+        self.placement
+            .has_own_metallicity_age()
+            .then(|| Years::new(f64::from(self.metallicity_age)))
+    }
+
     /// The record of an accepted candidate: its marks, drawn on their own streams, around the
     /// position and component the thinning settled (plan 03, Design note 4).
     #[must_use]
@@ -423,6 +654,33 @@ impl SystemRecord {
             population: component_laws.population(),
             primary_initial_mass,
             age_at_epoch,
+            placement: PackedPlacement::FIELD,
+            mark_attempt: 0,
+            metallicity_age: 0.0,
+        }
+    }
+
+    /// The record of an accepted candidate of layer D or E in a galaxy that holds plan 08's
+    /// displaced classes: the conditional marks `marks` drew for it, around the position the
+    /// thinning settled (plan 08, P08.T12.c). Its component is the one it was born in, and its
+    /// population that component's.
+    #[must_use]
+    pub(super) fn of_marks(
+        galaxy: &Galaxy,
+        id: SystemId,
+        epoch_position: GalacticPosition,
+        marks: &DrawnMarks,
+    ) -> Self {
+        Self {
+            id,
+            epoch_position,
+            origin: SystemOrigin::Grid(marks.component),
+            population: galaxy.fields().component(marks.component).population(),
+            primary_initial_mass: marks.mass,
+            age_at_epoch: marks.age,
+            placement: PackedPlacement::new(marks.placement, marks.metallicity_age.is_some()),
+            mark_attempt: marks.attempt,
+            metallicity_age: marks.metallicity_age.unwrap_or(0.0),
         }
     }
 }
@@ -548,6 +806,9 @@ mod tests {
         population: Population,
         primary_initial_mass: SolarMasses,
         age_at_epoch: Years,
+        placement: PackedPlacement,
+        mark_attempt: u8,
+        metallicity_age: f32,
     }
 
     /// An origin whose widest variant carries eight bytes at four-byte alignment.

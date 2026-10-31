@@ -1,0 +1,778 @@
+//! The conditional marks of layers D and E in a galaxy that holds plan 08's displaced classes
+//! (P08.T12.c; plan 08, Design notes 17, 19 and 28).
+//!
+//! A candidate the thinning accepts takes its marks from what it was picked for:
+//!
+//! - **Layer E, a field component.** Its kind, alive or retained by speed bin, on
+//!   `displaced.kind` from the component's [`StayMarks`], then its initial mass from that kind's
+//!   tabulated density on `displaced.mass`. Plan 03's `system.primary_mass` and `system.age` go
+//!   unused in layer E.
+//! - **Layer D or E, a displaced class.** Its kind (remnant, runaway, walkaway) on
+//!   `displaced.kind` from the class's [`ConditionalMarks`], its initial mass on `displaced.mass`,
+//!   and its birth component at that mass on `displaced.birth`.
+//! - **Layer D, a field component of a source that ejects runaways** (the thin disc and the
+//!   nuclear disc): plan 03's mass and age, and the runaway reduction. A living star is rejected
+//!   with the probability that it is a runaway or a walkaway already ejected (on `displaced.kind`),
+//!   and its mass, age and draws are then taken at the next attempt: the next draws of
+//!   `system.primary_mass`, `system.age` and `displaced.kind`, and
+//!   [`StarDraws::for_attempt`]. Whether a star is alive is read from the
+//!   [`LifetimeBracket`], and [`lifetime`](crate::stellar::lifetime) is called only for an age
+//!   inside it. The attempt kept is the record's [`mark_attempt`](SystemRecord::mark_attempt).
+//!   Every other layer-D component keeps plan 03's draws, at attempt 0.
+//!
+//! The age then follows without a fixed point (Design note 19), on `displaced.death`, with the
+//! record's own draws at attempt 0 and the lifetime of its source's reference composition `Z_ref`:
+//!
+//! - a dead record, retained or displaced, takes a time since death `s` from its component's ages
+//!   restricted to its age bin after that lifetime, draws its metallicity at the age
+//!   `lifetime(m, Z_ref) + s` and takes `lifetime(m, Z) + s` with the drawn `Z` as its age, so that
+//!   it died exactly `s` ago;
+//! - a living one takes its age under `Z_ref` from its component's ages below that lifetime (a
+//!   runaway's from those after its ejection, on `runaway.ejection`), draws its metallicity at
+//!   that age and takes the same fraction of `lifetime(m, Z)` as its age, so that it is alive.
+//!
+//! So placement calls `lifetime` at most twice per accepted layer-E record, and nothing else of
+//! the stellar stage but the metallicity draw. The metallicity age is stored with the record, at
+//! single precision, and the stellar stage's [`draw_metallicity`] reads it, so that it finds the
+//! same composition and the same death.
+//!
+//! [`StayMarks`]: crate::galaxy::displaced::marks::StayMarks
+//! [`ConditionalMarks`]: crate::galaxy::displaced::marks::ConditionalMarks
+//! [`draw_metallicity`]: crate::stellar::system::draw_metallicity
+
+#[cfg(test)]
+use std::cell::Cell;
+
+use super::candidate::Picked;
+use super::{CellKey, SystemRecord};
+use crate::coords::GalacticPosition;
+use crate::galaxy::Galaxy;
+use crate::galaxy::PointLy;
+use crate::galaxy::ages::AgeDistribution;
+use crate::galaxy::displaced::class_table::{ClassKey, ClassTable, ejects};
+use crate::galaxy::displaced::marks::{
+    LifetimeBracket, MARK_KINDS, MARK_MASS_NODES, StayCategory, age_between, age_bin_years,
+    time_since_death,
+};
+use crate::galaxy::displaced::runaway::Ejected;
+use crate::galaxy::displaced::{
+    BirthSource, DisplacedClassId, DisplacedFields, DisplacedKind, PlacementClass, SpeedBin,
+};
+use crate::galaxy::fields::ComponentId;
+use crate::galaxy::imf::MassBand;
+use crate::id::{BodyId, SystemId};
+use crate::rng::{Mark, ObjectKey, PiecewiseLinear, Stream, Threshold, tags};
+use crate::stellar::Composition;
+use crate::stellar::draws::StarDraws;
+use crate::stellar::remnant::RemnantKind;
+use crate::stellar::sse::{Fate, MAX_INITIAL_MASS, TrackOptions, fate_of, lifetime_under};
+use crate::stellar::system::{draw_metallicity, metallicity_of, primary_draws};
+use crate::units::{LightYears, SolarMasses, Years};
+
+use super::record::KickConstraint;
+
+/// The attempts layer D's runaway reduction makes before it keeps the last: a star is rejected
+/// with the probability that it is an ejected runaway or walkaway, a few per cent at 2.5–8 M☉, so
+/// a record that needs more than a handful does not occur.
+pub(super) const MAX_MARK_ATTEMPT: u8 = u8::MAX;
+
+/// What the conditional marks give an accepted candidate of layer D or E (P08.T12.c).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct DrawnMarks {
+    /// The component the system was born in: the field component the thinning picked, or a
+    /// displaced system's birth component.
+    pub(super) component: ComponentId,
+    /// The primary's initial mass.
+    pub(super) mass: SolarMasses,
+    /// The age at the epoch.
+    pub(super) age: Years,
+    /// The placement class.
+    pub(super) placement: PlacementClass,
+    /// The attempt whose marks were kept.
+    pub(super) attempt: u8,
+    /// The age, years, the metallicity was read at, where the marks chose one, at the precision
+    /// the record stores it.
+    pub(super) metallicity_age: Option<f32>,
+    /// The primary's lifetime at its own composition and draws, where the marks computed it:
+    /// what the carve-out hook's exact step reads instead of computing it again (P08.T13).
+    pub(super) lifetime: Option<Years>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The [`lifetime`] calls placement has made on this thread: the count of Design note 28's
+    /// test.
+    pub(super) static LIFETIME_CALLS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The lifetime of a star of `m`, `composition` and `draws` under the galaxy's stellar rules, the
+/// death age of the track the stellar stage builds for it, bit for bit; counted in test builds.
+#[must_use]
+fn lifetime(
+    galaxy: &Galaxy,
+    m: SolarMasses,
+    composition: &Composition,
+    draws: &StarDraws,
+) -> Years {
+    #[cfg(test)]
+    LIFETIME_CALLS.with(|calls| calls.set(calls.get() + 1));
+    lifetime_under(m, composition, draws, galaxy.rules().stellar)
+}
+
+/// The conditional marks of the accepted candidate `id` of `key` at `position`, picked for
+/// `picked`, in a galaxy holding `displaced`; `None` where plan 03's draws stand: outside layers D
+/// and E, and in layer D for a field component of a source that ejects no runaway.
+#[must_use]
+pub(super) fn draw(
+    galaxy: &Galaxy,
+    displaced: &DisplacedFields,
+    key: CellKey,
+    id: SystemId,
+    position: &GalacticPosition,
+    picked: Picked,
+) -> Option<DrawnMarks> {
+    let table = displaced.class_table();
+    let band = key.band();
+    match (band, picked) {
+        (MassBand::E, Picked::Field(pick)) => {
+            Some(stay(galaxy, table, id, position, pick.component))
+        }
+        (MassBand::D | MassBand::E, Picked::Displaced(class)) => {
+            Some(displaced_marks(galaxy, displaced, band, id, class))
+        }
+        (MassBand::D, Picked::Field(pick)) if ejects(table.component_source(pick.component)) => {
+            Some(runaway_reduction(
+                galaxy,
+                table,
+                key,
+                id,
+                position,
+                pick.component,
+            ))
+        }
+        (_, Picked::Field(_) | Picked::Displaced(_)) => None,
+    }
+}
+
+/// The streams of one record's conditional marks, keyed by its ID.
+fn stream(galaxy: &Galaxy, tag: crate::rng::DomainTag, id: SystemId) -> Stream {
+    Stream::open(galaxy.seed(), tag, ObjectKey::from(id))
+}
+
+/// The pick of `mark` among `weights` by plan 01's integer thresholds over their own total, or,
+/// should rounding leave the mark past every threshold, the last with weight.
+///
+/// # Panics
+///
+/// If no weight is positive, which a picked component or class never has.
+fn pick(mark: Mark, weights: &[f64]) -> usize {
+    let total: f64 = weights.iter().sum();
+    assert!(total > 0.0, "a picked component or class has weight");
+    mark.pick_weighted(weights, total).unwrap_or_else(|| {
+        weights
+            .iter()
+            .rposition(|&w| w > 0.0)
+            .expect("the total is positive")
+    })
+}
+
+/// A record's metallicity age, rounded to the single precision the record stores it at: the
+/// value placement and the stellar stage both read.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "an age of at most a few 10¹⁰ years, held to 2⁻²⁴ of itself: the stored value is the \
+              one both sides read, so the rounding is part of the draw"
+)]
+fn stored_age(age: f64) -> f32 {
+    age.max(0.0) as f32
+}
+
+/// One record's star, as its conditional marks read it: the record, the component it was born
+/// in and where, its initial mass and draws at attempt 0, and its lifetime under its source's
+/// reference composition.
+struct Star<'a> {
+    galaxy: &'a Galaxy,
+    id: SystemId,
+    component: ComponentId,
+    site: PointLy,
+    mass: SolarMasses,
+    draws: StarDraws,
+    life_ref: Years,
+}
+
+impl Star<'_> {
+    /// The star's composition, read at `age` (single precision, as the record stores it), and its
+    /// lifetime there.
+    fn at(&self, age: f32) -> Years {
+        let composition = metallicity_of(
+            self.galaxy,
+            self.id,
+            self.galaxy.fields().component(self.component),
+            &self.site,
+            Years::new(f64::from(age)),
+        );
+        lifetime(self.galaxy, self.mass, &composition, &self.draws)
+    }
+
+    /// The age, metallicity age and lifetime of the star alive, its age under the reference
+    /// composition in `[a, b]` of its component's ages at the rank `u` (Design note 19).
+    fn living(&self, (a, b): (Years, Years), u: f64) -> (Years, f32, Years) {
+        let ages = self.galaxy.fields().component(self.component).ages();
+        let age_ref = age_between(ages, a, b, u);
+        let fraction = age_ref.value() / self.life_ref.value();
+        let metallicity_age = stored_age(age_ref.value());
+        let life = self.at(metallicity_age);
+        (Years::new(fraction * life.value()), metallicity_age, life)
+    }
+}
+
+/// What a dead record's progenitor was, at its source's reference composition: its initial mass,
+/// the component it was born in and its fate (death and remnant).
+struct Progenitor {
+    mass: SolarMasses,
+    component: ComponentId,
+    fate: Fate,
+}
+
+/// The fate of a star of `m`, `composition` and `draws` under the galaxy's stellar rules: the
+/// track's fate, bit for bit, at the cost of [`lifetime`], whose death age it holds; counted in
+/// test builds as a lifetime call.
+#[must_use]
+fn fate(galaxy: &Galaxy, m: SolarMasses, composition: &Composition, draws: &StarDraws) -> Fate {
+    #[cfg(test)]
+    LIFETIME_CALLS.with(|calls| calls.set(calls.get() + 1));
+    let m = if m > MAX_INITIAL_MASS {
+        MAX_INITIAL_MASS
+    } else {
+        m
+    };
+    fate_of(
+        m,
+        composition,
+        draws,
+        TrackOptions::default().with_rules(galaxy.rules().stellar),
+    )
+}
+
+/// Whether `fate` can leave a remnant kicked into a speed bin whose least speed is above zero
+/// where `moving`, or into the slowest bin otherwise: any remnant reaches the slowest, but only an
+/// iron core's collapse gives the ordinary mode's kicks (a white dwarf's are about 1 km/s and an
+/// electron-capture neutron star's 5 km/s, plan 06's P06.T19).
+fn kickable(fate: &Fate, moving: bool) -> bool {
+    fate.remnant.kind() != RemnantKind::None && (!moving || fate.iron_core.is_some())
+}
+
+/// A dead record's progenitor: its initial mass from its kind's density, given at the mass nodes
+/// `masses` as `densities`, on `stream` (`displaced.mass`), its birth component as `born` gives it
+/// at that mass, and its fate at its source's reference composition `z_ref` with its `draws`.
+///
+/// The class table weighed the record's class at that composition and the median star's draws,
+/// with the densities linear between its nodes. Where a node and the next straddle a change of
+/// fate, such as the end of the electron-capture window near 8.5 M☉, the line puts mass where no
+/// iron core collapses, so a record of a moving class (`moving`) whose fate gives it no such kick
+/// draws its mass once more, from the density above the node over its first mass. That costs a
+/// second fate, so no record calls more than two.
+fn progenitor(
+    galaxy: &Galaxy,
+    (z_ref, draws): (&Composition, &StarDraws),
+    (masses, densities): (&[f64; MARK_MASS_NODES], &[f64; MARK_MASS_NODES]),
+    born: impl Fn(SolarMasses) -> ComponentId,
+    moving: bool,
+    stream: &mut Stream,
+) -> Progenitor {
+    let density = PiecewiseLinear::new(masses, densities)
+        .expect("a picked kind or category has weight, so a mass density");
+    let mass = SolarMasses::new(density.sample(stream));
+    let first = fate(galaxy, mass, z_ref, draws);
+    if kickable(&first, moving) {
+        return Progenitor {
+            mass,
+            component: born(mass),
+            fate: first,
+        };
+    }
+    let above = masses.partition_point(|&node| node <= mass.value());
+    let Ok(upper) = PiecewiseLinear::new(&masses[above..], &densities[above..]) else {
+        return Progenitor {
+            mass,
+            component: born(mass),
+            fate: first,
+        };
+    };
+    let mass = SolarMasses::new(upper.sample(stream));
+    Progenitor {
+        mass,
+        component: born(mass),
+        fate: fate(galaxy, mass, z_ref, draws),
+    }
+}
+
+/// A dead record's age and lifetime: the time since death on `[lo, hi]` of its birth component's
+/// ages after its lifetime, at the rank `u`, and the lifetime itself, its fate's death age (Design
+/// note 19 at the reference composition).
+fn dead_age(
+    galaxy: &Galaxy,
+    star: &Progenitor,
+    (lo, hi): (Years, Option<Years>),
+    u: f64,
+) -> (Years, Years) {
+    let life = star.fate.death.age();
+    let ages = galaxy.fields().component(star.component).ages();
+    let since = time_since_death(ages, life, lo, hi, u);
+    (Years::new(life.value() + since.value()), life)
+}
+
+/// The primary's draws at attempt 0.
+fn draws_of(galaxy: &Galaxy, id: SystemId) -> StarDraws {
+    StarDraws::for_star(galaxy.seed(), BodyId::new(id, 0))
+}
+
+/// A layer-E field record's marks: alive or retained by speed bin, from component `c`'s stay
+/// marks (Design note 17).
+fn stay(
+    galaxy: &Galaxy,
+    table: &ClassTable,
+    id: SystemId,
+    position: &GalacticPosition,
+    c: ComponentId,
+) -> DrawnMarks {
+    let marks = table.stay_marks(c);
+    let index = pick(
+        stream(galaxy, tags::DISPLACED_KIND, id).mark(),
+        marks.weights(),
+    );
+    let category = match index.checked_sub(1) {
+        None => StayCategory::Alive,
+        Some(s) => StayCategory::Retained(speed_bin(s)),
+    };
+    let z_ref = table.reference_composition(table.component_source(c));
+    let mut masses = stream(galaxy, tags::DISPLACED_MASS, id);
+    let u = stream(galaxy, tags::DISPLACED_DEATH, id).uniform();
+    match category {
+        StayCategory::Alive => {
+            let draws = draws_of(galaxy, id);
+            let mass = SolarMasses::new(
+                marks
+                    .mass_density(category)
+                    .expect("a picked category has weight, so a mass density")
+                    .sample(&mut masses),
+            );
+            let life_ref = lifetime(galaxy, mass, &z_ref, &draws);
+            let ages = galaxy.fields().component(c).ages();
+            let below = Years::new(life_ref.value().min(ages.max().value()));
+            let star = Star {
+                galaxy,
+                id,
+                component: c,
+                site: PointLy::from(position),
+                mass,
+                draws,
+                life_ref,
+            };
+            let (age, metallicity_age, life) = star.living((ages.min(), below), u);
+            DrawnMarks {
+                component: c,
+                mass,
+                age,
+                placement: PlacementClass::Alive,
+                attempt: 0,
+                metallicity_age: Some(metallicity_age),
+                lifetime: Some(life),
+            }
+        }
+        StayCategory::Retained(speed) => {
+            let star = progenitor(
+                galaxy,
+                (&z_ref, &draws_of(galaxy, id)),
+                (marks.masses(), marks.node_density(category)),
+                |_| c,
+                speed.index() > 0,
+                &mut masses,
+            );
+            let (age, life) = dead_age(galaxy, &star, (Years::ZERO, None), u);
+            DrawnMarks {
+                component: c,
+                mass: star.mass,
+                age,
+                placement: PlacementClass::Retained { speed },
+                attempt: 0,
+                metallicity_age: None,
+                lifetime: Some(life),
+            }
+        }
+    }
+}
+
+/// A displaced record's marks in `band`: its kind, initial mass and birth component from class
+/// `class`'s conditional marks, then its age (Design notes 17 and 19).
+fn displaced_marks(
+    galaxy: &Galaxy,
+    displaced: &DisplacedFields,
+    band: MassBand,
+    id: SystemId,
+    class: DisplacedClassId,
+) -> DrawnMarks {
+    let table = displaced.class_table();
+    let key = displaced.class(class).key();
+    let source = key
+        .source()
+        .expect("only the hypervelocity survivors have no source, and they have no weight");
+    let marks = table.marks(band, class);
+    let kind = MARK_KINDS[pick(
+        stream(galaxy, tags::DISPLACED_KIND, id).mark(),
+        &marks.kind_odds(),
+    )];
+    let z_ref = table.reference_composition(source);
+    let birth = stream(galaxy, tags::DISPLACED_BIRTH, id).mark();
+    let mut masses = stream(galaxy, tags::DISPLACED_MASS, id);
+    let u = stream(galaxy, tags::DISPLACED_DEATH, id).uniform();
+    let (lo, hi) = class_ages(table, key);
+    let placement = PlacementClass::Displaced { class, kind };
+    if kind == DisplacedKind::Remnant {
+        let origin = origin_bin(galaxy, table, band, class, id);
+        let star = progenitor(
+            galaxy,
+            (&z_ref, &draws_of(galaxy, id)),
+            (marks.masses(), &marks.node_density(kind)),
+            |m| marks.component_at(kind, m, birth),
+            origin.index() > 0,
+            &mut masses,
+        );
+        let (age, life) = dead_age(galaxy, &star, (lo, hi), u);
+        return DrawnMarks {
+            component: star.component,
+            mass: star.mass,
+            age,
+            placement,
+            attempt: 0,
+            metallicity_age: None,
+            lifetime: Some(life),
+        };
+    }
+    let mass = SolarMasses::new(
+        marks
+            .mass_density(kind)
+            .expect("a picked kind has weight, so a mass density")
+            .sample(&mut masses),
+    );
+    let c = marks.component_at(kind, mass, birth);
+    let draws = draws_of(galaxy, id);
+    let life_ref = lifetime(galaxy, mass, &z_ref, &draws);
+    let ages = galaxy.fields().component(c).ages();
+    let span = match kind {
+        DisplacedKind::Runaway | DisplacedKind::Walkaway => {
+            let ejected = if kind == DisplacedKind::Walkaway {
+                Ejected::Walkaway
+            } else {
+                Ejected::Runaway
+            };
+            let (a, b, _) = since_ejection(
+                galaxy,
+                table,
+                (source, ejected),
+                (ages, mass, life_ref),
+                (lo, hi),
+                id,
+            );
+            (a, b)
+        }
+        DisplacedKind::Remnant | DisplacedKind::HypervelocitySurvivor => (
+            ages.min(),
+            Years::new(life_ref.value().min(ages.max().value())),
+        ),
+    };
+    let star = Star {
+        galaxy,
+        id,
+        component: c,
+        site: table.reference_site(source),
+        mass,
+        draws,
+        life_ref,
+    };
+    let (age, metallicity_age, life) = star.living(span, u);
+    DrawnMarks {
+        component: c,
+        mass,
+        age,
+        placement,
+        attempt: 0,
+        metallicity_age: Some(metallicity_age),
+        lifetime: Some(life),
+    }
+}
+
+/// The speed bin a displaced remnant of class `class` in `band` was kicked in, drawn on
+/// `displaced.origin_bin` from the class's odds: its own bin, but in the fastest class of an age
+/// bin, which holds the unbound of every bin too (Design note 23).
+fn origin_bin(
+    galaxy: &Galaxy,
+    table: &ClassTable,
+    band: MassBand,
+    class: DisplacedClassId,
+    id: SystemId,
+) -> SpeedBin {
+    speed_bin(pick(
+        stream(galaxy, tags::DISPLACED_ORIGIN_BIN, id).mark(),
+        &table.marks(band, class).origin_odds(),
+    ))
+}
+
+/// The time since death or ejection a member of the class `key` has: its age bin's, in years, for
+/// a thin-disc class; any for an old source's, which has speed bins only.
+fn class_ages(table: &ClassTable, key: ClassKey) -> (Years, Option<Years>) {
+    match key {
+        ClassKey::Thin { age, .. } => age_bin_years(age, table.scales().tau_unit()),
+        ClassKey::Old { .. } | ClassKey::Hypervelocity => (Years::ZERO, None),
+    }
+}
+
+/// The ages a living runaway or walkaway of `source` of mass `m` can have under its reference
+/// composition, whose lifetime there is `life_ref`, with its time since ejection in `[lo, hi)`:
+/// `[t + lo, min(t + hi, life_ref)]` for the ejection age `t` drawn on `runaway.ejection`, each
+/// of the quadrature's ejection ages weighted by its share of the class at that mass, as the class
+/// table weighted it (`ejected_in`). Where no ejection age leaves room before the star's death,
+/// which the record's own draws can do where the median star's did not, the ages below its
+/// lifetime are taken, from the bin's lower edge if it can, ejected at its formation. The ejection
+/// age comes back with the span.
+fn since_ejection(
+    galaxy: &Galaxy,
+    table: &ClassTable,
+    (source, kind): (BirthSource, Ejected),
+    (ages, m, life_ref): (&AgeDistribution, SolarMasses, Years),
+    (lo, hi): (Years, Option<Years>),
+    id: SystemId,
+) -> (Years, Years, Years) {
+    let life = life_ref.value();
+    let hi = hi.map_or(f64::INFINITY, Years::value);
+    let span = |t: f64| {
+        let a = (t + lo.value()).min(life).max(0.0);
+        let b = (t + hi).min(life).min(ages.max().value()).max(a);
+        (a, b)
+    };
+    let ejections = table.ejection_ages(source, kind, m);
+    let weights: Vec<f64> = ejections
+        .iter()
+        .map(|&(t, w)| {
+            if t >= life {
+                return 0.0;
+            }
+            let (a, b) = span(t);
+            w * (ages.cdf(Years::new(b)) - ages.cdf(Years::new(a))).max(0.0)
+        })
+        .collect();
+    if weights.iter().any(|&w| w > 0.0) {
+        let i = pick(stream(galaxy, tags::RUNAWAY_EJECTION, id).mark(), &weights);
+        let (a, b) = span(ejections[i].0);
+        (Years::new(a), Years::new(b), Years::new(ejections[i].0))
+    } else {
+        let below = life.min(ages.max().value());
+        (
+            Years::new(lo.value().min(below).max(0.0)),
+            Years::new(below),
+            Years::ZERO,
+        )
+    }
+}
+
+/// A layer-D field record's marks, for a component of a source that ejects runaways: plan 03's
+/// mass and age, with the runaway reduction (Design note 17).
+fn runaway_reduction(
+    galaxy: &Galaxy,
+    table: &ClassTable,
+    key: CellKey,
+    id: SystemId,
+    position: &GalacticPosition,
+    c: ComponentId,
+) -> DrawnMarks {
+    let laws = galaxy.fields().component(c);
+    let model = table.runaway_model();
+    let source = table.component_source(c);
+    let site = PointLy::from(position);
+    let bracket = LifetimeBracket::shared();
+    let mut masses = stream(galaxy, tags::SYSTEM_PRIMARY_MASS, id);
+    let mut ages = stream(galaxy, tags::SYSTEM_AGE, id);
+    let mut kinds = stream(galaxy, tags::DISPLACED_KIND, id);
+    let mut attempt = 0_u8;
+    loop {
+        let mass = SolarMasses::new(
+            galaxy
+                .mass_function()
+                .sample_in_band(key.band(), &mut masses),
+        );
+        let age = laws.ages().sample(&mut ages);
+        let mark = kinds.mark();
+        let kept = DrawnMarks {
+            component: c,
+            mass,
+            age,
+            placement: PlacementClass::Alive,
+            attempt,
+            metallicity_age: None,
+            lifetime: None,
+        };
+        if attempt == MAX_MARK_ATTEMPT
+            || !alive(galaxy, (id, attempt), &site, c, (mass, age), bracket)
+        {
+            return kept;
+        }
+        let ejected: f64 = [Ejected::Runaway, Ejected::Walkaway]
+            .into_iter()
+            .map(|kind| {
+                let share = match kind {
+                    Ejected::Runaway => model.runaway_share(mass),
+                    Ejected::Walkaway => model.walkaway_share(mass),
+                };
+                share
+                    * table
+                        .ejection_ages(source, kind, mass)
+                        .iter()
+                        .filter(|&&(t, _)| t < age.value())
+                        .map(|&(_, w)| w)
+                        .sum::<f64>()
+            })
+            .sum();
+        if !mark.is_below(Threshold::from_probability(ejected.clamp(0.0, 1.0))) {
+            return kept;
+        }
+        attempt += 1;
+    }
+}
+
+/// Whether a layer-D star of `mass` and `age` at attempt `attempt` of record `id`, of component
+/// `c` at `site`, is alive: by the lifetime bracket where it decides, and otherwise by its
+/// lifetime at the metallicity the stellar stage draws for it and its draws at that attempt.
+fn alive(
+    galaxy: &Galaxy,
+    (id, attempt): (SystemId, u8),
+    site: &PointLy,
+    c: ComponentId,
+    (mass, age): (SolarMasses, Years),
+    bracket: &LifetimeBracket,
+) -> bool {
+    let (least, greatest) = bracket
+        .bracket(mass)
+        .expect("a layer-D mass lies in band D, which the bracket covers");
+    if age.value() < least.value() {
+        return true;
+    }
+    if age.value() > greatest.value() {
+        return false;
+    }
+    let read = Years::new(age.value().max(0.0));
+    let composition = metallicity_of(galaxy, id, galaxy.fields().component(c), site, read);
+    let draws = StarDraws::for_attempt(galaxy.seed(), BodyId::new(id, 0), u32::from(attempt));
+    age.value() < lifetime(galaxy, mass, &composition, &draws).value()
+}
+
+/// Speed bin `i`, below 8.
+fn speed_bin(i: usize) -> SpeedBin {
+    SpeedBin::new(u8::try_from(i).expect("under eight bins")).expect("under eight bins")
+}
+
+/// [`SystemRecord::formation_site`]: the epoch position, or a displaced record's birth source's
+/// reference site.
+pub(super) fn formation_site(galaxy: &Galaxy, record: &SystemRecord) -> PointLy {
+    match (record.placement_class(), galaxy.fields().displaced()) {
+        (PlacementClass::Displaced { class, .. }, Some(displaced)) => {
+            match displaced.class(class).key().source() {
+                Some(source) => displaced.class_table().reference_site(source),
+                None => PointLy::from(record.epoch_position()),
+            }
+        }
+        (PlacementClass::Displaced { .. }, None)
+        | (PlacementClass::Alive | PlacementClass::Retained { .. }, _) => {
+            PointLy::from(record.epoch_position())
+        }
+    }
+}
+
+/// [`SystemRecord::progenitor_composition`]: a retained record's or a displaced remnant's birth
+/// source's reference composition.
+pub(super) fn progenitor_composition(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+) -> Option<Composition> {
+    let displaced = galaxy.fields().displaced()?;
+    let table = displaced.class_table();
+    let source = match record.placement_class() {
+        PlacementClass::Retained { .. } => table.component_source(record.component()?),
+        PlacementClass::Displaced {
+            class,
+            kind: DisplacedKind::Remnant,
+        } => displaced.class(class).key().source()?,
+        PlacementClass::Alive
+        | PlacementClass::Displaced {
+            kind:
+                DisplacedKind::Runaway | DisplacedKind::Walkaway | DisplacedKind::HypervelocitySurvivor,
+            ..
+        } => return None,
+    };
+    Some(table.reference_composition(source))
+}
+
+/// [`SystemRecord::kick_constraint`].
+pub(super) fn kick_constraint(galaxy: &Galaxy, record: &SystemRecord) -> Option<KickConstraint> {
+    let displaced = galaxy.fields().displaced()?;
+    let table = displaced.class_table();
+    match record.placement_class() {
+        PlacementClass::Alive
+        | PlacementClass::Displaced {
+            kind:
+                DisplacedKind::Runaway | DisplacedKind::Walkaway | DisplacedKind::HypervelocitySurvivor,
+            ..
+        } => None,
+        PlacementClass::Retained { speed } => {
+            let source = table.component_source(record.component()?);
+            Some(KickConstraint::of_bin(
+                speed,
+                table.speed_scale(source),
+                None,
+            ))
+        }
+        PlacementClass::Displaced {
+            class,
+            kind: DisplacedKind::Remnant,
+        } => {
+            let key = displaced.class(class).key();
+            let source = key.source()?;
+            let origin = origin_bin(
+                galaxy,
+                table,
+                MassBand::from(record.layer()),
+                class,
+                record.id(),
+            );
+            let vertical = is_ballistic(key).then(|| ballistic_vertical(galaxy, record));
+            Some(KickConstraint::of_bin(
+                origin,
+                table.speed_scale(source),
+                vertical,
+            ))
+        }
+    }
+}
+
+/// Whether the class `key` is in its ballistic layer: a thin-disc class of the two youngest age
+/// bins, under 0.3 `R_d ÷ v_c` since death (Design note 22).
+#[must_use]
+pub(crate) fn is_ballistic(key: ClassKey) -> bool {
+    matches!(key, ClassKey::Thin { age, .. } if age.index() < 2)
+}
+
+/// A ballistic remnant's height above the midplane at the epoch and its time since death: its
+/// age at the epoch less its primary's lifetime at its own composition and draws.
+fn ballistic_vertical(galaxy: &Galaxy, record: &SystemRecord) -> (LightYears, Years) {
+    let composition = draw_metallicity(galaxy, record);
+    let life = lifetime_under(
+        record.primary_initial_mass(),
+        &composition,
+        &primary_draws(galaxy, record),
+        galaxy.rules().stellar,
+    );
+    let height = record.epoch_position().to_light_years_f64()[2];
+    (
+        LightYears::new(height),
+        Years::new(record.age_at_epoch().value() - life.value()),
+    )
+}

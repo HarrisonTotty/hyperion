@@ -301,7 +301,7 @@ fn the_classes_claim_their_hosts_from_the_grid_pinned() {
             Err(ResolveSystemError::NoSuchSystem)
         );
         assert_eq!(resolve(off, record.id()), Ok(*record));
-        assert!(!catalogue_claims(off, record));
+        assert!(!catalogue_claims(off, record, None));
         let raw = record.id().raw();
         values.push(f64::from(u32::try_from(raw >> 32).unwrap()));
         values.push(f64::from(u32::try_from(raw & 0xffff_ffff).unwrap()));
@@ -400,7 +400,7 @@ fn the_carve_out_asks_the_luminous_blue_variables_with_or_without_a_site() {
             ))
             .is_some()
         {
-            assert!(catalogue_claims(on, &host), "{:?}", host.id());
+            assert!(catalogue_claims(on, &host, None), "{:?}", host.id());
             assert_eq!(class_of(on, &host), Some(Class::LuminousBlueVariable));
             hosts += 1;
         }
@@ -411,10 +411,13 @@ fn the_carve_out_asks_the_luminous_blue_variables_with_or_without_a_site() {
             if class_of(on, &dead) == Some(Class::CoreCollapse) {
                 deaths += 1;
             }
-            assert_eq!(catalogue_claims(on, &dead), class_of(on, &dead).is_some());
-            assert!(!catalogue_claims(off, &dead));
+            assert_eq!(
+                catalogue_claims(on, &dead, None),
+                class_of(on, &dead).is_some()
+            );
+            assert!(!catalogue_claims(off, &dead, None));
         }
-        assert!(!catalogue_claims(off, &host));
+        assert!(!catalogue_claims(off, &host, None));
         checked += 1;
     }
     eprintln!("{checked} records: {hosts} luminous blue variables with no site, {deaths} deaths");
@@ -424,7 +427,10 @@ fn the_carve_out_asks_the_luminous_blue_variables_with_or_without_a_site() {
     );
     assert!(deaths > 0, "no recent death claimed among {checked}");
     for record in young.iter().take(64) {
-        assert_eq!(catalogue_claims(on, record), class_of(on, record).is_some());
+        assert_eq!(
+            catalogue_claims(on, record, None),
+            class_of(on, record).is_some()
+        );
     }
 }
 
@@ -458,7 +464,7 @@ fn a_star_dying_at_plus_1_500_years_is_a_grid_star() {
     let after = years_after_epoch(death);
     assert!((after - 1_500.0).abs() < 50.0, "{after}");
     assert!(explosion_site(on, &record).is_none());
-    assert!(!catalogue_claims(on, &record));
+    assert!(!catalogue_claims(on, &record, None));
     let velocity = epoch_velocity(on, &record);
     let position = record
         .epoch_position()
@@ -705,7 +711,7 @@ fn only_layer_e_is_claimed() {
         let mut cell = Vec::new();
         generate_cell(on, key, &mut cell);
         for record in &cell {
-            assert!(!catalogue_claims(on, record), "{:?}", record.id());
+            assert!(!catalogue_claims(on, record, None), "{:?}", record.id());
         }
     }
 }
@@ -803,7 +809,7 @@ fn the_core_collapses_claim_is_the_one_shared_test_on_sampled_records() {
             explosion_site(on, record).is_some_and(|site| recent_death_claims(on, &site, record));
         assert_eq!(grid, shared(record), "{:?}", record.id());
         assert_eq!(
-            catalogue_claims(on, record),
+            catalogue_claims(on, record, None),
             grid || lbv_claims(on, record),
             "{:?}",
             record.id()

@@ -26,10 +26,11 @@ use std::sync::Arc;
 use crate::GENERATOR_VERSION;
 use crate::coords::SystemVelocity;
 use crate::events::{EventSeries, tags as event_tags};
+use crate::galaxy::displaced::PlacementClass;
 use crate::galaxy::fields::Component;
-use crate::galaxy::placement::{Existence, SystemKind, SystemOrigin, SystemRecord};
+use crate::galaxy::placement::{Existence, KickConstraint, SystemKind, SystemOrigin, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy};
-use crate::id::BodyId;
+use crate::id::{BodyId, SystemId};
 use crate::math;
 use crate::orbit::KeplerElements;
 use crate::rng::{Mark, ObjectKey, Seed, Stream, tags};
@@ -64,7 +65,8 @@ use crate::stellar::{Composition, ObjectKind, Phase, StarState, substellar};
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{
-    Dex, HeliumExcess, Kelvin, Magnitudes, SolarLuminosities, SolarMasses, SolarRadii, Years,
+    Dex, HeliumExcess, Kelvin, KilometresPerSecond, Magnitudes, MetresPerSecond, SolarLuminosities,
+    SolarMasses, SolarRadii, Years,
 };
 
 /// The composition every star of the grid system `record` shares: \[Fe/H\] drawn from its density
@@ -82,6 +84,15 @@ use crate::units::{
 ///
 /// - A system not yet born at the epoch (a negative age, down to −H in the populations that still
 ///   form stars) reads its distribution at age zero.
+/// - Plan 08's conditional marks (P08.T12.c) move the place and the age for the records of layers
+///   D and E they draw: the place is the record's [`formation_site`](SystemRecord::formation_site),
+///   the epoch position for a field system and its birth source's reference site for a displaced
+///   one, and the age is the metallicity age the marks stored, where they stored one (a living
+///   layer-E record's and a runaway's or a walkaway's), at which placement drew the same
+///   composition (Design note 19). A dead one, retained or a displaced remnant, draws none: its
+///   composition is its birth source's reference composition
+///   ([`SystemRecord::progenitor_composition`]), at which the class table weighed its fate. Every
+///   other record reads its epoch position and age, as before them.
 /// - The helium excess is zero for every grid system (plan 06, design note 5); only plan 09's
 ///   cluster members carry one, and they bring their own [`Composition`].
 /// - The function is for grid records, whose origin is
@@ -123,13 +134,33 @@ use crate::units::{
 /// ```
 #[must_use]
 pub fn draw_metallicity(galaxy: &Galaxy, record: &SystemRecord) -> Composition {
-    let distribution = component_of(galaxy, record)
-        .metallicity(&PointLy::from(record.epoch_position()), age_read(record));
-    let mut stream = Stream::open(
-        galaxy.seed(),
-        tags::SYSTEM_METALLICITY,
-        ObjectKey::from(record.id()),
-    );
+    if let Some(composition) = record.progenitor_composition(galaxy) {
+        return composition;
+    }
+    let age = record.metallicity_age().unwrap_or_else(|| age_read(record));
+    metallicity_of(
+        galaxy,
+        record.id(),
+        component_of(galaxy, record),
+        &record.formation_site(galaxy),
+        age,
+    )
+}
+
+/// The composition of the system `id` of `component`, formed at `site` and read at `age`:
+/// \[Fe/H\] drawn from the component's distribution there and then, on two words of
+/// `system.metallicity`, and no helium excess ([`draw_metallicity`]'s draw, which plan 08's
+/// conditional marks make at the place and age they choose, P08.T12.c).
+#[must_use]
+pub(crate) fn metallicity_of(
+    galaxy: &Galaxy,
+    id: SystemId,
+    component: &Component,
+    site: &PointLy,
+    age: Years,
+) -> Composition {
+    let distribution = component.metallicity(site, age);
+    let mut stream = Stream::open(galaxy.seed(), tags::SYSTEM_METALLICITY, ObjectKey::from(id));
     let fe_h = stream.normal(distribution.mean().value(), distribution.sigma().value());
     Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO)
 }
@@ -295,6 +326,42 @@ impl RemnantStage {
     }
 }
 
+/// Whether `stage` has a natal kick whose speed `constraint` holds.
+fn kick_holds(stage: Option<&RemnantStage>, constraint: &KickConstraint) -> bool {
+    stage
+        .and_then(|stage| stage.natal_kick)
+        .is_some_and(|kick| constraint.holds(KilometresPerSecond::from(kick.speed())))
+}
+
+impl RemnantStage {
+    /// This stage with its natal kick's speed moved to the nearest speed `constraint` holds, its
+    /// direction and mode kept: how the kick loop ends at its cap (Design note 17). A stage with
+    /// no kick is returned as it is.
+    #[must_use]
+    fn with_kick_scaled_into(self, constraint: &KickConstraint) -> Self {
+        let Some(kick) = self.natal_kick else {
+            return self;
+        };
+        let (lo, hi) = constraint.speed();
+        let speed = KilometresPerSecond::from(kick.speed()).value();
+        let moved = if speed < lo.value() {
+            lo.value()
+        } else if speed >= hi.value() {
+            hi.value() * (1.0 - f64::EPSILON)
+        } else {
+            speed
+        };
+        Self {
+            natal_kick: Some(NatalKick::new(
+                MetresPerSecond::from(KilometresPerSecond::new(moved)),
+                kick.direction(),
+                kick.mode(),
+            )),
+            ..self
+        }
+    }
+}
+
 /// The remnant stage of a star whose `track` has reached its death, from its `draws`, or `None`
 /// if the track has not: the death and remnant that `track` gives the remnant draws
 /// (`star.remnant.*`), and the natal kick from `star.stripped` and `star.kick.*` under `rules`.
@@ -378,6 +445,58 @@ impl StarModel {
     #[must_use]
     pub(crate) const fn rules(&self) -> StellarRules {
         self.rules
+    }
+
+    /// This star with its remnant stage drawn again until the natal kick holds `constraint`: the
+    /// kick loop of [`primary_model`], on the attempts of `star` (in the universe of `seed`) after
+    /// `first`, and the attempts it made. A star whose track has not reached its death, or that has
+    /// none, is returned as it is.
+    #[must_use]
+    fn with_kick_in(
+        mut self,
+        constraint: &KickConstraint,
+        (seed, star): (Seed, BodyId),
+        first: u32,
+    ) -> (Self, u32) {
+        let Evolution::Track(track) = &self.evolution else {
+            return (self, 1);
+        };
+        if self.remnant.is_none() || kick_holds(self.remnant.as_ref(), constraint) {
+            return (self, 1);
+        }
+        let track = Arc::clone(track);
+        let (m0, composition) = (track.initial_mass(), *track.composition());
+        let (mut kept, mut attempts) = (None, KICK_LOOP_CAP);
+        for k in 1..KICK_LOOP_CAP {
+            let draws = self.draws.with_remnant_draws_of(seed, star, first + k);
+            let fate = track.fate_with(RemnantDraws::of(&draws));
+            let stage = fate.map(|fate| {
+                RemnantStage::new(
+                    fate.death,
+                    fate.remnant,
+                    &draws,
+                    (m0, &composition),
+                    self.rules,
+                )
+            });
+            let held = kick_holds(stage.as_ref(), constraint);
+            kept = Some((draws, fate, stage));
+            if held {
+                attempts = k + 1;
+                break;
+            }
+        }
+        let (draws, fate, stage) = kept.expect("the cap allows more than one attempt");
+        self.remnant = if attempts < KICK_LOOP_CAP {
+            stage
+        } else {
+            stage.map(|stage| stage.with_kick_scaled_into(constraint))
+        };
+        self.draws = draws;
+        if let Some(fate) = fate {
+            self.evolution = Evolution::Track(Arc::new(track.with_fate(fate)));
+        }
+        (self, attempts)
     }
 
     /// The initial mass, M☉, as given.
@@ -1713,16 +1832,7 @@ impl SystemStars {
         composition: &Composition,
         ctx: MultiplicityContext,
     ) -> Self {
-        let composition = *composition;
-        let age = record.age_at_epoch();
-        let primary = StarModel::new_under(
-            record.primary_initial_mass(),
-            composition,
-            primary_draws(galaxy, record),
-            age,
-            galaxy.rules().stellar,
-        )
-        .expect("a grid record's primary is a star or a brown dwarf, with a finite age");
+        let (primary, _) = primary_model(galaxy, record, *composition);
         let carves = crate::stellar::binary::carve::grid_redraws(record, ctx);
         let mut attempt = GRID_ATTEMPT;
         loop {
@@ -2460,22 +2570,74 @@ fn run_pairs(
 
 /// The multiplicity context of the grid record `record`: [`MultiplicityContext::Free`] for a
 /// star, and `ForcedSingle` for a free-floating brown dwarf or rogue planet, which are single
-/// (plan 13's Risks: "Brown dwarfs are single"; plan 11's multiplicity is not applied to them).
+/// (plan 13's Risks: "Brown dwarfs are single"; plan 11's multiplicity is not applied to them),
+/// and for a member of one of plan 08's displaced classes (P08.T12.c): a runaway or a walkaway is
+/// single by construction, and a remnant its kick carried from its birth site travels alone
+/// (brainstorm, "Displaced objects: kicks and runaways"); a retained remnant, kicked below a
+/// quarter of the circular speed, keeps its companions.
 ///
 /// Public as a seam: a caller that draws a grid record's hierarchy itself, as plan 14's hosts of
 /// P14.T27 will for a brown dwarf, takes the same context [`SystemStars::generate`] does.
 #[must_use]
 pub fn grid_multiplicity(record: &SystemRecord) -> MultiplicityContext {
     match record.kind() {
-        SystemKind::Stellar => MultiplicityContext::Free,
+        SystemKind::Stellar => match record.placement_class() {
+            PlacementClass::Displaced { .. } => MultiplicityContext::ForcedSingle,
+            PlacementClass::Alive | PlacementClass::Retained { .. } => MultiplicityContext::Free,
+        },
         SystemKind::BrownDwarf | SystemKind::RoguePlanet => MultiplicityContext::ForcedSingle,
     }
 }
 
-/// The primary's draws: body 0's at attempt 0, [`StarDraws::for_star`].
+/// The attempts plan 08's kick loop makes before it keeps the last, its kick scaled into the range
+/// (Design note 17): about the number of speed bins on average over displaced systems, and never
+/// reached in 10⁷ of them (P08.T12.c's test).
+pub const KICK_LOOP_CAP: u32 = 4_096;
+
+/// The primary's model of the grid system `record` in `galaxy` at `composition`, and the attempts
+/// plan 08's kick loop made for it (P08.T12.c, Design note 17): 1 where the record constrains no
+/// kick, which is every record of the version's galaxies.
 ///
-/// **A named seam** (plan 06, P06.T29.b; plan 11, P11.T2.c's second): plan 08's P08.T12.c makes it
-/// `for_attempt` of the record's `mark_attempt()`, which does not exist before then.
+/// Where the record has a [`kick_constraint`](SystemRecord::kick_constraint), the remnant stage
+/// is repeated on the one track the record's draws build, with the remnant's, the stripped mark's
+/// and the kick's draws of the attempts after its mark attempt
+/// ([`StarDraws::with_remnant_draws_of`]), until the natal kick's speed falls in the range; after
+/// [`KICK_LOOP_CAP`] attempts the last is kept with its kick scaled into the range. So an attempt
+/// costs a remnant and a kick and never a track, and the record's kick lies in its bin, which,
+/// given its mass, is exact.
+///
+/// # Panics
+///
+/// If the record's primary is not of 0.01–150 M☉ or its age is not finite, as
+/// [`SystemStars::generate_with`] does.
+#[must_use]
+pub(crate) fn primary_model(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: Composition,
+) -> (StarModel, u32) {
+    let model = StarModel::new_under(
+        record.primary_initial_mass(),
+        composition,
+        primary_draws(galaxy, record),
+        record.age_at_epoch(),
+        galaxy.rules().stellar,
+    )
+    .expect("a grid record's primary is a star or a brown dwarf, with a finite age");
+    let Some(constraint) = record.kick_constraint(galaxy) else {
+        return (model, 1);
+    };
+    model.with_kick_in(
+        &constraint,
+        (galaxy.seed(), BodyId::new(record.id(), 0)),
+        record_attempt(record),
+    )
+}
+
+/// The primary's draws: body 0's at the record's attempt, [`StarDraws::for_star`] at attempt 0.
+///
+/// **A named seam** (plan 06, P06.T29.b; plan 11, P11.T2.c's second): plan 08's P08.T12.c made it
+/// `for_attempt` of a grid record's [`mark_attempt`](SystemRecord::mark_attempt).
 #[must_use]
 pub(crate) fn primary_draws(galaxy: &Galaxy, record: &SystemRecord) -> StarDraws {
     match record_attempt(record) {
@@ -2484,13 +2646,15 @@ pub(crate) fn primary_draws(galaxy: &Galaxy, record: &SystemRecord) -> StarDraws
     }
 }
 
-/// The attempt a record's primary is read at: 0 for a grid record and a catalogue system (plan 09,
+/// The attempt a record's primary is read at: a grid record's mark attempt (plan 08, P08.T12.c; 0
+/// but where layer D's runaway reduction rejected a draw), 0 for a catalogue system (plan 09,
 /// P09.T33.a), and for a feature member the attempt its class's conditional draw chose (plan 09,
 /// P09.T10), which its origin carries.
 #[must_use]
 fn record_attempt(record: &SystemRecord) -> u32 {
     match record.origin() {
-        SystemOrigin::Grid(_) | SystemOrigin::CatalogueSystem(_) => 0,
+        SystemOrigin::Grid(_) => u32::from(record.mark_attempt()),
+        SystemOrigin::CatalogueSystem(_) => 0,
         SystemOrigin::FeatureMember { attempt, .. }
         | SystemOrigin::CentreMember { attempt }
         | SystemOrigin::GlobalListMember { attempt } => u32::from(attempt),

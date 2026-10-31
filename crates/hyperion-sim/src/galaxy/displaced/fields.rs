@@ -141,9 +141,6 @@ pub struct DisplacedClass {
     form: Option<DisplacedForm>,
     /// `[D, E]`, systems inside the root cube.
     count: [f64; 2],
-    /// `[D, E]`: the field component a record of the class is placed as until P08.T12.c draws its
-    /// birth component from the class's marks.
-    birth: [Option<ComponentId>; 2],
     /// Layer E's systems of the class that are remnants, inside the root cube.
     remnants_e: f64,
 }
@@ -166,19 +163,6 @@ impl DisplacedClass {
     #[must_use]
     pub fn count(&self, band: MassBand) -> f64 {
         band_slot(band).map_or(0.0, |b| self.count[b])
-    }
-
-    /// The field component a record of the class in `band` is placed as, the class's birth
-    /// component of the largest weight there; `None` outside layers D and E and for a class with
-    /// no weight in `band`.
-    ///
-    /// It is P08.T12.b's stand-in for the class's own marks: until P08.T12.c draws a displaced
-    /// record's kind, mass, birth component and time since death from the class's tables (Design
-    /// note 17), a record the thinning picks for a class is that component's record, with plan
-    /// 03's mass and age draws.
-    #[must_use]
-    pub(crate) fn birth(&self, band: MassBand) -> Option<ComponentId> {
-        band_slot(band).and_then(|b| self.birth[b])
     }
 }
 
@@ -250,18 +234,12 @@ impl DisplacedFields {
             } else {
                 None
             };
-            let birth = BANDS.map(|band| {
-                (table.class_weight(band, id) > 0.0)
-                    .then(|| modal_birth(&table, band, id))
-                    .flatten()
-            });
             let remnants_e =
                 count[1] * entry.marks(MassBand::E).kind_odds()[kind_index(DisplacedKind::Remnant)];
             classes.push(DisplacedClass {
                 key: entry.key(),
                 form,
                 count,
-                birth,
                 remnants_e,
             });
         }
@@ -412,35 +390,4 @@ fn band_slot(band: MassBand) -> Option<usize> {
             None
         }
     }
-}
-
-/// The birth component of class `id` that holds most of its weight in `band`, over every kind and
-/// mass node; the first such component on a tie; `None` for a class born in no component, as the
-/// hypervelocity survivors are (they come from no birth source, Design note 25).
-fn modal_birth(table: &ClassTable, band: MassBand, id: DisplacedClassId) -> Option<ComponentId> {
-    let marks = table.marks(band, id);
-    if marks.components().is_empty() {
-        return None;
-    }
-    let kinds = [
-        DisplacedKind::Remnant,
-        DisplacedKind::Runaway,
-        DisplacedKind::Walkaway,
-        DisplacedKind::HypervelocitySurvivor,
-    ];
-    let weight = |j: usize| -> f64 {
-        kinds
-            .iter()
-            .map(|&kind| marks.component_density(kind, j).iter().sum::<f64>())
-            .sum()
-    };
-    let mut best = 0;
-    let mut most = weight(0);
-    for j in 1..marks.components().len() {
-        let w = weight(j);
-        if w > most {
-            (best, most) = (j, w);
-        }
-    }
-    Some(marks.components()[best])
 }

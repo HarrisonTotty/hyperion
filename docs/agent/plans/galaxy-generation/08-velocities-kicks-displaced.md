@@ -1212,9 +1212,9 @@ form_bound}` bound one class's normalised form over a cell: the layer's radial e
 
 ### P08.T12 Displaced classes in placement
 
-**P08.T12.a–b built** (2026-10-31, behind `DISPLACED_VERSION` = 26; no output moves at 24): see
-"P08.T12.a as built" and "P08.T12.b as built" under [Risks](#risks-and-open-points). T12.c–d
-remain, and the bump.
+**P08.T12.a–c built** (2026-10-31, behind `DISPLACED_VERSION` = 26; no output moves at 24): see
+"P08.T12.a as built", "P08.T12.b as built" and "P08.T12.c as built" under
+[Risks](#risks-and-open-points). T12.d remains, and the bump.
 
 - **P08.T12.a Shares and components.** `DisplacedFields::new` from the class table and forms,
   classes ordered per Design note 16, zero-weight classes left out (about a hundred remain in layer
@@ -2104,3 +2104,37 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   - P08.T13's inheritance 4 holds under every 26 hold. Tests: `placement/displaced_hold.rs` (the
     whole task's that T12.a–b reach, and C1) and `candidate.rs`'s exits tests (10⁴ fast, 10⁶
     slow).
+
+- **P08.T12.c as built (2026-10-31, on `rendering-and-planets` 1a2f3dfd, behind
+  `DISPLACED_VERSION` = 26; no output moves at 24).**
+  - `placement/marks.rs` draws the marks of layers D and E under the new arm (Design notes 17
+    and 19). `SystemRecord` stays 80 bytes: the placement class packed in 16 bits, the mark
+    attempt in a `u8` (`mark_attempt() -> u16`) and the metallicity age at single precision.
+    T12.b's stand-in (`DisplacedClass::birth`) is gone.
+  - Deviation: `formation_site(&Galaxy)` and `kick_constraint(&Galaxy)` take the galaxy, since
+    the record holds neither in its 80 bytes. `placement::KickConstraint` has `speed()`,
+    `holds()` and `vertical()`; a displaced remnant's origin bin is drawn on
+    `displaced.origin_bin` where it is read.
+  - Deviation (lean, 2026-10-31): a dead record, retained or a displaced remnant, takes its
+    source's reference composition, the class table's, and draws no metallicity
+    (`SystemRecord::progenitor_composition`, which `draw_metallicity` returns). At a drawn Z its
+    own fate gave 4% of the displaced remnants at the Sun no kick in their bin: direct collapses,
+    and the electron-capture window. Living records draw Z per Design note 19.
+  - Deviation (lean, 2026-10-31): a class density that is linear between nodes puts a moving
+    class's mass where no iron core collapses (8.0–8.8 M☉). There the record draws its mass once
+    more above the next node. A dead record's fate is `sse::fate_of`, at a lifetime's cost, so it
+    makes at most two calls.
+  - The kick loop: `stellar::system::{primary_model, KICK_LOOP_CAP}` and
+    `StarDraws::with_remnant_draws_of`. The kept attempt's fate replaces the track's
+    (`Track::with_fate`), so the track's remnant segment and plan 11's engine show the loop's
+    remnant. Inside the stripped window the repeated stripped mark does not rebuild the track.
+  - The carve-out hook takes the marks' lifetime: `catalogue_claims(.., Option<Years>)` and
+    `explosion_site_knowing`, P08.T13's inheritance 3. Under the new arm `generate_cell_where`
+    reads layer D's and E's masses from the records.
+  - Displaced records are single (`grid_multiplicity`, lean 2026-10-31). Retained records keep
+    their companions.
+  - Tests: `placement/marks_hold.rs`. The 10⁷ kick-loop test (native only) and the living-share
+    chi-square are slow, run by name. The kick loop's cap is reached by 2,184 of 9,996,081
+    remnants, against none: that is pinned and logged as a finding, and those kicks are scaled
+    into their bin. The death test allows a second or 16 ulps of the age, since an age of 10¹⁰
+    years rounds to a minute. `DISPLACED_CELLS_DIGEST` now pins the marks too.

@@ -422,6 +422,33 @@ impl StarDraws {
         (UnitUniform::draw(&mut rotation), magnetism.mark())
     }
 
+    /// These draws with the remnant's (`star.remnant.*`), the companion-stripped mark
+    /// (`star.stripped`) and the kick's (`star.kick.*`) taken from `star`'s attempt `attempt`, as
+    /// [`for_attempt`](Self::for_attempt) reads them, and every other draw kept: one attempt of plan
+    /// 08's kick loop, which repeats only the remnant stage on one built track (P08.T12.c, Design
+    /// note 17).
+    #[must_use]
+    pub(crate) fn with_remnant_draws_of(&self, seed: Seed, star: BodyId, attempt: u32) -> Self {
+        let key = ObjectKey::from(star);
+        let start = u64::from(attempt) * ATTEMPT_WORDS;
+        let open = |tag: DomainTag| {
+            let mut stream = Stream::open(seed, tag, key);
+            stream.seek(start);
+            stream
+        };
+        Self::from_parts(StarDrawsParts {
+            stripped: open(tags::STAR_STRIPPED).mark(),
+            remnant_type: open(tags::STAR_REMNANT_TYPE).mark(),
+            remnant_fallback: open(tags::STAR_REMNANT_FALLBACK).mark(),
+            remnant_mass: StandardNormal::draw(&mut open(tags::STAR_REMNANT_MASS)),
+            kick_score: StandardNormal::draw_array(&mut open(tags::STAR_KICK_SCORE)),
+            kick_mode: open(tags::STAR_KICK_MODE).mark(),
+            kick_low: StandardNormal::draw_array(&mut open(tags::STAR_KICK_LOW)),
+            kick_direction: isotropic(&mut open(tags::STAR_KICK_DIRECTION)),
+            ..self.parts.clone()
+        })
+    }
+
     /// Draws from explicit variates, for quadratures and tests that need no ID.
     #[must_use]
     pub const fn from_parts(parts: StarDrawsParts) -> Self {
