@@ -223,3 +223,75 @@ describe("StyleControl's BASELINE row (R10.T12.a; decision-r10-t12a-scope §3.1)
     }).toEqual({ order: ["WIREFRAME", "PHOTOREALISTIC", "2 m", "5 m", "100 m"], after: true });
   });
 });
+
+/** The `GRID` row's buttons: each one's name and whether it is pressed. */
+function gridButtons(): ReadonlyArray<readonly [string, string | null]> {
+  return within(screen.getByRole("group", { name: "GRID" }))
+    .getAllByRole("button")
+    .map((button) => [button.textContent, button.getAttribute("aria-pressed")] as const);
+}
+
+describe("StyleControl's GRID row (the owner's request, 2026-10-31)", () => {
+  it("stands under PHOTOREALISTIC, ON pressed as a view starts", () => {
+    render(
+      <StyleControl
+        renderStyle="photorealistic"
+        refusals={BOTH}
+        faulted={false}
+        onStyle={() => undefined}
+        grid={{ on: true, onGrid: () => undefined }}
+      />,
+    );
+    expect(gridButtons()).toEqual([
+      ["ON", "true"],
+      ["OFF", "false"],
+    ]);
+  });
+
+  it("is left out of the WIREFRAME, which draws its grid whatever it is", () => {
+    render(
+      <StyleControl
+        renderStyle="wireframe"
+        refusals={BOTH}
+        faulted={false}
+        onStyle={() => undefined}
+        grid={{ on: false, onGrid: () => undefined }}
+      />,
+    );
+    expect(screen.queryByRole("group", { name: "GRID" })).toBeNull();
+  });
+
+  it("calls back with OFF at once when OFF is pressed", async () => {
+    const user = userEvent.setup();
+    const onGrid = vi.fn<(on: boolean) => void>();
+    render(
+      <StyleControl
+        renderStyle="photorealistic"
+        refusals={BOTH}
+        faulted={false}
+        onStyle={() => undefined}
+        grid={{ on: true, onGrid }}
+      />,
+    );
+    await user.click(
+      within(screen.getByRole("group", { name: "GRID" })).getByRole("button", { name: "OFF" }),
+    );
+    expect(onGrid).toHaveBeenCalledWith(false);
+  });
+
+  it("stands above the BASELINE row", () => {
+    render(
+      <StyleControl
+        renderStyle="photorealistic"
+        refusals={BOTH}
+        faulted={false}
+        onStyle={() => undefined}
+        grid={{ on: true, onGrid: () => undefined }}
+        baseline={{ chosen: 2, onBaseline: () => undefined }}
+      />,
+    );
+    const grid = screen.getByRole("group", { name: "GRID" });
+    const baseline = screen.getByRole("group", { name: "BASELINE" });
+    expect(grid.compareDocumentPosition(baseline) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+});

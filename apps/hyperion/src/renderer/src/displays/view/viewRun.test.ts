@@ -68,6 +68,7 @@ import {
   startServerRun,
   stepRun,
   surveyEdgeNotes,
+  withGridLine,
   withSceneStarsLine,
 } from "./viewRun";
 
@@ -300,6 +301,23 @@ describe("the label block", () => {
       withSceneStarsLine(lines, sceneStars).find((line) => line.label === "STARS")?.value;
     expect([stars(true), stars(false)]).toEqual(["SCENE TEST FIELD", STAR_SOURCE]);
   });
+
+  it.each<readonly [string, boolean, "wireframe" | "photorealistic", boolean]>([
+    ["photorealistic with its GRID at OFF", false, "photorealistic", true],
+    ["photorealistic with its GRID at ON", true, "photorealistic", false],
+    ["in the wireframe, whose grid stands whatever it is", false, "wireframe", false],
+  ])(
+    "states GRID OFF after STYLE %s (the owner's request, 2026-10-31)",
+    (_, grid, drawn, states) => {
+      const labels = withGridLine(
+        labelLines(startRun(precisionScene()), DEFAULT_EXPOSURE),
+        grid,
+        drawn,
+      ).map((line) => `${line.label} ${line.value}`);
+      const style = labels.findIndex((line) => line.startsWith("STYLE "));
+      expect(labels[style + 1] === "GRID OFF").toBe(states);
+    },
+  );
 
   it("stands the scene's own stars in only with no interim field and no sky drawn", () => {
     const own = ATMOSPHERE_STARS;

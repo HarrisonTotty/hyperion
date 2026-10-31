@@ -139,6 +139,40 @@ describe("the photorealistic overlay's draw list (R07.T16.a)", () => {
   });
 });
 
+describe("the photorealistic overlay with the view's GRID at OFF (the owner's request, 2026-10-31)", () => {
+  it("leaves out every body's limb and graticule, the batches that name their body", () => {
+    const overlay = overlayDrawList(wireframeList(), TOKENS, false);
+    expect(overlay.lines.filter((line) => line.body !== undefined)).toEqual([]);
+  });
+
+  it("keeps every other batch: the marks, hulls, orbits, predicted paths and rings", () => {
+    expect(batchKinds(overlayDrawList(wireframeList(), TOKENS, false))).toEqual([
+      "hull",
+      "mark",
+      "orbit",
+      "predicted",
+      "ring",
+    ]);
+  });
+
+  it("keeps every occluder and mark anchor, so that a mark behind a body stays hidden", () => {
+    const list = wireframeList();
+    const overlay = overlayDrawList(list, TOKENS, false);
+    expect([
+      overlay.occluderSpheres === list.occluderSpheres,
+      shape(overlay.occluderMeshes),
+      overlay.anchors === list.anchors,
+    ]).toEqual([true, shape(list.occluderMeshes), true]);
+  });
+
+  it("draws the limb and graticule at ON, as a view starts", () => {
+    const list = wireframeList();
+    expect(overlayDrawList(list, TOKENS, true).lines.map((line) => line.id)).toEqual(
+      overlayDrawList(list, TOKENS).lines.map((line) => line.id),
+    );
+  });
+});
+
 describe("the symbology's canvas pass (R07.T16.a)", () => {
   it("is labelled for the pass timer and loads the tone-mapped image beneath it", async () => {
     const renderer = new WireframeRenderer(await countingRenderEngine());

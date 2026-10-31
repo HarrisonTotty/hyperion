@@ -140,6 +140,11 @@ export interface Instrument {
   /** The style its camera asks for. */
   readonly style: RenderStyle;
   readonly selection: CameraTarget | null;
+  /**
+   * Its `GRID` (the owner's request, 2026-10-31): whether its photorealistic image takes each
+   * body's limb and graticule over it, `ON` as it opens.
+   */
+  readonly grid: boolean;
   /** What it last drew, or `null` while it is closed. */
   readonly shown: InstrumentShown | null;
   /** Whether the engine refused its canvas, so that it draws nothing until it is opened again. */
@@ -251,6 +256,8 @@ export interface Instruments {
   ) => void;
   /** Selects a mark of a slot, from its list or a pick on its canvas. */
   readonly select: (slot: InstrumentSlot, target: CameraTarget) => void;
+  /** Sets a slot's `GRID`, which its next frame draws by (the owner's request, 2026-10-31). */
+  readonly setGrid: (slot: InstrumentSlot, on: boolean) => void;
   /**
    * A key pressed on a slot's canvas: a flight key held, or its rate stepped.
    *
@@ -274,6 +281,7 @@ interface SlotState {
   readonly open: boolean;
   readonly style: RenderStyle;
   readonly selection: CameraTarget | null;
+  readonly grid: boolean;
   readonly shown: InstrumentShown | null;
   readonly refused: boolean;
 }
@@ -282,6 +290,7 @@ const CLOSED: SlotState = {
   open: false,
   style: "wireframe",
   selection: null,
+  grid: true,
   shown: null,
   refused: false,
 };
@@ -309,6 +318,8 @@ interface SlotInputs {
   readonly availability: StyleAvailability;
   /** Its own cull of the sky, or `null`. */
   readonly sky: DrawnSky | null;
+  /** Its `GRID`, which its photorealistic frame draws by. */
+  readonly grid: boolean;
 }
 
 /** A slot's drawer and its loop's clock, while its canvas is mounted. */
@@ -487,6 +498,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
             tokens: canvas === null || !canvas.isConnected ? null : readTokens(canvas),
             availability: availability(slot),
             sky: skies[slot - 1] ?? null,
+            grid: state.grid,
           },
         ];
       }),
@@ -537,6 +549,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           open: true,
           style: run.camera.style,
           selection: null,
+          // Its own GRID, ON as it opens (the owner's request, 2026-10-31).
+          grid: true,
           shown: {
             run,
             anchors: [],
@@ -592,6 +606,10 @@ export function useInstruments(input: InstrumentsInput): Instruments {
 
   const select = useCallback((slot: InstrumentSlot, target: CameraTarget): void => {
     setSlots((previous) => withSlot(previous, slot, (state) => ({ ...state, selection: target })));
+  }, []);
+
+  const setGrid = useCallback((slot: InstrumentSlot, on: boolean): void => {
+    setSlots((previous) => withSlot(previous, slot, (state) => ({ ...state, grid: on })));
   }, []);
 
   const keyDown = useCallback(
@@ -714,6 +732,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
               },
         // Its own handle on the stage's atmosphere cache (R08.T10.b).
         atmosphere: loop.air.inputFor(each.atmosphere.cache, each.atmosphere.scene, each.nowMs),
+        // Its own reference grid over its photorealistic image, or none (the owner's request).
+        grid: inputs.grid,
       };
       loop.intervals = each.intervals;
       const drawn = loop.drawer.draw(frameInputs);
@@ -777,6 +797,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         open: state.open,
         style: state.style,
         selection: state.selection,
+        grid: state.grid,
         shown: state.shown,
         refused: state.refused,
         size: slot === 1 ? stageOne.size : stageTwo.size,
@@ -798,6 +819,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     close,
     command,
     select,
+    setGrid,
     keyDown,
     keyUp,
     releaseKeys,

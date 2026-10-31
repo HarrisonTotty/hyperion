@@ -19,6 +19,17 @@ export interface StyleBaseline {
   readonly onBaseline: (baselineM: SlopeBaselineM) => void;
 }
 
+/**
+ * The `GRID` row's state and its callback (the owner's request, 2026-10-31): whether the view's
+ * reference grid, each body's limb and graticule, is drawn over its photorealistic image.
+ */
+export interface StyleGrid {
+  /** Whether it is drawn, `ON`, as a view starts. */
+  readonly on: boolean;
+  /** Called with the setting chosen; a display control, so it acts at once. */
+  readonly onGrid: (on: boolean) => void;
+}
+
 /** Props of {@link StyleControl}. */
 export interface StyleControlProps {
   /** The panel's ID, by which a disclosure button controls it (R07.T19.b), or none. */
@@ -43,6 +54,48 @@ export interface StyleControlProps {
    * the `PRIMARY` one; absent, the row is left out, as an instrument's slot states no readout.
    */
   readonly baseline?: StyleBaseline | undefined;
+  /**
+   * The `GRID` row's state (the owner's request, 2026-10-31): the panel's view's own, the row
+   * standing while the view's style is `PHOTOREALISTIC`; absent, the row is left out.
+   */
+  readonly grid?: StyleGrid | undefined;
+}
+
+/** Props of {@link GridRow}. */
+interface GridRowProps {
+  readonly grid: StyleGrid;
+}
+
+/** The `GRID` row's settings, in order. */
+const GRID_SETTINGS: ReadonlyArray<{ readonly on: boolean; readonly label: string }> = [
+  { on: true, label: "ON" },
+  { on: false, label: "OFF" },
+];
+
+/**
+ * The `GRID` row (the owner's request, 2026-10-31): its legend on the left of `ON` and `OFF` in
+ * the panel's row form, the chosen one pressed and underlined as a preset is; a display control,
+ * acting at once, with no key.
+ */
+function GridRow({ grid }: GridRowProps) {
+  return (
+    <fieldset className="preset-buttons view-style__baseline view-style__grid">
+      <legend className="field__label view-style__baseline-label">GRID</legend>
+      {GRID_SETTINGS.map((setting) => (
+        <button
+          key={setting.label}
+          type="button"
+          className="control preset-buttons__button view-style__baseline-button"
+          aria-pressed={setting.on === grid.on}
+          onClick={() => {
+            grid.onGrid(setting.on);
+          }}
+        >
+          {setting.label}
+        </button>
+      ))}
+    </fieldset>
+  );
 }
 
 /** Props of {@link BaselineRow}. */
@@ -87,6 +140,10 @@ function BaselineRow({ baseline }: BaselineRowProps) {
  * words: the graphics' condition, or the photorealistic view's failure to make its pipelines
  * (`styleRefusals`). Mounted by R07.T8.a beside the camera controls.
  *
+ * Under them, while the view draws `PHOTOREALISTIC` and `grid` is given, stands the `GRID` row,
+ * whose `OFF` leaves each body's limb and graticule out of the image's overlay (the owner's
+ * request, 2026-10-31).
+ *
  * After the style's buttons and their reason stands the `BASELINE` row while `baseline` is given
  * (R10.T12.a): the baseline `SLOPE` is read over on the view's terrain readout, which it sets
  * whatever the readout's state and whether or not a view is drawn, since it is the readout's
@@ -101,6 +158,7 @@ export function StyleControl({
   id,
   hidden,
   baseline,
+  grid,
 }: StyleControlProps) {
   const titleId = useId();
   const reasonId = useId();
@@ -153,6 +211,7 @@ export function StyleControl({
           <StatusText text={reason} />
         </p>
       )}
+      {grid === undefined || renderStyle !== "photorealistic" ? null : <GridRow grid={grid} />}
       {baseline === undefined ? null : <BaselineRow baseline={baseline} />}
     </section>
   );

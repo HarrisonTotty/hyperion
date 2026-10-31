@@ -1518,3 +1518,47 @@ describe("the primary's survey line from the own ship in a served system (R10.T1
     expect(lowerPlate()).toBeNull();
   });
 });
+
+/** The `GRID` row of the `Style` panel of `designator`. */
+function gridRow(designator: string): HTMLElement {
+  return within(screen.getByRole("region", { name: `Style ${designator}` })).getByRole("group", {
+    name: "GRID",
+  });
+}
+
+/** The `GRID` the frames of the view `id` were drawn at over the next `ms`. */
+function gridsOver(view: ViewDisplayHarness, ms: number, id: string): ReadonlyArray<unknown> {
+  return framesOver(view, ms)
+    .filter(({ inputs }) => inputs.terrain?.view === id)
+    .map(({ inputs }) => inputs.grid);
+}
+
+describe("a view's GRID over its photorealistic image (the owner's request, 2026-10-31)", () => {
+  it("draws the primary's frames without its grid once OFF is pressed", async () => {
+    const view = await terrainTestShown();
+    await photorealistic(view, primaryLabelBlock);
+    await view.user.click(within(gridRow("PRIMARY")).getByRole("button", { name: "OFF" }));
+    const grids = gridsOver(view, 600, PRIMARY_VIEW_ID);
+    expect([grids.length > 0, grids.every((grid) => grid === false)]).toEqual([true, true]);
+  });
+
+  it("states GRID OFF on the primary's label block while it is OFF", async () => {
+    const view = await terrainTestShown();
+    await photorealistic(view, primaryLabelBlock);
+    await view.user.click(within(gridRow("PRIMARY")).getByRole("button", { name: "OFF" }));
+    view.advance(300);
+    expect(readingIn(primaryLabelBlock(), "GRID")).toBe("OFF");
+  });
+
+  it("keeps each view's own GRID: an instrument opens at ON, the primary's OFF kept", async () => {
+    const view = await terrainTestShown();
+    await photorealistic(view, primaryLabelBlock);
+    await view.user.click(within(gridRow("PRIMARY")).getByRole("button", { name: "OFF" }));
+    await controlInstrument(view);
+    await photorealistic(view, () => screen.getByRole("region", { name: "INSTRUMENT 1" }));
+    expect([
+      gridsOver(view, 600, instrumentViewId(1)).every((grid) => grid === true),
+      gridsOver(view, 600, PRIMARY_VIEW_ID).every((grid) => grid === false),
+    ]).toEqual([true, true]);
+  });
+});

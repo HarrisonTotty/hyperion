@@ -24,6 +24,7 @@ import {
   type LabelLine,
   type LabelStatement,
   labelLines,
+  withGridLine,
   labelStatements,
   photorealStatements,
   POSITIONS_FROM_SHIP,
@@ -238,13 +239,17 @@ export function InstrumentView({
           {run === null ? null : (
             <ViewLabelBlock
               id={labelId}
-              lines={withSceneStarsLine(
-                instrumentLines(
-                  labelLines(run, exposure, stale, shown?.contourIntervalM ?? null),
-                  drawn,
-                  instrument.skyLabel ?? (skyAwaiting ? { value: SKY_PENDING } : null),
+              lines={withGridLine(
+                withSceneStarsLine(
+                  instrumentLines(
+                    labelLines(run, exposure, stale, shown?.contourIntervalM ?? null),
+                    drawn,
+                    instrument.skyLabel ?? (skyAwaiting ? { value: SKY_PENDING } : null),
+                  ),
+                  shown?.sceneStars === true,
                 ),
-                shown?.sceneStars === true,
+                instrument.grid,
+                drawn,
               )}
               statements={[]}
               countLine={null}

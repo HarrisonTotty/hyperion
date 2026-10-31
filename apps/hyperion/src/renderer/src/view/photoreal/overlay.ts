@@ -32,6 +32,11 @@
  * `DrawOptions.datumInside`, so that its limb's casing ends on the limb and no datum line or casing
  * covers the image beyond the body, an atmosphere's glow above the limb included; a body too small
  * to stroke inside has no datum over the image (`datumOverImage`). The wireframe centres its limb.
+ *
+ * A view's `GRID` (the owner's request, 2026-10-31) at `OFF` leaves the reference grid out of the
+ * overlay: every body's datum lines, its limb and graticule (the batches that name their body,
+ * `LineBatch.body`), so that the image of the body shows unmarked; every mark stays, the
+ * occluders that hide marks behind a body among them.
  */
 import type { ColourTokens } from "../../spatial/paint";
 import type { BodyFigure } from "../appearance/fromWire";
@@ -61,7 +66,7 @@ function cased(line: LineBatch, casingPx: number): LineBatch {
  * R02's draw list as the overlay draws it over the image: every line batch cased in its
  * `--surface-0` casing colour at `CASING_PX` times the list's stroke scale ({@link casingDevicePx}), the
  * hull edges included; every hull's opaque faces filled in `--surface-0`, its silhouette
- * (R07.T16.e); and no star sprite.
+ * (R07.T16.e); no star sprite; and, with the view's `GRID` at `OFF`, no body's datum lines.
  *
  * @remarks
  * Its list is built with the datum inside the figure (`DrawOptions.datumInside`; plan R10,
@@ -70,17 +75,22 @@ function cased(line: LineBatch, casingPx: number): LineBatch {
  *
  * @param tokens - The tokens the list was built with, whose `--surface-0` its casings take: the
  *   silhouette is one surface with them (decision-r07-t16a, item 3).
+ * @param grid - The view's `GRID`: `true` (`ON`, as a view starts) draws each body's limb and
+ *   graticule over the image; `false` leaves them out and keeps every other batch.
  */
 export function overlayDrawList(
   list: WireframeDrawList,
   tokens: Pick<ColourTokens, "surface0">,
+  grid = true,
 ): WireframeDrawList {
   const casingPx = casingDevicePx(list.strokeScale);
   const silhouette = (mesh: OccluderMesh): OccluderMesh => ({ ...mesh, fill: tokens.surface0 });
   return {
     ...list,
     occluderMeshes: list.occluderMeshes.map(silhouette),
-    lines: list.lines.map((line) => cased(line, casingPx)),
+    lines: list.lines
+      .filter((line) => grid || line.body === undefined)
+      .map((line) => cased(line, casingPx)),
     sprites: [],
   };
 }
@@ -99,6 +109,7 @@ export function overlayDrawList(
  *   plan ({@link surveyedDatumsOf}; plan R10, R10.T16.f): each one's occluder sphere and own lines
  *   packed as R10.T11's wireframe packs them over its terrain (`packWireframe`'s `surveyed`),
  *   binding its mask; an empty map draws every datum whole.
+ * @param grid - The view's `GRID` ({@link overlayDrawList}): `ON` unless given.
  */
 export function overlaySubmission(
   renderer: Pick<WireframeRenderer, "frame">,
@@ -107,10 +118,14 @@ export function overlaySubmission(
   camera: DrawCamera,
   viewport: Viewport,
   surveyed: ReadonlyMap<string, SurveyedDatumFrame>,
+  grid = true,
 ): FrameSubmission {
   return {
     // No terrain draws: the photorealistic renderer draws the terrain's depth before the pass.
-    ...renderer.frame(overlayDrawList(list, tokens), camera, viewport, [], { draws: [], surveyed }),
+    ...renderer.frame(overlayDrawList(list, tokens, grid), camera, viewport, [], {
+      draws: [],
+      surveyed,
+    }),
     label: PHOTOREAL_PASS_LABELS.symbology,
     colourLoad: "load",
   };

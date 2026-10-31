@@ -1074,6 +1074,7 @@ function renderInstrument(
     open: true,
     style: "photorealistic",
     selection: null,
+    grid: true,
     shown: {
       run: startRun(phaseScene()),
       anchors: [],

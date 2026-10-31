@@ -142,6 +142,12 @@ export interface ViewFrameInputs {
    */
   readonly lineOfSightPoint?: LineOfSightPoint | undefined;
   /**
+   * The view's `GRID` (the owner's request, 2026-10-31): `false` (`OFF`) leaves each body's limb
+   * and graticule out of the photorealistic overlay, every mark kept (`overlayDrawList`); `ON`
+   * unless given. The wireframe style draws its grid whatever it is.
+   */
+  readonly grid?: boolean | undefined;
+  /**
    * The view's atmospheres this frame (plan R08, R08.T10.b): its handle on the device's cache, the
    * scene its requests take and the frame's time. The drawer notes the frame's lit bodies with the
    * cache before it draws, each at its regime on the last photorealistic plan, and draws each
@@ -622,7 +628,15 @@ export class ViewFrameDrawer {
           // craft on their silhouettes (R07.T16.e), and each handed-over body's datum giving way
           // over its surveyed ground, built once the renderer has the plan (R10.T16.f).
           overlay: (surveyed) =>
-            overlaySubmission(this.#wireframe, list, tokens, camera, viewport, surveyed),
+            overlaySubmission(
+              this.#wireframe,
+              list,
+              tokens,
+              camera,
+              viewport,
+              surveyed,
+              inputs.grid ?? true,
+            ),
           atmospheres: inputs.atmosphere?.tablesOf,
           // Each body's ground drawn emitting where its record's field is above the cut (R08.T18.a).
           groundFields: inputs.atmosphere?.groundFieldOf,

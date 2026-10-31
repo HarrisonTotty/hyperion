@@ -566,6 +566,23 @@ export function withSceneStarsLine(
 }
 
 /**
+ * `lines` with `GRID OFF` after `STYLE` while the view draws `PHOTOREALISTIC` with its `GRID` at
+ * `OFF` (the owner's request, 2026-10-31), as the label block states the view's other settings; as
+ * they are otherwise.
+ */
+export function withGridLine(
+  lines: ReadonlyArray<LabelLine>,
+  grid: boolean,
+  drawn: RenderStyle,
+): ReadonlyArray<LabelLine> {
+  return grid || drawn !== "photorealistic"
+    ? lines
+    : lines.flatMap((line) =>
+        line.label === "STYLE" ? [line, { label: "GRID", value: "OFF" }] : [line],
+      );
+}
+
+/**
  * The star source's reading where the scene's system has no known position (a server scene's
  * system the client was not told of, R02.T17): no range query can be centred, so none is drawn.
  */
